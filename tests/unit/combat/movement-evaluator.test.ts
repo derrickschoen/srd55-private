@@ -25,6 +25,7 @@ function movementWorld(options: {
   const difficult = new Set(options.difficult ?? []);
   return {
     bounds: { columns: options.columns, rows: options.rows },
+    occupiedCells: (_actor, anchor) => [anchor],
     canTraverseStep: () => true,
     traversal: (_actor, _from, to) => blocked.has(key(to))
       ? { kind: 'blocked', reason: 'fixture wall' }
@@ -86,11 +87,11 @@ function input(overrides: Partial<MovementEvaluationInput> = {}): MovementEvalua
   };
 }
 
-describe('movement-eval-v1', () => {
+describe('movement-eval-v2', () => {
   it('turns one 5-foot bandit step into an exact normal-range upgrade', () => {
     const evaluation = evaluateMovementOptions(input());
     const option = evaluation.candidates[0];
-    expect(evaluation.policy).toBe('movement-eval-v1');
+    expect(evaluation.policy).toBe('movement-eval-v2');
     expect(option).toBeDefined();
     if (option === undefined) throw new Error('Missing movement option.');
     expect(option.semantic).toEqual({
@@ -99,7 +100,7 @@ describe('movement-eval-v1', () => {
     });
     expect(option.before).toMatchObject({
       status: 'resolved',
-      tacticalPolicy: 'tactical-evaluator-v2',
+      tacticalPolicy: 'tactical-evaluator-v3',
       evaluation: {
         range: { status: 'resolved', distanceFeet: 35, band: 'long', legal: true },
         rollMode: { mode: 'disadvantage', reasons: ['long_range_disadvantage'] },
@@ -107,7 +108,7 @@ describe('movement-eval-v1', () => {
     });
     expect(option.after).toMatchObject({
       status: 'resolved',
-      tacticalPolicy: 'tactical-evaluator-v2',
+      tacticalPolicy: 'tactical-evaluator-v3',
       evaluation: {
         range: { status: 'resolved', distanceFeet: 30, band: 'normal', legal: true },
         rollMode: { mode: 'normal', reasons: [] },
@@ -222,7 +223,7 @@ describe('movement-eval-v1', () => {
         cause: 'voluntary',
         reachSources: [{
           reactorId,
-          cell: { column: 0, row: 1 },
+          cells: [{ column: 0, row: 1 }],
           reach: feet(5),
           reactionAvailable: true,
           hostile: true,

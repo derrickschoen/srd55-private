@@ -2,9 +2,14 @@ import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from '../../helpers/test-filesystem';
 import {
+  applySizeSteps,
+  autoRelocatePlacement,
   creatureSpace,
+  effectSequence,
   minimumSpaceDistance,
   minimumSpaceLine,
+  narrowOpeningRegion,
+  newlyEnteredSpaceCells,
   normalPlacementFor,
   placementFor,
   sizedCombatantState,
@@ -222,8 +227,10 @@ describe('opaque creature space', () => {
   it('keeps Small and Medium geometry byte-identical while retaining their sizes', () => {
     const small = normalSpace('Small', { column: 4, row: 6 });
     const medium = normalSpace('Medium', { column: 4, row: 6 });
+    const oneCellContractBytes = '[{"column":4,"row":6}]';
 
-    expect(JSON.stringify(small.cells)).toBe(JSON.stringify(medium.cells));
+    expect(JSON.stringify(small.cells)).toBe(oneCellContractBytes);
+    expect(JSON.stringify(medium.cells)).toBe(oneCellContractBytes);
     expect(small.actualSize).toBe('Small');
     expect(medium.actualSize).toBe('Medium');
     expect(small.controlledAs).toBe('Small');
@@ -237,23 +244,82 @@ describe('opaque creature space', () => {
     expect(() => placementFor(medium, { column: 0.5, row: 0 }, mode)).toThrow(RangeError);
     expect(() => placementFor(medium, { column: 0, row: Number.NaN }, mode)).toThrow(RangeError);
   });
+
+  it('orders size effects by their persisted sequence rather than array position', () => {
+    expect(applySizeSteps('Gargantuan', [
+      { delta: -1, appliedSequence: effectSequence(2) },
+      { delta: 1, appliedSequence: effectSequence(1) },
+    ])).toBe('Huge');
+    expect(() => applySizeSteps('Medium', [
+      { delta: 1, appliedSequence: effectSequence(1) },
+      { delta: -1, appliedSequence: effectSequence(1) },
+    ])).toThrow('unique persisted effect sequences');
+  });
+
+  it('returns only newly entered footprint cells in stable row-major order', () => {
+    const before = normalSpace('Large', { column: 1, row: 1 });
+    const after = normalSpace('Large', { column: 2, row: 1 });
+    expect(newlyEnteredSpaceCells(before, after)).toEqual([
+      { column: 3, row: 1 },
+      { column: 3, row: 2 },
+    ]);
+  });
+
+  it('validates authored openings and auto-relocates by Chebyshev distance then row-major', () => {
+    expect(narrowOpeningRegion({
+      id: 'opening:hall', sizedFor: 'Medium', bounds: { columns: 4, rows: 4 },
+      cells: [{ column: 2, row: 1 }, { column: 1, row: 1 }],
+    }).cells).toEqual([{ column: 1, row: 1 }, { column: 2, row: 1 }]);
+    expect(() => narrowOpeningRegion({
+      id: 'opening:split', sizedFor: 'Medium', bounds: { columns: 4, rows: 4 },
+      cells: [{ column: 0, row: 0 }, { column: 2, row: 0 }],
+    })).toThrow('orthogonally connected');
+
+    const large = sizedCombatantState('Large');
+    const mode = normalPlacementFor(large);
+    const relocation = autoRelocatePlacement(
+      large,
+      { column: 2, row: 2 },
+      mode,
+      { columns: 5, rows: 5 },
+      (space) => space.anchor.row === 1 && (space.anchor.column === 1 || space.anchor.column === 3),
+    );
+    expect(relocation.kind).toBe('placed');
+    if (relocation.kind === 'placed') expect(relocation.placement.anchor).toEqual({ column: 1, row: 1 });
+    expect(autoRelocatePlacement(
+      large, { column: 0, row: 0 }, mode, { columns: 1, rows: 1 }, () => true,
+    )).toEqual({ kind: 'refused', refusal: { kind: 'no_legal_anchor' } });
+  });
 });
 
 const PRE_EDIT_POLICY_LITERALS = Object.freeze({
-  sessionSchema: '10',
-  replaySchema: '5',
-  tactical: 'tactical-evaluator-v2',
-  movement: 'movement-eval-v1',
+  sessionSchema: '11',
+  replaySchema: '6',
+  tactical: 'tactical-evaluator-v3',
+  movement: 'movement-eval-v2',
   actorKnowledge: 'actor-knowledge-v2',
-  concentration: 'concentration-intel-v1',
+  concentration: 'concentration-intel-v2',
   dmTurn: 'dm-turn-intel-v1',
   dmQuery: 'dm-intel-query-v1',
   dmCapture: 'dm-intel-capture-v1',
   renderer: 'turn-context-renderer-v3',
   engineActorKnowledge: 'actor-knowledge-v1',
-  engineCapsuleSchema: '1',
+  engineCapsuleSchema: '2',
   boardSchema: '1',
 });
+
+const INCREMENT_TWO_CHANGED_SURFACES = new Set([
+  'src/combat/encounter.ts',
+  'src/combat/world-objects.ts',
+  'src/combat/tactical-evaluator.ts',
+  'src/combat/movement-evaluator.ts',
+  'src/combat/concentration-evaluator.ts',
+  'src/vtt/session-persistence.ts',
+  'src/vtt/replay.ts',
+  'src/vtt/mcp/schemas.ts',
+  'src/vtt/mcp/engine-server.ts',
+  'src/vtt/engine-state-capsule.ts',
+]);
 
 const PRE_EDIT_SOURCE_HASHES = Object.freeze({
   'src/combat/encounter.ts': '9e69d044e2123723f804a8b455538fbb6bf8485a153e8a9457c8ea9bcd1ec5d0',
@@ -281,10 +347,14 @@ function sha256(path: string): string {
   return createHash('sha256').update(readFileSync(path)).digest('hex');
 }
 
-describe('hand-authored pre-edit serialized-surface baselines', () => {
-  it('pins every registered implementation surface by an independently captured hash', () => {
+describe('hand-authored serialized-surface change register', () => {
+  it('keeps every unapproved registered implementation surface byte-identical', () => {
     for (const [path, expected] of Object.entries(PRE_EDIT_SOURCE_HASHES)) {
-      expect(sha256(path), path).toBe(expected);
+      if (INCREMENT_TWO_CHANGED_SURFACES.has(path)) {
+        expect(sha256(path), `${path} must contain its registered Increment 2 change`).not.toBe(expected);
+      } else {
+        expect(sha256(path), path).toBe(expected);
+      }
     }
   });
 
@@ -307,10 +377,12 @@ describe('hand-authored pre-edit serialized-surface baselines', () => {
     expect(captured).toEqual(PRE_EDIT_POLICY_LITERALS);
   });
 
-  it('pins the public combatant summary as footprint-free before its approved later bump', () => {
+  it('pins the public combatant summary footprint contract', () => {
     const schemas = source('src/vtt/mcp/schemas.ts');
     const summary = /const combatantSummary = z\.object\(\{([\s\S]*?)\}\)\.strict\(\);/u.exec(schemas)?.[1];
     expect(summary).toContain('combatant_id: identifier');
-    expect(summary).not.toMatch(/footprint|effective_size|placement_mode/u);
+    expect(summary).toContain('effective_size');
+    expect(summary).toContain('placement_mode');
+    expect(summary).toContain('footprint');
   });
 });

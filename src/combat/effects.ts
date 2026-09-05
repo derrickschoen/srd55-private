@@ -3,6 +3,7 @@ import type { DamageOperationDelivery, DamageOperationSpec, ThresholdDamageRider
 import type { ConditionName, ExhaustionLevel } from './conditions';
 import type { DamageRequest, RollMode } from './resolution';
 import type { AreaTemplate } from './templates';
+import type { EffectSequence } from './creature-space';
 import type { PersistentAreaInput } from './persistent-areas';
 import type {
   CombatantId,
@@ -659,8 +660,14 @@ export type EffectPayload =
     }
   | {
       readonly kind: 'size_alteration';
-      readonly options: readonly ('enlarge' | 'reduce')[];
-      readonly sizeCategoryDelta: 1;
+      readonly selection: 'selected_when_cast';
+      readonly damageDieCount: number;
+      readonly damageDieSides: number;
+    }
+  | {
+      readonly kind: 'size_alteration';
+      readonly delta: 1 | -1;
+      readonly appliedSequence: EffectSequence;
       readonly damageDieCount: number;
       readonly damageDieSides: number;
     }

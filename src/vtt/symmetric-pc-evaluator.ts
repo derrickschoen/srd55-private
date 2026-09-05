@@ -1,7 +1,9 @@
 import {
+  combatantSpace,
   combatantConditions,
   type EncounterState,
 } from '../combat/encounter';
+import { minimumSpaceLine } from '../combat/creature-space';
 import type { AppliedCondition } from '../combat/conditions';
 import type { Controller, ControllerDecision, ControllerRequest } from '../combat/controllers';
 import type { EncounterCommand } from '../combat/events';
@@ -148,13 +150,17 @@ function tacticalAssessment(
     return { status: 'unresolved', reason: 'reciprocal_visibility_unknown' };
   }
   const attacker = actor(state, command.actor);
+  const selectedLine = minimumSpaceLine(
+    combatantSpace(state, command.actor),
+    combatantSpace(state, command.target),
+  );
   return {
     status: 'evaluated',
     evaluation: evaluateTacticalAttack({
       attackerId: command.actor,
       targetId: command.target,
-      attackerPosition: actorPosition(state, command.actor),
-      targetPosition: target.position,
+      attackerPosition: selectedLine.sourceCell,
+      targetPosition: selectedLine.targetCell,
       range: attackRange(state, command.actor, command),
       attackBonus: command.attackBonus,
       // A perceived AC band is not an AC number. D245 requires the evaluator's

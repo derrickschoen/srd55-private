@@ -14,6 +14,7 @@ import {
   combatantsAreAllies,
   EncounterConcludedBoundaryError,
   encounterMovementWorld,
+  combatantSpace,
   EncounterRuleError,
   PendingDecisionRuleError,
   reduceEncounter,
@@ -207,13 +208,12 @@ function coordinatedMovementSteps(
         candidate.turn.reactionAvailable,
     )
     .map((candidate) => {
-      const token = state.tokens.find(
-        (entry) => entry.combatantId === candidate.profile.id,
-      );
-      if (token === undefined) throw new EncounterRuleError('validation', 'Reactor has no token.');
+      if (!state.tokens.some((entry) => entry.combatantId === candidate.profile.id)) {
+        throw new EncounterRuleError('validation', 'Reactor has no token.');
+      }
       return {
         reactorId: candidate.profile.id,
-        cell: token.position,
+        cells: combatantSpace(state, candidate.profile.id).cells,
         reach: candidate.profile.rules.reach,
         reactionAvailable: true,
         hostile: true,

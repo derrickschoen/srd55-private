@@ -2126,7 +2126,7 @@ describe('AI-DM engine MCP conversation runner', () => {
       engineIntel: expect.objectContaining({
         policy: 'dm-intel-capture-v1',
         policyVersions: expect.objectContaining({
-          evaluator: 'tactical-evaluator-v2',
+          evaluator: 'tactical-evaluator-v3',
           renderer: 'dm-turn-intel-v1',
           query: 'dm-intel-query-v1',
           capture: 'dm-intel-capture-v1',

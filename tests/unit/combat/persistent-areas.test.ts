@@ -62,6 +62,26 @@ function hitPoints(state: EncounterState, id: string): number {
 }
 
 describe('persistent areas and deterministic membership hooks', () => {
+  it('includes a Large target when only a non-anchor footprint cell touches the area', () => {
+    const owner = playerProfile('tail-area-owner', { initiativeBonus: 20 });
+    const targetBase = monsterProfile('tail-area-target', { initiativeBonus: -20 });
+    const target = { ...targetBase, rules: { ...targetBase.rules, sizeCategory: 'Large' as const } };
+    let state = reduceEncounter(createEncounter({
+      bounds: { columns: 8, rows: 4 },
+      combatants: [owner, target],
+      tokens: [placedToken(owner, 0, 1), placedToken(target, 3, 1)],
+    }), { type: 'roll_initiative' }, () => 0.5).state;
+
+    state = createArea(state, baseArea(state, {
+      owner: owner.id,
+      origin: { kind: 'fixed', point: feetPoint(25, 10) },
+      shape: { kind: 'cube', size: feet(5) },
+      targetFilter: { kind: 'enemies' },
+    })).state;
+
+    expect(state.persistentAreas[0]?.members).toEqual([target.id]);
+  });
+
   it('area_triggers_every_step: crossing a three-square zone resolves once per entry, not once per step', () => {
     let state = started([8, 0]);
     const owner = state.combatants[0]!.profile.id;

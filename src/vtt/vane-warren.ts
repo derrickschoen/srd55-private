@@ -1,4 +1,5 @@
 import {
+  combatToken,
   monsterCombatantProfile,
   type CombatantProfile,
 } from '../combat/combatant';
@@ -209,15 +210,15 @@ export type VaneWarrenTpkEnemyRosterId =
 
 const TPK_ENEMY_POSITIONS = {
   ashmaw: { column: 4, row: 3 },
-  'cinder-guard-b': { column: 4, row: 4 },
-  'cinder-wave-1-a': { column: 4, row: 5 },
+  'cinder-guard-b': { column: 4, row: 5 },
+  'cinder-wave-1-a': { column: 5, row: 5 },
   'cinder-wave-2-a': { column: 4, row: 6 },
-  'doomed-crocodile': { column: 3, row: 4 },
-  'doomed-crocodile-second': { column: 3, row: 5 },
-  'doomed-crocodile-third': { column: 3, row: 1 },
-  'doomed-crocodile-fourth': { column: 3, row: 2 },
-  'doomed-crocodile-fifth': { column: 3, row: 6 },
-  'doomed-crocodile-sixth': { column: 3, row: 7 },
+  'doomed-crocodile': { column: 0, row: 0 },
+  'doomed-crocodile-second': { column: 5, row: 0 },
+  'doomed-crocodile-third': { column: 8, row: 0 },
+  'doomed-crocodile-fourth': { column: 0, row: 7 },
+  'doomed-crocodile-fifth': { column: 8, row: 7 },
+  'doomed-crocodile-sixth': { column: 11, row: 7 },
 } as const satisfies Readonly<Record<VaneWarrenTpkEnemyRosterId, GridCell>>;
 
 function tpkEnemyPosition(
@@ -365,6 +366,7 @@ function environment(fightId: VaneWarrenFightId, leader: CombatantId): Encounter
         partialUnit: 'completed_units_only',
       },
     }],
+    narrowOpeningRegions: [],
   };
 }
 
@@ -532,20 +534,12 @@ export function createVaneWarrenFight(
     bounds: { columns: 14, rows: 10 },
     combatants: [...players, ...standingProfiles],
     tokens: [
-      ...players.map((profile, index) => ({
-        id: profile.tokenId,
-        combatantId: profile.id,
-        position: playerPositions(scenario)[index] as GridCell,
-      })),
+      ...players.map((profile, index) => combatToken(profile, playerPositions(scenario)[index] as GridCell)),
       ...startingRoster.map((entry) => {
         const profile = profileFor(fightId, entry);
-        return {
-        id: profile.tokenId,
-        combatantId: profile.id,
-        position: scenarioConfig === null
+        return combatToken(profile, scenarioConfig === null
           ? entry.position
-          : tpkEnemyPosition(scenarioConfig.enemyPositions, entry.id) ?? entry.position,
-        };
+          : tpkEnemyPosition(scenarioConfig.enemyPositions, entry.id) ?? entry.position);
       }),
     ],
     blockedCells: [{ column: 4, row: 1 }, { column: 4, row: 8 }],
@@ -730,17 +724,13 @@ function deployRosterEntriesInEncounter(
     positions.push(position);
     encounter = {
       ...encounter,
-      tokens: [...encounter.tokens, { id: profile.tokenId, combatantId: profile.id, position }],
+      tokens: [...encounter.tokens, combatToken(profile, position)],
     };
   }
   const initialized = createEncounter({
     bounds: initial.bounds,
     combatants: profiles,
-    tokens: profiles.map((profile, index) => ({
-      id: profile.tokenId,
-      combatantId: profile.id,
-      position: positions[index] as GridCell,
-    })),
+    tokens: profiles.map((profile, index) => combatToken(profile, positions[index] as GridCell)),
   });
   const lastSlot = Math.max(-1, ...encounter.initiative.map((entry) => entry.slot));
   const lastTotal = Math.min(0, ...encounter.initiative.map((entry) => entry.total));

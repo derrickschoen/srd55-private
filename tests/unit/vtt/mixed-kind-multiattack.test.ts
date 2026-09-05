@@ -31,7 +31,7 @@ function encounter(statblock: MonsterStatblock, key: string): EncounterState {
   return freshMonsterPlanningState(createEncounter({
     bounds: { columns: 20, rows: 10 },
     combatants: [fastActor, target],
-    tokens: [placedToken(fastActor, 1, 1), placedToken(target, 2, 1)],
+    tokens: [placedToken(fastActor, 1, 1), placedToken(target, 4, 1)],
   }));
 }
 

@@ -185,7 +185,7 @@ describe('D348.1 imported combat senses and subject-cell obscurement', () => {
       tokens: [combatToken(observer.profile, { column: 0, row: 1 }), placedToken(obscured, 4, 1), placedToken(clear, 5, 1)],
       contentPacks: [observer.content],
       environment: {
-        lightRegions: [], difficultTerrainRegions: [], movementRegions: [],
+        lightRegions: [], difficultTerrainRegions: [], movementRegions: [], narrowOpeningRegions: [],
         obscurementRegions: [{ id: 'fog-edge', cells: [{ column: 4, row: 1 }], obscurement: 'heavy' }],
       },
     });

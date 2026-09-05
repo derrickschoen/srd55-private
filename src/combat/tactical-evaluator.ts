@@ -12,7 +12,7 @@ import {
 } from '../simulation/contracts';
 import { attackRollProbabilities } from '../simulation/probability';
 
-export const TACTICAL_EVALUATOR_POLICY = 'tactical-evaluator-v2' as const;
+export const TACTICAL_EVALUATOR_POLICY = 'tactical-evaluator-v3' as const;
 
 /** Shared with damage resolution: damage at zero HP marks one failure, or two on a critical. */
 export function deathSaveFailuresFromZeroHitPointDamage(critical: false): 1;
@@ -542,6 +542,20 @@ export function tacticalRangeVerdict(
       };
     }
   }
+}
+
+export function tacticalRangeVerdictAtDistance(
+  distanceFeet: number,
+  range: TacticalAttackRange,
+): TacticalRangeVerdict {
+  if (!Number.isSafeInteger(distanceFeet) || distanceFeet < 0 || distanceFeet % 5 !== 0) {
+    throw new RangeError('Tactical range distance must be a non-negative five-foot increment.');
+  }
+  return tacticalRangeVerdict(
+    { column: 0, row: 0 },
+    { column: distanceFeet / 5, row: 0 },
+    range,
+  );
 }
 
 function firstBlockingReason(

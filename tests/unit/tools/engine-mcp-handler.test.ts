@@ -726,7 +726,27 @@ describe('engine MCP dual-handshake full surface conformance', () => {
     const result = toolCall(runtime.handler, name, happyArguments(name, state, runtime));
     const value = structured(result);
     expect(record((result['content'] as readonly unknown[])[0])['text']).toBe(JSON.stringify(value));
-    expect(forbiddenAgentKeys(value)).toEqual([]);
+    if (name === 'engine.get_state_summary') {
+      const summary = record(record(value)['summary']);
+      const combatants = summary['combatants'];
+      if (!Array.isArray(combatants)) throw new TypeError('State summary omitted combatants.');
+      for (const combatant of combatants) {
+        const projected = record(combatant);
+        expect(projected['effective_size']).toBeTypeOf('string');
+        expect(record(projected['placement_mode'])['kind']).toMatch(/^(?:normal|squeezed)$/u);
+        expect(Array.isArray(projected['footprint']) && projected['footprint'].length > 0).toBe(true);
+      }
+      const withoutApprovedFootprints = {
+        ...record(value),
+        summary: {
+          ...summary,
+          combatants: combatants.map((combatant) => ({ ...record(combatant), footprint: [] })),
+        },
+      };
+      expect(forbiddenAgentKeys(withoutApprovedFootprints)).toEqual([]);
+    } else {
+      expect(forbiddenAgentKeys(value)).toEqual([]);
+    }
   });
 
   it.each(['caveman_prose', 'regular_prose'] as const)('makes %s the model-visible tool text while retaining schema-valid structured metadata', async (format) => {

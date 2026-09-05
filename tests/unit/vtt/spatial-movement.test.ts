@@ -335,6 +335,7 @@ describe('CAP-IMP-009 imported spatial movement operations', () => {
     let state = initiative(createEncounter({
       bounds: { columns: 6, rows: 1 }, combatants: [flyer], tokens: [placedToken(flyer, 0)], contentPacks: [pack],
       environment: {
+        narrowOpeningRegions: [],
         lightRegions: [], difficultTerrainRegions: [{ id: 'mire', cells: [{ column: 1, row: 0 }] }], obscurementRegions: [], movementRegions: [],
       },
     }));
@@ -367,6 +368,7 @@ describe('CAP-IMP-009 imported spatial movement operations', () => {
       bounds: { columns: 6, rows: 2 }, combatants: [reducer, target],
       tokens: [placedToken(reducer, 0, 1), placedToken(target, 0)], contentPacks: [pack],
       environment: {
+        narrowOpeningRegions: [],
         lightRegions: [], difficultTerrainRegions: [{ id: 'bog', cells: [{ column: 1, row: 0 }] }], obscurementRegions: [], movementRegions: [],
       },
     }));

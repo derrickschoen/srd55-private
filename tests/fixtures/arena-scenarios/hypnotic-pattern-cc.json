@@ -30,6 +30,7 @@
             "kind": "monster",
             "name": "Incubus",
             "rules": {
+              "sizeCategory": "Medium",
               "abilityScores": {
                 "charisma": 20,
                 "constitution": 13,
@@ -112,6 +113,7 @@
             "kind": "player_character",
             "name": "Clustered Fighter",
             "rules": {
+              "sizeCategory": "Medium",
               "abilityScores": { "charisma": 10, "constitution": 16, "dexterity": 10, "intelligence": 10, "strength": 18, "wisdom": 6 },
               "armorClass": 17,
               "attacksPerAction": 2,
@@ -148,6 +150,7 @@
             "kind": "player_character",
             "name": "Clustered Cleric",
             "rules": {
+              "sizeCategory": "Medium",
               "abilityScores": { "charisma": 10, "constitution": 16, "dexterity": 10, "intelligence": 10, "strength": 14, "wisdom": 6 },
               "armorClass": 18,
               "attacksPerAction": 1,
@@ -184,6 +187,7 @@
             "kind": "player_character",
             "name": "Clustered Rogue",
             "rules": {
+              "sizeCategory": "Medium",
               "abilityScores": { "charisma": 12, "constitution": 14, "dexterity": 18, "intelligence": 12, "strength": 10, "wisdom": 6 },
               "armorClass": 16,
               "attacksPerAction": 1,
@@ -220,6 +224,7 @@
             "kind": "player_character",
             "name": "Clustered Wizard",
             "rules": {
+              "sizeCategory": "Medium",
               "abilityScores": { "charisma": 10, "constitution": 14, "dexterity": 12, "intelligence": 18, "strength": 8, "wisdom": 6 },
               "armorClass": 15,
               "attacksPerAction": 1,
@@ -266,6 +271,7 @@
                 "recordId": "incubus",
                 "name": "Incubus",
                 "statblock": {
+                  "sizeCategory": "Medium",
                   "creatureType": "Fiend",
                   "armorClass": 15,
                   "hitPointMaximum": 66,
@@ -323,6 +329,7 @@
               "sourceId": "d432_srd",
               "recordId": "incubus",
               "name": "Incubus",
+              "sizeCategory": "Medium",
               "creatureType": "Fiend",
               "statblock": {
                 "id": "d432_srd:incubus",

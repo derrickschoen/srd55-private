@@ -2434,6 +2434,9 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         name: actor.name,
         side: actor.side,
         status: actorStatus(actor),
+        effective_size: actor.effectiveSize,
+        placement_mode: actor.placementMode,
+        footprint: actor.footprint,
         options: granularity === 'combatant_detail' ? tacticalOptions(state, queries, capsule, actor.id, true) : [],
         threats: granularity === 'turn_minimal' || granularity === 'combatant_detail' ? threats(state, queries, actor.id) : [],
       }));

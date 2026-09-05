@@ -227,15 +227,15 @@ describe('D377.5 The Vane Warren flagship bundle', () => {
     }
     expect(VANE_WARREN_TPK_SCENARIOS['tpk-clean'].enemyPositions).toEqual({
       ashmaw: { column: 4, row: 3 },
-      'cinder-guard-b': { column: 4, row: 4 },
-      'cinder-wave-1-a': { column: 4, row: 5 },
+      'cinder-guard-b': { column: 4, row: 5 },
+      'cinder-wave-1-a': { column: 5, row: 5 },
       'cinder-wave-2-a': { column: 4, row: 6 },
-      'doomed-crocodile': { column: 3, row: 4 },
-      'doomed-crocodile-second': { column: 3, row: 5 },
-      'doomed-crocodile-third': { column: 3, row: 1 },
-      'doomed-crocodile-fourth': { column: 3, row: 2 },
-      'doomed-crocodile-fifth': { column: 3, row: 6 },
-      'doomed-crocodile-sixth': { column: 3, row: 7 },
+      'doomed-crocodile': { column: 0, row: 0 },
+      'doomed-crocodile-second': { column: 5, row: 0 },
+      'doomed-crocodile-third': { column: 8, row: 0 },
+      'doomed-crocodile-fourth': { column: 0, row: 7 },
+      'doomed-crocodile-fifth': { column: 8, row: 7 },
+      'doomed-crocodile-sixth': { column: 11, row: 7 },
     });
   });
 
@@ -289,6 +289,7 @@ describe('D377.5 The Vane Warren flagship bundle', () => {
           unitFeet: 5, partialUnit: 'completed_units_only',
         },
       }],
+      narrowOpeningRegions: [],
     });
     const areas = loaded.encounter.persistentAreas;
     expect(areas.map((area) => ({

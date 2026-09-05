@@ -1,4 +1,4 @@
-import type { CombatantProfile, CombatToken } from '../combat/combatant';
+import { combatToken, type CombatantProfile, type CombatToken } from '../combat/combatant';
 import type { LegalActionSummary } from '../combat/controllers';
 import type { EncounterState } from '../combat/encounter';
 import type { EncounterCommand } from '../combat/events';
@@ -55,6 +55,7 @@ function profile(
       passivePerception: 12,
       detectionTraits: [],
       contactMedium: 'surface',
+      sizeCategory: 'Medium',
       ...(key === 'training-brute' ? { skillBonuses: { stealth: 20 } } : {}),
       spellSlots: options.spellSlots ?? [],
     },
@@ -115,11 +116,7 @@ export function referenceEncounterSetup(): {
   return {
     bounds: { columns: 10, rows: 7 },
     combatants,
-    tokens: combatants.map((combatant, index) => ({
-      id: combatant.tokenId,
-      combatantId: combatant.id,
-      position: positions[index] as GridCell,
-    })),
+    tokens: combatants.map((combatant, index) => combatToken(combatant, positions[index] as GridCell)),
     blockedCells: [{ column: 7, row: 2 }],
     foggedCells: [{ column: 8, row: 1 }, { column: 8, row: 2 }],
     environment: {
@@ -127,6 +124,7 @@ export function referenceEncounterSetup(): {
       obscurementRegions: [],
       difficultTerrainRegions: [],
       movementRegions: [],
+      narrowOpeningRegions: [],
     },
     dmNotes: ['Training Brute retreats after the three reference PCs act.'],
   };

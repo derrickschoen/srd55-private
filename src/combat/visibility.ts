@@ -7,7 +7,8 @@ import type {
   SpellSlotState,
   TurnResources,
 } from './encounter';
-import { canCombatantSee, combatantSide, effectiveCombatRules } from './encounter';
+import { canCombatantSee, combatantSide, combatantSpace, effectiveCombatRules, effectiveCreatureSize } from './encounter';
+import type { KnownCreatureSize, SerializedPlacementMode } from './creature-space';
 import type { HiddenRollCategory } from './roll-visibility';
 import type { EncounterEvent } from './events';
 import type { GridCell } from './grid';
@@ -34,6 +35,8 @@ export const ENCOUNTER_VIEW_CLASSIFICATION = {
   dmNotes: 'dm_only',
   combatants: 'per_seat',
   tokens: 'per_seat',
+  sharedSpaceRelations: 'dm_only',
+  adjudicationPending: 'dm_only',
   absentTokens: 'dm_only',
   initiative: 'per_seat',
   activeCombatant: 'player_visible',
@@ -108,6 +111,9 @@ export interface PlayerVisibleCombatant {
   readonly kind: 'player_character' | 'monster';
   readonly life: LifeState;
   readonly position: GridCell;
+  readonly effectiveSize: KnownCreatureSize;
+  readonly placementMode: SerializedPlacementMode;
+  readonly footprint: readonly [GridCell, ...GridCell[]];
   readonly active: boolean;
   readonly formName: string | null;
 }
@@ -223,6 +229,8 @@ export interface DmVisibleEncounterState {
   readonly worldObjects: EncounterState['worldObjects'];
   readonly environment: EncounterState['environment'];
   readonly combatants: readonly DmVisibleCombatant[];
+  readonly sharedSpaceRelations: EncounterState['sharedSpaceRelations'];
+  readonly adjudicationPending: EncounterState['adjudicationPending'];
   readonly recentEvents: readonly EncounterEvent[];
   readonly dmOnly: {
     readonly foggedCells: readonly GridCell[];
@@ -436,6 +444,8 @@ export function projectDmView(state: EncounterState): DmView {
       dmNotes: [...state.dmNotes],
       combatants: structuredClone(state.combatants),
       tokens: structuredClone(state.tokens),
+      sharedSpaceRelations: structuredClone(state.sharedSpaceRelations),
+      adjudicationPending: structuredClone(state.adjudicationPending),
       ...(state.absentTokens === undefined ? {} : { absentTokens: structuredClone(state.absentTokens) }),
       initiative: structuredClone(state.initiative),
       activeCombatant: state.activeCombatant,
@@ -473,19 +483,23 @@ export function projectPlayerView(state: EncounterState, binding: PlayerSeatBind
   const hidden = new Set(state.hiddenCombatants.map((entry) => entry.combatant));
   const hiddenCells = new Set(state.tokens
     .filter((entry) => hidden.has(entry.combatantId))
-    .map((entry) => cellKey(entry.position)));
+    .flatMap((entry) => combatantSpace(state, entry.combatantId).cells.map(cellKey)));
   const concealed = new Set([...fog, ...hiddenCells]);
   const combatants = state.combatants.flatMap((subject): readonly PlayerVisibleCombatant[] => {
     const token = tokensByCombatant.get(subject.profile.id);
-    if (token === undefined) throw new Error('Encounter projection found no token.');
+    if (token === undefined) return [];
     const owned = ownedIds.has(subject.profile.id);
     if (hidden.has(subject.profile.id) || (!owned && (fog.has(cellKey(token.position)) || !canCombatantSee(state, binding.combatantId, subject.profile.id)))) return [];
+    const space = combatantSpace(state, subject.profile.id);
     return [{
       id: subject.profile.id,
       name: subject.profile.name,
       kind: combatantSide(state, subject.profile.id),
       life: subject.life,
       position: { ...token.position },
+      effectiveSize: effectiveCreatureSize(state, subject.profile.id),
+      placementMode: structuredClone(token.placementMode),
+      footprint: space.cells.map((cell) => ({ ...cell })) as [GridCell, ...GridCell[]],
       active: state.activeCombatant === subject.profile.id,
       formName: subject.wildShape?.formName ?? subject.form?.formName ?? null,
     }];
@@ -539,24 +553,30 @@ export function dmVisibleEncounter(view: DmView): DmVisibleEncounterState {
     blockedCells: state.blockedCells.map((cell) => ({ ...cell })),
     worldObjects: structuredClone(state.worldObjects),
     environment: structuredClone(state.environment),
-    combatants: state.combatants.map((subject) => {
+    combatants: state.combatants.flatMap((subject): readonly DmVisibleCombatant[] => {
       const token = tokensByCombatant.get(subject.profile.id);
-      if (token === undefined) throw new Error('Encounter projection found no token.');
-      return {
+      if (token === undefined) return [];
+      const space = combatantSpace(state, subject.profile.id);
+      return [{
         id: subject.profile.id,
         name: subject.profile.name,
         kind: combatantSide(state, subject.profile.id),
         hitPoints: subject.hitPoints,
         life: subject.life,
         position: { ...token.position },
+        effectiveSize: effectiveCreatureSize(state, subject.profile.id),
+        placementMode: structuredClone(token.placementMode),
+        footprint: space.cells.map((cell) => ({ ...cell })) as [GridCell, ...GridCell[]],
         active: state.activeCombatant === subject.profile.id,
         formName: subject.wildShape?.formName ?? subject.form?.formName ?? null,
         rules: structuredClone(effectiveCombatRules(state, subject.profile.id)),
         deathSaves: structuredClone(subject.deathSaves),
         turn: structuredClone(subject.turn),
         spellSlots: structuredClone(subject.spellSlots),
-      };
+      }];
     }),
+    sharedSpaceRelations: structuredClone(state.sharedSpaceRelations),
+    adjudicationPending: structuredClone(state.adjudicationPending),
     recentEvents: structuredClone(state.eventLog),
     dmOnly: {
       foggedCells: state.foggedCells.map((cell) => ({ ...cell })),

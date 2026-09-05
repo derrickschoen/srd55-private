@@ -7,6 +7,17 @@ import type {
   EngineZoneId,
 } from '../combat/values';
 import type { EncounterState } from '../combat/encounter';
+import {
+  applySizeSteps,
+  creatureSpace,
+  effectSequence,
+  placementFromSerialized,
+  sizedCombatantState,
+  type CreatureSpace,
+  type KnownCreatureSize,
+  type SerializedPlacementMode,
+} from '../combat/creature-space';
+import { wildShapeRulesLens } from '../combat/wild-shape';
 import { sha256 } from '../crypto/sha256';
 import type { DmBoardProjection } from './encounter-projections';
 import type {
@@ -84,6 +95,9 @@ export interface EngineProjectionCombatant {
   readonly speedFeet: number;
   readonly reachFeet: number;
   readonly position: GridCell;
+  readonly effectiveSize: KnownCreatureSize;
+  readonly placementMode: SerializedPlacementMode;
+  readonly footprint: readonly [GridCell, ...GridCell[]];
   readonly actionAvailable: boolean;
   readonly bonusActionAvailable: boolean;
   readonly reactionAvailable: boolean;
@@ -112,6 +126,29 @@ export interface EngineDmProjection {
   readonly semanticZones: readonly EngineSemanticZone[];
 }
 
+function projectedCreatureSpace(state: EncounterState, combatantId: CombatantId): CreatureSpace<KnownCreatureSize> {
+  const combatant = state.combatants.find((candidate) => candidate.profile.id === combatantId);
+  const token = state.tokens.find((candidate) => candidate.combatantId === combatantId);
+  if (combatant === undefined || token === undefined) {
+    throw new TypeError(`Combatant ${String(combatantId)} has no query projection placement.`);
+  }
+  const rules = combatant.wildShape === undefined
+    ? combatant.profile.rules
+    : wildShapeRulesLens(combatant.profile.rules, combatant.wildShape);
+  if (rules.sizeCategory === undefined) {
+    throw new TypeError(`Combatant ${String(combatantId)} has no mechanical creature size.`);
+  }
+  const size = applySizeSteps(rules.sizeCategory, state.effects.flatMap((effect) =>
+    effect.targets.includes(combatantId) && effect.payload.kind === 'size_alteration' && 'delta' in effect.payload
+      ? [{ delta: effect.payload.delta, appliedSequence: effectSequence(effect.payload.appliedSequence) }]
+      : []));
+  const sized = sizedCombatantState(size);
+  return creatureSpace(sized, placementFromSerialized(sized, {
+    anchor: token.position,
+    mode: token.placementMode,
+  }));
+}
+
 export interface EngineHistoryEntry {
   readonly revision: number;
   readonly kind: string;
@@ -126,7 +163,7 @@ export interface RuleReference {
 
 export interface EngineStateCapsule {
   readonly format: 'engine-mcp-state-capsule';
-  readonly schemaVersion: 1;
+  readonly schemaVersion: 2;
   readonly runId: EncounterSessionId;
   readonly branchId: EncounterBranchId;
   readonly revision: number;
@@ -250,6 +287,9 @@ export function projectEngineDmProjection(
       speedFeet: combatant.rules.speed,
       reachFeet: combatant.rules.reach,
       position: { ...combatant.position },
+      effectiveSize: combatant.effectiveSize,
+      placementMode: structuredClone(combatant.placementMode),
+      footprint: combatant.footprint.map((cell) => ({ ...cell })) as [GridCell, ...GridCell[]],
       actionAvailable: combatant.turn.action.kind !== 'spent',
       bonusActionAvailable: combatant.turn.bonusActionAvailable,
       reactionAvailable: combatant.turn.reactionAvailable,
@@ -297,6 +337,7 @@ export function projectEngineEncounterState(
       const token = state.tokens.find((candidate) => candidate.combatantId === combatant.profile.id);
       if (token === undefined) throw new TypeError(`Combatant ${String(combatant.profile.id)} has no query projection token.`);
       const rules = combatant.wildShape?.physical ?? combatant.profile.rules;
+      const space = projectedCreatureSpace(state, combatant.profile.id);
       return {
         id: combatant.profile.id,
         name: boundedText(combatant.profile.name, 'combatant name', 200),
@@ -307,6 +348,9 @@ export function projectEngineEncounterState(
         speedFeet: rules.speed,
         reachFeet: rules.reach,
         position: { ...token.position },
+        effectiveSize: space.actualSize,
+        placementMode: structuredClone(token.placementMode),
+        footprint: space.cells.map((cell) => ({ ...cell })) as [GridCell, ...GridCell[]],
         actionAvailable: combatant.turn.action.kind !== 'spent',
         bonusActionAvailable: combatant.turn.bonusActionAvailable,
         reactionAvailable: combatant.turn.reactionAvailable,
@@ -426,7 +470,7 @@ export function createEngineStateCapsule(input: {
   }
   const body: CapsuleDigestInput = {
     format: 'engine-mcp-state-capsule',
-    schemaVersion: 1,
+    schemaVersion: 2,
     runId: input.runId,
     branchId: input.branchId,
     revision: input.revision,

@@ -22,12 +22,22 @@ import {
   exhaustionPenalty,
   isIncapacitated,
 } from './conditions';
-import type { CombatantProfile, CombatRulesProfile, CombatToken } from './combatant';
+import { combatToken, type CombatantProfile, type CombatRulesProfile, type CombatToken } from './combatant';
 import {
   automaticSaveFailure,
+  combatantSpace,
+  combatantSpaceAt,
   combatantConditions,
+  CreatureSizeRuleError,
   effectiveCombatRules,
+  effectiveCreatureSize,
   saveRollMode,
+} from './combat-rules';
+export {
+  combatantSpace,
+  combatantSpaceAt,
+  CreatureSizeRuleError,
+  effectiveCreatureSize,
 } from './combat-rules';
 import { EncounterRuleError } from './encounter-rule-error';
 import {
@@ -71,18 +81,41 @@ import {
   type GridCell,
 } from './grid';
 import {
+  applySizeSteps,
+  autoRelocatePlacement,
+  creatureSpace,
+  effectSequence,
+  minimumSpaceDistance,
+  minimumSpaceLine,
+  narrowOpeningRegion,
+  newlyEnteredSpaceCells,
+  normalPlacementFor,
+  openingContainingSpace,
+  placementFromSerialized,
+  sizedCombatantState,
+  spaceFitsBounds,
+  sharedSpaceRelation,
+  serializedPlacementMode,
+  spacesIntersect,
+  type CreatureSpace,
+  type SharedSpaceRelation,
+  type SizeStepOperation,
+} from './creature-space';
+import {
   findPath,
   planMovement,
   spendMovement,
   startTurnMovement,
-  type MovementWorld,
   type TurnMovement,
 } from './movement';
+import { encounterMovementWorld } from './encounter-movement-world';
+export { encounterMovementWorld } from './encounter-movement-world';
 import {
   fixedOrigin,
   feetShape,
   PERSISTENT_AREA_OPTIONAL_RULES,
   persistentAreaContains,
+  persistentAreaTouchesSpace,
   type PersistentArea,
   type PersistentAreaEffectSpec,
   type PersistentAreaHook,
@@ -147,6 +180,7 @@ import {
   evaluateTacticalAttack,
   projectMonsterRollModeSources,
   tacticalRangeVerdict,
+  tacticalRangeVerdictAtDistance,
   type AttackRollModeSource,
   type MonsterRollModeCombatantFacts,
   type MonsterRollModeFeatureInput,
@@ -554,6 +588,10 @@ export interface EncounterState {
   readonly dmNotes: readonly string[];
   readonly combatants: readonly EncounterCombatantState[];
   readonly tokens: readonly CombatToken[];
+  /** Exact causal proof for every currently shared creature cell. */
+  readonly sharedSpaceRelations: readonly SharedSpaceRelation[];
+  /** One-way migration preserves unknowable legacy facts for explicit DM adjudication. */
+  readonly adjudicationPending: readonly MigrationAdjudicationPending[];
   /** Tokens owned by temporary board-absence effects, including their return cells. */
   readonly absentTokens?: readonly CombatToken[];
   readonly initiative: readonly InitiativeEntry[];
@@ -586,6 +624,25 @@ export interface EncounterState {
   readonly itemContacts?: readonly ItemPhysicalContact[];
 }
 
+export type MigrationAdjudicationPending =
+  | {
+      readonly kind: 'legacy_size_required';
+      readonly combatant: CombatantId;
+      readonly sourceSizeText: string | null;
+      readonly suggestedAnchor: GridCell | null;
+    }
+  | {
+      readonly kind: 'effect_adjudication_pending';
+      readonly effectId: EncounterEffectId;
+      readonly originalPayload: unknown;
+    }
+  | {
+      readonly kind: 'overlap_adjudication_pending';
+      readonly first: CombatantId;
+      readonly second: CombatantId;
+      readonly formerAnchors: readonly [GridCell, GridCell];
+    };
+
 interface ReevaluatedSpellBranch {
   readonly sequence: number;
   readonly spellId: string;
@@ -611,6 +668,7 @@ export interface EncounterSetup {
   readonly alerting?: EncounterAlertingSetup;
   readonly combatants: readonly CombatantProfile[];
   readonly tokens: readonly CombatToken[];
+  readonly sharedSpaceRelations?: readonly SharedSpaceRelation[];
   readonly contentPacks?: readonly LoadedContentPack[];
   readonly equipment?: readonly CombatantEquipment[];
   readonly groundItems?: readonly GroundItem[];
@@ -936,7 +994,6 @@ export function createEncounter(setup: EncounterSetup): EncounterState {
   assertUnique(setup.combatants.map((profile) => profile.tokenId), 'Profile token ids');
   assertUnique(setup.tokens.map((token) => token.id), 'Token ids');
   assertUnique(setup.tokens.map((token) => token.combatantId), 'Token combatant ids');
-  assertUnique(setup.tokens.map((token) => cellKey(token.position)), 'Token positions');
 
   const profileIds = new Set(setup.combatants.map((profile) => profile.id));
   const profileTokenIds = new Set(setup.combatants.map((profile) => profile.tokenId));
@@ -982,6 +1039,11 @@ export function createEncounter(setup: EncounterSetup): EncounterState {
     if (!isCellInside(setup.bounds, token.position)) {
       throw new EncounterRuleError('validation', `Token ${token.id} is outside the encounter grid.`);
     }
+    const size = profile.rules.sizeCategory;
+    if (size === undefined) throw new CreatureSizeRuleError('mechanical_size_required', profile.id);
+    if (token.placementMode.actual !== size) {
+      throw new CreatureSizeRuleError('placement_size_mismatch', profile.id);
+    }
   }
 
   const reactionPolicies = setup.reactionPolicies ?? [];
@@ -1026,8 +1088,69 @@ export function createEncounter(setup: EncounterSetup): EncounterState {
     for (const region of environment.lightRegions) assertEnvironmentRegion(setup.bounds, region);
     for (const region of environment.difficultTerrainRegions) assertEnvironmentRegion(setup.bounds, region);
     for (const region of environment.obscurementRegions) assertEnvironmentRegion(setup.bounds, region);
+    for (const opening of environment.narrowOpeningRegions) {
+      narrowOpeningRegion({
+        id: opening.id,
+        sizedFor: opening.sizedFor,
+        cells: opening.cells,
+        bounds: setup.bounds,
+      });
+    }
   } catch (error) {
     throw new EncounterRuleError('validation', error instanceof Error ? error.message : 'Invalid environment region.');
+  }
+  const setupSpaces = setup.tokens.map((placed) => {
+    const profile = setup.combatants.find((candidate) => candidate.id === placed.combatantId);
+    if (profile?.rules.sizeCategory === undefined) {
+      throw new CreatureSizeRuleError('mechanical_size_required', placed.combatantId);
+    }
+    const sized = sizedCombatantState(profile.rules.sizeCategory);
+    const space = creatureSpace(sized, placementFromSerialized(sized, {
+      anchor: placed.position,
+      mode: placed.placementMode,
+    }));
+    if (!spaceFitsBounds(space, setup.bounds)) {
+      throw new EncounterRuleError('validation', `Token ${placed.id} footprint is outside the encounter grid.`);
+    }
+    if (space.cells.some((cell) => blockedCells.some((blocked) => cellKey(blocked) === cellKey(cell)))) {
+      throw new EncounterRuleError('validation', `Token ${placed.id} footprint intersects a blocked cell.`);
+    }
+    if (space.cells.some((cell) => worldObjects.some((object) => object.blocking.movement &&
+      object.footprint.some((occupied) => cellKey(occupied) === cellKey(cell))))) {
+      throw new EncounterRuleError('validation', `Token ${placed.id} footprint intersects a blocking object.`);
+    }
+    if (placed.placementMode.kind === 'squeezed' &&
+      openingContainingSpace(space, environment.narrowOpeningRegions) === null) {
+      throw new EncounterRuleError('validation', `Token ${placed.id} squeezed placement is not inside one matching opening.`);
+    }
+    return { combatantId: placed.combatantId, space };
+  });
+  const intersections = setupSpaces.flatMap((left, leftIndex) =>
+    setupSpaces.slice(leftIndex + 1).flatMap((right) =>
+      spacesIntersect(left.space, right.space) ? [[left.combatantId, right.combatantId] as const] : []));
+  const relations = setup.sharedSpaceRelations ?? [];
+  const relationKey = (left: CombatantId, right: CombatantId): string =>
+    [String(left), String(right)].sort().join('|');
+  assertUnique(relations.map((relation) => relationKey(relation.first, relation.second)), 'Shared-space relations');
+  for (const relation of relations) {
+    if (relation.first === relation.second || relation.originatingId.trim().length === 0 ||
+      !intersections.some(([left, right]) => relationKey(left, right) === relationKey(relation.first, relation.second))) {
+      throw new EncounterRuleError('validation', 'Shared-space relation is stale, malformed, or has no intersection.');
+    }
+  }
+  for (const [left, right] of intersections) {
+    const relation = relations.find((candidate) =>
+      relationKey(candidate.first, candidate.second) === relationKey(left, right));
+    if (relation === undefined) throw new EncounterRuleError('validation', 'Intersecting footprints require exact shared-space provenance.');
+    const leftSize = setupSpaces.find((entry) => entry.combatantId === left)?.space.actualSize;
+    const rightSize = setupSpaces.find((entry) => entry.combatantId === right)?.space.actualSize;
+    if (relation.provenance === 'tiny_capacity' && (leftSize !== 'Tiny' || rightSize !== 'Tiny')) {
+      throw new EncounterRuleError('validation', 'Tiny-capacity provenance applies only to two Tiny creatures.');
+    }
+  }
+  for (const group of setupSpaces.filter((entry) => entry.space.actualSize === 'Tiny')) {
+    const occupancy = setupSpaces.filter((candidate) => spacesIntersect(group.space, candidate.space));
+    if (occupancy.length > 4) throw new EncounterRuleError('validation', 'A Tiny shared cell has capacity four.');
   }
   const foggedCells = setup.foggedCells ?? [];
   assertUnique(foggedCells.map(cellKey), 'Fogged cells');
@@ -1149,7 +1272,13 @@ export function createEncounter(setup: EncounterSetup): EncounterState {
             },
           }),
     })),
-    tokens: setup.tokens.map((token) => ({ ...token, position: { ...token.position } })),
+    tokens: setup.tokens.map((token) => ({
+      ...token,
+      position: { ...token.position },
+      placementMode: { ...token.placementMode },
+    })),
+    sharedSpaceRelations: structuredClone(relations),
+    adjudicationPending: [],
     initiative: [],
     activeCombatant: null,
     activeInitiativeIndex: null,
@@ -1759,9 +1888,10 @@ export function detectCombatant(
   observer: CombatantId,
   subject: CombatantId,
 ): DetectionResult {
-  const from = token(state, observer).position;
-  const to = token(state, subject).position;
-  const distance = gridDistance(from, to);
+  const line = minimumSpaceLine(combatantSpace(state, observer), combatantSpace(state, subject));
+  const from = line.sourceCell;
+  const to = line.targetCell;
+  const distance = line.distance;
   const senses = effectiveCombatRules(state, observer).senses;
   const hasBlindsight = senses.some((sense) =>
     sense.kind === 'blindsight' && distance <= sense.rangeFeet);
@@ -2103,16 +2233,12 @@ function attackRollModeSources(
       });
     }
   }
-  const distance = gridDistance(
-    token(state, command.actor).position,
-    token(state, command.target).position,
+  const distance = minimumSpaceDistance(
+    combatantSpace(state, command.actor),
+    combatantSpace(state, command.target),
   );
   if (includeRangeSource && command.tacticalRange !== undefined) {
-    const range = tacticalRangeVerdict(
-      token(state, command.actor).position,
-      token(state, command.target).position,
-      command.tacticalRange,
-    );
+    const range = tacticalRangeVerdictAtDistance(distance, command.tacticalRange);
     if (range.status === 'resolved' && range.band === 'long') {
       sources.push({ mode: 'disadvantage', reason: 'long_range_disadvantage' });
     }
@@ -2163,13 +2289,17 @@ function activeHitPointMaximum(state: EncounterState, subject: EncounterCombatan
 
 function rollModeCombatantFacts(
   state: EncounterState,
+  target: CombatantId,
 ): readonly MonsterRollModeCombatantFacts[] {
   return state.combatants.flatMap((subject): readonly MonsterRollModeCombatantFacts[] => {
-    const position = state.tokens.find((entry) => entry.combatantId === subject.profile.id)?.position;
-    return position === undefined ? [] : [{
+    const placed = state.tokens.some((entry) => entry.combatantId === subject.profile.id);
+    return !placed ? [] : [{
       id: subject.profile.id,
       faction: combatantFaction(state, subject.profile.id),
-      position,
+      position: minimumSpaceLine(
+        combatantSpace(state, subject.profile.id),
+        combatantSpace(state, target),
+      ).sourceCell,
       life: subject.life,
       incapacitated: isIncapacitated(combatantConditions(state, subject.profile.id)),
     }];
@@ -2191,8 +2321,8 @@ function monsterAttackRollModeFeatureInput(
       hitPoints: activeHitPoints(subject),
       hitPointMaximum: activeHitPointMaximum(state, subject),
     },
-    targetPosition: token(state, target).position,
-    combatants: rollModeCombatantFacts(state),
+    targetPosition: minimumSpaceLine(combatantSpace(state, actor), combatantSpace(state, target)).targetCell,
+    combatants: rollModeCombatantFacts(state, target),
   };
 }
 
@@ -2278,11 +2408,12 @@ export function evaluateMonsterTacticalAttack(
   const targetHitPoints = targetState.wildShape?.physical.hitPoints ??
     targetState.form?.hitPoints ??
     targetState.hitPoints;
+  const selectedLine = minimumSpaceLine(combatantSpace(state, actor), combatantSpace(state, target));
   return evaluateTacticalAttack({
     attackerId: actor,
     targetId: target,
-    attackerPosition: token(state, actor).position,
-    targetPosition: token(state, target).position,
+    attackerPosition: selectedLine.sourceCell,
+    targetPosition: selectedLine.targetCell,
     range: monsterAttackRange(action),
     attackBonus:
       action.attackBonus +
@@ -2633,6 +2764,10 @@ function endEffects(
     .filter((effect) => ending.has(effect.id) && (
       effect.payload.kind === 'movement_modifier' || effect.payload.kind === 'slow'))
     .flatMap((effect) => effect.targets));
+  const sizeTargets = new Set(context.state.effects
+    .filter((effect) => ending.has(effect.id) && (
+      effect.payload.kind === 'size_alteration' || effect.payload.kind === 'form_alteration'))
+    .flatMap((effect) => effect.targets));
   for (const effect of context.state.effects) {
     if (!ending.has(effect.id)) continue;
     if (effect.payload.kind === 'temporary_banishment') {
@@ -2653,6 +2788,11 @@ function endEffects(
     ...context.state,
     effects: context.state.effects.filter((effect) => !ending.has(effect.id)),
   };
+  for (const target of sizeTargets) {
+    if (!isCombatantOnBoard(context.state, target)) continue;
+    context.state = stateAfterSizeTransition(context.state, target, combatant(context.state, target));
+  }
+  if (sizeTargets.size > 0) reevaluatePersistentAreaMembership(context);
   for (const target of movementTargets) refreshActiveTurnMovement(context, target);
 }
 
@@ -2741,6 +2881,43 @@ function effectiveHitPointMaximum(state: EncounterState, target: CombatantId): n
       : maximum, base);
 }
 
+function stateAfterSizeTransition(
+  state: EncounterState,
+  target: CombatantId,
+  nextCombatant: EncounterCombatantState,
+): EncounterState {
+  const withCombatant = replaceCombatant(state, nextCombatant);
+  const nextSize = effectiveCreatureSize(withCombatant, target);
+  const sized = sizedCombatantState(nextSize);
+  const mode = normalPlacementFor(sized);
+  const currentToken = token(state, target);
+  const result = autoRelocatePlacement(
+    sized,
+    currentToken.position,
+    mode,
+    state.bounds,
+    (candidate) => {
+      if (candidate.cells.some((occupied) => movementBlocked(state, occupied))) return false;
+      return state.tokens
+        .filter((entry) => entry.combatantId !== target && combatant(state, entry.combatantId).life !== 'dead')
+        .every((entry) => !spacesIntersect(candidate, combatantSpace(state, entry.combatantId)));
+    },
+  );
+  if (result.kind === 'refused') throw new CreatureSizeRuleError('no_legal_anchor', target);
+  return {
+    ...withCombatant,
+    tokens: withCombatant.tokens.map((entry) => entry.combatantId === target
+      ? {
+          ...entry,
+          position: { ...result.placement.anchor },
+          placementMode: serializedPlacementMode(result.placement.mode),
+        }
+      : entry),
+    sharedSpaceRelations: withCombatant.sharedSpaceRelations.filter((relation) =>
+      relation.first !== target && relation.second !== target),
+  };
+}
+
 function revertWildShape(
   context: ReductionContext,
   target: CombatantId,
@@ -2751,7 +2928,8 @@ function revertWildShape(
   const overlay = subject.wildShape;
   if (overlay === undefined) return;
   const { wildShape: _wildShape, ...trueForm } = subject;
-  context.state = replaceCombatant(context.state, trueForm);
+  context.state = stateAfterSizeTransition(context.state, target, trueForm);
+  reevaluatePersistentAreaMembership(context);
   emit(context, {
     type: 'wild_shape_reverted',
     combatant: target,
@@ -2815,7 +2993,7 @@ function assumeWildShape(
   const remaining = (beforeOverlay.wildShapeUses?.remaining ?? 0) - 1;
   const physical = wildShapePhysicalLayer(form);
   const expiresAtRound = context.state.round + wildShapeDurationRounds(feature.druidLevel);
-  context.state = replaceCombatant(context.state, {
+  context.state = stateAfterSizeTransition(context.state, command.actor, {
     ...beforeOverlay,
     wildShapeUses: {
       kind: 'wild_shape_uses',
@@ -2833,6 +3011,7 @@ function assumeWildShape(
       physical,
     },
   });
+  reevaluatePersistentAreaMembership(context);
   grantTemporaryHitPoints(context, command.actor, feature.druidLevel);
   if (command.equipmentDisposition === 'dropped_at_origin') {
     dropEquipmentForWildShape(context, command.actor);
@@ -3672,50 +3851,6 @@ function beginAttack(
   }
 }
 
-export function encounterMovementWorld(state: EncounterState): MovementWorld<CombatantId> {
-  return {
-    bounds: state.bounds,
-    canTraverseStep: () => true,
-    traversal: (actorId, _from, to) => {
-      if (movementBlocked(state, to)) {
-        return { kind: 'blocked', reason: 'blocked cell' };
-      }
-      const occupants = state.tokens
-        .filter((candidate) =>
-          candidate.combatantId !== actorId &&
-          combatant(state, candidate.combatantId).life !== 'dead' &&
-          cellKey(candidate.position) === cellKey(to))
-        .map((candidate) => combatant(state, candidate.combatantId));
-      const actorSize = effectiveCombatRules(state, actorId).sizeCategory;
-      const canPassOccupant = (occupant: EncounterCombatantState): boolean => {
-        if (combatantsAreAllies(state, actorId, occupant.profile.id)) return true;
-        if (isIncapacitated(combatantConditions(state, occupant.profile.id))) return true;
-        const occupantSize = effectiveCombatRules(state, occupant.profile.id).sizeCategory;
-        if (occupantSize === 'Tiny') return true;
-        if (actorSize === undefined || occupantSize === undefined) return false;
-        return Math.abs(creatureSizes.indexOf(actorSize) - creatureSizes.indexOf(occupantSize)) >= 2;
-      };
-      if (occupants.some((occupant) => !canPassOccupant(occupant))) {
-        return { kind: 'blocked', reason: 'creature space cannot be traversed' };
-      }
-      const creatureSpaceIsDifficult = occupants.some((occupant) =>
-        !combatantsAreAllies(state, actorId, occupant.profile.id) &&
-        effectiveCombatRules(state, occupant.profile.id).sizeCategory !== 'Tiny');
-      const difficult = !ignoresDifficultTerrain(state, actorId) && (creatureSpaceIsDifficult || isEnvironmentDifficultTerrain(state.environment, to) || state.persistentAreas.some((area) => {
-        if (!area.difficultTerrain) return false;
-        const origin = area.origin;
-        const anchor = origin.kind === 'anchored'
-          ? state.tokens.find((candidate) => candidate.combatantId === origin.combatant)?.position ?? null
-          : origin.kind === 'anchored_to_object'
-            ? state.worldObjects.find((object) => object.id === origin.object)?.position ?? null
-            : null;
-        return persistentAreaContains(area, to, anchor, state);
-      }));
-      return { kind: 'enterable', cost: feet(difficult ? 10 : 5), canEnd: occupants.length === 0 };
-    },
-  };
-}
-
 const AREA_HOOK_ORDER: Readonly<Record<PersistentAreaHook, number>> = {
   on_enter: 0,
   on_start_of_turn_inside: 1,
@@ -3735,6 +3870,20 @@ function persistentAreaAnchorCell(state: EncounterState, area: PersistentArea): 
     : origin.kind === 'anchored_to_object'
       ? state.worldObjects.find((object) => object.id === origin.object)?.position ?? null
       : null;
+}
+
+function persistentAreaAnchorCells(state: EncounterState, area: PersistentArea): readonly GridCell[] | null {
+  const origin = area.origin;
+  if (origin.kind === 'anchored') {
+    return isCombatantOnBoard(state, origin.combatant)
+      ? combatantSpace(state, origin.combatant).cells
+      : null;
+  }
+  if (origin.kind === 'anchored_to_object') {
+    const object = state.worldObjects.find((candidate) => candidate.id === origin.object);
+    return object?.footprint ?? null;
+  }
+  return null;
 }
 
 export const MOVEMENT_PATH_DANGER_KINDS = [
@@ -3892,10 +4041,10 @@ function applyBurningPersistentAreaDamage(
   subjectId: CombatantId,
 ): void {
   if (!isCombatantOnBoard(context.state, subjectId)) return;
-  const subjectCell = token(context.state, subjectId).position;
+  const subjectCells = combatantSpace(context.state, subjectId).cells;
   for (const snapshot of orderedAreas(context.state)) {
     const area = context.state.persistentAreas.find((candidate) => candidate.id === snapshot.id);
-    if (area === undefined || !areaHasBurningCell(area, subjectCell)) continue;
+    if (area === undefined || !subjectCells.some((cell) => areaHasBurningCell(area, cell))) continue;
     const ignition = effectiveIgnitionRule(context.state, area);
     if (ignition === null) continue;
     const result = resolveTargetDamage(context, area.owner, subjectId, ignition.startOfTurnDamage);
@@ -3938,13 +4087,18 @@ function areaTargetEligible(state: EncounterState, area: PersistentArea, target:
 }
 
 function areaMembers(state: EncounterState, area: PersistentArea): readonly CombatantId[] {
-  const anchor = persistentAreaAnchorCell(state, area);
+  const anchorCells = persistentAreaAnchorCells(state, area);
   return state.combatants
     .filter((subject) => subject.life !== 'dead')
     .filter((subject) => areaTargetEligible(state, area, subject.profile.id))
     .flatMap((subject): readonly CombatantId[] => {
       const placed = state.tokens.find((candidate) => candidate.combatantId === subject.profile.id);
-      return placed !== undefined && persistentAreaContains(area, placed.position, anchor, state)
+      return placed !== undefined && persistentAreaTouchesSpace(
+        area,
+        combatantSpace(state, subject.profile.id).cells,
+        anchorCells,
+        state,
+      )
         ? [subject.profile.id]
         : [];
     })
@@ -4191,28 +4345,35 @@ export const MOVEMENT_DAMAGE_PARTIAL_UNIT_RULE = 'completed_units_only' as const
  * Stable entered-cell order: movement regions by id first, then persistent
  * areas by their creation sequence through membership reevaluation.
  */
-function processEnteredCell(context: ReductionContext, mover: CombatantId): void {
-  const position = token(context.state, mover).position;
+function processEnteredCells(
+  context: ReductionContext,
+  mover: CombatantId,
+  enteredCells: readonly GridCell[],
+): void {
   const regions = [...(context.state.environment.movementRegions ?? [])]
-    .filter((region) => region.damage !== null && region.cells.some((cell) => cellKey(cell) === cellKey(position)))
+    .filter((region) => region.damage !== null)
     .sort((left, right) => left.id.localeCompare(right.id));
   for (const region of regions) {
-    if (region.damage === null || combatant(context.state, mover).life !== 'living') continue;
-    const request: DamageRequest = {
-      terms: [{
-        type: region.damage.damageType,
-        dice: {
-          count: region.damage.dice.count,
-          sides: dieSides(region.damage.dice.sides),
-          modifier: region.damage.dice.modifier,
-        },
-      }],
-      critical: false,
-      responses: [],
-    };
-    const result = resolveTargetDamage(context, region.source, mover, request);
-    applyDamage(context, region.source, mover, result.total);
-    concentrationCheck(context, mover, result.total);
+    if (region.damage === null) continue;
+    for (const entered of enteredCells) {
+      if (combatant(context.state, mover).life !== 'living' ||
+        !region.cells.some((cell) => cellKey(cell) === cellKey(entered))) continue;
+      const request: DamageRequest = {
+        terms: [{
+          type: region.damage.damageType,
+          dice: {
+            count: region.damage.dice.count,
+            sides: dieSides(region.damage.dice.sides),
+            modifier: region.damage.dice.modifier,
+          },
+        }],
+        critical: false,
+        responses: [],
+      };
+      const result = resolveTargetDamage(context, region.source, mover, request);
+      applyDamage(context, region.source, mover, result.total);
+      concentrationCheck(context, mover, result.total);
+    }
   }
   reevaluatePersistentAreaMembership(context);
 }
@@ -4412,7 +4573,7 @@ function opportunityAttackReachSources(
       candidate.profile.id !== mover)
     .map((candidate) => ({
       reactorId: candidate.profile.id,
-      cell: token(state, candidate.profile.id).position,
+      cells: combatantSpace(state, candidate.profile.id).cells,
       reach: effectiveCombatRules(state, candidate.profile.id).reach,
       reactionAvailable: canTakeReaction(state, candidate.profile.id),
       hostile: true,
@@ -4557,13 +4718,18 @@ function moveForLegendaryAction(
     throw new EncounterRuleError('validation', `Legendary Action ${action.id} cannot reach an enemy.`);
   }
   for (const step of path.cells) {
+    const sourceSpace = combatantSpace(context.state, actor);
     context.state = {
       ...context.state,
       tokens: context.state.tokens.map((candidate) => candidate.combatantId === actor
         ? { ...candidate, position: { ...step } }
         : candidate),
     };
-    processEnteredCell(context, actor);
+    processEnteredCells(
+      context,
+      actor,
+      newlyEnteredSpaceCells(sourceSpace, combatantSpace(context.state, actor)),
+    );
     if (combatant(context.state, actor).life !== 'living') break;
   }
   emit(context, {
@@ -4704,7 +4870,12 @@ function processMove(
     reachSources: opportunityAttackReachSources(context.state, command.actor),
   });
   if (plan.kind === 'illegal') {
-    throw new EncounterRuleError('validation', `Illegal movement: ${plan.reason} at step ${plan.stepIndex}.`);
+    const refused = command.path[plan.stepIndex];
+    throw new EncounterRuleError(
+      'validation',
+      `Illegal movement for ${String(command.actor)}: ${plan.reason} at step ${String(plan.stepIndex)}${
+        refused === undefined ? '' : ` (${String(refused.column)},${String(refused.row)})`}.`,
+    );
   }
   const traversed: GridCell[] = [];
   let spent = feet(0);
@@ -4746,20 +4917,42 @@ function processMove(
       }
     }
     if (combatant(context.state, command.actor).life !== 'living') break;
+    const sourceSpace = combatantSpace(context.state, command.actor);
     context.state = {
       ...context.state,
       tokens: context.state.tokens.map((candidate) => candidate.combatantId === command.actor
         ? { ...candidate, position: { ...step.to } }
         : candidate),
     };
+    const destinationSpace = combatantSpace(context.state, command.actor);
     traversed.push({ ...step.to });
     spent = feet(spent + step.cost);
-    processEnteredCell(context, command.actor);
+    processEnteredCells(context, command.actor, newlyEnteredSpaceCells(sourceSpace, destinationSpace));
     if (combatant(context.state, command.actor).life !== 'living') {
       resolveMootOpportunityAttacks(context, command.actor);
       break;
     }
   }
+  const moverSpace = combatantSpace(context.state, command.actor);
+  const overlaps = context.state.tokens.filter((candidate) =>
+    candidate.combatantId !== command.actor &&
+    combatant(context.state, candidate.combatantId).life !== 'dead' &&
+    spacesIntersect(moverSpace, combatantSpace(context.state, candidate.combatantId)));
+  const retainedRelations = context.state.sharedSpaceRelations.filter((relation) =>
+    relation.first !== command.actor && relation.second !== command.actor);
+  const createdRelations = overlaps.map((occupant) => sharedSpaceRelation({
+    left: command.actor,
+    right: occupant.combatantId,
+    provenance: effectiveMovementCause(context.state, command) === 'forced'
+      ? 'forced_movement'
+      : 'tiny_capacity',
+    originatingId: `movement:${String(context.state.revision + 1)}:${String(context.state.nextEventSequence)}`,
+  }));
+  context.state = {
+    ...context.state,
+    sharedSpaceRelations: [...retainedRelations, ...createdRelations].sort((left, right) =>
+      String(left.first).localeCompare(String(right.first)) || String(left.second).localeCompare(String(right.second))),
+  };
   const movement = spendMovement(subject.turn.movement, spent);
   context.state = replaceCombatant(context.state, {
     ...combatant(context.state, command.actor),
@@ -5535,6 +5728,13 @@ function applyEffect(
     nextEffectSequence: context.state.nextEffectSequence + 1,
     effects: [...context.state.effects, effect],
   };
+
+  if (effect.payload.kind === 'size_alteration' && 'delta' in effect.payload) {
+    for (const target of targets) {
+      context.state = stateAfterSizeTransition(context.state, target, combatant(context.state, target));
+    }
+    reevaluatePersistentAreaMembership(context);
+  }
 
   if (owned.payload.kind === 'condition') {
     for (const target of [...targets]) {
@@ -6615,9 +6815,9 @@ function processAttack(
     }
     if (
       opportunityTrigger === null &&
-      gridDistance(
-        token(context.state, command.actor).position,
-        token(context.state, command.target).position,
+      minimumSpaceDistance(
+        combatantSpace(context.state, command.actor),
+        combatantSpace(context.state, command.target),
       ) > effectiveCombatRules(context.state, reactor.profile.id).reach
     ) {
       throw new EncounterRuleError('validation', 'An Opportunity Attack reactor is out of reach.');
@@ -6642,7 +6842,13 @@ function processAttack(
   const actorPosition = token(context.state, command.actor).position;
   const targetPosition = token(context.state, command.target).position;
   if (opportunityTrigger === null && command.tacticalRange !== undefined) {
-    const range = tacticalRangeVerdict(actorPosition, targetPosition, command.tacticalRange);
+    const range = tacticalRangeVerdictAtDistance(
+      minimumSpaceDistance(
+        combatantSpace(context.state, command.actor),
+        combatantSpace(context.state, command.target),
+      ),
+      command.tacticalRange,
+    );
     if (range.status === 'unresolved') {
       throw new EncounterRuleError('validation', 'The attack long range is unresolved.');
     }
@@ -7256,15 +7462,17 @@ function placedAreaTargets(
       throw new EncounterRuleError('validation', `${spellName} requires a ${expectedSecondarySizeFeet}-foot secondary ${shape} dimension.`);
     }
   }
-  const actorCell = token(state, command.actor).position;
   const origin = command.area.template.origin;
-  const minimumX = actorCell.column * 5;
-  const maximumX = minimumX + 5;
-  const minimumY = actorCell.row * 5;
-  const maximumY = minimumY + 5;
-  const horizontal = Math.max(minimumX - origin.x, 0, origin.x - maximumX);
-  const vertical = Math.max(minimumY - origin.y, 0, origin.y - maximumY);
-  if (Math.max(horizontal, vertical) > rangeFeet) {
+  const distanceToOrigin = Math.min(...combatantSpace(state, command.actor).cells.map((cell) => {
+    const left = cell.column * 5;
+    const right = left + 5;
+    const top = cell.row * 5;
+    const bottom = top + 5;
+    const horizontal = Math.max(left - origin.x, 0, origin.x - right);
+    const vertical = Math.max(top - origin.y, 0, origin.y - bottom);
+    return Math.max(horizontal, vertical);
+  }));
+  if (distanceToOrigin > rangeFeet) {
     throw new EncounterRuleError('validation', `${spellName} area origin is out of range.`);
   }
   const cells = affectedCells(
@@ -7273,7 +7481,7 @@ function placedAreaTargets(
   );
   return state.combatants.flatMap((subject): readonly CombatantId[] => {
     if (subject.life === 'dead') return [];
-    const occupied = [token(state, subject.profile.id).position];
+    const occupied = combatantSpace(state, subject.profile.id).cells;
     return creatureOccupiesAffectedCell(occupied, cells) ? [subject.profile.id] : [];
   });
 }
@@ -7311,7 +7519,7 @@ function validateTargetRange(
   if (!allowDead && combatant(state, target).life === 'dead') {
     throw new EncounterRuleError('validation', 'A dead combatant is not a legal spell target.');
   }
-  if (gridDistance(token(state, actor).position, token(state, target).position) > rangeFeet) {
+  if (minimumSpaceDistance(combatantSpace(state, actor), combatantSpace(state, target)) > rangeFeet) {
     throw new EncounterRuleError('validation', `Spell target ${target} is out of range.`);
   }
 }
@@ -7427,7 +7635,7 @@ function validateTargetCount(
 }
 
 function targetDistance(state: EncounterState, left: CombatantId, right: CombatantId): number {
-  return gridDistance(token(state, left).position, token(state, right).position);
+  return minimumSpaceDistance(combatantSpace(state, left), combatantSpace(state, right));
 }
 
 function validateTargetGeometry(
@@ -7541,10 +7749,15 @@ function cloneAreaTemplate(template: AreaTemplate): AreaTemplate {
   }
 }
 
+function selectedTextOption(command: { readonly selectedOption: string | SizeStepOperation | null }): string | null {
+  return typeof command.selectedOption === 'string' ? command.selectedOption : null;
+}
+
 function resolvedSpellEffectPayload(
   definition: SpellDefinition,
   command: SpellCastCommand,
   payload: EffectPayload,
+  sequence: number,
 ): EffectPayload {
   const selectedArea = (): AreaTemplate => {
     if (command.area === null) throw new EncounterRuleError('validation', `${definition.name} requires an area placement.`);
@@ -7558,14 +7771,28 @@ function resolvedSpellEffectPayload(
       return payload;
     case 'recurring_damage_operation':
       return payload;
+    case 'size_alteration': {
+      if ('delta' in payload) return payload;
+      const selected = command.selectedOption;
+      if (typeof selected !== 'object' || selected === null || selected.kind !== 'size_step') {
+        throw new EncounterRuleError('validation', `${definition.name} requires a typed size-step choice.`);
+      }
+      return {
+        kind: 'size_alteration',
+        delta: selected.operation === 'enlarge' ? 1 : -1,
+        appliedSequence: effectSequence(sequence),
+        damageDieCount: payload.damageDieCount,
+        damageDieSides: payload.damageDieSides,
+      };
+    }
     case 'damage_reduction':
       return payload.damageType === 'chosen_when_cast'
-        ? { ...payload, damageType: command.selectedOption ?? 'Acid' }
+        ? { ...payload, damageType: selectedTextOption(command) ?? 'Acid' }
         : payload;
     case 'ability_check_modifier':
     case 'skill_modifier':
       return payload.skill === 'chosen_when_cast'
-        ? { ...payload, skill: command.selectedOption ?? 'Arcana' }
+        ? { ...payload, skill: selectedTextOption(command) ?? 'Arcana' }
         : payload;
     case 'alarm_ward':
     case 'food_purification':
@@ -7652,7 +7879,7 @@ function resolvedSpellEffectPayload(
         damageCount: payload.damageCount + payload.damagePerSlotCount * slotDelta,
       };
     case 'energy_protection': {
-      const selected = command.selectedOption;
+      const selected = selectedTextOption(command);
       if (selected === null || !payload.damageTypes.includes(selected as 'Acid' | 'Cold' | 'Fire' | 'Lightning' | 'Thunder')) {
         throw new EncounterRuleError('validation', `${definition.name} requires a listed energy damage type.`);
       }
@@ -7720,7 +7947,6 @@ function resolvedSpellEffectPayload(
     case 'detect_thoughts':
     case 'granted_breath':
     case 'ability_check_advantage':
-    case 'size_alteration':
     case 'trap_detection':
     case 'corpse_preservation':
     case 'levitation':
@@ -7795,13 +8021,14 @@ function effectApplication(
   command: SpellCastCommand,
   data: EffectData,
   targets: readonly CombatantId[],
+  sequence: number,
 ): EffectApplication {
   const actualTargets = data.target === 'self' ? [command.actor] : targets;
   const timingCombatant = data.expiresAt.startsWith('source_')
     ? command.actor
     : actualTargets[0] as CombatantId;
   const boundary: TurnBoundary = data.expiresAt.endsWith('_start') ? 'start' : 'end';
-  const payload = resolvedSpellEffectPayload(definition, command, data.payload);
+  const payload = resolvedSpellEffectPayload(definition, command, data.payload, sequence);
   const slotDelta = definition.level === 0 || command.castAsRitual
     ? 0
     : (command.slotLevel as number) - definition.level;
@@ -7865,11 +8092,15 @@ function applySpellEffect(
   if (targets.length === 0 && data.target === 'targets') return;
   if (data.repeatedSave !== undefined && data.target === 'targets') {
     for (const target of targets) {
-      applyEffect(context, command.actor, effectApplication(definition, command, data, [target]));
+      applyEffect(context, command.actor, effectApplication(
+        definition, command, data, [target], context.state.nextEffectSequence,
+      ));
     }
     return;
   }
-  applyEffect(context, command.actor, effectApplication(definition, command, data, targets));
+  applyEffect(context, command.actor, effectApplication(
+    definition, command, data, targets, context.state.nextEffectSequence,
+  ));
 }
 
 function applyHealing(
@@ -7942,6 +8173,7 @@ function forceMove(
   for (let distance = 0; distance + 5 <= distanceFeet; distance += 5) {
     const candidate = { column: position.column + columnStep, row: position.row + rowStep };
     if (!isCellInside(context.state.bounds, candidate) || movementBlocked(context.state, candidate) || occupied.has(cellKey(candidate))) break;
+    const sourceSpace = combatantSpace(context.state, target);
     position = candidate;
     context.state = {
       ...context.state,
@@ -7949,7 +8181,11 @@ function forceMove(
         entry.combatantId === target ? { ...entry, position: { ...position } } : entry),
     };
     traversed.push({ ...position });
-    processEnteredCell(context, target);
+    processEnteredCells(
+      context,
+      target,
+      newlyEnteredSpaceCells(sourceSpace, combatantSpace(context.state, target)),
+    );
     if (combatant(context.state, target).life !== 'living') break;
   }
   const movement = combatant(context.state, target).turn.movement;
@@ -8051,12 +8287,13 @@ function selectedSpellDamageType(
   configured: DamageType | readonly DamageType[],
 ): DamageType {
   if (!Array.isArray(configured)) return configured as DamageType;
-  if (command.selectedOption === null) {
+  const selectedOption = selectedTextOption(command);
+  if (selectedOption === null) {
     throw new EncounterRuleError('validation', `${definition.name} requires a damage type selection.`);
   }
-  const selected = damageType(command.selectedOption);
+  const selected = damageType(selectedOption);
   if (!configured.includes(selected)) {
-    throw new EncounterRuleError('validation', `${definition.name} does not allow ${command.selectedOption} damage.`);
+    throw new EncounterRuleError('validation', `${definition.name} does not allow ${selectedOption} damage.`);
   }
   return selected;
 }
@@ -9187,6 +9424,7 @@ function formReplacementRules(
     formName: stats.name,
     rules: {
       armorClass: armorClass(stats.armorClass),
+      sizeCategory: stats.sizeCategory,
       hitPointMaximum: stats.hitPointMaximum,
       speed: feet(stats.speedFeet),
       initiativeBonus: stats.initiativeBonus,
@@ -9283,7 +9521,7 @@ function resolveFormReplacement(
     },
   });
   for (const { target, subject, replacement } of replacements) {
-    context.state = replaceCombatant(context.state, {
+    context.state = stateAfterSizeTransition(context.state, target, {
       ...subject,
       profile: { ...subject.profile, rules: replacement.rules },
       temporaryHitPoints: 0,
@@ -9370,11 +9608,8 @@ function resolveSummon(
     wildShapeUses: null,
     spellSlots: [],
   }));
-  const tokens = profiles.map((profile, index): CombatToken => ({
-    id: tokenId(`summon-token:${String(effectSequence)}:${String(index + 1)}:${monster.recordId}`),
-    combatantId: combatantId(`summon:${String(effectSequence)}:${String(index + 1)}:${monster.recordId}`),
-    position: { ...(destinations[index] as GridCell) },
-  }));
+  const tokens = profiles.map((profile, index): CombatToken =>
+    combatToken(profile, { ...(destinations[index] as GridCell) }));
   context.state = {
     ...context.state,
     combatants: [...context.state.combatants, ...summonedStates],
@@ -9737,7 +9972,7 @@ function executeSpellOperation(
           saveDc: command.saveDc,
           spellcastingModifier: command.spellcastingModifier,
           area: command.area === null ? null : structuredClone(command.area),
-          selectedOption: command.selectedOption,
+          selectedOption: selectedTextOption(command),
         },
       });
       return 'applied';
@@ -10414,6 +10649,7 @@ function executeSpellOperation(
         }
         const parentId = applyEffect(context, command.actor, effectApplication(
           definition, command, operation.effect, [command.actor, ...creatureEligible],
+          context.state.nextEffectSequence,
         ));
         for (const target of failed) {
           const selection = selections.find((entry) => entry.target === target);
@@ -10445,7 +10681,7 @@ function executeSpellOperation(
       return 'applied';
     }
     case 'remove_condition': {
-      const selected = command.selectedOption;
+      const selected = selectedTextOption(command);
       if (selected === null || !operation.conditions.includes(selected as 'Blinded' | 'Deafened' | 'Paralyzed' | 'Poisoned')) {
         throw new EncounterRuleError('validation', `${definition.name} requires a removable condition selection.`);
       }
@@ -10675,7 +10911,9 @@ function executeSpellOperation(
         caster: command.actor,
         spellId: definition.id,
         capability: operation.effect.kind,
-        effect: resolvedSpellEffectPayload(definition, command, operation.effect),
+        effect: resolvedSpellEffectPayload(
+          definition, command, operation.effect, context.state.nextEffectSequence,
+        ),
       });
       if (operation.durationRounds !== null || operation.concentration || operation.stateful === true) {
         const slotLevel = command.slotLevel ?? definition.level;
@@ -11164,7 +11402,7 @@ function processSustainedEffectActivation(
     area: command.area,
     ...(command.spatialPoint === undefined ? {} : { spatialPoint: command.spatialPoint }),
     weaponAttack: null,
-    selectedOption: command.selectedOption,
+    selectedOption: selectedTextOption(command),
     objectTargets: command.objectTargets,
     ownedObjectTargets: command.ownedObjectTargets,
     ...(command.ownedObjectDestinations === undefined

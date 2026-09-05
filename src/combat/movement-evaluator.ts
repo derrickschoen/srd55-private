@@ -17,7 +17,7 @@ import {
 } from './tactical-evaluator';
 import { feet, type CombatantId, type Feet } from './values';
 
-export const MOVEMENT_EVALUATOR_POLICY = 'movement-eval-v1' as const;
+export const MOVEMENT_EVALUATOR_POLICY = 'movement-eval-v2' as const;
 
 export type MovementHazardKind =
   | 'burning_surface'

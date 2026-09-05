@@ -1,13 +1,24 @@
 import { combatantFaction, combatantsAreAllies } from '../combat/allies';
 import { conditionSpeedPenaltyFeet, exhaustionPenalty, isIncapacitated } from '../combat/conditions';
-import { creatureSizes } from '../domain/enums';
+import { creatureSizes, type KnownCreatureSize } from '../domain/enums';
 import type {
   EncounterCombatantState,
   EncounterState,
 } from '../combat/encounter';
+import {
+  applySizeSteps,
+  creatureSpace,
+  effectSequence,
+  minimumSpaceDistance,
+  minimumSpaceLine,
+  placementFromSerialized,
+  sizedCombatantState,
+  type CreatureSpace,
+} from '../combat/creature-space';
 import type { AppliedCondition, ExhaustionLevel } from '../combat/conditions';
 import { adjacentCells, gridDistance, type GridCell } from '../combat/grid';
 import { findPath, findPathToAny, findPathToBest } from '../combat/movement';
+import { encounterMovementWorld } from '../combat/encounter-movement-world';
 import {
   evaluateMovementOptions,
   MOVEMENT_EVALUATOR_POLICY,
@@ -23,6 +34,7 @@ import {
   evaluateTacticalAttack,
   foldTacticalAttackSequence,
   tacticalRangeVerdict,
+  tacticalRangeVerdictAtDistance,
   type AttackRollModeSource,
   type MonsterRollModeCombatantFacts,
   type MonsterRollModeFeatureInput,
@@ -193,6 +205,7 @@ export type EngineReachResult =
 export interface EngineQueryPort {
   combatant(state: EncounterState, id: CombatantId): EncounterCombatantState | null;
   tokenPosition(state: EncounterState, id: CombatantId): GridCell | null;
+  spaceDistance(state: EncounterState, left: CombatantId, right: CombatantId, leftAnchor?: GridCell): number | null;
   sameSide(state: EncounterState, left: CombatantId, right: CombatantId): boolean;
   actions(state: EncounterState, actorId: CombatantId): readonly MonsterAction[];
   resolveTarget(
@@ -390,6 +403,64 @@ function rulesFor(subject: EncounterCombatantState): EncounterCombatantState['pr
     return wildShapeRulesLens(subject.profile.rules, subject.wildShape);
   }
   return subject.profile.rules;
+}
+
+const querySpaceCache = new WeakMap<EncounterState, Map<CombatantId, CreatureSpace<KnownCreatureSize>>>();
+const pathResultCache = new WeakMap<EncounterState, Map<string, EnginePathResult>>();
+const approachResultCache = new WeakMap<EncounterState, Map<string, EnginePathResult>>();
+const reachResultCache = new WeakMap<EncounterState, Map<string, EngineReachResult>>();
+const distanceResultCache = new WeakMap<EncounterState, Map<string, number | null>>();
+
+function memoizedStateResult<Result extends object | number | null>(
+  cache: WeakMap<EncounterState, Map<string, Result>>,
+  state: EncounterState,
+  key: string,
+  calculate: () => Result,
+): Result {
+  const stateCache = cache.get(state);
+  const cached = stateCache?.get(key);
+  if (cached !== undefined) return cached;
+  const result = calculate();
+  const nextStateCache = stateCache ?? new Map<string, Result>();
+  nextStateCache.set(key, result);
+  if (stateCache === undefined) cache.set(state, nextStateCache);
+  return result;
+}
+
+function queryCombatantSpace(state: EncounterState, id: CombatantId): CreatureSpace<KnownCreatureSize> {
+  const cached = querySpaceCache.get(state)?.get(id);
+  if (cached !== undefined) return cached;
+  const subject = combatant(state, id);
+  const token = state.tokens.find((candidate) => candidate.combatantId === id);
+  const base = subject === null ? undefined : rulesFor(subject).sizeCategory;
+  if (subject === null || token === undefined || base === undefined) {
+    throw new TypeError(`Combatant ${String(id)} has no canonical query placement.`);
+  }
+  const size = applySizeSteps(base, state.effects.flatMap((effect) =>
+    effect.targets.includes(id) && effect.payload.kind === 'size_alteration' && 'delta' in effect.payload
+      ? [{ delta: effect.payload.delta, appliedSequence: effectSequence(effect.payload.appliedSequence) }]
+      : []));
+  const sized = sizedCombatantState(size);
+  const resolved = creatureSpace(sized, placementFromSerialized(sized, {
+    anchor: token.position,
+    mode: token.placementMode,
+  }));
+  const stateCache = querySpaceCache.get(state) ?? new Map<CombatantId, CreatureSpace<KnownCreatureSize>>();
+  stateCache.set(id, resolved);
+  if (!querySpaceCache.has(state)) querySpaceCache.set(state, stateCache);
+  return resolved;
+}
+
+function queryCombatantSpaceAt(state: EncounterState, id: CombatantId, anchor: GridCell) {
+  const current = queryCombatantSpace(state, id);
+  const token = state.tokens.find((candidate) => candidate.combatantId === id);
+  if (token === undefined) throw new TypeError(`Combatant ${String(id)} has no canonical query token.`);
+  if (token.position.column === anchor.column && token.position.row === anchor.row) return current;
+  const sized = sizedCombatantState(current.actualSize);
+  return creatureSpace(sized, placementFromSerialized(sized, {
+    anchor,
+    mode: token.placementMode,
+  }));
 }
 
 /** Canonical active-pool numerator for planning, guards, and projections. */
@@ -819,53 +890,6 @@ function ignoresDifficultTerrain(state: EncounterState, id: CombatantId): boolea
       effect.payload.modeGrants.some((grant) => grant.mode === 'flying')));
 }
 
-function movementWorld(state: EncounterState) {
-  return {
-    bounds: state.bounds,
-    canTraverseStep: () => true,
-    traversal: (actorId: CombatantId, _from: GridCell, to: GridCell) => {
-      const blocked = state.blockedCells.some((candidate) => cellKey(candidate) === cellKey(to)) ||
-        state.worldObjects.some((object) => object.blocking.movement && objectOccupies(object, to)) ||
-        (state.environment.movementRegions ?? []).some((region) => region.entry === 'blocked' &&
-          region.cells.some((candidate) => cellKey(candidate) === cellKey(to)));
-      if (blocked) return { kind: 'blocked' as const, reason: 'blocked cell' };
-      const actor = combatant(state, actorId);
-      if (actor === null) return { kind: 'blocked' as const, reason: 'unknown actor' };
-      const occupants = state.tokens.flatMap((token): readonly EncounterCombatantState[] => {
-        if (token.combatantId === actorId || cellKey(token.position) !== cellKey(to)) return [];
-        const occupant = combatant(state, token.combatantId);
-        return occupant === null || occupant.life === 'dead' ? [] : [occupant];
-      });
-      const actorSize = rulesFor(actor).sizeCategory;
-      const canPass = (occupant: EncounterCombatantState): boolean => {
-        if (combatantsAreAllies(state, actorId, occupant.profile.id) || isIncapacitatedByState(state, occupant.profile.id)) return true;
-        const occupantSize = rulesFor(occupant).sizeCategory;
-        if (occupantSize === 'Tiny') return true;
-        if (actorSize === undefined || occupantSize === undefined) return false;
-        return Math.abs(creatureSizes.indexOf(actorSize) - creatureSizes.indexOf(occupantSize)) >= 2;
-      };
-      if (occupants.some((occupant) => !canPass(occupant))) {
-        return { kind: 'blocked' as const, reason: 'creature space cannot be traversed' };
-      }
-      const creatureSpaceIsDifficult = occupants.some((occupant) =>
-        !combatantsAreAllies(state, actorId, occupant.profile.id) && rulesFor(occupant).sizeCategory !== 'Tiny');
-      const areaDifficult = state.persistentAreas.some((area) => {
-        if (!area.difficultTerrain) return false;
-        const origin = area.origin;
-        const anchor = origin.kind === 'anchored'
-          ? state.tokens.find((token) => token.combatantId === origin.combatant)?.position ?? null
-          : origin.kind === 'anchored_to_object'
-            ? state.worldObjects.find((object) => object.id === origin.object)?.position ?? null
-            : null;
-        return persistentAreaContains(area, to, anchor, state);
-      });
-      const difficult = !ignoresDifficultTerrain(state, actorId) &&
-        (creatureSpaceIsDifficult || isEnvironmentDifficultTerrain(state.environment, to) || areaDifficult);
-      return { kind: 'enterable' as const, cost: feet(difficult ? 10 : 5), canEnd: occupants.length === 0 };
-    },
-  };
-}
-
 export function engineAttackRangeFeet(action: MonsterAttackAction): number {
   switch (action.delivery.kind) {
     case 'melee': return action.delivery.reachFeet;
@@ -1024,7 +1048,7 @@ export function engineActionRegistry(state: EncounterState, revision = state.rev
           (token) => token.combatantId === target.profile.id,
         )?.position;
         if (targetPosition === undefined) return [];
-        const result = findPathToAny(movementWorld(state), {
+        const result = findPathToAny(encounterMovementWorld(state), {
           actorId: combatantId,
           start,
           maximumCost: feet(maximumPathCost(state)),
@@ -1142,7 +1166,7 @@ function path(state: EncounterState, request: EnginePathRequest): EnginePathResu
   const searchBudget = request.maximumFeet === undefined
     ? availableBudget
     : Math.min(availableBudget, maximumPathCost(state));
-  const result = findPath(movementWorld(state), {
+  const result = findPath(encounterMovementWorld(state), {
     actorId: request.actorId,
     start,
     goal: request.destination,
@@ -1157,7 +1181,7 @@ function path(state: EncounterState, request: EnginePathRequest): EnginePathResu
     };
   }
   if (request.maximumFeet !== undefined && request.maximumFeet < maximumPathCost(state)) {
-    const unbounded = findPath(movementWorld(state), {
+    const unbounded = findPath(encounterMovementWorld(state), {
       actorId: request.actorId,
       start,
       goal: request.destination,
@@ -1181,7 +1205,7 @@ function approach(state: EncounterState, request: EngineApproachRequest): Engine
       : ordinaryBudget
   );
   const originDistance = gridDistance(start, request.target);
-  const result = findPathToBest(movementWorld(state), {
+  const result = findPathToBest(encounterMovementWorld(state), {
     actorId: request.actorId,
     start,
     maximumCost: feet(Math.min(availableBudget, maximumPathCost(state))),
@@ -1225,9 +1249,11 @@ function reach(state: EncounterState, request: EngineReachRequest): EngineReachR
   ) {
     return { legal: false, codes };
   }
-  const distanceFeet = gridDistance(origin, targetPosition);
+  const actorSpace = queryCombatantSpaceAt(state, request.actorId, origin);
+  const targetSpace = queryCombatantSpace(state, request.targetId);
+  const distanceFeet = minimumSpaceDistance(actorSpace, targetSpace);
   if (action.kind === 'attack') {
-    const verdict = tacticalRangeVerdict(origin, targetPosition, monsterAttackRange(action));
+    const verdict = tacticalRangeVerdictAtDistance(distanceFeet, monsterAttackRange(action));
     if (verdict.status === 'unresolved') {
       return { legal: false, codes: ['action_range_unresolved'] };
     }
@@ -1243,6 +1269,9 @@ function reach(state: EncounterState, request: EngineReachRequest): EngineReachR
       normalRangeFeet: projected.normalRangeFeet ?? rangeFeet,
       longRangeFeet: projected.longRangeFeet,
     };
+  }
+  if (distanceFeet > rangeFeet) {
+    return { legal: false, codes: ['target_out_of_range'] };
   }
   return {
     legal: true,
@@ -1274,6 +1303,7 @@ export function engineTacticalAttackInput(
     actor === null || target === null || actorPosition === undefined ||
     targetPosition === undefined || action === undefined
   ) return null;
+  const selectedLine = minimumSpaceLine(queryCombatantSpace(state, actorId), queryCombatantSpace(state, targetId));
   const detection = detect(state, actorId, targetId);
   const reciprocal = detect(state, targetId, actorId);
   const visible = {
@@ -1332,7 +1362,10 @@ export function engineTacticalAttackInput(
       return position === undefined ? [] : [{
         id: candidate.profile.id,
         faction: combatantFaction(state, candidate.profile.id),
-        position,
+        position: minimumSpaceLine(
+          queryCombatantSpace(state, candidate.profile.id),
+          queryCombatantSpace(state, targetId),
+        ).sourceCell,
         life: candidate.life,
         incapacitated: isIncapacitated(enginePlanningConditions(state, candidate.profile.id)),
       }];
@@ -1347,14 +1380,14 @@ export function engineTacticalAttackInput(
       hitPoints: enginePlanningHitPoints(state, actorId),
       hitPointMaximum: enginePlanningHitPointMaximum(state, actorId),
     },
-    targetPosition,
+    targetPosition: selectedLine.targetCell,
     combatants: featureCombatants,
   };
   return {
     attackerId: actorId,
     targetId,
-    attackerPosition: actorPosition,
-    targetPosition,
+    attackerPosition: selectedLine.sourceCell,
+    targetPosition: selectedLine.targetCell,
     range: monsterAttackRange(action),
     attackBonus: action.attackBonus +
       exhaustionPenalty(enginePlanningConditions(state, actorId)) + flatAttackBonus,
@@ -1450,7 +1483,7 @@ function movementOptions(
   const start = state.tokens.find((token) => token.combatantId === actorId)?.position;
   if (actor === null || start === undefined ||
     engineTacticalAttackInput(state, actorId, targetId, actionId) === null) return null;
-  const world = movementWorld(state);
+  const world = encounterMovementWorld(state);
   const attackAt = (position: GridCell) => {
     const input = engineTacticalAttackInput(
       stateWithActorAt(state, actorId, position),
@@ -1495,7 +1528,7 @@ function movementOptions(
     ) return [];
     return [{
       reactorId: candidate.profile.id,
-      cell: position,
+      cells: queryCombatantSpace(state, candidate.profile.id).cells,
       reach: feet(candidate.profile.rules.reach),
       reactionAvailable: candidate.turn.reactionAvailable,
       hostile: true,
@@ -1582,7 +1615,7 @@ export function projectedMovementOptions(
   if (actor === null || start === undefined || target === undefined) return null;
 
   const restrictedState = projectedMovementState(state, projection);
-  const world = movementWorld(restrictedState);
+  const world = encounterMovementWorld(restrictedState);
   const targetConditions = projectedTargetConditions(target);
   const attackAt: MovementEvaluationInput['attackAt'] = (position) => {
     if (target.reciprocalVisibility.kind === 'unknown') {
@@ -1823,12 +1856,36 @@ export function compareTacticalAllocations(
 const engineQueryPort: EngineQueryPort = {
   combatant: (state, id) => state.combatants.find((candidate) => candidate.profile.id === id) ?? null,
   tokenPosition: (state, id) => state.tokens.find((token) => token.combatantId === id)?.position ?? null,
+  spaceDistance(state, left, right, leftAnchor) {
+    const key = `${left}:${right}:${leftAnchor?.column ?? ''}:${leftAnchor?.row ?? ''}`;
+    return memoizedStateResult(distanceResultCache, state, key, () => {
+      if (!state.combatants.some((candidate) => candidate.profile.id === left) ||
+        !state.combatants.some((candidate) => candidate.profile.id === right) ||
+        !state.tokens.some((token) => token.combatantId === left) ||
+        !state.tokens.some((token) => token.combatantId === right)) return null;
+      const leftSpace = leftAnchor === undefined
+        ? queryCombatantSpace(state, left)
+        : queryCombatantSpaceAt(state, left, leftAnchor);
+      return minimumSpaceDistance(leftSpace, queryCombatantSpace(state, right));
+    });
+  },
   sameSide: (state, left, right) => combatantsAreAllies(state, left, right),
   actions: monsterActions,
   resolveTarget,
-  path,
-  approach,
-  reach,
+  path(state, request) {
+    return memoizedStateResult(pathResultCache, state, JSON.stringify(request), () => path(state, request));
+  },
+  approach(state, request) {
+    return memoizedStateResult(
+      approachResultCache,
+      state,
+      JSON.stringify(request),
+      () => approach(state, request),
+    );
+  },
+  reach(state, request) {
+    return memoizedStateResult(reachResultCache, state, JSON.stringify(request), () => reach(state, request));
+  },
   tacticalAttack(state, actorId, targetId, actionId) {
     const input = engineTacticalAttackInput(state, actorId, targetId, actionId);
     return input === null ? null : evaluateTacticalAttack(input);

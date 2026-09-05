@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { monsterCombatantProfile } from '../../../src/combat/combatant';
+import { combatToken, monsterCombatantProfile } from '../../../src/combat/combatant';
 import { createEncounter, reduceEncounter } from '../../../src/combat/encounter';
 import { monsterAttackCommand } from '../../../src/combat/monster-commands';
 import { mulberry32 } from '../../../src/combat/random';
@@ -37,12 +37,8 @@ describe('bundled reference party size', () => {
         bounds: { columns: 4, rows: 3 },
         combatants: [wolf, player.profile],
         tokens: [
-          { id: wolf.tokenId, combatantId: wolf.id, position: { column: 1, row: 1 } },
-          {
-            id: player.profile.tokenId,
-            combatantId: player.profile.id,
-            position: { column: 2, row: 1 },
-          },
+          combatToken(wolf, { column: 1, row: 1 }),
+          combatToken(player.profile, { column: 2, row: 1 }),
         ],
       });
       const started = reduceEncounter(encounter, { type: 'roll_initiative' }, mulberry32(46_600_005)).state;

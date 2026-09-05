@@ -15,6 +15,7 @@ import {
 import { encounterStateFromApprovedFixture } from '../../../src/vtt/generated-encounter-fixtures';
 import { EncounterSessionJournal, MemoryBrowserSessionStore, MemoryMirrorSink } from '../../../src/vtt/session-persistence';
 import { reduceEncounter } from '../../../src/combat/encounter';
+import { dmVisibleEncounter, projectDmView } from '../../../src/combat/visibility';
 import type { EncounterCommand } from '../../../src/combat/events';
 import { mulberry32 } from '../../../src/combat/random';
 import { feetPoint } from '../../../src/combat/templates';
@@ -22,6 +23,10 @@ import { armorClass, encounterBranchId, encounterSessionId, feet, worldObjectId 
 import { recordScriptedReferenceSkirmish } from '../../../src/vtt/scripted-skirmish';
 import { TEST_APPROVED_FIRST_SKIRMISH_FIXTURE } from '../../../src/vtt/test-approved-first-skirmish';
 import { runVttReplayCommand } from '../../../tools/vtt-replay';
+import {
+  HAND_AUTHORED_REPLAY_V5_BODY,
+  HAND_AUTHORED_SESSION_V10_REVISION_BODY,
+} from '../../fixtures/vtt/creature-space-migration-fixtures';
 
 interface MutableReplayBundle {
   schemaVersion: number;
@@ -405,11 +410,46 @@ describe('increment 10 deterministic replay and playable exit', () => {
   it('OWN-BUNDLE-VERSION-OUTSIDE-WINDOW is refused while the adjacent migration remains exact', () => {
     const gate = recordScriptedReferenceSkirmish();
     expect(decodeReplayBundle(exportReplayBundleV1ForMigrationTest(gate.bundle))).toEqual(gate.bundle);
-    for (const version of [0, 6]) {
+    for (const version of [0, 7]) {
       const candidate = mutable(gate.bundle);
       candidate.schemaVersion = version;
       expect(() => decodeReplayBundle(JSON.stringify(candidate))).toThrow('outside the migration window');
     }
+  });
+
+  it('decodes the hand-authored replay-5 fixture with an embedded session-10 revision', () => {
+    const revisionBody = structuredClone(HAND_AUTHORED_SESSION_V10_REVISION_BODY);
+    const revision = { ...revisionBody, checksum: sha256(canonicalJson(revisionBody)) };
+    const legacy = {
+      ...structuredClone(HAND_AUTHORED_REPLAY_V5_BODY),
+      revisions: [{
+        revision,
+        void: false,
+        rng: { pre: revisionBody.rngState, post: revisionBody.rngState },
+        stateHash: 'stale-schema-5-state-hash',
+        projectionHashes: { dm: 'stale-schema-5-dm-hash', players: [] },
+      }],
+    };
+    const sourceBytes = canonicalJson(legacy);
+
+    const migrated = decodeReplayBundle(sourceBytes);
+
+    expect(migrated.schemaVersion).toBe(6);
+    expect(migrated.revisions[0]?.revision.schemaVersion).toBe(11);
+    expect(migrated.revisions[0]?.revision.encounterState).toMatchObject({
+      tokens: [],
+      sharedSpaceRelations: [],
+      adjudicationPending: [],
+      environment: { narrowOpeningRegions: [] },
+    });
+    const migratedRecord = migrated.revisions[0];
+    if (migratedRecord === undefined) throw new Error('Replay migration produced no revision.');
+    expect(migratedRecord.stateHash).toBe(sha256(canonicalJson(migratedRecord.revision.encounterState)));
+    expect(migratedRecord.projectionHashes).toEqual({
+      dm: sha256(canonicalJson(dmVisibleEncounter(projectDmView(migratedRecord.revision.encounterState)))),
+      players: [],
+    });
+    expect(canonicalJson(legacy)).toBe(sourceBytes);
   });
 
   it('HUMAN-FLEET-SCHEMA is empty but typed identically to model records', () => {

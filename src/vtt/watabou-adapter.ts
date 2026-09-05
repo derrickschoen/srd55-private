@@ -1,4 +1,5 @@
 import { createEncounter } from '../combat/encounter';
+import { combatToken } from '../combat/combatant';
 import type { GridCell } from '../combat/grid';
 import { armorClass, worldObjectId } from '../combat/values';
 import type { WorldObject } from '../combat/world-objects';
@@ -216,7 +217,7 @@ export function adaptWatabouDungeon(
     const spreadIndex = Math.floor(index * (placementCells.length - 1) / Math.max(1, profiles.length - 1));
     const position = placementCells[spreadIndex];
     if (position === undefined) throw new RangeError('Watabou token placement failed.');
-    return { id: profile.tokenId, combatantId: profile.id, position };
+    return combatToken(profile, position);
   });
   const fresh = createEncounter({
     bounds: { columns, rows },
@@ -229,6 +230,7 @@ export function adaptWatabouDungeon(
       difficultTerrainRegions: [],
       obscurementRegions: [],
       movementRegions: [],
+      narrowOpeningRegions: [],
     },
     dmNotes: [
       source.title,

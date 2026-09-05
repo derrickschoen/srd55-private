@@ -25,6 +25,7 @@ import type { GridCell } from '../combat/grid';
 import { mulberry32, type SerializableRng } from '../combat/random';
 import type { ChallengeRating } from '../combat/statblock';
 import { STARTER_MONSTER_ROSTER } from '../combat/statblocks/roster';
+import { creatureSizes } from '../domain/enums';
 import {
   combatantId,
   tokenId,
@@ -70,6 +71,7 @@ const rosterEntrySchema = z.strictObject({
   combatantId: nonEmptyTextSchema,
   tokenId: nonEmptyTextSchema,
   statblockId: nonEmptyTextSchema,
+  sizeCategory: z.enum(creatureSizes),
   role: z.enum([
     'ambusher',
     'artillery',
@@ -791,10 +793,11 @@ function encounterProfiles(encounterPackage: GeneratedEncounterPackage): readonl
   const monsters = encounterPackage.roster.map((entry) => {
     const row = STARTER_STATBLOCKS.get(entry.statblockId);
     if (row === undefined) throw new Error(`Unknown approved starter statblock id ${entry.statblockId}.`);
-    return monsterCombatantProfile(row.statblock, {
+    const profile = monsterCombatantProfile(row.statblock, {
       combatantId: entry.combatantId,
       tokenId: entry.tokenId,
     });
+    return { ...profile, rules: { ...profile.rules, sizeCategory: entry.sizeCategory } };
   });
   return [...referencePcs, ...monsters];
 }

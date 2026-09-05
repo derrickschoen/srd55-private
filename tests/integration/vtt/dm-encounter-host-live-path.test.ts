@@ -164,6 +164,7 @@ describe('DmEncounterHost live algorithm path', () => {
       combatants: [player, monster],
       tokens: [placedToken(player, 0, 5), placedToken(monster, 13, 5)],
       environment: {
+        narrowOpeningRegions: [],
         difficultTerrainRegions: [{
           id: 'host-large-board-rubble',
           cells: [{ column: 5, row: 5 }],
@@ -217,7 +218,7 @@ describe('DmEncounterHost live algorithm path', () => {
       tokens: [
         placedToken(mover, 1, 5),
         placedToken(reactor, 0, 5),
-        placedToken(legendary, 13, 5),
+        placedToken(legendary, 12, 5),
       ],
     });
     const host = new DmEncounterHost(

@@ -84,6 +84,7 @@ function statOverrideOperation(): Extract<BranchSpellOperation, { readonly kind:
       kind: 'stat_override',
       stats: {
         id: 'mist-hound', name: 'Mist Hound', armorClass: 13, hitPointMaximum: 7,
+        sizeCategory: 'Medium',
         speedFeet: 45, initiativeBonus: 3,
         savingThrowBonuses: {
           strength: 2, dexterity: 3, constitution: 1,

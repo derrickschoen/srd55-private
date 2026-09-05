@@ -98,6 +98,7 @@
       "recordId": "brassleaf-mote",
       "name": "Brassleaf Mote",
       "statblock": {
+        "sizeCategory": "Tiny",
         "armorClass": 12,
         "hitPointMaximum": 9,
         "speedFeet": 30,

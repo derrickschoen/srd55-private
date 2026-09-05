@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { monsterCombatantProfile } from '../../../src/combat/combatant';
+import { combatToken, monsterCombatantProfile } from '../../../src/combat/combatant';
 import { reduceEncounter, type EncounterState } from '../../../src/combat/encounter';
 import { mulberry32 } from '../../../src/combat/random';
 import { armorClass, combatantId, encounterBranchId, encounterSessionId, type CombatantId } from '../../../src/combat/values';
@@ -45,7 +45,8 @@ function fixedPositions(
     blockedCells: [],
     worldObjects: [],
     persistentAreas: [],
-    environment: {
+  environment: {
+    narrowOpeningRegions: [],
       lightRegions: [], obscurementRegions: [], difficultTerrainRegions: [], movementRegions: [],
     },
     tokens: generated.tokens.map((token, index) => ({
@@ -164,7 +165,7 @@ describe('authoritative engine round session', () => {
   it('executes a mixed multiattack attack child and saving-throw child once each', () => {
     const positioned = fixedPositions(new Map([
       [BRUTE_ID, { column: 1, row: 1 }],
-      [FOCUS_ID, { column: 2, row: 1 }],
+      [FOCUS_ID, { column: 3, row: 1 }],
     ]));
     const lionProfile = monsterCombatantProfile(LION, {
       combatantId: BRUTE_ID,
@@ -175,11 +176,17 @@ describe('authoritative engine round session', () => {
       combatants: positioned.combatants.map((candidate) => candidate.profile.id === BRUTE_ID
         ? { ...candidate, hitPoints: LION.hitPointMaximum, profile: lionProfile }
         : candidate),
+      tokens: positioned.tokens.map((placed) => placed.combatantId === BRUTE_ID
+        ? combatToken(lionProfile, placed.position)
+        : placed),
     };
     const lion = authorized(state, attackProposal(state, BRUTE_ID, 'rend', FOCUS_ID));
     expect(lion.mechanics.actionSlots.map((use) => use.kind)).toEqual(['attack', 'attack']);
     const mixedOption = availableEngineActorOptions(state, BRUTE_ID).find((option) =>
-      option.label.startsWith('Rend + Roar'));
+      option.label.startsWith('Rend + Roar') && option.actionSlots.some((slot) =>
+        slot.slot === 'main' && slot.use.kind === 'multiattack' &&
+        slot.use.components.every((component) => component.target.kind === 'combatant' &&
+          component.target.combatantId === FOCUS_ID)));
     if (mixedOption === undefined) throw new Error('Lion mixed option is absent.');
     const mixed = authorized(state, {
       actorId: BRUTE_ID,
@@ -456,7 +463,7 @@ describe('authoritative engine round session', () => {
   it('records a typed omission when an earlier attack in one option kills its later target', () => {
     const positioned = fixedPositions(new Map([
       [BRUTE_ID, { column: 1, row: 1 }],
-      [FOCUS_ID, { column: 2, row: 1 }],
+      [FOCUS_ID, { column: 3, row: 1 }],
     ]));
     const lionProfile = monsterCombatantProfile(LION, {
       combatantId: BRUTE_ID,
@@ -480,6 +487,9 @@ describe('authoritative engine round session', () => {
         }
         return candidate;
       }),
+      tokens: positioned.tokens.map((placed) => placed.combatantId === BRUTE_ID
+        ? combatToken(lionProfile, placed.position)
+        : placed),
     };
     const lion = authorized(state, attackProposal(state, BRUTE_ID, 'rend', FOCUS_ID));
     const session = new EngineRoundSession(state, mulberry32(46_600_006), {

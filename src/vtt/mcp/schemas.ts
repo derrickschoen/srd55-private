@@ -19,6 +19,7 @@ import { SEARCH_MEMORY_POLICY } from '../../combat/search-memory';
 import type { McpToolDescriptor, SchemaViolation } from './handler';
 import { rendererAttributionSchema } from '../renderer-profile';
 import { KB_SUBJECTS } from '../knowledge-base-contract';
+import { creatureSizes } from '../../domain/enums';
 
 export const ENGINE_ACTOR_KNOWLEDGE_POLICY = 'actor-knowledge-v1' as const;
 export const ENGINE_LEGENDARY_WINDOWS_POLICY = 'legendary-windows-v1' as const;
@@ -816,6 +817,12 @@ const loadSkillOutput = z.object({
 
 const combatantSummary = z.object({
   combatant_id: identifier, name: identifier, side: z.enum(['player_character', 'monster']), status: actorStatus,
+  effective_size: z.enum(creatureSizes),
+  placement_mode: z.discriminatedUnion('kind', [
+    z.object({ kind: z.literal('normal'), actual: z.enum(creatureSizes) }).strict(),
+    z.object({ kind: z.literal('squeezed'), actual: z.enum(creatureSizes), sizedFor: z.enum(creatureSizes) }).strict(),
+  ]),
+  footprint: z.array(gridCell).min(1).max(16),
   options: z.array(tacticalOption).max(100), threats: z.array(threat).max(50),
 }).strict();
 const stateSummaryBody = z.object({

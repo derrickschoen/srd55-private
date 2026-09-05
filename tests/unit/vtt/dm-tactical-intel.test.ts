@@ -124,7 +124,7 @@ describe('versioned DM tactical intel', () => {
     expect(first).toMatchObject({
       policy: DM_INTEL_QUERY_POLICY,
       renderer_policy: DM_TURN_INTEL_POLICY,
-      evaluator_policy: 'tactical-evaluator-v2',
+      evaluator_policy: 'tactical-evaluator-v3',
       truncated: false,
     });
     expect(first['rows']).toEqual([expect.objectContaining({ p_hit: '≈1/2', ev: 5 })]);
@@ -260,7 +260,7 @@ describe('versioned DM tactical intel', () => {
     expect(capture).toMatchObject({
       policy: DM_INTEL_CAPTURE_POLICY,
       policyVersions: {
-        evaluator: 'tactical-evaluator-v2',
+        evaluator: 'tactical-evaluator-v3',
         renderer: DM_TURN_INTEL_POLICY,
         query: DM_INTEL_QUERY_POLICY,
         capture: DM_INTEL_CAPTURE_POLICY,
