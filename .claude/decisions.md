@@ -11028,3 +11028,7 @@ D538 — OWNER (2026-09-05 13:55): NO stop rule for the picture — the board im
 regardless of measured decision gain; it is mainly for humans and judges, and DM benefit is a bonus, not a gate.
 The image experiments still report their numbers when run (D536 bar at medium), but a null result does not remove
 the picture.
+
+D539 — OWNER (2026-09-05 13:57): surviving mutants — CURRENT PRACTICE stands: a survivor is recorded in the commit
+message and the decisions log and carried into the next increment as a required killing test; it does not block
+the commit or the landing.
