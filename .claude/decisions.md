@@ -11109,3 +11109,6 @@ board projects a `last_seen` marker (ghost silhouette glyph + legend entry, in b
 the marker clears when the creature is seen again or is revealed dead; the DM board never shows it (the DM sees
 the creature). Dispatched to codex after footprints inc5 lands (same board/projection files); the AI-DM text
 context gains the same last-seen fact.
+
+D546 — OWNER (2026-09-05 14:52): no human playtest yet — keep going on AI judging until the feature set is
+complete.
