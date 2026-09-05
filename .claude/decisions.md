@@ -10927,3 +10927,7 @@ default to codex too unless the supervisor states why a unit needs Fable's desig
 rounds get THREE seats — one per model, perspectives rotated so every perspective is covered across a branch's
 rounds; Opus at medium (D530). The classic round-2 panel already running completes. Classic round 3 (in flight)
 is an intermediate round: three seats.
+
+D532 AMENDMENT — OWNER (2026-09-05 13:10): intermediate review panels are FOUR seats: Fable, Opus (medium), codex
+sol HIGH, plus a second codex sol seat at MEDIUM effort taking a different perspective from the first codex seat.
+Perspectives still rotate across a branch's rounds so all five are covered.
