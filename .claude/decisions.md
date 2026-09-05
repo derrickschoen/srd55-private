@@ -10402,3 +10402,11 @@ D525 LIGHT ENCODINGS, all three (6 states, case-folded; low / medium):
 ISO REVIEW ROUND 4 (codex 01a07004): HOLD — one MAJOR: retained surface handles bypass the one-density eviction
 (stale `bitmap`/`pixels` getters recreate the other density); minors: zero-size regions accepted, index brands not
 kind-specific. D5 dispatched for exactly these; landing on a clean round 5.
+
+LANDED ON MAIN (supervisor, 2026-09-05 01:55): claude/board-merge = board-shot inc2 + inc3 + inc2.5 (arena board
+images, UI-feedback tool, capture_only), path-overlay inc1 (D512) and classic art (D516), merged with main's
+browser-fix. Supervisor gates on the branch: tsc 0, sg 0, vitest 557/9659 then 558/9662 after the main merge;
+browser suite 184/185 before the main merge (the one failure being main's pre-fix player-build-and-share) and the
+three affected specs 3/3 after it. The DM board on main is now 64 px per cell with names, HP bars, coordinates,
+legend and option paths in snapshot mode; the arena captures and delivers the picture. D521 capture_only off arms
+complete; d513c packets (images on both sides, primes 677/683/691/701) building and judging now.
