@@ -1,10 +1,10 @@
 # Standing rules (D552)
 
-Compacted 2026-09-05 15:20 by the supervisor from D1–D555 (codex draft, supervisor-installed, codex-reviewed). The append-only chronology `.claude/decisions.md` remains the record and wins on conflict; interim resolutions of conflicting rules live in `.claude/RULE-CONFLICTS.md` (D555). Compaction pass at least once a day; each pass replaces this header line's date.
+Compacted 2026-09-05 15:20 by the supervisor from D1–D555 (codex draft, supervisor-installed); codex audit against the full chronology applied 2026-09-05 15:45 (omissions, stale rules, attributions corrected; open conflicts moved to RULE-CONFLICTS.md). The append-only chronology `.claude/decisions.md` remains the record and wins on conflict; interim resolutions of conflicting rules live in `.claude/RULE-CONFLICTS.md` (D555). Compaction pass at least once a day; each pass replaces this header line's date.
 
 ## Licensing wall & provenance
 
-- Never commit or distribute unauthorized work, and keep user-imported rules text and private content out of public repositories, artifacts, exports, and minted share links. [D57/D59/D330]
+- Never commit or distribute unauthorized work, and keep user-imported rules text and private content out of project-distributed public repositories and artifacts; a user's own full export carries their non-SRD content closure, and a minted share link carries it when it fits and warns at export time when it cannot. [D57/D59/D218/D330]
 - Admit SRD 5.2.1, SRD 5.1, A5E SRD, CC0/public-domain, MIT, Apache, and other cleared sources only under their actual terms, attribution, and row-level provenance. [D367/D395]
 - Segregate CC-BY-SA and OGL content in licence-complete dedicated folders, and never let their terms or text leak into engine code or other content. [D176/D395.2]
 - Keep BG3/Larian/wiki evidence and non-SRD character content, builds, or oracle overlays private or user-imported unless separately cleared. [D260.9/D330/D370/D491/D492/D500]
@@ -16,7 +16,8 @@ Compacted 2026-09-05 15:20 by the supervisor from D1–D555 (codex draft, superv
 
 ## Roles & who implements/reviews
 
-- Make Codex the default planner and high-effort implementer for substantive work, using Sol for complex work and Terra only as fallback. [AGENTS.md/model routing; standing/D530]
+- Make Codex the default planner and high-effort implementer for substantive work, using Sol for complex work and Terra only as fallback. [AGENTS.md/model routing]
+- Run every Opus 5 seat at medium effort. [D530]
 - Make the supervisor own contracts, arbitration, independent verification, gates, merges, and decisions-log entries, and keep that evidence distinct from lane claims. [D237/CLAUDE.md/standing]
 - Make Codex review every ordinary unit before merge, and use a model other than the artifact's author as the decisive independent reviewer. [D135/D249/D390]
 - Reserve Sonnet for the verified-KB second-reader role only; let it decide nothing. [standing]
@@ -29,7 +30,7 @@ Compacted 2026-09-05 15:20 by the supervisor from D1–D555 (codex draft, superv
 
 - Read the worktree rules, lane state, and applicable decisions before acting, let the newest ruling win, and prepend the maintained `COMMON RULES` source to every supervised dispatch. [COMMON RULES/D552]
 - Send Codex prompts through stdin files and forbid every lane from invoking Claude, nested Codex, or another agent CLI; only supervisor-run reviews carry gate weight. [D207/COMMON RULES/standing]
-- Start each lane from current main in its own worktree and database, use one worktree per experiment or strategy, and copy and verify every ignored plan file there before dispatch. [D248/D487/D511/supervisor ruling after D509]
+- Start each lane from the explicitly applicable current baseline (main, or the parent lane it extends) in its own worktree and database, use one worktree per experiment or strategy, and copy and verify every ignored plan file there before dispatch. [D248/D487/D511/supervisor ruling after D509]
 - Forbid lanes from repository operations, and require them to stop when work needs a frozen artifact, forbidden file, config change, another lane's files, or ungranted authority. [COMMON RULES]
 - Give file-producing analysis a writable workspace-local or `/tmp` output path or require the complete deliverable on stdout; never assume an external symlink target is writable. [supervisor findings after D460/D487]
 - Install dependencies in a fresh worktree before running its checks. [standing]
@@ -77,13 +78,13 @@ Compacted 2026-09-05 15:20 by the supervisor from D1–D555 (codex draft, superv
 
 - Use structured engine state as the AI DM's primary channel and a captured board image as default redundant context; use text-only only in experiments specifically about picture presence. [D522/D535/D538]
 - Keep `mcp_minimal` as the normal production transport and control; treat `final_indices` as an experimental comparator, not the default. [D503/D507]
-- Require each actor decision and override to carry bounded, typed, non-boilerplate reasons traceable through option, expectation, execution, and score; keep reasons in rows and keys but hide them from judges unless preregistered. [D485/D489/D490]
+- Require each actor decision to carry a bounded free-text reason, and each override additionally a typed kind, non-boilerplate and traceable through option, expectation, execution, and score; keep reasons in rows and keys but hide them from judges unless preregistered. [D485/D489/D490]
 - Present engine-computed ranked recommendations from typed intel, leave final choice to the DM, and never auto-select on prose heuristics. [D461]
-- Optimize monster advice for confirmed kills, then expected damage and closing ETA, using deterministic coordination, observed facts, and typed inference rather than hidden omniscience. [D462/D476 supersedes D418.1/D477]
+- Optimize monster advice for confirmed kills, then expected damage and closing ETA, using deterministic coordination, observed facts, and typed inference rather than hidden omniscience. [D462/D477; D476 supersedes D418.1's omniscience, D477 stays binding for confirmed-kill, expected-damage/ETA tie-breaks and sequential coordination]
 - Run all AI-DM testing under standard per-combatant initiative; isolate initiative variants as separately labelled experiments. [D421.4]
 - Preregister arms, variables, seeds, budgets, censoring, primes, success, and unsealing, then compare one declared variable on the same code era and frozen inputs and re-anchor after an era shift. [D418.3/D429/D442/D445/D472]
 - Record model, effort, transport, planner, instruction source/hash, repo commit, load average, prompt bytes, reasons, outcomes, rejections, image generation, and session linkage in each row. [D414/D489/supervisor findings after D510]
-- Flag rounds over 120 seconds, void an arm after more than three timeouts, treat CLI exits as outage evidence, run low/medium experiments at 120/240 seconds, and keep live play at 180 seconds. [D448/D473/D511/supervisor outage ruling]
+- Flag rounds over 120 seconds, void an arm after more than three timeouts, treat CLI exits as outage evidence, keep live play at 180 seconds; the 120/240-second low/medium arena budget was bound only through D460, and later experiments preregister their own budget. [D448/D473/D499/D511/supervisor outage ruling]
 - Keep a play sitting in one model session across rounds and rooms, including summaries and all prior-round images for serious encounters; roll over by deterministic digest only at the measured threshold and retain fresh context as a control. [D450/D457/D551]
 - Accept image-arm UI feedback once after the decision as typed non-scoring data, ask judges separately, tag every screenshot generation without mixing generations, and attach the executed fallback's own reason. [D504/D513.1/D513.3/supervisor ruling after D503]
 
@@ -124,7 +125,7 @@ Compacted 2026-09-05 15:20 by the supervisor from D1–D555 (codex draft, superv
 - Treat the engine as authoritative for legality and resolution; let AI agents propose typed intents and fail closed without partial execution. [D315.2/D396]
 - Model footprints as 1×1 Medium-or-smaller, 2×2 Large, 3×3 Huge, and 4×4 Gargantuan with north-west anchors, allowing up to four stacked Tiny creatures per cell. [D511/D513]
 - Require authored opening topology and never infer apertures merely from obstacle placement. [D513]
-- Auto-relocate a growth, reversion, or return that no longer fits to the nearest legal anchor by Chebyshev distance then row-major order; refuse typed if none exists. [D514 supersedes D513.5]
+- Auto-relocate a growth or reversion that no longer fits to the nearest legal anchor (D514 rules growth and reversion; it does not claim every return/re-entry uses this path) by Chebyshev distance then row-major order; refuse typed if none exists. [D514 supersedes D513.5]
 - Count only newly entered cells for step costs and entry hazards, evaluate ongoing effects over the full footprint, and treat intervening creatures as Half Cover with default-off three-quarters cover. [D514]
 - Reveal the full footprint of a detected creature and none of a hidden creature's current footprint to players. [D513/D545]
 - Migrate old sessions and replays one way to explicit normal movement, preserving known sizes and using validated migration-only pending adjudication when size is unknown; never guess Medium. [D514/supervisor ruling 2026-09-05 05:40]
@@ -189,3 +190,29 @@ Compacted 2026-09-05 15:20 by the supervisor from D1–D555 (codex draft, superv
 - Treat the first public version as one usable VTT containing the builder, trustworthy engine, tabletop, and AI DM; do not declare any single lane the product. [D548]
 - Never push, publish, deploy, send, create outward resources, or start a tunnel without explicit current authorization. [standing]
 - Keep publication and Cloudflare deployment stopped until owner approval, and use pre-alpha replacement freedom without deleting tests for green, self-generating expectations, or losing protected user data. [D25/D121/D266/D550]
+
+## Added by the 2026-09-05 codex audit (owner rulings still in force, absent from the first compaction)
+
+- Lanes may delete dead members in files they touch, reporting each deletion for supervisor verification; prune merged idle worktrees. [D207/D251]
+- Make type-invalid rows unstorable and reject them at read boundaries; return expected refusals through the shared Outcome/Result union and reserve typed throws for defects. [D235/D278]
+- The private regression gate is a blocking, public-SHA-pinned standalone merge-ritual step; a re-pin needs explicit justification. [D239/D244]
+- Apply a convention completely within its declared scope before merging; a proposed scope reduction goes to arbitration. [D241]
+- Model mutable resources as invariant-owning bounded counters (0..sheet-derived maximum), clamp recovery at the ceiling, reject overspend. [D267/D269]
+- Record successful type-fix patterns in the knowledge base and reuse them when reviewing similar shapes. [D269]
+- Delete paths unreachable through ordinary constructible inputs; harden public entries against accidental exotic inputs while trusting structured-clone-separated internals. [D281/D282]
+- Never park work merely because it awaits the owner; advance to the owner-action boundary, keeping the outward-action and authority hard stops. [D323]
+- Adopt an index when EXPLAIN QUERY PLAN proves a real improvement, unless endpoint measurement shows a regression. [D393]
+- Reaction guidance is declared ahead of the boundary with closed typed triggers/responses, persists until replaced, and never needs a synchronous reaction-time model call. [D401]
+- Luna low remains the general real-world intelligence floor; D536 changes only the picture-comprehension gate. [D406/D536]
+- DM/PC operators use an isolated CODEX_HOME with no global AGENTS.md; verify and repair the shared auth.json link when needed. [D415/D415.1]
+- After every host-path engine, renderer, or conversation merge, run the standing 10-room × 1-rep shape-stat mini-A/B against the era reference. [D429.1]
+- Optimize DM coaching through relevant, human-readable information, never machine-only compaction. [D430/D431]
+- Live play defaults to Luna medium, starts speculative planning during player turns, and escalates validation failure or refusal to Luna high inside the absolute 180-second wall. [D456/D474]
+- Promote advice only on a Luna-low win greater than 0.2 with Luna-medium non-inferiority within 0.2; medium stays the live default. [D475]
+- Until a faction model exists, all monsters belong to one allied monster side. [D480]
+- A correct first submission is the norm; rejection followed by retry must stay rare. [D484]
+- Keep the Codex CLI pinned to 0.148.0 until a later ruling authorizes an upgrade. [D511]
+- Forced shared endpoints are permitted under the ruled overlap/Prone policy; destination-only eight-way movement holds for every footprint size. [D513]
+- Keep zero-result experiment arms, packets, and fixtures for one generation, then delete them after the next-generation rerun reports. [D553]
+- When iso resumes: art-only crates/pillars stay absent, plate stems end at the token-bundle top, one plate row is reserved. [D554]
+- On a standing-rule conflict the supervisor records an interim resolution in RULE-CONFLICTS.md and marks the affected rule here "interim (see RULE-CONFLICTS)". [D555]

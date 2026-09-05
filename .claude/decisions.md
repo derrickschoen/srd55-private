@@ -11178,3 +11178,20 @@ redundancy" — both hold: the image stays on, the primary channel is text; (d) 
 D532 three (+1) intermediate seats — D532 supersedes for intermediate rounds; (e) "Claude never reviews what it
 authored" vs D528 Fable seats reviewing Fable units — owner-accepted, separate sessions; (f) D505 Fable implements
 iso vs D532 codex-first — D532 governs once the pause lifts, Fable only by supervisor request.
+
+## RULES.md codex audit applied (2026-09-05 15:45)
+
+Codex (sol high, read-only, rules-review-codex.log) audited the compacted
+RULES.md against the whole chronology and returned 22 omissions, 2 stale
+rules, 6 wrong attributions and 3 glossed conflicts. Supervisor verification:
+every cited D-number resolves to a heading in this file with matching sense
+(headers checked for all 29 distinct numbers); the 22 omissions were absent
+from RULES.md by grep. Applied: an "Added by the 2026-09-05 codex audit"
+section (22 lines); D218 folded into the licensing-wall line (user-local
+exports and share links may carry the user's own non-SRD closure); D530
+separated from model routing; D489/D490 reason wording; D476/D477
+attribution; D473/D499 arena budget bound through D460 only; D248/D487
+baseline "main or parent lane"; D514 limited to growth/reversion. The three
+conflicts (D25 vs D550, D249 vs D532, D352 vs owner-only scope) go to
+RULE-CONFLICTS.md with interim resolutions. Header no longer claims
+"codex-reviewed" ahead of the review; it now dates the applied audit.
