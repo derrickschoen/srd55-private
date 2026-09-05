@@ -10351,3 +10351,12 @@ dispatched on board-shot (01a06f70). Per D520(2) the combined board landing (inc
 art) is being assembled on claude/board-merge; conflicts resolved there, gated, then fast-forwarded once inc2.5 lands.
 Footprints inc2 resumed under the generated-schema ruling. Tactical inc6 delivered (CC0 public fixture, replay
 digests, provenance audit zero hits); gate queued.
+
+D519 PROBE, g2 + general primer (D524), rescored case-folded, 6 states, low / medium (arrow = no primer → primer):
+  Q1 id+cell 0.78→0.66 / 0.66→0.68; Q2 side 0.81→0.78 / 0.68→0.66; Q3 HP 0.42→0.34 / 0.41→0.52;
+  Q4 difficult 0.30→0.49 / 0.38→0.60; Q5 light 0.15→0.17 / 0.06→0.07; Q6 doors 0.17→0.08 / 0.17→0.22;
+  Q7 adjacent 0.28→0.53 / 0.36→0.60; Q8 hidden 0.33→0.00 / 0.22→0.25; Q9 fog 0.05→0.12 / 0.78→0.62;
+  Q10 blocked 0.37→0.03 / 0.38→0.18. Reading: the primer helps the classes it explains (difficult terrain,
+  adjacency, HP at medium) and hurts blocked/hidden — the primer's wording for those two needs the legend's exact
+  glyph names; light stays unreadable regardless of words, so the tint encoding is the next UI change (D525 order:
+  light, doors, HP, adjacency). Six states is noisy; the next runs use 12 states.
