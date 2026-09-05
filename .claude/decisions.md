@@ -10389,3 +10389,16 @@ D525 LIGHT ENCODINGS, probe (6 states, case-folded, low / medium), tint (primer 
 FINDING against my own shell hygiene (2026-09-05 01:25): a `pgrep -f` whose pattern was unbracketed matched my own
 command line and the loop killed the supervisor's shell (exit 144) — fifth instance. The bracketed form
 (`pgrep -f '[p]attern'`) worked on retry. Iso D4 committed; review round 4 dispatched.
+
+D525 LIGHT ENCODINGS, all three (6 states, case-folded; low / medium):
+  light (Q5): tint 0.46 / 0.65 · inverse 0.31 / 0.55 · SYMBOL 0.65 / 0.95 — glyph markers pass the 0.9 gate at medium.
+  symbol also lifts fog 0.06 / 0.83 and hidden 0.00 / 0.42 at medium, but at LOW it hurts fog (0.38→0.06) and
+  blocked (0.16→0.07): low-effort Luna reads one glyph family well and confuses others. Inverse remains best for HP
+  (0.46 / 0.80) and difficult terrain at medium (0.73). Doors ≈0 in every encoding.
+  Ruling (supervisor, D525 order): the recipe is one explicit glyph per fact class named in the legend and the
+  primer. Next unit: a full glyph vocabulary — doors (open/closed), blocked, hidden, fog, obscured — on top of
+  'symbol', with distinct silhouettes per family so low effort stops confusing them; then HP as a numeric band label
+  beside the bar. Probe on 12 states next time.
+ISO REVIEW ROUND 4 (codex 01a07004): HOLD — one MAJOR: retained surface handles bypass the one-density eviction
+(stale `bitmap`/`pixels` getters recreate the other density); minors: zero-size regions accepted, index brands not
+kind-specific. D5 dispatched for exactly these; landing on a clean round 5.
