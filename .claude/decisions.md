@@ -9931,3 +9931,457 @@ Start running the old arms on Luna medium so we can have comparison numbers." Th
 control (cav-full, mcp_minimal, typed_reason default), final_indices, and strict on Luna medium, 30 rows each,
 240 s budget with wall distribution recorded so rounds that would have exceeded the old 120 s cap can be
 counted; sealed packets d510/control (low d466 vs medium, prime 619), d510/transport (631), d510/strict (641).
+
+DISPATCH STATE (supervisor, 2026-09-04 11:20). Running in parallel, each in its own worktree: tactical_v2
+inc5.5 (codex sol, dnd-wt-tactical-v2, D502 declarations); board-screenshot inc1 (codex sol
+01a06cfa-93c4, dnd-wt-board-shot, plan .tmp-plans/board-screenshot-plan.md amended by D506/D509: full DM
+view, no monster-side projection, mutation renamed board_image_stale_after_move); graph-slice inc1 (codex sol
+01a06cfa-93cd, dnd-wt-graph-slice, plan .tmp-plans/graph-slice-plan.md with D507); isometric VTT units A and
+B (two Fable 5.1 claude -p subagents, dnd-wt-iso-vtt). Queued: run-d510-medium.sh (Luna-medium reruns of
+control / final_indices / strict; waits for a box with no vitest, tsc, gate or Playwright process, so it
+starts only between lane gates — if it has not started by the next quiet window the supervisor will run
+it alone). Screenshot plan's own recommendations overridden by rulings: monster-side view (D506 says full),
+K=10 stratified one rep per seed kept; the 3×2 (Luna low, Luna medium, Sol low × image off/on, D509) replaces
+the plan's 2×2 in Increment 4.
+
+FINDING AGAINST MY OWN DISPATCH (supervisor, 2026-09-04 11:30): `.tmp-plans/` is gitignored, so the two new
+worktrees (dnd-wt-board-shot, dnd-wt-graph-slice) were created WITHOUT the binding plans. Graph-slice inc1
+stopped correctly ("FINAL REPORT — BLOCKED: the binding implementation plan is missing", 0 edits) — the right
+behaviour, and a wasted dispatch that was mine. Board-shot inc1 found the plan by reading the main repo's copy
+and proceeded. Fix: plans copied into both worktrees; graph-slice redispatched (01a06d02-d6b7). Rule: a new
+worktree gets its plan file copied in before dispatch; the dispatch checklist now includes `ls <wt>/.tmp-plans`.
+Also on inc5.5: codex changed tests/unit/db/codec-slot-is-never-an-identity.test.ts to skip tracked files that
+no longer exist on disk — an accommodation for the no-git rule after it deleted the four constants modules.
+Reverted before commit; with the deletions staged the unmodified test passes 4/4.
+
+LUNA-MEDIUM CONTROL ARM VERIFIED; ISO UNIT A COMPLETE; CONTRACT AMENDED (supervisor, 2026-09-04 11:40).
+- d510-control-medium: 30/30 authorized, 0 timeouts, first decision accepted 30/30 (low: 28/30), 154 tool
+  calls (low: 208), wall median 11.7 s / max 24.1 s (low: 11.4 / 36.8), 0 rounds over 120 s in either arm,
+  so the 240 s budget introduced no confound. Effort evidence: reasoning tokens median 325 vs 145 (2.2×).
+  FINDING: the arena row has no `effort` field — medium is provable only through reasoning-token volume.
+  Rows must persist effort (and escalation effort); added to the board-shot increment-2 contract as a row
+  field. Packet d510/control is sealed until judged.
+- Iso unit A (Fable 5.1 subagent) delivered src/vtt/iso/pixel-art/* (40-colour palette as a type, seeded
+  mulberry32, RGBA bitmap painter with Bayer dithering, 19 tile kinds, 11 sprite archetypes × footprints ×
+  2 frames, 5 marks, 4 HP rings, shelf-packed atlas) with 23 tests, mutation atlas_uses_unseeded_random
+  killed and restored by cmp; its own findings fixed (palette overflow, outline bleed, unseeded variants,
+  a 26 s deepEqual replaced by a byte loop rather than a timeout raise). Supervisor rulings on its three
+  questions, applied to the frozen contract: PixelArtAtlas gains `bitmap` (RGBA bytes) and `canvas` becomes
+  nullable headless; `markFrames(mark)` added; PLACEHOLDER_PALETTE is unit B's to define in scene.ts, not the
+  contract's. Codex reviews the contract and A's toolkit before the round closes.
+
+D509 AMENDED — OWNER: "Just run Luna medium with the winner of Luna low" (2026-09-04 11:52). The Luna-low winner
+is the post-shift control configuration (caveman-full renderer, mcp_minimal, KB bundle, typed_reason default;
+panel 8.06), which had already run on medium (d510-control-medium, 30/30, 0 timeouts). The rest of the chain
+was stopped: the strict-medium arm (partial, 6 min in) is VOID (file renamed *.VOID-stopped-by-owner); the
+completed final-indices-medium rows are kept as row-level secondaries only (index-0 anchoring 0.93 vs 0.94 at
+low; first decision 26/30 vs 27/30) and are not judged. Packet d510/control (Luna low d466 vs Luna medium,
+prime 619, 60 entries, leaks none) built and sent to the three seats; key sealed until the owner rules.
+Finding against my own shell hygiene: a pkill whose pattern words were in the same command line killed the
+supervisor's shell (exit 144) — the kill-loop-alone rule exists for exactly this, fourth instance.
+
+D510 — OWNER RULINGS (2026-09-04 12:20, four questions answered):
+1. Conditions: widen the DM projection so `DmVisibleCombatant` carries per-combatant conditions; the iso side
+   panel and the round-start screenshot both show them. Codex implements on main; supervisor gates.
+2. DM view: fix on main as its own commit (the KB_SUBJECTS split, below) after codex review, AND add the
+   Playwright browser suite to the routine landing gate (tsc / sg / vitest / playwright).
+3. tactical_v2: gate + commit inc5.5, rebase claude/tactical-v2 onto main, re-gate once, then increment 6.
+4. Board-shot increment 2 arms — owner: "Can't we use the runs we already did without screenshots?" Yes:
+   d490 U and V (Luna low, typed_reason, two replicates) and d510-control-medium (Luna medium) all ran on
+   engine commit 8a459180, which is byte-identical to main's engine code today (only .claude/ commits since),
+   same seed 6203001, rooms, KB, timeout and policy; round-1 prose is already identical across arms (U vs
+   control 25/30 rows byte-identical, the rest diverged fights). They are the image-off arms. New arena runs:
+   Luna low image-on ×2 replicates, Luna medium image-on ×1, Sol low image-off ×1 and image-on ×1 (5 × 30
+   rows). Before any packet is built the image-off prose of every new row must hash-match the old rows'
+   rawTurnContext per (room, round); a mismatch voids the pairing. Old rows are RE-JUDGED inside the new
+   two-arm packets (judges now receive the image too); old panel scores are not reused. Keys sealed per pair.
+
+FINDING AGAINST MAIN — THE /vtt ROUTE HAS BEEN DEAD SINCE D466 C2 (supervisor, 2026-09-04 12:30, VERIFIED).
+Two lanes independently hit it: iso unit B (Fable) and board-shot inc1 (codex) each split `KB_SUBJECTS` into
+a new src/vtt/knowledge-base-subjects.ts because src/vtt/mcp/schemas.ts imports it from
+knowledge-base-contract.ts, which imports node:crypto; Vite externalizes it to a browser shim that throws at
+module evaluation, so `import('./vtt/encounter-app')` in main.ts never resolves. I ran
+tests/browser/vtt-save-manager.spec.ts on main (PLAYWRIGHT_PORT=4283, one worker): 0/2, both stuck at the
+startup phase "Starting local database…" with no "DM controls" heading after 60 s. The import landed in
+214c2349 (D466 C2, 2026-09-03 02:26), so main's browser app has been unmountable for ~34 hours, through two
+landings that passed my tsc/sg/vitest gate. Root cause of the miss: the landing gate never ran Playwright.
+Fix per D510(2): land the split on main as its own commit once the iso review (codex 01a06d40-ce24) returns,
+then every landing gate runs the browser suite (gate-wt2.sh). Finding against my own tick: my first gate
+chain passed bare worktree names to gate-wt.sh (it expects wt-<name>) and ran zero gates; my first
+Playwright attempt on main hit port 4173 because I omitted PLAYWRIGHT_PORT. Both caught within minutes, both
+mine.
+
+D511 — OWNER (2026-09-04 13:30): "Parallelize everything you can. Look for seams in tasks to split up tasks. Experiment
+using a worktree per experiment." Three rulings on the questions that followed:
+1. Creature space: engine footprints per SRD 5.2.1 (Large 2×2, Huge 3×3, Gargantuan 4×4; docs/srd/full line 854) in
+   their own lane (claude/footprints): occupancy, movement, reach, templates, DM projection. The iso view draws 1×1
+   until it lands.
+2. The arena-alone rule is LIFTED: arms run alongside implementation lanes. Only full vitest suites, the Playwright
+   suite and production builds serialize through `flock /home/vagrant/dnd-slim-runs/gate.lock`. Every arena round
+   records the 1-minute load average; rounds over 120 s are flagged; an arm with more than 3 timeouts is void.
+3. Codex CLI stays at 0.148.0 (no gpt-6-astra upgrade yet).
+Supervisor mechanics: one worktree per lane/experiment; heavy commands in every brief carry the lock line;
+gate-wt2.sh takes the same lock; Fable subagent lanes split at file seams (iso r2a = projection/renderer/contract
+types, r2b = view/input/scene) and merge on claude/iso-vtt.
+
+SUPERVISOR NOTES (2026-09-04 14:20, parallel era, D511):
+- Landed: claude/tactical-v2 d76d1f19 (inc5.5), claude/board-shot 9da6c3b6 (inc1), claude/graph-slice 713a469f
+  (inc1, supervisor mutant SURVIVED: endpoint-kind check; killing test ordered first in inc2), claude/iso-vtt 57f4ebe4
+  (A/A2/B checkpoint, review round 1 open), main: node:crypto split (see commit). The reference DM view mounts again.
+- FINDING against my briefs: the lock path dnd-slim-runs/gate.lock is unwritable from the codex sandbox; conditions
+  inc1 and tactical inc5.6 stopped BLOCKED at their full-suite gate (correct behaviour). Lock moved to /tmp/dnd-gate.lock.
+- FINDING against my gate script: two concurrent gate-wt2 runs both took Playwright port 4310 (n=1 each); the
+  conditions Playwright gate was void. Ports now hash from the worktree name.
+- FINDING against the Fable subagent pattern: iso r2b ended its turn with its gates backgrounded ("will notify me"),
+  which a `claude -p` session cannot wait on; its gates never ran and it wrote no FINAL REPORT. Rule for Fable briefs:
+  gates run in the foreground; no backgrounding in -p mode. r2a could not hold the lock at all (its tool permission
+  refuses `flock <cmd>` as an arbitrary command runner). Supervisor gates cover both.
+- FINDING (open): round-1 prose is not a pure function of engine state. Room 6 round 1 has two prose variants across
+  five arms with identical repoCommit, seed, startingRoomDigest, stateBinding, initiative, pcTurns, offered-option
+  counts (27,3,3,3) and decisionAttempts 1: U and d510-control 15,500 bytes; V, S-strict and d512-sol 19,855 bytes
+  (extra multiattack+bonus-spell and Dash+spell option lines). Investigation dispatched read-only (prose-determinism).
+  Until explained, the D510(4) identity check pairs rows by variant, and room 6 is flagged in every packet.
+- FINDING (open): with the split in place, vane-warren-entry.spec reaches the DM view and throws
+  "Interactive SELECT has an unkeyed SELECT ancestor in the draft tree" (stable-dom invariant). Three other browser
+  failures (acceptance-walkthrough, player-build-and-share, superseded-species-selection) ran under load 11; re-run alone.
+- d512 Sol low image-off: 30/30, 0 timeouts, 0 refusals, first accepted 30/30, wall median 10.6 s / max 19.2 s,
+  0 rounds over 120 s while seven lanes ran (load 3–11). Reasoning tokens median 190. Off baseline for Sol is in hand.
+
+D512 — OWNER (2026-09-04 14:35): "We should add path options for visible on each screenshot for each option delivered
+from the engine. Highlight in red when the path goes through opportunity attack range and if it goes over difficult
+terrain and damaging terrain." Supervisor reading: every engine-offered option that includes movement gets its path
+drawn on the round-start screenshot, labelled with the same option index the AI DM sees in prose; cells where the
+engine's own danger preview (previewMovementPathDangers: opportunity_attack, difficult_terrain, burning_surface,
+persistent_area_damage) fires are drawn red with a per-kind glyph and a legend. Own lane claude/path-overlay off
+claude/board-shot (inc1), disjoint from inc2's files; merges into board-shot before the image-on arms if it lands in
+time, otherwise as a second screenshot generation (both are recorded on the row so packets can tell them apart).
+D512 AMENDED — OWNER (2026-09-04 14:30): "Look at how bg3 shows path overlay and use that for an example." Design
+conventions only (no assets/names/palettes): one path line from the mover to the destination; colour change where
+the move crosses difficult terrain; a sharp arrow from the threatening enemy to the point on the path where the
+opportunity attack triggers; a destination marker with the distance; the part of the path beyond remaining movement
+shown differently. Owner's red rule wins for hazard colouring. Lane redispatched with the amended brief (first
+session killed at 10 min, 0 edits kept).
+
+
+D513 — OWNER (2026-09-04 14:45), three rulings:
+1. Image-on arms START as soon as inc2 lands (plain screenshots); the path-overlay arms are a second screenshot
+   generation, marked on every row (boardImage.generation), never mixed in a packet.
+2. Footprints plan (round 2, sha e88c0d92…) open rulings: SUPERVISOR DEFAULTS = codex's recommendations, recorded here;
+   the owner overrides any later. Default 9 changes the meaning of FROZEN for src/vtt/intel/contracts.ts and is flagged
+   to the owner explicitly.
+3. D504 UI feedback: a separate optional MCP tool `engine.submit_ui_feedback`, at most once per round after the
+   accepted decision, only in image arms, never scored; judges get the same question in their packet.
+Footprint defaults (plan §Open rulings, recommendation text verbatim):
+  1. Anchor convention: north-west.
+  2. Tiny capacity: capacity four, same GridCell geometry, stacked visual until subcell coordinates are separately designed.
+  3. Authored opening contract: approve; do not infer apertures from obstacles.
+  4. Forced shared endpoints: permit forced sharing; at end turn apply Prone when the actor is non-Tiny and is not larger than every overlapping creature; keep the shared placement until moved.
+  5. Failed growth/reversion/re-entry: reject discretionary Enlarge/form entry atomically; for mandatory Wild Shape/form expiration and banishment return, create a typed pending-placement state that cannot act until the DM selects a terrain-valid placement. Creature overlap may then follow ruling 4; walls/bounds never do.
+  6. Cover aggregation: least tier across permitted pairs; Total only when every pair is total; stable source ids from the chosen pair.
+  7. Fog boundary: disclose the complete footprint of a detected creature; hidden creatures disclose none.
+  8. Capsule schema: schema 2 with no compatibility layer in pre-alpha.
+  9. Frozen intel meaning: bytes remain frozen; explicitly authorize only the enumerated policy-literal changes plus a required closed movement-mode field if the movement result needs it, and prohibit every other key/discriminant change.
+  10. Public MCP exposure: add required footprint/size/mode to the public combatant summary and bump its governing response policy/schema if one exists.
+  11. Serialized-change register: approve only listed fields/versions; one-way migrate persisted user sessions/replays containing old paths to explicit normal mode; hand-author changed fixtures from the contract, never from runtime output.
+  12. Diagonal movement: preserve destination-only eight-way semantics for all sizes unless a separate corner rule is requested.
+
+SUPERVISOR POLICY (2026-09-04 14:58) — browser-suite gates. The full Playwright suite takes ~54 min on this box at one
+worker and the D511 lock serializes it; three lane gates queued behind each other put the screenshot lane (owner
+priority) two hours out. Rule: the FULL browser suite runs at main landings and for lanes that change src/vtt UI or
+tools/ai-dm-board-snapshot; non-UI lanes (tactical_v2, graph-slice) get tsc/sg/vitest plus only the specs they touch.
+Applied now: tactical inc5.6 and graph-slice inc2 browser gates stopped (already committed on vitest-green gates);
+iso-r2a's full-suite run and the conditions lane's queued full-suite run stopped so board-shot inc2 takes the lock
+first. Conditions gets a supervisor gate with the DM-view specs; iso r2a/r2b get iso-view.spec. Finding against
+myself: I put the full suite in every lane brief without measuring it first.
+
+D514 — OWNER (2026-09-04 15:45), footprints plan rulings gated before Increments 2–4 (plan round 3, sha 9a714cdf):
+1. Migration: one-way session 11 / replay 6 decoders; known sizes carry over, old paths become normal mode, unknown
+   size or unknowable size-effect becomes an explicit pending state the DM resolves; never guess Medium.
+2. Growth that no longer fits (Wild Shape reversion beside a wall, Enlarge beside a creature): AUTO-RELOCATE to the
+   nearest legal anchor, deterministically (overrides the plan's pending-placement recommendation for this case: the
+   plan's pending-placement machinery is NOT built; tie-break: smallest Chebyshev distance, then row-major). If no
+   legal anchor exists within the board, the transition is rejected with a typed refusal.
+3. Per-step terrain and hazards for multi-cell creatures: owner said "research community rulings". Result (EN World
+   thread on large monsters and difficult terrain, the d20 SRD "most difficult terrain" rule inherited by 5e tables,
+   rpgbot): count ONLY newly entered cells; the step costs as the most difficult terrain among the cells being
+   entered; cells the creature already occupied do not re-charge. Entry hazards fire for newly entered cells only;
+   ongoing/occupancy effects evaluate the whole footprint. This REPLACES the plan's "retained difficult cell still
+   counts" recommendation.
+4. Creature-provided cover: owner said "research community rulings". Result (Jeremy Crawford, 2018: "A creature
+   provides half cover, regardless of that creature's size"; DMG 251 lets a DM rule a group gives three-quarters;
+   Foundry cover modules trace best attacker corner to the target's corners and treat tokens as blockers): an
+   intervening creature grants Half Cover flat, no half-of-target oracle. Intervening = its footprint blocks any
+   line from the best attacker cell corner to the target's corners using the existing rasterizer; multiple
+   intervening creatures still give Half Cover (three-quarters is a DM option, default off). This REPLACES the plan's
+   ceil(targetCells/2) oracle.
+Supervisor defaults (not asked, UI/topology): 5 opening topology = plan rec; 6 audience-specific hidden geometry =
+plan rec (DM board shows every placed footprint incl. hidden-from-players, player projection per D513 rule 7);
+7 shared-cell stack interaction = plan rec.
+
+SCREENSHOTS LIVE IN THE ARENA (supervisor, 2026-09-04 17:42). board-shot inc2 committed ff1a6ca9 on claude/board-shot
+after my gate (tsc 0, sg 0, vitest 550/9618) and mutation (image-before-text fails the text-first test). Smoke
+(1 room, Luna low, --board-image png): boardImage {png, 26,417 B, 764×684, 317 ms capture}, effort recorded, first
+decision accepted, 16 tool calls, no image bytes in rawTurnContext; the PNG viewed by the supervisor shows tokens,
+difficult terrain, light, obscurement, doors and hazards. FINDING: token labels are truncated ("Refer…", "Sabe…") so
+identity is not readable from the picture; no HP band, coordinates or legend — legibility increment queued after
+path-overlay (brief-board-shot-inc4-legibility). D513(1): image-on arms started 17:42 from worktree dnd-wt-arena-img
+at ff1a6ca9 (run-d513-image-on.sh: luna-low-on-1, luna-low-on-2, luna-medium-on, sol-low-on; 30 rows each; load
+logged; off arms = d490 U/V, d510-control-medium, d512-sol-low-off). Identity check per D510(4) before packets.
+inc3 (UI feedback tool, D513(3)) dispatched on claude/board-shot (01a06e5a). footprints inc1 committed 7032e199.
+browser-fix harvested: both main browser failures have first-bad commits (367527f7 unkeyed activation <select>;
+e71242fd composer link as document navigation) and fixes; codex reports Chromium 182/182; supervisor full gate queued.
+
+D515 — OWNER (2026-09-04 17:50): "Use your design ability as fable to make it look like modern retro inspired games
+in 16bit style with some higher resolution. It looks ugly." Supervisor: art-direction pass on the isometric view as
+its own Fable unit (claude/iso-art off claude/iso-vtt), confined to src/vtt/iso/pixel-art/* plus the resolution
+constants in the iso contract (atlas native resolution doubles: TILE 128×64, WALL_RISE 80, SPRITE 96×128; the
+camera's integer zoom starts at 1 so a 20-cell room still fits a 1080p viewport). The supervisor writes the art
+bible (brief-iso-art-C.md) and judges each round's screenshot; at most three rounds. Still inspiration only: no
+assets, palettes or names lifted from any game.
+
+D516 — OWNER (2026-09-04 17:55): "Use your design abilities as fable to do a higher resolution pass improvement on
+the current ui as well. It looks like a bad nes game instead of a great snes inspired modern retro game." Supervisor:
+second Fable art unit, claude/classic-art off claude/board-shot (inc2), owning the starter art generator
+(src/assets/**), the board/DM-view stylesheet, and a new label/legend module; the screenshot cell size rises from
+40 to 64 CSS px (20-cell room = 1280 px, the capture viewport) with the PNG budget unchanged. Folds in the
+legibility items (full names, HP band, coordinates, legend) so only one lane draws labels. Same art bible as D515,
+top-down grammar. Path-overlay merges on top; both lanes append to styles.css.
+
+SUPERVISOR RULINGS (2026-09-04 18:45) on the image-packet builder's two questions:
+1. D510(4) identity: the mismatching (room, round) rows between d513 image-on arms and the d490 off arms are the
+   model's own `maximum_options_per_actor` choices (traced 14:20), not engine differences; the packet build proceeds
+   with those rows kept and flagged in the report (README's hard block is overridden for this family only).
+2. inc2 rows carry no `boardImage.generation`; implicit "none" is accepted for this generation and is named
+   "g1-plain" in reports; the path-overlay and classic-art generations must set the field explicitly.
+Luna-low judging launched (packets 631/641, three seats, images attached via codex -i and Read-only claude seats).
+Iso art round 1 (unit C) screenshot reviewed: sprites, walls and floors now read as 16-bit at 2× density; open
+critique for round 2: floor and wall tops merge in the same blue-grey, the wall-top dither reads as noise at 2×,
+the room is cropped by the 960-px canvas clamp (camera is the supervisor's), labels are the sibling's fillText and
+overlap until renderLabel/stackLabelOffsets are wired in the r2 integration unit.
+
+D517 — OWNER (2026-09-04 18:55): "Compare the iso to Diablo 2. Make the close walls translucent. Do a mood lighting
+pass." Supervisor: conventions only (no assets/palettes/names): dark ambient with warm pools of light, a light
+radius that falls off into cool darkness, desaturated shadow, walls nearest the camera fade to translucent when they
+would occlude a token or the hovered cell. Runs as ONE Fable unit (D) on the merged iso branch (r2a + r2b + art C
+merged into claude/iso-vtt first), owning renderer/scene/view and pixel-art together; the camera default becomes
+fit-to-room at integer zoom with the 960-px clamp removed (supervisor's camera ruling).
+
+SUPERVISOR NOTES (2026-09-04 19:05):
+- Iso lane: r2a 17b7bc0c and r2b 454fe34b committed after quick gates (tsc/sg/iso tests/iso spec) and my mutations
+  (depth order reversed -> 5 failures; staged-move invalidation weakened -> 2 failures); art C e56d77f7 committed
+  (my palette mutation: the first attempt edited a comment and was VOID; the real one on the shadow-hue call killed
+  2 tests). All three merged into claude/iso-vtt (c960ebf6); two test-file conflicts resolved toward r2b, art C's
+  seam edits there re-applied by unit D. Unit D (D517 mood lighting, translucent near walls, camera fit-to-room,
+  label wiring, door_open kind) dispatched on the merged branch.
+- Classic art (D516) delivered by its Fable unit: 64-px generated tiles, archetype busts, board-chrome (full names
+  with obstacle-aware stacking, HP bars via actor-knowledge's hitPointKnowledge, zero-based engine coordinates on all
+  edges, legend); unit ran tsc/sg/219 tests and the three specs WITHOUT the lock (its tool permission refuses
+  flock; stated loudly); capture 1140×1012 / 1588×1140, PNG 229 KB; mutation labels_truncate_again killed. Its own
+  critique: world-object labels still cell-clipped; DM headings not bitmap; per-cell data-URI duplication. NEEDS-RULING
+  items: stale docs/design/assets-preview/starter-art-board.svg (delete at landing); seam edits to
+  tools/ai-dm-board-snapshot-check.ts, encounter-package.ts, intel/actor-knowledge.ts (export only) accepted; legacy
+  monster ids share archetype bytes (accepted); 24-column boards exceed 1280 px but are captured whole (accepted).
+  Supervisor gate running (tsc/sg/touched tests/full vitest/three specs under the lock); mutation and commit follow.
+- D513 judging: both Luna-low packets judged by all three seats, 60/60 valid each, uiFeedback field present; keys
+  SEALED (d513/luna-low-on-1, d513/luna-low-on-2). Luna-medium arm running; Sol-low next.
+
+D518 — OWNER (2026-09-04 19:30): "Retry reducing the text (all 5 categories) sent on the arms that have a screenshot
+with them. Let's see if we don't need to send as much text if we send a screenshot." Supervisor: the five D443
+categories reduced together on the caveman-full profile (rows best_exception, opportunityCost conditional, movement
+material_only, threats counts_exception_ids, gating = frontier candidates_summary / knowledge relevance_gated /
+failures headline_codes / adverts stubs / rare triggered / misc merged); profile d514-profile-reduced.json. Arms
+(d514, worktree dnd-wt-arena-img at ff1a6ca9, same seeds): luna-low-reduced-on, luna-low-reduced-off (control
+isolating the picture), luna-medium-reduced-on, sol-low-reduced-on, 30 rows each. Packets: reduced-on vs the d513
+full-text image-on arm of the same model/effort (primes 653, 659, 661), plus reduced-off vs d490 U (673). Keys sealed.
+
+D519 — OWNER (2026-09-04 19:36): "we should test Luna low and medium to make sure it can understand what is in the
+screenshot or if we need to tweak the ui until it understands all of the info in the screenshot." Supervisor: a
+screenshot-comprehension probe (claude/screenshot-probe off claude/board-shot): render boards from known states with
+BoardSnapshotService, send ONLY the PNG plus a fixed structured question set, score the answers against the DM
+projection (exact match per fact class), report per-class accuracy for Luna low and Luna medium (Sol low as a
+reference seat). Runs on the g1 art now and again on each art generation; UI tuning targets the weakest fact class
+until every class is ≥ 0.9 at Luna low. Probe rows are never mixed into arena rows or packets.
+
+LANDED ON MAIN (supervisor, 2026-09-04 19:40): claude/browser-fix merged. With this and the node:crypto split, the
+browser suite on main is 182/182 (my run, 50 min, port 4710) for the first time since D466 C2. D513 judging complete:
+four packets (luna-low-on-1/2, luna-medium-on, sol-low-on), three seats each, 60/60 valid, keys SEALED pending the
+owner's word. D514 reduced-text arms running (started 19:36). Classic-art full vitest 9651 green; specs running.
+
+D520 — OWNER (2026-09-04 19:45): (1) UNSEAL D513 now (four packets). (2) Classic art (D516) stays on its branch until
+path-overlay merges; one combined landing; arena keeps g1 art meanwhile. (3) Engine lanes continue in parallel:
+tactical_v2 rebase onto main then increment 6; graph-slice increment 3; footprints increment 2 (D514 applied).
+(4) The iso view lands on main behind ?view=iso after codex review round 2 closes; footprints stay 1×1 until the
+engine lane lands.
+
+D513 UNSEALED (owner D520, 2026-09-04 19:50). Packets pair arm-a = image ON, arm-b = image OFF; the report's
+"arm-b − arm-a" is therefore OFF minus ON (negative = the picture helped). Panel means (n=30 paired, seed-clustered
+95% CI):
+  luna-low-on-1 vs U:        on 8.01, off 7.86, off−on −0.16 [−0.63, +0.24]
+  luna-low-on-2 vs V:        on 8.16, off 7.41, off−on −0.74 [−1.29, −0.31]   (CI excludes 0)
+  luna-medium-on vs control: on 8.20, off 7.87, off−on −0.33 [−0.73, +0.02]
+  sol-low-on vs sol-off:     on 7.84, off 7.81, off−on −0.03 [−0.12, +0.04]
+Reading: the picture helps Luna low (two replicates, +0.16 and +0.74; the second clears its interval), helps Luna
+medium by about a third of a point at the edge of its interval, and does nothing for Sol low, which is already at
+its text ceiling. CAVEAT (blinding): in an image packet the entries carrying a PNG are the image-on arm by
+construction, so seats could tell the arms apart; an image-blind rejudge of the same four packets (family d513t,
+same primes, images stripped, original judge script) was launched at 19:50 to bound that effect. Keys for d513t
+sealed until read beside these.
+
+D521 — OWNER (2026-09-04 20:00): "I still want the ai judges to have the screenshots to help them judge." Supervisor:
+judges keep the pictures. Blinding is restored by giving BOTH arms a picture: a new arena mode
+--board-image capture_only records the PNG per round (same capture, same row fields) without delivering the image
+block to the DM (the off-arm byte-identity test must still pass for prompt, startup and get_turn_context bytes).
+Off arms rerun in capture_only (d490 U/V-equivalents, the medium control, sol-off, and d514's reduced-off), so every
+2-arm packet carries 60 images and image presence no longer identifies the arm. The d513t text-only rejudge continues
+only as a bound on judge behaviour, not as the scoring method. Increment "board-shot inc2.5 capture_only" dispatches
+after inc3 leaves the same files.
+
+D513t UNSEALED (image-blind rejudge of the same four packets, images stripped, same primes; 2026-09-04 20:05).
+Gain from the picture (on − off), judged WITH images vs judged BLIND to images:
+  luna-low-on-1:  +0.16 → +0.08   (blind CI [−0.32, +0.60])
+  luna-low-on-2:  +0.74 → +0.57   (blind CI [−0.03, +1.26])
+  luna-medium-on: +0.33 → +0.12   (blind CI [−0.16, +0.53])
+  sol-low-on:     +0.03 → +0.10   (blind CI [−0.02, +0.26])
+Reading: judges seeing pictures inflated the Luna deltas by 0.1–0.2, but the ordering and most of the size survive
+blind: the picture's benefit for Luna low is real in the second replicate and small-to-nil elsewhere; Sol unchanged.
+Per D521 the standing method is images for BOTH arms (capture_only reruns); these blind numbers stand as the bound.
+
+D522 — OWNER (2026-09-04 20:15): (1) The screenshot is the DEFAULT DM input for every future arm and experiment
+(graph-slice, footprints A/Bs, tactical): arms capture and deliver the picture; byte-identity fixtures move to the
+image-on baseline; text-only arms only when an experiment is about the picture. Applies to briefs from now on
+(graph-slice inc3 in flight keeps its off-mode fixtures AND gains image-on ones at its next increment).
+(2) Iso round D2 starts now on the supervisor's critique, in a sibling worktree (claude/iso-d2 off claude/iso-vtt) so
+codex's read-only review round 2 keeps a stable tree; D2 merges after the review; codex findings get a D3 if needed.
+
+JUDGE UI FEEDBACK (D504, from the d513 image packets; supervisor compile 20:20): 240 comments per claude seat. Judges
+used the picture mainly to confirm distances and positioning ("board shows monsters top-right far from party,
+confirming attacks were out of reach and dashing was sensible"). Recurring asks: names truncated (fixed by D516
+classic art), HP not visible (D516), weapon/spell ranges and reach not shown (path-overlay D512 covers movement
+hazards; a range-ring overlay for the acting creature is a candidate for the next screenshot increment). Off-arm
+entries read "No picture was provided; judged from plan text alone" — the blinding gap D521 closes.
+
+ISO REVIEW ROUND 2 (codex 01a06ee3, read-only, 2026-09-04 20:25): no blocker; 7 MAJOR, minors. Accepted for round D3
+(after D2 merges): (1) fitCamera cannot reach zoom 2 for the reference room because the 2× atlas density was folded
+into the logical 64×32 projection unit — separate atlas pixels from logical units and render the 2× art at integer
+scale; (2) widened frame/variant indices still compile (round-1 finding 4 not closed; the test even accepts invalid
+calls); (3) tall sprites whose heads extend past the board cannot be picked; (4) mood lighting ignores the board
+model's mechanical bright/dim cell sets — derive bands from them, keep artistic emitters separate; (5) NaN/negative
+radius maps to full light — validated radius types; (6) atlas construction failures escape the placeholder fallback;
+(7) the atlas golden was regenerated from output. FINDING AGAINST MY OWN BRIEFS: I authorized regenerating art-hash
+expectations in the C, D and D2 briefs; that contradicts the standing rule. Ruling: the hash test stays as drift
+detection but a digest change is approved only through independent pixel-level invariants (facet count, band
+luminance ratios, seam equality, palette rule) reviewed in the same commit — the D2 brief's allowance is withdrawn
+at merge time (D2's hash change must come with those invariants or be reverted). Minors: locale-dependent id sort in
+scene (use compareIdBytes), door_open unreachable from encounter data (needs a projected door state).
+PROBE (D519): the codex lane could not run real model calls (codex must write its own home during start-up; the
+sandbox forbids it) — correct stop; the K=6 run launched by the supervisor outside the sandbox at 20:27.
+
+D523 — OWNER (2026-09-04 20:35): "Add a small note in the instructions that each square on the map is supposed to be
+5 feet." Applied in three places: (1) the AI DM's image-arm startup instructions gain one sentence ("Each grid square
+on the board image is 5 feet; distances in the text are in feet.") — folded into board-shot inc2.5 (capture_only)
+so off-arm bytes stay identical and png/capture_only arms carry the line; (2) the judge prompt header in
+judge-one-img.sh (supervisor edit, one line, outside the repo); (3) the D519 probe's question preamble at its next
+increment.
+
+D519 PROBE RESULT, g1 art (supervisor run outside the sandbox, 20:22–21:05; 6 states × 10 questions × Luna low and
+medium; only the PNG and the question reach the model): Luna CANNOT read the current screenshot. Mean Jaccard per
+class, low / medium: creatures+coordinates 0.03 / 0.03; sides 0.08 / 0.04; HP bands 0.00 / 0.17; difficult terrain
+0.55 / 0.37; light levels 0.17 / 0.17 (dominant confusion: BRIGHT read as DARK, 485 / 923 times); doors 0.17 / 0.17;
+adjacency 0.00 / 0.17; hidden creatures 0.00 / 0.33; fog/obscurement 0.16 / 0.40; blocked cells 0.01 / 0.16.
+Hallucinations are massive (light: 706 / 1125). Strict gate FAIL on every class for both efforts. Reading: g1 has no
+coordinates, truncated names, no legend, and its bright-light tint reads as darkness to the model; the D513 gains
+therefore came from coarse layout cues (which side of the room the enemies are on), consistent with the judges'
+comments. The probe reruns on the D516 classic art (names, coordinates, legend, HP bars) as soon as it commits;
+the target stays every class ≥ 0.9 at Luna low, and the light-level palette is the first thing to change if it
+still reads inverted.
+
+FINDING (2026-09-04 21:21): the Fable D2 unit dispatched at 20:15 did nothing — `claude -p` returned "You've hit your
+session limit · resets 9pm". Six Fable units and several `claude -p` judge seats ran today; the limit was reached
+around 20:15 and reset at 21:00. Relaunched at 21:22. Rule: check a Fable unit's log within a minute of dispatch
+for this message; a 63-byte log is the signature.
+
+D524 — OWNER (2026-09-04 21:35): "Still give the ai dm being tested the general info that this is a ttrpg and the
+basics of how it works so it knows better what it is looking at. Don't give it the full room description." Applies to
+the D519 probe (and, as the same primer, to the image-arm startup instructions): a fixed GENERAL primer — a tabletop
+RPG combat board viewed from above; each square is 5 feet; tokens are creatures, party vs foes by base colour; the
+numbers along the edges are zero-based column,row; bars under tokens are hit-point bands; the legend names the
+terrain tints and glyphs; walls, doors and objects as drawn — and NOTHING about the specific room (no names, counts,
+positions, terrain facts). The primer is versioned with the question set so probe rows say which primer they used.
+
+D525 — OWNER (2026-09-04 21:45): (1) UNSEAL D514 now, labelled generation g1 (the picture Luna could barely read);
+a g2 rerun is a later second generation. (2) NO arena reruns on g2 yet: keep iterating the classic UI with the
+comprehension probe until every class is ≥ 0.9 at Luna low; only then rerun the image experiments. (3) Claude account
+priority: the fable JUDGE seat comes first; Fable art/iso units wait when the account is near its session limit.
+
+D514 UNSEALED (owner D525, g1 picture; arm-a = REDUCED text, arm-b = FULL text; "arm-b − arm-a" = full − reduced):
+  luna-low  reduced+img 8.27 vs full+img 8.12   → reduced +0.14  [−0.13, +0.44]
+  luna-low  reduced no-img 7.57 vs full no-img 7.37 → reduced +0.21 [−0.23, +0.77]  (n=29 paired; one row lost)
+  luna-med  reduced+img 7.89 vs full+img 8.08   → reduced −0.19  [−0.40, −0.01]  (CI excludes 0)
+  sol-low   reduced+img 8.17 vs full+img 8.07   → reduced +0.10  [−0.16, +0.51]
+Reading: at LOW effort a third of the text costs nothing, picture or not (the reduced prose is 11.5 KB vs 32 KB);
+at MEDIUM the full text is worth about a fifth of a point. The picture did not "make up" for text — on g1 it could
+not have — but low-effort Luna was never using the dropped five categories. Second generation on g2 art later.
+
+D519 PROBE, g2 (classic art), 2026-09-04 22:05 — FINDING against the probe's scoring first: the tool compares names
+case-sensitively; the classic art renders plates in UPPERCASE, so every Q1/Q2 answer with the right creature at the
+right cell scored 0 (e.g. answer "REFERENCE WIZARD" at 1,2 vs truth "Reference Wizard" at 1,2). Rescored by the
+supervisor with case-folded, whitespace-collapsed names (same Jaccard rule; Q4–Q10 unaffected):
+  class:            Q1 id+cell  Q2 side  Q3 HP  Q4 difficult  Q5 light  Q6 doors  Q7 adjacent  Q8 hidden  Q9 fog  Q10 blocked
+  g1 low / medium:   0.03/0.03  0.08/0.04 0.00/0.17 0.55/0.37  0.17/0.17 0.17/0.17 0.00/0.17   0.00/0.33  0.16/0.40 0.01/0.16
+  g2 low / medium:   0.78/0.66  0.81/0.68 0.42/0.41 0.30/0.38  0.15/0.06 0.17/0.17 0.28/0.36   0.33/0.22  0.05/0.78 0.37/0.38
+Reading: the classic art fixes identity and coordinates (0.03 → 0.78 at low). Still failing: light levels (bright
+still read as dark/dim — the tint encoding, not the labels), doors (the glyph is not read as a door), HP bands
+(bar colours confused with "unknown"/"critical"), adjacency (derived, should follow Q1 once cells are exact — it
+does not yet, so answers are partly hallucinated pairs), fog at low. Next UI variants in that order (D525: probe
+first, no arena reruns). The probe's next increment case-folds names in the scorer; the primer run (inc2) is gated
+and will be rerun with that fix.
+
+SUPERVISOR RULING (2026-09-04 22:40) — footprints inc2 stopped BLOCKED, correctly: pack monsters and custom forms
+must persist a mechanical size (no Medium guess, D514), which changes the content-pack schema, whose exact published
+copy lives at docs/specs/content-pack.schema.json — a path my COMMON RULES forbid. That file is a GENERATED artifact of
+the code, not prose. Ruling: lanes may update docs/specs/*.schema.json ONLY by running the repository's schema
+generator (never by hand), and the increment's report must show the generator command and the resulting diff. The
+no-docs rule stands for everything else under docs/**. Codex's first locked suite on this increment showed 251
+failures before its fixes; the resumed session must finish with a real post-edit locked full suite and done-file.
+
+LANDINGS ON BRANCHES (supervisor, 2026-09-04 22:50): path-overlay inc1 5e4dbc6e, board-shot inc3 c82696a5,
+conditions inc1 d3c06ae6, graph-slice inc3 cf1bf2b9, probe inc2 7460325d, iso D2 1744049c (merged into iso-vtt), each
+after my forced gate and my own mutation (survivors and voids named in the commit messages). inc2.5 capture_only
+dispatched on board-shot (01a06f70). Per D520(2) the combined board landing (inc2+inc3 + path-overlay + classic
+art) is being assembled on claude/board-merge; conflicts resolved there, gated, then fast-forwarded once inc2.5 lands.
+Footprints inc2 resumed under the generated-schema ruling. Tactical inc6 delivered (CC0 public fixture, replay
+digests, provenance audit zero hits); gate queued.
+
+D519 PROBE, g2 + general primer (D524), rescored case-folded, 6 states, low / medium (arrow = no primer → primer):
+  Q1 id+cell 0.78→0.66 / 0.66→0.68; Q2 side 0.81→0.78 / 0.68→0.66; Q3 HP 0.42→0.34 / 0.41→0.52;
+  Q4 difficult 0.30→0.49 / 0.38→0.60; Q5 light 0.15→0.17 / 0.06→0.07; Q6 doors 0.17→0.08 / 0.17→0.22;
+  Q7 adjacent 0.28→0.53 / 0.36→0.60; Q8 hidden 0.33→0.00 / 0.22→0.25; Q9 fog 0.05→0.12 / 0.78→0.62;
+  Q10 blocked 0.37→0.03 / 0.38→0.18. Reading: the primer helps the classes it explains (difficult terrain,
+  adjacency, HP at medium) and hurts blocked/hidden — the primer's wording for those two needs the legend's exact
+  glyph names; light stays unreadable regardless of words, so the tint encoding is the next UI change (D525 order:
+  light, doors, HP, adjacency). Six states is noisy; the next runs use 12 states.
+
+SUPERVISOR NOTES (2026-09-04 23:58): iso D3 committed 26ab27dc (review round 3 in flight, LAND/HOLD requested);
+board-shot inc2.5 capture_only committed f7400638; board-merge c2bb320b = inc2+inc3 + path-overlay + classic art,
+conflict resolved by codex, gate queued (inc2.5 merges in after it). D521 capture_only reruns of the four off arms
+started 23:53 from dnd-wt-arena-img2 at f7400638 (g1 art, engine identical). Light encodings delivered ('inverse',
+'symbol' behind a closed option, default 'tint'); the probe runs on all three (6 states, Luna low+medium) since
+23:37. Combined-board screenshot reviewed: paths' polylines too faint, badges pile at the top-right, the movement
+legend box covers cells 13–16 of rows 11–12 — a path-overlay round 2 (legend outside the grid, thicker lines with
+dark halo, badge stacking) is briefed after the probe says whether paths help or hurt comprehension.
+
+ISO REVIEW ROUND 3 (codex 01a06fa4, 2026-09-05 00:20): HOLD. No blocker; three MAJORs: (1) the darkness pass draws the
+opaque shaded floor over difficult-terrain/area/movement overlays on band-0 cells (the draw-order test approves the
+faulty order); (2) sprite picking samples the native surface while zoom 1 and 3 display the 1× mip, so mip-visible
+edge pixels miss clicks; (3) colour+mip+shade+shade-mip retained ≈120 MB before canvases; placeholder canvases eager.
+Minors: unbranded atlas region coordinates, size/footprint not type-related (latent srd_space path), and two more.
+Unit D4 dispatched for the three majors and the region-brand minor; landing on main behind ?view=iso after a clean
+round 4 (D520).
+
+D525 LIGHT ENCODINGS, probe (6 states, case-folded, low / medium), tint (primer v2 with the light sentence) → inverse:
+  Q5 light 0.46→0.31 / 0.65→0.55 — 'inverse' is WORSE: with bright cells unmarked the model omits them
+  (1,368 "fact omitted"); the tint encoding with an explicit primer sentence ("pale warm tint = bright light") jumped
+  from 0.17/0.07 (no sentence) to 0.46/0.65. HP 0.27→0.46 / 0.61→0.80 and difficult terrain 0.43→0.73 at medium
+  improved under inverse (fewer competing overlays). Doors 0.08→0.00 and blocked cells still near zero in both.
+  'symbol' pending. Reading so far: an explicit marker per light level plus a primer sentence naming it is the
+  lever, not removing overlays; doors/blocked need their own glyph + primer wording next.
