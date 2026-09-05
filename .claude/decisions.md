@@ -10312,3 +10312,12 @@ D525 — OWNER (2026-09-04 21:45): (1) UNSEAL D514 now, labelled generation g1 (
 a g2 rerun is a later second generation. (2) NO arena reruns on g2 yet: keep iterating the classic UI with the
 comprehension probe until every class is ≥ 0.9 at Luna low; only then rerun the image experiments. (3) Claude account
 priority: the fable JUDGE seat comes first; Fable art/iso units wait when the account is near its session limit.
+
+D514 UNSEALED (owner D525, g1 picture; arm-a = REDUCED text, arm-b = FULL text; "arm-b − arm-a" = full − reduced):
+  luna-low  reduced+img 8.27 vs full+img 8.12   → reduced +0.14  [−0.13, +0.44]
+  luna-low  reduced no-img 7.57 vs full no-img 7.37 → reduced +0.21 [−0.23, +0.77]  (n=29 paired; one row lost)
+  luna-med  reduced+img 7.89 vs full+img 8.08   → reduced −0.19  [−0.40, −0.01]  (CI excludes 0)
+  sol-low   reduced+img 8.17 vs full+img 8.07   → reduced +0.10  [−0.16, +0.51]
+Reading: at LOW effort a third of the text costs nothing, picture or not (the reduced prose is 11.5 KB vs 32 KB);
+at MEDIUM the full text is worth about a fifth of a point. The picture did not "make up" for text — on g1 it could
+not have — but low-effort Luna was never using the dropped five categories. Second generation on g2 art later.
