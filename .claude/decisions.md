@@ -10895,3 +10895,12 @@ the plate text is now two lines of small pixel font inside a 64-px cell — whet
 question. Fifteen-seat review dispatched (Fable, Opus at medium, codex sol high × five perspectives, judges given
 the private research notes for their perspective). The 24-state probe on this round runs after the verdicts if
 no seat holds on a machine-readability blocker; otherwise the fix round comes first.
+
+D531 — OWNER (2026-09-05 12:55): PAUSE dispatching new iso work. Context: the owner asked why the five-hour Claude
+limit drains so fast; the supervisor's usage audit (per-session logs, last five hours, ~3,000 requests, 13M output
+tokens, ~90% Fable) found the Fable iso implementation units the largest single cost (5.7M output; D13 alone 1.9M so
+far), then the fifteen research units (one Fable seat 4M), then the review panels when fifteen run in one hour.
+Effect: D13 (running) finishes and is harvested and committed; D14 (art pass), further iso review rounds, the iso UI
+unit for coordinate labels/legend, and any new iso probe run are NOT dispatched until the owner lifts the pause.
+The iso BASELINE probe already running (Luna medium, codex-side spend, not the Claude limit) completes and is
+recorded. Classic lane, footprints, research synthesis and the classic review panel continue.
