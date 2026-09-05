@@ -10321,3 +10321,17 @@ D514 UNSEALED (owner D525, g1 picture; arm-a = REDUCED text, arm-b = FULL text; 
 Reading: at LOW effort a third of the text costs nothing, picture or not (the reduced prose is 11.5 KB vs 32 KB);
 at MEDIUM the full text is worth about a fifth of a point. The picture did not "make up" for text — on g1 it could
 not have — but low-effort Luna was never using the dropped five categories. Second generation on g2 art later.
+
+D519 PROBE, g2 (classic art), 2026-09-04 22:05 — FINDING against the probe's scoring first: the tool compares names
+case-sensitively; the classic art renders plates in UPPERCASE, so every Q1/Q2 answer with the right creature at the
+right cell scored 0 (e.g. answer "REFERENCE WIZARD" at 1,2 vs truth "Reference Wizard" at 1,2). Rescored by the
+supervisor with case-folded, whitespace-collapsed names (same Jaccard rule; Q4–Q10 unaffected):
+  class:            Q1 id+cell  Q2 side  Q3 HP  Q4 difficult  Q5 light  Q6 doors  Q7 adjacent  Q8 hidden  Q9 fog  Q10 blocked
+  g1 low / medium:   0.03/0.03  0.08/0.04 0.00/0.17 0.55/0.37  0.17/0.17 0.17/0.17 0.00/0.17   0.00/0.33  0.16/0.40 0.01/0.16
+  g2 low / medium:   0.78/0.66  0.81/0.68 0.42/0.41 0.30/0.38  0.15/0.06 0.17/0.17 0.28/0.36   0.33/0.22  0.05/0.78 0.37/0.38
+Reading: the classic art fixes identity and coordinates (0.03 → 0.78 at low). Still failing: light levels (bright
+still read as dark/dim — the tint encoding, not the labels), doors (the glyph is not read as a door), HP bands
+(bar colours confused with "unknown"/"critical"), adjacency (derived, should follow Q1 once cells are exact — it
+does not yet, so answers are partly hallucinated pairs), fog at low. Next UI variants in that order (D525: probe
+first, no arena reruns). The probe's next increment case-folds names in the scorer; the primer run (inc2) is gated
+and will be rerun with that fix.
