@@ -10953,3 +10953,12 @@ from AI tools — sources no older than six months (March 2026 onward) — inclu
 Fable/Astra-class agents access to Blender, and the pipeline of authoring 3D models and deriving sprites from
 them. Supervisor: three codex sol seats (network-enabled sandbox, private repo workflows/ folder, different
 angles) plus one Opus-medium cross-check seat; the supervisor synthesises a plain-English report for the owner.
+
+ISO D13 COMMITTED (2026-09-05 13:35): ae003f8d on claude/iso-vtt — engine truth (rocks only from the engine,
+mechanical layers as overlays, art-only crate/pillar dropped, mechanical light caps the band), one HP band, plates
+above heads with stems and picking, roster-independent layout; atlas hash change with independent pixel invariants
+for the three obscurement tiles. Unit mutation killed 5; my quick gate tsc 0, sg 0, iso 237/237, iso spec 1/1; my
+mutation (doors treated as blocking) killed 2. Per D531 NO review round or D14 is dispatched. Parked for the owner
+(unit's NEEDS-RULING): (a) art-only crates/pillars are dropped from the iso picture — keep dropped, or add a flat
+decoration tile kind; (b) stem endpoint at the diamond centre (a pin through the sprite) vs the bundle top;
+(c) plate reserve of one row above the tallest bundle vs two.
