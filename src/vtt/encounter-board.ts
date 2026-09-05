@@ -14,7 +14,7 @@ import type { EffectPayload } from '../combat/effects';
 import type { EncounterEvent } from '../combat/events';
 import type { GridCell } from '../combat/grid';
 import { isCellInside } from '../combat/grid';
-import { persistentAreaContains } from '../combat/persistent-areas';
+import { persistentAreaContains, persistentAreaTouchesSpace } from '../combat/persistent-areas';
 import { affectedCells, feetPoint, type AreaTemplate } from '../combat/templates';
 import { feet, type CombatantId } from '../combat/values';
 import type { EncounterEffectId, ObjectTargetId, PersistentAreaId, WorldObjectId } from '../combat/values';
@@ -362,13 +362,14 @@ function projectedLightOverlays(state: DmEncounterState): readonly EncounterBoar
 
 function projectedAreas(state: DmEncounterState): readonly EncounterBoardArea[] {
   const cells = allCells(state.bounds);
-  const tokens = new Map(state.tokens.map((token) => [token.combatantId, token.position] as const));
-  const objects = new Map(state.worldObjects.map((object) => [object.id, object.position] as const));
   const persistent = state.persistentAreas.map((area): EncounterBoardArea => {
-    const anchor = area.origin.kind === 'anchored'
-      ? tokens.get(area.origin.combatant) ?? null
-      : area.origin.kind === 'anchored_to_object'
-        ? objects.get(area.origin.object) ?? null
+    const origin = area.origin;
+    const anchorCells = origin.kind === 'anchored'
+      ? state.tokens.some((token) => token.combatantId === origin.combatant)
+        ? combatantSpace(state, origin.combatant).cells
+        : null
+      : origin.kind === 'anchored_to_object'
+        ? state.worldObjects.find((object) => object.id === origin.object)?.footprint ?? null
         : null;
     return {
       kind: 'persistent',
@@ -376,7 +377,7 @@ function projectedAreas(state: DmEncounterState): readonly EncounterBoardArea[] 
       owner: area.owner,
       ownerName: combatantName(state, area.owner),
       shape: area.shape,
-      cells: cells.filter((cell) => persistentAreaContains(area, cell, anchor, state)),
+      cells: cells.filter((cell) => persistentAreaTouchesSpace(area, [cell], anchorCells, state)),
       difficultTerrain: area.difficultTerrain,
     };
   });
@@ -717,6 +718,8 @@ export function encounterBoardRenderModel(
   }
   const combatants = new Map<string, EncounterBoardTokenModel[]>();
   for (const combatant of encounterBoardTokenRenderModels(projection, art)) {
+    // Cell-model indexing keeps one entry at the rendering origin; the separate
+    // token overlay owns the complete footprint box and must not duplicate tokens.
     const key = cellKey(combatant.position);
     const occupants = combatants.get(key) ?? [];
     occupants.push(combatant);

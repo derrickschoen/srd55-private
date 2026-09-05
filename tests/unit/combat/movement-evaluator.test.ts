@@ -59,11 +59,12 @@ function input(overrides: Partial<MovementEvaluationInput> = {}): MovementEvalua
       reachSources: [],
     },
     hazards: { status: 'resolved', cells: [] },
-    attackAt: () => ({
+    attackAt: (position) => ({
       status: 'resolved',
       input: {
         attackerId: actorId,
         targetId,
+        attackerPosition: position,
         targetPosition,
         range: {
           kind: 'ranged',
@@ -162,11 +163,12 @@ describe('movement-eval-v2', () => {
   });
 
   it('changes the guard ETA when four route cells become difficult terrain', () => {
-    const attackAt: MovementEvaluationInput['attackAt'] = () => ({
+    const attackAt: MovementEvaluationInput['attackAt'] = (position) => ({
       status: 'resolved',
       input: {
         attackerId: actorId,
         targetId,
+        attackerPosition: position,
         targetPosition: { column: 16, row: 0 },
         range: { kind: 'melee', reachFeet: feet(5) },
         attackBonus: 3,
@@ -257,11 +259,12 @@ describe('movement-eval-v2', () => {
     const speedUnknown = evaluateMovementOptions(input({
       speedPerTurn: null,
       currentMovementRemaining: feet(0),
-      attackAt: () => ({
+      attackAt: (position) => ({
         status: 'resolved',
         input: {
           attackerId: actorId,
           targetId,
+          attackerPosition: position,
           targetPosition: { column: 7, row: 0 },
           range: { kind: 'melee', reachFeet: feet(5) },
           attackBonus: 3,

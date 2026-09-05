@@ -6,6 +6,7 @@ import {
   type EncounterState,
 } from '../combat/encounter';
 import type { EncounterCommand } from '../combat/events';
+import { encounterMovementWorld } from '../combat/encounter-movement-world';
 import type { GridCell } from '../combat/grid';
 import { isCellInside } from '../combat/grid';
 import type { CombatantId } from '../combat/values';
@@ -52,16 +53,11 @@ function position(state: EncounterState, id: CombatantId): GridCell {
   return token.position;
 }
 
-function occupied(state: EncounterState, cell: GridCell): boolean {
-  return state.tokens.some(
-    (token) => token.position.column === cell.column && token.position.row === cell.row,
-  );
-}
-
 function movementActions(state: EncounterState, actor: CombatantId): readonly EncounterCommand[] {
   const subject = state.combatants.find((candidate) => candidate.profile.id === actor);
   if (subject === undefined || subject.turn.movement.remaining < 5) return [];
   const current = position(state, actor);
+  const world = encounterMovementWorld(state);
   const commands: EncounterCommand[] = [];
   for (let columnDelta = -1; columnDelta <= 1; columnDelta += 1) {
     for (let rowDelta = -1; rowDelta <= 1; rowDelta += 1) {
@@ -70,12 +66,12 @@ function movementActions(state: EncounterState, actor: CombatantId): readonly En
         column: current.column + columnDelta,
         row: current.row + rowDelta,
       };
+      const traversal = world.canTraverseStep(actor, current, destination)
+        ? world.traversal(actor, current, destination)
+        : { kind: 'blocked' as const };
       if (
         isCellInside(state.bounds, destination) &&
-        !occupied(state, destination) &&
-        !state.blockedCells.some(
-          (cell) => cell.column === destination.column && cell.row === destination.row,
-        )
+        traversal.kind === 'enterable' && traversal.canEnd
       ) {
         commands.push({
           type: 'move',

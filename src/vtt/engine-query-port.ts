@@ -6,8 +6,10 @@ import { coverBetweenCombatants, rasterizeInterveningCells } from '../combat/cov
 import {
   applySizeSteps,
   creatureSpace,
+  decodeProjectedCreatureSpace,
   effectSequence,
   minimumSpaceDistance,
+  minimumSpaceDistanceToCells,
   minimumSpaceLine,
   placementFromSerialized,
   sizedCombatantState,
@@ -23,7 +25,7 @@ import {
   type MovementEvaluation,
   type MovementEvaluationInput,
 } from '../combat/movement-evaluator';
-import { persistentAreaContains } from '../combat/persistent-areas';
+import { persistentAreaTouchesSpace } from '../combat/persistent-areas';
 import type { EffectPayload, EncounterEffect } from '../combat/effects';
 import { monsterAttackRange, monsterAttackRollModeSources } from '../combat/monster-commands';
 import { declaredMonsterTraits } from '../combat/monster-traits';
@@ -269,12 +271,12 @@ function planningRollDefenseApplies(
     case 'effect_targets_against_creatures_other_than_source': return effect.targets.includes(eligible) &&
       opposing !== effect.source;
     case 'allies_within_aura': {
-      const eligiblePosition = state.tokens.find((entry) => entry.combatantId === eligible)?.position;
-      const sourcePosition = state.tokens.find((entry) => entry.combatantId === effect.source)?.position;
       return eligibility.savingThrowCause === 'any' &&
-        eligiblePosition !== undefined && sourcePosition !== undefined &&
+        state.tokens.some((entry) => entry.combatantId === eligible) &&
+        state.tokens.some((entry) => entry.combatantId === effect.source) &&
         combatantsAreAllies(state, eligible, effect.source) &&
-        gridDistance(eligiblePosition, sourcePosition) <= eligibility.radiusFeet;
+        minimumSpaceDistance(queryCombatantSpace(state, eligible), queryCombatantSpace(state, effect.source)) <=
+          eligibility.radiusFeet;
     }
   }
 }
@@ -685,15 +687,15 @@ export function enginePlanningSemanticZones(
       memberCombatantIds: [...area.members].sort((left, right) => left.localeCompare(right)),
       active: area.duration.remaining > 0,
     }));
-  const positions = new Map(state.tokens.map((token) => [token.combatantId, token.position] as const));
   const authoredZones = (state.environment.movementRegions ?? []).map((region) => ({
     id: engineZoneId(region.id),
     kind: 'authored_encounter_zone' as const,
     memberCombatantIds: state.combatants
       .filter((subject) => subject.life !== 'dead')
       .flatMap((subject) => {
-        const position = positions.get(subject.profile.id);
-        return position !== undefined && region.cells.some((cell) => cellKey(cell) === cellKey(position))
+        const placed = state.tokens.some((token) => token.combatantId === subject.profile.id);
+        return placed && region.cells.some((cell) =>
+          queryCombatantSpace(state, subject.profile.id).cells.some((occupied) => cellKey(cell) === cellKey(occupied)))
           ? [subject.profile.id]
           : [];
       })
@@ -786,20 +788,8 @@ function isIncapacitatedByState(state: EncounterState, id: CombatantId): boolean
 }
 
 function sharesWebArea(state: EncounterState, observer: CombatantId, subject: CombatantId): boolean {
-  const observerCell = state.tokens.find((token) => token.combatantId === observer)?.position;
-  const subjectCell = state.tokens.find((token) => token.combatantId === subject)?.position;
-  if (observerCell === undefined || subjectCell === undefined) return false;
-  return state.persistentAreas.some((area) => {
-    if (area.material?.id !== 'webs') return false;
-    const origin = area.origin;
-    const anchor = origin.kind === 'anchored'
-      ? state.tokens.find((candidate) => candidate.combatantId === origin.combatant)?.position ?? null
-      : origin.kind === 'anchored_to_object'
-        ? state.worldObjects.find((object) => object.id === origin.object)?.position ?? null
-        : null;
-    return persistentAreaContains(area, observerCell, anchor, state) &&
-      persistentAreaContains(area, subjectCell, anchor, state);
-  });
+  return state.persistentAreas.some((area) => area.material?.id === 'webs' &&
+    area.members.includes(observer) && area.members.includes(subject));
 }
 
 type Detection =
@@ -809,10 +799,13 @@ type Detection =
 
 function detect(state: EncounterState, observer: CombatantId, subject: CombatantId): Detection | null {
   const observerState = combatant(state, observer);
-  const from = state.tokens.find((token) => token.combatantId === observer)?.position;
-  const to = state.tokens.find((token) => token.combatantId === subject)?.position;
-  if (observerState === null || combatant(state, subject) === null || from === undefined || to === undefined) return null;
-  const distance = minimumSpaceDistance(queryCombatantSpace(state, observer), queryCombatantSpace(state, subject));
+  const observerPlaced = state.tokens.some((token) => token.combatantId === observer);
+  const subjectPlaced = state.tokens.some((token) => token.combatantId === subject);
+  if (observerState === null || combatant(state, subject) === null || !observerPlaced || !subjectPlaced) return null;
+  const line = minimumSpaceLine(queryCombatantSpace(state, observer), queryCombatantSpace(state, subject));
+  const from = line.sourceCell;
+  const to = line.targetCell;
+  const distance = line.distance;
   const senses = rulesFor(observerState).senses;
   if (senses.some((sense) => sense.kind === 'blindsight' && distance <= sense.rangeFeet) && hasLineOfSight(state, from, to)) {
     return { kind: 'seen', sense: 'blindsight' };
@@ -1161,13 +1154,19 @@ function approach(state: EncounterState, request: EngineApproachRequest): Engine
       ? ordinaryBudget + actor.profile.rules.speed
       : ordinaryBudget
   );
-  const originDistance = gridDistance(start, request.target);
+  const originDistance = minimumSpaceDistanceToCells(
+    queryCombatantSpaceAt(state, request.actorId, start),
+    [request.target],
+  );
   const result = findPathToBest(encounterMovementWorld(state), {
     actorId: request.actorId,
     start,
     maximumCost: feet(Math.min(availableBudget, maximumPathCost(state))),
     rank: (cell) => {
-      const distance = gridDistance(cell, request.target);
+      const distance = minimumSpaceDistanceToCells(
+        queryCombatantSpaceAt(state, request.actorId, cell),
+        [request.target],
+      );
       return distance < originDistance ? [distance] : null;
     },
   });
@@ -1405,15 +1404,17 @@ function movementHazards(state: EncounterState): readonly {
     })));
     if (area.hooks.some((hook) => hook.effect.payload.kind === 'damage')) {
       const origin = area.origin;
-      const anchor = origin.kind === 'anchored'
-        ? state.tokens.find((token) => token.combatantId === origin.combatant)?.position ?? null
+      const anchorCells = origin.kind === 'anchored'
+        ? state.tokens.some((token) => token.combatantId === origin.combatant)
+          ? queryCombatantSpace(state, origin.combatant).cells
+          : null
         : origin.kind === 'anchored_to_object'
-          ? state.worldObjects.find((object) => object.id === origin.object)?.position ?? null
+          ? state.worldObjects.find((object) => object.id === origin.object)?.footprint ?? null
           : null;
       for (let row = 0; row < state.bounds.rows; row += 1) {
         for (let column = 0; column < state.bounds.columns; column += 1) {
           const cell = { column, row };
-          if (persistentAreaContains(area, cell, anchor, state)) {
+          if (persistentAreaTouchesSpace(area, [cell], anchorCells, state)) {
             values.push({ cell, kind: 'persistent_area_damage' });
           }
         }
@@ -1452,7 +1453,7 @@ function movementOptions(
       ? { status: 'unresolved' as const, reason: 'attack_context_unresolved' as const }
       : {
           status: 'resolved' as const,
-          input: (({ attackerPosition: _attackerPosition, ...withoutPosition }) => withoutPosition)(input),
+          input,
         };
   };
   const firstLegal = findPathToAny(world, {
@@ -1462,7 +1463,7 @@ function movementOptions(
     isGoal: (position) => {
       const verdict = attackAt(position);
       if (verdict.status === 'unresolved') return false;
-      const evaluation = evaluateTacticalAttack({ ...verdict.input, attackerPosition: position });
+      const evaluation = evaluateTacticalAttack(verdict.input);
       return evaluation.range.status === 'resolved' && evaluation.range.legal &&
         !evaluation.unresolved.includes('target_has_total_cover');
     },
@@ -1579,12 +1580,17 @@ export function projectedMovementOptions(
       return { status: 'unresolved', reason: 'visibility_unresolved' };
     }
     const cover = coverBetweenCombatants(state, request.actorId, request.targetId, { sourceAnchor: position }).tier;
+    const selectedLine = minimumSpaceLine(
+      queryCombatantSpaceAt(state, request.actorId, position),
+      decodeProjectedCreatureSpace(target),
+    );
     return {
       status: 'resolved',
       input: {
         attackerId: request.actorId,
         targetId: request.targetId,
-        targetPosition: target.position,
+        attackerPosition: selectedLine.sourceCell,
+        targetPosition: selectedLine.targetCell,
         range: request.attack.range,
         attackBonus: request.attack.attackBonus,
         targetArmorClass: null,
@@ -1614,7 +1620,7 @@ export function projectedMovementOptions(
     isGoal: (position) => {
       const verdict = attackAt(position);
       if (verdict.status === 'unresolved') return false;
-      const evaluation = evaluateTacticalAttack({ ...verdict.input, attackerPosition: position });
+      const evaluation = evaluateTacticalAttack(verdict.input);
       return evaluation.range.status === 'resolved' && evaluation.range.legal &&
         !evaluation.unresolved.includes('target_has_total_cover');
     },

@@ -8,6 +8,7 @@ import {
   type EncounterState,
   type MigrationAdjudicationPending,
 } from '../../../src/combat/encounter';
+import type { EncounterCommand } from '../../../src/combat/events';
 import {
   creatureSpace,
   minimumSpaceLine,
@@ -39,6 +40,69 @@ import {
 
 const FIGHTER = combatantId('combatant:fighter');
 const CLERIC = combatantId('combatant:cleric');
+
+const PENDING_PLACEMENT_BLOCKED_COMMAND_TYPES = [
+  'roll_initiative',
+  'assume_wild_shape',
+  'revert_wild_shape',
+  'cast_spell',
+  'activate_sustained_effect',
+  'drop_item',
+  'pickup_item',
+  'equip_item',
+  'stow_item',
+  'adjudicate',
+  'move',
+  'hide',
+  'search',
+  'reveal_hidden',
+  'resolve_pending_decision',
+  'set_hidden_roll_category',
+  'dm_stabilize',
+  'dm_revive_at_one_hit_point',
+  'dm_set_death_save_counts',
+  'dm_mark_dead',
+  'create_persistent_area',
+  'move_persistent_area',
+  'world_operation',
+  'use_world_object',
+  'dm_use_world_object',
+  'attack',
+  'attack_suspected_square',
+  'opportunity_attack',
+  'decline_reaction',
+  'force_save',
+  'roll_ability_check',
+  'dash',
+  'disengage',
+  'dodge',
+  'spend_bonus_action',
+  'spend_reaction',
+  'activate_action_surge',
+  'activate_timed_spellcasting_mode',
+  'activate_damage_operation',
+  'arm_weapon_hit_rider',
+  'heal',
+  'consume_healing_pool',
+  'drink_healing_potion',
+  'apply_effect',
+  'grant_temporary_hit_points',
+  'end_concentration',
+  'end_turn',
+] as const satisfies readonly Exclude<EncounterCommand['type'], 'resolve_pending_placement'>[];
+
+type MissingPendingPlacementGuardCommand = Exclude<
+  EncounterCommand['type'],
+  typeof PENDING_PLACEMENT_BLOCKED_COMMAND_TYPES[number] | 'resolve_pending_placement'
+>;
+type UnexpectedPendingPlacementGuardCommand = Exclude<
+  typeof PENDING_PLACEMENT_BLOCKED_COMMAND_TYPES[number],
+  EncounterCommand['type']
+>;
+const PENDING_PLACEMENT_COMMAND_INVENTORY_IS_EXHAUSTIVE:
+  [MissingPendingPlacementGuardCommand | UnexpectedPendingPlacementGuardCommand] extends [never]
+    ? true
+    : never = true;
 
 function profile(state: EncounterState, id: CombatantId): CombatantProfile {
   const found = state.combatants.find((entry) => entry.profile.id === id)?.profile;
@@ -145,10 +209,13 @@ describe('footprint Increment 4 board and migration placement recovery', () => {
       placed(combatantId('combatant:tiny-edge'), 'Tiny Edge', 'Tiny', { column: 9, row: 6 }, [{ column: 9, row: 6 }]),
       placed(combatantId('combatant:small-edge'), 'Small Edge', 'Small', { column: 0, row: 6 }, [{ column: 0, row: 6 }]),
       placed(combatantId('combatant:medium-edge'), 'Medium Edge', 'Medium', { column: 9, row: 0 }, [{ column: 9, row: 0 }]),
-      placed(combatantId('combatant:large-edge'), 'Large Edge', 'Large', { column: 0, row: 5 }, [
-        { column: 0, row: 5 }, { column: 1, row: 5 },
-        { column: 0, row: 6 }, { column: 1, row: 6 },
-      ]),
+      {
+        ...placed(combatantId('combatant:large-edge'), 'Large Edge', 'Large', { column: 0, row: 5 }, [
+          { column: 0, row: 5 }, { column: 1, row: 5 },
+          { column: 0, row: 6 }, { column: 1, row: 6 },
+        ]),
+        hiddenFromPlayers: true,
+      },
       placed(combatantId('combatant:huge-edge'), 'Huge Edge', 'Huge', { column: 7, row: 4 }, [
         { column: 7, row: 4 }, { column: 8, row: 4 }, { column: 9, row: 4 },
         { column: 7, row: 5 }, { column: 8, row: 5 }, { column: 9, row: 5 },
@@ -179,6 +246,12 @@ describe('footprint Increment 4 board and migration placement recovery', () => {
       expect(tokens[0]?.getAttribute('aria-label')).toBe(
         `${combatant.name}, ${combatant.effectiveSize}, column ${String(combatant.position.column)}, row ${String(combatant.position.row)}`,
       );
+      const hiddenRings = interactiveElement(board).querySelectorAll('.encounter-hidden-ring');
+      expect(hiddenRings).toHaveLength(index === 3 ? 1 : 0);
+      if (index === 3) {
+        expect(hiddenRings[0]?.getAttribute('style')).toContain('width:128px');
+        expect(hiddenRings[0]?.getAttribute('style')).toContain('height:128px');
+      }
     });
   });
 
@@ -427,6 +500,19 @@ describe('footprint Increment 4 board and migration placement recovery', () => {
       anchor: { column: 0, row: 0 },
     }, () => 10).state.tokens.find((token) => token.combatantId === FIGHTER)?.id)
       .toBe('token:fighter');
+  });
+
+  it('blocks the whole EncounterCommand union except pending-placement resolution during migration recovery', () => {
+    expect(PENDING_PLACEMENT_COMMAND_INVENTORY_IS_EXHAUSTIVE).toBe(true);
+    const state = migrationPendingState();
+    for (const type of PENDING_PLACEMENT_BLOCKED_COMMAND_TYPES) {
+      // The phase guard consumes only the discriminant and must run before command-specific decoding.
+      const command = { type } as EncounterCommand;
+      expect(
+        () => reduceEncounter(state, command, () => 10),
+        type,
+      ).toThrow(new PendingPlacementRuleError('placement_resolution_required', FIGHTER));
+    }
   });
 
   it('orders the migration recovery queue by initiative and then branded id', () => {

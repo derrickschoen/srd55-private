@@ -2,6 +2,7 @@ import { canonicalJson } from '../commands/canonical-json';
 import { combatantsAreAllies } from '../combat/allies';
 import type { EncounterState } from '../combat/encounter';
 import { combatantSpace } from '../combat/combat-rules';
+import { minimumSpaceDistanceToCells } from '../combat/creature-space';
 import type {
   MonsterAction,
   MonsterAttackAction,
@@ -380,7 +381,8 @@ function mainUses(state: EncounterState, actorId: CombatantId): readonly MainUse
     (object.classActions ?? []).flatMap((action) => {
       if (
         (action.eligibleActor !== 'either' && action.eligibleActor !== 'monster') ||
-        (action.reach === 'adjacent' && gridDistance(actorPosition, object.position) > 5) ||
+        (action.reach === 'adjacent' &&
+          minimumSpaceDistanceToCells(combatantSpace(state, actorId), object.footprint) > 5) ||
         (action.uses === 'once' && worldObjectActionWasUsed(state.eventLog, object.id, action.id))
       ) return [];
       return [{

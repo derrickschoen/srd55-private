@@ -247,8 +247,9 @@ export function projectActorKnowledge(
       }
       if (!actorIsPlaced) return unknownTarget(targetId);
 
-      // Fog is a map-level redaction. Do not surface its presence or a location within it.
-      if (state.foggedCells.some((cell) => sameCell(cell, target.position))) {
+      const space = combatantSpace(state, targetId);
+      // Fog is a map-level redaction. A partially exposed footprint remains locatable.
+      if (space.cells.every((occupied) => state.foggedCells.some((cell) => sameCell(cell, occupied)))) {
         return unknownTarget(targetId);
       }
 
@@ -256,7 +257,6 @@ export function projectActorKnowledge(
       if (detection.kind === 'seen' || detection.kind === 'located') {
         const reciprocal = detectCombatant(state, targetId, actorId);
         const seen = detection.kind === 'seen';
-        const space = combatantSpace(state, targetId);
         return {
           kind: 'perceived',
           placementStatus: 'placed',

@@ -320,6 +320,10 @@ function tokenChrome(
     if (combatant === undefined) continue;
     const cellLeft = COORDINATE_GUTTER_PX + combatant.position.column * CHROME_TILE_PX;
     const cellTop = COORDINATE_GUTTER_PX + combatant.position.row * CHROME_TILE_PX;
+    const columnSpan = Math.max(...combatant.footprint.map((cell) => cell.column)) -
+      Math.min(...combatant.footprint.map((cell) => cell.column)) + 1;
+    const rowSpan = Math.max(...combatant.footprint.map((cell) => cell.row)) -
+      Math.min(...combatant.footprint.map((cell) => cell.row)) + 1;
 
     if (combatant.hiddenFromPlayers === true) {
       const ring = el('img', 'encounter-hidden-ring');
@@ -331,8 +335,8 @@ function tokenChrome(
         position: 'absolute',
         left: `${String(cellLeft)}px`,
         top: `${String(cellTop)}px`,
-        width: `${String(CHROME_TILE_PX)}px`,
-        height: `${String(CHROME_TILE_PX)}px`,
+        width: `${String(CHROME_TILE_PX * columnSpan)}px`,
+        height: `${String(CHROME_TILE_PX * rowSpan)}px`,
       });
       layer.append(ring);
     }

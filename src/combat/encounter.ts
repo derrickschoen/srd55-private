@@ -96,7 +96,9 @@ import {
   creatureSpace,
   effectSequence,
   minimumSpaceDistance,
+  minimumSpaceDistanceToCells,
   minimumSpaceLine,
+  minimumSpaceLineToCells,
   narrowOpeningRegion,
   newlyEnteredSpaceCells,
   normalPlacementFor,
@@ -106,6 +108,7 @@ import {
   sizedCombatantState,
   squeezedPlacementFor,
   spaceFitsBounds,
+  spaceTouchesCellSet,
   sharedSpaceRelation,
   serializedPlacementMode,
   spacesIntersect,
@@ -115,6 +118,7 @@ import {
 } from './creature-space';
 import {
   findPath,
+  findPathToAny,
   planMovement,
   spendMovement,
   startTurnMovement,
@@ -1131,9 +1135,6 @@ export function createEncounter(setup: EncounterSetup): EncounterState {
     if (!isCellInside(setup.bounds, cell)) {
       throw new EncounterRuleError('validation', 'Blocked cells must be inside the encounter grid.');
     }
-    if (setup.tokens.some((token) => cellKey(token.position) === cellKey(cell))) {
-      throw new EncounterRuleError('validation', 'A token cannot start in a blocked cell.');
-    }
   }
   const worldObjects = setup.worldObjects ?? [];
   assertUnique(worldObjects.map((object) => object.id), 'World object ids');
@@ -1142,10 +1143,6 @@ export function createEncounter(setup: EncounterSetup): EncounterState {
       assertWorldObjectInput(setup.bounds, object);
     } catch (error) {
       throw new EncounterRuleError('validation', error instanceof Error ? error.message : 'Invalid world object.');
-    }
-    if (object.blocking.movement && setup.tokens.some((token) =>
-      object.footprint.some((cell) => cellKey(cell) === cellKey(token.position)))) {
-      throw new EncounterRuleError('validation', 'A token cannot start in a movement-blocking world object.');
     }
   }
   const environment = setup.environment ?? EMPTY_ENCOUNTER_ENVIRONMENT;
@@ -1874,7 +1871,7 @@ function rollDefenseEligibilityMatches(
         combatantsAreAllies(state, eligibleCombatant, effect.source) &&
         isCombatantOnBoard(state, eligibleCombatant) &&
         isCombatantOnBoard(state, effect.source) &&
-        gridDistance(token(state, eligibleCombatant).position, token(state, effect.source).position) <=
+        minimumSpaceDistance(combatantSpace(state, eligibleCombatant), combatantSpace(state, effect.source)) <=
           effect.payload.eligibility.radiusFeet;
   }
 }
@@ -2071,18 +2068,9 @@ function combatantIsHidden(state: EncounterState, subject: CombatantId): boolean
 }
 
 function sharesWebArea(state: EncounterState, observer: CombatantId, subject: CombatantId): boolean {
-  const observerCell = token(state, observer).position;
-  const subjectCell = token(state, subject).position;
   const persistentWeb = state.persistentAreas.some((area) => {
-    if (area.material?.id !== 'webs') return false;
-    const origin = area.origin;
-    const anchor = origin.kind === 'anchored'
-      ? state.tokens.find((candidate) => candidate.combatantId === origin.combatant)?.position ?? null
-      : origin.kind === 'anchored_to_object'
-        ? state.worldObjects.find((object) => object.id === origin.object)?.position ?? null
-        : null;
-    return persistentAreaContains(area, observerCell, anchor, state) &&
-      persistentAreaContains(area, subjectCell, anchor, state);
+    return area.material?.id === 'webs' &&
+      area.members.includes(observer) && area.members.includes(subject);
   });
   return persistentWeb || state.effects.some((effect) => {
     if (effect.payload.kind !== 'web_area' || effect.payload.placement === 'selected_when_cast') return false;
@@ -2091,7 +2079,8 @@ function sharesWebArea(state: EncounterState, observer: CombatantId, subject: Co
       effect.payload.placement,
     );
     const keys = new Set(cells.map(cellKey));
-    return keys.has(cellKey(observerCell)) && keys.has(cellKey(subjectCell));
+    return combatantSpace(state, observer).cells.some((cell) => keys.has(cellKey(cell))) &&
+      combatantSpace(state, subject).cells.some((cell) => keys.has(cellKey(cell)));
   });
 }
 
@@ -3004,24 +2993,28 @@ function endEffects(
   for (const target of movementTargets) refreshActiveTurnMovement(context, target);
 }
 
-function nearestReturnPosition(state: EncounterState, origin: GridCell): GridCell {
-  const candidates: GridCell[] = [];
-  for (let row = 0; row < state.bounds.rows; row += 1) {
-    for (let column = 0; column < state.bounds.columns; column += 1) {
-      const cell = { column, row };
-      if (movementBlocked(state, cell)) continue;
-      if (state.tokens.some((occupied) => cellKey(occupied.position) === cellKey(cell))) continue;
-      candidates.push(cell);
-    }
-  }
-  const selected = candidates.sort((left, right) =>
-    gridDistance(left, origin) - gridDistance(right, origin) ||
-    left.row - right.row ||
-    left.column - right.column)[0];
-  if (selected === undefined) {
+function nearestReturnPosition(
+  state: EncounterState,
+  target: CombatantId,
+  stored: CombatToken,
+): GridCell {
+  const sized = sizedCombatantState(effectiveCreatureSize(state, target));
+  const mode = placementFromSerialized(sized, {
+    anchor: stored.position,
+    mode: stored.placementMode,
+  }).mode;
+  const result = autoRelocatePlacement(sized, stored.position, mode, state.bounds, (space) =>
+    space.cells.every((cell) => !movementBlocked(state, cell)) &&
+    (space.mode.kind !== 'squeezed' ||
+      openingContainingSpace(space, state.environment.narrowOpeningRegions) !== null) &&
+    state.tokens.every((occupied) => !spacesIntersect(
+      space,
+      combatantSpace(state, occupied.combatantId),
+    )));
+  if (result.kind !== 'placed') {
     throw new EncounterRuleError('validation', 'A banished combatant has no unoccupied return space.');
   }
-  return selected;
+  return result.placement.anchor;
 }
 
 function restoreBanishedTargets(
@@ -3034,7 +3027,7 @@ function restoreBanishedTargets(
     const absentTokens = context.state.absentTokens ?? [];
     const stored = absentTokens.find((candidate) => candidate.combatantId === target);
     if (stored === undefined) continue;
-    const position = nearestReturnPosition(context.state, stored.position);
+    const position = nearestReturnPosition(context.state, target, stored);
     const returned = { ...stored, position };
     context.state = {
       ...context.state,
@@ -3879,7 +3872,7 @@ function processEquipmentCommand(
     case 'pickup_item': {
       const ground = context.state.groundItems?.find((candidate) => candidate.item === command.item);
       if (ground === undefined) throw new EquipmentRuleError('item_not_on_ground', `Item ${command.item} is not on the board.`);
-      if (cellKey(ground.position) !== cellKey(token(context.state, command.actor).position)) {
+      if (!spaceTouchesCellSet(combatantSpace(context.state, command.actor), [ground.position])) {
         throw new EquipmentRuleError('item_not_at_actor_cell', `Item ${command.item} is not at ${command.actor}'s cell.`);
       }
       spendObjectInteraction(context, command.actor, command.interaction, 'pickup');
@@ -4185,8 +4178,10 @@ export function previewMovementPathDangers(
       stepDangers.add('opportunity_attack');
     }
 
-    if (state.persistentAreas.some((area) => area.burningCells.some(
-      (burning) => cellKey(burning.cell) === cellKey(step.to),
+    const destinationSpace = combatantSpaceAt(state, command.actor, step.to);
+    if (state.persistentAreas.some((area) => spaceTouchesCellSet(
+      destinationSpace,
+      area.burningCells.map((burning) => burning.cell),
     ))) {
       add(step.to, 'burning_surface');
       stepDangers.add('burning_surface');
@@ -4194,7 +4189,12 @@ export function previewMovementPathDangers(
 
     if (state.persistentAreas.some((area) =>
       persistentAreaHasDamage(area) &&
-      persistentAreaContains(area, step.to, persistentAreaAnchorCell(state, area), state))) {
+      persistentAreaTouchesSpace(
+        area,
+        destinationSpace.cells,
+        persistentAreaAnchorCells(state, area),
+        state,
+      ))) {
       add(step.to, 'persistent_area_damage');
       stepDangers.add('persistent_area_damage');
     }
@@ -4240,8 +4240,8 @@ function areaHasBurningCell(area: PersistentArea, cell: GridCell): boolean {
 }
 
 /**
- * A damage resolution exposes only its target's occupied 5-foot cell. Web's
- * text says each exposed Cube burns; it supplies no adjacent-cell spread rule
+ * A damage resolution exposes every occupied target cell. Web's text says each
+ * exposed Cube burns; it supplies no adjacent-cell spread rule
  * (spell-descriptions.txt:8486-8489), so this deliberately does not traverse.
  */
 function exposePersistentAreasAtDamageCell(
@@ -4251,29 +4251,32 @@ function exposePersistentAreasAtDamageCell(
   damage: ReturnType<typeof resolveDamage>,
 ): void {
   if (!damage.terms.some((term) => term.type === 'Fire' && term.beforeResponse > 0)) return;
-  const exposedCell = token(context.state, target).position;
+  const exposedCells = combatantSpace(context.state, target).cells;
   const initiativeIndex = context.state.activeInitiativeIndex;
   if (initiativeIndex === null) return;
   for (const snapshot of orderedAreas(context.state)) {
     const area = context.state.persistentAreas.find((candidate) => candidate.id === snapshot.id);
-    if (
-      area === undefined ||
-      effectiveIgnitionRule(context.state, area) === null ||
-      areaHasBurningCell(area, exposedCell) ||
-      !persistentAreaContains(area, exposedCell, persistentAreaAnchorCell(context.state, area), context.state)
-    ) continue;
+    if (area === undefined || effectiveIgnitionRule(context.state, area) === null) continue;
+    const newlyExposed = exposedCells.filter((cell) =>
+      !areaHasBurningCell(area, cell) && persistentAreaContains(
+        area,
+        cell,
+        persistentAreaAnchorCell(context.state, area),
+        context.state,
+      ));
+    if (newlyExposed.length === 0) continue;
     context.state = {
       ...context.state,
       persistentAreas: context.state.persistentAreas.map((candidate) => candidate.id === area.id
         ? {
             ...candidate,
-            burningCells: [...candidate.burningCells, {
-              cell: { ...exposedCell },
+            burningCells: [...candidate.burningCells, ...newlyExposed.map((cell) => ({
+              cell: { ...cell },
               burnsAwayAt: {
                 round: context.state.round + 1,
                 initiativeIndex,
               },
-            }].sort((left, right) =>
+            }))].sort((left, right) =>
               left.cell.row - right.cell.row || left.cell.column - right.cell.column),
           }
         : candidate),
@@ -4652,7 +4655,7 @@ function perceptionMode(
   if (effectiveCombatRules(state, observer).detectionTraits.includes('keen_sight')) {
     modes.push('advantage');
   }
-  const subjectCell = token(state, subject).position;
+  const subjectCell = minimumSpaceLine(combatantSpace(state, observer), combatantSpace(state, subject)).targetCell;
   const light = environmentLightAt(state.environment, subjectCell);
   const obscurement = environmentObscurementAt(state.environment, subjectCell);
   // Lightly Obscured sight checks have Disadvantage: docs/srd/full/srd-5.2.1.txt:656-660.
@@ -4685,12 +4688,12 @@ function processHide(
     candidate.life === 'living' &&
     isEncounterParticipant(context.state.alerting, candidate.profile.id) &&
     !combatantsAreAllies(context.state, actor, candidate.profile.id));
-  const actorCell = token(context.state, actor).position;
   const outOfEnemySight = enemies.every((enemy) => !canCombatantSee(context.state, enemy.profile.id, actor));
-  const obscurement = environmentObscurementAt(context.state.environment, actorCell);
-  const heavilyObscured =
-    obscurement === 'heavy' || obscurement === 'magical_darkness' ||
-    environmentLightAt(context.state.environment, actorCell) === 'darkness';
+  const heavilyObscured = combatantSpace(context.state, actor).cells.every((actorCell) => {
+    const obscurement = environmentObscurementAt(context.state.environment, actorCell);
+    return obscurement === 'heavy' || obscurement === 'magical_darkness' ||
+      environmentLightAt(context.state.environment, actorCell) === 'darkness';
+  });
   const behindCover = enemies.length > 0 && enemies.every((enemy) => {
     const cover = coverBetweenCombatants(context.state, enemy.profile.id, actor).tier;
     return cover === 'three_quarters' || cover === 'total';
@@ -4925,7 +4928,7 @@ function resolveMootOpportunityAttacks(
 
 function legendaryActionTarget(state: EncounterState, actor: CombatantId): CombatantId | null {
   if (!isCombatantOnBoard(state, actor)) return null;
-  const origin = token(state, actor).position;
+  const origin = combatantSpace(state, actor);
   return state.combatants
     .filter((candidate) =>
       candidate.profile.id !== actor && candidate.life === 'living' &&
@@ -4933,8 +4936,8 @@ function legendaryActionTarget(state: EncounterState, actor: CombatantId): Comba
       isCombatantOnBoard(state, candidate.profile.id) &&
       !combatantsAreAllies(state, actor, candidate.profile.id))
     .sort((left, right) =>
-      gridDistance(origin, token(state, left.profile.id).position) -
-        gridDistance(origin, token(state, right.profile.id).position) ||
+      minimumSpaceDistance(origin, combatantSpace(state, left.profile.id)) -
+        minimumSpaceDistance(origin, combatantSpace(state, right.profile.id)) ||
       String(left.profile.id).localeCompare(String(right.profile.id)))[0]?.profile.id ?? null;
 }
 
@@ -4945,18 +4948,20 @@ function moveForLegendaryAction(
   action: Extract<MonsterLegendaryAction, { readonly kind: 'move_and_attack' }>,
 ): void {
   const start = token(context.state, actor).position;
-  const targetPosition = token(context.state, target).position;
   const maximumCost = feet(action.movement === 'half_speed'
     ? Math.floor(effectiveCombatRules(context.state, actor).speed / 2)
     : effectiveCombatRules(context.state, actor).speed);
-  const candidates = adjacentCells(context.state.bounds, targetPosition)
-    .filter((cell) => !context.state.tokens.some((candidate) =>
-      candidate.combatantId !== actor && cellKey(candidate.position) === cellKey(cell)))
-    .map((goal) => findPath(encounterMovementWorld(context.state), { actorId: actor, start, goal, maximumCost }))
-    .filter((result) => result.kind === 'found')
-    .sort((left, right) => left.cost - right.cost || left.cells.length - right.cells.length);
-  const path = candidates[0];
-  if (gridDistance(start, targetPosition) <= effectiveCombatRules(context.state, actor).reach) return;
+  if (minimumSpaceDistance(combatantSpace(context.state, actor), combatantSpace(context.state, target)) <=
+    effectiveCombatRules(context.state, actor).reach) return;
+  const path = findPathToAny(encounterMovementWorld(context.state), {
+    actorId: actor,
+    start,
+    maximumCost,
+    isGoal: (anchor) => minimumSpaceDistance(
+      combatantSpaceAt(context.state, actor, anchor),
+      combatantSpace(context.state, target),
+    ) <= effectiveCombatRules(context.state, actor).reach,
+  });
   if (path === undefined || path.kind !== 'found') {
     throw new EncounterRuleError('validation', `Legendary Action ${action.id} cannot reach an enemy.`);
   }
@@ -5037,18 +5042,20 @@ function legendaryActionAvailable(
   const target = legendaryActionTarget(state, actor);
   if (target === null) return false;
   const start = token(state, actor).position;
-  const targetPosition = token(state, target).position;
-  if (gridDistance(start, targetPosition) <= effectiveCombatRules(state, actor).reach) return true;
+  if (minimumSpaceDistance(combatantSpace(state, actor), combatantSpace(state, target)) <=
+    effectiveCombatRules(state, actor).reach) return true;
   const maximumCost = feet(action.movement === 'half_speed'
     ? Math.floor(effectiveCombatRules(state, actor).speed / 2)
     : effectiveCombatRules(state, actor).speed);
-  return adjacentCells(state.bounds, targetPosition)
-    .filter((cell) => !state.tokens.some((candidate) =>
-      candidate.combatantId !== actor && cellKey(candidate.position) === cellKey(cell)))
-    .some((goal) => findPath(
-      encounterMovementWorld(state),
-      { actorId: actor, start, goal, maximumCost },
-    ).kind === 'found');
+  return findPathToAny(encounterMovementWorld(state), {
+    actorId: actor,
+    start,
+    maximumCost,
+    isGoal: (anchor) => minimumSpaceDistance(
+      combatantSpaceAt(state, actor, anchor),
+      combatantSpace(state, target),
+    ) <= effectiveCombatRules(state, actor).reach,
+  }).kind === 'found';
 }
 
 function queueLegendaryActionWindows(context: ReductionContext, activeCombatant: CombatantId): boolean {
@@ -6142,7 +6149,8 @@ function enforceCommandedAction(context: ReductionContext, actor: CombatantId): 
   switch (option) {
     case 'approach': {
       if (sourcePosition === null) return;
-      if (gridDistance(token(context.state, actor).position, sourcePosition) <= 5) {
+      const sourceSpace = combatantSpace(context.state, effect.source);
+      if (minimumSpaceDistance(combatantSpace(context.state, actor), sourceSpace) <= 5) {
         endCommandedTurnResources(context, actor);
         return;
       }
@@ -6151,12 +6159,13 @@ function enforceCommandedAction(context: ReductionContext, actor: CombatantId): 
         .sort((left, right) => {
           const leftEnd = left.cells.at(-1) as GridCell;
           const rightEnd = right.cells.at(-1) as GridCell;
-          return gridDistance(leftEnd, sourcePosition) - gridDistance(rightEnd, sourcePosition) ||
+          return minimumSpaceDistance(combatantSpaceAt(context.state, actor, leftEnd), sourceSpace) -
+            minimumSpaceDistance(combatantSpaceAt(context.state, actor, rightEnd), sourceSpace) ||
             left.cost - right.cost || leftEnd.row - rightEnd.row || leftEnd.column - rightEnd.column;
         });
       const chosen = paths[0];
       if (chosen !== undefined) moveForCommand(context, actor, chosen.cells);
-      if (gridDistance(token(context.state, actor).position, sourcePosition) <= 5) {
+      if (minimumSpaceDistance(combatantSpace(context.state, actor), sourceSpace) <= 5) {
         endCommandedTurnResources(context, actor);
       }
       return;
@@ -6185,12 +6194,14 @@ function enforceCommandedAction(context: ReductionContext, actor: CombatantId): 
         },
       });
       if (sourcePosition !== null) {
+        const sourceSpace = combatantSpace(context.state, effect.source);
         const paths = reachableCommandPaths(context.state, actor, combatant(context.state, actor).turn.movement.remaining)
           .filter((path) => path.cells.length > 0)
           .sort((left, right) => {
             const leftEnd = left.cells.at(-1) as GridCell;
             const rightEnd = right.cells.at(-1) as GridCell;
-            return gridDistance(rightEnd, sourcePosition) - gridDistance(leftEnd, sourcePosition) ||
+            return minimumSpaceDistance(combatantSpaceAt(context.state, actor, rightEnd), sourceSpace) -
+              minimumSpaceDistance(combatantSpaceAt(context.state, actor, leftEnd), sourceSpace) ||
               right.cost - left.cost || leftEnd.row - rightEnd.row || leftEnd.column - rightEnd.column;
           });
         const chosen = paths[0];
@@ -6265,7 +6276,8 @@ function hasAdjacentAlly(
     isEncounterParticipant(state.alerting, candidate.profile.id) &&
     combatantsAreAllies(state, candidate.profile.id, actor) &&
     candidate.life === 'living' &&
-    gridDistance(token(state, candidate.profile.id).position, token(state, target).position) <= 5);
+    isCombatantOnBoard(state, candidate.profile.id) && isCombatantOnBoard(state, target) &&
+    minimumSpaceDistance(combatantSpace(state, candidate.profile.id), combatantSpace(state, target)) <= 5);
 }
 
 function selectedSlotLevel(
@@ -6928,9 +6940,9 @@ function callForHelpWhenNpcAttacked(
   const responders = helpCallResponders({
     alerting,
     caller,
-    callerPosition: origin,
-    positions: new Map(context.state.tokens.map((placed) =>
-      [placed.combatantId, placed.position] as const)),
+    callerSpace: combatantSpace(context.state, caller),
+    spaces: new Map(context.state.tokens.map((placed) =>
+      [placed.combatantId, combatantSpace(context.state, placed.combatantId)] as const)),
   }).filter(({ combatant: responder }) => {
     const subject = combatant(context.state, responder);
     return subject.profile.kind === 'monster' && subject.life === 'living';
@@ -7082,8 +7094,10 @@ function processAttack(
   if (cannotHarmTarget(context.state, command.actor, command.target)) {
     throw new EncounterRuleError('validation', 'The Charmed condition prohibits harming this target.');
   }
-  const actorPosition = token(context.state, command.actor).position;
-  const targetPosition = token(context.state, command.target).position;
+  const attackLine = minimumSpaceLine(
+    combatantSpace(context.state, command.actor),
+    combatantSpace(context.state, command.target),
+  );
   if (opportunityTrigger === null && command.tacticalRange !== undefined) {
     const range = tacticalRangeVerdictAtDistance(
       minimumSpaceDistance(
@@ -7101,7 +7115,7 @@ function processAttack(
   }
   if (
     opportunityTrigger === null &&
-    (!hasLineOfSight(context.state, actorPosition, targetPosition) ||
+    (!hasLineOfSight(context.state, attackLine.sourceCell, attackLine.targetCell) ||
       coverBetweenCombatants(context.state, command.actor, command.target).tier === 'total')
   ) {
     throw new EncounterRuleError('validation', 'The target has Total Cover or is outside line of sight.');
@@ -7167,9 +7181,9 @@ function processAttack(
     ).clauses.some(
       (clause) =>
         clause.kind === 'critical_if_hit_within' &&
-        gridDistance(
-          token(context.state, command.actor).position,
-          token(context.state, command.target).position,
+        minimumSpaceDistance(
+          combatantSpace(context.state, command.actor),
+          combatantSpace(context.state, command.target),
         ) <= clause.feet,
     );
     const attacking = combatant(context.state, command.actor);
@@ -7364,9 +7378,12 @@ function processSuspectedSquareAttack(
   if (!memory.suspicion.cells.some((cell) => cellKey(cell) === cellKey(command.square))) {
     throw new EncounterRuleError('validation', 'The selected square is outside the active suspicion region.');
   }
-  const actorPosition = token(context.state, command.actor).position;
+  const selectedLine = minimumSpaceLineToCells(
+    combatantSpace(context.state, command.actor),
+    [command.square],
+  );
   if (command.tacticalRange !== undefined) {
-    const range = tacticalRangeVerdict(actorPosition, command.square, command.tacticalRange);
+    const range = tacticalRangeVerdict(selectedLine.sourceCell, selectedLine.targetCell, command.tacticalRange);
     if (range.status === 'unresolved') {
       throw new EncounterRuleError('validation', 'The suspected-square attack long range is unresolved.');
     }
@@ -7375,8 +7392,8 @@ function processSuspectedSquareAttack(
     }
   }
   if (
-    !hasLineOfSight(context.state, actorPosition, command.square) ||
-    coverTierBetween(context.state, actorPosition, command.square) === 'total'
+    !hasLineOfSight(context.state, selectedLine.sourceCell, selectedLine.targetCell) ||
+    coverTierBetween(context.state, selectedLine.sourceCell, selectedLine.targetCell) === 'total'
   ) {
     throw new EncounterRuleError('validation', 'The suspected square has Total Cover or is outside line of sight.');
   }
@@ -7394,8 +7411,7 @@ function processSuspectedSquareAttack(
     ...(command.attackId === undefined ? {} : { attackId: command.attackId }),
     ...(command.monsterOnHit === undefined ? {} : { monsterOnHit: command.monsterOnHit }),
   };
-  const targetPosition = token(context.state, command.suspectedTarget).position;
-  if (cellKey(targetPosition) === cellKey(command.square)) {
+  if (spaceTouchesCellSet(combatantSpace(context.state, command.suspectedTarget), [command.square])) {
     processAttack(context, ordinaryAttack);
     const resolved = [...context.events].reverse().find((event) =>
       event.type === 'attack_resolved' &&
@@ -8412,10 +8428,13 @@ function forceMove(
   if (columnStep === 0 && rowStep === 0) return;
   let position = subjectToken.position;
   const traversed: GridCell[] = [];
-  const occupied = new Set(context.state.tokens.filter((entry) => entry.combatantId !== target).map((entry) => cellKey(entry.position)));
   for (let distance = 0; distance + 5 <= distanceFeet; distance += 5) {
     const candidate = { column: position.column + columnStep, row: position.row + rowStep };
-    if (!isCellInside(context.state.bounds, candidate) || movementBlocked(context.state, candidate) || occupied.has(cellKey(candidate))) break;
+    const candidateSpace = combatantSpaceAt(context.state, target, candidate);
+    if (!spaceFitsBounds(candidateSpace, context.state.bounds) ||
+      candidateSpace.cells.some((cell) => movementBlocked(context.state, cell)) ||
+      context.state.tokens.some((entry) => entry.combatantId !== target &&
+        spacesIntersect(candidateSpace, combatantSpace(context.state, entry.combatantId)))) break;
     const sourceSpace = combatantSpace(context.state, target);
     position = candidate;
     context.state = {
@@ -8441,10 +8460,12 @@ function rollSpellAttack(
   command: SpellCastCommand,
   target: CombatantId,
 ): ReturnType<typeof resolveAttackRoll> {
-  const actorPosition = token(context.state, command.actor).position;
-  const targetPosition = token(context.state, target).position;
+  const selectedLine = minimumSpaceLine(
+    combatantSpace(context.state, command.actor),
+    combatantSpace(context.state, target),
+  );
   if (
-    !hasLineOfSight(context.state, actorPosition, targetPosition) ||
+    !hasLineOfSight(context.state, selectedLine.sourceCell, selectedLine.targetCell) ||
     coverBetweenCombatants(context.state, command.actor, target).tier === 'total'
   ) throw new EncounterRuleError('validation', 'The spell target has Total Cover or is outside line of sight.');
   const rollModeEffects = context.state.effects.filter((effect) => {
@@ -8879,7 +8900,8 @@ function itemContacts(state: EncounterState, id: ItemId): readonly EquippedItemC
   const ground = state.groundItems?.find((candidate) => candidate.item === id);
   if (ground !== undefined) {
     for (const placed of state.tokens) {
-      if (cellKey(placed.position) === cellKey(ground.position) && !contacts.has(placed.combatantId)) {
+      if (spaceTouchesCellSet(combatantSpace(state, placed.combatantId), [ground.position]) &&
+        !contacts.has(placed.combatantId)) {
         contacts.set(placed.combatantId, 'other');
       }
     }
@@ -8889,13 +8911,13 @@ function itemContacts(state: EncounterState, id: ItemId): readonly EquippedItemC
     .map(([combatant, relationship]) => ({ combatant, relationship }));
 }
 
-function itemPosition(state: EncounterState, id: ItemId): GridCell {
+function itemCells(state: EncounterState, id: ItemId): readonly GridCell[] {
   const ground = state.groundItems?.find((candidate) => candidate.item === id);
-  if (ground !== undefined) return ground.position;
+  if (ground !== undefined) return [ground.position];
   const possessor = state.equipment?.find((equipment) =>
     heldItems(equipment.hands).includes(id) || equipment.worn.includes(id) || equipment.carried.includes(id));
   if (possessor === undefined) throw new EquipmentRuleError('unknown_item', `Item ${id} is not present in the encounter.`);
-  return token(state, possessor.combatant).position;
+  return combatantSpace(state, possessor.combatant).cells;
 }
 
 function heatMetalRange(definition: SpellDefinition): number {
@@ -8926,11 +8948,11 @@ function executeHeatMetal(
   if (!item.materials.some((material) => material.kind === 'known' && material.name === operation.requiredMaterial)) {
     throw new EquipmentRuleError('material_mismatch', `${definition.name} requires a metal item.`);
   }
-  const casterPosition = token(context.state, command.actor).position;
-  const position = itemPosition(context.state, id);
+  const targetCells = itemCells(context.state, id);
+  const selectedLine = minimumSpaceLineToCells(combatantSpace(context.state, command.actor), targetCells);
   if (
-    gridDistance(casterPosition, position) > heatMetalRange(definition) ||
-    !hasLineOfSight(context.state, casterPosition, position)
+    selectedLine.distance > heatMetalRange(definition) ||
+    !hasLineOfSight(context.state, selectedLine.sourceCell, selectedLine.targetCell)
   ) throw new EncounterRuleError('validation', `${definition.name} item target is out of range or not visible.`);
 
   const contacts = itemContacts(context.state, id);
@@ -9181,7 +9203,7 @@ function reactionTriggerMatches(
       return event.kind === 'hit_by_attack' && event.target === reactor;
     case 'damaged_by_creature':
       return event.kind === 'damaged_by_creature' && event.target === reactor &&
-        gridDistance(token(state, reactor).position, token(state, event.source).position) <= declaration.rangeFeet &&
+        minimumSpaceDistance(combatantSpace(state, reactor), combatantSpace(state, event.source)) <= declaration.rangeFeet &&
         (!declaration.requiresSight || canCombatantSee(state, reactor, event.source));
     case 'taking_damage_of_type':
       return event.kind === 'taking_damage_of_type' && event.target === reactor &&
@@ -9190,7 +9212,7 @@ function reactionTriggerMatches(
         ));
     case 'creature_casts_spell':
       return event.kind === 'creature_casts_spell' && event.caster !== reactor && event.hasComponents &&
-        gridDistance(token(state, reactor).position, token(state, event.caster).position) <= declaration.rangeFeet &&
+        minimumSpaceDistance(combatantSpace(state, reactor), combatantSpace(state, event.caster)) <= declaration.rangeFeet &&
         (!declaration.requiresSight || canCombatantSee(state, reactor, event.caster));
   }
 }
@@ -9790,9 +9812,10 @@ function validateSummonDestinations(
   state: EncounterState,
   definition: SpellDefinition,
   command: SpellCastCommand,
-  count: number,
+  profiles: readonly CombatantProfile[],
   rangeFeet: number,
 ): readonly GridCell[] {
+  const count = profiles.length;
   const destinations = command.summonDestinations ?? [];
   if (count > MAX_SUMMONED_COMBATANTS_PER_CAST) {
     throw new TargetSelectionRuleError(
@@ -9808,17 +9831,32 @@ function validateSummonDestinations(
       `${definition.name} summon destinations must be unique.`,
     );
   }
-  const casterPosition = token(state, command.actor).position;
-  for (const destination of destinations) {
-    if (!isCellInside(state.bounds, destination) || movementBlocked(state, destination)) {
+  const acceptedSpaces: CreatureSpace<KnownCreatureSize>[] = [];
+  for (const [index, destination] of destinations.entries()) {
+    const profile = profiles[index];
+    if (profile?.rules.sizeCategory === undefined) {
+      throw new CreatureSizeRuleError('mechanical_size_required', profile?.id ?? command.actor);
+    }
+    const sized = sizedCombatantState(profile.rules.sizeCategory);
+    const destinationSpace = creatureSpace(sized, placementFor(
+      sized,
+      destination,
+      normalPlacementFor(sized),
+    ));
+    if (!spaceFitsBounds(destinationSpace, state.bounds) ||
+      destinationSpace.cells.some((cell) => movementBlocked(state, cell))) {
       throw new EncounterRuleError('validation', `${definition.name} summon destination is not an occupiable cell.`);
     }
-    if (state.tokens.some((placed) => cellKey(placed.position) === cellKey(destination))) {
+    if (state.tokens.some((placed) => spacesIntersect(
+      destinationSpace,
+      combatantSpace(state, placed.combatantId),
+    )) || acceptedSpaces.some((accepted) => spacesIntersect(destinationSpace, accepted))) {
       throw new EncounterRuleError('validation', `${definition.name} summon destination must be unoccupied.`);
     }
-    if (gridDistance(casterPosition, destination) > rangeFeet) {
+    if (minimumSpaceDistanceToCells(combatantSpace(state, command.actor), [destination]) > rangeFeet) {
       throw new EncounterRuleError('validation', `${definition.name} summon destination is out of range.`);
     }
+    acceptedSpaces.push(destinationSpace);
   }
   return destinations.map((destination) => ({ ...destination }));
 }
@@ -9830,15 +9868,15 @@ function resolveSummon(
   operation: Extract<BranchSpellOperation, { readonly kind: 'summon' }>,
 ): void {
   const count = summonCount(definition, command, operation);
-  const destinations = validateSummonDestinations(
-    context.state, definition, command, count, operation.placementRangeFeet,
-  );
   const monster = summonMonster(context.state, definition, operation.monsterId);
   const effectSequence = context.state.nextEffectSequence;
-  const profiles = destinations.map((_destination, index) => importedMonsterProfile(monster, {
+  const profiles = Array.from({ length: count }, (_unused, index) => importedMonsterProfile(monster, {
     combatantId: `summon:${String(effectSequence)}:${String(index + 1)}:${monster.recordId}`,
     tokenId: `summon-token:${String(effectSequence)}:${String(index + 1)}:${monster.recordId}`,
   }));
+  const destinations = validateSummonDestinations(
+    context.state, definition, command, profiles, operation.placementRangeFeet,
+  );
   const summonIds = profiles.map((profile) => profile.id);
   const summonedStates: EncounterCombatantState[] = profiles.map((profile) => ({
     profile,
@@ -10518,28 +10556,41 @@ function executeSpellOperation(
     }
     case 'teleport': {
       const movers = operation.subject === 'caster' ? [command.actor] : targets;
-      const casterPosition = token(context.state, command.actor).position;
+      const casterSpace = combatantSpace(context.state, command.actor);
       const declaredDestinations = command.targetDestinations;
       const destinations = declaredDestinations === undefined
         ? command.spatialPoint === undefined ? [] : movers.map((mover) => ({ target: mover, destination: command.spatialPoint as GridCell }))
         : declaredDestinations;
       if (destinations.length !== movers.length) throw new EncounterRuleError('validation', `${definition.name} requires one destination per teleported creature.`);
+      const movingIds = new Set(movers);
+      const destinationSpaces: CreatureSpace<KnownCreatureSize>[] = [];
       for (const [index, mover] of movers.entries()) {
         const declared = destinations[index];
         if (declared === undefined || declared.target !== mover) {
           throw new TargetSelectionRuleError('each_target_own_destination', `${definition.name} violates each_target_own_destination.`);
         }
         const destination = declared.destination;
+        const destinationSpace = combatantSpaceAt(context.state, mover, destination);
+        const selectedLine = minimumSpaceLineToCells(casterSpace, [destination]);
         const occupied = context.state.tokens.some((placed) =>
-          placed.combatantId !== mover && combatant(context.state, placed.combatantId).life !== 'dead' &&
-          cellKey(placed.position) === cellKey(destination));
+          !movingIds.has(placed.combatantId) && combatant(context.state, placed.combatantId).life !== 'dead' &&
+          spacesIntersect(destinationSpace, combatantSpace(context.state, placed.combatantId))) ||
+          destinationSpaces.some((space) => spacesIntersect(destinationSpace, space));
         if (
-          !isCellInside(context.state.bounds, destination) ||
-          gridDistance(casterPosition, destination) > operation.maximumDistanceFeet ||
-          movementBlocked(context.state, destination) ||
+          !spaceFitsBounds(destinationSpace, context.state.bounds) ||
+          selectedLine.distance > operation.maximumDistanceFeet ||
+          destinationSpace.cells.some((cell) => movementBlocked(context.state, cell)) ||
+          (destinationSpace.mode.kind === 'squeezed' &&
+            openingContainingSpace(destinationSpace, context.state.environment.narrowOpeningRegions) === null) ||
           occupied ||
-          (operation.destination.requireLineOfSight && !hasLineOfSight(context.state, casterPosition, destination))
+          (operation.destination.requireLineOfSight &&
+            !hasLineOfSight(context.state, selectedLine.sourceCell, selectedLine.targetCell))
         ) throw new EncounterRuleError('validation', `${definition.name} requires an unoccupied, occupiable destination satisfying its declared constraint.`);
+        destinationSpaces.push(destinationSpace);
+      }
+      for (const [index, mover] of movers.entries()) {
+        const destination = destinations[index]?.destination;
+        if (destination === undefined) throw new EncounterRuleError('validation', `${definition.name} requires one destination per teleported creature.`);
         context.state = {
           ...context.state,
           tokens: context.state.tokens.map((placed) => placed.combatantId === mover
@@ -10554,10 +10605,9 @@ function executeSpellOperation(
       return 'applied';
     }
     case 'forced_movement': {
-      const origin = operation.origin === 'caster'
-        ? token(context.state, command.actor).position
-        : command.spatialPoint;
-      if (origin === undefined) throw new EncounterRuleError('validation', `${definition.name} requires a forced-movement origin point.`);
+      if (operation.origin !== 'caster' && command.spatialPoint === undefined) {
+        throw new EncounterRuleError('validation', `${definition.name} requires a forced-movement origin point.`);
+      }
       for (const target of targets) {
         if (operation.save !== null) {
           const save = resolveTargetSave(
@@ -10565,6 +10615,12 @@ function executeSpellOperation(
           );
           if (save.outcome !== operation.save.moveOn) continue;
         }
+        const origin = operation.origin === 'caster'
+          ? minimumSpaceLine(
+              combatantSpace(context.state, command.actor),
+              combatantSpace(context.state, target),
+            ).sourceCell
+          : command.spatialPoint as GridCell;
         forceMove(context, origin, command.actor, target, operation.distanceFeet, operation.direction);
       }
       return 'applied';
@@ -10769,7 +10825,17 @@ function executeSpellOperation(
           applySpellEffect(context, definition, command, operation.riderOnFailure, [target]);
         }
         if (save.outcome === 'failure' && operation.pushFeetOnFailure > 0) {
-          forceMove(context, token(context.state, command.actor).position, command.actor, target, operation.pushFeetOnFailure, 'away');
+          forceMove(
+            context,
+            minimumSpaceLine(
+              combatantSpace(context.state, command.actor),
+              combatantSpace(context.state, target),
+            ).sourceCell,
+            command.actor,
+            target,
+            operation.pushFeetOnFailure,
+            'away',
+          );
         }
       }
       return 'applied';
@@ -10917,7 +10983,17 @@ function executeSpellOperation(
       for (const target of targets) {
         const save = resolveTargetSave(context, command.actor, target, operation.ability, command.saveDc, 'normal', null);
         if (save.outcome === 'failure') {
-          forceMove(context, token(context.state, command.actor).position, command.actor, target, operation.pushFeetOnFailure, 'away');
+          forceMove(
+            context,
+            minimumSpaceLine(
+              combatantSpace(context.state, command.actor),
+              combatantSpace(context.state, target),
+            ).sourceCell,
+            command.actor,
+            target,
+            operation.pushFeetOnFailure,
+            'away',
+          );
         }
       }
       applySpellEffect(context, definition, command, operation.effect, targets);
@@ -11350,7 +11426,7 @@ function validateWorldObjectForState(
     throw new EncounterRuleError('validation', `World object ${object.id} already exists.`);
   }
   if (object.blocking.movement && state.tokens.some((placed) =>
-    object.footprint.some((cell) => cellKey(cell) === cellKey(placed.position)))) {
+    spaceTouchesCellSet(combatantSpace(state, placed.combatantId), object.footprint))) {
     throw new EncounterRuleError('validation', 'A movement-blocking world object cannot overlap a combatant.');
   }
 }
@@ -11546,7 +11622,8 @@ function useWorldObject(
   if (action.eligibleActor !== 'either' && action.eligibleActor !== subject.profile.kind) {
     throw new EncounterRuleError('validation', `${action.label} is unavailable to ${subject.profile.kind}.`);
   }
-  if (action.reach === 'adjacent' && gridDistance(token(context.state, command.actor).position, object.position) > 5) {
+  if (action.reach === 'adjacent' &&
+    minimumSpaceDistanceToCells(combatantSpace(context.state, command.actor), object.footprint) > 5) {
     throw new EncounterRuleError('validation', `${action.label} requires adjacency to ${object.name}.`);
   }
   spendCost(context, command.actor, action.cost, action.label);
@@ -11980,15 +12057,18 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
         return;
       }
       const consequence = command.consequence;
-      if (!isCellInside(context.state.bounds, consequence.to)) {
+      const destinationSpace = combatantSpaceAt(context.state, command.target, consequence.to);
+      if (!spaceFitsBounds(destinationSpace, context.state.bounds)) {
         throw new EncounterRuleError('validation', 'An adjudicated destination is outside the encounter grid.');
       }
       if (
-        movementBlocked(context.state, consequence.to) ||
+        destinationSpace.cells.some((cell) => movementBlocked(context.state, cell)) ||
+        (destinationSpace.mode.kind === 'squeezed' &&
+          openingContainingSpace(destinationSpace, context.state.environment.narrowOpeningRegions) === null) ||
         context.state.tokens.some(
           (candidate) =>
             candidate.combatantId !== command.target &&
-            cellKey(candidate.position) === cellKey(consequence.to),
+            spacesIntersect(destinationSpace, combatantSpace(context.state, candidate.combatantId)),
         )
       ) {
         throw new EncounterRuleError('validation', 'An adjudicated destination must be unoccupied and unblocked.');

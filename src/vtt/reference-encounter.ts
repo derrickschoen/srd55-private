@@ -1,9 +1,10 @@
 import { combatToken, type CombatantProfile, type CombatToken } from '../combat/combatant';
 import type { LegalActionSummary } from '../combat/controllers';
 import { combatantSpace, type EncounterState } from '../combat/encounter';
-import { minimumSpaceDistance } from '../combat/creature-space';
+import { minimumSpaceDistance, minimumSpaceDistanceToCells } from '../combat/creature-space';
 import type { EncounterCommand } from '../combat/events';
 import { gridDistance, isCellInside, type GridCell } from '../combat/grid';
+import { encounterMovementWorld } from '../combat/encounter-movement-world';
 import { feetPoint, previewAffectedCells } from '../combat/templates';
 import { referencePartySpellSlots } from '../combat/spells/resources';
 import {
@@ -143,16 +144,10 @@ function position(state: EncounterState, id: CombatantId): GridCell {
   return found.position;
 }
 
-function occupied(state: EncounterState, cell: GridCell): boolean {
-  return state.tokens.some(
-    (token) =>
-      token.position.column === cell.column && token.position.row === cell.row,
-  );
-}
-
 function movementActions(state: EncounterState, actor: CombatantId): readonly EncounterCommand[] {
   const current = position(state, actor);
   if (subject(state, actor).turn.movement.remaining < 5) return [];
+  const world = encounterMovementWorld(state);
   const actions: EncounterCommand[] = [];
   for (let columnDelta = -1; columnDelta <= 1; columnDelta += 1) {
     for (let rowDelta = -1; rowDelta <= 1; rowDelta += 1) {
@@ -161,12 +156,12 @@ function movementActions(state: EncounterState, actor: CombatantId): readonly En
         column: current.column + columnDelta,
         row: current.row + rowDelta,
       };
+      const traversal = world.canTraverseStep(actor, current, to)
+        ? world.traversal(actor, current, to)
+        : { kind: 'blocked' as const };
       if (
         isCellInside(state.bounds, to) &&
-        !occupied(state, to) &&
-        !state.blockedCells.some(
-          (cell) => cell.column === to.column && cell.row === to.row,
-        )
+        traversal.kind === 'enterable' && traversal.canEnd
       ) {
         actions.push({ type: 'move', actor, path: [to], cause: 'voluntary' });
       }
@@ -211,7 +206,7 @@ function shatterActions(state: EncounterState, actor: CombatantId): readonly Enc
         { bounds: state.bounds, blockedCells: state.blockedCells },
         area,
       );
-      if (gridDistance(position(state, actor), { column, row }) > 60) continue;
+      if (minimumSpaceDistanceToCells(combatantSpace(state, actor), [{ column, row }]) > 60) continue;
       actions.push({
         type: 'cast_spell',
         actor,

@@ -1,12 +1,13 @@
 import { canonicalJson } from '../commands/canonical-json';
 import { combatantsAreAllies } from '../combat/allies';
 import {
+  combatantSpace,
   combatantConditions,
   type EncounterState,
   type LifeState,
 } from '../combat/encounter';
 import { isIncapacitated } from '../combat/conditions';
-import { persistentAreaContains } from '../combat/persistent-areas';
+import { persistentAreaTouchesSpace } from '../combat/persistent-areas';
 import type { CombatantId } from '../combat/values';
 import { sha256 } from '../crypto/sha256';
 import {
@@ -522,10 +523,12 @@ function movedState(
     ...moved,
     persistentAreas: moved.persistentAreas.map((area) => {
       const origin = area.origin;
-      const anchor = origin.kind === 'anchored'
-        ? moved.tokens.find((token) => token.combatantId === origin.combatant)?.position ?? null
+      const anchorCells = origin.kind === 'anchored'
+        ? moved.tokens.some((token) => token.combatantId === origin.combatant)
+          ? combatantSpace(moved, origin.combatant).cells
+          : null
         : origin.kind === 'anchored_to_object'
-          ? moved.worldObjects.find((object) => object.id === origin.object)?.position ?? null
+          ? moved.worldObjects.find((object) => object.id === origin.object)?.footprint ?? null
           : null;
       const eligible = (subjectId: CombatantId): boolean => {
         switch (area.targetFilter.kind) {
@@ -539,7 +542,12 @@ function movedState(
         .filter((subject) => subject.life !== 'dead' && eligible(subject.profile.id))
         .flatMap((subject) => {
           const token = moved.tokens.find((candidate) => candidate.combatantId === subject.profile.id);
-          return token !== undefined && persistentAreaContains(area, token.position, anchor, moved)
+          return token !== undefined && persistentAreaTouchesSpace(
+            area,
+            combatantSpace(moved, subject.profile.id).cells,
+            anchorCells,
+            moved,
+          )
             ? [subject.profile.id]
             : [];
         })

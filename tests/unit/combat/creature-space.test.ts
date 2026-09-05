@@ -7,7 +7,9 @@ import {
   creatureSpace,
   effectSequence,
   minimumSpaceDistance,
+  minimumSpaceDistanceToCells,
   minimumSpaceLine,
+  minimumSpaceLineToCells,
   narrowOpeningRegion,
   newlyEnteredSpaceCells,
   normalPlacementFor,
@@ -196,6 +198,23 @@ describe('opaque creature space', () => {
       sourceCenter: { x: 1.5, y: 0.5 },
       targetCenter: { x: 3.5, y: 0.5 },
     });
+  });
+
+  it('measures authored cell sets from the nearest occupied creature cell', () => {
+    const source = normalSpace('Large', { column: 0, row: 0 });
+    const targetCells = [{ column: 3, row: 1 }, { column: 4, row: 1 }] as const;
+
+    expect(minimumSpaceLineToCells(source, targetCells)).toEqual({
+      distance: 10,
+      sourceCell: { column: 1, row: 0 },
+      targetCell: { column: 3, row: 1 },
+      sourceCenter: { x: 1.5, y: 0.5 },
+      targetCenter: { x: 3.5, y: 1.5 },
+    });
+    expect(minimumSpaceDistanceToCells(source, targetCells)).toBe(10);
+    expect(() => minimumSpaceLineToCells(source, [])).toThrow(
+      'A spatial target must contain at least one cell.',
+    );
   });
 
   it('derives only the five legal squeeze pairs and their smaller controlled spaces', () => {
