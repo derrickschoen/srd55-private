@@ -11032,3 +11032,7 @@ the picture.
 D539 — OWNER (2026-09-05 13:57): surviving mutants — CURRENT PRACTICE stands: a survivor is recorded in the commit
 message and the decisions log and carried into the next increment as a required killing test; it does not block
 the commit or the landing.
+
+D540 — OWNER (2026-09-05 13:59): PICTURE FIRST for the next few days — classic rounds and probe increments
+outrank engine landings for the gate lock and model seats until the D536 medium bar passes. Engine lanes
+(conditions, tactical, graph-slice, footprints inc5) continue but yield the lock; iso stays paused (D531).
