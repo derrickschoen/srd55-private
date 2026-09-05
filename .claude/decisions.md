@@ -11123,3 +11123,15 @@ research repo is referenced by name.
 D548 — OWNER (2026-09-05 14:57): the first public version is a USABLE VIRTUAL TABLETOP, which needs ALL the parts
 — character builder, trustworthy rules engine, the tabletop itself, and the AI DM. No single part is "first";
 each lane is scheduled toward VTT usability as a whole.
+
+D549 — OWNER (2026-09-05 15:00): ACCESSIBILITY. (1) Standing rule for both views: every fact is readable without
+colour — glyph, number or text alongside colour, never colour alone; keyboard focus preserved; reduced motion
+honoured; an art round may not remove a non-colour cue for looks. (2) A colour-blind palette option and a
+high-contrast accessibility mode (switchable, persisted like the D537 layers). (3) A FULL SCREEN-READER BOARD: a
+structured, assistive-technology-readable rendering of every board fact, exportable as an HTML file that an AI can
+read. Supervisor plan: (3) is a new module over the existing player/DM projections (semantic HTML: per-creature
+rows with cell, side, HP band, conditions, hidden/last-seen; per-cell facts for terrain, light, doors, fog,
+blocked; adjacency and reach lists; ARIA landmarks; no CSS dependence), served in-app as the "Screen-reader board"
+view and exported by a button and by the MCP snapshot tool as `board.html` next to the PNG — codex unit dispatched
+now in worktree dnd-wt-a11y (new files only; merges after footprints inc5 lands). (2) joins the classic lane as
+round 5 (after round 4): palette variants as typed closed sets, contrast mode as a layer preset, both probed.
