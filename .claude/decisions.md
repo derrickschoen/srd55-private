@@ -10628,3 +10628,12 @@ the mutation): tsc 0, sg 0, iso 223/223, iso spec 1/1. Supervisor rulings on the
 darkened-region residency bound (wall kinds × variants × densities, ≈18 native regions) is accepted without an LRU;
 the isAppliedCondition shim is deleted by the conditions lane (D510.1) when `conditions` lands on
 DmVisibleCombatant, not here. Codex review round 10 dispatched (HOLD/LAND).
+
+SUPERVISOR RULING (2026-09-05 08:50) — footprints/main merge, hidden creatures on the player board. Codex stopped
+on a contradiction: main (board-shot inc1, 9da6c3b6) has the player see a fog patch at the cell where a creature
+hid; footprints inc3 (8bdc7ba8) has the player see ordinary floor with no token. Both rewrote the same base
+(ea920d5c fogged the cell on both boards). Ruling: no leak — the player board renders a hidden creature's cell as
+plain floor with no fog and no token; the DM board keeps the token flagged hidden-from-players with no fog. A fog
+patch that appears exactly where a creature hid tells the player where it is. Codex's second claim, that the
+detection-ui unit test contradicts too, was wrong: both sides keep `concealedCells` equal to [] after the hunk.
+Owner may overrule; the spec assertion is one line either way. Codex resumed with the ruling.
