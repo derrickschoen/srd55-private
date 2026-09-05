@@ -10275,3 +10275,10 @@ at merge time (D2's hash change must come with those invariants or be reverted).
 scene (use compareIdBytes), door_open unreachable from encounter data (needs a projected door state).
 PROBE (D519): the codex lane could not run real model calls (codex must write its own home during start-up; the
 sandbox forbids it) — correct stop; the K=6 run launched by the supervisor outside the sandbox at 20:27.
+
+D523 — OWNER (2026-09-04 20:35): "Add a small note in the instructions that each square on the map is supposed to be
+5 feet." Applied in three places: (1) the AI DM's image-arm startup instructions gain one sentence ("Each grid square
+on the board image is 5 feet; distances in the text are in feet.") — folded into board-shot inc2.5 (capture_only)
+so off-arm bytes stay identical and png/capture_only arms carry the line; (2) the judge prompt header in
+judge-one-img.sh (supervisor edit, one line, outside the repo); (3) the D519 probe's question preamble at its next
+increment.
