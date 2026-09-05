@@ -11135,3 +11135,6 @@ blocked; adjacency and reach lists; ARIA landmarks; no CSS dependence), served i
 view and exported by a button and by the MCP snapshot tool as `board.html` next to the PNG — codex unit dispatched
 now in worktree dnd-wt-a11y (new files only; merges after footprints inc5 lands). (2) joins the classic lane as
 round 5 (after round 4): palette variants as typed closed sets, contrast mode as a layer preset, both probed.
+
+D550 — OWNER (2026-09-05 15:05): the save format stays disposable (one-way migrations, no compatibility promise)
+until the PUBLIC RELEASE; from then on compatibility is promised. Early saves may not survive before that.
