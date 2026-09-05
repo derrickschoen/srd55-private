@@ -11023,3 +11023,8 @@ corner glyphs, badges/plates and the roster box are layers a human can turn off 
 and the probe capture always have every layer on. Art rounds judge the board with layers off (player look) AND
 on (snapshot); a change may not improve one at the other's expense. The classic lane implements the layer toggles
 as typed presentation state (a closed set of layer names, persisted per DM), with the snapshot mode forcing all on.
+
+D538 — OWNER (2026-09-05 13:55): NO stop rule for the picture — the board image stays on as default AI-DM input
+regardless of measured decision gain; it is mainly for humans and judges, and DM benefit is a bonus, not a gate.
+The image experiments still report their numbers when run (D536 bar at medium), but a null result does not remove
+the picture.
