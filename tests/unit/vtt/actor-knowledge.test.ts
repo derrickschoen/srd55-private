@@ -184,6 +184,44 @@ describe('actor-knowledge-v3', () => {
     });
   });
 
+  it('redacts a Large target only when fog covers its complete footprint', () => {
+    const actor = monsterProfile('actor-knowledge-large-fog-observer');
+    const baseTarget = playerProfile('actor-knowledge-large-fog-target');
+    const target = {
+      ...baseTarget,
+      rules: { ...baseTarget.rules, sizeCategory: 'Large' as const },
+    };
+    const common = {
+      bounds: { columns: 5, rows: 3 },
+      combatants: [actor, target],
+      tokens: [placedToken(actor, 0, 1), placedToken(target, 2, 0)],
+    };
+    const partiallyFogged = createEncounter({
+      ...common,
+      foggedCells: [{ column: 2, row: 0 }],
+    });
+    const fullyFogged = createEncounter({
+      ...common,
+      foggedCells: [
+        { column: 2, row: 0 }, { column: 3, row: 0 },
+        { column: 2, row: 1 }, { column: 3, row: 1 },
+      ],
+    });
+
+    expect(onlyTarget(partiallyFogged, actor)).toMatchObject({
+      kind: 'perceived',
+      targetId: target.id,
+      footprint: [
+        { column: 2, row: 0 }, { column: 3, row: 0 },
+        { column: 2, row: 1 }, { column: 3, row: 1 },
+      ],
+    });
+    expect(onlyTarget(fullyFogged, actor)).toMatchObject({
+      kind: 'unknown',
+      targetId: target.id,
+    });
+  });
+
   it('records missing last-seen memory as a typed unresolved basis', () => {
     const setup = encounter();
     const hidden: EncounterState = {

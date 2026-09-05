@@ -13,6 +13,17 @@ import {
   type InitiativeEntry,
 } from '../combat/encounter';
 import type { EncounterCommand, EncounterEvent } from '../combat/events';
+import { combatantSpace } from '../combat/combat-rules';
+import {
+  creatureSpace,
+  minimumSpaceDistanceToCells,
+  normalPlacementFor,
+  placementFor,
+  sizedCombatantState,
+  spaceFitsBounds,
+  spacesIntersect,
+  spaceTouchesCellSet,
+} from '../combat/creature-space';
 import type { GridCell } from '../combat/grid';
 import type { Rng } from '../combat/random';
 import {
@@ -618,12 +629,6 @@ export function createVaneWarrenFight(
   };
 }
 
-function positionOf(state: EncounterState, actor: CombatantId): GridCell {
-  const token = state.tokens.find((candidate) => candidate.combatantId === actor);
-  if (token === undefined) throw new Error(`Combatant ${actor} has no Vane Warren token.`);
-  return token.position;
-}
-
 function adjacent(left: GridCell, right: GridCell): boolean {
   return Math.max(Math.abs(left.column - right.column), Math.abs(left.row - right.row)) <= 1;
 }
@@ -644,7 +649,10 @@ export function useVaneWarrenWarDrum(
     throw new Error('Only an enemy in this fight can sound the Vane Warren war drum.');
   }
   const alarmObject = drum(state);
-  if (!adjacent(positionOf(state.encounter, actor), alarmObject.object.position)) {
+  if (!state.encounter.tokens.some((token) => token.combatantId === actor)) {
+    throw new Error(`Combatant ${actor} has no Vane Warren token.`);
+  }
+  if (minimumSpaceDistanceToCells(combatantSpace(state.encounter, actor), alarmObject.object.footprint) > 5) {
     throw new Error('The enemy must reach the war drum before using it.');
   }
   const usedAtRound = Math.max(1, state.encounter.round);
@@ -694,14 +702,32 @@ export function reduceVaneWarrenWorldObjectAction(
   return sounded;
 }
 
-function openPosition(state: EncounterState, preferred: GridCell): GridCell {
-  const occupied = new Set(state.tokens.map((token) => `${String(token.position.column)},${String(token.position.row)}`));
-  const blocked = new Set(state.blockedCells.map((cell) => `${String(cell.column)},${String(cell.row)}`));
+function openPosition(
+  state: EncounterState,
+  profile: CombatantProfile,
+  preferred: GridCell,
+  additionalOccupied: readonly ReturnType<typeof combatantSpace>[],
+): GridCell {
+  const size = profile.rules.sizeCategory;
+  if (size === undefined) throw new Error(`The Vane Warren reinforcement ${profile.id} has no mechanical size.`);
+  const sized = sizedCombatantState(size);
+  const occupied = [
+    ...state.tokens.map((token) => combatantSpace(state, token.combatantId)),
+    ...additionalOccupied,
+  ];
+  const blocked = [
+    ...state.blockedCells,
+    ...state.worldObjects.filter((object) => object.blocking.movement).flatMap((object) => object.footprint),
+    ...(state.environment.movementRegions ?? []).filter((region) => region.entry === 'blocked').flatMap((region) => region.cells),
+  ];
   for (let radius = 0; radius < Math.max(state.bounds.columns, state.bounds.rows); radius += 1) {
     for (let row = Math.max(0, preferred.row - radius); row <= Math.min(state.bounds.rows - 1, preferred.row + radius); row += 1) {
       for (let column = Math.max(0, preferred.column - radius); column <= Math.min(state.bounds.columns - 1, preferred.column + radius); column += 1) {
-        const key = `${String(column)},${String(row)}`;
-        if (!occupied.has(key) && !blocked.has(key)) return { column, row };
+        const anchor = { column, row };
+        const candidate = creatureSpace(sized, placementFor(sized, anchor, normalPlacementFor(sized)));
+        if (spaceFitsBounds(candidate, state.bounds) &&
+          !spaceTouchesCellSet(candidate, blocked) &&
+          occupied.every((space) => !spacesIntersect(candidate, space))) return anchor;
       }
     }
   }
@@ -714,27 +740,27 @@ function deployRosterEntriesInEncounter(
   entries: readonly VaneWarrenRosterEntry[],
   incrementRevision = true,
 ): EncounterState {
-  let encounter = initial;
   const profiles: CombatantProfile[] = [];
   const positions: GridCell[] = [];
+  const addedSpaces: ReturnType<typeof combatantSpace>[] = [];
   for (const entry of entries) {
     const profile = profileFor(fight.id, entry);
-    const position = openPosition(encounter, entry.position);
+    const position = openPosition(initial, profile, entry.position, addedSpaces);
     profiles.push(profile);
     positions.push(position);
-    encounter = {
-      ...encounter,
-      tokens: [...encounter.tokens, combatToken(profile, position)],
-    };
+    const size = profile.rules.sizeCategory;
+    if (size === undefined) throw new Error(`The Vane Warren reinforcement ${profile.id} has no mechanical size.`);
+    const sized = sizedCombatantState(size);
+    addedSpaces.push(creatureSpace(sized, placementFor(sized, position, normalPlacementFor(sized))));
   }
   const initialized = createEncounter({
     bounds: initial.bounds,
     combatants: profiles,
     tokens: profiles.map((profile, index) => combatToken(profile, positions[index] as GridCell)),
   });
-  const lastSlot = Math.max(-1, ...encounter.initiative.map((entry) => entry.slot));
-  const lastTotal = Math.min(0, ...encounter.initiative.map((entry) => entry.total));
-  const appendedInitiative: readonly InitiativeEntry[] = encounter.initiative.length === 0
+  const lastSlot = Math.max(-1, ...initial.initiative.map((entry) => entry.slot));
+  const lastTotal = Math.min(0, ...initial.initiative.map((entry) => entry.total));
+  const appendedInitiative: readonly InitiativeEntry[] = initial.initiative.length === 0
     ? []
     : profiles.map((profile, index) => ({
         combatant: profile.id,
@@ -744,10 +770,11 @@ function deployRosterEntriesInEncounter(
         slot: lastSlot + index + 1,
       }));
   return {
-    ...encounter,
-    revision: incrementRevision ? encounter.revision + 1 : encounter.revision,
-    combatants: [...encounter.combatants, ...initialized.combatants],
-    initiative: [...encounter.initiative, ...appendedInitiative],
+    ...initial,
+    revision: incrementRevision ? initial.revision + 1 : initial.revision,
+    combatants: [...initial.combatants, ...initialized.combatants],
+    tokens: [...initial.tokens, ...initialized.tokens],
+    initiative: [...initial.initiative, ...appendedInitiative],
   };
 }
 

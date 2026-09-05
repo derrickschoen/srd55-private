@@ -3,6 +3,8 @@ import type { EncounterState } from '../../combat/encounter';
 import { ALERTING_POLICY, type EncounterAlertingState } from '../../combat/alerting';
 import type { EncounterEvent } from '../../combat/events';
 import type { GridCell } from '../../combat/grid';
+import { combatantSpace, combatantSpaceAt } from '../../combat/combat-rules';
+import { minimumSpaceLine } from '../../combat/creature-space';
 import { SEARCH_MEMORY_POLICY, type SearchMemory } from '../../combat/search-memory';
 import type { MonsterAttackAction } from '../../combat/statblock';
 import {
@@ -901,14 +903,21 @@ function reactionAttackInput(
   const command = decision.opportunityAttack.command;
   const attacker = state.combatants.find((candidate) => candidate.profile.id === command.actor);
   const target = state.combatants.find((candidate) => candidate.profile.id === command.target);
-  const attackerPosition = state.tokens.find((token) => token.combatantId === command.actor)?.position;
-  if (attacker === undefined || target === undefined || attackerPosition === undefined) return null;
+  const attackerToken = state.tokens.find((token) => token.combatantId === command.actor);
+  const targetToken = state.tokens.find((token) => token.combatantId === command.target);
+  if (attacker === undefined || target === undefined || attackerToken === undefined || targetToken === undefined) {
+    return null;
+  }
+  const selectedLine = minimumSpaceLine(
+    combatantSpace(state, command.actor),
+    combatantSpaceAt(state, command.target, decision.opportunityAttack.from),
+  );
   const criticalFloor = command.criticalFloor === 18 || command.criticalFloor === 19 ? command.criticalFloor : 20;
   return {
     attackerId: command.actor,
     targetId: command.target,
-    attackerPosition,
-    targetPosition: decision.opportunityAttack.from,
+    attackerPosition: selectedLine.sourceCell,
+    targetPosition: selectedLine.targetCell,
     range: command.tacticalRange ?? { kind: 'melee', reachFeet: attacker.profile.rules.reach },
     attackBonus: command.attackBonus,
     targetArmorClass: target.profile.rules.armorClass,

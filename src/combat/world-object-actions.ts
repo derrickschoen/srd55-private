@@ -1,16 +1,13 @@
 import type { LegalActionSummary } from './controllers';
+import { combatantSpace } from './combat-rules';
 import type { EncounterState } from './encounter';
 import type { EncounterCommand, EncounterEvent } from './events';
-import { gridDistance } from './grid';
+import { minimumSpaceDistanceToCells } from './creature-space';
 import type { CombatantId, WorldObjectId } from './values';
 import type { WorldObject, WorldObjectClassAction } from './world-objects';
 
 function combatant(state: EncounterState, actor: CombatantId) {
   return state.combatants.find((candidate) => candidate.profile.id === actor);
-}
-
-function position(state: EncounterState, actor: CombatantId) {
-  return state.tokens.find((candidate) => candidate.combatantId === actor)?.position;
 }
 
 export function worldObjectClassAction(
@@ -36,10 +33,9 @@ export function worldObjectClassActionCommands(
   actor: CombatantId,
 ): LegalActionSummary {
   const subject = combatant(state, actor);
-  const actorPosition = position(state, actor);
   if (
     subject === undefined ||
-    actorPosition === undefined ||
+    !state.tokens.some((candidate) => candidate.combatantId === actor) ||
     subject.life !== 'living' ||
     subject.turn.action.kind !== 'available' ||
     state.activeCombatant !== actor
@@ -51,7 +47,8 @@ export function worldObjectClassActionCommands(
     for (const action of object.classActions ?? []) {
       if (
         (action.eligibleActor !== 'either' && action.eligibleActor !== subject.profile.kind) ||
-        (action.reach === 'adjacent' && gridDistance(actorPosition, object.position) > 5) ||
+        (action.reach === 'adjacent' &&
+          minimumSpaceDistanceToCells(combatantSpace(state, actor), object.footprint) > 5) ||
         (action.uses === 'once' && worldObjectActionWasUsed(state.eventLog, object.id, action.id))
       ) {
         continue;

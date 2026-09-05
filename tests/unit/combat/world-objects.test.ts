@@ -13,6 +13,7 @@ import type { EncounterCommand } from '../../../src/combat/events';
 import { findPath } from '../../../src/combat/movement';
 import { armorClass, damageType, dieSides, feet, worldObjectId } from '../../../src/combat/values';
 import type { CoverTier, WorldObject } from '../../../src/combat/world-objects';
+import { worldObjectClassActionCommands } from '../../../src/combat/world-object-actions';
 import { monsterProfile, placedToken, playerProfile } from './fixtures';
 
 const force = damageType('Force');
@@ -94,6 +95,48 @@ function attackBy(
 }
 
 describe('typed world objects and encounter environment', () => {
+  it('uses every occupied creature cell for runtime blockers and adjacent object actions', () => {
+    const baseActor = playerProfile('large-world-actor', { initiativeBonus: 20 });
+    const actor = {
+      ...baseActor,
+      rules: { ...baseActor.rules, sizeCategory: 'Large' as const },
+    };
+    const target = monsterProfile('large-world-target', { initiativeBonus: -20 });
+    const lever: WorldObject = {
+      ...object('tail-lever', [{ column: 3, row: 1 }]),
+      classActions: [{
+        id: 'pull-tail-lever',
+        label: 'Pull tail lever',
+        cost: 'action',
+        reach: 'adjacent',
+        uses: 'once',
+        eligibleActor: 'either',
+      }],
+    };
+    const state = reduceEncounter(createEncounter({
+      bounds: { columns: 8, rows: 5 },
+      combatants: [actor, target],
+      tokens: [placedToken(actor, 1, 1), placedToken(target, 6, 2)],
+      worldObjects: [lever],
+    }), { type: 'roll_initiative' }, () => 0.5).state;
+
+    expect(worldObjectClassActionCommands(state, actor.id).actions).toContainEqual({
+      type: 'use_world_object',
+      actor: actor.id,
+      objectId: lever.id,
+      actionId: 'pull-tail-lever',
+    });
+    expect(() => reduceEncounter(state, {
+      type: 'world_operation',
+      actor: null,
+      cost: 'none',
+      operation: {
+        kind: 'create_object',
+        object: object('tail-blocker', [{ column: 2, row: 2 }], { movement: true }),
+      },
+    }, () => 0.5)).toThrow('A movement-blocking world object cannot overlap a combatant.');
+  });
+
   it('wall_ignored_by_pathing: a movement blocker forces a strictly longer route', () => {
     const wall = object('path-wall', [2, 3, 4].flatMap((column) =>
       [0, 1, 2, 3].map((row) => ({ column, row }))), { movement: true });

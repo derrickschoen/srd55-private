@@ -144,4 +144,33 @@ describe('D420 NPC help-calling', () => {
     expect(JSON.stringify(roundTripped)).toBe(serialized);
     expect(requiredAlerting(roundTripped)).toEqual(requiredAlerting(result.state));
   });
+
+  it('measures a help call from the caller footprint rather than its anchor', () => {
+    const pc = playerProfile('large-help-attacker', { initiativeBonus: 20 });
+    const baseCaller = monsterProfile('large-help-caller', { initiativeBonus: -20 });
+    const caller = {
+      ...baseCaller,
+      rules: { ...baseCaller.rules, sizeCategory: 'Large' as const },
+    };
+    const responder = monsterProfile('large-help-responder');
+    let state = createEncounter({
+      bounds: { columns: 7, rows: 2 },
+      alerting: {
+        nearbyNpcIds: [responder.id],
+        yellingDistance: yellingDistance(feet(10)),
+      },
+      combatants: [pc, caller, responder],
+      tokens: [placedToken(pc, 0), placedToken(caller, 2), placedToken(responder, 5)],
+    });
+    state = reduceEncounter(state, { type: 'roll_initiative' }, fixedD20(10)).state;
+
+    const result = reduceEncounter(state, attack(pc, caller), fixedD20(10));
+
+    expect(result.events).toContainEqual(expect.objectContaining({
+      type: 'combatant_joined_encounter',
+      combatant: responder.id,
+      calledBy: caller.id,
+      distance: 10,
+    }));
+  });
 });

@@ -70,7 +70,7 @@ export interface MovementEvaluationInput {
   readonly attackAt: (position: GridCell) =>
     | {
         readonly status: 'resolved';
-        readonly input: Omit<TacticalAttackInput, 'attackerPosition'>;
+        readonly input: TacticalAttackInput;
       }
     | {
         readonly status: 'unresolved';
@@ -255,10 +255,7 @@ function tacticalVerdict(
     : {
         status: 'resolved',
         tacticalPolicy: TACTICAL_EVALUATOR_POLICY,
-        evaluation: evaluateTacticalAttack({
-          ...context.input,
-          attackerPosition: position,
-        }),
+        evaluation: evaluateTacticalAttack(context.input),
       };
   cache.set(key, verdict);
   return verdict;

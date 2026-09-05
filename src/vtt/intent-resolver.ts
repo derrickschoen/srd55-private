@@ -1,4 +1,6 @@
 import { canonicalJson } from '../commands/canonical-json';
+import { combatantSpace } from '../combat/combat-rules';
+import { minimumSpaceDistanceToCells, minimumSpaceLine } from '../combat/creature-space';
 import type { EncounterState } from '../combat/encounter';
 import { gridDistance, type GridCell } from '../combat/grid';
 import type {
@@ -295,8 +297,11 @@ function movementResolution(
   const movementKind = slots.some((slot) => slot.slot === 'main' && slot.use.kind === 'dash') ? 'dash' : 'normal';
   if (productiveClose) {
     const anchorId = resolveSelector(state, actorId, anchor, queries);
-    const anchorPosition = anchorId === null ? null : queries.tokenPosition(state, anchorId);
-    if (anchorPosition === null) return null;
+    if (anchorId === null || queries.tokenPosition(state, anchorId) === null) return null;
+    const anchorPosition = minimumSpaceLine(
+      combatantSpace(state, actorId),
+      combatantSpace(state, anchorId),
+    ).targetCell;
     const approach = queries.approach(state, {
       actorId,
       target: anchorPosition,
@@ -416,7 +421,8 @@ function validateUse(
       const position = queries.tokenPosition(state, actorId);
       if (object === undefined || action === null || position === null ||
         (action.eligibleActor !== 'either' && action.eligibleActor !== 'monster') ||
-        (action.reach === 'adjacent' && gridDistance(position, object.position) > 5) ||
+        (action.reach === 'adjacent' &&
+          minimumSpaceDistanceToCells(combatantSpace(state, actorId), object.footprint) > 5) ||
         (action.uses === 'once' && worldObjectActionWasUsed(state.eventLog, object.id, action.id))) {
         return 'WORLD_OBJECT_ACTION_UNAVAILABLE';
       }

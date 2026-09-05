@@ -27,6 +27,7 @@ import { projectDmBoard } from '../../../src/vtt/encounter-projections';
 import { availableEngineActorOptions, pureTurnProposalResolver } from '../../../src/vtt/intent-resolver';
 import { freshMonsterPlanningState } from '../../../src/vtt/mcp/entrypoint';
 import { generateRoom } from '../../../src/vtt/room-generator';
+import { HAND_AUTHORED_CAPSULE_V2_BODY } from '../../fixtures/vtt/creature-space-migration-fixtures';
 
 const repoRoot = fileURLToPath(new URL('../../../', import.meta.url));
 const authorityBoundaryEntries = [
@@ -180,6 +181,69 @@ function rehash(value: unknown): Record<string, unknown> {
 }
 
 describe('read-only engine state capsule', () => {
+  it('exercises the strict capsule corpus from a hand-authored schema-2 fixture', () => {
+    const body = structuredClone(HAND_AUTHORED_CAPSULE_V2_BODY);
+    const fixture = {
+      ...body,
+      digest: sha256(canonicalJson(body)),
+      generatedAt: '2026-09-05T12:00:00.000Z',
+    };
+    expect(decodeEngineStateCapsule(fixture)).toEqual(fixture);
+
+    const exactShapeCases = [
+      ['top-level unknown key', (capsule: Record<string, unknown>) => {
+        capsule['unexpected'] = true;
+      }],
+      ['top-level missing key', (capsule: Record<string, unknown>) => {
+        delete capsule['rulesIndex'];
+      }],
+      ['schema 1', (capsule: Record<string, unknown>) => {
+        capsule['schemaVersion'] = 1;
+      }],
+    ] as const;
+    for (const [label, mutate] of exactShapeCases) {
+      const corrupted = structuredClone(fixture) as Record<string, unknown>;
+      mutate(corrupted);
+      expect(() => decodeEngineStateCapsule(rehash(corrupted)), label).toThrow();
+    }
+
+    const placedCases = [
+      ['legacy schema-1 combatant', (combatant: Record<string, unknown>) => {
+        delete combatant['placementStatus'];
+        delete combatant['effectiveSize'];
+        delete combatant['placementMode'];
+        delete combatant['footprint'];
+      }],
+      ['illegal mode-size pair', (combatant: Record<string, unknown>) => {
+        combatant['placementMode'] = { kind: 'squeezed', actual: 'Large', sizedFor: 'Small' };
+      }],
+      ['forged footprint', (combatant: Record<string, unknown>) => {
+        combatant['footprint'] = [{ column: 1, row: 1 }];
+      }],
+    ] as const;
+    for (const [label, mutate] of placedCases) {
+      const corrupted = rehash(fixture);
+      const projection = mutableRecord(corrupted['projection'], `${label} projection`);
+      const combatant = mutableRecord(mutableArray(projection['combatants'], `${label} combatants`)[0], label);
+      mutate(combatant);
+      expect(() => decodeEngineStateCapsule(rehash(corrupted)), label).toThrowError(
+        expect.objectContaining<Partial<EngineStateCapsuleDecodeError>>({ code: 'invalid_schema' }),
+      );
+    }
+
+    const pendingWithPosition = rehash(fixture);
+    const pendingProjection = mutableRecord(pendingWithPosition['projection'], 'pending projection');
+    const pending = mutableRecord(mutableArray(pendingProjection['combatants'], 'pending combatants')[1], 'pending');
+    pending['position'] = { column: 4, row: 4 };
+    expect(() => decodeEngineStateCapsule(rehash(pendingWithPosition))).toThrowError(
+      expect.objectContaining<Partial<EngineStateCapsuleDecodeError>>({ code: 'invalid_schema' }),
+    );
+
+    expect(() => decodeEngineStateCapsule({ ...fixture, revision: 2 })).toThrowError(
+      expect.objectContaining<Partial<EngineStateCapsuleDecodeError>>({ code: 'digest_mismatch' }),
+    );
+  });
+
   it('strictly decodes schema 2 only after exact shape and spatial semantics validate', () => {
     const { capsule } = capsuleFixture();
     expect(decodeEngineStateCapsule(capsule)).toEqual(capsule);

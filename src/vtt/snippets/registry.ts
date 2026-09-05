@@ -262,7 +262,8 @@ function hasProjectedObstacle(capsule: EngineStateCapsule): boolean {
       actor.placementStatus === 'placed' && actor.life !== 'dead' && actor.side !== side,
   );
   return capsule.projection.blockedCells.some((cell) => targets.some((target) =>
-    Math.max(Math.abs(cell.column - target.position.column), Math.abs(cell.row - target.position.row)) <= 1));
+    target.footprint.some((occupied) =>
+      Math.max(Math.abs(cell.column - occupied.column), Math.abs(cell.row - occupied.row)) <= 1)));
 }
 
 function definition(

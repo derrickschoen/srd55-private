@@ -526,14 +526,25 @@ export function minimumSpaceLine(
   source: CreatureSpace<KnownCreatureSize>,
   target: CreatureSpace<KnownCreatureSize>,
 ): MinimumSpaceLine {
+  return minimumSpaceLineToCells(source, target.cells);
+}
+
+/** Nearest occupied-cell line from a creature to an authored non-creature cell set. */
+export function minimumSpaceLineToCells(
+  source: CreatureSpace<KnownCreatureSize>,
+  targetCells: readonly GridCell[],
+): MinimumSpaceLine {
   const firstSource = source.cells[0];
-  const firstTarget = target.cells[0];
+  const firstTarget = targetCells[0];
+  if (firstTarget === undefined) {
+    throw new RangeError('A spatial target must contain at least one cell.');
+  }
   let selectedSource = firstSource;
   let selectedTarget = firstTarget;
   let selectedDistance = cellDistance(firstSource, firstTarget);
 
   for (const sourceCell of source.cells) {
-    for (const targetCell of target.cells) {
+    for (const targetCell of targetCells) {
       const distance = cellDistance(sourceCell, targetCell);
       if (distance < selectedDistance) {
         selectedSource = sourceCell;
@@ -557,6 +568,14 @@ export function minimumSpaceDistance(
   right: CreatureSpace<KnownCreatureSize>,
 ): Feet {
   return minimumSpaceLine(left, right).distance;
+}
+
+/** Nearest occupied-cell separation from a creature to an authored cell set. */
+export function minimumSpaceDistanceToCells(
+  source: CreatureSpace<KnownCreatureSize>,
+  targetCells: readonly GridCell[],
+): Feet {
+  return minimumSpaceLineToCells(source, targetCells).distance;
 }
 
 /** Rebuilds and verifies an opaque space at a serialized projection boundary. */
