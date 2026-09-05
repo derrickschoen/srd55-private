@@ -308,6 +308,8 @@ describe('footprint Increment 4 board and migration placement recovery', () => {
       life: 'living',
       hitPointBand: { kind: 'perceived_band', band: 'uninjured' },
       hiddenFromPlayers: false,
+      conditions: [],
+      reachFeet: 5,
       placementStatus: 'placement_pending',
       pendingReason: 'legacy_size_required',
     });

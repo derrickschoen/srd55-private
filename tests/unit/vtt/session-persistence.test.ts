@@ -394,6 +394,7 @@ describe('event-sourced encounter persistence', () => {
       life: 'living',
       active: false,
       formName: null,
+      conditions: [],
       placementStatus: 'placement_pending',
       pendingReason: 'legacy_size_required',
     }]);
