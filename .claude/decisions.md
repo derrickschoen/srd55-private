@@ -10919,3 +10919,11 @@ third of every token behind the in-cell plate. Round 3 dispatched to codex with 
 run is NOT started (a machine-readability seat holds on the vocabulary).
 CLEAN-ROOM: all three drafts complete (10–11 documents each, committed privately); codex merge into
 clean-room/final dispatched; the leakage check follows the merge. D13 still running (Fable, pre-D531 dispatch).
+
+D532 — OWNER (2026-09-05 13:05), from the usage audit: (1) Fable implementation units for art work ONLY when Fable
+is needed; codex implements the classic-view rounds (already the case) and, once D531's pause lifts, iso rounds
+default to codex too unless the supervisor states why a unit needs Fable's design judgement (and asks first).
+(2) Review panels: the full fifteen seats (3 models × 5 perspectives) ONLY on landing candidates; intermediate
+rounds get THREE seats — one per model, perspectives rotated so every perspective is covered across a branch's
+rounds; Opus at medium (D530). The classic round-2 panel already running completes. Classic round 3 (in flight)
+is an intermediate round: three seats.
