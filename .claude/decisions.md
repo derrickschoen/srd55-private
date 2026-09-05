@@ -10904,3 +10904,18 @@ Effect: D13 (running) finishes and is harvested and committed; D14 (art pass), f
 unit for coordinate labels/legend, and any new iso probe run are NOT dispatched until the owner lifts the pause.
 The iso BASELINE probe already running (Luna medium, codex-side spend, not the Claude limit) completes and is
 recorded. Classic lane, footprints, research synthesis and the classic review panel continue.
+
+CLASSIC ROUND 2 VERDICTS (2026-09-05 12:40–13:00, fifteen seats; ten in, four Opus seats still running; full text
+in the private repo rounds/classic-round-2/): nine HOLD, one "LAND to the probe only". Recurring majors, each
+VERIFIED by the supervisor in the code: (1) the snapshot bust is scaled by a non-integer `scale(0.84)` — pixel art
+off the grid; (2) plate text dropped from 2× to 1× and long words are squashed by a width-only clamp on the text
+image; (3) the leader is now meaningless (endpoint inside the same cell, a white bar over the chest); (4) HP
+VOCABULARY CONTRADICTION — legend UNINJURED/BLOODIED/NEAR DEATH vs probe uninjured/injured/critical (a scorer
+mismatch that has depressed the HP class since D516; found by three seats); (5) same-cell combatants overpaint
+each other since the collision handling was deleted, untested; (6) doors enter the OBJECT rail; the crate sigil is
+never drawn on the board; the rail can be clipped by the fixed legend height; (7) the live DM view loses the lower
+third of every token behind the in-cell plate. Round 3 dispatched to codex with all seven; leader removed
+(containment is the binding), one HP vocabulary everywhere, no fractional scaling anywhere. The round-2 probe
+run is NOT started (a machine-readability seat holds on the vocabulary).
+CLEAN-ROOM: all three drafts complete (10–11 documents each, committed privately); codex merge into
+clean-room/final dispatched; the leakage check follows the merge. D13 still running (Fable, pre-D531 dispatch).
