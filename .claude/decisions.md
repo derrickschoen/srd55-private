@@ -11434,3 +11434,19 @@ the owner writes (~/.config/dnd-art/fireworks.key) or from FIREWORKS_API_KEY in 
 supervisor does not extract the credential from the keyring itself (an attempt to read fireconnect's key-handling
 source was blocked by the tool classifier and is not retried). Reference-only rule, log, similarity gate and seat
 separation unchanged from D558.
+
+## Owner directions applied: claude-fw routes, Fireworks CLI allowed; ghost merge committed (2026-09-05 18:03)
+
+Owner: "You can use the fireconnect cli if you need" and update claude-fw to the latest Fireworks routes — K3 =
+accounts/fireworks/routers/kimi-k3-us, GLM-5.3-Flash = accounts/fireworks/routers/glm-5p3-flash-us, through the
+US endpoint https://us.api.fireworks.ai; K3 as fable and opus, GLM for sonnet and haiku. Applied to
+~/.claude-fw/settings.json (backup in ~/.claude-fw/backups, settings.json.<stamp>.pre-glm): FABLE/OPUS → K3,
+SONNET/HAIKU/SUBAGENT → GLM, ANTHROPIC_BASE_URL → https://us.api.fireworks.ai/inference. The manager's refresh
+copies settings.json forward, so the change survives a refresh. Smoke (stdin prompts): sonnet route answered
+PONG-GLM, opus route answered PONG-K3; Claude prints an "unrecognized_model" telemetry line for router ids, harmless.
+The fireconnect harness config itself (config.json profiles) is untouched — the owner named claude-fw only.
+
+References tool: the generator will take the key from `fireconnect key export --home /home/vagrant` (the same
+helper claude-fw uses), so no key file is needed; Fireworks amendment dispatched to the infra unit's session.
+Ghost lane: merge with main committed 35f8f6bf after my tsc 0 / sg 0 / focused 50/50; gate-wt4 (retry runners)
+launched. a11y mini-A/B running at load ~10 (may void).
