@@ -10343,3 +10343,11 @@ the code, not prose. Ruling: lanes may update docs/specs/*.schema.json ONLY by r
 generator (never by hand), and the increment's report must show the generator command and the resulting diff. The
 no-docs rule stands for everything else under docs/**. Codex's first locked suite on this increment showed 251
 failures before its fixes; the resumed session must finish with a real post-edit locked full suite and done-file.
+
+LANDINGS ON BRANCHES (supervisor, 2026-09-04 22:50): path-overlay inc1 5e4dbc6e, board-shot inc3 c82696a5,
+conditions inc1 d3c06ae6, graph-slice inc3 cf1bf2b9, probe inc2 7460325d, iso D2 1744049c (merged into iso-vtt), each
+after my forced gate and my own mutation (survivors and voids named in the commit messages). inc2.5 capture_only
+dispatched on board-shot (01a06f70). Per D520(2) the combined board landing (inc2+inc3 + path-overlay + classic
+art) is being assembled on claude/board-merge; conflicts resolved there, gated, then fast-forwarded once inc2.5 lands.
+Footprints inc2 resumed under the generated-schema ruling. Tactical inc6 delivered (CC0 public fixture, replay
+digests, provenance audit zero hits); gate queued.
