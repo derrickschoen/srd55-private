@@ -11040,3 +11040,6 @@ outrank engine landings for the gate lock and model seats until the D536 medium 
 D541 — OWNER (2026-09-05 14:01): pass evidence — one 24-board run per candidate; any class within 0.05 of the
 0.9 medium bar gets a second run with another seed and must pass on the combined score. A class passing only on
 a single run near the bar is "provisional", never "passed".
+
+D542 — OWNER (2026-09-05 14:03): the clean-room gate is the codex leakage check PLUS an independent Opus-medium
+leakage read; no owner read required. The folder opens to implementers only when both say CLEAN.
