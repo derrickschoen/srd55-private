@@ -390,12 +390,12 @@
                     "minimum": 0,
                     "maximum": 9007199254740991
                   },
+                  "willing": {
+                    "type": "boolean"
+                  },
                   "requiresSight": {
                     "type": "boolean",
                     "const": true
-                  },
-                  "willing": {
-                    "type": "boolean"
                   },
                   "allowDead": {
                     "type": "boolean",
@@ -454,12 +454,12 @@
                     "minimum": 0,
                     "maximum": 9007199254740991
                   },
+                  "willing": {
+                    "type": "boolean"
+                  },
                   "requiresSight": {
                     "type": "boolean",
                     "const": true
-                  },
-                  "willing": {
-                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -482,12 +482,12 @@
                     "minimum": 0,
                     "maximum": 100000
                   },
+                  "willing": {
+                    "type": "boolean"
+                  },
                   "requiresSight": {
                     "type": "boolean",
                     "const": true
-                  },
-                  "willing": {
-                    "type": "boolean"
                   },
                   "selection": {
                     "oneOf": [
@@ -5713,6 +5713,17 @@
                 "minLength": 1,
                 "maxLength": 1000
               },
+              "sizeCategory": {
+                "type": "string",
+                "enum": [
+                  "Tiny",
+                  "Small",
+                  "Medium",
+                  "Large",
+                  "Huge",
+                  "Gargantuan"
+                ]
+              },
               "armorClass": {
                 "type": "integer",
                 "minimum": 1,
@@ -5941,6 +5952,7 @@
               }
             },
             "required": [
+              "sizeCategory",
               "armorClass",
               "hitPointMaximum",
               "speedFeet",

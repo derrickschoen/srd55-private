@@ -46,10 +46,11 @@ export function monsterProfile(
       ? {}
       : { usesDeathSaves: options.usesDeathSaves }),
   });
-  return monsterCombatantProfile(statblock, {
+  const profile = monsterCombatantProfile(statblock, {
     combatantId: `combatant:${key}`,
     tokenId: `token:${key}`,
   });
+  return { ...profile, rules: { ...profile.rules, sizeCategory: 'Medium' } };
 }
 
 export function characterSheet(
@@ -64,6 +65,7 @@ export function characterSheet(
   return {
     character_id: 1,
     name: key,
+    creature_classification: { type: 'Humanoid', size: 'Medium' },
     hit_point_maximum: {
       id: 'hit_point_maximum',
       label: 'Hit Point maximum',

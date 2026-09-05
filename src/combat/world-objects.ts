@@ -1,4 +1,5 @@
 import type { GridBounds, GridCell } from './grid';
+import type { NarrowOpeningRegion } from './creature-space';
 import { isCellInside } from './grid';
 import type { DamageRequest, DamageResponse, RollMode } from './resolution';
 import type { ArmorClass, CombatantId, DamageType, WorldObjectId } from './values';
@@ -88,6 +89,8 @@ export interface EncounterEnvironment {
   readonly difficultTerrainRegions: readonly EnvironmentRegion[];
   /** Subject-cell visibility regions; ray-intersection geometry is deliberately absent. */
   readonly obscurementRegions: readonly ObscurementRegion[];
+  /** Authored apertures only; never inferred from terrain or blockers. */
+  readonly narrowOpeningRegions: readonly NarrowOpeningRegion[];
   /** Imported movement hazards. Region ids are the stable execution tie-breaker. */
   readonly movementRegions?: readonly MovementRegion[];
 }
@@ -108,6 +111,7 @@ export const EMPTY_ENCOUNTER_ENVIRONMENT: EncounterEnvironment = Object.freeze({
   lightRegions: Object.freeze([]),
   difficultTerrainRegions: Object.freeze([]),
   obscurementRegions: Object.freeze([]),
+  narrowOpeningRegions: Object.freeze([]),
   movementRegions: Object.freeze([]),
 });
 

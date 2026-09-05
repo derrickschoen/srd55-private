@@ -16,6 +16,7 @@ import { monsterTraitSupportRows } from '../../../src/vtt/monster-feature-suppor
 import { freshMonsterPlanningState } from '../../../src/vtt/monster-planning-state';
 import { generateRoom } from '../../../src/vtt/room-generator';
 import { engineActorOptions } from '../../../src/vtt/turn-option-registry';
+import { decodeArenaFixture } from '../../../src/vtt/mcp/entrypoint';
 import { declareTestInputs } from '../../helpers/test-inputs';
 
 const BRUTAL_FIXTURE_PATHS = [
@@ -208,7 +209,7 @@ describe('D466 room roster preflight', () => {
     expect(rooms, 'removing one seed from the 30-room list').toHaveLength(30);
 
     for (const { label, room } of rooms) {
-      const state = freshMonsterPlanningState(room.encounter.state);
+      const state = freshMonsterPlanningState(decodeArenaFixture(room));
       for (const monster of state.combatants) {
         if (monster.profile.kind !== 'monster') continue;
         const partition = engineActorOptions(state, monster.profile.id);

@@ -26,6 +26,7 @@ import {
   interactiveElement,
   type InteractiveTestElement,
 } from '../../fixtures/interactive-dom';
+import { createOptionPathFixtureEncounter } from '../../fixtures/vtt-option-path-encounter';
 import { placedToken, playerProfile } from '../combat/fixtures';
 
 function face(value: number): () => number {
@@ -91,6 +92,7 @@ function pathFixture(): {
       obscurementRegions: [],
       difficultTerrainRegions: [{ id: 'path-mud', cells: [{ column: 3, row: 0 }] }],
       movementRegions: [],
+      narrowOpeningRegions: [],
     },
     combatants: [actor, reactor, target],
     tokens: [placedToken(actor, 1), placedToken(reactor, 0), placedToken(target, 7)],
@@ -127,6 +129,57 @@ describe('D512 offered option movement paths', () => {
   });
 
   afterEach(() => restoreDocument());
+
+  it('legacy_combatant_skips_footprint_migration: browser fixture enters through canonical creature-space construction', () => {
+    const state = createOptionPathFixtureEncounter();
+    expect(state.tokens.map((token) => ({
+      combatantId: token.combatantId,
+      position: token.position,
+      placementMode: token.placementMode,
+    }))).toEqual([
+      {
+        combatantId: 'combatant:browser-path-goblin',
+        position: { column: 1, row: 2 },
+        placementMode: { kind: 'normal', actual: 'Small' },
+      },
+      {
+        combatantId: 'combatant:fighter',
+        position: { column: 0, row: 2 },
+        placementMode: { kind: 'normal', actual: 'Medium' },
+      },
+      {
+        combatantId: 'combatant:cleric',
+        position: { column: 7, row: 2 },
+        placementMode: { kind: 'normal', actual: 'Medium' },
+      },
+    ]);
+
+    expect(projectEncounterBoard(projectDmView(state)).combatants.map((combatant) => ({
+      id: combatant.id,
+      placementStatus: combatant.placementStatus,
+      effectiveSize: combatant.placementStatus === 'placed' ? combatant.effectiveSize : null,
+      footprint: combatant.placementStatus === 'placed' ? combatant.footprint : null,
+    }))).toEqual([
+      {
+        id: 'combatant:browser-path-goblin',
+        placementStatus: 'placed',
+        effectiveSize: 'Small',
+        footprint: [{ column: 1, row: 2 }],
+      },
+      {
+        id: 'combatant:cleric',
+        placementStatus: 'placed',
+        effectiveSize: 'Medium',
+        footprint: [{ column: 7, row: 2 }],
+      },
+      {
+        id: 'combatant:fighter',
+        placementStatus: 'placed',
+        effectiveSize: 'Medium',
+        footprint: [{ column: 0, row: 2 }],
+      },
+    ]);
+  });
 
   it('projects the resolver path with all four engine-owned danger kinds and omits a no-movement option', () => {
     const fixture = pathFixture();

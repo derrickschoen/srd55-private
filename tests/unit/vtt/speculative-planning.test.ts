@@ -47,7 +47,8 @@ import type {
   ScenarioFactAtom,
 } from '../../../src/vtt/speculative-plan-types';
 import { engineSchemaInternals, schemaViolations } from '../../../src/vtt/mcp/schemas';
-import { generateRoom, type GeneratedRoom } from '../../../src/vtt/room-generator';
+import { generateRoom } from '../../../src/vtt/room-generator';
+import { decodeArenaFixtureText } from '../../../src/vtt/mcp/entrypoint';
 import { freshMonsterPlanningState, projectFutureMonsterTurns } from '../../../src/vtt/monster-planning-state';
 import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
 import { declareTestInputs } from '../../helpers/test-inputs';
@@ -65,7 +66,7 @@ const hardBasisInputs = declareTestInputs({
 function frozenHardState(seed: (typeof HARD_BASIS_SEEDS)[number]): EncounterState {
   const path: `tests/fixtures/arena-basis-hard/seed-${number}.json` =
     `tests/fixtures/arena-basis-hard/seed-${seed}.json`;
-  return (JSON.parse(hardBasisInputs.fixtures.readText(path)) as GeneratedRoom).encounter.state;
+  return decodeArenaFixtureText(hardBasisInputs.fixtures.readText(path));
 }
 
 function direct(actorId: ReturnType<typeof combatantId>): EngineSelectorRef {

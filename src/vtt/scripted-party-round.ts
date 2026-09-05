@@ -4,7 +4,8 @@ import type { TurnLegalActions } from '../combat/coordinator';
 import type { EncounterState } from '../combat/encounter';
 import type { EncounterCommand } from '../combat/events';
 import { gridDistance, type GridCell } from '../combat/grid';
-import { dmVisibleEncounter, projectDmView, type DmVisibleEncounterState } from '../combat/visibility';
+import { decodeProjectedCreatureSpace, minimumSpaceDistance } from '../combat/creature-space';
+import { dmVisibleEncounter, isPlacedVisibleCombatant, projectDmView, type DmVisibleEncounterState } from '../combat/visibility';
 import type { CombatantId } from '../combat/values';
 import { sha256 } from '../crypto/sha256';
 import { spellDefinition } from '../combat/spells/definitions';
@@ -52,7 +53,7 @@ export interface ScriptedPartyPlan {
 }
 
 export interface ScriptedPartyPlanOptions {
-  /** Defaults to the actor-knowledge-v2 symmetric evaluator; v0 remains A/B selectable. */
+  /** Defaults to the actor-knowledge-v3 symmetric evaluator; v0 remains A/B selectable. */
   readonly decisionPolicy?: ScriptedPcDecisionPolicy;
   readonly controller?: AlgorithmController;
   readonly turnLegalActions?: TurnLegalActions;
@@ -171,7 +172,7 @@ function symmetricProgramIsLegal(
 
 function subject(state: DmVisibleEncounterState, id: CombatantId) {
   const found = state.combatants.find((candidate) => candidate.id === id);
-  if (found === undefined) throw new TypeError(`Scripted party program references unknown combatant ${id}.`);
+  if (found === undefined || found.placementStatus !== 'placed') throw new TypeError(`Scripted party program references unknown or unplaced combatant ${id}.`);
   return found;
 }
 
@@ -183,9 +184,9 @@ function predicateValue(predicate: StatePredicate, state: DmVisibleEncounterStat
       return combatant.hitPoints * 100 < combatant.rules.hitPointMaximum * predicate.percent;
     }
     case 'distance_at_most':
-      return gridDistance(
-        subject(state, predicate.left).position,
-        subject(state, predicate.right).position,
+      return minimumSpaceDistance(
+        decodeProjectedCreatureSpace(subject(state, predicate.left)),
+        decodeProjectedCreatureSpace(subject(state, predicate.right)),
       ) <= predicate.feet;
     case 'not': return !predicateValue(predicate.predicate, state);
     case 'all': return predicate.predicates.every((candidate) => predicateValue(candidate, state));
@@ -201,10 +202,12 @@ function selectedTarget(
   if (selector.kind === 'combatant') return selector.combatantId;
   const actor = subject(state, actorId);
   return state.combatants
+    .filter(isPlacedVisibleCombatant)
     .filter((candidate) => candidate.kind !== actor.kind && candidate.life !== 'dead')
     .sort((left, right) => {
-      const byDistance = gridDistance(actor.position, left.position) -
-        gridDistance(actor.position, right.position);
+      const actorSpace = decodeProjectedCreatureSpace(actor);
+      const byDistance = minimumSpaceDistance(actorSpace, decodeProjectedCreatureSpace(left)) -
+        minimumSpaceDistance(actorSpace, decodeProjectedCreatureSpace(right));
       return byDistance || left.id.localeCompare(right.id);
     })[0]?.id ?? null;
 }

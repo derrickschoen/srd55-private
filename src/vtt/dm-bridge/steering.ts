@@ -1,7 +1,14 @@
 import { canonicalJson } from '../../commands/canonical-json';
 import { AlgorithmController } from '../../combat/controllers';
 import { gridDistance, type GridCell } from '../../combat/grid';
-import type { DmVisibleCombatant, DmVisibleEncounterState } from '../../combat/visibility';
+import {
+  creatureSpace,
+  decodeProjectedCreatureSpace,
+  minimumSpaceDistance,
+  placementFromSerialized,
+  sizedCombatantState,
+} from '../../combat/creature-space';
+import { isPlacedVisibleCombatant, type DmVisiblePlacedCombatant, type DmVisibleEncounterState } from '../../combat/visibility';
 import type { CombatantId, EncounterSessionId } from '../../combat/values';
 import {
   DM_BRIDGE_PROTOCOL_VERSION,
@@ -94,10 +101,10 @@ function actionKind(program: DecisionProgram): PlanAction['kind'] | null {
   return program.kind === 'action' ? program.action.kind : null;
 }
 
-function farthestCorner(state: DmVisibleEncounterState, actor: DmVisibleCombatant): GridCell {
+function farthestCorner(state: DmVisibleEncounterState, actor: DmVisiblePlacedCombatant): GridCell {
   const enemies = state.combatants.filter(
-    (candidate) => candidate.kind !== actor.kind && candidate.life !== 'dead',
-  );
+    isPlacedVisibleCombatant,
+  ).filter((candidate) => candidate.kind !== actor.kind && candidate.life !== 'dead');
   const corners: GridCell[] = [
     { column: 0, row: 0 },
     { column: state.bounds.columns - 1, row: 0 },
@@ -105,8 +112,15 @@ function farthestCorner(state: DmVisibleEncounterState, actor: DmVisibleCombatan
     { column: state.bounds.columns - 1, row: state.bounds.rows - 1 },
   ];
   return corners.sort((left, right) => {
+    const actorSized = sizedCombatantState(actor.effectiveSize);
     const nearest = (cell: GridCell) => Math.min(
-      ...enemies.map((enemy) => gridDistance(cell, enemy.position)),
+      ...enemies.map((enemy) => minimumSpaceDistance(
+        creatureSpace(actorSized, placementFromSerialized(actorSized, {
+          anchor: cell,
+          mode: actor.placementMode,
+        })),
+        decodeProjectedCreatureSpace(enemy),
+      )),
       Number.POSITIVE_INFINITY,
     );
     return nearest(right) - nearest(left) || left.column - right.column || left.row - right.row;
@@ -117,7 +131,7 @@ function applyStance(
   program: DecisionProgram,
   stance: SteeringStance,
   state: DmVisibleEncounterState,
-  actor: DmVisibleCombatant,
+  actor: DmVisiblePlacedCombatant,
 ): DecisionProgram {
   const choices = [...asPriority(program)];
   switch (stance) {
@@ -209,7 +223,7 @@ export function applySteeringOverrides(
   const state = request.projection.encounter;
   const monsters = proposal.monsters.map((entry): MonsterRoundProgram => {
     const actor = state.combatants.find((candidate) => candidate.id === entry.monsterId);
-    if (actor === undefined) throw new TypeError('Steering proposal monster is absent from the DM projection.');
+    if (actor === undefined || actor.placementStatus !== 'placed') throw new TypeError('Steering proposal monster is absent or unplaced in the DM projection.');
     let program = entry.program;
     for (const { override } of sorted) {
       if (override.monsterId !== entry.monsterId) continue;

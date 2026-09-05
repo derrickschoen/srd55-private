@@ -7,6 +7,7 @@ import {
   startTurnMovement,
   type MovementCause,
   type MovementWorld,
+  type ReachSource,
 } from '../../../src/combat/movement';
 import { feet } from '../../../src/combat/values';
 
@@ -30,6 +31,7 @@ function world(options: WorldOptions = {}): MovementWorld<string> {
   const forbiddenTransitions = new Set(options.forbiddenTransitions ?? []);
   return {
     bounds: { columns: options.columns ?? 5, rows: options.rows ?? 5 },
+    occupiedCells: (_actorId, anchor) => [anchor],
     traversal(_actorId, _from, to) {
       const destination = key(to);
       if (blocked.has(destination)) {
@@ -330,33 +332,33 @@ describe('Opportunity Attack windows', () => {
   const eligibleReachSources = [
     {
       reactorId: 'reactor',
-      cell: { column: 0, row: 0 },
+      cells: [{ column: 0, row: 0 }],
       reach: feet(5),
       reactionAvailable: true,
       hostile: true,
     },
     {
       reactorId: 'reactor',
-      cell: { column: 0, row: 0 },
+      cells: [{ column: 0, row: 0 }],
       reach: feet(5),
       reactionAvailable: true,
       hostile: true,
     },
     {
       reactorId: 'friendly',
-      cell: { column: 0, row: 0 },
+      cells: [{ column: 0, row: 0 }],
       reach: feet(5),
       reactionAvailable: true,
       hostile: false,
     },
     {
       reactorId: 'spent',
-      cell: { column: 0, row: 0 },
+      cells: [{ column: 0, row: 0 }],
       reach: feet(5),
       reactionAvailable: false,
       hostile: true,
     },
-  ];
+  ] satisfies readonly ReachSource<string>[];
 
   it('records one eligible reach exit on the step before position changes', () => {
     const result = planMovement(world(), {

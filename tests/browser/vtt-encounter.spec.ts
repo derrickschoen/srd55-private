@@ -141,6 +141,15 @@ test('M38-PLAYER-NO-DM-CONTROLS and two local windows complete the resumable ref
     'data-state',
     'connected',
   );
+  for (const boardPage of [dm, page]) {
+    const tokens = boardPage.locator('.encounter-token');
+    await expect(tokens).toHaveCount(4);
+    await expect(boardPage.locator('.encounter-cell .encounter-token')).toHaveCount(0);
+    for (let index = 0; index < 4; index += 1) {
+      await expect(tokens.nth(index)).toHaveAttribute('data-column-span', '1');
+      await expect(tokens.nth(index)).toHaveAttribute('data-row-span', '1');
+    }
+  }
 
   await expect(page.getByRole('button', { name: 'Undo last' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Apply ADJUDICATED override' })).toHaveCount(0);
@@ -177,11 +186,15 @@ test('M38-PLAYER-NO-DM-CONTROLS and two local windows complete the resumable ref
   await expect(tray).toContainText('Training Brute moved from 3,3 to 4,3');
   await expect(dm.locator('.dm-pending-request')).toContainText('turn: Training Brute');
   await dm.getByRole('button', { name: 'Hide', exact: true }).click();
+  await expect(dm.locator('[data-cell="4,3"] .encounter-art-fog')).toHaveCount(0);
   await expect(dm.locator('[data-cell="4,3"] .encounter-token[data-kind="monster"]')).toBeVisible();
-  await expect(page.locator('[data-cell="4,3"] .encounter-art-fog')).toBeVisible();
-  await expect(
-    page.locator('[data-cell="4,3"] .encounter-token[data-kind="monster"]'),
-  ).toHaveCount(0);
+  await expect(dm.locator(
+    '.encounter-token[data-kind="monster"][data-column="4"][data-row="3"]',
+  )).toHaveAttribute('data-hidden-from-players', 'true');
+  await expect(page.locator('[data-cell="4,3"] .encounter-art-floor')).toBeVisible();
+  await expect(page.locator(
+    '.encounter-token[data-kind="monster"][data-column="4"][data-row="3"]',
+  )).toHaveCount(0);
   await expect(dm.getByRole('button', { name: 'End turn', exact: true })).toBeVisible();
 
   await dm.getByLabel('Adjudication target').selectOption({ label: 'Reference Fighter' });

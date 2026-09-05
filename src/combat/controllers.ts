@@ -1,11 +1,26 @@
 import type { EncounterCommand } from './events';
 import { gridDistance } from './grid';
+import {
+  creatureSpace,
+  decodeProjectedCreatureSpace,
+  minimumSpaceDistance,
+  placementFromSerialized,
+  sizedCombatantState,
+} from './creature-space';
 import type { CombatantId } from './values';
-import type { VisibleEncounterState } from './visibility';
+import { isPlacedVisibleCombatant, type PlayerVisiblePlacedCombatant, type VisibleEncounterState } from './visibility';
 import type { DmVisibleEncounterState } from './visibility';
 import type { DecisionProgram } from '../vtt/dm-bridge/round-plan-contract';
 import { canonicalJson } from '../commands/canonical-json';
 import { coverTierBetweenObjects } from './encounter';
+
+function placedVisibleCombatants(state: VisibleEncounterState): readonly PlayerVisiblePlacedCombatant[] {
+  const placed: PlayerVisiblePlacedCombatant[] = [];
+  for (const combatant of state.combatants) {
+    if (combatant.placementStatus === 'placed') placed.push(combatant);
+  }
+  return placed;
+}
 
 export interface LegalActionSummary {
   readonly actions: readonly EncounterCommand[];
@@ -111,6 +126,14 @@ function commandKey(command: EncounterCommand): string {
   return canonicalJson(command);
 }
 
+function projectedSpaceAt(combatant: PlayerVisiblePlacedCombatant, position: { readonly column: number; readonly row: number }) {
+  const sized = sizedCombatantState(combatant.effectiveSize);
+  return creatureSpace(sized, placementFromSerialized(sized, {
+    anchor: position,
+    mode: combatant.placementMode,
+  }));
+}
+
 function movementRemaining(
   request: ControllerRequest,
   actorId: CombatantId,
@@ -133,7 +156,7 @@ function clipMovementCandidate(
   if (command.type !== 'move') return command;
   const actor = request.visibleState.combatants.find((candidate) => candidate.id === command.actor);
   const budget = movementRemaining(request, command.actor);
-  if (actor === undefined || budget === null) return command;
+  if (actor === undefined || actor.placementStatus !== 'placed' || budget === null) return command;
   const path: Array<(typeof command.path)[number]> = [];
   let previous = actor.position;
   let spent = 0;
@@ -169,9 +192,9 @@ function visibleHostile(
   request: ControllerRequest,
   actorKind: VisibleEncounterState['combatants'][number]['kind'],
   id: CombatantId,
-) {
+) : PlayerVisiblePlacedCombatant | null {
   const target = request.visibleState.combatants.find((candidate) => candidate.id === id);
-  return target !== undefined && target.kind !== actorKind && target.life !== 'dead'
+  return target !== undefined && target.placementStatus === 'placed' && target.kind !== actorKind && target.life !== 'dead'
     ? target
     : null;
 }
@@ -251,18 +274,18 @@ function healingPriority(
 
 function focusRank(
   request: ControllerRequest,
-  actor: VisibleEncounterState['combatants'][number],
-  target: VisibleEncounterState['combatants'][number],
+  actor: PlayerVisiblePlacedCombatant,
+  target: PlayerVisiblePlacedCombatant,
 ): readonly [number, number] {
   return [
     lastKnownHitPoints(request, target.id)?.current ?? Number.POSITIVE_INFINITY,
-    gridDistance(actor.position, target.position),
+    minimumSpaceDistance(decodeProjectedCreatureSpace(actor), decodeProjectedCreatureSpace(target)),
   ];
 }
 
 function usedRangedActionThisTurn(
   request: ControllerRequest,
-  actor: VisibleEncounterState['combatants'][number],
+  actor: PlayerVisiblePlacedCombatant,
 ): boolean {
   let lastTurnStart = -1;
   for (const [index, event] of request.visibleState.recentEvents.entries()) {
@@ -271,13 +294,17 @@ function usedRangedActionThisTurn(
   return request.visibleState.recentEvents.slice(lastTurnStart + 1).some((event) => {
     if (event.type === 'attack_resolved' && event.actor === actor.id) {
       const target = visibleHostile(request, actor.kind, event.target);
-      return target !== null && gridDistance(actor.position, target.position) > 5;
+      return target !== null && minimumSpaceDistance(
+        decodeProjectedCreatureSpace(actor), decodeProjectedCreatureSpace(target),
+      ) > 5;
     }
     if (event.type === 'spell_cast' && event.caster === actor.id) {
       if (isTacticalRangedSpell(event.spellId)) return true;
       return event.targets.some((id) => {
         const target = visibleHostile(request, actor.kind, id);
-        return target !== null && gridDistance(actor.position, target.position) > 5;
+        return target !== null && minimumSpaceDistance(
+          decodeProjectedCreatureSpace(actor), decodeProjectedCreatureSpace(target),
+        ) > 5;
       });
     }
     return false;
@@ -287,7 +314,7 @@ function usedRangedActionThisTurn(
 function playerCharacterAlgorithmRank(
   request: ControllerRequest,
   command: EncounterCommand,
-  actor: VisibleEncounterState['combatants'][number],
+  actor: PlayerVisiblePlacedCombatant,
 ): readonly [number, number, number, string] {
   const isWeaponMasteryDefender = request.legalActions.actions.some((action) =>
     action.type === 'attack' && action.weaponMastery !== undefined);
@@ -359,9 +386,9 @@ function playerCharacterAlgorithmRank(
   if (command.type === 'move') {
     const destination = command.path.at(-1) ?? actor.position;
     const nearest = Math.min(
-      ...request.visibleState.combatants
+      ...placedVisibleCombatants(request.visibleState)
         .filter((candidate) => candidate.kind !== actor.kind && candidate.life !== 'dead')
-        .map((candidate) => gridDistance(destination, candidate.position)),
+        .map((candidate) => minimumSpaceDistance(projectedSpaceAt(actor, destination), decodeProjectedCreatureSpace(candidate))),
     );
     if (isWeaponMasteryDefender) {
       // The defender advances between the nearest hostile and the ranged
@@ -373,13 +400,15 @@ function playerCharacterAlgorithmRank(
     if (usedRangedActionThisTurn(request, actor)) {
       const currentlyAdjacent = request.visibleState.combatants.some((candidate) =>
         candidate.kind !== actor.kind && candidate.life !== 'dead' &&
-        gridDistance(actor.position, candidate.position) <= 5);
+        candidate.placementStatus === 'placed' && minimumSpaceDistance(
+          decodeProjectedCreatureSpace(actor), decodeProjectedCreatureSpace(candidate),
+        ) <= 5);
       const currentNearest = Math.min(
-        ...request.visibleState.combatants
+          ...placedVisibleCombatants(request.visibleState)
           .filter((candidate) => candidate.kind !== actor.kind && candidate.life !== 'dead')
-          .map((candidate) => gridDistance(actor.position, candidate.position)),
+          .map((candidate) => minimumSpaceDistance(decodeProjectedCreatureSpace(actor), decodeProjectedCreatureSpace(candidate))),
       );
-      const cover = Math.max(0, ...request.visibleState.combatants
+      const cover = Math.max(0, ...placedVisibleCombatants(request.visibleState)
         .filter((candidate) => candidate.kind !== actor.kind && candidate.life !== 'dead')
         .map((candidate) => COVER_RANK[coverTierBetweenObjects(
           request.visibleState.worldObjects,
@@ -402,9 +431,10 @@ function algorithmRank(
   request: ControllerRequest,
   command: EncounterCommand,
 ): readonly [number, number, number, string] {
-  const actor = request.visibleState.combatants.find(
-    (candidate) => candidate.id === request.actorId,
-  );
+  const actor = request.visibleState.combatants.find((candidate) => candidate.id === request.actorId);
+  if (actor?.placementStatus !== 'placed') {
+    return command.type === 'end_turn' ? [5, 0, 0, commandKey(command)] : [8, 0, 0, commandKey(command)];
+  }
   if (actor?.kind === 'player_character') {
     return playerCharacterAlgorithmRank(request, command, actor);
   }
@@ -416,13 +446,11 @@ function algorithmRank(
     return [0, 0, 0, commandKey(command)];
   }
   if (command.type === 'attack' && hostile(command.target)) {
-    const target = request.visibleState.combatants.find(
-      (candidate) => candidate.id === command.target,
-    );
+    const target = request.visibleState.combatants.find((candidate) => candidate.id === command.target);
     const distance =
-      actor === undefined || target === undefined
+      target === undefined || target.placementStatus !== 'placed'
         ? Number.POSITIVE_INFINITY
-        : gridDistance(actor.position, target.position);
+        : minimumSpaceDistance(decodeProjectedCreatureSpace(actor), decodeProjectedCreatureSpace(target));
     return [1, distance, 0, commandKey(command)];
   }
   if (command.type === 'move') {
@@ -430,9 +458,9 @@ function algorithmRank(
     const nearest = destination === undefined
       ? Number.POSITIVE_INFINITY
       : Math.min(
-          ...request.visibleState.combatants
+          ...placedVisibleCombatants(request.visibleState)
             .filter((candidate) => hostile(candidate.id))
-            .map((candidate) => gridDistance(destination, candidate.position)),
+            .map((candidate) => minimumSpaceDistance(projectedSpaceAt(actor, destination), decodeProjectedCreatureSpace(candidate))),
         );
     return [2, nearest, 0, commandKey(command)];
   }
@@ -459,13 +487,16 @@ export class AlgorithmController implements Controller {
       throw new RangeError('Algorithm turn candidate limit must be a positive integer.');
     }
     const actor = state.combatants.find((candidate) => candidate.id === actorId);
-    if (actor === undefined || actor.life !== 'living') {
+    if (actor === undefined || actor.placementStatus !== 'placed' || actor.life !== 'living') {
       throw new TypeError('Algorithm turn candidates require a living combatant in the DM projection.');
     }
     const enemies = state.combatants
+      .filter(isPlacedVisibleCombatant)
       .filter((candidate) => candidate.kind !== actor.kind && candidate.life !== 'dead')
       .sort((left, right) => {
-        const distance = gridDistance(actor.position, left.position) - gridDistance(actor.position, right.position);
+        const actorSpace = decodeProjectedCreatureSpace(actor);
+        const distance = minimumSpaceDistance(actorSpace, decodeProjectedCreatureSpace(left)) -
+          minimumSpaceDistance(actorSpace, decodeProjectedCreatureSpace(right));
         return distance || left.id.localeCompare(right.id);
       });
     const nearest = enemies[0];
@@ -585,7 +616,9 @@ export class AlgorithmController implements Controller {
         .slice(0, limit);
     }
     for (const enemy of enemies) {
-      const distance = gridDistance(actor.position, enemy.position);
+      const distance = minimumSpaceDistance(
+        decodeProjectedCreatureSpace(actor), decodeProjectedCreatureSpace(enemy),
+      );
       candidates.push({
         program: {
           kind: 'action',
@@ -607,7 +640,9 @@ export class AlgorithmController implements Controller {
           kind: 'action',
           action: { kind: 'move_toward', target: { kind: 'combatant', combatantId: nearest.id } },
         },
-        score: 50 - gridDistance(actor.position, nearest.position),
+        score: 50 - minimumSpaceDistance(
+          decodeProjectedCreatureSpace(actor), decodeProjectedCreatureSpace(nearest),
+        ),
       });
     }
     if (candidates.length === 0) {

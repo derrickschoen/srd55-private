@@ -1,5 +1,10 @@
 import { gridDistance } from '../../combat/grid';
-import type { DmVisibleCombatant, DmVisibleEncounterState } from '../../combat/visibility';
+import { decodeProjectedCreatureSpace, minimumSpaceDistance } from '../../combat/creature-space';
+import {
+  isPlacedVisibleCombatant,
+  type DmVisiblePlacedCombatant,
+  type DmVisibleEncounterState,
+} from '../../combat/visibility';
 import type { CombatantId } from '../../combat/values';
 import type {
   DecisionProgram,
@@ -545,7 +550,7 @@ export interface JsTurnProgramExecution {
 }
 
 class Interpreter {
-  readonly #actor: DmVisibleCombatant;
+  readonly #actor: DmVisiblePlacedCombatant;
   readonly #startedAt: number;
   readonly #now: () => number;
   readonly #stepBudget: number;
@@ -559,7 +564,7 @@ class Interpreter {
     limits: JsTurnProgramLimits,
   ) {
     const actor = state.combatants.find((candidate) => candidate.id === actorId);
-    if (actor === undefined) throw new JsTurnProgramRuntimeError(`Actor ${actorId} is outside the DM projection.`);
+    if (actor === undefined || actor.placementStatus !== 'placed') throw new JsTurnProgramRuntimeError(`Actor ${actorId} is outside or unplaced in the DM projection.`);
     this.#actor = actor;
     this.#stepBudget = limits.stepBudget ?? DEFAULT_JS_TURN_PROGRAM_STEP_BUDGET;
     this.#timeBudgetMs = limits.timeBudgetMs ?? DEFAULT_JS_TURN_PROGRAM_TIME_BUDGET_MS;
@@ -760,7 +765,10 @@ class Interpreter {
       }
       case 'distanceTo': {
         this.#arity(expression.callee, args, 1);
-        return gridDistance(this.#actor.position, this.#subject(args[0], 'distanceTo').position);
+        return minimumSpaceDistance(
+          decodeProjectedCreatureSpace(this.#actor),
+          decodeProjectedCreatureSpace(this.#subject(args[0], 'distanceTo')),
+        );
       }
       case 'attack': return this.#attack(args);
       case 'bonusAttack': return this.#targetAction(expression.callee, args, 'bonus_attack');
@@ -807,21 +815,22 @@ class Interpreter {
     }
   }
 
-  #enemies(): readonly DmVisibleCombatant[] {
-    return this.state.combatants.filter(
+  #enemies(): readonly DmVisiblePlacedCombatant[] {
+    return this.state.combatants.filter(isPlacedVisibleCombatant).filter(
       (candidate) => candidate.kind !== this.#actor.kind && candidate.life !== 'dead',
     );
   }
 
-  #allies(): readonly DmVisibleCombatant[] {
-    return this.state.combatants.filter(
+  #allies(): readonly DmVisiblePlacedCombatant[] {
+    return this.state.combatants.filter(isPlacedVisibleCombatant).filter(
       (candidate) => candidate.kind === this.#actor.kind && candidate.life !== 'dead' && candidate.id !== this.#actor.id,
     );
   }
 
-  #nearest(candidates: readonly DmVisibleCombatant[]): CombatantReference | null {
+  #nearest(candidates: readonly DmVisiblePlacedCombatant[]): CombatantReference | null {
     const selected = [...candidates].sort((left, right) =>
-      gridDistance(this.#actor.position, left.position) - gridDistance(this.#actor.position, right.position) ||
+      minimumSpaceDistance(decodeProjectedCreatureSpace(this.#actor), decodeProjectedCreatureSpace(left)) -
+        minimumSpaceDistance(decodeProjectedCreatureSpace(this.#actor), decodeProjectedCreatureSpace(right)) ||
       left.id.localeCompare(right.id),
     )[0];
     return selected === undefined ? null : this.#reference(selected);
@@ -832,15 +841,18 @@ class Interpreter {
     const feet = this.#number(args[0], 'distance');
     if (feet < 0) throw new JsTurnProgramRuntimeError('Distance must be non-negative.');
     return (allies ? this.#allies() : this.#enemies())
-      .filter((candidate) => gridDistance(this.#actor.position, candidate.position) <= feet)
+      .filter((candidate) => minimumSpaceDistance(
+        decodeProjectedCreatureSpace(this.#actor), decodeProjectedCreatureSpace(candidate),
+      ) <= feet)
       .sort((left, right) =>
-        gridDistance(this.#actor.position, left.position) - gridDistance(this.#actor.position, right.position) ||
+        minimumSpaceDistance(decodeProjectedCreatureSpace(this.#actor), decodeProjectedCreatureSpace(left)) -
+          minimumSpaceDistance(decodeProjectedCreatureSpace(this.#actor), decodeProjectedCreatureSpace(right)) ||
         left.id.localeCompare(right.id),
       )
       .map((candidate) => this.#reference(candidate));
   }
 
-  #reference(subject: DmVisibleCombatant): CombatantReference {
+  #reference(subject: DmVisiblePlacedCombatant): CombatantReference {
     return Object.freeze({ [COMBATANT_REFERENCE]: true as const, id: subject.id });
   }
 
@@ -849,7 +861,7 @@ class Interpreter {
       COMBATANT_REFERENCE in value && value[COMBATANT_REFERENCE] === true && 'id' in value;
   }
 
-  #subject(value: RuntimeValue | undefined, api: string): DmVisibleCombatant {
+  #subject(value: RuntimeValue | undefined, api: string): DmVisiblePlacedCombatant {
     const id = typeof value === 'string'
       ? value as CombatantId
       : this.#combatantReference(value)
@@ -857,11 +869,11 @@ class Interpreter {
         : null;
     if (id === null) throw new JsTurnProgramRuntimeError(`${api} requires a combatant reference.`);
     const subject = this.state.combatants.find((candidate) => candidate.id === id);
-    if (subject === undefined) throw new JsTurnProgramRuntimeError(`${api} received a combatant outside the projection.`);
+    if (subject === undefined || subject.placementStatus !== 'placed') throw new JsTurnProgramRuntimeError(`${api} received a combatant outside the projection or with placement pending.`);
     return subject;
   }
 
-  #combatantArray(value: RuntimeValue | undefined, api: string): readonly DmVisibleCombatant[] {
+  #combatantArray(value: RuntimeValue | undefined, api: string): readonly DmVisiblePlacedCombatant[] {
     if (!Array.isArray(value)) throw new JsTurnProgramRuntimeError(`${api} requires an API combatant array.`);
     return value.map((entry) => this.#subject(entry, api));
   }

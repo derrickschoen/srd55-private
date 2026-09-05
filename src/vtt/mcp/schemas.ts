@@ -18,12 +18,14 @@ import { ALERTING_POLICY } from '../../combat/alerting';
 import { SEARCH_MEMORY_POLICY } from '../../combat/search-memory';
 import type { McpToolDescriptor, SchemaViolation } from './handler';
 import { rendererAttributionSchema } from '../renderer-profile';
+import { creatureSizes } from '../../domain/enums';
 import { KB_SUBJECTS } from '../knowledge-base-subjects';
 
-export const ENGINE_ACTOR_KNOWLEDGE_POLICY = 'actor-knowledge-v1' as const;
-export const ENGINE_LEGENDARY_WINDOWS_POLICY = 'legendary-windows-v1' as const;
+export const ENGINE_ACTOR_KNOWLEDGE_POLICY = 'actor-knowledge-v2-creature-space' as const;
+export const ENGINE_LEGENDARY_WINDOWS_POLICY = 'legendary-windows-v2' as const;
 export const ENGINE_REACTION_SPEND_HOLD_POLICY = 'reaction-spend-hold-v1' as const;
-export const ENGINE_RECOVERY_CAPABILITY_POLICY = 'recovery-capability-v1' as const;
+export const ENGINE_RECOVERY_CAPABILITY_POLICY = 'recovery-capability-v2' as const;
+export const ENGINE_STATE_SUMMARY_POLICY = 'state-summary-v2-creature-space' as const;
 
 const identifier = z.string().min(1).max(200).describe('Engine-owned stable identifier.');
 const offerableOptionIdentifier = identifier.refine(
@@ -403,7 +405,22 @@ const gridCell = z.object({
   row: z.number().int().min(0),
 }).strict();
 const actorKnowledgeTarget = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('perceived'), target_id: identifier }).strict(),
+  z.object({
+    kind: z.literal('perceived'), target_id: identifier, placement_status: z.literal('placed'),
+    effective_size: z.enum(creatureSizes),
+    placement_mode: z.discriminatedUnion('kind', [
+      z.object({ kind: z.literal('normal'), actual: z.enum(creatureSizes) }).strict(),
+      z.object({ kind: z.literal('squeezed'), actual: z.enum(creatureSizes), sizedFor: z.enum(creatureSizes) }).strict(),
+    ]),
+    footprint: z.array(gridCell).min(1).max(16),
+    distance_feet: z.number().int().min(0),
+  }).strict(),
+  z.object({
+    kind: z.literal('placement_pending'), target_id: identifier,
+    placement_status: z.literal('placement_pending'), pending_reason: z.enum([
+      'legacy_size_required', 'effect_adjudication_pending', 'overlap_adjudication_pending',
+    ]),
+  }).strict(),
   z.object({
     kind: z.literal('suspected'), target_id: identifier,
     last_seen: z.object({ status: z.literal('resolved'), lastSeenPosition: gridCell }).strict(),
@@ -823,15 +840,34 @@ const loadSkillOutput = z.object({
   plays: z.array(advertisedPlay).max(3),
 }).strict();
 
-const combatantSummary = z.object({
+const placedCombatantSummary = z.object({
   combatant_id: identifier, name: identifier, side: z.enum(['player_character', 'monster']), status: actorStatus,
+  placement_status: z.literal('placed'),
+  effective_size: z.enum(creatureSizes),
+  placement_mode: z.discriminatedUnion('kind', [
+    z.object({ kind: z.literal('normal'), actual: z.enum(creatureSizes) }).strict(),
+    z.object({ kind: z.literal('squeezed'), actual: z.enum(creatureSizes), sizedFor: z.enum(creatureSizes) }).strict(),
+  ]),
+  footprint: z.array(gridCell).min(1).max(16),
   options: z.array(tacticalOption).max(100), threats: z.array(threat).max(50),
 }).strict();
+const placementPendingCombatantSummary = z.object({
+  combatant_id: identifier, name: identifier, side: z.enum(['player_character', 'monster']), status: actorStatus,
+  placement_status: z.literal('placement_pending'),
+  pending_reason: z.enum([
+    'legacy_size_required', 'effect_adjudication_pending', 'overlap_adjudication_pending',
+  ]),
+  options: z.array(tacticalOption).length(0), threats: z.array(threat).length(0),
+}).strict();
+const combatantSummary = z.discriminatedUnion('placement_status', [
+  placedCombatantSummary,
+  placementPendingCombatantSummary,
+]);
 const stateSummaryBody = z.object({
   room: z.number().int().min(1).nullable(), round: z.number().int().min(0), active_side: z.enum(['players', 'monsters', 'none']),
   combatants: z.array(combatantSummary).max(100), terrain_tags: z.array(shortCode).max(100), history: z.array(recentChange).max(100),
 }).strict();
-const stateSummaryOutput = z.object({ state_ref: stateRef, granularity: z.enum(['turn_minimal', 'room_tactical', 'combatant_detail', 'journal_delta']), proof_token: z.string().regex(/^[0-9a-f]{64}$/u), summary: stateSummaryBody, truncated: z.boolean(), next_cursor: z.string().max(500).nullable() }).strict();
+const stateSummaryOutput = z.object({ state_ref: stateRef, policy: z.literal(ENGINE_STATE_SUMMARY_POLICY), granularity: z.enum(['turn_minimal', 'room_tactical', 'combatant_detail', 'journal_delta']), proof_token: z.string().regex(/^[0-9a-f]{64}$/u), summary: stateSummaryBody, truncated: z.boolean(), next_cursor: z.string().max(500).nullable() }).strict();
 const optionsOutput = z.object({ state_ref: stateRef, actor_id: identifier, status: actorStatus, options: z.array(tacticalOption).max(100), truncated: z.boolean(), next_cursor: z.string().max(500).nullable() }).strict();
 
 const pathOutput = z.object({

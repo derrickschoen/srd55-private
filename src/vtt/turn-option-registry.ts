@@ -1,6 +1,7 @@
 import { canonicalJson } from '../commands/canonical-json';
 import { combatantsAreAllies } from '../combat/allies';
 import type { EncounterState } from '../combat/encounter';
+import { combatantSpace } from '../combat/combat-rules';
 import type {
   MonsterAction,
   MonsterAttackAction,
@@ -111,11 +112,13 @@ function hardControlSelection(
   const targeting = definition.targeting;
   const actorPosition = state.tokens.find((token) => token.combatantId === actorId)?.position;
   if (actorPosition === undefined) return null;
+  const actorCells = combatantSpace(state, actorId).cells;
   const enemies = new Set(livingEnemies(state, actorId));
   const allies = new Set(livingAllies(state, actorId));
-  const positioned = state.tokens.filter((token) =>
-    state.combatants.some((candidate) =>
-      candidate.profile.id === token.combatantId && candidate.life !== 'dead'));
+  const positioned = state.tokens
+    .filter((token) => state.combatants.some((candidate) =>
+      candidate.profile.id === token.combatantId && candidate.life !== 'dead'))
+    .map((token) => ({ token, cells: combatantSpace(state, token.combatantId).cells }));
   const templateGrid = {
     bounds: state.bounds,
     blockedCells: [
@@ -147,26 +150,27 @@ function hardControlSelection(
       },
     };
     const origin = area.template.origin;
-    const actorMinimumX = actorPosition.column * 5;
-    const actorMaximumX = actorMinimumX + 5;
-    const actorMinimumY = actorPosition.row * 5;
-    const actorMaximumY = actorMinimumY + 5;
-    const horizontal = Math.max(actorMinimumX - origin.x, 0, origin.x - actorMaximumX);
-    const vertical = Math.max(actorMinimumY - origin.y, 0, origin.y - actorMaximumY);
-    if (Math.max(horizontal, vertical) > targeting.rangeFeet) return [];
+    const distanceToOrigin = Math.min(...actorCells.map((cell) => {
+      const left = cell.column * 5;
+      const right = left + 5;
+      const top = cell.row * 5;
+      const bottom = top + 5;
+      return Math.max(Math.max(left - origin.x, 0, origin.x - right), Math.max(top - origin.y, 0, origin.y - bottom));
+    }));
+    if (distanceToOrigin > targeting.rangeFeet) return [];
     const affectedCells = new Set(cubeAffectedCellsAmong(
       templateGrid,
       area.template,
-      positioned.map((token) => token.position),
+      positioned.flatMap((entry) => entry.cells),
     ).map((cell) => `${String(cell.column)},${String(cell.row)}`));
-    const affected = positioned.filter((token) =>
-      affectedCells.has(`${String(token.position.column)},${String(token.position.row)}`));
-    const affectedEnemies = affected.filter((token) => enemies.has(token.combatantId))
-      .map((token) => token.combatantId)
+    const affected = positioned.filter((entry) => entry.cells.some((cell) =>
+      affectedCells.has(`${String(cell.column)},${String(cell.row)}`)));
+    const affectedEnemies = affected.filter((entry) => enemies.has(entry.token.combatantId))
+      .map((entry) => entry.token.combatantId)
       .sort((left, right) => left.localeCompare(right));
     if (affectedEnemies.length === 0) return [];
-    const affectedAllies = affected.filter((token) => allies.has(token.combatantId))
-      .map((token) => token.combatantId)
+    const affectedAllies = affected.filter((entry) => allies.has(entry.token.combatantId))
+      .map((entry) => entry.token.combatantId)
       .sort((left, right) => left.localeCompare(right));
     const affectedIds = [...affectedEnemies, ...affectedAllies]
       .sort((left, right) => left.localeCompare(right));
@@ -252,13 +256,16 @@ function placedAreaSelection(
     (definition.targeting.shape !== 'sphere' && definition.targeting.shape !== 'cube')) return null;
   const actorPosition = state.tokens.find((entry) => entry.combatantId === actorId)?.position;
   if (actorPosition === undefined) return null;
+  const actorCells = combatantSpace(state, actorId).cells;
   const enemyIds = new Set(livingEnemies(state, actorId));
   const eligibleEnemyIds = new Set(state.combatants
     .filter((entry) => enemyIds.has(entry.profile.id))
     .filter((entry) => definition.id !== 'calm-emotions' || entry.profile.rules.creatureType === 'Humanoid')
     .map((entry) => entry.profile.id));
-  const occupied = state.tokens.filter((entry) => state.combatants.some((subject) =>
-    subject.profile.id === entry.combatantId && subject.life !== 'dead'));
+  const occupied = state.tokens
+    .filter((entry) => state.combatants.some((subject) =>
+      subject.profile.id === entry.combatantId && subject.life !== 'dead'))
+    .map((token) => ({ token, cells: combatantSpace(state, token.combatantId).cells }));
   const grid = {
     bounds: state.bounds,
     blockedCells: [
@@ -272,7 +279,7 @@ function placedAreaSelection(
     .flatMap((column) => Array.from({ length: state.bounds.rows + 1 }, (_row, row) => row)
       .flatMap((row) => {
         const center = feetPoint(column * 5, row * 5);
-        if (gridDistance(actorPosition, { column, row }) > targeting.rangeFeet) return [];
+        if (Math.min(...actorCells.map((cell) => gridDistance(cell, { column, row }))) > targeting.rangeFeet) return [];
         if (targeting.shape === 'cube' &&
           (center.x < size / 2 || center.y < size / 2 ||
             center.x > state.bounds.columns * 5 - size / 2 ||
@@ -286,16 +293,17 @@ function placedAreaSelection(
                 axis: { x: 1, y: 0 }, size: feet(size), includeOrigin: false,
               },
             };
-        const cells = new Set(affectedCellsAmong(grid, area, occupied.map((entry) => entry.position))
+        const cells = new Set(affectedCellsAmong(grid, area, occupied.flatMap((entry) => entry.cells))
           .map((cell) => `${String(cell.column)},${String(cell.row)}`));
-        const affected = occupied.filter((entry) => cells.has(`${String(entry.position.column)},${String(entry.position.row)}`));
-        const enemies = affected.filter((entry) => eligibleEnemyIds.has(entry.combatantId))
-          .map((entry) => entry.combatantId).sort();
+        const affected = occupied.filter((entry) => entry.cells.some((cell) =>
+          cells.has(`${String(cell.column)},${String(cell.row)}`)));
+        const enemies = affected.filter((entry) => eligibleEnemyIds.has(entry.token.combatantId))
+          .map((entry) => entry.token.combatantId).sort();
         if (enemies.length === 0) return [];
         const eligible = affected.filter((entry) => definition.id !== 'calm-emotions' ||
-          state.combatants.find((subject) => subject.profile.id === entry.combatantId)?.profile.rules.creatureType === 'Humanoid')
-          .map((entry) => entry.combatantId).sort();
-        const allies = affected.filter((entry) => combatantsAreAllies(state, actorId, entry.combatantId)).length;
+          state.combatants.find((subject) => subject.profile.id === entry.token.combatantId)?.profile.rules.creatureType === 'Humanoid')
+          .map((entry) => entry.token.combatantId).sort();
+        const allies = affected.filter((entry) => combatantsAreAllies(state, actorId, entry.token.combatantId)).length;
         return [{ area, enemies, eligible, allies, row, column }];
       }));
   const chosen = candidates.sort((left, right) =>

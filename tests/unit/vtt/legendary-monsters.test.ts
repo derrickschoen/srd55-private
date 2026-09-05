@@ -51,7 +51,7 @@ function startedEncounter(
   const initial = createEncounter({
     bounds: { columns: 12, rows: 4 },
     combatants,
-    tokens: combatants.map((profile, index) => placedToken(profile, index, 1)),
+    tokens: combatants.map((profile, index) => placedToken(profile, index * 3, 1)),
     ...(options.resistancePolicy === undefined ? {} : {
       reactionPolicies: [{
         combatant: unicorn.id,

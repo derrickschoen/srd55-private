@@ -68,11 +68,26 @@ function started(statblock: MonsterStatblock, target = knownTarget('monster-ride
     combatantId: `combatant:${statblock.id}:on-hit`,
     tokenId: `token:${statblock.id}:on-hit`,
   });
+  const actorSize = actor.rules.sizeCategory;
+  if (actorSize === undefined) throw new Error(`${statblock.name} has no mechanical size.`);
+  const actorWidth = (() => {
+    switch (actorSize) {
+      case 'Tiny':
+      case 'Small':
+      case 'Medium': return 1;
+      case 'Large': return 2;
+      case 'Huge': return 3;
+      case 'Gargantuan': return 4;
+    }
+  })();
   const created = createEncounter({
     config: { initiativeMode: 'per_combatant' },
-    bounds: { columns: 4, rows: 2 },
+    bounds: { columns: actorWidth + 2, rows: actorWidth },
     combatants: [actor, target],
-    tokens: [combatToken(actor, { column: 0, row: 0 }), combatToken(target, { column: 1, row: 0 })],
+    tokens: [
+      combatToken(actor, { column: 0, row: 0 }),
+      combatToken(target, { column: actorWidth, row: 0 }),
+    ],
   });
   return {
     actor,

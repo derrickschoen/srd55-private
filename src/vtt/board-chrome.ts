@@ -22,7 +22,7 @@ import {
 import { starterArtDataUri } from '../assets/starter-art-resolver';
 import type { LifeState } from '../combat/encounter';
 import type { CombatantId } from '../combat/values';
-import type { EncounterBoardCombatant, EncounterBoardProjectionShape } from './encounter-board';
+import type { EncounterBoardProjectionShape } from './encounter-board';
 import type { ProjectedHitPointKnowledge } from './intel/contracts';
 
 export const CHROME_TILE_PX = 64;
@@ -299,13 +299,14 @@ function coordinateLabels(bounds: { readonly columns: number; readonly rows: num
 }
 
 function tokenChrome(
-  combatants: readonly EncounterBoardCombatant[],
+  combatants: EncounterBoardProjectionShape['combatants'],
   bounds: { readonly columns: number; readonly rows: number },
 ): HTMLDivElement {
   const layer = el('div', 'encounter-token-chrome');
   layer.setAttribute('aria-hidden', 'true');
+  const placedCombatants = combatants.filter((combatant) => combatant.placementStatus === 'placed');
   const plates = stackLabelOffsets(
-    combatants.map((combatant) => ({
+    placedCombatants.map((combatant) => ({
       id: combatant.id,
       displayName: combatant.name,
       column: combatant.position.column,
@@ -313,7 +314,7 @@ function tokenChrome(
     })),
     bounds,
   );
-  const byId = new Map(combatants.map((combatant) => [combatant.id, combatant] as const));
+  const byId = new Map(placedCombatants.map((combatant) => [combatant.id, combatant] as const));
   for (const plate of plates) {
     const combatant = byId.get(plate.id);
     if (combatant === undefined) continue;

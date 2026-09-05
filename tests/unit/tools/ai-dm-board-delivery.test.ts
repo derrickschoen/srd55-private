@@ -47,7 +47,9 @@ import {
 } from '../../helpers/test-filesystem';
 
 const META = mcpRequestMeta({ name: 'board-delivery-test', version: '1.0.0' });
-const HEAD_RAW_CONTEXT_SHA256 = 'd5f1dfbcac2fdd93cadb4c2c6aa50a9d52a83f00bd71d57e6dd7908372ef0951';
+// Independently reproduced from committed footprints Increment 3 (8bdc7ba8),
+// before the board-delivery branch was merged into it.
+const FOOTPRINTS_RAW_CONTEXT_SHA256 = '3ab18fe4c51818906b22d317126876617ad9615c00a1be7621e2b819876aca19';
 
 function record(value: unknown, label: string): Readonly<Record<string, unknown>> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -448,8 +450,8 @@ describe('arena capture lifecycle and off-arm invariance', () => {
 
     const raw = offResult[0]?.rawTurnContext;
     if (raw === undefined) throw new TypeError('Off-arm row omitted rawTurnContext.');
-    expect(Buffer.byteLength(raw)).toBe(32_120);
-    expect(createHash('sha256').update(raw).digest('hex')).toBe(HEAD_RAW_CONTEXT_SHA256);
+    expect(Buffer.byteLength(raw)).toBe(32_180);
+    expect(createHash('sha256').update(raw).digest('hex')).toBe(FOOTPRINTS_RAW_CONTEXT_SHA256);
 
     const offHandler = createMcpHandler({ tools: [{
       descriptor: { name: 'engine.get_turn_context', description: 'off-byte fixture', inputSchema: {} },

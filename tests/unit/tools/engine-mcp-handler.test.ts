@@ -452,9 +452,9 @@ function happyArguments(name: typeof TOOL_NAMES[number], state: EncounterState, 
 }
 
 describe('engine MCP dual-handshake full surface conformance', () => {
-  it('derives the state-summary proof token from digest, granularity, and the v1 domain separator', () => {
+  it('derives the state-summary proof token from digest, granularity, and the creature-space v2 domain separator', () => {
     expect(engineStateSummaryProofToken('a'.repeat(64), 'turn_minimal')).toBe(
-      '59f83cdc47b641fd55ca7dcda5b0a55839f61f718819fda843fe1e8bf767e114',
+      '41fc4514eeced83505a8815571ce1bc358a8a78d1f8b8bb8ef07b5ae3379672d',
     );
   });
 
@@ -726,7 +726,53 @@ describe('engine MCP dual-handshake full surface conformance', () => {
     const result = toolCall(runtime.handler, name, happyArguments(name, state, runtime));
     const value = structured(result);
     expect(record((result['content'] as readonly unknown[])[0])['text']).toBe(JSON.stringify(value));
-    expect(forbiddenAgentKeys(value)).toEqual([]);
+    if (name === 'engine.get_state_summary') {
+      const summary = record(record(value)['summary']);
+      const combatants = summary['combatants'];
+      if (!Array.isArray(combatants)) throw new TypeError('State summary omitted combatants.');
+      for (const combatant of combatants) {
+        const projected = record(combatant);
+        expect(projected['effective_size']).toBeTypeOf('string');
+        expect(record(projected['placement_mode'])['kind']).toMatch(/^(?:normal|squeezed)$/u);
+        expect(Array.isArray(projected['footprint']) && projected['footprint'].length > 0).toBe(true);
+      }
+      const withoutApprovedFootprints = {
+        ...record(value),
+        summary: {
+          ...summary,
+          combatants: combatants.map((combatant) => ({ ...record(combatant), footprint: [] })),
+        },
+      };
+      expect(forbiddenAgentKeys(withoutApprovedFootprints)).toEqual([]);
+    } else if (name === 'engine.get_turn_context') {
+      const context = record(value);
+      const actorKnowledge = record(context['actor_knowledge']);
+      const actors = actorKnowledge['actors'];
+      if (!Array.isArray(actors)) throw new TypeError('Turn context omitted actor knowledge.');
+      const withoutApprovedFootprints = {
+        ...context,
+        actor_knowledge: {
+          ...actorKnowledge,
+          actors: actors.map((actor) => {
+            const projectedActor = record(actor);
+            const targets = projectedActor['targets'];
+            if (!Array.isArray(targets)) throw new TypeError('Actor knowledge omitted targets.');
+            return {
+              ...projectedActor,
+              targets: targets.map((target) => {
+                const projectedTarget = record(target);
+                return projectedTarget['placement_status'] === 'placed'
+                  ? { ...projectedTarget, footprint: [] }
+                  : projectedTarget;
+              }),
+            };
+          }),
+        },
+      };
+      expect(forbiddenAgentKeys(withoutApprovedFootprints)).toEqual([]);
+    } else {
+      expect(forbiddenAgentKeys(value)).toEqual([]);
+    }
   });
 
   it.each(['caveman_prose', 'regular_prose'] as const)('makes %s the model-visible tool text while retaining schema-valid structured metadata', async (format) => {

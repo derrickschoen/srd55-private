@@ -26,78 +26,16 @@ async function createFixtureBundleInBrowser(page: Page): Promise<ImportedFixture
     async function loadModule(path: string): Promise<Record<string, unknown>> {
       return record(await import(/* @vite-ignore */ path), `module ${path}`);
     }
-    function withInitiative(profileValue: unknown, initiativeBonus: number): Record<string, unknown> {
-      const profile = record(profileValue, 'combatant profile');
-      return {
-        ...profile,
-        rules: { ...record(profile['rules'], 'combatant rules'), initiativeBonus },
-      };
-    }
-
-    const [combatantModule, encounterModule, monsterModule, referenceModule, randomModule,
-      sessionModule, valuesModule] = await Promise.all([
-      loadModule('/src/combat/combatant.ts'),
-      loadModule('/src/combat/encounter.ts'),
-      loadModule('/src/combat/statblocks/monsters.ts'),
-      loadModule('/src/vtt/reference-encounter.ts'),
+    const [fixtureModule, randomModule, sessionModule, valuesModule] = await Promise.all([
+      loadModule('/tests/fixtures/vtt-option-path-encounter.ts'),
       loadModule('/src/combat/random.ts'),
       loadModule('/src/vtt/session-persistence.ts'),
       loadModule('/src/combat/values.ts'),
     ]);
-    const referenceSetup = record(
-      invoke(referenceModule, 'referenceEncounterSetup'),
-      'reference encounter setup',
+    const state = record(
+      invoke(fixtureModule, 'createOptionPathFixtureEncounter'),
+      'option-path fixture encounter',
     );
-    const referenceProfiles = referenceSetup['combatants'];
-    if (!Array.isArray(referenceProfiles)) throw new TypeError('Reference profiles are absent.');
-    const players = referenceProfiles.filter((candidate) =>
-      record(candidate, 'reference profile')['kind'] === 'player_character').slice(0, 2);
-    if (players.length !== 2) throw new Error('Two reference player profiles are required.');
-
-    const actor = withInitiative(invoke(combatantModule, 'monsterCombatantProfile', [
-      monsterModule['GOBLIN_WARRIOR'],
-      { combatantId: 'combatant:browser-path-goblin', tokenId: 'token:browser-path-goblin' },
-    ]), 100);
-    const reactor = withInitiative(players[0], -100);
-    const target = withInitiative(players[1], -100);
-    const actorId = actor['id'];
-    const reactorId = reactor['id'];
-    const targetId = target['id'];
-    const actorTokenId = actor['tokenId'];
-    const reactorTokenId = reactor['tokenId'];
-    const targetTokenId = target['tokenId'];
-    for (const [label, value] of [
-      ['actor id', actorId], ['reactor id', reactorId], ['target id', targetId],
-      ['actor token id', actorTokenId], ['reactor token id', reactorTokenId],
-      ['target token id', targetTokenId],
-    ] as const) {
-      if (typeof value !== 'string') throw new TypeError(`${label} is absent.`);
-    }
-    const initialState = invoke(encounterModule, 'createEncounter', [{
-      bounds: { columns: 8, rows: 5 },
-      blockedCells: [
-        ...Array.from({ length: 8 }, (_, column) => ({ column, row: 1 })),
-        ...Array.from({ length: 8 }, (_, column) => ({ column, row: 3 })),
-      ],
-      environment: {
-        lightRegions: [],
-        obscurementRegions: [],
-        difficultTerrainRegions: [{ id: 'browser-path-mud', cells: [{ column: 3, row: 2 }] }],
-        movementRegions: [],
-      },
-      combatants: [actor, reactor, target],
-      tokens: [
-        { id: actorTokenId, combatantId: actorId, position: { column: 1, row: 2 } },
-        { id: reactorTokenId, combatantId: reactorId, position: { column: 0, row: 2 } },
-        { id: targetTokenId, combatantId: targetId, position: { column: 7, row: 2 } },
-      ],
-    }]);
-    const rolled = record(invoke(encounterModule, 'reduceEncounter', [
-      initialState,
-      { type: 'roll_initiative' },
-      () => (10 - 0.5) / 20,
-    ]), 'initiative result');
-    const state = record(rolled['state'], 'encounter state');
     const combatants = state['combatants'];
     if (!Array.isArray(combatants)) throw new TypeError('Encounter combatants are absent.');
     const controllers = combatants.map((candidate) => {

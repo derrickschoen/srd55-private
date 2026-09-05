@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { declareTestInputs } from '../../helpers/test-inputs';
 import { canonicalJson } from '../../../src/commands/canonical-json';
+import { sha256 } from '../../../src/crypto/sha256';
+import {
+  HAND_AUTHORED_SESSION_V10_REVISION_BODY,
+  HAND_AUTHORED_V10_CREATURE_SPACE_CASES,
+} from '../../fixtures/vtt/creature-space-migration-fixtures';
 import {
   AlgorithmController,
   AgentController,
@@ -16,11 +21,12 @@ import {
   type PersistedCoordinatorState,
 } from '../../../src/combat/coordinator';
 import { createEncounter } from '../../../src/combat/encounter';
-import { projectPlayerView } from '../../../src/combat/visibility';
+import { dmVisibleEncounter, projectDmView, projectPlayerView } from '../../../src/combat/visibility';
 import type { EncounterCommand } from '../../../src/combat/events';
 import { mulberry32 } from '../../../src/combat/random';
 import {
   agentSessionId,
+  combatantId,
   encounterBranchId,
   encounterSessionId,
   type CombatantId,
@@ -39,6 +45,7 @@ import {
   SqliteBrowserSessionStore,
   SessionFingerprintMismatchError,
   UnknownSessionTransitionKindError,
+  VTT_SESSION_MIGRATIONS,
   exportSavedSession,
   exportSavedSessionV1ForMigrationTest,
   importSavedSession,
@@ -170,6 +177,152 @@ class CountingController extends HumanController {
 }
 
 describe('event-sourced encounter persistence', () => {
+  it('preserves known sizes and emits explicit v10 adjudication records for every unknown', () => {
+    const migration = VTT_SESSION_MIGRATIONS.find((candidate) => candidate.from === 10 && candidate.to === 11);
+    if (migration === undefined) throw new Error('The session 10-to-11 migration is not registered.');
+    const sourceBytes = canonicalJson(HAND_AUTHORED_V10_CREATURE_SPACE_CASES);
+
+    const caseRevisionBody = {
+      schemaVersion: 10,
+      encounterState: structuredClone(HAND_AUTHORED_V10_CREATURE_SPACE_CASES),
+    };
+    const migrated = migration.migrate({
+      schemaVersion: 10,
+      revisions: [{
+        ...caseRevisionBody,
+        checksum: sha256(canonicalJson(caseRevisionBody)),
+      }],
+    });
+    const revisions = Reflect.get(migrated, 'revisions');
+    if (!Array.isArray(revisions) || typeof revisions[0] !== 'object' || revisions[0] === null) {
+      throw new Error('The session 10-to-11 migration produced no revision.');
+    }
+    const encounterState = Reflect.get(revisions[0], 'encounterState');
+    if (typeof encounterState !== 'object' || encounterState === null) {
+      throw new Error('The session 10-to-11 migration produced no encounter state.');
+    }
+
+    expect(Reflect.get(encounterState, 'tokens')).toEqual([
+      {
+        id: 'token:known-medium',
+        combatantId: 'combatant:known-medium',
+        position: { column: 0, row: 0 },
+        placementMode: { kind: 'normal', actual: 'Medium' },
+      },
+    ]);
+    expect(Reflect.get(encounterState, 'effects')).toEqual([
+      { id: 'effect:retained', payload: { kind: 'movement_modifier', speedDeltaFeet: 5 } },
+    ]);
+    expect(Reflect.get(encounterState, 'adjudicationPending')).toEqual([
+      {
+        kind: 'effect_adjudication_pending',
+        combatant: 'combatant:known-effect',
+        effectId: 'effect:legacy-size-choice',
+        originalEffect: {
+          id: 'effect:legacy-size-choice',
+          source: 'combatant:known-medium',
+          targets: ['combatant:known-effect'],
+          createdRevision: 0,
+          duration: { kind: 'permanent' },
+          concentrationOwner: null,
+          stackingIdentity: 'spell:enlarge-reduce',
+          stacking: 'replace_same_source',
+          repeatedSave: null,
+          payload: {
+            kind: 'size_alteration',
+            selection: 'selected_when_cast',
+            damageDieCount: 1,
+            damageDieSides: 4,
+          },
+        },
+        suggestedAnchor: { column: 3, row: 3 },
+        originatingToken: {
+          id: 'token:known-effect',
+          combatantId: 'combatant:known-effect',
+          position: { column: 3, row: 3 },
+        },
+      },
+      {
+        kind: 'overlap_adjudication_pending',
+        combatant: 'combatant:known-tiny',
+        overlappingCombatant: 'combatant:known-medium',
+        formerAnchors: [{ column: 0, row: 0 }, { column: 0, row: 0 }],
+        originatingToken: {
+          id: 'token:known-tiny',
+          combatantId: 'combatant:known-tiny',
+          position: { column: 0, row: 0 },
+        },
+      },
+      {
+        kind: 'legacy_size_required',
+        combatant: 'combatant:missing-size',
+        sourceSizeText: null,
+        suggestedAnchor: { column: 1, row: 1 },
+        originatingToken: {
+          id: 'token:missing-size',
+          combatantId: 'combatant:missing-size',
+          position: { column: 1, row: 1 },
+        },
+      },
+      {
+        kind: 'legacy_size_required',
+        combatant: 'combatant:unknown-size',
+        sourceSizeText: 'Colossal Homebrew',
+        suggestedAnchor: { column: 1, row: 1 },
+        originatingToken: {
+          id: 'token:unknown-size',
+          combatantId: 'combatant:unknown-size',
+          position: { column: 1, row: 1 },
+        },
+      },
+    ]);
+    expect(Reflect.get(encounterState, 'phase')).toEqual({
+      kind: 'awaiting_placement',
+      combatantId: 'combatant:known-effect',
+      reason: 'effect_adjudication_pending',
+      originatingRecord: Reflect.get(encounterState, 'adjudicationPending')[0],
+      resumePhase: { kind: 'active' },
+    });
+    expect(Reflect.get(encounterState, 'environment')).toEqual({
+      ...HAND_AUTHORED_V10_CREATURE_SPACE_CASES.environment,
+      narrowOpeningRegions: [],
+    });
+    expect(Reflect.get(encounterState, 'sharedSpaceRelations')).toEqual([]);
+    expect(canonicalJson(HAND_AUTHORED_V10_CREATURE_SPACE_CASES)).toBe(sourceBytes);
+  });
+
+  it('decodes the hand-authored schema-10 creature-space fixture one way into schema 11', () => {
+    const revisionBody = structuredClone(HAND_AUTHORED_SESSION_V10_REVISION_BODY);
+    const revision = { ...revisionBody, checksum: sha256(canonicalJson(revisionBody)) };
+    const bundleBody = {
+      format: 'vtt-session-revisions',
+      schemaVersion: 10,
+      sessionId: revisionBody.sessionId,
+      revisions: [revision],
+    };
+    const sourceBytes = canonicalJson({
+      ...bundleBody,
+      fingerprint: sha256(canonicalJson(bundleBody)),
+    });
+
+    const store = new MemoryBrowserSessionStore();
+    const importedId = importSavedSession(store, sourceBytes);
+    const migrated = store.revisions(importedId);
+
+    expect(migrated).toHaveLength(1);
+    expect(migrated[0]?.schemaVersion).toBe(11);
+    expect(migrated[0]?.encounterState).toMatchObject({
+      tokens: [],
+      sharedSpaceRelations: [],
+      adjudicationPending: [],
+      environment: { narrowOpeningRegions: [] },
+    });
+    expect(canonicalJson({
+      ...bundleBody,
+      fingerprint: sha256(canonicalJson(bundleBody)),
+    })).toBe(sourceBytes);
+  });
+
   it('migrates the literal pre-AgentSessionBinding v7 save without changing unrelated journal bytes', () => {
     const fixtureBytes = declaredInputs.fixtures
       .readText('tests/fixtures/vtt/pre-agent-binding-v7-save.json')
@@ -187,6 +340,8 @@ describe('event-sourced encounter persistence', () => {
       schemaVersion: _legacySchemaVersion,
       checksum: _legacyChecksum,
       codexSessionId: _legacySessionId,
+      encounterState: _legacyEncounterState,
+      branchRngStateFingerprint: _legacyBranchFingerprint,
       ...legacyUnrelated
     } = legacyRevision as Readonly<Record<string, unknown>>;
     const legacyUnrelatedBytes = new TextEncoder().encode(canonicalJson(legacyUnrelated));
@@ -215,9 +370,50 @@ describe('event-sourced encounter persistence', () => {
       schemaVersion: _migratedSchemaVersion,
       checksum: _migratedChecksum,
       agentSession: _migratedAgentSession,
+      encounterState: migratedEncounterState,
+      branchRngStateFingerprint: _migratedBranchFingerprint,
       ...migratedUnrelated
     } = migratedRevision;
     expect(new TextEncoder().encode(canonicalJson(migratedUnrelated))).toEqual(legacyUnrelatedBytes);
+    expect(migratedRevision.schemaVersion).toBe(11);
+    expect(migratedEncounterState.tokens).toEqual([]);
+    expect(migratedEncounterState.sharedSpaceRelations).toEqual([]);
+    expect(migratedEncounterState.environment.narrowOpeningRegions).toEqual([]);
+    expect(migratedEncounterState.adjudicationPending).toEqual([
+      { kind: 'legacy_size_required', combatant: 'combatant:cleric', sourceSizeText: null, suggestedAnchor: { column: 1, row: 4 }, originatingToken: { id: 'token:cleric', combatantId: 'combatant:cleric', position: { column: 1, row: 4 } } },
+      { kind: 'legacy_size_required', combatant: 'combatant:fighter', sourceSizeText: null, suggestedAnchor: { column: 2, row: 3 }, originatingToken: { id: 'token:fighter', combatantId: 'combatant:fighter', position: { column: 2, row: 3 } } },
+      { kind: 'legacy_size_required', combatant: 'combatant:training-brute', sourceSizeText: null, suggestedAnchor: { column: 3, row: 3 }, originatingToken: { id: 'token:training-brute', combatantId: 'combatant:training-brute', position: { column: 3, row: 3 } } },
+      { kind: 'legacy_size_required', combatant: 'combatant:wizard', sourceSizeText: null, suggestedAnchor: { column: 1, row: 2 }, originatingToken: { id: 'token:wizard', combatantId: 'combatant:wizard', position: { column: 1, row: 2 } } },
+    ]);
+    expect(projectPlayerView(migratedEncounterState, {
+      seatId: 'seat:migrated-fighter', combatantId: combatantId('combatant:fighter'),
+    }).combatants).toEqual([{
+      id: 'combatant:fighter',
+      name: 'Reference Fighter',
+      kind: 'player_character',
+      life: 'living',
+      active: false,
+      formName: null,
+      placementStatus: 'placement_pending',
+      pendingReason: 'legacy_size_required',
+    }]);
+    expect(dmVisibleEncounter(projectDmView(migratedEncounterState)).combatants.map((combatant) => ({
+      id: combatant.id,
+      name: combatant.name,
+      kind: combatant.kind,
+      life: combatant.life,
+      active: combatant.active,
+      formName: combatant.formName,
+      placementStatus: combatant.placementStatus,
+      pendingReason: combatant.placementStatus === 'placement_pending'
+        ? combatant.pendingReason
+        : null,
+    }))).toEqual([
+      { id: 'combatant:fighter', name: 'Reference Fighter', kind: 'player_character', life: 'living', active: false, formName: null, placementStatus: 'placement_pending', pendingReason: 'legacy_size_required' },
+      { id: 'combatant:cleric', name: 'Reference Cleric', kind: 'player_character', life: 'living', active: false, formName: null, placementStatus: 'placement_pending', pendingReason: 'legacy_size_required' },
+      { id: 'combatant:wizard', name: 'Reference Wizard', kind: 'player_character', life: 'living', active: false, formName: null, placementStatus: 'placement_pending', pendingReason: 'legacy_size_required' },
+      { id: 'combatant:training-brute', name: 'Training Brute', kind: 'monster', life: 'living', active: false, formName: null, placementStatus: 'placement_pending', pendingReason: 'legacy_size_required' },
+    ]);
     expect(exportSavedSession(store, importedId)).not.toContain('codexSessionId');
   });
 
@@ -966,11 +1162,11 @@ describe('event-sourced encounter persistence', () => {
          ORDER BY revision`,
       );
       expect(rows).toEqual([
-        { revision: 1, schema_version: 10 },
-        { revision: 2, schema_version: 10 },
-        { revision: 3, schema_version: 10 },
-        { revision: 4, schema_version: 10 },
-        { revision: 5, schema_version: 10 },
+        { revision: 1, schema_version: 11 },
+        { revision: 2, schema_version: 11 },
+        { revision: 3, schema_version: 11 },
+        { revision: 4, schema_version: 11 },
+        { revision: 5, schema_version: 11 },
       ]);
       expect(
         EncounterSessionJournal.resume(

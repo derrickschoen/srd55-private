@@ -28,13 +28,16 @@ import {
 } from './dm-encounter-host';
 import {
   encounterBoardRenderModel,
+  encounterBoardTokenRenderModels,
   type EncounterBoardMechanicalLayer,
   type EncounterBoardProjectionShape,
+  type EncounterBoardTokenModel,
 } from './encounter-board';
 import { encounterArtForBoard } from './encounter-art-selection';
 import type {
   DmBoardProjection,
   DmMovementPathPreview,
+  DmPendingPlacementRecovery,
   PlayerBoardProjection,
   ProjectedControllerRequest,
 } from './encounter-projections';
@@ -216,6 +219,7 @@ function actionLabel(action: EncounterCommand): string {
     case 'search': return 'Search';
     case 'reveal_hidden': return 'Reveal';
     case 'resolve_pending_decision': return action.optionId === 'roll' ? 'Roll death save' : 'Resolve reaction';
+    case 'resolve_pending_placement': return 'Resolve pending placement';
     case 'set_hidden_roll_category': return `${action.hidden ? 'Hide' : 'Show'} ${action.category.replaceAll('_', ' ')}`;
     case 'dm_stabilize': return 'DM: Stabilize';
     case 'dm_revive_at_one_hit_point': return 'DM: Revive at 1 HP';
@@ -292,6 +296,95 @@ function actionLabel(action: EncounterCommand): string {
 
 function actionKey(action: EncounterCommand): string {
   return canonicalJson(action);
+}
+
+export type EncounterBoardStackSelection = Map<string, CombatantId>;
+
+export function applyPendingPlacementFocus(
+  root: HTMLElement,
+  target: 'recovery' | 'active_token',
+  activeCombatant: CombatantId | null,
+): void {
+  if (target === 'recovery') {
+    root.querySelector<HTMLElement>('[data-pending-placement-heading="true"]')?.focus();
+    return;
+  }
+  for (const token of Array.from(root.querySelectorAll<HTMLElement>('.encounter-token'))) {
+    if (token.dataset.combatantId === activeCombatant) {
+      token.focus();
+      return;
+    }
+  }
+}
+
+export function renderPendingPlacementRecoveryHeading(
+  recovery: DmPendingPlacementRecovery,
+): HTMLElement {
+  const panel = element('section', { className: 'dm-pending-placement-recovery' });
+  panel.dataset.renderKey = stableRenderKey(
+    'dm', 'pending-placement-recovery', recovery.combatantId, recovery.reason,
+  );
+  panel.dataset.combatantId = recovery.combatantId;
+  panel.dataset.reason = recovery.reason;
+  const heading = element('h2', { text: `Place ${recovery.combatantName}` });
+  heading.tabIndex = -1;
+  heading.dataset.pendingPlacementHeading = 'true';
+  heading.dataset.renderKey = stableRenderKey(
+    'dm', 'pending-placement-recovery', recovery.combatantId, recovery.reason, 'heading',
+  );
+  panel.append(
+    heading,
+    element('p', {
+      text: `Migration recovery: ${recovery.reason.replaceAll('_', ' ')}. Choose a legal creature space before play resumes.`,
+    }),
+  );
+  return panel;
+}
+
+function renderEncounterToken(model: EncounterBoardTokenModel): HTMLButtonElement {
+  const token = element('button', { className: 'encounter-token' });
+  token.dataset.renderKey = stableRenderKey('board-token', model.id);
+  token.type = 'button';
+  token.dataset.combatantId = model.id;
+  token.dataset.active = String(model.focusAssetId !== null);
+  token.dataset.adjudicated = String(model.adjudicatedAssetId !== null);
+  token.dataset.kind = model.kind;
+  token.dataset.assetId = model.assetId;
+  token.dataset.life = model.life;
+  token.dataset.marker = model.marker;
+  token.dataset.hiddenFromPlayers = String(model.hiddenFromPlayers ?? false);
+  token.dataset.column = String(model.position.column);
+  token.dataset.row = String(model.position.row);
+  token.dataset.columnSpan = String(model.columnSpan);
+  token.dataset.rowSpan = String(model.rowSpan);
+  token.dataset.stackId = model.stackId;
+  token.dataset.stackIndex = String(model.stackIndex);
+  token.dataset.stackSize = String(model.stackSize);
+  token.setAttribute('aria-label', model.stackSize === 1
+    ? `${model.name}, ${model.effectiveSize}, column ${String(model.position.column)}, row ${String(model.position.row)}`
+    : `${model.name}, occupant ${String(model.stackIndex + 1)} of ${String(model.stackSize)}, ${model.effectiveSize}, column ${String(model.position.column)}, row ${String(model.position.row)}`);
+  const sprite = element('img', { className: 'encounter-token-sprite' });
+  sprite.alt = '';
+  sprite.setAttribute('aria-hidden', 'true');
+  sprite.src = starterArtDataUri(model.assetId);
+  token.append(sprite);
+  for (const [role, assetId] of [
+    ['focus', model.focusAssetId],
+    ['adjudicated', model.adjudicatedAssetId],
+  ] as const) {
+    if (assetId === null) continue;
+    const overlay = element('img', { className: `encounter-token-overlay encounter-token-${role}` });
+    overlay.alt = '';
+    overlay.setAttribute('aria-hidden', 'true');
+    overlay.src = starterArtDataUri(assetId);
+    overlay.dataset.assetId = assetId;
+    token.append(overlay);
+  }
+  token.append(element('span', {
+    className: 'encounter-token-label',
+    text: model.marker === 'corpse' ? `† ${model.name}` : model.name,
+  }));
+  return token;
 }
 
 const OPTION_PATH_DANGER_CLASSES: Readonly<Record<MovementPathDangerKind, string>> = {
@@ -412,8 +505,10 @@ function renderOfferedOptionPathOverlay(
   defs.append(marker);
   svg.append(defs);
 
-  const tokenPositions = new Map(projection.combatants.map((combatant) =>
-    [combatant.id, combatant.position] as const));
+  const tokenPositions = new Map(projection.combatants.flatMap((combatant) =>
+    combatant.placementStatus === 'placed'
+      ? [[combatant.id, combatant.position] as const]
+      : []));
   const destinationCounts = new Map<string, number>();
   paths.forEach((path, pathIndex) => {
     const offset = optionPathOffset(pathIndex, paths.length);
@@ -539,10 +634,12 @@ export function renderBoard(
     readonly stateDigest: string;
   },
   offeredPaths: readonly OfferedOptionPath[] | null = null,
+  stackSelection: EncounterBoardStackSelection = new Map(),
 ): HTMLDivElement {
   const art = encounterArtForBoard(projection);
   const models = encounterBoardRenderModel(projection, art);
   const board = element('div', { className: 'encounter-board' });
+  board.dataset.renderKey = stableRenderKey('encounter-board', art.id);
   board.style.setProperty('--encounter-columns', String(projection.bounds.columns));
   // ART-SEAM (D516): overlay art reaches the mechanical-layer CSS through custom properties.
   for (const [effect, assetId] of Object.entries(OVERLAY_ASSETS)) {
@@ -577,6 +674,7 @@ export function renderBoard(
   }
   for (const model of models) {
     const cell = element('div', { className: 'encounter-cell' });
+    cell.dataset.renderKey = stableRenderKey('encounter-board', art.id, 'cell', model.key);
     cell.dataset.cell = model.key;
     if (preview.has(model.key)) cell.dataset.preview = 'true';
     for (const layer of model.layers) {
@@ -647,57 +745,131 @@ export function renderBoard(
       }
       cell.append(placed);
     }
-    if (model.token !== null) {
-      const token = element('div', { className: 'encounter-token' });
-      if (optionThreats.has(model.token.id)) token.classList.add('encounter-option-threat');
-      token.dataset.combatantId = model.token.id;
-      token.dataset.active = String(model.token.focusAssetId !== null);
-      token.dataset.adjudicated = String(model.token.adjudicatedAssetId !== null);
-      token.dataset.kind = model.token.kind;
-      token.dataset.assetId = model.token.assetId;
-      token.dataset.life = model.token.life;
-      token.dataset.marker = model.token.marker;
-      const sprite = element('img', { className: 'encounter-token-sprite' });
-      sprite.alt = '';
-      sprite.setAttribute('aria-hidden', 'true');
-      sprite.src = starterArtDataUri(model.token.assetId);
-      token.append(sprite);
-      for (const [role, assetId] of [
-        ['focus', model.token.focusAssetId],
-        ['adjudicated', model.token.adjudicatedAssetId],
-      ] as const) {
-        if (assetId === null) continue;
-        const overlay = element('img', { className: `encounter-token-overlay encounter-token-${role}` });
-        overlay.alt = '';
-        overlay.setAttribute('aria-hidden', 'true');
-        overlay.src = starterArtDataUri(assetId);
-        overlay.dataset.assetId = assetId;
-        token.append(overlay);
-      }
-      token.append(element('span', { className: 'encounter-token-label', text: model.token.name }));
-      for (const effect of projection.sustainedEffects ?? []) {
-        if (effect.owner !== model.token.id) continue;
-        const badge = element('span', { className: 'encounter-sustained-badge', text: effect.badge });
-        badge.dataset.effectId = effect.effectId;
-        badge.dataset.binding = effect.targetBinding;
-        badge.dataset.activationAvailable = String(effect.activationAvailable);
-        token.append(badge);
-      }
-      cell.append(token);
-    }
-    for (const extra of model.tokens.slice(1)) {
-      const marker = element('div', { className: 'encounter-token encounter-token-stacked' });
-      marker.dataset.combatantId = extra.id;
-      marker.dataset.life = extra.life;
-      marker.dataset.marker = extra.marker;
-      marker.append(element('span', {
-        className: 'encounter-token-label',
-        text: extra.marker === 'corpse' ? `† ${extra.name}` : extra.name,
-      }));
-      cell.append(marker);
-    }
     board.append(cell);
   }
+  const tokenLayer = element('div', { className: 'encounter-token-layer' });
+  tokenLayer.dataset.renderKey = stableRenderKey('encounter-board', art.id, 'tokens');
+  tokenLayer.style.setProperty('--encounter-columns', String(projection.bounds.columns));
+  const tokenModels = encounterBoardTokenRenderModels(projection, art);
+  const tokensByStack = new Map<string, EncounterBoardTokenModel[]>();
+  const tokenElements = new Map<CombatantId, HTMLButtonElement>();
+  for (const model of tokenModels) {
+    const members = tokensByStack.get(model.stackId) ?? [];
+    members.push(model);
+    tokensByStack.set(model.stackId, members);
+    const token = renderEncounterToken(model);
+    if (optionThreats.has(model.id)) token.classList.add('encounter-option-threat');
+    for (const effect of projection.sustainedEffects ?? []) {
+      if (effect.owner !== model.id) continue;
+      const badge = element('span', { className: 'encounter-sustained-badge', text: effect.badge });
+      badge.dataset.effectId = effect.effectId;
+      badge.dataset.binding = effect.targetBinding;
+      badge.dataset.activationAvailable = String(effect.activationAvailable);
+      token.append(badge);
+    }
+    tokenElements.set(model.id, token);
+    const creatureSpace = element('div', { className: 'encounter-token-space' });
+    creatureSpace.dataset.renderKey = stableRenderKey('board-token-space', model.id);
+    creatureSpace.dataset.cell = `${String(model.position.column)},${String(model.position.row)}`;
+    creatureSpace.dataset.combatantId = model.id;
+    creatureSpace.dataset.columnSpan = String(model.columnSpan);
+    creatureSpace.dataset.rowSpan = String(model.rowSpan);
+    creatureSpace.style.gridColumn = `${String(model.position.column + 1)} / span ${String(model.columnSpan)}`;
+    creatureSpace.style.gridRow = `${String(model.position.row + 1)} / span ${String(model.rowSpan)}`;
+    creatureSpace.append(token);
+    tokenLayer.append(creatureSpace);
+  }
+  for (const [stackId, members] of tokensByStack) {
+    const memberIds = new Set(members.map((member) => member.id));
+    let selected = stackSelection.get(stackId);
+    if (selected === undefined || !memberIds.has(selected)) selected = members[0]?.id;
+    if (selected === undefined) continue;
+    stackSelection.set(stackId, selected);
+    const listbox = element('div', { className: 'encounter-token-listbox' });
+    listbox.dataset.renderKey = stableRenderKey('board-stack', stackId);
+    listbox.id = `encounter-stack-${encodeURIComponent(stackId)}`;
+    listbox.setAttribute('role', 'listbox');
+    listbox.setAttribute('aria-label', `Occupants at shared creature space ${stackId}`);
+    listbox.hidden = true;
+    const first = members[0];
+    if (first === undefined) continue;
+    listbox.style.gridColumn = `${String(first.position.column + 1)} / span ${String(first.columnSpan)}`;
+    listbox.style.gridRow = `${String(first.position.row + 1)} / span ${String(first.rowSpan)}`;
+    const applySelection = (next: CombatantId, focus: boolean): void => {
+      stackSelection.set(stackId, next);
+      for (const member of members) {
+        const token = tokenElements.get(member.id);
+        if (token === undefined) continue;
+        const active = member.id === next;
+        token.tabIndex = active ? 0 : -1;
+        token.dataset.selected = String(active);
+        token.style.zIndex = active ? '30' : String(10 + member.stackIndex);
+        token.setAttribute('aria-expanded', String(!listbox.hidden && active));
+      }
+      for (const option of Array.from(listbox.querySelectorAll<HTMLElement>('[role="option"]'))) {
+        option.setAttribute('aria-selected', String(option.dataset.combatantId === next));
+      }
+      if (focus) tokenElements.get(next)?.focus();
+    };
+    members.forEach((member) => {
+      const token = tokenElements.get(member.id);
+      if (token === undefined) return;
+      if (members.length > 1) {
+        token.setAttribute('aria-haspopup', 'listbox');
+        token.setAttribute('aria-controls', listbox.id);
+      }
+      token.addEventListener('click', () => {
+        const currentIndex = members.findIndex((candidate) =>
+          candidate.id === stackSelection.get(stackId));
+        const next = members[(currentIndex + 1) % members.length];
+        if (next !== undefined) applySelection(next.id, true);
+      });
+      token.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' && members.length > 1) {
+          event.preventDefault();
+          listbox.hidden = !listbox.hidden;
+          applySelection(stackSelection.get(stackId) ?? member.id, false);
+          if (!listbox.hidden) listbox.querySelector<HTMLElement>('[aria-selected="true"]')?.focus();
+          return;
+        }
+        if (event.key === 'Escape') {
+          listbox.hidden = true;
+          applySelection(stackSelection.get(stackId) ?? member.id, true);
+          return;
+        }
+        const direction = event.key === 'ArrowRight' || event.key === 'ArrowDown'
+          ? 1
+          : event.key === 'ArrowLeft' || event.key === 'ArrowUp'
+            ? -1
+            : 0;
+        if (direction === 0 || members.length === 1) return;
+        event.preventDefault();
+        const currentIndex = members.findIndex((candidate) =>
+          candidate.id === stackSelection.get(stackId));
+        const next = members[(currentIndex + direction + members.length) % members.length];
+        if (next !== undefined) applySelection(next.id, true);
+      });
+      const option = element('div', { text: member.name });
+      option.dataset.renderKey = stableRenderKey('board-stack', stackId, 'option', member.id);
+      option.tabIndex = -1;
+      option.dataset.combatantId = member.id;
+      option.setAttribute('role', 'option');
+      option.addEventListener('click', () => {
+        listbox.hidden = true;
+        applySelection(member.id, true);
+      });
+      option.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape') return;
+        event.preventDefault();
+        listbox.hidden = true;
+        applySelection(stackSelection.get(stackId) ?? member.id, true);
+      });
+      listbox.append(option);
+    });
+    applySelection(selected, false);
+    if (members.length > 1) tokenLayer.append(listbox);
+  }
+  board.append(tokenLayer);
   const lines = projection.targetLines ?? [];
   if (lines.length > 0) {
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -706,10 +878,10 @@ export function renderBoard(
     svg.setAttribute('aria-label', 'Bound sustained-effect targets');
     for (const connection of lines) {
       const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-      line.setAttribute('x1', String(connection.from.column + 0.5));
-      line.setAttribute('y1', String(connection.from.row + 0.5));
-      line.setAttribute('x2', String(connection.to.column + 0.5));
-      line.setAttribute('y2', String(connection.to.row + 0.5));
+      line.setAttribute('x1', String(connection.from.x));
+      line.setAttribute('y1', String(connection.from.y));
+      line.setAttribute('x2', String(connection.to.x));
+      line.setAttribute('y2', String(connection.to.y));
       line.dataset.effectId = connection.effectId;
       line.dataset.targetId = connection.target;
       svg.append(line);
@@ -719,12 +891,12 @@ export function renderBoard(
   if (offeredPaths !== null) {
     const nameplates = provenance === undefined
       ? []
-      : stackLabelOffsets(projection.combatants.map((combatant) => ({
+      : stackLabelOffsets(projection.combatants.flatMap((combatant) => combatant.placementStatus === 'placed' ? [{
         id: combatant.id,
         displayName: combatant.name,
         column: combatant.position.column,
         row: combatant.position.row,
-      })), projection.bounds);
+      }] : []), projection.bounds);
     board.append(renderOfferedOptionPathOverlay(projection, offeredPaths, nameplates));
     board.append(renderOfferedOptionLegend());
   }
@@ -806,6 +978,7 @@ class PlayerEncounterView {
   #staged: EncounterCommand | null = null;
   #aimingSpell = false;
   #lastHeartbeat = 0;
+  readonly #stackSelection: EncounterBoardStackSelection = new Map();
   readonly #heartbeatCheck: number;
 
   constructor(
@@ -968,7 +1141,7 @@ class PlayerEncounterView {
       }));
     }
     this.#shell.append(activePanel);
-    const board = renderBoard(projection, this.#preview());
+    const board = renderBoard(projection, this.#preview(), null, undefined, null, this.#stackSelection);
     board.addEventListener('pointermove', (event) => this.#aimAt(event));
     this.#shell.append(board);
 
@@ -1068,6 +1241,13 @@ class DmEncounterView {
   #pendingDelete: SaveManagerViewModel['pendingDelete'] = null;
   #saveManagerController: SaveManagerController | null = null;
   #movementPreviewKey: string | null = null;
+  readonly #stackSelection: EncounterBoardStackSelection = new Map();
+  #recoverySelection: {
+    readonly key: string;
+    readonly size: DmPendingPlacementRecovery['sizeOptions'][number]['size'];
+    readonly anchorKey: string;
+  } | null = null;
+  #focusAfterRender: 'recovery' | 'active_token' | null = null;
   #showOfferedOptionPaths = false;
   readonly #sessionFlow: StoredCharacterSessionFlow | null;
   #endSessionExported = false;
@@ -1174,6 +1354,16 @@ class DmEncounterView {
         if (this.#pendingSnapshot !== null) {
           this.#coalescedSnapshotCount += 1;
           continue;
+        }
+        const previousRecovery = this.#projection?.pendingPlacementRecovery ?? null;
+        const nextRecovery = snapshot.dm.pendingPlacementRecovery;
+        const previousKey = previousRecovery === null
+          ? null : `${previousRecovery.combatantId}:${previousRecovery.reason}`;
+        const nextKey = nextRecovery === null
+          ? null : `${nextRecovery.combatantId}:${nextRecovery.reason}`;
+        if (previousKey !== nextKey) {
+          this.#recoverySelection = null;
+          this.#focusAfterRender = nextKey === null ? 'active_token' : 'recovery';
         }
         this.#projection = snapshot.dm;
         if (!snapshot.dm.movementPreviews.some(
@@ -1613,6 +1803,144 @@ class DmEncounterView {
     live.dataset.renderMaximumMs = String(this.#renderMaximumMs);
     live.dataset.coalescedSnapshotCount = String(this.#coalescedSnapshotCount);
     live.dataset.sessionRevision = String(this.#projection?.history.at(-1)?.revision ?? 0);
+    if (this.#focusAfterRender !== null) applyPendingPlacementFocus(
+      live,
+      this.#focusAfterRender,
+      this.#projection?.board.activeCombatant ?? null,
+    );
+    this.#focusAfterRender = null;
+  }
+
+  #renderPendingPlacementRecovery(recovery: DmPendingPlacementRecovery): HTMLElement {
+    const panel = renderPendingPlacementRecoveryHeading(recovery);
+
+    const key = `${recovery.combatantId}:${recovery.reason}`;
+    const firstSize = recovery.sizeOptions[0];
+    if (firstSize === undefined) throw new Error('Pending placement recovery has no size options.');
+    const currentSize = this.#recoverySelection?.key === key
+      ? recovery.sizeOptions.find((entry) => entry.size === this.#recoverySelection?.size) ?? firstSize
+      : firstSize;
+    const suggestedKey = recovery.suggestedAnchor === null
+      ? null
+      : `${String(recovery.suggestedAnchor.column)},${String(recovery.suggestedAnchor.row)}`;
+    const preferredAnchor = this.#recoverySelection?.key === key
+      ? currentSize.legalAnchors.find((entry) =>
+          `${String(entry.anchor.column)},${String(entry.anchor.row)}:${entry.placementMode}` ===
+          this.#recoverySelection?.anchorKey)
+      : currentSize.legalAnchors.find((entry) =>
+          `${String(entry.anchor.column)},${String(entry.anchor.row)}` === suggestedKey);
+    const currentAnchor = preferredAnchor ?? currentSize.legalAnchors[0] ?? null;
+    this.#recoverySelection = {
+      key,
+      size: currentSize.size,
+      anchorKey: currentAnchor === null
+        ? ''
+        : `${String(currentAnchor.anchor.column)},${String(currentAnchor.anchor.row)}:${currentAnchor.placementMode}`,
+    };
+
+    const form = element('form');
+    form.dataset.renderKey = stableRenderKey(
+      'dm', 'pending-placement-recovery', recovery.combatantId, recovery.reason, 'form',
+    );
+    const sizeLabel = element('label', { text: 'Creature size' });
+    sizeLabel.dataset.renderKey = stableRenderKey(
+      'dm', 'pending-placement-recovery', recovery.combatantId, recovery.reason, 'size-label',
+    );
+    const size = element('select');
+    size.dataset.renderKey = stableRenderKey(
+      'dm', 'pending-placement-recovery', recovery.combatantId, recovery.reason, 'size',
+    );
+    size.setAttribute('aria-label', `Creature size for ${recovery.combatantName}`);
+    size.disabled = recovery.sizeInput === 'fixed';
+    for (const entry of recovery.sizeOptions) {
+      const option = element('option', { text: entry.size });
+      option.value = entry.size;
+      option.selected = entry.size === currentSize.size;
+      size.append(option);
+    }
+    size.addEventListener('change', () => {
+      const selected = recovery.sizeOptions.find((entry) => entry.size === size.value);
+      if (selected === undefined) return;
+      const firstAnchor = selected.legalAnchors[0] ?? null;
+      this.#recoverySelection = {
+        key,
+        size: selected.size,
+        anchorKey: firstAnchor === null
+          ? ''
+          : `${String(firstAnchor.anchor.column)},${String(firstAnchor.anchor.row)}:${firstAnchor.placementMode}`,
+      };
+      this.#render();
+    });
+    sizeLabel.append(size);
+
+    const anchorLabel = element('label', { text: 'Legal anchor' });
+    anchorLabel.dataset.renderKey = stableRenderKey(
+      'dm', 'pending-placement-recovery', recovery.combatantId, recovery.reason, 'anchor-label',
+    );
+    const anchor = element('select');
+    anchor.dataset.renderKey = stableRenderKey(
+      'dm', 'pending-placement-recovery', recovery.combatantId, recovery.reason, 'anchor',
+    );
+    anchor.setAttribute('aria-label', `Legal anchor for ${recovery.combatantName}`);
+    for (const entry of currentSize.legalAnchors) {
+      const anchorKey = `${String(entry.anchor.column)},${String(entry.anchor.row)}:${entry.placementMode}`;
+      const option = element('option', {
+        text: `${String(entry.anchor.column)},${String(entry.anchor.row)} (${entry.placementMode})`,
+      });
+      option.value = anchorKey;
+      option.selected = anchorKey === this.#recoverySelection.anchorKey;
+      anchor.append(option);
+    }
+    anchor.disabled = currentSize.legalAnchors.length === 0;
+    anchor.addEventListener('change', () => {
+      this.#recoverySelection = { key, size: currentSize.size, anchorKey: anchor.value };
+      this.#render();
+    });
+    anchorLabel.append(anchor);
+
+    const submit = element('button', { text: 'Place combatant and continue' });
+    submit.dataset.renderKey = stableRenderKey(
+      'dm', 'pending-placement-recovery', recovery.combatantId, recovery.reason, 'submit',
+    );
+    submit.type = 'submit';
+    submit.disabled = currentAnchor === null;
+    form.append(sizeLabel, anchorLabel, submit);
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const selectedSize = recovery.sizeOptions.find((entry) => entry.size === size.value);
+      const selectedAnchor = selectedSize?.legalAnchors.find((entry) =>
+        `${String(entry.anchor.column)},${String(entry.anchor.row)}:${entry.placementMode}` === anchor.value);
+      if (selectedSize === undefined || selectedAnchor === undefined) return;
+      let command: Extract<EncounterCommand, { readonly type: 'resolve_pending_placement' }>;
+      switch (recovery.reason) {
+        case 'legacy_size_required':
+        case 'effect_adjudication_pending':
+          command = {
+            type: 'resolve_pending_placement',
+            combatant: recovery.combatantId,
+            anchor: selectedAnchor.anchor,
+            reason: recovery.reason,
+            size: selectedSize.size,
+          };
+          break;
+        case 'overlap_adjudication_pending':
+          command = {
+            type: 'resolve_pending_placement',
+            combatant: recovery.combatantId,
+            anchor: selectedAnchor.anchor,
+            reason: recovery.reason,
+          };
+          break;
+      }
+      const result = this.#host.resolvePendingPlacement(command);
+      if (result.kind === 'refused') {
+        this.#channelError = result.reason;
+        this.#focusAfterRender = 'recovery';
+        this.#render();
+      }
+    });
+    panel.append(form);
+    return panel;
   }
 
   #renderDmBoard(projection: DmBoardProjection): void {
@@ -1630,6 +1958,21 @@ class DmEncounterView {
     const previewCells = new Set(movementPreview?.path.map(
       (cell) => `${String(cell.column)},${String(cell.row)}`,
     ) ?? []);
+    if (projection.pendingPlacementRecovery !== null) {
+      this.#shell.append(this.#renderPendingPlacementRecovery(projection.pendingPlacementRecovery));
+      const selection = this.#recoverySelection;
+      const sizeOption = selection === null
+        ? undefined
+        : projection.pendingPlacementRecovery.sizeOptions.find(
+            (entry) => entry.size === selection.size,
+          );
+      const legalAnchor = sizeOption?.legalAnchors.find((entry) =>
+        `${String(entry.anchor.column)},${String(entry.anchor.row)}:${entry.placementMode}` ===
+        selection?.anchorKey);
+      for (const cell of legalAnchor?.footprint ?? []) {
+        previewCells.add(`${String(cell.column)},${String(cell.row)}`);
+      }
+    }
     if (!this.boardSnapshotMode) {
       const toggle = element('label', { className: 'dm-option-path-toggle' });
       toggle.dataset.renderKey = stableRenderKey('dm', 'option-path-toggle', 'label');
@@ -1650,7 +1993,7 @@ class DmEncounterView {
       stateDigest: projection.stateDigest,
     }, this.boardSnapshotMode || this.#showOfferedOptionPaths
       ? projection.offeredOptionPaths
-      : null));
+      : null, this.#stackSelection));
     if (movementPreview !== null) this.#shell.append(renderMovementDangerLegend(movementPreview));
   }
 

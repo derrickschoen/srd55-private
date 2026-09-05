@@ -1,13 +1,17 @@
 import {
+  combatantSpace,
   combatantConditions,
   detectCombatant,
   effectiveCombatRules,
+  effectiveCreatureSize,
   type EncounterCombatantState,
   type EncounterState,
 } from '../../combat/encounter';
 import { combatantsAreAllies } from '../../combat/allies';
 import type { ConditionName } from '../../combat/conditions';
 import type { GridCell } from '../../combat/grid';
+import type { KnownCreatureSize, SerializedPlacementMode } from '../../combat/creature-space';
+import { minimumSpaceDistance } from '../../combat/creature-space';
 import type { CombatantId } from '../../combat/values';
 import {
   intelPolicyVersion,
@@ -23,7 +27,7 @@ import {
 } from './contracts';
 
 /** Versioned policy for the actor-local target-knowledge projection. */
-export const ACTOR_KNOWLEDGE_POLICY = intelPolicyVersion('actor-knowledge-v2');
+export const ACTOR_KNOWLEDGE_POLICY = intelPolicyVersion('actor-knowledge-v3');
 
 export type ActorKnowledgePolicy = typeof ACTOR_KNOWLEDGE_POLICY;
 
@@ -42,9 +46,15 @@ export type LastSeenPositionKnown = ResolvedIntel<{
 
 export interface PerceivedTargetKnowledge {
   readonly kind: 'perceived';
+  readonly placementStatus: 'placed';
   readonly targetId: CombatantId;
   /** Current position is exposed only when the actor can mechanically locate it. */
   readonly position: GridCell;
+  readonly effectiveSize: KnownCreatureSize;
+  readonly placementMode: SerializedPlacementMode;
+  readonly footprint: readonly [GridCell, ...GridCell[]];
+  /** Nearest occupied-cell separation from the observing actor. */
+  readonly distanceFeet: number;
   /** Positive markers only: an omitted condition is not asserted absent. */
   readonly conditions: readonly PerceivedConditionMarker[];
   readonly armorClass: ProjectedArmorClassKnowledge;
@@ -67,6 +77,13 @@ export interface UnknownTargetKnowledge {
   readonly lastSeen: LastSeenPositionUnavailable;
 }
 
+export interface PlacementPendingTargetKnowledge {
+  readonly kind: 'placement_pending';
+  readonly placementStatus: 'placement_pending';
+  readonly targetId: CombatantId;
+  readonly pendingReason: EncounterState['adjudicationPending'][number]['kind'];
+}
+
 /**
  * This shape intentionally contains no hidden/fog fields or reason codes.
  * It is the actor-facing knowledge projection, not a serialization of state.
@@ -74,7 +91,8 @@ export interface UnknownTargetKnowledge {
 export type ActorTargetKnowledge =
   | PerceivedTargetKnowledge
   | SuspectedTargetKnowledge
-  | UnknownTargetKnowledge;
+  | UnknownTargetKnowledge
+  | PlacementPendingTargetKnowledge;
 
 export interface ActorKnowledgeProjection {
   readonly policy: ActorKnowledgePolicy;
@@ -206,15 +224,28 @@ export function projectActorKnowledge(
     throw new RangeError(`Actor knowledge requires a combatant in this encounter: ${String(actorId)}.`);
   }
   const tokens = new Map(state.tokens.map((token) => [token.combatantId, token] as const));
+  const actorIsPlaced = tokens.has(actorId) && !state.adjudicationPending.some((entry) =>
+    entry.combatant === actorId);
   const targets = state.combatants
     .filter((candidate) => candidate.life !== 'dead' &&
       !combatantsAreAllies(state, actorId, candidate.profile.id))
     .map((candidate): ActorTargetKnowledge => {
       const targetId = candidate.profile.id;
       const target = tokens.get(targetId);
-      if (target === undefined) {
-        throw new Error(`Actor knowledge found no token for target: ${String(targetId)}.`);
+      const pending = state.adjudicationPending.find((entry) =>
+        entry.combatant === targetId);
+      if (pending !== undefined) {
+        return {
+          kind: 'placement_pending',
+          placementStatus: 'placement_pending',
+          targetId,
+          pendingReason: pending.kind,
+        };
       }
+      if (target === undefined) {
+        return unknownTarget(targetId);
+      }
+      if (!actorIsPlaced) return unknownTarget(targetId);
 
       // Fog is a map-level redaction. Do not surface its presence or a location within it.
       if (state.foggedCells.some((cell) => sameCell(cell, target.position))) {
@@ -225,10 +256,16 @@ export function projectActorKnowledge(
       if (detection.kind === 'seen' || detection.kind === 'located') {
         const reciprocal = detectCombatant(state, targetId, actorId);
         const seen = detection.kind === 'seen';
+        const space = combatantSpace(state, targetId);
         return {
           kind: 'perceived',
+          placementStatus: 'placed',
           targetId,
           position: { ...target.position },
+          effectiveSize: effectiveCreatureSize(state, targetId),
+          placementMode: structuredClone(target.placementMode),
+          footprint: space.cells.map((cell) => ({ ...cell })) as [GridCell, ...GridCell[]],
+          distanceFeet: minimumSpaceDistance(combatantSpace(state, actorId), space),
           conditions: seen ? perceivedConditions(state, targetId) : [],
           armorClass: seen ? armorClassKnowledge(state, targetId) : { kind: 'unknown' },
           hitPoints: seen ? hitPointKnowledge(state, candidate) : { kind: 'unknown' },
@@ -250,6 +287,6 @@ export function projectActorKnowledge(
 }
 
 /** Lets consumers name the versioned policy without accepting arbitrary strings. */
-export function actorKnowledgePolicyVersion(): IntelPolicyVersion<'actor-knowledge-v2'> {
+export function actorKnowledgePolicyVersion(): IntelPolicyVersion<'actor-knowledge-v3'> {
   return ACTOR_KNOWLEDGE_POLICY;
 }

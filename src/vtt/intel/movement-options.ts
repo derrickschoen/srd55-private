@@ -8,7 +8,7 @@ import type { EngineQueryPort } from '../engine-query-port';
 import type { EngineOfferableOption, EngineOptionId } from '../turn-proposal';
 import { intelPolicyVersion, type IntelProviderResult } from './contracts';
 
-export const MOVEMENT_OPTIONS_INTEL_POLICY = intelPolicyVersion('movement-options-v1');
+export const MOVEMENT_OPTIONS_INTEL_POLICY = intelPolicyVersion('movement-options-v2');
 
 export type MovementIntelRisk = 'none' | 'opportunity_attack' | 'hazard' | 'unresolved';
 

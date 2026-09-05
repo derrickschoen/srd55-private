@@ -1,12 +1,13 @@
 import { z } from 'zod';
 import { combatantsAreAllies } from '../combat/allies';
 import type { EncounterState } from '../combat/encounter';
-import { gridDistance } from '../combat/grid';
+import { combatantSpace } from '../combat/combat-rules';
+import { minimumSpaceDistance } from '../combat/creature-space';
 import { BUNDLED_MONSTER_ROSTER } from '../combat/statblocks/roster';
 import type { EngineStateCapsule } from './engine-state-capsule';
 import type { EngineOmittedRider, NoModeledEffect } from './option-modeling';
 
-export const RENDERER_POLICY_VERSION = 'turn-context-renderer-v3' as const;
+export const RENDERER_POLICY_VERSION = 'turn-context-renderer-v4-creature-space' as const;
 
 export const rendererFormatSchema = z.enum(['structured', 'caveman_prose', 'regular_prose']);
 export type RendererFormat = z.infer<typeof rendererFormatSchema>;
@@ -218,7 +219,10 @@ export function extractCircumstanceFeatures(input: {
       const rightPosition = positions.get(right.profile.id);
       return leftPosition === undefined || rightPosition === undefined
         ? []
-        : [gridDistance(leftPosition, rightPosition)];
+        : [minimumSpaceDistance(
+            combatantSpace(input.state, left.profile.id),
+            combatantSpace(input.state, right.profile.id),
+          )];
     }));
   const totalCells = Math.max(1, input.state.bounds.columns * input.state.bounds.rows);
   const difficultCells = new Set(input.state.environment.difficultTerrainRegions

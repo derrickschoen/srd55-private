@@ -1,4 +1,4 @@
-import type { Ability, DamageType as DomainDamageType, Skill } from '../../domain/enums';
+import type { Ability, DamageType as DomainDamageType, KnownCreatureSize, Skill } from '../../domain/enums';
 import type { ConditionName } from '../conditions';
 import type { DamageOperationPacket, DamageOperationSpec, OperationDice } from '../damage-operations';
 import type { EffectApplication, EffectPayload } from '../effects';
@@ -13,6 +13,7 @@ import type { AreaTemplate } from '../templates';
 import type { DamageRequest } from '../resolution';
 import type { CombatantId, DamageType, EncounterEffectId, LimitedResourcePoolId, ObjectTargetId, WorldObjectId } from '../values';
 import type { GridCell } from '../grid';
+import type { SizeStepOperation } from '../creature-space';
 import type { LightLevel, WorldObjectChanges, WorldObjectInput } from '../world-objects';
 import type { CombatSense, MonsterAction } from '../statblock';
 
@@ -534,6 +535,7 @@ export const FORM_REPLACEMENT_EQUIPMENT_DISPOSITIONS = [
 export interface DeclaredFormStatOverride {
   readonly id: string;
   readonly name: string;
+  readonly sizeCategory: KnownCreatureSize;
   readonly armorClass: number;
   readonly hitPointMaximum: number;
   readonly speedFeet: number;
@@ -1258,7 +1260,7 @@ export interface SpellCastCommand {
     readonly damageSides: number;
     readonly damageModifier: number;
   };
-  readonly selectedOption: string | null;
+  readonly selectedOption: string | SizeStepOperation | null;
   /** Per-Humanoid Calm Emotions choice, supplied at activation. */
   readonly calmEmotionsModes?: readonly {
     readonly target: CombatantId;

@@ -160,7 +160,7 @@ describe('D466 B4 spell payloads', () => {
     });
     const unicorn = { ...unicornBase, rules: { ...unicornBase.rules, initiativeBonus: 100 } };
     const ally = playerProfile('b4-ally', { initiativeBonus: -100 });
-    let state = freshMonsterPlanningState(started([unicorn, ally], [0, 1]));
+    let state = freshMonsterPlanningState(started([unicorn, ally], [0, 2]));
     const bonus = UNICORN.sourceDetails.bonusActions.kind === 'present'
       ? UNICORN.sourceDetails.bonusActions.value.find((entry) => entry.kind === 'spell_choice') : undefined;
     if (bonus?.kind !== 'spell_choice') throw new Error('Unicorn blessing declaration is absent.');
@@ -222,7 +222,7 @@ describe('D466 B4 spell payloads', () => {
       const ally = playerProfile('ui-ally', { initiativeBonus: -100 });
       const state = freshMonsterPlanningState(createEncounter({
         bounds: { columns: 30, rows: 12 }, combatants: [unicorn, ally],
-        tokens: [placedToken(unicorn, 0, 2), placedToken(ally, 1, 2)],
+        tokens: [placedToken(unicorn, 0, 2), placedToken(ally, 2, 2)],
       }));
       const projected = projectHumanEngineOptions(state, [unicorn.id]);
       const optionCount = projected[0]?.options.filter((entry) =>

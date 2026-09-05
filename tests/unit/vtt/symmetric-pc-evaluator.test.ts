@@ -65,10 +65,10 @@ describe('symmetric scripted-PC evaluator', () => {
 
     expect(DEFAULT_SCRIPTED_PC_DECISION_POLICY).toBe('symmetric_evaluator_v1');
     expect(decision.policyVersions).toEqual({
-      tactical: 'tactical-evaluator-v2',
-      movement: 'movement-eval-v1',
-      concentration: 'concentration-intel-v1',
-      actorKnowledge: 'actor-knowledge-v2',
+      tactical: 'tactical-evaluator-v3',
+      movement: 'movement-eval-v2',
+      concentration: 'concentration-intel-v2',
+      actorKnowledge: 'actor-knowledge-v3',
     });
     expect(decision.selected.command).toEqual(move);
     const movement = decision.selected.movement;

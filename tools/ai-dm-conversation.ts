@@ -52,7 +52,12 @@ import {
   availableEngineActorOptions, pureTurnProposalResolver,
   type EngineOfferableOption, type EngineTurnProposal, type ResolvedTurnMechanics,
 } from '../src/vtt/intent-resolver';
-import { enginePlayToken, type EnginePlayToken } from '../src/vtt/turn-proposal';
+import {
+  enginePlayToken,
+  type EngineActivationChoice,
+  type EngineActivationChoiceSlot,
+  type EnginePlayToken,
+} from '../src/vtt/turn-proposal';
 import {
   hiddenOptionRecords,
   type HiddenOptionRecord,
@@ -1099,6 +1104,23 @@ function monsterPlanHash(plan: ReadonlyMap<CombatantId, SegmentMonsterPlanEntry>
     .sort((left, right) => left.actorId.localeCompare(right.actorId))));
 }
 
+function firstActivationChoice(slot: EngineActivationChoiceSlot | null | undefined): EngineActivationChoice | null {
+  if (slot === undefined || slot === null) return null;
+  switch (slot.kind) {
+    case 'command_word':
+      return { kind: slot.kind, value: slot.values[0] };
+    case 'unicorns_blessing_spell':
+      return { kind: slot.kind, value: slot.values[0] };
+    case 'dispel_evil_and_good_mode':
+      return { kind: slot.kind, value: slot.values[0] };
+    case 'calm_emotions_per_target':
+      return {
+        kind: slot.kind,
+        selections: slot.targetIds.map((targetId) => ({ targetId, mode: slot.values[0] })),
+      };
+  }
+}
+
 function engineDefaultPlanEntry(
   state: EncounterState,
   actorId: CombatantId,
@@ -1118,10 +1140,14 @@ function engineDefaultPlanEntry(
     actorId, expectedRevision: revision, primaryOptionId: option.optionId,
     fallbackOptionId: null,
     reason: 'The engine selected its highest-ranked available option.',
+    activationChoice: firstActivationChoice(option.activationChoice),
     overrideJustification: null,
   };
   const resolution = pureTurnProposalResolver.resolve(planningState, proposal);
-  if (!resolution.valid) throw new Error(`Could not stage engine default for ${actorId}.`);
+  if (!resolution.valid) {
+    const details = resolution.refusals.map((refusal) => `${refusal.code}: ${refusal.summary}`).join('; ');
+    throw new Error(`Could not stage engine default for ${actorId}: ${details}`);
+  }
   return {
     proposal,
     option: resolution.option,

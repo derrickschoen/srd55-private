@@ -24,12 +24,12 @@ export const TEST_APPROVED_FIRST_SKIRMISH_PACKAGE = {
   request: TEST_APPROVED_FIRST_SKIRMISH_REQUEST,
   generationPrompt: buildEncounterGenerationPrompt(TEST_APPROVED_FIRST_SKIRMISH_REQUEST),
   roster: [
-    { combatantId: 'combatant:gate-captain-north', tokenId: 'token:gate-captain-north', statblockId: 'statblock:bandit-captain', role: 'defender' },
-    { combatantId: 'combatant:gate-captain-south', tokenId: 'token:gate-captain-south', statblockId: 'statblock:bandit-captain', role: 'defender' },
-    { combatantId: 'combatant:gate-ogre-east', tokenId: 'token:gate-ogre-east', statblockId: 'statblock:ogre', role: 'bruiser' },
-    { combatantId: 'combatant:gate-ogre-west', tokenId: 'token:gate-ogre-west', statblockId: 'statblock:ogre', role: 'bruiser' },
-    { combatantId: 'combatant:gate-priest-east', tokenId: 'token:gate-priest-east', statblockId: 'statblock:priest', role: 'leader' },
-    { combatantId: 'combatant:gate-priest-west', tokenId: 'token:gate-priest-west', statblockId: 'statblock:priest', role: 'leader' },
+    { combatantId: 'combatant:gate-captain-north', tokenId: 'token:gate-captain-north', statblockId: 'statblock:bandit-captain', sizeCategory: 'Medium', role: 'defender' },
+    { combatantId: 'combatant:gate-captain-south', tokenId: 'token:gate-captain-south', statblockId: 'statblock:bandit-captain', sizeCategory: 'Medium', role: 'defender' },
+    { combatantId: 'combatant:gate-ogre-east', tokenId: 'token:gate-ogre-east', statblockId: 'statblock:ogre', sizeCategory: 'Large', role: 'bruiser' },
+    { combatantId: 'combatant:gate-ogre-west', tokenId: 'token:gate-ogre-west', statblockId: 'statblock:ogre', sizeCategory: 'Large', role: 'bruiser' },
+    { combatantId: 'combatant:gate-priest-east', tokenId: 'token:gate-priest-east', statblockId: 'statblock:priest', sizeCategory: 'Medium', role: 'leader' },
+    { combatantId: 'combatant:gate-priest-west', tokenId: 'token:gate-priest-west', statblockId: 'statblock:priest', sizeCategory: 'Medium', role: 'leader' },
   ],
   layout: {
     map: {
@@ -49,7 +49,7 @@ export const TEST_APPROVED_FIRST_SKIRMISH_PACKAGE = {
       { combatantId: 'combatant:gate-ogre-east', cell: { column: 9, row: 3 } },
       { combatantId: 'combatant:gate-ogre-west', cell: { column: 9, row: 5 } },
       { combatantId: 'combatant:gate-priest-east', cell: { column: 10, row: 2 } },
-      { combatantId: 'combatant:gate-priest-west', cell: { column: 10, row: 6 } },
+      { combatantId: 'combatant:gate-priest-west', cell: { column: 11, row: 6 } },
     ],
     terrain: [
       { id: 'terrain:gate-pillar', cell: { column: 5, row: 3 }, kind: 'blocking', blocksMovement: true, assetId: 'art.terrain.pillar.v1' },

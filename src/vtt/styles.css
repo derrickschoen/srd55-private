@@ -142,14 +142,40 @@
 .encounter-path-danger-legend h2 { margin: 0 0 0.35rem; font-size: 1rem; }
 .encounter-path-danger-legend ul { margin: 0; padding-left: 1.25rem; }
 
-.encounter-token {
+.encounter-token-layer {
   position: absolute;
   z-index: 5;
-  inset: 0.08rem;
+  inset: 0;
+  display: grid;
+  grid-template-columns: repeat(var(--encounter-columns), var(--encounter-tile-size));
+  grid-auto-rows: var(--encounter-tile-size);
+  pointer-events: none;
+}
+
+.encounter-token-space {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  pointer-events: none;
+}
+
+.encounter-token-space > .encounter-token {
+  width: auto;
+  height: auto;
+}
+
+.encounter-shell .encounter-token {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  margin: 0.08rem;
+  padding: 0;
   display: block;
   border: 0;
   background: transparent;
   text-align: center;
+  pointer-events: auto;
 }
 
 .encounter-token[data-life='dying'] {
@@ -157,16 +183,60 @@
   outline: 2px dashed #ffb45b;
 }
 
-.encounter-token[data-marker='corpse'] {
+.encounter-token[data-marker='corpse'] .encounter-token-sprite {
   filter: grayscale(1);
   opacity: 0.7;
   transform: rotate(90deg) scale(0.78);
 }
 
-.encounter-token-stacked {
-  z-index: 6;
-  inset: 1.8rem 0.08rem 0.08rem;
-  transform: none;
+.encounter-token[data-selected='true'] {
+  outline: 3px solid #ffe78e;
+  outline-offset: -3px;
+}
+
+.encounter-token-listbox {
+  position: relative;
+  z-index: 40;
+  align-self: end;
+  max-height: 8rem;
+  overflow: auto;
+  border: 2px solid #ffe78e;
+  background: #11131a;
+  color: #fff;
+  font: 700 0.7rem/1.3 system-ui, sans-serif;
+  pointer-events: auto;
+}
+
+.encounter-token-listbox [role='option'] {
+  padding: 0.25rem 0.35rem;
+}
+
+.encounter-token-listbox [aria-selected='true'] {
+  background: #6d2a18;
+}
+
+.dm-pending-placement-recovery {
+  border: 0.14rem solid #d8ae62;
+  border-radius: 0.55rem;
+  background: #241d19;
+  padding: 0.8rem;
+}
+
+.dm-pending-placement-recovery h2:focus {
+  outline: 0.2rem solid #ffe78e;
+  outline-offset: 0.2rem;
+}
+
+.dm-pending-placement-recovery form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: end;
+}
+
+.dm-pending-placement-recovery label {
+  display: grid;
+  gap: 0.25rem;
 }
 
 .encounter-area,
@@ -898,6 +968,12 @@
 
 .encounter-board[data-board-chrome='on'] {
   padding: var(--chrome-gutter);
+}
+
+.encounter-board[data-board-chrome='on'] > .encounter-token-layer {
+  inset: var(--chrome-gutter) var(--chrome-gutter) auto;
+  width: calc(var(--encounter-columns) * var(--encounter-tile-size));
+  height: calc(var(--encounter-rows, 1) * var(--encounter-tile-size));
 }
 
 /* The chrome nameplate carries the full name; the in-cell label stays in the

@@ -1,4 +1,5 @@
 import type { ControllerIdentity } from '../combat/controllers';
+import { combatToken } from '../combat/combatant';
 import type { TurnLegalActions } from '../combat/coordinator';
 import {
   createEncounter,
@@ -127,11 +128,7 @@ export function composeStoredCharacterEncounter(
   const freshState = createEncounter({
     bounds: { columns: 10, rows: 7 },
     combatants,
-    tokens: combatants.map((profile, index) => ({
-      id: profile.tokenId,
-      combatantId: profile.id,
-      position: positions[index] as GridCell,
-    })),
+    tokens: combatants.map((profile, index) => combatToken(profile, positions[index] as GridCell)),
     blockedCells: [{ column: 7, row: 2 }],
     foggedCells: [{ column: 8, row: 1 }, { column: 8, row: 2 }],
     dmNotes: ['Stored characters selected by the DM.'],

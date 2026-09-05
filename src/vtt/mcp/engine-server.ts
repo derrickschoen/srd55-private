@@ -2,7 +2,7 @@ import { canonicalJson } from '../../commands/canonical-json';
 import type { EncounterState } from '../../combat/encounter';
 import { ALERTING_POLICY, type EncounterAlertingState } from '../../combat/alerting';
 import type { EncounterEvent } from '../../combat/events';
-import { gridDistance, type GridCell } from '../../combat/grid';
+import type { GridCell } from '../../combat/grid';
 import { SEARCH_MEMORY_POLICY, type SearchMemory } from '../../combat/search-memory';
 import type { MonsterAttackAction } from '../../combat/statblock';
 import {
@@ -114,6 +114,7 @@ import {
   ENGINE_MINIMAL_SUBMIT_ROUND_PROPOSALS_INPUT_SCHEMA,
   ENGINE_REACTION_SPEND_HOLD_POLICY,
   ENGINE_RECOVERY_CAPABILITY_POLICY,
+  ENGINE_STATE_SUMMARY_POLICY,
   ENGINE_SUBMIT_ROUND_PROPOSALS_INPUT_SCHEMA,
   ENGINE_TOOL_SPECS,
   ENGINE_TURN_PROPOSAL_INPUT_SCHEMA,
@@ -208,7 +209,7 @@ function encodedJsonBytes(value: unknown): number {
 const SUGGESTED_PLAN_ADVISORY = 'You may submit these revision-bound option proposals as-is via engine.submit_round_proposals, edit the selected option ids, or ignore this suggested plan.';
 
 export function engineStateSummaryProofToken(capsuleDigest: string, granularity: string): string {
-  return sha256(`${capsuleDigest}|${granularity}|state_summary_proof_v1`);
+  return sha256(`${capsuleDigest}|${granularity}|state_summary_proof_v2_creature_space`);
 }
 export interface AllowlistedRulesSource { readonly get: (ruleId: string) => AllowlistedRuleEntry | null }
 export interface AdjudicationEnvelope {
@@ -836,12 +837,10 @@ function tacticalOptions(state: EncounterState, queries: EngineQueryPort, capsul
 }
 function distanceBand(distance: number): 'engaged' | 'near' | 'far' { return distance <= 5 ? 'engaged' : distance <= 30 ? 'near' : 'far' }
 function threats(state: EncounterState, queries: EngineQueryPort, actorId: CombatantId): readonly Readonly<Record<string, unknown>>[] {
-  const origin = queries.tokenPosition(state, actorId);
-  if (origin === null) return [];
+  if (queries.tokenPosition(state, actorId) === null) return [];
   return state.combatants.filter((candidate) => candidate.life !== 'dead' && !queries.sameSide(state, actorId, candidate.profile.id)).flatMap((candidate) => {
-    const position = queries.tokenPosition(state, candidate.profile.id);
-    if (position === null) return [];
-    const distance = gridDistance(origin, position);
+    const distance = queries.spaceDistance(state, actorId, candidate.profile.id);
+    if (distance === null) return [];
     return [{ source_id: candidate.profile.id, kinds: ['melee'], distance_band: distanceBand(distance), can_reach_now: distance <= candidate.profile.rules.reach ? 'yes' : 'no', visible: queries.visibility(state, actorId, candidate.profile.id)?.visible ?? false, note_codes: [] }];
   }).sort((left, right) => left.source_id.localeCompare(right.source_id));
 }
@@ -938,6 +937,7 @@ function reactionAttackInput(
 function actorKnowledgeReports(
   state: EncounterState,
   queries: EngineQueryPort,
+  capsule: EngineStateCapsule,
 ): readonly Readonly<Record<string, unknown>>[] {
   return state.combatants
     .filter((candidate) => candidate.profile.kind === 'monster' && candidate.life !== 'dead')
@@ -946,9 +946,27 @@ function actorKnowledgeReports(
       targets: state.combatants
         .filter((target) => !queries.sameSide(state, actor.profile.id, target.profile.id) && target.life !== 'dead')
         .map((target) => {
+          const projected = capsule.projection.combatants.find((candidate) => candidate.id === target.profile.id);
+          const distanceFeet = queries.spaceDistance(state, actor.profile.id, target.profile.id);
+          if (projected?.placementStatus === 'placement_pending') {
+            return {
+              kind: 'placement_pending',
+              target_id: target.profile.id,
+              placement_status: 'placement_pending',
+              pending_reason: projected.pendingReason,
+            };
+          }
           const visibility = queries.visibility(state, actor.profile.id, target.profile.id);
-          return visibility?.visible === true
-            ? { kind: 'perceived', target_id: target.profile.id }
+          return visibility?.visible === true && projected?.placementStatus === 'placed' && distanceFeet !== null
+            ? {
+                kind: 'perceived',
+                target_id: target.profile.id,
+                placement_status: 'placed',
+                effective_size: projected.effectiveSize,
+                placement_mode: structuredClone(projected.placementMode),
+                footprint: projected.footprint.map((cell) => ({ ...cell })),
+                distance_feet: distanceFeet,
+              }
             : {
                 kind: 'unknown',
                 target_id: target.profile.id,
@@ -1130,7 +1148,7 @@ function capsuleIntelReports(
     (entry) => entry.kind === 'participant' && entry.joinedBy.kind === 'help_call',
   ) === true;
   return {
-    actorKnowledge: actorKnowledgeReports(state, queries),
+    actorKnowledge: actorKnowledgeReports(state, queries, capsule),
     reactionSpendHold: reactionSpendHoldReports(state),
     legendaryWindows: legendary.full,
     legendaryWindowsCompact: legendary.compact,
@@ -2451,18 +2469,33 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       if (granularity === 'combatant_detail' && !Array.isArray(input['combatant_ids'])) throw new RangeError('combatant_ids are required.');
       if (granularity === 'journal_delta' && typeof input['since_revision'] !== 'number') throw new RangeError('since_revision is required.');
       const ids = Array.isArray(input['combatant_ids']) ? input['combatant_ids'].map(String) : null;
-      const combatants = capsule.projection.combatants.filter((actor) => ids === null || ids.includes(actor.id)).sort((left, right) => left.id.localeCompare(right.id)).map((actor) => ({
-        combatant_id: actor.id,
-        name: actor.name,
-        side: actor.side,
-        status: actorStatus(actor),
-        options: granularity === 'combatant_detail' ? tacticalOptions(state, queries, capsule, actor.id, true) : [],
-        threats: granularity === 'turn_minimal' || granularity === 'combatant_detail' ? threats(state, queries, actor.id) : [],
-      }));
+      const combatants = capsule.projection.combatants.filter((actor) => ids === null || ids.includes(actor.id)).sort((left, right) => left.id.localeCompare(right.id)).map((actor) => actor.placementStatus === 'placed'
+        ? {
+            combatant_id: actor.id,
+            name: actor.name,
+            side: actor.side,
+            status: actorStatus(actor),
+            placement_status: 'placed' as const,
+            effective_size: actor.effectiveSize,
+            placement_mode: actor.placementMode,
+            footprint: actor.footprint,
+            options: granularity === 'combatant_detail' ? tacticalOptions(state, queries, capsule, actor.id, true) : [],
+            threats: granularity === 'turn_minimal' || granularity === 'combatant_detail' ? threats(state, queries, actor.id) : [],
+          }
+        : {
+            combatant_id: actor.id,
+            name: actor.name,
+            side: actor.side,
+            status: actorStatus(actor),
+            placement_status: 'placement_pending' as const,
+            pending_reason: actor.pendingReason,
+            options: [],
+            threats: [],
+          });
       const history = recentChanges(capsule).filter((entry) => typeof input['since_revision'] !== 'number' || Number(entry['revision']) > input['since_revision']);
       const source = granularity === 'journal_delta' ? history : combatants;
       const paged = applicationPage(capsule, canonicalJson({ granularity, ids, since: input['since_revision'] ?? null }), source, input['page']);
-      return { state_ref: externalStateRef(capsule), granularity, proof_token: engineStateSummaryProofToken(capsule.digest, granularity), summary: { room: capsule.projection.room, round: capsule.projection.round, active_side: capsule.projection.activeSide, combatants: granularity === 'journal_delta' ? [] : paged.values, terrain_tags: tacticalSummary(capsule)['terrain_tags'], history: granularity === 'journal_delta' ? paged.values : history }, truncated: paged.truncated, next_cursor: paged.next };
+      return { state_ref: externalStateRef(capsule), policy: ENGINE_STATE_SUMMARY_POLICY, granularity, proof_token: engineStateSummaryProofToken(capsule.digest, granularity), summary: { room: capsule.projection.room, round: capsule.projection.round, active_side: capsule.projection.activeSide, combatants: granularity === 'journal_delta' ? [] : paged.values, terrain_tags: tacticalSummary(capsule)['terrain_tags'], history: granularity === 'journal_delta' ? paged.values : history }, truncated: paged.truncated, next_cursor: paged.next };
     }
     if (name === 'engine.get_combatant_options') {
       const actorId = combatantId(stringField(input, 'actor_id'));
@@ -2480,24 +2513,26 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       if (targetId === null || targetCell === null) return { state_ref: externalStateRef(capsule), feasible: false, minimum_feet: null, risks: [], resulting_relation: null, refusals: [{ code: 'TARGET_ABSENT', summary: 'The semantic target did not resolve.' }] };
       const movement = decodeMovement(input['movement']);
       const maximumFeet = movement.willingness === 'none' ? 0 : movement.maximumFeet;
-      const candidates: { readonly cell: GridCell; readonly cost: number }[] = [];
+      const currentRelation = queries.spaceDistance(state, actorId, targetId);
+      const candidates: { readonly cell: GridCell; readonly cost: number; readonly relation: number }[] = [];
       for (let row = 0; row < state.bounds.rows; row += 1) for (let column = 0; column < state.bounds.columns; column += 1) {
         const cell = { row, column };
         const path = queries.path(state, { actorId, destination: cell, movement: 'normal', ...(maximumFeet === undefined ? {} : { maximumFeet }) });
         if (!path.legal) continue;
         const kind = stringField(objective, 'kind');
         const actionId = typeof objective['action_id'] === 'string' ? objective['action_id'] : null;
-        const relation = gridDistance(cell, targetCell);
+        const relation = queries.spaceDistance(state, actorId, targetId, cell);
+        if (relation === null) continue;
         const qualifies = kind === 'enable_action' && actionId !== null ? queries.reach(state, { actorId, targetId, actionId, origin: cell }).legal
-          : kind === 'withdraw_from' ? relation > gridDistance(queries.tokenPosition(state, actorId) ?? cell, targetCell)
+          : kind === 'withdraw_from' ? currentRelation !== null && relation > currentRelation
             : kind === 'maintain_range_from' ? relation > 5 : true;
-        if (qualifies) candidates.push({ cell, cost: path.costFeet });
+        if (qualifies) candidates.push({ cell, cost: path.costFeet, relation });
       }
-      candidates.sort((left, right) => left.cost - right.cost || gridDistance(left.cell, targetCell) - gridDistance(right.cell, targetCell) || left.cell.row - right.cell.row || left.cell.column - right.cell.column);
+      candidates.sort((left, right) => left.cost - right.cost || left.relation - right.relation || left.cell.row - right.cell.row || left.cell.column - right.cell.column);
       const selected = candidates[0];
       return selected === undefined
         ? { state_ref: externalStateRef(capsule), feasible: false, minimum_feet: null, risks: [], resulting_relation: null, refusals: [{ code: 'OBJECTIVE_UNREACHABLE', summary: 'No legal path satisfies the semantic objective.' }] }
-        : { state_ref: externalStateRef(capsule), feasible: true, minimum_feet: selected.cost, risks: [], resulting_relation: `${distanceBand(gridDistance(selected.cell, targetCell))} from ${targetId}`, refusals: [] };
+        : { state_ref: externalStateRef(capsule), feasible: true, minimum_feet: selected.cost, risks: [], resulting_relation: `${distanceBand(selected.relation)} from ${targetId}`, refusals: [] };
     }
     if (name === 'engine.query_reach' || name === 'engine.query_cover' || name === 'engine.query_visibility') {
       const queryValues = input['queries'];
@@ -2518,9 +2553,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         }
         const actionId = typeof query['action_id'] === 'string' ? query['action_id'] : '';
         const reach = actionId.length === 0 ? null : queries.reach(state, { actorId, targetId, actionId });
-        const actorCell = queries.tokenPosition(state, actorId);
-        const targetCell = queries.tokenPosition(state, targetId);
-        const distance = actorCell === null || targetCell === null ? null : gridDistance(actorCell, targetCell);
+        const distance = queries.spaceDistance(state, actorId, targetId);
         const after = query['after_movement'] === undefined ? null : record(execute('engine.query_path', { state_ref: input['state_ref'], actor_id: actorId, objective: { kind: 'enable_action', action_id: actionId, target: query['target'] }, movement: query['after_movement'], ...(query['engagement'] === undefined ? {} : { engagement: query['engagement'] }) }), 'path result');
         const afterFeasible = after?.['feasible'] === true;
         return { query_id: queryId, status: reach?.legal === true ? 'yes' : afterFeasible ? 'conditional' : reach === null ? 'unknown' : 'no', facts: { distance_band: distance === null ? 'unknown' : distanceBand(distance), action_range_feet: reach?.legal === true ? reach.rangeFeet : null, reachable_now: reach?.legal === true, reachable_after_movement: afterFeasible, minimum_movement_feet: afterFeasible && typeof after?.['minimum_feet'] === 'number' ? after['minimum_feet'] : null }, refusals: reach !== null && !reach.legal ? reach.codes.map((code) => ({ code: code.toUpperCase(), summary: `${actionId}: ${code}` })) : [] };
