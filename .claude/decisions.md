@@ -11254,3 +11254,13 @@ after every engine merge) or inc5 introduced it. Bisect running: identical
 arena on a detached worktree at 15ef2b24 (miniab-bisect-15ef2b24.jsonl).
 Interim: no further engine landings on main until the root cause is found;
 the ghost-marker lane keeps implementing but will not land ahead of the fix.
+
+Addendum (16:28): the fair references are the post-era-shift controls at
+f7400638 (D521/D514 arms, same brutal basis, seed 6203001, luna low, picture
+off), same extraction: per-room offense [1,1,2,2,3,2,0,2,3,1] in four
+separate runs (mean 1.6–1.7, zero-offense 1–2, dash 26–29). footprints5:
+[1,0,2,2,0,2,0,2,0,1] (mean 1.0, zero 4, dash 36). Rooms 5 and 9 fall from
+3 to 0 and room 2 from 1 to 0; the other seven rooms are identical. Same
+seed, same model, same basis: a regression between f7400638 and 7c52da1c,
+i.e. inside the footprints landings (15ef2b24 or 7c52da1c). Bisect at
+15ef2b24 pending.
