@@ -10989,3 +10989,10 @@ is the product; (4) generative-3D and diffusion pixel-art services do not clear 
 ownership, training clauses, no non-infringement warranty); (5) a Japanese postmortem measured 41 runs / 675 files
 for one character via diffusion pipelines — "an image carries too many specifications" — the engineering case
 for code-generated art independent of licensing.
+
+LANDED ON MAIN (2026-09-05 13:40): claude/footprints → main 15ef2b24 (footprints increments 1–4, the main merge
+with the no-leak hidden-creature ruling, and the typed option-path fixture). Supervisor gates on 098c4830: browser
+suite 185/185 (50.9 min), quiet full vitest 563/9719, tsc 0, sg 0; post-merge sanity on main: tsc 0, focused
+24/24. docs/specs/content-pack.schema.json changed by the repository generator only (22:40 ruling). Per D526.2
+increment 5 follows (brief from the plan's increment-5 section plus the carried coverage requirement: the
+awaiting_placement guard tested over the whole command union).
