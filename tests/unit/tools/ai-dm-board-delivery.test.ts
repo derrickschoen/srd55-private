@@ -27,9 +27,11 @@ import {
   runArena,
 } from '../../../tools/ai-dm-arena';
 import {
+  BOARD_IMAGE_SCALE_STARTUP_INSTRUCTION,
   parseConversationArgs,
   runConversation,
   UI_FEEDBACK_STARTUP_INSTRUCTION,
+  type BoardImageMode,
   type ConversationBoardSnapshotService,
 } from '../../../tools/ai-dm-conversation';
 import type {
@@ -160,7 +162,7 @@ class FastProposalAdapter implements AgentSessionAdapter {
   }
 }
 
-function conversationArgs(outPath: string, boardImage?: 'off' | 'png'): readonly string[] {
+function conversationArgs(outPath: string, boardImage?: BoardImageMode): readonly string[] {
   return [
     '--rooms', '1', '--rounds', '2', '--out', outPath, '--dry-run',
     '--capture-rl-data',
@@ -171,20 +173,24 @@ function conversationArgs(outPath: string, boardImage?: 'off' | 'png'): readonly
 }
 
 describe('board image parsing and row evidence', () => {
-  it('parses default/off/png as a closed mode in conversation and arena', () => {
+  it('parses default/off/png/capture_only as a closed mode in conversation and arena', () => {
     const directory = mkdtempSync(join(tmpdir(), 'board-image-parser-'));
     const conversationBase = ['--rooms', '1', '--rounds', '1', '--out', join(directory, 'c.jsonl')];
     const arenaBase = ['--rooms', '1', '--reps', '1', '--seed', '3943001', '--out', join(directory, 'a.jsonl')];
     expect(parseConversationArgs(conversationBase).boardImageMode).toBe('off');
     expect(parseConversationArgs([...conversationBase, '--board-image', 'off']).boardImageMode).toBe('off');
     expect(parseConversationArgs([...conversationBase, '--board-image', 'png']).boardImageMode).toBe('png');
+    expect(parseConversationArgs([...conversationBase, '--board-image', 'capture_only']).boardImageMode)
+      .toBe('capture_only');
     expect(parseArenaArgs(arenaBase).boardImageMode).toBe('off');
     expect(parseArenaArgs([...arenaBase, '--board-image', 'off']).boardImageMode).toBe('off');
     expect(parseArenaArgs([...arenaBase, '--board-image', 'png']).boardImageMode).toBe('png');
+    expect(parseArenaArgs([...arenaBase, '--board-image', 'capture_only']).boardImageMode)
+      .toBe('capture_only');
     expect(() => parseConversationArgs([...conversationBase, '--board-image', 'jpeg']))
-      .toThrow('--board-image must be off or png');
+      .toThrow('--board-image must be off, png, or capture_only');
     expect(() => parseArenaArgs([...arenaBase, '--board-image', 'jpeg']))
-      .toThrow('--board-image must be off or png');
+      .toThrow('--board-image must be off, png, or capture_only');
     expect(() => parseConversationArgs([
       ...conversationBase, '--board-image', 'png', '--transport', 'final_indices',
     ])).toThrow('--board-image png requires --transport mcp_minimal');
@@ -204,6 +210,19 @@ describe('board image parsing and row evidence', () => {
       .toEqual({ era: 'd510_legacy', effort: null, escalationEffort: null, boardImage: null });
     expect(() => decodeArenaRowEvidence({ effort: 'low' }, 'd510_legacy'))
       .toThrow('must not claim Increment 2 evidence');
+  });
+
+  it('accepts capture_only row evidence with PNG-identical fields and rejects every unlisted mode', () => {
+    const captured = {
+      mode: 'capture_only', sha256: 'a'.repeat(64), bytes: 96, width: 1, height: 1,
+      captureMs: 1, relativePath: `board-images/${'a'.repeat(64)}.png`,
+    };
+    expect(decodeArenaRowEvidence({
+      effort: 'low', escalationEffort: null, boardImage: captured,
+    }, 'increment_2').boardImage).toEqual(captured);
+    expect(() => decodeArenaRowEvidence({
+      effort: 'low', escalationEffort: null, boardImage: { ...captured, mode: 'jpeg' },
+    }, 'increment_2')).toThrow('closed off|png|capture_only contract');
   });
 });
 
@@ -247,12 +266,15 @@ describe('MCP board image content', () => {
 });
 
 describe('arena capture lifecycle and off-arm invariance', () => {
-  it('captures each changed round state once, persists evidence, and closes one service', { timeout: 60_000 }, async () => {
+  it.each(['png', 'capture_only'] as const)(
+    'captures each changed round state once, persists %s evidence, and closes one service',
+    { timeout: 60_000 },
+    async (mode) => {
     const directory = mkdtempSync(join(tmpdir(), 'board-image-lifecycle-'));
     const service = new FakeSnapshotService();
     let starts = 0;
     const result = await runConversation(parseConversationArgs(conversationArgs(
-      join(directory, 'rows.jsonl'), 'png',
+      join(directory, 'rows.jsonl'), mode,
     )), {
       roomStates: [generateRoom(3_943_006).encounter.state],
       adapter: new FastProposalAdapter(),
@@ -262,21 +284,22 @@ describe('arena capture lifecycle and off-arm invariance', () => {
     expect(starts).toBe(1);
     expect(service.captures).toHaveLength(2);
     expect(service.captures[1]?.source.stateDigest).not.toBe(service.captures[0]?.source.stateDigest);
-    expect(result.rows.map((row) => row.boardImage.mode)).toEqual(['png', 'png']);
+    expect(result.rows.map((row) => row.boardImage.mode)).toEqual([mode, mode]);
     expect(result.rows.every((row) => row.effort === 'low' && row.escalationEffort === null)).toBe(true);
     expect(result.rows.every((row) => row.uiFeedback === null)).toBe(true);
     expect(result.rows.every((row) => row.endToEndWall >= row.timeToFirstAction)).toBe(true);
     expect(result.rows.every((row) => row.boardImageEvidence !== null &&
       row.boardImageEvidence.capturedAtUnixMs <= row.boardImageEvidence.primaryDispatchStartedAtUnixMs)).toBe(true);
     for (const row of result.rows) {
-      if (row.boardImage.mode !== 'png') throw new Error('PNG lifecycle row lost its board image.');
+      if (row.boardImage.mode === 'off') throw new Error('Capturing lifecycle row lost its board image.');
       expect(row.rawTurnContext).not.toContain(row.boardImage.sha256);
       expect(row.rawTurnContext).not.toContain(row.boardImage.relativePath);
       expect(JSON.stringify(row.rlData ?? null)).not.toContain(row.boardImage.sha256);
       expect(JSON.stringify(row.rlData ?? null)).not.toContain(row.boardImage.relativePath);
     }
     expect(service.closed).toBe(true);
-  });
+    },
+  );
 
   it('board_image_stale_after_move prevents the second dispatch and still cleans up', { timeout: 60_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'board-image-stale-'));
@@ -284,7 +307,7 @@ describe('arena capture lifecycle and off-arm invariance', () => {
     service.reuseFirstArtifact = true;
     let dispatches = 0;
     await expect(runConversation(parseConversationArgs(conversationArgs(
-      join(directory, 'rows.jsonl'), 'png',
+      join(directory, 'rows.jsonl'), 'capture_only',
     )), {
       roomStates: [generateRoom(3_943_006).encounter.state],
       adapter: new FastProposalAdapter(),
@@ -303,7 +326,7 @@ describe('arena capture lifecycle and off-arm invariance', () => {
     let dispatches = 0;
     await expect(runArena(parseArenaArgs([
       '--rooms', '1', '--reps', '1', '--seed', '3943001', '--out', join(directory, 'rows.jsonl'),
-      '--dry-run', '--board-image', 'png', '--effort', 'low', '--initiative-profile', 'derived_v1',
+      '--dry-run', '--board-image', 'capture_only', '--effort', 'low', '--initiative-profile', 'derived_v1',
     ]), {
       boardSnapshotServiceFactory: async () => { starts += 1; return service; },
       onPrimaryInvocation: () => { dispatches += 1; },
@@ -333,35 +356,95 @@ describe('arena capture lifecycle and off-arm invariance', () => {
       suggestion: 'Keep the board picture aligned with the same round context.',
     });
     expect(invocations[0]?.instructions?.split(UI_FEEDBACK_STARTUP_INSTRUCTION)).toHaveLength(2);
+    expect(invocations[0]?.instructions?.split(BOARD_IMAGE_SCALE_STARTUP_INSTRUCTION)).toHaveLength(2);
     expect(service.closed).toBe(true);
   });
 
-  it('image_flag_off_changes_prompt_bytes preserves the committed raw context and all invocation bytes', { timeout: 60_000 }, async () => {
+  it('capture_only_leaks_image_block is killed by off-arm byte identity at every model boundary', { timeout: 60_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'board-image-off-invariance-'));
     const invocations = new Map<string, AgentInvocation[]>();
-    const run = async (label: 'default' | 'off') => {
+    const services = new Map<string, FakeSnapshotService>();
+    const run = async (label: 'default' | 'off' | 'capture_only') => {
       const captured: AgentInvocation[] = [];
       invocations.set(label, captured);
+      const service = label === 'capture_only' ? new FakeSnapshotService() : null;
+      if (service !== null) services.set(label, service);
       const args = [
         '--rooms', '1', '--reps', '1', '--seed', '3943001',
         '--out', join(directory, `${label}.jsonl`), '--dry-run', '--effort', 'low',
         '--model', 'gpt-5.6-luna', '--transport', 'mcp_minimal',
         '--initiative-profile', 'derived_v1',
-        ...(label === 'off' ? ['--board-image', 'off'] : []),
+        ...(label === 'default' ? [] : ['--board-image', label]),
       ];
       return runArena(parseArenaArgs(args), {
         onPrimaryInvocation: (invocation) => { captured.push(structuredClone(invocation)); },
+        ...(service === null ? {} : { boardSnapshotServiceFactory: async () => service }),
       });
     };
     const defaultResult = await run('default');
     const offResult = await run('off');
+    const captureOnlyResult = await run('capture_only');
     expect(offResult.map((row) => row.rawTurnContext))
       .toEqual(defaultResult.map((row) => row.rawTurnContext));
-    expect(invocations.get('off')?.map((entry) => ({
+    expect(captureOnlyResult.map((row) => row.rawTurnContext))
+      .toEqual(offResult.map((row) => row.rawTurnContext));
+    const modelBoundary = (label: 'default' | 'off' | 'capture_only') => invocations.get(label)?.map((entry) => ({
       prompt: entry.prompt, instructions: entry.instructions, output: entry.output,
-    }))).toEqual(invocations.get('default')?.map((entry) => ({
-      prompt: entry.prompt, instructions: entry.instructions, output: entry.output,
-    })));
+    }));
+    expect(modelBoundary('off')).toEqual(modelBoundary('default'));
+    expect(modelBoundary('capture_only')).toEqual(modelBoundary('off'));
+
+    const offInvocation = invocations.get('off')?.[0];
+    const captureOnlyInvocation = invocations.get('capture_only')?.[0];
+    if (offInvocation === undefined || captureOnlyInvocation === undefined) {
+      throw new TypeError('Byte-identity fixture omitted a primary invocation.');
+    }
+    const launcherMcpResult = async (invocation: AgentInvocation) => {
+      const manifest = JSON.parse(readFileSync(invocation.launcherToken, 'utf8')) as EngineMcpLauncherManifest;
+      const state = await loadArenaFixture(manifest.fixturePath);
+      const boardImageContent = await validatedLauncherBoardImage(manifest, state);
+      const runtime = createEngineMcpRuntime(state, {
+        runId: manifest.runId, branchId: manifest.branchId, revision: manifest.revision,
+        requestId: manifest.requestId, phase: manifest.phase,
+        correctionNumber: manifest.correctionNumber, room: manifest.room,
+        historyKind: manifest.historyKind, toolProfile: 'dm',
+        ...(manifest.overridePolicy === undefined ? {} : { overridePolicy: manifest.overridePolicy }),
+        ...(manifest.rendererProfile === undefined ? {} : { rendererProfile: manifest.rendererProfile }),
+        ...(manifest.initiativeProjection === undefined ? {} : {
+          initiativeProjection: manifest.initiativeProjection,
+        }),
+        ...(manifest.turnContextDeltaBase === undefined ? {} : {
+          turnContextDeltaBase: manifest.turnContextDeltaBase,
+        }),
+        ...(boardImageContent === undefined ? {} : { boardImageContent }),
+      });
+      const response = runtime.handler.handle({
+        jsonrpc: '2.0', id: 1, method: 'tools/call',
+        params: {
+          _meta: META, name: 'engine.get_turn_context',
+          arguments: {
+            run_id: manifest.runId, expected_revision: manifest.revision, scope: 'round',
+            intel_mode: 'full',
+            ...(manifest.turnContextDeltaBase === undefined ? { granularity: 'full' } : {
+              granularity: 'turn_delta', since_revision: manifest.turnContextDeltaBase.revision,
+            }),
+          },
+        },
+      });
+      const result = record(record(response, 'launcher MCP response')['result'], 'launcher MCP result');
+      return {
+        toolManifest: canonicalJson(runtime.toolSurface.tools),
+        content: result['content'],
+        structuredContent: result['structuredContent'],
+      };
+    };
+    const offMcp = await launcherMcpResult(offInvocation);
+    const captureOnlyMcp = await launcherMcpResult(captureOnlyInvocation);
+    expect(captureOnlyMcp.toolManifest).toBe(offMcp.toolManifest);
+    expect(captureOnlyMcp.content).toEqual(offMcp.content);
+    expect(captureOnlyMcp.structuredContent).toEqual(offMcp.structuredContent);
+    expect(Array.isArray(captureOnlyMcp.content) && captureOnlyMcp.content).toHaveLength(1);
+    expect(JSON.stringify(captureOnlyMcp.content)).not.toContain('image/png');
 
     const raw = offResult[0]?.rawTurnContext;
     if (raw === undefined) throw new TypeError('Off-arm row omitted rawTurnContext.');
@@ -379,6 +462,17 @@ describe('arena capture lifecycle and off-arm invariance', () => {
     const offMcpResult = record(record(offResponse, 'off MCP response')['result'], 'off MCP result');
     expect(offMcpResult['content']).toEqual([{ type: 'text', text: '{"exact":"structured"}' }]);
     expect(offMcpResult['structuredContent']).toEqual({ exact: 'structured' });
+
+    const captureOnlyRow = captureOnlyResult[0];
+    if (captureOnlyRow?.boardImage.mode !== 'capture_only' || captureOnlyRow.boardImageEvidence === null) {
+      throw new TypeError('Capture-only fixture omitted persisted board-image evidence.');
+    }
+    expect(services.get('capture_only')?.captures).toHaveLength(1);
+    expect(services.get('capture_only')?.closed).toBe(true);
+    expect(captureOnlyRow.boardImage.relativePath)
+      .toBe(`board-images/${captureOnlyRow.boardImage.sha256}.png`);
+    expect(offInvocation.instructions?.split(BOARD_IMAGE_SCALE_STARTUP_INSTRUCTION)).toHaveLength(1);
+    expect(captureOnlyInvocation.instructions?.split(BOARD_IMAGE_SCALE_STARTUP_INSTRUCTION)).toHaveLength(1);
   });
 
   it('ui_feedback_offered_in_off_arm keeps the off-arm tool manifest byte-identical', () => {

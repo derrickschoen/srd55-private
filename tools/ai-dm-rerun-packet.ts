@@ -94,6 +94,15 @@ const boardImageSchema = z.discriminatedUnion('mode', [
     captureMs: z.number().finite().nonnegative(),
     relativePath: z.string().regex(/^board-images\/[a-f0-9]{64}\.png$/u),
   }).strict(),
+  z.object({
+    mode: z.literal('capture_only'),
+    sha256: z.string().regex(/^[a-f0-9]{64}$/u),
+    bytes: safeIntegerSchema.min(24).max(1_000_000),
+    width: safeIntegerSchema.min(1),
+    height: safeIntegerSchema.min(1),
+    captureMs: z.number().finite().nonnegative(),
+    relativePath: z.string().regex(/^board-images\/[a-f0-9]{64}\.png$/u),
+  }).strict(),
 ]);
 
 export interface NeutralAction {
@@ -567,10 +576,10 @@ function validateRow(
   if (hasBoardImage !== hasUiFeedback) {
     throw new TypeError(`${sourceLabel} must carry boardImage and uiFeedback together.`);
   }
-  if (sourceRow.boardImage?.mode === 'off' && sourceRow.uiFeedback !== null) {
+  if (sourceRow.boardImage !== undefined && sourceRow.boardImage.mode !== 'png' && sourceRow.uiFeedback !== null) {
     throw new TypeError(`${sourceLabel} cannot carry UI feedback without a PNG board image.`);
   }
-  if (sourceRow.boardImage?.mode === 'png' &&
+  if (sourceRow.boardImage !== undefined && sourceRow.boardImage.mode !== 'off' &&
     sourceRow.boardImage.relativePath !== `board-images/${sourceRow.boardImage.sha256}.png`) {
     throw new TypeError(`${sourceLabel}.boardImage path must match its SHA-256.`);
   }
