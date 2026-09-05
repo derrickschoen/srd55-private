@@ -10282,3 +10282,15 @@ on the board image is 5 feet; distances in the text are in feet.") — folded in
 so off-arm bytes stay identical and png/capture_only arms carry the line; (2) the judge prompt header in
 judge-one-img.sh (supervisor edit, one line, outside the repo); (3) the D519 probe's question preamble at its next
 increment.
+
+D519 PROBE RESULT, g1 art (supervisor run outside the sandbox, 20:22–21:05; 6 states × 10 questions × Luna low and
+medium; only the PNG and the question reach the model): Luna CANNOT read the current screenshot. Mean Jaccard per
+class, low / medium: creatures+coordinates 0.03 / 0.03; sides 0.08 / 0.04; HP bands 0.00 / 0.17; difficult terrain
+0.55 / 0.37; light levels 0.17 / 0.17 (dominant confusion: BRIGHT read as DARK, 485 / 923 times); doors 0.17 / 0.17;
+adjacency 0.00 / 0.17; hidden creatures 0.00 / 0.33; fog/obscurement 0.16 / 0.40; blocked cells 0.01 / 0.16.
+Hallucinations are massive (light: 706 / 1125). Strict gate FAIL on every class for both efforts. Reading: g1 has no
+coordinates, truncated names, no legend, and its bright-light tint reads as darkness to the model; the D513 gains
+therefore came from coarse layout cues (which side of the room the enemies are on), consistent with the judges'
+comments. The probe reruns on the D516 classic art (names, coordinates, legend, HP bars) as soon as it commits;
+the target stays every class ≥ 0.9 at Luna low, and the light-level palette is the first thing to change if it
+still reads inverted.
