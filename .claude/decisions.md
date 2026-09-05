@@ -11043,3 +11043,12 @@ a single run near the bar is "provisional", never "passed".
 
 D542 — OWNER (2026-09-05 14:03): the clean-room gate is the codex leakage check PLUS an independent Opus-medium
 leakage read; no owner read required. The folder opens to implementers only when both say CLEAN.
+
+D543 — OWNER (2026-09-05 14:06): review-seat disagreements — the supervisor arbitrates by verification and the
+owner reads afterwards; the ruling and its evidence go in this log; no reversal waits on the owner.
+
+CLEAN-ROOM LEAKAGE CHECK v2 (codex, 14:05): all eleven final documents CLEAN. The Opus-medium second read (D542)
+is running; the folder opens to implementers when it agrees. SEAT-YIELD LEDGER (D535.3): tools/seat_yield.py in
+the private repo with a JSON schema, validator and six unit tests; ledgers seeded from the archived verdicts —
+85 findings across iso round 10 (8), classic round 1 (18) and classic round 2 (59); all "unverified" until the
+supervisor fills verdicts during arbitration; from classic round 3 on, every arbitration writes the ledger.
