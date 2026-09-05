@@ -92,7 +92,7 @@ test('DM loads the bundled D365 dungeon and RPC-authored party into room 1', asy
     expect(dimensions?.[0]).toBe(dimensions?.[1]);
   }
   expect(rosterContract.bustBitmapBoxes).toHaveLength(9);
-  expect(rosterContract.bustBitmapBoxes.every(([rendered, bitmap]) => rendered === 64 && bitmap === 64)).toBe(true);
+  expect(rosterContract.bustBitmapBoxes.every(([rendered, bitmap]) => rendered === 128 && bitmap === 128)).toBe(true);
 });
 
 test('DM composes stored builder characters and each PC defaults to human control', async ({

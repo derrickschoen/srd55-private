@@ -2,6 +2,29 @@ import { spawn, spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { expect, test } from './fixtures/parallel-test';
 
+const SNAPSHOT_LAYOUT = Object.freeze({
+  border: 2,
+  coordinateGutter: 24,
+  tile: 128,
+  legendGap: 8,
+  legendBase: 120,
+  sectionHeading: 22,
+  rosterRow: 24,
+  objectRow: 40,
+});
+
+function expectedBoardDimensions(
+  bounds: { readonly columns: number; readonly rows: number },
+  content: { readonly combatants: number; readonly objects: number },
+): string {
+  const width = 2 * SNAPSHOT_LAYOUT.border + 2 * SNAPSHOT_LAYOUT.coordinateGutter + bounds.columns * SNAPSHOT_LAYOUT.tile;
+  const roster = content.combatants === 0 ? 0 : SNAPSHOT_LAYOUT.sectionHeading + content.combatants * SNAPSHOT_LAYOUT.rosterRow;
+  const objects = content.objects === 0 ? 0 : SNAPSHOT_LAYOUT.sectionHeading + content.objects * SNAPSHOT_LAYOUT.objectRow;
+  const height = 2 * SNAPSHOT_LAYOUT.border + 2 * SNAPSHOT_LAYOUT.coordinateGutter + bounds.rows * SNAPSHOT_LAYOUT.tile +
+    SNAPSHOT_LAYOUT.legendGap + SNAPSHOT_LAYOUT.legendBase + roster + objects;
+  return `${String(width)}x${String(height)}`;
+}
+
 const productionBuild = spawnSync(process.execPath, ['tools/dist-build-cache.mjs'], {
   cwd: process.cwd(),
   encoding: 'utf8',
@@ -60,11 +83,11 @@ test('captures the full production DM board deterministically through durable sa
   );
   const result = await runBrowserCheck(outputDirectory);
   expect(result.benchmark.captures).toBe(2);
-  // D533: the fixed board grid is followed by a deliberately growing legend.
-  // seed-6203002 has 8 one-line roster rows and 7 2× rail entries:
-  // 4 border + 48 gutters + 13·64 cells + 8 gap + (120 + 22 + 8·24 + 22 + 7·40).
-  // seed-6203004 has 7 one-line roster rows and 5 rail entries by the same formula.
-  expect(result.dimensions).toEqual(['1140x1528', '1588x1552']);
+  const expectedDimensions = [
+    expectedBoardDimensions({ columns: 17, rows: 13 }, { combatants: 8, objects: 7 }),
+    expectedBoardDimensions({ columns: 24, rows: 15 }, { combatants: 7, objects: 5 }),
+  ].sort();
+  expect(result.dimensions).toEqual(expectedDimensions);
   expect(result.staleRejected).toBe(true);
   expect(result.identityRejected).toBe(true);
   expect(result.movedDigestChanged).toBe(true);

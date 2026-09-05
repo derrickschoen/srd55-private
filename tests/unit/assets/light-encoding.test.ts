@@ -35,7 +35,7 @@ import {
 import { installInteractiveDocument, interactiveElement, type InteractiveTestElement } from '../../fixtures/interactive-dom';
 
 function overlay(effect: OverlayEffect) {
-  return paintRecipe({ kind: 'overlay', effect });
+  return paintRecipe({ kind: 'overlay', material: 'semantic', effect });
 }
 
 // ---------------------------------------------------------------------------

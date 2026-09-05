@@ -10,6 +10,7 @@ import {
   WALL_PIECES,
   paintRecipe,
   renderPixelArtPng,
+  tokenRecipe,
   type ArtRecipe,
   type BandSide,
   type WallPiece,
@@ -26,8 +27,8 @@ function expectEdge(label: string, left: Uint8Array, right: Uint8Array): void {
 
 describe('D516 wall band and doors join seamlessly', () => {
   /**
-   * Tiles sit on a 64-px lattice and the cap pattern is 64-periodic, so the
-   * pixels that MEET at a boundary are column 63 of the left tile and column 0
+   * Tiles sit on the native lattice, so the pixels that meet at a boundary are
+   * the final column of the left tile and column 0
    * of the right tile: different columns of one continuous pattern. Seamless
    * therefore means a corner (or door) piece shows exactly what the straight
    * band shows at that same column/row, i.e. its edge treatment never deviates
@@ -84,8 +85,8 @@ describe('D516 wall band and doors join seamlessly', () => {
 
 describe('D516 tokens', () => {
   const tokenRecipes: readonly ArtRecipe[] = [
-    ...TOKEN_SIDES.flatMap((side) => TOKEN_ARCHETYPES.map((archetype): ArtRecipe => ({ kind: 'token', archetype, side }))),
-    { kind: 'token-dead' },
+    ...TOKEN_SIDES.flatMap((side) => TOKEN_ARCHETYPES.map((archetype): ArtRecipe => tokenRecipe(archetype, side))),
+    { kind: 'token-dead', material: 'bone' },
   ];
 
   it('every token frame keeps a 1-px transparent margin and stands on a base plate', () => {
@@ -102,10 +103,10 @@ describe('D516 tokens', () => {
       let opaque = 0;
       for (let y = 0; y < TILE_SIZE; y += 1) {
         for (let x = 0; x < TILE_SIZE; x += 1) {
-          const dx = x + 0.5 - 32;
-          const dy = y + 0.5 - 34;
+          const dx = (x + 0.5 - 64) / 51;
+          const dy = (y + 0.5 - 91) / 29;
           const distance = Math.sqrt(dx * dx + dy * dy);
-          if (distance < 23 || distance > 25.5) continue;
+          if (distance < 0.92 || distance > 0.99) continue;
           annulus += 1;
           if (bitmap.get(x, y).alpha === 255) opaque += 1;
         }
@@ -116,18 +117,18 @@ describe('D516 tokens', () => {
 
   it('party and foe plates differ while the bust is shared', () => {
     for (const archetype of TOKEN_ARCHETYPES) {
-      const party = paintRecipe({ kind: 'token', archetype, side: 'party' });
-      const foe = paintRecipe({ kind: 'token', archetype, side: 'foe' });
+      const party = paintRecipe(tokenRecipe(archetype, 'party'));
+      const foe = paintRecipe(tokenRecipe(archetype, 'foe'));
       expect(bytesEqual(party.data, foe.data)).toBe(false);
-      expect(bytesEqual(party.row(20), foe.row(20))).toBe(false);
+      expect(bytesEqual(party.row(110), foe.row(110))).toBe(false);
     }
-    const archetypes = TOKEN_ARCHETYPES.map((archetype) => Buffer.from(paintRecipe({ kind: 'token', archetype, side: 'foe' }).data).toString('base64'));
+    const archetypes = TOKEN_ARCHETYPES.map((archetype) => Buffer.from(paintRecipe(tokenRecipe(archetype, 'foe')).data).toString('base64'));
     expect(new Set(archetypes).size).toBe(TOKEN_ARCHETYPES.length);
   });
 });
 
 describe('D516 determinism', () => {
-  it('renders identical bytes for identical inputs, at 64×64 native', () => {
+  it('renders identical bytes for identical inputs at native resolution', () => {
     for (const input of STARTER_ART_INPUTS) {
       const first = renderPixelArtPng(input.recipe);
       const second = renderPixelArtPng(input.recipe);

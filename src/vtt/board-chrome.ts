@@ -75,7 +75,7 @@ import {
 } from './encounter-board';
 import type { ProjectedHitPointKnowledge } from './intel/contracts';
 
-export const CHROME_TILE_PX = 64;
+export const CHROME_TILE_PX = 128;
 export const CHROME_TEXT_SCALE = 2;
 /** `.encounter-board` border width in styles.css; part of the captured size. */
 export const BOARD_BORDER_PX = 2;

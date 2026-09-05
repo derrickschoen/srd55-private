@@ -82,7 +82,7 @@ const EXPECTED_NAMED_TOKEN_IDS = [
   'art.token.monster.wolf.v1',
 ] as const;
 
-describe('procedural starter-art manifest and deterministic outputs (D516, generator 2.0.0)', () => {
+describe('procedural starter-art manifest and deterministic outputs (native generator 3.0.0)', () => {
   it('inventories 36 token busts (13 fixture-named, 22 archetype×side, 1 dead) and 51 room/state assets', () => {
     expect(STARTER_ART_MANIFEST.assets).toHaveLength(EXPECTED_ASSET_COUNT);
     const tokens = STARTER_ART_MANIFEST.assets.filter((entry) => entry.kind === 'token').map((entry) => entry.id);
@@ -98,8 +98,8 @@ describe('procedural starter-art manifest and deterministic outputs (D516, gener
     expect(Object.keys(EXPECTED_STARTER_ART_SHA256)).toHaveLength(EXPECTED_ASSET_COUNT);
     expect(STARTER_ART_MANIFEST.generator).toEqual({
       id: 'starter-pixel-art',
-      version: '2.0.0',
-      fixedInputSet: 'starter-art-inputs-v2',
+      version: '3.0.0',
+      fixedInputSet: 'starter-art-inputs-v3',
       fixedInputsSha256: EXPECTED_FIXED_INPUTS_SHA256,
     });
     expect(STARTER_ART_MANIFEST.assets.every((entry) =>

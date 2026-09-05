@@ -42,6 +42,7 @@ import { hammingDistance, inkCount, outlineRows, padMark } from '../../../src/as
 import { combatantId, worldObjectId } from '../../../src/combat/values';
 import {
   CELL_GLYPH_RING_BOTTOM_PX,
+  CHROME_TILE_PX,
   HP_BAR_TOP_PX,
   LIFE_GLYPH_BELOW_DOOR_PX,
   LIFE_GLYPH_INSET_PX,
@@ -215,7 +216,7 @@ describe('D525 glyph families own distinct corners and silhouettes', () => {
 // ---------------------------------------------------------------------------
 
 function overlay(effect: CellGlyphEffect): Bitmap {
-  return paintRecipe({ kind: 'overlay', effect });
+  return paintRecipe({ kind: 'overlay', material: 'semantic', effect });
 }
 
 describe('D525 cell glyph tiles: pixel invariants', () => {
@@ -497,8 +498,8 @@ describe('D525 board DOM under each mode on a room with every fact class', () =>
     // the hidden creature: eye-slash on the ring, HIDDEN in its roster line, and the dashed ring
     const eyes = dm.querySelectorAll('.encounter-hidden-glyph');
     expect(eyes.map((eye) => eye.getAttribute('data-combatant-id'))).toEqual([FOE]);
-    expect(styleOf(eyes[0], 'left')).toBe(24 + 2 * 64 + 1 - 1);
-    expect(styleOf(eyes[0], 'top')).toBe(24 + 2 * 64 + 29 - 1);
+    expect(styleOf(eyes[0], 'left')).toBe(24 + 2 * CHROME_TILE_PX + 1 - 1);
+    expect(styleOf(eyes[0], 'top')).toBe(24 + 2 * CHROME_TILE_PX + 29 - 1);
     expect(styleOf(eyes[0], 'width')).toBe(CELL_GLYPH_SIZE + 2);
     expect(dm.querySelectorAll('.encounter-hidden-ring').map((ring) => ring.getAttribute('data-combatant-id'))).toEqual([FOE]);
     const roster = dm.querySelectorAll('.encounter-roster-entry');
@@ -509,12 +510,12 @@ describe('D525 board DOM under each mode on a room with every fact class', () =>
 
     // the scout stands in the open doorway: its life glyph drops below the door mark; the hero's does not
     const lifeOf = (id: string) => dm.querySelectorAll('.encounter-life-glyph').find((glyph) => glyph.getAttribute('data-combatant-id') === id);
-    expect(styleOf(lifeOf(SCOUT), 'top')).toBe(24 + OPEN_DOOR.row * 64 + LIFE_GLYPH_BELOW_DOOR_PX);
-    expect(styleOf(lifeOf(HERO), 'top')).toBe(24 + 1 * 64 + LIFE_GLYPH_INSET_PX);
+    expect(styleOf(lifeOf(SCOUT), 'top')).toBe(24 + OPEN_DOOR.row * CHROME_TILE_PX + LIFE_GLYPH_BELOW_DOOR_PX);
+    expect(styleOf(lifeOf(HERO), 'top')).toBe(24 + CHROME_TILE_PX + LIFE_GLYPH_INSET_PX);
     expect(LIFE_GLYPH_BELOW_DOOR_PX).toBeGreaterThan(CELL_GLYPH_MARGIN + CELL_GLYPH_SIZE);
     // the HP bar sits below every bottom-row glyph ring
     for (const bar of dm.querySelectorAll('.encounter-hp-bar')) {
-      expect((styleOf(bar, 'top') - 24) % 64).toBe(HP_BAR_TOP_PX);
+      expect((styleOf(bar, 'top') - 24) % CHROME_TILE_PX).toBe(HP_BAR_TOP_PX);
     }
   });
 

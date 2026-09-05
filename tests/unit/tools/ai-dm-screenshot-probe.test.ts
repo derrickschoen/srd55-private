@@ -292,8 +292,10 @@ describe('D524 general screenshot primer', () => {
     const primerPrompt = screenshotQuestionPrompt('Q1', 'general');
     expect(primerPrompt).toContain(`General primer ${PRIMER_VERSION}: ${GENERAL_PRIMER}`);
     expect(primerPrompt).toContain('Each grid square represents 5 feet');
-    expect(primerPrompt).toContain('Cool-blue base rings identify party creatures');
-    expect(primerPrompt).toContain('warm-red base rings identify foes');
+    expect(primerPrompt).toContain('Cool-blue floor plates identify party creatures');
+    expect(primerPrompt).toContain('warm-red floor plates identify foes');
+    expect(primerPrompt).toContain('upper-left side of world art is lit');
+    expect(primerPrompt).toContain('lower-right contact shadow grounds it');
     expect(primerPrompt).toContain('Each creature token carries a numbered coloured badge');
     expect(primerPrompt).toContain("roster box under the board repeats that badge and lists the creature's full name, cell, side and HP band");
     expect(primerPrompt).toContain('A creature stands in the cell that holds its badge');
@@ -329,7 +331,7 @@ describe('D524 general screenshot primer', () => {
   });
 
   it('D525: appends the light sentence per mode plus one sentence per glyph family under full, chosen by --board-glyphs, defaulting to none', () => {
-    expect(PRIMER_VERSION).toBe('d537-general-board-primer-v7');
+    expect(PRIMER_VERSION).toBe('d557-general-board-primer-v8');
     expect(BOARD_GLYPH_PRIMER.none).toEqual([LIGHT_PRIMER.tint]);
     expect(BOARD_GLYPH_PRIMER.light).toEqual([LIGHT_PRIMER.glyph]);
     expect(BOARD_GLYPH_PRIMER.full).toEqual([
@@ -488,7 +490,7 @@ describe('D519 screenshot comprehension schema and CLI', () => {
       const rescored = await rescoreScreenshotProbe(config);
       expect(rescored).toHaveLength(10);
       expect(rescored.every((row) => row.score === 1)).toBe(true);
-      expect(rescored.every((row) => row.version === 'd533-screenshot-comprehension-row-v7')).toBe(true);
+      expect(rescored.every((row) => row.version === 'd557-screenshot-comprehension-row-v8')).toBe(true);
       expect(rescored.every((row) => row.resultKind === 'rescored')).toBe(true);
       expect(rescored.every((row) => row.normaliserVersion === NORMALISER_VERSION)).toBe(true);
       expect(rescored.every((row) => row.sourceFileSha256 === createHash('sha256').update(savedBytes).digest('hex'))).toBe(true);
@@ -573,7 +575,7 @@ describe('D519 screenshot comprehension schema and CLI', () => {
       expect(rows.every((row) => row.primerVersion === PRIMER_VERSION)).toBe(true);
       expect(rows.every((row) => row.generation === 'g2-classic-general')).toBe(true);
       expect(rows.every((row) => row.boardGlyphs === 'full')).toBe(true);
-      expect(rows.every((row) => row.version === 'd533-screenshot-comprehension-row-v7')).toBe(true);
+      expect(rows.every((row) => row.version === 'd557-screenshot-comprehension-row-v8')).toBe(true);
       expect(rows.every((row) => row.resultKind === 'generated')).toBe(true);
       expect(rows.every((row) => row.sourceFileSha256 === null)).toBe(true);
       expect(rows.every((row) => row.normaliserVersion === NORMALISER_VERSION)).toBe(true);

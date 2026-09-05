@@ -768,8 +768,12 @@ describe('renderBoard: DM board with chrome, player board without', () => {
   });
 
   it('states the captured board size from the bounds alone', () => {
-    expect(boardChromeDimensions({ columns: 17, rows: 13 })).toEqual({ width: 1140, height: 1012 });
-    expect(boardChromeDimensions({ columns: 24, rows: 15 })).toEqual({ width: 1588, height: 1140 });
+    for (const bounds of [{ columns: 17, rows: 13 }, { columns: 24, rows: 15 }]) {
+      expect(boardChromeDimensions(bounds)).toEqual({
+        width: 2 * BOARD_BORDER_PX + 2 * COORDINATE_GUTTER_PX + bounds.columns * CHROME_TILE_PX,
+        height: 2 * BOARD_BORDER_PX + 2 * COORDINATE_GUTTER_PX + bounds.rows * CHROME_TILE_PX + LEGEND_GAP_PX + LEGEND_HEIGHT_PX,
+      });
+    }
     expect(boardChromeDimensions({ columns: 1, rows: 1 })).toEqual({
       width: 2 * BOARD_BORDER_PX + 2 * COORDINATE_GUTTER_PX + CHROME_TILE_PX,
       height: 2 * BOARD_BORDER_PX + 2 * COORDINATE_GUTTER_PX + CHROME_TILE_PX + LEGEND_GAP_PX + LEGEND_HEIGHT_PX,

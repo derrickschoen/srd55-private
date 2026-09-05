@@ -666,20 +666,20 @@
 }
 
 /* ==========================================================================
-   D516 — classic board at 64 CSS px per cell, 16-bit pass.
+   D516 — classic board, now at 128 native CSS pixels per cell.
    Appended after the original rules on purpose: the path-overlay lane appends
    its own section below this one, so nothing above is reordered.
    ========================================================================== */
 
 .encounter-board {
-  --encounter-tile-size: 64px;
+  --encounter-tile-size: 128px;
   --chrome-gutter: 24px;
   border-color: #393842;
   background: #111113;
 }
 
 /* Tiles carry their own mortar and wall rims; a 1 px cell border would scale
-   a 64 px tile into 62 px and break every wall seam. */
+   a tile into a non-native box and break every wall seam. */
 .encounter-cell {
   border: 0;
   background: #111113;
