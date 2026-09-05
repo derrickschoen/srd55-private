@@ -10488,3 +10488,13 @@ granting cover fails the creature-cover test); probe inc3 4a46ac16 (my gate; nam
 iso D8 df96ce63 (lane now paused per the round-8 hold). The first 24-state probe on the full glyph vocabulary
 started 05:22 (Luna low + medium). Footprints increment 4 dispatched (plan round 3, D513/D514 rulings, the plan's
 "Before Increment 4" recommendations as defaults).
+
+SUPERVISOR RULING (2026-09-05 05:40) — footprints Increment 4 stopped correctly: the plan's inc4 UI assumed the
+pending-placement lifecycle that D514(2) replaced with auto-relocation, yet D514(1)'s migration creates
+`legacy_size_required` / `effect_adjudication_pending` / `overlap_adjudication_pending` records that today are
+audit-only with no way to resolve them. Amendment: Increment 4's scope now includes the MINIMAL resolution flow for
+MIGRATION-ORIGIN pending records only — an `awaiting_placement`-style phase entered only by migration, one typed
+`resolve_pending_placement` command (DM supplies size and/or anchor; validated against terrain/opening/overlap
+rules), its reducer and events, projection as a non-spatial roster entry, and the DM recovery panel with a
+legal-anchor preview. Growth/reversion keeps auto-relocation; no other core change. Core files touched for this are
+listed in the report and reviewed by the supervisor.
