@@ -11151,3 +11151,11 @@ tooling lanes (probe inc5, flakes) land, since it changes the conversation runne
 CLEAN-ROOM OPEN (2026-09-05 15:08): the Opus v3 read reports all eleven documents CLEAN; with codex's v2 CLEAN
 the D542 gate is met — clean-room/final/ (v3) is readable by implementers from now on; every art brief from
 classic round 5 and the next iso unit onward cites it as the design authority (judges-only stays judges-only).
+
+D552 — OWNER (2026-09-05 15:10): SPLIT the standing rules from the chronology — `.claude/RULES.md` holds every
+currently binding rule (one line each, pointing at its D-number or supervisor ruling), `.claude/decisions.md`
+stays the append-only chronology and still wins on conflict; and a COMPACTION PASS of the rules file at least once
+a day (superseded rules removed, new rulings folded in, dated). Supervisor: codex drafts RULES.md from the log
+(read-only over the chronology, written to a scratch file outside .claude), the supervisor installs it on main,
+and a second codex seat reviews it against the log for omissions; the daily compaction is a supervisor duty
+recorded with a dated line at the top of RULES.md.
