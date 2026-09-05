@@ -34,7 +34,22 @@ import {
   type LightLevel,
 } from '../assets/light-encoding';
 import { OVERLAY_ASSETS } from '../assets/art-sets';
-import { neutral, paletteHex, ramp, type PaletteColorRef } from '../assets/palette';
+import {
+  BADGE_DARK_INK,
+  BADGE_LIGHT_INK,
+  renderChromeSwatchBitmap,
+  renderCreatureBadgeBitmap,
+  renderCreatureRingBitmap,
+} from '../assets/board-chrome-art';
+import {
+  neutral,
+  paletteHex,
+  ramp,
+  type NeutralStep,
+  type PaletteColorRef,
+  type PaletteRamp,
+  type RampStep,
+} from '../assets/palette';
 import {
   GLYPH_HEIGHT,
   layoutPixelText,
@@ -88,26 +103,54 @@ export const CREATURE_BADGE_TOP_PX = 2;
 export const CREATURE_BADGE_STACK_PITCH_PX = CREATURE_BADGE_HEIGHT_PX;
 export const MAX_BADGES_PER_CELL = 2;
 export const CREATURE_BUST_RING_INSET_PX = 7;
-export const CREATURE_BUST_RING_WIDTH_PX = CHROME_TILE_PX - 2 * CREATURE_BUST_RING_INSET_PX;
-export const CREATURE_BUST_RING_HEIGHT_PX = CHROME_TILE_PX - 2 * CREATURE_BUST_RING_INSET_PX;
+export const CREATURE_BUST_RING_WIDTH_PX = 50;
+export const CREATURE_BUST_RING_HEIGHT_PX = 50;
 export const ROSTER_NAME_GLYPHS_PER_LINE = 18;
 export const ROSTER_ENTRY_GAP_PX = 4;
 export const ROSTER_ENTRY_FRAME_PX = 6;
 
-/** A closed board vocabulary; a render cannot silently invent or reuse a hue. */
+export const BADGE_SIDE_HUES = Object.freeze([12, 222] as const);
+export const CREATURE_BADGE_HUE_EXCLUSION_DEGREES = 35;
+
+export type CreatureBadgeRamp = Exclude<PaletteRamp, 'cloth-warm' | 'cloth-cool'>;
+export type CreatureBadgeDisc =
+  | { readonly ramp: CreatureBadgeRamp; readonly step: RampStep }
+  | { readonly ramp: 'neutral'; readonly step: NeutralStep };
+
+function badgeRamp(rampName: CreatureBadgeRamp, step: RampStep): CreatureBadgeDisc {
+  return { ramp: rampName, step };
+}
+
+function badgeNeutral(step: NeutralStep): CreatureBadgeDisc {
+  return { ramp: 'neutral', step };
+}
+
+function badgeColor<const Id extends string>(
+  id: Id,
+  disc: CreatureBadgeDisc,
+  numeralInk: PaletteColorRef,
+): { readonly id: Id; readonly disc: CreatureBadgeDisc; readonly numeralInk: PaletteColorRef } {
+  return Object.freeze({ id, disc, numeralInk });
+}
+
+/**
+ * A closed, colour-vision-tested identity vocabulary. It deliberately omits
+ * the warm/cool side ramps and every saturated colour in the exclusion band
+ * around their 12°/222° base hues. The numeral remains the primary identity.
+ */
 export const CREATURE_BADGE_COLORS = Object.freeze([
-  { id: 'scarlet', css: 'hsl(0 82% 58%)', hue: 0, lightness: 58 },
-  { id: 'orange', css: 'hsl(30 88% 52%)', hue: 30, lightness: 52 },
-  { id: 'gold', css: 'hsl(60 82% 48%)', hue: 60, lightness: 48 },
-  { id: 'lime', css: 'hsl(90 72% 48%)', hue: 90, lightness: 48 },
-  { id: 'green', css: 'hsl(120 68% 45%)', hue: 120, lightness: 45 },
-  { id: 'teal', css: 'hsl(150 72% 45%)', hue: 150, lightness: 45 },
-  { id: 'cyan', css: 'hsl(180 78% 45%)', hue: 180, lightness: 45 },
-  { id: 'azure', css: 'hsl(210 82% 58%)', hue: 210, lightness: 58 },
-  { id: 'indigo', css: 'hsl(240 75% 64%)', hue: 240, lightness: 64 },
-  { id: 'violet', css: 'hsl(270 76% 62%)', hue: 270, lightness: 62 },
-  { id: 'magenta', css: 'hsl(300 76% 56%)', hue: 300, lightness: 56 },
-  { id: 'rose', css: 'hsl(330 82% 62%)', hue: 330, lightness: 62 },
+  badgeColor('deep-forest', badgeRamp('moss', 0), BADGE_LIGHT_INK),
+  badgeColor('ivory', badgeRamp('skin', 6), BADGE_DARK_INK),
+  badgeColor('fern', badgeRamp('moss', 4), BADGE_DARK_INK),
+  badgeColor('slate', badgeRamp('stone', 4), BADGE_DARK_INK),
+  badgeColor('pine', badgeRamp('moss', 2), BADGE_LIGHT_INK),
+  badgeColor('charcoal', badgeNeutral(2), BADGE_LIGHT_INK),
+  badgeColor('sand', badgeRamp('earth', 6), BADGE_DARK_INK),
+  badgeColor('silver', badgeRamp('stone', 6), BADGE_DARK_INK),
+  badgeColor('spruce', badgeRamp('moss', 1), BADGE_LIGHT_INK),
+  badgeColor('iron', badgeNeutral(3), BADGE_LIGHT_INK),
+  badgeColor('pearl', badgeRamp('metal', 6), BADGE_DARK_INK),
+  badgeColor('graphite', badgeNeutral(1), BADGE_LIGHT_INK),
 ] as const);
 
 export type CreatureBadgeColor = (typeof CREATURE_BADGE_COLORS)[number];
@@ -154,15 +197,6 @@ export function assignCreatureBadges(
       stackIndex: stackIndex as 0 | 1,
     };
   });
-}
-
-export function badgeColorDistance(
-  left: CreatureBadgeColor,
-  right: CreatureBadgeColor,
-): number {
-  const hue = Math.min(Math.abs(left.hue - right.hue), 360 - Math.abs(left.hue - right.hue)) / 180;
-  const lightness = Math.abs(left.lightness - right.lightness) / 100;
-  return Math.hypot(hue, lightness);
 }
 
 /** Word wrapping never resamples: long words become fixed 17-glyph pieces plus '-'. */
@@ -236,10 +270,11 @@ export function lifeGlyphFor(life: LifeState): LifeGlyph {
 export type HiddenRosterTag = typeof HIDDEN_GLYPH_LABEL;
 const HIDDEN_TAG_INK: PaletteColorRef = ramp('cloth-warm', 6);
 
-/** Creature and object labels are different visual concepts, enforced at their DOM boundary. */
-export type BoardLabelStyle = 'creature-roster' | 'object-tag';
-export const CREATURE_LABEL_STYLE: BoardLabelStyle = 'creature-roster';
-export const OBJECT_LABEL_STYLE: BoardLabelStyle = 'object-tag';
+/** Creature, object and door labels are distinct visual concepts at their DOM boundary. */
+export type BoardLabelStyle = 'creature-roster' | 'object-tag' | 'door-tag';
+export const CREATURE_LABEL_STYLE = 'creature-roster' as const satisfies BoardLabelStyle;
+export const OBJECT_LABEL_STYLE = 'object-tag' as const satisfies BoardLabelStyle;
+export const DOOR_LABEL_STYLE = 'door-tag' as const satisfies BoardLabelStyle;
 
 export interface BoardChromeDimensionContent {
   readonly combatants: readonly Pick<EncounterBoardCombatant, 'name'>[];
@@ -252,8 +287,8 @@ export function legendHeightPx(content: BoardChromeDimensionContent): number {
     : 22 + content.combatants.reduce((height, combatant) =>
         height + Math.max(GLYPH_HEIGHT * CHROME_TEXT_SCALE, layoutRosterName(combatant.name).height * CHROME_TEXT_SCALE) +
           ROSTER_ENTRY_FRAME_PX + ROSTER_ENTRY_GAP_PX, 0);
-  const objectCount = content.objects.filter((object) => object.kind !== 'door').length;
-  const objectHeight = objectCount === 0 ? 0 : 22 + objectCount * 30;
+  const objectCount = content.objects.length;
+  const objectHeight = objectCount === 0 ? 0 : 22 + objectCount * 40;
   return LEGEND_HEIGHT_PX + rosterHeight + objectHeight;
 }
 
@@ -553,7 +588,11 @@ function tokenChrome(
     layer.append(lifeImage);
 
     const ringInset = CREATURE_BUST_RING_INSET_PX + assignment.stackIndex * 2;
-    const bustRing = el('span', 'encounter-creature-bust-ring');
+    const ringArt = renderCreatureRingBitmap(assignment.color.disc);
+    const bustRing = el('img', 'encounter-creature-bust-ring');
+    bustRing.alt = '';
+    bustRing.setAttribute('aria-hidden', 'true');
+    bustRing.src = ringArt.dataUri;
     bustRing.dataset.combatantId = combatant.id;
     bustRing.dataset.badgeNumber = String(assignment.number);
     bustRing.dataset.badgeColor = assignment.color.id;
@@ -561,13 +600,16 @@ function tokenChrome(
       position: 'absolute',
       left: `${String(cellLeft + ringInset)}px`,
       top: `${String(cellTop + ringInset)}px`,
-      width: `${String(CREATURE_BUST_RING_WIDTH_PX - assignment.stackIndex * 4)}px`,
-      height: `${String(CREATURE_BUST_RING_HEIGHT_PX - assignment.stackIndex * 4)}px`,
-      border: `2px solid ${assignment.color.css}`,
+      width: `${String(CREATURE_BUST_RING_WIDTH_PX)}px`,
+      height: `${String(CREATURE_BUST_RING_HEIGHT_PX)}px`,
     });
     layer.append(bustRing);
 
-    const badge = el('span', 'encounter-creature-badge');
+    const badgeArt = renderCreatureBadgeBitmap(assignment.number, assignment.color.disc, assignment.color.numeralInk);
+    const badge = el('img', 'encounter-creature-badge');
+    badge.alt = '';
+    badge.setAttribute('aria-hidden', 'true');
+    badge.src = badgeArt.dataUri;
     badge.dataset.combatantId = combatant.id;
     badge.dataset.badgeNumber = String(assignment.number);
     badge.dataset.badgeColor = assignment.color.id;
@@ -581,14 +623,7 @@ function tokenChrome(
       top: `${String(cellTop + CREATURE_BADGE_TOP_PX + assignment.stackIndex * CREATURE_BADGE_STACK_PITCH_PX)}px`,
       width: `${String(CREATURE_BADGE_WIDTH_PX)}px`,
       height: `${String(CREATURE_BADGE_HEIGHT_PX)}px`,
-      background: assignment.color.css,
     });
-    const number = renderPixelText(layoutPixelText(String(assignment.number), 1), neutral(0), CHROME_TEXT_SCALE);
-    const numberImage = el('img', 'encounter-creature-badge-number');
-    numberImage.alt = '';
-    numberImage.src = number.dataUri;
-    styled(numberImage, { width: `${String(number.cssWidth)}px`, height: `${String(number.cssHeight)}px` });
-    badge.append(numberImage);
     layer.append(badge);
   }
   return layer;
@@ -603,8 +638,16 @@ function legendSwatch(entry: LegendEntry): HTMLElement {
     case 'tint':
     case 'glyph':
     case 'hp': {
-      const swatch = el('span', 'encounter-legend-swatch');
-      styled(swatch, { background: paletteHex(entry.swatch) });
+      const shape = entry.style === 'plate' ? 'disc'
+        : entry.style === 'plate-dashed' ? 'dashed-disc'
+          : entry.style === 'hp' ? 'hp'
+            : 'square';
+      const rendered = renderChromeSwatchBitmap(entry.swatch, shape);
+      const swatch = el('img', 'encounter-legend-swatch encounter-legend-swatch-bitmap');
+      swatch.alt = '';
+      swatch.setAttribute('aria-hidden', 'true');
+      swatch.src = rendered.dataUri;
+      styled(swatch, { width: `${String(rendered.cssWidth)}px`, height: `${String(rendered.cssHeight)}px` });
       return swatch;
     }
     case 'art': {
@@ -632,30 +675,67 @@ function legendSwatch(entry: LegendEntry): HTMLElement {
 
 type ProjectedWorldObjects = NonNullable<EncounterBoardProjectionShape['worldObjects']>;
 
+export type BoardRailEntry =
+  | {
+      readonly kind: 'object';
+      readonly object: ProjectedWorldObjects[number];
+      readonly labelStyle: typeof OBJECT_LABEL_STYLE;
+      readonly label: string;
+      readonly glyph: typeof OBJECT_GLYPH;
+    }
+  | {
+      readonly kind: 'door';
+      readonly state: 'open' | 'closed';
+      readonly object: ProjectedWorldObjects[number];
+      readonly labelStyle: typeof DOOR_LABEL_STYLE;
+      readonly label: string;
+      readonly glyph: (typeof CELL_GLYPHS)['door-open' | 'door-closed'];
+    };
+
+/** A closed discriminator chooses both the rail wording and its visual frame. */
+export function boardRailEntries(objects: ProjectedWorldObjects): readonly BoardRailEntry[] {
+  return objects.map((object): BoardRailEntry => {
+    const coordinate = `(${String(object.position.column)},${String(object.position.row)})`;
+    if (object.kind !== 'door') {
+      return { kind: 'object', object, labelStyle: OBJECT_LABEL_STYLE, label: `${object.name} ${coordinate}`, glyph: OBJECT_GLYPH };
+    }
+    const state = object.blocking.movement ? 'closed' : 'open';
+    return {
+      kind: 'door',
+      state,
+      object,
+      labelStyle: DOOR_LABEL_STYLE,
+      label: `DOOR ${state.toLocaleUpperCase('en-US')} ${coordinate}`,
+      glyph: CELL_GLYPHS[`door-${state}`],
+    };
+  });
+}
+
 function objectTagRail(objects: ProjectedWorldObjects): HTMLElement {
   const rail = el('div', 'encounter-object-tag-rail');
   rail.dataset.objectTagRail = 'snapshot';
-  for (const object of objects.filter((candidate) => candidate.kind !== 'door')) {
-    const tag = el('span', 'encounter-object-tag');
-    tag.dataset.objectId = object.id;
-    tag.dataset.labelStyle = OBJECT_LABEL_STYLE;
-    tag.dataset.anchorColumn = String(object.position.column);
-    tag.dataset.anchorRow = String(object.position.row);
+  for (const entry of boardRailEntries(objects)) {
+    const tag = el('span', `encounter-board-tag encounter-${entry.kind}-tag`);
+    tag.dataset.objectId = entry.object.id;
+    tag.dataset.entryKind = entry.kind;
+    tag.dataset.labelStyle = entry.labelStyle;
+    tag.dataset.anchorColumn = String(entry.object.position.column);
+    tag.dataset.anchorRow = String(entry.object.position.row);
+    if (entry.kind === 'door') tag.dataset.doorState = entry.state;
     const sigil = renderPixelGlyph(
-      'object', OBJECT_GLYPH.rows, OBJECT_GLYPH.ink, CHROME_TEXT_SCALE, OBJECT_GLYPH.outline,
+      entry.kind, entry.glyph.rows, entry.glyph.ink, CHROME_TEXT_SCALE, entry.glyph.outline,
     );
-    const sigilImage = el('img', 'encounter-object-tag-sigil');
+    const sigilImage = el('img', `encounter-board-tag-sigil encounter-${entry.kind}-tag-sigil`);
     sigilImage.alt = '';
     sigilImage.setAttribute('aria-hidden', 'true');
     sigilImage.src = sigil.dataUri;
     styled(sigilImage, { width: `${String(sigil.cssWidth)}px`, height: `${String(sigil.cssHeight)}px` });
-    const labelText = `${object.name} (${String(object.position.column)},${String(object.position.row)})`;
-    const label = renderPixelText(layoutPixelText(labelText, 2), TEXT_INK, 1);
-    const labelImage = el('img', 'encounter-object-tag-text');
+    const label = renderPixelText(layoutPixelText(entry.label, 2), TEXT_INK, CHROME_TEXT_SCALE);
+    const labelImage = el('img', `encounter-board-tag-text encounter-${entry.kind}-tag-text`);
     labelImage.alt = '';
     labelImage.setAttribute('aria-hidden', 'true');
     labelImage.src = label.dataUri;
-    labelImage.dataset.fullLabel = labelText;
+    labelImage.dataset.fullLabel = entry.label;
     styled(labelImage, { width: `${String(label.cssWidth)}px`, height: `${String(label.cssHeight)}px` });
     tag.append(sigilImage, labelImage);
     rail.append(tag);
@@ -692,7 +772,7 @@ function rosterBox(
   mode: BoardGlyphMode,
 ): HTMLElement {
   const box = el('section', 'encounter-roster-box');
-  box.dataset.creatureRoster = 'number-colour-name-side-hp';
+  box.dataset.creatureRoster = 'badge-name-cell-side-hp';
   box.append(textImage('ROSTER', TEXT_INK, 'encounter-roster-title'));
   const assignments = assignCreatureBadges(combatants);
   combatants.forEach((combatant, index) => {
@@ -710,19 +790,26 @@ function rosterBox(
     row.dataset.labelStyle = CREATURE_LABEL_STYLE;
     row.dataset.side = combatant.kind === 'player_character' ? 'party' : 'foe';
     row.dataset.hpBand = band;
-    const number = pixelImage(layoutPixelText(String(assignment.number), 1), neutral(0), 'encounter-roster-number');
-    const swatch = el('span', 'encounter-roster-swatch');
-    swatch.dataset.badgeColor = assignment.color.id;
-    styled(swatch, { background: assignment.color.css });
+    const badgeArt = renderCreatureBadgeBitmap(assignment.number, assignment.color.disc, assignment.color.numeralInk);
+    const badge = el('img', 'encounter-roster-badge');
+    badge.alt = '';
+    badge.setAttribute('aria-hidden', 'true');
+    badge.src = badgeArt.dataUri;
+    badge.dataset.badgeNumber = String(assignment.number);
+    badge.dataset.badgeColor = assignment.color.id;
+    styled(badge, { width: `${String(badgeArt.cssWidth)}px`, height: `${String(badgeArt.cssHeight)}px` });
     const name = pixelImage(layoutRosterName(combatant.name), TEXT_INK, 'encounter-roster-name');
     name.dataset.fullName = combatant.name;
+    const coordinateText = `(${String(combatant.position.column)},${String(combatant.position.row)})`;
+    const coordinate = pixelImage(layoutPixelText(coordinateText, 1), COORDINATE_INK, 'encounter-roster-coordinate');
+    coordinate.dataset.coordinate = coordinateText;
     const side = pixelImage(
       layoutPixelText(combatant.kind === 'player_character' ? 'PARTY' : 'FOE', 1),
       TEXT_INK,
       'encounter-roster-side',
     );
     const hp = pixelImage(layoutPixelText(hpBandLabel(band), 1), HP_BAND_INK[band], 'encounter-roster-hp');
-    row.append(number, swatch, name, side, hp);
+    row.append(badge, name, coordinate, side, hp);
     if (combatant.hiddenFromPlayers === true) {
       const hidden = pixelImage(layoutPixelText(HIDDEN_GLYPH_LABEL, 1), HIDDEN_TAG_INK, 'encounter-roster-hidden');
       hidden.dataset.tag = HIDDEN_GLYPH_LABEL;
@@ -760,7 +847,7 @@ function legend(
     box.append(item);
   }
   box.append(rosterBox(combatants, mode));
-  if (snapshotMode && objects.some((object) => object.kind !== 'door')) box.append(objectTagRail(objects));
+  if (snapshotMode && objects.length > 0) box.append(objectTagRail(objects));
   return box;
 }
 

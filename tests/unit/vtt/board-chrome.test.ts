@@ -3,8 +3,22 @@ import { readFileSync } from '../../helpers/test-filesystem';
 import { createEncounter, reduceEncounter, type EncounterState } from '../../../src/combat/encounter';
 import { combatantId, worldObjectId } from '../../../src/combat/values';
 import { projectDmView } from '../../../src/combat/visibility';
-import { normalizeLabelText, renderPixelText } from '../../../src/assets/pixel-font';
-import { neutral } from '../../../src/assets/palette';
+import { layoutPixelText, normalizeLabelText, renderPixelText } from '../../../src/assets/pixel-font';
+import {
+  BOARD_CHROME_ART_SCALE,
+  renderCreatureBadgeBitmap,
+} from '../../../src/assets/board-chrome-art';
+import {
+  NEUTRAL_STEPS,
+  PALETTE_RAMPS,
+  RAMP_STEPS,
+  neutral,
+  paletteHex,
+  paletteHsl,
+  paletteRgb,
+  ramp,
+  type PaletteColorRef,
+} from '../../../src/assets/palette';
 import {
   BOARD_BORDER_PX,
   CHROME_TILE_PX,
@@ -23,10 +37,13 @@ import {
   CREATURE_BADGE_STACK_PITCH_PX,
   CREATURE_BADGE_TOP_PX,
   CREATURE_BADGE_WIDTH_PX,
+  BADGE_SIDE_HUES,
+  CREATURE_BADGE_HUE_EXCLUSION_DEGREES,
   CREATURE_LABEL_STYLE,
+  DOOR_LABEL_STYLE,
   OBJECT_LABEL_STYLE,
   assignCreatureBadges,
-  badgeColorDistance,
+  boardRailEntries,
   boardChromeDimensions,
   hpBandOf,
   layoutRosterName,
@@ -71,15 +88,121 @@ describe('D533 creature badge and roster types', () => {
     expect(assignCreatureBadges(roster)).toEqual(badges);
   });
 
-  it('keeps every closed-palette pair numerically distinguishable', () => {
+  const DICHROMACY_MATRICES = {
+    protanopia: [
+      [0.152286, 1.052583, -0.204868],
+      [0.114503, 0.786281, 0.099216],
+      [-0.003882, -0.048116, 1.051998],
+    ],
+    deuteranopia: [
+      [0.367322, 0.860646, -0.227968],
+      [0.280085, 0.672501, 0.047413],
+      [-0.011820, 0.042940, 0.968881],
+    ],
+  } as const;
+
+  function linearChannel(channel: number): number {
+    const encoded = channel / 255;
+    return encoded <= 0.04045 ? encoded / 12.92 : ((encoded + 0.055) / 1.055) ** 2.4;
+  }
+
+  function encodedChannel(channel: number): number {
+    const linear = Math.min(1, Math.max(0, channel));
+    return 255 * (linear <= 0.0031308 ? 12.92 * linear : 1.055 * linear ** (1 / 2.4) - 0.055);
+  }
+
+  function simulatedRgb(
+    color: PaletteColorRef,
+    matrix: (typeof DICHROMACY_MATRICES)[keyof typeof DICHROMACY_MATRICES],
+  ): readonly [number, number, number] {
+    const rgb = paletteRgb(color);
+    const source = [linearChannel(rgb.red), linearChannel(rgb.green), linearChannel(rgb.blue)] as const;
+    const channel = (row: readonly [number, number, number]): number => encodedChannel(
+      row[0] * source[0] + row[1] * source[1] + row[2] * source[2],
+    );
+    return [channel(matrix[0]), channel(matrix[1]), channel(matrix[2])];
+  }
+
+  function cieLab(rgb: readonly [number, number, number]): readonly [number, number, number] {
+    const linear = rgb.map(linearChannel);
+    const x = (0.4124564 * linear[0]! + 0.3575761 * linear[1]! + 0.1804375 * linear[2]!) / 0.95047;
+    const y = 0.2126729 * linear[0]! + 0.7151522 * linear[1]! + 0.0721750 * linear[2]!;
+    const z = (0.0193339 * linear[0]! + 0.1191920 * linear[1]! + 0.9503041 * linear[2]!) / 1.08883;
+    const transform = (value: number): number => value > 216 / 24_389
+      ? Math.cbrt(value)
+      : ((24_389 / 27) * value + 16) / 116;
+    return [116 * transform(y) - 16, 500 * (transform(x) - transform(y)), 200 * (transform(y) - transform(z))];
+  }
+
+  function deltaE(left: readonly [number, number, number], right: readonly [number, number, number]): number {
+    return Math.hypot(left[0] - right[0], left[1] - right[1], left[2] - right[2]);
+  }
+
+  function relativeLuminance(color: PaletteColorRef): number {
+    const rgb = paletteRgb(color);
+    return 0.2126 * linearChannel(rgb.red) + 0.7152 * linearChannel(rgb.green) + 0.0722 * linearChannel(rgb.blue);
+  }
+
+  function contrastRatio(left: PaletteColorRef, right: PaletteColorRef): number {
+    const luminances = [relativeLuminance(left), relativeLuminance(right)].sort((a, b) => b - a);
+    return (luminances[0]! + 0.05) / (luminances[1]! + 0.05);
+  }
+
+  function hueDistance(left: number, right: number): number {
+    const distance = Math.abs(left - right);
+    return Math.min(distance, 360 - distance);
+  }
+
+  it('keeps the closed palette outside both side-hue bands and pairwise distinct under standard dichromacy matrices', () => {
     expect(CREATURE_BADGE_COLORS).toHaveLength(12);
+    expect(new Set(CREATURE_BADGE_COLORS.map((color) => paletteHex(color.disc))).size).toBe(CREATURE_BADGE_COLORS.length);
+    for (const color of CREATURE_BADGE_COLORS) {
+      const sourceRamp: string = color.disc.ramp;
+      expect(['cloth-warm', 'cloth-cool'].includes(sourceRamp), color.id).toBe(false);
+      const hsl = paletteHsl(color.disc);
+      if (hsl.saturation > 15) {
+        for (const sideHue of BADGE_SIDE_HUES) {
+          expect(hueDistance(hsl.hue, sideHue), `${color.id} against side hue ${String(sideHue)}`)
+            .toBeGreaterThanOrEqual(CREATURE_BADGE_HUE_EXCLUSION_DEGREES);
+        }
+      }
+    }
     for (let left = 0; left < CREATURE_BADGE_COLORS.length; left += 1) {
       for (let right = left + 1; right < CREATURE_BADGE_COLORS.length; right += 1) {
-        expect(
-          badgeColorDistance(CREATURE_BADGE_COLORS[left]!, CREATURE_BADGE_COLORS[right]!),
-          `${CREATURE_BADGE_COLORS[left]!.id}/${CREATURE_BADGE_COLORS[right]!.id}`,
-        ).toBeGreaterThanOrEqual(1 / 6);
+        for (const [simulation, matrix] of Object.entries(DICHROMACY_MATRICES)) {
+          const first = cieLab(simulatedRgb(CREATURE_BADGE_COLORS[left]!.disc, matrix));
+          const second = cieLab(simulatedRgb(CREATURE_BADGE_COLORS[right]!.disc, matrix));
+          expect(deltaE(first, second), `${simulation}: ${CREATURE_BADGE_COLORS[left]!.id}/${CREATURE_BADGE_COLORS[right]!.id}`)
+            .toBeGreaterThanOrEqual(10);
+        }
       }
+    }
+  });
+
+  it('roster_numeral_low_contrast: gives every badge numeral at least 4.5:1 contrast against its disc', () => {
+    for (const color of CREATURE_BADGE_COLORS) {
+      expect(contrastRatio(color.disc, color.numeralInk), color.id).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it('contains every 1..12 numeral bitmap inside the opaque badge with at least 2 CSS px clearance', () => {
+    expect(BOARD_CHROME_ART_SCALE).toBe(2);
+    for (let number = 1; number <= CREATURE_BADGE_COLORS.length; number += 1) {
+      const color = CREATURE_BADGE_COLORS[number - 1]!;
+      const art = renderCreatureBadgeBitmap(number, color.disc, color.numeralInk);
+      expect(art.cssWidth).toBe(CREATURE_BADGE_WIDTH_PX);
+      expect(art.cssHeight).toBe(CREATURE_BADGE_HEIGHT_PX);
+      art.numeralRows.forEach((row, y) => Array.from(row).forEach((pixel, x) => {
+        if (pixel !== '#') return;
+        const badgeX = art.numeralOrigin.x + x;
+        const badgeY = art.numeralOrigin.y + y;
+        for (const [dx, dy] of [[0, 0], [-1, 0], [1, 0], [0, -1], [0, 1]] as const) {
+          expect(
+            art.opaqueRows[badgeY + dy]?.[badgeX + dx],
+            `badge ${String(number)} numeral pixel ${String(x)},${String(y)} clearance`,
+          ).toBe('#');
+        }
+      }));
     }
   });
 
@@ -287,6 +410,11 @@ describe('renderBoard: DM board with chrome, player board without', () => {
       expect(row?.getAttribute('data-badge-color')).toBe(badge?.getAttribute('data-badge-color'));
       expect(row?.getAttribute('data-full-name')).toBe(combatant.name);
       expect(row?.getAttribute('data-label-style')).toBe(CREATURE_LABEL_STYLE);
+      const tokenBadge = badge as StyledElement | undefined;
+      const rosterBadge = row?.querySelector('.encounter-roster-badge') as StyledElement | null;
+      expect(rosterBadge?.src, `${combatant.name} roster badge`).toBe(tokenBadge?.src);
+      const coordinate = row?.querySelector('.encounter-roster-coordinate');
+      expect(coordinate?.getAttribute('data-coordinate')).toBe(`(${String(combatant.position.column)},${String(combatant.position.row)})`);
       const name = row?.querySelector('.encounter-roster-name') as StyledElement | null;
       const expectedName = renderPixelText(layoutRosterName(combatant.name), neutral(8), 2);
       expect(name?.src, combatant.name).toBe(expectedName.dataUri);
@@ -318,9 +446,9 @@ describe('renderBoard: DM board with chrome, player board without', () => {
     expect(dm.querySelectorAll('.encounter-hidden-glyph')).toHaveLength(0);
   });
 
-  it('keeps eight non-door objects in an unclipped growing rail, excludes doors, and stamps the crate sigil in cells', () => {
-    const styles: readonly BoardLabelStyle[] = [CREATURE_LABEL_STYLE, OBJECT_LABEL_STYLE];
-    expect(new Set(styles).size).toBe(2);
+  it('keeps objects and doors in an unclipped typed rail with distinct frames, coordinates, and matching sigils', () => {
+    const styles: readonly BoardLabelStyle[] = [CREATURE_LABEL_STYLE, OBJECT_LABEL_STYLE, DOOR_LABEL_STYLE];
+    expect(new Set(styles).size).toBe(3);
     const objects = Array.from({ length: 8 }, (_, index) => ({
       id: worldObjectId(`world-object:crate-${String(index)}`),
       name: `Crate ${String(index + 1)}`,
@@ -335,7 +463,19 @@ describe('renderBoard: DM board with chrome, player board without', () => {
       position: { column: 9, row: 1 }, cells: [{ column: 9, row: 1 }],
       blocking: { movement: true, lineOfSight: true, cover: 'total' as const }, lightClass: 'none' as const,
     };
-    const objectProjection = { ...projection, worldObjects: [...objects, door] };
+    const openDoor = {
+      ...door,
+      id: worldObjectId('world-object:rail-open-door'),
+      name: 'Open Rail Door',
+      position: { column: 9, row: 2 }, cells: [{ column: 9, row: 2 }],
+      blocking: { movement: false, lineOfSight: false, cover: 'none' as const },
+    };
+    const objectProjection = { ...projection, worldObjects: [...objects, door, openDoor] };
+    expect(boardRailEntries(objectProjection.worldObjects).map((entry) => [entry.kind, entry.labelStyle, entry.label])).toEqual([
+      ...objects.map((object) => ['object', OBJECT_LABEL_STYLE, `${object.name} (${String(object.position.column)},1)`]),
+      ['door', DOOR_LABEL_STYLE, 'DOOR CLOSED (9,1)'],
+      ['door', DOOR_LABEL_STYLE, 'DOOR OPEN (9,2)'],
+    ]);
     const liveDm = interactiveElement(renderBoard(objectProjection, new Set(), null, provenance));
     const liveObjectLabel = liveDm.querySelector('.encounter-world-object-label');
     expect(liveObjectLabel?.getAttribute('data-label-style')).toBe(OBJECT_LABEL_STYLE);
@@ -347,17 +487,37 @@ describe('renderBoard: DM board with chrome, player board without', () => {
     const legendSigil = snapshotDm.querySelector('[data-legend-key="object"]')
       ?.querySelector('.encounter-legend-swatch-mark') as StyledElement | null;
     const objectText = objectTag?.querySelector('.encounter-object-tag-text');
+    const doorTags = snapshotDm.querySelectorAll('.encounter-door-tag');
     expect(snapshotDm.querySelector('.encounter-world-object-label')).toBeNull();
     expect(objectTag?.getAttribute('data-label-style')).toBe(OBJECT_LABEL_STYLE);
     expect(objectTag?.getAttribute('data-anchor-column')).toBe('0');
     expect(objectTag?.getAttribute('data-anchor-row')).toBe('1');
     expect(objectText?.getAttribute('data-full-label')).toBe('Crate 1 (0,1)');
     expect(objectSigil?.src).toBe(legendSigil?.src);
+    const expectedObjectText = renderPixelText(layoutPixelText('Crate 1 (0,1)', 2), neutral(8), 2);
+    expect((objectText as StyledElement | null)?.src).toBe(expectedObjectText.dataUri);
+    expect((objectText as StyledElement | null)?.getAttribute('style')).toBe(`width:${String(expectedObjectText.cssWidth)}px;height:${String(expectedObjectText.cssHeight)}px`);
     expect(objectTag?.parentElement?.className).toBe('encounter-object-tag-rail');
     expect(creatureRow?.getAttribute('data-label-style')).toBe(CREATURE_LABEL_STYLE);
     expect(objectTag?.getAttribute('data-label-style')).not.toBe(creatureRow?.getAttribute('data-label-style'));
     expect(snapshotDm.querySelectorAll('.encounter-object-tag')).toHaveLength(8);
-    expect(snapshotDm.querySelectorAll('.encounter-object-tag').some((tag) => tag.getAttribute('data-object-id') === door.id)).toBe(false);
+    expect(doorTags).toHaveLength(2);
+    expect(doorTags.map((tag) => [
+      tag.getAttribute('data-label-style'),
+      tag.getAttribute('data-door-state'),
+      tag.querySelector('.encounter-door-tag-text')?.getAttribute('data-full-label'),
+    ])).toEqual([
+      [DOOR_LABEL_STYLE, 'closed', 'DOOR CLOSED (9,1)'],
+      [DOOR_LABEL_STYLE, 'open', 'DOOR OPEN (9,2)'],
+    ]);
+    expect(doorTags.every((tag) => tag.getAttribute('data-label-style') !== OBJECT_LABEL_STYLE)).toBe(true);
+    for (const tag of doorTags) {
+      const key = tag.getAttribute('data-door-state') === 'open' ? 'door-open' : 'door-closed';
+      const railSigil = tag.querySelector('.encounter-door-tag-sigil') as StyledElement | null;
+      const matchingLegend = snapshotDm.querySelector(`[data-legend-key="${key}"]`)
+        ?.querySelector('.encounter-legend-swatch-mark') as StyledElement | null;
+      expect(railSigil?.src, key).toBe(matchingLegend?.src);
+    }
     expect(snapshotDm.querySelectorAll('.encounter-world-object-sigil')).toHaveLength(8);
     const expectedLegendHeight = legendHeightPx({ combatants: projection.combatants, objects: objectProjection.worldObjects });
     expect(snapshotDm.querySelector('.encounter-legend')?.getAttribute('style')).toContain(`min-height:${String(expectedLegendHeight)}px`);
@@ -436,6 +596,11 @@ describe('renderBoard: DM board with chrome, player board without', () => {
         if (combatant === undefined) throw new Error('Roster row exceeds its source roster.');
         expect(row.getAttribute('data-full-name')).toBe(combatant.name);
         expect(row.getAttribute('data-roster-order')).toBe(String(index + 1));
+        expect(row.querySelector('.encounter-roster-coordinate')?.getAttribute('data-coordinate'))
+          .toBe(`(${String(combatant.position.column)},${String(combatant.position.row)})`);
+        const rosterBadge = row.querySelector('.encounter-roster-badge') as StyledElement | null;
+        const tokenBadge = badges[index] as StyledElement | undefined;
+        expect(rosterBadge?.src).toBe(tokenBadge?.src);
         const image = row.querySelector('.encounter-roster-name') as StyledElement | null;
         const expected = renderPixelText(layoutRosterName(combatant.name), neutral(8), 2);
         expect(image?.src, `sample ${String(sample)} ${combatant.name}`).toBe(expected.dataUri);
@@ -508,6 +673,47 @@ describe('renderBoard: DM board with chrome, player board without', () => {
       .map((match) => Number(match[1]));
     expect(everyDeclaredScale.filter((value) => !Number.isInteger(value)), everyDeclaredScale.join(','))
       .toEqual([]);
+  });
+
+  it('keeps every declared rendered chrome pixel in the generated closed palette with no CSS-rounded chrome', () => {
+    const closedPalette = new Set([
+      ...PALETTE_RAMPS.flatMap((name) => RAMP_STEPS.map((step) => paletteHex(ramp(name, step)))),
+      ...NEUTRAL_STEPS.map((step) => paletteHex(neutral(step))),
+    ]);
+    const boardStyles = readFileSync(new URL('../../../src/vtt/styles.css', import.meta.url), 'utf8');
+    const chromeStart = boardStyles.indexOf('D516 — classic board');
+    const chromeEnd = boardStyles.indexOf('/* --- DM chrome:', chromeStart);
+    expect(chromeStart).toBeGreaterThanOrEqual(0);
+    expect(chromeEnd).toBeGreaterThan(chromeStart);
+    const chromeCss = boardStyles.slice(chromeStart, chromeEnd);
+    expect(chromeCss).not.toContain('border-radius');
+    for (const color of chromeCss.match(/#[0-9a-f]{6}/gu) ?? []) {
+      expect(closedPalette.has(color), `chrome CSS ${color}`).toBe(true);
+    }
+
+    const board = interactiveElement(renderBoard(projection, new Set(), null, provenance, 'full', true));
+    const chromeRoots = ['.encounter-coordinate-labels', '.encounter-token-chrome', '.encounter-legend']
+      .map((selector) => board.querySelector(selector))
+      .filter((root): root is InteractiveTestElement => root !== null);
+    expect(chromeRoots).toHaveLength(3);
+    const visit = (node: InteractiveTestElement): void => {
+      const styledNode = node as StyledElement;
+      const source = styledNode.src;
+      if (source?.startsWith('data:image/svg+xml;charset=utf-8,') === true) {
+        const svg = decodeURIComponent(source.slice('data:image/svg+xml;charset=utf-8,'.length));
+        expect(svg).toContain('shape-rendering="crispEdges"');
+        for (const color of svg.match(/#[0-9a-f]{6}/gu) ?? []) {
+          expect(closedPalette.has(color), `${node.className} SVG ${color}`).toBe(true);
+        }
+      } else if (source !== undefined && source !== '') {
+        expect(source, node.className).toMatch(/^data:image\/png;base64,/u);
+      }
+      for (const color of (node.getAttribute('style')?.match(/#[0-9a-f]{6}/gu) ?? [])) {
+        expect(closedPalette.has(color), `${node.className} inline ${color}`).toBe(true);
+      }
+      for (const child of node.children) visit(child);
+    };
+    for (const root of chromeRoots) visit(root);
   });
 
   it("D525: 'none' and 'light' keep the D516 rows and swap only the light rows; the glyph modes add the room default", () => {

@@ -63,9 +63,12 @@ test('DM loads the bundled D365 dungeon and RPC-authored party into room 1', asy
     return {
       badgeNumbers: badges.map((badge) => badge.dataset.badgeNumber ?? ''),
       badgeColors: badges.map((badge) => badge.dataset.badgeColor ?? ''),
+      badgeSources: badges.map((badge) => badge instanceof HTMLImageElement ? badge.src : ''),
       rosterNumbers: roster.map((row) => row.dataset.badgeNumber ?? ''),
       rosterNames: names,
       rosterOrders: roster.map((row) => row.dataset.rosterOrder ?? ''),
+      rosterCoordinates: roster.map((row) => row.querySelector<HTMLElement>('.encounter-roster-coordinate')?.dataset.coordinate ?? ''),
+      rosterBadgeSources: roster.map((row) => row.querySelector<HTMLImageElement>('.encounter-roster-badge')?.src ?? ''),
       rosterNameBitmapWidths: roster.map((row) => {
         const image = row.querySelector<HTMLImageElement>('.encounter-roster-name');
         return image === null ? null : [image.width, image.naturalWidth];
@@ -76,12 +79,14 @@ test('DM loads the bundled D365 dungeon and RPC-authored party into room 1', asy
   });
   expect(rosterContract.badgeNumbers).toEqual(['1', '2', '3', '4', '5', '6', '7', '8', '9']);
   expect(rosterContract.badgeNumbers).toEqual(rosterContract.rosterNumbers);
+  expect(rosterContract.badgeSources).toEqual(rosterContract.rosterBadgeSources);
   expect(rosterContract.rosterOrders).toEqual(rosterContract.rosterNumbers);
   expect(new Set(rosterContract.badgeColors).size).toBe(9);
   expect(rosterContract.rosterNames).toEqual([
     'Mirel Ash', 'Orin Reed', 'Brann Vale', 'Sera Dawn', 'Tamsin Quill',
     'Goblin Warrior', 'Goblin Warrior', 'Wolf', 'Wolf',
   ]);
+  expect(rosterContract.rosterCoordinates.every((coordinate) => /^\([0-9]+,[0-9]+\)$/u.test(coordinate))).toBe(true);
   for (const dimensions of rosterContract.rosterNameBitmapWidths) {
     expect(dimensions).not.toBeNull();
     expect(dimensions?.[0]).toBe(dimensions?.[1]);

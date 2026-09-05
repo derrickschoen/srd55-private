@@ -61,10 +61,10 @@ test('captures the full production DM board deterministically through durable sa
   const result = await runBrowserCheck(outputDirectory);
   expect(result.benchmark.captures).toBe(2);
   // D533: the fixed board grid is followed by a deliberately growing legend.
-  // seed-6203002 has 8 one-line roster rows and 7 non-door objects:
-  // 4 border + 48 gutters + 13·64 cells + 8 gap + (120 + 22 + 8·24 + 22 + 7·30).
-  // seed-6203004 has 7 one-line roster rows and 5 non-door objects by the same formula.
-  expect(result.dimensions).toEqual(['1140x1458', '1588x1502']);
+  // seed-6203002 has 8 one-line roster rows and 7 2× rail entries:
+  // 4 border + 48 gutters + 13·64 cells + 8 gap + (120 + 22 + 8·24 + 22 + 7·40).
+  // seed-6203004 has 7 one-line roster rows and 5 rail entries by the same formula.
+  expect(result.dimensions).toEqual(['1140x1528', '1588x1552']);
   expect(result.staleRejected).toBe(true);
   expect(result.identityRejected).toBe(true);
   expect(result.movedDigestChanged).toBe(true);

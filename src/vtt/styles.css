@@ -674,15 +674,15 @@
 .encounter-board {
   --encounter-tile-size: 64px;
   --chrome-gutter: 24px;
-  border-color: #3a4152;
-  background: #14171f;
+  border-color: #393842;
+  background: #111113;
 }
 
 /* Tiles carry their own mortar and wall rims; a 1 px cell border would scale
    a 64 px tile into 62 px and break every wall seam. */
 .encounter-cell {
   border: 0;
-  background: #14171f;
+  background: #111113;
 }
 
 .encounter-art-shade { z-index: 1; }
@@ -835,10 +835,13 @@
 .encounter-legend-text,
 .encounter-life-glyph,
 .encounter-hidden-ring,
+.encounter-creature-bust-ring,
+.encounter-creature-badge,
 .encounter-creature-badge-number,
 .encounter-roster-title,
-.encounter-roster-number,
+.encounter-roster-badge,
 .encounter-roster-name,
+.encounter-roster-coordinate,
 .encounter-roster-side,
 .encounter-roster-hp,
 .encounter-roster-hidden {
@@ -850,31 +853,27 @@
 .encounter-hp-bar {
   display: block;
   box-sizing: content-box;
-  border: 1px solid #0d0f14;
-  background: #262a35;
+  border: 1px solid #111113;
+  background: #2a2c30;
 }
 
 .encounter-hp-bar[data-hp-band='unknown'] {
   border-style: dashed;
-  border-color: #6b7386;
+  border-color: #6b7485;
 }
 
 .encounter-hp-fill { display: block; }
 
 .encounter-creature-badge {
-  display: flex;
-  box-sizing: border-box;
-  align-items: center;
-  justify-content: center;
-  border: 2px solid #0d0f14;
-  border-radius: 50%;
-  box-shadow: 0 0 0 1px #eef0f5;
+  display: block;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
 }
 
 .encounter-creature-bust-ring {
   display: block;
-  box-sizing: border-box;
-  border-radius: 50%;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
 }
 
 .encounter-legend {
@@ -886,8 +885,8 @@
   gap: 6px 14px;
   overflow: visible;
   padding: 6px 8px;
-  border: 2px solid #3a4152;
-  background: #1b1f29;
+  border: 2px solid #393842;
+  background: #201f24;
 }
 
 .encounter-legend-item {
@@ -898,27 +897,16 @@
 }
 
 .encounter-legend-swatch {
-  display: inline-block;
-  box-sizing: border-box;
+  display: block;
+  flex: 0 0 auto;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+.encounter-legend-art .encounter-legend-swatch {
   width: 14px;
   height: 14px;
-  border: 1px solid #0d0f14;
 }
-
-.encounter-legend-plate .encounter-legend-swatch { border-radius: 50%; }
-
-.encounter-legend-plate-dashed .encounter-legend-swatch {
-  border: 2px dashed #eef0f5;
-  border-radius: 50%;
-  background: transparent !important;
-}
-
-.encounter-legend-hp .encounter-legend-swatch {
-  width: 20px;
-  height: 6px;
-}
-
-.encounter-legend-glyph .encounter-legend-swatch { border-radius: 2px; }
 
 .encounter-object-tag-rail {
   display: flex;
@@ -929,18 +917,24 @@
   overflow: visible;
 }
 
-.encounter-object-tag {
+.encounter-board-tag {
   display: inline-flex;
   flex: 0 0 auto;
   gap: 4px;
   align-items: center;
   padding: 2px 3px;
-  border: 1px solid #9a7446;
-  background: #12151c;
+  background: #111113;
 }
 
-.encounter-object-tag-sigil,
-.encounter-object-tag-text {
+.encounter-object-tag { border: 1px solid #8e7148; }
+
+.encounter-door-tag {
+  border: 2px solid #b0b2b9;
+  background: #2a2c30;
+}
+
+.encounter-board-tag-sigil,
+.encounter-board-tag-text {
   display: block;
   flex: 0 0 auto;
   image-rendering: pixelated;
@@ -953,28 +947,24 @@
   flex-direction: column;
   gap: 4px;
   padding-top: 4px;
-  border-top: 2px solid #3a4152;
+  border-top: 2px solid #393842;
 }
 
 .encounter-roster-entry {
   display: grid;
-  grid-template-columns: 26px 18px max-content max-content max-content max-content;
+  grid-template-columns: 26px max-content max-content max-content max-content max-content;
   gap: 8px;
   align-items: center;
   min-height: 20px;
   padding: 2px 3px;
-  border: 1px solid #3a4152;
-  background: #0d0f14;
+  border: 1px solid #393842;
+  background: #111113;
 }
 
-.encounter-roster-swatch {
+.encounter-roster-badge {
   display: block;
-  box-sizing: border-box;
-  width: 18px;
-  height: 18px;
-  border: 2px solid #0d0f14;
-  outline: 1px solid #eef0f5;
-  border-radius: 50%;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
 }
 
 /* --- DM chrome: slate ground, 2 px pixel bevels, uppercase mono headings -- */

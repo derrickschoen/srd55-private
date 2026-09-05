@@ -136,7 +136,7 @@ describe('D519 screenshot comprehension fact sheet', () => {
       {
         displayName: 'screenshot-hero',
         badgeNumber: 1,
-        badgeColor: 'scarlet',
+        badgeColor: 'deep-forest',
         cell: { column: 1, row: 1 },
         side: 'party',
         hpBand: 'uninjured',
@@ -146,7 +146,7 @@ describe('D519 screenshot comprehension fact sheet', () => {
       {
         displayName: 'screenshot-foe',
         badgeNumber: 2,
-        badgeColor: 'orange',
+        badgeColor: 'ivory',
         cell: { column: 2, row: 2 },
         side: 'foe',
         hpBand: 'near_death',
@@ -295,10 +295,12 @@ describe('D524 general screenshot primer', () => {
     expect(primerPrompt).toContain('Cool-blue base rings identify party creatures');
     expect(primerPrompt).toContain('warm-red base rings identify foes');
     expect(primerPrompt).toContain('Each creature token carries a numbered coloured badge');
-    expect(primerPrompt).toContain('roster box under the board lists the full name, side and HP band');
+    expect(primerPrompt).toContain("roster box under the board repeats that badge and lists the creature's full name, cell, side and HP band");
     expect(primerPrompt).toContain('A creature stands in the cell that holds its badge');
     expect(primerPrompt).toContain('An OBJECT-sigil tag in the legend rail names an object');
     expect(primerPrompt).toContain('coordinate printed on that tag is the cell where the object stands');
+    expect(primerPrompt).toContain("roster box under the board repeats that badge and lists the creature's full name, cell, side and HP band");
+    expect(primerPrompt).toContain("Door rail entries use the door glyph and print DOOR OPEN or DOOR CLOSED with the door's coordinate");
     expect(primerPrompt).toContain('top-left cell, whose column and row are both zero');
     expect(primerPrompt).toContain('columns increase rightward and rows increase downward');
     expect(primerPrompt).toContain('share an edge or a corner, so diagonals count');
@@ -327,7 +329,7 @@ describe('D524 general screenshot primer', () => {
   });
 
   it('D525: appends the light sentence per mode plus one sentence per glyph family under full, chosen by --board-glyphs, defaulting to none', () => {
-    expect(PRIMER_VERSION).toBe('d533-general-board-primer-v6');
+    expect(PRIMER_VERSION).toBe('d537-general-board-primer-v7');
     expect(BOARD_GLYPH_PRIMER.none).toEqual([LIGHT_PRIMER.tint]);
     expect(BOARD_GLYPH_PRIMER.light).toEqual([LIGHT_PRIMER.glyph]);
     expect(BOARD_GLYPH_PRIMER.full).toEqual([
