@@ -168,7 +168,7 @@ describe('D373 detection UI projections', () => {
         [setup.reactor.id]: REFERENCE_ENCOUNTER_ART.combatantTokens['combatant:training-brute']!,
       },
     }).find((cell) => cell.key === '0,1');
-    expect(dmCell?.layers.map((layer) => layer.role)).not.toContain('fog');
+    expect(dmCell?.layers).not.toContainEqual(expect.objectContaining({ role: 'fog' }));
     expect(dmCell?.token).toEqual(expect.objectContaining({
       id: setup.reactor.id,
       hiddenFromPlayers: true,

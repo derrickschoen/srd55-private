@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { doorSetFor, doorSideAt, floorSetFor, wallSetFor } from '../assets/art-sets';
 import { assetIdSchema, type AssetId } from '../assets/ids';
 import { resolveStarterArt } from '../assets/starter-art-resolver';
 
@@ -71,6 +72,24 @@ export const encounterArtPackageSchema = z.strictObject({
       context.addIssue({ code: 'custom', message: error instanceof Error ? error.message : String(error) });
     }
   });
+  // ART-SEAM (D516): the room's floor/wall/door ids must head a registered family, and the door
+  // must sit in a wall band (a corner has no band to orient it).
+  for (const check of [
+    () => floorSetFor(value.room.floor),
+    () => wallSetFor(value.room.wall),
+    () => doorSetFor(value.room.door),
+    () => {
+      if (doorSideAt(value.room.doorCell.column, value.room.doorCell.row, value.room) === null) {
+        throw new Error(`Door cell ${String(value.room.doorCell.column)},${String(value.room.doorCell.row)} is not in a wall band (corners and interior cells cannot hold a door).`);
+      }
+    },
+  ]) {
+    try {
+      check();
+    } catch (error: unknown) {
+      context.addIssue({ code: 'custom', path: ['room'], message: error instanceof Error ? error.message : String(error) });
+    }
+  }
 });
 
 export type EncounterArtPackage = z.infer<typeof encounterArtPackageSchema>;

@@ -1,6 +1,13 @@
 import { canonicalJson } from '../commands/canonical-json';
-import type { AssetId } from '../assets/ids';
-import { starterArtDataUri } from '../assets/starter-art-resolver';
+import { starterArtCssUrl, starterArtDataUri } from '../assets/starter-art-resolver';
+// ART-SEAM (D516): overlay art families and the DM board chrome.
+import { OVERLAY_ASSETS } from '../assets/art-sets';
+import {
+  CHROME_TILE_PX,
+  renderBoardChrome,
+  stackLabelOffsets,
+  type NameplateLayout,
+} from './board-chrome';
 import './styles.css';
 import { HumanController, type ControllerRequest } from '../combat/controllers';
 import type { EncounterCommand } from '../combat/events';
@@ -8,6 +15,7 @@ import {
   MOVEMENT_PATH_DANGER_KINDS,
   REACTION_KINDS,
   type EncounterPhase,
+  type MovementPathDangerKind,
   type PendingDecision,
 } from '../combat/encounter';
 import { HIDDEN_ROLL_CATEGORIES, type HiddenRollCategory } from '../combat/roll-visibility';
@@ -21,9 +29,11 @@ import {
 import {
   encounterBoardRenderModel,
   encounterBoardTokenRenderModels,
+  type EncounterBoardMechanicalLayer,
   type EncounterBoardProjectionShape,
   type EncounterBoardTokenModel,
 } from './encounter-board';
+import { encounterArtForBoard } from './encounter-art-selection';
 import type {
   DmBoardProjection,
   DmMovementPathPreview,
@@ -36,7 +46,7 @@ import {
   isHostWindowMessage,
   playerDecisionMessage,
 } from './local-window-channel';
-import { IndexedDbBrowserSessionStore } from './local-session-store';
+import { IndexedDbBrowserSessionStore, importBrowserSessionDurably } from './local-session-store';
 import {
   IndexedDbDirectoryHandlePersistence,
   SaveFolderRepository,
@@ -47,8 +57,6 @@ import {
   type SaveManagerEntry,
   type SaveManagerViewModel,
 } from './save-manager';
-import { REFERENCE_ENCOUNTER_ART } from './reference-encounter-art';
-import { VANE_WARREN_ART } from './vane-warren-art';
 import { decodeSavedSessionFingerprint } from './session-persistence';
 import type { EncounterSeed } from './session-seed';
 import type { StoredCharacterEncounter } from './stored-character-encounter';
@@ -65,7 +73,8 @@ import {
 } from './refusal-handling';
 import { reconcileStableRenderedChildren, stableRenderKey } from './stable-dom-render';
 import type { HumanEngineActorOptions } from './encounter-board-projection';
-import type { EngineActivationChoiceSlot } from './turn-proposal';
+import type { EngineActivationChoiceSlot, EngineOptionId } from './turn-proposal';
+import type { OfferedOptionPath } from './offered-option-paths';
 
 const HEARTBEAT_INTERVAL_MS = 250;
 const HEARTBEAT_TIMEOUT_MS = 1_000;
@@ -81,16 +90,26 @@ function element<K extends keyof HTMLElementTagNameMap>(
 }
 
 function activationChoiceControls(
-  optionId: string,
+  actorId: CombatantId,
+  optionId: EngineOptionId,
   slot: EngineActivationChoiceSlot,
 ): readonly HTMLElement[] {
   const targets = slot.kind === 'calm_emotions_per_target' ? slot.targetIds : [null];
   return targets.map((targetId, index) => {
     const label = element('label', { className: 'engine-activation-choice' });
+    const choiceIdentity = targetId ?? `single-${String(index)}`;
+    label.dataset.renderKey = stableRenderKey(
+      'dm', 'engine-options', actorId, optionId, 'activation-choice', slot.kind, choiceIdentity,
+      'label',
+    );
     const name = slot.kind.replaceAll('_', ' ');
     const prompt = targetId === null ? name : `${name} for ${String(targetId)}`;
     label.append(element('span', { text: `Choose ${prompt} at activation` }));
     const control = element('select');
+    control.dataset.renderKey = stableRenderKey(
+      'dm', 'engine-options', actorId, optionId, 'activation-choice', slot.kind, choiceIdentity,
+      'select',
+    );
     control.dataset.optionId = optionId;
     control.dataset.choiceKind = slot.kind;
     if (targetId !== null) control.dataset.targetId = targetId;
@@ -126,6 +145,7 @@ export function renderHumanEngineOptionCatalog(
     group.dataset.actorId = actor.actorId;
     group.append(element('h3', { text: actor.actorName }));
     const list = element('ol');
+    list.dataset.renderKey = stableRenderKey('dm', 'engine-options', actor.actorId, 'list');
     for (const entry of actor.options) {
       const item = element('li', { text: entry.label });
       item.dataset.renderKey = stableRenderKey(
@@ -135,7 +155,11 @@ export function renderHumanEngineOptionCatalog(
       item.dataset.optionId = entry.option.optionId;
       if (entry.availability === 'offerable' && entry.option.activationChoice !== undefined &&
         entry.option.activationChoice !== null) {
-        item.append(...activationChoiceControls(entry.option.optionId, entry.option.activationChoice));
+        item.append(...activationChoiceControls(
+          actor.actorId,
+          entry.option.optionId,
+          entry.option.activationChoice,
+        ));
       }
       list.append(item);
     }
@@ -336,8 +360,6 @@ function renderEncounterToken(model: EncounterBoardTokenModel): HTMLButtonElemen
   token.dataset.stackId = model.stackId;
   token.dataset.stackIndex = String(model.stackIndex);
   token.dataset.stackSize = String(model.stackSize);
-  token.style.gridColumn = `${String(model.position.column + 1)} / span ${String(model.columnSpan)}`;
-  token.style.gridRow = `${String(model.position.row + 1)} / span ${String(model.rowSpan)}`;
   token.setAttribute('aria-label', model.stackSize === 1
     ? `${model.name}, ${model.effectiveSize}, column ${String(model.position.column)}, row ${String(model.position.row)}`
     : `${model.name}, occupant ${String(model.stackIndex + 1)} of ${String(model.stackSize)}, ${model.effectiveSize}, column ${String(model.position.column)}, row ${String(model.position.row)}`);
@@ -365,43 +387,291 @@ function renderEncounterToken(model: EncounterBoardTokenModel): HTMLButtonElemen
   return token;
 }
 
-export function renderEncounterBoard(
+const OPTION_PATH_DANGER_CLASSES: Readonly<Record<MovementPathDangerKind, string>> = {
+  opportunity_attack: 'encounter-option-segment-opportunity-attack',
+  burning_surface: 'encounter-option-segment-burning-surface',
+  // MUTATION hazard_cells_not_red: replace this with a non-red class.
+  persistent_area_damage: 'encounter-option-segment-persistent-area-damage',
+  difficult_terrain: 'encounter-option-segment-difficult-terrain',
+};
+
+function optionPathDangerCells(path: OfferedOptionPath): string {
+  return path.annotations.map((annotation) =>
+    `${String(annotation.cell.column)},${String(annotation.cell.row)}:${annotation.dangers.join('+')}`,
+  ).join(';');
+}
+
+function optionPathOffset(index: number, count: number): { readonly x: number; readonly y: number } {
+  const band = index - (count - 1) / 2;
+  return { x: band * 0.045, y: -band * 0.045 };
+}
+
+interface OptionBadgeRect {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+const OPTION_BADGE_WIDTH_CELLS = 0.5;
+const OPTION_BADGE_HEIGHT_CELLS = 0.68;
+const OPTION_BADGE_TOP_CELLS = 0.22;
+const OPTION_BADGE_SHIFT_CELLS = 0.52;
+
+function optionBadgeRect(center: { readonly x: number; readonly y: number }): OptionBadgeRect {
+  return {
+    x: center.x - OPTION_BADGE_WIDTH_CELLS / 2,
+    y: center.y - OPTION_BADGE_TOP_CELLS,
+    width: OPTION_BADGE_WIDTH_CELLS,
+    height: OPTION_BADGE_HEIGHT_CELLS,
+  };
+}
+
+function nameplateRect(plate: NameplateLayout): OptionBadgeRect {
+  return {
+    x: plate.x / CHROME_TILE_PX,
+    y: plate.y / CHROME_TILE_PX,
+    width: plate.width / CHROME_TILE_PX,
+    height: plate.height / CHROME_TILE_PX,
+  };
+}
+
+function optionBadgeOverlaps(left: OptionBadgeRect, right: OptionBadgeRect): boolean {
+  return left.x < right.x + right.width && right.x < left.x + left.width &&
+    left.y < right.y + right.height && right.y < left.y + left.height;
+}
+
+function positionOptionBadge(
+  origin: { readonly x: number; readonly y: number },
+  bounds: EncounterBoardProjectionShape['bounds'],
+  nameplates: readonly NameplateLayout[],
+): { readonly center: { readonly x: number; readonly y: number }; readonly rect: OptionBadgeRect } {
+  const obstacles = nameplates.map(nameplateRect);
+  const initial = {
+    x: Math.max(
+      OPTION_BADGE_WIDTH_CELLS / 2,
+      Math.min(origin.x, bounds.columns - OPTION_BADGE_WIDTH_CELLS / 2),
+    ),
+    y: Math.max(
+      OPTION_BADGE_TOP_CELLS,
+      Math.min(origin.y, bounds.rows - (OPTION_BADGE_HEIGHT_CELLS - OPTION_BADGE_TOP_CELLS)),
+    ),
+  };
+  const maximumRing = 2 * Math.max(bounds.columns, bounds.rows);
+  for (let ring = 0; ring <= maximumRing; ring += 1) {
+    for (let vertical = -ring; vertical <= ring; vertical += 1) {
+      for (let horizontal = -ring; horizontal <= ring; horizontal += 1) {
+        if (Math.max(Math.abs(horizontal), Math.abs(vertical)) !== ring) continue;
+        const center = {
+          x: initial.x + horizontal * OPTION_BADGE_SHIFT_CELLS,
+          y: initial.y + vertical * OPTION_BADGE_SHIFT_CELLS,
+        };
+        const rect = optionBadgeRect(center);
+        if (rect.x < 0 || rect.y < 0 || rect.x + rect.width > bounds.columns ||
+          rect.y + rect.height > bounds.rows) continue;
+        if (obstacles.some((obstacle) => optionBadgeOverlaps(rect, obstacle))) continue;
+        return { center, rect };
+      }
+    }
+  }
+  throw new Error('Unable to place offered-option badge without covering a nameplate.');
+}
+
+function svgElement<K extends keyof SVGElementTagNameMap>(tag: K): SVGElementTagNameMap[K] {
+  return document.createElementNS('http://www.w3.org/2000/svg', tag);
+}
+
+function renderOfferedOptionPathOverlay(
+  projection: EncounterBoardProjectionShape,
+  paths: readonly OfferedOptionPath[],
+  nameplates: readonly NameplateLayout[],
+): SVGSVGElement {
+  const svg = svgElement('svg');
+  svg.classList.add('encounter-option-paths');
+  svg.setAttribute('viewBox', `0 0 ${String(projection.bounds.columns)} ${String(projection.bounds.rows)}`);
+  svg.setAttribute('aria-label', 'Engine offered movement options');
+  const defs = svgElement('defs');
+  const marker = svgElement('marker');
+  marker.id = 'encounter-option-oa-arrowhead';
+  marker.setAttribute('viewBox', '0 0 10 10');
+  marker.setAttribute('refX', '9');
+  marker.setAttribute('refY', '5');
+  marker.setAttribute('markerWidth', '5');
+  marker.setAttribute('markerHeight', '5');
+  marker.setAttribute('orient', 'auto-start-reverse');
+  const arrowHead = svgElement('path');
+  arrowHead.setAttribute('d', 'M 0 0 L 10 5 L 0 10 z');
+  marker.append(arrowHead);
+  defs.append(marker);
+  svg.append(defs);
+
+  const tokenPositions = new Map(projection.combatants.flatMap((combatant) =>
+    combatant.placementStatus === 'placed'
+      ? [[combatant.id, combatant.position] as const]
+      : []));
+  const destinationCounts = new Map<string, number>();
+  paths.forEach((path, pathIndex) => {
+    const offset = optionPathOffset(pathIndex, paths.length);
+    const dangerCells = optionPathDangerCells(path);
+    const group = svgElement('g');
+    group.classList.add('encounter-option-path');
+    group.style.setProperty(
+      '--encounter-option-color',
+      `hsl(${String((205 + pathIndex * 67) % 360)}deg 32% 72%)`,
+    );
+    group.dataset.optionOrdinal = String(path.optionOrdinal);
+    group.dataset.dangerCells = dangerCells;
+    group.dataset.optionId = path.optionId;
+    group.setAttribute('aria-label', `Option ${String(path.optionOrdinal)}: ${path.summaryLabel}, ${String(path.distanceFeet)} feet`);
+    const polyline = svgElement('polyline');
+    polyline.classList.add('encounter-option-polyline');
+    polyline.dataset.optionOrdinal = String(path.optionOrdinal);
+    polyline.setAttribute('points', path.path.map((cell) =>
+      `${String(cell.column + 0.5 + offset.x)},${String(cell.row + 0.5 + offset.y)}`).join(' '));
+    group.append(polyline);
+    let movementSpent = 0;
+    for (const step of path.steps) {
+      const segment = svgElement('path');
+      segment.classList.add('encounter-option-segment');
+      segment.dataset.optionOrdinal = String(path.optionOrdinal);
+      segment.dataset.dangerCells = dangerCells;
+      segment.dataset.dangers = step.dangers.join(',');
+      segment.setAttribute(
+        'd',
+        `M ${String(step.from.column + 0.5 + offset.x)} ${String(step.from.row + 0.5 + offset.y)} ` +
+          `L ${String(step.to.column + 0.5 + offset.x)} ${String(step.to.row + 0.5 + offset.y)}`,
+      );
+      movementSpent += step.costFeet;
+      if (movementSpent > path.movementRemainingFeet) {
+        segment.classList.add('encounter-option-segment-beyond-movement');
+      }
+      for (const danger of step.dangers) segment.classList.add(OPTION_PATH_DANGER_CLASSES[danger]);
+      if (step.dangers.length > 0) segment.classList.add('encounter-option-segment-hazard');
+      group.append(segment);
+
+      for (const reactorId of step.opportunityAttackReactors) {
+        const reactor = tokenPositions.get(reactorId);
+        if (reactor === undefined) continue;
+        const arrow = svgElement('path');
+        arrow.classList.add('encounter-option-opportunity-arrow');
+        arrow.dataset.optionOrdinal = String(path.optionOrdinal);
+        arrow.dataset.dangerCells = dangerCells;
+        arrow.dataset.reactorId = reactorId;
+        arrow.setAttribute(
+          'd',
+          `M ${String(reactor.column + 0.5)} ${String(reactor.row + 0.5)} ` +
+            `L ${String(step.from.column + 0.5 + offset.x)} ${String(step.from.row + 0.5 + offset.y)}`,
+        );
+        arrow.setAttribute('marker-end', 'url(#encounter-option-oa-arrowhead)');
+        // MUTATION opportunity_arrow_missing: remove this append while retaining the red segment.
+        group.append(arrow);
+      }
+    }
+    const destination = path.path.at(-1);
+    if (destination === undefined) throw new Error('Offered movement path has no destination.');
+    const destinationKey = `${String(destination.column)},${String(destination.row)}`;
+    const stack = destinationCounts.get(destinationKey) ?? 0;
+    destinationCounts.set(destinationKey, stack + 1);
+    const stackOffset = stack === 0
+      ? 0
+      : Math.ceil(stack / 2) * (stack % 2 === 1 ? -0.52 : 0.52);
+    const badgePosition = positionOptionBadge({
+      x: destination.column + 0.5 + offset.x,
+      y: destination.row + 0.5 + offset.y + stackOffset,
+    }, projection.bounds, nameplates);
+    const badge = svgElement('g');
+    badge.classList.add('encounter-option-destination');
+    badge.dataset.optionOrdinal = String(path.optionOrdinal);
+    badge.dataset.dangerCells = dangerCells;
+    badge.setAttribute(
+      'transform',
+      `translate(${String(badgePosition.center.x)} ${String(badgePosition.center.y)})`,
+    );
+    const circle = svgElement('circle');
+    circle.setAttribute('r', '0.18');
+    const ordinal = svgElement('text');
+    ordinal.classList.add('encounter-option-ordinal');
+    ordinal.setAttribute('text-anchor', 'middle');
+    ordinal.setAttribute('y', '0.055');
+    ordinal.textContent = String(path.optionOrdinal);
+    const distance = svgElement('text');
+    distance.classList.add('encounter-option-distance');
+    distance.setAttribute('text-anchor', 'middle');
+    distance.setAttribute('y', '0.36');
+    distance.textContent = `${String(path.distanceFeet)} ft`;
+    badge.append(circle, ordinal, distance);
+    group.append(badge);
+    svg.append(group);
+  });
+  return svg;
+}
+
+function renderOfferedOptionLegend(): HTMLElement {
+  const legend = element('aside', { className: 'encounter-option-path-legend' });
+  legend.dataset.optionPathLegend = 'true';
+  legend.append(element('strong', { text: 'Movement options' }));
+  for (const [className, text] of [
+    ['encounter-option-legend-solid', 'solid = within movement'],
+    ['encounter-option-legend-dashed', 'dashed = beyond movement (Dash)'],
+    ['encounter-option-legend-arrow', 'arrow = Opportunity Attack'],
+    ['encounter-option-legend-hatch', 'hatching = Difficult Terrain'],
+    ['encounter-option-legend-flame', '♨ = damaging terrain'],
+    ['encounter-option-legend-ordinal', 'N = option N'],
+  ] as const) {
+    legend.append(element('span', { className, text }));
+  }
+  return legend;
+}
+
+// ART-SEAM (D516): exported so the DM-with-chrome / player-without DOM identity is testable.
+export function renderBoard(
   projection: EncounterBoardProjectionShape,
   preview: ReadonlySet<string> = new Set(),
   movementDangerPreview: DmMovementPathPreview | null = null,
+  provenance?: {
+    readonly revision: number;
+    readonly round: number;
+    readonly stateDigest: string;
+  },
+  offeredPaths: readonly OfferedOptionPath[] | null = null,
   stackSelection: EncounterBoardStackSelection = new Map(),
 ): HTMLDivElement {
-  const packageForBounds = projection.bounds.columns === VANE_WARREN_ART.room.columns &&
-    projection.bounds.rows === VANE_WARREN_ART.room.rows
-    ? VANE_WARREN_ART
-    : REFERENCE_ENCOUNTER_ART;
-  const pcFallback = packageForBounds.combatantTokens['combatant:fighter'];
-  const monsterFallback = packageForBounds.combatantTokens['combatant:training-brute'];
-  if (pcFallback === undefined || monsterFallback === undefined) {
-    throw new Error('Reference encounter token art is incomplete.');
-  }
-  const combatantTokens: Record<string, AssetId> = {};
-  for (const combatant of projection.combatants) {
-    combatantTokens[combatant.id] =
-      packageForBounds.combatantTokens[combatant.id] ??
-      (combatant.kind === 'player_character' ? pcFallback : monsterFallback);
-  }
-  const hasReferenceArt = projection.combatants.every(
-    (combatant) => packageForBounds.combatantTokens[combatant.id] !== undefined,
-  );
-  const art = hasReferenceArt
-    ? packageForBounds
-    : { ...packageForBounds, combatantTokens };
-  const models = hasReferenceArt
-    ? encounterBoardRenderModel(projection, packageForBounds)
-    : encounterBoardRenderModel(projection, art);
+  const art = encounterArtForBoard(projection);
+  const models = encounterBoardRenderModel(projection, art);
   const board = element('div', { className: 'encounter-board' });
   board.dataset.renderKey = stableRenderKey('encounter-board', art.id);
   board.style.setProperty('--encounter-columns', String(projection.bounds.columns));
+  // ART-SEAM (D516): overlay art reaches the mechanical-layer CSS through custom properties.
+  for (const [effect, assetId] of Object.entries(OVERLAY_ASSETS)) {
+    board.style.setProperty(`--art-overlay-${effect}`, starterArtCssUrl(assetId));
+  }
   board.dataset.artPackage = art.id;
+  board.dataset.boardAudience = provenance === undefined ? 'player' : 'dm';
+  if (provenance !== undefined) {
+    board.dataset.sourceRevision = String(provenance.revision);
+    board.dataset.sourceRound = String(provenance.round);
+    board.dataset.sourceStateDigest = provenance.stateDigest;
+  }
+  if (offeredPaths !== null) board.dataset.optionPaths = String(offeredPaths.length);
   const dangersByCell = new Map<string, DmMovementPathPreview['annotations'][number]['dangers']>(movementDangerPreview?.annotations.map(
     (annotation) => [`${String(annotation.cell.column)},${String(annotation.cell.row)}`, annotation.dangers] as const,
   ) ?? []);
+  const optionDifficultCells = new Map<string, OfferedOptionPath[]>();
+  const optionDamageCells = new Map<string, OfferedOptionPath[]>();
+  const optionThreats = new Set(offeredPaths?.flatMap((path) =>
+    path.steps.flatMap((step) => step.opportunityAttackReactors)) ?? []);
+  for (const path of offeredPaths ?? []) {
+    for (const annotation of path.annotations) {
+      const key = `${String(annotation.cell.column)},${String(annotation.cell.row)}`;
+      if (annotation.dangers.includes('difficult_terrain')) {
+        optionDifficultCells.set(key, [...optionDifficultCells.get(key) ?? [], path]);
+      }
+      if (annotation.dangers.includes('burning_surface') ||
+        annotation.dangers.includes('persistent_area_damage')) {
+        optionDamageCells.set(key, [...optionDamageCells.get(key) ?? [], path]);
+      }
+    }
+  }
   for (const model of models) {
     const cell = element('div', { className: 'encounter-cell' });
     cell.dataset.renderKey = stableRenderKey('encounter-board', art.id, 'cell', model.key);
@@ -415,6 +685,7 @@ export function renderEncounterBoard(
       image.dataset.assetId = layer.assetId;
       cell.append(image);
     }
+    for (const layer of model.mechanicalLayers) cell.append(renderMechanicalLayer(layer));
     for (const light of model.lightOverlays) {
       const overlay = element('div', { className: `encounter-light encounter-light-${light.level}` });
       overlay.dataset.lightId = light.overlay.id;
@@ -441,6 +712,19 @@ export function renderEncounterBoard(
       marker.dataset.danger = danger;
       marker.setAttribute('aria-label', danger.replaceAll('_', ' '));
       cell.append(marker);
+    }
+    for (const path of optionDifficultCells.get(model.key) ?? []) {
+      const hatch = element('span', { className: 'encounter-option-difficult-hatch' });
+      hatch.dataset.optionOrdinal = String(path.optionOrdinal);
+      hatch.dataset.danger = 'difficult_terrain';
+      cell.append(hatch);
+    }
+    for (const path of optionDamageCells.get(model.key) ?? []) {
+      const flame = element('span', { className: 'encounter-option-damage-flame', text: '♨' });
+      flame.dataset.optionOrdinal = String(path.optionOrdinal);
+      flame.dataset.danger = 'damaging_terrain';
+      flame.setAttribute('aria-label', 'Damaging terrain');
+      cell.append(flame);
     }
     for (const object of model.worldObjects) {
       const placed = element('div', { className: 'encounter-world-object' });
@@ -474,6 +758,7 @@ export function renderEncounterBoard(
     members.push(model);
     tokensByStack.set(model.stackId, members);
     const token = renderEncounterToken(model);
+    if (optionThreats.has(model.id)) token.classList.add('encounter-option-threat');
     for (const effect of projection.sustainedEffects ?? []) {
       if (effect.owner !== model.id) continue;
       const badge = element('span', { className: 'encounter-sustained-badge', text: effect.badge });
@@ -483,7 +768,16 @@ export function renderEncounterBoard(
       token.append(badge);
     }
     tokenElements.set(model.id, token);
-    tokenLayer.append(token);
+    const creatureSpace = element('div', { className: 'encounter-token-space' });
+    creatureSpace.dataset.renderKey = stableRenderKey('board-token-space', model.id);
+    creatureSpace.dataset.cell = `${String(model.position.column)},${String(model.position.row)}`;
+    creatureSpace.dataset.combatantId = model.id;
+    creatureSpace.dataset.columnSpan = String(model.columnSpan);
+    creatureSpace.dataset.rowSpan = String(model.rowSpan);
+    creatureSpace.style.gridColumn = `${String(model.position.column + 1)} / span ${String(model.columnSpan)}`;
+    creatureSpace.style.gridRow = `${String(model.position.row + 1)} / span ${String(model.rowSpan)}`;
+    creatureSpace.append(token);
+    tokenLayer.append(creatureSpace);
   }
   for (const [stackId, members] of tokensByStack) {
     const memberIds = new Set(members.map((member) => member.id));
@@ -594,7 +888,49 @@ export function renderEncounterBoard(
     }
     board.append(svg);
   }
+  if (offeredPaths !== null) {
+    const nameplates = provenance === undefined
+      ? []
+      : stackLabelOffsets(projection.combatants.flatMap((combatant) => combatant.placementStatus === 'placed' ? [{
+        id: combatant.id,
+        displayName: combatant.name,
+        column: combatant.position.column,
+        row: combatant.position.row,
+      }] : []), projection.bounds);
+    board.append(renderOfferedOptionPathOverlay(projection, offeredPaths, nameplates));
+    board.append(renderOfferedOptionLegend());
+  }
+  // ART-SEAM (D516): the DM board gains names, HP bars, coordinates and a legend; the player board does not.
+  if (provenance !== undefined) renderBoardChrome(board, projection);
   return board;
+}
+
+function renderMechanicalLayer(layer: EncounterBoardMechanicalLayer): HTMLDivElement {
+  const rendered = element('div', {
+    className: `encounter-mechanical-layer encounter-mechanical-${layer.kind}`,
+  });
+  rendered.setAttribute('aria-hidden', 'true');
+  switch (layer.kind) {
+    case 'blocked':
+      rendered.dataset.mechanicalKind = layer.kind;
+      return rendered;
+    case 'difficult_terrain':
+      rendered.dataset.mechanicalKind = layer.kind;
+      rendered.dataset.regionId = layer.regionId;
+      return rendered;
+    case 'obscurement':
+      rendered.dataset.mechanicalKind = layer.kind;
+      rendered.dataset.regionId = layer.regionId;
+      rendered.dataset.obscurement = layer.obscurement;
+      return rendered;
+    case 'illumination':
+      rendered.dataset.mechanicalKind = layer.kind;
+      rendered.dataset.regionId = layer.regionId;
+      rendered.dataset.lightLevel = layer.level;
+      return rendered;
+  }
+  const exhaustive: never = layer;
+  throw new Error(`Unhandled encounter mechanical layer ${String(exhaustive)}`);
 }
 
 const MOVEMENT_DANGER_LABELS: Readonly<Record<
@@ -805,7 +1141,7 @@ class PlayerEncounterView {
       }));
     }
     this.#shell.append(activePanel);
-    const board = renderEncounterBoard(projection, this.#preview(), null, this.#stackSelection);
+    const board = renderBoard(projection, this.#preview(), null, undefined, null, this.#stackSelection);
     board.addEventListener('pointermove', (event) => this.#aimAt(event));
     this.#shell.append(board);
 
@@ -912,6 +1248,7 @@ class DmEncounterView {
     readonly anchorKey: string;
   } | null = null;
   #focusAfterRender: 'recovery' | 'active_token' | null = null;
+  #showOfferedOptionPaths = false;
   readonly #sessionFlow: StoredCharacterSessionFlow | null;
   #endSessionExported = false;
   #pendingSnapshot: DmEncounterHostSnapshot | null = null;
@@ -933,6 +1270,8 @@ class DmEncounterView {
     store: IndexedDbBrowserSessionStore,
     encounter?: StoredCharacterEncounter,
     initialSeed?: EncounterSeed,
+    private readonly boardSnapshotMode = false,
+    private readonly loadBoardSnapshotSession?: (sessionId: string) => Promise<void>,
   ) {
     this.#store = store;
     this.#sessionFlow = encounter?.sessionFlow ?? null;
@@ -974,9 +1313,19 @@ class DmEncounterView {
     sessionId: string,
     encounter?: StoredCharacterEncounter,
     initialSeed?: EncounterSeed,
+    boardSnapshotMode = false,
+    loadBoardSnapshotSession?: (sessionId: string) => Promise<void>,
   ): Promise<DmEncounterView> {
     const store = await IndexedDbBrowserSessionStore.open(indexedDB, localStorage);
-    const view = new DmEncounterView(root, sessionId, store, encounter, initialSeed);
+    const view = new DmEncounterView(
+      root,
+      sessionId,
+      store,
+      encounter,
+      initialSeed,
+      boardSnapshotMode,
+      loadBoardSnapshotSession,
+    );
     await store.flush();
     return view;
   }
@@ -1207,6 +1556,13 @@ class DmEncounterView {
         }
       }
     }
+    if (this.boardSnapshotMode) {
+      if (this.loadBoardSnapshotSession === undefined) {
+        throw new Error('Snapshot-mode save loading has no session remount handler.');
+      }
+      await this.loadBoardSnapshotSession(save.sessionId);
+      return;
+    }
     const url = new URL(location.href);
     url.searchParams.set('encounter', 'reference');
     url.searchParams.set('view', 'dm');
@@ -1238,7 +1594,7 @@ class DmEncounterView {
         if (this.#store.revisions(decoded.sessionId).length !== 0) {
           throw new Error('That uploaded session already exists in browser autosaves.');
         }
-        this.#store.import(bytes);
+        await importBrowserSessionDurably(this.#store, bytes);
         this.#render();
       });
     }, { once: true });
@@ -1587,6 +1943,60 @@ class DmEncounterView {
     return panel;
   }
 
+  #renderDmBoard(projection: DmBoardProjection): void {
+    const boardFog = new Set(projection.board.foggedCells.map(
+      (cell) => `${String(cell.column)},${String(cell.row)}`,
+    ));
+    if (projection.encounter.dmOnly.foggedCells.some(
+      (cell) => !boardFog.has(`${String(cell.column)},${String(cell.row)}`),
+    )) {
+      throw new Error('DM board omitted encounter fog.');
+    }
+    const movementPreview = projection.movementPreviews.find(
+      (preview) => preview.commandKey === this.#movementPreviewKey,
+    ) ?? null;
+    const previewCells = new Set(movementPreview?.path.map(
+      (cell) => `${String(cell.column)},${String(cell.row)}`,
+    ) ?? []);
+    if (projection.pendingPlacementRecovery !== null) {
+      this.#shell.append(this.#renderPendingPlacementRecovery(projection.pendingPlacementRecovery));
+      const selection = this.#recoverySelection;
+      const sizeOption = selection === null
+        ? undefined
+        : projection.pendingPlacementRecovery.sizeOptions.find(
+            (entry) => entry.size === selection.size,
+          );
+      const legalAnchor = sizeOption?.legalAnchors.find((entry) =>
+        `${String(entry.anchor.column)},${String(entry.anchor.row)}:${entry.placementMode}` ===
+        selection?.anchorKey);
+      for (const cell of legalAnchor?.footprint ?? []) {
+        previewCells.add(`${String(cell.column)},${String(cell.row)}`);
+      }
+    }
+    if (!this.boardSnapshotMode) {
+      const toggle = element('label', { className: 'dm-option-path-toggle' });
+      toggle.dataset.renderKey = stableRenderKey('dm', 'option-path-toggle', 'label');
+      const checkbox = element('input');
+      checkbox.type = 'checkbox';
+      checkbox.checked = this.#showOfferedOptionPaths;
+      checkbox.dataset.renderKey = stableRenderKey('dm', 'option-path-toggle', 'input');
+      checkbox.addEventListener('change', () => {
+        this.#showOfferedOptionPaths = checkbox.checked;
+        this.#render();
+      });
+      toggle.append(checkbox, element('span', { text: 'Show engine movement options' }));
+      this.#shell.append(toggle);
+    }
+    this.#shell.append(renderBoard(projection.board, previewCells, movementPreview, {
+      revision: projection.encounter.revision,
+      round: projection.board.round,
+      stateDigest: projection.stateDigest,
+    }, this.boardSnapshotMode || this.#showOfferedOptionPaths
+      ? projection.offeredOptionPaths
+      : null, this.#stackSelection));
+    if (movementPreview !== null) this.#shell.append(renderMovementDangerLegend(movementPreview));
+  }
+
   #renderFresh(): void {
     this.#shell.replaceChildren(
       element('p', { className: 'vtt-kicker', text: 'DM-local authority' }),
@@ -1594,6 +2004,12 @@ class DmEncounterView {
     );
     const projection = this.#projection;
     if (projection === null) return;
+    if (this.boardSnapshotMode) {
+      this.#shell.replaceChildren();
+      this.#renderDmBoard(projection);
+      this.#shell.append(this.#renderSaveManager());
+      return;
+    }
     if (this.#channelError !== null) {
       const error = element('p', { text: this.#channelError });
       error.setAttribute('role', 'alert');
@@ -2011,42 +2427,7 @@ class DmEncounterView {
       this.#shell.append(card);
     }
 
-    const boardFog = new Set(projection.board.foggedCells.map(
-      (cell) => `${String(cell.column)},${String(cell.row)}`,
-    ));
-    if (projection.encounter.dmOnly.foggedCells.some(
-      (cell) => !boardFog.has(`${String(cell.column)},${String(cell.row)}`),
-    )) {
-      throw new Error('DM board omitted encounter fog.');
-    }
-    const movementPreview = projection.movementPreviews.find(
-      (preview) => preview.commandKey === this.#movementPreviewKey,
-    ) ?? null;
-    const previewCells = new Set(movementPreview?.path.map(
-      (cell) => `${String(cell.column)},${String(cell.row)}`,
-    ) ?? []);
-    if (projection.pendingPlacementRecovery !== null) {
-      this.#shell.append(this.#renderPendingPlacementRecovery(projection.pendingPlacementRecovery));
-      const selection = this.#recoverySelection;
-      const sizeOption = selection === null
-        ? undefined
-        : projection.pendingPlacementRecovery.sizeOptions.find(
-            (entry) => entry.size === selection.size,
-          );
-      const legalAnchor = sizeOption?.legalAnchors.find((entry) =>
-        `${String(entry.anchor.column)},${String(entry.anchor.row)}:${entry.placementMode}` ===
-        selection?.anchorKey);
-      for (const cell of legalAnchor?.footprint ?? []) {
-        previewCells.add(`${String(cell.column)},${String(cell.row)}`);
-      }
-    }
-    this.#shell.append(renderEncounterBoard(
-      projection.board,
-      previewCells,
-      movementPreview,
-      this.#stackSelection,
-    ));
-    if (movementPreview !== null) this.#shell.append(renderMovementDangerLegend(movementPreview));
+    this.#renderDmBoard(projection);
 
     const tray = element('section', { className: 'dm-decision-tray' });
     tray.dataset.renderKey = stableRenderKey('dm', 'decision-tray');
@@ -2535,6 +2916,7 @@ export function mountEncounterVtt(
     readonly sessionId: string;
     readonly encounter?: StoredCharacterEncounter;
     readonly initialSeed?: EncounterSeed;
+    readonly boardSnapshotMode?: boolean;
   },
 ): EncounterVttMount {
   if (options.view === 'player') {
@@ -2545,14 +2927,36 @@ export function mountEncounterVtt(
   let mounted: DmEncounterView | null = null;
   let closed = false;
   root.replaceChildren(element('p', { className: 'dm-save-loading', text: 'Opening browser saves…' }));
-  void DmEncounterView.create(root, options.sessionId, options.encounter, options.initialSeed).then((view) => {
+  const openDmSession = async (
+    sessionId: string,
+    encounter?: StoredCharacterEncounter,
+    initialSeed?: EncounterSeed,
+  ): Promise<void> => {
+    mounted?.close();
+    mounted = null;
+    const view = await DmEncounterView.create(
+      root,
+      sessionId,
+      encounter,
+      initialSeed,
+      options.boardSnapshotMode,
+      options.boardSnapshotMode === true
+        ? async (nextSessionId) => {
+            const url = new URL(location.href);
+            url.searchParams.set('session', nextSessionId);
+            history.replaceState(history.state, '', url);
+            await openDmSession(nextSessionId);
+          }
+        : undefined,
+    );
     if (closed) {
       view.close();
       return;
     }
     mounted = view;
     view.mount();
-  }).catch((error: unknown) => {
+  };
+  void openDmSession(options.sessionId, options.encounter, options.initialSeed).catch((error: unknown) => {
     const message = error instanceof Error ? error.message : 'Browser session storage failed.';
     const alert = element('p', { className: 'dm-save-error', text: message });
     alert.setAttribute('role', 'alert');

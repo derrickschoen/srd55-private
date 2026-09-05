@@ -217,6 +217,7 @@ import {
   type CombatantId,
   type DamageType,
   type EncounterEffectId,
+  type Feet,
   type ItemId,
   type LimitedResourcePoolId,
   type ObjectTargetId,
@@ -4111,7 +4112,21 @@ export interface MovementPathDangerPreview {
   readonly actor: CombatantId;
   /** Start cell followed by each entered cell in travel order. */
   readonly path: readonly GridCell[];
+  /** Exact reducer-planned steps, including movement cost and eligible OA sources. */
+  readonly steps: readonly MovementPathDangerStepPreview[];
   readonly annotations: readonly MovementPathDangerAnnotation[];
+}
+
+export interface MovementPathDangerStepPreview {
+  readonly from: GridCell;
+  readonly to: GridCell;
+  readonly costFeet: number;
+  readonly dangers: readonly MovementPathDangerKind[];
+  readonly opportunityAttackReactors: readonly CombatantId[];
+}
+
+export interface MovementPathDangerPreviewOptions {
+  readonly movementBudgetRemaining?: Feet;
 }
 
 function persistentAreaHasDamage(area: PersistentArea): boolean {
@@ -4125,6 +4140,7 @@ function persistentAreaHasDamage(area: PersistentArea): boolean {
 export function previewMovementPathDangers(
   state: EncounterState,
   command: Extract<EncounterCommand, { readonly type: 'move' }>,
+  options: MovementPathDangerPreviewOptions = {},
 ): MovementPathDangerPreview {
   const mover = combatant(state, command.actor);
   const start = token(state, command.actor).position;
@@ -4132,7 +4148,7 @@ export function previewMovementPathDangers(
     actorId: command.actor,
     start,
     path: command.path,
-    budgetRemaining: mover.turn.movement.remaining,
+    budgetRemaining: options.movementBudgetRemaining ?? mover.turn.movement.remaining,
     cause: effectiveMovementCause(state, command),
     reachSources: opportunityAttackReachSources(state, command.actor),
   });
@@ -4154,29 +4170,52 @@ export function previewMovementPathDangers(
     }
   };
 
-  for (const step of plan.steps) {
-    if (step.beforeLeaving.some((window) => opportunityAttackWindowEligible(
-      state,
-      command.actor,
-      window.reactorId,
-    ))) add(step.from, 'opportunity_attack');
+  const steps = plan.steps.map((step): MovementPathDangerStepPreview => {
+    const opportunityAttackReactors = step.beforeLeaving
+      .filter((window) => opportunityAttackWindowEligible(
+        state,
+        command.actor,
+        window.reactorId,
+      ))
+      .map((window) => window.reactorId)
+      .sort((left, right) => left.localeCompare(right));
+    const stepDangers = new Set<MovementPathDangerKind>();
+    if (opportunityAttackReactors.length > 0) {
+      add(step.from, 'opportunity_attack');
+      stepDangers.add('opportunity_attack');
+    }
 
     if (state.persistentAreas.some((area) => area.burningCells.some(
       (burning) => cellKey(burning.cell) === cellKey(step.to),
-    ))) add(step.to, 'burning_surface');
+    ))) {
+      add(step.to, 'burning_surface');
+      stepDangers.add('burning_surface');
+    }
 
     if (state.persistentAreas.some((area) =>
       persistentAreaHasDamage(area) &&
       persistentAreaContains(area, step.to, persistentAreaAnchorCell(state, area), state))) {
       add(step.to, 'persistent_area_damage');
+      stepDangers.add('persistent_area_damage');
     }
 
-    if (step.cost > feet(5)) add(step.to, 'difficult_terrain');
-  }
+    if (step.cost > feet(5)) {
+      add(step.to, 'difficult_terrain');
+      stepDangers.add('difficult_terrain');
+    }
+    return {
+      from: { ...step.from },
+      to: { ...step.to },
+      costFeet: step.cost,
+      dangers: MOVEMENT_PATH_DANGER_KINDS.filter((danger) => stepDangers.has(danger)),
+      opportunityAttackReactors,
+    };
+  });
 
   return {
     actor: command.actor,
     path: [{ ...start }, ...plan.steps.map((step) => ({ ...step.to }))],
+    steps,
     annotations: [...dangersByCell.values()].map((annotation) => ({
       cell: annotation.cell,
       dangers: MOVEMENT_PATH_DANGER_KINDS.filter((danger) => annotation.dangers.has(danger)),
@@ -4771,6 +4810,7 @@ function opportunityAttackReachSources(
   return state.combatants
     .filter((candidate) =>
       candidate.life === 'living' &&
+      !state.adjudicationPending.some((entry) => entry.combatant === candidate.profile.id) &&
       isEncounterParticipant(state.alerting, candidate.profile.id) &&
       !combatantsAreAllies(state, candidate.profile.id, mover) &&
       candidate.profile.id !== mover)

@@ -22,8 +22,9 @@
 
 .encounter-board {
   --encounter-columns: 10;
+  --encounter-tile-size: 3rem;
   display: grid;
-  grid-template-columns: repeat(var(--encounter-columns), 3rem);
+  grid-template-columns: repeat(var(--encounter-columns), var(--encounter-tile-size));
   width: fit-content;
   border: 2px solid #78839d;
   touch-action: none;
@@ -34,8 +35,8 @@
 .encounter-cell {
   box-sizing: border-box;
   position: relative;
-  width: 3rem;
-  height: 3rem;
+  width: var(--encounter-tile-size);
+  height: var(--encounter-tile-size);
   overflow: hidden;
   border: 1px solid #3e4658;
   background: #292d35;
@@ -65,9 +66,40 @@
 .encounter-art-door { z-index: 1; }
 .encounter-art-terrain { z-index: 2; }
 .encounter-art-fog {
-  z-index: 3;
+  z-index: 4;
   opacity: 0.72;
 }
+
+.encounter-mechanical-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.encounter-mechanical-blocked {
+  z-index: 1;
+  background: rgb(52 58 70 / 94%);
+  box-shadow: inset 0 0 0 2px #adb6c8;
+}
+
+.encounter-mechanical-difficult_terrain {
+  z-index: 2;
+  border: 3px dotted rgb(223 177 91 / 82%);
+  background: rgb(151 109 54 / 34%);
+}
+
+.encounter-mechanical-illumination { z-index: 2; }
+.encounter-mechanical-illumination[data-light-level='bright'] { background: rgb(255 244 158 / 30%); }
+.encounter-mechanical-illumination[data-light-level='dim'] { background: rgb(193 183 124 / 18%); }
+.encounter-mechanical-illumination[data-light-level='darkness'] { background: rgb(9 11 18 / 68%); }
+
+.encounter-mechanical-obscurement {
+  z-index: 3;
+  background: rgb(178 188 194 / 32%);
+}
+
+.encounter-mechanical-obscurement[data-obscurement='heavy'] { background: rgb(115 126 134 / 60%); }
+.encounter-mechanical-obscurement[data-obscurement='magical_darkness'] { background: rgb(12 10 22 / 78%); }
 
 .encounter-cell[data-preview='true']::after {
   position: absolute;
@@ -115,9 +147,22 @@
   z-index: 5;
   inset: 0;
   display: grid;
-  grid-template-columns: repeat(var(--encounter-columns), 3rem);
-  grid-auto-rows: 3rem;
+  grid-template-columns: repeat(var(--encounter-columns), var(--encounter-tile-size));
+  grid-auto-rows: var(--encounter-tile-size);
   pointer-events: none;
+}
+
+.encounter-token-space {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  pointer-events: none;
+}
+
+.encounter-token-space > .encounter-token {
+  width: auto;
+  height: auto;
 }
 
 .encounter-shell .encounter-token {
@@ -261,6 +306,125 @@
   stroke-width: 0.08;
   stroke-dasharray: 0.16 0.1;
 }
+
+.encounter-option-paths {
+  position: absolute;
+  z-index: 10;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.encounter-option-polyline,
+.encounter-option-segment {
+  fill: none;
+  stroke: var(--encounter-option-color);
+  stroke-width: 0.1;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.encounter-option-segment-beyond-movement {
+  stroke-dasharray: 0.19 0.13;
+}
+
+.encounter-option-segment-hazard,
+.encounter-option-segment-opportunity-attack,
+.encounter-option-segment-burning-surface,
+.encounter-option-segment-persistent-area-damage,
+.encounter-option-segment-difficult-terrain {
+  stroke: #ff342e;
+}
+
+.encounter-option-segment-difficult-terrain {
+  stroke-width: 0.15;
+}
+
+.encounter-option-opportunity-arrow {
+  fill: none;
+  stroke: #ff342e;
+  stroke-width: 0.085;
+  vector-effect: non-scaling-stroke;
+}
+
+#encounter-option-oa-arrowhead path { fill: #ff342e; }
+
+.encounter-option-destination circle {
+  fill: #252a34;
+  stroke: #f2f0e8;
+  stroke-width: 0.045;
+}
+
+.encounter-option-destination text {
+  fill: #fff;
+  paint-order: stroke;
+  stroke: #171920;
+  stroke-width: 0.025;
+  font-family: system-ui, sans-serif;
+  font-weight: 800;
+}
+
+.encounter-option-ordinal { font-size: 0.18px; }
+.encounter-option-distance { font-size: 0.16px; }
+
+.encounter-option-difficult-hatch {
+  position: absolute;
+  z-index: 7;
+  inset: 0;
+  border: 2px solid rgb(255 52 46 / 88%);
+  background: repeating-linear-gradient(
+    135deg,
+    rgb(255 52 46 / 30%) 0,
+    rgb(255 52 46 / 30%) 3px,
+    transparent 3px,
+    transparent 7px
+  );
+  pointer-events: none;
+}
+
+.encounter-option-damage-flame {
+  position: absolute;
+  z-index: 11;
+  top: 0.08rem;
+  left: 50%;
+  color: #ff342e;
+  font: 900 0.8rem/1 system-ui, sans-serif;
+  filter: drop-shadow(0 1px 0 #210604);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.encounter-token.encounter-option-threat {
+  outline: 3px solid #ff342e;
+  outline-offset: -2px;
+}
+
+.encounter-option-path-legend {
+  position: absolute;
+  z-index: 12;
+  right: 0.2rem;
+  bottom: 0.2rem;
+  display: grid;
+  gap: 0.12rem;
+  min-width: 9rem;
+  padding: 0.35rem 0.45rem;
+  border: 1px solid #99a4bb;
+  background: rgb(17 19 26 / 94%);
+  color: #f5f2e8;
+  font: 600 0.55rem/1.2 system-ui, sans-serif;
+  pointer-events: none;
+}
+
+.encounter-option-path-legend strong { font-size: 0.62rem; }
+.encounter-option-legend-solid::before { content: '━━ '; color: #aebbd0; }
+.encounter-option-legend-dashed::before { content: '┄┄ '; color: #aebbd0; }
+.encounter-option-legend-arrow::before { content: '➜ '; color: #ff342e; }
+.encounter-option-legend-hatch::before { content: '▨ '; color: #ff342e; }
+.encounter-option-legend-flame::before { color: #ff342e; }
+.encounter-option-legend-ordinal::before { content: 'Ⓝ '; }
 
 .dm-initiative li[data-active='true'] {
   color: #ffe78e;
@@ -676,4 +840,374 @@
   .vtt-board-layout {
     grid-template-columns: 1fr;
   }
+}
+
+/* ==========================================================================
+   D516 — classic board at 64 CSS px per cell, 16-bit pass.
+   Appended after the original rules on purpose. The option-path selectors are
+   disjoint; their chrome-aware geometry is composed in the section below.
+   ========================================================================== */
+
+.encounter-board {
+  --encounter-tile-size: 64px;
+  --chrome-gutter: 24px;
+  border-color: #3a4152;
+  background: #14171f;
+}
+
+/* Tiles carry their own mortar and wall rims; a 1 px cell border would scale
+   a 64 px tile into 62 px and break every wall seam. */
+.encounter-cell {
+  border: 0;
+  background: #14171f;
+}
+
+.encounter-art-shade { z-index: 1; }
+.encounter-art-fog { opacity: 0.78; }
+
+.encounter-mechanical-layer {
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  background-position: center;
+  background-size: var(--encounter-tile-size) var(--encounter-tile-size);
+  background-repeat: no-repeat;
+}
+
+.encounter-mechanical-blocked {
+  background-color: transparent;
+  background-image: var(--art-overlay-blocked);
+  box-shadow: none;
+}
+
+.encounter-mechanical-difficult_terrain {
+  border: 0;
+  background-color: transparent;
+  background-image: var(--art-overlay-difficult);
+}
+
+.encounter-mechanical-illumination[data-light-level='bright'] {
+  background-color: transparent;
+  background-image: var(--art-overlay-light-bright);
+}
+
+.encounter-mechanical-illumination[data-light-level='dim'] {
+  background-color: transparent;
+  background-image: var(--art-overlay-light-dim);
+}
+
+.encounter-mechanical-illumination[data-light-level='darkness'] {
+  background-color: transparent;
+  background-image: var(--art-overlay-light-darkness);
+}
+
+.encounter-mechanical-obscurement {
+  background-color: transparent;
+  background-image: var(--art-overlay-obscurement-light);
+}
+
+.encounter-mechanical-obscurement[data-obscurement='heavy'] {
+  background-color: transparent;
+  background-image: var(--art-overlay-obscurement-heavy);
+}
+
+.encounter-mechanical-obscurement[data-obscurement='magical_darkness'] {
+  background-color: transparent;
+  background-image: var(--art-overlay-magical-darkness);
+}
+
+.encounter-light,
+.encounter-world-object {
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  background-position: center;
+  background-size: var(--encounter-tile-size) var(--encounter-tile-size);
+  background-repeat: no-repeat;
+}
+
+.encounter-light-bright { background-color: transparent; background-image: var(--art-overlay-light-bright); }
+.encounter-light-dim { background-color: transparent; background-image: var(--art-overlay-light-dim); }
+
+.encounter-world-object {
+  box-shadow: inset 0 0 0 2px rgb(196 150 84 / 85%);
+}
+
+.encounter-world-object[data-light-class='light-source'] {
+  box-shadow: none;
+  background-image: var(--art-overlay-light-source);
+}
+
+.encounter-token { inset: 0; }
+
+/* The prone silhouette asset replaces the CSS rotation and grey-out. */
+.encounter-token[data-marker='corpse'] {
+  filter: none;
+  opacity: 1;
+  transform: none;
+}
+
+.encounter-token[data-life='dying'] {
+  filter: none;
+  outline: none;
+}
+
+/* Rings are drawn in the art now; no glow filters. */
+.encounter-token-focus,
+.encounter-token-adjudicated {
+  filter: none;
+  opacity: 1;
+}
+
+.encounter-token-stacked { inset: 2.4rem 0.1rem 0.1rem; }
+
+.encounter-token-label {
+  padding: 0.08rem 0.14rem;
+  font-size: 0.62rem;
+}
+
+/* --- DM board chrome (board-chrome.ts) ---------------------------------- */
+
+.encounter-board[data-board-chrome='on'] {
+  padding: var(--chrome-gutter);
+}
+
+.encounter-board[data-board-chrome='on'] > .encounter-token-layer {
+  inset: var(--chrome-gutter) var(--chrome-gutter) auto;
+  width: calc(var(--encounter-columns) * var(--encounter-tile-size));
+  height: calc(var(--encounter-rows, 1) * var(--encounter-tile-size));
+}
+
+/* The chrome nameplate carries the full name; the in-cell label stays in the
+   DOM for text queries but is visually hidden. */
+.encounter-board[data-board-chrome='on'] .encounter-token-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.encounter-board[data-board-chrome='on'] .encounter-target-lines {
+  top: var(--chrome-gutter);
+  left: var(--chrome-gutter);
+  width: calc(100% - 2 * var(--chrome-gutter));
+  height: calc(var(--encounter-rows, 1) * var(--encounter-tile-size));
+}
+
+/* Keep the option overlay in grid coordinates after DM chrome adds gutters
+   and a legend. It paints above cell hatching and before the chrome layer. */
+.encounter-board[data-board-chrome='on'] > .encounter-option-paths {
+  top: var(--chrome-gutter);
+  right: auto;
+  bottom: auto;
+  left: var(--chrome-gutter);
+  width: calc(100% - 2 * var(--chrome-gutter));
+  height: calc(var(--encounter-rows, 1) * var(--encounter-tile-size));
+}
+
+.encounter-board[data-board-chrome='on'] > .encounter-option-path-legend {
+  right: calc(var(--chrome-gutter) + 0.2rem);
+  bottom: calc(var(--chrome-gutter) + 120px + 8px + 0.2rem);
+}
+
+.encounter-coordinate-labels,
+.encounter-token-chrome {
+  position: absolute;
+  z-index: 11;
+  inset: 0;
+  pointer-events: none;
+}
+
+.encounter-coordinate-label,
+.encounter-nameplate-text,
+.encounter-legend-text,
+.encounter-life-glyph,
+.encounter-hidden-ring {
+  display: block;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+.encounter-hp-bar {
+  display: block;
+  box-sizing: content-box;
+  border: 1px solid #0d0f14;
+  background: #262a35;
+}
+
+.encounter-hp-bar[data-hp-band='unknown'] {
+  border-style: dashed;
+  border-color: #6b7386;
+}
+
+.encounter-hp-fill { display: block; }
+
+.encounter-nameplate {
+  display: flex;
+  box-sizing: border-box;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border: 1px solid #5c6578;
+  background: rgb(13 15 20 / 60%);
+}
+
+.encounter-legend {
+  display: flex;
+  flex-wrap: wrap;
+  grid-column: 1 / -1;
+  box-sizing: border-box;
+  align-content: flex-start;
+  gap: 6px 14px;
+  overflow: hidden;
+  padding: 6px 8px;
+  border: 2px solid #3a4152;
+  background: #1b1f29;
+}
+
+.encounter-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 18px;
+}
+
+.encounter-legend-swatch {
+  display: inline-block;
+  box-sizing: border-box;
+  width: 14px;
+  height: 14px;
+  border: 1px solid #0d0f14;
+}
+
+.encounter-legend-plate .encounter-legend-swatch { border-radius: 50%; }
+
+.encounter-legend-plate-dashed .encounter-legend-swatch {
+  border: 2px dashed #eef0f5;
+  border-radius: 50%;
+  background: transparent !important;
+}
+
+.encounter-legend-hp .encounter-legend-swatch {
+  width: 20px;
+  height: 6px;
+}
+
+.encounter-legend-glyph .encounter-legend-swatch { border-radius: 2px; }
+
+/* --- DM chrome: slate ground, 2 px pixel bevels, uppercase mono headings -- */
+
+.dm-encounter {
+  background: #12151c;
+  color: #e6e9f0;
+}
+
+.dm-encounter .active-pc-panel,
+.dm-encounter .encounter-controls,
+.dm-encounter .dm-pending-request,
+.dm-encounter .dm-decision-tray,
+.dm-encounter .dm-reaction-preferences,
+.dm-encounter .dm-save-manager,
+.dm-encounter .dm-adjudication,
+.dm-encounter .dm-controller-assignments,
+.dm-encounter .encounter-path-danger-legend,
+.dm-encounter .dm-initiative-timeline {
+  border: 2px solid #3a4152;
+  background: #1b1f29;
+  box-shadow: inset 2px 2px 0 #2a3040, inset -2px -2px 0 #0f1218;
+  color: #e6e9f0;
+}
+
+.dm-encounter h1,
+.dm-encounter h2,
+.dm-encounter h3 {
+  color: #f2e9c8;
+  font-family: ui-monospace, 'Cascadia Mono', 'Courier New', monospace;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.dm-encounter h1 { font-size: 1.5rem; }
+.dm-encounter h2 { font-size: 1rem; }
+.dm-encounter h3 { font-size: 0.9rem; }
+.dm-encounter .vtt-kicker { color: #d8a24a; }
+
+.encounter-shell button {
+  padding: 0.5rem 0.8rem;
+  border: 0;
+  border-radius: 0;
+  background: #2e3547;
+  color: #f2f4f8;
+  box-shadow: inset 2px 2px 0 #4a5470, inset -2px -2px 0 #171b25;
+  font: 700 0.85rem/1 system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.encounter-shell button:hover { background: #3a4359; }
+
+.encounter-shell button:active {
+  box-shadow: inset -2px -2px 0 #4a5470, inset 2px 2px 0 #171b25;
+}
+
+.encounter-shell button[aria-pressed='true'] {
+  background: #5a4a1e;
+  box-shadow: inset 2px 2px 0 #8a6f2a, inset -2px -2px 0 #2c2410;
+}
+
+.encounter-shell button:disabled {
+  background: #23283a;
+  color: #8a92a6;
+  box-shadow: inset 2px 2px 0 #2c3346, inset -2px -2px 0 #171b25;
+  cursor: default;
+}
+
+.encounter-shell button:focus-visible,
+.encounter-shell select:focus-visible,
+.encounter-shell input:focus-visible,
+.encounter-shell textarea:focus-visible,
+.encounter-shell summary:focus-visible {
+  outline: 3px solid #f0c860;
+  outline-offset: 2px;
+}
+
+.encounter-shell select,
+.encounter-shell input,
+.encounter-shell textarea {
+  border: 2px solid #3a4152;
+  border-radius: 0;
+  background: #0f1218;
+  color: #e6e9f0;
+}
+
+.dm-encounter .dm-decision-tray[data-boundary-blocked='true'] {
+  border-color: #d8a24a;
+  box-shadow: inset 2px 2px 0 #6a4f1c, inset -2px -2px 0 #0f1218;
+}
+
+.dm-encounter .dm-decision-entry {
+  border-left: 4px solid #6f7fae;
+  background: #232838;
+}
+
+.dm-encounter .dm-save-row {
+  border: 2px solid #2f3648;
+  background: #171b25;
+}
+
+.dm-encounter .dm-save-badge { border-radius: 0; }
+
+.dm-encounter .dm-initiative-strip li {
+  border: 1px solid #3a4152;
+  border-radius: 0;
+  background: #232838;
+}
+
+.dm-encounter .dm-initiative-strip li[data-current='true'] {
+  border-color: #d8a24a;
+  background: #d8a24a;
+  color: #14171f;
 }

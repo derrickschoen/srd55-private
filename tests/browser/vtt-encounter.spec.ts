@@ -187,6 +187,7 @@ test('M38-PLAYER-NO-DM-CONTROLS and two local windows complete the resumable ref
   await expect(dm.locator('.dm-pending-request')).toContainText('turn: Training Brute');
   await dm.getByRole('button', { name: 'Hide', exact: true }).click();
   await expect(dm.locator('[data-cell="4,3"] .encounter-art-fog')).toHaveCount(0);
+  await expect(dm.locator('[data-cell="4,3"] .encounter-token[data-kind="monster"]')).toBeVisible();
   await expect(dm.locator(
     '.encounter-token[data-kind="monster"][data-column="4"][data-row="3"]',
   )).toHaveAttribute('data-hidden-from-players', 'true');

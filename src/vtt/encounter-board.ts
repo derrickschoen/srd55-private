@@ -19,7 +19,21 @@ import { affectedCells, feetPoint, type AreaTemplate } from '../combat/templates
 import { feet, type CombatantId } from '../combat/values';
 import type { EncounterEffectId, ObjectTargetId, PersistentAreaId, WorldObjectId } from '../combat/values';
 import type { WorldObjectBlocking, WorldObjectKind } from '../combat/world-objects';
-import type { DmView, DmVisibleCombatant, PlayerVisibleCombatant } from '../combat/visibility';
+import type { DmView } from '../combat/visibility';
+// ART-SEAM (D516): art families, dead silhouette and the prose HP classifier feed the board model.
+import {
+  SHADE_ASSETS,
+  doorSetFor,
+  doorSideAt,
+  floorSetFor,
+  floorVariantAt,
+  shadeSidesAt,
+  wallPieceAt,
+  wallSetFor,
+} from '../assets/art-sets';
+import { DEAD_TOKEN_ASSET_ID } from '../assets/starter-art-inputs';
+import { hitPointKnowledge } from './intel/actor-knowledge';
+import type { ProjectedHitPointKnowledge } from './intel/contracts';
 import type { EncounterArtPackage } from './encounter-package';
 
 type DmEncounterState = DmView['state'];
@@ -29,7 +43,12 @@ interface EncounterBoardCombatantIdentity {
   readonly name: string;
   readonly kind: 'player_character' | 'monster';
   readonly life?: LifeState;
+  /** DM projections only: the SAME band the prose gives the AI DM (actor-knowledge). */
+  readonly hitPointBand?: ProjectedHitPointKnowledge;
+  /** DM projections only: the engine currently treats this combatant as hidden. */
   readonly hiddenFromPlayers?: boolean;
+  /** Sourced creature type when the profile carries one; absent means the profile had none. */
+  readonly creatureType?: string;
 }
 
 export interface EncounterBoardPlacedCombatant extends EncounterBoardCombatantIdentity {
@@ -49,11 +68,13 @@ export type EncounterBoardCombatant =
   | EncounterBoardPlacedCombatant
   | EncounterBoardPendingCombatant;
 
-type EncounterBoardProjectionCombatant = EncounterBoardCombatant | PlayerVisibleCombatant | DmVisibleCombatant;
-
 export interface EncounterBoardProjectionShape {
   readonly bounds: { readonly columns: number; readonly rows: number };
-  readonly combatants: readonly EncounterBoardProjectionCombatant[];
+  readonly blockedCells?: readonly GridCell[];
+  readonly difficultTerrainRegions?: readonly EncounterBoardEnvironmentRegion[];
+  readonly obscurementRegions?: readonly EncounterBoardObscurementRegion[];
+  readonly environmentLightRegions?: readonly EncounterBoardLightRegion[];
+  readonly combatants: readonly EncounterBoardCombatant[];
   readonly highlightedCombatant: CombatantId | null;
   readonly adjudicatedTargets: readonly CombatantId[];
   /** Omit this property entirely for player projections. */
@@ -65,6 +86,19 @@ export interface EncounterBoardProjectionShape {
   readonly lightOverlays?: readonly EncounterBoardLightOverlay[];
   readonly sustainedEffects?: readonly EncounterBoardSustainedEffect[];
   readonly targetLines?: readonly EncounterBoardTargetLine[];
+}
+
+export interface EncounterBoardEnvironmentRegion {
+  readonly id: string;
+  readonly cells: readonly GridCell[];
+}
+
+export interface EncounterBoardObscurementRegion extends EncounterBoardEnvironmentRegion {
+  readonly obscurement: 'light' | 'heavy' | 'magical_darkness';
+}
+
+export interface EncounterBoardLightRegion extends EncounterBoardEnvironmentRegion {
+  readonly level: 'bright' | 'dim' | 'darkness';
 }
 
 export interface EncounterBoardWorldObject {
@@ -195,7 +229,7 @@ export interface DmEncounterBoardModel extends EncounterBoardProjectionShape {
   readonly log: readonly EncounterBoardLogEntry[];
 }
 
-export type EncounterBoardLayerRole = 'floor' | 'wall' | 'door' | 'terrain' | 'fog';
+export type EncounterBoardLayerRole = 'floor' | 'wall' | 'door' | 'shade' | 'terrain' | 'fog';
 
 export interface EncounterBoardLayer {
   readonly role: EncounterBoardLayerRole;
@@ -220,6 +254,7 @@ export interface EncounterBoardCellModel {
   readonly column: number;
   readonly row: number;
   readonly layers: readonly EncounterBoardLayer[];
+  readonly mechanicalLayers: readonly EncounterBoardMechanicalLayer[];
   readonly token: EncounterBoardTokenModel | null;
   readonly tokens: readonly EncounterBoardTokenModel[];
   readonly worldObjects: readonly EncounterBoardWorldObject[];
@@ -229,6 +264,20 @@ export interface EncounterBoardCellModel {
     readonly level: 'bright' | 'dim';
   }[];
 }
+
+export type EncounterBoardMechanicalLayer =
+  | { readonly kind: 'blocked' }
+  | { readonly kind: 'difficult_terrain'; readonly regionId: string }
+  | {
+      readonly kind: 'obscurement';
+      readonly regionId: string;
+      readonly obscurement: EncounterBoardObscurementRegion['obscurement'];
+    }
+  | {
+      readonly kind: 'illumination';
+      readonly regionId: string;
+      readonly level: EncounterBoardLightRegion['level'];
+    };
 
 function cellKey(cell: { readonly column: number; readonly row: number }): string {
   return `${String(cell.column)},${String(cell.row)}`;
@@ -478,13 +527,16 @@ export function projectEncounterBoard(
   const combatants = state.combatants.flatMap((subject): readonly (EncounterBoardCombatant & { readonly life: LifeState })[] => {
     const pending = state.adjudicationPending.find((entry) =>
       entry.combatant === subject.profile.id);
+    const creatureType = subject.profile.rules.creatureType;
     if (pending !== undefined) {
       return [{
         id: subject.profile.id,
         name: subject.profile.name,
         kind: subject.profile.kind,
         life: subject.life,
+        hitPointBand: hitPointKnowledge(state, subject),
         hiddenFromPlayers: hidden.has(subject.profile.id),
+        ...(creatureType === undefined ? {} : { creatureType }),
         placementStatus: 'placement_pending',
         pendingReason: pending.kind,
       }];
@@ -500,7 +552,10 @@ export function projectEncounterBoard(
       kind: subject.profile.kind,
       position: { ...position },
       life: subject.life,
+      // ART-SEAM (D516): the DM board carries the prose classifier's band, never a re-derived one.
+      hitPointBand: hitPointKnowledge(state, subject),
       hiddenFromPlayers: hidden.has(subject.profile.id),
+      ...(creatureType === undefined ? {} : { creatureType }),
       placementStatus: 'placed',
       effectiveSize: space.actualSize,
       placementMode: structuredClone(placedToken.placementMode),
@@ -538,6 +593,21 @@ export function projectEncounterBoard(
   });
   return {
     bounds: { ...state.bounds },
+    blockedCells: state.blockedCells.map((cell) => ({ ...cell })),
+    difficultTerrainRegions: state.environment.difficultTerrainRegions.map((region) => ({
+      id: region.id,
+      cells: region.cells.map((cell) => ({ ...cell })),
+    })),
+    obscurementRegions: state.environment.obscurementRegions.map((region) => ({
+      id: region.id,
+      cells: region.cells.map((cell) => ({ ...cell })),
+      obscurement: region.obscurement,
+    })),
+    environmentLightRegions: state.environment.lightRegions.map((region) => ({
+      id: region.id,
+      cells: region.cells.map((cell) => ({ ...cell })),
+      level: region.level,
+    })),
     combatants,
     highlightedCombatant: state.activeCombatant,
     activeCombatant: state.activeCombatant,
@@ -620,7 +690,8 @@ export function encounterBoardTokenRenderModels(
       ...combatant,
       life,
       marker: life === 'dead' ? 'corpse' : 'token',
-      assetId: asset,
+      // ART-SEAM (D516): the dead show the prone silhouette on a desaturated plate.
+      assetId: life === 'dead' ? DEAD_TOKEN_ASSET_ID : asset,
       focusAssetId: combatant.id === projection.highlightedCombatant ? art.ui.activePc : null,
       adjudicatedAssetId: projection.adjudicatedTargets.includes(combatant.id)
         ? art.ui.adjudicated
@@ -659,23 +730,70 @@ export function encounterBoardRenderModel(
   const worldObjects = projection.worldObjects ?? [];
   const areas = projection.areas ?? [];
   const lights = projection.lightOverlays ?? [];
+  const blocked = new Set((projection.blockedCells ?? []).map(cellKey));
+  const difficultTerrain = new Map<string, string[]>();
+  for (const region of projection.difficultTerrainRegions ?? []) {
+    for (const cell of region.cells) {
+      const key = cellKey(cell);
+      difficultTerrain.set(key, [...(difficultTerrain.get(key) ?? []), region.id]);
+    }
+  }
+  const obscurement = new Map<string, EncounterBoardObscurementRegion[]>();
+  for (const region of projection.obscurementRegions ?? []) {
+    for (const cell of region.cells) {
+      const key = cellKey(cell);
+      obscurement.set(key, [...(obscurement.get(key) ?? []), region]);
+    }
+  }
+  const illumination = new Map<string, EncounterBoardLightRegion[]>();
+  for (const region of projection.environmentLightRegions ?? []) {
+    for (const cell of region.cells) {
+      const key = cellKey(cell);
+      illumination.set(key, [...(illumination.get(key) ?? []), region]);
+    }
+  }
   const cells: EncounterBoardCellModel[] = [];
+  // ART-SEAM (D516): the package names one floor/wall/door family; cells pick the member.
+  const floorSet = floorSetFor(art.room.floor);
+  const wallSet = wallSetFor(art.room.wall);
+  const doorSet = doorSetFor(art.room.door);
+  const doorSide = doorSideAt(art.room.doorCell.column, art.room.doorCell.row, projection.bounds);
 
   for (let row = 0; row < projection.bounds.rows; row += 1) {
     for (let column = 0; column < projection.bounds.columns; column += 1) {
       const key = cellKey({ column, row });
-      const layers: EncounterBoardLayer[] = [{ role: 'floor', assetId: art.room.floor }];
-      const perimeter = row === 0 || row === projection.bounds.rows - 1 || column === 0 || column === projection.bounds.columns - 1;
-      if (perimeter) {
+      const layers: EncounterBoardLayer[] = [
+        { role: 'floor', assetId: floorSet.variants[floorVariantAt(column, row)] },
+      ];
+      const wallPiece = wallPieceAt(column, row, projection.bounds);
+      if (wallPiece !== null) {
         layers.push(
-          column === art.room.doorCell.column && row === art.room.doorCell.row
-            ? { role: 'door', assetId: art.room.door }
-            : { role: 'wall', assetId: art.room.wall },
+          doorSide !== null && column === art.room.doorCell.column && row === art.room.doorCell.row
+            ? { role: 'door', assetId: doorSet.pieces.closed[doorSide] }
+            : { role: 'wall', assetId: wallSet.pieces[wallPiece] },
         );
+      }
+      for (const side of shadeSidesAt(column, row, projection.bounds)) {
+        layers.push({ role: 'shade', assetId: SHADE_ASSETS[side] });
       }
       const terrainAsset = terrain.get(key);
       if (terrainAsset !== undefined) layers.push({ role: 'terrain', assetId: terrainAsset });
       if (fog.has(key)) layers.push({ role: 'fog', assetId: art.fog.hidden });
+      const mechanicalLayers: EncounterBoardMechanicalLayer[] = [];
+      if (blocked.has(key)) mechanicalLayers.push({ kind: 'blocked' });
+      for (const regionId of difficultTerrain.get(key) ?? []) {
+        mechanicalLayers.push({ kind: 'difficult_terrain', regionId });
+      }
+      for (const lit of illumination.get(key) ?? []) {
+        mechanicalLayers.push({ kind: 'illumination', regionId: lit.id, level: lit.level });
+      }
+      for (const obscured of obscurement.get(key) ?? []) {
+        mechanicalLayers.push({
+          kind: 'obscurement',
+          regionId: obscured.id,
+          obscurement: obscured.obscurement,
+        });
+      }
 
       const tokens = combatants.get(key) ?? [];
       const cellObjects = worldObjects.filter((object) => object.cells.some((cell) => cellKey(cell) === key));
@@ -696,6 +814,7 @@ export function encounterBoardRenderModel(
         column,
         row,
         layers: Object.freeze(layers),
+        mechanicalLayers: Object.freeze(mechanicalLayers),
         token: tokens[0] ?? null,
         tokens: Object.freeze(tokens),
         worldObjects: Object.freeze(cellObjects),

@@ -5,7 +5,9 @@ import {
   CONVERSATION_CLIS,
   CONVERSATION_EFFORTS,
   CONVERSATION_TRANSPORTS,
+  BOARD_IMAGE_MODES,
   COMBAT_MODELS,
+  boardImageOutputDirectory,
   runConversation,
   type ConversationCli,
   type ConversationEffort,
@@ -13,8 +15,11 @@ import {
   type ConversationRunOptions,
   type ConversationTransport,
   type CombatModel,
+  type BoardImageMode,
+  type ConversationBoardSnapshotService,
   type TurnContextRenderEvidence,
 } from './ai-dm-conversation';
+import { BoardSnapshotService } from './ai-dm-board-snapshot';
 import {
   DEFAULT_OVERRIDE_POLICY,
   OVERRIDE_POLICIES,
@@ -101,6 +106,7 @@ interface ArenaConfigBase {
   readonly captureRlData: boolean;
   readonly generateMissingRooms: boolean;
   readonly localOpenAi: LocalOpenAiConfig | null;
+  readonly boardImageMode: BoardImageMode;
 }
 
 export type ArenaConfig = ArenaConfigBase & AgentInstructionSource;
@@ -129,6 +135,86 @@ function conversationPart(row: ConversationRowPersisted) {
 
 export type ArenaConversationPart = ReturnType<typeof conversationPart>;
 export type ArenaRow = ArenaConversationPart & ArenaExtras;
+
+export type DecodedArenaRowEvidence =
+  | {
+      readonly era: 'increment_2';
+      readonly effort: ConversationEffort;
+      readonly escalationEffort: ConversationEffort | null;
+      readonly boardImage: ConversationRowPersisted['boardImage'];
+    }
+  | {
+      readonly era: 'd510_legacy';
+      readonly effort: null;
+      readonly escalationEffort: null;
+      readonly boardImage: null;
+    };
+
+function rowRecord(value: unknown): Readonly<Record<string, unknown>> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new TypeError('Arena row must be an object.');
+  }
+  return value as Readonly<Record<string, unknown>>;
+}
+
+function decodedBoardImage(value: unknown): ConversationRowPersisted['boardImage'] {
+  const image = rowRecord(value);
+  if (image['mode'] === 'off' && Object.keys(image).length === 1) return { mode: 'off' };
+  const mode = image['mode'];
+  if ((mode !== 'png' && mode !== 'capture_only') || Object.keys(image).some((key) => ![
+    'mode', 'sha256', 'bytes', 'width', 'height', 'captureMs', 'relativePath',
+  ].includes(key)) || typeof image['sha256'] !== 'string' ||
+    !/^[a-f0-9]{64}$/u.test(image['sha256']) ||
+    image['relativePath'] !== `board-images/${image['sha256']}.png` ||
+    !Number.isSafeInteger(image['bytes']) || typeof image['bytes'] !== 'number' ||
+    image['bytes'] < 24 || image['bytes'] > 1_000_000 ||
+    !Number.isSafeInteger(image['width']) || typeof image['width'] !== 'number' || image['width'] < 1 ||
+    !Number.isSafeInteger(image['height']) || typeof image['height'] !== 'number' || image['height'] < 1 ||
+    typeof image['captureMs'] !== 'number' || !Number.isFinite(image['captureMs']) || image['captureMs'] < 0) {
+    throw new TypeError('Arena row boardImage violates the closed off|png|capture_only contract.');
+  }
+  return {
+    mode,
+    sha256: image['sha256'],
+    bytes: image['bytes'],
+    width: image['width'],
+    height: image['height'],
+    captureMs: image['captureMs'],
+    relativePath: image['relativePath'] as `board-images/${string}.png`,
+  };
+}
+
+export function decodeArenaRowEvidence(
+  value: unknown,
+  era: 'increment_2' | 'd510_legacy',
+): DecodedArenaRowEvidence {
+  const row = rowRecord(value);
+  if (era === 'd510_legacy') {
+    if (row['effort'] !== undefined || row['escalationEffort'] !== undefined ||
+      row['boardImage'] !== undefined) {
+      throw new TypeError('D510 legacy row must not claim Increment 2 evidence fields.');
+    }
+    return { era, effort: null, escalationEffort: null, boardImage: null };
+  }
+  const effort = row['effort'];
+  const escalationEffort = row['escalationEffort'];
+  if (!CONVERSATION_EFFORTS.includes(effort as ConversationEffort)) {
+    throw new TypeError('Increment 2 arena row requires a valid effort field.');
+  }
+  if (escalationEffort !== null &&
+    !CONVERSATION_EFFORTS.includes(escalationEffort as ConversationEffort)) {
+    throw new TypeError('Increment 2 arena row requires escalationEffort to be null or valid.');
+  }
+  if (!Object.hasOwn(row, 'boardImage')) {
+    throw new TypeError('Increment 2 arena row requires boardImage evidence.');
+  }
+  return {
+    era,
+    effort: effort as ConversationEffort,
+    escalationEffort: escalationEffort as ConversationEffort | null,
+    boardImage: decodedBoardImage(row['boardImage']),
+  };
+}
 
 function requiredValue(argv: readonly string[], index: number, option: string): string {
   const value = argv[index + 1];
@@ -214,6 +300,7 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
       '--intel-mode',
       '--override-policy',
       '--renderer-profile',
+      '--board-image',
       '--basis', '--arm', '--local-base-url', '--local-model', '--local-api-key', '--local-think',
     ].includes(option ?? '')) throw new TypeError(`Unknown arena option ${option ?? '<missing>'}.`);
     const value = requiredValue(argumentsValue, index, option ?? '<missing>');
@@ -307,6 +394,16 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
   const rendererProfile = values.has('--renderer-profile')
     ? rendererProfileSchema.parse(JSON.parse(values.get('--renderer-profile') ?? ''))
     : DEFAULT_RENDERER_PROFILE;
+  const boardImageMode = values.get('--board-image') ?? 'off';
+  if (!BOARD_IMAGE_MODES.includes(boardImageMode as BoardImageMode)) {
+    throw new TypeError('--board-image must be off, png, or capture_only.');
+  }
+  if (boardImageMode === 'png' && selectedCli === 'local-openai') {
+    throw new TypeError('--board-image png requires an MCP-backed CLI.');
+  }
+  if (boardImageMode === 'png' && transport !== 'mcp_minimal') {
+    throw new TypeError('--board-image png requires --transport mcp_minimal.');
+  }
   const armCombatModels = new Map<string, CombatModel>();
   for (const raw of rawArmCombatModels) {
     const [label, model, extra] = raw.split(':');
@@ -410,12 +507,13 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
     captureRlData,
     generateMissingRooms,
     localOpenAi,
+    boardImageMode: boardImageMode as BoardImageMode,
   };
 }
 
 export interface ArenaRunOptions extends Omit<
   ConversationRunOptions,
-  'roomStates' | 'onPrimaryDispatchStart' | 'partyPolicyOverride'
+  'roomStates' | 'onPrimaryDispatchStart' | 'partyPolicyOverride' | 'boardSnapshotService'
 > {
   readonly adapterByArm?: Readonly<Record<string, AgentSessionAdapter>>;
   readonly heartbeat?: (line: string) => void;
@@ -497,14 +595,18 @@ export function arenaRows(
   arm: string,
   seeds: readonly number[],
 ): readonly ArenaRow[] {
-  return rows.map((row): ArenaRow => ({
+  return rows.map((row): ArenaRow => {
+    const arenaRow: ArenaRow = {
     ...conversationPart(row),
     seed: seeds[row.room - 1]!,
     basis: config.basis,
     probeVerdict: extractArenaProbeVerdict(config.basis, row.authorizedPlan),
     arm,
     wall: row.wallPerCreature,
-  }));
+    };
+    decodeArenaRowEvidence(arenaRow, 'increment_2');
+    return arenaRow;
+  });
 }
 
 function conversationConfig(
@@ -551,6 +653,7 @@ function conversationConfig(
       ...config.localOpenAi,
       model: overrides.model,
     },
+    boardImageMode: config.boardImageMode,
   };
 }
 
@@ -564,14 +667,23 @@ export async function runArena(
     heartbeat = stdoutHeartbeat,
     rendererEvidenceCache = new Map<string, TurnContextRenderEvidence>(),
     fixtureStates,
+    boardSnapshotServiceFactory,
     ...conversationOptions
   } = options;
   const states = fixtureStates ?? await frozenRoomStates(config);
   if (states.length !== config.rooms) {
     throw new RangeError(`Arena requires exactly ${String(config.rooms)} fixture states; received ${String(states.length)}.`);
   }
-  let rows: readonly ArenaRow[];
-  if (!config.interleave) {
+  let snapshotService: ConversationBoardSnapshotService | null = null;
+  try {
+    if (config.boardImageMode !== 'off') {
+      const outputDirectory = boardImageOutputDirectory(config);
+      snapshotService = boardSnapshotServiceFactory === undefined
+        ? await BoardSnapshotService.start({ outputDirectory })
+        : await boardSnapshotServiceFactory(outputDirectory);
+    }
+    let rows: readonly ArenaRow[];
+    if (!config.interleave) {
     const temporaryDirectory = await mkdtemp(join(tmpdir(), 'dnd-ai-dm-arena-independent-'));
     const independent: ArenaRow[] = [];
     for (let room = 1; room <= config.rooms; room += 1) {
@@ -586,6 +698,7 @@ export async function runArena(
           outPath: resolve(temporaryDirectory, `${String(room)}-${String(rep)}-single.jsonl`),
         }), {
           ...conversationOptions,
+          ...(snapshotService === null ? {} : { boardSnapshotService: snapshotService }),
           rendererEvidenceCache,
           roomStates: [structuredClone(states[room - 1]!)],
         });
@@ -595,7 +708,7 @@ export async function runArena(
       }
     }
     rows = independent;
-  } else {
+    } else {
     const temporaryDirectory = await mkdtemp(join(tmpdir(), 'dnd-ai-dm-arena-interleaved-'));
     const interleaved: ArenaRow[] = [];
     heartbeat(
@@ -626,6 +739,7 @@ export async function runArena(
             instruction: arm,
           }), {
             ...conversationOptions,
+            ...(snapshotService === null ? {} : { boardSnapshotService: snapshotService }),
             rendererEvidenceCache,
             ...(adapterByArm?.[arm.label] === undefined ? {} : { adapter: adapterByArm[arm.label] }),
             roomStates: [structuredClone(states[room - 1]!)],
@@ -658,9 +772,12 @@ export async function runArena(
       }
     }
     rows = interleaved;
+    }
+    await writeFile(config.outPath, rows.map((row) => JSON.stringify(row)).join('\n') + '\n', 'utf8');
+    return rows;
+  } finally {
+    await snapshotService?.close();
   }
-  await writeFile(config.outPath, rows.map((row) => JSON.stringify(row)).join('\n') + '\n', 'utf8');
-  return rows;
 }
 
 async function main(): Promise<void> {

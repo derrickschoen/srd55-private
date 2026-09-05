@@ -25,7 +25,7 @@ import {
 } from '../../../src/vtt/encounter-board';
 import {
   applyPendingPlacementFocus,
-  renderEncounterBoard,
+  renderBoard,
   renderPendingPlacementRecoveryHeading,
   type EncounterBoardStackSelection,
 } from '../../../src/vtt/encounter-app';
@@ -164,9 +164,16 @@ describe('footprint Increment 4 board and migration placement recovery', () => {
     const expectedSpans = [1, 1, 1, 2, 3, 4] as const;
 
     cases.forEach((combatant, index) => {
-      const board = renderEncounterBoard(projection([combatant]));
+      const board = renderBoard(
+        projection([combatant]),
+        new Set(),
+        null,
+        { revision: 1, round: 1, stateDigest: `footprint:${String(index)}` },
+      );
       const tokens = interactiveElement(board).querySelectorAll('.encounter-token');
       expect(tokens).toHaveLength(1);
+      expect(board.dataset.boardChrome).toBe('on');
+      expect(interactiveElement(board).querySelectorAll('.encounter-nameplate')).toHaveLength(1);
       expect(tokens[0]?.dataset.columnSpan).toBe(String(expectedSpans[index]));
       expect(tokens[0]?.dataset.rowSpan).toBe(String(expectedSpans[index]));
       expect(tokens[0]?.getAttribute('aria-label')).toBe(
@@ -182,7 +189,7 @@ describe('footprint Increment 4 board and migration placement recovery', () => {
     const right = placed(CLERIC, 'Right Large', 'Large', { column: 2, row: 0 }, [
       { column: 2, row: 0 }, { column: 3, row: 0 }, { column: 2, row: 1 }, { column: 3, row: 1 },
     ]);
-    const board = renderEncounterBoard(projection([left, right], {
+    const board = renderBoard(projection([left, right], {
       highlightedCombatant: FIGHTER,
       adjudicatedTargets: [FIGHTER],
       sustainedEffects: [{
@@ -205,7 +212,7 @@ describe('footprint Increment 4 board and migration placement recovery', () => {
     expect(tokens[0]?.querySelectorAll('.encounter-sustained-badge')).toHaveLength(1);
     expect(tokens[0]?.dataset.columnSpan).toBe('2');
 
-    const dyingBoard = renderEncounterBoard(projection([
+    const dyingBoard = renderBoard(projection([
       placed(FIGHTER, 'Dying Large', 'Large', { column: 0, row: 0 }, left.footprint, 'dying'),
       placed(CLERIC, 'Dead Large', 'Large', { column: 2, row: 0 }, right.footprint, 'dead'),
     ]));
@@ -237,7 +244,7 @@ describe('footprint Increment 4 board and migration placement recovery', () => {
       combatantId('combatant:tiny-c'), combatantId('combatant:tiny-d')].map((id, index) =>
       placed(id, `Occupant ${String(index + 1)}`, 'Tiny', { column: 4, row: 3 }, [{ column: 4, row: 3 }]));
     const selection: EncounterBoardStackSelection = new Map();
-    const board = renderEncounterBoard(projection(occupants), new Set(), null, selection);
+    const board = renderBoard(projection(occupants), new Set(), null, undefined, null, selection);
     const root = interactiveElement(board);
     const tokens = root.querySelectorAll('.encounter-token');
     const listbox = root.querySelector('[role="listbox"]');
@@ -276,7 +283,7 @@ describe('footprint Increment 4 board and migration placement recovery', () => {
       sourceCenter: { x: 1.5, y: 0.5 },
       targetCenter: { x: 3.5, y: 0.5 },
     });
-    const board = renderEncounterBoard(projection([], {
+    const board = renderBoard(projection([], {
       targetLines: [{
         effectId: encounterEffectId('effect:equal-distance'),
         from: line.sourceCenter,
@@ -299,6 +306,7 @@ describe('footprint Increment 4 board and migration placement recovery', () => {
       name: profile(state, FIGHTER).name,
       kind: 'player_character',
       life: 'living',
+      hitPointBand: { kind: 'perceived_band', band: 'uninjured' },
       hiddenFromPlayers: false,
       placementStatus: 'placement_pending',
       pendingReason: 'legacy_size_required',
@@ -348,7 +356,7 @@ describe('footprint Increment 4 board and migration placement recovery', () => {
     expect(interactiveElement(document.activeElement as Node).dataset.pendingPlacementHeading)
       .toBe('true');
 
-    const resumedBoard = renderEncounterBoard(projection([
+    const resumedBoard = renderBoard(projection([
       placed(CLERIC, 'Active Cleric', 'Medium', { column: 4, row: 4 }, [{ column: 4, row: 4 }]),
     ], { highlightedCombatant: CLERIC }));
     document.body.replaceChildren(resumedBoard);

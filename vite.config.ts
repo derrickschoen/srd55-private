@@ -55,7 +55,7 @@ function deployableAssets(
  *
  * `emitFile` rather than a post-build copy, and that is load-bearing. The
  * emitted assets are written during `writeBundle`, so the app-shell plugin's
- * `closeBundle` scan below already sees them: they are hashed into the cache
+ * later `writeBundle` scan below already sees them: they are hashed into the cache
  * name and precached like every other shell file. A file copied in AFTER that
  * scan would be present in `dist/` but absent from the service worker's
  * transcription, and `tools/assert-dist-clean.mjs` — which recomputes the shell
@@ -124,7 +124,7 @@ function appShellServiceWorker(): Plugin {
         },
       );
     },
-    closeBundle() {
+    writeBundle() {
       if (
         outputDirectory === undefined ||
         !statSync(outputDirectory).isDirectory()

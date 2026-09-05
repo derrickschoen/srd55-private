@@ -1,4 +1,5 @@
 import { canonicalJson } from '../commands/canonical-json';
+import { sha256 } from '../crypto/sha256';
 import type { ControllerIdentity, ControllerRequest } from '../combat/controllers';
 import type {
   CoordinatorPause,
@@ -49,6 +50,11 @@ import {
   projectHumanEngineOptions,
   type HumanEngineActorOptions,
 } from './encounter-board-projection';
+import {
+  offeredOptionActorsForState,
+  offeredOptionPaths as projectOfferedOptionPaths,
+  type OfferedOptionPath,
+} from './offered-option-paths';
 
 export interface ProjectedControllerRequest {
   readonly kind: 'turn' | 'reaction';
@@ -79,6 +85,7 @@ export interface PlayerBoardProjection {
 
 export interface DmBoardProjection {
   readonly audience: 'dm';
+  readonly stateDigest: string;
   readonly encounter: DmVisibleEncounterState;
   readonly board: DmEncounterBoardModel;
   readonly coordinator: PersistedCoordinatorState;
@@ -89,6 +96,8 @@ export interface DmBoardProjection {
   readonly humanEngineOptions: readonly HumanEngineActorOptions[];
   /** DM-only previews keyed by the exact legal move command. */
   readonly movementPreviews: readonly DmMovementPathPreview[];
+  /** Exact engine-offer paths in the same zero-based order used by turn context. */
+  readonly offeredOptionPaths: readonly OfferedOptionPath[];
   /** Optional batch-planning action domains, populated when one request plans for several actors. */
   readonly turnProgramLegalActions?: readonly {
     readonly actorId: CombatantId;
@@ -344,8 +353,10 @@ export function projectDmBoard(input: {
       combatantName: names.get(request.actorId as CombatantId) ?? request.actorId,
       interactive: true as const,
     }));
+  const offeredActors = offeredOptionActorsForState(input.view.state);
   return {
     audience: 'dm',
+    stateDigest: sha256(canonicalJson(input.view.state)),
     encounter: dmVisibleEncounter(input.view),
     board: projectEncounterBoard(input.view, input.coordinator.pendingRequest, targets),
     coordinator: input.coordinator,
@@ -356,6 +367,7 @@ export function projectDmBoard(input: {
       action.type === 'move'
         ? [{ commandKey: canonicalJson(action), ...previewMovementPathDangers(input.view.state, action) }]
         : []),
+    offeredOptionPaths: projectOfferedOptionPaths(input.view.state, offeredActors),
     controllers: input.controllers,
     history: input.history,
     adjudicatedTargets: targets,

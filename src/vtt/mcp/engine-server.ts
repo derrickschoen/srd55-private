@@ -106,6 +106,7 @@ import {
   type McpResourceContent,
   type McpResourceProvider,
   type McpToolBinding,
+  type McpToolResultContent,
 } from './handler';
 import {
   ENGINE_ACTOR_KNOWLEDGE_POLICY,
@@ -120,6 +121,7 @@ import {
   engineSchemaInternals,
   generatedMinimalRoundSubmissionExample,
   schemaViolations,
+  type EngineUiFeedback,
 } from './schemas';
 import type { KbReadBudget, KbReadCallPhase } from './knowledge-base';
 
@@ -217,6 +219,7 @@ export interface AdjudicationEnvelope {
   readonly blocking: boolean; readonly suggestedOutcomes: readonly string[]; readonly idempotencyKey: string;
 }
 export interface AdjudicationSink { readonly append: (envelope: AdjudicationEnvelope) => void }
+export interface UiFeedbackSink { readonly append: (feedback: EngineUiFeedback) => void }
 
 export interface TurnContextDeltaBase {
   readonly revision: number;
@@ -247,6 +250,9 @@ interface EngineMcpDependencies {
   readonly speculativePlans: SpeculativePlanSink;
   readonly narration: NarrationSink;
   readonly adjudications: AdjudicationSink;
+  readonly uiFeedback?: UiFeedbackSink;
+  readonly roundDecisionAlreadyAccepted?: boolean;
+  readonly uiFeedbackAlreadySubmitted?: boolean;
   readonly rules: AllowlistedRulesSource;
   readonly maximumToolResultBytes?: number;
   readonly maximumResourceBytes?: number;
@@ -265,6 +271,7 @@ interface EngineMcpDependencies {
   readonly kbReadBudget?: KbReadBudget;
   readonly kbReadCallPhase?: KbReadCallPhase;
   readonly overridePolicy?: OverridePolicy;
+  readonly toolResultContent?: McpToolResultContent;
 }
 
 export interface EngineToolSurface {
@@ -1261,6 +1268,8 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
   const fullContextAssemblyMaximumBytes = Number.MAX_SAFE_INTEGER;
   let optionReferences: ReadonlyMap<string, string> = new Map();
   const idempotency = new Map<string, { readonly bytes: string; readonly result: unknown }>();
+  let acceptedRoundDecision = dependencies.roundDecisionAlreadyAccepted ?? false;
+  let submittedUiFeedback = dependencies.uiFeedbackAlreadySubmitted ?? false;
   const applicationCursors = new Map<string, { readonly digest: string; readonly key: string; readonly offset: number }>();
   const opportunityReports = new Map<string, ReturnType<typeof actorOpportunityReport>>();
   const teamPlanReports = new Map<string, TeamPlanFrontierReport>();
@@ -1997,6 +2006,19 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       : null;
     if (roundSubmission?.kind === 'rejected') return roundSubmission.result;
     const input = roundSubmission === null ? suppliedInput : roundSubmission.envelope;
+    if (name === 'engine.submit_ui_feedback') {
+      if (!acceptedRoundDecision) {
+        return { status: 'rule_error', code: 'UI_FEEDBACK_DECISION_NOT_ACCEPTED' };
+      }
+      if (submittedUiFeedback) {
+        return { status: 'rule_error', code: 'UI_FEEDBACK_ALREADY_SUBMITTED' };
+      }
+      const sink = dependencies.uiFeedback;
+      if (sink === undefined) throw new RangeError('UI_FEEDBACK_UNAVAILABLE');
+      sink.append(structuredClone(input) as EngineUiFeedback);
+      submittedUiFeedback = true;
+      return { status: 'recorded' };
+    }
     if (name === 'engine.read_kb_subject') {
       const budget = dependencies.kbReadBudget;
       const callPhase = dependencies.kbReadCallPhase;
@@ -2681,6 +2703,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         const valid = evaluated.flatMap(({ proposal, contractRefusal, resolution }) => contractRefusal === null && resolution?.valid === true ? [{ proposal, option: resolution.option, primaryOption: resolution.primaryOption, fallbackOption: resolution.fallbackOption, mechanics: resolution.mechanics, selectedBranch: resolution.selectedBranch, resolutionDigest: resolution.resolutionDigest, summary: resolution.summary }] : []);
         const proposalId = `round:${sha256(canonicalJson({ digest: capsule.digest, key, valid, reactionGuidance })).slice(0, 48)}`;
         submitEngineProposal(feed, proposals, { kind: 'round_turn_proposal', proposalId, runId: capsule.runId, branchId: capsule.branchId, requestId: request.requestId, expectedRevision: capsule.revision, stateDigest: capsule.digest, stateHandle: engineStateHandle(capsule), phase: request.phase, idempotencyKey: key, resolutions: valid, rationale: typeof input['rationale'] === 'string' ? input['rationale'] : null, reactionGuidance, submittedArguments: structuredClone(roundSubmission?.submittedArguments ?? suppliedInput), ...(activeIntelMode === 'off' ? {} : { intelCapture: captureDmIntel(state, capsule, queries) }) });
+        acceptedRoundDecision = true;
         return { status: 'proposed', round_proposal_id: proposalId, state_ref: externalStateRef(capsule), actor_resolutions: valid.map((entry) => ({ actor_id: entry.proposal.actorId, selected_branch: entry.selectedBranch, resolution_digest: entry.resolutionDigest, summary: entry.summary })) };
       });
     }
@@ -2891,14 +2914,17 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
 
   const profileRequest = feed.current().request;
   const advertisedNames: ReadonlySet<string> | null = dependencies.toolProfile === 'dm'
-    ? new Set(profileRequest?.phase === 'speculative'
+    ? new Set([...(profileRequest?.phase === 'speculative'
       ? ENGINE_SPECULATIVE_DM_TOOL_NAMES
       : profileRequest?.kind === 'plan_adjustment'
         ? ENGINE_ADJUSTMENT_DM_TOOL_NAMES
-        : ENGINE_DM_TOOL_NAMES)
+        : ENGINE_DM_TOOL_NAMES), ...(dependencies.uiFeedback === undefined ? [] : ['engine.submit_ui_feedback'])])
     : null;
   const bindings: readonly McpToolBinding[] = ENGINE_TOOL_SPECS
-    .filter((spec) => spec.descriptor.name === 'engine.read_kb_subject'
+    .filter((spec) => spec.descriptor.name === 'engine.submit_ui_feedback'
+      ? dependencies.uiFeedback !== undefined && profileRequest?.phase !== 'speculative' &&
+        profileRequest?.kind !== 'plan_adjustment'
+      : spec.descriptor.name === 'engine.read_kb_subject'
       ? dependencies.kbReadBudget !== undefined && profileRequest?.phase !== 'speculative'
       : advertisedNames === null || advertisedNames.has(spec.descriptor.name))
     .map((spec) => ({
@@ -2941,7 +2967,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
     return resource;
   });
   const prompts = createPromptProvider(feed, rules, currentTurnContext);
-  const handler = createMcpHandler({ tools: bindings, resources, prompts, ...(dependencies.maximumToolResultBytes === undefined ? {} : { maximumToolResultBytes: dependencies.maximumToolResultBytes }), ...(dependencies.maximumResourceBytes === undefined ? {} : { maximumResourceBytes: dependencies.maximumResourceBytes }), ...(dependencies.listPageSize === undefined ? {} : { listPageSize: dependencies.listPageSize }) });
+  const handler = createMcpHandler({ tools: bindings, resources, prompts, ...(dependencies.maximumToolResultBytes === undefined ? {} : { maximumToolResultBytes: dependencies.maximumToolResultBytes }), ...(dependencies.maximumResourceBytes === undefined ? {} : { maximumResourceBytes: dependencies.maximumResourceBytes }), ...(dependencies.listPageSize === undefined ? {} : { listPageSize: dependencies.listPageSize }), ...(dependencies.toolResultContent === undefined ? {} : { toolResultContent: dependencies.toolResultContent }) });
   return Object.freeze({
     handle: handler.handle,
     drainNotifications: handler.drainNotifications,

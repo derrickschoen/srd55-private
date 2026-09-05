@@ -70,6 +70,9 @@ export class InteractiveTestElement {
     this.style = {
       setProperty: (property: string, value: string) => {
         styleValues.set(property, value);
+        this.setAttribute('style', [...styleValues]
+          .map(([name, declaration]) => `${name}: ${declaration}`)
+          .join('; '));
       },
       getPropertyValue: (property: string) => styleValues.get(property) ?? '',
     } as CSSStyleDeclaration;

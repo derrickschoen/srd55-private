@@ -71,8 +71,22 @@ import {
 import type { QueuedSpeculativePlanEnvelope } from '../src/vtt/speculative-plan-types';
 import { mcpRequestMeta } from '../src/vtt/mcp/handler';
 import {
-  createEngineMcpRuntime, loadArenaFixture, type EngineMcpLauncherManifest,
+  createEngineMcpRuntime, engineMcpUiFeedbackSpoolPath, loadArenaFixture,
+  type EngineMcpBoardImageBinding,
+  type EngineMcpLauncherManifest,
 } from '../src/vtt/mcp/entrypoint';
+import {
+  engineUiFeedbackSchema,
+  type EngineUiFeedback,
+} from '../src/vtt/mcp/schemas';
+import {
+  BoardSnapshotService,
+  boardStateDigest,
+  readValidatedBoardImage,
+  type BoardImageArtifact,
+  type BoardImageSource,
+  type BoardSnapshotCapture,
+} from './ai-dm-board-snapshot';
 import type { IntelMode, OverridePolicy, TurnContextDeltaBase } from '../src/vtt/mcp/engine-server';
 import {
   DEFAULT_OVERRIDE_POLICY,
@@ -193,6 +207,15 @@ const INITIAL_COORDINATOR_STATE: PersistedCoordinatorState = {
 };
 const RULES_SOURCE = { get: () => null } as const;
 
+export const BOARD_IMAGE_MODES = ['off', 'png', 'capture_only'] as const;
+export type BoardImageMode = (typeof BOARD_IMAGE_MODES)[number];
+
+export interface ConversationBoardSnapshotService {
+  readonly outputDirectory: string;
+  capture(input: BoardSnapshotCapture): Promise<BoardImageArtifact>;
+  close(): Promise<void>;
+}
+
 interface ConversationConfigBase {
   readonly intelMode: IntelMode;
   readonly overridePolicy: OverridePolicy;
@@ -217,6 +240,7 @@ interface ConversationConfigBase {
   readonly reactionAskDefault: UnattendedReactionAskDefault;
   readonly captureRlData: boolean;
   readonly localOpenAi: LocalOpenAiConfig | null;
+  readonly boardImageMode: BoardImageMode;
 }
 
 export type ConversationConfig = ConversationConfigBase & AgentInstructionSource;
@@ -457,7 +481,38 @@ export type ConversationTerminalOutcome = {
   readonly result: 'party_defeated';
 };
 
-export interface ConversationRow {
+export type ConversationBoardImage =
+  | { readonly mode: 'off' }
+  | {
+      readonly mode: 'png';
+      readonly sha256: string;
+      readonly bytes: number;
+      readonly width: number;
+      readonly height: number;
+      readonly captureMs: number;
+      readonly relativePath: `board-images/${string}.png`;
+    }
+  | {
+      readonly mode: 'capture_only';
+      readonly sha256: string;
+      readonly bytes: number;
+      readonly width: number;
+      readonly height: number;
+      readonly captureMs: number;
+      readonly relativePath: `board-images/${string}.png`;
+    };
+
+export const BOARD_IMAGE_SCALE_STARTUP_INSTRUCTION = 'Each grid square on the board image is 5 feet; distances in the text are in feet.';
+export const UI_FEEDBACK_STARTUP_INSTRUCTION = 'After an accepted round decision, you may call engine.submit_ui_feedback once to report how useful the board picture was. This optional feedback is never scored and never affects the encounter.';
+
+export interface ConversationBoardImageEvidence {
+  readonly capturedAtUnixMs: number;
+  readonly primaryDispatchStartedAtUnixMs: number;
+  readonly source: BoardImageSource;
+  readonly chromiumVersion: string;
+}
+
+interface ConversationRowBase {
   readonly knowledgeModel: 'engine_state';
   readonly hiddenOptions: readonly HiddenOptionRecord[];
   readonly intelMode: IntelMode;
@@ -475,6 +530,9 @@ export interface ConversationRow {
   readonly round: number;
   readonly cli: ConversationCli;
   readonly model: string;
+  readonly effort: ConversationEffort;
+  readonly escalationEffort: ConversationEffort | null;
+  readonly uiFeedback: EngineUiFeedback | null;
   readonly thinkMode: LocalThinkMode | null;
   readonly contextRevision: number;
   readonly projectionRevision: number;
@@ -498,6 +556,7 @@ export interface ConversationRow {
   readonly executionErrorClass: ConversationExecutionErrorClass | null;
   readonly proposalId: string | null;
   readonly timeToFirstAction: number;
+  readonly endToEndWall: number;
   readonly wallPerCreature: number;
   readonly tokens: ConversationTokenCounts;
   readonly callUsage: readonly AgentCallUsage[];
@@ -565,6 +624,18 @@ export interface ConversationRow {
   readonly rlData?: ConversationRlData;
 }
 
+export type ConversationBoardImageFields =
+  | {
+      readonly boardImage: { readonly mode: 'off' };
+      readonly boardImageEvidence: null;
+    }
+  | {
+      readonly boardImage: Exclude<ConversationBoardImage, { readonly mode: 'off' }>;
+      readonly boardImageEvidence: ConversationBoardImageEvidence;
+    };
+
+export type ConversationRow = ConversationRowBase & ConversationBoardImageFields;
+
 /** The complete row shape written by the conversation runner. */
 export type ConversationRowPersisted = ConversationRow;
 
@@ -604,7 +675,13 @@ export interface ConversationRunOptions {
   readonly roomStates?: readonly EncounterState[];
   readonly store?: BrowserSessionStore;
   readonly adapter?: AgentSessionAdapter;
+  readonly boardSnapshotService?: ConversationBoardSnapshotService;
+  readonly boardSnapshotServiceFactory?: (
+    outputDirectory: string,
+  ) => Promise<ConversationBoardSnapshotService>;
   readonly onPrimaryDispatchStart?: () => void;
+  /** Test evidence seam for exact model-facing primary invocation bytes. */
+  readonly onPrimaryInvocation?: (invocation: AgentInvocation) => void;
   readonly onSpeculationDispatchStart?: () => void;
   /** Test-only lower pacing cap; production derives 60 seconds per eligible PC, capped at five minutes. */
   readonly speculationBudgetMs?: number;
@@ -649,6 +726,13 @@ export interface ConversationRunOptions {
   ) => ScriptedPartyPlan;
   /** Explicit sitting boundary; omitted means the sitting remains resumable. */
   readonly endSession?: boolean;
+}
+
+export function boardImageOutputDirectory(
+  config: Pick<ConversationConfig, 'cwd' | 'outPath'>,
+): string {
+  const identity = sha256(resolve(config.outPath)).slice(0, 20);
+  return resolve(config.cwd, 'dnd-slim-runs', `board-capture-${identity}-images`);
 }
 
 function requiredValue(argv: readonly string[], index: number, option: string): string {
@@ -724,6 +808,7 @@ export function parseConversationArgs(argv: readonly string[], cwd = process.cwd
       '--intel-mode',
       '--override-policy',
       '--renderer-profile',
+      '--board-image',
       '--local-base-url', '--local-model', '--local-api-key', '--local-think',
     ].includes(option ?? '')) throw new TypeError(`Unknown conversation option ${option ?? '<missing>'}.`);
     values.set(option ?? '', requiredValue(argv, index, option ?? '<missing>'));
@@ -803,6 +888,16 @@ export function parseConversationArgs(argv: readonly string[], cwd = process.cwd
   const rendererProfile = values.has('--renderer-profile')
     ? rendererProfileSchema.parse(JSON.parse(values.get('--renderer-profile') ?? ''))
     : DEFAULT_RENDERER_PROFILE;
+  const boardImageMode = values.get('--board-image') ?? 'off';
+  if (!BOARD_IMAGE_MODES.includes(boardImageMode as BoardImageMode)) {
+    throw new TypeError('--board-image must be off, png, or capture_only.');
+  }
+  if (boardImageMode === 'png' && selectedCli === 'local-openai') {
+    throw new TypeError('--board-image png requires an MCP-backed CLI.');
+  }
+  if (boardImageMode === 'png' && transport !== 'mcp_minimal') {
+    throw new TypeError('--board-image png requires --transport mcp_minimal.');
+  }
   return {
     intelMode,
     overridePolicy: overridePolicy as OverridePolicy,
@@ -828,6 +923,7 @@ export function parseConversationArgs(argv: readonly string[], cwd = process.cwd
     reactionAskDefault,
     captureRlData,
     localOpenAi,
+    boardImageMode: boardImageMode as BoardImageMode,
   };
 }
 
@@ -1675,6 +1771,17 @@ function takeTurnContext(path: string): CapturedTurnContext | null {
   return raw === undefined ? null : capturedTurnContext(raw);
 }
 
+function takeUiFeedback(path: string | null): EngineUiFeedback | null {
+  if (path === null) return null;
+  let source: string;
+  try { source = readFileSync(path, 'utf8'); } catch { return null; }
+  const entries = source.split('\n').filter((line) => line.trim().length > 0);
+  if (entries.length > 1) throw new TypeError('UI feedback spool contains more than one report for a round.');
+  const encoded = entries[0];
+  if (encoded === undefined) return null;
+  return engineUiFeedbackSchema.parse(JSON.parse(encoded) as unknown);
+}
+
 async function driveScriptedMcp(
   cwd: string,
   launcherPath: string,
@@ -1898,6 +2005,24 @@ async function driveScriptedMcp(
     calls += 1;
     if (submitResult === null || submitResult['isError'] !== false) {
       throw new Error('engine.submit_round_proposals failed in the SIMULATED client.');
+    }
+    const submitted = asRecord(submitResult['structuredContent']);
+    if (manifest.boardImage !== undefined && submitted?.['status'] === 'proposed') {
+      const feedbackResult = asRecord(await mcpRequest(client, 'tools/call', {
+        name: 'engine.submit_ui_feedback',
+        arguments: {
+          readability: 4,
+          what_helped: ['The board picture made positions and nearby obstacles easy to compare.'],
+          what_confused: [],
+          missing: [],
+          suggestion: 'Keep the board picture aligned with the same round context.',
+        },
+      }));
+      calls += 1;
+      if (feedbackResult === null || feedbackResult['isError'] !== false ||
+        asRecord(feedbackResult['structuredContent'])?.['status'] !== 'recorded') {
+        throw new Error('engine.submit_ui_feedback failed in the SIMULATED client.');
+      }
     }
     return {
       calls,
@@ -2228,20 +2353,26 @@ async function writeLauncher(input: {
     readonly spoolPath: string;
     readonly subjectSources: KbSubjectSources;
   };
+  readonly boardImage?: EngineMcpBoardImageBinding;
 }): Promise<{
   readonly manifestPath: string;
   readonly recoveryManifestPath: string;
   readonly spoolPath: string;
   readonly turnContextSpoolPath: string;
+  readonly uiFeedbackSpoolPath: string | null;
 }> {
   const fixturePath = join(input.directory, `${input.name}-fixture.json`);
   const spoolPath = join(input.directory, `${input.name}-proposals.jsonl`);
   const turnContextSpoolPath = join(input.directory, `${input.name}-turn-context.jsonl`);
   const manifestPath = join(input.directory, `${input.name}-launcher.json`);
   const recoveryManifestPath = join(input.directory, `${input.name}-launcher-full.json`);
+  const uiFeedbackSpoolPath = input.boardImage === undefined
+    ? null
+    : engineMcpUiFeedbackSpoolPath(spoolPath);
   await writeFile(fixturePath, input.snapshot.fixtureJson, 'utf8');
   await writeFile(spoolPath, '', 'utf8');
   await writeFile(turnContextSpoolPath, '', 'utf8');
+  if (uiFeedbackSpoolPath !== null) await writeFile(uiFeedbackSpoolPath, '', 'utf8');
   const capsule = input.snapshot.capsule;
   const request = capsule.request;
   if (request === null) throw new Error('Conversation launcher requires a pending request.');
@@ -2259,6 +2390,7 @@ async function writeLauncher(input: {
     room: input.room, historyKind: input.historyKind, toolProfile: 'dm',
     rendererProfile: input.rendererProfile,
     initiativeProjection: capsule.projection.initiative,
+    ...(input.boardImage === undefined ? {} : { boardImage: input.boardImage }),
     ...(request.phase === 'speculative' ? {
       requestedActorIds: request.actors,
       speculativeRequest: {
@@ -2289,7 +2421,7 @@ async function writeLauncher(input: {
   await writeFile(manifestPath, canonicalJson(manifest), 'utf8');
   const { turnContextDeltaBase: _turnContextDeltaBase, ...fullManifest } = manifest;
   await writeFile(recoveryManifestPath, canonicalJson(fullManifest), 'utf8');
-  return { manifestPath, recoveryManifestPath, spoolPath, turnContextSpoolPath };
+  return { manifestPath, recoveryManifestPath, spoolPath, turnContextSpoolPath, uiFeedbackSpoolPath };
 }
 
 function fullTurnContextBase(
@@ -2814,9 +2946,12 @@ async function runConversationWithConfiguredIntel(
 ): Promise<ConversationRunResult> {
   const partyPolicy = options.partyPolicyOverride ?? config.partyPolicy;
   const knowledgeBase = await loadKnowledgeBase(config);
+  const startupInstructions = config.boardImageMode === 'png'
+    ? `${knowledgeBase.startupInstructions}\n\n${BOARD_IMAGE_SCALE_STARTUP_INSTRUCTION}\n${UI_FEEDBACK_STARTUP_INSTRUCTION}`
+    : knowledgeBase.startupInstructions;
   const freshSessionContext: FreshSessionContext = {
     knowledgeBaseBundleHash: knowledgeBase.combinedStartupHash,
-    startupInstructions: knowledgeBase.startupInstructions,
+    startupInstructions,
   };
   const repoCommit = await readRepoCommit(config.cwd);
   await writeFile(config.outPath, '', 'utf8');
@@ -2943,7 +3078,7 @@ async function runConversationWithConfiguredIntel(
 
     for (let round = 1; round <= config.rounds; round += 1) {
       const generationBeforeRound = journal.agentSession()?.generation ?? 0;
-      const started = performance.now();
+      const roundStarted = performance.now();
       const modelCallsBeforeRound = adapter.modelCalls;
       observedToolCalls = 0;
       observedTurnContextCalls = 0;
@@ -3028,6 +3163,37 @@ async function runConversationWithConfiguredIntel(
       const initialInvocationOutput = initialDecisionCatalog === null
         ? { kind: 'tool_driven' } as const
         : await structuredFinalOutput(config.decisionTransport, artifacts, `${key}-initial`, initialDecisionCatalog);
+      let boardImageArtifact: BoardImageArtifact | null = null;
+      let boardImagePrimaryDispatchStartedAtUnixMs: number | null = null;
+      let boardImageBinding: EngineMcpBoardImageBinding | undefined;
+      if (config.boardImageMode !== 'off') {
+        const snapshotService = options.boardSnapshotService;
+        if (snapshotService === undefined) {
+          throw new Error('Capturing board-image modes require a live arena-scoped snapshot service.');
+        }
+        const source: BoardImageSource = {
+          room,
+          round: rendererState.round,
+          revision: rendererState.revision,
+          stateDigest: boardStateDigest(rendererState),
+        };
+        boardImageArtifact = await snapshotService.capture({ state: rendererState, source });
+        boardImagePrimaryDispatchStartedAtUnixMs = Date.now();
+        await readValidatedBoardImage({
+          artifact: boardImageArtifact,
+          artifactRoot: snapshotService.outputDirectory,
+          state: rendererState,
+          source,
+          primaryDispatchStartedAtUnixMs: boardImagePrimaryDispatchStartedAtUnixMs,
+        });
+        if (config.boardImageMode === 'png') {
+          boardImageBinding = {
+            artifactRoot: snapshotService.outputDirectory,
+            artifact: boardImageArtifact,
+            primaryDispatchStartedAtUnixMs: boardImagePrimaryDispatchStartedAtUnixMs,
+          };
+        }
+      }
       const initialLauncher = await writeLauncher({
         rendererProfile: config.rendererProfile,
         overridePolicy: config.overridePolicy,
@@ -3037,7 +3203,9 @@ async function runConversationWithConfiguredIntel(
         ...(lastSeenTurnContext === undefined ? {} : {
           turnContextDeltaBase: lastSeenTurnContext,
         }),
+        ...(boardImageBinding === undefined ? {} : { boardImage: boardImageBinding }),
       });
+      const started = performance.now();
       let localInitialProposal: RoundTurnProposalEnvelope | null = null;
       const initialToolSession = config.cli === 'local-openai'
         ? inProcessDmToolSession({
@@ -3120,6 +3288,8 @@ async function runConversationWithConfiguredIntel(
       let escalationSessionId: string | null = null;
       let capturedRlData: ConversationRlData | undefined;
       let correctionTurnContextSpoolPath: string | null = null;
+      let correctionUiFeedbackSpoolPath: string | null = null;
+      let uiFeedback: EngineUiFeedback | null = null;
       let recordedCorrectionTurnContext: CapturedTurnContext | null = null;
       let initialCalls = 0;
       let adjustmentCalls = 0;
@@ -3258,7 +3428,7 @@ async function runConversationWithConfiguredIntel(
                 'speculate_round', sourceSnapshot.capsule, RULES_SOURCE, undefined, speculativeContext,
               ),
               launcher.manifestPath,
-              knowledgeBase.startupInstructions,
+              startupInstructions,
               planner,
               launcher.recoveryManifestPath,
               toolSession,
@@ -3728,7 +3898,7 @@ async function runConversationWithConfiguredIntel(
         const completedCorrectionProposal = recordedAdjustmentCorrectionProposal();
         if (config.captureRlData && adjustmentProposal?.submittedArguments !== undefined) {
           adjustmentRlData.push(rlCapture(
-            knowledgeBase.startupInstructions,
+            startupInstructions,
             adjustmentTurnContext,
             adjustmentProposal,
             config.intelMode,
@@ -3747,7 +3917,7 @@ async function runConversationWithConfiguredIntel(
           completedCorrectionProposal?.submittedArguments !== undefined &&
           adjustmentCorrectionContext !== null) {
           adjustmentRlData.push(rlCapture(
-            knowledgeBase.startupInstructions,
+            startupInstructions,
             adjustmentCorrectionContext,
             completedCorrectionProposal,
             config.intelMode,
@@ -3853,7 +4023,7 @@ async function runConversationWithConfiguredIntel(
                 ? `${retryNote}${turnContextPrompt(lastSeenTurnContext, config.intelMode)}\n\n${primaryPrompt}`
                 : primaryPrompt,
               initialLauncher.manifestPath,
-              journal.agentSession() === null ? knowledgeBase.startupInstructions : null,
+              journal.agentSession() === null ? startupInstructions : null,
               basePlanner,
               initialLauncher.recoveryManifestPath,
               initialToolSession,
@@ -3861,6 +4031,7 @@ async function runConversationWithConfiguredIntel(
               initialInvocationOutput,
             );
             initialDispatchPlanner = plannerAttribution(primaryInvocation);
+            options.onPrimaryInvocation?.(primaryInvocation);
             options.onPrimaryDispatchStart?.();
             initialCalls += 1;
             let turn: AgentTurnResult;
@@ -3991,8 +4162,10 @@ async function runConversationWithConfiguredIntel(
           ...(correctionTurnContextBase === undefined ? {} : {
             turnContextDeltaBase: correctionTurnContextBase,
           }),
+          ...(boardImageBinding === undefined ? {} : { boardImage: boardImageBinding }),
         });
         correctionTurnContextSpoolPath = correctionLauncher.turnContextSpoolPath;
+        correctionUiFeedbackSpoolPath = correctionLauncher.uiFeedbackSpoolPath;
         let localCorrectionProposal: RoundTurnProposalEnvelope | null = null;
         const correctionToolSession = config.cli === 'local-openai'
           ? inProcessDmToolSession({
@@ -4053,7 +4226,7 @@ async function runConversationWithConfiguredIntel(
               : null;
             const proposalRlData = proposalTurnContext === null
               ? undefined
-              : rlCapture(knowledgeBase.startupInstructions, proposalTurnContext, proposal, config.intelMode, {
+              : rlCapture(startupInstructions, proposalTurnContext, proposal, config.intelMode, {
                   repoCommit,
                   model: config.model,
                   effort: config.effort,
@@ -4458,7 +4631,7 @@ async function runConversationWithConfiguredIntel(
               ...(exhaustionIntelCapture === null ? {} : { intelCapture: exhaustionIntelCapture }),
             };
             capturedRlData = rlCapture(
-              knowledgeBase.startupInstructions,
+              startupInstructions,
               recordedCorrectionTurnContext ?? getPlannedCorrectionTurnContext(),
               syntheticProposal,
               config.intelMode,
@@ -4867,12 +5040,15 @@ async function runConversationWithConfiguredIntel(
         refusals.push(error instanceof Error ? error.message : String(error));
       }
       const wall = performance.now() - started;
+      const endToEndWall = performance.now() - roundStarted;
       const binding = journal.agentSession();
       rowTurnContext = takeTurnContext(initialLauncher.turnContextSpoolPath) ?? rowTurnContext;
       if (correctionTurnContextSpoolPath !== null) {
         recordedCorrectionTurnContext = takeTurnContext(correctionTurnContextSpoolPath) ??
           recordedCorrectionTurnContext;
       }
+      uiFeedback = takeUiFeedback(correctionUiFeedbackSpoolPath) ??
+        takeUiFeedback(initialLauncher.uiFeedbackSpoolPath);
       const recordedMonsterProposals = acceptedSubmission ??
         (segmentMonsterPlan.size === 0
           ? null
@@ -4938,6 +5114,27 @@ async function runConversationWithConfiguredIntel(
       if (outcome === 'authorized' && refusals.length > 0) {
         throw new Error('Authorized arena row cannot carry execution refusals.');
       }
+      const boardImageFields: ConversationBoardImageFields = config.boardImageMode === 'off'
+        ? { boardImage: { mode: 'off' }, boardImageEvidence: null }
+        : boardImageArtifact === null || boardImagePrimaryDispatchStartedAtUnixMs === null
+          ? (() => { throw new Error('Capturing board-image row cannot persist without a validated board artifact.'); })()
+          : {
+              boardImage: {
+                mode: config.boardImageMode,
+                sha256: boardImageArtifact.sha256,
+                bytes: boardImageArtifact.bytes,
+                width: boardImageArtifact.width,
+                height: boardImageArtifact.height,
+                captureMs: boardImageArtifact.captureMs,
+                relativePath: boardImageArtifact.relativePath,
+              },
+              boardImageEvidence: {
+                capturedAtUnixMs: boardImageArtifact.capturedAtUnixMs,
+                primaryDispatchStartedAtUnixMs: boardImagePrimaryDispatchStartedAtUnixMs,
+                source: { ...boardImageArtifact.source },
+                chromiumVersion: boardImageArtifact.chromiumVersion,
+              },
+            };
       const row: ConversationRow = {
         knowledgeModel: 'engine_state',
         hiddenOptions,
@@ -4952,6 +5149,10 @@ async function runConversationWithConfiguredIntel(
         roundProtocolVersion: ROUND_PROTOCOL_VERSION,
         startingRoomDigest,
         room, round, cli: config.cli, model: config.model,
+        effort: config.effort,
+        escalationEffort: config.escalationEffort,
+        uiFeedback,
+        ...boardImageFields,
         thinkMode: config.localOpenAi?.thinkMode ?? null,
         contextRevision, projectionRevision: capsuleRevision,
         sessionId: rolloutSessionId,
@@ -4973,6 +5174,7 @@ async function runConversationWithConfiguredIntel(
         suggestedPlay: suggestedPlan?.play ?? null,
         suggestionAdopted: classifySuggestionAdoption(suggestedPlan?.proposals ?? null, acceptedSubmission),
         timeToFirstAction: wall,
+        endToEndWall,
         wallPerCreature: wall / Math.max(1, livingMonsterIds(engineSession.currentState()).length),
         tokens: totalsTokens,
         callUsage: structuredClone(roundCallUsage),
@@ -5067,9 +5269,20 @@ export async function runConversation(
   const environmentKey = 'DND_LANE_INTEL_MODE';
   const previousMode = process.env[environmentKey];
   process.env[environmentKey] = config.intelMode;
+  let ownedSnapshotService: ConversationBoardSnapshotService | null = null;
   try {
-    return await runConversationWithConfiguredIntel(config, options);
+    if (config.boardImageMode !== 'off' && options.boardSnapshotService === undefined) {
+      const outputDirectory = boardImageOutputDirectory(config);
+      ownedSnapshotService = options.boardSnapshotServiceFactory === undefined
+        ? await BoardSnapshotService.start({ outputDirectory })
+        : await options.boardSnapshotServiceFactory(outputDirectory);
+    }
+    return await runConversationWithConfiguredIntel(config, {
+      ...options,
+      ...(ownedSnapshotService === null ? {} : { boardSnapshotService: ownedSnapshotService }),
+    });
   } finally {
+    await ownedSnapshotService?.close();
     if (previousMode === undefined) delete process.env[environmentKey];
     else process.env[environmentKey] = previousMode;
   }
