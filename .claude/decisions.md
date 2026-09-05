@@ -11346,3 +11346,27 @@ review at native size beside neighbours and under overlays — each rule express
 Dispatched as classic round 5 (codex sol high, D532) on a new worktree from round 4's d5c74dd0; the D549 colour-
 blind/high-contrast presets move to round 6. Implementers read clean-room/final only; the craft rules are pasted
 into the brief as general pixel-art principles (no sources, no game names).
+
+## CLASSIC ROUND 4 PANEL — three of four seats HOLD (2026-09-05 16:55)
+
+Fable (game-feel): HOLD — MAJOR 1 badge/ring frames use the floor's own stone/neutral ramps so token presence
+collapses (CR 1.00 on token 4); MAJOR 2 `fern` badge disc is the exact HP-uninjured green; MAJOR 3 the badge tab
+covers heads and the ring cuts shoulders (chrome z-index over sprite). Its ranked MS Paint diagnosis: the floor field
+(two-value slabs + checkerboard dither + random brightness + crack strokes, ~70% of pixels), the rune/dim scribble
+field, the identical manhole column, framed "profile picture" tokens, silent hazards. Codex sol high
+(ui-readability): HOLD — MAJOR roster BLOODIED (cloth-warm 3 on #111113 ≈ 4.04:1) and UNKNOWN text below the 4.5:1
+floor the round claimed only for numerals; MINOR rail reserves 40 px per object and leaves dead space. Codex sol
+medium (machine-readability): HOLD — identity, HP and adjacency remain operationally ambiguous at delivered scale
+(26×18 px badges, roster 1,100 px away); highest-leverage change: a large OCR-safe coordinate-first manifest row per
+creature sized against the model's normalised image; primer v7 should point Q1/Q3/Q7 at the roster coordinates.
+Opus (pixel-craft, medium) still running.
+
+Supervisor verification: `fern` = badgeRamp('moss', 4) and HP uninjured ink = ramp('moss', 4) — same colour,
+confirmed by grep (board-chrome.ts:144, :255). BLOODIED = ramp('cloth-warm', 3) on roster background #111113
+(styles.css); contrast 4.04:1 by my own WCAG computation using the hex codex reported for that ramp step. Both majors
+stand. Verdict: HOLD. The D536 bar is not demonstrated (round-3 probe: only light passes); round-4 probe running.
+
+Disposition: round 5 (D557) is already redrawing the art at 128 px on a branch from this commit; the chrome majors
+(frame ramps outside the floor palette, fern replaced, chrome below the sprite or moved off the head, roster text
+contrast ≥ 4.5:1 for every HP word, manifest row sizing, primer pointer) are queued as a round-5 amendment to be sent
+when its current turn ends (13:20 rule), not merged as a separate round-4b that would conflict in board-chrome.ts.
