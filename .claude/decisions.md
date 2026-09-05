@@ -10886,3 +10886,12 @@ resumed with that spec dropped. Iso D13: the first launch hit the Fable session 
 12:05. Research: all fifteen judges-only files complete (12,668 lines, committed privately); clean-room synthesis
 dispatched to three seats (Opus at medium); codex leakage check follows the merge. Brainstorm (owner request):
 three seats drafting questions for the owner.
+
+CLASSIC ROUND 2 (2026-09-05 12:40): 96fbc02c on claude/light-variant — plates inside their own token cell with outlined
+leaders under all plates, OBJECT-sigil tags in the legend rail with coordinates, primer v5, rescore provenance in
+rows, exact live names. Codex 559/9697 locked; my gate tsc 0, sg 0, focused 91/91, two specs 4/4; my mutation
+(plate bottom 12 px past the cell) killed four chrome tests. Capture viewed: plates no longer cover any other cell;
+the plate text is now two lines of small pixel font inside a 64-px cell — whether Luna reads it is the probe's
+question. Fifteen-seat review dispatched (Fable, Opus at medium, codex sol high × five perspectives, judges given
+the private research notes for their perspective). The 24-state probe on this round runs after the verdicts if
+no seat holds on a machine-readability blocker; otherwise the fix round comes first.
