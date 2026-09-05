@@ -2,6 +2,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { z } from 'zod';
 import { canonicalJson } from '../src/commands/canonical-json';
+import { engineUiFeedbackSchema } from '../src/vtt/mcp/schemas';
 
 export const R1_10_SEEDS = [
   5_117_001, 5_117_002, 5_117_003, 5_117_004, 5_117_005,
@@ -82,6 +83,27 @@ const overrideRejectionSchema = z.object({
   actorId: z.string().nullable(),
   code: z.literal('OVERRIDE_UNJUSTIFIED'),
 }).strict();
+const boardImageSchema = z.discriminatedUnion('mode', [
+  z.object({ mode: z.literal('off') }).strict(),
+  z.object({
+    mode: z.literal('png'),
+    sha256: z.string().regex(/^[a-f0-9]{64}$/u),
+    bytes: safeIntegerSchema.min(24).max(1_000_000),
+    width: safeIntegerSchema.min(1),
+    height: safeIntegerSchema.min(1),
+    captureMs: z.number().finite().nonnegative(),
+    relativePath: z.string().regex(/^board-images\/[a-f0-9]{64}\.png$/u),
+  }).strict(),
+  z.object({
+    mode: z.literal('capture_only'),
+    sha256: z.string().regex(/^[a-f0-9]{64}$/u),
+    bytes: safeIntegerSchema.min(24).max(1_000_000),
+    width: safeIntegerSchema.min(1),
+    height: safeIntegerSchema.min(1),
+    captureMs: z.number().finite().nonnegative(),
+    relativePath: z.string().regex(/^board-images\/[a-f0-9]{64}\.png$/u),
+  }).strict(),
+]);
 
 export interface NeutralAction {
   readonly kind: string;
@@ -124,6 +146,8 @@ const commonArenaRowSchema = z.object({
   planner: primaryPlannerSchema.optional(),
   overrideKinds: z.array(overrideKindSchema).optional(),
   overrideRejections: z.array(overrideRejectionSchema).optional(),
+  boardImage: boardImageSchema.optional(),
+  uiFeedback: engineUiFeedbackSchema.nullable().optional(),
   // Required in cross-era mode, where it is the arm partition key.
   repoCommit: z.string().min(1).optional(),
 });
@@ -268,6 +292,8 @@ interface CommonValidatedArenaRow {
   readonly overrideRejections: readonly z.infer<typeof overrideRejectionSchema>[];
   readonly roundNarrative: string | null;
   readonly authorizedPlan: readonly z.infer<typeof authorizedPlanEntrySchema>[] | null;
+  readonly boardImage?: z.infer<typeof boardImageSchema>;
+  readonly uiFeedback?: z.infer<typeof engineUiFeedbackSchema> | null;
 }
 
 interface PreShiftValidatedArenaRow extends CommonValidatedArenaRow {
@@ -336,6 +362,8 @@ export interface JudgePacketEntry {
   readonly outcome: string;
   readonly attribution: 'model_authorized' | 'engine_default' | 'not_model_authorized';
   readonly executedPlan: readonly NeutralPlanEntry[] | null;
+  readonly boardImage?: z.infer<typeof boardImageSchema>;
+  readonly uiFeedback?: z.infer<typeof engineUiFeedbackSchema> | null;
   readonly rubric: BlindRubric;
 }
 
@@ -543,6 +571,18 @@ function validateRow(
     }
   }
   const sourceRow = parsedRow.row;
+  const hasBoardImage = sourceRow.boardImage !== undefined;
+  const hasUiFeedback = sourceRow.uiFeedback !== undefined;
+  if (hasBoardImage !== hasUiFeedback) {
+    throw new TypeError(`${sourceLabel} must carry boardImage and uiFeedback together.`);
+  }
+  if (sourceRow.boardImage !== undefined && sourceRow.boardImage.mode !== 'png' && sourceRow.uiFeedback !== null) {
+    throw new TypeError(`${sourceLabel} cannot carry UI feedback without a PNG board image.`);
+  }
+  if (sourceRow.boardImage !== undefined && sourceRow.boardImage.mode !== 'off' &&
+    sourceRow.boardImage.relativePath !== `board-images/${sourceRow.boardImage.sha256}.png`) {
+    throw new TypeError(`${sourceLabel}.boardImage path must match its SHA-256.`);
+  }
   if (crossEra && !partitionCrossEraByRowEra && sourceRow.repoCommit === undefined) {
     throw new TypeError(`${sourceLabel}.repoCommit is required in cross-era mode (it is the arm partition key).`);
   }
@@ -573,6 +613,10 @@ function validateRow(
     overrideRejections: sourceRow.overrideRejections ?? [],
     roundNarrative: sourceRow.roundNarrative,
     authorizedPlan: sourceRow.authorizedPlan,
+    ...(sourceRow.boardImage === undefined ? {} : {
+      boardImage: sourceRow.boardImage,
+      uiFeedback: sourceRow.uiFeedback ?? null,
+    }),
   };
   if (parsedRow.rowEra === 'pre_shift') return { ...common, rowEra: 'pre_shift' };
   const postShiftRow = parsedRow.row;
@@ -860,6 +904,10 @@ function buildPacket(
                 (reasonVisibleArms === null || reasonVisibleArms.has(row.arm)),
             )
           : null,
+        ...(row.boardImage === undefined ? {} : {
+          boardImage: row.boardImage,
+          uiFeedback: row.uiFeedback ?? null,
+        }),
         rubric: rubric(outcome),
       };
     }),

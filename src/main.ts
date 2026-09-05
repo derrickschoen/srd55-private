@@ -54,8 +54,9 @@ if (localEncounterLaunch) {
   if (encounterRoot === null) throw new Error('Application root #app is missing.');
   const view = launchUrl.searchParams.get('view') === 'dm' ? 'dm' : 'player';
   const sessionId = launchUrl.searchParams.get('session') ?? 'reference-encounter';
+  const boardSnapshotMode = launchUrl.searchParams.get('boardSnapshot') === '1';
   void import('./vtt/encounter-app').then(({ mountEncounterVtt }) => {
-    const mounted = mountEncounterVtt(encounterRoot, { view, sessionId });
+    const mounted = mountEncounterVtt(encounterRoot, { view, sessionId, boardSnapshotMode });
     window.addEventListener('pagehide', () => mounted.close(), { once: true });
   });
 } else {

@@ -838,6 +838,54 @@ describe('engine MCP dual-handshake full surface conformance', () => {
     expect(runtime.proposals).toHaveLength(1);
   });
 
+  it('validates bounded UI feedback and returns a typed second-call rule error', async () => {
+    const png = Buffer.alloc(24);
+    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).copy(png);
+    png.writeUInt32BE(1, 16);
+    png.writeUInt32BE(1, 20);
+    const { state, runtime } = await fixtureRuntime({
+      requestedActorCount: 1,
+      toolProfile: 'dm',
+      boardImageContent: { type: 'image', mimeType: 'image/png', data: png.toString('base64') },
+    });
+    expect(runtime.toolSurface.tools.map(({ name }) => name)).toContain('engine.submit_ui_feedback');
+    const validFeedback = {
+      readability: 5,
+      what_helped: ['Clear positions'],
+      what_confused: [],
+      missing: [],
+      suggestion: 'Keep the same scale.',
+    } as const;
+    expect(structured(toolCall(runtime.handler, 'engine.submit_ui_feedback', validFeedback))).toEqual({
+      status: 'rule_error', code: 'UI_FEEDBACK_DECISION_NOT_ACCEPTED',
+    });
+    for (const invalid of [
+      { ...validFeedback, readability: 0 },
+      { ...validFeedback, readability: 6 },
+      { ...validFeedback, what_helped: Array.from({ length: 6 }, () => 'item') },
+      { ...validFeedback, what_confused: ['x'.repeat(281)] },
+      { ...validFeedback, missing: ['x'.repeat(281)] },
+      { ...validFeedback, suggestion: 'x'.repeat(281) },
+    ]) {
+      const result = toolCall(runtime.handler, 'engine.submit_ui_feedback', invalid);
+      expect(result['isError']).toBe(true);
+      expect(JSON.stringify(result)).toContain('Invalid tool arguments');
+    }
+    expect(structured(toolCall(
+      runtime.handler,
+      'engine.submit_round_proposals',
+      happyArguments('engine.submit_round_proposals', state, runtime),
+    ))['status']).toBe('proposed');
+    expect(structured(toolCall(runtime.handler, 'engine.submit_ui_feedback', validFeedback)))
+      .toEqual({ status: 'recorded' });
+    expect(runtime.uiFeedback).toEqual([validFeedback]);
+    expect(structured(toolCall(runtime.handler, 'engine.submit_ui_feedback', {
+      ...validFeedback,
+      readability: 1,
+    }))).toEqual({ status: 'rule_error', code: 'UI_FEEDBACK_ALREADY_SUBMITTED' });
+    expect(runtime.uiFeedback).toEqual([validFeedback]);
+  });
+
   it('D466 G1 fills a minimal submission from its launch binding and replays it exactly once', async () => {
     const { state, runtime } = await fixtureRuntime();
     const facts = fixtureFacts(state, runtime);

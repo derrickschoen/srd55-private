@@ -152,7 +152,7 @@ describe('D373 detection UI projections', () => {
     expect(coordinator.state().activeCombatant).toBe(setup.reactor.id);
   });
 
-  it('hidden_token_rendered: hidden occupants become fog-only cells in DM and shared board data', () => {
+  it('hidden_token_rendered: full DM view retains hidden occupants while player data conceals them', () => {
     const setup = encounter();
     const hidden: EncounterState = {
       ...setup.state,
@@ -168,9 +168,9 @@ describe('D373 detection UI projections', () => {
         [setup.reactor.id]: REFERENCE_ENCOUNTER_ART.combatantTokens['combatant:training-brute']!,
       },
     }).find((cell) => cell.key === '0,1');
-    expect(dmCell?.layers).toContainEqual(expect.objectContaining({ role: 'fog' }));
-    expect(dmCell?.token).toBeNull();
-    expect(dmBoard.combatants.map((entry) => entry.id)).not.toContain(setup.reactor.id);
+    expect(dmCell?.layers).not.toContainEqual(expect.objectContaining({ role: 'fog' }));
+    expect(dmCell?.token?.id).toBe(setup.reactor.id);
+    expect(dmBoard.combatants.map((entry) => entry.id)).toContain(setup.reactor.id);
 
     const playerView = projectPlayerView(hidden, {
       seatId: 'seat:detection-ui',

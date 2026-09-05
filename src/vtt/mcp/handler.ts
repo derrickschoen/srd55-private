@@ -5,6 +5,7 @@ export const MCP_CLASSIC_PROTOCOL_VERSIONS = Object.freeze([
   '2025-11-25',
 ] as const);
 export const MCP_TOOL_RESULT_MAX_BYTES = 64 * 1024;
+export const MCP_IMAGE_RESULT_MAX_BYTES = 1_000_000;
 export const MCP_RESOURCE_MAX_BYTES = 128 * 1024;
 export const MCP_STATIC_LIST_TTL_MS = 300_000;
 
@@ -30,6 +31,21 @@ export interface McpToolBinding {
   readonly validateOutput: (value: unknown) => readonly SchemaViolation[];
   readonly execute: (value: unknown) => unknown;
 }
+export interface McpTextContentBlock {
+  readonly type: 'text';
+  readonly text: string;
+}
+export interface McpImageContentBlock {
+  readonly type: 'image';
+  readonly mimeType: 'image/png';
+  readonly data: string;
+}
+export type McpToolContentBlock = McpTextContentBlock | McpImageContentBlock;
+export type McpToolResultContent = (input: {
+  readonly name: string;
+  readonly argumentsValue: Readonly<Record<string, unknown>>;
+  readonly structuredValue: unknown;
+}) => readonly McpImageContentBlock[];
 export interface McpResourceDescriptor { readonly uri: string; readonly name: string; readonly description: string; readonly mimeType: 'application/json' }
 export interface McpResourceTemplateDescriptor { readonly uriTemplate: string; readonly name: string; readonly description: string; readonly mimeType: 'application/json' }
 export interface McpResourceContent { readonly uri: string; readonly mimeType: 'application/json'; readonly text: string }
@@ -109,7 +125,32 @@ function completeList(field: string, values: readonly unknown[], nextCursor: str
     ? page
     : { resultType: 'complete', ...page, ttlMs: MCP_STATIC_LIST_TTL_MS, cacheScope: 'public', _meta: RESPONSE_META };
 }
-function toolResult(value: unknown, maximumBytes: number, classic: boolean): unknown {
+function decodedPng(block: McpImageContentBlock): Buffer {
+  if (block.mimeType !== 'image/png') throw new TypeError('MCP image content must use image/png.');
+  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(block.data)) {
+    throw new TypeError('MCP image content is not canonical base64.');
+  }
+  const bytes = Buffer.from(block.data, 'base64');
+  if (bytes.byteLength > MCP_IMAGE_RESULT_MAX_BYTES) {
+    throw new RangeError(
+      `IMAGE_RESULT_TOO_LARGE: ${String(bytes.byteLength)} bytes exceeds the ${String(MCP_IMAGE_RESULT_MAX_BYTES)}-byte limit.`,
+    );
+  }
+  const signature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+  if (bytes.byteLength < 24 || !bytes.subarray(0, signature.byteLength).equals(signature) ||
+    bytes.readUInt32BE(16) < 1 || bytes.readUInt32BE(20) < 1) {
+    throw new TypeError('MCP image content is not a dimensioned PNG.');
+  }
+  return bytes;
+}
+
+function toolResult(
+  value: unknown,
+  maximumBytes: number,
+  classic: boolean,
+  images: readonly McpImageContentBlock[],
+): unknown {
+  if (images.length > 1) throw new RangeError('MCP tool result may contain at most one image block.');
   const proseDocument = isRecord(value) &&
     (value['format'] === 'caveman_prose' || value['format'] === 'regular_prose') &&
     typeof value['document'] === 'string'
@@ -118,9 +159,11 @@ function toolResult(value: unknown, maximumBytes: number, classic: boolean): unk
   const text = proseDocument ?? JSON.stringify(value);
   if (text === undefined) throw new TypeError('Tool result is not JSON serializable.');
   const bytes = new TextEncoder().encode(text).byteLength;
+  for (const block of images) decodedPng(block);
+  const content: readonly McpToolContentBlock[] = [{ type: 'text', text }, ...images];
   const result = bytes > maximumBytes
     ? { isError: true, content: [{ type: 'text', text: `TOOL_RESULT_TOO_LARGE: ${bytes} UTF-8 bytes exceeds the ${maximumBytes}-byte limit.` }] }
-    : { content: [{ type: 'text', text }], structuredContent: value, isError: false };
+    : { content, structuredContent: value, isError: false };
   return classic ? result : { resultType: 'complete', ...result, _meta: RESPONSE_META };
 }
 function toolExecutionError(error: unknown, classic: boolean): unknown {
@@ -146,6 +189,7 @@ function listPage(kind: string, values: readonly unknown[], cursor: unknown, pag
 export function createMcpHandler(input: {
   readonly tools: readonly McpToolBinding[]; readonly resources?: McpResourceProvider; readonly prompts?: McpPromptProvider;
   readonly maximumToolResultBytes?: number; readonly maximumResourceBytes?: number; readonly listPageSize?: number;
+  readonly toolResultContent?: McpToolResultContent;
 }): McpHandler {
   const maximumToolResultBytes = input.maximumToolResultBytes ?? MCP_TOOL_RESULT_MAX_BYTES;
   const maximumResourceBytes = input.maximumResourceBytes ?? MCP_RESOURCE_MAX_BYTES;
@@ -286,7 +330,9 @@ export function createMcpHandler(input: {
           if (violations.length > 0 || typeof name !== 'string') return invalidParams(parsed.id, violations);
           const binding = toolsByName.get(name);
           if (binding === undefined) return responseError(parsed.id, INVALID_PARAMS, `Unknown tool: ${name}`, { kind: 'unknown_tool', tool: name });
-          const argumentsValue = params['arguments'] ?? {};
+          const argumentsValue: Readonly<Record<string, unknown>> = params['arguments'] === undefined
+            ? {}
+            : params['arguments'] as Readonly<Record<string, unknown>>;
           const argumentViolations = binding.validateArguments(argumentsValue);
           if (argumentViolations.length > 0) return { jsonrpc: '2.0', id: parsed.id, result: toolExecutionError(`Invalid tool arguments: ${JSON.stringify({ violations: argumentViolations })}`, classicSession !== null) };
           try {
@@ -294,7 +340,12 @@ export function createMcpHandler(input: {
             const outputViolations = binding.validateOutput(value);
             return outputViolations.length > 0
               ? { jsonrpc: '2.0', id: parsed.id, result: toolExecutionError(`Tool output violated outputSchema: ${JSON.stringify({ violations: outputViolations })}`, classicSession !== null) }
-              : { jsonrpc: '2.0', id: parsed.id, result: toolResult(value, maximumToolResultBytes, classicSession !== null) };
+              : { jsonrpc: '2.0', id: parsed.id, result: toolResult(
+                  value,
+                  maximumToolResultBytes,
+                  classicSession !== null,
+                  input.toolResultContent?.({ name, argumentsValue, structuredValue: value }) ?? [],
+                ) };
           } catch (error) { return { jsonrpc: '2.0', id: parsed.id, result: toolExecutionError(error, classicSession !== null) }; }
         }
         default: return responseError(parsed.id, METHOD_NOT_FOUND, `Method not found: ${parsed.method}`);

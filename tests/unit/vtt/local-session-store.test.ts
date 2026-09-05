@@ -7,6 +7,7 @@ import { DmEncounterHost } from '../../../src/vtt/dm-encounter-host';
 import {
   BrowserSessionWriteError,
   IndexedDbBrowserSessionStore,
+  importBrowserSessionDurably,
 } from '../../../src/vtt/local-session-store';
 import {
   MemoryBrowserSessionStore,
@@ -18,6 +19,40 @@ import {
   type LoadedPartyMember,
 } from '../../../src/vtt/party-pack';
 import { composeStoredCharacterEncounter } from '../../../src/vtt/stored-character-encounter';
+
+it('upload import acknowledgement waits for the durable flush before resolving', async () => {
+  const events: string[] = [];
+  let acknowledge: (() => void) | undefined;
+  const flush = new Promise<void>((resolveFlush) => {
+    acknowledge = resolveFlush;
+  });
+  const sessionId = encounterSessionId('session:durable-upload-unit');
+  const importing = importBrowserSessionDurably({
+    import: (bytes) => {
+      events.push(`import:${bytes}`);
+      return sessionId;
+    },
+    flush: async () => {
+      events.push('flush:start');
+      await flush;
+      events.push('flush:acknowledged');
+    },
+  }, 'fixture-save-bytes').then((resolved) => {
+    events.push('resolved');
+    return resolved;
+  });
+
+  await Promise.resolve();
+  expect(events).toEqual(['import:fixture-save-bytes', 'flush:start']);
+  acknowledge?.();
+  await expect(importing).resolves.toBe(sessionId);
+  expect(events).toEqual([
+    'import:fixture-save-bytes',
+    'flush:start',
+    'flush:acknowledged',
+    'resolved',
+  ]);
+});
 
 class MemoryStorage implements Storage {
   readonly #values = new Map<string, string>();

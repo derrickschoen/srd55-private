@@ -161,7 +161,8 @@ function activeHitPointMaximum(
       : maximum, base);
 }
 
-function hitPointKnowledge(
+// ART-SEAM (D516): exported so the DM board's HP bar uses THIS classifier, never a re-derived threshold.
+export function hitPointKnowledge(
   state: EncounterState,
   target: EncounterCombatantState,
 ): ProjectedHitPointKnowledge {

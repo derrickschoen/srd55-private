@@ -1,5 +1,6 @@
 import type { AssetId } from './ids';
-import { renderPixelArtSvg } from './pixel-art';
+import { base64 } from './png';
+import { renderPixelArtPng } from './pixel-art';
 import {
   STARTER_ART_MANIFEST,
   type ArtManifest,
@@ -23,13 +24,25 @@ export function resolveStarterArt(
   return Object.freeze({ manifest: row, input });
 }
 
-export function renderStarterArtSvg(
+export function renderStarterArtPng(
   id: AssetId,
   manifest: ArtManifest = STARTER_ART_MANIFEST,
-): string {
-  return renderPixelArtSvg(resolveStarterArt(id, manifest).input);
+): Uint8Array {
+  return renderPixelArtPng(resolveStarterArt(id, manifest).input.recipe);
 }
 
+const DATA_URI_CACHE = new Map<AssetId, string>();
+
+/** Rendering is pure, so the data URI for an id is memoised for the life of the module. */
 export function starterArtDataUri(id: AssetId): string {
-  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(renderStarterArtSvg(id))}`;
+  const cached = DATA_URI_CACHE.get(id);
+  if (cached !== undefined) return cached;
+  const uri = `data:image/png;base64,${base64(renderStarterArtPng(id))}`;
+  DATA_URI_CACHE.set(id, uri);
+  return uri;
+}
+
+/** For CSS custom properties: `url("data:...")`. */
+export function starterArtCssUrl(id: AssetId): string {
+  return `url("${starterArtDataUri(id)}")`;
 }
