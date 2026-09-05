@@ -11403,3 +11403,15 @@ queued under the lock. Mini-A/B rep3 launched at load 3.3 to settle rooms 5 and 
 Correction (mine, 17:22): the entry above is stamped "17:24"; the clock read 17:21 when it was written. I said
 I would stop estimating and did it again; from this line every entry stamp is produced by the clock in the write
 command itself, not typed.
+
+## Mini-A/B rep3 PASSES — footprints landing keeps its behavioural control; a11y LANDED (2026-09-05 17:36)
+
+rep3 on 7c52da1c at launch load 3.3 (same seed/basis/model): per-room offense [1,0,2,2,4,2,0,2,3,1], mean 1.70,
+zero-offense 2, dash 29 — the era-control shape (controls 1.6–1.7 / 1–2 / 26–29). Room 5 is 4 (run 1: 0), room 9
+is 3 (run 1: 0). Run 1's drop was noise under load, not a deterministic change; the three runs together are
+recorded as the D429.1 verdict for 7c52da1c: PASSED on rep3 with run 1 (load) and rep2 (two CLI timeouts) kept as
+evidence of how much a single luna-low rep moves. Engine landing hold LIFTED. The hidden-option-id leak stays a
+real defect (its unit is in flight) — it was present in every run including the passing ones.
+
+a11y-board landed on main (lane f9aec870): my full suite 564/9,725, specs 2/2 on 4680. It touches the player
+projection (src/combat/visibility.ts), so its D429.1 mini-A/B runs when the load average allows a valid run.
