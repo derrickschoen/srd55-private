@@ -10466,3 +10466,13 @@ D525 GLYPH VOCABULARY, probe (6 states, case-folded; 'light' glyphs → 'full' g
   doors — investigate whether wall-piece art or the pillar column reads as doors); adjacency regressed (glyph
   crowding or the primer's adjacency definition); difficult/HP/side need their own pass. Six boards remain noisy;
   the probe's next increment must sample more states.
+
+TWO FINDINGS from the glyph probe rows (2026-09-05 04:25):
+1. DOORS — the reference state's fact sheet has NO doors (the engine has no door world object there) but the board
+   draws door pieces from the ART PACKAGE (doorCell art), so the model faithfully reports doors at (9,1)/(9,2) that
+   the engine does not know. The picture disagrees with the engine, which is worse than a missing glyph: an AI DM
+   would act on a non-door. Ruling: in snapshot mode the board draws doors ONLY where the engine has a door world
+   object; art-package door cells become plain wall (or are projected into engine doors by the encounter author).
+   Same rule for any decorative object the engine does not track. UI unit next.
+2. ADJACENCY — the truth counts diagonal neighbours (5 ft, Chebyshev), the model reported only the orthogonal pair.
+   The primer must define adjacency as sharing an edge OR a corner. Probe inc3.
