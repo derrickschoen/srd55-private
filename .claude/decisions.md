@@ -10837,3 +10837,29 @@ describe and link), clean-room/ documents gated by a codex leakage check before 
 rounds/ for verdicts. Fifteen research units dispatched now (3 models × 5 perspectives); the synthesis into
 clean-room documents follows when they land; the two rounds now awaiting landing (iso bc0c7657, classic inc4)
 get the remaining perspective seats once the judges-only notes exist so the judges can use them.
+
+ISO ROUND 10 VERDICTS (2026-09-05 10:36, three seats on bc0c7657; full text in the private repo rounds/iso-round-10/):
+  codex: LAND (round 10, 09:05). Fable: HOLD — MAJOR: scene ignores engine mechanicalLayers and promotes art-only crates to blocking rocks; plates cover front-row sprites and detach from their tokens; artistic pool raises the engine's darkness cell to dim (needs a ruling).
+  Opus: **HOLD** — MAJOR 1 (plates unassociated from their creatures), MAJOR 2 (plates steal clicks for the wrong token), MAJOR 3 (layout margins track the live roster; worst-case plate reservation costs a zoom level), MAJOR 4 (the judged screenshot is captured off a free-running loop instead of `captureAt`), MAJOR 5 (`classic-board-identity` cannot fail for any change to the classic board).
+
+CLASSIC ROUND 1 VERDICTS (2026-09-05 10:36, three seats on a8309968 = probe inc4; full text in rounds/classic-round-1/):
+  Fable: HOLD — stem invisible at 1× and paints over the blocking plate; rescored rows unmarked and accepted by --compare; leak test can no longer fail; no primer sentence for plate placement; anchor property test restates the implementation.
+  Opus: **HOLD** — majors 1 (conventions absent from the primer, version not bumped), 2 (stems paint through neighbouring plates), 3 (stem invisible for attached plates), 4 (200-roster test restates the implementation), 5 (RESCORED label is losable and `--out` can clobber a real run), 6 (leak test replaced by an unfailable canary), 7 (object label still cell-clipped; discriminator only in the DOM). The sc
+  codex: HOLD — MAJOR: ineffective stem/plate association, fact-cell occlusion, unsafe name normalization, losable rescore provenance, and image-ambiguous object tags.
+SUPERVISOR ARBITRATION (verified in the code, 10:45): classic — the stem for a touching plate is 1–2 px in the
+plate-border colour under the plate's own border (anchorGeometry: plate.y+1 vs bottom−1), stacked stems are z-index 0
+in DOM order and cross the blocking plate's glyphs; GENERAL_PRIMER has no plate/object sentence and stays v4; the
+leak test now keys on ids/digests instead of names; rescored rows carry no marker. All confirmed → classic round 1
+HOLDS; round 2 dispatched to codex (visible outlined stems under all plates, plates never over another cell, pixel-
+font OBJECT tags, primer v5 + name canaries, rescore provenance in rows, exact live names). Iso — plates are anchored
+at the feet and blitted last with no stem and no sprite avoidance (renderer.ts 912–931); scene.ts has no reference to
+mechanicalLayers or blockedCells; the artistic light layer raises a mechanically dark cell by contract text. All
+confirmed → the iso landing candidate HOLDS despite codex's round-10 LAND; the iso landing gate was killed (its
+vitest phase had already flaked a byte-cap timing test under load 10). D13 (engine truth + plates + picking + margins)
+dispatched to Fable; D14 (the art pass: floor patchwork, near-wall lattice, key-light contrast, moss vs HP bars,
+floating weapons, shield silhouette, token rim) follows D13. RULING for D13(2): engine facts win the picture —
+mechanical darkness caps the artistic band. Both rounds' next candidates get the full D529 fifteen-seat review.
+Footprints: quiet vitest rerun 563/9718 green; browser suite 183/185 — two vtt-option-paths specs fail with
+"Cannot read properties of undefined (reading 'actual')" at createEncounter (the spec's in-page fixture predates
+schema-2 placementMode); codex resumed to fix the root cause with a unit test. The 15 research units are writing
+(nine files, 5,200 lines so far).
