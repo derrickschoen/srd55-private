@@ -11052,3 +11052,12 @@ is running; the folder opens to implementers when it agrees. SEAT-YIELD LEDGER (
 the private repo with a JSON schema, validator and six unit tests; ledgers seeded from the archived verdicts —
 85 findings across iso round 10 (8), classic round 1 (18) and classic round 2 (59); all "unverified" until the
 supervisor fills verdicts during arbitration; from classic round 3 on, every arbitration writes the ledger.
+
+CLASSIC ROUND 3 (2026-09-05 14:20): c6a7547f on claude/light-variant — D533 badges + roster box, one HP vocabulary, no
+fractional scaling, same-cell stacking, OBJECT sigils, doors out of the rail, primer v6. Codex 559/9700 locked, two
+mutations killed. My gate tsc 0, sg 0, focused 94/94, two specs 4/4; my mutation (MAX_BADGES_PER_CELL 2 → 1)
+killed three chrome tests; two earlier attempts of mine did not apply and are void. Captures viewed: badges and
+roster read clearly; several badge hues on the arena capture are close greens (a distinguishability question for
+the seats). Four-seat intermediate panel dispatched (Fable machine-readability, Opus-medium ui-readability, sol-high
+pixel-craft, sol-medium art-direction). The 24-state probe on this round started 14:20 (medium first per D536, low
+as research); D541 confirmation seeds follow for classes within 0.05 of the bar.
