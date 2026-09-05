@@ -11370,3 +11370,23 @@ Disposition: round 5 (D557) is already redrawing the art at 128 px on a branch f
 (frame ramps outside the floor palette, fern replaced, chrome below the sprite or moved off the head, roster text
 contrast ≥ 4.5:1 for every HP word, manifest row sizing, primer pointer) are queued as a round-5 amendment to be sent
 when its current turn ends (13:20 rule), not merged as a separate round-4b that would conflict in board-chrome.ts.
+
+## Round 4 panel closes 4/4 HOLD; flakes LANDED; a11y in verification (2026-09-05 17:12)
+
+Opus (pixel-craft, medium): HOLD — MAJOR badge discs have no contrast floor against the roster background (claims 5
+of 12 under 3:1, badge #1 at 1.02); MAJOR stacked bust ring at stackIndex 1 now a constant 50 px, overruns the HP
+bar and sits off-centre; MAJOR dichromacy test clears its ≥10 bar by 0.01 (spruce/graphite); MAJOR legend swatches
+and primer v7 still promise cool-blue/warm-red side rings the board no longer draws. Verified by me: the side-ring
+promise — the captures show badge-coloured rings only, and primer v7 still opens with the blue/red sentence (seen in
+the round-4 diff). The disc-contrast and ring-geometry numbers are Opus's, unverified by me; they go to round 5 as
+findings to verify in code. Also confirmed the badge ranks the crispness claims: Opus and codex both measured hard
+2×2 pixel blocks, no resampling. Seat-yield ledger written (rounds/classic-round-4/yield.json, private repo).
+
+Flakes unit LANDED on main bbf7f2bb: my full run through the new runner `npm run test:gate` at load 9: 1,863
+files / 9,722 tests passed, zero load flakes, zero retries; codex's claim (564/9,721) matches within the count
+convention. Gate scripts in dnd-slim-runs switch to `npm run test:gate` from the next landing.
+
+Licence unit: my full suite 563/564 files, 9,724/9,725 tests — the one failure is the D544-named 5-second arena
+round-robin test at 5.16 s under load 9; solo rerun in progress. a11y-board unit: codex exit 0 (claims 564/9,723
+locked, Playwright spec 1/1 on 4603, mutation player_export_leaks_hidden_creature killed); my tsc 0, sg 0, forbidden
+scan clean, focused set running. Classic round 4 browser specs 4/4 on 4640 — round 4's gate is complete.
