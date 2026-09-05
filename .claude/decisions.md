@@ -11519,3 +11519,13 @@ D536 bar (≥0.9 at medium): side and HP at the bar, light above; identity 0.89 
 confirmation run on a second seed (6203002, medium only) launched now; terrain REGRESSED 0.82→0.71 and blocked
 slipped 0.88→0.85 (both queued for the round-5 amendment together with the panel majors); doors 0.79, adjacency
 0.75, fog 0.69 remain below. Low-effort numbers are research only (D536).
+
+D560 — OWNER (2026-09-05 18:42): "Try installing ComfyUI and using it for image generation. I don't really care if it
+takes a few minutes per image on the CPU." Supervisor: local ComfyUI at ~/comfyui (outside every git tree), CPU
+only (Ryzen 9 7900X, 24 threads, AVX-512, 30 GB RAM, no GPU, 356 GB free), Python 3.12 venv via uv; models with
+output-friendly licences only — FLUX.2 Klein 4B (Apache-2.0) as the target, Stable Diffusion 1.5 (OpenRAIL-M) as
+the fast smoke model if Klein is too slow or gated; FLUX.1 [dev] and other non-commercial weights excluded even for
+references (D558). Server binds 127.0.0.1 on a port far from 4173; a headless API wrapper generates references
+into the private references folder with the D558 log; outputs never ship. Codex sol high installs and smokes it;
+the references tool gains provider "comfyui" afterwards. This replaces the Fireworks on-demand question (D558.1
+finding) — Fireworks stays for language routes only.
