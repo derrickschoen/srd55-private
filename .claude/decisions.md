@@ -11268,3 +11268,55 @@ i.e. inside the footprints landings (15ef2b24 or 7c52da1c). Bisect at
 Correction (mine, 16:11): the two entries above carry estimated clock times
 "16:20" and "16:28" that are wrong; the finding was written at 16:08 and the
 addendum at 16:10 (system clock). Content unchanged.
+
+## Tick record 16:45 — mini-A/B replicate, probe round 3, harvests (2026-09-05)
+
+**Mini-A/B replicate on 7c52da1c (rep2, same seed):** per-room offense
+[1,1,2,2,VOID,2,0,2,VOID,1]; rooms 5 and 9 refused with "Agent CLI timed
+out after 120000 ms" at load average 9.5 (quiet-machine rule: those two
+rooms are VOID, not zero). The eight valid rooms equal the era controls
+exactly, including room 2, which run 1 had at 0. Run 1's rooms 2/5/9 zeros
+are therefore unconfirmed and look like noise/load, not a deterministic
+change; rooms 5 and 9 need a quiet-machine rerun (rep3) before the engine
+landing hold lifts. The hidden-option-id leak (intel names an id the AI is
+not shown; validator accepts it) is real in every run and its codex unit
+(claude/intel-leak, dnd-wt-intel-leak) is in flight.
+
+**Probe round 3 (c6a7547f classic, 24 states, seed 6203001, my run,
+d536-probe24-r3.jsonl, 480 rows, 0 errors), mean score per class:**
+
+| class | medium | low |
+|---|---|---|
+| Q1 identity/location | 0.24 | 0.18 |
+| Q2 side | 0.45 | 0.50 |
+| Q3 HP band | 0.24 | 0.36 |
+| Q4 blocked/terrain cells | 0.82 | 0.60 |
+| Q5 light per cell | 0.91 | 0.59 |
+| Q6 doors | 0.38 | 0.36 |
+| Q7 adjacent pairs | 0.08 | 0.02 |
+| Q8 hidden creatures | 0.71 | 0.58 |
+| Q9 fog/obscured | 0.67 | 0.48 |
+| Q10 blocked cells | 0.88 | 0.88 |
+
+Against the D536 bar (every class >= 0.9 at Luna medium) only Q5 passes.
+Identity (Q1) and HP (Q3) are far below and the badge/roster round did not
+move them; this is the measurement the D556 art-techniques report speaks
+to. Rows carry primer v6; round 4 changes the primer to v7 (roster cells),
+so round 4 gets its own run.
+
+**Flakes unit (dnd-wt-flakes):** my tsc 0, sg 0. My focused run of the four
+named files at load 9.5: 3 files pass, experiment-orchestrator.test.ts
+FAILS at file level — top-level beforeAll "Hook timed out in 30000ms", 52
+tests skipped. Codex raised the test timeout but not the hook's; amendment
+sent by resume (hook timeout in that file only). Codex's own full-suite
+claim (564/9,721, no retry) stands as claimed, not verified.
+
+**Licence unit (dnd-wt-licence):** my tsc 0, sg 0, focused 52/52 (3 files).
+LICENSE-ART is 7,048 bytes, CC0 1.0 with all four sections; byte match to
+the official text is codex's claim. Full suite pending (mine).
+
+**Classic round 4 (dnd-wt-light):** codex exit 0, mutation
+roster_numeral_low_contrast shown killed; my tsc 0, sg 0; focused running.
+
+**D556 report delivered** (art-research/reports/2026-09-05-art-techniques.md,
+1,511 words, codex synthesis of four notes; private repo b78d844).
