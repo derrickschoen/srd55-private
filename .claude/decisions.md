@@ -10947,3 +10947,9 @@ I had already killed the original process, so round 3 was interrupted with three
 (pixel-art.ts, starter-art-resolver.ts, encounter-app.ts). The retried resume took over with an explicit note to
 inspect git status/diff and continue without discarding. Rule: an amendment to a running codex lane waits for the
 turn to end (or the lane is stopped FIRST, then resumed) — never both at once.
+
+D534 — OWNER (2026-09-05 13:25): research how others on game-related projects set up workflows to get good results
+from AI tools — sources no older than six months (March 2026 onward) — including the reported practice of giving
+Fable/Astra-class agents access to Blender, and the pipeline of authoring 3D models and deriving sprites from
+them. Supervisor: three codex sol seats (network-enabled sandbox, private repo workflows/ folder, different
+angles) plus one Opus-medium cross-check seat; the supervisor synthesises a plain-English report for the owner.
