@@ -44,8 +44,13 @@ function door(id: string, name: string, column: number, row: number, open: boole
   };
 }
 
-export async function referenceStates(): Promise<readonly ReferenceState[]> {
-  const arena = await loadArenaFixture(join(repositoryRoot, 'tests/fixtures/arena-basis-brutal/seed-6203002.json'));
+export async function referenceStates(arenaSeed: number | null = null): Promise<readonly ReferenceState[]> {
+  const selectedArenaSeed = arenaSeed ?? 6_203_002;
+  const arena = await loadArenaFixture(join(
+    repositoryRoot,
+    `tests/fixtures/arena-basis-brutal/seed-${String(selectedArenaSeed)}.json`,
+  ));
+  if (arenaSeed !== null) return [{ id: `arena-brutal-${String(arenaSeed)}`, state: arena }];
   const reference = createEncounter(referenceEncounterSetup());
   const referenceWithHidden: EncounterState = {
     ...reference,
@@ -94,8 +99,9 @@ export interface BoardGlyphCapture {
 export async function captureBoardGlyphModes(
   modes: readonly BoardGlyphMode[],
   outputDirectory: string,
+  arenaSeed: number | null = null,
 ): Promise<readonly BoardGlyphCapture[]> {
-  const states = await referenceStates();
+  const states = await referenceStates(arenaSeed);
   await mkdir(outputDirectory, { recursive: true });
   const captures: BoardGlyphCapture[] = [];
   for (const mode of modes) {
@@ -112,7 +118,10 @@ export async function captureBoardGlyphModes(
             stateDigest: boardStateDigest(candidate.state),
           },
         });
-        const outputPath = join(outputDirectory, `d525-glyphs-${mode}-${candidate.id}.png`);
+        const outputPath = join(
+          outputDirectory,
+          `${arenaSeed === null ? 'd525-glyphs' : 'classic-round-2'}-${mode}-${candidate.id}.png`,
+        );
         await copyFile(join(imagesRoot, artifact.relativePath), outputPath);
         captures.push({ mode, stateId: candidate.id, artifact, outputPath });
       }
@@ -120,8 +129,19 @@ export async function captureBoardGlyphModes(
       await service.close();
     }
   }
-  await writeFile(join(outputDirectory, 'd525-board-glyph-captures.json'), `${canonicalJson(captures)}\n`, 'utf8');
+  await writeFile(join(
+    outputDirectory,
+    arenaSeed === null ? 'd525-board-glyph-captures.json' : `classic-round-2-seed-${String(arenaSeed)}.json`,
+  ), `${canonicalJson(captures)}\n`, 'utf8');
   return captures;
+}
+
+function parseArenaSeed(argv: readonly string[]): number | null {
+  const index = argv.indexOf('--arena-seed');
+  if (index < 0) return null;
+  const value = Number(argv[index + 1]);
+  if (!Number.isSafeInteger(value) || value < 0) throw new RangeError('--arena-seed must be a non-negative safe integer.');
+  return value;
 }
 
 const invokedPath = process.argv[1];
@@ -129,7 +149,11 @@ if (process.env['VITEST'] !== 'true' && invokedPath !== undefined && (
   invokedPath.endsWith('/ai-dm-board-glyph-captures.ts') ||
   invokedPath.endsWith('/vite-node') || invokedPath.endsWith('/vite-node.mjs')
 )) {
-  const captures = await captureBoardGlyphModes(parseModes(process.argv), join(repositoryRoot, 'test-results'));
+  const captures = await captureBoardGlyphModes(
+    parseModes(process.argv),
+    join(repositoryRoot, 'test-results'),
+    parseArenaSeed(process.argv),
+  );
   for (const capture of captures) {
     process.stdout.write(`${capture.mode} ${capture.stateId} ${String(capture.artifact.width)}x${String(capture.artifact.height)} ${String(capture.artifact.bytes)} B sha256 ${capture.artifact.sha256} -> ${capture.outputPath}\n`);
   }

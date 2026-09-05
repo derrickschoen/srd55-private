@@ -363,7 +363,7 @@ describe('D525 board DOM per mode', () => {
     const keys = legend?.querySelectorAll('.encounter-legend-item').map((item) => item.getAttribute('data-legend-key')) ?? [];
     expect(keys).toContain('light-default');
     const markSwatches = legend?.querySelectorAll('.encounter-legend-swatch-mark') ?? [];
-    expect(markSwatches).toHaveLength(3);
-    expect(new Set(markSwatches.map((swatch) => (swatch as StyledElement).src)).size).toBe(3);
+    expect(markSwatches).toHaveLength(4);
+    expect(new Set(markSwatches.map((swatch) => (swatch as StyledElement).src)).size).toBe(4);
   });
 });

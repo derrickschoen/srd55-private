@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import {
   appendFile,
   mkdir,
@@ -35,10 +36,12 @@ import {
 
 const repositoryRoot = resolve(new URL('../', import.meta.url).pathname);
 const PROBE_VERSION = 'd519-screenshot-comprehension-v1' as const;
-const ROW_VERSION = 'd525-screenshot-comprehension-row-v5' as const;
-/** v4 (D525): coordinates, diagonal adjacency, and engine-owned doors are explicit. */
-export const PRIMER_VERSION = 'd525-general-board-primer-v4' as const;
-export const GENERAL_PRIMER = 'This is a tabletop RPG combat board viewed from above. Each grid square represents 5 feet, and tokens represent creatures. Cool-blue base plates identify party creatures; warm-red base plates identify foes. The coordinate origin is the top-left cell, whose column and row are both zero; columns increase rightward and rows increase downward, matching the zero-based labels along the board edges. Two creatures are adjacent and within 5 feet when their cells share an edge or a corner, so diagonals count. Bars under tokens show hit-point bands using the colours named in the legend. The legend box names every terrain tint (Difficult, Obscured, Bright light, Dim light, Darkness, and Fog) and every board glyph (Blocked, Object, and Light source). Doors are drawn only where the engine has a door. Interpret walls, doors, and objects as they are drawn on the board.' as const;
+const LEGACY_ROW_VERSION = 'd525-screenshot-comprehension-row-v5' as const;
+const ROW_VERSION = 'd529-screenshot-comprehension-row-v6' as const;
+export const NORMALISER_VERSION = 'd529-screenshot-name-normaliser-v2' as const;
+/** v5: plate leaders and coordinate-bearing OBJECT tags are explicit. */
+export const PRIMER_VERSION = 'd525-general-board-primer-v5' as const;
+export const GENERAL_PRIMER = 'This is a tabletop RPG combat board viewed from above. Each grid square represents 5 feet, and tokens represent creatures. Cool-blue base plates identify party creatures; warm-red base plates identify foes. A name plate is a label, not a position: the creature stands in the cell its leader touches. An OBJECT-sigil tag in the legend rail names an object, and the coordinate printed on that tag is the cell where the object stands. The coordinate origin is the top-left cell, whose column and row are both zero; columns increase rightward and rows increase downward, matching the zero-based labels along the board edges. Two creatures are adjacent and within 5 feet when their cells share an edge or a corner, so diagonals count. Bars under tokens show hit-point bands using the colours named in the legend. The legend box names every terrain tint (Difficult, Obscured, Bright light, Dim light, Darkness, and Fog) and every board glyph (Blocked, Object, and Light source). Doors are drawn only where the engine has a door. Interpret walls, doors, and objects as they are drawn on the board.' as const;
 /**
  * D525: the sentence describing how the board draws light levels, one per
  * convention. Each describes only the drawing convention — never a room fact —
@@ -179,7 +182,7 @@ export interface ProbeTokenUsage {
   readonly reasoning: number;
 }
 
-export interface ScreenshotProbeRow {
+interface ScreenshotProbeRowFields {
   readonly version: typeof ROW_VERSION;
   readonly stateId: string;
   readonly stateDigest: string;
@@ -210,6 +213,19 @@ export interface ScreenshotProbeRow {
   readonly rawAnswer: string;
   readonly error: string | null;
 }
+
+export type ScreenshotProbeRow = ScreenshotProbeRowFields & (
+  | {
+      readonly resultKind: 'generated';
+      readonly sourceFileSha256: null;
+      readonly normaliserVersion: typeof NORMALISER_VERSION;
+    }
+  | {
+      readonly resultKind: 'rescored';
+      readonly sourceFileSha256: string;
+      readonly normaliserVersion: typeof NORMALISER_VERSION;
+    }
+);
 
 export interface ProbeStateCandidate {
   readonly id: string;
@@ -493,12 +509,30 @@ export function parseProbeAnswer(question: ScreenshotQuestionId, rawAnswer: stri
 export function normalizedProbeName(name: string): string {
   return name.trim()
     .replace(/\s+/gu, ' ')
-    .replace(/^probe [^:]+:\s*/iu, '')
     .toLocaleLowerCase('en-US');
 }
 
-function normalizedCreatureAnswerName(name: string): string {
-  return normalizedProbeName(name).replace(/\s+hidden$/iu, '').trim();
+export interface ProbeNameNormalisationContext {
+  readonly source: 'live' | 'legacy-rescore';
+  readonly hiddenCreatureNames: readonly string[];
+}
+
+const LIVE_NAME_NORMALISATION: ProbeNameNormalisationContext = Object.freeze({
+  source: 'live',
+  hiddenCreatureNames: [],
+});
+
+function normalizedCreatureAnswerName(
+  name: string,
+  context: ProbeNameNormalisationContext,
+): string {
+  const folded = normalizedProbeName(name);
+  const scoped = context.source === 'legacy-rescore'
+    ? folded.replace(/^probe [^:]+:\s*/u, '')
+    : folded;
+  const withoutTag = scoped.replace(/\s+hidden$/u, '').trim();
+  const hiddenTruthNames = new Set(context.hiddenCreatureNames.map(normalizedProbeName));
+  return withoutTag !== scoped && hiddenTruthNames.has(withoutTag) ? withoutTag : scoped;
 }
 
 /**
@@ -506,10 +540,13 @@ function normalizedCreatureAnswerName(name: string): string {
  * case, so scoring compares a canonical case-folded, whitespace-collapsed
  * form while the row retains the parsed and raw model payloads for audit.
  */
-export function normalizeProbeAnswer(answer: ProbeAnswer): ProbeAnswer {
+export function normalizeProbeAnswer(
+  answer: ProbeAnswer,
+  context: ProbeNameNormalisationContext = LIVE_NAME_NORMALISATION,
+): ProbeAnswer {
   const creature = (entry: CreatureLocation): CreatureLocation => ({
     ...entry,
-    name: normalizedCreatureAnswerName(entry.name),
+    name: normalizedCreatureAnswerName(entry.name, context),
   });
   switch (answer.question) {
     case 'Q1': return { ...answer, creatures: answer.creatures.map(creature) };
@@ -664,9 +701,13 @@ export interface ProbeScore {
   readonly confusions: readonly string[];
 }
 
-export function scoreProbeAnswer(answer: ProbeAnswer, truth: ProbeAnswer): ProbeScore {
+export function scoreProbeAnswer(
+  answer: ProbeAnswer,
+  truth: ProbeAnswer,
+  context: ProbeNameNormalisationContext = LIVE_NAME_NORMALISATION,
+): ProbeScore {
   if (answer.question !== truth.question) throw new TypeError('Cannot score answers from different question classes.');
-  const answerFacts = factsForAnswer(normalizeProbeAnswer(answer));
+  const answerFacts = factsForAnswer(normalizeProbeAnswer(answer, context));
   const truthFacts = factsForAnswer(normalizeProbeTruth(truth));
   const answerKeys = new Set(answerFacts.map((fact) => fact.key));
   const truthKeys = new Set(truthFacts.map((fact) => fact.key));
@@ -1205,6 +1246,7 @@ interface ProbeTask {
   readonly model: ProbeModelSpec;
   readonly question: ScreenshotQuestionId;
   readonly truth: ProbeAnswer;
+  readonly hiddenCreatureNames: readonly string[];
 }
 
 async function runTask(
@@ -1226,6 +1268,9 @@ async function runTask(
   });
   const base = {
     version: ROW_VERSION,
+    resultKind: 'generated',
+    sourceFileSha256: null,
+    normaliserVersion: NORMALISER_VERSION,
     stateId: task.candidate.id,
     stateDigest: task.artifact.source.stateDigest,
     model: task.model.model,
@@ -1273,8 +1318,12 @@ async function runTask(
       error: error instanceof Error ? error.message : String(error),
     };
   }
-  const score = scoreProbeAnswer(answer, task.truth);
-  return { ...base, outcome: 'answered', ...score, answer, normalizedAnswer: normalizeProbeAnswer(answer), error: null };
+  const nameContext: ProbeNameNormalisationContext = {
+    source: 'live',
+    hiddenCreatureNames: task.hiddenCreatureNames,
+  };
+  const score = scoreProbeAnswer(answer, task.truth, nameContext);
+  return { ...base, outcome: 'answered', ...score, answer, normalizedAnswer: normalizeProbeAnswer(answer, nameContext), error: null };
 }
 
 interface ClassSummary {
@@ -1304,6 +1353,9 @@ export interface ComparisonProbeRow {
 }
 
 const comparisonProbeRowSchema = z.object({
+  version: z.literal(ROW_VERSION),
+  resultKind: z.literal('generated'),
+  normaliserVersion: z.literal(NORMALISER_VERSION),
   stateId: z.string().min(1),
   stateDigest: z.string().min(1),
   model: z.string().min(1),
@@ -1313,7 +1365,10 @@ const comparisonProbeRowSchema = z.object({
 }).passthrough();
 
 const savedProbeRowSchema = z.object({
-  version: z.literal(ROW_VERSION),
+  version: z.union([z.literal(LEGACY_ROW_VERSION), z.literal(ROW_VERSION)]),
+  resultKind: z.enum(['generated', 'rescored']).optional(),
+  sourceFileSha256: z.union([z.string().regex(/^[0-9a-f]{64}$/u), z.null()]).optional(),
+  normaliserVersion: z.literal(NORMALISER_VERSION).optional(),
   stateId: z.string().min(1),
   stateDigest: z.string().min(1),
   model: z.string().min(1),
@@ -1495,7 +1550,7 @@ async function readComparisonRows(path: string): Promise<readonly ComparisonProb
 
 export function strictProbeGate(rows: readonly ScreenshotProbeRow[]): boolean {
   const groups = groupedRows(rows);
-  return groups.size > 0 && [...groups.values()].every((group) =>
+  return rows.every((row) => row.resultKind === 'generated') && groups.size > 0 && [...groups.values()].every((group) =>
     classSummaries(group).every((summary) => summary.passes));
 }
 
@@ -1503,8 +1558,11 @@ export function renderProbeSummary(
   rows: readonly ScreenshotProbeRow[],
   previousRows: readonly ComparisonProbeRow[] | null = null,
   bootstrapSeed = 0,
-  kind: 'probe' | 'rescored' = 'probe',
 ): string {
+  const resultKinds = new Set(rows.map((row) => row.resultKind));
+  if (resultKinds.size !== 1) throw new TypeError('A probe summary cannot mix generated and rescored rows.');
+  const resultKind = rows[0]?.resultKind;
+  if (resultKind === undefined) throw new RangeError('A probe summary requires at least one row.');
   if (previousRows !== null) assertComparableRuns(rows, previousRows);
   const groups = new Map<string, ScreenshotProbeRow[]>();
   for (const row of rows) {
@@ -1516,7 +1574,7 @@ export function renderProbeSummary(
   const lines = [
     '# D519 screenshot comprehension probe',
     '',
-    ...(kind === 'rescored' ? ['**RESCORED ESTIMATE (image unchanged)**', ''] : []),
+    ...(resultKind === 'rescored' ? ['**RESCORED ESTIMATE (image unchanged)**', ''] : []),
     `Pass criterion: every question class has mean Jaccard accuracy >= ${PASS_THRESHOLD.toFixed(1)}.`,
     '',
     `Board glyphs: ${[...new Set(rows.map((row) => row.boardGlyphs))].sort().join(', ')}.`,
@@ -1543,16 +1601,40 @@ export function renderProbeSummary(
   return `${lines.join('\n')}\n`;
 }
 
-function rescoreSavedRow(value: unknown, rowNumber: number, path: string): ScreenshotProbeRow {
+function rescoreSavedRow(
+  value: unknown,
+  rowNumber: number,
+  path: string,
+  sourceFileSha256: string,
+  hiddenCreatureNames: readonly string[],
+): ScreenshotProbeRow {
   let saved: z.infer<typeof savedProbeRowSchema>;
   try {
     saved = savedProbeRowSchema.parse(value);
   } catch (error) {
     throw new TypeError(`Invalid saved probe row ${String(rowNumber)} in ${path}.`, { cause: error });
   }
+  const legacyGeneration = saved.version === LEGACY_ROW_VERSION;
+  if (!legacyGeneration && (
+    saved.resultKind !== 'generated' ||
+    saved.sourceFileSha256 !== null ||
+    saved.normaliserVersion !== NORMALISER_VERSION
+  )) {
+    throw new TypeError(`Saved probe row ${String(rowNumber)} in ${path} is not a generated ${ROW_VERSION} row.`);
+  }
+  if (saved.resultKind === 'rescored') {
+    throw new TypeError(`Saved probe row ${String(rowNumber)} in ${path} is already rescored.`);
+  }
   const truth = parseProbeAnswer(saved.question, canonicalJson(saved.truth));
+  const nameContext: ProbeNameNormalisationContext = {
+    source: legacyGeneration ? 'legacy-rescore' : 'live',
+    hiddenCreatureNames,
+  };
   const base = {
-    version: saved.version,
+    version: ROW_VERSION,
+    resultKind: 'rescored',
+    sourceFileSha256,
+    normaliserVersion: NORMALISER_VERSION,
     stateId: saved.stateId,
     stateDigest: saved.stateDigest,
     model: saved.model,
@@ -1598,9 +1680,9 @@ function rescoreSavedRow(value: unknown, rowNumber: number, path: string): Scree
   return {
     ...base,
     outcome: 'answered',
-    ...scoreProbeAnswer(answer, truth),
+    ...scoreProbeAnswer(answer, truth, nameContext),
     answer,
-    normalizedAnswer: normalizeProbeAnswer(answer),
+    normalizedAnswer: normalizeProbeAnswer(answer, nameContext),
     error: null,
   };
 }
@@ -1609,20 +1691,40 @@ function rescoreSavedRow(value: unknown, rowNumber: number, path: string): Scree
 export async function rescoreScreenshotProbe(
   config: ScreenshotProbeRescoreConfig,
 ): Promise<readonly ScreenshotProbeRow[]> {
-  const lines = (await readFile(config.rescorePath, 'utf8')).split('\n').filter((line) => line.trim().length > 0);
-  const rows = lines.map((line, index) => {
+  const sourceBytes = await readFile(config.rescorePath);
+  const sourceFileSha256 = createHash('sha256').update(sourceBytes).digest('hex');
+  const lines = sourceBytes.toString('utf8').split('\n').filter((line) => line.trim().length > 0);
+  const decodedRows = lines.map((line, index): unknown => {
     let decoded: unknown;
     try {
       decoded = JSON.parse(line) as unknown;
     } catch (error) {
       throw new TypeError(`Saved probe row ${String(index + 1)} in ${config.rescorePath} is not JSON.`, { cause: error });
     }
-    return rescoreSavedRow(decoded, index + 1, config.rescorePath);
+    return decoded;
+  });
+  const hiddenNamesByState = new Map<string, readonly string[]>();
+  for (let index = 0; index < decodedRows.length; index += 1) {
+    const saved = savedProbeRowSchema.parse(decodedRows[index]);
+    if (saved.question !== 'Q8') continue;
+    const truth = parseProbeAnswer('Q8', canonicalJson(saved.truth));
+    if (truth.question !== 'Q8') throw new TypeError('Saved Q8 truth parsed as another question.');
+    hiddenNamesByState.set(saved.stateDigest, truth.creatures.map((creature) => creature.name));
+  }
+  const rows = decodedRows.map((decoded, index) => {
+    const saved = savedProbeRowSchema.parse(decoded);
+    return rescoreSavedRow(
+      decoded,
+      index + 1,
+      config.rescorePath,
+      sourceFileSha256,
+      hiddenNamesByState.get(saved.stateDigest) ?? [],
+    );
   });
   if (rows.length === 0) throw new RangeError('--rescore input must contain at least one row.');
   await mkdir(resolve(config.outPath, '..'), { recursive: true });
-  await writeFile(config.outPath, rows.map((row) => `${canonicalJson(row)}\n`).join(''), 'utf8');
-  await writeFile(config.summaryPath, renderProbeSummary(rows, null, 0, 'rescored'), 'utf8');
+  await writeFile(config.outPath, rows.map((row) => `${canonicalJson(row)}\n`).join(''), { encoding: 'utf8', flag: 'wx' });
+  await writeFile(config.summaryPath, renderProbeSummary(rows), { encoding: 'utf8', flag: 'wx' });
   return rows;
 }
 
@@ -1667,7 +1769,14 @@ export async function runScreenshotProbe(
     }
     const tasks = captured.flatMap(({ candidate, artifact, sheet }) =>
       config.models.flatMap((model) => SCREENSHOT_QUESTION_IDS.map((question): ProbeTask => ({
-        candidate, artifact, model, question, truth: truthAnswer(sheet, question),
+        candidate,
+        artifact,
+        model,
+        question,
+        truth: truthAnswer(sheet, question),
+        hiddenCreatureNames: sheet.combatants
+          .filter((combatant) => combatant.hiddenFromPlayers)
+          .map((combatant) => combatant.displayName),
       }))));
     const rows = await mapConcurrent(tasks, config.simulate ? tasks.length : REAL_CALL_CONCURRENCY,
       (task) => runTask(task, answerer, schemas, config.imagesRoot, config.primer, config.generation, config.boardGlyphs));
@@ -1686,7 +1795,7 @@ async function main(): Promise<void> {
   if (argv.includes('--rescore')) {
     const config = parseScreenshotProbeRescoreArgs(argv);
     const rows = await rescoreScreenshotProbe(config);
-    process.stdout.write(renderProbeSummary(rows, null, 0, 'rescored'));
+    process.stdout.write(renderProbeSummary(rows));
     return;
   }
   const config = parseScreenshotProbeArgs(argv);

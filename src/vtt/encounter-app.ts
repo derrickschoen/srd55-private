@@ -293,6 +293,7 @@ export function renderBoard(
   },
   // ART-SEAM (D525): the snapshot page overrides the package's glyph mode from its URL.
   boardGlyphs?: BoardGlyphMode,
+  boardSnapshotMode = false,
 ): HTMLDivElement {
   const art = encounterArtForBoard(projection, boardGlyphs);
   const models = encounterBoardRenderModel(projection, art);
@@ -305,6 +306,7 @@ export function renderBoard(
   board.dataset.artPackage = art.id;
   board.dataset.boardGlyphs = art.boardGlyphs;
   board.dataset.boardAudience = provenance === undefined ? 'player' : 'dm';
+  if (boardSnapshotMode) board.dataset.boardSnapshot = 'true';
   if (provenance !== undefined) {
     board.dataset.sourceRevision = String(provenance.revision);
     board.dataset.sourceRound = String(provenance.round);
@@ -377,7 +379,7 @@ export function renderBoard(
       placed.dataset.blocksLineOfSight = String(object.blocking.lineOfSight);
       placed.dataset.cover = object.blocking.cover;
       placed.dataset.lightClass = object.lightClass;
-      if (
+      if (!boardSnapshotMode &&
         model.column === object.position.column &&
         model.row === object.position.row
       ) {
@@ -459,7 +461,7 @@ export function renderBoard(
     board.append(svg);
   }
   // ART-SEAM (D516): the DM board gains names, HP bars, coordinates and a legend; the player board does not.
-  if (provenance !== undefined) renderBoardChrome(board, projection, art.boardGlyphs, models);
+  if (provenance !== undefined) renderBoardChrome(board, projection, art.boardGlyphs, models, boardSnapshotMode);
   return board;
 }
 
@@ -1366,7 +1368,7 @@ class DmEncounterView {
       revision: projection.encounter.revision,
       round: projection.board.round,
       stateDigest: projection.stateDigest,
-    }, this.boardGlyphs));
+    }, this.boardGlyphs, this.boardSnapshotMode));
     if (movementPreview !== null) this.#shell.append(renderMovementDangerLegend(movementPreview));
   }
 

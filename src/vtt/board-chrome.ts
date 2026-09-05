@@ -21,6 +21,7 @@ import {
   CELL_GLYPH_SIZE,
   HIDDEN_GLYPH,
   HIDDEN_GLYPH_LABEL,
+  OBJECT_GLYPH,
   cellGlyphOrigin,
   type BoardGlyphMode,
   type CellGlyphKind,
@@ -67,20 +68,25 @@ export const BOARD_BORDER_PX = 2;
 export const COORDINATE_GUTTER_PX = 24;
 export const LEGEND_HEIGHT_PX = 120;
 export const LEGEND_GAP_PX = 8;
-export const NAMEPLATE_PADDING_PX = 4;
+export const NAMEPLATE_PADDING_PX = 1;
 export const NAMEPLATE_BORDER_PX = 1;
-export const NAMEPLATE_STACK_GAP_PX = 2;
-export const NAMEPLATE_MAX_LINES = 2;
+export const NAMEPLATE_MAX_LINES = 4;
 /** Names at or below this normalized character count stay on one line. */
-export const NAMEPLATE_SINGLE_LINE_CHARACTER_LIMIT = 14;
+export const NAMEPLATE_SINGLE_LINE_CHARACTER_LIMIT = 9;
 export const NAMEPLATE_STEM_THICKNESS_PX = 2;
-/** Sideways attempts before a colliding plate stacks vertically; bounds the placement loop. */
-export const MAX_HORIZONTAL_SHIFTS = 8;
+/** Every rendered leader must remain visibly associated at a 1× capture. */
+export const STEM_MIN_PX = 8;
+export const STEM_INK_HEX = '#eef0f5';
+export const STEM_OUTLINE_HEX = '#0d0f14';
+export const NAMEPLATE_CELL_INSET_PX = 1;
+export const NAMEPLATE_TEXT_SCALE = 1;
 export const HP_BAR_WIDTH_PX = 40;
 export const HP_BAR_HEIGHT_PX = 4;
 export const HP_BAR_BORDER_PX = 1;
 /** Where the HP bar's top border sits inside its cell; the bottom glyph row must end above it (D525). */
 export const HP_BAR_TOP_PX = CHROME_TILE_PX - HP_BAR_HEIGHT_PX - 2 * HP_BAR_BORDER_PX - 2;
+/** Plates finish above the HP bar and remain wholly inside their own cell. */
+export const NAMEPLATE_BOTTOM_PX = HP_BAR_TOP_PX;
 /** The last tile row a bottom-corner cell glyph's outline ring touches (D525). */
 export const CELL_GLYPH_RING_BOTTOM_PX = cellGlyphOrigin('blocked', CHROME_TILE_PX).y + CELL_GLYPH_SIZE;
 /** The life glyph's inset from the cell's top-right, and where it drops to under a door mark (D525). */
@@ -147,7 +153,7 @@ export interface NameplateLayout extends NameplateRequest {
   readonly y: number;
   readonly width: number;
   readonly height: number;
-  readonly placement: 'touching-token-cell' | 'stacked-with-leader';
+  readonly placement: 'inside-token-cell';
   /** The engine cell this plate identifies, even when collision stacking moves the plate away. */
   readonly anchorCell: { readonly column: number; readonly row: number };
   /** Grid-relative endpoints for the visible leader between plate and token-cell edge. */
@@ -173,8 +179,11 @@ export function nameplateSize(displayName: string, tag: NameplateTag | null): {
   const nativeHeight = text.height + (tagLayout === null ? 0 : LINE_GAP + tagLayout.height);
   return {
     text,
-    width: nativeWidth * CHROME_TEXT_SCALE + frame,
-    height: nativeHeight * CHROME_TEXT_SCALE + frame,
+    width: Math.min(
+      nativeWidth * NAMEPLATE_TEXT_SCALE + frame,
+      CHROME_TILE_PX - 2 * NAMEPLATE_CELL_INSET_PX,
+    ),
+    height: nativeHeight * NAMEPLATE_TEXT_SCALE + frame,
   };
 }
 
@@ -188,25 +197,13 @@ function anchorGeometry(
 ): Pick<NameplateLayout, 'anchorCell' | 'stem' | 'placement'> {
   const left = cell.column * CHROME_TILE_PX;
   const top = cell.row * CHROME_TILE_PX;
-  const right = left + CHROME_TILE_PX;
-  const bottom = top + CHROME_TILE_PX;
-  const centreX = left + CHROME_TILE_PX / 2;
-  const plateCentreY = plate.y + plate.height / 2;
-  const plateBelow = plateCentreY >= top + CHROME_TILE_PX / 2;
-  const token = {
-    x: centreX,
-    y: plateBelow ? bottom - 1 : top + 1,
-  };
-  const plateEndpoint = {
-    x: clamp(token.x, plate.x + 1, plate.x + plate.width - 1),
-    y: plateBelow ? plate.y + 1 : plate.y + plate.height - 1,
-  };
+  const centreX = clamp(left + CHROME_TILE_PX / 2, plate.x + 1, plate.x + plate.width - 1);
+  const plateEndpoint = { x: centreX, y: plate.y };
+  const token = { x: centreX, y: plate.y - STEM_MIN_PX };
   return {
     anchorCell: { column: cell.column, row: cell.row },
     stem: { plate: plateEndpoint, token },
-    placement: plate.x < right && plate.x + plate.width > left && plate.y <= bottom && plate.y + plate.height >= top
-      ? 'touching-token-cell'
-      : 'stacked-with-leader',
+    placement: 'inside-token-cell',
   };
 }
 
@@ -217,83 +214,35 @@ interface Rect {
   readonly height: number;
 }
 
-function overlaps(a: Rect, b: Rect): boolean {
-  return a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
-}
-
-/** The portrait area of a cell; plates may not cover another combatant's. */
-export const PORTRAIT_INSET_PX = 6;
-
-export function portraitBox(cell: { readonly column: number; readonly row: number }): Rect {
-  return {
-    x: cell.column * CHROME_TILE_PX + PORTRAIT_INSET_PX,
-    y: cell.row * CHROME_TILE_PX + PORTRAIT_INSET_PX,
-    width: CHROME_TILE_PX - 2 * PORTRAIT_INSET_PX,
-    height: CHROME_TILE_PX - 2 * PORTRAIT_INSET_PX,
-  };
-}
-
 /**
- * Places every plate centred under its cell, clamped into the grid. Anything
- * it would cover — an earlier plate or another combatant's portrait — is an
- * obstacle: the plate first slides sideways while still touching its own
- * cell, then stacks vertically. A plate whose cell has an occupied cell
- * directly below starts ABOVE its token. Row-major order makes the result a
- * pure function of the input.
+ * Places each plate wholly inside its own token cell, immediately above the
+ * HP bar. Long names wrap to at most four compact pixel-font lines; they can
+ * never expand into a fact-bearing neighbouring cell. Row-major order makes
+ * the result a pure function of the input.
  */
 export function stackLabelOffsets(
   requests: readonly NameplateRequest[],
   bounds: { readonly columns: number; readonly rows: number },
 ): readonly NameplateLayout[] {
-  const gridWidth = bounds.columns * CHROME_TILE_PX;
-  const occupied = new Set(requests.map((request) => `${String(request.column)},${String(request.row)}`));
+  if (bounds.columns < 1 || bounds.rows < 1) throw new RangeError('Nameplate bounds must contain at least one cell.');
   const ordered = [...requests].sort((left, right) =>
-    left.row - right.row || left.column - right.column || String(left.id).localeCompare(String(right.id)));
+    left.row - right.row || left.column - right.column ||
+    (String(left.id) < String(right.id) ? -1 : String(left.id) > String(right.id) ? 1 : 0));
   const placed: NameplateLayout[] = [];
   for (const request of ordered) {
-    const portraits: readonly Rect[] = requests
-      .filter((other) => other.id !== request.id)
-      .map((other) => portraitBox(other));
+    if (request.column < 0 || request.column >= bounds.columns || request.row < 0 || request.row >= bounds.rows) {
+      throw new RangeError(`Nameplate ${String(request.id)} is outside the board.`);
+    }
     const size = nameplateSize(request.displayName, request.tag);
     const centred = request.column * CHROME_TILE_PX + CHROME_TILE_PX / 2 - size.width / 2;
-    const x = Math.max(0, Math.min(Math.round(centred), Math.max(0, gridWidth - size.width)));
-    const belowOccupied = occupied.has(`${String(request.column)},${String(request.row + 1)}`);
-    const aboveY = request.row * CHROME_TILE_PX + 1 - size.height;
-    const belowY = (request.row + 1) * CHROME_TILE_PX - 1;
-    let placeAbove = belowOccupied && aboveY >= 0;
-    let y = placeAbove ? aboveY : belowY;
-    let candidateRect: Rect = { x, y, width: size.width, height: size.height };
-    const cellLeft = request.column * CHROME_TILE_PX;
-    const cellRight = cellLeft + CHROME_TILE_PX;
-    const staysAttached = (nx: number): boolean =>
-      nx >= 0 && nx + size.width <= gridWidth && nx < cellRight && nx + size.width > cellLeft;
-    let shifts = 0;
-    for (;;) {
-      const blocker = [...placed, ...portraits].find((other) => overlaps(candidateRect, other));
-      if (blocker === undefined) break;
-      if (shifts < MAX_HORIZONTAL_SHIFTS) {
-        // first choice: slide sideways past the blocker while still touching this plate's own cell
-        const options = [blocker.x + blocker.width + NAMEPLATE_STACK_GAP_PX, blocker.x - size.width - NAMEPLATE_STACK_GAP_PX]
-          .filter(staysAttached)
-          .sort((left, right) => Math.abs(left - centred) - Math.abs(right - centred));
-        const shifted = options[0];
-        if (shifted !== undefined) {
-          candidateRect = { ...candidateRect, x: shifted };
-          shifts += 1;
-          continue;
-        }
-      }
-      if (placeAbove) {
-        // stack upward; if the stack would leave the grid, give up on "above" and stack downward instead
-        y = blocker.y - size.height - NAMEPLATE_STACK_GAP_PX;
-        if (y < 0) {
-          placeAbove = false;
-          y = belowY;
-        }
-      } else {
-        y = blocker.y + blocker.height + NAMEPLATE_STACK_GAP_PX;
-      }
-      candidateRect = { ...candidateRect, y };
+    const candidateRect: Rect = {
+      x: Math.round(centred),
+      y: request.row * CHROME_TILE_PX + NAMEPLATE_BOTTOM_PX - size.height,
+      width: size.width,
+      height: size.height,
+    };
+    if (candidateRect.y - request.row * CHROME_TILE_PX < STEM_MIN_PX) {
+      throw new RangeError(`Nameplate ${String(request.id)} leaves no room for its ${String(STEM_MIN_PX)}px leader.`);
     }
     placed.push({
       ...request,
@@ -353,7 +302,7 @@ const DIFFICULT_ROW: LegendEntry = { key: 'difficult', label: 'Difficult', swatc
 const OBSCURED_TINT_ROW: LegendEntry = { key: 'obscured', label: 'Obscured', swatch: neutral(6), style: 'tint' };
 const FOG_TINT_ROW: LegendEntry = { key: 'fog', label: 'Fog', swatch: neutral(1), style: 'tint' };
 const BLOCKED_TINT_ROW: LegendEntry = { key: 'blocked', label: 'Blocked', swatch: ramp('stone', 2), style: 'glyph' };
-const OBJECT_ROW: LegendEntry = { key: 'object', label: 'Object', swatch: ramp('wood', 3), style: 'glyph' };
+const OBJECT_ROW: LegendEntry = { key: 'object', label: 'Object', glyph: OBJECT_GLYPH, style: 'mark' };
 const LIGHT_SOURCE_ROW: LegendEntry = { key: 'light-source', label: 'Light source', swatch: ramp('skin', 6), style: 'glyph' };
 const HP_ROWS: readonly LegendEntry[] = [
   { key: 'hp-uninjured', label: 'HP uninjured', swatch: HP_BAND_INK.uninjured, style: 'hp' },
@@ -513,6 +462,8 @@ function tokenChrome(
 ): HTMLDivElement {
   const layer = el('div', 'encounter-token-chrome');
   layer.setAttribute('aria-hidden', 'true');
+  const leaders = el('div', 'encounter-nameplate-leaders');
+  const plateLayer = el('div', 'encounter-nameplate-plates');
   const plates = stackLabelOffsets(
     combatants.map((combatant) => ({
       id: combatant.id,
@@ -608,6 +559,7 @@ function tokenChrome(
     nameplate.dataset.labelStyle = CREATURE_LABEL_STYLE;
     nameplate.dataset.anchorColumn = String(plate.anchorCell.column);
     nameplate.dataset.anchorRow = String(plate.anchorCell.row);
+    nameplate.dataset.placement = plate.placement;
     nameplate.dataset.lines = String(plate.text.lines.length);
     if (plate.tag !== null) nameplate.dataset.tag = plate.tag;
     styled(nameplate, {
@@ -625,29 +577,42 @@ function tokenChrome(
     stem.dataset.anchorRow = String(plate.anchorCell.row);
     stem.dataset.tokenX = String(plate.stem.token.x);
     stem.dataset.tokenY = String(plate.stem.token.y);
+    stem.dataset.plateX = String(plate.stem.plate.x);
+    stem.dataset.plateY = String(plate.stem.plate.y);
     styled(stem, {
       position: 'absolute',
       left: `${String(COORDINATE_GUTTER_PX + plate.stem.plate.x)}px`,
       top: `${String(COORDINATE_GUTTER_PX + plate.stem.plate.y)}px`,
       width: `${String(Math.hypot(stemDx, stemDy))}px`,
       height: `${String(NAMEPLATE_STEM_THICKNESS_PX)}px`,
+      background: STEM_INK_HEX,
+      'box-shadow': `0 0 0 1px ${STEM_OUTLINE_HEX}`,
       transform: `rotate(${String(Math.atan2(stemDy, stemDx))}rad)`,
       'transform-origin': '0 50%',
     });
-    layer.append(stem);
-    const text = renderPixelText(plate.text, TEXT_INK, CHROME_TEXT_SCALE);
+    leaders.append(stem);
+    const text = renderPixelText(plate.text, TEXT_INK, NAMEPLATE_TEXT_SCALE);
     const textImageNode = el('img', 'encounter-nameplate-text');
     textImageNode.alt = '';
     textImageNode.src = text.dataUri;
-    styled(textImageNode, { width: `${String(text.cssWidth)}px`, height: `${String(text.cssHeight)}px` });
+    styled(textImageNode, {
+      width: `${String(Math.min(text.cssWidth, plate.width - 2 * (NAMEPLATE_PADDING_PX + NAMEPLATE_BORDER_PX)))}px`,
+      height: `${String(text.cssHeight)}px`,
+    });
     nameplate.append(textImageNode);
     if (plate.tag !== null) {
-      const tagImage = textImage(plate.tag, NAMEPLATE_TAG_INK, 'encounter-nameplate-tag');
+      const renderedTag = renderPixelText(layoutPixelText(plate.tag, 1), NAMEPLATE_TAG_INK, NAMEPLATE_TEXT_SCALE);
+      const tagImage = el('img', 'encounter-nameplate-tag');
+      tagImage.alt = '';
+      tagImage.setAttribute('aria-hidden', 'true');
+      tagImage.src = renderedTag.dataUri;
+      styled(tagImage, { width: `${String(renderedTag.cssWidth)}px`, height: `${String(renderedTag.cssHeight)}px` });
       tagImage.dataset.tag = plate.tag;
       nameplate.append(tagImage);
     }
-    layer.append(nameplate);
+    plateLayer.append(nameplate);
   }
+  layer.append(leaders, plateLayer);
   return layer;
 }
 
@@ -687,7 +652,46 @@ function legendSwatch(entry: LegendEntry): HTMLElement {
   }
 }
 
-function legend(entries: readonly LegendEntry[], mode: BoardGlyphMode, roomDefault: LightLevel): HTMLElement {
+type ProjectedWorldObjects = NonNullable<EncounterBoardProjectionShape['worldObjects']>;
+
+function objectTagRail(objects: ProjectedWorldObjects): HTMLElement {
+  const rail = el('div', 'encounter-object-tag-rail');
+  rail.dataset.objectTagRail = 'snapshot';
+  for (const object of objects) {
+    const tag = el('span', 'encounter-object-tag');
+    tag.dataset.objectId = object.id;
+    tag.dataset.labelStyle = OBJECT_LABEL_STYLE;
+    tag.dataset.anchorColumn = String(object.position.column);
+    tag.dataset.anchorRow = String(object.position.row);
+    const sigil = renderPixelGlyph(
+      'object', OBJECT_GLYPH.rows, OBJECT_GLYPH.ink, CHROME_TEXT_SCALE, OBJECT_GLYPH.outline,
+    );
+    const sigilImage = el('img', 'encounter-object-tag-sigil');
+    sigilImage.alt = '';
+    sigilImage.setAttribute('aria-hidden', 'true');
+    sigilImage.src = sigil.dataUri;
+    styled(sigilImage, { width: `${String(sigil.cssWidth)}px`, height: `${String(sigil.cssHeight)}px` });
+    const labelText = `${object.name} (${String(object.position.column)},${String(object.position.row)})`;
+    const label = renderPixelText(layoutPixelText(labelText, 2), TEXT_INK, 1);
+    const labelImage = el('img', 'encounter-object-tag-text');
+    labelImage.alt = '';
+    labelImage.setAttribute('aria-hidden', 'true');
+    labelImage.src = label.dataUri;
+    labelImage.dataset.fullLabel = labelText;
+    styled(labelImage, { width: `${String(label.cssWidth)}px`, height: `${String(label.cssHeight)}px` });
+    tag.append(sigilImage, labelImage);
+    rail.append(tag);
+  }
+  return rail;
+}
+
+function legend(
+  entries: readonly LegendEntry[],
+  mode: BoardGlyphMode,
+  roomDefault: LightLevel,
+  objects: ProjectedWorldObjects,
+  snapshotMode: boolean,
+): HTMLElement {
   const box = el('aside', 'encounter-legend');
   box.dataset.legend = 'board-legend';
   box.dataset.boardGlyphs = mode;
@@ -702,6 +706,7 @@ function legend(entries: readonly LegendEntry[], mode: BoardGlyphMode, roomDefau
     item.append(legendSwatch(entry), textImage(entry.label, TEXT_INK, 'encounter-legend-text'));
     box.append(item);
   }
+  if (snapshotMode && objects.length > 0) box.append(objectTagRail(objects));
   return box;
 }
 
@@ -716,6 +721,7 @@ export function renderBoardChrome(
   projection: EncounterBoardProjectionShape,
   mode: BoardGlyphMode,
   cells: readonly EncounterBoardCellModel[],
+  snapshotMode = false,
 ): void {
   board.dataset.boardChrome = 'on';
   board.dataset.coordinateLabels = COORDINATE_CONVENTION;
@@ -729,6 +735,6 @@ export function renderBoardChrome(
   board.append(
     coordinateLabels(projection.bounds),
     tokenChrome(projection.combatants, projection.bounds, mode, doorCells),
-    legend(legendEntriesFor(mode, roomDefault, presence), mode, roomDefault),
+    legend(legendEntriesFor(mode, roomDefault, presence), mode, roomDefault, projection.worldObjects ?? [], snapshotMode),
   );
 }

@@ -186,6 +186,26 @@ export function cellGlyphOrigin(kind: CellGlyphKind, tileSize: number): { readon
 
 export const HIDDEN_GLYPH_LABEL = 'HIDDEN';
 
+/** The object tag and the legend share this crate-shaped sigil. It is not a
+ * cell-corner glyph: snapshot object tags live in the legend rail and print
+ * the object's coordinate explicitly. */
+export const OBJECT_GLYPH_LABEL = 'OBJECT';
+export const OBJECT_GLYPH: PixelMark = Object.freeze({
+  rows: M(
+    '..#####..',
+    '.#######.',
+    '##.....##',
+    '#########',
+    '#.#.#.#.#',
+    '#.......#',
+    '#..###..#',
+    '#.......#',
+    '#########',
+  ),
+  ink: ramp('wood', 5),
+  outline: neutral(0),
+});
+
 /** An eye crossed by a slash, on the rim of a hidden creature's dashed plate ('full' mode). */
 export const HIDDEN_GLYPH: PixelMark = Object.freeze({
   rows: M(

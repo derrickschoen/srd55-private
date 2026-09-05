@@ -1,4 +1,5 @@
 import { join, resolve } from 'node:path';
+import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { createEncounter, type EncounterState } from '../../../src/combat/encounter';
 import { armorClass, worldObjectId } from '../../../src/combat/values';
@@ -10,6 +11,7 @@ import {
   GLYPH_FAMILY_PRIMER,
   LIGHT_PRIMER,
   MIN_FACT_CLASS_STATE_COVERAGE,
+  NORMALISER_VERSION,
   PASS_THRESHOLD,
   PRIMER_VERSION,
   PROBE_CATALOGUE_SIZE,
@@ -23,6 +25,7 @@ import {
   probeCatalogueClassCoverage,
   runScreenshotProbe,
   rescoreScreenshotProbe,
+  renderProbeSummary,
   scoreProbeAnswer,
   screenshotQuestionPrompt,
   shiftedByOneRowAnswer,
@@ -212,7 +215,7 @@ describe('D519 screenshot comprehension scoring', () => {
     });
   });
 
-  it('strips the trailing plate tag from creature-keyed answers while Q8 still requires the hidden creature', () => {
+  it('keeps live names exact after case-folding and strips HIDDEN only for hidden truth creatures', () => {
     const truth = parseProbeAnswer('Q1', JSON.stringify({
       version: 'd519-screenshot-comprehension-v1',
       question: 'Q1',
@@ -223,7 +226,18 @@ describe('D519 screenshot comprehension scoring', () => {
       question: 'Q1',
       creatures: [{ name: 'Unicorn hidden', column: 2, row: 1 }],
     }));
-    expect(scoreProbeAnswer(tagged, truth)).toEqual({ score: 1, hallucinations: 0, confusions: [] });
+    expect(scoreProbeAnswer(tagged, truth).score).toBe(0);
+    expect(scoreProbeAnswer(tagged, truth, {
+      source: 'live',
+      hiddenCreatureNames: ['Unicorn'],
+    })).toEqual({ score: 1, hallucinations: 0, confusions: [] });
+
+    const prefixed = parseProbeAnswer('Q1', JSON.stringify({
+      version: 'd519-screenshot-comprehension-v1',
+      question: 'Q1',
+      creatures: [{ name: 'Probe fixture: Unicorn', column: 2, row: 1 }],
+    }));
+    expect(scoreProbeAnswer(prefixed, truth).score).toBe(0);
 
     const hiddenTruth = parseProbeAnswer('Q8', JSON.stringify({
       version: 'd519-screenshot-comprehension-v1',
@@ -274,6 +288,10 @@ describe('D524 general screenshot primer', () => {
     expect(primerPrompt).toContain('Each grid square represents 5 feet');
     expect(primerPrompt).toContain('Cool-blue base plates identify party creatures');
     expect(primerPrompt).toContain('warm-red base plates identify foes');
+    expect(primerPrompt).toContain('A name plate is a label, not a position');
+    expect(primerPrompt).toContain('creature stands in the cell its leader touches');
+    expect(primerPrompt).toContain('An OBJECT-sigil tag in the legend rail names an object');
+    expect(primerPrompt).toContain('coordinate printed on that tag is the cell where the object stands');
     expect(primerPrompt).toContain('top-left cell, whose column and row are both zero');
     expect(primerPrompt).toContain('columns increase rightward and rows increase downward');
     expect(primerPrompt).toContain('share an edge or a corner, so diagonals count');
@@ -284,21 +302,25 @@ describe('D524 general screenshot primer', () => {
     expect(primerPrompt).toContain('walls, doors, and objects as they are drawn');
 
     const candidates = await defaultProbeStateCandidates();
-    // The identity canary is deliberately non-rendered: catalogue ids and state digests identify
-    // probe arms without changing the engine-owned creature names visible on the board.
-    const identityCanaries = candidates.flatMap((candidate) => [candidate.id, boardStateDigest(candidate.state)]);
+    const leakCanaries = candidates.flatMap((candidate) => [
+      candidate.id,
+      boardStateDigest(candidate.state),
+      ...candidate.state.combatants.map((combatant) => combatant.profile.name),
+      ...candidate.state.worldObjects.map((worldObject) => worldObject.name),
+    ]);
     // D525: the leak test covers the whole primer under every board-glyph mode, not just the shared base.
     for (const mode of BOARD_GLYPH_MODES) {
       const normalizedPrimer = [GENERAL_PRIMER, ...BOARD_GLYPH_PRIMER[mode]].join(' ').toLocaleLowerCase('en-US');
-      for (const canary of identityCanaries) {
-        expect(normalizedPrimer, `${mode} primer leaked probe identity ${JSON.stringify(canary)}`)
-          .not.toContain(canary.toLocaleLowerCase('en-US'));
+      for (const canary of leakCanaries) {
+        const escapedCanary = canary.toLocaleLowerCase('en-US').replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+        expect(normalizedPrimer, `${mode} primer leaked id, digest, combatant name, or object name ${JSON.stringify(canary)}`)
+          .not.toMatch(new RegExp(`(?:^|[^a-z0-9])${escapedCanary}(?:$|[^a-z0-9])`, 'u'));
       }
     }
   });
 
   it('D525: appends the light sentence per mode plus one sentence per glyph family under full, chosen by --board-glyphs, defaulting to none', () => {
-    expect(PRIMER_VERSION).toBe('d525-general-board-primer-v4');
+    expect(PRIMER_VERSION).toBe('d525-general-board-primer-v5');
     expect(BOARD_GLYPH_PRIMER.none).toEqual([LIGHT_PRIMER.tint]);
     expect(BOARD_GLYPH_PRIMER.light).toEqual([LIGHT_PRIMER.glyph]);
     expect(BOARD_GLYPH_PRIMER.full).toEqual([
@@ -402,7 +424,14 @@ describe('D519 screenshot comprehension schema and CLI', () => {
           ? {
               ...truth,
               creatures: truth.question === 'Q1'
-                ? truth.creatures.map((creature) => ({ ...creature, name: `Probe fixture: ${creature.name} hidden` }))
+                ? truth.creatures.map((creature) => ({
+                    ...creature,
+                    name: `Probe fixture: ${creature.name}${
+                      sheet.combatants.some((combatant) =>
+                        combatant.displayName === creature.name && combatant.hiddenFromPlayers)
+                        ? ' hidden'
+                        : ''}`,
+                  }))
                 : [],
             }
           : truth;
@@ -431,15 +460,38 @@ describe('D519 screenshot comprehension schema and CLI', () => {
           error: null,
         };
       });
-      await writeFile(savedPath, rows.map((row) => `${JSON.stringify(row)}\n`).join(''), 'utf8');
+      const savedBytes = rows.map((row) => `${JSON.stringify(row)}\n`).join('');
+      await writeFile(savedPath, savedBytes, 'utf8');
       const config = parseScreenshotProbeRescoreArgs(['--rescore', savedPath, '--out', outPath]);
       const rescored = await rescoreScreenshotProbe(config);
       expect(rescored).toHaveLength(10);
       expect(rescored.every((row) => row.score === 1)).toBe(true);
+      expect(rescored.every((row) => row.version === 'd529-screenshot-comprehension-row-v6')).toBe(true);
+      expect(rescored.every((row) => row.resultKind === 'rescored')).toBe(true);
+      expect(rescored.every((row) => row.normaliserVersion === NORMALISER_VERSION)).toBe(true);
+      expect(rescored.every((row) => row.sourceFileSha256 === createHash('sha256').update(savedBytes).digest('hex'))).toBe(true);
       expect(rescored[0]?.normalizedAnswer).toEqual(truthAnswer(sheet, 'Q1'));
       expect(await readFile(config.summaryPath, 'utf8')).toContain('RESCORED ESTIMATE (image unchanged)');
+      expect(renderProbeSummary(rescored)).toContain('RESCORED ESTIMATE (image unchanged)');
+      expect(strictProbeGate(rescored)).toBe(false);
+      await expect(rescoreScreenshotProbe(config)).rejects.toThrow();
       expect(() => parseScreenshotProbeRescoreArgs(['--rescore', savedPath, '--out', savedPath]))
         .toThrow('--out must be a new path');
+
+      const comparisonConfig = parseScreenshotProbeArgs([
+        '--models', 'saved-model:low',
+        '--states', '1',
+        '--seed', '1',
+        '--images-root', join(directory, 'comparison-images'),
+        '--out', join(directory, 'comparison.jsonl'),
+        '--generation', 'comparison-generation',
+        '--compare', outPath,
+        '--simulate',
+      ]);
+      await expect(runScreenshotProbe(comparisonConfig, {
+        candidates: [{ id: 'fixture-all-classes', state: everyClassState() }],
+        snapshotService: new FakeSnapshotService(),
+      })).rejects.toThrow('Invalid comparison row 1');
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
@@ -497,7 +549,10 @@ describe('D519 screenshot comprehension schema and CLI', () => {
       expect(rows.every((row) => row.primerVersion === PRIMER_VERSION)).toBe(true);
       expect(rows.every((row) => row.generation === 'g2-classic-general')).toBe(true);
       expect(rows.every((row) => row.boardGlyphs === 'full')).toBe(true);
-      expect(rows.every((row) => row.version === 'd525-screenshot-comprehension-row-v5')).toBe(true);
+      expect(rows.every((row) => row.version === 'd529-screenshot-comprehension-row-v6')).toBe(true);
+      expect(rows.every((row) => row.resultKind === 'generated')).toBe(true);
+      expect(rows.every((row) => row.sourceFileSha256 === null)).toBe(true);
+      expect(rows.every((row) => row.normaliserVersion === NORMALISER_VERSION)).toBe(true);
       expect(rows.every((row) => row.answer !== null && row.normalizedAnswer !== null)).toBe(true);
       for (const row of rows) {
         if (row.answer === null) throw new Error('Perfect simulated answer was not recorded.');
@@ -507,6 +562,7 @@ describe('D519 screenshot comprehension schema and CLI', () => {
       expect(strictProbeGate(rows)).toBe(true);
       expect((await readFile(outPath, 'utf8')).trim().split('\n')).toHaveLength(20);
       const summary = await readFile(config.summaryPath, 'utf8');
+      expect(summary).not.toContain('RESCORED ESTIMATE');
       expect(summary).toContain('Board glyphs: full.');
       expect(summary).toContain('gpt-5.6-luna:low');
       expect(summary).toContain('gpt-5.6-luna:medium');

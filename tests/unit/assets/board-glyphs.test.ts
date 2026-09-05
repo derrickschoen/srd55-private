@@ -488,7 +488,7 @@ describe('D525 board DOM under each mode on a room with every fact class', () =>
       'object', 'light-source', 'hp-uninjured', 'hp-bloodied', 'hp-near-death', 'hp-unknown',
     ]);
     const markRows = legend?.querySelectorAll('.encounter-legend-mark').map((item) => item.getAttribute('data-legend-key')) ?? [];
-    expect(markRows).toEqual(['hidden', 'obscured', 'bright', 'dim', 'darkness', 'fog', 'blocked', 'door-closed', 'door-open']);
+    expect(markRows).toEqual(['hidden', 'obscured', 'bright', 'dim', 'darkness', 'fog', 'blocked', 'door-closed', 'door-open', 'object']);
     expect(new Set(legend?.querySelectorAll('.encounter-legend-swatch-mark').map((swatch) => (swatch as StyledElement).src)).size).toBe(markRows.length);
     expect(legendEntriesFor('full', 'bright', boardGlyphPresence(
       encounterBoardRenderModel(everyClass, encounterArtForBoard(everyClass, 'full')), everyClass.combatants,

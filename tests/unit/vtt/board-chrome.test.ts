@@ -5,7 +5,6 @@ import { projectDmView } from '../../../src/combat/visibility';
 import { GLYPH_HEIGHT, LINE_GAP, PIXEL_FONT_GLYPHS, normalizeLabelText } from '../../../src/assets/pixel-font';
 import {
   BOARD_BORDER_PX,
-  CHROME_TEXT_SCALE,
   CHROME_TILE_PX,
   COORDINATE_CONVENTION,
   COORDINATE_GUTTER_PX,
@@ -13,6 +12,10 @@ import {
   LEGEND_GAP_PX,
   LEGEND_HEIGHT_PX,
   NAMEPLATE_SINGLE_LINE_CHARACTER_LIMIT,
+  NAMEPLATE_TEXT_SCALE,
+  STEM_INK_HEX,
+  STEM_MIN_PX,
+  STEM_OUTLINE_HEX,
   CREATURE_LABEL_STYLE,
   OBJECT_LABEL_STYLE,
   boardChromeDimensions,
@@ -20,7 +23,6 @@ import {
   legendEntriesFor,
   lightLegendEntries,
   nameplateSize,
-  portraitBox,
   stackLabelOffsets,
   type NameplateLayout,
   type BoardLabelStyle,
@@ -49,21 +51,22 @@ function expectNoOverlap(plates: readonly NameplateLayout[]): void {
     for (let j = i + 1; j < plates.length; j += 1) {
       expect(overlaps(plates[i]!, plates[j]!), `${plates[i]!.displayName} vs ${plates[j]!.displayName}`).toBe(false);
     }
-    for (const other of plates) {
-      if (other.id === plates[i]!.id) continue;
-      const portrait = portraitBox(other);
-      expect(
-        overlaps(plates[i]!, portrait),
-        `${plates[i]!.displayName} covers ${other.displayName}'s portrait`,
-      ).toBe(false);
-    }
   }
+}
+
+function expectInsideAnchorCell(plate: NameplateLayout): void {
+  const left = plate.column * CHROME_TILE_PX;
+  const top = plate.row * CHROME_TILE_PX;
+  expect(plate.x, `${plate.displayName} left`).toBeGreaterThanOrEqual(left);
+  expect(plate.x + plate.width, `${plate.displayName} right`).toBeLessThanOrEqual(left + CHROME_TILE_PX);
+  expect(plate.y, `${plate.displayName} top`).toBeGreaterThanOrEqual(top);
+  expect(plate.y + plate.height, `${plate.displayName} bottom`).toBeLessThanOrEqual(top + CHROME_TILE_PX);
 }
 
 describe('stackLabelOffsets never lets two nameplates overlap', () => {
   const bounds = { columns: 6, rows: 4 };
 
-  it('stacks vertically adjacent tokens and horizontally adjacent long names', () => {
+  it('keeps adjacent long-name plates wholly inside their own cells', () => {
     const plates = stackLabelOffsets([
       { id: combatantId('combatant:a'), displayName: 'Reference Fighter', column: 2, row: 1, tag: null },
       { id: combatantId('combatant:b'), displayName: 'Hobgoblin Warrior Captain', column: 2, row: 2, tag: null },
@@ -73,31 +76,25 @@ describe('stackLabelOffsets never lets two nameplates overlap', () => {
     ], bounds);
     expect(plates).toHaveLength(5);
     expectNoOverlap(plates);
-    const occupied = new Set(plates.map((plate) => `${String(plate.column)},${String(plate.row)}`));
     for (const plate of plates) {
-      expect(plate.x).toBeGreaterThanOrEqual(0);
-      expect(plate.x + plate.width).toBeLessThanOrEqual(bounds.columns * CHROME_TILE_PX);
-      if (occupied.has(`${String(plate.column)},${String(plate.row + 1)}`)) {
-        // a token directly below: the name goes above its own portrait, never over the other token
-        expect(plate.y + plate.height, plate.displayName).toBeLessThanOrEqual(plate.row * CHROME_TILE_PX + 1);
-      } else {
-        expect(plate.y, plate.displayName).toBeGreaterThanOrEqual((plate.row + 1) * CHROME_TILE_PX - 1);
-      }
+      expectInsideAnchorCell(plate);
       expect(plate.text.lines.join(' ')).toBe(normalizeLabelText(plate.displayName));
       expect(plate.anchorCell).toEqual({ column: plate.column, row: plate.row });
+      expect(plate.placement).toBe('inside-token-cell');
+      expect(Math.hypot(
+        plate.stem.token.x - plate.stem.plate.x,
+        plate.stem.token.y - plate.stem.plate.y,
+      )).toBeGreaterThanOrEqual(STEM_MIN_PX);
       expect(plate.stem.token.x).toBeGreaterThan(plate.column * CHROME_TILE_PX);
       expect(plate.stem.token.x).toBeLessThan((plate.column + 1) * CHROME_TILE_PX);
       expect(plate.stem.token.y).toBeGreaterThan(plate.row * CHROME_TILE_PX);
       expect(plate.stem.token.y).toBeLessThan((plate.row + 1) * CHROME_TILE_PX);
     }
-    const fighter = plates.find((plate) => plate.displayName === 'Reference Fighter');
     const tiger = plates.find((plate) => plate.displayName === 'Sabertooth Tiger');
-    expect(fighter && fighter.y + fighter.height <= CHROME_TILE_PX * 1 + 1).toBe(true);
-    expect(tiger && tiger.y + tiger.height <= CHROME_TILE_PX * 1 + 1).toBe(true);
-    // D525: a HIDDEN tag adds one text line to the plate, and the placement accounts for it
+    // A HIDDEN tag adds one compact text line, and the contained placement accounts for it.
     const untagged = nameplateSize('Sabertooth Tiger', null);
     const tagged = nameplateSize('Sabertooth Tiger', 'HIDDEN');
-    expect(tagged.height).toBe(untagged.height + (LINE_GAP + GLYPH_HEIGHT) * CHROME_TEXT_SCALE);
+    expect(tagged.height).toBe(untagged.height + (LINE_GAP + GLYPH_HEIGHT) * NAMEPLATE_TEXT_SCALE);
     expect(tagged.width).toBe(untagged.width);
     expect(tiger?.height).toBe(tagged.height);
     expect(nameplateSize('Ox', 'HIDDEN').width).toBeGreaterThan(nameplateSize('Ox', null).width);
@@ -115,17 +112,18 @@ describe('stackLabelOffsets never lets two nameplates overlap', () => {
     expectNoOverlap(forward);
   });
 
-  it('clamps a plate wider than its row into the grid instead of cutting the name', () => {
+  it('contains an exceptionally long plate without dropping any name glyphs', () => {
     const [plate] = stackLabelOffsets([
       { id: combatantId('combatant:long'), displayName: 'The Extraordinarily Long Named Abomination', column: 0, row: 0, tag: null },
     ], { columns: 2, rows: 1 });
-    expect(plate?.x).toBe(0);
+    if (plate === undefined) throw new Error('Long-name plate was not laid out.');
+    expectInsideAnchorCell(plate);
     expect(plate?.text.lines.join(' ')).toBe('THE EXTRAORDINARILY LONG NAMED ABOMINATION');
   });
 
   it('keeps names on one line through the stated character limit and wraps only beyond it', () => {
     const atLimit = 'A'.repeat(NAMEPLATE_SINGLE_LINE_CHARACTER_LIMIT);
-    const beyondLimit = `${'A'.repeat(11)} ${'B'.repeat(NAMEPLATE_SINGLE_LINE_CHARACTER_LIMIT - 10)}`;
+    const beyondLimit = `${atLimit} B`;
     expect(nameplateSize(atLimit, null).text.lines).toHaveLength(1);
     expect(nameplateSize(beyondLimit, null).text.lines).toHaveLength(2);
   });
@@ -165,16 +163,11 @@ describe('stackLabelOffsets never lets two nameplates overlap', () => {
         expect(plate.stem.token.x).toBeLessThan((plate.anchorCell.column + 1) * CHROME_TILE_PX);
         expect(plate.stem.token.y).toBeGreaterThan(plate.anchorCell.row * CHROME_TILE_PX);
         expect(plate.stem.token.y).toBeLessThan((plate.anchorCell.row + 1) * CHROME_TILE_PX);
-        const anchorRect = {
-          x: plate.anchorCell.column * CHROME_TILE_PX,
-          y: plate.anchorCell.row * CHROME_TILE_PX,
-          width: CHROME_TILE_PX,
-          height: CHROME_TILE_PX,
-        };
-        const plateTouchesAnchor = plate.x < anchorRect.x + anchorRect.width &&
-          plate.x + plate.width > anchorRect.x && plate.y <= anchorRect.y + anchorRect.height &&
-          plate.y + plate.height >= anchorRect.y;
-        expect(plate.placement === 'touching-token-cell').toBe(plateTouchesAnchor);
+        expectInsideAnchorCell(plate);
+        expect(Math.hypot(
+          plate.stem.token.x - plate.stem.plate.x,
+          plate.stem.token.y - plate.stem.plate.y,
+        )).toBeGreaterThanOrEqual(STEM_MIN_PX);
       }
     }
   });
@@ -263,6 +256,49 @@ function fullNameRectCount(name: string): number {
 
 function rectCountOf(dataUri: string): number {
   return decodeURIComponent(dataUri.slice('data:image/svg+xml;charset=utf-8,'.length)).split('<rect ').length - 1;
+}
+
+function inlinePixels(node: InteractiveTestElement, property: string): number {
+  const match = node.getAttribute('style')?.match(new RegExp(`(?:^|;)${property}:(-?[0-9.]+)px(?:;|$)`, 'u'));
+  if (match?.[1] === undefined) throw new Error(`${node.className} has no ${property} pixel style.`);
+  return Number(match[1]);
+}
+
+function numericData(node: InteractiveTestElement, attribute: string): number {
+  const value = node.getAttribute(attribute);
+  if (value === null) throw new Error(`${node.className} has no ${attribute}.`);
+  return Number(value);
+}
+
+function pointInside(point: { readonly x: number; readonly y: number }, rect: GeometryRect): boolean {
+  return point.x > rect.x && point.x < rect.x + rect.width && point.y > rect.y && point.y < rect.y + rect.height;
+}
+
+function segmentCrossesRect(
+  start: { readonly x: number; readonly y: number },
+  end: { readonly x: number; readonly y: number },
+  rect: GeometryRect,
+): boolean {
+  if (pointInside(start, rect) || pointInside(end, rect)) return true;
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  let enter = 0;
+  let exit = 1;
+  for (const [p, q] of [
+    [-dx, start.x - rect.x],
+    [dx, rect.x + rect.width - start.x],
+    [-dy, start.y - rect.y],
+    [dy, rect.y + rect.height - start.y],
+  ] as const) {
+    if (p === 0) {
+      if (q <= 0) return false;
+      continue;
+    }
+    const ratio = q / p;
+    if (p < 0) enter = Math.max(enter, ratio);
+    else exit = Math.min(exit, ratio);
+  }
+  return enter < exit && exit > 0 && enter < 1;
 }
 
 describe('renderBoard: DM board with chrome, player board without', () => {
@@ -355,15 +391,132 @@ describe('renderBoard: DM board with chrome, player board without', () => {
     expect(dm.querySelectorAll('.encounter-nameplate').every((plate) => plate.getAttribute('data-tag') === null)).toBe(true);
   });
 
-  it('gives object labels a typed non-plate style discriminator', () => {
+  it('moves snapshot object labels to an unclipped pixel-tag rail with the legend OBJECT sigil', () => {
     const styles: readonly BoardLabelStyle[] = [CREATURE_LABEL_STYLE, OBJECT_LABEL_STYLE];
     expect(new Set(styles).size).toBe(2);
-    const dm = interactiveElement(renderBoard(projection, new Set(), null, provenance));
-    const objectLabel = dm.querySelector('.encounter-world-object-label');
-    const creaturePlate = dm.querySelector('.encounter-nameplate');
-    expect(objectLabel?.getAttribute('data-label-style')).toBe(OBJECT_LABEL_STYLE);
+    const liveDm = interactiveElement(renderBoard(projection, new Set(), null, provenance));
+    const liveObjectLabel = liveDm.querySelector('.encounter-world-object-label');
+    expect(liveObjectLabel?.getAttribute('data-label-style')).toBe(OBJECT_LABEL_STYLE);
+
+    const snapshotDm = interactiveElement(renderBoard(projection, new Set(), null, provenance, 'full', true));
+    const creaturePlate = snapshotDm.querySelector('.encounter-nameplate');
+    const objectTag = snapshotDm.querySelector('.encounter-object-tag');
+    const objectSigil = objectTag?.querySelector('.encounter-object-tag-sigil') as StyledElement | null;
+    const legendSigil = snapshotDm.querySelector('[data-legend-key="object"]')
+      ?.querySelector('.encounter-legend-swatch-mark') as StyledElement | null;
+    const objectText = objectTag?.querySelector('.encounter-object-tag-text');
+    expect(snapshotDm.querySelector('.encounter-world-object-label')).toBeNull();
+    expect(objectTag?.getAttribute('data-label-style')).toBe(OBJECT_LABEL_STYLE);
+    expect(objectTag?.getAttribute('data-anchor-column')).toBe('4');
+    expect(objectTag?.getAttribute('data-anchor-row')).toBe('1');
+    expect(objectText?.getAttribute('data-full-label')).toBe('Runed Brazier (4,1)');
+    expect(objectSigil?.src).toBe(legendSigil?.src);
+    expect(objectTag?.parentElement?.className).toBe('encounter-object-tag-rail');
     expect(creaturePlate?.getAttribute('data-label-style')).toBe(CREATURE_LABEL_STYLE);
-    expect(objectLabel?.getAttribute('data-label-style')).not.toBe(creaturePlate?.getAttribute('data-label-style'));
+    expect(objectTag?.getAttribute('data-label-style')).not.toBe(creaturePlate?.getAttribute('data-label-style'));
+  });
+
+  it('renders 200 seeded rosters with outlined stems under every plate and no cross-cell plate coverage', () => {
+    let randomState = 0x5eed1234;
+    const random = (): number => {
+      randomState = (Math.imul(randomState, 1_664_525) + 1_013_904_223) >>> 0;
+      return randomState / 4_294_967_296;
+    };
+    for (let sample = 0; sample < 200; sample += 1) {
+      const bounds = { columns: 3 + Math.floor(random() * 7), rows: 2 + Math.floor(random() * 6) };
+      const cellCount = bounds.columns * bounds.rows;
+      const rosterSize = 1 + Math.floor(random() * Math.min(10, cellCount));
+      const cells = Array.from({ length: cellCount }, (_, index) => index);
+      for (let index = cells.length - 1; index > 0; index -= 1) {
+        const swap = Math.floor(random() * (index + 1));
+        [cells[index], cells[swap]] = [cells[swap]!, cells[index]!];
+      }
+      const combatants = cells.slice(0, rosterSize).map((cell, index) => ({
+        id: combatantId(`combatant:rendered-${String(sample)}-${String(index)}`),
+        name: index % 3 === 0 ? `Long Rendered Creature ${String(sample)} ${String(index)}` : `Foe ${String(index)}`,
+        kind: 'monster' as const,
+        position: { column: cell % bounds.columns, row: Math.floor(cell / bounds.columns) },
+        life: 'living' as const,
+        hitPointBand: { kind: 'unknown' as const },
+        hiddenFromPlayers: index % 5 === 0,
+      }));
+      const board = interactiveElement(renderBoard({
+        bounds,
+        combatants,
+        highlightedCombatant: null,
+        adjudicatedTargets: [],
+        worldObjects: [],
+      }, new Set(), null, provenance, 'full', true));
+      const chrome = board.querySelector('.encounter-token-chrome');
+      if (chrome === null) throw new Error('Rendered board has no token chrome.');
+      const leaders = chrome.querySelector('.encounter-nameplate-leaders');
+      const plateLayer = chrome.querySelector('.encounter-nameplate-plates');
+      if (leaders === null || plateLayer === null) throw new Error('Rendered chrome lost its plate layers.');
+      expect(chrome.children.indexOf(leaders), `sample ${String(sample)} leader layer`).toBeLessThan(chrome.children.indexOf(plateLayer));
+      const plates = plateLayer.querySelectorAll('.encounter-nameplate');
+      const stems = leaders.querySelectorAll('.encounter-nameplate-stem');
+      expect(plates).toHaveLength(combatants.length);
+      expect(stems).toHaveLength(combatants.length);
+      const plateRects = new Map(plates.map((plate) => [plate.getAttribute('data-combatant-id'), {
+        x: inlinePixels(plate, 'left'),
+        y: inlinePixels(plate, 'top'),
+        width: inlinePixels(plate, 'width'),
+        height: inlinePixels(plate, 'height'),
+      }] as const));
+      for (const plate of plates) {
+        const id = plate.getAttribute('data-combatant-id');
+        const rect = plateRects.get(id);
+        if (id === null || rect === undefined) throw new Error('Rendered plate has no geometry identity.');
+        const column = numericData(plate, 'data-anchor-column');
+        const row = numericData(plate, 'data-anchor-row');
+        const cellRect = {
+          x: COORDINATE_GUTTER_PX + column * CHROME_TILE_PX,
+          y: COORDINATE_GUTTER_PX + row * CHROME_TILE_PX,
+          width: CHROME_TILE_PX,
+          height: CHROME_TILE_PX,
+        };
+        expect(rect.x).toBeGreaterThanOrEqual(cellRect.x);
+        expect(rect.y).toBeGreaterThanOrEqual(cellRect.y);
+        expect(rect.x + rect.width).toBeLessThanOrEqual(cellRect.x + cellRect.width);
+        expect(rect.y + rect.height).toBeLessThanOrEqual(cellRect.y + cellRect.height);
+        for (let otherRow = 0; otherRow < bounds.rows; otherRow += 1) {
+          for (let otherColumn = 0; otherColumn < bounds.columns; otherColumn += 1) {
+            if (otherColumn === column && otherRow === row) continue;
+            const otherCell = {
+              x: COORDINATE_GUTTER_PX + otherColumn * CHROME_TILE_PX,
+              y: COORDINATE_GUTTER_PX + otherRow * CHROME_TILE_PX,
+              width: CHROME_TILE_PX,
+              height: CHROME_TILE_PX,
+            };
+            expect(overlaps(rect, otherCell), `${id} covers cell ${String(otherColumn)},${String(otherRow)}`).toBe(false);
+          }
+        }
+      }
+      for (const stem of stems) {
+        const id = stem.getAttribute('data-combatant-id');
+        const anchor = combatants.find((combatant) => combatant.id === id)?.position;
+        if (id === null || anchor === undefined) throw new Error('Rendered stem has no anchor combatant.');
+        const start = {
+          x: COORDINATE_GUTTER_PX + numericData(stem, 'data-plate-x'),
+          y: COORDINATE_GUTTER_PX + numericData(stem, 'data-plate-y'),
+        };
+        const end = {
+          x: COORDINATE_GUTTER_PX + numericData(stem, 'data-token-x'),
+          y: COORDINATE_GUTTER_PX + numericData(stem, 'data-token-y'),
+        };
+        expect(inlinePixels(stem, 'width'), `${id} rendered length`).toBeGreaterThanOrEqual(STEM_MIN_PX);
+        expect(stem.getAttribute('style')).toContain(`background:${STEM_INK_HEX}`);
+        expect(stem.getAttribute('style')).toContain(`box-shadow:0 0 0 1px ${STEM_OUTLINE_HEX}`);
+        expect(end.x).toBeGreaterThan(COORDINATE_GUTTER_PX + anchor.column * CHROME_TILE_PX);
+        expect(end.x).toBeLessThan(COORDINATE_GUTTER_PX + (anchor.column + 1) * CHROME_TILE_PX);
+        expect(end.y).toBeGreaterThan(COORDINATE_GUTTER_PX + anchor.row * CHROME_TILE_PX);
+        expect(end.y).toBeLessThan(COORDINATE_GUTTER_PX + (anchor.row + 1) * CHROME_TILE_PX);
+        for (const [otherId, rect] of plateRects) {
+          if (otherId === id) continue;
+          expect(segmentCrossesRect(start, end, rect), `${id} stem crosses ${otherId ?? '<unknown>'}`).toBe(false);
+        }
+      }
+    }
   });
 
   it("D525: 'none' and 'light' keep the D516 rows and swap only the light rows; the glyph modes add the room default", () => {

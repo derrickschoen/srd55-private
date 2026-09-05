@@ -822,6 +822,16 @@
   pointer-events: none;
 }
 
+.encounter-nameplate-leaders,
+.encounter-nameplate-plates {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.encounter-nameplate-leaders { z-index: 0; }
+.encounter-nameplate-plates { z-index: 1; }
+
 .encounter-coordinate-label,
 .encounter-nameplate-text,
 .encounter-legend-text,
@@ -848,18 +858,26 @@
 
 .encounter-nameplate {
   display: flex;
+  flex-direction: column;
   box-sizing: border-box;
   align-items: center;
   justify-content: center;
-  padding: 4px;
+  gap: 2px;
+  padding: 1px;
   border: 1px solid #5c6578;
-  background: rgb(13 15 20 / 60%);
+  background: rgb(13 15 20 / 88%);
 }
 
 .encounter-nameplate-stem {
   display: block;
-  z-index: 0;
-  background: #5c6578;
+}
+
+/* Snapshot plates occupy only their own cell. Lift the bust so its face and
+   silhouette remain readable above the compact plate. */
+.encounter-board[data-board-snapshot='true'] .encounter-token-sprite,
+.encounter-board[data-board-snapshot='true'] .encounter-token-overlay {
+  transform: translateY(-7px) scale(0.84);
+  transform-origin: 50% 0;
 }
 
 .encounter-legend {
@@ -904,6 +922,33 @@
 }
 
 .encounter-legend-glyph .encounter-legend-swatch { border-radius: 2px; }
+
+.encounter-object-tag-rail {
+  display: flex;
+  flex: 1 0 100%;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  align-items: flex-start;
+  overflow: visible;
+}
+
+.encounter-object-tag {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 4px;
+  align-items: center;
+  padding: 2px 3px;
+  border: 1px solid #9a7446;
+  background: #12151c;
+}
+
+.encounter-object-tag-sigil,
+.encounter-object-tag-text {
+  display: block;
+  flex: 0 0 auto;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
 
 /* --- DM chrome: slate ground, 2 px pixel bevels, uppercase mono headings -- */
 
