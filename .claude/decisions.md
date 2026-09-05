@@ -11163,3 +11163,18 @@ recorded with a dated line at the top of RULES.md.
 D553 — OWNER (2026-09-05 15:12): arms, packets and fixtures of experiments that measured zero are KEPT FOR ONE
 GENERATION (until the next-generation rerun reports), then deleted. Applies to the g1 image arms, the D521
 capture_only arms and the D514 reduced-text arms: they go when the g3 (badges) generation reports.
+
+D554 — OWNER (2026-09-05 15:15): iso parked rulings — art-only crates/pillars stay dropped from the iso picture;
+the plate stem ends at the TOP of the token bundle (not the diamond centre); one plate row reserved. Applied in the
+next iso unit when D531's pause lifts.
+
+D555 — OWNER (2026-09-05 15:16): RULE CONFLICTS — when two standing rules conflict, the supervisor decides the
+resolution and LOGS the conflict in a dedicated section `.claude/RULE-CONFLICTS.md` (conflict, the rules involved
+by D-number, the supervisor's interim resolution, date) for the owner to rule on later; RULES.md marks the rule as
+"interim (see RULE-CONFLICTS)". Conflicts already known and resolved on the supervisor's interim call: (a) "never
+raise a timeout" vs D544 (raise the named flaky timeouts) — resolved as D544 for the named tests only; (b) D525/D526
+"every class ≥ 0.9 at Luna LOW" vs D536 (medium) — D536 supersedes; (c) D522 image-on default vs D535 "picture is
+redundancy" — both hold: the image stays on, the primary channel is text; (d) D529 fifteen seats every art round vs
+D532 three (+1) intermediate seats — D532 supersedes for intermediate rounds; (e) "Claude never reviews what it
+authored" vs D528 Fable seats reviewing Fable units — owner-accepted, separate sessions; (f) D505 Fable implements
+iso vs D532 codex-first — D532 governs once the pause lifts, Fable only by supervisor request.
