@@ -10259,3 +10259,19 @@ confirming attacks were out of reach and dashing was sensible"). Recurring asks:
 classic art), HP not visible (D516), weapon/spell ranges and reach not shown (path-overlay D512 covers movement
 hazards; a range-ring overlay for the acting creature is a candidate for the next screenshot increment). Off-arm
 entries read "No picture was provided; judged from plan text alone" — the blinding gap D521 closes.
+
+ISO REVIEW ROUND 2 (codex 01a06ee3, read-only, 2026-09-04 20:25): no blocker; 7 MAJOR, minors. Accepted for round D3
+(after D2 merges): (1) fitCamera cannot reach zoom 2 for the reference room because the 2× atlas density was folded
+into the logical 64×32 projection unit — separate atlas pixels from logical units and render the 2× art at integer
+scale; (2) widened frame/variant indices still compile (round-1 finding 4 not closed; the test even accepts invalid
+calls); (3) tall sprites whose heads extend past the board cannot be picked; (4) mood lighting ignores the board
+model's mechanical bright/dim cell sets — derive bands from them, keep artistic emitters separate; (5) NaN/negative
+radius maps to full light — validated radius types; (6) atlas construction failures escape the placeholder fallback;
+(7) the atlas golden was regenerated from output. FINDING AGAINST MY OWN BRIEFS: I authorized regenerating art-hash
+expectations in the C, D and D2 briefs; that contradicts the standing rule. Ruling: the hash test stays as drift
+detection but a digest change is approved only through independent pixel-level invariants (facet count, band
+luminance ratios, seam equality, palette rule) reviewed in the same commit — the D2 brief's allowance is withdrawn
+at merge time (D2's hash change must come with those invariants or be reverted). Minors: locale-dependent id sort in
+scene (use compareIdBytes), door_open unreachable from encounter data (needs a projected door state).
+PROBE (D519): the codex lane could not run real model calls (codex must write its own home during start-up; the
+sandbox forbids it) — correct stop; the K=6 run launched by the supervisor outside the sandbox at 20:27.
