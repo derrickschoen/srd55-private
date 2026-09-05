@@ -10996,3 +10996,17 @@ suite 185/185 (50.9 min), quiet full vitest 563/9719, tsc 0, sg 0; post-merge sa
 24/24. docs/specs/content-pack.schema.json changed by the repository generator only (22:40 ruling). Per D526.2
 increment 5 follows (brief from the plan's increment-5 section plus the carried coverage requirement: the
 awaiting_placement guard tested over the whole command union).
+
+D535 — OWNER (2026-09-05 13:45): run research recommendations 1, 2 and 3; Blender goes on the BACKLOG.
+(1) The AI DM's primary channel is the structured state it already receives; the board picture is redundancy and
+the human-facing view (D522's image-on default stands as redundancy). Before any further art round is judged by
+the probe, the probe gains tile-scale and board-offset sweeps so a low score can be attributed to image-patch
+alignment rather than art. (2) Capture-health checks (dimensions, non-empty and non-uniform pixels, luminance and
+entropy floors, scene revision/round/digest match) run before any vision judgement, with an invalid capture a
+hard row failure, never a model call; the probe extends from one still to a before/after pair with "what
+changed" questions scored against the engine's event log. (3) Review seats are measured: per round and per seat,
+findings raised, confirmed by supervisor verification, unique (not raised by another seat), and false positives;
+seats that do not earn their place are dropped. BACKLOG: the first-party headless Blender 3D→sprite pilot (three
+diagnostic assets, isolated worker, 2:1 dimetric, palette quantisation last) — not scheduled.
+Supervisor setup: probe increment 5 (codex) in a new worktree dnd-wt-probe5 from claude/light-variant (classic
+round 3 is running in dnd-wt-light; the two merge afterwards); seat-yield ledger tool (codex) in the private repo.
