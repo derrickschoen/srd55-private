@@ -11497,3 +11497,25 @@ on-demand deployment now. The D559 research note (F01/F02/F06) documents the end
 on Fireworks' current licence page and no dated availability notice. Decision for the owner: pay for an on-demand
 FLUX deployment around each reference batch, or pick another provider. Tool bug found: the LOG row is written
 before the request succeeds (smoke-floor-01 is logged with no output file) — amendment queued.
+
+## PROBE ROUND 4 (d5c74dd0, primer v7, 24 states, seed 6203001, my run, 480 rows, 0 errors) (2026-09-05 18:36)
+
+| class | r3 medium | r4 medium | r3 low | r4 low |
+|---|---|---|---|---|
+| Q1 identity/location | 0.24 | 0.89 | 0.18 | 0.94 |
+| Q2 side | 0.45 | 0.90 | 0.50 | 0.89 |
+| Q3 HP band | 0.24 | 0.90 | 0.36 | 0.91 |
+| Q4 terrain | 0.82 | 0.71 | 0.60 | 0.63 |
+| Q5 light | 0.91 | 0.93 | 0.59 | 0.66 |
+| Q6 doors | 0.38 | 0.79 | 0.36 | 0.54 |
+| Q7 adjacency | 0.08 | 0.75 | 0.02 | 0.75 |
+| Q8 hidden | 0.71 | 0.88 | 0.58 | 0.83 |
+| Q9 fog/obscured | 0.67 | 0.69 | 0.48 | 0.50 |
+| Q10 blocked | 0.88 | 0.85 | 0.91 | 0.92 |
+
+Roster coordinates + door rail + primer v7 moved identity, side and HP from ~0.3 to ~0.9 and adjacency from 0.08
+to 0.75 — the machine-readability seats' diagnosis (binding through printed coordinates) was right. Against the
+D536 bar (≥0.9 at medium): side and HP at the bar, light above; identity 0.89 and hidden 0.88 within 0.05 → D541
+confirmation run on a second seed (6203002, medium only) launched now; terrain REGRESSED 0.82→0.71 and blocked
+slipped 0.88→0.85 (both queued for the round-5 amendment together with the panel majors); doors 0.79, adjacency
+0.75, fog 0.69 remain below. Low-effort numbers are research only (D536).
