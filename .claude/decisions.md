@@ -11215,3 +11215,42 @@ tabletop asset sourcing with AI and the retro 16-bit look) plus one Opus-medium 
 (2025-09-05 onward); licensing feasibility for D547 CC0 art is a required column; the supervisor synthesises an
 owner report. The owner's quality verdict is recorded as a finding against the current art and feeds the next
 classic/iso rounds.
+
+## FINDING — D429.1 mini-A/B after footprints inc5 landing: shape CHANGED, not passed (2026-09-05 16:20)
+
+My run on main 7c52da1c (brutal, 10 rooms x 1 rep, seed 6203001, luna low, full
+intel; miniab-footprints5.jsonl), extracted with my own script applied
+identically to the two healthy references (round-1 slices):
+
+| run | mean offense/round | zero-offense rooms | dash slots | service nulls | blocks |
+|---|---|---|---|---|---|
+| footprints5 (7c52da1c) | 1.00 | 4/10 | 36 | 0 | 0 |
+| hp-probe ref (22cea413 era) | 1.70 | 2/10 | 14 | 0 | 1 |
+| prose ref | 1.90 | 1/10 | 11 | 0 | 0 |
+
+Offense = attack + cast_spell slots in authorized plans. Room digests differ
+from the references in every room (footprints change placement), so rooms
+are not cell-identical, but the seed, basis and party are the same.
+
+Mechanism seen in the rows (room 5 monsters 4-6, room 9 monsters 1/4/7, room
+7 monster-1, room 2 all five): the actor's OFFERED options in the turn
+context are attacks only (e.g. two Shortbow options, usable_now true, EV
+1.05 at long range 90 ft, disadvantage), the model's reason says "Shoot the
+most vulnerable visible enemy from range", yet its primary_option_id is a
+Dash option that is NOT in its shown options list. That id comes from the
+opportunity_cost block: status "dominated", better_option_id = Dash, delta
+"M5 Dash strictly dominates Dodge ... Supply one typed G8 override reason to
+keep the selected plan". The engine_default there is Dodge, and the
+dominance correction compares Dash against Dodge while the attacks are
+ignored; the model follows the pointer, submits Dash with an attack
+rationale and no override, and the proposal is accepted first time
+(decisionAttempts 1, no rejection codes). Result: monsters 90-100 ft out
+dash instead of shooting, offense halves. Reason/option contradiction
+accepted without rejection is a coaching-honesty defect of the D436 class.
+
+Not yet known: whether footprints inc1-4 (landed 15ef2b24 earlier today,
+with NO mini-A/B run after it — a process slip of mine, D429.1 requires one
+after every engine merge) or inc5 introduced it. Bisect running: identical
+arena on a detached worktree at 15ef2b24 (miniab-bisect-15ef2b24.jsonl).
+Interim: no further engine landings on main until the root cause is found;
+the ghost-marker lane keeps implementing but will not land ahead of the fix.
