@@ -10252,3 +10252,10 @@ image-on baseline; text-only arms only when an experiment is about the picture. 
 (graph-slice inc3 in flight keeps its off-mode fixtures AND gains image-on ones at its next increment).
 (2) Iso round D2 starts now on the supervisor's critique, in a sibling worktree (claude/iso-d2 off claude/iso-vtt) so
 codex's read-only review round 2 keeps a stable tree; D2 merges after the review; codex findings get a D3 if needed.
+
+JUDGE UI FEEDBACK (D504, from the d513 image packets; supervisor compile 20:20): 240 comments per claude seat. Judges
+used the picture mainly to confirm distances and positioning ("board shows monsters top-right far from party,
+confirming attacks were out of reach and dashing was sensible"). Recurring asks: names truncated (fixed by D516
+classic art), HP not visible (D516), weapon/spell ranges and reach not shown (path-overlay D512 covers movement
+hazards; a range-ring overlay for the acting creature is a candidate for the next screenshot increment). Off-arm
+entries read "No picture was provided; judged from plan text alone" — the blinding gap D521 closes.
