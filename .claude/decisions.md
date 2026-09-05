@@ -10369,3 +10369,11 @@ started 23:53 from dnd-wt-arena-img2 at f7400638 (g1 art, engine identical). Lig
 23:37. Combined-board screenshot reviewed: paths' polylines too faint, badges pile at the top-right, the movement
 legend box covers cells 13–16 of rows 11–12 — a path-overlay round 2 (legend outside the grid, thicker lines with
 dark halo, badge stacking) is briefed after the probe says whether paths help or hurt comprehension.
+
+ISO REVIEW ROUND 3 (codex 01a06fa4, 2026-09-05 00:20): HOLD. No blocker; three MAJORs: (1) the darkness pass draws the
+opaque shaded floor over difficult-terrain/area/movement overlays on band-0 cells (the draw-order test approves the
+faulty order); (2) sprite picking samples the native surface while zoom 1 and 3 display the 1× mip, so mip-visible
+edge pixels miss clicks; (3) colour+mip+shade+shade-mip retained ≈120 MB before canvases; placeholder canvases eager.
+Minors: unbranded atlas region coordinates, size/footprint not type-related (latent srd_space path), and two more.
+Unit D4 dispatched for the three majors and the region-brand minor; landing on main behind ?view=iso after a clean
+round 4 (D520).
