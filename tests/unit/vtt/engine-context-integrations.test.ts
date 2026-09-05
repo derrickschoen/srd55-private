@@ -249,12 +249,12 @@ describe('M-core and D420 turn-context rendering', () => {
     const { runtime, context } = contextFor(setup);
 
     expect(context['actor_knowledge']).toEqual({
-      policy: 'actor-knowledge-v2-creature-space',
+      policy: 'actor-knowledge-v3-last-seen',
       actors: [{
         actor_id: setup.unicorn.id,
         targets: [{
-          kind: 'unknown', target_id: setup.pc.id,
-          last_seen: { status: 'unresolved', reason: 'last_seen_position_not_modeled' },
+          kind: 'suspected', target_id: setup.pc.id,
+          last_seen: { status: 'resolved', lastSeenPosition: { column: 0, row: 1 } },
         }],
       }],
     });
@@ -416,7 +416,7 @@ describe('M-core and D420 turn-context rendering', () => {
     const bytes = new TextEncoder().encode(JSON.stringify(context)).byteLength;
     expect(context['context_trimmed'], `rendered ${String(bytes)} bytes`).toBe(true);
     expect(bytes).toBeLessThanOrEqual(TURN_CONTEXT_MAX_BYTES);
-    expect(context['actor_knowledge']).toEqual({ policy: 'actor-knowledge-v2-creature-space', actors: [] });
+    expect(context['actor_knowledge']).toEqual({ policy: 'actor-knowledge-v3-last-seen', actors: [] });
     expect(context['reaction_spend_hold']).toEqual({ policy: 'reaction-spend-hold-v1', windows: [] });
     expect(context['legendary_windows']).toMatchObject({
       policy: 'legendary-windows-v2', detail_level: 'compact',

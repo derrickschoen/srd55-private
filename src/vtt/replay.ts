@@ -49,7 +49,7 @@ export {
   type FleetTokenCounts,
 } from './fleet-telemetry';
 
-export const VTT_REPLAY_SCHEMA_VERSION = 6 as const;
+export const VTT_REPLAY_SCHEMA_VERSION = 7 as const;
 export const VTT_REPLAY_MINIMUM_SCHEMA_VERSION = 1 as const;
 
 export interface ReplayControllerIdentity {
@@ -343,6 +343,8 @@ const V4_TO_V5_SOURCE = 'vtt-replay-v4-to-v5:add-encounter-config-from-first-rev
 const V4_TO_V5_CHECKSUM = 'c0375bd900a13afe5a87cbc9c75028780c0b323a84bbe78b782084e18785d4d8';
 const V5_TO_V6_SOURCE = 'vtt-replay-v5-to-v6:migrate-embedded-session-11-and-rehash-state-projections:1';
 const V5_TO_V6_CHECKSUM = 'db9297b92a422ecf32b6ea85e5ab4d5b180ca5e9c39e7e1f36e9831529028cce';
+const V6_TO_V7_SOURCE = 'vtt-replay-v6-to-v7:migrate-embedded-session-12-and-rehash-state-projections:1';
+const V6_TO_V7_CHECKSUM = '919c1010a9f2a8ec897399653a21e1994dc200dc26fbb2a9b890eedb92f1a5f8';
 
 function migratedEncounterConfig(bundle: Readonly<Record<string, unknown>>): EncounterConfig {
   const revisions = bundle.revisions;
@@ -433,6 +435,32 @@ export const VTT_REPLAY_MIGRATIONS = Object.freeze([
             }
             const revision = migrateStoredSessionRevisions([entry.revision])[0];
             if (revision === undefined) throw new TypeError('VTT replay v5 revision migration produced no revision.');
+            return {
+              ...entry,
+              revision,
+              stateHash: sha256(canonicalJson(revision.encounterState)),
+              projectionHashes: hashProjections(projectReplayViews(revision.encounterState)),
+            };
+          })
+        : bundle.revisions,
+    }),
+  }),
+  Object.freeze({
+    id: 'vtt_replay_v6_to_v7',
+    from: 6,
+    to: 7,
+    source: V6_TO_V7_SOURCE,
+    checksum: V6_TO_V7_CHECKSUM,
+    migrate: (bundle: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> => ({
+      ...bundle,
+      schemaVersion: 7,
+      revisions: Array.isArray(bundle.revisions)
+        ? bundle.revisions.map((entry) => {
+            if (!record(entry) || !record(entry.revision)) {
+              throw new TypeError('VTT replay v6 revision record is malformed.');
+            }
+            const revision = migrateStoredSessionRevisions([entry.revision])[0];
+            if (revision === undefined) throw new TypeError('VTT replay v6 revision migration produced no revision.');
             return {
               ...entry,
               revision,

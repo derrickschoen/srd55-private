@@ -24,6 +24,7 @@ import {
   type DmView,
   type DmVisibleEncounterState,
   type PlayerView,
+  type PlayerLastSeenCombatant,
   type PlayerVisibleCombatant,
   type PlayerVisibleEncounterEvent,
 } from '../combat/visibility';
@@ -75,6 +76,7 @@ export interface PlayerBoardProjection {
   readonly activeCombatant: CombatantId | null;
   readonly highlightedCombatant: CombatantId | null;
   readonly combatants: readonly PlayerVisibleCombatant[];
+  readonly lastSeen: readonly PlayerLastSeenCombatant[];
   readonly activePcResources: TurnResources | null;
   readonly pendingRequest: ProjectedControllerRequest | null;
   readonly events: readonly PlayerVisibleEncounterEvent[];
@@ -253,6 +255,7 @@ export function projectPlayerBoard(
     activeCombatant: view.activeCombatant,
     highlightedCombatant: view.activeCombatant,
     combatants,
+    lastSeen: view.lastSeen.map((subject) => ({ ...subject, cell: { ...subject.cell } })),
     activePcResources: activePc?.turn ?? null,
     pendingRequest: projectedRequest(coordinator.pendingRequest, ownerIds),
     events: view.recentEvents,

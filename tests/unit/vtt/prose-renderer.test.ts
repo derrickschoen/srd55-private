@@ -260,6 +260,34 @@ describe('turn-context prose formats', () => {
     expect(document).not.toContain('applicable skills skill hash');
   });
 
+  it('renders resolved last-seen knowledge as one plain sentence', async () => {
+    const loaded = await loadArenaFixture(FIXTURE);
+    const structured = turnContext(createEngineMcpRuntime(freshMonsterPlanningState(loaded), {
+      runId: encounterSessionId('encounter:prose-last-seen'), revision: 1,
+    }));
+    const filtered = renderTurnContextProfile(structured, {
+      ...DEFAULT_RENDERER_PROFILE, format: 'structured',
+    });
+    const rendered = renderProseTurnContext({
+      ...filtered.context,
+      actor_knowledge: {
+        policy: 'actor-knowledge-v3-last-seen',
+        actors: [{
+          actor_id: 'combatant:observer',
+          targets: [{
+            kind: 'suspected',
+            target_id: 'combatant:target',
+            last_seen: { status: 'resolved', lastSeenPosition: { column: 2, row: 3 } },
+          }],
+        }],
+      },
+    }, 'regular_prose', filtered.optionRefs, 10 * 1024 * 1024);
+
+    expect(String(rendered.context['document'])).toContain(
+      'combatant:observer last saw combatant:target at cell (2, 3).',
+    );
+  });
+
   it.each(PROSE_FORMATS)('%s trims by relevance, preserves the K-set floor, and remains schema-valid', async (format) => {
     const loaded = await loadArenaFixture(FIXTURE);
     let evidence: { readonly preTrimBytes: number; readonly postTrimBytes: number } | undefined;

@@ -1988,7 +1988,7 @@ CREATE TABLE `vtt_session_revisions` (
 	PRIMARY KEY(`session_id`, `revision`),
 	CONSTRAINT "vtt_session_revisions_session_id_check" CHECK(length("vtt_session_revisions"."session_id") > 0),
 	CONSTRAINT "vtt_session_revisions_revision_check" CHECK(typeof(`revision`) = 'integer' AND `revision` >= 1),
-	CONSTRAINT "vtt_session_revisions_schema_version_check" CHECK("vtt_session_revisions"."schema_version" IN (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11)),
+	CONSTRAINT "vtt_session_revisions_schema_version_check" CHECK("vtt_session_revisions"."schema_version" IN (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)),
 	CONSTRAINT "vtt_session_revisions_payload_json_check" CHECK(json_valid("vtt_session_revisions"."payload_json")),
 	CONSTRAINT "vtt_session_revisions_payload_checksum_check" CHECK(length("vtt_session_revisions"."payload_checksum") = 64
         AND "vtt_session_revisions"."payload_checksum" NOT GLOB '*[^0-9a-f]*')

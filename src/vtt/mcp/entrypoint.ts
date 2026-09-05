@@ -502,6 +502,9 @@ export function decodeArenaFixture(decoded: unknown): EncounterState {
     environment: { ...environment, narrowOpeningRegions: [] },
     sharedSpaceRelations: [],
     adjudicationPending: [],
+    observationHistory: Array.isArray(state['observationHistory'])
+      ? structuredClone(state['observationHistory'])
+      : [],
   } as unknown as EncounterState;
 }
 

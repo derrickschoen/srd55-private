@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { CombatantProfile } from '../../../src/combat/combatant';
-import { createEncounter, type EncounterState } from '../../../src/combat/encounter';
+import { createEncounter, reduceEncounter, type EncounterState } from '../../../src/combat/encounter';
 import { effectStackingIdentity, encounterEffectId } from '../../../src/combat/values';
 import {
   ACTOR_KNOWLEDGE_POLICY,
@@ -43,7 +43,7 @@ function onlyTarget(state: EncounterState, actor: CombatantProfile): ActorTarget
   return target;
 }
 
-describe('actor-knowledge-v3', () => {
+describe('actor-knowledge-last-seen-v4', () => {
   it('projects a visible target as perceived with its current position', () => {
     const setup = encounter();
 
@@ -90,7 +90,7 @@ describe('actor-knowledge-v3', () => {
     };
 
     const projection = projectActorKnowledge(state, actor.id);
-    expect(projection.policy).toBe('actor-knowledge-v3');
+    expect(projection.policy).toBe('actor-knowledge-last-seen-v4');
     expect(projection.targets.map((target) => target.kind === 'perceived'
       ? [target.targetId, target.armorClass, target.hitPoints]
       : [target.targetId, target.kind])).toEqual([
@@ -165,13 +165,17 @@ describe('actor-knowledge-v3', () => {
 
   it('redacts a hidden target rather than exposing its position', () => {
     const setup = encounter();
+    const observed = reduceEncounter(setup.state, { type: 'roll_initiative' }, () => 0.5).state;
     const hidden: EncounterState = {
-      ...setup.state,
+      ...observed,
       hiddenCombatants: [{ combatant: setup.target.id, stealthTotal: 18, edition: '2024' }],
     };
 
     const target = onlyTarget(hidden, setup.actor);
-    expect(target).toMatchObject({ kind: 'unknown', targetId: setup.target.id });
+    expect(target).toMatchObject({
+      kind: 'suspected', targetId: setup.target.id,
+      lastSeen: { status: 'resolved', lastSeenPosition: { column: 2, row: 0 } },
+    });
     expect('position' in target).toBe(false);
   });
 
@@ -222,11 +226,12 @@ describe('actor-knowledge-v3', () => {
     });
   });
 
-  it('records missing last-seen memory as a typed unresolved basis', () => {
+  it('records a genuinely never-observed target as a typed unresolved basis', () => {
     const setup = encounter();
     const hidden: EncounterState = {
       ...setup.state,
       hiddenCombatants: [{ combatant: setup.target.id, stealthTotal: 18, edition: '2024' }],
+      observationHistory: [],
     };
 
     expect(onlyTarget(hidden, setup.actor)).toEqual({
@@ -234,7 +239,7 @@ describe('actor-knowledge-v3', () => {
       targetId: setup.target.id,
       lastSeen: {
         status: 'unresolved',
-        reason: 'last_seen_position_not_modeled',
+        reason: 'never_observed',
       },
     });
   });
