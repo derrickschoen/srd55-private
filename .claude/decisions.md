@@ -10637,3 +10637,11 @@ plain floor with no fog and no token; the DM board keeps the token flagged hidde
 patch that appears exactly where a creature hid tells the player where it is. Codex's second claim, that the
 detection-ui unit test contradicts too, was wrong: both sides keep `concealedCells` equal to [] after the hunk.
 Owner may overrule; the spec assertion is one line either way. Codex resumed with the ruling.
+
+LANDED ON BRANCH (2026-09-05 08:45): probe inc4 a8309968 on claude/light-variant (unscoped names, plate-tag
+stripping, --rescore, plates anchored to the token cell with stems, object tags styled apart from plates). My gate:
+tsc 0, sg 0, focused 28/28, board-snapshot + vtt-encounter specs 4/4. My mutation (single-line plate limit 14 → 4)
+killed the wrap test; restore cmp identical. Rescored estimate of the void 24-state run (same pictures, new
+scorer): Luna medium identity 0.63 / sides 0.56 / HP 0.35; low identity 0.48 — confirms the earlier hand estimate;
+the residual is the plate-cell confusion inc4 addresses plus doors (Q6 210 hallucinations) and fog (Q9). The
+24-state probe rerun on inc4 started 08:45 (Luna low + medium, full glyphs, ~2 h).
