@@ -1,5 +1,8 @@
 import { canonicalJson } from '../commands/canonical-json';
-import { starterArtDataUri } from '../assets/starter-art-resolver';
+import { starterArtCssUrl, starterArtDataUri } from '../assets/starter-art-resolver';
+// ART-SEAM (D516): overlay art families and the DM board chrome.
+import { OVERLAY_ASSETS } from '../assets/art-sets';
+import { renderBoardChrome } from './board-chrome';
 import './styles.css';
 import { HumanController, type ControllerRequest } from '../combat/controllers';
 import type { EncounterCommand } from '../combat/events';
@@ -277,7 +280,8 @@ function actionKey(action: EncounterCommand): string {
   return canonicalJson(action);
 }
 
-function renderBoard(
+// ART-SEAM (D516): exported so the DM-with-chrome / player-without DOM identity is testable.
+export function renderBoard(
   projection: EncounterBoardProjectionShape,
   preview: ReadonlySet<string> = new Set(),
   movementDangerPreview: DmMovementPathPreview | null = null,
@@ -291,6 +295,10 @@ function renderBoard(
   const models = encounterBoardRenderModel(projection, art);
   const board = element('div', { className: 'encounter-board' });
   board.style.setProperty('--encounter-columns', String(projection.bounds.columns));
+  // ART-SEAM (D516): overlay art reaches the mechanical-layer CSS through custom properties.
+  for (const [effect, assetId] of Object.entries(OVERLAY_ASSETS)) {
+    board.style.setProperty(`--art-overlay-${effect}`, starterArtCssUrl(assetId));
+  }
   board.dataset.artPackage = art.id;
   board.dataset.boardAudience = provenance === undefined ? 'player' : 'dm';
   if (provenance !== undefined) {
@@ -428,6 +436,8 @@ function renderBoard(
     }
     board.append(svg);
   }
+  // ART-SEAM (D516): the DM board gains names, HP bars, coordinates and a legend; the player board does not.
+  if (provenance !== undefined) renderBoardChrome(board, projection);
   return board;
 }
 

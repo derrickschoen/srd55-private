@@ -1,22 +1,24 @@
 import type { AssetId } from '../assets/ids';
+import { tokenAssetFor } from '../assets/token-archetypes';
 import type { EncounterBoardProjectionShape } from './encounter-board';
 import type { EncounterArtPackage } from './encounter-package';
 import { REFERENCE_ENCOUNTER_ART } from './reference-encounter-art';
 import { VANE_WARREN_ART } from './vane-warren-art';
 
+/**
+ * Combatants the package does not name get an archetype bust chosen from the
+ * profile's creature type (D516): a typed resolution, never a display-name match.
+ */
 function withCombatantFallbacks(
   base: EncounterArtPackage,
   projection: EncounterBoardProjectionShape,
 ): EncounterArtPackage {
-  const player = base.combatantTokens['combatant:fighter'];
-  const monster = base.combatantTokens['combatant:training-brute'];
-  if (player === undefined || monster === undefined) {
-    throw new Error(`Encounter art package ${base.id} has incomplete fallback token art.`);
-  }
   const combatantTokens: Record<string, AssetId> = { ...base.combatantTokens };
   for (const combatant of projection.combatants) {
-    combatantTokens[combatant.id] = combatantTokens[combatant.id] ??
-      (combatant.kind === 'player_character' ? player : monster);
+    combatantTokens[combatant.id] = combatantTokens[combatant.id] ?? tokenAssetFor({
+      kind: combatant.kind,
+      ...(combatant.creatureType === undefined ? {} : { creatureType: combatant.creatureType }),
+    });
   }
   return { ...base, combatantTokens };
 }
@@ -46,6 +48,7 @@ function genericArt(
       },
     },
     terrain: [],
+    combatantTokens: {},
   }, projection);
 }
 

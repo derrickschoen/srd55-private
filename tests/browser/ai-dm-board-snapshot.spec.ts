@@ -60,7 +60,10 @@ test('captures the full production DM board deterministically through durable sa
   );
   const result = await runBrowserCheck(outputDirectory);
   expect(result.benchmark.captures).toBe(2);
-  expect(result.dimensions).toEqual(['684x524', '964x604']);
+  // D516: seed-6203002 is 17×13 and seed-6203004 is 24×15; each board is
+  // 2·2 px border + 2·24 px coordinate gutters + columns·64, and
+  // 2·2 + 2·24 + rows·64 + 8 px gap + 120 px legend tall (boardChromeDimensions).
+  expect(result.dimensions).toEqual(['1140x1012', '1588x1140']);
   expect(result.staleRejected).toBe(true);
   expect(result.identityRejected).toBe(true);
   expect(result.movedDigestChanged).toBe(true);
