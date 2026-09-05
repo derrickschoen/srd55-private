@@ -1,6 +1,7 @@
 import { decodeEncounterArtPackage } from './encounter-package';
 import type { EncounterArtPackage } from './encounter-package';
 import type { AssetId } from '../assets/ids';
+import { tokenAssetFor } from '../assets/token-archetypes';
 
 /** The flagship uses the starter tiles on its authored 14-by-10 stronghold board. */
 export const VANE_WARREN_ART = decodeEncounterArtPackage({
@@ -37,23 +38,22 @@ export const VANE_WARREN_ART = decodeEncounterArtPackage({
   },
 });
 
+/** Unnamed combatants get an archetype bust from their creature type (D516), never a name match. */
 export function vaneWarrenArtForCombatants(
   combatants: readonly {
     readonly id: string;
     readonly kind: 'player_character' | 'monster';
+    readonly creatureType?: string;
   }[],
 ): EncounterArtPackage {
-  const player = VANE_WARREN_ART.combatantTokens['combatant:fighter'];
-  const monster = VANE_WARREN_ART.combatantTokens['combatant:training-brute'];
-  if (player === undefined || monster === undefined) {
-    throw new Error('Vane Warren fallback token art is incomplete.');
-  }
   const combatantTokens: Record<string, AssetId> = {
     ...VANE_WARREN_ART.combatantTokens,
   };
   for (const combatant of combatants) {
-    combatantTokens[combatant.id] = combatantTokens[combatant.id] ??
-      (combatant.kind === 'player_character' ? player : monster);
+    combatantTokens[combatant.id] = combatantTokens[combatant.id] ?? tokenAssetFor({
+      kind: combatant.kind,
+      ...(combatant.creatureType === undefined ? {} : { creatureType: combatant.creatureType }),
+    });
   }
   return { ...VANE_WARREN_ART, combatantTokens };
 }

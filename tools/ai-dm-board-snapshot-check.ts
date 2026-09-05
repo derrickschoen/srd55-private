@@ -77,7 +77,8 @@ try {
   if (mode === 'benchmark') {
     requireEqual(
       [...new Set(captures.map((artifact) => `${String(artifact.width)}x${String(artifact.height)}`))].sort(),
-      ['684x524', '964x604'],
+      // D516: 64 px cells + 24 px coordinate gutters + 128 px legend band, see boardChromeDimensions().
+      ['1140x1012', '1588x1140'],
       'captured dimensions',
     );
   }
@@ -144,7 +145,7 @@ try {
     throw new Error(`manifest viewport: ${JSON.stringify(manifestViewport)}`);
   }
   requireEqual(Reflect.get(manifest, 'deviceScaleFactor'), 1, 'manifest DPR');
-  requireEqual(Reflect.get(manifest, 'tileSizeCssPx'), 40, 'manifest tile size');
+  requireEqual(Reflect.get(manifest, 'tileSizeCssPx'), 64, 'manifest tile size');
   requireEqual(Reflect.get(manifest, 'maximumPngBytes'), 1_000_000, 'manifest PNG cap');
 
   process.stdout.write(`BOARD_SNAPSHOT_RESULT ${JSON.stringify({

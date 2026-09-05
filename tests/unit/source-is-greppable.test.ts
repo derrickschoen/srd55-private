@@ -45,6 +45,12 @@ const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 // These are PWA manifest raster icons: binary by nature and never grep targets.
 // Their SVG source of truth, public/icons/app-icon.svg, remains text and scanned.
 //
+// D516 also replaces the starter board art with 79 generated PNGs under the
+// one-purpose public/assets/art directory. Their TypeScript generator inputs,
+// manifest and content hashes remain text and scanned. The exact count and PNG
+// signature are pinned below, so another binary cannot silently acquire this
+// exemption and a newly added raster still requires this rationale to change.
+//
 // The two zips are the OGL-quarantine archives: the 3.0 and 3.5 SRD
 // distributions committed as published (e0b8b373), kept binary so their
 // Section 15 provenance can be verified against the originals rather than
@@ -58,6 +64,9 @@ const BINARY_EXEMPT: readonly string[] = [
   'docs/homebrew/ogl/srd-3.0/SRD-3.0-rtf-PARTIAL.zip',
   'docs/homebrew/ogl/srd-3.5/SRD-3.5-rtf.zip',
 ];
+
+const CLASSIC_ART_PNG = /^public\/assets\/art\/[^/]+\.png$/u;
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 function trackedFiles(): string[] {
   return execFileSync('git', ['ls-files', '-z'], {
@@ -99,9 +108,19 @@ describe('tracked source is greppable', () => {
     }
   });
 
+  it('keeps the reviewed classic-art exemption limited to the 79 generated PNGs', () => {
+    const rasterArt = files.filter((file) => CLASSIC_ART_PNG.test(file));
+    expect(rasterArt).toHaveLength(79);
+    for (const file of rasterArt) {
+      const contents = readFileSync(join(repoRoot, file));
+      expect(contents.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE), file).toBe(true);
+      expect(contents.includes(0x00), file).toBe(true);
+    }
+  });
+
   it('contains no literal NUL byte anywhere', () => {
     const offenders = files
-      .filter((file) => !BINARY_EXEMPT.includes(file))
+      .filter((file) => !BINARY_EXEMPT.includes(file) && !CLASSIC_ART_PNG.test(file))
       // An explicitly deleted tracked file remains in `git ls-files` until the
       // supervisor stages it; absent bytes cannot contain a NUL.
       .filter((file) => existsSync(join(repoRoot, file)))

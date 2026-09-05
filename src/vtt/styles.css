@@ -771,3 +771,367 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* ==========================================================================
+   D516 — classic board at 64 CSS px per cell, 16-bit pass.
+   Appended after the original rules on purpose. The option-path selectors are
+   disjoint; their chrome-aware geometry is composed in the section below.
+   ========================================================================== */
+
+.encounter-board {
+  --encounter-tile-size: 64px;
+  --chrome-gutter: 24px;
+  border-color: #3a4152;
+  background: #14171f;
+}
+
+/* Tiles carry their own mortar and wall rims; a 1 px cell border would scale
+   a 64 px tile into 62 px and break every wall seam. */
+.encounter-cell {
+  border: 0;
+  background: #14171f;
+}
+
+.encounter-art-shade { z-index: 1; }
+.encounter-art-fog { opacity: 0.78; }
+
+.encounter-mechanical-layer {
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  background-position: center;
+  background-size: var(--encounter-tile-size) var(--encounter-tile-size);
+  background-repeat: no-repeat;
+}
+
+.encounter-mechanical-blocked {
+  background-color: transparent;
+  background-image: var(--art-overlay-blocked);
+  box-shadow: none;
+}
+
+.encounter-mechanical-difficult_terrain {
+  border: 0;
+  background-color: transparent;
+  background-image: var(--art-overlay-difficult);
+}
+
+.encounter-mechanical-illumination[data-light-level='bright'] {
+  background-color: transparent;
+  background-image: var(--art-overlay-light-bright);
+}
+
+.encounter-mechanical-illumination[data-light-level='dim'] {
+  background-color: transparent;
+  background-image: var(--art-overlay-light-dim);
+}
+
+.encounter-mechanical-illumination[data-light-level='darkness'] {
+  background-color: transparent;
+  background-image: var(--art-overlay-light-darkness);
+}
+
+.encounter-mechanical-obscurement {
+  background-color: transparent;
+  background-image: var(--art-overlay-obscurement-light);
+}
+
+.encounter-mechanical-obscurement[data-obscurement='heavy'] {
+  background-color: transparent;
+  background-image: var(--art-overlay-obscurement-heavy);
+}
+
+.encounter-mechanical-obscurement[data-obscurement='magical_darkness'] {
+  background-color: transparent;
+  background-image: var(--art-overlay-magical-darkness);
+}
+
+.encounter-light,
+.encounter-world-object {
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  background-position: center;
+  background-size: var(--encounter-tile-size) var(--encounter-tile-size);
+  background-repeat: no-repeat;
+}
+
+.encounter-light-bright { background-color: transparent; background-image: var(--art-overlay-light-bright); }
+.encounter-light-dim { background-color: transparent; background-image: var(--art-overlay-light-dim); }
+
+.encounter-world-object {
+  box-shadow: inset 0 0 0 2px rgb(196 150 84 / 85%);
+}
+
+.encounter-world-object[data-light-class='light-source'] {
+  box-shadow: none;
+  background-image: var(--art-overlay-light-source);
+}
+
+.encounter-token { inset: 0; }
+
+/* The prone silhouette asset replaces the CSS rotation and grey-out. */
+.encounter-token[data-marker='corpse'] {
+  filter: none;
+  opacity: 1;
+  transform: none;
+}
+
+.encounter-token[data-life='dying'] {
+  filter: none;
+  outline: none;
+}
+
+/* Rings are drawn in the art now; no glow filters. */
+.encounter-token-focus,
+.encounter-token-adjudicated {
+  filter: none;
+  opacity: 1;
+}
+
+.encounter-token-stacked { inset: 2.4rem 0.1rem 0.1rem; }
+
+.encounter-token-label {
+  padding: 0.08rem 0.14rem;
+  font-size: 0.62rem;
+}
+
+/* --- DM board chrome (board-chrome.ts) ---------------------------------- */
+
+.encounter-board[data-board-chrome='on'] {
+  padding: var(--chrome-gutter);
+}
+
+/* The chrome nameplate carries the full name; the in-cell label stays in the
+   DOM for text queries but is visually hidden. */
+.encounter-board[data-board-chrome='on'] .encounter-token-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.encounter-board[data-board-chrome='on'] .encounter-target-lines {
+  top: var(--chrome-gutter);
+  left: var(--chrome-gutter);
+  width: calc(100% - 2 * var(--chrome-gutter));
+  height: calc(var(--encounter-rows, 1) * var(--encounter-tile-size));
+}
+
+/* Keep the option overlay in grid coordinates after DM chrome adds gutters
+   and a legend. It paints above cell hatching and before the chrome layer. */
+.encounter-board[data-board-chrome='on'] > .encounter-option-paths {
+  top: var(--chrome-gutter);
+  right: auto;
+  bottom: auto;
+  left: var(--chrome-gutter);
+  width: calc(100% - 2 * var(--chrome-gutter));
+  height: calc(var(--encounter-rows, 1) * var(--encounter-tile-size));
+}
+
+.encounter-board[data-board-chrome='on'] > .encounter-option-path-legend {
+  right: calc(var(--chrome-gutter) + 0.2rem);
+  bottom: calc(var(--chrome-gutter) + 120px + 8px + 0.2rem);
+}
+
+.encounter-coordinate-labels,
+.encounter-token-chrome {
+  position: absolute;
+  z-index: 11;
+  inset: 0;
+  pointer-events: none;
+}
+
+.encounter-coordinate-label,
+.encounter-nameplate-text,
+.encounter-legend-text,
+.encounter-life-glyph,
+.encounter-hidden-ring {
+  display: block;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+.encounter-hp-bar {
+  display: block;
+  box-sizing: content-box;
+  border: 1px solid #0d0f14;
+  background: #262a35;
+}
+
+.encounter-hp-bar[data-hp-band='unknown'] {
+  border-style: dashed;
+  border-color: #6b7386;
+}
+
+.encounter-hp-fill { display: block; }
+
+.encounter-nameplate {
+  display: flex;
+  box-sizing: border-box;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border: 1px solid #5c6578;
+  background: rgb(13 15 20 / 60%);
+}
+
+.encounter-legend {
+  display: flex;
+  flex-wrap: wrap;
+  grid-column: 1 / -1;
+  box-sizing: border-box;
+  align-content: flex-start;
+  gap: 6px 14px;
+  overflow: hidden;
+  padding: 6px 8px;
+  border: 2px solid #3a4152;
+  background: #1b1f29;
+}
+
+.encounter-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 18px;
+}
+
+.encounter-legend-swatch {
+  display: inline-block;
+  box-sizing: border-box;
+  width: 14px;
+  height: 14px;
+  border: 1px solid #0d0f14;
+}
+
+.encounter-legend-plate .encounter-legend-swatch { border-radius: 50%; }
+
+.encounter-legend-plate-dashed .encounter-legend-swatch {
+  border: 2px dashed #eef0f5;
+  border-radius: 50%;
+  background: transparent !important;
+}
+
+.encounter-legend-hp .encounter-legend-swatch {
+  width: 20px;
+  height: 6px;
+}
+
+.encounter-legend-glyph .encounter-legend-swatch { border-radius: 2px; }
+
+/* --- DM chrome: slate ground, 2 px pixel bevels, uppercase mono headings -- */
+
+.dm-encounter {
+  background: #12151c;
+  color: #e6e9f0;
+}
+
+.dm-encounter .active-pc-panel,
+.dm-encounter .encounter-controls,
+.dm-encounter .dm-pending-request,
+.dm-encounter .dm-decision-tray,
+.dm-encounter .dm-reaction-preferences,
+.dm-encounter .dm-save-manager,
+.dm-encounter .dm-adjudication,
+.dm-encounter .dm-controller-assignments,
+.dm-encounter .encounter-path-danger-legend,
+.dm-encounter .dm-initiative-timeline {
+  border: 2px solid #3a4152;
+  background: #1b1f29;
+  box-shadow: inset 2px 2px 0 #2a3040, inset -2px -2px 0 #0f1218;
+  color: #e6e9f0;
+}
+
+.dm-encounter h1,
+.dm-encounter h2,
+.dm-encounter h3 {
+  color: #f2e9c8;
+  font-family: ui-monospace, 'Cascadia Mono', 'Courier New', monospace;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.dm-encounter h1 { font-size: 1.5rem; }
+.dm-encounter h2 { font-size: 1rem; }
+.dm-encounter h3 { font-size: 0.9rem; }
+.dm-encounter .vtt-kicker { color: #d8a24a; }
+
+.encounter-shell button {
+  padding: 0.5rem 0.8rem;
+  border: 0;
+  border-radius: 0;
+  background: #2e3547;
+  color: #f2f4f8;
+  box-shadow: inset 2px 2px 0 #4a5470, inset -2px -2px 0 #171b25;
+  font: 700 0.85rem/1 system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.encounter-shell button:hover { background: #3a4359; }
+
+.encounter-shell button:active {
+  box-shadow: inset -2px -2px 0 #4a5470, inset 2px 2px 0 #171b25;
+}
+
+.encounter-shell button[aria-pressed='true'] {
+  background: #5a4a1e;
+  box-shadow: inset 2px 2px 0 #8a6f2a, inset -2px -2px 0 #2c2410;
+}
+
+.encounter-shell button:disabled {
+  background: #23283a;
+  color: #8a92a6;
+  box-shadow: inset 2px 2px 0 #2c3346, inset -2px -2px 0 #171b25;
+  cursor: default;
+}
+
+.encounter-shell button:focus-visible,
+.encounter-shell select:focus-visible,
+.encounter-shell input:focus-visible,
+.encounter-shell textarea:focus-visible,
+.encounter-shell summary:focus-visible {
+  outline: 3px solid #f0c860;
+  outline-offset: 2px;
+}
+
+.encounter-shell select,
+.encounter-shell input,
+.encounter-shell textarea {
+  border: 2px solid #3a4152;
+  border-radius: 0;
+  background: #0f1218;
+  color: #e6e9f0;
+}
+
+.dm-encounter .dm-decision-tray[data-boundary-blocked='true'] {
+  border-color: #d8a24a;
+  box-shadow: inset 2px 2px 0 #6a4f1c, inset -2px -2px 0 #0f1218;
+}
+
+.dm-encounter .dm-decision-entry {
+  border-left: 4px solid #6f7fae;
+  background: #232838;
+}
+
+.dm-encounter .dm-save-row {
+  border: 2px solid #2f3648;
+  background: #171b25;
+}
+
+.dm-encounter .dm-save-badge { border-radius: 0; }
+
+.dm-encounter .dm-initiative-strip li {
+  border: 1px solid #3a4152;
+  border-radius: 0;
+  background: #232838;
+}
+
+.dm-encounter .dm-initiative-strip li[data-current='true'] {
+  border-color: #d8a24a;
+  background: #d8a24a;
+  color: #14171f;
+}

@@ -11,6 +11,20 @@ import { feet, type CombatantId } from '../combat/values';
 import type { EncounterEffectId, ObjectTargetId, PersistentAreaId, WorldObjectId } from '../combat/values';
 import type { WorldObjectBlocking, WorldObjectKind } from '../combat/world-objects';
 import type { DmView } from '../combat/visibility';
+// ART-SEAM (D516): art families, dead silhouette and the prose HP classifier feed the board model.
+import {
+  SHADE_ASSETS,
+  doorSetFor,
+  doorSideAt,
+  floorSetFor,
+  floorVariantAt,
+  shadeSidesAt,
+  wallPieceAt,
+  wallSetFor,
+} from '../assets/art-sets';
+import { DEAD_TOKEN_ASSET_ID } from '../assets/starter-art-inputs';
+import { hitPointKnowledge } from './intel/actor-knowledge';
+import type { ProjectedHitPointKnowledge } from './intel/contracts';
 import type { EncounterArtPackage } from './encounter-package';
 
 type DmEncounterState = DmView['state'];
@@ -21,6 +35,12 @@ export interface EncounterBoardCombatant {
   readonly kind: 'player_character' | 'monster';
   readonly position: { readonly column: number; readonly row: number };
   readonly life?: LifeState;
+  /** DM projections only: the SAME band the prose gives the AI DM (actor-knowledge). */
+  readonly hitPointBand?: ProjectedHitPointKnowledge;
+  /** DM projections only: the engine currently treats this combatant as hidden. */
+  readonly hiddenFromPlayers?: boolean;
+  /** Sourced creature type when the profile carries one; absent means the profile had none. */
+  readonly creatureType?: string;
 }
 
 export interface EncounterBoardProjectionShape {
@@ -177,7 +197,7 @@ export interface DmEncounterBoardModel extends EncounterBoardProjectionShape {
   readonly log: readonly EncounterBoardLogEntry[];
 }
 
-export type EncounterBoardLayerRole = 'floor' | 'wall' | 'door' | 'terrain' | 'fog';
+export type EncounterBoardLayerRole = 'floor' | 'wall' | 'door' | 'shade' | 'terrain' | 'fog';
 
 export interface EncounterBoardLayer {
   readonly role: EncounterBoardLayerRole;
@@ -448,14 +468,21 @@ export function projectEncounterBoard(
 ): DmEncounterBoardModel {
   const state = view.state;
   const positions = new Map(state.tokens.map((token) => [token.combatantId, token.position] as const));
+  const hidden = new Set(state.hiddenCombatants.map((entry) => entry.combatant));
   const combatants = state.combatants.flatMap((subject) => {
     const position = positions.get(subject.profile.id);
-    return position === undefined ? [] : [{
+    if (position === undefined) return [];
+    const creatureType = subject.profile.rules.creatureType;
+    return [{
       id: subject.profile.id,
       name: subject.profile.name,
       kind: subject.profile.kind,
       position: { ...position },
       life: subject.life,
+      // ART-SEAM (D516): the DM board carries the prose classifier's band, never a re-derived one.
+      hitPointBand: hitPointKnowledge(state, subject),
+      hiddenFromPlayers: hidden.has(subject.profile.id),
+      ...(creatureType === undefined ? {} : { creatureType }),
     }];
   });
   const sustainedEffects = projectedSustainedEffects(state, pendingRequest);
@@ -566,18 +593,28 @@ export function encounterBoardRenderModel(
     }
   }
   const cells: EncounterBoardCellModel[] = [];
+  // ART-SEAM (D516): the package names one floor/wall/door family; cells pick the member.
+  const floorSet = floorSetFor(art.room.floor);
+  const wallSet = wallSetFor(art.room.wall);
+  const doorSet = doorSetFor(art.room.door);
+  const doorSide = doorSideAt(art.room.doorCell.column, art.room.doorCell.row, projection.bounds);
 
   for (let row = 0; row < projection.bounds.rows; row += 1) {
     for (let column = 0; column < projection.bounds.columns; column += 1) {
       const key = cellKey({ column, row });
-      const layers: EncounterBoardLayer[] = [{ role: 'floor', assetId: art.room.floor }];
-      const perimeter = row === 0 || row === projection.bounds.rows - 1 || column === 0 || column === projection.bounds.columns - 1;
-      if (perimeter) {
+      const layers: EncounterBoardLayer[] = [
+        { role: 'floor', assetId: floorSet.variants[floorVariantAt(column, row)] },
+      ];
+      const wallPiece = wallPieceAt(column, row, projection.bounds);
+      if (wallPiece !== null) {
         layers.push(
-          column === art.room.doorCell.column && row === art.room.doorCell.row
-            ? { role: 'door', assetId: art.room.door }
-            : { role: 'wall', assetId: art.room.wall },
+          doorSide !== null && column === art.room.doorCell.column && row === art.room.doorCell.row
+            ? { role: 'door', assetId: doorSet.pieces.closed[doorSide] }
+            : { role: 'wall', assetId: wallSet.pieces[wallPiece] },
         );
+      }
+      for (const side of shadeSidesAt(column, row, projection.bounds)) {
+        layers.push({ role: 'shade', assetId: SHADE_ASSETS[side] });
       }
       const terrainAsset = terrain.get(key);
       if (terrainAsset !== undefined) layers.push({ role: 'terrain', assetId: terrainAsset });
@@ -606,7 +643,8 @@ export function encounterBoardRenderModel(
           ...combatant,
           life,
           marker: life === 'dead' ? 'corpse' : 'token',
-          assetId: asset,
+          // ART-SEAM (D516): the dead show the prone silhouette on a desaturated plate.
+          assetId: life === 'dead' ? DEAD_TOKEN_ASSET_ID : asset,
           focusAssetId: combatant.id === projection.highlightedCombatant ? art.ui.activePc : null,
           adjudicatedAssetId: adjudicated.has(combatant.id) ? art.ui.adjudicated : null,
         };

@@ -1,13 +1,22 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { renderStarterArtSvg } from '../../src/assets/starter-art-resolver';
+import { base64 } from '../../src/assets/png';
+import { renderStarterArtPng } from '../../src/assets/starter-art-resolver';
 import { STARTER_ART_MANIFEST } from '../../src/assets/starter-art-manifest';
+import { TILE_SIZE } from '../../src/assets/pixel-art';
 import { combatantId } from '../../src/combat/values';
 import { encounterBoardRenderModel } from '../../src/vtt/encounter-board';
 import { REFERENCE_ENCOUNTER_ART } from '../../src/vtt/reference-encounter-art';
 
-function svgData(value: string): string {
-  return `data:image/svg+xml;base64,${Buffer.from(value, 'utf8').toString('base64')}`;
+/**
+ * The visual-review preview used to live under docs/design/assets-preview;
+ * D516's lane may not write docs/**, so the generator now keeps it beside
+ * the generator inputs. It embeds every asset once and renders both projections.
+ */
+export const STARTER_ART_PREVIEW_PATH = 'src/assets/preview/starter-art-board.svg';
+
+function pngData(bytes: Uint8Array): string {
+  return `data:image/png;base64,${base64(bytes)}`;
 }
 
 function symbolId(id: string): string {
@@ -15,7 +24,7 @@ function symbolId(id: string): string {
 }
 
 function useAsset(id: string, x: number, y: number, size: number): string {
-  return `<use href="#${symbolId(id)}" transform="translate(${String(x)} ${String(y)}) scale(${String(size / 64)})" data-asset-id="${id}"/>`;
+  return `<use href="#${symbolId(id)}" transform="translate(${String(x)} ${String(y)}) scale(${String(size / TILE_SIZE)})" data-asset-id="${id}"/>`;
 }
 
 function escapeXml(value: string): string {
@@ -68,14 +77,19 @@ function previewSvg(): string {
   };
   const tokenAssets = STARTER_ART_MANIFEST.assets.filter((asset) => asset.kind === 'token');
   const definitions = STARTER_ART_MANIFEST.assets.map((asset) =>
-    `<image id="${symbolId(asset.id)}" href="${svgData(renderStarterArtSvg(asset.id))}" width="64" height="64"/>`,
+    `<image id="${symbolId(asset.id)}" href="${pngData(renderStarterArtPng(asset.id))}" width="${String(TILE_SIZE)}" height="${String(TILE_SIZE)}"/>`,
   ).join('');
+  const perRow = 12;
   const inventory = tokenAssets.map((asset, index) => {
-    const x = 28 + index * 88;
-    return `<g data-inventory-asset="${asset.id}">${useAsset(asset.id, x, 56, 64)}<text x="${String(x + 32)}" y="136" class="label" fill="#edf0f7">${escapeXml(asset.title.replace(' silhouette', ''))}</text></g>`;
+    const x = 28 + (index % perRow) * 100;
+    const y = 56 + Math.floor(index / perRow) * 100;
+    return `<g data-inventory-asset="${asset.id}">${useAsset(asset.id, x, y, TILE_SIZE)}<text x="${String(x + 32)}" y="${String(y + 80)}" class="label" fill="#edf0f7">${escapeXml(asset.title.replace(' bust', ''))}</text></g>`;
   }).join('');
+  const inventoryRows = Math.ceil(tokenAssets.length / perRow);
+  const boardsY = 56 + inventoryRows * 100 + 40;
+  const height = boardsY + 7 * 44 + 40;
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="1240" height="560" viewBox="0 0 1240 560" data-generator="starter-pixel-art" data-generator-version="1.0.0"><defs>${definitions}</defs><style>text{font-family:ui-monospace,monospace}.title{font-size:22px;font-weight:700}.heading{font-size:16px;font-weight:700}.label{font-size:9px;text-anchor:middle}image{image-rendering:pixelated}</style><rect width="1240" height="560" fill="#11131a"/><text x="28" y="30" class="title" fill="#edf0f7">Starter Pixel Art — deterministic fixture preview</text><g data-sprite-inventory="13">${inventory}</g>${boardPreview('Player', base, 86, 205)}${boardPreview('DM', { ...base, foggedCells: [{ column: 8, row: 1 }, { column: 8, row: 2 }] }, 690, 205)}<metadata>pure-procedural-only; cc-by-4.0; focus.active-pc; event.adjudicated; fog.hidden; terrain; one-room; player-projection; dm-projection</metadata></svg>\n`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="1240" height="${String(height)}" viewBox="0 0 1240 ${String(height)}" data-generator="${STARTER_ART_MANIFEST.generator.id}" data-generator-version="${STARTER_ART_MANIFEST.generator.version}"><defs>${definitions}</defs><style>text{font-family:ui-monospace,monospace}.title{font-size:22px;font-weight:700}.heading{font-size:16px;font-weight:700}.label{font-size:9px;text-anchor:middle}image{image-rendering:pixelated}</style><rect width="1240" height="${String(height)}" fill="#11131a"/><text x="28" y="30" class="title" fill="#edf0f7">Starter Pixel Art — deterministic fixture preview</text><g data-sprite-inventory="${String(tokenAssets.length)}">${inventory}</g>${boardPreview('Player', base, 86, boardsY)}${boardPreview('DM', { ...base, foggedCells: [{ column: 8, row: 1 }, { column: 8, row: 2 }] }, 690, boardsY)}<metadata>pure-procedural-only; cc-by-4.0; focus.active-pc; event.adjudicated; fog.hidden; terrain; one-room; player-projection; dm-projection</metadata></svg>\n`;
 }
 
 export interface StarterArtGenerationOptions {
@@ -91,23 +105,24 @@ export interface StarterArtGenerationResult {
 export function generateStarterArt(
   options: StarterArtGenerationOptions,
 ): StarterArtGenerationResult {
-  const materialize = (path: string, generatedBytes: string): void => {
+  const materialize = (path: string, generatedBytes: Uint8Array | string): void => {
     const absolute = resolve(options.outputRoot, path);
     if (options.checkOnly) {
-      const current = readFileSync(absolute, 'utf8');
-      if (current !== generatedBytes) {
+      const current = readFileSync(absolute);
+      const expected = typeof generatedBytes === 'string' ? Buffer.from(generatedBytes, 'utf8') : Buffer.from(generatedBytes);
+      if (!current.equals(expected)) {
         throw new Error(`Generated starter art drifted: ${path}.`);
       }
       return;
     }
     mkdirSync(resolve(absolute, '..'), { recursive: true });
-    writeFileSync(absolute, generatedBytes, 'utf8');
+    writeFileSync(absolute, generatedBytes);
   };
 
   for (const asset of STARTER_ART_MANIFEST.assets) {
-    materialize(`public/${asset.output.path}`, renderStarterArtSvg(asset.id));
+    materialize(`public/${asset.output.path}`, renderStarterArtPng(asset.id));
   }
-  materialize('docs/design/assets-preview/starter-art-board.svg', previewSvg());
+  materialize(STARTER_ART_PREVIEW_PATH, previewSvg());
 
   return Object.freeze({
     assetCount: STARTER_ART_MANIFEST.assets.length,
@@ -115,8 +130,8 @@ export function generateStarterArt(
   });
 }
 
-const invokedPath = process.argv[1] === undefined ? null : resolve(process.argv[1]);
-if (invokedPath === resolve(import.meta.filename)) {
+/** vite-node puts its own bin in argv[1], so the CLI is keyed on explicit flags rather than the script path. */
+if (process.argv.includes('--generate') || process.argv.includes('--check')) {
   const checkOnly = process.argv.includes('--check');
   const result = generateStarterArt({
     outputRoot: resolve(import.meta.dirname, '../..'),

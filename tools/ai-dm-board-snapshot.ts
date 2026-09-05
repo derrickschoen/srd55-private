@@ -36,7 +36,7 @@ const repositoryRoot = resolve(fileURLToPath(new URL('../', import.meta.url)));
 const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 export const MAX_BOARD_PNG_BYTES = 1_000_000;
 const VIEWPORT = Object.freeze({ width: 1_280, height: 1_280 });
-const TILE_SIZE_CSS_PX = 40;
+const TILE_SIZE_CSS_PX = 64;
 const SNAPSHOT_CANARY = 'board-snapshot-element-crop-canary';
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
 
@@ -74,7 +74,7 @@ export interface BoardSnapshotManifest {
   };
   readonly viewport: { readonly width: 1_280; readonly height: 1_280 };
   readonly deviceScaleFactor: 1;
-  readonly tileSizeCssPx: 40;
+  readonly tileSizeCssPx: 64;
   readonly maximumPngBytes: 1_000_000;
   readonly capturePolicy: 'encounter-board-element-settled-v1';
   readonly coldStartMs: number;

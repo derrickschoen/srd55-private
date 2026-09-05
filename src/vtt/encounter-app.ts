@@ -1,5 +1,13 @@
 import { canonicalJson } from '../commands/canonical-json';
-import { starterArtDataUri } from '../assets/starter-art-resolver';
+import { starterArtCssUrl, starterArtDataUri } from '../assets/starter-art-resolver';
+// ART-SEAM (D516): overlay art families and the DM board chrome.
+import { OVERLAY_ASSETS } from '../assets/art-sets';
+import {
+  CHROME_TILE_PX,
+  renderBoardChrome,
+  stackLabelOffsets,
+  type NameplateLayout,
+} from './board-chrome';
 import './styles.css';
 import { HumanController, type ControllerRequest } from '../combat/controllers';
 import type { EncounterCommand } from '../combat/events';
@@ -298,6 +306,77 @@ function optionPathOffset(index: number, count: number): { readonly x: number; r
   return { x: band * 0.045, y: -band * 0.045 };
 }
 
+interface OptionBadgeRect {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+const OPTION_BADGE_WIDTH_CELLS = 0.5;
+const OPTION_BADGE_HEIGHT_CELLS = 0.68;
+const OPTION_BADGE_TOP_CELLS = 0.22;
+const OPTION_BADGE_SHIFT_CELLS = 0.52;
+
+function optionBadgeRect(center: { readonly x: number; readonly y: number }): OptionBadgeRect {
+  return {
+    x: center.x - OPTION_BADGE_WIDTH_CELLS / 2,
+    y: center.y - OPTION_BADGE_TOP_CELLS,
+    width: OPTION_BADGE_WIDTH_CELLS,
+    height: OPTION_BADGE_HEIGHT_CELLS,
+  };
+}
+
+function nameplateRect(plate: NameplateLayout): OptionBadgeRect {
+  return {
+    x: plate.x / CHROME_TILE_PX,
+    y: plate.y / CHROME_TILE_PX,
+    width: plate.width / CHROME_TILE_PX,
+    height: plate.height / CHROME_TILE_PX,
+  };
+}
+
+function optionBadgeOverlaps(left: OptionBadgeRect, right: OptionBadgeRect): boolean {
+  return left.x < right.x + right.width && right.x < left.x + left.width &&
+    left.y < right.y + right.height && right.y < left.y + left.height;
+}
+
+function positionOptionBadge(
+  origin: { readonly x: number; readonly y: number },
+  bounds: EncounterBoardProjectionShape['bounds'],
+  nameplates: readonly NameplateLayout[],
+): { readonly center: { readonly x: number; readonly y: number }; readonly rect: OptionBadgeRect } {
+  const obstacles = nameplates.map(nameplateRect);
+  const initial = {
+    x: Math.max(
+      OPTION_BADGE_WIDTH_CELLS / 2,
+      Math.min(origin.x, bounds.columns - OPTION_BADGE_WIDTH_CELLS / 2),
+    ),
+    y: Math.max(
+      OPTION_BADGE_TOP_CELLS,
+      Math.min(origin.y, bounds.rows - (OPTION_BADGE_HEIGHT_CELLS - OPTION_BADGE_TOP_CELLS)),
+    ),
+  };
+  const maximumRing = 2 * Math.max(bounds.columns, bounds.rows);
+  for (let ring = 0; ring <= maximumRing; ring += 1) {
+    for (let vertical = -ring; vertical <= ring; vertical += 1) {
+      for (let horizontal = -ring; horizontal <= ring; horizontal += 1) {
+        if (Math.max(Math.abs(horizontal), Math.abs(vertical)) !== ring) continue;
+        const center = {
+          x: initial.x + horizontal * OPTION_BADGE_SHIFT_CELLS,
+          y: initial.y + vertical * OPTION_BADGE_SHIFT_CELLS,
+        };
+        const rect = optionBadgeRect(center);
+        if (rect.x < 0 || rect.y < 0 || rect.x + rect.width > bounds.columns ||
+          rect.y + rect.height > bounds.rows) continue;
+        if (obstacles.some((obstacle) => optionBadgeOverlaps(rect, obstacle))) continue;
+        return { center, rect };
+      }
+    }
+  }
+  throw new Error('Unable to place offered-option badge without covering a nameplate.');
+}
+
 function svgElement<K extends keyof SVGElementTagNameMap>(tag: K): SVGElementTagNameMap[K] {
   return document.createElementNS('http://www.w3.org/2000/svg', tag);
 }
@@ -305,6 +384,7 @@ function svgElement<K extends keyof SVGElementTagNameMap>(tag: K): SVGElementTag
 function renderOfferedOptionPathOverlay(
   projection: EncounterBoardProjectionShape,
   paths: readonly OfferedOptionPath[],
+  nameplates: readonly NameplateLayout[],
 ): SVGSVGElement {
   const svg = svgElement('svg');
   svg.classList.add('encounter-option-paths');
@@ -393,13 +473,17 @@ function renderOfferedOptionPathOverlay(
     const stackOffset = stack === 0
       ? 0
       : Math.ceil(stack / 2) * (stack % 2 === 1 ? -0.52 : 0.52);
+    const badgePosition = positionOptionBadge({
+      x: destination.column + 0.5 + offset.x,
+      y: destination.row + 0.5 + offset.y + stackOffset,
+    }, projection.bounds, nameplates);
     const badge = svgElement('g');
     badge.classList.add('encounter-option-destination');
     badge.dataset.optionOrdinal = String(path.optionOrdinal);
     badge.dataset.dangerCells = dangerCells;
     badge.setAttribute(
       'transform',
-      `translate(${String(destination.column + 0.5 + offset.x)} ${String(destination.row + 0.5 + offset.y + stackOffset)})`,
+      `translate(${String(badgePosition.center.x)} ${String(badgePosition.center.y)})`,
     );
     const circle = svgElement('circle');
     circle.setAttribute('r', '0.18');
@@ -437,6 +521,7 @@ function renderOfferedOptionLegend(): HTMLElement {
   return legend;
 }
 
+// ART-SEAM (D516): exported so the DM-with-chrome / player-without DOM identity is testable.
 export function renderBoard(
   projection: EncounterBoardProjectionShape,
   preview: ReadonlySet<string> = new Set(),
@@ -452,6 +537,10 @@ export function renderBoard(
   const models = encounterBoardRenderModel(projection, art);
   const board = element('div', { className: 'encounter-board' });
   board.style.setProperty('--encounter-columns', String(projection.bounds.columns));
+  // ART-SEAM (D516): overlay art reaches the mechanical-layer CSS through custom properties.
+  for (const [effect, assetId] of Object.entries(OVERLAY_ASSETS)) {
+    board.style.setProperty(`--art-overlay-${effect}`, starterArtCssUrl(assetId));
+  }
   board.dataset.artPackage = art.id;
   board.dataset.boardAudience = provenance === undefined ? 'player' : 'dm';
   if (provenance !== undefined) {
@@ -621,9 +710,19 @@ export function renderBoard(
     board.append(svg);
   }
   if (offeredPaths !== null) {
-    board.append(renderOfferedOptionPathOverlay(projection, offeredPaths));
+    const nameplates = provenance === undefined
+      ? []
+      : stackLabelOffsets(projection.combatants.map((combatant) => ({
+        id: combatant.id,
+        displayName: combatant.name,
+        column: combatant.position.column,
+        row: combatant.position.row,
+      })), projection.bounds);
+    board.append(renderOfferedOptionPathOverlay(projection, offeredPaths, nameplates));
     board.append(renderOfferedOptionLegend());
   }
+  // ART-SEAM (D516): the DM board gains names, HP bars, coordinates and a legend; the player board does not.
+  if (provenance !== undefined) renderBoardChrome(board, projection);
   return board;
 }
 
