@@ -10770,3 +10770,21 @@ hunks (encounter-app, encounter-board, styles, encounter-board-art test) — the
 seam touched the same render-model code. Fable unit D11 dispatched to resolve (classic path renders exactly as main;
 iso on top; snapshot never regenerated); my full landing gate with the browser suite follows, then main. The three
 minors and three nits go into the first post-landing iso unit.
+
+FOOTPRINTS MERGE (2026-09-05 09:25): codex resolved all six files (both sides in full; one renderBoard path;
+multi-cell tokens span their footprints through main's chrome; player hidden cells plain floor per the 08:50
+ruling). Codex gates: tsc 0, sg 0, focused 207, three specs 5/5, locked full suite 563/9718; its mutation killed.
+Mine: forbidden scan clean, frozen sha intact, tsc 0, sg 0, focused 66/66; my mutation (DM board fogs hidden
+creatures' cells) killed the detection-ui test — a first variant did not compile and is void. Merge committed
+b1270d13 on claude/footprints; the full landing gate (browser suite) started 09:25 on the clean tree.
+
+ISO D11 (2026-09-05 09:20, merge resolution): all four files resolved, iso ported to main's encounterArtForBoard,
+classic renderBoard byte-identical to main's. One real merge defect found by the unit: git treated the final `}`
+of styles.css as shared text, so the iso @media block swallowed every D516 chrome rule (204/203 braces); fixed.
+Gates: tsc 0, sg 0, Playwright iso + vtt-encounter + board-snapshot 5/5, vitest 271 passed / 2 failed — the two
+are the classic-board snapshot test, and the unit STOPPED correctly: main's D516 classic-art landing changed the
+classic markup (PNG tiles, directional walls, shade layers, mechanical layers), so the pre-iso snapshot can never
+match again and re-baselining from our own output is forbidden. Mutation iso_seam_reads_stale_light killed 10.
+SUPERVISOR RULING: the hash snapshot is retired; D12 replaces it with a baseline-free invariant (classic markup
+identical with and without the iso strategy, plus structural D516 chrome assertions) and moves the Playwright
+wrapper config into the repo. D12 dispatched on the same mid-merge worktree; the merge is committed after it.
