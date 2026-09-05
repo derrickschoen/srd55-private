@@ -18,8 +18,13 @@ import { ALERTING_POLICY } from '../../combat/alerting';
 import { SEARCH_MEMORY_POLICY } from '../../combat/search-memory';
 import type { McpToolDescriptor, SchemaViolation } from './handler';
 import { rendererAttributionSchema } from '../renderer-profile';
-import { KB_SUBJECTS } from '../knowledge-base-contract';
 import { creatureSizes } from '../../domain/enums';
+
+// Keep the public wire enum browser-safe: the knowledge-base loader itself is
+// intentionally Node-only (filesystem + hashing) and must not enter the VTT bundle.
+const KB_SUBJECTS = [
+  'actions', 'movement', 'targeting', 'spells', 'conditions', 'reactions', 'protocol',
+] as const satisfies readonly import('../knowledge-base-contract').KbSubject[];
 
 export const ENGINE_ACTOR_KNOWLEDGE_POLICY = 'actor-knowledge-v2-creature-space' as const;
 export const ENGINE_LEGENDARY_WINDOWS_POLICY = 'legendary-windows-v2' as const;
@@ -408,7 +413,9 @@ const actorKnowledgeTarget = z.discriminatedUnion('kind', [
   }).strict(),
   z.object({
     kind: z.literal('placement_pending'), target_id: identifier,
-    placement_status: z.literal('placement_pending'), pending_reason: z.literal('legacy_size_required'),
+    placement_status: z.literal('placement_pending'), pending_reason: z.enum([
+      'legacy_size_required', 'effect_adjudication_pending', 'overlap_adjudication_pending',
+    ]),
   }).strict(),
   z.object({
     kind: z.literal('suspected'), target_id: identifier,
@@ -843,7 +850,9 @@ const placedCombatantSummary = z.object({
 const placementPendingCombatantSummary = z.object({
   combatant_id: identifier, name: identifier, side: z.enum(['player_character', 'monster']), status: actorStatus,
   placement_status: z.literal('placement_pending'),
-  pending_reason: z.literal('legacy_size_required'),
+  pending_reason: z.enum([
+    'legacy_size_required', 'effect_adjudication_pending', 'overlap_adjudication_pending',
+  ]),
   options: z.array(tacticalOption).length(0), threats: z.array(threat).length(0),
 }).strict();
 const combatantSummary = z.discriminatedUnion('placement_status', [

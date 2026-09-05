@@ -59,7 +59,13 @@ function previewSvg(): string {
     { id: combatantId('combatant:cleric'), name: 'Cleric', kind: 'player_character' as const, position: { column: 1, row: 4 } },
     { id: combatantId('combatant:wizard'), name: 'Wizard', kind: 'player_character' as const, position: { column: 1, row: 2 } },
     { id: combatantId('combatant:training-brute'), name: 'Training Brute', kind: 'monster' as const, position: { column: 6, row: 3 } },
-  ];
+  ].map((combatant) => ({
+    ...combatant,
+    placementStatus: 'placed' as const,
+    effectiveSize: 'Medium' as const,
+    placementMode: { kind: 'normal' as const, actual: 'Medium' as const },
+    footprint: [{ ...combatant.position }] as const,
+  }));
   const base = {
     bounds: { columns: 10, rows: 7 },
     combatants: party,

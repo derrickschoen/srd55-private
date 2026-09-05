@@ -1,4 +1,4 @@
-import { creatureSizes, skills, type Ability, type Skill } from '../domain/enums';
+import { creatureSizes, skills, type Ability, type KnownCreatureSize, type Skill } from '../domain/enums';
 import { canonicalJson } from '../commands/canonical-json';
 import { combatantFaction, combatantSide, combatantsAreAllies } from './allies';
 import {
@@ -101,8 +101,10 @@ import {
   newlyEnteredSpaceCells,
   normalPlacementFor,
   openingContainingSpace,
+  placementFor,
   placementFromSerialized,
   sizedCombatantState,
+  squeezedPlacementFor,
   spaceFitsBounds,
   sharedSpaceRelation,
   serializedPlacementMode,
@@ -249,7 +251,37 @@ export type LifeState = 'living' | 'dying' | 'stable' | 'dead';
 
 export type EncounterOutcome = 'victory' | 'defeat' | 'mutual';
 
-export type EncounterPhase =
+export interface MigrationOriginatingToken {
+  readonly id: CombatToken['id'];
+  readonly combatantId: CombatantId;
+  readonly position: GridCell;
+}
+
+export type MigrationAdjudicationPending =
+  | {
+      readonly kind: 'legacy_size_required';
+      readonly combatant: CombatantId;
+      readonly sourceSizeText: string | null;
+      readonly suggestedAnchor: GridCell | null;
+      readonly originatingToken: MigrationOriginatingToken | null;
+    }
+  | {
+      readonly kind: 'effect_adjudication_pending';
+      readonly combatant: CombatantId;
+      readonly effectId: EncounterEffectId;
+      readonly originalEffect: EncounterEffect;
+      readonly suggestedAnchor: GridCell | null;
+      readonly originatingToken: MigrationOriginatingToken | null;
+    }
+  | {
+      readonly kind: 'overlap_adjudication_pending';
+      readonly combatant: CombatantId;
+      readonly overlappingCombatant: CombatantId;
+      readonly formerAnchors: readonly [GridCell, GridCell];
+      readonly originatingToken: MigrationOriginatingToken;
+    };
+
+export type ResumableEncounterPhase =
   | { readonly kind: 'active' }
   | {
       readonly kind: 'concluded';
@@ -259,10 +291,32 @@ export type EncounterPhase =
       readonly revision: number;
     };
 
+export type EncounterPhase = ResumableEncounterPhase | {
+  readonly kind: 'awaiting_placement';
+  readonly combatantId: CombatantId;
+  readonly reason: MigrationAdjudicationPending['kind'];
+  readonly originatingRecord: MigrationAdjudicationPending;
+  readonly resumePhase: ResumableEncounterPhase;
+};
+
 export function isEncounterPhase(value: unknown): value is EncounterPhase {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
   const kind = Reflect.get(value, 'kind');
   if (kind === 'active') return Object.keys(value).length === 1;
+  if (kind === 'awaiting_placement') {
+    const reason = Reflect.get(value, 'reason');
+    const record = Reflect.get(value, 'originatingRecord');
+    const resumePhase = Reflect.get(value, 'resumePhase');
+    return Object.keys(value).length === 5 &&
+      typeof Reflect.get(value, 'combatantId') === 'string' &&
+      (reason === 'legacy_size_required' || reason === 'effect_adjudication_pending' ||
+        reason === 'overlap_adjudication_pending') &&
+      typeof record === 'object' && record !== null && !Array.isArray(record) &&
+      Reflect.get(record, 'kind') === reason &&
+      Reflect.get(record, 'combatant') === Reflect.get(value, 'combatantId') &&
+      typeof resumePhase === 'object' && resumePhase !== null && !Array.isArray(resumePhase) &&
+      Reflect.get(resumePhase, 'kind') !== 'awaiting_placement' && isEncounterPhase(resumePhase);
+  }
   if (kind !== 'concluded' || Object.keys(value).length !== 5) return false;
   const outcome = Reflect.get(value, 'outcome');
   const survivingSide = Reflect.get(value, 'survivingSide');
@@ -337,6 +391,28 @@ export class EncounterConcludedBoundaryError extends EncounterRuleError {
       'encounter_concluded_boundary',
       `The encounter concluded with ${conclusion.outcome}; turn advancement is unavailable.`,
     );
+  }
+}
+
+export type PendingPlacementRefusalCode =
+  | 'not_awaiting_placement'
+  | 'placement_resolution_required'
+  | 'not_queue_head'
+  | 'size_not_allowed'
+  | 'outside_bounds'
+  | 'blocked_cell'
+  | 'blocking_object'
+  | 'opening_mismatch'
+  | 'tiny_capacity_exceeded';
+
+export class PendingPlacementRuleError extends EncounterRuleError {
+  override readonly name = 'PendingPlacementRuleError' as const;
+
+  constructor(
+    readonly code: PendingPlacementRefusalCode,
+    readonly combatantId: CombatantId,
+  ) {
+    super('validation', `${String(combatantId)}: ${code}`);
   }
 }
 
@@ -633,25 +709,6 @@ export interface EncounterState {
   readonly groundItems?: readonly GroundItem[];
   readonly itemContacts?: readonly ItemPhysicalContact[];
 }
-
-export type MigrationAdjudicationPending =
-  | {
-      readonly kind: 'legacy_size_required';
-      readonly combatant: CombatantId;
-      readonly sourceSizeText: string | null;
-      readonly suggestedAnchor: GridCell | null;
-    }
-  | {
-      readonly kind: 'effect_adjudication_pending';
-      readonly effectId: EncounterEffectId;
-      readonly originalPayload: unknown;
-    }
-  | {
-      readonly kind: 'overlap_adjudication_pending';
-      readonly first: CombatantId;
-      readonly second: CombatantId;
-      readonly formerAnchors: readonly [GridCell, GridCell];
-    };
 
 interface ReevaluatedSpellBranch {
   readonly sequence: number;
@@ -1339,6 +1396,195 @@ function token(state: EncounterState, id: CombatantId): CombatToken {
   const found = state.tokens.find((candidate) => candidate.combatantId === id);
   if (found === undefined) throw new EncounterRuleError('validation', `Combatant ${id} has no token.`);
   return found;
+}
+
+const MIGRATION_PENDING_REASON_ORDER: Readonly<Record<MigrationAdjudicationPending['kind'], number>> = {
+  legacy_size_required: 0,
+  effect_adjudication_pending: 1,
+  overlap_adjudication_pending: 2,
+};
+
+export function orderedMigrationPlacementQueue(
+  pending: readonly MigrationAdjudicationPending[],
+  initiative: readonly InitiativeEntry[],
+): readonly MigrationAdjudicationPending[] {
+  const initiativeOrder = new Map(initiative.map((entry, index) => [entry.combatant, index] as const));
+  return [...pending].sort((left, right) =>
+    (initiativeOrder.get(left.combatant) ?? Number.MAX_SAFE_INTEGER) -
+      (initiativeOrder.get(right.combatant) ?? Number.MAX_SAFE_INTEGER) ||
+    String(left.combatant).localeCompare(String(right.combatant)) ||
+    MIGRATION_PENDING_REASON_ORDER[left.kind] - MIGRATION_PENDING_REASON_ORDER[right.kind]);
+}
+
+export function awaitingPlacementPhase(
+  pending: readonly MigrationAdjudicationPending[],
+  initiative: readonly InitiativeEntry[],
+  resumePhase: ResumableEncounterPhase,
+): EncounterPhase {
+  const head = orderedMigrationPlacementQueue(pending, initiative)[0];
+  return head === undefined
+    ? resumePhase
+    : {
+        kind: 'awaiting_placement',
+        combatantId: head.combatant,
+        reason: head.kind,
+        originatingRecord: structuredClone(head),
+        resumePhase: structuredClone(resumePhase),
+      };
+}
+
+export interface PendingPlacementLegalAnchor {
+  readonly anchor: GridCell;
+  readonly effectiveSize: KnownCreatureSize;
+  readonly placementMode: import('./creature-space').SerializedPlacementMode;
+  readonly footprint: readonly [GridCell, ...GridCell[]];
+}
+
+function pendingPlacementCandidateSpaces(
+  size: KnownCreatureSize,
+  anchor: GridCell,
+): readonly CreatureSpace<KnownCreatureSize>[] {
+  switch (size) {
+    case 'Tiny': {
+      const sized = sizedCombatantState('Tiny');
+      return [creatureSpace(sized, placementFor(sized, anchor, normalPlacementFor(sized)))];
+    }
+    case 'Small': {
+      const sized = sizedCombatantState('Small');
+      return [
+        creatureSpace(sized, placementFor(sized, anchor, normalPlacementFor(sized))),
+        creatureSpace(sized, placementFor(sized, anchor, squeezedPlacementFor(sized))),
+      ];
+    }
+    case 'Medium': {
+      const sized = sizedCombatantState('Medium');
+      return [
+        creatureSpace(sized, placementFor(sized, anchor, normalPlacementFor(sized))),
+        creatureSpace(sized, placementFor(sized, anchor, squeezedPlacementFor(sized))),
+      ];
+    }
+    case 'Large': {
+      const sized = sizedCombatantState('Large');
+      return [
+        creatureSpace(sized, placementFor(sized, anchor, normalPlacementFor(sized))),
+        creatureSpace(sized, placementFor(sized, anchor, squeezedPlacementFor(sized))),
+      ];
+    }
+    case 'Huge': {
+      const sized = sizedCombatantState('Huge');
+      return [
+        creatureSpace(sized, placementFor(sized, anchor, normalPlacementFor(sized))),
+        creatureSpace(sized, placementFor(sized, anchor, squeezedPlacementFor(sized))),
+      ];
+    }
+    case 'Gargantuan': {
+      const sized = sizedCombatantState('Gargantuan');
+      return [
+        creatureSpace(sized, placementFor(sized, anchor, normalPlacementFor(sized))),
+        creatureSpace(sized, placementFor(sized, anchor, squeezedPlacementFor(sized))),
+      ];
+    }
+  }
+}
+
+function pendingPlacementRefusal(
+  state: EncounterState,
+  combatantId: CombatantId,
+  space: CreatureSpace<KnownCreatureSize>,
+): PendingPlacementRefusalCode | null {
+  if (!spaceFitsBounds(space, state.bounds)) return 'outside_bounds';
+  if (space.cells.some((occupied) => state.blockedCells.some((blocked) =>
+    cellKey(blocked) === cellKey(occupied)))) return 'blocked_cell';
+  if (space.cells.some((occupied) => state.worldObjects.some((object) =>
+    object.blocking.movement && object.footprint.some((blocked) =>
+      cellKey(blocked) === cellKey(occupied))))) return 'blocking_object';
+  if (space.cells.some((occupied) => (state.environment.movementRegions ?? []).some((region) =>
+    region.entry === 'blocked' && region.cells.some((blocked) =>
+      cellKey(blocked) === cellKey(occupied))))) return 'blocked_cell';
+  if (space.mode.kind === 'squeezed') {
+    if (openingContainingSpace(space, state.environment.narrowOpeningRegions) === null) {
+      return 'opening_mismatch';
+    }
+  } else {
+    const actualIndex = creatureSizes.indexOf(space.actualSize);
+    if (state.environment.narrowOpeningRegions.some((opening) =>
+      actualIndex > creatureSizes.indexOf(opening.sizedFor) && space.cells.some((occupied) =>
+        opening.cells.some((openingCell) => cellKey(openingCell) === cellKey(occupied))))) {
+      return 'opening_mismatch';
+    }
+  }
+  const pendingIds = new Set(state.adjudicationPending.map((entry) => entry.combatant));
+  const overlaps = state.tokens.filter((candidate) =>
+    candidate.combatantId !== combatantId && !pendingIds.has(candidate.combatantId) &&
+    combatant(state, candidate.combatantId).life !== 'dead' &&
+    spacesIntersect(space, combatantSpace(state, candidate.combatantId)));
+  if (space.actualSize === 'Tiny' && overlaps.every((candidate) =>
+    effectiveCreatureSize(state, candidate.combatantId) === 'Tiny') && overlaps.length >= 4) {
+    return 'tiny_capacity_exceeded';
+  }
+  return null;
+}
+
+function legalPendingPlacementAt(
+  state: EncounterState,
+  combatantId: CombatantId,
+  size: KnownCreatureSize,
+  anchor: GridCell,
+): CreatureSpace<KnownCreatureSize> | PendingPlacementRefusalCode {
+  let firstRefusal: PendingPlacementRefusalCode | null = null;
+  for (const candidate of pendingPlacementCandidateSpaces(size, anchor)) {
+    const refusal = pendingPlacementRefusal(state, combatantId, candidate);
+    if (refusal === null) return candidate;
+    firstRefusal ??= refusal;
+  }
+  return firstRefusal ?? 'opening_mismatch';
+}
+
+function sizeAllowedForPendingRecord(
+  state: EncounterState,
+  record: MigrationAdjudicationPending,
+  size: KnownCreatureSize,
+): boolean {
+  switch (record.kind) {
+    case 'legacy_size_required':
+      return true;
+    case 'overlap_adjudication_pending':
+      return effectiveCreatureSize(state, record.combatant) === size;
+    case 'effect_adjudication_pending': {
+      const payload = record.originalEffect.payload;
+      if (payload.kind !== 'size_alteration' || 'delta' in payload ||
+        record.originalEffect.targets.length !== 1 ||
+        record.originalEffect.targets[0] !== record.combatant) return false;
+      return Math.abs(
+        creatureSizes.indexOf(size) -
+        creatureSizes.indexOf(effectiveCreatureSize(state, record.combatant)),
+      ) === 1;
+    }
+  }
+}
+
+export function pendingPlacementLegalAnchors(
+  state: EncounterState,
+  size: KnownCreatureSize,
+): readonly PendingPlacementLegalAnchor[] {
+  if (state.phase.kind !== 'awaiting_placement') return [];
+  const record = state.phase.originatingRecord;
+  if (!sizeAllowedForPendingRecord(state, record, size)) return [];
+  const anchors: PendingPlacementLegalAnchor[] = [];
+  for (let row = 0; row < state.bounds.rows; row += 1) {
+    for (let column = 0; column < state.bounds.columns; column += 1) {
+      const anchor = { column, row };
+      const result = legalPendingPlacementAt(state, record.combatant, size, anchor);
+      if (typeof result === 'string') continue;
+      anchors.push({
+        anchor,
+        effectiveSize: size,
+        placementMode: serializedPlacementMode(result.mode),
+        footprint: result.cells.map((cell) => ({ ...cell })) as [GridCell, ...GridCell[]],
+      });
+    }
+  }
+  return anchors;
 }
 
 export function isCombatantOnBoard(state: EncounterState, id: CombatantId): boolean {
@@ -11466,8 +11712,160 @@ function applyDmDeathOverride(context: ReductionContext, command: DmDeathOverrid
   });
 }
 
+type ResolvePendingPlacementCommand = Extract<EncounterCommand, {
+  readonly type: 'resolve_pending_placement';
+}>;
+
+function pendingPlacementRecordMatches(
+  record: MigrationAdjudicationPending,
+  command: ResolvePendingPlacementCommand,
+): boolean {
+  return record.combatant === command.combatant && record.kind === command.reason;
+}
+
+function resolveMigrationPendingPlacement(
+  context: ReductionContext,
+  command: ResolvePendingPlacementCommand,
+): void {
+  const phase = context.state.phase;
+  if (phase.kind !== 'awaiting_placement') {
+    throw new PendingPlacementRuleError('not_awaiting_placement', command.combatant);
+  }
+  const head = orderedMigrationPlacementQueue(
+    context.state.adjudicationPending,
+    context.state.initiative,
+  )[0];
+  if (head === undefined || !pendingPlacementRecordMatches(head, command) ||
+    !pendingPlacementRecordMatches(phase.originatingRecord, command)) {
+    throw new PendingPlacementRuleError('not_queue_head', command.combatant);
+  }
+  const size = command.reason === 'overlap_adjudication_pending'
+    ? effectiveCreatureSize(context.state, command.combatant)
+    : command.size;
+  if (!sizeAllowedForPendingRecord(context.state, head, size)) {
+    throw new PendingPlacementRuleError('size_not_allowed', command.combatant);
+  }
+  const placement = legalPendingPlacementAt(
+    context.state,
+    command.combatant,
+    size,
+    command.anchor,
+  );
+  if (typeof placement === 'string') {
+    throw new PendingPlacementRuleError(placement, command.combatant);
+  }
+
+  let next = context.state;
+  if (head.kind === 'legacy_size_required') {
+    const subject = combatant(next, head.combatant);
+    next = replaceCombatant(next, {
+      ...subject,
+      profile: {
+        ...subject.profile,
+        rules: { ...subject.profile.rules, sizeCategory: size },
+      },
+    });
+  } else if (head.kind === 'effect_adjudication_pending') {
+    const payload = head.originalEffect.payload;
+    if (payload.kind !== 'size_alteration' || 'delta' in payload) {
+      throw new PendingPlacementRuleError('size_not_allowed', command.combatant);
+    }
+    const baseIndex = creatureSizes.indexOf(effectiveCreatureSize(next, head.combatant));
+    const selectedIndex = creatureSizes.indexOf(size);
+    const delta = selectedIndex > baseIndex ? 1 as const : -1 as const;
+    const restoredEffect: EncounterEffect = {
+      ...head.originalEffect,
+      payload: {
+        kind: 'size_alteration',
+        delta,
+        appliedSequence: effectSequence(next.nextEffectSequence),
+        damageDieCount: payload.damageDieCount,
+        damageDieSides: payload.damageDieSides,
+      },
+    };
+    next = {
+      ...next,
+      effects: [...next.effects, restoredEffect],
+      nextEffectSequence: next.nextEffectSequence + 1,
+    };
+  }
+
+  const remaining = [...next.adjudicationPending];
+  const recordIndex = remaining.indexOf(head);
+  if (recordIndex < 0) throw new PendingPlacementRuleError('not_queue_head', command.combatant);
+  remaining.splice(recordIndex, 1);
+  const tokenPlacement: CombatToken = {
+    id: head.originatingToken?.id ?? combatant(next, head.combatant).profile.tokenId,
+    combatantId: head.combatant,
+    position: { ...placement.anchor },
+    placementMode: serializedPlacementMode(placement.mode),
+  };
+  const withoutResolvedToken = next.tokens.filter((candidate) =>
+    candidate.combatantId !== head.combatant);
+  next = {
+    ...next,
+    tokens: [...withoutResolvedToken, tokenPlacement],
+    adjudicationPending: orderedMigrationPlacementQueue(remaining, next.initiative),
+    sharedSpaceRelations: next.sharedSpaceRelations.filter((relation) =>
+      relation.first !== head.combatant && relation.second !== head.combatant),
+  };
+  const stillPending = next.adjudicationPending.some((entry) =>
+    entry.combatant === head.combatant);
+  const sharedWith = stillPending
+    ? []
+    : next.tokens.flatMap((candidate): readonly CombatantId[] =>
+        candidate.combatantId !== head.combatant &&
+        !next.adjudicationPending.some((entry) => entry.combatant === candidate.combatantId) &&
+        combatant(next, candidate.combatantId).life !== 'dead' &&
+        spacesIntersect(placement, combatantSpace(next, candidate.combatantId))
+          ? [candidate.combatantId]
+          : []);
+  if (!stillPending) {
+    const originatingId = `migration-placement:${String(next.revision)}:${String(next.nextEventSequence)}`;
+    next = {
+      ...next,
+      sharedSpaceRelations: [
+        ...next.sharedSpaceRelations,
+        ...sharedWith.map((other) => sharedSpaceRelation({
+          left: head.combatant,
+          right: other,
+          provenance: 'dm_pending_resolution',
+          originatingId,
+        })),
+      ].sort((left, right) =>
+        String(left.first).localeCompare(String(right.first)) ||
+        String(left.second).localeCompare(String(right.second))),
+    };
+  }
+  next = {
+    ...next,
+    phase: awaitingPlacementPhase(next.adjudicationPending, next.initiative, phase.resumePhase),
+  };
+  context.state = next;
+  emit(context, {
+    type: 'pending_placement_resolved',
+    combatant: head.combatant,
+    reason: head.kind,
+    effectiveSize: size,
+    position: { ...placement.anchor },
+    placementMode: serializedPlacementMode(placement.mode),
+    sharedWith,
+  });
+  if (!stillPending) reevaluatePersistentAreaMembership(context);
+}
+
 function processCommand(context: ReductionContext, command: EncounterCommand): void {
+  if (context.state.phase.kind === 'awaiting_placement' &&
+    command.type !== 'resolve_pending_placement') {
+    throw new PendingPlacementRuleError(
+      'placement_resolution_required',
+      context.state.phase.combatantId,
+    );
+  }
   switch (command.type) {
+    case 'resolve_pending_placement':
+      resolveMigrationPendingPlacement(context, command);
+      return;
     case 'use_world_object':
       useWorldObject(context, command);
       return;

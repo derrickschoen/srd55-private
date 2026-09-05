@@ -209,47 +209,80 @@ describe('event-sourced encounter persistence', () => {
         position: { column: 0, row: 0 },
         placementMode: { kind: 'normal', actual: 'Medium' },
       },
-      {
-        id: 'token:known-tiny',
-        combatantId: 'combatant:known-tiny',
-        position: { column: 0, row: 0 },
-        placementMode: { kind: 'normal', actual: 'Tiny' },
-      },
     ]);
     expect(Reflect.get(encounterState, 'effects')).toEqual([
       { id: 'effect:retained', payload: { kind: 'movement_modifier', speedDeltaFeet: 5 } },
     ]);
     expect(Reflect.get(encounterState, 'adjudicationPending')).toEqual([
       {
+        kind: 'effect_adjudication_pending',
+        combatant: 'combatant:known-effect',
+        effectId: 'effect:legacy-size-choice',
+        originalEffect: {
+          id: 'effect:legacy-size-choice',
+          source: 'combatant:known-medium',
+          targets: ['combatant:known-effect'],
+          createdRevision: 0,
+          duration: { kind: 'permanent' },
+          concentrationOwner: null,
+          stackingIdentity: 'spell:enlarge-reduce',
+          stacking: 'replace_same_source',
+          repeatedSave: null,
+          payload: {
+            kind: 'size_alteration',
+            selection: 'selected_when_cast',
+            damageDieCount: 1,
+            damageDieSides: 4,
+          },
+        },
+        suggestedAnchor: { column: 3, row: 3 },
+        originatingToken: {
+          id: 'token:known-effect',
+          combatantId: 'combatant:known-effect',
+          position: { column: 3, row: 3 },
+        },
+      },
+      {
+        kind: 'overlap_adjudication_pending',
+        combatant: 'combatant:known-tiny',
+        overlappingCombatant: 'combatant:known-medium',
+        formerAnchors: [{ column: 0, row: 0 }, { column: 0, row: 0 }],
+        originatingToken: {
+          id: 'token:known-tiny',
+          combatantId: 'combatant:known-tiny',
+          position: { column: 0, row: 0 },
+        },
+      },
+      {
         kind: 'legacy_size_required',
         combatant: 'combatant:missing-size',
         sourceSizeText: null,
         suggestedAnchor: { column: 1, row: 1 },
+        originatingToken: {
+          id: 'token:missing-size',
+          combatantId: 'combatant:missing-size',
+          position: { column: 1, row: 1 },
+        },
       },
       {
         kind: 'legacy_size_required',
         combatant: 'combatant:unknown-size',
         sourceSizeText: 'Colossal Homebrew',
         suggestedAnchor: { column: 1, row: 1 },
-      },
-      {
-        kind: 'effect_adjudication_pending',
-        effectId: 'effect:legacy-size-choice',
-        originalPayload: { kind: 'size_alteration', legacyChoice: 'Enlarge or Reduce was not recorded' },
-      },
-      {
-        kind: 'overlap_adjudication_pending',
-        first: 'combatant:known-medium',
-        second: 'combatant:known-tiny',
-        formerAnchors: [{ column: 0, row: 0 }, { column: 0, row: 0 }],
-      },
-      {
-        kind: 'overlap_adjudication_pending',
-        first: 'combatant:missing-size',
-        second: 'combatant:unknown-size',
-        formerAnchors: [{ column: 1, row: 1 }, { column: 1, row: 1 }],
+        originatingToken: {
+          id: 'token:unknown-size',
+          combatantId: 'combatant:unknown-size',
+          position: { column: 1, row: 1 },
+        },
       },
     ]);
+    expect(Reflect.get(encounterState, 'phase')).toEqual({
+      kind: 'awaiting_placement',
+      combatantId: 'combatant:known-effect',
+      reason: 'effect_adjudication_pending',
+      originatingRecord: Reflect.get(encounterState, 'adjudicationPending')[0],
+      resumePhase: { kind: 'active' },
+    });
     expect(Reflect.get(encounterState, 'environment')).toEqual({
       ...HAND_AUTHORED_V10_CREATURE_SPACE_CASES.environment,
       narrowOpeningRegions: [],
@@ -347,10 +380,10 @@ describe('event-sourced encounter persistence', () => {
     expect(migratedEncounterState.sharedSpaceRelations).toEqual([]);
     expect(migratedEncounterState.environment.narrowOpeningRegions).toEqual([]);
     expect(migratedEncounterState.adjudicationPending).toEqual([
-      { kind: 'legacy_size_required', combatant: 'combatant:fighter', sourceSizeText: null, suggestedAnchor: { column: 2, row: 3 } },
-      { kind: 'legacy_size_required', combatant: 'combatant:cleric', sourceSizeText: null, suggestedAnchor: { column: 1, row: 4 } },
-      { kind: 'legacy_size_required', combatant: 'combatant:wizard', sourceSizeText: null, suggestedAnchor: { column: 1, row: 2 } },
-      { kind: 'legacy_size_required', combatant: 'combatant:training-brute', sourceSizeText: null, suggestedAnchor: { column: 3, row: 3 } },
+      { kind: 'legacy_size_required', combatant: 'combatant:cleric', sourceSizeText: null, suggestedAnchor: { column: 1, row: 4 }, originatingToken: { id: 'token:cleric', combatantId: 'combatant:cleric', position: { column: 1, row: 4 } } },
+      { kind: 'legacy_size_required', combatant: 'combatant:fighter', sourceSizeText: null, suggestedAnchor: { column: 2, row: 3 }, originatingToken: { id: 'token:fighter', combatantId: 'combatant:fighter', position: { column: 2, row: 3 } } },
+      { kind: 'legacy_size_required', combatant: 'combatant:training-brute', sourceSizeText: null, suggestedAnchor: { column: 3, row: 3 }, originatingToken: { id: 'token:training-brute', combatantId: 'combatant:training-brute', position: { column: 3, row: 3 } } },
+      { kind: 'legacy_size_required', combatant: 'combatant:wizard', sourceSizeText: null, suggestedAnchor: { column: 1, row: 2 }, originatingToken: { id: 'token:wizard', combatantId: 'combatant:wizard', position: { column: 1, row: 2 } } },
     ]);
     expect(projectPlayerView(migratedEncounterState, {
       seatId: 'seat:migrated-fighter', combatantId: combatantId('combatant:fighter'),

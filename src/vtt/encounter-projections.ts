@@ -4,7 +4,13 @@ import type {
   CoordinatorPause,
   PersistedCoordinatorState,
 } from '../combat/coordinator';
-import type { TurnResources } from '../combat/encounter';
+import {
+  effectiveCreatureSize,
+  pendingPlacementLegalAnchors,
+  type PendingPlacementLegalAnchor,
+  type TurnResources,
+} from '../combat/encounter';
+import { creatureSizes, type KnownCreatureSize } from '../domain/enums';
 import type { PendingDecision, ReactionPolicy } from '../combat/encounter';
 import {
   previewMovementPathDangers,
@@ -101,6 +107,19 @@ export interface DmBoardProjection {
     readonly objectName: string;
     readonly label: string;
     readonly command: Extract<EncounterCommand, { readonly type: 'dm_use_world_object' }>;
+  }[];
+  readonly pendingPlacementRecovery: DmPendingPlacementRecovery | null;
+}
+
+export interface DmPendingPlacementRecovery {
+  readonly combatantId: CombatantId;
+  readonly combatantName: string;
+  readonly reason: import('../combat/encounter').MigrationAdjudicationPending['kind'];
+  readonly suggestedAnchor: GridCell | null;
+  readonly sizeInput: 'required' | 'fixed';
+  readonly sizeOptions: readonly {
+    readonly size: KnownCreatureSize;
+    readonly legalAnchors: readonly PendingPlacementLegalAnchor[];
   }[];
 }
 
@@ -270,6 +289,29 @@ export function projectDmBoard(input: {
   const names = new Map(input.view.state.combatants.map(
     (subject) => [subject.profile.id, subject.profile.name] as const,
   ));
+  const recovery = input.view.state.phase.kind === 'awaiting_placement'
+    ? (() => {
+        const phase = input.view.state.phase;
+        const record = phase.originatingRecord;
+        const sizes = record.kind === 'overlap_adjudication_pending'
+          ? [effectiveCreatureSize(input.view.state, record.combatant)]
+          : creatureSizes;
+        const suggestedAnchor = record.kind === 'overlap_adjudication_pending'
+          ? record.formerAnchors[1]
+          : record.suggestedAnchor;
+        return {
+          combatantId: record.combatant,
+          combatantName: names.get(record.combatant) ?? String(record.combatant),
+          reason: record.kind,
+          suggestedAnchor: suggestedAnchor === null ? null : { ...suggestedAnchor },
+          sizeInput: record.kind === 'overlap_adjudication_pending' ? 'fixed' : 'required',
+          sizeOptions: sizes.map((size) => ({
+            size,
+            legalAnchors: pendingPlacementLegalAnchors(input.view.state, size),
+          })),
+        } satisfies DmPendingPlacementRecovery;
+      })()
+    : null;
   const pendingEntries: readonly DmDecisionTrayEntry[] = [
     ...input.view.state.pendingDecisions,
     ...(input.adjudicationPrompts ?? []),
@@ -327,6 +369,7 @@ export function projectDmBoard(input: {
     },
     timeline: projectEncounterTimeline(input.view.state, input.history),
     worldObjectControls,
+    pendingPlacementRecovery: recovery,
   };
 }
 

@@ -205,7 +205,7 @@ describe('D359 encounter views', () => {
     });
 
     expect(westView.combatants.map((entry) => entry.id)).toEqual([west.id]);
-    expect(eastView.combatants.map((entry) => entry.id)).toEqual([west.id, east.id]);
+    expect(eastView.combatants.map((entry) => entry.id)).toEqual([east.id, west.id]);
     expect(westView.ownedCombatants.map((entry) => entry.id)).toEqual([west.id]);
     expect(eastView.ownedCombatants.map((entry) => entry.id)).toEqual([east.id]);
     expect(westView.seat).toMatchObject({ seatId: 'seat:west', combatantId: west.id });

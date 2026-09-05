@@ -120,7 +120,7 @@ export interface EngineProjectionPlacedCombatant extends EngineProjectionCombata
 
 export interface EngineProjectionPlacementPendingCombatant extends EngineProjectionCombatantIdentity {
   readonly placementStatus: 'placement_pending';
-  readonly pendingReason: 'legacy_size_required';
+  readonly pendingReason: EncounterState['adjudicationPending'][number]['kind'];
 }
 
 export type EngineProjectionCombatant =
@@ -489,7 +489,9 @@ function decodeProjectionCombatant(value: unknown): EngineProjectionCombatant {
     throw new EngineStateCapsuleDecodeError('invalid_schema', 'combatant.planning.concentrating must be boolean.');
   }
   if (pending) {
-    if (record['pendingReason'] !== 'legacy_size_required') {
+    if (record['pendingReason'] !== 'legacy_size_required' &&
+      record['pendingReason'] !== 'effect_adjudication_pending' &&
+      record['pendingReason'] !== 'overlap_adjudication_pending') {
       throw new EngineStateCapsuleDecodeError('invalid_schema', 'Pending combatant reason is invalid.');
     }
     return structuredClone(record) as unknown as EngineProjectionPlacementPendingCombatant;
@@ -743,7 +745,7 @@ export function projectEngineEncounterState(
       const token = state.tokens.find((candidate) => candidate.combatantId === combatant.profile.id);
       const rules = combatant.wildShape?.physical ?? combatant.profile.rules;
       const pending = state.adjudicationPending.find((entry) =>
-        entry.kind === 'legacy_size_required' && entry.combatant === combatant.profile.id);
+        entry.combatant === combatant.profile.id);
       const identity: EngineProjectionCombatantIdentity = {
         id: combatant.profile.id,
         name: boundedText(combatant.profile.name, 'combatant name', 200),
@@ -763,7 +765,7 @@ export function projectEngineEncounterState(
         planning: structuredClone(registry.planningFactsFor(combatant.profile.id)),
       };
       if (pending !== undefined) {
-        return [{ ...identity, placementStatus: 'placement_pending', pendingReason: 'legacy_size_required' }];
+        return [{ ...identity, placementStatus: 'placement_pending', pendingReason: pending.kind }];
       }
       if (token === undefined) return [];
       const space = projectedCreatureSpace(state, combatant.profile.id);

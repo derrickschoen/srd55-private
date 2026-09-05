@@ -137,6 +137,7 @@ describe('footprint Increment 3 AI-DM semantics', () => {
         combatant: FIGHTER,
         sourceSizeText: null,
         suggestedAnchor: { column: 0, row: 0 },
+        originatingToken: null,
       }],
     };
     const runtime = createEngineMcpRuntime(state, { requestedActorIds: [SCOUT] });

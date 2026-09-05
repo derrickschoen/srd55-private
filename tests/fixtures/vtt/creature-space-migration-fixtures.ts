@@ -90,6 +90,8 @@ const LEGACY_DETECTION_RULES = Object.freeze({
 
 export const HAND_AUTHORED_V10_CREATURE_SPACE_CASES = Object.freeze({
   config: { initiativeMode: 'per_combatant' },
+  phase: { kind: 'active' },
+  initiative: [],
   hiddenRolls: [],
   persistentAreas: [],
   nextPersistentAreaSequence: 1,
@@ -103,6 +105,7 @@ export const HAND_AUTHORED_V10_CREATURE_SPACE_CASES = Object.freeze({
   combatants: [
     { profile: { id: 'combatant:known-medium', rules: { ...LEGACY_DETECTION_RULES, sizeCategory: 'Medium' } } },
     { profile: { id: 'combatant:known-tiny', rules: { ...LEGACY_DETECTION_RULES, sizeCategory: 'Tiny' } } },
+    { profile: { id: 'combatant:known-effect', rules: { ...LEGACY_DETECTION_RULES, sizeCategory: 'Medium' } } },
     { profile: { id: 'combatant:missing-size', rules: { ...LEGACY_DETECTION_RULES } } },
     {
       profile: {
@@ -114,13 +117,27 @@ export const HAND_AUTHORED_V10_CREATURE_SPACE_CASES = Object.freeze({
   tokens: [
     { id: 'token:known-medium', combatantId: 'combatant:known-medium', position: { column: 0, row: 0 } },
     { id: 'token:known-tiny', combatantId: 'combatant:known-tiny', position: { column: 0, row: 0 } },
+    { id: 'token:known-effect', combatantId: 'combatant:known-effect', position: { column: 3, row: 3 } },
     { id: 'token:missing-size', combatantId: 'combatant:missing-size', position: { column: 1, row: 1 } },
     { id: 'token:unknown-size', combatantId: 'combatant:unknown-size', position: { column: 1, row: 1 } },
   ],
   effects: [
     {
       id: 'effect:legacy-size-choice',
-      payload: { kind: 'size_alteration', legacyChoice: 'Enlarge or Reduce was not recorded' },
+      source: 'combatant:known-medium',
+      targets: ['combatant:known-effect'],
+      createdRevision: 0,
+      duration: { kind: 'permanent' },
+      concentrationOwner: null,
+      stackingIdentity: 'spell:enlarge-reduce',
+      stacking: 'replace_same_source',
+      repeatedSave: null,
+      payload: {
+        kind: 'size_alteration',
+        selection: 'selected_when_cast',
+        damageDieCount: 1,
+        damageDieSides: 4,
+      },
     },
     { id: 'effect:retained', payload: { kind: 'movement_modifier', speedDeltaFeet: 5 } },
   ],

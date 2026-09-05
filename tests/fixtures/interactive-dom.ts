@@ -8,6 +8,7 @@ export class InteractiveTestElement {
     toggle: (token: string, force?: boolean) => boolean;
   };
   readonly dataset: Record<string, string>;
+  readonly style: CSSStyleDeclaration;
   className = '';
   textContent: string | null = null;
   innerHTML = '';
@@ -21,6 +22,7 @@ export class InteractiveTestElement {
   min = '';
   max = '';
   value = '';
+  tabIndex = 0;
   open = false;
 
   private readonly listeners = new Map<string, Set<Listener>>();
@@ -64,6 +66,13 @@ export class InteractiveTestElement {
         },
       },
     );
+    const styleValues = new Map<string, string>();
+    this.style = {
+      setProperty: (property: string, value: string) => {
+        styleValues.set(property, value);
+      },
+      getPropertyValue: (property: string) => styleValues.get(property) ?? '',
+    } as CSSStyleDeclaration;
   }
 
   setAttribute(name: string, value: string): void {
@@ -276,6 +285,10 @@ class InteractiveTestDocument {
 
   createElement(tagName: string): InteractiveTestElement {
     return new InteractiveTestElement(tagName, this);
+  }
+
+  createElementNS(_namespace: string | null, qualifiedName: string): InteractiveTestElement {
+    return new InteractiveTestElement(qualifiedName, this);
   }
 
   createDocumentFragment(): InteractiveTestElement {

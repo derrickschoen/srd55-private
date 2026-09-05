@@ -252,6 +252,7 @@ describe('read-only engine state capsule', () => {
         combatant: pendingId,
         sourceSizeText: null,
         suggestedAnchor: null,
+        originatingToken: null,
       }],
     };
     const pendingBoard = projectDmBoard({

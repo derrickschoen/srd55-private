@@ -81,7 +81,7 @@ export interface PlacementPendingTargetKnowledge {
   readonly kind: 'placement_pending';
   readonly placementStatus: 'placement_pending';
   readonly targetId: CombatantId;
-  readonly pendingReason: 'legacy_size_required';
+  readonly pendingReason: EncounterState['adjudicationPending'][number]['kind'];
 }
 
 /**
@@ -224,7 +224,7 @@ export function projectActorKnowledge(
   }
   const tokens = new Map(state.tokens.map((token) => [token.combatantId, token] as const));
   const actorIsPlaced = tokens.has(actorId) && !state.adjudicationPending.some((entry) =>
-    entry.kind === 'legacy_size_required' && entry.combatant === actorId);
+    entry.combatant === actorId);
   const targets = state.combatants
     .filter((candidate) => candidate.life !== 'dead' &&
       !combatantsAreAllies(state, actorId, candidate.profile.id))
@@ -232,13 +232,13 @@ export function projectActorKnowledge(
       const targetId = candidate.profile.id;
       const target = tokens.get(targetId);
       const pending = state.adjudicationPending.find((entry) =>
-        entry.kind === 'legacy_size_required' && entry.combatant === targetId);
+        entry.combatant === targetId);
       if (pending !== undefined) {
         return {
           kind: 'placement_pending',
           placementStatus: 'placement_pending',
           targetId,
-          pendingReason: 'legacy_size_required',
+          pendingReason: pending.kind,
         };
       }
       if (target === undefined) {

@@ -124,7 +124,7 @@ export interface PlayerVisiblePlacedCombatant extends PlayerVisibleCombatantIden
 
 export interface PlayerVisiblePlacementPendingCombatant extends PlayerVisibleCombatantIdentity {
   readonly placementStatus: 'placement_pending';
-  readonly pendingReason: 'legacy_size_required';
+  readonly pendingReason: EncounterState['adjudicationPending'][number]['kind'];
 }
 
 export type PlayerVisibleCombatant =
@@ -289,6 +289,7 @@ function eventCombatants(event: EncounterEvent): readonly CombatantId[] {
     case 'npc_called_for_help': return [event.caller, event.attacker];
     case 'combatant_joined_encounter': return [event.combatant, event.calledBy];
     case 'initiative_rolled':
+    case 'pending_placement_resolved':
     case 'turn_started':
     case 'movement_completed':
     case 'death_save_resolved':
@@ -507,9 +508,14 @@ export function projectPlayerView(state: EncounterState, binding: PlayerSeatBind
   const hidden = new Set(state.hiddenCombatants.map((entry) => entry.combatant));
   // Hidden creature geometry is never read into a player-safe projection.
   const concealed = new Set(fog);
+  const initiativeOrder = new Map(state.initiative.map((entry, index) =>
+    [entry.combatant, index] as const));
+  const visibilityObserverPending = state.adjudicationPending.some(
+    (entry) => entry.combatant === binding.combatantId,
+  );
   const combatants = state.combatants.flatMap((subject): readonly PlayerVisibleCombatant[] => {
     const pending = state.adjudicationPending.find((entry) =>
-      entry.kind === 'legacy_size_required' && entry.combatant === subject.profile.id);
+      entry.combatant === subject.profile.id);
     if (pending !== undefined) {
       if (!ownedIds.has(subject.profile.id)) return [];
       return [{
@@ -518,7 +524,7 @@ export function projectPlayerView(state: EncounterState, binding: PlayerSeatBind
         kind: combatantSide(state, subject.profile.id),
         life: subject.life,
         placementStatus: 'placement_pending',
-        pendingReason: 'legacy_size_required',
+        pendingReason: pending.kind,
         active: state.activeCombatant === subject.profile.id,
         formName: subject.wildShape?.formName ?? subject.form?.formName ?? null,
       }];
@@ -526,6 +532,7 @@ export function projectPlayerView(state: EncounterState, binding: PlayerSeatBind
     const token = tokensByCombatant.get(subject.profile.id);
     if (token === undefined) return [];
     const owned = ownedIds.has(subject.profile.id);
+    if (!owned && visibilityObserverPending) return [];
     if (hidden.has(subject.profile.id) || (!owned && !canCombatantSee(state, binding.combatantId, subject.profile.id))) return [];
     const space = combatantSpace(state, subject.profile.id);
     if (!owned && space.cells.every((cell) => fog.has(cellKey(cell)))) return [];
@@ -542,7 +549,10 @@ export function projectPlayerView(state: EncounterState, binding: PlayerSeatBind
       active: state.activeCombatant === subject.profile.id,
       formName: subject.wildShape?.formName ?? subject.form?.formName ?? null,
     }];
-  });
+  }).sort((left, right) =>
+    (initiativeOrder.get(left.id) ?? Number.MAX_SAFE_INTEGER) -
+      (initiativeOrder.get(right.id) ?? Number.MAX_SAFE_INTEGER) ||
+    String(left.id).localeCompare(String(right.id)));
   const visibleIds = new Set(combatants.map((subject) => subject.id));
   const monsterIds = new Set(state.combatants.flatMap((subject) =>
     subject.profile.kind === 'monster' ? [subject.profile.id] : []));
@@ -594,7 +604,7 @@ export function dmVisibleEncounter(view: DmView): DmVisibleEncounterState {
     environment: structuredClone(state.environment),
     combatants: state.combatants.flatMap((subject): readonly DmVisibleCombatant[] => {
       const pending = state.adjudicationPending.find((entry) =>
-        entry.kind === 'legacy_size_required' && entry.combatant === subject.profile.id);
+        entry.combatant === subject.profile.id);
       if (pending !== undefined) {
         return [{
           id: subject.profile.id,
@@ -603,7 +613,7 @@ export function dmVisibleEncounter(view: DmView): DmVisibleEncounterState {
           hitPoints: subject.hitPoints,
           life: subject.life,
           placementStatus: 'placement_pending',
-          pendingReason: 'legacy_size_required',
+          pendingReason: pending.kind,
           active: state.activeCombatant === subject.profile.id,
           formName: subject.wildShape?.formName ?? subject.form?.formName ?? null,
           rules: structuredClone(effectiveCombatRules(state, subject.profile.id)),

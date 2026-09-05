@@ -26,7 +26,12 @@ import {
 } from '../../../src/combat/values';
 import { projectDmView, projectPlayerView } from '../../../src/combat/visibility';
 import { loadContentPack, type LoadedContentPack } from '../../../src/content/content-pack';
-import { encounterBoardRenderModel, projectEncounterBoard } from '../../../src/vtt/encounter-board';
+import {
+  encounterBoardRenderModel,
+  projectEncounterBoard,
+  type EncounterBoardCombatant,
+  type EncounterBoardPlacedCombatant,
+} from '../../../src/vtt/encounter-board';
 import { projectDmBoard } from '../../../src/vtt/encounter-projections';
 import { REFERENCE_ENCOUNTER_ART } from '../../../src/vtt/reference-encounter-art';
 import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
@@ -40,6 +45,23 @@ interface SpellRecord {
   readonly operation: SpellOperation;
   readonly concentration?: boolean;
   readonly duration?: Readonly<Record<string, unknown>>;
+}
+
+function isPlacedBoardCombatant(
+  entry: EncounterBoardCombatant,
+): entry is EncounterBoardPlacedCombatant {
+  return entry.placementStatus === 'placed';
+}
+
+function placedBoardCombatant(
+  entries: readonly EncounterBoardCombatant[],
+  id: CombatantId,
+): EncounterBoardPlacedCombatant {
+  const entry = entries.find((candidate) => candidate.id === id);
+  if (entry === undefined || !isPlacedBoardCombatant(entry)) {
+    throw new Error(`Expected a placed board combatant ${String(id)}.`);
+  }
+  return entry;
 }
 
 function importedPack(records: readonly SpellRecord[]): LoadedContentPack {
@@ -286,7 +308,10 @@ describe('D344.3 DM encounter board projection', () => {
       type: 'adjudicate', target: corpse.id, subject: 'edge', reasoning: 'fixture',
       consequence: { kind: 'hit_point_delta', amount: -1 },
     }, () => 0).state;
-    const projected = projectEncounterBoard(projectDmView(state)).combatants.filter((entry) => entry.life === 'dead');
+    const boardCombatants = projectEncounterBoard(projectDmView(state)).combatants;
+    const projected = boardCombatants
+      .map((entry) => placedBoardCombatant(boardCombatants, entry.id))
+      .filter((entry) => entry.life === 'dead');
     expect(projected.map((entry) => entry.position)).toEqual([{ column: 2, row: 1 }]);
     expect(projected.some((entry) => entry.position.column === 3 || entry.position.row === 2)).toBe(false);
   });
@@ -312,14 +337,18 @@ describe('D344.3 DM encounter board projection', () => {
     moved = reduceEncounter(moved, {
       type: 'move', actor: mover.id, path: [{ column: 1, row: 0 }], cause: 'voluntary',
     }, () => 0).state;
-    expect(projectEncounterBoard(projectDmView(moved)).combatants.find((entry) => entry.id === mover.id)?.position)
+    expect(placedBoardCombatant(
+      projectEncounterBoard(projectDmView(moved)).combatants, mover.id,
+    ).position)
       .toEqual({ column: 1, row: 0 });
 
     let teleported = started([mover, target], [{ column: 0, row: 0 }, { column: 8, row: 0 }], { pack: spatialPack });
     teleported = reduceEncounter(teleported, castCommand(
       mover, 'greenforge:board-step', [], { spatialPoint: { column: 6, row: 0 } },
     ), () => 0).state;
-    expect(projectEncounterBoard(projectDmView(teleported)).combatants.find((entry) => entry.id === mover.id)?.position)
+    expect(placedBoardCombatant(
+      projectEncounterBoard(projectDmView(teleported)).combatants, mover.id,
+    ).position)
       .toEqual({ column: 6, row: 0 });
 
     let forced = started([mover, target], [{ column: 0, row: 0 }, { column: 1, row: 0 }], { pack: spatialPack });
@@ -328,7 +357,9 @@ describe('D344.3 DM encounter board projection', () => {
       castCommand(mover, 'greenforge:board-wave', [target.id]),
       () => 0,
     ).state;
-    expect(projectEncounterBoard(projectDmView(forced)).combatants.find((entry) => entry.id === target.id)?.position)
+    expect(placedBoardCombatant(
+      projectEncounterBoard(projectDmView(forced)).combatants, target.id,
+    ).position)
       .toEqual({ column: 3, row: 0 });
   });
 
@@ -490,7 +521,7 @@ describe('D344.3 DM encounter board projection', () => {
       },
     ]);
     expect(before.targetLines).toEqual([expect.objectContaining({
-      effectId, from: { column: 0, row: 0 }, to: { column: 4, row: 0 }, target: target.id,
+      effectId, from: { x: 0.5, y: 0.5 }, to: { x: 4.5, y: 0.5 }, target: target.id,
     })]);
 
     state = reduceEncounter(state, activation, () => 0).state;
