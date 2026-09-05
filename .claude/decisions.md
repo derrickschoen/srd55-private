@@ -10431,3 +10431,9 @@ per-cell environment LightLevel into the DM board model (a seam edit in encounte
 byte-identical) and use it as the mechanical floor. Minor: kind-index brands lose their kind after widening.
 D6 dispatched. Footprints inc2: my gate green on rerun (550/9619, exit 0; the first run's non-zero exit did not
 recur); mutation below; commit follows.
+
+FOOTPRINTS INC2 COMMITTED d5001aa4. FINDING: my mutation — entered cells computed against the destination itself
+(so nothing is ever "entered") — SURVIVED the movement-world, spatial-movement, room-generator and creature-space
+tests: the D514 entered-cells terrain/hazard rule has no test that fails when it is broken. Increment 3's brief
+opens with that killing test (a 2×2 creature stepping so that exactly one new cell is difficult must cost double;
+stepping so that a difficult cell is retained but none entered must not).
