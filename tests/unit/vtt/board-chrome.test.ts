@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createEncounter, reduceEncounter, type EncounterState } from '../../../src/combat/encounter';
-import { combatantId } from '../../../src/combat/values';
+import { combatantId, worldObjectId } from '../../../src/combat/values';
 import { projectDmView } from '../../../src/combat/visibility';
 import { GLYPH_HEIGHT, LINE_GAP, PIXEL_FONT_GLYPHS, normalizeLabelText } from '../../../src/assets/pixel-font';
 import {
@@ -12,6 +12,9 @@ import {
   HP_BANDS,
   LEGEND_GAP_PX,
   LEGEND_HEIGHT_PX,
+  NAMEPLATE_SINGLE_LINE_CHARACTER_LIMIT,
+  CREATURE_LABEL_STYLE,
+  OBJECT_LABEL_STYLE,
   boardChromeDimensions,
   hpBandOf,
   legendEntriesFor,
@@ -20,6 +23,7 @@ import {
   portraitBox,
   stackLabelOffsets,
   type NameplateLayout,
+  type BoardLabelStyle,
 } from '../../../src/vtt/board-chrome';
 import { BOARD_GLYPH_MODES } from '../../../src/assets/board-glyphs';
 import { LIGHT_LEVELS } from '../../../src/assets/light-encoding';
@@ -29,7 +33,14 @@ import { hitPointKnowledge } from '../../../src/vtt/intel/actor-knowledge';
 import { installInteractiveDocument, interactiveElement, type InteractiveTestElement } from '../../fixtures/interactive-dom';
 import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
 
-function overlaps(a: NameplateLayout, b: NameplateLayout): boolean {
+interface GeometryRect {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+function overlaps(a: GeometryRect, b: GeometryRect): boolean {
   return a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
 }
 
@@ -42,7 +53,7 @@ function expectNoOverlap(plates: readonly NameplateLayout[]): void {
       if (other.id === plates[i]!.id) continue;
       const portrait = portraitBox(other);
       expect(
-        overlaps(plates[i]!, { ...portrait, id: other.id, displayName: other.displayName, column: other.column, row: other.row, text: other.text, tag: other.tag }),
+        overlaps(plates[i]!, portrait),
         `${plates[i]!.displayName} covers ${other.displayName}'s portrait`,
       ).toBe(false);
     }
@@ -73,6 +84,11 @@ describe('stackLabelOffsets never lets two nameplates overlap', () => {
         expect(plate.y, plate.displayName).toBeGreaterThanOrEqual((plate.row + 1) * CHROME_TILE_PX - 1);
       }
       expect(plate.text.lines.join(' ')).toBe(normalizeLabelText(plate.displayName));
+      expect(plate.anchorCell).toEqual({ column: plate.column, row: plate.row });
+      expect(plate.stem.token.x).toBeGreaterThan(plate.column * CHROME_TILE_PX);
+      expect(plate.stem.token.x).toBeLessThan((plate.column + 1) * CHROME_TILE_PX);
+      expect(plate.stem.token.y).toBeGreaterThan(plate.row * CHROME_TILE_PX);
+      expect(plate.stem.token.y).toBeLessThan((plate.row + 1) * CHROME_TILE_PX);
     }
     const fighter = plates.find((plate) => plate.displayName === 'Reference Fighter');
     const tiger = plates.find((plate) => plate.displayName === 'Sabertooth Tiger');
@@ -105,6 +121,62 @@ describe('stackLabelOffsets never lets two nameplates overlap', () => {
     ], { columns: 2, rows: 1 });
     expect(plate?.x).toBe(0);
     expect(plate?.text.lines.join(' ')).toBe('THE EXTRAORDINARILY LONG NAMED ABOMINATION');
+  });
+
+  it('keeps names on one line through the stated character limit and wraps only beyond it', () => {
+    const atLimit = 'A'.repeat(NAMEPLATE_SINGLE_LINE_CHARACTER_LIMIT);
+    const beyondLimit = `${'A'.repeat(11)} ${'B'.repeat(NAMEPLATE_SINGLE_LINE_CHARACTER_LIMIT - 10)}`;
+    expect(nameplateSize(atLimit, null).text.lines).toHaveLength(1);
+    expect(nameplateSize(beyondLimit, null).text.lines).toHaveLength(2);
+  });
+
+  it('anchors every plate and stem to its token cell over 200 seeded random rosters', () => {
+    let randomState = 0x5eed1234;
+    const random = (): number => {
+      randomState = (Math.imul(randomState, 1_664_525) + 1_013_904_223) >>> 0;
+      return randomState / 4_294_967_296;
+    };
+    for (let sample = 0; sample < 200; sample += 1) {
+      const bounds = {
+        columns: 3 + Math.floor(random() * 7),
+        rows: 2 + Math.floor(random() * 6),
+      };
+      const cellCount = bounds.columns * bounds.rows;
+      const rosterSize = 1 + Math.floor(random() * Math.min(10, cellCount));
+      const cells = Array.from({ length: cellCount }, (_, index) => index);
+      for (let index = cells.length - 1; index > 0; index -= 1) {
+        const swap = Math.floor(random() * (index + 1));
+        [cells[index], cells[swap]] = [cells[swap]!, cells[index]!];
+      }
+      const requests = cells.slice(0, rosterSize).map((cell, index) => ({
+        id: combatantId(`combatant:random-${String(sample)}-${String(index)}`),
+        displayName: index % 3 === 0 ? `Long Random Creature ${String(sample)} ${String(index)}` : `Foe ${String(index)}`,
+        column: cell % bounds.columns,
+        row: Math.floor(cell / bounds.columns),
+        tag: index % 5 === 0 ? 'HIDDEN' as const : null,
+      }));
+      const plates = stackLabelOffsets(requests, bounds);
+      expectNoOverlap(plates);
+      for (const plate of plates) {
+        const request = requests.find((entry) => entry.id === plate.id);
+        expect(request).toBeDefined();
+        expect(plate.anchorCell).toEqual({ column: request?.column, row: request?.row });
+        expect(plate.stem.token.x).toBeGreaterThan(plate.anchorCell.column * CHROME_TILE_PX);
+        expect(plate.stem.token.x).toBeLessThan((plate.anchorCell.column + 1) * CHROME_TILE_PX);
+        expect(plate.stem.token.y).toBeGreaterThan(plate.anchorCell.row * CHROME_TILE_PX);
+        expect(plate.stem.token.y).toBeLessThan((plate.anchorCell.row + 1) * CHROME_TILE_PX);
+        const anchorRect = {
+          x: plate.anchorCell.column * CHROME_TILE_PX,
+          y: plate.anchorCell.row * CHROME_TILE_PX,
+          width: CHROME_TILE_PX,
+          height: CHROME_TILE_PX,
+        };
+        const plateTouchesAnchor = plate.x < anchorRect.x + anchorRect.width &&
+          plate.x + plate.width > anchorRect.x && plate.y <= anchorRect.y + anchorRect.height &&
+          plate.y + plate.height >= anchorRect.y;
+        expect(plate.placement === 'touching-token-cell').toBe(plateTouchesAnchor);
+      }
+    }
   });
 });
 
@@ -227,6 +299,15 @@ describe('renderBoard: DM board with chrome, player board without', () => {
     ],
     highlightedCombatant: combatantId('combatant:fighter'),
     adjudicatedTargets: [],
+    worldObjects: [{
+      id: worldObjectId('world-object:runed-brazier'),
+      name: 'Runed Brazier',
+      kind: 'generic',
+      position: { column: 4, row: 1 },
+      cells: [{ column: 4, row: 1 }],
+      blocking: { movement: false, lineOfSight: false, cover: 'none' },
+      lightClass: 'light-source',
+    }],
   };
   const provenance = { revision: 3, round: 1, stateDigest: 'digest-under-test' };
 
@@ -240,6 +321,9 @@ describe('renderBoard: DM board with chrome, player board without', () => {
     for (const combatant of projection.combatants) {
       const plate = plates.find((candidate) => candidate.getAttribute('data-combatant-id') === combatant.id);
       expect(plate?.getAttribute('data-display-name')).toBe(combatant.name);
+      expect(plate?.getAttribute('data-label-style')).toBe(CREATURE_LABEL_STYLE);
+      expect(plate?.getAttribute('data-anchor-column')).toBe(String(combatant.position.column));
+      expect(plate?.getAttribute('data-anchor-row')).toBe(String(combatant.position.row));
       const text = plate?.querySelector('.encounter-nameplate-text') as StyledElement | null;
       expect(text?.src, combatant.name).toBeDefined();
       expect(rectCountOf(text?.src ?? ''), `${combatant.name} is drawn in full`).toBe(fullNameRectCount(combatant.name));
@@ -249,6 +333,7 @@ describe('renderBoard: DM board with chrome, player board without', () => {
       expect(glyph?.getAttribute('data-life')).toBe(combatant.life);
     }
     expect(dm.querySelectorAll('.encounter-hidden-ring').map((ring) => ring.getAttribute('data-combatant-id'))).toEqual(['combatant:training-brute']);
+    expect(dm.querySelectorAll('.encounter-nameplate-stem')).toHaveLength(projection.combatants.length);
 
     const labels = dm.querySelector('[data-coordinate-labels]');
     expect(labels?.querySelectorAll('[data-axis="column"]')).toHaveLength(projection.bounds.columns * 2);
@@ -268,6 +353,17 @@ describe('renderBoard: DM board with chrome, player board without', () => {
     expect(dm.querySelectorAll('.encounter-nameplate-tag')).toHaveLength(0);
     expect(dm.querySelectorAll('.encounter-hidden-glyph')).toHaveLength(0);
     expect(dm.querySelectorAll('.encounter-nameplate').every((plate) => plate.getAttribute('data-tag') === null)).toBe(true);
+  });
+
+  it('gives object labels a typed non-plate style discriminator', () => {
+    const styles: readonly BoardLabelStyle[] = [CREATURE_LABEL_STYLE, OBJECT_LABEL_STYLE];
+    expect(new Set(styles).size).toBe(2);
+    const dm = interactiveElement(renderBoard(projection, new Set(), null, provenance));
+    const objectLabel = dm.querySelector('.encounter-world-object-label');
+    const creaturePlate = dm.querySelector('.encounter-nameplate');
+    expect(objectLabel?.getAttribute('data-label-style')).toBe(OBJECT_LABEL_STYLE);
+    expect(creaturePlate?.getAttribute('data-label-style')).toBe(CREATURE_LABEL_STYLE);
+    expect(objectLabel?.getAttribute('data-label-style')).not.toBe(creaturePlate?.getAttribute('data-label-style'));
   });
 
   it("D525: 'none' and 'light' keep the D516 rows and swap only the light rows; the glyph modes add the room default", () => {

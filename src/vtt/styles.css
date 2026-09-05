@@ -193,7 +193,6 @@
 .encounter-light-dim { background: rgb(193 183 124 / 16%); }
 
 .encounter-light-label,
-.encounter-world-object-label,
 .encounter-sustained-badge {
   position: absolute;
   z-index: 9;
@@ -204,6 +203,19 @@
   background: rgb(17 19 26 / 92%);
   color: #f4f0df;
   font: 600 0.58rem/1.2 system-ui, sans-serif;
+  white-space: normal;
+}
+
+.encounter-world-object-label {
+  position: absolute;
+  z-index: 9;
+  width: max-content;
+  max-width: 15rem;
+  padding: 0.08rem 0.18rem;
+  border: 0;
+  background: rgb(17 19 26 / 78%);
+  color: #e5cf9e;
+  font: italic 500 0.5rem/1.15 system-ui, sans-serif;
   white-space: normal;
 }
 
@@ -842,6 +854,12 @@
   padding: 4px;
   border: 1px solid #5c6578;
   background: rgb(13 15 20 / 60%);
+}
+
+.encounter-nameplate-stem {
+  display: block;
+  z-index: 0;
+  background: #5c6578;
 }
 
 .encounter-legend {

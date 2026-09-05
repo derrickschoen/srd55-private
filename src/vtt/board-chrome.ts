@@ -39,6 +39,7 @@ import {
   GLYPH_HEIGHT,
   LINE_GAP,
   layoutPixelText,
+  normalizeLabelText,
   renderLifeGlyph,
   renderPixelGlyph,
   renderPixelText,
@@ -70,6 +71,9 @@ export const NAMEPLATE_PADDING_PX = 4;
 export const NAMEPLATE_BORDER_PX = 1;
 export const NAMEPLATE_STACK_GAP_PX = 2;
 export const NAMEPLATE_MAX_LINES = 2;
+/** Names at or below this normalized character count stay on one line. */
+export const NAMEPLATE_SINGLE_LINE_CHARACTER_LIMIT = 14;
+export const NAMEPLATE_STEM_THICKNESS_PX = 2;
 /** Sideways attempts before a colliding plate stacks vertically; bounds the placement loop. */
 export const MAX_HORIZONTAL_SHIFTS = 8;
 export const HP_BAR_WIDTH_PX = 40;
@@ -123,6 +127,11 @@ export function lifeGlyphFor(life: LifeState): LifeGlyph {
 export type NameplateTag = typeof HIDDEN_GLYPH_LABEL;
 const NAMEPLATE_TAG_INK: PaletteColorRef = ramp('cloth-warm', 6);
 
+/** Creature and object labels are different visual concepts, enforced at their DOM boundary. */
+export type BoardLabelStyle = 'creature-plate' | 'object-tag';
+export const CREATURE_LABEL_STYLE: BoardLabelStyle = 'creature-plate';
+export const OBJECT_LABEL_STYLE: BoardLabelStyle = 'object-tag';
+
 export interface NameplateRequest {
   readonly id: CombatantId;
   readonly displayName: string;
@@ -138,6 +147,14 @@ export interface NameplateLayout extends NameplateRequest {
   readonly y: number;
   readonly width: number;
   readonly height: number;
+  readonly placement: 'touching-token-cell' | 'stacked-with-leader';
+  /** The engine cell this plate identifies, even when collision stacking moves the plate away. */
+  readonly anchorCell: { readonly column: number; readonly row: number };
+  /** Grid-relative endpoints for the visible leader between plate and token-cell edge. */
+  readonly stem: {
+    readonly plate: { readonly x: number; readonly y: number };
+    readonly token: { readonly x: number; readonly y: number };
+  };
 }
 
 export function nameplateSize(displayName: string, tag: NameplateTag | null): {
@@ -145,7 +162,11 @@ export function nameplateSize(displayName: string, tag: NameplateTag | null): {
   readonly width: number;
   readonly height: number;
 } {
-  const text = layoutPixelText(displayName, NAMEPLATE_MAX_LINES);
+  const normalizedLength = Array.from(normalizeLabelText(displayName).trim()).length;
+  const text = layoutPixelText(
+    displayName,
+    normalizedLength <= NAMEPLATE_SINGLE_LINE_CHARACTER_LIMIT ? 1 : NAMEPLATE_MAX_LINES,
+  );
   const tagLayout = tag === null ? null : layoutPixelText(tag, 1);
   const frame = 2 * (NAMEPLATE_PADDING_PX + NAMEPLATE_BORDER_PX);
   const nativeWidth = Math.max(text.width, tagLayout?.width ?? 0);
@@ -154,6 +175,38 @@ export function nameplateSize(displayName: string, tag: NameplateTag | null): {
     text,
     width: nativeWidth * CHROME_TEXT_SCALE + frame,
     height: nativeHeight * CHROME_TEXT_SCALE + frame,
+  };
+}
+
+function clamp(value: number, minimum: number, maximum: number): number {
+  return Math.max(minimum, Math.min(value, maximum));
+}
+
+function anchorGeometry(
+  plate: Rect,
+  cell: { readonly column: number; readonly row: number },
+): Pick<NameplateLayout, 'anchorCell' | 'stem' | 'placement'> {
+  const left = cell.column * CHROME_TILE_PX;
+  const top = cell.row * CHROME_TILE_PX;
+  const right = left + CHROME_TILE_PX;
+  const bottom = top + CHROME_TILE_PX;
+  const centreX = left + CHROME_TILE_PX / 2;
+  const plateCentreY = plate.y + plate.height / 2;
+  const plateBelow = plateCentreY >= top + CHROME_TILE_PX / 2;
+  const token = {
+    x: centreX,
+    y: plateBelow ? bottom - 1 : top + 1,
+  };
+  const plateEndpoint = {
+    x: clamp(token.x, plate.x + 1, plate.x + plate.width - 1),
+    y: plateBelow ? plate.y + 1 : plate.y + plate.height - 1,
+  };
+  return {
+    anchorCell: { column: cell.column, row: cell.row },
+    stem: { plate: plateEndpoint, token },
+    placement: plate.x < right && plate.x + plate.width > left && plate.y <= bottom && plate.y + plate.height >= top
+      ? 'touching-token-cell'
+      : 'stacked-with-leader',
   };
 }
 
@@ -209,14 +262,14 @@ export function stackLabelOffsets(
     const belowY = (request.row + 1) * CHROME_TILE_PX - 1;
     let placeAbove = belowOccupied && aboveY >= 0;
     let y = placeAbove ? aboveY : belowY;
-    let candidate: NameplateLayout = { ...request, text: size.text, x, y, width: size.width, height: size.height };
+    let candidateRect: Rect = { x, y, width: size.width, height: size.height };
     const cellLeft = request.column * CHROME_TILE_PX;
     const cellRight = cellLeft + CHROME_TILE_PX;
     const staysAttached = (nx: number): boolean =>
       nx >= 0 && nx + size.width <= gridWidth && nx < cellRight && nx + size.width > cellLeft;
     let shifts = 0;
     for (;;) {
-      const blocker = [...placed, ...portraits].find((other) => overlaps(candidate, other));
+      const blocker = [...placed, ...portraits].find((other) => overlaps(candidateRect, other));
       if (blocker === undefined) break;
       if (shifts < MAX_HORIZONTAL_SHIFTS) {
         // first choice: slide sideways past the blocker while still touching this plate's own cell
@@ -225,7 +278,7 @@ export function stackLabelOffsets(
           .sort((left, right) => Math.abs(left - centred) - Math.abs(right - centred));
         const shifted = options[0];
         if (shifted !== undefined) {
-          candidate = { ...candidate, x: shifted };
+          candidateRect = { ...candidateRect, x: shifted };
           shifts += 1;
           continue;
         }
@@ -240,9 +293,14 @@ export function stackLabelOffsets(
       } else {
         y = blocker.y + blocker.height + NAMEPLATE_STACK_GAP_PX;
       }
-      candidate = { ...candidate, y };
+      candidateRect = { ...candidateRect, y };
     }
-    placed.push(candidate);
+    placed.push({
+      ...request,
+      text: size.text,
+      ...candidateRect,
+      ...anchorGeometry(candidateRect, request),
+    });
   }
   return placed;
 }
@@ -547,6 +605,9 @@ function tokenChrome(
     const nameplate = el('span', plate.tag === null ? 'encounter-nameplate' : 'encounter-nameplate encounter-nameplate-tagged');
     nameplate.dataset.combatantId = combatant.id;
     nameplate.dataset.displayName = combatant.name;
+    nameplate.dataset.labelStyle = CREATURE_LABEL_STYLE;
+    nameplate.dataset.anchorColumn = String(plate.anchorCell.column);
+    nameplate.dataset.anchorRow = String(plate.anchorCell.row);
     nameplate.dataset.lines = String(plate.text.lines.length);
     if (plate.tag !== null) nameplate.dataset.tag = plate.tag;
     styled(nameplate, {
@@ -556,6 +617,24 @@ function tokenChrome(
       width: `${String(plate.width)}px`,
       height: `${String(plate.height)}px`,
     });
+    const stemDx = plate.stem.token.x - plate.stem.plate.x;
+    const stemDy = plate.stem.token.y - plate.stem.plate.y;
+    const stem = el('span', 'encounter-nameplate-stem');
+    stem.dataset.combatantId = combatant.id;
+    stem.dataset.anchorColumn = String(plate.anchorCell.column);
+    stem.dataset.anchorRow = String(plate.anchorCell.row);
+    stem.dataset.tokenX = String(plate.stem.token.x);
+    stem.dataset.tokenY = String(plate.stem.token.y);
+    styled(stem, {
+      position: 'absolute',
+      left: `${String(COORDINATE_GUTTER_PX + plate.stem.plate.x)}px`,
+      top: `${String(COORDINATE_GUTTER_PX + plate.stem.plate.y)}px`,
+      width: `${String(Math.hypot(stemDx, stemDy))}px`,
+      height: `${String(NAMEPLATE_STEM_THICKNESS_PX)}px`,
+      transform: `rotate(${String(Math.atan2(stemDy, stemDx))}rad)`,
+      'transform-origin': '0 50%',
+    });
+    layer.append(stem);
     const text = renderPixelText(plate.text, TEXT_INK, CHROME_TEXT_SCALE);
     const textImageNode = el('img', 'encounter-nameplate-text');
     textImageNode.alt = '';

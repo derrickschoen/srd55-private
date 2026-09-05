@@ -205,7 +205,7 @@ export interface ScreenshotProbeRow {
   readonly truth: ProbeAnswer;
   /** Parsed model payload exactly as supplied, before name normalization. */
   readonly answer: ProbeAnswer | null;
-  /** Scored payload: creature names case-folded with internal whitespace collapsed. */
+  /** Scored payload: creature names canonicalized and visual plate tags removed. */
   readonly normalizedAnswer: ProbeAnswer | null;
   readonly rawAnswer: string;
   readonly error: string | null;
@@ -491,7 +491,14 @@ export function parseProbeAnswer(question: ScreenshotQuestionId, rawAnswer: stri
 }
 
 export function normalizedProbeName(name: string): string {
-  return name.trim().replace(/\s+/gu, ' ').toLocaleLowerCase('en-US');
+  return name.trim()
+    .replace(/\s+/gu, ' ')
+    .replace(/^probe [^:]+:\s*/iu, '')
+    .toLocaleLowerCase('en-US');
+}
+
+function normalizedCreatureAnswerName(name: string): string {
+  return normalizedProbeName(name).replace(/\s+hidden$/iu, '').trim();
 }
 
 /**
@@ -500,6 +507,28 @@ export function normalizedProbeName(name: string): string {
  * form while the row retains the parsed and raw model payloads for audit.
  */
 export function normalizeProbeAnswer(answer: ProbeAnswer): ProbeAnswer {
+  const creature = (entry: CreatureLocation): CreatureLocation => ({
+    ...entry,
+    name: normalizedCreatureAnswerName(entry.name),
+  });
+  switch (answer.question) {
+    case 'Q1': return { ...answer, creatures: answer.creatures.map(creature) };
+    case 'Q2': return { ...answer, creatures: answer.creatures.map((entry) => ({ ...creature(entry), side: entry.side })) };
+    case 'Q3': return { ...answer, creatures: answer.creatures.map((entry) => ({ ...creature(entry), hpBand: entry.hpBand })) };
+    case 'Q4': return answer;
+    case 'Q5': return answer;
+    case 'Q6': return answer;
+    case 'Q7': return {
+      ...answer,
+      pairs: answer.pairs.map((pair) => ({ first: creature(pair.first), second: creature(pair.second) })),
+    };
+    case 'Q8': return { ...answer, creatures: answer.creatures.map(creature) };
+    case 'Q9': return answer;
+    case 'Q10': return answer;
+  }
+}
+
+function normalizeProbeTruth(answer: ProbeAnswer): ProbeAnswer {
   const creature = (entry: CreatureLocation): CreatureLocation => ({
     ...entry,
     name: normalizedProbeName(entry.name),
@@ -638,7 +667,7 @@ export interface ProbeScore {
 export function scoreProbeAnswer(answer: ProbeAnswer, truth: ProbeAnswer): ProbeScore {
   if (answer.question !== truth.question) throw new TypeError('Cannot score answers from different question classes.');
   const answerFacts = factsForAnswer(normalizeProbeAnswer(answer));
-  const truthFacts = factsForAnswer(normalizeProbeAnswer(truth));
+  const truthFacts = factsForAnswer(normalizeProbeTruth(truth));
   const answerKeys = new Set(answerFacts.map((fact) => fact.key));
   const truthKeys = new Set(truthFacts.map((fact) => fact.key));
   let intersection = 0;
@@ -935,6 +964,32 @@ export function parseScreenshotProbeArgs(argv: readonly string[]): ScreenshotPro
   };
 }
 
+export interface ScreenshotProbeRescoreConfig {
+  readonly rescorePath: string;
+  readonly outPath: string;
+  readonly summaryPath: string;
+}
+
+export function parseScreenshotProbeRescoreArgs(argv: readonly string[]): ScreenshotProbeRescoreConfig {
+  const values = new Map<string, string>();
+  for (let index = 0; index < argv.length; index += 1) {
+    const option = argv[index];
+    if (option !== '--rescore' && option !== '--out') {
+      throw new TypeError(`Unknown screenshot rescore option ${option ?? '<missing>'}.`);
+    }
+    const value = argv[index + 1];
+    if (value === undefined || value.startsWith('--')) throw new TypeError(`${option} requires a value.`);
+    values.set(option, value);
+    index += 1;
+  }
+  const rescorePath = insideRepository(requiredOption(values, '--rescore'), '--rescore');
+  const outPath = insideRepository(requiredOption(values, '--out'), '--out');
+  if (!rescorePath.endsWith('.jsonl')) throw new RangeError('--rescore must end in .jsonl.');
+  if (!outPath.endsWith('.jsonl')) throw new RangeError('--out must end in .jsonl.');
+  if (rescorePath === outPath) throw new RangeError('--out must be a new path, not the saved --rescore path.');
+  return { rescorePath, outPath, summaryPath: outPath.slice(0, -'.jsonl'.length) + '-summary.md' };
+}
+
 function vanePlayers(): readonly CombatantProfile[] {
   const referencePlayers = referenceEncounterSetup().combatants.filter((profile) => profile.kind === 'player_character');
   const template = referencePlayers[0];
@@ -950,16 +1005,6 @@ const GENERATED_PROBE_SEEDS = [
   6_203_101, 6_203_102, 6_203_103, 6_203_104, 6_203_105,
   6_203_106, 6_203_107, 6_203_108, 6_203_109, 6_203_110,
 ] as const;
-
-function scopedProbeCombatantNames(state: EncounterState, scope: string): EncounterState {
-  return {
-    ...state,
-    combatants: state.combatants.map((combatant) => ({
-      ...combatant,
-      profile: { ...combatant.profile, name: `Probe ${scope}: ${combatant.profile.name}` },
-    })),
-  };
-}
 
 function perimeterCells(state: EncounterState): readonly GridCell[] {
   const cells: GridCell[] = [];
@@ -1022,10 +1067,7 @@ function withProbeMarkers(state: EncounterState, seed: number): EncounterState {
 
 export function deterministicGeneratedProbeCandidates(): readonly ProbeStateCandidate[] {
   return GENERATED_PROBE_SEEDS.map((seed, index) => {
-    const generated = scopedProbeCombatantNames(
-      generateRoom(seed, { difficulty: 'brutal' }).encounter.state,
-      String(seed),
-    );
+    const generated = generateRoom(seed, { difficulty: 'brutal' }).encounter.state;
     return {
       id: `generated-brutal-${String(seed)}`,
       state: index < MIN_FACT_CLASS_STATE_COVERAGE ? withProbeMarkers(generated, seed) : generated,
@@ -1040,7 +1082,7 @@ export async function defaultProbeStateCandidates(): Promise<readonly ProbeState
       return loadArenaFixture(join(repositoryRoot, `tests/fixtures/arena-basis-brutal/seed-${String(seed)}.json`))
         .then((state): ProbeStateCandidate => ({
           id: `arena-brutal-${String(seed)}`,
-          state: scopedProbeCombatantNames(state, `arena ${String(seed)}`),
+          state,
         }));
     })),
     readFile(join(repositoryRoot, 'tests/fixtures/watabou/one-page-dungeon-sample.json'), 'utf8'),
@@ -1052,24 +1094,18 @@ export async function defaultProbeStateCandidates(): Promise<readonly ProbeState
   };
   const candidates: readonly ProbeStateCandidate[] = [
     ...brutalFixtures,
-    { id: 'reference-hidden', state: scopedProbeCombatantNames(referenceWithHidden, 'reference') },
+    { id: 'reference-hidden', state: referenceWithHidden },
     {
       id: 'vane-warren-cinder-rite',
-      state: scopedProbeCombatantNames(createVaneWarrenFight('cinder-rite', vanePlayers()).encounter, 'vane warren'),
+      state: createVaneWarrenFight('cinder-rite', vanePlayers()).encounter,
     },
     {
       id: 'watabou-generated-bounds',
-      state: scopedProbeCombatantNames(
-        adaptWatabouDungeon(JSON.parse(watabouBytes) as unknown, { seed: 6203003 }).state,
-        'watabou',
-      ),
+      state: adaptWatabouDungeon(JSON.parse(watabouBytes) as unknown, { seed: 6203003 }).state,
     },
     {
       id: 'generated-bounds-24x24',
-      state: scopedProbeCombatantNames(
-        generateRoom(6203001, { dimensions: { columns: 24, rows: 24 }, difficulty: 'brutal' }).encounter.state,
-        'large room',
-      ),
+      state: generateRoom(6203001, { dimensions: { columns: 24, rows: 24 }, difficulty: 'brutal' }).encounter.state,
     },
     ...deterministicGeneratedProbeCandidates(),
   ];
@@ -1276,6 +1312,35 @@ const comparisonProbeRowSchema = z.object({
   score: z.number().min(0).max(1),
 }).passthrough();
 
+const savedProbeRowSchema = z.object({
+  version: z.literal(ROW_VERSION),
+  stateId: z.string().min(1),
+  stateDigest: z.string().min(1),
+  model: z.string().min(1),
+  effort: effortSchema,
+  question: z.enum(SCREENSHOT_QUESTION_IDS),
+  promptVersion: z.literal(PROBE_VERSION),
+  primerVersion: z.union([z.literal(PRIMER_VERSION), z.null()]),
+  generation: z.string().min(1),
+  boardGlyphs: z.enum(['none', 'light', 'full']),
+  png: z.object({
+    sha256: z.string().min(1),
+    relativePath: z.string().min(1),
+    width: z.number().int().positive(),
+    height: z.number().int().positive(),
+  }).strict(),
+  outcome: z.enum(['answered', 'schema_rejected', 'call_error']),
+  wallMs: z.number().nonnegative(),
+  tokens: z.object({
+    input: z.number().int().nonnegative(),
+    cachedInput: z.number().int().nonnegative(),
+    output: z.number().int().nonnegative(),
+    reasoning: z.number().int().nonnegative(),
+  }).strict().nullable(),
+  truth: z.unknown(),
+  rawAnswer: z.string(),
+}).passthrough();
+
 function topConfusions(rows: readonly ScreenshotProbeRow[]): readonly string[] {
   const counts = new Map<string, number>();
   for (const confusion of rows.flatMap((row) => row.confusions)) {
@@ -1438,6 +1503,7 @@ export function renderProbeSummary(
   rows: readonly ScreenshotProbeRow[],
   previousRows: readonly ComparisonProbeRow[] | null = null,
   bootstrapSeed = 0,
+  kind: 'probe' | 'rescored' = 'probe',
 ): string {
   if (previousRows !== null) assertComparableRuns(rows, previousRows);
   const groups = new Map<string, ScreenshotProbeRow[]>();
@@ -1450,6 +1516,7 @@ export function renderProbeSummary(
   const lines = [
     '# D519 screenshot comprehension probe',
     '',
+    ...(kind === 'rescored' ? ['**RESCORED ESTIMATE (image unchanged)**', ''] : []),
     `Pass criterion: every question class has mean Jaccard accuracy >= ${PASS_THRESHOLD.toFixed(1)}.`,
     '',
     `Board glyphs: ${[...new Set(rows.map((row) => row.boardGlyphs))].sort().join(', ')}.`,
@@ -1474,6 +1541,89 @@ export function renderProbeSummary(
     lines.push('');
   }
   return `${lines.join('\n')}\n`;
+}
+
+function rescoreSavedRow(value: unknown, rowNumber: number, path: string): ScreenshotProbeRow {
+  let saved: z.infer<typeof savedProbeRowSchema>;
+  try {
+    saved = savedProbeRowSchema.parse(value);
+  } catch (error) {
+    throw new TypeError(`Invalid saved probe row ${String(rowNumber)} in ${path}.`, { cause: error });
+  }
+  const truth = parseProbeAnswer(saved.question, canonicalJson(saved.truth));
+  const base = {
+    version: saved.version,
+    stateId: saved.stateId,
+    stateDigest: saved.stateDigest,
+    model: saved.model,
+    effort: saved.effort,
+    question: saved.question,
+    promptVersion: saved.promptVersion,
+    primerVersion: saved.primerVersion,
+    generation: saved.generation,
+    boardGlyphs: saved.boardGlyphs,
+    png: saved.png,
+    wallMs: saved.wallMs,
+    tokens: saved.tokens,
+    truth,
+    rawAnswer: saved.rawAnswer,
+  } as const;
+  if (saved.outcome === 'call_error') {
+    return {
+      ...base,
+      outcome: 'call_error',
+      score: 0,
+      hallucinations: 0,
+      confusions: ['call error'],
+      answer: null,
+      normalizedAnswer: null,
+      error: 'Saved row recorded a model call error; no answer exists to rescore.',
+    };
+  }
+  let answer: ProbeAnswer;
+  try {
+    answer = parseProbeAnswer(saved.question, saved.rawAnswer);
+  } catch (error) {
+    return {
+      ...base,
+      outcome: 'schema_rejected',
+      score: 0,
+      hallucinations: 0,
+      confusions: ['schema rejected'],
+      answer: null,
+      normalizedAnswer: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+  return {
+    ...base,
+    outcome: 'answered',
+    ...scoreProbeAnswer(answer, truth),
+    answer,
+    normalizedAnswer: normalizeProbeAnswer(answer),
+    error: null,
+  };
+}
+
+/** Re-evaluates saved raw payloads only; it never captures a board or invokes an answerer. */
+export async function rescoreScreenshotProbe(
+  config: ScreenshotProbeRescoreConfig,
+): Promise<readonly ScreenshotProbeRow[]> {
+  const lines = (await readFile(config.rescorePath, 'utf8')).split('\n').filter((line) => line.trim().length > 0);
+  const rows = lines.map((line, index) => {
+    let decoded: unknown;
+    try {
+      decoded = JSON.parse(line) as unknown;
+    } catch (error) {
+      throw new TypeError(`Saved probe row ${String(index + 1)} in ${config.rescorePath} is not JSON.`, { cause: error });
+    }
+    return rescoreSavedRow(decoded, index + 1, config.rescorePath);
+  });
+  if (rows.length === 0) throw new RangeError('--rescore input must contain at least one row.');
+  await mkdir(resolve(config.outPath, '..'), { recursive: true });
+  await writeFile(config.outPath, rows.map((row) => `${canonicalJson(row)}\n`).join(''), 'utf8');
+  await writeFile(config.summaryPath, renderProbeSummary(rows, null, 0, 'rescored'), 'utf8');
+  return rows;
 }
 
 function formatInterval(interval: BootstrapInterval | null): string {
@@ -1533,6 +1683,12 @@ async function main(): Promise<void> {
   const scriptIndex = process.argv.findIndex((argument) =>
     argument.endsWith('/ai-dm-screenshot-probe.ts') || argument.endsWith('\\ai-dm-screenshot-probe.ts'));
   const argv = scriptIndex < 0 ? process.argv.slice(2) : process.argv.slice(scriptIndex + 1);
+  if (argv.includes('--rescore')) {
+    const config = parseScreenshotProbeRescoreArgs(argv);
+    const rows = await rescoreScreenshotProbe(config);
+    process.stdout.write(renderProbeSummary(rows, null, 0, 'rescored'));
+    return;
+  }
   const config = parseScreenshotProbeArgs(argv);
   const rows = await runScreenshotProbe(config);
   process.stdout.write(renderProbeSummary(rows, null, config.seed));
@@ -1543,7 +1699,7 @@ if (process.env['VITEST'] !== 'true' && invokedPath !== undefined && (
   import.meta.url === pathToFileURL(invokedPath).href ||
   ((invokedPath.endsWith('/vite-node') || invokedPath.endsWith('\\vite-node') ||
     invokedPath.endsWith('/vite-node.mjs') || invokedPath.endsWith('\\vite-node.mjs')) &&
-    process.argv.includes('--models') && process.argv.includes('--states'))
+    ((process.argv.includes('--models') && process.argv.includes('--states')) || process.argv.includes('--rescore')))
 )) {
   await main();
 }

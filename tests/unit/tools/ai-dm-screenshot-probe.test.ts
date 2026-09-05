@@ -19,8 +19,10 @@ import {
   normalizeProbeAnswer,
   parseProbeAnswer,
   parseScreenshotProbeArgs,
+  parseScreenshotProbeRescoreArgs,
   probeCatalogueClassCoverage,
   runScreenshotProbe,
+  rescoreScreenshotProbe,
   scoreProbeAnswer,
   screenshotQuestionPrompt,
   shiftedByOneRowAnswer,
@@ -32,7 +34,7 @@ import {
 } from '../../../tools/ai-dm-screenshot-probe';
 import { boardStateDigest, type BoardImageArtifact, type BoardImageSource } from '../../../tools/ai-dm-board-snapshot';
 import { mkdirSync } from '../../helpers/test-filesystem';
-import { mkdtemp, readFile, rm } from '../../helpers/test-filesystem-promises';
+import { mkdtemp, readFile, rm, writeFile } from '../../helpers/test-filesystem-promises';
 import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
 
 function object(
@@ -210,6 +212,30 @@ describe('D519 screenshot comprehension scoring', () => {
     });
   });
 
+  it('strips the trailing plate tag from creature-keyed answers while Q8 still requires the hidden creature', () => {
+    const truth = parseProbeAnswer('Q1', JSON.stringify({
+      version: 'd519-screenshot-comprehension-v1',
+      question: 'Q1',
+      creatures: [{ name: 'Unicorn', column: 2, row: 1 }],
+    }));
+    const tagged = parseProbeAnswer('Q1', JSON.stringify({
+      version: 'd519-screenshot-comprehension-v1',
+      question: 'Q1',
+      creatures: [{ name: 'Unicorn hidden', column: 2, row: 1 }],
+    }));
+    expect(scoreProbeAnswer(tagged, truth)).toEqual({ score: 1, hallucinations: 0, confusions: [] });
+
+    const hiddenTruth = parseProbeAnswer('Q8', JSON.stringify({
+      version: 'd519-screenshot-comprehension-v1',
+      question: 'Q8',
+      creatures: [{ name: 'Unicorn', column: 2, row: 1 }],
+    }));
+    const omitted = parseProbeAnswer('Q8', JSON.stringify({
+      version: 'd519-screenshot-comprehension-v1', question: 'Q8', creatures: [],
+    }));
+    expect(scoreProbeAnswer(omitted, hiddenTruth).score).toBe(0);
+  });
+
   it('jaccard_ignores_hallucinations: penalizes an asserted row-shifted fact absent from truth', () => {
     const truth = parseProbeAnswer('Q4', JSON.stringify({
       version: 'd519-screenshot-comprehension-v1', question: 'Q4', cells: [{ column: 2, row: 0 }],
@@ -242,7 +268,7 @@ describe('D519 screenshot comprehension scoring', () => {
 });
 
 describe('D524 general screenshot primer', () => {
-  it('is versioned, uses generic classic-board conventions, and leaks no probed fact-sheet names or coordinates', async () => {
+  it('is versioned, uses generic classic-board conventions, and leaks no non-rendered probe identity', async () => {
     const primerPrompt = screenshotQuestionPrompt('Q1', 'general');
     expect(primerPrompt).toContain(`General primer ${PRIMER_VERSION}: ${GENERAL_PRIMER}`);
     expect(primerPrompt).toContain('Each grid square represents 5 feet');
@@ -257,33 +283,16 @@ describe('D524 general screenshot primer', () => {
     expect(primerPrompt).toContain('Blocked, Object, and Light source');
     expect(primerPrompt).toContain('walls, doors, and objects as they are drawn');
 
-    const sheets = [
-      deriveScreenshotFactSheet(everyClassState()),
-      ...(await defaultProbeStateCandidates()).map((candidate) => deriveScreenshotFactSheet(candidate.state)),
-    ];
-    const factSheetStrings = new Set(sheets.flatMap((sheet) => {
-      const cells = [
-        ...sheet.combatants.map((entry) => entry.cell),
-        ...sheet.difficultTerrainCells,
-        ...sheet.obscuredCells,
-        ...sheet.lightCells,
-        ...sheet.foggedCells,
-        ...sheet.blockedCells,
-        ...sheet.doors,
-        ...sheet.worldObjects,
-      ];
-      return [
-        ...sheet.combatants.map((entry) => entry.displayName),
-        ...sheet.worldObjects.map((entry) => entry.name),
-        ...cells.map((cell) => `${String(cell.column)},${String(cell.row)}`),
-      ];
-    }));
+    const candidates = await defaultProbeStateCandidates();
+    // The identity canary is deliberately non-rendered: catalogue ids and state digests identify
+    // probe arms without changing the engine-owned creature names visible on the board.
+    const identityCanaries = candidates.flatMap((candidate) => [candidate.id, boardStateDigest(candidate.state)]);
     // D525: the leak test covers the whole primer under every board-glyph mode, not just the shared base.
     for (const mode of BOARD_GLYPH_MODES) {
       const normalizedPrimer = [GENERAL_PRIMER, ...BOARD_GLYPH_PRIMER[mode]].join(' ').toLocaleLowerCase('en-US');
-      for (const fact of factSheetStrings) {
-        expect(normalizedPrimer, `${mode} primer leaked fact-sheet string ${JSON.stringify(fact)}`)
-          .not.toContain(fact.toLocaleLowerCase('en-US'));
+      for (const canary of identityCanaries) {
+        expect(normalizedPrimer, `${mode} primer leaked probe identity ${JSON.stringify(canary)}`)
+          .not.toContain(canary.toLocaleLowerCase('en-US'));
       }
     }
   });
@@ -370,9 +379,69 @@ describe('D519 screenshot comprehension schema and CLI', () => {
     expect(new Set(first.map((candidate) => boardStateDigest(candidate.state))).size).toBe(PROBE_CATALOGUE_SIZE);
     expect(second.map((candidate) => ({ id: candidate.id, digest: boardStateDigest(candidate.state) })))
       .toEqual(first.map((candidate) => ({ id: candidate.id, digest: boardStateDigest(candidate.state) })));
+    // Probe identity lives only in the non-rendered catalogue id and state digest.
+    expect(first.flatMap((candidate) => candidate.state.combatants)
+      .every((combatant) => !combatant.profile.name.startsWith('Probe '))).toBe(true);
     const coverage = probeCatalogueClassCoverage(first);
     for (const [question, count] of Object.entries(coverage)) {
       expect(count, `${question} state coverage`).toBeGreaterThanOrEqual(MIN_FACT_CLASS_STATE_COVERAGE);
+    }
+  });
+
+  it('re-scores saved raw answers with legacy scope prefixes and plate tags without invoking a model', async () => {
+    const artifactRoot = resolve('dnd-slim-runs');
+    mkdirSync(artifactRoot, { recursive: true });
+    const directory = await mkdtemp(join(artifactRoot, 'd519-rescore-test-'));
+    const savedPath = join(directory, 'saved.jsonl');
+    const outPath = join(directory, 'rescored.jsonl');
+    try {
+      const sheet = deriveScreenshotFactSheet(everyClassState());
+      const rows = (['Q1', 'Q2', 'Q3', 'Q4', 'Q5', 'Q6', 'Q7', 'Q8', 'Q9', 'Q10'] as const).map((question) => {
+        const truth = truthAnswer(sheet, question);
+        const raw = question === 'Q1'
+          ? {
+              ...truth,
+              creatures: truth.question === 'Q1'
+                ? truth.creatures.map((creature) => ({ ...creature, name: `Probe fixture: ${creature.name} hidden` }))
+                : [],
+            }
+          : truth;
+        return {
+          version: 'd525-screenshot-comprehension-row-v5',
+          stateId: 'saved-state',
+          stateDigest: 'a'.repeat(64),
+          model: 'saved-model',
+          effort: 'low',
+          question,
+          promptVersion: 'd519-screenshot-comprehension-v1',
+          primerVersion: PRIMER_VERSION,
+          generation: 'saved-generation',
+          boardGlyphs: 'full',
+          png: { sha256: 'b'.repeat(64), relativePath: 'board-images/saved.png', width: 640, height: 480 },
+          outcome: 'answered',
+          score: 0,
+          hallucinations: 1,
+          confusions: ['old normalizer'],
+          wallMs: 12,
+          tokens: null,
+          truth,
+          answer: null,
+          normalizedAnswer: null,
+          rawAnswer: JSON.stringify(raw),
+          error: null,
+        };
+      });
+      await writeFile(savedPath, rows.map((row) => `${JSON.stringify(row)}\n`).join(''), 'utf8');
+      const config = parseScreenshotProbeRescoreArgs(['--rescore', savedPath, '--out', outPath]);
+      const rescored = await rescoreScreenshotProbe(config);
+      expect(rescored).toHaveLength(10);
+      expect(rescored.every((row) => row.score === 1)).toBe(true);
+      expect(rescored[0]?.normalizedAnswer).toEqual(truthAnswer(sheet, 'Q1'));
+      expect(await readFile(config.summaryPath, 'utf8')).toContain('RESCORED ESTIMATE (image unchanged)');
+      expect(() => parseScreenshotProbeRescoreArgs(['--rescore', savedPath, '--out', savedPath]))
+        .toThrow('--out must be a new path');
+    } finally {
+      await rm(directory, { recursive: true, force: true });
     }
   });
 

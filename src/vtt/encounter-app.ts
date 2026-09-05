@@ -3,7 +3,7 @@ import { starterArtCssUrl, starterArtDataUri } from '../assets/starter-art-resol
 // ART-SEAM (D516): overlay art families and the DM board chrome.
 import { OVERLAY_ASSETS } from '../assets/art-sets';
 import type { BoardGlyphMode } from '../assets/board-glyphs';
-import { renderBoardChrome } from './board-chrome';
+import { OBJECT_LABEL_STYLE, renderBoardChrome } from './board-chrome';
 import './styles.css';
 import { HumanController, type ControllerRequest } from '../combat/controllers';
 import type { EncounterCommand } from '../combat/events';
@@ -385,6 +385,8 @@ export function renderBoard(
           className: 'encounter-world-object-label',
           text: `${object.name} — movement ${object.blocking.movement ? 'blocked' : 'open'}; sight ${object.blocking.lineOfSight ? 'blocked' : 'open'}; cover ${object.blocking.cover}`,
         }));
+        const label = placed.querySelector<HTMLElement>('.encounter-world-object-label');
+        if (label !== null) label.dataset.labelStyle = OBJECT_LABEL_STYLE;
       }
       cell.append(placed);
     }
