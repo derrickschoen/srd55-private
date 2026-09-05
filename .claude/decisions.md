@@ -11474,3 +11474,13 @@ in that test (capture-only == off), (b) the new hidden-option-boundary test (no 
 shown set; hidden id rejected with OPTION_NOT_SHOWN), and (c) a new assertion that the rendered context declares how
 many options were omitted for size. Same logic as the art-hash rule: the pin is a change detector, the invariants
 are the test. Logged in RULE-CONFLICTS.md.
+
+D559 — OWNER (2026-09-05 18:08): (1) research how people use the Fireworks API to generate images from CLI agents
+(as if the call came from Claude Code or opencode); (2) owner's technique: AI-generated images are poor at exact
+pixel-dimension budgets, but they work as TEMPLATES from which an agent writes a code file that emits SVG image
+files. Supervisor: one codex sol high research seat (network, private repo art-techniques/, angle I) covering the
+Fireworks image endpoint as used from agent CLIs (MCP servers, skills, scripts, fireconnect), models/licences/cost,
+and the image-as-template → agent-written SVG/procedural generator technique (vectorisers vs LLM transcription,
+what survives at 64/128 px, palette and grid discipline); the references tool gains an "observe → generator" step
+in its README; classic round 5 receives, at its turn end, the amendment that references (when the key is wired)
+are consumed as templates for code that draws, never as shipped pixels (D558).
