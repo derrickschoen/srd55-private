@@ -10940,3 +10940,10 @@ the same colour around the bust; a ROSTER legend box (part of the chrome, never 
 "<number> <colour swatch> FULL NAME — PARTY|FOE — HP band", ordered by number; numbers are stable for the
 encounter (assigned in roster order at capture). Primer v6 describes the convention. The probe keeps scoring by full
 name (read from the roster box) and cell. Objects keep the OBJECT rail with coordinates.
+
+FINDING AGAINST MY OWN WORK (2026-09-05 13:20): to deliver D533 mid-round I sent `codex exec resume` to the
+round-3 session while its first turn was still running; codex refused ("thread already has an active writer") and
+I had already killed the original process, so round 3 was interrupted with three files partially edited
+(pixel-art.ts, starter-art-resolver.ts, encounter-app.ts). The retried resume took over with an explicit note to
+inspect git status/diff and continue without discarding. Rule: an amendment to a running codex lane waits for the
+turn to end (or the lane is stopped FIRST, then resumed) — never both at once.
