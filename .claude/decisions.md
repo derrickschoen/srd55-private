@@ -10645,3 +10645,128 @@ killed the wrap test; restore cmp identical. Rescored estimate of the void 24-st
 scorer): Luna medium identity 0.63 / sides 0.56 / HP 0.35; low identity 0.48 — confirms the earlier hand estimate;
 the residual is the plate-cell confusion inc4 addresses plus doors (Q6 210 hallucinations) and fog (Q9). The
 24-state probe rerun on inc4 started 08:45 (Luna low + medium, full glyphs, ~2 h).
+
+ISO REVIEW ROUND 10 (2026-09-05 09:05, codex sol high, read-only, on 5e3a35d3): LAND — no BLOCKER/MAJOR. Three
+MINOR (the ordinary two-blit darkness path is still inexact on partial-alpha mip edges — codex calls it a bounded
+visual fringe acceptable behind ?view=iso; fitZoom accepts non-finite dimensions; a 1.5 s wall-clock assertion in
+pixel-art.test.ts is load-sensitive) and three NIT (classic snapshot provenance, localeCompare ordering, a
+source-text wiring test). Verified by reading: footprint blocker closed (engine_1x1 ships), whole-bundle picking,
+one-blit near-wall darkness with an independent oracle, residency ≈1 MiB native / 14 regions, brands enforced by
+both toolkits, isAppliedCondition exhaustive. Full text:
+
+FINDINGS
+
+No BLOCKER or MAJOR findings.
+
+### MINOR
+
+1. `src/vtt/iso/renderer.ts:801-806,892-905` — The ordinary tile/token darkness path remains a two-blit operation and is not alpha-correct for partial-alpha mip pixels.
+
+   Failure scenario: with source coverage `p = 0.5` and darkness `a = 8/13`, the current composition produces coefficients approximately `B=.346, C=.346, S=.308`; the correct pre-darkened single blit produces `B=.5, C=.192, S=.308`. Zoom 1/3 antialiased edges therefore become too opaque and retain too much source colour. Zoom 2 binary pixels are exact.
+
+   Fix direction: use `DarknessAtlas.darkened()` and one source-over application for every shaded atlas region, as the near-wall path now does.
+
+   This is acceptable for landing behind `?view=iso`: it is a bounded visual fringe, not a state, picking, or data error.
+
+2. `src/vtt/iso/renderer.ts:399-417` — `fitZoom` validates neither finite layout dimensions nor finite, positive viewport dimensions.
+
+   Failure scenario: `fitCamera({width: NaN, height: 355}, {width: 1920, height: 1080})` compiles and returns a camera containing `NaN`; an infinite layout similarly produces `-Infinity` pan coordinates.
+
+   Fix direction: reject non-finite/non-positive layout and viewport dimensions at the public boundary.
+
+3. `tests/unit/vtt/iso/pixel-art.test.ts:187-192` — The 1.5-second wall-clock assertion is sensitive to machine load.
+
+   Failure scenario: the same deterministic atlas build exceeds 1.5 seconds while concurrent gates load the host, failing despite unchanged output and complexity.
+
+   Fix direction: retain the functional size assertions and enforce performance in a controlled benchmark gate using warm-up and repeated measurements.
+
+### NIT
+
+4. `tests/unit/vtt/iso/classic-board-snapshot.test.ts:13-18` — The assertion that the snapshot predates iso integration is not independently auditable.
+
+   Failure scenario: a classic-markup regression and its regenerated baseline could have entered the initial iso commit together and the test would pass. History shows the snapshot was introduced with the integration and has not subsequently been regenerated; direct source comparison currently clears the classic path.
+
+   Fix direction: record or derive the baseline from the pre-iso parent artifact.
+
+5. `tests/unit/vtt/iso/classic-board-snapshot.test.ts:22-24` — Snapshot attribute ordering uses default-locale `localeCompare`.
+
+   Failure scenario: another ICU/default-locale configuration orders punctuation or case differently, producing a snapshot difference from identical DOM data.
+
+   Fix direction: use an explicit code-unit comparator.
+
+6. `tests/unit/assets/encounter-board-art.test.ts:79-90` — The edited wiring test remains source-text based.
+
+   Failure scenario: the required strings remain in dead code or comments while `renderBoard` stops using `encounterBoardRenderModel`; the test still passes.
+
+   Fix direction: exercise the rendered model/DOM boundary behaviorally. The round’s edit did not weaken the existing string checks, but their original false-positive mode remains.
+
+## VERIFIED BY READING
+
+- Round-1 footprint blocker remains closed: `DEFAULT_FOOTPRINT_MODE` is `engine_1x1` at `scene.ts:112`; scene construction selects `1x1` at `scene.ts:230`; view layout and painting consistently pass that mode at `view.ts:677,700,716`. The dormant `srd_space` option is not what ships.
+
+- D10 token picking is closed: `tokenBundle` at `renderer.ts:453` supplies both painting (`renderer.ts:902`) and reverse-order picking (`renderer.ts:531`). Sprite, every mark, and HP bar participate; any alpha greater than zero picks the token.
+
+- D10 near-wall darkness is closed: the renderer uses cached pre-darkened regions at `renderer.ts:824`. `shade.ts:107,217` computes `C(1−a)+S·a` while preserving the source alpha, so every covered pixel receives one source-over application.
+
+- The darkness oracle is sufficiently independent: the fake compositor calculates source-over per pixel; separate shade tests assert the closed-form colour transformation and preserved alpha rather than regenerating expectations from rendered output.
+
+- Darkened-region residency is bounded. For current generated art: seven wall variants across two dim bands produce 14 regions, about 1,032,192 bytes at native density and about 258 KiB at 1×. The three-kind/three-variant placeholder maximum is 18 regions, about 1.27 MiB native. Density changes evict the prior density. No LRU is required at this accepted bound.
+
+- D10 glyph measurement/drawing is closed: both paths consume nominal `PlateGlyphs` from `contracts.ts:503`; uppercase expansion and `Array.from` give identical glyph sequences for `Groß` and multi-code-point text.
+
+- `AtlasSeed` and `HexColour` are nominal and runtime-validated at `contracts.ts:292,309`; both actual and placeholder toolkits pass through the same constructors and revalidate forged seeds at build time.
+
+- `isAppliedCondition` at `view.ts:173` exhaustively covers the present union. The structural shim is isolated and does not silently default unknown variants.
+
+- `IsoScene.frame` is gone. Animation state is supplied as a branded tick at rendering boundaries.
+
+- Tile roles form one exhaustive table. `door_open` and `glow_warm` are closed tile kinds with generated variants and explicit rendering roles. Arbitrary tile-kind strings do not compile.
+
+- Atlas selections are nominal and bounds-checked. A raw or out-of-range sprite frame cannot be supplied through the normal typed API.
+
+- `LabelPlate.canvas` is explicitly nullable; renderable surface canvases are non-null. Token size/footprint contradiction is not representable in `IsoTokenView`.
+
+- Projection center round-trips are exact under the 2:1 transform. Edge ties have a consistent `Math.round` rule. Multi-cell footprints use their front cell, and standing depth is total through depth, layer, then code-point token ID.
+
+- Reference fit arithmetic is correct: the complete layout is `586×355`; with the fit margin, `1920×1080` selects zoom 2 because height prevents zoom 3. The browser’s `1920×920` canvas also selects zoom 2.
+
+- Scene generation, lighting, occlusion, atlas generation, variant selection, and rendering contain no `Date` or `Math.random` dependency. Iteration and tie-breaking are explicitly ordered.
+
+- Occlusion is computed as scene data. Translucent walls do not block click-through unless an opaque displayed pixel is encountered.
+
+- Rendering disables image smoothing, rounds the applied camera, resizes for DPR, and restores canvas state after backing-store changes.
+
+- The rAF lifecycle cancels scheduled work, respects visibility, detaches listeners on disposal, and prevents late atlas resolution from reviving a disposed view.
+
+- Name plates are drawn last and stacked from the same measured glyph run, without sprites interleaving between a token and its bundle.
+
+- Classic `dm` selection still reaches the same DOM board path. Extracted command labels and `encounterArtFor` preserve the previous values; iso-only styles and retained placeholders do not alter classic markup.
+
+- The classic snapshot has not been modified after its initial iso commit. Direct comparison of the current `renderBoard` flow found no classic-output change.
+
+- The encounter-board-art edit retained all former source assertions and added the extracted resolver path; it was not weakened by removing relevant coverage.
+
+- Large atlases are compared using hashes/scans rather than `toEqual` on complete bitmaps. Small per-pixel oracle images are bounded. The fake compositor implements the blend operation under test and rejects unsupported image drawing.
+
+- `KB_SUBJECTS` was moved unchanged. `knowledge-base-contract.ts:6` re-exports the same value and type, while `mcp/schemas.ts:21` imports the leaf module and severs the browser path to `node:crypto`.
+
+- No imported raster assets, encoded image data, game asset names, copied sprite tables, or suspicious game palettes were found. Pixel output is generated by local drawing code. The literal bitmap-like data is limited to a generic Bayer matrix and the local pixel-font glyph table; neither resembles Baldur’s Gate or Diablo content.
+
+- No test suppression directives were found in the reviewed scope.
+
+- Earlier fixes remain closed: full-layout fitting, raised-wall bounds, displayed-density picking, mechanical light precedence, generated fallback art, open-door rendering, surface-density eviction, keyed retained DOM updates, click-time command resolution, exhaustive role contracts, token stacking, opaque-wall blocking, and near-wall pre-darkening.
+
+## NOT CHECKED
+
+- No compiler, unit, browser, build, screenshot, or performance command was run, per the review restrictions.
+- External provenance of generic glyph shapes and palette inspiration cannot be proved solely from repository contents; no repository evidence of copied game art was found.
+- The checked-out `.claude/decisions.md` ends at D505. D506–D508 were available only through historical repository objects/messages; D509 was intentionally excluded.
+
+LAND — no BLOCKER or MAJOR findings.
+
+REVIEW COMPLETE
+SUPERVISOR (2026-09-05 09:10): landing per D526.1. Merging main into claude/iso-vtt conflicts in four files / 11
+hunks (encounter-app, encounter-board, styles, encounter-board-art test) — the classic-art landing and the iso D6
+seam touched the same render-model code. Fable unit D11 dispatched to resolve (classic path renders exactly as main;
+iso on top; snapshot never regenerated); my full landing gate with the browser suite follows, then main. The three
+minors and three nits go into the first post-landing iso unit.
