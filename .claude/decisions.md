@@ -10299,3 +10299,11 @@ FINDING (2026-09-04 21:21): the Fable D2 unit dispatched at 20:15 did nothing �
 session limit · resets 9pm". Six Fable units and several `claude -p` judge seats ran today; the limit was reached
 around 20:15 and reset at 21:00. Relaunched at 21:22. Rule: check a Fable unit's log within a minute of dispatch
 for this message; a 63-byte log is the signature.
+
+D524 — OWNER (2026-09-04 21:35): "Still give the ai dm being tested the general info that this is a ttrpg and the
+basics of how it works so it knows better what it is looking at. Don't give it the full room description." Applies to
+the D519 probe (and, as the same primer, to the image-arm startup instructions): a fixed GENERAL primer — a tabletop
+RPG combat board viewed from above; each square is 5 feet; tokens are creatures, party vs foes by base colour; the
+numbers along the edges are zero-based column,row; bars under tokens are hit-point bands; the legend names the
+terrain tints and glyphs; walls, doors and objects as drawn — and NOTHING about the specific room (no names, counts,
+positions, terrain facts). The primer is versioned with the question set so probe rows say which primer they used.
