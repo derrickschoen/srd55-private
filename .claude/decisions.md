@@ -10972,3 +10972,20 @@ supervisor: SRD mechanics are our licensed domain content. Rewrite v2 dispatched
 access to judge notes): numbers stay only with two-source support or as explicitly labelled PROJECT DEFAULTS with
 their validation named; lifted phrasing regenerated; leakage check v2 follows. Workflow research (D534): all four
 seats complete; the supervisor is synthesising the owner's report.
+
+D534 RESEARCH DELIVERED (2026-09-05 13:45): four dated-source notes in the private repo workflows/ (a: workflows,
+b: 3D→sprite + Blender agents, c: pixel-art tools + evaluation, d: cross-check). Headline findings the supervisor
+carried to the owner: (1) the evidenced 2026 pattern is human intent + narrow agent tasks + independent executable
+gates — not autonomous feature ownership and not large review panels (a structured 3-agent review gained ~4 points
+at ~4.5× tokens; naive panels underperformed a single reviewer); (2) vision models read game grids badly in ways
+that track image-patch alignment, not difficulty (Grid2Matrix), and structured state matched screenshots on a
+300-trial GUI benchmark (DailyDroid) while frame + engine-truth symbols beat either alone (See, Symbolize, Act) —
+so the AI DM's primary channel should stay structured state, and the probe must sweep tile size/offset before
+blaming art; (3) 3D→sprite is viable as a first-party, headless, deterministic Blender pipeline (5.2.1 LTS,
+--background --factory-startup, fixed ortho camera, rotate the root, 2:1 dimetric to match the board, palette
+quantisation at the end) with raw Blender-MCP code execution confined to a research VM; agents are good at
+parametric/hard-surface geometry and weak at organic characters; no maintained 3D→sprite tool exists, the script
+is the product; (4) generative-3D and diffusion pixel-art services do not clear the licensing wall (plan-dependent
+ownership, training clauses, no non-infringement warranty); (5) a Japanese postmortem measured 41 runs / 675 files
+for one character via diffusion pipelines — "an image carries too many specifications" — the engineering case
+for code-generated art independent of licensing.
