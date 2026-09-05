@@ -10619,3 +10619,12 @@ landing gate on a tree that was not what I meant to gate — first on the unmerg
 unstaged tools file), then on the conflicted tree, because `git merge … | tail -2` masked the merge's exit status
 inside an `&&` chain. Both gates killed within a minute; no numbers were read from them. Rule: a merge gets its
 own command with its own exit check; a gate starts only after `git status --short` is empty.
+
+LANDED ON BRANCH (2026-09-05 08:40): iso D10 5e3a35d3 (all six round-9 findings: whole-bundle picking, precomposed
+darkened wall regions blitted once, plate glyph runs, branded AtlasSeed/HexColour, exhaustive isAppliedCondition,
+frame removed). Unit mutation killed 2; my mutation (exhaustion level rounded, 2.5 accepted) killed the view test,
+restore cmp identical — a first attempt did not apply and its green run is void. My quick gate (foreground, before
+the mutation): tsc 0, sg 0, iso 223/223, iso spec 1/1. Supervisor rulings on the unit's NEEDS-RULING: the
+darkened-region residency bound (wall kinds × variants × densities, ≈18 native regions) is accepted without an LRU;
+the isAppliedCondition shim is deleted by the conditions lane (D510.1) when `conditions` lands on
+DmVisibleCombatant, not here. Codex review round 10 dispatched (HOLD/LAND).
