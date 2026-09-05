@@ -10788,3 +10788,17 @@ match again and re-baselining from our own output is forbidden. Mutation iso_sea
 SUPERVISOR RULING: the hash snapshot is retired; D12 replaces it with a baseline-free invariant (classic markup
 identical with and without the iso strategy, plus structural D516 chrome assertions) and moves the Playwright
 wrapper config into the repo. D12 dispatched on the same mid-merge worktree; the merge is committed after it.
+
+ISO MERGE COMMITTED (2026-09-05 09:55): bc0c7657 on claude/iso-vtt carries D11 (merge resolution) and D12 (snapshot
+retired; classic-board-identity test: classic markup byte-identical with/without the iso strategy, D516 chrome by
+meaning; Playwright wrapper config in the repo). My checks: forbidden scan clean, no snapshot or .tmp remains,
+frozen sha intact; quick gate tsc 0, sg 0, iso 223/223, iso spec 1/1. My mutation (view routing inverted so the
+default becomes iso) SURVIVED 227 unit tests — the routing rule is browser-covered only — and was killed by all four
+specs. First post-landing iso unit: extract boardRendererFor(searchParams) and test it; the round-10 minors/nits.
+
+FOOTPRINTS LANDING GATE (2026-09-05 09:36–09:56): on b1270d13, tsc 0, sg 0, vitest 562/563 files (9717/9718) —
+the one failure, ai-dm-conversation "three rounds", passes alone (67/67) and passed in codex's locked run of the
+same tree; it ran under load 6.5 with D12's gates, a probe and Playwright concurrent. Per the quiet-machine rule
+the vitest phase is DISCARDED, not excused: a chained script reruns the full vitest alone under the lock as soon as
+the Playwright phase ends, then runs the iso full landing gate (browser suite). Both branches land on main only on
+a clean rerun.
