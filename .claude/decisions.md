@@ -11454,3 +11454,23 @@ launched. a11y mini-A/B running at load ~10 (may void).
 a11y-board D429.1 mini-A/B on main e5dcefda (18:06): per-room offense [1,0,2,2,3,2,0,VOID,3,1] (room 8 refused:
 CLI timeout at load ~10), dash 31 — era shape on the nine valid rooms (controls 1,1,2,2,3,2,0,2,3,1). PASSED with room
 8 void; the projection change did not move monster behaviour.
+
+## FINDING + RULING — intel-leak unit stopped on an infeasible gate; root cause is the 32 KiB context cap (2026-09-05 18:08)
+
+Codex (correctly) stopped: its fix (intel bound to the shown-option partition; typed rejection OPTION_NOT_SHOWN for
+hidden ids; room-5 regression test) changes the raw turn context, and tests/unit/tools/ai-dm-board-delivery.test.ts
+pins the off-arm raw context to exactly 32,180 bytes and a fixed sha256 (FOOTPRINTS_RAW_CONTEXT_SHA256) — a golden
+that encodes the leaking context. ROOT CAUSE (codex, from engine-server.ts:762 and :2310, and I accept it as the
+explanation of what I saw in the rows): the server builds six offerable options offense-first, then the 32 KiB
+context limit REMOVES options down to two, but intel (opportunity-cost, movement rows) was generated before the
+pruning and kept ids of pruned options. So "two Shortbow options shown" in room 5 was the byte cap, not a design
+partition; Dash/Dodge/End Turn were silently dropped and the intel still pointed at Dash. Renderer shortlist was
+not the cause. Second finding: the byte cap prunes options SILENTLY — the model is never told options were omitted.
+
+RULING (supervisor, interim under D555 — conflict between "never regenerate an expectation from own output" and a
+deliberate, independently-tested context change): the byte/sha pin in ai-dm-board-delivery.test.ts may be updated
+in the SAME commit as the independent invariants that justify the change — (a) the arm-identity assertions already
+in that test (capture-only == off), (b) the new hidden-option-boundary test (no id in rendered intel outside the
+shown set; hidden id rejected with OPTION_NOT_SHOWN), and (c) a new assertion that the rendered context declares how
+many options were omitted for size. Same logic as the art-hash rule: the pin is a change detector, the invariants
+are the test. Logged in RULE-CONFLICTS.md.
