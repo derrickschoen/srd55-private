@@ -10422,3 +10422,12 @@ by NOTHING measurable at any model or effort. The earlier +0.74 / +0.57 for Luna
 replicate, which was itself a low-scoring run (7.41), i.e. replicate noise plus judge-side picture preference. This
 is consistent with the D519 probe: Luna cannot read the g1 picture, so it could not have used it. The experiment
 is only meaningful once the probe passes (D525), which is why arena reruns wait on the UI iteration.
+
+ISO REVIEW ROUND 5 (codex 01a0703a, 2026-09-05 02:35): HOLD — one MAJOR: the iso scene treats effect-overlay
+membership as the complete lighting state (unlisted cells default to dark), while the engine's
+environment.lightRegions default unlisted cells to BRIGHT and are never projected into the board model; the
+reference encounter's single darkness cell is lost and every plain cell reads dark. Fix = project the canonical
+per-cell environment LightLevel into the DM board model (a seam edit in encounter-board.ts, classic board
+byte-identical) and use it as the mechanical floor. Minor: kind-index brands lose their kind after widening.
+D6 dispatched. Footprints inc2: my gate green on rerun (550/9619, exit 0; the first run's non-zero exit did not
+recur); mutation below; commit follows.
