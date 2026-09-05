@@ -11390,3 +11390,12 @@ Licence unit: my full suite 563/564 files, 9,724/9,725 tests — the one failure
 round-robin test at 5.16 s under load 9; solo rerun in progress. a11y-board unit: codex exit 0 (claims 564/9,723
 locked, Playwright spec 1/1 on 4603, mutation player_export_leaks_hidden_creature killed); my tsc 0, sg 0, forbidden
 scan clean, focused set running. Classic round 4 browser specs 4/4 on 4640 — round 4's gate is complete.
+
+## Licence LANDED e4598858; a11y committed and gating; mini-A/B rep3 on a quiet machine (2026-09-05 17:24)
+
+Licence unit landed on main (lane commit d2fd27c6): the one full-suite failure was the D544-named 5 s arena test
+under load 9; solo rerun 36/36. a11y-board committed on claude/a11y-board after the amendment: my mutation (non-owned
+private conditions leaked to players) is now killed by two tests (visibility.test "redacts private conditions for
+non-owners…", accessible-board.test "redacts private non-owned conditions from player HTML while the DM HTML names
+them"); tsc 0, sg 0, focused 66/66, forbidden scan clean. Its two browser specs (port 4680) and my full suite are
+queued under the lock. Mini-A/B rep3 launched at load 3.3 to settle rooms 5 and 9.
