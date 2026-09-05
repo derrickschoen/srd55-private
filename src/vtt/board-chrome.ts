@@ -8,22 +8,36 @@
  * distances), while the engine, the DM tray ("moved from 1,1 to 2,1") and
  * every MCP payload use zero-based `column,row` numbers — so the labels are
  * the engine's column and row numbers, not letters.
+ *
+ * D525: under the 'full' glyph mode the legend lists exactly the glyph
+ * families the board shows, a hidden creature gains an eye-slash mark on its
+ * plate rim and the word HIDDEN inside its name plate, and the life glyph on
+ * a door cell drops below the door mark instead of colliding with it.
  */
-import { HIDDEN_FOCUS_ASSET_ID, OVERLAY_ASSETS, STONE_FLOOR_SET_ID } from '../assets/art-sets';
+import { HIDDEN_FOCUS_ASSET_ID, STONE_FLOOR_SET_ID } from '../assets/art-sets';
+import {
+  CELL_GLYPHS,
+  CELL_GLYPH_MARGIN,
+  CELL_GLYPH_SIZE,
+  HIDDEN_GLYPH,
+  HIDDEN_GLYPH_LABEL,
+  cellGlyphOrigin,
+  type BoardGlyphMode,
+  type CellGlyphKind,
+} from '../assets/board-glyphs';
 import type { AssetId } from '../assets/ids';
 import {
   LIGHT_GLYPH_BY_LEVEL,
   LIGHT_LEVELS,
   LIGHT_LEVEL_LABELS,
-  LIGHT_VEIL_BY_LEVEL,
   lightGlyphForLevel,
-  type LightEncoding,
   type LightLevel,
 } from '../assets/light-encoding';
-import type { LightGlyph } from '../assets/light-glyphs';
+import { OVERLAY_ASSETS } from '../assets/art-sets';
 import { neutral, paletteHex, ramp, type PaletteColorRef } from '../assets/palette';
 import {
   GLYPH_HEIGHT,
+  LINE_GAP,
   layoutPixelText,
   renderLifeGlyph,
   renderPixelGlyph,
@@ -31,10 +45,18 @@ import {
   type LifeGlyph,
   type PixelTextLayout,
 } from '../assets/pixel-font';
+import type { PixelMark } from '../assets/pixel-mark';
 import { starterArtCssUrl, starterArtDataUri } from '../assets/starter-art-resolver';
 import type { LifeState } from '../combat/encounter';
 import type { CombatantId } from '../combat/values';
-import { roomDefaultLightOf, type EncounterBoardCombatant, type EncounterBoardProjectionShape } from './encounter-board';
+import {
+  boardGlyphPresence,
+  roomDefaultLightOf,
+  type BoardGlyphPresence,
+  type EncounterBoardCellModel,
+  type EncounterBoardCombatant,
+  type EncounterBoardProjectionShape,
+} from './encounter-board';
 import type { ProjectedHitPointKnowledge } from './intel/contracts';
 
 export const CHROME_TILE_PX = 64;
@@ -53,6 +75,15 @@ export const MAX_HORIZONTAL_SHIFTS = 8;
 export const HP_BAR_WIDTH_PX = 40;
 export const HP_BAR_HEIGHT_PX = 4;
 export const HP_BAR_BORDER_PX = 1;
+/** Where the HP bar's top border sits inside its cell; the bottom glyph row must end above it (D525). */
+export const HP_BAR_TOP_PX = CHROME_TILE_PX - HP_BAR_HEIGHT_PX - 2 * HP_BAR_BORDER_PX - 2;
+/** The last tile row a bottom-corner cell glyph's outline ring touches (D525). */
+export const CELL_GLYPH_RING_BOTTOM_PX = cellGlyphOrigin('blocked', CHROME_TILE_PX).y + CELL_GLYPH_SIZE;
+/** The life glyph's inset from the cell's top-right, and where it drops to under a door mark (D525). */
+export const LIFE_GLYPH_INSET_PX = 3;
+export const LIFE_GLYPH_BELOW_DOOR_PX = CELL_GLYPH_MARGIN + CELL_GLYPH_SIZE + 2;
+/** The hidden eye-slash mark's top-left inside its cell: centred on the plate's left rim (D525). */
+export const HIDDEN_GLYPH_ORIGIN = Object.freeze({ x: 1, y: 29 });
 
 export const COORDINATE_CONVENTION = 'engine-column-row-zero-based' as const;
 
@@ -88,11 +119,16 @@ export function lifeGlyphFor(life: LifeState): LifeGlyph {
   }
 }
 
+/** The only word a plate can carry under its name (D525 'full': hidden from players). */
+export type NameplateTag = typeof HIDDEN_GLYPH_LABEL;
+const NAMEPLATE_TAG_INK: PaletteColorRef = ramp('cloth-warm', 6);
+
 export interface NameplateRequest {
   readonly id: CombatantId;
   readonly displayName: string;
   readonly column: number;
   readonly row: number;
+  readonly tag: NameplateTag | null;
 }
 
 export interface NameplateLayout extends NameplateRequest {
@@ -104,17 +140,20 @@ export interface NameplateLayout extends NameplateRequest {
   readonly height: number;
 }
 
-export function nameplateSize(displayName: string): {
+export function nameplateSize(displayName: string, tag: NameplateTag | null): {
   readonly text: PixelTextLayout;
   readonly width: number;
   readonly height: number;
 } {
   const text = layoutPixelText(displayName, NAMEPLATE_MAX_LINES);
+  const tagLayout = tag === null ? null : layoutPixelText(tag, 1);
   const frame = 2 * (NAMEPLATE_PADDING_PX + NAMEPLATE_BORDER_PX);
+  const nativeWidth = Math.max(text.width, tagLayout?.width ?? 0);
+  const nativeHeight = text.height + (tagLayout === null ? 0 : LINE_GAP + tagLayout.height);
   return {
     text,
-    width: text.width * CHROME_TEXT_SCALE + frame,
-    height: text.height * CHROME_TEXT_SCALE + frame,
+    width: nativeWidth * CHROME_TEXT_SCALE + frame,
+    height: nativeHeight * CHROME_TEXT_SCALE + frame,
   };
 }
 
@@ -162,7 +201,7 @@ export function stackLabelOffsets(
     const portraits: readonly Rect[] = requests
       .filter((other) => other.id !== request.id)
       .map((other) => portraitBox(other));
-    const size = nameplateSize(request.displayName);
+    const size = nameplateSize(request.displayName, request.tag);
     const centred = request.column * CHROME_TILE_PX + CHROME_TILE_PX / 2 - size.width / 2;
     const x = Math.max(0, Math.min(Math.round(centred), Math.max(0, gridWidth - size.width)));
     const belowOccupied = occupied.has(`${String(request.column)},${String(request.row + 1)}`);
@@ -225,8 +264,8 @@ export function boardChromeDimensions(bounds: { readonly columns: number; readon
 
 /**
  * A legend row. `swatch` rows show one palette colour; `art` rows show a real
- * overlay tile over the plain flagstone (D525 'inverse' veils); `mark` rows
- * show a light glyph at the chrome's 2× scale (D525 'symbol').
+ * overlay tile over the plain flagstone; `mark` rows show a pixel mark at the
+ * chrome's 2× scale (D525 light glyphs and the 'full' vocabulary).
  */
 export type LegendEntry =
   | {
@@ -246,44 +285,36 @@ export type LegendEntry =
       readonly key: string;
       readonly label: string;
       readonly style: 'mark';
-      readonly glyph: LightGlyph;
+      readonly glyph: PixelMark;
     };
 
-const SIDE_LEGEND_ENTRIES: readonly LegendEntry[] = [
-  { key: 'side-party', label: 'Party', swatch: ramp('cloth-cool', 3), style: 'plate' },
-  { key: 'side-foe', label: 'Foe', swatch: ramp('cloth-warm', 3), style: 'plate' },
-  { key: 'hidden', label: 'Hidden from players', swatch: neutral(8), style: 'plate-dashed' },
-  { key: 'difficult', label: 'Difficult', swatch: ramp('earth', 2), style: 'tint' },
-  { key: 'obscured', label: 'Obscured', swatch: neutral(6), style: 'tint' },
-];
-
-const TAIL_LEGEND_ENTRIES: readonly LegendEntry[] = [
-  { key: 'fog', label: 'Fog', swatch: neutral(1), style: 'tint' },
-  { key: 'blocked', label: 'Blocked', swatch: ramp('stone', 2), style: 'glyph' },
-  { key: 'object', label: 'Object', swatch: ramp('wood', 3), style: 'glyph' },
-  { key: 'light-source', label: 'Light source', swatch: ramp('skin', 6), style: 'glyph' },
+const PARTY_ROW: LegendEntry = { key: 'side-party', label: 'Party', swatch: ramp('cloth-cool', 3), style: 'plate' };
+const FOE_ROW: LegendEntry = { key: 'side-foe', label: 'Foe', swatch: ramp('cloth-warm', 3), style: 'plate' };
+const HIDDEN_PLATE_ROW: LegendEntry = { key: 'hidden', label: 'Hidden from players', swatch: neutral(8), style: 'plate-dashed' };
+const DIFFICULT_ROW: LegendEntry = { key: 'difficult', label: 'Difficult', swatch: ramp('earth', 2), style: 'tint' };
+const OBSCURED_TINT_ROW: LegendEntry = { key: 'obscured', label: 'Obscured', swatch: neutral(6), style: 'tint' };
+const FOG_TINT_ROW: LegendEntry = { key: 'fog', label: 'Fog', swatch: neutral(1), style: 'tint' };
+const BLOCKED_TINT_ROW: LegendEntry = { key: 'blocked', label: 'Blocked', swatch: ramp('stone', 2), style: 'glyph' };
+const OBJECT_ROW: LegendEntry = { key: 'object', label: 'Object', swatch: ramp('wood', 3), style: 'glyph' };
+const LIGHT_SOURCE_ROW: LegendEntry = { key: 'light-source', label: 'Light source', swatch: ramp('skin', 6), style: 'glyph' };
+const HP_ROWS: readonly LegendEntry[] = [
   { key: 'hp-uninjured', label: 'HP uninjured', swatch: HP_BAND_INK.uninjured, style: 'hp' },
   { key: 'hp-bloodied', label: 'HP bloodied', swatch: HP_BAND_INK.bloodied, style: 'hp' },
   { key: 'hp-near-death', label: 'HP near death', swatch: HP_BAND_INK.near_death, style: 'hp' },
   { key: 'hp-unknown', label: 'HP unknown', swatch: HP_BAND_INK.unknown, style: 'hp' },
 ];
 
-/** The light rows depend on the encoding (D525); 'symbol' also names the unmarked room default. */
-export function lightLegendEntries(encoding: LightEncoding, roomDefault: LightLevel): readonly LegendEntry[] {
-  switch (encoding) {
-    case 'tint':
+/** The light rows depend on the mode (D525); the glyph modes also name the unmarked room default. */
+export function lightLegendEntries(mode: BoardGlyphMode, roomDefault: LightLevel): readonly LegendEntry[] {
+  switch (mode) {
+    case 'none':
       return [
         { key: 'bright', label: 'Bright light', swatch: ramp('skin', 6), style: 'tint' },
         { key: 'dim', label: 'Dim light', swatch: ramp('cloth-warm', 5), style: 'tint' },
         { key: 'darkness', label: 'Darkness', swatch: neutral(0), style: 'tint' },
       ];
-    case 'inverse':
-      return [
-        { key: 'bright', label: 'No veil = bright light', style: 'art', floor: STONE_FLOOR_SET_ID, overlay: null },
-        { key: 'dim', label: 'Light veil = dim', style: 'art', floor: STONE_FLOOR_SET_ID, overlay: OVERLAY_ASSETS[LIGHT_VEIL_BY_LEVEL.dim] },
-        { key: 'darkness', label: 'Heavy veil = darkness', style: 'art', floor: STONE_FLOOR_SET_ID, overlay: OVERLAY_ASSETS[LIGHT_VEIL_BY_LEVEL.darkness] },
-      ];
-    case 'symbol':
+    case 'light':
+    case 'full':
       return [
         ...LIGHT_LEVELS.map((level): LegendEntry => ({
           key: level,
@@ -296,11 +327,51 @@ export function lightLegendEntries(encoding: LightEncoding, roomDefault: LightLe
   }
 }
 
-export function legendEntriesFor(encoding: LightEncoding, roomDefault: LightLevel): readonly LegendEntry[] {
-  return [...SIDE_LEGEND_ENTRIES, ...lightLegendEntries(encoding, roomDefault), ...TAIL_LEGEND_ENTRIES];
+function cellGlyphRow(kind: CellGlyphKind): LegendEntry {
+  return { key: kind, label: CELL_GLYPHS[kind].label, style: 'mark', glyph: CELL_GLYPHS[kind] };
 }
 
-/** The glyph asset each 'symbol' legend row stands for, so a test can tie the row to the tile. */
+/**
+ * Every legend row for a board. 'none' and 'light' keep the D516 rows and swap
+ * the light rows; 'full' replaces the hidden, obscured, fog and blocked rows
+ * with their marks and adds the door marks — each only when the board shows
+ * it, so the legend lists exactly the families present.
+ */
+export function legendEntriesFor(
+  mode: BoardGlyphMode,
+  roomDefault: LightLevel,
+  presence: BoardGlyphPresence,
+): readonly LegendEntry[] {
+  switch (mode) {
+    case 'none':
+    case 'light':
+      return [
+        PARTY_ROW, FOE_ROW, HIDDEN_PLATE_ROW, DIFFICULT_ROW, OBSCURED_TINT_ROW,
+        ...lightLegendEntries(mode, roomDefault),
+        FOG_TINT_ROW, BLOCKED_TINT_ROW, OBJECT_ROW, LIGHT_SOURCE_ROW, ...HP_ROWS,
+      ];
+    case 'full': {
+      const shown = (kind: CellGlyphKind): readonly LegendEntry[] => presence.cells.includes(kind) ? [cellGlyphRow(kind)] : [];
+      return [
+        PARTY_ROW,
+        FOE_ROW,
+        ...(presence.hidden ? [{ key: 'hidden', label: HIDDEN_GLYPH_LABEL, style: 'mark', glyph: HIDDEN_GLYPH } satisfies LegendEntry] : []),
+        DIFFICULT_ROW,
+        ...shown('obscured'),
+        ...lightLegendEntries(mode, roomDefault),
+        ...shown('fog'),
+        ...shown('blocked'),
+        ...shown('door-closed'),
+        ...shown('door-open'),
+        OBJECT_ROW,
+        LIGHT_SOURCE_ROW,
+        ...HP_ROWS,
+      ];
+    }
+  }
+}
+
+/** The glyph asset each light legend row stands for, so a test can tie the row to the tile. */
 export function legendGlyphAssetFor(level: LightLevel): AssetId {
   return OVERLAY_ASSETS[LIGHT_GLYPH_BY_LEVEL[level]];
 }
@@ -371,9 +442,16 @@ function coordinateLabels(bounds: { readonly columns: number; readonly rows: num
   return container;
 }
 
+/** The plate tag a combatant carries under a mode: HIDDEN under 'full' for a hidden creature, else none. */
+export function nameplateTagFor(mode: BoardGlyphMode, combatant: EncounterBoardCombatant): NameplateTag | null {
+  return mode === 'full' && combatant.hiddenFromPlayers === true ? HIDDEN_GLYPH_LABEL : null;
+}
+
 function tokenChrome(
   combatants: readonly EncounterBoardCombatant[],
   bounds: { readonly columns: number; readonly rows: number },
+  mode: BoardGlyphMode,
+  doorCells: ReadonlySet<string>,
 ): HTMLDivElement {
   const layer = el('div', 'encounter-token-chrome');
   layer.setAttribute('aria-hidden', 'true');
@@ -383,6 +461,7 @@ function tokenChrome(
       displayName: combatant.name,
       column: combatant.position.column,
       row: combatant.position.row,
+      tag: nameplateTagFor(mode, combatant),
     })),
     bounds,
   );
@@ -392,6 +471,7 @@ function tokenChrome(
     if (combatant === undefined) continue;
     const cellLeft = COORDINATE_GUTTER_PX + combatant.position.column * CHROME_TILE_PX;
     const cellTop = COORDINATE_GUTTER_PX + combatant.position.row * CHROME_TILE_PX;
+    const cellKey = `${String(combatant.position.column)},${String(combatant.position.row)}`;
 
     if (combatant.hiddenFromPlayers === true) {
       const ring = el('img', 'encounter-hidden-ring');
@@ -407,6 +487,23 @@ function tokenChrome(
         height: `${String(CHROME_TILE_PX)}px`,
       });
       layer.append(ring);
+      // D525 'full': the eye-slash mark on the ring's left rim, at the tile's own 1× scale like the cell glyphs.
+      if (plate.tag !== null) {
+        const eye = renderPixelGlyph('hidden', HIDDEN_GLYPH.rows, HIDDEN_GLYPH.ink, 1, HIDDEN_GLYPH.outline);
+        const eyeImage = el('img', 'encounter-hidden-glyph');
+        eyeImage.alt = '';
+        eyeImage.src = eye.dataUri;
+        eyeImage.dataset.combatantId = combatant.id;
+        eyeImage.dataset.glyphKind = 'hidden';
+        styled(eyeImage, {
+          position: 'absolute',
+          left: `${String(cellLeft + HIDDEN_GLYPH_ORIGIN.x - 1)}px`,
+          top: `${String(cellTop + HIDDEN_GLYPH_ORIGIN.y - 1)}px`,
+          width: `${String(eye.cssWidth)}px`,
+          height: `${String(eye.cssHeight)}px`,
+        });
+        layer.append(eyeImage);
+      }
     }
 
     const band = hpBandOf(combatant.hitPointBand);
@@ -416,7 +513,7 @@ function tokenChrome(
     styled(bar, {
       position: 'absolute',
       left: `${String(cellLeft + Math.round((CHROME_TILE_PX - HP_BAR_WIDTH_PX) / 2) - HP_BAR_BORDER_PX)}px`,
-      top: `${String(cellTop + CHROME_TILE_PX - HP_BAR_HEIGHT_PX - 2 * HP_BAR_BORDER_PX - 2)}px`,
+      top: `${String(cellTop + HP_BAR_TOP_PX)}px`,
       width: `${String(HP_BAR_WIDTH_PX)}px`,
       height: `${String(HP_BAR_HEIGHT_PX)}px`,
     });
@@ -436,19 +533,22 @@ function tokenChrome(
     lifeImage.src = glyph.dataUri;
     lifeImage.dataset.combatantId = combatant.id;
     lifeImage.dataset.life = life;
+    // D525: a door mark owns the top-right corner; the life glyph on a door cell drops below it.
+    const lifeTop = doorCells.has(cellKey) ? LIFE_GLYPH_BELOW_DOOR_PX : LIFE_GLYPH_INSET_PX;
     styled(lifeImage, {
       position: 'absolute',
-      left: `${String(cellLeft + CHROME_TILE_PX - glyph.cssWidth - 3)}px`,
-      top: `${String(cellTop + 3)}px`,
+      left: `${String(cellLeft + CHROME_TILE_PX - glyph.cssWidth - LIFE_GLYPH_INSET_PX)}px`,
+      top: `${String(cellTop + lifeTop)}px`,
       width: `${String(glyph.cssWidth)}px`,
       height: `${String(glyph.cssHeight)}px`,
     });
     layer.append(lifeImage);
 
-    const nameplate = el('span', 'encounter-nameplate');
+    const nameplate = el('span', plate.tag === null ? 'encounter-nameplate' : 'encounter-nameplate encounter-nameplate-tagged');
     nameplate.dataset.combatantId = combatant.id;
     nameplate.dataset.displayName = combatant.name;
     nameplate.dataset.lines = String(plate.text.lines.length);
+    if (plate.tag !== null) nameplate.dataset.tag = plate.tag;
     styled(nameplate, {
       position: 'absolute',
       left: `${String(COORDINATE_GUTTER_PX + plate.x)}px`,
@@ -462,6 +562,11 @@ function tokenChrome(
     textImageNode.src = text.dataUri;
     styled(textImageNode, { width: `${String(text.cssWidth)}px`, height: `${String(text.cssHeight)}px` });
     nameplate.append(textImageNode);
+    if (plate.tag !== null) {
+      const tagImage = textImage(plate.tag, NAMEPLATE_TAG_INK, 'encounter-nameplate-tag');
+      tagImage.dataset.tag = plate.tag;
+      nameplate.append(tagImage);
+    }
     layer.append(nameplate);
   }
   return layer;
@@ -503,10 +608,10 @@ function legendSwatch(entry: LegendEntry): HTMLElement {
   }
 }
 
-function legend(entries: readonly LegendEntry[], lightEncoding: LightEncoding, roomDefault: LightLevel): HTMLElement {
+function legend(entries: readonly LegendEntry[], mode: BoardGlyphMode, roomDefault: LightLevel): HTMLElement {
   const box = el('aside', 'encounter-legend');
   box.dataset.legend = 'board-legend';
-  box.dataset.lightEncoding = lightEncoding;
+  box.dataset.boardGlyphs = mode;
   box.dataset.roomDefaultLight = roomDefault;
   box.setAttribute('aria-label', 'Board legend');
   // D525: a minimum, not a fixed height. A narrow board (the 10×7 reference room) wraps the rows past
@@ -524,21 +629,27 @@ function legend(entries: readonly LegendEntry[], lightEncoding: LightEncoding, r
 /**
  * Appends the DM chrome to a rendered `.encounter-board`. The cells and their
  * children are untouched, so a player board is byte-identical without this.
- * The legend's light rows follow the board's light encoding (D525).
+ * The legend's rows follow the board's glyph mode and, under 'full', the marks
+ * the rendered cells actually show (D525).
  */
 export function renderBoardChrome(
   board: HTMLElement,
   projection: EncounterBoardProjectionShape,
-  lightEncoding: LightEncoding,
+  mode: BoardGlyphMode,
+  cells: readonly EncounterBoardCellModel[],
 ): void {
   board.dataset.boardChrome = 'on';
   board.dataset.coordinateLabels = COORDINATE_CONVENTION;
   board.dataset.encounterRows = String(projection.bounds.rows);
   board.style.setProperty('--encounter-rows', String(projection.bounds.rows));
   const roomDefault = roomDefaultLightOf(projection);
+  const presence = boardGlyphPresence(cells, projection.combatants);
+  const doorCells = new Set(cells
+    .filter((cell) => cell.glyphs.some((glyph) => CELL_GLYPHS[glyph.kind].family === 'door'))
+    .map((cell) => cell.key));
   board.append(
     coordinateLabels(projection.bounds),
-    tokenChrome(projection.combatants, projection.bounds),
-    legend(legendEntriesFor(lightEncoding, roomDefault), lightEncoding, roomDefault),
+    tokenChrome(projection.combatants, projection.bounds, mode, doorCells),
+    legend(legendEntriesFor(mode, roomDefault, presence), mode, roomDefault),
   );
 }

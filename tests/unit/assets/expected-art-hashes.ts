@@ -6,11 +6,18 @@
  * that D516 replaced. This is the one sanctioned regeneration of this file;
  * after it, a changed digest is a finding, not a pin to refresh.
  *
- * D525 ADDITION (2026-09-04): five NEW overlay ids (two 'inverse' veils, three
- * 'symbol' glyphs) were pinned with `sha256sum` over the generated PNGs. No
- * existing digest changed. The preview digest changed only because the
- * preview embeds every asset once; tests/unit/assets/light-encoding.test.ts
- * carries the pixel-level invariants that license these five pins.
+ * D525 ADDITION (2026-09-04): three NEW light-glyph overlay ids were pinned
+ * with `sha256sum` over the generated PNGs. No existing digest changed;
+ * tests/unit/assets/light-encoding.test.ts carries the pixel-level invariants
+ * that license those pins.
+ *
+ * D525 GLYPH VOCABULARY (2026-09-05): the two 'inverse' veil ids were REMOVED
+ * with their subject (the closed option is now boardGlyphs none/light/full)
+ * and five NEW cell-glyph overlay ids were pinned with `sha256sum` over the
+ * generated PNGs. No existing digest changed. The preview digest changed only
+ * because the preview embeds every asset once;
+ * tests/unit/assets/board-glyphs.test.ts carries the pixel-level invariants
+ * that license these five pins.
  */
 export const EXPECTED_STARTER_ART_SHA256: Readonly<Record<string, string>> = Object.freeze({
   'art.token.pc.fighter.v1': 'cc8f95a5f1f9cfe5449a36a8e639ebccd2556f2212cb52ffdd83d55f7626fc83',
@@ -82,11 +89,14 @@ export const EXPECTED_STARTER_ART_SHA256: Readonly<Record<string, string>> = Obj
   'art.map.overlay.light-darkness.v1': 'c61c4396fde508408208e5d820aa64e73b71d3197920d0d40990cfc8f5821a2d',
   'art.map.overlay.blocked.v1': '1e398ee15ce0df264dae89849cce529c3145460043418dffe542ef19e904e0bb',
   'art.map.overlay.light-source.v1': '8fab2f5838bca5aac7aad4ff40e9943a4c903beff63da25c6a8762778dcea64a',
-  'art.map.overlay.light-veil-dim.v1': '28feac66fc2a897b7168d568ca7843a2e35aff66575d4853c5fa81fa924c7e48',
-  'art.map.overlay.light-veil-dark.v1': '4848eeb652bd7b98da09c56c208df9c7f4e407106c6f9a921bd28aaff3439e53',
   'art.map.overlay.light-glyph-bright.v1': 'bcbbd23cc27b590269cfdac6e3ba9a0ebb536bbf8a8be4c5bf6f28d83a5cb091',
   'art.map.overlay.light-glyph-dim.v1': 'df369ebc51a87481854608a155d5e8cb88027fd0e1d08c831198e4c537ef71ca',
   'art.map.overlay.light-glyph-dark.v1': '8a71bcb78b4df85fc8aa8e01844f034d1037d812f9157b6fb222eab1fdaf9109',
+  'art.map.overlay.glyph-door-closed.v1': '15d70aad69af2cfbb2ffb52211fd04d955ca9ad1441f5d0f9aa529bfc565e6fc',
+  'art.map.overlay.glyph-door-open.v1': 'fb3775f23ac80d0195eb6ab1760a5b12b018460c659a9a917ebd2987b6e72a4a',
+  'art.map.overlay.glyph-blocked.v1': 'f8113d2a146b03932a087600943d80c74d809956d3f074f2ca9440f887b62119',
+  'art.map.overlay.glyph-fog.v1': '6f2b68b0a389bf125c162c7768b2d4816fc60f8cdbd2cc2c5ff1f8004449b99a',
+  'art.map.overlay.glyph-obscured.v1': 'df8b5f982cd63c756694a569e18513b05d70b27bb5e28401b017233e65ec53a2',
   'art.terrain.rubble.v1': '737a9995c7863e841b8e6dcc65302485e40bd2c5ece7af52e54baecfa6bb324c',
   'art.terrain.crate.v1': '29513dc3cd0ca375802bb2289fcf00c666cda4d2fb87908e82390f189b13fc2d',
   'art.terrain.pillar.v1': 'c74849d3af6e020c3b14b8091a8b50126ccdea932538b32dd42615bbd94d7c7f',
@@ -102,6 +112,6 @@ export const EXPECTED_STARTER_ART_SHA256: Readonly<Record<string, string>> = Obj
 /** sha256 of src/assets/starter-art-inputs.ts (D516 regeneration, see above). */
 export const EXPECTED_FIXED_INPUTS_SHA256 =
   'de92080a13ac71090f21d7d8ba905f5b14ecd95521df4db2b06de8db6f036e78';
-/** sha256 of src/assets/preview/starter-art-board.svg (D525 addition: the preview now embeds 84 assets). */
+/** sha256 of src/assets/preview/starter-art-board.svg (D525 glyph vocabulary: the preview now embeds 87 assets). */
 export const EXPECTED_PREVIEW_SHA256 =
-  '2444e2faab233088215c5c1973c0b2ed2eb5ff711f7bc4fe002d17436eeca7b7';
+  '482f557175c982caedb893aaff1a8bab6eca9d8afaba93f3edc5c9738b891b7c';

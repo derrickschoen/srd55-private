@@ -1001,9 +1001,10 @@
   color: #14171f;
 }
 
-/* --- D525 light encodings: 'inverse' veils and 'symbol' corner glyphs ---- */
+/* --- D525 board glyphs: light glyphs ('light', 'full') and the cell vocabulary ('full') ---- */
 
-.encounter-light-mark {
+.encounter-light-mark,
+.encounter-board-glyph {
   position: absolute;
   z-index: 4;
   inset: 0;
@@ -1016,17 +1017,37 @@
   background-repeat: no-repeat;
 }
 
-.encounter-light-mark[data-light-mark='light-veil-dim'] { background-image: var(--art-overlay-light-veil-dim); }
-.encounter-light-mark[data-light-mark='light-veil-dark'] { background-image: var(--art-overlay-light-veil-dark); }
 .encounter-light-mark[data-light-mark='light-glyph-bright'] { background-image: var(--art-overlay-light-glyph-bright); }
 .encounter-light-mark[data-light-mark='light-glyph-dim'] { background-image: var(--art-overlay-light-glyph-dim); }
 .encounter-light-mark[data-light-mark='light-glyph-dark'] { background-image: var(--art-overlay-light-glyph-dark); }
 
-/* Under either new encoding the floor stays plain: the 'tint' illumination layer draws nothing. */
-.encounter-board[data-light-encoding='inverse'] .encounter-mechanical-illumination,
-.encounter-board[data-light-encoding='symbol'] .encounter-mechanical-illumination {
+.encounter-board-glyph[data-glyph-effect='glyph-door-closed'] { background-image: var(--art-overlay-glyph-door-closed); }
+.encounter-board-glyph[data-glyph-effect='glyph-door-open'] { background-image: var(--art-overlay-glyph-door-open); }
+.encounter-board-glyph[data-glyph-effect='glyph-blocked'] { background-image: var(--art-overlay-glyph-blocked); }
+.encounter-board-glyph[data-glyph-effect='glyph-fog'] { background-image: var(--art-overlay-glyph-fog); }
+.encounter-board-glyph[data-glyph-effect='glyph-obscured'] { background-image: var(--art-overlay-glyph-obscured); }
+
+/* Under a glyph mode the floor stays plain: the 'none' illumination tint draws nothing. */
+.encounter-board[data-board-glyphs='light'] .encounter-mechanical-illumination,
+.encounter-board[data-board-glyphs='full'] .encounter-mechanical-illumination {
   background-color: transparent;
   background-image: none;
+}
+
+/* Under 'full' the fog glyph tile carries the hatched veil; the dithered fog tile would bury it. */
+.encounter-board[data-board-glyphs='full'] .encounter-art-fog {
+  display: none;
+}
+
+.encounter-hidden-glyph {
+  display: block;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+.encounter-nameplate-tagged {
+  flex-direction: column;
+  gap: 4px;
 }
 
 .encounter-legend-art .encounter-legend-swatch {

@@ -55,18 +55,18 @@ if (localEncounterLaunch) {
   const view = launchUrl.searchParams.get('view') === 'dm' ? 'dm' : 'player';
   const sessionId = launchUrl.searchParams.get('session') ?? 'reference-encounter';
   const boardSnapshotMode = launchUrl.searchParams.get('boardSnapshot') === '1';
-  const lightEncodingParameter = launchUrl.searchParams.get('lightEncoding');
-  void Promise.all([import('./vtt/encounter-app'), import('./assets/light-encoding')]).then(
-    ([{ mountEncounterVtt }, { isLightEncoding }]) => {
-      // D525: a misspelt encoding must fail here, not silently capture a 'tint' board under another label.
-      if (lightEncodingParameter !== null && !isLightEncoding(lightEncodingParameter)) {
-        throw new Error(`Unknown lightEncoding ${lightEncodingParameter}; expected tint, symbol or inverse.`);
+  const boardGlyphsParameter = launchUrl.searchParams.get('boardGlyphs');
+  void Promise.all([import('./vtt/encounter-app'), import('./assets/board-glyphs')]).then(
+    ([{ mountEncounterVtt }, { isBoardGlyphMode }]) => {
+      // D525: a misspelt mode must fail here, not silently capture a 'none' board under another label.
+      if (boardGlyphsParameter !== null && !isBoardGlyphMode(boardGlyphsParameter)) {
+        throw new Error(`Unknown boardGlyphs ${boardGlyphsParameter}; expected none, light or full.`);
       }
       const mounted = mountEncounterVtt(encounterRoot, {
         view,
         sessionId,
         boardSnapshotMode,
-        ...(lightEncodingParameter === null ? {} : { lightEncoding: lightEncodingParameter }),
+        ...(boardGlyphsParameter === null ? {} : { boardGlyphs: boardGlyphsParameter }),
       });
       window.addEventListener('pagehide', () => mounted.close(), { once: true });
     },

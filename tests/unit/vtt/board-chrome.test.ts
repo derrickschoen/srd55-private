@@ -2,9 +2,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createEncounter, reduceEncounter, type EncounterState } from '../../../src/combat/encounter';
 import { combatantId } from '../../../src/combat/values';
 import { projectDmView } from '../../../src/combat/visibility';
-import { PIXEL_FONT_GLYPHS, normalizeLabelText } from '../../../src/assets/pixel-font';
+import { GLYPH_HEIGHT, LINE_GAP, PIXEL_FONT_GLYPHS, normalizeLabelText } from '../../../src/assets/pixel-font';
 import {
   BOARD_BORDER_PX,
+  CHROME_TEXT_SCALE,
   CHROME_TILE_PX,
   COORDINATE_CONVENTION,
   COORDINATE_GUTTER_PX,
@@ -15,12 +16,14 @@ import {
   hpBandOf,
   legendEntriesFor,
   lightLegendEntries,
+  nameplateSize,
   portraitBox,
   stackLabelOffsets,
   type NameplateLayout,
 } from '../../../src/vtt/board-chrome';
-import { LIGHT_ENCODINGS, LIGHT_LEVELS } from '../../../src/assets/light-encoding';
-import { projectEncounterBoard, type EncounterBoardProjectionShape } from '../../../src/vtt/encounter-board';
+import { BOARD_GLYPH_MODES } from '../../../src/assets/board-glyphs';
+import { LIGHT_LEVELS } from '../../../src/assets/light-encoding';
+import { projectEncounterBoard, type BoardGlyphPresence, type EncounterBoardProjectionShape } from '../../../src/vtt/encounter-board';
 import { renderBoard } from '../../../src/vtt/encounter-app';
 import { hitPointKnowledge } from '../../../src/vtt/intel/actor-knowledge';
 import { installInteractiveDocument, interactiveElement, type InteractiveTestElement } from '../../fixtures/interactive-dom';
@@ -39,7 +42,7 @@ function expectNoOverlap(plates: readonly NameplateLayout[]): void {
       if (other.id === plates[i]!.id) continue;
       const portrait = portraitBox(other);
       expect(
-        overlaps(plates[i]!, { ...portrait, id: other.id, displayName: other.displayName, column: other.column, row: other.row, text: other.text }),
+        overlaps(plates[i]!, { ...portrait, id: other.id, displayName: other.displayName, column: other.column, row: other.row, text: other.text, tag: other.tag }),
         `${plates[i]!.displayName} covers ${other.displayName}'s portrait`,
       ).toBe(false);
     }
@@ -51,11 +54,11 @@ describe('stackLabelOffsets never lets two nameplates overlap', () => {
 
   it('stacks vertically adjacent tokens and horizontally adjacent long names', () => {
     const plates = stackLabelOffsets([
-      { id: combatantId('combatant:a'), displayName: 'Reference Fighter', column: 2, row: 1 },
-      { id: combatantId('combatant:b'), displayName: 'Hobgoblin Warrior Captain', column: 2, row: 2 },
-      { id: combatantId('combatant:c'), displayName: 'Sabertooth Tiger', column: 3, row: 1 },
-      { id: combatantId('combatant:d'), displayName: 'Wolf', column: 1, row: 1 },
-      { id: combatantId('combatant:e'), displayName: 'Goblin Warrior', column: 3, row: 2 },
+      { id: combatantId('combatant:a'), displayName: 'Reference Fighter', column: 2, row: 1, tag: null },
+      { id: combatantId('combatant:b'), displayName: 'Hobgoblin Warrior Captain', column: 2, row: 2, tag: null },
+      { id: combatantId('combatant:c'), displayName: 'Sabertooth Tiger', column: 3, row: 1, tag: 'HIDDEN' },
+      { id: combatantId('combatant:d'), displayName: 'Wolf', column: 1, row: 1, tag: null },
+      { id: combatantId('combatant:e'), displayName: 'Goblin Warrior', column: 3, row: 2, tag: null },
     ], bounds);
     expect(plates).toHaveLength(5);
     expectNoOverlap(plates);
@@ -75,13 +78,20 @@ describe('stackLabelOffsets never lets two nameplates overlap', () => {
     const tiger = plates.find((plate) => plate.displayName === 'Sabertooth Tiger');
     expect(fighter && fighter.y + fighter.height <= CHROME_TILE_PX * 1 + 1).toBe(true);
     expect(tiger && tiger.y + tiger.height <= CHROME_TILE_PX * 1 + 1).toBe(true);
+    // D525: a HIDDEN tag adds one text line to the plate, and the placement accounts for it
+    const untagged = nameplateSize('Sabertooth Tiger', null);
+    const tagged = nameplateSize('Sabertooth Tiger', 'HIDDEN');
+    expect(tagged.height).toBe(untagged.height + (LINE_GAP + GLYPH_HEIGHT) * CHROME_TEXT_SCALE);
+    expect(tagged.width).toBe(untagged.width);
+    expect(tiger?.height).toBe(tagged.height);
+    expect(nameplateSize('Ox', 'HIDDEN').width).toBeGreaterThan(nameplateSize('Ox', null).width);
   });
 
   it('is a pure function of the input regardless of request order', () => {
     const requests = [
-      { id: combatantId('combatant:x'), displayName: 'Ancient Red Dragon', column: 0, row: 0 },
-      { id: combatantId('combatant:y'), displayName: 'Ancient Blue Dragon', column: 1, row: 0 },
-      { id: combatantId('combatant:z'), displayName: 'Kobold', column: 0, row: 1 },
+      { id: combatantId('combatant:x'), displayName: 'Ancient Red Dragon', column: 0, row: 0, tag: null },
+      { id: combatantId('combatant:y'), displayName: 'Ancient Blue Dragon', column: 1, row: 0, tag: null },
+      { id: combatantId('combatant:z'), displayName: 'Kobold', column: 0, row: 1, tag: null },
     ];
     const forward = stackLabelOffsets(requests, bounds);
     const reversed = stackLabelOffsets([...requests].reverse(), bounds);
@@ -91,7 +101,7 @@ describe('stackLabelOffsets never lets two nameplates overlap', () => {
 
   it('clamps a plate wider than its row into the grid instead of cutting the name', () => {
     const [plate] = stackLabelOffsets([
-      { id: combatantId('combatant:long'), displayName: 'The Extraordinarily Long Named Abomination', column: 0, row: 0 },
+      { id: combatantId('combatant:long'), displayName: 'The Extraordinarily Long Named Abomination', column: 0, row: 0, tag: null },
     ], { columns: 2, rows: 1 });
     expect(plate?.x).toBe(0);
     expect(plate?.text.lines.join(' ')).toBe('THE EXTRAORDINARILY LONG NAMED ABOMINATION');
@@ -165,6 +175,8 @@ function serialize(node: InteractiveTestElement): Serialized {
 }
 
 const CHROME_CLASSES = new Set(['encounter-coordinate-labels', 'encounter-token-chrome', 'encounter-legend']);
+const NOTHING_PRESENT: BoardGlyphPresence = { cells: [], hidden: false };
+const EVERYTHING_PRESENT: BoardGlyphPresence = { cells: ['door-closed', 'door-open', 'blocked', 'fog', 'obscured'], hidden: true };
 
 function withoutChrome(node: Serialized): Serialized {
   return { ...node, children: node.children.filter((child) => !CHROME_CLASSES.has(child.className)) };
@@ -241,50 +253,56 @@ describe('renderBoard: DM board with chrome, player board without', () => {
     const labels = dm.querySelector('[data-coordinate-labels]');
     expect(labels?.querySelectorAll('[data-axis="column"]')).toHaveLength(projection.bounds.columns * 2);
     expect(labels?.querySelectorAll('[data-axis="row"]')).toHaveLength(projection.bounds.rows * 2);
-    // The reference room names no light region, so every cell is bright and the default encoding is 'tint'.
+    // The reference room names no light region, so every cell is bright and the default mode is 'none'.
     const legend = dm.querySelector('[data-legend]');
     // D525: the band is a minimum so a narrow board's rows are never clipped.
     expect(legend?.getAttribute('style')).toContain(`min-height:${String(LEGEND_HEIGHT_PX)}px`);
     expect(legend?.getAttribute('style')).not.toMatch(/(?:^|;)height:/u);
-    expect(legend?.getAttribute('data-light-encoding')).toBe('tint');
+    expect(legend?.getAttribute('data-board-glyphs')).toBe('none');
     expect(legend?.getAttribute('data-room-default-light')).toBe('bright');
-    const tintEntries = legendEntriesFor('tint', 'bright');
-    expect(legend?.querySelectorAll('.encounter-legend-item').map((item) => item.getAttribute('data-legend-key'))).toEqual(tintEntries.map((entry) => entry.key));
-    for (const band of HP_BANDS) expect(tintEntries.some((entry) => entry.key === `hp-${band.replaceAll('_', '-')}`)).toBe(true);
-    expect(tintEntries.map((entry) => entry.label)).toContain('Bright light');
+    const noneEntries = legendEntriesFor('none', 'bright', NOTHING_PRESENT);
+    expect(legend?.querySelectorAll('.encounter-legend-item').map((item) => item.getAttribute('data-legend-key'))).toEqual(noneEntries.map((entry) => entry.key));
+    for (const band of HP_BANDS) expect(noneEntries.some((entry) => entry.key === `hp-${band.replaceAll('_', '-')}`)).toBe(true);
+    expect(noneEntries.map((entry) => entry.label)).toContain('Bright light');
+    // under 'none' no plate carries a tag and no eye-slash mark is drawn, hidden creature or not
+    expect(dm.querySelectorAll('.encounter-nameplate-tag')).toHaveLength(0);
+    expect(dm.querySelectorAll('.encounter-hidden-glyph')).toHaveLength(0);
+    expect(dm.querySelectorAll('.encounter-nameplate').every((plate) => plate.getAttribute('data-tag') === null)).toBe(true);
   });
 
-  it('D525: every encoding keeps the non-light rows and swaps only the three light rows (symbol adds the room default)', () => {
-    for (const encoding of LIGHT_ENCODINGS) {
+  it("D525: 'none' and 'light' keep the D516 rows and swap only the light rows; the glyph modes add the room default", () => {
+    for (const mode of ['none', 'light'] as const) {
       for (const roomDefault of LIGHT_LEVELS) {
-        const entries = legendEntriesFor(encoding, roomDefault);
-        const lightRows = lightLegendEntries(encoding, roomDefault);
-        const keys = entries.map((entry) => entry.key);
-        expect(new Set(keys).size, `${encoding}/${roomDefault} keys are unique`).toBe(keys.length);
-        expect(keys.slice(0, 5)).toEqual(['side-party', 'side-foe', 'hidden', 'difficult', 'obscured']);
-        expect(keys.slice(5, 5 + lightRows.length)).toEqual(lightRows.map((entry) => entry.key));
-        expect(keys.slice(5 + lightRows.length)).toEqual(['fog', 'blocked', 'object', 'light-source', 'hp-uninjured', 'hp-bloodied', 'hp-near-death', 'hp-unknown']);
-        expect(lightRows.map((entry) => entry.key).slice(0, 3)).toEqual(['bright', 'dim', 'darkness']);
+        // presence never matters outside 'full'
+        for (const presence of [NOTHING_PRESENT, EVERYTHING_PRESENT]) {
+          const entries = legendEntriesFor(mode, roomDefault, presence);
+          const lightRows = lightLegendEntries(mode, roomDefault);
+          const keys = entries.map((entry) => entry.key);
+          expect(new Set(keys).size, `${mode}/${roomDefault} keys are unique`).toBe(keys.length);
+          expect(keys.slice(0, 5)).toEqual(['side-party', 'side-foe', 'hidden', 'difficult', 'obscured']);
+          expect(keys.slice(5, 5 + lightRows.length)).toEqual(lightRows.map((entry) => entry.key));
+          expect(keys.slice(5 + lightRows.length)).toEqual(['fog', 'blocked', 'object', 'light-source', 'hp-uninjured', 'hp-bloodied', 'hp-near-death', 'hp-unknown']);
+          expect(lightRows.map((entry) => entry.key).slice(0, 3)).toEqual(['bright', 'dim', 'darkness']);
+        }
       }
     }
-    expect(lightLegendEntries('inverse', 'bright').map((entry) => [entry.style, entry.label])).toEqual([
-      ['art', 'No veil = bright light'],
-      ['art', 'Light veil = dim'],
-      ['art', 'Heavy veil = darkness'],
+    expect(lightLegendEntries('none', 'bright').map((entry) => [entry.style, entry.label])).toEqual([
+      ['tint', 'Bright light'],
+      ['tint', 'Dim light'],
+      ['tint', 'Darkness'],
     ]);
-    const inverseRows = lightLegendEntries('inverse', 'bright');
-    expect(inverseRows.map((entry) => entry.style === 'art' ? entry.overlay : 'not-art')).toEqual([
-      null, 'art.map.overlay.light-veil-dim.v1', 'art.map.overlay.light-veil-dark.v1',
-    ]);
-    expect(lightLegendEntries('symbol', 'darkness').map((entry) => [entry.style, entry.label])).toEqual([
-      ['mark', 'BRIGHT'],
-      ['mark', 'DIM'],
-      ['mark', 'DARK'],
-      ['art', 'No glyph = DARK'],
-    ]);
-    expect(lightLegendEntries('symbol', 'dim').at(-1)?.label).toBe('No glyph = DIM');
-    // 'inverse' has no room-default row: the plain floor is always bright, whatever the majority level.
-    expect(lightLegendEntries('inverse', 'darkness')).toEqual(lightLegendEntries('inverse', 'bright'));
+    for (const mode of ['light', 'full'] as const) {
+      expect(lightLegendEntries(mode, 'darkness').map((entry) => [entry.style, entry.label])).toEqual([
+        ['mark', 'BRIGHT'],
+        ['mark', 'DIM'],
+        ['mark', 'DARK'],
+        ['art', 'No glyph = DARK'],
+      ]);
+      expect(lightLegendEntries(mode, 'dim').at(-1)?.label).toBe('No glyph = DIM');
+    }
+    // 'none' has no room-default row: the tints name every level whatever the majority.
+    expect(lightLegendEntries('none', 'darkness')).toEqual(lightLegendEntries('none', 'bright'));
+    expect(BOARD_GLYPH_MODES).toEqual(['none', 'light', 'full']);
   });
 
   it('leaves the player board byte-identical to the DM board minus its chrome', () => {

@@ -10,7 +10,7 @@ import {
 import { basename, join, relative, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
-import { DEFAULT_LIGHT_ENCODING, isLightEncoding, type LightEncoding } from '../src/assets/light-encoding';
+import { DEFAULT_BOARD_GLYPH_MODE, isBoardGlyphMode, type BoardGlyphMode, type CornerGlyphFamily } from '../src/assets/board-glyphs';
 import { canonicalJson } from '../src/commands/canonical-json';
 import type { CombatantProfile } from '../src/combat/combatant';
 import { createEncounter, type EncounterState, type LifeState } from '../src/combat/encounter';
@@ -42,20 +42,36 @@ import {
 
 const repositoryRoot = resolve(new URL('../', import.meta.url).pathname);
 const PROBE_VERSION = 'd519-screenshot-comprehension-v1' as const;
-const ROW_VERSION = 'd525-screenshot-comprehension-row-v3' as const;
-/** v2 (D525): the general primer gains one sentence naming the board's light encoding. */
-export const PRIMER_VERSION = 'd525-general-board-primer-v2' as const;
+const ROW_VERSION = 'd525-screenshot-comprehension-row-v4' as const;
+/** v3 (D525): the general primer gains one sentence per glyph family under `--board-glyphs full`. */
+export const PRIMER_VERSION = 'd525-general-board-primer-v3' as const;
 export const GENERAL_PRIMER = 'This is a tabletop RPG combat board viewed from above. Each grid square represents 5 feet, and tokens represent creatures. Cool-blue base plates identify party creatures; warm-red base plates identify foes. Numbers along the horizontal and vertical board edges are zero-based column,row coordinates, and answers must use that convention. Bars under tokens show hit-point bands using the colours named in the legend. The legend box names every terrain tint (Difficult, Obscured, Bright light, Dim light, Darkness, and Fog) and every board glyph (Blocked, Object, and Light source). Interpret walls, doors, and objects as they are drawn on the board.' as const;
 /**
- * D525: one sentence per light encoding, appended to the general primer. Each
- * describes only the drawing convention — never a room fact — and must match
- * the legend rows board-chrome renders for that encoding.
+ * D525: the sentence describing how the board draws light levels, one per
+ * convention. Each describes only the drawing convention — never a room fact —
+ * and must match the legend rows board-chrome renders.
  */
-export const LIGHT_ENCODING_PRIMER = {
+export const LIGHT_PRIMER = {
   tint: 'Light levels are shown as floor tints: a pale warm tint marks bright light, a fainter warm tint marks dim light, a dark veil marks darkness, and untinted floor is also bright light.',
-  inverse: 'Light levels are shown as veils over the floor: plain unveiled floor is bright light, a light checkered blue-grey veil marks dim light, and a heavy dark veil marks darkness.',
-  symbol: 'Light levels are shown by a small glyph in the top-left corner of a cell: a sun marks bright light, a crescent moon marks dim light, a filled dark circle marks darkness, and a cell without a glyph has the room default level that the legend names after "No glyph =".',
-} as const satisfies Readonly<Record<LightEncoding, string>>;
+  glyph: 'Light levels are shown by a small glyph in the top-left corner of a cell: a sun marks bright light, a crescent moon marks dim light, a filled dark circle marks darkness, and a cell without a glyph has the room default level that the legend names after "No glyph =".',
+} as const;
+/**
+ * D525 'full': one sentence per glyph family, naming the corner and the
+ * meaning, in the corner order board-glyphs.ts fixes. The hidden mark rides
+ * the token plate, so its sentence names the rim rather than a corner.
+ */
+export const GLYPH_FAMILY_PRIMER = {
+  door: 'Doors are marked by a glyph in the top-right corner of the cell: a solid door slab crossed by a dark bar means the door is closed, and a door frame with an open gap and a swing arc means the door is open.',
+  blocked: 'A blocked cell, such as a pillar or rubble, carries an X inside a square in the bottom-left corner of the cell.',
+  veil: 'Fog is a veil of diagonal hatching with a cloud glyph in the bottom-right corner of the cell, obscurement is a dotted veil with a wave glyph just left of that corner, and a cell can carry both.',
+  hidden: 'A creature hidden from the players has a dashed ring around its plate, an eye crossed by a slash on the left rim of that ring, and the word HIDDEN inside its name plate.',
+} as const satisfies Readonly<Record<Exclude<CornerGlyphFamily, 'light'> | 'hidden', string>>;
+/** The sentences appended to the general primer for each board-glyph mode. */
+export const BOARD_GLYPH_PRIMER: Readonly<Record<BoardGlyphMode, readonly string[]>> = Object.freeze({
+  none: [LIGHT_PRIMER.tint],
+  light: [LIGHT_PRIMER.glyph],
+  full: [LIGHT_PRIMER.glyph, GLYPH_FAMILY_PRIMER.door, GLYPH_FAMILY_PRIMER.blocked, GLYPH_FAMILY_PRIMER.veil, GLYPH_FAMILY_PRIMER.hidden],
+});
 const AI_DM_CODEX_HOME = '/home/vagrant/.codex-aidm' as const;
 const REAL_CALL_CONCURRENCY = 4;
 export const PASS_THRESHOLD = 0.9;
@@ -156,8 +172,8 @@ export interface ScreenshotProbeConfig {
   readonly primer: PrimerMode;
   readonly generation: string;
   readonly comparePath: string | null;
-  /** D525: the encoding every board is captured under and the primer sentence that describes it. */
-  readonly lightEncoding: LightEncoding;
+  /** D525: the glyph mode every board is captured under and the primer sentences that describe it. */
+  readonly boardGlyphs: BoardGlyphMode;
 }
 
 export interface ProbeTokenUsage {
@@ -177,7 +193,7 @@ export interface ScreenshotProbeRow {
   readonly promptVersion: typeof PROBE_VERSION;
   readonly primerVersion: PrimerVersion;
   readonly generation: string;
-  readonly lightEncoding: LightEncoding;
+  readonly boardGlyphs: BoardGlyphMode;
   readonly png: {
     readonly sha256: string;
     readonly relativePath: string;
@@ -609,7 +625,7 @@ export function scoreProbeAnswer(answer: ProbeAnswer, truth: ProbeAnswer): Probe
 export function screenshotQuestionPrompt(
   question: ScreenshotQuestionId,
   primer: PrimerMode = 'general',
-  lightEncoding: LightEncoding = DEFAULT_LIGHT_ENCODING,
+  boardGlyphs: BoardGlyphMode = DEFAULT_BOARD_GLYPH_MODE,
 ): string {
   const questionLines = [
     `Question ${question}: ${QUESTION_TEXT[question]}`,
@@ -617,7 +633,7 @@ export function screenshotQuestionPrompt(
     'Inspect only the attached PNG. Return only JSON matching the supplied strict schema.',
   ];
   return primer === 'general'
-    ? [`General primer ${PRIMER_VERSION}: ${GENERAL_PRIMER} ${LIGHT_ENCODING_PRIMER[lightEncoding]}`, ...questionLines].join('\n')
+    ? [`General primer ${PRIMER_VERSION}: ${[GENERAL_PRIMER, ...BOARD_GLYPH_PRIMER[boardGlyphs]].join(' ')}`, ...questionLines].join('\n')
     : questionLines.join('\n');
 }
 
@@ -840,7 +856,7 @@ export function parseScreenshotProbeArgs(argv: readonly string[]): ScreenshotPro
       simulate = true;
       continue;
     }
-    if (!['--models', '--states', '--seed', '--images-root', '--out', '--primer', '--generation', '--compare', '--light-encoding'].includes(option ?? '')) {
+    if (!['--models', '--states', '--seed', '--images-root', '--out', '--primer', '--generation', '--compare', '--board-glyphs'].includes(option ?? '')) {
       throw new TypeError(`Unknown screenshot probe option ${option ?? '<missing>'}.`);
     }
     const value = argv[index + 1];
@@ -869,8 +885,8 @@ export function parseScreenshotProbeArgs(argv: readonly string[]): ScreenshotPro
   const compareValue = values.get('--compare');
   const comparePath = compareValue === undefined ? null : insideRepository(compareValue, '--compare');
   if (comparePath !== null && !comparePath.endsWith('.jsonl')) throw new RangeError('--compare must end in .jsonl.');
-  const lightEncoding = values.get('--light-encoding') ?? DEFAULT_LIGHT_ENCODING;
-  if (!isLightEncoding(lightEncoding)) throw new TypeError('--light-encoding must be tint, symbol or inverse.');
+  const boardGlyphs = values.get('--board-glyphs') ?? DEFAULT_BOARD_GLYPH_MODE;
+  if (!isBoardGlyphMode(boardGlyphs)) throw new TypeError('--board-glyphs must be none, light or full.');
   return {
     models,
     stateCount,
@@ -882,7 +898,7 @@ export function parseScreenshotProbeArgs(argv: readonly string[]): ScreenshotPro
     primer: primerValue,
     generation,
     comparePath,
-    lightEncoding,
+    boardGlyphs,
   };
 }
 
@@ -1019,12 +1035,12 @@ async function runTask(
   imagesRoot: string,
   primer: PrimerMode,
   generation: string,
-  lightEncoding: LightEncoding,
+  boardGlyphs: BoardGlyphMode,
 ): Promise<ScreenshotProbeRow> {
   const result = await answerer.answer({
     ...task.model,
     question: task.question,
-    prompt: screenshotQuestionPrompt(task.question, primer, lightEncoding),
+    prompt: screenshotQuestionPrompt(task.question, primer, boardGlyphs),
     schemaPath: schemas[task.question],
     imagePath: join(imagesRoot, task.artifact.relativePath),
     truth: task.truth,
@@ -1039,7 +1055,7 @@ async function runTask(
     promptVersion: PROBE_VERSION,
     primerVersion: primer === 'general' ? PRIMER_VERSION : null,
     generation,
-    lightEncoding,
+    boardGlyphs,
     png: {
       sha256: task.artifact.sha256,
       relativePath: task.artifact.relativePath,
@@ -1208,7 +1224,7 @@ export function renderProbeSummary(
     '',
     `Pass criterion: every question class has mean Jaccard accuracy >= ${PASS_THRESHOLD.toFixed(1)}.`,
     '',
-    `Light encoding: ${[...new Set(rows.map((row) => row.lightEncoding))].sort().join(', ')}.`,
+    `Board glyphs: ${[...new Set(rows.map((row) => row.boardGlyphs))].sort().join(', ')}.`,
     '',
   ];
   for (const [key, group] of [...groups.entries()].sort(([left], [right]) => left.localeCompare(right))) {
@@ -1249,7 +1265,7 @@ export async function runScreenshotProbe(
   const schemas = await writeSchemas(config.imagesRoot);
   const selected = shuffledCandidates(candidates, config.seed).slice(0, config.stateCount);
   const ownedService = dependencies.snapshotService === undefined
-    ? await BoardSnapshotService.start({ outputDirectory: config.imagesRoot, lightEncoding: config.lightEncoding })
+    ? await BoardSnapshotService.start({ outputDirectory: config.imagesRoot, boardGlyphs: config.boardGlyphs })
     : null;
   const snapshotService = dependencies.snapshotService ?? ownedService;
   if (snapshotService === null) throw new Error('Screenshot probe has no snapshot service.');
@@ -1270,7 +1286,7 @@ export async function runScreenshotProbe(
         candidate, artifact, model, question, truth: truthAnswer(sheet, question),
       }))));
     const rows = await mapConcurrent(tasks, config.simulate ? tasks.length : REAL_CALL_CONCURRENCY,
-      (task) => runTask(task, answerer, schemas, config.imagesRoot, config.primer, config.generation, config.lightEncoding));
+      (task) => runTask(task, answerer, schemas, config.imagesRoot, config.primer, config.generation, config.boardGlyphs));
     for (const row of rows) await appendFile(config.outPath, `${canonicalJson(row)}\n`, 'utf8');
     await writeFile(config.summaryPath, renderProbeSummary(rows, comparisonRows), 'utf8');
     return rows;

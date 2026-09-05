@@ -5,8 +5,10 @@
  * nothing is traced or copied from any game.
  */
 import { Bitmap, bayer2, hashNoise, type Ink } from './bitmap';
-import { LIGHT_GLYPHS, LIGHT_GLYPH_ORIGIN, outlineRows, type LightGlyphKind } from './light-glyphs';
+import { CELL_GLYPHS, cellGlyphOrigin, type CellGlyphKind } from './board-glyphs';
+import { LIGHT_GLYPHS, LIGHT_GLYPH_ORIGIN, type LightGlyphKind } from './light-glyphs';
 import { neutral, ramp, type PaletteRamp, type RampStep } from './palette';
+import { outlineRows, type PixelMark } from './pixel-mark';
 import { encodePng } from './png';
 
 export const TILE_SIZE = 64;
@@ -21,13 +23,19 @@ export const DOOR_STATES = ['closed', 'open'] as const;
 export type DoorState = (typeof DOOR_STATES)[number];
 export const TERRAIN_OBJECTS = ['rubble', 'crate', 'pillar', 'hazard'] as const;
 export type TerrainObject = (typeof TERRAIN_OBJECTS)[number];
-/** D525 'inverse' encoding: cool veils over dim and dark floor; bright floor stays plain. */
-export const LIGHT_VEIL_EFFECTS = ['light-veil-dim', 'light-veil-dark'] as const;
-export type LightVeilEffect = (typeof LIGHT_VEIL_EFFECTS)[number];
-/** D525 'symbol' encoding: a corner glyph per light level. */
+/** D525 'light' and 'full' board-glyph modes: a top-left corner glyph per light level. */
 export const LIGHT_GLYPH_EFFECTS = ['light-glyph-bright', 'light-glyph-dim', 'light-glyph-dark'] as const;
 export type LightGlyphEffect = (typeof LIGHT_GLYPH_EFFECTS)[number];
-export type LightMarkEffect = LightVeilEffect | LightGlyphEffect;
+/** D525 'full' mode: one 9×9 mark per fact class in its family's corner (board-glyphs.ts). */
+export const CELL_GLYPH_EFFECTS = ['glyph-door-closed', 'glyph-door-open', 'glyph-blocked', 'glyph-fog', 'glyph-obscured'] as const;
+export type CellGlyphEffect = (typeof CELL_GLYPH_EFFECTS)[number];
+export const CELL_GLYPH_EFFECT_BY_KIND: Readonly<Record<CellGlyphKind, CellGlyphEffect>> = Object.freeze({
+  'door-closed': 'glyph-door-closed',
+  'door-open': 'glyph-door-open',
+  blocked: 'glyph-blocked',
+  fog: 'glyph-fog',
+  obscured: 'glyph-obscured',
+});
 export const OVERLAY_EFFECTS = [
   'difficult',
   'obscurement-light',
@@ -38,8 +46,8 @@ export const OVERLAY_EFFECTS = [
   'light-darkness',
   'blocked',
   'light-source',
-  ...LIGHT_VEIL_EFFECTS,
   ...LIGHT_GLYPH_EFFECTS,
+  ...CELL_GLYPH_EFFECTS,
 ] as const;
 export type OverlayEffect = (typeof OVERLAY_EFFECTS)[number];
 export const FOG_STATES = ['hidden', 'unexplored', 'revealed'] as const;
@@ -554,28 +562,8 @@ function paintLightSource(bitmap: Bitmap): void {
   bitmap.rect(29, 52, 7, 2, METAL(1));
 }
 
-/**
- * D525 'inverse' veils. Dim: a cool 2×2-Bayer veil covering half the pixels at
- * 80 % opacity, i.e. 40 % of the cell. Dark: a heavy 70 % veil from the
- * neutral ramp (which also desaturates the stone) with a dithered cool cast.
- */
-export const DIM_VEIL_ALPHA = 204;
-export const DIM_VEIL_BAYER_LEVEL = 2;
-export const DARK_VEIL_ALPHA = 179;
-export const DARK_VEIL_COOL_CAST_ALPHA = 60;
-
-function paintDimVeil(bitmap: Bitmap): void {
-  paintVeil(bitmap, shade(COOL(0), DIM_VEIL_ALPHA), DIM_VEIL_BAYER_LEVEL, 0);
-}
-
-function paintDarkVeil(bitmap: Bitmap): void {
-  paintVeil(bitmap, shade(neutral(0), DARK_VEIL_ALPHA), 4, 0);
-  paintVeil(bitmap, shade(COOL(1), DARK_VEIL_COOL_CAST_ALPHA), 2, 0);
-}
-
-/** D525 'symbol' glyph: the 7×7 mark at the tile's top-left with a 1-px outline ring. */
-function paintLightGlyph(bitmap: Bitmap, kind: LightGlyphKind): void {
-  const glyph = LIGHT_GLYPHS[kind];
+/** Stamps a one-ink mark with its 1-px outline ring; `origin` is the tile pixel of the mark's top-left. */
+function stampMark(bitmap: Bitmap, mark: PixelMark, origin: { readonly x: number; readonly y: number }): void {
   const stamp = (rows: readonly string[], originX: number, originY: number, ink: Ink): void => {
     rows.forEach((row, y) => {
       Array.from(row).forEach((cell, x) => {
@@ -583,8 +571,35 @@ function paintLightGlyph(bitmap: Bitmap, kind: LightGlyphKind): void {
       });
     });
   };
-  stamp(outlineRows(glyph.rows), LIGHT_GLYPH_ORIGIN - 1, LIGHT_GLYPH_ORIGIN - 1, glyph.outline);
-  stamp(glyph.rows, LIGHT_GLYPH_ORIGIN, LIGHT_GLYPH_ORIGIN, glyph.ink);
+  stamp(outlineRows(mark.rows), origin.x - 1, origin.y - 1, mark.outline);
+  stamp(mark.rows, origin.x, origin.y, mark.ink);
+}
+
+/** D525 light glyph: the 7×7 mark at the tile's top-left with a 1-px outline ring. */
+function paintLightGlyph(bitmap: Bitmap, kind: LightGlyphKind): void {
+  stampMark(bitmap, LIGHT_GLYPHS[kind], { x: LIGHT_GLYPH_ORIGIN, y: LIGHT_GLYPH_ORIGIN });
+}
+
+/**
+ * D525 fog veil under 'full': diagonal hatch lines, one dark pixel where
+ * `x + y` is a multiple of the pitch, so fog reads as hatching while
+ * obscurement keeps its Bayer-dotted veil. The cloud glyph stamps over it.
+ */
+export const FOG_HATCH_PITCH = 6;
+export const FOG_HATCH_ALPHA = 150;
+
+function paintFogHatch(bitmap: Bitmap): void {
+  for (let y = 0; y < TILE_SIZE; y += 1) {
+    for (let x = 0; x < TILE_SIZE; x += 1) {
+      if ((x + y) % FOG_HATCH_PITCH === 0) bitmap.put(x, y, shade(neutral(1), FOG_HATCH_ALPHA));
+    }
+  }
+}
+
+/** D525 cell glyph: the 9×9 mark in its family's corner (and slot) with a 1-px outline ring. */
+function paintCellGlyph(bitmap: Bitmap, kind: CellGlyphKind): void {
+  if (kind === 'fog') paintFogHatch(bitmap);
+  stampMark(bitmap, CELL_GLYPHS[kind], cellGlyphOrigin(kind, TILE_SIZE));
 }
 
 function paintOverlay(bitmap: Bitmap, effect: OverlayEffect): void {
@@ -604,11 +619,14 @@ function paintOverlay(bitmap: Bitmap, effect: OverlayEffect): void {
     case 'light-darkness': paintVeil(bitmap, shade(neutral(0), 175), 4, 4); return;
     case 'blocked': paintBlocked(bitmap); return;
     case 'light-source': paintLightSource(bitmap); return;
-    case 'light-veil-dim': paintDimVeil(bitmap); return;
-    case 'light-veil-dark': paintDarkVeil(bitmap); return;
     case 'light-glyph-bright': paintLightGlyph(bitmap, 'sun'); return;
     case 'light-glyph-dim': paintLightGlyph(bitmap, 'crescent'); return;
     case 'light-glyph-dark': paintLightGlyph(bitmap, 'disc'); return;
+    case 'glyph-door-closed': paintCellGlyph(bitmap, 'door-closed'); return;
+    case 'glyph-door-open': paintCellGlyph(bitmap, 'door-open'); return;
+    case 'glyph-blocked': paintCellGlyph(bitmap, 'blocked'); return;
+    case 'glyph-fog': paintCellGlyph(bitmap, 'fog'); return;
+    case 'glyph-obscured': paintCellGlyph(bitmap, 'obscured'); return;
   }
 }
 

@@ -20,7 +20,7 @@ import type { ControllerIdentity } from '../src/combat/controllers';
 import type { PersistedCoordinatorState } from '../src/combat/coordinator';
 import type { EncounterState } from '../src/combat/encounter';
 import { mulberry32 } from '../src/combat/random';
-import type { LightEncoding } from '../src/assets/light-encoding';
+import type { BoardGlyphMode } from '../src/assets/board-glyphs';
 import {
   encounterBranchId,
   encounterSessionId,
@@ -78,8 +78,8 @@ export interface BoardSnapshotManifest {
   readonly tileSizeCssPx: 64;
   readonly maximumPngBytes: 1_000_000;
   readonly capturePolicy: 'encounter-board-element-settled-v1';
-  /** D525: the light encoding forced through the snapshot page's URL, or null when the art package decided. */
-  readonly lightEncodingOverride: LightEncoding | null;
+  /** D525: the glyph mode forced through the snapshot page's URL, or null when the art package decided. */
+  readonly boardGlyphsOverride: BoardGlyphMode | null;
   readonly coldStartMs: number;
   readonly artifacts: readonly BoardImageArtifact[];
 }
@@ -92,8 +92,8 @@ export interface BoardSnapshotCapture {
 export interface BoardSnapshotServiceOptions {
   readonly outputDirectory: string;
   readonly forbiddenBoardStrings?: readonly string[];
-  /** D525: render every capture under this light encoding; a board that says otherwise is never captured. */
-  readonly lightEncoding?: LightEncoding;
+  /** D525: render every capture under this glyph mode; a board that says otherwise is never captured. */
+  readonly boardGlyphs?: BoardGlyphMode;
 }
 
 function sha256Bytes(value: Uint8Array): string {
@@ -350,7 +350,7 @@ async function assertContainedArtifact(
 export class BoardSnapshotService implements AsyncDisposable {
   readonly #outputDirectory: string;
   readonly #forbiddenBoardStrings: readonly string[];
-  readonly #lightEncoding: LightEncoding | null;
+  readonly #boardGlyphs: BoardGlyphMode | null;
   readonly #server: PreviewServer;
   readonly #context: BrowserContext;
   readonly #page: Page;
@@ -367,7 +367,7 @@ export class BoardSnapshotService implements AsyncDisposable {
   private constructor(input: {
     readonly outputDirectory: string;
     readonly forbiddenBoardStrings: readonly string[];
-    readonly lightEncoding: LightEncoding | null;
+    readonly boardGlyphs: BoardGlyphMode | null;
     readonly server: PreviewServer;
     readonly context: BrowserContext;
     readonly page: Page;
@@ -379,7 +379,7 @@ export class BoardSnapshotService implements AsyncDisposable {
   }) {
     this.#outputDirectory = input.outputDirectory;
     this.#forbiddenBoardStrings = input.forbiddenBoardStrings;
-    this.#lightEncoding = input.lightEncoding;
+    this.#boardGlyphs = input.boardGlyphs;
     this.#server = input.server;
     this.#context = input.context;
     this.#page = input.page;
@@ -419,9 +419,9 @@ export class BoardSnapshotService implements AsyncDisposable {
       });
       const page = context.pages()[0] ?? await context.newPage();
       const origin = `http://127.0.0.1:${String(port)}`;
-      const lightEncoding = options.lightEncoding ?? null;
-      const encodingParameter = lightEncoding === null ? '' : `&lightEncoding=${lightEncoding}`;
-      await page.goto(`${origin}/vtt?encounter=reference&view=dm&boardSnapshot=1&session=board-snapshot-bootstrap${encodingParameter}`);
+      const boardGlyphs = options.boardGlyphs ?? null;
+      const glyphParameter = boardGlyphs === null ? '' : `&boardGlyphs=${boardGlyphs}`;
+      await page.goto(`${origin}/vtt?encounter=reference&view=dm&boardSnapshot=1&session=board-snapshot-bootstrap${glyphParameter}`);
       await page.locator('.dm-save-manager').waitFor({ state: 'visible' });
       const browser = context.browser();
       if (browser === null) throw new Error('Persistent Chromium context has no browser handle.');
@@ -429,7 +429,7 @@ export class BoardSnapshotService implements AsyncDisposable {
       return new BoardSnapshotService({
         outputDirectory,
         forbiddenBoardStrings: [...(options.forbiddenBoardStrings ?? []), SNAPSHOT_CANARY],
-        lightEncoding,
+        boardGlyphs,
         server,
         context,
         page,
@@ -459,8 +459,8 @@ export class BoardSnapshotService implements AsyncDisposable {
     return this.#manifestPath;
   }
 
-  get lightEncoding(): LightEncoding | null {
-    return this.#lightEncoding;
+  get boardGlyphs(): BoardGlyphMode | null {
+    return this.#boardGlyphs;
   }
 
   async capture(input: BoardSnapshotCapture): Promise<BoardImageArtifact> {
@@ -576,9 +576,9 @@ export class BoardSnapshotService implements AsyncDisposable {
           candidate.dataset.sourceRevision === String(expected.revision) &&
           candidate.dataset.sourceRound === String(expected.round) &&
           candidate.dataset.sourceStateDigest === expected.stateDigest &&
-          // D525: a board rendered under another encoding than requested is never captured.
-          (expected.lightEncoding === null || candidate.dataset.lightEncoding === expected.lightEncoding);
-      }, { ...source, lightEncoding: this.#lightEncoding }, { polling: 'raf' }).then(() => {
+          // D525: a board rendered under another glyph mode than requested is never captured.
+          (expected.boardGlyphs === null || candidate.dataset.boardGlyphs === expected.boardGlyphs);
+      }, { ...source, boardGlyphs: this.#boardGlyphs }, { polling: 'raf' }).then(() => {
         this.#page.off('pageerror', onPageError);
         resolveBoard();
       }, (error: unknown) => {
@@ -669,7 +669,7 @@ export class BoardSnapshotService implements AsyncDisposable {
       tileSizeCssPx: TILE_SIZE_CSS_PX,
       maximumPngBytes: MAX_BOARD_PNG_BYTES,
       capturePolicy: 'encounter-board-element-settled-v1',
-      lightEncodingOverride: this.#lightEncoding,
+      boardGlyphsOverride: this.#boardGlyphs,
       coldStartMs: this.#coldStartMs,
       artifacts: [...this.#artifacts],
     };

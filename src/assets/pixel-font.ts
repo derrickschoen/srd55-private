@@ -1,5 +1,5 @@
-import { outlineRows } from './light-glyphs';
 import { paletteHex, type PaletteColorRef } from './palette';
+import { outlineRows } from './pixel-mark';
 
 /**
  * An original 8×8-cell bitmap font (glyphs 5×7, one-column gap). Uppercase,

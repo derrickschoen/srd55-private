@@ -1,5 +1,5 @@
 import type { AssetId } from '../assets/ids';
-import type { LightEncoding } from '../assets/light-encoding';
+import type { BoardGlyphMode } from '../assets/board-glyphs';
 import { tokenAssetFor } from '../assets/token-archetypes';
 import type { EncounterBoardProjectionShape } from './encounter-board';
 import type { EncounterArtPackage } from './encounter-package';
@@ -55,15 +55,15 @@ function genericArt(
 
 /**
  * Select authored art only for its authored encounter; generated rooms get
- * bounds-matched neutral art. A `lightEncoding` override (D525: the snapshot
+ * bounds-matched neutral art. A `boardGlyphs` override (D525: the snapshot
  * page's URL) replaces the package's own; absent, the package decides.
  */
 export function encounterArtForBoard(
   projection: EncounterBoardProjectionShape,
-  lightEncoding?: LightEncoding,
+  boardGlyphs?: BoardGlyphMode,
 ): EncounterArtPackage {
   const art = selectArt(projection);
-  return lightEncoding === undefined ? art : { ...art, lightEncoding };
+  return boardGlyphs === undefined ? art : { ...art, boardGlyphs };
 }
 
 function selectArt(projection: EncounterBoardProjectionShape): EncounterArtPackage {

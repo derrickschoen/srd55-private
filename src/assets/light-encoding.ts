@@ -1,20 +1,16 @@
 /**
- * D525: how a board shows light levels. The probe (D519) showed Luna reading
- * the warm 'tint' on bright cells as shadow, so an art package now names one
- * of three closed encodings and the board says which one it used in
- * `data-light-encoding`. Everything here is pure and structural so the render
- * model, the DM legend and the probe's primer share one source of truth.
+ * D525: the light-level model behind the board's glyphs. The probe (D519)
+ * showed Luna reading the warm tint on bright cells as shadow, and reading a
+ * corner glyph per level well, so the 'light' and 'full' board-glyph modes
+ * (board-glyphs.ts) stamp one of three marks in the top-left corner while
+ * 'none' keeps the pre-D525 tints. Everything here is pure and structural so
+ * the render model, the DM legend and the probe's primer share one source of
+ * truth.
  */
-import { LIGHT_GLYPHS, type LightGlyph, type LightGlyphKind } from './light-glyphs';
-import type { LightGlyphEffect, LightMarkEffect, LightVeilEffect } from './pixel-art';
-
-export const LIGHT_ENCODINGS = ['tint', 'symbol', 'inverse'] as const;
-export type LightEncoding = (typeof LIGHT_ENCODINGS)[number];
-export const DEFAULT_LIGHT_ENCODING: LightEncoding = 'tint';
-
-export function isLightEncoding(value: string): value is LightEncoding {
-  return (LIGHT_ENCODINGS as readonly string[]).includes(value);
-}
+import { drawsLightGlyphs, type BoardGlyphMode } from './board-glyphs';
+import { LIGHT_GLYPHS, type LightGlyphKind } from './light-glyphs';
+import type { LightGlyphEffect } from './pixel-art';
+import type { PixelMark } from './pixel-mark';
 
 /** Ordered: ties in `roomDefaultLight` resolve toward the earlier entry. */
 export const LIGHT_LEVELS = ['bright', 'dim', 'darkness'] as const;
@@ -56,7 +52,7 @@ export function cellLightLevels(
   return levels;
 }
 
-/** The level most cells share; the 'symbol' encoding leaves those cells unmarked. */
+/** The level most cells share; the glyph modes leave those cells unmarked. */
 export function roomDefaultLight(levels: Iterable<LightLevel>): LightLevel {
   const counts: Record<LightLevel, number> = { bright: 0, dim: 0, darkness: 0 };
   for (const level of levels) counts[level] += 1;
@@ -66,11 +62,6 @@ export function roomDefaultLight(levels: Iterable<LightLevel>): LightLevel {
   }
   return best;
 }
-
-export const LIGHT_VEIL_BY_LEVEL: Readonly<Record<Exclude<LightLevel, 'bright'>, LightVeilEffect>> = {
-  dim: 'light-veil-dim',
-  darkness: 'light-veil-dark',
-};
 
 export const LIGHT_GLYPH_BY_LEVEL: Readonly<Record<LightLevel, LightGlyphEffect>> = {
   bright: 'light-glyph-bright',
@@ -84,27 +75,24 @@ export const LIGHT_GLYPH_KIND_BY_LEVEL: Readonly<Record<LightLevel, LightGlyphKi
   darkness: 'disc',
 };
 
-export function lightGlyphForLevel(level: LightLevel): LightGlyph {
+export function lightGlyphForLevel(level: LightLevel): PixelMark {
   return LIGHT_GLYPHS[LIGHT_GLYPH_KIND_BY_LEVEL[level]];
 }
 
 /**
  * The overlay tile a cell shows for its light level, or null for no overlay.
- * 'tint' returns null for every level: its tints ride the existing
+ * 'none' returns null for every level: its tints ride the existing
  * illumination mechanical layers, which is what keeps the default board
- * byte-identical. 'inverse' never overlays bright cells; 'symbol' never
- * overlays the room default so the board is not carpeted with glyphs.
+ * byte-identical. The glyph modes never mark the room default so the board is
+ * not carpeted with glyphs.
  */
 export function lightMarkFor(
-  encoding: LightEncoding,
+  mode: BoardGlyphMode,
   level: LightLevel,
   roomDefault: LightLevel,
-): LightMarkEffect | null {
-  switch (encoding) {
-    case 'tint': return null;
-    case 'inverse': return level === 'bright' ? null : LIGHT_VEIL_BY_LEVEL[level];
-    case 'symbol': return level === roomDefault ? null : LIGHT_GLYPH_BY_LEVEL[level];
-  }
+): LightGlyphEffect | null {
+  if (!drawsLightGlyphs(mode)) return null;
+  return level === roomDefault ? null : LIGHT_GLYPH_BY_LEVEL[level];
 }
 
 export const LIGHT_LEVEL_LABELS: Readonly<Record<LightLevel, string>> = {
