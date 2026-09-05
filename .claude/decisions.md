@@ -11098,3 +11098,14 @@ Codex: tsc 0, command outcomes 0, locked full suite 563/9725, locked build 0, sc
 diff, mutation killed. Mine: scan clean, frozen sha, tsc 0, sg 0, focused 35/35; my mutation ('end_turn'
 exempted from the guard) killed both guard tests. Full landing gate (browser suite) started 14:43; lands on main
 on green. The iso view still draws engine_1x1 (D511) — the iso lane is paused (D531).
+
+D545 — OWNER (2026-09-05 14:50): CONFIRMED (1) a hidden creature's cell is plain floor on the player board (no
+fog patch, no token) and (2) the picture shows only what the engine knows (art-only doors/crates are not drawn).
+ADDITION: when a creature that the players HAVE SEEN becomes hidden or invisible, the player board shows a ghost
+or fog marker at the cell where it was LAST SEEN — a "last known position" fact, which is player knowledge the
+engine can track (not the creature's current cell). Supervisor plan: an engine/projection increment — the player
+view records `lastSeen: {cell, round}` per creature at the moment it leaves the players' perception, the player
+board projects a `last_seen` marker (ghost silhouette glyph + legend entry, in both classic layers and later iso),
+the marker clears when the creature is seen again or is revealed dead; the DM board never shows it (the DM sees
+the creature). Dispatched to codex after footprints inc5 lands (same board/projection files); the AI-DM text
+context gains the same last-seen fact.
