@@ -11010,3 +11010,10 @@ seats that do not earn their place are dropped. BACKLOG: the first-party headles
 diagnostic assets, isolated worker, 2:1 dimetric, palette quantisation last) — not scheduled.
 Supervisor setup: probe increment 5 (codex) in a new worktree dnd-wt-probe5 from claude/light-variant (classic
 round 3 is running in dnd-wt-light; the two merge afterwards); seat-yield ledger tool (codex) in the private repo.
+
+D536 — OWNER (2026-09-05 13:50): the comprehension bar moves to LUNA MEDIUM — every fact class ≥ 0.9 at Luna
+medium effort gates the picture-experiment reruns, and the arena image experiments run at medium. Luna low stays
+measured in every probe run as a research curiosity, not a gate. Supersedes the "at Luna LOW" clause of D525/D526.
+Current standing at medium (classic inc4 run, 24 states): light 0.98 and blocked 0.97 pass; hidden 0.79,
+difficult 0.73, identity 0.70, fog 0.67, side 0.64, HP 0.53, adjacency 0.52, doors 0.47 do not. Classic round 3
+(badges + roster box + one HP vocabulary) is the next candidate; its probe run reports medium first.
