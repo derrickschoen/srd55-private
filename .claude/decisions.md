@@ -11264,3 +11264,7 @@ separate runs (mean 1.6–1.7, zero-offense 1–2, dash 26–29). footprints5:
 seed, same model, same basis: a regression between f7400638 and 7c52da1c,
 i.e. inside the footprints landings (15ef2b24 or 7c52da1c). Bisect at
 15ef2b24 pending.
+
+Correction (mine, 16:11): the two entries above carry estimated clock times
+"16:20" and "16:28" that are wrong; the finding was written at 16:08 and the
+addendum at 16:10 (system clock). Content unchanged.
