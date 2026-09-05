@@ -10245,3 +10245,10 @@ Gain from the picture (on − off), judged WITH images vs judged BLIND to images
 Reading: judges seeing pictures inflated the Luna deltas by 0.1–0.2, but the ordering and most of the size survive
 blind: the picture's benefit for Luna low is real in the second replicate and small-to-nil elsewhere; Sol unchanged.
 Per D521 the standing method is images for BOTH arms (capture_only reruns); these blind numbers stand as the bound.
+
+D522 — OWNER (2026-09-04 20:15): (1) The screenshot is the DEFAULT DM input for every future arm and experiment
+(graph-slice, footprints A/Bs, tactical): arms capture and deliver the picture; byte-identity fixtures move to the
+image-on baseline; text-only arms only when an experiment is about the picture. Applies to briefs from now on
+(graph-slice inc3 in flight keeps its off-mode fixtures AND gains image-on ones at its next increment).
+(2) Iso round D2 starts now on the supervisor's critique, in a sibling worktree (claude/iso-d2 off claude/iso-vtt) so
+codex's read-only review round 2 keeps a stable tree; D2 merges after the review; codex findings get a D3 if needed.
