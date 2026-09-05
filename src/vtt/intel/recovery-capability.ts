@@ -1,6 +1,6 @@
 import { isIncapacitated } from '../../combat/conditions';
-import { combatantConditions, type EncounterState } from '../../combat/encounter';
-import { gridDistance } from '../../combat/grid';
+import { combatantConditions, combatantSpace, type EncounterState } from '../../combat/encounter';
+import { minimumSpaceDistance } from '../../combat/creature-space';
 import { spellDefinition } from '../../combat/spells/definitions';
 import type { SpellManifestId } from '../../combat/spells/manifest';
 import type { CombatantId } from '../../combat/values';
@@ -12,7 +12,7 @@ import {
 } from './contracts';
 
 /** Versioned policy for engine-proved party rescue capability. */
-export const RECOVERY_CAPABILITY_POLICY = intelPolicyVersion('recovery-capability-v1');
+export const RECOVERY_CAPABILITY_POLICY = intelPolicyVersion('recovery-capability-v2');
 
 export type RecoveryKind = 'healing' | 'revival';
 export type RecoveryKnowledgeCode = 'dm_omniscient_party_resources';
@@ -208,7 +208,10 @@ export function recoveryCapabilityBeforeBoundary(
       if (turn.isCurrent && !currentTurnCanCast(state, member.profile.id, time)) continue;
       const range = spellRange(spell.id, source.casterLevel);
       if (range === null) continue;
-      const distance = gridDistance(rescuerToken.position, targetToken.position);
+      const distance = minimumSpaceDistance(
+        combatantSpace(state, member.profile.id),
+        combatantSpace(state, target),
+      );
       const movementFeet = Math.max(0, distance - range);
       const availableMovement = turn.isCurrent
         ? rescuer.turn.movement.remaining

@@ -1,10 +1,8 @@
 import { combatantFaction, combatantsAreAllies } from '../combat/allies';
 import { conditionSpeedPenaltyFeet, exhaustionPenalty, isIncapacitated } from '../combat/conditions';
 import { creatureSizes, type KnownCreatureSize } from '../domain/enums';
-import type {
-  EncounterCombatantState,
-  EncounterState,
-} from '../combat/encounter';
+import type { EncounterCombatantState, EncounterState } from '../combat/encounter';
+import { coverBetweenCombatants, rasterizeInterveningCells } from '../combat/cover';
 import {
   applySizeSteps,
   creatureSpace,
@@ -60,8 +58,6 @@ import {
   environmentLightAt,
   environmentObscurementAt,
   isEnvironmentDifficultTerrain,
-  type CoverTier,
-  type WorldObject,
 } from '../combat/world-objects';
 import { availableEngineActorOptions, resolveEngineActorOption } from './intent-resolver';
 import type {
@@ -333,7 +329,7 @@ function planningAttackRollSources(
   const targetPosition = state.tokens.find((entry) => entry.combatantId === targetId)?.position;
   const distance = actorPosition === undefined || targetPosition === undefined
     ? Number.POSITIVE_INFINITY
-    : gridDistance(actorPosition, targetPosition);
+    : minimumSpaceDistance(queryCombatantSpace(state, actorId), queryCombatantSpace(state, targetId));
   const actor = combatant(state, actorId);
   const piercesVisualIllusion = actor !== null && rulesFor(actor).senses.some((sense) =>
     (sense.kind === 'blindsight' || sense.kind === 'truesight') && distance <= sense.rangeFeet);
@@ -761,55 +757,11 @@ export function monsterBonusActions(
   return executableBonusActions(declaredMonsterBonusActions(state, actorId));
 }
 
-function interveningCells(from: GridCell, to: GridCell): readonly GridCell[] {
-  const columnDelta = to.column - from.column;
-  const rowDelta = to.row - from.row;
-  const steps = Math.max(Math.abs(columnDelta), Math.abs(rowDelta));
-  if (steps <= 1) return [];
-  const cells: GridCell[] = [];
-  const seen = new Set<string>();
-  for (let step = 1; step < steps; step += 1) {
-    const cell = {
-      column: Math.round(from.column + columnDelta * step / steps),
-      row: Math.round(from.row + rowDelta * step / steps),
-    };
-    const key = cellKey(cell);
-    if (!seen.has(key)) {
-      seen.add(key);
-      cells.push(cell);
-    }
-  }
-  return cells;
-}
-
-function objectOccupies(object: WorldObject, cell: GridCell): boolean {
-  return object.footprint.some((candidate) => cellKey(candidate) === cellKey(cell));
-}
-
 function hasLineOfSight(state: EncounterState, from: GridCell, to: GridCell): boolean {
   const blocked = new Set(state.worldObjects
     .flatMap((object) => object.blocking.lineOfSight ? object.footprint : [])
     .map(cellKey));
-  return interveningCells(from, to).every((cell) => !blocked.has(cellKey(cell)));
-}
-
-const COVER_ORDER: Readonly<Record<CoverTier, number>> = {
-  none: 0,
-  half: 1,
-  three_quarters: 2,
-  total: 3,
-};
-
-function coverBetweenObjects(objects: readonly WorldObject[], from: GridCell, to: GridCell): CoverTier {
-  let cover: CoverTier = 'none';
-  for (const cell of interveningCells(from, to)) {
-    for (const object of objects) {
-      if (objectOccupies(object, cell) && COVER_ORDER[object.blocking.cover] > COVER_ORDER[cover]) {
-        cover = object.blocking.cover;
-      }
-    }
-  }
-  return cover;
+  return rasterizeInterveningCells(from, to).every((cell) => !blocked.has(cellKey(cell)));
 }
 
 function effectConditionNames(state: EncounterState, id: CombatantId): ReadonlySet<string> {
@@ -860,7 +812,7 @@ function detect(state: EncounterState, observer: CombatantId, subject: Combatant
   const from = state.tokens.find((token) => token.combatantId === observer)?.position;
   const to = state.tokens.find((token) => token.combatantId === subject)?.position;
   if (observerState === null || combatant(state, subject) === null || from === undefined || to === undefined) return null;
-  const distance = gridDistance(from, to);
+  const distance = minimumSpaceDistance(queryCombatantSpace(state, observer), queryCombatantSpace(state, subject));
   const senses = rulesFor(observerState).senses;
   if (senses.some((sense) => sense.kind === 'blindsight' && distance <= sense.rangeFeet) && hasLineOfSight(state, from, to)) {
     return { kind: 'seen', sense: 'blindsight' };
@@ -1053,7 +1005,10 @@ export function engineActionRegistry(state: EncounterState, revision = state.rev
           start,
           maximumCost: feet(maximumPathCost(state)),
           isGoal: (origin) => {
-            if (maintainRange && gridDistance(origin, targetPosition) <= target.profile.rules.reach) {
+            if (maintainRange && minimumSpaceDistance(
+              queryCombatantSpaceAt(state, combatantId, origin),
+              queryCombatantSpace(state, target.profile.id),
+            ) <= target.profile.rules.reach) {
               return false;
             }
             return reach(state, {
@@ -1122,9 +1077,10 @@ function resolveTarget(
         (right.combatant.hitPoints / right.combatant.profile.rules.hitPointMaximum) ||
       left.combatant.profile.id.localeCompare(right.combatant.profile.id))[0]?.combatant.profile.id ?? null;
   }
-  const anchor = selector.kind === 'enemy_threatening_ally'
-    ? state.tokens.find((token) => token.combatantId === selector.allyId)?.position ?? origin
-    : origin;
+  const distanceOriginId = selector.kind === 'enemy_threatening_ally' &&
+    state.tokens.some((token) => token.combatantId === selector.allyId)
+    ? selector.allyId
+    : actorId;
   const enemies = positionedCandidates(
     state,
     (candidate) => candidate.life !== 'dead' &&
@@ -1141,7 +1097,8 @@ function resolveTarget(
       left.combatant.profile.id.localeCompare(right.combatant.profile.id));
   } else {
     enemies.sort((left, right) =>
-      gridDistance(anchor, left.position) - gridDistance(anchor, right.position) ||
+      minimumSpaceDistance(queryCombatantSpace(state, distanceOriginId), queryCombatantSpace(state, left.combatant.profile.id)) -
+        minimumSpaceDistance(queryCombatantSpace(state, distanceOriginId), queryCombatantSpace(state, right.combatant.profile.id)) ||
       left.combatant.profile.id.localeCompare(right.combatant.profile.id));
   }
   return enemies[0]?.combatant.profile.id ?? null;
@@ -1310,7 +1267,7 @@ export function engineTacticalAttackInput(
     visible: detection?.kind === 'seen',
     reciprocal: reciprocal?.kind === 'seen',
   };
-  const cover = coverBetweenObjects(state.worldObjects, actorPosition, targetPosition);
+  const cover = coverBetweenCombatants(state, actorId, targetId).tier;
   const coverBonus = cover === 'half' ? 2 : cover === 'three_quarters' ? 5 : 0;
   const madeRollDefense = state.effects.filter((effect): effect is PlanningRollDefenseEffect =>
     isPlanningRollDefenseEffect(effect) &&
@@ -1621,7 +1578,7 @@ export function projectedMovementOptions(
     if (target.reciprocalVisibility.kind === 'unknown') {
       return { status: 'unresolved', reason: 'visibility_unresolved' };
     }
-    const cover = coverBetweenObjects(state.worldObjects, position, target.position);
+    const cover = coverBetweenCombatants(state, request.actorId, request.targetId, { sourceAnchor: position }).tier;
     return {
       status: 'resolved',
       input: {
@@ -1898,11 +1855,7 @@ const engineQueryPort: EngineQueryPort = {
     const to = state.tokens.find((token) => token.combatantId === targetId)?.position;
     if (from === undefined || to === undefined) return null;
     return {
-      tier: coverBetweenObjects(state.worldObjects, from, to),
-      sourceIds: state.worldObjects
-        .filter((object) => coverBetweenObjects([object], from, to) !== 'none')
-        .map((object) => String(object.id))
-        .sort(),
+      ...coverBetweenCombatants(state, actorId, targetId),
     };
   },
   visibility(state, actorId, targetId) {

@@ -6,7 +6,6 @@ import {
   type LifeState,
 } from '../combat/encounter';
 import { isIncapacitated } from '../combat/conditions';
-import { gridDistance } from '../combat/grid';
 import { persistentAreaContains } from '../combat/persistent-areas';
 import type { CombatantId } from '../combat/values';
 import { sha256 } from '../crypto/sha256';
@@ -125,10 +124,9 @@ export function evaluateScenarioFact(
     case 'adjacency_is': {
       const subjects = pair(state, atom.left, atom.right, queries);
       if (isEvaluation(subjects)) return subjects;
-      const left = queries.tokenPosition(state, subjects.left);
-      const right = queries.tokenPosition(state, subjects.right);
-      if (left === null || right === null) return failure('TOKEN_UNAVAILABLE');
-      return compared(gridDistance(left, right) <= 5, atom.value);
+      const separation = queries.spaceDistance(state, subjects.left, subjects.right);
+      if (separation === null) return failure('TOKEN_UNAVAILABLE');
+      return compared(separation <= 5, atom.value);
     }
     case 'within_action_reach_is': {
       const subjects = pair(state, atom.actor, atom.target, queries);
@@ -396,12 +394,11 @@ export function extractProposalFactDependencies(
         });
       }
     }
-    const actorPosition = queries.tokenPosition(state, option.actorId);
-    const targetPosition = queries.tokenPosition(state, targetId);
-    if (actorPosition !== null && targetPosition !== null) {
+    const separation = queries.spaceDistance(state, option.actorId, targetId);
+    if (separation !== null) {
       addDependency(entries, option.actorId, {
         kind: 'adjacency_is', left: actorRef, right: targetRef,
-        value: gridDistance(actorPosition, targetPosition) <= 5,
+        value: separation <= 5,
       });
     }
     for (const slot of option.actionSlots) {

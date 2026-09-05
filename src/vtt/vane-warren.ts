@@ -145,7 +145,7 @@ const VANE_WARREN_FIGHTS_BY_ID = {
     name: 'The Last Muster',
     leaderRosterId: 'commander-sablehook',
     standing: [
-      roster('commander-sablehook', 'statblock:hobgoblin-captain', 'Commander Sablehook', 9, 5),
+      roster('commander-sablehook', 'statblock:hobgoblin-captain', 'Commander Sablehook', 11, 5),
     ],
     alarmWaves: [],
     conditionalJoiners: [
@@ -185,11 +185,11 @@ const TPK_INITIAL_REINFORCEMENTS = [
 ] as const;
 
 const TPK_PLAYER_POSITIONS = [
-  { column: 1, row: 3 },
-  { column: 1, row: 4 },
-  { column: 1, row: 5 },
-  { column: 2, row: 4 },
-  { column: 2, row: 5 },
+  { column: 3, row: 1 },
+  { column: 4, row: 0 },
+  { column: 11, row: 1 },
+  { column: 3, row: 8 },
+  { column: 7, row: 8 },
 ] as const;
 
 /** Manually curated completeness oracle; it is not derived from the table. */

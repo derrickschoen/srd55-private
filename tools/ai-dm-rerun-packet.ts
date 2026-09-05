@@ -20,7 +20,7 @@ const safeIntegerSchema = z.number().int()
   .max(Number.MAX_SAFE_INTEGER);
 
 const engineIntelSchema = z.object({
-  policy: z.literal('dm-intel-capture-v1'),
+  policy: z.enum(['dm-intel-capture-v1', 'dm-intel-capture-v2-creature-space']),
   policyVersions: z.object({
     initiative: z.literal(STANDARD_INITIATIVE_POLICY),
   }).passthrough(),

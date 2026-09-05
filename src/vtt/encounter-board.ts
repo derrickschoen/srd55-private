@@ -10,7 +10,7 @@ import { affectedCells, feetPoint, type AreaTemplate } from '../combat/templates
 import { feet, type CombatantId } from '../combat/values';
 import type { EncounterEffectId, ObjectTargetId, PersistentAreaId, WorldObjectId } from '../combat/values';
 import type { WorldObjectBlocking, WorldObjectKind } from '../combat/world-objects';
-import type { DmView } from '../combat/visibility';
+import type { DmView, DmVisibleCombatant, PlayerVisibleCombatant } from '../combat/visibility';
 import type { EncounterArtPackage } from './encounter-package';
 
 type DmEncounterState = DmView['state'];
@@ -21,11 +21,14 @@ export interface EncounterBoardCombatant {
   readonly kind: 'player_character' | 'monster';
   readonly position: { readonly column: number; readonly row: number };
   readonly life?: LifeState;
+  readonly hiddenFromPlayers?: boolean;
 }
+
+type EncounterBoardProjectionCombatant = EncounterBoardCombatant | PlayerVisibleCombatant | DmVisibleCombatant;
 
 export interface EncounterBoardProjectionShape {
   readonly bounds: { readonly columns: number; readonly rows: number };
-  readonly combatants: readonly EncounterBoardCombatant[];
+  readonly combatants: readonly EncounterBoardProjectionCombatant[];
   readonly highlightedCombatant: CombatantId | null;
   readonly adjudicatedTargets: readonly CombatantId[];
   /** Omit this property entirely for player projections. */
@@ -416,12 +419,8 @@ export function projectEncounterBoard(
 ): DmEncounterBoardModel {
   const state = view.state;
   const hidden = new Set(state.hiddenCombatants.map((entry) => entry.combatant));
-  const hiddenCells = state.tokens
-    .filter((entry) => hidden.has(entry.combatantId))
-    .map((entry) => ({ ...entry.position }));
   const positions = new Map(state.tokens.map((token) => [token.combatantId, token.position] as const));
   const combatants = state.combatants.flatMap((subject) => {
-    if (hidden.has(subject.profile.id)) return [];
     const position = positions.get(subject.profile.id);
     return position === undefined ? [] : [{
       id: subject.profile.id,
@@ -429,6 +428,7 @@ export function projectEncounterBoard(
       kind: subject.profile.kind,
       position: { ...position },
       life: subject.life,
+      hiddenFromPlayers: hidden.has(subject.profile.id),
     }];
   });
   const sustainedEffects = projectedSustainedEffects(state, pendingRequest);
@@ -446,9 +446,7 @@ export function projectEncounterBoard(
     highlightedCombatant: state.activeCombatant,
     activeCombatant: state.activeCombatant,
     adjudicatedTargets: [...adjudicatedTargets],
-    foggedCells: [...new Map(
-      [...state.foggedCells, ...hiddenCells].map((cell) => [cellKey(cell), { ...cell }] as const),
-    ).values()],
+    foggedCells: state.foggedCells.map((cell) => ({ ...cell })),
     round: state.round,
     initiative: state.initiative.map((entry) => {
       const subject = state.combatants.find((candidate) => candidate.profile.id === entry.combatant);
@@ -489,6 +487,7 @@ export function encounterBoardRenderModel(
   }
   const combatants = new Map<string, EncounterBoardCombatant[]>();
   for (const combatant of projection.combatants) {
+    if ('placementStatus' in combatant && combatant.placementStatus === 'placement_pending') continue;
     const key = cellKey(combatant.position);
     const occupants = combatants.get(key) ?? [];
     occupants.push(combatant);

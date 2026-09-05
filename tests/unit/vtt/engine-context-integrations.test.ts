@@ -249,7 +249,7 @@ describe('M-core and D420 turn-context rendering', () => {
     const { runtime, context } = contextFor(setup);
 
     expect(context['actor_knowledge']).toEqual({
-      policy: 'actor-knowledge-v1',
+      policy: 'actor-knowledge-v2-creature-space',
       actors: [{
         actor_id: setup.unicorn.id,
         targets: [{
@@ -274,7 +274,7 @@ describe('M-core and D420 turn-context rendering', () => {
 
     const legendary = record(context['legendary_windows'], 'legendary windows');
     expect(legendary).toMatchObject({
-      policy: 'legendary-windows-v1', status: 'resolved', detail_level: 'full',
+      policy: 'legendary-windows-v2', status: 'resolved', detail_level: 'full',
       compact: [
         'legendary', 'Unicorn', 'actions', '3/3', 'resistance', '3/3',
         'next', String(setup.pc.id), 'pending', 'action',
@@ -289,7 +289,7 @@ describe('M-core and D420 turn-context rendering', () => {
     ]);
 
     expect(context['recovery_capabilities']).toEqual({
-      policy: 'recovery-capability-v1',
+      policy: 'recovery-capability-v2',
       targets: [{ target: setup.pc.id, status: 'unresolved', reason: 'party_data_unavailable' }],
     });
     expect(array(context['applicable_skills'], 'applicable skills')).toEqual(expect.arrayContaining([
@@ -416,12 +416,12 @@ describe('M-core and D420 turn-context rendering', () => {
     const bytes = new TextEncoder().encode(JSON.stringify(context)).byteLength;
     expect(context['context_trimmed'], `rendered ${String(bytes)} bytes`).toBe(true);
     expect(bytes).toBeLessThanOrEqual(TURN_CONTEXT_MAX_BYTES);
-    expect(context['actor_knowledge']).toEqual({ policy: 'actor-knowledge-v1', actors: [] });
+    expect(context['actor_knowledge']).toEqual({ policy: 'actor-knowledge-v2-creature-space', actors: [] });
     expect(context['reaction_spend_hold']).toEqual({ policy: 'reaction-spend-hold-v1', windows: [] });
     expect(context['legendary_windows']).toMatchObject({
-      policy: 'legendary-windows-v1', detail_level: 'compact',
+      policy: 'legendary-windows-v2', detail_level: 'compact',
     });
-    expect(context['recovery_capabilities']).toEqual({ policy: 'recovery-capability-v1', targets: [] });
+    expect(context['recovery_capabilities']).toEqual({ policy: 'recovery-capability-v2', targets: [] });
     expect(context['search_memory']).toEqual({ policy: 'search-memory-v1', memories: [] });
     expect(context['alert_state']).toMatchObject({ calls: [], joined: [] });
     expect(context['applicable_skills']).toEqual([]);

@@ -43,14 +43,19 @@ function onlyTarget(state: EncounterState, actor: CombatantProfile): ActorTarget
   return target;
 }
 
-describe('actor-knowledge-v2', () => {
+describe('actor-knowledge-v3', () => {
   it('projects a visible target as perceived with its current position', () => {
     const setup = encounter();
 
     expect(onlyTarget(setup.state, setup.actor)).toEqual({
       kind: 'perceived',
       targetId: setup.target.id,
+      placementStatus: 'placed',
       position: { column: 2, row: 0 },
+      effectiveSize: 'Medium',
+      placementMode: { kind: 'normal', actual: 'Medium' },
+      footprint: [{ column: 2, row: 0 }],
+      distanceFeet: 10,
       conditions: [],
       armorClass: { kind: 'perceived_band', band: 'guarded' },
       hitPoints: { kind: 'perceived_band', band: 'uninjured' },
@@ -85,7 +90,7 @@ describe('actor-knowledge-v2', () => {
     };
 
     const projection = projectActorKnowledge(state, actor.id);
-    expect(projection.policy).toBe('actor-knowledge-v2');
+    expect(projection.policy).toBe('actor-knowledge-v3');
     expect(projection.targets.map((target) => target.kind === 'perceived'
       ? [target.targetId, target.armorClass, target.hitPoints]
       : [target.targetId, target.kind])).toEqual([

@@ -308,7 +308,7 @@ const PRE_EDIT_POLICY_LITERALS = Object.freeze({
   boardSchema: '1',
 });
 
-const INCREMENT_TWO_CHANGED_SURFACES = new Set([
+const PLANNED_CHANGED_SURFACES = new Set([
   'src/combat/encounter.ts',
   'src/combat/world-objects.ts',
   'src/combat/tactical-evaluator.ts',
@@ -319,6 +319,9 @@ const INCREMENT_TWO_CHANGED_SURFACES = new Set([
   'src/vtt/mcp/schemas.ts',
   'src/vtt/mcp/engine-server.ts',
   'src/vtt/engine-state-capsule.ts',
+  'src/vtt/intel/actor-knowledge.ts',
+  'src/vtt/dm-tactical-intel.ts',
+  'src/vtt/renderer-profile.ts',
 ]);
 
 const PRE_EDIT_SOURCE_HASHES = Object.freeze({
@@ -350,7 +353,7 @@ function sha256(path: string): string {
 describe('hand-authored serialized-surface change register', () => {
   it('keeps every unapproved registered implementation surface byte-identical', () => {
     for (const [path, expected] of Object.entries(PRE_EDIT_SOURCE_HASHES)) {
-      if (INCREMENT_TWO_CHANGED_SURFACES.has(path)) {
+      if (PLANNED_CHANGED_SURFACES.has(path)) {
         expect(sha256(path), `${path} must contain its registered Increment 2 change`).not.toBe(expected);
       } else {
         expect(sha256(path), path).toBe(expected);
@@ -374,15 +377,26 @@ describe('hand-authored serialized-surface change register', () => {
       engineCapsuleSchema: /readonly schemaVersion: (\d+);/u.exec(source('src/vtt/engine-state-capsule.ts'))?.[1],
       boardSchema: /VTT_SCHEMA_VERSION = (\d+)/u.exec(source('src/vtt/model.ts'))?.[1],
     };
-    expect(captured).toEqual(PRE_EDIT_POLICY_LITERALS);
+    expect(captured).toEqual({
+      ...PRE_EDIT_POLICY_LITERALS,
+      actorKnowledge: 'actor-knowledge-v3',
+      dmTurn: 'dm-turn-intel-v2-creature-space',
+      dmQuery: 'dm-intel-query-v2-creature-space',
+      dmCapture: 'dm-intel-capture-v2-creature-space',
+      renderer: 'turn-context-renderer-v4-creature-space',
+      engineActorKnowledge: 'actor-knowledge-v2-creature-space',
+    });
   });
 
   it('pins the public combatant summary footprint contract', () => {
     const schemas = source('src/vtt/mcp/schemas.ts');
-    const summary = /const combatantSummary = z\.object\(\{([\s\S]*?)\}\)\.strict\(\);/u.exec(schemas)?.[1];
+    const summary = /const placedCombatantSummary = z\.object\(\{([\s\S]*?)\}\)\.strict\(\);/u.exec(schemas)?.[1];
     expect(summary).toContain('combatant_id: identifier');
     expect(summary).toContain('effective_size');
     expect(summary).toContain('placement_mode');
     expect(summary).toContain('footprint');
+    const pending = /const placementPendingCombatantSummary = z\.object\(\{([\s\S]*?)\}\)\.strict\(\);/u.exec(schemas)?.[1];
+    expect(pending).toContain("placement_status: z.literal('placement_pending')");
+    expect(pending).not.toContain('footprint');
   });
 });

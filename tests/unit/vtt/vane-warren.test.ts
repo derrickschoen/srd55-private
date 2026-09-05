@@ -204,11 +204,11 @@ describe('D377.5 The Vane Warren flagship bundle', () => {
       expect(configured.encounter.tokens
         .filter((token) => String(token.combatantId).startsWith('combatant:vane-player-'))
         .map((token) => token.position)).toEqual([
-          { column: 1, row: 3 },
-          { column: 1, row: 4 },
-          { column: 1, row: 5 },
-          { column: 2, row: 4 },
-          { column: 2, row: 5 },
+          { column: 3, row: 1 },
+          { column: 4, row: 0 },
+          { column: 11, row: 1 },
+          { column: 3, row: 8 },
+          { column: 7, row: 8 },
         ]);
     }
     expect(VANE_WARREN_TPK_SCENARIOS['tpk-clean'].startingReinforcements)

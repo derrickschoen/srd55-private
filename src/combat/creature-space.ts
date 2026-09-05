@@ -148,6 +148,13 @@ export interface SerializedTraversalPlacement<Size extends KnownCreatureSize = K
   readonly mode: SerializedPlacementMode<Size>;
 }
 
+export interface SerializedCreatureSpaceProjection {
+  readonly position: GridCell;
+  readonly effectiveSize: KnownCreatureSize;
+  readonly placementMode: SerializedPlacementMode;
+  readonly footprint: readonly GridCell[];
+}
+
 export type PlacementPurpose =
   | 'encounter_entry'
   | 'movement_transit'
@@ -550,6 +557,27 @@ export function minimumSpaceDistance(
   right: CreatureSpace<KnownCreatureSize>,
 ): Feet {
   return minimumSpaceLine(left, right).distance;
+}
+
+/** Rebuilds and verifies an opaque space at a serialized projection boundary. */
+export function decodeProjectedCreatureSpace(
+  projection: SerializedCreatureSpaceProjection,
+): CreatureSpace<KnownCreatureSize> {
+  const sized = sizedCombatantState(projection.effectiveSize);
+  const space = creatureSpace(sized, placementFromSerialized(sized, {
+    anchor: projection.position,
+    mode: projection.placementMode,
+  }));
+  if (
+    projection.footprint.length !== space.cells.length ||
+    projection.footprint.some((cell, index) => {
+      const expected = space.cells[index];
+      return expected === undefined || !sameGridCell(cell, expected);
+    })
+  ) {
+    throw new TypeError('Projected footprint does not match its effective size, mode, and anchor.');
+  }
+  return space;
 }
 
 export function serializedPlacementMode<Size extends KnownCreatureSize>(

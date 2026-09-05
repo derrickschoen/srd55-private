@@ -3,7 +3,7 @@ import { monsterCombatantProfile } from '../../../src/combat/combatant';
 import { createEncounter, type EncounterState } from '../../../src/combat/encounter';
 import type { MovementEvaluation } from '../../../src/combat/movement-evaluator';
 import { GOBLIN_WARRIOR } from '../../../src/combat/statblocks/monsters';
-import { feet } from '../../../src/combat/values';
+import { armorClass, feet, worldObjectId } from '../../../src/combat/values';
 import {
   canonicalEngineQueryPort,
   projectedMovementOptions,
@@ -106,6 +106,78 @@ function movementDecision(evaluation: MovementEvaluation) {
 }
 
 describe('projected movement options', () => {
+  it('uses the complete Large footprint for blocked tails, hazards, and opportunity annotations', () => {
+    const baseActor = monsterCombatantProfile(GOBLIN_WARRIOR, {
+      combatantId: 'combatant:large-movement-goblin',
+      tokenId: 'token:large-movement-goblin',
+    });
+    const actor = {
+      ...baseActor,
+      rules: { ...baseActor.rules, sizeCategory: 'Large' as const },
+    };
+    const target = playerProfile('large-movement-target');
+    const common = {
+      bounds: { columns: 6, rows: 4 },
+      combatants: [actor, target],
+      tokens: [placedToken(actor, 1, 1), placedToken(target, 0, 1)],
+    };
+    const blocked = createEncounter({ ...common, blockedCells: [{ column: 3, row: 2 }] });
+    const blockedEvaluation = canonicalEngineQueryPort.movementOptions(
+      blocked,
+      actor.id,
+      target.id,
+      'scimitar',
+    );
+    const blockedTail = blockedEvaluation?.candidates.find((candidate) =>
+      candidate.destination.column === 2 && candidate.destination.row === 1);
+    expect(blockedTail?.path).toMatchObject({ status: 'unreachable' });
+
+    const exposedBase = createEncounter({
+      ...common,
+      worldObjects: [{
+        id: worldObjectId('object:large-tail-hazard'),
+        name: 'Tail-cell hazard',
+        kind: 'hazard',
+        position: { column: 3, row: 2 },
+        footprint: [{ column: 3, row: 2 }],
+        durability: { kind: 'indestructible' },
+        armorClass: armorClass(10),
+        damageResponses: [],
+        blocking: { movement: false, lineOfSight: false, cover: 'none' },
+        createdRevision: 0,
+      }],
+    });
+    const exposed: EncounterState = {
+      ...exposedBase,
+      combatants: exposedBase.combatants.map((combatant) =>
+        combatant.profile.id === target.id
+          ? { ...combatant, turn: { ...combatant.turn, reactionAvailable: true } }
+          : combatant),
+    };
+    const exposedEvaluation = canonicalEngineQueryPort.movementOptions(
+      exposed,
+      actor.id,
+      target.id,
+      'scimitar',
+    );
+    const enteredTail = exposedEvaluation?.candidates.find((candidate) =>
+      candidate.destination.column === 2 && candidate.destination.row === 1);
+    expect(enteredTail?.path).toMatchObject({
+      status: 'found',
+      hazardRisk: {
+        status: 'resolved',
+        atRisk: true,
+        annotations: [{ cell: { column: 3, row: 2 }, kinds: ['environmental_hazard'] }],
+      },
+      opportunityAttackRisk: {
+        status: 'resolved',
+        atRisk: true,
+        cells: [{ column: 1, row: 1 }],
+        reactorIds: [target.id],
+      },
+    });
+  });
+
   it('matches the full movement decision when every movement-sensitive fact is observed', () => {
     const setup = encounter('observed_spent');
     const projection = projectActorKnowledge(setup.state, setup.actorId);

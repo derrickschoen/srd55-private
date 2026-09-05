@@ -452,9 +452,9 @@ function happyArguments(name: typeof TOOL_NAMES[number], state: EncounterState, 
 }
 
 describe('engine MCP dual-handshake full surface conformance', () => {
-  it('derives the state-summary proof token from digest, granularity, and the v1 domain separator', () => {
+  it('derives the state-summary proof token from digest, granularity, and the creature-space v2 domain separator', () => {
     expect(engineStateSummaryProofToken('a'.repeat(64), 'turn_minimal')).toBe(
-      '59f83cdc47b641fd55ca7dcda5b0a55839f61f718819fda843fe1e8bf767e114',
+      '41fc4514eeced83505a8815571ce1bc358a8a78d1f8b8bb8ef07b5ae3379672d',
     );
   });
 
@@ -741,6 +741,32 @@ describe('engine MCP dual-handshake full surface conformance', () => {
         summary: {
           ...summary,
           combatants: combatants.map((combatant) => ({ ...record(combatant), footprint: [] })),
+        },
+      };
+      expect(forbiddenAgentKeys(withoutApprovedFootprints)).toEqual([]);
+    } else if (name === 'engine.get_turn_context') {
+      const context = record(value);
+      const actorKnowledge = record(context['actor_knowledge']);
+      const actors = actorKnowledge['actors'];
+      if (!Array.isArray(actors)) throw new TypeError('Turn context omitted actor knowledge.');
+      const withoutApprovedFootprints = {
+        ...context,
+        actor_knowledge: {
+          ...actorKnowledge,
+          actors: actors.map((actor) => {
+            const projectedActor = record(actor);
+            const targets = projectedActor['targets'];
+            if (!Array.isArray(targets)) throw new TypeError('Actor knowledge omitted targets.');
+            return {
+              ...projectedActor,
+              targets: targets.map((target) => {
+                const projectedTarget = record(target);
+                return projectedTarget['placement_status'] === 'placed'
+                  ? { ...projectedTarget, footprint: [] }
+                  : projectedTarget;
+              }),
+            };
+          }),
         },
       };
       expect(forbiddenAgentKeys(withoutApprovedFootprints)).toEqual([]);

@@ -64,7 +64,7 @@ function requireDetails(intel: LegendaryWindowsIntel) {
   return intel.details;
 }
 
-describe('M4 legendary-windows-v1', () => {
+describe('M4 legendary-windows-v2', () => {
   it('reports Unicorn pools, the hand-built post-player window, and tactical verdicts for pending actions', () => {
     const player = playerProfile('legendary-window-player', { initiativeBonus: 20 });
     const setup = startedEncounter(player);

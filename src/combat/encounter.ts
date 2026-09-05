@@ -41,6 +41,16 @@ export {
 } from './combat-rules';
 import { EncounterRuleError } from './encounter-rule-error';
 import {
+  coverBetweenCombatants,
+  coverTierBetweenObjects as coverTierBetweenWorldObjects,
+  rasterizeInterveningCells,
+} from './cover';
+export {
+  coverBetweenCombatants,
+  type CombatantCoverResult,
+  type CreatureCoverOptions,
+} from './cover';
+import {
   FREE_OBJECT_INTERACTIONS_PER_TURN,
   type CombatantEquipment,
   type EquipmentItemDefinition,
@@ -1749,27 +1759,6 @@ function effectDiceModifier(
   }, 0);
 }
 
-function interveningCells(from: GridCell, to: GridCell): readonly GridCell[] {
-  const columnDelta = to.column - from.column;
-  const rowDelta = to.row - from.row;
-  const steps = Math.max(Math.abs(columnDelta), Math.abs(rowDelta));
-  if (steps <= 1) return [];
-  const result: GridCell[] = [];
-  const seen = new Set<string>();
-  for (let step = 1; step < steps; step += 1) {
-    const cell = {
-      column: Math.round(from.column + columnDelta * step / steps),
-      row: Math.round(from.row + rowDelta * step / steps),
-    };
-    const key = cellKey(cell);
-    if (!seen.has(key)) {
-      seen.add(key);
-      result.push(cell);
-    }
-  }
-  return result;
-}
-
 function worldObjectOccupiesCell(object: WorldObject, cell: GridCell): boolean {
   return object.footprint.some((candidate) => cellKey(candidate) === cellKey(cell));
 }
@@ -1797,15 +1786,8 @@ export function hasLineOfSight(
   const blocked = new Set(state.worldObjects
     .flatMap((object) => object.blocking.lineOfSight ? object.footprint : [])
     .map(cellKey));
-  return interveningCells(from, to).every((cell) => !blocked.has(cellKey(cell)));
+  return rasterizeInterveningCells(from, to).every((cell) => !blocked.has(cellKey(cell)));
 }
-
-const COVER_ORDER: Readonly<Record<CoverTier, number>> = {
-  none: 0,
-  half: 1,
-  three_quarters: 2,
-  total: 3,
-};
 
 export function coverTierBetween(
   state: EncounterState,
@@ -1820,16 +1802,7 @@ export function coverTierBetweenObjects(
   from: GridCell,
   to: GridCell,
 ): CoverTier {
-  let cover: CoverTier = 'none';
-  for (const cell of interveningCells(from, to)) {
-    for (const object of objects) {
-      if (
-        worldObjectOccupiesCell(object, cell) &&
-        COVER_ORDER[object.blocking.cover] > COVER_ORDER[cover]
-      ) cover = object.blocking.cover;
-    }
-  }
-  return cover;
+  return coverTierBetweenWorldObjects(objects, from, to);
 }
 
 export type DetectionResult =
@@ -2118,7 +2091,7 @@ function canCombatantPierceVisualIllusion(
   observer: CombatantId,
   subject: CombatantId,
 ): boolean {
-  const distance = gridDistance(token(state, observer).position, token(state, subject).position);
+  const distance = minimumSpaceDistance(combatantSpace(state, observer), combatantSpace(state, subject));
   return effectiveCombatRules(state, observer).senses.some((sense) =>
     (sense.kind === 'blindsight' || sense.kind === 'truesight') && distance <= sense.rangeFeet);
 }
@@ -2147,11 +2120,7 @@ function coverSavingThrowBonus(
     !isCombatantOnBoard(state, source) ||
     !isCombatantOnBoard(state, target)
   ) return 0;
-  return coverDefenseBonus(coverTierBetween(
-    state,
-    token(state, source).position,
-    token(state, target).position,
-  ));
+  return coverDefenseBonus(coverBetweenCombatants(state, source, target).tier);
 }
 
 function coverAdjustedArmorClass(
@@ -2159,11 +2128,7 @@ function coverAdjustedArmorClass(
   attacker: CombatantId,
   target: CombatantId,
 ): ReturnType<typeof armorClass> {
-  const tier = coverTierBetween(
-    state,
-    token(state, attacker).position,
-    token(state, target).position,
-  );
+  const tier = coverBetweenCombatants(state, attacker, target).tier;
   return armorClass(effectiveArmorClass(state, target, attacker) + coverDefenseBonus(tier));
 }
 
@@ -2393,11 +2358,7 @@ export function evaluateMonsterTacticalAttack(
     }),
   ];
   const conditionalDamage = action.damage.some((term) => term.trigger.kind !== 'always');
-  const targetCover = coverTierBetween(
-    state,
-    token(state, actor).position,
-    token(state, target).position,
-  );
+  const targetCover = coverBetweenCombatants(state, actor, target).tier;
   const unresolvedReasons: TacticalUnresolvedReason[] = [
     ...(conditionalDamage ? ['conditional_damage_rider_unresolved' as const] : []),
     ...(targetCover === 'total' ? ['target_has_total_cover' as const] : []),
@@ -4446,11 +4407,7 @@ function processHide(
     obscurement === 'heavy' || obscurement === 'magical_darkness' ||
     environmentLightAt(context.state.environment, actorCell) === 'darkness';
   const behindCover = enemies.length > 0 && enemies.every((enemy) => {
-    const cover = coverTierBetween(
-      context.state,
-      token(context.state, enemy.profile.id).position,
-      actorCell,
-    );
+    const cover = coverBetweenCombatants(context.state, enemy.profile.id, actor).tier;
     return cover === 'three_quarters' || cover === 'total';
   });
   const validPosition = context.state.rulesEdition === '2014'
@@ -6859,7 +6816,7 @@ function processAttack(
   if (
     opportunityTrigger === null &&
     (!hasLineOfSight(context.state, actorPosition, targetPosition) ||
-      coverTierBetween(context.state, actorPosition, targetPosition) === 'total')
+      coverBetweenCombatants(context.state, command.actor, command.target).tier === 'total')
   ) {
     throw new EncounterRuleError('validation', 'The target has Total Cover or is outside line of sight.');
   }
@@ -8202,7 +8159,7 @@ function rollSpellAttack(
   const targetPosition = token(context.state, target).position;
   if (
     !hasLineOfSight(context.state, actorPosition, targetPosition) ||
-    coverTierBetween(context.state, actorPosition, targetPosition) === 'total'
+    coverBetweenCombatants(context.state, command.actor, target).tier === 'total'
   ) throw new EncounterRuleError('validation', 'The spell target has Total Cover or is outside line of sight.');
   const rollModeEffects = context.state.effects.filter((effect) => {
     if (effect.payload.kind === 'faerie_fire') return effect.targets.includes(target);

@@ -354,8 +354,33 @@ describe('event-sourced encounter persistence', () => {
     ]);
     expect(projectPlayerView(migratedEncounterState, {
       seatId: 'seat:migrated-fighter', combatantId: combatantId('combatant:fighter'),
-    }).combatants).toEqual([]);
-    expect(dmVisibleEncounter(projectDmView(migratedEncounterState)).combatants).toEqual([]);
+    }).combatants).toEqual([{
+      id: 'combatant:fighter',
+      name: 'Reference Fighter',
+      kind: 'player_character',
+      life: 'living',
+      active: false,
+      formName: null,
+      placementStatus: 'placement_pending',
+      pendingReason: 'legacy_size_required',
+    }]);
+    expect(dmVisibleEncounter(projectDmView(migratedEncounterState)).combatants.map((combatant) => ({
+      id: combatant.id,
+      name: combatant.name,
+      kind: combatant.kind,
+      life: combatant.life,
+      active: combatant.active,
+      formName: combatant.formName,
+      placementStatus: combatant.placementStatus,
+      pendingReason: combatant.placementStatus === 'placement_pending'
+        ? combatant.pendingReason
+        : null,
+    }))).toEqual([
+      { id: 'combatant:fighter', name: 'Reference Fighter', kind: 'player_character', life: 'living', active: false, formName: null, placementStatus: 'placement_pending', pendingReason: 'legacy_size_required' },
+      { id: 'combatant:cleric', name: 'Reference Cleric', kind: 'player_character', life: 'living', active: false, formName: null, placementStatus: 'placement_pending', pendingReason: 'legacy_size_required' },
+      { id: 'combatant:wizard', name: 'Reference Wizard', kind: 'player_character', life: 'living', active: false, formName: null, placementStatus: 'placement_pending', pendingReason: 'legacy_size_required' },
+      { id: 'combatant:training-brute', name: 'Training Brute', kind: 'monster', life: 'living', active: false, formName: null, placementStatus: 'placement_pending', pendingReason: 'legacy_size_required' },
+    ]);
     expect(exportSavedSession(store, importedId)).not.toContain('codexSessionId');
   });
 

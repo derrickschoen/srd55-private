@@ -260,10 +260,9 @@ function positionFits(
   const anchor = movement.engagement.anchor;
   if (movement.engagement.stance === 'maintain_range' && anchor !== undefined && anchor !== null) {
     const anchorId = resolveSelector(state, actorId, anchor, queries);
-    const anchorPosition = anchorId === null ? null : queries.tokenPosition(state, anchorId);
     const anchorReach = anchorId === null ? null : queries.combatant(state, anchorId)?.profile.rules.reach;
-    if (anchorPosition === null || anchorReach === null || anchorReach === undefined ||
-      gridDistance(position, anchorPosition) <= anchorReach) return false;
+    const separation = anchorId === null ? null : queries.spaceDistance(state, actorId, anchorId, position);
+    if (separation === null || anchorReach === null || anchorReach === undefined || separation <= anchorReach) return false;
   }
   return true;
 }

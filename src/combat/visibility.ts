@@ -105,17 +105,36 @@ export class UnknownPlayerSeatCombatantError extends Error {
   }
 }
 
-export interface PlayerVisibleCombatant {
+interface PlayerVisibleCombatantIdentity {
   readonly id: CombatantId;
   readonly name: string;
   readonly kind: 'player_character' | 'monster';
   readonly life: LifeState;
+  readonly active: boolean;
+  readonly formName: string | null;
+}
+
+export interface PlayerVisiblePlacedCombatant extends PlayerVisibleCombatantIdentity {
+  readonly placementStatus: 'placed';
   readonly position: GridCell;
   readonly effectiveSize: KnownCreatureSize;
   readonly placementMode: SerializedPlacementMode;
   readonly footprint: readonly [GridCell, ...GridCell[]];
-  readonly active: boolean;
-  readonly formName: string | null;
+}
+
+export interface PlayerVisiblePlacementPendingCombatant extends PlayerVisibleCombatantIdentity {
+  readonly placementStatus: 'placement_pending';
+  readonly pendingReason: 'legacy_size_required';
+}
+
+export type PlayerVisibleCombatant =
+  | PlayerVisiblePlacedCombatant
+  | PlayerVisiblePlacementPendingCombatant;
+
+export function isPlacedVisibleCombatant<Combatant extends PlayerVisibleCombatant>(
+  combatant: Combatant,
+): combatant is Extract<Combatant, { readonly placementStatus: 'placed' }> {
+  return combatant.placementStatus === 'placed';
 }
 
 export interface PlayerOwnedCombatant {
@@ -126,13 +145,18 @@ export interface PlayerOwnedCombatant {
   readonly wildShapeUses: EncounterCombatantState['wildShapeUses'];
 }
 
-export interface DmVisibleCombatant extends PlayerVisibleCombatant {
+interface DmVisibleCombatantDetails {
   readonly hitPoints: number;
   readonly rules: CombatRulesProfile;
   readonly deathSaves: DeathSaveState | null;
   readonly turn: TurnResources;
   readonly spellSlots: readonly SpellSlotState[];
+  readonly hiddenFromPlayers: boolean;
 }
+
+export type DmVisiblePlacedCombatant = PlayerVisiblePlacedCombatant & DmVisibleCombatantDetails;
+export type DmVisiblePlacementPendingCombatant = PlayerVisiblePlacementPendingCombatant & DmVisibleCombatantDetails;
+export type DmVisibleCombatant = DmVisiblePlacedCombatant | DmVisiblePlacementPendingCombatant;
 
 type DeathSaveResolvedEvent = Extract<EncounterEvent, { readonly type: 'death_save_resolved' }>;
 type AttackResolvedEvent = Extract<EncounterEvent, { readonly type: 'attack_resolved' }>;
@@ -481,21 +505,36 @@ export function projectPlayerView(state: EncounterState, binding: PlayerSeatBind
   const tokensByCombatant = new Map(state.tokens.map((token) => [token.combatantId, token] as const));
   const fog = new Set(state.foggedCells.map(cellKey));
   const hidden = new Set(state.hiddenCombatants.map((entry) => entry.combatant));
-  const hiddenCells = new Set(state.tokens
-    .filter((entry) => hidden.has(entry.combatantId))
-    .flatMap((entry) => combatantSpace(state, entry.combatantId).cells.map(cellKey)));
-  const concealed = new Set([...fog, ...hiddenCells]);
+  // Hidden creature geometry is never read into a player-safe projection.
+  const concealed = new Set(fog);
   const combatants = state.combatants.flatMap((subject): readonly PlayerVisibleCombatant[] => {
+    const pending = state.adjudicationPending.find((entry) =>
+      entry.kind === 'legacy_size_required' && entry.combatant === subject.profile.id);
+    if (pending !== undefined) {
+      if (!ownedIds.has(subject.profile.id)) return [];
+      return [{
+        id: subject.profile.id,
+        name: subject.profile.name,
+        kind: combatantSide(state, subject.profile.id),
+        life: subject.life,
+        placementStatus: 'placement_pending',
+        pendingReason: 'legacy_size_required',
+        active: state.activeCombatant === subject.profile.id,
+        formName: subject.wildShape?.formName ?? subject.form?.formName ?? null,
+      }];
+    }
     const token = tokensByCombatant.get(subject.profile.id);
     if (token === undefined) return [];
     const owned = ownedIds.has(subject.profile.id);
-    if (hidden.has(subject.profile.id) || (!owned && (fog.has(cellKey(token.position)) || !canCombatantSee(state, binding.combatantId, subject.profile.id)))) return [];
+    if (hidden.has(subject.profile.id) || (!owned && !canCombatantSee(state, binding.combatantId, subject.profile.id))) return [];
     const space = combatantSpace(state, subject.profile.id);
+    if (!owned && space.cells.every((cell) => fog.has(cellKey(cell)))) return [];
     return [{
       id: subject.profile.id,
       name: subject.profile.name,
       kind: combatantSide(state, subject.profile.id),
       life: subject.life,
+      placementStatus: 'placed',
       position: { ...token.position },
       effectiveSize: effectiveCreatureSize(state, subject.profile.id),
       placementMode: structuredClone(token.placementMode),
@@ -554,6 +593,26 @@ export function dmVisibleEncounter(view: DmView): DmVisibleEncounterState {
     worldObjects: structuredClone(state.worldObjects),
     environment: structuredClone(state.environment),
     combatants: state.combatants.flatMap((subject): readonly DmVisibleCombatant[] => {
+      const pending = state.adjudicationPending.find((entry) =>
+        entry.kind === 'legacy_size_required' && entry.combatant === subject.profile.id);
+      if (pending !== undefined) {
+        return [{
+          id: subject.profile.id,
+          name: subject.profile.name,
+          kind: combatantSide(state, subject.profile.id),
+          hitPoints: subject.hitPoints,
+          life: subject.life,
+          placementStatus: 'placement_pending',
+          pendingReason: 'legacy_size_required',
+          active: state.activeCombatant === subject.profile.id,
+          formName: subject.wildShape?.formName ?? subject.form?.formName ?? null,
+          rules: structuredClone(effectiveCombatRules(state, subject.profile.id)),
+          deathSaves: structuredClone(subject.deathSaves),
+          turn: structuredClone(subject.turn),
+          spellSlots: structuredClone(subject.spellSlots),
+          hiddenFromPlayers: state.hiddenCombatants.some((entry) => entry.combatant === subject.profile.id),
+        }];
+      }
       const token = tokensByCombatant.get(subject.profile.id);
       if (token === undefined) return [];
       const space = combatantSpace(state, subject.profile.id);
@@ -563,6 +622,7 @@ export function dmVisibleEncounter(view: DmView): DmVisibleEncounterState {
         kind: combatantSide(state, subject.profile.id),
         hitPoints: subject.hitPoints,
         life: subject.life,
+        placementStatus: 'placed',
         position: { ...token.position },
         effectiveSize: effectiveCreatureSize(state, subject.profile.id),
         placementMode: structuredClone(token.placementMode),
@@ -573,6 +633,7 @@ export function dmVisibleEncounter(view: DmView): DmVisibleEncounterState {
         deathSaves: structuredClone(subject.deathSaves),
         turn: structuredClone(subject.turn),
         spellSlots: structuredClone(subject.spellSlots),
+        hiddenFromPlayers: state.hiddenCombatants.some((entry) => entry.combatant === subject.profile.id),
       }];
     }),
     sharedSpaceRelations: structuredClone(state.sharedSpaceRelations),

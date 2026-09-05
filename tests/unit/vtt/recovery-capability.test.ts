@@ -128,7 +128,7 @@ function targetStart(state: EncounterState, target: LoadedPartyMember): Timeline
   return { round: 1, combatant: target.profile.id, boundary: 'start' };
 }
 
-describe('recovery-capability-v1', () => {
+describe('recovery-capability-v2', () => {
   it('proves an in-range loaded healer with a remaining slot before the dying target turn', () => {
     const members = loadedParty(['healing-word']);
     const target = members[1];

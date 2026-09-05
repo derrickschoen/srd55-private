@@ -1,6 +1,7 @@
 import { combatToken, type CombatantProfile, type CombatToken } from '../combat/combatant';
 import type { LegalActionSummary } from '../combat/controllers';
-import type { EncounterState } from '../combat/encounter';
+import { combatantSpace, type EncounterState } from '../combat/encounter';
+import { minimumSpaceDistance } from '../combat/creature-space';
 import type { EncounterCommand } from '../combat/events';
 import { gridDistance, isCellInside, type GridCell } from '../combat/grid';
 import { feetPoint, previewAffectedCells } from '../combat/templates';
@@ -259,7 +260,7 @@ export function referenceTurnLegalActions(
     if (actor === REFERENCE_MONSTER_ID) {
       actions.push({ type: 'hide', actor });
     } else {
-      if (gridDistance(position(state, actor), position(state, REFERENCE_MONSTER_ID)) <= 5) {
+      if (minimumSpaceDistance(combatantSpace(state, actor), combatantSpace(state, REFERENCE_MONSTER_ID)) <= 5) {
         actions.push(weaponAttack(actor, REFERENCE_MONSTER_ID));
       }
       actions.push(
@@ -283,7 +284,7 @@ export function referenceReactionLegalActions(
   if (
     reactor !== REFERENCE_FIGHTER_ID ||
     mover !== REFERENCE_MONSTER_ID ||
-    gridDistance(position(state, reactor), position(state, mover)) > 5
+    minimumSpaceDistance(combatantSpace(state, reactor), combatantSpace(state, mover)) > 5
   ) {
     return [];
   }

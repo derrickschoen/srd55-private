@@ -77,6 +77,7 @@ function projectedActor(input: {
     hitPointMaximum: input.hitPoints,
     speedFeet: 30,
     reachFeet: 5,
+    placementStatus: 'placed',
     position: input.position,
     effectiveSize: 'Medium',
     placementMode: { kind: 'normal', actual: 'Medium' },

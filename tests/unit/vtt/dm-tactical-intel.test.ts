@@ -58,10 +58,16 @@ describe('versioned DM tactical intel', () => {
 
     const scout = capsule.projection.combatants.find((actor) => actor.id === SCOUT);
     const fighter = capsule.projection.combatants.find((actor) => actor.id === FIGHTER);
-    if (scout === undefined || fighter === undefined) throw new Error('Frozen R02 tokens are absent.');
-    const nearestDistance = Math.min(...capsule.projection.combatants
-      .filter((target) => target.side === 'player_character' && target.life !== 'dead')
-      .map((target) => gridDistance(scout.position, target.position)));
+    if (scout?.placementStatus !== 'placed' || fighter?.placementStatus !== 'placed') {
+      throw new Error('Frozen R02 tokens are absent.');
+    }
+    const playerDistances: number[] = [];
+    for (const target of capsule.projection.combatants) {
+      if (target.placementStatus === 'placed' && target.side === 'player_character' && target.life !== 'dead') {
+        playerDistances.push(gridDistance(scout.position, target.position));
+      }
+    }
+    const nearestDistance = Math.min(...playerDistances);
     expect(gridDistance(scout.position, fighter.position)).toBe(90);
     expect(nearestDistance).toBe(85);
 
