@@ -11538,3 +11538,17 @@ the ComfyUI GGUF loader, or the official quantized release if one exists) and Kr
 verified and recorded before download; if it is non-commercial, the weights may still be used locally for
 REFERENCE images only (they never ship, D558) and the licence text hash goes into models/LICENSES.md; anything that
 forbids even local generation is refused and reported. SD 1.5 is no longer downloaded unless both fail.
+
+## CLASSIC ROUND 5 committed e5afcb98; round 5b amendment queued behind the probe's dist build (2026-09-05 18:54)
+
+Codex: 128 px native redraw of all 87 assets (pixel-art.ts 1042→394 lines, but dense multi-statement lines),
+technique suite of 10 validators shown failing on the old art (6 failures pasted), contact sheets ×3, primer v8,
+claims locked 560/9,714, specs 4/4 on 4660, build clean, mutation upscaled_old_art killed. Mine: forbidden scan
+clean, tsc 0, sg 0, focused 13 files / 121 tests; captures viewed — floors, walls, doors and busts read as one lit
+set, a clear step up from the 64 px art, still simple; badges now draw as hollow square brackets around the numeral.
+MY MUTATION SURVIVED: flipping shadedHead's shadow/highlight sides for every bust leaves all 10 technique tests
+green — the light-direction invariant does not cover creature art. Also found: paintRecipe's material response is
+a no-op (`void MATERIAL_RESPONSES[...]`), so rule 2(a) is typed but not drawn. Both go to round 5b with the
+round-4 panel majors, the terrain/blocked probe regressions, and a readability reformat with a byte-identical hash
+proof. Round-5 probe (primer v8, 24 states, medium+low) launched on the committed tree; the two specs run under my
+own lock slot after 5b.
