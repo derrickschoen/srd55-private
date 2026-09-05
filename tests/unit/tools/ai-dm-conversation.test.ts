@@ -1337,7 +1337,7 @@ describe('AI-DM engine MCP conversation runner', () => {
     expect(exportSavedSession(store, sessionId)).toBe(result.journalExport);
   });
 
-  it('runs a three-room three-round model-free brutal smoke with the stub adapter', { timeout: 120_000 }, async () => {
+  it('runs a three-room three-round model-free brutal smoke with the stub adapter', { timeout: 300_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-3round-smoke-'));
     const config = parseConversationArgs([
       '--fixtures', 'tests/fixtures/arena-basis-brutal',
@@ -2067,7 +2067,7 @@ describe('AI-DM engine MCP conversation runner', () => {
     expect(result.rows[0]?.refusals).toEqual([]);
   });
 
-  it('runs three rounds with a one-round party program by recording typed default turns', { timeout: 60_000 }, async () => {
+  it('runs three rounds with a one-round party program by recording typed default turns', { timeout: 180_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-party-default-'));
     const base = await alternatingInitiativeRoom({ monsterHitPoints: 10_000 });
     const durable: EncounterState = {

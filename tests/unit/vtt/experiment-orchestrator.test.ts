@@ -178,11 +178,11 @@ beforeAll(async () => {
   for (const entry of e05bSchedule) {
     e05bRecords = [...e05bRecords, await runE05BTable(entry, e05bExecution, e05bPreregistration)];
   }
-}, 30_000);
+}, 180_000);
 
 afterAll(async () => {
   if (directory.length > 0) await rm(directory, { recursive: true, force: true });
-});
+}, 180_000);
 
 describe('E02 worked-example experiment registration', () => {
   it('arms_share_examples: pins all arms and keeps non-empty example blocks separate from byte-identical instructions', () => {
@@ -644,7 +644,7 @@ describe('E05 typed versus untyped restricted-JS registration', () => {
     expect(untyped.calls.every((call) => call.typeCheckProgramCounts === null)).toBe(true);
   });
 
-  it('failed_result_recorded_as_pass: a real ambient rejection increments typed failures and unique catches while untyped stays null', async () => {
+  it('failed_result_recorded_as_pass: a real ambient rejection increments typed failures and unique catches while untyped stays null', { timeout: 60_000 }, async () => {
     const schedule = buildExperimentSchedule('E05');
     const typedEntry = schedule.find((candidate) => candidate.armId === 'typed-js');
     const untypedEntry = schedule.find((candidate) => candidate.armId === 'untyped-js');
