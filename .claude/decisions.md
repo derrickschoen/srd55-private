@@ -11112,3 +11112,10 @@ context gains the same last-seen fact.
 
 D546 — OWNER (2026-09-05 14:52): no human playtest yet — keep going on AI judging until the feature set is
 complete.
+
+D547 — OWNER (2026-09-05 14:55): the generated art ships under the MOST PERMISSIVE art licence (CC0 1.0, public
+domain dedication); all code that is ours ships under MIT. SRD content keeps its own CC-BY 4.0 attribution
+(unchanged). Supervisor: a codex unit adds/aligns the licence files (MIT for our code, CC0 for public/assets/art
+and every generator output, an art-provenance statement describing code-generated art from clean-room principles
+with no third-party assets), the bundled licence texts in dist, and the dist-clean check; nothing from the private
+research repo is referenced by name.
