@@ -11399,3 +11399,7 @@ private conditions leaked to players) is now killed by two tests (visibility.tes
 non-owners…", accessible-board.test "redacts private non-owned conditions from player HTML while the DM HTML names
 them"); tsc 0, sg 0, focused 66/66, forbidden scan clean. Its two browser specs (port 4680) and my full suite are
 queued under the lock. Mini-A/B rep3 launched at load 3.3 to settle rooms 5 and 9.
+
+Correction (mine, 17:22): the entry above is stamped "17:24"; the clock read 17:21 when it was written. I said
+I would stop estimating and did it again; from this line every entry stamp is produced by the clock in the write
+command itself, not typed.
