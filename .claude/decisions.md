@@ -10482,3 +10482,9 @@ roles are a second hand-maintained table (a new standing kind silently becomes a
 through opaque obstacles that visually cover a token; translucent walls skip the mood-darkness pass. Per the recorded
 rule the iso lane now HOLDS with no further units until the owner answers the round-7 question (land behind ?view=iso
 with known issues, or continue). Eight rounds, eight classes.
+
+LANDED ON BRANCHES (2026-09-05 05:25): footprints inc3 8bdc7ba8 (my gate 552/9644; my mutation: dead creatures
+granting cover fails the creature-cover test); probe inc3 4a46ac16 (my gate; name-normalization mutant killed);
+iso D8 df96ce63 (lane now paused per the round-8 hold). The first 24-state probe on the full glyph vocabulary
+started 05:22 (Luna low + medium). Footprints increment 4 dispatched (plan round 3, D513/D514 rulings, the plan's
+"Before Increment 4" recommendations as defaults).
