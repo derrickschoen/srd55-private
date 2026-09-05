@@ -10931,3 +10931,12 @@ is an intermediate round: three seats.
 D532 AMENDMENT — OWNER (2026-09-05 13:10): intermediate review panels are FOUR seats: Fable, Opus (medium), codex
 sol HIGH, plus a second codex sol seat at MEDIUM effort taking a different perspective from the first codex seat.
 Perspectives still rotate across a branch's rounds so all five are covered.
+
+D533 — OWNER (2026-09-05 13:15): classic UI — every token gets a COLOUR and a NUMBER on the board, and a legend box
+lists the full name matched by that colour and number. Supervisor reading for round 3 (amended in flight): the
+in-cell name plate is replaced by a badge on the token — a unique colour per creature (a closed palette of
+distinguishable hues, not the side colours) and a pixel-font number at 2× on a disc of that colour, plus a ring of
+the same colour around the bust; a ROSTER legend box (part of the chrome, never over cells) lists each creature as
+"<number> <colour swatch> FULL NAME — PARTY|FOE — HP band", ordered by number; numbers are stable for the
+encounter (assigned in roster order at capture). Primer v6 describes the convention. The probe keeps scoring by full
+name (read from the roster box) and cell. Objects keep the OBJECT rail with coordinates.
