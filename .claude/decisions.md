@@ -11061,3 +11061,11 @@ roster read clearly; several badge hues on the arena capture are close greens (a
 the seats). Four-seat intermediate panel dispatched (Fable machine-readability, Opus-medium ui-readability, sol-high
 pixel-craft, sol-medium art-direction). The 24-state probe on this round started 14:20 (medium first per D536, low
 as research); D541 confirmation seeds follow for classes within 0.05 of the bar.
+
+D544 — OWNER (2026-09-05 14:30): RAISE THE TIMEOUTS on the known load-flaky tests (an explicit exception to the
+"never raise a timeout" rule, limited to the named tests and recorded here), and have codex build a gate runner
+that reruns the failures at the end SERIALLY under the gate lock, so a load-induced failure gets one quiet retry
+and is reported as a load flake rather than voiding the run. Known flakes: ai-dm-conversation "three rounds",
+experiment-orchestrator "failed_result_recorded_as_pass" (5 s), the arena three-room smoke (120 s), the
+brutal-basis byte-cap timing test, iso pixel-art atlas build (1.5 s wall clock), acceptance-walkthrough click
+(50 s, Playwright). Lanes stay parallel; the four voided runs today cost ~30 min of lock time.
