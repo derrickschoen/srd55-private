@@ -10600,3 +10600,22 @@ cell as the creature's cell. Objects with labels (Runed Brazier) were listed as 
 dispatched to codex: scope prefix removed from display names, plate-tag words stripped before name comparison,
 plates anchored to the token cell with a visible stem, object labels styled unlike creature plates, `--rescore`
 for saved runs (labelled estimate). The 24-state run is VOID as a measurement; rerun after inc4.
+
+FOOTPRINTS INC4 (2026-09-05 08:30): committed 3b6d9cd2 on claude/footprints. My full gate on the pre-merge branch
+(base ea920d5c): tsc 0, sg 0, vitest 553/9651, Playwright 179/182. The three browser failures are not inc4's:
+acceptance-walkthrough timed out at 50 s under load 12 and passes alone (20.5 s); player-build-and-share and
+vane-warren-entry fail identically (#148/#164, "heading not found") on pre-browser-fix main
+(gate-multiclass-spells-static.log) — the dead /vtt route fixed by ff74e847, which this branch's base predates.
+My mutation (awaiting_placement guard admits 'adjudicate') SURVIVED the focused footprint tests: the guard is
+exercised with one command type only. Carried into increment 5 as a coverage requirement (property over the command
+union). Merging main into the branch conflicts in six files / 18 hunks (encounter-app, encounter-board, mcp
+schemas, vtt-encounter spec, interactive-dom fixture, detection-ui test) — the board-merge landing rewrote the
+classic board. Codex dispatched to resolve the merge in the worktree (both sides in full; supervisor commits);
+the landing gate follows on the merged branch.
+
+FINDINGS AGAINST MY OWN WORK (2026-09-05 08:26, two): (1) `git add -A src tests docs` missed inc4's compile fix
+in tools/assets/generate-starter-art.ts; amended into 3b6d9cd2. (2) Twice in four minutes I started the footprints
+landing gate on a tree that was not what I meant to gate — first on the unmerged branch (merge refused on the
+unstaged tools file), then on the conflicted tree, because `git merge … | tail -2` masked the merge's exit status
+inside an `&&` chain. Both gates killed within a minute; no numbers were read from them. Rule: a merge gets its
+own command with its own exit check; a gate starts only after `git status --short` is empty.
