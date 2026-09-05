@@ -8,6 +8,7 @@ export class InteractiveTestElement {
     toggle: (token: string, force?: boolean) => boolean;
   };
   readonly dataset: Record<string, string>;
+  readonly style: { setProperty: (name: string, value: string) => void };
   className = '';
   textContent: string | null = null;
   innerHTML = '';
@@ -64,6 +65,9 @@ export class InteractiveTestElement {
         },
       },
     );
+    this.style = {
+      setProperty: (name, value) => this.setAttribute('style', `${name}: ${value}`),
+    };
   }
 
   setAttribute(name: string, value: string): void {
@@ -275,6 +279,10 @@ class InteractiveTestDocument {
   }
 
   createElement(tagName: string): InteractiveTestElement {
+    return new InteractiveTestElement(tagName, this);
+  }
+
+  createElementNS(_namespace: string, tagName: string): InteractiveTestElement {
     return new InteractiveTestElement(tagName, this);
   }
 

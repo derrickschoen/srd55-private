@@ -7,6 +7,7 @@ import {
   MOVEMENT_PATH_DANGER_KINDS,
   REACTION_KINDS,
   type EncounterPhase,
+  type MovementPathDangerKind,
   type PendingDecision,
 } from '../combat/encounter';
 import { HIDDEN_ROLL_CATEGORIES, type HiddenRollCategory } from '../combat/roll-visibility';
@@ -62,6 +63,7 @@ import {
 import { reconcileStableRenderedChildren, stableRenderKey } from './stable-dom-render';
 import type { HumanEngineActorOptions } from './encounter-board-projection';
 import type { EngineActivationChoiceSlot } from './turn-proposal';
+import type { OfferedOptionPath } from './offered-option-paths';
 
 const HEARTBEAT_INTERVAL_MS = 250;
 const HEARTBEAT_TIMEOUT_MS = 1_000;
@@ -277,7 +279,165 @@ function actionKey(action: EncounterCommand): string {
   return canonicalJson(action);
 }
 
-function renderBoard(
+const OPTION_PATH_DANGER_CLASSES: Readonly<Record<MovementPathDangerKind, string>> = {
+  opportunity_attack: 'encounter-option-segment-opportunity-attack',
+  burning_surface: 'encounter-option-segment-burning-surface',
+  // MUTATION hazard_cells_not_red: replace this with a non-red class.
+  persistent_area_damage: 'encounter-option-segment-persistent-area-damage',
+  difficult_terrain: 'encounter-option-segment-difficult-terrain',
+};
+
+function optionPathDangerCells(path: OfferedOptionPath): string {
+  return path.annotations.map((annotation) =>
+    `${String(annotation.cell.column)},${String(annotation.cell.row)}:${annotation.dangers.join('+')}`,
+  ).join(';');
+}
+
+function optionPathOffset(index: number, count: number): { readonly x: number; readonly y: number } {
+  const band = index - (count - 1) / 2;
+  return { x: band * 0.045, y: -band * 0.045 };
+}
+
+function svgElement<K extends keyof SVGElementTagNameMap>(tag: K): SVGElementTagNameMap[K] {
+  return document.createElementNS('http://www.w3.org/2000/svg', tag);
+}
+
+function renderOfferedOptionPathOverlay(
+  projection: EncounterBoardProjectionShape,
+  paths: readonly OfferedOptionPath[],
+): SVGSVGElement {
+  const svg = svgElement('svg');
+  svg.classList.add('encounter-option-paths');
+  svg.setAttribute('viewBox', `0 0 ${String(projection.bounds.columns)} ${String(projection.bounds.rows)}`);
+  svg.setAttribute('aria-label', 'Engine offered movement options');
+  const defs = svgElement('defs');
+  const marker = svgElement('marker');
+  marker.id = 'encounter-option-oa-arrowhead';
+  marker.setAttribute('viewBox', '0 0 10 10');
+  marker.setAttribute('refX', '9');
+  marker.setAttribute('refY', '5');
+  marker.setAttribute('markerWidth', '5');
+  marker.setAttribute('markerHeight', '5');
+  marker.setAttribute('orient', 'auto-start-reverse');
+  const arrowHead = svgElement('path');
+  arrowHead.setAttribute('d', 'M 0 0 L 10 5 L 0 10 z');
+  marker.append(arrowHead);
+  defs.append(marker);
+  svg.append(defs);
+
+  const tokenPositions = new Map(projection.combatants.map((combatant) =>
+    [combatant.id, combatant.position] as const));
+  const destinationCounts = new Map<string, number>();
+  paths.forEach((path, pathIndex) => {
+    const offset = optionPathOffset(pathIndex, paths.length);
+    const dangerCells = optionPathDangerCells(path);
+    const group = svgElement('g');
+    group.classList.add('encounter-option-path');
+    group.style.setProperty(
+      '--encounter-option-color',
+      `hsl(${String((205 + pathIndex * 67) % 360)}deg 32% 72%)`,
+    );
+    group.dataset.optionOrdinal = String(path.optionOrdinal);
+    group.dataset.dangerCells = dangerCells;
+    group.dataset.optionId = path.optionId;
+    group.setAttribute('aria-label', `Option ${String(path.optionOrdinal)}: ${path.summaryLabel}, ${String(path.distanceFeet)} feet`);
+    const polyline = svgElement('polyline');
+    polyline.classList.add('encounter-option-polyline');
+    polyline.dataset.optionOrdinal = String(path.optionOrdinal);
+    polyline.setAttribute('points', path.path.map((cell) =>
+      `${String(cell.column + 0.5 + offset.x)},${String(cell.row + 0.5 + offset.y)}`).join(' '));
+    group.append(polyline);
+    let movementSpent = 0;
+    for (const step of path.steps) {
+      const segment = svgElement('path');
+      segment.classList.add('encounter-option-segment');
+      segment.dataset.optionOrdinal = String(path.optionOrdinal);
+      segment.dataset.dangerCells = dangerCells;
+      segment.dataset.dangers = step.dangers.join(',');
+      segment.setAttribute(
+        'd',
+        `M ${String(step.from.column + 0.5 + offset.x)} ${String(step.from.row + 0.5 + offset.y)} ` +
+          `L ${String(step.to.column + 0.5 + offset.x)} ${String(step.to.row + 0.5 + offset.y)}`,
+      );
+      movementSpent += step.costFeet;
+      if (movementSpent > path.movementRemainingFeet) {
+        segment.classList.add('encounter-option-segment-beyond-movement');
+      }
+      for (const danger of step.dangers) segment.classList.add(OPTION_PATH_DANGER_CLASSES[danger]);
+      if (step.dangers.length > 0) segment.classList.add('encounter-option-segment-hazard');
+      group.append(segment);
+
+      for (const reactorId of step.opportunityAttackReactors) {
+        const reactor = tokenPositions.get(reactorId);
+        if (reactor === undefined) continue;
+        const arrow = svgElement('path');
+        arrow.classList.add('encounter-option-opportunity-arrow');
+        arrow.dataset.optionOrdinal = String(path.optionOrdinal);
+        arrow.dataset.dangerCells = dangerCells;
+        arrow.dataset.reactorId = reactorId;
+        arrow.setAttribute(
+          'd',
+          `M ${String(reactor.column + 0.5)} ${String(reactor.row + 0.5)} ` +
+            `L ${String(step.from.column + 0.5 + offset.x)} ${String(step.from.row + 0.5 + offset.y)}`,
+        );
+        arrow.setAttribute('marker-end', 'url(#encounter-option-oa-arrowhead)');
+        // MUTATION opportunity_arrow_missing: remove this append while retaining the red segment.
+        group.append(arrow);
+      }
+    }
+    const destination = path.path.at(-1);
+    if (destination === undefined) throw new Error('Offered movement path has no destination.');
+    const destinationKey = `${String(destination.column)},${String(destination.row)}`;
+    const stack = destinationCounts.get(destinationKey) ?? 0;
+    destinationCounts.set(destinationKey, stack + 1);
+    const stackOffset = stack === 0
+      ? 0
+      : Math.ceil(stack / 2) * (stack % 2 === 1 ? -0.52 : 0.52);
+    const badge = svgElement('g');
+    badge.classList.add('encounter-option-destination');
+    badge.dataset.optionOrdinal = String(path.optionOrdinal);
+    badge.dataset.dangerCells = dangerCells;
+    badge.setAttribute(
+      'transform',
+      `translate(${String(destination.column + 0.5 + offset.x)} ${String(destination.row + 0.5 + offset.y + stackOffset)})`,
+    );
+    const circle = svgElement('circle');
+    circle.setAttribute('r', '0.18');
+    const ordinal = svgElement('text');
+    ordinal.classList.add('encounter-option-ordinal');
+    ordinal.setAttribute('text-anchor', 'middle');
+    ordinal.setAttribute('y', '0.055');
+    ordinal.textContent = String(path.optionOrdinal);
+    const distance = svgElement('text');
+    distance.classList.add('encounter-option-distance');
+    distance.setAttribute('text-anchor', 'middle');
+    distance.setAttribute('y', '0.36');
+    distance.textContent = `${String(path.distanceFeet)} ft`;
+    badge.append(circle, ordinal, distance);
+    group.append(badge);
+    svg.append(group);
+  });
+  return svg;
+}
+
+function renderOfferedOptionLegend(): HTMLElement {
+  const legend = element('aside', { className: 'encounter-option-path-legend' });
+  legend.dataset.optionPathLegend = 'true';
+  legend.append(element('strong', { text: 'Movement options' }));
+  for (const [className, text] of [
+    ['encounter-option-legend-solid', 'solid = within movement'],
+    ['encounter-option-legend-dashed', 'dashed = beyond movement (Dash)'],
+    ['encounter-option-legend-arrow', 'arrow = Opportunity Attack'],
+    ['encounter-option-legend-hatch', 'hatching = Difficult Terrain'],
+    ['encounter-option-legend-flame', '♨ = damaging terrain'],
+    ['encounter-option-legend-ordinal', 'N = option N'],
+  ] as const) {
+    legend.append(element('span', { className, text }));
+  }
+  return legend;
+}
+
+export function renderBoard(
   projection: EncounterBoardProjectionShape,
   preview: ReadonlySet<string> = new Set(),
   movementDangerPreview: DmMovementPathPreview | null = null,
@@ -286,6 +446,7 @@ function renderBoard(
     readonly round: number;
     readonly stateDigest: string;
   },
+  offeredPaths: readonly OfferedOptionPath[] | null = null,
 ): HTMLDivElement {
   const art = encounterArtForBoard(projection);
   const models = encounterBoardRenderModel(projection, art);
@@ -298,9 +459,26 @@ function renderBoard(
     board.dataset.sourceRound = String(provenance.round);
     board.dataset.sourceStateDigest = provenance.stateDigest;
   }
+  if (offeredPaths !== null) board.dataset.optionPaths = String(offeredPaths.length);
   const dangersByCell = new Map<string, DmMovementPathPreview['annotations'][number]['dangers']>(movementDangerPreview?.annotations.map(
     (annotation) => [`${String(annotation.cell.column)},${String(annotation.cell.row)}`, annotation.dangers] as const,
   ) ?? []);
+  const optionDifficultCells = new Map<string, OfferedOptionPath[]>();
+  const optionDamageCells = new Map<string, OfferedOptionPath[]>();
+  const optionThreats = new Set(offeredPaths?.flatMap((path) =>
+    path.steps.flatMap((step) => step.opportunityAttackReactors)) ?? []);
+  for (const path of offeredPaths ?? []) {
+    for (const annotation of path.annotations) {
+      const key = `${String(annotation.cell.column)},${String(annotation.cell.row)}`;
+      if (annotation.dangers.includes('difficult_terrain')) {
+        optionDifficultCells.set(key, [...optionDifficultCells.get(key) ?? [], path]);
+      }
+      if (annotation.dangers.includes('burning_surface') ||
+        annotation.dangers.includes('persistent_area_damage')) {
+        optionDamageCells.set(key, [...optionDamageCells.get(key) ?? [], path]);
+      }
+    }
+  }
   for (const model of models) {
     const cell = element('div', { className: 'encounter-cell' });
     cell.dataset.cell = model.key;
@@ -341,6 +519,19 @@ function renderBoard(
       marker.setAttribute('aria-label', danger.replaceAll('_', ' '));
       cell.append(marker);
     }
+    for (const path of optionDifficultCells.get(model.key) ?? []) {
+      const hatch = element('span', { className: 'encounter-option-difficult-hatch' });
+      hatch.dataset.optionOrdinal = String(path.optionOrdinal);
+      hatch.dataset.danger = 'difficult_terrain';
+      cell.append(hatch);
+    }
+    for (const path of optionDamageCells.get(model.key) ?? []) {
+      const flame = element('span', { className: 'encounter-option-damage-flame', text: '♨' });
+      flame.dataset.optionOrdinal = String(path.optionOrdinal);
+      flame.dataset.danger = 'damaging_terrain';
+      flame.setAttribute('aria-label', 'Damaging terrain');
+      cell.append(flame);
+    }
     for (const object of model.worldObjects) {
       const placed = element('div', { className: 'encounter-world-object' });
       placed.dataset.objectId = object.id;
@@ -362,6 +553,7 @@ function renderBoard(
     }
     if (model.token !== null) {
       const token = element('div', { className: 'encounter-token' });
+      if (optionThreats.has(model.token.id)) token.classList.add('encounter-option-threat');
       token.dataset.combatantId = model.token.id;
       token.dataset.active = String(model.token.focusAssetId !== null);
       token.dataset.adjudicated = String(model.token.adjudicatedAssetId !== null);
@@ -427,6 +619,10 @@ function renderBoard(
       svg.append(line);
     }
     board.append(svg);
+  }
+  if (offeredPaths !== null) {
+    board.append(renderOfferedOptionPathOverlay(projection, offeredPaths));
+    board.append(renderOfferedOptionLegend());
   }
   return board;
 }
@@ -766,6 +962,7 @@ class DmEncounterView {
   #pendingDelete: SaveManagerViewModel['pendingDelete'] = null;
   #saveManagerController: SaveManagerController | null = null;
   #movementPreviewKey: string | null = null;
+  #showOfferedOptionPaths = false;
   readonly #sessionFlow: StoredCharacterSessionFlow | null;
   #endSessionExported = false;
   #pendingSnapshot: DmEncounterHostSnapshot | null = null;
@@ -1327,11 +1524,27 @@ class DmEncounterView {
     const previewCells = new Set(movementPreview?.path.map(
       (cell) => `${String(cell.column)},${String(cell.row)}`,
     ) ?? []);
+    if (!this.boardSnapshotMode) {
+      const toggle = element('label', { className: 'dm-option-path-toggle' });
+      toggle.dataset.renderKey = stableRenderKey('dm', 'option-path-toggle', 'label');
+      const checkbox = element('input');
+      checkbox.type = 'checkbox';
+      checkbox.checked = this.#showOfferedOptionPaths;
+      checkbox.dataset.renderKey = stableRenderKey('dm', 'option-path-toggle', 'input');
+      checkbox.addEventListener('change', () => {
+        this.#showOfferedOptionPaths = checkbox.checked;
+        this.#render();
+      });
+      toggle.append(checkbox, element('span', { text: 'Show engine movement options' }));
+      this.#shell.append(toggle);
+    }
     this.#shell.append(renderBoard(projection.board, previewCells, movementPreview, {
       revision: projection.encounter.revision,
       round: projection.board.round,
       stateDigest: projection.stateDigest,
-    }));
+    }, this.boardSnapshotMode || this.#showOfferedOptionPaths
+      ? projection.offeredOptionPaths
+      : null));
     if (movementPreview !== null) this.#shell.append(renderMovementDangerLegend(movementPreview));
   }
 
