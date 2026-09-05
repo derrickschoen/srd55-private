@@ -24,10 +24,10 @@ const outputPathSchema = z.string().regex(
 
 const artLicenseSchema = z.strictObject({
   spdx: z.literal(STARTER_ART_LICENSE),
-  version: z.literal('4.0 International'),
+  version: z.literal('1.0 Universal'),
   authorizationUrl: z.literal(STARTER_ART_LICENSE_URL),
-  attributionRequired: z.literal(true),
-  bundledLicenseOutput: z.literal('licenses/CC-BY-4.0.txt'),
+  attributionRequired: z.literal(false),
+  bundledLicenseOutput: z.literal('LICENSE-ART'),
 });
 
 const artManifestAssetSchema = z.strictObject({
@@ -111,10 +111,10 @@ const rawManifest = {
       kind: entry.kind,
       license: {
         spdx: STARTER_ART_LICENSE,
-        version: '4.0 International',
+        version: '1.0 Universal',
         authorizationUrl: STARTER_ART_LICENSE_URL,
-        attributionRequired: true,
-        bundledLicenseOutput: 'licenses/CC-BY-4.0.txt',
+        attributionRequired: false,
+        bundledLicenseOutput: 'LICENSE-ART',
       },
       attributionText: STARTER_ART_ATTRIBUTION,
       source: {

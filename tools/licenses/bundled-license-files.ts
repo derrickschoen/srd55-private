@@ -11,7 +11,8 @@ import { resolve } from 'node:path';
  * only for people who cloned the repository. Anyone who received the built app
  * — which is how the app is actually delivered — received it with no notice.
  *
- * CC-BY-4.0 sits beside it for the reason `docs/srd/ATTRIBUTION.md` gives: the
+ * CC0-1.0, its provenance statement, and CC-BY-4.0 sit beside it. For CC-BY,
+ * `docs/srd/ATTRIBUTION.md` gives the reason: the
  * notice the legal page renders points at the licence, and pointing at a
  * third-party URL is a link, not a copy. The legalcode ships so the built app
  * carries the terms it is redistributed under rather than depending on
@@ -74,11 +75,18 @@ export const BUNDLED_LICENSE_FILES: readonly BundledLicenseFile[] =
         '9ba9550ad48438d0836ddab3da480b3b69ffa0aac7b7878b5a0039e7ab429411',
     }),
     Object.freeze({
-      fileName: 'licenses/STARTER-ART-NOTICE.txt',
-      sourcePath: 'docs/licenses/STARTER-ART-NOTICE.txt',
-      literal: 'Starter Pixel Art and Ink Room',
+      fileName: 'LICENSE-ART',
+      sourcePath: 'LICENSE-ART',
+      literal: 'CC0 1.0 Universal',
       sha256:
-        'd09f1227f09d079dadd77abb1d586c53cc4c5539ecf6e56626f5b90e78c477c2',
+        'a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499',
+    }),
+    Object.freeze({
+      fileName: 'ART-PROVENANCE.md',
+      sourcePath: 'ART-PROVENANCE.md',
+      literal: 'clean-room process',
+      sha256:
+        '2f59edbec2577cab34827a115bb1dc53f07391983e7b4a1933371c74d70d3de2',
     }),
     Object.freeze({
       fileName: 'licenses/SRD-5.1-ATTRIBUTION.txt',
