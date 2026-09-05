@@ -11204,3 +11204,214 @@ Merge --no-ff from the main repo, exit 0, 27 files, +847/-292, tree clean.
 D429.1 mini-A/B launched immediately (brutal, 10 rooms x 1 rep, seed
 6203001, luna low, full intel; miniab-footprints5.jsonl). D545 last-seen
 ghost-marker unit unblocks and is dispatched from this commit.
+
+D556 — OWNER (2026-09-05 16:02): the D534 workflow research missed the point — the owner wants ART TECHNIQUES:
+research the last year for reports of how people get the best out of AI-produced art assets, and make sure some
+sources cover using Fable (newer and better). Owner assessment of our current VTT art: "way worse than most of the
+AI generated art I have seen. It looks like something a kid did in MS Paint." Supervisor: three codex sol seats
+(network sandbox, private repo art-techniques/ folder, angles: generative image models for game assets and
+consistency; agent-driven art pipelines incl. Fable-specific reports and why code-drawn art looks flat; VTT and
+tabletop asset sourcing with AI and the retro 16-bit look) plus one Opus-medium cross-check; twelve-month window
+(2025-09-05 onward); licensing feasibility for D547 CC0 art is a required column; the supervisor synthesises an
+owner report. The owner's quality verdict is recorded as a finding against the current art and feeds the next
+classic/iso rounds.
+
+## FINDING — D429.1 mini-A/B after footprints inc5 landing: shape CHANGED, not passed (2026-09-05 16:20)
+
+My run on main 7c52da1c (brutal, 10 rooms x 1 rep, seed 6203001, luna low, full
+intel; miniab-footprints5.jsonl), extracted with my own script applied
+identically to the two healthy references (round-1 slices):
+
+| run | mean offense/round | zero-offense rooms | dash slots | service nulls | blocks |
+|---|---|---|---|---|---|
+| footprints5 (7c52da1c) | 1.00 | 4/10 | 36 | 0 | 0 |
+| hp-probe ref (22cea413 era) | 1.70 | 2/10 | 14 | 0 | 1 |
+| prose ref | 1.90 | 1/10 | 11 | 0 | 0 |
+
+Offense = attack + cast_spell slots in authorized plans. Room digests differ
+from the references in every room (footprints change placement), so rooms
+are not cell-identical, but the seed, basis and party are the same.
+
+Mechanism seen in the rows (room 5 monsters 4-6, room 9 monsters 1/4/7, room
+7 monster-1, room 2 all five): the actor's OFFERED options in the turn
+context are attacks only (e.g. two Shortbow options, usable_now true, EV
+1.05 at long range 90 ft, disadvantage), the model's reason says "Shoot the
+most vulnerable visible enemy from range", yet its primary_option_id is a
+Dash option that is NOT in its shown options list. That id comes from the
+opportunity_cost block: status "dominated", better_option_id = Dash, delta
+"M5 Dash strictly dominates Dodge ... Supply one typed G8 override reason to
+keep the selected plan". The engine_default there is Dodge, and the
+dominance correction compares Dash against Dodge while the attacks are
+ignored; the model follows the pointer, submits Dash with an attack
+rationale and no override, and the proposal is accepted first time
+(decisionAttempts 1, no rejection codes). Result: monsters 90-100 ft out
+dash instead of shooting, offense halves. Reason/option contradiction
+accepted without rejection is a coaching-honesty defect of the D436 class.
+
+Not yet known: whether footprints inc1-4 (landed 15ef2b24 earlier today,
+with NO mini-A/B run after it — a process slip of mine, D429.1 requires one
+after every engine merge) or inc5 introduced it. Bisect running: identical
+arena on a detached worktree at 15ef2b24 (miniab-bisect-15ef2b24.jsonl).
+Interim: no further engine landings on main until the root cause is found;
+the ghost-marker lane keeps implementing but will not land ahead of the fix.
+
+Addendum (16:28): the fair references are the post-era-shift controls at
+f7400638 (D521/D514 arms, same brutal basis, seed 6203001, luna low, picture
+off), same extraction: per-room offense [1,1,2,2,3,2,0,2,3,1] in four
+separate runs (mean 1.6–1.7, zero-offense 1–2, dash 26–29). footprints5:
+[1,0,2,2,0,2,0,2,0,1] (mean 1.0, zero 4, dash 36). Rooms 5 and 9 fall from
+3 to 0 and room 2 from 1 to 0; the other seven rooms are identical. Same
+seed, same model, same basis: a regression between f7400638 and 7c52da1c,
+i.e. inside the footprints landings (15ef2b24 or 7c52da1c). Bisect at
+15ef2b24 pending.
+
+Correction (mine, 16:11): the two entries above carry estimated clock times
+"16:20" and "16:28" that are wrong; the finding was written at 16:08 and the
+addendum at 16:10 (system clock). Content unchanged.
+
+## Tick record 16:45 — mini-A/B replicate, probe round 3, harvests (2026-09-05)
+
+**Mini-A/B replicate on 7c52da1c (rep2, same seed):** per-room offense
+[1,1,2,2,VOID,2,0,2,VOID,1]; rooms 5 and 9 refused with "Agent CLI timed
+out after 120000 ms" at load average 9.5 (quiet-machine rule: those two
+rooms are VOID, not zero). The eight valid rooms equal the era controls
+exactly, including room 2, which run 1 had at 0. Run 1's rooms 2/5/9 zeros
+are therefore unconfirmed and look like noise/load, not a deterministic
+change; rooms 5 and 9 need a quiet-machine rerun (rep3) before the engine
+landing hold lifts. The hidden-option-id leak (intel names an id the AI is
+not shown; validator accepts it) is real in every run and its codex unit
+(claude/intel-leak, dnd-wt-intel-leak) is in flight.
+
+**Probe round 3 (c6a7547f classic, 24 states, seed 6203001, my run,
+d536-probe24-r3.jsonl, 480 rows, 0 errors), mean score per class:**
+
+| class | medium | low |
+|---|---|---|
+| Q1 identity/location | 0.24 | 0.18 |
+| Q2 side | 0.45 | 0.50 |
+| Q3 HP band | 0.24 | 0.36 |
+| Q4 blocked/terrain cells | 0.82 | 0.60 |
+| Q5 light per cell | 0.91 | 0.59 |
+| Q6 doors | 0.38 | 0.36 |
+| Q7 adjacent pairs | 0.08 | 0.02 |
+| Q8 hidden creatures | 0.71 | 0.58 |
+| Q9 fog/obscured | 0.67 | 0.48 |
+| Q10 blocked cells | 0.88 | 0.88 |
+
+Against the D536 bar (every class >= 0.9 at Luna medium) only Q5 passes.
+Identity (Q1) and HP (Q3) are far below and the badge/roster round did not
+move them; this is the measurement the D556 art-techniques report speaks
+to. Rows carry primer v6; round 4 changes the primer to v7 (roster cells),
+so round 4 gets its own run.
+
+**Flakes unit (dnd-wt-flakes):** my tsc 0, sg 0. My focused run of the four
+named files at load 9.5: 3 files pass, experiment-orchestrator.test.ts
+FAILS at file level — top-level beforeAll "Hook timed out in 30000ms", 52
+tests skipped. Codex raised the test timeout but not the hook's; amendment
+sent by resume (hook timeout in that file only). Codex's own full-suite
+claim (564/9,721, no retry) stands as claimed, not verified.
+
+**Licence unit (dnd-wt-licence):** my tsc 0, sg 0, focused 52/52 (3 files).
+LICENSE-ART is 7,048 bytes, CC0 1.0 with all four sections; byte match to
+the official text is codex's claim. Full suite pending (mine).
+
+**Classic round 4 (dnd-wt-light):** codex exit 0, mutation
+roster_numeral_low_contrast shown killed; my tsc 0, sg 0; focused running.
+
+**D556 report delivered** (art-research/reports/2026-09-05-art-techniques.md,
+1,511 words, codex synthesis of four notes; private repo b78d844).
+
+CLASSIC ROUND 4 (2026-09-05 17:05): d5c74dd0 on claude/light-variant — pixel-art badge/ring bitmaps (board-chrome-art.ts,
+no CSS radius), roster numeral contrast ≥4.5:1, badge palette outside both side-hue bands and pairwise distinct
+under dichromacy matrices, 1..12 numeral clearance, typed object/door rail with coordinates, roster coordinates,
+primer v7. Codex: locked 559/9703, mutation roster_numeral_low_contrast killed. Mine: forbidden scan clean, tsc 0,
+sg 0, focused chrome+probe green; first mutation (hue-exclusion constant 35→5) VOID — the constant is read only by
+the test, not at runtime; second mutation (sand badge → warm cloth ramp) killed two tests (side-hue band, numeral
+contrast 4.04 < 4.5), cmp-restored. Two browser specs queued under the lock on port 4640. Captures viewed: badges
+crisp, roster and door rail readable; the art itself remains the flat look the owner named in D556. Four-seat panel
+dispatched with rotated perspectives (Fable game-feel, Opus-medium pixel-craft, sol-high ui-readability, sol-medium
+machine-readability carrying the round-3 probe numbers). Round-4 probe (primer v7, 24 states, medium+low) started.
+
+Correction (mine, 16:44): the round-4 entry above says "17:05"; the system clock was 16:41 when it was written. I stop
+writing estimated times; every timestamp from here is read from `date`.
+
+D557 — OWNER (2026-09-05 16:43): "Double the pixel density and try to implement the art techniques for classic view."
+Supervisor reading: (1) the classic board's native art resolution doubles — 128 px per cell instead of 64, tiles,
+tokens, glyphs, badges and rings drawn at the new native size (integer scaling only, no upscaled 64-px art); (2) the
+craft techniques from the D556 report's diagnosis become the classic view's drawing rules — one global light
+direction with a shared shadow colour and material-specific response, palette ramps with deliberate shadow/mid/
+highlight steps and restrained hue shifts, silhouette-first creature busts, no pillow shading, cluster discipline
+(no stray single pixels, no anti-aliased edges, no fractional placement), selective outlines that support hierarchy,
+review at native size beside neighbours and under overlays — each rule expressed as a validator test, not prose.
+Dispatched as classic round 5 (codex sol high, D532) on a new worktree from round 4's d5c74dd0; the D549 colour-
+blind/high-contrast presets move to round 6. Implementers read clean-room/final only; the craft rules are pasted
+into the brief as general pixel-art principles (no sources, no game names).
+
+## CLASSIC ROUND 4 PANEL — three of four seats HOLD (2026-09-05 16:55)
+
+Fable (game-feel): HOLD — MAJOR 1 badge/ring frames use the floor's own stone/neutral ramps so token presence
+collapses (CR 1.00 on token 4); MAJOR 2 `fern` badge disc is the exact HP-uninjured green; MAJOR 3 the badge tab
+covers heads and the ring cuts shoulders (chrome z-index over sprite). Its ranked MS Paint diagnosis: the floor field
+(two-value slabs + checkerboard dither + random brightness + crack strokes, ~70% of pixels), the rune/dim scribble
+field, the identical manhole column, framed "profile picture" tokens, silent hazards. Codex sol high
+(ui-readability): HOLD — MAJOR roster BLOODIED (cloth-warm 3 on #111113 ≈ 4.04:1) and UNKNOWN text below the 4.5:1
+floor the round claimed only for numerals; MINOR rail reserves 40 px per object and leaves dead space. Codex sol
+medium (machine-readability): HOLD — identity, HP and adjacency remain operationally ambiguous at delivered scale
+(26×18 px badges, roster 1,100 px away); highest-leverage change: a large OCR-safe coordinate-first manifest row per
+creature sized against the model's normalised image; primer v7 should point Q1/Q3/Q7 at the roster coordinates.
+Opus (pixel-craft, medium) still running.
+
+Supervisor verification: `fern` = badgeRamp('moss', 4) and HP uninjured ink = ramp('moss', 4) — same colour,
+confirmed by grep (board-chrome.ts:144, :255). BLOODIED = ramp('cloth-warm', 3) on roster background #111113
+(styles.css); contrast 4.04:1 by my own WCAG computation using the hex codex reported for that ramp step. Both majors
+stand. Verdict: HOLD. The D536 bar is not demonstrated (round-3 probe: only light passes); round-4 probe running.
+
+Disposition: round 5 (D557) is already redrawing the art at 128 px on a branch from this commit; the chrome majors
+(frame ramps outside the floor palette, fern replaced, chrome below the sprite or moved off the head, roster text
+contrast ≥ 4.5:1 for every HP word, manifest row sizing, primer pointer) are queued as a round-5 amendment to be sent
+when its current turn ends (13:20 rule), not merged as a separate round-4b that would conflict in board-chrome.ts.
+
+## Round 4 panel closes 4/4 HOLD; flakes LANDED; a11y in verification (2026-09-05 17:12)
+
+Opus (pixel-craft, medium): HOLD — MAJOR badge discs have no contrast floor against the roster background (claims 5
+of 12 under 3:1, badge #1 at 1.02); MAJOR stacked bust ring at stackIndex 1 now a constant 50 px, overruns the HP
+bar and sits off-centre; MAJOR dichromacy test clears its ≥10 bar by 0.01 (spruce/graphite); MAJOR legend swatches
+and primer v7 still promise cool-blue/warm-red side rings the board no longer draws. Verified by me: the side-ring
+promise — the captures show badge-coloured rings only, and primer v7 still opens with the blue/red sentence (seen in
+the round-4 diff). The disc-contrast and ring-geometry numbers are Opus's, unverified by me; they go to round 5 as
+findings to verify in code. Also confirmed the badge ranks the crispness claims: Opus and codex both measured hard
+2×2 pixel blocks, no resampling. Seat-yield ledger written (rounds/classic-round-4/yield.json, private repo).
+
+Flakes unit LANDED on main bbf7f2bb: my full run through the new runner `npm run test:gate` at load 9: 1,863
+files / 9,722 tests passed, zero load flakes, zero retries; codex's claim (564/9,721) matches within the count
+convention. Gate scripts in dnd-slim-runs switch to `npm run test:gate` from the next landing.
+
+Licence unit: my full suite 563/564 files, 9,724/9,725 tests — the one failure is the D544-named 5-second arena
+round-robin test at 5.16 s under load 9; solo rerun in progress. a11y-board unit: codex exit 0 (claims 564/9,723
+locked, Playwright spec 1/1 on 4603, mutation player_export_leaks_hidden_creature killed); my tsc 0, sg 0, forbidden
+scan clean, focused set running. Classic round 4 browser specs 4/4 on 4640 — round 4's gate is complete.
+
+## Licence LANDED e4598858; a11y committed and gating; mini-A/B rep3 on a quiet machine (2026-09-05 17:24)
+
+Licence unit landed on main (lane commit d2fd27c6): the one full-suite failure was the D544-named 5 s arena test
+under load 9; solo rerun 36/36. a11y-board committed on claude/a11y-board after the amendment: my mutation (non-owned
+private conditions leaked to players) is now killed by two tests (visibility.test "redacts private conditions for
+non-owners…", accessible-board.test "redacts private non-owned conditions from player HTML while the DM HTML names
+them"); tsc 0, sg 0, focused 66/66, forbidden scan clean. Its two browser specs (port 4680) and my full suite are
+queued under the lock. Mini-A/B rep3 launched at load 3.3 to settle rooms 5 and 9.
+
+Correction (mine, 17:22): the entry above is stamped "17:24"; the clock read 17:21 when it was written. I said
+I would stop estimating and did it again; from this line every entry stamp is produced by the clock in the write
+command itself, not typed.
+
+## Mini-A/B rep3 PASSES — footprints landing keeps its behavioural control; a11y LANDED (2026-09-05 17:36)
+
+rep3 on 7c52da1c at launch load 3.3 (same seed/basis/model): per-room offense [1,0,2,2,4,2,0,2,3,1], mean 1.70,
+zero-offense 2, dash 29 — the era-control shape (controls 1.6–1.7 / 1–2 / 26–29). Room 5 is 4 (run 1: 0), room 9
+is 3 (run 1: 0). Run 1's drop was noise under load, not a deterministic change; the three runs together are
+recorded as the D429.1 verdict for 7c52da1c: PASSED on rep3 with run 1 (load) and rep2 (two CLI timeouts) kept as
+evidence of how much a single luna-low rep moves. Engine landing hold LIFTED. The hidden-option-id leak stays a
+real defect (its unit is in flight) — it was present in every run including the passing ones.
+
+a11y-board landed on main (lane f9aec870): my full suite 564/9,725, specs 2/2 on 4680. It touches the player
+projection (src/combat/visibility.ts), so its D429.1 mini-A/B runs when the load average allows a valid run.

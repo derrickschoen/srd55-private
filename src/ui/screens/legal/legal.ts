@@ -13,7 +13,8 @@ import { A5ESRD_ATTRIBUTION, SRD_5_1_ATTRIBUTION } from '../../../combat/statblo
  * the one page whose job is to make the licences readable.
  */
 const CC_BY_LEGALCODE_HREF = './licenses/CC-BY-4.0.txt';
-const STARTER_ART_NOTICE_HREF = './licenses/STARTER-ART-NOTICE.txt';
+const ART_LICENSE_HREF = './LICENSE-ART';
+const ART_PROVENANCE_HREF = './ART-PROVENANCE.md';
 const MIT_LICENSE_HREF = './LICENSE.txt';
 
 function escapeHtml(value: unknown): string {
@@ -64,10 +65,12 @@ export function renderLegalPage(): string {
         <section class="legal-section">
           <h2>Project-original starter art</h2>
           <p data-testid="starter-art-attribution">${escapeHtml(STARTER_ART_ATTRIBUTION)}</p>
-          <p>The exact notice travels with this app:
-            <a href="${STARTER_ART_NOTICE_HREF}"
-            data-testid="starter-art-notice">read the bundled starter-art
-            notice</a>. The complete CC-BY-4.0 terms are linked above.</p>
+          <p>The exact public-domain dedication and provenance statement travel
+            with this app: <a href="${ART_LICENSE_HREF}"
+            data-testid="starter-art-license">read the bundled CC0 1.0
+            Universal dedication</a> and <a href="${ART_PROVENANCE_HREF}"
+            data-testid="starter-art-provenance">read the art provenance
+            statement</a>.</p>
         </section>
 
         <section class="legal-section">

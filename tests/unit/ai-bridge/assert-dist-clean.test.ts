@@ -148,7 +148,7 @@ describe('the dist guard passes only a genuinely clean build', () => {
       }),
     );
     expect(run.code).toBe(0);
-    expect(run.stdout).toContain('12 files scanned');
+    expect(run.stdout).toContain('13 files scanned');
   });
 
   it('fails when the PWA shell bytes no longer match the cache version', async () => {

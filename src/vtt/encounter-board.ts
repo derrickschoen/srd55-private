@@ -1,6 +1,13 @@
 import type { AssetId } from '../assets/ids';
 import type { ControllerRequest } from '../combat/controllers';
-import { combatantSpace, type EncounterState, type InitiativeEntry, type LifeState } from '../combat/encounter';
+import {
+  combatantConditions,
+  combatantSpace,
+  effectiveCombatRules,
+  type EncounterState,
+  type InitiativeEntry,
+  type LifeState,
+} from '../combat/encounter';
 import {
   creatureSpace,
   minimumSpaceLine,
@@ -47,6 +54,15 @@ interface EncounterBoardCombatantIdentity {
   readonly hitPointBand?: ProjectedHitPointKnowledge;
   /** DM projections only: the engine currently treats this combatant as hidden. */
   readonly hiddenFromPlayers?: boolean;
+  /** Current projected conditions, already filtered at the audience boundary. */
+  readonly conditions?: readonly string[];
+  /** Sourced reach is available on the omniscient board projection. */
+  readonly reachFeet?: number;
+  /** Future-safe player knowledge: never aliases a hidden creature's current cell. */
+  readonly lastKnown?: {
+    readonly cell: GridCell;
+    readonly round: number;
+  };
   /** Sourced creature type when the profile carries one; absent means the profile had none. */
   readonly creatureType?: string;
 }
@@ -537,6 +553,9 @@ export function projectEncounterBoard(
         life: subject.life,
         hitPointBand: hitPointKnowledge(state, subject),
         hiddenFromPlayers: hidden.has(subject.profile.id),
+        conditions: combatantConditions(state, subject.profile.id).map((condition) =>
+          condition.name === 'Exhaustion' ? `${condition.name} ${String(condition.level)}` : condition.name),
+        reachFeet: effectiveCombatRules(state, subject.profile.id).reach,
         ...(creatureType === undefined ? {} : { creatureType }),
         placementStatus: 'placement_pending',
         pendingReason: pending.kind,
@@ -556,6 +575,9 @@ export function projectEncounterBoard(
       // ART-SEAM (D516): the DM board carries the prose classifier's band, never a re-derived one.
       hitPointBand: hitPointKnowledge(state, subject),
       hiddenFromPlayers: hidden.has(subject.profile.id),
+      conditions: combatantConditions(state, subject.profile.id).map((condition) =>
+        condition.name === 'Exhaustion' ? `${condition.name} ${String(condition.level)}` : condition.name),
+      reachFeet: effectiveCombatRules(state, subject.profile.id).reach,
       ...(creatureType === undefined ? {} : { creatureType }),
       placementStatus: 'placed',
       effectiveSize: space.actualSize,
