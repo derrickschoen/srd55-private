@@ -10962,3 +10962,13 @@ mutation (doors treated as blocking) killed 2. Per D531 NO review round or D14 i
 (unit's NEEDS-RULING): (a) art-only crates/pillars are dropped from the iso picture — keep dropped, or add a flat
 decoration tile kind; (b) stem endpoint at the diamond centre (a pin through the sprite) vs the bundle top;
 (c) plate reserve of one row above the tallest bundle vs two.
+
+CLEAN-ROOM LEAKAGE CHECK v1 (2026-09-05 13:05, codex): 00-index CLEAN; documents 01–10 NEEDS-REWRITE. No game
+name, URL or trademark survived into the final set; the findings are (a) numeric thresholds with fewer than two
+independent supports or spliced from single notes (the bulk), (b) near-lifted phrasing from judge notes that name
+games, (c) one distinctive single-source technique (a declared ambient-shadow colour) and one exact tile/display
+specification repeated from one game, (d) the D&D size ladder flagged as franchise leakage — REJECTED by the
+supervisor: SRD mechanics are our licensed domain content. Rewrite v2 dispatched (codex, clean-room side, no
+access to judge notes): numbers stay only with two-source support or as explicitly labelled PROJECT DEFAULTS with
+their validation named; lifted phrasing regenerated; leakage check v2 follows. Workflow research (D534): all four
+seats complete; the supervisor is synthesising the owner's report.
