@@ -11077,3 +11077,14 @@ mutation — the empty-content floor MIN_NON_BACKGROUND_FRACTION set to 0 so an 
 size, non-uniform, yet nearly empty" (a few stray pixels on background), so the empty_content branch is untested.
 Per D539 recorded and carried: probe inc6 opens with that killing fixture. Merge of claude/probe5 into
 claude/light-variant (round 3) follows the round-3 panel.
+
+CLASSIC ROUND 3 VERDICTS (2026-09-05 14:40, four seats): all HOLD. Verified by the supervisor in the captures and
+code: the roster NUMBER is invisible (neutral(0) ink on the dark row — the join between badge and name has no
+number); badge digits are clipped by the circular border; the palette includes the side hues so a party creature
+wears red; doors have no rail entry or coordinate and share the object frame; roster rows carry no printed cell.
+Also raised: greens 4/5/6 collapse under deuteranopia; anti-aliased CSS circles grow the palette; rail text at 1×.
+Round 4 dispatched to codex with all six. Verdicts archived and the seat-yield ledger written for the round.
+
+ISO BASELINE PROBE (2026-09-05 14:38, Luna medium, 24 states, iso view with NO coordinate labels or legend, D527):
+identity 0.41 · side 0.31 · HP 0.29 · difficult 0.27 · light 0.52 (2,044 bright read as dim) · adjacency 0.41 ·
+hidden 0.71 · fog 0.38 · blocked 0.13 — the "before" picture for the iso lane, which stays paused (D531).
