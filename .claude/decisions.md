@@ -11204,3 +11204,14 @@ Merge --no-ff from the main repo, exit 0, 27 files, +847/-292, tree clean.
 D429.1 mini-A/B launched immediately (brutal, 10 rooms x 1 rep, seed
 6203001, luna low, full intel; miniab-footprints5.jsonl). D545 last-seen
 ghost-marker unit unblocks and is dispatched from this commit.
+
+D556 — OWNER (2026-09-05 16:02): the D534 workflow research missed the point — the owner wants ART TECHNIQUES:
+research the last year for reports of how people get the best out of AI-produced art assets, and make sure some
+sources cover using Fable (newer and better). Owner assessment of our current VTT art: "way worse than most of the
+AI generated art I have seen. It looks like something a kid did in MS Paint." Supervisor: three codex sol seats
+(network sandbox, private repo art-techniques/ folder, angles: generative image models for game assets and
+consistency; agent-driven art pipelines incl. Fable-specific reports and why code-drawn art looks flat; VTT and
+tabletop asset sourcing with AI and the retro 16-bit look) plus one Opus-medium cross-check; twelve-month window
+(2025-09-05 onward); licensing feasibility for D547 CC0 art is a required column; the supervisor synthesises an
+owner report. The owner's quality verdict is recorded as a finding against the current art and feeds the next
+classic/iso rounds.
