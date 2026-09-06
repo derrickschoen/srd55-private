@@ -11565,3 +11565,24 @@ restarted from main (serve.mjs rebuilds first); all three codex lanes resumed by
 first ComfyUI relaunch exited 1 for a missing --skip-git-repo-check, relaunched with it); ghost gate rerun in full
 via gate-wt4.sh; both probes relaunched from their scripts; tick cron re-armed. No mutation and gate share a
 worktree. Nothing landed or committed during the outage.
+
+## D560/D560.1 LANDED (outside git) — ComfyUI on CPU generates images; supervisor-verified (2026-09-05 22:49)
+
+Codex (session 01a073bd, resumed twice across the reboot) delivered ~/comfyui: ComfyUI 0.34.0 @ f00bfd61, ComfyUI-GGUF
+@ 6ea2651e, Python 3.12.12 uv venv, torch 2.14.0+cpu, 86 pins in requirements.lock.txt; run-server.sh (127.0.0.1:8188
+only, refuses if the port is busy, pid file), stop-server.sh, health-check.sh, generate.py (POST /prompt, poll
+/history, fetch /view), workflows/klein.json (Flux2 scheduler, CFGGuider cfg 1, 4 steps) and krea.json (GGUF unet
+loader, KSampler euler/simple, 8 steps). Models: FLUX.2 Klein 4B official FP8 (Apache-2.0) + Qwen3-4B text encoder +
+FLUX.2 VAE; Krea 2 Turbo ByteShape GGUF Q3_K_M 3.91 bpw + qwen3vl-4b fp8 encoder + qwen image VAE, under the Krea 2
+Community License (revocable, revenue-thresholded, AUP) — recorded as LOCAL REFERENCE ONLY per D560.1. Licence texts
+saved with sha256 in models/licenses/ and models/LICENSES.md before download.
+VERIFIED BY ME: all six model sha256 recomputed and match the manifest; both smoke PNGs are 512x512 and I viewed them —
+Klein: grey-green cracked flagstones with grout and moss, diffuse upper-left light, no text, a usable template;
+Krea: dark-blue cobble grid with a hard cream upper-left light pool, cruder (Q3 quant), no text. Timings from
+/usr/bin/time on a LOADED box (three codex lanes + two probes + the ghost gate running): Klein 100.3 s wall,
+server peak RSS 15.9 GiB; Krea 558.0 s wall, peak 11.1 GiB. Server was stopped at the end; 8188 not listening;
+4173 untouched. No "claude -p" in the lane log. Note: ~/comfyui/.git is an EMPTY directory created by the first
+install lane (codex trust check); it is not a repository and nothing there is under version control.
+NEXT (dispatched now, research/brief-references-comfyui.md): gen_reference.py gains --provider comfyui (klein|krea),
+the LOG-row-before-success bug is fixed, krea requires --local-reference-only, one real generation per model of
+floor-stone-cracked with written observations.
