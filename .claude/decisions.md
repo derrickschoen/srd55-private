@@ -12728,3 +12728,27 @@ requirement of every lane brief; codex's own verification did not
 include the pin spec. Resumed the session with the finding: restore the
 default rendering, confine adverts to the flag-on path, re-run the pin
 spec. E4 is not committed.
+
+## E1 'both' REPLICATES on seed 2 (not a fluke); E1b encoding fix committed (2026-09-06 17:40)
+
+Seed 6203002, luna medium, same arm on the clean dnd-wt-e1-run tree
+(66b5843a): Q1 .955, Q2 1.000, Q3 1.000, Q4 .973, Q5 .949, Q6 1.000, Q7
+1.000, Q8 1.000, Q9 .944, Q10 1.000; mean .982; strict PASS. Seed 1 was
+.984 / PASS; every class lies inside the other seed's bootstrap
+interval. Under the D565 fluke guard the image+facts arm is a REAL
+improvement: luna medium at .98 vs sol high's .911 on pixels alone.
+
+E1b (01a0789b): diagnosis from the semantic-only rows confirmed the
+run-triple misread (Q5 equal false/omitted counts, bright-run interiors
+lost or re-asserted as dark) and Q9 as pure omission of obscured cells
+while fog was exact. Fix: explicit [col,row] lists for classes <= 200
+cells, inclusive runs with a declared encoding field otherwise, light
+partition bright/dim/dark with default_light, direct obscured / fogged /
+obscured_or_fogged lists; semantic/both primers name the encoding; PNG
+v10 primer untouched. Payloads 3.5-7.4 KB (mean 6.1 KB). Verified: no
+forbidden constructs, typecheck 0, 26/26; supervisor mutant (union
+drops fog) killed 2/5; committed claude/e1-semantic 49d782bb. Next:
+re-run semantic and both arms on 49d782bb (second clean run worktree)
+to confirm the semantic-only path recovers Q5/Q9 without moving 'both';
+then E1c wires the payload into the live DM turn context behind a
+renderer flag so the arena measures DM quality with facts.
