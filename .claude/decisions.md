@@ -12392,3 +12392,14 @@ dnd-wt-probe-run/dnd-slim-runs/probe24-sol-high.jsonl. Both are
 measurements against luna medium's r5c (.824) and the D429.1 era
 controls; the arena's 10-room offense shape is not a quality judgement
 (blinded packets are).
+
+## D564 — OWNER: "park the library stuff for now and focus on improving the app with the existing stuff" (2026-09-06 16:08)
+
+Preact island lane (01a07846-e00c) killed mid-edit; its worktree
+dnd-wt-preact-island keeps the partial diff, uncommitted, for a later
+resume (RESUME NOTE required: partial, unverified edits). Nothing from
+it lands. Render-bench (measurement of the existing boards, no library)
+finished before the ruling and is harvested as data only; no renderer
+change follows from it. Join-baseline (measurement of the existing
+Yjs+Trystero room) continues. Library adoption questions (Preact/React,
+PixiJS, Tiled/LDtk) are parked; the engine, AI DM and art lanes proceed.
