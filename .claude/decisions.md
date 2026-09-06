@@ -11873,3 +11873,57 @@ dnd-wt-classic5/dnd-slim-runs/d536-probe24-r5b.jsonl, log .tmp/runs/
 d536-probe24-r5b.log. Its dist build/capture overlaps the gate's first
 minutes; the luna phase is network-bound. If the gate shows LOAD FLAKES in
 that window they are discarded per the quiet-machine rule, not re-pinned.
+
+## FINDING: two WSL crashes overnight, neither caused by image generation itself; C: drive is the hazard (2026-09-06 09:00)
+
+Owner asked whether last night's two WSL crashes were the image generation.
+Verified from journalctl (boots -2/-1), the Windows System/Application event
+logs (via powershell.exe) and file timestamps:
+
+Crash 1, Sat 2026-09-05 18:56:32: the Linux journal stops mid-line (no
+shutdown sequence, no OOM, no panic) = the VM was killed from the host.
+Windows Volsnap logged at 18:55:32 "insufficient disk space on volume C:"
+and at 18:57:02 "shadow copies aborted because storage failed to grow".
+The distro's ext4.vhdx (654 GB) lives on C: (882 GB). Between 18:49 and
+18:52 the ComfyUI install lane (D560/D560.1) wrote ~18 GB of model files
+(flux-2-klein-4b-fp8 4.1 GB, qwen_3_4b 8.0 GB, qwen3vl fp8 5.2 GB, VAEs)
+into the vhdx, which grew until C: was full. Root cause: C: exhaustion from
+the model DOWNLOAD growing the vhdx, not generation (no image had been
+generated yet). Supervisor finding against own work: the install brief
+quoted "356 GB free disk" from df inside the VM and never checked the host
+drive the sparse image grows into.
+
+Crash 2, Sun 2026-09-06 01:58:41: orderly poweroff initiated by the host.
+Windows Update installed the WSL Store package 2.7.13.0 (MsiInstaller
+01:58:36-01:58:52, "start type of the Windows Subsystem for Linux service
+changed from auto start to disabled" at 01:58:36, RestartManager "machine
+restart is required"). The WSL service restart shut the distro down. No
+memory pressure anywhere: no Resource-Exhaustion-Detector events in 7 days,
+no kernel OOM, host has 64 GB with 44 GB free this morning. ComfyUI was not
+running at the time (server.log last written 23:20; smoke runs peaked at
+16.6 GB / 11.6 GB VmHWM in --cpu mode and completed).
+
+Collateral: the intel-leak gate (Playwright phase, port 4630) and probe r5b
+were killed at 01:58 and are VOID (never completed); chrome-headless-shell
+SIGTRAP crash dumps from those runs (532 MB + 361 MB) landed in
+C:\Users\...\Temp\wsl-crashes (983 MB total, deletable). The session cron
+died with the reboot and is re-armed; :4173 restarted.
+
+Current C: free: 23.4 GB. Linux reports 611 GB used inside a 654 GB image,
+so ~43 GB is reclaimable by compacting the vhdx (needs `wsl --shutdown`,
+owner's call). NEW RULE for any lane that downloads large files: check
+host C: free space via powershell.exe before and after each file and stop
+if free < size + 8 GB (written into the klein-quant brief).
+
+Owner follow-up question: "do we need GPU passthrough? can we try the 4b
+model on q8 or q4 on cpu?" Host GPUs are an AMD RX 460 (4 GB) and the Ryzen
+iGPU: no CUDA, Polaris is unsupported by ROCm, 4 GB VRAM is below the 4B
+model's footprint, so CPU is the only practical path and passthrough is
+not needed (everything so far ran with --cpu). Dispatched codex lane
+(brief .tmp/runs/brief-klein-quants.md, log .tmp/runs/log-klein-quants.log,
+cwd ~/comfyui, workspace-write+network): download unsloth
+FLUX.2-klein-4B-GGUF Q8_0 (4.30 GB) and Q4_K_M (2.60 GB) under the disk
+guard, allow --unet for klein in generate.py, smoke both at 512x512 / 4
+steps / seed 560 on fresh servers, compare wall time and VmHWM against the
+fp8 baseline (99.9 s, 16.6 GB). Intel-leak gate relaunch waits until this
+CPU-bound lane finishes (quiet-machine rule).
