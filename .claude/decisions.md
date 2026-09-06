@@ -11626,3 +11626,14 @@ one-sample judgement; the open owner question (heavier quant vs Klein-only) stan
 the server afterwards (8188 closed). Stale pre-fix fireworks LOG row marked VOID by me. Observations files exist
 for both; per D558 an implementer of floor-stone-cracked receives those, not the images, and the seat that viewed
 them (this one, and the lane) does not implement that asset.
+
+D560.2 — OWNER (2026-09-05 23:33): "Try out all of the different krea quants to find the ones that actually work on this machine. Then
+see if any do a better job than the setup we already tried." Supervisor: dispatched to codex in ~/comfyui
+(.tmp/runs/brief-krea-quants.md): enumerate every Krea 2 Turbo GGUF quant at the pinned ByteShape revision (other
+repos only after licence recording), feasibility filter against 24 GB available RAM (installed Q3_K_M is 6.26 GB,
+so Q8 should fit and bf16 will not), one download at a time with sha256, two fixed prompts (floor, goblin bust) at
+512/8 steps/seed 560 for every working quant including a Q3_K_M rerun under the same protocol, load average
+recorded around each run because the box is busy, contact sheets per prompt, ranking and recommendation in
+~/comfyui/reports/krea-quants.md. This answers the open question (heavier quant vs Klein-only) with data instead of
+a ruling. Cost: the runs will keep the box loud for hours, so the queued D429.1 mini-A/B for the ghost merge waits
+behind it; no further engine/renderer merge lands until it runs.
