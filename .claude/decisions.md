@@ -12276,3 +12276,38 @@ audience boundary, intel attribution, blinded judging, no model
 coordinates). Six preregistered experiments E1-E6 reuse probe / mini-A/B
 / blinded packets; recommended sequence E1 first, E2 in parallel if
 authorised. Owner asked one question: authorise E1 (and E2 in parallel).
+
+## HARVEST — D562 chrome scale + obscured veil verified and committed (claude/classic-r5 67e98afa); probe r5c launched (2026-09-06 14:26)
+
+Codex (01a077cd) delivered 22 files (+845/-221). Part A: all chrome
+metrics derived from a 64-px base and doubled at 128 (text scale 4, HP
+bar 80x8 border 2, cell glyph 18, badge 60x44, gutter 48, legend 240/16,
+border 4), chrome art generators take a scale, CSS driven by --chrome-*
+variables; tests assert every metric at 128 is exactly 2x its 64 value
+and read HP/badge sizes back from rendered styles. Part B diagnosis:
+round 5 had cut obscurement to alpha 145/195 with 25%/50% Bayer coverage
+plus a softened inset, kept the 9-px glyph (half-size on a 128 tile) and
+a 6-px absolute fog hatch; fix = cool-blue patterned fill with two-
+direction diagonal lattice (diamonds), alpha 120/180 fill, 205/235
+lattice, 18-px glyph, legend "OBSCURED - COOL-BLUE DIAMOND VEIL".
+Contrast vs bright/dim/dark rose from deltaE76 ~7.1 to ~8.9 (dL .054 ->
+.019 but the colour term dominates); vs fogged 38.2; floors dE >= 8.5,
+dL >= 0.015 asserted. Moved pins (11): obscurement light/heavy, 8 overlay
+glyphs regenerated at 2x, preview SVG; each paired with structural
+invariants (exact 2x reconstruction, silhouette, origin, pixel counts,
+fog 1-in-6 hatch density, 87-asset generator completeness). No capture
+pin moved. Verified myself: no any/ts-ignore/skip; typecheck 0;
+board-chrome + board-glyphs + classic-art-techniques 56/56; starter-art
+10/10; generate-starter-art --check verified 87 assets + preview; 128-px
+smoke 52f16b22 (2024x3524) viewed: chrome at round-4 proportions, labels
+readable, obscured region unmistakable. Supervisor mutants: A (text
+scale stops scaling) killed 12 failed/11 passed; B (lattice alpha 40/60)
+killed 2 failed/14 passed with the contrast floor naming dL .0002 <
+.015; both restored byte-identical. Committed 67e98afa, tree clean.
+
+Probe r5c launched: 24 states, seed 6203001, luna medium+low, primer v9,
+128-px capture, generation g5c-round5c-24, out dnd-wt-classic5/
+dnd-slim-runs/d562-probe24-r5c.jsonl, log .tmp/runs/d562-probe24-r5c.log.
+Landing rule unchanged: classic lands only if r5c >= round 4 (medium mean
+.830, or better per class incl. Q9 .693); the 64-px diagnostic (.816, Q9
+.350) is the reference for what scale alone buys.
