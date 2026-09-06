@@ -12094,3 +12094,25 @@ UI, Tailwind, signals, event-sourcing lib, Vite swap, component kit,
 router, SW, test stack) each rejected or gated with triggers. Owner
 questions 1-14 in the report; the first for the owner: what concrete
 problem prompted the React question.
+
+## PROBE R5B (classic 5b + 5b.1 art, 4a279a80, primer v9, 24 states, seed 6203001, 480 rows, exit 0): MISS vs round 4 → D561 capture-scale diagnostic fires (2026-09-06 11:39)
+
+Paired per class (mean Jaccard; same 24 states and seed; r4 = d5c74dd0
+round-4 chrome, r4s2 = round 4 second seed, r5 = round-5 art, r5b = 5b.1):
+
+luna medium: Q1 .887/.910/.793/.815, Q2 .903/.897/.708/.807, Q3
+.899/.893/.747/.760, Q4 .713/.707/.479/.734, Q5 .932/.951/.913/.862, Q6
+.792/.750/.792/.667, Q7 .753/.808/.537/.571, Q8 .875/.833/.750/.875, Q9
+.693/.639/.236/.321, Q10 .855/.956/.677/.894. Means r4 .830, r4s2 .834,
+r5 .663, r5b .731; classes >= 0.9: 2 / 3 / 1 / 0.
+luna low: means r4 .757, r5 .580, r5b .707; passes 3 / 0 / 1.
+
+Reading: 5b.1's material response recovered about half of round 5's loss
+(medium mean +0.068 over r5) but stays 0.10 below round 4, with Q9
+(obscured/fog) still collapsed (.321 vs .693) and Q7/Q3/Q6 down. Q4/Q8/
+Q10 are back at or above round 4. Classic does NOT land. Per D561 the
+capture-scale diagnostic now runs without a further ask: probe-only
+change, art untouched, same 24 states/seed, luna medium, 64-px capture
+tile paired against this 128-px r5b run. If the 64-px capture restores
+round-4 scores the regression is raster scale, not art; if not, it is
+the art.
