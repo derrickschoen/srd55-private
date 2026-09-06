@@ -12311,3 +12311,19 @@ dnd-slim-runs/d562-probe24-r5c.jsonl, log .tmp/runs/d562-probe24-r5c.log.
 Landing rule unchanged: classic lands only if r5c >= round 4 (medium mean
 .830, or better per class incl. Q9 .693); the 64-px diagnostic (.816, Q9
 .350) is the reference for what scale alone buys.
+
+## PROBE R5C (D562 chrome scale + obscured veil, 67e98afa, 128 px, 480 rows, exit 0): NEAR round 4, not at it — classic still does not land (2026-09-06 15:52)
+
+luna medium per class (r4 / 64-px diagnostic / r5c): Q1 .887/.905/.919,
+Q2 .903/.849/.916, Q3 .899/.911/.922, Q4 .713/.779/.662, Q5
+.932/.920/.902, Q6 .792/.833/.833, Q7 .753/.786/.809, Q8 .875/.917/.958,
+Q9 .693/.350/.471, Q10 .855/.906/.850. Means .830 / .816 / .824; classes
+>= 0.9: 2 / 5 / 5. luna low means .757 / .785 / .754; passes 3 / 4 / 2.
+
+Reading: chrome scaling delivered what the diagnostic predicted (Q1-Q3,
+Q6-Q8 at or above round 4, five passes at medium). Two classes hold it
+back: Q9 obscured improved .32 -> .47 but is still far below .693, and
+Q4 difficult terrain fell to .662 (low: .544). Landing rule not met
+(mean .824 < .830 and Q9/Q4 below round 4). Next: round 5d art
+increment on obscured + difficult terrain driven by the actual r5c
+answers (which cells were asserted vs truth), same lane, then re-probe.
