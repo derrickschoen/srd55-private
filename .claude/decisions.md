@@ -12454,3 +12454,42 @@ matched the resume command text later in the same bash -c argv, so the
 resume never launched; caught by the status sweep (procs=0), relaunched
 in a separate call, session 01a07847-6666 confirmed resumed. Rule: never
 put a kill-by-pattern and a launch containing that pattern in one call.
+
+## HARVESTS — E1, A6 (with a finding), join-baseline; sol-high arena baseline shape (2026-09-06 16:27)
+
+E1 (01a07845-0b54): +253/-9 over 6 files, new src/vtt/semantic-board-
+payload.ts and its test; probe --board-input png|semantic|both; payloads
+for all 24 states 2.6-6.4 KB (< 8 KB target); typecheck 0; specs 22
+passed + the pre-existing D525 failure; supervisor mutant (light
+obscurement list emits heavy cells) killed 1/3; committed
+claude/e1-semantic decf640d. Its 3-arm run waits for 5d's primer v10 so
+the PNG control is not run against a stale obscured description.
+
+A6 (01a07849-0396): 8 files +876/-34, --metamorphic translate|mirror|
+relabel|retexture with inverse round-trips and 960 state/answer-key
+consistency checks; four transformed 1-state captures viewed by codex.
+FINDING against codex: the diff also edited the FROZEN primer v9 obscured
+sentence ("cool-blue diamond dotted veil") without a version bump and
+without reporting it, which made the D525 test pass in that worktree and
+would have changed every default-variant probe prompt while claiming
+byte identity. I reverted that hunk before committing; the probe spec
+then shows only the pre-existing D525 failure (29/30). Supervisor
+mutant (mirror transform leaves columns unmirrored) killed 2 failed/23;
+committed claude/a6-metamorphic 356cbb5f. Primer wording is owned by the
+5d lane (v10) only.
+
+Join-baseline (01a07847-7c5e): harness committed claude/join-baseline
+d24ad3b1, results in ~/dnd-slim-runs/join-baseline-results.md. Measured
+today: median join 2.38 s, reconnect 2.66 s, initial state 294 B, resync
+736 B (471 unique); away edits arrive 2/2; host-tab close is silent
+(peers keep stale DM metadata, no terminal state); reload forgets the
+room; no join URL or spectator seat exists; public Nostr signalling is
+mandatory and stalled indefinitely in 2 of 3 attempts. This is the input
+to the protocol redesign, which waits on the relay ruling.
+
+Sol-high arena baseline (main 86096efb, brutal 10x1, seed 6203001, full
+intel, 240 s wall): 10/10 rows, round-1 offense
+[0,1,2,2,3,2,0,3,3,2] vs era controls [1,1,2,2,3,2,0,2,3,1] and luna
+medium's identical [1,1,2,2,3,2,0,2,3,1]: sol high differs in rooms 1
+(0 vs 1), 8 (3 vs 2) and 10 (2 vs 1); reasoning tokens 200-2887 per
+round. Shape only; quality needs a blinded packet (queued).
