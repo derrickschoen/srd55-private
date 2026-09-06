@@ -702,6 +702,8 @@ export interface EncounterState {
   readonly reevaluatedBranches?: readonly ReevaluatedSpellBranch[];
   readonly eventLog: readonly EncounterEvent[];
   readonly hiddenCombatants: readonly HiddenCombatant[];
+  /** Canonical last-known token anchors, keyed by the observer-subject pair. */
+  readonly observationHistory: readonly CombatantObservation[];
   /** Monster-side memory retained after a visible enemy becomes undetected. */
   readonly searchMemories?: readonly SearchMemory[];
   /** Reducer-owned active/nearby membership and help-call propagation policy. */
@@ -713,6 +715,14 @@ export interface EncounterState {
   readonly equipment?: readonly CombatantEquipment[];
   readonly groundItems?: readonly GroundItem[];
   readonly itemContacts?: readonly ItemPhysicalContact[];
+}
+
+export interface CombatantObservation {
+  readonly observer: CombatantId;
+  readonly subject: CombatantId;
+  readonly cell: GridCell;
+  readonly round: number;
+  readonly revision: number;
 }
 
 interface ReevaluatedSpellBranch {
@@ -1281,7 +1291,7 @@ export function createEncounter(setup: EncounterSetup): EncounterState {
     }
   }
 
-  return {
+  const initialState: EncounterState = {
     config: { ...config },
     phase: { kind: 'active' },
     rulesEdition: setup.rulesEdition ?? '2024',
@@ -1353,6 +1363,7 @@ export function createEncounter(setup: EncounterSetup): EncounterState {
     nextPersistentAreaSequence: 1,
     eventLog: [],
     hiddenCombatants: [],
+    observationHistory: [],
     ...(nearbyNpcIds.length === 0
       ? {}
       : {
@@ -1382,6 +1393,7 @@ export function createEncounter(setup: EncounterSetup): EncounterState {
           itemContacts: structuredClone(contacts),
         }),
   };
+  return initialState;
 }
 
 function combatant(state: EncounterState, id: CombatantId): EncounterCombatantState {
@@ -2163,6 +2175,60 @@ export function canCombatantSee(
   subject: CombatantId,
 ): boolean {
   return detectCombatant(state, observer, subject).kind === 'seen';
+}
+
+function observationKey(observer: CombatantId, subject: CombatantId): string {
+  return `${String(observer)}\u0000${String(subject)}`;
+}
+
+/**
+ * Refreshes only facts directly perceived in this state. An unperceived
+ * subject's token is never read while retaining its earlier observation.
+ */
+export function reconcileObservationHistory(state: EncounterState): EncounterState {
+  const hidden = new Set(state.hiddenCombatants.map((entry) => entry.combatant));
+  const tokens = new Map(state.tokens.map((token) => [token.combatantId, token] as const));
+  const presentCombatants = new Set(state.combatants.map((combatant) => combatant.profile.id));
+  const presentLiving = new Set(state.combatants.flatMap((combatant) =>
+    combatant.life !== 'dead' && tokens.has(combatant.profile.id)
+      ? [combatant.profile.id]
+      : []));
+  const byPair = new Map(state.observationHistory
+    .filter((entry) => presentCombatants.has(entry.observer) && presentLiving.has(entry.subject))
+    .map((entry) => [observationKey(entry.observer, entry.subject), entry] as const));
+  const validSpaces = new Map<CombatantId, ReturnType<typeof combatantSpace>>();
+  for (const id of presentLiving) {
+    try {
+      validSpaces.set(id, combatantSpace(state, id));
+    } catch (error) {
+      if (!(error instanceof CreatureSizeRuleError)) throw error;
+    }
+  }
+  const combatantIds = [...validSpaces.keys()].sort((left, right) => String(left).localeCompare(String(right)));
+  for (const observer of combatantIds) {
+    for (const subject of combatantIds) {
+      if (observer === subject || hidden.has(subject) || !canCombatantSee(state, observer, subject)) continue;
+      const token = tokens.get(subject);
+      if (token === undefined) continue;
+      const subjectSpace = validSpaces.get(subject);
+      if (subjectSpace === undefined) continue;
+      if (subjectSpace.cells.every((occupied) =>
+        state.foggedCells.some((fogged) => cellKey(fogged) === cellKey(occupied)))) continue;
+      byPair.set(observationKey(observer, subject), {
+        observer,
+        subject,
+        cell: { ...token.position },
+        round: state.round,
+        revision: state.revision,
+      });
+    }
+  }
+  return {
+    ...state,
+    observationHistory: [...byPair.values()].sort((left, right) =>
+      String(left.observer).localeCompare(String(right.observer)) ||
+      String(left.subject).localeCompare(String(right.subject))),
+  };
 }
 
 interface MonsterVisibilitySnapshot {
@@ -12710,28 +12776,32 @@ export function reduceEncounter(
   rng: Rng,
   options: EncounterReductionOptions = {},
 ): EncounterReduction {
-  const visibilityBefore = monsterVisibilitySnapshot(state);
+  const observedState = reconcileObservationHistory(state);
+  const visibilityBefore = monsterVisibilitySnapshot(observedState);
   const context: ReductionContext = {
-    state: { ...state, revision: state.revision + 1 },
+    state: { ...observedState, revision: observedState.revision + 1 },
     rng: transactionalRng(rng),
     events: [],
     reactionDecision: options.reactionDecision ?? null,
   };
   const resolvedDecision = command.type === 'resolve_pending_decision'
-    ? state.pendingDecisions.find((decision) => decision.id === command.decisionId)
+    ? observedState.pendingDecisions.find((decision) => decision.id === command.decisionId)
     : undefined;
   const deferredLegendaryBoundary = resolvedDecision?.kind === 'legendary_action_window';
   const resumedLegendaryBoundary = command.type === 'end_turn' &&
-    resumesLegendaryTurnBoundary(state, command.actor);
+    resumesLegendaryTurnBoundary(observedState, command.actor);
   processCommand(context, command);
   reconcileSearchMemories(context, visibilityBefore, command);
   advanceSearchMemories(context);
   const conclusion = deferredLegendaryBoundary
     ? null
-    : encounterConclusionAfter(state, context.state) ??
+    : encounterConclusionAfter(observedState, context.state) ??
       (resumedLegendaryBoundary
         ? encounterConclusionFromCurrentState(context.state)
         : null);
   if (conclusion !== null) context.state = { ...context.state, phase: conclusion };
-  return { state: compactD420State(context.state), events: context.events };
+  return {
+    state: compactD420State(reconcileObservationHistory(context.state)),
+    events: context.events,
+  };
 }

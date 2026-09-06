@@ -68,7 +68,7 @@ describe('symmetric scripted-PC evaluator', () => {
       tactical: 'tactical-evaluator-v3',
       movement: 'movement-eval-v2',
       concentration: 'concentration-intel-v2',
-      actorKnowledge: 'actor-knowledge-v3',
+      actorKnowledge: 'actor-knowledge-last-seen-v4',
     });
     expect(decision.selected.command).toEqual(move);
     const movement = decision.selected.movement;

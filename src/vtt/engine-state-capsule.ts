@@ -10,7 +10,7 @@ import {
   type EncounterSessionId,
   type EngineZoneId,
 } from '../combat/values';
-import type { EncounterState } from '../combat/encounter';
+import type { CombatantObservation, EncounterState } from '../combat/encounter';
 import {
   applySizeSteps,
   creatureSpace,
@@ -148,6 +148,7 @@ export interface EngineDmProjection {
     readonly cells: readonly GridCell[];
   }[];
   readonly combatants: readonly EngineProjectionCombatant[];
+  readonly observationHistory: readonly CombatantObservation[];
   readonly semanticZones: readonly EngineSemanticZone[];
 }
 
@@ -188,7 +189,7 @@ export interface RuleReference {
 
 export interface EngineStateCapsule {
   readonly format: 'engine-mcp-state-capsule';
-  readonly schemaVersion: 2;
+  readonly schemaVersion: 3;
   readonly runId: EncounterSessionId;
   readonly branchId: EncounterBranchId;
   readonly revision: number;
@@ -421,7 +422,7 @@ function decodeCapsuleRequest(value: unknown): EngineCapsuleRequest | null {
 
 const projectionKeys = [
   'room', 'round', 'activeSide', 'activeCombatant', 'initiative', 'bounds', 'blockedCells',
-  'difficultTerrainCells', 'movementBlockingObjects', 'combatants', 'semanticZones',
+  'difficultTerrainCells', 'movementBlockingObjects', 'combatants', 'observationHistory', 'semanticZones',
 ] as const;
 const combatantIdentityKeys = [
   'id', 'name', 'side', 'life', 'hitPoints', 'hitPointMaximum', 'speedFeet', 'reachFeet',
@@ -551,6 +552,15 @@ function decodeEngineProjection(value: unknown): EngineDmProjection {
         .forEach((cell, cellIndex) => decodeGridCell(cell, `movementBlockingObject.cells[${String(cellIndex)}]`));
     });
   capsuleArray(record['combatants'], 'projection.combatants', 1_000).forEach(decodeProjectionCombatant);
+  capsuleArray(record['observationHistory'], 'projection.observationHistory', 1_000_000).forEach((value) => {
+    const observation = capsuleRecord(value, 'observation');
+    exactCapsuleKeys(observation, ['observer', 'subject', 'cell', 'round', 'revision'], 'observation');
+    capsuleIdentity(observation['observer'], 'observation.observer', combatantId);
+    capsuleIdentity(observation['subject'], 'observation.subject', combatantId);
+    decodeGridCell(observation['cell'], 'observation.cell');
+    capsuleInteger(observation['round'], 'observation.round');
+    capsuleInteger(observation['revision'], 'observation.revision');
+  });
   capsuleArray(record['semanticZones'], 'projection.semanticZones', 10_000).forEach((value) => {
     const zone = capsuleRecord(value, 'semanticZone');
     exactCapsuleKeys(zone, ['id', 'kind', 'memberCombatantIds', 'active'], 'semanticZone');
@@ -574,11 +584,11 @@ function decodeEngineProjection(value: unknown): EngineDmProjection {
   return structuredClone(record) as unknown as EngineDmProjection;
 }
 
-/** Strict schema-2 decoder. Digest verification happens only after shape and semantics. */
+/** Strict schema-3 decoder. Digest verification happens only after shape and semantics. */
 export function decodeEngineStateCapsule(value: unknown): EngineStateCapsule {
   const record = capsuleRecord(value, 'engine state capsule');
-  if (record['schemaVersion'] !== 2) {
-    throw new EngineStateCapsuleDecodeError('unsupported_version', 'Only engine state capsule schema 2 is accepted.');
+  if (record['schemaVersion'] !== 3) {
+    throw new EngineStateCapsuleDecodeError('unsupported_version', 'Only engine state capsule schema 3 is accepted.');
   }
   exactCapsuleKeys(record, [
     'format', 'schemaVersion', 'runId', 'branchId', 'revision', 'digest', 'generatedAt',
@@ -647,6 +657,7 @@ function activeSide(projection: DmBoardProjection): EngineDmProjection['activeSi
 export function projectEngineDmProjection(
   projection: DmBoardProjection,
   registry: EngineActionRegistry,
+  observationHistory: EncounterState['observationHistory'],
   room: number | null = null,
 ): EngineDmProjection {
   const encounter = projection.encounter;
@@ -707,6 +718,7 @@ export function projectEngineDmProjection(
           }
         : { ...identity, placementStatus: 'placement_pending', pendingReason: combatant.pendingReason };
     }),
+    observationHistory: structuredClone(observationHistory),
     semanticZones: structuredClone(registry.semanticZones()),
   };
 }
@@ -778,6 +790,7 @@ export function projectEngineEncounterState(
         footprint: space.cells.map((cell) => ({ ...cell })) as [GridCell, ...GridCell[]],
       }];
     }),
+    observationHistory: structuredClone(state.observationHistory),
     semanticZones: structuredClone(registry.semanticZones()),
   };
 }
@@ -887,7 +900,7 @@ export function createEngineStateCapsule(input: {
   }
   const body: CapsuleDigestInput = {
     format: 'engine-mcp-state-capsule',
-    schemaVersion: 2,
+    schemaVersion: 3,
     runId: input.runId,
     branchId: input.branchId,
     revision: input.revision,

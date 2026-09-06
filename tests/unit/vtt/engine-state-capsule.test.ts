@@ -27,7 +27,7 @@ import { projectDmBoard } from '../../../src/vtt/encounter-projections';
 import { availableEngineActorOptions, pureTurnProposalResolver } from '../../../src/vtt/intent-resolver';
 import { freshMonsterPlanningState } from '../../../src/vtt/mcp/entrypoint';
 import { generateRoom } from '../../../src/vtt/room-generator';
-import { HAND_AUTHORED_CAPSULE_V2_BODY } from '../../fixtures/vtt/creature-space-migration-fixtures';
+import { HAND_AUTHORED_CAPSULE_V3_BODY } from '../../fixtures/vtt/creature-space-migration-fixtures';
 
 const repoRoot = fileURLToPath(new URL('../../../', import.meta.url));
 const authorityBoundaryEntries = [
@@ -154,7 +154,7 @@ function capsuleFixture() {
       correctionNumber: 0,
       actors: [actor.profile.id],
     },
-    projection: projectEngineDmProjection(board, engineActionRegistry(state), 1),
+    projection: projectEngineDmProjection(board, engineActionRegistry(state), state.observationHistory, 1),
   });
   return { state, actor: actor.profile.id, target: target.profile.id, requestId, capsule };
 }
@@ -181,8 +181,8 @@ function rehash(value: unknown): Record<string, unknown> {
 }
 
 describe('read-only engine state capsule', () => {
-  it('exercises the strict capsule corpus from a hand-authored schema-2 fixture', () => {
-    const body = structuredClone(HAND_AUTHORED_CAPSULE_V2_BODY);
+  it('exercises the strict capsule corpus from a hand-authored schema-3 fixture', () => {
+    const body = structuredClone(HAND_AUTHORED_CAPSULE_V3_BODY);
     const fixture = {
       ...body,
       digest: sha256(canonicalJson(body)),
@@ -244,7 +244,7 @@ describe('read-only engine state capsule', () => {
     );
   });
 
-  it('strictly decodes schema 2 only after exact shape and spatial semantics validate', () => {
+  it('strictly decodes schema 3 only after exact shape and spatial semantics validate', () => {
     const { capsule } = capsuleFixture();
     expect(decodeEngineStateCapsule(capsule)).toEqual(capsule);
 
@@ -332,7 +332,7 @@ describe('read-only engine state capsule', () => {
       history: [],
     });
     const pendingRegistry = engineActionRegistry(pendingState);
-    const fromBoard = projectEngineDmProjection(pendingBoard, pendingRegistry, 1);
+    const fromBoard = projectEngineDmProjection(pendingBoard, pendingRegistry, pendingState.observationHistory, 1);
     const fromState = projectEngineEncounterState(pendingState, pendingRegistry, fromBoard.initiative, 1);
     expect(fromState).toEqual(fromBoard);
     const pending = fromState.combatants.find((combatant) => combatant.id === pendingId);
@@ -514,6 +514,7 @@ describe('read-only engine state capsule', () => {
       'difficultTerrainCells',
       'initiative',
       'movementBlockingObjects',
+      'observationHistory',
       'room',
       'round',
       'semanticZones',

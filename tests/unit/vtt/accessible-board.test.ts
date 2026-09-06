@@ -130,6 +130,42 @@ function conditionPrivacyState(): {
   return { state, viewer: viewer.id, target: target.id };
 }
 
+function lastSeenMovementState(): {
+  readonly state: EncounterState;
+  readonly viewer: CombatantId;
+  readonly target: CombatantId;
+} {
+  const viewer = playerProfile('accessible-last-seen-viewer', { initiativeBonus: -20 });
+  const target = monsterProfile('accessible-last-seen-target', { initiativeBonus: 20 });
+  let state = createEncounter({
+    bounds: { columns: 6, rows: 2 },
+    combatants: [viewer, target],
+    tokens: [placedToken(viewer, 0), placedToken(target, 2)],
+  });
+  state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+  const effect: EffectApplication = {
+    targets: [target.id],
+    duration: { kind: 'permanent' },
+    concentration: false,
+    stackingIdentity: effectStackingIdentity('accessible:last-seen-invisible'),
+    stacking: 'replace_same_source',
+    repeatedSave: null,
+    payload: { kind: 'condition', condition: 'Invisible' },
+  };
+  state = reduceEncounter(
+    state,
+    { type: 'apply_effect', actor: target.id, effect, cost: 'none' },
+    () => 0.5,
+  ).state;
+  state = reduceEncounter(state, {
+    type: 'move', actor: target.id, path: [{ column: 3, row: 0 }], cause: 'voluntary',
+  }, () => 0.5).state;
+  state = reduceEncounter(state, {
+    type: 'move', actor: target.id, path: [{ column: 4, row: 0 }], cause: 'voluntary',
+  }, () => 0.5).state;
+  return { state, viewer: viewer.id, target: target.id };
+}
+
 describe('screen-reader board HTML', () => {
   it('redacts private non-owned conditions from player HTML while the DM HTML names them', () => {
     const fixture = conditionPrivacyState();
@@ -215,6 +251,42 @@ describe('screen-reader board HTML', () => {
     expect(html).not.toContain(`data-cell="${String(hiddenToken.position.column)},${String(hiddenToken.position.row)}"`);
     expect(html).not.toContain('<td>Hidden from players</td>');
     expect(renderedFactCellKeys(html)).toEqual(factCellKeys(player));
+  });
+
+  it('renders player last-seen rows without leaking either hidden movement destination', () => {
+    const fixture = lastSeenMovementState();
+    const player = projectPlayerBoard(projectPlayerView(fixture.state, {
+      seatId: 'seat:accessible-last-seen',
+      combatantId: fixture.viewer,
+      ownedCombatantIds: [fixture.viewer],
+    }), IDLE);
+    const playerHtml = serializeAccessibleBoard({
+      encounterName: 'Last-seen movement', audience: 'player', round: player.round,
+      activeCombatant: player.activeCombatant, board: player,
+    });
+    const dmHtml = serializeAccessibleBoard({
+      encounterName: 'Last-seen movement', audience: 'dm', round: fixture.state.round,
+      activeCombatant: fixture.state.activeCombatant,
+      board: projectEncounterBoard(projectDmView(fixture.state)),
+    });
+
+    expect(player.lastSeen).toEqual([{
+      id: fixture.target,
+      name: 'accessible-last-seen-target',
+      kind: 'monster',
+      cell: { column: 2, row: 0 },
+      round: 1,
+    }]);
+    expect(playerHtml).toContain('<h2 id="last-seen-heading">Last seen</h2>');
+    expect(playerHtml).toContain(
+      `<tr data-last-seen-id="${fixture.target}"><th scope="row">accessible-last-seen-target</th><td>Foe</td><td>(2,0)</td><td>1</td></tr>`,
+    );
+    expect(playerHtml).not.toContain('(3,0)');
+    expect(playerHtml).not.toContain('(4,0)');
+    expect(dmHtml).not.toContain('id="last-seen-heading"');
+    expect(dmHtml).toContain('(4,0)');
+    assertSmallHtmlParserAccepts(playerHtml);
+    assertSmallHtmlParserAccepts(dmHtml);
   });
 
   it('renders every arena fact cell and produces byte-identical HTML for the same state', async () => {

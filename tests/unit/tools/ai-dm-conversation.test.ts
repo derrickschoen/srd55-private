@@ -1030,7 +1030,7 @@ describe('AI-DM engine MCP conversation runner', () => {
         teamScorer: 'team-scorer-v1',
         correction: 'dominance-correction-v1',
         materialityContext: 'materiality-context-v1',
-        actorKnowledge: 'actor-knowledge-v3',
+        actorKnowledge: 'actor-knowledge-last-seen-v4',
         reactionSpendHold: 'reaction-spend-hold-v1',
         legendaryWindows: 'legendary-windows-v2',
         recoveryCapability: 'recovery-capability-v2',
@@ -1089,17 +1089,17 @@ describe('AI-DM engine MCP conversation runner', () => {
     ];
     expect(capturedActorKnowledge).toEqual([
       {
-        policy: 'actor-knowledge-v3',
+        policy: 'actor-knowledge-last-seen-v4',
         actorId: 'combatant:generated-3943001-monster-1',
         targets: projectedTargets([70, 75, 75]),
       },
       {
-        policy: 'actor-knowledge-v3',
+        policy: 'actor-knowledge-last-seen-v4',
         actorId: 'combatant:generated-3943001-monster-2',
         targets: projectedTargets([65, 70, 70]),
       },
       {
-        policy: 'actor-knowledge-v3',
+        policy: 'actor-knowledge-last-seen-v4',
         actorId: 'combatant:generated-3943001-monster-3',
         targets: projectedTargets([70, 75, 75]),
       },

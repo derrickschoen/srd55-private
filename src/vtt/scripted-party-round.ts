@@ -53,7 +53,7 @@ export interface ScriptedPartyPlan {
 }
 
 export interface ScriptedPartyPlanOptions {
-  /** Defaults to the actor-knowledge-v3 symmetric evaluator; v0 remains A/B selectable. */
+  /** Defaults to the actor-knowledge-last-seen-v4 symmetric evaluator; v0 remains A/B selectable. */
   readonly decisionPolicy?: ScriptedPcDecisionPolicy;
   readonly controller?: AlgorithmController;
   readonly turnLegalActions?: TurnLegalActions;

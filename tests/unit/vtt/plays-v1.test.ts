@@ -133,6 +133,7 @@ function handBuiltCapsule(): EngineStateCapsule {
     blockedCells: [{ column: 2, row: 1 }],
     difficultTerrainCells: [],
     movementBlockingObjects: [],
+    observationHistory: [],
     combatants: [
       projectedActor({ id: BRUTE, side: 'monster', hitPoints: 18, position: { column: 0, row: 1 }, options: bruteOptions }),
       projectedActor({ id: ARCHER, side: 'monster', hitPoints: 12, position: { column: 0, row: 3 }, options: archerOptions }),

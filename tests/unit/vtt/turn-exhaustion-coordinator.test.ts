@@ -79,7 +79,7 @@ function fixture() {
       correctionNumber: MAX_PROPOSAL_CORRECTIONS,
       actors: [actor],
     },
-    projection: projectEngineDmProjection(projection, engineActionRegistry(state), 1),
+    projection: projectEngineDmProjection(projection, engineActionRegistry(state), state.observationHistory, 1),
   });
   return { actor, branchId, capsule, journal, sessionId, state, store };
 }

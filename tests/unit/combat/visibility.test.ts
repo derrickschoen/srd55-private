@@ -190,14 +190,22 @@ describe('D359 encounter views', () => {
         footprint: [{ column: 2, row: 1 }],
       });
 
+    const observed = reduceEncounter(created, { type: 'roll_initiative' }, fixedD20(10)).state;
     const hidden = {
-      ...created,
+      ...observed,
       hiddenCombatants: [{ combatant: target.id, stealthTotal: 20, edition: '2024' as const }],
     };
     const player = projectPlayerView(hidden, { seatId: 'seat:hidden', combatantId: viewer.id });
     const dm = dmVisibleEncounter(projectDmView(hidden));
     expect(player.combatants.some((entry) => entry.id === target.id)).toBe(false);
-    expect(JSON.stringify(player)).not.toContain(String(target.id));
+    expect(player.lastSeen).toEqual([{
+      id: target.id,
+      name: target.name,
+      kind: 'monster',
+      cell: { column: 2, row: 1 },
+      round: 1,
+    }]);
+    expect(JSON.stringify(player)).not.toContain('"position":{"column":2,"row":1}');
     expect(dm.combatants.find((entry) => entry.id === target.id)).toMatchObject({
       placementStatus: 'placed', hiddenFromPlayers: true,
       footprint: [

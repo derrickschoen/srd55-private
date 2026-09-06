@@ -179,7 +179,7 @@ describe('footprint Increment 3 AI-DM semantics', () => {
 
   it('records nearest-cell distance in actor knowledge', () => {
     const projection = projectActorKnowledge(separatedState(), SCOUT);
-    expect(projection.policy).toBe('actor-knowledge-v3');
+    expect(projection.policy).toBe('actor-knowledge-last-seen-v4');
     expect(projection.targets).toEqual([
       expect.objectContaining({
         kind: 'perceived', placementStatus: 'placed', targetId: FIGHTER,

@@ -2,6 +2,7 @@ import {
   decodeProjectedCreatureSpace,
   minimumSpaceDistance,
 } from '../combat/creature-space';
+import type { PlayerLastSeenCombatant } from '../combat/visibility';
 import type { CombatantId } from '../combat/values';
 import { hpBandOf, type HpBand } from './board-chrome';
 import type {
@@ -16,13 +17,24 @@ export const ACCESSIBLE_BOARD_VIEW_MODES = ['graphic', 'screen_reader'] as const
 export type AccessibleBoardViewMode = (typeof ACCESSIBLE_BOARD_VIEW_MODES)[number];
 export type AccessibleBoardAudience = 'dm' | 'player';
 
-export interface AccessibleBoardContext {
+interface AccessibleBoardContextBase {
   readonly encounterName: string;
-  readonly audience: AccessibleBoardAudience;
   readonly round: number;
   readonly activeCombatant: CombatantId | null;
-  readonly board: EncounterBoardProjectionShape;
 }
+
+export type AccessibleBoardContext = AccessibleBoardContextBase & (
+  | {
+      readonly audience: 'dm';
+      readonly board: EncounterBoardProjectionShape;
+    }
+  | {
+      readonly audience: 'player';
+      readonly board: EncounterBoardProjectionShape & {
+        readonly lastSeen: readonly PlayerLastSeenCombatant[];
+      };
+    }
+);
 
 export const ACCESSIBLE_BOARD_COORDINATE_CONVENTION =
   'Coordinates are zero-based (column,row), the origin is at the top-left, and each cell represents 5 feet.';
@@ -32,7 +44,7 @@ const TERM_LEGEND = [
   ['Foe', 'A monster creature.'],
   ['HP band', 'Uninjured, bloodied, near death, or unknown; it is not an exact Hit Point total.'],
   ['Hidden from players', 'The DM knows this creature is hidden; player exports omit it and its current cell.'],
-  ['Last known', 'A previously observed position, not the creature\'s current position.'],
+  ['Last seen', 'A previously observed position, not the creature\'s current position.'],
   ['Difficult terrain', 'A projected terrain or area fact that increases movement cost.'],
   ['Obscurement', 'Light, heavy, or magical-darkness obscurement projected for a cell.'],
   ['Fog or concealed', 'The audience projection does not reveal the cell\'s contents.'],
@@ -120,6 +132,15 @@ function creatureRows(context: AccessibleBoardContext): string {
     ];
     return `<tr data-creature-id="${escapeHtml(String(combatant.id))}">${cells.map((value) => `<td>${escapeHtml(value)}</td>`).join('')}</tr>`;
   }).join('');
+}
+
+function lastSeenSection(context: AccessibleBoardContext): string {
+  if (context.audience === 'dm') return '';
+  const rows = context.board.lastSeen.map((subject) => {
+    const side = subject.kind === 'player_character' ? 'Party' : 'Foe';
+    return `<tr data-last-seen-id="${escapeHtml(String(subject.id))}"><th scope="row">${escapeHtml(subject.name)}</th><td>${side}</td><td>${cellText(subject.cell)}</td><td>${String(subject.round)}</td></tr>`;
+  }).join('');
+  return `<section aria-labelledby="last-seen-heading"><h2 id="last-seen-heading">Last seen</h2><table><caption>Last-seen creature positions known to this player</caption><thead><tr><th scope="col">Name</th><th scope="col">Side</th><th scope="col">Cell</th><th scope="col">Round</th></tr></thead><tbody>${rows}</tbody></table></section>`;
 }
 
 function objectFact(object: EncounterBoardWorldObject): string {
@@ -251,7 +272,7 @@ function legend(): string {
 
 function boardArticle(context: AccessibleBoardContext): string {
   const title = `${context.encounterName} screen-reader board`;
-  return `<article class="accessible-board" lang="en" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}" data-board-audience="${context.audience}"><header aria-label="Encounter summary"><h1>${escapeHtml(context.encounterName)}</h1><p>Round: ${String(context.round)}</p><p>Active creature: ${escapeHtml(activeCreatureName(context))}</p><p>Audience: ${context.audience === 'dm' ? 'Dungeon Master' : 'Player'}</p><p>Board dimensions: ${String(context.board.bounds.columns)} columns by ${String(context.board.bounds.rows)} rows</p></header><section aria-labelledby="creatures-heading"><h2 id="creatures-heading">Creatures</h2><table><caption>Creature positions and states</caption><thead><tr><th scope="col">Number</th><th scope="col">Name</th><th scope="col">Side</th><th scope="col">Creature type</th><th scope="col">Cell</th><th scope="col">Size</th><th scope="col">Footprint cells</th><th scope="col">Placement</th><th scope="col">HP band</th><th scope="col">Life</th><th scope="col">Conditions</th><th scope="col">Hidden or last-known status</th><th scope="col">Markers</th></tr></thead><tbody>${creatureRows(context)}</tbody></table></section><section aria-labelledby="cells-heading"><h2 id="cells-heading">Cells carrying facts</h2><table><caption>Only cells with projected board facts</caption><thead><tr><th scope="col">Cell</th><th scope="col">Facts</th></tr></thead><tbody>${factRows(context)}</tbody></table></section><section aria-labelledby="adjacency-heading"><h2 id="adjacency-heading">Creatures within 5 feet</h2>${adjacencyLists(context)}</section><section aria-labelledby="reach-heading"><h2 id="reach-heading">Reach and range</h2>${reachLists(context)}</section><section aria-labelledby="effects-heading"><h2 id="effects-heading">Sustained effects</h2>${sustainedEffects(context)}</section><section aria-labelledby="connections-heading"><h2 id="connections-heading">Target connections</h2>${targetConnections(context)}</section><aside aria-labelledby="legend-heading"><h2 id="legend-heading">Legend of terms</h2>${legend()}</aside><footer aria-label="Coordinate convention"><h2>Coordinate convention</h2><p>${ACCESSIBLE_BOARD_COORDINATE_CONVENTION}</p></footer></article>`;
+  return `<article class="accessible-board" lang="en" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}" data-board-audience="${context.audience}"><header aria-label="Encounter summary"><h1>${escapeHtml(context.encounterName)}</h1><p>Round: ${String(context.round)}</p><p>Active creature: ${escapeHtml(activeCreatureName(context))}</p><p>Audience: ${context.audience === 'dm' ? 'Dungeon Master' : 'Player'}</p><p>Board dimensions: ${String(context.board.bounds.columns)} columns by ${String(context.board.bounds.rows)} rows</p></header><section aria-labelledby="creatures-heading"><h2 id="creatures-heading">Creatures</h2><table><caption>Creature positions and states</caption><thead><tr><th scope="col">Number</th><th scope="col">Name</th><th scope="col">Side</th><th scope="col">Creature type</th><th scope="col">Cell</th><th scope="col">Size</th><th scope="col">Footprint cells</th><th scope="col">Placement</th><th scope="col">HP band</th><th scope="col">Life</th><th scope="col">Conditions</th><th scope="col">Hidden or last-known status</th><th scope="col">Markers</th></tr></thead><tbody>${creatureRows(context)}</tbody></table></section>${lastSeenSection(context)}<section aria-labelledby="cells-heading"><h2 id="cells-heading">Cells carrying facts</h2><table><caption>Only cells with projected board facts</caption><thead><tr><th scope="col">Cell</th><th scope="col">Facts</th></tr></thead><tbody>${factRows(context)}</tbody></table></section><section aria-labelledby="adjacency-heading"><h2 id="adjacency-heading">Creatures within 5 feet</h2>${adjacencyLists(context)}</section><section aria-labelledby="reach-heading"><h2 id="reach-heading">Reach and range</h2>${reachLists(context)}</section><section aria-labelledby="effects-heading"><h2 id="effects-heading">Sustained effects</h2>${sustainedEffects(context)}</section><section aria-labelledby="connections-heading"><h2 id="connections-heading">Target connections</h2>${targetConnections(context)}</section><aside aria-labelledby="legend-heading"><h2 id="legend-heading">Legend of terms</h2>${legend()}</aside><footer aria-label="Coordinate convention"><h2>Coordinate convention</h2><p>${ACCESSIBLE_BOARD_COORDINATE_CONVENTION}</p></footer></article>`;
 }
 
 export function serializeAccessibleBoard(context: AccessibleBoardContext): string {

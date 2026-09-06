@@ -80,10 +80,10 @@ export const HAND_AUTHORED_REPLAY_V5_BODY = Object.freeze({
   transcripts: [],
 });
 
-/** Literal capsule-2 body authored from the approved register, not from projector output. */
-export const HAND_AUTHORED_CAPSULE_V2_BODY = Object.freeze({
+/** Literal capsule-3 body authored from the approved register, not from projector output. */
+export const HAND_AUTHORED_CAPSULE_V3_BODY = Object.freeze({
   format: 'engine-mcp-state-capsule',
-  schemaVersion: 2,
+  schemaVersion: 3,
   runId: 'encounter:hand-authored-capsule-v2',
   branchId: 'branch:hand-authored-capsule-v2',
   revision: 1,
@@ -171,6 +171,13 @@ export const HAND_AUTHORED_CAPSULE_V2_BODY = Object.freeze({
         pendingReason: 'legacy_size_required',
       },
     ],
+    observationHistory: [{
+      observer: 'combatant:hand-authored-large',
+      subject: 'combatant:hand-authored-pending',
+      cell: { column: 4, row: 4 },
+      round: 1,
+      revision: 1,
+    }],
     semanticZones: [],
   },
   historyDelta: [],

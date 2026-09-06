@@ -51,6 +51,7 @@ const META = mcpRequestMeta({ name: 'board-delivery-test', version: '1.0.0' });
 // Independently reproduced from committed footprints Increment 3 (8bdc7ba8),
 // before the board-delivery branch was merged into it.
 const FOOTPRINTS_RAW_CONTEXT_SHA256 = '3ab18fe4c51818906b22d317126876617ad9615c00a1be7621e2b819876aca19';
+const FOOTPRINTS_STATE_HANDLE = 'engine-state:c7c7b052bd70a39bf59c83277b7508d8bf52b69100fbde5939c8562ac8686842';
 
 function record(value: unknown, label: string): Readonly<Record<string, unknown>> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -457,8 +458,18 @@ describe('arena capture lifecycle and off-arm invariance', () => {
 
     const raw = offResult[0]?.rawTurnContext;
     if (raw === undefined) throw new TypeError('Off-arm row omitted rawTurnContext.');
-    expect(Buffer.byteLength(raw)).toBe(32_180);
-    expect(createHash('sha256').update(raw).digest('hex')).toBe(FOOTPRINTS_RAW_CONTEXT_SHA256);
+    expect(Buffer.byteLength(raw)).toBe(32_175);
+    const rawRecord = record(JSON.parse(raw) as unknown, 'off raw context');
+    expect(record(rawRecord['actor_knowledge'], 'off actor knowledge')['policy'])
+      .toBe('actor-knowledge-v3-last-seen');
+    const stateHandle = record(rawRecord['state_ref'], 'off state ref')['state_handle'];
+    expect(stateHandle).toMatch(/^engine-state:[0-9a-f]{64}$/u);
+    expect(stateHandle).not.toBe(FOOTPRINTS_STATE_HANDLE);
+    const baselineEquivalent = raw
+      .replace('actor-knowledge-v3-last-seen', 'actor-knowledge-v2-creature-space')
+      .replace(String(stateHandle), FOOTPRINTS_STATE_HANDLE);
+    expect(Buffer.byteLength(baselineEquivalent)).toBe(32_180);
+    expect(createHash('sha256').update(baselineEquivalent).digest('hex')).toBe(FOOTPRINTS_RAW_CONTEXT_SHA256);
 
     const offHandler = createMcpHandler({ tools: [{
       descriptor: { name: 'engine.get_turn_context', description: 'off-byte fixture', inputSchema: {} },

@@ -27,19 +27,14 @@ import {
 } from './contracts';
 
 /** Versioned policy for the actor-local target-knowledge projection. */
-export const ACTOR_KNOWLEDGE_POLICY = intelPolicyVersion('actor-knowledge-v3');
+export const ACTOR_KNOWLEDGE_POLICY = intelPolicyVersion('actor-knowledge-last-seen-v4');
 
 export type ActorKnowledgePolicy = typeof ACTOR_KNOWLEDGE_POLICY;
 
-/**
- * The engine does not yet record observation history. This is deliberately
- * typed rather than treating a current hidden target as if it had no history.
- */
 export type LastSeenPositionUnavailable = UnresolvedIntel<
-  'last_seen_position_not_modeled'
+  'never_observed'
 >;
 
-/** Reserved for when a mechanically recorded observation history is added. */
 export type LastSeenPositionKnown = ResolvedIntel<{
   readonly lastSeenPosition: GridCell;
 }>;
@@ -104,13 +99,29 @@ function sameCell(left: GridCell, right: GridCell): boolean {
   return left.column === right.column && left.row === right.row;
 }
 
-function unknownTarget(targetId: CombatantId): UnknownTargetKnowledge {
+function unlocatedTarget(
+  state: EncounterState,
+  observer: CombatantId,
+  targetId: CombatantId,
+): SuspectedTargetKnowledge | UnknownTargetKnowledge {
+  const observation = state.observationHistory.find((entry) =>
+    entry.observer === observer && entry.subject === targetId);
+  if (observation !== undefined) {
+    return {
+      kind: 'suspected',
+      targetId,
+      lastSeen: {
+        status: 'resolved',
+        lastSeenPosition: { ...observation.cell },
+      },
+    };
+  }
   return {
     kind: 'unknown',
     targetId,
     lastSeen: {
       status: 'unresolved',
-      reason: 'last_seen_position_not_modeled',
+      reason: 'never_observed',
     },
   };
 }
@@ -213,8 +224,8 @@ function reactionKnowledge(
 }
 
 /**
- * Projects living opponents as one actor can currently locate them. It does
- * not infer a last-seen position or retain search history; D420 owns that.
+ * Projects living opponents as one actor can currently locate them, falling
+ * back only to reducer-owned observation history.
  */
 export function projectActorKnowledge(
   state: EncounterState,
@@ -243,14 +254,14 @@ export function projectActorKnowledge(
         };
       }
       if (target === undefined) {
-        return unknownTarget(targetId);
+        return unlocatedTarget(state, actorId, targetId);
       }
-      if (!actorIsPlaced) return unknownTarget(targetId);
+      if (!actorIsPlaced) return unlocatedTarget(state, actorId, targetId);
 
       const space = combatantSpace(state, targetId);
       // Fog is a map-level redaction. A partially exposed footprint remains locatable.
       if (space.cells.every((occupied) => state.foggedCells.some((cell) => sameCell(cell, occupied)))) {
-        return unknownTarget(targetId);
+        return unlocatedTarget(state, actorId, targetId);
       }
 
       const detection = detectCombatant(state, actorId, targetId);
@@ -275,7 +286,7 @@ export function projectActorKnowledge(
           reaction: reactionKnowledge(state, targetId),
         };
       }
-      return unknownTarget(targetId);
+      return unlocatedTarget(state, actorId, targetId);
     })
     .sort((left, right) => String(left.targetId).localeCompare(String(right.targetId)));
 
@@ -287,6 +298,6 @@ export function projectActorKnowledge(
 }
 
 /** Lets consumers name the versioned policy without accepting arbitrary strings. */
-export function actorKnowledgePolicyVersion(): IntelPolicyVersion<'actor-knowledge-v3'> {
+export function actorKnowledgePolicyVersion(): IntelPolicyVersion<'actor-knowledge-last-seen-v4'> {
   return ACTOR_KNOWLEDGE_POLICY;
 }

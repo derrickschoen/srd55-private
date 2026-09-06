@@ -189,6 +189,7 @@ function d466NonRosterProjection(room: GeneratedRoom): unknown {
         },
         sharedSpaceRelations: undefined,
         adjudicationPending: undefined,
+        observationHistory: undefined,
       },
     },
   });
@@ -296,6 +297,7 @@ function expectedCreatureSpaceFixture(bytes: string): string {
         },
         sharedSpaceRelations: [],
         adjudicationPending: [],
+        observationHistory: [],
       },
     },
   };
@@ -339,6 +341,7 @@ function legacyCreatureSpaceProjection(room: GeneratedRoom): string {
         },
         sharedSpaceRelations: undefined,
         adjudicationPending: undefined,
+        observationHistory: undefined,
       },
     },
   }));

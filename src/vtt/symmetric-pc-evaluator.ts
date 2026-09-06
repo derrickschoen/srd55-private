@@ -322,7 +322,7 @@ function compareRank(left: readonly [number, number, string], right: readonly [n
 }
 
 /**
- * Evaluates legal PC commands from actor-knowledge-v3. The full state never
+ * Evaluates legal PC commands from actor-knowledge-last-seen-v4. The full state never
  * supplies an opponent fact to a tactical decision; it is passed to the
  * projected movement provider only through its projection-restricted entrypoint.
  */
