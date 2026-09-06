@@ -12043,3 +12043,27 @@ against our actual UI code (~4.7k lines of imperative DOM in four files,
 269k src / 286k test lines), other fundamental shifts (worker, wasm,
 monorepo, CSS, signals, testing), one recommendation with a decision rule.
 Supervisor review on harvest.
+
+## LANDED — intel-leak fix on main (fb224acc); gate green; mini-A/B launched (2026-09-06 10:39)
+
+Gate on dnd-wt-intel-leak 3076e3ad (relaunched 09:18, done 10:25:51):
+tsc 0, sg 0, vitest-gate 0 (one LOAD FLAKE passed serially), Playwright
+185 passed in 54.6 min, 1 failed then passed on the D544 retry runner
+(tests/browser/acceptance-walkthrough.spec.ts:82 "an unassisted sitting
+creates a caster through the current guided level 1 journey"; the probe's
+capture phase overlapped this window, so per the standing ruling the flake
+is discarded, not re-pinned), playwright-gate exit 0. Merged from the main
+repo with git -C, --no-ff, exit 0, tree clean: main fb224acc. New on main:
+docs/specs/engine-turn-context.schema.json, tests/unit/vtt/
+hidden-option-boundary.test.ts, tools/generate-engine-mcp-schemas.ts.
+
+:4173 restarted on the merged main (serve.mjs rebuilds dist before
+listening). Finding against own work: my first restart used an
+unbracketed pkill -f 'node tools/serve.mjs' which matched and killed my
+own shell (exit 144) and left :4173 down for ~3 min; relaunched.
+
+D429.1 mini-A/B for this merge launched: brutal, 10 rooms x 1 rep, seed
+6203001, luna low, full intel, out ~/dnd-slim-runs/miniab-intel-leak.jsonl,
+log .tmp/runs/miniab-intel-leak.log. Concurrent: probe r5b (luna, network
+bound) and the framework research lane; load 1.0 at launch. Era controls
+[1,1,2,2,3,2,0,2,3,1].
