@@ -12927,3 +12927,19 @@ entries; no contrastOrder / consequence / arm strings in the packet),
 answer key sealed at ~/dnd-slim-runs/e2-key-cards.json. Judge panel
 launched via judge-one.sh e2 cards (sol high via codex read-only, opus
 and fable via claude -p: the standing supervisor-run panel).
+
+## Classic merge with main resolved and committed (599fbe79); landing gate running (2026-09-06 19:25)
+
+Codex (01a078fc) resolved the six conflicts keeping both sides: main's
+placement/a11y/last-seen/option-boundary work plus the lane's metric-
+derived chrome; badge layouts and hidden rings now scale with the
+lattice (footprint test proves Large hidden rings 128x128 at 64 px and
+256x256 at 128 px). Verified myself: no conflict markers, no forbidden
+constructs, typecheck 0, 83/83 across board-chrome, accessible-board,
+board-glyphs, board-delivery (pin 31,995 B unchanged: art and chrome do
+not enter the turn context), screenshot-probe, source-is-greppable.
+Staged and committed the merge as 599fbe79 on claude/classic-r5. Full
+gate launched 19:25 (gate-wt4.sh wt-classic5, load 0.95, no other
+gate/vitest/Playwright running; the E2 judges had finished). Mini-A/B
+follows the gate, then the main merge, dist rebuild, and the E1 lineage
+merges (E1/E1b/E1c descend from this branch).
