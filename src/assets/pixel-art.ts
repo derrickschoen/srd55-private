@@ -880,22 +880,31 @@ function paintVeil(
       if (bayer2(x, y) < coverage) bitmap.put(x, y, ink);
 }
 function paintDifficult(bitmap: Bitmap): void {
-  paintVeil(bitmap, translucent(EARTH(2), 65), 1, 3);
-  for (const ridgeY of [22, 58, 94] as const) {
-    for (const thickness of [-1, 0, 1] as const) {
-      outlinedLine(
-        bitmap,
-        [
-          { x: 6, y: ridgeY + 10 + thickness },
-          { x: 28, y: ridgeY - 4 + thickness },
-          { x: 52, y: ridgeY + 10 + thickness },
-          { x: 76, y: ridgeY - 4 + thickness },
-          { x: 100, y: ridgeY + 10 + thickness },
-          { x: 121, y: ridgeY - 3 + thickness },
-        ],
-        translucent(EARTH(4), 175),
-        translucent(EARTH(1), 210),
-      );
+  paintVeil(bitmap, translucent(EARTH(4), 150), 1, 4);
+  // Three inset ridges form one cell-local emblem. Keeping the emblem clear
+  // of every edge prevents adjacent difficult cells from becoming one
+  // uncountable stripe, while the opaque light/dark pair survives every floor.
+  for (const ridgeY of [34, 64, 94] as const) {
+    const points = [
+      { x: 18, y: ridgeY + 7 },
+      { x: 40, y: ridgeY - 7 },
+      { x: 64, y: ridgeY + 7 },
+      { x: 88, y: ridgeY - 7 },
+      { x: 110, y: ridgeY + 7 },
+    ] as const;
+    for (const offset of [-3, -2, -1, 0, 1, 2, 3] as const) {
+      for (let index = 1; index < points.length; index += 1) {
+        const start = points[index - 1]!;
+        const end = points[index]!;
+        bitmap.line(start.x, start.y + offset, end.x, end.y + offset, neutral(0));
+      }
+    }
+    for (const offset of [-2, -1, 0, 1, 2] as const) {
+      for (let index = 1; index < points.length; index += 1) {
+        const start = points[index - 1]!;
+        const end = points[index]!;
+        bitmap.line(start.x, start.y + offset, end.x, end.y + offset, EARTH(6));
+      }
     }
   }
 }
@@ -992,25 +1001,34 @@ function paintCellGlyph(bitmap: Bitmap, kind: CellGlyphKind): void {
 
 function paintObscurement(bitmap: Bitmap, strength: 'light' | 'heavy'): void {
   const fillAlpha = strength === 'light' ? 120 : 180;
-  const latticeAlpha = strength === 'light' ? 205 : 235;
   paintVeil(bitmap, translucent(COOL(3), fillAlpha), 1, 4);
-  const pitch = 32;
-  for (let offset = -TILE_SIZE; offset < TILE_SIZE * 2; offset += pitch) {
-    for (const thickness of [0, 1] as const) {
-      bitmap.line(
-        offset + thickness,
-        3,
-        offset + TILE_SIZE - 7 + thickness,
-        TILE_SIZE - 4,
-        translucent(COOL(6), latticeAlpha),
-      );
-      bitmap.line(
-        offset + thickness,
-        TILE_SIZE - 4,
-        offset + TILE_SIZE - 7 + thickness,
-        3,
-        translucent(COOL(5), latticeAlpha),
-      );
+  // Closed, inset diamonds are a per-cell lattice, not the continuous
+  // one-direction diagonal hatch used by fog. The opaque cyan skeleton keeps
+  // both orientation and colour stable over every floor and light wash.
+  for (const [radiusX, radiusY, ink] of [
+    [52, 56, COOL(6)],
+    [32, 36, COOL(5)],
+    [14, 16, COOL(6)],
+  ] as const) {
+    const points = [
+      { x: 64, y: 64 - radiusY },
+      { x: 64 + radiusX, y: 64 },
+      { x: 64, y: 64 + radiusY },
+      { x: 64 - radiusX, y: 64 },
+      { x: 64, y: 64 - radiusY },
+    ] as const;
+    for (const offset of [-1, 0, 1] as const) {
+      for (let index = 1; index < points.length; index += 1) {
+        const start = points[index - 1]!;
+        const end = points[index]!;
+        bitmap.line(
+          start.x + offset,
+          start.y,
+          end.x + offset,
+          end.y,
+          ink,
+        );
+      }
     }
   }
 }

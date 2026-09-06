@@ -58,9 +58,13 @@ const PREVIOUS_ROW_VERSION = 'd557-screenshot-comprehension-row-v8' as const;
 const ROW_VERSION = 'd557-screenshot-comprehension-row-v9' as const;
 export const NORMALISER_VERSION =
   'd533-screenshot-vocabulary-normaliser-v3' as const;
-export const PRIMER_VERSION = 'd557-general-board-primer-v9' as const;
-export const GENERAL_PRIMER =
+export const PREVIOUS_PRIMER_VERSION =
+  'd557-general-board-primer-v9' as const;
+export const GENERAL_PRIMER_V9 =
   "This is a tabletop RPG combat board viewed from above. Each grid square represents 5 feet, and tokens represent creatures. Cool-blue floor plates beneath busts identify party creatures; warm-red floor plates beneath busts identify foes, exactly as the two floor-plate legend swatches show. The upper-left side of world art is lit and its lower-right contact shadow grounds it in the owning cell. Each creature token carries a numbered coloured badge; the roster box under the board repeats that badge and lists the creature's full name, cell, side and HP band. A creature stands in the cell that holds its badge. An OBJECT-sigil tag in the legend rail names an object, and the coordinate printed on that tag is the cell where the object stands. Door rail entries use the door glyph and print DOOR OPEN or DOOR CLOSED with the door's coordinate. The coordinate origin is the top-left cell, whose column and row are both zero; columns increase rightward and rows increase downward, matching the zero-based labels along the board edges. Two creatures are adjacent and within 5 feet when their cells share an edge or a corner, so diagonals count. HP bars and roster words use green for uninjured, amber for bloodied, red for near death, and grey for unknown. Difficult terrain is marked by three broad ochre zigzag ridges spanning its floor. Blocked terrain is marked by a large cross-braced stone pile spanning the cell. The legend box names every terrain overlay (Difficult, Obscured, Bright light, Dim light, Darkness, and Fog) and every board mark (Blocked, Object, and Light source). Doors are drawn only where the engine has a door. Interpret walls, doors, and objects as they are drawn on the board." as const;
+export const PRIMER_VERSION = 'd562-general-board-primer-v10' as const;
+export const GENERAL_PRIMER =
+  "This is a tabletop RPG combat board viewed from above. Each grid square represents 5 feet, and tokens represent creatures. Cool-blue floor plates beneath busts identify party creatures; warm-red floor plates beneath busts identify foes, exactly as the two floor-plate legend swatches show. The upper-left side of world art is lit and its lower-right contact shadow grounds it in the owning cell. Each creature token carries a numbered coloured badge; the roster box under the board repeats that badge and lists the creature's full name, cell, side and HP band. A creature stands in the cell that holds its badge. An OBJECT-sigil tag in the legend rail names an object, and the coordinate printed on that tag is the cell where the object stands. Door rail entries use the door glyph and print DOOR OPEN or DOOR CLOSED with the door's coordinate. The coordinate origin is the top-left cell, whose column and row are both zero; columns increase rightward and rows increase downward, matching the zero-based labels along the board edges. Two creatures are adjacent and within 5 feet when their cells share an edge or a corner, so diagonals count. HP bars and roster words use green for uninjured, amber for bloodied, red for near death, and grey for unknown. Difficult terrain is marked by one cell-local emblem of three inset opaque pale-ochre zigzag ridges with a dark outline. Blocked terrain is marked by a large cross-braced stone pile spanning the cell. The legend box names every terrain overlay (Difficult, Obscured, Bright light, Dim light, Darkness, and Fog) and every board mark (Blocked, Object, and Light source). Doors are drawn only where the engine has a door. Interpret walls, doors, and objects as they are drawn on the board." as const;
 /**
  * D525: the sentence describing how the board draws light levels, one per
  * convention. Each describes only the drawing convention — never a room fact —
@@ -80,12 +84,35 @@ export const GLYPH_FAMILY_PRIMER = {
   door: 'Doors are marked by a glyph in the top-right corner of the cell: a solid door slab crossed by a dark bar means the door is closed, and a door frame with an open gap and a swing arc means the door is open.',
   blocked:
     'A blocked cell has a large cross-braced stone pile spanning its floor and carries an X inside a square in the bottom-left corner of the cell.',
+  veil:
+    'Fog is a warm-grey veil of diagonal hatching with a cloud glyph in the bottom-right corner of the cell, obscurement is a cool cyan veil of three closed inset diamonds forming a lattice with a glyph of cyan waves just left of that corner, obscured is not fog, and a cell can carry both.',
+  hidden:
+    'A creature hidden from the players has a dashed ring around its bust, an eye crossed by a slash on the left rim of that ring, and the word HIDDEN in its roster line.',
+} as const satisfies Readonly<
+  Record<Exclude<CornerGlyphFamily, 'light'> | 'hidden', string>
+>;
+export const LIGHT_PRIMER_V9 = {
+  tint: 'Light levels are shown as structured floor overlays: a pale warm pattern marks bright light, a fainter warm pattern marks dim light, a dark veil marks darkness, and untinted floor is also bright light.',
+  glyph:
+    'Light levels are shown by a small glyph in the top-left corner of a cell: a sun marks bright light, a crescent moon marks dim light, a filled dark circle marks darkness, and a cell without a glyph has the room default level that the legend names after "No glyph =".',
+} as const;
+export const GLYPH_FAMILY_PRIMER_V9 = {
+  door: 'Doors are marked by a glyph in the top-right corner of the cell: a solid door slab crossed by a dark bar means the door is closed, and a door frame with an open gap and a swing arc means the door is open.',
+  blocked:
+    'A blocked cell has a large cross-braced stone pile spanning its floor and carries an X inside a square in the bottom-left corner of the cell.',
   veil: 'Fog is a veil of diagonal hatching with a cloud glyph in the bottom-right corner of the cell, obscurement is a dotted veil with a wave glyph just left of that corner, and a cell can carry both.',
   hidden:
     'A creature hidden from the players has a dashed ring around its bust, an eye crossed by a slash on the left rim of that ring, and the word HIDDEN in its roster line.',
 } as const satisfies Readonly<
   Record<Exclude<CornerGlyphFamily, 'light'> | 'hidden', string>
 >;
+export const PRIMER_HISTORY = Object.freeze({
+  [PREVIOUS_PRIMER_VERSION]: Object.freeze({
+    general: GENERAL_PRIMER_V9,
+    light: LIGHT_PRIMER_V9,
+    glyphFamilies: GLYPH_FAMILY_PRIMER_V9,
+  }),
+});
 /** The sentences appended to the general primer for each board-glyph mode. */
 export const BOARD_GLYPH_PRIMER: Readonly<
   Record<BoardGlyphMode, readonly string[]>
@@ -128,6 +155,7 @@ export type PrimerMode = 'none' | 'general';
 export type BoardInput = 'png' | 'semantic' | 'both';
 export type PrimerVersion =
   | typeof PRIMER_VERSION
+  | typeof PREVIOUS_PRIMER_VERSION
   | 'd557-general-board-primer-v8'
   | 'd525-general-board-primer-v5'
   | null;
@@ -2318,6 +2346,7 @@ const savedProbeRowSchema = z
     promptVersion: z.literal(PROBE_VERSION),
     primerVersion: z.union([
       z.literal(PRIMER_VERSION),
+      z.literal(PREVIOUS_PRIMER_VERSION),
       z.literal('d557-general-board-primer-v8'),
       z.literal('d525-general-board-primer-v5'),
       z.null(),

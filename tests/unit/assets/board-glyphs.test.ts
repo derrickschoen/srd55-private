@@ -4,7 +4,7 @@
  * tiles are what license their digests in expected-art-hashes.ts.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { OVERLAY_ASSETS } from '../../../src/assets/art-sets';
+import { OVERLAY_ASSETS, STONE_FLOOR_SET_ID } from '../../../src/assets/art-sets';
 import { Bitmap } from '../../../src/assets/bitmap';
 import {
   BOARD_GLYPH_MODES,
@@ -30,10 +30,11 @@ import {
   type CellGlyphKind,
 } from '../../../src/assets/board-glyphs';
 import { LIGHT_GLYPHS, LIGHT_GLYPH_KINDS, LIGHT_GLYPH_SIZE } from '../../../src/assets/light-glyphs';
-import { paletteRgb, ramp } from '../../../src/assets/palette';
+import { neutral, paletteRgb, ramp } from '../../../src/assets/palette';
 import {
   CELL_GLYPH_EFFECTS,
   CELL_GLYPH_EFFECT_BY_KIND,
+  FLOOR_VARIANTS,
   FOG_HATCH_ALPHA,
   FOG_HATCH_PITCH,
   TILE_SIZE,
@@ -218,7 +219,7 @@ describe('D525 glyph families own distinct corners and silhouettes', () => {
       'DOOR OPEN',
       'BLOCKED',
       'FOG',
-      'OBSCURED - COOL-BLUE DIAMOND VEIL',
+      'OBSCURED - CYAN DIAMONDS AND WAVES - NOT FOG',
     ]);
   });
 });
@@ -369,16 +370,45 @@ describe('D525 cell glyph tiles: pixel invariants', () => {
 });
 
 describe('D562 obscured-cell directional contrast', () => {
-  it('draws both obscurement strengths as a two-direction cool-blue lattice over a patterned fill', () => {
+  it('draws difficult terrain as one inset three-ridge emblem with an opaque light/dark skeleton', () => {
+    const bitmap = semanticOverlay('difficult');
+    const ridgeInk = paletteRgb(ramp('earth', 6));
+    const ridgeOutline = paletteRgb(neutral(0));
+    let ridgePixels = 0;
+    let outlinePixels = 0;
+    for (let y = 0; y < TILE_SIZE; y += 1) {
+      for (let x = 0; x < TILE_SIZE; x += 1) {
+        const pixel = bitmap.get(x, y);
+        if (pixel.alpha !== 255) continue;
+        if (pixel.red === ridgeInk.red && pixel.green === ridgeInk.green && pixel.blue === ridgeInk.blue) ridgePixels += 1;
+        if (pixel.red === ridgeOutline.red && pixel.green === ridgeOutline.green && pixel.blue === ridgeOutline.blue) outlinePixels += 1;
+      }
+    }
+    expect(ridgePixels).toBeGreaterThanOrEqual(1_000);
+    expect(outlinePixels).toBeGreaterThanOrEqual(500);
+    for (const ridgeY of [34, 64, 94] as const) {
+      expect(bitmap.get(18, ridgeY + 7)).toMatchObject({ ...ridgeInk, alpha: 255 });
+      expect(bitmap.get(64, ridgeY + 7)).toMatchObject({ ...ridgeInk, alpha: 255 });
+      expect(bitmap.get(110, ridgeY + 7)).toMatchObject({ ...ridgeInk, alpha: 255 });
+    }
+    for (let coordinate = 0; coordinate < TILE_SIZE; coordinate += 1) {
+      expect(bitmap.get(coordinate, 0).alpha).toBe(0);
+      expect(bitmap.get(coordinate, TILE_SIZE - 1).alpha).toBe(0);
+      expect(bitmap.get(0, coordinate).alpha).toBe(0);
+      expect(bitmap.get(TILE_SIZE - 1, coordinate).alpha).toBe(0);
+    }
+  });
+
+  it('draws both obscurement strengths as closed cell-local cyan diamonds over a patterned fill', () => {
     const coolFive = paletteRgb(ramp('cloth-cool', 5));
     const coolSix = paletteRgb(ramp('cloth-cool', 6));
-    for (const [effect, fillAlpha, latticeAlpha] of [
-      ['obscurement-light', 120, 205],
-      ['obscurement-heavy', 180, 235],
+    for (const [effect, fillAlpha] of [
+      ['obscurement-light', 120],
+      ['obscurement-heavy', 180],
     ] as const) {
       const bitmap = semanticOverlay(effect);
-      let fallingDiagonalPixels = 0;
-      let risingDiagonalPixels = 0;
+      let outerDiamondPixels = 0;
+      let innerDiamondPixels = 0;
       let patternedFillPixels = 0;
       const alphas = new Set<number>();
       for (let y = 0; y < TILE_SIZE; y += 1) {
@@ -390,55 +420,84 @@ describe('D562 obscured-cell directional contrast', () => {
             pixel.red === coolFive.red &&
             pixel.green === coolFive.green &&
             pixel.blue === coolFive.blue &&
-            pixel.alpha === latticeAlpha
-          ) risingDiagonalPixels += 1;
+            pixel.alpha === 255
+          ) innerDiamondPixels += 1;
           else if (
             pixel.red === coolSix.red &&
             pixel.green === coolSix.green &&
             pixel.blue === coolSix.blue &&
-            pixel.alpha === latticeAlpha
-          ) fallingDiagonalPixels += 1;
+            pixel.alpha === 255
+          ) outerDiamondPixels += 1;
           else patternedFillPixels += 1;
         }
       }
       expect([...alphas].sort((left, right) => left - right)).toEqual([
         fillAlpha,
-        latticeAlpha,
+        255,
       ]);
-      expect(risingDiagonalPixels, `${effect} rising lattice`).toBeGreaterThanOrEqual(900);
-      expect(fallingDiagonalPixels, `${effect} falling lattice`).toBeGreaterThanOrEqual(900);
+      expect(outerDiamondPixels, `${effect} outer diamond`).toBeGreaterThanOrEqual(600);
+      expect(innerDiamondPixels, `${effect} inner diamond`).toBeGreaterThanOrEqual(400);
       expect(patternedFillPixels, `${effect} Bayer fill`).toBeGreaterThanOrEqual(3_000);
+      // Fog's diagonal hatch reaches tile edges; the obscured skeleton is a
+      // closed emblem with a transparent outer gutter in all four directions.
+      for (let coordinate = 0; coordinate < TILE_SIZE; coordinate += 1) {
+        expect(bitmap.get(coordinate, 0).alpha, `${effect} top gutter`).toBe(0);
+        expect(bitmap.get(coordinate, TILE_SIZE - 1).alpha, `${effect} bottom gutter`).toBe(0);
+        expect(bitmap.get(0, coordinate).alpha, `${effect} left gutter`).toBe(0);
+        expect(bitmap.get(TILE_SIZE - 1, coordinate).alpha, `${effect} right gutter`).toBe(0);
+      }
+      expect(bitmap.get(64, 8)).toMatchObject({ ...coolSix, alpha: 255 });
+      expect(bitmap.get(116, 64)).toMatchObject({ ...coolSix, alpha: 255 });
+      expect(bitmap.get(64, 28)).toMatchObject({ ...coolFive, alpha: 255 });
+      expect(bitmap.get(96, 64)).toMatchObject({ ...coolFive, alpha: 255 });
     }
   });
 
-  it('keeps the cool-blue diamond veil measurably distinct from bright, dim, dark and fogged cells at 128 px', () => {
+  it('keeps difficult and obscured cells measurably distinct from every comparison class at 128 px', () => {
     const floor = paintRecipe({ kind: 'floor', material: 'stone', variant: 0 });
     const cells = {
-      bright: compositeCell([floor, semanticOverlay('light-glyph-bright')]),
       dim: compositeCell([floor, semanticOverlay('light-glyph-dim')]),
-      dark: compositeCell([floor, semanticOverlay('light-glyph-dark')]),
       fogged: compositeCell([
         floor,
         paintRecipe({ kind: 'fog', material: 'fog', state: 'hidden' }),
         semanticOverlay('glyph-fog'),
       ]),
+      difficult: compositeCell([floor, semanticOverlay('difficult')]),
       obscured: compositeCell([
         floor,
         semanticOverlay('obscurement-heavy'),
         semanticOverlay('glyph-obscured'),
       ]),
     } as const;
-    const obscured = meanCellRgb(cells.obscured);
-    const differences: Record<string, { readonly luminance: number; readonly deltaE: number }> = {};
-    for (const [name, bitmap] of Object.entries(cells)) {
-      if (name === 'obscured') continue;
-      const comparison = meanCellRgb(bitmap);
-      differences[name] = {
-        luminance: Math.abs(luminance(obscured) - luminance(comparison)),
-        deltaE: cieDeltaE(obscured, comparison),
+    const difference = (left: Bitmap, right: Bitmap): { readonly luminance: number; readonly deltaE: number } => {
+      const leftMean = meanCellRgb(left);
+      const rightMean = meanCellRgb(right);
+      return {
+        luminance: Math.abs(luminance(leftMean) - luminance(rightMean)),
+        deltaE: cieDeltaE(leftMean, rightMean),
       };
+    };
+    const differences: Record<string, { readonly luminance: number; readonly deltaE: number }> = {
+      'difficult/obscured': difference(cells.difficult, cells.obscured),
+      'obscured/fog': difference(cells.obscured, cells.fogged),
+      'obscured/dim': difference(cells.obscured, cells.dim),
+    };
+    for (const variant of FLOOR_VARIANTS) {
+      const plain = paintRecipe({ kind: 'floor', material: 'stone', variant });
+      differences[`difficult/plain-${String(variant)}`] = difference(
+        compositeCell([plain, semanticOverlay('difficult')]),
+        plain,
+      );
     }
-    expect(Object.keys(differences)).toEqual(['bright', 'dim', 'dark', 'fogged']);
+    expect(Object.keys(differences)).toEqual([
+      'difficult/obscured',
+      'obscured/fog',
+      'obscured/dim',
+      'difficult/plain-0',
+      'difficult/plain-1',
+      'difficult/plain-2',
+      'difficult/plain-3',
+    ]);
     for (const [name, difference] of Object.entries(differences)) {
       expect(difference.luminance, `${name} luminance difference`).toBeGreaterThanOrEqual(0.015);
       expect(difference.deltaE, `${name} CIE76 deltaE`).toBeGreaterThanOrEqual(8.5);
@@ -653,6 +712,10 @@ describe('D525 board DOM under each mode on a room with every fact class', () =>
     const markRows = legend?.querySelectorAll('.encounter-legend-mark').map((item) => item.getAttribute('data-legend-key')) ?? [];
     expect(markRows).toEqual(['hidden', 'obscured', 'bright', 'dim', 'darkness', 'fog', 'blocked', 'door-closed', 'door-open', 'object']);
     expect(new Set(legend?.querySelectorAll('.encounter-legend-swatch-mark').map((swatch) => (swatch as StyledElement).src)).size).toBe(markRows.length);
+    const obscuredLegend = legend?.querySelector('[data-legend-key="obscured"]');
+    const obscuredSwatch = obscuredLegend?.querySelector('.encounter-legend-swatch-mark');
+    expect(obscuredSwatch?.getAttribute('data-overlay-asset-id')).toBe(OVERLAY_ASSETS['obscurement-heavy']);
+    expect(obscuredSwatch?.getAttribute('data-floor-asset-id')).toBe(STONE_FLOOR_SET_ID);
     expect(legendEntriesFor('full', 'bright', boardGlyphPresence(
       encounterBoardRenderModel(everyClass, encounterArtForBoard(everyClass, 'full')), everyClass.combatants,
     )).map((entry) => entry.key)).toEqual(keys);
