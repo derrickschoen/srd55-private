@@ -12176,3 +12176,20 @@ v9, art 4a279a80, --capture-tile-px 64, generation g5b-round5b1-24-cap64,
 out dnd-wt-classic5/dnd-slim-runs/d561-probe24-r5b-64.jsonl, log
 .tmp/runs/d561-probe24-r5b-64.log. Comparison basis: r5b (128 px, same
 states) medium mean .731, round 4 .830.
+
+## D562 — OWNER: if the 64-px diagnostic points at raster scale, fix on the chrome side (2026-09-06 13:10)
+
+Owner: "Chrome-side fix: keep capturing at 128 px and scale the semantic
+chrome (text scale, HP bar, glyphs, badges) to match, then re-probe."
+Rejected alternative: a permanent 64-px snapshot path for the AI DM (would
+make the DM's view diverge from the players' board). Plan on a
+raster-scale verdict from d561-probe24-r5b-64: classic lane increment
+scaling the chrome element sizes with the tile (text scale 2 -> 4, HP bar
+40x4 -> 80x8, cell/life glyphs and 30x22 badges doubled, gutters and
+legend proportionate), the 128-px capture and native art unchanged,
+directional tests, art-hash pins for chrome-bearing captures allowed to
+move ONLY with the independent invariants in the same commit; then a
+fresh 24-state probe at 128 px paired against r5b and round 4. Classic
+lands only when that probe scores >= round 4. If the 64-px probe does NOT
+restore round-4 scores, the regression is in the art itself and this
+ruling does not apply; report and ask.
