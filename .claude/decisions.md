@@ -12193,3 +12193,20 @@ fresh 24-state probe at 128 px paired against r5b and round 4. Classic
 lands only when that probe scores >= round 4. If the 64-px probe does NOT
 restore round-4 scores, the regression is in the art itself and this
 ruling does not apply; report and ask.
+
+## Owner: brainstorm "get luna medium to understand the board and DM closer to sol high" — dispatched (2026-09-06 13:25)
+
+Two-agent brainstorm: supervisor seeded 12 proposals (semantic text board
+instead of/alongside pixels; redundant encodings; two-pass assess-then-
+choose; sol-high exemplar distillation and retrieval; failure-class
+checklists and fact-not-present discipline; engine-side option pruning
+with computed consequences; self-verification engine queries; protocol
+text per D483; best-of-2 with team-scorer inside the 180 s budget;
+decision/prose split; refusal feedback retry; probe-first curriculum).
+Codex lane (brief .tmp/runs/brief-luna-brainstorm.md, log .tmp/runs/
+log-luna-brainstorm.log, private research dir, repo and dnd-slim-runs
+read-only) must quantify the luna-medium vs sol-high gap from the run
+logs first, critique each seed with evidence, add >= 6 of its own, rank
+by gain per cost with a cheapest experiment for the top 6, and list what
+must not change (engine authority, proposer-only boundary, D405.3, D406).
+Supervisor synthesis to the owner after review.
