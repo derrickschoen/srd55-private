@@ -12561,3 +12561,35 @@ sol-high probe is the reference ceiling for E1 (semantic board): if
 luna medium with engine facts reaches or beats .911, the comprehension
 gap is closed by facts, not by model size. Re-run sol high on 5d art
 once r5d is in (queued, same worktree pattern).
+
+## HARVESTS — E5 and S3 committed; E2 mini-A/B running; S7/E6/S9/A5 in verification (2026-09-06 16:54)
+
+E5 (01a07846-43b4): 13 files +686/-30; typed rejection {code, repair_
+scope, message} with codes OPTION_NOT_SHOWN / STALE_REVISION /
+MISSING_ACTOR / NON_INDEPENDENT_FALLBACK / ILLEGAL_PROPOSAL mapped from
+the engine's existing refusal codes; identity-blinded replay corpus
+from historical rows (209 OPTION_NOT_SHOWN, 0 STALE_REVISION, 2
+MISSING_ACTOR, 3 NON_INDEPENDENT_FALLBACK, 13 ILLEGAL_PROPOSAL); one
+bounded retry behind typedRepair (default off); replay harness
+tools/ai-dm-repair-replay.ts; docs/specs regenerated. Verified: no
+forbidden constructs, typecheck 0, 181/181 across conversation +
+handler + replay specs; supervisor mutant (stale codes mapped to
+ILLEGAL_PROPOSAL) killed 1/111; committed claude/e5-repair a7b97628.
+Note: the corpus has no STALE_REVISION example; the replay run must
+add a hard current-engine fixture for it (the brief allowed this).
+
+S3 (01a07847-caac): 13 files +830/-41; structuredAssessment renderer
+flag in the profile hash, engine-built skeleton (shown actors/options,
+reach/threat facts), bounded assessment schema with typed rejections
+(assessment_required/invalid_shape/invalid_value/missing_actor/
+unknown_actor/unknown_option), single model call preserved
+(final_indices encoding), assessment persisted on arena rows only.
+Verified: typecheck 0, 165/165 across five specs; supervisor mutant
+(unknown option ids accepted) killed 1/18; committed claude/s3-assess
+592b128e.
+
+E2 mini-A/B launched on dnd-wt-e2-cards a787e8fc: default renderer
+profile + consequenceCards:true (JSON saved as
+~/dnd-slim-runs/e2-profile-cards.json), brutal 10x1, seed 6203001, luna
+medium, full intel, out ~/dnd-slim-runs/miniab-e2-cards.jsonl. Control
+= the era controls / luna-medium intel-leak run.
