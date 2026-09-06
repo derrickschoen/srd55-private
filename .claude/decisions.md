@@ -12880,3 +12880,27 @@ improvement on both delivery modes (facts-only .995/.995; image+facts
 comprehension objective is met by facts; the remaining question is
 play quality with facts in the live DM context (E1c arena arm, queued
 after main is merged into the E1 lineage).
+
+## E4 committed after the survivor fix; E1b image+facts replicates on seed 2 (.995 / .994) (2026-09-06 18:55)
+
+E4 (resumed 01a07845-f587): directional cap test with five real
+applicable plays (remove_obstacle, focus_fire, close_attack,
+basic_advance, screen_ally; rank->name tie-break asserted). My detached
+mutant run (slice(0,5)) now fails 1/161 with RESTORED OK marker;
+registry byte-identical to the original; typecheck 0; pin + snippets
+48/48; committed claude/e4-plays e94fc231.
+
+E1b 'both' arm, seed 6203002: Q1 .955, Q2-Q4 1.000, Q5 .993, Q6-Q8
+1.000, Q9 .994, Q10 .997; mean .994; PASS (seed 1: .995). All four E1b
+runs (two arms x two seeds) pass the strict gate at luna medium with
+means .994-.995. The comprehension programme's candidate is fixed:
+5d art + primer v10 + compact semantic board (E1b encoding), delivered
+as image+facts for the live DM (E1c) and facts-only where no image is
+sent.
+
+All 16 experiment lanes are now verified and committed on their
+branches (preact-island parked per D564). Open measurement runs: r5d
+seed 2 (classic landing gate), E2 judged arms (hard basis, R1-10).
+Landing order after r5d seed 2: classic-r5 (10e3892a) with full gate +
+mini-A/B; then main merged into each lane branch for its own gate;
+E1/E1b/E1c first among the experiment lanes.
