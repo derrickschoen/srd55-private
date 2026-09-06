@@ -11637,3 +11637,10 @@ recorded around each run because the box is busy, contact sheets per prompt, ran
 ~/comfyui/reports/krea-quants.md. This answers the open question (heavier quant vs Klein-only) with data instead of
 a ruling. Cost: the runs will keep the box loud for hours, so the queued D429.1 mini-A/B for the ghost merge waits
 behind it; no further engine/renderer merge lands until it runs.
+
+D560.2 PARKED — OWNER (2026-09-05 23:35): "Forget the krea stuff for now. Put it on the back burner." Supervisor: Krea quant sweep lane
+(session 01a074c7) killed ~10 minutes in while it was still enumerating (nothing downloaded beyond the installed
+Q3_K_M; server not running; brief kept at .tmp/runs/brief-krea-quants.md for whenever it is resumed). The open
+heavier-quant-vs-Klein question is parked with it; the references tool keeps Klein as default and Krea behind
+--local-reference-only. The ghost mini-A/B is no longer blocked behind the sweep; it runs when the current lanes
+drain.
