@@ -37,9 +37,22 @@ const repositoryRoot = resolve(fileURLToPath(new URL('../', import.meta.url)));
 const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 export const MAX_BOARD_PNG_BYTES = 1_000_000;
 const VIEWPORT = Object.freeze({ width: 1_280, height: 1_280 });
-const TILE_SIZE_CSS_PX = 128;
 const SNAPSHOT_CANARY = 'board-snapshot-element-crop-canary';
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
+
+export type CaptureTilePx = 64 | 128;
+
+export function boardSnapshotCaptureGeometry(
+  captureTilePx: CaptureTilePx = 128,
+): {
+  readonly tileSizeCssPx: CaptureTilePx;
+  readonly markerHeightCssPx: number;
+} {
+  return {
+    tileSizeCssPx: captureTilePx,
+    markerHeightCssPx: captureTilePx * 10,
+  };
+}
 
 export interface BoardImageSource {
   readonly room: number;
@@ -75,7 +88,7 @@ export interface BoardSnapshotManifest {
   };
   readonly viewport: { readonly width: 1_280; readonly height: 1_280 };
   readonly deviceScaleFactor: 1;
-  readonly tileSizeCssPx: 128;
+  readonly tileSizeCssPx: CaptureTilePx;
   readonly maximumPngBytes: 1_000_000;
   readonly capturePolicy: 'encounter-board-element-settled-v1';
   /** D525: the glyph mode forced through the snapshot page's URL, or null when the art package decided. */
@@ -94,6 +107,8 @@ export interface BoardSnapshotServiceOptions {
   readonly forbiddenBoardStrings?: readonly string[];
   /** D525: render every capture under this glyph mode; a board that says otherwise is never captured. */
   readonly boardGlyphs?: BoardGlyphMode;
+  /** D561: CSS raster scale for the diagnostic capture; native art remains unchanged. */
+  readonly captureTilePx?: CaptureTilePx;
 }
 
 function sha256Bytes(value: Uint8Array): string {
@@ -351,6 +366,7 @@ export class BoardSnapshotService implements AsyncDisposable {
   readonly #outputDirectory: string;
   readonly #forbiddenBoardStrings: readonly string[];
   readonly #boardGlyphs: BoardGlyphMode | null;
+  readonly #captureGeometry: ReturnType<typeof boardSnapshotCaptureGeometry>;
   readonly #server: PreviewServer;
   readonly #context: BrowserContext;
   readonly #page: Page;
@@ -368,6 +384,7 @@ export class BoardSnapshotService implements AsyncDisposable {
     readonly outputDirectory: string;
     readonly forbiddenBoardStrings: readonly string[];
     readonly boardGlyphs: BoardGlyphMode | null;
+    readonly captureGeometry: ReturnType<typeof boardSnapshotCaptureGeometry>;
     readonly server: PreviewServer;
     readonly context: BrowserContext;
     readonly page: Page;
@@ -380,6 +397,7 @@ export class BoardSnapshotService implements AsyncDisposable {
     this.#outputDirectory = input.outputDirectory;
     this.#forbiddenBoardStrings = input.forbiddenBoardStrings;
     this.#boardGlyphs = input.boardGlyphs;
+    this.#captureGeometry = input.captureGeometry;
     this.#server = input.server;
     this.#context = input.context;
     this.#page = input.page;
@@ -420,8 +438,12 @@ export class BoardSnapshotService implements AsyncDisposable {
       const page = context.pages()[0] ?? await context.newPage();
       const origin = `http://127.0.0.1:${String(port)}`;
       const boardGlyphs = options.boardGlyphs ?? null;
+      const captureGeometry = boardSnapshotCaptureGeometry(options.captureTilePx);
       const glyphParameter = boardGlyphs === null ? '' : `&boardGlyphs=${boardGlyphs}`;
-      await page.goto(`${origin}/vtt?encounter=reference&view=dm&boardSnapshot=1&session=board-snapshot-bootstrap${glyphParameter}`);
+      const captureTileParameter = captureGeometry.tileSizeCssPx === 128
+        ? ''
+        : `&captureTilePx=${String(captureGeometry.tileSizeCssPx)}`;
+      await page.goto(`${origin}/vtt?encounter=reference&view=dm&boardSnapshot=1&session=board-snapshot-bootstrap${glyphParameter}${captureTileParameter}`);
       await page.locator('.dm-save-manager').waitFor({ state: 'visible' });
       const browser = context.browser();
       if (browser === null) throw new Error('Persistent Chromium context has no browser handle.');
@@ -430,6 +452,7 @@ export class BoardSnapshotService implements AsyncDisposable {
         outputDirectory,
         forbiddenBoardStrings: [...(options.forbiddenBoardStrings ?? []), SNAPSHOT_CANARY],
         boardGlyphs,
+        captureGeometry,
         server,
         context,
         page,
@@ -505,18 +528,22 @@ export class BoardSnapshotService implements AsyncDisposable {
       html { scrollbar-width: none !important; }
       ::-webkit-scrollbar { display: none !important; }
       .encounter-board {
-        --encounter-tile-size: ${String(TILE_SIZE_CSS_PX)}px !important;
+        --encounter-tile-size: ${String(this.#captureGeometry.tileSizeCssPx)}px !important;
         user-select: none !important;
       }
     ` });
-    await this.#page.evaluate(({ ordinal, canary }) => {
+    await this.#page.evaluate(({ ordinal, canary, markerHeightCssPx }) => {
       const marker = document.createElement('p');
       marker.id = 'board-snapshot-outside-canary';
       marker.textContent = `${canary}:${String(ordinal)}`;
-      marker.style.height = '1280px';
+      marker.style.height = `${String(markerHeightCssPx)}px`;
       marker.style.margin = '0';
       document.body.append(marker);
-    }, { ordinal: captureOrdinal, canary: SNAPSHOT_CANARY });
+    }, {
+      ordinal: captureOrdinal,
+      canary: SNAPSHOT_CANARY,
+      markerHeightCssPx: this.#captureGeometry.markerHeightCssPx,
+    });
 
     const board = this.#page.locator('.encounter-board');
     await this.#waitForBoardVisible(board, input.source);
@@ -666,7 +693,7 @@ export class BoardSnapshotService implements AsyncDisposable {
       os: { platform: platform(), release: release(), architecture: arch() },
       viewport: VIEWPORT,
       deviceScaleFactor: 1,
-      tileSizeCssPx: TILE_SIZE_CSS_PX,
+      tileSizeCssPx: this.#captureGeometry.tileSizeCssPx,
       maximumPngBytes: MAX_BOARD_PNG_BYTES,
       capturePolicy: 'encounter-board-element-settled-v1',
       boardGlyphsOverride: this.#boardGlyphs,

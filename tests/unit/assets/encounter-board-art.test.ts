@@ -180,7 +180,7 @@ describe('encounter package asset-id consumption', () => {
     expect(source).toContain('starterArtDataUri(model.token.assetId)');
     expect(source).toContain('projection.encounter.dmOnly.foggedCells');
     expect(source).toContain('renderMechanicalLayer(layer)');
-    expect(source).toContain('renderBoardChrome(board, projection, art.boardGlyphs, models, boardSnapshotMode)');
+    expect(source).toContain('renderBoardChrome(board, projection, art.boardGlyphs, models, boardSnapshotMode, boardChromeTilePx)');
     expect(source).toContain('board.dataset.boardGlyphs = art.boardGlyphs');
     expect(source).toContain('for (const glyph of model.glyphs)');
   });

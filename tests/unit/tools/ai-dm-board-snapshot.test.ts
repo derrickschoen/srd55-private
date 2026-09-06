@@ -14,6 +14,7 @@ import {
 import { loadArenaFixture } from '../../../src/vtt/mcp/entrypoint';
 import {
   assertBoardImageFresh,
+  boardSnapshotCaptureGeometry,
   boardStateDigest,
   createBoardSnapshotSessionBundle,
   type BoardImageArtifact,
@@ -52,6 +53,17 @@ function movedState(state: EncounterState): EncounterState {
 }
 
 describe('AI DM board snapshot contracts', () => {
+  it('derives the CSS tile, marker height, and default from capture scale', () => {
+    expect(boardSnapshotCaptureGeometry(64)).toEqual({
+      tileSizeCssPx: 64,
+      markerHeightCssPx: 640,
+    });
+    expect(boardSnapshotCaptureGeometry()).toEqual({
+      tileSizeCssPx: 128,
+      markerHeightCssPx: 1_280,
+    });
+  });
+
   it.each(CONTROL_FIXTURES)('renders generated bounds and every mechanical terrain cell for %s', async (path) => {
     const state = await loadArenaFixture(path);
     const projection = projectEncounterBoard(projectDmView(state));

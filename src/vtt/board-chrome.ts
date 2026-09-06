@@ -79,6 +79,7 @@ import {
 import type { ProjectedHitPointKnowledge } from './intel/contracts';
 
 export const CHROME_TILE_PX = 128;
+export type BoardChromeTilePx = 64 | typeof CHROME_TILE_PX;
 export const CHROME_TEXT_SCALE = 2;
 /** `.encounter-board` border width in styles.css; part of the captured size. */
 export const BOARD_BORDER_PX = 2;
@@ -89,11 +90,17 @@ export const HP_BAR_WIDTH_PX = 40;
 export const HP_BAR_HEIGHT_PX = 4;
 export const HP_BAR_BORDER_PX = 1;
 /** Where the HP bar's top border sits inside its cell; badge and glyph boxes end above it. */
-export const HP_BAR_TOP_PX =
-  CHROME_TILE_PX - HP_BAR_HEIGHT_PX - 2 * HP_BAR_BORDER_PX - 2;
+export function hpBarTopPx(tilePx: BoardChromeTilePx = CHROME_TILE_PX): number {
+  return tilePx - HP_BAR_HEIGHT_PX - 2 * HP_BAR_BORDER_PX - 2;
+}
+export const HP_BAR_TOP_PX = hpBarTopPx();
 /** The last tile row a bottom-corner cell glyph's outline ring touches (D525). */
-export const CELL_GLYPH_RING_BOTTOM_PX =
-  cellGlyphOrigin('blocked', CHROME_TILE_PX).y + CELL_GLYPH_SIZE;
+export function cellGlyphRingBottomPx(
+  tilePx: BoardChromeTilePx = CHROME_TILE_PX,
+): number {
+  return cellGlyphOrigin('blocked', tilePx).y + CELL_GLYPH_SIZE;
+}
+export const CELL_GLYPH_RING_BOTTOM_PX = cellGlyphRingBottomPx();
 /** The life glyph's inset from the cell's top-right, and where it drops to under a door mark (D525). */
 export const LIFE_GLYPH_INSET_PX = 3;
 export const LIFE_GLYPH_BELOW_DOOR_PX = CELL_GLYPH_MARGIN + CELL_GLYPH_SIZE + 2;
@@ -103,8 +110,12 @@ export const HIDDEN_GLYPH_ORIGIN = Object.freeze({ x: 1, y: 29 });
 export const CREATURE_BADGE_SLOT = 'top-centre' as const;
 export const CREATURE_BADGE_WIDTH_PX = 30;
 export const CREATURE_BADGE_HEIGHT_PX = 22;
-export const CREATURE_BADGE_LEFT_PX =
-  (CHROME_TILE_PX - CREATURE_BADGE_WIDTH_PX) / 2;
+export function creatureBadgeLeftPx(
+  tilePx: BoardChromeTilePx = CHROME_TILE_PX,
+): number {
+  return (tilePx - CREATURE_BADGE_WIDTH_PX) / 2;
+}
+export const CREATURE_BADGE_LEFT_PX = creatureBadgeLeftPx();
 export const CREATURE_BADGE_TOP_PX = 2;
 export const CREATURE_BADGE_STACK_PITCH_PX = CREATURE_BADGE_HEIGHT_PX;
 export const MAX_BADGES_PER_CELL = 2;
@@ -339,6 +350,16 @@ export interface BoardChromeDimensionContent {
   readonly objects: readonly { readonly kind: string }[];
 }
 
+export function boardChromeCellOrigin(
+  cell: { readonly column: number; readonly row: number },
+  tilePx: BoardChromeTilePx = CHROME_TILE_PX,
+): { readonly left: number; readonly top: number } {
+  return {
+    left: COORDINATE_GUTTER_PX + cell.column * tilePx,
+    top: COORDINATE_GUTTER_PX + cell.row * tilePx,
+  };
+}
+
 export function legendHeightPx(content: BoardChromeDimensionContent): number {
   const rosterHeight =
     content.combatants.length === 0
@@ -368,6 +389,7 @@ export function legendHeightPx(content: BoardChromeDimensionContent): number {
 export function boardChromeDimensions(
   bounds: { readonly columns: number; readonly rows: number },
   content: BoardChromeDimensionContent = { combatants: [], objects: [] },
+  tilePx: BoardChromeTilePx = CHROME_TILE_PX,
 ): {
   readonly width: number;
   readonly height: number;
@@ -376,11 +398,11 @@ export function boardChromeDimensions(
     width:
       2 * BOARD_BORDER_PX +
       2 * COORDINATE_GUTTER_PX +
-      bounds.columns * CHROME_TILE_PX,
+      bounds.columns * tilePx,
     height:
       2 * BOARD_BORDER_PX +
       2 * COORDINATE_GUTTER_PX +
-      bounds.rows * CHROME_TILE_PX +
+      bounds.rows * tilePx +
       LEGEND_GAP_PX +
       legendHeightPx(content),
   };
@@ -688,14 +710,14 @@ function textImage(
 function coordinateLabels(bounds: {
   readonly columns: number;
   readonly rows: number;
-}): HTMLDivElement {
+}, tilePx: BoardChromeTilePx): HTMLDivElement {
   const container = el('div', 'encounter-coordinate-labels');
   container.dataset.coordinateLabels = COORDINATE_CONVENTION;
   container.setAttribute('aria-hidden', 'true');
   const gridTop = COORDINATE_GUTTER_PX;
   const gridLeft = COORDINATE_GUTTER_PX;
-  const gridBottom = gridTop + bounds.rows * CHROME_TILE_PX;
-  const gridRight = gridLeft + bounds.columns * CHROME_TILE_PX;
+  const gridBottom = gridTop + bounds.rows * tilePx;
+  const gridRight = gridLeft + bounds.columns * tilePx;
   const textHeight = GLYPH_HEIGHT * CHROME_TEXT_SCALE;
   for (let column = 0; column < bounds.columns; column += 1) {
     for (const edge of ['top', 'bottom'] as const) {
@@ -710,8 +732,8 @@ function coordinateLabels(bounds: {
       );
       const x =
         gridLeft +
-        column * CHROME_TILE_PX +
-        Math.round(CHROME_TILE_PX / 2 - width / 2);
+        column * tilePx +
+        Math.round(tilePx / 2 - width / 2);
       const y =
         edge === 'top'
           ? Math.round((COORDINATE_GUTTER_PX - textHeight) / 2)
@@ -740,8 +762,8 @@ function coordinateLabels(bounds: {
       );
       const y =
         gridTop +
-        row * CHROME_TILE_PX +
-        Math.round(CHROME_TILE_PX / 2 - textHeight / 2);
+        row * tilePx +
+        Math.round(tilePx / 2 - textHeight / 2);
       const x =
         edge === 'left'
           ? Math.round((COORDINATE_GUTTER_PX - width) / 2)
@@ -773,6 +795,7 @@ export function hiddenRosterTagFor(
 function tokenIdentityUnderlay(
   combatants: readonly EncounterBoardCombatant[],
   bounds: { readonly columns: number; readonly rows: number },
+  tilePx: BoardChromeTilePx,
 ): HTMLDivElement {
   const layer = el('div', 'encounter-token-underlay');
   layer.setAttribute('aria-hidden', 'true');
@@ -792,10 +815,10 @@ function tokenIdentityUnderlay(
       throw new RangeError(
         `Combatant ${String(combatant.id)} is outside the board.`,
       );
-    const cellLeft =
-      COORDINATE_GUTTER_PX + combatant.position.column * CHROME_TILE_PX;
-    const cellTop =
-      COORDINATE_GUTTER_PX + combatant.position.row * CHROME_TILE_PX;
+    const { left: cellLeft, top: cellTop } = boardChromeCellOrigin(
+      combatant.position,
+      tilePx,
+    );
     const ringGeometry = creatureBustRingGeometry(assignment.stackIndex);
     const ringArt = renderCreatureRingBitmap(
       assignment.color.disc,
@@ -834,7 +857,7 @@ function tokenIdentityUnderlay(
     badge.dataset.stackIndex = String(assignment.stackIndex);
     styled(badge, {
       position: 'absolute',
-      left: `${String(cellLeft + CREATURE_BADGE_LEFT_PX)}px`,
+      left: `${String(cellLeft + creatureBadgeLeftPx(tilePx))}px`,
       top: `${String(cellTop + CREATURE_BADGE_TOP_PX + assignment.stackIndex * CREATURE_BADGE_STACK_PITCH_PX)}px`,
       width: `${String(badgeArt.cssWidth)}px`,
       height: `${String(badgeArt.cssHeight)}px`,
@@ -849,6 +872,7 @@ function tokenChrome(
   bounds: { readonly columns: number; readonly rows: number },
   mode: BoardGlyphMode,
   doorCells: ReadonlySet<string>,
+  tilePx: BoardChromeTilePx,
 ): HTMLDivElement {
   const layer = el('div', 'encounter-token-chrome');
   layer.setAttribute('aria-hidden', 'true');
@@ -862,10 +886,10 @@ function tokenChrome(
       throw new RangeError(
         `Combatant ${String(combatant.id)} is outside the board.`,
       );
-    const cellLeft =
-      COORDINATE_GUTTER_PX + combatant.position.column * CHROME_TILE_PX;
-    const cellTop =
-      COORDINATE_GUTTER_PX + combatant.position.row * CHROME_TILE_PX;
+    const { left: cellLeft, top: cellTop } = boardChromeCellOrigin(
+      combatant.position,
+      tilePx,
+    );
     const cellKey = `${String(combatant.position.column)},${String(combatant.position.row)}`;
 
     if (combatant.hiddenFromPlayers === true) {
@@ -878,8 +902,8 @@ function tokenChrome(
         position: 'absolute',
         left: `${String(cellLeft)}px`,
         top: `${String(cellTop)}px`,
-        width: `${String(CHROME_TILE_PX)}px`,
-        height: `${String(CHROME_TILE_PX)}px`,
+        width: `${String(tilePx)}px`,
+        height: `${String(tilePx)}px`,
       });
       layer.append(ring);
       // D525 'full': the eye-slash mark on the ring's left rim, at the tile's own 1× scale like the cell glyphs.
@@ -913,8 +937,8 @@ function tokenChrome(
     bar.dataset.hpBand = band;
     styled(bar, {
       position: 'absolute',
-      left: `${String(cellLeft + Math.round((CHROME_TILE_PX - HP_BAR_WIDTH_PX) / 2) - HP_BAR_BORDER_PX)}px`,
-      top: `${String(cellTop + HP_BAR_TOP_PX)}px`,
+      left: `${String(cellLeft + Math.round((tilePx - HP_BAR_WIDTH_PX) / 2) - HP_BAR_BORDER_PX)}px`,
+      top: `${String(cellTop + hpBarTopPx(tilePx))}px`,
       width: `${String(HP_BAR_WIDTH_PX)}px`,
       height: `${String(HP_BAR_HEIGHT_PX)}px`,
     });
@@ -944,7 +968,7 @@ function tokenChrome(
       : LIFE_GLYPH_INSET_PX;
     styled(lifeImage, {
       position: 'absolute',
-      left: `${String(cellLeft + CHROME_TILE_PX - glyph.cssWidth - LIFE_GLYPH_INSET_PX)}px`,
+      left: `${String(cellLeft + tilePx - glyph.cssWidth - LIFE_GLYPH_INSET_PX)}px`,
       top: `${String(cellTop + lifeTop)}px`,
       width: `${String(glyph.cssWidth)}px`,
       height: `${String(glyph.cssHeight)}px`,
@@ -1300,6 +1324,7 @@ export function renderBoardChrome(
   mode: BoardGlyphMode,
   cells: readonly EncounterBoardCellModel[],
   snapshotMode = false,
+  tilePx: BoardChromeTilePx = CHROME_TILE_PX,
 ): void {
   board.dataset.boardChrome = 'on';
   board.dataset.coordinateLabels = COORDINATE_CONVENTION;
@@ -1315,9 +1340,9 @@ export function renderBoardChrome(
       .map((cell) => cell.key),
   );
   board.append(
-    coordinateLabels(projection.bounds),
-    tokenIdentityUnderlay(projection.combatants, projection.bounds),
-    tokenChrome(projection.combatants, projection.bounds, mode, doorCells),
+    coordinateLabels(projection.bounds, tilePx),
+    tokenIdentityUnderlay(projection.combatants, projection.bounds, tilePx),
+    tokenChrome(projection.combatants, projection.bounds, mode, doorCells, tilePx),
     legend(
       legendEntriesFor(mode, roomDefault, presence),
       mode,

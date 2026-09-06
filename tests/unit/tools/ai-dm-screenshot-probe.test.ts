@@ -601,6 +601,18 @@ describe('D524 general screenshot primer', () => {
       'g3',
     ];
     expect(parseScreenshotProbeArgs(base).boardGlyphs).toBe('none');
+    expect(parseScreenshotProbeArgs(base).captureTilePx).toBe(128);
+    expect(
+      parseScreenshotProbeArgs([...base, '--capture-tile-px', '64'])
+        .captureTilePx,
+    ).toBe(64);
+    expect(
+      parseScreenshotProbeArgs([...base, '--capture-tile-px', '128'])
+        .captureTilePx,
+    ).toBe(128);
+    expect(() =>
+      parseScreenshotProbeArgs([...base, '--capture-tile-px', '96']),
+    ).toThrow('--capture-tile-px must be 64 or 128.');
     expect(
       parseScreenshotProbeArgs([...base, '--board-glyphs', 'light'])
         .boardGlyphs,
@@ -926,11 +938,14 @@ describe('D519 screenshot comprehension schema and CLI', () => {
         'g2-classic-general',
         '--board-glyphs',
         'full',
+        '--capture-tile-px',
+        '64',
         '--simulate',
       ]);
       expect(config.primer).toBe('general');
       expect(config.comparePath).toBeNull();
       expect(config.boardGlyphs).toBe('full');
+      expect(config.captureTilePx).toBe(64);
       const rows = await runScreenshotProbe(config, {
         candidates: [{ id: 'fixture-all-classes', state: everyClassState() }],
         snapshotService: service,
@@ -947,6 +962,7 @@ describe('D519 screenshot comprehension schema and CLI', () => {
         true,
       );
       expect(rows.every((row) => row.boardGlyphs === 'full')).toBe(true);
+      expect(rows.every((row) => row.captureTilePx === 64)).toBe(true);
       expect(
         rows.every(
           (row) => row.version === 'd557-screenshot-comprehension-row-v9',
@@ -977,6 +993,7 @@ describe('D519 screenshot comprehension schema and CLI', () => {
       const summary = await readFile(config.summaryPath, 'utf8');
       expect(summary).not.toContain('RESCORED ESTIMATE');
       expect(summary).toContain('Board glyphs: full.');
+      expect(summary).toContain('Capture tile: 64 px.');
       expect(summary).toContain('gpt-5.6-luna:low');
       expect(summary).toContain('gpt-5.6-luna:medium');
       expect(

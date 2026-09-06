@@ -4,7 +4,11 @@ import { starterArtCssUrl, starterArtDataUri } from '../assets/starter-art-resol
 import { OVERLAY_ASSETS } from '../assets/art-sets';
 import { OBJECT_GLYPH, type BoardGlyphMode } from '../assets/board-glyphs';
 import { renderPixelGlyph } from '../assets/pixel-font';
-import { OBJECT_LABEL_STYLE, renderBoardChrome } from './board-chrome';
+import {
+  OBJECT_LABEL_STYLE,
+  renderBoardChrome,
+  type BoardChromeTilePx,
+} from './board-chrome';
 import './styles.css';
 import { HumanController, type ControllerRequest } from '../combat/controllers';
 import type { EncounterCommand } from '../combat/events';
@@ -295,6 +299,7 @@ export function renderBoard(
   // ART-SEAM (D525): the snapshot page overrides the package's glyph mode from its URL.
   boardGlyphs?: BoardGlyphMode,
   boardSnapshotMode = false,
+  boardChromeTilePx?: BoardChromeTilePx,
 ): HTMLDivElement {
   const art = encounterArtForBoard(projection, boardGlyphs);
   const models = encounterBoardRenderModel(projection, art);
@@ -472,7 +477,8 @@ export function renderBoard(
     board.append(svg);
   }
   // ART-SEAM (D516): the DM board gains names, HP bars, coordinates and a legend; the player board does not.
-  if (provenance !== undefined) renderBoardChrome(board, projection, art.boardGlyphs, models, boardSnapshotMode);
+  if (provenance !== undefined)
+    renderBoardChrome(board, projection, art.boardGlyphs, models, boardSnapshotMode, boardChromeTilePx);
   return board;
 }
 
@@ -835,6 +841,7 @@ class DmEncounterView {
     private readonly boardSnapshotMode = false,
     private readonly loadBoardSnapshotSession?: (sessionId: string) => Promise<void>,
     private readonly boardGlyphs?: BoardGlyphMode,
+    private readonly captureTilePx?: BoardChromeTilePx,
   ) {
     this.#store = store;
     this.#sessionFlow = encounter?.sessionFlow ?? null;
@@ -879,6 +886,7 @@ class DmEncounterView {
     boardSnapshotMode = false,
     loadBoardSnapshotSession?: (sessionId: string) => Promise<void>,
     boardGlyphs?: BoardGlyphMode,
+    captureTilePx?: BoardChromeTilePx,
   ): Promise<DmEncounterView> {
     const store = await IndexedDbBrowserSessionStore.open(indexedDB, localStorage);
     const view = new DmEncounterView(
@@ -890,6 +898,7 @@ class DmEncounterView {
       boardSnapshotMode,
       loadBoardSnapshotSession,
       boardGlyphs,
+      captureTilePx,
     );
     await store.flush();
     return view;
@@ -1379,7 +1388,7 @@ class DmEncounterView {
       revision: projection.encounter.revision,
       round: projection.board.round,
       stateDigest: projection.stateDigest,
-    }, this.boardGlyphs, this.boardSnapshotMode));
+    }, this.boardGlyphs, this.boardSnapshotMode, this.captureTilePx));
     if (movementPreview !== null) this.#shell.append(renderMovementDangerLegend(movementPreview));
   }
 
@@ -2305,6 +2314,8 @@ export function mountEncounterVtt(
     readonly boardSnapshotMode?: boolean;
     /** D525: the snapshot page's `boardGlyphs` URL parameter; absent, the art package decides. */
     readonly boardGlyphs?: BoardGlyphMode;
+    /** D561: snapshot-only chrome lattice pitch; absent keeps the 128-px app default. */
+    readonly captureTilePx?: BoardChromeTilePx;
   },
 ): EncounterVttMount {
   if (options.view === 'player') {
@@ -2337,6 +2348,7 @@ export function mountEncounterVtt(
           }
         : undefined,
       options.boardGlyphs,
+      options.captureTilePx,
     );
     if (closed) {
       view.close();

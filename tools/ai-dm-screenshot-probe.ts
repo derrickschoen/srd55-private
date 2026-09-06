@@ -45,6 +45,7 @@ import {
   boardStateDigest,
   type BoardImageArtifact,
   type BoardImageSource,
+  type CaptureTilePx,
 } from './ai-dm-board-snapshot';
 
 const repositoryRoot = resolve(new URL('../', import.meta.url).pathname);
@@ -253,6 +254,8 @@ export interface ScreenshotProbeConfig {
   readonly comparePath: string | null;
   /** D525: the glyph mode every board is captured under and the primer sentences that describe it. */
   readonly boardGlyphs: BoardGlyphMode;
+  /** D561: CSS tile size used for the captured raster. */
+  readonly captureTilePx: CaptureTilePx;
 }
 
 export interface ProbeTokenUsage {
@@ -273,6 +276,7 @@ interface ScreenshotProbeRowFields {
   readonly primerVersion: PrimerVersion;
   readonly generation: string;
   readonly boardGlyphs: BoardGlyphMode;
+  readonly captureTilePx: CaptureTilePx;
   readonly png: {
     readonly sha256: string;
     readonly relativePath: string;
@@ -1624,6 +1628,7 @@ export function parseScreenshotProbeArgs(
         '--generation',
         '--compare',
         '--board-glyphs',
+        '--capture-tile-px',
       ].includes(option ?? '')
     ) {
       throw new TypeError(
@@ -1683,6 +1688,10 @@ export function parseScreenshotProbeArgs(
   const boardGlyphs = values.get('--board-glyphs') ?? DEFAULT_BOARD_GLYPH_MODE;
   if (!isBoardGlyphMode(boardGlyphs))
     throw new TypeError('--board-glyphs must be none, light or full.');
+  const captureTilePxValue = values.get('--capture-tile-px') ?? '128';
+  if (captureTilePxValue !== '64' && captureTilePxValue !== '128')
+    throw new TypeError('--capture-tile-px must be 64 or 128.');
+  const captureTilePx: CaptureTilePx = captureTilePxValue === '64' ? 64 : 128;
   return {
     models,
     stateCount,
@@ -1695,6 +1704,7 @@ export function parseScreenshotProbeArgs(
     generation,
     comparePath,
     boardGlyphs,
+    captureTilePx,
   };
 }
 
@@ -2082,6 +2092,7 @@ async function runTask(
   primer: PrimerMode,
   generation: string,
   boardGlyphs: BoardGlyphMode,
+  captureTilePx: CaptureTilePx,
 ): Promise<ScreenshotProbeRow> {
   const result = await answerer.answer({
     ...task.model,
@@ -2105,6 +2116,7 @@ async function runTask(
     primerVersion: primer === 'general' ? PRIMER_VERSION : null,
     generation,
     boardGlyphs,
+    captureTilePx,
     png: {
       sha256: task.artifact.sha256,
       relativePath: task.artifact.relativePath,
@@ -2224,6 +2236,7 @@ const savedProbeRowSchema = z
     ]),
     generation: z.string().min(1),
     boardGlyphs: z.enum(['none', 'light', 'full']),
+    captureTilePx: z.union([z.literal(64), z.literal(128)]).optional(),
     png: z
       .object({
         sha256: z.string().min(1),
@@ -2491,6 +2504,7 @@ export function renderProbeSummary(
     `Pass criterion: every question class has mean Jaccard accuracy >= ${PASS_THRESHOLD.toFixed(1)}.`,
     '',
     `Board glyphs: ${[...new Set(rows.map((row) => row.boardGlyphs))].sort().join(', ')}.`,
+    `Capture tile: ${[...new Set(rows.map((row) => row.captureTilePx))].sort((left, right) => left - right).join(', ')} px.`,
     'HP vocabulary: uninjured / bloodied / near_death / unknown.',
     '',
   ];
@@ -2615,6 +2629,7 @@ function rescoreSavedRow(
     primerVersion: saved.primerVersion,
     generation: saved.generation,
     boardGlyphs: saved.boardGlyphs,
+    captureTilePx: saved.captureTilePx ?? 128,
     png: saved.png,
     wallMs: saved.wallMs,
     tokens: saved.tokens,
@@ -2761,6 +2776,7 @@ export async function runScreenshotProbe(
       ? await BoardSnapshotService.start({
           outputDirectory: config.imagesRoot,
           boardGlyphs: config.boardGlyphs,
+          captureTilePx: config.captureTilePx,
         })
       : null;
   const snapshotService = dependencies.snapshotService ?? ownedService;
@@ -2820,6 +2836,7 @@ export async function runScreenshotProbe(
           config.primer,
           config.generation,
           config.boardGlyphs,
+          config.captureTilePx,
         ),
     );
     for (const row of rows)

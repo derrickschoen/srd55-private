@@ -41,6 +41,7 @@ import {
 } from '../../../src/assets/palette';
 import {
   BOARD_BORDER_PX,
+  CELL_GLYPH_RING_BOTTOM_PX,
   CHROME_TILE_PX,
   COORDINATE_CONVENTION,
   COORDINATE_GUTTER_PX,
@@ -66,8 +67,12 @@ import {
   OBJECT_LABEL_STYLE,
   assignCreatureBadges,
   boardRailEntries,
+  boardChromeCellOrigin,
   boardChromeDimensions,
+  cellGlyphRingBottomPx,
+  creatureBadgeLeftPx,
   hpBandOf,
+  hpBarTopPx,
   layoutRosterName,
   legendHeightPx,
   legendEntriesFor,
@@ -1703,5 +1708,50 @@ describe('renderBoard: DM board with chrome, player board without', () => {
         LEGEND_GAP_PX +
         LEGEND_HEIGHT_PX,
     });
+  });
+
+  it('changes lattice pitch without changing fixed chrome element sizes', () => {
+    const bounds = { columns: 15, rows: 24 };
+
+    expect(boardChromeCellOrigin({ column: 3, row: 2 }, 64)).toEqual({
+      left: COORDINATE_GUTTER_PX + 192,
+      top: COORDINATE_GUTTER_PX + 128,
+    });
+    expect(boardChromeCellOrigin({ column: 3, row: 2 })).toEqual({
+      left: COORDINATE_GUTTER_PX + 384,
+      top: COORDINATE_GUTTER_PX + 256,
+    });
+
+    const capture64 = boardChromeDimensions(bounds, undefined, 64);
+    const capture128 = boardChromeDimensions(bounds);
+    const fixedFrameWidth = 2 * BOARD_BORDER_PX + 2 * COORDINATE_GUTTER_PX;
+    expect(capture64.width - fixedFrameWidth).toBe(bounds.columns * 64);
+    expect(capture128.width - fixedFrameWidth).toBe(
+      bounds.columns * CHROME_TILE_PX,
+    );
+
+    expect(hpBarTopPx(64)).toBe(56);
+    expect(hpBarTopPx()).toBe(HP_BAR_TOP_PX);
+    expect(creatureBadgeLeftPx(64)).toBe(17);
+    expect(creatureBadgeLeftPx()).toBe(CREATURE_BADGE_LEFT_PX);
+    expect(cellGlyphRingBottomPx(64)).toBe(54);
+    expect(cellGlyphRingBottomPx()).toBe(CELL_GLYPH_RING_BOTTOM_PX);
+    expect(HP_BAR_WIDTH_PX).toBe(40);
+    expect(HP_BAR_HEIGHT_PX).toBe(4);
+    expect(CREATURE_BADGE_WIDTH_PX).toBe(30);
+    expect(CREATURE_BADGE_HEIGHT_PX).toBe(22);
+
+    const rendered64 = interactiveElement(
+      renderBoard(projection, new Set(), null, provenance, 'full', true, 64),
+    );
+    const rendered128 = interactiveElement(
+      renderBoard(projection, new Set(), null, provenance, 'full', true),
+    );
+    const hp64 = rendered64.querySelector('.encounter-hp-bar') as StyledElement | null;
+    const hp128 = rendered128.querySelector('.encounter-hp-bar') as StyledElement | null;
+    if (hp64 === null || hp128 === null)
+      throw new Error('Rendered board omitted an HP bar.');
+    expect(inlinePixels(hp64, 'width')).toBe(40);
+    expect(inlinePixels(hp128, 'width')).toBe(40);
   });
 });

@@ -56,6 +56,14 @@ if (localEncounterLaunch) {
   const sessionId = launchUrl.searchParams.get('session') ?? 'reference-encounter';
   const boardSnapshotMode = launchUrl.searchParams.get('boardSnapshot') === '1';
   const boardGlyphsParameter = launchUrl.searchParams.get('boardGlyphs');
+  const captureTilePxParameter = launchUrl.searchParams.get('captureTilePx');
+  let captureTilePx: 64 | 128 | undefined;
+  if (captureTilePxParameter === '64') captureTilePx = 64;
+  else if (captureTilePxParameter === '128') captureTilePx = 128;
+  else if (captureTilePxParameter !== null)
+    throw new Error(
+      `Unknown captureTilePx ${captureTilePxParameter}; expected 64 or 128.`,
+    );
   void Promise.all([import('./vtt/encounter-app'), import('./assets/board-glyphs')]).then(
     ([{ mountEncounterVtt }, { isBoardGlyphMode }]) => {
       // D525: a misspelt mode must fail here, not silently capture a 'none' board under another label.
@@ -67,6 +75,7 @@ if (localEncounterLaunch) {
         sessionId,
         boardSnapshotMode,
         ...(boardGlyphsParameter === null ? {} : { boardGlyphs: boardGlyphsParameter }),
+        ...(captureTilePx === undefined ? {} : { captureTilePx }),
       });
       window.addEventListener('pagehide', () => mounted.close(), { once: true });
     },
