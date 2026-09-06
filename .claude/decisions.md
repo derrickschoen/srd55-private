@@ -11586,3 +11586,13 @@ install lane (codex trust check); it is not a repository and nothing there is un
 NEXT (dispatched now, research/brief-references-comfyui.md): gen_reference.py gains --provider comfyui (klein|krea),
 the LOG-row-before-success bug is fixed, krea requires --local-reference-only, one real generation per model of
 floor-stone-cracked with written observations.
+
+## D541 confirmation — round-4 chrome, second seed (6203002, luna medium, 24 states, 240 rows) (2026-09-05 22:50)
+
+Seed-2 means (bar 0.90): Q1 identity 0.910 PASS, Q2 side 0.897, Q3 HP 0.893, Q4 terrain 0.707, Q5 light 0.951 PASS,
+Q6 doors 0.750, Q7 adjacency 0.808, Q8 hidden 0.833, Q9 fog 0.639, Q10 blocked 0.956 PASS. Against seed 1 (medium):
+identity/light/blocked hold the bar on both seeds and are CONFIRMED; side and HP sit within 0.01 of the bar on both
+seeds (0.903/0.897, 0.907/0.893) — not confirmed, not regressed, treated as at-bar pending round 5b; terrain, fog,
+doors, adjacency, hidden are below the bar on both seeds with the same dominant failure ("fact not present"), which
+is the primer/rendering gap round 5b already targets (terrain + blocked regressions, primer v9). Run survived the
+reboot only by relaunch; output at dnd-wt-light/dnd-slim-runs/d541-probe24-r4-seed2.jsonl (relative --out).
