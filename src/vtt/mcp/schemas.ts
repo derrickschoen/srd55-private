@@ -26,6 +26,13 @@ export const ENGINE_LEGENDARY_WINDOWS_POLICY = 'legendary-windows-v2' as const;
 export const ENGINE_REACTION_SPEND_HOLD_POLICY = 'reaction-spend-hold-v1' as const;
 export const ENGINE_RECOVERY_CAPABILITY_POLICY = 'recovery-capability-v2' as const;
 export const ENGINE_STATE_SUMMARY_POLICY = 'state-summary-v2-creature-space' as const;
+export const PROPOSAL_CONTRACT_REFUSAL_CODES = Object.freeze([
+  'CORRECTION_FALLBACK_MUST_BE_NULL',
+  'INITIAL_FALLBACK_REQUIRED',
+  'PRIMARY_FALLBACK_IDENTICAL',
+  'OPTION_NOT_SHOWN',
+] as const);
+export const proposalContractRefusalCodeSchema = z.enum(PROPOSAL_CONTRACT_REFUSAL_CODES);
 
 const identifier = z.string().min(1).max(200).describe('Engine-owned stable identifier.');
 const offerableOptionIdentifier = identifier.refine(
@@ -376,13 +383,32 @@ const contextMovementIntelRow = movementIntelRow.omit({
 const opportunityCost = z.object({
   policy: z.literal(OPPORTUNITY_COST_POLICY),
   correction_policy: z.literal(DOMINANCE_CORRECTION_POLICY),
-  dodge_option_id: identifier,
-  engine_default_option_id: identifier,
+  dodge_option_id: identifier.optional(),
+  dodge_option_label: summaryText.optional(),
+  engine_default_option_id: identifier.optional(),
+  engine_default_option_label: summaryText.optional(),
   status: z.enum(['dominated', 'not_dominated', 'not_dominated_tradeoff', 'blocked_unresolved']),
   better_option_id: identifier.optional(),
+  better_option_label: summaryText.optional(),
   delta: z.string().min(1).max(1_000).optional(),
   reason_codes: z.array(shortCode).max(50).optional(),
-}).strict();
+}).strict().superRefine((value, context) => {
+  for (const role of ['dodge', 'engine_default'] as const) {
+    const hasId = value[`${role}_option_id`] !== undefined;
+    const hasLabel = value[`${role}_option_label`] !== undefined;
+    if (hasId === hasLabel) context.addIssue({
+      code: 'custom',
+      path: [`${role}_option_id`],
+      message: `${role} option must carry exactly one shown id or hidden-option label.`,
+    });
+  }
+  const hasBetterId = value.better_option_id !== undefined;
+  const hasBetterLabel = value.better_option_label !== undefined;
+  if (hasBetterId && hasBetterLabel) context.addIssue({
+    code: 'custom', path: ['better_option_id'],
+    message: 'better option must not carry both an id and label.',
+  });
+});
 const actorIntel = z.object({
   policy: z.literal(DM_TURN_INTEL_POLICY),
   zero_movement_offense_count: z.number().int().min(0),
@@ -598,11 +624,19 @@ const materialityContext = z.object({
     summary: z.string().min(1).max(1_000),
   }).strict()).min(1).max(20),
 }).strict();
-const actorContext = z.object({ actor_id: identifier, status: actorStatus, options: z.array(tacticalOption).max(20), threats: z.array(threat).max(50), intel: actorIntel }).strict();
+const actorContext = z.object({
+  actor_id: identifier,
+  status: actorStatus,
+  options: z.array(tacticalOption).max(20),
+  options_omitted_for_size: z.number().int().min(0).max(20),
+  threats: z.array(threat).max(50),
+  intel: actorIntel,
+}).strict();
 const intelSuppressedActorContext = z.object({
   actor_id: identifier,
   status: actorStatus,
   options: z.array(tacticalOption).max(20),
+  options_omitted_for_size: z.number().int().min(0).max(20),
   threats: z.array(threat).max(50),
 }).strict();
 const advertisedPlay = z.object({
@@ -1246,4 +1280,5 @@ export const engineSchemaInternals = {
   minimalSubmitRoundTransportInput,
   submitRoundTransportInput,
   submitSpeculativeRoundPlanInput,
+  turnContextOutput,
 };

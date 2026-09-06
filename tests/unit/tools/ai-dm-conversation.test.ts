@@ -64,6 +64,7 @@ import {
 } from '../../../src/vtt/knowledge-base-contract';
 import { declareTestInputs } from '../../helpers/test-inputs';
 import { sha256 } from '../../../src/crypto/sha256';
+import { DEFAULT_RENDERER_PROFILE } from '../../../src/vtt/renderer-profile';
 
 const kbInputs = declareTestInputs({ fixtures: [
   'tests/fixtures/ai-dm-kb/ai-dm-core.md',
@@ -215,7 +216,7 @@ class SerializedRoundTripAdapter implements AgentSessionAdapter {
   #startCount = 0;
 
   constructor(
-    private readonly choice: 'use_action_dodge' | 'targeted_web' | 'attack' | 'invalid_then_dodge' | 'option_shaped_end_turn',
+    private readonly choice: 'first_shown' | 'use_action_dodge' | 'targeted_web' | 'attack' | 'invalid_then_dodge' | 'option_shaped_end_turn',
     private readonly usageInputs: number[] = [],
   ) {}
 
@@ -278,33 +279,53 @@ class SerializedRoundTripAdapter implements AgentSessionAdapter {
     this.turnContexts.push(context);
     const actors = runtime.feed.current().request?.actors;
     if (actors === undefined) throw new Error('Serialized round request has no actors.');
+    const renderedActors = context['actors'];
+    if (!Array.isArray(renderedActors)) throw new Error('Serialized turn context has no actors.');
     let specialSubmitted = false;
     const proposals = actors.map((actorId) => {
-      const options = runtime.feed.current().projection.combatants
-        .find((combatant) => combatant.id === actorId)?.options ?? [];
-      const special = !specialSubmitted ? options.find((option) => option.actionSlots.some((slot) =>
+      const renderedActor = renderedActors.map((value) => objectValue(value, 'rendered actor'))
+        .find((actor) => actor['actor_id'] === actorId);
+      const optionValues = renderedActor?.['options'];
+      if (!Array.isArray(optionValues)) throw new Error(`Serialized context has no options for ${actorId}.`);
+      const options = optionValues.map((value) => objectValue(value, 'rendered option'));
+      const slots = (option: Readonly<Record<string, unknown>>) => {
+        const values = option['action_slots'];
+        return Array.isArray(values) ? values.map((value) => objectValue(value, 'rendered option slot')) : [];
+      };
+      const engineDefaultId = objectValue(
+        objectValue(renderedActor?.['intel'], 'rendered actor intel')['opportunity_cost'],
+        'rendered actor opportunity cost',
+      )['engine_default_option_id'];
+      const matchingSpecials = (this.choice === 'attack' || !specialSubmitted) ? options.filter((option) => slots(option).some((slot) =>
         this.choice === 'attack'
-          ? slot.use.kind === 'attack' || slot.use.kind === 'multiattack'
+          ? slot['kind'] === 'attack' || slot['kind'] === 'multiattack'
           : this.choice === 'targeted_web'
-            ? slot.use.kind === 'saving_throw' && slot.use.actionId === 'web'
-            : false)) : undefined;
+            ? slot['kind'] === 'saving_throw' && slot['action_id'] === 'web'
+            : false)) : [];
+      const special = matchingSpecials.find((option) => option['option_id'] === engineDefaultId) ??
+        matchingSpecials[0];
       if (special !== undefined) specialSubmitted = true;
       const requestedKind = this.choice === 'option_shaped_end_turn' ? 'end_turn' : 'dodge';
-      const selected = special ?? options.find((option) => option.actionSlots.some((slot) =>
-        slot.slot === 'main' && slot.use.kind === requestedKind));
+      const selected = this.choice === 'first_shown'
+        ? options[0]
+        : special ?? options.find((option) => slots(option).some((slot) =>
+            slot['slot'] === 'main' && slot['kind'] === requestedKind));
       if (selected === undefined) throw new Error(`Serialized round has no ${requestedKind} option for ${actorId}.`);
-      const fallback = options.find((option) => option.optionId !== selected.optionId);
+      const selectedId = String(selected['option_id']);
+      const selectedLabel = String(selected['label']);
+      const selectedMainKind = slots(selected).find((slot) => slot['slot'] === 'main')?.['kind'];
+      const fallback = options.find((option) => option['option_id'] !== selectedId);
       if (manifest.phase === 'initial' && fallback === undefined) {
         throw new Error(`Serialized round has no independent fallback option for ${actorId}.`);
       }
-      this.submittedOptions.push({ option_id: selected.optionId, label: selected.label });
+      this.submittedOptions.push({ option_id: selectedId, label: selectedLabel });
       return {
         actor_id: actorId,
         expected_revision: manifest.revision,
-        primary_option_id: selected.optionId,
-        fallback_option_id: manifest.phase === 'correction' ? null : fallback?.optionId ?? null,
-        reason: `Choose ${selected.label} to exercise the serialized decision path.`,
-        override_justification: requestedKind === 'dodge' || requestedKind === 'end_turn'
+        primary_option_id: selectedId,
+        fallback_option_id: manifest.phase === 'correction' ? null : String(fallback?.['option_id']),
+        reason: `Choose ${selectedLabel} to exercise the serialized decision path.`,
+        override_justification: selectedMainKind === 'dodge' || selectedMainKind === 'end_turn'
           ? {
               kind: 'missing_metric',
               id: 'expected_damage_milli',
@@ -431,6 +452,22 @@ function preparedMonsterRoundRevision(initialState: EncounterState): {
 
 const LEGACY_BLOCK_ARGS = [
   '--combat-model', 'monster_block_v1', '--initiative-profile', 'legacy',
+] as const;
+
+const ALL_OPTIONS_TEST_RENDERER_ARGS = [
+  '--renderer-profile', JSON.stringify({
+    ...DEFAULT_RENDERER_PROFILE,
+    rows: 'off',
+    movement: 'material_only',
+    threats: 'counts_exception_ids',
+    rare: 'triggered',
+    knowledge: 'relevance_gated',
+    frontier: 'off',
+    failures: 'headline_codes',
+    adverts: 'full',
+    misc: 'merged',
+    optionDetail: 'top2_stubs',
+  }),
 ] as const;
 
 describe('AI-DM engine MCP conversation runner', () => {
@@ -605,7 +642,7 @@ describe('AI-DM engine MCP conversation runner', () => {
 
   it('keeps one sitting across rooms, rolls only at threshold, and explicit end prevents resume', { timeout: 60_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-sitting-rollover-'));
-    const adapter = new SerializedRoundTripAdapter('use_action_dodge', [1_000, 73]);
+    const adapter = new SerializedRoundTripAdapter('first_shown', [1_000, 73]);
     const config = parseConversationArgs([
       '--rooms', '2', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
       ...LEGACY_BLOCK_ARGS,
@@ -720,6 +757,7 @@ describe('AI-DM engine MCP conversation runner', () => {
     const config = parseConversationArgs([
       '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
       ...LEGACY_BLOCK_ARGS,
+      ...ALL_OPTIONS_TEST_RENDERER_ARGS,
     ]);
 
     const result = await runConversation(config, {
@@ -750,7 +788,7 @@ describe('AI-DM engine MCP conversation runner', () => {
 
   it('requests full context for round one and a delta for a resumed later round', { timeout: 60_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-round-delta-'));
-    const adapter = new SerializedRoundTripAdapter('use_action_dodge');
+    const adapter = new SerializedRoundTripAdapter('first_shown');
     const config = parseConversationArgs([
       '--rooms', '1', '--rounds', '2', '--out', join(directory, 'rows.jsonl'),
       ...LEGACY_BLOCK_ARGS,
@@ -849,6 +887,7 @@ describe('AI-DM engine MCP conversation runner', () => {
         '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
         '--cli-bin', 'definitely-not-a-model-binary', '--dry-run',
         ...LEGACY_BLOCK_ARGS,
+        ...ALL_OPTIONS_TEST_RENDERER_ARGS,
       ]);
 
       const result = await runConversation(config, { roomStates: [generatedState] });
@@ -1317,6 +1356,7 @@ describe('AI-DM engine MCP conversation runner', () => {
       '--rooms', '1', '--rounds', '1', '--out', outPath,
       '--cli-bin', 'definitely-not-a-model-binary', '--dry-run',
       ...LEGACY_BLOCK_ARGS,
+      ...ALL_OPTIONS_TEST_RENDERER_ARGS,
     ]);
 
     const result = await runConversation(config);
@@ -1344,6 +1384,7 @@ describe('AI-DM engine MCP conversation runner', () => {
       '--rooms', '3', '--rounds', '3', '--out', join(directory, 'rows.jsonl'),
       '--combat-model', 'initiative_segments_v1', '--initiative-profile', 'derived_v1',
       '--dry-run',
+      ...ALL_OPTIONS_TEST_RENDERER_ARGS,
     ]);
 
     const result = await runConversation(config);
@@ -1359,6 +1400,7 @@ describe('AI-DM engine MCP conversation runner', () => {
     const config = parseConversationArgs([
       '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'), '--dry-run',
       ...LEGACY_BLOCK_ARGS,
+      ...ALL_OPTIONS_TEST_RENDERER_ARGS,
     ]);
 
     const result = await runConversation(config, {
@@ -1401,6 +1443,7 @@ describe('AI-DM engine MCP conversation runner', () => {
     const config = parseConversationArgs([
       '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'), '--dry-run',
       ...LEGACY_BLOCK_ARGS,
+      ...ALL_OPTIONS_TEST_RENDERER_ARGS,
     ]);
 
     const result = await runConversation(config, {
@@ -1577,6 +1620,7 @@ describe('AI-DM engine MCP conversation runner', () => {
     const result = await runConversation(parseConversationArgs([
       '--rooms', '1', '--rounds', '1', '--out', outPath, '--dry-run',
       ...LEGACY_BLOCK_ARGS,
+      ...ALL_OPTIONS_TEST_RENDERER_ARGS,
     ]));
 
     expect(result.rows[0]).toEqual(expect.objectContaining({
@@ -1784,6 +1828,7 @@ describe('AI-DM engine MCP conversation runner', () => {
     const config = parseConversationArgs([
       '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
       '--combat-model', 'initiative_segments_v1', '--dry-run', '--transport', 'final_indices',
+      ...ALL_OPTIONS_TEST_RENDERER_ARGS,
     ]);
     const result = await runConversationWithPartyPolicy('heuristic_v0', config, {
       roomStates: [await alternatingInitiativeRoom({ fragileMonsterCount: 1 })],
@@ -1822,6 +1867,7 @@ describe('AI-DM engine MCP conversation runner', () => {
     const config = parseConversationArgs([
       '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
       '--combat-model', 'initiative_segments_v1', '--dry-run', '--transport', 'final_indices',
+      ...ALL_OPTIONS_TEST_RENDERER_ARGS,
     ]);
     const result = await runConversationWithPartyPolicy('heuristic_v0', config, {
       roomStates: [await alternatingInitiativeRoom({ fragileMonsterCount: 1 })],
@@ -1971,6 +2017,7 @@ describe('AI-DM engine MCP conversation runner', () => {
     const config = parseConversationArgs([
       '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
       '--combat-model', 'initiative_segments_v1', '--dry-run',
+      ...ALL_OPTIONS_TEST_RENDERER_ARGS,
     ]);
 
     const result = await runConversation(config, {
@@ -2110,6 +2157,7 @@ describe('AI-DM engine MCP conversation runner', () => {
     const config = parseConversationArgs([
       '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
       '--combat-model', 'initiative_segments_v1', '--capture-rl-data', '--dry-run',
+      ...ALL_OPTIONS_TEST_RENDERER_ARGS,
     ]);
 
     const result = await runConversationWithPartyPolicy('heuristic_v0', config, {
@@ -2379,6 +2427,7 @@ describe('AI-DM engine MCP conversation runner', () => {
     const config = parseConversationArgs([
       '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
       '--combat-model', 'initiative_segments_v1', '--dry-run',
+      ...ALL_OPTIONS_TEST_RENDERER_ARGS,
     ]);
 
     const result = await runConversation(config, {
@@ -2468,6 +2517,7 @@ describe('AI-DM engine MCP conversation runner', () => {
     const config = parseConversationArgs([
       '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
       '--combat-model', 'initiative_segments_v1', '--dry-run',
+      ...ALL_OPTIONS_TEST_RENDERER_ARGS,
     ]);
 
     const result = await runConversationWithPartyPolicy('heuristic_v0', config, {
@@ -2488,6 +2538,7 @@ describe('AI-DM engine MCP conversation runner', () => {
     const config = parseConversationArgs([
       '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
       '--combat-model', 'initiative_segments_v1', '--dry-run',
+      ...ALL_OPTIONS_TEST_RENDERER_ARGS,
     ]);
 
     const result = await runConversationWithPartyPolicy('heuristic_v0', config, {
@@ -2510,6 +2561,7 @@ describe('AI-DM engine MCP conversation runner', () => {
     const config = parseConversationArgs([
       '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
       '--combat-model', 'initiative_segments_v1', '--dry-run',
+      ...ALL_OPTIONS_TEST_RENDERER_ARGS,
     ]);
 
     const result = await runConversationWithPartyPolicy('heuristic_v0', config, {

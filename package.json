@@ -35,6 +35,7 @@
     "db:migrations": "vitest run --configLoader runner tests/unit/db/migrations.test.ts",
     "db:contracts": "vite-node scripts/build-row-contracts.ts",
     "schema:content-pack": "vite-node tools/generate-content-pack-schema.ts",
+    "schema:engine-mcp": "vite-node tools/generate-engine-mcp-schemas.ts",
     "attribute:round-input": "vite-node tools/attribute-round-input.ts --",
     "rl:extract-sft": "vite-node tools/rl/extract-sft.ts --",
     "rl:generate-data": "vite-node tools/rl/generate-data.ts --"

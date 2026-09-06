@@ -48,9 +48,10 @@ import {
 } from '../../helpers/test-filesystem';
 
 const META = mcpRequestMeta({ name: 'board-delivery-test', version: '1.0.0' });
-// Independently reproduced from committed footprints Increment 3 (8bdc7ba8),
-// before the board-delivery branch was merged into it.
-const FOOTPRINTS_RAW_CONTEXT_SHA256 = '3ab18fe4c51818906b22d317126876617ad9615c00a1be7621e2b819876aca19';
+// Pin = the intel-leak lane context (04fd8420: shown-option boundary, size-omission
+// declarations) BEFORE the last-seen (D545) merge; the last-seen policy string and
+// state handle are normalised back below so the pin stays independent of that merge.
+const FOOTPRINTS_RAW_CONTEXT_SHA256 = 'aa841063ad0512d0f6b286318db802526da3efc5265a04d8b67f4d8351909d51';
 const FOOTPRINTS_STATE_HANDLE = 'engine-state:c7c7b052bd70a39bf59c83277b7508d8bf52b69100fbde5939c8562ac8686842';
 
 function record(value: unknown, label: string): Readonly<Record<string, unknown>> {
@@ -458,7 +459,7 @@ describe('arena capture lifecycle and off-arm invariance', () => {
 
     const raw = offResult[0]?.rawTurnContext;
     if (raw === undefined) throw new TypeError('Off-arm row omitted rawTurnContext.');
-    expect(Buffer.byteLength(raw)).toBe(32_175);
+    expect(Buffer.byteLength(raw)).toBe(31_995);
     const rawRecord = record(JSON.parse(raw) as unknown, 'off raw context');
     expect(record(rawRecord['actor_knowledge'], 'off actor knowledge')['policy'])
       .toBe('actor-knowledge-v3-last-seen');
@@ -468,7 +469,7 @@ describe('arena capture lifecycle and off-arm invariance', () => {
     const baselineEquivalent = raw
       .replace('actor-knowledge-v3-last-seen', 'actor-knowledge-v2-creature-space')
       .replace(String(stateHandle), FOOTPRINTS_STATE_HANDLE);
-    expect(Buffer.byteLength(baselineEquivalent)).toBe(32_180);
+    expect(Buffer.byteLength(baselineEquivalent)).toBe(32_000);
     expect(createHash('sha256').update(baselineEquivalent).digest('hex')).toBe(FOOTPRINTS_RAW_CONTEXT_SHA256);
 
     const offHandler = createMcpHandler({ tools: [{
