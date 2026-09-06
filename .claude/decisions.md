@@ -12677,3 +12677,27 @@ s3-assess 592b128e, s7-verify 0b902f0a, s9-bestof2 cfb9a74c, a5-delta
 10e3892a, render-bench 0c5aa3d1, join-baseline d24ad3b1. None on main
 yet: landings are serial with a full gate each after the measurement
 runs read out.
+
+## D565 — OWNER: optimise luna-medium board comprehension toward sol high's best; art and instructions may move; sol high may degrade slightly if the luna gain is real (2026-09-06 17:22)
+
+Owner (verbatim): "The goal is to fix the art and the instructions to
+get Luna medium comprehension as close to sol high as we can. I am
+looking for anything that raises Luna medium scores to get as close as
+possible to the sol high best score. It is even ok to degrade sol high
+scores slightly to improve Luna medium scores (just be sure that it
+really is an improvement and not a fluke)."
+
+Consequences: (1) the objective for the classic/probe programme is luna
+medium's per-class Jaccard and strict gate, with sol high's best (.911
+mean on r5c pixels; per-class ceiling per D-record above) as the
+reference, not a constraint; (2) fluke guard: an improvement counts only
+when it replicates on a second seed (6203002, as D541 did for round 4)
+or a repeat run of the same 24 states with the class means moving the
+same direction, and the bootstrap intervals do not overlap the prior
+run's on the classes claimed; (3) the E1 semantic board (already .942)
+is the primary lever, so its encoding defects (Q5 light, Q9 union) are
+fixed next (E1b brief prepared, dispatches when the 'both' arm frees
+the worktree), then semantic/both re-run and a second-seed confirmation;
+(4) art rounds continue for the PNG path (r5d in flight) since the live
+DM still sees the image and the 'both' arm uses it; (5) sol high is
+re-probed on the final candidate to report the trade.
