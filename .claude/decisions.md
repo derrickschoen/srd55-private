@@ -11840,3 +11840,14 @@ metal cluster, forced-gloss control). Restores byte-identical, 17/17 after.
 Survivor B from 5b is closed. Committed on claude/classic-r5 (see git log;
 5b = 36e7b7f8). Classic still does NOT land: probe r5b and the capture-size
 diagnostic come first (after the intel-leak gate, one heavy job at a time).
+
+## VOID GATE — intel-leak gate-wt4 ran nothing: lane branch 41 commits behind main, no test:gate scripts (2026-09-06 01:22)
+
+gate-wt-intel-leak.log: tsc 0, sg 0, then "vitest-gate exit:1" and
+"playwright-gate exit:1" with no runner output, GATES DONE after 32 s. Cause
+verified: claude/intel-leak (04fd8420, base 03a50715) predates the D544 gate
+runners; `npm run test:gate` fails with "missing script". Nothing was
+tested; the exit 1s are not a verdict (memory: an empty gate log is killed
+or never-ran, not passed). Fix: merge main (4b8ee291, 41 commits incl. the
+ghost landing dda20902) into the lane, re-verify (tsc/focused/my mutants),
+then re-run the gate. Recorded before relaunch.
