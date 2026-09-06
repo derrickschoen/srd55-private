@@ -11976,3 +11976,23 @@ dnd-wt-classic5 4a279a80 after clearing the killed run's empty jsonl and
 4 partial capture dirs (log .tmp/runs/d536-probe24-r5b.log; the 01:24 log
 kept as -VOID-reboot-0158). Same overlap ruling as 01:24: any Playwright
 LOAD FLAKE in the probe's capture window is discarded, never re-pinned.
+
+## D561 — OWNER: capture-scale diagnostic auto-runs on an r5b miss; VTT prior-art research dispatched (2026-09-06 09:39)
+
+Owner "yes": if probe r5b scores below round 4, the capture-scale
+diagnostic runs without a further ask: probe-only change (a capped long
+edge / 64-px CSS tile at the snapshot seam, art untouched), same 24 states
+and seed, paired against the 128-px capture, luna medium. Classic lands
+only when a probe scores >= round 4.
+
+Owner: research what is popular for browser-played games like this VTT,
+prior art and libraries "to see if we could be doing better", colonist.io
+as one example, plus "one I don't know about". Dispatched codex research
+lane (brief .tmp/runs/brief-vtt-prior-art.md, log .tmp/runs/
+log-vtt-prior-art.log, cwd ~/dnd-research-private/vtt-research, read-only
+on the repo, network on, no paid APIs, cite-don't-copy). Deliverable:
+~/dnd-research-private/vtt-research/2026-09-06-browser-vtt-prior-art-codex.md
+(colonist.io deep-dive, VTT landscape table, library/building-block review
+against the no-backend PWA constraint, three lesser-known adopted
+projects, ranked recommendations with experiments, open questions).
+Supervisor review on harvest before anything reaches the owner as advice.
