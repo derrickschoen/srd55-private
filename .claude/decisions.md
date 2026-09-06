@@ -12130,3 +12130,24 @@ whether chrome scales with the tile. Art, renderer, chrome and primer
 untouched. On harvest: verify, commit on claude/classic-r5, then run the
 paired probe (24 states, seed 6203001, luna medium+low, 64-px capture)
 against r5b's 128-px numbers.
+
+## FINDING AGAINST MY OWN BRIEF — capture-scale lane BLOCKED correctly; amended (2026-09-06 11:54)
+
+Codex (01a07760) implemented the probe-side option (4 files, +77/-7,
+typecheck pass, 31 touched tests pass, no pins moved, the 128-px smoke
+capture hash equals the pinned D536 capture) and then stopped: at a 64-px
+capture the chrome stays on the 128-px lattice because board-chrome.ts
+CHROME_TILE_PX = 128 was on my forbidden list. I viewed both smoke PNGs
+(64 px: 1012x2104, 128 px: 1972x3640, same state arena-brutal-6203010):
+the 64-px image shows column labels 0-7 over a 15-column board and rows
+0-15 over 24, badges and rings displaced. A paired run on that would be
+invalid. Round 4 had all three tile values at 64 (chrome lattice, capture
+CSS tile, native art); round 5 moved all three to 128 with unchanged
+chrome element sizes, so the lattice must follow the capture tile for the
+diagnostic to test the hypothesis. Amendment sent by resume (full UUID
+confirmed): board-chrome.ts may be changed only to parameterise the
+lattice pitch (tilePx 64|128, default 128, sizes untouched), threaded from
+the snapshot service, with directional tests; re-run typecheck, touched
+specs and both smokes. Codex's smoke luna calls failed because
+~/.codex-aidm is read-only in its sandbox: expected, the PNGs are the
+deliverable; I run the real paired probe after commit.
