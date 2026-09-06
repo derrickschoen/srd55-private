@@ -12231,3 +12231,18 @@ render (or how they contrast with fog/dim) in a way luna no longer sees.
 D562 applies to the scale part; Q9 needs an art-side diagnosis and fix in
 the same lane before the re-probe (a re-probe cannot reach round 4 with
 Q9 at .35). Dispatching now.
+
+## D562 chrome-scale + Q9 obscured lane dispatched (2026-09-06 13:39)
+
+Codex 01a077cd in dnd-wt-classic5 (2ba531a6, clean): brief .tmp/runs/
+brief-classic-chrome-scale.md, log .tmp/runs/log-classic-chrome-scale.log.
+Part A: every chrome element size derived from tilePx with the 64-px
+values as base (text scale 4, HP bar 80x8, glyphs 18, badges 60x44,
+gutter 48, border 4, legend proportionate at 128), directional and 2x
+ratio tests, moved pins listed each with a paired independent invariant.
+Part B: diff obscured-cell rendering d5c74dd0 vs HEAD, fix so obscured is
+distinct from bright/dim/dark/fogged at 128 px with measured contrast
+before/after and a floor test. Verify: typecheck, touched specs, 1-state
+128-px capture smoke viewed. On harvest: my verification + mutants,
+commit, then the fresh 24-state 128-px probe paired against r5b/r4.
+Brainstorm lane (01a077c0) finished at 13:37; review next.
