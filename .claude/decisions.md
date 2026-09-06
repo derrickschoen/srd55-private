@@ -12816,3 +12816,21 @@ pairs: 43 shown; in 31 the chosen option was one of the pair (A 11, B
 blinded panel can test order-conditioned effects. Next: build the
 blinded 3/3/2/2 packet from the two jsonls with tools/ai-dm-rerun-packet
 and run the judges.
+
+## FINDING AGAINST MY OWN RUN — E2 30-row arms used the mini-A/B seed, not the R1-10 holdout; relaunched (2026-09-06 18:30)
+
+tools/ai-dm-rerun-packet.ts refuses rows whose seed is not one of the
+R1-10 holdout seeds (5117001-5117010, room N = seed 5117000+N, reps 3):
+"row 1.seed=6203001 is not an R1-10 holdout seed". My 30-row E2 arms ran
+with --seed 6203001 (the D429.1 mini-A/B seed), so they can serve as
+mechanism data only (both arms 30/30 authorized, offense 51 vs 51) and
+cannot be judged. Relaunched both arms with --seed 5117001 --rooms 10
+--reps 3 (cards profile vs default) in parallel on dnd-wt-e2-cards
+(run-e2-r110.sh); the packet is built from those with --shuffle-seed
+and judged with judge-one.sh (sol high via codex, opus and fable via
+claude -p, the standing supervisor-run panel). Rule recorded: judged
+arms always run on the R1-10 protocol; the 6203001 seed is for the
+offense-shape mini-A/B only. Also: rows carry arm 'single' for
+single-arm runs, so the two files must be relabelled (arm: cards /
+control) before the packet build; that relabel touches only the arm
+field, which the packet withholds from judges anyway.
