@@ -12854,3 +12854,17 @@ seed-5117001.json. Relaunched: cards vs default profile, --basis hard
 --seed 5117001 --rooms 10 --reps 3, luna medium, full intel, in
 parallel (run-e2-r110.sh). Seed-6203001 brutal rows remain mini-A/B
 shape data only.
+
+## E4 surviving mutant confirmed (advert cap untested); session resumed (2026-09-06 18:35)
+
+The completed background run (mutant slice(0,3) -> slice(0,5) in
+src/vtt/snippets/registry.ts, in place during the run, restored after)
+passed all 351 tests across every advert-related spec: the "<= 3
+adverts" requirement has no failing test. Codex's E4 report claimed
+"advert limit" coverage. Resumed 01a07845-f587 with the finding and a
+required directional test (>= 5 applicable plays from real predicates,
+exactly three advertised, the top three named). A redundant second
+mutant script that would have tested the wrong file state was killed;
+registry verified byte-identical to the original; E4 remains
+uncommitted. E2 judged arms confirmed running: hard basis, seed 5117001,
+10 x 3, cards vs default, luna medium.
