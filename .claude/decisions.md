@@ -12943,3 +12943,20 @@ gate launched 19:25 (gate-wt4.sh wt-classic5, load 0.95, no other
 gate/vitest/Playwright running; the E2 judges had finished). Mini-A/B
 follows the gate, then the main merge, dist rebuild, and the E1 lineage
 merges (E1/E1b/E1c descend from this branch).
+
+## E2 BLINDED VERDICT: consequence cards do not move the panel; the hard basis is saturated at luna medium (2026-09-06 19:26)
+
+Panel (sol high / opus / fable, packet e2/cards, 60 entries, hard basis
+R1-10 x 3 reps, luna medium): cards mean 9.37 (sol 9.53, opus 9.07,
+fable 9.50, 0 refused) vs control 9.48 (9.70 / 9.13 / 9.60, 0 refused);
+paired contrast control - cards = +0.11, seed-clustered 95% CI
+[-0.12, +0.41]. No effect; if anything a hair worse. Both arms sit at
+9.4-9.5 of 10, i.e. the 3/3/2/2 rubric on the hard basis is at ceiling
+for luna medium with full intel (compare D465's 7.75-7.78 on the old
+era). Consequences: (1) E2 is not promoted; the cards flag stays
+available but off. (2) Tactical experiments at luna medium need
+headroom: run the remaining mini-A/Bs on the brutal basis for shape,
+and judge on brutal (or a stricter rubric) rather than hard; record
+this as a rule for E4/E6/S3/S7/A5/S9 packets. (3) The mechanism data
+(anchoring: chosen option was in the contrast pair 31/43 times, B 20 vs
+A 11) is kept for the write-up but carries no quality claim.
