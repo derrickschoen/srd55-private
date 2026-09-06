@@ -12067,3 +12067,30 @@ D429.1 mini-A/B for this merge launched: brutal, 10 rooms x 1 rep, seed
 log .tmp/runs/miniab-intel-leak.log. Concurrent: probe r5b (luna, network
 bound) and the framework research lane; load 1.0 at launch. Era controls
 [1,1,2,2,3,2,0,2,3,1].
+
+## D429.1 mini-A/B for intel-leak merge fb224acc: PASS; framework-shift research harvested and reviewed (2026-09-06 10:54)
+
+Mini-A/B (brutal, 10 rooms x 1 rep, seed 6203001, luna low, full intel,
+~/dnd-slim-runs/miniab-intel-leak.jsonl, exit 0, 10 rows, all
+authorized, no VOID): round-1 offense [1,1,2,2,3,2,0,2,3,1] = era controls
+[1,1,2,2,3,2,0,2,3,1] exactly. Engine/renderer merges stay unblocked.
+
+Framework research (codex 01a07708, 562 lines, 78 sources, exit 0; no
+claude invocation, no git writes, main tree clean). My spot-checks all
+held: element( 1521, addEventListener( 315, replaceChildren( 47, src/ui
+32,009 lines, router 191 lines, stable-dom-render 226 lines; npm React
+4,975,033,933 and Preact 810,262,067 for 2025-09..2026-08 match the API
+byte-for-byte; generals.io's live bundle contains react-dom, redux and
+socket.io as stated (I did not find a Pixi signature in that one chunk;
+the report's Pixi claim for generals.io stays codex-claimed). Verdict
+ACCEPTED. Recommendation: no React rewrite, no renderer/build/test
+platform shift; formalise a mount/update(projection)/dispose + typed
+command contract, refactor one bounded vanilla component through it
+(subclass-form subsection, not encounter-app), record baselines, and run a
+Preact island only if measured flip conditions hit (>20% of UI change time
+in manual DOM sync, or 2+ stale-DOM/focus defects a quarter), with
+numeric adoption gates. Other shifts (monorepo, worker, Rust/wasm, canvas
+UI, Tailwind, signals, event-sourcing lib, Vite swap, component kit,
+router, SW, test stack) each rejected or gated with triggers. Owner
+questions 1-14 in the report; the first for the owner: what concrete
+problem prompted the React question.
