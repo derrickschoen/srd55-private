@@ -11996,3 +11996,34 @@ on the repo, network on, no paid APIs, cite-don't-copy). Deliverable:
 against the no-backend PWA constraint, three lesser-known adopted
 projects, ranked recommendations with experiments, open questions).
 Supervisor review on harvest before anything reaches the owner as advice.
+
+## HARVEST + REVIEW — VTT prior-art research (codex 01a076f2) (2026-09-06 09:54)
+
+Deliverable ~/dnd-research-private/vtt-research/2026-09-06-browser-vtt-prior-art-codex.md
+(421 lines, 7 sections, 114 URLs, documented/community/inferred labels).
+Hygiene: no claude invocation (one grep hit = echoed brief), no git writes,
+main tree clean, nothing written outside the private dir. Exit 0.
+
+My spot-checks (verified, not codex's word): (a) local-code claims hold:
+room code pattern [a-zA-Z0-9-]{3,64} (app.ts:241), Trystero password =
+roomCode, send() silently resolves when no peer is connected
+(trystero.ts:58), board 12 rows, 64-px tiles; (b) Owlbear dev log 6 does
+say OBR1 P2P sync "was very unreliable" and 2.0 moved to cloud; (c)
+OpenFront Architecture.md does say simulation runs deterministically on
+each client and the server relays intent bundles per turn; (d) Foundry
+2025 review: 22% licence growth and 377 h/user CONFIRMED, but the report's
+"describes work moving Pixi 7 to 8" is WRONG in emphasis: Foundry
+investigated and POSTPONED the Pixi 8 upgrade as too disruptive. That
+strengthens, not weakens, recommendation 4 (benchmark before any renderer
+change). No other defects found; verdict ACCEPTED with that correction.
+
+Report's ranked recommendations: (1) join/rejoin/seat-identity protocol
+(128-bit secret in URL fragment, roles, resync, local Yjs persistence);
+(2) split CRDT collaboration from host-authoritative rules intents; (3)
+spectator + replay scrubber on the existing v7 bundles; (4) renderer
+benchmark, Pixi 8 spike only against thresholds; (5) build-time Tiled/LDtk
+import spike; (6) engine queries in a Web Worker; (7) unify visual and
+semantic boards; (8) audio optional; (9) file/link community loops; (10)
+honest security ceiling. Lesser-known examples: OpenFrontIO, Rune, tldraw,
+LDtk. Owner questions 1-12 listed; the gating one (optional TURN/ordering
+relay ever allowed?) goes to the owner first.
