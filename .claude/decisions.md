@@ -12904,3 +12904,26 @@ seed 2 (classic landing gate), E2 judged arms (hard basis, R1-10).
 Landing order after r5d seed 2: classic-r5 (10e3892a) with full gate +
 mini-A/B; then main merged into each lane branch for its own gate;
 E1/E1b/E1c first among the experiment lanes.
+
+## R5D SEED 2: 5d art above round 4 on both seeds → classic landing gate; E2 packet built and judged (2026-09-06 19:09)
+
+r5d seed 6203002 (luna medium): Q1 .868, Q2 .908, Q3 .893, Q4 .834, Q5
+.871, Q6 .708, Q7 .875, Q8 .875, Q9 .727, Q10 .910; mean .847; round 4
+on the same seed (D541): mean .834. Seed 1: .861 vs .830. On both
+seeds the 5d mean beats round 4; per class seed 2 has Q4 +.13, Q7
++.07, Q9 +.09, Q1 -.04, Q5 -.08, Q6 -.04, all inside the seed-2
+bootstrap intervals. Under D565 the pixel-path improvement replicates
+(direction of the mean on both seeds; Q4/Q7/Q9 gains on both). Classic
+lands: merging main into claude/classic-r5 first (the classic lineage
+predates the intel-leak merge), then the full gate on dnd-wt-classic5,
+then a D429.1 mini-A/B (chrome/renderer changes), then main. The strict
+pixel-only gate is still not met (best 4 classes >= .9); the live DM
+gets image+facts (E1c), where the gate passes on both seeds.
+
+E2 judged arms (hard basis, seeds 5117001-10, 3 reps, luna medium):
+cards 30/30 authorized, control 30/30. Packet built with the E2 tree's
+rerun-packet tool (arms relabelled cards/control from 'single'; 60
+entries; no contrastOrder / consequence / arm strings in the packet),
+answer key sealed at ~/dnd-slim-runs/e2-key-cards.json. Judge panel
+launched via judge-one.sh e2 cards (sol high via codex read-only, opus
+and fable via claude -p: the standing supervisor-run panel).
