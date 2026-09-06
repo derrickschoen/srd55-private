@@ -11694,3 +11694,38 @@ Mini-A/B (D429.1) for the ghost merge dda20902 LAUNCHED now on main
 e1765e3a (clean tree): brutal 10×1 seed 6203001 luna low full intel, out
 .tmp/runs/miniab-ghost.jsonl. Load at launch 0.8; only the network-bound
 probe shares the box.
+
+## FINDING — probe r5 (classic round 5 art, e5afcb98): REGRESSION on every class but blocked; images are 4× the pixels (2026-09-06 00:09)
+
+d536-probe24-r5 finished 00:06 (480 rows: luna low + medium × 24 states × Q1–Q10,
+primer v8, generation g5-round5-24, board glyphs full). Same 24 stateIds as
+the round-4 seed-2 run (d541-probe24-r4-seed2, primer v7), so the comparison
+is paired. luna medium, mean Jaccard, r4-seed2 → r5:
+
+| class | r4 s2 | r5 | delta |
+|---|---:|---:|---:|
+| Q1 identity | 0.910 | 0.793 | -0.117 |
+| Q2 | 0.897 | 0.708 | -0.189 |
+| Q3 | 0.893 | 0.747 | -0.146 |
+| Q4 terrain | 0.707 | 0.479 | -0.228 |
+| Q5 light | 0.951 | 0.913 | -0.038 |
+| Q6 blocked | 0.750 | 0.792 | +0.042 |
+| Q7 doors | 0.808 | 0.537 | -0.271 |
+| Q8 | 0.833 | 0.750 | -0.083 |
+| Q9 fog | 0.639 | 0.236 | -0.403 |
+| Q10 HP | 0.956 | 0.677 | -0.279 |
+
+luna low is worse still (Q5 0.573, Q1 0.799, Q9 0.157). Strict gate FAIL on
+both efforts; only Q5 medium passes. Hallucination counts roughly doubled
+(Q9 1004 vs 342). Capture sizes: r4 948×1170 … 1588×2144; r5 1332×1194 …
+3124×2976 (the native 128 px redraw roughly doubled the linear size, ~4× the
+pixels); mean input tokens 132k → 162k per call. Q10 HP going from pass to
+0.68 and Q9 fog collapsing while the fog/HP semantics did not change points at
+the image size / downscaling by the vision model, not (only) the drawings; a
+paired test at a capped long edge is the next diagnostic (the probe has no
+scale option today: --board-glyphs --compare --generation --images-root
+--models --out --primer --rescore --seed --states only). Consequence: round 5
+is NOT probe-progress; 5b (primer v9, bigger terrain motifs) does not touch
+image size. Classic 5b harvest continues as planned (its gates and captures),
+then probe r5b, then a capture-scale diagnostic lane; no classic landing on
+main while the probe is below round 4. Owner-visible.
