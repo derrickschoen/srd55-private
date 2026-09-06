@@ -1258,10 +1258,12 @@ export function screenshotQuestionPrompt(
     : boardInput === 'semantic'
       ? [
           'Use only the authoritative semantic board facts below. Return only JSON matching the supplied strict schema.',
+          'Cell-list encoding: [column,row] is one cell; [start_column,row,end_column_inclusive] is a horizontal run that includes both endpoints.',
           `Semantic board JSON:\n${semanticPayload ?? ''}`,
         ]
       : [
           'The semantic facts are authoritative and the attached PNG is illustrative.',
+          'Cell-list encoding: [column,row] is one cell; [start_column,row,end_column_inclusive] is a horizontal run that includes both endpoints.',
           'Return only JSON matching the supplied strict schema.',
           `Semantic board JSON:\n${semanticPayload ?? ''}`,
         ];

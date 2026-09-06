@@ -19,9 +19,21 @@ export interface EngineFactList<Value> {
 }
 
 export type SemanticCell = readonly [column: number, row: number];
-export type SemanticCellRun =
-  | SemanticCell
-  | readonly [start_column: number, row: number, end_column_inclusive: number];
+export type SemanticCellRun = readonly [
+  start_column: number,
+  row: number,
+  end_column_inclusive: number,
+];
+export type SemanticEncodedCell = SemanticCell | SemanticCellRun;
+export type SemanticCellEncoding =
+  | '[column,row]'
+  | '[start_column,row,end_column_inclusive]; endpoint is inclusive';
+
+export interface EngineCellFactList {
+  readonly provenance: 'engine_fact';
+  readonly encoding: SemanticCellEncoding;
+  readonly items: readonly SemanticEncodedCell[];
+}
 
 interface SemanticCreature {
   readonly id: string;
@@ -38,14 +50,14 @@ interface SemanticCreature {
 interface SemanticDoor {
   readonly id: string;
   readonly name: string;
-  readonly cells: readonly SemanticCellRun[];
+  readonly cells: readonly SemanticEncodedCell[];
 }
 
 interface SemanticObject {
   readonly id: string;
   readonly name: string;
   readonly kind: string;
-  readonly cells: readonly SemanticCellRun[];
+  readonly cells: readonly SemanticEncodedCell[];
 }
 
 interface SemanticAdjacencyPair {
@@ -70,23 +82,31 @@ export interface SemanticBoardPayload {
     readonly indexing: 'zero_based';
     readonly columns_increase: 'right';
     readonly rows_increase: 'down';
-    readonly cell_list_encoding: '[column,row] or [start_column,row,end_column_inclusive]';
+    readonly cell_list_encoding: 'each cell list declares its encoding';
   };
   readonly bounds: { readonly columns: number; readonly rows: number };
   readonly creatures: EngineFactList<SemanticCreature>;
   readonly cells: {
-    readonly blocked: EngineFactList<SemanticCellRun>;
-    readonly difficult_terrain: EngineFactList<SemanticCellRun>;
+    readonly blocked: EngineCellFactList;
+    readonly difficult_terrain: EngineCellFactList;
     readonly light: {
-      readonly bright: EngineFactList<SemanticCellRun>;
-      readonly dim: EngineFactList<SemanticCellRun>;
-      readonly dark: EngineFactList<SemanticCellRun>;
+      readonly default_light: 'bright';
+      readonly default_applies_to: 'cells not covered by dim or dark exception regions';
+      readonly partition: 'bright, dim, and dark together contain every board cell exactly once';
+      readonly bright: EngineCellFactList;
+      readonly dim: EngineCellFactList;
+      readonly dark: EngineCellFactList;
     };
     readonly obscurement: {
-      readonly light: EngineFactList<SemanticCellRun>;
-      readonly heavy: EngineFactList<SemanticCellRun>;
+      readonly light: EngineCellFactList;
+      readonly heavy: EngineCellFactList;
     };
-    readonly fog: EngineFactList<SemanticCellRun>;
+    /** Q9 component: every kind of obscurement, including magical darkness. */
+    readonly obscured: EngineCellFactList;
+    /** Q9 component: fog only. */
+    readonly fogged: EngineCellFactList;
+    /** Q9 union: cells in either component, de-duplicated. */
+    readonly obscured_or_fogged: EngineCellFactList;
   };
   readonly doors: {
     readonly open: EngineFactList<SemanticDoor>;
@@ -110,11 +130,14 @@ function semanticCell(cell: GridCell): SemanticCell {
   return [cell.column, cell.row];
 }
 
-function orderedCells(cells: readonly GridCell[]): readonly SemanticCellRun[] {
+function explicitOrderedCells(cells: readonly GridCell[]): readonly SemanticCell[] {
   const unique = new Map(cells.map((cell) => [cellKey(cell), semanticCell(cell)] as const));
-  const sorted = [...unique.values()].sort(
+  return [...unique.values()].sort(
     (left, right) => (left[1] ?? 0) - (right[1] ?? 0) || (left[0] ?? 0) - (right[0] ?? 0),
   );
+}
+
+function horizontalRuns(sorted: readonly SemanticCell[]): readonly SemanticCellRun[] {
   const runs: SemanticCellRun[] = [];
   for (let index = 0; index < sorted.length;) {
     const first = sorted[index];
@@ -127,10 +150,30 @@ function orderedCells(cells: readonly GridCell[]): readonly SemanticCellRun[] {
       endColumn = next[0];
       nextIndex += 1;
     }
-    runs.push(endColumn === first[0] ? first : [first[0], first[1], endColumn]);
+    runs.push([first[0], first[1], endColumn]);
     index = nextIndex;
   }
   return runs;
+}
+
+/** Small classes stay literal; only large classes use explicitly inclusive runs. */
+function encodedCells(cells: readonly GridCell[]): EngineCellFactList {
+  const explicit = explicitOrderedCells(cells);
+  return explicit.length <= 200
+    ? {
+        provenance: 'engine_fact',
+        encoding: '[column,row]',
+        items: explicit,
+      }
+    : {
+        provenance: 'engine_fact',
+        encoding: '[start_column,row,end_column_inclusive]; endpoint is inclusive',
+        items: horizontalRuns(explicit),
+      };
+}
+
+function encodedCellItems(cells: readonly GridCell[]): readonly SemanticEncodedCell[] {
+  return encodedCells(cells).items;
 }
 
 function hitPointBand(
@@ -185,10 +228,10 @@ export function semanticBoardPayload(
     };
   });
 
-  const difficultTerrain = orderedCells([
+  const difficultTerrain = [
     ...(board.difficultTerrainRegions ?? []).flatMap((region) => region.cells),
     ...board.areas.filter((area) => area.difficultTerrain).flatMap((area) => area.cells),
-  ]);
+  ];
   const lightByCell = new Map<string, 'bright' | 'dim' | 'dark'>();
   for (let row = 0; row < board.bounds.rows; row += 1) {
     for (let column = 0; column < board.bounds.columns; column += 1) {
@@ -199,20 +242,22 @@ export function semanticBoardPayload(
     const level = region.level === 'darkness' ? 'dark' : region.level;
     for (const cell of region.cells) lightByCell.set(cellKey(cell), level);
   }
-  const lightCells = (level: 'bright' | 'dim' | 'dark'): readonly SemanticCellRun[] =>
-    orderedCells([...lightByCell.entries()].flatMap(([key, value]) => {
+  const lightCells = (level: 'bright' | 'dim' | 'dark'): readonly GridCell[] =>
+    [...lightByCell.entries()].flatMap(([key, value]) => {
       if (value !== level) return [];
       const [column, row] = key.split(',').map(Number);
       if (column === undefined || row === undefined)
         throw new Error(`Malformed semantic board cell ${key}.`);
       return [{ column, row }];
-    }));
-  const obscurementCells = (level: 'light' | 'heavy'): readonly SemanticCellRun[] =>
-    orderedCells((board.obscurementRegions ?? []).flatMap((region) =>
+    });
+  const obscurementCells = (level: 'light' | 'heavy'): readonly GridCell[] =>
+    (board.obscurementRegions ?? []).flatMap((region) =>
       region.obscurement === level ||
       (level === 'heavy' && region.obscurement === 'magical_darkness')
         ? region.cells
-        : []));
+        : []);
+  const obscuredCells = (board.obscurementRegions ?? []).flatMap((region) => region.cells);
+  const foggedCells = board.foggedCells;
 
   const orderedObjects = [...board.worldObjects].sort(
     (left, right) =>
@@ -224,12 +269,12 @@ export function semanticBoardPayload(
     id: String(object.id),
     name: object.name,
     kind: object.kind,
-    cells: orderedCells(object.cells),
+    cells: encodedCellItems(object.cells),
   });
   const doorValue = (object: (typeof orderedObjects)[number]): SemanticDoor => ({
     id: String(object.id),
     name: object.name,
-    cells: orderedCells(object.cells),
+    cells: encodedCellItems(object.cells),
   });
   const doors = orderedObjects.filter((object) => object.kind === 'door');
 
@@ -282,23 +327,28 @@ export function semanticBoardPayload(
       indexing: 'zero_based',
       columns_increase: 'right',
       rows_increase: 'down',
-      cell_list_encoding: '[column,row] or [start_column,row,end_column_inclusive]',
+      cell_list_encoding: 'each cell list declares its encoding',
     },
     bounds: { ...board.bounds },
     creatures: factList(creatures),
     cells: {
-      blocked: factList(orderedCells(board.blockedCells ?? [])),
-      difficult_terrain: factList(difficultTerrain),
+      blocked: encodedCells(board.blockedCells ?? []),
+      difficult_terrain: encodedCells(difficultTerrain),
       light: {
-        bright: factList(lightCells('bright')),
-        dim: factList(lightCells('dim')),
-        dark: factList(lightCells('dark')),
+        default_light: 'bright',
+        default_applies_to: 'cells not covered by dim or dark exception regions',
+        partition: 'bright, dim, and dark together contain every board cell exactly once',
+        bright: encodedCells(lightCells('bright')),
+        dim: encodedCells(lightCells('dim')),
+        dark: encodedCells(lightCells('dark')),
       },
       obscurement: {
-        light: factList(obscurementCells('light')),
-        heavy: factList(obscurementCells('heavy')),
+        light: encodedCells(obscurementCells('light')),
+        heavy: encodedCells(obscurementCells('heavy')),
       },
-      fog: factList(orderedCells(board.foggedCells)),
+      obscured: encodedCells(obscuredCells),
+      fogged: encodedCells(foggedCells),
+      obscured_or_fogged: encodedCells([...obscuredCells, ...foggedCells]),
     },
     doors: {
       open: factList(doors.filter((door) => !door.blocking.movement).map(doorValue)),

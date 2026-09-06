@@ -651,6 +651,21 @@ describe('D524 general screenshot primer', () => {
     expect(prompt).toContain('Question Q1:');
     expect(prompt).toContain('Use zero-based column,row coordinates');
   });
+
+  it('names cell-list encoding for semantic inputs without changing the PNG primer', () => {
+    const semantic = screenshotQuestionPrompt('Q5', 'general', 'full', 'semantic', '{}');
+    const both = screenshotQuestionPrompt('Q9', 'general', 'full', 'both', '{}');
+    const png = screenshotQuestionPrompt('Q5', 'general', 'full', 'png');
+
+    expect(semantic).toContain(
+      'Cell-list encoding: [column,row] is one cell; [start_column,row,end_column_inclusive] is a horizontal run that includes both endpoints.',
+    );
+    expect(both).toContain(
+      'Cell-list encoding: [column,row] is one cell; [start_column,row,end_column_inclusive] is a horizontal run that includes both endpoints.',
+    );
+    expect(png).not.toContain('Cell-list encoding:');
+    expect(png).toContain(`General primer ${PRIMER_VERSION}: ${GENERAL_PRIMER}`);
+  });
 });
 
 describe('D519 screenshot comprehension schema and CLI', () => {
