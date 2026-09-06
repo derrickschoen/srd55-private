@@ -11927,3 +11927,30 @@ guard, allow --unet for klein in generate.py, smoke both at 512x512 / 4
 steps / seed 560 on fresh servers, compare wall time and VmHWM against the
 fp8 baseline (99.9 s, 16.6 GB). Intel-leak gate relaunch waits until this
 CPU-bound lane finishes (quiet-machine rule).
+
+## Klein quant smoke harvested (Q8_0 chosen); unused models deleted on owner order (2026-09-06 09:18)
+
+Codex lane (session 01a076ce-7523-7ac0-877b-c438e085b977) reported and I
+verified from ~/comfyui/logs, README table, LICENSES.md and the PNGs myself:
+both GGUFs downloaded under the disk guard (C: 23.4 -> 22.1 -> 19.3 GB free
+during downloads; Windows later freed space, 34.5 GB free at 09:08), sha256
+matched the HF LFS oids. Same prompt/seed 560/512x512/4 steps, fresh server
+each: FP8 100.3 s / 16,629,712 kB peak; Q8_0 86.3 s / 16,707,456 kB; Q4_K_M
+93.3 s / 16,708,160 kB. Peak RSS is identical across quants (~15.9 GiB), so
+the diffusion weights are not what sets the CPU peak (the 8 GB bf16 Qwen3-4B
+text encoder is the likely floor; not measured). I viewed the three images:
+Q8_0 is indistinguishable from FP8 at the same seed; Q4_K_M produces a
+different tiling with fewer, larger slabs. Q8_0 is the default going forward.
+Forbidden-scan on the lane log: one hit = the echoed brief; no claude
+invocation, no git writes, no repo paths.
+
+Owner: "delete unused models". Deleted from ~/comfyui/ComfyUI/models (29 GB
+-> 12 GB inside the VM; C: only reclaims it after a vhdx compaction):
+flux-2-klein-4b-fp8.safetensors (4.1 GB), flux-2-klein-4b-Q4_K_M.gguf
+(2.6 GB), Krea-2-Turbo-Q3_K_M (6.3 GB), qwen3vl_4b_fp8_scaled (5.2 GB),
+qwen_image_vae (0.3 GB). Krea (D560.2, parked) now needs a re-download to
+resume. My edits (not codex): workflows/klein.json loader -> UnetLoaderGGUF
+flux-2-klein-4b-Q8_0.gguf; deletion notes appended to README.md and
+LICENSES.md (licence records kept). Verified: fresh server, default
+generate.py path, 82.4 s, output byte-identical (cmp) to the lane's Q8 PNG.
+Server stopped, :8188 free. Machine quiet: intel-leak gate relaunched next.
