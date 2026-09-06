@@ -11596,3 +11596,15 @@ seeds (0.903/0.897, 0.907/0.893) — not confirmed, not regressed, treated as at
 doors, adjacency, hidden are below the bar on both seeds with the same dominant failure ("fact not present"), which
 is the primer/rendering gap round 5b already targets (terrain + blocked regressions, primer v9). Run survived the
 reboot only by relaunch; output at dnd-wt-light/dnd-slim-runs/d541-probe24-r4-seed2.jsonl (relative --out).
+
+## LANDED — D545 ghost/last-seen markers on main (dda20902) (2026-09-05 23:08)
+
+claude/ghost-marker (7f9b16da inc1 + 35f8f6bf merge of main) merged --no-ff from the main repo, exit 0, 40 files
++909/-113. Gate (gate-wt4.sh, rerun in full after the reboot): tsc 0, sg 0, vitest gate exit 0 with one load flake
+passed serially, Playwright 185 passed in 57.1 min with one load flake (a toBeVisible timeout) passed serially in
+2.4 min, exit 0. Gate ran on a loaded box (three codex lanes + two probes), which is what the D544 runner exists for.
+D429.1 mini-A/B is OWED for this merge and is QUEUED, not run: the box is not quiet (probe r5 running, classic 5b and
+intel-leak lanes running, ComfyUI generating at all cores for the references lane). It runs as soon as the lanes
+drain; until then no further engine/renderer merge lands on top. dist for :4173 is being rebuilt under the gate lock.
+Next on this line: classic glyph increment for lastSeen (reads PlayerBoardProjection.lastSeen[].cell), dispatched
+after round 5b lands so it does not collide with the chrome work.
