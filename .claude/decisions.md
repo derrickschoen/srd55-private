@@ -12960,3 +12960,37 @@ and judge on brutal (or a stricter rubric) rather than hard; record
 this as a rule for E4/E6/S3/S7/A5/S9 packets. (3) The mechanism data
 (anchoring: chosen option was in the contrast pair 31/43 times, B 20 vs
 A 11) is kept for the write-up but carries no quality claim.
+
+## Classic gate FAILED on two merge-resolution defects (gate killed); mini-A/B and replay results (2026-09-06 19:40)
+
+Gate on 599fbe79: tsc 0, sg 0, vitest-gate exit 1 with two REAL
+failures (no load flakes): tests/unit/assets/light-encoding.test.ts
+(main's D525 invariant "each glyph tile carries exactly one mark in the
+top-left 9x9 box": the lane's glyphs are now 18 px, so the test must be
+derived from the glyph metrics, not 9) and tests/unit/assets/
+classic-art-techniques.test.ts ("uses cell-spanning repeated ridges for
+difficult terrain": the 5d art replaced spanning ridges with three inset
+ridges; the merge resurrected the pre-5d assertion). Both are merge
+resolution errors that neither my six-spec verification nor codex's
+nine-spec list covered; the gate caught them. I killed the gate during
+Playwright (its verdict was already FAIL), moved the log to
+gate-wt-classic5-FAIL-merge-tests.log, and am resuming the merge
+session to fix both tests as directional invariants on the current
+design (no deletions, no pin moves). Finding against my own harvest:
+the touched-spec list for a 218-commit merge must include every spec
+under tests/unit/assets and tests/unit/vtt, not the six I chose.
+
+Mini-A/Bs (brutal 10x1, seed 6203001, luna medium, flag on): E4
+playAdverts 10/10 authorized, offense [1,1,2,2,3,2,0,2,3,1] = controls
+(telemetry playAdverts/playLoaded/playDraftOutcome present); A5
+deltaFirst 10/10 but offense [0,1,2,2,3,2,0,2,3,1] (room 1: 0 vs 1),
+rerun launched for replication before any verdict; S3 first launch
+refused ("structuredAssessment requires --transport final_indices"),
+relaunched with that transport; S7 running; E6 factoredNarration
+CRASHED on room 1 ("Authorized arena row cannot carry execution
+refusals: Engine request actors must be unique living monsters") =
+a flag-on bug in the narration step: E6 session resumed with the crash
+and a required repro test. E5 replay: only 5 fixtures were replayable
+(the hard current-engine ones), accepted-after-one-correction 4/5;
+the 227 historical cases are recorded as counts/matches in the corpus
+files but not replayed; investigating whether that is by design.
