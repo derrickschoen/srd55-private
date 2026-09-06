@@ -13013,3 +13013,34 @@ on every row, offense [0,1,2,2,4,2,0,2,3,1] vs controls
 [1,1,2,2,3,2,0,2,3,1] (rooms 1 and 5 differ). Like A5's room-1
 deviation this is a 1-rep shape difference; a second rep is running for
 both before any reading. Per-room query telemetry recorded.
+
+## Mini-A/B room-1 deviations traced to concurrency timeouts; merge-test fix verified pending sweep (2026-09-06 19:55)
+
+S3 (final_indices transport), A5 rep 2 and S7 rep 2 all show room 1
+with zero offense; A5 rep 2's room 1 is an explicit refusal "Agent CLI
+timed out after 120000 ms" (VOID), S3's room 1 is the only row without
+an assessment block, and S7 rep 1/rep 2 differ from each other (rooms
+5 and 10) — the signature of the weather rule: five arenas ran
+concurrently with the gate's vitest phase and each other. Per the
+standing rule these deviations are DISCARDED, not read as flag effects;
+E2 and E4, which ran while the box was quieter, matched the controls
+exactly. A flag-off control is running on the A5 tree now at load ~3;
+flagged mini-A/Bs are re-run one at a time on a quiet box before any
+shape verdict (A5, S3, S7 queued behind the classic gate).
+
+Merge-test fix (01a078fc resumed): both tests replaced by derived
+invariants (light-encoding: geometry from cellGlyphScale at 64 and 128,
+64 reproducing main's exact values, "nothing anywhere else" kept;
+classic-art-techniques: exactly three inset opaque ridges + gutters +
+floor contrast + unchanged blocked cross-brace). Codex confirmed the
+lane's own 10e3892a copy still carried the pre-5d assertion, i.e. the
+5d lane never updated that test and my 5d harvest ran it green only
+because... it did not: my 5d harvest listed classic-art-techniques as
+passing 67/67 across four specs — that run predates the primer
+amendment; the test as committed at 10e3892a asserted spanning ridges
+against three-ridge art and must have failed; I did not re-run it after
+the amended lane finished. Finding against my own harvest, recorded.
+Codex: 109 files / 1352 tests green on the expanded sweep; my own sweep
+of tests/unit/assets + tests/unit/vtt + the three named specs is
+running; typecheck 0; the two changed test cases are renames of the
+replaced assertions (no deletions).
