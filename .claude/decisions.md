@@ -12374,3 +12374,21 @@ semantic arms are re-based on landed art. Q8 preact island: gates + the
 report's numeric adoption gates; render-bench and join-baseline produce
 result files only. Main landings one at a time, full gate each, mini-A/B
 for engine/renderer changes, :4173 rebuilt after each.
+
+## Owner: "Do we have a sol high to compare the luna medium result to?" — no; sol-high baselines launched (2026-09-06 16:01)
+
+Verified from ~/dnd-slim-runs: every sol actor arm ever run is sol LOW
+(c3b, d465 x9 profiles, d512/d513/d514/d521); sol high appears only as a
+blinded judge; the 24-state comprehension probe has never run on sol at
+any effort (only 2-row smoke probes at sol low/medium). Launched two
+sol-high baselines so the comparison exists: (1) arena mini-A/B shape on
+main 86096efb, brutal 10 rooms x 1 rep, seed 6203001, full intel,
+--timeout-ms 240000 (sol high is slow; the 120 s default would VOID
+rooms), out ~/dnd-slim-runs/miniab-sol-high-baseline.jsonl; (2) the
+24-state probe at gpt-5.6-sol:high on a clean detached worktree
+dnd-wt-probe-run at 67e98afa (r5c art, 128 px; the classic5 tree is
+being mutated by the 5d lane so it must not serve probe runs), out
+dnd-wt-probe-run/dnd-slim-runs/probe24-sol-high.jsonl. Both are
+measurements against luna medium's r5c (.824) and the D429.1 era
+controls; the arena's 10-room offense shape is not a quality judgement
+(blinded packets are).
