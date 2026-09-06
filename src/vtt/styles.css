@@ -824,12 +824,16 @@
 }
 
 .encounter-coordinate-labels,
+.encounter-token-underlay,
 .encounter-token-chrome {
   position: absolute;
-  z-index: 10;
   inset: 0;
   pointer-events: none;
 }
+
+.encounter-token-underlay { z-index: 3; }
+.encounter-coordinate-labels,
+.encounter-token-chrome { z-index: 10; }
 
 .encounter-coordinate-label,
 .encounter-legend-text,

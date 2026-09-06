@@ -6,8 +6,10 @@ import {
   TILE_SIZE,
   TOKEN_ARCHETYPES,
   paintRecipe,
+  paintTokenBust,
   tokenRecipe,
   type ArtRecipe,
+  type TokenArchetype,
 } from '../../../src/assets/pixel-art';
 import {
   NEUTRAL_STEPS,
@@ -65,17 +67,27 @@ function distinctColors(bitmap: Bitmap): number {
 
 function minimumRgbDistance(bitmap: Bitmap): number {
   const unique = new Map<string, readonly [number, number, number]>();
-  for (let y = 0; y < bitmap.height; y += 1) for (let x = 0; x < bitmap.width; x += 1) {
-    const { red, green, blue, alpha } = bitmap.get(x, y);
-    if (alpha > 0) unique.set(`${String(red)},${String(green)},${String(blue)}`, [red, green, blue]);
-  }
+  for (let y = 0; y < bitmap.height; y += 1)
+    for (let x = 0; x < bitmap.width; x += 1) {
+      const { red, green, blue, alpha } = bitmap.get(x, y);
+      if (alpha > 0)
+        unique.set(`${String(red)},${String(green)},${String(blue)}`, [
+          red,
+          green,
+          blue,
+        ]);
+    }
   const colors = [...unique.values()];
   let minimum = Number.POSITIVE_INFINITY;
-  for (let left = 0; left < colors.length; left += 1) for (let right = left + 1; right < colors.length; right += 1) {
-    const a = colors[left]!;
-    const b = colors[right]!;
-    minimum = Math.min(minimum, Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]));
-  }
+  for (let left = 0; left < colors.length; left += 1)
+    for (let right = left + 1; right < colors.length; right += 1) {
+      const a = colors[left]!;
+      const b = colors[right]!;
+      minimum = Math.min(
+        minimum,
+        Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]),
+      );
+    }
   return minimum;
 }
 
@@ -85,7 +97,8 @@ function downscaleThenUpscale(bitmap: Bitmap): Bitmap {
     for (let x = 0; x < bitmap.width; x += 2) {
       const sample = bitmap.get(x, y);
       for (let dy = 0; dy < 2; dy += 1) {
-        for (let dx = 0; dx < 2; dx += 1) rebuilt.blendRgba(x + dx, y + dy, sample);
+        for (let dx = 0; dx < 2; dx += 1)
+          rebuilt.blendRgba(x + dx, y + dy, sample);
       }
     }
   }
@@ -99,11 +112,12 @@ function nativeDetailFraction(bitmap: Bitmap): number {
     const alpha = bitmap.data[index + 3]!;
     if (alpha === 0 && rebuilt.data[index + 3] === 0) continue;
     if (
-      bitmap.data[index] !== rebuilt.data[index]
-      || bitmap.data[index + 1] !== rebuilt.data[index + 1]
-      || bitmap.data[index + 2] !== rebuilt.data[index + 2]
-      || alpha !== rebuilt.data[index + 3]
-    ) changed += 1;
+      bitmap.data[index] !== rebuilt.data[index] ||
+      bitmap.data[index + 1] !== rebuilt.data[index + 1] ||
+      bitmap.data[index + 2] !== rebuilt.data[index + 2] ||
+      alpha !== rebuilt.data[index + 3]
+    )
+      changed += 1;
   }
   return changed / Math.max(1, opaquePixelCount(bitmap));
 }
@@ -116,10 +130,13 @@ function isolatedColorIslands(bitmap: Bitmap): number {
       if (color.alpha === 0) continue;
       const key = rgbaKey(color);
       const neighbours = [
-        bitmap.get(x - 1, y), bitmap.get(x + 1, y),
-        bitmap.get(x, y - 1), bitmap.get(x, y + 1),
+        bitmap.get(x - 1, y),
+        bitmap.get(x + 1, y),
+        bitmap.get(x, y - 1),
+        bitmap.get(x, y + 1),
       ];
-      if (neighbours.every((candidate) => rgbaKey(candidate) !== key)) islands += 1;
+      if (neighbours.every((candidate) => rgbaKey(candidate) !== key))
+        islands += 1;
     }
   }
   return islands;
@@ -130,8 +147,8 @@ function sharedBustSilhouette(party: Bitmap, foe: Bitmap): readonly number[] {
   const bins = 16;
   const descriptor: number[] = [];
   for (let bin = 0; bin < bins; bin += 1) {
-    const y0 = Math.floor(bin * cropBottom / bins);
-    const y1 = Math.floor((bin + 1) * cropBottom / bins);
+    const y0 = Math.floor((bin * cropBottom) / bins);
+    const y1 = Math.floor(((bin + 1) * cropBottom) / bins);
     let left = party.width;
     let right = -1;
     let area = 0;
@@ -139,20 +156,34 @@ function sharedBustSilhouette(party: Bitmap, foe: Bitmap): readonly number[] {
       for (let x = 0; x < party.width; x += 1) {
         const partyPixel = party.get(x, y);
         const foePixel = foe.get(x, y);
-        if (partyPixel.alpha === 0 || rgbaKey(partyPixel) !== rgbaKey(foePixel)) continue;
-        if (rgbaKey(partyPixel) === colorKey({ ramp: 'neutral', step: 1 })) continue;
+        if (partyPixel.alpha === 0 || rgbaKey(partyPixel) !== rgbaKey(foePixel))
+          continue;
+        if (rgbaKey(partyPixel) === colorKey({ ramp: 'neutral', step: 1 }))
+          continue;
         left = Math.min(left, x);
         right = Math.max(right, x);
         area += 1;
       }
     }
-    descriptor.push(left / party.width, (right + 1) / party.width, area / Math.max(1, (y1 - y0) * party.width));
+    descriptor.push(
+      left / party.width,
+      (right + 1) / party.width,
+      area / Math.max(1, (y1 - y0) * party.width),
+    );
   }
   return descriptor;
 }
 
-function descriptorDistance(left: readonly number[], right: readonly number[]): number {
-  return left.reduce((sum, value, index) => sum + Math.abs(value - right[index]!), 0) / left.length;
+function descriptorDistance(
+  left: readonly number[],
+  right: readonly number[],
+): number {
+  return (
+    left.reduce(
+      (sum, value, index) => sum + Math.abs(value - right[index]!),
+      0,
+    ) / left.length
+  );
 }
 
 function colorKey(reference: PaletteColorRef, alpha = 255): string {
@@ -161,18 +192,31 @@ function colorKey(reference: PaletteColorRef, alpha = 255): string {
 }
 
 const PALETTE_RGB = new Set([
-  ...PALETTE_RAMPS.flatMap((rampName) => RAMP_STEPS.map((step) => colorKey({ ramp: rampName, step }).split(',').slice(0, 3).join(','))),
-  ...NEUTRAL_STEPS.map((step) => colorKey({ ramp: 'neutral', step }).split(',').slice(0, 3).join(',')),
+  ...PALETTE_RAMPS.flatMap((rampName) =>
+    RAMP_STEPS.map((step) =>
+      colorKey({ ramp: rampName, step }).split(',').slice(0, 3).join(','),
+    ),
+  ),
+  ...NEUTRAL_STEPS.map((step) =>
+    colorKey({ ramp: 'neutral', step }).split(',').slice(0, 3).join(','),
+  ),
 ]);
 
-function directionalCentroid(bitmap: Bitmap): { readonly highlight: number; readonly shadow: number } {
+function directionalCentroid(bitmap: Bitmap): {
+  readonly highlight: number;
+  readonly shadow: number;
+} {
   const highlightKeys = new Set([
-    colorKey(ramp('stone', 5)), colorKey(ramp('stone', 6)),
-    colorKey(ramp('metal', 5)), colorKey(ramp('metal', 6)),
+    colorKey(ramp('stone', 5)),
+    colorKey(ramp('stone', 6)),
+    colorKey(ramp('metal', 5)),
+    colorKey(ramp('metal', 6)),
   ]);
   const shadowKeys = new Set([
-    colorKey(ramp('stone', 0)), colorKey(ramp('stone', 1)),
-    colorKey(ramp('metal', 0)), colorKey(ramp('metal', 1)),
+    colorKey(ramp('stone', 0)),
+    colorKey(ramp('stone', 1)),
+    colorKey(ramp('metal', 0)),
+    colorKey(ramp('metal', 1)),
   ]);
   let highlightSum = 0;
   let highlightCount = 0;
@@ -193,7 +237,122 @@ function directionalCentroid(bitmap: Bitmap): { readonly highlight: number; read
   }
   expect(highlightCount).toBeGreaterThan(0);
   expect(shadowCount).toBeGreaterThan(0);
-  return { highlight: highlightSum / highlightCount, shadow: shadowSum / shadowCount };
+  return {
+    highlight: highlightSum / highlightCount,
+    shadow: shadowSum / shadowCount,
+  };
+}
+
+interface BustLightRegion {
+  readonly bounds: readonly [number, number, number, number];
+  readonly highlight: readonly PaletteColorRef[];
+  readonly shadow: readonly PaletteColorRef[];
+}
+
+interface BustLightProfile {
+  readonly head: BustLightRegion;
+  readonly body: BustLightRegion;
+}
+
+const region = (
+  bounds: readonly [number, number, number, number],
+  highlight: readonly PaletteColorRef[],
+  shadow: readonly PaletteColorRef[],
+): BustLightRegion => ({ bounds, highlight, shadow });
+
+const BUST_LIGHT_PROFILES: Readonly<Record<TokenArchetype, BustLightProfile>> =
+  {
+    fighter: {
+      head: region([35, 15, 85, 68], [ramp('skin', 5)], [ramp('skin', 1)]),
+      body: region([15, 66, 120, 108], [ramp('metal', 6)], [ramp('metal', 1)]),
+    },
+    wizard: {
+      head: region([35, 30, 80, 70], [ramp('skin', 5)], [ramp('skin', 1)]),
+      body: region(
+        [20, 68, 105, 108],
+        [ramp('cloth-cool', 6)],
+        [ramp('cloth-cool', 1)],
+      ),
+    },
+    cleric: {
+      head: region([40, 25, 88, 70], [ramp('skin', 5)], [ramp('skin', 1)]),
+      body: region(
+        [20, 68, 108, 108],
+        [ramp('cloth-warm', 6)],
+        [ramp('cloth-warm', 1)],
+      ),
+    },
+    rogue: {
+      head: region([35, 30, 80, 72], [ramp('skin', 5)], [ramp('skin', 1)]),
+      body: region([25, 68, 105, 108], [ramp('earth', 6)], [ramp('earth', 1)]),
+    },
+    ranger: {
+      head: region([35, 30, 82, 72], [ramp('skin', 5)], [ramp('skin', 1)]),
+      body: region([20, 68, 105, 108], [ramp('earth', 6)], [ramp('earth', 1)]),
+    },
+    brute: {
+      head: region([28, 15, 90, 72], [ramp('skin', 5)], [ramp('skin', 1)]),
+      body: region([5, 65, 120, 108], [ramp('skin', 6)], [ramp('skin', 1)]),
+    },
+    beast: {
+      head: region([35, 20, 105, 72], [ramp('earth', 5)], [ramp('earth', 1)]),
+      body: region([10, 65, 118, 108], [ramp('earth', 3)], [ramp('earth', 2)]),
+    },
+    undead: {
+      head: region([35, 20, 82, 70], [neutral(8)], [neutral(7)]),
+      body: region([25, 70, 100, 108], [ramp('stone', 6)], [ramp('stone', 1)]),
+    },
+    fiend: {
+      head: region(
+        [32, 18, 92, 72],
+        [ramp('cloth-warm', 5)],
+        [ramp('cloth-warm', 1)],
+      ),
+      body: region(
+        [12, 65, 118, 108],
+        [ramp('cloth-warm', 6)],
+        [ramp('cloth-warm', 1)],
+      ),
+    },
+    ooze: {
+      head: region(
+        [15, 15, 82, 85],
+        [ramp('moss', 5), ramp('moss', 6)],
+        [ramp('moss', 2)],
+      ),
+      body: region(
+        [15, 60, 115, 118],
+        [ramp('moss', 3), ramp('moss', 4)],
+        [ramp('moss', 1), ramp('moss', 2)],
+      ),
+    },
+    construct: {
+      head: region([28, 15, 90, 68], [ramp('stone', 5)], [ramp('stone', 1)]),
+      body: region(
+        [15, 68, 115, 110],
+        [ramp('metal', 5), ramp('metal', 6)],
+        [ramp('metal', 3)],
+      ),
+    },
+  };
+
+function bustRegionCentroid(
+  bitmap: Bitmap,
+  regionDefinition: BustLightRegion,
+  colors: readonly PaletteColorRef[],
+): number {
+  const keys = new Set(colors.map((color) => colorKey(color)));
+  const [x0, y0, x1, y1] = regionDefinition.bounds;
+  let position = 0;
+  let count = 0;
+  for (let y = y0; y <= y1; y += 1)
+    for (let x = x0; x <= x1; x += 1) {
+      if (!keys.has(rgbaKey(bitmap.get(x, y)))) continue;
+      position += x + y;
+      count += 1;
+    }
+  expect(count).toBeGreaterThan(0);
+  return position / count;
 }
 
 function twoByUpscale(source: Bitmap): Bitmap {
@@ -202,7 +361,8 @@ function twoByUpscale(source: Bitmap): Bitmap {
     for (let x = 0; x < source.width; x += 1) {
       const pixel = source.get(x, y);
       for (let dy = 0; dy < 2; dy += 1) {
-        for (let dx = 0; dx < 2; dx += 1) result.blendRgba(x * 2 + dx, y * 2 + dy, pixel);
+        for (let dx = 0; dx < 2; dx += 1)
+          result.blendRgba(x * 2 + dx, y * 2 + dy, pixel);
       }
     }
   }
@@ -212,19 +372,43 @@ function twoByUpscale(source: Bitmap): Bitmap {
 describe('classic native-density and art-technique invariants', () => {
   it('Part 2(a): carries a closed material response on every recipe', () => {
     expect(TILE_SIZE).toBe(EXPECTED_NATIVE_SIZE);
-    expect(Object.keys(MATERIAL_RESPONSES).sort()).toEqual([...ART_MATERIALS].sort());
-    for (const input of STARTER_ART_INPUTS) expect(MATERIAL_RESPONSES[input.recipe.material]).toBeDefined();
+    expect(Object.keys(MATERIAL_RESPONSES).sort()).toEqual(
+      [...ART_MATERIALS].sort(),
+    );
+    for (const input of STARTER_ART_INPUTS)
+      expect(MATERIAL_RESPONSES[input.recipe.material]).toBeDefined();
     expect(MATERIAL_RESPONSES.metal.specular).toBe('single-cluster');
     expect(MATERIAL_RESPONSES.stone.specular).toBe('none');
     expect(MATERIAL_RESPONSES.cloth.mark).toBe('broad-fold');
     expect(MATERIAL_RESPONSES.skin.mark).toBe('warm-plane');
   });
 
+  it('Part 2(a): consumes every material-response field while painting a physical asset', () => {
+    const recipe = tokenRecipe('fighter', 'party');
+    const baseline = paintRecipe(recipe);
+    const response = MATERIAL_RESPONSES.metal;
+    const mutations = [
+      { ...response, specular: 'none' as const },
+      { ...response, edge: 'soft' as const },
+      { ...response, mark: 'broad-fold' as const },
+    ];
+    for (const mutation of mutations) {
+      const rendered = paintRecipe(recipe, { metal: mutation });
+      expect(
+        rendered.data,
+        `${response.material}:${mutation.specular}/${mutation.edge}/${mutation.mark}`,
+      ).not.toEqual(baseline.data);
+    }
+  });
+
   it('authors every generated class on the 128-pixel lattice without resampling', () => {
     expect(TILE_SIZE).toBe(EXPECTED_NATIVE_SIZE);
     for (const input of STARTER_ART_INPUTS) {
       const bitmap = paintRecipe(input.recipe);
-      expect([bitmap.width, bitmap.height], input.id).toEqual([EXPECTED_NATIVE_SIZE, EXPECTED_NATIVE_SIZE]);
+      expect([bitmap.width, bitmap.height], input.id).toEqual([
+        EXPECTED_NATIVE_SIZE,
+        EXPECTED_NATIVE_SIZE,
+      ]);
     }
   });
 
@@ -236,16 +420,23 @@ describe('classic native-density and art-technique invariants', () => {
     for (const input of STARTER_ART_INPUTS) {
       const bitmap = paintRecipe(input.recipe);
       const colors = distinctColors(bitmap);
-      if (colors > COLOR_BUDGET[input.recipe.kind]) overBudget.push(`${input.id}:${String(colors)}`);
+      if (colors > COLOR_BUDGET[input.recipe.kind])
+        overBudget.push(`${input.id}:${String(colors)}`);
       for (let index = 0; index < bitmap.data.length; index += 4) {
         if (bitmap.data[index + 3] === 0) continue;
         const rgb = `${String(bitmap.data[index])},${String(bitmap.data[index + 1])},${String(bitmap.data[index + 2])}`;
         if (!PALETTE_RGB.has(rgb)) outsidePalette.push(`${input.id}:${rgb}`);
       }
-      if (input.recipe.kind === 'overlay' || input.recipe.kind === 'fog' || input.recipe.kind === 'shade') continue;
+      if (
+        input.recipe.kind === 'overlay' ||
+        input.recipe.kind === 'fog' ||
+        input.recipe.kind === 'shade'
+      )
+        continue;
       for (let index = 3; index < bitmap.data.length; index += 4) {
         const alpha = bitmap.data[index]!;
-        if (alpha !== 0 && alpha !== 255) nonBinaryAlpha.push(`${input.id}:${String(index)}`);
+        if (alpha !== 0 && alpha !== 255)
+          nonBinaryAlpha.push(`${input.id}:${String(index)}`);
       }
     }
     expect(overBudget).toEqual([]);
@@ -256,13 +447,18 @@ describe('classic native-density and art-technique invariants', () => {
   it('grounds every freestanding object with the one shared contact-shadow colour', () => {
     expect(TILE_SIZE).toBe(EXPECTED_NATIVE_SIZE);
     const shadow = colorKey(neutral(1));
-    for (const input of STARTER_ART_INPUTS.filter(({ recipe }) =>
-      recipe.kind === 'terrain' || recipe.kind === 'token' || recipe.kind === 'token-dead')) {
+    for (const input of STARTER_ART_INPUTS.filter(
+      ({ recipe }) =>
+        recipe.kind === 'terrain' ||
+        recipe.kind === 'token' ||
+        recipe.kind === 'token-dead',
+    )) {
       const bitmap = paintRecipe(input.recipe);
       let shadowPixels = 0;
-      for (let y = 0; y < bitmap.height; y += 1) for (let x = 0; x < bitmap.width; x += 1) {
-        if (rgbaKey(bitmap.get(x, y)) === shadow) shadowPixels += 1;
-      }
+      for (let y = 0; y < bitmap.height; y += 1)
+        for (let x = 0; x < bitmap.width; x += 1) {
+          if (rgbaKey(bitmap.get(x, y)) === shadow) shadowPixels += 1;
+        }
       expect(shadowPixels, input.id).toBeGreaterThan(12);
     }
   });
@@ -270,19 +466,89 @@ describe('classic native-density and art-technique invariants', () => {
   it('keeps every colour choice perceptibly separate from its neighbours', () => {
     expect(TILE_SIZE).toBe(EXPECTED_NATIVE_SIZE);
     for (const input of STARTER_ART_INPUTS) {
-      expect(minimumRgbDistance(paintRecipe(input.recipe)), input.id).toBeGreaterThanOrEqual(8);
+      expect(
+        minimumRgbDistance(paintRecipe(input.recipe)),
+        input.id,
+      ).toBeGreaterThanOrEqual(8);
     }
   });
 
   it('keeps structured texture in clusters instead of isolated speckle', () => {
     expect(TILE_SIZE).toBe(EXPECTED_NATIVE_SIZE);
-    for (const input of STARTER_ART_INPUTS.filter(({ recipe }) => ['floor', 'wall', 'door', 'terrain'].includes(recipe.kind))) {
-      expect(isolatedColorIslands(paintRecipe(input.recipe)), input.id).toBeLessThanOrEqual(24);
+    for (const input of STARTER_ART_INPUTS.filter(({ recipe }) =>
+      ['floor', 'wall', 'door', 'terrain'].includes(recipe.kind),
+    )) {
+      expect(
+        isolatedColorIslands(paintRecipe(input.recipe)),
+        input.id,
+      ).toBeLessThanOrEqual(24);
     }
     const speckled = new Bitmap(128, 128);
     speckled.rect(0, 0, 128, 128, ramp('stone', 3));
-    for (let index = 0; index < 40; index += 1) speckled.put(2 + index * 3, 17 + (index % 3) * 5, ramp('stone', 1));
+    for (let index = 0; index < 40; index += 1)
+      speckled.put(2 + index * 3, 17 + (index % 3) * 5, ramp('stone', 1));
     expect(isolatedColorIslands(speckled)).toBeGreaterThan(24);
+  });
+
+  it('uses cell-spanning repeated ridges for difficult terrain and a broad stone cross-brace for blocked cells', () => {
+    const difficult = paintRecipe({
+      kind: 'overlay',
+      material: 'semantic',
+      effect: 'difficult',
+    });
+    const ridgeRgb = paletteRgb(ramp('earth', 4));
+    const ridgeKey = rgbaKey({ ...ridgeRgb, alpha: 175 });
+    const ridgePoints: { readonly x: number; readonly y: number }[] = [];
+    for (let y = 0; y < difficult.height; y += 1) {
+      for (let x = 0; x < difficult.width; x += 1) {
+        if (rgbaKey(difficult.get(x, y)) === ridgeKey)
+          ridgePoints.push({ x, y });
+      }
+    }
+    expect(ridgePoints.length).toBeGreaterThan(300);
+    expect(
+      Math.max(...ridgePoints.map(({ x }) => x)) -
+        Math.min(...ridgePoints.map(({ x }) => x)),
+    ).toBeGreaterThan(110);
+    expect(new Set(ridgePoints.map(({ y }) => Math.floor(y / 32))).size).toBe(
+      4,
+    );
+
+    const blocked = paintRecipe({
+      kind: 'overlay',
+      material: 'semantic',
+      effect: 'blocked',
+    });
+    const braceKeys = new Set([
+      colorKey(ramp('stone', 0)),
+      colorKey(ramp('stone', 4)),
+    ]);
+    let bracePixels = 0;
+    for (let y = 16; y <= 112; y += 1) {
+      for (let x = 16; x <= 112; x += 1) {
+        const onBrace = Math.abs(x - y) <= 5 || Math.abs(x + y - 128) <= 5;
+        if (onBrace && braceKeys.has(rgbaKey(blocked.get(x, y))))
+          bracePixels += 1;
+      }
+    }
+    expect(bracePixels).toBeGreaterThan(700);
+
+    const plausibleWrong = new Bitmap(128, 128);
+    plausibleWrong.rect(8, 8, 112, 112, { ...ramp('earth', 4), alpha: 65 });
+    for (let index = 0; index < 40; index += 1) {
+      plausibleWrong.put(8 + index * 2, 20 + (index % 4), {
+        ...ramp('earth', 4),
+        alpha: 175,
+      });
+    }
+    let wrongRidgePixels = 0;
+    for (let y = 0; y < plausibleWrong.height; y += 1) {
+      for (let x = 0; x < plausibleWrong.width; x += 1) {
+        if (rgbaKey(plausibleWrong.get(x, y)) === ridgeKey)
+          wrongRidgePixels += 1;
+      }
+    }
+    expect(wrongRidgePixels).toBeLessThanOrEqual(80);
   });
 
   it('gives every archetype a measurably distinct alpha-mask silhouette', () => {
@@ -298,14 +564,21 @@ describe('classic native-density and art-technique invariants', () => {
       for (let right = left + 1; right < silhouettes.length; right += 1) {
         const a = silhouettes[left]!;
         const b = silhouettes[right]!;
-        expect(descriptorDistance(a.descriptor, b.descriptor), `${a.archetype}/${b.archetype}`).toBeGreaterThan(0.012);
+        expect(
+          descriptorDistance(a.descriptor, b.descriptor),
+          `${a.archetype}/${b.archetype}`,
+        ).toBeGreaterThan(0.012);
       }
     }
   });
 
   it('places convex highlights toward the upper-left and shadows toward the lower-right', () => {
     expect(TILE_SIZE).toBe(EXPECTED_NATIVE_SIZE);
-    const pillar = paintRecipe({ kind: 'terrain', material: 'stone', object: 'pillar' });
+    const pillar = paintRecipe({
+      kind: 'terrain',
+      material: 'stone',
+      object: 'pillar',
+    });
     const centroids = directionalCentroid(pillar);
     expect(centroids.highlight).toBeLessThan(centroids.shadow - 12);
 
@@ -317,10 +590,33 @@ describe('classic native-density and art-technique invariants', () => {
     expect(Math.abs(rejected.highlight - rejected.shadow)).toBeLessThan(1);
   });
 
+  it('places every authored bust head and body highlight above-left of its shadow mass', () => {
+    for (const archetype of TOKEN_ARCHETYPES) {
+      const bitmap = paintTokenBust(archetype);
+      const profile = BUST_LIGHT_PROFILES[archetype];
+      for (const [mass, definition] of Object.entries(profile)) {
+        const highlight = bustRegionCentroid(
+          bitmap,
+          definition,
+          definition.highlight,
+        );
+        const shadow = bustRegionCentroid(
+          bitmap,
+          definition,
+          definition.shadow,
+        );
+        expect(shadow - highlight, `${archetype} ${mass}`).toBeGreaterThan(12);
+      }
+    }
+  });
+
   it('contains native one-pixel decisions that cannot be reconstructed through 64 pixels', () => {
     expect(TILE_SIZE).toBe(EXPECTED_NATIVE_SIZE);
     for (const input of STARTER_ART_INPUTS) {
-      expect(nativeDetailFraction(paintRecipe(input.recipe)), input.id).toBeGreaterThanOrEqual(MIN_NATIVE_DETAIL_FRACTION);
+      expect(
+        nativeDetailFraction(paintRecipe(input.recipe)),
+        input.id,
+      ).toBeGreaterThanOrEqual(MIN_NATIVE_DETAIL_FRACTION);
     }
 
     const low = new Bitmap(64, 64);
@@ -334,9 +630,10 @@ describe('classic native-density and art-technique invariants', () => {
     const token = paintRecipe(tokenRecipe('fighter', 'party'));
     const pureBlack = rgbaKey({ red: 0, green: 0, blue: 0, alpha: 255 });
     let pureBlackCount = 0;
-    for (let y = 0; y < token.height; y += 1) for (let x = 0; x < token.width; x += 1) {
-      if (rgbaKey(token.get(x, y)) === pureBlack) pureBlackCount += 1;
-    }
+    for (let y = 0; y < token.height; y += 1)
+      for (let x = 0; x < token.width; x += 1) {
+        if (rgbaKey(token.get(x, y)) === pureBlack) pureBlackCount += 1;
+      }
     expect(pureBlackCount).toBe(0);
     const lit = colorKey(ramp('metal', 3));
     const dark = colorKey(ramp('metal', 0));
@@ -344,11 +641,18 @@ describe('classic native-density and art-technique invariants', () => {
     let litCount = 0;
     let darkPosition = 0;
     let darkCount = 0;
-    for (let y = 0; y < token.height; y += 1) for (let x = 0; x < token.width; x += 1) {
-      const key = rgbaKey(token.get(x, y));
-      if (key === lit) { litPosition += x + y; litCount += 1; }
-      if (key === dark) { darkPosition += x + y; darkCount += 1; }
-    }
+    for (let y = 0; y < token.height; y += 1)
+      for (let x = 0; x < token.width; x += 1) {
+        const key = rgbaKey(token.get(x, y));
+        if (key === lit) {
+          litPosition += x + y;
+          litCount += 1;
+        }
+        if (key === dark) {
+          darkPosition += x + y;
+          darkCount += 1;
+        }
+      }
     expect(litCount).toBeGreaterThan(0);
     expect(darkCount).toBeGreaterThan(0);
     expect(litPosition / litCount).toBeLessThan(darkPosition / darkCount);

@@ -62,7 +62,10 @@ import {
   type PixelTextLayout,
 } from '../assets/pixel-font';
 import type { PixelMark } from '../assets/pixel-mark';
-import { starterArtCssUrl, starterArtDataUri } from '../assets/starter-art-resolver';
+import {
+  starterArtCssUrl,
+  starterArtDataUri,
+} from '../assets/starter-art-resolver';
 import type { LifeState } from '../combat/encounter';
 import type { CombatantId } from '../combat/values';
 import {
@@ -86,9 +89,11 @@ export const HP_BAR_WIDTH_PX = 40;
 export const HP_BAR_HEIGHT_PX = 4;
 export const HP_BAR_BORDER_PX = 1;
 /** Where the HP bar's top border sits inside its cell; badge and glyph boxes end above it. */
-export const HP_BAR_TOP_PX = CHROME_TILE_PX - HP_BAR_HEIGHT_PX - 2 * HP_BAR_BORDER_PX - 2;
+export const HP_BAR_TOP_PX =
+  CHROME_TILE_PX - HP_BAR_HEIGHT_PX - 2 * HP_BAR_BORDER_PX - 2;
 /** The last tile row a bottom-corner cell glyph's outline ring touches (D525). */
-export const CELL_GLYPH_RING_BOTTOM_PX = cellGlyphOrigin('blocked', CHROME_TILE_PX).y + CELL_GLYPH_SIZE;
+export const CELL_GLYPH_RING_BOTTOM_PX =
+  cellGlyphOrigin('blocked', CHROME_TILE_PX).y + CELL_GLYPH_SIZE;
 /** The life glyph's inset from the cell's top-right, and where it drops to under a door mark (D525). */
 export const LIFE_GLYPH_INSET_PX = 3;
 export const LIFE_GLYPH_BELOW_DOOR_PX = CELL_GLYPH_MARGIN + CELL_GLYPH_SIZE + 2;
@@ -96,15 +101,15 @@ export const LIFE_GLYPH_BELOW_DOOR_PX = CELL_GLYPH_MARGIN + CELL_GLYPH_SIZE + 2;
 export const HIDDEN_GLYPH_ORIGIN = Object.freeze({ x: 1, y: 29 });
 
 export const CREATURE_BADGE_SLOT = 'top-centre' as const;
-export const CREATURE_BADGE_WIDTH_PX = 26;
-export const CREATURE_BADGE_HEIGHT_PX = 18;
-export const CREATURE_BADGE_LEFT_PX = (CHROME_TILE_PX - CREATURE_BADGE_WIDTH_PX) / 2;
+export const CREATURE_BADGE_WIDTH_PX = 30;
+export const CREATURE_BADGE_HEIGHT_PX = 22;
+export const CREATURE_BADGE_LEFT_PX =
+  (CHROME_TILE_PX - CREATURE_BADGE_WIDTH_PX) / 2;
 export const CREATURE_BADGE_TOP_PX = 2;
 export const CREATURE_BADGE_STACK_PITCH_PX = CREATURE_BADGE_HEIGHT_PX;
 export const MAX_BADGES_PER_CELL = 2;
 export const CREATURE_BUST_RING_INSET_PX = 7;
-export const CREATURE_BUST_RING_WIDTH_PX = 50;
-export const CREATURE_BUST_RING_HEIGHT_PX = 50;
+export const CREATURE_BUST_RING_SIZE_PX = Object.freeze([50, 46] as const);
 export const ROSTER_NAME_GLYPHS_PER_LINE = 18;
 export const ROSTER_ENTRY_GAP_PX = 4;
 export const ROSTER_ENTRY_FRAME_PX = 6;
@@ -112,12 +117,18 @@ export const ROSTER_ENTRY_FRAME_PX = 6;
 export const BADGE_SIDE_HUES = Object.freeze([12, 222] as const);
 export const CREATURE_BADGE_HUE_EXCLUSION_DEGREES = 35;
 
-export type CreatureBadgeRamp = Exclude<PaletteRamp, 'cloth-warm' | 'cloth-cool'>;
+export type CreatureBadgeRamp = Exclude<
+  PaletteRamp,
+  'cloth-warm' | 'cloth-cool'
+>;
 export type CreatureBadgeDisc =
   | { readonly ramp: CreatureBadgeRamp; readonly step: RampStep }
   | { readonly ramp: 'neutral'; readonly step: NeutralStep };
 
-function badgeRamp(rampName: CreatureBadgeRamp, step: RampStep): CreatureBadgeDisc {
+function badgeRamp(
+  rampName: CreatureBadgeRamp,
+  step: RampStep,
+): CreatureBadgeDisc {
   return { ramp: rampName, step };
 }
 
@@ -129,7 +140,11 @@ function badgeColor<const Id extends string>(
   id: Id,
   disc: CreatureBadgeDisc,
   numeralInk: PaletteColorRef,
-): { readonly id: Id; readonly disc: CreatureBadgeDisc; readonly numeralInk: PaletteColorRef } {
+): {
+  readonly id: Id;
+  readonly disc: CreatureBadgeDisc;
+  readonly numeralInk: PaletteColorRef;
+} {
   return Object.freeze({ id, disc, numeralInk });
 }
 
@@ -141,7 +156,7 @@ function badgeColor<const Id extends string>(
 export const CREATURE_BADGE_COLORS = Object.freeze([
   badgeColor('deep-forest', badgeRamp('moss', 0), BADGE_LIGHT_INK),
   badgeColor('ivory', badgeRamp('skin', 6), BADGE_DARK_INK),
-  badgeColor('fern', badgeRamp('moss', 4), BADGE_DARK_INK),
+  badgeColor('fern', badgeRamp('moss', 5), BADGE_DARK_INK),
   badgeColor('slate', badgeRamp('stone', 4), BADGE_DARK_INK),
   badgeColor('pine', badgeRamp('moss', 2), BADGE_LIGHT_INK),
   badgeColor('charcoal', badgeNeutral(2), BADGE_LIGHT_INK),
@@ -155,11 +170,19 @@ export const CREATURE_BADGE_COLORS = Object.freeze([
 
 export type CreatureBadgeColor = (typeof CREATURE_BADGE_COLORS)[number];
 declare const creatureBadgeNumberBrand: unique symbol;
-export type CreatureBadgeNumber = number & { readonly [creatureBadgeNumberBrand]: true };
+export type CreatureBadgeNumber = number & {
+  readonly [creatureBadgeNumberBrand]: true;
+};
 
 function creatureBadgeNumber(value: number): CreatureBadgeNumber {
-  if (!Number.isSafeInteger(value) || value < 1 || value > CREATURE_BADGE_COLORS.length) {
-    throw new RangeError(`Creature badge number must be 1..${String(CREATURE_BADGE_COLORS.length)}.`);
+  if (
+    !Number.isSafeInteger(value) ||
+    value < 1 ||
+    value > CREATURE_BADGE_COLORS.length
+  ) {
+    throw new RangeError(
+      `Creature badge number must be 1..${String(CREATURE_BADGE_COLORS.length)}.`,
+    );
   }
   return value as CreatureBadgeNumber;
 }
@@ -173,19 +196,41 @@ export interface CreatureBadgeAssignment {
   readonly stackIndex: 0 | 1;
 }
 
+export interface CreatureBustRingGeometry {
+  readonly inset: number;
+  readonly size: number;
+  readonly nativeSize: number;
+}
+
+/** Each stacked ring keeps its authored 2x scale while stepping inward inside the cell. */
+export function creatureBustRingGeometry(
+  stackIndex: 0 | 1,
+): CreatureBustRingGeometry {
+  const size = CREATURE_BUST_RING_SIZE_PX[stackIndex];
+  return {
+    inset: CREATURE_BUST_RING_INSET_PX + stackIndex * 2,
+    size,
+    nativeSize: size / 2,
+  };
+}
+
 /** Stable roster order is the only numbering source in both live and snapshot DM views. */
 export function assignCreatureBadges(
   combatants: readonly EncounterBoardCombatant[],
 ): readonly CreatureBadgeAssignment[] {
   if (combatants.length > CREATURE_BADGE_COLORS.length) {
-    throw new RangeError(`The closed creature-badge palette supports ${String(CREATURE_BADGE_COLORS.length)} creatures.`);
+    throw new RangeError(
+      `The closed creature-badge palette supports ${String(CREATURE_BADGE_COLORS.length)} creatures.`,
+    );
   }
   const cellCounts = new Map<string, number>();
   return combatants.map((combatant, index): CreatureBadgeAssignment => {
     const key = `${String(combatant.position.column)},${String(combatant.position.row)}`;
     const stackIndex = cellCounts.get(key) ?? 0;
     if (stackIndex >= MAX_BADGES_PER_CELL) {
-      throw new RangeError(`Cell ${key} exceeds the ${String(MAX_BADGES_PER_CELL)}-badge column.`);
+      throw new RangeError(
+        `Cell ${key} exceeds the ${String(MAX_BADGES_PER_CELL)}-badge column.`,
+      );
     }
     cellCounts.set(key, stackIndex + 1);
     return {
@@ -236,10 +281,17 @@ export function layoutRosterName(displayName: string): PixelTextLayout {
 export const COORDINATE_CONVENTION = 'engine-column-row-zero-based' as const;
 
 export type HpBand = 'uninjured' | 'bloodied' | 'near_death' | 'unknown';
-export const HP_BANDS: readonly HpBand[] = ['uninjured', 'bloodied', 'near_death', 'unknown'];
+export const HP_BANDS: readonly HpBand[] = [
+  'uninjured',
+  'bloodied',
+  'near_death',
+  'unknown',
+];
 
 /** The bar shows the classifier's band, not a fraction: the prose gets no more than this either. */
-export function hpBandOf(knowledge: ProjectedHitPointKnowledge | undefined): HpBand {
+export function hpBandOf(
+  knowledge: ProjectedHitPointKnowledge | undefined,
+): HpBand {
   if (knowledge === undefined || knowledge.kind === 'unknown') return 'unknown';
   return knowledge.band;
 }
@@ -253,17 +305,21 @@ export const HP_BAND_FILL_PX: Readonly<Record<HpBand, number>> = {
 
 export const HP_BAND_INK: Readonly<Record<HpBand, PaletteColorRef>> = {
   uninjured: ramp('moss', 4),
-  bloodied: ramp('cloth-warm', 3),
+  bloodied: ramp('cloth-warm', 4),
   near_death: ramp('cloth-warm', 5),
-  unknown: neutral(3),
+  unknown: neutral(5),
 };
 
 export function lifeGlyphFor(life: LifeState): LifeGlyph {
   switch (life) {
-    case 'living': return 'living';
-    case 'dying': return 'dying';
-    case 'stable': return 'stable';
-    case 'dead': return 'dead';
+    case 'living':
+      return 'living';
+    case 'dying':
+      return 'dying';
+    case 'stable':
+      return 'stable';
+    case 'dead':
+      return 'dead';
   }
 }
 
@@ -272,8 +328,10 @@ const HIDDEN_TAG_INK: PaletteColorRef = ramp('cloth-warm', 6);
 
 /** Creature, object and door labels are distinct visual concepts at their DOM boundary. */
 export type BoardLabelStyle = 'creature-roster' | 'object-tag' | 'door-tag';
-export const CREATURE_LABEL_STYLE = 'creature-roster' as const satisfies BoardLabelStyle;
-export const OBJECT_LABEL_STYLE = 'object-tag' as const satisfies BoardLabelStyle;
+export const CREATURE_LABEL_STYLE =
+  'creature-roster' as const satisfies BoardLabelStyle;
+export const OBJECT_LABEL_STYLE =
+  'object-tag' as const satisfies BoardLabelStyle;
 export const DOOR_LABEL_STYLE = 'door-tag' as const satisfies BoardLabelStyle;
 
 export interface BoardChromeDimensionContent {
@@ -282,11 +340,21 @@ export interface BoardChromeDimensionContent {
 }
 
 export function legendHeightPx(content: BoardChromeDimensionContent): number {
-  const rosterHeight = content.combatants.length === 0
-    ? 0
-    : 22 + content.combatants.reduce((height, combatant) =>
-        height + Math.max(GLYPH_HEIGHT * CHROME_TEXT_SCALE, layoutRosterName(combatant.name).height * CHROME_TEXT_SCALE) +
-          ROSTER_ENTRY_FRAME_PX + ROSTER_ENTRY_GAP_PX, 0);
+  const rosterHeight =
+    content.combatants.length === 0
+      ? 0
+      : 22 +
+        content.combatants.reduce(
+          (height, combatant) =>
+            height +
+            Math.max(
+              GLYPH_HEIGHT * CHROME_TEXT_SCALE,
+              layoutRosterName(combatant.name).height * CHROME_TEXT_SCALE,
+            ) +
+            ROSTER_ENTRY_FRAME_PX +
+            ROSTER_ENTRY_GAP_PX,
+          0,
+        );
   const objectCount = content.objects.length;
   const objectHeight = objectCount === 0 ? 0 : 22 + objectCount * 40;
   return LEGEND_HEIGHT_PX + rosterHeight + objectHeight;
@@ -305,9 +373,16 @@ export function boardChromeDimensions(
   readonly height: number;
 } {
   return {
-    width: 2 * BOARD_BORDER_PX + 2 * COORDINATE_GUTTER_PX + bounds.columns * CHROME_TILE_PX,
-    height: 2 * BOARD_BORDER_PX + 2 * COORDINATE_GUTTER_PX + bounds.rows * CHROME_TILE_PX +
-      LEGEND_GAP_PX + legendHeightPx(content),
+    width:
+      2 * BOARD_BORDER_PX +
+      2 * COORDINATE_GUTTER_PX +
+      bounds.columns * CHROME_TILE_PX,
+    height:
+      2 * BOARD_BORDER_PX +
+      2 * COORDINATE_GUTTER_PX +
+      bounds.rows * CHROME_TILE_PX +
+      LEGEND_GAP_PX +
+      legendHeightPx(content),
   };
 }
 
@@ -335,49 +410,159 @@ export type LegendEntry =
       readonly label: string;
       readonly style: 'mark';
       readonly glyph: PixelMark;
+      readonly floor?: AssetId;
+      readonly overlay?: AssetId;
     };
 
-const PARTY_ROW: LegendEntry = { key: 'side-party', label: 'Party', swatch: ramp('cloth-cool', 3), style: 'plate' };
-const FOE_ROW: LegendEntry = { key: 'side-foe', label: 'Foe', swatch: ramp('cloth-warm', 3), style: 'plate' };
-const HIDDEN_PLATE_ROW: LegendEntry = { key: 'hidden', label: 'Hidden from players', swatch: neutral(8), style: 'plate-dashed' };
-const DIFFICULT_ROW: LegendEntry = { key: 'difficult', label: 'Difficult', swatch: ramp('earth', 2), style: 'tint' };
-const OBSCURED_TINT_ROW: LegendEntry = { key: 'obscured', label: 'Obscured', swatch: neutral(6), style: 'tint' };
-const FOG_TINT_ROW: LegendEntry = { key: 'fog', label: 'Fog', swatch: neutral(1), style: 'tint' };
-const BLOCKED_TINT_ROW: LegendEntry = { key: 'blocked', label: 'Blocked', swatch: ramp('stone', 2), style: 'glyph' };
-const OBJECT_ROW: LegendEntry = { key: 'object', label: 'Object', glyph: OBJECT_GLYPH, style: 'mark' };
-const LIGHT_SOURCE_ROW: LegendEntry = { key: 'light-source', label: 'Light source', swatch: ramp('skin', 6), style: 'glyph' };
+const PARTY_ROW: LegendEntry = {
+  key: 'side-party',
+  label: 'Party cool-blue floor plate',
+  swatch: ramp('cloth-cool', 3),
+  style: 'plate',
+};
+const FOE_ROW: LegendEntry = {
+  key: 'side-foe',
+  label: 'Foe warm-red floor plate',
+  swatch: ramp('cloth-warm', 3),
+  style: 'plate',
+};
+const HIDDEN_PLATE_ROW: LegendEntry = {
+  key: 'hidden',
+  label: 'Hidden from players',
+  swatch: neutral(8),
+  style: 'plate-dashed',
+};
+const DIFFICULT_ROW: LegendEntry = {
+  key: 'difficult',
+  label: 'Difficult — broad ochre ridges',
+  style: 'art',
+  floor: STONE_FLOOR_SET_ID,
+  overlay: OVERLAY_ASSETS.difficult,
+};
+const OBSCURED_TINT_ROW: LegendEntry = {
+  key: 'obscured',
+  label: 'Obscured',
+  swatch: neutral(6),
+  style: 'tint',
+};
+const FOG_TINT_ROW: LegendEntry = {
+  key: 'fog',
+  label: 'Fog',
+  swatch: neutral(1),
+  style: 'tint',
+};
+const BLOCKED_ROW: LegendEntry = {
+  key: 'blocked',
+  label: 'Blocked — cross-braced stone pile',
+  style: 'art',
+  floor: STONE_FLOOR_SET_ID,
+  overlay: OVERLAY_ASSETS.blocked,
+};
+const OBJECT_ROW: LegendEntry = {
+  key: 'object',
+  label: 'Object',
+  glyph: OBJECT_GLYPH,
+  style: 'mark',
+};
+const LIGHT_SOURCE_ROW: LegendEntry = {
+  key: 'light-source',
+  label: 'Light source',
+  swatch: ramp('skin', 6),
+  style: 'glyph',
+};
 const HP_ROWS: readonly LegendEntry[] = [
-  { key: 'hp-uninjured', label: 'HP uninjured', swatch: HP_BAND_INK.uninjured, style: 'hp' },
-  { key: 'hp-bloodied', label: 'HP bloodied', swatch: HP_BAND_INK.bloodied, style: 'hp' },
-  { key: 'hp-near-death', label: 'HP near death', swatch: HP_BAND_INK.near_death, style: 'hp' },
-  { key: 'hp-unknown', label: 'HP unknown', swatch: HP_BAND_INK.unknown, style: 'hp' },
+  {
+    key: 'hp-uninjured',
+    label: 'HP uninjured',
+    swatch: HP_BAND_INK.uninjured,
+    style: 'hp',
+  },
+  {
+    key: 'hp-bloodied',
+    label: 'HP bloodied',
+    swatch: HP_BAND_INK.bloodied,
+    style: 'hp',
+  },
+  {
+    key: 'hp-near-death',
+    label: 'HP near death',
+    swatch: HP_BAND_INK.near_death,
+    style: 'hp',
+  },
+  {
+    key: 'hp-unknown',
+    label: 'HP unknown',
+    swatch: HP_BAND_INK.unknown,
+    style: 'hp',
+  },
 ];
 
 /** The light rows depend on the mode (D525); the glyph modes also name the unmarked room default. */
-export function lightLegendEntries(mode: BoardGlyphMode, roomDefault: LightLevel): readonly LegendEntry[] {
+export function lightLegendEntries(
+  mode: BoardGlyphMode,
+  roomDefault: LightLevel,
+): readonly LegendEntry[] {
   switch (mode) {
     case 'none':
       return [
-        { key: 'bright', label: 'Bright light', swatch: ramp('skin', 6), style: 'tint' },
-        { key: 'dim', label: 'Dim light', swatch: ramp('cloth-warm', 5), style: 'tint' },
-        { key: 'darkness', label: 'Darkness', swatch: neutral(0), style: 'tint' },
+        {
+          key: 'bright',
+          label: 'Bright light',
+          swatch: ramp('skin', 6),
+          style: 'tint',
+        },
+        {
+          key: 'dim',
+          label: 'Dim light',
+          swatch: ramp('cloth-warm', 5),
+          style: 'tint',
+        },
+        {
+          key: 'darkness',
+          label: 'Darkness',
+          swatch: neutral(0),
+          style: 'tint',
+        },
       ];
     case 'light':
     case 'full':
       return [
-        ...LIGHT_LEVELS.map((level): LegendEntry => ({
-          key: level,
-          label: LIGHT_LEVEL_LABELS[level],
-          style: 'mark',
-          glyph: lightGlyphForLevel(level),
-        })),
-        { key: 'light-default', label: `No glyph = ${LIGHT_LEVEL_LABELS[roomDefault]}`, style: 'art', floor: STONE_FLOOR_SET_ID, overlay: null },
+        ...LIGHT_LEVELS.map(
+          (level): LegendEntry => ({
+            key: level,
+            label: LIGHT_LEVEL_LABELS[level],
+            style: 'mark',
+            glyph: lightGlyphForLevel(level),
+          }),
+        ),
+        {
+          key: 'light-default',
+          label: `No glyph = ${LIGHT_LEVEL_LABELS[roomDefault]}`,
+          style: 'art',
+          floor: STONE_FLOOR_SET_ID,
+          overlay: null,
+        },
       ];
   }
 }
 
 function cellGlyphRow(kind: CellGlyphKind): LegendEntry {
-  return { key: kind, label: CELL_GLYPHS[kind].label, style: 'mark', glyph: CELL_GLYPHS[kind] };
+  if (kind === 'blocked') {
+    return {
+      key: kind,
+      label: 'Blocked — cross-braced stone pile and corner X',
+      style: 'mark',
+      glyph: CELL_GLYPHS[kind],
+      floor: STONE_FLOOR_SET_ID,
+      overlay: OVERLAY_ASSETS.blocked,
+    };
+  }
+  return {
+    key: kind,
+    label: CELL_GLYPHS[kind].label,
+    style: 'mark',
+    glyph: CELL_GLYPHS[kind],
+  };
 }
 
 /**
@@ -395,16 +580,34 @@ export function legendEntriesFor(
     case 'none':
     case 'light':
       return [
-        PARTY_ROW, FOE_ROW, HIDDEN_PLATE_ROW, DIFFICULT_ROW, OBSCURED_TINT_ROW,
+        PARTY_ROW,
+        FOE_ROW,
+        HIDDEN_PLATE_ROW,
+        DIFFICULT_ROW,
+        OBSCURED_TINT_ROW,
         ...lightLegendEntries(mode, roomDefault),
-        FOG_TINT_ROW, BLOCKED_TINT_ROW, OBJECT_ROW, LIGHT_SOURCE_ROW, ...HP_ROWS,
+        FOG_TINT_ROW,
+        BLOCKED_ROW,
+        OBJECT_ROW,
+        LIGHT_SOURCE_ROW,
+        ...HP_ROWS,
       ];
     case 'full': {
-      const shown = (kind: CellGlyphKind): readonly LegendEntry[] => presence.cells.includes(kind) ? [cellGlyphRow(kind)] : [];
+      const shown = (kind: CellGlyphKind): readonly LegendEntry[] =>
+        presence.cells.includes(kind) ? [cellGlyphRow(kind)] : [];
       return [
         PARTY_ROW,
         FOE_ROW,
-        ...(presence.hidden ? [{ key: 'hidden', label: HIDDEN_GLYPH_LABEL, style: 'mark', glyph: HIDDEN_GLYPH } satisfies LegendEntry] : []),
+        ...(presence.hidden
+          ? [
+              {
+                key: 'hidden',
+                label: HIDDEN_GLYPH_LABEL,
+                style: 'mark',
+                glyph: HIDDEN_GLYPH,
+              } satisfies LegendEntry,
+            ]
+          : []),
         DIFFICULT_ROW,
         ...shown('obscured'),
         ...lightLegendEntries(mode, roomDefault),
@@ -427,29 +630,65 @@ export function legendGlyphAssetFor(level: LightLevel): AssetId {
 
 const TEXT_INK: PaletteColorRef = neutral(8);
 const COORDINATE_INK: PaletteColorRef = neutral(6);
+export const ROSTER_WORD_INKS = Object.freeze({
+  title: TEXT_INK,
+  name: TEXT_INK,
+  coordinate: COORDINATE_INK,
+  side: TEXT_INK,
+  hidden: HIDDEN_TAG_INK,
+  hpUninjured: HP_BAND_INK.uninjured,
+  hpBloodied: HP_BAND_INK.bloodied,
+  hpNearDeath: HP_BAND_INK.near_death,
+  hpUnknown: HP_BAND_INK.unknown,
+});
 
-function el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string): HTMLElementTagNameMap[K] {
+function el<K extends keyof HTMLElementTagNameMap>(
+  tag: K,
+  className: string,
+): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
   node.className = className;
   return node;
 }
 
-function styled<T extends HTMLElement>(node: T, declarations: Readonly<Record<string, string>>): T {
-  node.setAttribute('style', Object.entries(declarations).map(([property, value]) => `${property}:${value}`).join(';'));
+function styled<T extends HTMLElement>(
+  node: T,
+  declarations: Readonly<Record<string, string>>,
+): T {
+  node.setAttribute(
+    'style',
+    Object.entries(declarations)
+      .map(([property, value]) => `${property}:${value}`)
+      .join(';'),
+  );
   return node;
 }
 
-function textImage(text: string, ink: PaletteColorRef, className: string): HTMLImageElement {
-  const rendered = renderPixelText(layoutPixelText(text, 1), ink, CHROME_TEXT_SCALE);
+function textImage(
+  text: string,
+  ink: PaletteColorRef,
+  className: string,
+): HTMLImageElement {
+  const rendered = renderPixelText(
+    layoutPixelText(text, 1),
+    ink,
+    CHROME_TEXT_SCALE,
+  );
   const image = el('img', className);
   image.alt = '';
   image.setAttribute('aria-hidden', 'true');
   image.src = rendered.dataUri;
-  styled(image, { width: `${String(rendered.cssWidth)}px`, height: `${String(rendered.cssHeight)}px` });
+  styled(image, {
+    width: `${String(rendered.cssWidth)}px`,
+    height: `${String(rendered.cssHeight)}px`,
+  });
   return image;
 }
 
-function coordinateLabels(bounds: { readonly columns: number; readonly rows: number }): HTMLDivElement {
+function coordinateLabels(bounds: {
+  readonly columns: number;
+  readonly rows: number;
+}): HTMLDivElement {
   const container = el('div', 'encounter-coordinate-labels');
   container.dataset.coordinateLabels = COORDINATE_CONVENTION;
   container.setAttribute('aria-hidden', 'true');
@@ -460,13 +699,28 @@ function coordinateLabels(bounds: { readonly columns: number; readonly rows: num
   const textHeight = GLYPH_HEIGHT * CHROME_TEXT_SCALE;
   for (let column = 0; column < bounds.columns; column += 1) {
     for (const edge of ['top', 'bottom'] as const) {
-      const image = textImage(String(column), COORDINATE_INK, 'encounter-coordinate-label');
-      const width = Number.parseInt(image.getAttribute('style')?.match(/width:(\d+)px/u)?.[1] ?? '0', 10);
-      const x = gridLeft + column * CHROME_TILE_PX + Math.round(CHROME_TILE_PX / 2 - width / 2);
-      const y = edge === 'top'
-        ? Math.round((COORDINATE_GUTTER_PX - textHeight) / 2)
-        : gridBottom + Math.round((COORDINATE_GUTTER_PX - textHeight) / 2);
-      styled(image, { position: 'absolute', left: `${String(x)}px`, top: `${String(y)}px` });
+      const image = textImage(
+        String(column),
+        COORDINATE_INK,
+        'encounter-coordinate-label',
+      );
+      const width = Number.parseInt(
+        image.getAttribute('style')?.match(/width:(\d+)px/u)?.[1] ?? '0',
+        10,
+      );
+      const x =
+        gridLeft +
+        column * CHROME_TILE_PX +
+        Math.round(CHROME_TILE_PX / 2 - width / 2);
+      const y =
+        edge === 'top'
+          ? Math.round((COORDINATE_GUTTER_PX - textHeight) / 2)
+          : gridBottom + Math.round((COORDINATE_GUTTER_PX - textHeight) / 2);
+      styled(image, {
+        position: 'absolute',
+        left: `${String(x)}px`,
+        top: `${String(y)}px`,
+      });
       image.dataset.axis = 'column';
       image.dataset.index = String(column);
       image.dataset.edge = edge;
@@ -475,13 +729,28 @@ function coordinateLabels(bounds: { readonly columns: number; readonly rows: num
   }
   for (let row = 0; row < bounds.rows; row += 1) {
     for (const edge of ['left', 'right'] as const) {
-      const image = textImage(String(row), COORDINATE_INK, 'encounter-coordinate-label');
-      const width = Number.parseInt(image.getAttribute('style')?.match(/width:(\d+)px/u)?.[1] ?? '0', 10);
-      const y = gridTop + row * CHROME_TILE_PX + Math.round(CHROME_TILE_PX / 2 - textHeight / 2);
-      const x = edge === 'left'
-        ? Math.round((COORDINATE_GUTTER_PX - width) / 2)
-        : gridRight + Math.round((COORDINATE_GUTTER_PX - width) / 2);
-      styled(image, { position: 'absolute', left: `${String(x)}px`, top: `${String(y)}px` });
+      const image = textImage(
+        String(row),
+        COORDINATE_INK,
+        'encounter-coordinate-label',
+      );
+      const width = Number.parseInt(
+        image.getAttribute('style')?.match(/width:(\d+)px/u)?.[1] ?? '0',
+        10,
+      );
+      const y =
+        gridTop +
+        row * CHROME_TILE_PX +
+        Math.round(CHROME_TILE_PX / 2 - textHeight / 2);
+      const x =
+        edge === 'left'
+          ? Math.round((COORDINATE_GUTTER_PX - width) / 2)
+          : gridRight + Math.round((COORDINATE_GUTTER_PX - width) / 2);
+      styled(image, {
+        position: 'absolute',
+        left: `${String(x)}px`,
+        top: `${String(y)}px`,
+      });
       image.dataset.axis = 'row';
       image.dataset.index = String(row);
       image.dataset.edge = edge;
@@ -492,8 +761,87 @@ function coordinateLabels(bounds: { readonly columns: number; readonly rows: num
 }
 
 /** The cell eye-slash accompanies a roster HIDDEN tag only in full glyph mode. */
-export function hiddenRosterTagFor(mode: BoardGlyphMode, combatant: EncounterBoardCombatant): HiddenRosterTag | null {
-  return mode === 'full' && combatant.hiddenFromPlayers === true ? HIDDEN_GLYPH_LABEL : null;
+export function hiddenRosterTagFor(
+  mode: BoardGlyphMode,
+  combatant: EncounterBoardCombatant,
+): HiddenRosterTag | null {
+  return mode === 'full' && combatant.hiddenFromPlayers === true
+    ? HIDDEN_GLYPH_LABEL
+    : null;
+}
+
+function tokenIdentityUnderlay(
+  combatants: readonly EncounterBoardCombatant[],
+  bounds: { readonly columns: number; readonly rows: number },
+): HTMLDivElement {
+  const layer = el('div', 'encounter-token-underlay');
+  layer.setAttribute('aria-hidden', 'true');
+  const assignments = assignCreatureBadges(combatants);
+  for (const [index, combatant] of combatants.entries()) {
+    const assignment = assignments[index];
+    if (assignment === undefined)
+      throw new Error(
+        `Combatant ${String(combatant.id)} lost its badge assignment.`,
+      );
+    if (
+      combatant.position.column < 0 ||
+      combatant.position.column >= bounds.columns ||
+      combatant.position.row < 0 ||
+      combatant.position.row >= bounds.rows
+    )
+      throw new RangeError(
+        `Combatant ${String(combatant.id)} is outside the board.`,
+      );
+    const cellLeft =
+      COORDINATE_GUTTER_PX + combatant.position.column * CHROME_TILE_PX;
+    const cellTop =
+      COORDINATE_GUTTER_PX + combatant.position.row * CHROME_TILE_PX;
+    const ringGeometry = creatureBustRingGeometry(assignment.stackIndex);
+    const ringArt = renderCreatureRingBitmap(
+      assignment.color.disc,
+      ringGeometry.nativeSize,
+    );
+    const bustRing = el('img', 'encounter-creature-bust-ring');
+    bustRing.alt = '';
+    bustRing.src = ringArt.dataUri;
+    bustRing.dataset.combatantId = combatant.id;
+    bustRing.dataset.badgeNumber = String(assignment.number);
+    bustRing.dataset.badgeColor = assignment.color.id;
+    bustRing.dataset.stackIndex = String(assignment.stackIndex);
+    styled(bustRing, {
+      position: 'absolute',
+      left: `${String(cellLeft + ringGeometry.inset)}px`,
+      top: `${String(cellTop + ringGeometry.inset)}px`,
+      width: `${String(ringArt.cssWidth)}px`,
+      height: `${String(ringArt.cssHeight)}px`,
+    });
+    layer.append(bustRing);
+
+    const badgeArt = renderCreatureBadgeBitmap(
+      assignment.number,
+      assignment.color.disc,
+      assignment.color.numeralInk,
+    );
+    const badge = el('img', 'encounter-creature-badge');
+    badge.alt = '';
+    badge.src = badgeArt.dataUri;
+    badge.dataset.combatantId = combatant.id;
+    badge.dataset.badgeNumber = String(assignment.number);
+    badge.dataset.badgeColor = assignment.color.id;
+    badge.dataset.badgeSlot = CREATURE_BADGE_SLOT;
+    badge.dataset.anchorColumn = String(assignment.column);
+    badge.dataset.anchorRow = String(assignment.row);
+    badge.dataset.stackIndex = String(assignment.stackIndex);
+    styled(badge, {
+      position: 'absolute',
+      left: `${String(cellLeft + CREATURE_BADGE_LEFT_PX)}px`,
+      top: `${String(cellTop + CREATURE_BADGE_TOP_PX + assignment.stackIndex * CREATURE_BADGE_STACK_PITCH_PX)}px`,
+      width: `${String(badgeArt.cssWidth)}px`,
+      height: `${String(badgeArt.cssHeight)}px`,
+    });
+    layer.append(badge);
+  }
+  return layer;
 }
 
 function tokenChrome(
@@ -504,16 +852,20 @@ function tokenChrome(
 ): HTMLDivElement {
   const layer = el('div', 'encounter-token-chrome');
   layer.setAttribute('aria-hidden', 'true');
-  const assignments = assignCreatureBadges(combatants);
-  for (const [index, combatant] of combatants.entries()) {
-    const assignment = assignments[index];
-    if (assignment === undefined) throw new Error(`Combatant ${String(combatant.id)} lost its badge assignment.`);
+  for (const combatant of combatants) {
     if (
-      combatant.position.column < 0 || combatant.position.column >= bounds.columns ||
-      combatant.position.row < 0 || combatant.position.row >= bounds.rows
-    ) throw new RangeError(`Combatant ${String(combatant.id)} is outside the board.`);
-    const cellLeft = COORDINATE_GUTTER_PX + combatant.position.column * CHROME_TILE_PX;
-    const cellTop = COORDINATE_GUTTER_PX + combatant.position.row * CHROME_TILE_PX;
+      combatant.position.column < 0 ||
+      combatant.position.column >= bounds.columns ||
+      combatant.position.row < 0 ||
+      combatant.position.row >= bounds.rows
+    )
+      throw new RangeError(
+        `Combatant ${String(combatant.id)} is outside the board.`,
+      );
+    const cellLeft =
+      COORDINATE_GUTTER_PX + combatant.position.column * CHROME_TILE_PX;
+    const cellTop =
+      COORDINATE_GUTTER_PX + combatant.position.row * CHROME_TILE_PX;
     const cellKey = `${String(combatant.position.column)},${String(combatant.position.row)}`;
 
     if (combatant.hiddenFromPlayers === true) {
@@ -532,7 +884,13 @@ function tokenChrome(
       layer.append(ring);
       // D525 'full': the eye-slash mark on the ring's left rim, at the tile's own 1× scale like the cell glyphs.
       if (hiddenRosterTagFor(mode, combatant) !== null) {
-        const eye = renderPixelGlyph('hidden', HIDDEN_GLYPH.rows, HIDDEN_GLYPH.ink, 1, HIDDEN_GLYPH.outline);
+        const eye = renderPixelGlyph(
+          'hidden',
+          HIDDEN_GLYPH.rows,
+          HIDDEN_GLYPH.ink,
+          1,
+          HIDDEN_GLYPH.outline,
+        );
         const eyeImage = el('img', 'encounter-hidden-glyph');
         eyeImage.alt = '';
         eyeImage.src = eye.dataUri;
@@ -570,14 +928,20 @@ function tokenChrome(
     layer.append(bar);
 
     const life = combatant.life ?? 'living';
-    const glyph = renderLifeGlyph(lifeGlyphFor(life), TEXT_INK, CHROME_TEXT_SCALE);
+    const glyph = renderLifeGlyph(
+      lifeGlyphFor(life),
+      TEXT_INK,
+      CHROME_TEXT_SCALE,
+    );
     const lifeImage = el('img', 'encounter-life-glyph');
     lifeImage.alt = '';
     lifeImage.src = glyph.dataUri;
     lifeImage.dataset.combatantId = combatant.id;
     lifeImage.dataset.life = life;
     // D525: a door mark owns the top-right corner; the life glyph on a door cell drops below it.
-    const lifeTop = doorCells.has(cellKey) ? LIFE_GLYPH_BELOW_DOOR_PX : LIFE_GLYPH_INSET_PX;
+    const lifeTop = doorCells.has(cellKey)
+      ? LIFE_GLYPH_BELOW_DOOR_PX
+      : LIFE_GLYPH_INSET_PX;
     styled(lifeImage, {
       position: 'absolute',
       left: `${String(cellLeft + CHROME_TILE_PX - glyph.cssWidth - LIFE_GLYPH_INSET_PX)}px`,
@@ -586,45 +950,6 @@ function tokenChrome(
       height: `${String(glyph.cssHeight)}px`,
     });
     layer.append(lifeImage);
-
-    const ringInset = CREATURE_BUST_RING_INSET_PX + assignment.stackIndex * 2;
-    const ringArt = renderCreatureRingBitmap(assignment.color.disc);
-    const bustRing = el('img', 'encounter-creature-bust-ring');
-    bustRing.alt = '';
-    bustRing.setAttribute('aria-hidden', 'true');
-    bustRing.src = ringArt.dataUri;
-    bustRing.dataset.combatantId = combatant.id;
-    bustRing.dataset.badgeNumber = String(assignment.number);
-    bustRing.dataset.badgeColor = assignment.color.id;
-    styled(bustRing, {
-      position: 'absolute',
-      left: `${String(cellLeft + ringInset)}px`,
-      top: `${String(cellTop + ringInset)}px`,
-      width: `${String(CREATURE_BUST_RING_WIDTH_PX)}px`,
-      height: `${String(CREATURE_BUST_RING_HEIGHT_PX)}px`,
-    });
-    layer.append(bustRing);
-
-    const badgeArt = renderCreatureBadgeBitmap(assignment.number, assignment.color.disc, assignment.color.numeralInk);
-    const badge = el('img', 'encounter-creature-badge');
-    badge.alt = '';
-    badge.setAttribute('aria-hidden', 'true');
-    badge.src = badgeArt.dataUri;
-    badge.dataset.combatantId = combatant.id;
-    badge.dataset.badgeNumber = String(assignment.number);
-    badge.dataset.badgeColor = assignment.color.id;
-    badge.dataset.badgeSlot = CREATURE_BADGE_SLOT;
-    badge.dataset.anchorColumn = String(assignment.column);
-    badge.dataset.anchorRow = String(assignment.row);
-    badge.dataset.stackIndex = String(assignment.stackIndex);
-    styled(badge, {
-      position: 'absolute',
-      left: `${String(cellLeft + CREATURE_BADGE_LEFT_PX)}px`,
-      top: `${String(cellTop + CREATURE_BADGE_TOP_PX + assignment.stackIndex * CREATURE_BADGE_STACK_PITCH_PX)}px`,
-      width: `${String(CREATURE_BADGE_WIDTH_PX)}px`,
-      height: `${String(CREATURE_BADGE_HEIGHT_PX)}px`,
-    });
-    layer.append(badge);
   }
   return layer;
 }
@@ -638,21 +963,33 @@ function legendSwatch(entry: LegendEntry): HTMLElement {
     case 'tint':
     case 'glyph':
     case 'hp': {
-      const shape = entry.style === 'plate' ? 'disc'
-        : entry.style === 'plate-dashed' ? 'dashed-disc'
-          : entry.style === 'hp' ? 'hp'
-            : 'square';
+      const shape =
+        entry.style === 'plate'
+          ? 'disc'
+          : entry.style === 'plate-dashed'
+            ? 'dashed-disc'
+            : entry.style === 'hp'
+              ? 'hp'
+              : 'square';
       const rendered = renderChromeSwatchBitmap(entry.swatch, shape);
-      const swatch = el('img', 'encounter-legend-swatch encounter-legend-swatch-bitmap');
+      const swatch = el(
+        'img',
+        'encounter-legend-swatch encounter-legend-swatch-bitmap',
+      );
       swatch.alt = '';
       swatch.setAttribute('aria-hidden', 'true');
       swatch.src = rendered.dataUri;
-      styled(swatch, { width: `${String(rendered.cssWidth)}px`, height: `${String(rendered.cssHeight)}px` });
+      styled(swatch, {
+        width: `${String(rendered.cssWidth)}px`,
+        height: `${String(rendered.cssHeight)}px`,
+      });
       return swatch;
     }
     case 'art': {
       const swatch = el('span', 'encounter-legend-swatch');
-      const layers = [entry.overlay, entry.floor].flatMap((asset) => asset === null ? [] : [starterArtCssUrl(asset)]);
+      const layers = [entry.overlay, entry.floor].flatMap((asset) =>
+        asset === null ? [] : [starterArtCssUrl(asset)],
+      );
       swatch.dataset.floorAssetId = entry.floor;
       if (entry.overlay !== null) swatch.dataset.overlayAssetId = entry.overlay;
       styled(swatch, {
@@ -662,18 +999,44 @@ function legendSwatch(entry: LegendEntry): HTMLElement {
       return swatch;
     }
     case 'mark': {
-      const rendered = renderPixelGlyph(entry.key, entry.glyph.rows, entry.glyph.ink, CHROME_TEXT_SCALE, entry.glyph.outline);
-      const swatch = el('img', 'encounter-legend-swatch encounter-legend-swatch-mark');
+      const rendered = renderPixelGlyph(
+        entry.key,
+        entry.glyph.rows,
+        entry.glyph.ink,
+        CHROME_TEXT_SCALE,
+        entry.glyph.outline,
+      );
+      const swatch = el(
+        'img',
+        'encounter-legend-swatch encounter-legend-swatch-mark',
+      );
       swatch.alt = '';
       swatch.setAttribute('aria-hidden', 'true');
       swatch.src = rendered.dataUri;
-      styled(swatch, { width: `${String(rendered.cssWidth)}px`, height: `${String(rendered.cssHeight)}px` });
+      styled(swatch, {
+        width: `${String(rendered.cssWidth)}px`,
+        height: `${String(rendered.cssHeight)}px`,
+        ...(entry.overlay === undefined
+          ? {}
+          : {
+              'background-image': [
+                starterArtCssUrl(entry.overlay),
+                starterArtCssUrl(entry.floor ?? STONE_FLOOR_SET_ID),
+              ].join(','),
+              'background-size': `${String(rendered.cssWidth)}px ${String(rendered.cssHeight)}px`,
+            }),
+      });
+      if (entry.overlay !== undefined)
+        swatch.dataset.overlayAssetId = entry.overlay;
+      if (entry.floor !== undefined) swatch.dataset.floorAssetId = entry.floor;
       return swatch;
     }
   }
 }
 
-type ProjectedWorldObjects = NonNullable<EncounterBoardProjectionShape['worldObjects']>;
+type ProjectedWorldObjects = NonNullable<
+  EncounterBoardProjectionShape['worldObjects']
+>;
 
 export type BoardRailEntry =
   | {
@@ -693,11 +1056,19 @@ export type BoardRailEntry =
     };
 
 /** A closed discriminator chooses both the rail wording and its visual frame. */
-export function boardRailEntries(objects: ProjectedWorldObjects): readonly BoardRailEntry[] {
+export function boardRailEntries(
+  objects: ProjectedWorldObjects,
+): readonly BoardRailEntry[] {
   return objects.map((object): BoardRailEntry => {
     const coordinate = `(${String(object.position.column)},${String(object.position.row)})`;
     if (object.kind !== 'door') {
-      return { kind: 'object', object, labelStyle: OBJECT_LABEL_STYLE, label: `${object.name} ${coordinate}`, glyph: OBJECT_GLYPH };
+      return {
+        kind: 'object',
+        object,
+        labelStyle: OBJECT_LABEL_STYLE,
+        label: `${object.name} ${coordinate}`,
+        glyph: OBJECT_GLYPH,
+      };
     }
     const state = object.blocking.movement ? 'closed' : 'open';
     return {
@@ -723,20 +1094,40 @@ function objectTagRail(objects: ProjectedWorldObjects): HTMLElement {
     tag.dataset.anchorRow = String(entry.object.position.row);
     if (entry.kind === 'door') tag.dataset.doorState = entry.state;
     const sigil = renderPixelGlyph(
-      entry.kind, entry.glyph.rows, entry.glyph.ink, CHROME_TEXT_SCALE, entry.glyph.outline,
+      entry.kind,
+      entry.glyph.rows,
+      entry.glyph.ink,
+      CHROME_TEXT_SCALE,
+      entry.glyph.outline,
     );
-    const sigilImage = el('img', `encounter-board-tag-sigil encounter-${entry.kind}-tag-sigil`);
+    const sigilImage = el(
+      'img',
+      `encounter-board-tag-sigil encounter-${entry.kind}-tag-sigil`,
+    );
     sigilImage.alt = '';
     sigilImage.setAttribute('aria-hidden', 'true');
     sigilImage.src = sigil.dataUri;
-    styled(sigilImage, { width: `${String(sigil.cssWidth)}px`, height: `${String(sigil.cssHeight)}px` });
-    const label = renderPixelText(layoutPixelText(entry.label, 2), TEXT_INK, CHROME_TEXT_SCALE);
-    const labelImage = el('img', `encounter-board-tag-text encounter-${entry.kind}-tag-text`);
+    styled(sigilImage, {
+      width: `${String(sigil.cssWidth)}px`,
+      height: `${String(sigil.cssHeight)}px`,
+    });
+    const label = renderPixelText(
+      layoutPixelText(entry.label, 2),
+      TEXT_INK,
+      CHROME_TEXT_SCALE,
+    );
+    const labelImage = el(
+      'img',
+      `encounter-board-tag-text encounter-${entry.kind}-tag-text`,
+    );
     labelImage.alt = '';
     labelImage.setAttribute('aria-hidden', 'true');
     labelImage.src = label.dataUri;
     labelImage.dataset.fullLabel = entry.label;
-    styled(labelImage, { width: `${String(label.cssWidth)}px`, height: `${String(label.cssHeight)}px` });
+    styled(labelImage, {
+      width: `${String(label.cssWidth)}px`,
+      height: `${String(label.cssHeight)}px`,
+    });
     tag.append(sigilImage, labelImage);
     rail.append(tag);
   }
@@ -754,16 +1145,25 @@ function pixelImage(
   image.alt = '';
   image.setAttribute('aria-hidden', 'true');
   image.src = rendered.dataUri;
-  styled(image, { width: `${String(rendered.cssWidth)}px`, height: `${String(rendered.cssHeight)}px` });
+  styled(image, {
+    width: `${String(rendered.cssWidth)}px`,
+    height: `${String(rendered.cssHeight)}px`,
+  });
   return image;
 }
 
-export function hpBandLabel(band: HpBand): 'UNINJURED' | 'BLOODIED' | 'NEAR DEATH' | 'UNKNOWN' {
+export function hpBandLabel(
+  band: HpBand,
+): 'UNINJURED' | 'BLOODIED' | 'NEAR DEATH' | 'UNKNOWN' {
   switch (band) {
-    case 'uninjured': return 'UNINJURED';
-    case 'bloodied': return 'BLOODIED';
-    case 'near_death': return 'NEAR DEATH';
-    case 'unknown': return 'UNKNOWN';
+    case 'uninjured':
+      return 'UNINJURED';
+    case 'bloodied':
+      return 'BLOODIED';
+    case 'near_death':
+      return 'NEAR DEATH';
+    case 'unknown':
+      return 'UNKNOWN';
   }
 }
 
@@ -773,11 +1173,16 @@ function rosterBox(
 ): HTMLElement {
   const box = el('section', 'encounter-roster-box');
   box.dataset.creatureRoster = 'badge-name-cell-side-hp';
-  box.append(textImage('ROSTER', TEXT_INK, 'encounter-roster-title'));
+  box.append(
+    textImage('ROSTER', ROSTER_WORD_INKS.title, 'encounter-roster-title'),
+  );
   const assignments = assignCreatureBadges(combatants);
   combatants.forEach((combatant, index) => {
     const assignment = assignments[index];
-    if (assignment === undefined) throw new Error(`Combatant ${String(combatant.id)} lost its roster assignment.`);
+    if (assignment === undefined)
+      throw new Error(
+        `Combatant ${String(combatant.id)} lost its roster assignment.`,
+      );
     const band = hpBandOf(combatant.hitPointBand);
     const row = el('div', 'encounter-roster-entry');
     row.dataset.combatantId = combatant.id;
@@ -790,28 +1195,54 @@ function rosterBox(
     row.dataset.labelStyle = CREATURE_LABEL_STYLE;
     row.dataset.side = combatant.kind === 'player_character' ? 'party' : 'foe';
     row.dataset.hpBand = band;
-    const badgeArt = renderCreatureBadgeBitmap(assignment.number, assignment.color.disc, assignment.color.numeralInk);
+    const badgeArt = renderCreatureBadgeBitmap(
+      assignment.number,
+      assignment.color.disc,
+      assignment.color.numeralInk,
+    );
     const badge = el('img', 'encounter-roster-badge');
     badge.alt = '';
     badge.setAttribute('aria-hidden', 'true');
     badge.src = badgeArt.dataUri;
     badge.dataset.badgeNumber = String(assignment.number);
     badge.dataset.badgeColor = assignment.color.id;
-    styled(badge, { width: `${String(badgeArt.cssWidth)}px`, height: `${String(badgeArt.cssHeight)}px` });
-    const name = pixelImage(layoutRosterName(combatant.name), TEXT_INK, 'encounter-roster-name');
+    styled(badge, {
+      width: `${String(badgeArt.cssWidth)}px`,
+      height: `${String(badgeArt.cssHeight)}px`,
+    });
+    const name = pixelImage(
+      layoutRosterName(combatant.name),
+      ROSTER_WORD_INKS.name,
+      'encounter-roster-name',
+    );
     name.dataset.fullName = combatant.name;
     const coordinateText = `(${String(combatant.position.column)},${String(combatant.position.row)})`;
-    const coordinate = pixelImage(layoutPixelText(coordinateText, 1), COORDINATE_INK, 'encounter-roster-coordinate');
+    const coordinate = pixelImage(
+      layoutPixelText(coordinateText, 1),
+      ROSTER_WORD_INKS.coordinate,
+      'encounter-roster-coordinate',
+    );
     coordinate.dataset.coordinate = coordinateText;
     const side = pixelImage(
-      layoutPixelText(combatant.kind === 'player_character' ? 'PARTY' : 'FOE', 1),
-      TEXT_INK,
+      layoutPixelText(
+        combatant.kind === 'player_character' ? 'PARTY' : 'FOE',
+        1,
+      ),
+      ROSTER_WORD_INKS.side,
       'encounter-roster-side',
     );
-    const hp = pixelImage(layoutPixelText(hpBandLabel(band), 1), HP_BAND_INK[band], 'encounter-roster-hp');
+    const hp = pixelImage(
+      layoutPixelText(hpBandLabel(band), 1),
+      HP_BAND_INK[band],
+      'encounter-roster-hp',
+    );
     row.append(badge, name, coordinate, side, hp);
     if (combatant.hiddenFromPlayers === true) {
-      const hidden = pixelImage(layoutPixelText(HIDDEN_GLYPH_LABEL, 1), HIDDEN_TAG_INK, 'encounter-roster-hidden');
+      const hidden = pixelImage(
+        layoutPixelText(HIDDEN_GLYPH_LABEL, 1),
+        ROSTER_WORD_INKS.hidden,
+        'encounter-roster-hidden',
+      );
       hidden.dataset.tag = HIDDEN_GLYPH_LABEL;
       row.append(hidden);
     }
@@ -841,9 +1272,15 @@ function legend(
     'margin-top': `${String(LEGEND_GAP_PX)}px`,
   });
   for (const entry of entries) {
-    const item = el('span', `encounter-legend-item encounter-legend-${entry.style}`);
+    const item = el(
+      'span',
+      `encounter-legend-item encounter-legend-${entry.style}`,
+    );
     item.dataset.legendKey = entry.key;
-    item.append(legendSwatch(entry), textImage(entry.label, TEXT_INK, 'encounter-legend-text'));
+    item.append(
+      legendSwatch(entry),
+      textImage(entry.label, TEXT_INK, 'encounter-legend-text'),
+    );
     box.append(item);
   }
   box.append(rosterBox(combatants, mode));
@@ -870,11 +1307,16 @@ export function renderBoardChrome(
   board.style.setProperty('--encounter-rows', String(projection.bounds.rows));
   const roomDefault = roomDefaultLightOf(projection);
   const presence = boardGlyphPresence(cells, projection.combatants);
-  const doorCells = new Set(cells
-    .filter((cell) => cell.glyphs.some((glyph) => CELL_GLYPHS[glyph.kind].family === 'door'))
-    .map((cell) => cell.key));
+  const doorCells = new Set(
+    cells
+      .filter((cell) =>
+        cell.glyphs.some((glyph) => CELL_GLYPHS[glyph.kind].family === 'door'),
+      )
+      .map((cell) => cell.key),
+  );
   board.append(
     coordinateLabels(projection.bounds),
+    tokenIdentityUnderlay(projection.combatants, projection.bounds),
     tokenChrome(projection.combatants, projection.bounds, mode, doorCells),
     legend(
       legendEntriesFor(mode, roomDefault, presence),

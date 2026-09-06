@@ -8,94 +8,182 @@ export const STARTER_ART_OUTPUT_SHA256: {
   readonly fixedInputs: string;
   readonly outputs: Readonly<Record<string, string>>;
 } = Object.freeze({
-  fixedInputs: '8649f9165fc76812a931af6e428bacb004caea4d8b70417ff86f3b7bcdc83a97',
+  fixedInputs:
+    '8649f9165fc76812a931af6e428bacb004caea4d8b70417ff86f3b7bcdc83a97',
   outputs: Object.freeze({
-    'art.token.pc.fighter.v1': 'bdd9b065448f13076cc0259874d07821054fe21fa1ff38ff1386cf553c84111b',
-    'art.token.pc.cleric.v1': 'b0db2badb1867219c645b28240c7baae04f3537325eb9d90db49dfc3ab0fc38b',
-    'art.token.pc.wizard.v1': 'f61fa9ef35e6a881e9fe6e59765bd26c88b94e99006017d1068a6ea2b3ab3ce0',
-    'art.token.pc.rogue.v1': '5a12f03fd7977bee28c80fa809c484e649731eebd18e02dea70a138b99748247',
-    'art.token.monster.goblin-warrior.v1': '51c87d3364654fc6498faeea5857b28dedd812db5e62875bfd8bce01ee928d81',
-    'art.token.monster.hobgoblin-warrior.v1': '3ca2668826f0576812824189d2bc99f508bec2bbd7a7c526a58f5337a90b2a36',
-    'art.token.monster.bandit-captain.v1': '3ca2668826f0576812824189d2bc99f508bec2bbd7a7c526a58f5337a90b2a36',
-    'art.token.monster.ogre.v1': '51c87d3364654fc6498faeea5857b28dedd812db5e62875bfd8bce01ee928d81',
-    'art.token.monster.priest-acolyte.v1': 'a76cdd587fba148cfa1d57f076eebef9d915453b4383402c04c6e9f8b5e175d0',
-    'art.token.monster.priest.v1': 'a76cdd587fba148cfa1d57f076eebef9d915453b4383402c04c6e9f8b5e175d0',
-    'art.token.monster.skeleton.v1': 'c6d850c0634fc564916c8f3429ccb1d48d48ca6f0ab2ad9f7ae6be51932d21ff',
-    'art.token.monster.zombie.v1': 'c6d850c0634fc564916c8f3429ccb1d48d48ca6f0ab2ad9f7ae6be51932d21ff',
-    'art.token.monster.wolf.v1': 'f466881796158c2cbaddf2f3568f6afa3db187c21667ae2a7d3e2c89e9241859',
-    'art.token.party.fighter.v1': 'bdd9b065448f13076cc0259874d07821054fe21fa1ff38ff1386cf553c84111b',
-    'art.token.party.wizard.v1': 'f61fa9ef35e6a881e9fe6e59765bd26c88b94e99006017d1068a6ea2b3ab3ce0',
-    'art.token.party.cleric.v1': 'b0db2badb1867219c645b28240c7baae04f3537325eb9d90db49dfc3ab0fc38b',
-    'art.token.party.rogue.v1': '5a12f03fd7977bee28c80fa809c484e649731eebd18e02dea70a138b99748247',
-    'art.token.party.ranger.v1': '62011e9234aabce3e9e08b2c523f69b0ea27e40d7c11fd18521fb2f601df2471',
-    'art.token.party.brute.v1': 'a76ef032ee99129bfdc8f7f174961f5b61ef5abe77c712cd14c42f8c0570a005',
-    'art.token.party.beast.v1': '358fe40b23361c4e1a6f9992ad28ea1e3f84a024eb3405ad134c9e77d44df25d',
-    'art.token.party.undead.v1': 'd649c4a3f42d70bbe749b1027a2e9082fe3cc805328074b3a7ce31c25cc6f9f7',
-    'art.token.party.fiend.v1': 'c21a0894d8f771fb88968cd75e6478fafab1462919d4c4bf18555ad0316cdd26',
-    'art.token.party.ooze.v1': 'dad94ef30eb55f18ae772178d6dabfe0763592e8192bfe38b53071b534b9697d',
-    'art.token.party.construct.v1': 'ba17a5d785b06f2ff0a76c2131d00b73c9e3558a61e337da0f4b6eb8f50b792f',
-    'art.token.foe.fighter.v1': '3ca2668826f0576812824189d2bc99f508bec2bbd7a7c526a58f5337a90b2a36',
-    'art.token.foe.wizard.v1': 'b6aa2ec9b9d6b1f38778916c1d1d4c421f765cadbb2723930671f29f6e8bc07f',
-    'art.token.foe.cleric.v1': 'a76cdd587fba148cfa1d57f076eebef9d915453b4383402c04c6e9f8b5e175d0',
-    'art.token.foe.rogue.v1': '7dd3f380f86e7daf399bb59732d1244d5f297037513bb1cb15781163a29b1ced',
-    'art.token.foe.ranger.v1': '6b1a3714be42c5b72d4ae6058499d78ad991db74eb51fdf110d97c6487c85bbb',
-    'art.token.foe.brute.v1': '51c87d3364654fc6498faeea5857b28dedd812db5e62875bfd8bce01ee928d81',
-    'art.token.foe.beast.v1': 'f466881796158c2cbaddf2f3568f6afa3db187c21667ae2a7d3e2c89e9241859',
-    'art.token.foe.undead.v1': 'c6d850c0634fc564916c8f3429ccb1d48d48ca6f0ab2ad9f7ae6be51932d21ff',
-    'art.token.foe.fiend.v1': 'c0e22c8ec8776dafdd2a28e9db31756ed11ad0de1bc2fb6e67680fe7e56c21c2',
-    'art.token.foe.ooze.v1': 'bbf4d452d7e4373745ad51684820452d3096e89af3359ed8fad41a69e1a18919',
-    'art.token.foe.construct.v1': '62e260324b2b9f057ee4131b53c285e2b95a40041b5287ebe4b40812996db3b5',
-    'art.token.dead.v1': '9f986fbd40fb8e1ea6a0b746daf711e70d535468881183c52b1617abe4e0bb89',
-    'art.map.floor.stone.v1': '71a2942d7bd504983e8be62186ad1737485af2045e23c71b43d7e1a36ac72329',
-    'art.map.floor.stone-1.v1': '88868d6427d8c611b8ab86f2732ad83ffa5e3433ed6d4d120a58886abd4e571e',
-    'art.map.floor.stone-2.v1': '60625d9334cc602ebc8c33cf1a35f05de76c6820a3c68692b4ccb6e4c3543ad7',
-    'art.map.floor.stone-3.v1': 'bf559d7e1cad2164d339aaa79dd81652a76f975e1c9ee4e6d3751ce9d00f40af',
-    'art.map.wall.stone.v1': '2920f5aca93ad1ea68b94af9813d263794fe4d7b004c595dbd625a82895fc888',
-    'art.map.wall.stone-s.v1': 'ca24ff0aa786875ca6e3f5a43cfb9983ac23f0bc8b7e9dc5bd4912cd9f00c2e1',
-    'art.map.wall.stone-w.v1': 'ea5c0a0746e2f95e39f2a2764d19430a14a74e542616523fe518f8698cfe007f',
-    'art.map.wall.stone-e.v1': 'a02d9a3f2c9434860974efb9beb5804f1cca7333dbde2b8f88092bd54e33151e',
-    'art.map.wall.stone-nw.v1': 'fa969c787bfeb6f65676659e38c041a3317ac1b4104009be4725e60ea015c47d',
-    'art.map.wall.stone-ne.v1': '9d16970097c805ee832742df87f88533c9113149123898276e9faa0745159cc0',
-    'art.map.wall.stone-sw.v1': '124d59501f41362adf37edd07e3abdf3ef15ebafd5b9db7fbac737061bade10d',
-    'art.map.wall.stone-se.v1': '393f65df884bdbdc8a3dd3cdc3c082bb7caf89b981cfcb6a8c004ce0a94beb22',
-    'art.map.door.wood.v1': 'e0e21b587770f6016c65450f2f2ae6da26744515372931f1af2d2dcc80342a6f',
-    'art.map.door.wood-s.v1': '28efb1b665a1e41453fd7d3afd585029fcb9c80e928c9068b4fcdef7d0ad732c',
-    'art.map.door.wood-w.v1': 'e41a30e0c3bf3fcf15ac59bf67bda37761b7f4c8234c9d274248cabac5b60325',
-    'art.map.door.wood-e.v1': '4fa945596cbc05af775e5ba5ec65b8419596e45de27a2ef98588fa673886b389',
-    'art.map.door.wood-open-n.v1': '46d69c43fe8def5dbb0cd50ad1cc171c7b295ef96e98e77a6ea4deba4079f810',
-    'art.map.door.wood-open-s.v1': '29d828a25a0964c655c58ffa84b3f98b5f29eba6d5e18ad1efdb86ea7ce3ddb7',
-    'art.map.door.wood-open-w.v1': 'd0213f80300d5103dc7946c41a8ec92438dc544707433fd0c9f43619ec576b29',
-    'art.map.door.wood-open-e.v1': '4d018e3f6ff6eac8c514ca3d27b850cb0494ce7d531666ef3d7860ded650902b',
-    'art.map.shade.n.v1': '09e8182832ec447ea30ece5111275ab37830fadb0999a5304c372a3c860ee38d',
-    'art.map.shade.s.v1': 'ccaeb74cf005d950a60486363da7fa3f5678d640ea20b7f272ec4fc28929a1ed',
-    'art.map.shade.w.v1': '10e8f27b751b6f7544c2e124055e75029e7315ca212f10d48a7533f111b91900',
-    'art.map.shade.e.v1': 'c56da5e1f8084e00c8331efe56e56d5c29830dc2c08ed9f41630b8ded3814aaf',
-    'art.map.overlay.difficult.v1': 'c359f9761d3c143a9ad59074659a37e1e23f18e153d7036b3b8471df768100dd',
-    'art.map.overlay.obscurement-light.v1': '5094e490e219e12505fddd6a1fc70a47efed89de8eaea21e702b0b2239ae37ca',
-    'art.map.overlay.obscurement-heavy.v1': 'b4add9ae905389b1dee98575b1670a43a85ff52fae45ca4f75077c312351d032',
-    'art.map.overlay.magical-darkness.v1': '18826a590a87b7244b22ab9b67e725d4291caec9499dc7e17e1b4fe109af9af0',
-    'art.map.overlay.light-bright.v1': 'c1b584656185cc78ce3e11398fb4be61ccd8e74c6480cf6108e23c3ec24f9948',
-    'art.map.overlay.light-dim.v1': 'caa4a45296607dc8735d77d4eb0683ff5ea1cc13b2bd5a09892fb615e4571a57',
-    'art.map.overlay.light-darkness.v1': 'd5bcc7c2f3489f6d5469cefb72cf776649595aa1626426ad5e56871d1668fd7c',
-    'art.map.overlay.blocked.v1': '4d04478a77ae538b7059912975515c315125ecee69252645d635789b05eb2f54',
-    'art.map.overlay.light-source.v1': 'c7d9abf3e1369eb509dcd29865e7413d487a1f645a106af61cc04ff915f97766',
-    'art.map.overlay.light-glyph-bright.v1': '889a8e0db7b3e38cc2c3789b7cc0192a6c0ab025a6c32e23ba6b16ebf10e6264',
-    'art.map.overlay.light-glyph-dim.v1': '98b627911ff53087ba2f485909fd2255721aa2dececeee23b3ea2b8d277659b6',
-    'art.map.overlay.light-glyph-dark.v1': '88edf65ebf73d0c72182d38e675e696ab851b00db00bba319406d2b09da1f972',
-    'art.map.overlay.glyph-door-closed.v1': '4ddb7ae4860e27239edfaec15f5e2bec3e202c7ec3e9530ec4359603169bc3ec',
-    'art.map.overlay.glyph-door-open.v1': 'f9508e99ea9e0a21c2742ea5d5c3e6e9ed09f59e1f1f9aaadbce572df629194f',
-    'art.map.overlay.glyph-blocked.v1': 'f0827d84d891463dc5253b496c06df09c15d5c180ce47fdfd9784c6f73502708',
-    'art.map.overlay.glyph-fog.v1': 'a4c792f767775bfc472dfc0f527a306bec32d4be2c3338de239335e906628a59',
-    'art.map.overlay.glyph-obscured.v1': '6917ec378bae8c1cb2e29d0a0d843b5fa80c1bbed6461ca8626f8df1190980c5',
-    'art.terrain.rubble.v1': '6e37d742c752bc6d809ea100e9a5f1608c6c29c89d1ffa936d22333e4496ab42',
-    'art.terrain.crate.v1': '133a91645bd06a3d53a996244da519715ebd846750a72ed5f9ee632ecd01974d',
-    'art.terrain.pillar.v1': '662e31d41a7106bfae856426f5d2a0e71977a5add8639ff39d626c30fd351795',
-    'art.terrain.hazard.v1': '70e197152c73631fe98d9f904d797def8e9d80f843c7a88b278afdfe47f3dcf2',
-    'art.fog.hidden.v1': '6f4ad6577896274df2ef43bc6a2c24f364e41891e01fb1b8b24d0cda201ba6b0',
-    'art.fog.unexplored.v1': 'e9ae1694c16574d95cd9ef6ad3e8fb472d589dabfadb6fc802959f9330d69236',
-    'art.fog.revealed.v1': 'd6ddc84737bba1dd5b0e888fde7de939aa7c863a2de2c2345697e315c7fa6183',
-    'art.focus.active-pc.v1': '629c92942a90ff66ef850e6d611c366f49d24cae6ec2984baa794059aaa05291',
-    'art.focus.hidden.v1': 'dc7911da16f99abb80bda77c28d6c0c30b5412278965725a1b33a1982894a847',
-    'art.event.adjudicated.v1': '9ab196fbb4fdaf18a9970a2e929928f58b1b43e0fcbbac8b98edabad83210acc',
+    'art.token.pc.fighter.v1':
+      'dc30524f1eb607bd011543c93816baec840a2efa93b3a39b2241076d5480c23a',
+    'art.token.pc.cleric.v1':
+      '20f673faa6bffcb50dd6b42813603ef5bc10397c9ffd29a4e2cdf05d17952a0b',
+    'art.token.pc.wizard.v1':
+      '4bd16e8cfb7cc7bf99b11c8655f5850d568466d1679bb6695d274e0cb2a67885',
+    'art.token.pc.rogue.v1':
+      'f142db5d7637f85b93723a62e21b2f0e2afc62de74ab8f475fb2072ba97e62e4',
+    'art.token.monster.goblin-warrior.v1':
+      'ba31b1dba5b012055a3ae47a42bba71c392f057566551a27b516359537bd3fd2',
+    'art.token.monster.hobgoblin-warrior.v1':
+      '0d8f7991d741f3fb3ff3f1487145538c5d04900a09a2d8dcddf21daa456ab51b',
+    'art.token.monster.bandit-captain.v1':
+      '0d8f7991d741f3fb3ff3f1487145538c5d04900a09a2d8dcddf21daa456ab51b',
+    'art.token.monster.ogre.v1':
+      'ba31b1dba5b012055a3ae47a42bba71c392f057566551a27b516359537bd3fd2',
+    'art.token.monster.priest-acolyte.v1':
+      'e677d5a13b2bcf453b382002d1a092516f7e1615a258fa2811c9848db5b7a388',
+    'art.token.monster.priest.v1':
+      'e677d5a13b2bcf453b382002d1a092516f7e1615a258fa2811c9848db5b7a388',
+    'art.token.monster.skeleton.v1':
+      '04f8a49cb8e110ed36e6caff9b64180d0b3e0ca963ea23d575f63b35f27c3202',
+    'art.token.monster.zombie.v1':
+      '04f8a49cb8e110ed36e6caff9b64180d0b3e0ca963ea23d575f63b35f27c3202',
+    'art.token.monster.wolf.v1':
+      'c497357eccf185387aab6260ce6619bb1c6b1e163386b5ed7fdc6d3f91bb5717',
+    'art.token.party.fighter.v1':
+      'dc30524f1eb607bd011543c93816baec840a2efa93b3a39b2241076d5480c23a',
+    'art.token.party.wizard.v1':
+      '4bd16e8cfb7cc7bf99b11c8655f5850d568466d1679bb6695d274e0cb2a67885',
+    'art.token.party.cleric.v1':
+      '20f673faa6bffcb50dd6b42813603ef5bc10397c9ffd29a4e2cdf05d17952a0b',
+    'art.token.party.rogue.v1':
+      'f142db5d7637f85b93723a62e21b2f0e2afc62de74ab8f475fb2072ba97e62e4',
+    'art.token.party.ranger.v1':
+      'f14cb8a9d1994305446e3ab2c3232f817c05a88541583113b9dd70d1bfd04064',
+    'art.token.party.brute.v1':
+      'd835b325abb7ffe2d1911de8ef8543fc94bb66c83677c52a9aefc93f922a2f1a',
+    'art.token.party.beast.v1':
+      '5525c397186a15d36ee718e849deac5855f42853520f155bfaf644ddf3754962',
+    'art.token.party.undead.v1':
+      'df68d6495a7240a5d9c902540542e8e29dade1ae0b6de21d6b4266fbea313cdf',
+    'art.token.party.fiend.v1':
+      '8e8b397ee7a6f466445b94efe60f8bebcbcc944bba8c1f1cf8594331de6ba541',
+    'art.token.party.ooze.v1':
+      'a51c76a561d0fa61371806b5ed7dd52025fad4ed0beca26e06e994fe88d916ad',
+    'art.token.party.construct.v1':
+      'ebf612cb7df2b2b38ed68e6fbc0addd601826905c890c8c8c6820302d53acbac',
+    'art.token.foe.fighter.v1':
+      '0d8f7991d741f3fb3ff3f1487145538c5d04900a09a2d8dcddf21daa456ab51b',
+    'art.token.foe.wizard.v1':
+      '7d01fea311072716f66d2b0303def98852f4ad6d8976c23e258b9c7b8193af3d',
+    'art.token.foe.cleric.v1':
+      'e677d5a13b2bcf453b382002d1a092516f7e1615a258fa2811c9848db5b7a388',
+    'art.token.foe.rogue.v1':
+      'dec0eae1a8cff5a6f23b4539094b221a6d922c859999d407dff209c3eb3a63b6',
+    'art.token.foe.ranger.v1':
+      'bdeef9fd60bd8f7bd3372df407ba3606b2d2bcf2e5fc1b94178248b87774fa7e',
+    'art.token.foe.brute.v1':
+      'ba31b1dba5b012055a3ae47a42bba71c392f057566551a27b516359537bd3fd2',
+    'art.token.foe.beast.v1':
+      'c497357eccf185387aab6260ce6619bb1c6b1e163386b5ed7fdc6d3f91bb5717',
+    'art.token.foe.undead.v1':
+      '04f8a49cb8e110ed36e6caff9b64180d0b3e0ca963ea23d575f63b35f27c3202',
+    'art.token.foe.fiend.v1':
+      'b55b71cd075cacae670a2058baa0f2fff4f315f28c44e6219ad41c073c0e8386',
+    'art.token.foe.ooze.v1':
+      '8ea75a293f273894ea14cf04683629780362a557509bce381a0e5a0337ce9ff5',
+    'art.token.foe.construct.v1':
+      '6f524289f256ed3bc460b71d9b8f50154ed8ed87f86657e023caa444b10d739a',
+    'art.token.dead.v1':
+      '9f986fbd40fb8e1ea6a0b746daf711e70d535468881183c52b1617abe4e0bb89',
+    'art.map.floor.stone.v1':
+      '4c3c3ab26ae5a3dc7cffd7e60afa6d439a9622cfacb88ea99a1fd9e9e280c082',
+    'art.map.floor.stone-1.v1':
+      '1d579c93d589c9d40b288421c626fd9aac430cc41f5c53d74be46a9a31a918a2',
+    'art.map.floor.stone-2.v1':
+      '0b8b0be67271f5099b0e9e687119b58d4a8be2be807f35108f4a352bc34e2eac',
+    'art.map.floor.stone-3.v1':
+      '0e16c6e483e11271821488fc6b1b91c270eecee38ba055d295dc5580ad290d30',
+    'art.map.wall.stone.v1':
+      '9db9718056d3e5c3337a5119cace46209aff5d51e2002fdaf2214ec970fa1764',
+    'art.map.wall.stone-s.v1':
+      '0c6cb89176ba324a0e1025f5973bf16fafed2f9304b0c9a0773b69ed4ddda6cb',
+    'art.map.wall.stone-w.v1':
+      '7446cfe4c7481f1c2bd5d9f0be5bdb75d6144a656968fd6e2f50b644b7d77303',
+    'art.map.wall.stone-e.v1':
+      '8dddbe850aecddd8153f7caf50e699ddf7b7c48a7e8dea45a73d19c9ced79f06',
+    'art.map.wall.stone-nw.v1':
+      'fe9c380cbdc4f985d1559991713bd8ca2a01b6097777f25e17949dcec1d1d92a',
+    'art.map.wall.stone-ne.v1':
+      '56200b6107b3071d9de984b5cfd1ec556eed8e61fea8e096e17e242ba5b0c400',
+    'art.map.wall.stone-sw.v1':
+      'c6f4e80abc94b0e44ceb63b83081062ccfd2c5cdcc8ad5cdaa1f97a67c0ca2fa',
+    'art.map.wall.stone-se.v1':
+      '92dadc36e660a8a5621020a909d4de89857814adac76374150447266fbbf061e',
+    'art.map.door.wood.v1':
+      '23bc2ce561321fb91d41772cfc92d3f9fe4ff15b75fbb7c92e9764ae005a7e97',
+    'art.map.door.wood-s.v1':
+      '333be1360ef50667ffc3c48026a8ec913c06d2d4feac15652f0c08e029d7b0d4',
+    'art.map.door.wood-w.v1':
+      'c8ba145834c553543ffa9573e11ae801b93fc3ba998248923e9c5144db416f52',
+    'art.map.door.wood-e.v1':
+      '8c7c002778f60836952df86b65fffecd62931d21b3f014a603b340630235fa6f',
+    'art.map.door.wood-open-n.v1':
+      '4b862c85bf3eed1d3355e5f0db27d71c71668aa78c27cdebb1c9df6ecf075da4',
+    'art.map.door.wood-open-s.v1':
+      '589e9dc81f888eba36a97db70784bfb9aebe9978263d956ec36131d61d72d9d4',
+    'art.map.door.wood-open-w.v1':
+      'f710a2f84f5575fbb296001ee408c9dd45cf728ee90b3cca419eeb0a897ee824',
+    'art.map.door.wood-open-e.v1':
+      '75f460dbf68be9e8704568f233728c0f21b2d6f20104469c1bb4a5efa7089693',
+    'art.map.shade.n.v1':
+      '09e8182832ec447ea30ece5111275ab37830fadb0999a5304c372a3c860ee38d',
+    'art.map.shade.s.v1':
+      'ccaeb74cf005d950a60486363da7fa3f5678d640ea20b7f272ec4fc28929a1ed',
+    'art.map.shade.w.v1':
+      '10e8f27b751b6f7544c2e124055e75029e7315ca212f10d48a7533f111b91900',
+    'art.map.shade.e.v1':
+      'c56da5e1f8084e00c8331efe56e56d5c29830dc2c08ed9f41630b8ded3814aaf',
+    'art.map.overlay.difficult.v1':
+      '20818957d179ad680cc43e7138782cfe5946efed51c9919ad25831e83f571d17',
+    'art.map.overlay.obscurement-light.v1':
+      '5094e490e219e12505fddd6a1fc70a47efed89de8eaea21e702b0b2239ae37ca',
+    'art.map.overlay.obscurement-heavy.v1':
+      'b4add9ae905389b1dee98575b1670a43a85ff52fae45ca4f75077c312351d032',
+    'art.map.overlay.magical-darkness.v1':
+      '18826a590a87b7244b22ab9b67e725d4291caec9499dc7e17e1b4fe109af9af0',
+    'art.map.overlay.light-bright.v1':
+      'c1b584656185cc78ce3e11398fb4be61ccd8e74c6480cf6108e23c3ec24f9948',
+    'art.map.overlay.light-dim.v1':
+      'caa4a45296607dc8735d77d4eb0683ff5ea1cc13b2bd5a09892fb615e4571a57',
+    'art.map.overlay.light-darkness.v1':
+      'd5bcc7c2f3489f6d5469cefb72cf776649595aa1626426ad5e56871d1668fd7c',
+    'art.map.overlay.blocked.v1':
+      '951066b265ecb35a2763ed08ca44db768a26527d0b193dc156c1c7c321ebd6b6',
+    'art.map.overlay.light-source.v1':
+      'c7d9abf3e1369eb509dcd29865e7413d487a1f645a106af61cc04ff915f97766',
+    'art.map.overlay.light-glyph-bright.v1':
+      '889a8e0db7b3e38cc2c3789b7cc0192a6c0ab025a6c32e23ba6b16ebf10e6264',
+    'art.map.overlay.light-glyph-dim.v1':
+      '98b627911ff53087ba2f485909fd2255721aa2dececeee23b3ea2b8d277659b6',
+    'art.map.overlay.light-glyph-dark.v1':
+      '88edf65ebf73d0c72182d38e675e696ab851b00db00bba319406d2b09da1f972',
+    'art.map.overlay.glyph-door-closed.v1':
+      '4ddb7ae4860e27239edfaec15f5e2bec3e202c7ec3e9530ec4359603169bc3ec',
+    'art.map.overlay.glyph-door-open.v1':
+      'f9508e99ea9e0a21c2742ea5d5c3e6e9ed09f59e1f1f9aaadbce572df629194f',
+    'art.map.overlay.glyph-blocked.v1':
+      'f0827d84d891463dc5253b496c06df09c15d5c180ce47fdfd9784c6f73502708',
+    'art.map.overlay.glyph-fog.v1':
+      'a4c792f767775bfc472dfc0f527a306bec32d4be2c3338de239335e906628a59',
+    'art.map.overlay.glyph-obscured.v1':
+      '6917ec378bae8c1cb2e29d0a0d843b5fa80c1bbed6461ca8626f8df1190980c5',
+    'art.terrain.rubble.v1':
+      'b77d3b9097b4e3f3c0426b2ab3c3f8d8f20462101e2adb8afdaecb1c8d21e359',
+    'art.terrain.crate.v1':
+      '9a9482774b1c0935a648f00bc03e98e38cbe8788ffb176208df7088b7a718af1',
+    'art.terrain.pillar.v1':
+      '662e31d41a7106bfae856426f5d2a0e71977a5add8639ff39d626c30fd351795',
+    'art.terrain.hazard.v1':
+      '6d08668966a359cc7c47ba57a9f7d529a846a4ec9e11c17ac8a3559bb38cd988',
+    'art.fog.hidden.v1':
+      '6f4ad6577896274df2ef43bc6a2c24f364e41891e01fb1b8b24d0cda201ba6b0',
+    'art.fog.unexplored.v1':
+      'e9ae1694c16574d95cd9ef6ad3e8fb472d589dabfadb6fc802959f9330d69236',
+    'art.fog.revealed.v1':
+      'd6ddc84737bba1dd5b0e888fde7de939aa7c863a2de2c2345697e315c7fa6183',
+    'art.focus.active-pc.v1':
+      '629c92942a90ff66ef850e6d611c366f49d24cae6ec2984baa794059aaa05291',
+    'art.focus.hidden.v1':
+      'dc7911da16f99abb80bda77c28d6c0c30b5412278965725a1b33a1982894a847',
+    'art.event.adjudicated.v1':
+      '9ab196fbb4fdaf18a9970a2e929928f58b1b43e0fcbbac8b98edabad83210acc',
   }),
 });
