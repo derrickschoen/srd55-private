@@ -1,6 +1,7 @@
 import type { AssetId } from '../assets/ids';
 import type { ControllerRequest } from '../combat/controllers';
 import type { EncounterState, InitiativeEntry, LifeState } from '../combat/encounter';
+import { combatantConditions } from '../combat/combat-rules';
 import type { EffectPayload } from '../combat/effects';
 import type { EncounterEvent } from '../combat/events';
 import type { GridCell } from '../combat/grid';
@@ -48,6 +49,8 @@ export interface EncounterBoardCombatant {
   readonly hitPointBand?: ProjectedHitPointKnowledge;
   /** DM projections only: the engine currently treats this combatant as hidden. */
   readonly hiddenFromPlayers?: boolean;
+  /** Active engine conditions; present on the DM projection only. */
+  readonly conditions?: readonly string[];
   /** Sourced creature type when the profile carries one; absent means the profile had none. */
   readonly creatureType?: string;
 }
@@ -509,6 +512,9 @@ export function projectEncounterBoard(
       // ART-SEAM (D516): the DM board carries the prose classifier's band, never a re-derived one.
       hitPointBand: hitPointKnowledge(state, subject),
       hiddenFromPlayers: hidden.has(subject.profile.id),
+      conditions: combatantConditions(state, subject.profile.id)
+        .map((condition) => condition.name)
+        .sort((left, right) => left.localeCompare(right)),
       ...(creatureType === undefined ? {} : { creatureType }),
     }];
   });
