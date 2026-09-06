@@ -11964,3 +11964,15 @@ regenerable (node_modules, .stryker-tmp, .venv-rl 1.3 GB, mutation-shards
 reports of 2026-08-22 whose rerun was pruned from the standing brief), no
 process or lock using it. Removed with git worktree remove --force (7.2 GB
 inside the VM) and deleted the merged branch lane-wt/mutshard.
+
+## Post-reboot relaunches: intel-leak gate and probe r5b (2026-09-06 09:34)
+
+Owner: "there is enough free space now. lets get back to work" (C: 63.4 GB
+free; vhdx still 654 GB, not sparse; sparse-mode fix offered, deferred).
+Intel-leak gate relaunched 09:18 on dnd-wt-intel-leak 3076e3ad (clean
+tree): tsc 0, sg 0, vitest-gate 0 with one LOAD FLAKE passed serially,
+Playwright on port 4630 running since 09:30. Probe r5b relaunched 2026-09-06 09:34 on
+dnd-wt-classic5 4a279a80 after clearing the killed run's empty jsonl and
+4 partial capture dirs (log .tmp/runs/d536-probe24-r5b.log; the 01:24 log
+kept as -VOID-reboot-0158). Same overlap ruling as 01:24: any Playwright
+LOAD FLAKE in the probe's capture window is discarded, never re-pinned.
