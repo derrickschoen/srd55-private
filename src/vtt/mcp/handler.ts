@@ -45,7 +45,7 @@ export type McpToolResultContent = (input: {
   readonly name: string;
   readonly argumentsValue: Readonly<Record<string, unknown>>;
   readonly structuredValue: unknown;
-}) => readonly McpImageContentBlock[];
+}) => readonly McpToolContentBlock[];
 export interface McpResourceDescriptor { readonly uri: string; readonly name: string; readonly description: string; readonly mimeType: 'application/json' }
 export interface McpResourceTemplateDescriptor { readonly uriTemplate: string; readonly name: string; readonly description: string; readonly mimeType: 'application/json' }
 export interface McpResourceContent { readonly uri: string; readonly mimeType: 'application/json'; readonly text: string }
@@ -148,8 +148,11 @@ function toolResult(
   value: unknown,
   maximumBytes: number,
   classic: boolean,
-  images: readonly McpImageContentBlock[],
+  additionalContent: readonly McpToolContentBlock[],
 ): unknown {
+  const images = additionalContent.filter(
+    (block): block is McpImageContentBlock => block.type === 'image',
+  );
   if (images.length > 1) throw new RangeError('MCP tool result may contain at most one image block.');
   const proseDocument = isRecord(value) &&
     (value['format'] === 'caveman_prose' || value['format'] === 'regular_prose') &&
@@ -160,7 +163,7 @@ function toolResult(
   if (text === undefined) throw new TypeError('Tool result is not JSON serializable.');
   const bytes = new TextEncoder().encode(text).byteLength;
   for (const block of images) decodedPng(block);
-  const content: readonly McpToolContentBlock[] = [{ type: 'text', text }, ...images];
+  const content: readonly McpToolContentBlock[] = [{ type: 'text', text }, ...additionalContent];
   const result = bytes > maximumBytes
     ? { isError: true, content: [{ type: 'text', text: `TOOL_RESULT_TOO_LARGE: ${bytes} UTF-8 bytes exceeds the ${maximumBytes}-byte limit.` }] }
     : { content, structuredContent: value, isError: false };

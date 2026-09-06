@@ -596,7 +596,7 @@ export function recordScriptedReferenceSkirmish(
     transcripts: recorder.records(),
     build: { buildId: 'vtt-phase2-increment-10', commit: 'supervisor-owned' },
     protocolVersions: ['dm-bridge:2', 'encounter-package:1', 'vtt-session:2'],
-    licensingVersions: ['SRD-5.2.1-CC-BY-4.0', 'starter-art-CC-BY-4.0'],
+    licensingVersions: ['SRD-5.2.1-CC-BY-4.0', 'generated-art-CC0-1.0'],
     gapReports: [],
   });
   return {

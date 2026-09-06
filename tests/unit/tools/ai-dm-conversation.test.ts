@@ -1069,7 +1069,7 @@ describe('AI-DM engine MCP conversation runner', () => {
         teamScorer: 'team-scorer-v1',
         correction: 'dominance-correction-v1',
         materialityContext: 'materiality-context-v1',
-        actorKnowledge: 'actor-knowledge-v3',
+        actorKnowledge: 'actor-knowledge-last-seen-v4',
         reactionSpendHold: 'reaction-spend-hold-v1',
         legendaryWindows: 'legendary-windows-v2',
         recoveryCapability: 'recovery-capability-v2',
@@ -1128,17 +1128,17 @@ describe('AI-DM engine MCP conversation runner', () => {
     ];
     expect(capturedActorKnowledge).toEqual([
       {
-        policy: 'actor-knowledge-v3',
+        policy: 'actor-knowledge-last-seen-v4',
         actorId: 'combatant:generated-3943001-monster-1',
         targets: projectedTargets([70, 75, 75]),
       },
       {
-        policy: 'actor-knowledge-v3',
+        policy: 'actor-knowledge-last-seen-v4',
         actorId: 'combatant:generated-3943001-monster-2',
         targets: projectedTargets([65, 70, 70]),
       },
       {
-        policy: 'actor-knowledge-v3',
+        policy: 'actor-knowledge-last-seen-v4',
         actorId: 'combatant:generated-3943001-monster-3',
         targets: projectedTargets([70, 75, 75]),
       },
@@ -1377,7 +1377,7 @@ describe('AI-DM engine MCP conversation runner', () => {
     expect(exportSavedSession(store, sessionId)).toBe(result.journalExport);
   });
 
-  it('runs a three-room three-round model-free brutal smoke with the stub adapter', { timeout: 120_000 }, async () => {
+  it('runs a three-room three-round model-free brutal smoke with the stub adapter', { timeout: 300_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-3round-smoke-'));
     const config = parseConversationArgs([
       '--fixtures', 'tests/fixtures/arena-basis-brutal',
@@ -2114,7 +2114,7 @@ describe('AI-DM engine MCP conversation runner', () => {
     expect(result.rows[0]?.refusals).toEqual([]);
   });
 
-  it('runs three rounds with a one-round party program by recording typed default turns', { timeout: 60_000 }, async () => {
+  it('runs three rounds with a one-round party program by recording typed default turns', { timeout: 180_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-party-default-'));
     const base = await alternatingInitiativeRoom({ monsterHitPoints: 10_000 });
     const durable: EncounterState = {

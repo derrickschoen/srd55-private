@@ -6,6 +6,7 @@ import {
   HAND_AUTHORED_SESSION_V10_REVISION_BODY,
   HAND_AUTHORED_V10_CREATURE_SPACE_CASES,
 } from '../../fixtures/vtt/creature-space-migration-fixtures';
+import { HAND_AUTHORED_PRE_LAST_SEEN_V11_REVISION_BODY } from '../../fixtures/vtt/pre-last-seen-v11-save';
 import {
   AlgorithmController,
   AgentController,
@@ -291,7 +292,7 @@ describe('event-sourced encounter persistence', () => {
     expect(canonicalJson(HAND_AUTHORED_V10_CREATURE_SPACE_CASES)).toBe(sourceBytes);
   });
 
-  it('decodes the hand-authored schema-10 creature-space fixture one way into schema 11', () => {
+  it('decodes the hand-authored schema-10 creature-space fixture through the current schema', () => {
     const revisionBody = structuredClone(HAND_AUTHORED_SESSION_V10_REVISION_BODY);
     const revision = { ...revisionBody, checksum: sha256(canonicalJson(revisionBody)) };
     const bundleBody = {
@@ -310,13 +311,44 @@ describe('event-sourced encounter persistence', () => {
     const migrated = store.revisions(importedId);
 
     expect(migrated).toHaveLength(1);
-    expect(migrated[0]?.schemaVersion).toBe(11);
+    expect(migrated[0]?.schemaVersion).toBe(12);
     expect(migrated[0]?.encounterState).toMatchObject({
       tokens: [],
       sharedSpaceRelations: [],
       adjudicationPending: [],
       environment: { narrowOpeningRegions: [] },
+      observationHistory: [],
     });
+    expect(canonicalJson({
+      ...bundleBody,
+      fingerprint: sha256(canonicalJson(bundleBody)),
+    })).toBe(sourceBytes);
+  });
+
+  it('migrates a hand-authored pre-history schema-11 save without guessing observations', () => {
+    const revisionBody = structuredClone(HAND_AUTHORED_PRE_LAST_SEEN_V11_REVISION_BODY);
+    const revision = { ...revisionBody, checksum: sha256(canonicalJson(revisionBody)) };
+    const bundleBody = {
+      format: 'vtt-session-revisions',
+      schemaVersion: 11,
+      sessionId: revisionBody.sessionId,
+      revisions: [revision],
+    };
+    const sourceBytes = canonicalJson({
+      ...bundleBody,
+      fingerprint: sha256(canonicalJson(bundleBody)),
+    });
+    const store = new MemoryBrowserSessionStore();
+
+    const importedId = importSavedSession(store, sourceBytes);
+    const migrated = store.revisions(importedId);
+
+    expect(migrated).toHaveLength(1);
+    expect(migrated[0]?.schemaVersion).toBe(12);
+    expect(migrated[0]?.encounterState.observationHistory).toEqual([]);
+    expect(migrated[0]?.encounterState.dmNotes).toEqual([
+      'hand-authored schema-11 save predating observation history',
+    ]);
     expect(canonicalJson({
       ...bundleBody,
       fingerprint: sha256(canonicalJson(bundleBody)),
@@ -375,7 +407,7 @@ describe('event-sourced encounter persistence', () => {
       ...migratedUnrelated
     } = migratedRevision;
     expect(new TextEncoder().encode(canonicalJson(migratedUnrelated))).toEqual(legacyUnrelatedBytes);
-    expect(migratedRevision.schemaVersion).toBe(11);
+    expect(migratedRevision.schemaVersion).toBe(12);
     expect(migratedEncounterState.tokens).toEqual([]);
     expect(migratedEncounterState.sharedSpaceRelations).toEqual([]);
     expect(migratedEncounterState.environment.narrowOpeningRegions).toEqual([]);
@@ -394,6 +426,7 @@ describe('event-sourced encounter persistence', () => {
       life: 'living',
       active: false,
       formName: null,
+      conditions: [],
       placementStatus: 'placement_pending',
       pendingReason: 'legacy_size_required',
     }]);
@@ -1117,7 +1150,8 @@ describe('event-sourced encounter persistence', () => {
     expect(importedId).toBe(encounterSessionId('session:persistence-test'));
     const before = store.revisions(importedId)[0]!;
     const after = imported.revisions(importedId)[0]!;
-    expect(after.encounterState).toEqual(before.encounterState);
+    expect(after.encounterState).toEqual({ ...before.encounterState, observationHistory: [] });
+    expect(after.encounterState.observationHistory).toEqual([]);
     expect(after.coordinatorState).toEqual(before.coordinatorState);
     expect(after.controllers).toEqual(before.controllers);
     expect(after.rngState).toEqual(before.rngState);
@@ -1162,11 +1196,11 @@ describe('event-sourced encounter persistence', () => {
          ORDER BY revision`,
       );
       expect(rows).toEqual([
-        { revision: 1, schema_version: 11 },
-        { revision: 2, schema_version: 11 },
-        { revision: 3, schema_version: 11 },
-        { revision: 4, schema_version: 11 },
-        { revision: 5, schema_version: 11 },
+        { revision: 1, schema_version: 12 },
+        { revision: 2, schema_version: 12 },
+        { revision: 3, schema_version: 12 },
+        { revision: 4, schema_version: 12 },
+        { revision: 5, schema_version: 12 },
       ]);
       expect(
         EncounterSessionJournal.resume(

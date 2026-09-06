@@ -982,9 +982,10 @@ function actorKnowledgeReports(
 ): readonly Readonly<Record<string, unknown>>[] {
   return state.combatants
     .filter((candidate) => candidate.profile.kind === 'monster' && candidate.life !== 'dead')
-    .map((actor) => ({
-      actor_id: actor.profile.id,
-      targets: state.combatants
+    .map((actor) => {
+      return {
+        actor_id: actor.profile.id,
+        targets: state.combatants
         .filter((target) => !queries.sameSide(state, actor.profile.id, target.profile.id) && target.life !== 'dead')
         .map((target) => {
           const projected = capsule.projection.combatants.find((candidate) => candidate.id === target.profile.id);
@@ -998,24 +999,37 @@ function actorKnowledgeReports(
             };
           }
           const visibility = queries.visibility(state, actor.profile.id, target.profile.id);
-          return visibility?.visible === true && projected?.placementStatus === 'placed' && distanceFeet !== null
+          if (visibility?.visible === true && projected?.placementStatus === 'placed' && distanceFeet !== null) {
+            return {
+              kind: 'perceived',
+              target_id: target.profile.id,
+              placement_status: 'placed',
+              effective_size: projected.effectiveSize,
+              placement_mode: structuredClone(projected.placementMode),
+              footprint: projected.footprint.map((cell) => ({ ...cell })),
+              distance_feet: distanceFeet,
+            };
+          }
+          const observation = capsule.projection.observationHistory.find((entry) =>
+            entry.observer === actor.profile.id && entry.subject === target.profile.id);
+          return observation !== undefined
             ? {
-                kind: 'perceived',
+                kind: 'suspected',
                 target_id: target.profile.id,
-                placement_status: 'placed',
-                effective_size: projected.effectiveSize,
-                placement_mode: structuredClone(projected.placementMode),
-                footprint: projected.footprint.map((cell) => ({ ...cell })),
-                distance_feet: distanceFeet,
+                last_seen: {
+                  status: 'resolved',
+                  lastSeenPosition: { ...observation.cell },
+                },
               }
             : {
                 kind: 'unknown',
                 target_id: target.profile.id,
-                last_seen: { status: 'unresolved', reason: 'last_seen_position_not_modeled' },
+                last_seen: { status: 'unresolved', reason: 'never_observed' },
               };
         })
         .sort((left, right) => left.target_id.localeCompare(right.target_id)),
-    }))
+      };
+    })
     .sort((left, right) => left.actor_id.localeCompare(right.actor_id));
 }
 

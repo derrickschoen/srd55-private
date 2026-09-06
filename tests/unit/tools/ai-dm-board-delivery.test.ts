@@ -17,6 +17,7 @@ import {
   decodeEngineMcpLauncherManifest,
   createEngineMcpRuntime,
   loadArenaFixture,
+  validatedLauncherBoardHtmlReference,
   validatedLauncherBoardImage,
   type EngineMcpLauncherManifest,
 } from '../../../src/vtt/mcp/entrypoint';
@@ -47,9 +48,11 @@ import {
 } from '../../helpers/test-filesystem';
 
 const META = mcpRequestMeta({ name: 'board-delivery-test', version: '1.0.0' });
-// Independently reproduced from committed footprints Increment 3 (8bdc7ba8),
-// before the board-delivery branch was merged into it.
+// Pin = the intel-leak lane context (04fd8420: shown-option boundary, size-omission
+// declarations) BEFORE the last-seen (D545) merge; the last-seen policy string and
+// state handle are normalised back below so the pin stays independent of that merge.
 const FOOTPRINTS_RAW_CONTEXT_SHA256 = 'aa841063ad0512d0f6b286318db802526da3efc5265a04d8b67f4d8351909d51';
+const FOOTPRINTS_STATE_HANDLE = 'engine-state:c7c7b052bd70a39bf59c83277b7508d8bf52b69100fbde5939c8562ac8686842';
 
 function record(value: unknown, label: string): Readonly<Record<string, unknown>> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -92,11 +95,17 @@ class FakeSnapshotService implements ConversationBoardSnapshotService {
     const relativePath = `board-images/${digest}.png` as const;
     mkdirSync(join(this.outputDirectory, 'board-images'), { recursive: true });
     writeFileSync(join(this.outputDirectory, relativePath), png);
+    const htmlBytes = Buffer.from('<!doctype html><html lang="en"><body><main>SIMULATED board</main></body></html>\n');
+    const htmlDigest = hashBytes(htmlBytes);
+    const htmlRelativePath = `board-html/${htmlDigest}/board.html` as const;
+    mkdirSync(join(this.outputDirectory, 'board-html', htmlDigest), { recursive: true });
+    writeFileSync(join(this.outputDirectory, htmlRelativePath), htmlBytes);
     const artifact: BoardImageArtifact = {
       version: 'arena-board-image-v1', audience: 'dm', mimeType: 'image/png',
       relativePath, sha256: digest, bytes: png.byteLength, width: 1, height: 1,
       capturedAtUnixMs: Date.now(), captureMs: 1, source: { ...input.source },
       chromiumVersion: 'SIMULATED Chromium',
+      html: { relativePath: htmlRelativePath, sha256: htmlDigest, bytes: htmlBytes.byteLength },
     };
     this.#firstArtifact ??= artifact;
     return artifact;
@@ -450,8 +459,18 @@ describe('arena capture lifecycle and off-arm invariance', () => {
 
     const raw = offResult[0]?.rawTurnContext;
     if (raw === undefined) throw new TypeError('Off-arm row omitted rawTurnContext.');
-    expect(Buffer.byteLength(raw)).toBe(32_000);
-    expect(createHash('sha256').update(raw).digest('hex')).toBe(FOOTPRINTS_RAW_CONTEXT_SHA256);
+    expect(Buffer.byteLength(raw)).toBe(31_995);
+    const rawRecord = record(JSON.parse(raw) as unknown, 'off raw context');
+    expect(record(rawRecord['actor_knowledge'], 'off actor knowledge')['policy'])
+      .toBe('actor-knowledge-v3-last-seen');
+    const stateHandle = record(rawRecord['state_ref'], 'off state ref')['state_handle'];
+    expect(stateHandle).toMatch(/^engine-state:[0-9a-f]{64}$/u);
+    expect(stateHandle).not.toBe(FOOTPRINTS_STATE_HANDLE);
+    const baselineEquivalent = raw
+      .replace('actor-knowledge-v3-last-seen', 'actor-knowledge-v2-creature-space')
+      .replace(String(stateHandle), FOOTPRINTS_STATE_HANDLE);
+    expect(Buffer.byteLength(baselineEquivalent)).toBe(32_000);
+    expect(createHash('sha256').update(baselineEquivalent).digest('hex')).toBe(FOOTPRINTS_RAW_CONTEXT_SHA256);
 
     const offHandler = createMcpHandler({ tools: [{
       descriptor: { name: 'engine.get_turn_context', description: 'off-byte fixture', inputSchema: {} },
@@ -503,6 +522,11 @@ describe('launcher image containment and binding', () => {
     const relativePath = `board-images/${digest}.png` as const;
     mkdirSync(join(root, 'board-images'), { recursive: true });
     writeFileSync(join(root, relativePath), png);
+    const htmlBytes = Buffer.from('<!doctype html><html lang="en"><body><main>Board facts</main></body></html>\n');
+    const htmlDigest = hashBytes(htmlBytes);
+    const htmlRelativePath = `board-html/${htmlDigest}/board.html` as const;
+    mkdirSync(join(root, 'board-html', htmlDigest), { recursive: true });
+    writeFileSync(join(root, htmlRelativePath), htmlBytes);
     const source: BoardImageSource = {
       room: 1, round: state.round, revision: state.revision,
       stateDigest: sha256(canonicalJson(state)),
@@ -524,11 +548,19 @@ describe('launcher image containment and binding', () => {
           version: 'arena-board-image-v1', audience: 'dm', mimeType: 'image/png', relativePath,
           sha256: digest, bytes: png.byteLength, width: 1, height: 1,
           capturedAtUnixMs: 1, captureMs: 1, source, chromiumVersion: 'SIMULATED',
+          html: {
+            relativePath: htmlRelativePath,
+            sha256: htmlDigest,
+            bytes: htmlBytes.byteLength,
+          },
         },
       },
     } satisfies EngineMcpLauncherManifest;
     const image = await validatedLauncherBoardImage(manifest, state);
     expect(Buffer.from(image?.data ?? '', 'base64')).toEqual(png);
+    const htmlReference = await validatedLauncherBoardHtmlReference(manifest, state);
+    expect(htmlReference?.text).toContain(htmlRelativePath);
+    expect(htmlReference?.text).toContain(htmlDigest);
 
     const escaped = structuredClone(manifest) as unknown as Record<string, unknown>;
     const binding = record(escaped['boardImage'], 'board binding');

@@ -7,7 +7,14 @@ import type {
   SpellSlotState,
   TurnResources,
 } from './encounter';
-import { canCombatantSee, combatantSide, combatantSpace, effectiveCombatRules, effectiveCreatureSize } from './encounter';
+import {
+  canCombatantSee,
+  combatantConditions,
+  combatantSide,
+  combatantSpace,
+  effectiveCombatRules,
+  effectiveCreatureSize,
+} from './encounter';
 import type { KnownCreatureSize, SerializedPlacementMode } from './creature-space';
 import type { HiddenRollCategory } from './roll-visibility';
 import type { EncounterEvent } from './events';
@@ -49,6 +56,7 @@ export const ENCOUNTER_VIEW_CLASSIFICATION = {
   reevaluatedBranches: 'dm_only',
   eventLog: 'per_seat',
   hiddenCombatants: 'per_seat',
+  observationHistory: 'per_seat',
   searchMemories: 'dm_only',
   alerting: 'dm_only',
   pendingDecisions: 'per_seat',
@@ -112,6 +120,38 @@ interface PlayerVisibleCombatantIdentity {
   readonly life: LifeState;
   readonly active: boolean;
   readonly formName: string | null;
+  readonly conditions: readonly string[];
+}
+
+function playerVisibleConditions(
+  state: EncounterState,
+  id: CombatantId,
+  owned: boolean,
+): readonly string[] {
+  return combatantConditions(state, id).flatMap((condition): readonly string[] => {
+    if (owned) {
+      return [condition.name === 'Exhaustion'
+        ? `${condition.name} ${String(condition.level)}`
+        : condition.name];
+    }
+    switch (condition.name) {
+      case 'Blinded':
+      case 'Grappled':
+      case 'Paralyzed':
+      case 'Petrified':
+      case 'Prone':
+      case 'Restrained':
+      case 'Stunned':
+      case 'Unconscious': return [condition.name];
+      case 'Charmed':
+      case 'Deafened':
+      case 'Exhaustion':
+      case 'Frightened':
+      case 'Incapacitated':
+      case 'Invisible':
+      case 'Poisoned': return [];
+    }
+  });
 }
 
 export interface PlayerVisiblePlacedCombatant extends PlayerVisibleCombatantIdentity {
@@ -143,6 +183,14 @@ export interface PlayerOwnedCombatant {
   readonly hitPointMaximum: number;
   readonly turn: TurnResources;
   readonly wildShapeUses: EncounterCombatantState['wildShapeUses'];
+}
+
+export interface PlayerLastSeenCombatant {
+  readonly id: CombatantId;
+  readonly name: string;
+  readonly kind: 'player_character' | 'monster';
+  readonly cell: GridCell;
+  readonly round: number;
 }
 
 interface DmVisibleCombatantDetails {
@@ -236,6 +284,8 @@ export interface PlayerView {
   readonly blockedCells: readonly GridCell[];
   readonly worldObjects: EncounterState['worldObjects'];
   readonly combatants: readonly PlayerVisibleCombatant[];
+  /** Last-known anchors only; no current unperceived geometry enters this view. */
+  readonly lastSeen: readonly PlayerLastSeenCombatant[];
   readonly ownedCombatants: readonly PlayerOwnedCombatant[];
   readonly recentEvents: readonly PlayerVisibleEncounterEvent[];
 }
@@ -482,6 +532,7 @@ export function projectDmView(state: EncounterState): DmView {
       ...(state.reevaluatedBranches === undefined ? {} : { reevaluatedBranches: structuredClone(state.reevaluatedBranches) }),
       eventLog: structuredClone(state.eventLog),
       hiddenCombatants: structuredClone(state.hiddenCombatants),
+      observationHistory: structuredClone(state.observationHistory),
       ...(state.searchMemories === undefined ? {} : { searchMemories: structuredClone(state.searchMemories) }),
       ...(state.alerting === undefined ? {} : { alerting: structuredClone(state.alerting) }),
       pendingDecisions: structuredClone(state.pendingDecisions),
@@ -510,9 +561,8 @@ export function projectPlayerView(state: EncounterState, binding: PlayerSeatBind
   const concealed = new Set(fog);
   const initiativeOrder = new Map(state.initiative.map((entry, index) =>
     [entry.combatant, index] as const));
-  const visibilityObserverPending = state.adjudicationPending.some(
-    (entry) => entry.combatant === binding.combatantId,
-  );
+  const availableObservers = [...ownedIds].filter((observer) =>
+    !state.adjudicationPending.some((entry) => entry.combatant === observer));
   const combatants = state.combatants.flatMap((subject): readonly PlayerVisibleCombatant[] => {
     const pending = state.adjudicationPending.find((entry) =>
       entry.combatant === subject.profile.id);
@@ -527,13 +577,14 @@ export function projectPlayerView(state: EncounterState, binding: PlayerSeatBind
         pendingReason: pending.kind,
         active: state.activeCombatant === subject.profile.id,
         formName: subject.wildShape?.formName ?? subject.form?.formName ?? null,
+        conditions: playerVisibleConditions(state, subject.profile.id, true),
       }];
     }
     const token = tokensByCombatant.get(subject.profile.id);
     if (token === undefined) return [];
     const owned = ownedIds.has(subject.profile.id);
-    if (!owned && visibilityObserverPending) return [];
-    if (hidden.has(subject.profile.id) || (!owned && !canCombatantSee(state, binding.combatantId, subject.profile.id))) return [];
+    if (hidden.has(subject.profile.id) ||
+      (!owned && !availableObservers.some((observer) => canCombatantSee(state, observer, subject.profile.id)))) return [];
     const space = combatantSpace(state, subject.profile.id);
     if (!owned && space.cells.every((cell) => fog.has(cellKey(cell)))) return [];
     return [{
@@ -548,12 +599,32 @@ export function projectPlayerView(state: EncounterState, binding: PlayerSeatBind
       footprint: space.cells.map((cell) => ({ ...cell })) as [GridCell, ...GridCell[]],
       active: state.activeCombatant === subject.profile.id,
       formName: subject.wildShape?.formName ?? subject.form?.formName ?? null,
+      conditions: playerVisibleConditions(state, subject.profile.id, owned),
     }];
   }).sort((left, right) =>
     (initiativeOrder.get(left.id) ?? Number.MAX_SAFE_INTEGER) -
       (initiativeOrder.get(right.id) ?? Number.MAX_SAFE_INTEGER) ||
     String(left.id).localeCompare(String(right.id)));
   const visibleIds = new Set(combatants.map((subject) => subject.id));
+  const lastSeen = state.combatants.flatMap((subject): readonly PlayerLastSeenCombatant[] => {
+    if (subject.life === 'dead' || visibleIds.has(subject.profile.id) ||
+      !tokensByCombatant.has(subject.profile.id)) return [];
+    const latest = state.observationHistory
+      .filter((entry) => ownedIds.has(entry.observer) && entry.subject === subject.profile.id)
+      .sort((left, right) => right.revision - left.revision ||
+        String(left.observer).localeCompare(String(right.observer)))[0];
+    if (latest === undefined) return [];
+    return [{
+      id: subject.profile.id,
+      name: subject.profile.name,
+      kind: combatantSide(state, subject.profile.id),
+      cell: { ...latest.cell },
+      round: latest.round,
+    }];
+  }).sort((left, right) =>
+    (initiativeOrder.get(left.id) ?? Number.MAX_SAFE_INTEGER) -
+      (initiativeOrder.get(right.id) ?? Number.MAX_SAFE_INTEGER) ||
+    String(left.id).localeCompare(String(right.id)));
   const monsterIds = new Set(state.combatants.flatMap((subject) =>
     subject.profile.kind === 'monster' ? [subject.profile.id] : []));
   return {
@@ -574,6 +645,7 @@ export function projectPlayerView(state: EncounterState, binding: PlayerSeatBind
       .filter((object) => object.footprint.every((cell) => !concealed.has(cellKey(cell))))
       .map((object) => structuredClone(object)),
     combatants,
+    lastSeen,
     ownedCombatants: state.combatants
       .filter((subject) => ownedIds.has(subject.profile.id))
       .map((subject) => ({
@@ -621,6 +693,7 @@ export function dmVisibleEncounter(view: DmView): DmVisibleEncounterState {
           turn: structuredClone(subject.turn),
           spellSlots: structuredClone(subject.spellSlots),
           hiddenFromPlayers: state.hiddenCombatants.some((entry) => entry.combatant === subject.profile.id),
+          conditions: playerVisibleConditions(state, subject.profile.id, true),
         }];
       }
       const token = tokensByCombatant.get(subject.profile.id);
@@ -644,6 +717,7 @@ export function dmVisibleEncounter(view: DmView): DmVisibleEncounterState {
         turn: structuredClone(subject.turn),
         spellSlots: structuredClone(subject.spellSlots),
         hiddenFromPlayers: state.hiddenCombatants.some((entry) => entry.combatant === subject.profile.id),
+        conditions: playerVisibleConditions(state, subject.profile.id, true),
       }];
     }),
     sharedSpaceRelations: structuredClone(state.sharedSpaceRelations),

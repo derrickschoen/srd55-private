@@ -1306,24 +1306,33 @@ function actorKnowledgeText(style: ProseRendererFormat, value: unknown): string 
     const targets = array(actor['targets']).flatMap((targetValue) => {
       const target = record(targetValue);
       if (target === null) return [];
-      const base = String(target['target_id']);
-      const lastSeen = target['last_seen'];
-      return [lastSeen === undefined ? base : `${base}; ${flatClauses(lastSeen).join('; ')}`];
+      return [String(target['target_id'])];
     });
-    return [{ actorId: String(actor['actor_id']), targets }];
+    const lastSeenSentences = array(actor['targets']).flatMap((targetValue) => {
+      const target = record(targetValue);
+      const lastSeen = record(target?.['last_seen']);
+      const position = record(lastSeen?.['lastSeenPosition']);
+      return lastSeen?.['status'] === 'resolved' && position !== null
+        ? [`${String(actor['actor_id'])} last saw ${String(target?.['target_id'])} at cell (${String(position['column'])}, ${String(position['row'])}).`]
+        : [];
+    });
+    return [{ actorId: String(actor['actor_id']), targets, lastSeenSentences }];
   });
+  const lastSeenText = notes.flatMap((note) => note.lastSeenSentences).join(' ');
   const sharedTargets = notes[0]?.targets;
   const allShared = sharedTargets !== undefined && notes.every((note) =>
     note.targets.length === sharedTargets.length && note.targets.every((target, index) => target === sharedTargets[index]));
   if (allShared) {
-    return style === 'caveman_prose'
+    const shared = style === 'caveman_prose'
       ? `Actor knowledge. All ${String(notes.length)} actors perceive ${sharedTargets.join(', ')}.`
       : `Actor knowledge is shared: all ${String(notes.length)} actors perceive ${sharedTargets.join(', ')}.`;
+    return lastSeenText.length === 0 ? shared : `${shared} ${lastSeenText}`;
   }
   const individual = notes.map((note) => `${note.actorId} perceives ${note.targets.join(', ')}`);
-  return style === 'caveman_prose'
+  const differentiated = style === 'caveman_prose'
     ? `Actor knowledge. ${individual.join('. ')}.`
     : `Actor knowledge differs by actor. ${individual.join('. ')}.`;
+  return lastSeenText.length === 0 ? differentiated : `${differentiated} ${lastSeenText}`;
 }
 
 function legendaryText(style: ProseRendererFormat, value: unknown): string {

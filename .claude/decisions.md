@@ -11268,3 +11268,575 @@ i.e. inside the footprints landings (15ef2b24 or 7c52da1c). Bisect at
 Correction (mine, 16:11): the two entries above carry estimated clock times
 "16:20" and "16:28" that are wrong; the finding was written at 16:08 and the
 addendum at 16:10 (system clock). Content unchanged.
+
+## Tick record 16:45 — mini-A/B replicate, probe round 3, harvests (2026-09-05)
+
+**Mini-A/B replicate on 7c52da1c (rep2, same seed):** per-room offense
+[1,1,2,2,VOID,2,0,2,VOID,1]; rooms 5 and 9 refused with "Agent CLI timed
+out after 120000 ms" at load average 9.5 (quiet-machine rule: those two
+rooms are VOID, not zero). The eight valid rooms equal the era controls
+exactly, including room 2, which run 1 had at 0. Run 1's rooms 2/5/9 zeros
+are therefore unconfirmed and look like noise/load, not a deterministic
+change; rooms 5 and 9 need a quiet-machine rerun (rep3) before the engine
+landing hold lifts. The hidden-option-id leak (intel names an id the AI is
+not shown; validator accepts it) is real in every run and its codex unit
+(claude/intel-leak, dnd-wt-intel-leak) is in flight.
+
+**Probe round 3 (c6a7547f classic, 24 states, seed 6203001, my run,
+d536-probe24-r3.jsonl, 480 rows, 0 errors), mean score per class:**
+
+| class | medium | low |
+|---|---|---|
+| Q1 identity/location | 0.24 | 0.18 |
+| Q2 side | 0.45 | 0.50 |
+| Q3 HP band | 0.24 | 0.36 |
+| Q4 blocked/terrain cells | 0.82 | 0.60 |
+| Q5 light per cell | 0.91 | 0.59 |
+| Q6 doors | 0.38 | 0.36 |
+| Q7 adjacent pairs | 0.08 | 0.02 |
+| Q8 hidden creatures | 0.71 | 0.58 |
+| Q9 fog/obscured | 0.67 | 0.48 |
+| Q10 blocked cells | 0.88 | 0.88 |
+
+Against the D536 bar (every class >= 0.9 at Luna medium) only Q5 passes.
+Identity (Q1) and HP (Q3) are far below and the badge/roster round did not
+move them; this is the measurement the D556 art-techniques report speaks
+to. Rows carry primer v6; round 4 changes the primer to v7 (roster cells),
+so round 4 gets its own run.
+
+**Flakes unit (dnd-wt-flakes):** my tsc 0, sg 0. My focused run of the four
+named files at load 9.5: 3 files pass, experiment-orchestrator.test.ts
+FAILS at file level — top-level beforeAll "Hook timed out in 30000ms", 52
+tests skipped. Codex raised the test timeout but not the hook's; amendment
+sent by resume (hook timeout in that file only). Codex's own full-suite
+claim (564/9,721, no retry) stands as claimed, not verified.
+
+**Licence unit (dnd-wt-licence):** my tsc 0, sg 0, focused 52/52 (3 files).
+LICENSE-ART is 7,048 bytes, CC0 1.0 with all four sections; byte match to
+the official text is codex's claim. Full suite pending (mine).
+
+**Classic round 4 (dnd-wt-light):** codex exit 0, mutation
+roster_numeral_low_contrast shown killed; my tsc 0, sg 0; focused running.
+
+**D556 report delivered** (art-research/reports/2026-09-05-art-techniques.md,
+1,511 words, codex synthesis of four notes; private repo b78d844).
+
+CLASSIC ROUND 4 (2026-09-05 17:05): d5c74dd0 on claude/light-variant — pixel-art badge/ring bitmaps (board-chrome-art.ts,
+no CSS radius), roster numeral contrast ≥4.5:1, badge palette outside both side-hue bands and pairwise distinct
+under dichromacy matrices, 1..12 numeral clearance, typed object/door rail with coordinates, roster coordinates,
+primer v7. Codex: locked 559/9703, mutation roster_numeral_low_contrast killed. Mine: forbidden scan clean, tsc 0,
+sg 0, focused chrome+probe green; first mutation (hue-exclusion constant 35→5) VOID — the constant is read only by
+the test, not at runtime; second mutation (sand badge → warm cloth ramp) killed two tests (side-hue band, numeral
+contrast 4.04 < 4.5), cmp-restored. Two browser specs queued under the lock on port 4640. Captures viewed: badges
+crisp, roster and door rail readable; the art itself remains the flat look the owner named in D556. Four-seat panel
+dispatched with rotated perspectives (Fable game-feel, Opus-medium pixel-craft, sol-high ui-readability, sol-medium
+machine-readability carrying the round-3 probe numbers). Round-4 probe (primer v7, 24 states, medium+low) started.
+
+Correction (mine, 16:44): the round-4 entry above says "17:05"; the system clock was 16:41 when it was written. I stop
+writing estimated times; every timestamp from here is read from `date`.
+
+D557 — OWNER (2026-09-05 16:43): "Double the pixel density and try to implement the art techniques for classic view."
+Supervisor reading: (1) the classic board's native art resolution doubles — 128 px per cell instead of 64, tiles,
+tokens, glyphs, badges and rings drawn at the new native size (integer scaling only, no upscaled 64-px art); (2) the
+craft techniques from the D556 report's diagnosis become the classic view's drawing rules — one global light
+direction with a shared shadow colour and material-specific response, palette ramps with deliberate shadow/mid/
+highlight steps and restrained hue shifts, silhouette-first creature busts, no pillow shading, cluster discipline
+(no stray single pixels, no anti-aliased edges, no fractional placement), selective outlines that support hierarchy,
+review at native size beside neighbours and under overlays — each rule expressed as a validator test, not prose.
+Dispatched as classic round 5 (codex sol high, D532) on a new worktree from round 4's d5c74dd0; the D549 colour-
+blind/high-contrast presets move to round 6. Implementers read clean-room/final only; the craft rules are pasted
+into the brief as general pixel-art principles (no sources, no game names).
+
+## CLASSIC ROUND 4 PANEL — three of four seats HOLD (2026-09-05 16:55)
+
+Fable (game-feel): HOLD — MAJOR 1 badge/ring frames use the floor's own stone/neutral ramps so token presence
+collapses (CR 1.00 on token 4); MAJOR 2 `fern` badge disc is the exact HP-uninjured green; MAJOR 3 the badge tab
+covers heads and the ring cuts shoulders (chrome z-index over sprite). Its ranked MS Paint diagnosis: the floor field
+(two-value slabs + checkerboard dither + random brightness + crack strokes, ~70% of pixels), the rune/dim scribble
+field, the identical manhole column, framed "profile picture" tokens, silent hazards. Codex sol high
+(ui-readability): HOLD — MAJOR roster BLOODIED (cloth-warm 3 on #111113 ≈ 4.04:1) and UNKNOWN text below the 4.5:1
+floor the round claimed only for numerals; MINOR rail reserves 40 px per object and leaves dead space. Codex sol
+medium (machine-readability): HOLD — identity, HP and adjacency remain operationally ambiguous at delivered scale
+(26×18 px badges, roster 1,100 px away); highest-leverage change: a large OCR-safe coordinate-first manifest row per
+creature sized against the model's normalised image; primer v7 should point Q1/Q3/Q7 at the roster coordinates.
+Opus (pixel-craft, medium) still running.
+
+Supervisor verification: `fern` = badgeRamp('moss', 4) and HP uninjured ink = ramp('moss', 4) — same colour,
+confirmed by grep (board-chrome.ts:144, :255). BLOODIED = ramp('cloth-warm', 3) on roster background #111113
+(styles.css); contrast 4.04:1 by my own WCAG computation using the hex codex reported for that ramp step. Both majors
+stand. Verdict: HOLD. The D536 bar is not demonstrated (round-3 probe: only light passes); round-4 probe running.
+
+Disposition: round 5 (D557) is already redrawing the art at 128 px on a branch from this commit; the chrome majors
+(frame ramps outside the floor palette, fern replaced, chrome below the sprite or moved off the head, roster text
+contrast ≥ 4.5:1 for every HP word, manifest row sizing, primer pointer) are queued as a round-5 amendment to be sent
+when its current turn ends (13:20 rule), not merged as a separate round-4b that would conflict in board-chrome.ts.
+
+## Round 4 panel closes 4/4 HOLD; flakes LANDED; a11y in verification (2026-09-05 17:12)
+
+Opus (pixel-craft, medium): HOLD — MAJOR badge discs have no contrast floor against the roster background (claims 5
+of 12 under 3:1, badge #1 at 1.02); MAJOR stacked bust ring at stackIndex 1 now a constant 50 px, overruns the HP
+bar and sits off-centre; MAJOR dichromacy test clears its ≥10 bar by 0.01 (spruce/graphite); MAJOR legend swatches
+and primer v7 still promise cool-blue/warm-red side rings the board no longer draws. Verified by me: the side-ring
+promise — the captures show badge-coloured rings only, and primer v7 still opens with the blue/red sentence (seen in
+the round-4 diff). The disc-contrast and ring-geometry numbers are Opus's, unverified by me; they go to round 5 as
+findings to verify in code. Also confirmed the badge ranks the crispness claims: Opus and codex both measured hard
+2×2 pixel blocks, no resampling. Seat-yield ledger written (rounds/classic-round-4/yield.json, private repo).
+
+Flakes unit LANDED on main bbf7f2bb: my full run through the new runner `npm run test:gate` at load 9: 1,863
+files / 9,722 tests passed, zero load flakes, zero retries; codex's claim (564/9,721) matches within the count
+convention. Gate scripts in dnd-slim-runs switch to `npm run test:gate` from the next landing.
+
+Licence unit: my full suite 563/564 files, 9,724/9,725 tests — the one failure is the D544-named 5-second arena
+round-robin test at 5.16 s under load 9; solo rerun in progress. a11y-board unit: codex exit 0 (claims 564/9,723
+locked, Playwright spec 1/1 on 4603, mutation player_export_leaks_hidden_creature killed); my tsc 0, sg 0, forbidden
+scan clean, focused set running. Classic round 4 browser specs 4/4 on 4640 — round 4's gate is complete.
+
+## Licence LANDED e4598858; a11y committed and gating; mini-A/B rep3 on a quiet machine (2026-09-05 17:24)
+
+Licence unit landed on main (lane commit d2fd27c6): the one full-suite failure was the D544-named 5 s arena test
+under load 9; solo rerun 36/36. a11y-board committed on claude/a11y-board after the amendment: my mutation (non-owned
+private conditions leaked to players) is now killed by two tests (visibility.test "redacts private conditions for
+non-owners…", accessible-board.test "redacts private non-owned conditions from player HTML while the DM HTML names
+them"); tsc 0, sg 0, focused 66/66, forbidden scan clean. Its two browser specs (port 4680) and my full suite are
+queued under the lock. Mini-A/B rep3 launched at load 3.3 to settle rooms 5 and 9.
+
+Correction (mine, 17:22): the entry above is stamped "17:24"; the clock read 17:21 when it was written. I said
+I would stop estimating and did it again; from this line every entry stamp is produced by the clock in the write
+command itself, not typed.
+
+## Mini-A/B rep3 PASSES — footprints landing keeps its behavioural control; a11y LANDED (2026-09-05 17:36)
+
+rep3 on 7c52da1c at launch load 3.3 (same seed/basis/model): per-room offense [1,0,2,2,4,2,0,2,3,1], mean 1.70,
+zero-offense 2, dash 29 — the era-control shape (controls 1.6–1.7 / 1–2 / 26–29). Room 5 is 4 (run 1: 0), room 9
+is 3 (run 1: 0). Run 1's drop was noise under load, not a deterministic change; the three runs together are
+recorded as the D429.1 verdict for 7c52da1c: PASSED on rep3 with run 1 (load) and rep2 (two CLI timeouts) kept as
+evidence of how much a single luna-low rep moves. Engine landing hold LIFTED. The hidden-option-id leak stays a
+real defect (its unit is in flight) — it was present in every run including the passing ones.
+
+a11y-board landed on main (lane f9aec870): my full suite 564/9,725, specs 2/2 on 4680. It touches the player
+projection (src/combat/visibility.ts), so its D429.1 mini-A/B runs when the load average allows a valid run.
+
+D558 — OWNER (2026-09-05 17:54): YES — the art pipeline may call an image model for REFERENCE SHEETS ONLY, never for
+shipped pixels. Supervisor reading: OpenAI image API is the approved model (local FLUX Klein 4B allowed later if a GPU
+is set up); references live in the private research repo (art-research/references/, never in any public tree,
+never copied into the repo, never used as a test fixture); the clean-room review checklist gains a similarity gate
+(procedural output must not reproduce a reference's structure; judges compare at native size); a seat that has seen
+a reference for an asset is not the implementer for that asset; the implementer receives written observations
+derived from references (what the light does, how a ramp steps), not the images, unless the supervisor decides a
+specific asset needs the picture and records it. Every generated reference is logged (prompt, model, date, asset)
+in references/LOG.md so provenance is auditable.
+
+D558.1 — OWNER (2026-09-05 17:58): no OpenAI key exists; the owner has a FIREWORKS key (stored by the fireconnect tool in an
+encrypted keyring). Supervisor: the approved reference model becomes Fireworks-hosted FLUX.1 [schnell]
+(accounts/fireworks/models/flux-1-schnell, Apache-2.0 per the Fireworks model list I fetched); FLUX.1 [dev]
+variants (non-commercial licence) are NOT used even for references. The generator reads the key from a 0600 file
+the owner writes (~/.config/dnd-art/fireworks.key) or from FIREWORKS_API_KEY in the owner's own shell; the
+supervisor does not extract the credential from the keyring itself (an attempt to read fireconnect's key-handling
+source was blocked by the tool classifier and is not retried). Reference-only rule, log, similarity gate and seat
+separation unchanged from D558.
+
+## Owner directions applied: claude-fw routes, Fireworks CLI allowed; ghost merge committed (2026-09-05 18:03)
+
+Owner: "You can use the fireconnect cli if you need" and update claude-fw to the latest Fireworks routes — K3 =
+accounts/fireworks/routers/kimi-k3-us, GLM-5.3-Flash = accounts/fireworks/routers/glm-5p3-flash-us, through the
+US endpoint https://us.api.fireworks.ai; K3 as fable and opus, GLM for sonnet and haiku. Applied to
+~/.claude-fw/settings.json (backup in ~/.claude-fw/backups, settings.json.<stamp>.pre-glm): FABLE/OPUS → K3,
+SONNET/HAIKU/SUBAGENT → GLM, ANTHROPIC_BASE_URL → https://us.api.fireworks.ai/inference. The manager's refresh
+copies settings.json forward, so the change survives a refresh. Smoke (stdin prompts): sonnet route answered
+PONG-GLM, opus route answered PONG-K3; Claude prints an "unrecognized_model" telemetry line for router ids, harmless.
+The fireconnect harness config itself (config.json profiles) is untouched — the owner named claude-fw only.
+
+References tool: the generator will take the key from `fireconnect key export --home /home/vagrant` (the same
+helper claude-fw uses), so no key file is needed; Fireworks amendment dispatched to the infra unit's session.
+Ghost lane: merge with main committed 35f8f6bf after my tsc 0 / sg 0 / focused 50/50; gate-wt4 (retry runners)
+launched. a11y mini-A/B running at load ~10 (may void).
+
+a11y-board D429.1 mini-A/B on main e5dcefda (18:06): per-room offense [1,0,2,2,3,2,0,VOID,3,1] (room 8 refused:
+CLI timeout at load ~10), dash 31 — era shape on the nine valid rooms (controls 1,1,2,2,3,2,0,2,3,1). PASSED with room
+8 void; the projection change did not move monster behaviour.
+
+## FINDING + RULING — intel-leak unit stopped on an infeasible gate; root cause is the 32 KiB context cap (2026-09-05 18:08)
+
+Codex (correctly) stopped: its fix (intel bound to the shown-option partition; typed rejection OPTION_NOT_SHOWN for
+hidden ids; room-5 regression test) changes the raw turn context, and tests/unit/tools/ai-dm-board-delivery.test.ts
+pins the off-arm raw context to exactly 32,180 bytes and a fixed sha256 (FOOTPRINTS_RAW_CONTEXT_SHA256) — a golden
+that encodes the leaking context. ROOT CAUSE (codex, from engine-server.ts:762 and :2310, and I accept it as the
+explanation of what I saw in the rows): the server builds six offerable options offense-first, then the 32 KiB
+context limit REMOVES options down to two, but intel (opportunity-cost, movement rows) was generated before the
+pruning and kept ids of pruned options. So "two Shortbow options shown" in room 5 was the byte cap, not a design
+partition; Dash/Dodge/End Turn were silently dropped and the intel still pointed at Dash. Renderer shortlist was
+not the cause. Second finding: the byte cap prunes options SILENTLY — the model is never told options were omitted.
+
+RULING (supervisor, interim under D555 — conflict between "never regenerate an expectation from own output" and a
+deliberate, independently-tested context change): the byte/sha pin in ai-dm-board-delivery.test.ts may be updated
+in the SAME commit as the independent invariants that justify the change — (a) the arm-identity assertions already
+in that test (capture-only == off), (b) the new hidden-option-boundary test (no id in rendered intel outside the
+shown set; hidden id rejected with OPTION_NOT_SHOWN), and (c) a new assertion that the rendered context declares how
+many options were omitted for size. Same logic as the art-hash rule: the pin is a change detector, the invariants
+are the test. Logged in RULE-CONFLICTS.md.
+
+D559 — OWNER (2026-09-05 18:08): (1) research how people use the Fireworks API to generate images from CLI agents
+(as if the call came from Claude Code or opencode); (2) owner's technique: AI-generated images are poor at exact
+pixel-dimension budgets, but they work as TEMPLATES from which an agent writes a code file that emits SVG image
+files. Supervisor: one codex sol high research seat (network, private repo art-techniques/, angle I) covering the
+Fireworks image endpoint as used from agent CLIs (MCP servers, skills, scripts, fireconnect), models/licences/cost,
+and the image-as-template → agent-written SVG/procedural generator technique (vectorisers vs LLM transcription,
+what survives at 64/128 px, palette and grid discipline); the references tool gains an "observe → generator" step
+in its README; classic round 5 receives, at its turn end, the amendment that references (when the key is wired)
+are consumed as templates for code that draws, never as shipped pixels (D558).
+
+## FINDING — Fireworks serverless FLUX is not reachable from this account (2026-09-05 18:23)
+
+References tool (codex, Fireworks amendment, 12 unit tests green, dry-run fine) made one live call with the owner's
+key (via `fireconnect key export`): HTTP 404 {"code":"NOT_FOUND","message":"Model not found, inaccessible, and/or
+not deployed"} for accounts/fireworks/models/flux-1-schnell and for flux-1-schnell-fp8, on both api.fireworks.ai
+and us.api.fireworks.ai, on the documented workflows text_to_image path. The key itself is valid (models list
+200, 25 language/embedding models, no image model). Control plane: both FLUX models exist with state READY, kind
+FLUMINA_BASE_MODEL, deployedModelRefs [] — i.e. no serverless deployment behind them; they appear to require an
+on-demand deployment now. The D559 research note (F01/F02/F06) documents the endpoint but found no FLUX licence row
+on Fireworks' current licence page and no dated availability notice. Decision for the owner: pay for an on-demand
+FLUX deployment around each reference batch, or pick another provider. Tool bug found: the LOG row is written
+before the request succeeds (smoke-floor-01 is logged with no output file) — amendment queued.
+
+## PROBE ROUND 4 (d5c74dd0, primer v7, 24 states, seed 6203001, my run, 480 rows, 0 errors) (2026-09-05 18:36)
+
+| class | r3 medium | r4 medium | r3 low | r4 low |
+|---|---|---|---|---|
+| Q1 identity/location | 0.24 | 0.89 | 0.18 | 0.94 |
+| Q2 side | 0.45 | 0.90 | 0.50 | 0.89 |
+| Q3 HP band | 0.24 | 0.90 | 0.36 | 0.91 |
+| Q4 terrain | 0.82 | 0.71 | 0.60 | 0.63 |
+| Q5 light | 0.91 | 0.93 | 0.59 | 0.66 |
+| Q6 doors | 0.38 | 0.79 | 0.36 | 0.54 |
+| Q7 adjacency | 0.08 | 0.75 | 0.02 | 0.75 |
+| Q8 hidden | 0.71 | 0.88 | 0.58 | 0.83 |
+| Q9 fog/obscured | 0.67 | 0.69 | 0.48 | 0.50 |
+| Q10 blocked | 0.88 | 0.85 | 0.91 | 0.92 |
+
+Roster coordinates + door rail + primer v7 moved identity, side and HP from ~0.3 to ~0.9 and adjacency from 0.08
+to 0.75 — the machine-readability seats' diagnosis (binding through printed coordinates) was right. Against the
+D536 bar (≥0.9 at medium): side and HP at the bar, light above; identity 0.89 and hidden 0.88 within 0.05 → D541
+confirmation run on a second seed (6203002, medium only) launched now; terrain REGRESSED 0.82→0.71 and blocked
+slipped 0.88→0.85 (both queued for the round-5 amendment together with the panel majors); doors 0.79, adjacency
+0.75, fog 0.69 remain below. Low-effort numbers are research only (D536).
+
+D560 — OWNER (2026-09-05 18:42): "Try installing ComfyUI and using it for image generation. I don't really care if it
+takes a few minutes per image on the CPU." Supervisor: local ComfyUI at ~/comfyui (outside every git tree), CPU
+only (Ryzen 9 7900X, 24 threads, AVX-512, 30 GB RAM, no GPU, 356 GB free), Python 3.12 venv via uv; models with
+output-friendly licences only — FLUX.2 Klein 4B (Apache-2.0) as the target, Stable Diffusion 1.5 (OpenRAIL-M) as
+the fast smoke model if Klein is too slow or gated; FLUX.1 [dev] and other non-commercial weights excluded even for
+references (D558). Server binds 127.0.0.1 on a port far from 4173; a headless API wrapper generates references
+into the private references folder with the D558 log; outputs never ship. Codex sol high installs and smokes it;
+the references tool gains provider "comfyui" afterwards. This replaces the Fireworks on-demand question (D558.1
+finding) — Fireworks stays for language routes only.
+
+D560.1 — OWNER (2026-09-05 18:46): "Try FLUX.2 Klein 4B quantized and Krea 2 Turbo aggressively quantized." Supervisor:
+the install lane was stopped (turn active; stop-then-resume rule) 6 minutes in, with ComfyUI cloned and CPU torch
+installed (4.1 GB), and resumed with the amendment: models are FLUX.2 Klein 4B in a quantized build (GGUF Q8/Q4 via
+the ComfyUI GGUF loader, or the official quantized release if one exists) and Krea 2 Turbo aggressively quantized
+(lowest usable GGUF quant). Licence rule adjusted by the owner's explicit naming: Krea 2 Turbo's licence is
+verified and recorded before download; if it is non-commercial, the weights may still be used locally for
+REFERENCE images only (they never ship, D558) and the licence text hash goes into models/LICENSES.md; anything that
+forbids even local generation is refused and reported. SD 1.5 is no longer downloaded unless both fail.
+
+## CLASSIC ROUND 5 committed e5afcb98; round 5b amendment queued behind the probe's dist build (2026-09-05 18:54)
+
+Codex: 128 px native redraw of all 87 assets (pixel-art.ts 1042→394 lines, but dense multi-statement lines),
+technique suite of 10 validators shown failing on the old art (6 failures pasted), contact sheets ×3, primer v8,
+claims locked 560/9,714, specs 4/4 on 4660, build clean, mutation upscaled_old_art killed. Mine: forbidden scan
+clean, tsc 0, sg 0, focused 13 files / 121 tests; captures viewed — floors, walls, doors and busts read as one lit
+set, a clear step up from the 64 px art, still simple; badges now draw as hollow square brackets around the numeral.
+MY MUTATION SURVIVED: flipping shadedHead's shadow/highlight sides for every bust leaves all 10 technique tests
+green — the light-direction invariant does not cover creature art. Also found: paintRecipe's material response is
+a no-op (`void MATERIAL_RESPONSES[...]`), so rule 2(a) is typed but not drawn. Both go to round 5b with the
+round-4 panel majors, the terrain/blocked probe regressions, and a readability reformat with a byte-identical hash
+proof. Round-5 probe (primer v8, 24 states, medium+low) launched on the committed tree; the two specs run under my
+own lock slot after 5b.
+
+## SUPERVISOR — host reboot recovery (2026-09-05 21:36)
+
+Host rebooted (uptime -s 2026-09-05 21:29:27); every lane log stopped at 18:56. Killed: classic round 5b (codex had
+only read code; dnd-wt-classic5 clean at e5afcb98), intel-leak resume (partial unverified edits survived on disk: 7
+modified + 4 untracked files), ComfyUI install (19 GB of models on disk, no README/outputs yet), ghost gate
+(vitest phase had passed exit 0 with one serial-retried flake; Playwright phase lost), probe r5 and D541 seed-2
+probe (0 rows each; dist caches intact), owner's :4173 server, the tick cron. Recovery per the runbook: :4173
+restarted from main (serve.mjs rebuilds first); all three codex lanes resumed by session id with RESUME NOTES
+(intel-leak told to treat surviving edits as unverified drafts; ComfyUI told to hash-verify before re-downloading;
+first ComfyUI relaunch exited 1 for a missing --skip-git-repo-check, relaunched with it); ghost gate rerun in full
+via gate-wt4.sh; both probes relaunched from their scripts; tick cron re-armed. No mutation and gate share a
+worktree. Nothing landed or committed during the outage.
+
+## D560/D560.1 LANDED (outside git) — ComfyUI on CPU generates images; supervisor-verified (2026-09-05 22:49)
+
+Codex (session 01a073bd, resumed twice across the reboot) delivered ~/comfyui: ComfyUI 0.34.0 @ f00bfd61, ComfyUI-GGUF
+@ 6ea2651e, Python 3.12.12 uv venv, torch 2.14.0+cpu, 86 pins in requirements.lock.txt; run-server.sh (127.0.0.1:8188
+only, refuses if the port is busy, pid file), stop-server.sh, health-check.sh, generate.py (POST /prompt, poll
+/history, fetch /view), workflows/klein.json (Flux2 scheduler, CFGGuider cfg 1, 4 steps) and krea.json (GGUF unet
+loader, KSampler euler/simple, 8 steps). Models: FLUX.2 Klein 4B official FP8 (Apache-2.0) + Qwen3-4B text encoder +
+FLUX.2 VAE; Krea 2 Turbo ByteShape GGUF Q3_K_M 3.91 bpw + qwen3vl-4b fp8 encoder + qwen image VAE, under the Krea 2
+Community License (revocable, revenue-thresholded, AUP) — recorded as LOCAL REFERENCE ONLY per D560.1. Licence texts
+saved with sha256 in models/licenses/ and models/LICENSES.md before download.
+VERIFIED BY ME: all six model sha256 recomputed and match the manifest; both smoke PNGs are 512x512 and I viewed them —
+Klein: grey-green cracked flagstones with grout and moss, diffuse upper-left light, no text, a usable template;
+Krea: dark-blue cobble grid with a hard cream upper-left light pool, cruder (Q3 quant), no text. Timings from
+/usr/bin/time on a LOADED box (three codex lanes + two probes + the ghost gate running): Klein 100.3 s wall,
+server peak RSS 15.9 GiB; Krea 558.0 s wall, peak 11.1 GiB. Server was stopped at the end; 8188 not listening;
+4173 untouched. No "claude -p" in the lane log. Note: ~/comfyui/.git is an EMPTY directory created by the first
+install lane (codex trust check); it is not a repository and nothing there is under version control.
+NEXT (dispatched now, research/brief-references-comfyui.md): gen_reference.py gains --provider comfyui (klein|krea),
+the LOG-row-before-success bug is fixed, krea requires --local-reference-only, one real generation per model of
+floor-stone-cracked with written observations.
+
+## D541 confirmation — round-4 chrome, second seed (6203002, luna medium, 24 states, 240 rows) (2026-09-05 22:50)
+
+Seed-2 means (bar 0.90): Q1 identity 0.910 PASS, Q2 side 0.897, Q3 HP 0.893, Q4 terrain 0.707, Q5 light 0.951 PASS,
+Q6 doors 0.750, Q7 adjacency 0.808, Q8 hidden 0.833, Q9 fog 0.639, Q10 blocked 0.956 PASS. Against seed 1 (medium):
+identity/light/blocked hold the bar on both seeds and are CONFIRMED; side and HP sit within 0.01 of the bar on both
+seeds (0.903/0.897, 0.907/0.893) — not confirmed, not regressed, treated as at-bar pending round 5b; terrain, fog,
+doors, adjacency, hidden are below the bar on both seeds with the same dominant failure ("fact not present"), which
+is the primer/rendering gap round 5b already targets (terrain + blocked regressions, primer v9). Run survived the
+reboot only by relaunch; output at dnd-wt-light/dnd-slim-runs/d541-probe24-r4-seed2.jsonl (relative --out).
+
+## LANDED — D545 ghost/last-seen markers on main (dda20902) (2026-09-05 23:08)
+
+claude/ghost-marker (7f9b16da inc1 + 35f8f6bf merge of main) merged --no-ff from the main repo, exit 0, 40 files
++909/-113. Gate (gate-wt4.sh, rerun in full after the reboot): tsc 0, sg 0, vitest gate exit 0 with one load flake
+passed serially, Playwright 185 passed in 57.1 min with one load flake (a toBeVisible timeout) passed serially in
+2.4 min, exit 0. Gate ran on a loaded box (three codex lanes + two probes), which is what the D544 runner exists for.
+D429.1 mini-A/B is OWED for this merge and is QUEUED, not run: the box is not quiet (probe r5 running, classic 5b and
+intel-leak lanes running, ComfyUI generating at all cores for the references lane). It runs as soon as the lanes
+drain; until then no further engine/renderer merge lands on top. dist for :4173 is being rebuilt under the gate lock.
+Next on this line: classic glyph increment for lastSeen (reads PlayerBoardProjection.lastSeen[].cell), dispatched
+after round 5b lands so it does not collide with the chrome work.
+
+## D558/D559 — reference-image tool now generates locally; first references produced; supervisor-verified (2026-09-05 23:23)
+
+Codex (session 01a0749e, stopped once correctly because its sandbox cannot write ~/comfyui/logs; I started the server
+and resumed it) delivered in the private research tree: tools/gen_reference.py --provider comfyui --model klein|krea
+(stdlib /prompt, /history, /view; starts/stops the server only if it started it), the LOG-row-before-success bug
+fixed (atomic write after PNG signature + dimension check), krea refused without --local-reference-only and its row
+carries "local reference only", README "Local generation (ComfyUI)" section, three new tests. VERIFIED BY ME:
+15/15 tests in my own run; MUTATION (append_log moved before the fetch) KILLED by
+test_failed_comfyui_fetch_keeps_log_identical_and_leaves_no_output, restored; no "claude -p" in either log; no key
+printing; both PNGs 512x512 in references/out/ and viewed: Klein (117.7 s) gives four large cool-grey slabs with
+charcoal seams and pale upper-left bevels, a clean silhouette template; Krea Q3 (574.9 s) gives a 3x3 hand-painted
+tile grid with warm/cool colour shifts, chipped corners and a hard cast shadow across the upper-left — visibly the
+more painterly of the two and much better than its smoke image, so the earlier "Krea is barely useful" reading was a
+one-sample judgement; the open owner question (heavier quant vs Klein-only) stands with that correction. I stopped
+the server afterwards (8188 closed). Stale pre-fix fireworks LOG row marked VOID by me. Observations files exist
+for both; per D558 an implementer of floor-stone-cracked receives those, not the images, and the seat that viewed
+them (this one, and the lane) does not implement that asset.
+
+D560.2 — OWNER (2026-09-05 23:33): "Try out all of the different krea quants to find the ones that actually work on this machine. Then
+see if any do a better job than the setup we already tried." Supervisor: dispatched to codex in ~/comfyui
+(.tmp/runs/brief-krea-quants.md): enumerate every Krea 2 Turbo GGUF quant at the pinned ByteShape revision (other
+repos only after licence recording), feasibility filter against 24 GB available RAM (installed Q3_K_M is 6.26 GB,
+so Q8 should fit and bf16 will not), one download at a time with sha256, two fixed prompts (floor, goblin bust) at
+512/8 steps/seed 560 for every working quant including a Q3_K_M rerun under the same protocol, load average
+recorded around each run because the box is busy, contact sheets per prompt, ranking and recommendation in
+~/comfyui/reports/krea-quants.md. This answers the open question (heavier quant vs Klein-only) with data instead of
+a ruling. Cost: the runs will keep the box loud for hours, so the queued D429.1 mini-A/B for the ghost merge waits
+behind it; no further engine/renderer merge lands until it runs.
+
+D560.2 PARKED — OWNER (2026-09-05 23:35): "Forget the krea stuff for now. Put it on the back burner." Supervisor: Krea quant sweep lane
+(session 01a074c7) killed ~10 minutes in while it was still enumerating (nothing downloaded beyond the installed
+Q3_K_M; server not running; brief kept at .tmp/runs/brief-krea-quants.md for whenever it is resumed). The open
+heavier-quant-vs-Klein question is parked with it; the references tool keeps Klein as default and Krea behind
+--local-reference-only. The ghost mini-A/B is no longer blocked behind the sweep; it runs when the current lanes
+drain.
+
+## HARVEST — intel-leak lane verified and committed on claude/intel-leak; classic 5b BLOCKED by my own brief; probe r5 status (2026-09-06 00:04)
+
+Intel-leak (dnd-wt-intel-leak, session 01a0733f) ended "INTEL LEAK COMPLETE",
+exit 0. Codex CLAIMS: locked full vitest 564 files / 9,729 tests, locked
+production build exit 0, tsc/sg 0, named mutation intel_names_hidden_option
+killed (cmp 0 after restore). I VERIFIED myself in the worktree: tsc -b
+--force exit 0 (35 s), sg scan exit 0, focused 8 files / 132 tests passed,
+schema generator re-run byte-stable (engine-turn-context 24fc55e9…,
+refusal-code 6955d048…), frozen contracts sha unchanged, no any/ts-ignore/
+skip/todo in the diff, no test deletions (the two removed expect lines are
+the pin update 32180→32000 and a reformatted toMatchObject), no
+`claude -p` in the lane log, docs/ touched only via the generator
+(docs/specs/*.schema.json). Pin moved with invariants (a)–(d) in the same
+commit as ruled. My two mutants, both killed by hidden-option-boundary:
+A "options_omitted_for_size always 0" → "expected +0 to be 4" (1 failed);
+B pruning floor `length > 2` → `> 0` → 3 of 4 failed incl. the no-offense
+test ("expected 0 to be greater than 0"). Both files restored byte-identical
+(cmp), 4/4 pass after. Committed 04fd8420 on claude/intel-leak. Full
+supervisor gate (gate-wt4.sh incl. browser) still owed before landing; it
+waits behind the ghost mini-A/B (box must be quiet, one heavy job at a time).
+D489/D490 free-text-reason contradiction sub-item: codex stopped it as
+infeasible without natural-language guessing; accepted, not implemented.
+
+Classic 5b (dnd-wt-classic5, session 01a07351) ended "CLASSIC ROUND 5B
+BLOCKED — DIST/SERVER HOLD MUST BE CLEARED", exit 0. FINDING AGAINST MY OWN
+BRIEF: the resume note said "do not touch dist/ or start/stop servers"
+(probe r5 uses that worktree's dist on 4660) while the same brief demanded
+the two Playwright specs on 4660 under the lock, the locked build, and fresh
+captures. Those three cannot run without dist/ or a server; codex stopped
+correctly. Codex CLAIMS completed: bust light invariants over 11 archetypes,
+bust_light_from_lower_right mutant failed (-31.04 vs > 12) and byte-identical
+restore, material responses consumed (mark/specular/edge), chrome/terrain/
+primer v9, locked full vitest 560 files / 9,721 tests, tsc/sg 0, 87 assets
+regenerated. NOT run: build, both specs, captures. NOTHING VERIFIED BY ME
+YET beyond: 72 files changed, no forbidden tokens in the diff, no
+`claude -p` in the log, no .claude/docs edits, frozen sha unchanged.
+Harvest resumes (clear the hold, resume the session for the three gates and
+captures, then my verification) once probe r5 has finished writing.
+
+Probe r5 (d536-probe24-r5): still running 2 h 30 m, 0 rows — NOT stuck: the
+tool appends all rows only after mapConcurrent finishes (probe line 2826);
+711 luna rollouts since 21:37 in ~/.codex-aidm, 708 with an agent message,
+0 aborted. Two models × 24 states × 10 questions = 480 tasks, so the excess
+is retries; will inspect at scoring.
+
+Mini-A/B (D429.1) for the ghost merge dda20902 LAUNCHED now on main
+e1765e3a (clean tree): brutal 10×1 seed 6203001 luna low full intel, out
+.tmp/runs/miniab-ghost.jsonl. Load at launch 0.8; only the network-bound
+probe shares the box.
+
+## FINDING — probe r5 (classic round 5 art, e5afcb98): REGRESSION on every class but blocked; images are 4× the pixels (2026-09-06 00:09)
+
+d536-probe24-r5 finished 00:06 (480 rows: luna low + medium × 24 states × Q1–Q10,
+primer v8, generation g5-round5-24, board glyphs full). Same 24 stateIds as
+the round-4 seed-2 run (d541-probe24-r4-seed2, primer v7), so the comparison
+is paired. luna medium, mean Jaccard, r4-seed2 → r5:
+
+| class | r4 s2 | r5 | delta |
+|---|---:|---:|---:|
+| Q1 identity | 0.910 | 0.793 | -0.117 |
+| Q2 | 0.897 | 0.708 | -0.189 |
+| Q3 | 0.893 | 0.747 | -0.146 |
+| Q4 terrain | 0.707 | 0.479 | -0.228 |
+| Q5 light | 0.951 | 0.913 | -0.038 |
+| Q6 blocked | 0.750 | 0.792 | +0.042 |
+| Q7 doors | 0.808 | 0.537 | -0.271 |
+| Q8 | 0.833 | 0.750 | -0.083 |
+| Q9 fog | 0.639 | 0.236 | -0.403 |
+| Q10 HP | 0.956 | 0.677 | -0.279 |
+
+luna low is worse still (Q5 0.573, Q1 0.799, Q9 0.157). Strict gate FAIL on
+both efforts; only Q5 medium passes. Hallucination counts roughly doubled
+(Q9 1004 vs 342). Capture sizes: r4 948×1170 … 1588×2144; r5 1332×1194 …
+3124×2976 (the native 128 px redraw roughly doubled the linear size, ~4× the
+pixels); mean input tokens 132k → 162k per call. Q10 HP going from pass to
+0.68 and Q9 fog collapsing while the fog/HP semantics did not change points at
+the image size / downscaling by the vision model, not (only) the drawings; a
+paired test at a capped long edge is the next diagnostic (the probe has no
+scale option today: --board-glyphs --compare --generation --images-root
+--models --out --primer --rescore --seed --states only). Consequence: round 5
+is NOT probe-progress; 5b (primer v9, bigger terrain motifs) does not touch
+image size. Classic 5b harvest continues as planned (its gates and captures),
+then probe r5b, then a capture-scale diagnostic lane; no classic landing on
+main while the probe is below round 4. Owner-visible.
+
+## D429.1 mini-A/B for the ghost merge dda20902: shape MATCHES era controls; classic 5b resumed (2026-09-06 00:23)
+
+Run on main 5eddddd2 (contains dda20902; brutal 10×1 seed 6203001 luna low
+full intel; ~/dnd-slim-runs/miniab-ghost.jsonl, 10 rows, exit 0, load ≤1.4).
+Round-1 offense slots per room, my extraction script as before:
+
+| run | rooms 1–10 | mean | zero rooms | dash slots |
+|---|---|---:|---:|---:|
+| ghost (5eddddd2) | 1,1,2,3,3,2,0,2,VOID,1 | 1.67 | 1 (room 7) | 22 |
+| era controls | 1,1,2,2,3,2,0,2,3,1 | 1.70 | 1 (room 7) | — |
+
+Room 9 VOID = "Agent CLI timed out after 120000 ms" (8 tool calls, no
+decision; the arena's default 120 s, not an engine refusal — same kind as the
+a11y run's room-8 VOID). Same zero-offense room, mean within 0.03: the ghost
+merge did not change the play shape. Verdict: PASS (9 paired rooms, 1 void).
+Engine/renderer merges are unblocked; the intel-leak full gate runs after the
+classic 5b lane's locked gates so the box is not shared.
+
+Note on the first attempt: tools/ai-dm-arena.ts refuses --out inside the
+working tree ("--out must be outside the repository working tree"), so arena
+outputs stay in ~/dnd-slim-runs; only briefs/logs moved to .tmp/runs.
+
+Classic 5b lane resumed 00:22 (session 01a07351, sol high, brief
+.tmp/runs/resume-classic5b-hold-cleared.md, log
+.tmp/runs/log-classic5b-hold-cleared.log): hold cleared for the locked build,
+both 4660 specs and the captures; plus a read-only explanation of the
+capture-size change and options to cap it (no implementation).
+
+## FINDING AGAINST MY OWN DISPATCH — 5b resume with a short session id started a fresh session that loaded the forbidden codex-side skill; killed in ~40 s, re-dispatched (2026-09-06 00:24)
+
+My 00:22 resume used `resume 01a07351` (8-char prefix) and a brief that said
+"same COMMON RULES" by reference. codex-cli is now 0.153.4 (was 0.148.0); it
+treated the prefix as an unknown thread name and printed a NEW session id
+(01a074f4…, rollout has no round-5b brief text). Without lane context the
+model announced "I'm using the project's Claude-consensus workflow" and read
+~/.codex/skills/claude-consensus/SKILL.md (which prescribes `claude -p
+--model sonnet`). Killed before any exec beyond reads (the only exec was a
+sed of the skill file and .claude files; no claude invocation; worktree still
+88 changed paths). Log kept as .tmp/runs/log-classic5b-hold-cleared-KILLED-
+skill.log. Re-dispatched 00:24 with the FULL COMMON RULES header restated
+(explicitly: no claude, ~/.codex skills incl. claude-consensus do not apply)
+and the full UUID; the new log prints session id 01a07351-2240-74e1-8600-
+60f7edf52c52, i.e. the real resume. Rule added to memory: full UUID + verify
+the printed session id + restate the header in full on every resume.
+
+## HARVEST — classic 5b verified and committed on claude/classic-r5; supervisor mutant B SURVIVED → 5b.1 dispatched (2026-09-06 00:40)
+
+5b resumed lane (real session 01a07351-2240…) finished "CLASSIC ROUND 5B
+COMPLETE" in 13 min, exit 0. Codex CLAIMS: locked build exit 0 (36.6 s),
+ai-dm-board-snapshot.spec 1 passed (48 s), vtt-encounter.spec 3 passed
+(50 s), captures arena-6203010 1972×3640 + two reference rooms 1332×1194/
+1332×1296 under test-results/classic-round-5b-captures/, earlier locked full
+vitest 560 / 9,721. I VERIFIED: tsc -b --force 0, sg 0, focused 3 files /
+52 tests (classic-art-techniques, screenshot-probe, board-chrome), PRIMER
+v9 in the probe tool, 72 tracked changes / 0 untracked, no forbidden tokens,
+no claude invocation, no .claude/docs edits, frozen sha unchanged. My named
+mutant A (flip head shadow to cx-3,cy-4 and highlight to +0.3rx) KILLED:
+"fighter head: expected -28.075 to be greater than 12" (1 failed / 12
+passed); restore byte-identical.
+
+FINDING — mutant B SURVIVED: inverting `response.specular ===
+'single-cluster'` to `!==` in materialFinish (cluster painted on every
+non-metal, omitted on metal) leaves classic-art-techniques 13/13 green; only
+the starter-art hash change detector fails (2 tests). Cause: the Part 2(a)
+test asserts "bytes differ from baseline" for each field, which any
+consumption, including an inverted one, satisfies. Second finding on depth:
+materialFinish is a 3-pixel cluster plus a few mark pixels at one anchor
+(one extra row for 'soft') — a token consumption of rule 2(a), not a visible
+material response. Committed 5b as-is on claude/classic-r5 (message records
+the survivor) and dispatched 5b.1 (brief .tmp/runs/brief-classic5b1-
+material.md, resume by full UUID, header restated): visible per-material
+response derived from the quoted rule text, DIRECTIONAL tests, named
+mutations `specular_inverted` and `specular_never`, hash regen with the
+invariants, no dist/Playwright unless chrome changes.
+
+Capture-size answer from codex (read-only, accepted as the diagnosis to
+test): native cells 64→128 px (pixel-art.ts:17, board-chrome.ts), snapshot
+forced CSS tile 64→128 (ai-dm-board-snapshot.ts:39), device scale still 1,
+while semantic chrome did NOT scale (text scale 2, HP bar 40×4, glyphs 9 px,
+badges 30×22) — so a whole-board raster twice as large carries the same
+fixed-size badges/HP/glyphs, which any vision-side normalisation shrinks.
+Options listed (nearest-neighbour power-of-two probe PNG; probe-only 64 px
+CSS tile at the snapshot seam; fractional device scale; panel split; board
+and roster captured separately). Decision deferred until 5b.1 lands; the
+paired diagnostic will run on the 5b.1 art.
+
+Order of the box: 5b.1 lane now; intel-leak full gate (gate-wt4.sh
+wt-intel-leak) when 5b.1 ends; probe r5b + size diagnostic after that.
+
+## HARVEST — classic 5b.1 verified and committed; intel-leak full gate starting (2026-09-06 01:09)
+
+5b.1 (session 01a07351-2240…, 27 min) "CLASSIC ROUND 5B.1 COMPLETE", exit 0.
+Rule quoted from clean-room/final/01-art-direction.md: "Every material
+declares one dominant mark direction or edge-frequency class and must remain
+identifiable in a grayscale contact sheet at final size." Codex CLAIMS locked
+full vitest 560 files / 9,725 tests (416 s), starter-art oracle 27 tests /
+87 assets, contact sheets iteration-4 (+grayscale) and iteration-5
+byte-identical; build/Playwright not run (no chrome files changed — I
+confirmed: only pixel-art.ts, the hash modules, preview SVG, the technique
+test and 60 PNGs). I VERIFIED: tsc -b --force 0, sg 0, focused 12 files /
+119 tests, no forbidden tokens, no deleted tests (0 removed / 20 added
+assertion lines), no claude invocation, frozen sha unchanged. Both named
+mutants applied by me and KILLED: specular_inverted → 3/17 failed ("metal
+specular cluster must contain at least six brightest pixels: expected 0 to
+be ≥ 6"; "matte stone must contain zero brightest-cluster pixels: expected
+6 to be +0"; colour budget); specular_never → 3/17 failed (field-influence,
+metal cluster, forced-gloss control). Restores byte-identical, 17/17 after.
+Survivor B from 5b is closed. Committed on claude/classic-r5 (see git log;
+5b = 36e7b7f8). Classic still does NOT land: probe r5b and the capture-size
+diagnostic come first (after the intel-leak gate, one heavy job at a time).

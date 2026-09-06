@@ -398,12 +398,15 @@ describe('hand-authored serialized-surface change register', () => {
     };
     expect(captured).toEqual({
       ...PRE_EDIT_POLICY_LITERALS,
-      actorKnowledge: 'actor-knowledge-v3',
+      sessionSchema: '12',
+      replaySchema: '7',
+      actorKnowledge: 'actor-knowledge-last-seen-v4',
       dmTurn: 'dm-turn-intel-v2-creature-space',
       dmQuery: 'dm-intel-query-v2-creature-space',
       dmCapture: 'dm-intel-capture-v2-creature-space',
       renderer: 'turn-context-renderer-v4-creature-space',
-      engineActorKnowledge: 'actor-knowledge-v2-creature-space',
+      engineActorKnowledge: 'actor-knowledge-v3-last-seen',
+      engineCapsuleSchema: '3',
     });
   });
 

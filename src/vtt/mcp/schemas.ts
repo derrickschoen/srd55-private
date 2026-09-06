@@ -21,7 +21,7 @@ import { rendererAttributionSchema } from '../renderer-profile';
 import { creatureSizes } from '../../domain/enums';
 import { KB_SUBJECTS } from '../knowledge-base-subjects';
 
-export const ENGINE_ACTOR_KNOWLEDGE_POLICY = 'actor-knowledge-v2-creature-space' as const;
+export const ENGINE_ACTOR_KNOWLEDGE_POLICY = 'actor-knowledge-v3-last-seen' as const;
 export const ENGINE_LEGENDARY_WINDOWS_POLICY = 'legendary-windows-v2' as const;
 export const ENGINE_REACTION_SPEND_HOLD_POLICY = 'reaction-spend-hold-v1' as const;
 export const ENGINE_RECOVERY_CAPABILITY_POLICY = 'recovery-capability-v2' as const;
@@ -454,7 +454,7 @@ const actorKnowledgeTarget = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('unknown'), target_id: identifier,
     last_seen: z.object({
-      status: z.literal('unresolved'), reason: z.literal('last_seen_position_not_modeled'),
+      status: z.literal('unresolved'), reason: z.literal('never_observed'),
     }).strict(),
   }).strict(),
 ]);
