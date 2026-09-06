@@ -12027,3 +12027,19 @@ semantic boards; (8) audio optional; (9) file/link community loops; (10)
 honest security ceiling. Lesser-known examples: OpenFrontIO, Rune, tldraw,
 LDtk. Owner questions 1-12 listed; the gating one (optional TURN/ordering
 relay ever allowed?) goes to the owner first.
+
+## Owner: "should we switch to React or other fundamental shift?" — research dispatched (2026-09-06 10:03)
+
+Owner asked whether to switch to React or make another fundamental shift,
+and for research on how the latest browser games are built library-wise.
+Answered WebGL/Unity/Godot from the prior report plus checks (Unity 6.6
+WebGPU production, Godot .NET web export still unofficial): stay Canvas +
+DOM, Pixi only against measurements, engines only if the product changes
+shape. Dispatched codex research lane (brief .tmp/runs/
+brief-framework-shift.md, log .tmp/runs/log-framework-shift.log, same
+private dir and rules as the prior-art lane): 15+ titles with evidence per
+title, survey/npm/benchmark data, the framework question argued both ways
+against our actual UI code (~4.7k lines of imperative DOM in four files,
+269k src / 286k test lines), other fundamental shifts (worker, wasm,
+monorepo, CSS, signals, testing), one recommendation with a decision rule.
+Supervisor review on harvest.
