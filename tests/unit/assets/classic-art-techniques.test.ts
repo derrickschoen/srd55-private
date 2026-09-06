@@ -26,6 +26,16 @@ import { STARTER_ART_INPUTS } from '../../../src/assets/starter-art-inputs';
 const EXPECTED_NATIVE_SIZE = 128;
 /** Fine accents are deliberately sparse; four percent still rejects every 2x enlargement. */
 const MIN_NATIVE_DETAIL_FRACTION = 0.04;
+const TWO_BY_CHROME_OVERLAY_IDS = new Set([
+  'art.map.overlay.light-glyph-bright.v1',
+  'art.map.overlay.light-glyph-dim.v1',
+  'art.map.overlay.light-glyph-dark.v1',
+  'art.map.overlay.glyph-door-closed.v1',
+  'art.map.overlay.glyph-door-open.v1',
+  'art.map.overlay.glyph-blocked.v1',
+  'art.map.overlay.glyph-fog.v1',
+  'art.map.overlay.glyph-obscured.v1',
+]);
 
 type AssetClass = ArtRecipe['kind'];
 
@@ -909,11 +919,25 @@ describe('classic native-density and art-technique invariants', () => {
     }
   });
 
-  it('contains native one-pixel decisions that cannot be reconstructed through 64 pixels', () => {
+  it('keeps physical art native-detailed while semantic chrome is an exact 2x rendering of its 64-pixel design', () => {
     expect(TILE_SIZE).toBe(EXPECTED_NATIVE_SIZE);
     for (const input of STARTER_ART_INPUTS) {
+      const rendered = paintRecipe(input.recipe);
+      if (TWO_BY_CHROME_OVERLAY_IDS.has(input.id)) {
+        expect(nativeDetailFraction(rendered), input.id).toBe(0);
+        const reduced = new Bitmap(64, 64);
+        for (let y = 0; y < 64; y += 1) {
+          for (let x = 0; x < 64; x += 1) {
+            reduced.blendRgba(x, y, rendered.get(x * 2, y * 2));
+          }
+        }
+        expect(rendered.data, `${input.id} exact 2x chrome`).toEqual(
+          twoByUpscale(reduced).data,
+        );
+        continue;
+      }
       expect(
-        nativeDetailFraction(paintRecipe(input.recipe)),
+        nativeDetailFraction(rendered),
         input.id,
       ).toBeGreaterThanOrEqual(MIN_NATIVE_DETAIL_FRACTION);
     }

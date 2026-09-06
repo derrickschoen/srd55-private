@@ -6,6 +6,7 @@ import { OBJECT_GLYPH, type BoardGlyphMode } from '../assets/board-glyphs';
 import { renderPixelGlyph } from '../assets/pixel-font';
 import {
   OBJECT_LABEL_STYLE,
+  boardChromeMetrics,
   renderBoardChrome,
   type BoardChromeTilePx,
 } from './board-chrome';
@@ -301,6 +302,7 @@ export function renderBoard(
   boardSnapshotMode = false,
   boardChromeTilePx?: BoardChromeTilePx,
 ): HTMLDivElement {
+  const chromeMetrics = boardChromeMetrics(boardChromeTilePx);
   const art = encounterArtForBoard(projection, boardGlyphs);
   const models = encounterBoardRenderModel(projection, art);
   const board = element('div', { className: 'encounter-board' });
@@ -386,7 +388,13 @@ export function renderBoard(
       placed.dataset.cover = object.blocking.cover;
       placed.dataset.lightClass = object.lightClass;
       if (art.boardGlyphs === 'full' && object.kind !== 'door' && object.lightClass !== 'light-source') {
-        const rendered = renderPixelGlyph('object', OBJECT_GLYPH.rows, OBJECT_GLYPH.ink, 1, OBJECT_GLYPH.outline);
+        const rendered = renderPixelGlyph(
+          'object',
+          OBJECT_GLYPH.rows,
+          OBJECT_GLYPH.ink,
+          chromeMetrics.latticeScale,
+          OBJECT_GLYPH.outline,
+        );
         const sigil = element('img', { className: 'encounter-world-object-sigil' });
         sigil.alt = '';
         sigil.setAttribute('aria-hidden', 'true');

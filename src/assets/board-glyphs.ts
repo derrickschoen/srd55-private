@@ -48,6 +48,7 @@ export const GLYPH_FAMILY_CORNER: Readonly<Record<CornerGlyphFamily, GlyphCorner
 });
 
 export const CELL_GLYPH_SIZE = 9;
+export const CELL_GLYPH_BASE_TILE_SIZE = 64;
 /** Tile pixels from the cell edge to the mark; the 1-px outline ring sits one pixel closer. */
 export const CELL_GLYPH_MARGIN = 2;
 /**
@@ -58,10 +59,22 @@ export const CELL_GLYPH_HP_BAR_CLEARANCE = 8;
 /** Pitch between the corner slot and the next slot inward: mark plus both ring columns. */
 export const CELL_GLYPH_SLOT_PITCH = CELL_GLYPH_SIZE + 2;
 
+export function cellGlyphScale(tileSize: number): number {
+  const scale = tileSize / CELL_GLYPH_BASE_TILE_SIZE;
+  if (!Number.isSafeInteger(scale) || scale < 1) {
+    throw new RangeError('Cell-glyph tile size must be a positive integer multiple of 64.');
+  }
+  return scale;
+}
+
+export function cellGlyphSizePx(tileSize: number): number {
+  return CELL_GLYPH_SIZE * cellGlyphScale(tileSize);
+}
+
 export const CELL_GLYPH_KINDS = ['door-closed', 'door-open', 'blocked', 'fog', 'obscured'] as const;
 export type CellGlyphKind = (typeof CELL_GLYPH_KINDS)[number];
 
-/** Slot 0 is the corner itself; slot 1 is one pitch inward along the cell's bottom edge. */
+/** Slot 0 is the corner itself; slot 1 climbs the edge so the centred badge lane stays clear. */
 export type GlyphSlot = 0 | 1;
 
 export interface CellGlyph extends PixelMark {
@@ -152,7 +165,7 @@ export const CELL_GLYPHS: Readonly<Record<CellGlyphKind, CellGlyph>> = Object.fr
   obscured: {
     family: 'veil',
     slot: 1,
-    label: 'OBSCURED',
+    label: 'OBSCURED - COOL-BLUE DIAMOND VEIL',
     rows: M(
       '.........',
       '.........',
@@ -173,14 +186,17 @@ export const CELL_GLYPHS: Readonly<Record<CellGlyphKind, CellGlyph>> = Object.fr
 export function cellGlyphOrigin(kind: CellGlyphKind, tileSize: number): { readonly x: number; readonly y: number } {
   const glyph = CELL_GLYPHS[kind];
   const corner = GLYPH_FAMILY_CORNER[glyph.family];
-  const near = CELL_GLYPH_MARGIN;
-  const far = tileSize - CELL_GLYPH_MARGIN - CELL_GLYPH_SIZE;
-  const low = far - CELL_GLYPH_HP_BAR_CLEARANCE;
+  const scale = cellGlyphScale(tileSize);
+  const near = CELL_GLYPH_MARGIN * scale;
+  const size = CELL_GLYPH_SIZE * scale;
+  const far = tileSize - CELL_GLYPH_MARGIN * scale - size;
+  const low = far - CELL_GLYPH_HP_BAR_CLEARANCE * scale;
+  const pitch = CELL_GLYPH_SLOT_PITCH * scale;
   switch (corner) {
-    case 'top-left': return { x: near + glyph.slot * CELL_GLYPH_SLOT_PITCH, y: near };
-    case 'top-right': return { x: far - glyph.slot * CELL_GLYPH_SLOT_PITCH, y: near };
-    case 'bottom-left': return { x: near + glyph.slot * CELL_GLYPH_SLOT_PITCH, y: low };
-    case 'bottom-right': return { x: far - glyph.slot * CELL_GLYPH_SLOT_PITCH, y: low };
+    case 'top-left': return { x: near + glyph.slot * pitch, y: near };
+    case 'top-right': return { x: far - glyph.slot * pitch, y: near };
+    case 'bottom-left': return { x: near + glyph.slot * pitch, y: low };
+    case 'bottom-right': return { x: far, y: low - glyph.slot * pitch };
   }
 }
 

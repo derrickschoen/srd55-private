@@ -673,7 +673,6 @@
 
 .encounter-board {
   --encounter-tile-size: 128px;
-  --chrome-gutter: 24px;
   border-color: #393842;
   background: #111113;
 }
@@ -751,7 +750,7 @@
 .encounter-light-dim { background-color: transparent; background-image: var(--art-overlay-light-dim); }
 
 .encounter-world-object {
-  box-shadow: inset 0 0 0 2px rgb(196 150 84 / 85%);
+  box-shadow: inset 0 0 0 var(--chrome-world-object-border, 2px) rgb(196 150 84 / 85%);
 }
 
 .encounter-world-object[data-light-class='light-source'] {
@@ -761,8 +760,8 @@
 
 .encounter-world-object-sigil {
   position: absolute;
-  top: 26px;
-  left: 26px;
+  top: var(--chrome-world-object-sigil-inset, 26px);
+  left: var(--chrome-world-object-sigil-inset, 26px);
   display: block;
   image-rendering: pixelated;
   image-rendering: crisp-edges;
@@ -800,6 +799,7 @@
 
 .encounter-board[data-board-chrome='on'] {
   padding: var(--chrome-gutter);
+  border-width: var(--chrome-board-border);
 }
 
 /* The chrome roster carries the full name; the in-cell label stays in the
@@ -857,7 +857,7 @@
 .encounter-hp-bar {
   display: block;
   box-sizing: content-box;
-  border: 1px solid #111113;
+  border: var(--chrome-hp-border) solid #111113;
   background: #2a2c30;
 }
 
@@ -886,18 +886,18 @@
   grid-column: 1 / -1;
   box-sizing: border-box;
   align-content: flex-start;
-  gap: 6px 14px;
+  gap: var(--chrome-legend-row-gap) var(--chrome-legend-column-gap);
   overflow: visible;
-  padding: 6px 8px;
-  border: 2px solid #393842;
+  padding: var(--chrome-legend-padding-y) var(--chrome-legend-padding-x);
+  border: var(--chrome-legend-border) solid #393842;
   background: #201f24;
 }
 
 .encounter-legend-item {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  height: 18px;
+  gap: var(--chrome-legend-item-gap);
+  height: var(--chrome-legend-item-height);
 }
 
 .encounter-legend-swatch {
@@ -908,15 +908,15 @@
 }
 
 .encounter-legend-art .encounter-legend-swatch {
-  width: 14px;
-  height: 14px;
+  width: var(--chrome-legend-swatch);
+  height: var(--chrome-legend-swatch);
 }
 
 .encounter-object-tag-rail {
   display: flex;
   flex: 1 0 100%;
   flex-wrap: wrap;
-  gap: 4px 8px;
+  gap: var(--chrome-object-rail-row-gap) var(--chrome-object-rail-column-gap);
   align-items: flex-start;
   overflow: visible;
 }
@@ -924,16 +924,16 @@
 .encounter-board-tag {
   display: inline-flex;
   flex: 0 0 auto;
-  gap: 4px;
+  gap: var(--chrome-tag-gap);
   align-items: center;
-  padding: 2px 3px;
+  padding: var(--chrome-tag-padding-y) var(--chrome-tag-padding-x);
   background: #111113;
 }
 
-.encounter-object-tag { border: 1px solid #8e7148; }
+.encounter-object-tag { border: var(--chrome-object-tag-border) solid #8e7148; }
 
 .encounter-door-tag {
-  border: 2px solid #b0b2b9;
+  border: var(--chrome-door-tag-border) solid #b0b2b9;
   background: #2a2c30;
 }
 
@@ -949,19 +949,19 @@
   display: flex;
   flex: 1 0 100%;
   flex-direction: column;
-  gap: 4px;
-  padding-top: 4px;
-  border-top: 2px solid #393842;
+  gap: var(--chrome-roster-box-gap);
+  padding-top: var(--chrome-roster-box-padding-top);
+  border-top: var(--chrome-roster-box-border) solid #393842;
 }
 
 .encounter-roster-entry {
   display: grid;
-  grid-template-columns: 26px max-content max-content max-content max-content max-content;
-  gap: 8px;
+  grid-template-columns: var(--chrome-roster-badge-column) max-content max-content max-content max-content max-content;
+  gap: var(--chrome-roster-grid-gap);
   align-items: center;
-  min-height: 20px;
-  padding: 2px 3px;
-  border: 1px solid #393842;
+  min-height: var(--chrome-roster-entry-min-height);
+  padding: var(--chrome-roster-entry-padding-y) var(--chrome-roster-entry-padding-x);
+  border: var(--chrome-roster-entry-border) solid #393842;
   background: #111113;
 }
 

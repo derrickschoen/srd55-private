@@ -235,6 +235,7 @@ export function renderCreatureBadgeBitmap(
   number: number,
   disc: PaletteColorRef,
   numeralInk: PaletteColorRef,
+  scale: number = BOARD_CHROME_ART_SCALE,
 ): CreatureBadgeBitmap {
   const frame = outerBoundaryRows(BADGE_ROWS);
   const digits = numeralRows(number);
@@ -247,7 +248,7 @@ export function renderCreatureBadgeBitmap(
     ...generatedSvg(
       CREATURE_BADGE_NATIVE_WIDTH,
       CREATURE_BADGE_NATIVE_HEIGHT,
-      BOARD_CHROME_ART_SCALE,
+      scale,
       [
         rectGroup(runs(BADGE_ROWS, 1, 1), disc),
         rectGroup(runs(frame.lit), CHROME_FRAME_LIGHT_INK),
@@ -291,6 +292,7 @@ function ringRows(size: number): readonly string[] {
 export function renderCreatureRingBitmap(
   ink: PaletteColorRef,
   nativeSize: number = CREATURE_RING_NATIVE_SIZE,
+  scale: number = BOARD_CHROME_ART_SCALE,
 ): GeneratedChromeBitmap {
   if (
     !Number.isSafeInteger(nativeSize) ||
@@ -321,7 +323,7 @@ export function renderCreatureRingBitmap(
     nativeSize,
     (x, y) => sourcePixel(boundary, x, y) && x + y >= nativeSize - 1,
   );
-  return generatedSvg(nativeSize, nativeSize, BOARD_CHROME_ART_SCALE, [
+  return generatedSvg(nativeSize, nativeSize, scale, [
     rectGroup(runs(ring), ink),
     rectGroup(runs(litBoundary), CHROME_FRAME_LIGHT_INK),
     rectGroup(runs(shadowBoundary), CHROME_FRAME_DARK_INK),
@@ -358,6 +360,7 @@ const HP_ROWS = Object.freeze(['##########', '##########', '##########']);
 export function renderChromeSwatchBitmap(
   ink: PaletteColorRef,
   shape: ChromeSwatchShape,
+  scale: number = BOARD_CHROME_ART_SCALE,
 ): GeneratedChromeBitmap {
   const rows = (() => {
     switch (shape) {
@@ -371,7 +374,7 @@ export function renderChromeSwatchBitmap(
         return HP_ROWS;
     }
   })();
-  return generatedSvg(rows[0]!.length, rows.length, BOARD_CHROME_ART_SCALE, [
+  return generatedSvg(rows[0]!.length, rows.length, scale, [
     rectGroup(runs(rows), ink),
   ]);
 }

@@ -20,6 +20,8 @@ import {
   GLYPH_FAMILY_CORNER,
   HIDDEN_GLYPH,
   HIDDEN_GLYPH_LABEL,
+  cellGlyphScale,
+  cellGlyphSizePx,
   cellGlyphOrigin,
   cellGlyphsFor,
   drawsLightGlyphs,
@@ -28,7 +30,7 @@ import {
   type CellGlyphKind,
 } from '../../../src/assets/board-glyphs';
 import { LIGHT_GLYPHS, LIGHT_GLYPH_KINDS, LIGHT_GLYPH_SIZE } from '../../../src/assets/light-glyphs';
-import { paletteRgb } from '../../../src/assets/palette';
+import { paletteRgb, ramp } from '../../../src/assets/palette';
 import {
   CELL_GLYPH_EFFECTS,
   CELL_GLYPH_EFFECT_BY_KIND,
@@ -37,12 +39,14 @@ import {
   TILE_SIZE,
   paintRecipe,
   type CellGlyphEffect,
+  type OverlayEffect,
 } from '../../../src/assets/pixel-art';
 import { hammingDistance, inkCount, outlineRows, padMark } from '../../../src/assets/pixel-mark';
 import { combatantId, worldObjectId } from '../../../src/combat/values';
 import {
   CELL_GLYPH_RING_BOTTOM_PX,
   CHROME_TILE_PX,
+  COORDINATE_GUTTER_PX,
   HP_BAR_TOP_PX,
   LIFE_GLYPH_BELOW_DOOR_PX,
   LIFE_GLYPH_INSET_PX,
@@ -119,17 +123,19 @@ describe('D525 glyph families own distinct corners and silhouettes', () => {
   });
 
   it('places each kind in its family corner, the bottom row clear of the HP bar, and no two boxes overlap on one cell', () => {
+    const scale = cellGlyphScale(TILE_SIZE);
+    const glyphSize = cellGlyphSizePx(TILE_SIZE);
     const boxes = CELL_GLYPH_KINDS.map((kind) => {
       const origin = cellGlyphOrigin(kind, TILE_SIZE);
-      return { kind, x0: origin.x - 1, y0: origin.y - 1, x1: origin.x + CELL_GLYPH_SIZE, y1: origin.y + CELL_GLYPH_SIZE };
+      return { kind, x0: origin.x - scale, y0: origin.y - scale, x1: origin.x + glyphSize + scale - 1, y1: origin.y + glyphSize + scale - 1 };
     });
-    const near = CELL_GLYPH_MARGIN;
-    const far = TILE_SIZE - CELL_GLYPH_MARGIN - CELL_GLYPH_SIZE;
+    const near = CELL_GLYPH_MARGIN * scale;
+    const far = TILE_SIZE - near - glyphSize;
     expect(cellGlyphOrigin('door-closed', TILE_SIZE)).toEqual({ x: far, y: near });
     expect(cellGlyphOrigin('door-open', TILE_SIZE)).toEqual({ x: far, y: near });
-    expect(cellGlyphOrigin('blocked', TILE_SIZE)).toEqual({ x: near, y: far - CELL_GLYPH_HP_BAR_CLEARANCE });
-    expect(cellGlyphOrigin('fog', TILE_SIZE)).toEqual({ x: far, y: far - CELL_GLYPH_HP_BAR_CLEARANCE });
-    expect(cellGlyphOrigin('obscured', TILE_SIZE)).toEqual({ x: far - CELL_GLYPH_SLOT_PITCH, y: far - CELL_GLYPH_HP_BAR_CLEARANCE });
+    expect(cellGlyphOrigin('blocked', TILE_SIZE)).toEqual({ x: near, y: far - CELL_GLYPH_HP_BAR_CLEARANCE * scale });
+    expect(cellGlyphOrigin('fog', TILE_SIZE)).toEqual({ x: far, y: far - CELL_GLYPH_HP_BAR_CLEARANCE * scale });
+    expect(cellGlyphOrigin('obscured', TILE_SIZE)).toEqual({ x: far, y: far - (CELL_GLYPH_HP_BAR_CLEARANCE + CELL_GLYPH_SLOT_PITCH) * scale });
     for (const box of boxes) {
       expect(box.x0, box.kind).toBeGreaterThanOrEqual(0);
       expect(box.y0, box.kind).toBeGreaterThanOrEqual(0);
@@ -137,7 +143,7 @@ describe('D525 glyph families own distinct corners and silhouettes', () => {
       expect(box.y1, box.kind).toBeLessThan(TILE_SIZE);
     }
     // the light glyph's box (top-left, 7 px at origin 2 with its ring) never meets a cell glyph's box
-    const lightBox = { x0: 1, y0: 1, x1: 2 + LIGHT_GLYPH_SIZE, y1: 2 + LIGHT_GLYPH_SIZE };
+    const lightBox = { x0: scale, y0: scale, x1: (2 + LIGHT_GLYPH_SIZE + 1) * scale - 1, y1: (2 + LIGHT_GLYPH_SIZE + 1) * scale - 1 };
     const disjoint = (a: typeof lightBox, b: typeof lightBox): boolean => a.x1 < b.x0 || b.x1 < a.x0 || a.y1 < b.y0 || b.y1 < a.y0;
     for (const box of boxes) expect(disjoint(lightBox, box), `light vs ${box.kind}`).toBe(true);
     // the only pair that can share a cell AND a corner (fog + obscured) sits in different slots
@@ -207,7 +213,13 @@ describe('D525 glyph families own distinct corners and silhouettes', () => {
     expect(eye[4]).toBe('#...#...#');
     for (let index = 0; index < CELL_GLYPH_SIZE; index += 1) expect(eye[index]?.[CELL_GLYPH_SIZE - 1 - index], `slash at ${String(index)}`).toBe('#');
     expect(HIDDEN_GLYPH_LABEL).toBe('HIDDEN');
-    expect(CELL_GLYPH_KINDS.map((kind) => CELL_GLYPHS[kind].label)).toEqual(['DOOR CLOSED', 'DOOR OPEN', 'BLOCKED', 'FOG', 'OBSCURED']);
+    expect(CELL_GLYPH_KINDS.map((kind) => CELL_GLYPHS[kind].label)).toEqual([
+      'DOOR CLOSED',
+      'DOOR OPEN',
+      'BLOCKED',
+      'FOG',
+      'OBSCURED - COOL-BLUE DIAMOND VEIL',
+    ]);
   });
 });
 
@@ -219,6 +231,69 @@ function overlay(effect: CellGlyphEffect): Bitmap {
   return paintRecipe({ kind: 'overlay', material: 'semantic', effect });
 }
 
+function compositeCell(layers: readonly Bitmap[]): Bitmap {
+  const result = new Bitmap(TILE_SIZE, TILE_SIZE);
+  for (const layer of layers) {
+    for (let y = 0; y < TILE_SIZE; y += 1) {
+      for (let x = 0; x < TILE_SIZE; x += 1) result.blendRgba(x, y, layer.get(x, y));
+    }
+  }
+  return result;
+}
+
+function semanticOverlay(effect: OverlayEffect): Bitmap {
+  return paintRecipe({ kind: 'overlay', material: 'semantic', effect });
+}
+
+function meanCellRgb(bitmap: Bitmap): readonly [number, number, number] {
+  const inset = 8;
+  const sampleSize = (TILE_SIZE - 2 * inset) ** 2;
+  let red = 0;
+  let green = 0;
+  let blue = 0;
+  for (let y = inset; y < TILE_SIZE - inset; y += 1) {
+    for (let x = inset; x < TILE_SIZE - inset; x += 1) {
+      const pixel = bitmap.get(x, y);
+      red += pixel.red;
+      green += pixel.green;
+      blue += pixel.blue;
+    }
+  }
+  return [red / sampleSize, green / sampleSize, blue / sampleSize];
+}
+
+function linearChannel(value: number): number {
+  const encoded = value / 255;
+  return encoded <= 0.04045
+    ? encoded / 12.92
+    : ((encoded + 0.055) / 1.055) ** 2.4;
+}
+
+function luminance(rgb: readonly [number, number, number]): number {
+  return 0.2126 * linearChannel(rgb[0]) + 0.7152 * linearChannel(rgb[1]) + 0.0722 * linearChannel(rgb[2]);
+}
+
+function lab(rgb: readonly [number, number, number]): readonly [number, number, number] {
+  const [red, green, blue] = rgb.map(linearChannel);
+  const x = (0.4124564 * red! + 0.3575761 * green! + 0.1804375 * blue!) / 0.95047;
+  const y = 0.2126729 * red! + 0.7151522 * green! + 0.072175 * blue!;
+  const z = (0.0193339 * red! + 0.119192 * green! + 0.9503041 * blue!) / 1.08883;
+  const transform = (value: number): number => value > 216 / 24_389
+    ? Math.cbrt(value)
+    : ((24_389 / 27) * value + 16) / 116;
+  return [
+    116 * transform(y) - 16,
+    500 * (transform(x) - transform(y)),
+    200 * (transform(y) - transform(z)),
+  ];
+}
+
+function cieDeltaE(left: readonly [number, number, number], right: readonly [number, number, number]): number {
+  const a = lab(left);
+  const b = lab(right);
+  return Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+}
+
 describe('D525 cell glyph tiles: pixel invariants', () => {
   it('each tile carries exactly its mark in its family corner box, the fog tile a hatch veil elsewhere, the rest nothing', () => {
     for (const kind of CELL_GLYPH_KINDS) {
@@ -227,44 +302,51 @@ describe('D525 cell glyph tiles: pixel invariants', () => {
       const glyph = CELL_GLYPHS[kind];
       const ring = outlineRows(glyph.rows);
       const origin = cellGlyphOrigin(kind, TILE_SIZE);
+      const scale = cellGlyphScale(TILE_SIZE);
       const hatchInk = paletteRgb({ ramp: 'neutral', step: 1 });
       let inkPixels = 0;
       for (let y = 0; y < TILE_SIZE; y += 1) {
         for (let x = 0; x < TILE_SIZE; x += 1) {
           const pixel = tile.get(x, y);
           const at = `${effect} at ${String(x)},${String(y)}`;
-          const gx = x - origin.x;
-          const gy = y - origin.y;
-          const inBox = gx >= -1 && gx <= CELL_GLYPH_SIZE && gy >= -1 && gy <= CELL_GLYPH_SIZE;
-          const isInk = inBox && glyph.rows[gy]?.[gx] === '#';
-          const isRing = inBox && !isInk && ring[gy + 1]?.[gx + 1] === '#';
+          const gx = Math.floor((x - origin.x) / scale);
+          const gy = Math.floor((y - origin.y) / scale);
+          const ringX = Math.floor((x - origin.x + scale) / scale);
+          const ringY = Math.floor((y - origin.y + scale) / scale);
+          const isInk = glyph.rows[gy]?.[gx] === '#';
+          const isRing = !isInk && ring[ringY]?.[ringX] === '#';
           if (isInk) {
             inkPixels += 1;
             expect({ red: pixel.red, green: pixel.green, blue: pixel.blue, alpha: pixel.alpha }, at).toEqual({ ...paletteRgb(glyph.ink), alpha: 255 });
           } else if (isRing) {
             expect({ red: pixel.red, green: pixel.green, blue: pixel.blue, alpha: pixel.alpha }, at).toEqual({ ...paletteRgb(glyph.outline), alpha: 255 });
-          } else if (kind === 'fog' && (x + y) % FOG_HATCH_PITCH === 0) {
+          } else if (
+            kind === 'fog' &&
+            (Math.floor(x / scale) + Math.floor(y / scale)) % FOG_HATCH_PITCH === 0
+          ) {
             expect({ red: pixel.red, green: pixel.green, blue: pixel.blue, alpha: pixel.alpha }, at).toEqual({ ...hatchInk, alpha: FOG_HATCH_ALPHA });
           } else {
             expect(pixel.alpha, at).toBe(0);
           }
         }
       }
-      expect(inkPixels, kind).toBe(inkCount(glyph.rows));
+      expect(inkPixels, kind).toBe(inkCount(glyph.rows) * scale * scale);
     }
     expect(new Set(CELL_GLYPH_EFFECTS.map((effect) => Buffer.from(overlay(effect).data).toString('base64'))).size).toBe(CELL_GLYPH_EFFECTS.length);
     expect(CELL_GLYPH_KINDS.map((kind) => CELL_GLYPH_EFFECT_BY_KIND[kind])).toEqual(CELL_GLYPH_EFFECTS);
     for (const effect of CELL_GLYPH_EFFECTS) expect(OVERLAY_ASSETS[effect]).toBe(`art.map.overlay.${effect}.v1`);
   });
 
-  it('the fog hatch is one dark diagonal line every six pixels and the obscured tile carries no veil of its own', () => {
+  it('the fog hatch preserves its one-in-six base-pixel density and the obscured glyph carries no duplicate veil', () => {
     const fog = overlay('glyph-fog');
     const origin = cellGlyphOrigin('fog', TILE_SIZE);
+    const scale = cellGlyphScale(TILE_SIZE);
+    const glyphSize = cellGlyphSizePx(TILE_SIZE);
     let hatched = 0;
     let clear = 0;
     for (let y = 0; y < TILE_SIZE; y += 1) {
       for (let x = 0; x < TILE_SIZE; x += 1) {
-        const outsideBox = x < origin.x - 1 || x > origin.x + CELL_GLYPH_SIZE || y < origin.y - 1 || y > origin.y + CELL_GLYPH_SIZE;
+        const outsideBox = x < origin.x - scale || x >= origin.x + glyphSize + scale || y < origin.y - scale || y >= origin.y + glyphSize + scale;
         if (!outsideBox) continue;
         if (fog.get(x, y).alpha > 0) hatched += 1;
         else clear += 1;
@@ -280,7 +362,87 @@ describe('D525 cell glyph tiles: pixel invariants', () => {
     for (let y = 0; y < TILE_SIZE; y += 1) {
       for (let x = 0; x < TILE_SIZE; x += 1) if (obscured.get(x, y).alpha > 0) opaque += 1;
     }
-    expect(opaque).toBe(inkCount(CELL_GLYPHS.obscured.rows) + inkCount(outlineRows(CELL_GLYPHS.obscured.rows)));
+    expect(opaque).toBe(
+      (inkCount(CELL_GLYPHS.obscured.rows) + inkCount(outlineRows(CELL_GLYPHS.obscured.rows))) * scale * scale,
+    );
+  });
+});
+
+describe('D562 obscured-cell directional contrast', () => {
+  it('draws both obscurement strengths as a two-direction cool-blue lattice over a patterned fill', () => {
+    const coolFive = paletteRgb(ramp('cloth-cool', 5));
+    const coolSix = paletteRgb(ramp('cloth-cool', 6));
+    for (const [effect, fillAlpha, latticeAlpha] of [
+      ['obscurement-light', 120, 205],
+      ['obscurement-heavy', 180, 235],
+    ] as const) {
+      const bitmap = semanticOverlay(effect);
+      let fallingDiagonalPixels = 0;
+      let risingDiagonalPixels = 0;
+      let patternedFillPixels = 0;
+      const alphas = new Set<number>();
+      for (let y = 0; y < TILE_SIZE; y += 1) {
+        for (let x = 0; x < TILE_SIZE; x += 1) {
+          const pixel = bitmap.get(x, y);
+          if (pixel.alpha === 0) continue;
+          alphas.add(pixel.alpha);
+          if (
+            pixel.red === coolFive.red &&
+            pixel.green === coolFive.green &&
+            pixel.blue === coolFive.blue &&
+            pixel.alpha === latticeAlpha
+          ) risingDiagonalPixels += 1;
+          else if (
+            pixel.red === coolSix.red &&
+            pixel.green === coolSix.green &&
+            pixel.blue === coolSix.blue &&
+            pixel.alpha === latticeAlpha
+          ) fallingDiagonalPixels += 1;
+          else patternedFillPixels += 1;
+        }
+      }
+      expect([...alphas].sort((left, right) => left - right)).toEqual([
+        fillAlpha,
+        latticeAlpha,
+      ]);
+      expect(risingDiagonalPixels, `${effect} rising lattice`).toBeGreaterThanOrEqual(900);
+      expect(fallingDiagonalPixels, `${effect} falling lattice`).toBeGreaterThanOrEqual(900);
+      expect(patternedFillPixels, `${effect} Bayer fill`).toBeGreaterThanOrEqual(3_000);
+    }
+  });
+
+  it('keeps the cool-blue diamond veil measurably distinct from bright, dim, dark and fogged cells at 128 px', () => {
+    const floor = paintRecipe({ kind: 'floor', material: 'stone', variant: 0 });
+    const cells = {
+      bright: compositeCell([floor, semanticOverlay('light-glyph-bright')]),
+      dim: compositeCell([floor, semanticOverlay('light-glyph-dim')]),
+      dark: compositeCell([floor, semanticOverlay('light-glyph-dark')]),
+      fogged: compositeCell([
+        floor,
+        paintRecipe({ kind: 'fog', material: 'fog', state: 'hidden' }),
+        semanticOverlay('glyph-fog'),
+      ]),
+      obscured: compositeCell([
+        floor,
+        semanticOverlay('obscurement-heavy'),
+        semanticOverlay('glyph-obscured'),
+      ]),
+    } as const;
+    const obscured = meanCellRgb(cells.obscured);
+    const differences: Record<string, { readonly luminance: number; readonly deltaE: number }> = {};
+    for (const [name, bitmap] of Object.entries(cells)) {
+      if (name === 'obscured') continue;
+      const comparison = meanCellRgb(bitmap);
+      differences[name] = {
+        luminance: Math.abs(luminance(obscured) - luminance(comparison)),
+        deltaE: cieDeltaE(obscured, comparison),
+      };
+    }
+    expect(Object.keys(differences)).toEqual(['bright', 'dim', 'dark', 'fogged']);
+    for (const [name, difference] of Object.entries(differences)) {
+      expect(difference.luminance, `${name} luminance difference`).toBeGreaterThanOrEqual(0.015);
+      expect(difference.deltaE, `${name} CIE76 deltaE`).toBeGreaterThanOrEqual(8.5);
+    }
   });
 });
 
@@ -498,9 +660,10 @@ describe('D525 board DOM under each mode on a room with every fact class', () =>
     // the hidden creature: eye-slash on the ring, HIDDEN in its roster line, and the dashed ring
     const eyes = dm.querySelectorAll('.encounter-hidden-glyph');
     expect(eyes.map((eye) => eye.getAttribute('data-combatant-id'))).toEqual([FOE]);
-    expect(styleOf(eyes[0], 'left')).toBe(24 + 2 * CHROME_TILE_PX + 1 - 1);
-    expect(styleOf(eyes[0], 'top')).toBe(24 + 2 * CHROME_TILE_PX + 29 - 1);
-    expect(styleOf(eyes[0], 'width')).toBe(CELL_GLYPH_SIZE + 2);
+    const scale = cellGlyphScale(CHROME_TILE_PX);
+    expect(styleOf(eyes[0], 'left')).toBe(COORDINATE_GUTTER_PX + 2 * CHROME_TILE_PX);
+    expect(styleOf(eyes[0], 'top')).toBe(COORDINATE_GUTTER_PX + 2 * CHROME_TILE_PX + 28 * scale);
+    expect(styleOf(eyes[0], 'width')).toBe((CELL_GLYPH_SIZE + 2) * scale);
     expect(dm.querySelectorAll('.encounter-hidden-ring').map((ring) => ring.getAttribute('data-combatant-id'))).toEqual([FOE]);
     const roster = dm.querySelectorAll('.encounter-roster-entry');
     const foeRow = roster.find((row) => row.getAttribute('data-combatant-id') === FOE);
@@ -510,12 +673,12 @@ describe('D525 board DOM under each mode on a room with every fact class', () =>
 
     // the scout stands in the open doorway: its life glyph drops below the door mark; the hero's does not
     const lifeOf = (id: string) => dm.querySelectorAll('.encounter-life-glyph').find((glyph) => glyph.getAttribute('data-combatant-id') === id);
-    expect(styleOf(lifeOf(SCOUT), 'top')).toBe(24 + OPEN_DOOR.row * CHROME_TILE_PX + LIFE_GLYPH_BELOW_DOOR_PX);
-    expect(styleOf(lifeOf(HERO), 'top')).toBe(24 + CHROME_TILE_PX + LIFE_GLYPH_INSET_PX);
-    expect(LIFE_GLYPH_BELOW_DOOR_PX).toBeGreaterThan(CELL_GLYPH_MARGIN + CELL_GLYPH_SIZE);
+    expect(styleOf(lifeOf(SCOUT), 'top')).toBe(COORDINATE_GUTTER_PX + OPEN_DOOR.row * CHROME_TILE_PX + LIFE_GLYPH_BELOW_DOOR_PX);
+    expect(styleOf(lifeOf(HERO), 'top')).toBe(COORDINATE_GUTTER_PX + CHROME_TILE_PX + LIFE_GLYPH_INSET_PX);
+    expect(LIFE_GLYPH_BELOW_DOOR_PX).toBeGreaterThan((CELL_GLYPH_MARGIN + CELL_GLYPH_SIZE) * scale);
     // the HP bar sits below every bottom-row glyph ring
     for (const bar of dm.querySelectorAll('.encounter-hp-bar')) {
-      expect((styleOf(bar, 'top') - 24) % CHROME_TILE_PX).toBe(HP_BAR_TOP_PX);
+      expect((styleOf(bar, 'top') - COORDINATE_GUTTER_PX) % CHROME_TILE_PX).toBe(HP_BAR_TOP_PX);
     }
   });
 
@@ -526,7 +689,9 @@ describe('D525 board DOM under each mode on a room with every fact class', () =>
     expect(dm.querySelectorAll('.encounter-roster-hidden')).toHaveLength(1);
     expect(dm.querySelectorAll('.encounter-nameplate')).toHaveLength(0);
     expect(dm.querySelectorAll('.encounter-hidden-ring')).toHaveLength(1);
-    for (const glyph of dm.querySelectorAll('.encounter-life-glyph')) expect((styleOf(glyph, 'top') - 24) % 64).toBe(LIFE_GLYPH_INSET_PX);
+    for (const glyph of dm.querySelectorAll('.encounter-life-glyph')) {
+      expect((styleOf(glyph, 'top') - COORDINATE_GUTTER_PX) % CHROME_TILE_PX).toBe(LIFE_GLYPH_INSET_PX);
+    }
     const keys = dm.querySelector('[data-legend]')?.querySelectorAll('.encounter-legend-item').map((item) => item.getAttribute('data-legend-key')) ?? [];
     expect(keys).toEqual(legendEntriesFor('light', 'bright', { cells: [], hidden: false }).map((entry) => entry.key));
     expect(keys).not.toContain('door-closed');

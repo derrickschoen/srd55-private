@@ -938,6 +938,7 @@ function paintLightSource(bitmap: Bitmap): void {
   bitmap.rect(51, 80, 3, 2, METAL(6));
 }
 function stampMark(bitmap: Bitmap, mark: PixelMark, origin: Point): void {
+  const scale = TILE_SIZE / 64;
   const stamp = (
     rows: readonly string[],
     x0: number,
@@ -946,30 +947,72 @@ function stampMark(bitmap: Bitmap, mark: PixelMark, origin: Point): void {
   ): void =>
     rows.forEach((row, y) =>
       Array.from(row).forEach((cell, x) => {
-        if (cell === '#') bitmap.put(x0 + x, y0 + y, ink);
+        if (cell === '#')
+          bitmap.rect(x0 + x * scale, y0 + y * scale, scale, scale, ink);
       }),
     );
-  stamp(outlineRows(mark.rows), origin.x - 1, origin.y - 1, mark.outline);
+  stamp(
+    outlineRows(mark.rows),
+    origin.x - scale,
+    origin.y - scale,
+    mark.outline,
+  );
   stamp(mark.rows, origin.x, origin.y, mark.ink);
 }
 function paintLightGlyph(bitmap: Bitmap, kind: LightGlyphKind): void {
+  const scale = TILE_SIZE / 64;
   stampMark(bitmap, LIGHT_GLYPHS[kind], {
-    x: LIGHT_GLYPH_ORIGIN,
-    y: LIGHT_GLYPH_ORIGIN,
+    x: LIGHT_GLYPH_ORIGIN * scale,
+    y: LIGHT_GLYPH_ORIGIN * scale,
   });
 }
 export const FOG_HATCH_PITCH = 6;
 export const FOG_HATCH_ALPHA = 150;
-function paintFogHatch(bitmap: Bitmap): void {
+function paintFogHatch(
+  bitmap: Bitmap,
+  pitch = FOG_HATCH_PITCH,
+  thickness = 1,
+): void {
+  const scale = pitch / FOG_HATCH_PITCH;
   for (let y = 0; y < TILE_SIZE; y += 1)
     for (let x = 0; x < TILE_SIZE; x += 1) {
-      if ((x + y) % FOG_HATCH_PITCH === 0)
+      if (
+        scale === thickness && Number.isSafeInteger(scale)
+          ? (Math.floor(x / scale) + Math.floor(y / scale)) % FOG_HATCH_PITCH === 0
+          : (x + y) % pitch < thickness
+      )
         bitmap.put(x, y, translucent(neutral(1), FOG_HATCH_ALPHA));
     }
 }
 function paintCellGlyph(bitmap: Bitmap, kind: CellGlyphKind): void {
-  if (kind === 'fog') paintFogHatch(bitmap);
+  const scale = TILE_SIZE / 64;
+  if (kind === 'fog') paintFogHatch(bitmap, FOG_HATCH_PITCH * scale, scale);
   stampMark(bitmap, CELL_GLYPHS[kind], cellGlyphOrigin(kind, TILE_SIZE));
+}
+
+function paintObscurement(bitmap: Bitmap, strength: 'light' | 'heavy'): void {
+  const fillAlpha = strength === 'light' ? 120 : 180;
+  const latticeAlpha = strength === 'light' ? 205 : 235;
+  paintVeil(bitmap, translucent(COOL(3), fillAlpha), 1, 4);
+  const pitch = 32;
+  for (let offset = -TILE_SIZE; offset < TILE_SIZE * 2; offset += pitch) {
+    for (const thickness of [0, 1] as const) {
+      bitmap.line(
+        offset + thickness,
+        3,
+        offset + TILE_SIZE - 7 + thickness,
+        TILE_SIZE - 4,
+        translucent(COOL(6), latticeAlpha),
+      );
+      bitmap.line(
+        offset + thickness,
+        TILE_SIZE - 4,
+        offset + TILE_SIZE - 7 + thickness,
+        3,
+        translucent(COOL(5), latticeAlpha),
+      );
+    }
+  }
 }
 function paintOverlay(bitmap: Bitmap, effect: OverlayEffect): void {
   switch (effect) {
@@ -977,10 +1020,10 @@ function paintOverlay(bitmap: Bitmap, effect: OverlayEffect): void {
       paintDifficult(bitmap);
       return;
     case 'obscurement-light':
-      paintVeil(bitmap, translucent(neutral(6), 145), 1, 3);
+      paintObscurement(bitmap, 'light');
       return;
     case 'obscurement-heavy':
-      paintVeil(bitmap, translucent(neutral(5), 195), 2, 3);
+      paintObscurement(bitmap, 'heavy');
       return;
     case 'magical-darkness':
       paintVeil(bitmap, translucent(neutral(0), 235), 4, 0);

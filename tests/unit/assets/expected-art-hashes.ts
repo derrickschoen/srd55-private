@@ -157,9 +157,9 @@ export const EXPECTED_STARTER_ART_SHA256: Readonly<Record<string, string>> =
     'art.map.overlay.difficult.v1':
       '20818957d179ad680cc43e7138782cfe5946efed51c9919ad25831e83f571d17',
     'art.map.overlay.obscurement-light.v1':
-      '5094e490e219e12505fddd6a1fc70a47efed89de8eaea21e702b0b2239ae37ca',
+      'e188a5625f8d205bdf1a6af483477dd83d965be5c3bc51123129ce1f4fb4fa64',
     'art.map.overlay.obscurement-heavy.v1':
-      'b4add9ae905389b1dee98575b1670a43a85ff52fae45ca4f75077c312351d032',
+      'd73b43ad89802b5e9b7167b745114e1294394dd0a25fea788e8fabf2411f4d59',
     'art.map.overlay.magical-darkness.v1':
       '18826a590a87b7244b22ab9b67e725d4291caec9499dc7e17e1b4fe109af9af0',
     'art.map.overlay.light-bright.v1':
@@ -173,21 +173,21 @@ export const EXPECTED_STARTER_ART_SHA256: Readonly<Record<string, string>> =
     'art.map.overlay.light-source.v1':
       'c7d9abf3e1369eb509dcd29865e7413d487a1f645a106af61cc04ff915f97766',
     'art.map.overlay.light-glyph-bright.v1':
-      '889a8e0db7b3e38cc2c3789b7cc0192a6c0ab025a6c32e23ba6b16ebf10e6264',
+      '3f938dc9199c4d2dcbb8a4cdab68a6114a692f87dc7f9189bb4a7ecb1dab7e44',
     'art.map.overlay.light-glyph-dim.v1':
-      '98b627911ff53087ba2f485909fd2255721aa2dececeee23b3ea2b8d277659b6',
+      'c9dc4ca4547c5b6d9455cf2dda9125bfab29a5ac7c41c57022ef9d0b4a26669d',
     'art.map.overlay.light-glyph-dark.v1':
-      '88edf65ebf73d0c72182d38e675e696ab851b00db00bba319406d2b09da1f972',
+      '8158fdfa90bb05914a308a12ea8b7380912c322326713666a00c3989667147d7',
     'art.map.overlay.glyph-door-closed.v1':
-      '4ddb7ae4860e27239edfaec15f5e2bec3e202c7ec3e9530ec4359603169bc3ec',
+      '9d06a29037ed243e5763b21d95af4b24393ac1a0f6f5a61834706ff56fcbbf19',
     'art.map.overlay.glyph-door-open.v1':
-      'f9508e99ea9e0a21c2742ea5d5c3e6e9ed09f59e1f1f9aaadbce572df629194f',
+      '67eab988aa7766b89190664db7b90a34b8c7563857d7bdc666e434b9b6706596',
     'art.map.overlay.glyph-blocked.v1':
-      'f0827d84d891463dc5253b496c06df09c15d5c180ce47fdfd9784c6f73502708',
+      'ed4fd0107db1ec30aa7a610f520c90bb006d5e16dbbb22935ccdbdda3b174b9e',
     'art.map.overlay.glyph-fog.v1':
-      'a4c792f767775bfc472dfc0f527a306bec32d4be2c3338de239335e906628a59',
+      '53aa42b20ed165438a0efcd22612a9d653640f70d56eff8c6cfe2772c1c15ee0',
     'art.map.overlay.glyph-obscured.v1':
-      '6917ec378bae8c1cb2e29d0a0d843b5fa80c1bbed6461ca8626f8df1190980c5',
+      '8409b44e5e7b6bdf1e9e83c6d60c5bcf5120b13a6345dd231de7446056765664',
     'art.terrain.rubble.v1':
       '9200bcaff30d4f549f458e0741297507920645d4a3b2d72ccd9fd39161c00dd1',
     'art.terrain.crate.v1':
@@ -215,4 +215,4 @@ export const EXPECTED_FIXED_INPUTS_SHA256 =
   '8649f9165fc76812a931af6e428bacb004caea4d8b70417ff86f3b7bcdc83a97';
 /** sha256 of src/assets/preview/starter-art-board.svg; the preview embeds all 87 assets at integer scale. */
 export const EXPECTED_PREVIEW_SHA256 =
-  'dc4b3cf5bcfd1f0e4646175c9595c95419630d1ccebf581254cf2cde17c6c4e9';
+  '48233eb55ebdf32e5543b774738c51381a3e9ef7c8792e252bb2070e64e673e2';

@@ -43,6 +43,7 @@ import {
   BOARD_BORDER_PX,
   CELL_GLYPH_RING_BOTTOM_PX,
   CHROME_TILE_PX,
+  CHROME_TEXT_SCALE,
   COORDINATE_CONVENTION,
   COORDINATE_GUTTER_PX,
   HP_BANDS,
@@ -69,6 +70,7 @@ import {
   boardRailEntries,
   boardChromeCellOrigin,
   boardChromeDimensions,
+  boardChromeMetrics,
   cellGlyphRingBottomPx,
   creatureBadgeLeftPx,
   hpBandOf,
@@ -86,6 +88,8 @@ import {
   CELL_GLYPHS,
   CELL_GLYPH_KINDS,
   CELL_GLYPH_SIZE,
+  cellGlyphScale,
+  cellGlyphSizePx,
   cellGlyphOrigin,
 } from '../../../src/assets/board-glyphs';
 import { LIGHT_LEVELS } from '../../../src/assets/light-encoding';
@@ -410,6 +414,7 @@ describe('D533 creature badge and roster types', () => {
         number,
         color.disc,
         color.numeralInk,
+        CHROME_TEXT_SCALE,
       );
       expect(art.cssWidth).toBe(CREATURE_BADGE_WIDTH_PX);
       expect(art.cssHeight).toBe(CREATURE_BADGE_HEIGHT_PX);
@@ -454,7 +459,8 @@ describe('D533 creature badge and roster types', () => {
     expect(rendered.cssHeight).toBe(layout.height * 2);
   });
 
-  it('keeps both badge slots disjoint from every corner glyph box and the HP bar', () => {
+  it('keeps both badges disjoint and limits the underlay ring to one base pixel beneath the HP bar', () => {
+    const glyphScale = cellGlyphScale(CHROME_TILE_PX);
     const badges = [0, 1].map(
       (stackIndex): GeometryRect => ({
         x: CREATURE_BADGE_LEFT_PX,
@@ -465,18 +471,18 @@ describe('D533 creature badge and roster types', () => {
     );
     const glyphs = [
       {
-        x: LIGHT_GLYPH_ORIGIN - 1,
-        y: LIGHT_GLYPH_ORIGIN - 1,
-        width: LIGHT_GLYPH_SIZE + 2,
-        height: LIGHT_GLYPH_SIZE + 2,
+        x: (LIGHT_GLYPH_ORIGIN - 1) * glyphScale,
+        y: (LIGHT_GLYPH_ORIGIN - 1) * glyphScale,
+        width: (LIGHT_GLYPH_SIZE + 2) * glyphScale,
+        height: (LIGHT_GLYPH_SIZE + 2) * glyphScale,
       },
       ...CELL_GLYPH_KINDS.map((kind) => {
         const origin = cellGlyphOrigin(kind, CHROME_TILE_PX);
         return {
-          x: origin.x - 1,
-          y: origin.y - 1,
-          width: CELL_GLYPH_SIZE + 2,
-          height: CELL_GLYPH_SIZE + 2,
+          x: origin.x - glyphScale,
+          y: origin.y - glyphScale,
+          width: cellGlyphSizePx(CHROME_TILE_PX) + 2 * glyphScale,
+          height: cellGlyphSizePx(CHROME_TILE_PX) + 2 * glyphScale,
         };
       }),
     ];
@@ -506,14 +512,15 @@ describe('D533 creature badge and roster types', () => {
         renderCreatureRingBitmap(
           CREATURE_BADGE_COLORS[stackIndex]!.disc,
           geometry.nativeSize,
+          CHROME_TEXT_SCALE,
         ).cssWidth,
       ).toBe(geometry.size);
       expect(ring.x + ring.width).toBeLessThanOrEqual(CHROME_TILE_PX);
       expect(ring.y + ring.height).toBeLessThanOrEqual(CHROME_TILE_PX);
-      expect(
-        overlaps(ring, hp),
-        `stack ${String(stackIndex)} ring vs HP bar`,
-      ).toBe(false);
+      const underlap = Math.max(0, ring.y + ring.height - hp.y);
+      expect(underlap, `stack ${String(stackIndex)} ring under HP bar`).toBe(
+        stackIndex === 0 ? glyphScale : 0,
+      );
     }
   });
 
@@ -890,7 +897,7 @@ describe('renderBoard: DM board with chrome, player board without', () => {
       const expectedName = renderPixelText(
         layoutRosterName(combatant.name),
         neutral(8),
-        2,
+        CHROME_TEXT_SCALE,
       );
       expect(name?.src, combatant.name).toBe(expectedName.dataUri);
       expect(name?.getAttribute('style')).toBe(
@@ -983,11 +990,13 @@ describe('renderBoard: DM board with chrome, player board without', () => {
       const ring = renderCreatureRingBitmap(
         color.disc,
         ringGeometry.nativeSize,
+        CHROME_TEXT_SCALE,
       );
       const badge = renderCreatureBadgeBitmap(
         index + 1,
         color.disc,
         color.numeralInk,
+        CHROME_TEXT_SCALE,
       );
       const bust = paintTokenBust(archetype);
       const under = new Bitmap(CHROME_TILE_PX, CHROME_TILE_PX);
@@ -1110,7 +1119,7 @@ describe('renderBoard: DM board with chrome, player board without', () => {
     const expectedObjectText = renderPixelText(
       layoutPixelText('Crate 1 (0,1)', 2),
       neutral(8),
-      2,
+      CHROME_TEXT_SCALE,
     );
     expect((objectText as StyledElement | null)?.src).toBe(
       expectedObjectText.dataUri,
@@ -1276,10 +1285,10 @@ describe('renderBoard: DM board with chrome, player board without', () => {
         );
         const hpRect = {
           x:
-            cellRect.x + Math.round((CHROME_TILE_PX - HP_BAR_WIDTH_PX) / 2) - 1,
+            cellRect.x + Math.round((CHROME_TILE_PX - HP_BAR_WIDTH_PX) / 2) - HP_BAR_BORDER_PX,
           y: cellRect.y + HP_BAR_TOP_PX,
-          width: HP_BAR_WIDTH_PX + 2,
-          height: HP_BAR_HEIGHT_PX + 2,
+          width: HP_BAR_WIDTH_PX + 2 * HP_BAR_BORDER_PX,
+          height: HP_BAR_HEIGHT_PX + 2 * HP_BAR_BORDER_PX,
         };
         expect(overlaps(rect, hpRect), `${id} badge overlaps HP bar`).toBe(
           false,
@@ -1309,7 +1318,7 @@ describe('renderBoard: DM board with chrome, player board without', () => {
         const expected = renderPixelText(
           layoutRosterName(combatant.name),
           neutral(8),
-          2,
+          CHROME_TEXT_SCALE,
         );
         expect(image?.src, `sample ${String(sample)} ${combatant.name}`).toBe(
           expected.dataUri,
@@ -1383,8 +1392,7 @@ describe('renderBoard: DM board with chrome, player board without', () => {
       expect(ringRect.y + ringRect.height).toBeLessThanOrEqual(
         cellTop + CHROME_TILE_PX,
       );
-      expect(
-        overlaps(ringRect, {
+      const hpRect = {
           x:
             cellLeft +
             Math.round((CHROME_TILE_PX - HP_BAR_WIDTH_PX) / 2) -
@@ -1392,8 +1400,9 @@ describe('renderBoard: DM board with chrome, player board without', () => {
           y: cellTop + HP_BAR_TOP_PX,
           width: HP_BAR_WIDTH_PX + 2 * HP_BAR_BORDER_PX,
           height: HP_BAR_HEIGHT_PX + 2 * HP_BAR_BORDER_PX,
-        }),
-      ).toBe(false);
+        };
+      const underlap = Math.max(0, ringRect.y + ringRect.height - hpRect.y);
+      expect(underlap).toBe(stackIndex === 0 ? cellGlyphScale(CHROME_TILE_PX) : 0);
     }
   });
 
@@ -1662,7 +1671,12 @@ describe('renderBoard: DM board with chrome, player board without', () => {
             'data-source-state-digest',
           ].includes(name) && name !== 'data-board-audience',
       ),
-      style: dm.style.filter(([name]) => name !== '--encounter-rows'),
+      style: dm.style.filter(
+        ([name]) =>
+          name !== '--encounter-rows' &&
+          name !== '--encounter-tile-size' &&
+          !name.startsWith('--chrome-'),
+      ),
     });
     const playerComparable = {
       ...player,
@@ -1710,25 +1724,32 @@ describe('renderBoard: DM board with chrome, player board without', () => {
     });
   });
 
-  it('changes lattice pitch without changing fixed chrome element sizes', () => {
+  it('derives every semantic chrome dimension from the 64-pixel lattice and doubles it at 128', () => {
     const bounds = { columns: 15, rows: 24 };
+    const chrome64 = boardChromeMetrics(64);
+    const chrome128 = boardChromeMetrics(128);
 
     expect(boardChromeCellOrigin({ column: 3, row: 2 }, 64)).toEqual({
-      left: COORDINATE_GUTTER_PX + 192,
-      top: COORDINATE_GUTTER_PX + 128,
+      left: chrome64.coordinateGutter + 192,
+      top: chrome64.coordinateGutter + 128,
     });
     expect(boardChromeCellOrigin({ column: 3, row: 2 })).toEqual({
-      left: COORDINATE_GUTTER_PX + 384,
-      top: COORDINATE_GUTTER_PX + 256,
+      left: chrome128.coordinateGutter + 384,
+      top: chrome128.coordinateGutter + 256,
     });
 
     const capture64 = boardChromeDimensions(bounds, undefined, 64);
     const capture128 = boardChromeDimensions(bounds);
-    const fixedFrameWidth = 2 * BOARD_BORDER_PX + 2 * COORDINATE_GUTTER_PX;
-    expect(capture64.width - fixedFrameWidth).toBe(bounds.columns * 64);
-    expect(capture128.width - fixedFrameWidth).toBe(
-      bounds.columns * CHROME_TILE_PX,
-    );
+    expect(
+      capture64.width - 2 * chrome64.boardBorder - 2 * chrome64.coordinateGutter,
+    ).toBe(bounds.columns * 64);
+    expect(
+      capture128.width - 2 * chrome128.boardBorder - 2 * chrome128.coordinateGutter,
+    ).toBe(bounds.columns * CHROME_TILE_PX);
+    expect(capture128).toEqual({
+      width: capture64.width * 2,
+      height: capture64.height * 2,
+    });
 
     expect(hpBarTopPx(64)).toBe(56);
     expect(hpBarTopPx()).toBe(HP_BAR_TOP_PX);
@@ -1736,10 +1757,46 @@ describe('renderBoard: DM board with chrome, player board without', () => {
     expect(creatureBadgeLeftPx()).toBe(CREATURE_BADGE_LEFT_PX);
     expect(cellGlyphRingBottomPx(64)).toBe(54);
     expect(cellGlyphRingBottomPx()).toBe(CELL_GLYPH_RING_BOTTOM_PX);
-    expect(HP_BAR_WIDTH_PX).toBe(40);
-    expect(HP_BAR_HEIGHT_PX).toBe(4);
-    expect(CREATURE_BADGE_WIDTH_PX).toBe(30);
-    expect(CREATURE_BADGE_HEIGHT_PX).toBe(22);
+    expect(chrome64).toMatchObject({
+      textScale: 2,
+      boardBorder: 2,
+      coordinateGutter: 24,
+      legendHeight: 120,
+      legendGap: 8,
+      hpBarWidth: 40,
+      hpBarHeight: 4,
+      hpBarBorder: 1,
+      cellGlyphSize: 9,
+      creatureBadgeWidth: 30,
+      creatureBadgeHeight: 22,
+    });
+    expect(chrome128).toMatchObject({
+      textScale: 4,
+      boardBorder: 4,
+      coordinateGutter: 48,
+      legendHeight: 240,
+      legendGap: 16,
+      hpBarWidth: 80,
+      hpBarHeight: 8,
+      hpBarBorder: 2,
+      cellGlyphSize: 18,
+      creatureBadgeWidth: 60,
+      creatureBadgeHeight: 44,
+    });
+    expect(CHROME_TEXT_SCALE).toBe(4);
+    expect(HP_BAR_WIDTH_PX).toBe(80);
+    expect(HP_BAR_HEIGHT_PX).toBe(8);
+    expect(CREATURE_BADGE_WIDTH_PX).toBe(60);
+    expect(CREATURE_BADGE_HEIGHT_PX).toBe(44);
+    expect(COORDINATE_GUTTER_PX).toBe(48);
+    const values64 = Object.values(chrome64);
+    const values128 = Object.values(chrome128);
+    expect(values128).toHaveLength(values64.length);
+    for (let index = 0; index < values64.length; index += 1) {
+      expect(values128[index], Object.keys(chrome64)[index]).toBe(
+        values64[index]! * 2,
+      );
+    }
 
     const rendered64 = interactiveElement(
       renderBoard(projection, new Set(), null, provenance, 'full', true, 64),
@@ -1747,11 +1804,20 @@ describe('renderBoard: DM board with chrome, player board without', () => {
     const rendered128 = interactiveElement(
       renderBoard(projection, new Set(), null, provenance, 'full', true),
     );
-    const hp64 = rendered64.querySelector('.encounter-hp-bar') as StyledElement | null;
-    const hp128 = rendered128.querySelector('.encounter-hp-bar') as StyledElement | null;
-    if (hp64 === null || hp128 === null)
-      throw new Error('Rendered board omitted an HP bar.');
+    const hp64 = rendered64.querySelector('.encounter-hp-bar');
+    const hp128 = rendered128.querySelector('.encounter-hp-bar');
+    const badge64 = rendered64.querySelector('.encounter-creature-badge');
+    const badge128 = rendered128.querySelector('.encounter-creature-badge');
+    if (hp64 === null || hp128 === null || badge64 === null || badge128 === null) {
+      throw new Error('Rendered board omitted an HP bar or creature badge.');
+    }
     expect(inlinePixels(hp64, 'width')).toBe(40);
-    expect(inlinePixels(hp128, 'width')).toBe(40);
+    expect(inlinePixels(hp64, 'height')).toBe(4);
+    expect(inlinePixels(hp128, 'width')).toBe(80);
+    expect(inlinePixels(hp128, 'height')).toBe(8);
+    expect(inlinePixels(badge64, 'width')).toBe(30);
+    expect(inlinePixels(badge64, 'height')).toBe(22);
+    expect(inlinePixels(badge128, 'width')).toBe(60);
+    expect(inlinePixels(badge128, 'height')).toBe(44);
   });
 });
