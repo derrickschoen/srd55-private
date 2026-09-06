@@ -675,7 +675,7 @@ const HIDDEN_PLATE_ROW: LegendEntry = {
 };
 const DIFFICULT_ROW: LegendEntry = {
   key: 'difficult',
-  label: 'Difficult — broad ochre ridges',
+  label: 'Difficult — 3 ochre ridges in each cell',
   style: 'art',
   floor: STONE_FLOOR_SET_ID,
   overlay: OVERLAY_ASSETS.difficult,
@@ -796,6 +796,16 @@ function cellGlyphRow(kind: CellGlyphKind): LegendEntry {
       glyph: CELL_GLYPHS[kind],
       floor: STONE_FLOOR_SET_ID,
       overlay: OVERLAY_ASSETS.blocked,
+    };
+  }
+  if (kind === 'obscured') {
+    return {
+      key: kind,
+      label: CELL_GLYPHS[kind].label,
+      style: 'mark',
+      glyph: CELL_GLYPHS[kind],
+      floor: STONE_FLOOR_SET_ID,
+      overlay: OVERLAY_ASSETS['obscurement-heavy'],
     };
   }
   return {

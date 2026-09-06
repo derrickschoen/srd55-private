@@ -155,11 +155,11 @@ export const EXPECTED_STARTER_ART_SHA256: Readonly<Record<string, string>> =
     'art.map.shade.e.v1':
       'c56da5e1f8084e00c8331efe56e56d5c29830dc2c08ed9f41630b8ded3814aaf',
     'art.map.overlay.difficult.v1':
-      '20818957d179ad680cc43e7138782cfe5946efed51c9919ad25831e83f571d17',
+      '59be65303261b38de23d087083fba541d2379cbbc468ad953baa719a58dba39b',
     'art.map.overlay.obscurement-light.v1':
-      'e188a5625f8d205bdf1a6af483477dd83d965be5c3bc51123129ce1f4fb4fa64',
+      'd9b836bd67132f23225da2636085af84b9f066414673bd2f329bb12a00273158',
     'art.map.overlay.obscurement-heavy.v1':
-      'd73b43ad89802b5e9b7167b745114e1294394dd0a25fea788e8fabf2411f4d59',
+      '8d0839c5d6552742a193f81f7b0f71c8fbddcac1c6e7edd3c0ed9445e3d9ea11',
     'art.map.overlay.magical-darkness.v1':
       '18826a590a87b7244b22ab9b67e725d4291caec9499dc7e17e1b4fe109af9af0',
     'art.map.overlay.light-bright.v1':
@@ -215,4 +215,4 @@ export const EXPECTED_FIXED_INPUTS_SHA256 =
   '8649f9165fc76812a931af6e428bacb004caea4d8b70417ff86f3b7bcdc83a97';
 /** sha256 of src/assets/preview/starter-art-board.svg; the preview embeds all 87 assets at integer scale. */
 export const EXPECTED_PREVIEW_SHA256 =
-  '48233eb55ebdf32e5543b774738c51381a3e9ef7c8792e252bb2070e64e673e2';
+  'afd728536fdebb13d6e52738e60bd63985e64f340e65f08ba8905fd6b2a45b46';

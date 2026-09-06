@@ -20,6 +20,8 @@ import {
   MIN_FACT_CLASS_STATE_COVERAGE,
   NORMALISER_VERSION,
   PASS_THRESHOLD,
+  PREVIOUS_PRIMER_VERSION,
+  PRIMER_HISTORY,
   PRIMER_VERSION,
   PROBE_CATALOGUE_SIZE,
   bootstrapMeanInterval95,
@@ -486,7 +488,14 @@ describe('D524 general screenshot primer', () => {
   });
 
   it('D525: appends the light sentence per mode plus one sentence per glyph family under full, chosen by --board-glyphs, defaulting to none', () => {
-    expect(PRIMER_VERSION).toBe('d557-general-board-primer-v9');
+    expect(PRIMER_VERSION).toBe('d562-general-board-primer-v10');
+    expect(PREVIOUS_PRIMER_VERSION).toBe('d557-general-board-primer-v9');
+    expect(PRIMER_HISTORY[PREVIOUS_PRIMER_VERSION].general).toBe(
+      "This is a tabletop RPG combat board viewed from above. Each grid square represents 5 feet, and tokens represent creatures. Cool-blue floor plates beneath busts identify party creatures; warm-red floor plates beneath busts identify foes, exactly as the two floor-plate legend swatches show. The upper-left side of world art is lit and its lower-right contact shadow grounds it in the owning cell. Each creature token carries a numbered coloured badge; the roster box under the board repeats that badge and lists the creature's full name, cell, side and HP band. A creature stands in the cell that holds its badge. An OBJECT-sigil tag in the legend rail names an object, and the coordinate printed on that tag is the cell where the object stands. Door rail entries use the door glyph and print DOOR OPEN or DOOR CLOSED with the door's coordinate. The coordinate origin is the top-left cell, whose column and row are both zero; columns increase rightward and rows increase downward, matching the zero-based labels along the board edges. Two creatures are adjacent and within 5 feet when their cells share an edge or a corner, so diagonals count. HP bars and roster words use green for uninjured, amber for bloodied, red for near death, and grey for unknown. Difficult terrain is marked by three broad ochre zigzag ridges spanning its floor. Blocked terrain is marked by a large cross-braced stone pile spanning the cell. The legend box names every terrain overlay (Difficult, Obscured, Bright light, Dim light, Darkness, and Fog) and every board mark (Blocked, Object, and Light source). Doors are drawn only where the engine has a door. Interpret walls, doors, and objects as they are drawn on the board.",
+    );
+    expect(PRIMER_HISTORY[PREVIOUS_PRIMER_VERSION].glyphFamilies.veil).toBe(
+      'Fog is a veil of diagonal hatching with a cloud glyph in the bottom-right corner of the cell, obscurement is a dotted veil with a wave glyph just left of that corner, and a cell can carry both.',
+    );
     expect(GENERAL_PRIMER).toContain(
       'Cool-blue floor plates beneath busts identify party creatures',
     );
@@ -494,7 +503,7 @@ describe('D524 general screenshot primer', () => {
       'warm-red floor plates beneath busts identify foes',
     );
     expect(GENERAL_PRIMER).toContain(
-      'Difficult terrain is marked by three broad ochre zigzag ridges spanning its floor.',
+      'Difficult terrain is marked by one cell-local emblem of three inset opaque pale-ochre zigzag ridges with a dark outline.',
     );
     expect(GENERAL_PRIMER).toContain(
       'Blocked terrain is marked by a large cross-braced stone pile spanning the cell.',
@@ -557,7 +566,10 @@ describe('D524 general screenshot primer', () => {
     expect(GLYPH_FAMILY_PRIMER.blocked).toMatch(/X inside a square/u);
     expect(GLYPH_FAMILY_PRIMER.veil).toContain(GLYPH_FAMILY_CORNER.veil);
     expect(GLYPH_FAMILY_PRIMER.veil).toMatch(/hatching with a cloud glyph/u);
-    expect(GLYPH_FAMILY_PRIMER.veil).toMatch(/dotted veil with a wave glyph/u);
+    expect(GLYPH_FAMILY_PRIMER.veil).toMatch(
+      /cool cyan veil of three closed inset diamonds forming a lattice/u,
+    );
+    expect(GLYPH_FAMILY_PRIMER.veil).toMatch(/glyph of cyan waves/u);
     expect(GLYPH_FAMILY_PRIMER.hidden).toMatch(
       /eye crossed by a slash on the left rim/u,
     );

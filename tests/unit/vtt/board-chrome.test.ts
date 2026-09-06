@@ -1620,7 +1620,7 @@ describe('renderBoard: DM board with chrome, player board without', () => {
     );
     expect(fullEntries.find((entry) => entry.key === 'difficult')).toEqual({
       key: 'difficult',
-      label: 'Difficult — broad ochre ridges',
+      label: 'Difficult — 3 ochre ridges in each cell',
       style: 'art',
       floor: STONE_FLOOR_SET_ID,
       overlay: OVERLAY_ASSETS.difficult,

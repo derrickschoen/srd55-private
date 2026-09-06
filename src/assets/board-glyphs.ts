@@ -165,7 +165,7 @@ export const CELL_GLYPHS: Readonly<Record<CellGlyphKind, CellGlyph>> = Object.fr
   obscured: {
     family: 'veil',
     slot: 1,
-    label: 'OBSCURED - COOL-BLUE DIAMOND VEIL',
+    label: 'OBSCURED - CYAN DIAMONDS AND WAVES - NOT FOG',
     rows: M(
       '.........',
       '.........',
