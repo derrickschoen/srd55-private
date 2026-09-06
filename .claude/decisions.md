@@ -12116,3 +12116,17 @@ change, art untouched, same 24 states/seed, luna medium, 64-px capture
 tile paired against this 128-px r5b run. If the 64-px capture restores
 round-4 scores the regression is raster scale, not art; if not, it is
 the art.
+
+## D561 capture-scale diagnostic dispatched (2026-09-06 11:39)
+
+Codex lane in dnd-wt-classic5 (4a279a80, clean): brief .tmp/runs/
+brief-capture-scale.md, log .tmp/runs/log-capture-scale.log. Probe-only:
+captureTilePx 64|128 parameter on tools/ai-dm-board-snapshot.ts (default
+128 keeps every pin byte-identical), --capture-tile-px on the probe with
+the value on every row and in the summary header, directional unit tests
+(64 -> 640-px marker, 128 default, 96 rejected), tsc/sg/touched specs, one
+real 1-state capture smoke at 64 px with pixel dimensions and a look at
+whether chrome scales with the tile. Art, renderer, chrome and primer
+untouched. On harvest: verify, commit on claude/classic-r5, then run the
+paired probe (24 states, seed 6203001, luna medium+low, 64-px capture)
+against r5b's 128-px numbers.
