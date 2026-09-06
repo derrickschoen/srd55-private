@@ -12438,3 +12438,19 @@ renderer change; the question is parked anyway (D564).
 Forbidden-scan note: 'claude -p' hits in lane logs (15 in render-bench,
 2 in e3) are codex cat/rg output of .claude/decisions.md, not
 invocations; every exec line was checked.
+
+## HARVEST — A10 committed; 5d resumed with the primer amendment (after a self-kill) (2026-09-06 16:14)
+
+A10 (01a07849-5163): 2 files +1042/-32, no forbidden constructs,
+typecheck 0, probe spec 17 passed + the pre-existing D525 failure (same
+as base 67e98afa, not A10's); v1 rows/summaries byte-identical per
+codex's check and the identity tests; supervisor mutant (unsupported-
+assertion counter reads 'legend' instead of 'unknown') killed (2 failed
+incl. the pre-existing one); committed claude/a10-unknown 0f89bce5.
+
+Finding against own work: my first stop-then-resume of the 5d lane
+killed its own shell (exit 144) because the pgrep -f pattern also
+matched the resume command text later in the same bash -c argv, so the
+resume never launched; caught by the status sweep (procs=0), relaunched
+in a separate call, session 01a07847-6666 confirmed resumed. Rule: never
+put a kill-by-pattern and a launch containing that pattern in one call.
