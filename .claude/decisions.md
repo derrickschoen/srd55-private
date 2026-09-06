@@ -12624,3 +12624,56 @@ present on 8/10 rows with seeded A/B order recorded. Sane; promoted to
 the 30-row stage: candidate (cards) and control (default profile) arms,
 10 rooms x 3 reps, luna medium, launched (run-e2-30rows.sh); blinded
 packet follows.
+
+## HARVESTS — S7, S9, A5, E6 committed (E6 after a surviving mutant); E4 in verification (2026-09-06 17:18)
+
+S7 (01a07848-18d6): 12 files +433/-10, verificationBundle flag in the
+profile hash, pure triggers (close vectors, obscurement, reaction-rich,
+multiple high-value targets), bundle for the top-two offense options
+from existing reach/cover/visibility/dice/validation queries, one extra
+batched query round enforced, row telemetry. Verified: typecheck 0,
+238/238 across six specs; supervisor mutant (obscurement trigger
+dropped) killed 1/4; committed claude/s7-verify 0b902f0a.
+
+S9 (01a07848-66fa): 5 files +836/-14, arena-only --best-of 2 (two
+planners, consequence vectors, mulberry32-seeded A/B order, schema-
+constrained chooser selecting whole plans or per-actor from A/B, only
+the chosen plan submitted). Verified: typecheck 0; the arena spec first
+showed two timeouts at load 18 (discarded as LOAD FLAKES), then 41/41
+serially at load 1; supervisor mutant (order never randomised) killed
+1/41; committed claude/s9-bestof2 cfb9a74c.
+
+A5 (01a07848-b520): 8 files +602/-15, deltaFirst flag, since_last_
+accepted_revision block (moved/damaged/died/newly-visible/conditions/
+doors) leading resumed contexts, flag-off rendering byte-identical
+(31,969 B pin unchanged). Verified: typecheck 0, 116/116; supervisor
+mutant (died changes dropped) killed 2/27; committed claude/a5-delta
+1d39824a.
+
+E6 (01a07846-91e0): FINDING — supervisor mutant "every event narrated
+to the shared audience" SURVIVED all touched specs (9/9 + 135/135)
+because the audience-isolation test only used shared events; codex's
+report had claimed audience isolation coverage. Resumed the session:
+codex wired the real reducer event combatant_joined_encounter with
+visibility dm_only into an 'arrival' outcome and added a directional
+mixed-audience test; the same mutant now fails 1/10 and is restored.
+Verified: typecheck 0, 145/145 on the four fast specs (the 212/212
+conversation-suite run predates the fix; the fix touched only the
+narration module and its test); committed claude/e6-narration a2a9d4aa.
+
+E4 (01a07845-f587): report claims playAdverts flag, <= 3 applicable
+plays, propose_from_play returning an UNQUEUED-DRAFT of shown ids, row
+telemetry; its schema regeneration also corrected a drift on main
+(docs/specs engine-turn-context policy const v2 -> v3-last-seen; main's
+committed schema was stale). My spec run is still in progress with one
+failure so far in the arena interleave spec ("capture_only_leaks_image_
+block is killed by off-arm byte identity", 28 s, not a timeout);
+verdict after the run ends.
+
+Branch tips now: e1-semantic 66b5843a (merged 5d), e2-cards a787e8fc,
+e3-checklist 5b5c2083, e5-repair a7b97628, e6-narration a2a9d4aa,
+s3-assess 592b128e, s7-verify 0b902f0a, s9-bestof2 cfb9a74c, a5-delta
+1d39824a, a6-metamorphic 356cbb5f, a10-unknown 0f89bce5, classic-r5
+10e3892a, render-bench 0c5aa3d1, join-baseline d24ad3b1. None on main
+yet: landings are serial with a full gate each after the measurement
+runs read out.
