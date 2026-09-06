@@ -1,4 +1,12 @@
-import { monsterCombatantProfile, type CombatantProfile } from '../combat/combatant';
+import { combatToken, monsterCombatantProfile, type CombatantProfile } from '../combat/combatant';
+import {
+  autoRelocatePlacement,
+  normalPlacementFor,
+  sizedCombatantState,
+  spacesIntersect,
+  type CreatureSpace,
+  type KnownCreatureSize,
+} from '../combat/creature-space';
 import { createEncounter, type EncounterCombatantState, type EncounterState } from '../combat/encounter';
 import type { GridCell } from '../combat/grid';
 import { mulberry32, type Rng } from '../combat/random';
@@ -300,6 +308,42 @@ function generatedWorldObject<const Kind extends 'hazard' | 'light-source'>(
     blocking: { movement: false, lineOfSight: false, cover: 'none' },
     createdRevision: 0,
   };
+}
+
+function legalGeneratedPositions(
+  profiles: readonly CombatantProfile[],
+  preferredPositions: readonly GridCell[],
+  dimensions: RoomSpec['dimensions'],
+  blockedCells: readonly GridCell[],
+): readonly GridCell[] {
+  const blocked = new Set(blockedCells.map(cellKey));
+  const occupied: CreatureSpace<KnownCreatureSize>[] = [];
+  return profiles.map((profile, index) => {
+    const preferred = preferredPositions[index];
+    if (preferred === undefined) throw new Error(`Generated combatant ${profile.id} has no preferred anchor.`);
+    const size = profile.rules.sizeCategory;
+    if (size === undefined) throw new Error(`Generated combatant ${profile.id} has no mechanical size.`);
+    const combatant = sizedCombatantState(size);
+    let acceptedSpace: CreatureSpace<KnownCreatureSize> | undefined;
+    const relocated = autoRelocatePlacement(
+      combatant,
+      preferred,
+      normalPlacementFor(combatant),
+      dimensions,
+      (space) => {
+        const legal = space.cells.every((cell) => !blocked.has(cellKey(cell))) &&
+          occupied.every((other) => !spacesIntersect(space, other));
+        if (legal) acceptedSpace = space;
+        return legal;
+      },
+    );
+    if (relocated.kind === 'refused') {
+      throw new RangeError(`Generated room has no legal anchor for ${profile.id}.`);
+    }
+    if (acceptedSpace === undefined) throw new Error(`Generated space for ${profile.id} disappeared.`);
+    occupied.push(acceptedSpace);
+    return relocated.placement.anchor;
+  });
 }
 
 function sampledRoster(
@@ -718,15 +762,19 @@ export function generateRoom(seed: number, options: GenerateRoomOptions = {}): G
     }
   }
   const combatants = [...partyProfiles, ...roster.profiles];
-  const positions = [...partyPositions, ...monsterPositions];
+  const positions = legalGeneratedPositions(
+    combatants,
+    [...partyPositions, ...monsterPositions],
+    dimensions,
+    blockedCells,
+  );
   const fresh = createEncounter({
     bounds: dimensions,
     combatants,
-    tokens: combatants.map((profile, index) => ({
-      id: profile.tokenId,
-      combatantId: profile.id,
-      position: positions[index] ?? { column: 0, row: 0 },
-    })),
+    tokens: combatants.map((profile, index) => combatToken(
+      profile,
+      positions[index] ?? { column: 0, row: 0 },
+    )),
     blockedCells,
     worldObjects: terrain.flatMap((feature) =>
       feature.kind === 'hazard-object' || feature.kind === 'light-source' ? [feature.object] : []),
@@ -744,6 +792,7 @@ export function generateRoom(seed: number, options: GenerateRoomOptions = {}): G
           ? [{ id: feature.id, cells: feature.cells, obscurement: feature.obscurement }]
           : []),
       movementRegions: [],
+      narrowOpeningRegions: [],
     },
     dmNotes: [`Deterministic generated room seed ${String(normalizedSeed)}.`],
   });

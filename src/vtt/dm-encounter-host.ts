@@ -841,6 +841,19 @@ export class DmEncounterHost {
     this.#publish();
   }
 
+  resolvePendingPlacement(
+    command: Extract<EncounterCommand, { readonly type: 'resolve_pending_placement' }>,
+  ): ReturnType<TurnCoordinator['resolvePendingPlacement']> {
+    const result = this.#coordinator.resolvePendingPlacement(command);
+    this.#actionRefusal = null;
+    this.#boundaryRefusal = null;
+    this.#publish();
+    if (result.kind === 'applied' && this.#coordinator.state().phase.kind !== 'awaiting_placement') {
+      void this.#pumpCoordinator();
+    }
+    return result;
+  }
+
   dmUseWorldObject(command: Extract<EncounterCommand, { readonly type: 'dm_use_world_object' }>): void {
     this.#coordinator.dmUseWorldObject(command);
     this.#publish();

@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "string",
+  "enum": [
+    "CORRECTION_FALLBACK_MUST_BE_NULL",
+    "INITIAL_FALLBACK_REQUIRED",
+    "PRIMARY_FALLBACK_IDENTICAL",
+    "OPTION_NOT_SHOWN"
+  ]
+}

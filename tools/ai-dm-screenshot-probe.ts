@@ -25,7 +25,10 @@ import {
   worldObjectId,
 } from '../src/combat/values';
 import { dmVisibleEncounter, projectDmView } from '../src/combat/visibility';
-import { projectEncounterBoard } from '../src/vtt/encounter-board';
+import {
+  projectEncounterBoard,
+  type EncounterBoardPlacedCombatant,
+} from '../src/vtt/encounter-board';
 import {
   assignCreatureBadges,
   type CreatureBadgeColor,
@@ -546,12 +549,16 @@ export function deriveScreenshotFactSheet(
   const visibleById = new Map(
     dmEncounter.combatants.map((entry) => [entry.id, entry] as const),
   );
+  const placedCombatants = board.combatants.filter(
+    (entry): entry is EncounterBoardPlacedCombatant & { readonly life: LifeState } =>
+      entry.placementStatus === 'placed',
+  );
   const badges = new Map(
-    assignCreatureBadges(board.combatants).map(
+    assignCreatureBadges(placedCombatants).map(
       (badge) => [badge.combatantId, badge] as const,
     ),
   );
-  const combatants = board.combatants
+  const combatants = placedCombatants
     .map((entry): FactSheetCombatant => {
       const projected = visibleById.get(entry.id);
       if (projected === undefined)

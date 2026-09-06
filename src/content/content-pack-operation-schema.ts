@@ -20,7 +20,7 @@ import {
   REACTION_DAMAGE_TYPES,
   rollDefenseModifierScopes,
 } from '../combat/spells/types';
-import { abilities, damageTypes, skills } from '../domain/enums';
+import { abilities, creatureSizes, damageTypes, skills } from '../domain/enums';
 
 export const MAX_IMPORTED_DICE_COUNT = 100;
 export const MAX_IMPORTED_DISTANCE_FEET = 100_000;
@@ -636,6 +636,7 @@ const formSavingThrowBonuses = Object.fromEntries(
 const declaredFormStatOverrideSchema: z.ZodType<DeclaredFormStatOverride> = z.strictObject({
   id: formIdentifier,
   name: z.string().trim().min(1).max(1_000),
+  sizeCategory: z.enum(creatureSizes),
   armorClass: positiveInteger.max(100),
   hitPointMaximum: positiveInteger.max(MAX_IMPORTED_SCALAR),
   speedFeet: importedSpeed,

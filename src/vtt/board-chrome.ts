@@ -75,6 +75,7 @@ import {
   type BoardGlyphPresence,
   type EncounterBoardCellModel,
   type EncounterBoardCombatant,
+  type EncounterBoardPlacedCombatant,
   type EncounterBoardProjectionShape,
 } from './encounter-board';
 import type { ProjectedHitPointKnowledge } from './intel/contracts';
@@ -395,6 +396,22 @@ export interface CreatureBadgeAssignment {
   readonly stackIndex: 0 | 1;
 }
 
+export interface CreatureBadgeSubject {
+  readonly id: CombatantId;
+  readonly name: string;
+  readonly kind: 'player_character' | 'monster';
+  readonly position: { readonly column: number; readonly row: number };
+}
+
+export interface CreatureBadgeLayout {
+  readonly combatantId: CombatantId;
+  /** Relative to the grid's top-left, excluding the chrome coordinate gutter. */
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
 export interface CreatureBustRingGeometry {
   readonly inset: number;
   readonly size: number;
@@ -421,7 +438,7 @@ export function creatureBustRingGeometry(
 
 /** Stable roster order is the only numbering source in both live and snapshot DM views. */
 export function assignCreatureBadges(
-  combatants: readonly EncounterBoardCombatant[],
+  combatants: readonly CreatureBadgeSubject[],
 ): readonly CreatureBadgeAssignment[] {
   if (combatants.length > CREATURE_BADGE_COLORS.length) {
     throw new RangeError(
@@ -447,6 +464,24 @@ export function assignCreatureBadges(
       stackIndex: stackIndex as 0 | 1,
     };
   });
+}
+
+/** Exact in-grid boxes occupied by the numbered identity badges. */
+export function creatureBadgeLayouts(
+  combatants: readonly CreatureBadgeSubject[],
+  tilePx: BoardChromeTilePx = CHROME_TILE_PX,
+): readonly CreatureBadgeLayout[] {
+  const metrics = boardChromeMetrics(tilePx);
+  return assignCreatureBadges(combatants).map((assignment) => ({
+    combatantId: assignment.combatantId,
+    x: assignment.column * tilePx + creatureBadgeLeftPx(tilePx),
+    y:
+      assignment.row * tilePx +
+      metrics.creatureBadgeTop +
+      assignment.stackIndex * metrics.creatureBadgeStackPitch,
+    width: metrics.creatureBadgeWidth,
+    height: metrics.creatureBadgeHeight,
+  }));
 }
 
 /** Word wrapping never resamples: long words become fixed 17-glyph pieces plus '-'. */
@@ -922,6 +957,8 @@ function applyBoardChromeCssMetrics(
   const dimensions = {
     '--chrome-gutter': metrics.coordinateGutter,
     '--chrome-board-border': metrics.boardBorder,
+    '--chrome-legend-height': metrics.legendHeight,
+    '--chrome-legend-gap': metrics.legendGap,
     '--chrome-hp-border': metrics.hpBarBorder,
     '--chrome-legend-row-gap': metrics.legendRowGap,
     '--chrome-legend-column-gap': metrics.legendColumnGap,
@@ -1065,7 +1102,7 @@ export function hiddenRosterTagFor(
 }
 
 function tokenIdentityUnderlay(
-  combatants: readonly EncounterBoardCombatant[],
+  combatants: readonly EncounterBoardPlacedCombatant[],
   bounds: { readonly columns: number; readonly rows: number },
   tilePx: BoardChromeTilePx,
 ): HTMLDivElement {
@@ -1143,7 +1180,7 @@ function tokenIdentityUnderlay(
 }
 
 function tokenChrome(
-  combatants: readonly EncounterBoardCombatant[],
+  combatants: readonly EncounterBoardPlacedCombatant[],
   bounds: { readonly columns: number; readonly rows: number },
   mode: BoardGlyphMode,
   doorCells: ReadonlySet<string>,
@@ -1167,6 +1204,10 @@ function tokenChrome(
       tilePx,
     );
     const cellKey = `${String(combatant.position.column)},${String(combatant.position.row)}`;
+    const columnSpan = Math.max(...combatant.footprint.map((cell) => cell.column)) -
+      Math.min(...combatant.footprint.map((cell) => cell.column)) + 1;
+    const rowSpan = Math.max(...combatant.footprint.map((cell) => cell.row)) -
+      Math.min(...combatant.footprint.map((cell) => cell.row)) + 1;
 
     if (combatant.hiddenFromPlayers === true) {
       const ring = el('img', 'encounter-hidden-ring');
@@ -1178,8 +1219,8 @@ function tokenChrome(
         position: 'absolute',
         left: `${String(cellLeft)}px`,
         top: `${String(cellTop)}px`,
-        width: `${String(tilePx)}px`,
-        height: `${String(tilePx)}px`,
+        width: `${String(tilePx * columnSpan)}px`,
+        height: `${String(tilePx * rowSpan)}px`,
       });
       layer.append(ring);
       // D525 'full': the eye-slash mark on the ring's left rim, scaled with the cell glyphs.
@@ -1477,7 +1518,7 @@ export function hpBandLabel(
 }
 
 function rosterBox(
-  combatants: readonly EncounterBoardCombatant[],
+  combatants: readonly EncounterBoardPlacedCombatant[],
   mode: BoardGlyphMode,
   metrics: BoardChromeMetrics,
 ): HTMLElement {
@@ -1578,7 +1619,7 @@ function legend(
   mode: BoardGlyphMode,
   roomDefault: LightLevel,
   objects: ProjectedWorldObjects,
-  combatants: readonly EncounterBoardCombatant[],
+  combatants: readonly EncounterBoardPlacedCombatant[],
   snapshotMode: boolean,
   tilePx: BoardChromeTilePx,
 ): HTMLElement {
@@ -1632,6 +1673,10 @@ export function renderBoardChrome(
   tilePx: BoardChromeTilePx = CHROME_TILE_PX,
 ): void {
   const metrics = boardChromeMetrics(tilePx);
+  const placedCombatants = projection.combatants.filter(
+    (combatant): combatant is EncounterBoardPlacedCombatant =>
+      combatant.placementStatus === 'placed',
+  );
   board.dataset.boardChrome = 'on';
   board.dataset.coordinateLabels = COORDINATE_CONVENTION;
   board.dataset.encounterRows = String(projection.bounds.rows);
@@ -1639,7 +1684,7 @@ export function renderBoardChrome(
   board.style.setProperty('--encounter-rows', String(projection.bounds.rows));
   applyBoardChromeCssMetrics(board, metrics);
   const roomDefault = roomDefaultLightOf(projection);
-  const presence = boardGlyphPresence(cells, projection.combatants);
+  const presence = boardGlyphPresence(cells, placedCombatants);
   const doorCells = new Set(
     cells
       .filter((cell) =>
@@ -1649,14 +1694,14 @@ export function renderBoardChrome(
   );
   board.append(
     coordinateLabels(projection.bounds, tilePx),
-    tokenIdentityUnderlay(projection.combatants, projection.bounds, tilePx),
-    tokenChrome(projection.combatants, projection.bounds, mode, doorCells, tilePx),
+    tokenIdentityUnderlay(placedCombatants, projection.bounds, tilePx),
+    tokenChrome(placedCombatants, projection.bounds, mode, doorCells, tilePx),
     legend(
       legendEntriesFor(mode, roomDefault, presence),
       mode,
       roomDefault,
       projection.worldObjects ?? [],
-      projection.combatants,
+      placedCombatants,
       snapshotMode,
       tilePx,
     ),

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { CombatantProfile } from '../../../src/combat/combatant';
-import { createEncounter, type EncounterState } from '../../../src/combat/encounter';
+import { createEncounter, reduceEncounter, type EncounterState } from '../../../src/combat/encounter';
 import { effectStackingIdentity, encounterEffectId } from '../../../src/combat/values';
 import {
   ACTOR_KNOWLEDGE_POLICY,
@@ -43,14 +43,19 @@ function onlyTarget(state: EncounterState, actor: CombatantProfile): ActorTarget
   return target;
 }
 
-describe('actor-knowledge-v2', () => {
+describe('actor-knowledge-last-seen-v4', () => {
   it('projects a visible target as perceived with its current position', () => {
     const setup = encounter();
 
     expect(onlyTarget(setup.state, setup.actor)).toEqual({
       kind: 'perceived',
       targetId: setup.target.id,
+      placementStatus: 'placed',
       position: { column: 2, row: 0 },
+      effectiveSize: 'Medium',
+      placementMode: { kind: 'normal', actual: 'Medium' },
+      footprint: [{ column: 2, row: 0 }],
+      distanceFeet: 10,
       conditions: [],
       armorClass: { kind: 'perceived_band', band: 'guarded' },
       hitPoints: { kind: 'perceived_band', band: 'uninjured' },
@@ -85,7 +90,7 @@ describe('actor-knowledge-v2', () => {
     };
 
     const projection = projectActorKnowledge(state, actor.id);
-    expect(projection.policy).toBe('actor-knowledge-v2');
+    expect(projection.policy).toBe('actor-knowledge-last-seen-v4');
     expect(projection.targets.map((target) => target.kind === 'perceived'
       ? [target.targetId, target.armorClass, target.hitPoints]
       : [target.targetId, target.kind])).toEqual([
@@ -160,13 +165,17 @@ describe('actor-knowledge-v2', () => {
 
   it('redacts a hidden target rather than exposing its position', () => {
     const setup = encounter();
+    const observed = reduceEncounter(setup.state, { type: 'roll_initiative' }, () => 0.5).state;
     const hidden: EncounterState = {
-      ...setup.state,
+      ...observed,
       hiddenCombatants: [{ combatant: setup.target.id, stealthTotal: 18, edition: '2024' }],
     };
 
     const target = onlyTarget(hidden, setup.actor);
-    expect(target).toMatchObject({ kind: 'unknown', targetId: setup.target.id });
+    expect(target).toMatchObject({
+      kind: 'suspected', targetId: setup.target.id,
+      lastSeen: { status: 'resolved', lastSeenPosition: { column: 2, row: 0 } },
+    });
     expect('position' in target).toBe(false);
   });
 
@@ -179,11 +188,50 @@ describe('actor-knowledge-v2', () => {
     });
   });
 
-  it('records missing last-seen memory as a typed unresolved basis', () => {
+  it('redacts a Large target only when fog covers its complete footprint', () => {
+    const actor = monsterProfile('actor-knowledge-large-fog-observer');
+    const baseTarget = playerProfile('actor-knowledge-large-fog-target');
+    const target = {
+      ...baseTarget,
+      rules: { ...baseTarget.rules, sizeCategory: 'Large' as const },
+    };
+    const common = {
+      bounds: { columns: 5, rows: 3 },
+      combatants: [actor, target],
+      tokens: [placedToken(actor, 0, 1), placedToken(target, 2, 0)],
+    };
+    const partiallyFogged = createEncounter({
+      ...common,
+      foggedCells: [{ column: 2, row: 0 }],
+    });
+    const fullyFogged = createEncounter({
+      ...common,
+      foggedCells: [
+        { column: 2, row: 0 }, { column: 3, row: 0 },
+        { column: 2, row: 1 }, { column: 3, row: 1 },
+      ],
+    });
+
+    expect(onlyTarget(partiallyFogged, actor)).toMatchObject({
+      kind: 'perceived',
+      targetId: target.id,
+      footprint: [
+        { column: 2, row: 0 }, { column: 3, row: 0 },
+        { column: 2, row: 1 }, { column: 3, row: 1 },
+      ],
+    });
+    expect(onlyTarget(fullyFogged, actor)).toMatchObject({
+      kind: 'unknown',
+      targetId: target.id,
+    });
+  });
+
+  it('records a genuinely never-observed target as a typed unresolved basis', () => {
     const setup = encounter();
     const hidden: EncounterState = {
       ...setup.state,
       hiddenCombatants: [{ combatant: setup.target.id, stealthTotal: 18, edition: '2024' }],
+      observationHistory: [],
     };
 
     expect(onlyTarget(hidden, setup.actor)).toEqual({
@@ -191,7 +239,7 @@ describe('actor-knowledge-v2', () => {
       targetId: setup.target.id,
       lastSeen: {
         status: 'unresolved',
-        reason: 'last_seen_position_not_modeled',
+        reason: 'never_observed',
       },
     });
   });

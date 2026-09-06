@@ -49,6 +49,7 @@ interface BrowserCheckResult {
   readonly staleRejected: boolean;
   readonly identityRejected: boolean;
   readonly movedDigestChanged: boolean;
+  readonly manifestCarriesHtml: boolean;
 }
 
 async function runBrowserCheck(outputDirectory: string): Promise<BrowserCheckResult> {
@@ -91,6 +92,7 @@ test('captures the full production DM board deterministically through durable sa
   expect(result.staleRejected).toBe(true);
   expect(result.identityRejected).toBe(true);
   expect(result.movedDigestChanged).toBe(true);
+  expect(result.manifestCarriesHtml).toBe(true);
   expect(result.chromiumVersion).not.toBe('');
   expect(result.playwrightVersion).toBe('1.61.1');
 });

@@ -406,6 +406,7 @@ const monsterSchema = z.strictObject({
   ...recordIdentityShape,
   statblock: z.strictObject({
     creatureType: trimmedText.optional(),
+    sizeCategory: z.enum(creatureSizes),
     armorClass: positiveInteger.max(100),
     hitPointMaximum: positiveInteger.max(1_000_000),
     speedFeet: nonNegativeInteger.max(MAX_IMPORTED_SPEED_FEET),
@@ -499,6 +500,7 @@ export interface LoadedContentMonster {
   readonly sourceId: string;
   readonly recordId: string;
   readonly name: string;
+  readonly sizeCategory: (typeof creatureSizes)[number];
   readonly creatureType?: string;
   readonly statblock: MonsterStatblock;
   readonly actions: readonly MonsterAction[];
@@ -677,6 +679,7 @@ function loadMonster(monster: ContentPackV1['monsters'][number]): LoadedContentM
     sourceId: monster.sourceId,
     recordId: monster.recordId,
     name: monster.name,
+    sizeCategory: monster.statblock.sizeCategory,
     ...(monster.statblock.creatureType === undefined ? {} : { creatureType: monster.statblock.creatureType }),
     statblock: monsterStatblock(input),
     actions: monster.actions,
@@ -1205,9 +1208,14 @@ export function importedMonsterProfile(
   identity: { readonly combatantId: string; readonly tokenId: string },
 ): CombatantProfile {
   const profile = monsterCombatantProfile(monster.statblock, identity);
-  return monster.creatureType === undefined
-    ? profile
-    : { ...profile, rules: { ...profile.rules, creatureType: monster.creatureType } };
+  return {
+    ...profile,
+    rules: {
+      ...profile.rules,
+      sizeCategory: monster.sizeCategory,
+      ...(monster.creatureType === undefined ? {} : { creatureType: monster.creatureType }),
+    },
+  };
 }
 
 export function importedMonsterAttackCommand(

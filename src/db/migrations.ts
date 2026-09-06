@@ -64,6 +64,8 @@ import profileProvenIndexes from '../../drizzle/0060_profile_proven_indexes.sql?
 import vttAgentSessionBinding from '../../drizzle/0061_vtt_agent_session_binding.sql?raw';
 import vttContextTokenUsage from '../../drizzle/0062_vtt_context_token_usage.sql?raw';
 import vttContextRollover from '../../drizzle/0063_vtt_context_rollover.sql?raw';
+import vttCreatureSpace from '../../drizzle/0064_vtt_creature_space.sql?raw';
+import vttObservationHistory from '../../drizzle/0065_vtt_observation_history.sql?raw';
 import { sha256 } from '../crypto/sha256';
 
 export interface DatabaseMigration {
@@ -665,6 +667,18 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = Object.freeze([
     sql: vttContextRollover,
     checksum: 'c4aab1df7d15b3e8c499b46f8166ebb5bdf319d5bb0e97634ddfcf45f68b7110',
     resultSchemaChecksum: '4f18fd0935b384029516b7f60063856a23f3f39ec29968dbff0d922bd9b41c3a',
+  }),
+  Object.freeze({
+    id: '0064_vtt_creature_space',
+    sql: vttCreatureSpace,
+    checksum: '9591b01d3ee1d163d7c9fe8b6977bc9c8b2c4c3a7eb39761081722e02cb8511f',
+    resultSchemaChecksum: 'b1c044ea77b24a707933309268070641c4721277e289a600d14eb9f60e6abcbd',
+  }),
+  Object.freeze({
+    id: '0065_vtt_observation_history',
+    sql: vttObservationHistory,
+    checksum: 'a3344dd16fa1985e6363d1f4df02e76c7ea4ff25a3cfa651f7f48e6300460d44',
+    resultSchemaChecksum: 'e73b614050a8e31746c989d6a00dfbb061803979d0c17eda8dead1c2beeb81ca',
   }),
 ]);
 

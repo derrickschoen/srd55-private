@@ -4,7 +4,8 @@ import {
   planningSavingThrowFacts,
 } from '../../combat/combat-rules';
 import type { EncounterState } from '../../combat/encounter';
-import { gridDistance } from '../../combat/grid';
+import { combatantSpace } from '../../combat/combat-rules';
+import { minimumSpaceDistance } from '../../combat/creature-space';
 import {
   savingThrowOutcomeWeights,
   type RollMode,
@@ -1050,7 +1051,10 @@ function wakeReachability(
     return affected.some((targetId) => {
       if (targetId === waker.profile.id) return false;
       const target = state.tokens.find((token) => token.combatantId === targetId)?.position;
-      return target !== undefined && gridDistance(origin, target) <= effectiveCombatRules(state, waker.profile.id).speed;
+      return target !== undefined && minimumSpaceDistance(
+        combatantSpace(state, waker.profile.id),
+        combatantSpace(state, targetId),
+      ) <= effectiveCombatRules(state, waker.profile.id).speed;
     });
   });
   return reachable.every(Boolean)

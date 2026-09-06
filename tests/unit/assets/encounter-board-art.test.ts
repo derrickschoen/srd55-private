@@ -14,8 +14,22 @@ const ogre = combatantId('combatant:training-brute');
 const projection = {
   bounds: { columns: 10, rows: 7 },
   combatants: [
-    { id: fighter, name: 'Reference Fighter', kind: 'player_character' as const, position: { column: 2, row: 3 } },
-    { id: ogre, name: 'Training Brute', kind: 'monster' as const, position: { column: 6, row: 3 } },
+    {
+      id: fighter, name: 'Reference Fighter', kind: 'player_character' as const,
+      placementStatus: 'placed' as const,
+      position: { column: 2, row: 3 },
+      effectiveSize: 'Medium' as const,
+      placementMode: { kind: 'normal' as const, actual: 'Medium' as const },
+      footprint: [{ column: 2, row: 3 }] as const,
+    },
+    {
+      id: ogre, name: 'Training Brute', kind: 'monster' as const,
+      placementStatus: 'placed' as const,
+      position: { column: 6, row: 3 },
+      effectiveSize: 'Medium' as const,
+      placementMode: { kind: 'normal' as const, actual: 'Medium' as const },
+      footprint: [{ column: 6, row: 3 }] as const,
+    },
   ],
   highlightedCombatant: fighter,
   adjudicatedTargets: [ogre],
@@ -116,11 +130,11 @@ describe('encounter package asset-id consumption', () => {
     const generated = {
       bounds: { columns: 12, rows: 9 },
       combatants: [
-        { id: combatantId('combatant:pc-1'), name: 'Mirel Ash', kind: 'player_character' as const, position: { column: 1, row: 1 } },
-        { id: combatantId('combatant:m-1'), name: 'Wolf', kind: 'monster' as const, position: { column: 5, row: 5 }, creatureType: 'Beast' },
-        { id: combatantId('combatant:m-2'), name: 'Skeleton', kind: 'monster' as const, position: { column: 6, row: 5 }, creatureType: 'Undead' },
-        { id: combatantId('combatant:m-3'), name: 'Thing', kind: 'monster' as const, position: { column: 7, row: 5 }, creatureType: 'Chronovore' },
-        { id: combatantId('combatant:m-4'), name: 'Untyped', kind: 'monster' as const, position: { column: 8, row: 5 } },
+        { id: combatantId('combatant:pc-1'), name: 'Mirel Ash', kind: 'player_character' as const, placementStatus: 'placed' as const, position: { column: 1, row: 1 }, effectiveSize: 'Medium' as const, placementMode: { kind: 'normal' as const, actual: 'Medium' as const }, footprint: [{ column: 1, row: 1 }] as const },
+        { id: combatantId('combatant:m-1'), name: 'Wolf', kind: 'monster' as const, placementStatus: 'placed' as const, position: { column: 5, row: 5 }, effectiveSize: 'Medium' as const, placementMode: { kind: 'normal' as const, actual: 'Medium' as const }, footprint: [{ column: 5, row: 5 }] as const, creatureType: 'Beast' },
+        { id: combatantId('combatant:m-2'), name: 'Skeleton', kind: 'monster' as const, placementStatus: 'placed' as const, position: { column: 6, row: 5 }, effectiveSize: 'Medium' as const, placementMode: { kind: 'normal' as const, actual: 'Medium' as const }, footprint: [{ column: 6, row: 5 }] as const, creatureType: 'Undead' },
+        { id: combatantId('combatant:m-3'), name: 'Thing', kind: 'monster' as const, placementStatus: 'placed' as const, position: { column: 7, row: 5 }, effectiveSize: 'Medium' as const, placementMode: { kind: 'normal' as const, actual: 'Medium' as const }, footprint: [{ column: 7, row: 5 }] as const, creatureType: 'Chronovore' },
+        { id: combatantId('combatant:m-4'), name: 'Untyped', kind: 'monster' as const, placementStatus: 'placed' as const, position: { column: 8, row: 5 }, effectiveSize: 'Medium' as const, placementMode: { kind: 'normal' as const, actual: 'Medium' as const }, footprint: [{ column: 8, row: 5 }] as const },
       ],
       highlightedCombatant: null,
       adjudicatedTargets: [],
@@ -177,7 +191,8 @@ describe('encounter package asset-id consumption', () => {
     expect(source).toContain('encounterArtForBoard(projection, boardGlyphs)');
     expect(source).toContain('encounterBoardRenderModel(projection, art)');
     expect(source).toContain('starterArtDataUri(layer.assetId)');
-    expect(source).toContain('starterArtDataUri(model.token.assetId)');
+    expect(source).toContain('encounterBoardTokenRenderModels(projection, art)');
+    expect(source).toContain('starterArtDataUri(model.assetId)');
     expect(source).toContain('projection.encounter.dmOnly.foggedCells');
     expect(source).toContain('renderMechanicalLayer(layer)');
     expect(source).toContain('renderBoardChrome(board, projection, art.boardGlyphs, models, boardSnapshotMode, boardChromeTilePx)');

@@ -290,6 +290,23 @@ const LEGACY_BLOCK_ARGS = [
   '--combat-model', 'monster_block_v1', '--initiative-profile', 'legacy',
 ] as const;
 
+const ALL_OPTIONS_TEST_RENDERER_PROFILE = {
+  ...DEFAULT_RENDERER_PROFILE,
+  rows: 'off',
+  movement: 'material_only',
+  threats: 'counts_exception_ids',
+  rare: 'triggered',
+  knowledge: 'relevance_gated',
+  frontier: 'off',
+  failures: 'headline_codes',
+  adverts: 'full',
+  misc: 'merged',
+  optionDetail: 'top2_stubs',
+} as const;
+const ALL_OPTIONS_TEST_RENDERER_ARGS = [
+  '--renderer-profile', JSON.stringify(ALL_OPTIONS_TEST_RENDERER_PROFILE),
+] as const;
+
 describe('AI-DM arena', () => {
   it('maps rows with zero, one, and two KB reads without losing hashes or order (mutation: omit arena kbReads)', () => {
     const records: readonly KbReadRecord[] = [
@@ -483,10 +500,10 @@ describe('AI-DM arena', () => {
   it('threads inline renderer-profile JSON through dry-run rows while keeping arena metadata', { timeout: 30_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-renderer-profile-'));
     const profiles = [
-      { ...DEFAULT_RENDERER_PROFILE, nullFields: 'omit' as const },
-      { ...DEFAULT_RENDERER_PROFILE, attribution: 'stamped' as const },
-      { ...DEFAULT_RENDERER_PROFILE, format: 'caveman_prose' as const },
-      { ...DEFAULT_RENDERER_PROFILE, format: 'regular_prose' as const },
+      { ...ALL_OPTIONS_TEST_RENDERER_PROFILE, nullFields: 'omit' as const },
+      { ...ALL_OPTIONS_TEST_RENDERER_PROFILE, attribution: 'stamped' as const },
+      { ...ALL_OPTIONS_TEST_RENDERER_PROFILE, format: 'caveman_prose' as const },
+      { ...ALL_OPTIONS_TEST_RENDERER_PROFILE, format: 'regular_prose' as const },
     ] as const;
 
     for (const [index, profile] of profiles.entries()) {
@@ -816,6 +833,10 @@ describe('AI-DM arena', () => {
       '--cli-bin', 'definitely-not-a-real-codex-binary',
       '--dry-run',
       ...LEGACY_BLOCK_ARGS,
+      '--renderer-profile', JSON.stringify({
+        ...ALL_OPTIONS_TEST_RENDERER_PROFILE,
+        frontier: 'full',
+      }),
     ]);
 
     const rows = await runArena(config);
@@ -1280,6 +1301,7 @@ describe('AI-DM arena', () => {
       '--dry-run', '--cli', 'local-openai', '--local-base-url', 'http://SIMULATED',
       '--local-model', 'SIMULATED-model',
       ...LEGACY_BLOCK_ARGS,
+      ...ALL_OPTIONS_TEST_RENDERER_ARGS,
     ] as const;
     const disabledAdapter = new InProcessArenaAdapter();
     const highAdapter = new InProcessArenaAdapter();
@@ -1396,13 +1418,13 @@ describe('AI-DM arena', () => {
           expect.objectContaining({
             attempt: 'primary',
             rejectionReasons: expect.arrayContaining([
-              expect.stringContaining('primary option was not offered'),
+              expect.stringContaining('primary_option_id must identify an option shown'),
             ]),
           }),
           expect.objectContaining({
             attempt: 'fallback',
             rejectionReasons: expect.arrayContaining([
-              expect.stringContaining('fallback option was not offered'),
+              expect.stringContaining('fallback_option_id must identify an option shown'),
             ]),
           }),
         ]),

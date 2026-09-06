@@ -71,7 +71,11 @@ describe('real-stdio engine MCP golden dungeon run', () => {
     expect(independentlyDerivedFeet).toBe(0);
     expect(independentlyDerivedFeet).toBeLessThanOrEqual(maximumFeet);
     expect(path).toMatchObject({ feasible: true, minimum_feet: 0, refusals: [] });
-    expect(structured(toolEntry(report.initial, 'engine.validate_proposal'))).toMatchObject({ valid: true, selected_branch: 'fallback' });
+    expect(structured(toolEntry(report.initial, 'engine.validate_proposal'))).toMatchObject({
+      valid: false,
+      selected_branch: 'none',
+      refusals: [{ code: 'OPTION_NOT_SHOWN' }],
+    });
     const initialAfter = structured(toolEntry(report.initial, 'engine.get_turn_context', 1));
     expect(stateHandle(initialAfter)).toBe(stateHandle(initialBefore));
     expect(structured(toolEntry(report.initial, 'engine.submit_round_proposals'))).toMatchObject({ status: 'proposed' });

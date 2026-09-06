@@ -452,9 +452,9 @@ function happyArguments(name: typeof TOOL_NAMES[number], state: EncounterState, 
 }
 
 describe('engine MCP dual-handshake full surface conformance', () => {
-  it('derives the state-summary proof token from digest, granularity, and the v1 domain separator', () => {
+  it('derives the state-summary proof token from digest, granularity, and the creature-space v2 domain separator', () => {
     expect(engineStateSummaryProofToken('a'.repeat(64), 'turn_minimal')).toBe(
-      '59f83cdc47b641fd55ca7dcda5b0a55839f61f718819fda843fe1e8bf767e114',
+      '41fc4514eeced83505a8815571ce1bc358a8a78d1f8b8bb8ef07b5ae3379672d',
     );
   });
 
@@ -726,7 +726,53 @@ describe('engine MCP dual-handshake full surface conformance', () => {
     const result = toolCall(runtime.handler, name, happyArguments(name, state, runtime));
     const value = structured(result);
     expect(record((result['content'] as readonly unknown[])[0])['text']).toBe(JSON.stringify(value));
-    expect(forbiddenAgentKeys(value)).toEqual([]);
+    if (name === 'engine.get_state_summary') {
+      const summary = record(record(value)['summary']);
+      const combatants = summary['combatants'];
+      if (!Array.isArray(combatants)) throw new TypeError('State summary omitted combatants.');
+      for (const combatant of combatants) {
+        const projected = record(combatant);
+        expect(projected['effective_size']).toBeTypeOf('string');
+        expect(record(projected['placement_mode'])['kind']).toMatch(/^(?:normal|squeezed)$/u);
+        expect(Array.isArray(projected['footprint']) && projected['footprint'].length > 0).toBe(true);
+      }
+      const withoutApprovedFootprints = {
+        ...record(value),
+        summary: {
+          ...summary,
+          combatants: combatants.map((combatant) => ({ ...record(combatant), footprint: [] })),
+        },
+      };
+      expect(forbiddenAgentKeys(withoutApprovedFootprints)).toEqual([]);
+    } else if (name === 'engine.get_turn_context') {
+      const context = record(value);
+      const actorKnowledge = record(context['actor_knowledge']);
+      const actors = actorKnowledge['actors'];
+      if (!Array.isArray(actors)) throw new TypeError('Turn context omitted actor knowledge.');
+      const withoutApprovedFootprints = {
+        ...context,
+        actor_knowledge: {
+          ...actorKnowledge,
+          actors: actors.map((actor) => {
+            const projectedActor = record(actor);
+            const targets = projectedActor['targets'];
+            if (!Array.isArray(targets)) throw new TypeError('Actor knowledge omitted targets.');
+            return {
+              ...projectedActor,
+              targets: targets.map((target) => {
+                const projectedTarget = record(target);
+                return projectedTarget['placement_status'] === 'placed'
+                  ? { ...projectedTarget, footprint: [] }
+                  : projectedTarget;
+              }),
+            };
+          }),
+        },
+      };
+      expect(forbiddenAgentKeys(withoutApprovedFootprints)).toEqual([]);
+    } else {
+      expect(forbiddenAgentKeys(value)).toEqual([]);
+    }
   });
 
   it.each(['caveman_prose', 'regular_prose'] as const)('makes %s the model-visible tool text while retaining schema-valid structured metadata', async (format) => {
@@ -836,6 +882,54 @@ describe('engine MCP dual-handshake full surface conformance', () => {
     }));
     expect(rejected['status']).toBe('rejected');
     expect(runtime.proposals).toHaveLength(1);
+  });
+
+  it('validates bounded UI feedback and returns a typed second-call rule error', async () => {
+    const png = Buffer.alloc(24);
+    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).copy(png);
+    png.writeUInt32BE(1, 16);
+    png.writeUInt32BE(1, 20);
+    const { state, runtime } = await fixtureRuntime({
+      requestedActorCount: 1,
+      toolProfile: 'dm',
+      boardImageContent: { type: 'image', mimeType: 'image/png', data: png.toString('base64') },
+    });
+    expect(runtime.toolSurface.tools.map(({ name }) => name)).toContain('engine.submit_ui_feedback');
+    const validFeedback = {
+      readability: 5,
+      what_helped: ['Clear positions'],
+      what_confused: [],
+      missing: [],
+      suggestion: 'Keep the same scale.',
+    } as const;
+    expect(structured(toolCall(runtime.handler, 'engine.submit_ui_feedback', validFeedback))).toEqual({
+      status: 'rule_error', code: 'UI_FEEDBACK_DECISION_NOT_ACCEPTED',
+    });
+    for (const invalid of [
+      { ...validFeedback, readability: 0 },
+      { ...validFeedback, readability: 6 },
+      { ...validFeedback, what_helped: Array.from({ length: 6 }, () => 'item') },
+      { ...validFeedback, what_confused: ['x'.repeat(281)] },
+      { ...validFeedback, missing: ['x'.repeat(281)] },
+      { ...validFeedback, suggestion: 'x'.repeat(281) },
+    ]) {
+      const result = toolCall(runtime.handler, 'engine.submit_ui_feedback', invalid);
+      expect(result['isError']).toBe(true);
+      expect(JSON.stringify(result)).toContain('Invalid tool arguments');
+    }
+    expect(structured(toolCall(
+      runtime.handler,
+      'engine.submit_round_proposals',
+      happyArguments('engine.submit_round_proposals', state, runtime),
+    ))['status']).toBe('proposed');
+    expect(structured(toolCall(runtime.handler, 'engine.submit_ui_feedback', validFeedback)))
+      .toEqual({ status: 'recorded' });
+    expect(runtime.uiFeedback).toEqual([validFeedback]);
+    expect(structured(toolCall(runtime.handler, 'engine.submit_ui_feedback', {
+      ...validFeedback,
+      readability: 1,
+    }))).toEqual({ status: 'rule_error', code: 'UI_FEEDBACK_ALREADY_SUBMITTED' });
+    expect(runtime.uiFeedback).toEqual([validFeedback]);
   });
 
   it('D466 G1 fills a minimal submission from its launch binding and replays it exactly once', async () => {

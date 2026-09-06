@@ -1,5 +1,6 @@
 import type { EncounterState } from '../combat/encounter';
-import { gridDistance } from '../combat/grid';
+import { combatantSpace } from '../combat/combat-rules';
+import { minimumSpaceDistance } from '../combat/creature-space';
 import type { MonsterAction, MonsterBonusAction } from '../combat/statblock';
 import { combatantsAreAllies } from '../combat/allies';
 import type { CombatantId } from '../combat/values';
@@ -161,7 +162,10 @@ function hasAdjacentHostileWithModeledOpportunityAttack(
     if (candidate.profile.id === actorId || candidate.life !== 'living' ||
       combatantsAreAllies(state, actorId, candidate.profile.id) || !candidate.turn.reactionAvailable) return false;
     const position = state.tokens.find((token) => token.combatantId === candidate.profile.id)?.position;
-    return position !== undefined && gridDistance(actorPosition, position) <= candidate.profile.rules.reach;
+    return position !== undefined && minimumSpaceDistance(
+      combatantSpace(state, actorId),
+      combatantSpace(state, candidate.profile.id),
+    ) <= candidate.profile.rules.reach;
   });
 }
 

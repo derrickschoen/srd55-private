@@ -453,7 +453,7 @@ describe('D386.2 path-reservation body blocking', () => {
 
     const huge = sized(monsterProfile('space-huge'), 'Huge');
     const hugeState = createEncounter({
-      bounds: { columns: 3, rows: 1 }, combatants: [mover, huge],
+      bounds: { columns: 4, rows: 3 }, combatants: [mover, huge],
       tokens: [placedToken(mover, 0), placedToken(huge, 1)],
     });
     expect(encounterMovementWorld(hugeState).traversal(mover.id, { column: 0, row: 0 }, { column: 1, row: 0 })).toEqual({

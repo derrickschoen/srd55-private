@@ -1,4 +1,6 @@
 import { canonicalJson } from '../commands/canonical-json';
+import { combatantSpace } from '../combat/combat-rules';
+import { minimumSpaceDistanceToCells, minimumSpaceLine } from '../combat/creature-space';
 import type { EncounterState } from '../combat/encounter';
 import { gridDistance, type GridCell } from '../combat/grid';
 import type {
@@ -145,9 +147,17 @@ function targetConstraints(
   actorId: CombatantId,
   slots: readonly EngineActionSlotUse[],
   queries: EngineQueryPort,
-): readonly { readonly targetId: CombatantId; readonly actionId: string; readonly rangeFeet: number }[] | null {
+): readonly {
+  readonly targetId: CombatantId;
+  readonly rangeFeet: number;
+  readonly source: { readonly kind: 'action'; readonly actionId: string } | { readonly kind: 'spell' };
+}[] | null {
   const actions = monsterActions(state, actorId);
-  const constraints: { readonly targetId: CombatantId; readonly actionId: string; readonly rangeFeet: number }[] = [];
+  const constraints: {
+    readonly targetId: CombatantId;
+    readonly rangeFeet: number;
+    readonly source: { readonly kind: 'action'; readonly actionId: string } | { readonly kind: 'spell' };
+  }[] = [];
   for (const slot of slots) {
     const use = slot.use;
     switch (use.kind) {
@@ -161,7 +171,7 @@ function targetConstraints(
               ? resolved.action.delivery.longRangeFeet.value
               : resolved.action.delivery.rangeFeet
             : resolved.action.delivery.longRangeFeet;
-        constraints.push({ targetId: resolved.targetId, actionId: resolved.action.id, rangeFeet });
+        constraints.push({ targetId: resolved.targetId, source: { kind: 'action', actionId: resolved.action.id }, rangeFeet });
         break;
       }
       case 'multiattack':
@@ -177,7 +187,7 @@ function targetConstraints(
                     ? resolved.action.delivery.longRangeFeet.value
                     : resolved.action.delivery.rangeFeet
                   : resolved.action.delivery.longRangeFeet;
-              constraints.push({ targetId: resolved.targetId, actionId: resolved.action.id, rangeFeet });
+              constraints.push({ targetId: resolved.targetId, source: { kind: 'action', actionId: resolved.action.id }, rangeFeet });
               break;
             }
             case 'saving_throw': {
@@ -185,7 +195,7 @@ function targetConstraints(
               if (resolved === null) return null;
               constraints.push({
                 targetId: resolved.targetId,
-                actionId: resolved.action.id,
+                source: { kind: 'action', actionId: resolved.action.id },
                 rangeFeet: resolved.action.target.rangeFeet,
               });
               break;
@@ -199,7 +209,7 @@ function targetConstraints(
           (candidate): candidate is MonsterSavingThrowAction => candidate.kind === 'saving_throw' && candidate.id === use.actionId,
         );
         if (targetId === null || action === undefined) return null;
-        constraints.push({ targetId, actionId: action.id, rangeFeet: action.target.rangeFeet });
+        constraints.push({ targetId, source: { kind: 'action', actionId: action.id }, rangeFeet: action.target.rangeFeet });
         break;
       }
       case 'cast_spell': {
@@ -208,7 +218,7 @@ function targetConstraints(
         if (definition === null || targetIds === null) return null;
         const rangeFeet = 'rangeFeet' in definition.targeting ? definition.targeting.rangeFeet : 0;
         for (const targetId of targetIds) {
-          constraints.push({ targetId, actionId: use.sourceActionId, rangeFeet });
+          constraints.push({ targetId, source: { kind: 'spell' }, rangeFeet });
         }
         break;
       }
@@ -227,21 +237,34 @@ function positionFits(
   state: EncounterState,
   actorId: CombatantId,
   position: GridCell,
-  constraints: readonly { readonly targetId: CombatantId; readonly rangeFeet: number }[],
+  constraints: readonly {
+    readonly targetId: CombatantId;
+    readonly rangeFeet: number;
+    readonly source: { readonly kind: 'action'; readonly actionId: string } | { readonly kind: 'spell' };
+  }[],
   movement: EngineMovementObjective,
   queries: EngineQueryPort,
 ): boolean {
   for (const constraint of constraints) {
-    const targetPosition = queries.tokenPosition(state, constraint.targetId);
-    if (targetPosition === null || gridDistance(position, targetPosition) > constraint.rangeFeet) return false;
+    if (constraint.source.kind === 'spell') {
+      const distance = queries.spaceDistance(state, actorId, constraint.targetId, position);
+      if (distance === null || distance > constraint.rangeFeet) return false;
+      continue;
+    }
+    const reach = queries.reach(state, {
+      actorId,
+      targetId: constraint.targetId,
+      actionId: constraint.source.actionId,
+      origin: position,
+    });
+    if (!reach.legal || reach.distanceFeet > constraint.rangeFeet) return false;
   }
   const anchor = movement.engagement.anchor;
   if (movement.engagement.stance === 'maintain_range' && anchor !== undefined && anchor !== null) {
     const anchorId = resolveSelector(state, actorId, anchor, queries);
-    const anchorPosition = anchorId === null ? null : queries.tokenPosition(state, anchorId);
     const anchorReach = anchorId === null ? null : queries.combatant(state, anchorId)?.profile.rules.reach;
-    if (anchorPosition === null || anchorReach === null || anchorReach === undefined ||
-      gridDistance(position, anchorPosition) <= anchorReach) return false;
+    const separation = anchorId === null ? null : queries.spaceDistance(state, actorId, anchorId, position);
+    if (separation === null || anchorReach === null || anchorReach === undefined || separation <= anchorReach) return false;
   }
   return true;
 }
@@ -274,8 +297,11 @@ function movementResolution(
   const movementKind = slots.some((slot) => slot.slot === 'main' && slot.use.kind === 'dash') ? 'dash' : 'normal';
   if (productiveClose) {
     const anchorId = resolveSelector(state, actorId, anchor, queries);
-    const anchorPosition = anchorId === null ? null : queries.tokenPosition(state, anchorId);
-    if (anchorPosition === null) return null;
+    if (anchorId === null || queries.tokenPosition(state, anchorId) === null) return null;
+    const anchorPosition = minimumSpaceLine(
+      combatantSpace(state, actorId),
+      combatantSpace(state, anchorId),
+    ).targetCell;
     const approach = queries.approach(state, {
       actorId,
       target: anchorPosition,
@@ -395,7 +421,8 @@ function validateUse(
       const position = queries.tokenPosition(state, actorId);
       if (object === undefined || action === null || position === null ||
         (action.eligibleActor !== 'either' && action.eligibleActor !== 'monster') ||
-        (action.reach === 'adjacent' && gridDistance(position, object.position) > 5) ||
+        (action.reach === 'adjacent' &&
+          minimumSpaceDistanceToCells(combatantSpace(state, actorId), object.footprint) > 5) ||
         (action.uses === 'once' && worldObjectActionWasUsed(state.eventLog, object.id, action.id))) {
         return 'WORLD_OBJECT_ACTION_UNAVAILABLE';
       }
@@ -532,7 +559,7 @@ function choiceFitsOption(
   }
 }
 
-function mechanicsWithChoice(
+export function mechanicsWithChoice(
   mechanics: ResolvedTurnMechanics,
   choice: EngineActivationChoice | null | undefined,
 ): ResolvedTurnMechanics {

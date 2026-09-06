@@ -1,4 +1,5 @@
 import {
+  combatToken,
   monsterCombatantProfile,
   type CombatantProfile,
 } from '../combat/combatant';
@@ -309,16 +310,11 @@ export function composeD365Room(
     bounds: { columns: 10, rows: 7 },
     combatants: [...players, ...monsters],
     tokens: [
-      ...players.map((profile, index) => ({
-        id: profile.tokenId,
-        combatantId: profile.id,
-        position: playerPositions[index] as GridCell,
-      })),
-      ...monsters.map((profile, index) => ({
-        id: profile.tokenId,
-        combatantId: profile.id,
-        position: room.monsters[index]?.position ?? { column: 8, row: index + 1 },
-      })),
+      ...players.map((profile, index) => combatToken(profile, playerPositions[index] as GridCell)),
+      ...monsters.map((profile, index) => combatToken(
+        profile,
+        room.monsters[index]?.position ?? { column: 8, row: index + 1 },
+      )),
     ],
     blockedCells: room.blockedCells,
     worldObjects: coverWorldObjects(room),

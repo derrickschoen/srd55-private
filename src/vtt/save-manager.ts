@@ -1,5 +1,18 @@
 import type { EncounterSessionId } from '../combat/values';
 
+export function downloadBrowserFile(
+  filename: string,
+  bytes: string,
+  mimeType: 'application/json' | 'text/html',
+): void {
+  const anchor = document.createElement('a');
+  const url = URL.createObjectURL(new Blob([bytes], { type: mimeType }));
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
 export type SaveSource = 'browser' | 'folder';
 export type AutosavePool = 'per_round' | 'encounter_boundary';
 export type SaveRetention =

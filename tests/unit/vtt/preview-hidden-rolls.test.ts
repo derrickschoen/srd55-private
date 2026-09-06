@@ -123,6 +123,7 @@ describe('D377.12 movement path-danger preview', () => {
     let state = reduceEncounter(createEncounter({
       bounds: { columns: 8, rows: 3 },
       environment: {
+        narrowOpeningRegions: [],
         lightRegions: [],
         obscurementRegions: [],
         difficultTerrainRegions: [{ id: 'mud', cells: [{ column: 2, row: 1 }] }],

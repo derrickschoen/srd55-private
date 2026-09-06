@@ -1,5 +1,5 @@
 import type { EncounterState } from '../combat/encounter';
-import { gridDistance, type GridCell } from '../combat/grid';
+import type { GridCell } from '../combat/grid';
 import type { MonsterAction, MonsterAttackAction } from '../combat/statblock';
 import { SPELL_MANIFEST } from '../combat/spells/manifest';
 import type { CombatantId } from '../combat/values';
@@ -108,7 +108,8 @@ function actionRefusals(
   if (arenaSameSide(state, actor, target)) refusals.push(`${actor}: target is on the actor's side`);
   const targetPosition = arenaTokenPosition(state, target);
   if (targetPosition === null) return [...refusals, `${actor}: target has no token`];
-  const distance = gridDistance(origin, targetPosition);
+  const distance = canonicalEngineQueryPort.spaceDistance(state, actor, target);
+  if (distance === null) return [...refusals, `${actor}: target separation is unavailable`];
   if (action.kind === 'attack' || action.kind === 'bonus_attack') {
     const selected = action.kind === 'attack' && action.attackId !== undefined
       ? actions.find((candidate): candidate is MonsterAttackAction =>

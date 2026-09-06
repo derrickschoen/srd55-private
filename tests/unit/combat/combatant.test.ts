@@ -89,6 +89,7 @@ describe('combatant and statblock boundaries', () => {
       id: 'token:ada',
       combatantId: 'combatant:ada',
       position: { column: 2, row: 3 },
+      placementMode: { kind: 'normal', actual: 'Medium' },
     });
   });
 

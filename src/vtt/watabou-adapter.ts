@@ -1,5 +1,16 @@
 import { createEncounter } from '../combat/encounter';
+import { combatToken } from '../combat/combatant';
+import {
+  autoRelocatePlacement,
+  creatureSpace,
+  normalPlacementFor,
+  sizedCombatantState,
+  spacesIntersect,
+  spaceTouchesCellSet,
+  type CreatureSpace,
+} from '../combat/creature-space';
 import type { GridCell } from '../combat/grid';
+import type { KnownCreatureSize } from '../domain/enums';
 import { armorClass, worldObjectId } from '../combat/values';
 import type { WorldObject } from '../combat/world-objects';
 import { encounterIr, type EncounterIr } from './encounter-ir';
@@ -205,18 +216,34 @@ export function adaptWatabouDungeon(
     }
   }
   const worldObjects = source.doors.map((door, index) => doorObject(door, index, minimumX, minimumY));
-  const objectCells = new Set(worldObjects.filter((object) => object.blocking.movement).map((object) => cellKey(object.position)));
+  const blockingObjectCells = worldObjects.filter((object) => object.blocking.movement)
+    .flatMap((object) => object.footprint);
+  const objectCells = new Set(blockingObjectCells.map(cellKey));
   const placementCells = openCells.filter((cell) => !objectCells.has(cellKey(cell)));
   const generated = generateRoom(options.seed ?? 0, { dimensions: { columns, rows } });
   const profiles = generated.encounter.state.combatants.map((subject) => subject.profile);
   if (placementCells.length < profiles.length) {
     throw new RangeError('Watabou dungeon has too few open cells for the generated encounter roster.');
   }
+  const occupied: CreatureSpace<KnownCreatureSize>[] = [];
   const tokens = profiles.map((profile, index) => {
     const spreadIndex = Math.floor(index * (placementCells.length - 1) / Math.max(1, profiles.length - 1));
-    const position = placementCells[spreadIndex];
-    if (position === undefined) throw new RangeError('Watabou token placement failed.');
-    return { id: profile.tokenId, combatantId: profile.id, position };
+    const preferred = placementCells[spreadIndex];
+    const size = profile.rules.sizeCategory;
+    if (preferred === undefined || size === undefined) throw new RangeError('Watabou token placement failed.');
+    const sized = sizedCombatantState(size);
+    const placement = autoRelocatePlacement(
+      sized,
+      preferred,
+      normalPlacementFor(sized),
+      { columns, rows },
+      (space) => !spaceTouchesCellSet(space, blockedCells) &&
+        !spaceTouchesCellSet(space, blockingObjectCells) &&
+        occupied.every((other) => !spacesIntersect(space, other)),
+    );
+    if (placement.kind !== 'placed') throw new RangeError('Watabou token placement failed.');
+    occupied.push(creatureSpace(sized, placement.placement));
+    return combatToken(profile, placement.placement.anchor);
   });
   const fresh = createEncounter({
     bounds: { columns, rows },
@@ -229,6 +256,7 @@ export function adaptWatabouDungeon(
       difficultTerrainRegions: [],
       obscurementRegions: [],
       movementRegions: [],
+      narrowOpeningRegions: [],
     },
     dmNotes: [
       source.title,

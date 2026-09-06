@@ -383,6 +383,22 @@ const SCHEMA_BEFORE_VTT_CONTEXT_ROLLOVER = DATABASE_MIGRATIONS
   .map((entry) => entry.sql)
   .join('\n');
 const VTT_CONTEXT_ROLLOVER_MIGRATION = DATABASE_MIGRATIONS[VTT_CONTEXT_ROLLOVER_INDEX]!;
+const VTT_CREATURE_SPACE_INDEX = DATABASE_MIGRATIONS.findIndex(
+  (entry) => entry.id === '0064_vtt_creature_space',
+);
+const SCHEMA_BEFORE_VTT_CREATURE_SPACE = DATABASE_MIGRATIONS
+  .slice(0, VTT_CREATURE_SPACE_INDEX)
+  .map((entry) => entry.sql)
+  .join('\n');
+const VTT_CREATURE_SPACE_MIGRATION = DATABASE_MIGRATIONS[VTT_CREATURE_SPACE_INDEX]!;
+const VTT_OBSERVATION_HISTORY_INDEX = DATABASE_MIGRATIONS.findIndex(
+  (entry) => entry.id === '0065_vtt_observation_history',
+);
+const SCHEMA_BEFORE_VTT_OBSERVATION_HISTORY = DATABASE_MIGRATIONS
+  .slice(0, VTT_OBSERVATION_HISTORY_INDEX)
+  .map((entry) => entry.sql)
+  .join('\n');
+const VTT_OBSERVATION_HISTORY_MIGRATION = DATABASE_MIGRATIONS[VTT_OBSERVATION_HISTORY_INDEX]!;
 
 /**
  * One character, three source instances (one of them deleted so the
@@ -4408,6 +4424,94 @@ describe('database migration chain', () => {
       `);
       expect(databaseSchemaChecksum(databaseSchemaSignature(db))).toBe(
         VTT_CONTEXT_ROLLOVER_MIGRATION.resultSchemaChecksum,
+      );
+      expect(databaseSchemaSignature(db)).toBe(schemaSignature(SCHEMA_BEFORE_VTT_CREATURE_SPACE));
+    } finally {
+      db.close();
+    }
+  });
+
+  it('0064 preserves schema-ten journal bytes and admits schema-eleven creature-space state', () => {
+    const db = new sqlite3.oo1.DB(':memory:', 'c');
+    try {
+      db.exec(SCHEMA_BEFORE_VTT_CREATURE_SPACE);
+      db.exec(`
+        INSERT INTO vtt_session_revisions (
+          session_id, revision, schema_version, payload_json, payload_checksum
+        ) VALUES (
+          'session:creature-space-survivor', 1, 10,
+          '{"journal":"unchanged","schemaVersion":10}',
+          '${'78'.repeat(32)}'
+        )
+      `);
+
+      db.exec(VTT_CREATURE_SPACE_MIGRATION.sql);
+
+      expect(db.selectObjects(
+        `SELECT session_id, revision, schema_version, payload_json, payload_checksum
+         FROM vtt_session_revisions`,
+      )).toEqual([{
+        session_id: 'session:creature-space-survivor',
+        revision: 1,
+        schema_version: 10,
+        payload_json: '{"journal":"unchanged","schemaVersion":10}',
+        payload_checksum: '78'.repeat(32),
+      }]);
+      db.exec(`
+        INSERT INTO vtt_session_revisions (
+          session_id, revision, schema_version, payload_json, payload_checksum
+        ) VALUES (
+          'session:creature-space-v11', 1, 11,
+          '{"encounter":{"adjudicationPending":[]},"schemaVersion":11}',
+          '${'9a'.repeat(32)}'
+        )
+      `);
+      expect(databaseSchemaChecksum(databaseSchemaSignature(db))).toBe(
+        VTT_CREATURE_SPACE_MIGRATION.resultSchemaChecksum,
+      );
+      expect(databaseSchemaSignature(db)).toBe(schemaSignature(SCHEMA_BEFORE_VTT_OBSERVATION_HISTORY));
+    } finally {
+      db.close();
+    }
+  });
+
+  it('0065 preserves schema-eleven journal bytes and admits schema-twelve observation history', () => {
+    const db = new sqlite3.oo1.DB(':memory:', 'c');
+    try {
+      db.exec(SCHEMA_BEFORE_VTT_OBSERVATION_HISTORY);
+      db.exec(`
+        INSERT INTO vtt_session_revisions (
+          session_id, revision, schema_version, payload_json, payload_checksum
+        ) VALUES (
+          'session:observation-history-survivor', 1, 11,
+          '{"journal":"unchanged","schemaVersion":11}',
+          '${'54'.repeat(32)}'
+        )
+      `);
+
+      db.exec(VTT_OBSERVATION_HISTORY_MIGRATION.sql);
+
+      expect(db.selectObjects(
+        `SELECT session_id, revision, schema_version, payload_json, payload_checksum
+         FROM vtt_session_revisions`,
+      )).toEqual([{
+        session_id: 'session:observation-history-survivor',
+        revision: 1,
+        schema_version: 11,
+        payload_json: '{"journal":"unchanged","schemaVersion":11}',
+        payload_checksum: '54'.repeat(32),
+      }]);
+      db.exec(`
+        INSERT INTO vtt_session_revisions (
+          session_id, revision, schema_version, payload_json, payload_checksum
+        ) VALUES (
+          'session:observation-history-v12', 1, 12,
+          '{"encounter":{"observationHistory":[]},"schemaVersion":12}',
+          '${'55'.repeat(32)}'
+        )
+      `);
+      expect(databaseSchemaChecksum(databaseSchemaSignature(db))).toBe(
+        VTT_OBSERVATION_HISTORY_MIGRATION.resultSchemaChecksum,
       );
       expect(databaseSchemaSignature(db)).toBe(schemaSignature(schema));
     } finally {

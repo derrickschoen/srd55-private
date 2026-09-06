@@ -17,7 +17,7 @@ import {
 } from './tactical-evaluator';
 import { feet, type CombatantId, type Feet } from './values';
 
-export const MOVEMENT_EVALUATOR_POLICY = 'movement-eval-v1' as const;
+export const MOVEMENT_EVALUATOR_POLICY = 'movement-eval-v2' as const;
 
 export type MovementHazardKind =
   | 'burning_surface'
@@ -70,7 +70,7 @@ export interface MovementEvaluationInput {
   readonly attackAt: (position: GridCell) =>
     | {
         readonly status: 'resolved';
-        readonly input: Omit<TacticalAttackInput, 'attackerPosition'>;
+        readonly input: TacticalAttackInput;
       }
     | {
         readonly status: 'unresolved';
@@ -255,10 +255,7 @@ function tacticalVerdict(
     : {
         status: 'resolved',
         tacticalPolicy: TACTICAL_EVALUATOR_POLICY,
-        evaluation: evaluateTacticalAttack({
-          ...context.input,
-          attackerPosition: position,
-        }),
+        evaluation: evaluateTacticalAttack(context.input),
       };
   cache.set(key, verdict);
   return verdict;
@@ -367,20 +364,27 @@ function pathRisks(
       readonly cell: GridCell;
       readonly kinds: Set<MovementHazardKind>;
     }>();
-    for (const cell of path.cells) {
-      for (const hazard of input.hazards.cells) {
-        if (!sameCell(cell, hazard.cell)) continue;
-        const key = cellKey(cell);
-        const existing = hazardsByCell.get(key);
-        if (existing === undefined) {
-          hazardsByCell.set(key, {
-            cell: { ...cell },
-            kinds: new Set([hazard.kind]),
-          });
-        } else {
-          existing.kinds.add(hazard.kind);
+    let previousAnchor = input.start;
+    for (const anchor of path.cells) {
+      const previousCells = input.world.occupiedCells(input.actorId, previousAnchor);
+      const enteredCells = input.world.occupiedCells(input.actorId, anchor)
+        .filter((cell) => !previousCells.some((previous) => sameCell(cell, previous)));
+      for (const cell of enteredCells) {
+        for (const hazard of input.hazards.cells) {
+          if (!sameCell(cell, hazard.cell)) continue;
+          const key = cellKey(cell);
+          const existing = hazardsByCell.get(key);
+          if (existing === undefined) {
+            hazardsByCell.set(key, {
+              cell: { ...cell },
+              kinds: new Set([hazard.kind]),
+            });
+          } else {
+            existing.kinds.add(hazard.kind);
+          }
         }
       }
+      previousAnchor = anchor;
     }
     const annotations = [...hazardsByCell.values()].map((annotation) => ({
       cell: annotation.cell,

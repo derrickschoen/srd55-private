@@ -533,9 +533,9 @@ function doorObject(id: string, name: string, cell: { readonly column: number; r
 const everyClass: EncounterBoardProjectionShape = {
   bounds: { columns: 6, rows: 4 },
   combatants: [
-    { id: HERO, name: 'Hero', kind: 'player_character', position: { column: 1, row: 1 }, life: 'living', hitPointBand: { kind: 'perceived_band', band: 'uninjured' } },
-    { id: FOE, name: 'Lurking Foe', kind: 'monster', position: { column: 2, row: 2 }, life: 'living', hitPointBand: { kind: 'unknown' }, hiddenFromPlayers: true },
-    { id: SCOUT, name: 'Scout', kind: 'player_character', position: OPEN_DOOR, life: 'living', hitPointBand: { kind: 'perceived_band', band: 'bloodied' } },
+    { id: HERO, name: 'Hero', kind: 'player_character', placementStatus: 'placed', position: { column: 1, row: 1 }, effectiveSize: 'Medium', placementMode: { kind: 'normal', actual: 'Medium' }, footprint: [{ column: 1, row: 1 }], life: 'living', hitPointBand: { kind: 'perceived_band', band: 'uninjured' } },
+    { id: FOE, name: 'Lurking Foe', kind: 'monster', placementStatus: 'placed', position: { column: 2, row: 2 }, effectiveSize: 'Medium', placementMode: { kind: 'normal', actual: 'Medium' }, footprint: [{ column: 2, row: 2 }], life: 'living', hitPointBand: { kind: 'unknown' }, hiddenFromPlayers: true },
+    { id: SCOUT, name: 'Scout', kind: 'player_character', placementStatus: 'placed', position: OPEN_DOOR, effectiveSize: 'Medium', placementMode: { kind: 'normal', actual: 'Medium' }, footprint: [OPEN_DOOR], life: 'living', hitPointBand: { kind: 'perceived_band', band: 'bloodied' } },
   ],
   highlightedCombatant: null,
   adjudicatedTargets: [],
@@ -763,7 +763,7 @@ describe('D525 board DOM under each mode on a room with every fact class', () =>
   it("DM board under 'full' on a room with nothing to mark lists no vocabulary rows, and a closed door alone lists only DOOR CLOSED", () => {
     const bare: EncounterBoardProjectionShape = {
       bounds: { columns: 6, rows: 4 },
-      combatants: [{ id: HERO, name: 'Hero', kind: 'player_character', position: { column: 1, row: 1 } }],
+      combatants: [{ id: HERO, name: 'Hero', kind: 'player_character', placementStatus: 'placed', position: { column: 1, row: 1 }, effectiveSize: 'Medium', placementMode: { kind: 'normal', actual: 'Medium' }, footprint: [{ column: 1, row: 1 }] }],
       highlightedCombatant: null,
       adjudicatedTargets: [],
     };

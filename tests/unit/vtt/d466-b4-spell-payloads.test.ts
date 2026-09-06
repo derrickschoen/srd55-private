@@ -17,6 +17,7 @@ import { engineSchemaInternals } from '../../../src/vtt/mcp/schemas';
 import { freshMonsterPlanningState } from '../../../src/vtt/monster-planning-state';
 import { projectHumanEngineOptions } from '../../../src/vtt/encounter-board-projection';
 import { renderHumanEngineOptionCatalog } from '../../../src/vtt/encounter-app';
+import { reconcileStableRenderedChildren } from '../../../src/vtt/stable-dom-render';
 import { engineActorOptions } from '../../../src/vtt/turn-option-registry';
 import type { EngineActivationChoice } from '../../../src/vtt/turn-proposal';
 import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
@@ -159,7 +160,7 @@ describe('D466 B4 spell payloads', () => {
     });
     const unicorn = { ...unicornBase, rules: { ...unicornBase.rules, initiativeBonus: 100 } };
     const ally = playerProfile('b4-ally', { initiativeBonus: -100 });
-    let state = freshMonsterPlanningState(started([unicorn, ally], [0, 1]));
+    let state = freshMonsterPlanningState(started([unicorn, ally], [0, 2]));
     const bonus = UNICORN.sourceDetails.bonusActions.kind === 'present'
       ? UNICORN.sourceDetails.bonusActions.value.find((entry) => entry.kind === 'spell_choice') : undefined;
     if (bonus?.kind !== 'spell_choice') throw new Error('Unicorn blessing declaration is absent.');
@@ -221,19 +222,29 @@ describe('D466 B4 spell payloads', () => {
       const ally = playerProfile('ui-ally', { initiativeBonus: -100 });
       const state = freshMonsterPlanningState(createEncounter({
         bounds: { columns: 30, rows: 12 }, combatants: [unicorn, ally],
-        tokens: [placedToken(unicorn, 0, 2), placedToken(ally, 1, 2)],
+        tokens: [placedToken(unicorn, 0, 2), placedToken(ally, 2, 2)],
       }));
       const projected = projectHumanEngineOptions(state, [unicorn.id]);
       const optionCount = projected[0]?.options.filter((entry) =>
         entry.availability === 'offerable' && entry.option.activationChoice?.kind === 'unicorns_blessing_spell').length;
-      const catalog = interactiveElement(renderHumanEngineOptionCatalog(projected));
-      const controls = catalog.querySelectorAll('select').filter((control) =>
+      const catalog = renderHumanEngineOptionCatalog(projected);
+      const controls = interactiveElement(catalog).querySelectorAll('select').filter((control) =>
         control.dataset['choiceKind'] === 'unicorns_blessing_spell');
       expect(optionCount).toBeGreaterThan(0);
       expect(controls).toHaveLength(optionCount ?? 0);
       expect(controls[0]?.children.map((entry) => entry.value)).toEqual([
         '', 'cure-wounds', 'lesser-restoration',
       ]);
+
+      const live = document.createElement('main');
+      const firstDraft = document.createElement('main');
+      firstDraft.append(catalog);
+      reconcileStableRenderedChildren(live, firstDraft);
+      const retainedControl = live.querySelector('select');
+      const nextDraft = document.createElement('main');
+      nextDraft.append(renderHumanEngineOptionCatalog(projected));
+      reconcileStableRenderedChildren(live, nextDraft);
+      expect(live.querySelector('select')).toBe(retainedControl);
     } finally {
       restoreDocument();
     }

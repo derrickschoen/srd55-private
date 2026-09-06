@@ -6,6 +6,7 @@ import { mulberry32 } from '../../../src/combat/random';
 import { BUNDLED_MONSTER_ROSTER, STARTER_MONSTER_ROSTER } from '../../../src/combat/statblocks/roster';
 import { spellDefinition } from '../../../src/combat/spells/definitions';
 import { sha256 } from '../../../src/crypto/sha256';
+import { creatureSizes, type KnownCreatureSize } from '../../../src/domain/enums';
 import {
   D466_GENERATED_ROOM_OVERRIDES,
   d466CreatureReplacement,
@@ -131,6 +132,10 @@ const inputs = declareTestInputs({
   ],
 });
 
+function omitUndefined(value: unknown): unknown {
+  return JSON.parse(JSON.stringify(value)) as unknown;
+}
+
 function expectValidEnvironmentRegions(room: GeneratedRoom): void {
   const environment = room.encounter.state.environment;
   const regions = [
@@ -146,7 +151,11 @@ function expectValidEnvironmentRegions(room: GeneratedRoom): void {
 }
 
 function d466NonRosterProjection(room: GeneratedRoom): unknown {
-  return {
+  const monsterTokenIndexes = new Map(room.spec.monsterRoster.map((entry, index) => [
+    String(entry.tokenId),
+    index,
+  ]));
+  return omitUndefined({
     spec: { ...room.spec, monsterRoster: [] },
     encounter: {
       ...room.encounter,
@@ -154,10 +163,188 @@ function d466NonRosterProjection(room: GeneratedRoom): unknown {
         ...room.encounter.state,
         combatants: room.encounter.state.combatants.filter(
           (combatant) => combatant.profile.kind !== 'monster',
-        ),
+        ).map((combatant) => ({
+          ...combatant,
+          profile: {
+            ...combatant.profile,
+            rules: { ...combatant.profile.rules, sizeCategory: legacyFixtureSize(combatant.profile) },
+          },
+        })),
+        tokens: room.encounter.state.tokens.map((token) => {
+          const monsterIndex = monsterTokenIndexes.get(String(token.id));
+          return {
+            ...token,
+            placementMode: undefined,
+            position: monsterIndex === undefined
+              ? token.position
+              : {
+                  column: room.spec.dimensions.columns - 2 - monsterIndex % 2,
+                  row: 1 + Math.floor(monsterIndex / 2) * 2,
+                },
+          };
+        }),
+        environment: {
+          ...room.encounter.state.environment,
+          narrowOpeningRegions: undefined,
+        },
+        sharedSpaceRelations: undefined,
+        adjudicationPending: undefined,
+        observationHistory: undefined,
+      },
+    },
+  });
+}
+
+function fixtureSize(profile: GeneratedRoom['encounter']['state']['combatants'][number]['profile']): KnownCreatureSize {
+  if (profile.kind === 'player_character') return 'Medium';
+  const row = BUNDLED_MONSTER_ROSTER.find((candidate) => candidate.id === profile.statblockId);
+  const size = row?.statblock.sourceDetails.classification.kind === 'present'
+    ? row.statblock.sourceDetails.classification.value.sizes[0]
+    : undefined;
+  if (size === undefined || !creatureSizes.includes(size as KnownCreatureSize)) {
+    throw new Error(`Frozen room references ${profile.statblockId} without an authoritative size.`);
+  }
+  return size as KnownCreatureSize;
+}
+
+function legacyFixtureSize(
+  profile: GeneratedRoom['encounter']['state']['combatants'][number]['profile'],
+): KnownCreatureSize | undefined {
+  if (profile.kind === 'player_character') return undefined;
+  const row = BUNDLED_MONSTER_ROSTER.find((candidate) => candidate.id === profile.statblockId);
+  const sizes = row?.statblock.sourceDetails.classification.kind === 'present'
+    ? row.statblock.sourceDetails.classification.value.sizes
+    : [];
+  const [size] = sizes;
+  return sizes.length === 1 && size !== undefined && creatureSizes.includes(size as KnownCreatureSize)
+    ? size as KnownCreatureSize
+    : undefined;
+}
+
+function footprintWidth(size: KnownCreatureSize): 1 | 2 | 3 | 4 {
+  switch (size) {
+    case 'Tiny':
+    case 'Small':
+    case 'Medium': return 1;
+    case 'Large': return 2;
+    case 'Huge': return 3;
+    case 'Gargantuan': return 4;
+  }
+}
+
+function expectedCreatureSpaceFixture(bytes: string): string {
+  const legacy = JSON.parse(bytes) as GeneratedRoom;
+  const sizes = new Map(legacy.encounter.state.combatants.map((combatant) => [
+    String(combatant.profile.id),
+    fixtureSize(combatant.profile),
+  ]));
+  const occupied = new Set<string>();
+  const blocked = new Set(legacy.spec.blockedCells.map((cell) => `${String(cell.column)},${String(cell.row)}`));
+  const tokens = legacy.encounter.state.tokens.map((token) => {
+    const size = sizes.get(String(token.combatantId));
+    if (size === undefined) throw new Error(`Frozen token ${token.id} has no sized combatant.`);
+    const width = footprintWidth(size);
+    const candidates = Array.from(
+      { length: legacy.spec.dimensions.columns * legacy.spec.dimensions.rows },
+      (_unused, index) => ({
+        column: index % legacy.spec.dimensions.columns,
+        row: Math.floor(index / legacy.spec.dimensions.columns),
+      }),
+    ).sort((left, right) =>
+      Math.max(
+        Math.abs(left.column - token.position.column),
+        Math.abs(left.row - token.position.row),
+      ) - Math.max(
+        Math.abs(right.column - token.position.column),
+        Math.abs(right.row - token.position.row),
+      ) || left.row - right.row || left.column - right.column);
+    const position = candidates.find((anchor) => {
+      if (anchor.column + width > legacy.spec.dimensions.columns ||
+        anchor.row + width > legacy.spec.dimensions.rows) return false;
+      for (let row = anchor.row; row < anchor.row + width; row += 1) {
+        for (let column = anchor.column; column < anchor.column + width; column += 1) {
+          const key = `${String(column)},${String(row)}`;
+          if (blocked.has(key) || occupied.has(key)) return false;
+        }
+      }
+      return true;
+    });
+    if (position === undefined) throw new Error(`Frozen token ${token.id} has no legal D514 anchor.`);
+    for (let row = position.row; row < position.row + width; row += 1) {
+      for (let column = position.column; column < position.column + width; column += 1) {
+        occupied.add(`${String(column)},${String(row)}`);
+      }
+    }
+    return { ...token, position, placementMode: { kind: 'normal' as const, actual: size } };
+  });
+  const upgraded: GeneratedRoom = {
+    ...legacy,
+    encounter: {
+      ...legacy.encounter,
+      state: {
+        ...legacy.encounter.state,
+        combatants: legacy.encounter.state.combatants.map((combatant) => ({
+          ...combatant,
+          profile: {
+            ...combatant.profile,
+            rules: { ...combatant.profile.rules, sizeCategory: fixtureSize(combatant.profile) },
+          },
+        })),
+        tokens,
+        environment: {
+          ...legacy.encounter.state.environment,
+          narrowOpeningRegions: [],
+        },
+        sharedSpaceRelations: [],
+        adjudicationPending: [],
+        observationHistory: [],
       },
     },
   };
+  return `${canonicalJson(upgraded)}\n`;
+}
+
+function legacyCreatureSpaceProjection(room: GeneratedRoom): string {
+  const monsterTokenIndexes = new Map(room.spec.monsterRoster.map((entry, index) => [
+    String(entry.tokenId),
+    index,
+  ]));
+  return canonicalJson(omitUndefined({
+    ...room,
+    encounter: {
+      ...room.encounter,
+      state: {
+        ...room.encounter.state,
+        combatants: room.encounter.state.combatants.map((combatant) => ({
+          ...combatant,
+          profile: {
+            ...combatant.profile,
+            rules: { ...combatant.profile.rules, sizeCategory: legacyFixtureSize(combatant.profile) },
+          },
+        })),
+        tokens: room.encounter.state.tokens.map((token) => {
+          const monsterIndex = monsterTokenIndexes.get(String(token.id));
+          return {
+            ...token,
+            placementMode: undefined,
+            position: monsterIndex === undefined
+              ? token.position
+              : {
+                  column: room.spec.dimensions.columns - 2 - monsterIndex % 2,
+                  row: 1 + Math.floor(monsterIndex / 2) * 2,
+                },
+          };
+        }),
+        environment: {
+          ...room.encounter.state.environment,
+          narrowOpeningRegions: undefined,
+        },
+        sharedSpaceRelations: undefined,
+        adjudicationPending: undefined,
+        observationHistory: undefined,
+      },
+    },
+  }));
 }
 
 describe('seeded room generator', () => {
@@ -237,15 +424,17 @@ describe('seeded room generator', () => {
     // Seed 3943005's Priest Acolyte derives three independent 1/day Divine Aid pools from its statblock.
     const path = `tests/fixtures/arena-basis/seed-${String(seed)}.json` as
       `tests/fixtures/arena-basis/seed-${typeof seed}.json`;
-    expect(`${canonicalJson(generateRoom(seed))}\n`).toBe(inputs.fixtures.readText(path));
+    const fixtureBytes = inputs.fixtures.readText(path);
+    expect(`${canonicalJson(generateRoom(seed))}\n`).toBe(expectedCreatureSpaceFixture(fixtureBytes));
   });
 
   it.each(HARD_BASIS_SEEDS)('pins frozen hard arena basis seed %s byte-for-byte', (seed) => {
     // Every hard basis seed has Priest monster-1: Spirit Guardians is 1/day and each Divine Aid spell is 3/day.
     const path = `tests/fixtures/arena-basis-hard/seed-${String(seed)}.json` as
       `tests/fixtures/arena-basis-hard/seed-${typeof seed}.json`;
+    const fixtureBytes = inputs.fixtures.readText(path);
     expect(`${canonicalJson(generateRoom(seed, { difficulty: 'hard' }))}\n`).toBe(
-      inputs.fixtures.readText(path),
+      expectedCreatureSpaceFixture(fixtureBytes),
     );
   });
 
@@ -299,13 +488,18 @@ describe('seeded room generator', () => {
       `tests/fixtures/arena-basis-brutal/seed-${typeof seed}.json`;
     const generatedBytes = `${canonicalJson(generateRoom(seed, { difficulty: 'brutal' }))}\n`;
     const fixtureBytes = inputs.fixtures.readText(path);
-    expect(sha256(generatedBytes), `seed ${String(seed)} pre-replacement generation changed`).toBe(
+    const legacyGeneratedBytes = `${legacyCreatureSpaceProjection(
+      generateRoom(seed, { difficulty: 'brutal' }),
+    )}\n`;
+    if (seed === 6_203_001) expect(legacyGeneratedBytes).toBe(fixtureBytes);
+    expect(sha256(legacyGeneratedBytes),
+      `seed ${String(seed)} pre-replacement generation changed`).toBe(
       BRUTAL_BASIS_GENERATED_DIGESTS[seed],
     );
     expect(sha256(fixtureBytes), `seed ${String(seed)} typed fixture changed`).toBe(
       BRUTAL_BASIS_FIXTURE_DIGESTS[seed],
     );
-    if (seed === 6_203_001) expect(generatedBytes).toBe(fixtureBytes);
+    if (seed === 6_203_001) expect(generatedBytes).toBe(expectedCreatureSpaceFixture(fixtureBytes));
   });
 
   it('applies only the three 6204 post-sampling replacements without changing RNG-derived room data', () => {

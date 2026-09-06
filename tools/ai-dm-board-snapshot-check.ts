@@ -71,6 +71,12 @@ try {
     await readFile(join(outputDirectory, captures[repeatedIndex]!.relativePath)),
     'same-state PNG bytes',
   );
+  requireEqual(captures[0]?.html.sha256, captures[repeatedIndex]?.html.sha256, 'same-state HTML digest');
+  requireEqual(
+    await readFile(join(outputDirectory, captures[0]!.html.relativePath)),
+    await readFile(join(outputDirectory, captures[repeatedIndex]!.html.relativePath)),
+    'same-state HTML bytes',
+  );
   requireEqual(new Set(captures.map((artifact) => artifact.chromiumVersion)).size, 1, 'Chromium version count');
   if (!captures.every((artifact) => artifact.bytes > 0 && artifact.bytes <= 1_000_000)) {
     throw new Error('A board PNG violated the nonzero 1,000,000-byte contract.');
@@ -156,6 +162,15 @@ try {
   requireEqual(Reflect.get(manifest, 'deviceScaleFactor'), 1, 'manifest DPR');
   requireEqual(Reflect.get(manifest, 'tileSizeCssPx'), 128, 'manifest tile size');
   requireEqual(Reflect.get(manifest, 'maximumPngBytes'), 1_000_000, 'manifest PNG cap');
+  const manifestArtifacts = Reflect.get(manifest, 'artifacts');
+  if (!Array.isArray(manifestArtifacts) || !manifestArtifacts.every((artifact: unknown) => {
+    if (artifact === null || typeof artifact !== 'object') return false;
+    const html = Reflect.get(artifact, 'html');
+    return html !== null && typeof html === 'object' &&
+      typeof Reflect.get(html, 'relativePath') === 'string' &&
+      typeof Reflect.get(html, 'sha256') === 'string' &&
+      typeof Reflect.get(html, 'bytes') === 'number';
+  })) throw new Error('Snapshot manifest artifacts do not carry board HTML entries.');
 
   process.stdout.write(`BOARD_SNAPSHOT_RESULT ${JSON.stringify({
     outputDirectory,
@@ -171,6 +186,7 @@ try {
     staleRejected,
     identityRejected,
     movedDigestChanged: movedArtifact.source.stateDigest !== captures[1]?.source.stateDigest,
+    manifestCarriesHtml: true,
   })}\n`);
 } finally {
   await service.close();

@@ -50,7 +50,7 @@ const OVERRIDDEN = { column: 2, row: 1 };
 const litRoom: EncounterBoardProjectionShape = {
   bounds: { columns: 6, rows: 4 },
   combatants: [
-    { id: combatantId('combatant:hero'), name: 'Hero', kind: 'player_character', position: { column: 0, row: 0 } },
+    { id: combatantId('combatant:hero'), name: 'Hero', kind: 'player_character', placementStatus: 'placed', position: { column: 0, row: 0 }, effectiveSize: 'Medium', placementMode: { kind: 'normal', actual: 'Medium' }, footprint: [{ column: 0, row: 0 }] },
   ],
   highlightedCombatant: null,
   adjudicatedTargets: [],

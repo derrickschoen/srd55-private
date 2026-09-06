@@ -2,7 +2,9 @@ import { canonicalJson } from '../../commands/canonical-json';
 import type { EncounterState } from '../../combat/encounter';
 import { ALERTING_POLICY, type EncounterAlertingState } from '../../combat/alerting';
 import type { EncounterEvent } from '../../combat/events';
-import { gridDistance, type GridCell } from '../../combat/grid';
+import type { GridCell } from '../../combat/grid';
+import { combatantSpace, combatantSpaceAt } from '../../combat/combat-rules';
+import { minimumSpaceLine } from '../../combat/creature-space';
 import { SEARCH_MEMORY_POLICY, type SearchMemory } from '../../combat/search-memory';
 import type { MonsterAttackAction } from '../../combat/statblock';
 import {
@@ -34,6 +36,7 @@ import {
   engineOptionId,
   enginePlayToken,
   type EngineOfferableOption,
+  type EngineOptionId,
   type EngineOptionMetric,
   type EngineOverrideJustification,
 } from '../turn-proposal';
@@ -80,6 +83,7 @@ import type { ReactionGuidanceDeclaration, ReactionTriggerGuidance } from '../re
 import { diffTurnContextValues } from '../dm-bridge/projection-transport';
 import {
   DEFAULT_RENDERER_PROFILE,
+  bindIntelToShownOptions,
   extractCircumstanceFeatures,
   renderBytes,
   renderProseTurnContext,
@@ -112,14 +116,17 @@ import {
   ENGINE_ACTOR_KNOWLEDGE_POLICY,
   ENGINE_LEGENDARY_WINDOWS_POLICY,
   ENGINE_MINIMAL_SUBMIT_ROUND_PROPOSALS_INPUT_SCHEMA,
+  PROPOSAL_CONTRACT_REFUSAL_CODES,
   ENGINE_REACTION_SPEND_HOLD_POLICY,
   ENGINE_RECOVERY_CAPABILITY_POLICY,
+  ENGINE_STATE_SUMMARY_POLICY,
   ENGINE_SUBMIT_ROUND_PROPOSALS_INPUT_SCHEMA,
   ENGINE_TOOL_SPECS,
   ENGINE_TURN_PROPOSAL_INPUT_SCHEMA,
   engineSchemaInternals,
   generatedMinimalRoundSubmissionExample,
   schemaViolations,
+  type EngineUiFeedback,
 } from './schemas';
 import type { KbReadBudget, KbReadCallPhase } from './knowledge-base';
 
@@ -207,7 +214,7 @@ function encodedJsonBytes(value: unknown): number {
 const SUGGESTED_PLAN_ADVISORY = 'You may submit these revision-bound option proposals as-is via engine.submit_round_proposals, edit the selected option ids, or ignore this suggested plan.';
 
 export function engineStateSummaryProofToken(capsuleDigest: string, granularity: string): string {
-  return sha256(`${capsuleDigest}|${granularity}|state_summary_proof_v1`);
+  return sha256(`${capsuleDigest}|${granularity}|state_summary_proof_v2_creature_space`);
 }
 export interface AllowlistedRulesSource { readonly get: (ruleId: string) => AllowlistedRuleEntry | null }
 export interface AdjudicationEnvelope {
@@ -217,6 +224,7 @@ export interface AdjudicationEnvelope {
   readonly blocking: boolean; readonly suggestedOutcomes: readonly string[]; readonly idempotencyKey: string;
 }
 export interface AdjudicationSink { readonly append: (envelope: AdjudicationEnvelope) => void }
+export interface UiFeedbackSink { readonly append: (feedback: EngineUiFeedback) => void }
 
 export interface TurnContextDeltaBase {
   readonly revision: number;
@@ -247,6 +255,9 @@ interface EngineMcpDependencies {
   readonly speculativePlans: SpeculativePlanSink;
   readonly narration: NarrationSink;
   readonly adjudications: AdjudicationSink;
+  readonly uiFeedback?: UiFeedbackSink;
+  readonly roundDecisionAlreadyAccepted?: boolean;
+  readonly uiFeedbackAlreadySubmitted?: boolean;
   readonly rules: AllowlistedRulesSource;
   readonly maximumToolResultBytes?: number;
   readonly maximumResourceBytes?: number;
@@ -359,8 +370,10 @@ function promptRequest(capsule: EngineStateCapsule): Readonly<Record<string, unk
     } : {}),
   };
 }
+export type ProposalContractRefusalCode = (typeof PROPOSAL_CONTRACT_REFUSAL_CODES)[number];
+
 interface ProposalContractRefusal {
-  readonly code: 'CORRECTION_FALLBACK_MUST_BE_NULL' | 'INITIAL_FALLBACK_REQUIRED' | 'PRIMARY_FALLBACK_IDENTICAL';
+  readonly code: ProposalContractRefusalCode;
   readonly summary: string;
   readonly attempt: 'primary' | 'fallback';
 }
@@ -390,6 +403,29 @@ function proposalContractRefusal(
     };
   }
   return null;
+}
+
+function shownOptionRefusals(
+  proposal: EngineTurnProposal,
+  shownOptionIds: ReadonlySet<EngineOptionId> | undefined,
+): readonly ProposalContractRefusal[] {
+  if (shownOptionIds === undefined) return [];
+  return ([
+    ['primary', proposal.primaryOptionId],
+    ['fallback', proposal.fallbackOptionId],
+  ] as const).flatMap(([attempt, optionId]) =>
+    optionId === null || shownOptionIds.has(optionId) ? [] : [{
+      code: 'OPTION_NOT_SHOWN',
+      summary: `${attempt}_option_id must identify an option shown for this actor in the rendered turn context.`,
+      attempt,
+    }]);
+}
+
+function shownOptionRefusal(
+  proposal: EngineTurnProposal,
+  shownOptionIds: ReadonlySet<EngineOptionId> | undefined,
+): ProposalContractRefusal | null {
+  return shownOptionRefusals(proposal, shownOptionIds)[0] ?? null;
 }
 
 interface LauncherRoundSubmissionBinding {
@@ -754,6 +790,10 @@ function externalOptionSlot(
 function tacticalOptions(state: EncounterState, queries: EngineQueryPort, capsule: EngineStateCapsule, actorId: CombatantId, includeExpectations: boolean): readonly Readonly<Record<string, unknown>>[] {
   const projected = capsule.projection.combatants.find((candidate) => candidate.id === actorId);
   if (projected === undefined) return [];
+  // The byte-cap pruner removes from the tail. Keep immediately usable,
+  // information-rich offense first; movement/defense follows, with End Turn
+  // last. This makes truncation deterministic without promoting an unavailable
+  // attack over a legal defensive turn.
   const informationRank = (option: EngineOfferableOption): number => {
     const main = option.actionSlots.find((slot) => slot.slot === 'main')?.use;
     if (main === undefined) return 6;
@@ -831,12 +871,10 @@ function tacticalOptions(state: EncounterState, queries: EngineQueryPort, capsul
 }
 function distanceBand(distance: number): 'engaged' | 'near' | 'far' { return distance <= 5 ? 'engaged' : distance <= 30 ? 'near' : 'far' }
 function threats(state: EncounterState, queries: EngineQueryPort, actorId: CombatantId): readonly Readonly<Record<string, unknown>>[] {
-  const origin = queries.tokenPosition(state, actorId);
-  if (origin === null) return [];
+  if (queries.tokenPosition(state, actorId) === null) return [];
   return state.combatants.filter((candidate) => candidate.life !== 'dead' && !queries.sameSide(state, actorId, candidate.profile.id)).flatMap((candidate) => {
-    const position = queries.tokenPosition(state, candidate.profile.id);
-    if (position === null) return [];
-    const distance = gridDistance(origin, position);
+    const distance = queries.spaceDistance(state, actorId, candidate.profile.id);
+    if (distance === null) return [];
     return [{ source_id: candidate.profile.id, kinds: ['melee'], distance_band: distanceBand(distance), can_reach_now: distance <= candidate.profile.rules.reach ? 'yes' : 'no', visible: queries.visibility(state, actorId, candidate.profile.id)?.visible ?? false, note_codes: [] }];
   }).sort((left, right) => left.source_id.localeCompare(right.source_id));
 }
@@ -897,14 +935,21 @@ function reactionAttackInput(
   const command = decision.opportunityAttack.command;
   const attacker = state.combatants.find((candidate) => candidate.profile.id === command.actor);
   const target = state.combatants.find((candidate) => candidate.profile.id === command.target);
-  const attackerPosition = state.tokens.find((token) => token.combatantId === command.actor)?.position;
-  if (attacker === undefined || target === undefined || attackerPosition === undefined) return null;
+  const attackerToken = state.tokens.find((token) => token.combatantId === command.actor);
+  const targetToken = state.tokens.find((token) => token.combatantId === command.target);
+  if (attacker === undefined || target === undefined || attackerToken === undefined || targetToken === undefined) {
+    return null;
+  }
+  const selectedLine = minimumSpaceLine(
+    combatantSpace(state, command.actor),
+    combatantSpaceAt(state, command.target, decision.opportunityAttack.from),
+  );
   const criticalFloor = command.criticalFloor === 18 || command.criticalFloor === 19 ? command.criticalFloor : 20;
   return {
     attackerId: command.actor,
     targetId: command.target,
-    attackerPosition,
-    targetPosition: decision.opportunityAttack.from,
+    attackerPosition: selectedLine.sourceCell,
+    targetPosition: selectedLine.targetCell,
     range: command.tacticalRange ?? { kind: 'melee', reachFeet: attacker.profile.rules.reach },
     attackBonus: command.attackBonus,
     targetArmorClass: target.profile.rules.armorClass,
@@ -933,25 +978,58 @@ function reactionAttackInput(
 function actorKnowledgeReports(
   state: EncounterState,
   queries: EngineQueryPort,
+  capsule: EngineStateCapsule,
 ): readonly Readonly<Record<string, unknown>>[] {
   return state.combatants
     .filter((candidate) => candidate.profile.kind === 'monster' && candidate.life !== 'dead')
-    .map((actor) => ({
-      actor_id: actor.profile.id,
-      targets: state.combatants
+    .map((actor) => {
+      return {
+        actor_id: actor.profile.id,
+        targets: state.combatants
         .filter((target) => !queries.sameSide(state, actor.profile.id, target.profile.id) && target.life !== 'dead')
         .map((target) => {
+          const projected = capsule.projection.combatants.find((candidate) => candidate.id === target.profile.id);
+          const distanceFeet = queries.spaceDistance(state, actor.profile.id, target.profile.id);
+          if (projected?.placementStatus === 'placement_pending') {
+            return {
+              kind: 'placement_pending',
+              target_id: target.profile.id,
+              placement_status: 'placement_pending',
+              pending_reason: projected.pendingReason,
+            };
+          }
           const visibility = queries.visibility(state, actor.profile.id, target.profile.id);
-          return visibility?.visible === true
-            ? { kind: 'perceived', target_id: target.profile.id }
+          if (visibility?.visible === true && projected?.placementStatus === 'placed' && distanceFeet !== null) {
+            return {
+              kind: 'perceived',
+              target_id: target.profile.id,
+              placement_status: 'placed',
+              effective_size: projected.effectiveSize,
+              placement_mode: structuredClone(projected.placementMode),
+              footprint: projected.footprint.map((cell) => ({ ...cell })),
+              distance_feet: distanceFeet,
+            };
+          }
+          const observation = capsule.projection.observationHistory.find((entry) =>
+            entry.observer === actor.profile.id && entry.subject === target.profile.id);
+          return observation !== undefined
+            ? {
+                kind: 'suspected',
+                target_id: target.profile.id,
+                last_seen: {
+                  status: 'resolved',
+                  lastSeenPosition: { ...observation.cell },
+                },
+              }
             : {
                 kind: 'unknown',
                 target_id: target.profile.id,
-                last_seen: { status: 'unresolved', reason: 'last_seen_position_not_modeled' },
+                last_seen: { status: 'unresolved', reason: 'never_observed' },
               };
         })
         .sort((left, right) => left.target_id.localeCompare(right.target_id)),
-    }))
+      };
+    })
     .sort((left, right) => left.actor_id.localeCompare(right.actor_id));
 }
 
@@ -1125,7 +1203,7 @@ function capsuleIntelReports(
     (entry) => entry.kind === 'participant' && entry.joinedBy.kind === 'help_call',
   ) === true;
   return {
-    actorKnowledge: actorKnowledgeReports(state, queries),
+    actorKnowledge: actorKnowledgeReports(state, queries, capsule),
     reactionSpendHold: reactionSpendHoldReports(state),
     legendaryWindows: legendary.full,
     legendaryWindowsCompact: legendary.compact,
@@ -1244,7 +1322,10 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
   // Profile and measure the complete incumbent context before the one authoritative cap pass.
   const fullContextAssemblyMaximumBytes = Number.MAX_SAFE_INTEGER;
   let optionReferences: ReadonlyMap<string, string> = new Map();
+  let shownOptionIdsByActor: ReadonlyMap<string, ReadonlySet<EngineOptionId>> | null = null;
   const idempotency = new Map<string, { readonly bytes: string; readonly result: unknown }>();
+  let acceptedRoundDecision = dependencies.roundDecisionAlreadyAccepted ?? false;
+  let submittedUiFeedback = dependencies.uiFeedbackAlreadySubmitted ?? false;
   const applicationCursors = new Map<string, { readonly digest: string; readonly key: string; readonly offset: number }>();
   const opportunityReports = new Map<string, ReturnType<typeof actorOpportunityReport>>();
   const teamPlanReports = new Map<string, TeamPlanFrontierReport>();
@@ -1981,6 +2062,19 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       : null;
     if (roundSubmission?.kind === 'rejected') return roundSubmission.result;
     const input = roundSubmission === null ? suppliedInput : roundSubmission.envelope;
+    if (name === 'engine.submit_ui_feedback') {
+      if (!acceptedRoundDecision) {
+        return { status: 'rule_error', code: 'UI_FEEDBACK_DECISION_NOT_ACCEPTED' };
+      }
+      if (submittedUiFeedback) {
+        return { status: 'rule_error', code: 'UI_FEEDBACK_ALREADY_SUBMITTED' };
+      }
+      const sink = dependencies.uiFeedback;
+      if (sink === undefined) throw new RangeError('UI_FEEDBACK_UNAVAILABLE');
+      sink.append(structuredClone(input) as EngineUiFeedback);
+      submittedUiFeedback = true;
+      return { status: 'recorded' };
+    }
     if (name === 'engine.read_kb_subject') {
       const budget = dependencies.kbReadBudget;
       const callPhase = dependencies.kbReadCallPhase;
@@ -2020,10 +2114,17 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
           features,
           removals: rendered.removals,
         });
+        shownOptionIdsByActor = prose.shownOptionIdsByActor;
         dependencies.onTurnContext?.(structuredClone(prose.context));
         return prose.context;
       }
       const preTrimBytes = renderBytes(rendered.context);
+      const objectAt = (parent: Record<string, unknown>, key: string): Record<string, unknown> | null => {
+        const value = parent[key];
+        return typeof value === 'object' && value !== null && !Array.isArray(value)
+          ? value as Record<string, unknown>
+          : null;
+      };
       const trimToLimit = (source: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> => {
         const sourceBytes = source === rendered.context ? preTrimBytes : renderBytes(source);
         if (sourceBytes <= turnContextMaximumBytes) return source;
@@ -2035,15 +2136,61 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
           typeof actor === 'object' && actor !== null && !Array.isArray(actor));
         const arrays = (key: 'options' | 'threats', actor: Record<string, unknown>): unknown[] =>
           Array.isArray(actor[key]) ? actor[key] as unknown[] : [];
-        const objectAt = (parent: Record<string, unknown>, key: string): Record<string, unknown> | null => {
-          const value = parent[key];
-          return typeof value === 'object' && value !== null && !Array.isArray(value)
-            ? value as Record<string, unknown>
-            : null;
-        };
         const clearArrayField = (parent: Record<string, unknown>, key: string): void => {
           if (Array.isArray(parent[key])) parent[key] = [];
         };
+        if (sourceBytes > turnContextMaximumBytes) {
+          for (const actor of actorRecords) {
+            const options = arrays('options', actor);
+            const intel = objectAt(actor, 'intel');
+            const opportunity = objectAt(intel ?? {}, 'opportunity_cost');
+            const defaultId = opportunity?.['engine_default_option_id'];
+            const optionId = (value: unknown): unknown => {
+              const option = objectAt({ option: value }, 'option');
+              return option?.['option_id'] ?? option?.['option_ref'];
+            };
+            const defaultOption = options.find((value) => optionId(value) === defaultId);
+            const ranked = [
+              ...(defaultOption === undefined ? [] : [defaultOption]),
+              ...options.filter((value) => value !== defaultOption),
+            ];
+            // The engine-ranked default leads, followed by the established
+            // offense-first tactical order. Pruning from the tail therefore
+            // retains the chosen objective and the strongest independent
+            // alternative rather than arbitrary serialization order.
+            const usableOffenseKinds = new Set(['attack', 'cast_spell', 'use_action']);
+            const survivalKinds = new Set(['dash', 'dodge', 'end_turn']);
+            const hasUsableOffense = ranked.some((value) => {
+              const option = objectAt({ option: value }, 'option');
+              return option?.['usable_now'] === true && usableOffenseKinds.has(String(option['kind']));
+            });
+            const dominatedDodgeId = opportunity?.['status'] === 'dominated'
+              ? opportunity['dodge_option_id']
+              : null;
+            if (!hasUsableOffense && typeof dominatedDodgeId === 'string') {
+              const dominatedIndex = ranked.findIndex((value) => optionId(value) === dominatedDodgeId);
+              if (dominatedIndex > 0) {
+                const [dominated] = ranked.splice(dominatedIndex, 1);
+                if (dominated !== undefined) ranked.push(dominated);
+              }
+            }
+            const floor = ranked.slice(0, 2);
+            if (!hasUsableOffense && !floor.some((value) => {
+              const option = objectAt({ option: value }, 'option');
+              return survivalKinds.has(String(option?.['kind']));
+            })) {
+              const survivalIndex = ranked.findIndex((value) => {
+                const option = objectAt({ option: value }, 'option');
+                return survivalKinds.has(String(option?.['kind']));
+              });
+              if (survivalIndex >= 0) {
+                const [survival] = ranked.splice(survivalIndex, 1);
+                if (survival !== undefined) ranked.splice(Math.min(1, ranked.length), 0, survival);
+              }
+            }
+            actor['options'] = ranked;
+          }
+        }
         clearArrayField(candidate, 'applicable_skills');
         const knowledge = objectAt(candidate, 'actor_knowledge');
         if (knowledge !== null) clearArrayField(knowledge, 'actors');
@@ -2095,10 +2242,15 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
                 : null;
             };
             const defaultOption = actorOptions.find((option) => exactId(option) === defaultId);
-            const floorOptions = [
+            const rankedFloorOptions = [
               ...(defaultOption === undefined ? [] : [defaultOption]),
               ...actorOptions.filter((option) => option !== defaultOption),
-            ].slice(0, Math.min(2, actorOptions.length));
+            ];
+            // Compact fallback preserves the same engine-default plus
+            // highest-ranked-alternative floor as ordinary pruning. Its two
+            // options are deliberately bounded so the hard byte cap remains
+            // enforceable even for unusually large initiative groups.
+            const floorOptions = rankedFloorOptions.slice(0, Math.min(2, actorOptions.length));
             const compactOptions = floorOptions.flatMap((option) => {
               const optionId = exactId(option);
               if (optionId === null) return [];
@@ -2186,6 +2338,11 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
                 configured_cap_bytes: turnContextMaximumBytes,
               } };
         };
+        // Options arrived offense-first above. Prune from the least informative
+        // tail while preserving a two-choice floor. A no-offense actor keeps a
+        // legal movement/defensive choice, and known-dominated Dodge moves
+        // behind another such choice so the renderer never invents a false
+        // Dash-versus-Dodge decision boundary.
         while (renderBytes(candidate) > turnContextMaximumBytes) {
           const actor = [...actorRecords].reverse().find((entry) => arrays('options', entry).length > 2);
           if (actor === undefined) break;
@@ -2241,13 +2398,19 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         if (renderBytes(candidate) > turnContextMaximumBytes) {
           return compactFallback();
         }
-        return candidate;
+        const bound = bindIntelToShownOptions(candidate, optionReferences, source, true).context;
+        return renderBytes(bound) <= turnContextMaximumBytes ? bound : compactFallback();
       };
       const untrimmedFull = rendered.context;
       let trimmedFull: Readonly<Record<string, unknown>> | undefined;
       const full = (): Readonly<Record<string, unknown>> => {
         trimmedFull ??= trimToLimit(untrimmedFull);
         return trimmedFull;
+      };
+      let currentPartition: ReturnType<typeof bindIntelToShownOptions> | undefined;
+      const partition = (): ReturnType<typeof bindIntelToShownOptions> => {
+        currentPartition ??= bindIntelToShownOptions(full(), optionReferences, untrimmedFull, true);
+        return currentPartition;
       };
       const base = dependencies.turnContextDeltaBase;
       const wantsDelta = rendererProfile.delta !== 'off' && input['granularity'] === 'turn_delta';
@@ -2259,37 +2422,46 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
             const baseStateRef = record(base.context['state_ref'], 'turn context delta base state_ref');
             if (baseStateRef['run_id'] !== capsule.runId ||
               baseStateRef['expected_revision'] !== base.revision) return untrimmedFull;
+            const currentFull = partition().context;
             const anchor = rendererProfile.anchor === 'hash_only'
               ? {
                   base_revision: base.revision,
                   revision: capsule.revision,
                   base_context_hash: sha256(canonicalJson(base.context)),
-                  context_hash: sha256(canonicalJson(untrimmedFull)),
+                  context_hash: sha256(canonicalJson(currentFull)),
                 }
               : {
                   base_revision: base.revision,
                   revision: capsule.revision,
                   base_context_hash: sha256(canonicalJson(base.context)),
-                  context_hash: sha256(canonicalJson(untrimmedFull)),
-                  state_ref: untrimmedFull['state_ref'],
-                  request: untrimmedFull['request'],
+                  context_hash: sha256(canonicalJson(currentFull)),
+                  state_ref: currentFull['state_ref'],
+                  request: currentFull['request'],
                 };
             const delta = {
               granularity: 'turn_delta' as const,
               anchor,
-              changes: diffTurnContextValues(base.context, untrimmedFull),
-              context_trimmed: untrimmedFull['context_trimmed'],
-              renderer_attribution: untrimmedFull['renderer_attribution'],
+              changes: diffTurnContextValues(base.context, currentFull),
+              context_trimmed: currentFull['context_trimmed'],
+              renderer_attribution: currentFull['renderer_attribution'],
             };
-            return rendererProfile.delta === 'guarded' && renderBytes(delta) >= renderBytes(untrimmedFull) * 0.8
-              ? untrimmedFull
+            return rendererProfile.delta === 'guarded' && renderBytes(delta) >= renderBytes(currentFull) * 0.8
+              ? currentFull
               : delta;
           })();
-      const context = contextCandidate['granularity'] === 'full'
+      const contextBeforeBinding = contextCandidate['granularity'] === 'full'
         ? trimToLimit(contextCandidate)
         : encodedJsonBytes(contextCandidate) <= turnContextMaximumBytes
           ? contextCandidate
           : { ...full(), context_trimmed: true, truncated: true };
+      const boundContext = contextBeforeBinding['granularity'] === 'full'
+        ? bindIntelToShownOptions(contextBeforeBinding, optionReferences, untrimmedFull, true)
+        : null;
+      const context = boundContext?.context ?? contextBeforeBinding;
+      shownOptionIdsByActor = boundContext?.shownOptionIdsByActor ??
+        (context['granularity'] === 'turn_delta'
+          ? partition().shownOptionIdsByActor
+          : rendered.shownOptionIdsByActor);
       const postTrimBytes = renderBytes(context);
       const featurePreTrimBytes = context['granularity'] === 'turn_delta'
         ? renderBytes(contextCandidate)
@@ -2431,18 +2603,33 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       if (granularity === 'combatant_detail' && !Array.isArray(input['combatant_ids'])) throw new RangeError('combatant_ids are required.');
       if (granularity === 'journal_delta' && typeof input['since_revision'] !== 'number') throw new RangeError('since_revision is required.');
       const ids = Array.isArray(input['combatant_ids']) ? input['combatant_ids'].map(String) : null;
-      const combatants = capsule.projection.combatants.filter((actor) => ids === null || ids.includes(actor.id)).sort((left, right) => left.id.localeCompare(right.id)).map((actor) => ({
-        combatant_id: actor.id,
-        name: actor.name,
-        side: actor.side,
-        status: actorStatus(actor),
-        options: granularity === 'combatant_detail' ? tacticalOptions(state, queries, capsule, actor.id, true) : [],
-        threats: granularity === 'turn_minimal' || granularity === 'combatant_detail' ? threats(state, queries, actor.id) : [],
-      }));
+      const combatants = capsule.projection.combatants.filter((actor) => ids === null || ids.includes(actor.id)).sort((left, right) => left.id.localeCompare(right.id)).map((actor) => actor.placementStatus === 'placed'
+        ? {
+            combatant_id: actor.id,
+            name: actor.name,
+            side: actor.side,
+            status: actorStatus(actor),
+            placement_status: 'placed' as const,
+            effective_size: actor.effectiveSize,
+            placement_mode: actor.placementMode,
+            footprint: actor.footprint,
+            options: granularity === 'combatant_detail' ? tacticalOptions(state, queries, capsule, actor.id, true) : [],
+            threats: granularity === 'turn_minimal' || granularity === 'combatant_detail' ? threats(state, queries, actor.id) : [],
+          }
+        : {
+            combatant_id: actor.id,
+            name: actor.name,
+            side: actor.side,
+            status: actorStatus(actor),
+            placement_status: 'placement_pending' as const,
+            pending_reason: actor.pendingReason,
+            options: [],
+            threats: [],
+          });
       const history = recentChanges(capsule).filter((entry) => typeof input['since_revision'] !== 'number' || Number(entry['revision']) > input['since_revision']);
       const source = granularity === 'journal_delta' ? history : combatants;
       const paged = applicationPage(capsule, canonicalJson({ granularity, ids, since: input['since_revision'] ?? null }), source, input['page']);
-      return { state_ref: externalStateRef(capsule), granularity, proof_token: engineStateSummaryProofToken(capsule.digest, granularity), summary: { room: capsule.projection.room, round: capsule.projection.round, active_side: capsule.projection.activeSide, combatants: granularity === 'journal_delta' ? [] : paged.values, terrain_tags: tacticalSummary(capsule)['terrain_tags'], history: granularity === 'journal_delta' ? paged.values : history }, truncated: paged.truncated, next_cursor: paged.next };
+      return { state_ref: externalStateRef(capsule), policy: ENGINE_STATE_SUMMARY_POLICY, granularity, proof_token: engineStateSummaryProofToken(capsule.digest, granularity), summary: { room: capsule.projection.room, round: capsule.projection.round, active_side: capsule.projection.activeSide, combatants: granularity === 'journal_delta' ? [] : paged.values, terrain_tags: tacticalSummary(capsule)['terrain_tags'], history: granularity === 'journal_delta' ? paged.values : history }, truncated: paged.truncated, next_cursor: paged.next };
     }
     if (name === 'engine.get_combatant_options') {
       const actorId = combatantId(stringField(input, 'actor_id'));
@@ -2460,24 +2647,26 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       if (targetId === null || targetCell === null) return { state_ref: externalStateRef(capsule), feasible: false, minimum_feet: null, risks: [], resulting_relation: null, refusals: [{ code: 'TARGET_ABSENT', summary: 'The semantic target did not resolve.' }] };
       const movement = decodeMovement(input['movement']);
       const maximumFeet = movement.willingness === 'none' ? 0 : movement.maximumFeet;
-      const candidates: { readonly cell: GridCell; readonly cost: number }[] = [];
+      const currentRelation = queries.spaceDistance(state, actorId, targetId);
+      const candidates: { readonly cell: GridCell; readonly cost: number; readonly relation: number }[] = [];
       for (let row = 0; row < state.bounds.rows; row += 1) for (let column = 0; column < state.bounds.columns; column += 1) {
         const cell = { row, column };
         const path = queries.path(state, { actorId, destination: cell, movement: 'normal', ...(maximumFeet === undefined ? {} : { maximumFeet }) });
         if (!path.legal) continue;
         const kind = stringField(objective, 'kind');
         const actionId = typeof objective['action_id'] === 'string' ? objective['action_id'] : null;
-        const relation = gridDistance(cell, targetCell);
+        const relation = queries.spaceDistance(state, actorId, targetId, cell);
+        if (relation === null) continue;
         const qualifies = kind === 'enable_action' && actionId !== null ? queries.reach(state, { actorId, targetId, actionId, origin: cell }).legal
-          : kind === 'withdraw_from' ? relation > gridDistance(queries.tokenPosition(state, actorId) ?? cell, targetCell)
+          : kind === 'withdraw_from' ? currentRelation !== null && relation > currentRelation
             : kind === 'maintain_range_from' ? relation > 5 : true;
-        if (qualifies) candidates.push({ cell, cost: path.costFeet });
+        if (qualifies) candidates.push({ cell, cost: path.costFeet, relation });
       }
-      candidates.sort((left, right) => left.cost - right.cost || gridDistance(left.cell, targetCell) - gridDistance(right.cell, targetCell) || left.cell.row - right.cell.row || left.cell.column - right.cell.column);
+      candidates.sort((left, right) => left.cost - right.cost || left.relation - right.relation || left.cell.row - right.cell.row || left.cell.column - right.cell.column);
       const selected = candidates[0];
       return selected === undefined
         ? { state_ref: externalStateRef(capsule), feasible: false, minimum_feet: null, risks: [], resulting_relation: null, refusals: [{ code: 'OBJECTIVE_UNREACHABLE', summary: 'No legal path satisfies the semantic objective.' }] }
-        : { state_ref: externalStateRef(capsule), feasible: true, minimum_feet: selected.cost, risks: [], resulting_relation: `${distanceBand(gridDistance(selected.cell, targetCell))} from ${targetId}`, refusals: [] };
+        : { state_ref: externalStateRef(capsule), feasible: true, minimum_feet: selected.cost, risks: [], resulting_relation: `${distanceBand(selected.relation)} from ${targetId}`, refusals: [] };
     }
     if (name === 'engine.query_reach' || name === 'engine.query_cover' || name === 'engine.query_visibility') {
       const queryValues = input['queries'];
@@ -2498,9 +2687,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         }
         const actionId = typeof query['action_id'] === 'string' ? query['action_id'] : '';
         const reach = actionId.length === 0 ? null : queries.reach(state, { actorId, targetId, actionId });
-        const actorCell = queries.tokenPosition(state, actorId);
-        const targetCell = queries.tokenPosition(state, targetId);
-        const distance = actorCell === null || targetCell === null ? null : gridDistance(actorCell, targetCell);
+        const distance = queries.spaceDistance(state, actorId, targetId);
         const after = query['after_movement'] === undefined ? null : record(execute('engine.query_path', { state_ref: input['state_ref'], actor_id: actorId, objective: { kind: 'enable_action', action_id: actionId, target: query['target'] }, movement: query['after_movement'], ...(query['engagement'] === undefined ? {} : { engagement: query['engagement'] }) }), 'path result');
         const afterFeasible = after?.['feasible'] === true;
         return { query_id: queryId, status: reach?.legal === true ? 'yes' : afterFeasible ? 'conditional' : reach === null ? 'unknown' : 'no', facts: { distance_band: distance === null ? 'unknown' : distanceBand(distance), action_range_feet: reach?.legal === true ? reach.rangeFeet : null, reachable_now: reach?.legal === true, reachable_after_movement: afterFeasible, minimum_movement_feet: afterFeasible && typeof after?.['minimum_feet'] === 'number' ? after['minimum_feet'] : null }, refusals: reach !== null && !reach.legal ? reach.codes.map((code) => ({ code: code.toUpperCase(), summary: `${actionId}: ${code}` })) : [] };
@@ -2533,6 +2720,12 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       const contractRefusal = proposalContractRefusal(request.phase, proposal);
       if (contractRefusal !== null) {
         return { state_ref: externalStateRef(capsule), valid: false, selected_branch: 'none', resolution: null, refusals: [{ code: contractRefusal.code, summary: contractRefusal.summary }], correction_guidance: correctionGuidance(capsule) };
+      }
+      const shownRefusal = shownOptionRefusal(
+        proposal, shownOptionIdsByActor?.get(proposal.actorId),
+      );
+      if (shownRefusal !== null) {
+        return { state_ref: externalStateRef(capsule), valid: false, selected_branch: 'none', resolution: null, refusals: [{ code: shownRefusal.code, summary: shownRefusal.summary }], correction_guidance: correctionGuidance(capsule) };
       }
       const resolution = turnProposals.resolve(state, proposal);
       if (!resolution.valid) {
@@ -2583,15 +2776,19 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         ? request.actors.map((actorId) => decoded.find((proposal) => proposal.actorId === actorId)).filter((proposal): proposal is EngineTurnProposal => proposal !== undefined)
         : decoded;
       const evaluated = canonical.map((proposal) => {
-        const contractRefusal = proposalContractRefusal(request.phase, proposal);
+        const shapeRefusal = proposalContractRefusal(request.phase, proposal);
+        const contractRefusals = shapeRefusal === null
+          ? shownOptionRefusals(proposal, shownOptionIdsByActor?.get(proposal.actorId))
+          : [shapeRefusal];
+        const resolution = contractRefusals.length === 0 ? turnProposals.resolve(state, proposal) : null;
         return {
           proposal,
-          contractRefusal,
-          resolution: contractRefusal === null ? turnProposals.resolve(state, proposal) : null,
+          contractRefusals,
+          resolution,
         };
       });
-      const dominanceRefusals = evaluated.flatMap(({ proposal, contractRefusal, resolution }) => {
-        if (contractRefusal !== null || resolution === null || !resolution.valid) return [];
+      const dominanceRefusals = evaluated.flatMap(({ proposal, contractRefusals, resolution }) => {
+        if (contractRefusals.length > 0 || resolution === null || !resolution.valid) return [];
         const refusal = dominanceRefusal(capsule, proposal, resolution.option.optionId);
         return refusal === null ? [] : [{
           actor_id: proposal.actorId,
@@ -2614,7 +2811,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
             rejection_reasons: ['Round submission must contain one proposal for each required actor exactly once.'],
           }],
         }]),
-        ...evaluated.flatMap(({ proposal, contractRefusal, resolution }) => contractRefusal === null ? [] : [{
+        ...evaluated.flatMap(({ proposal, contractRefusals }) => contractRefusals.map((contractRefusal) => ({
           actor_id: proposal.actorId,
           codes: [contractRefusal.code],
           summary: contractRefusal.summary,
@@ -2624,8 +2821,8 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
               ? proposal.primaryOptionId : proposal.fallbackOptionId,
             rejection_reasons: [contractRefusal.summary],
           }],
-        }]),
-        ...evaluated.flatMap(({ proposal, contractRefusal, resolution }) => contractRefusal !== null || resolution === null || resolution.valid ? [] : [{
+        }))),
+        ...evaluated.flatMap(({ proposal, contractRefusals, resolution }) => contractRefusals.length > 0 || resolution === null || resolution.valid ? [] : [{
           actor_id: proposal.actorId,
           codes: resolution.refusals.map((entry) => entry.code),
           summary: resolution.refusals.map((entry) => entry.summary).join('; '),
@@ -2647,9 +2844,10 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       const reactionGuidance = input['reaction_guidance'] === undefined
         ? null : decodeReactionGuidance(input['reaction_guidance']);
       return idempotent(key, input, () => {
-        const valid = evaluated.flatMap(({ proposal, contractRefusal, resolution }) => contractRefusal === null && resolution?.valid === true ? [{ proposal, option: resolution.option, primaryOption: resolution.primaryOption, fallbackOption: resolution.fallbackOption, mechanics: resolution.mechanics, selectedBranch: resolution.selectedBranch, resolutionDigest: resolution.resolutionDigest, summary: resolution.summary }] : []);
+        const valid = evaluated.flatMap(({ proposal, contractRefusals, resolution }) => contractRefusals.length === 0 && resolution?.valid === true ? [{ proposal, option: resolution.option, primaryOption: resolution.primaryOption, fallbackOption: resolution.fallbackOption, mechanics: resolution.mechanics, selectedBranch: resolution.selectedBranch, resolutionDigest: resolution.resolutionDigest, summary: resolution.summary }] : []);
         const proposalId = `round:${sha256(canonicalJson({ digest: capsule.digest, key, valid, reactionGuidance })).slice(0, 48)}`;
         submitEngineProposal(feed, proposals, { kind: 'round_turn_proposal', proposalId, runId: capsule.runId, branchId: capsule.branchId, requestId: request.requestId, expectedRevision: capsule.revision, stateDigest: capsule.digest, stateHandle: engineStateHandle(capsule), phase: request.phase, idempotencyKey: key, resolutions: valid, rationale: typeof input['rationale'] === 'string' ? input['rationale'] : null, reactionGuidance, submittedArguments: structuredClone(roundSubmission?.submittedArguments ?? suppliedInput), ...(activeIntelMode === 'off' ? {} : { intelCapture: captureDmIntel(state, capsule, queries) }) });
+        acceptedRoundDecision = true;
         return { status: 'proposed', round_proposal_id: proposalId, state_ref: externalStateRef(capsule), actor_resolutions: valid.map((entry) => ({ actor_id: entry.proposal.actorId, selected_branch: entry.selectedBranch, resolution_digest: entry.resolutionDigest, summary: entry.summary })) };
       });
     }
@@ -2678,6 +2876,8 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
                 ? { code: 'ACTOR_NOT_OPEN', summary: 'Only actors whose turns remain open may receive an adjustment.', attempt: 'primary' as const }
                 : contractRefusal;
         if (staticRefusal !== null) return { proposal, resolution: null, staticRefusal };
+        const hidden = shownOptionRefusal(proposal, shownOptionIdsByActor?.get(proposal.actorId));
+        if (hidden !== null) return { proposal, resolution: null, staticRefusal: hidden };
         const resolution = turnProposals.resolve(state, proposal);
         if (resolution.valid) {
           const refusal = dominanceRefusal(capsule, proposal, resolution.option.optionId);
@@ -2815,6 +3015,8 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       if (request.actors.length !== 1 || request.actors[0] !== proposal.actorId) return { status: 'rejected', state_ref: externalStateRef(capsule), refusals: [{ code: 'ACTOR_REQUIRES_WHOLE_ROUND', summary: 'This actor belongs to the pending shared-initiative whole-round request.' }], correction_guidance: correctionGuidance(capsule) };
       const contractRefusal = proposalContractRefusal(request.phase, proposal);
       if (contractRefusal !== null) return { status: 'rejected', state_ref: externalStateRef(capsule), refusals: [{ code: contractRefusal.code, summary: contractRefusal.summary }], correction_guidance: correctionGuidance(capsule) };
+      const shownRefusal = shownOptionRefusal(proposal, shownOptionIdsByActor?.get(proposal.actorId));
+      if (shownRefusal !== null) return { status: 'rejected', state_ref: externalStateRef(capsule), refusals: [{ code: shownRefusal.code, summary: shownRefusal.summary }], correction_guidance: correctionGuidance(capsule) };
       const resolution = turnProposals.resolve(state, proposal);
       if (!resolution.valid) return { status: 'rejected', state_ref: externalStateRef(capsule), refusals: resolution.refusals.map((entry) => ({ code: entry.code, summary: entry.summary })), correction_guidance: correctionGuidance(capsule) };
       const dominance = dominanceRefusal(capsule, proposal, resolution.option.optionId);
@@ -2860,14 +3062,17 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
 
   const profileRequest = feed.current().request;
   const advertisedNames: ReadonlySet<string> | null = dependencies.toolProfile === 'dm'
-    ? new Set(profileRequest?.phase === 'speculative'
+    ? new Set([...(profileRequest?.phase === 'speculative'
       ? ENGINE_SPECULATIVE_DM_TOOL_NAMES
       : profileRequest?.kind === 'plan_adjustment'
         ? ENGINE_ADJUSTMENT_DM_TOOL_NAMES
-        : ENGINE_DM_TOOL_NAMES)
+        : ENGINE_DM_TOOL_NAMES), ...(dependencies.uiFeedback === undefined ? [] : ['engine.submit_ui_feedback'])])
     : null;
   const bindings: readonly McpToolBinding[] = ENGINE_TOOL_SPECS
-    .filter((spec) => spec.descriptor.name === 'engine.read_kb_subject'
+    .filter((spec) => spec.descriptor.name === 'engine.submit_ui_feedback'
+      ? dependencies.uiFeedback !== undefined && profileRequest?.phase !== 'speculative' &&
+        profileRequest?.kind !== 'plan_adjustment'
+      : spec.descriptor.name === 'engine.read_kb_subject'
       ? dependencies.kbReadBudget !== undefined && profileRequest?.phase !== 'speculative'
       : advertisedNames === null || advertisedNames.has(spec.descriptor.name))
     .map((spec) => ({

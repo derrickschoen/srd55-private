@@ -1,8 +1,10 @@
-import type { CombatantProfile, CombatToken } from '../combat/combatant';
+import { combatToken, type CombatantProfile, type CombatToken } from '../combat/combatant';
 import type { LegalActionSummary } from '../combat/controllers';
-import type { EncounterState } from '../combat/encounter';
+import { combatantSpace, type EncounterState } from '../combat/encounter';
+import { minimumSpaceDistance, minimumSpaceDistanceToCells } from '../combat/creature-space';
 import type { EncounterCommand } from '../combat/events';
 import { gridDistance, isCellInside, type GridCell } from '../combat/grid';
+import { encounterMovementWorld } from '../combat/encounter-movement-world';
 import { feetPoint, previewAffectedCells } from '../combat/templates';
 import { referencePartySpellSlots } from '../combat/spells/resources';
 import {
@@ -55,6 +57,7 @@ function profile(
       passivePerception: 12,
       detectionTraits: [],
       contactMedium: 'surface',
+      sizeCategory: 'Medium',
       ...(key === 'training-brute' ? { skillBonuses: { stealth: 20 } } : {}),
       spellSlots: options.spellSlots ?? [],
     },
@@ -115,11 +118,7 @@ export function referenceEncounterSetup(): {
   return {
     bounds: { columns: 10, rows: 7 },
     combatants,
-    tokens: combatants.map((combatant, index) => ({
-      id: combatant.tokenId,
-      combatantId: combatant.id,
-      position: positions[index] as GridCell,
-    })),
+    tokens: combatants.map((combatant, index) => combatToken(combatant, positions[index] as GridCell)),
     blockedCells: [{ column: 7, row: 2 }],
     foggedCells: [{ column: 8, row: 1 }, { column: 8, row: 2 }],
     environment: {
@@ -127,6 +126,7 @@ export function referenceEncounterSetup(): {
       obscurementRegions: [],
       difficultTerrainRegions: [],
       movementRegions: [],
+      narrowOpeningRegions: [],
     },
     dmNotes: ['Training Brute retreats after the three reference PCs act.'],
   };
@@ -144,16 +144,10 @@ function position(state: EncounterState, id: CombatantId): GridCell {
   return found.position;
 }
 
-function occupied(state: EncounterState, cell: GridCell): boolean {
-  return state.tokens.some(
-    (token) =>
-      token.position.column === cell.column && token.position.row === cell.row,
-  );
-}
-
 function movementActions(state: EncounterState, actor: CombatantId): readonly EncounterCommand[] {
   const current = position(state, actor);
   if (subject(state, actor).turn.movement.remaining < 5) return [];
+  const world = encounterMovementWorld(state);
   const actions: EncounterCommand[] = [];
   for (let columnDelta = -1; columnDelta <= 1; columnDelta += 1) {
     for (let rowDelta = -1; rowDelta <= 1; rowDelta += 1) {
@@ -162,12 +156,12 @@ function movementActions(state: EncounterState, actor: CombatantId): readonly En
         column: current.column + columnDelta,
         row: current.row + rowDelta,
       };
+      const traversal = world.canTraverseStep(actor, current, to)
+        ? world.traversal(actor, current, to)
+        : { kind: 'blocked' as const };
       if (
         isCellInside(state.bounds, to) &&
-        !occupied(state, to) &&
-        !state.blockedCells.some(
-          (cell) => cell.column === to.column && cell.row === to.row,
-        )
+        traversal.kind === 'enterable' && traversal.canEnd
       ) {
         actions.push({ type: 'move', actor, path: [to], cause: 'voluntary' });
       }
@@ -212,7 +206,7 @@ function shatterActions(state: EncounterState, actor: CombatantId): readonly Enc
         { bounds: state.bounds, blockedCells: state.blockedCells },
         area,
       );
-      if (gridDistance(position(state, actor), { column, row }) > 60) continue;
+      if (minimumSpaceDistanceToCells(combatantSpace(state, actor), [{ column, row }]) > 60) continue;
       actions.push({
         type: 'cast_spell',
         actor,
@@ -261,7 +255,7 @@ export function referenceTurnLegalActions(
     if (actor === REFERENCE_MONSTER_ID) {
       actions.push({ type: 'hide', actor });
     } else {
-      if (gridDistance(position(state, actor), position(state, REFERENCE_MONSTER_ID)) <= 5) {
+      if (minimumSpaceDistance(combatantSpace(state, actor), combatantSpace(state, REFERENCE_MONSTER_ID)) <= 5) {
         actions.push(weaponAttack(actor, REFERENCE_MONSTER_ID));
       }
       actions.push(
@@ -285,7 +279,7 @@ export function referenceReactionLegalActions(
   if (
     reactor !== REFERENCE_FIGHTER_ID ||
     mover !== REFERENCE_MONSTER_ID ||
-    gridDistance(position(state, reactor), position(state, mover)) > 5
+    minimumSpaceDistance(combatantSpace(state, reactor), combatantSpace(state, mover)) > 5
   ) {
     return [];
   }

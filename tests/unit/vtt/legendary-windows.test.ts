@@ -64,7 +64,7 @@ function requireDetails(intel: LegendaryWindowsIntel) {
   return intel.details;
 }
 
-describe('M4 legendary-windows-v1', () => {
+describe('M4 legendary-windows-v2', () => {
   it('reports Unicorn pools, the hand-built post-player window, and tactical verdicts for pending actions', () => {
     const player = playerProfile('legendary-window-player', { initiativeBonus: 20 });
     const setup = startedEncounter(player);
@@ -110,7 +110,7 @@ describe('M4 legendary-windows-v1', () => {
       throw new Error('Expected a scored Charging Horn.');
     }
     expect(horn.assessment.tactical).toEqual({
-      policy: 'tactical-evaluator-v2',
+      policy: 'tactical-evaluator-v3',
       range: { status: 'resolved', distanceFeet: 5, band: 'melee', legal: true },
       rollMode: { mode: 'normal', reasons: [], sources: [] },
       probabilities: { status: 'resolved', hit: 0.7, critical: 0.05, miss: 0.3 },

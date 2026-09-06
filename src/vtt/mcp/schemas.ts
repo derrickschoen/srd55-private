@@ -18,12 +18,21 @@ import { ALERTING_POLICY } from '../../combat/alerting';
 import { SEARCH_MEMORY_POLICY } from '../../combat/search-memory';
 import type { McpToolDescriptor, SchemaViolation } from './handler';
 import { rendererAttributionSchema } from '../renderer-profile';
+import { creatureSizes } from '../../domain/enums';
 import { KB_SUBJECTS } from '../knowledge-base-subjects';
 
-export const ENGINE_ACTOR_KNOWLEDGE_POLICY = 'actor-knowledge-v1' as const;
-export const ENGINE_LEGENDARY_WINDOWS_POLICY = 'legendary-windows-v1' as const;
+export const ENGINE_ACTOR_KNOWLEDGE_POLICY = 'actor-knowledge-v3-last-seen' as const;
+export const ENGINE_LEGENDARY_WINDOWS_POLICY = 'legendary-windows-v2' as const;
 export const ENGINE_REACTION_SPEND_HOLD_POLICY = 'reaction-spend-hold-v1' as const;
-export const ENGINE_RECOVERY_CAPABILITY_POLICY = 'recovery-capability-v1' as const;
+export const ENGINE_RECOVERY_CAPABILITY_POLICY = 'recovery-capability-v2' as const;
+export const ENGINE_STATE_SUMMARY_POLICY = 'state-summary-v2-creature-space' as const;
+export const PROPOSAL_CONTRACT_REFUSAL_CODES = Object.freeze([
+  'CORRECTION_FALLBACK_MUST_BE_NULL',
+  'INITIAL_FALLBACK_REQUIRED',
+  'PRIMARY_FALLBACK_IDENTICAL',
+  'OPTION_NOT_SHOWN',
+] as const);
+export const proposalContractRefusalCodeSchema = z.enum(PROPOSAL_CONTRACT_REFUSAL_CODES);
 
 const identifier = z.string().min(1).max(200).describe('Engine-owned stable identifier.');
 const offerableOptionIdentifier = identifier.refine(
@@ -75,6 +84,15 @@ const decisionReason = z.string().min(1).max(240).refine((value) => value.trim()
   .describe('One short sentence explaining why this option was chosen.');
 const roundRationale = z.string().min(1).max(600).refine((value) => value.trim().length > 0, 'Rationale cannot be blank.')
   .describe('Optional round-level rationale retained outside blinded judging packets.');
+const uiFeedbackText = z.string().max(280);
+export const engineUiFeedbackSchema = z.object({
+  readability: z.number().int().min(1).max(5),
+  what_helped: z.array(uiFeedbackText).max(5),
+  what_confused: z.array(uiFeedbackText).max(5),
+  missing: z.array(uiFeedbackText).max(5),
+  suggestion: uiFeedbackText,
+}).strict();
+export type EngineUiFeedback = z.infer<typeof engineUiFeedbackSchema>;
 const overrideJustification = z.discriminatedUnion('kind', [
   z.object({
     kind: z.enum(SIMPLE_OVERRIDE_JUSTIFICATION_KINDS),
@@ -365,13 +383,32 @@ const contextMovementIntelRow = movementIntelRow.omit({
 const opportunityCost = z.object({
   policy: z.literal(OPPORTUNITY_COST_POLICY),
   correction_policy: z.literal(DOMINANCE_CORRECTION_POLICY),
-  dodge_option_id: identifier,
-  engine_default_option_id: identifier,
+  dodge_option_id: identifier.optional(),
+  dodge_option_label: summaryText.optional(),
+  engine_default_option_id: identifier.optional(),
+  engine_default_option_label: summaryText.optional(),
   status: z.enum(['dominated', 'not_dominated', 'not_dominated_tradeoff', 'blocked_unresolved']),
   better_option_id: identifier.optional(),
+  better_option_label: summaryText.optional(),
   delta: z.string().min(1).max(1_000).optional(),
   reason_codes: z.array(shortCode).max(50).optional(),
-}).strict();
+}).strict().superRefine((value, context) => {
+  for (const role of ['dodge', 'engine_default'] as const) {
+    const hasId = value[`${role}_option_id`] !== undefined;
+    const hasLabel = value[`${role}_option_label`] !== undefined;
+    if (hasId === hasLabel) context.addIssue({
+      code: 'custom',
+      path: [`${role}_option_id`],
+      message: `${role} option must carry exactly one shown id or hidden-option label.`,
+    });
+  }
+  const hasBetterId = value.better_option_id !== undefined;
+  const hasBetterLabel = value.better_option_label !== undefined;
+  if (hasBetterId && hasBetterLabel) context.addIssue({
+    code: 'custom', path: ['better_option_id'],
+    message: 'better option must not carry both an id and label.',
+  });
+});
 const actorIntel = z.object({
   policy: z.literal(DM_TURN_INTEL_POLICY),
   zero_movement_offense_count: z.number().int().min(0),
@@ -394,7 +431,22 @@ const gridCell = z.object({
   row: z.number().int().min(0),
 }).strict();
 const actorKnowledgeTarget = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('perceived'), target_id: identifier }).strict(),
+  z.object({
+    kind: z.literal('perceived'), target_id: identifier, placement_status: z.literal('placed'),
+    effective_size: z.enum(creatureSizes),
+    placement_mode: z.discriminatedUnion('kind', [
+      z.object({ kind: z.literal('normal'), actual: z.enum(creatureSizes) }).strict(),
+      z.object({ kind: z.literal('squeezed'), actual: z.enum(creatureSizes), sizedFor: z.enum(creatureSizes) }).strict(),
+    ]),
+    footprint: z.array(gridCell).min(1).max(16),
+    distance_feet: z.number().int().min(0),
+  }).strict(),
+  z.object({
+    kind: z.literal('placement_pending'), target_id: identifier,
+    placement_status: z.literal('placement_pending'), pending_reason: z.enum([
+      'legacy_size_required', 'effect_adjudication_pending', 'overlap_adjudication_pending',
+    ]),
+  }).strict(),
   z.object({
     kind: z.literal('suspected'), target_id: identifier,
     last_seen: z.object({ status: z.literal('resolved'), lastSeenPosition: gridCell }).strict(),
@@ -402,7 +454,7 @@ const actorKnowledgeTarget = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('unknown'), target_id: identifier,
     last_seen: z.object({
-      status: z.literal('unresolved'), reason: z.literal('last_seen_position_not_modeled'),
+      status: z.literal('unresolved'), reason: z.literal('never_observed'),
     }).strict(),
   }).strict(),
 ]);
@@ -572,11 +624,19 @@ const materialityContext = z.object({
     summary: z.string().min(1).max(1_000),
   }).strict()).min(1).max(20),
 }).strict();
-const actorContext = z.object({ actor_id: identifier, status: actorStatus, options: z.array(tacticalOption).max(20), threats: z.array(threat).max(50), intel: actorIntel }).strict();
+const actorContext = z.object({
+  actor_id: identifier,
+  status: actorStatus,
+  options: z.array(tacticalOption).max(20),
+  options_omitted_for_size: z.number().int().min(0).max(20),
+  threats: z.array(threat).max(50),
+  intel: actorIntel,
+}).strict();
 const intelSuppressedActorContext = z.object({
   actor_id: identifier,
   status: actorStatus,
   options: z.array(tacticalOption).max(20),
+  options_omitted_for_size: z.number().int().min(0).max(20),
   threats: z.array(threat).max(50),
 }).strict();
 const advertisedPlay = z.object({
@@ -814,15 +874,34 @@ const loadSkillOutput = z.object({
   plays: z.array(advertisedPlay).max(3),
 }).strict();
 
-const combatantSummary = z.object({
+const placedCombatantSummary = z.object({
   combatant_id: identifier, name: identifier, side: z.enum(['player_character', 'monster']), status: actorStatus,
+  placement_status: z.literal('placed'),
+  effective_size: z.enum(creatureSizes),
+  placement_mode: z.discriminatedUnion('kind', [
+    z.object({ kind: z.literal('normal'), actual: z.enum(creatureSizes) }).strict(),
+    z.object({ kind: z.literal('squeezed'), actual: z.enum(creatureSizes), sizedFor: z.enum(creatureSizes) }).strict(),
+  ]),
+  footprint: z.array(gridCell).min(1).max(16),
   options: z.array(tacticalOption).max(100), threats: z.array(threat).max(50),
 }).strict();
+const placementPendingCombatantSummary = z.object({
+  combatant_id: identifier, name: identifier, side: z.enum(['player_character', 'monster']), status: actorStatus,
+  placement_status: z.literal('placement_pending'),
+  pending_reason: z.enum([
+    'legacy_size_required', 'effect_adjudication_pending', 'overlap_adjudication_pending',
+  ]),
+  options: z.array(tacticalOption).length(0), threats: z.array(threat).length(0),
+}).strict();
+const combatantSummary = z.discriminatedUnion('placement_status', [
+  placedCombatantSummary,
+  placementPendingCombatantSummary,
+]);
 const stateSummaryBody = z.object({
   room: z.number().int().min(1).nullable(), round: z.number().int().min(0), active_side: z.enum(['players', 'monsters', 'none']),
   combatants: z.array(combatantSummary).max(100), terrain_tags: z.array(shortCode).max(100), history: z.array(recentChange).max(100),
 }).strict();
-const stateSummaryOutput = z.object({ state_ref: stateRef, granularity: z.enum(['turn_minimal', 'room_tactical', 'combatant_detail', 'journal_delta']), proof_token: z.string().regex(/^[0-9a-f]{64}$/u), summary: stateSummaryBody, truncated: z.boolean(), next_cursor: z.string().max(500).nullable() }).strict();
+const stateSummaryOutput = z.object({ state_ref: stateRef, policy: z.literal(ENGINE_STATE_SUMMARY_POLICY), granularity: z.enum(['turn_minimal', 'room_tactical', 'combatant_detail', 'journal_delta']), proof_token: z.string().regex(/^[0-9a-f]{64}$/u), summary: stateSummaryBody, truncated: z.boolean(), next_cursor: z.string().max(500).nullable() }).strict();
 const optionsOutput = z.object({ state_ref: stateRef, actor_id: identifier, status: actorStatus, options: z.array(tacticalOption).max(100), truncated: z.boolean(), next_cursor: z.string().max(500).nullable() }).strict();
 
 const pathOutput = z.object({
@@ -905,6 +984,13 @@ const singleOutput = z.union([
 ]);
 const narrationOutput = z.object({ status: z.literal('queued'), narration_id: identifier, state_ref: stateRef, warnings: z.array(summaryText).max(20) }).strict();
 const adjudicationOutput = z.object({ status: z.literal('requested'), adjudication_request_id: identifier, state_ref: stateRef }).strict();
+const uiFeedbackOutput = z.union([
+  z.object({ status: z.literal('recorded') }).strict(),
+  z.object({
+    status: z.literal('rule_error'),
+    code: z.enum(['UI_FEEDBACK_DECISION_NOT_ACCEPTED', 'UI_FEEDBACK_ALREADY_SUBMITTED']),
+  }).strict(),
+]);
 
 const refInput = { state_ref: stateRef };
 const phaseProposalInput = z.object({ ...refInput, request_id: identifier, phase: z.enum(['initial', 'correction']), proposal: turnProposal }).strict();
@@ -1136,6 +1222,7 @@ export const ENGINE_TOOL_SPECS: readonly EngineToolSpec[] = Object.freeze([
   spec('engine.query_dice_expectation', 'Compare bounded analytic outcomes without consuming RNG.', z.object({ ...refInput, candidates: z.array(z.object({ candidate_id: z.string().min(1).max(100), actor_id: identifier, choice: actionChoice, movement: movementPreference.optional(), engagement: engagement.optional() }).strict()).min(1).max(20), include_distribution: z.boolean().optional() }).strict(), diceOutput),
   spec('engine.validate_proposal', 'Purely validate and preview one revision-bound composite option proposal.', phaseProposalInput, validateOutput),
   spec('engine.submit_round_proposals', 'Queue the round; include one short sentence per actor saying why this option. Minimal input: { proposals, rationale?, reaction_guidance? }; the launcher fills state_ref, request_id, phase, and a deterministic idempotency_key from this turn binding. The full explicit envelope { state_ref, request_id, phase, idempotency_key, proposals, rationale?, reaction_guidance? } is also accepted. One ACCEPTED submission per round; a call rejected for invalid arguments is not queued — fix it and call again.', submitRoundInput, roundOutput, true),
+  spec('engine.submit_ui_feedback', 'After an accepted round decision, optionally record one unscored report about the board image. Feedback never affects the encounter.', engineUiFeedbackSchema, uiFeedbackOutput, true),
   spec('engine.submit_plan_adjustment', 'Validate and queue a bounded patch over the remaining open monster plan.', submitPlanAdjustmentInput, adjustmentOutput, true),
   spec('engine.submit_speculative_round_plan', 'Structurally validate and queue one host-guarded contingent monster-round plan.', submitSpeculativeRoundPlanInput, speculativeRoundPlanOutput, true),
   spec('engine.submit_proposal', 'Validate and queue one separately controlled seat proposal.', submitProposalInput, singleOutput, true),
@@ -1193,4 +1280,5 @@ export const engineSchemaInternals = {
   minimalSubmitRoundTransportInput,
   submitRoundTransportInput,
   submitSpeculativeRoundPlanInput,
+  turnContextOutput,
 };

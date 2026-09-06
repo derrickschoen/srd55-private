@@ -2,6 +2,12 @@ import { abilities, creatureSizes, skills, type Ability, type KnownCreatureSize,
 import type { CharacterSheet } from '../queries/character-sheet-builder';
 import type { CombatFeatureEffect } from './effects';
 import type { GridCell } from './grid';
+import {
+  normalPlacementFor,
+  serializedPlacementMode,
+  sizedCombatantState,
+  type SerializedPlacementMode,
+} from './creature-space';
 import type { DamageResponse } from './resolution';
 import {
   monsterSpellMaximumUses,
@@ -117,6 +123,7 @@ export interface CombatToken {
   readonly id: TokenId;
   readonly combatantId: CombatantId;
   readonly position: GridCell;
+  readonly placementMode: SerializedPlacementMode;
 }
 
 export interface CharacterCombatantIdentity {
@@ -130,6 +137,7 @@ export type CharacterCombatSheet = Pick<
   CharacterSheet,
   | 'character_id'
   | 'name'
+  | 'creature_classification'
   | 'hit_point_maximum'
   | 'walking_speed'
   | 'armor_class'
@@ -178,6 +186,12 @@ export function characterCombatantProfile(
   if (sheet.unchosen_damage_resistances.length > 0) {
     throw new CharacterCombatantProjectionError('damage resistance types');
   }
+  if (
+    sheet.creature_classification.size === null ||
+    !creatureSizes.includes(sheet.creature_classification.size as KnownCreatureSize)
+  ) {
+    throw new CharacterCombatantProjectionError('creature classification size');
+  }
 
   return {
     kind: 'player_character',
@@ -212,6 +226,7 @@ export function characterCombatantProfile(
       passivePerception: 10,
       detectionTraits: [],
       contactMedium: 'surface',
+      sizeCategory: sheet.creature_classification.size as KnownCreatureSize,
       spellSlots: identity.spellSlots ?? [],
     },
   };
@@ -294,7 +309,6 @@ export function monsterCombatantProfile(
         : [],
       contactMedium: 'surface',
       ...(statblock.sourceDetails.classification.kind === 'present' &&
-        statblock.sourceDetails.classification.value.sizes.length === 1 &&
         creatureSizes.includes(statblock.sourceDetails.classification.value.sizes[0] as KnownCreatureSize)
           ? { sizeCategory: statblock.sourceDetails.classification.value.sizes[0] as KnownCreatureSize }
           : {}),
@@ -342,9 +356,14 @@ export function combatToken(
   if (!Number.isSafeInteger(position.column) || !Number.isSafeInteger(position.row)) {
     throw new RangeError('Combat token coordinates must be safe integers.');
   }
+  if (profile.rules.sizeCategory === undefined) {
+    throw new CharacterCombatantProjectionError('mechanical creature size');
+  }
+  const sized = sizedCombatantState(profile.rules.sizeCategory);
   return {
     id: profile.tokenId,
     combatantId: profile.id,
     position: { ...position },
+    placementMode: serializedPlacementMode(normalPlacementFor(sized)),
   };
 }

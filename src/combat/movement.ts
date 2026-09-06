@@ -17,6 +17,7 @@ export type CellTraversal =
 
 export interface MovementWorld<TActorId extends string> {
   readonly bounds: GridBounds;
+  occupiedCells(actorId: TActorId, anchor: GridCell): readonly GridCell[];
   traversal(
     actorId: TActorId,
     from: GridCell,
@@ -31,7 +32,7 @@ export interface MovementWorld<TActorId extends string> {
 
 export interface ReachSource<TActorId extends string> {
   readonly reactorId: TActorId;
-  readonly cell: GridCell;
+  readonly cells: readonly [GridCell, ...GridCell[]];
   readonly reach: Feet;
   readonly reactionAvailable: boolean;
   readonly hostile: boolean;
@@ -309,6 +310,7 @@ function isAdjacent(from: GridCell, to: GridCell): boolean {
 }
 
 function opportunityWindows<TActorId extends string>(
+  world: MovementWorld<TActorId>,
   request: MovementRequest<TActorId>,
   from: GridCell,
   to: GridCell,
@@ -323,13 +325,17 @@ function opportunityWindows<TActorId extends string>(
     readonly reactorId: TActorId;
     readonly moverId: TActorId;
   }[] = [];
+  const minimumDistance = (left: readonly GridCell[], right: readonly GridCell[]): Feet =>
+    feet(Math.min(...left.flatMap((leftCell) => right.map((rightCell) => gridDistance(leftCell, rightCell)))));
+  const fromCells = world.occupiedCells(request.actorId, from);
+  const toCells = world.occupiedCells(request.actorId, to);
   for (const source of request.reachSources) {
     if (
       !source.hostile ||
       !source.reactionAvailable ||
       includedReactors.has(source.reactorId) ||
-      gridDistance(from, source.cell) > source.reach ||
-      gridDistance(to, source.cell) <= source.reach
+      minimumDistance(fromCells, source.cells) > source.reach ||
+      minimumDistance(toCells, source.cells) <= source.reach
     ) {
       continue;
     }
@@ -390,7 +396,7 @@ export function planMovement<TActorId extends string>(
       from,
       to,
       cost,
-      beforeLeaving: opportunityWindows(request, from, to),
+      beforeLeaving: opportunityWindows(world, request, from, to),
     });
     from = to;
   }

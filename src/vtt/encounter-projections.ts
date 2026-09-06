@@ -5,7 +5,13 @@ import type {
   CoordinatorPause,
   PersistedCoordinatorState,
 } from '../combat/coordinator';
-import type { TurnResources } from '../combat/encounter';
+import {
+  effectiveCreatureSize,
+  pendingPlacementLegalAnchors,
+  type PendingPlacementLegalAnchor,
+  type TurnResources,
+} from '../combat/encounter';
+import { creatureSizes, type KnownCreatureSize } from '../domain/enums';
 import type { PendingDecision, ReactionPolicy } from '../combat/encounter';
 import {
   previewMovementPathDangers,
@@ -18,10 +24,13 @@ import {
   type DmView,
   type DmVisibleEncounterState,
   type PlayerView,
+  type PlayerLastSeenCombatant,
   type PlayerVisibleCombatant,
   type PlayerVisibleEncounterEvent,
 } from '../combat/visibility';
 import type { CombatantId } from '../combat/values';
+import type { ProjectedHitPointKnowledge } from './intel/contracts';
+import type { EncounterBoardWorldObject } from './encounter-board';
 import type { AdjudicationEnvelope } from './mcp/engine-server';
 import { dmWorldObjectOverrideCommand } from '../combat/world-object-actions';
 import type { SessionHistoryEntry } from './session-persistence';
@@ -44,6 +53,11 @@ import {
   projectHumanEngineOptions,
   type HumanEngineActorOptions,
 } from './encounter-board-projection';
+import {
+  offeredOptionActorsForState,
+  offeredOptionPaths as projectOfferedOptionPaths,
+  type OfferedOptionPath,
+} from './offered-option-paths';
 
 export interface ProjectedControllerRequest {
   readonly kind: 'turn' | 'reaction';
@@ -63,7 +77,13 @@ export interface PlayerBoardProjection {
   readonly concealedCells: readonly GridCell[];
   readonly activeCombatant: CombatantId | null;
   readonly highlightedCombatant: CombatantId | null;
-  readonly combatants: readonly PlayerVisibleCombatant[];
+  readonly combatants: readonly (PlayerVisibleCombatant & {
+    readonly hitPointBand: ProjectedHitPointKnowledge;
+    readonly hitPoints?: number;
+    readonly hitPointMaximum?: number;
+  })[];
+  readonly lastSeen: readonly PlayerLastSeenCombatant[];
+  readonly worldObjects: readonly EncounterBoardWorldObject[];
   readonly activePcResources: TurnResources | null;
   readonly pendingRequest: ProjectedControllerRequest | null;
   readonly events: readonly PlayerVisibleEncounterEvent[];
@@ -85,6 +105,8 @@ export interface DmBoardProjection {
   readonly humanEngineOptions: readonly HumanEngineActorOptions[];
   /** DM-only previews keyed by the exact legal move command. */
   readonly movementPreviews: readonly DmMovementPathPreview[];
+  /** Exact engine-offer paths in the same zero-based order used by turn context. */
+  readonly offeredOptionPaths: readonly OfferedOptionPath[];
   /** Optional batch-planning action domains, populated when one request plans for several actors. */
   readonly turnProgramLegalActions?: readonly {
     readonly actorId: CombatantId;
@@ -103,6 +125,19 @@ export interface DmBoardProjection {
     readonly objectName: string;
     readonly label: string;
     readonly command: Extract<EncounterCommand, { readonly type: 'dm_use_world_object' }>;
+  }[];
+  readonly pendingPlacementRecovery: DmPendingPlacementRecovery | null;
+}
+
+export interface DmPendingPlacementRecovery {
+  readonly combatantId: CombatantId;
+  readonly combatantName: string;
+  readonly reason: import('../combat/encounter').MigrationAdjudicationPending['kind'];
+  readonly suggestedAnchor: GridCell | null;
+  readonly sizeInput: 'required' | 'fixed';
+  readonly sizeOptions: readonly {
+    readonly size: KnownCreatureSize;
+    readonly legalAnchors: readonly PendingPlacementLegalAnchor[];
   }[];
 }
 
@@ -203,16 +238,30 @@ export function projectPlayerBoard(
 ): PlayerBoardProjection {
   const ownerIds = new Set(view.ownedCombatants.map((subject) => subject.id));
   const owned = new Map(view.ownedCombatants.map((subject) => [subject.id, subject] as const));
-  const combatants = view.combatants.map((subject) =>
-    ownerIds.has(subject.id)
-      ? {
-          ...subject,
-          hitPoints: owned.get(subject.id)?.hitPoints ?? (() => {
-            throw new Error(`Player projection is missing owned Hit Points for ${subject.id}.`);
-          })(),
-        }
-      : subject,
-  );
+  const combatants = view.combatants.map((subject) => {
+    const own = owned.get(subject.id);
+    if (ownerIds.has(subject.id) && own === undefined) {
+      throw new Error(`Player projection is missing owned Hit Points for ${subject.id}.`);
+    }
+    const hitPointBand: ProjectedHitPointKnowledge = own === undefined || own.hitPointMaximum <= 0
+      ? { kind: 'unknown' }
+      : {
+          kind: 'perceived_band',
+          band: own.hitPoints >= own.hitPointMaximum
+            ? 'uninjured'
+            : own.hitPoints * 4 <= own.hitPointMaximum
+              ? 'near_death'
+              : 'bloodied',
+        };
+    return {
+      ...subject,
+      hitPointBand,
+      ...(own === undefined ? {} : {
+        hitPoints: own.hitPoints,
+        hitPointMaximum: own.hitPointMaximum,
+      }),
+    };
+  });
   const activePc = view.ownedCombatants.find((subject) => subject.id === view.activeCombatant);
   const adjudicatedSequence = coordinator.pause?.kind === 'adjudicated'
     ? coordinator.pause.eventSequence
@@ -227,6 +276,16 @@ export function projectPlayerBoard(
     activeCombatant: view.activeCombatant,
     highlightedCombatant: view.activeCombatant,
     combatants,
+    lastSeen: view.lastSeen.map((subject) => ({ ...subject, cell: { ...subject.cell } })),
+    worldObjects: view.worldObjects.map((object) => ({
+      id: object.id,
+      name: object.name,
+      kind: object.kind,
+      position: { ...object.position },
+      cells: object.footprint.map((cell) => ({ ...cell })),
+      blocking: { ...object.blocking },
+      lightClass: object.kind === 'light-source' ? 'light-source' : 'none',
+    })),
     activePcResources: activePc?.turn ?? null,
     pendingRequest: projectedRequest(coordinator.pendingRequest, ownerIds),
     events: view.recentEvents,
@@ -272,6 +331,29 @@ export function projectDmBoard(input: {
   const names = new Map(input.view.state.combatants.map(
     (subject) => [subject.profile.id, subject.profile.name] as const,
   ));
+  const recovery = input.view.state.phase.kind === 'awaiting_placement'
+    ? (() => {
+        const phase = input.view.state.phase;
+        const record = phase.originatingRecord;
+        const sizes = record.kind === 'overlap_adjudication_pending'
+          ? [effectiveCreatureSize(input.view.state, record.combatant)]
+          : creatureSizes;
+        const suggestedAnchor = record.kind === 'overlap_adjudication_pending'
+          ? record.formerAnchors[1]
+          : record.suggestedAnchor;
+        return {
+          combatantId: record.combatant,
+          combatantName: names.get(record.combatant) ?? String(record.combatant),
+          reason: record.kind,
+          suggestedAnchor: suggestedAnchor === null ? null : { ...suggestedAnchor },
+          sizeInput: record.kind === 'overlap_adjudication_pending' ? 'fixed' : 'required',
+          sizeOptions: sizes.map((size) => ({
+            size,
+            legalAnchors: pendingPlacementLegalAnchors(input.view.state, size),
+          })),
+        } satisfies DmPendingPlacementRecovery;
+      })()
+    : null;
   const pendingEntries: readonly DmDecisionTrayEntry[] = [
     ...input.view.state.pendingDecisions,
     ...(input.adjudicationPrompts ?? []),
@@ -304,6 +386,7 @@ export function projectDmBoard(input: {
       combatantName: names.get(request.actorId as CombatantId) ?? request.actorId,
       interactive: true as const,
     }));
+  const offeredActors = offeredOptionActorsForState(input.view.state);
   return {
     audience: 'dm',
     stateDigest: sha256(canonicalJson(input.view.state)),
@@ -317,6 +400,7 @@ export function projectDmBoard(input: {
       action.type === 'move'
         ? [{ commandKey: canonicalJson(action), ...previewMovementPathDangers(input.view.state, action) }]
         : []),
+    offeredOptionPaths: projectOfferedOptionPaths(input.view.state, offeredActors),
     controllers: input.controllers,
     history: input.history,
     adjudicatedTargets: targets,
@@ -330,6 +414,7 @@ export function projectDmBoard(input: {
     },
     timeline: projectEncounterTimeline(input.view.state, input.history),
     worldObjectControls,
+    pendingPlacementRecovery: recovery,
   };
 }
 

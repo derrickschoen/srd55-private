@@ -142,14 +142,40 @@
 .encounter-path-danger-legend h2 { margin: 0 0 0.35rem; font-size: 1rem; }
 .encounter-path-danger-legend ul { margin: 0; padding-left: 1.25rem; }
 
-.encounter-token {
+.encounter-token-layer {
   position: absolute;
   z-index: 5;
-  inset: 0.08rem;
+  inset: 0;
+  display: grid;
+  grid-template-columns: repeat(var(--encounter-columns), var(--encounter-tile-size));
+  grid-auto-rows: var(--encounter-tile-size);
+  pointer-events: none;
+}
+
+.encounter-token-space {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  pointer-events: none;
+}
+
+.encounter-token-space > .encounter-token {
+  width: auto;
+  height: auto;
+}
+
+.encounter-shell .encounter-token {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  margin: 0.08rem;
+  padding: 0;
   display: block;
   border: 0;
   background: transparent;
   text-align: center;
+  pointer-events: auto;
 }
 
 .encounter-token[data-life='dying'] {
@@ -157,16 +183,60 @@
   outline: 2px dashed #ffb45b;
 }
 
-.encounter-token[data-marker='corpse'] {
+.encounter-token[data-marker='corpse'] .encounter-token-sprite {
   filter: grayscale(1);
   opacity: 0.7;
   transform: rotate(90deg);
 }
 
-.encounter-token-stacked {
-  z-index: 6;
-  inset: 1.8rem 0.08rem 0.08rem;
-  transform: none;
+.encounter-token[data-selected='true'] {
+  outline: 3px solid #ffe78e;
+  outline-offset: -3px;
+}
+
+.encounter-token-listbox {
+  position: relative;
+  z-index: 40;
+  align-self: end;
+  max-height: 8rem;
+  overflow: auto;
+  border: 2px solid #ffe78e;
+  background: #11131a;
+  color: #fff;
+  font: 700 0.7rem/1.3 system-ui, sans-serif;
+  pointer-events: auto;
+}
+
+.encounter-token-listbox [role='option'] {
+  padding: 0.25rem 0.35rem;
+}
+
+.encounter-token-listbox [aria-selected='true'] {
+  background: #6d2a18;
+}
+
+.dm-pending-placement-recovery {
+  border: 0.14rem solid #d8ae62;
+  border-radius: 0.55rem;
+  background: #241d19;
+  padding: 0.8rem;
+}
+
+.dm-pending-placement-recovery h2:focus {
+  outline: 0.2rem solid #ffe78e;
+  outline-offset: 0.2rem;
+}
+
+.dm-pending-placement-recovery form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: end;
+}
+
+.dm-pending-placement-recovery label {
+  display: grid;
+  gap: 0.25rem;
 }
 
 .encounter-area,
@@ -248,6 +318,125 @@
   stroke-width: 0.08;
   stroke-dasharray: 0.16 0.1;
 }
+
+.encounter-option-paths {
+  position: absolute;
+  z-index: 10;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.encounter-option-polyline,
+.encounter-option-segment {
+  fill: none;
+  stroke: var(--encounter-option-color);
+  stroke-width: 0.1;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.encounter-option-segment-beyond-movement {
+  stroke-dasharray: 0.19 0.13;
+}
+
+.encounter-option-segment-hazard,
+.encounter-option-segment-opportunity-attack,
+.encounter-option-segment-burning-surface,
+.encounter-option-segment-persistent-area-damage,
+.encounter-option-segment-difficult-terrain {
+  stroke: #ff342e;
+}
+
+.encounter-option-segment-difficult-terrain {
+  stroke-width: 0.15;
+}
+
+.encounter-option-opportunity-arrow {
+  fill: none;
+  stroke: #ff342e;
+  stroke-width: 0.085;
+  vector-effect: non-scaling-stroke;
+}
+
+#encounter-option-oa-arrowhead path { fill: #ff342e; }
+
+.encounter-option-destination circle {
+  fill: #252a34;
+  stroke: #f2f0e8;
+  stroke-width: 0.045;
+}
+
+.encounter-option-destination text {
+  fill: #fff;
+  paint-order: stroke;
+  stroke: #171920;
+  stroke-width: 0.025;
+  font-family: system-ui, sans-serif;
+  font-weight: 800;
+}
+
+.encounter-option-ordinal { font-size: 0.18px; }
+.encounter-option-distance { font-size: 0.16px; }
+
+.encounter-option-difficult-hatch {
+  position: absolute;
+  z-index: 7;
+  inset: 0;
+  border: 2px solid rgb(255 52 46 / 88%);
+  background: repeating-linear-gradient(
+    135deg,
+    rgb(255 52 46 / 30%) 0,
+    rgb(255 52 46 / 30%) 3px,
+    transparent 3px,
+    transparent 7px
+  );
+  pointer-events: none;
+}
+
+.encounter-option-damage-flame {
+  position: absolute;
+  z-index: 11;
+  top: 0.08rem;
+  left: 50%;
+  color: #ff342e;
+  font: 900 0.8rem/1 system-ui, sans-serif;
+  filter: drop-shadow(0 1px 0 #210604);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.encounter-token.encounter-option-threat {
+  outline: 3px solid #ff342e;
+  outline-offset: -2px;
+}
+
+.encounter-option-path-legend {
+  position: absolute;
+  z-index: 12;
+  right: 0.2rem;
+  bottom: 0.2rem;
+  display: grid;
+  gap: 0.12rem;
+  min-width: 9rem;
+  padding: 0.35rem 0.45rem;
+  border: 1px solid #99a4bb;
+  background: rgb(17 19 26 / 94%);
+  color: #f5f2e8;
+  font: 600 0.55rem/1.2 system-ui, sans-serif;
+  pointer-events: none;
+}
+
+.encounter-option-path-legend strong { font-size: 0.62rem; }
+.encounter-option-legend-solid::before { content: '━━ '; color: #aebbd0; }
+.encounter-option-legend-dashed::before { content: '┄┄ '; color: #aebbd0; }
+.encounter-option-legend-arrow::before { content: '➜ '; color: #ff342e; }
+.encounter-option-legend-hatch::before { content: '▨ '; color: #ff342e; }
+.encounter-option-legend-flame::before { color: #ff342e; }
+.encounter-option-legend-ordinal::before { content: 'Ⓝ '; }
 
 .dm-initiative li[data-active='true'] {
   color: #ffe78e;
@@ -667,8 +856,8 @@
 
 /* ==========================================================================
    D516 — classic board, now at 128 native CSS pixels per cell.
-   Appended after the original rules on purpose: the path-overlay lane appends
-   its own section below this one, so nothing above is reordered.
+   Appended after the original rules on purpose. The option-path selectors
+   compose with its metrics-derived chrome geometry in the section below.
    ========================================================================== */
 
 .encounter-board {
@@ -802,6 +991,12 @@
   border-width: var(--chrome-board-border);
 }
 
+.encounter-board[data-board-chrome='on'] > .encounter-token-layer {
+  inset: var(--chrome-gutter) var(--chrome-gutter) auto;
+  width: calc(var(--encounter-columns) * var(--encounter-tile-size));
+  height: calc(var(--encounter-rows, 1) * var(--encounter-tile-size));
+}
+
 /* The chrome roster carries the full name; the in-cell label stays in the
    DOM for text queries but is visually hidden. */
 .encounter-board[data-board-chrome='on'] .encounter-token-label {
@@ -821,6 +1016,22 @@
   left: var(--chrome-gutter);
   width: calc(100% - 2 * var(--chrome-gutter));
   height: calc(var(--encounter-rows, 1) * var(--encounter-tile-size));
+}
+
+/* Keep the option overlay in grid coordinates after DM chrome adds gutters
+   and a legend. It paints above cell hatching and before the chrome layer. */
+.encounter-board[data-board-chrome='on'] > .encounter-option-paths {
+  top: var(--chrome-gutter);
+  right: auto;
+  bottom: auto;
+  left: var(--chrome-gutter);
+  width: calc(100% - 2 * var(--chrome-gutter));
+  height: calc(var(--encounter-rows, 1) * var(--encounter-tile-size));
+}
+
+.encounter-board[data-board-chrome='on'] > .encounter-option-path-legend {
+  right: calc(var(--chrome-gutter) + 0.2rem);
+  bottom: calc(var(--chrome-gutter) + var(--chrome-legend-height) + var(--chrome-legend-gap) + 0.2rem);
 }
 
 .encounter-coordinate-labels,

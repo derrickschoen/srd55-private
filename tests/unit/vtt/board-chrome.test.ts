@@ -773,42 +773,13 @@ describe('renderBoard: DM board with chrome, player board without', () => {
     restoreDocument();
   });
 
-  const projection: EncounterBoardProjectionShape = {
+  const projection = {
     bounds: { columns: 10, rows: 7 },
     combatants: [
-      {
-        id: combatantId('combatant:fighter'),
-        name: 'Reference Fighter',
-        kind: 'player_character',
-        position: { column: 2, row: 3 },
-        life: 'living',
-        hitPointBand: { kind: 'perceived_band', band: 'uninjured' },
-      },
-      {
-        id: combatantId('combatant:cleric'),
-        name: 'Reference Cleric',
-        kind: 'player_character',
-        position: { column: 2, row: 4 },
-        life: 'dying',
-        hitPointBand: { kind: 'perceived_band', band: 'near_death' },
-      },
-      {
-        id: combatantId('combatant:wizard'),
-        name: 'Reference Wizard',
-        kind: 'player_character',
-        position: { column: 1, row: 2 },
-        life: 'living',
-        hitPointBand: { kind: 'perceived_band', band: 'bloodied' },
-      },
-      {
-        id: combatantId('combatant:training-brute'),
-        name: 'Training Brute',
-        kind: 'monster',
-        position: { column: 6, row: 3 },
-        life: 'living',
-        hitPointBand: { kind: 'unknown' },
-        hiddenFromPlayers: true,
-      },
+      { id: combatantId('combatant:fighter'), name: 'Reference Fighter', kind: 'player_character', placementStatus: 'placed', position: { column: 2, row: 3 }, effectiveSize: 'Medium', placementMode: { kind: 'normal', actual: 'Medium' }, footprint: [{ column: 2, row: 3 }], life: 'living', hitPointBand: { kind: 'perceived_band', band: 'uninjured' } },
+      { id: combatantId('combatant:cleric'), name: 'Reference Cleric', kind: 'player_character', placementStatus: 'placed', position: { column: 2, row: 4 }, effectiveSize: 'Medium', placementMode: { kind: 'normal', actual: 'Medium' }, footprint: [{ column: 2, row: 4 }], life: 'dying', hitPointBand: { kind: 'perceived_band', band: 'near_death' } },
+      { id: combatantId('combatant:wizard'), name: 'Reference Wizard', kind: 'player_character', placementStatus: 'placed', position: { column: 1, row: 2 }, effectiveSize: 'Medium', placementMode: { kind: 'normal', actual: 'Medium' }, footprint: [{ column: 1, row: 2 }], life: 'living', hitPointBand: { kind: 'perceived_band', band: 'bloodied' } },
+      { id: combatantId('combatant:training-brute'), name: 'Training Brute', kind: 'monster', placementStatus: 'placed', position: { column: 6, row: 3 }, effectiveSize: 'Medium', placementMode: { kind: 'normal', actual: 'Medium' }, footprint: [{ column: 6, row: 3 }], life: 'living', hitPointBand: { kind: 'unknown' }, hiddenFromPlayers: true },
     ],
     highlightedCombatant: combatantId('combatant:fighter'),
     adjudicatedTargets: [],
@@ -823,7 +794,7 @@ describe('renderBoard: DM board with chrome, player board without', () => {
         lightClass: 'light-source',
       },
     ],
-  };
+  } satisfies EncounterBoardProjectionShape;
   const provenance = {
     revision: 3,
     round: 1,
@@ -966,7 +937,7 @@ describe('renderBoard: DM board with chrome, player board without', () => {
   it('composites identity chrome below every 128-pixel bust so no head or shoulder pixel is covered', () => {
     const styles = readFileSync('src/vtt/styles.css', 'utf8');
     expect(styles).toMatch(/\.encounter-token-underlay \{ z-index: 3; \}/u);
-    expect(styles).toMatch(/\.encounter-token \{[\s\S]*?z-index: 5;/u);
+    expect(styles).toMatch(/\.encounter-token-layer \{[\s\S]*?z-index: 5;/u);
     const dm = interactiveElement(
       renderBoard(projection, new Set(), null, provenance),
     );
@@ -1221,10 +1192,17 @@ describe('renderBoard: DM board with chrome, player board without', () => {
             ? `Long Rendered Creature ${String(sample)} ${String(index)}`
             : `Foe ${String(index)}`,
         kind: 'monster' as const,
+        placementStatus: 'placed' as const,
         position: {
           column: cell % bounds.columns,
           row: Math.floor(cell / bounds.columns),
         },
+        effectiveSize: 'Medium' as const,
+        placementMode: { kind: 'normal' as const, actual: 'Medium' as const },
+        footprint: [{
+          column: cell % bounds.columns,
+          row: Math.floor(cell / bounds.columns),
+        }] as const,
         life: 'living' as const,
         hitPointBand: { kind: 'unknown' as const },
         hiddenFromPlayers: index % 5 === 0,
@@ -1678,21 +1656,14 @@ describe('renderBoard: DM board with chrome, player board without', () => {
           !name.startsWith('--chrome-'),
       ),
     });
-    const playerComparable = {
-      ...player,
-      attributes: player.attributes.filter(
-        ([name]) => name !== 'data-board-audience',
-      ),
-    };
-    expect(JSON.stringify(dmWithoutChrome)).toBe(
-      JSON.stringify(playerComparable),
-    );
-    expect(
-      player.children.every((child) => child.className === 'encounter-cell'),
-    ).toBe(true);
-    expect(player.children).toHaveLength(
-      projection.bounds.columns * projection.bounds.rows,
-    );
+    const playerComparable = { ...player, attributes: player.attributes.filter(([name]) => name !== 'data-board-audience') };
+    expect(JSON.stringify(dmWithoutChrome)).toBe(JSON.stringify(playerComparable));
+    expect(player.children.every((child) =>
+      child.className === 'encounter-cell' || child.className === 'encounter-token-layer')).toBe(true);
+    expect(player.children.filter((child) => child.className === 'encounter-cell'))
+      .toHaveLength(projection.bounds.columns * projection.bounds.rows);
+    expect(player.children.filter((child) => child.className === 'encounter-token-layer')).toHaveLength(1);
+    expect(player.children).toHaveLength(projection.bounds.columns * projection.bounds.rows + 1);
   });
 
   it('states the captured board size from the bounds alone', () => {

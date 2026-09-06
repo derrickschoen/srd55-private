@@ -1,8 +1,9 @@
 import type { LegalActionSummary } from '../../combat/controllers';
 import { combatantsAreAllies } from '../../combat/allies';
-import type { EncounterState } from '../../combat/encounter';
+import { combatantSpace, combatantSpaceAt, type EncounterState } from '../../combat/encounter';
+import { minimumSpaceDistance, spacesIntersect } from '../../combat/creature-space';
 import type { EncounterCommand } from '../../combat/events';
-import { adjacentCells, gridDistance } from '../../combat/grid';
+import { adjacentCells } from '../../combat/grid';
 import type { RollMode } from '../../combat/resolution';
 import {
   monsterAttackCommand,
@@ -102,7 +103,7 @@ function attacksAgainst(
   target: CombatantId,
   options: { readonly opportunity: boolean; readonly meleeOnly: boolean },
 ): readonly Extract<EncounterCommand, { readonly type: 'attack' | 'opportunity_attack' }>[] {
-  const distance = gridDistance(position(state, actor), position(state, target));
+  const distance = minimumSpaceDistance(combatantSpace(state, actor), combatantSpace(state, target));
   const attacks = decodedMonsterAttacks(state, actor)
     .filter((action) => !options.meleeOnly || action.delivery.kind !== 'ranged')
     .flatMap((action) => {
@@ -168,7 +169,7 @@ function forceSavesAgainst(
   target: CombatantId,
   cost: 'action' | 'none',
 ): readonly Extract<EncounterCommand, { readonly type: 'force_save' }>[] {
-  const distance = gridDistance(position(state, actor), position(state, target));
+  const distance = minimumSpaceDistance(combatantSpace(state, actor), combatantSpace(state, target));
   const monsterActions = decodedSavingThrows(state, actor)
     .filter((action) => distance <= action.target.rangeFeet)
     .map((action) => monsterSaveCommand(actor, target, action, cost));
@@ -196,8 +197,8 @@ function nearestEnemy(state: EncounterState, actor: CombatantId) {
   return state.combatants
     .filter((candidate) => !combatantsAreAllies(state, actor, candidate.profile.id) && candidate.life !== 'dead')
     .sort((left, right) => {
-      const distance = gridDistance(position(state, actor), position(state, left.profile.id))
-        - gridDistance(position(state, actor), position(state, right.profile.id));
+      const distance = minimumSpaceDistance(combatantSpace(state, actor), combatantSpace(state, left.profile.id))
+        - minimumSpaceDistance(combatantSpace(state, actor), combatantSpace(state, right.profile.id));
       return distance || left.profile.id.localeCompare(right.profile.id);
     })[0];
 }
@@ -210,13 +211,15 @@ export function regretTurnLegalActions(
   const acting = subject(state, actor);
   const enemies = state.combatants.filter((candidate) =>
     !combatantsAreAllies(state, actor, candidate.profile.id) && candidate.life !== 'dead');
-  const occupied = new Set(state.tokens.map((token) => `${token.position.column},${token.position.row}`));
   const actions: EncounterCommand[] = [];
   if (acting.turn.movement.remaining >= 5) {
     for (const cell of adjacentCells(state.bounds, position(state, actor))) {
+      const destination = combatantSpaceAt(state, actor, cell);
       if (
-        !occupied.has(`${cell.column},${cell.row}`) &&
-        !state.blockedCells.some((blocked) => blocked.column === cell.column && blocked.row === cell.row)
+        !destination.cells.some((occupied) => state.blockedCells.some((blocked) =>
+          blocked.column === occupied.column && blocked.row === occupied.row)) &&
+        state.combatants.every((other) => other.profile.id === actor ||
+          !spacesIntersect(destination, combatantSpace(state, other.profile.id)))
       ) {
         actions.push({ type: 'move', actor, path: [cell], cause: 'voluntary' });
       }

@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 import { combatantId, encounterBranchId, encounterSessionId } from '../../../src/combat/values';
+import { canonicalJson } from '../../../src/commands/canonical-json';
+import { sha256 } from '../../../src/crypto/sha256';
 import {
   submitEngineProposal,
   type EngineProposalEnvelope,
@@ -11,10 +13,13 @@ import {
 } from '../../../src/vtt/engine-envelopes';
 import {
   createEngineStateCapsule,
+  decodeEngineStateCapsule,
+  EngineStateCapsuleDecodeError,
   engineCapsuleRequestKind,
   engineStateHandle,
   FixedReadonlyStateCapsuleSource,
   projectEngineDmProjection,
+  projectEngineEncounterState,
   verifyEngineStateCapsule,
 } from '../../../src/vtt/engine-state-capsule';
 import { engineActionRegistry } from '../../../src/vtt/engine-query-port';
@@ -22,6 +27,7 @@ import { projectDmBoard } from '../../../src/vtt/encounter-projections';
 import { availableEngineActorOptions, pureTurnProposalResolver } from '../../../src/vtt/intent-resolver';
 import { freshMonsterPlanningState } from '../../../src/vtt/mcp/entrypoint';
 import { generateRoom } from '../../../src/vtt/room-generator';
+import { HAND_AUTHORED_CAPSULE_V3_BODY } from '../../fixtures/vtt/creature-space-migration-fixtures';
 
 const repoRoot = fileURLToPath(new URL('../../../', import.meta.url));
 const authorityBoundaryEntries = [
@@ -148,12 +154,199 @@ function capsuleFixture() {
       correctionNumber: 0,
       actors: [actor.profile.id],
     },
-    projection: projectEngineDmProjection(board, engineActionRegistry(state), 1),
+    projection: projectEngineDmProjection(board, engineActionRegistry(state), state.observationHistory, 1),
   });
   return { state, actor: actor.profile.id, target: target.profile.id, requestId, capsule };
 }
 
+function mutableRecord(value: unknown, label: string): Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new TypeError(`${label} must be an object.`);
+  }
+  return value as Record<string, unknown>;
+}
+
+function mutableArray(value: unknown, label: string): unknown[] {
+  if (!Array.isArray(value)) throw new TypeError(`${label} must be an array.`);
+  return value;
+}
+
+function rehash(value: unknown): Record<string, unknown> {
+  const capsule = mutableRecord(structuredClone(value), 'capsule');
+  const body = { ...capsule };
+  delete body['digest'];
+  delete body['generatedAt'];
+  capsule['digest'] = sha256(canonicalJson(body));
+  return capsule;
+}
+
 describe('read-only engine state capsule', () => {
+  it('exercises the strict capsule corpus from a hand-authored schema-3 fixture', () => {
+    const body = structuredClone(HAND_AUTHORED_CAPSULE_V3_BODY);
+    const fixture = {
+      ...body,
+      digest: sha256(canonicalJson(body)),
+      generatedAt: '2026-09-05T12:00:00.000Z',
+    };
+    expect(decodeEngineStateCapsule(fixture)).toEqual(fixture);
+
+    const exactShapeCases = [
+      ['top-level unknown key', (capsule: Record<string, unknown>) => {
+        capsule['unexpected'] = true;
+      }],
+      ['top-level missing key', (capsule: Record<string, unknown>) => {
+        delete capsule['rulesIndex'];
+      }],
+      ['schema 1', (capsule: Record<string, unknown>) => {
+        capsule['schemaVersion'] = 1;
+      }],
+    ] as const;
+    for (const [label, mutate] of exactShapeCases) {
+      const corrupted = structuredClone(fixture) as Record<string, unknown>;
+      mutate(corrupted);
+      expect(() => decodeEngineStateCapsule(rehash(corrupted)), label).toThrow();
+    }
+
+    const placedCases = [
+      ['legacy schema-1 combatant', (combatant: Record<string, unknown>) => {
+        delete combatant['placementStatus'];
+        delete combatant['effectiveSize'];
+        delete combatant['placementMode'];
+        delete combatant['footprint'];
+      }],
+      ['illegal mode-size pair', (combatant: Record<string, unknown>) => {
+        combatant['placementMode'] = { kind: 'squeezed', actual: 'Large', sizedFor: 'Small' };
+      }],
+      ['forged footprint', (combatant: Record<string, unknown>) => {
+        combatant['footprint'] = [{ column: 1, row: 1 }];
+      }],
+    ] as const;
+    for (const [label, mutate] of placedCases) {
+      const corrupted = rehash(fixture);
+      const projection = mutableRecord(corrupted['projection'], `${label} projection`);
+      const combatant = mutableRecord(mutableArray(projection['combatants'], `${label} combatants`)[0], label);
+      mutate(combatant);
+      expect(() => decodeEngineStateCapsule(rehash(corrupted)), label).toThrowError(
+        expect.objectContaining<Partial<EngineStateCapsuleDecodeError>>({ code: 'invalid_schema' }),
+      );
+    }
+
+    const pendingWithPosition = rehash(fixture);
+    const pendingProjection = mutableRecord(pendingWithPosition['projection'], 'pending projection');
+    const pending = mutableRecord(mutableArray(pendingProjection['combatants'], 'pending combatants')[1], 'pending');
+    pending['position'] = { column: 4, row: 4 };
+    expect(() => decodeEngineStateCapsule(rehash(pendingWithPosition))).toThrowError(
+      expect.objectContaining<Partial<EngineStateCapsuleDecodeError>>({ code: 'invalid_schema' }),
+    );
+
+    expect(() => decodeEngineStateCapsule({ ...fixture, revision: 2 })).toThrowError(
+      expect.objectContaining<Partial<EngineStateCapsuleDecodeError>>({ code: 'digest_mismatch' }),
+    );
+  });
+
+  it('strictly decodes schema 3 only after exact shape and spatial semantics validate', () => {
+    const { capsule } = capsuleFixture();
+    expect(decodeEngineStateCapsule(capsule)).toEqual(capsule);
+
+    const unknownKey = rehash(capsule);
+    unknownKey['unexpected'] = true;
+    expect(() => decodeEngineStateCapsule(unknownKey)).toThrowError(
+      expect.objectContaining<Partial<EngineStateCapsuleDecodeError>>({ code: 'invalid_schema' }),
+    );
+
+    const missingKey = rehash(capsule);
+    delete missingKey['rulesIndex'];
+    expect(() => decodeEngineStateCapsule(rehash(missingKey))).toThrowError(
+      expect.objectContaining<Partial<EngineStateCapsuleDecodeError>>({ code: 'invalid_schema' }),
+    );
+
+    const versionOne = rehash(capsule);
+    versionOne['schemaVersion'] = 1;
+    expect(() => decodeEngineStateCapsule(rehash(versionOne))).toThrowError(
+      expect.objectContaining<Partial<EngineStateCapsuleDecodeError>>({ code: 'unsupported_version' }),
+    );
+
+    const placedCases = [
+      ['legacy schema-1 combatant', (combatant: Record<string, unknown>) => {
+        delete combatant['placementStatus'];
+        delete combatant['effectiveSize'];
+        delete combatant['placementMode'];
+        delete combatant['footprint'];
+      }],
+      ['illegal mode-size pair', (combatant: Record<string, unknown>) => {
+        combatant['placementMode'] = { kind: 'squeezed', actual: 'Medium', sizedFor: 'Tiny' };
+      }],
+      ['forged footprint', (combatant: Record<string, unknown>) => {
+        combatant['footprint'] = [{ column: 99, row: 99 }];
+      }],
+      ['pending with position', (combatant: Record<string, unknown>) => {
+        combatant['placementStatus'] = 'placement_pending';
+        combatant['pendingReason'] = 'legacy_size_required';
+      }],
+    ] as const;
+    for (const [label, mutate] of placedCases) {
+      const corrupted = rehash(capsule);
+      const projection = mutableRecord(corrupted['projection'], `${label} projection`);
+      const combatant = mutableRecord(mutableArray(projection['combatants'], `${label} combatants`)[0], label);
+      mutate(combatant);
+      expect(() => decodeEngineStateCapsule(rehash(corrupted)), label).toThrowError(
+        expect.objectContaining<Partial<EngineStateCapsuleDecodeError>>({ code: 'invalid_schema' }),
+      );
+    }
+
+    const digestMismatch = structuredClone(capsule);
+    const changed = { ...digestMismatch, revision: digestMismatch.revision + 1 };
+    expect(() => decodeEngineStateCapsule(changed)).toThrowError(
+      expect.objectContaining<Partial<EngineStateCapsuleDecodeError>>({ code: 'digest_mismatch' }),
+    );
+  });
+
+  it('gives board-derived and direct projection paths identical placed and pending semantics', () => {
+    const fixture = capsuleFixture();
+    const registry = engineActionRegistry(fixture.state);
+    const direct = projectEngineEncounterState(fixture.state, registry, fixture.capsule.projection.initiative, 1);
+    expect(direct).toEqual(fixture.capsule.projection);
+
+    const pendingId = fixture.target;
+    const pendingState = {
+      ...fixture.state,
+      tokens: fixture.state.tokens.filter((token) => token.combatantId !== pendingId),
+      adjudicationPending: [{
+        kind: 'legacy_size_required' as const,
+        combatant: pendingId,
+        sourceSizeText: null,
+        suggestedAnchor: null,
+        originatingToken: null,
+      }],
+    };
+    const pendingBoard = projectDmBoard({
+      view: { audience: 'dm', state: pendingState },
+      coordinator: {
+        requestSequence: 0,
+        pendingRequest: null,
+        pendingCommand: null,
+        continuation: { kind: 'idle' },
+        pause: null,
+      },
+      controllers: [],
+      history: [],
+    });
+    const pendingRegistry = engineActionRegistry(pendingState);
+    const fromBoard = projectEngineDmProjection(pendingBoard, pendingRegistry, pendingState.observationHistory, 1);
+    const fromState = projectEngineEncounterState(pendingState, pendingRegistry, fromBoard.initiative, 1);
+    expect(fromState).toEqual(fromBoard);
+    const pending = fromState.combatants.find((combatant) => combatant.id === pendingId);
+    expect(pending).toEqual(expect.objectContaining({
+      id: pendingId,
+      placementStatus: 'placement_pending',
+      pendingReason: 'legacy_size_required',
+      actions: [],
+      actionApproaches: [],
+      options: [],
+    }));
+    expect(pending === undefined ? [] : Object.keys(pending)).not.toContain('position');
+    expect(pending === undefined ? [] : Object.keys(pending)).not.toContain('footprint');
+  });
   it('defaults legacy ordinary requests to round_plan and carries exact adjustment metadata', () => {
     const fixture = capsuleFixture();
     const legacyRequest = fixture.capsule.request;
@@ -321,6 +514,7 @@ describe('read-only engine state capsule', () => {
       'difficultTerrainCells',
       'initiative',
       'movementBlockingObjects',
+      'observationHistory',
       'room',
       'round',
       'semanticZones',
