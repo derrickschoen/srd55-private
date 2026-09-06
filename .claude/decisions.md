@@ -12327,3 +12327,50 @@ Q4 difficult terrain fell to .662 (low: .544). Landing rule not met
 (mean .824 < .830 and Q9/Q4 below round 4). Next: round 5d art
 increment on obscured + difficult terrain driven by the actual r5c
 answers (which cells were asserted vs truth), same lane, then re-probe.
+
+## D563 — OWNER: "Dispatch as many parallel experiments... look for seams... queue the serial experiments" — 16-lane programme (2026-09-06 15:55)
+
+Seam analysis: every brainstorm/report item splits into (i) an
+implementation lane behind a renderer-profile or CLI flag that is
+byte-identical when off (pins untouched, attributable via profile hash),
+verified and committed on its own branch, and (ii) the measurement run
+(luna probe / mini-A/B / replay / bench) that the supervisor runs
+afterwards since codex sandboxes cannot call models. (i) lanes are
+mutually independent (separate worktrees off main cbef2f8f, or off
+claude/classic-r5 67e98afa where the probe tool lives) and run in
+parallel; (ii) runs are luna-network-bound and also parallelise; gates
+serialise on the lock; merges to main happen one at a time with their own
+mini-A/B where engine/renderer code changed.
+
+Dispatched (codex sol high, worktree, port, session): e1-semantic
+(classic-r5, 4650, 01a07845-0b54), e2-cards (main, 4651, 01a07845-5939),
+e3-checklist (classic-r5, 4652, 01a07845-a75c), e4-plays (main, 4653,
+01a07845-f587), e5-repair (main, 4654, 01a07846-43b4), e6-narration
+(main, 4655, 01a07846-91e0), preact-island (main, 4656, 01a07846-e00c),
+render-bench (main, 4657, 01a07847-2e4d), join-baseline (main, 4658,
+01a07847-7c5e), s3-assess (main, 4659, 01a07847-caac), s7-verify (main,
+4660, 01a07848-18d6), s9-bestof2 (main, 4661, 01a07848-66fa), a5-delta
+(main, 4662, 01a07848-b520), a6-metamorphic (classic-r5, 4663),
+a10-unknown (classic-r5, 4664), classic-5d (dnd-wt-classic5 itself,
+4665, 01a07847-6666: Q9/Q4 art from the r5c rows). Briefs under
+.tmp/runs/briefs-2026-09-06/ (HEADER.md + per lane; prompt-<lane>.md is
+the exact text sent); logs .tmp/runs/log-lane-<lane>.log. Not
+dispatched: S2 (narrowed to a diagnostic arm inside E1 once E1 reads
+out), S8 (protocol prose, minimise), A3/A7/A8/A9 (need E1-E7 results or
+an owner ruling), S4 exemplars (no clean teacher data), VTT prior-art
+recs 1(protocol redesign)/2/3/5-10 (relay ruling or landing order).
+
+Serial queue (after each lane's harvest: my verification + mutants +
+commit; then the run): Q1 E1 probe, 3 arms x 24 states x luna medium
+(png control on the E1 tree, semantic, both) -> if any class still <
+0.9, E3 checklist slice on those classes, then A10 v2 schema as
+secondary metric, then A6 metamorphic on the best arm. Q2 E2 cards
+10-room mini-A/B vs era controls -> if sane, 10 seeds x 3 reps + blinded
+packet. Q3 E4 plays mini-A/B -> 30 rows + packet. Q4 E5 repair replay
+with luna medium on the corpus. Q5 E6 factored narration mini-A/B +
+latency. Q6 S3 / S7 / A5 / S9 each: mini-A/B on the flag, S9 offline
+only. Q7 classic 5d re-probe -> landing if >= round 4 -> then E1's
+semantic arms are re-based on landed art. Q8 preact island: gates + the
+report's numeric adoption gates; render-bench and join-baseline produce
+result files only. Main landings one at a time, full gate each, mini-A/B
+for engine/renderer changes, :4173 rebuilt after each.
