@@ -12151,3 +12151,28 @@ the snapshot service, with directional tests; re-run typecheck, touched
 specs and both smokes. Codex's smoke luna calls failed because
 ~/.codex-aidm is read-only in its sandbox: expected, the PNGs are the
 deliverable; I run the real paired probe after commit.
+
+## HARVEST — capture-scale diagnostic verified and committed (claude/classic-r5 2ba531a6); paired 64-px probe launched (2026-09-06 12:10)
+
+Codex (01a07760, resumed) delivered 9 files (+213/-44): captureTilePx
+64|128 on the snapshot service and probe (--capture-tile-px, row field,
+summary header), chrome lattice pitch parameterised in board-chrome.ts
+(cell origin, grid size, HP-bar top, badge left, glyph ring bottom all
+take tilePx, default 128) and threaded via a snapshot-only ?captureTilePx
+URL parameter (main.ts -> encounter-app -> renderBoardChrome); one source
+assertion in encounter-board-art.test.ts updated for the new argument.
+Verified myself: no any/ts-ignore/skip; size constants unchanged
+(HP bar 40x4, badge 30x22, gutter 24); typecheck 0; board-chrome +
+snapshot + probe specs 54/54; encounter-board-art 5/5; 128-px smoke hash
+e541a3c3 = the pinned D536 capture (codex claim, consistent with my
+unchanged-pin check); 64-px smoke a1d37386 1012x2104 viewed: labels 0-14
+across and 0-23 down, badges on tokens, chrome element sizes unchanged.
+Supervisor mutants: A (cell origin ignores tilePx) killed 1 failed/22
+passed; B (marker height fixed 1280) killed 1 failed/13 passed; both
+restored byte-identical. Committed 2ba531a6, tree clean.
+
+Paired probe launched: 24 states, seed 6203001, luna medium+low, primer
+v9, art 4a279a80, --capture-tile-px 64, generation g5b-round5b1-24-cap64,
+out dnd-wt-classic5/dnd-slim-runs/d561-probe24-r5b-64.jsonl, log
+.tmp/runs/d561-probe24-r5b-64.log. Comparison basis: r5b (128 px, same
+states) medium mean .731, round 4 .830.
