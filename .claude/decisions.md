@@ -11729,3 +11729,31 @@ is NOT probe-progress; 5b (primer v9, bigger terrain motifs) does not touch
 image size. Classic 5b harvest continues as planned (its gates and captures),
 then probe r5b, then a capture-scale diagnostic lane; no classic landing on
 main while the probe is below round 4. Owner-visible.
+
+## D429.1 mini-A/B for the ghost merge dda20902: shape MATCHES era controls; classic 5b resumed (2026-09-06 00:23)
+
+Run on main 5eddddd2 (contains dda20902; brutal 10×1 seed 6203001 luna low
+full intel; ~/dnd-slim-runs/miniab-ghost.jsonl, 10 rows, exit 0, load ≤1.4).
+Round-1 offense slots per room, my extraction script as before:
+
+| run | rooms 1–10 | mean | zero rooms | dash slots |
+|---|---|---:|---:|---:|
+| ghost (5eddddd2) | 1,1,2,3,3,2,0,2,VOID,1 | 1.67 | 1 (room 7) | 22 |
+| era controls | 1,1,2,2,3,2,0,2,3,1 | 1.70 | 1 (room 7) | — |
+
+Room 9 VOID = "Agent CLI timed out after 120000 ms" (8 tool calls, no
+decision; the arena's default 120 s, not an engine refusal — same kind as the
+a11y run's room-8 VOID). Same zero-offense room, mean within 0.03: the ghost
+merge did not change the play shape. Verdict: PASS (9 paired rooms, 1 void).
+Engine/renderer merges are unblocked; the intel-leak full gate runs after the
+classic 5b lane's locked gates so the box is not shared.
+
+Note on the first attempt: tools/ai-dm-arena.ts refuses --out inside the
+working tree ("--out must be outside the repository working tree"), so arena
+outputs stay in ~/dnd-slim-runs; only briefs/logs moved to .tmp/runs.
+
+Classic 5b lane resumed 00:22 (session 01a07351, sol high, brief
+.tmp/runs/resume-classic5b-hold-cleared.md, log
+.tmp/runs/log-classic5b-hold-cleared.log): hold cleared for the locked build,
+both 4660 specs and the captures; plus a read-only explanation of the
+capture-size change and options to cap it (no implementation).
