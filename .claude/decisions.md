@@ -12834,3 +12834,23 @@ offense-shape mini-A/B only. Also: rows carry arm 'single' for
 single-arm runs, so the two files must be relabelled (arm: cards /
 control) before the packet build; that relabel touches only the arm
 field, which the packet withholds from judges anyway.
+
+## FINDING AGAINST MY OWN HARVEST — a cut-off background mutant left E4's registry mutated; E2 judged arms need the hard basis (2026-09-06 18:31)
+
+(1) My E4 advert-cap mutant run (registry.ts slice(0,3) -> slice(0,5))
+was moved to the background by the harness timeout and never reached
+its restore step; the worktree carried the mutant for ~10 minutes
+until the pre-commit cmp against the saved original caught it (byte
+22570, line 514). Restored from .tmp/runs/e4.orig, verified byte-
+identical. No commit was made in that window. Rule: mutant runs are
+launched as detached scripts that restore in the same script and write
+a RESTORED marker; the harvest reads the marker, never assumes.
+Re-run in flight (e4-mutant-run.sh -> .tmp/runs/e4-mut3.log).
+
+(2) The R1-10 judged protocol runs on --basis hard (fixtures
+tests/fixtures/arena-basis-hard/seed-5117001..10.json), not brutal; my
+first R1-10 relaunch on brutal crashed with ENOENT for
+seed-5117001.json. Relaunched: cards vs default profile, --basis hard
+--seed 5117001 --rooms 10 --reps 3, luna medium, full intel, in
+parallel (run-e2-r110.sh). Seed-6203001 brutal rows remain mini-A/B
+shape data only.
