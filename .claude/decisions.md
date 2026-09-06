@@ -11818,3 +11818,25 @@ paired diagnostic will run on the 5b.1 art.
 
 Order of the box: 5b.1 lane now; intel-leak full gate (gate-wt4.sh
 wt-intel-leak) when 5b.1 ends; probe r5b + size diagnostic after that.
+
+## HARVEST — classic 5b.1 verified and committed; intel-leak full gate starting (2026-09-06 01:09)
+
+5b.1 (session 01a07351-2240…, 27 min) "CLASSIC ROUND 5B.1 COMPLETE", exit 0.
+Rule quoted from clean-room/final/01-art-direction.md: "Every material
+declares one dominant mark direction or edge-frequency class and must remain
+identifiable in a grayscale contact sheet at final size." Codex CLAIMS locked
+full vitest 560 files / 9,725 tests (416 s), starter-art oracle 27 tests /
+87 assets, contact sheets iteration-4 (+grayscale) and iteration-5
+byte-identical; build/Playwright not run (no chrome files changed — I
+confirmed: only pixel-art.ts, the hash modules, preview SVG, the technique
+test and 60 PNGs). I VERIFIED: tsc -b --force 0, sg 0, focused 12 files /
+119 tests, no forbidden tokens, no deleted tests (0 removed / 20 added
+assertion lines), no claude invocation, frozen sha unchanged. Both named
+mutants applied by me and KILLED: specular_inverted → 3/17 failed ("metal
+specular cluster must contain at least six brightest pixels: expected 0 to
+be ≥ 6"; "matte stone must contain zero brightest-cluster pixels: expected
+6 to be +0"; colour budget); specular_never → 3/17 failed (field-influence,
+metal cluster, forced-gloss control). Restores byte-identical, 17/17 after.
+Survivor B from 5b is closed. Committed on claude/classic-r5 (see git log;
+5b = 36e7b7f8). Classic still does NOT land: probe r5b and the capture-size
+diagnostic come first (after the intel-leak gate, one heavy job at a time).
