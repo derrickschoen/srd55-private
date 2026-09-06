@@ -12246,3 +12246,33 @@ before/after and a floor test. Verify: typecheck, touched specs, 1-state
 128-px capture smoke viewed. On harvest: my verification + mutants,
 commit, then the fresh 24-state 128-px probe paired against r5b/r4.
 Brainstorm lane (01a077c0) finished at 13:37; review next.
+
+## HARVEST + REVIEW — luna-medium brainstorm (codex 01a077c0) (2026-09-06 13:40)
+
+~/dnd-research-private/vtt-research/2026-09-06-luna-medium-closer-to-sol-brainstorm-codex.md
+(364 lines). Hygiene clean (no claude, no git writes, nothing outside the
+private dir). Spot-checks held: D465 cav-rows-move-gating panel 7.78 vs
+7.75, paired delta -0.10 CI [-0.91,+0.69] (unseal-2026-09-03.md:100-109);
+d510 medium control 30/30, 154 calls, 11.7 s median (decisions 9957-63);
+kbReads empty in 60/60 control+comparator rows (I recomputed from the
+jsonls). Verdict ACCEPTED.
+
+Premise correction (important): there is NO sol-high actor arm in the
+corpus; sol high is a blinded judge. The measured comparator is sol low,
+and luna medium is at parity with it on plan quality (components within
+0.1). The measured deficit is board-fact extraction from the PNG (Q9 fog,
+Q4 terrain, Q7 adjacency, Q6 doors), not planning. Ranked top six: (1)
+S1+A1 compact authoritative semantic board from the DM accessible-board
+projection, screenshot kept as gestalt, engine facts win conflicts; (2)
+S6+A2 typed consequence / pairwise contrast cards on shown options,
+order-randomised; (3) S5 narrow failure-conditioned perception checklist;
+(4) A4 applicable verified draft plays (D405); (5) S11 typed validation
+codes + one bounded retry; (6) S10+A12 decision/narration factorisation.
+Killed or narrowed: S2 three encodings, S8 more protocol prose, S9
+best-of-2 (offline only; chooser-boundary risk), S4 exemplars (no clean
+teacher data yet). Ten invariants listed (engine authority, revision-
+bound shown options, proposer-only, D405.3, D406, D456/D474 timing,
+audience boundary, intel attribution, blinded judging, no model
+coordinates). Six preregistered experiments E1-E6 reuse probe / mini-A/B
+/ blinded packets; recommended sequence E1 first, E2 in parallel if
+authorised. Owner asked one question: authorise E1 (and E2 in parallel).
