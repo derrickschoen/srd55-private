@@ -11774,3 +11774,47 @@ skill.log. Re-dispatched 00:24 with the FULL COMMON RULES header restated
 and the full UUID; the new log prints session id 01a07351-2240-74e1-8600-
 60f7edf52c52, i.e. the real resume. Rule added to memory: full UUID + verify
 the printed session id + restate the header in full on every resume.
+
+## HARVEST — classic 5b verified and committed on claude/classic-r5; supervisor mutant B SURVIVED → 5b.1 dispatched (2026-09-06 00:40)
+
+5b resumed lane (real session 01a07351-2240…) finished "CLASSIC ROUND 5B
+COMPLETE" in 13 min, exit 0. Codex CLAIMS: locked build exit 0 (36.6 s),
+ai-dm-board-snapshot.spec 1 passed (48 s), vtt-encounter.spec 3 passed
+(50 s), captures arena-6203010 1972×3640 + two reference rooms 1332×1194/
+1332×1296 under test-results/classic-round-5b-captures/, earlier locked full
+vitest 560 / 9,721. I VERIFIED: tsc -b --force 0, sg 0, focused 3 files /
+52 tests (classic-art-techniques, screenshot-probe, board-chrome), PRIMER
+v9 in the probe tool, 72 tracked changes / 0 untracked, no forbidden tokens,
+no claude invocation, no .claude/docs edits, frozen sha unchanged. My named
+mutant A (flip head shadow to cx-3,cy-4 and highlight to +0.3rx) KILLED:
+"fighter head: expected -28.075 to be greater than 12" (1 failed / 12
+passed); restore byte-identical.
+
+FINDING — mutant B SURVIVED: inverting `response.specular ===
+'single-cluster'` to `!==` in materialFinish (cluster painted on every
+non-metal, omitted on metal) leaves classic-art-techniques 13/13 green; only
+the starter-art hash change detector fails (2 tests). Cause: the Part 2(a)
+test asserts "bytes differ from baseline" for each field, which any
+consumption, including an inverted one, satisfies. Second finding on depth:
+materialFinish is a 3-pixel cluster plus a few mark pixels at one anchor
+(one extra row for 'soft') — a token consumption of rule 2(a), not a visible
+material response. Committed 5b as-is on claude/classic-r5 (message records
+the survivor) and dispatched 5b.1 (brief .tmp/runs/brief-classic5b1-
+material.md, resume by full UUID, header restated): visible per-material
+response derived from the quoted rule text, DIRECTIONAL tests, named
+mutations `specular_inverted` and `specular_never`, hash regen with the
+invariants, no dist/Playwright unless chrome changes.
+
+Capture-size answer from codex (read-only, accepted as the diagnosis to
+test): native cells 64→128 px (pixel-art.ts:17, board-chrome.ts), snapshot
+forced CSS tile 64→128 (ai-dm-board-snapshot.ts:39), device scale still 1,
+while semantic chrome did NOT scale (text scale 2, HP bar 40×4, glyphs 9 px,
+badges 30×22) — so a whole-board raster twice as large carries the same
+fixed-size badges/HP/glyphs, which any vision-side normalisation shrinks.
+Options listed (nearest-neighbour power-of-two probe PNG; probe-only 64 px
+CSS tile at the snapshot seam; fractional device scale; panel split; board
+and roster captured separately). Decision deferred until 5b.1 lands; the
+paired diagnostic will run on the 5b.1 art.
+
+Order of the box: 5b.1 lane now; intel-leak full gate (gate-wt4.sh
+wt-intel-leak) when 5b.1 ends; probe r5b + size diagnostic after that.
