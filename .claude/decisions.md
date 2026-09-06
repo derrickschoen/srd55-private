@@ -11954,3 +11954,13 @@ flux-2-klein-4b-Q8_0.gguf; deletion notes appended to README.md and
 LICENSES.md (licence records kept). Verified: fresh server, default
 generate.py path, 82.4 s, output byte-identical (cmp) to the lane's Q8 PNG.
 Server stopped, :8188 free. Machine quiet: intel-leak gate relaunched next.
+
+## Owner: dnd-lane-mutshard worktree deleted (2026-09-06 09:29)
+
+Verified before removal: lane-wt/mutshard fully merged into main (0 commits
+main lacks, empty diff, merge recorded at the D416 entry), untracked content
+only .cache/ and two stryker-setup-*.js scratch files, ignored content
+regenerable (node_modules, .stryker-tmp, .venv-rl 1.3 GB, mutation-shards
+reports of 2026-08-22 whose rerun was pruned from the standing brief), no
+process or lock using it. Removed with git worktree remove --force (7.2 GB
+inside the VM) and deleted the merged branch lane-wt/mutshard.
