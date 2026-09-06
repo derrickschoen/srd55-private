@@ -12868,3 +12868,15 @@ mutant script that would have tested the wrong file state was killed;
 registry verified byte-identical to the original; E4 remains
 uncommitted. E2 judged arms confirmed running: hard basis, seed 5117001,
 10 x 3, cards vs default, luna medium.
+
+## E1b facts-only REPLICATES on seed 2 (.995 / .995, strict PASS both) (2026-09-06 18:53)
+
+E1b semantic-only arm, 49d782bb, luna medium, seed 6203002: Q1 .955,
+Q2-Q4 1.000, Q5 .994, Q6-Q8 1.000, Q9 .999, Q10 1.000; mean .995; PASS.
+Seed 1 was .995 / PASS with every class inside the other seed's
+interval. Under D565 the compact semantic board is a confirmed, real
+improvement on both delivery modes (facts-only .995/.995; image+facts
+.984/.982 on E1, .995 on E1b seed 1 with seed 2 running). The
+comprehension objective is met by facts; the remaining question is
+play quality with facts in the live DM context (E1c arena arm, queued
+after main is merged into the E1 lineage).
