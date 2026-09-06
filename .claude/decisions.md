@@ -12493,3 +12493,48 @@ intel, 240 s wall): 10/10 rows, round-1 offense
 medium's identical [1,1,2,2,3,2,0,2,3,1]: sol high differs in rooms 1
 (0 vs 1), 8 (3 vs 2) and 10 (2 vs 1); reasoning tokens 200-2887 per
 round. Shape only; quality needs a blinded packet (queued).
+
+## HARVESTS — classic 5d committed (10e3892a) and probe r5d launched; E2 committed; E1 arms launched (2026-09-06 16:48)
+
+Classic 5d (01a07847-6666, resumed with the primer amendment): 13 files
++210/-78. Diagnosis from the r5c rows (per-state tables in the lane
+log): Q9 false positives were overwhelmingly the model filing obscured
+cells under FOG (whole obscured regions asserted as fog and omitted as
+obscured in 6203002/4/5/6/9), i.e. the diagonal lattice read as fog
+hatching, exactly the primer/legend confusion; Q4 false positives
+cluster on cells adjacent to true difficult runs (ridges bleeding into
+neighbours visually) plus whole-region misses on two states. Fix:
+difficult = three inset opaque pale-ochre ridges with dark outline;
+obscured = cyan veil with three closed inset diamonds (no continuous
+crosshatch); legend "OBSCURED - CYAN DIAMONDS AND WAVES - NOT FOG" and
+"DIFFICULT - 3 OCHRE RIDGES IN EACH CELL"; legend samples now use the
+exact 128-px cell assets; PRIMER_VERSION d562-general-board-primer-v10
+with v9 kept byte-identical in PRIMER_HISTORY. Contrast at 128 px:
+difficult/obscured dE 17.2, obscured/fog 38.2, obscured/dim 8.8,
+difficult vs each floor 9.8-10.4. Pins moved (4: difficult,
+obscurement light/heavy, preview) each paired with geometry/contrast
+invariants. Verified myself: no forbidden constructs, typecheck 0,
+67/67 across board-glyphs, board-chrome, probe, starter-art (probe spec
+now green, D525 satisfied), generator --check 87 assets, smoke PNG
+viewed (2280x3056: cyan diamond cells and ochre ridge cells unmistakable
+and legend-matched). Supervisor mutant (two ridges instead of three)
+killed 2 failed/15. Committed claude/classic-r5 10e3892a. Probe r5d
+launched (luna medium+low, 24 states, 128 px, primer v10, out
+dnd-wt-classic5/dnd-slim-runs/d562-probe24-r5d.jsonl, log .tmp/runs/
+d562-probe24-r5d.log). Landing rule unchanged.
+
+E2 (01a07845-5939): 10 files +699/-182, new src/vtt/intel/
+consequence-cards.ts (cards from existing outcome/movement/opportunity/
+cover/visibility/reach queries; bands none/low/mid/high), contrast pair
+of the two closest offense-capable shown options with seeded A/B order
+and contrastOrder recorded, renderer flag consequenceCards in the
+profile hash, docs/specs regenerated. Verified: contracts.ts hash
+unchanged, typecheck 0, 38/38 incl. the board-delivery pin, supervisor
+mutant (certain -> possible exposure) killed; committed claude/e2-cards
+a787e8fc. Its mini-A/B run is next in the queue.
+
+E1 run: merged claude/classic-r5 10e3892a into claude/e1-semantic (exit
+0, post-merge specs green) so the semantic arms use primer v10 and the
+5d art; arms 'semantic' and 'both' launched at luna medium on the E1
+tree (run-e1-arms.sh); r5d's luna-medium run is the PNG control (same
+art, same primer, default probe path byte-identical).
