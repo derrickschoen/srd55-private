@@ -11644,3 +11644,53 @@ Q3_K_M; server not running; brief kept at .tmp/runs/brief-krea-quants.md for whe
 heavier-quant-vs-Klein question is parked with it; the references tool keeps Klein as default and Krea behind
 --local-reference-only. The ghost mini-A/B is no longer blocked behind the sweep; it runs when the current lanes
 drain.
+
+## HARVEST — intel-leak lane verified and committed on claude/intel-leak; classic 5b BLOCKED by my own brief; probe r5 status (2026-09-06 00:04)
+
+Intel-leak (dnd-wt-intel-leak, session 01a0733f) ended "INTEL LEAK COMPLETE",
+exit 0. Codex CLAIMS: locked full vitest 564 files / 9,729 tests, locked
+production build exit 0, tsc/sg 0, named mutation intel_names_hidden_option
+killed (cmp 0 after restore). I VERIFIED myself in the worktree: tsc -b
+--force exit 0 (35 s), sg scan exit 0, focused 8 files / 132 tests passed,
+schema generator re-run byte-stable (engine-turn-context 24fc55e9…,
+refusal-code 6955d048…), frozen contracts sha unchanged, no any/ts-ignore/
+skip/todo in the diff, no test deletions (the two removed expect lines are
+the pin update 32180→32000 and a reformatted toMatchObject), no
+`claude -p` in the lane log, docs/ touched only via the generator
+(docs/specs/*.schema.json). Pin moved with invariants (a)–(d) in the same
+commit as ruled. My two mutants, both killed by hidden-option-boundary:
+A "options_omitted_for_size always 0" → "expected +0 to be 4" (1 failed);
+B pruning floor `length > 2` → `> 0` → 3 of 4 failed incl. the no-offense
+test ("expected 0 to be greater than 0"). Both files restored byte-identical
+(cmp), 4/4 pass after. Committed 04fd8420 on claude/intel-leak. Full
+supervisor gate (gate-wt4.sh incl. browser) still owed before landing; it
+waits behind the ghost mini-A/B (box must be quiet, one heavy job at a time).
+D489/D490 free-text-reason contradiction sub-item: codex stopped it as
+infeasible without natural-language guessing; accepted, not implemented.
+
+Classic 5b (dnd-wt-classic5, session 01a07351) ended "CLASSIC ROUND 5B
+BLOCKED — DIST/SERVER HOLD MUST BE CLEARED", exit 0. FINDING AGAINST MY OWN
+BRIEF: the resume note said "do not touch dist/ or start/stop servers"
+(probe r5 uses that worktree's dist on 4660) while the same brief demanded
+the two Playwright specs on 4660 under the lock, the locked build, and fresh
+captures. Those three cannot run without dist/ or a server; codex stopped
+correctly. Codex CLAIMS completed: bust light invariants over 11 archetypes,
+bust_light_from_lower_right mutant failed (-31.04 vs > 12) and byte-identical
+restore, material responses consumed (mark/specular/edge), chrome/terrain/
+primer v9, locked full vitest 560 files / 9,721 tests, tsc/sg 0, 87 assets
+regenerated. NOT run: build, both specs, captures. NOTHING VERIFIED BY ME
+YET beyond: 72 files changed, no forbidden tokens in the diff, no
+`claude -p` in the log, no .claude/docs edits, frozen sha unchanged.
+Harvest resumes (clear the hold, resume the session for the three gates and
+captures, then my verification) once probe r5 has finished writing.
+
+Probe r5 (d536-probe24-r5): still running 2 h 30 m, 0 rows — NOT stuck: the
+tool appends all rows only after mapConcurrent finishes (probe line 2826);
+711 luna rollouts since 21:37 in ~/.codex-aidm, 708 with an agent message,
+0 aborted. Two models × 24 states × 10 questions = 480 tasks, so the excess
+is retries; will inspect at scoring.
+
+Mini-A/B (D429.1) for the ghost merge dda20902 LAUNCHED now on main
+e1765e3a (clean tree): brutal 10×1 seed 6203001 luna low full intel, out
+.tmp/runs/miniab-ghost.jsonl. Load at launch 0.8; only the network-bound
+probe shares the box.
