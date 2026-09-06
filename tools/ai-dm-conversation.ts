@@ -163,6 +163,7 @@ import {
   type RendererProfile,
   type RendererRemovalCounts,
 } from '../src/vtt/renderer-profile';
+import type { SemanticBoardTruncationClass } from '../src/vtt/semantic-board-payload';
 import {
   DEFAULT_AI_DM_KB_ROOT,
   loadAiDmKnowledgeBase,
@@ -501,6 +502,8 @@ interface ConversationRowBase {
     readonly policyVersion: typeof RENDERER_POLICY_VERSION;
     readonly profile: RendererProfile;
   };
+  readonly semanticBoardBytes: number;
+  readonly semanticBoardTruncated: readonly SemanticBoardTruncationClass[];
   readonly circumstanceFeatures: CircumstanceFeatureVector;
   readonly combatModel: CombatModel;
   readonly roundProtocolVersion: typeof ROUND_PROTOCOL_VERSION;
@@ -647,6 +650,8 @@ export interface TurnContextRenderEvidence {
   readonly postTrimBytes: number;
   readonly features: CircumstanceFeatureVector;
   readonly removals: RendererRemovalCounts;
+  readonly semanticBoardBytes: number;
+  readonly semanticBoardTruncated: readonly SemanticBoardTruncationClass[];
 }
 
 export interface ConversationRunOptions {
@@ -5056,6 +5061,8 @@ async function runConversationWithConfiguredIntel(
           policyVersion: RENDERER_POLICY_VERSION,
           profile: config.rendererProfile,
         },
+        semanticBoardBytes: rendererEvidence.semanticBoardBytes,
+        semanticBoardTruncated: rendererEvidence.semanticBoardTruncated,
         circumstanceFeatures: rendererEvidence.features,
         combatModel: config.combatModel,
         roundProtocolVersion: ROUND_PROTOCOL_VERSION,

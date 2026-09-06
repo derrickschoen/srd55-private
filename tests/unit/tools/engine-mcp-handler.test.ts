@@ -744,6 +744,68 @@ describe('engine MCP dual-handshake full surface conformance', () => {
     expect(String(record(content[0])['text'])).not.toBe(JSON.stringify(value));
   });
 
+  it('delivers a revision-matched semantic DM board with exact row telemetry', async () => {
+    const { state } = await fixtureRuntime();
+    let evidence: {
+      readonly semanticBoardBytes: number;
+      readonly semanticBoardTruncated: readonly string[];
+    } | undefined;
+    const runtime = createEngineMcpRuntime(state, {
+      requestedActorCount: 1,
+      toolProfile: 'dm',
+      rendererProfile: { ...DEFAULT_RENDERER_PROFILE, semanticBoard: true },
+      turnContextMaximumBytes: 100_000,
+      onTurnContextRendered: (value) => { evidence = value; },
+    });
+    const capsule = runtime.feed.current();
+    const context = structured(toolCall(runtime.handler, 'engine.get_turn_context', contextArguments()));
+    const board = record(context['semantic_board']);
+
+    expect(board).toMatchObject({
+      provenance: 'engine_fact',
+      audience: 'dm',
+      revision: capsule.revision,
+    });
+    expect(String(board['encoding_note'])).not.toContain('\n');
+    expect(context).not.toHaveProperty('semantic_board_truncated');
+    expect(evidence).toMatchObject({
+      semanticBoardBytes: new TextEncoder().encode(JSON.stringify(board)).byteLength,
+      semanticBoardTruncated: [],
+    });
+  });
+
+  it('truncates semantic facts in fixed order before the protected board and option floor', async () => {
+    const { state } = await fixtureRuntime();
+    const maximumBytes = 12_000;
+    const runtime = createEngineMcpRuntime(state, {
+      requestedActorCount: 1,
+      toolProfile: 'dm',
+      rendererProfile: { ...DEFAULT_RENDERER_PROFILE, semanticBoard: true },
+      turnContextMaximumBytes: maximumBytes,
+    });
+    const context = structured(toolCall(runtime.handler, 'engine.get_turn_context', contextArguments()));
+    const board = record(context['semantic_board']);
+    const cells = record(board['cells']);
+    const actors = context['actors'];
+    if (!Array.isArray(actors)) throw new TypeError('Truncated semantic context omitted actors.');
+
+    expect(new TextEncoder().encode(JSON.stringify(context)).byteLength).toBeLessThanOrEqual(maximumBytes);
+    expect(context['semantic_board_truncated']).toEqual(['light', 'adjacency', 'objects']);
+    expect(cells).not.toHaveProperty('light');
+    expect(board).not.toHaveProperty('light_sources');
+    expect(board).not.toHaveProperty('adjacency_pairs');
+    expect(board).not.toHaveProperty('reach_range_summaries');
+    expect(board).not.toHaveProperty('objects');
+    expect(board).not.toHaveProperty('doors');
+    expect(cells).toHaveProperty('blocked');
+    expect(cells).toHaveProperty('obscured');
+    expect(board).toHaveProperty('creatures');
+    expect(actors.every((actor) => {
+      const options = record(actor)['options'];
+      return Array.isArray(options) && options.length > 0;
+    })).toBe(true);
+  });
+
   it('returns a revision delta that reconstructs the independently recomputed full turn context', async () => {
     const { state, runtime: baseRuntime } = await fixtureRuntime({ requestedActorCount: 1, revision: 1 });
     const base = structured(toolCall(baseRuntime.handler, 'engine.get_turn_context', {

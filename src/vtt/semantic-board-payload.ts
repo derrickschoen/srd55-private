@@ -1,9 +1,14 @@
 import { canonicalJson } from '../commands/canonical-json';
 import type { GridCell } from '../combat/grid';
 import type { CombatantId } from '../combat/values';
-import type { DmBoardProjection } from './encounter-projections';
+import type { DmBoardProjection, PlayerBoardProjection } from './encounter-projections';
 
 export const SEMANTIC_BOARD_FORMAT = 'engine-semantic-board-v1' as const;
+export const SEMANTIC_BOARD_ENCODING_NOTE =
+  'Cells are [column,row]; runs are [start_column,row,end_column_inclusive] with an inclusive endpoint.' as const;
+
+export const SEMANTIC_BOARD_TRUNCATION_CLASSES = ['light', 'adjacency', 'objects'] as const;
+export type SemanticBoardTruncationClass = (typeof SEMANTIC_BOARD_TRUNCATION_CLASSES)[number];
 
 export type SemanticBoardAudience = 'dm' | 'player';
 
@@ -116,6 +121,11 @@ export interface SemanticBoardPayload {
   readonly light_sources: EngineFactList<SemanticObject>;
   readonly adjacency_pairs: EngineFactList<SemanticAdjacencyPair>;
   readonly reach_range_summaries: EngineFactList<SemanticReachRangeSummary>;
+}
+
+export interface SemanticBoardTurnContextBlock extends SemanticBoardPayload {
+  readonly provenance: 'engine_fact';
+  readonly encoding_note: typeof SEMANTIC_BOARD_ENCODING_NOTE;
 }
 
 function factList<Value>(items: readonly Value[]): EngineFactList<Value> {
@@ -358,6 +368,18 @@ export function semanticBoardPayload(
     light_sources: factList(orderedObjects.filter((object) => object.lightClass === 'light-source').map(objectValue)),
     adjacency_pairs: factList(adjacencyPairs),
     reach_range_summaries: factList(reachRangeSummaries),
+  };
+}
+
+/** The turn-context delivery seam accepts both projections so the player denial is executable. */
+export function semanticBoardTurnContextBlock(
+  projection: DmBoardProjection | PlayerBoardProjection,
+): SemanticBoardTurnContextBlock | null {
+  if (projection.audience !== 'dm') return null;
+  return {
+    provenance: 'engine_fact',
+    encoding_note: SEMANTIC_BOARD_ENCODING_NOTE,
+    ...semanticBoardPayload(projection),
   };
 }
 

@@ -21,6 +21,7 @@ import {
   type EngineMcpLauncherManifest,
 } from '../../../src/vtt/mcp/entrypoint';
 import { generateRoom } from '../../../src/vtt/room-generator';
+import { DEFAULT_RENDERER_PROFILE } from '../../../src/vtt/renderer-profile';
 import {
   decodeArenaRowEvidence,
   parseArenaArgs,
@@ -246,6 +247,25 @@ describe('MCP board image content', () => {
 });
 
 describe('arena capture lifecycle and off-arm invariance', () => {
+  it('records delivered semantic-board bytes and truncation on the arena row', { timeout: 60_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'semantic-board-row-'));
+    const profile = { ...DEFAULT_RENDERER_PROFILE, semanticBoard: true as const };
+    const [row] = await runArena(parseArenaArgs([
+      '--rooms', '1', '--reps', '1', '--seed', '3943001',
+      '--out', join(directory, 'rows.jsonl'), '--dry-run', '--effort', 'low',
+      '--model', 'gpt-5.6-luna', '--transport', 'mcp_minimal',
+      '--initiative-profile', 'derived_v1', '--renderer-profile', JSON.stringify(profile),
+    ]));
+    if (row === undefined) throw new TypeError('Semantic-board arena omitted its row.');
+    const context = record(JSON.parse(row.rawTurnContext) as unknown, 'semantic-board context');
+    const board = record(context['semantic_board'], 'semantic-board block');
+
+    expect(row.rendererAttribution.profile).toEqual(profile);
+    expect(row.semanticBoardBytes).toBe(Buffer.byteLength(JSON.stringify(board)));
+    expect(row.semanticBoardBytes).toBeGreaterThan(0);
+    expect(row.semanticBoardTruncated).toEqual(context['semantic_board_truncated'] ?? []);
+  });
+
   it('captures each changed round state once, persists evidence, and closes one service', { timeout: 60_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'board-image-lifecycle-'));
     const service = new FakeSnapshotService();
@@ -311,10 +331,10 @@ describe('arena capture lifecycle and off-arm invariance', () => {
     expect(service.closed).toBe(true);
   });
 
-  it('image_flag_off_changes_prompt_bytes preserves the committed raw context and all invocation bytes', { timeout: 60_000 }, async () => {
+  it('absent semantic-board and image-off flags preserve the committed raw context and invocation bytes', { timeout: 60_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'board-image-off-invariance-'));
     const invocations = new Map<string, AgentInvocation[]>();
-    const run = async (label: 'default' | 'off') => {
+    const run = async (label: 'default' | 'image-off' | 'semantic-absent') => {
       const captured: AgentInvocation[] = [];
       invocations.set(label, captured);
       const args = [
@@ -322,21 +342,29 @@ describe('arena capture lifecycle and off-arm invariance', () => {
         '--out', join(directory, `${label}.jsonl`), '--dry-run', '--effort', 'low',
         '--model', 'gpt-5.6-luna', '--transport', 'mcp_minimal',
         '--initiative-profile', 'derived_v1',
-        ...(label === 'off' ? ['--board-image', 'off'] : []),
+        ...(label === 'image-off' ? ['--board-image', 'off'] : []),
+        ...(label === 'semantic-absent'
+          ? ['--renderer-profile', JSON.stringify(DEFAULT_RENDERER_PROFILE)]
+          : []),
       ];
       return runArena(parseArenaArgs(args), {
         onPrimaryInvocation: (invocation) => { captured.push(structuredClone(invocation)); },
       });
     };
     const defaultResult = await run('default');
-    const offResult = await run('off');
-    expect(offResult.map((row) => row.rawTurnContext))
-      .toEqual(defaultResult.map((row) => row.rawTurnContext));
-    expect(invocations.get('off')?.map((entry) => ({
-      prompt: entry.prompt, instructions: entry.instructions, output: entry.output,
-    }))).toEqual(invocations.get('default')?.map((entry) => ({
-      prompt: entry.prompt, instructions: entry.instructions, output: entry.output,
-    })));
+    const offResult = await run('image-off');
+    const absentResult = await run('semantic-absent');
+    expect(absentResult.every((row) =>
+      row.semanticBoardBytes === 0 && row.semanticBoardTruncated.length === 0)).toBe(true);
+    for (const [label, result] of [['image-off', offResult], ['semantic-absent', absentResult]] as const) {
+      expect(result.map((row) => row.rawTurnContext))
+        .toEqual(defaultResult.map((row) => row.rawTurnContext));
+      expect(invocations.get(label)?.map((entry) => ({
+        prompt: entry.prompt, instructions: entry.instructions, output: entry.output,
+      }))).toEqual(invocations.get('default')?.map((entry) => ({
+        prompt: entry.prompt, instructions: entry.instructions, output: entry.output,
+      })));
+    }
 
     const raw = offResult[0]?.rawTurnContext;
     if (raw === undefined) throw new TypeError('Off-arm row omitted rawTurnContext.');

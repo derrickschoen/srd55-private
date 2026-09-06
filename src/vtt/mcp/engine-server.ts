@@ -77,6 +77,7 @@ import {
   type OptionOutcomeEvaluation,
 } from '../intel/option-outcome';
 import type { ReactionGuidanceDeclaration, ReactionTriggerGuidance } from '../reaction-guidance';
+import type { DmBoardProjection } from '../encounter-projections';
 import { diffTurnContextValues } from '../dm-bridge/projection-transport';
 import {
   DEFAULT_RENDERER_PROFILE,
@@ -90,6 +91,11 @@ import {
   type RendererProfile,
   type RendererRemovalCounts,
 } from '../renderer-profile';
+import {
+  SEMANTIC_BOARD_TRUNCATION_CLASSES,
+  semanticBoardTurnContextBlock,
+  type SemanticBoardTruncationClass,
+} from '../semantic-board-payload';
 import { submitSpeculativeRoundPlan } from '../speculative-plan-submission';
 import type { SpeculativePlanSink } from '../speculative-plan-types';
 import {
@@ -255,12 +261,15 @@ interface EngineMcpDependencies {
   readonly turnContextDeltaBase?: TurnContextDeltaBase;
   readonly onTurnContext?: (context: Readonly<Record<string, unknown>>) => void;
   readonly rendererProfile?: RendererProfile;
+  readonly semanticBoardProjection?: DmBoardProjection;
   readonly turnContextMaximumBytes?: number;
   readonly onTurnContextRendered?: (result: {
     readonly preTrimBytes: number;
     readonly postTrimBytes: number;
     readonly features: CircumstanceFeatureVector;
     readonly removals: RendererRemovalCounts;
+    readonly semanticBoardBytes: number;
+    readonly semanticBoardTruncated: readonly SemanticBoardTruncationClass[];
   }) => void;
   readonly kbReadBudget?: KbReadBudget;
   readonly kbReadCallPhase?: KbReadCallPhase;
@@ -1237,6 +1246,15 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
   const rendererProfile = rendererProfileSchema.parse(
     dependencies.rendererProfile ?? DEFAULT_RENDERER_PROFILE,
   );
+  const deliveredSemanticBoard = rendererProfile.semanticBoard === true
+    ? (() => {
+        const projection = dependencies.semanticBoardProjection;
+        if (projection === undefined) {
+          throw new TypeError('DM semantic-board delivery requires the authoritative DM board projection.');
+        }
+        return semanticBoardTurnContextBlock(projection);
+      })()
+    : null;
   const turnContextMaximumBytes = dependencies.turnContextMaximumBytes ?? TURN_CONTEXT_MAX_BYTES;
   if (!Number.isSafeInteger(turnContextMaximumBytes) || turnContextMaximumBytes < 1) {
     throw new RangeError('turnContextMaximumBytes must be a positive safe integer.');
@@ -1996,7 +2014,13 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       const capsule = exactCurrent(feed, stringField(input, 'run_id'), numberField(input, 'expected_revision'));
       if (capsule.request === null) throw new RangeError('NO_PENDING_REQUEST');
       if (capsule.request.phase === 'speculative') throw new RangeError('SPECULATIVE_CONTEXT_USES_CAPSULE_MENU');
-      const incumbentFull = fullTurnContext(capsule, input);
+      if (deliveredSemanticBoard !== null && deliveredSemanticBoard.revision !== capsule.revision) {
+        throw new RangeError('SEMANTIC_BOARD_REVISION_MISMATCH');
+      }
+      const incumbentContext = fullTurnContext(capsule, input);
+      const incumbentFull = deliveredSemanticBoard === null
+        ? incumbentContext
+        : { ...incumbentContext, semantic_board: deliveredSemanticBoard };
       const rendered = renderTurnContextProfile(incumbentFull, rendererProfile);
       optionReferences = rendered.optionRefs;
       if (rendererProfile.format !== 'structured') {
@@ -2019,6 +2043,8 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
           postTrimBytes: prose.postTrimBytes,
           features,
           removals: rendered.removals,
+          semanticBoardBytes: 0,
+          semanticBoardTruncated: [],
         });
         dependencies.onTurnContext?.(structuredClone(prose.context));
         return prose.context;
@@ -2044,6 +2070,33 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         const clearArrayField = (parent: Record<string, unknown>, key: string): void => {
           if (Array.isArray(parent[key])) parent[key] = [];
         };
+        const truncatedSemanticClasses: SemanticBoardTruncationClass[] = [];
+        const semanticBoard = objectAt(candidate, 'semantic_board');
+        const truncateSemanticClass = (factClass: SemanticBoardTruncationClass): void => {
+          if (semanticBoard === null) return;
+          switch (factClass) {
+            case 'light': {
+              const cells = objectAt(semanticBoard, 'cells');
+              if (cells !== null) delete cells['light'];
+              delete semanticBoard['light_sources'];
+              break;
+            }
+            case 'adjacency':
+              delete semanticBoard['adjacency_pairs'];
+              delete semanticBoard['reach_range_summaries'];
+              break;
+            case 'objects':
+              delete semanticBoard['objects'];
+              delete semanticBoard['doors'];
+              break;
+          }
+          truncatedSemanticClasses.push(factClass);
+          candidate['semantic_board_truncated'] = [...truncatedSemanticClasses];
+        };
+        for (const factClass of SEMANTIC_BOARD_TRUNCATION_CLASSES) {
+          if (renderBytes(candidate) <= turnContextMaximumBytes) break;
+          truncateSemanticClass(factClass);
+        }
         clearArrayField(candidate, 'applicable_skills');
         const knowledge = objectAt(candidate, 'actor_knowledge');
         if (knowledge !== null) clearArrayField(knowledge, 'actors');
@@ -2173,6 +2226,12 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
               known_failure_modes: { policy: sourceFailures['policy'] },
             }),
             renderer_attribution: source['renderer_attribution'],
+            ...(candidate['semantic_board'] === undefined ? {} : {
+              semantic_board: candidate['semantic_board'],
+            }),
+            ...(candidate['semantic_board_truncated'] === undefined ? {} : {
+              semantic_board_truncated: candidate['semantic_board_truncated'],
+            }),
             compact_fallback: true,
             truncated: true,
             next_cursor: null,
@@ -2302,11 +2361,24 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         preTrimBytes: featurePreTrimBytes,
         postTrimBytes,
       });
+      const semanticEvidenceContext = record(
+        context['granularity'] === 'full' ? context : full(),
+        'semantic board evidence context',
+      );
+      const semanticEvidenceBlock = semanticEvidenceContext['semantic_board'];
+      const semanticBoardBytes = semanticEvidenceBlock === undefined ? 0 : renderBytes(semanticEvidenceBlock);
+      const semanticTruncationValue = semanticEvidenceContext['semantic_board_truncated'];
+      const semanticBoardTruncated = Array.isArray(semanticTruncationValue)
+        ? semanticTruncationValue.filter((value): value is SemanticBoardTruncationClass =>
+            SEMANTIC_BOARD_TRUNCATION_CLASSES.some((factClass) => factClass === value))
+        : [];
       dependencies.onTurnContextRendered?.({
         preTrimBytes: featurePreTrimBytes,
         postTrimBytes,
         features,
         removals: rendered.removals,
+        semanticBoardBytes,
+        semanticBoardTruncated,
       });
       dependencies.onTurnContext?.(structuredClone(context));
       return context;

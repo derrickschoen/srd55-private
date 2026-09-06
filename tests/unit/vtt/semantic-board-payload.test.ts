@@ -2,12 +2,14 @@ import { describe, expect, it } from 'vitest';
 import type { PersistedCoordinatorState } from '../../../src/combat/coordinator';
 import { createEncounter } from '../../../src/combat/encounter';
 import { armorClass, worldObjectId } from '../../../src/combat/values';
-import { projectDmView } from '../../../src/combat/visibility';
+import { projectDmView, projectPlayerView } from '../../../src/combat/visibility';
 import type { WorldObject } from '../../../src/combat/world-objects';
-import { projectDmBoard } from '../../../src/vtt/encounter-projections';
+import { projectDmBoard, projectPlayerBoard } from '../../../src/vtt/encounter-projections';
 import {
+  SEMANTIC_BOARD_ENCODING_NOTE,
   semanticBoardJson,
   semanticBoardPayload,
+  semanticBoardTurnContextBlock,
 } from '../../../src/vtt/semantic-board-payload';
 import {
   deriveScreenshotFactSheet,
@@ -259,5 +261,21 @@ describe('semantic board payload', () => {
     expect(semanticBoardJson(projection)).toBe(
       JSON.stringify(JSON.parse(semanticBoardJson(projection)) as unknown),
     );
+  });
+
+  it('builds a provenance-stamped DM block and refuses a player projection at the delivery seam', () => {
+    const { state, hero, projection } = fixtureProjection();
+    const player = projectPlayerBoard(projectPlayerView(state, {
+      seatId: 'seat:semantic-hero',
+      combatantId: hero.id,
+    }), IDLE);
+
+    expect(semanticBoardTurnContextBlock(projection)).toMatchObject({
+      provenance: 'engine_fact',
+      encoding_note: SEMANTIC_BOARD_ENCODING_NOTE,
+      audience: 'dm',
+      revision: projection.encounter.revision,
+    });
+    expect(semanticBoardTurnContextBlock(player)).toBeNull();
   });
 });
