@@ -11608,3 +11608,21 @@ intel-leak lanes running, ComfyUI generating at all cores for the references lan
 drain; until then no further engine/renderer merge lands on top. dist for :4173 is being rebuilt under the gate lock.
 Next on this line: classic glyph increment for lastSeen (reads PlayerBoardProjection.lastSeen[].cell), dispatched
 after round 5b lands so it does not collide with the chrome work.
+
+## D558/D559 — reference-image tool now generates locally; first references produced; supervisor-verified (2026-09-05 23:23)
+
+Codex (session 01a0749e, stopped once correctly because its sandbox cannot write ~/comfyui/logs; I started the server
+and resumed it) delivered in the private research tree: tools/gen_reference.py --provider comfyui --model klein|krea
+(stdlib /prompt, /history, /view; starts/stops the server only if it started it), the LOG-row-before-success bug
+fixed (atomic write after PNG signature + dimension check), krea refused without --local-reference-only and its row
+carries "local reference only", README "Local generation (ComfyUI)" section, three new tests. VERIFIED BY ME:
+15/15 tests in my own run; MUTATION (append_log moved before the fetch) KILLED by
+test_failed_comfyui_fetch_keeps_log_identical_and_leaves_no_output, restored; no "claude -p" in either log; no key
+printing; both PNGs 512x512 in references/out/ and viewed: Klein (117.7 s) gives four large cool-grey slabs with
+charcoal seams and pale upper-left bevels, a clean silhouette template; Krea Q3 (574.9 s) gives a 3x3 hand-painted
+tile grid with warm/cool colour shifts, chipped corners and a hard cast shadow across the upper-left — visibly the
+more painterly of the two and much better than its smoke image, so the earlier "Krea is barely useful" reading was a
+one-sample judgement; the open owner question (heavier quant vs Klein-only) stands with that correction. I stopped
+the server afterwards (8188 closed). Stale pre-fix fireworks LOG row marked VOID by me. Observations files exist
+for both; per D558 an implementer of floor-stone-cracked receives those, not the images, and the seat that viewed
+them (this one, and the lane) does not implement that asset.
