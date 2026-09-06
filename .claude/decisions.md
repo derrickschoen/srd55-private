@@ -11552,3 +11552,16 @@ a no-op (`void MATERIAL_RESPONSES[...]`), so rule 2(a) is typed but not drawn. B
 round-4 panel majors, the terrain/blocked probe regressions, and a readability reformat with a byte-identical hash
 proof. Round-5 probe (primer v8, 24 states, medium+low) launched on the committed tree; the two specs run under my
 own lock slot after 5b.
+
+## SUPERVISOR — host reboot recovery (2026-09-05 21:36)
+
+Host rebooted (uptime -s 2026-09-05 21:29:27); every lane log stopped at 18:56. Killed: classic round 5b (codex had
+only read code; dnd-wt-classic5 clean at e5afcb98), intel-leak resume (partial unverified edits survived on disk: 7
+modified + 4 untracked files), ComfyUI install (19 GB of models on disk, no README/outputs yet), ghost gate
+(vitest phase had passed exit 0 with one serial-retried flake; Playwright phase lost), probe r5 and D541 seed-2
+probe (0 rows each; dist caches intact), owner's :4173 server, the tick cron. Recovery per the runbook: :4173
+restarted from main (serve.mjs rebuilds first); all three codex lanes resumed by session id with RESUME NOTES
+(intel-leak told to treat surviving edits as unverified drafts; ComfyUI told to hash-verify before re-downloading;
+first ComfyUI relaunch exited 1 for a missing --skip-git-repo-check, relaunched with it); ghost gate rerun in full
+via gate-wt4.sh; both probes relaunched from their scripts; tick cron re-armed. No mutation and gate share a
+worktree. Nothing landed or committed during the outage.
