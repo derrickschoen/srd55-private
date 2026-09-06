@@ -18,6 +18,7 @@ import {
   neutral,
   paletteRgb,
   ramp,
+  type PaletteRamp,
   type PaletteColorRef,
 } from '../../../src/assets/palette';
 import { STARTER_ART_INPUTS } from '../../../src/assets/starter-art-inputs';
@@ -355,6 +356,115 @@ function bustRegionCentroid(
   return position / count;
 }
 
+interface MaterialPixel {
+  readonly x: number;
+  readonly y: number;
+}
+
+function largestRampComponent(
+  bitmap: Bitmap,
+  rampName: PaletteRamp,
+): readonly MaterialPixel[] {
+  const colors = new Set(RAMP_STEPS.map((step) => colorKey(ramp(rampName, step))));
+  const visited = new Uint8Array(bitmap.width * bitmap.height);
+  let largest: readonly MaterialPixel[] = [];
+  for (let y = 0; y < bitmap.height; y += 1) {
+    for (let x = 0; x < bitmap.width; x += 1) {
+      const start = y * bitmap.width + x;
+      if (visited[start] === 1 || !colors.has(rgbaKey(bitmap.get(x, y))))
+        continue;
+      visited[start] = 1;
+      const queue = [start];
+      const component: MaterialPixel[] = [];
+      for (let cursor = 0; cursor < queue.length; cursor += 1) {
+        const index = queue[cursor]!;
+        const point = {
+          x: index % bitmap.width,
+          y: Math.floor(index / bitmap.width),
+        };
+        component.push(point);
+        for (const [dx, dy] of [
+          [-1, 0],
+          [1, 0],
+          [0, -1],
+          [0, 1],
+        ] as const) {
+          const neighbourX = point.x + dx;
+          const neighbourY = point.y + dy;
+          if (!bitmap.inside(neighbourX, neighbourY)) continue;
+          const neighbour = neighbourY * bitmap.width + neighbourX;
+          if (
+            visited[neighbour] === 1 ||
+            !colors.has(rgbaKey(bitmap.get(neighbourX, neighbourY)))
+          )
+            continue;
+          visited[neighbour] = 1;
+          queue.push(neighbour);
+        }
+      }
+      if (component.length > largest.length) largest = component;
+    }
+  }
+  expect(largest.length, `${rampName} largest material region`).toBeGreaterThan(
+    0,
+  );
+  return largest;
+}
+
+function linearChannel(value: number): number {
+  const channel = value / 255;
+  return channel <= 0.04045
+    ? channel / 12.92
+    : ((channel + 0.055) / 1.055) ** 2.4;
+}
+
+function relativeLuminance(color: Rgba): number {
+  return (
+    0.2126 * linearChannel(color.red) +
+    0.7152 * linearChannel(color.green) +
+    0.0722 * linearChannel(color.blue)
+  );
+}
+
+function median(values: readonly number[]): number {
+  const ordered = [...values].sort((left, right) => left - right);
+  const middle = ordered[Math.floor(ordered.length / 2)];
+  if (middle === undefined) throw new Error('Cannot take the median of no pixels.');
+  return middle;
+}
+
+function brighterChangedPixels(
+  brighter: Bitmap,
+  darker: Bitmap,
+  brightest: PaletteColorRef,
+): readonly MaterialPixel[] {
+  const brightKey = colorKey(brightest);
+  const points: MaterialPixel[] = [];
+  for (let y = 0; y < brighter.height; y += 1) {
+    for (let x = 0; x < brighter.width; x += 1) {
+      if (
+        rgbaKey(brighter.get(x, y)) === brightKey &&
+        rgbaKey(darker.get(x, y)) !== brightKey
+      )
+        points.push({ x, y });
+    }
+  }
+  return points;
+}
+
+function bitmapDifferencePixels(
+  rendered: Bitmap,
+  control: Bitmap,
+): readonly MaterialPixel[] {
+  const points: MaterialPixel[] = [];
+  for (let y = 0; y < rendered.height; y += 1)
+    for (let x = 0; x < rendered.width; x += 1) {
+      if (rgbaKey(rendered.get(x, y)) !== rgbaKey(control.get(x, y)))
+        points.push({ x, y });
+    }
+  return points;
+}
+
 function twoByUpscale(source: Bitmap): Bitmap {
   const result = new Bitmap(source.width * 2, source.height * 2);
   for (let y = 0; y < source.height; y += 1) {
@@ -398,6 +508,195 @@ describe('classic native-density and art-technique invariants', () => {
         rendered.data,
         `${response.material}:${mutation.specular}/${mutation.edge}/${mutation.mark}`,
       ).not.toEqual(baseline.data);
+    }
+  });
+
+  it('Part 2(a): puts the metal specular cluster and hard rim on the upper-left of the largest metal region', () => {
+    const recipe = tokenRecipe('fighter', 'party');
+    const response = MATERIAL_RESPONSES.metal;
+    const metal = paintRecipe(recipe);
+    const matte = paintRecipe(recipe, {
+      metal: { ...response, specular: 'none' },
+    });
+    const cluster = brighterChangedPixels(
+      metal,
+      matte,
+      ramp('metal', 6),
+    );
+    expect(
+      cluster.length,
+      'metal specular cluster must contain at least six brightest pixels',
+    ).toBeGreaterThanOrEqual(6);
+    const region = largestRampComponent(matte, 'metal');
+    const minX = Math.min(...region.map(({ x }) => x));
+    const minY = Math.min(...region.map(({ y }) => y));
+    const maxX = Math.max(...region.map(({ x }) => x));
+    const maxY = Math.max(...region.map(({ y }) => y));
+    const clusterX =
+      cluster.reduce((sum, { x }) => sum + x, 0) / cluster.length;
+    const clusterY =
+      cluster.reduce((sum, { y }) => sum + y, 0) / cluster.length;
+    expect(clusterX, 'metal cluster horizontal quadrant').toBeLessThan(
+      minX + (maxX - minX) / 2,
+    );
+    expect(clusterY, 'metal cluster vertical quadrant').toBeLessThan(
+      minY + (maxY - minY) / 2,
+    );
+    const materialMedian = median(
+      region.map(({ x, y }) => relativeLuminance(matte.get(x, y))),
+    );
+    const clusterLuminance =
+      cluster.reduce(
+        (sum, { x, y }) => sum + relativeLuminance(metal.get(x, y)),
+        0,
+      ) / cluster.length;
+    expect(
+      clusterLuminance - materialMedian,
+      'metal specular luminance above material median',
+    ).toBeGreaterThan(0.2);
+
+    const soft = paintRecipe(recipe, {
+      metal: { ...response, specular: 'none', edge: 'soft' },
+    });
+    const rim = brighterChangedPixels(matte, soft, ramp('metal', 5));
+    expect(rim.length, 'hard metal rim pixel count').toBeGreaterThan(20);
+    const rimPosition =
+      rim.reduce((sum, { x, y }) => sum + x + y, 0) / rim.length;
+    const regionPosition =
+      region.reduce((sum, { x, y }) => sum + x + y, 0) / region.length;
+    expect(rimPosition, 'hard metal rim faces the key light').toBeLessThan(
+      regionPosition,
+    );
+  });
+
+  it('Part 2(a): keeps stone and cloth matte while proving their forced-gloss controls can carry a cluster', () => {
+    const pillarRecipe = {
+      kind: 'terrain',
+      material: 'stone',
+      object: 'pillar',
+    } as const;
+    const stone = paintRecipe(pillarRecipe);
+    let stoneClusterPixels = 0;
+    const stoneBright = colorKey(ramp('stone', 6));
+    for (let y = 0; y < stone.height; y += 1)
+      for (let x = 0; x < stone.width; x += 1)
+        if (rgbaKey(stone.get(x, y)) === stoneBright) stoneClusterPixels += 1;
+    expect(
+      stoneClusterPixels,
+      'matte stone must contain zero brightest-cluster pixels',
+    ).toBe(0);
+    const glossyStone = paintRecipe(pillarRecipe, {
+      stone: { ...MATERIAL_RESPONSES.stone, specular: 'single-cluster' },
+    });
+    expect(
+      brighterChangedPixels(glossyStone, stone, ramp('stone', 6)).length,
+      'forced-gloss stone control must gain the six-pixel cluster',
+    ).toBeGreaterThanOrEqual(6);
+
+    const clothRecipe = tokenRecipe('wizard', 'party');
+    const cloth = paintRecipe(clothRecipe);
+    const glossyCloth = paintRecipe(clothRecipe, {
+      cloth: { ...MATERIAL_RESPONSES.cloth, specular: 'single-cluster' },
+    });
+    expect(
+      brighterChangedPixels(glossyCloth, cloth, ramp('cloth-cool', 6))
+        .length,
+      'forced-gloss cloth control must gain the six-pixel cluster',
+    ).toBeGreaterThanOrEqual(6);
+  });
+
+  it('Part 2(a): gives cloth broad multi-row low-contrast folds instead of a sparkle', () => {
+    const recipe = tokenRecipe('wizard', 'party');
+    const cloth = paintRecipe(recipe);
+    const control = paintRecipe(recipe, {
+      cloth: { ...MATERIAL_RESPONSES.cloth, mark: 'glyph' },
+    });
+    const foldRows = new Set<number>();
+    let foldPixels = 0;
+    const foldColors = new Set([
+      colorKey(ramp('cloth-cool', 2)),
+      colorKey(ramp('cloth-cool', 3)),
+      colorKey(ramp('cloth-cool', 4)),
+    ]);
+    for (let y = 0; y < cloth.height; y += 1) {
+      for (let x = 0; x < cloth.width; x += 1) {
+        if (
+          rgbaKey(cloth.get(x, y)) === rgbaKey(control.get(x, y)) ||
+          !foldColors.has(rgbaKey(cloth.get(x, y)))
+        )
+          continue;
+        foldRows.add(y);
+        foldPixels += 1;
+      }
+    }
+    expect(foldRows.size, 'cloth fold row count').toBeGreaterThanOrEqual(15);
+    expect(foldPixels, 'cloth fold pixel count').toBeGreaterThanOrEqual(100);
+    expect(
+      brighterChangedPixels(cloth, control, ramp('cloth-cool', 6)).length,
+      'cloth fold sparkle count',
+    ).toBe(0);
+  });
+
+  it('Part 2(a): gives matte stone, wood, and warm skin distinct large-scale mark grammars', () => {
+    const cases = [
+      {
+        name: 'stone mortar',
+        rendered: paintRecipe({
+          kind: 'floor',
+          material: 'stone',
+          variant: 0,
+        }),
+        control: paintRecipe(
+          { kind: 'floor', material: 'stone', variant: 0 },
+          { stone: { ...MATERIAL_RESPONSES.stone, mark: 'glyph' } },
+        ),
+        minimumPixels: 70,
+        minimumHorizontalSpan: 70,
+        minimumRows: 25,
+      },
+      {
+        name: 'wood grain',
+        rendered: paintRecipe({
+          kind: 'terrain',
+          material: 'wood',
+          object: 'crate',
+        }),
+        control: paintRecipe(
+          { kind: 'terrain', material: 'wood', object: 'crate' },
+          { wood: { ...MATERIAL_RESPONSES.wood, mark: 'glyph' } },
+        ),
+        minimumPixels: 100,
+        minimumHorizontalSpan: 50,
+        minimumRows: 15,
+      },
+      {
+        name: 'skin warm planes',
+        rendered: paintRecipe(tokenRecipe('brute', 'party')),
+        control: paintRecipe(tokenRecipe('brute', 'party'), {
+          skin: { ...MATERIAL_RESPONSES.skin, mark: 'glyph' },
+        }),
+        minimumPixels: 90,
+        minimumHorizontalSpan: 50,
+        minimumRows: 12,
+      },
+    ] as const;
+    for (const materialCase of cases) {
+      const points = bitmapDifferencePixels(
+        materialCase.rendered,
+        materialCase.control,
+      );
+      expect(points.length, `${materialCase.name} marked pixels`).toBeGreaterThanOrEqual(
+        materialCase.minimumPixels,
+      );
+      expect(
+        Math.max(...points.map(({ x }) => x)) -
+          Math.min(...points.map(({ x }) => x)),
+        `${materialCase.name} horizontal span`,
+      ).toBeGreaterThanOrEqual(materialCase.minimumHorizontalSpan);
+      expect(
+        new Set(points.map(({ y }) => y)).size,
+        `${materialCase.name} marked rows`,
+      ).toBeGreaterThanOrEqual(materialCase.minimumRows);
     }
   });
 

@@ -1,5 +1,5 @@
 /** Native 128-pixel procedural art for the classic board. */
-import { Bitmap, bayer2, type Ink } from './bitmap';
+import { Bitmap, bayer2, type Ink, type Rgba } from './bitmap';
 import {
   CELL_GLYPHS,
   cellGlyphOrigin,
@@ -10,7 +10,15 @@ import {
   LIGHT_GLYPH_ORIGIN,
   type LightGlyphKind,
 } from './light-glyphs';
-import { neutral, ramp, type PaletteRamp, type RampStep } from './palette';
+import {
+  NEUTRAL_STEPS,
+  RAMP_STEPS,
+  neutral,
+  paletteRgb,
+  ramp,
+  type PaletteRamp,
+  type RampStep,
+} from './palette';
 import { outlineRows, type PixelMark } from './pixel-mark';
 import { encodePng } from './png';
 
@@ -1610,88 +1618,241 @@ function recipeMaterialRamp(recipe: ArtRecipe): PaletteRamp | 'neutral' | null {
   }
 }
 
-function materialFinishInk(
-  response: MaterialResponse,
-  rampName: PaletteRamp | 'neutral',
-): Ink {
-  const step =
-    response.specular === 'single-cluster'
-      ? 6
-      : response.edge === 'hard'
-        ? 4
-        : 6;
+type MaterialRampName = PaletteRamp | 'neutral';
+
+interface MaterialRegion {
+  readonly pixels: readonly Point[];
+  readonly membership: ReadonlySet<number>;
+  readonly minX: number;
+  readonly minY: number;
+  readonly maxX: number;
+  readonly maxY: number;
+  readonly centroidX: number;
+  readonly centroidY: number;
+}
+
+function rgbKey(color: Pick<Rgba, 'red' | 'green' | 'blue'>): number {
+  return color.red * 65_536 + color.green * 256 + color.blue;
+}
+
+function materialColorKeys(rampName: MaterialRampName): ReadonlySet<number> {
+  const steps = rampName === 'neutral' ? NEUTRAL_STEPS : RAMP_STEPS;
+  return new Set(
+    steps.map((step) =>
+      rgbKey(
+        paletteRgb(
+          rampName === 'neutral'
+            ? neutral(step)
+            : ramp(rampName, step as RampStep),
+        ),
+      ),
+    ),
+  );
+}
+
+function materialRegionIndex(bitmap: Bitmap, x: number, y: number): number {
+  return y * bitmap.width + x;
+}
+
+function largestMaterialRegion(
+  bitmap: Bitmap,
+  rampName: MaterialRampName,
+): MaterialRegion | null {
+  const colors = materialColorKeys(rampName);
+  const visited = new Uint8Array(bitmap.width * bitmap.height);
+  let largest: readonly Point[] = [];
+  for (let y = 0; y < bitmap.height; y += 1) {
+    for (let x = 0; x < bitmap.width; x += 1) {
+      const start = materialRegionIndex(bitmap, x, y);
+      const pixel = bitmap.get(x, y);
+      if (
+        visited[start] === 1 ||
+        pixel.alpha !== 255 ||
+        !colors.has(rgbKey(pixel))
+      )
+        continue;
+      visited[start] = 1;
+      const queue = [start];
+      const component: Point[] = [];
+      for (let cursor = 0; cursor < queue.length; cursor += 1) {
+        const index = queue[cursor]!;
+        const point = {
+          x: index % bitmap.width,
+          y: Math.floor(index / bitmap.width),
+        };
+        component.push(point);
+        for (const [dx, dy] of [
+          [-1, 0],
+          [1, 0],
+          [0, -1],
+          [0, 1],
+        ] as const) {
+          const neighbourX = point.x + dx;
+          const neighbourY = point.y + dy;
+          if (!bitmap.inside(neighbourX, neighbourY)) continue;
+          const neighbour = materialRegionIndex(
+            bitmap,
+            neighbourX,
+            neighbourY,
+          );
+          if (visited[neighbour] === 1) continue;
+          const neighbourPixel = bitmap.get(neighbourX, neighbourY);
+          if (
+            neighbourPixel.alpha !== 255 ||
+            !colors.has(rgbKey(neighbourPixel))
+          )
+            continue;
+          visited[neighbour] = 1;
+          queue.push(neighbour);
+        }
+      }
+      if (component.length > largest.length) largest = component;
+    }
+  }
+  if (largest.length === 0) return null;
+  const membership = new Set(
+    largest.map(({ x, y }) => materialRegionIndex(bitmap, x, y)),
+  );
+  const minX = Math.min(...largest.map(({ x }) => x));
+  const minY = Math.min(...largest.map(({ y }) => y));
+  const maxX = Math.max(...largest.map(({ x }) => x));
+  const maxY = Math.max(...largest.map(({ y }) => y));
+  return {
+    pixels: largest,
+    membership,
+    minX,
+    minY,
+    maxX,
+    maxY,
+    centroidX:
+      largest.reduce((sum, { x }) => sum + x, 0) / largest.length,
+    centroidY:
+      largest.reduce((sum, { y }) => sum + y, 0) / largest.length,
+  };
+}
+
+function regionContains(
+  bitmap: Bitmap,
+  region: MaterialRegion,
+  x: number,
+  y: number,
+): boolean {
+  return (
+    bitmap.inside(x, y) &&
+    region.membership.has(materialRegionIndex(bitmap, x, y))
+  );
+}
+
+function materialInk(rampName: MaterialRampName, step: RampStep): Ink {
   return rampName === 'neutral' ? neutral(step) : ramp(rampName, step);
 }
 
-function opaqueFinishAnchor(bitmap: Bitmap): Point | null {
-  let best: { readonly point: Point; readonly score: number } | null = null;
-  for (let y = 3; y < bitmap.height - 3; y += 1) {
-    for (let x = 3; x < bitmap.width - 3; x += 1) {
-      let interior = true;
-      for (let dy = -2; dy <= 2 && interior; dy += 1) {
-        for (let dx = -2; dx <= 2; dx += 1) {
-          if (bitmap.get(x + dx, y + dy).alpha === 0) {
-            interior = false;
-            break;
-          }
-        }
-      }
-      if (!interior) continue;
-      const score = Math.abs(x - 47) + Math.abs(y - 62);
-      if (best === null || score < best.score)
-        best = { point: { x, y }, score };
-    }
+function regionAnchor(
+  bitmap: Bitmap,
+  region: MaterialRegion,
+  pattern: readonly Point[],
+  fractionX: number,
+  fractionY: number,
+): Point | null {
+  const targetX = region.minX + (region.maxX - region.minX) * fractionX;
+  const targetY = region.minY + (region.maxY - region.minY) * fractionY;
+  let best: { readonly point: Point; readonly distance: number } | null = null;
+  for (const point of region.pixels) {
+    if (
+      !pattern.every((offset) =>
+        regionContains(
+          bitmap,
+          region,
+          point.x + offset.x,
+          point.y + offset.y,
+        ),
+      )
+    )
+      continue;
+    const distance =
+      Math.abs(point.x - targetX) + Math.abs(point.y - targetY);
+    if (best === null || distance < best.distance)
+      best = { point, distance };
   }
   return best?.point ?? null;
+}
+
+function stampMaterialPattern(
+  bitmap: Bitmap,
+  region: MaterialRegion,
+  pattern: readonly Point[],
+  fractionX: number,
+  fractionY: number,
+  ink: Ink,
+): boolean {
+  const anchor = regionAnchor(
+    bitmap,
+    region,
+    pattern,
+    fractionX,
+    fractionY,
+  );
+  if (anchor === null) return false;
+  for (const point of pattern)
+    bitmap.put(anchor.x + point.x, anchor.y + point.y, ink);
+  return true;
 }
 
 const MATERIAL_MARK_PIXELS: Readonly<
   Record<MaterialResponse['mark'], readonly Point[]>
 > = {
   mortar: [
-    { x: -3, y: 0 },
-    { x: -2, y: 0 },
-    { x: -1, y: 0 },
-    { x: 0, y: 0 },
-    { x: 0, y: 1 },
-    { x: 0, y: 2 },
+    ...Array.from({ length: 19 }, (_, index) => ({ x: index - 9, y: 0 })),
+    ...Array.from({ length: 8 }, (_, index) => ({ x: 0, y: index + 1 })),
   ],
   grain: [
-    { x: -3, y: -1 },
-    { x: -2, y: -1 },
-    { x: -1, y: -1 },
-    { x: 1, y: 1 },
-    { x: 2, y: 1 },
-    { x: 3, y: 1 },
+    ...Array.from({ length: 21 }, (_, index) => ({
+      x: index - 10,
+      y: index < 13 ? -2 : -1,
+    })),
+    ...Array.from({ length: 17 }, (_, index) => ({
+      x: index - 8,
+      y: index < 6 ? 2 : 3,
+    })),
   ],
   fracture: [
-    { x: -2, y: -2 },
-    { x: -1, y: -1 },
-    { x: 0, y: 0 },
-    { x: 1, y: 1 },
+    ...Array.from({ length: 15 }, (_, index) => ({
+      x: index - 7,
+      y: Math.floor((index - 7) / 2),
+    })),
     { x: 2, y: 2 },
-    { x: 1, y: 2 },
+    { x: 3, y: 3 },
+    { x: 4, y: 4 },
+    { x: -3, y: -3 },
+    { x: -4, y: -2 },
   ],
   'specular-cluster': [
-    { x: -1, y: -1 },
-    { x: 0, y: -1 },
-    { x: -1, y: 0 },
+    { x: 0, y: 0 },
+    { x: 1, y: 0 },
+    { x: 2, y: 0 },
+    { x: 0, y: 1 },
+    { x: 1, y: 1 },
+    { x: 0, y: 2 },
   ],
   'broad-fold': [
-    { x: -3, y: -2 },
-    { x: -2, y: -1 },
-    { x: -1, y: 0 },
-    { x: 0, y: 1 },
-    { x: 1, y: 2 },
-    { x: 2, y: 2 },
+    ...Array.from({ length: 21 }, (_, index) => ({
+      x: index - 10,
+      y: Math.floor(index / 5) - 2,
+    })),
+    ...Array.from({ length: 21 }, (_, index) => ({
+      x: index - 10,
+      y: Math.floor(index / 5) - 1,
+    })),
+    ...Array.from({ length: 21 }, (_, index) => ({
+      x: index - 10,
+      y: Math.floor(index / 5),
+    })),
   ],
   'warm-plane': [
-    { x: -2, y: -1 },
-    { x: -1, y: -1 },
-    { x: 0, y: -1 },
-    { x: -2, y: 0 },
-    { x: -1, y: 0 },
-    { x: 0, y: 0 },
+    ...Array.from({ length: 10 }, (_, index) => ({ x: index - 5, y: -2 })),
+    ...Array.from({ length: 12 }, (_, index) => ({ x: index - 6, y: -1 })),
+    ...Array.from({ length: 12 }, (_, index) => ({ x: index - 6, y: 0 })),
+    ...Array.from({ length: 9 }, (_, index) => ({ x: index - 5, y: 1 })),
   ],
   joint: [
     { x: 0, y: -2 },
@@ -1733,31 +1894,132 @@ const MATERIAL_MARK_PIXELS: Readonly<
   ],
 };
 
+const MATERIAL_MARK_TARGETS = [
+  [0.28, 0.3],
+  [0.58, 0.55],
+  [0.73, 0.74],
+] as const;
+
+function paintBroadFolds(
+  bitmap: Bitmap,
+  region: MaterialRegion,
+  rampName: MaterialRampName,
+): void {
+  const footprint = MATERIAL_MARK_PIXELS['broad-fold'];
+  const highlight = materialInk(rampName, 4);
+  const mid = materialInk(rampName, 3);
+  const shadow = materialInk(rampName, 2);
+  const anchors = new Set<number>();
+  for (const [fractionX, fractionY] of MATERIAL_MARK_TARGETS) {
+    const anchor = regionAnchor(
+      bitmap,
+      region,
+      footprint,
+      fractionX,
+      fractionY,
+    );
+    if (anchor === null) continue;
+    const anchorKey = materialRegionIndex(bitmap, anchor.x, anchor.y);
+    if (anchors.has(anchorKey)) continue;
+    anchors.add(anchorKey);
+    for (let index = 0; index < 21; index += 1) {
+      const x = anchor.x + index - 10;
+      const y = anchor.y + Math.floor(index / 5) - 2;
+      bitmap.put(x, y, highlight);
+      bitmap.put(x, y + 1, mid);
+      bitmap.put(x, y + 2, shadow);
+    }
+  }
+}
+
+function paintRepeatedMaterialMarks(
+  bitmap: Bitmap,
+  region: MaterialRegion,
+  mark: Exclude<MaterialResponse['mark'], 'broad-fold' | 'specular-cluster'>,
+  rampName: MaterialRampName,
+  edge: MaterialResponse['edge'],
+): void {
+  const pattern = MATERIAL_MARK_PIXELS[mark];
+  const ink = materialInk(rampName, edge === 'soft' ? 3 : 2);
+  for (const [fractionX, fractionY] of MATERIAL_MARK_TARGETS)
+    stampMaterialPattern(
+      bitmap,
+      region,
+      pattern,
+      fractionX,
+      fractionY,
+      ink,
+    );
+}
+
+function paintHardLitRim(
+  bitmap: Bitmap,
+  region: MaterialRegion,
+  rampName: MaterialRampName,
+): void {
+  const candidates = new Set<number>();
+  for (const point of region.pixels) {
+    if (point.x + point.y > region.centroidX + region.centroidY) continue;
+    if (
+      !regionContains(bitmap, region, point.x - 1, point.y) ||
+      !regionContains(bitmap, region, point.x, point.y - 1)
+    )
+      candidates.add(materialRegionIndex(bitmap, point.x, point.y));
+  }
+  const ink = materialInk(rampName, 5);
+  for (const point of region.pixels) {
+    const index = materialRegionIndex(bitmap, point.x, point.y);
+    if (!candidates.has(index)) continue;
+    const connected = ([
+      [point.x - 1, point.y],
+      [point.x + 1, point.y],
+      [point.x, point.y - 1],
+      [point.x, point.y + 1],
+    ] as const).some(
+      ([x, y]) =>
+        bitmap.inside(x, y) &&
+        candidates.has(materialRegionIndex(bitmap, x, y)),
+    );
+    if (connected) bitmap.put(point.x, point.y, ink);
+  }
+}
+
+function paintSpecularCluster(
+  bitmap: Bitmap,
+  region: MaterialRegion,
+  rampName: MaterialRampName,
+): void {
+  stampMaterialPattern(
+    bitmap,
+    region,
+    MATERIAL_MARK_PIXELS['specular-cluster'],
+    0.28,
+    0.28,
+    materialInk(rampName, 6),
+  );
+}
+
 function applyMaterialResponse(
   bitmap: Bitmap,
   response: MaterialResponse,
-  rampName: PaletteRamp | 'neutral',
+  rampName: MaterialRampName,
 ): void {
-  const anchor = opaqueFinishAnchor(bitmap);
-  if (anchor === null) return;
-  const ink = materialFinishInk(response, rampName);
-  const mark = MATERIAL_MARK_PIXELS[response.mark];
-  const repetitions = response.edge === 'soft' ? 2 : 1;
-  for (let repetition = 0; repetition < repetitions; repetition += 1) {
-    for (const point of mark) {
-      const x = anchor.x + point.x;
-      const y = anchor.y + point.y + repetition;
-      if (bitmap.get(x, y).alpha > 0) bitmap.put(x, y, ink);
-    }
-  }
+  const region = largestMaterialRegion(bitmap, rampName);
+  if (region === null) return;
+  if (response.mark === 'broad-fold')
+    paintBroadFolds(bitmap, region, rampName);
+  else if (response.mark !== 'specular-cluster')
+    paintRepeatedMaterialMarks(
+      bitmap,
+      region,
+      response.mark,
+      rampName,
+      response.edge,
+    );
+  if (response.material === 'metal' && response.edge === 'hard')
+    paintHardLitRim(bitmap, region, rampName);
   if (response.specular === 'single-cluster') {
-    for (const point of [
-      { x: -2, y: -2 },
-      { x: -1, y: -2 },
-      { x: -2, y: -1 },
-    ]) {
-      bitmap.put(anchor.x + point.x, anchor.y + point.y, ink);
-    }
+    paintSpecularCluster(bitmap, region, rampName);
   }
 }
 
