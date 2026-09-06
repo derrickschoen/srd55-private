@@ -12538,3 +12538,26 @@ E1 run: merged claude/classic-r5 10e3892a into claude/e1-semantic (exit
 5d art; arms 'semantic' and 'both' launched at luna medium on the E1
 tree (run-e1-arms.sh); r5d's luna-medium run is the PNG control (same
 art, same primer, default probe path byte-identical).
+
+## SOL-HIGH PROBE BASELINE — first paired comprehension comparison (2026-09-06 16:53)
+
+probe24-sol-high (dnd-wt-probe-run at 67e98afa = r5c art, 128 px, primer
+v9, 24 states, seed 6203001, 240 rows, exit 0, median wall 12.9 s, max
+263.5 s) vs luna on the identical captures (r5c):
+
+class: sol-high / luna-medium / luna-low
+Q1 .961/.919/.891  Q2 .972/.916/.899  Q3 .985/.922/.908
+Q4 .790/.662/.544  Q5 .979/.902/.594  Q6 .958/.833/.708
+Q7 .910/.809/.896  Q8 .917/.958/.917  Q9 .783/.471/.377
+Q10 .852/.850/.808
+means .911 / .824 / .754; classes >= 0.9: 7 / 5 / 2. Strict gate: FAIL
+for all three (sol high misses Q4, Q9, Q10).
+
+Reading: on the same pixels sol high reads the board better on every
+class but Q8 and Q10, and the gap is largest exactly where luna fails
+(Q9 +.31, Q4 +.13, Q6 +.13, Q7 +.10). Even sol high does not clear Q9/Q4
+on the r5c art, which supports the 5d art fix over "more model". The
+sol-high probe is the reference ceiling for E1 (semantic board): if
+luna medium with engine facts reaches or beats .911, the comprehension
+gap is closed by facts, not by model size. Re-run sol high on 5d art
+once r5d is in (queued, same worktree pattern).
