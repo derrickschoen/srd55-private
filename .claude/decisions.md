@@ -12994,3 +12994,22 @@ and a required repro test. E5 replay: only 5 fixtures were replayable
 (the hard current-engine ones), accepted-after-one-correction 4/5;
 the 227 historical cases are recorded as counts/matches in the corpus
 files but not replayed; investigating whether that is by design.
+
+## Classic gate stopped and merge-test fix dispatched; S7 mini-A/B shape (2026-09-06 19:42)
+
+The failed gate's Playwright phase and its port-4720 server were killed
+by pid after two self-matching pkill attempts (unbracketed patterns
+matched my own shell, exit 144 twice; bracketed patterns and numeric
+pids were needed); log kept as gate-wt-classic5-FAIL-merge-tests.log;
+dnd-wt-classic5 tree clean at 599fbe79. Merge session 01a078fc resumed
+with the two test fixes required as derived invariants (light-encoding
+box/mark/colour from glyph metrics at 64 and 128, 64 reproducing
+main's numbers; classic-art-techniques restored to the 5d three-ridge
+invariant) and a run of every spec under tests/unit/assets and
+tests/unit/vtt before the next gate.
+
+S7 verificationBundle mini-A/B: 10/10 authorized, verification enabled
+on every row, offense [0,1,2,2,4,2,0,2,3,1] vs controls
+[1,1,2,2,3,2,0,2,3,1] (rooms 1 and 5 differ). Like A5's room-1
+deviation this is a 1-rep shape difference; a second rep is running for
+both before any reading. Per-room query telemetry recorded.
