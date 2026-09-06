@@ -11851,3 +11851,25 @@ tested; the exit 1s are not a verdict (memory: an empty gate log is killed
 or never-ran, not passed). Fix: merge main (4b8ee291, 41 commits incl. the
 ghost landing dda20902) into the lane, re-verify (tsc/focused/my mutants),
 then re-run the gate. Recorded before relaunch.
+
+## Intel-leak: main merged into the lane (pin conflict resolved by prediction), gate relaunched; probe r5b launched (2026-09-06 01:24)
+
+`git merge main` in dnd-wt-intel-leak: one conflict, the board-delivery pin
+test. Main (ghost/last-seen landing) normalises the policy string and state
+handle back to a baseline before checking the footprints pin 3ab18fe4/32180;
+the lane had moved the pin to aa841063/32000. Resolution (mine, mechanical):
+keep main's normalisation, anchor to the lane pin, and PREDICT the raw length
+as 32000 − 5 (policy string 28 vs 33 chars) = 31995. First run: 13/13 — the
+predicted values held, so the pin was not regenerated from output; the
+normalisation and the lane pin are mutually consistent. Comment updated to
+state the pin's provenance (intel-leak context before the D545 merge).
+Merge committed on claude/intel-leak; gate-wt4.sh wt-intel-leak relaunched
+(now with the D544 runners present). Full verification of the merged tree
+(tsc/focused/mutants) is what the gate + my harvest check will show.
+
+Probe r5b launched on dnd-wt-classic5 4a279a80 (5b + 5b.1 art, primer v9):
+same 24 states / seed / both luna efforts, generation g5b-round5b1-24, out
+dnd-wt-classic5/dnd-slim-runs/d536-probe24-r5b.jsonl, log .tmp/runs/
+d536-probe24-r5b.log. Its dist build/capture overlaps the gate's first
+minutes; the luna phase is network-bound. If the gate shows LOAD FLAKES in
+that window they are discarded per the quiet-machine rule, not re-pinned.
