@@ -12403,3 +12403,38 @@ finished before the ruling and is harvested as data only; no renderer
 change follows from it. Join-baseline (measurement of the existing
 Yjs+Trystero room) continues. Library adoption questions (Preact/React,
 PixiJS, Tiled/LDtk) are parked; the engine, AI DM and art lanes proceed.
+
+## FINDING AGAINST MY OWN HARVEST — 67e98afa ships a failing test; primer v9 no longer describes the obscured art (r5c confound); E3 + render-bench harvested (2026-09-06 16:11)
+
+While verifying E3 I ran tests/unit/tools/ai-dm-screenshot-probe.test.ts
+on a clean 67e98afa (dnd-wt-probe-run): 1 failed / 16 passed. The D525
+test requires the primer's glyph-family sentence to carry the legend's
+colour word; the chrome-scale commit changed the legend to "OBSCURED -
+COOL-BLUE DIAMOND VEIL" but primer v9 still says "obscurement is a dotted
+veil with a wave glyph". My harvest ran the four specs codex touched plus
+starter-art and the generator check, not the probe spec, so I committed
+a red test. Consequence: probe r5c asked luna to find obscured cells
+with a stale description, a plausible part of the Q9 miss (.471). Fix
+folded into the 5d lane by stop-then-resume (session 01a07847-6666, full
+UUID confirmed): primer v10 describing the current art, D525 green, and
+the Q9 false-positive breakdown (fog/dim vs plain). Lesson recorded: a
+harvest runs every spec that references a changed export or label, found
+by grep, not only the specs the implementer listed.
+
+E3 (01a07845-a75c) verified: 2 files +110/-1, no forbidden constructs,
+typecheck 0, its own tests pass (the one failure is the pre-existing
+D525 case above), supervisor mutant (checklist pushed over the 120-token
+budget) killed; committed claude/e3-checklist 5b5c2083. E3's run waits
+for 5d's primer v10 so the checklist rides on a correct primer.
+
+Render-bench (01a07847-2e4d, finished before D564): committed
+claude/render-bench 0c5aa3d1 (tool + fixture test, 2/2), results copied
+to ~/dnd-slim-runs/render-bench-results.{md,json}. Data: DOM rich board
+p95 input-to-paint 17-25 ms up to 32x24/300 tokens and 55 ms at
+64x64/300; Canvas light board 17 ms everywhere; no long tasks except one
+53 ms; heap <= 20 MiB DOM, 40 MiB Canvas. Nothing here justifies a
+renderer change; the question is parked anyway (D564).
+
+Forbidden-scan note: 'claude -p' hits in lane logs (15 in render-bench,
+2 in e3) are codex cat/rg output of .claude/decisions.md, not
+invocations; every exec line was checked.
