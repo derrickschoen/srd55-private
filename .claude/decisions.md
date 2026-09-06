@@ -11757,3 +11757,20 @@ Classic 5b lane resumed 00:22 (session 01a07351, sol high, brief
 .tmp/runs/log-classic5b-hold-cleared.log): hold cleared for the locked build,
 both 4660 specs and the captures; plus a read-only explanation of the
 capture-size change and options to cap it (no implementation).
+
+## FINDING AGAINST MY OWN DISPATCH — 5b resume with a short session id started a fresh session that loaded the forbidden codex-side skill; killed in ~40 s, re-dispatched (2026-09-06 00:24)
+
+My 00:22 resume used `resume 01a07351` (8-char prefix) and a brief that said
+"same COMMON RULES" by reference. codex-cli is now 0.153.4 (was 0.148.0); it
+treated the prefix as an unknown thread name and printed a NEW session id
+(01a074f4…, rollout has no round-5b brief text). Without lane context the
+model announced "I'm using the project's Claude-consensus workflow" and read
+~/.codex/skills/claude-consensus/SKILL.md (which prescribes `claude -p
+--model sonnet`). Killed before any exec beyond reads (the only exec was a
+sed of the skill file and .claude files; no claude invocation; worktree still
+88 changed paths). Log kept as .tmp/runs/log-classic5b-hold-cleared-KILLED-
+skill.log. Re-dispatched 00:24 with the FULL COMMON RULES header restated
+(explicitly: no claude, ~/.codex skills incl. claude-consensus do not apply)
+and the full UUID; the new log prints session id 01a07351-2240-74e1-8600-
+60f7edf52c52, i.e. the real resume. Rule added to memory: full UUID + verify
+the printed session id + restate the header in full on every resume.
