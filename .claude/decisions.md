@@ -12752,3 +12752,40 @@ re-run semantic and both arms on 49d782bb (second clean run worktree)
 to confirm the semantic-only path recovers Q5/Q9 without moving 'both';
 then E1c wires the payload into the live DM turn context behind a
 renderer flag so the arena measures DM quality with facts.
+
+## PROBE R5D: 5d art beats round 4 (seed-2 confirmation launched); sol high with facts .999; E1b facts-only .995 (2026-09-06 18:10)
+
+r5d (10e3892a, primer v10, 128 px, 24 states, seed 6203001, 480 rows):
+luna medium per class (r4 / r5c / r5d): Q1 .887/.919/.892, Q2
+.903/.916/.937, Q3 .899/.922/.901, Q4 .713/.662/.775, Q5
+.932/.902/.909, Q6 .792/.833/.792, Q7 .753/.809/.813, Q8
+.875/.958/.875, Q9 .693/.471/.801, Q10 .855/.850/.915. Means .830 /
+.824 / .861; passes 2 / 5 / 4. luna low means .757 / .754 / .839 (Q4
++.20, Q6 +.21, Q9 +.28 over round 4). Strict gate still FAIL on pixels
+alone (Q4 .775, Q6 .792, Q7 .813, Q8 .875, Q9 .801).
+
+Reading: on pixels, 5d is the first art at or above round 4 on the mean
+and on 8/10 classes at medium (Q5 -.023 and Q8 0.000 within their
+intervals), with Q9 finally repaired (.801 vs .693; sol high on r5c
+pixels: .783). Landing rule met on the mean; D565 fluke guard applies:
+seed-6203002 confirmation at luna medium launched on dnd-wt-classic5
+(run-d562-probe24-r5d-seed2.sh). If it holds, classic lands (5 rounds:
+e5afcb98 r5, 5b, 5b.1, 2ba531a6 capture option, 67e98afa chrome scale,
+10e3892a 5d) after a full gate and mini-A/B (renderer/chrome changes).
+
+Sol high + facts (E1 'both' arm, seed 6203001): Q1 .994, Q2-Q10 1.000;
+mean .999; PASS. No trade: the semantic board lifts sol high from .911
+to .999 while lifting luna medium from .824 to .984.
+
+E1b semantic-only (49d782bb, luna medium, seed 6203001): Q4 .935 ->
+1.000, Q5 .662 -> .992, Q9 .870 -> 1.000, all else unchanged; mean .995;
+strict PASS. The encoding fix worked as diagnosed. E1b 'both' arm still
+running; then second-seed replication of E1b per D565.
+
+E1c (01a078aa) reported ready: semanticBoard flag, DM-only
+semantic_board block revision-matched, budget truncation light ->
+adjacency -> objects with declaration, telemetry, byte-identity kept
+(the pin on that lineage is 32,120 B: the E1 branches descend from
+claude/classic-r5, which predates the intel-leak merge, so they carry
+neither the intel-leak fix nor the schema generator; main must be
+merged into them before any landing). My spec run in progress.
