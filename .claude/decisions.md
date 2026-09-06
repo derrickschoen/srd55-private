@@ -12593,3 +12593,34 @@ profile + consequenceCards:true (JSON saved as
 ~/dnd-slim-runs/e2-profile-cards.json), brutal 10x1, seed 6203001, luna
 medium, full intel, out ~/dnd-slim-runs/miniab-e2-cards.jsonl. Control
 = the era controls / luna-medium intel-leak run.
+
+## E1 SEMANTIC ARM: luna medium with engine facts beats sol high on pixels; E2 mini-A/B sane (2026-09-06 17:12)
+
+E1 arm 'semantic' (dnd-wt-e1-semantic 66b5843a = E1 + 5d art/primer v10,
+luna medium, 24 states, seed 6203001, NO image, 240 rows): per class
+(E1-semantic / r5c PNG luna medium / sol-high PNG): Q1 .955/.919/.961,
+Q2 1.000/.916/.972, Q3 1.000/.922/.985, Q4 .935/.662/.790, Q5
+.662/.902/.979, Q6 1.000/.833/.958, Q7 1.000/.809/.910, Q8
+1.000/.958/.917, Q9 .870/.471/.783, Q10 1.000/.850/.852. Means .942 /
+.824 / .911; classes >= 0.9: 8 / 5 / 7. Strict gate still FAIL on two
+classes: Q5 light collapsed (.662, worse than pixels) and Q9 at .870.
+
+Reading: engine facts close the comprehension gap and overshoot the
+sol-high pixel ceiling on eight classes. Q5's drop is an encoding
+problem in the payload, not a model problem: light cells are emitted as
+run-length triples [col,row,endCol] inside per-level lists and the model
+misreads runs (the same triple encoding appears in difficult_terrain
+where it scored .935, so the interaction with three light levels is
+the suspect); Q9 obscurement is split light/heavy + fog lists. Follow-up
+lane (after the 'both' arm reads out): explicit per-cell light list or
+a documented run notation, one level per line, and a single
+'obscured' union list; re-run the semantic arm. Arm 'both' (image +
+semantic, facts authoritative) running.
+
+E2 mini-A/B (dnd-wt-e2-cards a787e8fc, consequenceCards profile, luna
+medium, brutal 10x1, seed 6203001): exit 0, 10/10 planned, round-1
+offense [1,1,2,2,3,2,0,2,3,1] = era controls exactly; contrast pairs
+present on 8/10 rows with seeded A/B order recorded. Sane; promoted to
+the 30-row stage: candidate (cards) and control (default profile) arms,
+10 rooms x 3 reps, luna medium, launched (run-e2-30rows.sh); blinded
+packet follows.
