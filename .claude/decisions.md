@@ -12789,3 +12789,30 @@ adjacency -> objects with declaration, telemetry, byte-identity kept
 claude/classic-r5, which predates the intel-leak merge, so they carry
 neither the intel-leak fix nor the schema generator; main must be
 merged into them before any landing). My spec run in progress.
+
+## HARVESTS — E1c committed; E4 pin restored (verifying); E1b 'both' .995; E2 30 rows in (2026-09-06 18:25)
+
+E1c (01a078aa): 9 files +267/-15; verified: no forbidden constructs,
+typecheck 0, 143/143 incl. the board-delivery pin of that lineage;
+supervisor mutant (truncation order reversed) killed 1/113; committed
+claude/e1c-dm-facts dd237874. Ready for an arena arm (semanticBoard
+profile) once main is merged into the E1 lineage.
+
+E4 pin fix (resumed 01a07845-f587): default path restored
+(SUGGESTED_PLAN_MAX_BYTES, advisory text, legacy applicability and
+adverts when playAdverts is off; stricter applicability and the
+unqueued draft only when on); my run: typecheck 0, board-delivery pin +
+renderer-profile + handler 139/139. Mutant and commit next.
+
+E1b 'both' (49d782bb, seed 6203001): Q9 .908 -> 1.000, Q4 .994 -> .999,
+Q5 .988 -> .992; mean .995; strict PASS. Both E1b arms now .995. Seed-2
+replication of both arms launched (run-e1b-seed2.sh).
+
+E2 30-row arms (luna medium, brutal 10x3, seed 6203001): cards 30/30
+authorized, control 30/30; round-1 offense total 51 vs 51 (mean 1.7
+both): the cards do not change how often the DM attacks. Contrast
+pairs: 43 shown; in 31 the chosen option was one of the pair (A 11, B
+20), in 12 neither. Display order is seeded and recorded, so the
+blinded panel can test order-conditioned effects. Next: build the
+blinded 3/3/2/2 packet from the two jsonls with tools/ai-dm-rerun-packet
+and run the judges.
