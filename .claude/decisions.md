@@ -12701,3 +12701,30 @@ the worktree), then semantic/both re-run and a second-seed confirmation;
 (4) art rounds continue for the PNG path (r5d in flight) since the live
 DM still sees the image and the 'both' arm uses it; (5) sol high is
 re-probed on the final candidate to report the trade.
+
+## E1 'BOTH' ARM: luna medium PASSES the strict comprehension gate for the first time (.984, 10/10); replication launched; E4 pin finding (2026-09-06 17:24)
+
+E1 arm 'both' (image + compact semantic facts, facts authoritative; E1
+tree 66b5843a = 5d art + primer v10; luna medium; 24 states; seed
+6203001; 240 rows): Q1 .955, Q2 1.000, Q3 1.000, Q4 .994, Q5 .988, Q6
+1.000, Q7 1.000, Q8 1.000, Q9 .908, Q10 1.000; mean .984; strict all
+classes >= 0.9: PASS. Compared on the same states: semantic-only .942
+(8 passes), PNG-only luna medium .824 (5), sol high PNG-only .911 (7).
+The image repairs exactly the two classes the payload encoding hurt
+(Q5 .662 -> .988, Q9 .870 -> .908) while facts carry the rest.
+
+Under D565 this is the candidate; fluke guard in flight on a clean
+detached worktree dnd-wt-e1-run (66b5843a): (a) the same arm on seed
+6203002 at luna medium; (b) the same arm at sol high on seed 6203001 for
+the trade report (does giving sol the facts help or hurt it). E1b
+(encoding fix for the semantic-only path, session 01a0789b) proceeds in
+parallel in the E1 worktree; it must not regress the 'both' numbers.
+
+E4 (01a07845-f587): FINDING — my spec run (301 tests) fails the board-
+delivery pin with playAdverts OFF: raw turn context 31,938 B vs the
+pinned 31,995 (codex removed the suggested-plan advisory text and its
+byte budget from the default path). Flag-off byte identity is a hard
+requirement of every lane brief; codex's own verification did not
+include the pin spec. Resumed the session with the finding: restore the
+default rendering, confine adverts to the flag-on path, re-run the pin
+spec. E4 is not committed.
