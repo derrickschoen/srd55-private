@@ -12210,3 +12210,24 @@ logs first, critique each seed with evidence, add >= 6 of its own, rank
 by gain per cost with a cheapest experiment for the top 6, and list what
 must not change (engine authority, proposer-only boundary, D405.3, D406).
 Supervisor synthesis to the owner after review.
+
+## D561 VERDICT — raster scale explains the round-5 regression except Q9 (obscured) (2026-09-06 13:38)
+
+d561-probe24-r5b-64 (same 24 states, seed, art 4a279a80, primer v9,
+capture 64 px, 480 rows, exit 0) vs r5b at 128 px vs round 4:
+luna medium means: r4 .830 / 128 px .731 / 64 px .816; classes >= 0.9:
+2 / 0 / 5. Per class 64-vs-128: Q7 +.215, Q6 +.166, Q3 +.151, Q1 +.090,
+Q5 +.058, Q4 +.045, Q2 +.042, Q8 +.042, Q9 +.029, Q10 +.012. Against
+round 4 the 64-px capture is within +-0.07 on every class except Q9
+(obscured): .350 vs .693 (128 px: .321).
+luna low means: r4 .757 / 128 px .707 / 64 px .785; passes 3 / 1 / 4; Q9
+.300 vs .505.
+
+Reading: the 4x raster with fixed-size chrome caused the across-the-board
+loss; at round-4 scale the 5b.1 art is at or slightly above round 4 on
+nine classes. Q9 is NOT a scale effect: obscured cells are read as
+"fact not present" at both scales, so round 5 changed how obscured cells
+render (or how they contrast with fog/dim) in a way luna no longer sees.
+D562 applies to the scale part; Q9 needs an art-side diagnosis and fix in
+the same lane before the re-probe (a re-probe cannot reach round 4 with
+Q9 at .35). Dispatching now.
