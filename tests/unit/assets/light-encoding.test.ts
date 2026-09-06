@@ -5,7 +5,12 @@
  * drawing, never a pin refreshed from output.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { BOARD_GLYPH_MODES, type BoardGlyphMode } from '../../../src/assets/board-glyphs';
+import {
+  BOARD_GLYPH_MODES,
+  CELL_GLYPH_BASE_TILE_SIZE,
+  cellGlyphScale,
+  type BoardGlyphMode,
+} from '../../../src/assets/board-glyphs';
 import {
   LIGHT_GLYPH_BY_LEVEL,
   LIGHT_LEVELS,
@@ -25,6 +30,7 @@ import {
   type OverlayEffect,
 } from '../../../src/assets/pixel-art';
 import { combatantId } from '../../../src/combat/values';
+import { CHROME_TILE_PX } from '../../../src/vtt/board-chrome';
 import { renderBoard } from '../../../src/vtt/encounter-app';
 import { encounterArtForBoard } from '../../../src/vtt/encounter-art-selection';
 import {
@@ -184,39 +190,77 @@ describe('D525 light glyphs: pixel invariants', () => {
     }
   });
 
-  it('each glyph tile carries exactly one mark in the top-left 9×9 box and nothing anywhere else', () => {
-    for (const level of LIGHT_LEVELS) {
-      const effect = LIGHT_GLYPH_BY_LEVEL[level];
-      const tile = overlay(effect);
-      const glyph = lightGlyphForLevel(level);
-      const ring = outlineRows(glyph.rows);
-      const boxStart = LIGHT_GLYPH_ORIGIN - 1;
-      const boxEnd = LIGHT_GLYPH_ORIGIN + LIGHT_GLYPH_SIZE; // inclusive
-      let inkPixels = 0;
-      for (let y = 0; y < TILE_SIZE; y += 1) {
-        for (let x = 0; x < TILE_SIZE; x += 1) {
-          const pixel = tile.get(x, y);
-          const inBox = x >= boxStart && x <= boxEnd && y >= boxStart && y <= boxEnd;
-          if (!inBox) {
-            expect(pixel.alpha, `${effect} outside box at ${String(x)},${String(y)}`).toBe(0);
-            continue;
+  it('each glyph tile carries exactly one scaled top-left mark and nothing anywhere else at 64 and 128 px', () => {
+    for (const tilePx of [CELL_GLYPH_BASE_TILE_SIZE, CHROME_TILE_PX] as const) {
+      const scale = cellGlyphScale(tilePx);
+      const sourcePixelsPerCssPixel = TILE_SIZE / tilePx;
+      expect(Number.isSafeInteger(sourcePixelsPerCssPixel)).toBe(true);
+      const origin = LIGHT_GLYPH_ORIGIN * scale;
+      const glyphSize = LIGHT_GLYPH_SIZE * scale;
+      const boxStart = origin - scale;
+      const boxEnd = origin + glyphSize + scale - 1;
+      expect({ tilePx, scale, origin, glyphSize, boxStart, boxEnd }).toEqual(
+        tilePx === 64
+          ? { tilePx: 64, scale: 1, origin: 2, glyphSize: 7, boxStart: 1, boxEnd: 9 }
+          : { tilePx: 128, scale: 2, origin: 4, glyphSize: 14, boxStart: 2, boxEnd: 19 },
+      );
+
+      for (const level of LIGHT_LEVELS) {
+        const effect = LIGHT_GLYPH_BY_LEVEL[level];
+        const tile = overlay(effect);
+        const glyph = lightGlyphForLevel(level);
+        const ring = outlineRows(glyph.rows);
+        let inkPixels = 0;
+        for (let y = 0; y < tilePx; y += 1) {
+          for (let x = 0; x < tilePx; x += 1) {
+            const sourceX = x * sourcePixelsPerCssPixel;
+            const sourceY = y * sourcePixelsPerCssPixel;
+            const pixel = tile.get(sourceX, sourceY);
+            for (let dy = 0; dy < sourcePixelsPerCssPixel; dy += 1) {
+              for (let dx = 0; dx < sourcePixelsPerCssPixel; dx += 1) {
+                expect(
+                  tile.get(sourceX + dx, sourceY + dy),
+                  `${effect} ${String(tilePx)}px source block at ${String(x)},${String(y)}`,
+                ).toEqual(pixel);
+              }
+            }
+            const inBox = x >= boxStart && x <= boxEnd && y >= boxStart && y <= boxEnd;
+            if (!inBox) {
+              expect(
+                pixel.alpha,
+                `${effect} ${String(tilePx)}px outside box at ${String(x)},${String(y)}`,
+              ).toBe(0);
+              continue;
+            }
+            const glyphX = Math.floor((x - origin) / scale);
+            const glyphY = Math.floor((y - origin) / scale);
+            const ringX = Math.floor((x - boxStart) / scale);
+            const ringY = Math.floor((y - boxStart) / scale);
+            const isInk = glyph.rows[glyphY]?.[glyphX] === '#';
+            const isRing = !isInk && ring[ringY]?.[ringX] === '#';
+            const expected = isInk
+              ? paletteRgb(glyph.ink)
+              : isRing
+                ? paletteRgb(glyph.outline)
+                : null;
+            if (expected === null) {
+              expect(
+                pixel.alpha,
+                `${effect} ${String(tilePx)}px gap at ${String(x)},${String(y)}`,
+              ).toBe(0);
+            } else {
+              expect(
+                { red: pixel.red, green: pixel.green, blue: pixel.blue, alpha: pixel.alpha },
+                `${effect} ${String(tilePx)}px at ${String(x)},${String(y)}`,
+              ).toEqual({ ...expected, alpha: 255 });
+            }
+            if (isInk) inkPixels += 1;
           }
-          const gx = x - LIGHT_GLYPH_ORIGIN;
-          const gy = y - LIGHT_GLYPH_ORIGIN;
-          const isInk = glyph.rows[gy]?.[gx] === '#';
-          const isRing = ring[gy + 1]?.[gx + 1] === '#';
-          const expected = isInk ? paletteRgb(glyph.ink) : isRing ? paletteRgb(glyph.outline) : null;
-          if (expected === null) {
-            expect(pixel.alpha, `${effect} gap at ${String(x)},${String(y)}`).toBe(0);
-          } else {
-            expect({ red: pixel.red, green: pixel.green, blue: pixel.blue, alpha: pixel.alpha }, `${effect} at ${String(x)},${String(y)}`)
-              .toEqual({ ...expected, alpha: 255 });
-          }
-          if (isInk) inkPixels += 1;
         }
+        const baseInkPixels = glyph.rows.join('').split('#').length - 1;
+        expect(inkPixels).toBe(baseInkPixels * scale * scale);
+        expect(baseInkPixels).toBeGreaterThan(8);
       }
-      expect(inkPixels).toBe(glyph.rows.join('').split('#').length - 1);
-      expect(inkPixels).toBeGreaterThan(8);
     }
     const distinct = new Set(LIGHT_GLYPH_EFFECTS.map((effect) => Buffer.from(overlay(effect).data).toString('base64')));
     expect(distinct.size).toBe(3);
