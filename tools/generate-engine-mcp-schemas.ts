@@ -1,0 +1,21 @@
+import { writeFileSync } from 'node:fs';
+import { z } from 'zod';
+import {
+  engineSchemaInternals,
+  proposalContractRefusalCodeSchema,
+} from '../src/vtt/mcp/schemas';
+
+function writeSchema(path: string, schema: z.ZodType<unknown>): void {
+  const generated = z.toJSONSchema(schema, {
+    target: 'draft-2020-12',
+    io: 'output',
+    reused: 'ref',
+  });
+  writeFileSync(path, `${JSON.stringify(generated, null, 2)}\n`);
+}
+
+writeSchema('docs/specs/engine-turn-context.schema.json', engineSchemaInternals.turnContextOutput);
+writeSchema(
+  'docs/specs/engine-proposal-contract-refusal-code.schema.json',
+  proposalContractRefusalCodeSchema,
+);

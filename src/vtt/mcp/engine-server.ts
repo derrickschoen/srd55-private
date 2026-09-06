@@ -36,6 +36,7 @@ import {
   engineOptionId,
   enginePlayToken,
   type EngineOfferableOption,
+  type EngineOptionId,
   type EngineOptionMetric,
   type EngineOverrideJustification,
 } from '../turn-proposal';
@@ -82,6 +83,7 @@ import type { ReactionGuidanceDeclaration, ReactionTriggerGuidance } from '../re
 import { diffTurnContextValues } from '../dm-bridge/projection-transport';
 import {
   DEFAULT_RENDERER_PROFILE,
+  bindIntelToShownOptions,
   extractCircumstanceFeatures,
   renderBytes,
   renderProseTurnContext,
@@ -114,6 +116,7 @@ import {
   ENGINE_ACTOR_KNOWLEDGE_POLICY,
   ENGINE_LEGENDARY_WINDOWS_POLICY,
   ENGINE_MINIMAL_SUBMIT_ROUND_PROPOSALS_INPUT_SCHEMA,
+  PROPOSAL_CONTRACT_REFUSAL_CODES,
   ENGINE_REACTION_SPEND_HOLD_POLICY,
   ENGINE_RECOVERY_CAPABILITY_POLICY,
   ENGINE_STATE_SUMMARY_POLICY,
@@ -367,8 +370,10 @@ function promptRequest(capsule: EngineStateCapsule): Readonly<Record<string, unk
     } : {}),
   };
 }
+export type ProposalContractRefusalCode = (typeof PROPOSAL_CONTRACT_REFUSAL_CODES)[number];
+
 interface ProposalContractRefusal {
-  readonly code: 'CORRECTION_FALLBACK_MUST_BE_NULL' | 'INITIAL_FALLBACK_REQUIRED' | 'PRIMARY_FALLBACK_IDENTICAL';
+  readonly code: ProposalContractRefusalCode;
   readonly summary: string;
   readonly attempt: 'primary' | 'fallback';
 }
@@ -398,6 +403,29 @@ function proposalContractRefusal(
     };
   }
   return null;
+}
+
+function shownOptionRefusals(
+  proposal: EngineTurnProposal,
+  shownOptionIds: ReadonlySet<EngineOptionId> | undefined,
+): readonly ProposalContractRefusal[] {
+  if (shownOptionIds === undefined) return [];
+  return ([
+    ['primary', proposal.primaryOptionId],
+    ['fallback', proposal.fallbackOptionId],
+  ] as const).flatMap(([attempt, optionId]) =>
+    optionId === null || shownOptionIds.has(optionId) ? [] : [{
+      code: 'OPTION_NOT_SHOWN',
+      summary: `${attempt}_option_id must identify an option shown for this actor in the rendered turn context.`,
+      attempt,
+    }]);
+}
+
+function shownOptionRefusal(
+  proposal: EngineTurnProposal,
+  shownOptionIds: ReadonlySet<EngineOptionId> | undefined,
+): ProposalContractRefusal | null {
+  return shownOptionRefusals(proposal, shownOptionIds)[0] ?? null;
 }
 
 interface LauncherRoundSubmissionBinding {
@@ -762,6 +790,10 @@ function externalOptionSlot(
 function tacticalOptions(state: EncounterState, queries: EngineQueryPort, capsule: EngineStateCapsule, actorId: CombatantId, includeExpectations: boolean): readonly Readonly<Record<string, unknown>>[] {
   const projected = capsule.projection.combatants.find((candidate) => candidate.id === actorId);
   if (projected === undefined) return [];
+  // The byte-cap pruner removes from the tail. Keep immediately usable,
+  // information-rich offense first; movement/defense follows, with End Turn
+  // last. This makes truncation deterministic without promoting an unavailable
+  // attack over a legal defensive turn.
   const informationRank = (option: EngineOfferableOption): number => {
     const main = option.actionSlots.find((slot) => slot.slot === 'main')?.use;
     if (main === undefined) return 6;
@@ -1276,6 +1308,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
   // Profile and measure the complete incumbent context before the one authoritative cap pass.
   const fullContextAssemblyMaximumBytes = Number.MAX_SAFE_INTEGER;
   let optionReferences: ReadonlyMap<string, string> = new Map();
+  let shownOptionIdsByActor: ReadonlyMap<string, ReadonlySet<EngineOptionId>> | null = null;
   const idempotency = new Map<string, { readonly bytes: string; readonly result: unknown }>();
   let acceptedRoundDecision = dependencies.roundDecisionAlreadyAccepted ?? false;
   let submittedUiFeedback = dependencies.uiFeedbackAlreadySubmitted ?? false;
@@ -2067,10 +2100,17 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
           features,
           removals: rendered.removals,
         });
+        shownOptionIdsByActor = prose.shownOptionIdsByActor;
         dependencies.onTurnContext?.(structuredClone(prose.context));
         return prose.context;
       }
       const preTrimBytes = renderBytes(rendered.context);
+      const objectAt = (parent: Record<string, unknown>, key: string): Record<string, unknown> | null => {
+        const value = parent[key];
+        return typeof value === 'object' && value !== null && !Array.isArray(value)
+          ? value as Record<string, unknown>
+          : null;
+      };
       const trimToLimit = (source: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> => {
         const sourceBytes = source === rendered.context ? preTrimBytes : renderBytes(source);
         if (sourceBytes <= turnContextMaximumBytes) return source;
@@ -2082,15 +2122,61 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
           typeof actor === 'object' && actor !== null && !Array.isArray(actor));
         const arrays = (key: 'options' | 'threats', actor: Record<string, unknown>): unknown[] =>
           Array.isArray(actor[key]) ? actor[key] as unknown[] : [];
-        const objectAt = (parent: Record<string, unknown>, key: string): Record<string, unknown> | null => {
-          const value = parent[key];
-          return typeof value === 'object' && value !== null && !Array.isArray(value)
-            ? value as Record<string, unknown>
-            : null;
-        };
         const clearArrayField = (parent: Record<string, unknown>, key: string): void => {
           if (Array.isArray(parent[key])) parent[key] = [];
         };
+        if (sourceBytes > turnContextMaximumBytes) {
+          for (const actor of actorRecords) {
+            const options = arrays('options', actor);
+            const intel = objectAt(actor, 'intel');
+            const opportunity = objectAt(intel ?? {}, 'opportunity_cost');
+            const defaultId = opportunity?.['engine_default_option_id'];
+            const optionId = (value: unknown): unknown => {
+              const option = objectAt({ option: value }, 'option');
+              return option?.['option_id'] ?? option?.['option_ref'];
+            };
+            const defaultOption = options.find((value) => optionId(value) === defaultId);
+            const ranked = [
+              ...(defaultOption === undefined ? [] : [defaultOption]),
+              ...options.filter((value) => value !== defaultOption),
+            ];
+            // The engine-ranked default leads, followed by the established
+            // offense-first tactical order. Pruning from the tail therefore
+            // retains the chosen objective and the strongest independent
+            // alternative rather than arbitrary serialization order.
+            const usableOffenseKinds = new Set(['attack', 'cast_spell', 'use_action']);
+            const survivalKinds = new Set(['dash', 'dodge', 'end_turn']);
+            const hasUsableOffense = ranked.some((value) => {
+              const option = objectAt({ option: value }, 'option');
+              return option?.['usable_now'] === true && usableOffenseKinds.has(String(option['kind']));
+            });
+            const dominatedDodgeId = opportunity?.['status'] === 'dominated'
+              ? opportunity['dodge_option_id']
+              : null;
+            if (!hasUsableOffense && typeof dominatedDodgeId === 'string') {
+              const dominatedIndex = ranked.findIndex((value) => optionId(value) === dominatedDodgeId);
+              if (dominatedIndex > 0) {
+                const [dominated] = ranked.splice(dominatedIndex, 1);
+                if (dominated !== undefined) ranked.push(dominated);
+              }
+            }
+            const floor = ranked.slice(0, 2);
+            if (!hasUsableOffense && !floor.some((value) => {
+              const option = objectAt({ option: value }, 'option');
+              return survivalKinds.has(String(option?.['kind']));
+            })) {
+              const survivalIndex = ranked.findIndex((value) => {
+                const option = objectAt({ option: value }, 'option');
+                return survivalKinds.has(String(option?.['kind']));
+              });
+              if (survivalIndex >= 0) {
+                const [survival] = ranked.splice(survivalIndex, 1);
+                if (survival !== undefined) ranked.splice(Math.min(1, ranked.length), 0, survival);
+              }
+            }
+            actor['options'] = ranked;
+          }
+        }
         clearArrayField(candidate, 'applicable_skills');
         const knowledge = objectAt(candidate, 'actor_knowledge');
         if (knowledge !== null) clearArrayField(knowledge, 'actors');
@@ -2142,10 +2228,15 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
                 : null;
             };
             const defaultOption = actorOptions.find((option) => exactId(option) === defaultId);
-            const floorOptions = [
+            const rankedFloorOptions = [
               ...(defaultOption === undefined ? [] : [defaultOption]),
               ...actorOptions.filter((option) => option !== defaultOption),
-            ].slice(0, Math.min(2, actorOptions.length));
+            ];
+            // Compact fallback preserves the same engine-default plus
+            // highest-ranked-alternative floor as ordinary pruning. Its two
+            // options are deliberately bounded so the hard byte cap remains
+            // enforceable even for unusually large initiative groups.
+            const floorOptions = rankedFloorOptions.slice(0, Math.min(2, actorOptions.length));
             const compactOptions = floorOptions.flatMap((option) => {
               const optionId = exactId(option);
               if (optionId === null) return [];
@@ -2233,6 +2324,11 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
                 configured_cap_bytes: turnContextMaximumBytes,
               } };
         };
+        // Options arrived offense-first above. Prune from the least informative
+        // tail while preserving a two-choice floor. A no-offense actor keeps a
+        // legal movement/defensive choice, and known-dominated Dodge moves
+        // behind another such choice so the renderer never invents a false
+        // Dash-versus-Dodge decision boundary.
         while (renderBytes(candidate) > turnContextMaximumBytes) {
           const actor = [...actorRecords].reverse().find((entry) => arrays('options', entry).length > 2);
           if (actor === undefined) break;
@@ -2288,13 +2384,19 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         if (renderBytes(candidate) > turnContextMaximumBytes) {
           return compactFallback();
         }
-        return candidate;
+        const bound = bindIntelToShownOptions(candidate, optionReferences, source, true).context;
+        return renderBytes(bound) <= turnContextMaximumBytes ? bound : compactFallback();
       };
       const untrimmedFull = rendered.context;
       let trimmedFull: Readonly<Record<string, unknown>> | undefined;
       const full = (): Readonly<Record<string, unknown>> => {
         trimmedFull ??= trimToLimit(untrimmedFull);
         return trimmedFull;
+      };
+      let currentPartition: ReturnType<typeof bindIntelToShownOptions> | undefined;
+      const partition = (): ReturnType<typeof bindIntelToShownOptions> => {
+        currentPartition ??= bindIntelToShownOptions(full(), optionReferences, untrimmedFull, true);
+        return currentPartition;
       };
       const base = dependencies.turnContextDeltaBase;
       const wantsDelta = rendererProfile.delta !== 'off' && input['granularity'] === 'turn_delta';
@@ -2306,37 +2408,46 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
             const baseStateRef = record(base.context['state_ref'], 'turn context delta base state_ref');
             if (baseStateRef['run_id'] !== capsule.runId ||
               baseStateRef['expected_revision'] !== base.revision) return untrimmedFull;
+            const currentFull = partition().context;
             const anchor = rendererProfile.anchor === 'hash_only'
               ? {
                   base_revision: base.revision,
                   revision: capsule.revision,
                   base_context_hash: sha256(canonicalJson(base.context)),
-                  context_hash: sha256(canonicalJson(untrimmedFull)),
+                  context_hash: sha256(canonicalJson(currentFull)),
                 }
               : {
                   base_revision: base.revision,
                   revision: capsule.revision,
                   base_context_hash: sha256(canonicalJson(base.context)),
-                  context_hash: sha256(canonicalJson(untrimmedFull)),
-                  state_ref: untrimmedFull['state_ref'],
-                  request: untrimmedFull['request'],
+                  context_hash: sha256(canonicalJson(currentFull)),
+                  state_ref: currentFull['state_ref'],
+                  request: currentFull['request'],
                 };
             const delta = {
               granularity: 'turn_delta' as const,
               anchor,
-              changes: diffTurnContextValues(base.context, untrimmedFull),
-              context_trimmed: untrimmedFull['context_trimmed'],
-              renderer_attribution: untrimmedFull['renderer_attribution'],
+              changes: diffTurnContextValues(base.context, currentFull),
+              context_trimmed: currentFull['context_trimmed'],
+              renderer_attribution: currentFull['renderer_attribution'],
             };
-            return rendererProfile.delta === 'guarded' && renderBytes(delta) >= renderBytes(untrimmedFull) * 0.8
-              ? untrimmedFull
+            return rendererProfile.delta === 'guarded' && renderBytes(delta) >= renderBytes(currentFull) * 0.8
+              ? currentFull
               : delta;
           })();
-      const context = contextCandidate['granularity'] === 'full'
+      const contextBeforeBinding = contextCandidate['granularity'] === 'full'
         ? trimToLimit(contextCandidate)
         : encodedJsonBytes(contextCandidate) <= turnContextMaximumBytes
           ? contextCandidate
           : { ...full(), context_trimmed: true, truncated: true };
+      const boundContext = contextBeforeBinding['granularity'] === 'full'
+        ? bindIntelToShownOptions(contextBeforeBinding, optionReferences, untrimmedFull, true)
+        : null;
+      const context = boundContext?.context ?? contextBeforeBinding;
+      shownOptionIdsByActor = boundContext?.shownOptionIdsByActor ??
+        (context['granularity'] === 'turn_delta'
+          ? partition().shownOptionIdsByActor
+          : rendered.shownOptionIdsByActor);
       const postTrimBytes = renderBytes(context);
       const featurePreTrimBytes = context['granularity'] === 'turn_delta'
         ? renderBytes(contextCandidate)
@@ -2596,6 +2707,12 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       if (contractRefusal !== null) {
         return { state_ref: externalStateRef(capsule), valid: false, selected_branch: 'none', resolution: null, refusals: [{ code: contractRefusal.code, summary: contractRefusal.summary }], correction_guidance: correctionGuidance(capsule) };
       }
+      const shownRefusal = shownOptionRefusal(
+        proposal, shownOptionIdsByActor?.get(proposal.actorId),
+      );
+      if (shownRefusal !== null) {
+        return { state_ref: externalStateRef(capsule), valid: false, selected_branch: 'none', resolution: null, refusals: [{ code: shownRefusal.code, summary: shownRefusal.summary }], correction_guidance: correctionGuidance(capsule) };
+      }
       const resolution = turnProposals.resolve(state, proposal);
       if (!resolution.valid) {
         return { state_ref: externalStateRef(capsule), valid: false, selected_branch: 'none', resolution: null, refusals: resolution.refusals.map((entry) => ({ code: entry.code, summary: entry.summary })), correction_guidance: correctionGuidance(capsule) };
@@ -2645,15 +2762,19 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         ? request.actors.map((actorId) => decoded.find((proposal) => proposal.actorId === actorId)).filter((proposal): proposal is EngineTurnProposal => proposal !== undefined)
         : decoded;
       const evaluated = canonical.map((proposal) => {
-        const contractRefusal = proposalContractRefusal(request.phase, proposal);
+        const shapeRefusal = proposalContractRefusal(request.phase, proposal);
+        const contractRefusals = shapeRefusal === null
+          ? shownOptionRefusals(proposal, shownOptionIdsByActor?.get(proposal.actorId))
+          : [shapeRefusal];
+        const resolution = contractRefusals.length === 0 ? turnProposals.resolve(state, proposal) : null;
         return {
           proposal,
-          contractRefusal,
-          resolution: contractRefusal === null ? turnProposals.resolve(state, proposal) : null,
+          contractRefusals,
+          resolution,
         };
       });
-      const dominanceRefusals = evaluated.flatMap(({ proposal, contractRefusal, resolution }) => {
-        if (contractRefusal !== null || resolution === null || !resolution.valid) return [];
+      const dominanceRefusals = evaluated.flatMap(({ proposal, contractRefusals, resolution }) => {
+        if (contractRefusals.length > 0 || resolution === null || !resolution.valid) return [];
         const refusal = dominanceRefusal(capsule, proposal, resolution.option.optionId);
         return refusal === null ? [] : [{
           actor_id: proposal.actorId,
@@ -2676,7 +2797,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
             rejection_reasons: ['Round submission must contain one proposal for each required actor exactly once.'],
           }],
         }]),
-        ...evaluated.flatMap(({ proposal, contractRefusal, resolution }) => contractRefusal === null ? [] : [{
+        ...evaluated.flatMap(({ proposal, contractRefusals }) => contractRefusals.map((contractRefusal) => ({
           actor_id: proposal.actorId,
           codes: [contractRefusal.code],
           summary: contractRefusal.summary,
@@ -2686,8 +2807,8 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
               ? proposal.primaryOptionId : proposal.fallbackOptionId,
             rejection_reasons: [contractRefusal.summary],
           }],
-        }]),
-        ...evaluated.flatMap(({ proposal, contractRefusal, resolution }) => contractRefusal !== null || resolution === null || resolution.valid ? [] : [{
+        }))),
+        ...evaluated.flatMap(({ proposal, contractRefusals, resolution }) => contractRefusals.length > 0 || resolution === null || resolution.valid ? [] : [{
           actor_id: proposal.actorId,
           codes: resolution.refusals.map((entry) => entry.code),
           summary: resolution.refusals.map((entry) => entry.summary).join('; '),
@@ -2709,7 +2830,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       const reactionGuidance = input['reaction_guidance'] === undefined
         ? null : decodeReactionGuidance(input['reaction_guidance']);
       return idempotent(key, input, () => {
-        const valid = evaluated.flatMap(({ proposal, contractRefusal, resolution }) => contractRefusal === null && resolution?.valid === true ? [{ proposal, option: resolution.option, primaryOption: resolution.primaryOption, fallbackOption: resolution.fallbackOption, mechanics: resolution.mechanics, selectedBranch: resolution.selectedBranch, resolutionDigest: resolution.resolutionDigest, summary: resolution.summary }] : []);
+        const valid = evaluated.flatMap(({ proposal, contractRefusals, resolution }) => contractRefusals.length === 0 && resolution?.valid === true ? [{ proposal, option: resolution.option, primaryOption: resolution.primaryOption, fallbackOption: resolution.fallbackOption, mechanics: resolution.mechanics, selectedBranch: resolution.selectedBranch, resolutionDigest: resolution.resolutionDigest, summary: resolution.summary }] : []);
         const proposalId = `round:${sha256(canonicalJson({ digest: capsule.digest, key, valid, reactionGuidance })).slice(0, 48)}`;
         submitEngineProposal(feed, proposals, { kind: 'round_turn_proposal', proposalId, runId: capsule.runId, branchId: capsule.branchId, requestId: request.requestId, expectedRevision: capsule.revision, stateDigest: capsule.digest, stateHandle: engineStateHandle(capsule), phase: request.phase, idempotencyKey: key, resolutions: valid, rationale: typeof input['rationale'] === 'string' ? input['rationale'] : null, reactionGuidance, submittedArguments: structuredClone(roundSubmission?.submittedArguments ?? suppliedInput), ...(activeIntelMode === 'off' ? {} : { intelCapture: captureDmIntel(state, capsule, queries) }) });
         acceptedRoundDecision = true;
@@ -2741,6 +2862,8 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
                 ? { code: 'ACTOR_NOT_OPEN', summary: 'Only actors whose turns remain open may receive an adjustment.', attempt: 'primary' as const }
                 : contractRefusal;
         if (staticRefusal !== null) return { proposal, resolution: null, staticRefusal };
+        const hidden = shownOptionRefusal(proposal, shownOptionIdsByActor?.get(proposal.actorId));
+        if (hidden !== null) return { proposal, resolution: null, staticRefusal: hidden };
         const resolution = turnProposals.resolve(state, proposal);
         if (resolution.valid) {
           const refusal = dominanceRefusal(capsule, proposal, resolution.option.optionId);
@@ -2878,6 +3001,8 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       if (request.actors.length !== 1 || request.actors[0] !== proposal.actorId) return { status: 'rejected', state_ref: externalStateRef(capsule), refusals: [{ code: 'ACTOR_REQUIRES_WHOLE_ROUND', summary: 'This actor belongs to the pending shared-initiative whole-round request.' }], correction_guidance: correctionGuidance(capsule) };
       const contractRefusal = proposalContractRefusal(request.phase, proposal);
       if (contractRefusal !== null) return { status: 'rejected', state_ref: externalStateRef(capsule), refusals: [{ code: contractRefusal.code, summary: contractRefusal.summary }], correction_guidance: correctionGuidance(capsule) };
+      const shownRefusal = shownOptionRefusal(proposal, shownOptionIdsByActor?.get(proposal.actorId));
+      if (shownRefusal !== null) return { status: 'rejected', state_ref: externalStateRef(capsule), refusals: [{ code: shownRefusal.code, summary: shownRefusal.summary }], correction_guidance: correctionGuidance(capsule) };
       const resolution = turnProposals.resolve(state, proposal);
       if (!resolution.valid) return { status: 'rejected', state_ref: externalStateRef(capsule), refusals: resolution.refusals.map((entry) => ({ code: entry.code, summary: entry.summary })), correction_guidance: correctionGuidance(capsule) };
       const dominance = dominanceRefusal(capsule, proposal, resolution.option.optionId);

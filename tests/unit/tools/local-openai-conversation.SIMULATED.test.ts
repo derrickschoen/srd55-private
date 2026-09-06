@@ -11,6 +11,7 @@ import {
   openAiFunctionTools,
 } from '../../../src/vtt/agent-adapters/local-openai';
 import { parseArenaArgs, runArena } from '../../../tools/ai-dm-arena';
+import { DEFAULT_RENDERER_PROFILE } from '../../../src/vtt/renderer-profile';
 import { mkdtempSync, readFileSync } from '../../helpers/test-filesystem';
 
 interface FakeRequest {
@@ -30,6 +31,20 @@ function messages(value: unknown): readonly Readonly<Record<string, unknown>>[] 
   if (!Array.isArray(value)) throw new TypeError('messages must be an array.');
   return value.map((entry) => record(entry, 'message'));
 }
+
+const ALL_OPTIONS_TEST_RENDERER_PROFILE = {
+  ...DEFAULT_RENDERER_PROFILE,
+  rows: 'off',
+  movement: 'material_only',
+  threats: 'counts_exception_ids',
+  rare: 'triggered',
+  knowledge: 'relevance_gated',
+  frontier: 'off',
+  failures: 'headline_codes',
+  adverts: 'full',
+  misc: 'merged',
+  optionDetail: 'top2_stubs',
+} as const;
 
 async function fakeServer(
   respond: (request: FakeRequest, index: number) => { readonly status?: number; readonly body: unknown },
@@ -191,6 +206,7 @@ describe('SIMULATED local OpenAI conversation adapter', () => {
         '--local-think', 'on',
         '--effort', 'low', '--kb', 'tests/fixtures/ai-dm-kb/k6.txt',
         '--combat-model', 'monster_block_v1', '--initiative-profile', 'legacy',
+        '--renderer-profile', JSON.stringify(ALL_OPTIONS_TEST_RENDERER_PROFILE),
       ]);
       const rows = await runArena(config);
 

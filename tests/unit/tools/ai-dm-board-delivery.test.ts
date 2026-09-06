@@ -49,7 +49,7 @@ import {
 const META = mcpRequestMeta({ name: 'board-delivery-test', version: '1.0.0' });
 // Independently reproduced from committed footprints Increment 3 (8bdc7ba8),
 // before the board-delivery branch was merged into it.
-const FOOTPRINTS_RAW_CONTEXT_SHA256 = '3ab18fe4c51818906b22d317126876617ad9615c00a1be7621e2b819876aca19';
+const FOOTPRINTS_RAW_CONTEXT_SHA256 = 'aa841063ad0512d0f6b286318db802526da3efc5265a04d8b67f4d8351909d51';
 
 function record(value: unknown, label: string): Readonly<Record<string, unknown>> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -450,7 +450,7 @@ describe('arena capture lifecycle and off-arm invariance', () => {
 
     const raw = offResult[0]?.rawTurnContext;
     if (raw === undefined) throw new TypeError('Off-arm row omitted rawTurnContext.');
-    expect(Buffer.byteLength(raw)).toBe(32_180);
+    expect(Buffer.byteLength(raw)).toBe(32_000);
     expect(createHash('sha256').update(raw).digest('hex')).toBe(FOOTPRINTS_RAW_CONTEXT_SHA256);
 
     const offHandler = createMcpHandler({ tools: [{

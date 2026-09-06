@@ -356,7 +356,40 @@ export function renderDodgeOpportunityCost(
 ): Readonly<Record<string, unknown>> | null {
   const dodge = report.options.find((option) => option.kind === 'dodge');
   if (dodge === undefined) return null;
-  const comparison = submissionDominance(report, dodge.option.optionId);
+  const defaultEvaluation = report.options.find((option) =>
+    option.option.optionId === report.defaultOption.optionId);
+  const defaultDominance = submissionDominance(report, report.defaultOption.optionId);
+  const resolvedDodge = dodge.status === 'resolved' ? dodge : null;
+  const defaultBeatsDodge = defaultEvaluation?.status === 'resolved' &&
+    defaultEvaluation.kind === 'offense' && resolvedDodge !== null &&
+    defaultDominance.status !== 'dominated'
+    ? compareOpportunityV2(defaultEvaluation, resolvedDodge)
+    : null;
+  // D462/D476/D477 rank a viable, non-dominated offensive default ahead of
+  // passive setup: confirmed kill first, then expected damage, then attack ETA.
+  // Do not let the generic dominance scan recommend an approach such as Dash
+  // over both Dodge and that already-preferred offense merely because Dash was
+  // encountered first in the offerable list.
+  const comparison: SubmissionDominance = defaultEvaluation?.status === 'resolved' && resolvedDodge !== null &&
+    defaultBeatsDodge?.relation === 'left_dominates'
+    ? {
+        status: 'dominated',
+        policy: OPPORTUNITY_COST_POLICY,
+        correctionPolicy: DOMINANCE_CORRECTION_POLICY,
+        selected: resolvedDodge,
+        alternative: defaultEvaluation,
+        comparison: defaultBeatsDodge,
+        delta: deltaText(resolvedDodge, defaultEvaluation, defaultBeatsDodge),
+      }
+    : defaultEvaluation?.status === 'resolved' && defaultEvaluation.kind === 'offense' &&
+        defaultDominance.status !== 'dominated'
+      ? {
+          status: 'not_dominated_tradeoff',
+          policy: OPPORTUNITY_COST_POLICY,
+          correctionPolicy: DOMINANCE_CORRECTION_POLICY,
+          reasons: ['engine_default_offense_ranked_first'],
+        }
+      : submissionDominance(report, dodge.option.optionId);
   return {
     policy: OPPORTUNITY_COST_POLICY,
     correction_policy: DOMINANCE_CORRECTION_POLICY,

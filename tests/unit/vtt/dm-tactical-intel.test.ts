@@ -26,10 +26,13 @@ function record(value: unknown, label: string): Readonly<Record<string, unknown>
   return value as Readonly<Record<string, unknown>>;
 }
 
-async function r02Runtime(profile: 'dm' | 'full' = 'dm') {
+async function r02Runtime(profile: 'dm' | 'full' = 'dm', turnContextMaximumBytes?: number) {
   const loaded = await loadArenaFixture('tests/fixtures/arena-basis-hard/seed-5117009.json');
   const state = freshMonsterPlanningState(loaded);
-  const runtime = createEngineMcpRuntime(state, { toolProfile: profile });
+  const runtime = createEngineMcpRuntime(state, {
+    toolProfile: profile,
+    ...(turnContextMaximumBytes === undefined ? {} : { turnContextMaximumBytes }),
+  });
   return { state, runtime, capsule: runtime.feed.current() };
 }
 
@@ -239,7 +242,7 @@ describe('versioned DM tactical intel', () => {
   });
 
   it('attaches full-precision offered-set and all intel policy versions to accepted capture', async () => {
-    const { runtime, capsule } = await r02Runtime();
+    const { runtime, capsule } = await r02Runtime('dm', 1_000_000);
     const context = fullContext(runtime, capsule);
     const suggested = context['suggested_plan'];
     const plan = suggested === undefined
