@@ -14087,3 +14087,12 @@ are the decision surface (D569 blind judgement, option pruning, cap
 24 for latency) and effort/attempt budgets. The brutal-b arms (second
 family) still run and are reported when done; they cannot rescue the
 claim on their own.
+
+## Pooled D565 estimate (2026-09-07 03:54)
+
+Both brutal runs pooled as per-room-run pairs (n=20): luna_facts -
+luna_control = +0.13, seed-clustered 95% CI [-0.21, +0.57] (20,000
+resamples, seed 5117). Per room the two runs disagree in sign on
+6203001 (+0.78 then -2.22), 6203005, 6203008, 6203009; only 6203002 is
+positive both times (+3.00, +0.67). No effect at this sample size.
+:4173 serving the merged main.
