@@ -15272,3 +15272,77 @@ lane pool-seat-swap was dispatched (session
 sol/opus/astra, make the seat list the single source of truth, and add a
 test proving the rule still requires ALL THREE seats rather than a
 majority, with no recusal logic per D578.3.
+
+## D579 corrections landed (e247bc01), seat swap landed (b2677a7a), D580 selector rulings dispatched (2026-09-07 18:29)
+
+CORRECTIONS, verified by the supervisor on dnd-wt-blind-dm: the HP band
+paragraph now states the real thresholds, warns that BLOODIED spans a
+very wide range and must not be read as half, and notes the bar length
+is a fixed per-band glyph; all four board-feature markers intact; zero
+remaining "northeast" spellings. The reply validator keeps rejecting
+dice, DCs, attack bonuses, coordinates, arrows, reducer and option
+tokens and numeric damage claims, while permitting the bare tactical
+nouns. Recusal removed: seatEligibilityPolicy is now
+all_registered_seats_every_comparison with sessionPolicy
+fresh_session_per_packet and explicit packet exclusions; manifest is
+d569-blind-experiment-v3 with the amendment quoting the owner ruling.
+3 spec files 59/59, tsc clean, contracts hash unchanged. Supervisor
+mutant M-SUP-I6B-GUIDE-REGRESSES-TO-HALF put the false half claim back
+and the new guide-versus-engine alignment test caught it (3 failures),
+restored.
+
+SEAT SWAP, verified on dnd-wt-brutal-pool: STRUGGLE_JUDGE_SEATS is
+sol/opus/astra, every seat-indexed type, CLI option, path and report
+field derives from that constant, a helper pins the judge-file naming
+convention against it, zero fable literals remain, 7/7 tests, tsc clean.
+Supervisor mutant M-SUP-SEAT-MAJORITY-QUALIFIES weakened unanimity to a
+two-of-three majority: killed by 3 tests including the new explicit
+majority case, restored.
+
+BLOCKER FOUND WHEN I RAN THE SELECTOR: it validates case ids against
+/^case-\d+-1$/ and therefore accepts only ONE repetition per room, so
+the three-rep packet is rejected outright. The tool was written for the
+one-rep screen.
+
+D580 (decider rulings, ACCEPTED, dispatched as lane pool-reps-selector,
+session 01a07dfd-24d4-7793-9c94-18b76a06ba5d):
+1. Aggregate by MEAN across reps within room, seat and arm; "all three
+   seats prefer the alternative" means each seat mean is strictly
+   negative before rounding, so exactly zero fails. Parse case ids as
+   room plus repetition, validate against the packet's expected rep set,
+   and REJECT any missing or duplicated (room, rep, seat, arm)
+   combination rather than averaging a partial set. Evaluate the luna
+   and sol alternatives separately and record which qualified. Report
+   the three seat means alongside the count of reps that favoured the
+   alternative. Majority-of-reps was rejected because it discards
+   magnitude; pooling reps as independent observations was rejected
+   because it inflates evidence.
+2. The bottom-tertile Luna condition STOPS being a required gate and
+   becomes descriptive. Unanimous strictly-negative seat means are a
+   NOMINATION rule only. Astra's reasoning, which I accept: a null
+   population average can coexist with real room-specific advantages,
+   but selecting extreme observed deltas necessarily enriches
+   measurement noise, and adding a second noisy selection on low Luna
+   scores compounds it, so calling the selected extremes established
+   engine failures would be unjustified. Output naming must therefore
+   say nominated candidates, not verified failures, and confirmation
+   requires fresh evaluations excluded from selection plus a rules check
+   of the claimed tactical advantage.
+3. No seat normalization. An additive offset cancels in paired
+   within-seat deltas and unanimity stops one generous seat overruling
+   the others; z-scoring after the fact was rejected. Caveat recorded:
+   offsets cancelling does not prove the seats use comparable ranges,
+   and ceiling effects or divergent rubric readings would call for
+   recalibration rather than statistics.
+4. Priority after this: validate and freeze the line-of-sight and cover
+   overhaul first, since it moves cover in 1522 of 3470 pairs and adds
+   three-quarters cover, and never combine results across engine
+   versions; then run the blind DM experiment's first model arm on that
+   frozen version; then confirm nominated rooms under frozen rules;
+   and only then consider more pool sampling, justified by a stated
+   effect size and precision target.
+
+Astra's framing of the null, which I accept and which corrects a
+temptation in my own earlier wording: the result supports "no
+demonstrated average improvement", NOT equivalence and NOT "no model can
+win a room". The intervals still admit meaningful differences.
