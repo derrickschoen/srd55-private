@@ -14380,3 +14380,20 @@ the owner asked for the comparison with luna medium directly.
 Standing rules unchanged: engine authority, proposer-only, no dice or
 commands from any model, 240 s wall, no escalation, refusals score
 zero with executed-only reported beside.
+
+## Pool committed c89e1ea4; screening arms launched; luna-low 48/64 with the panel; increment 2 mutant redo (2026-09-07 10:24)
+
+Pool verified: my mutant at the engine-top proposal site (second
+available option instead of the engine default) killed by "runs the
+engine-top arm from actorOpportunityReport defaults without accepting
+a model plan"; restored. Screening on the 30 pool rooms, 1 rep each:
+engine-top (no model), luna medium (advice, default profile), sol high
+(advice). Selection follows the panel per D572. Open item carried:
+engine-top rows record model "gpt-5.6-sol" with planner engine_top;
+fix before the struggle freeze.
+Luna-low 48/64 arms: 30/30 authorized each; packets vs the low 32
+control with the panel.
+Increment 2: my all-gates mutant broke compilation (tsc exit 1) and the
+browser check never ran, so it proved nothing; a well-formed variant
+(every gate compares against an impossible mode) is running with the
+browser spec as the killing test.
