@@ -14141,3 +14141,20 @@ Verified myself before committing: 9 spec files 387/387, generator
 idempotent, tsc 0, no markers, scans clean, contracts.ts unchanged.
 Full landing gate (tsc, sg, locked vitest, full Playwright) running on
 wt-cap-fix; merge to main and :4173 rebuild follow a green gate.
+
+## Boundary fix: verified live, but a supervisor mutant SURVIVED; sent back (2026-09-07 05:24)
+
+Codex root cause: seed 6206009 queues two legendary-action windows at
+one turn boundary; the unattended resolver passed the first, replayed
+end_turn, never passed the second. Fix drains every pending decision
+at the boundary before replaying end_turn; adds a no-model dry run of
+6206009 and a round-one execution invariant across 13 hard + 10 brutal
++ 10 brutal-b fixtures with a seeded guard against filtering failures.
+Codex claims 84/84, tsc 0, two mutants killed. Verified myself: my dry
+run of room 9 is authorized, 84/84, tsc 0, scans clean.
+Surviving mutant (mine): never recording the boundary to resume (so the
+end_turn replay never fires) leaves all 46 tests green including the
+33-fixture invariant. Either the replay is dead code or a real state
+needs it and nothing tests it. Not committed; the lane is resumed with
+the finding (prove reachability with a minimal reducer-level test that
+kills the mutant, or remove the replay).
