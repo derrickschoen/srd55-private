@@ -19,6 +19,9 @@ export const D569_AI_DM_KB_PROVENANCE = `${D569_AI_DM_KB_DIRECTORY}/provenance.j
 export const AI_DM_KB_ROOT_TARGET_BYTES = 3_072 as const;
 export const AI_DM_KB_ROOT_HARD_BYTES = 4_096 as const;
 export const AI_DM_KB_STARTUP_HARD_BYTES = 4_608 as const;
+export const D569_KB_ROOT_MAX_BYTES = 12_288 as const;
+export const D569_KB_COMPONENT_MAX_BYTES = 16_384 as const;
+export const D569_KB_STARTUP_MAX_BYTES = 49_152 as const;
 
 const LEGACY_SINGLE_FILE_NAMES = ['k5.txt', 'k6.txt', 'k7-close.txt'] as const;
 
@@ -39,11 +42,20 @@ export const D569_AI_DM_KB_COMPONENT_PATHS = Object.freeze([
   ...KB_SUBJECTS.map((subject) => `${D569_AI_DM_KB_DIRECTORY}/${subject}.md` as const),
 ] as const);
 
-export type D569KbProvenanceKind = 'cc_by_srd' | 'project_experience';
-export interface D569KbProvenanceSource {
-  readonly kind: D569KbProvenanceKind;
+export interface D569KbSrdProvenanceSource {
+  readonly kind: 'cc_by_srd';
+  readonly section: string;
+  readonly locator: string;
+  readonly heading: string;
+}
+export interface D569KbProjectProvenanceSource {
+  readonly kind: 'project_experience';
+  readonly section: string;
   readonly locator: string;
 }
+export type D569KbProvenanceSource =
+  | D569KbSrdProvenanceSource
+  | D569KbProjectProvenanceSource;
 export interface D569KbComponentProvenance {
   readonly path: (typeof D569_AI_DM_KB_COMPONENT_PATHS)[number];
   readonly revision: string;
@@ -51,7 +63,7 @@ export interface D569KbComponentProvenance {
   readonly sources: readonly D569KbProvenanceSource[];
 }
 export interface D569KbProvenanceManifest {
-  readonly version: 'd569-kb-provenance-v1';
+  readonly version: 'd570-kb-provenance-v2';
   readonly components: readonly D569KbComponentProvenance[];
 }
 
@@ -112,6 +124,7 @@ export interface KbComponent {
 
 export interface AiDmKbBundle {
   readonly kind: 'bundle';
+  readonly subjectReadPolicy: 'two_per_round' | 'startup_only';
   readonly root: KbComponent;
   readonly tactics: KbComponent;
   readonly subjects: Readonly<Record<KbSubject, KbComponent>>;
@@ -122,7 +135,7 @@ export interface AiDmKbBundle {
   };
   /** Exact cold-start text after repo-relative index paths become operator-readable absolute paths. */
   readonly startupInstructions: string;
-  /** Relocation-stable hash of the source root bytes, separator, and tactics bytes. */
+  /** Relocation-stable hash of the exact source components joined for cold start. */
   readonly combinedStartupHash: string;
 }
 
@@ -260,11 +273,18 @@ async function loadBundle(cwd: string, rootAbsolutePath: string): Promise<AiDmKb
     throw new TypeError('Bundled --kb root is not a supported AI-DM bundle.');
   }
   const root = await loadComponent(cwd, fixtureDirectory, definition.rootPath);
-  if (root.byteCount > AI_DM_KB_ROOT_TARGET_BYTES) {
-    throw new TypeError(`KB root exceeds its ${String(AI_DM_KB_ROOT_TARGET_BYTES)}-byte cap.`);
-  }
-  if (root.byteCount >= AI_DM_KB_ROOT_HARD_BYTES) {
-    throw new TypeError(`KB root reaches its ${String(AI_DM_KB_ROOT_HARD_BYTES)}-byte hard stop.`);
+  const d569Bundle = definition.rootPath === D569_AI_DM_KB_ROOT;
+  if (d569Bundle) {
+    if (root.byteCount > D569_KB_ROOT_MAX_BYTES) {
+      throw new TypeError(`D569 KB root exceeds its ${String(D569_KB_ROOT_MAX_BYTES)}-byte cap.`);
+    }
+  } else {
+    if (root.byteCount > AI_DM_KB_ROOT_TARGET_BYTES) {
+      throw new TypeError(`KB root exceeds its ${String(AI_DM_KB_ROOT_TARGET_BYTES)}-byte cap.`);
+    }
+    if (root.byteCount >= AI_DM_KB_ROOT_HARD_BYTES) {
+      throw new TypeError(`KB root reaches its ${String(AI_DM_KB_ROOT_HARD_BYTES)}-byte hard stop.`);
+    }
   }
   const indexed = indexedSubjectPaths(root.text);
   const [actions, movement, targeting, spells, conditions, reactions, protocol, tactics] =
@@ -279,12 +299,31 @@ async function loadBundle(cwd: string, rootAbsolutePath: string): Promise<AiDmKb
       loadComponent(cwd, fixtureDirectory, definition.tacticsPath),
     ]);
   const subjects = { actions, movement, targeting, spells, conditions, reactions, protocol };
-  const rawStartup = `${root.text}\n\n${tactics.text}`;
-  if (Buffer.byteLength(rawStartup, 'utf8') > AI_DM_KB_STARTUP_HARD_BYTES) {
+  const componentsAfterRoot = [tactics, ...KB_SUBJECTS.map((subject) => subjects[subject])];
+  const rawStartup = d569Bundle
+    ? [root, ...componentsAfterRoot].map((component) => component.text).join('\n\n')
+    : `${root.text}\n\n${tactics.text}`;
+  if (d569Bundle) {
+    const oversized = [root, ...componentsAfterRoot]
+      .find((component) => component.byteCount > D569_KB_COMPONENT_MAX_BYTES);
+    if (oversized !== undefined) {
+      throw new TypeError(
+        `D569 KB component ${oversized.repoRelativePath} exceeds its ${String(D569_KB_COMPONENT_MAX_BYTES)}-byte cap.`,
+      );
+    }
+  } else if (Buffer.byteLength(rawStartup, 'utf8') > AI_DM_KB_STARTUP_HARD_BYTES) {
     throw new TypeError(`KB startup pair exceeds its ${String(AI_DM_KB_STARTUP_HARD_BYTES)}-byte hard stop.`);
+  }
+  const relocatedRoot = replaceIndexedPaths(root.text, subjects);
+  const startupInstructions = d569Bundle
+    ? [relocatedRoot, ...componentsAfterRoot.map((component) => component.text)].join('\n\n')
+    : `${relocatedRoot}\n\n${tactics.text}`;
+  if (d569Bundle && Buffer.byteLength(startupInstructions, 'utf8') > D569_KB_STARTUP_MAX_BYTES) {
+    throw new TypeError(`D569 KB startup exceeds its ${String(D569_KB_STARTUP_MAX_BYTES)}-byte cap.`);
   }
   return {
     kind: 'bundle',
+    subjectReadPolicy: d569Bundle ? 'startup_only' : 'two_per_round',
     root,
     tactics,
     subjects,
@@ -301,7 +340,7 @@ async function loadBundle(cwd: string, rootAbsolutePath: string): Promise<AiDmKb
         protocol: protocol.sha256,
       },
     },
-    startupInstructions: `${replaceIndexedPaths(root.text, subjects)}\n\n${tactics.text}`,
+    startupInstructions,
     combinedStartupHash: sha256(rawStartup),
   };
 }
@@ -374,7 +413,7 @@ export async function loadD569KbProvenanceManifest(cwd: string): Promise<D569KbP
   const fixtureDirectory = await realpath(resolve(cwd, AI_DM_KB_FIXTURE_DIRECTORY));
   const provenance = await resolveFixturePath(cwd, fixtureDirectory, D569_AI_DM_KB_PROVENANCE);
   const parsed = plainRecord(JSON.parse(await readFile(provenance.absolutePath, 'utf8')) as unknown, 'D569 provenance');
-  if (parsed['version'] !== 'd569-kb-provenance-v1' || !Array.isArray(parsed['components'])) {
+  if (parsed['version'] !== 'd570-kb-provenance-v2' || !Array.isArray(parsed['components'])) {
     throw new TypeError('D569 provenance has an unsupported version or component list.');
   }
   const expectedPaths = new Set<string>(D569_AI_DM_KB_COMPONENT_PATHS);
@@ -394,14 +433,21 @@ export async function loadD569KbProvenanceManifest(cwd: string): Promise<D569KbP
     }
     const sources = component['sources'].map((sourceValue, sourceIndex): D569KbProvenanceSource => {
       const source = plainRecord(sourceValue, `D569 provenance source ${String(sourceIndex + 1)}`);
-      if (!Object.keys(source).every((key) => ['kind', 'locator'].includes(key)) ||
+      if (!Object.keys(source).every((key) => ['kind', 'section', 'locator', 'heading'].includes(key)) ||
         (source['kind'] !== 'cc_by_srd' && source['kind'] !== 'project_experience')) {
         throw new TypeError(`D569 provenance component ${path} has an invalid source.`);
       }
-      return {
-        kind: source['kind'],
+      const common = {
+        section: nonemptyString(source['section'], `D569 provenance source section for ${path}`),
         locator: nonemptyString(source['locator'], `D569 provenance source locator for ${path}`),
       };
+      return source['kind'] === 'cc_by_srd'
+        ? {
+            kind: 'cc_by_srd',
+            ...common,
+            heading: nonemptyString(source['heading'], `D569 provenance source heading for ${path}`),
+          }
+        : { kind: 'project_experience', ...common };
     });
     return {
       path: path as D569KbComponentProvenance['path'],
@@ -422,7 +468,7 @@ export async function loadD569KbProvenanceManifest(cwd: string): Promise<D569KbP
       throw new TypeError(`D569 provenance component hash does not match ${component.path}.`);
     }
   }
-  return { version: 'd569-kb-provenance-v1', components };
+  return { version: 'd570-kb-provenance-v2', components };
 }
 
 function asciiLowercase(bytes: Uint8Array): Uint8Array {

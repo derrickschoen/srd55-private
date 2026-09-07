@@ -6,6 +6,9 @@ import {
   D569_AI_DM_KB_COMPONENT_PATHS,
   D569_AI_DM_KB_PROVENANCE,
   D569_AI_DM_KB_ROOT,
+  D569_KB_COMPONENT_MAX_BYTES,
+  D569_KB_ROOT_MAX_BYTES,
+  D569_KB_STARTUP_MAX_BYTES,
   DEFAULT_AI_DM_KB_ROOT,
   KB_SUBJECTS,
   loadD569AiDmKnowledgeBase,
@@ -13,6 +16,8 @@ import {
   loadAiDmKnowledgeBase,
   scanD569KnowledgeBaseBytes,
 } from '../../../src/vtt/knowledge-base-contract';
+import { CELL_GLYPH_KINDS } from '../../../src/assets/board-glyphs';
+import { legendEntriesFor } from '../../../src/vtt/board-chrome';
 import { SRD_ATTRIBUTION_NOTICE } from '../../../src/rules/srd-attribution';
 import {
   existsSync,
@@ -56,7 +61,11 @@ const d569FixturePaths = [
 ] as const;
 
 const arenaFixture = 'tests/fixtures/arena-basis/seed-3943001.json' as const;
-const inputs = declareTestInputs({ fixtures: [...fixturePaths, ...d569FixturePaths, arenaFixture] });
+const srdFixture = 'docs/srd/full/srd-5.2.1.txt' as const;
+const inputs = declareTestInputs({
+  fixtures: [...fixturePaths, ...d569FixturePaths, arenaFixture],
+  srdText: [srdFixture],
+});
 const fixtureText = (path: (typeof fixturePaths)[number]): string => inputs.fixtures.readText(path);
 const rootText = fixtureText(DEFAULT_AI_DM_KB_ROOT);
 const tacticsText = fixtureText('tests/fixtures/ai-dm-kb/tactics.md');
@@ -291,15 +300,26 @@ describe('D466 AI DM knowledge-base fixture package', () => {
 });
 
 describe('D569 shared blind/advice knowledge-base fixture package', () => {
-  it('loads byte-identical components and hashes for both DM modes', async () => {
+  it('loads the complete byte-identical primer at startup for both DM modes', async () => {
     const [advice, blind] = await Promise.all([
       loadD569AiDmKnowledgeBase(process.cwd(), 'advice'),
       loadD569AiDmKnowledgeBase(process.cwd(), 'blind'),
     ]);
     const adviceComponents = d569ComponentEntries(advice);
     const blindComponents = d569ComponentEntries(blind);
+    const relocatedRoot = KB_SUBJECTS.reduce((text, subject) => text.replaceAll(
+      `${AI_DM_KB_FIXTURE_DIRECTORY}/d569/${subject}.md`,
+      resolve(process.cwd(), AI_DM_KB_FIXTURE_DIRECTORY, 'd569', `${subject}.md`),
+    ), String(inputs.fixtures.readText(D569_AI_DM_KB_ROOT)));
+    const expectedStartup = [
+      relocatedRoot,
+      ...D569_AI_DM_KB_COMPONENT_PATHS.slice(1).map((path) => inputs.fixtures.readText(path)),
+    ].join('\n\n');
 
     expect(advice.root.repoRelativePath).toBe(D569_AI_DM_KB_ROOT);
+    expect(advice.subjectReadPolicy).toBe('startup_only');
+    expect(blind.subjectReadPolicy).toBe('startup_only');
+    expect(advice.startupInstructions).toBe(expectedStartup);
     expect(advice.startupInstructions).toBe(blind.startupInstructions);
     expect(advice.combinedStartupHash).toBe(blind.combinedStartupHash);
     expect(advice.componentSha256).toEqual(blind.componentSha256);
@@ -309,11 +329,17 @@ describe('D569 shared blind/advice knowledge-base fixture package', () => {
       D569_AI_DM_KB_COMPONENT_PATHS.map((path) =>
         sha256(inputs.fixtures.readText(path))),
     );
+    expect(advice.root.byteCount).toBeLessThanOrEqual(D569_KB_ROOT_MAX_BYTES);
+    expect(adviceComponents.every((component) =>
+      component.byteCount <= D569_KB_COMPONENT_MAX_BYTES)).toBe(true);
+    expect(Buffer.byteLength(advice.startupInstructions, 'utf8'))
+      .toBeLessThanOrEqual(D569_KB_STARTUP_MAX_BYTES);
   });
 
   it('byte-scans startup, tactics, every subject, and provenance for the complete forbidden vocabulary', async () => {
     const bundle = await loadD569AiDmKnowledgeBase(process.cwd(), 'blind');
     const realComponents = [
+      { name: 'startupInstructions', bytes: Buffer.from(bundle.startupInstructions, 'utf8') },
       ...d569ComponentEntries(bundle).map((component) => ({
         name: component.repoRelativePath,
         bytes: Buffer.from(component.text, 'utf8'),
@@ -348,6 +374,7 @@ describe('D569 shared blind/advice knowledge-base fixture package', () => {
 
     expect(componentPaths).toEqual(D569_AI_DM_KB_COMPONENT_PATHS);
     expect(new Set(componentPaths).size).toBe(D569_AI_DM_KB_COMPONENT_PATHS.length);
+    expect(manifest.version).toBe('d570-kb-provenance-v2');
     expect(manifest.components.every((component) =>
       component.revision.startsWith('d569-') && component.sources.length > 0)).toBe(true);
     expect(manifest.components.map((component) => component.sha256)).toEqual(
@@ -362,5 +389,57 @@ describe('D569 shared blind/advice knowledge-base fixture package', () => {
     expect(inputs.fixtures.readText(D569_AI_DM_KB_ROOT).replace(/\s+/gu, ' ').trim())
       .toContain(SRD_ATTRIBUTION_NOTICE);
     expect(rawManifest).not.toMatch(/\b(?:BG3|Baldur(?:'s)? Gate|Nimble|private[-_ ]research)\b/iu);
+  });
+
+  it('resolves every rules-section SRD locator to its recorded heading and real line range', async () => {
+    const manifest = await loadD569KbProvenanceManifest(process.cwd());
+    const srdLines = inputs.srdText.readText(srdFixture).split('\n');
+    const rulesComponents = new Set([
+      `${AI_DM_KB_FIXTURE_DIRECTORY}/d569/actions.md`,
+      `${AI_DM_KB_FIXTURE_DIRECTORY}/d569/movement.md`,
+      `${AI_DM_KB_FIXTURE_DIRECTORY}/d569/targeting.md`,
+      `${AI_DM_KB_FIXTURE_DIRECTORY}/d569/spells.md`,
+      `${AI_DM_KB_FIXTURE_DIRECTORY}/d569/conditions.md`,
+      `${AI_DM_KB_FIXTURE_DIRECTORY}/d569/reactions.md`,
+    ]);
+
+    for (const component of manifest.components) {
+      if (!rulesComponents.has(component.path)) continue;
+      const recordedSections = new Set(component.sources.map((source) => source.section));
+      const markdownSections = [...inputs.fixtures.readText(component.path)
+        .matchAll(/^## (.+)$/gmu)].map((match) => match[1] ?? '');
+      expect(markdownSections.filter((section) => !recordedSections.has(section)), component.path)
+        .toEqual([]);
+    }
+
+    for (const source of manifest.components.flatMap((component) => component.sources)) {
+      if (source.kind !== 'cc_by_srd') continue;
+      const match = /^docs\/srd\/full\/srd-5\.2\.1\.txt:(\d+)-(\d+)$/u.exec(source.locator);
+      expect(match, source.locator).not.toBeNull();
+      const firstLine = Number(match?.[1]);
+      const lastLine = Number(match?.[2]);
+      expect(Number.isSafeInteger(firstLine) && firstLine >= 1, source.locator).toBe(true);
+      expect(Number.isSafeInteger(lastLine) && lastLine >= firstLine, source.locator).toBe(true);
+      expect(lastLine, source.locator).toBeLessThanOrEqual(srdLines.length);
+      expect(srdLines.slice(firstLine - 1, lastLine).join('\n'), source.locator)
+        .toContain(source.heading);
+    }
+  });
+
+  it('documents every renderer legend entry in the map guide', () => {
+    const presence = { cells: CELL_GLYPH_KINDS, hidden: true } as const;
+    const rendererKeys = new Set([
+      ...CELL_GLYPH_KINDS,
+      ...[
+        ...legendEntriesFor('none', 'bright', presence),
+        ...legendEntriesFor('light', 'dim', presence),
+        ...legendEntriesFor('full', 'darkness', presence),
+      ].map((entry) => entry.key),
+    ]);
+    const guide = inputs.fixtures.readText(`${AI_DM_KB_FIXTURE_DIRECTORY}/d569/protocol.md`);
+    const documentedKeys = new Set([...guide.matchAll(/<!-- board-feature:([a-z-]+) -->/gu)]
+      .map((match) => match[1] ?? ''));
+
+    expect([...rendererKeys].filter((key) => !documentedKeys.has(key))).toEqual([]);
   });
 });

@@ -3092,7 +3092,8 @@ async function runConversationWithConfiguredIntel(
       const requestId = `request:room-${String(room)}-round-${String(round)}`;
       const key = `room-${String(room)}-round-${String(round)}`;
       const kbReadSpoolPath = join(artifacts, `${key}-kb-reads.jsonl`);
-      const rowKbSubjectSources = knowledgeBase.kind === 'bundle'
+      const rowKbSubjectSources = knowledgeBase.kind === 'bundle' &&
+        knowledgeBase.subjectReadPolicy === 'two_per_round'
         ? kbSubjectSources(knowledgeBase)
         : undefined;
       if (rowKbSubjectSources !== undefined) await writeFile(kbReadSpoolPath, '', 'utf8');
