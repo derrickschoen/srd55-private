@@ -13903,3 +13903,20 @@ the comprehension goal of D568 is met and the next test of luna low is
 DM quality (the D569 arms run low last, as ordered). Rejected factors
 recorded: v2-evidence answer format (-.17 light), checklist primer (no
 gain); the screenshot itself is neutral-to-harmful at low on light.
+
+## D567 cap arms complete (luna medium, hard R1-10 x3, cap-sweep f59f4b49); panel running (2026-09-07 01:39)
+
+| cap | outcomes | post-trim bytes | options omitted (mean) | wall mean / median |
+|---|---|---|---|---|
+| 16 | 15 authorized / 15 refused (serialization defect, void) | 5.2-16.3 KB | 35.3 | 46 s / 34 s |
+| 24 | 30 authorized | 23.8-24.3 KB | 35.1 | 62 s / 50 s |
+| 32 (control) | 30 authorized | 31.3-32.4 KB | 32.2 | 68 s / 59 s |
+| 48 | 30 authorized | 45.7-48.8 KB | 20.1 | 90 s / 74 s |
+| 64 | 30 authorized | 45.7-65.4 KB | 5.9 | 105 s / 80 s |
+
+Latency grows roughly linearly with context (about +18 s per 16 KiB
+at luna medium); at 64 KiB the median turn is 80 s and the mean 105 s
+against the 180 s live wall (D456), with a 240 s experiment wall.
+Attempts: more second/third attempts at 48/64 (8 and 7 rows) than at
+24 (6). Packets 24/48/64 vs the 32 control (60 entries each) with the
+standing panel; 16 KiB is judged after its rerun on the cap-fix build.
