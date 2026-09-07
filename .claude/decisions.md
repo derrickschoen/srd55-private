@@ -13808,3 +13808,28 @@ sweep, invisible at 32 KiB. The 16 KiB arm is void for those rooms
 until fixed; fix lane dispatched on a separate worktree off
 claude/cap-sweep because the cap arms still run from that tree's
 source.
+
+## Schema fix verified except one flaky run; D568 round 1 negative; cap 24 clean (2026-09-07 00:45)
+
+Schema fix, my verification on claude/e1c-dm-facts: codex's dry-run
+reproduction on brutal room 1 now ends authorized with 1 adjustment and
+3 PC turns, 0 refusals (was partial_execution with the schema refusal);
+generator idempotent; tsc 0; my mutant (truncation classes relaxed to
+any string) kills the 17-shape invariant; file restored. The 4-spec run
+had one failure in that same invariant (5.0 s) with three arenas and
+two codex lanes loading the box, and the test passes alone on the
+restored tree; rerunning the four specs before committing, per the
+load-flake rule (rerun, never re-pin).
+
+D568 tuning round 1 (luna low, facts only, seed 6203001, answer-schema
+v2-evidence on the tuning tree 09ef9f4b): mean .970, strict FAIL, Q5
+light .749, Q1 identity .955. The evidence-bearing answer format makes
+light much worse at low effort (facts-only v1 gave .954/.968). Factor
+REJECTED for luna low; the same-tree v1 control is running to confirm
+the tree itself did not move.
+
+D567 arms so far: 16 KiB void on the five compact-fallback rooms
+(serialization defect, fix lane running), authorized on the other 15;
+24 KiB 30/30 authorized, no refusals, post-trim 23.8-24.3 KB, 35
+options omitted per room on average, wall 62 s mean. 32 running, then
+48/64.
