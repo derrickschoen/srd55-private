@@ -13337,3 +13337,28 @@ budget with D418.2 the next day; never ruled, never A/B tested; the
 base context sits at 31.4-32.8 KB on every hard room, so the cap prunes
 options (six built offense-first, down to two in room 5 on 2026-09-05)
 and actor detail on nearly every turn. Supervisor plan follows.
+
+## D567 plan dispatched (lane cap-sweep) and D568 — OWNER: luna low comprehension experiment (2026-09-06 22:44)
+
+Cap sweep: worktree dnd-wt-cap-sweep off main 1457234d, codex session
+01a079bf-bc31-7753-9ed8-d9a748684aa5, brief
+.tmp/runs/briefs-2026-09-06/cap-sweep.md: `--turn-context-max-bytes`
+knob on arena/conversation with the cap, pre/post-trim bytes and the
+options-omitted count on every row; proof that the screenshot travels
+outside every byte accounting (the tool-result cap has a 64 KiB hard
+limit, which no 128-px board PNG could fit, so the image must already
+be outside it; the lane proves it); recorder assertion follows the cap;
+a no-model-call table for caps 16/24/32/48/64 KiB on the 10 hard
+fixtures (post-trim bytes, options offered/omitted, removal classes).
+Then supervisor arms: luna medium, default profile, hard R1-10 x3 at
+16/24/32/48/64 KiB on the same tree, each judged against the 32 KiB
+control; latency per turn recorded.
+
+D568 — OWNER (verbatim): "Also do an experiment process to try to get
+Luna low comprehension as good as what we got with Luna medium that let
+it match sol high performance". Reading: the comprehension probe at
+luna low, same 24 states, with the delivery modes and encodings that
+took luna medium to .995 (semantic facts, image+facts), primer variants
+and answer schema, then whatever encoding/primer changes lift luna low,
+each replicated on seed 2. Baseline matrix launched first (model calls
+only, supervisor-run, E1b tree 49d782bb).
