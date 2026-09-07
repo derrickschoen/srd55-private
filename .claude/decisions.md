@@ -14134,3 +14134,10 @@ by hand), corrected one stale symbol its own tsc caught, claims 9 files
 387/387, tsc 0, idempotent generator; no pins moved. My verification
 chain (same nine specs, generator idempotence, tsc) is running; scans
 clean, contracts.ts unchanged, no markers.
+
+## Cap landing merge committed be3649d4 on claude/cap-fix; full gate launched (2026-09-07 04:53)
+
+Verified myself before committing: 9 spec files 387/387, generator
+idempotent, tsc 0, no markers, scans clean, contracts.ts unchanged.
+Full landing gate (tsc, sg, locked vitest, full Playwright) running on
+wt-cap-fix; merge to main and :4173 rebuild follow a green gate.
