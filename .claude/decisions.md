@@ -14263,3 +14263,29 @@ D573: at luna low, the same protocols already judged at luna medium:
 the cap sweep on hard (16/24/32/48/64 vs the 32 control) and facts vs
 control on hard and on brutal; same trees, same seeds, same panel.
 Launched now on main's tree.
+
+## D574 — OWNER: compress stat blocks to essentials; repeated monsters reference one shared block (2026-09-07 08:48)
+
+Owner (verbatim): "Can we compress the stat blocks at all? We don't need
+flavor text (need ac, hp, movement, attack info, and other essentials) .
+
+Also, multiples of the same monster should reference a shared stat
+blocks instead of repeating"
+
+Status: sharing is already in increment 1b (creature_facts.statblocks
+keyed by stat-block id; actors carry statblock_ref plus live state).
+Flavor text is not stripped yet: the block is the complete typed SRD
+entry. Amendment to 1b queued behind increment 2 (same worktree):
+essentials only (AC, HP, speeds, senses, resistances/immunities,
+saves, skills, attacks with to-hit and damage dice, multiattack,
+spells with DCs and slots, mechanical text of traits/reactions/legendary
+actions), descriptive prose removed, with a provenance note that the
+omitted text is flavor, the strict schema updated, and the 33-fixture
+byte table rerun to show the reduction.
+
+Also this tick: the arena's --dry-run records a simulated model as the
+planner (planner "model", plannedBy sol medium), so it is NOT the
+engine-top arm; the brutal-pool lane must add a real engine-top arm
+(planner "engine_top") for D572's selection. D573 luna-low reruns
+launched on a run worktree off main (caps 16-64 hard; facts vs control
+hard and brutal).
