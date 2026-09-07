@@ -13861,3 +13861,29 @@ runs of identical inputs (E1b seed 1 .954, seed 2 .993, this control
 .919), so a light gain under ~.05 is noise and needs both seeds and a
 repeat. Round 2 launched: primer-variant v9-checklist as the single
 factor (v1 answer schema, same tree, seed 1).
+
+## Both defect fixes verified and committed: cap-fix 1c7c4677 (claude/cap-fix), schema fix 56bcd859 (claude/e1c-dm-facts) (2026-09-07 01:23)
+
+cap-fix, verified myself: forbidden scans clean, contracts.ts unchanged;
+my dry-run reproduction at 16 KiB on hard seed 5117001 now ends
+authorized with no refusals (post-trim 5,154 B, compact fallback); five
+specs 248/248; generator idempotent; tsc 0; my mutant (the wrapper's
+serialization-violation check disabled) killed by "never emits
+undefined from the tool-result wrapper"; handler.ts restored
+byte-identical. Root cause per codex and consistent with the rows:
+renderer_attribution emitted as undefined in the compact fallback,
+dropped by the text payload, rejected in the structured payload.
+
+Schema fix amendment, verified myself: the invariant split into 17
+per-shape tests with a shared beforeAll; the four-file set twice at
+142/142 (23 s each), tsc 0. Together with the earlier chain (dry-run
+reproduction, generator idempotence, my truncation-enum mutant) the fix
+is verified. Note for the landing: the E1c lineage gained its own
+schema generator and docs/specs/engine-get-turn-context-output.schema.json
+while main's lineage (cap-fix) regenerates docs/specs/
+engine-turn-context.schema.json with main's generator; the merge lane
+must reconcile the two into main's generator.
+
+Next: rerun the void arms on fixed builds: cap 16 (cap-fix tree) and
+the E1cb brutal arms (schema-fixed E1c tree), after the 48/64 arms free
+the model lanes.
