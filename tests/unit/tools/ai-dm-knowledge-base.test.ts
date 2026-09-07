@@ -3,9 +3,15 @@ import { isAbsolute, join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   AI_DM_KB_FIXTURE_DIRECTORY,
+  D569_AI_DM_KB_COMPONENT_PATHS,
+  D569_AI_DM_KB_PROVENANCE,
+  D569_AI_DM_KB_ROOT,
   DEFAULT_AI_DM_KB_ROOT,
   KB_SUBJECTS,
+  loadD569AiDmKnowledgeBase,
+  loadD569KbProvenanceManifest,
   loadAiDmKnowledgeBase,
+  scanD569KnowledgeBaseBytes,
 } from '../../../src/vtt/knowledge-base-contract';
 import { SRD_ATTRIBUTION_NOTICE } from '../../../src/rules/srd-attribution';
 import {
@@ -44,8 +50,13 @@ const fixturePaths = [
   'tests/fixtures/ai-dm-kb/k7-close.txt',
 ] as const;
 
+const d569FixturePaths = [
+  ...D569_AI_DM_KB_COMPONENT_PATHS,
+  D569_AI_DM_KB_PROVENANCE,
+] as const;
+
 const arenaFixture = 'tests/fixtures/arena-basis/seed-3943001.json' as const;
-const inputs = declareTestInputs({ fixtures: [...fixturePaths, arenaFixture] });
+const inputs = declareTestInputs({ fixtures: [...fixturePaths, ...d569FixturePaths, arenaFixture] });
 const fixtureText = (path: (typeof fixturePaths)[number]): string => inputs.fixtures.readText(path);
 const rootText = fixtureText(DEFAULT_AI_DM_KB_ROOT);
 const tacticsText = fixtureText('tests/fixtures/ai-dm-kb/tactics.md');
@@ -54,6 +65,14 @@ const subjectPaths = KB_SUBJECTS.map((subject) =>
 
 function sha256(text: string): string {
   return createHash('sha256').update(Buffer.from(text, 'utf8')).digest('hex');
+}
+
+function d569ComponentEntries(bundle: Awaited<ReturnType<typeof loadD569AiDmKnowledgeBase>>) {
+  return [
+    bundle.root,
+    bundle.tactics,
+    ...KB_SUBJECTS.map((subject) => bundle.subjects[subject]),
+  ] as const;
 }
 
 function copyFixturePackage(destinationRoot: string): void {
@@ -268,5 +287,80 @@ describe('D466 AI DM knowledge-base fixture package', () => {
     expect(budget.records()).toEqual([
       expect.objectContaining({ subject: 'protocol', ordinal: 1 }),
     ]);
+  });
+});
+
+describe('D569 shared blind/advice knowledge-base fixture package', () => {
+  it('loads byte-identical components and hashes for both DM modes', async () => {
+    const [advice, blind] = await Promise.all([
+      loadD569AiDmKnowledgeBase(process.cwd(), 'advice'),
+      loadD569AiDmKnowledgeBase(process.cwd(), 'blind'),
+    ]);
+    const adviceComponents = d569ComponentEntries(advice);
+    const blindComponents = d569ComponentEntries(blind);
+
+    expect(advice.root.repoRelativePath).toBe(D569_AI_DM_KB_ROOT);
+    expect(advice.startupInstructions).toBe(blind.startupInstructions);
+    expect(advice.combinedStartupHash).toBe(blind.combinedStartupHash);
+    expect(advice.componentSha256).toEqual(blind.componentSha256);
+    expect(adviceComponents.map((component) => Buffer.from(component.text, 'utf8')))
+      .toEqual(blindComponents.map((component) => Buffer.from(component.text, 'utf8')));
+    expect(adviceComponents.map((component) => component.sha256)).toEqual(
+      D569_AI_DM_KB_COMPONENT_PATHS.map((path) =>
+        sha256(inputs.fixtures.readText(path))),
+    );
+  });
+
+  it('byte-scans startup, tactics, every subject, and provenance for the complete forbidden vocabulary', async () => {
+    const bundle = await loadD569AiDmKnowledgeBase(process.cwd(), 'blind');
+    const realComponents = [
+      ...d569ComponentEntries(bundle).map((component) => ({
+        name: component.repoRelativePath,
+        bytes: Buffer.from(component.text, 'utf8'),
+      })),
+      { name: D569_AI_DM_KB_PROVENANCE, bytes: inputs.fixtures.readBytes(D569_AI_DM_KB_PROVENANCE) },
+    ];
+    expect(scanD569KnowledgeBaseBytes(realComponents)).toEqual([]);
+
+    const scannerSentinels = [
+      'option_id', 'OPTION_REF', 'option id', 'option ref', 'offered option',
+      'primary_option', 'fallback_option', 'options_omitted_for_size', 'option count',
+      'option_index', 'option score', 'ranked option', 'top recommendation',
+      'current legal move', 'engine.', 'proposal',
+      'suggested_plan', 'suggested plan', 'team_plan_frontier', 'tactical_intel',
+      'tactical intel', 'intel_mode', 'engine advert', 'adverts', 'consequence_card',
+      'consequence card', 'opportunity_cost', 'opportunity cost', 'movement_options',
+      'applicable_play', 'play_id', 'snippet',
+      'engine rank',
+    ] as const;
+    const seeded = scannerSentinels.map((token, index) => ({
+      name: `seeded-${String(index)}`,
+      bytes: Buffer.from(token, 'utf8'),
+    }));
+    expect(scanD569KnowledgeBaseBytes(seeded).map((finding) => finding.component))
+      .toEqual(seeded.map((component) => component.name));
+  });
+
+  it('records complete allowlisted provenance with no restricted-source claim', async () => {
+    const manifest = await loadD569KbProvenanceManifest(process.cwd());
+    const rawManifest = inputs.fixtures.readText(D569_AI_DM_KB_PROVENANCE);
+    const componentPaths = manifest.components.map((component) => component.path);
+
+    expect(componentPaths).toEqual(D569_AI_DM_KB_COMPONENT_PATHS);
+    expect(new Set(componentPaths).size).toBe(D569_AI_DM_KB_COMPONENT_PATHS.length);
+    expect(manifest.components.every((component) =>
+      component.revision.startsWith('d569-') && component.sources.length > 0)).toBe(true);
+    expect(manifest.components.map((component) => component.sha256)).toEqual(
+      D569_AI_DM_KB_COMPONENT_PATHS.map((path) => sha256(inputs.fixtures.readText(path))),
+    );
+    expect(manifest.components.flatMap((component) => component.sources)
+      .every((source) => source.kind === 'cc_by_srd' || source.kind === 'project_experience'))
+      .toBe(true);
+    expect(manifest.components.flatMap((component) => component.sources)
+      .filter((source) => source.kind === 'cc_by_srd')
+      .every((source) => source.locator.startsWith('docs/srd/'))).toBe(true);
+    expect(inputs.fixtures.readText(D569_AI_DM_KB_ROOT).replace(/\s+/gu, ' ').trim())
+      .toContain(SRD_ATTRIBUTION_NOTICE);
+    expect(rawManifest).not.toMatch(/\b(?:BG3|Baldur(?:'s)? Gate|Nimble|private[-_ ]research)\b/iu);
   });
 });

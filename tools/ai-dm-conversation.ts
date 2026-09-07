@@ -639,6 +639,11 @@ export type ConversationRow = ConversationRowBase & ConversationBoardImageFields
 /** The complete row shape written by the conversation runner. */
 export type ConversationRowPersisted = ConversationRow;
 
+/** Exact JSONL payload for one persisted conversation row. */
+export function serializeConversationRow(row: ConversationRowPersisted): string {
+  return JSON.stringify(row);
+}
+
 export interface ConversationPlannerAttribution {
   readonly model: string;
   readonly effort: ConversationEffort;
@@ -5239,7 +5244,7 @@ async function runConversationWithConfiguredIntel(
         ...(capturedRlData === undefined ? {} : { rlData: capturedRlData }),
       };
       rows.push(row);
-      await appendFile(config.outPath, `${JSON.stringify(row)}\n`, 'utf8');
+      await appendFile(config.outPath, `${serializeConversationRow(row)}\n`, 'utf8');
       completedRounds += 1;
       if (!restoredMidRun && options.restoreAfterRound === completedRounds) {
         const saved = journal.export();

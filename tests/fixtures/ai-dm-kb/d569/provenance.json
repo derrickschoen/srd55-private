@@ -1,0 +1,81 @@
+{
+  "version": "d569-kb-provenance-v1",
+  "components": [
+    {
+      "path": "tests/fixtures/ai-dm-kb/d569/ai-dm-core.md",
+      "revision": "d569-shared-root-v1",
+      "sha256": "63d6afcd3b60bce70a2ad3290d493b01b6fdde449b07fe3bd3d6cc8a6e9b46a0",
+      "sources": [
+        { "kind": "cc_by_srd", "locator": "docs/srd/full/srd-5.2.1.txt (title and license identity)" },
+        { "kind": "project_experience", "locator": "clean-room encounter-runner operating principles" }
+      ]
+    },
+    {
+      "path": "tests/fixtures/ai-dm-kb/d569/tactics.md",
+      "revision": "d569-general-tactics-v1",
+      "sha256": "c814163a76b498898d66b76f1fe00347fc21418961d9323c8c3ae9b793959217",
+      "sources": [
+        { "kind": "project_experience", "locator": "clean-room general turn-planning heuristics" }
+      ]
+    },
+    {
+      "path": "tests/fixtures/ai-dm-kb/d569/actions.md",
+      "revision": "d569-actions-v1",
+      "sha256": "8a602475e6cc11c7ac639b428c2f5860c9c661eaf9edc8cd35fe9685168dcd94",
+      "sources": [
+        { "kind": "cc_by_srd", "locator": "docs/srd/full/srd-5.2.1.txt (Playing the Game: Combat; Rules Glossary: Dash, Disengage, Dodge)" }
+      ]
+    },
+    {
+      "path": "tests/fixtures/ai-dm-kb/d569/movement.md",
+      "revision": "d569-movement-v1",
+      "sha256": "c68646bd03f61592879bf8ddf236ae59e56040ab4221256ce0bbecff6a8b648d",
+      "sources": [
+        { "kind": "cc_by_srd", "locator": "docs/srd/full/srd-5.2.1.txt (Playing the Game: Movement and Position; Rules Glossary: Difficult Terrain and Opportunity Attacks)" },
+        { "kind": "project_experience", "locator": "clean-room board-reading guidance" }
+      ]
+    },
+    {
+      "path": "tests/fixtures/ai-dm-kb/d569/targeting.md",
+      "revision": "d569-targeting-v1",
+      "sha256": "161778bae974673124d7f38b3cc4faa1ed946bcbaa5c12e1938cf5638b5a441a",
+      "sources": [
+        { "kind": "project_experience", "locator": "clean-room multi-creature coordination guidance" }
+      ]
+    },
+    {
+      "path": "tests/fixtures/ai-dm-kb/d569/spells.md",
+      "revision": "d569-spells-v1",
+      "sha256": "27f73d9cb7aca97cc78a3e9ec0e9274e098d2b1744b1435d422356830f7e6ba8",
+      "sources": [
+        { "kind": "cc_by_srd", "locator": "docs/srd/full/srd-5.2.1.txt (Playing the Game: Casting a Spell; Rules Glossary: Concentration)" },
+        { "kind": "project_experience", "locator": "clean-room resource-planning guidance" }
+      ]
+    },
+    {
+      "path": "tests/fixtures/ai-dm-kb/d569/conditions.md",
+      "revision": "d569-conditions-v1",
+      "sha256": "07ae4d9ddd54a54957be3cef08c63b4b7d0e7647441d9d760b32730ae430396a",
+      "sources": [
+        { "kind": "cc_by_srd", "locator": "docs/srd/full/srd-5.2.1.txt (Rules Glossary condition entries)" }
+      ]
+    },
+    {
+      "path": "tests/fixtures/ai-dm-kb/d569/reactions.md",
+      "revision": "d569-reactions-v1",
+      "sha256": "31cc283448f8713b5ed5a65571da5385aef111c0d9102332c67cc200837704b0",
+      "sources": [
+        { "kind": "cc_by_srd", "locator": "docs/srd/full/srd-5.2.1.txt (Playing the Game: Opportunity Attacks; Rules Glossary: Opportunity Attacks)" },
+        { "kind": "project_experience", "locator": "clean-room trigger-prioritization guidance" }
+      ]
+    },
+    {
+      "path": "tests/fixtures/ai-dm-kb/d569/protocol.md",
+      "revision": "d569-round-intent-v1",
+      "sha256": "d1f935e8588356dbb5a037f54e0f2dfcf6b9043e610845dc090985a1883ed99f",
+      "sources": [
+        { "kind": "project_experience", "locator": "clean-room tabletop-intent expression guidance" }
+      ]
+    }
+  ]
+}
