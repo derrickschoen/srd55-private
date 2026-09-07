@@ -14725,3 +14725,36 @@ failing membership stops the lane; no hand edits, no override entries.
 Note for landing: claude/blind-dm does not contain main's brutal-b,
 cap-fix or E1c landings (2d8b1cfc is not an ancestor); merge main into
 the lane before its full gate.
+
+## D569 increment 5 harvest (4f3efb63) and increment 6 dispatch; pool three-rep arms complete (2026-09-07 16:37)
+
+Increment 5, codex session 01a07d47-ab64-7b31-b1a7-1103952117cc.
+Claims: both families generated and independently regenerated 10/10
+byte-identical; pins coupled to reducer load, regions/footprints and
+difficulty membership; manifest carries the ledger entry verbatim;
+3 specs 89 tests; tsc clean; four named mutants killed and restored to
+5f951df4...; existing fixture aggregates unchanged.
+
+Supervisor verified on dnd-wt-blind-dm: the 3 specs 89/89; tsc exit 0;
+I regenerated both families myself into a scratch directory and
+diff -rq reports both identical to the committed fixtures (10 files
+each); no existing fixture modified; contracts.ts hash unchanged; no
+removed tests; no forbidden patterns; no git writes; the lane log's
+second "claude -p" hit is a quotation of decisions.md, not a call.
+Supervisor mutant M-SUP-I5-LEDGER-DROPS-6204 (remove the 6204
+namespace from the used-seed ledger constant, which would let a future
+manifest claim a used range as independent): killed, 1 failed / 26
+passed, restored (log .tmp/runs/mut-sup-i5.log).
+
+Increment 6 dispatched (session 01a07d96-916f-7073-bb57-8cf4b7d06e4c).
+Amendments carried: the second family is 5118/6207 via the frozen
+manifest; D575 arms are luna (high/medium/low per the maxed-state
+machine), opus, fable and sol high, each blind and advice, with the
+per-model blind-vs-advice and luna-vs-judge comparisons alongside the
+standing ceiling comparison; the ten pairwise packets from increment 4
+are consumed, not rebuilt; BLOCKED rather than a guessed cell count if
+the plan's counts cannot be reconciled.
+
+Pool three-rep arms complete: pool3-engine-top, pool3-luna-medium and
+pool3-sol-high, 90 rows each (30 rooms x 3 reps), all exit 0. Packet
+build, judging and struggle-room selection are the next pool step.
