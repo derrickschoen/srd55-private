@@ -13984,3 +13984,30 @@ luna_control 30/30, sol_facts 28/30 (2 refused at attempts 0: see the
 refusal text in the run record; not the schema refusal). Packets
 (brutal-10, shuffle 9064) built with the E1c tree's builder; the
 standing panel is judging both.
+
+## D565 first positive: on brutal, luna medium + semantic board beats its control (+0.54 [+0.12, +1.16]) and reaches parity with sol high + facts (2026-09-07 02:54)
+
+Standing panel, blinded, brutal 10x3, seed 6203001, 240 s wall,
+schema-fixed E1c build 56bcd859 (unseal-e1cc.md):
+- luna_facts - luna_control: +0.54, 95% seed-clustered CI [+0.12,
+  +1.16] (7.18 vs 6.63; sol judge 8.57/8.07, opus 6.60/5.97, fable
+  6.37/5.87: all three seats agree in direction). Per room: no room
+  lost; 6203002 +3.00 (3.89 -> 6.89), 6203001 +0.78, 6203010 +0.78,
+  6203005 +0.56, 6203008 +0.22, 6203009 +0.11, four rooms tied. Rubric:
+  target priority 2.04 -> 2.31, action economy 1.62 -> 1.81, coherence
+  1.63 -> 1.72, positioning unchanged.
+- sol_facts - luna_facts: -0.46 [-1.32, +0.26] (6.86 vs 7.31): parity;
+  sol's two 240 s timeouts (rooms 8 and 9) score zero in that packet,
+  so on executed rows sol is closer to even. Rubric: luna_facts target
+  priority 2.28 vs sol 1.94.
+Reading: with the block delivered whole and the adjustment path
+working, engine facts in the live context are the first change that
+raises luna medium's judged play, and only where the basis has
+headroom (hard: neutral at 8.8/10; brutal: +0.54 at 6.6/10). D565's
+fluke guard applies before this is called an improvement: (1) a
+fresh-session replication of both luna arms on the same rooms
+(sampling noise), launched now; (2) a second brutal seed family with
+no per-seed generator overrides, generated and frozen by a codex lane
+with membership tests and a `brutal-10-b` packet protocol, then the
+same two arms on it. Sol-high parity is reported with the timeout
+caveat and is not the claim.
