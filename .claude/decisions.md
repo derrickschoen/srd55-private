@@ -14115,3 +14115,22 @@ dispatched on the brutal-b tree (reproduce by dry run, identify the
 pending decision kind, resolve it under the unattended policy or fix
 the engine, add the invariant that every basis room's round 1 executes
 under the unattended harness).
+
+## D565 facts lever: third look on the second brutal family is null; verdict closed (2026-09-07 04:38)
+
+Second family 6206001-10 (never run before), luna medium facts vs
+control, 10x3: luna_facts - luna_control = +0.12, 95% CI [-0.03,
++0.34] (5.53 vs 5.41; all three seats within 0.2 of each other; room
+6206009 zero on both sides from the boundary-decision defect). With the
+first run (+0.54), its fresh-session replication (-0.29) and the pooled
++0.13 [-0.21, +0.57], the semantic board in the live context has no
+demonstrated effect on luna medium's judged play on either basis.
+Closed. Recorded for D565: comprehension solved (probe .83 -> .99 at
+low and medium), play unchanged; the lever for play is elsewhere.
+
+Cap landing merge (claude/cap-fix + main): codex resolved 18 hunks (12 of
+them in the generated schema, regenerated through the generator, not
+by hand), corrected one stale symbol its own tsc caught, claims 9 files
+387/387, tsc 0, idempotent generator; no pins moved. My verification
+chain (same nine specs, generator idempotence, tsc) is running; scans
+clean, contracts.ts unchanged, no markers.
