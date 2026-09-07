@@ -13672,3 +13672,11 @@ comprehension on both seeds; the residual is Q1 identity/coordinates
 (~.96-.97) and, on seed 1 only, Q5 light (.95). Next D568 tuning round
 targets the identity answer format (answer-schema v2-evidence) as the
 single factor, seed 1 then seed 2.
+
+## D568 note: at luna low the image competes with the facts on light (2026-09-07 00:07)
+
+Seed 2 image+facts scored Q5 light .909 [.796, .991] against .993 for
+facts alone on the same boards; seed 1 showed .952 vs .954. At low
+effort the picture pulls the light answer away from the text partition
+instead of confirming it. Facts-only is the luna-low candidate; the
+image is reintroduced only if a later factor makes it help.
