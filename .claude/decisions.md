@@ -14561,3 +14561,22 @@ D573 luna low, brutal facts vs control: -0.12 [-0.39, +0.14]: null,
 matching medium on brutal. D573 verdict complete: at luna low the cap
 sweep has the same shape as medium and sharper (24 = 32, larger caps
 hurt more), facts hurt on hard (-0.33) and are null on brutal.
+
+## FINDING (D572): in advice mode the models mostly execute the engine's top recommendation; the struggle set cannot be built from these arms (2026-09-07 12:39)
+
+Pool screen, 30 rooms, one rep, plans compared by option id per actor:
+luna medium == engine-top on 19/30 rooms, sol high == engine-top on
+20/30, all three identical on 14/30. Where they differ the seat
+scores mostly tie anyway. The selection rule (bottom-tertile luna AND
+all three seats scoring engine-top below sol) selects 1 room (6208016);
+6208030 has unanimous seats but luna is not bottom-tertile. The tool
+works (the packet guard bug is fixed on the pool branch); the arms do
+not diverge from the engine enough to expose "engine top is not the
+best play". Two ways forward, both started or planned: (a) three reps
+of luna medium and sol high on the pool to accumulate divergence
+(launched; engine-top is deterministic and stands); (b) the D569 blind
+arms, which by construction do not see the recommendation, are the
+natural comparison for D572 and will be run on the pool when increment
+4 lands. The 24/32/48 rerun on the struggle set waits for a set of ten.
+Also recorded: the judge panel scores identical plans identically, so
+seat-level ties are expected when arms copy each other.
