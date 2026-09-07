@@ -14595,3 +14595,32 @@ reason became optional (tested; never judged), and the resolver's
 deadline defaults to the 180 s live wall unless the caller injects one,
 so increment 4 must pass the arena's 240 s experiment wall through
 that dependency.
+
+## D576.2 — OWNER: cover is not linked to passability; looked up in the SRD and community rulings (2026-09-07 13:30)
+
+Owner (verbatim): "Look up in the srd and what the community rulings
+are. I don't think cover is necessary linked to pass ability"
+
+Lookup: SRD 5.2.1 (docs/srd/full/srd-5.2.1.txt lines 925-954) defines
+cover by how much of the target an object or creature covers and says
+nothing about movement; the Difficult Terrain rule (lines 872-883)
+names "low furniture, rubble, undergrowth, steep stairs" as examples,
+the same objects that grant half cover; another creature's space is
+difficult terrain and creatures grant half cover. Community reading
+(2014 text: "a low wall, a large piece of furniture, a narrow tree
+trunk, or a creature" as half cover; jumping "a hedge or low wall" with
+an Athletics check at the GM's option): low cover is crossable at a
+cost, tall solid things are not, and cover degree is independent of
+passability. No official ruling links the two.
+
+Ruling as applied to D576 (supersedes the plan's default): each terrain
+feature carries two typed dimensions, cover tier (none, half,
+three_quarters, total) and passability (open, difficult, blocked), with
+the consistency rules total => blocked and blocked-sight => total. Walls
+(existing blocked cells) are total + blocked + no sight; generated low
+cover (barricades, crates, low walls) is half + difficult; arrow slits
+and portcullises are three_quarters + blocked; living creatures give
+half cover and their space is difficult terrain as the SRD says. The
+map draws both cues per feature (tier mark and a crossable mark),
+the legend names both, and the query tool reports both. Increment 1a
+dispatched with this ruling.
