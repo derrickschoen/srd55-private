@@ -46,6 +46,7 @@ import type {
   PlayerBoardProjection,
   ProjectedControllerRequest,
 } from './encounter-projections';
+import { projectStateOnlyDmBoard } from './encounter-projections';
 import {
   decodePlayerDecision,
   isHostWindowMessage,
@@ -92,6 +93,9 @@ import type { OfferedOptionPath } from './offered-option-paths';
 
 const HEARTBEAT_INTERVAL_MS = 250;
 const HEARTBEAT_TIMEOUT_MS = 1_000;
+
+export type BoardSnapshotInformationMode = 'advice' | 'blind_state';
+export type BoardSnapshotRole = 'dm_board' | 'accessible_board_raster' | 'player_board';
 
 function element<K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -1353,6 +1357,7 @@ class DmEncounterView {
   readonly #channel: BroadcastChannel;
   #shell = element('main', { className: 'encounter-shell dm-encounter' });
   #projection: DmBoardProjection | null = null;
+  #playerProjection: PlayerBoardProjection | null = null;
   #channelError: string | null = null;
   #saveManagerError: string | null = null;
   #folderSaves: readonly SaveManagerEntry[] = [];
@@ -1393,6 +1398,8 @@ class DmEncounterView {
     private readonly loadBoardSnapshotSession?: (sessionId: string) => Promise<void>,
     private readonly boardGlyphs?: BoardGlyphMode,
     private readonly captureTilePx?: BoardChromeTilePx,
+    private readonly boardSnapshotInformation: BoardSnapshotInformationMode = 'advice',
+    private readonly boardSnapshotRole: BoardSnapshotRole = 'dm_board',
   ) {
     this.#boardView = readAccessibleBoardViewMode(localStorage, 'dm');
     this.#store = store;
@@ -1439,6 +1446,8 @@ class DmEncounterView {
     loadBoardSnapshotSession?: (sessionId: string) => Promise<void>,
     boardGlyphs?: BoardGlyphMode,
     captureTilePx?: BoardChromeTilePx,
+    boardSnapshotInformation: BoardSnapshotInformationMode = 'advice',
+    boardSnapshotRole: BoardSnapshotRole = 'dm_board',
   ): Promise<DmEncounterView> {
     const store = await IndexedDbBrowserSessionStore.open(indexedDB, localStorage);
     const view = new DmEncounterView(
@@ -1451,6 +1460,8 @@ class DmEncounterView {
       loadBoardSnapshotSession,
       boardGlyphs,
       captureTilePx,
+      boardSnapshotInformation,
+      boardSnapshotRole,
     );
     await store.flush();
     return view;
@@ -1491,7 +1502,10 @@ class DmEncounterView {
           this.#recoverySelection = null;
           this.#focusAfterRender = nextKey === null ? 'active_token' : 'recovery';
         }
-        this.#projection = snapshot.dm;
+        this.#projection = this.boardSnapshotInformation === 'blind_state'
+          ? projectStateOnlyDmBoard(snapshot.dm)
+          : snapshot.dm;
+        this.#playerProjection = snapshot.player;
         if (!snapshot.dm.movementPreviews.some(
           (preview) => preview.commandKey === this.#movementPreviewKey,
         )) this.#movementPreviewKey = null;
@@ -2073,13 +2087,18 @@ class DmEncounterView {
     )) {
       throw new Error('DM board omitted encounter fog.');
     }
-    const movementPreview = projection.movementPreviews.find(
-      (preview) => preview.commandKey === this.#movementPreviewKey,
-    ) ?? null;
+    const movementPreview = this.boardSnapshotInformation === 'blind_state'
+      ? null
+      : projection.movementPreviews.find(
+          (preview) => preview.commandKey === this.#movementPreviewKey,
+        ) ?? null;
     const previewCells = new Set(movementPreview?.path.map(
       (cell) => `${String(cell.column)},${String(cell.row)}`,
     ) ?? []);
-    if (projection.pendingPlacementRecovery !== null) {
+    if (
+      this.boardSnapshotInformation !== 'blind_state' &&
+      projection.pendingPlacementRecovery !== null
+    ) {
       this.#shell.append(this.#renderPendingPlacementRecovery(projection.pendingPlacementRecovery));
       const selection = this.#recoverySelection;
       const sizeOption = selection === null
@@ -2129,15 +2148,68 @@ class DmEncounterView {
         return;
       }
     }
-    this.#shell.append(renderBoard(projection.board, previewCells, movementPreview, {
+    const renderedBoard = renderBoard(projection.board, previewCells, movementPreview, {
       revision: projection.encounter.revision,
       round: projection.board.round,
       stateDigest: projection.stateDigest,
     }, this.boardGlyphs, this.boardSnapshotMode, this.captureTilePx,
-    this.boardSnapshotMode || this.#showOfferedOptionPaths
+    this.boardSnapshotInformation !== 'blind_state' &&
+      (this.boardSnapshotMode || this.#showOfferedOptionPaths)
       ? projection.offeredOptionPaths
-      : null, this.#stackSelection));
+      : null, this.#stackSelection);
+    if (this.boardSnapshotInformation === 'blind_state') {
+      renderedBoard.dataset.blindSnapshotCapture = 'true';
+      renderedBoard.dataset.blindSnapshotRole = 'dm_board';
+    }
+    this.#shell.append(renderedBoard);
     if (movementPreview !== null) this.#shell.append(renderMovementDangerLegend(movementPreview));
+  }
+
+  #markBlindSnapshotCapture(
+    element: HTMLElement,
+    projection: DmBoardProjection,
+    role: BoardSnapshotRole,
+  ): void {
+    element.dataset.blindSnapshotCapture = 'true';
+    element.dataset.blindSnapshotRole = role;
+    element.dataset.boardAudience = role === 'player_board' ? 'player' : 'dm';
+    element.dataset.sourceRevision = String(projection.encounter.revision);
+    element.dataset.sourceRound = String(projection.board.round);
+    element.dataset.sourceStateDigest = projection.stateDigest;
+    element.dataset.boardGlyphs = encounterArtForBoard(
+      projection.board,
+      this.boardGlyphs,
+    ).boardGlyphs;
+  }
+
+  #renderBlindStateSnapshot(projection: DmBoardProjection): void {
+    switch (this.boardSnapshotRole) {
+      case 'dm_board':
+        this.#renderDmBoard(projection);
+        return;
+      case 'accessible_board_raster': {
+        const accessible = renderAccessibleBoard({
+          encounterName: this.#sessionFlow?.name ?? 'Reference encounter',
+          audience: 'dm',
+          round: projection.board.round,
+          activeCombatant: projection.board.activeCombatant,
+          board: projection.board,
+        });
+        // D571 leaves action/target-specific reach conclusions to the model.
+        accessible.querySelector('#reach-heading')?.closest('section')?.remove();
+        this.#markBlindSnapshotCapture(accessible, projection, 'accessible_board_raster');
+        this.#shell.append(accessible);
+        return;
+      }
+      case 'player_board': {
+        const player = this.#playerProjection;
+        if (player === null) return;
+        const board = renderBoard(player, new Set(), null, undefined, this.boardGlyphs);
+        this.#markBlindSnapshotCapture(board, projection, 'player_board');
+        this.#shell.append(board);
+        return;
+      }
+    }
   }
 
   #renderFresh(): void {
@@ -2149,7 +2221,11 @@ class DmEncounterView {
     if (projection === null) return;
     if (this.boardSnapshotMode) {
       this.#shell.replaceChildren();
-      this.#renderDmBoard(projection);
+      if (this.boardSnapshotInformation === 'blind_state') {
+        this.#renderBlindStateSnapshot(projection);
+      } else {
+        this.#renderDmBoard(projection);
+      }
       this.#shell.append(this.#renderSaveManager());
       return;
     }
@@ -3060,6 +3136,8 @@ export function mountEncounterVtt(
     readonly encounter?: StoredCharacterEncounter;
     readonly initialSeed?: EncounterSeed;
     readonly boardSnapshotMode?: boolean;
+    readonly boardSnapshotInformation?: BoardSnapshotInformationMode;
+    readonly boardSnapshotRole?: BoardSnapshotRole;
     /** D525: the snapshot page's `boardGlyphs` URL parameter; absent, the art package decides. */
     readonly boardGlyphs?: BoardGlyphMode;
     /** D561: snapshot-only chrome lattice pitch; absent keeps the 128-px app default. */
@@ -3097,6 +3175,8 @@ export function mountEncounterVtt(
         : undefined,
       options.boardGlyphs,
       options.captureTilePx,
+      options.boardSnapshotInformation,
+      options.boardSnapshotRole,
     );
     if (closed) {
       view.close();

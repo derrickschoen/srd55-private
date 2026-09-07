@@ -198,6 +198,25 @@ function launcherHasUiFeedback(manifest: EngineMcpLauncherManifest): boolean {
   return lines.length === 1;
 }
 
+export interface EngineMcpBoardDomEvidence {
+  readonly optionSurfaceAbsent: true;
+  readonly nextEventPreviewAbsent: true;
+  readonly coordinateLabels: number;
+  readonly creatureBadges: number;
+  readonly rosterEntries: number;
+  readonly hpBars: number;
+  readonly legendEntries: number;
+  readonly blockedCells: number;
+  readonly difficultCells: number;
+  readonly obscuredCells: number;
+  readonly illuminatedCells: number;
+  readonly fogMarks: number;
+  readonly doors: number;
+  readonly objects: number;
+  readonly hiddenMarks: number;
+  readonly multiCellFootprints: number;
+}
+
 export interface EngineMcpBoardImageArtifact {
   readonly version: 'arena-board-image-v1';
   readonly audience: 'dm';
@@ -216,6 +235,15 @@ export interface EngineMcpBoardImageArtifact {
     readonly stateDigest: string;
   };
   readonly chromiumVersion: string;
+  readonly blindState?: {
+    readonly informationMode: 'blind_state';
+    readonly role: 'dm_board' | 'accessible_board_raster' | 'player_board';
+    readonly ordinal: number;
+    readonly primerVersion: string;
+    readonly glyphMode: 'none' | 'light' | 'full';
+    readonly captureTilePx: 64 | 128;
+    readonly domEvidence: EngineMcpBoardDomEvidence;
+  };
   readonly html?: {
     readonly relativePath: `board-html/${string}/board.html`;
     readonly sha256: string;
@@ -257,6 +285,8 @@ export interface EngineMcpLauncherManifest {
     readonly scenarios: readonly HostScenario[];
   };
   readonly toolProfile?: EngineMcpToolProfile;
+  readonly dmMode?: DmMode;
+  readonly blindVisuals?: readonly BlindVisualDescriptor[];
   readonly turnContextDeltaBase?: TurnContextDeltaBase;
   readonly rendererProfile?: RendererProfile;
   readonly turnContextMaximumBytes?: number;
@@ -313,12 +343,21 @@ export function createEngineMcpRuntime(
     readonly kbReadCallPhase?: KbReadCallPhase;
     readonly overridePolicy?: OverridePolicy;
     readonly boardImageContent?: McpImageContentBlock;
+    readonly boardImageContents?: readonly McpImageContentBlock[];
     readonly boardHtmlContent?: McpTextContentBlock;
     readonly onUiFeedback?: (feedback: EngineUiFeedback) => void;
     readonly roundDecisionAlreadyAccepted?: boolean;
     readonly uiFeedbackAlreadySubmitted?: boolean;
   } = {},
 ): EngineMcpRuntime {
+  if (options.boardImageContent !== undefined && options.boardImageContents !== undefined) {
+    throw new TypeError('Use either boardImageContent or boardImageContents, not both.');
+  }
+  const boardImageContents = options.boardImageContents ??
+    (options.boardImageContent === undefined ? [] : [options.boardImageContent]);
+  if ((options.dmMode === 'blind' || options.toolProfile === 'blind') && options.boardHtmlContent !== undefined) {
+    throw new TypeError('Blind MCP delivery prohibits accessible-board HTML attachment.');
+  }
   const candidates = state.combatants
     .filter((candidate) => candidate.profile.kind === 'monster' && candidate.life !== 'dead')
     .map((candidate) => candidate.profile.id)
@@ -334,7 +373,7 @@ export function createEngineMcpRuntime(
   const revision = options.revision ?? 1;
   const phase = options.phase ?? 'initial';
   const correctionNumber = options.correctionNumber ?? (phase === 'correction' ? 1 : 0);
-  if ((options.boardImageContent !== undefined || options.boardHtmlContent !== undefined) &&
+  if ((boardImageContents.length > 0 || options.boardHtmlContent !== undefined) &&
     (phase === 'speculative' || options.requestKind === 'plan_adjustment')) {
     throw new TypeError('Board artifacts may bind only to ordinary round-plan MCP launchers.');
   }
@@ -431,7 +470,7 @@ export function createEngineMcpRuntime(
     } },
     narration: { append: (envelope) => { narrations.push(envelope); } },
     adjudications: { append: (envelope) => { adjudications.push(envelope); } },
-    ...(options.boardImageContent === undefined ? {} : {
+    ...(boardImageContents.length === 0 ? {} : {
       uiFeedback: {
         append: (feedback: EngineUiFeedback) => {
           uiFeedback.push(structuredClone(feedback));
@@ -482,11 +521,11 @@ export function createEngineMcpRuntime(
     ...(options.kbReadBudget === undefined ? {} : { kbReadBudget: options.kbReadBudget }),
     ...(options.kbReadCallPhase === undefined ? {} : { kbReadCallPhase: options.kbReadCallPhase }),
     ...(options.overridePolicy === undefined ? {} : { overridePolicy: options.overridePolicy }),
-    ...(options.boardImageContent === undefined && options.boardHtmlContent === undefined ? {} : {
+    ...(boardImageContents.length === 0 && options.boardHtmlContent === undefined ? {} : {
       toolResultContent: ({ name }) => name === 'engine.get_turn_context'
         ? [
             ...(options.boardHtmlContent === undefined ? [] : [options.boardHtmlContent]),
-            ...(options.boardImageContent === undefined ? [] : [options.boardImageContent]),
+            ...boardImageContents,
           ]
         : [],
     }),
@@ -598,6 +637,32 @@ function isPositiveSafeInteger(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1;
 }
 
+function isBoardSnapshotDomEvidence(value: unknown): value is EngineMcpBoardDomEvidence {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const evidence = value as Readonly<Record<string, unknown>>;
+  const countKeys = [
+    'coordinateLabels', 'creatureBadges', 'rosterEntries', 'hpBars', 'legendEntries',
+    'blockedCells', 'difficultCells', 'obscuredCells', 'illuminatedCells', 'fogMarks',
+    'doors', 'objects', 'hiddenMarks', 'multiCellFootprints',
+  ] as const;
+  return Object.keys(evidence).length === countKeys.length + 2 &&
+    evidence['optionSurfaceAbsent'] === true && evidence['nextEventPreviewAbsent'] === true &&
+    countKeys.every((key) => typeof evidence[key] === 'number' &&
+      Number.isSafeInteger(evidence[key]) && evidence[key] >= 0);
+}
+
+function isBlindVisualDescriptor(value: unknown): value is BlindVisualDescriptor {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const descriptor = value as Readonly<Record<string, unknown>>;
+  return Object.keys(descriptor).length === 5 &&
+    (descriptor['kind'] === 'dm_board' || descriptor['kind'] === 'accessible_board_raster' ||
+      descriptor['kind'] === 'player_board') &&
+    isPositiveSafeInteger(descriptor['ordinal']) &&
+    typeof descriptor['primer_version'] === 'string' && descriptor['primer_version'].length > 0 &&
+    typeof descriptor['glyph_mode'] === 'string' && descriptor['glyph_mode'].length > 0 &&
+    isPositiveSafeInteger(descriptor['capture_tile_px']);
+}
+
 function isEngineMcpBoardImageBinding(value: unknown): value is EngineMcpBoardImageBinding {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
   const binding = value as Readonly<Record<string, unknown>>;
@@ -615,6 +680,7 @@ function isEngineMcpBoardImageBinding(value: unknown): value is EngineMcpBoardIm
     Object.keys(artifact).every((key) => [
       'version', 'audience', 'mimeType', 'relativePath', 'sha256', 'bytes', 'width', 'height',
       'capturedAtUnixMs', 'captureMs', 'source', 'chromiumVersion', 'html',
+      'blindState',
     ].includes(key)) &&
     artifact['version'] === 'arena-board-image-v1' && artifact['audience'] === 'dm' &&
     artifact['mimeType'] === 'image/png' && typeof sha === 'string' && /^[a-f0-9]{64}$/u.test(sha) &&
@@ -625,6 +691,21 @@ function isEngineMcpBoardImageBinding(value: unknown): value is EngineMcpBoardIm
     typeof artifact['captureMs'] === 'number' && Number.isFinite(artifact['captureMs']) &&
     artifact['captureMs'] >= 0 && typeof artifact['chromiumVersion'] === 'string' &&
     artifact['chromiumVersion'].length > 0 &&
+    (artifact['blindState'] === undefined || (() => {
+      const value = artifact['blindState'];
+      if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+      const blind = value as Readonly<Record<string, unknown>>;
+      return Object.keys(blind).every((key) => [
+        'informationMode', 'role', 'ordinal', 'primerVersion', 'glyphMode', 'captureTilePx',
+        'domEvidence',
+      ].includes(key)) && blind['informationMode'] === 'blind_state' &&
+        (blind['role'] === 'dm_board' || blind['role'] === 'accessible_board_raster' ||
+          blind['role'] === 'player_board') && isPositiveSafeInteger(blind['ordinal']) &&
+        typeof blind['primerVersion'] === 'string' && blind['primerVersion'].length > 0 &&
+        (blind['glyphMode'] === 'none' || blind['glyphMode'] === 'light' || blind['glyphMode'] === 'full') &&
+        (blind['captureTilePx'] === 64 || blind['captureTilePx'] === 128) &&
+        isBoardSnapshotDomEvidence(blind['domEvidence']);
+    })()) &&
     (artifact['html'] === undefined || (() => {
       const value = artifact['html'];
       if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
@@ -686,6 +767,7 @@ export async function validatedLauncherBoardHtmlReference(
   manifest: EngineMcpLauncherManifest,
   state: EncounterState,
 ): Promise<McpTextContentBlock | undefined> {
+  if (manifest.dmMode === 'blind' || manifest.toolProfile === 'blind') return undefined;
   const binding = manifest.boardImage;
   const html = binding?.artifact.html;
   if (binding === undefined || html === undefined) return undefined;
@@ -776,6 +858,9 @@ function isLauncherManifest(value: unknown): value is EngineMcpLauncherManifest 
         (candidate['context'] as Readonly<Record<string, unknown>>)['granularity'] === 'full';
     })()) &&
     (input['toolProfile'] === undefined || input['toolProfile'] === 'full' || input['toolProfile'] === 'dm' || input['toolProfile'] === 'blind') &&
+    (input['dmMode'] === undefined || input['dmMode'] === 'advice' || input['dmMode'] === 'blind') &&
+    (input['blindVisuals'] === undefined || Array.isArray(input['blindVisuals']) &&
+      input['blindVisuals'].every(isBlindVisualDescriptor)) &&
     (input['rendererProfile'] === undefined || rendererProfileSchema.safeParse(input['rendererProfile']).success) &&
     (input['turnContextMaximumBytes'] === undefined ||
       Number.isSafeInteger(input['turnContextMaximumBytes']) &&
@@ -878,6 +963,8 @@ export async function runEngineMcpEntrypoint(argv: readonly string[] = process.a
       ...((selectedProfile ?? manifest.toolProfile) === undefined
         ? {}
         : { toolProfile: selectedProfile ?? manifest.toolProfile }),
+      ...(manifest.dmMode === undefined ? {} : { dmMode: manifest.dmMode }),
+      ...(manifest.blindVisuals === undefined ? {} : { blindVisuals: manifest.blindVisuals }),
       ...(kbReadBudget === undefined ? {} : {
         kbReadBudget,
         kbReadCallPhase: manifest.requestKind === 'plan_adjustment'

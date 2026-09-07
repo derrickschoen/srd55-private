@@ -51,6 +51,26 @@ interface BrowserCheckResult {
   readonly manifestCarriesHtml: boolean;
 }
 
+interface BlindBrowserCheckResult {
+  readonly primerVersion: string;
+  readonly captureTilePx: number;
+  readonly results: readonly {
+    readonly difficulty: 'hard' | 'brutal';
+    readonly seed: number;
+    readonly revision: number;
+    readonly stateDigest: string;
+    readonly images: readonly {
+      readonly role: 'dm_board' | 'accessible_board_raster' | 'player_board';
+      readonly ordinal: number;
+      readonly sha256: string;
+      readonly bytes: number;
+      readonly width: number;
+      readonly height: number;
+      readonly path: string;
+    }[];
+  }[];
+}
+
 async function runBrowserCheck(outputDirectory: string): Promise<BrowserCheckResult> {
   const output = await new Promise<{ readonly stdout: string; readonly stderr: string }>((resolveRun, reject) => {
     const child = spawn('npx', [
@@ -77,6 +97,34 @@ async function runBrowserCheck(outputDirectory: string): Promise<BrowserCheckRes
   return JSON.parse(line.slice('BOARD_SNAPSHOT_RESULT '.length)) as BrowserCheckResult;
 }
 
+async function runBlindBrowserCheck(outputDirectory: string): Promise<BlindBrowserCheckResult> {
+  const output = await new Promise<{ readonly stdout: string; readonly stderr: string }>((resolveRun, reject) => {
+    const child = spawn('npx', [
+      'vite-node',
+      'tools/ai-dm-blind-board-snapshot-check.ts',
+      '--',
+      outputDirectory,
+    ], { cwd: process.cwd(), env: process.env });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    child.stdout.on('data', (chunk: string) => { stdout += chunk; });
+    child.stderr.on('data', (chunk: string) => { stderr += chunk; });
+    child.once('error', reject);
+    child.once('exit', (code, signal) => {
+      if (code === 0) resolveRun({ stdout, stderr });
+      else reject(new Error(`Blind snapshot check failed (${String(code ?? signal)}).\n${stdout}\n${stderr}`));
+    });
+  });
+  const line = output.stdout.split('\n').find((candidate) =>
+    candidate.startsWith('BLIND_BOARD_SNAPSHOT_RESULT '));
+  if (line === undefined) {
+    throw new Error(`Blind snapshot check emitted no result.\n${output.stdout}\n${output.stderr}`);
+  }
+  return JSON.parse(line.slice('BLIND_BOARD_SNAPSHOT_RESULT '.length)) as BlindBrowserCheckResult;
+}
+
 test('captures the full production DM board deterministically through durable save upload/load', async () => {
   expect(expectedBoardDimensions({ columns: 17, rows: 13 }, { combatants: 0, objects: 0 }, 64))
     .toBe('1140x1012');
@@ -99,4 +147,29 @@ test('captures the full production DM board deterministically through durable sa
   expect(result.manifestCarriesHtml).toBe(true);
   expect(result.chromiumVersion).not.toBe('');
   expect(result.playwrightVersion).toBe('1.61.1');
+});
+
+test('captures synchronized state-only DM, accessible-raster, and player evidence', async () => {
+  const outputDirectory = resolve(
+    `dnd-slim-runs/blind-board-snapshot-browser-${String(process.pid)}-images`,
+  );
+  const result = await runBlindBrowserCheck(outputDirectory);
+  expect(result.primerVersion).toBe('d562-general-board-primer-v10');
+  expect(result.captureTilePx).toBe(128);
+  expect(result.results.map(({ difficulty, seed }) => ({ difficulty, seed }))).toEqual([
+    { difficulty: 'hard', seed: 5_117_001 },
+    { difficulty: 'brutal', seed: 6_203_001 },
+  ]);
+  for (const family of result.results) {
+    expect(family.stateDigest).toMatch(/^[a-f0-9]{64}$/u);
+    expect(family.images.map(({ role, ordinal }) => ({ role, ordinal }))).toEqual([
+      { role: 'dm_board', ordinal: 1 },
+      { role: 'accessible_board_raster', ordinal: 2 },
+      { role: 'player_board', ordinal: 3 },
+    ]);
+    expect(new Set(family.images.map(({ sha256 }) => sha256)).size).toBe(3);
+    expect(family.images.every((image) =>
+      image.bytes > 0 && image.bytes <= 1_000_000 && image.width > 0 && image.height > 0 &&
+      image.path.endsWith(`${image.sha256}.png`))).toBe(true);
+  }
 });
