@@ -13192,3 +13192,31 @@ footprints, selection, listbox roles, markers) and makes the sprite box
 exactly N*128; verification: the two specs 4/4, every browser spec that
 references the token layer / footprints / awaiting_placement, the unit
 specs touching styles/board-chrome, tsc.
+
+## Classic gate-fix harvest committed (8661cdbc); E1c judged arms complete, panels running (2026-09-06 21:23)
+
+Codex (resumed lane) fixed the sprite shrink with a one-line CSS change
+( margin 0.08rem -> 0; its first
+attempt patched .encounter-path-danger by mistake and was reverted by
+codex before the marker). Codex claimed 4/4 on the two specs, no other
+browser spec references the token layer/footprints, six unit files
+69/69, tsc 0.
+
+Verified myself: forbidden scans clean, lane logs carry only the
+header's own claude mention; my own Playwright run of the two specs on
+port 4721: 4/4 (1.0 m); the six unit files 69/69; tsc -b --force exit 0;
+supervisor mutant (rosterBox iterates the combatants reversed) fails the
+new initiative-id comparison at vtt-encounter.spec.ts:95 and the file
+was restored byte-identical (cmp). Committed 8661cdbc on claude/classic-r5.
+Pending before landing: the change touches the renderer (styles.css)
+and board-chrome, so the full browser suite reruns at the merge and the
+D429.1 mini-A/B runs on a quiet box first.
+
+E1c judged arms finished 21:22 (62 min under the 240 s wall): 30 rows
+per arm, all authorized, first decision accepted 30/30 in every arm;
+decision attempts luna_facts 22x1/8x2, luna_control 25x1/5x2, sol_facts
+27x1/3x2. Arms relabelled (luna_facts, luna_control, sol_facts), two
+packets built with the E1c tree's builder (shuffle 9061, 60 entries
+each): e1c-packet-facts-vs-control.json and e1c-packet-facts-vs-sol.json.
+Standing panel launched sequentially via judge-one.sh (sol/opus/fable);
+unseal config ~/dnd-slim-runs/unseal-config-e1c.json.
