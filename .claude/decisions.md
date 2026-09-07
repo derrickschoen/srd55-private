@@ -14472,3 +14472,13 @@ recommendation), counted in the blind ingress audit as an allowed
 fact channel, rate-limited like KB reads so a model cannot brute-force
 every pair (report the budget as a knob), and recorded per call on the
 row. Added as a required section for the D576 plan's round-2 critique.
+
+## D573: at luna low the semantic facts block HURTS on hard (-0.33 [-0.62, -0.06]) (2026-09-07 11:23)
+
+Luna low, hard R1-10 x3, main tree, standing panel (unseal-lowfacts-
+hard.md): luna_low_facts 8.96 vs luna_low_control 9.29, delta -0.33,
+seed-clustered 95% CI [-0.62, -0.06], all three seats in the same
+direction. At luna medium the same contrast was -0.11 [-0.53, +0.34].
+So the extra facts, which lift comprehension at low, lower judged play
+at low: consistent with the cap sweep (a bigger context hurts the
+weaker model more). Brutal at low pending (control arm running).
