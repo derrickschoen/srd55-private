@@ -13096,3 +13096,24 @@ protocol for the packet builder (--protocol brutal-10, seeds
 6203001-10) is being added by codex (lane packet-brutal, worktree off
 main) so the same arms can be judged with headroom; those arms run
 after the classic gate frees the box.
+
+## Packet-brutal harvest: --protocol brutal-10 committed on claude/packet-brutal (2026-09-06 20:47)
+
+Codex (lane packet-brutal, worktree off main eeab0cdd) added
+`--protocol r1-10|brutal-10` (default r1-10) and brutal-only `--reps 1|3`
+to tools/ai-dm-rerun-packet.ts, brutal seeds 6203001-10 -> rooms 1-10;
+packet and answer key carry a top-level `protocol` field. Codex claimed
+18/18 focused tests, typecheck 0, its own mutant killed.
+
+Verified myself: diff limited to the tool and one new test; no forbidden
+constructs, no .claude/docs edits, contracts.ts sha unchanged, lane log
+free of claude invocations (the header's own text is the only match).
+Old builder (stash) vs new builder on the real E2 rows (cards vs armed
+control, shuffle 4242): packet and key byte-identical apart from the
+added `protocol: "r1-10"` field. Touched specs (protocol, rerun-packet,
+arena, conversation): 4 files, 121/121. Supervisor mutant (brutal arm
+ignores --reps, i.e. `{...BRUTAL_10_PROTOCOL, reps: config.reps}` ->
+`BRUTAL_10_PROTOCOL`): killed 1/3, file restored byte-identical.
+Committed 7b1183e7 on claude/packet-brutal. Brutal-judged arms for the
+three D566 arms wait for the box to go quiet (classic gate in
+Playwright, E1c hard arms running).
