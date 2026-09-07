@@ -13371,3 +13371,48 @@ passed in 50.0 min, no load flakes, exit 0. Classic round 5 (native
 128-px art, lattice-scaled chrome, 5d obscured/difficult art, primer
 v10, board-chrome-layout module, sprite-lattice CSS fix) is landed and
 verified on main; :4173 serves it.
+
+## D569 — OWNER: blind-DM experiment, luna (high, then medium, then low) vs sol high with screenshot only and no engine legal/recommended moves (2026-09-06 22:54)
+
+Owner (verbatim): "Cue up another experiment where we try to get Luna
+(high first, then medium after high is maxed out, then low lastly) to
+perform as well as sol high where both are given a screenshot but no
+output of legal or recommended moves from the engine. I want to see how
+good we can get the ai dm to perform given only the rules of the game,
+general tips, all of the visual representations of tabletop state, and
+instructions on how to interpret the screenshot.
+
+My hope is that we can make the ai dm better at knowing when to
+override the engine top recommendation. I hope that The better it can
+independently understand how to run the game like a human would, the
+more often it will improve upon performance of just following the
+engine advice and getting cheesed out like the bg3 algorithm does.
+
+You will need the judges panel to rate the performance of different
+models."
+
+Supervisor reading, recorded so it can be corrected: a "blind" DM mode
+in which the turn context carries the rules KB, general tactics tips,
+the DM board screenshot(s) with the interpretation primer, the
+initiative timeline and creature names/HP bands as the board shows
+them, and NOTHING derived from the option engine: no offered options,
+no intel, no adverts, no suggested plan, no consequence cards. The
+model states its intent for each monster in a small typed grammar
+(actor by name, action kind and named target or destination cell using
+the board's coordinate gutter), and the engine resolves that intent
+deterministically to a legal offered option or rejects it with a typed
+code. Standing-rule conflict, named: "the model may never emit
+coordinates, paths, dice, DCs, damage or reducer commands". Under D569
+the model must name destinations somehow; the reading is that
+coordinates as board labels are the owner's intended input in this
+mode (the gutter exists for it), while dice, DCs, damage and reducer
+commands stay forbidden and the engine remains the sole authority over
+legality and resolution (a rejected intent never acts). If the owner
+wants destinations expressed only relatively ("adjacent to the wizard",
+"behind the pillar"), say so and the grammar shrinks. Order of arms:
+luna high blind vs sol high blind (and sol high with engine advice as
+the ceiling reference), judged by the standing panel on the hard and
+brutal bases; luna medium once luna high is maxed; luna low last. The
+override study (blind judgement vs engine top recommendation) follows
+once blind play is measured. Codex writes the plan; supervisor
+critiques before any implementation.
