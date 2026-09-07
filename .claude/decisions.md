@@ -14011,3 +14011,23 @@ no per-seed generator overrides, generated and frozen by a codex lane
 with membership tests and a `brutal-10-b` packet protocol, then the
 same two arms on it. Sol-high parity is reported with the timeout
 caveat and is not the claim.
+
+## E1 landing gate: 185/186 Playwright, one port collision; supervisor self-kill (fourth time) (2026-09-07 03:09)
+
+gate-wt-e1c-land.log: tsc 0, sg 0, vitest-gate 0 (no load flakes),
+Playwright 185 passed in 50.4 min and one failure: the board-snapshot
+spec's own preview server could not bind port 4650 ("Port 4650 is
+already in use"); the spec derives that port from PLAYWRIGHT_PORT, the
+same port the gate's Playwright web server uses, and the collision did
+not occur in the classic or main landing gates on their ports. The
+port is free now; the spec is rerun serially on the landing tree under
+the gate lock with the gate's port before the merge proceeds.
+
+Own error, recorded in full: while relaunching that rerun I put a
+kill-by-pattern (pgrep -f on the spec name) and a launch whose command
+line contained the same pattern in one shell call; the pattern matched
+my own shell and killed it (exit 144), the relaunch never ran, and I
+also missed my own gate-finished marker for two ticks. This is the
+fourth self-kill of the window against a rule I wrote after the first.
+Standing correction, effective now: a kill call contains only kills and
+uses numeric pids from a prior read; a launch is always its own call.
