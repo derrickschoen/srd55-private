@@ -13056,3 +13056,19 @@ the flags; those three mini-A/Bs are VOID as shape evidence and will be
 re-run one at a time on a quiet box (no gate, no other arena) with the
 default 120 s wall so they stay comparable to the D429.1 controls. Rule
 recorded: flagged mini-A/Bs never overlap a gate or each other.
+
+## E6 arena crash fixed and committed (2026-09-06 20:13)
+
+Root cause (codex, verified by the repro test): the post-acceptance
+narration step built a second planning runtime from the accepted
+request's actors; if a pending monster had died meanwhile, living-actor
+validation refused. Fix: an emit-only narration runtime bound to the
+accepted capsule (createEngineNarrationMcpRuntime: no request, no actor
+selection, proposals/speculation/adjudication throw), text-only model
+dispatch for narration (no MCP server started), conversation path
+consumes resolved outcomes. Verified: no forbidden constructs, typecheck
+0, 80/80 on the fast touched specs; supervisor mutant (narration built
+on the planning runtime again) kills the new arena repro test 1/38 and
+was restored byte-identical (self-restoring script, RESTORED OK).
+Committed claude/e6-narration (see git log). E6's mini-A/B re-run
+waits for the quiet box.
