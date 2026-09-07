@@ -38,6 +38,10 @@ describe('D576 exhaustive runtime call-site cutover', () => {
     expect(source('src/vtt/engine-query-port.ts')).not.toContain('function hasLineOfSight');
     expect(source('src/combat/cover.ts')).toContain('export function traceTerrainLine');
     expect(source('src/combat/cover.ts')).toContain('export function traceCombatantLine');
+    expect(source('src/combat/cover.ts')).toContain('export function outerCorners');
+    expect(source('src/combat/cover.ts')).toContain('export function cornerLineCrossesCell');
+    expect(source('src/combat/cover.ts')).toContain('export function rasterizeCornerLine');
+    expect(source('src/combat/cover.ts')).not.toContain('canonical centre-to-centre trace');
     expect(source('src/vtt/encounter-app.ts')).toContain('blockedCells: terrainWallCells({');
   });
 

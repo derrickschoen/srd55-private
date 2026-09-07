@@ -155,14 +155,14 @@ describe('canonical engine query port', () => {
     const target = playerProfile('parity-target', { initiativeBonus: -20 });
     const lowCover = {
       id: worldObjectId('object:parity-low-cover'), name: 'Parity low cover', kind: 'cover' as const,
-      position: { column: 2, row: 0 }, footprint: [{ column: 2, row: 0 }],
+      position: { column: 2, row: 0 }, footprint: [0, 1, 2, 3].map((row) => ({ column: 2, row })),
       durability: { kind: 'indestructible' as const }, armorClass: armorClass(10), damageResponses: [],
       blocking: terrainBlocking('half_cover'), createdRevision: 0,
     };
     const setup = (worldObjects: EncounterState['worldObjects'], blockedCells: EncounterState['blockedCells'] = []) =>
       reduceEncounter(createEncounter({
-        bounds: { columns: 6, rows: 1 }, combatants: [actor, target],
-        tokens: [placedToken(actor, 0), placedToken(target, 5)], worldObjects, blockedCells,
+        bounds: { columns: 6, rows: 4 }, combatants: [actor, target],
+        tokens: [placedToken(actor, 0, 0), placedToken(target, 5, 2)], worldObjects, blockedCells,
       }), { type: 'roll_initiative' }, () => 0.5).state;
     const partial = setup([lowCover]);
     const partialTrace = traceCombatantLine(partial, actor.id, target.id);
@@ -180,7 +180,12 @@ describe('canonical engine query port', () => {
     if (attack === undefined || attack.kind !== 'attack') throw new Error('Parity fixture omitted Shortbow.');
     expect(() => reduceEncounter(partial, monsterAttackCommand(attack, actor.id, target.id), () => 0.5)).not.toThrow();
 
-    const walled = setup([], [{ column: 2, row: 0 }]);
+    const walledCells = [
+      ...[0, 1, 2, 3].map((row) => ({ column: 2, row })),
+      // Keep the actor at the tested origin so an option cannot move to a boundary-grazing line.
+      { column: 1, row: 0 }, { column: 0, row: 1 }, { column: 1, row: 1 },
+    ];
+    const walled = setup([], walledCells);
     expect(traceCombatantLine(walled, actor.id, target.id)).toMatchObject({ tier: 'total', blocksSight: true });
     expect(canCombatantSee(walled, actor.id, target.id)).toBe(false);
     expect(canonicalEngineQueryPort.cover(walled, actor.id, target.id)).toMatchObject({ tier: 'total' });
@@ -191,7 +196,7 @@ describe('canonical engine query port', () => {
       slot.use.kind === 'attack' && slot.use.target.kind === 'combatant' && slot.use.target.combatantId === target.id))).toBe(false);
     expect(() => reduceEncounter(walled, monsterAttackCommand(attack, actor.id, target.id), () => 0.5))
       .toThrow('Total Cover or is outside line of sight');
-    expect(projectEncounterBoard(projectDmView(walled)).blockedCells).toContainEqual({ column: 2, row: 0 });
+    expect(projectEncounterBoard(projectDmView(walled)).blockedCells).toEqual(walledCells);
   });
 
   it('returns independently hand-computed melee reach and thrown normal range', () => {

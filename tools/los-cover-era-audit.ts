@@ -13,7 +13,7 @@ import { decodeArenaFixtureText } from '../src/vtt/mcp/entrypoint';
 import { generateRoom } from '../src/vtt/room-generator';
 
 export const LOS_COVER_ERA_AUDIT_VERSION = 'd576-los-cover-era-audit-v1' as const;
-export const LOS_COVER_ENGINE_REVISION = 'd576-i1a-centre-ray-v1' as const;
+export const LOS_COVER_ENGINE_REVISION = 'd576-i1a-corner-rule-v1' as const;
 
 export type EraAuditFamily = 'hard' | 'brutal' | 'brutal-b' | 'pool';
 
@@ -299,7 +299,8 @@ async function main(): Promise<void> {
   process.stdout.write(`${canonicalJson(await buildEraAuditReport())}\n`);
 }
 
-const invoked = process.argv[1];
-if (invoked !== undefined && (invoked.endsWith('/los-cover-era-audit.ts') || invoked.endsWith('\\los-cover-era-audit.ts'))) {
+const invokedDirectly = process.argv.slice(1).some((argument) =>
+  argument.endsWith('/los-cover-era-audit.ts') || argument.endsWith('\\los-cover-era-audit.ts'));
+if (invokedDirectly) {
   await main();
 }

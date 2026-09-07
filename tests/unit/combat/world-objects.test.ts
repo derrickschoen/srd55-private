@@ -60,6 +60,21 @@ function started(worldObjects: readonly WorldObject[] = []): EncounterState {
   return reduceEncounter(setup(worldObjects), { type: 'roll_initiative' }, () => 0.5).state;
 }
 
+function diagonalStarted(worldObjects: readonly WorldObject[]): EncounterState {
+  const actor = playerProfile('world-diagonal-actor', { initiativeBonus: 20 });
+  const target = monsterProfile('world-diagonal-target', { initiativeBonus: -20, hitPoints: 40 });
+  return reduceEncounter(createEncounter({
+    bounds: { columns: 8, rows: 5 },
+    combatants: [actor, target],
+    tokens: [placedToken(actor, 0, 1), placedToken(target, 6, 3)],
+    worldObjects,
+  }), { type: 'roll_initiative' }, () => 0.5).state;
+}
+
+function verticalFeature(id: string, terrain: TerrainKind): WorldObject {
+  return object(id, [0, 1, 2, 3, 4].map((row) => ({ column: 3, row })), { terrain });
+}
+
 function attack(state: EncounterState): Extract<EncounterCommand, { readonly type: 'attack' }> {
   const actor = state.combatants.find((entry) => entry.profile.kind === 'player_character')?.profile;
   const target = state.combatants.find((entry) => entry.profile.kind === 'monster')?.profile;
@@ -151,29 +166,29 @@ describe('typed world objects and encounter environment', () => {
   });
 
   it('a sight-blocker breaks line of sight and targeting', () => {
-    const blocker = object('sight-wall', [{ column: 3, row: 2 }], { terrain: 'wall' });
-    const state = started([blocker]);
-    expect(hasLineOfSight(state, { column: 0, row: 2 }, { column: 6, row: 2 })).toBe(false);
+    const blocker = verticalFeature('sight-wall', 'wall');
+    const state = diagonalStarted([blocker]);
+    expect(hasLineOfSight(state, { column: 0, row: 1 }, { column: 6, row: 3 })).toBe(false);
     expect(() => reduceEncounter(state, attack(state), () => 0.65)).toThrow('outside line of sight');
   });
 
   it('cover_tier_off_by_one: half and three-quarters cover change exact attack boundaries', () => {
-    const half = started([object('half-cover', [{ column: 3, row: 2 }], { terrain: 'half_cover' })]);
+    const half = diagonalStarted([verticalFeature('half-cover', 'half_cover')]);
     const halfHit = reduceEncounter(half, attack(half), () => 0.65);
     expect(halfHit.events.find((event) => event.type === 'attack_resolved')?.attack.outcome).toBe('hit');
 
-    const threeQuarters = started([object('three-cover', [{ column: 3, row: 2 }], { terrain: 'three_quarters_cover' })]);
+    const threeQuarters = diagonalStarted([verticalFeature('three-cover', 'three_quarters_cover')]);
     const threeQuarterMiss = reduceEncounter(threeQuarters, attack(threeQuarters), () => 0.65);
     expect(threeQuarterMiss.events.find((event) => event.type === 'attack_resolved')?.attack.outcome).toBe('miss');
   });
 
   it('cover_no_bonus: line-crossing cover grants its cited AC and Dexterity-save bonus', () => {
-    const halfAttack = started([object('half-cover-ac', [{ column: 3, row: 2 }], { terrain: 'half_cover' })]);
+    const halfAttack = diagonalStarted([verticalFeature('half-cover-ac', 'half_cover')]);
     const coveredAttack = reduceEncounter(halfAttack, attack(halfAttack), () => 0.6);
     expect(coveredAttack.events.find((event) => event.type === 'attack_resolved')?.attack)
       .toMatchObject({ outcome: 'miss', total: 13 });
 
-    const halfSave = started([object('half-cover-dex', [{ column: 3, row: 2 }], { terrain: 'half_cover' })]);
+    const halfSave = diagonalStarted([verticalFeature('half-cover-dex', 'half_cover')]);
     const actor = halfSave.activeCombatant;
     const target = halfSave.combatants.find((entry) => entry.profile.kind === 'monster')?.profile.id;
     if (actor === null || target === undefined) throw new Error('Cover save fixture is incomplete.');
@@ -185,9 +200,7 @@ describe('typed world objects and encounter environment', () => {
     expect(coveredSave.events.find((event) => event.type === 'save_resolved')?.save)
       .toMatchObject({ outcome: 'success', total: 12 });
 
-    const threeQuarterSave = started([
-      object('three-quarter-cover-dex', [{ column: 3, row: 2 }], { terrain: 'three_quarters_cover' }),
-    ]);
+    const threeQuarterSave = diagonalStarted([verticalFeature('three-quarter-cover-dex', 'three_quarters_cover')]);
     const threeQuarterActor = threeQuarterSave.activeCombatant;
     const threeQuarterTarget = threeQuarterSave.combatants
       .find((entry) => entry.profile.kind === 'monster')?.profile.id;

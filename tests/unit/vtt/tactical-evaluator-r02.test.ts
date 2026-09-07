@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { evaluateMonsterTacticalAttack, type EncounterState } from '../../../src/combat/encounter';
+import { traceCombatantLine } from '../../../src/combat/cover';
 import type { MonsterAttackAction } from '../../../src/combat/statblock';
 import { combatantId } from '../../../src/combat/values';
 import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
@@ -25,6 +26,50 @@ const BANDITS = [
   combatantId('combatant:generated-5117009-monster-6'),
 ] as const;
 
+interface FailureWeights {
+  readonly miss: number;
+  readonly normalHit: number;
+  readonly criticalHit: number;
+  readonly denominator: number;
+}
+
+function repeated(weights: FailureWeights, count: number): readonly FailureWeights[] {
+  return Array.from({ length: count }, () => weights);
+}
+
+/** Independent closed-form convolution over miss/+1/+2 death-save-failure outcomes. */
+function deathSaveKillProbability(attacks: readonly FailureWeights[]): number {
+  let states: readonly number[] = [1, 0, 0, 0];
+  for (const attack of attacks) {
+    const next = [0, 0, 0, 0];
+    for (let failures = 0; failures <= 3; failures += 1) {
+      const stateProbability = states[failures] ?? 0;
+      next[failures] = (next[failures] ?? 0) + stateProbability * attack.miss / attack.denominator;
+      const normalTotal = Math.min(3, failures + 1);
+      next[normalTotal] = (next[normalTotal] ?? 0) + stateProbability * attack.normalHit / attack.denominator;
+      const criticalTotal = Math.min(3, failures + 2);
+      next[criticalTotal] = (next[criticalTotal] ?? 0) + stateProbability * attack.criticalHit / attack.denominator;
+    }
+    states = [next[0] ?? 0, next[1] ?? 0, next[2] ?? 0, next[3] ?? 0];
+  }
+  return states[3] ?? 0;
+}
+
+const BASE_FAILURE_WEIGHTS = {
+  priest: { miss: 14, normalHit: 5, criticalHit: 1, denominator: 20 },
+  firstScout: { miss: 15, normalHit: 4, criticalHit: 1, denominator: 20 },
+  secondScout: { miss: 18, normalHit: 1, criticalHit: 1, denominator: 20 },
+  firstBandit: { miss: 16, normalHit: 3, criticalHit: 1, denominator: 20 },
+  secondBandit: { miss: 14, normalHit: 5, criticalHit: 1, denominator: 20 },
+} as const satisfies Readonly<Record<string, FailureWeights>>;
+
+const BLESSED_FAILURE_WEIGHTS = {
+  priest: { miss: 23, normalHit: 15, criticalHit: 2, denominator: 40 },
+  firstScout: { miss: 25, normalHit: 13, criticalHit: 2, denominator: 40 },
+  secondScout: { miss: 31, normalHit: 7, criticalHit: 2, denominator: 40 },
+  firstBandit: { miss: 27, normalHit: 11, criticalHit: 2, denominator: 40 },
+} as const satisfies Readonly<Record<string, FailureWeights>>;
+
 async function frozenState(): Promise<EncounterState> {
   inputs.fixtures.readText('tests/fixtures/arena-basis-hard/seed-5117009.json');
   return loadArenaFixture('tests/fixtures/arena-basis-hard/seed-5117009.json');
@@ -33,7 +78,22 @@ async function frozenState(): Promise<EncounterState> {
 describe('R02-like canonical tactical query', () => {
   it('reports both 90-foot Scout shots as move-0 normal range and straight at the dying fighter', async () => {
     const state = await frozenState();
-    const rows = SCOUTS.map((scoutId) => {
+    const handGeometry = [
+      {
+        scoutId: SCOUTS[0], position: { column: 19, row: 3 }, sourceCorner: { column: 19, row: 3 },
+        lineTiers: ['total', 'total', 'none', 'none'], coverTier: 'half',
+        probabilities: { status: 'resolved', hit: 5 / 20, critical: 1 / 20, miss: 15 / 20 },
+        expectedDamage: (4 / 20) * 6.5 + (1 / 20) * 11,
+      },
+      {
+        scoutId: SCOUTS[1], position: { column: 19, row: 5 }, sourceCorner: { column: 19, row: 5 },
+        lineTiers: ['total', 'total', 'none', 'total'], coverTier: 'three_quarters',
+        probabilities: { status: 'resolved', hit: 2 / 20, critical: 1 / 20, miss: 18 / 20 },
+        expectedDamage: (1 / 20) * 6.5 + (1 / 20) * 11,
+      },
+    ] as const;
+    const rows = handGeometry.map((geometry) => {
+      const scoutId = geometry.scoutId;
       const action = canonicalEngineQueryPort.actions(state, scoutId)
         .find((candidate): candidate is MonsterAttackAction =>
           candidate.kind === 'attack' && candidate.id === 'longbow');
@@ -52,6 +112,17 @@ describe('R02-like canonical tactical query', () => {
       if (evaluation === null) throw new Error(`${scoutId} tactical evaluation is absent.`);
       // The executor-side state adapter must produce the exact same canonical verdict.
       expect(evaluateMonsterTacticalAttack(state, action, scoutId, FIGHTER)).toEqual(evaluation);
+      const trace = traceCombatantLine(state, scoutId, FIGHTER);
+      expect(state.tokens.find((token) => token.combatantId === scoutId)?.position).toEqual(geometry.position);
+      expect({
+        sourceCorner: trace.sourceCorner,
+        lineTiers: trace.lines.map((line) => line.tier),
+        coverTier: trace.tier,
+      }).toEqual({
+        sourceCorner: geometry.sourceCorner,
+        lineTiers: geometry.lineTiers,
+        coverTier: geometry.coverTier,
+      });
       return {
         scoutId,
         minimumMovementFeet: reach.legal ? 0 : null,
@@ -61,6 +132,8 @@ describe('R02-like canonical tactical query', () => {
         damage: evaluation.damage,
         consequences: evaluation.consequences,
         policy: evaluation.policy,
+        expectedProbabilities: geometry.probabilities,
+        expectedDamage: geometry.expectedDamage,
       };
     });
 
@@ -74,16 +147,14 @@ describe('R02-like canonical tactical query', () => {
         mode: 'normal',
         reasons: ['unconscious_advantage', 'prone_ranged_disadvantage'],
       });
-      // +4 vs AC 18 hits on 14..20: 7/20, with 1/20 critical.
-      expect(row.probabilities).toEqual({
-        status: 'resolved', hit: 0.35, critical: 0.05, miss: 0.65,
-      });
+      // +4 attacks the hand-counted Half/Three-Quarters adjusted AC above.
+      expect(row.probabilities).toEqual(row.expectedProbabilities);
       // Longbow 1d8+2 averages 6.5; critical 2d8+2 averages 11.
       expect(row.damage).toEqual({
         status: 'resolved',
         normalHitAverage: 6.5,
         criticalHitAverage: 11,
-        expectedDamage: 2.5,
+        expectedDamage: row.expectedDamage,
       });
       expect(row.consequences).toEqual({
         deathFailureOnHit: true,
@@ -168,22 +239,42 @@ describe('R02-like canonical tactical query', () => {
       expect(result.expectedDamage).not.toBeNull();
       return result.killProbability;
     };
-    // Independent hand convolution, capping at 3 failures after every shot:
-    // Scout={13/20,6/20,1/20}, Bandit={14/20,5/20,1/20},
-    // Priest={12/20,7/20,1/20}; Bless changes their noncrit rows to
-    // Scout={21/40,17/40,2/40}, Bandit={23/40,15/40,2/40},
-    // Priest={19/40,19/40,2/40}. These literals are the resulting state-3 mass.
-    expect(probability('no-bless')).toBeCloseTo(4_103_381_091 / 6_400_000_000, 12);
-    expect(probability('bless-scout-scout-priest')).toBeCloseTo(
-      1_322_400_334_711 / 1_638_400_000_000, 12,
-    );
-    expect(probability('bless-scout-scout-bandit')).toBeCloseTo(
-      320_104_650_259 / 409_600_000_000, 12,
-    );
-    expect(probability('no-priest-attacks')).toBeCloseTo(26_295_931 / 64_000_000, 12);
-    expect(probability('bless-only-priest-no-attacks')).toBeCloseTo(
-      1_220_131_427 / 2_048_000_000, 12,
-    );
+    // Hand corner counts give Half to Priest/Scout 1/Bandit 1, Three-Quarters
+    // to Scout 2, and none to Bandit 2. The named fractions above follow from
+    // attack bonus versus AC (natural 20 remains critical), independently of the engine fold.
+    expect(probability('no-bless')).toBeCloseTo(deathSaveKillProbability([
+      ...repeated(BASE_FAILURE_WEIGHTS.priest, 2),
+      ...repeated(BASE_FAILURE_WEIGHTS.firstScout, 2),
+      ...repeated(BASE_FAILURE_WEIGHTS.secondScout, 2),
+      BASE_FAILURE_WEIGHTS.firstBandit,
+      BASE_FAILURE_WEIGHTS.secondBandit,
+    ]), 12);
+    expect(probability('bless-scout-scout-priest')).toBeCloseTo(deathSaveKillProbability([
+      ...repeated(BLESSED_FAILURE_WEIGHTS.priest, 2),
+      ...repeated(BLESSED_FAILURE_WEIGHTS.firstScout, 2),
+      ...repeated(BLESSED_FAILURE_WEIGHTS.secondScout, 2),
+      BASE_FAILURE_WEIGHTS.firstBandit,
+      BASE_FAILURE_WEIGHTS.secondBandit,
+    ]), 12);
+    expect(probability('bless-scout-scout-bandit')).toBeCloseTo(deathSaveKillProbability([
+      ...repeated(BASE_FAILURE_WEIGHTS.priest, 2),
+      ...repeated(BLESSED_FAILURE_WEIGHTS.firstScout, 2),
+      ...repeated(BLESSED_FAILURE_WEIGHTS.secondScout, 2),
+      BLESSED_FAILURE_WEIGHTS.firstBandit,
+      BASE_FAILURE_WEIGHTS.secondBandit,
+    ]), 12);
+    expect(probability('no-priest-attacks')).toBeCloseTo(deathSaveKillProbability([
+      ...repeated(BASE_FAILURE_WEIGHTS.firstScout, 2),
+      ...repeated(BASE_FAILURE_WEIGHTS.secondScout, 2),
+      BASE_FAILURE_WEIGHTS.firstBandit,
+      BASE_FAILURE_WEIGHTS.secondBandit,
+    ]), 12);
+    expect(probability('bless-only-priest-no-attacks')).toBeCloseTo(deathSaveKillProbability([
+      ...repeated(BLESSED_FAILURE_WEIGHTS.firstScout, 2),
+      ...repeated(BLESSED_FAILURE_WEIGHTS.secondScout, 2),
+      BLESSED_FAILURE_WEIGHTS.firstBandit,
+      BASE_FAILURE_WEIGHTS.secondBandit,
+    ]), 12);
 
     const delayedOrder = [SCOUTS[0], PRIEST, SCOUTS[1], ...BANDITS] as const;
     const delayedBlessOption = priestBless;
@@ -204,10 +295,13 @@ describe('R02-like canonical tactical query', () => {
     if (delayed?.killProbability === null || delayed?.killProbability === undefined) {
       throw new Error('Delayed-Bless allocation is unresolved.');
     }
-    // The first Scout's two shots remain {13/20,6/20,1/20}; only the Priest
-    // and later Scout use their Blessed rows. Hand convolution yields this mass.
-    expect(delayed.killProbability).toBeCloseTo(
-      310_602_197_859 / 409_600_000_000, 12,
-    );
+    // The first Scout acts before Bless; Priest and Scout 2 then use their blessed rows.
+    expect(delayed.killProbability).toBeCloseTo(deathSaveKillProbability([
+      ...repeated(BASE_FAILURE_WEIGHTS.firstScout, 2),
+      ...repeated(BLESSED_FAILURE_WEIGHTS.priest, 2),
+      ...repeated(BLESSED_FAILURE_WEIGHTS.secondScout, 2),
+      BASE_FAILURE_WEIGHTS.firstBandit,
+      BASE_FAILURE_WEIGHTS.secondBandit,
+    ]), 12);
   });
 });

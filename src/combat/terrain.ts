@@ -100,11 +100,24 @@ export function terrainPassabilityAt(state: TerrainState, cell: GridCell): Terra
   let passability: TerrainPassability = 'open';
   for (const object of state.worldObjects) {
     if (!object.footprint.some((candidate) => cellKey(candidate) === key)) continue;
-    const candidate = TERRAIN_PROFILES[terrainKindOfWireBlocking(object.blocking)].passability;
+    const candidate = terrainPassabilityOfWireBlocking(object.blocking);
     if (candidate === 'blocked') return 'blocked';
     if (candidate === 'difficult') passability = 'difficult';
   }
   return passability;
+}
+
+/** Passability remains independent from cover tracing during the 1a/1b wire seam. */
+export function terrainPassabilityOfWireBlocking(
+  blocking: WorldObjectBlockingWire,
+): TerrainPassability {
+  if (blocking.movement) return 'blocked';
+  switch (blocking.cover) {
+    case 'none': return 'open';
+    case 'half': return 'difficult';
+    case 'three_quarters': return 'blocked';
+    case 'total': return 'blocked';
+  }
 }
 
 export function terrainWallCells(state: TerrainState): readonly GridCell[] {

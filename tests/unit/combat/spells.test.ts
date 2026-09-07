@@ -1355,9 +1355,10 @@ describe('spell foundations and implemented value pins', () => {
     const obstructed = {
       ...state,
       tokens: state.tokens.map((entry) => entry.combatantId === target.id
-        ? { ...entry, position: { column: 2, row: 1 } }
+        ? { ...entry, position: { column: 4, row: 3 } }
         : entry),
-      blockedCells: [{ column: 1, row: 1 }],
+      // A full-height wall crosses all four corner lines between the offset spaces.
+      blockedCells: [0, 1, 2, 3, 4, 5].map((row) => ({ column: 2, row })),
     };
     expect(() => reduceEncounter(obstructed, castCommand(definition, caster, target), () => 0.5))
       .toThrow('cannot select unseen target');

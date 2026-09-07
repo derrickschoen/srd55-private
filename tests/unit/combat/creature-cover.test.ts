@@ -76,36 +76,31 @@ describe('D514 creature cover', () => {
     expect(coverBetweenCombatants(fixture.state, fixture.source.id, fixture.target.id).tier).toBe('half');
   });
 
-  it('M576-E1A-MULTICELL-NEAREST-ONLY uses the least-obstructed occupied-cell ray for both sight and cover of a Large target', () => {
-    const source = playerProfile('least-ray-source');
-    const baseTarget = monsterProfile('least-ray-large-target');
+  it('M576-E1A-MULTICELL-INNER-CORNERS uses only the four outer corners of a Large target space', () => {
+    const source = playerProfile('outer-corner-source');
+    const baseTarget = monsterProfile('outer-corner-large-target');
     const target = { ...baseTarget, rules: { ...baseTarget.rules, sizeCategory: 'Large' as const } };
-    const partlyExposed = createEncounter({
+    const state = createEncounter({
       bounds: { columns: 6, rows: 3 },
       combatants: [source, target],
       tokens: [placedToken(source, 0, 0), placedToken(target, 3, 0)],
-      blockedCells: [{ column: 2, row: 0 }],
     });
-    expect(traceCombatantLine(partlyExposed, source.id, target.id)).toMatchObject({
-      sourceCell: { column: 0, row: 0 }, targetCell: { column: 3, row: 1 },
-      tier: 'none', blocksSight: false,
+    const trace = traceCombatantLine(state, source.id, target.id);
+    expect(trace).toMatchObject({
+      sourceCell: { column: 0, row: 0 }, targetCell: { column: 3, row: 0 },
+      sourceCorner: { column: 0, row: 0 }, tier: 'none', blocksSight: false,
     });
-    expect(canCombatantSee(partlyExposed, source.id, target.id)).toBe(true);
-
-    const fullyBlocked = {
-      ...partlyExposed,
-      blockedCells: [{ column: 2, row: 0 }, { column: 2, row: 1 }],
-    };
-    expect(traceCombatantLine(fullyBlocked, source.id, target.id)).toMatchObject({
-      tier: 'total', blocksSight: true,
-    });
-    expect(canCombatantSee(fullyBlocked, source.id, target.id)).toBe(false);
+    expect(trace.lines.map((line) => line.targetCorner)).toEqual([
+      { column: 3, row: 0 }, { column: 5, row: 0 },
+      { column: 3, row: 2 }, { column: 5, row: 2 },
+    ]);
+    expect(canCombatantSee(state, source.id, target.id)).toBe(true);
   });
 
-  it('M576-E1A-CORNER-RAY-SURVIVES uses occupied-cell centre rays for creature cover', () => {
-    const source = playerProfile('centre-ray-source');
-    const intervening = monsterProfile('centre-ray-intervening');
-    const baseTarget = monsterProfile('centre-ray-large-target');
+  it('M576-E1A-CENTRE-RAY-SURVIVES counts an intervening living creature on the corner lines', () => {
+    const source = playerProfile('corner-ray-source');
+    const intervening = monsterProfile('corner-ray-intervening');
+    const baseTarget = monsterProfile('corner-ray-large-target');
     const target = { ...baseTarget, rules: { ...baseTarget.rules, sizeCategory: 'Large' as const } };
     const state = createEncounter({
       bounds: { columns: 6, rows: 3 },
@@ -113,8 +108,9 @@ describe('D514 creature cover', () => {
       tokens: [placedToken(source, 0, 0), placedToken(intervening, 2, 0), placedToken(target, 3, 0)],
     });
     expect(traceCombatantLine(state, source.id, target.id)).toMatchObject({
-      sourceCell: { column: 0, row: 0 }, targetCell: { column: 3, row: 1 },
-      tier: 'none', blocksSight: false, sourceIds: [],
+      sourceCell: { column: 0, row: 0 }, targetCell: { column: 3, row: 0 },
+      tier: 'half', blocksSight: false,
+      sourceIds: [`creature:${intervening.id}`],
     });
   });
 });

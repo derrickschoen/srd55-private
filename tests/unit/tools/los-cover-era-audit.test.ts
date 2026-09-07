@@ -49,17 +49,18 @@ describe('D576 mechanical-era audit', () => {
     const middle = playerProfile('era-middle');
     const right = monsterProfile('era-right');
     const state = createEncounter({
-      bounds: { columns: 7, rows: 3 }, combatants: [left, middle, right],
-      tokens: [placedToken(left, 0, 0), placedToken(middle, 0, 2), placedToken(right, 6, 0)],
-      blockedCells: [{ column: 3, row: 0 }],
+      bounds: { columns: 7, rows: 6 }, combatants: [left, middle, right],
+      tokens: [placedToken(left, 0, 0), placedToken(middle, 0, 4), placedToken(right, 6, 2)],
+      // A hand-counted full-height wall separates Right from the two left-side creatures.
+      blockedCells: [0, 1, 2, 3, 4, 5].map((row) => ({ column: 3, row })),
     });
     const counts = auditEncounterState(state);
     expect(counts.denominator).toBe(6);
-    expect(counts.line_of_sight_changed).toBeGreaterThan(0);
-    expect(counts.cover_tier_changed).toBeGreaterThan(0);
-    expect(counts.either_changed).toBeLessThanOrEqual(
-      counts.line_of_sight_changed + counts.cover_tier_changed,
-    );
+    expect(counts.line_of_sight_changed).toBe(4);
+    expect(counts.cover_tier_changed).toBe(4);
+    expect(counts.either_changed).toBe(4);
+    expect(counts.tier_transitions['none->none']).toBe(2);
+    expect(counts.tier_transitions['none->total']).toBe(4);
     expect(Object.values(counts.tier_transitions).reduce((sum, count) => sum + count, 0)).toBe(6);
   });
 
