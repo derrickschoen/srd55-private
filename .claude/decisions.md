@@ -15378,3 +15378,59 @@ Dispatch is held until the gate finishes rather than started now,
 because a lane writing in a worktree while that worktree is being gated
 invalidates the gate. The remaining vitest and browser results are still
 worth having, so the gate runs to completion first.
+
+## D576.3 IS NOT LANDABLE: the full gate fails lint and nine test files (2026-09-07 19:10)
+
+The corner rule passed its 25 targeted specs and tsc, and fails the gate.
+tsc passed; `sg scan` failed on the raw-fs import already recorded; then
+the locked vitest suite FAILED with nine files:
+
+  tests/integration/vtt/pc-algorithm-policy.test.ts
+    "all four D365 rooms expose two fiction-anchored cover cells"
+      expected false to be true
+    "vane-tpk-clean-terminates ..."
+      RangeError: A candidate template cell is outside the grid.
+  tests/unit/combat/controllers-mutation.test.ts
+    "ignores ally-only cover ..."            expected 'half' to be 'none'
+    "ignores cover available only against a dead hostile"
+                                             expected 'half' to be 'none'
+  tests/unit/vtt/dm-tactical-intel.test.ts
+    exact probability 0.4375 where 0.5775 expected; R02 row mismatch
+  tests/unit/tools/ai-dm-arena.test.ts, ai-dm-conversation.test.ts,
+  tests/unit/bridge/js-round-plan-integration.test.ts,
+  tests/unit/vtt/forms.test.ts, last-seen.test.ts, vane-warren.test.ts
+  (tests/unit/vtt/replay.test.ts was a LOAD FLAKE that passed serially
+   and is not counted.)
+
+TWO OF THESE LOOK LIKE REAL BUGS, NOT ERA CONSEQUENCES, and I am saying
+so before codex reports rather than after:
+1. RangeError "A candidate template cell is outside the grid" is a
+   crash. A geometry change must not push template candidates off the
+   board. Highest priority in the fix lane.
+2. The two controllers-mutation failures call coverTierBetweenObjects
+   directly, cell to cell, with a half-cover object at column 6 row 2
+   and lines like (5,0) to (1,1) that run away from it. I worked the
+   corner arithmetic by hand for the ray from corner (6,0): against cell
+   (6,2) the column slab gives t in [-0.25, 0] and the row slab gives
+   t in [2, 3], so entry 2 exceeds exit 0 and the cell is NOT crossed.
+   The function returning 'half' therefore contradicts the rule as
+   ruled, which points at the candidate-cell enumeration rather than at
+   the tests. The test names also say ally-only and dead-hostile cover,
+   so the possibility that the corner path dropped a filter the centre
+   path applied is explicitly on the table.
+
+Actions: killed the running gate by pid rather than letting the browser
+suite spend an hour on code known to be broken; the worktree was left
+clean. Dispatched lane los-cover-gatefix (session
+01a07e22-aae6-7b81-8f2d-5d8532c44f02) with the full failure list, the
+requirement to CLASSIFY each of the nine files as era consequence or
+implementation bug with reasons, the instruction to stop rather than
+guess, and the requirement to run `sg scan` plus the FULL locked
+`npm run test:gate` rather than a subset.
+
+PROCESS CHANGE, from the finding recorded above: `sg scan` and the full
+locked suite are now part of a lane's own verification for any change
+with engine-wide reach, and my harvest verification must run the checks
+the lane did NOT run rather than repeating its command list. Targeted
+specs chosen by the implementer cannot establish that an engine-wide
+geometry change is safe.
