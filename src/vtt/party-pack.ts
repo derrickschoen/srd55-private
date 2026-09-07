@@ -16,7 +16,10 @@ import {
 } from '../combat/effects';
 import type { EncounterCommand } from '../combat/events';
 import type { EncounterCombatantState } from '../combat/encounter';
-import { adjacentCells, gridDistance } from '../combat/grid';
+import { combatantSpace } from '../combat/combat-rules';
+import { adjacentCells } from '../combat/grid';
+import { minimumSpaceDistance } from '../combat/creature-space';
+import { encounterMovementWorld } from '../combat/encounter-movement-world';
 import { cubeAffectedCellsAmong, feetPoint } from '../combat/templates';
 import type { PersistentAreaEffectSpec, PersistentAreaShape } from '../combat/persistent-areas';
 import { spellDefinition } from '../combat/spells/definitions';
@@ -2726,6 +2729,14 @@ function loadedMemberPosition(state: Parameters<TurnLegalActions>[0], id: Return
   return found.position;
 }
 
+function loadedMemberDistance(
+  state: Parameters<TurnLegalActions>[0],
+  left: ReturnType<typeof combatantId>,
+  right: ReturnType<typeof combatantId>,
+): number {
+  return minimumSpaceDistance(combatantSpace(state, left), combatantSpace(state, right));
+}
+
 const encounterCombatantIndexes = new WeakMap<
   Parameters<TurnLegalActions>[0],
   TotalMap<CombatantId, EncounterCombatantState>
@@ -2751,14 +2762,14 @@ function loadedPartyMovementActions(
 ): readonly Extract<EncounterCommand, { readonly type: 'move' }>[] {
   const acting = encounterCombatantIndex(state).at(actor);
   if (acting.turn.movement.remaining < 5) return [];
-  const occupied = new Set(state.tokens
-    .filter((token) => token.combatantId !== actor)
-    .map((token) => `${String(token.position.column)},${String(token.position.row)}`));
+  const origin = loadedMemberPosition(state, actor);
+  const world = encounterMovementWorld(state);
   return adjacentCells(state.bounds, loadedMemberPosition(state, actor))
-    .filter((cell) =>
-      !occupied.has(`${String(cell.column)},${String(cell.row)}`) &&
-      !state.blockedCells.some((blocked) =>
-        blocked.column === cell.column && blocked.row === cell.row))
+    .filter((cell) => {
+      if (!world.canTraverseStep(actor, origin, cell)) return false;
+      const traversal = world.traversal(actor, origin, cell);
+      return traversal.kind === 'enterable' && traversal.canEnd;
+    })
     .map((cell) => ({ type: 'move', actor, path: [cell], cause: 'voluntary' }));
 }
 
@@ -2805,10 +2816,7 @@ function basicDamageCantripCommands(
         .filter((level) => level <= source.casterLevel).length
       : 1;
     return targets.flatMap((target) => {
-      const distance = gridDistance(
-        loadedMemberPosition(state, actor),
-        loadedMemberPosition(state, target.profile.id),
-      );
+      const distance = loadedMemberDistance(state, actor, target.profile.id);
       if (distance > range) return [];
       return [loadedPartySpellCastCommand(member, spell.id, {
         slotLevel: null,
@@ -2868,10 +2876,7 @@ function healingSpellCommands(
       slot.remaining > 0 && slot.level >= definition.level)
       .sort((left, right) => left.level - right.level);
     return slots.flatMap((slot) => allies.flatMap((target) => {
-      if (gridDistance(
-        loadedMemberPosition(state, actor),
-        loadedMemberPosition(state, target.profile.id),
-      ) > range) return [];
+      if (loadedMemberDistance(state, actor, target.profile.id) > range) return [];
       const slotDelta = slot.level - definition.level;
       const diceCount = operation.dice.baseCount + operation.dice.perSlotCount * slotDelta;
       const averageHealing = diceCount * (operation.dice.sides + 1) / 2 +
@@ -2919,10 +2924,7 @@ function revivifySpellCommands(
       candidate.life === 'dead' &&
       candidate.deathAt !== null &&
       state.round - candidate.deathAt.round <= maximumDeathAgeRounds &&
-      gridDistance(
-        loadedMemberPosition(state, actor),
-        loadedMemberPosition(state, candidate.profile.id),
-      ) <= 5)
+      loadedMemberDistance(state, actor, candidate.profile.id) <= 5)
     .sort((left, right) => left.profile.id.localeCompare(right.profile.id));
   // Revivify has Touch range, returns an eligible creature dead no longer than
   // one minute with 1 HP, and consumes its diamond component.
@@ -2980,7 +2982,7 @@ function blessSpellCommands(
     .filter((candidate) =>
       candidate.life !== 'dead' &&
       combatantsAreAllies(state, candidate.profile.id, actor) &&
-      gridDistance(loadedMemberPosition(state, actor), loadedMemberPosition(state, candidate.profile.id)) <= 30)
+      loadedMemberDistance(state, actor, candidate.profile.id) <= 30)
     .sort((left, right) =>
       right.profile.rules.attacksPerAction - left.profile.rules.attacksPerAction ||
       Number(right.profile.id === actor) - Number(left.profile.id === actor) ||
@@ -3033,9 +3035,9 @@ function slowSpellCommands(
       ...state.worldObjects.flatMap((object) => object.blocking.lineOfSight ? object.footprint : []),
     ],
   };
-  const positions = new Map(hostiles.map((target) => [
+  const occupiedCells = new Map(hostiles.map((target) => [
     target.profile.id,
-    loadedMemberPosition(state, target.profile.id),
+    combatantSpace(state, target.profile.id).cells,
   ] as const));
   const minimumCenterColumn = 4;
   const candidates = Array.from(
@@ -3055,11 +3057,12 @@ function slowSpellCommands(
     const affected = new Set(cubeAffectedCellsAmong(
       templateGrid,
       area.template,
-      [...positions.values()],
+      [...occupiedCells.values()].flat(),
     ).map((cell) => `${String(cell.column)},${String(cell.row)}`));
     const selected = hostiles.filter((target) => {
-      const position = positions.get(target.profile.id);
-      return position !== undefined && affected.has(`${String(position.column)},${String(position.row)}`);
+      const cells = occupiedCells.get(target.profile.id);
+      return cells !== undefined && cells.some((cell) =>
+        affected.has(`${String(cell.column)},${String(cell.row)}`));
     }).slice(0, 6);
     return { area, selected };
   }))
@@ -3153,10 +3156,7 @@ function commandKeepAwaySpellCommands(
     !member.spells.some((spell) => spell.id === 'command')
   ) return [];
   const adjacent = targets
-    .filter((target) => gridDistance(
-      loadedMemberPosition(state, actor),
-      loadedMemberPosition(state, target.profile.id),
-    ) <= 5)
+    .filter((target) => loadedMemberDistance(state, actor, target.profile.id) <= 5)
     .sort((left, right) => left.hitPoints - right.hitPoints || left.profile.id.localeCompare(right.profile.id))[0];
   const slot = sharedSpellSlot(state, actor, 1);
   if (adjacent === undefined || slot === undefined) return [];
@@ -3207,10 +3207,7 @@ export function loadedPartyTurnLegalActions(
     ): Extract<EncounterCommand, { readonly type: 'attack' }>[] =>
       targets.flatMap((target) => member.attacks.flatMap((declaredAttack) => {
         const attack = effectiveLoadedPartyAttack(member, declaredAttack);
-        const distance = gridDistance(
-          loadedMemberPosition(state, actor),
-          loadedMemberPosition(state, target.profile.id),
-        );
+        const distance = loadedMemberDistance(state, actor, target.profile.id);
         const inRange = attack.kind === 'melee'
           ? distance <= attack.reach
           : distance <= attack.range;

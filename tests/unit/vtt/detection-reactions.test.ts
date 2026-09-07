@@ -42,6 +42,7 @@ function sequence(...values: readonly number[]): () => number {
 
 function darkEnvironment(...cells: readonly { readonly column: number; readonly row: number }[]) {
   return {
+    narrowOpeningRegions: [],
     lightRegions: [{ id: 'darkness', cells, level: 'darkness' as const }],
     obscurementRegions: [], difficultTerrainRegions: [], movementRegions: [],
   };
@@ -146,7 +147,7 @@ describe('D356 full detection vocabulary', () => {
     const subjectCell = { column: 1, row: 1 } as const;
     const obscured: EncounterState = {
       ...disadvantage.state,
-      environment: {
+    environment: {
         ...disadvantage.state.environment,
         lightRegions: [{ id: 'dim-passive', cells: [subjectCell], level: 'dim' }],
         obscurementRegions: [{ id: 'heavy-passive', cells: [subjectCell], obscurement: 'heavy' }],

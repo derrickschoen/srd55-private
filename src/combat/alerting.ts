@@ -1,4 +1,4 @@
-import { gridDistance, type GridCell } from './grid';
+import { minimumSpaceDistance, type CreatureSpace, type KnownCreatureSize } from './creature-space';
 import { feet, type CombatantId, type Feet } from './values';
 
 export const ALERTING_POLICY = 'npc-help-calling-v1' as const;
@@ -80,17 +80,17 @@ export function isEncounterParticipant(
 export function helpCallResponders(input: {
   readonly alerting: EncounterAlertingState | undefined;
   readonly caller: CombatantId;
-  readonly callerPosition: GridCell;
-  readonly positions: ReadonlyMap<CombatantId, GridCell>;
+  readonly callerSpace: CreatureSpace<KnownCreatureSize>;
+  readonly spaces: ReadonlyMap<CombatantId, CreatureSpace<KnownCreatureSize>>;
 }): readonly { readonly combatant: CombatantId; readonly distance: Feet }[] {
   const alerting = input.alerting;
   if (alerting === undefined) return [];
   return alerting.membership
     .flatMap((entry): readonly { readonly combatant: CombatantId; readonly distance: Feet }[] => {
       if (entry.kind !== 'nearby_npc') return [];
-      const position = input.positions.get(entry.combatant);
-      if (position === undefined) return [];
-      const distance = gridDistance(input.callerPosition, position);
+      const space = input.spaces.get(entry.combatant);
+      if (space === undefined) return [];
+      const distance = minimumSpaceDistance(input.callerSpace, space);
       return distance <= alerting.yellingDistance.radius
         ? [{ combatant: entry.combatant, distance }]
         : [];

@@ -7,7 +7,7 @@ import type { TacticalAllocationCandidate } from '../../../src/vtt/engine-query-
 import { freshMonsterPlanningState } from '../../../src/vtt/monster-planning-state';
 import { availableEngineActorOptions } from '../../../src/vtt/intent-resolver';
 import type { EngineOfferableOption } from '../../../src/vtt/turn-proposal';
-import type { GeneratedRoom } from '../../../src/vtt/room-generator';
+import { loadArenaFixture } from '../../../src/vtt/mcp/entrypoint';
 import { declareTestInputs } from '../../helpers/test-inputs';
 
 const inputs = declareTestInputs({
@@ -25,15 +25,14 @@ const BANDITS = [
   combatantId('combatant:generated-5117009-monster-6'),
 ] as const;
 
-function frozenState(): EncounterState {
-  return (JSON.parse(inputs.fixtures.readText(
-    'tests/fixtures/arena-basis-hard/seed-5117009.json',
-  )) as GeneratedRoom).encounter.state;
+async function frozenState(): Promise<EncounterState> {
+  inputs.fixtures.readText('tests/fixtures/arena-basis-hard/seed-5117009.json');
+  return loadArenaFixture('tests/fixtures/arena-basis-hard/seed-5117009.json');
 }
 
 describe('R02-like canonical tactical query', () => {
-  it('reports both 90-foot Scout shots as move-0 normal range and straight at the dying fighter', () => {
-    const state = frozenState();
+  it('reports both 90-foot Scout shots as move-0 normal range and straight at the dying fighter', async () => {
+    const state = await frozenState();
     const rows = SCOUTS.map((scoutId) => {
       const action = canonicalEngineQueryPort.actions(state, scoutId)
         .find((candidate): candidate is MonsterAttackAction =>
@@ -93,12 +92,12 @@ describe('R02-like canonical tactical query', () => {
         automaticCriticalOnHit: false,
         automaticCriticalMaximumDistanceFeet: 5,
       });
-      expect(row.policy).toBe('tactical-evaluator-v2');
+      expect(row.policy).toBe('tactical-evaluator-v3');
     }
   });
 
-  it('compares ordered registry allocations with exact post-grant Bless conditioning', () => {
-    const state = freshMonsterPlanningState(frozenState());
+  it('compares ordered registry allocations with exact post-grant Bless conditioning', async () => {
+    const state = freshMonsterPlanningState(await frozenState());
     const optionFor = (
       actorId: typeof PRIEST,
       predicate: (option: EngineOfferableOption) => boolean,
@@ -159,7 +158,7 @@ describe('R02-like canonical tactical query', () => {
       candidate('bless-only-priest-no-attacks', priestBlessOnly, scoutScoutBandit),
     ], initiativeOrder);
 
-    expect(comparison.policy).toBe('tactical-evaluator-v2');
+    expect(comparison.policy).toBe('tactical-evaluator-v3');
     const probability = (allocationId: string) => {
       const result = comparison.allocations.find((allocation) => allocation.allocationId === allocationId);
       if (result?.killProbability === null || result?.killProbability === undefined) {

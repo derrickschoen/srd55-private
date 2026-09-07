@@ -713,7 +713,7 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
     source: 'docs/srd/source/spell-descriptions.txt:2679',
     castingTime: 'action', components: material('a pinch of powdered iron'),
     targeting: { kind: 'single', rangeFeet: 30, willing: false, requiresSight: true },
-    operation: { kind: 'effect', effect: effect({ kind: 'size_alteration', options: ['enlarge', 'reduce'], sizeCategoryDelta: 1, damageDieCount: 1, damageDieSides: 4 }, { concentration: true, durationRounds: 10 }) },
+    operation: { kind: 'effect', effect: effect({ kind: 'size_alteration', selection: 'selected_when_cast', damageDieCount: 1, damageDieSides: 4 }, { concentration: true, durationRounds: 10 }) },
   },
   {
     id: 'find-traps', name: 'Find Traps', level: 2,

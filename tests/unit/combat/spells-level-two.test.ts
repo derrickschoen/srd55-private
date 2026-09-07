@@ -76,7 +76,7 @@ const LEVEL_TWO_MECHANICS_PINS: readonly LevelTwoMechanicsPin[] = [
   { id: 'detect-thoughts', source: 'spell-descriptions.txt:2119', targeting: { kind: 'self' }, operation: { kind: 'utility', effect: { kind: 'detect_thoughts', radiusFeet: 30, probeSaveAbility: 'wisdom', escapeCheckAbility: 'intelligence', escapeCheckSkill: 'Arcana' }, concentration: true, durationRounds: 10 } },
   { id: 'dragons-breath', source: 'spell-descriptions.txt:2492', targeting: { kind: 'single', rangeFeet: 5, willing: true }, operation: { kind: 'effect', effect: effect({ kind: 'granted_breath', damageTypes: ['Acid', 'Cold', 'Fire', 'Lightning', 'Poison'], coneFeet: 15, saveAbility: 'dexterity', onSuccess: 'half', dice: { baseCount: 3, sides: 6, perSlotCount: 1 } }, { concentration: true, durationRounds: 10 }) } },
   { id: 'enhance-ability', source: 'spell-descriptions.txt:2660', targeting: { kind: 'multiple', rangeFeet: 5, baseMaximum: 1, additionalPerSlot: 1 }, operation: { kind: 'effect', effect: effect({ kind: 'ability_check_advantage', ability: 'chosen_when_cast', excludedAbility: 'constitution' }, { concentration: true, durationRounds: 600 }) } },
-  { id: 'enlarge-reduce', source: 'spell-descriptions.txt:2679', targeting: { kind: 'single', rangeFeet: 30, willing: false }, operation: { kind: 'effect', effect: effect({ kind: 'size_alteration', options: ['enlarge', 'reduce'], sizeCategoryDelta: 1, damageDieCount: 1, damageDieSides: 4 }, { concentration: true, durationRounds: 10 }) } },
+  { id: 'enlarge-reduce', source: 'spell-descriptions.txt:2679', targeting: { kind: 'single', rangeFeet: 30, willing: false }, operation: { kind: 'effect', effect: effect({ kind: 'size_alteration', selection: 'selected_when_cast', damageDieCount: 1, damageDieSides: 4 }, { concentration: true, durationRounds: 10 }) } },
   { id: 'find-traps', source: 'spell-descriptions.txt:3131', targeting: { kind: 'utility', rangeFeet: 120 }, operation: { kind: 'utility', effect: { kind: 'trap_detection', rangeFeet: 120, revealsLocation: false }, concentration: false, durationRounds: null } },
   { id: 'flaming-sphere', source: 'spell-descriptions.txt:3276', targeting: { kind: 'area', rangeFeet: 60, shape: 'sphere', baseSizeFeet: 2.5, sizePerSlotFeet: 0 }, operation: { kind: 'utility', effect: { kind: 'flaming_sphere', placement: 'selected_when_cast', diameterFeet: 5, damageCount: 2, damageSides: 6, damagePerSlotCount: 1, moveFeetPerBonusAction: 30, brightFeet: 20, dimFeet: 20 }, concentration: true, durationRounds: 10 } },
   { id: 'gentle-repose', source: 'spell-descriptions.txt:3682', targeting: { kind: 'utility', rangeFeet: 5 }, operation: { kind: 'utility', effect: { kind: 'corpse_preservation', preventsDecayAndUndeath: true }, concentration: false, durationRounds: 144000 } },
@@ -249,7 +249,10 @@ describe('level-2 spell mechanics pins', () => {
       castAsRitual: false, casterLevel: 7, attackBonus: 100, saveDc: 100,
       spellcastingModifier: 3, targets, area: levelTwoArea(definition), weaponAttack: null,
       selectedOption: definition.id === 'blindness-deafness' ? 'Blinded'
-        : definition.id === 'lesser-restoration' ? 'Poisoned' : null,
+        : definition.id === 'lesser-restoration' ? 'Poisoned'
+          : definition.id === 'enlarge-reduce'
+            ? { kind: 'size_step', operation: 'enlarge' }
+            : null,
       ...(definition.id === 'calm-emotions'
         ? { calmEmotionsModes: [{ target: target.id, mode: 'suppress_charmed_frightened' as const }] }
         : {}),

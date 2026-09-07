@@ -140,6 +140,11 @@ describe('AI DM board snapshot contracts', () => {
       captureMs: 1,
       source,
       chromiumVersion: 'unit',
+      html: {
+        relativePath: `board-html/${'b'.repeat(64)}/board.html`,
+        sha256: 'b'.repeat(64),
+        bytes: 1,
+      },
     };
     const moved = movedState(state);
     const movedSource = sourceFor(moved);

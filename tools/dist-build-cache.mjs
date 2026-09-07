@@ -35,8 +35,9 @@ export const DIST_BUILD_INPUT_CLASSES = Object.freeze([
   ]) }),
   Object.freeze({ label: 'emitted licence texts', paths: Object.freeze([
     'LICENSE',
+    'LICENSE-ART',
+    'ART-PROVENANCE.md',
     'docs/licenses/CC-BY-4.0.txt',
-    'docs/licenses/STARTER-ART-NOTICE.txt',
     'docs/licenses/SRD-5.1-ATTRIBUTION.txt',
     'docs/licenses/A5ESRD-ATTRIBUTION.txt',
   ]) }),

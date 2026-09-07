@@ -17,6 +17,7 @@ describe('headless simulation adoption', () => {
     const difficult = new Set(['1,0']);
     const world: MovementWorld<'sim-actor'> = {
       bounds: { columns: 4, rows: 2 },
+      occupiedCells: (_actorId, anchor) => [anchor],
       traversal(_actorId, _from, to) {
         return {
           kind: 'enterable',

@@ -1,15 +1,30 @@
 import { describe, expect, it } from 'vitest';
 import { createEncounter, reduceEncounter, type EncounterState } from '../../../src/combat/encounter';
+import type { EffectApplication } from '../../../src/combat/effects';
 import type { EncounterCommand } from '../../../src/combat/events';
 import {
   dmVisibleEncounter,
   projectDmView,
   projectPlayerView,
 } from '../../../src/combat/visibility';
-import { damageType, dieSides } from '../../../src/combat/values';
+import {
+  damageType,
+  dieSides,
+  effectStackingIdentity,
+  type CombatantId,
+} from '../../../src/combat/values';
 import { monsterProfile, placedToken, playerProfile } from './fixtures';
+import type { KnownCreatureSize } from '../../../src/domain/enums';
 
 const fixedD20 = (face: number) => () => (face - 0.5) / 20;
+
+function applyVisibilityTestEffect(
+  state: EncounterState,
+  actor: CombatantId,
+  effect: EffectApplication,
+): EncounterState {
+  return reduceEncounter(state, { type: 'apply_effect', actor, effect, cost: 'none' }, fixedD20(11)).state;
+}
 
 function hiddenDeathSaveState(): EncounterState {
   const pc = playerProfile('viewer', { initiativeBonus: -20, hitPoints: 10 });
@@ -52,6 +67,153 @@ function hiddenDeathSaveState(): EncounterState {
 }
 
 describe('D359 encounter views', () => {
+  it('redacts private conditions for non-owners while preserving owned conditions and Exhaustion level', () => {
+    const baseViewer = playerProfile('condition-viewer');
+    const viewer = {
+      ...baseViewer,
+      rules: {
+        ...baseViewer.rules,
+        senses: [...baseViewer.rules.senses, { kind: 'truesight' as const, rangeFeet: 60 }],
+      },
+    };
+    const target = monsterProfile('condition-target');
+    let state = createEncounter({
+      bounds: { columns: 4, rows: 2 },
+      combatants: [viewer, target],
+      tokens: [placedToken(viewer, 0), placedToken(target, 1)],
+    });
+    state = reduceEncounter(state, { type: 'roll_initiative' }, fixedD20(11)).state;
+    const conditionEffect = (
+      key: string,
+      targetId: CombatantId,
+      payload: EffectApplication['payload'],
+    ): EffectApplication => ({
+      targets: [targetId],
+      duration: { kind: 'permanent' },
+      concentration: false,
+      stackingIdentity: effectStackingIdentity(`visibility:${key}`),
+      stacking: 'coexist',
+      repeatedSave: null,
+      payload,
+    });
+    state = applyVisibilityTestEffect(state, viewer.id, conditionEffect(
+      'charmed', target.id, { kind: 'condition', condition: 'Charmed' },
+    ));
+    state = applyVisibilityTestEffect(state, viewer.id, conditionEffect(
+      'invisible', target.id, { kind: 'condition', condition: 'Invisible' },
+    ));
+    state = applyVisibilityTestEffect(state, viewer.id, conditionEffect(
+      'prone', target.id, { kind: 'condition', condition: 'Prone' },
+    ));
+    state = applyVisibilityTestEffect(state, viewer.id, conditionEffect(
+      'exhaustion', viewer.id, { kind: 'exhaustion', level: 2 },
+    ));
+
+    const nonOwnerView = projectPlayerView(state, {
+      seatId: 'seat:condition-viewer', combatantId: viewer.id,
+    });
+    const ownerView = projectPlayerView(state, {
+      seatId: 'seat:condition-target', combatantId: target.id,
+    });
+
+    expect(nonOwnerView.combatants.find((combatant) => combatant.id === target.id)?.conditions)
+      .toEqual(['Prone']);
+    expect(nonOwnerView.combatants.find((combatant) => combatant.id === viewer.id)?.conditions)
+      .toEqual(['Exhaustion 2']);
+    expect(ownerView.combatants.find((combatant) => combatant.id === target.id)?.conditions)
+      .toEqual(['Charmed', 'Invisible', 'Prone']);
+  });
+
+  it.each([
+    ['Tiny', [{ column: 2, row: 2 }]],
+    ['Small', [{ column: 2, row: 2 }]],
+    ['Medium', [{ column: 2, row: 2 }]],
+    ['Large', [
+      { column: 2, row: 2 }, { column: 3, row: 2 },
+      { column: 2, row: 3 }, { column: 3, row: 3 },
+    ]],
+    ['Huge', [
+      { column: 2, row: 2 }, { column: 3, row: 2 }, { column: 4, row: 2 },
+      { column: 2, row: 3 }, { column: 3, row: 3 }, { column: 4, row: 3 },
+      { column: 2, row: 4 }, { column: 3, row: 4 }, { column: 4, row: 4 },
+    ]],
+    ['Gargantuan', [
+      { column: 2, row: 2 }, { column: 3, row: 2 }, { column: 4, row: 2 }, { column: 5, row: 2 },
+      { column: 2, row: 3 }, { column: 3, row: 3 }, { column: 4, row: 3 }, { column: 5, row: 3 },
+      { column: 2, row: 4 }, { column: 3, row: 4 }, { column: 4, row: 4 }, { column: 5, row: 4 },
+      { column: 2, row: 5 }, { column: 3, row: 5 }, { column: 4, row: 5 }, { column: 5, row: 5 },
+    ]],
+  ] as const)('clones the exact row-major %s footprint into player and DM projections', (size, footprint) => {
+    const viewer = playerProfile(`projection-viewer-${size}`);
+    const baseTarget = monsterProfile(`projection-target-${size}`);
+    const target = { ...baseTarget, rules: { ...baseTarget.rules, sizeCategory: size as KnownCreatureSize } };
+    const state = createEncounter({
+      bounds: { columns: 8, rows: 8 },
+      combatants: [viewer, target],
+      tokens: [placedToken(viewer, 0, 0), placedToken(target, 2, 2)],
+    });
+    const player = projectPlayerView(state, { seatId: 'seat:projection', combatantId: viewer.id });
+    const dm = dmVisibleEncounter(projectDmView(state));
+    expect(player.combatants.find((entry) => entry.id === target.id)).toMatchObject({
+      placementStatus: 'placed', effectiveSize: size, placementMode: { kind: 'normal', actual: size }, footprint,
+    });
+    expect(dm.combatants.find((entry) => entry.id === target.id)).toMatchObject({
+      placementStatus: 'placed', effectiveSize: size, placementMode: { kind: 'normal', actual: size }, footprint,
+    });
+    const projected = player.combatants.find((entry) => entry.id === target.id);
+    const canonicalToken = state.tokens.find((entry) => entry.combatantId === target.id);
+    if (projected?.placementStatus !== 'placed' || canonicalToken === undefined) throw new Error('Placed projection fixture failed.');
+    (canonicalToken.position as { column: number }).column = 7;
+    expect(projected.position).toEqual({ column: 2, row: 2 });
+  });
+
+  it('projects a legal squeezed mode and filters hidden geometry before handling partial fog', () => {
+    const viewer = playerProfile('projection-squeeze-viewer');
+    const baseTarget = monsterProfile('projection-squeeze-target');
+    const target = { ...baseTarget, rules: { ...baseTarget.rules, sizeCategory: 'Large' as const } };
+    const created = createEncounter({
+      bounds: { columns: 6, rows: 4 },
+      foggedCells: [{ column: 3, row: 1 }, { column: 2, row: 2 }, { column: 3, row: 2 }],
+      combatants: [viewer, target],
+      tokens: [placedToken(viewer, 0, 0), placedToken(target, 2, 1)],
+    });
+    const squeezed: EncounterState = {
+      ...created,
+      tokens: created.tokens.map((token) => token.combatantId === target.id
+        ? { ...token, placementMode: { kind: 'squeezed', actual: 'Large', sizedFor: 'Medium' } }
+        : token),
+    };
+    expect(projectPlayerView(squeezed, { seatId: 'seat:squeeze', combatantId: viewer.id }).combatants
+      .find((entry) => entry.id === target.id)).toMatchObject({
+        placementStatus: 'placed', effectiveSize: 'Large',
+        placementMode: { kind: 'squeezed', actual: 'Large', sizedFor: 'Medium' },
+        footprint: [{ column: 2, row: 1 }],
+      });
+
+    const observed = reduceEncounter(created, { type: 'roll_initiative' }, fixedD20(10)).state;
+    const hidden = {
+      ...observed,
+      hiddenCombatants: [{ combatant: target.id, stealthTotal: 20, edition: '2024' as const }],
+    };
+    const player = projectPlayerView(hidden, { seatId: 'seat:hidden', combatantId: viewer.id });
+    const dm = dmVisibleEncounter(projectDmView(hidden));
+    expect(player.combatants.some((entry) => entry.id === target.id)).toBe(false);
+    expect(player.lastSeen).toEqual([{
+      id: target.id,
+      name: target.name,
+      kind: 'monster',
+      cell: { column: 2, row: 1 },
+      round: 1,
+    }]);
+    expect(JSON.stringify(player)).not.toContain('"position":{"column":2,"row":1}');
+    expect(dm.combatants.find((entry) => entry.id === target.id)).toMatchObject({
+      placementStatus: 'placed', hiddenFromPlayers: true,
+      footprint: [
+        { column: 2, row: 1 }, { column: 3, row: 1 },
+        { column: 2, row: 2 }, { column: 3, row: 2 },
+      ],
+    });
+  });
   it('omits a fogged edge cell and its contents while retaining the adjacent visible boundary cell', () => {
     const state = hiddenDeathSaveState();
     const pc = state.combatants.find((subject) => subject.profile.kind === 'player_character');
@@ -122,7 +284,7 @@ describe('D359 encounter views', () => {
     });
 
     expect(westView.combatants.map((entry) => entry.id)).toEqual([west.id]);
-    expect(eastView.combatants.map((entry) => entry.id)).toEqual([west.id, east.id]);
+    expect(eastView.combatants.map((entry) => entry.id)).toEqual([east.id, west.id]);
     expect(westView.ownedCombatants.map((entry) => entry.id)).toEqual([west.id]);
     expect(eastView.ownedCombatants.map((entry) => entry.id)).toEqual([east.id]);
     expect(westView.seat).toMatchObject({ seatId: 'seat:west', combatantId: west.id });

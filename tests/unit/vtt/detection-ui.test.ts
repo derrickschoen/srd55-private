@@ -152,7 +152,7 @@ describe('D373 detection UI projections', () => {
     expect(coordinator.state().activeCombatant).toBe(setup.reactor.id);
   });
 
-  it('hidden_token_rendered: full DM view retains hidden occupants while player data conceals them', () => {
+  it('hidden_token_rendered: the DM retains hidden placement without leaking its cell to the player', () => {
     const setup = encounter();
     const hidden: EncounterState = {
       ...setup.state,
@@ -169,8 +169,14 @@ describe('D373 detection UI projections', () => {
       },
     }).find((cell) => cell.key === '0,1');
     expect(dmCell?.layers).not.toContainEqual(expect.objectContaining({ role: 'fog' }));
-    expect(dmCell?.token?.id).toBe(setup.reactor.id);
-    expect(dmBoard.combatants.map((entry) => entry.id)).toContain(setup.reactor.id);
+    expect(dmCell?.token).toEqual(expect.objectContaining({
+      id: setup.reactor.id,
+      hiddenFromPlayers: true,
+    }));
+    expect(dmBoard.combatants).toContainEqual(expect.objectContaining({
+      id: setup.reactor.id,
+      hiddenFromPlayers: true,
+    }));
 
     const playerView = projectPlayerView(hidden, {
       seatId: 'seat:detection-ui',
@@ -178,7 +184,8 @@ describe('D373 detection UI projections', () => {
       ownedCombatantIds: [setup.mover.id],
     });
     const playerBoard = projectPlayerBoard(playerView, IDLE);
-    expect(playerBoard.concealedCells).toContainEqual({ column: 0, row: 1 });
+    expect(playerBoard.concealedCells).toEqual([]);
+    expect(playerView.cells).toContainEqual({ column: 0, row: 1 });
     expect(playerBoard.combatants.map((entry) => entry.id)).not.toContain(setup.reactor.id);
   });
 });

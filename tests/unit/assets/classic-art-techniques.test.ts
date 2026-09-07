@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { Bitmap, type Rgba } from '../../../src/assets/bitmap';
 import {
   ART_MATERIALS,
+  FLOOR_VARIANTS,
   MATERIAL_RESPONSES,
   TILE_SIZE,
   TOKEN_ARCHETYPES,
@@ -436,6 +437,62 @@ function relativeLuminance(color: Rgba): number {
   );
 }
 
+function compositeCell(layers: readonly Bitmap[]): Bitmap {
+  const result = new Bitmap(TILE_SIZE, TILE_SIZE);
+  for (const layer of layers) {
+    for (let y = 0; y < TILE_SIZE; y += 1) {
+      for (let x = 0; x < TILE_SIZE; x += 1)
+        result.blendRgba(x, y, layer.get(x, y));
+    }
+  }
+  return result;
+}
+
+function meanCellColor(bitmap: Bitmap): Rgba {
+  const inset = 8;
+  const sampleSize = (TILE_SIZE - 2 * inset) ** 2;
+  let red = 0;
+  let green = 0;
+  let blue = 0;
+  for (let y = inset; y < TILE_SIZE - inset; y += 1) {
+    for (let x = inset; x < TILE_SIZE - inset; x += 1) {
+      const pixel = bitmap.get(x, y);
+      red += pixel.red;
+      green += pixel.green;
+      blue += pixel.blue;
+    }
+  }
+  return {
+    red: red / sampleSize,
+    green: green / sampleSize,
+    blue: blue / sampleSize,
+    alpha: 255,
+  };
+}
+
+function labColor(color: Rgba): readonly [number, number, number] {
+  const red = linearChannel(color.red);
+  const green = linearChannel(color.green);
+  const blue = linearChannel(color.blue);
+  const x = (0.4124564 * red + 0.3575761 * green + 0.1804375 * blue) / 0.95047;
+  const y = 0.2126729 * red + 0.7151522 * green + 0.072175 * blue;
+  const z = (0.0193339 * red + 0.119192 * green + 0.9503041 * blue) / 1.08883;
+  const transform = (value: number): number => value > 216 / 24_389
+    ? Math.cbrt(value)
+    : ((24_389 / 27) * value + 16) / 116;
+  return [
+    116 * transform(y) - 16,
+    500 * (transform(x) - transform(y)),
+    200 * (transform(y) - transform(z)),
+  ];
+}
+
+function cieDeltaE(left: Rgba, right: Rgba): number {
+  const a = labColor(left);
+  const b = labColor(right);
+  return Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+}
+
 function median(values: readonly number[]): number {
   const ordered = [...values].sort((left, right) => left - right);
   const middle = ordered[Math.floor(ordered.length / 2)];
@@ -799,29 +856,91 @@ describe('classic native-density and art-technique invariants', () => {
     expect(isolatedColorIslands(speckled)).toBeGreaterThan(24);
   });
 
-  it('uses cell-spanning repeated ridges for difficult terrain and a broad stone cross-brace for blocked cells', () => {
+  it('uses exactly three inset opaque ridges for difficult terrain and a broad stone cross-brace for blocked cells', () => {
     const difficult = paintRecipe({
       kind: 'overlay',
       material: 'semantic',
       effect: 'difficult',
     });
-    const ridgeRgb = paletteRgb(ramp('earth', 4));
-    const ridgeKey = rgbaKey({ ...ridgeRgb, alpha: 175 });
-    const ridgePoints: { readonly x: number; readonly y: number }[] = [];
+    const ridgeInk = paletteRgb(ramp('earth', 6));
+    const ridgeOutline = paletteRgb(neutral(0));
+    const ridgeKey = rgbaKey({ ...ridgeInk, alpha: 255 });
+    const outlineKey = rgbaKey({ ...ridgeOutline, alpha: 255 });
+    const skeletonKeys = new Set([ridgeKey, outlineKey]);
+    let ridgePixels = 0;
+    let outlinePixels = 0;
     for (let y = 0; y < difficult.height; y += 1) {
       for (let x = 0; x < difficult.width; x += 1) {
-        if (rgbaKey(difficult.get(x, y)) === ridgeKey)
-          ridgePoints.push({ x, y });
+        const pixelKey = rgbaKey(difficult.get(x, y));
+        if (pixelKey === ridgeKey) ridgePixels += 1;
+        if (pixelKey === outlineKey) outlinePixels += 1;
       }
     }
-    expect(ridgePoints.length).toBeGreaterThan(300);
-    expect(
-      Math.max(...ridgePoints.map(({ x }) => x)) -
-        Math.min(...ridgePoints.map(({ x }) => x)),
-    ).toBeGreaterThan(110);
-    expect(new Set(ridgePoints.map(({ y }) => Math.floor(y / 32))).size).toBe(
-      4,
-    );
+    expect(ridgePixels).toBeGreaterThanOrEqual(1_000);
+    expect(outlinePixels).toBeGreaterThanOrEqual(500);
+
+    const visited = new Uint8Array(TILE_SIZE * TILE_SIZE);
+    let ridgeComponents = 0;
+    for (let y = 0; y < TILE_SIZE; y += 1) {
+      for (let x = 0; x < TILE_SIZE; x += 1) {
+        const offset = y * TILE_SIZE + x;
+        if (visited[offset] === 1 || !skeletonKeys.has(rgbaKey(difficult.get(x, y)))) continue;
+        ridgeComponents += 1;
+        const queue: Array<{ readonly x: number; readonly y: number }> = [{ x, y }];
+        visited[offset] = 1;
+        for (let index = 0; index < queue.length; index += 1) {
+          const point = queue[index];
+          if (point === undefined) throw new Error('Ridge component queue lost a point.');
+          for (const [dx, dy] of [
+            [-1, -1], [0, -1], [1, -1],
+            [-1, 0], [1, 0],
+            [-1, 1], [0, 1], [1, 1],
+          ] as const) {
+            const nextX = point.x + dx;
+            const nextY = point.y + dy;
+            if (!difficult.inside(nextX, nextY)) continue;
+            const nextOffset = nextY * TILE_SIZE + nextX;
+            if (
+              visited[nextOffset] === 1 ||
+              !skeletonKeys.has(rgbaKey(difficult.get(nextX, nextY)))
+            ) continue;
+            visited[nextOffset] = 1;
+            queue.push({ x: nextX, y: nextY });
+          }
+        }
+      }
+    }
+    expect(ridgeComponents).toBe(3);
+    for (const ridgeY of [34, 64, 94] as const) {
+      for (const [x, y] of [
+        [18, ridgeY + 7],
+        [40, ridgeY - 7],
+        [64, ridgeY + 7],
+        [88, ridgeY - 7],
+        [110, ridgeY + 7],
+      ] as const) {
+        expect(difficult.get(x, y)).toEqual({ ...ridgeInk, alpha: 255 });
+      }
+    }
+    for (let coordinate = 0; coordinate < TILE_SIZE; coordinate += 1) {
+      expect(difficult.get(coordinate, 0).alpha, 'top gutter').toBe(0);
+      expect(difficult.get(coordinate, TILE_SIZE - 1).alpha, 'bottom gutter').toBe(0);
+      expect(difficult.get(0, coordinate).alpha, 'left gutter').toBe(0);
+      expect(difficult.get(TILE_SIZE - 1, coordinate).alpha, 'right gutter').toBe(0);
+    }
+    for (const variant of FLOOR_VARIANTS) {
+      const floor = paintRecipe({ kind: 'floor', material: 'stone', variant });
+      const rendered = meanCellColor(compositeCell([floor, difficult]));
+      const plain = meanCellColor(floor);
+      expect(
+        Math.abs(relativeLuminance(rendered) - relativeLuminance(plain)),
+        `difficult/plain-${String(variant)} luminance difference`,
+      ).toBeGreaterThanOrEqual(0.015);
+      expect(
+        cieDeltaE(rendered, plain),
+        `difficult/plain-${String(variant)} CIE76 deltaE`,
+      ).toBeGreaterThanOrEqual(8.5);
+    }
 
     const blocked = paintRecipe({
       kind: 'overlay',
@@ -841,23 +960,6 @@ describe('classic native-density and art-technique invariants', () => {
       }
     }
     expect(bracePixels).toBeGreaterThan(700);
-
-    const plausibleWrong = new Bitmap(128, 128);
-    plausibleWrong.rect(8, 8, 112, 112, { ...ramp('earth', 4), alpha: 65 });
-    for (let index = 0; index < 40; index += 1) {
-      plausibleWrong.put(8 + index * 2, 20 + (index % 4), {
-        ...ramp('earth', 4),
-        alpha: 175,
-      });
-    }
-    let wrongRidgePixels = 0;
-    for (let y = 0; y < plausibleWrong.height; y += 1) {
-      for (let x = 0; x < plausibleWrong.width; x += 1) {
-        if (rgbaKey(plausibleWrong.get(x, y)) === ridgeKey)
-          wrongRidgePixels += 1;
-      }
-    }
-    expect(wrongRidgePixels).toBeLessThanOrEqual(80);
   });
 
   it('gives every archetype a measurably distinct alpha-mask silhouette', () => {

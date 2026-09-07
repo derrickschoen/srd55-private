@@ -115,7 +115,7 @@ describe('procedural starter-art manifest and deterministic outputs (native gene
 
     expect(() => decodeArtManifest(mutated)).toThrow();
     expect(STARTER_ART_MANIFEST.assets.every((entry) =>
-      entry.license.spdx === 'CC-BY-4.0' && entry.source.type === 'procedural',
+      entry.license.spdx === 'CC0-1.0' && entry.source.type === 'procedural',
     )).toBe(true);
   });
 
@@ -213,23 +213,22 @@ describe('procedural starter-art manifest and deterministic outputs (native gene
 
 describe('starter-art attribution reaches repository and distribution', () => {
   it('M52-ATTRIBUTION-OMITTED emits the exact notice and renders it on the legal screen', () => {
-    const notice = text('docs/licenses/STARTER-ART-NOTICE.txt').trimEnd();
-    expect(notice).toBe(STARTER_ART_ATTRIBUTION);
-    expect(text('NOTICE.md').split(STARTER_ART_ATTRIBUTION)).toHaveLength(2);
+    expect(text('ART-PROVENANCE.md')).toContain('CC0 1.0 Universal');
+    expect(text('NOTICE.md')).toContain('[LICENSE-ART](LICENSE-ART)');
     expect(renderLegalPage()).toContain(STARTER_ART_ATTRIBUTION);
 
     const declaration = BUNDLED_LICENSE_FILES.find(
-      (entry) => entry.fileName === 'licenses/STARTER-ART-NOTICE.txt',
+      (entry) => entry.fileName === 'LICENSE-ART',
     );
-    expect(declaration?.sha256).toBe(sha256(bytes('docs/licenses/STARTER-ART-NOTICE.txt')));
+    expect(declaration?.sha256).toBe(sha256(bytes('LICENSE-ART')));
     const emitted = bundledLicenseAssets(repositoryRoot).find(
-      (entry) => entry.fileName === 'licenses/STARTER-ART-NOTICE.txt',
+      (entry) => entry.fileName === 'LICENSE-ART',
     );
     expect(Buffer.from(emitted?.source ?? []).toString('utf8')).toBe(
-      text('docs/licenses/STARTER-ART-NOTICE.txt'),
+      text('LICENSE-ART'),
     );
     const guard = text('tools/assert-dist-clean.mjs');
-    expect(guard).toContain('licenses/STARTER-ART-NOTICE.txt');
+    expect(guard).toContain('LICENSE-ART');
     expect(guard).toContain(declaration?.sha256);
   });
 

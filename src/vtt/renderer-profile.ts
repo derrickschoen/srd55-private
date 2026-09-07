@@ -1,12 +1,14 @@
 import { z } from 'zod';
 import { combatantsAreAllies } from '../combat/allies';
 import type { EncounterState } from '../combat/encounter';
-import { gridDistance } from '../combat/grid';
+import { combatantSpace } from '../combat/combat-rules';
+import { minimumSpaceDistance } from '../combat/creature-space';
 import { BUNDLED_MONSTER_ROSTER } from '../combat/statblocks/roster';
 import type { EngineStateCapsule } from './engine-state-capsule';
 import type { EngineOmittedRider, NoModeledEffect } from './option-modeling';
+import { engineOptionId, type EngineOptionId } from './turn-proposal';
 
-export const RENDERER_POLICY_VERSION = 'turn-context-renderer-v3' as const;
+export const RENDERER_POLICY_VERSION = 'turn-context-renderer-v4-creature-space' as const;
 
 export const rendererFormatSchema = z.enum(['structured', 'caveman_prose', 'regular_prose']);
 export type RendererFormat = z.infer<typeof rendererFormatSchema>;
@@ -228,7 +230,10 @@ export function extractCircumstanceFeatures(input: {
       const rightPosition = positions.get(right.profile.id);
       return leftPosition === undefined || rightPosition === undefined
         ? []
-        : [gridDistance(leftPosition, rightPosition)];
+        : [minimumSpaceDistance(
+            combatantSpace(input.state, left.profile.id),
+            combatantSpace(input.state, right.profile.id),
+          )];
     }));
   const totalCells = Math.max(1, input.state.bounds.columns * input.state.bounds.rows);
   const difficultCells = new Set(input.state.environment.difficultTerrainRegions
@@ -420,7 +425,150 @@ function rareTriggered(key: string, value: MutableRecord): boolean {
 export interface RenderedProfileContext {
   readonly context: Readonly<Record<string, unknown>>;
   readonly optionRefs: ReadonlyMap<string, string>;
+  readonly shownOptionIdsByActor: ReadonlyMap<string, ReadonlySet<EngineOptionId>>;
   readonly removals: RendererRemovalCounts;
+}
+
+const shownOptionIdBrand = Symbol('ShownOptionId');
+
+/** An exact engine id proven to be present in one actor's rendered option list. */
+type ShownOptionId = EngineOptionId & { readonly [shownOptionIdBrand]: true };
+
+interface RenderedOptionCatalogEntry {
+  readonly actorId: string;
+  readonly optionId: EngineOptionId;
+  readonly displayId: string;
+  readonly label: string;
+}
+
+export interface ShownOptionContext {
+  readonly context: Readonly<Record<string, unknown>>;
+  readonly shownOptionIdsByActor: ReadonlyMap<string, ReadonlySet<EngineOptionId>>;
+}
+
+function optionLabel(option: MutableRecord): string {
+  if (typeof option['label'] === 'string') return option['label'];
+  return derivedLabel(option['action_id']) ?? 'Unlabelled option';
+}
+
+function optionCatalog(
+  context: Readonly<Record<string, unknown>>,
+  references: ReadonlyMap<string, string>,
+): readonly RenderedOptionCatalogEntry[] {
+  return renderedActors(context).flatMap((actor) => {
+    const actorId = String(actor['actor_id']);
+    return array(actor['options']).flatMap((value) => {
+      const option = record(value);
+      if (option === null) return [];
+      const displayId = typeof option['option_id'] === 'string'
+        ? option['option_id']
+        : typeof option['option_ref'] === 'string'
+          ? option['option_ref']
+          : null;
+      if (displayId === null) return [];
+      const exactId = references.get(displayId) ?? (typeof option['option_id'] === 'string'
+        ? option['option_id']
+        : undefined);
+      return exactId === undefined ? [] : [{
+        actorId,
+        optionId: engineOptionId(exactId),
+        displayId,
+        label: optionLabel(option),
+      }];
+    });
+  });
+}
+
+function shownOptionId(id: EngineOptionId, shown: ReadonlySet<EngineOptionId>): ShownOptionId | null {
+  return shown.has(id) ? id as ShownOptionId : null;
+}
+
+/**
+ * Close every rendered option reference over the actor's visible option list.
+ * Hidden choices retain human-readable coaching as labels, but their executable
+ * ids are removed. This keeps the D430/D431 relevance cut readable without
+ * turning an omitted choice back into an offer through an intel side channel.
+ */
+export function bindIntelToShownOptions(
+  contextValue: Readonly<Record<string, unknown>>,
+  references: ReadonlyMap<string, string>,
+  catalogContext: Readonly<Record<string, unknown>> = contextValue,
+  declareSizeOmissions = false,
+): ShownOptionContext {
+  const context = structuredClone(contextValue) as MutableRecord;
+  const catalogValue = optionCatalog(catalogContext, references);
+  const shownCatalog = optionCatalog(context, references);
+  const shownOptionIdsByActor = new Map<string, ReadonlySet<EngineOptionId>>();
+  for (const actorId of new Set(renderedActors(context).map((actor) => String(actor['actor_id'])))) {
+    shownOptionIdsByActor.set(actorId, new Set(shownCatalog
+      .filter((entry) => entry.actorId === actorId)
+      .map((entry) => entry.optionId)));
+  }
+  const catalogCounts = new Map<string, number>();
+  for (const entry of catalogValue) {
+    catalogCounts.set(entry.actorId, (catalogCounts.get(entry.actorId) ?? 0) + 1);
+  }
+  for (const actor of renderedActors(context)) {
+    const actorId = String(actor['actor_id']);
+    const shownCount = shownCatalog.filter((entry) => entry.actorId === actorId).length;
+    actor['options_omitted_for_size'] = declareSizeOmissions
+      ? Math.max(0, (catalogCounts.get(actorId) ?? shownCount) - shownCount)
+      : 0;
+  }
+  const byId = new Map(catalogValue.map((entry) => [entry.optionId, entry] as const));
+  const shownById = new Map(shownCatalog.map((entry) => [entry.optionId, entry] as const));
+  const hiddenEntries = catalogValue.filter((entry) =>
+    shownOptionId(entry.optionId, shownOptionIdsByActor.get(entry.actorId) ?? new Set()) === null);
+
+  const suggested = record(context['suggested_plan']);
+  const suggestedProposals = array(suggested?.['proposals']).flatMap((value) => {
+    const proposal = record(value);
+    return proposal === null ? [] : [proposal];
+  });
+  if (suggested !== null && suggestedProposals.some((proposal) => {
+    const actorShown = shownOptionIdsByActor.get(String(proposal['actor_id'])) ?? new Set();
+    return [proposal['primary_option_id'], proposal['fallback_option_id']].some((id) =>
+      typeof id === 'string' && !actorShown.has(engineOptionId(id)));
+  })) {
+    // A suggested plan is advertised as executable as-is. If byte pruning hid
+    // either branch, omit the whole advert instead of leaking an unshown id or
+    // presenting a plan that the proposal validator must reject.
+    delete context['suggested_plan'];
+  }
+
+  const visit = (value: unknown, insideOption: boolean): void => {
+    if (Array.isArray(value)) {
+      value.forEach((entry) => visit(entry, insideOption));
+      return;
+    }
+    const current = record(value);
+    if (current === null) return;
+    for (const [key, nested] of Object.entries(current)) {
+      const childInsideOption = insideOption || key === 'options';
+      if (!insideOption && key.endsWith('option_id') && typeof nested === 'string') {
+        const catalogEntry = byId.get(engineOptionId(nested));
+        const shownEntry = shownById.get(engineOptionId(nested));
+        if (shownEntry === undefined) {
+          delete current[key];
+          const labelKey = key.replace(/_id$/u, '_label');
+          if (typeof current[labelKey] !== 'string') {
+            current[labelKey] = catalogEntry?.label ?? plainWords(key.replace(/_option_id$/u, ''));
+          }
+        } else {
+          current[key] = shownEntry.displayId;
+        }
+        continue;
+      }
+      if (!insideOption && typeof nested === 'string') {
+        current[key] = hiddenEntries.reduce((text, entry) =>
+          text.replaceAll(entry.optionId, entry.label), nested);
+      } else {
+        visit(nested, childInsideOption);
+      }
+    }
+  };
+  visit(context, false);
+  return { context, shownOptionIdsByActor };
 }
 
 export function renderTurnContextProfile(
@@ -617,9 +765,11 @@ export function renderTurnContextProfile(
   } else {
     delete context['renderer_attribution'];
   }
+  const bound = bindIntelToShownOptions(context, optionRefs, input);
   return {
-    context,
+    context: bound.context,
     optionRefs,
+    shownOptionIdsByActor: bound.shownOptionIdsByActor,
     removals: {
       rows: removedRows, options: removedOptions, threats: removedThreats,
       movement: removedMovement, rare: removedRare, adverts: removedAdverts,
@@ -658,10 +808,16 @@ interface ProseSegment {
   readonly protected: boolean;
   readonly text: string;
   readonly compactText: string;
+  readonly actorOption?: {
+    readonly actorId: string;
+    readonly optionId: EngineOptionId;
+  };
+  readonly actorOmissionDeclaration?: string;
 }
 
 export interface RenderedProseTurnContext {
   readonly context: Readonly<Record<string, unknown>>;
+  readonly shownOptionIdsByActor: ReadonlyMap<string, ReadonlySet<EngineOptionId>>;
   readonly preTrimBytes: number;
   readonly postTrimBytes: number;
 }
@@ -949,12 +1105,18 @@ function opportunityText(
   const opportunity = record(value);
   if (opportunity === null) return `No opportunity note for ${actorId}.`;
   const labelFor = (id: unknown, fallback: string): string => {
-    const match = options.find((option) => exactOptionId(option, references) === id);
+    const exactId = typeof id === 'string' ? resolveOptionReference(id, references) : id;
+    const match = options.find((option) => exactOptionId(option, references) === exactId);
     return typeof match?.['label'] === 'string' ? cleanClause(match['label']) : fallback;
   };
-  const dodge = labelFor(opportunity['dodge_option_id'], 'Dodge');
-  const better = labelFor(opportunity['better_option_id'], 'the better option');
-  if (opportunity['status'] === 'dominated' && typeof opportunity['better_option_id'] === 'string') {
+  const dodge = typeof opportunity['dodge_option_label'] === 'string'
+    ? cleanClause(opportunity['dodge_option_label'])
+    : labelFor(opportunity['dodge_option_id'], 'Dodge');
+  const better = typeof opportunity['better_option_label'] === 'string'
+    ? cleanClause(opportunity['better_option_label'])
+    : labelFor(opportunity['better_option_id'], 'the better option');
+  if (opportunity['status'] === 'dominated' &&
+    (typeof opportunity['better_option_id'] === 'string' || typeof opportunity['better_option_label'] === 'string')) {
     return style === 'caveman_prose'
       ? `${dodge} is worse than ${better}. Every metric is equal or better. Overriding needs a typed reason.`
       : `${dodge} is dominated by ${better} — no metric favors it; keeping it would need a typed override reason.`;
@@ -991,14 +1153,24 @@ function actorSegments(
     return option === null ? [] : [option];
   });
   const opportunity = record(record(actor['intel'])?.['opportunity_cost']);
-  const defaultOptionId = opportunity?.['engine_default_option_id'];
+  const renderedDefaultOptionId = opportunity?.['engine_default_option_id'];
+  const defaultOptionId = typeof renderedDefaultOptionId === 'string'
+    ? resolveOptionReference(renderedDefaultOptionId, references)
+    : renderedDefaultOptionId;
   const defaultOptionIndex = typeof defaultOptionId === 'string'
     ? options.findIndex((option) => exactOptionId(option, references) === defaultOptionId)
     : -1;
+  const renderedDominatedDodgeId = opportunity?.['status'] === 'dominated'
+    ? opportunity['dodge_option_id']
+    : null;
+  const dominatedDodgeId = typeof renderedDominatedDodgeId === 'string'
+    ? resolveOptionReference(renderedDominatedDodgeId, references)
+    : renderedDominatedDodgeId;
   const protectedOptionIndices = new Set<number>([
     defaultOptionIndex >= 0 ? defaultOptionIndex : 0,
   ]);
-  const alternativeIndex = options.findIndex((_option, index) => !protectedOptionIndices.has(index));
+  const alternativeIndex = options.findIndex((option, index) =>
+    !protectedOptionIndices.has(index) && exactOptionId(option, references) !== dominatedDodgeId);
   if (alternativeIndex >= 0) protectedOptionIndices.add(alternativeIndex);
   segments.push({
     group,
@@ -1006,6 +1178,14 @@ function actorSegments(
     protected: false,
     text: statusText(style, actorId, record(actor['status'])),
     compactText: `Actor ${actorId}.`,
+  });
+  segments.push({
+    group,
+    priority: 120,
+    protected: true,
+    text: `Actor ${actorId} options omitted for size: none.`,
+    compactText: `Actor ${actorId} options omitted for size: none.`,
+    actorOmissionDeclaration: actorId,
   });
   options.forEach((option, optionIndex) => {
     const optionId = exactOptionId(option, references);
@@ -1021,6 +1201,7 @@ function actorSegments(
       protected: protectedOptionIndices.has(optionIndex),
       text: optionText(style, label, optionId, option),
       compactText: `${label} [${optionId}]. Actor ${actorId}.`,
+      actorOption: { actorId, optionId: engineOptionId(optionId) },
     });
   });
   const threats = array(actor['threats']);
@@ -1135,24 +1316,33 @@ function actorKnowledgeText(style: ProseRendererFormat, value: unknown): string 
     const targets = array(actor['targets']).flatMap((targetValue) => {
       const target = record(targetValue);
       if (target === null) return [];
-      const base = String(target['target_id']);
-      const lastSeen = target['last_seen'];
-      return [lastSeen === undefined ? base : `${base}; ${flatClauses(lastSeen).join('; ')}`];
+      return [String(target['target_id'])];
     });
-    return [{ actorId: String(actor['actor_id']), targets }];
+    const lastSeenSentences = array(actor['targets']).flatMap((targetValue) => {
+      const target = record(targetValue);
+      const lastSeen = record(target?.['last_seen']);
+      const position = record(lastSeen?.['lastSeenPosition']);
+      return lastSeen?.['status'] === 'resolved' && position !== null
+        ? [`${String(actor['actor_id'])} last saw ${String(target?.['target_id'])} at cell (${String(position['column'])}, ${String(position['row'])}).`]
+        : [];
+    });
+    return [{ actorId: String(actor['actor_id']), targets, lastSeenSentences }];
   });
+  const lastSeenText = notes.flatMap((note) => note.lastSeenSentences).join(' ');
   const sharedTargets = notes[0]?.targets;
   const allShared = sharedTargets !== undefined && notes.every((note) =>
     note.targets.length === sharedTargets.length && note.targets.every((target, index) => target === sharedTargets[index]));
   if (allShared) {
-    return style === 'caveman_prose'
+    const shared = style === 'caveman_prose'
       ? `Actor knowledge. All ${String(notes.length)} actors perceive ${sharedTargets.join(', ')}.`
       : `Actor knowledge is shared: all ${String(notes.length)} actors perceive ${sharedTargets.join(', ')}.`;
+    return lastSeenText.length === 0 ? shared : `${shared} ${lastSeenText}`;
   }
   const individual = notes.map((note) => `${note.actorId} perceives ${note.targets.join(', ')}`);
-  return style === 'caveman_prose'
+  const differentiated = style === 'caveman_prose'
     ? `Actor knowledge. ${individual.join('. ')}.`
     : `Actor knowledge differs by actor. ${individual.join('. ')}.`;
+  return lastSeenText.length === 0 ? differentiated : `${differentiated} ${lastSeenText}`;
 }
 
 function legendaryText(style: ProseRendererFormat, value: unknown): string {
@@ -1383,9 +1573,11 @@ function referenceDataSegment(
       }
       parts.push([
         `opportunity ${actorId}`,
-        `dodge ${String(opportunity['dodge_option_id'])}`,
-        `default ${String(opportunity['engine_default_option_id'])}`,
-        ...(opportunity['better_option_id'] === undefined ? [] : [`better ${String(opportunity['better_option_id'])}`]),
+        `dodge ${String(opportunity['dodge_option_id'] ?? opportunity['dodge_option_label'])}`,
+        `default ${String(opportunity['engine_default_option_id'] ?? opportunity['engine_default_option_label'])}`,
+        ...(opportunity['better_option_id'] === undefined && opportunity['better_option_label'] === undefined
+          ? []
+          : [`better ${String(opportunity['better_option_id'] ?? opportunity['better_option_label'])}`]),
         `status ${String(opportunity['status'])}`,
         ...(array(opportunity['reason_codes']).length === 0 ? [] : [`codes ${listed(opportunity['reason_codes'])}`]),
       ].join(', '));
@@ -1510,7 +1702,28 @@ export function renderProseTurnContext(
   ];
   const untrimmedDocument = proseDocument(segments);
   const trimmed = trimProseSegments(segments, maximumBytes);
-  const document = proseDocument(trimmed.segments);
+  const shownOptionIdsByActor = new Map<string, ReadonlySet<EngineOptionId>>();
+  for (const actor of renderedActors(structuredContext)) {
+    shownOptionIdsByActor.set(String(actor['actor_id']), new Set());
+  }
+  for (const segment of trimmed.segments) {
+    if (segment.actorOption === undefined) continue;
+    const current = new Set(shownOptionIdsByActor.get(segment.actorOption.actorId) ?? []);
+    current.add(segment.actorOption.optionId);
+    shownOptionIdsByActor.set(segment.actorOption.actorId, current);
+  }
+  const catalog = optionCatalog(structuredContext, optionReferences);
+  const hidden = catalog.filter((entry) =>
+    !shownOptionIdsByActor.get(entry.actorId)?.has(entry.optionId));
+  const declaredSegments = trimmed.segments.map((segment) => {
+    if (segment.actorOmissionDeclaration === undefined) return segment;
+    const omitted = catalog.filter((entry) => entry.actorId === segment.actorOmissionDeclaration &&
+      !shownOptionIdsByActor.get(entry.actorId)?.has(entry.optionId)).length;
+    const declaration = `Actor ${segment.actorOmissionDeclaration} options omitted for size: ${omitted === 0 ? 'none' : String(omitted)}.`;
+    return { ...segment, text: declaration, compactText: declaration };
+  });
+  const document = hidden.reduce((text, entry) => text.replaceAll(entry.optionId, entry.label),
+    proseDocument(declaredSegments));
   const sourceTrimmed = structuredContext['context_trimmed'] === true || structuredContext['truncated'] === true;
   const contextTrimmed = sourceTrimmed || trimmed.trimmed;
   const context = {
@@ -1528,6 +1741,7 @@ export function renderProseTurnContext(
   };
   return {
     context,
+    shownOptionIdsByActor,
     preTrimBytes: proseBytes(untrimmedDocument),
     postTrimBytes: proseBytes(document),
   };

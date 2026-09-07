@@ -3,7 +3,8 @@ import type { Controller } from '../../combat/controllers';
 import type { EncounterCommand } from '../../combat/events';
 import type { InitiativeMode } from '../../combat/encounter';
 import { gridDistance } from '../../combat/grid';
-import type { DmVisibleCombatant, DmVisibleEncounterState } from '../../combat/visibility';
+import { decodeProjectedCreatureSpace, minimumSpaceDistance } from '../../combat/creature-space';
+import { isPlacedVisibleCombatant, type DmVisiblePlacedCombatant, type DmVisibleEncounterState } from '../../combat/visibility';
 import type { AgentSessionId, CombatantId, EncounterSessionId } from '../../combat/values';
 import type { DmBoardProjection } from '../encounter-projections';
 import type { SessionHistoryEntry } from '../session-persistence';
@@ -67,9 +68,9 @@ function requireFullDmProjection(projection: DmBoardProjection): DmVisibleEncoun
   return projection.encounter;
 }
 
-function subject(state: DmVisibleEncounterState, id: CombatantId): DmVisibleCombatant {
+function subject(state: DmVisibleEncounterState, id: CombatantId): DmVisiblePlacedCombatant {
   const found = state.combatants.find((candidate) => candidate.id === id);
-  if (found === undefined) throw new TypeError(`Decision program references unknown combatant ${id}.`);
+  if (found === undefined || found.placementStatus !== 'placed') throw new TypeError(`Decision program references unknown or unplaced combatant ${id}.`);
   return found;
 }
 
@@ -82,9 +83,9 @@ function evaluatePredicate(predicate: StatePredicate, state: DmVisibleEncounterS
       return combatant.hitPoints * 100 < combatant.rules.hitPointMaximum * predicate.percent;
     }
     case 'distance_at_most':
-      return gridDistance(
-        subject(state, predicate.left).position,
-        subject(state, predicate.right).position,
+      return minimumSpaceDistance(
+        decodeProjectedCreatureSpace(subject(state, predicate.left)),
+        decodeProjectedCreatureSpace(subject(state, predicate.right)),
       ) <= predicate.feet;
     case 'not':
       return !evaluatePredicate(predicate.predicate, state);
@@ -107,9 +108,12 @@ function targetId(
   if (selector.kind === 'combatant') return selector.combatantId;
   const acting = subject(state, actor);
   return state.combatants
+    .filter(isPlacedVisibleCombatant)
     .filter((candidate) => candidate.kind !== acting.kind && candidate.life !== 'dead')
     .sort((left, right) => {
-      const distance = gridDistance(acting.position, left.position) - gridDistance(acting.position, right.position);
+      const actingSpace = decodeProjectedCreatureSpace(acting);
+      const distance = minimumSpaceDistance(actingSpace, decodeProjectedCreatureSpace(left)) -
+        minimumSpaceDistance(actingSpace, decodeProjectedCreatureSpace(right));
       return distance || left.id.localeCompare(right.id);
     })[0]?.id ?? null;
 }

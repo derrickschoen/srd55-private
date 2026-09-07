@@ -1,12 +1,27 @@
 import type { AssetId } from '../assets/ids';
 import type { ControllerRequest } from '../combat/controllers';
-import type { EncounterState, InitiativeEntry, LifeState } from '../combat/encounter';
-import { combatantConditions } from '../combat/combat-rules';
+import {
+  combatantConditions,
+  combatantSpace,
+  effectiveCombatRules,
+  type EncounterState,
+  type InitiativeEntry,
+  type LifeState,
+} from '../combat/encounter';
+import {
+  creatureSpace,
+  minimumSpaceLine,
+  normalPlacementFor,
+  placementFor,
+  sizedCombatantState,
+  type GridPoint,
+  type SerializedPlacementMode,
+} from '../combat/creature-space';
 import type { EffectPayload } from '../combat/effects';
 import type { EncounterEvent } from '../combat/events';
 import type { GridCell } from '../combat/grid';
 import { isCellInside } from '../combat/grid';
-import { persistentAreaContains } from '../combat/persistent-areas';
+import { persistentAreaContains, persistentAreaTouchesSpace } from '../combat/persistent-areas';
 import { affectedCells, feetPoint, type AreaTemplate } from '../combat/templates';
 import { feet, type CombatantId } from '../combat/values';
 import type { EncounterEffectId, ObjectTargetId, PersistentAreaId, WorldObjectId } from '../combat/values';
@@ -39,21 +54,44 @@ import type { EncounterArtPackage } from './encounter-package';
 
 type DmEncounterState = DmView['state'];
 
-export interface EncounterBoardCombatant {
+interface EncounterBoardCombatantIdentity {
   readonly id: CombatantId;
   readonly name: string;
   readonly kind: 'player_character' | 'monster';
-  readonly position: { readonly column: number; readonly row: number };
   readonly life?: LifeState;
   /** DM projections only: the SAME band the prose gives the AI DM (actor-knowledge). */
   readonly hitPointBand?: ProjectedHitPointKnowledge;
   /** DM projections only: the engine currently treats this combatant as hidden. */
   readonly hiddenFromPlayers?: boolean;
-  /** Active engine conditions; present on the DM projection only. */
+  /** Current projected conditions, already filtered at the audience boundary. */
   readonly conditions?: readonly string[];
+  /** Sourced reach is available on the omniscient board projection. */
+  readonly reachFeet?: number;
+  /** Future-safe player knowledge: never aliases a hidden creature's current cell. */
+  readonly lastKnown?: {
+    readonly cell: GridCell;
+    readonly round: number;
+  };
   /** Sourced creature type when the profile carries one; absent means the profile had none. */
   readonly creatureType?: string;
 }
+
+export interface EncounterBoardPlacedCombatant extends EncounterBoardCombatantIdentity {
+  readonly placementStatus: 'placed';
+  readonly position: { readonly column: number; readonly row: number };
+  readonly effectiveSize: import('../domain/enums').KnownCreatureSize;
+  readonly placementMode: SerializedPlacementMode;
+  readonly footprint: readonly [GridCell, ...GridCell[]];
+}
+
+export interface EncounterBoardPendingCombatant extends EncounterBoardCombatantIdentity {
+  readonly placementStatus: 'placement_pending';
+  readonly pendingReason: EncounterState['adjudicationPending'][number]['kind'];
+}
+
+export type EncounterBoardCombatant =
+  | EncounterBoardPlacedCombatant
+  | EncounterBoardPendingCombatant;
 
 export interface EncounterBoardProjectionShape {
   readonly bounds: { readonly columns: number; readonly rows: number };
@@ -131,12 +169,19 @@ export interface EncounterBoardLightOverlay {
   readonly dimCells: readonly GridCell[];
 }
 
-export interface EncounterBoardBoundTarget {
-  readonly kind: 'combatant' | 'object' | 'owned_object';
-  readonly id: CombatantId | ObjectTargetId;
-  readonly name: string;
-  readonly position: GridCell;
-}
+export type EncounterBoardBoundTarget =
+  | {
+      readonly kind: 'combatant';
+      readonly id: CombatantId;
+      readonly name: string;
+      readonly position: GridCell;
+    }
+  | {
+      readonly kind: 'object' | 'owned_object';
+      readonly id: ObjectTargetId | WorldObjectId;
+      readonly name: string;
+      readonly position: GridCell;
+    };
 
 export interface EncounterBoardSustainedEffect {
   readonly effectId: EncounterEffectId;
@@ -151,9 +196,9 @@ export interface EncounterBoardSustainedEffect {
 
 export interface EncounterBoardTargetLine {
   readonly effectId: EncounterEffectId;
-  readonly from: GridCell;
-  readonly to: GridCell;
-  readonly target: CombatantId | ObjectTargetId;
+  readonly from: GridPoint;
+  readonly to: GridPoint;
+  readonly target: CombatantId | ObjectTargetId | WorldObjectId;
 }
 
 export interface EncounterBoardInitiativeEntry extends InitiativeEntry {
@@ -216,12 +261,17 @@ export interface EncounterBoardLayer {
   readonly assetId: AssetId;
 }
 
-export interface EncounterBoardTokenModel extends EncounterBoardCombatant {
+export interface EncounterBoardTokenModel extends EncounterBoardPlacedCombatant {
   readonly assetId: AssetId;
   readonly focusAssetId: AssetId | null;
   readonly adjudicatedAssetId: AssetId | null;
   readonly life: LifeState;
   readonly marker: 'token' | 'corpse';
+  readonly columnSpan: 1 | 2 | 3 | 4;
+  readonly rowSpan: 1 | 2 | 3 | 4;
+  readonly stackId: string;
+  readonly stackIndex: number;
+  readonly stackSize: number;
 }
 
 /**
@@ -274,6 +324,22 @@ export type EncounterBoardMechanicalLayer =
 
 function cellKey(cell: { readonly column: number; readonly row: number }): string {
   return `${String(cell.column)},${String(cell.row)}`;
+}
+
+function cellsIntersect(left: readonly GridCell[], right: readonly GridCell[]): boolean {
+  const rightKeys = new Set(right.map(cellKey));
+  return left.some((cell) => rightKeys.has(cellKey(cell)));
+}
+
+function footprintSpan(cells: readonly [GridCell, ...GridCell[]]): 1 | 2 | 3 | 4 {
+  const columns = cells.map((cell) => cell.column);
+  const rows = cells.map((cell) => cell.row);
+  const span = Math.max(
+    Math.max(...columns) - Math.min(...columns) + 1,
+    Math.max(...rows) - Math.min(...rows) + 1,
+  );
+  if (span === 1 || span === 2 || span === 3 || span === 4) return span;
+  throw new TypeError('A board token footprint must span one through four cells.');
 }
 
 function allCells(bounds: EncounterState['bounds']): readonly GridCell[] {
@@ -339,13 +405,14 @@ function projectedLightOverlays(state: DmEncounterState): readonly EncounterBoar
 
 function projectedAreas(state: DmEncounterState): readonly EncounterBoardArea[] {
   const cells = allCells(state.bounds);
-  const tokens = new Map(state.tokens.map((token) => [token.combatantId, token.position] as const));
-  const objects = new Map(state.worldObjects.map((object) => [object.id, object.position] as const));
   const persistent = state.persistentAreas.map((area): EncounterBoardArea => {
-    const anchor = area.origin.kind === 'anchored'
-      ? tokens.get(area.origin.combatant) ?? null
-      : area.origin.kind === 'anchored_to_object'
-        ? objects.get(area.origin.object) ?? null
+    const origin = area.origin;
+    const anchorCells = origin.kind === 'anchored'
+      ? state.tokens.some((token) => token.combatantId === origin.combatant)
+        ? combatantSpace(state, origin.combatant).cells
+        : null
+      : origin.kind === 'anchored_to_object'
+        ? state.worldObjects.find((object) => object.id === origin.object)?.footprint ?? null
         : null;
     return {
       kind: 'persistent',
@@ -353,7 +420,7 @@ function projectedAreas(state: DmEncounterState): readonly EncounterBoardArea[] 
       owner: area.owner,
       ownerName: combatantName(state, area.owner),
       shape: area.shape,
-      cells: cells.filter((cell) => persistentAreaContains(area, cell, anchor, state)),
+      cells: cells.filter((cell) => persistentAreaTouchesSpace(area, [cell], anchorCells, state)),
       difficultTerrain: area.difficultTerrain,
     };
   });
@@ -497,12 +564,36 @@ export function projectEncounterBoard(
   adjudicatedTargets: readonly CombatantId[] = [],
 ): DmEncounterBoardModel {
   const state = view.state;
-  const positions = new Map(state.tokens.map((token) => [token.combatantId, token.position] as const));
   const hidden = new Set(state.hiddenCombatants.map((entry) => entry.combatant));
-  const combatants = state.combatants.flatMap((subject) => {
+  const positions = new Map(state.tokens.map((token) => [token.combatantId, token.position] as const));
+  const initiativeOrder = new Map(state.initiative.map((entry, index) =>
+    [entry.combatant, index] as const));
+  const combatants = state.combatants.flatMap((subject): readonly (EncounterBoardCombatant & { readonly life: LifeState })[] => {
+    const pending = state.adjudicationPending.find((entry) =>
+      entry.combatant === subject.profile.id);
+    const creatureType = subject.profile.rules.creatureType;
+    if (pending !== undefined) {
+      return [{
+        id: subject.profile.id,
+        name: subject.profile.name,
+        kind: subject.profile.kind,
+        life: subject.life,
+        hitPointBand: hitPointKnowledge(state, subject),
+        hiddenFromPlayers: hidden.has(subject.profile.id),
+        conditions: combatantConditions(state, subject.profile.id).map((condition) =>
+          condition.name === 'Exhaustion' ? `${condition.name} ${String(condition.level)}` : condition.name)
+          .sort((left, right) => left.localeCompare(right)),
+        reachFeet: effectiveCombatRules(state, subject.profile.id).reach,
+        ...(creatureType === undefined ? {} : { creatureType }),
+        placementStatus: 'placement_pending',
+        pendingReason: pending.kind,
+      }];
+    }
     const position = positions.get(subject.profile.id);
     if (position === undefined) return [];
-    const creatureType = subject.profile.rules.creatureType;
+    const placedToken = state.tokens.find((token) => token.combatantId === subject.profile.id);
+    if (placedToken === undefined) throw new Error('Placed board combatant has no placement mode.');
+    const space = combatantSpace(state, subject.profile.id);
     return [{
       id: subject.profile.id,
       name: subject.profile.name,
@@ -512,20 +603,45 @@ export function projectEncounterBoard(
       // ART-SEAM (D516): the DM board carries the prose classifier's band, never a re-derived one.
       hitPointBand: hitPointKnowledge(state, subject),
       hiddenFromPlayers: hidden.has(subject.profile.id),
-      conditions: combatantConditions(state, subject.profile.id)
-        .map((condition) => condition.name)
+      conditions: combatantConditions(state, subject.profile.id).map((condition) =>
+        condition.name === 'Exhaustion' ? `${condition.name} ${String(condition.level)}` : condition.name)
         .sort((left, right) => left.localeCompare(right)),
+      reachFeet: effectiveCombatRules(state, subject.profile.id).reach,
       ...(creatureType === undefined ? {} : { creatureType }),
+      placementStatus: 'placed',
+      effectiveSize: space.actualSize,
+      placementMode: structuredClone(placedToken.placementMode),
+      footprint: space.cells.map((cell) => ({ ...cell })) as [GridCell, ...GridCell[]],
     }];
-  });
+  }).sort((left, right) =>
+    (initiativeOrder.get(left.id) ?? Number.MAX_SAFE_INTEGER) -
+      (initiativeOrder.get(right.id) ?? Number.MAX_SAFE_INTEGER) ||
+    String(left.id).localeCompare(String(right.id)));
   const sustainedEffects = projectedSustainedEffects(state, pendingRequest);
   const targetLines = sustainedEffects.flatMap((effect): readonly EncounterBoardTargetLine[] => {
     if (effect.targetBinding === 'reselect') return [];
-    const from = positions.get(effect.owner);
-    if (from === undefined) return [];
-    return effect.boundTargets.map((target) => ({
-      effectId: effect.effectId, from: { ...from }, to: { ...target.position }, target: target.id,
-    }));
+    if (!positions.has(effect.owner) || state.adjudicationPending.some((entry) =>
+      entry.combatant === effect.owner)) return [];
+    const sourceSpace = combatantSpace(state, effect.owner);
+    return effect.boundTargets.map((target) => {
+      const targetSpace = target.kind === 'combatant'
+        ? combatantSpace(state, target.id)
+        : (() => {
+            const sized = sizedCombatantState('Medium');
+            return creatureSpace(sized, placementFor(
+              sized,
+              target.position,
+              normalPlacementFor(sized),
+            ));
+          })();
+      const line = minimumSpaceLine(sourceSpace, targetSpace);
+      return {
+        effectId: effect.effectId,
+        from: { ...line.sourceCenter },
+        to: { ...line.targetCenter },
+        target: target.id,
+      };
+    });
   });
   return {
     bounds: { ...state.bounds },
@@ -616,6 +732,70 @@ export function doorCellsOf(worldObjects: readonly EncounterBoardWorldObject[]):
   return doors;
 }
 
+export function encounterBoardTokenRenderModels(
+  projection: EncounterBoardProjectionShape,
+  art: EncounterArtPackage,
+): readonly EncounterBoardTokenModel[] {
+  const placed = projection.combatants.filter(
+    (combatant): combatant is EncounterBoardPlacedCombatant =>
+      combatant.placementStatus === 'placed',
+  );
+  const roots = placed.map((_combatant, index) => index);
+  const rootOf = (index: number): number => {
+    let cursor = index;
+    while (roots[cursor] !== cursor) cursor = roots[cursor] ?? cursor;
+    return cursor;
+  };
+  for (let left = 0; left < placed.length; left += 1) {
+    for (let right = left + 1; right < placed.length; right += 1) {
+      const leftCombatant = placed[left];
+      const rightCombatant = placed[right];
+      if (leftCombatant === undefined || rightCombatant === undefined ||
+        !cellsIntersect(leftCombatant.footprint, rightCombatant.footprint)) continue;
+      const leftRoot = rootOf(left);
+      const rightRoot = rootOf(right);
+      if (leftRoot !== rightRoot) roots[rightRoot] = leftRoot;
+    }
+  }
+  const membersByRoot = new Map<number, number[]>();
+  placed.forEach((_combatant, index) => {
+    const root = rootOf(index);
+    const members = membersByRoot.get(root) ?? [];
+    members.push(index);
+    membersByRoot.set(root, members);
+  });
+  return Object.freeze(placed.map((combatant, index): EncounterBoardTokenModel => {
+    const asset = art.combatantTokens[combatant.id];
+    if (asset === undefined) throw new Error(`Art package ${art.id} has no token for ${combatant.id}.`);
+    const root = rootOf(index);
+    const members = membersByRoot.get(root) ?? [index];
+    const rootCombatant = placed[members[0] ?? index];
+    if (rootCombatant === undefined) throw new Error('Board token stack has no root combatant.');
+    const life = combatant.life ?? 'living';
+    const columnSpan = footprintSpan(combatant.footprint);
+    const rowSpan = columnSpan;
+    if (combatant.footprint.length !== columnSpan * rowSpan) {
+      throw new TypeError(`Board token ${String(combatant.id)} has a non-rectangular footprint.`);
+    }
+    return Object.freeze({
+      ...combatant,
+      life,
+      marker: life === 'dead' ? 'corpse' : 'token',
+      // ART-SEAM (D516): the dead show the prone silhouette on a desaturated plate.
+      assetId: life === 'dead' ? DEAD_TOKEN_ASSET_ID : asset,
+      focusAssetId: combatant.id === projection.highlightedCombatant ? art.ui.activePc : null,
+      adjudicatedAssetId: projection.adjudicatedTargets.includes(combatant.id)
+        ? art.ui.adjudicated
+        : null,
+      columnSpan,
+      rowSpan,
+      stackId: String(rootCombatant.id),
+      stackIndex: members.indexOf(index),
+      stackSize: members.length,
+    });
+  }));
+}
+
 export function encounterBoardRenderModel(
   projection: EncounterBoardProjectionShape,
   art: EncounterArtPackage,
@@ -626,8 +806,10 @@ export function encounterBoardRenderModel(
   ) {
     throw new Error(`Encounter bounds do not match art package ${art.id}.`);
   }
-  const combatants = new Map<string, EncounterBoardCombatant[]>();
-  for (const combatant of projection.combatants) {
+  const combatants = new Map<string, EncounterBoardTokenModel[]>();
+  for (const combatant of encounterBoardTokenRenderModels(projection, art)) {
+    // Cell-model indexing keeps one entry at the rendering origin; the separate
+    // token overlay owns the complete footprint box and must not duplicate tokens.
     const key = cellKey(combatant.position);
     const occupants = combatants.get(key) ?? [];
     occupants.push(combatant);
@@ -638,7 +820,6 @@ export function encounterBoardRenderModel(
     ...(projection.foggedCells?.map(cellKey) ?? []),
     ...(projection.concealedCells?.map(cellKey) ?? []),
   ]);
-  const adjudicated = new Set(projection.adjudicatedTargets);
   const worldObjects = projection.worldObjects ?? [];
   const areas = projection.areas ?? [];
   const lights = projection.lightOverlays ?? [];
@@ -725,20 +906,7 @@ export function encounterBoardRenderModel(
         obscured: obscurement.has(key),
       }).map((kind): EncounterBoardCellGlyph => ({ kind, effect: CELL_GLYPH_EFFECT_BY_KIND[kind] }));
 
-      const tokens = (combatants.get(key) ?? []).map((combatant): EncounterBoardTokenModel => {
-        const asset = art.combatantTokens[combatant.id];
-        if (asset === undefined) throw new Error(`Art package ${art.id} has no token for ${combatant.id}.`);
-        const life = combatant.life ?? 'living';
-        return {
-          ...combatant,
-          life,
-          marker: life === 'dead' ? 'corpse' : 'token',
-          // ART-SEAM (D516): the dead show the prone silhouette on a desaturated plate.
-          assetId: life === 'dead' ? DEAD_TOKEN_ASSET_ID : asset,
-          focusAssetId: combatant.id === projection.highlightedCombatant ? art.ui.activePc : null,
-          adjudicatedAssetId: adjudicated.has(combatant.id) ? art.ui.adjudicated : null,
-        };
-      });
+      const tokens = combatants.get(key) ?? [];
       const cellObjects = worldObjects.filter((object) => object.cells.some((cell) => cellKey(cell) === key));
       const cellAreas = areas.filter((area) => area.cells.some((cell) => cellKey(cell) === key));
       const cellLights: Array<{

@@ -160,7 +160,8 @@ function rowRecord(value: unknown): Readonly<Record<string, unknown>> {
 function decodedBoardImage(value: unknown): ConversationRowPersisted['boardImage'] {
   const image = rowRecord(value);
   if (image['mode'] === 'off' && Object.keys(image).length === 1) return { mode: 'off' };
-  if (image['mode'] !== 'png' || Object.keys(image).some((key) => ![
+  const mode = image['mode'];
+  if ((mode !== 'png' && mode !== 'capture_only') || Object.keys(image).some((key) => ![
     'mode', 'sha256', 'bytes', 'width', 'height', 'captureMs', 'relativePath',
   ].includes(key)) || typeof image['sha256'] !== 'string' ||
     !/^[a-f0-9]{64}$/u.test(image['sha256']) ||
@@ -170,10 +171,10 @@ function decodedBoardImage(value: unknown): ConversationRowPersisted['boardImage
     !Number.isSafeInteger(image['width']) || typeof image['width'] !== 'number' || image['width'] < 1 ||
     !Number.isSafeInteger(image['height']) || typeof image['height'] !== 'number' || image['height'] < 1 ||
     typeof image['captureMs'] !== 'number' || !Number.isFinite(image['captureMs']) || image['captureMs'] < 0) {
-    throw new TypeError('Arena row boardImage violates the closed off|png contract.');
+    throw new TypeError('Arena row boardImage violates the closed off|png|capture_only contract.');
   }
   return {
-    mode: 'png',
+    mode,
     sha256: image['sha256'],
     bytes: image['bytes'],
     width: image['width'],
@@ -395,7 +396,7 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
     : DEFAULT_RENDERER_PROFILE;
   const boardImageMode = values.get('--board-image') ?? 'off';
   if (!BOARD_IMAGE_MODES.includes(boardImageMode as BoardImageMode)) {
-    throw new TypeError('--board-image must be off or png.');
+    throw new TypeError('--board-image must be off, png, or capture_only.');
   }
   if (boardImageMode === 'png' && selectedCli === 'local-openai') {
     throw new TypeError('--board-image png requires an MCP-backed CLI.');
@@ -675,7 +676,7 @@ export async function runArena(
   }
   let snapshotService: ConversationBoardSnapshotService | null = null;
   try {
-    if (config.boardImageMode === 'png') {
+    if (config.boardImageMode !== 'off') {
       const outputDirectory = boardImageOutputDirectory(config);
       snapshotService = boardSnapshotServiceFactory === undefined
         ? await BoardSnapshotService.start({ outputDirectory })

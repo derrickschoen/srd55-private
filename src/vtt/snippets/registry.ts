@@ -1,4 +1,4 @@
-import type { EngineStateCapsule } from '../engine-state-capsule';
+import type { EngineProjectionPlacedCombatant, EngineStateCapsule } from '../engine-state-capsule';
 import type { CombatantId, EngineOfferableOption, EngineTurnProposal } from '../turn-proposal';
 
 export const PLAY_NAMES = ['remove_obstacle', 'focus_fire', 'basic_advance'] as const;
@@ -257,9 +257,13 @@ function ordinaryApplicable(capsule: EngineStateCapsule): boolean {
 function hasProjectedObstacle(capsule: EngineStateCapsule): boolean {
   const actors = requestedActors(capsule);
   const side = actors[0]?.side;
-  const targets = capsule.projection.combatants.filter((actor) => actor.life !== 'dead' && actor.side !== side);
+  const targets = capsule.projection.combatants.filter(
+    (actor): actor is EngineProjectionPlacedCombatant =>
+      actor.placementStatus === 'placed' && actor.life !== 'dead' && actor.side !== side,
+  );
   return capsule.projection.blockedCells.some((cell) => targets.some((target) =>
-    Math.max(Math.abs(cell.column - target.position.column), Math.abs(cell.row - target.position.row)) <= 1));
+    target.footprint.some((occupied) =>
+      Math.max(Math.abs(cell.column - occupied.column), Math.abs(cell.row - occupied.row)) <= 1)));
 }
 
 function definition(

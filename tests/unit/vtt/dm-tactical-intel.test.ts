@@ -26,10 +26,13 @@ function record(value: unknown, label: string): Readonly<Record<string, unknown>
   return value as Readonly<Record<string, unknown>>;
 }
 
-async function r02Runtime(profile: 'dm' | 'full' = 'dm') {
+async function r02Runtime(profile: 'dm' | 'full' = 'dm', turnContextMaximumBytes?: number) {
   const loaded = await loadArenaFixture('tests/fixtures/arena-basis-hard/seed-5117009.json');
   const state = freshMonsterPlanningState(loaded);
-  const runtime = createEngineMcpRuntime(state, { toolProfile: profile });
+  const runtime = createEngineMcpRuntime(state, {
+    toolProfile: profile,
+    ...(turnContextMaximumBytes === undefined ? {} : { turnContextMaximumBytes }),
+  });
   return { state, runtime, capsule: runtime.feed.current() };
 }
 
@@ -58,10 +61,16 @@ describe('versioned DM tactical intel', () => {
 
     const scout = capsule.projection.combatants.find((actor) => actor.id === SCOUT);
     const fighter = capsule.projection.combatants.find((actor) => actor.id === FIGHTER);
-    if (scout === undefined || fighter === undefined) throw new Error('Frozen R02 tokens are absent.');
-    const nearestDistance = Math.min(...capsule.projection.combatants
-      .filter((target) => target.side === 'player_character' && target.life !== 'dead')
-      .map((target) => gridDistance(scout.position, target.position)));
+    if (scout?.placementStatus !== 'placed' || fighter?.placementStatus !== 'placed') {
+      throw new Error('Frozen R02 tokens are absent.');
+    }
+    const playerDistances: number[] = [];
+    for (const target of capsule.projection.combatants) {
+      if (target.placementStatus === 'placed' && target.side === 'player_character' && target.life !== 'dead') {
+        playerDistances.push(gridDistance(scout.position, target.position));
+      }
+    }
+    const nearestDistance = Math.min(...playerDistances);
     expect(gridDistance(scout.position, fighter.position)).toBe(90);
     expect(nearestDistance).toBe(85);
 
@@ -124,7 +133,7 @@ describe('versioned DM tactical intel', () => {
     expect(first).toMatchObject({
       policy: DM_INTEL_QUERY_POLICY,
       renderer_policy: DM_TURN_INTEL_POLICY,
-      evaluator_policy: 'tactical-evaluator-v2',
+      evaluator_policy: 'tactical-evaluator-v3',
       truncated: false,
     });
     expect(first['rows']).toEqual([expect.objectContaining({ p_hit: '≈1/2', ev: 5 })]);
@@ -233,7 +242,7 @@ describe('versioned DM tactical intel', () => {
   });
 
   it('attaches full-precision offered-set and all intel policy versions to accepted capture', async () => {
-    const { runtime, capsule } = await r02Runtime();
+    const { runtime, capsule } = await r02Runtime('dm', 1_000_000);
     const context = fullContext(runtime, capsule);
     const suggested = context['suggested_plan'];
     const plan = suggested === undefined
@@ -260,7 +269,7 @@ describe('versioned DM tactical intel', () => {
     expect(capture).toMatchObject({
       policy: DM_INTEL_CAPTURE_POLICY,
       policyVersions: {
-        evaluator: 'tactical-evaluator-v2',
+        evaluator: 'tactical-evaluator-v3',
         renderer: DM_TURN_INTEL_POLICY,
         query: DM_INTEL_QUERY_POLICY,
         capture: DM_INTEL_CAPTURE_POLICY,

@@ -93,10 +93,10 @@ describe('concentration and represented-zone intel', () => {
     const verdict = evaluateConcentrationZoneIntel(baseInput({
       zones: {
         grid: { bounds: { columns: 8, rows: 2 }, blockedCells: [] },
-        zones: [{ area: fixedSphere(), anchorCell: null }],
+        zones: [{ area: fixedSphere(), anchorCells: null }],
         movements: [
-          { combatantId: caster, from: { column: 1, row: 0 }, to: { column: 2, row: 0 } },
-          { combatantId: ally, from: { column: 2, row: 0 }, to: { column: 3, row: 0 } },
+          { combatantId: caster, from: [{ column: 1, row: 0 }], to: [{ column: 2, row: 0 }] },
+          { combatantId: ally, from: [{ column: 2, row: 0 }], to: [{ column: 3, row: 0 }] },
         ],
       },
     }));

@@ -1,4 +1,5 @@
 import { canonicalizeJson, canonicalJson } from '../commands/canonical-json';
+import { creatureSizes, type KnownCreatureSize } from '../domain/enums';
 import type { ControllerIdentity } from '../combat/controllers';
 import type {
   CoordinatorPersistence,
@@ -6,15 +7,26 @@ import type {
   PersistedCoordinatorState,
 } from '../combat/coordinator';
 import {
+  awaitingPlacementPhase,
   encounterConclusionAfter,
   isEncounterConfig,
   isEncounterPhase,
+  orderedMigrationPlacementQueue,
   REACTION_KINDS,
   reduceEncounter,
   type EncounterState,
+  type MigrationOriginatingToken,
   type ReactionKind,
   type ReactionPolicy,
+  type ResumableEncounterPhase,
 } from '../combat/encounter';
+import {
+  creatureSpace,
+  normalPlacementFor,
+  placementFor,
+  sizedCombatantState,
+  spacesIntersect,
+} from '../combat/creature-space';
 import type { EncounterEvent } from '../combat/events';
 import {
   restoreMulberry32,
@@ -114,7 +126,7 @@ export type EngineHostTransition =
       readonly controllerKind: 'agent' | 'algorithm';
     };
 
-export const VTT_SESSION_SCHEMA_VERSION = 10 as const;
+export const VTT_SESSION_SCHEMA_VERSION = 12 as const;
 export const VTT_SESSION_MINIMUM_SCHEMA_VERSION = 1 as const;
 
 export type SessionTransition =
@@ -926,6 +938,7 @@ function decodeRevision(value: unknown): SessionRevision {
     !Array.isArray(value.encounterState.hiddenRolls) ||
     !value.encounterState.hiddenRolls.every(isHiddenRollCategory) ||
     new Set(value.encounterState.hiddenRolls).size !== value.encounterState.hiddenRolls.length ||
+    !Array.isArray(value.encounterState.observationHistory) ||
     typeof value.branchRngStateFingerprint !== 'string' ||
     !(value.partyState === null || isRecord(value.partyState)) ||
     !isRecord(value.rngState) ||
@@ -968,9 +981,30 @@ function decodeRevision(value: unknown): SessionRevision {
       ? { ...combatant, wildShapeUses, wildShape: decodeWildShapeOverlay(combatant.wildShape) }
       : { ...combatant, wildShapeUses };
   });
+  const observationKeys = new Set<string>();
+  const observationHistory = value.encounterState.observationHistory.map((entry) => {
+    if (!isRecord(entry) || !hasExactlyKeys(entry, ['observer', 'subject', 'cell', 'round', 'revision']) ||
+      typeof entry.observer !== 'string' || typeof entry.subject !== 'string' || entry.observer === entry.subject ||
+      !isRecord(entry.cell) || !hasExactlyKeys(entry.cell, ['column', 'row']) ||
+      !Number.isSafeInteger(entry.cell.column) || (entry.cell.column as number) < 0 ||
+      !Number.isSafeInteger(entry.cell.row) || (entry.cell.row as number) < 0 ||
+      !Number.isSafeInteger(entry.round) || (entry.round as number) < 0 ||
+      !Number.isSafeInteger(entry.revision) || (entry.revision as number) < 0) {
+      throw new TypeError('Persisted combatant observation is malformed.');
+    }
+    const key = `${entry.observer}\u0000${entry.subject}`;
+    if (observationKeys.has(key)) throw new TypeError('Persisted combatant observations duplicate an observer-subject pair.');
+    observationKeys.add(key);
+    return structuredClone(entry) as unknown as EncounterState['observationHistory'][number];
+  });
+  const orderedObservationKeys = observationHistory.map((entry) => `${String(entry.observer)}\u0000${String(entry.subject)}`);
+  if (orderedObservationKeys.some((key, index) => index > 0 && key.localeCompare(orderedObservationKeys[index - 1]!) < 0)) {
+    throw new TypeError('Persisted combatant observations are not canonical.');
+  }
   const encounterState = {
     ...value.encounterState,
     combatants: encounterCombatants,
+    observationHistory,
   } as unknown as EncounterState;
   if (
     branchRngStateFingerprint(value.encounterState as unknown as EncounterState) !==
@@ -1772,7 +1806,7 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
       current: {
         room: latest.partyState?.room ?? history.at(-1)?.encounterOrdinal ?? 1,
         round: latest.encounterState.round,
-        phase: latest.encounterState.phase,
+        phase: canonicalizeJson(latest.encounterState.phase),
       },
       durableReactionGuidance: this.reactionGuidance() === null
         ? null : canonicalizeJson(this.reactionGuidance()),
@@ -2576,6 +2610,147 @@ const V6_TO_V7_SOURCE = 'vtt-session-v6-to-v7:add-typed-encounter-phase-and-reha
 const V7_TO_V8_SOURCE = 'vtt-session-v7-to-v8:replace-codex-session-id-with-agent-session-binding-and-rehash-revisions';
 const V8_TO_V9_SOURCE = 'vtt-session-v8-to-v9:add-agent-call-usage-and-current-context-token-count';
 const V9_TO_V10_SOURCE = 'vtt-session-v9-to-v10:add-agent-generation-rollover-transition-and-digest-telemetry';
+const V10_TO_V11_SOURCE = 'vtt-session-v10-to-v11:add-canonical-creature-space-and-migration-placement-recovery:2';
+const V11_TO_V12_SOURCE = 'vtt-session-v11-to-v12:add-observation-history-empty-and-rehash-revisions:1';
+
+function migrationOriginatingToken(value: unknown): MigrationOriginatingToken | null {
+  if (!isRecord(value) || typeof value.id !== 'string' || typeof value.combatantId !== 'string' ||
+    !isRecord(value.position) || !Number.isSafeInteger(value.position.column) ||
+    !Number.isSafeInteger(value.position.row)) return null;
+  return {
+    id: value.id as MigrationOriginatingToken['id'],
+    combatantId: value.combatantId as MigrationOriginatingToken['combatantId'],
+    position: { column: value.position.column as number, row: value.position.row as number },
+  };
+}
+
+function migrateV10EncounterState(value: unknown): EncounterState {
+  if (!isRecord(value) || !Array.isArray(value.combatants) || !Array.isArray(value.tokens) ||
+    !Array.isArray(value.effects) || !isRecord(value.environment)) {
+    throw new TypeError('VTT session v10 encounter state is malformed.');
+  }
+  const knownSizes = new Set<string>(creatureSizes);
+  const sizes = new Map<string, KnownCreatureSize>();
+  const pending: EncounterState['adjudicationPending'][number][] = [];
+  const oldTokens = new Map<string, MigrationOriginatingToken>();
+  for (const rawToken of value.tokens) {
+    const token = migrationOriginatingToken(rawToken);
+    if (token === null) throw new TypeError('VTT session v10 token is malformed.');
+    oldTokens.set(token.combatantId, token);
+  }
+  for (const entry of value.combatants) {
+    if (!isRecord(entry) || !isRecord(entry.profile)) {
+      throw new TypeError('VTT session v10 combatant is malformed.');
+    }
+    const profile = entry.profile;
+    if (typeof profile.id !== 'string' || !isRecord(profile.rules)) {
+      throw new TypeError('VTT session v10 combatant profile is malformed.');
+    }
+    const rules = profile.rules;
+    const sourceSize = rules.sizeCategory;
+    if (typeof sourceSize === 'string' && knownSizes.has(sourceSize)) {
+      sizes.set(profile.id as string, sourceSize as KnownCreatureSize);
+    } else {
+      const oldToken = oldTokens.get(profile.id);
+      pending.push({
+        kind: 'legacy_size_required',
+        combatant: profile.id as EncounterState['combatants'][number]['profile']['id'],
+        sourceSizeText: typeof sourceSize === 'string' ? sourceSize : null,
+        suggestedAnchor: oldToken === undefined ? null : { ...oldToken.position },
+        originatingToken: oldToken ?? null,
+      });
+    }
+  }
+  const activeEffects = value.effects.flatMap((entry) => {
+    if (!isRecord(entry) || !isRecord(entry.payload)) {
+      throw new TypeError('VTT session v10 effect is malformed.');
+    }
+    if (entry.payload.kind !== 'size_alteration') return [entry];
+    if (typeof entry.id !== 'string' || !Array.isArray(entry.targets) || entry.targets.length !== 1 ||
+      typeof entry.targets[0] !== 'string' || entry.payload.selection !== 'selected_when_cast' ||
+      !Number.isSafeInteger(entry.payload.damageDieCount) ||
+      !Number.isSafeInteger(entry.payload.damageDieSides)) {
+      throw new TypeError('VTT session v10 size effect is not a resolvable single-target effect.');
+    }
+    const combatant = entry.targets[0] as EncounterState['combatants'][number]['profile']['id'];
+    const oldToken = oldTokens.get(combatant);
+    pending.push({
+      kind: 'effect_adjudication_pending',
+      combatant,
+      effectId: entry.id as EncounterState['effects'][number]['id'],
+      originalEffect: structuredClone(entry) as unknown as EncounterState['effects'][number],
+      suggestedAnchor: oldToken === undefined ? null : { ...oldToken.position },
+      originatingToken: oldToken ?? null,
+    });
+    return [];
+  });
+  const formerTokens = [...oldTokens.values()];
+  for (let leftIndex = 0; leftIndex < formerTokens.length; leftIndex += 1) {
+    const left = formerTokens[leftIndex];
+    if (left === undefined) continue;
+    for (const right of formerTokens.slice(leftIndex + 1)) {
+      const leftSize = sizes.get(left.combatantId);
+      const rightSize = sizes.get(right.combatantId);
+      if (leftSize === undefined || rightSize === undefined) continue;
+      const leftSized = sizedCombatantState(leftSize);
+      const rightSized = sizedCombatantState(rightSize);
+      const leftSpace = creatureSpace(leftSized, placementFor(
+        leftSized, left.position, normalPlacementFor(leftSized),
+      ));
+      const rightSpace = creatureSpace(rightSized, placementFor(
+        rightSized, right.position, normalPlacementFor(rightSized),
+      ));
+      if (!spacesIntersect(leftSpace, rightSpace)) continue;
+      const [retained, resolving] = String(left.combatantId).localeCompare(String(right.combatantId)) <= 0
+        ? [left, right]
+        : [right, left];
+      pending.push({
+        kind: 'overlap_adjudication_pending',
+        combatant: resolving.combatantId,
+        overlappingCombatant: retained.combatantId,
+        formerAnchors: [
+          { ...retained.position },
+          { ...resolving.position },
+        ],
+        originatingToken: resolving,
+      });
+    }
+  }
+  const orderedPending = orderedMigrationPlacementQueue(
+    pending,
+    Array.isArray(value.initiative) ? value.initiative as EncounterState['initiative'] : [],
+  );
+  const pendingCombatants = new Set(orderedPending.map((entry) => entry.combatant));
+  const tokens = value.tokens.flatMap((entry) => {
+    if (!isRecord(entry) || typeof entry.combatantId !== 'string') {
+      throw new TypeError('VTT session v10 token is malformed.');
+    }
+    const size = sizes.get(entry.combatantId);
+    return size === undefined || pendingCombatants.has(entry.combatantId as MigrationOriginatingToken['combatantId'])
+      ? []
+      : [{ ...entry, placementMode: { kind: 'normal' as const, actual: size } }];
+  });
+  const originalPhase = value.phase;
+  if (!isEncounterPhase(originalPhase) || originalPhase.kind === 'awaiting_placement') {
+    throw new TypeError('VTT session v10 encounter phase is malformed.');
+  }
+  const migrated = {
+    ...value,
+    tokens,
+    effects: activeEffects,
+    environment: { ...value.environment, narrowOpeningRegions: [] },
+    sharedSpaceRelations: [],
+    adjudicationPending: orderedPending,
+  } as unknown as EncounterState;
+  return {
+    ...migrated,
+    phase: awaitingPlacementPhase(
+      orderedPending,
+      migrated.initiative,
+      originalPhase as ResumableEncounterPhase,
+    ),
+  };
+}
 
 export const VTT_SESSION_MIGRATIONS: readonly VttSessionMigration[] =
   Object.freeze([
@@ -2975,6 +3150,83 @@ export const VTT_SESSION_MIGRATIONS: readonly VttSessionMigration[] =
         return { ...body, fingerprint: sha256(canonicalJson(body)) };
       },
     }),
+    Object.freeze({
+      id: 'vtt_session_v10_to_v11',
+      from: 10,
+      to: 11,
+      source: V10_TO_V11_SOURCE,
+      checksum: '7c407f3ed1d3ad12692deeca519742dcef3b6a89e8b8de16e76964b3d2d583ef',
+      migrate: (bundle: Readonly<Record<string, unknown>>) => {
+        if (!Array.isArray(bundle.revisions)) {
+          throw new TypeError('VTT session v10 revisions are malformed.');
+        }
+        const revisions = bundle.revisions.map((revision) => {
+          if (!isRecord(revision) || typeof revision.checksum !== 'string') {
+            throw new TypeError('VTT session v10 revision is malformed.');
+          }
+          const { checksum: _oldChecksum, ...oldBody } = revision;
+          if (sha256(canonicalJson(oldBody)) !== revision.checksum) {
+            throw new Error('VTT session v10 revision checksum mismatch.');
+          }
+          const encounterState = migrateV10EncounterState(revision.encounterState);
+          const body = {
+            ...oldBody,
+            schemaVersion: 11 as const,
+            encounterState,
+            branchRngStateFingerprint: branchRngStateFingerprint(encounterState),
+          };
+          return { ...body, checksum: sha256(canonicalJson(body)) };
+        });
+        const { fingerprint: _oldFingerprint, ...oldBundle } = bundle;
+        const body = {
+          ...oldBundle,
+          format: 'vtt-session-revisions' as const,
+          schemaVersion: 11 as const,
+          revisions,
+        };
+        return { ...body, fingerprint: sha256(canonicalJson(body)) };
+      },
+    }),
+    Object.freeze({
+      id: 'vtt_session_v11_to_v12',
+      from: 11,
+      to: 12,
+      source: V11_TO_V12_SOURCE,
+      checksum: '0e45635886c5cd0f61e1ae8df72d030417642154833165bdec642a520813b976',
+      migrate: (bundle: Readonly<Record<string, unknown>>) => {
+        if (!Array.isArray(bundle.revisions)) {
+          throw new TypeError('VTT session v11 revisions are malformed.');
+        }
+        const revisions = bundle.revisions.map((revision) => {
+          if (!isRecord(revision) || typeof revision.checksum !== 'string' || !isRecord(revision.encounterState)) {
+            throw new TypeError('VTT session v11 revision is malformed.');
+          }
+          const { checksum: _oldChecksum, ...oldBody } = revision;
+          if (sha256(canonicalJson(oldBody)) !== revision.checksum) {
+            throw new Error('VTT session v11 revision checksum mismatch.');
+          }
+          const encounterState = {
+            ...revision.encounterState,
+            observationHistory: [],
+          } as unknown as EncounterState;
+          const body = {
+            ...oldBody,
+            schemaVersion: 12 as const,
+            encounterState,
+            branchRngStateFingerprint: branchRngStateFingerprint(encounterState),
+          };
+          return { ...body, checksum: sha256(canonicalJson(body)) };
+        });
+        const { fingerprint: _oldFingerprint, ...oldBundle } = bundle;
+        const body = {
+          ...oldBundle,
+          format: 'vtt-session-revisions' as const,
+          schemaVersion: 12 as const,
+          revisions,
+        };
+        return { ...body, fingerprint: sha256(canonicalJson(body)) };
+      },
+    }),
   ]);
 
 export function validateVttSessionMigrationRegistry(): void {
@@ -3002,7 +3254,8 @@ function migrateSavedBundle(value: unknown): SavedSessionBundleV2 {
   if (isRecord(value) && value.format === JOURNAL_DAG_FORMAT) {
     if (value.schemaVersion === VTT_SESSION_SCHEMA_VERSION) return decodeJournalDagBundle(value);
     if (
-      (value.schemaVersion !== 7 && value.schemaVersion !== 8 && value.schemaVersion !== 9) ||
+      (value.schemaVersion !== 7 && value.schemaVersion !== 8 && value.schemaVersion !== 9 &&
+        value.schemaVersion !== 10 && value.schemaVersion !== 11) ||
       typeof value.sessionId !== 'string' ||
       typeof value.fingerprint !== 'string'
     ) throw new TypeError('Saved VTT session journal DAG header is malformed.');

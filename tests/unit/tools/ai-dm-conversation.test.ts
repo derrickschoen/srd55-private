@@ -21,7 +21,7 @@ import {
 import { buildRerunPacket } from '../../../tools/ai-dm-rerun-packet';
 import { mkdtempSync, readFileSync, writeFileSync } from '../../helpers/test-filesystem';
 import { createEncounter, reduceEncounter, type EncounterState } from '../../../src/combat/encounter';
-import { armorClass, encounterSessionId, type CombatantId } from '../../../src/combat/values';
+import { armorClass, encounterSessionId, feet, type CombatantId } from '../../../src/combat/values';
 import type { EncounterCommand } from '../../../src/combat/events';
 import { mulberry32 } from '../../../src/combat/random';
 import { generateRoom } from '../../../src/vtt/room-generator';
@@ -64,6 +64,7 @@ import {
 } from '../../../src/vtt/knowledge-base-contract';
 import { declareTestInputs } from '../../helpers/test-inputs';
 import { sha256 } from '../../../src/crypto/sha256';
+import { DEFAULT_RENDERER_PROFILE } from '../../../src/vtt/renderer-profile';
 
 const kbInputs = declareTestInputs({ fixtures: [
   'tests/fixtures/ai-dm-kb/ai-dm-core.md',
@@ -215,7 +216,7 @@ class SerializedRoundTripAdapter implements AgentSessionAdapter {
   #startCount = 0;
 
   constructor(
-    private readonly choice: 'use_action_dodge' | 'targeted_web' | 'attack' | 'invalid_then_dodge' | 'option_shaped_end_turn',
+    private readonly choice: 'first_shown' | 'use_action_dodge' | 'targeted_web' | 'attack' | 'invalid_then_dodge' | 'option_shaped_end_turn',
     private readonly usageInputs: number[] = [],
   ) {}
 
@@ -278,33 +279,53 @@ class SerializedRoundTripAdapter implements AgentSessionAdapter {
     this.turnContexts.push(context);
     const actors = runtime.feed.current().request?.actors;
     if (actors === undefined) throw new Error('Serialized round request has no actors.');
+    const renderedActors = context['actors'];
+    if (!Array.isArray(renderedActors)) throw new Error('Serialized turn context has no actors.');
     let specialSubmitted = false;
     const proposals = actors.map((actorId) => {
-      const options = runtime.feed.current().projection.combatants
-        .find((combatant) => combatant.id === actorId)?.options ?? [];
-      const special = !specialSubmitted ? options.find((option) => option.actionSlots.some((slot) =>
+      const renderedActor = renderedActors.map((value) => objectValue(value, 'rendered actor'))
+        .find((actor) => actor['actor_id'] === actorId);
+      const optionValues = renderedActor?.['options'];
+      if (!Array.isArray(optionValues)) throw new Error(`Serialized context has no options for ${actorId}.`);
+      const options = optionValues.map((value) => objectValue(value, 'rendered option'));
+      const slots = (option: Readonly<Record<string, unknown>>) => {
+        const values = option['action_slots'];
+        return Array.isArray(values) ? values.map((value) => objectValue(value, 'rendered option slot')) : [];
+      };
+      const engineDefaultId = objectValue(
+        objectValue(renderedActor?.['intel'], 'rendered actor intel')['opportunity_cost'],
+        'rendered actor opportunity cost',
+      )['engine_default_option_id'];
+      const matchingSpecials = (this.choice === 'attack' || !specialSubmitted) ? options.filter((option) => slots(option).some((slot) =>
         this.choice === 'attack'
-          ? slot.use.kind === 'attack' || slot.use.kind === 'multiattack'
+          ? slot['kind'] === 'attack' || slot['kind'] === 'multiattack'
           : this.choice === 'targeted_web'
-            ? slot.use.kind === 'saving_throw' && slot.use.actionId === 'web'
-            : false)) : undefined;
+            ? slot['kind'] === 'saving_throw' && slot['action_id'] === 'web'
+            : false)) : [];
+      const special = matchingSpecials.find((option) => option['option_id'] === engineDefaultId) ??
+        matchingSpecials[0];
       if (special !== undefined) specialSubmitted = true;
       const requestedKind = this.choice === 'option_shaped_end_turn' ? 'end_turn' : 'dodge';
-      const selected = special ?? options.find((option) => option.actionSlots.some((slot) =>
-        slot.slot === 'main' && slot.use.kind === requestedKind));
+      const selected = this.choice === 'first_shown'
+        ? options[0]
+        : special ?? options.find((option) => slots(option).some((slot) =>
+            slot['slot'] === 'main' && slot['kind'] === requestedKind));
       if (selected === undefined) throw new Error(`Serialized round has no ${requestedKind} option for ${actorId}.`);
-      const fallback = options.find((option) => option.optionId !== selected.optionId);
+      const selectedId = String(selected['option_id']);
+      const selectedLabel = String(selected['label']);
+      const selectedMainKind = slots(selected).find((slot) => slot['slot'] === 'main')?.['kind'];
+      const fallback = options.find((option) => option['option_id'] !== selectedId);
       if (manifest.phase === 'initial' && fallback === undefined) {
         throw new Error(`Serialized round has no independent fallback option for ${actorId}.`);
       }
-      this.submittedOptions.push({ option_id: selected.optionId, label: selected.label });
+      this.submittedOptions.push({ option_id: selectedId, label: selectedLabel });
       return {
         actor_id: actorId,
         expected_revision: manifest.revision,
-        primary_option_id: selected.optionId,
-        fallback_option_id: manifest.phase === 'correction' ? null : fallback?.optionId ?? null,
-        reason: `Choose ${selected.label} to exercise the serialized decision path.`,
-        override_justification: requestedKind === 'dodge' || requestedKind === 'end_turn'
+        primary_option_id: selectedId,
+        fallback_option_id: manifest.phase === 'correction' ? null : String(fallback?.['option_id']),
+        reason: `Choose ${selectedLabel} to exercise the serialized decision path.`,
+        override_justification: selectedMainKind === 'dodge' || selectedMainKind === 'end_turn'
           ? {
               kind: 'missing_metric',
               id: 'expected_damage_milli',
@@ -431,6 +452,22 @@ function preparedMonsterRoundRevision(initialState: EncounterState): {
 
 const LEGACY_BLOCK_ARGS = [
   '--combat-model', 'monster_block_v1', '--initiative-profile', 'legacy',
+] as const;
+
+const ALL_OPTIONS_TEST_RENDERER_ARGS = [
+  '--renderer-profile', JSON.stringify({
+    ...DEFAULT_RENDERER_PROFILE,
+    rows: 'off',
+    movement: 'material_only',
+    threats: 'counts_exception_ids',
+    rare: 'triggered',
+    knowledge: 'relevance_gated',
+    frontier: 'off',
+    failures: 'headline_codes',
+    adverts: 'full',
+    misc: 'merged',
+    optionDetail: 'top2_stubs',
+  }),
 ] as const;
 
 describe('AI-DM engine MCP conversation runner', () => {
@@ -605,7 +642,7 @@ describe('AI-DM engine MCP conversation runner', () => {
 
   it('keeps one sitting across rooms, rolls only at threshold, and explicit end prevents resume', { timeout: 60_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-sitting-rollover-'));
-    const adapter = new SerializedRoundTripAdapter('use_action_dodge', [1_000, 73]);
+    const adapter = new SerializedRoundTripAdapter('first_shown', [1_000, 73]);
     const config = parseConversationArgs([
       '--rooms', '2', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
       ...LEGACY_BLOCK_ARGS,
@@ -720,6 +757,7 @@ describe('AI-DM engine MCP conversation runner', () => {
     const config = parseConversationArgs([
       '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
       ...LEGACY_BLOCK_ARGS,
+      ...ALL_OPTIONS_TEST_RENDERER_ARGS,
     ]);
 
     const result = await runConversation(config, {
@@ -750,7 +788,7 @@ describe('AI-DM engine MCP conversation runner', () => {
 
   it('requests full context for round one and a delta for a resumed later round', { timeout: 60_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-round-delta-'));
-    const adapter = new SerializedRoundTripAdapter('use_action_dodge');
+    const adapter = new SerializedRoundTripAdapter('first_shown');
     const config = parseConversationArgs([
       '--rooms', '1', '--rounds', '2', '--out', join(directory, 'rows.jsonl'),
       ...LEGACY_BLOCK_ARGS,
@@ -849,6 +887,7 @@ describe('AI-DM engine MCP conversation runner', () => {
         '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
         '--cli-bin', 'definitely-not-a-model-binary', '--dry-run',
         ...LEGACY_BLOCK_ARGS,
+        ...ALL_OPTIONS_TEST_RENDERER_ARGS,
       ]);
 
       const result = await runConversation(config, { roomStates: [generatedState] });
@@ -1025,26 +1064,31 @@ describe('AI-DM engine MCP conversation runner', () => {
       plannerLabel: 'engine_default',
       autoSubmitBlocks: [],
       intelPolicyVersions: {
-        movement: 'movement-options-v1',
+        movement: 'movement-options-v2',
         opportunityCost: 'opportunity-cost-v1',
         teamScorer: 'team-scorer-v1',
         correction: 'dominance-correction-v1',
         materialityContext: 'materiality-context-v1',
-        actorKnowledge: 'actor-knowledge-v2',
+        actorKnowledge: 'actor-knowledge-last-seen-v4',
         reactionSpendHold: 'reaction-spend-hold-v1',
-        legendaryWindows: 'legendary-windows-v1',
-        recoveryCapability: 'recovery-capability-v1',
+        legendaryWindows: 'legendary-windows-v2',
+        recoveryCapability: 'recovery-capability-v2',
       },
     }));
     // Fixture bands, hand-computed:
     // cleric hp 52 of max 52 = 100% -> band uninjured; effective AC 18 + 1 = 19 -> heavily_defended.
     // fighter hp 51 of max 67 = 76.1% -> band bloodied; AC 18 -> heavily_defended.
     // wizard hp 38 of max 38 = 100% -> band uninjured; AC 15 -> guarded.
-    const projectedTargets = [
+    const projectedTargets = (distances: readonly [number, number, number]) => [
       {
         kind: 'perceived',
         targetId: 'combatant:cleric',
+        placementStatus: 'placed',
         position: { column: 2, row: 4 },
+        effectiveSize: 'Medium',
+        placementMode: { kind: 'normal', actual: 'Medium' },
+        footprint: [{ column: 2, row: 4 }],
+        distanceFeet: distances[0],
         conditions: [],
         armorClass: { kind: 'perceived_band', band: 'heavily_defended' },
         hitPoints: { kind: 'perceived_band', band: 'uninjured' },
@@ -1054,7 +1098,12 @@ describe('AI-DM engine MCP conversation runner', () => {
       {
         kind: 'perceived',
         targetId: 'combatant:fighter',
+        placementStatus: 'placed',
         position: { column: 1, row: 2 },
+        effectiveSize: 'Medium',
+        placementMode: { kind: 'normal', actual: 'Medium' },
+        footprint: [{ column: 1, row: 2 }],
+        distanceFeet: distances[1],
         conditions: [],
         armorClass: { kind: 'perceived_band', band: 'heavily_defended' },
         hitPoints: { kind: 'perceived_band', band: 'bloodied' },
@@ -1064,7 +1113,12 @@ describe('AI-DM engine MCP conversation runner', () => {
       {
         kind: 'perceived',
         targetId: 'combatant:wizard',
+        placementStatus: 'placed',
         position: { column: 1, row: 6 },
+        effectiveSize: 'Medium',
+        placementMode: { kind: 'normal', actual: 'Medium' },
+        footprint: [{ column: 1, row: 6 }],
+        distanceFeet: distances[2],
         conditions: [],
         armorClass: { kind: 'perceived_band', band: 'guarded' },
         hitPoints: { kind: 'perceived_band', band: 'uninjured' },
@@ -1074,19 +1128,19 @@ describe('AI-DM engine MCP conversation runner', () => {
     ];
     expect(capturedActorKnowledge).toEqual([
       {
-        policy: 'actor-knowledge-v2',
+        policy: 'actor-knowledge-last-seen-v4',
         actorId: 'combatant:generated-3943001-monster-1',
-        targets: projectedTargets,
+        targets: projectedTargets([70, 75, 75]),
       },
       {
-        policy: 'actor-knowledge-v2',
+        policy: 'actor-knowledge-last-seen-v4',
         actorId: 'combatant:generated-3943001-monster-2',
-        targets: projectedTargets,
+        targets: projectedTargets([65, 70, 70]),
       },
       {
-        policy: 'actor-knowledge-v2',
+        policy: 'actor-knowledge-last-seen-v4',
         actorId: 'combatant:generated-3943001-monster-3',
-        targets: projectedTargets,
+        targets: projectedTargets([70, 75, 75]),
       },
     ]);
     expect(result.rows[0]?.authorizedPlan?.some((entry) =>
@@ -1302,6 +1356,7 @@ describe('AI-DM engine MCP conversation runner', () => {
       '--rooms', '1', '--rounds', '1', '--out', outPath,
       '--cli-bin', 'definitely-not-a-model-binary', '--dry-run',
       ...LEGACY_BLOCK_ARGS,
+      ...ALL_OPTIONS_TEST_RENDERER_ARGS,
     ]);
 
     const result = await runConversation(config);
@@ -1322,13 +1377,14 @@ describe('AI-DM engine MCP conversation runner', () => {
     expect(exportSavedSession(store, sessionId)).toBe(result.journalExport);
   });
 
-  it('runs a three-room three-round model-free brutal smoke with the stub adapter', { timeout: 120_000 }, async () => {
+  it('runs a three-room three-round model-free brutal smoke with the stub adapter', { timeout: 300_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-3round-smoke-'));
     const config = parseConversationArgs([
       '--fixtures', 'tests/fixtures/arena-basis-brutal',
       '--rooms', '3', '--rounds', '3', '--out', join(directory, 'rows.jsonl'),
       '--combat-model', 'initiative_segments_v1', '--initiative-profile', 'derived_v1',
       '--dry-run',
+      ...ALL_OPTIONS_TEST_RENDERER_ARGS,
     ]);
 
     const result = await runConversation(config);
@@ -1344,6 +1400,7 @@ describe('AI-DM engine MCP conversation runner', () => {
     const config = parseConversationArgs([
       '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'), '--dry-run',
       ...LEGACY_BLOCK_ARGS,
+      ...ALL_OPTIONS_TEST_RENDERER_ARGS,
     ]);
 
     const result = await runConversation(config, {
@@ -1386,6 +1443,7 @@ describe('AI-DM engine MCP conversation runner', () => {
     const config = parseConversationArgs([
       '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'), '--dry-run',
       ...LEGACY_BLOCK_ARGS,
+      ...ALL_OPTIONS_TEST_RENDERER_ARGS,
     ]);
 
     const result = await runConversation(config, {
@@ -1562,6 +1620,7 @@ describe('AI-DM engine MCP conversation runner', () => {
     const result = await runConversation(parseConversationArgs([
       '--rooms', '1', '--rounds', '1', '--out', outPath, '--dry-run',
       ...LEGACY_BLOCK_ARGS,
+      ...ALL_OPTIONS_TEST_RENDERER_ARGS,
     ]));
 
     expect(result.rows[0]).toEqual(expect.objectContaining({
@@ -1769,10 +1828,19 @@ describe('AI-DM engine MCP conversation runner', () => {
     const config = parseConversationArgs([
       '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
       '--combat-model', 'initiative_segments_v1', '--dry-run', '--transport', 'final_indices',
+      ...ALL_OPTIONS_TEST_RENDERER_ARGS,
     ]);
     const result = await runConversationWithPartyPolicy('heuristic_v0', config, {
       roomStates: [await alternatingInitiativeRoom({ fragileMonsterCount: 1 })],
       suggestionResponseByRequest: { 'room-1-round-1': 'ignored' },
+      mutateBeforeAdjustmentPreflight: (state) => ({
+        ...state,
+        revision: state.revision + 1,
+        combatants: state.combatants.map((combatant) =>
+          combatant.profile.kind === 'player_character'
+            ? { ...combatant, hitPoints: 0, life: 'dead' as const }
+            : combatant),
+      }),
     });
     const [row] = result.rows;
     if (row === undefined) throw new Error('Final-index adjustment run produced no row.');
@@ -1799,11 +1867,20 @@ describe('AI-DM engine MCP conversation runner', () => {
     const config = parseConversationArgs([
       '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
       '--combat-model', 'initiative_segments_v1', '--dry-run', '--transport', 'final_indices',
+      ...ALL_OPTIONS_TEST_RENDERER_ARGS,
     ]);
     const result = await runConversationWithPartyPolicy('heuristic_v0', config, {
       roomStates: [await alternatingInitiativeRoom({ fragileMonsterCount: 1 })],
       suggestionResponseByRequest: { 'room-1-round-1': 'ignored' },
       exhaustInitial: ['room-1-round-1-pc-turn-1'],
+      mutateBeforeAdjustmentPreflight: (state) => ({
+        ...state,
+        revision: state.revision + 1,
+        combatants: state.combatants.map((combatant) =>
+          combatant.profile.kind === 'player_character'
+            ? { ...combatant, hitPoints: 0, life: 'dead' as const }
+            : combatant),
+      }),
     });
     const [row] = result.rows;
     if (row === undefined) throw new Error('Final-index adjustment correction run produced no row.');
@@ -1940,6 +2017,7 @@ describe('AI-DM engine MCP conversation runner', () => {
     const config = parseConversationArgs([
       '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
       '--combat-model', 'initiative_segments_v1', '--dry-run',
+      ...ALL_OPTIONS_TEST_RENDERER_ARGS,
     ]);
 
     const result = await runConversation(config, {
@@ -2036,7 +2114,7 @@ describe('AI-DM engine MCP conversation runner', () => {
     expect(result.rows[0]?.refusals).toEqual([]);
   });
 
-  it('runs three rounds with a one-round party program by recording typed default turns', { timeout: 60_000 }, async () => {
+  it('runs three rounds with a one-round party program by recording typed default turns', { timeout: 180_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-party-default-'));
     const base = await alternatingInitiativeRoom({ monsterHitPoints: 10_000 });
     const durable: EncounterState = {
@@ -2079,6 +2157,7 @@ describe('AI-DM engine MCP conversation runner', () => {
     const config = parseConversationArgs([
       '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
       '--combat-model', 'initiative_segments_v1', '--capture-rl-data', '--dry-run',
+      ...ALL_OPTIONS_TEST_RENDERER_ARGS,
     ]);
 
     const result = await runConversationWithPartyPolicy('heuristic_v0', config, {
@@ -2124,12 +2203,12 @@ describe('AI-DM engine MCP conversation runner', () => {
       submissionTool: 'engine.submit_round_proposals',
       roundProtocolVersion: 3,
       engineIntel: expect.objectContaining({
-        policy: 'dm-intel-capture-v1',
+        policy: 'dm-intel-capture-v2-creature-space',
         policyVersions: expect.objectContaining({
-          evaluator: 'tactical-evaluator-v2',
-          renderer: 'dm-turn-intel-v1',
-          query: 'dm-intel-query-v1',
-          capture: 'dm-intel-capture-v1',
+          evaluator: 'tactical-evaluator-v3',
+          renderer: 'dm-turn-intel-v2-creature-space',
+          query: 'dm-intel-query-v2-creature-space',
+          capture: 'dm-intel-capture-v2-creature-space',
         }),
         actors: expect.arrayContaining([expect.objectContaining({
           offeredOptionIds: expect.any(Array),
@@ -2348,6 +2427,7 @@ describe('AI-DM engine MCP conversation runner', () => {
     const config = parseConversationArgs([
       '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
       '--combat-model', 'initiative_segments_v1', '--dry-run',
+      ...ALL_OPTIONS_TEST_RENDERER_ARGS,
     ]);
 
     const result = await runConversation(config, {
@@ -2374,27 +2454,56 @@ describe('AI-DM engine MCP conversation runner', () => {
       '--combat-model', 'initiative_segments_v1', '--dry-run',
     ]);
 
-    const base = await alternatingInitiativeRoom({ fragileMonsterCount: 1 });
-    const twoFragileMonsters: EncounterState = {
+    const base = await alternatingInitiativeRoom({ fragileMonsterCount: 2 });
+    const independentFlapState: EncounterState = {
       ...base,
-      combatants: base.combatants.map((combatant) =>
-        combatant.profile.id === 'combatant:generated-3943001-monster-3'
-          ? {
-            ...combatant,
-            hitPoints: 1,
-            profile: {
-              ...combatant.profile,
-              rules: { ...combatant.profile.rules, hitPointMaximum: 1 },
-            },
-          }
-          : combatant),
+      combatants: base.combatants.map((combatant) => ({
+        ...combatant,
+        profile: {
+          ...combatant.profile,
+          rules: {
+            ...combatant.profile.rules,
+            initiativeBonus: combatant.profile.id === 'combatant:cleric'
+              ? 100
+              : combatant.profile.id === 'combatant:fighter'
+                ? 70
+                : combatant.profile.id === 'combatant:wizard'
+                  ? 40
+                  : 0,
+            ...(combatant.profile.id === 'combatant:fighter'
+              ? { attacksPerAction: 1 }
+              : {}),
+            ...(combatant.profile.id === 'combatant:generated-3943001-monster-2'
+              ? { armorClass: armorClass(0) }
+              : {}),
+          },
+        },
+      })),
+      tokens: base.tokens.map((token) =>
+        token.combatantId === 'combatant:generated-3943001-monster-1'
+          ? { ...token, position: { column: 5, row: 4 } }
+          : token),
     };
     const result = await runConversationWithPartyPolicy('heuristic_v0', config, {
-      roomStates: [twoFragileMonsters],
+      roomStates: [independentFlapState],
       flapPrimaryByRequest: {
         'room-1-round-1-pc-turn-1': 1,
         'room-1-round-1-pc-turn-2': 1,
       },
+      mutateBeforeAdjustmentPreflight: (state) => ({
+        ...state,
+        revision: state.revision + 1,
+        combatants: state.combatants.map((combatant) =>
+          combatant.profile.id === 'combatant:generated-3943001-monster-1'
+            ? {
+                ...combatant,
+                profile: {
+                  ...combatant.profile,
+                  rules: { ...combatant.profile.rules, speed: feet(0) },
+                },
+              }
+            : combatant),
+      }),
     });
 
     expect(result.rows[0]?.adjustments?.slice(0, 2)).toEqual([
@@ -2408,10 +2517,12 @@ describe('AI-DM engine MCP conversation runner', () => {
     const config = parseConversationArgs([
       '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
       '--combat-model', 'initiative_segments_v1', '--dry-run',
+      ...ALL_OPTIONS_TEST_RENDERER_ARGS,
     ]);
 
     const result = await runConversationWithPartyPolicy('heuristic_v0', config, {
       roomStates: [await alternatingInitiativeRoom({ fragileMonsterCount: 1 })],
+      suggestionResponseByRequest: { 'room-1-round-1': 'ignored' },
       adjustmentResponseByRequest: { 'room-1-round-1-pc-turn-1': 'invalid' },
     });
 
@@ -2427,10 +2538,12 @@ describe('AI-DM engine MCP conversation runner', () => {
     const config = parseConversationArgs([
       '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
       '--combat-model', 'initiative_segments_v1', '--dry-run',
+      ...ALL_OPTIONS_TEST_RENDERER_ARGS,
     ]);
 
     const result = await runConversationWithPartyPolicy('heuristic_v0', config, {
       roomStates: [await alternatingInitiativeRoom({ fragileMonsterCount: 1 })],
+      suggestionResponseByRequest: { 'room-1-round-1': 'ignored' },
       flapPrimaryByRequest: { 'room-1-round-1-pc-turn-1': 3 },
     });
 
@@ -2448,10 +2561,12 @@ describe('AI-DM engine MCP conversation runner', () => {
     const config = parseConversationArgs([
       '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
       '--combat-model', 'initiative_segments_v1', '--dry-run',
+      ...ALL_OPTIONS_TEST_RENDERER_ARGS,
     ]);
 
     const result = await runConversationWithPartyPolicy('heuristic_v0', config, {
       roomStates: [await alternatingInitiativeRoom({ fragileMonsterCount: 1 })],
+      suggestionResponseByRequest: { 'room-1-round-1': 'ignored' },
       adjustmentResponseByRequest: { 'room-1-round-1-pc-turn-1': 'invalid' },
       failCorrection: ['room-1-round-1-pc-turn-1'],
     });

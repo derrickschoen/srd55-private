@@ -14,7 +14,9 @@ import {
   combatantsAreAllies,
   EncounterConcludedBoundaryError,
   encounterMovementWorld,
+  combatantSpace,
   EncounterRuleError,
+  PendingPlacementRuleError,
   PendingDecisionRuleError,
   reduceEncounter,
   type EncounterReduction,
@@ -146,6 +148,7 @@ export type CoordinatorStep =
       readonly encounterConclusionCode?: EncounterConcludedBoundaryError['code'];
       readonly conclusion?: Extract<EncounterPhase, { readonly kind: 'concluded' }>;
       readonly pendingDecisionCode?: PendingDecisionRuleError['code'];
+      readonly pendingPlacementCode?: PendingPlacementRuleError['code'];
       readonly actionRefusal?: NonBoundaryActionRefusal;
     };
 
@@ -207,13 +210,12 @@ function coordinatedMovementSteps(
         candidate.turn.reactionAvailable,
     )
     .map((candidate) => {
-      const token = state.tokens.find(
-        (entry) => entry.combatantId === candidate.profile.id,
-      );
-      if (token === undefined) throw new EncounterRuleError('validation', 'Reactor has no token.');
+      if (!state.tokens.some((entry) => entry.combatantId === candidate.profile.id)) {
+        throw new EncounterRuleError('validation', 'Reactor has no token.');
+      }
       return {
         reactorId: candidate.profile.id,
-        cell: token.position,
+        cells: combatantSpace(state, candidate.profile.id).cells,
         reach: candidate.profile.rules.reach,
         reactionAvailable: true,
         hostile: true,
@@ -383,6 +385,27 @@ export class TurnCoordinator {
           state: this.#state,
           reason: error.message,
           pendingDecisionCode: error.code,
+        };
+      }
+      throw error;
+    }
+  }
+
+  resolvePendingPlacement(
+    command: Extract<EncounterCommand, { readonly type: 'resolve_pending_placement' }>,
+  ): CoordinatorStep {
+    try {
+      this.#cancelPendingRequest();
+      this.#continuation = IDLE;
+      const reduction = this.#apply(command, IDLE);
+      return { kind: 'applied', state: this.#state, events: reduction.events };
+    } catch (error: unknown) {
+      if (error instanceof PendingPlacementRuleError) {
+        return {
+          kind: 'refused',
+          state: this.#state,
+          reason: error.message,
+          pendingPlacementCode: error.code,
         };
       }
       throw error;
@@ -764,6 +787,14 @@ export class TurnCoordinator {
           conclusion: error.conclusion,
         };
       }
+      if (this.#state.phase.kind === 'awaiting_placement') {
+        return {
+          kind: 'refused',
+          state: this.#state,
+          reason: `Placement resolution required for ${String(this.#state.phase.combatantId)}.`,
+          pendingPlacementCode: 'placement_resolution_required',
+        };
+      }
       if (this.#continuation.kind === 'movement') return await this.#continueMovement();
       if (this.#continuation.kind === 'turn') return await this.#continueTurn();
       if (this.#state.initiative.length === 0) {
@@ -820,6 +851,14 @@ export class TurnCoordinator {
           state: this.#state,
           reason: error.message,
           pendingDecisionCode: error.code,
+        };
+      }
+      if (error instanceof PendingPlacementRuleError) {
+        return {
+          kind: 'refused',
+          state: this.#state,
+          reason: error.message,
+          pendingPlacementCode: error.code,
         };
       }
       if (

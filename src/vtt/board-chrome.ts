@@ -16,8 +16,6 @@
 import { HIDDEN_FOCUS_ASSET_ID, STONE_FLOOR_SET_ID } from '../assets/art-sets';
 import {
   CELL_GLYPHS,
-  CELL_GLYPH_MARGIN,
-  CELL_GLYPH_SIZE,
   HIDDEN_GLYPH,
   HIDDEN_GLYPH_LABEL,
   OBJECT_GLYPH,
@@ -54,11 +52,9 @@ import {
 import {
   GLYPH_HEIGHT,
   layoutPixelText,
-  normalizeLabelText,
   renderLifeGlyph,
   renderPixelGlyph,
   renderPixelText,
-  textPixelWidth,
   type LifeGlyph,
   type PixelTextLayout,
 } from '../assets/pixel-font';
@@ -75,190 +71,30 @@ import {
   type BoardGlyphPresence,
   type EncounterBoardCellModel,
   type EncounterBoardCombatant,
+  type EncounterBoardPlacedCombatant,
   type EncounterBoardProjectionShape,
 } from './encounter-board';
 import type { ProjectedHitPointKnowledge } from './intel/contracts';
-
-export const CHROME_TILE_PX = 128;
-export type BoardChromeTilePx = 64 | typeof CHROME_TILE_PX;
-export const CHROME_BASE_TILE_PX = 64;
-
-const BASE_CHROME_DIMENSIONS = Object.freeze({
-  textScale: 2,
-  boardBorder: 2,
-  coordinateGutter: 24,
-  legendHeight: 120,
-  legendGap: 8,
-  hpBarWidth: 40,
-  hpBarHeight: 4,
-  hpBarBorder: 1,
-  hpBarBottomInset: 2,
-  lifeGlyphInset: 3,
-  lifeGlyphDoorGap: 2,
-  hiddenGlyphX: 1,
-  hiddenGlyphY: 29,
-  creatureBadgeWidth: 30,
-  creatureBadgeHeight: 22,
-  creatureBadgeTop: 2,
-  creatureBustRingInset: 7,
-  creatureBustRingStackInset: 2,
-  creatureBustRingPrimarySize: 50,
-  creatureBustRingSecondarySize: 46,
-  rosterEntryGap: 4,
-  rosterEntryFrame: 6,
-  rosterHeaderHeight: 22,
-  objectHeaderHeight: 22,
-  objectEntryHeight: 40,
-  legendSwatch: 14,
-  legendRowGap: 6,
-  legendColumnGap: 14,
-  legendPaddingY: 6,
-  legendPaddingX: 8,
-  legendBorder: 2,
-  legendItemGap: 6,
-  legendItemHeight: 18,
-  objectRailRowGap: 4,
-  objectRailColumnGap: 8,
-  tagGap: 4,
-  tagPaddingY: 2,
-  tagPaddingX: 3,
-  objectTagBorder: 1,
-  doorTagBorder: 2,
-  rosterBoxGap: 4,
-  rosterBoxPaddingTop: 4,
-  rosterBoxBorder: 2,
-  rosterGridBadgeColumn: 26,
-  rosterGridGap: 8,
-  rosterEntryMinHeight: 20,
-  rosterEntryPaddingY: 2,
-  rosterEntryPaddingX: 3,
-  rosterEntryBorder: 1,
-  worldObjectBorder: 2,
-  worldObjectSigilInset: 26,
-} as const);
-
-export interface BoardChromeMetrics {
-  readonly latticeScale: number;
-  readonly textScale: number;
-  readonly boardBorder: number;
-  readonly coordinateGutter: number;
-  readonly legendHeight: number;
-  readonly legendGap: number;
-  readonly hpBarWidth: number;
-  readonly hpBarHeight: number;
-  readonly hpBarBorder: number;
-  readonly hpBarBottomInset: number;
-  readonly cellGlyphSize: number;
-  readonly lifeGlyphInset: number;
-  readonly lifeGlyphBelowDoor: number;
-  readonly hiddenGlyphX: number;
-  readonly hiddenGlyphY: number;
-  readonly creatureBadgeWidth: number;
-  readonly creatureBadgeHeight: number;
-  readonly creatureBadgeTop: number;
-  readonly creatureBadgeStackPitch: number;
-  readonly creatureBustRingInset: number;
-  readonly creatureBustRingStackInset: number;
-  readonly creatureBustRingPrimarySize: number;
-  readonly creatureBustRingSecondarySize: number;
-  readonly rosterEntryGap: number;
-  readonly rosterEntryFrame: number;
-  readonly rosterHeaderHeight: number;
-  readonly objectHeaderHeight: number;
-  readonly objectEntryHeight: number;
-  readonly legendSwatch: number;
-  readonly legendRowGap: number;
-  readonly legendColumnGap: number;
-  readonly legendPaddingY: number;
-  readonly legendPaddingX: number;
-  readonly legendBorder: number;
-  readonly legendItemGap: number;
-  readonly legendItemHeight: number;
-  readonly objectRailRowGap: number;
-  readonly objectRailColumnGap: number;
-  readonly tagGap: number;
-  readonly tagPaddingY: number;
-  readonly tagPaddingX: number;
-  readonly objectTagBorder: number;
-  readonly doorTagBorder: number;
-  readonly rosterBoxGap: number;
-  readonly rosterBoxPaddingTop: number;
-  readonly rosterBoxBorder: number;
-  readonly rosterGridBadgeColumn: number;
-  readonly rosterGridGap: number;
-  readonly rosterEntryMinHeight: number;
-  readonly rosterEntryPaddingY: number;
-  readonly rosterEntryPaddingX: number;
-  readonly rosterEntryBorder: number;
-  readonly worldObjectBorder: number;
-  readonly worldObjectSigilInset: number;
-}
-
-/** All semantic chrome derives from the 64-pixel lattice, including CSS-only spacing. */
-export function boardChromeMetrics(
-  tilePx: BoardChromeTilePx = CHROME_TILE_PX,
-): BoardChromeMetrics {
-  const latticeScale = tilePx / CHROME_BASE_TILE_PX;
-  const px = (value: number): number => value * latticeScale;
-  return Object.freeze({
-    latticeScale,
-    textScale: px(BASE_CHROME_DIMENSIONS.textScale),
-    boardBorder: px(BASE_CHROME_DIMENSIONS.boardBorder),
-    coordinateGutter: px(BASE_CHROME_DIMENSIONS.coordinateGutter),
-    legendHeight: px(BASE_CHROME_DIMENSIONS.legendHeight),
-    legendGap: px(BASE_CHROME_DIMENSIONS.legendGap),
-    hpBarWidth: px(BASE_CHROME_DIMENSIONS.hpBarWidth),
-    hpBarHeight: px(BASE_CHROME_DIMENSIONS.hpBarHeight),
-    hpBarBorder: px(BASE_CHROME_DIMENSIONS.hpBarBorder),
-    hpBarBottomInset: px(BASE_CHROME_DIMENSIONS.hpBarBottomInset),
-    cellGlyphSize: cellGlyphSizePx(tilePx),
-    lifeGlyphInset: px(BASE_CHROME_DIMENSIONS.lifeGlyphInset),
-    lifeGlyphBelowDoor: px(
-      CELL_GLYPH_MARGIN + CELL_GLYPH_SIZE + BASE_CHROME_DIMENSIONS.lifeGlyphDoorGap,
-    ),
-    hiddenGlyphX: px(BASE_CHROME_DIMENSIONS.hiddenGlyphX),
-    hiddenGlyphY: px(BASE_CHROME_DIMENSIONS.hiddenGlyphY),
-    creatureBadgeWidth: px(BASE_CHROME_DIMENSIONS.creatureBadgeWidth),
-    creatureBadgeHeight: px(BASE_CHROME_DIMENSIONS.creatureBadgeHeight),
-    creatureBadgeTop: px(BASE_CHROME_DIMENSIONS.creatureBadgeTop),
-    creatureBadgeStackPitch: px(BASE_CHROME_DIMENSIONS.creatureBadgeHeight),
-    creatureBustRingInset: px(BASE_CHROME_DIMENSIONS.creatureBustRingInset),
-    creatureBustRingStackInset: px(BASE_CHROME_DIMENSIONS.creatureBustRingStackInset),
-    creatureBustRingPrimarySize: px(BASE_CHROME_DIMENSIONS.creatureBustRingPrimarySize),
-    creatureBustRingSecondarySize: px(BASE_CHROME_DIMENSIONS.creatureBustRingSecondarySize),
-    rosterEntryGap: px(BASE_CHROME_DIMENSIONS.rosterEntryGap),
-    rosterEntryFrame: px(BASE_CHROME_DIMENSIONS.rosterEntryFrame),
-    rosterHeaderHeight: px(BASE_CHROME_DIMENSIONS.rosterHeaderHeight),
-    objectHeaderHeight: px(BASE_CHROME_DIMENSIONS.objectHeaderHeight),
-    objectEntryHeight: px(BASE_CHROME_DIMENSIONS.objectEntryHeight),
-    legendSwatch: px(BASE_CHROME_DIMENSIONS.legendSwatch),
-    legendRowGap: px(BASE_CHROME_DIMENSIONS.legendRowGap),
-    legendColumnGap: px(BASE_CHROME_DIMENSIONS.legendColumnGap),
-    legendPaddingY: px(BASE_CHROME_DIMENSIONS.legendPaddingY),
-    legendPaddingX: px(BASE_CHROME_DIMENSIONS.legendPaddingX),
-    legendBorder: px(BASE_CHROME_DIMENSIONS.legendBorder),
-    legendItemGap: px(BASE_CHROME_DIMENSIONS.legendItemGap),
-    legendItemHeight: px(BASE_CHROME_DIMENSIONS.legendItemHeight),
-    objectRailRowGap: px(BASE_CHROME_DIMENSIONS.objectRailRowGap),
-    objectRailColumnGap: px(BASE_CHROME_DIMENSIONS.objectRailColumnGap),
-    tagGap: px(BASE_CHROME_DIMENSIONS.tagGap),
-    tagPaddingY: px(BASE_CHROME_DIMENSIONS.tagPaddingY),
-    tagPaddingX: px(BASE_CHROME_DIMENSIONS.tagPaddingX),
-    objectTagBorder: px(BASE_CHROME_DIMENSIONS.objectTagBorder),
-    doorTagBorder: px(BASE_CHROME_DIMENSIONS.doorTagBorder),
-    rosterBoxGap: px(BASE_CHROME_DIMENSIONS.rosterBoxGap),
-    rosterBoxPaddingTop: px(BASE_CHROME_DIMENSIONS.rosterBoxPaddingTop),
-    rosterBoxBorder: px(BASE_CHROME_DIMENSIONS.rosterBoxBorder),
-    rosterGridBadgeColumn: px(BASE_CHROME_DIMENSIONS.rosterGridBadgeColumn),
-    rosterGridGap: px(BASE_CHROME_DIMENSIONS.rosterGridGap),
-    rosterEntryMinHeight: px(BASE_CHROME_DIMENSIONS.rosterEntryMinHeight),
-    rosterEntryPaddingY: px(BASE_CHROME_DIMENSIONS.rosterEntryPaddingY),
-    rosterEntryPaddingX: px(BASE_CHROME_DIMENSIONS.rosterEntryPaddingX),
-    rosterEntryBorder: px(BASE_CHROME_DIMENSIONS.rosterEntryBorder),
-    worldObjectBorder: px(BASE_CHROME_DIMENSIONS.worldObjectBorder),
-    worldObjectSigilInset: px(BASE_CHROME_DIMENSIONS.worldObjectSigilInset),
-  });
-}
+import {
+  CHROME_TILE_PX,
+  boardChromeMetrics,
+  layoutRosterName,
+  legendHeightPx,
+  type BoardChromeMetrics,
+  type BoardChromeTilePx,
+} from './board-chrome-layout';
+export {
+  CHROME_BASE_TILE_PX,
+  CHROME_TILE_PX,
+  ROSTER_NAME_GLYPHS_PER_LINE,
+  boardChromeDimensions,
+  boardChromeMetrics,
+  layoutRosterName,
+  legendHeightPx,
+  type BoardChromeDimensionContent,
+  type BoardChromeMetrics,
+  type BoardChromeTilePx,
+} from './board-chrome-layout';
 
 const DEFAULT_CHROME_METRICS = boardChromeMetrics();
 export const CHROME_TEXT_SCALE = DEFAULT_CHROME_METRICS.textScale;
@@ -309,7 +145,6 @@ export const CREATURE_BUST_RING_SIZE_PX = Object.freeze([
   DEFAULT_CHROME_METRICS.creatureBustRingPrimarySize,
   DEFAULT_CHROME_METRICS.creatureBustRingSecondarySize,
 ] as const);
-export const ROSTER_NAME_GLYPHS_PER_LINE = 18;
 export const ROSTER_ENTRY_GAP_PX = DEFAULT_CHROME_METRICS.rosterEntryGap;
 export const ROSTER_ENTRY_FRAME_PX = DEFAULT_CHROME_METRICS.rosterEntryFrame;
 
@@ -395,6 +230,22 @@ export interface CreatureBadgeAssignment {
   readonly stackIndex: 0 | 1;
 }
 
+export interface CreatureBadgeSubject {
+  readonly id: CombatantId;
+  readonly name: string;
+  readonly kind: 'player_character' | 'monster';
+  readonly position: { readonly column: number; readonly row: number };
+}
+
+export interface CreatureBadgeLayout {
+  readonly combatantId: CombatantId;
+  /** Relative to the grid's top-left, excluding the chrome coordinate gutter. */
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
 export interface CreatureBustRingGeometry {
   readonly inset: number;
   readonly size: number;
@@ -421,7 +272,7 @@ export function creatureBustRingGeometry(
 
 /** Stable roster order is the only numbering source in both live and snapshot DM views. */
 export function assignCreatureBadges(
-  combatants: readonly EncounterBoardCombatant[],
+  combatants: readonly CreatureBadgeSubject[],
 ): readonly CreatureBadgeAssignment[] {
   if (combatants.length > CREATURE_BADGE_COLORS.length) {
     throw new RangeError(
@@ -449,38 +300,22 @@ export function assignCreatureBadges(
   });
 }
 
-/** Word wrapping never resamples: long words become fixed 17-glyph pieces plus '-'. */
-export function layoutRosterName(displayName: string): PixelTextLayout {
-  const normalized = normalizeLabelText(displayName).trim();
-  const words = normalized.length === 0 ? ['?'] : normalized.split(' ');
-  const pieces = words.flatMap((word): readonly string[] => {
-    const result: string[] = [];
-    let remainder = word;
-    while (remainder.length > ROSTER_NAME_GLYPHS_PER_LINE) {
-      result.push(`${remainder.slice(0, ROSTER_NAME_GLYPHS_PER_LINE - 1)}-`);
-      remainder = remainder.slice(ROSTER_NAME_GLYPHS_PER_LINE - 1);
-    }
-    result.push(remainder);
-    return result;
-  });
-  const lines: string[] = [];
-  let current = '';
-  for (const piece of pieces) {
-    if (current === '') {
-      current = piece;
-    } else if (`${current} ${piece}`.length <= ROSTER_NAME_GLYPHS_PER_LINE) {
-      current = `${current} ${piece}`;
-    } else {
-      lines.push(current);
-      current = piece;
-    }
-  }
-  lines.push(current);
-  return {
-    lines,
-    width: Math.max(...lines.map(textPixelWidth), 0),
-    height: lines.length * GLYPH_HEIGHT + (lines.length - 1) * 2,
-  };
+/** Exact in-grid boxes occupied by the numbered identity badges. */
+export function creatureBadgeLayouts(
+  combatants: readonly CreatureBadgeSubject[],
+  tilePx: BoardChromeTilePx = CHROME_TILE_PX,
+): readonly CreatureBadgeLayout[] {
+  const metrics = boardChromeMetrics(tilePx);
+  return assignCreatureBadges(combatants).map((assignment) => ({
+    combatantId: assignment.combatantId,
+    x: assignment.column * tilePx + creatureBadgeLeftPx(tilePx),
+    y:
+      assignment.row * tilePx +
+      metrics.creatureBadgeTop +
+      assignment.stackIndex * metrics.creatureBadgeStackPitch,
+    width: metrics.creatureBadgeWidth,
+    height: metrics.creatureBadgeHeight,
+  }));
 }
 
 export const COORDINATE_CONVENTION = 'engine-column-row-zero-based' as const;
@@ -556,11 +391,6 @@ export const OBJECT_LABEL_STYLE =
   'object-tag' as const satisfies BoardLabelStyle;
 export const DOOR_LABEL_STYLE = 'door-tag' as const satisfies BoardLabelStyle;
 
-export interface BoardChromeDimensionContent {
-  readonly combatants: readonly Pick<EncounterBoardCombatant, 'name'>[];
-  readonly objects: readonly { readonly kind: string }[];
-}
-
 export function boardChromeCellOrigin(
   cell: { readonly column: number; readonly row: number },
   tilePx: BoardChromeTilePx = CHROME_TILE_PX,
@@ -569,61 +399,6 @@ export function boardChromeCellOrigin(
   return {
     left: metrics.coordinateGutter + cell.column * tilePx,
     top: metrics.coordinateGutter + cell.row * tilePx,
-  };
-}
-
-export function legendHeightPx(
-  content: BoardChromeDimensionContent,
-  tilePx: BoardChromeTilePx = CHROME_TILE_PX,
-): number {
-  const metrics = boardChromeMetrics(tilePx);
-  const rosterHeight =
-    content.combatants.length === 0
-      ? 0
-      : metrics.rosterHeaderHeight +
-        content.combatants.reduce(
-          (height, combatant) =>
-            height +
-            Math.max(
-              GLYPH_HEIGHT * metrics.textScale,
-              layoutRosterName(combatant.name).height * metrics.textScale,
-            ) +
-            metrics.rosterEntryFrame +
-            metrics.rosterEntryGap,
-          0,
-        );
-  const objectCount = content.objects.length;
-  const objectHeight = objectCount === 0
-    ? 0
-    : metrics.objectHeaderHeight + objectCount * metrics.objectEntryHeight;
-  return metrics.legendHeight + rosterHeight + objectHeight;
-}
-
-/**
- * The captured DM board size when the legend fits its 120-px minimum band,
- * which every arena board (17+ columns) does. Narrower boards wrap the legend
- * past the band and capture taller than this (D525).
- */
-export function boardChromeDimensions(
-  bounds: { readonly columns: number; readonly rows: number },
-  content: BoardChromeDimensionContent = { combatants: [], objects: [] },
-  tilePx: BoardChromeTilePx = CHROME_TILE_PX,
-): {
-  readonly width: number;
-  readonly height: number;
-} {
-  const metrics = boardChromeMetrics(tilePx);
-  return {
-    width:
-      2 * metrics.boardBorder +
-      2 * metrics.coordinateGutter +
-      bounds.columns * tilePx,
-    height:
-      2 * metrics.boardBorder +
-      2 * metrics.coordinateGutter +
-      bounds.rows * tilePx +
-      metrics.legendGap +
-      legendHeightPx(content, tilePx),
   };
 }
 
@@ -922,6 +697,8 @@ function applyBoardChromeCssMetrics(
   const dimensions = {
     '--chrome-gutter': metrics.coordinateGutter,
     '--chrome-board-border': metrics.boardBorder,
+    '--chrome-legend-height': metrics.legendHeight,
+    '--chrome-legend-gap': metrics.legendGap,
     '--chrome-hp-border': metrics.hpBarBorder,
     '--chrome-legend-row-gap': metrics.legendRowGap,
     '--chrome-legend-column-gap': metrics.legendColumnGap,
@@ -1065,7 +842,7 @@ export function hiddenRosterTagFor(
 }
 
 function tokenIdentityUnderlay(
-  combatants: readonly EncounterBoardCombatant[],
+  combatants: readonly EncounterBoardPlacedCombatant[],
   bounds: { readonly columns: number; readonly rows: number },
   tilePx: BoardChromeTilePx,
 ): HTMLDivElement {
@@ -1143,7 +920,7 @@ function tokenIdentityUnderlay(
 }
 
 function tokenChrome(
-  combatants: readonly EncounterBoardCombatant[],
+  combatants: readonly EncounterBoardPlacedCombatant[],
   bounds: { readonly columns: number; readonly rows: number },
   mode: BoardGlyphMode,
   doorCells: ReadonlySet<string>,
@@ -1167,6 +944,10 @@ function tokenChrome(
       tilePx,
     );
     const cellKey = `${String(combatant.position.column)},${String(combatant.position.row)}`;
+    const columnSpan = Math.max(...combatant.footprint.map((cell) => cell.column)) -
+      Math.min(...combatant.footprint.map((cell) => cell.column)) + 1;
+    const rowSpan = Math.max(...combatant.footprint.map((cell) => cell.row)) -
+      Math.min(...combatant.footprint.map((cell) => cell.row)) + 1;
 
     if (combatant.hiddenFromPlayers === true) {
       const ring = el('img', 'encounter-hidden-ring');
@@ -1178,8 +959,8 @@ function tokenChrome(
         position: 'absolute',
         left: `${String(cellLeft)}px`,
         top: `${String(cellTop)}px`,
-        width: `${String(tilePx)}px`,
-        height: `${String(tilePx)}px`,
+        width: `${String(tilePx * columnSpan)}px`,
+        height: `${String(tilePx * rowSpan)}px`,
       });
       layer.append(ring);
       // D525 'full': the eye-slash mark on the ring's left rim, scaled with the cell glyphs.
@@ -1477,7 +1258,7 @@ export function hpBandLabel(
 }
 
 function rosterBox(
-  combatants: readonly EncounterBoardCombatant[],
+  combatants: readonly EncounterBoardPlacedCombatant[],
   mode: BoardGlyphMode,
   metrics: BoardChromeMetrics,
 ): HTMLElement {
@@ -1578,7 +1359,7 @@ function legend(
   mode: BoardGlyphMode,
   roomDefault: LightLevel,
   objects: ProjectedWorldObjects,
-  combatants: readonly EncounterBoardCombatant[],
+  combatants: readonly EncounterBoardPlacedCombatant[],
   snapshotMode: boolean,
   tilePx: BoardChromeTilePx,
 ): HTMLElement {
@@ -1632,6 +1413,10 @@ export function renderBoardChrome(
   tilePx: BoardChromeTilePx = CHROME_TILE_PX,
 ): void {
   const metrics = boardChromeMetrics(tilePx);
+  const placedCombatants = projection.combatants.filter(
+    (combatant): combatant is EncounterBoardPlacedCombatant =>
+      combatant.placementStatus === 'placed',
+  );
   board.dataset.boardChrome = 'on';
   board.dataset.coordinateLabels = COORDINATE_CONVENTION;
   board.dataset.encounterRows = String(projection.bounds.rows);
@@ -1639,7 +1424,7 @@ export function renderBoardChrome(
   board.style.setProperty('--encounter-rows', String(projection.bounds.rows));
   applyBoardChromeCssMetrics(board, metrics);
   const roomDefault = roomDefaultLightOf(projection);
-  const presence = boardGlyphPresence(cells, projection.combatants);
+  const presence = boardGlyphPresence(cells, placedCombatants);
   const doorCells = new Set(
     cells
       .filter((cell) =>
@@ -1649,14 +1434,14 @@ export function renderBoardChrome(
   );
   board.append(
     coordinateLabels(projection.bounds, tilePx),
-    tokenIdentityUnderlay(projection.combatants, projection.bounds, tilePx),
-    tokenChrome(projection.combatants, projection.bounds, mode, doorCells, tilePx),
+    tokenIdentityUnderlay(placedCombatants, projection.bounds, tilePx),
+    tokenChrome(placedCombatants, projection.bounds, mode, doorCells, tilePx),
     legend(
       legendEntriesFor(mode, roomDefault, presence),
       mode,
       roomDefault,
       projection.worldObjects ?? [],
-      projection.combatants,
+      placedCombatants,
       snapshotMode,
       tilePx,
     ),

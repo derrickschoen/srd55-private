@@ -1,8 +1,8 @@
 import type { GridCell } from './grid';
-import { persistentAreaContains, type PersistentArea } from './persistent-areas';
+import { persistentAreaTouchesSpace, type PersistentArea } from './persistent-areas';
 import type { CombatantId, EncounterEffectId, PersistentAreaId } from './values';
 
-export const CONCENTRATION_INTEL_POLICY = 'concentration-intel-v1' as const;
+export const CONCENTRATION_INTEL_POLICY = 'concentration-intel-v2' as const;
 
 export type ConcentrationSubject =
   | {
@@ -31,13 +31,13 @@ export type ConcentrationDamageInput =
 export interface RepresentedZone {
   readonly area: PersistentArea;
   /** Required for an anchored area; fixed areas intentionally use null. */
-  readonly anchorCell: GridCell | null;
+  readonly anchorCells: readonly GridCell[] | null;
 }
 
 export interface StatedPositionChange {
   readonly combatantId: CombatantId;
-  readonly from: GridCell;
-  readonly to: GridCell;
+  readonly from: readonly [GridCell, ...GridCell[]];
+  readonly to: readonly [GridCell, ...GridCell[]];
 }
 
 export interface RepresentedZonePositions {
@@ -189,7 +189,7 @@ function concentrationStateVerdict(
 }
 
 function zoneDelta(zone: RepresentedZone, positions: RepresentedZonePositions): ZoneMembershipDelta {
-  if (zone.area.origin.kind !== 'fixed' && zone.anchorCell === null) {
+  if (zone.area.origin.kind !== 'fixed' && zone.anchorCells === null) {
     return {
       status: 'unresolved', areaId: zone.area.id, reason: 'zone_anchor_position_not_represented',
     };
@@ -197,10 +197,10 @@ function zoneDelta(zone: RepresentedZone, positions: RepresentedZonePositions): 
   const membersBefore: CombatantId[] = [];
   const membersAfter: CombatantId[] = [];
   for (const movement of positions.movements) {
-    if (persistentAreaContains(zone.area, movement.from, zone.anchorCell, positions.grid)) {
+    if (persistentAreaTouchesSpace(zone.area, movement.from, zone.anchorCells, positions.grid)) {
       membersBefore.push(movement.combatantId);
     }
-    if (persistentAreaContains(zone.area, movement.to, zone.anchorCell, positions.grid)) {
+    if (persistentAreaTouchesSpace(zone.area, movement.to, zone.anchorCells, positions.grid)) {
       membersAfter.push(movement.combatantId);
     }
   }

@@ -1,6 +1,5 @@
 import type { ConditionName } from '../../combat/conditions';
 import { combatantsAreAllies } from '../../combat/allies';
-import { gridDistance } from '../../combat/grid';
 import {
   evaluateTacticalAttack,
   type TacticalAttackEvaluation,
@@ -8,7 +7,7 @@ import {
 import type { MonsterLegendaryAction } from '../../combat/statblock';
 import type { EncounterState } from '../../combat/encounter';
 import type { CombatantId } from '../../combat/values';
-import { engineTacticalAttackInput } from '../engine-query-port';
+import { canonicalEngineQueryPort, engineTacticalAttackInput } from '../engine-query-port';
 import type { EncounterTimelineProjection } from '../session-timeline';
 import {
   intelPolicyVersion,
@@ -20,7 +19,7 @@ import {
   type UnresolvedIntel,
 } from './contracts';
 
-export const LEGENDARY_WINDOWS_POLICY = intelPolicyVersion('legendary-windows-v1');
+export const LEGENDARY_WINDOWS_POLICY = intelPolicyVersion('legendary-windows-v2');
 
 /** Always ten presentation tokens, so the always-on form remains within M4's 8–16-token budget. */
 export type CompactLegendaryWindowSummary = readonly [
@@ -197,7 +196,8 @@ function nearestLivingEnemy(state: EncounterState, actor: CombatantId): Combatan
       const leftPosition = state.tokens.find((token) => token.combatantId === left.profile.id)?.position;
       const rightPosition = state.tokens.find((token) => token.combatantId === right.profile.id)?.position;
       if (leftPosition === undefined || rightPosition === undefined) return 0;
-      return gridDistance(origin, leftPosition) - gridDistance(origin, rightPosition) ||
+      return (canonicalEngineQueryPort.spaceDistance(state, actor, left.profile.id) ?? Number.POSITIVE_INFINITY) -
+        (canonicalEngineQueryPort.spaceDistance(state, actor, right.profile.id) ?? Number.POSITIVE_INFINITY) ||
         String(left.profile.id).localeCompare(String(right.profile.id));
     })[0]?.profile.id ?? null;
 }

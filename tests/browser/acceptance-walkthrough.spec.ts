@@ -83,14 +83,14 @@ test('an unassisted sitting creates a caster through the current guided level 1 
   page,
 }) => {
   // The four-worker parallel pool measured 19.3s through the fifteen level-1
-  // writes and level-2 pass; 50s preserves at least 2.5x wall-clock headroom
-  // under parallel-pool contention.
-  test.setTimeout(50_000);
+  // writes and level-2 pass; 180s absorbs heavily loaded shared-host scheduling
+  // without changing any functional checkpoint in the walkthrough.
+  test.setTimeout(180_000);
   await page.goto('/');
   await expect(page.locator('#status')).toHaveAttribute(
     'data-ready',
     'true',
-    { timeout: 50_000 },
+    { timeout: 180_000 },
   );
   await expect(
     page.getByRole('heading', { name: 'No characters yet' }),

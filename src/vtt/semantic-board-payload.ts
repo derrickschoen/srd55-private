@@ -1,5 +1,5 @@
 import { canonicalJson } from '../commands/canonical-json';
-import { combatantConditions } from '../combat/combat-rules';
+import { combatantConditions, combatantSpace } from '../combat/combat-rules';
 import type { EncounterState } from '../combat/encounter';
 import type { GridCell } from '../combat/grid';
 import { persistentAreaContains } from '../combat/persistent-areas';
@@ -231,6 +231,14 @@ function gridDistanceFeet(left: GridCell, right: GridCell): number {
   ) * 5;
 }
 
+function minimumFootprintDistanceFeet(
+  left: readonly [GridCell, ...GridCell[]],
+  right: readonly [GridCell, ...GridCell[]],
+): number {
+  return Math.min(...left.flatMap((leftCell) =>
+    right.map((rightCell) => gridDistanceFeet(leftCell, rightCell))));
+}
+
 function encounterCells(state: EncounterState): readonly GridCell[] {
   const cells: GridCell[] = [];
   for (let row = 0; row < state.bounds.rows; row += 1) {
@@ -299,8 +307,12 @@ export function projectEngineSemanticBoard(
         level: region.level,
       })),
       combatants: state.combatants.flatMap((combatant) => {
+        if (state.adjudicationPending.some((entry) => entry.combatant === combatant.profile.id)) return [];
         const position = positions.get(combatant.profile.id);
         if (position === undefined) return [];
+        const token = state.tokens.find((candidate) => candidate.combatantId === combatant.profile.id);
+        if (token === undefined) throw new Error('Placed semantic-board combatant has no placement mode.');
+        const space = combatantSpace(state, combatant.profile.id);
         const maximum = enginePlanningHitPointMaximum(state, combatant.profile.id);
         const hitPoints = enginePlanningHitPoints(state, combatant.profile.id);
         return [{
@@ -321,8 +333,14 @@ export function projectEngineSemanticBoard(
               },
           hiddenFromPlayers: hidden.has(combatant.profile.id),
           conditions: combatantConditions(state, combatant.profile.id)
-            .map((condition) => condition.name)
+            .map((condition) => condition.name === 'Exhaustion'
+              ? `${condition.name} ${String(condition.level)}`
+              : condition.name)
             .sort((left, right) => left.localeCompare(right)),
+          placementStatus: 'placed' as const,
+          effectiveSize: space.actualSize,
+          placementMode: structuredClone(token.placementMode),
+          footprint: space.cells.map((cell) => ({ ...cell })) as [GridCell, ...GridCell[]],
         }];
       }),
       foggedCells: state.foggedCells.map((cell) => ({ ...cell })),
@@ -355,7 +373,10 @@ export function semanticBoardPayload(
 ): SemanticBoardPayload {
   const audience = options.audience ?? projection.audience;
   const board = projection.board;
-  const orderedCombatants = [...board.combatants].sort(
+  const orderedCombatants = board.combatants.filter(
+    (combatant): combatant is Extract<typeof combatant, { readonly placementStatus: 'placed' }> =>
+      combatant.placementStatus === 'placed',
+  ).sort(
     (left, right) =>
       left.position.row - right.position.row ||
       left.position.column - right.position.column ||
@@ -372,7 +393,7 @@ export function semanticBoardPayload(
       name: combatant.name,
       side: combatant.kind === 'player_character' ? 'party' : 'foe',
       cell: redactPosition ? null : semanticCell(combatant.position),
-      footprint: redactPosition ? [] : [semanticCell(combatant.position)],
+      footprint: redactPosition ? [] : combatant.footprint.map(semanticCell),
       hp_band: audience === 'player' ? 'unknown' : hitPointBand(combatant.hitPointBand),
       conditions: redactPosition
         ? []
@@ -442,7 +463,7 @@ export function semanticBoardPayload(
     for (let secondIndex = firstIndex + 1; secondIndex < spatialCombatants.length; secondIndex += 1) {
       const second = spatialCombatants[secondIndex];
       if (second === undefined) continue;
-      if (gridDistanceFeet(first.position, second.position) <= 5) {
+      if (minimumFootprintDistanceFeet(first.footprint, second.footprint) <= 5) {
         adjacencyPairs.push({ first_id: String(first.id), second_id: String(second.id) });
       }
     }
@@ -456,14 +477,14 @@ export function semanticBoardPayload(
       throw new Error(`Semantic board creature ${String(combatant.id)} has no encounter rules.`);
     const hostileDistances = spatialCombatants
       .filter((target) => target.kind !== combatant.kind)
-      .map((target) => gridDistanceFeet(combatant.position, target.position));
+      .map((target) => minimumFootprintDistanceFeet(combatant.footprint, target.footprint));
     return {
       id: String(combatant.id),
       reach_feet: reach,
       creatures_in_reach: spatialCombatants
         .filter((target) =>
           target.id !== combatant.id &&
-          gridDistanceFeet(combatant.position, target.position) <= reach)
+          minimumFootprintDistanceFeet(combatant.footprint, target.footprint) <= reach)
         .map((target) => String(target.id)),
       nearest_hostile_distance_feet: hostileDistances.length === 0
         ? null

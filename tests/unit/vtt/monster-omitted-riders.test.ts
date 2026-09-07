@@ -27,10 +27,13 @@ function encounter(statblock: MonsterStatblock): EncounterState {
     tokenId: `token:${String(statblock.id)}`,
   });
   const target = playerProfile(`target-${String(statblock.id)}`, { hitPoints: 500, initiativeBonus: -100 });
+  const sideCells = actor.rules.sizeCategory === 'Gargantuan' ? 4
+    : actor.rules.sizeCategory === 'Huge' ? 3
+      : actor.rules.sizeCategory === 'Large' ? 2 : 1;
   return freshMonsterPlanningState(createEncounter({
     bounds: { columns: 20, rows: 10 },
     combatants: [actor, target],
-    tokens: [placedToken(actor, 1, 1), placedToken(target, 2, 1)],
+    tokens: [placedToken(actor, 1, 1), placedToken(target, sideCells + 1, 1)],
   }));
 }
 

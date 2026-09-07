@@ -1,4 +1,4 @@
-import type { Ability } from '../domain/enums';
+import { creatureSizes, type Ability, type KnownCreatureSize } from '../domain/enums';
 import { combatantFaction } from './allies';
 import type { CombatRulesProfile } from './combatant';
 import {
@@ -8,6 +8,15 @@ import {
 } from './conditions';
 import type { EncounterState, EncounterCombatantState } from './encounter';
 import { EncounterRuleError } from './encounter-rule-error';
+import {
+  applySizeSteps,
+  creatureSpace,
+  effectSequence,
+  placementFromSerialized,
+  sizedCombatantState,
+  type CreatureSpace,
+} from './creature-space';
+import type { GridCell } from './grid';
 import type { EncounterEffect } from './effects';
 import { declaredMonsterTraits } from './monster-traits';
 import type { RollMode } from './saving-throw-outcomes';
@@ -30,6 +39,67 @@ export function effectiveCombatRules(
   return subject.wildShape === undefined
     ? subject.profile.rules
     : wildShapeRulesLens(subject.profile.rules, subject.wildShape);
+}
+
+export class CreatureSizeRuleError extends EncounterRuleError {
+  override readonly name = 'CreatureSizeRuleError' as const;
+
+  constructor(
+    readonly code: 'mechanical_size_required' | 'placement_size_mismatch' | 'no_legal_anchor',
+    readonly combatantId: CombatantId,
+  ) {
+    super('validation', `${String(combatantId)}: ${code}`);
+  }
+}
+
+/** The sole encounter-state lens for sourced/replacement/effect-derived size. */
+export function effectiveCreatureSize(state: EncounterState, id: CombatantId): KnownCreatureSize {
+  const rules = effectiveCombatRules(state, id);
+  if (rules.sizeCategory === undefined) {
+    throw new CreatureSizeRuleError('mechanical_size_required', id);
+  }
+  const operations = state.effects.flatMap((effect) => {
+    if (!effect.targets.includes(id) || effect.payload.kind !== 'size_alteration' ||
+      !('delta' in effect.payload) || !('appliedSequence' in effect.payload)) return [];
+    const delta = effect.payload.delta;
+    const sequence = effect.payload.appliedSequence;
+    if ((delta !== 1 && delta !== -1) || typeof sequence !== 'number') return [];
+    const operation: Parameters<typeof applySizeSteps>[1][number] = {
+      delta,
+      appliedSequence: effectSequence(sequence),
+    };
+    return [operation];
+  });
+  return applySizeSteps(rules.sizeCategory, operations);
+}
+
+/** Canonical relation helper. Normal footprint cells are always derived. */
+export function combatantSpace(
+  state: EncounterState,
+  id: CombatantId,
+): CreatureSpace<KnownCreatureSize> {
+  const size = effectiveCreatureSize(state, id);
+  const sized = sizedCombatantState(size);
+  const placed = state.tokens.find((candidate) => candidate.combatantId === id);
+  if (placed === undefined) throw new CreatureSizeRuleError('mechanical_size_required', id);
+  if (placed.placementMode.actual !== size) {
+    throw new CreatureSizeRuleError('placement_size_mismatch', id);
+  }
+  return creatureSpace(sized, placementFromSerialized(sized, {
+    anchor: placed.position,
+    mode: placed.placementMode,
+  }));
+}
+
+export function combatantSpaceAt(state: EncounterState, id: CombatantId, anchor: GridCell) {
+  const size = effectiveCreatureSize(state, id);
+  const sized = sizedCombatantState(size);
+  const current = state.tokens.find((candidate) => candidate.combatantId === id);
+  if (current === undefined) throw new CreatureSizeRuleError('mechanical_size_required', id);
+  return creatureSpace(sized, placementFromSerialized(sized, {
+    anchor,
+    mode: current.placementMode,
+  }));
 }
 
 function appliedConditions(effect: EncounterEffect): readonly AppliedCondition[] {

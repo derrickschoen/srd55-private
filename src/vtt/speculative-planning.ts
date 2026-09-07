@@ -1,13 +1,13 @@
 import { canonicalJson } from '../commands/canonical-json';
 import { combatantsAreAllies } from '../combat/allies';
 import {
+  combatantSpace,
   combatantConditions,
   type EncounterState,
   type LifeState,
 } from '../combat/encounter';
 import { isIncapacitated } from '../combat/conditions';
-import { gridDistance } from '../combat/grid';
-import { persistentAreaContains } from '../combat/persistent-areas';
+import { persistentAreaTouchesSpace } from '../combat/persistent-areas';
 import type { CombatantId } from '../combat/values';
 import { sha256 } from '../crypto/sha256';
 import {
@@ -125,10 +125,9 @@ export function evaluateScenarioFact(
     case 'adjacency_is': {
       const subjects = pair(state, atom.left, atom.right, queries);
       if (isEvaluation(subjects)) return subjects;
-      const left = queries.tokenPosition(state, subjects.left);
-      const right = queries.tokenPosition(state, subjects.right);
-      if (left === null || right === null) return failure('TOKEN_UNAVAILABLE');
-      return compared(gridDistance(left, right) <= 5, atom.value);
+      const separation = queries.spaceDistance(state, subjects.left, subjects.right);
+      if (separation === null) return failure('TOKEN_UNAVAILABLE');
+      return compared(separation <= 5, atom.value);
     }
     case 'within_action_reach_is': {
       const subjects = pair(state, atom.actor, atom.target, queries);
@@ -396,12 +395,11 @@ export function extractProposalFactDependencies(
         });
       }
     }
-    const actorPosition = queries.tokenPosition(state, option.actorId);
-    const targetPosition = queries.tokenPosition(state, targetId);
-    if (actorPosition !== null && targetPosition !== null) {
+    const separation = queries.spaceDistance(state, option.actorId, targetId);
+    if (separation !== null) {
       addDependency(entries, option.actorId, {
         kind: 'adjacency_is', left: actorRef, right: targetRef,
-        value: gridDistance(actorPosition, targetPosition) <= 5,
+        value: separation <= 5,
       });
     }
     for (const slot of option.actionSlots) {
@@ -525,10 +523,12 @@ function movedState(
     ...moved,
     persistentAreas: moved.persistentAreas.map((area) => {
       const origin = area.origin;
-      const anchor = origin.kind === 'anchored'
-        ? moved.tokens.find((token) => token.combatantId === origin.combatant)?.position ?? null
+      const anchorCells = origin.kind === 'anchored'
+        ? moved.tokens.some((token) => token.combatantId === origin.combatant)
+          ? combatantSpace(moved, origin.combatant).cells
+          : null
         : origin.kind === 'anchored_to_object'
-          ? moved.worldObjects.find((object) => object.id === origin.object)?.position ?? null
+          ? moved.worldObjects.find((object) => object.id === origin.object)?.footprint ?? null
           : null;
       const eligible = (subjectId: CombatantId): boolean => {
         switch (area.targetFilter.kind) {
@@ -542,7 +542,12 @@ function movedState(
         .filter((subject) => subject.life !== 'dead' && eligible(subject.profile.id))
         .flatMap((subject) => {
           const token = moved.tokens.find((candidate) => candidate.combatantId === subject.profile.id);
-          return token !== undefined && persistentAreaContains(area, token.position, anchor, moved)
+          return token !== undefined && persistentAreaTouchesSpace(
+            area,
+            combatantSpace(moved, subject.profile.id).cells,
+            anchorCells,
+            moved,
+          )
             ? [subject.profile.id]
             : [];
         })

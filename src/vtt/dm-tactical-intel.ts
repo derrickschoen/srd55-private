@@ -20,9 +20,9 @@ import { ENGINE_FAILURE_MODES_POLICY } from './engine-failure-modes';
 import { legalMultiattackCombinations } from './turn-option-registry';
 import type { RendererNullFields } from './renderer-profile';
 
-export const DM_TURN_INTEL_POLICY = 'dm-turn-intel-v1' as const;
-export const DM_INTEL_QUERY_POLICY = 'dm-intel-query-v1' as const;
-export const DM_INTEL_CAPTURE_POLICY = 'dm-intel-capture-v1' as const;
+export const DM_TURN_INTEL_POLICY = 'dm-turn-intel-v2-creature-space' as const;
+export const DM_INTEL_QUERY_POLICY = 'dm-intel-query-v2-creature-space' as const;
+export const DM_INTEL_CAPTURE_POLICY = 'dm-intel-capture-v2-creature-space' as const;
 
 export type DmIntelRollMode = 'normal' | 'advantage' | 'disadvantage' | 'mixed' | 'unresolved';
 

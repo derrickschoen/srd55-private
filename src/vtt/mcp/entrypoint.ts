@@ -6,6 +6,8 @@ import { readFile, realpath } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { canonicalJson } from '../../commands/canonical-json';
 import type { EncounterState } from '../../combat/encounter';
+import { creatureSizes } from '../../domain/enums';
+import { BUNDLED_MONSTER_ROSTER } from '../../combat/statblocks/roster';
 import {
   encounterBranchId,
   encounterSessionId,
@@ -48,7 +50,8 @@ import {
   type TurnContextDeltaBase,
 } from './engine-server';
 import { jsonRpcParseError, type JsonRpcResponse, type McpHandler } from './handler';
-import type { McpImageContentBlock } from './handler';
+import type { McpImageContentBlock, McpTextContentBlock } from './handler';
+import { engineUiFeedbackSchema, type EngineUiFeedback } from './schemas';
 import {
   projectEngineSemanticBoard,
   type SemanticBoardTruncationClass,
@@ -152,6 +155,39 @@ export interface EngineMcpRuntime {
   readonly speculativePlans: readonly QueuedSpeculativePlanEnvelope[];
   readonly narrations: readonly NarrationEnvelope[];
   readonly adjudications: readonly AdjudicationEnvelope[];
+  readonly uiFeedback: readonly EngineUiFeedback[];
+}
+
+export function engineMcpUiFeedbackSpoolPath(proposalSpoolPath: string): string {
+  return `${proposalSpoolPath}.ui-feedback.jsonl`;
+}
+
+function nonemptySpoolLines(path: string): readonly string[] {
+  try {
+    return readFileSync(path, 'utf8').split('\n').filter((line) => line.trim().length > 0);
+  } catch (error) {
+    if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT') return [];
+    throw error;
+  }
+}
+
+function launcherHasAcceptedRoundDecision(manifest: EngineMcpLauncherManifest): boolean {
+  const lines = nonemptySpoolLines(manifest.proposalSpoolPath);
+  for (const line of lines) {
+    const value: unknown = JSON.parse(line);
+    const proposal = record(value, 'proposal spool entry');
+    if (proposal['kind'] !== 'round_turn_proposal' || proposal['requestId'] !== manifest.requestId) {
+      throw new TypeError('Proposal spool contains an entry outside the launcher round binding.');
+    }
+  }
+  return lines.length > 0;
+}
+
+function launcherHasUiFeedback(manifest: EngineMcpLauncherManifest): boolean {
+  const lines = nonemptySpoolLines(engineMcpUiFeedbackSpoolPath(manifest.proposalSpoolPath));
+  if (lines.length > 1) throw new TypeError('UI feedback spool contains more than one report for a round.');
+  if (lines[0] !== undefined) engineUiFeedbackSchema.parse(JSON.parse(lines[0]) as unknown);
+  return lines.length === 1;
 }
 
 export interface EngineMcpBoardImageArtifact {
@@ -172,6 +208,11 @@ export interface EngineMcpBoardImageArtifact {
     readonly stateDigest: string;
   };
   readonly chromiumVersion: string;
+  readonly html?: {
+    readonly relativePath: `board-html/${string}/board.html`;
+    readonly sha256: string;
+    readonly bytes: number;
+  };
 }
 
 export interface EngineMcpBoardImageBinding {
@@ -257,6 +298,10 @@ export function createEngineMcpRuntime(
     readonly kbReadCallPhase?: KbReadCallPhase;
     readonly overridePolicy?: OverridePolicy;
     readonly boardImageContent?: McpImageContentBlock;
+    readonly boardHtmlContent?: McpTextContentBlock;
+    readonly onUiFeedback?: (feedback: EngineUiFeedback) => void;
+    readonly roundDecisionAlreadyAccepted?: boolean;
+    readonly uiFeedbackAlreadySubmitted?: boolean;
   } = {},
 ): EngineMcpRuntime {
   const candidates = state.combatants
@@ -274,9 +319,9 @@ export function createEngineMcpRuntime(
   const revision = options.revision ?? 1;
   const phase = options.phase ?? 'initial';
   const correctionNumber = options.correctionNumber ?? (phase === 'correction' ? 1 : 0);
-  if (options.boardImageContent !== undefined &&
+  if ((options.boardImageContent !== undefined || options.boardHtmlContent !== undefined) &&
     (phase === 'speculative' || options.requestKind === 'plan_adjustment')) {
-    throw new TypeError('Board images may bind only to ordinary round-plan MCP launchers.');
+    throw new TypeError('Board artifacts may bind only to ordinary round-plan MCP launchers.');
   }
   let request: EngineCapsuleRequest;
   if (phase === 'speculative') {
@@ -352,6 +397,7 @@ export function createEngineMcpRuntime(
   const speculativePlans: QueuedSpeculativePlanEnvelope[] = [];
   const narrations: NarrationEnvelope[] = [];
   const adjudications: AdjudicationEnvelope[] = [];
+  const uiFeedback: EngineUiFeedback[] = [];
   const application = createEngineMcpApplication({
     state: planningState,
     stateSource: feed,
@@ -369,6 +415,16 @@ export function createEngineMcpRuntime(
     } },
     narration: { append: (envelope) => { narrations.push(envelope); } },
     adjudications: { append: (envelope) => { adjudications.push(envelope); } },
+    ...(options.boardImageContent === undefined ? {} : {
+      uiFeedback: {
+        append: (feedback: EngineUiFeedback) => {
+          uiFeedback.push(structuredClone(feedback));
+          options.onUiFeedback?.(structuredClone(feedback));
+        },
+      },
+      roundDecisionAlreadyAccepted: options.roundDecisionAlreadyAccepted ?? false,
+      uiFeedbackAlreadySubmitted: options.uiFeedbackAlreadySubmitted ?? false,
+    }),
     rules: options.rules ?? { get: () => null },
     ...(options.rendererProfile?.semanticBoard === true ? {
       semanticBoardProjection: projectEngineSemanticBoard(planningState, revision),
@@ -394,9 +450,12 @@ export function createEngineMcpRuntime(
     ...(options.kbReadBudget === undefined ? {} : { kbReadBudget: options.kbReadBudget }),
     ...(options.kbReadCallPhase === undefined ? {} : { kbReadCallPhase: options.kbReadCallPhase }),
     ...(options.overridePolicy === undefined ? {} : { overridePolicy: options.overridePolicy }),
-    ...(options.boardImageContent === undefined ? {} : {
+    ...(options.boardImageContent === undefined && options.boardHtmlContent === undefined ? {} : {
       toolResultContent: ({ name }) => name === 'engine.get_turn_context'
-        ? [options.boardImageContent as McpImageContentBlock]
+        ? [
+            ...(options.boardHtmlContent === undefined ? [] : [options.boardHtmlContent]),
+            ...(options.boardImageContent === undefined ? [] : [options.boardImageContent]),
+          ]
         : [],
     }),
   });
@@ -408,6 +467,7 @@ export function createEngineMcpRuntime(
     speculativePlans,
     narrations,
     adjudications,
+    uiFeedback,
   };
 }
 
@@ -419,13 +479,64 @@ export function handleMcpRequest(state: EncounterState, message: unknown): JsonR
   return createEngineMcpHandler(state).handle(message);
 }
 
-export async function loadArenaFixture(path: string): Promise<EncounterState> {
-  const decoded: unknown = JSON.parse(await readFile(path, 'utf8'));
+export function decodeArenaFixture(decoded: unknown): EncounterState {
   const root = record(decoded, 'arena fixture');
   const encounter = record(root['encounter'], 'arena fixture encounter');
   const state = record(encounter['state'], 'arena fixture encounter state');
   if (!Array.isArray(state['combatants']) || !Array.isArray(state['tokens']) || typeof state['round'] !== 'number') throw new TypeError('Arena fixture encounter state is incomplete.');
-  return state as unknown as EncounterState;
+  const explicitLegacyPlayerSizes: ReadonlyMap<string, (typeof creatureSizes)[number]> = new Map([
+    ['combatant:fighter', 'Medium'],
+    ['combatant:cleric', 'Medium'],
+    ['combatant:wizard', 'Medium'],
+  ] as const);
+  const combatants = state['combatants'].map((value) => {
+    const combatant = record(value, 'arena fixture combatant');
+    const profile = record(combatant['profile'], 'arena fixture combatant profile');
+    const rules = record(profile['rules'], 'arena fixture combatant rules');
+    const sourced = rules['sizeCategory'];
+    const statblockId = String(profile['statblockId']);
+    const sourcedStatblockSize = BUNDLED_MONSTER_ROSTER.find((entry) => entry.id === statblockId)
+      ?.statblock.sourceDetails.classification;
+    const firstStatblockSize = sourcedStatblockSize?.kind === 'present'
+      ? sourcedStatblockSize.value.sizes.find((size) => creatureSizes.includes(size as (typeof creatureSizes)[number]))
+      : undefined;
+    const carried = typeof sourced === 'string' && creatureSizes.includes(sourced as (typeof creatureSizes)[number])
+      ? sourced as (typeof creatureSizes)[number]
+      : explicitLegacyPlayerSizes.get(String(profile['id'])) ?? firstStatblockSize as (typeof creatureSizes)[number] | undefined;
+    if (carried === undefined) throw new TypeError(`Arena fixture combatant ${String(profile['id'])} has no known mechanical size.`);
+    return { ...combatant, profile: { ...profile, rules: { ...rules, sizeCategory: carried } } };
+  });
+  const sizes = new Map(combatants.map((combatant) => {
+    const profile = record(combatant['profile'], 'arena fixture combatant profile');
+    const rules = record(profile['rules'], 'arena fixture combatant rules');
+    return [String(profile['id']), rules['sizeCategory'] as (typeof creatureSizes)[number]] as const;
+  }));
+  const tokens = state['tokens'].map((value) => {
+    const token = record(value, 'arena fixture token');
+    const size = sizes.get(String(token['combatantId']));
+    if (size === undefined) throw new TypeError(`Arena fixture token ${String(token['id'])} has no known mechanical size.`);
+    return { ...token, placementMode: { kind: 'normal' as const, actual: size } };
+  });
+  const environment = record(state['environment'], 'arena fixture environment');
+  return {
+    ...state,
+    combatants,
+    tokens,
+    environment: { ...environment, narrowOpeningRegions: [] },
+    sharedSpaceRelations: [],
+    adjudicationPending: [],
+    observationHistory: Array.isArray(state['observationHistory'])
+      ? structuredClone(state['observationHistory'])
+      : [],
+  } as unknown as EncounterState;
+}
+
+export function decodeArenaFixtureText(text: string): EncounterState {
+  return decodeArenaFixture(JSON.parse(text) as unknown);
+}
+
+export async function loadArenaFixture(path: string): Promise<EncounterState> {
+  return decodeArenaFixtureText(await readFile(path, 'utf8'));
 }
 
 export { freshMonsterPlanningState, projectFutureMonsterTurns } from '../monster-planning-state';
@@ -470,7 +581,7 @@ function isEngineMcpBoardImageBinding(value: unknown): value is EngineMcpBoardIm
     isPositiveSafeInteger(binding['primaryDispatchStartedAtUnixMs']) &&
     Object.keys(artifact).every((key) => [
       'version', 'audience', 'mimeType', 'relativePath', 'sha256', 'bytes', 'width', 'height',
-      'capturedAtUnixMs', 'captureMs', 'source', 'chromiumVersion',
+      'capturedAtUnixMs', 'captureMs', 'source', 'chromiumVersion', 'html',
     ].includes(key)) &&
     artifact['version'] === 'arena-board-image-v1' && artifact['audience'] === 'dm' &&
     artifact['mimeType'] === 'image/png' && typeof sha === 'string' && /^[a-f0-9]{64}$/u.test(sha) &&
@@ -481,6 +592,16 @@ function isEngineMcpBoardImageBinding(value: unknown): value is EngineMcpBoardIm
     typeof artifact['captureMs'] === 'number' && Number.isFinite(artifact['captureMs']) &&
     artifact['captureMs'] >= 0 && typeof artifact['chromiumVersion'] === 'string' &&
     artifact['chromiumVersion'].length > 0 &&
+    (artifact['html'] === undefined || (() => {
+      const value = artifact['html'];
+      if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+      const html = value as Readonly<Record<string, unknown>>;
+      const htmlSha = html['sha256'];
+      return Object.keys(html).every((key) => ['relativePath', 'sha256', 'bytes'].includes(key)) &&
+        typeof htmlSha === 'string' && /^[a-f0-9]{64}$/u.test(htmlSha) &&
+        html['relativePath'] === `board-html/${htmlSha}/board.html` &&
+        isPositiveSafeInteger(html['bytes']);
+    })()) &&
     Object.keys(source).every((key) => ['room', 'round', 'revision', 'stateDigest'].includes(key)) &&
     isPositiveSafeInteger(source['room']) && isPositiveSafeInteger(source['round']) &&
     Number.isSafeInteger(source['revision']) && typeof source['revision'] === 'number' &&
@@ -526,6 +647,45 @@ export async function validatedLauncherBoardImage(
     throw new Error('Board image bytes do not match the launcher metadata.');
   }
   return { type: 'image', mimeType: 'image/png', data: png.toString('base64') };
+}
+
+export async function validatedLauncherBoardHtmlReference(
+  manifest: EngineMcpLauncherManifest,
+  state: EncounterState,
+): Promise<McpTextContentBlock | undefined> {
+  const binding = manifest.boardImage;
+  const html = binding?.artifact.html;
+  if (binding === undefined || html === undefined) return undefined;
+  if (manifest.phase === 'speculative' || manifest.requestKind === 'plan_adjustment') {
+    throw new TypeError('Board HTML binding is forbidden for non-round-plan launchers.');
+  }
+  const sourceDigest = createHash('sha256').update(canonicalJson(state), 'utf8').digest('hex');
+  if (binding.artifact.source.room !== manifest.room ||
+    binding.artifact.source.round !== state.round ||
+    binding.artifact.source.revision !== state.revision ||
+    binding.artifact.source.stateDigest !== sourceDigest) {
+    throw new Error('Board HTML binding is stale for the launcher fixture.');
+  }
+  const root = resolve(binding.artifactRoot);
+  const path = resolve(root, html.relativePath);
+  const inside = relative(root, path);
+  if (inside === '..' || inside.startsWith(`..${sep}`) || isAbsolute(inside)) {
+    throw new Error('Board HTML path escaped its artifact root.');
+  }
+  const [realRoot, realPath] = await Promise.all([realpath(root), realpath(path)]);
+  const realInside = relative(realRoot, realPath);
+  if (realInside === '..' || realInside.startsWith(`..${sep}`) || isAbsolute(realInside)) {
+    throw new Error('Board HTML path resolved outside its artifact root.');
+  }
+  const bytes = await readFile(realPath);
+  if (bytes.byteLength !== html.bytes ||
+    createHash('sha256').update(bytes).digest('hex') !== html.sha256) {
+    throw new Error('Board HTML bytes do not match the launcher metadata.');
+  }
+  return {
+    type: 'text',
+    text: `Screen-reader board HTML: ${realPath} (sha256 ${html.sha256}; ${String(html.bytes)} bytes).`,
+  };
 }
 
 function isLauncherManifest(value: unknown): value is EngineMcpLauncherManifest {
@@ -643,10 +803,11 @@ export async function runEngineMcpEntrypoint(argv: readonly string[] = process.a
   const manifest = await launcherManifest(launcherPath);
   if (manifest !== null) {
     const kbReadBudget = createLauncherKbReadBudget(manifest);
-    const boardImageContent = await validatedLauncherBoardImage(
-      manifest,
-      await loadArenaFixture(manifest.fixturePath),
-    );
+    const state = await loadArenaFixture(manifest.fixturePath);
+    const [boardImageContent, boardHtmlContent] = await Promise.all([
+      validatedLauncherBoardImage(manifest, state),
+      validatedLauncherBoardHtmlReference(manifest, state),
+    ]);
     await runEngineMcpServer(manifest.fixturePath, {
       runId: manifest.runId,
       branchId: manifest.branchId,
@@ -685,6 +846,20 @@ export async function runEngineMcpEntrypoint(argv: readonly string[] = process.a
           : manifest.phase === 'correction' ? 'correction' as const : 'initial' as const,
       }),
       ...(boardImageContent === undefined ? {} : { boardImageContent }),
+      ...(boardHtmlContent === undefined ? {} : { boardHtmlContent }),
+      ...(boardImageContent === undefined ? {} : {
+        roundDecisionAlreadyAccepted: launcherHasAcceptedRoundDecision(manifest),
+        uiFeedbackAlreadySubmitted: launcherHasUiFeedback(manifest),
+      }),
+      ...(boardImageContent === undefined ? {} : {
+        onUiFeedback: (feedback: EngineUiFeedback) => {
+          appendFileSync(
+            engineMcpUiFeedbackSpoolPath(manifest.proposalSpoolPath),
+            `${JSON.stringify(feedback)}\n`,
+            'utf8',
+          );
+        },
+      }),
       onProposal: (proposal) => {
         appendFileSync(manifest.proposalSpoolPath, `${JSON.stringify(proposal)}\n`, 'utf8');
       },

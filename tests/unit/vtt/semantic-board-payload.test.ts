@@ -85,6 +85,7 @@ function fixtureProjection() {
         { id: 'dark', level: 'darkness', cells: [{ column: 4, row: 0 }] },
       ],
       movementRegions: [],
+      narrowOpeningRegions: [],
     },
   });
   const hiddenState = {

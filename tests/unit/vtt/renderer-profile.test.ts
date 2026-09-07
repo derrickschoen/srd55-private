@@ -430,6 +430,6 @@ describe('renderer profile', () => {
       options_per_actor_mean: 2,
       options_per_actor_max: 3,
     });
-    expect(RENDERER_POLICY_VERSION).toBe('turn-context-renderer-v3');
+    expect(RENDERER_POLICY_VERSION).toBe('turn-context-renderer-v4-creature-space');
   });
 });

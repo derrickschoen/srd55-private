@@ -76,7 +76,7 @@ function encounter(
   let state = createEncounter({
     bounds: { columns: 10, rows: 2 },
     combatants: [caster, ...sizedTargets],
-    tokens: [placedToken(caster, 0), ...sizedTargets.map((target, index) => placedToken(target, index + 2))],
+    tokens: [placedToken(caster, 0), ...sizedTargets.map((target, index) => placedToken(target, index * 2 + 2))],
     contentPacks: [loadedSpell(operation, options)],
   });
   state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;

@@ -19,6 +19,7 @@ import type {
 import { canonicalEngineQueryPort, monsterActions, monsterBonusActions } from './engine-query-port';
 import {
   availableEngineActorOptions,
+  mechanicsWithChoice,
   resolveEngineActorOption,
   type EngineOfferableOption,
   type EngineTurnProposal,
@@ -607,11 +608,11 @@ export class EngineRoundSession {
       let appliedBranch: EngineAppliedProposalBranch;
       let refusalCodes: string[];
       if (primary.valid) {
-        mechanics = primary.mechanics;
+        mechanics = mechanicsWithChoice(primary.mechanics, entry.proposal.activationChoice);
         appliedBranch = 'primary';
         refusalCodes = [];
       } else if (fallback?.valid === true) {
-        mechanics = fallback.mechanics;
+        mechanics = mechanicsWithChoice(fallback.mechanics, entry.proposal.activationChoice);
         appliedBranch = 'fallback';
         refusalCodes = [primary.code];
       } else {

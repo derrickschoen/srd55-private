@@ -1,27 +1,26 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
+import {
+  boardChromeDimensions,
+  type BoardChromeTilePx,
+} from '../../src/vtt/board-chrome-layout';
 import { expect, test } from './fixtures/parallel-test';
 
-const SNAPSHOT_LAYOUT = Object.freeze({
-  border: 2,
-  coordinateGutter: 24,
-  tile: 128,
-  legendGap: 8,
-  legendBase: 120,
-  sectionHeading: 22,
-  rosterRow: 24,
-  objectRow: 40,
-});
+const CAPTURE_TILE_PX = 128 satisfies BoardChromeTilePx;
 
 function expectedBoardDimensions(
   bounds: { readonly columns: number; readonly rows: number },
   content: { readonly combatants: number; readonly objects: number },
+  tilePx: BoardChromeTilePx = CAPTURE_TILE_PX,
 ): string {
-  const width = 2 * SNAPSHOT_LAYOUT.border + 2 * SNAPSHOT_LAYOUT.coordinateGutter + bounds.columns * SNAPSHOT_LAYOUT.tile;
-  const roster = content.combatants === 0 ? 0 : SNAPSHOT_LAYOUT.sectionHeading + content.combatants * SNAPSHOT_LAYOUT.rosterRow;
-  const objects = content.objects === 0 ? 0 : SNAPSHOT_LAYOUT.sectionHeading + content.objects * SNAPSHOT_LAYOUT.objectRow;
-  const height = 2 * SNAPSHOT_LAYOUT.border + 2 * SNAPSHOT_LAYOUT.coordinateGutter + bounds.rows * SNAPSHOT_LAYOUT.tile +
-    SNAPSHOT_LAYOUT.legendGap + SNAPSHOT_LAYOUT.legendBase + roster + objects;
+  const { width, height } = boardChromeDimensions(
+    bounds,
+    {
+      combatants: Array.from({ length: content.combatants }, () => ({ name: 'CREATURE' })),
+      objects: Array.from({ length: content.objects }, () => ({ kind: 'object' })),
+    },
+    tilePx,
+  );
   return `${String(width)}x${String(height)}`;
 }
 
@@ -49,6 +48,7 @@ interface BrowserCheckResult {
   readonly staleRejected: boolean;
   readonly identityRejected: boolean;
   readonly movedDigestChanged: boolean;
+  readonly manifestCarriesHtml: boolean;
 }
 
 async function runBrowserCheck(outputDirectory: string): Promise<BrowserCheckResult> {
@@ -78,6 +78,11 @@ async function runBrowserCheck(outputDirectory: string): Promise<BrowserCheckRes
 }
 
 test('captures the full production DM board deterministically through durable save upload/load', async () => {
+  expect(expectedBoardDimensions({ columns: 17, rows: 13 }, { combatants: 0, objects: 0 }, 64))
+    .toBe('1140x1012');
+  expect(expectedBoardDimensions({ columns: 24, rows: 15 }, { combatants: 0, objects: 0 }, 64))
+    .toBe('1588x1140');
+
   const outputDirectory = resolve(
     `dnd-slim-runs/board-snapshot-browser-${String(process.pid)}-images`,
   );
@@ -91,6 +96,7 @@ test('captures the full production DM board deterministically through durable sa
   expect(result.staleRejected).toBe(true);
   expect(result.identityRejected).toBe(true);
   expect(result.movedDigestChanged).toBe(true);
+  expect(result.manifestCarriesHtml).toBe(true);
   expect(result.chromiumVersion).not.toBe('');
   expect(result.playwrightVersion).toBe('1.61.1');
 });

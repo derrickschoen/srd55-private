@@ -14,9 +14,8 @@ import {
 } from '../../../src/vtt/intel/opportunity-cost';
 import { renderMovementIntelRow, type MovementIntelRow } from '../../../src/vtt/intel/movement-options';
 import { freshMonsterPlanningState } from '../../../src/vtt/monster-planning-state';
-import type { GeneratedRoom } from '../../../src/vtt/room-generator';
 import { engineSchemaInternals, schemaViolations } from '../../../src/vtt/mcp/schemas';
-import { createEngineMcpRuntime } from '../../../src/vtt/mcp/entrypoint';
+import { createEngineMcpRuntime, decodeArenaFixtureText } from '../../../src/vtt/mcp/entrypoint';
 import { declareTestInputs } from '../../helpers/test-inputs';
 
 const inputs = declareTestInputs({
@@ -43,17 +42,17 @@ interface FailedRoundEntry {
 }
 
 function frozenState(): EncounterState {
-  const generated = JSON.parse(inputs.fixtures.readText(
+  const state = decodeArenaFixtureText(inputs.fixtures.readText(
     'tests/fixtures/arena-basis-hard/seed-5117009.json',
-  )) as GeneratedRoom;
-  return freshMonsterPlanningState(generated.encounter.state);
+  ));
+  return freshMonsterPlanningState(state);
 }
 
 function room8State(): EncounterState {
-  const generated = JSON.parse(inputs.fixtures.readText(
+  const state = decodeArenaFixtureText(inputs.fixtures.readText(
     'tests/fixtures/room8-repro/seed-5117008.SIMULATED.json',
-  )) as GeneratedRoom;
-  return freshMonsterPlanningState(generated.encounter.state);
+  ));
+  return freshMonsterPlanningState(state);
 }
 
 function record(value: unknown): Readonly<Record<string, unknown>> {

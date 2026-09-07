@@ -14,6 +14,8 @@
     "check:command-outcomes": "scripts/check-command-outcomes.sh",
     "typecheck:fast": "tsgo -p tsconfig.app.json --noEmit && tsgo -p tsconfig.node.json --noEmit",
     "test": "vitest run --configLoader runner",
+    "test:gate": "node tools/gate-vitest.mjs",
+    "test:gate:browser": "node tools/gate-playwright.mjs",
     "test:affected": "node scripts/test-affected.mjs",
     "census:modules": "node scripts/module-state-census.mjs",
     "test:shuffled": "vitest run --configLoader runner --sequence.shuffle --sequence.seed=20260825",
@@ -33,7 +35,7 @@
     "db:migrations": "vitest run --configLoader runner tests/unit/db/migrations.test.ts",
     "db:contracts": "vite-node scripts/build-row-contracts.ts",
     "schema:content-pack": "vite-node tools/generate-content-pack-schema.ts",
-    "schema:engine-mcp": "vite-node tools/generate-engine-mcp-schema.ts",
+    "schema:engine-mcp": "vite-node tools/generate-engine-mcp-schemas.ts",
     "attribute:round-input": "vite-node tools/attribute-round-input.ts --",
     "rl:extract-sft": "vite-node tools/rl/extract-sft.ts --",
     "rl:generate-data": "vite-node tools/rl/generate-data.ts --"

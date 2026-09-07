@@ -253,6 +253,22 @@ export function persistentAreaContains(
   return affectedCellsAmong(grid, template, [cell]).length === 1;
 }
 
+/** Footprint-aware membership; anchored emanations radiate from every source cell. */
+export function persistentAreaTouchesSpace(
+  area: PersistentArea,
+  targetCells: readonly GridCell[],
+  anchorCells: readonly GridCell[] | null,
+  grid: { readonly bounds: { readonly columns: number; readonly rows: number }; readonly blockedCells: readonly GridCell[] },
+): boolean {
+  if (area.origin.kind === 'fixed') {
+    return targetCells.some((target) => persistentAreaContains(area, target, null, grid));
+  }
+  if (anchorCells === null || anchorCells.length === 0) return false;
+  const sourceCells = area.shape.kind === 'emanation' ? anchorCells : [anchorCells[0] as GridCell];
+  return sourceCells.some((anchor) =>
+    targetCells.some((target) => persistentAreaContains(area, target, anchor, grid)));
+}
+
 export function feetShape(template: AreaTemplate): PersistentAreaShape {
   switch (template.shape) {
     case 'sphere': return { kind: 'sphere', radius: template.template.radius };

@@ -123,9 +123,10 @@ describe('canonical tactical evaluator', () => {
       },
     })).toEqual([{ mode: 'advantage', reason: 'bloodied_frenzy_advantage' }]);
 
-    const tough = monsterCombatantProfile(BERSERKER, {
+    const toughBase = monsterCombatantProfile(BERSERKER, {
       combatantId: 'combatant:bloodied-berserker', tokenId: 'token:bloodied-berserker',
     });
+    const tough = { ...toughBase, rules: { ...toughBase.rules, sizeCategory: 'Medium' as const } };
     const opponent = playerProfile('bloodied-opponent');
     const initial = createEncounter({
       bounds: { columns: 2, rows: 1 }, combatants: [tough, opponent],

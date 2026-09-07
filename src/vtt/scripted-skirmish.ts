@@ -7,6 +7,7 @@ import {
 } from '../combat/encounter';
 import type { EffectApplication } from '../combat/effects';
 import type { EncounterCommand } from '../combat/events';
+import { encounterMovementWorld } from '../combat/encounter-movement-world';
 import type { GridCell } from '../combat/grid';
 import { mulberry32, type SerializableRng } from '../combat/random';
 import { feetPoint } from '../combat/templates';
@@ -152,14 +153,13 @@ function concentrationCondition(source: CombatantId, target: CombatantId): Encou
 function adjacentOpenCell(state: EncounterState, actor: CombatantId): GridCell | null {
   const token = state.tokens.find((candidate) => candidate.combatantId === actor);
   if (token === undefined) return null;
+  const world = encounterMovementWorld(state);
   for (const delta of [[1, 0], [0, 1], [-1, 0], [0, -1]] as const) {
     const cell = { column: token.position.column + delta[0], row: token.position.row + delta[1] };
-    if (
-      cell.column >= 0 && cell.column < state.bounds.columns &&
-      cell.row >= 0 && cell.row < state.bounds.rows &&
-      !state.blockedCells.some((blocked) => blocked.column === cell.column && blocked.row === cell.row) &&
-      !state.tokens.some((occupied) => occupied.position.column === cell.column && occupied.position.row === cell.row)
-    ) {
+    const traversal = world.canTraverseStep(actor, token.position, cell)
+      ? world.traversal(actor, token.position, cell)
+      : { kind: 'blocked' as const };
+    if (traversal.kind === 'enterable' && traversal.canEnd) {
       return cell;
     }
   }
@@ -596,7 +596,7 @@ export function recordScriptedReferenceSkirmish(
     transcripts: recorder.records(),
     build: { buildId: 'vtt-phase2-increment-10', commit: 'supervisor-owned' },
     protocolVersions: ['dm-bridge:2', 'encounter-package:1', 'vtt-session:2'],
-    licensingVersions: ['SRD-5.2.1-CC-BY-4.0', 'starter-art-CC-BY-4.0'],
+    licensingVersions: ['SRD-5.2.1-CC-BY-4.0', 'generated-art-CC0-1.0'],
     gapReports: [],
   });
   return {

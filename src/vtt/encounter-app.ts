@@ -5,10 +5,13 @@ import { OVERLAY_ASSETS } from '../assets/art-sets';
 import { OBJECT_GLYPH, type BoardGlyphMode } from '../assets/board-glyphs';
 import { renderPixelGlyph } from '../assets/pixel-font';
 import {
+  CHROME_TILE_PX,
   OBJECT_LABEL_STYLE,
   boardChromeMetrics,
+  creatureBadgeLayouts,
   renderBoardChrome,
   type BoardChromeTilePx,
+  type CreatureBadgeLayout,
 } from './board-chrome';
 import './styles.css';
 import { HumanController, type ControllerRequest } from '../combat/controllers';
@@ -17,6 +20,7 @@ import {
   MOVEMENT_PATH_DANGER_KINDS,
   REACTION_KINDS,
   type EncounterPhase,
+  type MovementPathDangerKind,
   type PendingDecision,
 } from '../combat/encounter';
 import { HIDDEN_ROLL_CATEGORIES, type HiddenRollCategory } from '../combat/roll-visibility';
@@ -29,13 +33,16 @@ import {
 } from './dm-encounter-host';
 import {
   encounterBoardRenderModel,
+  encounterBoardTokenRenderModels,
   type EncounterBoardMechanicalLayer,
   type EncounterBoardProjectionShape,
+  type EncounterBoardTokenModel,
 } from './encounter-board';
 import { encounterArtForBoard } from './encounter-art-selection';
 import type {
   DmBoardProjection,
   DmMovementPathPreview,
+  DmPendingPlacementRecovery,
   PlayerBoardProjection,
   ProjectedControllerRequest,
 } from './encounter-projections';
@@ -52,9 +59,18 @@ import {
 import {
   SaveManagerController,
   buildSaveManagerViewModel,
+  downloadBrowserFile,
   type SaveManagerEntry,
   type SaveManagerViewModel,
 } from './save-manager';
+import {
+  readAccessibleBoardViewMode,
+  renderAccessibleBoard,
+  serializeAccessibleBoard,
+  writeAccessibleBoardViewMode,
+  type AccessibleBoardContext,
+  type AccessibleBoardViewMode,
+} from './accessible-board';
 import { decodeSavedSessionFingerprint } from './session-persistence';
 import type { EncounterSeed } from './session-seed';
 import type { StoredCharacterEncounter } from './stored-character-encounter';
@@ -71,7 +87,8 @@ import {
 } from './refusal-handling';
 import { reconcileStableRenderedChildren, stableRenderKey } from './stable-dom-render';
 import type { HumanEngineActorOptions } from './encounter-board-projection';
-import type { EngineActivationChoiceSlot } from './turn-proposal';
+import type { EngineActivationChoiceSlot, EngineOptionId } from './turn-proposal';
+import type { OfferedOptionPath } from './offered-option-paths';
 
 const HEARTBEAT_INTERVAL_MS = 250;
 const HEARTBEAT_TIMEOUT_MS = 1_000;
@@ -87,22 +104,25 @@ function element<K extends keyof HTMLElementTagNameMap>(
 }
 
 function activationChoiceControls(
-  optionId: string,
+  actorId: CombatantId,
+  optionId: EngineOptionId,
   slot: EngineActivationChoiceSlot,
 ): readonly HTMLElement[] {
   const targets = slot.kind === 'calm_emotions_per_target' ? slot.targetIds : [null];
   return targets.map((targetId, index) => {
     const label = element('label', { className: 'engine-activation-choice' });
-    const identity = targetId === null ? String(index) : String(targetId);
+    const choiceIdentity = targetId ?? `single-${String(index)}`;
     label.dataset.renderKey = stableRenderKey(
-      'dm', 'engine-options', optionId, 'activation-choice', slot.kind, identity, 'label',
+      'dm', 'engine-options', actorId, optionId, 'activation-choice', slot.kind, choiceIdentity,
+      'label',
     );
     const name = slot.kind.replaceAll('_', ' ');
     const prompt = targetId === null ? name : `${name} for ${String(targetId)}`;
     label.append(element('span', { text: `Choose ${prompt} at activation` }));
     const control = element('select');
     control.dataset.renderKey = stableRenderKey(
-      'dm', 'engine-options', optionId, 'activation-choice', slot.kind, identity, 'select',
+      'dm', 'engine-options', actorId, optionId, 'activation-choice', slot.kind, choiceIdentity,
+      'select',
     );
     control.dataset.optionId = optionId;
     control.dataset.choiceKind = slot.kind;
@@ -139,7 +159,7 @@ export function renderHumanEngineOptionCatalog(
     group.dataset.actorId = actor.actorId;
     group.append(element('h3', { text: actor.actorName }));
     const list = element('ol');
-    list.dataset.renderKey = stableRenderKey('dm', 'engine-options', actor.actorId, 'options');
+    list.dataset.renderKey = stableRenderKey('dm', 'engine-options', actor.actorId, 'list');
     for (const entry of actor.options) {
       const item = element('li', { text: entry.label });
       item.dataset.renderKey = stableRenderKey(
@@ -149,7 +169,11 @@ export function renderHumanEngineOptionCatalog(
       item.dataset.optionId = entry.option.optionId;
       if (entry.availability === 'offerable' && entry.option.activationChoice !== undefined &&
         entry.option.activationChoice !== null) {
-        item.append(...activationChoiceControls(entry.option.optionId, entry.option.activationChoice));
+        item.append(...activationChoiceControls(
+          actor.actorId,
+          entry.option.optionId,
+          entry.option.activationChoice,
+        ));
       }
       list.append(item);
     }
@@ -209,6 +233,7 @@ function actionLabel(action: EncounterCommand): string {
     case 'search': return 'Search';
     case 'reveal_hidden': return 'Reveal';
     case 'resolve_pending_decision': return action.optionId === 'roll' ? 'Roll death save' : 'Resolve reaction';
+    case 'resolve_pending_placement': return 'Resolve pending placement';
     case 'set_hidden_roll_category': return `${action.hidden ? 'Hide' : 'Show'} ${action.category.replaceAll('_', ' ')}`;
     case 'dm_stabilize': return 'DM: Stabilize';
     case 'dm_revive_at_one_hit_point': return 'DM: Revive at 1 HP';
@@ -287,6 +312,361 @@ function actionKey(action: EncounterCommand): string {
   return canonicalJson(action);
 }
 
+export type EncounterBoardStackSelection = Map<string, CombatantId>;
+
+function boardPresentationControls(input: {
+  readonly audience: 'dm' | 'player';
+  readonly mode: AccessibleBoardViewMode;
+  readonly context: AccessibleBoardContext;
+  readonly setMode: (mode: AccessibleBoardViewMode) => void;
+}): HTMLElement {
+  const controls = element('section', { className: 'board-presentation-controls' });
+  controls.dataset.renderKey = stableRenderKey(input.audience, 'board-presentation');
+  controls.setAttribute('aria-label', 'Board presentation');
+  const toggle = element('button', {
+    text: 'Screen-reader board',
+  });
+  toggle.type = 'button';
+  toggle.dataset.renderKey = stableRenderKey(input.audience, 'board-presentation', 'toggle');
+  toggle.setAttribute('aria-pressed', String(input.mode === 'screen_reader'));
+  toggle.addEventListener('click', () => {
+    input.setMode(input.mode === 'graphic' ? 'screen_reader' : 'graphic');
+  });
+  const download = element('button', { text: 'Export board as HTML' });
+  download.type = 'button';
+  download.dataset.renderKey = stableRenderKey(input.audience, 'board-presentation', 'export');
+  download.addEventListener('click', () => {
+    downloadBrowserFile('board.html', serializeAccessibleBoard(input.context), 'text/html');
+  });
+  controls.append(toggle, download);
+  return controls;
+}
+
+export function applyPendingPlacementFocus(
+  root: HTMLElement,
+  target: 'recovery' | 'active_token',
+  activeCombatant: CombatantId | null,
+): void {
+  if (target === 'recovery') {
+    root.querySelector<HTMLElement>('[data-pending-placement-heading="true"]')?.focus();
+    return;
+  }
+  for (const token of Array.from(root.querySelectorAll<HTMLElement>('.encounter-token'))) {
+    if (token.dataset.combatantId === activeCombatant) {
+      token.focus();
+      return;
+    }
+  }
+}
+
+export function renderPendingPlacementRecoveryHeading(
+  recovery: DmPendingPlacementRecovery,
+): HTMLElement {
+  const panel = element('section', { className: 'dm-pending-placement-recovery' });
+  panel.dataset.renderKey = stableRenderKey(
+    'dm', 'pending-placement-recovery', recovery.combatantId, recovery.reason,
+  );
+  panel.dataset.combatantId = recovery.combatantId;
+  panel.dataset.reason = recovery.reason;
+  const heading = element('h2', { text: `Place ${recovery.combatantName}` });
+  heading.tabIndex = -1;
+  heading.dataset.pendingPlacementHeading = 'true';
+  heading.dataset.renderKey = stableRenderKey(
+    'dm', 'pending-placement-recovery', recovery.combatantId, recovery.reason, 'heading',
+  );
+  panel.append(
+    heading,
+    element('p', {
+      text: `Migration recovery: ${recovery.reason.replaceAll('_', ' ')}. Choose a legal creature space before play resumes.`,
+    }),
+  );
+  return panel;
+}
+
+function renderEncounterToken(model: EncounterBoardTokenModel): HTMLButtonElement {
+  const token = element('button', { className: 'encounter-token' });
+  token.dataset.renderKey = stableRenderKey('board-token', model.id);
+  token.type = 'button';
+  token.dataset.combatantId = model.id;
+  token.dataset.active = String(model.focusAssetId !== null);
+  token.dataset.adjudicated = String(model.adjudicatedAssetId !== null);
+  token.dataset.kind = model.kind;
+  token.dataset.assetId = model.assetId;
+  token.dataset.life = model.life;
+  token.dataset.marker = model.marker;
+  token.dataset.hiddenFromPlayers = String(model.hiddenFromPlayers ?? false);
+  token.dataset.column = String(model.position.column);
+  token.dataset.row = String(model.position.row);
+  token.dataset.columnSpan = String(model.columnSpan);
+  token.dataset.rowSpan = String(model.rowSpan);
+  token.dataset.stackId = model.stackId;
+  token.dataset.stackIndex = String(model.stackIndex);
+  token.dataset.stackSize = String(model.stackSize);
+  token.setAttribute('aria-label', model.stackSize === 1
+    ? `${model.name}, ${model.effectiveSize}, column ${String(model.position.column)}, row ${String(model.position.row)}`
+    : `${model.name}, occupant ${String(model.stackIndex + 1)} of ${String(model.stackSize)}, ${model.effectiveSize}, column ${String(model.position.column)}, row ${String(model.position.row)}`);
+  const sprite = element('img', { className: 'encounter-token-sprite' });
+  sprite.alt = '';
+  sprite.setAttribute('aria-hidden', 'true');
+  sprite.src = starterArtDataUri(model.assetId);
+  token.append(sprite);
+  for (const [role, assetId] of [
+    ['focus', model.focusAssetId],
+    ['adjudicated', model.adjudicatedAssetId],
+  ] as const) {
+    if (assetId === null) continue;
+    const overlay = element('img', { className: `encounter-token-overlay encounter-token-${role}` });
+    overlay.alt = '';
+    overlay.setAttribute('aria-hidden', 'true');
+    overlay.src = starterArtDataUri(assetId);
+    overlay.dataset.assetId = assetId;
+    token.append(overlay);
+  }
+  token.append(element('span', {
+    className: 'encounter-token-label',
+    text: model.marker === 'corpse' ? `† ${model.name}` : model.name,
+  }));
+  return token;
+}
+
+const OPTION_PATH_DANGER_CLASSES: Readonly<Record<MovementPathDangerKind, string>> = {
+  opportunity_attack: 'encounter-option-segment-opportunity-attack',
+  burning_surface: 'encounter-option-segment-burning-surface',
+  // MUTATION hazard_cells_not_red: replace this with a non-red class.
+  persistent_area_damage: 'encounter-option-segment-persistent-area-damage',
+  difficult_terrain: 'encounter-option-segment-difficult-terrain',
+};
+
+function optionPathDangerCells(path: OfferedOptionPath): string {
+  return path.annotations.map((annotation) =>
+    `${String(annotation.cell.column)},${String(annotation.cell.row)}:${annotation.dangers.join('+')}`,
+  ).join(';');
+}
+
+function optionPathOffset(index: number, count: number): { readonly x: number; readonly y: number } {
+  const band = index - (count - 1) / 2;
+  return { x: band * 0.045, y: -band * 0.045 };
+}
+
+interface OptionBadgeRect {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+const OPTION_BADGE_WIDTH_CELLS = 0.5;
+const OPTION_BADGE_HEIGHT_CELLS = 0.68;
+const OPTION_BADGE_TOP_CELLS = 0.22;
+const OPTION_BADGE_SHIFT_CELLS = 0.52;
+
+function optionBadgeRect(center: { readonly x: number; readonly y: number }): OptionBadgeRect {
+  return {
+    x: center.x - OPTION_BADGE_WIDTH_CELLS / 2,
+    y: center.y - OPTION_BADGE_TOP_CELLS,
+    width: OPTION_BADGE_WIDTH_CELLS,
+    height: OPTION_BADGE_HEIGHT_CELLS,
+  };
+}
+
+function chromeObstacleRect(plate: CreatureBadgeLayout, tilePx: BoardChromeTilePx): OptionBadgeRect {
+  return {
+    x: plate.x / tilePx,
+    y: plate.y / tilePx,
+    width: plate.width / tilePx,
+    height: plate.height / tilePx,
+  };
+}
+
+function optionBadgeOverlaps(left: OptionBadgeRect, right: OptionBadgeRect): boolean {
+  return left.x < right.x + right.width && right.x < left.x + left.width &&
+    left.y < right.y + right.height && right.y < left.y + left.height;
+}
+
+function positionOptionBadge(
+  origin: { readonly x: number; readonly y: number },
+  bounds: EncounterBoardProjectionShape['bounds'],
+  chromeObstacles: readonly CreatureBadgeLayout[],
+  tilePx: BoardChromeTilePx,
+): { readonly center: { readonly x: number; readonly y: number }; readonly rect: OptionBadgeRect } {
+  const obstacles = chromeObstacles.map((obstacle) => chromeObstacleRect(obstacle, tilePx));
+  const initial = {
+    x: Math.max(
+      OPTION_BADGE_WIDTH_CELLS / 2,
+      Math.min(origin.x, bounds.columns - OPTION_BADGE_WIDTH_CELLS / 2),
+    ),
+    y: Math.max(
+      OPTION_BADGE_TOP_CELLS,
+      Math.min(origin.y, bounds.rows - (OPTION_BADGE_HEIGHT_CELLS - OPTION_BADGE_TOP_CELLS)),
+    ),
+  };
+  const maximumRing = 2 * Math.max(bounds.columns, bounds.rows);
+  for (let ring = 0; ring <= maximumRing; ring += 1) {
+    for (let vertical = -ring; vertical <= ring; vertical += 1) {
+      for (let horizontal = -ring; horizontal <= ring; horizontal += 1) {
+        if (Math.max(Math.abs(horizontal), Math.abs(vertical)) !== ring) continue;
+        const center = {
+          x: initial.x + horizontal * OPTION_BADGE_SHIFT_CELLS,
+          y: initial.y + vertical * OPTION_BADGE_SHIFT_CELLS,
+        };
+        const rect = optionBadgeRect(center);
+        if (rect.x < 0 || rect.y < 0 || rect.x + rect.width > bounds.columns ||
+          rect.y + rect.height > bounds.rows) continue;
+        if (obstacles.some((obstacle) => optionBadgeOverlaps(rect, obstacle))) continue;
+        return { center, rect };
+      }
+    }
+  }
+  throw new Error('Unable to place offered-option badge without covering board chrome.');
+}
+
+function svgElement<K extends keyof SVGElementTagNameMap>(tag: K): SVGElementTagNameMap[K] {
+  return document.createElementNS('http://www.w3.org/2000/svg', tag);
+}
+
+function renderOfferedOptionPathOverlay(
+  projection: EncounterBoardProjectionShape,
+  paths: readonly OfferedOptionPath[],
+  chromeObstacles: readonly CreatureBadgeLayout[],
+  tilePx: BoardChromeTilePx,
+): SVGSVGElement {
+  const svg = svgElement('svg');
+  svg.classList.add('encounter-option-paths');
+  svg.setAttribute('viewBox', `0 0 ${String(projection.bounds.columns)} ${String(projection.bounds.rows)}`);
+  svg.setAttribute('aria-label', 'Engine offered movement options');
+  const defs = svgElement('defs');
+  const marker = svgElement('marker');
+  marker.id = 'encounter-option-oa-arrowhead';
+  marker.setAttribute('viewBox', '0 0 10 10');
+  marker.setAttribute('refX', '9');
+  marker.setAttribute('refY', '5');
+  marker.setAttribute('markerWidth', '5');
+  marker.setAttribute('markerHeight', '5');
+  marker.setAttribute('orient', 'auto-start-reverse');
+  const arrowHead = svgElement('path');
+  arrowHead.setAttribute('d', 'M 0 0 L 10 5 L 0 10 z');
+  marker.append(arrowHead);
+  defs.append(marker);
+  svg.append(defs);
+
+  const tokenPositions = new Map(projection.combatants.flatMap((combatant) =>
+    combatant.placementStatus === 'placed'
+      ? [[combatant.id, combatant.position] as const]
+      : []));
+  const destinationCounts = new Map<string, number>();
+  paths.forEach((path, pathIndex) => {
+    const offset = optionPathOffset(pathIndex, paths.length);
+    const dangerCells = optionPathDangerCells(path);
+    const group = svgElement('g');
+    group.classList.add('encounter-option-path');
+    group.style.setProperty(
+      '--encounter-option-color',
+      `hsl(${String((205 + pathIndex * 67) % 360)}deg 32% 72%)`,
+    );
+    group.dataset.optionOrdinal = String(path.optionOrdinal);
+    group.dataset.dangerCells = dangerCells;
+    group.dataset.optionId = path.optionId;
+    group.setAttribute('aria-label', `Option ${String(path.optionOrdinal)}: ${path.summaryLabel}, ${String(path.distanceFeet)} feet`);
+    const polyline = svgElement('polyline');
+    polyline.classList.add('encounter-option-polyline');
+    polyline.dataset.optionOrdinal = String(path.optionOrdinal);
+    polyline.setAttribute('points', path.path.map((cell) =>
+      `${String(cell.column + 0.5 + offset.x)},${String(cell.row + 0.5 + offset.y)}`).join(' '));
+    group.append(polyline);
+    let movementSpent = 0;
+    for (const step of path.steps) {
+      const segment = svgElement('path');
+      segment.classList.add('encounter-option-segment');
+      segment.dataset.optionOrdinal = String(path.optionOrdinal);
+      segment.dataset.dangerCells = dangerCells;
+      segment.dataset.dangers = step.dangers.join(',');
+      segment.setAttribute(
+        'd',
+        `M ${String(step.from.column + 0.5 + offset.x)} ${String(step.from.row + 0.5 + offset.y)} ` +
+          `L ${String(step.to.column + 0.5 + offset.x)} ${String(step.to.row + 0.5 + offset.y)}`,
+      );
+      movementSpent += step.costFeet;
+      if (movementSpent > path.movementRemainingFeet) {
+        segment.classList.add('encounter-option-segment-beyond-movement');
+      }
+      for (const danger of step.dangers) segment.classList.add(OPTION_PATH_DANGER_CLASSES[danger]);
+      if (step.dangers.length > 0) segment.classList.add('encounter-option-segment-hazard');
+      group.append(segment);
+
+      for (const reactorId of step.opportunityAttackReactors) {
+        const reactor = tokenPositions.get(reactorId);
+        if (reactor === undefined) continue;
+        const arrow = svgElement('path');
+        arrow.classList.add('encounter-option-opportunity-arrow');
+        arrow.dataset.optionOrdinal = String(path.optionOrdinal);
+        arrow.dataset.dangerCells = dangerCells;
+        arrow.dataset.reactorId = reactorId;
+        arrow.setAttribute(
+          'd',
+          `M ${String(reactor.column + 0.5)} ${String(reactor.row + 0.5)} ` +
+            `L ${String(step.from.column + 0.5 + offset.x)} ${String(step.from.row + 0.5 + offset.y)}`,
+        );
+        arrow.setAttribute('marker-end', 'url(#encounter-option-oa-arrowhead)');
+        // MUTATION opportunity_arrow_missing: remove this append while retaining the red segment.
+        group.append(arrow);
+      }
+    }
+    const destination = path.path.at(-1);
+    if (destination === undefined) throw new Error('Offered movement path has no destination.');
+    const destinationKey = `${String(destination.column)},${String(destination.row)}`;
+    const stack = destinationCounts.get(destinationKey) ?? 0;
+    destinationCounts.set(destinationKey, stack + 1);
+    const stackOffset = stack === 0
+      ? 0
+      : Math.ceil(stack / 2) * (stack % 2 === 1 ? -0.52 : 0.52);
+    const badgePosition = positionOptionBadge({
+      x: destination.column + 0.5 + offset.x,
+      y: destination.row + 0.5 + offset.y + stackOffset,
+    }, projection.bounds, chromeObstacles, tilePx);
+    const badge = svgElement('g');
+    badge.classList.add('encounter-option-destination');
+    badge.dataset.optionOrdinal = String(path.optionOrdinal);
+    badge.dataset.dangerCells = dangerCells;
+    badge.setAttribute(
+      'transform',
+      `translate(${String(badgePosition.center.x)} ${String(badgePosition.center.y)})`,
+    );
+    const circle = svgElement('circle');
+    circle.setAttribute('r', '0.18');
+    const ordinal = svgElement('text');
+    ordinal.classList.add('encounter-option-ordinal');
+    ordinal.setAttribute('text-anchor', 'middle');
+    ordinal.setAttribute('y', '0.055');
+    ordinal.textContent = String(path.optionOrdinal);
+    const distance = svgElement('text');
+    distance.classList.add('encounter-option-distance');
+    distance.setAttribute('text-anchor', 'middle');
+    distance.setAttribute('y', '0.36');
+    distance.textContent = `${String(path.distanceFeet)} ft`;
+    badge.append(circle, ordinal, distance);
+    group.append(badge);
+    svg.append(group);
+  });
+  return svg;
+}
+
+function renderOfferedOptionLegend(): HTMLElement {
+  const legend = element('aside', { className: 'encounter-option-path-legend' });
+  legend.dataset.optionPathLegend = 'true';
+  legend.append(element('strong', { text: 'Movement options' }));
+  for (const [className, text] of [
+    ['encounter-option-legend-solid', 'solid = within movement'],
+    ['encounter-option-legend-dashed', 'dashed = beyond movement (Dash)'],
+    ['encounter-option-legend-arrow', 'arrow = Opportunity Attack'],
+    ['encounter-option-legend-hatch', 'hatching = Difficult Terrain'],
+    ['encounter-option-legend-flame', '♨ = damaging terrain'],
+    ['encounter-option-legend-ordinal', 'N = option N'],
+  ] as const) {
+    legend.append(element('span', { className, text }));
+  }
+  return legend;
+}
+
 // ART-SEAM (D516): exported so the DM-with-chrome / player-without DOM identity is testable.
 export function renderBoard(
   projection: EncounterBoardProjectionShape,
@@ -301,11 +681,15 @@ export function renderBoard(
   boardGlyphs?: BoardGlyphMode,
   boardSnapshotMode = false,
   boardChromeTilePx?: BoardChromeTilePx,
+  offeredPaths: readonly OfferedOptionPath[] | null = null,
+  stackSelection: EncounterBoardStackSelection = new Map(),
 ): HTMLDivElement {
-  const chromeMetrics = boardChromeMetrics(boardChromeTilePx);
+  const tilePx = boardChromeTilePx ?? CHROME_TILE_PX;
+  const chromeMetrics = boardChromeMetrics(tilePx);
   const art = encounterArtForBoard(projection, boardGlyphs);
   const models = encounterBoardRenderModel(projection, art);
   const board = element('div', { className: 'encounter-board' });
+  board.dataset.renderKey = stableRenderKey('encounter-board', art.id);
   board.style.setProperty('--encounter-columns', String(projection.bounds.columns));
   // ART-SEAM (D516): overlay art reaches the mechanical-layer CSS through custom properties.
   for (const [effect, assetId] of Object.entries(OVERLAY_ASSETS)) {
@@ -320,11 +704,29 @@ export function renderBoard(
     board.dataset.sourceRound = String(provenance.round);
     board.dataset.sourceStateDigest = provenance.stateDigest;
   }
+  if (offeredPaths !== null) board.dataset.optionPaths = String(offeredPaths.length);
   const dangersByCell = new Map<string, DmMovementPathPreview['annotations'][number]['dangers']>(movementDangerPreview?.annotations.map(
     (annotation) => [`${String(annotation.cell.column)},${String(annotation.cell.row)}`, annotation.dangers] as const,
   ) ?? []);
+  const optionDifficultCells = new Map<string, OfferedOptionPath[]>();
+  const optionDamageCells = new Map<string, OfferedOptionPath[]>();
+  const optionThreats = new Set(offeredPaths?.flatMap((path) =>
+    path.steps.flatMap((step) => step.opportunityAttackReactors)) ?? []);
+  for (const path of offeredPaths ?? []) {
+    for (const annotation of path.annotations) {
+      const key = `${String(annotation.cell.column)},${String(annotation.cell.row)}`;
+      if (annotation.dangers.includes('difficult_terrain')) {
+        optionDifficultCells.set(key, [...optionDifficultCells.get(key) ?? [], path]);
+      }
+      if (annotation.dangers.includes('burning_surface') ||
+        annotation.dangers.includes('persistent_area_damage')) {
+        optionDamageCells.set(key, [...optionDamageCells.get(key) ?? [], path]);
+      }
+    }
+  }
   for (const model of models) {
     const cell = element('div', { className: 'encounter-cell' });
+    cell.dataset.renderKey = stableRenderKey('encounter-board', art.id, 'cell', model.key);
     cell.dataset.cell = model.key;
     if (preview.has(model.key)) cell.dataset.preview = 'true';
     for (const layer of model.layers) {
@@ -379,6 +781,19 @@ export function renderBoard(
       marker.setAttribute('aria-label', danger.replaceAll('_', ' '));
       cell.append(marker);
     }
+    for (const path of optionDifficultCells.get(model.key) ?? []) {
+      const hatch = element('span', { className: 'encounter-option-difficult-hatch' });
+      hatch.dataset.optionOrdinal = String(path.optionOrdinal);
+      hatch.dataset.danger = 'difficult_terrain';
+      cell.append(hatch);
+    }
+    for (const path of optionDamageCells.get(model.key) ?? []) {
+      const flame = element('span', { className: 'encounter-option-damage-flame', text: '♨' });
+      flame.dataset.optionOrdinal = String(path.optionOrdinal);
+      flame.dataset.danger = 'damaging_terrain';
+      flame.setAttribute('aria-label', 'Damaging terrain');
+      cell.append(flame);
+    }
     for (const object of model.worldObjects) {
       const placed = element('div', { className: 'encounter-world-object' });
       placed.dataset.objectId = object.id;
@@ -416,56 +831,131 @@ export function renderBoard(
       }
       cell.append(placed);
     }
-    if (model.token !== null) {
-      const token = element('div', { className: 'encounter-token' });
-      token.dataset.combatantId = model.token.id;
-      token.dataset.active = String(model.token.focusAssetId !== null);
-      token.dataset.adjudicated = String(model.token.adjudicatedAssetId !== null);
-      token.dataset.kind = model.token.kind;
-      token.dataset.assetId = model.token.assetId;
-      token.dataset.life = model.token.life;
-      token.dataset.marker = model.token.marker;
-      const sprite = element('img', { className: 'encounter-token-sprite' });
-      sprite.alt = '';
-      sprite.setAttribute('aria-hidden', 'true');
-      sprite.src = starterArtDataUri(model.token.assetId);
-      token.append(sprite);
-      for (const [role, assetId] of [
-        ['focus', model.token.focusAssetId],
-        ['adjudicated', model.token.adjudicatedAssetId],
-      ] as const) {
-        if (assetId === null) continue;
-        const overlay = element('img', { className: `encounter-token-overlay encounter-token-${role}` });
-        overlay.alt = '';
-        overlay.setAttribute('aria-hidden', 'true');
-        overlay.src = starterArtDataUri(assetId);
-        overlay.dataset.assetId = assetId;
-        token.append(overlay);
-      }
-      token.append(element('span', { className: 'encounter-token-label', text: model.token.name }));
-      for (const effect of projection.sustainedEffects ?? []) {
-        if (effect.owner !== model.token.id) continue;
-        const badge = element('span', { className: 'encounter-sustained-badge', text: effect.badge });
-        badge.dataset.effectId = effect.effectId;
-        badge.dataset.binding = effect.targetBinding;
-        badge.dataset.activationAvailable = String(effect.activationAvailable);
-        token.append(badge);
-      }
-      cell.append(token);
-    }
-    for (const extra of model.tokens.slice(1)) {
-      const marker = element('div', { className: 'encounter-token encounter-token-stacked' });
-      marker.dataset.combatantId = extra.id;
-      marker.dataset.life = extra.life;
-      marker.dataset.marker = extra.marker;
-      marker.append(element('span', {
-        className: 'encounter-token-label',
-        text: extra.marker === 'corpse' ? `† ${extra.name}` : extra.name,
-      }));
-      cell.append(marker);
-    }
     board.append(cell);
   }
+  const tokenLayer = element('div', { className: 'encounter-token-layer' });
+  tokenLayer.dataset.renderKey = stableRenderKey('encounter-board', art.id, 'tokens');
+  tokenLayer.style.setProperty('--encounter-columns', String(projection.bounds.columns));
+  const tokenModels = encounterBoardTokenRenderModels(projection, art);
+  const tokensByStack = new Map<string, EncounterBoardTokenModel[]>();
+  const tokenElements = new Map<CombatantId, HTMLButtonElement>();
+  for (const model of tokenModels) {
+    const members = tokensByStack.get(model.stackId) ?? [];
+    members.push(model);
+    tokensByStack.set(model.stackId, members);
+    const token = renderEncounterToken(model);
+    if (optionThreats.has(model.id)) token.classList.add('encounter-option-threat');
+    for (const effect of projection.sustainedEffects ?? []) {
+      if (effect.owner !== model.id) continue;
+      const badge = element('span', { className: 'encounter-sustained-badge', text: effect.badge });
+      badge.dataset.effectId = effect.effectId;
+      badge.dataset.binding = effect.targetBinding;
+      badge.dataset.activationAvailable = String(effect.activationAvailable);
+      token.append(badge);
+    }
+    tokenElements.set(model.id, token);
+    const creatureSpace = element('div', { className: 'encounter-token-space' });
+    creatureSpace.dataset.renderKey = stableRenderKey('board-token-space', model.id);
+    creatureSpace.dataset.cell = `${String(model.position.column)},${String(model.position.row)}`;
+    creatureSpace.dataset.combatantId = model.id;
+    creatureSpace.dataset.columnSpan = String(model.columnSpan);
+    creatureSpace.dataset.rowSpan = String(model.rowSpan);
+    creatureSpace.style.gridColumn = `${String(model.position.column + 1)} / span ${String(model.columnSpan)}`;
+    creatureSpace.style.gridRow = `${String(model.position.row + 1)} / span ${String(model.rowSpan)}`;
+    creatureSpace.append(token);
+    tokenLayer.append(creatureSpace);
+  }
+  for (const [stackId, members] of tokensByStack) {
+    const memberIds = new Set(members.map((member) => member.id));
+    let selected = stackSelection.get(stackId);
+    if (selected === undefined || !memberIds.has(selected)) selected = members[0]?.id;
+    if (selected === undefined) continue;
+    stackSelection.set(stackId, selected);
+    const listbox = element('div', { className: 'encounter-token-listbox' });
+    listbox.dataset.renderKey = stableRenderKey('board-stack', stackId);
+    listbox.id = `encounter-stack-${encodeURIComponent(stackId)}`;
+    listbox.setAttribute('role', 'listbox');
+    listbox.setAttribute('aria-label', `Occupants at shared creature space ${stackId}`);
+    listbox.hidden = true;
+    const first = members[0];
+    if (first === undefined) continue;
+    listbox.style.gridColumn = `${String(first.position.column + 1)} / span ${String(first.columnSpan)}`;
+    listbox.style.gridRow = `${String(first.position.row + 1)} / span ${String(first.rowSpan)}`;
+    const applySelection = (next: CombatantId, focus: boolean): void => {
+      stackSelection.set(stackId, next);
+      for (const member of members) {
+        const token = tokenElements.get(member.id);
+        if (token === undefined) continue;
+        const active = member.id === next;
+        token.tabIndex = active ? 0 : -1;
+        token.dataset.selected = String(active);
+        token.style.zIndex = active ? '30' : String(10 + member.stackIndex);
+        token.setAttribute('aria-expanded', String(!listbox.hidden && active));
+      }
+      for (const option of Array.from(listbox.querySelectorAll<HTMLElement>('[role="option"]'))) {
+        option.setAttribute('aria-selected', String(option.dataset.combatantId === next));
+      }
+      if (focus) tokenElements.get(next)?.focus();
+    };
+    members.forEach((member) => {
+      const token = tokenElements.get(member.id);
+      if (token === undefined) return;
+      if (members.length > 1) {
+        token.setAttribute('aria-haspopup', 'listbox');
+        token.setAttribute('aria-controls', listbox.id);
+      }
+      token.addEventListener('click', () => {
+        const currentIndex = members.findIndex((candidate) =>
+          candidate.id === stackSelection.get(stackId));
+        const next = members[(currentIndex + 1) % members.length];
+        if (next !== undefined) applySelection(next.id, true);
+      });
+      token.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' && members.length > 1) {
+          event.preventDefault();
+          listbox.hidden = !listbox.hidden;
+          applySelection(stackSelection.get(stackId) ?? member.id, false);
+          if (!listbox.hidden) listbox.querySelector<HTMLElement>('[aria-selected="true"]')?.focus();
+          return;
+        }
+        if (event.key === 'Escape') {
+          listbox.hidden = true;
+          applySelection(stackSelection.get(stackId) ?? member.id, true);
+          return;
+        }
+        const direction = event.key === 'ArrowRight' || event.key === 'ArrowDown'
+          ? 1
+          : event.key === 'ArrowLeft' || event.key === 'ArrowUp'
+            ? -1
+            : 0;
+        if (direction === 0 || members.length === 1) return;
+        event.preventDefault();
+        const currentIndex = members.findIndex((candidate) =>
+          candidate.id === stackSelection.get(stackId));
+        const next = members[(currentIndex + direction + members.length) % members.length];
+        if (next !== undefined) applySelection(next.id, true);
+      });
+      const option = element('div', { text: member.name });
+      option.dataset.renderKey = stableRenderKey('board-stack', stackId, 'option', member.id);
+      option.tabIndex = -1;
+      option.dataset.combatantId = member.id;
+      option.setAttribute('role', 'option');
+      option.addEventListener('click', () => {
+        listbox.hidden = true;
+        applySelection(member.id, true);
+      });
+      option.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape') return;
+        event.preventDefault();
+        listbox.hidden = true;
+        applySelection(stackSelection.get(stackId) ?? member.id, true);
+      });
+      listbox.append(option);
+    });
+    applySelection(selected, false);
+    if (members.length > 1) tokenLayer.append(listbox);
+  }
+  board.append(tokenLayer);
   const lines = projection.targetLines ?? [];
   if (lines.length > 0) {
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -474,15 +964,25 @@ export function renderBoard(
     svg.setAttribute('aria-label', 'Bound sustained-effect targets');
     for (const connection of lines) {
       const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-      line.setAttribute('x1', String(connection.from.column + 0.5));
-      line.setAttribute('y1', String(connection.from.row + 0.5));
-      line.setAttribute('x2', String(connection.to.column + 0.5));
-      line.setAttribute('y2', String(connection.to.row + 0.5));
+      line.setAttribute('x1', String(connection.from.x));
+      line.setAttribute('y1', String(connection.from.y));
+      line.setAttribute('x2', String(connection.to.x));
+      line.setAttribute('y2', String(connection.to.y));
       line.dataset.effectId = connection.effectId;
       line.dataset.targetId = connection.target;
       svg.append(line);
     }
     board.append(svg);
+  }
+  if (offeredPaths !== null) {
+    const chromeObstacles = provenance === undefined
+      ? []
+      : creatureBadgeLayouts(
+          projection.combatants.filter((combatant) => combatant.placementStatus === 'placed'),
+          tilePx,
+        );
+    board.append(renderOfferedOptionPathOverlay(projection, offeredPaths, chromeObstacles, tilePx));
+    board.append(renderOfferedOptionLegend());
   }
   // ART-SEAM (D516): the DM board gains names, HP bars, coordinates and a legend; the player board does not.
   if (provenance !== undefined)
@@ -563,12 +1063,15 @@ class PlayerEncounterView {
   #staged: EncounterCommand | null = null;
   #aimingSpell = false;
   #lastHeartbeat = 0;
+  readonly #stackSelection: EncounterBoardStackSelection = new Map();
   readonly #heartbeatCheck: number;
+  #boardView: AccessibleBoardViewMode;
 
   constructor(
     private readonly root: HTMLElement,
     private readonly sessionId: string,
   ) {
+    this.#boardView = readAccessibleBoardViewMode(localStorage, 'player');
     this.#channel = new BroadcastChannel(`srd55:vtt:${sessionId}`);
     this.#channel.addEventListener('message', this.#onMessage);
     this.#heartbeatCheck = window.setInterval(() => {
@@ -725,9 +1228,40 @@ class PlayerEncounterView {
       }));
     }
     this.#shell.append(activePanel);
-    const board = renderBoard(projection, this.#preview());
-    board.addEventListener('pointermove', (event) => this.#aimAt(event));
-    this.#shell.append(board);
+    const boardContext: AccessibleBoardContext = {
+      encounterName: 'Reference encounter',
+      audience: 'player',
+      round: projection.round,
+      activeCombatant: projection.activeCombatant,
+      board: projection,
+    };
+    this.#shell.append(boardPresentationControls({
+      audience: 'player',
+      mode: this.#boardView,
+      context: boardContext,
+      setMode: (mode) => {
+        this.#boardView = mode;
+        writeAccessibleBoardViewMode(localStorage, 'player', mode);
+        this.#render();
+      },
+    }));
+    if (this.#boardView === 'screen_reader') {
+      this.#shell.append(renderAccessibleBoard(boardContext));
+    } else {
+      const board = renderBoard(
+        projection,
+        this.#preview(),
+        null,
+        undefined,
+        undefined,
+        false,
+        undefined,
+        null,
+        this.#stackSelection,
+      );
+      board.addEventListener('pointermove', (event) => this.#aimAt(event));
+      this.#shell.append(board);
+    }
 
     const controls = element('section', { className: 'encounter-controls' });
     controls.dataset.renderKey = stableRenderKey('player', 'controls');
@@ -825,6 +1359,15 @@ class DmEncounterView {
   #pendingDelete: SaveManagerViewModel['pendingDelete'] = null;
   #saveManagerController: SaveManagerController | null = null;
   #movementPreviewKey: string | null = null;
+  readonly #stackSelection: EncounterBoardStackSelection = new Map();
+  #recoverySelection: {
+    readonly key: string;
+    readonly size: DmPendingPlacementRecovery['sizeOptions'][number]['size'];
+    readonly anchorKey: string;
+  } | null = null;
+  #focusAfterRender: 'recovery' | 'active_token' | null = null;
+  #showOfferedOptionPaths = false;
+  #boardView: AccessibleBoardViewMode;
   readonly #sessionFlow: StoredCharacterSessionFlow | null;
   #endSessionExported = false;
   #pendingSnapshot: DmEncounterHostSnapshot | null = null;
@@ -851,6 +1394,7 @@ class DmEncounterView {
     private readonly boardGlyphs?: BoardGlyphMode,
     private readonly captureTilePx?: BoardChromeTilePx,
   ) {
+    this.#boardView = readAccessibleBoardViewMode(localStorage, 'dm');
     this.#store = store;
     this.#sessionFlow = encounter?.sessionFlow ?? null;
     this.#host = new DmEncounterHost(sessionId, this.#store, encounter === undefined
@@ -936,6 +1480,16 @@ class DmEncounterView {
         if (this.#pendingSnapshot !== null) {
           this.#coalescedSnapshotCount += 1;
           continue;
+        }
+        const previousRecovery = this.#projection?.pendingPlacementRecovery ?? null;
+        const nextRecovery = snapshot.dm.pendingPlacementRecovery;
+        const previousKey = previousRecovery === null
+          ? null : `${previousRecovery.combatantId}:${previousRecovery.reason}`;
+        const nextKey = nextRecovery === null
+          ? null : `${nextRecovery.combatantId}:${nextRecovery.reason}`;
+        if (previousKey !== nextKey) {
+          this.#recoverySelection = null;
+          this.#focusAfterRender = nextKey === null ? 'active_token' : 'recovery';
         }
         this.#projection = snapshot.dm;
         if (!snapshot.dm.movementPreviews.some(
@@ -1143,12 +1697,7 @@ class DmEncounterView {
   }
 
   #download(name: string, bytes: string): void {
-    const anchor = element('a');
-    const url = URL.createObjectURL(new Blob([bytes], { type: 'application/json' }));
-    anchor.href = url;
-    anchor.download = `${name}.vtt.json`;
-    anchor.click();
-    URL.revokeObjectURL(url);
+    downloadBrowserFile(`${name}.vtt.json`, bytes, 'application/json');
   }
 
   #openUpload(): void {
@@ -1375,6 +1924,144 @@ class DmEncounterView {
     live.dataset.renderMaximumMs = String(this.#renderMaximumMs);
     live.dataset.coalescedSnapshotCount = String(this.#coalescedSnapshotCount);
     live.dataset.sessionRevision = String(this.#projection?.history.at(-1)?.revision ?? 0);
+    if (this.#focusAfterRender !== null) applyPendingPlacementFocus(
+      live,
+      this.#focusAfterRender,
+      this.#projection?.board.activeCombatant ?? null,
+    );
+    this.#focusAfterRender = null;
+  }
+
+  #renderPendingPlacementRecovery(recovery: DmPendingPlacementRecovery): HTMLElement {
+    const panel = renderPendingPlacementRecoveryHeading(recovery);
+
+    const key = `${recovery.combatantId}:${recovery.reason}`;
+    const firstSize = recovery.sizeOptions[0];
+    if (firstSize === undefined) throw new Error('Pending placement recovery has no size options.');
+    const currentSize = this.#recoverySelection?.key === key
+      ? recovery.sizeOptions.find((entry) => entry.size === this.#recoverySelection?.size) ?? firstSize
+      : firstSize;
+    const suggestedKey = recovery.suggestedAnchor === null
+      ? null
+      : `${String(recovery.suggestedAnchor.column)},${String(recovery.suggestedAnchor.row)}`;
+    const preferredAnchor = this.#recoverySelection?.key === key
+      ? currentSize.legalAnchors.find((entry) =>
+          `${String(entry.anchor.column)},${String(entry.anchor.row)}:${entry.placementMode}` ===
+          this.#recoverySelection?.anchorKey)
+      : currentSize.legalAnchors.find((entry) =>
+          `${String(entry.anchor.column)},${String(entry.anchor.row)}` === suggestedKey);
+    const currentAnchor = preferredAnchor ?? currentSize.legalAnchors[0] ?? null;
+    this.#recoverySelection = {
+      key,
+      size: currentSize.size,
+      anchorKey: currentAnchor === null
+        ? ''
+        : `${String(currentAnchor.anchor.column)},${String(currentAnchor.anchor.row)}:${currentAnchor.placementMode}`,
+    };
+
+    const form = element('form');
+    form.dataset.renderKey = stableRenderKey(
+      'dm', 'pending-placement-recovery', recovery.combatantId, recovery.reason, 'form',
+    );
+    const sizeLabel = element('label', { text: 'Creature size' });
+    sizeLabel.dataset.renderKey = stableRenderKey(
+      'dm', 'pending-placement-recovery', recovery.combatantId, recovery.reason, 'size-label',
+    );
+    const size = element('select');
+    size.dataset.renderKey = stableRenderKey(
+      'dm', 'pending-placement-recovery', recovery.combatantId, recovery.reason, 'size',
+    );
+    size.setAttribute('aria-label', `Creature size for ${recovery.combatantName}`);
+    size.disabled = recovery.sizeInput === 'fixed';
+    for (const entry of recovery.sizeOptions) {
+      const option = element('option', { text: entry.size });
+      option.value = entry.size;
+      option.selected = entry.size === currentSize.size;
+      size.append(option);
+    }
+    size.addEventListener('change', () => {
+      const selected = recovery.sizeOptions.find((entry) => entry.size === size.value);
+      if (selected === undefined) return;
+      const firstAnchor = selected.legalAnchors[0] ?? null;
+      this.#recoverySelection = {
+        key,
+        size: selected.size,
+        anchorKey: firstAnchor === null
+          ? ''
+          : `${String(firstAnchor.anchor.column)},${String(firstAnchor.anchor.row)}:${firstAnchor.placementMode}`,
+      };
+      this.#render();
+    });
+    sizeLabel.append(size);
+
+    const anchorLabel = element('label', { text: 'Legal anchor' });
+    anchorLabel.dataset.renderKey = stableRenderKey(
+      'dm', 'pending-placement-recovery', recovery.combatantId, recovery.reason, 'anchor-label',
+    );
+    const anchor = element('select');
+    anchor.dataset.renderKey = stableRenderKey(
+      'dm', 'pending-placement-recovery', recovery.combatantId, recovery.reason, 'anchor',
+    );
+    anchor.setAttribute('aria-label', `Legal anchor for ${recovery.combatantName}`);
+    for (const entry of currentSize.legalAnchors) {
+      const anchorKey = `${String(entry.anchor.column)},${String(entry.anchor.row)}:${entry.placementMode}`;
+      const option = element('option', {
+        text: `${String(entry.anchor.column)},${String(entry.anchor.row)} (${entry.placementMode})`,
+      });
+      option.value = anchorKey;
+      option.selected = anchorKey === this.#recoverySelection.anchorKey;
+      anchor.append(option);
+    }
+    anchor.disabled = currentSize.legalAnchors.length === 0;
+    anchor.addEventListener('change', () => {
+      this.#recoverySelection = { key, size: currentSize.size, anchorKey: anchor.value };
+      this.#render();
+    });
+    anchorLabel.append(anchor);
+
+    const submit = element('button', { text: 'Place combatant and continue' });
+    submit.dataset.renderKey = stableRenderKey(
+      'dm', 'pending-placement-recovery', recovery.combatantId, recovery.reason, 'submit',
+    );
+    submit.type = 'submit';
+    submit.disabled = currentAnchor === null;
+    form.append(sizeLabel, anchorLabel, submit);
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const selectedSize = recovery.sizeOptions.find((entry) => entry.size === size.value);
+      const selectedAnchor = selectedSize?.legalAnchors.find((entry) =>
+        `${String(entry.anchor.column)},${String(entry.anchor.row)}:${entry.placementMode}` === anchor.value);
+      if (selectedSize === undefined || selectedAnchor === undefined) return;
+      let command: Extract<EncounterCommand, { readonly type: 'resolve_pending_placement' }>;
+      switch (recovery.reason) {
+        case 'legacy_size_required':
+        case 'effect_adjudication_pending':
+          command = {
+            type: 'resolve_pending_placement',
+            combatant: recovery.combatantId,
+            anchor: selectedAnchor.anchor,
+            reason: recovery.reason,
+            size: selectedSize.size,
+          };
+          break;
+        case 'overlap_adjudication_pending':
+          command = {
+            type: 'resolve_pending_placement',
+            combatant: recovery.combatantId,
+            anchor: selectedAnchor.anchor,
+            reason: recovery.reason,
+          };
+          break;
+      }
+      const result = this.#host.resolvePendingPlacement(command);
+      if (result.kind === 'refused') {
+        this.#channelError = result.reason;
+        this.#focusAfterRender = 'recovery';
+        this.#render();
+      }
+    });
+    panel.append(form);
+    return panel;
   }
 
   #renderDmBoard(projection: DmBoardProjection): void {
@@ -1392,11 +2079,64 @@ class DmEncounterView {
     const previewCells = new Set(movementPreview?.path.map(
       (cell) => `${String(cell.column)},${String(cell.row)}`,
     ) ?? []);
+    if (projection.pendingPlacementRecovery !== null) {
+      this.#shell.append(this.#renderPendingPlacementRecovery(projection.pendingPlacementRecovery));
+      const selection = this.#recoverySelection;
+      const sizeOption = selection === null
+        ? undefined
+        : projection.pendingPlacementRecovery.sizeOptions.find(
+            (entry) => entry.size === selection.size,
+          );
+      const legalAnchor = sizeOption?.legalAnchors.find((entry) =>
+        `${String(entry.anchor.column)},${String(entry.anchor.row)}:${entry.placementMode}` ===
+        selection?.anchorKey);
+      for (const cell of legalAnchor?.footprint ?? []) {
+        previewCells.add(`${String(cell.column)},${String(cell.row)}`);
+      }
+    }
+    if (!this.boardSnapshotMode) {
+      const boardContext: AccessibleBoardContext = {
+        encounterName: this.#sessionFlow?.name ?? 'Reference encounter',
+        audience: 'dm',
+        round: projection.board.round,
+        activeCombatant: projection.board.activeCombatant,
+        board: projection.board,
+      };
+      this.#shell.append(boardPresentationControls({
+        audience: 'dm',
+        mode: this.#boardView,
+        context: boardContext,
+        setMode: (mode) => {
+          this.#boardView = mode;
+          writeAccessibleBoardViewMode(localStorage, 'dm', mode);
+          this.#render();
+        },
+      }));
+      const toggle = element('label', { className: 'dm-option-path-toggle' });
+      toggle.dataset.renderKey = stableRenderKey('dm', 'option-path-toggle', 'label');
+      const checkbox = element('input');
+      checkbox.type = 'checkbox';
+      checkbox.checked = this.#showOfferedOptionPaths;
+      checkbox.dataset.renderKey = stableRenderKey('dm', 'option-path-toggle', 'input');
+      checkbox.addEventListener('change', () => {
+        this.#showOfferedOptionPaths = checkbox.checked;
+        this.#render();
+      });
+      toggle.append(checkbox, element('span', { text: 'Show engine movement options' }));
+      this.#shell.append(toggle);
+      if (this.#boardView === 'screen_reader') {
+        this.#shell.append(renderAccessibleBoard(boardContext));
+        return;
+      }
+    }
     this.#shell.append(renderBoard(projection.board, previewCells, movementPreview, {
       revision: projection.encounter.revision,
       round: projection.board.round,
       stateDigest: projection.stateDigest,
-    }, this.boardGlyphs, this.boardSnapshotMode, this.captureTilePx));
+    }, this.boardGlyphs, this.boardSnapshotMode, this.captureTilePx,
+    this.boardSnapshotMode || this.#showOfferedOptionPaths
+      ? projection.offeredOptionPaths
+      : null, this.#stackSelection));
     if (movementPreview !== null) this.#shell.append(renderMovementDangerLegend(movementPreview));
   }
 

@@ -110,6 +110,7 @@ function everyClassState(): EncounterState {
         { id: 'dark', level: 'darkness', cells: [{ column: 2, row: 0 }] },
       ],
       movementRegions: [],
+      narrowOpeningRegions: [],
     },
   });
   return {
@@ -153,6 +154,11 @@ class FakeSnapshotService implements ProbeSnapshotService {
       captureMs: 0,
       source: input.source,
       chromiumVersion: 'SIMULATED',
+      html: {
+        relativePath: `board-html/${'b'.repeat(64)}/board.html`,
+        sha256: 'b'.repeat(64),
+        bytes: 48,
+      },
     });
   }
 
@@ -171,8 +177,8 @@ describe('D519 screenshot comprehension fact sheet', () => {
     expect(sheet.combatants).toEqual([
       {
         displayName: 'screenshot-hero',
-        badgeNumber: 1,
-        badgeColor: 'deep-forest',
+        badgeNumber: 2,
+        badgeColor: 'ivory',
         cell: { column: 1, row: 1 },
         side: 'party',
         hpBand: 'uninjured',
@@ -181,8 +187,8 @@ describe('D519 screenshot comprehension fact sheet', () => {
       },
       {
         displayName: 'screenshot-foe',
-        badgeNumber: 2,
-        badgeColor: 'ivory',
+        badgeNumber: 1,
+        badgeColor: 'deep-forest',
         cell: { column: 2, row: 2 },
         side: 'foe',
         hpBand: 'near_death',
@@ -709,7 +715,9 @@ describe('D519 screenshot comprehension schema and CLI', () => {
   });
 
   it('sends semantic input without an image and records its canonical artifact', async () => {
-    const directory = await mkdtemp(join(resolve('dnd-slim-runs'), 'e1-semantic-test-'));
+    const artifactRoot = resolve('dnd-slim-runs');
+    mkdirSync(artifactRoot, { recursive: true });
+    const directory = await mkdtemp(join(artifactRoot, 'e1-semantic-test-'));
     const imagesRoot = join(directory, 'semantic-images');
     const outPath = join(directory, 'semantic.jsonl');
     const requests: ProbeAnswerRequest[] = [];

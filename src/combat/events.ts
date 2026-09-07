@@ -1,4 +1,5 @@
-import type { Ability, Skill } from '../domain/enums';
+import type { Ability, KnownCreatureSize, Skill } from '../domain/enums';
+import type { SerializedPlacementMode } from './creature-space';
 import type { ObjectInteractionMode } from './equipment';
 import type { GridCell } from './grid';
 import type {
@@ -105,6 +106,19 @@ export type EncounterCommand =
       readonly type: 'resolve_pending_decision';
       readonly decisionId: string;
       readonly optionId: string;
+    }
+  | {
+      readonly type: 'resolve_pending_placement';
+      readonly combatant: CombatantId;
+      readonly reason: 'legacy_size_required' | 'effect_adjudication_pending';
+      readonly size: KnownCreatureSize;
+      readonly anchor: GridCell;
+    }
+  | {
+      readonly type: 'resolve_pending_placement';
+      readonly combatant: CombatantId;
+      readonly reason: 'overlap_adjudication_pending';
+      readonly anchor: GridCell;
     }
   | {
       readonly type: 'set_hidden_roll_category';
@@ -472,6 +486,18 @@ export type EncounterEvent =
               readonly failures: number;
             };
           };
+    })
+  | (SequencedEvent & {
+      readonly type: 'pending_placement_resolved';
+      readonly combatant: CombatantId;
+      readonly reason:
+        | 'legacy_size_required'
+        | 'effect_adjudication_pending'
+        | 'overlap_adjudication_pending';
+      readonly effectiveSize: KnownCreatureSize;
+      readonly position: GridCell;
+      readonly placementMode: SerializedPlacementMode;
+      readonly sharedWith: readonly CombatantId[];
     })
   | (SequencedEvent & {
       readonly type: 'wild_shape_assumed';

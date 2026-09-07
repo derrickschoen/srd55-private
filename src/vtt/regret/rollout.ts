@@ -13,9 +13,11 @@ import {
 import { TurnCoordinator, type DurableCoordinatorTransition } from '../../combat/coordinator';
 import type { EncounterCommand } from '../../combat/events';
 import { gridDistance } from '../../combat/grid';
+import { decodeProjectedCreatureSpace, minimumSpaceDistance } from '../../combat/creature-space';
 import { mulberry32 } from '../../combat/random';
 import {
   dmVisibleEncounter,
+  isPlacedVisibleCombatant,
   projectDmView,
   type DmVisibleEncounterState,
 } from '../../combat/visibility';
@@ -83,7 +85,7 @@ export function reconstructEncounterState(capture: RolloutInputCapture): Encount
 
 function visibleSubject(state: DmVisibleEncounterState, id: CombatantId) {
   const found = state.combatants.find((candidate) => candidate.id === id);
-  if (found === undefined) throw new TypeError(`Decision program references unknown combatant ${id}.`);
+  if (found === undefined || found.placementStatus !== 'placed') throw new TypeError(`Decision program references unknown or unplaced combatant ${id}.`);
   return found;
 }
 
@@ -96,9 +98,9 @@ function predicateValue(predicate: StatePredicate, state: DmVisibleEncounterStat
       return subject.hitPoints * 100 < subject.rules.hitPointMaximum * predicate.percent;
     }
     case 'distance_at_most':
-      return gridDistance(
-        visibleSubject(state, predicate.left).position,
-        visibleSubject(state, predicate.right).position,
+      return minimumSpaceDistance(
+        decodeProjectedCreatureSpace(visibleSubject(state, predicate.left)),
+        decodeProjectedCreatureSpace(visibleSubject(state, predicate.right)),
       ) <= predicate.feet;
     case 'not':
       return !predicateValue(predicate.predicate, state);
@@ -117,9 +119,12 @@ function selectedTarget(
   if (selector.kind === 'combatant') return selector.combatantId;
   const acting = visibleSubject(state, actor);
   return state.combatants
+    .filter(isPlacedVisibleCombatant)
     .filter((candidate) => candidate.kind !== acting.kind && candidate.life !== 'dead')
     .sort((left, right) => {
-      const distance = gridDistance(acting.position, left.position) - gridDistance(acting.position, right.position);
+      const actingSpace = decodeProjectedCreatureSpace(acting);
+      const distance = minimumSpaceDistance(actingSpace, decodeProjectedCreatureSpace(left)) -
+        minimumSpaceDistance(actingSpace, decodeProjectedCreatureSpace(right));
       return distance || left.id.localeCompare(right.id);
     })[0]?.id ?? null;
 }
