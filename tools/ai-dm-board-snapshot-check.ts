@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { EncounterState } from '../src/combat/encounter';
+import { boardChromeDimensions } from '../src/vtt/board-chrome';
 import { loadArenaFixture } from '../src/vtt/mcp/entrypoint';
 import {
   BoardSnapshotService,
@@ -83,8 +84,16 @@ try {
   if (mode === 'benchmark') {
     requireEqual(
       [...new Set(captures.map((artifact) => `${String(artifact.width)}x${String(artifact.height)}`))].sort(),
-      // D516: 64 px cells + 24 px coordinate gutters + 128 px legend band, see boardChromeDimensions().
-      ['1140x1012', '1588x1140'],
+      [
+        boardChromeDimensions(
+          { columns: 17, rows: 13 },
+          { combatants: Array.from({ length: 8 }, () => ({ name: 'CREATURE' })), objects: Array.from({ length: 7 }, () => ({ kind: 'object' })) },
+        ),
+        boardChromeDimensions(
+          { columns: 24, rows: 15 },
+          { combatants: Array.from({ length: 7 }, () => ({ name: 'CREATURE' })), objects: Array.from({ length: 5 }, () => ({ kind: 'object' })) },
+        ),
+      ].map(({ width, height }) => `${String(width)}x${String(height)}`).sort(),
       'captured dimensions',
     );
   }
@@ -151,7 +160,7 @@ try {
     throw new Error(`manifest viewport: ${JSON.stringify(manifestViewport)}`);
   }
   requireEqual(Reflect.get(manifest, 'deviceScaleFactor'), 1, 'manifest DPR');
-  requireEqual(Reflect.get(manifest, 'tileSizeCssPx'), 64, 'manifest tile size');
+  requireEqual(Reflect.get(manifest, 'tileSizeCssPx'), 128, 'manifest tile size');
   requireEqual(Reflect.get(manifest, 'maximumPngBytes'), 1_000_000, 'manifest PNG cap');
   const manifestArtifacts = Reflect.get(manifest, 'artifacts');
   if (!Array.isArray(manifestArtifacts) || !manifestArtifacts.every((artifact: unknown) => {

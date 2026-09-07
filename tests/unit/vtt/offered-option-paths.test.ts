@@ -228,6 +228,9 @@ describe('D512 offered option movement paths', () => {
       new Set(),
       null,
       { revision: fixture.state.revision, round: fixture.state.round, stateDigest: 'digest:d512' },
+      undefined,
+      false,
+      undefined,
       renderedPaths,
     ));
 
@@ -268,6 +271,9 @@ describe('D512 offered option movement paths', () => {
       boardProjection,
       new Set(),
       null,
+      undefined,
+      undefined,
+      false,
       undefined,
       null,
     ));

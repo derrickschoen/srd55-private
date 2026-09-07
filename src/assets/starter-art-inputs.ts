@@ -12,12 +12,14 @@ import {
   type ArtRecipe,
   type TokenArchetype,
   type TokenSide,
+  terrainRecipe,
+  tokenRecipe,
 } from './pixel-art';
 
 export const STARTER_ART_GENERATOR_ID = 'starter-pixel-art' as const;
-/** D516: 64×64 generated tiles replace the 16×16 silhouettes of 1.0.0. */
-export const STARTER_ART_GENERATOR_VERSION = '2.0.0' as const;
-export const STARTER_ART_INPUT_SET_ID = 'starter-art-inputs-v2' as const;
+/** Native 128×128 recipes with typed material response and directional light. */
+export const STARTER_ART_GENERATOR_VERSION = '3.0.0' as const;
+export const STARTER_ART_INPUT_SET_ID = 'starter-art-inputs-v3' as const;
 
 export type StarterArtKind =
   | 'token'
@@ -68,38 +70,38 @@ const shades: readonly StarterArtInput[] = BAND_SIDES.map((side) => input(
   `art.map.shade.${side}.v1`,
   `Ambient-occlusion band below a ${SIDE_TITLES[side]} wall`,
   'map',
-  { kind: 'shade', side },
+  { kind: 'shade', material: 'shadow', side },
 ));
 
 const overlays: readonly StarterArtInput[] = OVERLAY_EFFECTS.map((effect) => input(
   `art.map.overlay.${effect}.v1`,
   `Mechanical overlay: ${effect.replaceAll('-', ' ')}`,
   'map',
-  { kind: 'overlay', effect },
+  { kind: 'overlay', material: 'semantic', effect },
 ));
 
 const terrain: readonly StarterArtInput[] = TERRAIN_OBJECTS.map((object) => input(
   `art.terrain.${object}.v1`,
   `${object[0]!.toUpperCase()}${object.slice(1)} terrain`,
   'terrain',
-  { kind: 'terrain', object },
+  terrainRecipe(object),
 ));
 
 const fog: readonly StarterArtInput[] = FOG_STATES.map((state) => input(
   `art.fog.${state}.v1`,
   `${state[0]!.toUpperCase()}${state.slice(1)} fog`,
   'fog',
-  { kind: 'fog', state },
+  { kind: 'fog', material: 'fog', state },
 ));
 
 const ui: readonly StarterArtInput[] = [
-  input('art.focus.active-pc.v1', 'Active combatant focus ring', 'focus', { kind: 'focus', mark: 'active' }),
-  input('art.focus.hidden.v1', 'Hidden-from-players dashed ring', 'focus', { kind: 'focus', mark: 'hidden' }),
-  input('art.event.adjudicated.v1', 'ADJUDICATED highlight', 'event', { kind: 'event', mark: 'adjudicated' }),
+  input('art.focus.active-pc.v1', 'Active combatant focus ring', 'focus', { kind: 'focus', material: 'semantic', mark: 'active' }),
+  input('art.focus.hidden.v1', 'Hidden-from-players dashed ring', 'focus', { kind: 'focus', material: 'semantic', mark: 'hidden' }),
+  input('art.event.adjudicated.v1', 'ADJUDICATED highlight', 'event', { kind: 'event', material: 'semantic', mark: 'adjudicated' }),
 ];
 
 function tokenInput(id: string, title: string, archetype: TokenArchetype, side: TokenSide): StarterArtInput {
-  return input(id, title, 'token', { kind: 'token', archetype, side });
+  return input(id, title, 'token', tokenRecipe(archetype, side));
 }
 
 /** Ids the approved fixtures already name; each now renders an archetype bust. */
@@ -133,7 +135,7 @@ const archetypeTokens: readonly StarterArtInput[] = TOKEN_SIDES.flatMap((side) =
 
 export const DEAD_TOKEN_ASSET_ID: AssetId = assetId('art.token.dead.v1');
 
-const deadToken = input(DEAD_TOKEN_ASSET_ID, 'Prone silhouette on a desaturated plate', 'token', { kind: 'token-dead' });
+const deadToken = input(DEAD_TOKEN_ASSET_ID, 'Prone silhouette on a desaturated plate', 'token', { kind: 'token-dead', material: 'bone' });
 
 export const STARTER_ART_INPUTS: readonly StarterArtInput[] = Object.freeze([
   ...namedTokens,

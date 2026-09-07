@@ -50,8 +50,21 @@ function sha256(value: string | Uint8Array): string {
   return createHash('sha256').update(value).digest('hex');
 }
 
-const EXPECTED_ASSET_COUNT = 79;
+/** 36 tokens + 43 D516 room/state assets + 3 D525 light glyphs + 5 D525 cell glyphs (the 'full' vocabulary). */
+const EXPECTED_ASSET_COUNT = 87;
 const EXPECTED_TOKEN_COUNT = 36;
+const EXPECTED_GLYPH_OVERLAY_IDS = [
+  'art.map.overlay.light-glyph-bright.v1',
+  'art.map.overlay.light-glyph-dim.v1',
+  'art.map.overlay.light-glyph-dark.v1',
+  'art.map.overlay.glyph-door-closed.v1',
+  'art.map.overlay.glyph-door-open.v1',
+  'art.map.overlay.glyph-blocked.v1',
+  'art.map.overlay.glyph-fog.v1',
+  'art.map.overlay.glyph-obscured.v1',
+] as const;
+/** The D525 'inverse' veils left with their subject; a stale PNG or pin would be a finding. */
+const REMOVED_OVERLAY_IDS = ['art.map.overlay.light-veil-dim.v1', 'art.map.overlay.light-veil-dark.v1'] as const;
 
 const EXPECTED_NAMED_TOKEN_IDS = [
   'art.token.pc.fighter.v1',
@@ -69,17 +82,24 @@ const EXPECTED_NAMED_TOKEN_IDS = [
   'art.token.monster.wolf.v1',
 ] as const;
 
-describe('procedural starter-art manifest and deterministic outputs (D516, generator 2.0.0)', () => {
-  it('inventories 36 token busts (13 fixture-named, 22 archetype×side, 1 dead) and 43 room/state assets', () => {
+describe('procedural starter-art manifest and deterministic outputs (native generator 3.0.0)', () => {
+  it('inventories 36 token busts (13 fixture-named, 22 archetype×side, 1 dead) and 51 room/state assets', () => {
     expect(STARTER_ART_MANIFEST.assets).toHaveLength(EXPECTED_ASSET_COUNT);
     const tokens = STARTER_ART_MANIFEST.assets.filter((entry) => entry.kind === 'token').map((entry) => entry.id);
     expect(tokens).toHaveLength(EXPECTED_TOKEN_COUNT);
     expect(tokens.slice(0, EXPECTED_NAMED_TOKEN_IDS.length)).toEqual(EXPECTED_NAMED_TOKEN_IDS);
+    const ids = STARTER_ART_MANIFEST.assets.map((entry) => entry.id);
+    for (const id of EXPECTED_GLYPH_OVERLAY_IDS) expect(ids, id).toContain(id);
+    for (const id of REMOVED_OVERLAY_IDS) {
+      expect(ids, id).not.toContain(id);
+      expect(EXPECTED_STARTER_ART_SHA256[id], id).toBeUndefined();
+    }
+    expect(STARTER_ART_MANIFEST.assets.filter((entry) => entry.kind === 'map' && entry.id.startsWith('art.map.overlay.'))).toHaveLength(17);
     expect(Object.keys(EXPECTED_STARTER_ART_SHA256)).toHaveLength(EXPECTED_ASSET_COUNT);
     expect(STARTER_ART_MANIFEST.generator).toEqual({
       id: 'starter-pixel-art',
-      version: '2.0.0',
-      fixedInputSet: 'starter-art-inputs-v2',
+      version: '3.0.0',
+      fixedInputSet: 'starter-art-inputs-v3',
       fixedInputsSha256: EXPECTED_FIXED_INPUTS_SHA256,
     });
     expect(STARTER_ART_MANIFEST.assets.every((entry) =>
@@ -224,6 +244,10 @@ describe('starter-art attribution reaches repository and distribution', () => {
     const preview = text(STARTER_ART_PREVIEW_PATH);
     expect(sha256(preview)).toBe(EXPECTED_PREVIEW_SHA256);
     expect(preview).toContain(`data-sprite-inventory="${String(EXPECTED_TOKEN_COUNT)}"`);
+    // D525: the preview embeds every asset once, so the eight glyph overlays are pinned into its digest.
+    for (const id of EXPECTED_GLYPH_OVERLAY_IDS) expect(preview).toContain(`id="asset-${id.replaceAll('.', '-')}"`);
+    for (const id of REMOVED_OVERLAY_IDS) expect(preview).not.toContain(`id="asset-${id.replaceAll('.', '-')}"`);
+    expect(preview.match(/<image id="asset-/gu)).toHaveLength(EXPECTED_ASSET_COUNT);
     for (const marker of [
       'data-projection="player"',
       'data-projection="dm"',

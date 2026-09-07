@@ -1,4 +1,5 @@
 import type { AssetId } from '../assets/ids';
+import type { BoardGlyphMode } from '../assets/board-glyphs';
 import { tokenAssetFor } from '../assets/token-archetypes';
 import type { EncounterBoardProjectionShape } from './encounter-board';
 import type { EncounterArtPackage } from './encounter-package';
@@ -52,10 +53,20 @@ function genericArt(
   }, projection);
 }
 
-/** Select authored art only for its authored encounter; generated rooms get bounds-matched neutral art. */
+/**
+ * Select authored art only for its authored encounter; generated rooms get
+ * bounds-matched neutral art. A `boardGlyphs` override (D525: the snapshot
+ * page's URL) replaces the package's own; absent, the package decides.
+ */
 export function encounterArtForBoard(
   projection: EncounterBoardProjectionShape,
+  boardGlyphs?: BoardGlyphMode,
 ): EncounterArtPackage {
+  const art = selectArt(projection);
+  return boardGlyphs === undefined ? art : { ...art, boardGlyphs };
+}
+
+function selectArt(projection: EncounterBoardProjectionShape): EncounterArtPackage {
   const isReference = boundsMatch(projection, REFERENCE_ENCOUNTER_ART) &&
     projection.combatants.every((combatant) =>
       REFERENCE_ENCOUNTER_ART.combatantTokens[combatant.id] !== undefined);

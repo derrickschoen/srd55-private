@@ -588,10 +588,10 @@ function externalProposal(proposal: EngineTurnProposal): Readonly<Record<string,
     }),
   };
 }
-function hitPointBand(hitPoints: number, maximum: number): 'uninjured' | 'injured' | 'critical' | 'unknown' {
+function hitPointBand(hitPoints: number, maximum: number): 'uninjured' | 'bloodied' | 'near_death' | 'unknown' {
   if (maximum <= 0) return 'unknown';
   if (hitPoints >= maximum) return 'uninjured';
-  return hitPoints * 4 <= maximum ? 'critical' : 'injured';
+  return hitPoints * 4 <= maximum ? 'near_death' : 'bloodied';
 }
 function actorStatus(actor: EngineStateCapsule['projection']['combatants'][number]): Readonly<Record<string, unknown>> {
   return { life: actor.life, hit_point_band: hitPointBand(actor.hitPoints, actor.hitPointMaximum), movement_feet: actor.movementRemainingFeet, action_available: actor.actionAvailable, bonus_action_available: actor.bonusActionAvailable, reaction_available: actor.reactionAvailable, effect_tags: [], pending_decision_ids: [] };

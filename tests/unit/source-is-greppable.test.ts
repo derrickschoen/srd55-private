@@ -45,11 +45,11 @@ const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 // These are PWA manifest raster icons: binary by nature and never grep targets.
 // Their SVG source of truth, public/icons/app-icon.svg, remains text and scanned.
 //
-// D516 also replaces the starter board art with 79 generated PNGs under the
-// one-purpose public/assets/art directory. Their TypeScript generator inputs,
-// manifest and content hashes remain text and scanned. The exact count and PNG
-// signature are pinned below, so another binary cannot silently acquire this
-// exemption and a newly added raster still requires this rationale to change.
+// D516/D525 also generate 87 classic-board PNGs under the one-purpose
+// public/assets/art directory. Their TypeScript generator inputs, manifest and
+// content hashes remain text and scanned. The exact count and PNG signature are
+// pinned below, so another binary cannot silently acquire this exemption and a
+// newly added raster still requires this rationale to change.
 //
 // The two zips are the OGL-quarantine archives: the 3.0 and 3.5 SRD
 // distributions committed as published (e0b8b373), kept binary so their
@@ -108,9 +108,9 @@ describe('tracked source is greppable', () => {
     }
   });
 
-  it('keeps the reviewed classic-art exemption limited to the 79 generated PNGs', () => {
+  it('keeps the reviewed D516/D525 classic-art exemption limited to the 87 generated PNGs', () => {
     const rasterArt = files.filter((file) => CLASSIC_ART_PNG.test(file));
-    expect(rasterArt).toHaveLength(79);
+    expect(rasterArt).toHaveLength(87);
     for (const file of rasterArt) {
       const contents = readFileSync(join(repoRoot, file));
       expect(contents.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE), file).toBe(true);

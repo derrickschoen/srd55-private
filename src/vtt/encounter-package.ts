@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { doorSetFor, doorSideAt, floorSetFor, wallSetFor } from '../assets/art-sets';
 import { assetIdSchema, type AssetId } from '../assets/ids';
+import { BOARD_GLYPH_MODES, DEFAULT_BOARD_GLYPH_MODE } from '../assets/board-glyphs';
 import { resolveStarterArt } from '../assets/starter-art-resolver';
 
 const packageCellSchema = z.strictObject({
@@ -33,6 +34,8 @@ export const encounterArtPackageSchema = z.strictObject({
     adjudicated: assetIdSchema,
   }),
   combatantTokens: z.record(z.string().min(1), assetIdSchema),
+  /** D525: which glyph vocabulary the board draws; omitted means 'none', the pre-D525 tint board. */
+  boardGlyphs: z.enum(BOARD_GLYPH_MODES).default(DEFAULT_BOARD_GLYPH_MODE),
 }).superRefine((value, context) => {
   const inBounds = (cell: { readonly column: number; readonly row: number }): boolean =>
     cell.column < value.room.columns && cell.row < value.room.rows;

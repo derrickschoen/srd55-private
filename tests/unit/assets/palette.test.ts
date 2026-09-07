@@ -23,6 +23,16 @@ function towards(from: number, to: number, target: number): number {
   return wanted === 0 ? 0 : moved * wanted;
 }
 
+function labLightness(red: number, green: number, blue: number): number {
+  const linear = [red, green, blue].map((channel) => {
+    const encoded = channel / 255;
+    return encoded <= 0.04045 ? encoded / 12.92 : ((encoded + 0.055) / 1.055) ** 2.4;
+  });
+  const y = 0.2126729 * linear[0]! + 0.7151522 * linear[1]! + 0.072175 * linear[2]!;
+  const transformed = y > 216 / 24_389 ? Math.cbrt(y) : (24_389 / 27) * y / 116 + 16 / 116;
+  return 116 * transformed - 16;
+}
+
 describe('D516 palette rule: 8 hue ramps × 7 steps + 9 neutrals, generated', () => {
   it('turns 12–18° toward blue-violet and loses 10 % saturation per shadow step', () => {
     for (const name of PALETTE_RAMPS) {
@@ -86,6 +96,18 @@ describe('D516 palette rule: 8 hue ramps × 7 steps + 9 neutrals, generated', ()
       expect(hsl.lightness).toBeGreaterThan(previous);
       expect(hsl.hue).toBe(paletteHsl(neutral(0)).hue);
       previous = hsl.lightness;
+    }
+  });
+
+  it('keeps every adjacent hue-ramp step clearly separated in perceptual luminance', () => {
+    for (const name of PALETTE_RAMPS) {
+      for (let step = 1; step < RAMP_STEPS.length; step += 1) {
+        const darker = paletteRgb(ramp(name, (step - 1) as RampStep));
+        const lighter = paletteRgb(ramp(name, step as RampStep));
+        const separation = labLightness(lighter.red, lighter.green, lighter.blue) - labLightness(darker.red, darker.green, darker.blue);
+        expect(separation, `${name} ${String(step - 1)}→${String(step)}`).toBeGreaterThanOrEqual(6);
+        expect(separation, `${name} ${String(step - 1)}→${String(step)}`).toBeLessThanOrEqual(20);
+      }
     }
   });
 

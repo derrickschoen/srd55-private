@@ -1,6 +1,28 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
+import {
+  boardChromeDimensions,
+  type BoardChromeTilePx,
+} from '../../src/vtt/board-chrome-layout';
 import { expect, test } from './fixtures/parallel-test';
+
+const CAPTURE_TILE_PX = 128 satisfies BoardChromeTilePx;
+
+function expectedBoardDimensions(
+  bounds: { readonly columns: number; readonly rows: number },
+  content: { readonly combatants: number; readonly objects: number },
+  tilePx: BoardChromeTilePx = CAPTURE_TILE_PX,
+): string {
+  const { width, height } = boardChromeDimensions(
+    bounds,
+    {
+      combatants: Array.from({ length: content.combatants }, () => ({ name: 'CREATURE' })),
+      objects: Array.from({ length: content.objects }, () => ({ kind: 'object' })),
+    },
+    tilePx,
+  );
+  return `${String(width)}x${String(height)}`;
+}
 
 const productionBuild = spawnSync(process.execPath, ['tools/dist-build-cache.mjs'], {
   cwd: process.cwd(),
@@ -56,15 +78,21 @@ async function runBrowserCheck(outputDirectory: string): Promise<BrowserCheckRes
 }
 
 test('captures the full production DM board deterministically through durable save upload/load', async () => {
+  expect(expectedBoardDimensions({ columns: 17, rows: 13 }, { combatants: 0, objects: 0 }, 64))
+    .toBe('1140x1012');
+  expect(expectedBoardDimensions({ columns: 24, rows: 15 }, { combatants: 0, objects: 0 }, 64))
+    .toBe('1588x1140');
+
   const outputDirectory = resolve(
     `dnd-slim-runs/board-snapshot-browser-${String(process.pid)}-images`,
   );
   const result = await runBrowserCheck(outputDirectory);
   expect(result.benchmark.captures).toBe(2);
-  // D516: seed-6203002 is 17×13 and seed-6203004 is 24×15; each board is
-  // 2·2 px border + 2·24 px coordinate gutters + columns·64, and
-  // 2·2 + 2·24 + rows·64 + 8 px gap + 120 px legend tall (boardChromeDimensions).
-  expect(result.dimensions).toEqual(['1140x1012', '1588x1140']);
+  const expectedDimensions = [
+    expectedBoardDimensions({ columns: 17, rows: 13 }, { combatants: 8, objects: 7 }),
+    expectedBoardDimensions({ columns: 24, rows: 15 }, { combatants: 7, objects: 5 }),
+  ].sort();
+  expect(result.dimensions).toEqual(expectedDimensions);
   expect(result.staleRejected).toBe(true);
   expect(result.identityRejected).toBe(true);
   expect(result.movedDigestChanged).toBe(true);

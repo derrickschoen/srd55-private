@@ -19,6 +19,9 @@ import {
 import { combatantId, encounterEffectId, type CombatantId } from '../../../src/combat/values';
 import { projectDmView, projectPlayerView } from '../../../src/combat/visibility';
 import {
+  CHROME_TILE_PX,
+} from '../../../src/vtt/board-chrome';
+import {
   encounterBoardTokenRenderModels,
   projectEncounterBoard,
   type EncounterBoardPlacedCombatant,
@@ -240,7 +243,7 @@ describe('footprint Increment 4 board and migration placement recovery', () => {
       const tokens = interactiveElement(board).querySelectorAll('.encounter-token');
       expect(tokens).toHaveLength(1);
       expect(board.dataset.boardChrome).toBe('on');
-      expect(interactiveElement(board).querySelectorAll('.encounter-nameplate')).toHaveLength(1);
+      expect(interactiveElement(board).querySelectorAll('.encounter-creature-badge')).toHaveLength(1);
       expect(tokens[0]?.dataset.columnSpan).toBe(String(expectedSpans[index]));
       expect(tokens[0]?.dataset.rowSpan).toBe(String(expectedSpans[index]));
       expect(tokens[0]?.getAttribute('aria-label')).toBe(
@@ -249,8 +252,29 @@ describe('footprint Increment 4 board and migration placement recovery', () => {
       const hiddenRings = interactiveElement(board).querySelectorAll('.encounter-hidden-ring');
       expect(hiddenRings).toHaveLength(index === 3 ? 1 : 0);
       if (index === 3) {
-        expect(hiddenRings[0]?.getAttribute('style')).toContain('width:128px');
-        expect(hiddenRings[0]?.getAttribute('style')).toContain('height:128px');
+        const compactBoard = renderBoard(
+          projection([combatant]),
+          new Set(),
+          null,
+          { revision: 1, round: 1, stateDigest: 'footprint:64' },
+          undefined,
+          false,
+          64,
+        );
+        const compactRing = interactiveElement(compactBoard)
+          .querySelector('.encounter-hidden-ring');
+        expect(compactRing?.getAttribute('style')).toContain(
+          `width:${String(expectedSpans[index] * 64)}px`,
+        );
+        expect(compactRing?.getAttribute('style')).toContain(
+          `height:${String(expectedSpans[index] * 64)}px`,
+        );
+        expect(hiddenRings[0]?.getAttribute('style')).toContain(
+          `width:${String(expectedSpans[index] * CHROME_TILE_PX)}px`,
+        );
+        expect(hiddenRings[0]?.getAttribute('style')).toContain(
+          `height:${String(expectedSpans[index] * CHROME_TILE_PX)}px`,
+        );
       }
     });
   });
@@ -317,7 +341,17 @@ describe('footprint Increment 4 board and migration placement recovery', () => {
       combatantId('combatant:tiny-c'), combatantId('combatant:tiny-d')].map((id, index) =>
       placed(id, `Occupant ${String(index + 1)}`, 'Tiny', { column: 4, row: 3 }, [{ column: 4, row: 3 }]));
     const selection: EncounterBoardStackSelection = new Map();
-    const board = renderBoard(projection(occupants), new Set(), null, undefined, null, selection);
+    const board = renderBoard(
+      projection(occupants),
+      new Set(),
+      null,
+      undefined,
+      undefined,
+      false,
+      undefined,
+      null,
+      selection,
+    );
     const root = interactiveElement(board);
     const tokens = root.querySelectorAll('.encounter-token');
     const listbox = root.querySelector('[role="listbox"]');

@@ -39,6 +39,15 @@ import {
   wallSetFor,
 } from '../assets/art-sets';
 import { DEAD_TOKEN_ASSET_ID } from '../assets/starter-art-inputs';
+// ART-SEAM (D525): the package's glyph mode decides which overlays a cell's light level and facts draw.
+import { CELL_GLYPH_KINDS, cellGlyphsFor, type CellGlyphKind } from '../assets/board-glyphs';
+import {
+  cellLightLevels,
+  lightMarkFor,
+  roomDefaultLight,
+  type LightLevel,
+} from '../assets/light-encoding';
+import { CELL_GLYPH_EFFECT_BY_KIND, type CellGlyphEffect, type LightGlyphEffect } from '../assets/pixel-art';
 import { hitPointKnowledge } from './intel/actor-knowledge';
 import type { ProjectedHitPointKnowledge } from './intel/contracts';
 import type { EncounterArtPackage } from './encounter-package';
@@ -114,7 +123,7 @@ export interface EncounterBoardObscurementRegion extends EncounterBoardEnvironme
 }
 
 export interface EncounterBoardLightRegion extends EncounterBoardEnvironmentRegion {
-  readonly level: 'bright' | 'dim' | 'darkness';
+  readonly level: LightLevel;
 }
 
 export interface EncounterBoardWorldObject {
@@ -265,12 +274,30 @@ export interface EncounterBoardTokenModel extends EncounterBoardPlacedCombatant 
   readonly stackSize: number;
 }
 
+/**
+ * D525: the cell's effective light level (last region wins; unregioned is
+ * bright) and the overlay tile the package's glyph mode draws for it. 'none'
+ * marks nothing here because its tints ride the illumination mechanical layer.
+ */
+export interface EncounterBoardCellLight {
+  readonly level: LightLevel;
+  readonly mark: LightGlyphEffect | null;
+}
+
+/** D525 'full': one corner mark per fact the cell carries (doors, blocked, fog, obscurement). */
+export interface EncounterBoardCellGlyph {
+  readonly kind: CellGlyphKind;
+  readonly effect: CellGlyphEffect;
+}
+
 export interface EncounterBoardCellModel {
   readonly key: string;
   readonly column: number;
   readonly row: number;
   readonly layers: readonly EncounterBoardLayer[];
   readonly mechanicalLayers: readonly EncounterBoardMechanicalLayer[];
+  readonly light: EncounterBoardCellLight;
+  readonly glyphs: readonly EncounterBoardCellGlyph[];
   readonly token: EncounterBoardTokenModel | null;
   readonly tokens: readonly EncounterBoardTokenModel[];
   readonly worldObjects: readonly EncounterBoardWorldObject[];
@@ -664,6 +691,45 @@ export function projectEncounterBoard(
   };
 }
 
+/** The level most cells of this board share; the glyph modes leave those cells unmarked. */
+export function roomDefaultLightOf(projection: EncounterBoardProjectionShape): LightLevel {
+  return roomDefaultLight(cellLightLevels(projection.bounds, projection.environmentLightRegions ?? []).values());
+}
+
+/** D525 'full': which marks a rendered board actually shows, so the legend lists exactly those. */
+export interface BoardGlyphPresence {
+  /** The cell glyph kinds at least one cell shows, in CELL_GLYPH_KINDS order. */
+  readonly cells: readonly CellGlyphKind[];
+  /** Whether any combatant carries the hidden-from-players plate mark. */
+  readonly hidden: boolean;
+}
+
+export function boardGlyphPresence(
+  cells: readonly EncounterBoardCellModel[],
+  combatants: readonly EncounterBoardCombatant[],
+): BoardGlyphPresence {
+  const shown = new Set(cells.flatMap((cell) => cell.glyphs.map((glyph) => glyph.kind)));
+  return {
+    cells: CELL_GLYPH_KINDS.filter((kind) => shown.has(kind)),
+    hidden: combatants.some((combatant) => combatant.hiddenFromPlayers === true),
+  };
+}
+
+/**
+ * The cells the engine's door world objects occupy, keyed `column,row`, with
+ * the door's state: a door that blocks movement is closed. The art package's
+ * decorative wall-band door tile is not a door here, as it is not one in the
+ * probe's fact sheet either.
+ */
+export function doorCellsOf(worldObjects: readonly EncounterBoardWorldObject[]): ReadonlyMap<string, 'open' | 'closed'> {
+  const doors = new Map<string, 'open' | 'closed'>();
+  for (const object of worldObjects) {
+    if (object.kind !== 'door') continue;
+    for (const cell of object.cells) doors.set(cellKey(cell), object.blocking.movement ? 'closed' : 'open');
+  }
+  return doors;
+}
+
 export function encounterBoardTokenRenderModels(
   projection: EncounterBoardProjectionShape,
   art: EncounterArtPackage,
@@ -777,12 +843,14 @@ export function encounterBoardRenderModel(
       illumination.set(key, [...(illumination.get(key) ?? []), region]);
     }
   }
+  const lightLevels = cellLightLevels(projection.bounds, projection.environmentLightRegions ?? []);
+  const roomDefault = roomDefaultLight(lightLevels.values());
+  const doors = doorCellsOf(worldObjects);
   const cells: EncounterBoardCellModel[] = [];
   // ART-SEAM (D516): the package names one floor/wall/door family; cells pick the member.
   const floorSet = floorSetFor(art.room.floor);
   const wallSet = wallSetFor(art.room.wall);
   const doorSet = doorSetFor(art.room.door);
-  const doorSide = doorSideAt(art.room.doorCell.column, art.room.doorCell.row, projection.bounds);
 
   for (let row = 0; row < projection.bounds.rows; row += 1) {
     for (let column = 0; column < projection.bounds.columns; column += 1) {
@@ -792,9 +860,11 @@ export function encounterBoardRenderModel(
       ];
       const wallPiece = wallPieceAt(column, row, projection.bounds);
       if (wallPiece !== null) {
+        const doorState = doors.get(key);
+        const engineDoorSide = doorState === undefined ? null : doorSideAt(column, row, projection.bounds);
         layers.push(
-          doorSide !== null && column === art.room.doorCell.column && row === art.room.doorCell.row
-            ? { role: 'door', assetId: doorSet.pieces.closed[doorSide] }
+          engineDoorSide !== null && doorState !== undefined
+            ? { role: 'door', assetId: doorSet.pieces[doorState][engineDoorSide] }
             : { role: 'wall', assetId: wallSet.pieces[wallPiece] },
         );
       }
@@ -820,6 +890,20 @@ export function encounterBoardRenderModel(
         });
       }
 
+      const lightLevel = lightLevels.get(key);
+      if (lightLevel === undefined) throw new Error(`Cell ${key} has no light level.`);
+      const light: EncounterBoardCellLight = {
+        level: lightLevel,
+        mark: lightMarkFor(art.boardGlyphs, lightLevel, roomDefault),
+      };
+      // ART-SEAM (D525): under 'full' every fact class the probe asks about gets its own corner mark.
+      const glyphs = cellGlyphsFor(art.boardGlyphs, {
+        door: doors.get(key) ?? null,
+        blocked: blocked.has(key),
+        fogged: fog.has(key),
+        obscured: obscurement.has(key),
+      }).map((kind): EncounterBoardCellGlyph => ({ kind, effect: CELL_GLYPH_EFFECT_BY_KIND[kind] }));
+
       const tokens = combatants.get(key) ?? [];
       const cellObjects = worldObjects.filter((object) => object.cells.some((cell) => cellKey(cell) === key));
       const cellAreas = areas.filter((area) => area.cells.some((cell) => cellKey(cell) === key));
@@ -840,6 +924,8 @@ export function encounterBoardRenderModel(
         row,
         layers: Object.freeze(layers),
         mechanicalLayers: Object.freeze(mechanicalLayers),
+        light: Object.freeze(light),
+        glyphs: Object.freeze(glyphs),
         token: tokens[0] ?? null,
         tokens: Object.freeze(tokens),
         worldObjects: Object.freeze(cellObjects),

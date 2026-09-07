@@ -33,6 +33,9 @@ describe('D516 pixel font', () => {
     }
     expect(PIXEL_FONT_GLYPHS.size).toBeGreaterThanOrEqual(26 + 10 + 10);
     for (const letter of 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789') expect(PIXEL_FONT_GLYPHS.has(letter)).toBe(true);
+    // D525: the light legends spell "No veil = bright light"; '=' must be a real glyph, not the '?' replacement.
+    expect(normalizeLabelText('No veil = bright light')).toBe('NO VEIL = BRIGHT LIGHT');
+    expect(PIXEL_FONT_GLYPHS.get('=')).toEqual(['.....', '.....', '#####', '.....', '#####', '.....', '.....']);
   });
 
   it('renders the four life-state marks', () => {

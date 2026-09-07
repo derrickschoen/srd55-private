@@ -2,11 +2,16 @@ import { canonicalJson } from '../commands/canonical-json';
 import { starterArtCssUrl, starterArtDataUri } from '../assets/starter-art-resolver';
 // ART-SEAM (D516): overlay art families and the DM board chrome.
 import { OVERLAY_ASSETS } from '../assets/art-sets';
+import { OBJECT_GLYPH, type BoardGlyphMode } from '../assets/board-glyphs';
+import { renderPixelGlyph } from '../assets/pixel-font';
 import {
   CHROME_TILE_PX,
+  OBJECT_LABEL_STYLE,
+  boardChromeMetrics,
+  creatureBadgeLayouts,
   renderBoardChrome,
-  stackLabelOffsets,
-  type NameplateLayout,
+  type BoardChromeTilePx,
+  type CreatureBadgeLayout,
 } from './board-chrome';
 import './styles.css';
 import { HumanController, type ControllerRequest } from '../combat/controllers';
@@ -464,12 +469,12 @@ function optionBadgeRect(center: { readonly x: number; readonly y: number }): Op
   };
 }
 
-function nameplateRect(plate: NameplateLayout): OptionBadgeRect {
+function chromeObstacleRect(plate: CreatureBadgeLayout, tilePx: BoardChromeTilePx): OptionBadgeRect {
   return {
-    x: plate.x / CHROME_TILE_PX,
-    y: plate.y / CHROME_TILE_PX,
-    width: plate.width / CHROME_TILE_PX,
-    height: plate.height / CHROME_TILE_PX,
+    x: plate.x / tilePx,
+    y: plate.y / tilePx,
+    width: plate.width / tilePx,
+    height: plate.height / tilePx,
   };
 }
 
@@ -481,9 +486,10 @@ function optionBadgeOverlaps(left: OptionBadgeRect, right: OptionBadgeRect): boo
 function positionOptionBadge(
   origin: { readonly x: number; readonly y: number },
   bounds: EncounterBoardProjectionShape['bounds'],
-  nameplates: readonly NameplateLayout[],
+  chromeObstacles: readonly CreatureBadgeLayout[],
+  tilePx: BoardChromeTilePx,
 ): { readonly center: { readonly x: number; readonly y: number }; readonly rect: OptionBadgeRect } {
-  const obstacles = nameplates.map(nameplateRect);
+  const obstacles = chromeObstacles.map((obstacle) => chromeObstacleRect(obstacle, tilePx));
   const initial = {
     x: Math.max(
       OPTION_BADGE_WIDTH_CELLS / 2,
@@ -511,7 +517,7 @@ function positionOptionBadge(
       }
     }
   }
-  throw new Error('Unable to place offered-option badge without covering a nameplate.');
+  throw new Error('Unable to place offered-option badge without covering board chrome.');
 }
 
 function svgElement<K extends keyof SVGElementTagNameMap>(tag: K): SVGElementTagNameMap[K] {
@@ -521,7 +527,8 @@ function svgElement<K extends keyof SVGElementTagNameMap>(tag: K): SVGElementTag
 function renderOfferedOptionPathOverlay(
   projection: EncounterBoardProjectionShape,
   paths: readonly OfferedOptionPath[],
-  nameplates: readonly NameplateLayout[],
+  chromeObstacles: readonly CreatureBadgeLayout[],
+  tilePx: BoardChromeTilePx,
 ): SVGSVGElement {
   const svg = svgElement('svg');
   svg.classList.add('encounter-option-paths');
@@ -615,7 +622,7 @@ function renderOfferedOptionPathOverlay(
     const badgePosition = positionOptionBadge({
       x: destination.column + 0.5 + offset.x,
       y: destination.row + 0.5 + offset.y + stackOffset,
-    }, projection.bounds, nameplates);
+    }, projection.bounds, chromeObstacles, tilePx);
     const badge = svgElement('g');
     badge.classList.add('encounter-option-destination');
     badge.dataset.optionOrdinal = String(path.optionOrdinal);
@@ -670,10 +677,16 @@ export function renderBoard(
     readonly round: number;
     readonly stateDigest: string;
   },
+  // ART-SEAM (D525): the snapshot page overrides the package's glyph mode from its URL.
+  boardGlyphs?: BoardGlyphMode,
+  boardSnapshotMode = false,
+  boardChromeTilePx?: BoardChromeTilePx,
   offeredPaths: readonly OfferedOptionPath[] | null = null,
   stackSelection: EncounterBoardStackSelection = new Map(),
 ): HTMLDivElement {
-  const art = encounterArtForBoard(projection);
+  const tilePx = boardChromeTilePx ?? CHROME_TILE_PX;
+  const chromeMetrics = boardChromeMetrics(tilePx);
+  const art = encounterArtForBoard(projection, boardGlyphs);
   const models = encounterBoardRenderModel(projection, art);
   const board = element('div', { className: 'encounter-board' });
   board.dataset.renderKey = stableRenderKey('encounter-board', art.id);
@@ -683,7 +696,9 @@ export function renderBoard(
     board.style.setProperty(`--art-overlay-${effect}`, starterArtCssUrl(assetId));
   }
   board.dataset.artPackage = art.id;
+  board.dataset.boardGlyphs = art.boardGlyphs;
   board.dataset.boardAudience = provenance === undefined ? 'player' : 'dm';
+  if (boardSnapshotMode) board.dataset.boardSnapshot = 'true';
   if (provenance !== undefined) {
     board.dataset.sourceRevision = String(provenance.revision);
     board.dataset.sourceRound = String(provenance.round);
@@ -723,6 +738,22 @@ export function renderBoard(
       cell.append(image);
     }
     for (const layer of model.mechanicalLayers) cell.append(renderMechanicalLayer(layer));
+    // ART-SEAM (D525): light glyphs under 'light' and 'full'; 'none' marks nothing, so its DOM is unchanged.
+    if (model.light.mark !== null) {
+      const mark = element('div', { className: 'encounter-light-mark' });
+      mark.setAttribute('aria-hidden', 'true');
+      mark.dataset.lightLevel = model.light.level;
+      mark.dataset.lightMark = model.light.mark;
+      cell.append(mark);
+    }
+    // ART-SEAM (D525): the 'full' vocabulary, one element per mark in the cell's corners.
+    for (const glyph of model.glyphs) {
+      const mark = element('div', { className: 'encounter-board-glyph' });
+      mark.setAttribute('aria-hidden', 'true');
+      mark.dataset.glyphKind = glyph.kind;
+      mark.dataset.glyphEffect = glyph.effect;
+      cell.append(mark);
+    }
     for (const light of model.lightOverlays) {
       const overlay = element('div', { className: `encounter-light encounter-light-${light.level}` });
       overlay.dataset.lightId = light.overlay.id;
@@ -771,7 +802,23 @@ export function renderBoard(
       placed.dataset.blocksLineOfSight = String(object.blocking.lineOfSight);
       placed.dataset.cover = object.blocking.cover;
       placed.dataset.lightClass = object.lightClass;
-      if (
+      if (art.boardGlyphs === 'full' && object.kind !== 'door' && object.lightClass !== 'light-source') {
+        const rendered = renderPixelGlyph(
+          'object',
+          OBJECT_GLYPH.rows,
+          OBJECT_GLYPH.ink,
+          chromeMetrics.latticeScale,
+          OBJECT_GLYPH.outline,
+        );
+        const sigil = element('img', { className: 'encounter-world-object-sigil' });
+        sigil.alt = '';
+        sigil.setAttribute('aria-hidden', 'true');
+        sigil.src = rendered.dataUri;
+        sigil.dataset.objectId = object.id;
+        sigil.setAttribute('style', `width:${String(rendered.cssWidth)}px;height:${String(rendered.cssHeight)}px`);
+        placed.append(sigil);
+      }
+      if (!boardSnapshotMode &&
         model.column === object.position.column &&
         model.row === object.position.row
       ) {
@@ -779,6 +826,8 @@ export function renderBoard(
           className: 'encounter-world-object-label',
           text: `${object.name} — movement ${object.blocking.movement ? 'blocked' : 'open'}; sight ${object.blocking.lineOfSight ? 'blocked' : 'open'}; cover ${object.blocking.cover}`,
         }));
+        const label = placed.querySelector<HTMLElement>('.encounter-world-object-label');
+        if (label !== null) label.dataset.labelStyle = OBJECT_LABEL_STYLE;
       }
       cell.append(placed);
     }
@@ -926,19 +975,18 @@ export function renderBoard(
     board.append(svg);
   }
   if (offeredPaths !== null) {
-    const nameplates = provenance === undefined
+    const chromeObstacles = provenance === undefined
       ? []
-      : stackLabelOffsets(projection.combatants.flatMap((combatant) => combatant.placementStatus === 'placed' ? [{
-        id: combatant.id,
-        displayName: combatant.name,
-        column: combatant.position.column,
-        row: combatant.position.row,
-      }] : []), projection.bounds);
-    board.append(renderOfferedOptionPathOverlay(projection, offeredPaths, nameplates));
+      : creatureBadgeLayouts(
+          projection.combatants.filter((combatant) => combatant.placementStatus === 'placed'),
+          tilePx,
+        );
+    board.append(renderOfferedOptionPathOverlay(projection, offeredPaths, chromeObstacles, tilePx));
     board.append(renderOfferedOptionLegend());
   }
   // ART-SEAM (D516): the DM board gains names, HP bars, coordinates and a legend; the player board does not.
-  if (provenance !== undefined) renderBoardChrome(board, projection);
+  if (provenance !== undefined)
+    renderBoardChrome(board, projection, art.boardGlyphs, models, boardSnapshotMode, boardChromeTilePx);
   return board;
 }
 
@@ -1200,7 +1248,17 @@ class PlayerEncounterView {
     if (this.#boardView === 'screen_reader') {
       this.#shell.append(renderAccessibleBoard(boardContext));
     } else {
-      const board = renderBoard(projection, this.#preview(), null, undefined, null, this.#stackSelection);
+      const board = renderBoard(
+        projection,
+        this.#preview(),
+        null,
+        undefined,
+        undefined,
+        false,
+        undefined,
+        null,
+        this.#stackSelection,
+      );
       board.addEventListener('pointermove', (event) => this.#aimAt(event));
       this.#shell.append(board);
     }
@@ -1333,6 +1391,8 @@ class DmEncounterView {
     initialSeed?: EncounterSeed,
     private readonly boardSnapshotMode = false,
     private readonly loadBoardSnapshotSession?: (sessionId: string) => Promise<void>,
+    private readonly boardGlyphs?: BoardGlyphMode,
+    private readonly captureTilePx?: BoardChromeTilePx,
   ) {
     this.#boardView = readAccessibleBoardViewMode(localStorage, 'dm');
     this.#store = store;
@@ -1377,6 +1437,8 @@ class DmEncounterView {
     initialSeed?: EncounterSeed,
     boardSnapshotMode = false,
     loadBoardSnapshotSession?: (sessionId: string) => Promise<void>,
+    boardGlyphs?: BoardGlyphMode,
+    captureTilePx?: BoardChromeTilePx,
   ): Promise<DmEncounterView> {
     const store = await IndexedDbBrowserSessionStore.open(indexedDB, localStorage);
     const view = new DmEncounterView(
@@ -1387,6 +1449,8 @@ class DmEncounterView {
       initialSeed,
       boardSnapshotMode,
       loadBoardSnapshotSession,
+      boardGlyphs,
+      captureTilePx,
     );
     await store.flush();
     return view;
@@ -2069,7 +2133,8 @@ class DmEncounterView {
       revision: projection.encounter.revision,
       round: projection.board.round,
       stateDigest: projection.stateDigest,
-    }, this.boardSnapshotMode || this.#showOfferedOptionPaths
+    }, this.boardGlyphs, this.boardSnapshotMode, this.captureTilePx,
+    this.boardSnapshotMode || this.#showOfferedOptionPaths
       ? projection.offeredOptionPaths
       : null, this.#stackSelection));
     if (movementPreview !== null) this.#shell.append(renderMovementDangerLegend(movementPreview));
@@ -2995,6 +3060,10 @@ export function mountEncounterVtt(
     readonly encounter?: StoredCharacterEncounter;
     readonly initialSeed?: EncounterSeed;
     readonly boardSnapshotMode?: boolean;
+    /** D525: the snapshot page's `boardGlyphs` URL parameter; absent, the art package decides. */
+    readonly boardGlyphs?: BoardGlyphMode;
+    /** D561: snapshot-only chrome lattice pitch; absent keeps the 128-px app default. */
+    readonly captureTilePx?: BoardChromeTilePx;
   },
 ): EncounterVttMount {
   if (options.view === 'player') {
@@ -3026,6 +3095,8 @@ export function mountEncounterVtt(
             await openDmSession(nextSessionId);
           }
         : undefined,
+      options.boardGlyphs,
+      options.captureTilePx,
     );
     if (closed) {
       view.close();

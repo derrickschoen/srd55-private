@@ -169,7 +169,7 @@
   position: relative;
   min-width: 0;
   min-height: 0;
-  margin: 0.08rem;
+  margin: 0;
   padding: 0;
   display: block;
   border: 0;
@@ -186,7 +186,7 @@
 .encounter-token[data-marker='corpse'] .encounter-token-sprite {
   filter: grayscale(1);
   opacity: 0.7;
-  transform: rotate(90deg) scale(0.78);
+  transform: rotate(90deg);
 }
 
 .encounter-token[data-selected='true'] {
@@ -263,7 +263,6 @@
 .encounter-light-dim { background: rgb(193 183 124 / 16%); }
 
 .encounter-light-label,
-.encounter-world-object-label,
 .encounter-sustained-badge {
   position: absolute;
   z-index: 9;
@@ -274,6 +273,19 @@
   background: rgb(17 19 26 / 92%);
   color: #f4f0df;
   font: 600 0.58rem/1.2 system-ui, sans-serif;
+  white-space: normal;
+}
+
+.encounter-world-object-label {
+  position: absolute;
+  z-index: 9;
+  width: max-content;
+  max-width: 15rem;
+  padding: 0.08rem 0.18rem;
+  border: 0;
+  background: rgb(17 19 26 / 78%);
+  color: #e5cf9e;
+  font: italic 500 0.5rem/1.15 system-ui, sans-serif;
   white-space: normal;
 }
 
@@ -843,23 +855,22 @@
 }
 
 /* ==========================================================================
-   D516 — classic board at 64 CSS px per cell, 16-bit pass.
-   Appended after the original rules on purpose. The option-path selectors are
-   disjoint; their chrome-aware geometry is composed in the section below.
+   D516 — classic board, now at 128 native CSS pixels per cell.
+   Appended after the original rules on purpose. The option-path selectors
+   compose with its metrics-derived chrome geometry in the section below.
    ========================================================================== */
 
 .encounter-board {
-  --encounter-tile-size: 64px;
-  --chrome-gutter: 24px;
-  border-color: #3a4152;
-  background: #14171f;
+  --encounter-tile-size: 128px;
+  border-color: #393842;
+  background: #111113;
 }
 
 /* Tiles carry their own mortar and wall rims; a 1 px cell border would scale
-   a 64 px tile into 62 px and break every wall seam. */
+   a tile into a non-native box and break every wall seam. */
 .encounter-cell {
   border: 0;
-  background: #14171f;
+  background: #111113;
 }
 
 .encounter-art-shade { z-index: 1; }
@@ -928,12 +939,21 @@
 .encounter-light-dim { background-color: transparent; background-image: var(--art-overlay-light-dim); }
 
 .encounter-world-object {
-  box-shadow: inset 0 0 0 2px rgb(196 150 84 / 85%);
+  box-shadow: inset 0 0 0 var(--chrome-world-object-border, 2px) rgb(196 150 84 / 85%);
 }
 
 .encounter-world-object[data-light-class='light-source'] {
   box-shadow: none;
   background-image: var(--art-overlay-light-source);
+}
+
+.encounter-world-object-sigil {
+  position: absolute;
+  top: var(--chrome-world-object-sigil-inset, 26px);
+  left: var(--chrome-world-object-sigil-inset, 26px);
+  display: block;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
 }
 
 .encounter-token { inset: 0; }
@@ -968,6 +988,7 @@
 
 .encounter-board[data-board-chrome='on'] {
   padding: var(--chrome-gutter);
+  border-width: var(--chrome-board-border);
 }
 
 .encounter-board[data-board-chrome='on'] > .encounter-token-layer {
@@ -976,7 +997,7 @@
   height: calc(var(--encounter-rows, 1) * var(--encounter-tile-size));
 }
 
-/* The chrome nameplate carries the full name; the in-cell label stays in the
+/* The chrome roster carries the full name; the in-cell label stays in the
    DOM for text queries but is visually hidden. */
 .encounter-board[data-board-chrome='on'] .encounter-token-label {
   position: absolute;
@@ -1010,22 +1031,35 @@
 
 .encounter-board[data-board-chrome='on'] > .encounter-option-path-legend {
   right: calc(var(--chrome-gutter) + 0.2rem);
-  bottom: calc(var(--chrome-gutter) + 120px + 8px + 0.2rem);
+  bottom: calc(var(--chrome-gutter) + var(--chrome-legend-height) + var(--chrome-legend-gap) + 0.2rem);
 }
 
 .encounter-coordinate-labels,
+.encounter-token-underlay,
 .encounter-token-chrome {
   position: absolute;
-  z-index: 11;
   inset: 0;
   pointer-events: none;
 }
 
+.encounter-token-underlay { z-index: 3; }
+.encounter-coordinate-labels,
+.encounter-token-chrome { z-index: 10; }
+
 .encounter-coordinate-label,
-.encounter-nameplate-text,
 .encounter-legend-text,
 .encounter-life-glyph,
-.encounter-hidden-ring {
+.encounter-hidden-ring,
+.encounter-creature-bust-ring,
+.encounter-creature-badge,
+.encounter-creature-badge-number,
+.encounter-roster-title,
+.encounter-roster-badge,
+.encounter-roster-name,
+.encounter-roster-coordinate,
+.encounter-roster-side,
+.encounter-roster-hp,
+.encounter-roster-hidden {
   display: block;
   image-rendering: pixelated;
   image-rendering: crisp-edges;
@@ -1034,25 +1068,27 @@
 .encounter-hp-bar {
   display: block;
   box-sizing: content-box;
-  border: 1px solid #0d0f14;
-  background: #262a35;
+  border: var(--chrome-hp-border) solid #111113;
+  background: #2a2c30;
 }
 
 .encounter-hp-bar[data-hp-band='unknown'] {
   border-style: dashed;
-  border-color: #6b7386;
+  border-color: #6b7485;
 }
 
 .encounter-hp-fill { display: block; }
 
-.encounter-nameplate {
-  display: flex;
-  box-sizing: border-box;
-  align-items: center;
-  justify-content: center;
-  padding: 4px;
-  border: 1px solid #5c6578;
-  background: rgb(13 15 20 / 60%);
+.encounter-creature-badge {
+  display: block;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+.encounter-creature-bust-ring {
+  display: block;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
 }
 
 .encounter-legend {
@@ -1061,42 +1097,90 @@
   grid-column: 1 / -1;
   box-sizing: border-box;
   align-content: flex-start;
-  gap: 6px 14px;
-  overflow: hidden;
-  padding: 6px 8px;
-  border: 2px solid #3a4152;
-  background: #1b1f29;
+  gap: var(--chrome-legend-row-gap) var(--chrome-legend-column-gap);
+  overflow: visible;
+  padding: var(--chrome-legend-padding-y) var(--chrome-legend-padding-x);
+  border: var(--chrome-legend-border) solid #393842;
+  background: #201f24;
 }
 
 .encounter-legend-item {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  height: 18px;
+  gap: var(--chrome-legend-item-gap);
+  height: var(--chrome-legend-item-height);
 }
 
 .encounter-legend-swatch {
-  display: inline-block;
-  box-sizing: border-box;
-  width: 14px;
-  height: 14px;
-  border: 1px solid #0d0f14;
+  display: block;
+  flex: 0 0 auto;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
 }
 
-.encounter-legend-plate .encounter-legend-swatch { border-radius: 50%; }
-
-.encounter-legend-plate-dashed .encounter-legend-swatch {
-  border: 2px dashed #eef0f5;
-  border-radius: 50%;
-  background: transparent !important;
+.encounter-legend-art .encounter-legend-swatch {
+  width: var(--chrome-legend-swatch);
+  height: var(--chrome-legend-swatch);
 }
 
-.encounter-legend-hp .encounter-legend-swatch {
-  width: 20px;
-  height: 6px;
+.encounter-object-tag-rail {
+  display: flex;
+  flex: 1 0 100%;
+  flex-wrap: wrap;
+  gap: var(--chrome-object-rail-row-gap) var(--chrome-object-rail-column-gap);
+  align-items: flex-start;
+  overflow: visible;
 }
 
-.encounter-legend-glyph .encounter-legend-swatch { border-radius: 2px; }
+.encounter-board-tag {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: var(--chrome-tag-gap);
+  align-items: center;
+  padding: var(--chrome-tag-padding-y) var(--chrome-tag-padding-x);
+  background: #111113;
+}
+
+.encounter-object-tag { border: var(--chrome-object-tag-border) solid #8e7148; }
+
+.encounter-door-tag {
+  border: var(--chrome-door-tag-border) solid #b0b2b9;
+  background: #2a2c30;
+}
+
+.encounter-board-tag-sigil,
+.encounter-board-tag-text {
+  display: block;
+  flex: 0 0 auto;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+.encounter-roster-box {
+  display: flex;
+  flex: 1 0 100%;
+  flex-direction: column;
+  gap: var(--chrome-roster-box-gap);
+  padding-top: var(--chrome-roster-box-padding-top);
+  border-top: var(--chrome-roster-box-border) solid #393842;
+}
+
+.encounter-roster-entry {
+  display: grid;
+  grid-template-columns: var(--chrome-roster-badge-column) max-content max-content max-content max-content max-content;
+  gap: var(--chrome-roster-grid-gap);
+  align-items: center;
+  min-height: var(--chrome-roster-entry-min-height);
+  padding: var(--chrome-roster-entry-padding-y) var(--chrome-roster-entry-padding-x);
+  border: var(--chrome-roster-entry-border) solid #393842;
+  background: #111113;
+}
+
+.encounter-roster-badge {
+  display: block;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
 
 /* --- DM chrome: slate ground, 2 px pixel bevels, uppercase mono headings -- */
 
@@ -1210,4 +1294,65 @@
   border-color: #d8a24a;
   background: #d8a24a;
   color: #14171f;
+}
+
+/* --- D525 board glyphs: light glyphs ('light', 'full') and the cell vocabulary ('full') ---- */
+
+.encounter-light-mark,
+.encounter-board-glyph {
+  position: absolute;
+  z-index: 4;
+  inset: 0;
+  pointer-events: none;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  background-color: transparent;
+  background-position: center;
+  background-size: var(--encounter-tile-size) var(--encounter-tile-size);
+  background-repeat: no-repeat;
+}
+
+.encounter-light-mark[data-light-mark='light-glyph-bright'] { background-image: var(--art-overlay-light-glyph-bright); }
+.encounter-light-mark[data-light-mark='light-glyph-dim'] { background-image: var(--art-overlay-light-glyph-dim); }
+.encounter-light-mark[data-light-mark='light-glyph-dark'] { background-image: var(--art-overlay-light-glyph-dark); }
+
+.encounter-board-glyph[data-glyph-effect='glyph-door-closed'] { background-image: var(--art-overlay-glyph-door-closed); }
+.encounter-board-glyph[data-glyph-effect='glyph-door-open'] { background-image: var(--art-overlay-glyph-door-open); }
+.encounter-board-glyph[data-glyph-effect='glyph-blocked'] { background-image: var(--art-overlay-glyph-blocked); }
+.encounter-board-glyph[data-glyph-effect='glyph-fog'] { background-image: var(--art-overlay-glyph-fog); }
+.encounter-board-glyph[data-glyph-effect='glyph-obscured'] { background-image: var(--art-overlay-glyph-obscured); }
+
+/* Under a glyph mode the floor stays plain: the 'none' illumination tint draws nothing. */
+.encounter-board[data-board-glyphs='light'] .encounter-mechanical-illumination,
+.encounter-board[data-board-glyphs='full'] .encounter-mechanical-illumination {
+  background-color: transparent;
+  background-image: none;
+}
+
+/* Under 'full' the fog glyph tile carries the hatched veil; the dithered fog tile would bury it. */
+.encounter-board[data-board-glyphs='full'] .encounter-art-fog {
+  display: none;
+}
+
+.encounter-hidden-glyph {
+  display: block;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+.encounter-legend-art .encounter-legend-swatch {
+  border-radius: 0;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  background-repeat: no-repeat;
+}
+
+.encounter-legend-mark .encounter-legend-swatch-mark {
+  display: block;
+  width: auto;
+  height: auto;
+  border: 0;
+  background: transparent;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
 }

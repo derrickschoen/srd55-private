@@ -1,4 +1,5 @@
 import { paletteHex, type PaletteColorRef } from './palette';
+import { outlineRows } from './pixel-mark';
 
 /**
  * An original 8×8-cell bitmap font (glyphs 5×7, one-column gap). Uppercase,
@@ -63,6 +64,7 @@ export const PIXEL_FONT_GLYPHS: ReadonlyMap<string, readonly string[]> = new Map
   ['(', G('..#..', '.#...', '#....', '#....', '#....', '.#...', '..#..')],
   [')', G('..#..', '...#.', '....#', '....#', '....#', '...#.', '..#..')],
   ['+', G('.....', '..#..', '..#..', '#####', '..#..', '..#..', '.....')],
+  ['=', G('.....', '.....', '#####', '.....', '#####', '.....', '.....')],
   ['!', G('..#..', '..#..', '..#..', '..#..', '..#..', '.....', '..#..')],
   ['?', G('.###.', '#...#', '....#', '...#.', '..#..', '.....', '..#..')],
   ['&', G('.##..', '#..#.', '#..#.', '.##..', '#.#.#', '#..#.', '.##.#')],
@@ -199,18 +201,46 @@ export function renderPixelText(
   };
 }
 
-export function renderLifeGlyph(glyph: LifeGlyph, ink: PaletteColorRef, scale: number): PixelTextRender {
-  const runs = glyphRuns(LIFE_GLYPHS[glyph], 0, 0);
-  const fill = paletteHex(ink);
+/**
+ * Renders one rectangular `#`/`.` bitmap as crisp SVG rects. With an
+ * `outline` ink, every `.` pixel that touches a `#` (8-neighbourhood) is drawn
+ * in that ink first, so the mark keeps a one-pixel ring on any background —
+ * the same rule paintLightGlyph uses on the board tile.
+ */
+export function renderPixelGlyph(
+  label: string,
+  rows: readonly string[],
+  ink: PaletteColorRef,
+  scale: number,
+  outline: PaletteColorRef | null = null,
+): PixelTextRender {
+  // outlineRows validates the grid; the ring is only drawn when an outline ink is given.
+  const ring = outlineRows(rows);
+  const height = rows.length;
+  const width = rows[0]?.length ?? 0;
+  const layers: string[] = [];
+  if (outline !== null) layers.push(rectGroup(glyphRuns(ring, 0, 0), paletteHex(outline)));
+  const inset = outline === null ? 0 : 1;
+  layers.push(rectGroup(glyphRuns(rows, inset, inset), paletteHex(ink)));
+  const boxWidth = width + 2 * inset;
+  const boxHeight = height + 2 * inset;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${String(boxWidth)} ${String(boxHeight)}" width="${String(boxWidth * scale)}" height="${String(boxHeight * scale)}" shape-rendering="crispEdges">${layers.join('')}</svg>`;
+  return {
+    layout: { lines: [label], width: boxWidth, height: boxHeight },
+    svg,
+    dataUri: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`,
+    cssWidth: boxWidth * scale,
+    cssHeight: boxHeight * scale,
+  };
+}
+
+function rectGroup(runs: readonly GlyphRun[], fill: string): string {
   const rects = runs
     .map((run) => `<rect x="${String(run.x)}" y="${String(run.y)}" width="${String(run.width)}" height="1"/>`)
     .join('');
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${String(GLYPH_WIDTH)} ${String(GLYPH_HEIGHT)}" width="${String(GLYPH_WIDTH * scale)}" height="${String(GLYPH_HEIGHT * scale)}" shape-rendering="crispEdges"><g fill="${fill}">${rects}</g></svg>`;
-  return {
-    layout: { lines: [glyph], width: GLYPH_WIDTH, height: GLYPH_HEIGHT },
-    svg,
-    dataUri: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`,
-    cssWidth: GLYPH_WIDTH * scale,
-    cssHeight: GLYPH_HEIGHT * scale,
-  };
+  return `<g fill="${fill}">${rects}</g>`;
+}
+
+export function renderLifeGlyph(glyph: LifeGlyph, ink: PaletteColorRef, scale: number): PixelTextRender {
+  return renderPixelGlyph(glyph, LIFE_GLYPHS[glyph], ink, scale);
 }

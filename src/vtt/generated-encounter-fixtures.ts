@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { assetIdSchema, type AssetId } from '../assets/ids';
+import { DEFAULT_BOARD_GLYPH_MODE } from '../assets/board-glyphs';
 import { STARTER_ART_MANIFEST } from '../assets/starter-art-manifest';
 import { resolveStarterArt } from '../assets/starter-art-resolver';
 import {
@@ -783,6 +784,8 @@ export function encounterArtFromApprovedFixture(
       adjudicated: layout.ui.adjudicatedAssetId,
     },
     combatantTokens: layout.combatantTokens,
+    // ART-SEAM (D525): approved fixtures predate the glyph vocabulary and draw the pre-D525 board.
+    boardGlyphs: DEFAULT_BOARD_GLYPH_MODE,
   };
 }
 

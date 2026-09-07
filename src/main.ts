@@ -55,10 +55,31 @@ if (localEncounterLaunch) {
   const view = launchUrl.searchParams.get('view') === 'dm' ? 'dm' : 'player';
   const sessionId = launchUrl.searchParams.get('session') ?? 'reference-encounter';
   const boardSnapshotMode = launchUrl.searchParams.get('boardSnapshot') === '1';
-  void import('./vtt/encounter-app').then(({ mountEncounterVtt }) => {
-    const mounted = mountEncounterVtt(encounterRoot, { view, sessionId, boardSnapshotMode });
-    window.addEventListener('pagehide', () => mounted.close(), { once: true });
-  });
+  const boardGlyphsParameter = launchUrl.searchParams.get('boardGlyphs');
+  const captureTilePxParameter = launchUrl.searchParams.get('captureTilePx');
+  let captureTilePx: 64 | 128 | undefined;
+  if (captureTilePxParameter === '64') captureTilePx = 64;
+  else if (captureTilePxParameter === '128') captureTilePx = 128;
+  else if (captureTilePxParameter !== null)
+    throw new Error(
+      `Unknown captureTilePx ${captureTilePxParameter}; expected 64 or 128.`,
+    );
+  void Promise.all([import('./vtt/encounter-app'), import('./assets/board-glyphs')]).then(
+    ([{ mountEncounterVtt }, { isBoardGlyphMode }]) => {
+      // D525: a misspelt mode must fail here, not silently capture a 'none' board under another label.
+      if (boardGlyphsParameter !== null && !isBoardGlyphMode(boardGlyphsParameter)) {
+        throw new Error(`Unknown boardGlyphs ${boardGlyphsParameter}; expected none, light or full.`);
+      }
+      const mounted = mountEncounterVtt(encounterRoot, {
+        view,
+        sessionId,
+        boardSnapshotMode,
+        ...(boardGlyphsParameter === null ? {} : { boardGlyphs: boardGlyphsParameter }),
+        ...(captureTilePx === undefined ? {} : { captureTilePx }),
+      });
+      window.addEventListener('pagehide', () => mounted.close(), { once: true });
+    },
+  );
 } else {
 
 const persistenceStatus =

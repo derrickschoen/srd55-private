@@ -4,7 +4,7 @@ import { base64 } from '../../src/assets/png';
 import { renderStarterArtPng } from '../../src/assets/starter-art-resolver';
 import { STARTER_ART_MANIFEST } from '../../src/assets/starter-art-manifest';
 import { TILE_SIZE } from '../../src/assets/pixel-art';
-import { combatantId } from '../../src/combat/values';
+import { combatantId, worldObjectId } from '../../src/combat/values';
 import { encounterBoardRenderModel } from '../../src/vtt/encounter-board';
 import { REFERENCE_ENCOUNTER_ART } from '../../src/vtt/reference-encounter-art';
 
@@ -24,7 +24,9 @@ function symbolId(id: string): string {
 }
 
 function useAsset(id: string, x: number, y: number, size: number): string {
-  return `<use href="#${symbolId(id)}" transform="translate(${String(x)} ${String(y)}) scale(${String(size / TILE_SIZE)})" data-asset-id="${id}"/>`;
+  const scale = size / TILE_SIZE;
+  if (!Number.isSafeInteger(scale) || scale < 1) throw new RangeError('Preview art must use a positive integer scale.');
+  return `<use href="#${symbolId(id)}" transform="translate(${String(x)} ${String(y)}) scale(${String(scale)})" data-asset-id="${id}"/>`;
 }
 
 function escapeXml(value: string): string {
@@ -41,7 +43,7 @@ function boardPreview(
   originX: number,
   originY: number,
 ): string {
-  const size = 44;
+  const size = TILE_SIZE;
   const model = encounterBoardRenderModel(projection, REFERENCE_ENCOUNTER_ART);
   const content = model.map((cell) => {
     const x = originX + cell.column * size;
@@ -55,7 +57,7 @@ function boardPreview(
       cell.token.focusAssetId,
       cell.token.adjudicatedAssetId,
     ].flatMap((id) => id === null ? [] : [
-      useAsset(id, x + 2, y + 2, size - 4),
+      useAsset(id, x, y, size),
     ]).join('');
     return `${layers}${tokenImages}`;
   }).join('');
@@ -80,6 +82,16 @@ function previewSvg(): string {
     combatants: party,
     highlightedCombatant: combatantId('combatant:fighter'),
     adjudicatedTargets: [combatantId('combatant:training-brute')],
+    // D525: previewed door art must be backed by the same engine object the board projects.
+    worldObjects: [{
+      id: worldObjectId('world-object:starter-art-preview-south-door'),
+      name: 'South Door',
+      kind: 'door' as const,
+      position: { column: 4, row: 6 },
+      cells: [{ column: 4, row: 6 }],
+      blocking: { movement: true, lineOfSight: true, cover: 'total' as const },
+      lightClass: 'none' as const,
+    }],
   };
   const tokenAssets = STARTER_ART_MANIFEST.assets.filter((asset) => asset.kind === 'token');
   const definitions = STARTER_ART_MANIFEST.assets.map((asset) =>
@@ -87,15 +99,15 @@ function previewSvg(): string {
   ).join('');
   const perRow = 12;
   const inventory = tokenAssets.map((asset, index) => {
-    const x = 28 + (index % perRow) * 100;
-    const y = 56 + Math.floor(index / perRow) * 100;
-    return `<g data-inventory-asset="${asset.id}">${useAsset(asset.id, x, y, TILE_SIZE)}<text x="${String(x + 32)}" y="${String(y + 80)}" class="label" fill="#edf0f7">${escapeXml(asset.title.replace(' bust', ''))}</text></g>`;
+    const x = 28 + (index % perRow) * 136;
+    const y = 56 + Math.floor(index / perRow) * 152;
+    return `<g data-inventory-asset="${asset.id}">${useAsset(asset.id, x, y, TILE_SIZE)}<text x="${String(x + 64)}" y="${String(y + 142)}" class="label" fill="#edf0f7">${escapeXml(asset.title.replace(' bust', ''))}</text></g>`;
   }).join('');
   const inventoryRows = Math.ceil(tokenAssets.length / perRow);
-  const boardsY = 56 + inventoryRows * 100 + 40;
-  const height = boardsY + 7 * 44 + 40;
+  const boardsY = 56 + inventoryRows * 152 + 40;
+  const height = boardsY + 7 * TILE_SIZE + 40;
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="1240" height="${String(height)}" viewBox="0 0 1240 ${String(height)}" data-generator="${STARTER_ART_MANIFEST.generator.id}" data-generator-version="${STARTER_ART_MANIFEST.generator.version}"><defs>${definitions}</defs><style>text{font-family:ui-monospace,monospace}.title{font-size:22px;font-weight:700}.heading{font-size:16px;font-weight:700}.label{font-size:9px;text-anchor:middle}image{image-rendering:pixelated}</style><rect width="1240" height="${String(height)}" fill="#11131a"/><text x="28" y="30" class="title" fill="#edf0f7">Starter Pixel Art — deterministic fixture preview</text><g data-sprite-inventory="${String(tokenAssets.length)}">${inventory}</g>${boardPreview('Player', base, 86, boardsY)}${boardPreview('DM', { ...base, foggedCells: [{ column: 8, row: 1 }, { column: 8, row: 2 }] }, 690, boardsY)}<metadata>pure-procedural-only; cc-by-4.0; focus.active-pc; event.adjudicated; fog.hidden; terrain; one-room; player-projection; dm-projection</metadata></svg>\n`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="2840" height="${String(height)}" viewBox="0 0 2840 ${String(height)}" data-generator="${STARTER_ART_MANIFEST.generator.id}" data-generator-version="${STARTER_ART_MANIFEST.generator.version}"><defs>${definitions}</defs><style>text{font-family:ui-monospace,monospace}.title{font-size:22px;font-weight:700}.heading{font-size:16px;font-weight:700}.label{font-size:9px;text-anchor:middle}image{image-rendering:pixelated}</style><rect width="2840" height="${String(height)}" fill="#11131a"/><text x="28" y="30" class="title" fill="#edf0f7">Starter Pixel Art — deterministic fixture preview</text><g data-sprite-inventory="${String(tokenAssets.length)}">${inventory}</g>${boardPreview('Player', base, 28, boardsY)}${boardPreview('DM', { ...base, foggedCells: [{ column: 8, row: 1 }, { column: 8, row: 2 }] }, 1480, boardsY)}<metadata>pure-procedural-only; cc-by-4.0; focus.active-pc; event.adjudicated; fog.hidden; terrain; one-room; player-projection; dm-projection</metadata></svg>\n`;
 }
 
 export interface StarterArtGenerationOptions {
