@@ -14187,3 +14187,13 @@ and the D567/compact-fallback landing; the blind-dm branch (contracts,
 D569/D570 knowledge bundle, legacy invariance) takes main so increment
 1b (blind renderer, closed MCP profile, ingress recorder) can start
 per the approved plan.
+
+## brutal-b family and boundary fix LANDED on main (2d8b1cfc) (2026-09-07 07:08)
+
+Landing gate (gate-wt-brutal-b.log, start 05:54, done 06:56): tsc 0,
+sg 0, vitest-gate 0 (one load flake passed serially), Playwright 185
+passed + 1 passed serially, exit 0. Merged from the main repo with
+--no-ff, exit 0. :4173 restart follows in its own calls. Main now
+carries: classic round 5, the E1 semantic-board lineage, the D567 cap
+knob and compact-fallback fix, the second brutal family with the
+boundary fix. Four landings this window, each behind a full gate.
