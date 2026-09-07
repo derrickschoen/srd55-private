@@ -13970,3 +13970,17 @@ E1cc brutal reruns on the schema-fixed E1c tree (56bcd859): luna_facts
 30/30 authorized, luna_control 30/30 authorized, 0 refusals in either,
 semantic_board_truncated [] on 30/30 (was 5 and 1 partial executions).
 sol_facts running; packets and the panel follow it.
+
+## D567 16 KiB (fixed build) panel; brutal reruns complete and with the panel (2026-09-07 02:39)
+
+16 vs 32 (cap-fix build for the 16 arm, luna medium, hard x3): cap16
+9.09 vs cap32 9.37; contrast row: | cap32 − cap16 | 30 | 9.09 | 9.37 | +0.28 | [+0.02, +0.57] |. Combined with 24 (=32), 48
+(-0.29) and 64 (-0.34): the sweep is flat-to-negative on both sides
+of 24-32 KiB; 24 KiB is the smallest cap with no judged loss and the
+fastest turns.
+
+E1cc brutal reruns (schema-fixed 56bcd859): luna_facts 30/30 authorized,
+luna_control 30/30, sol_facts 28/30 (2 refused at attempts 0: see the
+refusal text in the run record; not the schema refusal). Packets
+(brutal-10, shuffle 9064) built with the E1c tree's builder; the
+standing panel is judging both.
