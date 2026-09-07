@@ -13887,3 +13887,19 @@ must reconcile the two into main's generator.
 Next: rerun the void arms on fixed builds: cap 16 (cap-fix tree) and
 the E1cb brutal arms (schema-fixed E1c tree), after the 48/64 arms free
 the model lanes.
+
+## D568 round 2 no-gain; luna low comprehension phase closed as achieved within noise (2026-09-07 01:24)
+
+Round 2 (v9-checklist primer, facts only, luna low, seed 6203001, tuning
+tree 09ef9f4b): mean .986, strict PASS, Q5 .907, Q1 .955, against the
+same-tree control .989/.919/.968: no gain. Two consecutive rounds
+without a CI-excluding gain = "maxed" under the plan's rule. Standing
+result for D568: luna low with engine facts reads the board at
+.989-.996 mean (both seeds, three runs) versus luna medium .995 and sol
+high .999; the only class below .96 at low is light, whose run-to-run
+spread (.907-.993 on identical inputs) is model variance, not an
+encoding gap. Further comprehension tuning at low would chase noise;
+the comprehension goal of D568 is met and the next test of luna low is
+DM quality (the D569 arms run low last, as ordered). Rejected factors
+recorded: v2-evidence answer format (-.17 light), checklist primer (no
+gain); the screenshot itself is neutral-to-harmful at low on light.
