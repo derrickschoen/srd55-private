@@ -14289,3 +14289,39 @@ engine-top arm; the brutal-pool lane must add a real engine-top arm
 (planner "engine_top") for D572's selection. D573 luna-low reruns
 launched on a run worktree off main (caps 16-64 hard; facts vs control
 hard and brutal).
+
+## D573 luna-low caps 16/24 vs 32; increment 2 and the D572 pool delivered; a boundary finding against my own 1b verification (2026-09-07 09:40)
+
+Luna LOW, hard R1-10 x3, each vs the low 32 KiB control (unseal-lowcap-a.md):
+16 KiB: control - 16 = +0.32 [-0.01, +0.67] (8.79 vs 8.98); 24 KiB:
++0.03 [-0.33, +0.30] (8.94 vs 8.98): the same shape as luna medium (16
+worse, 24 equal). 48/64 running. Rows: all 30/30 authorized, no
+refusals, medians 48-55 s.
+
+Increment 2 (codex): boardSnapshotInformation advice|blind_state
+(advice default byte-compatible), blind projection drops offered paths
+before render, blind DOM rejects option classes/attributes/legend/
+threat/next-event preview before capture, roles dm_board /
+accessible_board_raster / player_board with ordinals and hashes,
+accessible HTML kept as audit only, initiative stays in the blind JSON.
+Claims 7 files 226/226, Playwright 2/2, tsc 0, three mutants killed,
+pixels inspected. Verification chain running.
+
+FINDING (mine): codex notes tests/unit/tools/engine-mcp-boundary.test.ts
+fails on this tree since increment 1b (the blind renderer's runtime
+import graph reaches src/combat/encounter.ts and random.ts, the same
+standalone-MCP boundary E1c broke and fixed with an engine-safe
+projection). My 1b verification ran the plan's five-spec command and
+never the boundary test, so I committed 1b with a red boundary test.
+Repair folded into the queued 1b amendment (D574 stat compression):
+route the blind renderer through engine-safe sources and run the
+boundary test as part of its gate.
+
+D572 pool (codex): seeds 6208001-30, no overrides, regenerated
+byte-identical, membership plus round-1 execution validated, bases
+brutal-pool and brutal-struggle, protocols brutal-pool and
+brutal-struggle, `--engine-top` arm (planner "engine_top", plannedBy
+null, primary option = actorOpportunityReport(...).defaultOption; the
+existing --dry-run records a simulated model instead), a selection tool
+with unanimous three-seat rule and --freeze. Claims 4 files 84/84 + 15/
+15, tsc 0, five mutants killed. Verification chain running.
