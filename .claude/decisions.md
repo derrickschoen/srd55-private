@@ -14518,3 +14518,25 @@ ERA BOUNDARY: once blocked cells block sight, every judged result
 recorded before D576 lands (E1c hard/brutal, E1cb, E1cc, cap sweeps at
 medium and low, brutal-b, pool screening) belongs to the pre-D576 era
 and is not comparable to post-D576 runs on the same seeds.
+
+## D576 plan APPROVED at round 2 (583 lines); one owner question blocks increment 1a (2026-09-07 11:40)
+
+Round 2 added: the D576.1 `engine.query_line` fact tool (both
+profiles; source cell, target cell, optional acting creature; answer
+carries sight, blocking cell, cover tier and sources, never a score or
+recommendation; per-round budget 0-3 with default 1, spool like KB
+reads, every call recorded on the row and counted by the blind
+ingress audit; refusal codes for budget, placement and stale state);
+increment 1 split into 1a (vocabulary, wire union, trace, runtime
+cutover, parity, era census) and 1b (authored-content migration,
+schemas, the MCP tool); a no-model census over 63 rooms counting
+ordered living-creature pairs whose sight or cover answer changes,
+with tier-transition counts; the half-cover movement alternative
+costed (traversable difficult ground: a second typed dimension or a
+fifth profile, path-cost and occupancy tests, legend text, generator
+and adjudication updates, new mutants); three worked examples in the
+guide including an intervening creature and a Large creature's
+least-obstructed ray; the E1b semantic payload versioned with a
+per-cell terrain partition in increment 3, never pair answers.
+Consensus; no round 3. Increment 1a waits on the owner's ruling on
+half-cover movement, per the plan's own first scope line.
