@@ -191,6 +191,15 @@ describe('renderer profile', () => {
     expect(rendererProfileSchema.safeParse({ ...DEFAULT_RENDERER_PROFILE, delta: 'maybe' }).success).toBe(false);
     expect(rendererProfileSchema.safeParse({ ...DEFAULT_RENDERER_PROFILE, nullFields: 'maybe' }).success).toBe(false);
     expect(rendererProfileSchema.safeParse({ ...DEFAULT_RENDERER_PROFILE, attribution: 'maybe' }).success).toBe(false);
+    expect(rendererProfileSchema.parse({ ...DEFAULT_RENDERER_PROFILE, semanticBoard: true }))
+      .toEqual({ ...DEFAULT_RENDERER_PROFILE, semanticBoard: true });
+    expect(rendererProfileSchema.safeParse({ ...DEFAULT_RENDERER_PROFILE, semanticBoard: false }).success).toBe(false);
+    expect(rendererProfileSchema.safeParse({
+      ...DEFAULT_RENDERER_PROFILE,
+      format: 'caveman_prose',
+      semanticBoard: true,
+    }).success).toBe(false);
+    expect(DEFAULT_RENDERER_PROFILE).not.toHaveProperty('semanticBoard');
     const { rows: _rows, ...incomplete } = DEFAULT_RENDERER_PROFILE;
     expect(rendererProfileSchema.safeParse(incomplete).success).toBe(false);
   });

@@ -43,6 +43,20 @@ const VIEWPORT = Object.freeze({ width: 1_280, height: 1_280 });
 const SNAPSHOT_CANARY = 'board-snapshot-element-crop-canary';
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
 
+export function configuredPreviewPort(
+  environment: Readonly<NodeJS.ProcessEnv> = process.env,
+): number {
+  const raw = environment['BOARD_SNAPSHOT_PREVIEW_PORT'];
+  if (raw === undefined) return 0;
+  const port = Number(raw);
+  if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) {
+    throw new RangeError(
+      `BOARD_SNAPSHOT_PREVIEW_PORT must be a valid port; received "${raw}".`,
+    );
+  }
+  return port;
+}
+
 export type CaptureTilePx = 64 | 128;
 
 export function boardSnapshotCaptureGeometry(
@@ -480,7 +494,7 @@ export class BoardSnapshotService implements AsyncDisposable {
     const server = await preview({
       root: repositoryRoot,
       configLoader: 'runner',
-      preview: { host: '127.0.0.1', port: 0, strictPort: true },
+      preview: { host: '127.0.0.1', port: configuredPreviewPort(), strictPort: true },
     });
     const port = actualPort(server);
     if (port === 4173) {

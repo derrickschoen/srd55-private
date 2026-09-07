@@ -13337,3 +13337,762 @@ budget with D418.2 the next day; never ruled, never A/B tested; the
 base context sits at 31.4-32.8 KB on every hard room, so the cap prunes
 options (six built offense-first, down to two in room 5 on 2026-09-05)
 and actor detail on nearly every turn. Supervisor plan follows.
+
+## D567 plan dispatched (lane cap-sweep) and D568 — OWNER: luna low comprehension experiment (2026-09-06 22:44)
+
+Cap sweep: worktree dnd-wt-cap-sweep off main 1457234d, codex session
+01a079bf-bc31-7753-9ed8-d9a748684aa5, brief
+.tmp/runs/briefs-2026-09-06/cap-sweep.md: `--turn-context-max-bytes`
+knob on arena/conversation with the cap, pre/post-trim bytes and the
+options-omitted count on every row; proof that the screenshot travels
+outside every byte accounting (the tool-result cap has a 64 KiB hard
+limit, which no 128-px board PNG could fit, so the image must already
+be outside it; the lane proves it); recorder assertion follows the cap;
+a no-model-call table for caps 16/24/32/48/64 KiB on the 10 hard
+fixtures (post-trim bytes, options offered/omitted, removal classes).
+Then supervisor arms: luna medium, default profile, hard R1-10 x3 at
+16/24/32/48/64 KiB on the same tree, each judged against the 32 KiB
+control; latency per turn recorded.
+
+D568 — OWNER (verbatim): "Also do an experiment process to try to get
+Luna low comprehension as good as what we got with Luna medium that let
+it match sol high performance". Reading: the comprehension probe at
+luna low, same 24 states, with the delivery modes and encodings that
+took luna medium to .995 (semantic facts, image+facts), primer variants
+and answer schema, then whatever encoding/primer changes lift luna low,
+each replicated on seed 2. Baseline matrix launched first (model calls
+only, supervisor-run, E1b tree 49d782bb).
+
+## Main landing gate GREEN at 236aa967 (classic round 5) (2026-09-06 22:44)
+
+gate-multiclass-spells-static.log, start 21:45:32, done 22:44:39: tsc 0,
+sg 0, vitest-gate 0 (no load flakes, none failed), Playwright 186
+passed in 50.0 min, no load flakes, exit 0. Classic round 5 (native
+128-px art, lattice-scaled chrome, 5d obscured/difficult art, primer
+v10, board-chrome-layout module, sprite-lattice CSS fix) is landed and
+verified on main; :4173 serves it.
+
+## D569 — OWNER: blind-DM experiment, luna (high, then medium, then low) vs sol high with screenshot only and no engine legal/recommended moves (2026-09-06 22:54)
+
+Owner (verbatim): "Cue up another experiment where we try to get Luna
+(high first, then medium after high is maxed out, then low lastly) to
+perform as well as sol high where both are given a screenshot but no
+output of legal or recommended moves from the engine. I want to see how
+good we can get the ai dm to perform given only the rules of the game,
+general tips, all of the visual representations of tabletop state, and
+instructions on how to interpret the screenshot.
+
+My hope is that we can make the ai dm better at knowing when to
+override the engine top recommendation. I hope that The better it can
+independently understand how to run the game like a human would, the
+more often it will improve upon performance of just following the
+engine advice and getting cheesed out like the bg3 algorithm does.
+
+You will need the judges panel to rate the performance of different
+models."
+
+Supervisor reading, recorded so it can be corrected: a "blind" DM mode
+in which the turn context carries the rules KB, general tactics tips,
+the DM board screenshot(s) with the interpretation primer, the
+initiative timeline and creature names/HP bands as the board shows
+them, and NOTHING derived from the option engine: no offered options,
+no intel, no adverts, no suggested plan, no consequence cards. The
+model states its intent for each monster in a small typed grammar
+(actor by name, action kind and named target or destination cell using
+the board's coordinate gutter), and the engine resolves that intent
+deterministically to a legal offered option or rejects it with a typed
+code. Standing-rule conflict, named: "the model may never emit
+coordinates, paths, dice, DCs, damage or reducer commands". Under D569
+the model must name destinations somehow; the reading is that
+coordinates as board labels are the owner's intended input in this
+mode (the gutter exists for it), while dice, DCs, damage and reducer
+commands stay forbidden and the engine remains the sole authority over
+legality and resolution (a rejected intent never acts). If the owner
+wants destinations expressed only relatively ("adjacent to the wizard",
+"behind the pillar"), say so and the grammar shrinks. Order of arms:
+luna high blind vs sol high blind (and sol high with engine advice as
+the ceiling reference), judged by the standing panel on the hard and
+brutal bases; luna medium once luna high is maxed; luna low last. The
+override study (blind judgement vs engine top recommendation) follows
+once blind play is measured. Codex writes the plan; supervisor
+critiques before any implementation.
+
+## D569 plan round 1 received; supervisor critique sent as round 2 (2026-09-06 23:17)
+
+Codex plan (587 lines, .tmp-plans/2026-09-06-blind-dm-no-engine-advice.md,
+copied to the main repo): blind DM mode with an exact turn-context
+allowlist (names, badges, sides, HP bands, initiative, image roles,
+primer version), closed MCP tool profile, D569 CC-BY KB bundle shared by
+blind and advice arms, typed intent grammar with the gutter label as the
+only coordinate form, private deterministic resolver over
+availableEngineActorOptions, closed rejection enum, code-only vs
+labelled minimal-hint repair arms, byte-level ingress leak audit,
+state-only screenshot capture, packet compatibility via the existing
+resolutionSummary, arms and cohorts, -0.20 noninferiority with
+seed-clustered CI, second seed family as fluke guard, "maxed" = two
+consecutive no-gain tuning rounds, override study recorded now as
+answer-key-only fields, five increments with tests/mutants/markers.
+Two catches by codex that the record did not have: snapshot mode passes
+the engine's offered movement paths into the capture even with the UI
+toggle off (a blind screenshot would carry advice in pixels), and the
+DM timeline's next-event preview can print an exact save DC.
+
+Supervisor critique (round 2, brief blind-dm-plan-r2.md): (1)
+structural: the ambiguity rule rejects any attack without a destination
+when a moving variant exists and any relative phrase with two candidate
+cells, so refusal rate would dominate the panel; required: no
+destination = hold, relative phrases resolve by a documented geometric
+convention printed in the primer, strict rejection only for genuine
+semantic ambiguity; (2) area spells unreachable (no area anchor in the
+grammar; entangle is the brutal room-1 opener); (3) attempts default 3
+under the 240 s wall; (4) report refusals-as-zero and executed-only
+plus refusal rate with CI; (5) tips authorship clean-room CC-BY, never
+from the private research tree; (6) split increment 1; (7) confirm the
+initiative hp_band is exactly the board's knowledge-policy band; (8)
+capture and first-token latency; (9) ceiling arm comparability with
+the standing sol-high baseline; (10) who generates and verifies the
+second seed family. Session resumed (same id confirmed).
+
+## Cap-sweep table reproduced; E1cb facts arm delivers whole blocks; D568 luna-low png baseline (2026-09-06 23:24)
+
+Cap sweep (lane cap-sweep, my own run of tools/turn-context-cap-sweep.ts):
+50/50 rows identical to codex's table. Pre-trim context 46-83 KB per
+hard room. At 32 KiB every room loses 11-42 options (13-19 offered over
+4-7 actors); at 16 KiB five rooms fall to the ~5 KB compact fallback;
+at 48 KiB movement/intel rows all survive but 17-33 options are still
+cut; at 64 KiB five rooms keep every option and five lose 5-16. The
+screenshot travels as a separate image content block on the tool
+result and is outside both the context cap and the 64 KiB tool-result
+cap (codex test: 900 KB PNG under a 24 KiB cap, identical context and
+evidence on and off). Verification (11 specs, mutant) in progress.
+
+E1cb hard arms (budget-fixed build ca43be82): luna_facts 30/30
+authorized, semantic_board_truncated [] on 30/30 (was [light,
+adjacency, objects] 30/30 before the fix), block 5.1-6.4 KB, base
+31.4-32.7 KB; luna_control 30/30 authorized, same base range. Where
+both rows recorded the full context the facts arm's baseContextBytes
+equals the control's raw bytes exactly; the pairs that differ are rows
+whose last served context before the proposal was a compact 11-16 KB
+one (rawTurnContext is "last served", not "round-1 full"), so they are
+not comparable, not a budget difference. Attempts: facts 23x1/6x2/1x3,
+control 25x1/5x2. sol_facts still running; brutal arms follow.
+
+D568 luna LOW baseline, png only (E1b tree 49d782bb, 24 states, seed
+6203001, 128 px, primer v10): strict gate FAIL. Weakest classes: Q6
+doors .708, Q5 light .744, Q8 hidden .750, Q9 fog/obscured .802, Q4
+difficult .811; Q2 side .875, Q7 adjacency .875, Q1 identity .896; Q3
+HP .901 and Q10 blocked .928 pass. Dominant error "fact not present"
+(the model omits cells it should list), then dim/bright confusion.
+Semantic-only and image+facts arms running next.
+
+## D569 plan APPROVED at round 2 (698 lines); one amendment; increment 1a dispatched (2026-09-06 23:25)
+
+Round-2 revisions verified in the file (.tmp-plans/2026-09-06-blind-dm-no-engine-advice.md,
+copied to the main repo): omitted destination = hold with
+DESTINATION_REQUIRED when no stationary offer exists; relative phrases
+resolve by fixed geometric conventions printed in the primer (shortest
+engine path, lexical column,row tie-break; never score/threat/rank);
+strict uniqueness demoted to a preregistered diagnostic; area anchors
+(cell label or centred-on entity, closed eight-way direction word)
+mapped shape by shape to what the placed-area offer path emits today;
+blindMaxAttempts 1..3 default 3 under one absolute 240 s wall;
+refusals-as-zero primary, executed-only and refusal-rate CIs alongside;
+tips clean-room from CC-BY SRD and project experience, private research
+tree forbidden to the authoring seat, provenance checker, byte-hashed
+per version; increment 1 split into 1a/1b; hp_band joined from the
+roster projection (hitPointKnowledge -> hpBandOf/hpBandLabel) by badge,
+never from hit points; first-token latency nullable unless a real token
+delta exists; ceiling arm pinned to the standing sol-high configuration
+with the KB swap named as the one intended difference; second seed
+family generated by tools/generate-arena-basis.ts, regenerated and
+byte-compared, membership validated by the generator's own hard/brutal
+criteria, hashes pinned only beside those invariants; increments now
+1a, 1b, 2, 3, 4, 5 (seed family), 6 (runner/analysis).
+
+Amendment (supervisor): the plan notes that some seeds in the proposed
+brutal second family 6204001-10 pass through per-seed generator
+overrides; increment 5 must choose a brutal range with NO per-seed
+overrides and record why. Otherwise consensus; no round 3.
+
+Increment 1a dispatched on dnd-wt-blind-dm (contracts, clean-room D569
+KB/tips bundle, KB byte scan, legacy byte-invariance fixture).
+
+## D568 luna LOW baseline complete: engine facts take luna low to a strict-gate PASS on the first try (2026-09-06 23:39)
+
+Same 24 boards, seed 6203001, E1b tree 49d782bb, 128 px, primer v10:
+- png only: mean of class means 0.829, strict FAIL (weakest Q6 0.708, Q5 0.744, Q8 0.750, Q9 0.802);
+- semantic facts only: 0.992, strict PASS (weakest Q5 0.954, Q1 0.963, Q9 0.999, Q10 1.000);
+- image + facts: 0.992, strict PASS (weakest Q5 0.952, Q1 0.963, Q10 1.000, Q2 1.000).
+For reference luna medium on the same protocol: png .861, facts .995,
+image+facts .995; sol high image+facts .999. The lever that closed luna
+medium closes most of luna low too; the residual gap is Q5 light and Q1
+identity/coordinates at ~.95-.96 versus ~.99 at medium. Seed-2
+replication (6203002) of the two facts arms at luna low launched
+(run-d568-low-seed2.sh). Next tuning targets for luna low, one factor
+at a time with the second seed as fluke guard: light encoding wording
+(default_light and the partition lists), identity/coordinate answer
+format (answer-schema v2-evidence), primer checklist variant.
+
+E1cb hard arms complete on the budget-fixed build: luna_facts 23x1/6x2/1x3
+attempts, control 25x1/5x2, sol_facts 26x1/3x2/1x3, all 30/30
+authorized. Packets e1cbh (facts vs control, facts vs sol; shuffle 9062)
+built; standing panel launched; brutal arms running.
+
+## cap-sweep harvest committed f59f4b49 on claude/cap-sweep; D567 arms queued (2026-09-06 23:42)
+
+Codex claimed: 11 specs 304/304, tsc 0, two mutants killed (cap ignored;
+image counted), sweep table. Verified myself: forbidden scans clean
+(the only `any` hits are vitest expect.any matchers), lane log carries
+only the header's own claude mention, contracts.ts hash unchanged; the
+sweep table reproduced 50/50 rows by my own run; 11 specs 304/304 twice
+(the first run's vitest exit was 1 with every test passing, the rerun
+with full output exited 0; recorded as an anomaly, not a failure); tsc
+0; supervisor mutant (recorder assertion reverted to the 32 KiB
+constant) killed by the 64 KiB arena test, file restored byte-identical.
+
+D567 arms queued behind the E1cb brutal arms (run-cap-arms.sh): luna
+medium, default profile, full intel, hard R1-10 x3, seed 5117001, 240
+s wall, caps 16/24/32/48/64 KiB (three then two concurrent), rows
+~/dnd-slim-runs/cap-<n>.jsonl. Each cap is judged pairwise against the
+32 KiB control from the same tree; latency per turn compared from the
+rows.
+
+## E1cbh panel (hard, budget-fixed build): facts neutral, sol gap narrowed (2026-09-06 23:42)
+
+Standing panel, blinded, hard R1-10 x3, 240 s wall, unseal-e1cbh.md:
+- luna_facts - luna_control: -0.11, 95% CI [-0.53, +0.34] (control 8.82,
+  facts 8.71); with the broken block it was -0.38 [-0.78, +0.02]. The
+  earlier loss was the budget collision; a whole block neither helps nor
+  hurts on a basis where the control already scores 8.8/10.
+- sol_facts - luna_facts: +0.57 [+0.16, +1.00] (7.84 vs 8.41 in that
+  packet), down from +0.82 with the broken block.
+Reading: the hard basis is at ceiling and cannot show a comprehension
+gain; the brutal arms (running) are the informative test for D565; the
+sol gap on hard is now mostly attempts/coherence, not board reading.
+Judge outputs e1cbh-judge-{sol,opus,fable}-*; packets shuffle 9062.
+
+## D570 — OWNER: the blind-DM knowledge must teach how the game works and explain every map feature (2026-09-06 23:57)
+
+Asked whether the owner wants to author the blind-DM "general tips"
+(codex's first draft: eight generic lines). Owner (verbatim): "No, but
+give enough knowledge to know how the game works and the ins and outs.
+Eight lines won't cut it. Also make sure to explain all of the map
+features".
+
+Supervisor reading: the D569 knowledge bundle becomes a real primer
+for a human-like DM: (1) a combat-rules digest derived from the CC-BY
+SRD with a citation per section (turn structure, actions/bonus/
+reactions, movement and difficult terrain, cover, opportunity attacks,
+ranged attacks in melee, hiding and the Hidden condition, light and
+vision (bright/dim/dark, lightly/heavily obscured), conditions,
+concentration and spell targeting/areas, saves and DCs in general
+terms, death and dying, initiative/delays), (2) tactics "ins and outs"
+written clean-room (focus fire, action economy, positioning, cover use,
+control before damage, when to retreat, protecting casters, using
+terrain, reactions), and (3) a complete map-feature guide: every
+feature the board renderer can draw, enumerated from the renderer's
+own legend/glyph registry (coordinate gutter and label convention,
+tile size, numbered badges and side colours, HP bars and band words,
+blocked cells, difficult-terrain ridges, obscured cyan diamonds and
+waves, fog, light levels, doors, world objects and sigils, hidden
+marks, life glyphs, corpse markers, large-creature footprints, the
+roster and legend panels) with what each means for play. Delivered
+whole at startup in both blind and advice arms, so the D569 bundle gets
+its own byte caps (legacy caps untouched). Test invariant: the map
+guide's coverage is checked against the renderer's legend list, so a
+new glyph without a guide entry fails; rules sections carry SRD
+locators; the byte scan still applies. Applied as an amendment on top
+of increment 1a once its harvest lands.
+
+## D569 increment 1a harvested and committed 062a2b70; D570 amendment lane dispatched (2026-09-07 00:00)
+
+Codex claimed: 3 specs 26/26, tsc 0, three named mutants killed with
+restore hashes. Verified myself: forbidden scans clean, contracts.ts
+hash unchanged, lane log shows the private research tree was never
+opened (every mention is the brief, the plan text or the tests' own
+negative regexes), the bundle contains no BG3/Nimble/option-protocol
+vocabulary, provenance carries SRD locators per component; 4 spec files
+(contract, knowledge-base, legacy-invariance, conversation) 93/93 by my
+run; tsc 0; supervisor mutant (blindIntentSchema strictObject ->
+object) killed by "rejects unknown or authority-crossing fields",
+restored byte-identical. A first mutant of mine targeted `.strict()`
+which the file never uses (it uses z.strictObject); it applied nothing
+and is void, recorded so nobody counts it. The conversation change is a
+pure extraction (serializeConversationRow = JSON.stringify) covered by
+the byte-invariance fixture.
+
+D570 amendment dispatched on the same worktree (brief blind-dm-i1a2.md):
+full SRD-cited rules digest, tactics with reasons, complete map-feature
+guide with a coverage test derived from the renderer's legend exports,
+bundle-specific byte caps, legacy fixture unchanged.
+
+## D571 — OWNER: blind mode hides the engine's recommendations, not the facts a human DM has (2026-09-07 00:02)
+
+Owner (verbatim): "I meant to just hide the list of recommendations
+from the ai dm and try to get it to figure them out on its own.
+
+You still need to provide what a human dm would have: dice, DCs, damage
+and legal movement paths.
+
+The dm should have everything it needs to choose the best line of play
+like a human would have"
+
+Supervisor reading (corrects the D569 plan's section 1 allowlist):
+PROVIDED in blind mode, as engine facts: the semantic board (positions,
+terrain, light, obscurement, fog, doors, objects: the E1b payload); the
+screenshot with the primer; initiative; each creature's full stat block
+as the SRD gives it (attacks with to-hit and damage dice, spells and
+save DCs, abilities, speed, AC, senses, resistances), exact hit points
+and resources for the DM's own monsters and the DM-knowledge band for
+the party (what a human DM at the table knows); conditions and
+concentration; legal movement for each monster this turn (reachable
+cells with movement cost, difficult terrain and squeezing applied, as a
+VTT range overlay would show); the rules KB (D570). HIDDEN: the engine's
+offered option list and its ranking, suggested plan, tactical intel
+matrix, opportunity-cost and movement-candidate scoring, threat rows,
+adverts, plays, consequence cards, team frontier, scores, and any
+"top recommendation". Gray line, decided as follows and open to
+correction: which targets are in reach or range, whether a move
+provokes an opportunity attack, and cover from a given cell are left to
+the model to work out from the board and the rules, because that is
+what "figure them out on its own" asks for; movement reach is provided
+because the owner named it. The model still never outputs dice
+results, DCs, damage or reducer commands; it states intents and the
+engine resolves and rolls. The intent grammar, resolver, repair arms,
+leak audit (now forbidding recommendation fields, not numbers) and the
+evaluation protocol stand. Plan amendment sent to the planning session.
+
+## D568 seed-2 replication at luna low: both facts arms hold (2026-09-07 00:06)
+
+Seed 6203002, same 24-state protocol, luna low:
+- semantic: mean 0.996, strict PASS, weakest Q1 0.968, Q5 0.993, Q10 1.000
+- both: mean 0.986, strict PASS, weakest Q5 0.909, Q1 0.955, Q9 0.994
+Seed 1 was .992/.992. Not a fluke: engine facts give luna low strict-gate
+comprehension on both seeds; the residual is Q1 identity/coordinates
+(~.96-.97) and, on seed 1 only, Q5 light (.95). Next D568 tuning round
+targets the identity answer format (answer-schema v2-evidence) as the
+single factor, seed 1 then seed 2.
+
+## D568 note: at luna low the image competes with the facts on light (2026-09-07 00:07)
+
+Seed 2 image+facts scored Q5 light .909 [.796, .991] against .993 for
+facts alone on the same boards; seed 1 showed .952 vs .954. At low
+effort the picture pulls the light answer away from the text partition
+instead of confirming it. Facts-only is the luna-low candidate; the
+image is reintroduced only if a later factor makes it help.
+
+## D568 tuning round 1 misfire (mine): --answer-schema does not exist on the E1b tree (2026-09-07 00:07)
+
+I launched the identity-format factor with `--answer-schema v2-evidence`
+on the E1b run tree (49d782bb); the probe rejected the option at
+parse time (exit 1, no model calls). The v2-evidence schema lives on
+claude/a10-unknown and the v9-checklist primer on claude/e3-checklist,
+neither of which carries E1b's encoding. Fix: a tuning tree that merges
+both lanes onto claude/e1-semantic (codex merge lane d568-tune), then
+the factors run there. No result was recorded from the misfire.
+
+## E1cb brutal arms complete; packet-build misfire (mine) and recovery; brutal panel running (2026-09-07 00:11)
+
+Rows (budget-fixed build ca43be82, brutal 10x3, seed 6203001, 240 s):
+luna_facts 25 authorized / 5 partial_execution, all first-attempt;
+luna_control 29 authorized / 1 partial, 25x1/5x2 attempts; sol_facts 26
+authorized / 3 partial / 1 refused (attempts 0). semantic_board_truncated
+[] on 30/30 facts rows. The brutal basis exercises partial executions
+that the hard basis never showed.
+
+Misfire, mine: I built the brutal packets with the packet-brutal
+worktree's builder (main lineage) against E1c-lineage rows; it threw
+"row 1 must carry boardImage and uiFeedback together" (the intel-leak
+row schema post-dates E1c), my exit check read the pipe's tail instead
+of the builder, and the judge runner launched on missing packets. Killed
+the runner and its three judge children by pid within a minute, deleted
+the bogus judge files, removed the empty start line from
+judge-e1cbb.log. Recovery: cherry-picked 7b1183e7 (--protocol
+brutal-10) onto claude/e1c-dm-facts cleanly (4b5cbd26), its protocol
+test 3/3 there, rebuilt both packets with the E1c tree's own builder
+(60 entries each, protocol brutal-10, shuffle 9063), relaunched the
+panel. Lesson already on record (read the verdict, not the pipe).
+
+## FINDING: E1cb brutal panel is dominated by an MCP output-schema defect on adjustment calls; facts arm punished for it (2026-09-07 00:17)
+
+Panel (unseal-e1cbb.md): luna_facts - luna_control -0.32 [-2.21, +1.13];
+sol_facts - luna_facts +0.19 [-1.09, +1.78]. Means ~6/10 with judge
+spread (sol judge 7.97 vs opus 4.77 on the same rows). Per room the
+entire facts deficit is seed 6203001 (control 7.56, facts 0.00 on all
+three reps) plus two reps of 6203004; every zero is a partial_execution
+row (facts 5, sol 3, control 1) and the refused sol row. On authorized
+rows alone luna_facts averages 6.87 vs control 6.25.
+
+Cause (mine, from the rows): each partial row carries the refusal
+`Tool output violated outputSchema: {"violations":[{"path":"$",
+"keyword":"invalid_union","message":"Invalid input"}]}`: the codex CLI
+rejected an engine tool result because the structured content matched
+no member of the declared output-schema union, on the mid-round
+adjustment call (the control row that adjusted after the cleric's turn
+has an adjustments entry; the failing rows have none), so the round
+finished without the adjustment as partial_execution and scored zero.
+The control hits it once; the facts arms hit it 5/30 and 4/30 because
+the semantic-board block changes the emitted shape. Hard basis: zero
+refusals in any arm (no adjustment calls on those rooms). This is an
+engine/MCP contract defect exposed by the brutal basis, not a DM
+quality signal; the D565 brutal measurement is void until fixed. Fix
+lane dispatched on the E1c tree (no model calls: replay the frozen
+6203001 state to the adjustment call, validate against the declared
+schema, fix, add the invariant that every emitted context shape
+validates against its declared outputSchema).
+
+## D569 plan round 3 (D571 amendment) APPROVED with one supervisor amendment on adjustments (2026-09-07 00:19)
+
+Revised plan (775 lines, copied to the main repo): blind context now
+carries creature_facts (deduplicated complete SRD stat blocks and
+referenced spells from the same typed sources that feed the advice
+status/options: statblockId, BUNDLED_MONSTER_ROSTER,
+effectiveCombatRules, spellDefinition; exact HP/slots/legendary
+resources/action economy for the DM's monsters; displayed band only
+for the party; conditions and concentration), legal_movement (every
+in-bounds destination via canonicalEngineQueryPort.path with least
+legal cost, gutter labels only, no routes/targets/scores), the E1b
+semantic_board minus reach_range_summaries (the D571 gray line), and
+the previous allowlist. Byte estimate on the seven-actor hard rooms:
+mechanics 19.5-22.6 KB, movement 14.7-16.9 KB, board <= 7.6 KB, total
+~47 KB: blind arms run at --turn-context-max-bytes 65536 (D567 knob)
+with the 8 KiB board allowance; a pre-run serialization of every
+fixture must prove nothing required is truncated. Leak audit forbids
+recommendation fields, option ids/order/counts and scores; numbers and
+reach sets are allowed. Resolver enforces the same reachability it
+shows.
+
+Supervisor amendment (recorded, binding for increments 4 and 6): the
+blind v1 round has no mid-round adjustment call, so the sol-advice
+ceiling arm must run with mid-round adjustments disabled too (or blind
+gets an equivalent blind adjustment call); otherwise the ceiling gap
+measures adjustments, not judgment. Increment 1b waits for the D570
+knowledge lane to finish in the same worktree.
+
+## D568 tuning tree ready (09ef9f4b); tuning round 1 launched (2026-09-07 00:24)
+
+claude/d568-tune = E1b (49d782bb) + A10 v2-evidence answer schema
+(e8354a84) + E3 v9-checklist primer variant (09ef9f4b); both conflicts in
+tools/ai-dm-screenshot-probe.ts resolved by codex lanes, verified by my
+own runs (27/27 then 29/29), no markers, all three flags present.
+Round 1 (single factor): luna low, semantic only, seed 6203001,
+answer-schema v2-evidence versus a same-tree v1 control (to separate
+the tree change from the factor). Seed 2 follows for a gain.
+
+## Schema-fix lane result; second defect from the cap sweep: the compact-fallback context is not serializable (2026-09-07 00:39)
+
+Schema fix (codex, claude/e1c-dm-facts): cause confirmed as the strict
+turnDeltaOutput schema not declaring semantic_board /
+semantic_board_truncated, so the mid-round adjustment delta with a
+board attached matched no union member. Fix adds a strict semantic-board
+schema to every structured full/delta variant, a 17-context invariant
+(round/adjustment, full/delta, structured/profiled/intel-off/prose,
+board on/off, partial/full truncation) that failed before and passes
+after, the missing `schema:engine-mcp` generator on this lineage, and
+the generated docs/specs/engine-get-turn-context-output.schema.json.
+Codex's dry-run reproduction on brutal room 1: before partial_execution
+with the refusal, after authorized with the adjustment. Codex claims 4
+specs 124/124, tsc 0, two mutants killed. Codex also notes the control's
+6203004 rep-3 partial is a different error (Dispel-mode) and the sol
+refused row was a timeout. My verification chain (repro, specs,
+generator idempotence, tsc, my own mutant on the truncation enum) is
+running; a first version of my script had a regex that would have
+produced a syntax error and was stopped before it ran.
+
+Cap sweep, 16 KiB arm (luna medium, hard x3): 15/30 refused, every
+refusal `Value is not JSON serializable: [object Undefined].`, all on
+the five rooms the sweep table marks compact_fallback (post-trim 5.15 KB).
+The compact-fallback turn context carries an undefined value that the
+tool result cannot serialize: a second engine/MCP defect exposed by the
+sweep, invisible at 32 KiB. The 16 KiB arm is void for those rooms
+until fixed; fix lane dispatched on a separate worktree off
+claude/cap-sweep because the cap arms still run from that tree's
+source.
+
+## Schema fix verified except one flaky run; D568 round 1 negative; cap 24 clean (2026-09-07 00:45)
+
+Schema fix, my verification on claude/e1c-dm-facts: codex's dry-run
+reproduction on brutal room 1 now ends authorized with 1 adjustment and
+3 PC turns, 0 refusals (was partial_execution with the schema refusal);
+generator idempotent; tsc 0; my mutant (truncation classes relaxed to
+any string) kills the 17-shape invariant; file restored. The 4-spec run
+had one failure in that same invariant (5.0 s) with three arenas and
+two codex lanes loading the box, and the test passes alone on the
+restored tree; rerunning the four specs before committing, per the
+load-flake rule (rerun, never re-pin).
+
+D568 tuning round 1 (luna low, facts only, seed 6203001, answer-schema
+v2-evidence on the tuning tree 09ef9f4b): mean .970, strict FAIL, Q5
+light .749, Q1 identity .955. The evidence-bearing answer format makes
+light much worse at low effort (facts-only v1 gave .954/.968). Factor
+REJECTED for luna low; the same-tree v1 control is running to confirm
+the tree itself did not move.
+
+D567 arms so far: 16 KiB void on the five compact-fallback rooms
+(serialization defect, fix lane running), authorized on the other 15;
+24 KiB 30/30 authorized, no refusals, post-trim 23.8-24.3 KB, 35
+options omitted per room on average, wall 62 s mean. 32 running, then
+48/64.
+
+## D570 knowledge bundle harvested and committed 43ff7779 on claude/blind-dm (2026-09-07 00:46)
+
+Codex claimed 19/19 and 86/86, tsc 0, two mutants killed. Verified
+myself: read the map guide, tactics, movement and conditions files
+(accurate to SRD 5.2.1, clean-room, no private-source or option-
+protocol vocabulary; lane log shows no private-tree access); 4 spec
+files 95/95, tsc 0; my mutant (movement SRD locator shifted 400 lines,
+a plausible wrong range) killed by the locator test, provenance
+restored byte-identical. One amendment before commit (same session):
+two sentences that still forbade coordinates and relative-only
+movement were rewritten to the D571 grammar (gutter label or relative
+phrase, hold by default); codex reran the KB specs 19/19 and I reran
+them 19/19 before committing. Bytes: startup 26,981 delivered
+(protocol.md 7,748), nine components, provenance with section-level
+locators.
+
+## D568 round 1 verdict: v2-evidence REJECTED; light is noisy at low effort; round 2 launched (2026-09-07 00:55)
+
+Tuning tree 09ef9f4b, luna low, facts only, seed 6203001: same-tree v1
+control mean .989 strict PASS (Q5 light .919, Q1 .968); v2-evidence
+mean .970 strict FAIL (Q5 .749, Q1 .955). The factor costs .17 on light,
+far outside the run-to-run spread; rejected for luna low. Observation
+for every later comparison: Q5 light at luna low varies .919-.993 across
+runs of identical inputs (E1b seed 1 .954, seed 2 .993, this control
+.919), so a light gain under ~.05 is noise and needs both seeds and a
+repeat. Round 2 launched: primer-variant v9-checklist as the single
+factor (v1 answer schema, same tree, seed 1).
+
+## Both defect fixes verified and committed: cap-fix 1c7c4677 (claude/cap-fix), schema fix 56bcd859 (claude/e1c-dm-facts) (2026-09-07 01:23)
+
+cap-fix, verified myself: forbidden scans clean, contracts.ts unchanged;
+my dry-run reproduction at 16 KiB on hard seed 5117001 now ends
+authorized with no refusals (post-trim 5,154 B, compact fallback); five
+specs 248/248; generator idempotent; tsc 0; my mutant (the wrapper's
+serialization-violation check disabled) killed by "never emits
+undefined from the tool-result wrapper"; handler.ts restored
+byte-identical. Root cause per codex and consistent with the rows:
+renderer_attribution emitted as undefined in the compact fallback,
+dropped by the text payload, rejected in the structured payload.
+
+Schema fix amendment, verified myself: the invariant split into 17
+per-shape tests with a shared beforeAll; the four-file set twice at
+142/142 (23 s each), tsc 0. Together with the earlier chain (dry-run
+reproduction, generator idempotence, my truncation-enum mutant) the fix
+is verified. Note for the landing: the E1c lineage gained its own
+schema generator and docs/specs/engine-get-turn-context-output.schema.json
+while main's lineage (cap-fix) regenerates docs/specs/
+engine-turn-context.schema.json with main's generator; the merge lane
+must reconcile the two into main's generator.
+
+Next: rerun the void arms on fixed builds: cap 16 (cap-fix tree) and
+the E1cb brutal arms (schema-fixed E1c tree), after the 48/64 arms free
+the model lanes.
+
+## D568 round 2 no-gain; luna low comprehension phase closed as achieved within noise (2026-09-07 01:24)
+
+Round 2 (v9-checklist primer, facts only, luna low, seed 6203001, tuning
+tree 09ef9f4b): mean .986, strict PASS, Q5 .907, Q1 .955, against the
+same-tree control .989/.919/.968: no gain. Two consecutive rounds
+without a CI-excluding gain = "maxed" under the plan's rule. Standing
+result for D568: luna low with engine facts reads the board at
+.989-.996 mean (both seeds, three runs) versus luna medium .995 and sol
+high .999; the only class below .96 at low is light, whose run-to-run
+spread (.907-.993 on identical inputs) is model variance, not an
+encoding gap. Further comprehension tuning at low would chase noise;
+the comprehension goal of D568 is met and the next test of luna low is
+DM quality (the D569 arms run low last, as ordered). Rejected factors
+recorded: v2-evidence answer format (-.17 light), checklist primer (no
+gain); the screenshot itself is neutral-to-harmful at low on light.
+
+## D567 cap arms complete (luna medium, hard R1-10 x3, cap-sweep f59f4b49); panel running (2026-09-07 01:39)
+
+| cap | outcomes | post-trim bytes | options omitted (mean) | wall mean / median |
+|---|---|---|---|---|
+| 16 | 15 authorized / 15 refused (serialization defect, void) | 5.2-16.3 KB | 35.3 | 46 s / 34 s |
+| 24 | 30 authorized | 23.8-24.3 KB | 35.1 | 62 s / 50 s |
+| 32 (control) | 30 authorized | 31.3-32.4 KB | 32.2 | 68 s / 59 s |
+| 48 | 30 authorized | 45.7-48.8 KB | 20.1 | 90 s / 74 s |
+| 64 | 30 authorized | 45.7-65.4 KB | 5.9 | 105 s / 80 s |
+
+Latency grows roughly linearly with context (about +18 s per 16 KiB
+at luna medium); at 64 KiB the median turn is 80 s and the mean 105 s
+against the 180 s live wall (D456), with a 240 s experiment wall.
+Attempts: more second/third attempts at 48/64 (8 and 7 rows) than at
+24 (6). Packets 24/48/64 vs the 32 control (60 entries each) with the
+standing panel; 16 KiB is judged after its rerun on the cap-fix build.
+
+## D567 panel verdict: a larger cap makes luna medium WORSE; 24 KiB equals 32 and is faster (2026-09-07 01:54)
+
+Standing panel, blinded, luna medium, default profile, hard R1-10 x3,
+each cap vs the same-tree 32 KiB control (unseal-cap.md):
+- 24 vs 32: cap32 - cap24 = +0.07 [-0.08, +0.24] (9.18 vs 9.24): no
+  difference; 24 KiB turns are 9 s faster at the median (50 vs 59 s).
+- 48 vs 32: -0.29 [-0.64, +0.07] (8.98 vs 9.27).
+- 64 vs 32: -0.34 [-0.57, -0.10] (8.90 vs 9.24): worse, interval
+  excludes zero, with median turn 80 s and mean 105 s.
+Reading: the 32 KiB cap does not starve luna medium; giving it more
+options and more actor detail lowers judged play and raises latency,
+consistent with the E1c facts result (a bigger, richer context did not
+help either). The pruned, offense-first shortlist is doing work for
+luna medium. Open question for the fixed 16 KiB rerun: whether the
+compact end still holds at 16 (5 rooms fall to the 5 KB compact form).
+Hard basis is at 9.2/10, so a brutal pass at 24 vs 32 is the follow-up
+if the owner wants the cap lowered for latency. Note for D569: the
+blind context is planned at 64 KiB by necessity (stat blocks + reach);
+this result says luna medium handles 64 KiB of options worse, not that
+it cannot read 64 KiB of facts, but latency at 64 KiB (median 80 s)
+must be budgeted.
+
+## E1 landing merge committed f36fd253 on claude/e1c-land; full gate launched; stray nohup.out removed from main (2026-09-07 01:54)
+
+Codex resolved 15 hunks (list in the lane log) and claims 22 files
+348/348 (including all asset specs), tsc 0, generator idempotent, one
+raw pin moved with three-way identity invariants. My checks before
+committing: zero markers, contracts.ts hash unchanged, no forbidden
+constructs in the merge diff (the one `any` is prose in the merged
+decisions file), the lane log carries only the header's claude mention,
+duplicate generator and its output deleted. Full landing gate on
+wt-e1c-land (tsc, sg, locked vitest, full Playwright) started while the
+four rerun arenas idle-wait on models; LOAD FLAKES are rerun serially
+by the runner and never re-pinned.
+
+Finding on main: nohup.out has been tracked since footprints inc2
+(d5001aa4); removed from main in its own commit. It rides along in the
+landing worktree via main and disappears when main merges back.
+
+## Both fixes confirmed live: fixed 16 KiB arm and brutal reruns clean (2026-09-07 02:24)
+
+cap-16 on the cap-fix build (1c7c4677): 30/30 authorized, 0 refusals
+(was 15/30 refused), 24x1/6x2 attempts, post-trim 5.2-16.3 KB, 35.3
+options omitted, wall 63 s mean / 50 s median. Packet 16 vs 32
+(shuffle 9016) with the panel.
+E1cc brutal reruns on the schema-fixed E1c tree (56bcd859): luna_facts
+30/30 authorized, luna_control 30/30 authorized, 0 refusals in either,
+semantic_board_truncated [] on 30/30 (was 5 and 1 partial executions).
+sol_facts running; packets and the panel follow it.
+
+## D567 16 KiB (fixed build) panel; brutal reruns complete and with the panel (2026-09-07 02:39)
+
+16 vs 32 (cap-fix build for the 16 arm, luna medium, hard x3): cap16
+9.09 vs cap32 9.37; contrast row: | cap32 − cap16 | 30 | 9.09 | 9.37 | +0.28 | [+0.02, +0.57] |. Combined with 24 (=32), 48
+(-0.29) and 64 (-0.34): the sweep is flat-to-negative on both sides
+of 24-32 KiB; 24 KiB is the smallest cap with no judged loss and the
+fastest turns.
+
+E1cc brutal reruns (schema-fixed 56bcd859): luna_facts 30/30 authorized,
+luna_control 30/30, sol_facts 28/30 (2 refused at attempts 0: see the
+refusal text in the run record; not the schema refusal). Packets
+(brutal-10, shuffle 9064) built with the E1c tree's builder; the
+standing panel is judging both.
+
+## D565 first positive: on brutal, luna medium + semantic board beats its control (+0.54 [+0.12, +1.16]) and reaches parity with sol high + facts (2026-09-07 02:54)
+
+Standing panel, blinded, brutal 10x3, seed 6203001, 240 s wall,
+schema-fixed E1c build 56bcd859 (unseal-e1cc.md):
+- luna_facts - luna_control: +0.54, 95% seed-clustered CI [+0.12,
+  +1.16] (7.18 vs 6.63; sol judge 8.57/8.07, opus 6.60/5.97, fable
+  6.37/5.87: all three seats agree in direction). Per room: no room
+  lost; 6203002 +3.00 (3.89 -> 6.89), 6203001 +0.78, 6203010 +0.78,
+  6203005 +0.56, 6203008 +0.22, 6203009 +0.11, four rooms tied. Rubric:
+  target priority 2.04 -> 2.31, action economy 1.62 -> 1.81, coherence
+  1.63 -> 1.72, positioning unchanged.
+- sol_facts - luna_facts: -0.46 [-1.32, +0.26] (6.86 vs 7.31): parity;
+  sol's two 240 s timeouts (rooms 8 and 9) score zero in that packet,
+  so on executed rows sol is closer to even. Rubric: luna_facts target
+  priority 2.28 vs sol 1.94.
+Reading: with the block delivered whole and the adjustment path
+working, engine facts in the live context are the first change that
+raises luna medium's judged play, and only where the basis has
+headroom (hard: neutral at 8.8/10; brutal: +0.54 at 6.6/10). D565's
+fluke guard applies before this is called an improvement: (1) a
+fresh-session replication of both luna arms on the same rooms
+(sampling noise), launched now; (2) a second brutal seed family with
+no per-seed generator overrides, generated and frozen by a codex lane
+with membership tests and a `brutal-10-b` packet protocol, then the
+same two arms on it. Sol-high parity is reported with the timeout
+caveat and is not the claim.
+
+## E1 landing gate: 185/186 Playwright, one port collision; supervisor self-kill (fourth time) (2026-09-07 03:09)
+
+gate-wt-e1c-land.log: tsc 0, sg 0, vitest-gate 0 (no load flakes),
+Playwright 185 passed in 50.4 min and one failure: the board-snapshot
+spec's own preview server could not bind port 4650 ("Port 4650 is
+already in use"); the spec derives that port from PLAYWRIGHT_PORT, the
+same port the gate's Playwright web server uses, and the collision did
+not occur in the classic or main landing gates on their ports. The
+port is free now; the spec is rerun serially on the landing tree under
+the gate lock with the gate's port before the merge proceeds.
+
+Own error, recorded in full: while relaunching that rerun I put a
+kill-by-pattern (pgrep -f on the spec name) and a launch whose command
+line contained the same pattern in one shell call; the pattern matched
+my own shell and killed it (exit 144), the relaunch never ran, and I
+also missed my own gate-finished marker for two ticks. This is the
+fourth self-kill of the window against a rule I wrote after the first.
+Standing correction, effective now: a kill call contains only kills and
+uses numeric pids from a prior read; a launch is always its own call.
+
+## brutal-b family committed cb39abab; fluke-guard arms on the new rooms and the replication panel launched; port fix delivered (2026-09-07 03:39)
+
+brutal-b (codex, claude/brutal-b off the landing merge): seeds
+6206001-10 (6205 rejected because one room had a monster with no
+productive first-turn offer; the D466 override table names only
+6204004/6/9), regenerated byte-identical, membership pinned only beside
+state-derived property checks, overlap guards, --protocol brutal-10-b,
+--basis brutal-b. Codex claimed 3 specs 54/54, tsc 0, three mutants
+killed. Verified myself: scans clean (the second "claude -p" in the
+lane log is text codex read from the merged decisions file; zero exec
+lines mention claude), contracts.ts unchanged, 54/54 by my run, my
+own regeneration byte-identical, tsc 0, my mutant (one creature moved
+one row in fixture 6206003) killed by the property-then-pin test,
+fixture restored byte-identical. Arms on brutal-b (luna medium facts vs
+control, 10x3, seed 6206001, 240 s) launched.
+
+Replication on the original brutal rooms (fresh sessions): luna_facts
+30/30 authorized, luna_control 30/30, no refusals; packet (brutal-10,
+shuffle 9065) with the panel.
+
+Port fix (codex, claude/e1c-land): the E1 semantic/probe commit
+decf640d had bound the snapshot preview to PLAYWRIGHT_PORT for
+deterministic capture ports; now ephemeral by default with
+BOARD_SNAPSHOT_PREVIEW_PORT as the dedicated override; codex claims
+30/30 unit, the snapshot spec 1/1 on port 4650, tsc 0, mutant killed.
+My verification chain is running; commit and merge to main follow.
+
+## E1 lineage LANDED on main (33dc2a9d); D565 replication FAILED: the +0.54 does not hold (2026-09-07 03:54)
+
+Landing: port fix committed b71980ec after my verification (30/30
+unit, the snapshot spec 1/1 on port 4650 under the gate lock, tsc 0,
+my mutant killed); `git -C <main> merge --no-ff claude/e1c-land` exit 0
+-> 33dc2a9d, tree clean, nohup.out gone. The full gate on the merge
+was 185/186 with the one failure being the port collision now fixed;
+the post-gate change is confined to the snapshot tool's port selection
+and its unit test, both rerun green, so no second 55-minute gate.
+:4173 restarted on the merged tree.
+
+Replication (fresh sessions, same brutal rooms, same build):
+luna_facts - luna_control = -0.29, 95% CI [-0.80, +0.11] (control 7.56,
+facts 7.27). First run was +0.54 [+0.12, +1.16] (control 6.63, facts
+7.18). The control arm alone moved +0.93 between identical runs: the
+per-room panel scores on brutal carry about a point of sampling noise
+per arm at n=30, so a single 30-row contrast with a lower bound of
++0.12 was never enough. Pooled across both runs (per-room-run pairs)
+the effect is near zero; the seed-clustered interval is in the record
+above. Verdict for D565: engine facts in the live context are NOT a
+demonstrated improvement of luna medium's play on brutal; neutral on
+hard. The comprehension gains (probe .83 -> .99) do not carry into the
+judged round at the sample sizes we run. Standing conclusion: the
+board-reading lever is exhausted for DM quality; the remaining levers
+are the decision surface (D569 blind judgement, option pruning, cap
+24 for latency) and effort/attempt budgets. The brutal-b arms (second
+family) still run and are reported when done; they cannot rescue the
+claim on their own.
+
+## Pooled D565 estimate (2026-09-07 03:54)
+
+Both brutal runs pooled as per-room-run pairs (n=20): luna_facts -
+luna_control = +0.13, seed-clustered 95% CI [-0.21, +0.57] (20,000
+resamples, seed 5117). Per room the two runs disagree in sign on
+6203001 (+0.78 then -2.22), 6203005, 6203008, 6203009; only 6203002 is
+positive both times (+3.00, +0.67). No effect at this sample size.
+:4173 serving the merged main.

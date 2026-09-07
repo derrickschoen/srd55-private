@@ -20,6 +20,11 @@ import type { McpToolDescriptor, SchemaViolation } from './handler';
 import { rendererAttributionSchema } from '../renderer-profile';
 import { creatureSizes } from '../../domain/enums';
 import { KB_SUBJECTS } from '../knowledge-base-subjects';
+import {
+  SEMANTIC_BOARD_ENCODING_NOTE,
+  SEMANTIC_BOARD_FORMAT,
+  SEMANTIC_BOARD_TRUNCATION_CLASSES,
+} from '../semantic-board-payload';
 
 export const ENGINE_ACTOR_KNOWLEDGE_POLICY = 'actor-knowledge-v3-last-seen' as const;
 export const ENGINE_LEGENDARY_WINDOWS_POLICY = 'legendary-windows-v2' as const;
@@ -624,6 +629,111 @@ const materialityContext = z.object({
     summary: z.string().min(1).max(1_000),
   }).strict()).min(1).max(20),
 }).strict();
+const semanticCell = z.tuple([
+  z.number().int().nonnegative(),
+  z.number().int().nonnegative(),
+]);
+const semanticCellRun = z.tuple([
+  z.number().int().nonnegative(),
+  z.number().int().nonnegative(),
+  z.number().int().nonnegative(),
+]);
+const semanticEncodedCell = z.union([semanticCell, semanticCellRun]);
+const semanticFactList = (item: z.ZodType<unknown>) => z.object({
+  provenance: z.literal('engine_fact'),
+  items: z.array(item),
+}).strict();
+const semanticCellFactList = z.object({
+  provenance: z.literal('engine_fact'),
+  encoding: z.enum([
+    '[column,row]',
+    '[start_column,row,end_column_inclusive]; endpoint is inclusive',
+  ]),
+  items: z.array(semanticEncodedCell),
+}).strict();
+const semanticObject = z.object({
+  id: identifier,
+  name: z.string(),
+  kind: z.string(),
+  cells: z.array(semanticEncodedCell),
+}).strict();
+const semanticBoard = z.object({
+  format: z.literal(SEMANTIC_BOARD_FORMAT),
+  revision: z.number().int().min(1),
+  audience: z.literal('dm'),
+  provenance: z.literal('engine_fact'),
+  encoding_note: z.literal(SEMANTIC_BOARD_ENCODING_NOTE),
+  coordinates: z.object({
+    order: z.literal('column,row'),
+    origin: z.literal('top_left'),
+    indexing: z.literal('zero_based'),
+    columns_increase: z.literal('right'),
+    rows_increase: z.literal('down'),
+    cell_list_encoding: z.literal('each cell list declares its encoding'),
+  }).strict(),
+  bounds: z.object({
+    columns: z.number().int().positive(),
+    rows: z.number().int().positive(),
+  }).strict(),
+  creatures: semanticFactList(z.object({
+    id: identifier,
+    name: z.string(),
+    side: z.enum(['party', 'foe']),
+    cell: semanticCell.nullable(),
+    footprint: z.array(semanticCell),
+    hp_band: z.enum(['uninjured', 'bloodied', 'near_death', 'unknown']),
+    conditions: z.array(z.string()),
+    hidden: z.boolean(),
+    last_seen: semanticCell.nullable(),
+  }).strict()),
+  cells: z.object({
+    blocked: semanticCellFactList,
+    difficult_terrain: semanticCellFactList,
+    light: z.object({
+      default_light: z.literal('bright'),
+      default_applies_to: z.literal('cells not covered by dim or dark exception regions'),
+      partition: z.literal('bright, dim, and dark together contain every board cell exactly once'),
+      bright: semanticCellFactList,
+      dim: semanticCellFactList,
+      dark: semanticCellFactList,
+    }).strict().optional(),
+    obscurement: z.object({
+      light: semanticCellFactList,
+      heavy: semanticCellFactList,
+    }).strict(),
+    obscured: semanticCellFactList,
+    fogged: semanticCellFactList,
+    obscured_or_fogged: semanticCellFactList,
+  }).strict(),
+  doors: z.object({
+    open: semanticFactList(z.object({
+      id: identifier,
+      name: z.string(),
+      cells: z.array(semanticEncodedCell),
+    }).strict()),
+    closed: semanticFactList(z.object({
+      id: identifier,
+      name: z.string(),
+      cells: z.array(semanticEncodedCell),
+    }).strict()),
+  }).strict().optional(),
+  objects: semanticFactList(semanticObject).optional(),
+  light_sources: semanticFactList(semanticObject).optional(),
+  adjacency_pairs: semanticFactList(z.object({
+    first_id: identifier,
+    second_id: identifier,
+  }).strict()).optional(),
+  reach_range_summaries: semanticFactList(z.object({
+    id: identifier,
+    reach_feet: z.number().int().nonnegative(),
+    creatures_in_reach: z.array(identifier),
+    nearest_hostile_distance_feet: z.number().int().nonnegative().nullable(),
+  }).strict()).optional(),
+}).strict();
+const semanticBoardContextFields = {
+  semantic_board: semanticBoard.optional(),
+  semantic_board_truncated: z.array(z.enum(SEMANTIC_BOARD_TRUNCATION_CLASSES)).min(1).max(3).optional(),
+};
 const actorContext = z.object({
   actor_id: identifier,
   status: actorStatus,
@@ -796,6 +906,7 @@ const fullTurnContextOutput = z.object({
   search_memory: searchMemoryContext,
   alert_state: alertStateContext,
   recent_changes: z.array(recentChange).max(100), truncated: z.boolean(), next_cursor: z.string().max(500).nullable(),
+  ...semanticBoardContextFields,
 }).strict();
 const intelSuppressedTurnContextOutput = z.object({
   granularity: z.literal('full'), context_trimmed: z.boolean(),
@@ -806,6 +917,7 @@ const intelSuppressedTurnContextOutput = z.object({
   suggested_plan: suggestedPlan.optional(),
   current_plan: currentPlanSummary.optional(),
   recent_changes: z.array(recentChange).max(100), truncated: z.boolean(), next_cursor: z.string().max(500).nullable(),
+  ...semanticBoardContextFields,
 }).strict();
 const revisionDeltaOperation = z.union([
   z.object({ kind: z.literal('set'), path: z.array(z.string()).min(1).max(20), value: z.unknown() }).strict(),
@@ -829,6 +941,7 @@ const turnDeltaOutput = z.object({
   changes: z.array(revisionDeltaOperation).max(10_000),
   context_trimmed: z.boolean(),
   renderer_attribution: rendererAttributionSchema.optional(),
+  ...semanticBoardContextFields,
 }).strict();
 const compactTurnContextOutput = z.object({
   granularity: z.literal('full'),
@@ -896,6 +1009,7 @@ const compactTurnContextOutput = z.object({
   }).strict().optional(),
   truncated: z.literal(true),
   next_cursor: z.null(),
+  ...semanticBoardContextFields,
 }).strict();
 const profiledFullTurnContextOutput = z.object({
   granularity: z.literal('full'),
@@ -907,6 +1021,7 @@ const profiledFullTurnContextOutput = z.object({
   renderer_attribution: rendererAttributionSchema.optional(),
   truncated: z.boolean(),
   next_cursor: z.string().max(500).nullable(),
+  ...semanticBoardContextFields,
 }).passthrough();
 const proseTurnContextOutput = z.object({
   format: z.enum(['caveman_prose', 'regular_prose']),
@@ -1256,6 +1371,7 @@ function spec(name: string, description: string, input: z.ZodType<unknown>, outp
 }
 
 export const ENGINE_TURN_PROPOSAL_INPUT_SCHEMA = jsonSchema(turnProposal);
+export const ENGINE_GET_TURN_CONTEXT_OUTPUT_SCHEMA = jsonSchema(turnContextOutput);
 
 export const ENGINE_TOOL_SPECS: readonly EngineToolSpec[] = Object.freeze([
   spec('engine.read_kb_subject', 'Read one indexed knowledge-base subject; at most two successful reads are allowed per round.', z.object({

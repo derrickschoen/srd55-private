@@ -581,7 +581,8 @@ export function projectEncounterBoard(
         hitPointBand: hitPointKnowledge(state, subject),
         hiddenFromPlayers: hidden.has(subject.profile.id),
         conditions: combatantConditions(state, subject.profile.id).map((condition) =>
-          condition.name === 'Exhaustion' ? `${condition.name} ${String(condition.level)}` : condition.name),
+          condition.name === 'Exhaustion' ? `${condition.name} ${String(condition.level)}` : condition.name)
+          .sort((left, right) => left.localeCompare(right)),
         reachFeet: effectiveCombatRules(state, subject.profile.id).reach,
         ...(creatureType === undefined ? {} : { creatureType }),
         placementStatus: 'placement_pending',
@@ -603,7 +604,8 @@ export function projectEncounterBoard(
       hitPointBand: hitPointKnowledge(state, subject),
       hiddenFromPlayers: hidden.has(subject.profile.id),
       conditions: combatantConditions(state, subject.profile.id).map((condition) =>
-        condition.name === 'Exhaustion' ? `${condition.name} ${String(condition.level)}` : condition.name),
+        condition.name === 'Exhaustion' ? `${condition.name} ${String(condition.level)}` : condition.name)
+        .sort((left, right) => left.localeCompare(right)),
       reachFeet: effectiveCombatRules(state, subject.profile.id).reach,
       ...(creatureType === undefined ? {} : { creatureType }),
       placementStatus: 'placed',

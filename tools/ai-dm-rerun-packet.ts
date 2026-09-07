@@ -9,7 +9,13 @@ export const R1_10_SEEDS = [
   5_117_006, 5_117_007, 5_117_008, 5_117_009, 5_117_010,
 ] as const;
 
+export const BRUTAL_10_SEEDS = [
+  6_203_001, 6_203_002, 6_203_003, 6_203_004, 6_203_005,
+  6_203_006, 6_203_007, 6_203_008, 6_203_009, 6_203_010,
+] as const;
+
 export const R1_10_REPS = 3 as const;
+export const BRUTAL_10_REPS = 3 as const;
 export const RERUN_PACKET_VERSION = 'ai-dm-rerun-packet-v1' as const;
 const STANDARD_INITIATIVE_POLICY = 'initiative-intel-v1';
 
@@ -245,9 +251,12 @@ type ParsedArenaRow =
   | { readonly rowEra: 'post_shift'; readonly row: PostShiftArenaRow };
 
 export interface RerunProtocol {
+  readonly name?: RerunProtocolName;
   readonly seeds: readonly number[];
   readonly reps: number;
 }
+
+export type RerunProtocolName = 'r1-10' | 'brutal-10';
 
 export interface RerunPacketBuilderOptions {
   /** Decision reasons are excluded unless this is explicitly true. */
@@ -256,13 +265,20 @@ export interface RerunPacketBuilderOptions {
   readonly reasonVisibleArms?: readonly string[];
 }
 
-export const R1_10_PROTOCOL: RerunProtocol = { seeds: R1_10_SEEDS, reps: R1_10_REPS };
+export const R1_10_PROTOCOL: RerunProtocol = {
+  name: 'r1-10', seeds: R1_10_SEEDS, reps: R1_10_REPS,
+};
+export const BRUTAL_10_PROTOCOL: RerunProtocol = {
+  name: 'brutal-10', seeds: BRUTAL_10_SEEDS, reps: BRUTAL_10_REPS,
+};
 
 export interface RerunPacketConfig {
   readonly inputPaths: readonly string[];
   readonly packetPath: string;
   readonly answerKeyPath: string;
   readonly shuffleSeed: number;
+  readonly protocol: RerunProtocolName;
+  readonly reps: 1 | 3;
   /**
    * Cross-era comparison mode: the two arms ran DIFFERENT code eras against
    * byte-identical frozen room inputs. Arms are partitioned by repoCommit
@@ -333,16 +349,25 @@ type ValidatedArenaRow =
 
 type ArmCardinality = 'exactly_two' | 'two_or_more';
 
-function assertArmCardinality(armCount: number, cardinality: ArmCardinality): void {
+function protocolLabel(protocol: RerunProtocol): string {
+  return protocol.name === 'r1-10' ? 'R1-10' : protocol.name ?? 'Rerun protocol';
+}
+
+function assertArmCardinality(
+  armCount: number,
+  cardinality: ArmCardinality,
+  protocol: RerunProtocol,
+): void {
+  const label = protocolLabel(protocol);
   switch (cardinality) {
     case 'exactly_two':
       if (armCount !== 2) {
-        throw new TypeError(`R1-10 requires exactly two paired arms; found ${String(armCount)}.`);
+        throw new TypeError(`${label} requires exactly two paired arms; found ${String(armCount)}.`);
       }
       return;
     case 'two_or_more':
       if (armCount < 2) {
-        throw new TypeError(`R1-10 requires at least two paired arms; found ${String(armCount)}.`);
+        throw new TypeError(`${label} requires at least two paired arms; found ${String(armCount)}.`);
       }
       return;
   }
@@ -369,6 +394,7 @@ export interface JudgePacketEntry {
 
 export interface JudgePacket {
   readonly version: typeof RERUN_PACKET_VERSION;
+  readonly protocol?: RerunProtocolName;
   readonly judgingOrder: 'interleaved_blinded';
   readonly rubric: {
     readonly targetPriority: { readonly maximum: 3 };
@@ -423,6 +449,7 @@ interface FinalIndicesPostShiftAnswerKeyEntry extends CommonPostShiftAnswerKeyEn
 
 export interface RerunAnswerKey {
   readonly version: typeof RERUN_PACKET_VERSION;
+  readonly protocol?: RerunProtocolName;
   readonly entries: readonly (
     | PreShiftAnswerKeyEntry
     | McpMinimalPostShiftAnswerKeyEntry
@@ -474,7 +501,7 @@ export function parseRerunPacketArgs(argv: readonly string[]): RerunPacketConfig
   for (let index = 0; index < argumentsValue.length; index += 1) {
     const option = argumentsValue[index];
     if (option === '--cross-era') { crossEra = true; continue; }
-    if (!['--input', '--packet', '--answer-key', '--shuffle-seed'].includes(option ?? '')) {
+    if (!['--input', '--packet', '--answer-key', '--shuffle-seed', '--protocol', '--reps'].includes(option ?? '')) {
       throw new TypeError(`Unknown rerun-packet option ${option ?? '<missing>'}.`);
     }
     const value = requiredValue(argumentsValue, index, option ?? '<missing>');
@@ -490,11 +517,23 @@ export function parseRerunPacketArgs(argv: readonly string[]): RerunPacketConfig
   const packetPath = resolve(packet);
   const answerKeyPath = resolve(answerKey);
   if (packetPath === answerKeyPath) throw new TypeError('--packet and --answer-key must be different files.');
+  const protocolValue = values.get('--protocol') ?? 'r1-10';
+  if (protocolValue !== 'r1-10' && protocolValue !== 'brutal-10') {
+    throw new TypeError('--protocol must be r1-10 or brutal-10.');
+  }
+  const repsValue = values.get('--reps');
+  if (repsValue !== undefined && protocolValue !== 'brutal-10') {
+    throw new TypeError('--reps is available only with --protocol brutal-10.');
+  }
+  const reps = repsValue === undefined ? 3 : parseSafeInteger(repsValue, '--reps');
+  if (reps !== 1 && reps !== 3) throw new TypeError('--reps must be 1 or 3.');
   return {
     inputPaths,
     packetPath,
     answerKeyPath,
     shuffleSeed: parseSafeInteger(values.get('--shuffle-seed') ?? '', '--shuffle-seed'),
+    protocol: protocolValue,
+    reps,
     crossEra,
   };
 }
@@ -557,7 +596,7 @@ function validateRow(
   partitionCrossEraByRowEra: boolean,
 ): ValidatedArenaRow {
   if ('rlData' in source) {
-    throw new TypeError(`${sourceLabel} contains rlData; R1-10 is a permanent holdout and cannot contain training data.`);
+    throw new TypeError(`${sourceLabel} contains rlData; ${protocolLabel(protocol)} is a permanent holdout and cannot contain training data.`);
   }
   const parsedRow = parseArenaRow(source, sourceLabel);
   if (parsedRow.rowEra === 'post_shift') {
@@ -594,7 +633,10 @@ function validateRow(
       : sourceRow.arm;
   const rep = sourceRow.round;
   const expectedRoom = protocol.seeds.indexOf(seed) + 1;
-  if (expectedRoom === 0) throw new TypeError(`${sourceLabel}.seed=${String(seed)} is not an R1-10 holdout seed.`);
+  if (expectedRoom === 0) {
+    const article = protocol.name === 'r1-10' ? 'an' : 'a';
+    throw new TypeError(`${sourceLabel}.seed=${String(seed)} is not ${article} ${protocolLabel(protocol)} holdout seed.`);
+  }
   if (room !== expectedRoom) throw new TypeError(`${sourceLabel}.room must be ${String(expectedRoom)} for seed ${String(seed)}.`);
   if (rep < 1 || rep > protocol.reps) throw new TypeError(`${sourceLabel}.round must be in 1..${String(protocol.reps)}.`);
   const planner = sourceRow.planner ?? (sourceRow.plannerLabel === 'sim_controller'
@@ -653,7 +695,8 @@ function validateRows(
   const validated = rows.map((row, index) =>
     validateRow(row, `row ${String(index + 1)}`, protocol, crossEra, partitionCrossEraByRowEra));
   const arms = [...new Set(validated.map((row) => row.arm))].sort((left, right) => left.localeCompare(right));
-  assertArmCardinality(arms.length, armCardinality);
+  assertArmCardinality(arms.length, armCardinality, protocol);
+  const label = protocolLabel(protocol);
   const byCase = new Map<string, ValidatedArenaRow[]>();
   for (const row of validated) {
     const caseKey = `${String(row.seed)}:${String(row.rep)}`;
@@ -666,11 +709,11 @@ function validateRows(
       const caseKey = `${String(seed)}:${String(rep)}`;
       const caseRows = byCase.get(caseKey) ?? [];
       if (caseRows.length !== arms.length) {
-        throw new TypeError(`R1-10 requires one row from each arm for seed ${String(seed)} rep ${String(rep)}.`);
+        throw new TypeError(`${label} requires one row from each arm for seed ${String(seed)} rep ${String(rep)}.`);
       }
       const seenArms = new Set(caseRows.map((row) => row.arm));
       if (seenArms.size !== arms.length || arms.some((arm) => !seenArms.has(arm))) {
-        throw new TypeError(`R1-10 requires paired arms for seed ${String(seed)} rep ${String(rep)}.`);
+        throw new TypeError(`${label} requires paired arms for seed ${String(seed)} rep ${String(rep)}.`);
       }
       if (!crossEra) {
         const digests = new Set(caseRows.map((row) => row.startingRoomDigest));
@@ -699,7 +742,7 @@ function validateRows(
     }
   }
   if (validated.length !== protocol.seeds.length * protocol.reps * arms.length) {
-    throw new TypeError('R1-10 rows contain duplicate or unregistered seed/rep/arm entries.');
+    throw new TypeError(`${label} rows contain duplicate or unregistered seed/rep/arm entries.`);
   }
   return validated;
 }
@@ -867,6 +910,7 @@ function buildPacket(
   crossEra: boolean,
   armCardinality: ArmCardinality,
   options: RerunPacketBuilderOptions,
+  protocolName?: RerunProtocolName,
 ): { readonly packet: JudgePacket; readonly answerKey: RerunAnswerKey } {
   if (!Number.isSafeInteger(shuffleSeed)) throw new TypeError('shuffleSeed must be a safe integer.');
   const inferredCrossEra = !crossEra && hasMixedRowEras(rows);
@@ -885,6 +929,7 @@ function buildPacket(
   }));
   const packet: JudgePacket = {
     version: RERUN_PACKET_VERSION,
+    ...(protocolName === undefined ? {} : { protocol: protocolName }),
     judgingOrder: 'interleaved_blinded',
     rubric: {
       targetPriority: { maximum: 3 }, actionEconomy: { maximum: 3 },
@@ -914,6 +959,7 @@ function buildPacket(
   };
   const answerKey: RerunAnswerKey = {
     version: RERUN_PACKET_VERSION,
+    ...(protocolName === undefined ? {} : { protocol: protocolName }),
     entries: blinded.map(({ blindId, row }) => {
       const common: CommonAnswerKeyEntry = {
         blindId,
@@ -1013,7 +1059,12 @@ export function buildReasonVisibilityIsolationPacket(
 export async function createRerunPacket(config: RerunPacketConfig): Promise<{ readonly packet: JudgePacket; readonly answerKey: RerunAnswerKey }> {
   const sources = await Promise.all(config.inputPaths.map(async (path) => ({ path, text: await readFile(path, 'utf8') })));
   const rows = sources.flatMap(({ path, text }) => parseJsonl(text, path));
-  const result = buildRerunPacket(rows, config.shuffleSeed, R1_10_PROTOCOL, config.crossEra);
+  const protocol: RerunProtocol = config.protocol === 'r1-10'
+    ? R1_10_PROTOCOL
+    : { ...BRUTAL_10_PROTOCOL, reps: config.reps };
+  const result = buildPacket(
+    rows, config.shuffleSeed, protocol, config.crossEra, 'exactly_two', {}, config.protocol,
+  );
   await Promise.all([
     writeFile(config.packetPath, `${canonicalJson(result.packet)}\n`, 'utf8'),
     writeFile(config.answerKeyPath, `${canonicalJson(result.answerKey)}\n`, 'utf8'),
@@ -1028,7 +1079,9 @@ async function main(): Promise<void> {
 }
 
 const invokedPath = process.argv[1];
-const PACKET_FLAGS = ['--input', '--packet', '--answer-key', '--shuffle-seed', '--cross-era'];
+const PACKET_FLAGS = [
+  '--input', '--packet', '--answer-key', '--shuffle-seed', '--cross-era', '--protocol', '--reps',
+];
 if (process.env['VITEST'] !== 'true' && invokedPath !== undefined && (
   invokedPath.endsWith('/ai-dm-rerun-packet.ts') || invokedPath.endsWith('\\ai-dm-rerun-packet.ts') ||
   ((invokedPath.endsWith('/vite-node') || invokedPath.endsWith('\\vite-node') ||

@@ -42,6 +42,7 @@ import {
   strictProbeGate,
   truthAnswer,
   type ProbeSnapshotService,
+  type ProbeAnswerRequest,
   type ScreenshotFactSheet,
 } from '../../../tools/ai-dm-screenshot-probe';
 import {
@@ -656,9 +657,121 @@ describe('D524 general screenshot primer', () => {
     expect(prompt).toContain('Question Q1:');
     expect(prompt).toContain('Use zero-based column,row coordinates');
   });
+
+  it('names cell-list encoding for semantic inputs without changing the PNG primer', () => {
+    const semantic = screenshotQuestionPrompt('Q5', 'general', 'full', 'semantic', '{}');
+    const both = screenshotQuestionPrompt('Q9', 'general', 'full', 'both', '{}');
+    const png = screenshotQuestionPrompt('Q5', 'general', 'full', 'png');
+
+    expect(semantic).toContain(
+      'Cell-list encoding: [column,row] is one cell; [start_column,row,end_column_inclusive] is a horizontal run that includes both endpoints.',
+    );
+    expect(both).toContain(
+      'Cell-list encoding: [column,row] is one cell; [start_column,row,end_column_inclusive] is a horizontal run that includes both endpoints.',
+    );
+    expect(png).not.toContain('Cell-list encoding:');
+    expect(png).toContain(`General primer ${PRIMER_VERSION}: ${GENERAL_PRIMER}`);
+  });
 });
 
 describe('D519 screenshot comprehension schema and CLI', () => {
+  it('accepts png, semantic and both board inputs, defaults to png, and rejects others', () => {
+    const base = [
+      '--models',
+      'gpt-5.6-luna:medium',
+      '--states',
+      '1',
+      '--seed',
+      '1',
+      '--images-root',
+      'dnd-slim-runs/board-input-images',
+      '--out',
+      'dnd-slim-runs/board-input.jsonl',
+      '--generation',
+      'e1-semantic-board',
+    ];
+    expect(parseScreenshotProbeArgs(base).boardInput).toBe('png');
+    for (const boardInput of ['png', 'semantic', 'both'] as const) {
+      expect(
+        parseScreenshotProbeArgs([...base, '--board-input', boardInput]).boardInput,
+      ).toBe(boardInput);
+    }
+    expect(() =>
+      parseScreenshotProbeArgs([...base, '--board-input', 'coordinates']),
+    ).toThrow('--board-input must be png, semantic or both.');
+  });
+
+  it('marks semantic facts authoritative only when semantic input is present', () => {
+    const semantic = screenshotQuestionPrompt('Q1', 'general', 'none', 'semantic', '{"revision":7}');
+    const both = screenshotQuestionPrompt('Q1', 'general', 'none', 'both', '{"revision":7}');
+    expect(semantic).not.toContain(GENERAL_PRIMER);
+    expect(semantic).not.toContain('attached PNG');
+    expect(semantic).toContain('Semantic board JSON:\n{"revision":7}');
+    expect(both).toContain('The semantic facts are authoritative and the attached PNG is illustrative.');
+    expect(both).toContain(GENERAL_PRIMER);
+    expect(() => screenshotQuestionPrompt('Q1', 'general', 'none', 'both')).toThrow(
+      'both board input requires a semantic payload.',
+    );
+  });
+
+  it('sends semantic input without an image and records its canonical artifact', async () => {
+    const artifactRoot = resolve('dnd-slim-runs');
+    mkdirSync(artifactRoot, { recursive: true });
+    const directory = await mkdtemp(join(artifactRoot, 'e1-semantic-test-'));
+    const imagesRoot = join(directory, 'semantic-images');
+    const outPath = join(directory, 'semantic.jsonl');
+    const requests: ProbeAnswerRequest[] = [];
+    try {
+      const config = parseScreenshotProbeArgs([
+        '--models',
+        'gpt-5.6-luna:medium',
+        '--states',
+        '1',
+        '--seed',
+        '1',
+        '--images-root',
+        imagesRoot,
+        '--out',
+        outPath,
+        '--generation',
+        'e1-semantic-board',
+        '--board-input',
+        'semantic',
+        '--simulate',
+      ]);
+      const rows = await runScreenshotProbe(config, {
+        candidates: [{ id: 'semantic-fixture', state: everyClassState() }],
+        snapshotService: new FakeSnapshotService(),
+        answerer: {
+          answer(request) {
+            requests.push(request);
+            return Promise.resolve({
+              rawAnswer: JSON.stringify(request.truth),
+              wallMs: 0,
+              tokens: null,
+              error: null,
+            });
+          },
+        },
+      });
+
+      expect(requests).toHaveLength(10);
+      expect(requests.every((request) => request.imagePath === null)).toBe(true);
+      expect(requests.every((request) => request.prompt.includes('Semantic board JSON:'))).toBe(true);
+      expect(rows.every((row) => row.boardInput === 'semantic')).toBe(true);
+      const semanticHash = rows[0]?.semanticPayloadSha256;
+      const semanticPath = rows[0]?.semanticPayloadRelativePath;
+      expect(semanticHash).toMatch(/^[0-9a-f]{64}$/u);
+      expect(rows.every((row) => row.semanticPayloadSha256 === semanticHash)).toBe(true);
+      expect(semanticPath).toBe(`semantic-boards/${semanticHash ?? ''}.json`);
+      const bytes = await readFile(join(imagesRoot, semanticPath ?? ''), 'utf8');
+      expect(createHash('sha256').update(bytes).digest('hex')).toBe(semanticHash);
+      expect(await readFile(config.summaryPath, 'utf8')).toContain('Board input: semantic.');
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it('pins the strict threshold to 0.9', () => {
     expect(PASS_THRESHOLD).toBe(0.9);
   });

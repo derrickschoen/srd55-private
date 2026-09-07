@@ -22,6 +22,7 @@ import {
   type EngineMcpLauncherManifest,
 } from '../../../src/vtt/mcp/entrypoint';
 import { generateRoom } from '../../../src/vtt/room-generator';
+import { DEFAULT_RENDERER_PROFILE } from '../../../src/vtt/renderer-profile';
 import {
   decodeArenaRowEvidence,
   parseArenaArgs,
@@ -53,6 +54,9 @@ const META = mcpRequestMeta({ name: 'board-delivery-test', version: '1.0.0' });
 // state handle are normalised back below so the pin stays independent of that merge.
 const FOOTPRINTS_RAW_CONTEXT_SHA256 = 'aa841063ad0512d0f6b286318db802526da3efc5265a04d8b67f4d8351909d51';
 const FOOTPRINTS_STATE_HANDLE = 'engine-state:c7c7b052bd70a39bf59c83277b7508d8bf52b69100fbde5939c8562ac8686842';
+// The post-merge E1c pin is paired with byte identity across implicit defaults,
+// explicit image-off, and an explicitly semantic-board-off renderer profile.
+const E1C_RAW_CONTEXT_SHA256 = '418b9e16e31c01667a2bea7431e6affe3eccc9f80c353783551872bb6ae16118';
 
 function record(value: unknown, label: string): Readonly<Record<string, unknown>> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -349,6 +353,29 @@ describe('MCP board image content', () => {
 });
 
 describe('arena capture lifecycle and off-arm invariance', () => {
+  it('records delivered semantic-board bytes and truncation on the arena row', { timeout: 60_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'semantic-board-row-'));
+    const profile = { ...DEFAULT_RENDERER_PROFILE, semanticBoard: true as const };
+    const [row] = await runArena(parseArenaArgs([
+      '--rooms', '1', '--reps', '1', '--seed', '3943001',
+      '--out', join(directory, 'rows.jsonl'), '--dry-run', '--effort', 'low',
+      '--model', 'gpt-5.6-luna', '--transport', 'mcp_minimal',
+      '--initiative-profile', 'derived_v1', '--renderer-profile', JSON.stringify(profile),
+    ]));
+    if (row === undefined) throw new TypeError('Semantic-board arena omitted its row.');
+    const context = record(JSON.parse(row.rawTurnContext) as unknown, 'semantic-board context');
+    const board = record(context['semantic_board'], 'semantic-board block');
+    const base = structuredClone(context) as Record<string, unknown>;
+    delete base['semantic_board'];
+    delete base['semantic_board_truncated'];
+
+    expect(row.rendererAttribution.profile).toEqual(profile);
+    expect(row.baseContextBytes).toBe(Buffer.byteLength(JSON.stringify(base)));
+    expect(row.semanticBoardBytes).toBe(Buffer.byteLength(JSON.stringify(board)));
+    expect(row.semanticBoardBytes).toBeGreaterThan(0);
+    expect(row.semanticBoardTruncated).toEqual(context['semantic_board_truncated'] ?? []);
+  });
+
   it.each(['png', 'capture_only'] as const)(
     'captures each changed round state once, persists %s evidence, and closes one service',
     { timeout: 60_000 },
@@ -417,6 +444,47 @@ describe('arena capture lifecycle and off-arm invariance', () => {
     expect(dispatches).toBe(0);
     expect(starts).toBe(1);
     expect(service.closed).toBe(true);
+  });
+
+  it('absent semantic-board and image-off flags preserve the committed raw context and invocation bytes', { timeout: 60_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'semantic-board-off-invariance-'));
+    const invocations = new Map<string, AgentInvocation[]>();
+    const run = async (label: 'default' | 'image-off' | 'semantic-absent') => {
+      const captured: AgentInvocation[] = [];
+      invocations.set(label, captured);
+      const args = [
+        '--rooms', '1', '--reps', '1', '--seed', '3943001',
+        '--out', join(directory, `${label}.jsonl`), '--dry-run', '--effort', 'low',
+        '--model', 'gpt-5.6-luna', '--transport', 'mcp_minimal',
+        '--initiative-profile', 'derived_v1',
+        ...(label === 'image-off' ? ['--board-image', 'off'] : []),
+        ...(label === 'semantic-absent'
+          ? ['--renderer-profile', JSON.stringify(DEFAULT_RENDERER_PROFILE)]
+          : []),
+      ];
+      return runArena(parseArenaArgs(args), {
+        onPrimaryInvocation: (invocation) => { captured.push(structuredClone(invocation)); },
+      });
+    };
+    const defaultResult = await run('default');
+    const offResult = await run('image-off');
+    const absentResult = await run('semantic-absent');
+    expect(absentResult.every((row) =>
+      row.semanticBoardBytes === 0 && row.semanticBoardTruncated.length === 0)).toBe(true);
+    for (const [label, result] of [['image-off', offResult], ['semantic-absent', absentResult]] as const) {
+      expect(result.map((row) => row.rawTurnContext))
+        .toEqual(defaultResult.map((row) => row.rawTurnContext));
+      expect(invocations.get(label)?.map((entry) => ({
+        prompt: entry.prompt, instructions: entry.instructions, output: entry.output,
+      }))).toEqual(invocations.get('default')?.map((entry) => ({
+        prompt: entry.prompt, instructions: entry.instructions, output: entry.output,
+      })));
+    }
+
+    const raw = offResult[0]?.rawTurnContext;
+    if (raw === undefined) throw new TypeError('Semantic-board-off row omitted rawTurnContext.');
+    expect(Buffer.byteLength(raw)).toBe(31_995);
+    expect(createHash('sha256').update(raw).digest('hex')).toBe(E1C_RAW_CONTEXT_SHA256);
   });
 
   it('persists simulated image feedback and gives judges the feedback beside the image', { timeout: 60_000 }, async () => {
