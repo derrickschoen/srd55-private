@@ -14058,3 +14058,32 @@ deterministic capture ports; now ephemeral by default with
 BOARD_SNAPSHOT_PREVIEW_PORT as the dedicated override; codex claims
 30/30 unit, the snapshot spec 1/1 on port 4650, tsc 0, mutant killed.
 My verification chain is running; commit and merge to main follow.
+
+## E1 lineage LANDED on main (33dc2a9d); D565 replication FAILED: the +0.54 does not hold (2026-09-07 03:54)
+
+Landing: port fix committed b71980ec after my verification (30/30
+unit, the snapshot spec 1/1 on port 4650 under the gate lock, tsc 0,
+my mutant killed); `git -C <main> merge --no-ff claude/e1c-land` exit 0
+-> 33dc2a9d, tree clean, nohup.out gone. The full gate on the merge
+was 185/186 with the one failure being the port collision now fixed;
+the post-gate change is confined to the snapshot tool's port selection
+and its unit test, both rerun green, so no second 55-minute gate.
+:4173 restarted on the merged tree.
+
+Replication (fresh sessions, same brutal rooms, same build):
+luna_facts - luna_control = -0.29, 95% CI [-0.80, +0.11] (control 7.56,
+facts 7.27). First run was +0.54 [+0.12, +1.16] (control 6.63, facts
+7.18). The control arm alone moved +0.93 between identical runs: the
+per-room panel scores on brutal carry about a point of sampling noise
+per arm at n=30, so a single 30-row contrast with a lower bound of
++0.12 was never enough. Pooled across both runs (per-room-run pairs)
+the effect is near zero; the seed-clustered interval is in the record
+above. Verdict for D565: engine facts in the live context are NOT a
+demonstrated improvement of luna medium's play on brutal; neutral on
+hard. The comprehension gains (probe .83 -> .99) do not carry into the
+judged round at the sample sizes we run. Standing conclusion: the
+board-reading lever is exhausted for DM quality; the remaining levers
+are the decision surface (D569 blind judgement, option pruning, cap
+24 for latency) and effort/attempt budgets. The brutal-b arms (second
+family) still run and are reported when done; they cannot rescue the
+claim on their own.
