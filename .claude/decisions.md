@@ -13570,3 +13570,36 @@ Reading: the hard basis is at ceiling and cannot show a comprehension
 gain; the brutal arms (running) are the informative test for D565; the
 sol gap on hard is now mostly attempts/coherence, not board reading.
 Judge outputs e1cbh-judge-{sol,opus,fable}-*; packets shuffle 9062.
+
+## D570 — OWNER: the blind-DM knowledge must teach how the game works and explain every map feature (2026-09-06 23:57)
+
+Asked whether the owner wants to author the blind-DM "general tips"
+(codex's first draft: eight generic lines). Owner (verbatim): "No, but
+give enough knowledge to know how the game works and the ins and outs.
+Eight lines won't cut it. Also make sure to explain all of the map
+features".
+
+Supervisor reading: the D569 knowledge bundle becomes a real primer
+for a human-like DM: (1) a combat-rules digest derived from the CC-BY
+SRD with a citation per section (turn structure, actions/bonus/
+reactions, movement and difficult terrain, cover, opportunity attacks,
+ranged attacks in melee, hiding and the Hidden condition, light and
+vision (bright/dim/dark, lightly/heavily obscured), conditions,
+concentration and spell targeting/areas, saves and DCs in general
+terms, death and dying, initiative/delays), (2) tactics "ins and outs"
+written clean-room (focus fire, action economy, positioning, cover use,
+control before damage, when to retreat, protecting casters, using
+terrain, reactions), and (3) a complete map-feature guide: every
+feature the board renderer can draw, enumerated from the renderer's
+own legend/glyph registry (coordinate gutter and label convention,
+tile size, numbered badges and side colours, HP bars and band words,
+blocked cells, difficult-terrain ridges, obscured cyan diamonds and
+waves, fog, light levels, doors, world objects and sigils, hidden
+marks, life glyphs, corpse markers, large-creature footprints, the
+roster and legend panels) with what each means for play. Delivered
+whole at startup in both blind and advice arms, so the D569 bundle gets
+its own byte caps (legacy caps untouched). Test invariant: the map
+guide's coverage is checked against the renderer's legend list, so a
+new glyph without a guide entry fails; rules sections carry SRD
+locators; the byte scan still applies. Applied as an amendment on top
+of increment 1a once its harvest lands.
