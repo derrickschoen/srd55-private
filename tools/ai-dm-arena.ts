@@ -55,7 +55,7 @@ import {
 } from '../src/vtt/renderer-profile';
 import { DEFAULT_AI_DM_KB_ROOT } from '../src/vtt/knowledge-base-contract';
 
-export const ARENA_BASES = ['standard', 'hard', 'brutal', 'scenario'] as const;
+export const ARENA_BASES = ['standard', 'hard', 'brutal', 'brutal-b', 'scenario'] as const;
 export type ArenaBasis = (typeof ARENA_BASES)[number];
 
 export interface ArenaProbeVerdict {
@@ -372,7 +372,7 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
   }
   const basis = values.get('--basis') ?? 'standard';
   if (!ARENA_BASES.includes(basis as ArenaBasis)) {
-    throw new TypeError('--basis must be standard, hard, brutal, or scenario.');
+    throw new TypeError('--basis must be standard, hard, brutal, brutal-b, or scenario.');
   }
   const combatModel = values.get('--combat-model') ?? 'initiative_segments_v1';
   if (!COMBAT_MODELS.includes(combatModel as CombatModel)) {
@@ -538,6 +538,7 @@ export function basisFixturesPath(config: Pick<ArenaConfig, 'cwd' | 'basis'>): s
     case 'standard': return resolve(config.cwd, 'tests/fixtures/arena-basis');
     case 'hard': return resolve(config.cwd, 'tests/fixtures/arena-basis-hard');
     case 'brutal': return resolve(config.cwd, 'tests/fixtures/arena-basis-brutal');
+    case 'brutal-b': return resolve(config.cwd, 'tests/fixtures/arena-basis-brutal-b');
     case 'scenario': return resolve(config.cwd, 'tests/fixtures/arena-scenarios');
   }
   basis satisfies never;
@@ -564,7 +565,11 @@ async function frozenRoomStates(config: ArenaConfig): Promise<readonly import('.
       if (!config.generateMissingRooms || !(error instanceof Error) ||
         !('code' in error) || error.code !== 'ENOENT') throw error;
       return generateRoom(seed, {
-        difficulty: config.basis === 'scenario' ? 'standard' : config.basis,
+        difficulty: config.basis === 'scenario'
+          ? 'standard'
+          : config.basis === 'brutal-b'
+            ? 'brutal'
+            : config.basis,
         initiativeProfile: config.initiativeProfile,
       }).encounter.state;
     }

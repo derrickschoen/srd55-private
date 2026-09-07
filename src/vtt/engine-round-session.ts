@@ -174,6 +174,10 @@ function resolveBoundaryDecisions(
   let state = initialState;
   const fallbackResolutions: AutoResolvedReactionOffer[] = [];
   const guidedResolutions: GuidedReactionResolution[] = [];
+  let legendaryBoundaryToResume: {
+    readonly activeCombatant: CombatantId;
+    readonly round: number;
+  } | null = null;
   for (;;) {
     let selected:
       | { readonly kind: 'guidance'; readonly resolution: GuidedReactionResolution }
@@ -217,22 +221,31 @@ function resolveBoundaryDecisions(
       ? state.pendingDecisions.find((decision) => decision.kind === 'legendary_action_window')
       : undefined;
     if (legendaryWindow !== undefined) {
+      legendaryBoundaryToResume ??= { ...legendaryWindow.boundary };
       state = reduceOne(state, {
         type: 'resolve_pending_decision', decisionId: legendaryWindow.id, optionId: 'pass',
       }, rng);
-      if (state.phase.kind === 'active' &&
-        state.activeCombatant === legendaryWindow.boundary.activeCombatant) {
-        state = reduceOne(state, {
-          type: 'end_turn', actor: legendaryWindow.boundary.activeCombatant,
-        }, rng);
-      }
       continue;
     }
     const deathSave = state.pendingDecisions.find((decision) => decision.kind === 'death_save');
-    if (deathSave === undefined) return { state, fallbackResolutions, guidedResolutions };
-    state = reduceOne(state, {
-      type: 'resolve_pending_decision', decisionId: deathSave.id, optionId: 'roll',
-    }, rng);
+    if (deathSave !== undefined) {
+      state = reduceOne(state, {
+        type: 'resolve_pending_decision', decisionId: deathSave.id, optionId: 'roll',
+      }, rng);
+      continue;
+    }
+    const boundaryToResume = legendaryBoundaryToResume;
+    if (boundaryToResume !== null && state.phase.kind === 'active' &&
+      state.activeCombatant === boundaryToResume.activeCombatant &&
+      state.round === boundaryToResume.round &&
+      !state.pendingDecisions.some((decision) =>
+        decision.boundary.activeCombatant === boundaryToResume.activeCombatant &&
+        decision.boundary.round === boundaryToResume.round)) {
+      legendaryBoundaryToResume = null;
+      state = reduceOne(state, { type: 'end_turn', actor: boundaryToResume.activeCombatant }, rng);
+      continue;
+    }
+    return { state, fallbackResolutions, guidedResolutions };
   }
 }
 

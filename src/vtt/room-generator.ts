@@ -41,6 +41,7 @@ export const ROOM_DIFFICULTY_PROFILES = ['standard', 'hard', 'brutal'] as const;
 export type RoomDifficultyProfile = (typeof ROOM_DIFFICULTY_PROFILES)[number];
 
 export const BRUTAL_CHALLENGE_BUDGET_SCALE = 2 as const;
+export const BRUTAL_CHALLENGE_SPEND_FRACTION_BAND = { minimum: 0.9, maximum: 1 } as const;
 export const BRUTAL_TERRAIN_FEATURE_COUNT_BAND = { minimum: 10, maximum: 14 } as const;
 
 export const ROOM_INITIATIVE_PROFILES = ['legacy', 'derived_v1'] as const;
