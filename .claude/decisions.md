@@ -13416,3 +13416,39 @@ brutal bases; luna medium once luna high is maxed; luna low last. The
 override study (blind judgement vs engine top recommendation) follows
 once blind play is measured. Codex writes the plan; supervisor
 critiques before any implementation.
+
+## D569 plan round 1 received; supervisor critique sent as round 2 (2026-09-06 23:17)
+
+Codex plan (587 lines, .tmp-plans/2026-09-06-blind-dm-no-engine-advice.md,
+copied to the main repo): blind DM mode with an exact turn-context
+allowlist (names, badges, sides, HP bands, initiative, image roles,
+primer version), closed MCP tool profile, D569 CC-BY KB bundle shared by
+blind and advice arms, typed intent grammar with the gutter label as the
+only coordinate form, private deterministic resolver over
+availableEngineActorOptions, closed rejection enum, code-only vs
+labelled minimal-hint repair arms, byte-level ingress leak audit,
+state-only screenshot capture, packet compatibility via the existing
+resolutionSummary, arms and cohorts, -0.20 noninferiority with
+seed-clustered CI, second seed family as fluke guard, "maxed" = two
+consecutive no-gain tuning rounds, override study recorded now as
+answer-key-only fields, five increments with tests/mutants/markers.
+Two catches by codex that the record did not have: snapshot mode passes
+the engine's offered movement paths into the capture even with the UI
+toggle off (a blind screenshot would carry advice in pixels), and the
+DM timeline's next-event preview can print an exact save DC.
+
+Supervisor critique (round 2, brief blind-dm-plan-r2.md): (1)
+structural: the ambiguity rule rejects any attack without a destination
+when a moving variant exists and any relative phrase with two candidate
+cells, so refusal rate would dominate the panel; required: no
+destination = hold, relative phrases resolve by a documented geometric
+convention printed in the primer, strict rejection only for genuine
+semantic ambiguity; (2) area spells unreachable (no area anchor in the
+grammar; entangle is the brutal room-1 opener); (3) attempts default 3
+under the 240 s wall; (4) report refusals-as-zero and executed-only
+plus refusal rate with CI; (5) tips authorship clean-room CC-BY, never
+from the private research tree; (6) split increment 1; (7) confirm the
+initiative hp_band is exactly the board's knowledge-policy band; (8)
+capture and first-token latency; (9) ceiling arm comparability with
+the standing sol-high baseline; (10) who generates and verifies the
+second seed family. Session resumed (same id confirmed).
