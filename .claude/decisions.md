@@ -14416,3 +14416,43 @@ D574 amendment dispatched on claude/blind-dm: shared stat blocks
 confirmed by test, compression to mechanical essentials with provenance
 of dropped fields, strict schema updated, boundary repair (no reducer
 or RNG in the blind renderer's import graph), byte table before/after.
+
+## D576 — OWNER (TOP PRIORITY): engine and map must show line of sight and cover (full, 3/4, 1/2), agreeing with each other, readable by sol high from the screenshot, then luna medium (2026-09-07 10:50)
+
+Owner (verbatim): "We need a way in the engine and on the map to show
+los, full,3/4,1/2 cover.
+
+The engine and the map need to agree and it need to be obvious to sol
+high how to tell which is which from the screenshot because you can't
+put los in json if the creature can move and then shoot.
+
+Then try to get it where Luna medium can interpret.
+
+The above is now top priority"
+
+Context (from the code, answered earlier this window): the engine's
+hasLineOfSight consults only world objects flagged lineOfSight;
+blocked cells (drawn as cross-braced stone piles) stop movement and
+clip templates but never block sight or give cover, and the picture
+gives no way to tell sight-blocking objects from others.
+
+Supervisor reading: (1) one typed terrain vocabulary in the engine
+that carries movement, sight and cover together: wall (blocks
+movement and sight, total cover), three-quarters-cover feature,
+half-cover feature, and open; blocked cells become walls unless a
+generated room authors them otherwise; world objects keep a cover tier
+and a sight flag consistent with it; (2) a single line-and-cover rule
+the model can apply by eye: the engine's centre-to-centre
+rasterization decides which cells a line crosses; a wall cell on the
+line blocks sight; the best cover feature crossed grants its tier;
+that rule is printed in the map guide with worked examples; (3) the
+map draws each tier distinctly (opaque wall art versus a low half-
+cover object versus a three-quarters feature, with tier marks and
+legend rows) so a reader can classify any pair of cells; the generator
+emits cover-bearing features in every basis so rooms exercise all
+tiers; (4) the comprehension probe gains classes for line of sight and
+cover tier between named pairs with engine ground truth; sol high
+must pass first, then luna medium, tuning art and primer. No per-pair
+LoS in JSON. All other lanes continue; this unit has priority for
+dispatch and model lanes. Plan lane dispatched (codex), critique before
+implementation.
