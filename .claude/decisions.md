@@ -14096,3 +14096,22 @@ resamples, seed 5117). Per room the two runs disagree in sign on
 6203001 (+0.78 then -2.22), 6203005, 6203008, 6203009; only 6203002 is
 positive both times (+3.00, +0.67). No effect at this sample size.
 :4173 serving the merged main.
+
+## brutal-b arms complete; third defect: room 6206009 cannot advance past an unresolved boundary decision (2026-09-07 04:24)
+
+Second family (cb39abab, luna medium facts vs control, 10x3, seed
+6206001, 240 s): both arms 27 authorized / 3 execution_failed, all
+first-attempt, no truncation. All six failures are seed 6206009 (every
+rep, both arms): executionErrorClass unresolved_boundary_decision,
+"The turn cannot advance while a pending decision for this boundary is
+unresolved." The unattended arena harness (askDefault decline) leaves
+some boundary decision in that room unresolved, so the round cannot
+execute; deterministic, arm-independent, engine/harness defect exposed
+by a never-run room (the membership check "every monster has a
+productive first-turn offer" does not cover boundary decisions).
+Packet (brutal-10-b, shuffle 9066, 60 entries) with the panel; the
+room scores zero on both sides and cancels in the contrast. Fix lane
+dispatched on the brutal-b tree (reproduce by dry run, identify the
+pending decision kind, resolve it under the unattended policy or fix
+the engine, add the invariant that every basis room's round 1 executes
+under the unattended harness).
