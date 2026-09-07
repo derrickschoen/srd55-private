@@ -14775,3 +14775,51 @@ run will have two unless the limit clears. Not substituting another
 model for the fable seat without an owner ruling; if the owner wants a
 two-seat unseal for this packet, say so, otherwise the fable seat is
 re-run when its limit resets.
+
+## D576.3 — OWNER: use the 2014 corner-to-corner rule for line of sight and cover (2026-09-07 16:42)
+
+Owner (verbatim): "Try the 2014 corner to corner rule"
+
+Chosen over the exact-centre-ray option. The canonical trace becomes:
+
+1. Candidate corners are the outer corners of the source space and the
+   outer corners of the target space (for a Small creature these are its
+   own square's four corners, which is the DMG rule exactly). The source
+   corner is CHOSEN: the engine evaluates every source corner and keeps
+   the least protective result, with a stable tie-break.
+2. From the chosen source corner, four lines run to the four target
+   corners. A line that merely runs along a cell boundary does not cross
+   that cell; only interior crossings count (the existing epsilon rule in
+   cornerLineCrossesCell).
+3. Per line, lineTier is the strongest cover tier among the features whose
+   interior it crosses, and lineBlocksSight is true when it crosses a wall.
+   An intervening living creature obstructs a line at half.
+4. blocksSight is true exactly when ALL FOUR lines cross a wall.
+5. If blocksSight, the tier is total. Otherwise the tier is the weakest of:
+   the count tier (0 obstructed lines = none, 1 or 2 = half, 3 =
+   three_quarters, 4 = total), the strongest lineTier among obstructed
+   lines, and three_quarters. The three_quarters clamp keeps the invariant
+   total <=> no sight, so four lines through a low wall stay half and a
+   wall corner clipping two lines stays half.
+
+This keeps D576.2's two independent dimensions untouched: passability is
+still per feature and never derived from the tier or the ray count.
+Rationale: it is the rule a human applies to the screenshot with a
+straightedge, it is what the community and every major VTT use, and the
+corner geometry already exists in src/combat/cover.ts (outerCorners,
+cornerLineCrossesCell, rasterizeCornerLine) rather than being deleted.
+
+Supporting measurement (recorded earlier this window): the pre-D576
+centre-ray rasterizer skips cells the segment actually crosses on 5496
+of 10000 ordered pairs on a 10x10 board, 13904 skipped cells, so a wall
+the drawn line visibly clips blocks neither sight nor cover today.
+
+Pin ledger amendment AUTHORIZED for this era change, under conditions:
+the thirteen legacy assertions found by increment 1a may move, but each
+one must be listed in the commit with an INDEPENDENT invariant that
+does not come from the lane's own output. Acceptable independent
+invariants: a hand-derived path cost or corner count stated in the test;
+a closed-form recomputation of a probability from its named components;
+a membership predicate replacing an exact count. Not acceptable:
+copying the new number the engine now prints. Any assertion the lane
+cannot justify that way stays failing and the lane reports it.
