@@ -5,12 +5,16 @@ import {
   D569_CORE_ARM_IDENTITIES,
   D569_EXPERIMENT_MANIFEST_PATH,
   D569_HINT_ARM_IDENTITIES,
+  D569_JUDGE_PANEL_IDENTITIES,
+  D569_PREREGISTRATION_AMENDMENTS,
+  D569_REFUSAL_RISK_MARGIN,
   D569_SECOND_FAMILY_MANIFEST_PATH,
   D575_ANALYSIS_COMPARISONS,
   analyzeD569Pair,
   d569OverrideImprovement,
   dryRunD569Experiment,
   initialD569TuningState,
+  labelD569PairNoninferiority,
   labelD569Success,
   recordD569TuningRound,
   validateD569ExperimentManifest,
@@ -155,25 +159,27 @@ const components = (value: number): D569PanelComponents => ({
   positioning: value,
 });
 
+type SyntheticScore = number | 'refused' | 'execution_failed';
+
 function analysisRows(
   family: 'primary' | 'second',
   basis: 'hard' | 'brutal',
-  leftScores: readonly (number | 'refused')[],
-  rightScores: readonly (number | 'refused')[],
+  leftScores: readonly SyntheticScore[],
+  rightScores: readonly SyntheticScore[],
 ): readonly D569AnalysisRow[] {
   if (leftScores.length !== rightScores.length) throw new Error('synthetic pair mismatch');
   return leftScores.flatMap((left, index) => {
     const right = rightScores[index];
     if (right === undefined) throw new Error('synthetic right row disappeared');
     const seed = (basis === 'hard' ? 1_000 : 2_000) + index;
-    const row = (arm: string, value: number | 'refused'): D569AnalysisRow => ({
+    const row = (arm: string, value: SyntheticScore): D569AnalysisRow => ({
       arm,
       family,
       basis,
       seed,
       rep: 1,
-      outcome: value === 'refused' ? 'refused' : 'executed',
-      seats: value === 'refused' ? [] : [
+      outcome: typeof value === 'number' ? 'executed' : value,
+      seats: typeof value !== 'number' ? [] : [
         { judge: 'seat-a', components: components(value - 1) },
         { judge: 'seat-b', components: components(value + 1) },
       ],
@@ -208,21 +214,31 @@ describe('D569 preregistered experiment manifest and dry runner', () => {
   it('validates the exact amended arm/cohort/comparison preregistration', () => {
     const frozen = manifest();
     expect(codes(frozen)).toEqual([]);
+    expect(frozen.version).toBe('d569-blind-experiment-v2');
+    expect(frozen.preregistrationAmendments).toEqual(D569_PREREGISTRATION_AMENDMENTS);
+    expect(frozen.preregistrationAmendments.every((amendment) => amendment.timing === 'pre-results'))
+      .toBe(true);
     expect(frozen.coreArms).toEqual(D569_CORE_ARM_IDENTITIES);
     expect(frozen.hintArms).toEqual(D569_HINT_ARM_IDENTITIES);
     expect(frozen.analysisComparisons).toEqual(D575_ANALYSIS_COMPARISONS);
-    expect(frozen.analysisComparisons).toHaveLength(11);
+    expect(frozen.analysisComparisons).toHaveLength(8);
+    expect(JSON.stringify(frozen.coreArms)).not.toContain('claude-fable-5');
+    expect(JSON.stringify(frozen.analysisComparisons)).not.toContain('claude-fable-5');
+    expect(frozen.judgePanel.seats).toEqual(D569_JUDGE_PANEL_IDENTITIES);
+    expect(frozen.judgePanel.comparisonSeatPolicy).toBe('same_eligible_seats_both_sides');
+    expect(frozen.judgePanel.seats.map((seat) => seat.model)).toContain('gpt-6-astra');
+    expect(frozen.coreArms.map((arm) => arm.model)).not.toContain('gpt-6-astra');
   });
 
-  it('dry-runs 30 hard and 30 brutal cells per each of eight core arms, 480 total', () => {
+  it('dry-runs 30 hard and 30 brutal cells per each of six core arms, 360 total', () => {
     const cells = dryRunD569Experiment(manifest(), access());
-    expect(cells).toHaveLength(480);
+    expect(cells).toHaveLength(360);
     for (const arm of D569_CORE_ARM_IDENTITIES) {
       const armCells = cells.filter((cell) => cell.arm === arm.id);
       expect(armCells.filter((cell) => cell.basis === 'hard')).toHaveLength(30);
       expect(armCells.filter((cell) => cell.basis === 'brutal')).toHaveLength(30);
     }
-    expect(new Set(cells.map((cell) => cell.sessionKey))).toHaveLength(480);
+    expect(new Set(cells.map((cell) => cell.sessionKey))).toHaveLength(360);
     expect(cells.every((cell) => cell.sessionPolicy === 'fresh' && cell.timeoutMs === 240_000 &&
       !cell.escalation && !cell.modelDefaultFallback && cell.semanticContextCapBytes === 8_192 &&
       cell.truncatedBlocks.length === 0)).toBe(true);
@@ -238,17 +254,17 @@ describe('D569 preregistered experiment manifest and dry runner', () => {
     expect([...pairedSources.values()].every((hashes) => hashes.size === 1)).toBe(true);
   });
 
-  it('adds exactly 120 separately labeled advice-assisted hint cells, 600 total', () => {
+  it('adds exactly 120 separately labeled advice-assisted hint cells, 480 total', () => {
     const cells = dryRunD569Experiment(manifest(), access(), { includeHintArms: true });
     const hint = cells.filter((cell) => cell.repair === 'minimal_legal_alternative');
-    expect(cells).toHaveLength(600);
+    expect(cells).toHaveLength(480);
     expect(hint).toHaveLength(120);
     expect(hint.every((cell) => cell.adviceAssisted)).toBe(true);
   });
 
   it('consumes the frozen second encounter family instead of restating or shuffling its seeds', () => {
     const cells = dryRunD569Experiment(manifest(), access(), { family: 'second' });
-    expect(cells).toHaveLength(480);
+    expect(cells).toHaveLength(360);
     expect([...new Set(cells.filter((cell) => cell.basis === 'hard').map((cell) => cell.seed))])
       .toEqual(D569_SECOND_FAMILY_SEEDS.hard);
     expect([...new Set(cells.filter((cell) => cell.basis === 'brutal').map((cell) => cell.seed))])
@@ -291,6 +307,44 @@ describe('D569 preregistered experiment manifest and dry runner', () => {
     const changedSecond = `${readText(SECOND_HARD_PATHS[0])} `;
     expect(codes(manifest(), access((path) => path === SECOND_HARD_PATHS[0] ? changedSecond : undefined)))
       .toEqual(expect.arrayContaining(['second_family_fixture_hash', 'second_family_independent_regeneration']));
+  });
+
+  it('derives same-side judge eligibility from active arm models and rejects dangling, implicit, and self-scored comparisons', () => {
+    const frozen = manifest();
+    const arms = new Map([...frozen.coreArms, ...frozen.hintArms].map((arm) => [arm.id, arm]));
+    for (const comparison of frozen.analysisComparisons) {
+      const left = arms.get(comparison.leftArm);
+      const right = arms.get(comparison.rightArm);
+      if (left === undefined || right === undefined) throw new Error('registered comparison is dangling');
+      const playingModels = new Set<string>([left.model, right.model]);
+      expect(comparison.eligibleJudgeSeats).toEqual(frozen.judgePanel.seats
+        .filter((seat) => !playingModels.has(seat.model)).map((seat) => seat.id));
+      expect(comparison.eligibleJudgeSeats.length).toBeGreaterThanOrEqual(2);
+    }
+
+    const dangling = structuredClone(frozen);
+    dangling.analysisComparisons[0]!.rightArm = 'claude-fable-5-advice';
+    expect(codes(dangling)).toContain('dangling_comparison_arm');
+
+    const implicit = structuredClone(frozen) as unknown as {
+      coreArms: Array<{ model?: string }>;
+    };
+    delete implicit.coreArms[0]!.model;
+    expect(codes(implicit)).toContain('manifest_shape');
+
+    const selfScored = structuredClone(frozen);
+    const versusSol = selfScored.analysisComparisons.find((comparison) =>
+      comparison.id === 'gpt-5.6-luna-vs-gpt-5.6-sol-blind');
+    if (versusSol === undefined) throw new Error('Sol comparison disappeared');
+    versusSol.eligibleJudgeSeats.push('gpt-5.6-sol');
+    expect(codes(selfScored)).toEqual(expect.arrayContaining(['judge_eligibility', 'self_scoring']));
+
+    const insufficient = structuredClone(frozen);
+    const comparison = insufficient.analysisComparisons[0]!;
+    comparison.leftArm = 'claude-opus-5-blind';
+    comparison.rightArm = 'gpt-5.6-sol-blind';
+    comparison.eligibleJudgeSeats = ['gpt-6-astra'];
+    expect(codes(insufficient)).toContain('judge_consensus');
   });
 
   it('fluke_guard_uses_shuffle_seed: rejects a trained or replaced second encounter cohort', () => {
@@ -352,6 +406,73 @@ describe('D569 maxed effort state machine', () => {
 });
 
 describe('D569 paired cluster analysis and success labels', () => {
+  const passingOffense = { lower: 0, upper: 0 } as const;
+  const refusalEvidence = (lower: number, upper: number, mean = (lower + upper) / 2) => ({
+    mean, interval: { lower, upper },
+  });
+
+  it.each([
+    { interval: [-0.10, -0.01] as const, expected: 'noninferior' },
+    { interval: [-0.10, 0.00] as const, expected: 'noninferior' },
+    { interval: [0.00, 0.00] as const, expected: 'noninferior' },
+    { interval: [-0.10, 0.01] as const, expected: 'not_noninferior' },
+    { interval: [0.00, 0.01] as const, expected: 'not_noninferior' },
+    { interval: [0.01, 0.10] as const, expected: 'not_noninferior' },
+  ])('refusal interval boundary matrix classifies $interval as $expected', ({ interval, expected }) => {
+    expect(labelD569PairNoninferiority(
+      passingOffense, refusalEvidence(interval[0], interval[1]),
+    )).toBe(expected);
+  });
+
+  it('refusal_upper_bound_not_lower: fails when only the refusal lower bound clears the margin', () => {
+    expect(labelD569PairNoninferiority(passingOffense, refusalEvidence(-0.10, 0.01)))
+      .toBe('not_noninferior');
+  });
+
+  it('refusal_direction_is_blind_minus_advice: accepts a nonpositive interval and rejects a positive interval', () => {
+    expect(labelD569PairNoninferiority(passingOffense, refusalEvidence(-0.10, -0.01)))
+      .toBe('noninferior');
+    expect(labelD569PairNoninferiority(passingOffense, refusalEvidence(0.01, 0.10)))
+      .toBe('not_noninferior');
+  });
+
+  it('refusal_margin_is_at_most: accepts an upper bound exactly equal to the named zero margin', () => {
+    expect(D569_REFUSAL_RISK_MARGIN).toBe(0);
+    expect(labelD569PairNoninferiority(passingOffense, refusalEvidence(-0.10, 0.00)))
+      .toBe('noninferior');
+  });
+
+  it('refusal_interval_not_mean: a negative mean with a positive upper bound fails', () => {
+    expect(labelD569PairNoninferiority(passingOffense, refusalEvidence(-0.20, 0.01, -0.095)))
+      .toBe('not_noninferior');
+  });
+
+  it('offense_is_strict_and_conjunctive: exact margin fails and just above passes only with refusal passing', () => {
+    const refusalPasses = refusalEvidence(-0.10, 0.00);
+    const refusalFails = refusalEvidence(-0.10, 0.01);
+    expect(labelD569PairNoninferiority({ lower: -0.20, upper: 0 }, refusalPasses))
+      .toBe('not_noninferior');
+    expect(labelD569PairNoninferiority({ lower: -0.199_999, upper: 0 }, refusalPasses))
+      .toBe('noninferior');
+    expect(labelD569PairNoninferiority({ lower: -0.199_999, upper: 0 }, refusalFails))
+      .toBe('not_noninferior');
+  });
+
+  it('invalid_interval_guard: missing, non-finite, or reversed interval evidence never qualifies', () => {
+    expect(labelD569PairNoninferiority(null, refusalEvidence(-0.10, 0))).toBe('not_noninferior');
+    expect(labelD569PairNoninferiority(passingOffense, null)).toBe('not_noninferior');
+    expect(labelD569PairNoninferiority(passingOffense, { mean: -0.05, interval: null }))
+      .toBe('not_noninferior');
+    expect(labelD569PairNoninferiority({ lower: Number.NaN, upper: 0 }, refusalEvidence(-0.10, 0)))
+      .toBe('not_noninferior');
+    expect(labelD569PairNoninferiority({ lower: 0, upper: Number.POSITIVE_INFINITY }, refusalEvidence(-0.10, 0)))
+      .toBe('not_noninferior');
+    expect(labelD569PairNoninferiority({ lower: 0.1, upper: 0 }, refusalEvidence(-0.10, 0)))
+      .toBe('not_noninferior');
+    expect(labelD569PairNoninferiority(passingOffense, refusalEvidence(0.1, -0.1)))
+      .toBe('not_noninferior');
+  });
+
   it('proves pairing direction, panel-seat averaging, components, and 100000-resample reproducibility', () => {
     const rows = analysisRows('primary', 'hard', [3, 3], [2, 2]);
     const first = analyzeD569Pair(rows, {
@@ -386,6 +507,37 @@ describe('D569 paired cluster analysis and success labels', () => {
     expect(report.refusalRiskDifference.interval.upper).toBeGreaterThan(0);
   });
 
+  it('refusal_cluster_distribution_end_to_end: zero-and-one clusters fail, while swapped arms pass', () => {
+    const exactTwoClusterDistribution = [0, 1].flatMap((first) =>
+      [0, 1].map((second) => (first + second) / 2)).sort();
+    expect(exactTwoClusterDistribution).toEqual([0, 0.5, 0.5, 1]);
+
+    const rows = analysisRows(
+      'primary', 'hard', ['execution_failed', 'refused'], ['refused', 0],
+    );
+    const blindMinusAdvice = analyzeD569Pair(rows, {
+      family: 'primary', basis: 'hard', leftArm: 'left', rightArm: 'right',
+      bootstrapSeed: 569, resamples: 10_000,
+    });
+    expect(blindMinusAdvice.pairedZeroInclusive.total).toMatchObject({
+      mean: 0, interval: { lower: 0, upper: 0 }, count: 2,
+    });
+    expect(blindMinusAdvice.refusalRiskDifference).toMatchObject({
+      mean: 0.5, interval: { lower: 0, upper: 1 }, count: 2,
+    });
+    expect(blindMinusAdvice.left.counts).toMatchObject({ refused: 1, executionFailed: 1 });
+    expect(blindMinusAdvice.right.counts.refused).toBe(1);
+    expect(blindMinusAdvice.successLabel).toBe('not_noninferior');
+
+    const adviceMinusBlind = analyzeD569Pair(rows, {
+      family: 'primary', basis: 'hard', leftArm: 'right', rightArm: 'left',
+      bootstrapSeed: 570, resamples: 10_000,
+    });
+    expect(adviceMinusBlind.pairedZeroInclusive.total.interval).toEqual({ lower: 0, upper: 0 });
+    expect(adviceMinusBlind.refusalRiskDifference.interval).toEqual({ lower: -1, upper: 0 });
+    expect(adviceMinusBlind.successLabel).toBe('noninferior');
+  });
+
   it('noninferiority_pools_bases: never lets hard success conceal brutal failure', () => {
     const hard = analyzeD569Pair(analysisRows('primary', 'hard', [3, 3], [2, 2]), {
       family: 'primary', basis: 'hard', leftArm: 'left', rightArm: 'right',
@@ -409,6 +561,38 @@ describe('D569 paired cluster analysis and success labels', () => {
     const summary = labelD569Success(reports, 'left', 'right');
     expect(summary.primary).toBe('passes');
     expect(summary.flukeGuard).toBe('fails');
+  });
+
+  it('refusal_only_failure_propagates: either primary basis or second family prevents overall success', () => {
+    const report = (
+      family: 'primary' | 'second', basis: 'hard' | 'brutal', refusalFails: boolean,
+    ) => analyzeD569Pair(refusalFails
+      ? analysisRows(family, basis, ['execution_failed', 'refused'], ['refused', 0])
+      : analysisRows(family, basis, [0, 0], [0, 0]), {
+      family, basis, leftArm: 'left', rightArm: 'right', bootstrapSeed: 700, resamples: 5_000,
+    });
+    for (const failedBasis of ['hard', 'brutal'] as const) {
+      const primaryRefusalFailure = [
+        report('primary', 'hard', failedBasis === 'hard'),
+        report('primary', 'brutal', failedBasis === 'brutal'),
+        report('second', 'hard', false), report('second', 'brutal', false),
+      ];
+      expect(primaryRefusalFailure.find((candidate) => candidate.basis === failedBasis &&
+        candidate.family === 'primary')?.pairedZeroInclusive.total.interval)
+        .toEqual({ lower: 0, upper: 0 });
+      expect(labelD569Success(primaryRefusalFailure, 'left', 'right').primary).toBe('fails');
+    }
+
+    for (const failedBasis of ['hard', 'brutal'] as const) {
+      const secondFamilyRefusalFailure = [
+        report('primary', 'hard', false), report('primary', 'brutal', false),
+        report('second', 'hard', failedBasis === 'hard'),
+        report('second', 'brutal', failedBasis === 'brutal'),
+      ];
+      const summary = labelD569Success(secondFamilyRefusalFailure, 'left', 'right');
+      expect(summary.primary).toBe('passes');
+      expect(summary.flukeGuard).toBe('fails');
+    }
   });
 });
 

@@ -24,13 +24,32 @@ export const D569_SECOND_FAMILY_MANIFEST_PATH =
 export const D569_EXPERIMENT_WALL_MS = 240_000 as const;
 export const D569_BOOTSTRAP_RESAMPLES = 100_000 as const;
 export const D569_NONINFERIORITY_MARGIN = -0.20 as const;
+export const D569_REFUSAL_RISK_MARGIN = 0.00 as const;
 export const D569_REPS = 3 as const;
 
 export const D569_PLAYER_MODELS = Object.freeze([
   'gpt-5.6-luna',
   'claude-opus-5',
-  'claude-fable-5',
   'gpt-5.6-sol',
+] as const);
+
+export const D569_PREREGISTRATION_AMENDMENTS = Object.freeze([
+  {
+    id: 'refusal-risk-upper-bound',
+    timing: 'pre-results',
+    reason: 'The prior lower-bound check allowed an increased refusal risk compatible with the data.',
+  },
+  {
+    id: 'remove-fable-player-arms',
+    timing: 'pre-results',
+    reason: 'Fable usage exhausted; no replacement in this registration',
+  },
+] as const);
+
+export const D569_JUDGE_PANEL_IDENTITIES = Object.freeze([
+  { id: 'gpt-5.6-sol', model: 'gpt-5.6-sol', effort: 'high' },
+  { id: 'claude-opus-5', model: 'claude-opus-5', effort: 'high' },
+  { id: 'gpt-6-astra', model: 'gpt-6-astra', effort: 'high' },
 ] as const);
 
 export const D569_CORE_ARM_IDENTITIES = Object.freeze(D569_PLAYER_MODELS.flatMap((model) =>
@@ -54,20 +73,33 @@ export const D569_HINT_ARM_IDENTITIES = Object.freeze([
   },
 ] as const);
 
+const activePlayerModels = new Set<string>(D569_PLAYER_MODELS);
+const eligibleJudgeSeats = (playingModels: ReadonlySet<string>): readonly string[] =>
+  D569_JUDGE_PANEL_IDENTITIES
+    .filter((seat) => !playingModels.has(seat.model))
+    .map((seat) => seat.id);
+
 export const D575_ANALYSIS_COMPARISONS = Object.freeze([
-  ...D575_PAIRWISE_COMPARISON_IDENTITIES.map((comparison) => ({
-    id: comparison.name,
-    leftArm: `${comparison.left.model}-${comparison.left.dmMode}`,
-    rightArm: `${comparison.right.model}-${comparison.right.dmMode}`,
-    estimand: comparison.left.model === comparison.right.model
-      ? 'blind_minus_own_advice' as const
-      : 'luna_minus_judge_within_mode' as const,
-  })),
+  ...D575_PAIRWISE_COMPARISON_IDENTITIES
+    .filter((comparison) => activePlayerModels.has(comparison.left.model) &&
+      activePlayerModels.has(comparison.right.model))
+    .map((comparison) => ({
+      id: comparison.name,
+      leftArm: `${comparison.left.model}-${comparison.left.dmMode}`,
+      rightArm: `${comparison.right.model}-${comparison.right.dmMode}`,
+      estimand: comparison.left.model === comparison.right.model
+        ? 'blind_minus_own_advice' as const
+        : 'luna_minus_judge_within_mode' as const,
+      eligibleJudgeSeats: eligibleJudgeSeats(new Set([
+        comparison.left.model, comparison.right.model,
+      ])),
+    })),
   {
     id: 'gpt-5.6-luna-blind-vs-gpt-5.6-sol-advice-ceiling',
     leftArm: 'gpt-5.6-luna-blind',
     rightArm: 'gpt-5.6-sol-advice',
     estimand: 'blind_minus_advice_ceiling' as const,
+    eligibleJudgeSeats: eligibleJudgeSeats(new Set(['gpt-5.6-luna', 'gpt-5.6-sol'])),
   },
 ]);
 
@@ -94,6 +126,7 @@ const comparisonSchema = z.strictObject({
     'luna_minus_judge_within_mode',
     'blind_minus_advice_ceiling',
   ]),
+  eligibleJudgeSeats: z.array(z.enum(D569_JUDGE_PANEL_IDENTITIES.map((seat) => seat.id))),
 });
 const repairComparisonSchema = z.strictObject({
   id: z.string(),
@@ -103,7 +136,21 @@ const repairComparisonSchema = z.strictObject({
 });
 
 export const d569ExperimentManifestSchema = z.strictObject({
-  version: z.literal('d569-blind-experiment-v1'),
+  version: z.literal('d569-blind-experiment-v2'),
+  preregistrationAmendments: z.tuple([
+    z.strictObject({
+      id: z.literal('refusal-risk-upper-bound'),
+      timing: z.literal('pre-results'),
+      reason: z.literal(
+        'The prior lower-bound check allowed an increased refusal risk compatible with the data.',
+      ),
+    }),
+    z.strictObject({
+      id: z.literal('remove-fable-player-arms'),
+      timing: z.literal('pre-results'),
+      reason: z.literal('Fable usage exhausted; no replacement in this registration'),
+    }),
+  ]),
   experimentWallMs: z.literal(D569_EXPERIMENT_WALL_MS),
   reps: z.literal(D569_REPS),
   blindMaxAttempts: z.literal(3),
@@ -177,6 +224,21 @@ export const d569ExperimentManifestSchema = z.strictObject({
     manifestSha256: hashSchema,
   }),
   trainingSeeds: z.array(z.number().int().nonnegative()),
+  judgePanel: z.strictObject({
+    seats: z.tuple([
+      z.strictObject({
+        id: z.literal('gpt-5.6-sol'), model: z.literal('gpt-5.6-sol'), effort: z.literal('high'),
+      }),
+      z.strictObject({
+        id: z.literal('claude-opus-5'), model: z.literal('claude-opus-5'), effort: z.literal('high'),
+      }),
+      z.strictObject({
+        id: z.literal('gpt-6-astra'), model: z.literal('gpt-6-astra'), effort: z.literal('high'),
+      }),
+    ]),
+    comparisonSeatPolicy: z.literal('same_eligible_seats_both_sides'),
+    minimumConsensusSeats: z.literal(2),
+  }),
   coreArms: z.array(armSchema),
   hintArms: z.array(armSchema),
   analysisComparisons: z.array(comparisonSchema),
@@ -273,11 +335,13 @@ export function validateD569ExperimentManifest(
   const violations: D569ExperimentViolation[] = [];
 
   addViolation(violations, canonicalEqual(manifest.coreArms, D569_CORE_ARM_IDENTITIES),
-    'core_arm_set', 'manifest must contain the exact eight D575 model/mode arms');
+    'core_arm_set', 'manifest must contain the exact six active model/mode arms');
   addViolation(violations, canonicalEqual(manifest.hintArms, D569_HINT_ARM_IDENTITIES),
     'hint_arm_set', 'manifest must contain the two preregistered hint diagnostics');
   addViolation(violations, canonicalEqual(manifest.analysisComparisons, D575_ANALYSIS_COMPARISONS),
-    'analysis_comparison_set', 'manifest must contain all D575 and advice-ceiling comparisons');
+    'analysis_comparison_set', 'manifest must contain the amended active and advice-ceiling comparisons');
+  addViolation(violations, canonicalEqual(manifest.judgePanel.seats, D569_JUDGE_PANEL_IDENTITIES),
+    'judge_panel', 'judge panel must contain the exact preregistered Sol, Opus, and Astra seats');
   addViolation(violations, canonicalEqual(manifest.repairComparisons, REQUIRED_REPAIR_COMPARISONS),
     'repair_comparison_set', 'manifest must contain both advice-assisted repair comparisons');
   addViolation(violations,
@@ -291,6 +355,29 @@ export function validateD569ExperimentManifest(
   addViolation(violations,
     canonicalEqual(manifest.sealedOverride.answerKeyOnlyFields, REQUIRED_ANSWER_KEY_FIELDS),
     'override_answer_key_fields', 'sealed override answer-key fields changed');
+
+  const armsById = new Map(
+    [...manifest.coreArms, ...manifest.hintArms].map((arm) => [arm.id, arm] as const),
+  );
+  for (const comparison of manifest.analysisComparisons) {
+    const left = armsById.get(comparison.leftArm);
+    const right = armsById.get(comparison.rightArm);
+    addViolation(violations, left !== undefined && right !== undefined,
+      'dangling_comparison_arm', `comparison ${comparison.id} references an inactive arm`);
+    if (left === undefined || right === undefined) continue;
+    const playingModels = new Set<string>([left.model, right.model]);
+    const expectedSeats = eligibleJudgeSeats(playingModels);
+    const registeredSeats = manifest.judgePanel.seats.filter((seat) =>
+      comparison.eligibleJudgeSeats.includes(seat.id));
+    const registeredEligibleSeats = registeredSeats.filter((seat) => !playingModels.has(seat.model));
+    addViolation(violations, canonicalEqual(comparison.eligibleJudgeSeats, expectedSeats),
+      'judge_eligibility', `comparison ${comparison.id} must use every and only eligible judge seat`);
+    addViolation(violations, registeredSeats.every((seat) => !playingModels.has(seat.model)),
+      'self_scoring', `comparison ${comparison.id} assigns a playing model to judge itself`);
+    addViolation(violations, expectedSeats.length >= manifest.judgePanel.minimumConsensusSeats &&
+      registeredEligibleSeats.length >= manifest.judgePanel.minimumConsensusSeats,
+      'judge_consensus', `comparison ${comparison.id} has fewer than two eligible judge seats`);
+  }
 
   const componentKeys = D569_AI_DM_KB_COMPONENT_PATHS.map(kbComponentKey);
   addViolation(violations,
@@ -624,6 +711,10 @@ export interface D569MetricReport {
   readonly interval: D569Interval;
   readonly count: number;
 }
+export interface D569SuccessMetricEvidence {
+  readonly mean: number;
+  readonly interval: D569Interval | null;
+}
 export interface D569ArmReport {
   readonly zeroInclusive: Readonly<Record<'total' | D569PanelComponent, D569MetricReport>>;
   readonly executedOnly: Readonly<Record<'total' | D569PanelComponent, D569MetricReport>>;
@@ -648,6 +739,24 @@ export interface D569PairAnalysis {
   readonly pairedExecutedOnly: Readonly<Record<'total' | D569PanelComponent, D569MetricReport>>;
   readonly refusalRiskDifference: D569MetricReport;
   readonly successLabel: 'noninferior' | 'not_noninferior';
+}
+
+function isFiniteOrderedInterval(interval: D569Interval | null): interval is D569Interval {
+  return interval !== null && Number.isFinite(interval.lower) && Number.isFinite(interval.upper) &&
+    interval.upper >= interval.lower;
+}
+
+/** Applies the two conjunctive preregistered bounds; null represents missing interval evidence. */
+export function labelD569PairNoninferiority(
+  offenseInterval: D569Interval | null,
+  refusalRiskDifference: D569SuccessMetricEvidence | null,
+): D569PairAnalysis['successLabel'] {
+  const offensePasses = isFiniteOrderedInterval(offenseInterval) &&
+    offenseInterval.lower > D569_NONINFERIORITY_MARGIN;
+  const refusalPasses = refusalRiskDifference !== null &&
+    isFiniteOrderedInterval(refusalRiskDifference.interval) &&
+    refusalRiskDifference.interval.upper <= D569_REFUSAL_RISK_MARGIN;
+  return offensePasses && refusalPasses ? 'noninferior' : 'not_noninferior';
 }
 
 function mulberry32(seed: number): () => number {
@@ -818,8 +927,7 @@ export function analyzeD569Pair(
     pairedZeroInclusive,
     pairedExecutedOnly,
     refusalRiskDifference,
-    successLabel: primary.interval.lower > D569_NONINFERIORITY_MARGIN &&
-      refusalRiskDifference.interval.lower <= 0 ? 'noninferior' : 'not_noninferior',
+    successLabel: labelD569PairNoninferiority(primary.interval, refusalRiskDifference),
   };
 }
 

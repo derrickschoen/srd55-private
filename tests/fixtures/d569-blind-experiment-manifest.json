@@ -1,5 +1,17 @@
 {
-  "version": "d569-blind-experiment-v1",
+  "version": "d569-blind-experiment-v2",
+  "preregistrationAmendments": [
+    {
+      "id": "refusal-risk-upper-bound",
+      "timing": "pre-results",
+      "reason": "The prior lower-bound check allowed an increased refusal risk compatible with the data."
+    },
+    {
+      "id": "remove-fable-player-arms",
+      "timing": "pre-results",
+      "reason": "Fable usage exhausted; no replacement in this registration"
+    }
+  ],
   "experimentWallMs": 240000,
   "reps": 3,
   "blindMaxAttempts": 3,
@@ -134,13 +146,20 @@
     "manifestSha256": "83daa7ea3ca89b270e5149368d09fa97074124dfe438cf95b346e996996026c8"
   },
   "trainingSeeds": [],
+  "judgePanel": {
+    "seats": [
+      { "id": "gpt-5.6-sol", "model": "gpt-5.6-sol", "effort": "high" },
+      { "id": "claude-opus-5", "model": "claude-opus-5", "effort": "high" },
+      { "id": "gpt-6-astra", "model": "gpt-6-astra", "effort": "high" }
+    ],
+    "comparisonSeatPolicy": "same_eligible_seats_both_sides",
+    "minimumConsensusSeats": 2
+  },
   "coreArms": [
     { "id": "gpt-5.6-luna-blind", "model": "gpt-5.6-luna", "effort": "high", "dmMode": "blind", "repair": "code_only", "adviceAssisted": false },
     { "id": "gpt-5.6-luna-advice", "model": "gpt-5.6-luna", "effort": "high", "dmMode": "advice", "repair": null, "adviceAssisted": true },
     { "id": "claude-opus-5-blind", "model": "claude-opus-5", "effort": "high", "dmMode": "blind", "repair": "code_only", "adviceAssisted": false },
     { "id": "claude-opus-5-advice", "model": "claude-opus-5", "effort": "high", "dmMode": "advice", "repair": null, "adviceAssisted": true },
-    { "id": "claude-fable-5-blind", "model": "claude-fable-5", "effort": "high", "dmMode": "blind", "repair": "code_only", "adviceAssisted": false },
-    { "id": "claude-fable-5-advice", "model": "claude-fable-5", "effort": "high", "dmMode": "advice", "repair": null, "adviceAssisted": true },
     { "id": "gpt-5.6-sol-blind", "model": "gpt-5.6-sol", "effort": "high", "dmMode": "blind", "repair": "code_only", "adviceAssisted": false },
     { "id": "gpt-5.6-sol-advice", "model": "gpt-5.6-sol", "effort": "high", "dmMode": "advice", "repair": null, "adviceAssisted": true }
   ],
@@ -149,17 +168,14 @@
     { "id": "gpt-5.6-sol-blind-minhint", "model": "gpt-5.6-sol", "effort": "high", "dmMode": "blind", "repair": "minimal_legal_alternative", "adviceAssisted": true }
   ],
   "analysisComparisons": [
-    { "id": "gpt-5.6-luna-blind-vs-advice", "leftArm": "gpt-5.6-luna-blind", "rightArm": "gpt-5.6-luna-advice", "estimand": "blind_minus_own_advice" },
-    { "id": "claude-opus-5-blind-vs-advice", "leftArm": "claude-opus-5-blind", "rightArm": "claude-opus-5-advice", "estimand": "blind_minus_own_advice" },
-    { "id": "claude-fable-5-blind-vs-advice", "leftArm": "claude-fable-5-blind", "rightArm": "claude-fable-5-advice", "estimand": "blind_minus_own_advice" },
-    { "id": "gpt-5.6-sol-blind-vs-advice", "leftArm": "gpt-5.6-sol-blind", "rightArm": "gpt-5.6-sol-advice", "estimand": "blind_minus_own_advice" },
-    { "id": "gpt-5.6-luna-vs-claude-opus-5-blind", "leftArm": "gpt-5.6-luna-blind", "rightArm": "claude-opus-5-blind", "estimand": "luna_minus_judge_within_mode" },
-    { "id": "gpt-5.6-luna-vs-claude-fable-5-blind", "leftArm": "gpt-5.6-luna-blind", "rightArm": "claude-fable-5-blind", "estimand": "luna_minus_judge_within_mode" },
-    { "id": "gpt-5.6-luna-vs-gpt-5.6-sol-blind", "leftArm": "gpt-5.6-luna-blind", "rightArm": "gpt-5.6-sol-blind", "estimand": "luna_minus_judge_within_mode" },
-    { "id": "gpt-5.6-luna-vs-claude-opus-5-advice", "leftArm": "gpt-5.6-luna-advice", "rightArm": "claude-opus-5-advice", "estimand": "luna_minus_judge_within_mode" },
-    { "id": "gpt-5.6-luna-vs-claude-fable-5-advice", "leftArm": "gpt-5.6-luna-advice", "rightArm": "claude-fable-5-advice", "estimand": "luna_minus_judge_within_mode" },
-    { "id": "gpt-5.6-luna-vs-gpt-5.6-sol-advice", "leftArm": "gpt-5.6-luna-advice", "rightArm": "gpt-5.6-sol-advice", "estimand": "luna_minus_judge_within_mode" },
-    { "id": "gpt-5.6-luna-blind-vs-gpt-5.6-sol-advice-ceiling", "leftArm": "gpt-5.6-luna-blind", "rightArm": "gpt-5.6-sol-advice", "estimand": "blind_minus_advice_ceiling" }
+    { "id": "gpt-5.6-luna-blind-vs-advice", "leftArm": "gpt-5.6-luna-blind", "rightArm": "gpt-5.6-luna-advice", "estimand": "blind_minus_own_advice", "eligibleJudgeSeats": ["gpt-5.6-sol", "claude-opus-5", "gpt-6-astra"] },
+    { "id": "claude-opus-5-blind-vs-advice", "leftArm": "claude-opus-5-blind", "rightArm": "claude-opus-5-advice", "estimand": "blind_minus_own_advice", "eligibleJudgeSeats": ["gpt-5.6-sol", "gpt-6-astra"] },
+    { "id": "gpt-5.6-sol-blind-vs-advice", "leftArm": "gpt-5.6-sol-blind", "rightArm": "gpt-5.6-sol-advice", "estimand": "blind_minus_own_advice", "eligibleJudgeSeats": ["claude-opus-5", "gpt-6-astra"] },
+    { "id": "gpt-5.6-luna-vs-claude-opus-5-blind", "leftArm": "gpt-5.6-luna-blind", "rightArm": "claude-opus-5-blind", "estimand": "luna_minus_judge_within_mode", "eligibleJudgeSeats": ["gpt-5.6-sol", "gpt-6-astra"] },
+    { "id": "gpt-5.6-luna-vs-gpt-5.6-sol-blind", "leftArm": "gpt-5.6-luna-blind", "rightArm": "gpt-5.6-sol-blind", "estimand": "luna_minus_judge_within_mode", "eligibleJudgeSeats": ["claude-opus-5", "gpt-6-astra"] },
+    { "id": "gpt-5.6-luna-vs-claude-opus-5-advice", "leftArm": "gpt-5.6-luna-advice", "rightArm": "claude-opus-5-advice", "estimand": "luna_minus_judge_within_mode", "eligibleJudgeSeats": ["gpt-5.6-sol", "gpt-6-astra"] },
+    { "id": "gpt-5.6-luna-vs-gpt-5.6-sol-advice", "leftArm": "gpt-5.6-luna-advice", "rightArm": "gpt-5.6-sol-advice", "estimand": "luna_minus_judge_within_mode", "eligibleJudgeSeats": ["claude-opus-5", "gpt-6-astra"] },
+    { "id": "gpt-5.6-luna-blind-vs-gpt-5.6-sol-advice-ceiling", "leftArm": "gpt-5.6-luna-blind", "rightArm": "gpt-5.6-sol-advice", "estimand": "blind_minus_advice_ceiling", "eligibleJudgeSeats": ["claude-opus-5", "gpt-6-astra"] }
   ],
   "repairComparisons": [
     { "id": "gpt-5.6-luna-code-only-vs-minhint", "codeOnlyArm": "gpt-5.6-luna-blind", "minimalHintArm": "gpt-5.6-luna-blind-minhint", "reportLabel": "advice-assisted" },
