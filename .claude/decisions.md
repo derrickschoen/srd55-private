@@ -14580,3 +14580,18 @@ natural comparison for D572 and will be run on the pool when increment
 4 lands. The 24/32/48 rerun on the struggle set waits for a set of ten.
 Also recorded: the judge panel scores identical plans identically, so
 seat-level ties are expected when arms copy each other.
+
+## D569 increment 3 committed 4ae1b677; guard fix committed c81b5573 on the pool branch; increment 4 dispatched (2026-09-07 13:09)
+
+Increment 3, codex claims: 3 specs 33/33, boundary 4/4, tsc 0, eight
+named mutants killed with restore hashes. Verified myself: 5 spec
+files 83/83 (resolver, contract, MCP server, boundary, turn context),
+generator idempotent, tsc 0, scans clean, no claude exec lines,
+contracts.ts unchanged; my mutant (the resolver's first cell-equality
+forced true, so hold no longer filters to the current cell) killed by
+four named tests including "defaults omitted destinations to hold";
+restored byte-identical. Two design notes accepted: the intent's
+reason became optional (tested; never judged), and the resolver's
+deadline defaults to the 180 s live wall unless the caller injects one,
+so increment 4 must pass the arena's 240 s experiment wall through
+that dependency.
