@@ -13778,3 +13778,33 @@ own runs (27/27 then 29/29), no markers, all three flags present.
 Round 1 (single factor): luna low, semantic only, seed 6203001,
 answer-schema v2-evidence versus a same-tree v1 control (to separate
 the tree change from the factor). Seed 2 follows for a gain.
+
+## Schema-fix lane result; second defect from the cap sweep: the compact-fallback context is not serializable (2026-09-07 00:39)
+
+Schema fix (codex, claude/e1c-dm-facts): cause confirmed as the strict
+turnDeltaOutput schema not declaring semantic_board /
+semantic_board_truncated, so the mid-round adjustment delta with a
+board attached matched no union member. Fix adds a strict semantic-board
+schema to every structured full/delta variant, a 17-context invariant
+(round/adjustment, full/delta, structured/profiled/intel-off/prose,
+board on/off, partial/full truncation) that failed before and passes
+after, the missing `schema:engine-mcp` generator on this lineage, and
+the generated docs/specs/engine-get-turn-context-output.schema.json.
+Codex's dry-run reproduction on brutal room 1: before partial_execution
+with the refusal, after authorized with the adjustment. Codex claims 4
+specs 124/124, tsc 0, two mutants killed. Codex also notes the control's
+6203004 rep-3 partial is a different error (Dispel-mode) and the sol
+refused row was a timeout. My verification chain (repro, specs,
+generator idempotence, tsc, my own mutant on the truncation enum) is
+running; a first version of my script had a regex that would have
+produced a syntax error and was stopped before it ran.
+
+Cap sweep, 16 KiB arm (luna medium, hard x3): 15/30 refused, every
+refusal `Value is not JSON serializable: [object Undefined].`, all on
+the five rooms the sweep table marks compact_fallback (post-trim 5.15 KB).
+The compact-fallback turn context carries an undefined value that the
+tool result cannot serialize: a second engine/MCP defect exposed by the
+sweep, invisible at 32 KiB. The 16 KiB arm is void for those rooms
+until fixed; fix lane dispatched on a separate worktree off
+claude/cap-sweep because the cap arms still run from that tree's
+source.
