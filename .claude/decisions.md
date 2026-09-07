@@ -14648,3 +14648,41 @@ data-model change). Recommendation: (2) over an integer-exact trace.
 Owner asked one question: option 2 or option 1. Lane los-cover-i1a
 continues on the centre-line rule until the owner answers; a change
 is a plan amendment and a re-dispatch.
+
+## D576 increment 1a harvest: BLOCKED at the pin ledger, work committed as c1b024e1 on claude/los-cover (2026-09-07 14:40)
+
+Codex (session 01a07cec-4c7d-7e31-90c2-a2b19d757ecf, 1 h 55 min) stopped
+with "BLOCKED: canonical wall behavior invalidates thirteen legacy-era
+assertions, including an exact tactical probability pin not authorized
+by the approved pin ledger." Correct behaviour: the plan's ledger did
+not list them. This is a plan finding, not a codex failure.
+
+Codex claims: 22 touched specs 829/829; tsc clean; twelve M576-E1A-*
+mutants each killed by a named test and restored to prior hashes; 33
+frozen fixtures aggregate hash unchanged; no optional wire field needed
+(the triple movement:false, lineOfSight:false, cover:half maps to
+half + difficult); era census run over 63 rooms.
+
+Supervisor verified on dnd-wt-los-cover: tsc exit 0; the 22 specs
+22 files / 829 tests passed; the four legacy specs reproduce exactly 13
+failures (9 brutal-room productivity, 1 hard-room Scout shot, 1 movement
+35->40 ft, 2 R02 tactical incl. probability 0.64115329546875 ->
+0.59120877671875); contracts.ts hash unchanged; no fixture files
+modified; no any/ts-ignore/skip/todo in the diff; one removed test
+(three-quarters creature variant) replaced by three new ones per the
+plan; no git write commands and no claude invocation in the lane log.
+Supervisor mutant M-SUP-1A-SIGHT-FROM-PASSABILITY (blocksSight derived
+from passability === 'blocked' instead of tier === 'total', so an arrow
+slit would block sight): killed, 2 tests failed / 827 passed, restored
+to dcd7fa51... (log .tmp/runs/mut-sup-1a-sight.log).
+
+Era census (codex run, pasted in the lane log): overall 3470 ordered
+living pairs, 1771 change cover tier, 1680 change sight; transitions
+none->total 1131, half->total 549, half->none 57, none->half 34; no
+three_quarters anywhere (no generator emits it yet).
+
+Ruling deferred: the 13 legacy assertions are the era change itself
+and will move in a ledger amendment listing each with its independent
+invariant. Held until the owner answers the ray-casting question
+(option 1 exact centre ray vs option 2 DMG corner rays), because
+option 2 moves the same assertions again. Lane idle; no re-dispatch.
