@@ -1,0 +1,177 @@
+{
+  "version": "d569-blind-experiment-v1",
+  "experimentWallMs": 240000,
+  "reps": 3,
+  "blindMaxAttempts": 3,
+  "execution": {
+    "freshSessionPerCell": true,
+    "escalation": false,
+    "modelDefaultFallback": false,
+    "transport": "mcp_minimal",
+    "boardImage": "png"
+  },
+  "caps": {
+    "blindBaseBytes": 65536,
+    "semanticBytes": 8192,
+    "adviceBaseBytes": 32768
+  },
+  "bootstrap": {
+    "resamples": 100000,
+    "seed": 569575,
+    "confidence": 0.95,
+    "noninferiorityMargin": -0.2
+  },
+  "sharedKb": {
+    "rootPath": "tests/fixtures/ai-dm-kb/d569/ai-dm-core.md",
+    "combinedStartupHash": "6a073582ff15fa3f44e301f3a71300baaee8e459590cecd2e61930568bb8f38f",
+    "componentHashes": {
+      "root": "19f66c81a0a1c8641a7cc4a3844e5cdd0b49ce72cd056ad72b8932d37085f260",
+      "tactics": "4b78bdf95f86bc1a8f7078e96bfb2b2485d0cd35babe1871adbfdfcb8d34f2f7",
+      "actions": "551561024a73750fb250d88d7b64c2a357bb6de5bb2f6dcb99755511a859bbd6",
+      "movement": "549fc7e27d73ea4250b00c94b4c17067c440c2cdf905e003b4c11e153a0e6c3d",
+      "targeting": "da6c04dacb471ef9a8b1bd60f5229418ab25a692b0a86d8a41e10248ac5b98e3",
+      "spells": "a8e618a972ce98ca4fb5a025229f1d3c08a6bf0bdf297f637d2e68a3d472a13f",
+      "conditions": "f57bd5ab6c9626cb9182316f5fb10f8ad2b998758c1dd1ad44c37ce4ded80ae9",
+      "reactions": "7c775e9710d57648dd2dbfa6a99159e1e5dc1d0eaa6a89ecb80493579ecd6918",
+      "protocol": "05c767f15ae28f9d3f34fbd3f54260ce857336cfb9cbbac1178c462299505d08"
+    }
+  },
+  "visualPins": {
+    "blind": {
+      "informationMode": "blind_state",
+      "primerVersion": "d562-general-board-primer-v10",
+      "imageRole": "dm_board",
+      "glyphMode": "full",
+      "captureTilePx": 128
+    },
+    "advice": {
+      "informationMode": "advice",
+      "primerVersion": "d562-general-board-primer-v10",
+      "imageRole": "dm_board",
+      "glyphMode": "full",
+      "captureTilePx": 128
+    }
+  },
+  "adviceCeiling": {
+    "arm": "gpt-5.6-sol-advice",
+    "model": "gpt-5.6-sol",
+    "effort": "high",
+    "intelMode": "full",
+    "rendererProfile": {
+      "format": "structured",
+      "delta": "path_granular",
+      "anchor": "full",
+      "rows": "full",
+      "slots": "full",
+      "opportunityCost": "full",
+      "threats": "full",
+      "ids": "full",
+      "status": "full",
+      "movement": "always",
+      "labels": "always",
+      "frontier": "full",
+      "knowledge": "full",
+      "failures": "full",
+      "adverts": "full",
+      "rare": "always",
+      "misc": "separate",
+      "shortlist": "all",
+      "optionDetail": "full",
+      "nullFields": "explicit",
+      "attribution": "off"
+    },
+    "contextCapBytes": 32768,
+    "timeoutMs": 240000,
+    "escalation": false,
+    "transport": "mcp_minimal",
+    "combatModel": "initiative_segments_v1",
+    "initiativeProfile": "derived_v1",
+    "partyPolicy": "symmetric_evaluator_v1",
+    "overridePolicy": "typed_reason",
+    "reactionAskDefault": "decline",
+    "midRoundAdjustmentsEnabled": false,
+    "captureRlData": false,
+    "commonKbHash": "6a073582ff15fa3f44e301f3a71300baaee8e459590cecd2e61930568bb8f38f",
+    "visualPin": "advice",
+    "intentionalHistoricalDifference": "common_d570_kb_tips"
+  },
+  "primaryCohorts": [
+    {
+      "id": "evaluation-hard",
+      "difficulty": "hard",
+      "fixtures": [
+        { "seed": 5117001, "path": "tests/fixtures/arena-basis-hard/seed-5117001.json", "sha256": "fb5c2811fa4751b4e3e25f1f2aa4fac74c1235aee998f7a232f24b70164d132d" },
+        { "seed": 5117002, "path": "tests/fixtures/arena-basis-hard/seed-5117002.json", "sha256": "85daa5615a594cd3cc89f19d605946e33975954ecdae8204b5df216ce3e804ff" },
+        { "seed": 5117003, "path": "tests/fixtures/arena-basis-hard/seed-5117003.json", "sha256": "67e4ab39e3a7c89e8d96d1deadcb67820c848c78a0ca5fa0a3d8ed40b45007fb" },
+        { "seed": 5117004, "path": "tests/fixtures/arena-basis-hard/seed-5117004.json", "sha256": "a23f8912e86d84d091633cd3494af0d886731a7c13af74fdb915d209d8f96e30" },
+        { "seed": 5117005, "path": "tests/fixtures/arena-basis-hard/seed-5117005.json", "sha256": "8caae8d94f1eeb9ac46f6cabb2ad3578bc1f63b921e59e00911935827d0bac4c" },
+        { "seed": 5117006, "path": "tests/fixtures/arena-basis-hard/seed-5117006.json", "sha256": "04b6f6af41237fd30e5d486d26d44e929a29ddd5df5cc9689010f5b7fa54e11d" },
+        { "seed": 5117007, "path": "tests/fixtures/arena-basis-hard/seed-5117007.json", "sha256": "2eb3ff898ebb3e413ef30cbcf9d7611553f4c38b8bfe9135e665ce011ff9b45a" },
+        { "seed": 5117008, "path": "tests/fixtures/arena-basis-hard/seed-5117008.json", "sha256": "b59c2a1f6360b80db375363faad7e2212ffaa3db09ed25428c9d8f91ad580805" },
+        { "seed": 5117009, "path": "tests/fixtures/arena-basis-hard/seed-5117009.json", "sha256": "b679f1135883166b7a151e95ac969cc4b7d474d10cd180cac85a9a416eb6898a" },
+        { "seed": 5117010, "path": "tests/fixtures/arena-basis-hard/seed-5117010.json", "sha256": "6388153ab3eec04b77475f328d38b837de1f571c41aeaf6cfcf8a5fd62b44e94" }
+      ]
+    },
+    {
+      "id": "evaluation-brutal",
+      "difficulty": "brutal",
+      "fixtures": [
+        { "seed": 6203001, "path": "tests/fixtures/arena-basis-brutal/seed-6203001.json", "sha256": "3f737f1ddf714b0381abdc0e822b3a07cda4c55287a4bc0b1a97cd4d7d71d63b" },
+        { "seed": 6203002, "path": "tests/fixtures/arena-basis-brutal/seed-6203002.json", "sha256": "8a7738bd2606792bae65da8f39f709ffad5b0bb5487f8e5749cecac4f29f9860" },
+        { "seed": 6203003, "path": "tests/fixtures/arena-basis-brutal/seed-6203003.json", "sha256": "d54761b2864fcdc1a777f645ade96279da751b3247bca1e042fb997326dc060f" },
+        { "seed": 6203004, "path": "tests/fixtures/arena-basis-brutal/seed-6203004.json", "sha256": "6f9465eccac77eb60ffab2be1832f8f1bcd3290c655130c2ac752a38e6d75a20" },
+        { "seed": 6203005, "path": "tests/fixtures/arena-basis-brutal/seed-6203005.json", "sha256": "5b3be6abbdf2fcccff3243639d582bea2fb1098099fa91cf2208a0f143a2364e" },
+        { "seed": 6203006, "path": "tests/fixtures/arena-basis-brutal/seed-6203006.json", "sha256": "3e6818fe70e276e9ee7407d76b01e3afab7254cc1c27e649d5f445a5f6a6480c" },
+        { "seed": 6203007, "path": "tests/fixtures/arena-basis-brutal/seed-6203007.json", "sha256": "e6215e5b6388a79bc850e7ff97867f2618733acbb434526a77133e382cba2d1b" },
+        { "seed": 6203008, "path": "tests/fixtures/arena-basis-brutal/seed-6203008.json", "sha256": "b067b1aa081f368859979415c468d997b6fa504cad6ad70dc6998c90eeb3207c" },
+        { "seed": 6203009, "path": "tests/fixtures/arena-basis-brutal/seed-6203009.json", "sha256": "9780276cdec0ee71c99cc13217d73376990866f5ab3ab471c7a793196665f7ce" },
+        { "seed": 6203010, "path": "tests/fixtures/arena-basis-brutal/seed-6203010.json", "sha256": "2ec7f3c1298e7b6f3519cf765bcb88f36be3426e02cf7572730a77af9e32114d" }
+      ]
+    }
+  ],
+  "secondFamily": {
+    "manifestPath": "tests/fixtures/d569-second-family-manifest.json",
+    "manifestSha256": "83daa7ea3ca89b270e5149368d09fa97074124dfe438cf95b346e996996026c8"
+  },
+  "trainingSeeds": [],
+  "coreArms": [
+    { "id": "gpt-5.6-luna-blind", "model": "gpt-5.6-luna", "effort": "high", "dmMode": "blind", "repair": "code_only", "adviceAssisted": false },
+    { "id": "gpt-5.6-luna-advice", "model": "gpt-5.6-luna", "effort": "high", "dmMode": "advice", "repair": null, "adviceAssisted": true },
+    { "id": "claude-opus-5-blind", "model": "claude-opus-5", "effort": "high", "dmMode": "blind", "repair": "code_only", "adviceAssisted": false },
+    { "id": "claude-opus-5-advice", "model": "claude-opus-5", "effort": "high", "dmMode": "advice", "repair": null, "adviceAssisted": true },
+    { "id": "claude-fable-5-blind", "model": "claude-fable-5", "effort": "high", "dmMode": "blind", "repair": "code_only", "adviceAssisted": false },
+    { "id": "claude-fable-5-advice", "model": "claude-fable-5", "effort": "high", "dmMode": "advice", "repair": null, "adviceAssisted": true },
+    { "id": "gpt-5.6-sol-blind", "model": "gpt-5.6-sol", "effort": "high", "dmMode": "blind", "repair": "code_only", "adviceAssisted": false },
+    { "id": "gpt-5.6-sol-advice", "model": "gpt-5.6-sol", "effort": "high", "dmMode": "advice", "repair": null, "adviceAssisted": true }
+  ],
+  "hintArms": [
+    { "id": "gpt-5.6-luna-blind-minhint", "model": "gpt-5.6-luna", "effort": "high", "dmMode": "blind", "repair": "minimal_legal_alternative", "adviceAssisted": true },
+    { "id": "gpt-5.6-sol-blind-minhint", "model": "gpt-5.6-sol", "effort": "high", "dmMode": "blind", "repair": "minimal_legal_alternative", "adviceAssisted": true }
+  ],
+  "analysisComparisons": [
+    { "id": "gpt-5.6-luna-blind-vs-advice", "leftArm": "gpt-5.6-luna-blind", "rightArm": "gpt-5.6-luna-advice", "estimand": "blind_minus_own_advice" },
+    { "id": "claude-opus-5-blind-vs-advice", "leftArm": "claude-opus-5-blind", "rightArm": "claude-opus-5-advice", "estimand": "blind_minus_own_advice" },
+    { "id": "claude-fable-5-blind-vs-advice", "leftArm": "claude-fable-5-blind", "rightArm": "claude-fable-5-advice", "estimand": "blind_minus_own_advice" },
+    { "id": "gpt-5.6-sol-blind-vs-advice", "leftArm": "gpt-5.6-sol-blind", "rightArm": "gpt-5.6-sol-advice", "estimand": "blind_minus_own_advice" },
+    { "id": "gpt-5.6-luna-vs-claude-opus-5-blind", "leftArm": "gpt-5.6-luna-blind", "rightArm": "claude-opus-5-blind", "estimand": "luna_minus_judge_within_mode" },
+    { "id": "gpt-5.6-luna-vs-claude-fable-5-blind", "leftArm": "gpt-5.6-luna-blind", "rightArm": "claude-fable-5-blind", "estimand": "luna_minus_judge_within_mode" },
+    { "id": "gpt-5.6-luna-vs-gpt-5.6-sol-blind", "leftArm": "gpt-5.6-luna-blind", "rightArm": "gpt-5.6-sol-blind", "estimand": "luna_minus_judge_within_mode" },
+    { "id": "gpt-5.6-luna-vs-claude-opus-5-advice", "leftArm": "gpt-5.6-luna-advice", "rightArm": "claude-opus-5-advice", "estimand": "luna_minus_judge_within_mode" },
+    { "id": "gpt-5.6-luna-vs-claude-fable-5-advice", "leftArm": "gpt-5.6-luna-advice", "rightArm": "claude-fable-5-advice", "estimand": "luna_minus_judge_within_mode" },
+    { "id": "gpt-5.6-luna-vs-gpt-5.6-sol-advice", "leftArm": "gpt-5.6-luna-advice", "rightArm": "gpt-5.6-sol-advice", "estimand": "luna_minus_judge_within_mode" },
+    { "id": "gpt-5.6-luna-blind-vs-gpt-5.6-sol-advice-ceiling", "leftArm": "gpt-5.6-luna-blind", "rightArm": "gpt-5.6-sol-advice", "estimand": "blind_minus_advice_ceiling" }
+  ],
+  "repairComparisons": [
+    { "id": "gpt-5.6-luna-code-only-vs-minhint", "codeOnlyArm": "gpt-5.6-luna-blind", "minimalHintArm": "gpt-5.6-luna-blind-minhint", "reportLabel": "advice-assisted" },
+    { "id": "gpt-5.6-sol-code-only-vs-minhint", "codeOnlyArm": "gpt-5.6-sol-blind", "minimalHintArm": "gpt-5.6-sol-blind-minhint", "reportLabel": "advice-assisted" }
+  ],
+  "sealedOverride": {
+    "version": "d569-sealed-override-v1",
+    "stageOrder": ["blind_intent_sealed", "engine_top_revealed", "final_policy_choice_sealed"],
+    "blindSealFields": ["capsuleRevision", "capsuleDigest", "roomHash", "blindIntentText", "blindIntents", "repairTranscript", "rejectionCodes", "attempts", "resolverSemanticDigest", "sealSha256"],
+    "answerKeyOnlyFields": ["selectedOfferedId", "catalogDigest", "engineTopId", "engineTopRank", "engineTopPolicyVersion", "engineTopResolutionDigest", "blindDiffersFromEngineTop", "differenceClass", "blindCounterfactualDigest", "engineTopCounterfactualDigest"],
+    "counterfactualCapsulePolicy": "identical_capsule",
+    "improvementEstimand": "final_policy_minus_always_top",
+    "minimumMeanGain": 0.2
+  }
+}

@@ -1140,6 +1140,32 @@ export interface D575PairwisePacket {
   readonly answerKey: RerunAnswerKey;
 }
 
+export interface D575PairwiseComparisonIdentity {
+  readonly name: string;
+  readonly left: { readonly model: string; readonly dmMode: 'blind' | 'advice' };
+  readonly right: { readonly model: string; readonly dmMode: 'blind' | 'advice' };
+}
+
+const D575_LUNA_MODEL = 'gpt-5.6-luna' as const;
+const D575_JUDGE_PLAYER_MODELS = Object.freeze([
+  'claude-opus-5', 'claude-fable-5', 'gpt-5.6-sol',
+] as const);
+
+/** The ten D575 packet-layer identities consumed by later experiment manifests. */
+export const D575_PAIRWISE_COMPARISON_IDENTITIES = Object.freeze([
+  ...[D575_LUNA_MODEL, ...D575_JUDGE_PLAYER_MODELS].map((model) => ({
+    name: `${model}-blind-vs-advice`,
+    left: { model, dmMode: 'blind' as const },
+    right: { model, dmMode: 'advice' as const },
+  })),
+  ...(['blind', 'advice'] as const).flatMap((dmMode) =>
+    D575_JUDGE_PLAYER_MODELS.map((model) => ({
+      name: `gpt-5.6-luna-vs-${model}-${dmMode}`,
+      left: { model: D575_LUNA_MODEL, dmMode },
+      right: { model, dmMode },
+    }))),
+] satisfies readonly D575PairwiseComparisonIdentity[]);
+
 /** Builds the preregistered D575 comparisons without changing the standing two-arm judge format. */
 export function buildD575PairwiseRerunPackets(
   rows: readonly JsonRecord[],
@@ -1168,25 +1194,11 @@ export function buildD575PairwiseRerunPackets(
     }
     return matching[0]?.[0] ?? '';
   };
-  const judgeModels = ['claude-opus-5', 'claude-fable-5', 'gpt-5.6-sol'] as const;
-  const lunaModel = 'gpt-5.6-luna';
-  const pairs: { readonly name: string; readonly leftArm: string; readonly rightArm: string }[] = [];
-  for (const model of [lunaModel, ...judgeModels]) {
-    pairs.push({
-      name: `${model}-blind-vs-advice`,
-      leftArm: findArm(model, 'blind'),
-      rightArm: findArm(model, 'advice'),
-    });
-  }
-  for (const mode of ['blind', 'advice'] as const) {
-    for (const model of judgeModels) {
-      pairs.push({
-        name: `gpt-5.6-luna-vs-${model}-${mode}`,
-        leftArm: findArm(lunaModel, mode),
-        rightArm: findArm(model, mode),
-      });
-    }
-  }
+  const pairs = D575_PAIRWISE_COMPARISON_IDENTITIES.map((comparison) => ({
+    name: comparison.name,
+    leftArm: findArm(comparison.left.model, comparison.left.dmMode),
+    rightArm: findArm(comparison.right.model, comparison.right.dmMode),
+  }));
   const seeds = pairs.map((pair) => shuffleSeeds[pair.name]);
   if (seeds.some((seed) => seed === undefined || !Number.isSafeInteger(seed)) ||
     new Set(seeds).size !== pairs.length) {
