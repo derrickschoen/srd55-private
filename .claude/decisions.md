@@ -13537,3 +13537,22 @@ E1cb hard arms complete on the budget-fixed build: luna_facts 23x1/6x2/1x3
 attempts, control 25x1/5x2, sol_facts 26x1/3x2/1x3, all 30/30
 authorized. Packets e1cbh (facts vs control, facts vs sol; shuffle 9062)
 built; standing panel launched; brutal arms running.
+
+## cap-sweep harvest committed f59f4b49 on claude/cap-sweep; D567 arms queued (2026-09-06 23:42)
+
+Codex claimed: 11 specs 304/304, tsc 0, two mutants killed (cap ignored;
+image counted), sweep table. Verified myself: forbidden scans clean
+(the only `any` hits are vitest expect.any matchers), lane log carries
+only the header's own claude mention, contracts.ts hash unchanged; the
+sweep table reproduced 50/50 rows by my own run; 11 specs 304/304 twice
+(the first run's vitest exit was 1 with every test passing, the rerun
+with full output exited 0; recorded as an anomaly, not a failure); tsc
+0; supervisor mutant (recorder assertion reverted to the 32 KiB
+constant) killed by the 64 KiB arena test, file restored byte-identical.
+
+D567 arms queued behind the E1cb brutal arms (run-cap-arms.sh): luna
+medium, default profile, full intel, hard R1-10 x3, seed 5117001, 240
+s wall, caps 16/24/32/48/64 KiB (three then two concurrent), rows
+~/dnd-slim-runs/cap-<n>.jsonl. Each cap is judged pairwise against the
+32 KiB control from the same tree; latency per turn compared from the
+rows.
