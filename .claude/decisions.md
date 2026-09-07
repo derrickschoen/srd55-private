@@ -13768,3 +13768,13 @@ ceiling arm must run with mid-round adjustments disabled too (or blind
 gets an equivalent blind adjustment call); otherwise the ceiling gap
 measures adjustments, not judgment. Increment 1b waits for the D570
 knowledge lane to finish in the same worktree.
+
+## D568 tuning tree ready (09ef9f4b); tuning round 1 launched (2026-09-07 00:24)
+
+claude/d568-tune = E1b (49d782bb) + A10 v2-evidence answer schema
+(e8354a84) + E3 v9-checklist primer variant (09ef9f4b); both conflicts in
+tools/ai-dm-screenshot-probe.ts resolved by codex lanes, verified by my
+own runs (27/27 then 29/29), no markers, all three flags present.
+Round 1 (single factor): luna low, semantic only, seed 6203001,
+answer-schema v2-evidence versus a same-tree v1 control (to separate
+the tree change from the factor). Seed 2 follows for a gain.
