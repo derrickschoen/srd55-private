@@ -13325,3 +13325,15 @@ meaninglessly; recorded so nobody counts it.
 Judged arms relaunched on ca43be82: hard R1-10 x3 (luna+facts, luna control,
 sol+facts) then brutal 10x3 with the same three arms, 240 s wall, rows
 to ~/dnd-slim-runs/e1cb-*.jsonl.
+
+## D567 — OWNER: experiment with the turn-context cap above and below 32 KiB; the screenshot never counts toward the budget (2026-09-06 22:42)
+
+Owner (verbatim): "Experiment with limits higher and lower than 32kb.
+Do not include the screenshot size in the budget"
+
+Context: the 32 KiB TURN_CONTEXT_MAX_BYTES entered on 2026-08-29 as the
+D414 recording assertion size and became the structured renderer's trim
+budget with D418.2 the next day; never ruled, never A/B tested; the
+base context sits at 31.4-32.8 KB on every hard room, so the cap prunes
+options (six built offense-first, down to two in room 5 on 2026-09-05)
+and actor detail on nearly every turn. Supervisor plan follows.
