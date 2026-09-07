@@ -54,7 +54,7 @@ import {
   salientInitiativeWindow,
   topDmActorIntelRows,
 } from '../dm-tactical-intel';
-import { renderEngineFailureModes } from '../engine-failure-modes';
+import { ENGINE_FAILURE_MODES_POLICY, renderEngineFailureModes } from '../engine-failure-modes';
 import {
   movementOptionsIntel,
   renderMovementContextRow,
@@ -72,6 +72,7 @@ import {
 import {
   renderTeamPlanFrontier,
   scoreTeamPlans,
+  TEAM_SCORER_POLICY,
   type TeamPlanFrontierReport,
 } from '../intel/team-scorer';
 import {
@@ -2290,34 +2291,35 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
             }];
           });
           optionReferences = fallbackReferences;
-          const sourceSummary = objectAt(source as Record<string, unknown>, 'summary');
+          const sourceSummary = objectAt(source as Record<string, unknown>, 'summary') ??
+            objectAt(incumbentFull as Record<string, unknown>, 'summary');
+          if (sourceSummary === null) throw new TypeError('Compact turn context requires a tactical summary.');
           const sourceFrontier = objectAt(source as Record<string, unknown>, 'team_plan_frontier');
-          const sourceFailures = objectAt(source as Record<string, unknown>, 'known_failure_modes');
           const compact = {
             granularity: 'full' as const,
             context_trimmed: true,
             state_ref: source['state_ref'],
             request: source['request'],
-            summary: sourceSummary === null ? undefined : {
+            summary: {
               room: sourceSummary['room'], round: sourceSummary['round'],
               active_side: sourceSummary['active_side'], living_allies: sourceSummary['living_allies'],
               living_enemies: sourceSummary['living_enemies'], terrain_tags: [],
             },
             actors: compactActors,
-            actor_knowledge: { policy: objectAt(source as Record<string, unknown>, 'actor_knowledge')?.['policy'], actors: [] },
-            reaction_spend_hold: { policy: objectAt(source as Record<string, unknown>, 'reaction_spend_hold')?.['policy'], windows: [] },
+            actor_knowledge: { policy: ENGINE_ACTOR_KNOWLEDGE_POLICY, actors: [] },
+            reaction_spend_hold: { policy: ENGINE_REACTION_SPEND_HOLD_POLICY, windows: [] },
             legendary_windows: {
-              policy: objectAt(source as Record<string, unknown>, 'legendary_windows')?.['policy'],
+              policy: ENGINE_LEGENDARY_WINDOWS_POLICY,
               detail_level: 'compact', compact: [],
             },
-            recovery_capabilities: { policy: objectAt(source as Record<string, unknown>, 'recovery_capabilities')?.['policy'], targets: [] },
-            search_memory: { policy: objectAt(source as Record<string, unknown>, 'search_memory')?.['policy'], memories: [] },
+            recovery_capabilities: { policy: ENGINE_RECOVERY_CAPABILITY_POLICY, targets: [] },
+            search_memory: { policy: SEARCH_MEMORY_POLICY, memories: [] },
             alert_state: {
-              policy: objectAt(source as Record<string, unknown>, 'alert_state')?.['policy'], calls: [], joined: [],
+              policy: ALERTING_POLICY, calls: [], joined: [],
             },
             applicable_plays: [], applicable_skills: [], recent_changes: [],
             team_plan_frontier: sourceFrontier === null ? null : {
-              policy: sourceFrontier['policy'],
+              policy: TEAM_SCORER_POLICY,
               frontier_resolution: sourceFrontier['frontier_resolution'],
               detail_level: 'omitted',
               frontier_candidate_count: Array.isArray(sourceFrontier['candidates'])
@@ -2328,10 +2330,10 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
                 : sourceFrontier['removed_candidate_count'] ?? 0,
               reason: 'context_size_limit',
             },
-            ...(sourceFailures === null ? {} : {
-              known_failure_modes: { policy: sourceFailures['policy'] },
-            }),
-            renderer_attribution: source['renderer_attribution'],
+            known_failure_modes: { policy: ENGINE_FAILURE_MODES_POLICY },
+            ...(source['renderer_attribution'] === undefined
+              ? {}
+              : { renderer_attribution: source['renderer_attribution'] }),
             compact_fallback: true,
             truncated: true,
             next_cursor: null,
@@ -2450,7 +2452,9 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
               anchor,
               changes: diffTurnContextValues(base.context, currentFull),
               context_trimmed: currentFull['context_trimmed'],
-              renderer_attribution: currentFull['renderer_attribution'],
+              ...(currentFull['renderer_attribution'] === undefined
+                ? {}
+                : { renderer_attribution: currentFull['renderer_attribution'] }),
             };
             return rendererProfile.delta === 'guarded' && renderBytes(delta) >= renderBytes(currentFull) * 0.8
               ? currentFull
