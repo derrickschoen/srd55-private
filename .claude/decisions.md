@@ -13959,3 +13959,14 @@ by the runner and never re-pinned.
 Finding on main: nohup.out has been tracked since footprints inc2
 (d5001aa4); removed from main in its own commit. It rides along in the
 landing worktree via main and disappears when main merges back.
+
+## Both fixes confirmed live: fixed 16 KiB arm and brutal reruns clean (2026-09-07 02:24)
+
+cap-16 on the cap-fix build (1c7c4677): 30/30 authorized, 0 refusals
+(was 15/30 refused), 24x1/6x2 attempts, post-trim 5.2-16.3 KB, 35.3
+options omitted, wall 63 s mean / 50 s median. Packet 16 vs 32
+(shuffle 9016) with the panel.
+E1cc brutal reruns on the schema-fixed E1c tree (56bcd859): luna_facts
+30/30 authorized, luna_control 30/30 authorized, 0 refusals in either,
+semantic_board_truncated [] on 30/30 (was 5 and 1 partial executions).
+sol_facts running; packets and the panel follow it.
