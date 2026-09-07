@@ -13196,7 +13196,7 @@ specs touching styles/board-chrome, tsc.
 ## Classic gate-fix harvest committed (8661cdbc); E1c judged arms complete, panels running (2026-09-06 21:23)
 
 Codex (resumed lane) fixed the sprite shrink with a one-line CSS change
-( margin 0.08rem -> 0; its first
+(.encounter-shell .encounter-token margin 0.08rem -> 0; its first
 attempt patched .encounter-path-danger by mistake and was reverted by
 codex before the marker). Codex claimed 4/4 on the two specs, no other
 browser spec references the token layer/footprints, six unit files
@@ -13220,3 +13220,15 @@ packets built with the E1c tree's builder (shuffle 9061, 60 entries
 each): e1c-packet-facts-vs-control.json and e1c-packet-facts-vs-sol.json.
 Standing panel launched sequentially via judge-one.sh (sol/opus/fable);
 unseal config ~/dnd-slim-runs/unseal-config-e1c.json.
+
+## FINDING (supervisor, own error): unquoted heredoc executed a backticked selector while writing the previous entry (2026-09-06 21:24)
+
+Writing the entry above through an unquoted bash heredoc (needed to
+interpolate the commit hash) let the shell execute the backticked span
+`.encounter-shell .encounter-token` as a command ("command not found");
+the entry landed with that span blanked. Same class as the earlier
+wsl --shutdown incident this window; the rule (quoted 'EOF' heredocs, or
+python for any text with backticks) was already recorded and I broke
+it. Repaired the text in place via python; no command with side effects
+ran (the selector is not an executable). From here every decisions.md
+append goes through python with the hash passed as an argument.
