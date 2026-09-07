@@ -15111,3 +15111,80 @@ and 18 none-to-three-quarters transitions, where the centre ray produced
 zero. Astra's requirement that D576 verification include explicit
 three-quarters fixtures is therefore partly met by the geometry itself,
 though authored three-quarters features are still needed in increment 2.
+
+## D579 — Astra's review of the AI DM prompt surface; three defects verified by the supervisor (2026-09-07 17:48)
+
+Owner: "Have Astra review the prompts sent to the ai dm and brainstorm
+ways to improve". Astra read the live prompt surface in
+dnd-wt-blind-dm (arena-prompt.ts, the session-instruction helper, all
+nine D569 knowledge-base files, blind-turn-context.ts,
+blind-dm-contract.ts, the snapshot primer and the probe primers). Full
+output: .tmp/runs/astra-prompt-review.log.
+
+THREE FINDINGS I VERIFIED MYSELF, all real:
+
+1. THE MAP GUIDE TEACHES THE WRONG HP BANDS, and this is the most
+   damaging item found. The engine's own definition
+   (src/vtt/intel/actor-knowledge.ts:203-207) is uninjured when hp >=
+   max, near_death when hp*4 <= max, and bloodied for EVERYTHING in
+   between. So BLOODIED means merely injured and above a quarter: a
+   creature at 99 percent of its maximum displays BLOODIED.
+   tests/fixtures/ai-dm-kb/d569/protocol.md:10 tells the DM that amber
+   and BLOODIED mean "at or below half" and that green and UNINJURED
+   mean "above the Bloodied threshold". Both are false. The blind
+   context's displayHpBand (src/vtt/blind-turn-context.ts:95) matches
+   the engine, not the guide. The renderer compounds it: HP_BAND_FILL_PX
+   draws the bloodied bar at exactly half width
+   (src/vtt/board-chrome.ts), so the picture reinforces the false
+   reading. This directly corrupts the first tactical instruction,
+   concentrate on a wounded threat, and it has been present in every
+   blind DM prompt built so far. No blind arm has run yet, so no result
+   is contaminated.
+
+2. src/vtt/arena-prompt.ts HAS NO CALLERS anywhere in src, tools or
+   tests. The live path is renderEnginePrompt and renderBlindEnginePrompt
+   in tools/ai-dm-conversation.ts. My own dispatch brief described
+   arena-prompt.ts as "the standing advice-mode prompt envelope", which
+   was wrong; astra checked and corrected it. Recorded as a finding
+   against my own work.
+
+3. THE REPLY VALIDATOR REJECTS THE KNOWLEDGE BASE'S OWN VOCABULARY. The
+   prose guard (src/vtt/blind-dm-contract.ts:61) refuses any reason
+   containing "damage", "path" or "route", while
+   tests/fixtures/ai-dm-kb/d569/tactics.md:3 instructs "Control before
+   damage". A model that follows the tactics file and explains itself in
+   its words gets its round rejected. The same file teaches "northeast"
+   while the schema demands "north_east".
+
+Astra's other substantive points, not yet independently verified: the
+blind intent resolver requires exactly one action per candidate
+(src/vtt/blind-intent-resolver.ts:393) while the knowledge base
+encourages bonus actions, reactions, Ready and Help, so blind-versus-
+advice is partly an INTERFACE comparison rather than a reasoning one;
+the screenshot primer is delivered twice, once inside the knowledge
+base's map guide and again appended from the probe module; the tactics
+file offers four competing slogans with no priority procedure; and
+creature-facts provenance ships dropped-field explanations the model
+does not need.
+
+On the measurements, astra's reading is that added material COMPETES
+with the choice rather than that shorter is always better, noting that
+16 KiB also loses, so the 24 to 32 KiB plateau is a real optimum. It
+also cautioned that 19 of 30 agreements with engine-top do not prove
+anchoring, since the engine may simply be right, and that the wide
+one-rep Sol interval does not establish Luna's superiority.
+
+Ranked bets, astra's own subjective planning estimates in panel points:
+fix the HP bands first; move advice to 24 KiB; drop the duplicated
+primer; separate binding protocol from reference knowledge; replace the
+tactical slogans with a comparison procedure; vary option ordering and
+recommendation visibility separately as a position-bias diagnostic;
+trim audit prose from turn context; collapse near-duplicate options;
+repair the blind interface's coverage with engine-offered composite
+choices; and simplify the board art last, given the closed board-facts
+result.
+
+Supervisor decision: item 1 is a bug in data we author that would
+corrupt an experiment that has not yet run, so it is being fixed now
+rather than queued behind the brainstorm. The rest await the owner's
+direction.
