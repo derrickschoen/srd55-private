@@ -14983,3 +14983,61 @@ timed out; no claude invocation appears in the transcript, so nothing was
 spent, but the omission was mine and it is the same load-bearing-preamble
 failure recorded before. The decision-prompt template now carries the
 full prohibition.
+
+## D569 increment 6 harvest (73c4b2ba), a surviving supervisor mutant, and D578.1/D578.2 amendments (2026-09-07 17:31)
+
+Increment 6, codex session 01a07d96-916f-7073-bb57-8cf4b7d06e4c, ended
+at BLIND-DM-I6-EXPERIMENT-READY. Supervisor verified: 2 spec files
+34/34; tsc exit 0; contracts.ts hash unchanged; no removed tests; no
+forbidden patterns; no git writes.
+
+SUPERVISOR MUTANT SURVIVED. M-SUP-I6-REFUSAL-INTERVAL-FLIPPED changed
+the refusal clause of the preregistered success label from
+refusalRiskDifference.interval.lower <= 0 to .upper <= 0
+(tools/d569-blind-experiment.ts:822) and all 16 tests still passed.
+Neither reading is pinned by any test.
+
+CORRECTION OF MY OWN FINDING, at full length because it is against my
+own work. I committed 73c4b2ba describing this as a defect in codex's
+implementation, saying the refusal guard "needs the UPPER bound". Astra,
+now the decider, checked the approved plan and found line 407 requires
+"neither basis has a CI-excluding increase in refused/execution-failure
+rate", and an increase is CI-excluding exactly when the interval's lower
+bound is above zero. I verified that line myself. So codex implemented
+the approved plan CORRECTLY and my commit message misattributes the
+fault. The weakness is in the plan's own success rule, which I reviewed
+and approved. What the mutant really proved is that the rule is
+untested, not that the code is wrong. The follow-up commit carries the
+correct framing.
+
+D578.1 (decider ruling, pre-results, ACCEPTED): the refusal clause is
+STRENGTHENED to require the UPPER bound at or below its own new named
+margin D569_REFUSAL_RISK_MARGIN = 0.00, never the offense margin.
+Missing, non-finite or reversed intervals can never qualify. Astra's
+point stands that zero tolerance is demanding and a failed gate means
+noninferiority was not established rather than inferiority proved.
+Pinning table given to the lane verbatim: [-0.10,-0.01], [-0.10,0.00]
+and [0.00,0.00] pass; [-0.10,0.01], [0.00,0.01] and [0.01,0.10] fail;
+a negative mean with a positive upper bound fails; offense lower bound
+exactly -0.20 fails; and an end-to-end two-cluster fixture whose paired
+refusal differences are 0 and 1 has the exact bootstrap distribution
+0, 0.5, 1 at one quarter, one half, one quarter, so offense passes and
+refusal fails, while swapping the arms gives [-1,0] and passes. Seven
+mutants required: lower-for-upper, mean-for-interval, reversed sign,
+reversed inequality, strict less-than, omitted guard, OR for AND.
+
+D578.2 (decider ruling, ACCEPTED): the Fable PLAYER arm is dropped from
+this registration rather than substituted or waited on, because
+substituting a different model changes the model under study. Astra
+also corrected my premise here: substituting itself would NOT have made
+all three Fable comparisons single-judge, since two of the three are
+forms that leave Sol and Opus eligible. The manifest becomes
+d569-blind-experiment-v2, removes the two Fable arms and the three
+comparisons that reference them, records "Fable usage exhausted; no
+replacement in this registration", names the panel as sol high, opus and
+astra with astra holding no player arm, and encodes judge eligibility
+generally from the arm list so that a comparison with fewer than two
+eligible seats is rejected rather than reported.
+
+Both amendments dispatched as lane blind-dm-i6a, session
+01a07dc7-8e17-7071-8323-5bfacaeb5eff.
