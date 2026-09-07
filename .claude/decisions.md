@@ -14686,3 +14686,42 @@ and will move in a ledger amendment listing each with its independent
 invariant. Held until the owner answers the ray-casting question
 (option 1 exact centre ray vs option 2 DMG corner rays), because
 option 2 moves the same assertions again. Lane idle; no re-dispatch.
+
+## D569 increment 4 harvest (2167d6f2 on claude/blind-dm) and increment 5 dispatch with a replaced brutal seed range (2026-09-07 15:11)
+
+Codex (session 01a07cd8-7de6-74c2-9a99-70b7c7432463, ~2 h) ended at
+BLIND-DM-I4-ARENA-PACKET-READY. Claims: blind mode screenshot-first
+(semantic_board off unless --blind-facts on); claude-code (opus, fable)
+and codex sol-high blind/advice compositions; rows record blind attempts,
+resolver outcomes and codes, ingress audit, context budget, visual
+profile, KB root hash; adjustments disabled in both D575 modes;
+mode-isolated sessions/images/deltas/caches; all D569 identity fields
+stripped recursively from judge packets; ten D575 pairwise packets;
+4 spec files 131 tests 450 s; engine-mcp-boundary 4/4; tsc clean; dist
+build cache 709 modules; two dry runs (hard 5117001 blind 38,803 base
+bytes, 0 semantic bytes, no truncation; advice row) pasted.
+
+Supervisor verified on dnd-wt-blind-dm: tsc exit 0; the five listed
+specs 4 files / 131 tests passed (the type-test file is tsc-only);
+contracts.ts hash unchanged; no fixture changes; no removed tests;
+`expect.any(Array)` is a vitest matcher, not the banned type; the two
+extra "claude -p" hits in the lane log are quotations of decisions.md
+that codex read, not invocations; no git write commands. Supervisor
+mutants: M-SUP-I4-FACTS-DEFAULT-ON (--blind-facts default flipped to
+on) killed 1/111; M-SUP-I4-DMMODE-NOT-STRIPPED (dmMode removed from the
+identity and answer-key lists) killed 2/18, one of them the recursive
+identity-leak test; both restored to their prior hashes (log
+.tmp/runs/mut-sup-i4.log).
+
+Increment 5 dispatched (session 01a07d47-ab64-7b31-b1a7-1103952117cc,
+port 4725). Supervisor amendment: the plan's brutal second family
+6204001-10 fails the independence check (ledger: D466-era arena
+protocol seeds with judged runs and a generator override table), so
+the brutal second family is 6207001-10; hard stays 5118001-10. Ledger
+grep: 5118 and 6207 have zero occurrences in decisions.md, fixtures and
+tools. Fixture dirs arena-basis-hard-2 / arena-basis-brutal-2. Any seed
+failing membership stops the lane; no hand edits, no override entries.
+
+Note for landing: claude/blind-dm does not contain main's brutal-b,
+cap-fix or E1c landings (2d8b1cfc is not an ancestor); merge main into
+the lane before its full gate.
