@@ -13452,3 +13452,35 @@ initiative hp_band is exactly the board's knowledge-policy band; (8)
 capture and first-token latency; (9) ceiling arm comparability with
 the standing sol-high baseline; (10) who generates and verifies the
 second seed family. Session resumed (same id confirmed).
+
+## Cap-sweep table reproduced; E1cb facts arm delivers whole blocks; D568 luna-low png baseline (2026-09-06 23:24)
+
+Cap sweep (lane cap-sweep, my own run of tools/turn-context-cap-sweep.ts):
+50/50 rows identical to codex's table. Pre-trim context 46-83 KB per
+hard room. At 32 KiB every room loses 11-42 options (13-19 offered over
+4-7 actors); at 16 KiB five rooms fall to the ~5 KB compact fallback;
+at 48 KiB movement/intel rows all survive but 17-33 options are still
+cut; at 64 KiB five rooms keep every option and five lose 5-16. The
+screenshot travels as a separate image content block on the tool
+result and is outside both the context cap and the 64 KiB tool-result
+cap (codex test: 900 KB PNG under a 24 KiB cap, identical context and
+evidence on and off). Verification (11 specs, mutant) in progress.
+
+E1cb hard arms (budget-fixed build ca43be82): luna_facts 30/30
+authorized, semantic_board_truncated [] on 30/30 (was [light,
+adjacency, objects] 30/30 before the fix), block 5.1-6.4 KB, base
+31.4-32.7 KB; luna_control 30/30 authorized, same base range. Where
+both rows recorded the full context the facts arm's baseContextBytes
+equals the control's raw bytes exactly; the pairs that differ are rows
+whose last served context before the proposal was a compact 11-16 KB
+one (rawTurnContext is "last served", not "round-1 full"), so they are
+not comparable, not a budget difference. Attempts: facts 23x1/6x2/1x3,
+control 25x1/5x2. sol_facts still running; brutal arms follow.
+
+D568 luna LOW baseline, png only (E1b tree 49d782bb, 24 states, seed
+6203001, 128 px, primer v10): strict gate FAIL. Weakest classes: Q6
+doors .708, Q5 light .744, Q8 hidden .750, Q9 fog/obscured .802, Q4
+difficult .811; Q2 side .875, Q7 adjacency .875, Q1 identity .896; Q3
+HP .901 and Q10 blocked .928 pass. Dominant error "fact not present"
+(the model omits cells it should list), then dim/bright confusion.
+Semantic-only and image+facts arms running next.
