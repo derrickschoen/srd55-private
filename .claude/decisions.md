@@ -14911,3 +14911,75 @@ costed alternatives, an assumptions table proved by grep, exact SRD
 locators, and an honest answer on the hardest point, whether elevation
 and creature height can stay legible in a flat top-down PNG, which is
 the requirement the whole of D576 exists to satisfy.
+
+## D578 — OWNER: Astra replaces Fable on the judge panel and becomes the decider; Claude reviews and executes (2026-09-07 17:24)
+
+Owner (verbatim): "Replace fable with astra on the judging panel. Also,
+until I say fable is back, have Astra make the decisions you were making
+and you review them and execute if needed"
+
+Executed: ~/dnd-slim-runs/judge-one.sh now runs Sol high, Claude Opus
+and gpt-6-astra; the prior file is kept as judge-one.sh.bak-fable. The
+astra seat is `codex exec --sandbox read-only -m gpt-6-astra`, so its
+output arrives as a codex transcript and needs the same JSON extraction
+the sol seat needs. Panel version for anything scored from here is
+sol-high / opus / astra, and it must be reported as such rather than
+compared to older three-seat absolute scores without calibration.
+
+Astra's rulings (session log .tmp/runs/astra-decision-01.log), with the
+supervisor's review of each:
+
+1. RESUME judging on the new panel; the owner naming a replacement seat
+   is what lifts a pause caused by that seat's exhaustion. ACCEPTED and
+   executed: interrupted outputs preserved as killed-*, all three seats
+   restarted fresh on the same 270-entry packet at 17:24.
+2. Astra is both a judge and the decider, so enforce separation: the
+   judge runs in a fresh session with no decision context, no arm
+   identities, no answer key and no other seat's scores; the rubric,
+   exclusions and selection criteria are frozen before scoring and held
+   by Claude. Further, a seat may not score a comparison involving its
+   own play. ACCEPTED, and this catches a real pre-existing flaw I had
+   missed: the pool3 packet's three arms are engine-top, luna-medium and
+   SOL-HIGH, and sol high is also a judge seat. So for every comparison
+   involving the sol arm the eligible seats are opus and astra, with the
+   sol seat's score reported separately and never used to qualify a
+   room. The D572 struggle-room selector's unanimous three-seat rule is
+   amended accordingly: both ELIGIBLE seats must prefer the alternative
+   to engine-top, the Luna bottom-tertile condition stands, and zero
+   qualifying rooms is an acceptable outcome. judge-one.sh satisfies the
+   fresh-session requirement because each seat is a new codex or claude
+   invocation.
+3. No vendor weighting penalty; the provider split is still two to one,
+   merely reversed. Keep equal weights among eligible seats but report
+   models and effort, per-seat paired differences, exclusions,
+   disagreement, and whether dropping a seat changes the conclusion, and
+   estimate uncertainty by room rather than treating 270 entries as 270
+   independent units. ACCEPTED.
+4. Priority order: finish and verify the corner rule first, then this
+   packet's judging, then the D569 runner, then the reduced elevation
+   plan once the worktree frees, then struggle-room selection and the
+   cap study. Add explicit three-quarters fixtures to D576 verification
+   because no existing room contains that tier. ACCEPTED; the
+   three-quarters point is a real gap the era census exposed and it is
+   now a requirement on D576 increment 2.
+5. Elevation: pursue a reduced model (one ground elevation per square,
+   obstacle height separate, creature body height and altitude separate)
+   after the flat board is readable, and defer general stacked 3D.
+   Creature heights are labelled project defaults, never presented as
+   SRD. Activation is gated on a preregistered held-out screenshot probe
+   at 95 percent accuracy separately for sight and for cover within each
+   tier, Sol high first then Luna medium, with no false-visible answers
+   in fully blocked cases. ACCEPTED. Astra also rejected my brief's
+   presumption that corners simply become box corners, requiring instead
+   that the extension reproduce D576.3 exactly in flat cases and pass
+   independently worked vertical examples. That correction is right and
+   the brief is being amended before dispatch.
+
+FINDING AGAINST MY OWN WORK: the decision prompt I sent astra omitted
+the standing rule that ~/.codex skills do not apply and that no lane may
+invoke claude. Astra consequently read ~/.codex/skills/consensus/SKILL.md
+and, following it, attempted claude reviewer sessions, which it reports
+timed out; no claude invocation appears in the transcript, so nothing was
+spent, but the omission was mine and it is the same load-bearing-preamble
+failure recorded before. The decision-prompt template now carries the
+full prohibition.
