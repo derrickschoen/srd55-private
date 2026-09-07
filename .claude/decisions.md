@@ -14456,3 +14456,893 @@ must pass first, then luna medium, tuning art and primer. No per-pair
 LoS in JSON. All other lanes continue; this unit has priority for
 dispatch and model lanes. Plan lane dispatched (codex), critique before
 implementation.
+
+## D576.1 — OWNER: the engine must answer line-of-sight questions from one cell to another for the AI DM (2026-09-07 10:54)
+
+Owner (verbatim): "The engine will need to be able to answer questions
+about los from one cell to another from the ai dm"
+
+Reading: an engine query tool, cell to cell (source cell, target cell,
+optional acting creature so its footprint and size apply), returning
+line of sight (yes/no and the blocking cell) and the cover tier the
+target would have from that source under the same rasterization rule
+the map teaches; exposed on the DM MCP surface in both advice and
+blind profiles (a rules fact a human would ask the table, not a
+recommendation), counted in the blind ingress audit as an allowed
+fact channel, rate-limited like KB reads so a model cannot brute-force
+every pair (report the budget as a knob), and recorded per call on the
+row. Added as a required section for the D576 plan's round-2 critique.
+
+## D573: at luna low the semantic facts block HURTS on hard (-0.33 [-0.62, -0.06]) (2026-09-07 11:23)
+
+Luna low, hard R1-10 x3, main tree, standing panel (unseal-lowfacts-
+hard.md): luna_low_facts 8.96 vs luna_low_control 9.29, delta -0.33,
+seed-clustered 95% CI [-0.62, -0.06], all three seats in the same
+direction. At luna medium the same contrast was -0.11 [-0.53, +0.34].
+So the extra facts, which lift comprehension at low, lower judged play
+at low: consistent with the cap sweep (a bigger context hurts the
+weaker model more). Brutal at low pending (control arm running).
+
+## D576 plan round 1 received (458 lines); supervisor critique sent as round 2; era boundary declared (2026-09-07 11:25)
+
+Plan (copied to the main repo as .tmp-plans/2026-09-07-line-of-sight-
+and-cover.md): one four-kind terrain vocabulary (open, half_cover,
+three_quarters_cover, wall) carried as an exact wire union of the
+existing blocking triple so frozen bytes stay identical; blocked cells
+normalize to wall at the query boundary; one centre-to-centre trace
+(existing rasterization, strongest crossed tier, wall = no sight and
+total cover, endpoints excluded, living creatures give half cover);
+multi-cell creatures use the least-obstructed occupied-cell ray for
+both sight and cover, replacing the corner-ray system and the
+query-port's duplicate sight rule; all consumers cut over with a
+parity test; opt-in generator profile with all tiers exercised per
+room and legacy bases byte-identical; four native art treatments with
+measured invariants; probe classes Q11-Q14 (pair and creature-to-cell
+sight and cover) with production ground truth, PNG-only acceptance,
+sol high then luna medium at 0.90 per class; a blind-guide amendment;
+a pin ledger; six increments. Verified baseline findings match what I
+read myself earlier (hasLineOfSight ignores blockedCells; templates
+treat them as opaque; walk-through cover objects in D365 and Vane).
+
+Critique sent (round 2): D576.1's query tool was missing (cell-to-cell
+line and cover for the DM, both profiles, per-round budget, row and
+ingress recording, mutants); split increment 1 into 1a engine core and
+1b authored-content migration plus the tool; a no-model script
+counting, per frozen room, the creature pairs whose sight or cover
+answer changes; surface the half-cover-blocks-movement assumption for
+the owner with the traversable alternative costed; worked examples for
+creature cover and Large creatures; the semantic board's terrain kind
+and no pair answers.
+
+ERA BOUNDARY: once blocked cells block sight, every judged result
+recorded before D576 lands (E1c hard/brutal, E1cb, E1cc, cap sweeps at
+medium and low, brutal-b, pool screening) belongs to the pre-D576 era
+and is not comparable to post-D576 runs on the same seeds.
+
+## D576 plan APPROVED at round 2 (583 lines); one owner question blocks increment 1a (2026-09-07 11:40)
+
+Round 2 added: the D576.1 `engine.query_line` fact tool (both
+profiles; source cell, target cell, optional acting creature; answer
+carries sight, blocking cell, cover tier and sources, never a score or
+recommendation; per-round budget 0-3 with default 1, spool like KB
+reads, every call recorded on the row and counted by the blind
+ingress audit; refusal codes for budget, placement and stale state);
+increment 1 split into 1a (vocabulary, wire union, trace, runtime
+cutover, parity, era census) and 1b (authored-content migration,
+schemas, the MCP tool); a no-model census over 63 rooms counting
+ordered living-creature pairs whose sight or cover answer changes,
+with tier-transition counts; the half-cover movement alternative
+costed (traversable difficult ground: a second typed dimension or a
+fifth profile, path-cost and occupancy tests, legend text, generator
+and adjudication updates, new mutants); three worked examples in the
+guide including an intervening creature and a Large creature's
+least-obstructed ray; the E1b semantic payload versioned with a
+per-cell terrain partition in increment 3, never pair answers.
+Consensus; no round 3. Increment 1a waits on the owner's ruling on
+half-cover movement, per the plan's own first scope line.
+
+## D574 committed c22484a0; D572 pool screen and D573 low brutal panels (2026-09-07 11:54)
+
+D574 verified myself: 6 spec files incl. the MCP boundary test 192/192,
+tsc 0, byte report reproduced (33 fixtures, base 15,122-42,118, none
+truncated), my mutant (attack bonus nulled) makes the strict schema
+reject the block at render so the test file fails at setup; restored.
+Committed on claude/blind-dm.
+
+D572 screen (30 pool rooms, 1 rep, advice mode, panel):
+- sol_high - luna_medium = -0.38 [-0.86, +0.03]: luna medium scores
+  above sol high on these rooms at one rep.
+- luna_medium - engine_top = +0.34 [-0.11, +0.89].
+- sol_high - engine_top = +0.08 [-0.17, +0.33]: the engine's own top
+  recommendation plays about as well as sol high with advice on the
+  pool. Selection by room and seat follows with the selection tool.
+
+D573 luna low, brutal facts vs control: -0.12 [-0.39, +0.14]: null,
+matching medium on brutal. D573 verdict complete: at luna low the cap
+sweep has the same shape as medium and sharper (24 = 32, larger caps
+hurt more), facts hurt on hard (-0.33) and are null on brutal.
+
+## FINDING (D572): in advice mode the models mostly execute the engine's top recommendation; the struggle set cannot be built from these arms (2026-09-07 12:39)
+
+Pool screen, 30 rooms, one rep, plans compared by option id per actor:
+luna medium == engine-top on 19/30 rooms, sol high == engine-top on
+20/30, all three identical on 14/30. Where they differ the seat
+scores mostly tie anyway. The selection rule (bottom-tertile luna AND
+all three seats scoring engine-top below sol) selects 1 room (6208016);
+6208030 has unanimous seats but luna is not bottom-tertile. The tool
+works (the packet guard bug is fixed on the pool branch); the arms do
+not diverge from the engine enough to expose "engine top is not the
+best play". Two ways forward, both started or planned: (a) three reps
+of luna medium and sol high on the pool to accumulate divergence
+(launched; engine-top is deterministic and stands); (b) the D569 blind
+arms, which by construction do not see the recommendation, are the
+natural comparison for D572 and will be run on the pool when increment
+4 lands. The 24/32/48 rerun on the struggle set waits for a set of ten.
+Also recorded: the judge panel scores identical plans identically, so
+seat-level ties are expected when arms copy each other.
+
+## D569 increment 3 committed 4ae1b677; guard fix committed c81b5573 on the pool branch; increment 4 dispatched (2026-09-07 13:09)
+
+Increment 3, codex claims: 3 specs 33/33, boundary 4/4, tsc 0, eight
+named mutants killed with restore hashes. Verified myself: 5 spec
+files 83/83 (resolver, contract, MCP server, boundary, turn context),
+generator idempotent, tsc 0, scans clean, no claude exec lines,
+contracts.ts unchanged; my mutant (the resolver's first cell-equality
+forced true, so hold no longer filters to the current cell) killed by
+four named tests including "defaults omitted destinations to hold";
+restored byte-identical. Two design notes accepted: the intent's
+reason became optional (tested; never judged), and the resolver's
+deadline defaults to the 180 s live wall unless the caller injects one,
+so increment 4 must pass the arena's 240 s experiment wall through
+that dependency.
+
+## D576.2 — OWNER: cover is not linked to passability; looked up in the SRD and community rulings (2026-09-07 13:30)
+
+Owner (verbatim): "Look up in the srd and what the community rulings
+are. I don't think cover is necessary linked to pass ability"
+
+Lookup: SRD 5.2.1 (docs/srd/full/srd-5.2.1.txt lines 925-954) defines
+cover by how much of the target an object or creature covers and says
+nothing about movement; the Difficult Terrain rule (lines 872-883)
+names "low furniture, rubble, undergrowth, steep stairs" as examples,
+the same objects that grant half cover; another creature's space is
+difficult terrain and creatures grant half cover. Community reading
+(2014 text: "a low wall, a large piece of furniture, a narrow tree
+trunk, or a creature" as half cover; jumping "a hedge or low wall" with
+an Athletics check at the GM's option): low cover is crossable at a
+cost, tall solid things are not, and cover degree is independent of
+passability. No official ruling links the two.
+
+Ruling as applied to D576 (supersedes the plan's default): each terrain
+feature carries two typed dimensions, cover tier (none, half,
+three_quarters, total) and passability (open, difficult, blocked), with
+the consistency rules total => blocked and blocked-sight => total. Walls
+(existing blocked cells) are total + blocked + no sight; generated low
+cover (barricades, crates, low walls) is half + difficult; arrow slits
+and portcullises are three_quarters + blocked; living creatures give
+half cover and their space is difficult terrain as the SRD says. The
+map draws both cues per feature (tier mark and a crossable mark),
+the legend names both, and the query tool reports both. Increment 1a
+dispatched with this ruling.
+
+## D576 finding: the current line tracer is thin; ray-casting assessment delivered, owner question pending (2026-09-07 13:38)
+
+Owner asked: "Look into the possibility of ray casting for Los".
+
+Supervisor measurement (scratch vitest against src/combat/cover.ts
+rasterizeInterveningCells, not committed): reversal symmetry holds
+(8x8 board, 4096 ordered pairs, 0 differences). Against an exact
+interior-crossing trace of the same centre-to-centre segment on a
+10x10 board: 5496 of 10000 pairs differ, 13904 crossed cells skipped,
+0 cells added. Simplest case A1->B3 skips A2, so a wall at A2 blocks
+neither sight nor cover although the drawn line clips it. Increment 1a
+as dispatched keeps this tracer.
+
+Options presented: (1) exact supercover of the single centre ray;
+(2) 2014 DMG corner-to-corner rule (attacker corner to four target
+corners, 0/1-2/3/4 obstructed lines = none/half/three-quarters/total,
+line tier = strongest feature crossed, result capped at the strongest
+feature tier, sight = any line free of walls; reuses the existing
+corner geometry the plan deletes); (3) wall-edge model (rejected as a
+data-model change). Recommendation: (2) over an integer-exact trace.
+Owner asked one question: option 2 or option 1. Lane los-cover-i1a
+continues on the centre-line rule until the owner answers; a change
+is a plan amendment and a re-dispatch.
+
+## D576 increment 1a harvest: BLOCKED at the pin ledger, work committed as c1b024e1 on claude/los-cover (2026-09-07 14:40)
+
+Codex (session 01a07cec-4c7d-7e31-90c2-a2b19d757ecf, 1 h 55 min) stopped
+with "BLOCKED: canonical wall behavior invalidates thirteen legacy-era
+assertions, including an exact tactical probability pin not authorized
+by the approved pin ledger." Correct behaviour: the plan's ledger did
+not list them. This is a plan finding, not a codex failure.
+
+Codex claims: 22 touched specs 829/829; tsc clean; twelve M576-E1A-*
+mutants each killed by a named test and restored to prior hashes; 33
+frozen fixtures aggregate hash unchanged; no optional wire field needed
+(the triple movement:false, lineOfSight:false, cover:half maps to
+half + difficult); era census run over 63 rooms.
+
+Supervisor verified on dnd-wt-los-cover: tsc exit 0; the 22 specs
+22 files / 829 tests passed; the four legacy specs reproduce exactly 13
+failures (9 brutal-room productivity, 1 hard-room Scout shot, 1 movement
+35->40 ft, 2 R02 tactical incl. probability 0.64115329546875 ->
+0.59120877671875); contracts.ts hash unchanged; no fixture files
+modified; no any/ts-ignore/skip/todo in the diff; one removed test
+(three-quarters creature variant) replaced by three new ones per the
+plan; no git write commands and no claude invocation in the lane log.
+Supervisor mutant M-SUP-1A-SIGHT-FROM-PASSABILITY (blocksSight derived
+from passability === 'blocked' instead of tier === 'total', so an arrow
+slit would block sight): killed, 2 tests failed / 827 passed, restored
+to dcd7fa51... (log .tmp/runs/mut-sup-1a-sight.log).
+
+Era census (codex run, pasted in the lane log): overall 3470 ordered
+living pairs, 1771 change cover tier, 1680 change sight; transitions
+none->total 1131, half->total 549, half->none 57, none->half 34; no
+three_quarters anywhere (no generator emits it yet).
+
+Ruling deferred: the 13 legacy assertions are the era change itself
+and will move in a ledger amendment listing each with its independent
+invariant. Held until the owner answers the ray-casting question
+(option 1 exact centre ray vs option 2 DMG corner rays), because
+option 2 moves the same assertions again. Lane idle; no re-dispatch.
+
+## D569 increment 4 harvest (2167d6f2 on claude/blind-dm) and increment 5 dispatch with a replaced brutal seed range (2026-09-07 15:11)
+
+Codex (session 01a07cd8-7de6-74c2-9a99-70b7c7432463, ~2 h) ended at
+BLIND-DM-I4-ARENA-PACKET-READY. Claims: blind mode screenshot-first
+(semantic_board off unless --blind-facts on); claude-code (opus, fable)
+and codex sol-high blind/advice compositions; rows record blind attempts,
+resolver outcomes and codes, ingress audit, context budget, visual
+profile, KB root hash; adjustments disabled in both D575 modes;
+mode-isolated sessions/images/deltas/caches; all D569 identity fields
+stripped recursively from judge packets; ten D575 pairwise packets;
+4 spec files 131 tests 450 s; engine-mcp-boundary 4/4; tsc clean; dist
+build cache 709 modules; two dry runs (hard 5117001 blind 38,803 base
+bytes, 0 semantic bytes, no truncation; advice row) pasted.
+
+Supervisor verified on dnd-wt-blind-dm: tsc exit 0; the five listed
+specs 4 files / 131 tests passed (the type-test file is tsc-only);
+contracts.ts hash unchanged; no fixture changes; no removed tests;
+`expect.any(Array)` is a vitest matcher, not the banned type; the two
+extra "claude -p" hits in the lane log are quotations of decisions.md
+that codex read, not invocations; no git write commands. Supervisor
+mutants: M-SUP-I4-FACTS-DEFAULT-ON (--blind-facts default flipped to
+on) killed 1/111; M-SUP-I4-DMMODE-NOT-STRIPPED (dmMode removed from the
+identity and answer-key lists) killed 2/18, one of them the recursive
+identity-leak test; both restored to their prior hashes (log
+.tmp/runs/mut-sup-i4.log).
+
+Increment 5 dispatched (session 01a07d47-ab64-7b31-b1a7-1103952117cc,
+port 4725). Supervisor amendment: the plan's brutal second family
+6204001-10 fails the independence check (ledger: D466-era arena
+protocol seeds with judged runs and a generator override table), so
+the brutal second family is 6207001-10; hard stays 5118001-10. Ledger
+grep: 5118 and 6207 have zero occurrences in decisions.md, fixtures and
+tools. Fixture dirs arena-basis-hard-2 / arena-basis-brutal-2. Any seed
+failing membership stops the lane; no hand edits, no override entries.
+
+Note for landing: claude/blind-dm does not contain main's brutal-b,
+cap-fix or E1c landings (2d8b1cfc is not an ancestor); merge main into
+the lane before its full gate.
+
+## D569 increment 5 harvest (4f3efb63) and increment 6 dispatch; pool three-rep arms complete (2026-09-07 16:37)
+
+Increment 5, codex session 01a07d47-ab64-7b31-b1a7-1103952117cc.
+Claims: both families generated and independently regenerated 10/10
+byte-identical; pins coupled to reducer load, regions/footprints and
+difficulty membership; manifest carries the ledger entry verbatim;
+3 specs 89 tests; tsc clean; four named mutants killed and restored to
+5f951df4...; existing fixture aggregates unchanged.
+
+Supervisor verified on dnd-wt-blind-dm: the 3 specs 89/89; tsc exit 0;
+I regenerated both families myself into a scratch directory and
+diff -rq reports both identical to the committed fixtures (10 files
+each); no existing fixture modified; contracts.ts hash unchanged; no
+removed tests; no forbidden patterns; no git writes; the lane log's
+second "claude -p" hit is a quotation of decisions.md, not a call.
+Supervisor mutant M-SUP-I5-LEDGER-DROPS-6204 (remove the 6204
+namespace from the used-seed ledger constant, which would let a future
+manifest claim a used range as independent): killed, 1 failed / 26
+passed, restored (log .tmp/runs/mut-sup-i5.log).
+
+Increment 6 dispatched (session 01a07d96-916f-7073-bb57-8cf4b7d06e4c).
+Amendments carried: the second family is 5118/6207 via the frozen
+manifest; D575 arms are luna (high/medium/low per the maxed-state
+machine), opus, fable and sol high, each blind and advice, with the
+per-model blind-vs-advice and luna-vs-judge comparisons alongside the
+standing ceiling comparison; the ten pairwise packets from increment 4
+are consumed, not rebuilt; BLOCKED rather than a guessed cell count if
+the plan's counts cannot be reconciled.
+
+Pool three-rep arms complete: pool3-engine-top, pool3-luna-medium and
+pool3-sol-high, 90 rows each (30 rooms x 3 reps), all exit 0. Packet
+build, judging and struggle-room selection are the next pool step.
+
+## D572 pool three-rep packet built and judged; FABLE JUDGE SEAT OUT OF CREDITS (2026-09-07 16:39)
+
+Built the three-arm pool packet from the completed three-rep arms:
+rows relabelled from arm 'single' to engine-top / luna-medium / sol-high
+(90 rows each), builder run on dnd-wt-brutal-pool with
+--protocol brutal-pool --reps 3 --shuffle-seed 6208303, producing
+pool3-packet.json (270 entries) and pool3-answer-key.json. Leak scan of
+the packet for model or arm names: zero hits.
+
+Panel launched via judge-one.sh pool3 3rep. Finding: the fable seat
+failed immediately, exit 1, with "You've reached your Fable limit."
+Opus and sol high are running. The D566 panel is three seats, so this
+run will have two unless the limit clears. Not substituting another
+model for the fable seat without an owner ruling; if the owner wants a
+two-seat unseal for this packet, say so, otherwise the fable seat is
+re-run when its limit resets.
+
+## D576.3 — OWNER: use the 2014 corner-to-corner rule for line of sight and cover (2026-09-07 16:42)
+
+Owner (verbatim): "Try the 2014 corner to corner rule"
+
+Chosen over the exact-centre-ray option. The canonical trace becomes:
+
+1. Candidate corners are the outer corners of the source space and the
+   outer corners of the target space (for a Small creature these are its
+   own square's four corners, which is the DMG rule exactly). The source
+   corner is CHOSEN: the engine evaluates every source corner and keeps
+   the least protective result, with a stable tie-break.
+2. From the chosen source corner, four lines run to the four target
+   corners. A line that merely runs along a cell boundary does not cross
+   that cell; only interior crossings count (the existing epsilon rule in
+   cornerLineCrossesCell).
+3. Per line, lineTier is the strongest cover tier among the features whose
+   interior it crosses, and lineBlocksSight is true when it crosses a wall.
+   An intervening living creature obstructs a line at half.
+4. blocksSight is true exactly when ALL FOUR lines cross a wall.
+5. If blocksSight, the tier is total. Otherwise the tier is the weakest of:
+   the count tier (0 obstructed lines = none, 1 or 2 = half, 3 =
+   three_quarters, 4 = total), the strongest lineTier among obstructed
+   lines, and three_quarters. The three_quarters clamp keeps the invariant
+   total <=> no sight, so four lines through a low wall stay half and a
+   wall corner clipping two lines stays half.
+
+This keeps D576.2's two independent dimensions untouched: passability is
+still per feature and never derived from the tier or the ray count.
+Rationale: it is the rule a human applies to the screenshot with a
+straightedge, it is what the community and every major VTT use, and the
+corner geometry already exists in src/combat/cover.ts (outerCorners,
+cornerLineCrossesCell, rasterizeCornerLine) rather than being deleted.
+
+Supporting measurement (recorded earlier this window): the pre-D576
+centre-ray rasterizer skips cells the segment actually crosses on 5496
+of 10000 ordered pairs on a 10x10 board, 13904 skipped cells, so a wall
+the drawn line visibly clips blocks neither sight nor cover today.
+
+Pin ledger amendment AUTHORIZED for this era change, under conditions:
+the thirteen legacy assertions found by increment 1a may move, but each
+one must be listed in the commit with an INDEPENDENT invariant that
+does not come from the lane's own output. Acceptable independent
+invariants: a hand-derived path cost or corner count stated in the test;
+a closed-form recomputation of a probability from its named components;
+a membership predicate replacing an exact count. Not acceptable:
+copying the new number the engine now prints. Any assertion the lane
+cannot justify that way stays failing and the lane reports it.
+
+## OWNER: all judge panel work paused (2026-09-07 16:42)
+
+Owner (verbatim): "I am out of fable usage. Pause all judge panel work
+until I say otherwise"
+
+Killed the two running pool3 judge seats by pid (opus 3094460, sol
+3094458/3094472); the fable seat had already failed on its own limit.
+No judge, unseal or panel run starts again until the owner lifts this.
+The pool3 packet and answer key are built and keep on disk
+(~/dnd-slim-runs/pool3-packet-3rep.json, pool3-answer-key.json), so
+judging resumes without rebuilding. Consequences held: D572 struggle-room
+selection needs the sol judge JSON and cannot proceed, so the 24/32/48
+cap rerun on brutal-struggle is blocked; D575's blind-vs-advice judging
+is likewise held. Engine work (D576) and the model-free blind-dm
+increments continue, since neither calls a judge.
+
+## D576.3 dispatched: corner-rule amendment of increment 1a (2026-09-07 16:44)
+
+Lane los-cover-i1a-corner on dnd-wt-los-cover (claude/los-cover, HEAD
+c1b024e1, port 4731, sol high), session
+01a07d9c-9bef-7a52-b362-b42710290c40. Brief
+.tmp/runs/briefs-2026-09-06/los-cover-i1a-corner.md carries the eight
+numbered trace rules of D576.3 verbatim, keeps D576.2's two dimensions
+untouched with a test proving passability cannot change a tier or a
+sight answer, reuses the existing corner geometry instead of deleting
+it, and carries the pin ledger amendment with its acceptable and
+unacceptable justifications spelled out. It also requires a re-run era
+census with a bumped engine_revision and the delta against the
+centre-ray census, and adds three named mutants beyond the twelve:
+CORNER-FIXED-SOURCE, COUNT-WITHOUT-CLAMP, BOUNDARY-GRAZE-BLOCKS.
+Marker LOS-COVER-I1A-CORNER-READY.
+
+## D577 — gpt-6-astra verified available on the installed codex CLI; no upgrade needed (2026-09-07 17:00)
+
+Owner: "Try updating codex to the latest version and see if you can
+make it use the new gpt-6-astra model. You will have to search for the
+right model string".
+
+Findings, all verified rather than read: installed codex-cli is 0.153.4
+and npm's latest dist-tag is also 0.153.4, so there is nothing to
+upgrade to on the stable channel; the only newer build is an alpha
+(0.154.0-alpha.6-linux-x64), which I did NOT install, both because it is
+unnecessary and because replacing the global binary while two lanes are
+mid-run risks killing them. Public documentation says first-class
+gpt-6-astra support landed in 0.153.1, which we are past.
+
+Model string is exactly `gpt-6-astra`. Probe run:
+`codex exec --sandbox read-only -m gpt-6-astra "Reply with exactly:
+ASTRA-OK and nothing else."` returned ASTRA-OK, exit 0, session
+01a07dab-c5e1-7992-a13f-ed91994d7f1f, 7,621 tokens, default reasoning
+effort high. So the model is usable now with no configuration change.
+
+Reported characteristics from the public write-ups, NOT verified by me:
+1.05M context, 128K output, $10 per M in and $50 per M out, natively
+multimodal with image input. If the multimodal claim holds it is
+directly relevant to D576 and D569, where the whole objective is a model
+reading cover and line of sight off the board PNG; astra becomes a
+candidate seat for the screenshot comprehension probe and for the blind
+DM arms. It is roughly the price of a judge seat, so it is not a
+drop-in replacement for luna in bulk arena work.
+
+## D576.4 — elevation and movement modes plan drafted and queued (2026-09-07 17:00)
+
+Owner: "We will need to give every square a height value and each sized
+creature a height value as well. Also we need to account for jumping,
+swimming, climbing and flying".
+
+Supervisor-verified starting facts recorded for the plan: GridCell is
+exactly {column,row} with no elevation anywhere in terrain, state,
+movement or the renderer; MovementKind (walk/burrow/climb/fly/swim)
+exists at src/combat/statblock.ts:30 and statblocks carry speeds, but
+the pathfinder at src/combat/encounter-movement-world.ts never consults
+movement kind, its only flight branch being a difficult-terrain
+immunity check; jumping exists only as the 'jump_movement' action
+effect and cannot cross an obstacle; and the SRD's Creature Size and
+Space table (docs/srd/full/srd-5.2.1.txt:848-860) gives a square
+footprint per size and NO creature height, so any height vocabulary is
+our own design.
+
+Planning brief written to .tmp/runs/briefs-2026-09-06/los-3d-plan.md.
+NOT yet dispatched: it must run in dnd-wt-los-cover, where the corner
+rule lane is currently writing, and two codex lanes must not share a
+worktree. It dispatches the moment that lane ends. The brief requires
+costed alternatives, an assumptions table proved by grep, exact SRD
+locators, and an honest answer on the hardest point, whether elevation
+and creature height can stay legible in a flat top-down PNG, which is
+the requirement the whole of D576 exists to satisfy.
+
+## D578 — OWNER: Astra replaces Fable on the judge panel and becomes the decider; Claude reviews and executes (2026-09-07 17:24)
+
+Owner (verbatim): "Replace fable with astra on the judging panel. Also,
+until I say fable is back, have Astra make the decisions you were making
+and you review them and execute if needed"
+
+Executed: ~/dnd-slim-runs/judge-one.sh now runs Sol high, Claude Opus
+and gpt-6-astra; the prior file is kept as judge-one.sh.bak-fable. The
+astra seat is `codex exec --sandbox read-only -m gpt-6-astra`, so its
+output arrives as a codex transcript and needs the same JSON extraction
+the sol seat needs. Panel version for anything scored from here is
+sol-high / opus / astra, and it must be reported as such rather than
+compared to older three-seat absolute scores without calibration.
+
+Astra's rulings (session log .tmp/runs/astra-decision-01.log), with the
+supervisor's review of each:
+
+1. RESUME judging on the new panel; the owner naming a replacement seat
+   is what lifts a pause caused by that seat's exhaustion. ACCEPTED and
+   executed: interrupted outputs preserved as killed-*, all three seats
+   restarted fresh on the same 270-entry packet at 17:24.
+2. Astra is both a judge and the decider, so enforce separation: the
+   judge runs in a fresh session with no decision context, no arm
+   identities, no answer key and no other seat's scores; the rubric,
+   exclusions and selection criteria are frozen before scoring and held
+   by Claude. Further, a seat may not score a comparison involving its
+   own play. ACCEPTED, and this catches a real pre-existing flaw I had
+   missed: the pool3 packet's three arms are engine-top, luna-medium and
+   SOL-HIGH, and sol high is also a judge seat. So for every comparison
+   involving the sol arm the eligible seats are opus and astra, with the
+   sol seat's score reported separately and never used to qualify a
+   room. The D572 struggle-room selector's unanimous three-seat rule is
+   amended accordingly: both ELIGIBLE seats must prefer the alternative
+   to engine-top, the Luna bottom-tertile condition stands, and zero
+   qualifying rooms is an acceptable outcome. judge-one.sh satisfies the
+   fresh-session requirement because each seat is a new codex or claude
+   invocation.
+3. No vendor weighting penalty; the provider split is still two to one,
+   merely reversed. Keep equal weights among eligible seats but report
+   models and effort, per-seat paired differences, exclusions,
+   disagreement, and whether dropping a seat changes the conclusion, and
+   estimate uncertainty by room rather than treating 270 entries as 270
+   independent units. ACCEPTED.
+4. Priority order: finish and verify the corner rule first, then this
+   packet's judging, then the D569 runner, then the reduced elevation
+   plan once the worktree frees, then struggle-room selection and the
+   cap study. Add explicit three-quarters fixtures to D576 verification
+   because no existing room contains that tier. ACCEPTED; the
+   three-quarters point is a real gap the era census exposed and it is
+   now a requirement on D576 increment 2.
+5. Elevation: pursue a reduced model (one ground elevation per square,
+   obstacle height separate, creature body height and altitude separate)
+   after the flat board is readable, and defer general stacked 3D.
+   Creature heights are labelled project defaults, never presented as
+   SRD. Activation is gated on a preregistered held-out screenshot probe
+   at 95 percent accuracy separately for sight and for cover within each
+   tier, Sol high first then Luna medium, with no false-visible answers
+   in fully blocked cases. ACCEPTED. Astra also rejected my brief's
+   presumption that corners simply become box corners, requiring instead
+   that the extension reproduce D576.3 exactly in flat cases and pass
+   independently worked vertical examples. That correction is right and
+   the brief is being amended before dispatch.
+
+FINDING AGAINST MY OWN WORK: the decision prompt I sent astra omitted
+the standing rule that ~/.codex skills do not apply and that no lane may
+invoke claude. Astra consequently read ~/.codex/skills/consensus/SKILL.md
+and, following it, attempted claude reviewer sessions, which it reports
+timed out; no claude invocation appears in the transcript, so nothing was
+spent, but the omission was mine and it is the same load-bearing-preamble
+failure recorded before. The decision-prompt template now carries the
+full prohibition.
+
+## D569 increment 6 harvest (73c4b2ba), a surviving supervisor mutant, and D578.1/D578.2 amendments (2026-09-07 17:31)
+
+Increment 6, codex session 01a07d96-916f-7073-bb57-8cf4b7d06e4c, ended
+at BLIND-DM-I6-EXPERIMENT-READY. Supervisor verified: 2 spec files
+34/34; tsc exit 0; contracts.ts hash unchanged; no removed tests; no
+forbidden patterns; no git writes.
+
+SUPERVISOR MUTANT SURVIVED. M-SUP-I6-REFUSAL-INTERVAL-FLIPPED changed
+the refusal clause of the preregistered success label from
+refusalRiskDifference.interval.lower <= 0 to .upper <= 0
+(tools/d569-blind-experiment.ts:822) and all 16 tests still passed.
+Neither reading is pinned by any test.
+
+CORRECTION OF MY OWN FINDING, at full length because it is against my
+own work. I committed 73c4b2ba describing this as a defect in codex's
+implementation, saying the refusal guard "needs the UPPER bound". Astra,
+now the decider, checked the approved plan and found line 407 requires
+"neither basis has a CI-excluding increase in refused/execution-failure
+rate", and an increase is CI-excluding exactly when the interval's lower
+bound is above zero. I verified that line myself. So codex implemented
+the approved plan CORRECTLY and my commit message misattributes the
+fault. The weakness is in the plan's own success rule, which I reviewed
+and approved. What the mutant really proved is that the rule is
+untested, not that the code is wrong. The follow-up commit carries the
+correct framing.
+
+D578.1 (decider ruling, pre-results, ACCEPTED): the refusal clause is
+STRENGTHENED to require the UPPER bound at or below its own new named
+margin D569_REFUSAL_RISK_MARGIN = 0.00, never the offense margin.
+Missing, non-finite or reversed intervals can never qualify. Astra's
+point stands that zero tolerance is demanding and a failed gate means
+noninferiority was not established rather than inferiority proved.
+Pinning table given to the lane verbatim: [-0.10,-0.01], [-0.10,0.00]
+and [0.00,0.00] pass; [-0.10,0.01], [0.00,0.01] and [0.01,0.10] fail;
+a negative mean with a positive upper bound fails; offense lower bound
+exactly -0.20 fails; and an end-to-end two-cluster fixture whose paired
+refusal differences are 0 and 1 has the exact bootstrap distribution
+0, 0.5, 1 at one quarter, one half, one quarter, so offense passes and
+refusal fails, while swapping the arms gives [-1,0] and passes. Seven
+mutants required: lower-for-upper, mean-for-interval, reversed sign,
+reversed inequality, strict less-than, omitted guard, OR for AND.
+
+D578.2 (decider ruling, ACCEPTED): the Fable PLAYER arm is dropped from
+this registration rather than substituted or waited on, because
+substituting a different model changes the model under study. Astra
+also corrected my premise here: substituting itself would NOT have made
+all three Fable comparisons single-judge, since two of the three are
+forms that leave Sol and Opus eligible. The manifest becomes
+d569-blind-experiment-v2, removes the two Fable arms and the three
+comparisons that reference them, records "Fable usage exhausted; no
+replacement in this registration", names the panel as sol high, opus and
+astra with astra holding no player arm, and encodes judge eligibility
+generally from the arm list so that a comparison with fewer than two
+eligible seats is rejected rather than reported.
+
+Both amendments dispatched as lane blind-dm-i6a, session
+01a07dc7-8e17-7071-8323-5bfacaeb5eff.
+
+## D578.3 — OWNER: a model may judge its own play from a fresh context; supersedes the recusal rule (2026-09-07 17:40)
+
+Owner (verbatim): "It is ok for the same model to judge if it starts
+from a fresh context"
+
+This SUPERSEDES the recusal half of D578 item 2 and the eligibility
+clause of D578.2. Fresh context, not model identity, is the safeguard.
+judge-one.sh already satisfies it: every seat is a new codex or claude
+invocation per packet with no prior conversation, no arm identities, no
+answer key and no other seat's scores.
+
+Consequences applied:
+- The pool3 packet is scored by all three seats. Sol high may score the
+  sol-high arm. The D572 struggle-room selector returns to its original
+  unanimous THREE-seat rule; the two-eligible-seat amendment is void.
+- The parts of D578 item 2 that survive are the ones about context
+  isolation, not identity: a judge session must carry no decision
+  conversation, no arm identity, no answer key and no other seat's
+  scores, and the rubric, exclusions and aggregation stay frozen before
+  scoring with Claude holding the key.
+- Lane blind-dm-i6a was dispatched BEFORE this ruling and carries the
+  now-void instruction to encode judge eligibility excluding any model
+  playing on either side. It will be corrected in a follow-up rather
+  than interrupted mid-turn. Amendment B of that lane, dropping the
+  Fable player arm, is unaffected and stands.
+
+## D576.3 corner rule harvested and committed (d2536fce on claude/los-cover) (2026-09-07 17:40)
+
+Codex session 01a07d9c-9bef-7a52-b362-b42710290c40 ended at
+LOS-COVER-I1A-CORNER-READY. Claims: 25 spec files 904 tests; tsc exit 0
+under the lock; 15 named mutants applied, killed and restored; frozen
+fixture aggregate and contracts.ts unchanged; era census re-run.
+
+Supervisor verified independently: the same 25 specs 25 files / 904
+tests passed; tsc exit 0; contracts.ts hash unchanged; zero fixture
+files modified; no forbidden patterns in the diff; no git write commands
+and no claude invocation in the lane log. Four tests were removed and
+eleven added: three of the four were centre-ray-specific mutant guards
+correctly replaced by corner equivalents, and the fourth pinned the old
+rasterizer's diagonal order and reversal symmetry. That rasterizer is no
+longer used by any production file, which the call-site test now
+enforces, and survives only as the era audit's legacy oracle; the loss
+of its symmetry pin is a small accepted gap recorded here rather than
+hidden.
+
+Pin ledger, checked line by line: only two assertions moved, both in
+tactical-evaluator-r02, and each carries its independent invariant
+inside the test, hand-counted source corners with explicit per-line
+tiers, named d20 miss/normal/critical weights out of 20 and out of 40
+under Bless, and a closed-form death-save convolution written in the
+test. Neither number was regenerated from engine output. The other
+eleven authorized expectations went green under the corner rule and
+were not touched, so eleven of the thirteen pins I had authorized did
+not need to move at all.
+
+Supervisor mutant M-SUP-CORNER-COUNT-OFF-BY-ONE shifted the DMG count
+thresholds so that two obstructed lines read three_quarters instead of
+half: killed by 3 tests, including the named "a wall corner clipping two
+lines yields Half Cover" case, and restored to 74edbb0a...
+
+Era census delta, corner rule against centre ray, all 63 rooms and 3470
+ordered living pairs: cover tier changes fall from 1771 to 1522 and
+sight changes fall from 1680 to 736, which is expected because sight now
+requires all four lines to cross a wall. The important result is that
+three_quarters cover EXISTS for the first time, 40 half-to-three-quarters
+and 18 none-to-three-quarters transitions, where the centre ray produced
+zero. Astra's requirement that D576 verification include explicit
+three-quarters fixtures is therefore partly met by the geometry itself,
+though authored three-quarters features are still needed in increment 2.
+
+## D579 — Astra's review of the AI DM prompt surface; three defects verified by the supervisor (2026-09-07 17:48)
+
+Owner: "Have Astra review the prompts sent to the ai dm and brainstorm
+ways to improve". Astra read the live prompt surface in
+dnd-wt-blind-dm (arena-prompt.ts, the session-instruction helper, all
+nine D569 knowledge-base files, blind-turn-context.ts,
+blind-dm-contract.ts, the snapshot primer and the probe primers). Full
+output: .tmp/runs/astra-prompt-review.log.
+
+THREE FINDINGS I VERIFIED MYSELF, all real:
+
+1. THE MAP GUIDE TEACHES THE WRONG HP BANDS, and this is the most
+   damaging item found. The engine's own definition
+   (src/vtt/intel/actor-knowledge.ts:203-207) is uninjured when hp >=
+   max, near_death when hp*4 <= max, and bloodied for EVERYTHING in
+   between. So BLOODIED means merely injured and above a quarter: a
+   creature at 99 percent of its maximum displays BLOODIED.
+   tests/fixtures/ai-dm-kb/d569/protocol.md:10 tells the DM that amber
+   and BLOODIED mean "at or below half" and that green and UNINJURED
+   mean "above the Bloodied threshold". Both are false. The blind
+   context's displayHpBand (src/vtt/blind-turn-context.ts:95) matches
+   the engine, not the guide. The renderer compounds it: HP_BAND_FILL_PX
+   draws the bloodied bar at exactly half width
+   (src/vtt/board-chrome.ts), so the picture reinforces the false
+   reading. This directly corrupts the first tactical instruction,
+   concentrate on a wounded threat, and it has been present in every
+   blind DM prompt built so far. No blind arm has run yet, so no result
+   is contaminated.
+
+2. src/vtt/arena-prompt.ts HAS NO CALLERS anywhere in src, tools or
+   tests. The live path is renderEnginePrompt and renderBlindEnginePrompt
+   in tools/ai-dm-conversation.ts. My own dispatch brief described
+   arena-prompt.ts as "the standing advice-mode prompt envelope", which
+   was wrong; astra checked and corrected it. Recorded as a finding
+   against my own work.
+
+3. THE REPLY VALIDATOR REJECTS THE KNOWLEDGE BASE'S OWN VOCABULARY. The
+   prose guard (src/vtt/blind-dm-contract.ts:61) refuses any reason
+   containing "damage", "path" or "route", while
+   tests/fixtures/ai-dm-kb/d569/tactics.md:3 instructs "Control before
+   damage". A model that follows the tactics file and explains itself in
+   its words gets its round rejected. The same file teaches "northeast"
+   while the schema demands "north_east".
+
+Astra's other substantive points, not yet independently verified: the
+blind intent resolver requires exactly one action per candidate
+(src/vtt/blind-intent-resolver.ts:393) while the knowledge base
+encourages bonus actions, reactions, Ready and Help, so blind-versus-
+advice is partly an INTERFACE comparison rather than a reasoning one;
+the screenshot primer is delivered twice, once inside the knowledge
+base's map guide and again appended from the probe module; the tactics
+file offers four competing slogans with no priority procedure; and
+creature-facts provenance ships dropped-field explanations the model
+does not need.
+
+On the measurements, astra's reading is that added material COMPETES
+with the choice rather than that shorter is always better, noting that
+16 KiB also loses, so the 24 to 32 KiB plateau is a real optimum. It
+also cautioned that 19 of 30 agreements with engine-top do not prove
+anchoring, since the engine may simply be right, and that the wide
+one-rep Sol interval does not establish Luna's superiority.
+
+Ranked bets, astra's own subjective planning estimates in panel points:
+fix the HP bands first; move advice to 24 KiB; drop the duplicated
+primer; separate binding protocol from reference knowledge; replace the
+tactical slogans with a comparison procedure; vary option ordering and
+recommendation visibility separately as a position-bias diagnostic;
+trim audit prose from turn context; collapse near-duplicate options;
+repair the blind interface's coverage with engine-offered composite
+choices; and simplify the board art last, given the closed board-facts
+result.
+
+Supervisor decision: item 1 is a bug in data we author that would
+corrupt an experiment that has not yet run, so it is being fixed now
+rather than queued behind the brainstorm. The rest await the owner's
+direction.
+
+## D578.1/D578.2 harvest (881a6455) and the D579 corrections dispatch (2026-09-07 17:56)
+
+Amendment lane blind-dm-i6a, session
+01a07dc7-8e17-7071-8323-5bfacaeb5eff, ended at
+BLIND-DM-I6A-AMENDMENT-READY. Supervisor verified: the success rule now
+reads refusalRiskDifference.interval.upper <= D569_REFUSAL_RISK_MARGIN
+with the margin its own named 0.00 constant, and an interval that is
+missing, non-finite or reversed cannot qualify; manifest is
+d569-blind-experiment-v2 with both amendments recorded as pre-results
+and the two Fable player arms plus their three comparisons removed;
+2 spec files 49/49; tsc exit 0; contracts.ts hash unchanged. Supervisor
+mutant M-SUP-I6A-BOUNDARY-EXCLUSIVE changed the at-most comparison to
+strictly-less, so an upper bound of exactly the zero margin would fail:
+killed by 6 tests, including astra's named boundary matrix, and restored
+to 8cbe1e65...
+
+That commit also carries the judge recusal policy the owner superseded
+in D578.3 while the lane was already running, so it is corrected next
+rather than left standing.
+
+Corrections lane blind-dm-i6b dispatched, session
+01a07dde-ab3a-70f1-9ec1-ad70d7b7aae7, with three items:
+1. Rewrite the HP band paragraph in the D570 map guide to state the real
+   thresholds, with the explicit warning that BLOODIED spans a very wide
+   range and is weak evidence of how close a creature is to dropping,
+   keeping all four board-feature markers in place for the coverage
+   test, plus a note that the drawn bar length is a fixed per-band glyph
+   rather than a proportional measure. A new test must fail if the guide
+   and actor-knowledge's thresholds disagree, deriving its boundary
+   cases from the engine function rather than from the prose.
+2. Narrow the reply validator so it still rejects dice expressions,
+   numeric damage, DCs, attack bonuses, coordinates, arrows and reducer
+   or option tokens, but permits the bare tactical nouns damage, path
+   and route, which our own tactics file uses; and correct the guide's
+   "northeast" to the schema's "north_east".
+3. Remove the recusal restriction so all three seats are eligible for
+   every comparison, replacing it with the fresh-session requirement the
+   owner's ruling actually imposes, as a third pre-results amendment
+   quoting the ruling.
+The D570 bundle hash legitimately moves for item 1; the lane must list
+its independent invariant in the same change.
+
+## D572 pool three-rep result: BOTH CONTRASTS NULL; the one-rep screen was noise (2026-09-07 18:10)
+
+Panel sol high / claude opus / gpt-6-astra, all three seats fresh, 270
+entries, 30 pool rooms x 3 reps, three arms. Judge outputs extracted
+(sol and astra arrive as codex transcripts, opus as raw JSON) and
+unsealed with unseal-report.py, whose SEATS tuple I changed from
+sol/opus/fable to sol/opus/astra with both seats now read as
+pre-extracted JSON; the original is kept as unseal-report.py.bak-fable.
+
+| Arm | n | Panel mean | sol | opus | astra | refused |
+| engine-top  | 90 | 6.83 | 8.20 | 6.27 | 6.03 | 0 |
+| luna-medium | 90 | 6.92 | 8.22 | 6.46 | 6.09 | 1 |
+| sol-high    | 90 | 6.76 | 8.12 | 6.29 | 5.87 | 1 |
+
+| Contrast | n | Delta | Seed-clustered 95% CI |
+| luna-medium - engine-top | 90 | +0.09 | [-0.25, +0.51] |
+| sol-high - engine-top    | 90 | -0.07 | [-0.40, +0.19] |
+
+READING: the one-rep screen recorded earlier this window put
+luna - engine-top at +0.34 and sol - luna at -0.38. At three reps both
+collapse. Luna medium is indistinguishable from simply taking the
+engine's top recommendation on this pool, and sol high is too. This is
+the D572 question answered on the current engine: on these 30 rooms
+nobody beats engine-top, so there is no population of rooms here where
+the model reliably improves on it.
+
+Note the seat spread: sol scores everything about two points higher than
+opus and astra, on every arm. Absolute panel levels are not comparable
+across seats, only the paired deltas within a seat, which is how the
+report computes them.
+
+Consequence for the struggle-room hunt: selection needs rooms where the
+judges agree the engine's top pick is NOT the best play, and this result
+says such rooms are rare in the current pool. Selection still runs, but
+a null or near-null yield is now the expected outcome rather than a
+surprise. tools/select-struggle-rooms.ts hardcoded the fable seat, so
+lane pool-seat-swap was dispatched (session
+01a07deb-4161-7ec0-99ba-83fc2a20be4d) to move the seat vocabulary to
+sol/opus/astra, make the seat list the single source of truth, and add a
+test proving the rule still requires ALL THREE seats rather than a
+majority, with no recusal logic per D578.3.
+
+## D579 corrections landed (e247bc01), seat swap landed (b2677a7a), D580 selector rulings dispatched (2026-09-07 18:29)
+
+CORRECTIONS, verified by the supervisor on dnd-wt-blind-dm: the HP band
+paragraph now states the real thresholds, warns that BLOODIED spans a
+very wide range and must not be read as half, and notes the bar length
+is a fixed per-band glyph; all four board-feature markers intact; zero
+remaining "northeast" spellings. The reply validator keeps rejecting
+dice, DCs, attack bonuses, coordinates, arrows, reducer and option
+tokens and numeric damage claims, while permitting the bare tactical
+nouns. Recusal removed: seatEligibilityPolicy is now
+all_registered_seats_every_comparison with sessionPolicy
+fresh_session_per_packet and explicit packet exclusions; manifest is
+d569-blind-experiment-v3 with the amendment quoting the owner ruling.
+3 spec files 59/59, tsc clean, contracts hash unchanged. Supervisor
+mutant M-SUP-I6B-GUIDE-REGRESSES-TO-HALF put the false half claim back
+and the new guide-versus-engine alignment test caught it (3 failures),
+restored.
+
+SEAT SWAP, verified on dnd-wt-brutal-pool: STRUGGLE_JUDGE_SEATS is
+sol/opus/astra, every seat-indexed type, CLI option, path and report
+field derives from that constant, a helper pins the judge-file naming
+convention against it, zero fable literals remain, 7/7 tests, tsc clean.
+Supervisor mutant M-SUP-SEAT-MAJORITY-QUALIFIES weakened unanimity to a
+two-of-three majority: killed by 3 tests including the new explicit
+majority case, restored.
+
+BLOCKER FOUND WHEN I RAN THE SELECTOR: it validates case ids against
+/^case-\d+-1$/ and therefore accepts only ONE repetition per room, so
+the three-rep packet is rejected outright. The tool was written for the
+one-rep screen.
+
+D580 (decider rulings, ACCEPTED, dispatched as lane pool-reps-selector,
+session 01a07dfd-24d4-7793-9c94-18b76a06ba5d):
+1. Aggregate by MEAN across reps within room, seat and arm; "all three
+   seats prefer the alternative" means each seat mean is strictly
+   negative before rounding, so exactly zero fails. Parse case ids as
+   room plus repetition, validate against the packet's expected rep set,
+   and REJECT any missing or duplicated (room, rep, seat, arm)
+   combination rather than averaging a partial set. Evaluate the luna
+   and sol alternatives separately and record which qualified. Report
+   the three seat means alongside the count of reps that favoured the
+   alternative. Majority-of-reps was rejected because it discards
+   magnitude; pooling reps as independent observations was rejected
+   because it inflates evidence.
+2. The bottom-tertile Luna condition STOPS being a required gate and
+   becomes descriptive. Unanimous strictly-negative seat means are a
+   NOMINATION rule only. Astra's reasoning, which I accept: a null
+   population average can coexist with real room-specific advantages,
+   but selecting extreme observed deltas necessarily enriches
+   measurement noise, and adding a second noisy selection on low Luna
+   scores compounds it, so calling the selected extremes established
+   engine failures would be unjustified. Output naming must therefore
+   say nominated candidates, not verified failures, and confirmation
+   requires fresh evaluations excluded from selection plus a rules check
+   of the claimed tactical advantage.
+3. No seat normalization. An additive offset cancels in paired
+   within-seat deltas and unanimity stops one generous seat overruling
+   the others; z-scoring after the fact was rejected. Caveat recorded:
+   offsets cancelling does not prove the seats use comparable ranges,
+   and ceiling effects or divergent rubric readings would call for
+   recalibration rather than statistics.
+4. Priority after this: validate and freeze the line-of-sight and cover
+   overhaul first, since it moves cover in 1522 of 3470 pairs and adds
+   three-quarters cover, and never combine results across engine
+   versions; then run the blind DM experiment's first model arm on that
+   frozen version; then confirm nominated rooms under frozen rules;
+   and only then consider more pool sampling, justified by a stated
+   effect size and precision target.
+
+Astra's framing of the null, which I accept and which corrects a
+temptation in my own earlier wording: the result supports "no
+demonstrated average improvement", NOT equivalence and NOT "no model can
+win a room". The intervals still admit meaningful differences.
