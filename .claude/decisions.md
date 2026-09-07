@@ -14341,3 +14341,42 @@ Finding on the pool: engine-top rows still record model "gpt-5.6-sol";
 the packet strips model identity so blinding holds, but the row lies
 and the arm must record model null (or "engine") before the screening
 runs; sent with the commit gate.
+
+## D575 — OWNER: the blind experiment is screenshot-first; the judge models also play, blind and with engine output; compare, then compare to luna medium (2026-09-07 10:10)
+
+Owner (verbatim): "My intent for the experiment is can we coax the model
+into reading the screenshot and choosing how to play the turn based on
+that plus general knowledge a human would have from knowing the rules
+and having played before.
+
+The human would presumably have also read instructions on how to
+interpret the map.
+
+Have the judges try to do the same thing under the same conditions and
+then a separate panel that has the typical engine output. See how they
+compare and then compare to what Luna medium came up with"
+
+Supervisor reading, binding for increments 4 and 6 and open to
+correction: (1) The blind context is screenshot-first: the state-only
+DM board image with the map-interpretation primer, the D570 rules and
+tactics primer, the monster stat blocks a DM would have open (D571,
+compressed per D574) and the legal-movement reach D571 named; the
+semantic board facts block is NOT part of the blind arm by default
+(they are engine facts a human would derive from the picture) and
+becomes a separately labelled diagnostic arm only. (2) New arms: each
+judge model plays the same rooms under the same blind conditions
+(sol high, opus, fable via the arena's claude-code and codex CLIs), and
+each also plays with the typical engine output (advice mode, default
+profile). (3) The standing panel judges every arm blinded; for a row
+played by one of the judge models, that seat's own score is reported
+but the primary contrast uses the other two seats, so no model grades
+its own play. (4) Comparisons, all on the same rooms: judge-model blind
+vs judge-model advice (does the engine shortlist help strong models or
+hurt them), then luna medium blind vs luna medium advice, then luna
+medium vs each judge model in both modes. (5) Effort order from D569
+still holds for luna (high maxed first, then medium, then low), but
+the judge-model arms and luna medium run in the first batch because
+the owner asked for the comparison with luna medium directly.
+Standing rules unchanged: engine authority, proposer-only, no dice or
+commands from any model, 240 s wall, no escalation, refusals score
+zero with executed-only reported beside.
