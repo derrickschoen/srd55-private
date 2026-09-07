@@ -14397,3 +14397,22 @@ Increment 2: my all-gates mutant broke compilation (tsc exit 1) and the
 browser check never ran, so it proved nothing; a well-formed variant
 (every gate compares against an impossible mode) is running with the
 browser spec as the killing test.
+
+## Increment 2 committed 5aea7c17; luna-low 48/64 verdicts; D574 stat-block + boundary amendment dispatched (2026-09-07 10:39)
+
+Increment 2 verified myself: 7 specs 118/118, browser spec 2/2, tsc 0,
+pixel inspection of the brutal room-1 capture (no option overlay, no
+DC text, all guide features drawn); a well-formed mutant that makes
+every blind_state gate compare against an impossible mode compiles
+and fails the browser spec (1 failed / 1 passed), restored. Earlier
+mutants of mine were void or ill-formed and are not counted.
+
+Luna LOW caps 48/64 vs the low 32 control (unseal-lowcap-b.md):
+| lowcap/48-vs-32 | lowcap48 − lowcap32 | 30 | -0.91 | [-1.52, -0.39] |
+| lowcap/64-vs-32 | lowcap64 − lowcap32 | 30 | -0.53 | [-0.80, -0.28] |
+(The 48 arm had one refusal in 30 rows.)
+
+D574 amendment dispatched on claude/blind-dm: shared stat blocks
+confirmed by test, compression to mechanical essentials with provenance
+of dropped fields, strict schema updated, boundary repair (no reducer
+or RNG in the blind renderer's import graph), byte table before/after.
