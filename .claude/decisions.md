@@ -13362,3 +13362,12 @@ took luna medium to .995 (semantic facts, image+facts), primer variants
 and answer schema, then whatever encoding/primer changes lift luna low,
 each replicated on seed 2. Baseline matrix launched first (model calls
 only, supervisor-run, E1b tree 49d782bb).
+
+## Main landing gate GREEN at 236aa967 (classic round 5) (2026-09-06 22:44)
+
+gate-multiclass-spells-static.log, start 21:45:32, done 22:44:39: tsc 0,
+sg 0, vitest-gate 0 (no load flakes, none failed), Playwright 186
+passed in 50.0 min, no load flakes, exit 0. Classic round 5 (native
+128-px art, lattice-scaled chrome, 5d obscured/difficult art, primer
+v10, board-chrome-layout module, sprite-lattice CSS fix) is landed and
+verified on main; :4173 serves it.
