@@ -15230,3 +15230,45 @@ Corrections lane blind-dm-i6b dispatched, session
    quoting the ruling.
 The D570 bundle hash legitimately moves for item 1; the lane must list
 its independent invariant in the same change.
+
+## D572 pool three-rep result: BOTH CONTRASTS NULL; the one-rep screen was noise (2026-09-07 18:10)
+
+Panel sol high / claude opus / gpt-6-astra, all three seats fresh, 270
+entries, 30 pool rooms x 3 reps, three arms. Judge outputs extracted
+(sol and astra arrive as codex transcripts, opus as raw JSON) and
+unsealed with unseal-report.py, whose SEATS tuple I changed from
+sol/opus/fable to sol/opus/astra with both seats now read as
+pre-extracted JSON; the original is kept as unseal-report.py.bak-fable.
+
+| Arm | n | Panel mean | sol | opus | astra | refused |
+| engine-top  | 90 | 6.83 | 8.20 | 6.27 | 6.03 | 0 |
+| luna-medium | 90 | 6.92 | 8.22 | 6.46 | 6.09 | 1 |
+| sol-high    | 90 | 6.76 | 8.12 | 6.29 | 5.87 | 1 |
+
+| Contrast | n | Delta | Seed-clustered 95% CI |
+| luna-medium - engine-top | 90 | +0.09 | [-0.25, +0.51] |
+| sol-high - engine-top    | 90 | -0.07 | [-0.40, +0.19] |
+
+READING: the one-rep screen recorded earlier this window put
+luna - engine-top at +0.34 and sol - luna at -0.38. At three reps both
+collapse. Luna medium is indistinguishable from simply taking the
+engine's top recommendation on this pool, and sol high is too. This is
+the D572 question answered on the current engine: on these 30 rooms
+nobody beats engine-top, so there is no population of rooms here where
+the model reliably improves on it.
+
+Note the seat spread: sol scores everything about two points higher than
+opus and astra, on every arm. Absolute panel levels are not comparable
+across seats, only the paired deltas within a seat, which is how the
+report computes them.
+
+Consequence for the struggle-room hunt: selection needs rooms where the
+judges agree the engine's top pick is NOT the best play, and this result
+says such rooms are rare in the current pool. Selection still runs, but
+a null or near-null yield is now the expected outcome rather than a
+surprise. tools/select-struggle-rooms.ts hardcoded the fable seat, so
+lane pool-seat-swap was dispatched (session
+01a07deb-4161-7ec0-99ba-83fc2a20be4d) to move the seat vocabulary to
+sol/opus/astra, make the seat list the single source of truth, and add a
+test proving the rule still requires ALL THREE seats rather than a
+majority, with no recusal logic per D578.3.
