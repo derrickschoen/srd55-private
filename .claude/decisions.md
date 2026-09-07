@@ -13625,3 +13625,39 @@ D570 amendment dispatched on the same worktree (brief blind-dm-i1a2.md):
 full SRD-cited rules digest, tactics with reasons, complete map-feature
 guide with a coverage test derived from the renderer's legend exports,
 bundle-specific byte caps, legacy fixture unchanged.
+
+## D571 — OWNER: blind mode hides the engine's recommendations, not the facts a human DM has (2026-09-07 00:02)
+
+Owner (verbatim): "I meant to just hide the list of recommendations
+from the ai dm and try to get it to figure them out on its own.
+
+You still need to provide what a human dm would have: dice, DCs, damage
+and legal movement paths.
+
+The dm should have everything it needs to choose the best line of play
+like a human would have"
+
+Supervisor reading (corrects the D569 plan's section 1 allowlist):
+PROVIDED in blind mode, as engine facts: the semantic board (positions,
+terrain, light, obscurement, fog, doors, objects: the E1b payload); the
+screenshot with the primer; initiative; each creature's full stat block
+as the SRD gives it (attacks with to-hit and damage dice, spells and
+save DCs, abilities, speed, AC, senses, resistances), exact hit points
+and resources for the DM's own monsters and the DM-knowledge band for
+the party (what a human DM at the table knows); conditions and
+concentration; legal movement for each monster this turn (reachable
+cells with movement cost, difficult terrain and squeezing applied, as a
+VTT range overlay would show); the rules KB (D570). HIDDEN: the engine's
+offered option list and its ranking, suggested plan, tactical intel
+matrix, opportunity-cost and movement-candidate scoring, threat rows,
+adverts, plays, consequence cards, team frontier, scores, and any
+"top recommendation". Gray line, decided as follows and open to
+correction: which targets are in reach or range, whether a move
+provokes an opportunity attack, and cover from a given cell are left to
+the model to work out from the board and the rules, because that is
+what "figure them out on its own" asks for; movement reach is provided
+because the owner named it. The model still never outputs dice
+results, DCs, damage or reducer commands; it states intents and the
+engine resolves and rolls. The intent grammar, resolver, repair arms,
+leak audit (now forbidding recommendation fields, not numbers) and the
+evaluation protocol stand. Plan amendment sent to the planning session.
