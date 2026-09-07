@@ -14158,3 +14158,22 @@ end_turn replay never fires) leaves all 46 tests green including the
 needs it and nothing tests it. Not committed; the lane is resumed with
 the finding (prove reachability with a minimal reducer-level test that
 kills the mutant, or remove the replay).
+
+## Cap knob and compact-fallback fix LANDED on main (b091ce71); boundary fix committed a2a01384 on claude/brutal-b (2026-09-07 05:54)
+
+Cap landing gate (gate-wt-cap-fix.log): tsc 0, sg 0, vitest-gate 0 (no
+load flakes), Playwright 186 passed in 50.3 min, exit 0. Merged from
+the main repo with --no-ff, exit 0. :4173 restarted on the new main.
+
+Boundary fix amendment: codex confirmed case (b): resolving the last
+legendary window leaves the same active combatant until a second
+end_turn observes the closed window, so the replay is required; the
+old single-pass code handled one window and broke with two. Added a
+minimal one-window reducer fixture, tightened the 33-fixture invariant
+(an already-acted combatant re-encountered in the same round fails
+even with an empty queue) and made the production arena loop throw on
+that stall instead of breaking out silently. Verified myself: 3 specs
+(arena, brutal-b basis, conversation) 152/152, tsc 0, the exact mutant
+now kills 7 tests (six fixtures plus the minimal case), restored
+byte-identical. Committed; lands behind a merge with the new main and
+its own gate.
