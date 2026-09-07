@@ -76,7 +76,11 @@ import {
   type BlindTurnContextBudgetEvidence,
   type BlindVisualDescriptor,
 } from '../blind-turn-context';
-import type { BlindModelIngressRecorder } from '../blind-model-ingress';
+import {
+  BlindModelIngressRecorder,
+  type BlindIngressChannel,
+  type BlindIngressRecord,
+} from '../blind-model-ingress';
 
 function record(value: unknown, label: string): Readonly<Record<string, unknown>> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new TypeError(`${label} must be an object.`);
@@ -183,6 +187,27 @@ function nonemptySpoolLines(path: string): readonly string[] {
     if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT') return [];
     throw error;
   }
+}
+
+function decodeBlindIngressRecords(lines: readonly string[]): readonly BlindIngressRecord[] {
+  const channels: readonly BlindIngressChannel[] = [
+    'startup', 'initial_prompt', 'retry_prompt', 'turn_context', 'tools_list', 'tool_result',
+    'resources_list', 'resource_templates', 'resource_read', 'prompts_list', 'prompt_get',
+    'kb_read', 'replay_history', 'image_metadata',
+  ];
+  return lines.map((line, index) => {
+    const value: unknown = JSON.parse(line);
+    const candidate = record(value, `blind ingress record ${String(index + 1)}`);
+    if (candidate['ordinal'] !== index + 1 || typeof candidate['channel'] !== 'string' ||
+      !channels.includes(candidate['channel'] as BlindIngressChannel) ||
+      typeof candidate['text'] !== 'string' || typeof candidate['utf8Bytes'] !== 'number' ||
+      candidate['utf8Bytes'] !== new TextEncoder().encode(candidate['text']).byteLength ||
+      typeof candidate['sha256'] !== 'string' ||
+      candidate['sha256'] !== createHash('sha256').update(candidate['text'], 'utf8').digest('hex')) {
+      throw new TypeError(`Blind ingress record ${String(index + 1)} is invalid.`);
+    }
+    return candidate as unknown as BlindIngressRecord;
+  });
 }
 
 function launcherHasAcceptedRoundDecision(manifest: EngineMcpLauncherManifest): boolean {
@@ -296,9 +321,13 @@ export interface EngineMcpLauncherManifest {
   readonly blindMaxAttempts?: BlindMaxAttempts;
   readonly blindDeadlineUnixMs?: number;
   readonly blindVisuals?: readonly BlindVisualDescriptor[];
+  readonly blindFacts?: boolean;
+  readonly blindIntentSpoolPath?: string;
+  readonly blindIngressSpoolPath?: string;
   readonly turnContextDeltaBase?: TurnContextDeltaBase;
   readonly rendererProfile?: RendererProfile;
   readonly turnContextMaximumBytes?: number;
+  readonly semanticBoardMaximumBytes?: number;
   readonly initiativeProjection?: EngineInitiativeProjection;
   readonly boardImage?: EngineMcpBoardImageBinding;
 }
@@ -334,6 +363,7 @@ export function createEngineMcpRuntime(
     readonly clock?: () => number;
     readonly beforeBlindIntentStage?: () => void;
     readonly blindVisuals?: readonly BlindVisualDescriptor[];
+    readonly blindFacts?: boolean;
     readonly blindIngressRecorder?: BlindModelIngressRecorder;
     readonly onBlindTurnContextRendered?: (evidence: BlindTurnContextBudgetEvidence) => void;
     readonly onBlindIntentSubmission?: (submission: BlindIntentSubmissionRecord) => void;
@@ -503,7 +533,8 @@ export function createEngineMcpRuntime(
       uiFeedbackAlreadySubmitted: options.uiFeedbackAlreadySubmitted ?? false,
     }),
     rules: options.rules ?? { get: () => null },
-    ...(options.rendererProfile?.semanticBoard === true || options.dmMode === 'blind' || options.toolProfile === 'blind' ? {
+    ...(options.rendererProfile?.semanticBoard === true ||
+      (options.dmMode === 'blind' || options.toolProfile === 'blind') && options.blindFacts === true ? {
       semanticBoardProjection: projectEngineSemanticBoard(planningState, revision),
     } : {}),
     ...(blindTurnProjection === null ? {} : { blindTurnProjection }),
@@ -900,10 +931,18 @@ function isLauncherManifest(value: unknown): value is EngineMcpLauncherManifest 
       Number.isSafeInteger(input['blindDeadlineUnixMs']) && input['blindDeadlineUnixMs'] >= 1) &&
     (input['blindVisuals'] === undefined || Array.isArray(input['blindVisuals']) &&
       input['blindVisuals'].every(isBlindVisualDescriptor)) &&
+    (input['blindFacts'] === undefined || typeof input['blindFacts'] === 'boolean') &&
+    (input['blindIntentSpoolPath'] === undefined || typeof input['blindIntentSpoolPath'] === 'string' &&
+      input['blindIntentSpoolPath'].length > 0) &&
+    (input['blindIngressSpoolPath'] === undefined || typeof input['blindIngressSpoolPath'] === 'string' &&
+      input['blindIngressSpoolPath'].length > 0) &&
     (input['rendererProfile'] === undefined || rendererProfileSchema.safeParse(input['rendererProfile']).success) &&
     (input['turnContextMaximumBytes'] === undefined ||
       Number.isSafeInteger(input['turnContextMaximumBytes']) &&
       typeof input['turnContextMaximumBytes'] === 'number' && input['turnContextMaximumBytes'] >= 1) &&
+    (input['semanticBoardMaximumBytes'] === undefined ||
+      Number.isSafeInteger(input['semanticBoardMaximumBytes']) &&
+      typeof input['semanticBoardMaximumBytes'] === 'number' && input['semanticBoardMaximumBytes'] >= 1) &&
     (input['boardImage'] === undefined || isEngineMcpBoardImageBinding(input['boardImage']));
 }
 
@@ -968,6 +1007,14 @@ export async function runEngineMcpEntrypoint(argv: readonly string[] = process.a
       validatedLauncherBoardImage(manifest, state),
       validatedLauncherBoardHtmlReference(manifest, state),
     ]);
+    const ingressRecords = manifest.blindIngressSpoolPath === undefined
+      ? []
+      : decodeBlindIngressRecords(nonemptySpoolLines(manifest.blindIngressSpoolPath));
+    const blindIngressRecorder = manifest.dmMode !== 'blind' || manifest.blindIngressSpoolPath === undefined
+      ? undefined
+      : new BlindModelIngressRecorder(ingressRecords, (record) => {
+          appendFileSync(manifest.blindIngressSpoolPath ?? '', `${JSON.stringify(record)}\n`, 'utf8');
+        });
     await runEngineMcpServer(manifest.fixturePath, {
       runId: manifest.runId,
       branchId: manifest.branchId,
@@ -996,6 +1043,9 @@ export async function runEngineMcpEntrypoint(argv: readonly string[] = process.a
       ...(manifest.turnContextMaximumBytes === undefined ? {} : {
         turnContextMaximumBytes: manifest.turnContextMaximumBytes,
       }),
+      ...(manifest.semanticBoardMaximumBytes === undefined ? {} : {
+        semanticBoardMaximumBytes: manifest.semanticBoardMaximumBytes,
+      }),
       ...(manifest.initiativeProjection === undefined ? {} : {
         initiativeProjection: manifest.initiativeProjection,
       }),
@@ -1009,6 +1059,8 @@ export async function runEngineMcpEntrypoint(argv: readonly string[] = process.a
         blindDeadlineUnixMs: manifest.blindDeadlineUnixMs,
       }),
       ...(manifest.blindVisuals === undefined ? {} : { blindVisuals: manifest.blindVisuals }),
+      ...(manifest.blindFacts === undefined ? {} : { blindFacts: manifest.blindFacts }),
+      ...(blindIngressRecorder === undefined ? {} : { blindIngressRecorder }),
       ...(kbReadBudget === undefined ? {} : {
         kbReadBudget,
         kbReadCallPhase: manifest.requestKind === 'plan_adjustment'
@@ -1036,6 +1088,11 @@ export async function runEngineMcpEntrypoint(argv: readonly string[] = process.a
       onSpeculativePlan: (plan) => {
         appendFileSync(manifest.proposalSpoolPath, `${JSON.stringify(plan)}\n`, 'utf8');
       },
+      ...(manifest.blindIntentSpoolPath === undefined ? {} : {
+        onBlindIntentSubmission: (submission: BlindIntentSubmissionRecord) => {
+          appendFileSync(manifest.blindIntentSpoolPath ?? '', `${JSON.stringify(submission)}\n`, 'utf8');
+        },
+      }),
       ...(manifest.turnContextSpoolPath === undefined ? {} : {
         onTurnContext: (context: Readonly<Record<string, unknown>>) => {
           appendFileSync(manifest.turnContextSpoolPath ?? '', `${JSON.stringify(context)}\n`, 'utf8');

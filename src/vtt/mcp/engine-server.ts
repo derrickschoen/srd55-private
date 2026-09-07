@@ -279,6 +279,9 @@ export interface BlindIntentSubmissionRecord {
   readonly requestId: string;
   readonly phase: 'initial' | 'correction';
   readonly attempt: number;
+  readonly startedAtUnixMs: number;
+  readonly endedAtUnixMs: number;
+  readonly resolverLatencyMs: number;
   readonly envelope: unknown;
   readonly resolution: BlindResolutionResult;
 }
@@ -1461,13 +1464,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       })()
     : null;
   const blindSemanticBoardProjection = dmMode === 'blind'
-    ? (() => {
-        const projection = dependencies.semanticBoardProjection;
-        if (projection === undefined) {
-          throw new TypeError('Blind DM mode requires the authoritative semantic-board projection.');
-        }
-        return projection;
-      })()
+    ? dependencies.semanticBoardProjection ?? null
     : null;
   const blindTurnProjection = dmMode === 'blind'
     ? (() => {
@@ -2258,6 +2255,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       blindIntentAttempt += 1;
       if (blindIntentAttempt > blindMaxAttempts) throw new RangeError('BLIND_MAX_ATTEMPTS_EXCEEDED');
       const envelope: unknown = structuredClone(value);
+      const resolverStartedAtUnixMs = clock();
       if (blindTurnProjection === null) throw new TypeError('Blind intent resolution requires the blind turn projection.');
       const resolution = resolveBlindRoundIntents({
         state,
@@ -2269,6 +2267,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         dependencies: { queries, proposalResolver: turnProposals },
       });
       const recordResolution = (recorded: BlindResolutionResult): void => {
+        const resolverEndedAtUnixMs = clock();
         dependencies.blindIntents?.append(structuredClone({
           stateRef: {
             runId: capsule.runId,
@@ -2278,6 +2277,9 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
           requestId: roundRequest.requestId,
           phase: roundRequest.phase,
           attempt: blindIntentAttempt,
+          startedAtUnixMs: resolverStartedAtUnixMs,
+          endedAtUnixMs: resolverEndedAtUnixMs,
+          resolverLatencyMs: Math.max(0, resolverEndedAtUnixMs - resolverStartedAtUnixMs),
           envelope: recorded.status === 'accepted' ? recorded.envelope : envelope,
           resolution: recorded,
         }));
@@ -2362,9 +2364,6 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         if (input['granularity'] === 'turn_delta') {
           return { status: 'rejected', code: BLIND_FULL_CONTEXT_REQUIRED };
         }
-        if (blindSemanticBoardProjection === null) {
-          throw new TypeError('Blind semantic-board projection is unavailable.');
-        }
         if (blindTurnProjection === null) {
           throw new TypeError('Blind turn projection is unavailable.');
         }
@@ -2376,7 +2375,9 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
           blind: () => renderBlindTurnContext({
             capsule,
             blindProjection: blindTurnProjection,
-            semanticBoardProjection: blindSemanticBoardProjection,
+            ...(blindSemanticBoardProjection === null ? {} : {
+              semanticBoardProjection: blindSemanticBoardProjection,
+            }),
             ...(dependencies.blindVisuals === undefined ? {} : {
               visuals: dependencies.blindVisuals,
             }),

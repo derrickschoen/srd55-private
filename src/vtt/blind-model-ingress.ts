@@ -19,6 +19,9 @@ export const BLIND_CONTEXT_TOP_LEVEL_KEYS = Object.freeze([
   'intent_contract',
 ] as const);
 
+const BLIND_CONTEXT_REQUIRED_TOP_LEVEL_KEYS = BLIND_CONTEXT_TOP_LEVEL_KEYS
+  .filter((key) => key !== 'semantic_board');
+
 export type BlindIngressChannel =
   | 'startup'
   | 'initial_prompt'
@@ -129,16 +132,21 @@ export function assertBlindTurnContextAllowlist(value: unknown): void {
   const context = recordValue(value);
   if (context === null) throw new TypeError('Blind turn context must be an object.');
   const actual = Object.keys(context).sort();
-  const expected = [...BLIND_CONTEXT_TOP_LEVEL_KEYS].sort();
+  const expected = [
+    ...BLIND_CONTEXT_REQUIRED_TOP_LEVEL_KEYS,
+    ...(context['semantic_board'] === undefined ? [] : ['semantic_board'] as const),
+  ].sort();
   if (canonicalJson(actual) !== canonicalJson(expected)) {
     throw new TypeError(`Blind turn context keys are not allowlisted: ${canonicalJson(actual)}.`);
   }
   if (context['granularity'] !== 'full' || context['dm_mode'] !== 'blind') {
     throw new TypeError('Blind turn context must be a full blind projection.');
   }
-  const semantic = recordValue(context['semantic_board']);
-  if (semantic === null || 'reach_range_summaries' in semantic) {
-    throw new TypeError('Blind semantic board must exist without reach_range_summaries.');
+  const semantic = context['semantic_board'] === undefined
+    ? undefined
+    : recordValue(context['semantic_board']);
+  if (semantic === null || semantic !== undefined && 'reach_range_summaries' in semantic) {
+    throw new TypeError('Blind semantic board, when enabled, must omit reach_range_summaries.');
   }
 }
 
@@ -199,17 +207,26 @@ export function assertBlindIngressSafe(
 }
 
 export class BlindModelIngressRecorder {
-  readonly #records: BlindIngressRecord[] = [];
+  readonly #records: BlindIngressRecord[];
+
+  constructor(
+    initialRecords: readonly BlindIngressRecord[] = [],
+    private readonly onRecord?: (record: BlindIngressRecord) => void,
+  ) {
+    this.#records = initialRecords.map((record) => ({ ...record }));
+  }
 
   record(channel: BlindIngressChannel, text: string): void {
     const ordinal = this.#records.length + 1;
-    this.#records.push(Object.freeze({
+    const record = Object.freeze({
       ordinal,
       channel,
       text,
       utf8Bytes: utf8Bytes(text),
       sha256: sha256(text),
-    }));
+    });
+    this.#records.push(record);
+    this.onRecord?.(record);
   }
 
   recordJson(channel: BlindIngressChannel, value: unknown): void {

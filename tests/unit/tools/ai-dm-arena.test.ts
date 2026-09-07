@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
 import { encounterSessionId } from '../../../src/combat/values';
@@ -37,12 +38,24 @@ import {
   mapConversationKbReads,
   parseArenaArgs,
   runArena,
+  type ArenaRow,
 } from '../../../tools/ai-dm-arena';
 import { validateRerunRows } from '../../../tools/ai-dm-rerun-packet';
 import {
   mkdtempSync,
+  mkdirSync,
   readFileSync,
+  writeFileSync,
 } from '../../helpers/test-filesystem';
+import type {
+  BoardImageArtifact,
+  BoardSnapshotCapture,
+} from '../../../tools/ai-dm-board-snapshot';
+import type { ConversationBoardSnapshotService } from '../../../tools/ai-dm-conversation';
+import {
+  BlindModelIngressRecorder,
+  assertNoForbiddenBlindStructure,
+} from '../../../src/vtt/blind-model-ingress';
 import {
   DEFAULT_AI_DM_KB_ROOT,
   type RepoRelativeKbPath,
@@ -51,6 +64,117 @@ import type { KbReadRecord } from '../../../src/vtt/mcp/knowledge-base';
 import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
 
 const DEFAULT_KB_HASH = '00776f3f2d4cd7468a1eb2a63028e9c3f846b43b14a4e5787d3e9c94e02633c0';
+
+class BlindArenaSnapshotService implements ConversationBoardSnapshotService {
+  readonly outputDirectory = mkdtempSync(join(tmpdir(), 'dnd-arena-blind-snapshot-'));
+  readonly captures: BoardSnapshotCapture[] = [];
+
+  constructor(private readonly identity = 'blind') {}
+
+  async capture(input: BoardSnapshotCapture): Promise<BoardImageArtifact> {
+    this.captures.push(structuredClone(input));
+    const png = Buffer.alloc(96);
+    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).copy(png);
+    png.writeUInt32BE(1, 16);
+    png.writeUInt32BE(1, 20);
+    Buffer.from(`${this.identity}:${input.source.stateDigest}`, 'utf8').copy(png, 24, 0, 64);
+    const digest = createHash('sha256').update(png).digest('hex');
+    const relativePath = `board-images/${digest}.png` as const;
+    mkdirSync(join(this.outputDirectory, 'board-images'), { recursive: true });
+    writeFileSync(join(this.outputDirectory, relativePath), png);
+    const html = Buffer.from('<!doctype html><main>independent blind test image</main>\n');
+    const htmlDigest = createHash('sha256').update(html).digest('hex');
+    const htmlRelativePath = `board-html/${htmlDigest}/board.html` as const;
+    mkdirSync(join(this.outputDirectory, 'board-html', htmlDigest), { recursive: true });
+    writeFileSync(join(this.outputDirectory, htmlRelativePath), html);
+    return {
+      version: 'arena-board-image-v1', audience: 'dm', mimeType: 'image/png',
+      relativePath, sha256: digest, bytes: png.byteLength, width: 1, height: 1,
+      capturedAtUnixMs: Date.now(), captureMs: 7, source: { ...input.source },
+      chromiumVersion: 'SIMULATED Chromium',
+      html: { relativePath: htmlRelativePath, sha256: htmlDigest, bytes: html.byteLength },
+      blindState: {
+        informationMode: 'blind_state', role: 'dm_board', ordinal: 1,
+        primerVersion: 'd562-general-board-primer-v10', glyphMode: 'full', captureTilePx: 128,
+        domEvidence: {
+          optionSurfaceAbsent: true, nextEventPreviewAbsent: true,
+          coordinateLabels: 1, creatureBadges: 1, rosterEntries: 1, hpBars: 1,
+          legendEntries: 1, blockedCells: 0, difficultCells: 0, obscuredCells: 0,
+          illuminatedCells: 0, fogMarks: 0, doors: 0, objects: 0,
+          hiddenMarks: 0, multiCellFootprints: 0,
+        },
+      },
+    };
+  }
+
+  async close(): Promise<void> { return undefined; }
+}
+
+async function runBlindArenaCase(input: {
+  readonly label: string;
+  readonly repair?: 'code_only' | 'minimal_legal_alternative';
+  readonly facts?: 'on' | 'off';
+  readonly invalid?: boolean;
+}): Promise<{ readonly row: ArenaRow; readonly service: BlindArenaSnapshotService }> {
+  const directory = mkdtempSync(join(tmpdir(), `dnd-arena-d569-${input.label}-`));
+  const service = new BlindArenaSnapshotService(input.label);
+  const [row] = await runArena(parseArenaArgs([
+    '--rooms', '1', '--reps', '1', '--seed', '3943001', '--basis', 'standard',
+    '--out', join(directory, 'row.jsonl'), '--dry-run', '--dm-mode', 'blind',
+    '--blind-repair-arm', input.repair ?? 'code_only', '--blind-facts', input.facts ?? 'off',
+    '--cli', 'codex', '--model', 'gpt-5.6-sol', '--effort', 'high',
+  ]), {
+    boardSnapshotServiceFactory: async () => service,
+    ...(input.invalid === true ? { invalidInitial: ['room-1-round-1'] } : {}),
+  });
+  if (row === undefined) throw new Error(`${input.label} emitted no arena row.`);
+  return { row, service };
+}
+
+function expectAcceptedBlindEvidence(row: ArenaRow, service: BlindArenaSnapshotService): void {
+  expect(row).toEqual(expect.objectContaining({
+    dmMode: 'blind', midRoundAdjustmentsEnabled: false, adjustmentBudget: 0,
+    blindMaxAttempts: 3, outcome: 'authorized', planner: 'model',
+    turnContextMaximumBytes: 65_536, turnContextGranularity: 'full',
+  }));
+  expect(row.adjustments).toEqual([]);
+  expect(row.authorizedPlan?.length).toBeGreaterThan(0);
+  expect(row.authorizedPlan?.every((entry) => entry.resolutionSummary.actionSlots.length > 0))
+    .toBe(true);
+  expect(row.blindIngressAudit).toEqual(expect.objectContaining({ passed: true }));
+  expect(row.turnContextBudget).toEqual(expect.objectContaining({
+    configuredBaseBytes: 65_536, configuredSemanticBytes: 8_192, truncatedBlocks: [],
+  }));
+  expect(row.turnContextBudget?.actualBaseBytes).toBeLessThanOrEqual(65_536);
+  expect(row.visualProfile).toEqual(expect.objectContaining({
+    primerVersion: 'd562-general-board-primer-v10', glyphMode: 'full',
+    captureTilePx: 128, perImageCaptureLatencyMs: [7], totalImageCaptureLatencyMs: 7,
+  }));
+  expect(service.captures).toHaveLength(1);
+  for (const attempt of row.blindAttempts ?? []) {
+    expect(attempt.modelFirstTokenMs).toBeNull();
+    expect(attempt.endedAtOffsetMs - attempt.startedAtOffsetMs)
+      .toBe(attempt.modelWallMs + attempt.resolverLatencyMs);
+  }
+}
+
+const BLIND_ARENA_ROW_EVIDENCE: readonly {
+  readonly row: ArenaRow;
+  readonly service: BlindArenaSnapshotService;
+}[] | Error = await Promise.all([
+  runBlindArenaCase({ label: 'screenshot-first' }),
+  runBlindArenaCase({ label: 'semantic', facts: 'on' }),
+  runBlindArenaCase({ label: 'code-repair', repair: 'code_only', invalid: true }),
+  runBlindArenaCase({ label: 'hint-repair', repair: 'minimal_legal_alternative', invalid: true }),
+]).catch((error: unknown) => error instanceof Error ? error : new Error(String(error)));
+
+function blindArenaRowEvidence(): readonly {
+  readonly row: ArenaRow;
+  readonly service: BlindArenaSnapshotService;
+}[] {
+  if (BLIND_ARENA_ROW_EVIDENCE instanceof Error) throw BLIND_ARENA_ROW_EVIDENCE;
+  return BLIND_ARENA_ROW_EVIDENCE;
+}
 
 function objectValue(value: unknown, label: string): Readonly<Record<string, unknown>> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -374,6 +498,107 @@ describe('AI-DM arena', () => {
       .toThrow('--basis must be standard, hard, brutal, or scenario.');
     expect(() => parseArenaArgs([...common, '--party-policy', 'unknown-policy']))
       .toThrow('--party-policy must be heuristic_v0 or symmetric_evaluator_v1.');
+  });
+
+  it('composes D569 blind/advice modes with Claude and Codex judge-player identities', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-d569-parse-'));
+    const common = [
+      '--rooms', '1', '--reps', '1', '--seed', '5117001',
+      '--out', join(directory, 'arena.jsonl'), '--dry-run',
+    ] as const;
+    for (const [cli, model, effort] of [
+      ['claude-code', 'claude-opus-5', 'high'],
+      ['claude-code', 'claude-fable-5', 'high'],
+      ['codex', 'gpt-5.6-sol', 'high'],
+    ] as const) {
+      for (const mode of ['blind', 'advice'] as const) {
+        expect(parseArenaArgs([
+          ...common, '--dm-mode', mode, '--cli', cli, '--model', model, '--effort', effort,
+        ])).toEqual(expect.objectContaining({
+          dmMode: mode, dmModeExplicit: true, cli, model, effort,
+          midRoundAdjustmentsEnabled: false, timeoutMs: 240_000, boardImageMode: 'png',
+        }));
+      }
+    }
+    expect(parseArenaArgs([...common, '--dm-mode', 'blind'])).toEqual(expect.objectContaining({
+      blindRepairArm: 'code_only', blindMaxAttempts: 3, blindFacts: false,
+      turnContextMaximumBytes: 65_536,
+    }));
+    expect(() => parseArenaArgs([
+      ...common, '--dm-mode', 'blind', '--capture-rl-data',
+    ])).toThrow('prohibit escalation and RL capture');
+  });
+
+  it('blind_scanner_flags_all_numbers: allows mechanics and neutral reach but rejects recommendation evidence', () => {
+    const allowed = new BlindModelIngressRecorder();
+    allowed.recordJson('turn_context', {
+      statblock: { armorClass: 18, hitPoints: 41, attack: '+7', damage: '2d8+4', saveDc: 15 },
+      resources: { spellSlots: 3 },
+      legal_movement: { cells: [{ label: '12,7', cost_feet: 25 }] },
+    });
+    expect(allowed.assertSafe({ requiredText: ['2d8+4', 'saveDc', '12,7', 'cost_feet'] }))
+      .toEqual(expect.objectContaining({ passed: true }));
+
+    for (const key of [
+      'option_id', 'option_count', 'option_order', 'rank', 'score', 'suggested_plan',
+      'intel', 'adverts', 'threats', 'movement_candidates', 'path_cells',
+    ]) {
+      if (key === 'path_cells') {
+        const bytes = new BlindModelIngressRecorder();
+        bytes.record('retry_prompt', 'path_cells are 1,1 then 1,2');
+        expect(() => bytes.assertSafe(), key).toThrow('forbidden recommendation bytes');
+      } else {
+        expect(() => assertNoForbiddenBlindStructure({ wrapper: { [key]: 'private' } }), key)
+          .toThrow('recommendation fields');
+      }
+    }
+    const exactId = new BlindModelIngressRecorder();
+    exactId.record('tool_result', 'option:2:private-current-offer');
+    expect(() => exactId.assertSafe({ offeredOptionIds: ['option:2:private-current-offer'] }))
+      .toThrow('forbidden recommendation bytes');
+  });
+
+  it('adjustment_runs_in_blind_arm and blind_arm_reuses_semantic_board_by_default: keeps screenshot-first parity', () => {
+    const { row, service } = blindArenaRowEvidence()[0]!;
+    expectAcceptedBlindEvidence(row, service);
+    expect(row.rawTurnContext).not.toContain('"semantic_board"');
+    expect(row.semanticBoardEvidence).toBeNull();
+    expect(row.turnContextBudget?.actualSemanticBytes).toBe(0);
+  });
+
+  it('blind_row_omits_context_cap_evidence: records the separately capped semantic diagnostic', () => {
+    const { row, service } = blindArenaRowEvidence()[1]!;
+    expectAcceptedBlindEvidence(row, service);
+    expect(row.rawTurnContext).toContain('"semantic_board"');
+    expect(row.semanticBoardEvidence).toEqual(expect.objectContaining({
+      omittedBlocks: ['reach_range_summaries'],
+    }));
+    expect(row.turnContextBudget?.actualSemanticBytes).toBeGreaterThan(0);
+    expect(row.turnContextBudget?.actualSemanticBytes).toBeLessThanOrEqual(8_192);
+  });
+
+  it('resolver_latency_included_as_model_wall and first_token_uses_first_stdout_line: separates code-only retries', () => {
+    const { row, service } = blindArenaRowEvidence()[2]!;
+    expectAcceptedBlindEvidence(row, service);
+    expect(row.blindAttempts).toHaveLength(2);
+    expect(row.blindAttempts?.[0]).toEqual(expect.objectContaining({
+      resolverOutcome: 'rejected', codes: expect.arrayContaining(['ACTION_UNAVAILABLE']),
+      hintExposed: false, modelFirstTokenMs: null,
+    }));
+    expect(row.blindAttempts?.[1]).toEqual(expect.objectContaining({
+      resolverOutcome: 'accepted', modelFirstTokenMs: null,
+    }));
+  });
+
+  it('blind_row_exposes_option_order: audits retries in the separately labelled minimal-hint arm', () => {
+    const { row, service } = blindArenaRowEvidence()[3]!;
+    expectAcceptedBlindEvidence(row, service);
+    expect(row.blindAttempts).toHaveLength(2);
+    expect(row.blindAttempts?.[0]).toEqual(expect.objectContaining({
+      resolverOutcome: 'rejected', codes: expect.arrayContaining(['ACTION_UNAVAILABLE']),
+      hintExposed: true,
+    }));
+    expect(JSON.stringify(row.blindAttempts?.[0])).not.toMatch(/option:|path|rank|score/iu);
   });
 
   it('plumbs the cap into real hard-fixture context construction and arena evidence', { timeout: 60_000 }, async () => {

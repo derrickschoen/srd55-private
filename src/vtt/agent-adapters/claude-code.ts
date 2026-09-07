@@ -44,6 +44,11 @@ const ROUND_PLAN_DM_ENGINE_TOOL_NAMES = DM_ENGINE_TOOL_NAMES.filter((name) =>
   name !== 'engine.submit_plan_adjustment');
 const PLAN_ADJUSTMENT_DM_ENGINE_TOOL_NAMES = DM_ENGINE_TOOL_NAMES.filter((name) =>
   name !== 'engine.propose_from_play' && name !== 'engine.submit_round_proposals');
+const BLIND_ENGINE_TOOL_NAMES = [
+  'engine.get_turn_context',
+  'engine.read_kb_subject',
+  'engine.submit_blind_round_intents',
+] as const;
 
 export function claudeCodeEngineToolName(toolName: string): string {
   return `mcp__engine__${toolName.replaceAll('.', '_')}`;
@@ -51,6 +56,13 @@ export function claudeCodeEngineToolName(toolName: string): string {
 
 export const CLAUDE_ENGINE_TOOLS = Object.freeze(ENGINE_TOOL_NAMES.map(claudeCodeEngineToolName));
 export const CLAUDE_DM_ENGINE_TOOLS = Object.freeze(DM_ENGINE_TOOL_NAMES.map(claudeCodeEngineToolName));
+export const CLAUDE_BLIND_ENGINE_TOOLS = Object.freeze(BLIND_ENGINE_TOOL_NAMES.map(claudeCodeEngineToolName));
+
+function configuredClaudeTools(profile: AgentAdapterOptions['engineToolProfile']): readonly string[] {
+  return profile === 'blind'
+    ? CLAUDE_BLIND_ENGINE_TOOLS
+    : profile === 'dm' ? CLAUDE_DM_ENGINE_TOOLS : CLAUDE_ENGINE_TOOLS;
+}
 
 interface ClaudeDecodedTurn {
   readonly sessionId: string;
@@ -85,7 +97,7 @@ export class ClaudeCodeAgentSessionAdapter extends ProcessAgentSessionAdapter {
       engineArgs: this.engineArgs(invocation.launcherToken),
       instructions: invocation.instructions ?? null,
       sessionId,
-      engineTools: this.options.engineToolProfile === 'dm' ? CLAUDE_DM_ENGINE_TOOLS : CLAUDE_ENGINE_TOOLS,
+      engineTools: configuredClaudeTools(this.options.engineToolProfile),
     }));
   }
 
@@ -111,13 +123,15 @@ export class ClaudeCodeAgentSessionAdapter extends ProcessAgentSessionAdapter {
       output.stdout,
       sessionId,
       (event) => this.observe(event),
-      this.options.engineToolProfile === 'dm' ? CLAUDE_DM_ENGINE_TOOLS : CLAUDE_ENGINE_TOOLS,
+      configuredClaudeTools(this.options.engineToolProfile),
       this.options.engineToolProfile === 'dm'
         ? [
             ROUND_PLAN_DM_ENGINE_TOOL_NAMES.map(claudeCodeEngineToolName),
             PLAN_ADJUSTMENT_DM_ENGINE_TOOL_NAMES.map(claudeCodeEngineToolName),
           ]
-        : undefined,
+        : this.options.engineToolProfile === 'blind'
+          ? [BLIND_ENGINE_TOOL_NAMES.map(claudeCodeEngineToolName)]
+          : undefined,
     );
     return {
       resumeSessionId: agentSessionIdFromCli(decoded.sessionId),

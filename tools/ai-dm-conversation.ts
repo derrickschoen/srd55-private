@@ -96,6 +96,7 @@ import type {
 import {
   DEFAULT_OVERRIDE_POLICY,
   OVERRIDE_POLICIES,
+  renderBlindEnginePrompt,
   renderEnginePrompt,
   SEMANTIC_BOARD_MAX_BYTES,
   TURN_CONTEXT_MAX_BYTES,
@@ -173,6 +174,7 @@ import { readRepoCommit } from './rl/repo-commit';
 import {
   DEFAULT_RENDERER_PROFILE,
   RENDERER_POLICY_VERSION,
+  extractCircumstanceFeatures,
   rendererProfileSchema,
   type CircumstanceFeatureVector,
   type RendererProfile,
@@ -181,6 +183,7 @@ import {
 import type { SemanticBoardTruncationClass } from '../src/vtt/semantic-board-payload';
 import {
   DEFAULT_AI_DM_KB_ROOT,
+  D569_AI_DM_KB_ROOT,
   loadAiDmKnowledgeBase,
   type LoadedAiDmKnowledgeBase,
 } from '../src/vtt/knowledge-base-contract';
@@ -192,6 +195,38 @@ import {
   type KbReadRecord,
   type KbSubjectSources,
 } from '../src/vtt/mcp/knowledge-base';
+import {
+  BLIND_INTENT_VERSION,
+  BLIND_MAX_ATTEMPTS_DEFAULT,
+  BLIND_REPAIR_ARMS,
+  blindMaxAttemptsSchema,
+  blindRoundIntentEnvelopeSchema,
+  type BlindIntent,
+  type BlindIntentRejectionCode,
+  type BlindMaxAttempts,
+  type BlindRepairArm,
+  type DmMode,
+} from '../src/vtt/blind-dm-contract';
+import {
+  BLIND_SEMANTIC_BOARD_MAX_BYTES,
+  BLIND_TURN_CONTEXT_MAX_BYTES,
+  type BlindTurnContextBudgetEvidence,
+  type BlindVisualDescriptor,
+} from '../src/vtt/blind-turn-context';
+import {
+  BlindModelIngressRecorder,
+  assertBlindIngressSafe,
+  type BlindIngressAuditSummary,
+  type BlindIngressRecord,
+} from '../src/vtt/blind-model-ingress';
+import type { BlindIntentSubmissionRecord } from '../src/vtt/mcp/engine-server';
+import {
+  BLIND_STATE_PRIMER_VERSION,
+} from './ai-dm-board-snapshot';
+import {
+  BOARD_GLYPH_PRIMER,
+  GENERAL_PRIMER,
+} from './ai-dm-screenshot-probe';
 
 export const CONVERSATION_CLIS = ['codex', 'claude-code', 'local-openai'] as const;
 export type ConversationCli = (typeof CONVERSATION_CLIS)[number];
@@ -224,6 +259,12 @@ export interface ConversationBoardSnapshotService {
 }
 
 interface ConversationConfigBase {
+  readonly dmMode: DmMode;
+  readonly dmModeExplicit: boolean;
+  readonly blindRepairArm: BlindRepairArm;
+  readonly blindMaxAttempts: BlindMaxAttempts;
+  readonly blindFacts: boolean;
+  readonly midRoundAdjustmentsEnabled: boolean;
   readonly intelMode: IntelMode;
   readonly overridePolicy: OverridePolicy;
   readonly rendererProfile: RendererProfile;
@@ -520,6 +561,84 @@ export interface ConversationBoardImageEvidence {
   readonly chromiumVersion: string;
 }
 
+export interface ConversationBlindAttempt {
+  readonly number: number;
+  readonly intentText: string;
+  readonly parsedIntents: readonly BlindIntent[] | null;
+  readonly startedAtOffsetMs: number;
+  readonly endedAtOffsetMs: number;
+  readonly modelWallMs: number;
+  readonly modelFirstTokenMs: number | null;
+  readonly resolverLatencyMs: number;
+  readonly resolverOutcome: 'accepted' | 'rejected';
+  readonly codes: readonly BlindIntentRejectionCode[];
+  readonly hintExposed: boolean;
+}
+
+export interface ConversationVisualProfile {
+  readonly primerVersion: string;
+  readonly images: readonly {
+    readonly role: 'dm_board' | 'accessible_board_raster' | 'player_board';
+    readonly sha256: string;
+    readonly ordinal: number;
+  }[];
+  readonly glyphMode: string;
+  readonly captureTilePx: number;
+  readonly perImageCaptureLatencyMs: readonly number[];
+  readonly totalImageCaptureLatencyMs: number;
+}
+
+export interface ConversationProjectionEvidence {
+  readonly projectionVersion: string;
+  readonly sha256: string;
+  readonly utf8Bytes: number;
+}
+
+export interface ConversationBlindRowEvidence {
+  readonly dmMode: DmMode;
+  readonly blindFacts: boolean;
+  readonly midRoundAdjustmentsEnabled: false;
+  readonly blindContextVersion: 'blind-turn-context-v1';
+  readonly blindIntentVersion: typeof BLIND_INTENT_VERSION;
+  readonly blindRepairArm: BlindRepairArm;
+  readonly blindMaxAttempts: BlindMaxAttempts;
+  readonly blindIntentText: string | null;
+  readonly blindIntents: readonly BlindIntent[] | null;
+  readonly blindResolverOutcome: readonly {
+    readonly actor: { readonly name: string; readonly badge: number };
+    readonly status: 'accepted' | 'rejected';
+    readonly semanticDigest: string | null;
+  }[];
+  readonly blindRejectionCodes: readonly BlindIntentRejectionCode[];
+  readonly blindAttempts: readonly ConversationBlindAttempt[];
+  readonly blindResolverLatencyMs: number;
+  readonly blindIngressAudit: BlindIngressAuditSummary;
+  readonly visualProfile: ConversationVisualProfile;
+  readonly sharedKbComponentHashes: Readonly<Record<string, string>>;
+  readonly semanticBoardEvidence: null | {
+    readonly format: string;
+    readonly sha256: string;
+    readonly utf8Bytes: number;
+    readonly omittedBlocks: readonly ['reach_range_summaries'];
+  };
+  readonly creatureFactsEvidence: ConversationProjectionEvidence & {
+    readonly sourceIds: readonly string[];
+  };
+  readonly legalMovementEvidence: ConversationProjectionEvidence & {
+    readonly stateDigest: string;
+    readonly actorCellCounts: readonly { readonly name: string; readonly badge: number; readonly cells: number }[];
+  };
+  readonly turnContextBudget: BlindTurnContextBudgetEvidence;
+  readonly blindPrivateAnswerKey: {
+    readonly selectedOfferedIds: readonly string[];
+    readonly semanticDigests: readonly string[];
+    readonly catalogDigest: string;
+    readonly engineTopRecommendationIds: readonly string[];
+    readonly engineTopPolicyVersion: string;
+    readonly blindDiffersFromEngineTop: boolean | null;
+  };
+}
+
 interface ConversationRowBase {
   readonly knowledgeModel: 'engine_state';
   readonly hiddenOptions: readonly HiddenOptionRecord[];
@@ -650,7 +769,8 @@ export type ConversationBoardImageFields =
       readonly boardImageEvidence: ConversationBoardImageEvidence;
     };
 
-export type ConversationRow = ConversationRowBase & ConversationBoardImageFields;
+export type ConversationRow = ConversationRowBase & ConversationBoardImageFields &
+  Partial<ConversationBlindRowEvidence>;
 
 /** The complete row shape written by the conversation runner. */
 export type ConversationRowPersisted = ConversationRow;
@@ -760,6 +880,17 @@ export function boardImageOutputDirectory(
   return resolve(config.cwd, 'dnd-slim-runs', `board-capture-${identity}-images`);
 }
 
+function blindVisualDescriptors(artifact: BoardImageArtifact | null): readonly BlindVisualDescriptor[] {
+  const blind = artifact?.blindState;
+  return blind === undefined ? [] : [{
+    kind: blind.role,
+    ordinal: blind.ordinal,
+    primer_version: blind.primerVersion,
+    glyph_mode: blind.glyphMode,
+    capture_tile_px: blind.captureTilePx,
+  }];
+}
+
 function requiredValue(argv: readonly string[], index: number, option: string): string {
   const value = argv[index + 1];
   if (value === undefined || value.startsWith('--')) throw new TypeError(`${option} requires a value.`);
@@ -835,6 +966,7 @@ export function parseConversationArgs(argv: readonly string[], cwd = process.cwd
       '--renderer-profile',
       '--turn-context-max-bytes',
       '--board-image',
+      '--dm-mode', '--blind-repair-arm', '--blind-max-attempts', '--blind-facts',
       '--local-base-url', '--local-model', '--local-api-key', '--local-think',
     ].includes(option ?? '')) throw new TypeError(`Unknown conversation option ${option ?? '<missing>'}.`);
     values.set(option ?? '', requiredValue(argv, index, option ?? '<missing>'));
@@ -843,6 +975,15 @@ export function parseConversationArgs(argv: readonly string[], cwd = process.cwd
   const outPath = resolve(values.get('--out') ?? '');
   if ((values.get('--out') ?? '').length === 0) throw new TypeError('--out is required.');
   if (pathIsInside(cwd, outPath)) throw new TypeError('--out must be outside the repository working tree.');
+  const dmModeExplicit = values.has('--dm-mode');
+  const dmMode = values.get('--dm-mode') ?? 'advice';
+  if (dmMode !== 'advice' && dmMode !== 'blind') {
+    throw new TypeError('--dm-mode must be advice or blind.');
+  }
+  if (dmModeExplicit && !values.has('--instruction-source') && !values.has('--kb')) {
+    values.set('--instruction-source', 'kb');
+    values.set('--kb', D569_AI_DM_KB_ROOT);
+  }
   const effort = values.get('--effort') ?? 'medium';
   if (!CONVERSATION_EFFORTS.includes(effort as ConversationEffort)) {
     throw new TypeError('--effort must be low, medium, high, or xhigh.');
@@ -915,10 +1056,12 @@ export function parseConversationArgs(argv: readonly string[], cwd = process.cwd
     ? rendererProfileSchema.parse(JSON.parse(values.get('--renderer-profile') ?? ''))
     : DEFAULT_RENDERER_PROFILE;
   const turnContextMaximumBytes = positiveInteger(
-    values.get('--turn-context-max-bytes') ?? String(TURN_CONTEXT_MAX_BYTES),
+    values.get('--turn-context-max-bytes') ?? String(dmMode === 'blind'
+      ? BLIND_TURN_CONTEXT_MAX_BYTES
+      : TURN_CONTEXT_MAX_BYTES),
     '--turn-context-max-bytes',
   );
-  const boardImageMode = values.get('--board-image') ?? 'off';
+  const boardImageMode = values.get('--board-image') ?? (dmModeExplicit ? 'png' : 'off');
   if (!BOARD_IMAGE_MODES.includes(boardImageMode as BoardImageMode)) {
     throw new TypeError('--board-image must be off, png, or capture_only.');
   }
@@ -928,7 +1071,41 @@ export function parseConversationArgs(argv: readonly string[], cwd = process.cwd
   if (boardImageMode === 'png' && transport !== 'mcp_minimal') {
     throw new TypeError('--board-image png requires --transport mcp_minimal.');
   }
+  const blindRepairArm = values.get('--blind-repair-arm') ?? 'code_only';
+  if (!BLIND_REPAIR_ARMS.includes(blindRepairArm as BlindRepairArm)) {
+    throw new TypeError('--blind-repair-arm must be code_only or minimal_legal_alternative.');
+  }
+  const blindMaxAttempts = blindMaxAttemptsSchema.parse(
+    values.has('--blind-max-attempts')
+      ? positiveInteger(values.get('--blind-max-attempts') ?? '', '--blind-max-attempts')
+      : undefined,
+  );
+  const blindFactsValue = values.get('--blind-facts') ?? 'off';
+  if (blindFactsValue !== 'on' && blindFactsValue !== 'off') {
+    throw new TypeError('--blind-facts must be on or off.');
+  }
+  if (dmMode !== 'blind' && (values.has('--blind-repair-arm') ||
+    values.has('--blind-max-attempts') || values.has('--blind-facts'))) {
+    throw new TypeError('Blind repair, attempt, and fact options require --dm-mode blind.');
+  }
+  if (dmMode === 'blind' && (transport !== 'mcp_minimal' || boardImageMode !== 'png' ||
+    turnContextMaximumBytes !== BLIND_TURN_CONTEXT_MAX_BYTES)) {
+    throw new TypeError('Blind mode requires MCP-minimal, PNG delivery, and a 65536-byte base cap.');
+  }
+  if (dmModeExplicit && (escalationModel !== null || escalationEffort !== null || captureRlData)) {
+    throw new TypeError('D569 experiment modes prohibit escalation and RL capture.');
+  }
+  if (dmModeExplicit && (instructionSource.instructionSource !== 'kb' ||
+    instructionSource.kbPath !== resolve(cwd, D569_AI_DM_KB_ROOT))) {
+    throw new TypeError('Explicit D569 DM modes require the shared D570 knowledge bundle.');
+  }
   return {
+    dmMode: dmMode as DmMode,
+    dmModeExplicit,
+    blindRepairArm: blindRepairArm as BlindRepairArm,
+    blindMaxAttempts,
+    blindFacts: blindFactsValue === 'on',
+    midRoundAdjustmentsEnabled: !dmModeExplicit,
     intelMode,
     overridePolicy: overridePolicy as OverridePolicy,
     rendererProfile,
@@ -949,7 +1126,7 @@ export function parseConversationArgs(argv: readonly string[], cwd = process.cwd
     dryRun,
     cwd: resolve(cwd),
     cliBin: values.get('--cli-bin') ?? (selectedCli === 'codex' ? 'codex' : selectedCli === 'claude-code' ? 'claude' : ''),
-    timeoutMs: positiveInteger(values.get('--timeout-ms') ?? '120000', '--timeout-ms'),
+    timeoutMs: positiveInteger(values.get('--timeout-ms') ?? (dmModeExplicit ? '240000' : '120000'), '--timeout-ms'),
     ...instructionSource,
     reactionAskDefault,
     captureRlData,
@@ -1739,6 +1916,37 @@ function capturedTurnContext(raw: string, maximumBytes: number): CapturedTurnCon
   return { raw: modelVisibleRaw, granularity, value };
 }
 
+function blindRendererEvidence(
+  state: EncounterState,
+  capsule: EngineStateCapsule,
+  context: CapturedTurnContext,
+): TurnContextRenderEvidence {
+  const base = structuredClone(context.value) as Record<string, unknown>;
+  const semantic = base['semantic_board'];
+  delete base['semantic_board'];
+  const baseContextBytes = new TextEncoder().encode(JSON.stringify(base)).byteLength;
+  const semanticBoardBytes = semantic === undefined
+    ? 0
+    : new TextEncoder().encode(JSON.stringify(semantic)).byteLength;
+  return {
+    preTrimBytes: baseContextBytes,
+    postTrimBytes: baseContextBytes,
+    baseContextBytes,
+    features: extractCircumstanceFeatures({
+      state,
+      capsule,
+      renderedContext: context.value,
+      granularity: 'full',
+      preTrimBytes: baseContextBytes,
+      postTrimBytes: baseContextBytes,
+    }),
+    removals: { rows: 0, options: 0, threats: 0, movement: 0, rare: 0, adverts: 0, topLevel: 0 },
+    optionsOmittedForSizeByActor: [],
+    semanticBoardBytes,
+    semanticBoardTruncated: [],
+  };
+}
+
 function unrequestedTurnContext(maximumBytes: number): CapturedTurnContext {
   return capturedTurnContext(JSON.stringify({
     granularity: 'full',
@@ -1753,6 +1961,12 @@ function plannedTurnContext(
   intelMode: IntelMode,
   rendererProfile: RendererProfile,
   turnContextMaximumBytes: number,
+  blind?: {
+    readonly repairArm: BlindRepairArm;
+    readonly maxAttempts: BlindMaxAttempts;
+    readonly facts: boolean;
+    readonly visuals: readonly BlindVisualDescriptor[];
+  },
 ): CapturedTurnContext {
   const capsule = snapshot.capsule;
   const request = capsule.request;
@@ -1785,19 +1999,26 @@ function plannedTurnContext(
       adjustmentBudget: request.adjustmentBudget,
       },
     } : { requestedActorIds: request.actors }),
-    toolProfile: 'dm',
+    toolProfile: blind === undefined ? 'dm' : 'blind',
+    ...(blind === undefined ? {} : {
+      dmMode: 'blind' as const,
+      blindRepairArm: blind.repairArm,
+      blindMaxAttempts: blind.maxAttempts,
+      blindFacts: blind.facts,
+      blindVisuals: blind.visuals,
+    }),
     rendererProfile,
     turnContextMaximumBytes,
     onTurnContextRendered: (value) => { rendering = value; },
     initiativeProjection: capsule.projection.initiative,
-    ...(base === undefined ? {} : { turnContextDeltaBase: base }),
+    ...(base === undefined || blind !== undefined ? {} : { turnContextDeltaBase: base }),
   });
   const value = runtime.toolSurface.execute('engine.get_turn_context', {
     run_id: capsule.runId,
     expected_revision: capsule.revision,
     scope: 'round',
     intel_mode: intelMode,
-    ...(base === undefined
+    ...(base === undefined || blind !== undefined
       ? { granularity: 'full' }
       : { granularity: 'turn_delta', since_revision: base.revision }),
   });
@@ -1856,6 +2077,33 @@ async function driveScriptedMcp(
         asRecord(tool)?.['name'] === 'engine.read_kb_subject'))) {
       throw new Error('Launcher-owned KB subject tool is not advertised.');
     }
+    if (manifest.dmMode === 'blind') {
+      const resources = asRecord(await mcpRequest(client, 'resources/list', {}));
+      await mcpRequest(client, 'resources/templates/list', {});
+      const prompts = asRecord(await mcpRequest(client, 'prompts/list', {}));
+      for (const resource of Array.isArray(resources?.['resources']) ? resources['resources'] : []) {
+        const uri = asRecord(resource)?.['uri'];
+        if (typeof uri === 'string') await mcpRequest(client, 'resources/read', { uri });
+      }
+      for (const prompt of Array.isArray(prompts?.['prompts']) ? prompts['prompts'] : []) {
+        const name = asRecord(prompt)?.['name'];
+        if (name === 'engine.plan_blind_round') {
+          await mcpRequest(client, 'prompts/get', {
+            name,
+            arguments: { run_id: manifest.runId, expected_revision: manifest.revision },
+          });
+        } else if (name === 'engine.repair_blind_intents' && manifest.phase === 'correction') {
+          await mcpRequest(client, 'prompts/get', {
+            name,
+            arguments: {
+              run_id: manifest.runId,
+              expected_revision: manifest.revision,
+              request_id: manifest.requestId,
+            },
+          });
+        }
+      }
+    }
     if (manifest.phase === 'speculative') {
       await abortableDelay(speculativeDelayMs, signal ?? new AbortController().signal);
       const speculative = manifest.speculativeRequest;
@@ -1900,7 +2148,7 @@ async function driveScriptedMcp(
       name: 'engine.get_turn_context',
       arguments: {
         run_id: manifest.runId, expected_revision: manifest.revision, scope: 'round',
-        intel_mode: intelMode,
+        ...(manifest.dmMode === 'blind' ? {} : { intel_mode: intelMode }),
         ...(manifest.turnContextDeltaBase === undefined ? { granularity: 'full' } : {
           granularity: 'turn_delta', since_revision: manifest.turnContextDeltaBase.revision,
         }),
@@ -1928,6 +2176,52 @@ async function driveScriptedMcp(
     if (context === null) throw new Error('engine.get_turn_context delta could not be reconstructed.');
     const stateRef = asRecord(context['state_ref']);
     if (stateRef === null) throw new Error('engine.get_turn_context omitted state_ref.');
+    if (manifest.dmMode === 'blind') {
+      if (!submit) {
+        return {
+          calls,
+          rejections: [],
+          contextTruncated: false,
+        };
+      }
+      const request = asRecord(context['request']);
+      const requiredActors = request?.['required_actors'];
+      if (!Array.isArray(requiredActors)) {
+        throw new Error('Blind context omitted required actor display identities.');
+      }
+      const envelope = {
+        intent_version: BLIND_INTENT_VERSION,
+        intents: requiredActors.map((actor) => ({
+          actor: requiredRecord(actor, 'blind required actor'),
+          action: { kind: 'dodge' as const },
+          destination: { kind: 'relative' as const, relation: 'hold' as const },
+          reason: 'Maintain a defensive posture.',
+        })),
+      };
+      const attempts: unknown[] = invalid ? [{
+        intent_version: BLIND_INTENT_VERSION,
+        intents: requiredActors.map((actor) => ({
+          actor: requiredRecord(actor, 'blind required actor'),
+          action: { kind: 'help' as const },
+          reason: 'Support an ally.',
+        })),
+      }, envelope] : [envelope];
+      let finalResult: Readonly<Record<string, unknown>> | null = null;
+      for (const attempted of attempts.slice(0, manifest.blindMaxAttempts ?? BLIND_MAX_ATTEMPTS_DEFAULT)) {
+        const result = asRecord(await mcpRequest(client, 'tools/call', {
+          name: 'engine.submit_blind_round_intents',
+          arguments: attempted,
+        }));
+        calls += 1;
+        finalResult = asRecord(result?.['structuredContent']);
+        if (finalResult?.['status'] === 'accepted') break;
+      }
+      return {
+        calls,
+        rejections: [],
+        contextTruncated: false,
+      };
+    }
     if (manifest.requestKind === 'plan_adjustment') {
       const actorId = manifest.requestedActorIds?.[0];
       const invalidAdjustment = manifest.phase === 'initial' && adjustmentResponse === 'invalid';
@@ -2125,10 +2419,11 @@ class SimulatedConversationAdapter implements AgentSessionAdapter {
 
   async start(invocation: AgentInvocation, signal: AbortSignal): Promise<AgentTurnResult> {
     this.#starts += 1;
-    const sessionId = this.#starts === 1
-      ? `agent-session:SIMULATED:${invocation.runId}`
-      : `agent-session:SIMULATED:${invocation.runId}:fresh-${String(this.#starts)}`;
     const manifest = JSON.parse(await readFile(invocation.launcherToken, 'utf8')) as EngineMcpLauncherManifest;
+    const modeSuffix = manifest.dmMode === undefined ? '' : `:${manifest.dmMode}`;
+    const sessionId = this.#starts === 1
+      ? `agent-session:SIMULATED:${invocation.runId}${modeSuffix}`
+      : `agent-session:SIMULATED:${invocation.runId}${modeSuffix}:fresh-${String(this.#starts)}`;
     return this.#dispatch(sessionId, invocation, false, signal);
   }
 
@@ -2383,6 +2678,49 @@ function takeSpeculativePlan(path: string): QueuedSpeculativePlanEnvelope | null
   return plan === null ? null : structuredClone(plan);
 }
 
+function takeBlindIntentSubmissions(path: string | null): readonly BlindIntentSubmissionRecord[] {
+  if (path === null) return [];
+  let source: string;
+  try { source = readFileSync(path, 'utf8'); } catch { return []; }
+  return source.split('\n').filter((line) => line.trim().length > 0).map((line) => {
+    const value: unknown = JSON.parse(line);
+    const candidate = requiredRecord(value, 'blind intent submission');
+    if (!Number.isSafeInteger(candidate['attempt']) || typeof candidate['startedAtUnixMs'] !== 'number' ||
+      typeof candidate['endedAtUnixMs'] !== 'number' || typeof candidate['resolverLatencyMs'] !== 'number') {
+      throw new TypeError('Blind intent submission timing evidence is invalid.');
+    }
+    return candidate as unknown as BlindIntentSubmissionRecord;
+  });
+}
+
+function takeBlindIngressRecords(path: string | null): readonly BlindIngressRecord[] {
+  if (path === null) return [];
+  let source: string;
+  try { source = readFileSync(path, 'utf8'); } catch { return []; }
+  return source.split('\n').filter((line) => line.trim().length > 0).map((line, index) => {
+    const value: unknown = JSON.parse(line);
+    const candidate = requiredRecord(value, 'blind ingress record');
+    if (candidate['ordinal'] !== index + 1 || typeof candidate['channel'] !== 'string' ||
+      typeof candidate['text'] !== 'string' || typeof candidate['utf8Bytes'] !== 'number' ||
+      typeof candidate['sha256'] !== 'string') {
+      throw new TypeError('Blind ingress spool contains invalid evidence.');
+    }
+    return candidate as unknown as BlindIngressRecord;
+  });
+}
+
+function appendBlindIngress(
+  path: string | null,
+  records: readonly { readonly channel: 'startup' | 'initial_prompt' | 'retry_prompt' | 'replay_history' | 'image_metadata'; readonly text: string }[],
+): void {
+  if (path === null || records.length === 0) return;
+  const existing = takeBlindIngressRecords(path);
+  const recorder = new BlindModelIngressRecorder(existing, (record) => {
+    appendFileSync(path, `${JSON.stringify(record)}\n`, 'utf8');
+  });
+  for (const record of records) recorder.record(record.channel, record.text);
+}
+
 async function writeLauncher(input: {
   readonly directory: string;
   readonly name: string;
@@ -2398,24 +2736,41 @@ async function writeLauncher(input: {
     readonly subjectSources: KbSubjectSources;
   };
   readonly boardImage?: EngineMcpBoardImageBinding;
+  readonly dmMode?: DmMode;
+  readonly blindRepairArm?: BlindRepairArm;
+  readonly blindMaxAttempts?: BlindMaxAttempts;
+  readonly blindDeadlineUnixMs?: number;
+  readonly blindFacts?: boolean;
+  readonly blindVisuals?: readonly BlindVisualDescriptor[];
+  readonly semanticBoardMaximumBytes?: number;
 }): Promise<{
   readonly manifestPath: string;
   readonly recoveryManifestPath: string;
   readonly spoolPath: string;
   readonly turnContextSpoolPath: string;
   readonly uiFeedbackSpoolPath: string | null;
+  readonly blindIntentSpoolPath: string | null;
+  readonly blindIngressSpoolPath: string | null;
 }> {
   const fixturePath = join(input.directory, `${input.name}-fixture.json`);
   const spoolPath = join(input.directory, `${input.name}-proposals.jsonl`);
   const turnContextSpoolPath = join(input.directory, `${input.name}-turn-context.jsonl`);
   const manifestPath = join(input.directory, `${input.name}-launcher.json`);
   const recoveryManifestPath = join(input.directory, `${input.name}-launcher-full.json`);
+  const blindIntentSpoolPath = input.dmMode === 'blind'
+    ? join(input.directory, `${input.name}-blind-intents.jsonl`)
+    : null;
+  const blindIngressSpoolPath = input.dmMode === 'blind'
+    ? join(input.directory, `${input.name}-blind-ingress.jsonl`)
+    : null;
   const uiFeedbackSpoolPath = input.boardImage === undefined
     ? null
     : engineMcpUiFeedbackSpoolPath(spoolPath);
   await writeFile(fixturePath, input.snapshot.fixtureJson, 'utf8');
   await writeFile(spoolPath, '', 'utf8');
   await writeFile(turnContextSpoolPath, '', 'utf8');
+  if (blindIntentSpoolPath !== null) await writeFile(blindIntentSpoolPath, '', 'utf8');
+  if (blindIngressSpoolPath !== null) await writeFile(blindIngressSpoolPath, '', 'utf8');
   if (uiFeedbackSpoolPath !== null) await writeFile(uiFeedbackSpoolPath, '', 'utf8');
   const capsule = input.snapshot.capsule;
   const request = capsule.request;
@@ -2431,9 +2786,21 @@ async function writeLauncher(input: {
     revision: capsule.revision, requestId: request.requestId,
     phase: request.phase, correctionNumber: request.correctionNumber,
     overridePolicy: input.overridePolicy,
-    room: input.room, historyKind: input.historyKind, toolProfile: 'dm',
+    room: input.room, historyKind: input.historyKind,
+    toolProfile: input.dmMode === 'blind' ? 'blind' : 'dm',
+    ...(input.dmMode === undefined ? {} : { dmMode: input.dmMode }),
+    ...(input.blindRepairArm === undefined ? {} : { blindRepairArm: input.blindRepairArm }),
+    ...(input.blindMaxAttempts === undefined ? {} : { blindMaxAttempts: input.blindMaxAttempts }),
+    ...(input.blindDeadlineUnixMs === undefined ? {} : { blindDeadlineUnixMs: input.blindDeadlineUnixMs }),
+    ...(input.blindFacts === undefined ? {} : { blindFacts: input.blindFacts }),
+    ...(input.blindVisuals === undefined ? {} : { blindVisuals: input.blindVisuals }),
+    ...(blindIntentSpoolPath === null ? {} : { blindIntentSpoolPath }),
+    ...(blindIngressSpoolPath === null ? {} : { blindIngressSpoolPath }),
     rendererProfile: input.rendererProfile,
     turnContextMaximumBytes: input.turnContextMaximumBytes,
+    ...(input.semanticBoardMaximumBytes === undefined ? {} : {
+      semanticBoardMaximumBytes: input.semanticBoardMaximumBytes,
+    }),
     initiativeProjection: capsule.projection.initiative,
     ...(input.boardImage === undefined ? {} : { boardImage: input.boardImage }),
     ...(request.phase === 'speculative' ? {
@@ -2466,7 +2833,10 @@ async function writeLauncher(input: {
   await writeFile(manifestPath, canonicalJson(manifest), 'utf8');
   const { turnContextDeltaBase: _turnContextDeltaBase, ...fullManifest } = manifest;
   await writeFile(recoveryManifestPath, canonicalJson(fullManifest), 'utf8');
-  return { manifestPath, recoveryManifestPath, spoolPath, turnContextSpoolPath, uiFeedbackSpoolPath };
+  return {
+    manifestPath, recoveryManifestPath, spoolPath, turnContextSpoolPath, uiFeedbackSpoolPath,
+    blindIntentSpoolPath, blindIngressSpoolPath,
+  };
 }
 
 function fullTurnContextBase(
@@ -3000,7 +3370,10 @@ async function runConversationWithConfiguredIntel(
 ): Promise<ConversationRunResult> {
   const partyPolicy = options.partyPolicyOverride ?? config.partyPolicy;
   const knowledgeBase = await loadKnowledgeBase(config);
-  const startupInstructions = config.boardImageMode === 'png'
+  const blindPrimer = [GENERAL_PRIMER, ...BOARD_GLYPH_PRIMER.full].join(' ');
+  const startupInstructions = config.dmMode === 'blind'
+    ? `${knowledgeBase.startupInstructions}\n\nGeneral primer ${BLIND_STATE_PRIMER_VERSION}: ${blindPrimer}`
+    : config.boardImageMode === 'png'
     ? `${knowledgeBase.startupInstructions}\n\n${BOARD_IMAGE_SCALE_STARTUP_INSTRUCTION}\n${UI_FEEDBACK_STARTUP_INSTRUCTION}`
     : knowledgeBase.startupInstructions;
   const freshSessionContext: FreshSessionContext = {
@@ -3052,7 +3425,7 @@ async function runConversationWithConfiguredIntel(
     : resolveAgentAdapter(config.cli as AgentCliKind, {
         binary: config.cliBin, cwd: config.cwd, engineCommand: process.execPath,
         ...(instructionEnvironment.codexHome === null ? {} : { codexHome: instructionEnvironment.codexHome }),
-        engineToolProfile: 'dm',
+        engineToolProfile: config.dmMode === 'blind' ? 'blind' : 'dm',
         engineArgs: [
           resolve(config.cwd, 'node_modules/vite-node/vite-node.mjs'),
           resolve(config.cwd, 'tools/engine-mcp-server.ts'),
@@ -3199,6 +3572,9 @@ async function runConversationWithConfiguredIntel(
         );
         return currentTurnContext;
       };
+      let boardImageArtifact: BoardImageArtifact | null = null;
+      let boardImagePrimaryDispatchStartedAtUnixMs: number | null = null;
+      let boardImageBinding: EngineMcpBoardImageBinding | undefined;
       let plannedInitialTurnContext: CapturedTurnContext | undefined;
       let initialRendererEvidence: CapturedTurnContext['rendering'];
       const getPlannedInitialTurnContext = (): CapturedTurnContext => {
@@ -3209,6 +3585,12 @@ async function runConversationWithConfiguredIntel(
           config.intelMode,
           config.rendererProfile,
           config.turnContextMaximumBytes,
+          config.dmMode === 'blind' ? {
+            repairArm: config.blindRepairArm,
+            maxAttempts: config.blindMaxAttempts,
+            facts: config.blindFacts,
+            visuals: blindVisualDescriptors(boardImageArtifact),
+          } : undefined,
         );
         return plannedInitialTurnContext;
       };
@@ -3220,9 +3602,6 @@ async function runConversationWithConfiguredIntel(
       const initialInvocationOutput = initialDecisionCatalog === null
         ? { kind: 'tool_driven' } as const
         : await structuredFinalOutput(config.decisionTransport, artifacts, `${key}-initial`, initialDecisionCatalog);
-      let boardImageArtifact: BoardImageArtifact | null = null;
-      let boardImagePrimaryDispatchStartedAtUnixMs: number | null = null;
-      let boardImageBinding: EngineMcpBoardImageBinding | undefined;
       if (config.boardImageMode !== 'off') {
         const snapshotService = options.boardSnapshotService;
         if (snapshotService === undefined) {
@@ -3235,6 +3614,9 @@ async function runConversationWithConfiguredIntel(
           stateDigest: boardStateDigest(rendererState),
         };
         boardImageArtifact = await snapshotService.capture({ state: rendererState, source });
+        if (config.dmMode === 'blind' && boardImageArtifact.blindState === undefined) {
+          throw new Error('Blind DM mode requires a state-only board image; advice captures cannot be reused.');
+        }
         boardImagePrimaryDispatchStartedAtUnixMs = Date.now();
         await readValidatedBoardImage({
           artifact: boardImageArtifact,
@@ -3251,14 +3633,24 @@ async function runConversationWithConfiguredIntel(
           };
         }
       }
+      const blindDeadlineUnixMs = Date.now() + config.timeoutMs;
       const initialLauncher = await writeLauncher({
         rendererProfile: config.rendererProfile,
         turnContextMaximumBytes: config.turnContextMaximumBytes,
         overridePolicy: config.overridePolicy,
         directory: artifacts, name: `${key}-initial`, snapshot: initialSnapshot, room,
         historyKind: round === 1 ? 'room_ready' : 'proposal_applied',
+        ...(config.dmModeExplicit ? { dmMode: config.dmMode } : {}),
+        ...(config.dmMode === 'blind' ? {
+          blindRepairArm: config.blindRepairArm,
+          blindMaxAttempts: config.blindMaxAttempts,
+          blindDeadlineUnixMs,
+          blindFacts: config.blindFacts,
+          blindVisuals: blindVisualDescriptors(boardImageArtifact),
+          semanticBoardMaximumBytes: BLIND_SEMANTIC_BOARD_MAX_BYTES,
+        } : {}),
         ...(launcherKbRead === undefined ? {} : { kbRead: launcherKbRead }),
-        ...(lastSeenTurnContext === undefined ? {} : {
+        ...(lastSeenTurnContext === undefined || config.dmMode === 'blind' ? {} : {
           turnContextDeltaBase: lastSeenTurnContext,
         }),
         ...(boardImageBinding === undefined ? {} : { boardImage: boardImageBinding }),
@@ -3378,6 +3770,7 @@ async function runConversationWithConfiguredIntel(
         sourceState: EncounterState,
         window: ReturnType<typeof playerWindowBeforeNextMonster>,
       ): Promise<void> => {
+        if (config.dmModeExplicit) return;
         if (inFlightSpeculation.current !== null || window.players.length === 0 || window.monsters.length === 0) return;
         const derivedBudget = Math.min(
           window.players.length * SPECULATION_MS_PER_PLAYER_TURN,
@@ -3555,6 +3948,7 @@ async function runConversationWithConfiguredIntel(
         readonly reasons: readonly PlanMaterialityReasonCode[];
         readonly openActorIds: readonly CombatantId[];
       }): Promise<void> => {
+        if (!config.midRoundAdjustmentsEnabled) return;
         if (segmentPlanId === null) throw new Error('Material PC turn has no authorized monster plan to adjust.');
         if (options.mutateBeforeAdjustmentPreflight !== undefined) {
           engineSession.replaceEncounterState(
@@ -4083,10 +4477,13 @@ async function runConversationWithConfiguredIntel(
         const rejectionsObserved = (): readonly ConversationChainAttemptEvidence[] =>
           simulated?.rejectionsByRequest.get(requestId) ?? observedRejections;
         const primaryPrompt = initialDecisionCatalog === null
-          ? renderEnginePrompt('plan_round', capsule, RULES_SOURCE)
+          ? config.dmMode === 'blind'
+            ? renderBlindEnginePrompt('plan_blind_round', capsule, RULES_SOURCE)
+            : renderEnginePrompt('plan_round', capsule, RULES_SOURCE)
           : structuredFinalPrompt(rowTurnContext, initialDecisionCatalog);
         try {
-          for (let attempt = 0; attempt < 3; attempt += 1) {
+          const dispatchAttempts = config.dmMode === 'blind' ? 1 : 3;
+          for (let attempt = 0; attempt < dispatchAttempts; attempt += 1) {
             const callsBefore = toolCallsObserved();
             const contextCallsBefore = contextCallsObserved();
             const rejectionsBefore = rejectionsObserved().length;
@@ -4096,7 +4493,9 @@ async function runConversationWithConfiguredIntel(
               config, runId,
               'initial',
               initialDecisionCatalog === null
-                ? `${retryNote}${turnContextPrompt(lastSeenTurnContext, config.intelMode)}\n\n${primaryPrompt}`
+                ? config.dmMode === 'blind'
+                  ? `${retryNote}Call engine.get_turn_context with granularity "full", then call engine.submit_blind_round_intents.\n\n${primaryPrompt}`
+                  : `${retryNote}${turnContextPrompt(lastSeenTurnContext, config.intelMode)}\n\n${primaryPrompt}`
                 : primaryPrompt,
               initialLauncher.manifestPath,
               journal.agentSession() === null ? startupInstructions : null,
@@ -4107,6 +4506,31 @@ async function runConversationWithConfiguredIntel(
               initialInvocationOutput,
             );
             initialDispatchPlanner = plannerAttribution(primaryInvocation);
+            if (config.dmMode === 'blind') {
+              const priorPrompts = takeBlindIngressRecords(initialLauncher.blindIngressSpoolPath)
+                .filter((record) => record.channel === 'initial_prompt' || record.channel === 'retry_prompt')
+                .map((record) => record.text);
+              appendBlindIngress(initialLauncher.blindIngressSpoolPath, [
+                ...(attempt === 0 ? [{ channel: 'startup' as const, text: startupInstructions }] : []),
+                ...(priorPrompts.length === 0 ? [] : [{
+                  channel: 'replay_history' as const,
+                  text: canonicalJson(priorPrompts),
+                }]),
+                {
+                  channel: attempt === 0 ? 'initial_prompt' as const : 'retry_prompt' as const,
+                  text: primaryInvocation.prompt,
+                },
+                ...(boardImageArtifact?.blindState === undefined ? [] : [{
+                  channel: 'image_metadata' as const,
+                  text: canonicalJson({
+                    role: boardImageArtifact.blindState.role,
+                    ordinal: boardImageArtifact.blindState.ordinal,
+                    sha256: boardImageArtifact.sha256,
+                    primerVersion: boardImageArtifact.blindState.primerVersion,
+                  }),
+                }]),
+              ]);
+            }
             options.onPrimaryInvocation?.(primaryInvocation);
             options.onPrimaryDispatchStart?.();
             initialCalls += 1;
@@ -4166,12 +4590,12 @@ async function runConversationWithConfiguredIntel(
             }
             const flapped = initialDecisionCatalog === null && turn.exit === 'completed' && proposed === null &&
               toolCallsObserved() === callsBefore && rejectionsObserved().length === rejectionsBefore;
-            if (contextCallsObserved() > contextCallsBefore || proposed !== null) {
+            if (config.dmMode !== 'blind' && (contextCallsObserved() > contextCallsBefore || proposed !== null)) {
               lastSeenTurnContext = getCurrentTurnContext();
             }
             if (!flapped) break;
             if (initialDecisionCatalog !== null) break;
-            if (attempt === 2) {
+            if (attempt === dispatchAttempts - 1) {
               serviceNull = true;
               outcome = 'service_null';
               break;
@@ -4240,8 +4664,17 @@ async function runConversationWithConfiguredIntel(
           overridePolicy: config.overridePolicy,
           directory: artifacts, name: `${key}-correction`, snapshot: correctionSnapshot,
           room, historyKind: 'proposal_correction_requested',
+          ...(config.dmModeExplicit ? { dmMode: config.dmMode } : {}),
+          ...(config.dmMode === 'blind' ? {
+            blindRepairArm: config.blindRepairArm,
+            blindMaxAttempts: config.blindMaxAttempts,
+            blindDeadlineUnixMs,
+            blindFacts: config.blindFacts,
+            blindVisuals: blindVisualDescriptors(boardImageArtifact),
+            semanticBoardMaximumBytes: BLIND_SEMANTIC_BOARD_MAX_BYTES,
+          } : {}),
           ...(launcherKbRead === undefined ? {} : { kbRead: launcherKbRead }),
-          ...(correctionTurnContextBase === undefined ? {} : {
+          ...(correctionTurnContextBase === undefined || config.dmMode === 'blind' ? {} : {
             turnContextDeltaBase: correctionTurnContextBase,
           }),
           ...(boardImageBinding === undefined ? {} : { boardImage: boardImageBinding }),
@@ -4478,7 +4911,9 @@ async function runConversationWithConfiguredIntel(
           },
           pauseForDmAdjudication: ({ actorId, reason }) => { refusals.push(`${actorId}: ${reason}`); },
         };
-        const coordinated = await new TurnExhaustionCoordinator(journal.turnExhaustionPersistence()).coordinate({
+        const coordinated = config.dmMode === 'blind' && proposed === null
+          ? { kind: 'refused' as const }
+          : await new TurnExhaustionCoordinator(journal.turnExhaustionPersistence()).coordinate({
           initial,
           correction: {
             capsule: correctionCapsule, rules: RULES_SOURCE,
@@ -5187,20 +5622,27 @@ async function runConversationWithConfiguredIntel(
             ? initialSnapshot.capsule.request.kind ?? 'round_plan'
             : 'speculative',
         combatModel: config.combatModel,
+        dmMode: config.dmMode,
+        blindFacts: config.blindFacts,
         intelMode: config.intelMode,
         rendererProfile: config.rendererProfile,
         turnContextMaximumBytes: config.turnContextMaximumBytes,
         deltaBaseRevision: rendererDeltaBase?.revision ?? null,
       });
-      const rendererEvidence = initialRendererEvidence ?? plannedInitialTurnContext?.rendering ??
-        options.rendererEvidenceCache?.get(rendererEvidenceCacheKey) ?? plannedTurnContext(
-          rendererState,
-          initialSnapshot,
-          rendererDeltaBase,
-          config.intelMode,
-          config.rendererProfile,
-          config.turnContextMaximumBytes,
-        ).rendering;
+      if (config.dmMode === 'blind' && rowTurnContext.value['dm_mode'] !== 'blind') {
+        rowTurnContext = getPlannedInitialTurnContext();
+      }
+      const rendererEvidence = config.dmMode === 'blind'
+        ? blindRendererEvidence(rendererState, capsule, rowTurnContext)
+        : initialRendererEvidence ?? plannedInitialTurnContext?.rendering ??
+          options.rendererEvidenceCache?.get(rendererEvidenceCacheKey) ?? plannedTurnContext(
+            rendererState,
+            initialSnapshot,
+            rendererDeltaBase,
+            config.intelMode,
+            config.rendererProfile,
+            config.turnContextMaximumBytes,
+          ).rendering;
       if (rendererEvidence === undefined) throw new Error('Turn-context renderer emitted no attribution evidence.');
       options.rendererEvidenceCache?.set(rendererEvidenceCacheKey, rendererEvidence);
       const optionsOmittedForSize = rendererEvidence.optionsOmittedForSizeByActor
@@ -5239,6 +5681,188 @@ async function runConversationWithConfiguredIntel(
                 chromiumVersion: boardImageArtifact.chromiumVersion,
               },
             };
+      const sharedKbComponentHashes = knowledgeBase.kind === 'bundle'
+        ? {
+            root: knowledgeBase.componentSha256.root,
+            tactics: knowledgeBase.componentSha256.tactics,
+            ...Object.fromEntries(Object.entries(knowledgeBase.componentSha256.subjects)
+              .map(([subject, hash]) => [`subject:${subject}`, hash])),
+          }
+        : {};
+      const d569AdviceFields = config.dmModeExplicit && config.dmMode === 'advice'
+        ? (() => {
+            if (boardImageArtifact === null) {
+              throw new Error('Explicit D569 advice row lacks its independently captured board image.');
+            }
+            return {
+            dmMode: 'advice' as const,
+            blindFacts: false,
+            midRoundAdjustmentsEnabled: false as const,
+            blindRepairArm: config.blindRepairArm,
+            blindMaxAttempts: config.blindMaxAttempts,
+            blindIntentText: null,
+            blindIntents: null,
+            blindResolverOutcome: [],
+            blindRejectionCodes: [],
+            blindAttempts: [],
+            blindResolverLatencyMs: 0,
+            visualProfile: {
+              primerVersion: 'standing-advice-board-image-v1',
+              images: [{ role: 'dm_board' as const, sha256: boardImageArtifact.sha256, ordinal: 1 }],
+              glyphMode: 'standing_default',
+              captureTilePx: 128,
+              perImageCaptureLatencyMs: [boardImageArtifact.captureMs],
+              totalImageCaptureLatencyMs: boardImageArtifact.captureMs,
+            },
+            sharedKbComponentHashes,
+            };
+          })()
+        : {};
+      let d569BlindFields: Partial<ConversationBlindRowEvidence> = {};
+      if (config.dmMode === 'blind') {
+        const submissions = takeBlindIntentSubmissions(initialLauncher.blindIntentSpoolPath);
+        const ingressRecords = takeBlindIngressRecords(initialLauncher.blindIngressSpoolPath);
+        const offeredOptions = (capsule.request?.actors ?? []).flatMap((actorId) =>
+          availableEngineActorOptions(optionProjectionState, actorId, canonicalEngineQueryPort, capsule.revision));
+        const offeredOptionIds = offeredOptions.map((option) => String(option.optionId));
+        const ingressAudit = assertBlindIngressSafe(ingressRecords, {
+          offeredOptionIds,
+          requiredText: [BLIND_INTENT_VERSION, 'creature_facts', 'legal_movement', BLIND_STATE_PRIMER_VERSION],
+        });
+        const finalSubmission = submissions.at(-1) ?? null;
+        const finalParsed = finalSubmission === null
+          ? null
+          : blindRoundIntentEnvelopeSchema.safeParse(finalSubmission.envelope);
+        const parsedIntents = finalParsed?.success === true ? finalParsed.data.intents : null;
+        const attemptBaseline = blindDeadlineUnixMs - config.timeoutMs;
+        let priorAttemptEnd = attemptBaseline;
+        const blindAttempts = submissions.map((submission): ConversationBlindAttempt => {
+          const parsed = blindRoundIntentEnvelopeSchema.safeParse(submission.envelope);
+          const resolution = submission.resolution;
+          const startedAtOffsetMs = Math.max(0, priorAttemptEnd - attemptBaseline);
+          const entry: ConversationBlindAttempt = {
+            number: submission.attempt,
+            intentText: JSON.stringify(submission.envelope),
+            parsedIntents: parsed.success ? parsed.data.intents : null,
+            startedAtOffsetMs,
+            endedAtOffsetMs: Math.max(startedAtOffsetMs, submission.endedAtUnixMs - attemptBaseline),
+            modelWallMs: Math.max(0, submission.startedAtUnixMs - priorAttemptEnd),
+            modelFirstTokenMs: null,
+            resolverLatencyMs: submission.resolverLatencyMs,
+            resolverOutcome: resolution.status,
+            codes: resolution.status === 'rejected' ? resolution.codes : [],
+            hintExposed: config.blindRepairArm === 'minimal_legal_alternative' &&
+              resolution.status === 'rejected' && resolution.legalAlternative !== undefined,
+          };
+          priorAttemptEnd = submission.endedAtUnixMs;
+          return entry;
+        });
+        const contextRecord = rowTurnContext.value;
+        const creatureFacts = requiredRecord(contextRecord['creature_facts'], 'blind creature_facts');
+        const legalMovement = requiredRecord(contextRecord['legal_movement'], 'blind legal_movement');
+        const semanticBoard = contextRecord['semantic_board'] === undefined
+          ? null
+          : requiredRecord(contextRecord['semantic_board'], 'blind semantic_board');
+        const encodedEvidence = (value: unknown): { readonly sha256: string; readonly utf8Bytes: number } => {
+          const bytes = canonicalJson(value);
+          return { sha256: sha256(bytes), utf8Bytes: new TextEncoder().encode(bytes).byteLength };
+        };
+        const creatureEncoded = encodedEvidence(creatureFacts);
+        const movementEncoded = encodedEvidence(legalMovement);
+        const creatureProvenance = requiredRecord(creatureFacts['provenance'], 'blind creature provenance');
+        const rulesSources = creatureProvenance['rules_sources'];
+        const movementProvenance = requiredRecord(legalMovement['provenance'], 'blind movement provenance');
+        const movementActors = legalMovement['actors'];
+        const selectedOfferedIds = finalSubmission?.resolution.status === 'accepted'
+          ? finalSubmission.resolution.actors.map((actor) => actor.selectedOptionId)
+          : [];
+        const engineTopRecommendationIds = (capsule.request?.actors ?? []).map((actorId) =>
+          String(actorOpportunityReport(optionProjectionState, actorId, canonicalEngineQueryPort).defaultOption.optionId));
+        const visual = boardImageArtifact?.blindState;
+        if (visual === undefined || boardImageArtifact === null) {
+          throw new Error('Blind row lacks state-only visual evidence.');
+        }
+        d569BlindFields = {
+          dmMode: 'blind',
+          blindFacts: config.blindFacts,
+          midRoundAdjustmentsEnabled: false,
+          blindContextVersion: 'blind-turn-context-v1',
+          blindIntentVersion: BLIND_INTENT_VERSION,
+          blindRepairArm: config.blindRepairArm,
+          blindMaxAttempts: config.blindMaxAttempts,
+          blindIntentText: finalSubmission === null ? null : JSON.stringify(finalSubmission.envelope),
+          blindIntents: parsedIntents,
+          blindResolverOutcome: finalSubmission?.resolution.status === 'accepted'
+            ? finalSubmission.resolution.actors.map((actor) => ({
+                actor: actor.actor,
+                status: 'accepted' as const,
+                semanticDigest: actor.semanticDigest,
+              }))
+            : finalSubmission?.resolution.actor === undefined ? [] : [{
+                actor: finalSubmission.resolution.actor,
+                status: 'rejected' as const,
+                semanticDigest: null,
+              }],
+          blindRejectionCodes: submissions.flatMap((submission) =>
+            submission.resolution.status === 'rejected' ? submission.resolution.codes : []),
+          blindAttempts,
+          blindResolverLatencyMs: blindAttempts.reduce((total, attempt) => total + attempt.resolverLatencyMs, 0),
+          blindIngressAudit: ingressAudit,
+          visualProfile: {
+            primerVersion: visual.primerVersion,
+            images: [{ role: visual.role, sha256: boardImageArtifact.sha256, ordinal: visual.ordinal }],
+            glyphMode: visual.glyphMode,
+            captureTilePx: visual.captureTilePx,
+            perImageCaptureLatencyMs: [boardImageArtifact.captureMs],
+            totalImageCaptureLatencyMs: boardImageArtifact.captureMs,
+          },
+          sharedKbComponentHashes,
+          semanticBoardEvidence: semanticBoard === null ? null : {
+            format: String(requiredRecord(semanticBoard['provenance'], 'blind semantic provenance')['format']),
+            ...encodedEvidence(semanticBoard),
+            omittedBlocks: ['reach_range_summaries'],
+          },
+          creatureFactsEvidence: {
+            projectionVersion: 'blind-creature-facts-v1',
+            ...creatureEncoded,
+            sourceIds: Array.isArray(rulesSources) ? rulesSources.flatMap((source) => {
+              const sourceId = asRecord(source)?.['source_id'];
+              return typeof sourceId === 'string' ? [sourceId] : [];
+            }) : [],
+          },
+          legalMovementEvidence: {
+            projectionVersion: String(movementProvenance['query']),
+            stateDigest: String(movementProvenance['state_digest']),
+            ...movementEncoded,
+            actorCellCounts: Array.isArray(movementActors) ? movementActors.map((actor) => {
+              const entry = requiredRecord(actor, 'blind legal movement actor');
+              return {
+                name: String(entry['name']),
+                badge: Number(entry['badge']),
+                cells: Array.isArray(entry['cells']) ? entry['cells'].length : 0,
+              };
+            }) : [],
+          },
+          turnContextBudget: {
+            configuredBaseBytes: BLIND_TURN_CONTEXT_MAX_BYTES,
+            configuredSemanticBytes: BLIND_SEMANTIC_BOARD_MAX_BYTES,
+            actualBaseBytes: rendererEvidence.baseContextBytes,
+            actualSemanticBytes: rendererEvidence.semanticBoardBytes,
+            truncatedBlocks: [],
+          },
+          blindPrivateAnswerKey: {
+            selectedOfferedIds,
+            semanticDigests: finalSubmission?.resolution.status === 'accepted'
+              ? finalSubmission.resolution.actors.map((actor) => actor.semanticDigest)
+              : [],
+            catalogDigest: sha256(canonicalJson(offeredOptions.map((option) => option.optionId).sort())),
+            engineTopRecommendationIds,
+            engineTopPolicyVersion: OPPORTUNITY_COST_POLICY,
+            blindDiffersFromEngineTop: selectedOfferedIds.length === 0 ? null :
+              selectedOfferedIds.some((id, index) => id !== engineTopRecommendationIds[index]),
+          },
+        };
+      }
       const row: ConversationRow = {
         knowledgeModel: 'engine_state',
         hiddenOptions,
@@ -5333,7 +5957,7 @@ async function runConversationWithConfiguredIntel(
           ? PLAN_MATERIALITY_POLICY_HASH
           : null,
         engineIntel: acceptedIntelCapture,
-        adjustmentBudget: config.combatModel === 'initiative_segments_v1' ? 2 : 0,
+        adjustmentBudget: config.midRoundAdjustmentsEnabled && config.combatModel === 'initiative_segments_v1' ? 2 : 0,
         teamPlans,
         pcTurns,
         adjustments,
@@ -5349,6 +5973,8 @@ async function runConversationWithConfiguredIntel(
           tokens: totalsTokens,
         },
         ...(capturedRlData === undefined ? {} : { rlData: capturedRlData }),
+        ...d569AdviceFields,
+        ...d569BlindFields,
       };
       rows.push(row);
       await appendFile(config.outPath, `${serializeConversationRow(row)}\n`, 'utf8');
@@ -5386,7 +6012,15 @@ export async function runConversation(
     if (config.boardImageMode !== 'off' && options.boardSnapshotService === undefined) {
       const outputDirectory = boardImageOutputDirectory(config);
       ownedSnapshotService = options.boardSnapshotServiceFactory === undefined
-        ? await BoardSnapshotService.start({ outputDirectory })
+        ? await BoardSnapshotService.start({
+            outputDirectory,
+            ...(config.dmMode === 'blind' ? {
+              informationMode: 'blind_state' as const,
+              boardGlyphs: 'full' as const,
+              captureTilePx: 128 as const,
+              primerVersion: BLIND_STATE_PRIMER_VERSION,
+            } : {}),
+          })
         : await options.boardSnapshotServiceFactory(outputDirectory);
     }
     return await runConversationWithConfiguredIntel(config, {

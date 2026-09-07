@@ -180,6 +180,48 @@ const postShiftCommonArenaRowSchema = commonArenaRowSchema.extend({
   skillName: z.enum(['engine-submission', 'dm-round']).nullable(),
   skillHash: z.string().regex(/^[0-9a-f]{64}$/u).nullable(),
   rationale: z.string().max(600).nullable(),
+  dmMode: z.enum(['advice', 'blind']).optional(),
+  blindFacts: z.boolean().optional(),
+  midRoundAdjustmentsEnabled: z.boolean().optional(),
+  blindContextVersion: z.string().optional(),
+  blindIntentVersion: z.string().optional(),
+  blindRepairArm: z.enum(['code_only', 'minimal_legal_alternative']).optional(),
+  blindMaxAttempts: safeIntegerSchema.min(1).max(3).optional(),
+  blindIntentText: z.string().nullable().optional(),
+  blindIntents: z.array(z.unknown()).nullable().optional(),
+  blindResolverOutcome: z.array(z.unknown()).optional(),
+  blindRejectionCodes: z.array(z.string()).optional(),
+  blindAttempts: z.array(z.object({
+    number: safeIntegerSchema.min(1).max(3),
+    intentText: z.string(),
+    parsedIntents: z.array(z.unknown()).nullable(),
+    startedAtOffsetMs: z.number().finite().nonnegative(),
+    endedAtOffsetMs: z.number().finite().nonnegative(),
+    modelWallMs: z.number().finite().nonnegative(),
+    modelFirstTokenMs: z.number().finite().nonnegative().nullable(),
+    resolverLatencyMs: z.number().finite().nonnegative(),
+    resolverOutcome: z.enum(['accepted', 'rejected']),
+    codes: z.array(z.string()),
+    hintExposed: z.boolean(),
+  }).strict()).optional(),
+  blindResolverLatencyMs: z.number().finite().nonnegative().optional(),
+  blindIngressAudit: z.object({
+    version: z.string(), stringCount: safeIntegerSchema.min(1), utf8Bytes: safeIntegerSchema.min(1),
+    sha256: z.string().regex(/^[a-f0-9]{64}$/u), passed: z.literal(true),
+  }).strict().optional(),
+  visualProfile: z.unknown().optional(),
+  sharedKbComponentHashes: z.record(z.string(), z.string().regex(/^[a-f0-9]{64}$/u)).optional(),
+  semanticBoardEvidence: z.unknown().nullable().optional(),
+  creatureFactsEvidence: z.unknown().optional(),
+  legalMovementEvidence: z.unknown().optional(),
+  turnContextBudget: z.object({
+    configuredBaseBytes: z.literal(65_536),
+    configuredSemanticBytes: z.literal(8_192),
+    actualBaseBytes: safeIntegerSchema.min(1).max(65_536),
+    actualSemanticBytes: safeIntegerSchema.min(0).max(8_192),
+    truncatedBlocks: z.tuple([]),
+  }).strict().optional(),
+  blindPrivateAnswerKey: z.unknown().optional(),
 });
 
 const mcpMinimalPostShiftArenaRowSchema = postShiftCommonArenaRowSchema.extend({
@@ -201,6 +243,42 @@ const postShiftArenaRowSchema = z.discriminatedUnion('decisionTransport', [
       path: ['chosenOptionIndices'],
       message: 'must be absent when decisionTransport is mcp_minimal',
     });
+  }
+  if (row.dmMode !== undefined && row.midRoundAdjustmentsEnabled !== false) {
+    context.addIssue({
+      code: 'custom',
+      path: ['midRoundAdjustmentsEnabled'],
+      message: 'must be false in D569 arms',
+    });
+  }
+  if (row.dmMode !== undefined && row.outcome === 'authorized') {
+    if (row.authorizedPlan === null || row.authorizedPlan.length === 0) {
+      context.addIssue({
+        code: 'custom',
+        path: ['authorizedPlan'],
+        message: 'must contain the authoritative resolved plan for an authorized round',
+      });
+    }
+  } else if (row.dmMode !== undefined && row.authorizedPlan !== null) {
+    context.addIssue({
+      code: 'custom',
+      path: ['authorizedPlan'],
+      message: 'must be null unless the round outcome is authorized',
+    });
+  }
+  if (row.dmMode === 'blind') {
+    const required = [
+      'blindContextVersion', 'blindIntentVersion', 'blindRepairArm', 'blindMaxAttempts',
+      'blindIntentText', 'blindIntents', 'blindResolverOutcome', 'blindRejectionCodes',
+      'blindAttempts', 'blindResolverLatencyMs', 'blindIngressAudit', 'visualProfile',
+      'sharedKbComponentHashes', 'semanticBoardEvidence', 'creatureFactsEvidence',
+      'legalMovementEvidence', 'turnContextBudget', 'blindPrivateAnswerKey',
+    ] as const;
+    for (const field of required) {
+      if (!Object.prototype.hasOwnProperty.call(row, field)) {
+        context.addIssue({ code: 'custom', path: [field], message: 'is required on a blind row' });
+      }
+    }
   }
 });
 
@@ -327,6 +405,7 @@ interface CommonPostShiftValidatedArenaRow extends CommonValidatedArenaRow {
   readonly decisionRejectionCodes: readonly string[];
   readonly normalizationCodes: readonly string[];
   readonly rationale: string | null;
+  readonly d569AnswerKey: Readonly<Record<string, unknown>>;
 }
 
 interface McpMinimalPostShiftValidatedArenaRow extends CommonPostShiftValidatedArenaRow {
@@ -430,6 +509,7 @@ interface CommonPostShiftAnswerKeyEntry extends CommonAnswerKeyEntry {
   readonly instructionSource: 'none' | 'kb' | 'skill';
   readonly skillName: 'engine-submission' | 'dm-round' | null;
   readonly skillHash: string | null;
+  readonly [field: string]: unknown;
 }
 
 interface McpMinimalPostShiftAnswerKeyEntry extends CommonPostShiftAnswerKeyEntry {
@@ -479,7 +559,28 @@ const MODEL_IDENTITY_FIELDS = new Set([
   // beyond the neutral plan + movementFeet, so it is banned from the packet.
   'roundNarrative',
   'reason', 'rationale',
+  'dmMode', 'blindFacts', 'midRoundAdjustmentsEnabled',
+  'blindContextVersion', 'blindIntentVersion', 'blindRepairArm', 'blindMaxAttempts',
+  'blindIntentText', 'blindIntents', 'blindResolverOutcome', 'blindRejectionCodes',
+  'blindAttempts', 'blindResolverLatencyMs', 'blindIngressAudit', 'visualProfile',
+  'turnContextBudget', 'blindPrivateAnswerKey',
+  'selectedOfferedIds', 'semanticDigests', 'catalogDigest', 'engineTopRecommendationIds',
+  'engineTopPolicyVersion', 'blindDiffersFromEngineTop', 'option_order',
 ]);
+
+const D569_ANSWER_KEY_FIELDS = [
+  'dmMode', 'blindFacts', 'midRoundAdjustmentsEnabled',
+  'blindContextVersion', 'blindIntentVersion', 'blindRepairArm', 'blindMaxAttempts',
+  'blindIntentText', 'blindIntents', 'blindResolverOutcome', 'blindRejectionCodes',
+  'blindAttempts', 'blindResolverLatencyMs', 'blindIngressAudit', 'visualProfile',
+  'sharedKbComponentHashes', 'semanticBoardEvidence', 'creatureFactsEvidence',
+  'legalMovementEvidence', 'turnContextBudget', 'blindPrivateAnswerKey',
+] as const;
+
+function d569AnswerKeyFields(row: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
+  return Object.fromEntries(D569_ANSWER_KEY_FIELDS.flatMap((field) =>
+    Object.prototype.hasOwnProperty.call(row, field) ? [[field, structuredClone(row[field])]] : []));
+}
 
 function requiredValue(argv: readonly string[], index: number, option: string): string {
   const value = argv[index + 1];
@@ -674,6 +775,7 @@ function validateRow(
     decisionRejectionCodes: postShiftRow.decisionRejectionCodes,
     normalizationCodes: postShiftRow.normalizationCodes,
     rationale: postShiftRow.rationale,
+    d569AnswerKey: d569AnswerKeyFields(postShiftRow),
   };
   if (postShiftRow.decisionTransport === 'mcp_minimal') {
     return { ...postShiftCommon, decisionTransport: 'mcp_minimal' };
@@ -983,6 +1085,7 @@ function buildPacket(
         instructionSource: row.instructionSource,
         skillName: row.skillName,
         skillHash: row.skillHash,
+        ...row.d569AnswerKey,
       };
       if (row.decisionTransport === 'mcp_minimal') {
         return {
@@ -1027,6 +1130,75 @@ export function buildMultiArmRerunPacket(
   const crossEra = typeof crossEraOrOptions === 'boolean' ? crossEraOrOptions : false;
   const selectedOptions = typeof crossEraOrOptions === 'boolean' ? options : crossEraOrOptions;
   return buildPacket(rows, shuffleSeed, protocol, crossEra, 'two_or_more', selectedOptions);
+}
+
+export interface D575PairwisePacket {
+  readonly leftArm: string;
+  readonly rightArm: string;
+  readonly shuffleSeed: number;
+  readonly packet: JudgePacket;
+  readonly answerKey: RerunAnswerKey;
+}
+
+/** Builds the preregistered D575 comparisons without changing the standing two-arm judge format. */
+export function buildD575PairwiseRerunPackets(
+  rows: readonly JsonRecord[],
+  shuffleSeeds: Readonly<Record<string, number>>,
+  protocol: RerunProtocol = R1_10_PROTOCOL,
+): Readonly<Record<string, D575PairwisePacket>> {
+  const arms = new Map<string, { readonly model: string; readonly dmMode: 'blind' | 'advice' }>();
+  for (const row of rows) {
+    const arm = row['arm'];
+    const model = row['model'];
+    const dmMode = row['dmMode'];
+    if (typeof arm !== 'string' || typeof model !== 'string' ||
+      (dmMode !== 'blind' && dmMode !== 'advice')) {
+      throw new TypeError('D575 pairwise rows require arm, model, and explicit dmMode fields.');
+    }
+    const prior = arms.get(arm);
+    if (prior !== undefined && (prior.model !== model || prior.dmMode !== dmMode)) {
+      throw new TypeError(`D575 arm ${arm} mixes model or DM-mode identity.`);
+    }
+    arms.set(arm, { model, dmMode });
+  }
+  const findArm = (model: string, dmMode: 'blind' | 'advice'): string => {
+    const matching = [...arms].filter(([, identity]) => identity.model === model && identity.dmMode === dmMode);
+    if (matching.length !== 1) {
+      throw new TypeError(`D575 requires exactly one ${model} ${dmMode} arm; found ${String(matching.length)}.`);
+    }
+    return matching[0]?.[0] ?? '';
+  };
+  const judgeModels = ['claude-opus-5', 'claude-fable-5', 'gpt-5.6-sol'] as const;
+  const lunaModel = 'gpt-5.6-luna';
+  const pairs: { readonly name: string; readonly leftArm: string; readonly rightArm: string }[] = [];
+  for (const model of [lunaModel, ...judgeModels]) {
+    pairs.push({
+      name: `${model}-blind-vs-advice`,
+      leftArm: findArm(model, 'blind'),
+      rightArm: findArm(model, 'advice'),
+    });
+  }
+  for (const mode of ['blind', 'advice'] as const) {
+    for (const model of judgeModels) {
+      pairs.push({
+        name: `gpt-5.6-luna-vs-${model}-${mode}`,
+        leftArm: findArm(lunaModel, mode),
+        rightArm: findArm(model, mode),
+      });
+    }
+  }
+  const seeds = pairs.map((pair) => shuffleSeeds[pair.name]);
+  if (seeds.some((seed) => seed === undefined || !Number.isSafeInteger(seed)) ||
+    new Set(seeds).size !== pairs.length) {
+    throw new TypeError('D575 pairwise packets require one distinct recorded safe-integer shuffle seed per comparison.');
+  }
+  return Object.fromEntries(pairs.map((pair) => {
+    const shuffleSeed = shuffleSeeds[pair.name];
+    if (shuffleSeed === undefined) throw new Error('Validated D575 shuffle seed disappeared.');
+    const selected = rows.filter((row) => row['arm'] === pair.leftArm || row['arm'] === pair.rightArm);
+    const built = buildRerunPacket(selected, shuffleSeed, protocol);
+    return [pair.name, { ...pair, shuffleSeed, ...built }];
+  }));
 }
 
 /**

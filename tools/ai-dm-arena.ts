@@ -54,6 +54,17 @@ import {
   type RendererProfile,
 } from '../src/vtt/renderer-profile';
 import { DEFAULT_AI_DM_KB_ROOT } from '../src/vtt/knowledge-base-contract';
+import { D569_AI_DM_KB_ROOT } from '../src/vtt/knowledge-base-contract';
+import {
+  BLIND_MAX_ATTEMPTS_DEFAULT,
+  BLIND_REPAIR_ARMS,
+  blindMaxAttemptsSchema,
+  type BlindMaxAttempts,
+  type BlindRepairArm,
+  type DmMode,
+} from '../src/vtt/blind-dm-contract';
+import { BLIND_TURN_CONTEXT_MAX_BYTES } from '../src/vtt/blind-turn-context';
+import { BLIND_STATE_PRIMER_VERSION } from './ai-dm-board-snapshot';
 
 export const ARENA_BASES = ['standard', 'hard', 'brutal', 'scenario'] as const;
 export type ArenaBasis = (typeof ARENA_BASES)[number];
@@ -80,6 +91,12 @@ interface ArenaArmBase {
 export type ArenaArm = ArenaArmBase & AgentInstructionSource;
 
 interface ArenaConfigBase {
+  readonly dmMode: DmMode;
+  readonly dmModeExplicit: boolean;
+  readonly blindRepairArm: BlindRepairArm;
+  readonly blindMaxAttempts: BlindMaxAttempts;
+  readonly blindFacts: boolean;
+  readonly midRoundAdjustmentsEnabled: boolean;
   readonly intelMode: IntelMode;
   readonly overridePolicy: OverridePolicy;
   readonly rendererProfile: RendererProfile;
@@ -304,6 +321,7 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
       '--renderer-profile',
       '--turn-context-max-bytes',
       '--board-image',
+      '--dm-mode', '--blind-repair-arm', '--blind-max-attempts', '--blind-facts',
       '--basis', '--arm', '--local-base-url', '--local-model', '--local-api-key', '--local-think',
     ].includes(option ?? '')) throw new TypeError(`Unknown arena option ${option ?? '<missing>'}.`);
     const value = requiredValue(argumentsValue, index, option ?? '<missing>');
@@ -318,6 +336,15 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
   const outPath = resolve(values.get('--out') ?? '');
   if ((values.get('--out') ?? '').length === 0) throw new TypeError('--out is required.');
   if (pathIsInside(cwd, outPath)) throw new TypeError('--out must be outside the repository working tree.');
+  const dmModeExplicit = values.has('--dm-mode');
+  const dmMode = values.get('--dm-mode') ?? 'advice';
+  if (dmMode !== 'advice' && dmMode !== 'blind') {
+    throw new TypeError('--dm-mode must be advice or blind.');
+  }
+  if (dmModeExplicit && !values.has('--instruction-source') && !values.has('--kb')) {
+    values.set('--instruction-source', 'kb');
+    values.set('--kb', D569_AI_DM_KB_ROOT);
+  }
   const cli = values.get('--cli') ?? 'codex';
   if (!CONVERSATION_CLIS.includes(cli as ConversationCli)) {
     throw new TypeError('--cli must be codex, claude-code, or local-openai.');
@@ -398,10 +425,12 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
     ? rendererProfileSchema.parse(JSON.parse(values.get('--renderer-profile') ?? ''))
     : DEFAULT_RENDERER_PROFILE;
   const turnContextMaximumBytes = positiveInteger(
-    values.get('--turn-context-max-bytes') ?? String(TURN_CONTEXT_MAX_BYTES),
+    values.get('--turn-context-max-bytes') ?? String(dmMode === 'blind'
+      ? BLIND_TURN_CONTEXT_MAX_BYTES
+      : TURN_CONTEXT_MAX_BYTES),
     '--turn-context-max-bytes',
   );
-  const boardImageMode = values.get('--board-image') ?? 'off';
+  const boardImageMode = values.get('--board-image') ?? (dmModeExplicit ? 'png' : 'off');
   if (!BOARD_IMAGE_MODES.includes(boardImageMode as BoardImageMode)) {
     throw new TypeError('--board-image must be off, png, or capture_only.');
   }
@@ -410,6 +439,32 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
   }
   if (boardImageMode === 'png' && transport !== 'mcp_minimal') {
     throw new TypeError('--board-image png requires --transport mcp_minimal.');
+  }
+  const blindRepairArm = values.get('--blind-repair-arm') ?? 'code_only';
+  if (!BLIND_REPAIR_ARMS.includes(blindRepairArm as BlindRepairArm)) {
+    throw new TypeError('--blind-repair-arm must be code_only or minimal_legal_alternative.');
+  }
+  const blindMaxAttempts = blindMaxAttemptsSchema.parse(values.has('--blind-max-attempts')
+    ? positiveInteger(values.get('--blind-max-attempts') ?? '', '--blind-max-attempts')
+    : BLIND_MAX_ATTEMPTS_DEFAULT);
+  const blindFactsValue = values.get('--blind-facts') ?? 'off';
+  if (blindFactsValue !== 'on' && blindFactsValue !== 'off') {
+    throw new TypeError('--blind-facts must be on or off.');
+  }
+  if (dmMode !== 'blind' && (values.has('--blind-repair-arm') ||
+    values.has('--blind-max-attempts') || values.has('--blind-facts'))) {
+    throw new TypeError('Blind repair, attempt, and fact options require --dm-mode blind.');
+  }
+  if (dmMode === 'blind' && (transport !== 'mcp_minimal' || boardImageMode !== 'png' ||
+    turnContextMaximumBytes !== BLIND_TURN_CONTEXT_MAX_BYTES)) {
+    throw new TypeError('Blind mode requires MCP-minimal, PNG delivery, and a 65536-byte base cap.');
+  }
+  if (dmModeExplicit && (escalationModel !== null || escalationEffort !== null || captureRlData)) {
+    throw new TypeError('D569 experiment modes prohibit escalation and RL capture.');
+  }
+  if (dmModeExplicit && (instructionSource.instructionSource !== 'kb' ||
+    instructionSource.kbPath !== resolve(cwd, D569_AI_DM_KB_ROOT))) {
+    throw new TypeError('Explicit D569 DM modes require the shared D570 knowledge bundle.');
   }
   const armCombatModels = new Map<string, CombatModel>();
   for (const raw of rawArmCombatModels) {
@@ -486,6 +541,12 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
     throw new TypeError('--arm-override-policy is only valid with --interleave.');
   }
   return {
+    dmMode: dmMode as DmMode,
+    dmModeExplicit,
+    blindRepairArm: blindRepairArm as BlindRepairArm,
+    blindMaxAttempts,
+    blindFacts: blindFactsValue === 'on',
+    midRoundAdjustmentsEnabled: !dmModeExplicit,
     intelMode,
     overridePolicy: overridePolicy as OverridePolicy,
     rendererProfile,
@@ -506,7 +567,7 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
     dryRun,
     cwd: resolve(cwd),
     cliBin: values.get('--cli-bin') ?? (selectedCli === 'codex' ? 'codex' : selectedCli === 'claude-code' ? 'claude' : ''),
-    timeoutMs: positiveInteger(values.get('--timeout-ms') ?? '120000', '--timeout-ms'),
+    timeoutMs: positiveInteger(values.get('--timeout-ms') ?? (dmModeExplicit ? '240000' : '120000'), '--timeout-ms'),
     ...instructionSource,
     reactionAskDefault,
     basis: basis as ArenaBasis,
@@ -635,6 +696,12 @@ function conversationConfig(
   const instructionSource: AgentInstructionSource = overrides.instruction ?? config;
   return {
     ...instructionSource,
+    dmMode: config.dmMode,
+    dmModeExplicit: config.dmModeExplicit,
+    blindRepairArm: config.blindRepairArm,
+    blindMaxAttempts: config.blindMaxAttempts,
+    blindFacts: config.blindFacts,
+    midRoundAdjustmentsEnabled: config.midRoundAdjustmentsEnabled,
     intelMode: config.intelMode,
     overridePolicy: overrides.overridePolicy ?? config.overridePolicy,
     rendererProfile: config.rendererProfile,
@@ -688,7 +755,15 @@ export async function runArena(
     if (config.boardImageMode !== 'off') {
       const outputDirectory = boardImageOutputDirectory(config);
       snapshotService = boardSnapshotServiceFactory === undefined
-        ? await BoardSnapshotService.start({ outputDirectory })
+        ? await BoardSnapshotService.start({
+            outputDirectory,
+            ...(config.dmMode === 'blind' ? {
+              informationMode: 'blind_state' as const,
+              boardGlyphs: 'full' as const,
+              captureTilePx: 128 as const,
+              primerVersion: BLIND_STATE_PRIMER_VERSION,
+            } : {}),
+          })
         : await boardSnapshotServiceFactory(outputDirectory);
     }
     let rows: readonly ArenaRow[];

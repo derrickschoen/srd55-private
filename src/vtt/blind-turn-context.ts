@@ -889,7 +889,7 @@ export const blindTurnContextSchema = z.strictObject({
   round: nonNegativeIntegerSchema,
   initiative: z.array(blindInitiativeEntrySchema),
   roster: z.array(blindRosterEntrySchema),
-  semantic_board: blindSemanticBoardSchema,
+  semantic_board: blindSemanticBoardSchema.optional(),
   creature_facts: blindCreatureFactsSchema,
   legal_movement: blindLegalMovementSchema,
   visuals: z.array(blindVisualDescriptorSchema),
@@ -1200,7 +1200,7 @@ export function blindSemanticBoard(
 export function renderBlindTurnContext(input: {
   readonly capsule: EngineStateCapsule;
   readonly blindProjection: EngineBlindTurnProjection;
-  readonly semanticBoardProjection: EngineSemanticBoardProjection;
+  readonly semanticBoardProjection?: EngineSemanticBoardProjection;
   readonly visuals?: readonly BlindVisualDescriptor[];
   readonly baseMaximumBytes?: number;
   readonly semanticMaximumBytes?: number;
@@ -1213,7 +1213,8 @@ export function renderBlindTurnContext(input: {
   if (semanticMaximumBytes !== BLIND_SEMANTIC_BOARD_MAX_BYTES) {
     throw new RangeError(`Blind semantic-board cap must be ${String(BLIND_SEMANTIC_BOARD_MAX_BYTES)} bytes.`);
   }
-  if (input.semanticBoardProjection.revision !== input.capsule.revision) {
+  if (input.semanticBoardProjection !== undefined &&
+    input.semanticBoardProjection.revision !== input.capsule.revision) {
     throw new RangeError('SEMANTIC_BOARD_REVISION_MISMATCH');
   }
   if (input.blindProjection.revision !== input.capsule.revision) {
@@ -1230,7 +1231,9 @@ export function renderBlindTurnContext(input: {
     side: display.side,
     hp_band: display.hpBand,
   }));
-  const semanticBoard = blindSemanticBoard(input.semanticBoardProjection, input.capsule.digest);
+  const semanticBoard = input.semanticBoardProjection === undefined
+    ? undefined
+    : blindSemanticBoard(input.semanticBoardProjection, input.capsule.digest);
   const candidate: BlindTurnContext = {
     granularity: 'full' as const,
     dm_mode: 'blind' as const,
@@ -1254,7 +1257,7 @@ export function renderBlindTurnContext(input: {
     round: input.blindProjection.round,
     initiative: input.blindProjection.initiative,
     roster,
-    semantic_board: semanticBoard,
+    ...(semanticBoard === undefined ? {} : { semantic_board: semanticBoard }),
     creature_facts: input.blindProjection.creatureFacts,
     legal_movement: input.blindProjection.legalMovement,
     visuals: (input.visuals ?? []).map((visual) => ({ ...visual })),
@@ -1264,7 +1267,7 @@ export function renderBlindTurnContext(input: {
   const context = candidate;
   const { semantic_board: _semanticBoard, ...baseContext } = context;
   const actualBaseBytes = encodedBytes(baseContext);
-  const actualSemanticBytes = encodedBytes(semanticBoard);
+  const actualSemanticBytes = semanticBoard === undefined ? 0 : encodedBytes(semanticBoard);
   if (actualBaseBytes > baseMaximumBytes) {
     throw new RangeError(
       `Protected blind context requires ${String(actualBaseBytes)} UTF-8 bytes; maximum is ${String(baseMaximumBytes)}.`,

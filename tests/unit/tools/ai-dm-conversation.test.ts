@@ -2004,12 +2004,49 @@ describe('AI-DM engine MCP conversation runner', () => {
     ])).toThrow('--kb cannot use content/cc-by-sa');
   });
 
+  it('parses the D569 mode, repair, attempt, fact, cap, timeout, and judge-model combinations', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-blind-parse-'));
+    const outPath = join(directory, 'rows.jsonl');
+    const common = ['--rooms', '1', '--out', outPath, '--dm-mode', 'blind'] as const;
+
+    expect(parseConversationArgs(common)).toEqual(expect.objectContaining({
+      dmMode: 'blind', dmModeExplicit: true, blindRepairArm: 'code_only',
+      blindMaxAttempts: 3, blindFacts: false, midRoundAdjustmentsEnabled: false,
+      turnContextMaximumBytes: 65_536, timeoutMs: 240_000,
+      instructionSource: 'kb', boardImageMode: 'png',
+    }));
+    expect(parseConversationArgs([
+      ...common, '--cli', 'claude-code', '--model', 'claude-opus-5',
+      '--blind-repair-arm', 'minimal_legal_alternative', '--blind-max-attempts', '2',
+      '--blind-facts', 'on',
+    ])).toEqual(expect.objectContaining({
+      cli: 'claude-code', model: 'claude-opus-5',
+      blindRepairArm: 'minimal_legal_alternative', blindMaxAttempts: 2, blindFacts: true,
+    }));
+    expect(parseConversationArgs([
+      ...common, '--cli', 'codex', '--model', 'gpt-5.6-sol', '--effort', 'high',
+    ])).toEqual(expect.objectContaining({ cli: 'codex', model: 'gpt-5.6-sol', effort: 'high' }));
+    expect(() => parseConversationArgs([...common, '--transport', 'final_indices']))
+      .toThrow('--board-image png requires --transport mcp_minimal');
+    expect(() => parseConversationArgs([...common, '--board-image', 'off']))
+      .toThrow('Blind mode requires MCP-minimal');
+    expect(() => parseConversationArgs([...common, '--turn-context-max-bytes', '65535']))
+      .toThrow('Blind mode requires MCP-minimal');
+    expect(() => parseConversationArgs([...common, '--blind-max-attempts', '4'])).toThrow();
+    expect(() => parseConversationArgs([
+      '--rooms', '1', '--out', outPath, '--blind-facts', 'on',
+    ])).toThrow('require --dm-mode blind');
+  });
+
   it('derives per-combatant initiative for standalone fixtures and rejects an explicit legacy profile', { timeout: 30_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-segments-fixture-constraint-'));
     const result = await runConversation(parseConversationArgs([
       '--rooms', '1', '--rounds', '1', '--out', join(directory, 'derived.jsonl'), '--dry-run',
     ]));
     expect(result.rows[0]?.combatModel).toBe('initiative_segments_v1');
+    expect(result.rows[0]).not.toHaveProperty('dmMode');
+    expect(result.rows[0]).not.toHaveProperty('blindIntentText');
+    expect(result.rows[0]).not.toHaveProperty('blindIngressAudit');
 
     const incompatible = parseConversationArgs([
       '--rooms', '1', '--rounds', '1', '--out', join(directory, 'legacy.jsonl'),

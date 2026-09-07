@@ -6,6 +6,7 @@ import {
   R1_10_PROTOCOL,
   R1_10_SEEDS,
   assertBlindedPacket,
+  buildD575PairwiseRerunPackets,
   buildMultiArmRerunPacket,
   buildReasonVisibilityIsolationPacket,
   buildRerunPacket,
@@ -73,6 +74,35 @@ function registeredRows(): JsonRecord[] {
       } : {}),
     } satisfies JsonRecord)
   )));
+}
+
+function blindRowFields(): Readonly<Record<string, unknown>> {
+  return {
+    dmMode: 'blind', blindFacts: false, midRoundAdjustmentsEnabled: false,
+    blindContextVersion: 'blind-turn-context-v1', blindIntentVersion: 'blind-round-intent-v1',
+    blindRepairArm: 'code_only', blindMaxAttempts: 3,
+    blindIntentText: '{"intent_version":"blind-round-intent-v1","intents":[]}',
+    blindIntents: [], blindResolverOutcome: [], blindRejectionCodes: [], blindAttempts: [],
+    blindResolverLatencyMs: 0,
+    blindIngressAudit: {
+      version: 'blind-model-ingress-v1', stringCount: 1, utf8Bytes: 1,
+      sha256: 'b'.repeat(64), passed: true,
+    },
+    visualProfile: { primerVersion: 'primer-v1', images: [] },
+    sharedKbComponentHashes: { root: 'c'.repeat(64) },
+    semanticBoardEvidence: null,
+    creatureFactsEvidence: { sha256: 'd'.repeat(64), utf8Bytes: 10 },
+    legalMovementEvidence: { sha256: 'e'.repeat(64), utf8Bytes: 10 },
+    turnContextBudget: {
+      configuredBaseBytes: 65_536, configuredSemanticBytes: 8_192,
+      actualBaseBytes: 100, actualSemanticBytes: 0, truncatedBlocks: [],
+    },
+    blindPrivateAnswerKey: {
+      selectedOfferedIds: ['option:private'], semanticDigests: ['f'.repeat(64)],
+      catalogDigest: '1'.repeat(64), engineTopRecommendationIds: ['option:top'],
+      engineTopPolicyVersion: 'top-v1', blindDiffersFromEngineTop: true,
+    },
+  };
 }
 
 describe('AI-DM R1-10 rerun packet', () => {
@@ -690,6 +720,77 @@ describe('AI-DM R1-10 rerun packet', () => {
       .toThrow('.instructionSource is invalid');
     expect(() => buildRerunPacket([first, withoutSkillHash], 1, tinyProtocol))
       .toThrow('.skillHash is invalid');
+  });
+
+  it('blind_row_hides_refused_as_authorized: normalizes accepted blind mechanics and keeps refused rounds zero', () => {
+    const source = rowsFromFixture('tests/fixtures/ai-dm-rerun/paired-tiny.SIMULATED.jsonl');
+    const accepted = { ...source[0]!, ...blindRowFields(), arm: 'blind-accepted' };
+    const refused = {
+      ...source[1]!, ...blindRowFields(), arm: 'blind-refused', outcome: 'refused',
+      authorizedPlan: null, plannedBy: null,
+    };
+    const built = buildRerunPacket([accepted, refused], 71, tinyProtocol);
+    const acceptedPacket = built.packet.entries.find((entry) => entry.outcome === 'authorized');
+    const refusedPacket = built.packet.entries.find((entry) => entry.outcome === 'refused');
+    expect(acceptedPacket?.executedPlan).not.toBeNull();
+    expect(JSON.stringify(acceptedPacket?.executedPlan)).not.toContain('acceptedProposal');
+    expect(JSON.stringify(built.answerKey)).toContain('creatureFactsEvidence');
+    expect(JSON.stringify(built.answerKey)).toContain('legalMovementEvidence');
+    expect(JSON.stringify(built.answerKey)).toContain('sharedKbComponentHashes');
+    expect(refusedPacket).toEqual(expect.objectContaining({
+      executedPlan: null,
+      rubric: { targetPriority: 0, actionEconomy: 0, positioning: 0, coherence: 0, total: 0 },
+    }));
+    expect(() => buildRerunPacket([
+      accepted,
+      { ...refused, authorizedPlan: [] },
+    ], 71, tinyProtocol)).toThrow('must be null unless the round outcome is authorized');
+  });
+
+  it('blind_identity_leaks_into_packet and blind_row_exposes_option_order: rejects every nested D569 identity field', () => {
+    const fields = [
+      'dmMode', 'blindFacts', 'midRoundAdjustmentsEnabled',
+      'blindContextVersion', 'blindIntentVersion', 'blindRepairArm', 'blindMaxAttempts',
+      'blindIntentText', 'blindIntents', 'blindResolverOutcome', 'blindRejectionCodes',
+      'blindAttempts', 'blindResolverLatencyMs', 'blindIngressAudit', 'visualProfile',
+      'turnContextBudget', 'blindPrivateAnswerKey',
+      'selectedOfferedIds', 'semanticDigests', 'catalogDigest', 'engineTopRecommendationIds',
+      'engineTopPolicyVersion', 'blindDiffersFromEngineTop', 'option_order',
+    ] as const;
+    for (const field of fields) {
+      expect(() => assertBlindedPacket({ entries: [{ nested: { [field]: 'leak' } }] }), field)
+        .toThrow('leaks a model-identifying field');
+    }
+  });
+
+  it('builds every D575 model/mode pair with an independent recorded shuffle seed', () => {
+    const source = rowsFromFixture('tests/fixtures/ai-dm-rerun/paired-tiny.SIMULATED.jsonl')[0];
+    if (source === undefined) throw new Error('paired fixture is incomplete');
+    const models = ['gpt-5.6-luna', 'claude-opus-5', 'claude-fable-5', 'gpt-5.6-sol'] as const;
+    const rows = models.flatMap((model) => (['blind', 'advice'] as const).map((dmMode) => ({
+      ...source,
+      ...(dmMode === 'blind' ? blindRowFields() : {
+        dmMode: 'advice', blindFacts: false, midRoundAdjustmentsEnabled: false,
+      }),
+      arm: `${model}-${dmMode}`,
+      model,
+      dmMode,
+    })));
+    const pairNames = [
+      ...models.map((model) => `${model}-blind-vs-advice`),
+      ...(['blind', 'advice'] as const).flatMap((mode) =>
+        models.slice(1).map((model) => `gpt-5.6-luna-vs-${model}-${mode}`)),
+    ];
+    const seeds = Object.fromEntries(pairNames.map((name, index) => [name, 10_000 + index]));
+    const packets = buildD575PairwiseRerunPackets(rows, seeds, tinyProtocol);
+
+    expect(Object.keys(packets).sort()).toEqual([...pairNames].sort());
+    expect(Object.values(packets)).toHaveLength(10);
+    for (const packet of Object.values(packets)) {
+      expect(packet.packet.entries).toHaveLength(2);
+      expect(new Set(packet.answerKey.entries.map((entry) => entry.arm)))
+        .toEqual(new Set([packet.leftArm, packet.rightArm]));
+    }
   });
 
   it('requires explicit, separate CLI paths and a deterministic shuffle seed', () => {
