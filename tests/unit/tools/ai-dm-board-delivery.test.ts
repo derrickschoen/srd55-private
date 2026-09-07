@@ -259,8 +259,12 @@ describe('arena capture lifecycle and off-arm invariance', () => {
     if (row === undefined) throw new TypeError('Semantic-board arena omitted its row.');
     const context = record(JSON.parse(row.rawTurnContext) as unknown, 'semantic-board context');
     const board = record(context['semantic_board'], 'semantic-board block');
+    const base = structuredClone(context) as Record<string, unknown>;
+    delete base['semantic_board'];
+    delete base['semantic_board_truncated'];
 
     expect(row.rendererAttribution.profile).toEqual(profile);
+    expect(row.baseContextBytes).toBe(Buffer.byteLength(JSON.stringify(base)));
     expect(row.semanticBoardBytes).toBe(Buffer.byteLength(JSON.stringify(board)));
     expect(row.semanticBoardBytes).toBeGreaterThan(0);
     expect(row.semanticBoardTruncated).toEqual(context['semantic_board_truncated'] ?? []);

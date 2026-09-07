@@ -13,7 +13,10 @@ import {
   type McpHandler,
 } from '../../../src/vtt/mcp/handler';
 import { createEngineStateCapsule, engineStateHandle } from '../../../src/vtt/engine-state-capsule';
-import { engineStateSummaryProofToken } from '../../../src/vtt/mcp/engine-server';
+import {
+  engineStateSummaryProofToken,
+  SEMANTIC_BOARD_MAX_BYTES,
+} from '../../../src/vtt/mcp/engine-server';
 import {
   ENGINE_DM_TOOL_NAMES,
   ENGINE_SPECULATIVE_DM_TOOL_NAMES,
@@ -73,6 +76,14 @@ it('rejects human-only option ids at the proposal schema boundary', () => {
 function record(value: unknown): Readonly<Record<string, unknown>> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new TypeError('Expected an object.');
   return value as Readonly<Record<string, unknown>>;
+}
+function withoutSemanticBoard(
+  context: Readonly<Record<string, unknown>>,
+): Readonly<Record<string, unknown>> {
+  const base = structuredClone(context) as Record<string, unknown>;
+  delete base['semantic_board'];
+  delete base['semantic_board_truncated'];
+  return base;
 }
 function request(handler: McpHandler, id: string | number, method: string, params: Readonly<Record<string, unknown>> = {}): JsonRpcResponse {
   const response = handler.handle({ jsonrpc: '2.0', id, method, params: { ...params, _meta: mcpRequestMeta(CLIENT_INFO) } });
@@ -747,6 +758,7 @@ describe('engine MCP dual-handshake full surface conformance', () => {
   it('delivers a revision-matched semantic DM board with exact row telemetry', async () => {
     const { state } = await fixtureRuntime();
     let evidence: {
+      readonly baseContextBytes: number;
       readonly semanticBoardBytes: number;
       readonly semanticBoardTruncated: readonly string[];
     } | undefined;
@@ -769,41 +781,86 @@ describe('engine MCP dual-handshake full surface conformance', () => {
     expect(String(board['encoding_note'])).not.toContain('\n');
     expect(context).not.toHaveProperty('semantic_board_truncated');
     expect(evidence).toMatchObject({
+      baseContextBytes: new TextEncoder().encode(JSON.stringify(withoutSemanticBoard(context))).byteLength,
       semanticBoardBytes: new TextEncoder().encode(JSON.stringify(board)).byteLength,
       semanticBoardTruncated: [],
     });
   });
 
-  it('truncates semantic facts in fixed order before the protected board and option floor', async () => {
+  it('delivers the whole semantic board on top of an already-capped byte-identical base context', async () => {
     const { state } = await fixtureRuntime();
     const maximumBytes = 12_000;
-    const runtime = createEngineMcpRuntime(state, {
+    const offRuntime = createEngineMcpRuntime(state, {
+      requestedActorCount: 1,
+      toolProfile: 'dm',
+      turnContextMaximumBytes: maximumBytes,
+    });
+    const onRuntime = createEngineMcpRuntime(state, {
       requestedActorCount: 1,
       toolProfile: 'dm',
       rendererProfile: { ...DEFAULT_RENDERER_PROFILE, semanticBoard: true },
       turnContextMaximumBytes: maximumBytes,
     });
-    const context = structured(toolCall(runtime.handler, 'engine.get_turn_context', contextArguments()));
-    const board = record(context['semantic_board']);
-    const cells = record(board['cells']);
-    const actors = context['actors'];
-    if (!Array.isArray(actors)) throw new TypeError('Truncated semantic context omitted actors.');
+    const off = structured(toolCall(offRuntime.handler, 'engine.get_turn_context', contextArguments()));
+    const on = structured(toolCall(onRuntime.handler, 'engine.get_turn_context', contextArguments()));
+    const baseOn = withoutSemanticBoard(on);
+    const baseBytes = new TextEncoder().encode(JSON.stringify(baseOn)).byteLength;
+    const totalBytes = new TextEncoder().encode(JSON.stringify(on)).byteLength;
 
-    expect(new TextEncoder().encode(JSON.stringify(context)).byteLength).toBeLessThanOrEqual(maximumBytes);
-    expect(context['semantic_board_truncated']).toEqual(['light', 'adjacency', 'objects']);
-    expect(cells).not.toHaveProperty('light');
-    expect(board).not.toHaveProperty('light_sources');
-    expect(board).not.toHaveProperty('adjacency_pairs');
-    expect(board).not.toHaveProperty('reach_range_summaries');
-    expect(board).not.toHaveProperty('objects');
-    expect(board).not.toHaveProperty('doors');
-    expect(cells).toHaveProperty('blocked');
-    expect(cells).toHaveProperty('obscured');
-    expect(board).toHaveProperty('creatures');
-    expect(actors.every((actor) => {
-      const options = record(actor)['options'];
-      return Array.isArray(options) && options.length > 0;
-    })).toBe(true);
+    expect(off['context_trimmed']).toBe(true);
+    expect(JSON.stringify(baseOn)).toBe(JSON.stringify(off));
+    expect(baseBytes).toBeLessThanOrEqual(maximumBytes);
+    expect(on).not.toHaveProperty('semantic_board_truncated');
+    expect(totalBytes).toBeLessThanOrEqual(maximumBytes + SEMANTIC_BOARD_MAX_BYTES);
+  });
+
+  it('truncates an oversized semantic board in fixed order without touching actors', async () => {
+    const { state } = await fixtureRuntime();
+    const maximumBytes = 100_000;
+    const offRuntime = createEngineMcpRuntime(state, {
+      requestedActorCount: 1,
+      toolProfile: 'dm',
+      turnContextMaximumBytes: maximumBytes,
+    });
+    const fullRuntime = createEngineMcpRuntime(state, {
+      requestedActorCount: 1,
+      toolProfile: 'dm',
+      rendererProfile: { ...DEFAULT_RENDERER_PROFILE, semanticBoard: true },
+      turnContextMaximumBytes: maximumBytes,
+    });
+    const off = structured(toolCall(offRuntime.handler, 'engine.get_turn_context', contextArguments()));
+    const full = structured(toolCall(fullRuntime.handler, 'engine.get_turn_context', contextArguments()));
+    const expectedBoard = structuredClone(record(full['semantic_board'])) as Record<string, unknown>;
+    const cells = structuredClone(record(expectedBoard['cells'])) as Record<string, unknown>;
+    delete cells['light'];
+    expectedBoard['cells'] = cells;
+    delete expectedBoard['light_sources'];
+    const expected = {
+      ...off,
+      semantic_board: expectedBoard,
+      semantic_board_truncated: ['light'],
+    };
+    const baseBytes = new TextEncoder().encode(JSON.stringify(off)).byteLength;
+    const semanticBoardMaximumBytes = new TextEncoder().encode(JSON.stringify(expected)).byteLength - baseBytes;
+    const fullAttachmentBytes = new TextEncoder().encode(JSON.stringify(full)).byteLength - baseBytes;
+    const truncatedRuntime = createEngineMcpRuntime(state, {
+      requestedActorCount: 1,
+      toolProfile: 'dm',
+      rendererProfile: { ...DEFAULT_RENDERER_PROFILE, semanticBoard: true },
+      turnContextMaximumBytes: maximumBytes,
+      semanticBoardMaximumBytes,
+    });
+    const truncated = structured(toolCall(
+      truncatedRuntime.handler,
+      'engine.get_turn_context',
+      contextArguments(),
+    ));
+
+    expect(fullAttachmentBytes).toBeGreaterThan(semanticBoardMaximumBytes);
+    expect(truncated).toEqual(expected);
+    expect(withoutSemanticBoard(truncated)['actors']).toEqual(off['actors']);
+    expect(new TextEncoder().encode(JSON.stringify(truncated)).byteLength - baseBytes)
+      .toBeLessThanOrEqual(semanticBoardMaximumBytes);
   });
 
   it('returns a revision delta that reconstructs the independently recomputed full turn context', async () => {

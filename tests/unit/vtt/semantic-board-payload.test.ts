@@ -7,6 +7,7 @@ import type { WorldObject } from '../../../src/combat/world-objects';
 import { projectDmBoard, projectPlayerBoard } from '../../../src/vtt/encounter-projections';
 import {
   SEMANTIC_BOARD_ENCODING_NOTE,
+  projectEngineSemanticBoard,
   semanticBoardJson,
   semanticBoardPayload,
   semanticBoardTurnContextBlock,
@@ -104,6 +105,13 @@ function fixtureProjection() {
 }
 
 describe('semantic board payload', () => {
+  it('keeps the engine-safe semantic source equal to the canonical DM board projection', () => {
+    const fixture = fixtureProjection();
+    const engineProjection = projectEngineSemanticBoard(fixture.state, fixture.projection.encounter.revision);
+
+    expect(semanticBoardPayload(engineProjection)).toEqual(semanticBoardPayload(fixture.projection));
+  });
+
   it('lists exact engine terrain facts and keeps absent arrays explicit', () => {
     const payload = semanticBoardPayload(fixtureProjection().projection);
 

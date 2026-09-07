@@ -1,6 +1,13 @@
 import { canonicalJson } from '../commands/canonical-json';
+import { combatantConditions } from '../combat/combat-rules';
+import type { EncounterState } from '../combat/encounter';
 import type { GridCell } from '../combat/grid';
+import { persistentAreaContains } from '../combat/persistent-areas';
 import type { CombatantId } from '../combat/values';
+import {
+  enginePlanningHitPointMaximum,
+  enginePlanningHitPoints,
+} from './engine-query-port';
 import type { DmBoardProjection, PlayerBoardProjection } from './encounter-projections';
 
 export const SEMANTIC_BOARD_FORMAT = 'engine-semantic-board-v1' as const;
@@ -16,6 +23,30 @@ export interface SemanticBoardPayloadOptions {
   readonly audience?: SemanticBoardAudience;
   /** Player-safe observation memory. Missing entries serialize as an explicit null. */
   readonly lastSeenByCreature?: ReadonlyMap<CombatantId, GridCell | null>;
+}
+
+type SemanticBoardSourceShape = Pick<
+  DmBoardProjection['board'],
+  | 'bounds'
+  | 'blockedCells'
+  | 'difficultTerrainRegions'
+  | 'obscurementRegions'
+  | 'environmentLightRegions'
+  | 'combatants'
+  | 'foggedCells'
+  | 'worldObjects'
+  | 'areas'
+>;
+
+/** Engine-safe source used by the standalone MCP graph without importing the encounter reducer. */
+export interface EngineSemanticBoardProjection {
+  readonly audience: 'dm';
+  readonly revision: number;
+  readonly board: SemanticBoardSourceShape;
+  readonly reaches: readonly {
+    readonly id: CombatantId;
+    readonly reachFeet: number;
+  }[];
 }
 
 export interface EngineFactList<Value> {
@@ -200,13 +231,126 @@ function gridDistanceFeet(left: GridCell, right: GridCell): number {
   ) * 5;
 }
 
+function encounterCells(state: EncounterState): readonly GridCell[] {
+  const cells: GridCell[] = [];
+  for (let row = 0; row < state.bounds.rows; row += 1) {
+    for (let column = 0; column < state.bounds.columns; column += 1) cells.push({ column, row });
+  }
+  return cells;
+}
+
+/**
+ * Projects only the facts consumed by the semantic payload. This intentionally
+ * avoids the UI's wider DM projection and its reducer-only dependencies.
+ */
+export function projectEngineSemanticBoard(
+  state: EncounterState,
+  revision: number,
+): EngineSemanticBoardProjection {
+  const positions = new Map(state.tokens.map((token) => [token.combatantId, token.position] as const));
+  const hidden = new Set(state.hiddenCombatants.map((entry) => entry.combatant));
+  const names = new Map(state.combatants.map((combatant) => [combatant.profile.id, combatant.profile.name] as const));
+  const cells = encounterCells(state);
+  const objects = new Map(state.worldObjects.map((object) => [object.id, object.position] as const));
+  const persistentAreas = state.persistentAreas.map((area) => {
+    const anchor = area.origin.kind === 'anchored'
+      ? positions.get(area.origin.combatant) ?? null
+      : area.origin.kind === 'anchored_to_object'
+        ? objects.get(area.origin.object) ?? null
+        : null;
+    return {
+      kind: 'persistent' as const,
+      id: area.id,
+      owner: area.owner,
+      ownerName: names.get(area.owner) ?? String(area.owner),
+      shape: area.shape,
+      cells: cells.filter((cell) => persistentAreaContains(area, cell, anchor, state)),
+      difficultTerrain: area.difficultTerrain,
+    };
+  });
+  const movementAreas = (state.environment.movementRegions ?? []).map((region) => ({
+    kind: 'movement_region' as const,
+    id: region.id,
+    owner: region.source,
+    ownerName: names.get(region.source) ?? String(region.source),
+    shape: { kind: 'declared_cells' as const },
+    cells: region.cells.map((cell) => ({ ...cell })),
+    difficultTerrain: state.environment.difficultTerrainRegions.some((candidate) => candidate.id === region.id),
+    entry: region.entry,
+  }));
+  return {
+    audience: 'dm',
+    revision,
+    board: {
+      bounds: { ...state.bounds },
+      blockedCells: state.blockedCells.map((cell) => ({ ...cell })),
+      difficultTerrainRegions: state.environment.difficultTerrainRegions.map((region) => ({
+        id: region.id,
+        cells: region.cells.map((cell) => ({ ...cell })),
+      })),
+      obscurementRegions: state.environment.obscurementRegions.map((region) => ({
+        id: region.id,
+        cells: region.cells.map((cell) => ({ ...cell })),
+        obscurement: region.obscurement,
+      })),
+      environmentLightRegions: state.environment.lightRegions.map((region) => ({
+        id: region.id,
+        cells: region.cells.map((cell) => ({ ...cell })),
+        level: region.level,
+      })),
+      combatants: state.combatants.flatMap((combatant) => {
+        const position = positions.get(combatant.profile.id);
+        if (position === undefined) return [];
+        const maximum = enginePlanningHitPointMaximum(state, combatant.profile.id);
+        const hitPoints = enginePlanningHitPoints(state, combatant.profile.id);
+        return [{
+          id: combatant.profile.id,
+          name: combatant.profile.name,
+          kind: combatant.profile.kind,
+          position: { ...position },
+          life: combatant.life,
+          hitPointBand: maximum <= 0
+            ? { kind: 'unknown' as const }
+            : {
+                kind: 'perceived_band' as const,
+                band: hitPoints >= maximum
+                  ? 'uninjured' as const
+                  : hitPoints * 4 <= maximum
+                    ? 'near_death' as const
+                    : 'bloodied' as const,
+              },
+          hiddenFromPlayers: hidden.has(combatant.profile.id),
+          conditions: combatantConditions(state, combatant.profile.id)
+            .map((condition) => condition.name)
+            .sort((left, right) => left.localeCompare(right)),
+        }];
+      }),
+      foggedCells: state.foggedCells.map((cell) => ({ ...cell })),
+      worldObjects: state.worldObjects.map((object) => ({
+        id: object.id,
+        name: object.name,
+        kind: object.kind,
+        position: { ...object.position },
+        cells: object.footprint.map((cell) => ({ ...cell })),
+        blocking: { ...object.blocking },
+        lightClass: object.kind === 'light-source' ? 'light-source' as const : 'none' as const,
+      })),
+      areas: [...persistentAreas, ...movementAreas],
+    },
+    reaches: state.combatants.map((combatant) => ({
+      id: combatant.profile.id,
+      reachFeet: combatant.wildShape?.physical.reach ?? combatant.profile.rules.reach,
+    })),
+  };
+}
+
 /**
  * Canonical engine facts drawn from the exact projection rendered by the board.
  * Player mode is a testable redaction boundary; the DM export is never routed to
  * a player channel.
  */
 export function semanticBoardPayload(
-  projection: DmBoardProjection,
+  projection: DmBoardProjection | EngineSemanticBoardProjection,
   options: SemanticBoardPayloadOptions = {},
 ): SemanticBoardPayload {
   const audience = options.audience ?? projection.audience;
@@ -303,9 +447,9 @@ export function semanticBoardPayload(
       }
     }
   }
-  const reachById = new Map(
-    projection.encounter.combatants.map((combatant) => [combatant.id, combatant.rules.reach] as const),
-  );
+  const reachById = new Map('reaches' in projection
+    ? projection.reaches.map((combatant) => [combatant.id, combatant.reachFeet] as const)
+    : projection.encounter.combatants.map((combatant) => [combatant.id, combatant.rules.reach] as const));
   const reachRangeSummaries = spatialCombatants.map((combatant): SemanticReachRangeSummary => {
     const reach = reachById.get(combatant.id);
     if (reach === undefined)
@@ -329,7 +473,7 @@ export function semanticBoardPayload(
 
   return {
     format: SEMANTIC_BOARD_FORMAT,
-    revision: projection.encounter.revision,
+    revision: 'revision' in projection ? projection.revision : projection.encounter.revision,
     audience,
     coordinates: {
       order: 'column,row',
@@ -373,7 +517,7 @@ export function semanticBoardPayload(
 
 /** The turn-context delivery seam accepts both projections so the player denial is executable. */
 export function semanticBoardTurnContextBlock(
-  projection: DmBoardProjection | PlayerBoardProjection,
+  projection: DmBoardProjection | PlayerBoardProjection | EngineSemanticBoardProjection,
 ): SemanticBoardTurnContextBlock | null {
   if (projection.audience !== 'dm') return null;
   return {

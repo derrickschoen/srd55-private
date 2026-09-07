@@ -5,9 +5,7 @@ import { appendFileSync, readFileSync } from 'node:fs';
 import { readFile, realpath } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { canonicalJson } from '../../commands/canonical-json';
-import type { PersistedCoordinatorState } from '../../combat/coordinator';
 import type { EncounterState } from '../../combat/encounter';
-import { projectDmView } from '../../combat/visibility';
 import {
   encounterBranchId,
   encounterSessionId,
@@ -51,8 +49,10 @@ import {
 } from './engine-server';
 import { jsonRpcParseError, type JsonRpcResponse, type McpHandler } from './handler';
 import type { McpImageContentBlock } from './handler';
-import { projectDmBoard } from '../encounter-projections';
-import type { SemanticBoardTruncationClass } from '../semantic-board-payload';
+import {
+  projectEngineSemanticBoard,
+  type SemanticBoardTruncationClass,
+} from '../semantic-board-payload';
 import {
   decodeKbReadRecords,
   isKbSubjectSources,
@@ -154,14 +154,6 @@ export interface EngineMcpRuntime {
   readonly adjudications: readonly AdjudicationEnvelope[];
 }
 
-const ENGINE_SEMANTIC_BOARD_COORDINATOR: PersistedCoordinatorState = {
-  requestSequence: 1,
-  pendingRequest: null,
-  pendingCommand: null,
-  continuation: { kind: 'idle' },
-  pause: null,
-};
-
 export interface EngineMcpBoardImageArtifact {
   readonly version: 'arena-board-image-v1';
   readonly audience: 'dm';
@@ -249,9 +241,11 @@ export function createEngineMcpRuntime(
     readonly turnContextDeltaBase?: TurnContextDeltaBase;
     readonly rendererProfile?: RendererProfile;
     readonly turnContextMaximumBytes?: number;
+    readonly semanticBoardMaximumBytes?: number;
     readonly onTurnContextRendered?: (result: {
       readonly preTrimBytes: number;
       readonly postTrimBytes: number;
+      readonly baseContextBytes: number;
       readonly features: CircumstanceFeatureVector;
       readonly removals: RendererRemovalCounts;
       readonly semanticBoardBytes: number;
@@ -377,14 +371,7 @@ export function createEngineMcpRuntime(
     adjudications: { append: (envelope) => { adjudications.push(envelope); } },
     rules: options.rules ?? { get: () => null },
     ...(options.rendererProfile?.semanticBoard === true ? {
-      semanticBoardProjection: projectDmBoard({
-        view: projectDmView(planningState.revision === revision
-          ? planningState
-          : { ...planningState, revision }),
-        coordinator: ENGINE_SEMANTIC_BOARD_COORDINATOR,
-        controllers: [],
-        history: [],
-      }),
+      semanticBoardProjection: projectEngineSemanticBoard(planningState, revision),
     } : {}),
     ...(options.maximumToolResultBytes === undefined ? {} : { maximumToolResultBytes: options.maximumToolResultBytes }),
     ...(options.maximumResourceBytes === undefined ? {} : { maximumResourceBytes: options.maximumResourceBytes }),
@@ -396,6 +383,9 @@ export function createEngineMcpRuntime(
     ...(options.rendererProfile === undefined ? {} : { rendererProfile: options.rendererProfile }),
     ...(options.turnContextMaximumBytes === undefined ? {} : {
       turnContextMaximumBytes: options.turnContextMaximumBytes,
+    }),
+    ...(options.semanticBoardMaximumBytes === undefined ? {} : {
+      semanticBoardMaximumBytes: options.semanticBoardMaximumBytes,
     }),
     ...(options.onTurnContextRendered === undefined ? {} : {
       onTurnContextRendered: options.onTurnContextRendered,

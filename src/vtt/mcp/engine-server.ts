@@ -77,7 +77,6 @@ import {
   type OptionOutcomeEvaluation,
 } from '../intel/option-outcome';
 import type { ReactionGuidanceDeclaration, ReactionTriggerGuidance } from '../reaction-guidance';
-import type { DmBoardProjection } from '../encounter-projections';
 import { diffTurnContextValues } from '../dm-bridge/projection-transport';
 import {
   DEFAULT_RENDERER_PROFILE,
@@ -94,6 +93,7 @@ import {
 import {
   SEMANTIC_BOARD_TRUNCATION_CLASSES,
   semanticBoardTurnContextBlock,
+  type EngineSemanticBoardProjection,
   type SemanticBoardTruncationClass,
 } from '../semantic-board-payload';
 import { submitSpeculativeRoundPlan } from '../speculative-plan-submission';
@@ -206,6 +206,7 @@ export interface AllowlistedRuleEntry extends RuleReference {
 
 export const SUGGESTED_PLAN_MAX_BYTES = 16 * 1024;
 export const TURN_CONTEXT_MAX_BYTES = 32 * 1024;
+export const SEMANTIC_BOARD_MAX_BYTES = 8 * 1024;
 
 function encodedJsonBytes(value: unknown): number {
   return new TextEncoder().encode(JSON.stringify(value)).byteLength;
@@ -261,11 +262,13 @@ interface EngineMcpDependencies {
   readonly turnContextDeltaBase?: TurnContextDeltaBase;
   readonly onTurnContext?: (context: Readonly<Record<string, unknown>>) => void;
   readonly rendererProfile?: RendererProfile;
-  readonly semanticBoardProjection?: DmBoardProjection;
+  readonly semanticBoardProjection?: EngineSemanticBoardProjection;
   readonly turnContextMaximumBytes?: number;
+  readonly semanticBoardMaximumBytes?: number;
   readonly onTurnContextRendered?: (result: {
     readonly preTrimBytes: number;
     readonly postTrimBytes: number;
+    readonly baseContextBytes: number;
     readonly features: CircumstanceFeatureVector;
     readonly removals: RendererRemovalCounts;
     readonly semanticBoardBytes: number;
@@ -1259,7 +1262,11 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
   if (!Number.isSafeInteger(turnContextMaximumBytes) || turnContextMaximumBytes < 1) {
     throw new RangeError('turnContextMaximumBytes must be a positive safe integer.');
   }
-  // Profile and measure the complete incumbent context before the one authoritative cap pass.
+  const semanticBoardMaximumBytes = dependencies.semanticBoardMaximumBytes ?? SEMANTIC_BOARD_MAX_BYTES;
+  if (!Number.isSafeInteger(semanticBoardMaximumBytes) || semanticBoardMaximumBytes < 1) {
+    throw new RangeError('semanticBoardMaximumBytes must be a positive safe integer.');
+  }
+  // Build the uncapped incumbent before the one authoritative base-context cap pass.
   const fullContextAssemblyMaximumBytes = Number.MAX_SAFE_INTEGER;
   let optionReferences: ReadonlyMap<string, string> = new Map();
   const idempotency = new Map<string, { readonly bytes: string; readonly result: unknown }>();
@@ -2018,10 +2025,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         throw new RangeError('SEMANTIC_BOARD_REVISION_MISMATCH');
       }
       const incumbentContext = fullTurnContext(capsule, input);
-      const incumbentFull = deliveredSemanticBoard === null
-        ? incumbentContext
-        : { ...incumbentContext, semantic_board: deliveredSemanticBoard };
-      const rendered = renderTurnContextProfile(incumbentFull, rendererProfile);
+      const rendered = renderTurnContextProfile(incumbentContext, rendererProfile);
       optionReferences = rendered.optionRefs;
       if (rendererProfile.format !== 'structured') {
         const prose = renderProseTurnContext(
@@ -2041,6 +2045,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         dependencies.onTurnContextRendered?.({
           preTrimBytes: prose.preTrimBytes,
           postTrimBytes: prose.postTrimBytes,
+          baseContextBytes: prose.postTrimBytes,
           features,
           removals: rendered.removals,
           semanticBoardBytes: 0,
@@ -2070,33 +2075,6 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         const clearArrayField = (parent: Record<string, unknown>, key: string): void => {
           if (Array.isArray(parent[key])) parent[key] = [];
         };
-        const truncatedSemanticClasses: SemanticBoardTruncationClass[] = [];
-        const semanticBoard = objectAt(candidate, 'semantic_board');
-        const truncateSemanticClass = (factClass: SemanticBoardTruncationClass): void => {
-          if (semanticBoard === null) return;
-          switch (factClass) {
-            case 'light': {
-              const cells = objectAt(semanticBoard, 'cells');
-              if (cells !== null) delete cells['light'];
-              delete semanticBoard['light_sources'];
-              break;
-            }
-            case 'adjacency':
-              delete semanticBoard['adjacency_pairs'];
-              delete semanticBoard['reach_range_summaries'];
-              break;
-            case 'objects':
-              delete semanticBoard['objects'];
-              delete semanticBoard['doors'];
-              break;
-          }
-          truncatedSemanticClasses.push(factClass);
-          candidate['semantic_board_truncated'] = [...truncatedSemanticClasses];
-        };
-        for (const factClass of SEMANTIC_BOARD_TRUNCATION_CLASSES) {
-          if (renderBytes(candidate) <= turnContextMaximumBytes) break;
-          truncateSemanticClass(factClass);
-        }
         clearArrayField(candidate, 'applicable_skills');
         const knowledge = objectAt(candidate, 'actor_knowledge');
         if (knowledge !== null) clearArrayField(knowledge, 'actors');
@@ -2226,12 +2204,6 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
               known_failure_modes: { policy: sourceFailures['policy'] },
             }),
             renderer_attribution: source['renderer_attribution'],
-            ...(candidate['semantic_board'] === undefined ? {} : {
-              semantic_board: candidate['semantic_board'],
-            }),
-            ...(candidate['semantic_board_truncated'] === undefined ? {} : {
-              semantic_board_truncated: candidate['semantic_board_truncated'],
-            }),
             compact_fallback: true,
             truncated: true,
             next_cursor: null,
@@ -2309,26 +2281,34 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         return trimmedFull;
       };
       const base = dependencies.turnContextDeltaBase;
+      const deltaBaseContext = base === undefined
+        ? undefined
+        : (() => {
+            const copy = structuredClone(base.context) as Record<string, unknown>;
+            delete copy['semantic_board'];
+            delete copy['semantic_board_truncated'];
+            return copy as Readonly<Record<string, unknown>>;
+          })();
       const wantsDelta = rendererProfile.delta !== 'off' && input['granularity'] === 'turn_delta';
       const contextCandidate = !wantsDelta || base === undefined ||
         input['since_revision'] !== base.revision ||
-        base.context['granularity'] !== 'full'
+        deltaBaseContext?.['granularity'] !== 'full'
         ? untrimmedFull
         : (() => {
-            const baseStateRef = record(base.context['state_ref'], 'turn context delta base state_ref');
+            const baseStateRef = record(deltaBaseContext['state_ref'], 'turn context delta base state_ref');
             if (baseStateRef['run_id'] !== capsule.runId ||
               baseStateRef['expected_revision'] !== base.revision) return untrimmedFull;
             const anchor = rendererProfile.anchor === 'hash_only'
               ? {
                   base_revision: base.revision,
                   revision: capsule.revision,
-                  base_context_hash: sha256(canonicalJson(base.context)),
+                  base_context_hash: sha256(canonicalJson(deltaBaseContext)),
                   context_hash: sha256(canonicalJson(untrimmedFull)),
                 }
               : {
                   base_revision: base.revision,
                   revision: capsule.revision,
-                  base_context_hash: sha256(canonicalJson(base.context)),
+                  base_context_hash: sha256(canonicalJson(deltaBaseContext)),
                   context_hash: sha256(canonicalJson(untrimmedFull)),
                   state_ref: untrimmedFull['state_ref'],
                   request: untrimmedFull['request'],
@@ -2336,7 +2316,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
             const delta = {
               granularity: 'turn_delta' as const,
               anchor,
-              changes: diffTurnContextValues(base.context, untrimmedFull),
+              changes: diffTurnContextValues(deltaBaseContext, untrimmedFull),
               context_trimmed: untrimmedFull['context_trimmed'],
               renderer_attribution: untrimmedFull['renderer_attribution'],
             };
@@ -2344,37 +2324,71 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
               ? untrimmedFull
               : delta;
           })();
-      const context = contextCandidate['granularity'] === 'full'
+      const baseContext = contextCandidate['granularity'] === 'full'
         ? trimToLimit(contextCandidate)
         : encodedJsonBytes(contextCandidate) <= turnContextMaximumBytes
           ? contextCandidate
           : { ...full(), context_trimmed: true, truncated: true };
-      const postTrimBytes = renderBytes(context);
-      const featurePreTrimBytes = context['granularity'] === 'turn_delta'
+      const baseContextBytes = renderBytes(baseContext);
+      const featurePreTrimBytes = baseContext['granularity'] === 'turn_delta'
         ? renderBytes(contextCandidate)
         : preTrimBytes;
       const features = extractCircumstanceFeatures({
         state,
         capsule,
         renderedContext: untrimmedFull,
-        granularity: context['granularity'] === 'turn_delta' ? 'turn_delta' : 'full',
+        granularity: baseContext['granularity'] === 'turn_delta' ? 'turn_delta' : 'full',
         preTrimBytes: featurePreTrimBytes,
-        postTrimBytes,
+        postTrimBytes: baseContextBytes,
       });
-      const semanticEvidenceContext = record(
-        context['granularity'] === 'full' ? context : full(),
-        'semantic board evidence context',
-      );
-      const semanticEvidenceBlock = semanticEvidenceContext['semantic_board'];
+      const semanticBoardTruncated: SemanticBoardTruncationClass[] = [];
+      let context: Readonly<Record<string, unknown>> = baseContext;
+      if (deliveredSemanticBoard !== null) {
+        const semanticBoard = structuredClone(deliveredSemanticBoard) as unknown as Record<string, unknown>;
+        const attachSemanticBoard = (): Readonly<Record<string, unknown>> => ({
+          ...baseContext,
+          semantic_board: semanticBoard,
+          ...(semanticBoardTruncated.length === 0 ? {} : {
+            semantic_board_truncated: [...semanticBoardTruncated],
+          }),
+        });
+        const attachmentBytes = (candidate: Readonly<Record<string, unknown>>): number =>
+          renderBytes(candidate) - baseContextBytes;
+        context = attachSemanticBoard();
+        for (const factClass of SEMANTIC_BOARD_TRUNCATION_CLASSES) {
+          if (attachmentBytes(context) <= semanticBoardMaximumBytes) break;
+          switch (factClass) {
+            case 'light': {
+              const cells = record(semanticBoard['cells'], 'semantic board cells') as Record<string, unknown>;
+              delete cells['light'];
+              delete semanticBoard['light_sources'];
+              break;
+            }
+            case 'adjacency':
+              delete semanticBoard['adjacency_pairs'];
+              delete semanticBoard['reach_range_summaries'];
+              break;
+            case 'objects':
+              delete semanticBoard['objects'];
+              delete semanticBoard['doors'];
+              break;
+          }
+          semanticBoardTruncated.push(factClass);
+          context = attachSemanticBoard();
+        }
+        const finalAttachmentBytes = attachmentBytes(context);
+        if (finalAttachmentBytes > semanticBoardMaximumBytes) {
+          throw new RangeError(
+            `Protected semantic-board facts require ${String(finalAttachmentBytes)} UTF-8 bytes; maximum is ${String(semanticBoardMaximumBytes)}.`,
+          );
+        }
+      }
+      const semanticEvidenceBlock = context['semantic_board'];
       const semanticBoardBytes = semanticEvidenceBlock === undefined ? 0 : renderBytes(semanticEvidenceBlock);
-      const semanticTruncationValue = semanticEvidenceContext['semantic_board_truncated'];
-      const semanticBoardTruncated = Array.isArray(semanticTruncationValue)
-        ? semanticTruncationValue.filter((value): value is SemanticBoardTruncationClass =>
-            SEMANTIC_BOARD_TRUNCATION_CLASSES.some((factClass) => factClass === value))
-        : [];
       dependencies.onTurnContextRendered?.({
         preTrimBytes: featurePreTrimBytes,
-        postTrimBytes,
+        postTrimBytes: baseContextBytes,
+        baseContextBytes,
         features,
         removals: rendered.removals,
         semanticBoardBytes,
