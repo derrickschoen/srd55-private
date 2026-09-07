@@ -13603,3 +13603,25 @@ guide's coverage is checked against the renderer's legend list, so a
 new glyph without a guide entry fails; rules sections carry SRD
 locators; the byte scan still applies. Applied as an amendment on top
 of increment 1a once its harvest lands.
+
+## D569 increment 1a harvested and committed 062a2b70; D570 amendment lane dispatched (2026-09-07 00:00)
+
+Codex claimed: 3 specs 26/26, tsc 0, three named mutants killed with
+restore hashes. Verified myself: forbidden scans clean, contracts.ts
+hash unchanged, lane log shows the private research tree was never
+opened (every mention is the brief, the plan text or the tests' own
+negative regexes), the bundle contains no BG3/Nimble/option-protocol
+vocabulary, provenance carries SRD locators per component; 4 spec files
+(contract, knowledge-base, legacy-invariance, conversation) 93/93 by my
+run; tsc 0; supervisor mutant (blindIntentSchema strictObject ->
+object) killed by "rejects unknown or authority-crossing fields",
+restored byte-identical. A first mutant of mine targeted `.strict()`
+which the file never uses (it uses z.strictObject); it applied nothing
+and is void, recorded so nobody counts it. The conversation change is a
+pure extraction (serializeConversationRow = JSON.stringify) covered by
+the byte-invariance fixture.
+
+D570 amendment dispatched on the same worktree (brief blind-dm-i1a2.md):
+full SRD-cited rules digest, tactics with reasons, complete map-feature
+guide with a coverage test derived from the renderer's legend exports,
+bundle-specific byte caps, legacy fixture unchanged.
