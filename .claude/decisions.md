@@ -13740,3 +13740,31 @@ lane dispatched on the E1c tree (no model calls: replay the frozen
 6203001 state to the adjustment call, validate against the declared
 schema, fix, add the invariant that every emitted context shape
 validates against its declared outputSchema).
+
+## D569 plan round 3 (D571 amendment) APPROVED with one supervisor amendment on adjustments (2026-09-07 00:19)
+
+Revised plan (775 lines, copied to the main repo): blind context now
+carries creature_facts (deduplicated complete SRD stat blocks and
+referenced spells from the same typed sources that feed the advice
+status/options: statblockId, BUNDLED_MONSTER_ROSTER,
+effectiveCombatRules, spellDefinition; exact HP/slots/legendary
+resources/action economy for the DM's monsters; displayed band only
+for the party; conditions and concentration), legal_movement (every
+in-bounds destination via canonicalEngineQueryPort.path with least
+legal cost, gutter labels only, no routes/targets/scores), the E1b
+semantic_board minus reach_range_summaries (the D571 gray line), and
+the previous allowlist. Byte estimate on the seven-actor hard rooms:
+mechanics 19.5-22.6 KB, movement 14.7-16.9 KB, board <= 7.6 KB, total
+~47 KB: blind arms run at --turn-context-max-bytes 65536 (D567 knob)
+with the 8 KiB board allowance; a pre-run serialization of every
+fixture must prove nothing required is truncated. Leak audit forbids
+recommendation fields, option ids/order/counts and scores; numbers and
+reach sets are allowed. Resolver enforces the same reachability it
+shows.
+
+Supervisor amendment (recorded, binding for increments 4 and 6): the
+blind v1 round has no mid-round adjustment call, so the sol-advice
+ceiling arm must run with mid-round adjustments disabled too (or blind
+gets an equivalent blind adjustment call); otherwise the ceiling gap
+measures adjustments, not judgment. Increment 1b waits for the D570
+knowledge lane to finish in the same worktree.
