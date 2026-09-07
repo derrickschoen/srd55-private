@@ -87,7 +87,12 @@ import {
   type BoardImageSource,
   type BoardSnapshotCapture,
 } from './ai-dm-board-snapshot';
-import type { IntelMode, OverridePolicy, TurnContextDeltaBase } from '../src/vtt/mcp/engine-server';
+import type {
+  IntelMode,
+  OverridePolicy,
+  TurnContextDeltaBase,
+  TurnContextSizeOmission,
+} from '../src/vtt/mcp/engine-server';
 import {
   DEFAULT_OVERRIDE_POLICY,
   OVERRIDE_POLICIES,
@@ -220,6 +225,7 @@ interface ConversationConfigBase {
   readonly intelMode: IntelMode;
   readonly overridePolicy: OverridePolicy;
   readonly rendererProfile: RendererProfile;
+  readonly turnContextMaximumBytes: number;
   readonly combatModel: CombatModel;
   readonly initiativeProfile: RoomInitiativeProfile;
   readonly partyPolicy: ScriptedPartyDecisionPolicy;
@@ -547,6 +553,11 @@ interface ConversationRowBase {
   readonly kbReads: readonly KbReadRecord[];
   readonly repoCommit: string;
   readonly rawTurnContext: string;
+  readonly turnContextMaximumBytes: number;
+  readonly preTrimBytes: number;
+  readonly postTrimBytes: number;
+  readonly optionsOmittedForSize: number;
+  readonly optionsOmittedForSizeByActor: readonly TurnContextSizeOmission[];
   readonly turnContextGranularity: 'full' | 'turn_delta';
   readonly snippetHash: string;
   readonly snippetSetHash: string;
@@ -669,6 +680,7 @@ export interface TurnContextRenderEvidence {
   readonly postTrimBytes: number;
   readonly features: CircumstanceFeatureVector;
   readonly removals: RendererRemovalCounts;
+  readonly optionsOmittedForSizeByActor: readonly TurnContextSizeOmission[];
 }
 
 export interface ConversationRunOptions {
@@ -808,6 +820,7 @@ export function parseConversationArgs(argv: readonly string[], cwd = process.cwd
       '--intel-mode',
       '--override-policy',
       '--renderer-profile',
+      '--turn-context-max-bytes',
       '--board-image',
       '--local-base-url', '--local-model', '--local-api-key', '--local-think',
     ].includes(option ?? '')) throw new TypeError(`Unknown conversation option ${option ?? '<missing>'}.`);
@@ -888,6 +901,10 @@ export function parseConversationArgs(argv: readonly string[], cwd = process.cwd
   const rendererProfile = values.has('--renderer-profile')
     ? rendererProfileSchema.parse(JSON.parse(values.get('--renderer-profile') ?? ''))
     : DEFAULT_RENDERER_PROFILE;
+  const turnContextMaximumBytes = positiveInteger(
+    values.get('--turn-context-max-bytes') ?? String(TURN_CONTEXT_MAX_BYTES),
+    '--turn-context-max-bytes',
+  );
   const boardImageMode = values.get('--board-image') ?? 'off';
   if (!BOARD_IMAGE_MODES.includes(boardImageMode as BoardImageMode)) {
     throw new TypeError('--board-image must be off, png, or capture_only.');
@@ -902,6 +919,7 @@ export function parseConversationArgs(argv: readonly string[], cwd = process.cwd
     intelMode,
     overridePolicy: overridePolicy as OverridePolicy,
     rendererProfile,
+    turnContextMaximumBytes,
     combatModel: combatModel as CombatModel,
     initiativeProfile: initiativeProfile as RoomInitiativeProfile,
     partyPolicy: DEFAULT_SCRIPTED_PARTY_DECISION_POLICY,
@@ -1680,7 +1698,7 @@ interface CapturedTurnContext {
   readonly rendering?: TurnContextRenderEvidence;
 }
 
-function capturedTurnContext(raw: string): CapturedTurnContext {
+function capturedTurnContext(raw: string, maximumBytes: number): CapturedTurnContext {
   const value = requiredRecord(JSON.parse(raw) as unknown, 'recorded turn context');
   const proseDocument =
     (value['format'] === 'caveman_prose' || value['format'] === 'regular_prose') &&
@@ -1689,9 +1707,9 @@ function capturedTurnContext(raw: string): CapturedTurnContext {
       : null;
   const modelVisibleRaw = proseDocument ?? raw;
   const bytes = new TextEncoder().encode(modelVisibleRaw).byteLength;
-  if (bytes > TURN_CONTEXT_MAX_BYTES) {
+  if (bytes > maximumBytes) {
     throw new RangeError(
-      `Recorded turn context is ${String(bytes)} UTF-8 bytes; maximum is ${String(TURN_CONTEXT_MAX_BYTES)}.`,
+      `Recorded turn context is ${String(bytes)} UTF-8 bytes; maximum is ${String(maximumBytes)}.`,
     );
   }
   const granularity = value['granularity'];
@@ -1701,11 +1719,11 @@ function capturedTurnContext(raw: string): CapturedTurnContext {
   return { raw: modelVisibleRaw, granularity, value };
 }
 
-function unrequestedTurnContext(): CapturedTurnContext {
+function unrequestedTurnContext(maximumBytes: number): CapturedTurnContext {
   return capturedTurnContext(JSON.stringify({
     granularity: 'full',
     context_not_requested: true,
-  }));
+  }), maximumBytes);
 }
 
 function plannedTurnContext(
@@ -1714,6 +1732,7 @@ function plannedTurnContext(
   base: TurnContextDeltaBase | undefined,
   intelMode: IntelMode,
   rendererProfile: RendererProfile,
+  turnContextMaximumBytes: number,
 ): CapturedTurnContext {
   const capsule = snapshot.capsule;
   const request = capsule.request;
@@ -1748,6 +1767,7 @@ function plannedTurnContext(
     } : { requestedActorIds: request.actors }),
     toolProfile: 'dm',
     rendererProfile,
+    turnContextMaximumBytes,
     onTurnContextRendered: (value) => { rendering = value; },
     initiativeProjection: capsule.projection.initiative,
     ...(base === undefined ? {} : { turnContextDeltaBase: base }),
@@ -1761,14 +1781,17 @@ function plannedTurnContext(
       ? { granularity: 'full' }
       : { granularity: 'turn_delta', since_revision: base.revision }),
   });
-  return { ...capturedTurnContext(JSON.stringify(value)), ...(rendering === undefined ? {} : { rendering }) };
+  return {
+    ...capturedTurnContext(JSON.stringify(value), turnContextMaximumBytes),
+    ...(rendering === undefined ? {} : { rendering }),
+  };
 }
 
-function takeTurnContext(path: string): CapturedTurnContext | null {
+function takeTurnContext(path: string, maximumBytes: number): CapturedTurnContext | null {
   let source: string;
   try { source = readFileSync(path, 'utf8'); } catch { return null; }
   const raw = source.split('\n').filter((line) => line.trim().length > 0).at(-1);
-  return raw === undefined ? null : capturedTurnContext(raw);
+  return raw === undefined ? null : capturedTurnContext(raw, maximumBytes);
 }
 
 function takeUiFeedback(path: string | null): EngineUiFeedback | null {
@@ -2344,6 +2367,7 @@ async function writeLauncher(input: {
   readonly directory: string;
   readonly name: string;
   readonly rendererProfile: RendererProfile;
+  readonly turnContextMaximumBytes: number;
   readonly overridePolicy: OverridePolicy;
   readonly snapshot: EngineRoundSnapshot;
   readonly room: number;
@@ -2389,6 +2413,7 @@ async function writeLauncher(input: {
     overridePolicy: input.overridePolicy,
     room: input.room, historyKind: input.historyKind, toolProfile: 'dm',
     rendererProfile: input.rendererProfile,
+    turnContextMaximumBytes: input.turnContextMaximumBytes,
     initiativeProjection: capsule.projection.initiative,
     ...(input.boardImage === undefined ? {} : { boardImage: input.boardImage }),
     ...(request.phase === 'speculative' ? {
@@ -2429,6 +2454,7 @@ function fullTurnContextBase(
   snapshot: EngineRoundSnapshot,
   intelMode: IntelMode,
   rendererProfile: RendererProfile,
+  turnContextMaximumBytes: number,
 ): TurnContextDeltaBase {
   const capsule = snapshot.capsule;
   const request = capsule.request;
@@ -2462,6 +2488,7 @@ function fullTurnContextBase(
     } : { requestedActorCount: request.actors.length }),
     toolProfile: 'dm',
     rendererProfile,
+    turnContextMaximumBytes,
     initiativeProjection: capsule.projection.initiative,
   });
   const response = runtime.handler.handle({
@@ -2489,6 +2516,7 @@ function inProcessDmToolSession(input: {
   readonly snapshot: EngineRoundSnapshot;
   readonly intelMode: IntelMode;
   readonly rendererProfile: RendererProfile;
+  readonly turnContextMaximumBytes: number;
   readonly overridePolicy: OverridePolicy;
   readonly turnContextDeltaBase?: TurnContextDeltaBase;
   readonly onProposal: (proposal: RoundTurnProposalEnvelope | PlanAdjustmentProposalEnvelope) => void;
@@ -2529,6 +2557,7 @@ function inProcessDmToolSession(input: {
     } : { requestedActorCount: request.actors.length }),
     toolProfile: 'dm',
     rendererProfile: input.rendererProfile,
+    turnContextMaximumBytes: input.turnContextMaximumBytes,
     overridePolicy: input.overridePolicy,
     ...(input.onTurnContextRendered === undefined ? {} : {
       onTurnContextRendered: input.onTurnContextRendered,
@@ -2668,6 +2697,7 @@ function queueStructuredFinalDecision(input: {
   readonly snapshot: EngineRoundSnapshot;
   readonly intelMode: IntelMode;
   readonly rendererProfile: RendererProfile;
+  readonly turnContextMaximumBytes: number;
   readonly overridePolicy: OverridePolicy;
   readonly turnContextDeltaBase?: TurnContextDeltaBase;
   readonly inheritedReactionGuidance: ReactionGuidanceDeclaration | null;
@@ -2707,6 +2737,7 @@ function queueStructuredFinalDecision(input: {
     snapshot: input.snapshot,
     intelMode: input.intelMode,
     rendererProfile: input.rendererProfile,
+    turnContextMaximumBytes: input.turnContextMaximumBytes,
     overridePolicy: input.overridePolicy,
     ...(input.turnContextDeltaBase === undefined ? {} : {
       turnContextDeltaBase: input.turnContextDeltaBase,
@@ -3140,6 +3171,7 @@ async function runConversationWithConfiguredIntel(
       const getCurrentTurnContext = (): TurnContextDeltaBase => {
         currentTurnContext ??= fullTurnContextBase(
           engineSession.currentState(), initialSnapshot, config.intelMode, config.rendererProfile,
+          config.turnContextMaximumBytes,
         );
         return currentTurnContext;
       };
@@ -3152,10 +3184,11 @@ async function runConversationWithConfiguredIntel(
           lastSeenTurnContext,
           config.intelMode,
           config.rendererProfile,
+          config.turnContextMaximumBytes,
         );
         return plannedInitialTurnContext;
       };
-      let rowTurnContext = unrequestedTurnContext();
+      let rowTurnContext = unrequestedTurnContext(config.turnContextMaximumBytes);
       const initialDecisionCatalog = config.decisionTransport === 'final_indices'
         ? decisionCatalogForSnapshot(engineSession.currentState(), initialSnapshot)
         : null;
@@ -3196,6 +3229,7 @@ async function runConversationWithConfiguredIntel(
       }
       const initialLauncher = await writeLauncher({
         rendererProfile: config.rendererProfile,
+        turnContextMaximumBytes: config.turnContextMaximumBytes,
         overridePolicy: config.overridePolicy,
         directory: artifacts, name: `${key}-initial`, snapshot: initialSnapshot, room,
         historyKind: round === 1 ? 'room_ready' : 'proposal_applied',
@@ -3213,6 +3247,7 @@ async function runConversationWithConfiguredIntel(
             snapshot: initialSnapshot,
             intelMode: config.intelMode,
             rendererProfile: config.rendererProfile,
+            turnContextMaximumBytes: config.turnContextMaximumBytes,
             overridePolicy: config.overridePolicy,
             ...(rowKbReadBudget === undefined ? {} : {
               kbReadBudget: rowKbReadBudget,
@@ -3229,7 +3264,7 @@ async function runConversationWithConfiguredIntel(
               observedToolCalls += 1;
               if (name === 'engine.get_turn_context') observedTurnContextCalls += 1;
               if (name === 'engine.get_turn_context') {
-                rowTurnContext = capturedTurnContext(JSON.stringify(result));
+                rowTurnContext = capturedTurnContext(JSON.stringify(result), config.turnContextMaximumBytes);
                 if (rowTurnContext.granularity === 'full') {
                   currentTurnContext = {
                     revision: initialSnapshot.capsule.revision,
@@ -3364,6 +3399,7 @@ async function runConversationWithConfiguredIntel(
           undefined,
           config.intelMode,
           config.rendererProfile,
+          config.turnContextMaximumBytes,
         ).value;
         const ordinaryContext = options.mutateSpeculativeContext?.(renderedOrdinaryContext) ??
           renderedOrdinaryContext;
@@ -3399,6 +3435,7 @@ async function runConversationWithConfiguredIntel(
         };
         const launcher = await writeLauncher({
           rendererProfile: config.rendererProfile,
+          turnContextMaximumBytes: config.turnContextMaximumBytes,
           overridePolicy: config.overridePolicy,
           directory: artifacts,
           name: `${key}-speculative-${String(window.monsters[0])}`,
@@ -3559,6 +3596,7 @@ async function runConversationWithConfiguredIntel(
         const plannedAdjustmentContext = plannedTurnContext(
           engineSession.currentState(), adjustmentSnapshot, lastSeenTurnContext, config.intelMode,
           config.rendererProfile,
+          config.turnContextMaximumBytes,
         );
         let adjustmentTurnContext = plannedAdjustmentContext;
         const adjustmentDecisionCatalog = config.decisionTransport === 'final_indices'
@@ -3574,6 +3612,7 @@ async function runConversationWithConfiguredIntel(
             );
         const adjustmentLauncher = await writeLauncher({
           rendererProfile: config.rendererProfile,
+          turnContextMaximumBytes: config.turnContextMaximumBytes,
           overridePolicy: config.overridePolicy,
           directory: artifacts,
           name: `${adjustmentKey}-initial`,
@@ -3590,6 +3629,7 @@ async function runConversationWithConfiguredIntel(
               snapshot: adjustmentSnapshot,
               intelMode: config.intelMode,
               rendererProfile: config.rendererProfile,
+              turnContextMaximumBytes: config.turnContextMaximumBytes,
               overridePolicy: config.overridePolicy,
               ...(rowKbReadBudget === undefined ? {} : {
                 kbReadBudget: rowKbReadBudget,
@@ -3603,7 +3643,10 @@ async function runConversationWithConfiguredIntel(
                 observedToolCalls += 1;
                 if (name === 'engine.get_turn_context') {
                   observedTurnContextCalls += 1;
-                  adjustmentTurnContext = capturedTurnContext(JSON.stringify(result));
+                  adjustmentTurnContext = capturedTurnContext(
+                    JSON.stringify(result),
+                    config.turnContextMaximumBytes,
+                  );
                 }
                 if (eventContextTrimmed(result)) observedContextTruncated = true;
                 observedRejections.push(...rejectionEvidence(result));
@@ -3654,7 +3697,10 @@ async function runConversationWithConfiguredIntel(
           captureCallUsage(turn, 'adjustment');
           decisionAttempts += 1;
           adjustmentUsage = addAgentUsage(adjustmentUsage, turn.usage);
-          adjustmentTurnContext = takeTurnContext(adjustmentLauncher.turnContextSpoolPath) ??
+          adjustmentTurnContext = takeTurnContext(
+            adjustmentLauncher.turnContextSpoolPath,
+            config.turnContextMaximumBytes,
+          ) ??
             adjustmentTurnContext;
           if (adjustmentDecisionCatalog === null) {
             adjustmentProposal = localAdjustmentProposal ??
@@ -3668,6 +3714,7 @@ async function runConversationWithConfiguredIntel(
               snapshot: adjustmentSnapshot,
               intelMode: config.intelMode,
               rendererProfile: config.rendererProfile,
+              turnContextMaximumBytes: config.turnContextMaximumBytes,
               overridePolicy: config.overridePolicy,
               ...(lastSeenTurnContext === undefined ? {} : { turnContextDeltaBase: lastSeenTurnContext }),
               inheritedReactionGuidance: journal.reactionGuidance(),
@@ -3763,6 +3810,7 @@ async function runConversationWithConfiguredIntel(
           const correctionContext = plannedTurnContext(
             engineSession.currentState(), correctionSnapshot, lastSeenTurnContext, config.intelMode,
             config.rendererProfile,
+            config.turnContextMaximumBytes,
           );
           adjustmentCorrectionContext = correctionContext;
           const adjustmentCorrectionDecisionCatalog = config.decisionTransport === 'final_indices'
@@ -3778,6 +3826,7 @@ async function runConversationWithConfiguredIntel(
               );
           const correctionLauncher = await writeLauncher({
             rendererProfile: config.rendererProfile,
+            turnContextMaximumBytes: config.turnContextMaximumBytes,
             overridePolicy: config.overridePolicy,
             directory: artifacts,
             name: `${adjustmentKey}-correction`,
@@ -3794,6 +3843,7 @@ async function runConversationWithConfiguredIntel(
                 snapshot: correctionSnapshot,
                 intelMode: config.intelMode,
                 rendererProfile: config.rendererProfile,
+                turnContextMaximumBytes: config.turnContextMaximumBytes,
                 overridePolicy: config.overridePolicy,
                 ...(rowKbReadBudget === undefined ? {} : {
                   kbReadBudget: rowKbReadBudget,
@@ -3827,7 +3877,8 @@ async function runConversationWithConfiguredIntel(
                 decisionAttempts += 1;
                 adjustmentUsage = addAgentUsage(adjustmentUsage, turn.usage);
                 adjustmentCorrectionContext =
-                  takeTurnContext(correctionLauncher.turnContextSpoolPath) ?? adjustmentCorrectionContext;
+                  takeTurnContext(correctionLauncher.turnContextSpoolPath, config.turnContextMaximumBytes) ??
+                  adjustmentCorrectionContext;
                 if (adjustmentCorrectionDecisionCatalog !== null) {
                   const structured = queueStructuredFinalDecision({
                     finalText: turn.finalText,
@@ -3837,6 +3888,7 @@ async function runConversationWithConfiguredIntel(
                     snapshot: correctionSnapshot,
                     intelMode: config.intelMode,
                     rendererProfile: config.rendererProfile,
+                    turnContextMaximumBytes: config.turnContextMaximumBytes,
                     overridePolicy: config.overridePolicy,
                     ...(lastSeenTurnContext === undefined ? {} : {
                       turnContextDeltaBase: lastSeenTurnContext,
@@ -4052,7 +4104,10 @@ async function runConversationWithConfiguredIntel(
             captureCallUsage(turn, 'initial');
             decisionAttempts += 1;
             if (initialDecisionCatalog === null) {
-              rowTurnContext = takeTurnContext(initialLauncher.turnContextSpoolPath) ?? rowTurnContext;
+              rowTurnContext = takeTurnContext(
+                initialLauncher.turnContextSpoolPath,
+                config.turnContextMaximumBytes,
+              ) ?? rowTurnContext;
               proposed = localInitialProposal ?? takeRoundProposal(initialLauncher.spoolPath);
               if (decisionAttempts === 1) firstDecisionAccepted = proposed !== null;
             } else {
@@ -4064,6 +4119,7 @@ async function runConversationWithConfiguredIntel(
                 snapshot: initialSnapshot,
                 intelMode: config.intelMode,
                 rendererProfile: config.rendererProfile,
+                turnContextMaximumBytes: config.turnContextMaximumBytes,
                 overridePolicy: config.overridePolicy,
                 ...(lastSeenTurnContext === undefined ? {} : { turnContextDeltaBase: lastSeenTurnContext }),
                 inheritedReactionGuidance: journal.reactionGuidance(),
@@ -4136,6 +4192,7 @@ async function runConversationWithConfiguredIntel(
               correctionTurnContextBase,
               config.intelMode,
               config.rendererProfile,
+              config.turnContextMaximumBytes,
             );
             return plannedCorrectionTurnContext;
           };
@@ -4155,6 +4212,7 @@ async function runConversationWithConfiguredIntel(
             );
         const correctionLauncher = await writeLauncher({
           rendererProfile: config.rendererProfile,
+          turnContextMaximumBytes: config.turnContextMaximumBytes,
           overridePolicy: config.overridePolicy,
           directory: artifacts, name: `${key}-correction`, snapshot: correctionSnapshot,
           room, historyKind: 'proposal_correction_requested',
@@ -4173,6 +4231,7 @@ async function runConversationWithConfiguredIntel(
               snapshot: correctionSnapshot,
               intelMode: config.intelMode,
               rendererProfile: config.rendererProfile,
+              turnContextMaximumBytes: config.turnContextMaximumBytes,
               overridePolicy: config.overridePolicy,
               ...(rowKbReadBudget === undefined ? {} : {
                 kbReadBudget: rowKbReadBudget,
@@ -4188,7 +4247,10 @@ async function runConversationWithConfiguredIntel(
               observedToolCalls += 1;
               if (name === 'engine.get_turn_context') observedTurnContextCalls += 1;
               if (name === 'engine.get_turn_context') {
-                recordedCorrectionTurnContext = capturedTurnContext(JSON.stringify(result));
+                recordedCorrectionTurnContext = capturedTurnContext(
+                  JSON.stringify(result),
+                  config.turnContextMaximumBytes,
+                );
               }
                 if (eventContextTrimmed(result)) observedContextTruncated = true;
                 observedRejections.push(...rejectionEvidence(result));
@@ -4221,8 +4283,10 @@ async function runConversationWithConfiguredIntel(
             }
             const proposalTurnContext = config.captureRlData
               ? proposal.phase === 'initial'
-                ? takeTurnContext(initialLauncher.turnContextSpoolPath) ?? getPlannedInitialTurnContext()
-                : takeTurnContext(correctionLauncher.turnContextSpoolPath) ?? getPlannedCorrectionTurnContext()
+                ? takeTurnContext(initialLauncher.turnContextSpoolPath, config.turnContextMaximumBytes) ??
+                  getPlannedInitialTurnContext()
+                : takeTurnContext(correctionLauncher.turnContextSpoolPath, config.turnContextMaximumBytes) ??
+                  getPlannedCorrectionTurnContext()
               : null;
             const proposalRlData = proposalTurnContext === null
               ? undefined
@@ -4451,7 +4515,8 @@ async function runConversationWithConfiguredIntel(
                 captureCallUsage(correctionTurn, 'correction');
                 decisionAttempts += 1;
                 recordedCorrectionTurnContext =
-                  takeTurnContext(correctionLauncher.turnContextSpoolPath) ?? recordedCorrectionTurnContext;
+                  takeTurnContext(correctionLauncher.turnContextSpoolPath, config.turnContextMaximumBytes) ??
+                  recordedCorrectionTurnContext;
                 if (correctionDecisionCatalog !== null) {
                   const structured = queueStructuredFinalDecision({
                     finalText: correctionTurn.finalText,
@@ -4461,6 +4526,7 @@ async function runConversationWithConfiguredIntel(
                     snapshot: correctionSnapshot,
                     intelMode: config.intelMode,
                     rendererProfile: config.rendererProfile,
+                    turnContextMaximumBytes: config.turnContextMaximumBytes,
                     overridePolicy: config.overridePolicy,
                     ...(correctionTurnContextBase === undefined ? {} : {
                       turnContextDeltaBase: correctionTurnContextBase,
@@ -4491,6 +4557,7 @@ async function runConversationWithConfiguredIntel(
                     correctionSnapshot,
                     config.intelMode,
                     config.rendererProfile,
+                    config.turnContextMaximumBytes,
                   );
                 }
                 correctionFinalText = correctionTurn.finalText;
@@ -4831,6 +4898,7 @@ async function runConversationWithConfiguredIntel(
                     });
                     const recalculationLauncher = await writeLauncher({
                       rendererProfile: config.rendererProfile,
+                      turnContextMaximumBytes: config.turnContextMaximumBytes,
                       overridePolicy: config.overridePolicy,
                       directory: artifacts,
                       name: `${key}-speculation-recalc-${String(segmentActors[0])}`,
@@ -4846,6 +4914,7 @@ async function runConversationWithConfiguredIntel(
                           snapshot: recalculationSnapshot,
                           intelMode: config.intelMode,
                           rendererProfile: config.rendererProfile,
+                          turnContextMaximumBytes: config.turnContextMaximumBytes,
                           overridePolicy: config.overridePolicy,
                           turnContextDeltaBase: pending.sourceTurnContext,
                           onProposal: (proposal) => {
@@ -5042,9 +5111,15 @@ async function runConversationWithConfiguredIntel(
       const wall = performance.now() - started;
       const endToEndWall = performance.now() - roundStarted;
       const binding = journal.agentSession();
-      rowTurnContext = takeTurnContext(initialLauncher.turnContextSpoolPath) ?? rowTurnContext;
+      rowTurnContext = takeTurnContext(
+        initialLauncher.turnContextSpoolPath,
+        config.turnContextMaximumBytes,
+      ) ?? rowTurnContext;
       if (correctionTurnContextSpoolPath !== null) {
-        recordedCorrectionTurnContext = takeTurnContext(correctionTurnContextSpoolPath) ??
+        recordedCorrectionTurnContext = takeTurnContext(
+          correctionTurnContextSpoolPath,
+          config.turnContextMaximumBytes,
+        ) ??
           recordedCorrectionTurnContext;
       }
       uiFeedback = takeUiFeedback(correctionUiFeedbackSpoolPath) ??
@@ -5089,6 +5164,7 @@ async function runConversationWithConfiguredIntel(
         combatModel: config.combatModel,
         intelMode: config.intelMode,
         rendererProfile: config.rendererProfile,
+        turnContextMaximumBytes: config.turnContextMaximumBytes,
         deltaBaseRevision: rendererDeltaBase?.revision ?? null,
       });
       const rendererEvidence = initialRendererEvidence ?? plannedInitialTurnContext?.rendering ??
@@ -5098,9 +5174,12 @@ async function runConversationWithConfiguredIntel(
           rendererDeltaBase,
           config.intelMode,
           config.rendererProfile,
+          config.turnContextMaximumBytes,
         ).rendering;
       if (rendererEvidence === undefined) throw new Error('Turn-context renderer emitted no attribution evidence.');
       options.rendererEvidenceCache?.set(rendererEvidenceCacheKey, rendererEvidence);
+      const optionsOmittedForSize = rendererEvidence.optionsOmittedForSizeByActor
+        .reduce((total, actor) => total + actor.count, 0);
       const kbReads = rowKbSubjectSources === undefined
         ? []
         : decodeKbReadRecords(readFileSync(kbReadSpoolPath, 'utf8'));
@@ -5168,6 +5247,11 @@ async function runConversationWithConfiguredIntel(
         kbReads,
         repoCommit,
         rawTurnContext: rowTurnContext.raw,
+        turnContextMaximumBytes: config.turnContextMaximumBytes,
+        preTrimBytes: rendererEvidence.preTrimBytes,
+        postTrimBytes: rendererEvidence.postTrimBytes,
+        optionsOmittedForSize,
+        optionsOmittedForSizeByActor: structuredClone(rendererEvidence.optionsOmittedForSizeByActor),
         turnContextGranularity: rowTurnContext.granularity,
         snippetHash: SNIPPET_REGISTRY.snippetHash,
         snippetSetHash: SNIPPET_REGISTRY.snippetSetHash,

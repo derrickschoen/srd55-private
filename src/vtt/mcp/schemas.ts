@@ -846,7 +846,10 @@ const proseTurnContextOutput = z.object({
   context_trimmed: z.boolean(),
   state_ref: stateRef,
   request: turnRequest,
-  document: z.string().min(1).max(32 * 1024),
+  // The runtime renderer enforces its configured UTF-8 byte cap. A static
+  // character-count ceiling here would incorrectly retain the former 32 KiB
+  // policy when a larger experimental cap is selected.
+  document: z.string().min(1),
   renderer_attribution: rendererAttributionSchema.optional(),
   truncated: z.boolean(),
   next_cursor: z.null(),

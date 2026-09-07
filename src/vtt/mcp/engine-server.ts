@@ -208,6 +208,11 @@ export interface AllowlistedRuleEntry extends RuleReference {
 export const SUGGESTED_PLAN_MAX_BYTES = 16 * 1024;
 export const TURN_CONTEXT_MAX_BYTES = 32 * 1024;
 
+export interface TurnContextSizeOmission {
+  readonly actorId: string;
+  readonly count: number;
+}
+
 function encodedJsonBytes(value: unknown): number {
   return new TextEncoder().encode(JSON.stringify(value)).byteLength;
 }
@@ -272,6 +277,7 @@ interface EngineMcpDependencies {
     readonly postTrimBytes: number;
     readonly features: CircumstanceFeatureVector;
     readonly removals: RendererRemovalCounts;
+    readonly optionsOmittedForSizeByActor: readonly TurnContextSizeOmission[];
   }) => void;
   readonly kbReadBudget?: KbReadBudget;
   readonly kbReadCallPhase?: KbReadCallPhase;
@@ -2113,6 +2119,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
           postTrimBytes: prose.postTrimBytes,
           features,
           removals: rendered.removals,
+          optionsOmittedForSizeByActor: prose.optionsOmittedForSizeByActor,
         });
         shownOptionIdsByActor = prose.shownOptionIdsByActor;
         dependencies.onTurnContext?.(structuredClone(prose.context));
@@ -2479,6 +2486,18 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         postTrimBytes,
         features,
         removals: rendered.removals,
+        optionsOmittedForSizeByActor: (() => {
+          const contextRecord = context as Readonly<Record<string, unknown>>;
+          return (Array.isArray(contextRecord['actors']) ? contextRecord['actors'] : [])
+            .flatMap((value): readonly TurnContextSizeOmission[] => {
+              if (typeof value !== 'object' || value === null || Array.isArray(value)) return [];
+              const actor = value as Readonly<Record<string, unknown>>;
+              return typeof actor['actor_id'] === 'string' &&
+                typeof actor['options_omitted_for_size'] === 'number'
+                ? [{ actorId: actor['actor_id'], count: actor['options_omitted_for_size'] }]
+                : [];
+            });
+        })(),
       });
       dependencies.onTurnContext?.(structuredClone(context));
       return context;

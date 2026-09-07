@@ -247,6 +247,7 @@ export interface EngineMcpLauncherManifest {
   readonly toolProfile?: EngineMcpToolProfile;
   readonly turnContextDeltaBase?: TurnContextDeltaBase;
   readonly rendererProfile?: RendererProfile;
+  readonly turnContextMaximumBytes?: number;
   readonly initiativeProjection?: EngineInitiativeProjection;
   readonly boardImage?: EngineMcpBoardImageBinding;
 }
@@ -283,6 +284,7 @@ export function createEngineMcpRuntime(
       readonly postTrimBytes: number;
       readonly features: CircumstanceFeatureVector;
       readonly removals: RendererRemovalCounts;
+      readonly optionsOmittedForSizeByActor: readonly import('./engine-server').TurnContextSizeOmission[];
     }) => void;
     readonly initiativeProjection?: EngineInitiativeProjection;
     readonly onTurnContext?: (context: Readonly<Record<string, unknown>>) => void;
@@ -730,6 +732,9 @@ function isLauncherManifest(value: unknown): value is EngineMcpLauncherManifest 
     })()) &&
     (input['toolProfile'] === undefined || input['toolProfile'] === 'full' || input['toolProfile'] === 'dm') &&
     (input['rendererProfile'] === undefined || rendererProfileSchema.safeParse(input['rendererProfile']).success) &&
+    (input['turnContextMaximumBytes'] === undefined ||
+      Number.isSafeInteger(input['turnContextMaximumBytes']) &&
+      typeof input['turnContextMaximumBytes'] === 'number' && input['turnContextMaximumBytes'] >= 1) &&
     (input['boardImage'] === undefined || isEngineMcpBoardImageBinding(input['boardImage']));
 }
 
@@ -818,6 +823,9 @@ export async function runEngineMcpEntrypoint(argv: readonly string[] = process.a
       }),
       ...(manifest.rendererProfile === undefined ? {} : {
         rendererProfile: manifest.rendererProfile,
+      }),
+      ...(manifest.turnContextMaximumBytes === undefined ? {} : {
+        turnContextMaximumBytes: manifest.turnContextMaximumBytes,
       }),
       ...(manifest.initiativeProjection === undefined ? {} : {
         initiativeProjection: manifest.initiativeProjection,
