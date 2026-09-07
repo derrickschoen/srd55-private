@@ -13267,3 +13267,13 @@ prove semantic_board_truncated is empty and the actors bytes equal the
 control's on all 10 hard rooms and the 10 brutal rooms, then rerun the
 judged arms (hard, and brutal with --protocol brutal-10). The brutal
 arms for the current build are cancelled as uninformative.
+
+## Classic5 mini-A/B PASS at 8661cdbc; merging claude/classic-r5 into main (2026-09-06 21:45)
+
+D429.1 mini-A/B (brutal 10x1, seed 6203001, full intel, default
+profile, quiet box): luna medium 10/10 authorized, first decision
+accepted 10/10, attempts [2,1,1,1,1,1,1,1,1,1], round-1 offense
+[1,1,2,2,3,2,0,2,3,1] (offensive slots = attack or cast_spell with
+targets) = era controls exactly; luna low identical on every vector and
+equal to the intel-leak PASS run. No escalation. Merging from the main
+repo with the full browser suite as the landing gate.
