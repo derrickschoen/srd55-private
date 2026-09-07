@@ -13152,3 +13152,43 @@ and prove the same helper at 64 reproduces main's D516 pin 1140x1012 /
 an order check against an independent initiative source, no renderer
 change beyond an optional initiative-index attribute. Only the two
 specs rerun on the lane port; the full browser suite reruns at landing.
+
+## FINDING: main's footprints token layer shrinks classic sprites to 125.47 px (merge regression); classic-gate-fix lane resumed with a CSS-only fix authorized (2026-09-06 21:11)
+
+Codex (lane classic-gate-fix) delivered both spec fixes and stopped
+BLOCKED, correctly: with the roster-order pin gone, the next assertion
+in the same test (every .encounter-token-sprite rendered width ===
+naturalWidth === 128) fails at 125.46875 px for all nine sprites.
+Codex's claims: board-chrome.test 23/23, tsc 0, Playwright 3/4 with the
+snapshot spec green. Not yet verified by me beyond the diff review below.
+
+Diff review (mine): codex extracted the chrome layout table and
+boardChromeMetrics/boardChromeDimensions into src/vtt/board-chrome-layout.ts
+so the browser spec can import it without the DOM renderer; a line-by-line
+check shows 280 removed lines all present in the new module except a
+comment reflow and the combatants type narrowed to { name: string }.
+board-chrome.ts re-exports the same names. Snapshot spec now derives its
+expected size from boardChromeDimensions at 128 and asserts the 64-px
+case reproduces D516's 1140x1012 / 1588x1140. Roster test: multiset
+equality of names plus roster combatant ids === the DM initiative strip's
+combatant ids (an independent DOM source).
+
+Cause of the sprite shrink (mine): merge 599fbe79 brought main's
+footprints token layer (src/vtt/styles.css): `.encounter-shell
+.encounter-token { margin: 0.08rem }` inside a var(--encounter-tile-size)
+grid track, sprite `width: 100%`; pre-merge classic positioned the
+token absolutely with inset 0.08rem and the sprite held the lattice.
+Proof: the same spec file on the pre-merge classic tip 67e98afa
+(dnd-wt-probe-run, port 4722) passes 3/3 including the bust assertion
+(premerge-vtt-encounter.log). This is a D533 "no fractional scaling"
+regression introduced by the merge, invisible on main because main
+never asserted sprite integrality.
+
+Ruling: the assertion stands. Lane resumed (same session
+01a0795f-595e-7bf1-82fc-0e7cc678ab75, confirmed by the printed id;
+brief classic-gate-fix-amend.md) with authorization for a CSS-only fix
+that keeps main's token-space semantics (grid layer, multi-cell
+footprints, selection, listbox roles, markers) and makes the sprite box
+exactly N*128; verification: the two specs 4/4, every browser spec that
+references the token layer / footprints / awaiting_placement, the unit
+specs touching styles/board-chrome, tsc.
