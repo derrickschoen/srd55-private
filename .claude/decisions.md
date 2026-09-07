@@ -14624,3 +14624,27 @@ half cover and their space is difficult terrain as the SRD says. The
 map draws both cues per feature (tier mark and a crossable mark),
 the legend names both, and the query tool reports both. Increment 1a
 dispatched with this ruling.
+
+## D576 finding: the current line tracer is thin; ray-casting assessment delivered, owner question pending (2026-09-07 13:38)
+
+Owner asked: "Look into the possibility of ray casting for Los".
+
+Supervisor measurement (scratch vitest against src/combat/cover.ts
+rasterizeInterveningCells, not committed): reversal symmetry holds
+(8x8 board, 4096 ordered pairs, 0 differences). Against an exact
+interior-crossing trace of the same centre-to-centre segment on a
+10x10 board: 5496 of 10000 pairs differ, 13904 crossed cells skipped,
+0 cells added. Simplest case A1->B3 skips A2, so a wall at A2 blocks
+neither sight nor cover although the drawn line clips it. Increment 1a
+as dispatched keeps this tracer.
+
+Options presented: (1) exact supercover of the single centre ray;
+(2) 2014 DMG corner-to-corner rule (attacker corner to four target
+corners, 0/1-2/3/4 obstructed lines = none/half/three-quarters/total,
+line tier = strongest feature crossed, result capped at the strongest
+feature tier, sight = any line free of walls; reuses the existing
+corner geometry the plan deletes); (3) wall-edge model (rejected as a
+data-model change). Recommendation: (2) over an integer-exact trace.
+Owner asked one question: option 2 or option 1. Lane los-cover-i1a
+continues on the centre-line rule until the owner answers; a change
+is a plan amendment and a re-dispatch.
