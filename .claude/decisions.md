@@ -13690,3 +13690,25 @@ claude/a10-unknown and the v9-checklist primer on claude/e3-checklist,
 neither of which carries E1b's encoding. Fix: a tuning tree that merges
 both lanes onto claude/e1-semantic (codex merge lane d568-tune), then
 the factors run there. No result was recorded from the misfire.
+
+## E1cb brutal arms complete; packet-build misfire (mine) and recovery; brutal panel running (2026-09-07 00:11)
+
+Rows (budget-fixed build ca43be82, brutal 10x3, seed 6203001, 240 s):
+luna_facts 25 authorized / 5 partial_execution, all first-attempt;
+luna_control 29 authorized / 1 partial, 25x1/5x2 attempts; sol_facts 26
+authorized / 3 partial / 1 refused (attempts 0). semantic_board_truncated
+[] on 30/30 facts rows. The brutal basis exercises partial executions
+that the hard basis never showed.
+
+Misfire, mine: I built the brutal packets with the packet-brutal
+worktree's builder (main lineage) against E1c-lineage rows; it threw
+"row 1 must carry boardImage and uiFeedback together" (the intel-leak
+row schema post-dates E1c), my exit check read the pipe's tail instead
+of the builder, and the judge runner launched on missing packets. Killed
+the runner and its three judge children by pid within a minute, deleted
+the bogus judge files, removed the empty start line from
+judge-e1cbb.log. Recovery: cherry-picked 7b1183e7 (--protocol
+brutal-10) onto claude/e1c-dm-facts cleanly (4b5cbd26), its protocol
+test 3/3 there, rebuilt both packets with the E1c tree's own builder
+(60 entries each, protocol brutal-10, shuffle 9063), relaunched the
+panel. Lesson already on record (read the verdict, not the pipe).
