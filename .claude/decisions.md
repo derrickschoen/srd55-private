@@ -13288,3 +13288,40 @@ chromium suite ~55 min). :4173 restarted on the merged tree (old
 serve.mjs pid 203215 killed; relaunch in a separate call). Codex lane
 e1c-budget keeps running in its own worktree; LOAD FLAKES, if any, are
 rerun serially by the gate runner and never re-pinned.
+
+## e1c-budget harvest: committed ca43be82 on claude/e1c-dm-facts; judged arms relaunched on the fixed build (2026-09-06 22:25)
+
+Codex delivered SEMANTIC_BOARD_MAX_BYTES (8 KiB, injectable) on top of
+the 32 KiB cap, base context capped first and byte-identical to flag-off,
+block truncation against its own allowance only, baseContextBytes on the
+row, and the consumer-side limit in ai-dm-conversation.ts extended by the
+same 8 KiB. Unrequested but justified change: the block is now built by a
+new engine-safe projectEngineSemanticBoard because the original E1c path
+(projectDmView + projectDmBoard) pulled src/combat/encounter.ts (the
+reducer) into the standalone MCP graph and failed
+tests/unit/tools/engine-mcp-boundary.test.ts, a full-gate test the E1c
+harvest's four-spec run never exercised (finding against that harvest,
+mine). The new projection copies the hitPointKnowledge thresholds rather
+than calling them; acceptable only because equality is proven below, and
+noted as drift risk.
+
+Codex claimed: 9 specs 234/234, tsc 0, two mutants killed (allowance
+ignored 2 fails; order reversed 1 fail), a 20-seed proof table with equal
+base bytes and no truncation.
+
+Verified myself: forbidden scans clean, lane log only the header's own
+claude mention, contracts.ts hash unchanged; my own vite-node script on
+all 10 hard + 10 brutal fixtures at the round-1 request: semantic payload
+from the old UI projection == payload from the engine projection
+(canonical JSON) 20/20, base context on == off byte-for-byte 20/20,
+block 5.1-7.4 KB, truncated [] everywhere (bytes match codex's table to
+within the run-id label length). 9 spec files + engine-mcp-boundary
+234/234 (my run), tsc 0. Supervisor mutant: baseContextBytes reported as
+base + block on the structured path kills 2 tests (delivery row
+telemetry, handler telemetry); restored byte-identical. A first mutant
+of mine landed in the prose branch (dead for this feature) and survived
+meaninglessly; recorded so nobody counts it.
+
+Judged arms relaunched on ca43be82: hard R1-10 x3 (luna+facts, luna control,
+sol+facts) then brutal 10x3 with the same three arms, 240 s wall, rows
+to ~/dnd-slim-runs/e1cb-*.jsonl.
