@@ -15041,3 +15041,73 @@ eligible seats is rejected rather than reported.
 
 Both amendments dispatched as lane blind-dm-i6a, session
 01a07dc7-8e17-7071-8323-5bfacaeb5eff.
+
+## D578.3 — OWNER: a model may judge its own play from a fresh context; supersedes the recusal rule (2026-09-07 17:40)
+
+Owner (verbatim): "It is ok for the same model to judge if it starts
+from a fresh context"
+
+This SUPERSEDES the recusal half of D578 item 2 and the eligibility
+clause of D578.2. Fresh context, not model identity, is the safeguard.
+judge-one.sh already satisfies it: every seat is a new codex or claude
+invocation per packet with no prior conversation, no arm identities, no
+answer key and no other seat's scores.
+
+Consequences applied:
+- The pool3 packet is scored by all three seats. Sol high may score the
+  sol-high arm. The D572 struggle-room selector returns to its original
+  unanimous THREE-seat rule; the two-eligible-seat amendment is void.
+- The parts of D578 item 2 that survive are the ones about context
+  isolation, not identity: a judge session must carry no decision
+  conversation, no arm identity, no answer key and no other seat's
+  scores, and the rubric, exclusions and aggregation stay frozen before
+  scoring with Claude holding the key.
+- Lane blind-dm-i6a was dispatched BEFORE this ruling and carries the
+  now-void instruction to encode judge eligibility excluding any model
+  playing on either side. It will be corrected in a follow-up rather
+  than interrupted mid-turn. Amendment B of that lane, dropping the
+  Fable player arm, is unaffected and stands.
+
+## D576.3 corner rule harvested and committed (d2536fce on claude/los-cover) (2026-09-07 17:40)
+
+Codex session 01a07d9c-9bef-7a52-b362-b42710290c40 ended at
+LOS-COVER-I1A-CORNER-READY. Claims: 25 spec files 904 tests; tsc exit 0
+under the lock; 15 named mutants applied, killed and restored; frozen
+fixture aggregate and contracts.ts unchanged; era census re-run.
+
+Supervisor verified independently: the same 25 specs 25 files / 904
+tests passed; tsc exit 0; contracts.ts hash unchanged; zero fixture
+files modified; no forbidden patterns in the diff; no git write commands
+and no claude invocation in the lane log. Four tests were removed and
+eleven added: three of the four were centre-ray-specific mutant guards
+correctly replaced by corner equivalents, and the fourth pinned the old
+rasterizer's diagonal order and reversal symmetry. That rasterizer is no
+longer used by any production file, which the call-site test now
+enforces, and survives only as the era audit's legacy oracle; the loss
+of its symmetry pin is a small accepted gap recorded here rather than
+hidden.
+
+Pin ledger, checked line by line: only two assertions moved, both in
+tactical-evaluator-r02, and each carries its independent invariant
+inside the test, hand-counted source corners with explicit per-line
+tiers, named d20 miss/normal/critical weights out of 20 and out of 40
+under Bless, and a closed-form death-save convolution written in the
+test. Neither number was regenerated from engine output. The other
+eleven authorized expectations went green under the corner rule and
+were not touched, so eleven of the thirteen pins I had authorized did
+not need to move at all.
+
+Supervisor mutant M-SUP-CORNER-COUNT-OFF-BY-ONE shifted the DMG count
+thresholds so that two obstructed lines read three_quarters instead of
+half: killed by 3 tests, including the named "a wall corner clipping two
+lines yields Half Cover" case, and restored to 74edbb0a...
+
+Era census delta, corner rule against centre ray, all 63 rooms and 3470
+ordered living pairs: cover tier changes fall from 1771 to 1522 and
+sight changes fall from 1680 to 736, which is expected because sight now
+requires all four lines to cross a wall. The important result is that
+three_quarters cover EXISTS for the first time, 40 half-to-three-quarters
+and 18 none-to-three-quarters transitions, where the centre ray produced
+zero. Astra's requirement that D576 verification include explicit
+three-quarters fixtures is therefore partly met by the geometry itself,
+though authored three-quarters features are still needed in increment 2.
