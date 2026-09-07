@@ -14456,3 +14456,19 @@ must pass first, then luna medium, tuning art and primer. No per-pair
 LoS in JSON. All other lanes continue; this unit has priority for
 dispatch and model lanes. Plan lane dispatched (codex), critique before
 implementation.
+
+## D576.1 — OWNER: the engine must answer line-of-sight questions from one cell to another for the AI DM (2026-09-07 10:54)
+
+Owner (verbatim): "The engine will need to be able to answer questions
+about los from one cell to another from the ai dm"
+
+Reading: an engine query tool, cell to cell (source cell, target cell,
+optional acting creature so its footprint and size apply), returning
+line of sight (yes/no and the blocking cell) and the cover tier the
+target would have from that source under the same rasterization rule
+the map teaches; exposed on the DM MCP surface in both advice and
+blind profiles (a rules fact a human would ask the table, not a
+recommendation), counted in the blind ingress audit as an allowed
+fact channel, rate-limited like KB reads so a model cannot brute-force
+every pair (report the budget as a knob), and recorded per call on the
+row. Added as a required section for the D576 plan's round-2 critique.
