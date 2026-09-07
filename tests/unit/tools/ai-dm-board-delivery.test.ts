@@ -193,11 +193,17 @@ describe('board image parsing and row evidence', () => {
     const conversationBase = ['--rooms', '1', '--rounds', '1', '--out', join(directory, 'c.jsonl')];
     const arenaBase = ['--rooms', '1', '--reps', '1', '--seed', '3943001', '--out', join(directory, 'a.jsonl')];
     expect(parseConversationArgs(conversationBase).boardImageMode).toBe('off');
+    expect(parseConversationArgs(conversationBase).turnContextMaximumBytes).toBe(32 * 1024);
+    expect(parseConversationArgs([
+      ...conversationBase, '--turn-context-max-bytes', '24576',
+    ]).turnContextMaximumBytes).toBe(24 * 1024);
     expect(parseConversationArgs([...conversationBase, '--board-image', 'off']).boardImageMode).toBe('off');
     expect(parseConversationArgs([...conversationBase, '--board-image', 'png']).boardImageMode).toBe('png');
     expect(parseConversationArgs([...conversationBase, '--board-image', 'capture_only']).boardImageMode)
       .toBe('capture_only');
     expect(parseArenaArgs(arenaBase).boardImageMode).toBe('off');
+    expect(parseArenaArgs([...arenaBase, '--turn-context-max-bytes', '49152']).turnContextMaximumBytes)
+      .toBe(48 * 1024);
     expect(parseArenaArgs([...arenaBase, '--board-image', 'off']).boardImageMode).toBe('off');
     expect(parseArenaArgs([...arenaBase, '--board-image', 'png']).boardImageMode).toBe('png');
     expect(parseArenaArgs([...arenaBase, '--board-image', 'capture_only']).boardImageMode)
@@ -212,6 +218,72 @@ describe('board image parsing and row evidence', () => {
     expect(() => parseArenaArgs([
       ...arenaBase, '--board-image', 'png', '--transport', 'final_indices',
     ])).toThrow('--board-image png requires --transport mcp_minimal');
+  });
+
+  it('keeps image bytes outside turn-context and maximum-tool-result accounting', async () => {
+    const state = await loadArenaFixture('tests/fixtures/arena-basis-hard/seed-5117005.json');
+    const maximumBytes = 24 * 1024;
+    const png = dimensionedPng('image-accounting-mutant', 900_000);
+    const evidence: Array<{
+      readonly preTrimBytes: number;
+      readonly postTrimBytes: number;
+      readonly removals: unknown;
+    }> = [];
+    const runtime = (withImage: boolean) => createEngineMcpRuntime(state, {
+      toolProfile: 'dm',
+      turnContextMaximumBytes: maximumBytes,
+      maximumToolResultBytes: maximumBytes,
+      onTurnContextRendered: (value) => { evidence.push(value); },
+      ...(withImage ? {
+        boardImageContent: { type: 'image' as const, mimeType: 'image/png' as const, data: png.toString('base64') },
+      } : {}),
+    });
+    const call = (withImage: boolean) => {
+      const selected = runtime(withImage);
+      const capsule = selected.feed.current();
+      const response = selected.handler.handle({
+        jsonrpc: '2.0', id: withImage ? 'image' : 'off', method: 'tools/call',
+        params: {
+          _meta: META,
+          name: 'engine.get_turn_context',
+          arguments: {
+            run_id: capsule.runId,
+            expected_revision: capsule.revision,
+            scope: 'round',
+            granularity: 'full',
+            intel_mode: 'full',
+          },
+        },
+      });
+      const result = record(record(response, 'MCP response')['result'], 'MCP result');
+      const context = record(result['structuredContent'], 'MCP structured content');
+      return { result, context };
+    };
+    const off = call(false);
+    const image = call(true);
+    const optionIds = (context: Readonly<Record<string, unknown>>) => {
+      const actors = context['actors'];
+      if (!Array.isArray(actors)) throw new TypeError('Turn context omitted actors.');
+      return actors.flatMap((actorValue) => {
+        const options = record(actorValue, 'turn-context actor')['options'];
+        if (!Array.isArray(options)) throw new TypeError('Turn-context actor omitted options.');
+        return options.map((option) => String(record(option, 'turn-context option')['option_id']));
+      });
+    };
+
+    expect(png.byteLength).toBeGreaterThan(maximumBytes);
+    expect(image.result['isError']).toBe(false);
+    expect(off.context).toEqual(image.context);
+    expect(optionIds(off.context)).toEqual(optionIds(image.context));
+    expect(off.context['semantic_board_truncated']).toBe(image.context['semantic_board_truncated']);
+    expect(evidence).toHaveLength(2);
+    expect(evidence[0]).toEqual(evidence[1]);
+    expect(evidence[0]?.postTrimBytes).toBeLessThanOrEqual(maximumBytes);
+    expect(evidence[0]?.preTrimBytes).toBeGreaterThan(evidence[0]?.postTrimBytes ?? maximumBytes);
+    const content = image.result['content'];
+    if (!Array.isArray(content)) throw new TypeError('Image MCP result omitted content blocks.');
+    expect(content.map((block) => record(block, 'MCP content block')['type'])).toEqual(['text', 'image']);
+    expect(Buffer.byteLength(JSON.stringify(image.context))).toBe(evidence[1]?.postTrimBytes);
   });
 
   it('effort_field_defaults_silently is killed by required current fields and explicit D510 null evidence', () => {

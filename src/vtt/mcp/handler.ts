@@ -144,6 +144,43 @@ function decodedPng(block: McpImageContentBlock): Buffer {
   return bytes;
 }
 
+interface JsonSerializationViolation {
+  readonly path: string;
+  readonly kind: string;
+}
+
+function childJsonPath(path: string, key: string): string {
+  return /^[A-Za-z_$][A-Za-z0-9_$]*$/u.test(key)
+    ? `${path}.${key}`
+    : `${path}[${JSON.stringify(key)}]`;
+}
+
+function jsonSerializationViolation(
+  value: unknown,
+  path = '$',
+  ancestors: ReadonlySet<object> = new Set(),
+): JsonSerializationViolation | null {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return null;
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? null : { path, kind: 'non-finite number' };
+  }
+  if (typeof value !== 'object') return { path, kind: typeof value };
+  if (ancestors.has(value)) return { path, kind: 'circular reference' };
+  const nestedAncestors = new Set(ancestors).add(value);
+  if (Array.isArray(value)) {
+    for (let index = 0; index < value.length; index += 1) {
+      const violation = jsonSerializationViolation(value[index], `${path}[${String(index)}]`, nestedAncestors);
+      if (violation !== null) return violation;
+    }
+    return null;
+  }
+  for (const [key, entry] of Object.entries(value)) {
+    const violation = jsonSerializationViolation(entry, childJsonPath(path, key), nestedAncestors);
+    if (violation !== null) return violation;
+  }
+  return null;
+}
+
 function toolResult(
   value: unknown,
   maximumBytes: number,
@@ -159,6 +196,12 @@ function toolResult(
     typeof value['document'] === 'string'
     ? value['document']
     : null;
+  const serializationViolation = jsonSerializationViolation(value);
+  if (serializationViolation !== null) {
+    throw new TypeError(
+      `Tool result is not JSON serializable at ${serializationViolation.path}: ${serializationViolation.kind}.`,
+    );
+  }
   const text = proseDocument ?? JSON.stringify(value);
   if (text === undefined) throw new TypeError('Tool result is not JSON serializable.');
   const bytes = new TextEncoder().encode(text).byteLength;
