@@ -14325,3 +14325,19 @@ null, primary option = actorOpportunityReport(...).defaultOption; the
 existing --dry-run records a simulated model instead), a selection tool
 with unanimous three-seat rule and --freeze. Claims 4 files 84/84 + 15/
 15, tsc 0, five mutants killed. Verification chain running.
+
+## Increment 2 and pool verification: specs/Playwright/tsc green; my first mutants void; engine-top row field finding (2026-09-07 09:53)
+
+Increment 2, my run: 7 spec files 118/118, the snapshot browser spec
+2/2 on port 4725 (wrapper config), tsc 0; the MCP boundary test fails
+exactly as codex said (graph reaches src/combat/encounter.ts and
+random.ts), owed to increment 1b and queued for repair. Pool, my run:
+5 spec files 99/99, regeneration byte-identical 30/30, an engine-top
+dry run on three pool rooms authorized with planner "engine_top" and
+plannedBy null, tsc 0. Both of my mutants targeted patterns that do not
+exist in the code (void, recorded so they are not counted); real
+mutants follow at the actual guard sites before either commit.
+Finding on the pool: engine-top rows still record model "gpt-5.6-sol";
+the packet strips model identity so blinding holds, but the row lies
+and the arm must record model null (or "engine") before the screening
+runs; sent with the commit gate.
