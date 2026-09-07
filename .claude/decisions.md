@@ -14540,3 +14540,24 @@ least-obstructed ray; the E1b semantic payload versioned with a
 per-cell terrain partition in increment 3, never pair answers.
 Consensus; no round 3. Increment 1a waits on the owner's ruling on
 half-cover movement, per the plan's own first scope line.
+
+## D574 committed c22484a0; D572 pool screen and D573 low brutal panels (2026-09-07 11:54)
+
+D574 verified myself: 6 spec files incl. the MCP boundary test 192/192,
+tsc 0, byte report reproduced (33 fixtures, base 15,122-42,118, none
+truncated), my mutant (attack bonus nulled) makes the strict schema
+reject the block at render so the test file fails at setup; restored.
+Committed on claude/blind-dm.
+
+D572 screen (30 pool rooms, 1 rep, advice mode, panel):
+- sol_high - luna_medium = -0.38 [-0.86, +0.03]: luna medium scores
+  above sol high on these rooms at one rep.
+- luna_medium - engine_top = +0.34 [-0.11, +0.89].
+- sol_high - engine_top = +0.08 [-0.17, +0.33]: the engine's own top
+  recommendation plays about as well as sol high with advice on the
+  pool. Selection by room and seat follows with the selection tool.
+
+D573 luna low, brutal facts vs control: -0.12 [-0.39, +0.14]: null,
+matching medium on brutal. D573 verdict complete: at luna low the cap
+sweep has the same shape as medium and sharper (24 = 32, larger caps
+hurt more), facts hurt on hard (-0.33) and are null on brutal.
