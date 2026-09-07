@@ -13232,3 +13232,38 @@ python for any text with backticks) was already recorded and I broke
 it. Repaired the text in place via python; no command with side effects
 ran (the selector is not an executable). From here every decisions.md
 append goes through python with the hash passed as an argument.
+
+## E1c judged panel verdict: facts in the live context LOST on the hard basis, and the mechanism is a budget collision, not the facts (2026-09-06 21:29)
+
+Panel (sol/opus/fable, blinded, hard R1-10 x3, 240 s wall, unseal-e1c.md):
+- luna_facts - luna_control: -0.38, seed-clustered 95% CI [-0.78, +0.02]
+  (control 8.81, facts 8.43). Rubric: targetPriority 2.69 -> 2.46,
+  coherence 1.80 -> 1.62, action economy and positioning unchanged.
+  Rooms 5117004/5117006/5117009 lost 1.1-1.3; 5117003/5117005 gained 0.6.
+- sol_facts - luna_facts: +0.82 [+0.24, +1.46] (7.61 vs 8.43 in that
+  packet). Sol high with the same context stays clearly ahead.
+No escalation fired in any arm (all escalationEffort null; owner asked
+whether luna medium numbers were secretly luna high: no, checked rows).
+
+Mechanism (mine, from the rows and the E1c diff, dd237874
+src/vtt/mcp/engine-server.ts): the semantic_board block is appended to
+the full turn context and the WHOLE context is then held under the
+existing turnContextMaximumBytes cap; when over, the block's fact classes
+are deleted in order light -> adjacency -> objects. Result on every one
+of the 30 facts rows: semantic_board_truncated = [light, adjacency,
+objects] (30/30), the delivered block is a 2.5-3.0 KB stub (identity,
+positions, side, HP), and the actors section shrank from 31.5 KB to
+28.6 KB in the room-1 pair (total context 32.7 vs 32.6 KB). So the arm
+measured "a stub board block replacing 3 KB of actor detail", which is
+exactly where target priority and coherence would suffer. The fact
+classes that carried the probe gains (light .66 -> .99, obscured .87 ->
+1.00) never reached the DM. This is an E1c implementation flaw, not a
+verdict on D565's direction.
+
+Ruling (supervisor): E1c does not land as built. Next lane (e1c-budget):
+give semantic_board its own byte allowance on top of the cap so it never
+displaces actors, truncate its classes only against its own allowance,
+prove semantic_board_truncated is empty and the actors bytes equal the
+control's on all 10 hard rooms and the 10 brutal rooms, then rerun the
+judged arms (hard, and brutal with --protocol brutal-10). The brutal
+arms for the current build are cancelled as uninformative.
