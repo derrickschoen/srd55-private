@@ -14482,3 +14482,39 @@ direction. At luna medium the same contrast was -0.11 [-0.53, +0.34].
 So the extra facts, which lift comprehension at low, lower judged play
 at low: consistent with the cap sweep (a bigger context hurts the
 weaker model more). Brutal at low pending (control arm running).
+
+## D576 plan round 1 received (458 lines); supervisor critique sent as round 2; era boundary declared (2026-09-07 11:25)
+
+Plan (copied to the main repo as .tmp-plans/2026-09-07-line-of-sight-
+and-cover.md): one four-kind terrain vocabulary (open, half_cover,
+three_quarters_cover, wall) carried as an exact wire union of the
+existing blocking triple so frozen bytes stay identical; blocked cells
+normalize to wall at the query boundary; one centre-to-centre trace
+(existing rasterization, strongest crossed tier, wall = no sight and
+total cover, endpoints excluded, living creatures give half cover);
+multi-cell creatures use the least-obstructed occupied-cell ray for
+both sight and cover, replacing the corner-ray system and the
+query-port's duplicate sight rule; all consumers cut over with a
+parity test; opt-in generator profile with all tiers exercised per
+room and legacy bases byte-identical; four native art treatments with
+measured invariants; probe classes Q11-Q14 (pair and creature-to-cell
+sight and cover) with production ground truth, PNG-only acceptance,
+sol high then luna medium at 0.90 per class; a blind-guide amendment;
+a pin ledger; six increments. Verified baseline findings match what I
+read myself earlier (hasLineOfSight ignores blockedCells; templates
+treat them as opaque; walk-through cover objects in D365 and Vane).
+
+Critique sent (round 2): D576.1's query tool was missing (cell-to-cell
+line and cover for the DM, both profiles, per-round budget, row and
+ingress recording, mutants); split increment 1 into 1a engine core and
+1b authored-content migration plus the tool; a no-model script
+counting, per frozen room, the creature pairs whose sight or cover
+answer changes; surface the half-cover-blocks-movement assumption for
+the owner with the traversable alternative costed; worked examples for
+creature cover and Large creatures; the semantic board's terrain kind
+and no pair answers.
+
+ERA BOUNDARY: once blocked cells block sight, every judged result
+recorded before D576 lands (E1c hard/brutal, E1cb, E1cc, cap sweeps at
+medium and low, brutal-b, pool screening) belongs to the pre-D576 era
+and is not comparable to post-D576 runs on the same seeds.
