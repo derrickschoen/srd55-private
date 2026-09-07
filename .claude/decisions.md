@@ -14855,3 +14855,59 @@ census with a bumped engine_revision and the delta against the
 centre-ray census, and adds three named mutants beyond the twelve:
 CORNER-FIXED-SOURCE, COUNT-WITHOUT-CLAMP, BOUNDARY-GRAZE-BLOCKS.
 Marker LOS-COVER-I1A-CORNER-READY.
+
+## D577 — gpt-6-astra verified available on the installed codex CLI; no upgrade needed (2026-09-07 17:00)
+
+Owner: "Try updating codex to the latest version and see if you can
+make it use the new gpt-6-astra model. You will have to search for the
+right model string".
+
+Findings, all verified rather than read: installed codex-cli is 0.153.4
+and npm's latest dist-tag is also 0.153.4, so there is nothing to
+upgrade to on the stable channel; the only newer build is an alpha
+(0.154.0-alpha.6-linux-x64), which I did NOT install, both because it is
+unnecessary and because replacing the global binary while two lanes are
+mid-run risks killing them. Public documentation says first-class
+gpt-6-astra support landed in 0.153.1, which we are past.
+
+Model string is exactly `gpt-6-astra`. Probe run:
+`codex exec --sandbox read-only -m gpt-6-astra "Reply with exactly:
+ASTRA-OK and nothing else."` returned ASTRA-OK, exit 0, session
+01a07dab-c5e1-7992-a13f-ed91994d7f1f, 7,621 tokens, default reasoning
+effort high. So the model is usable now with no configuration change.
+
+Reported characteristics from the public write-ups, NOT verified by me:
+1.05M context, 128K output, $10 per M in and $50 per M out, natively
+multimodal with image input. If the multimodal claim holds it is
+directly relevant to D576 and D569, where the whole objective is a model
+reading cover and line of sight off the board PNG; astra becomes a
+candidate seat for the screenshot comprehension probe and for the blind
+DM arms. It is roughly the price of a judge seat, so it is not a
+drop-in replacement for luna in bulk arena work.
+
+## D576.4 — elevation and movement modes plan drafted and queued (2026-09-07 17:00)
+
+Owner: "We will need to give every square a height value and each sized
+creature a height value as well. Also we need to account for jumping,
+swimming, climbing and flying".
+
+Supervisor-verified starting facts recorded for the plan: GridCell is
+exactly {column,row} with no elevation anywhere in terrain, state,
+movement or the renderer; MovementKind (walk/burrow/climb/fly/swim)
+exists at src/combat/statblock.ts:30 and statblocks carry speeds, but
+the pathfinder at src/combat/encounter-movement-world.ts never consults
+movement kind, its only flight branch being a difficult-terrain
+immunity check; jumping exists only as the 'jump_movement' action
+effect and cannot cross an obstacle; and the SRD's Creature Size and
+Space table (docs/srd/full/srd-5.2.1.txt:848-860) gives a square
+footprint per size and NO creature height, so any height vocabulary is
+our own design.
+
+Planning brief written to .tmp/runs/briefs-2026-09-06/los-3d-plan.md.
+NOT yet dispatched: it must run in dnd-wt-los-cover, where the corner
+rule lane is currently writing, and two codex lanes must not share a
+worktree. It dispatches the moment that lane ends. The brief requires
+costed alternatives, an assumptions table proved by grep, exact SRD
+locators, and an honest answer on the hardest point, whether elevation
+and creature height can stay legible in a flat top-down PNG, which is
+the requirement the whole of D576 exists to satisfy.
