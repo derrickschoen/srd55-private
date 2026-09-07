@@ -15188,3 +15188,45 @@ Supervisor decision: item 1 is a bug in data we author that would
 corrupt an experiment that has not yet run, so it is being fixed now
 rather than queued behind the brainstorm. The rest await the owner's
 direction.
+
+## D578.1/D578.2 harvest (881a6455) and the D579 corrections dispatch (2026-09-07 17:56)
+
+Amendment lane blind-dm-i6a, session
+01a07dc7-8e17-7071-8323-5bfacaeb5eff, ended at
+BLIND-DM-I6A-AMENDMENT-READY. Supervisor verified: the success rule now
+reads refusalRiskDifference.interval.upper <= D569_REFUSAL_RISK_MARGIN
+with the margin its own named 0.00 constant, and an interval that is
+missing, non-finite or reversed cannot qualify; manifest is
+d569-blind-experiment-v2 with both amendments recorded as pre-results
+and the two Fable player arms plus their three comparisons removed;
+2 spec files 49/49; tsc exit 0; contracts.ts hash unchanged. Supervisor
+mutant M-SUP-I6A-BOUNDARY-EXCLUSIVE changed the at-most comparison to
+strictly-less, so an upper bound of exactly the zero margin would fail:
+killed by 6 tests, including astra's named boundary matrix, and restored
+to 8cbe1e65...
+
+That commit also carries the judge recusal policy the owner superseded
+in D578.3 while the lane was already running, so it is corrected next
+rather than left standing.
+
+Corrections lane blind-dm-i6b dispatched, session
+01a07dde-ab3a-70f1-9ec1-ad70d7b7aae7, with three items:
+1. Rewrite the HP band paragraph in the D570 map guide to state the real
+   thresholds, with the explicit warning that BLOODIED spans a very wide
+   range and is weak evidence of how close a creature is to dropping,
+   keeping all four board-feature markers in place for the coverage
+   test, plus a note that the drawn bar length is a fixed per-band glyph
+   rather than a proportional measure. A new test must fail if the guide
+   and actor-knowledge's thresholds disagree, deriving its boundary
+   cases from the engine function rather than from the prose.
+2. Narrow the reply validator so it still rejects dice expressions,
+   numeric damage, DCs, attack bonuses, coordinates, arrows and reducer
+   or option tokens, but permits the bare tactical nouns damage, path
+   and route, which our own tactics file uses; and correct the guide's
+   "northeast" to the schema's "north_east".
+3. Remove the recusal restriction so all three seats are eligible for
+   every comparison, replacing it with the fresh-session requirement the
+   owner's ruling actually imposes, as a third pre-results amendment
+   quoting the ruling.
+The D570 bundle hash legitimately moves for item 1; the lane must list
+its independent invariant in the same change.
