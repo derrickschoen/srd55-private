@@ -13849,3 +13849,15 @@ phrase, hold by default); codex reran the KB specs 19/19 and I reran
 them 19/19 before committing. Bytes: startup 26,981 delivered
 (protocol.md 7,748), nine components, provenance with section-level
 locators.
+
+## D568 round 1 verdict: v2-evidence REJECTED; light is noisy at low effort; round 2 launched (2026-09-07 00:55)
+
+Tuning tree 09ef9f4b, luna low, facts only, seed 6203001: same-tree v1
+control mean .989 strict PASS (Q5 light .919, Q1 .968); v2-evidence
+mean .970 strict FAIL (Q5 .749, Q1 .955). The factor costs .17 on light,
+far outside the run-to-run spread; rejected for luna low. Observation
+for every later comparison: Q5 light at luna low varies .919-.993 across
+runs of identical inputs (E1b seed 1 .954, seed 2 .993, this control
+.919), so a light gain under ~.05 is noise and needs both seeds and a
+repeat. Round 2 launched: primer-variant v9-checklist as the single
+factor (v1 answer schema, same tree, seed 1).
