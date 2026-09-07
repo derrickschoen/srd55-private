@@ -13942,3 +13942,20 @@ blind context is planned at 64 KiB by necessity (stat blocks + reach);
 this result says luna medium handles 64 KiB of options worse, not that
 it cannot read 64 KiB of facts, but latency at 64 KiB (median 80 s)
 must be budgeted.
+
+## E1 landing merge committed f36fd253 on claude/e1c-land; full gate launched; stray nohup.out removed from main (2026-09-07 01:54)
+
+Codex resolved 15 hunks (list in the lane log) and claims 22 files
+348/348 (including all asset specs), tsc 0, generator idempotent, one
+raw pin moved with three-way identity invariants. My checks before
+committing: zero markers, contracts.ts hash unchanged, no forbidden
+constructs in the merge diff (the one `any` is prose in the merged
+decisions file), the lane log carries only the header's claude mention,
+duplicate generator and its output deleted. Full landing gate on
+wt-e1c-land (tsc, sg, locked vitest, full Playwright) started while the
+four rerun arenas idle-wait on models; LOAD FLAKES are rerun serially
+by the runner and never re-pinned.
+
+Finding on main: nohup.out has been tracked since footprints inc2
+(d5001aa4); removed from main in its own commit. It rides along in the
+landing worktree via main and disappears when main merges back.
