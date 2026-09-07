@@ -13712,3 +13712,31 @@ brutal-10) onto claude/e1c-dm-facts cleanly (4b5cbd26), its protocol
 test 3/3 there, rebuilt both packets with the E1c tree's own builder
 (60 entries each, protocol brutal-10, shuffle 9063), relaunched the
 panel. Lesson already on record (read the verdict, not the pipe).
+
+## FINDING: E1cb brutal panel is dominated by an MCP output-schema defect on adjustment calls; facts arm punished for it (2026-09-07 00:17)
+
+Panel (unseal-e1cbb.md): luna_facts - luna_control -0.32 [-2.21, +1.13];
+sol_facts - luna_facts +0.19 [-1.09, +1.78]. Means ~6/10 with judge
+spread (sol judge 7.97 vs opus 4.77 on the same rows). Per room the
+entire facts deficit is seed 6203001 (control 7.56, facts 0.00 on all
+three reps) plus two reps of 6203004; every zero is a partial_execution
+row (facts 5, sol 3, control 1) and the refused sol row. On authorized
+rows alone luna_facts averages 6.87 vs control 6.25.
+
+Cause (mine, from the rows): each partial row carries the refusal
+`Tool output violated outputSchema: {"violations":[{"path":"$",
+"keyword":"invalid_union","message":"Invalid input"}]}`: the codex CLI
+rejected an engine tool result because the structured content matched
+no member of the declared output-schema union, on the mid-round
+adjustment call (the control row that adjusted after the cleric's turn
+has an adjustments entry; the failing rows have none), so the round
+finished without the adjustment as partial_execution and scored zero.
+The control hits it once; the facts arms hit it 5/30 and 4/30 because
+the semantic-board block changes the emitted shape. Hard basis: zero
+refusals in any arm (no adjustment calls on those rooms). This is an
+engine/MCP contract defect exposed by the brutal basis, not a DM
+quality signal; the D565 brutal measurement is void until fixed. Fix
+lane dispatched on the E1c tree (no model calls: replay the frozen
+6203001 state to the adjustment call, validate against the declared
+schema, fix, add the invariant that every emitted context shape
+validates against its declared outputSchema).
