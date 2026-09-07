@@ -13920,3 +13920,25 @@ against the 180 s live wall (D456), with a 240 s experiment wall.
 Attempts: more second/third attempts at 48/64 (8 and 7 rows) than at
 24 (6). Packets 24/48/64 vs the 32 control (60 entries each) with the
 standing panel; 16 KiB is judged after its rerun on the cap-fix build.
+
+## D567 panel verdict: a larger cap makes luna medium WORSE; 24 KiB equals 32 and is faster (2026-09-07 01:54)
+
+Standing panel, blinded, luna medium, default profile, hard R1-10 x3,
+each cap vs the same-tree 32 KiB control (unseal-cap.md):
+- 24 vs 32: cap32 - cap24 = +0.07 [-0.08, +0.24] (9.18 vs 9.24): no
+  difference; 24 KiB turns are 9 s faster at the median (50 vs 59 s).
+- 48 vs 32: -0.29 [-0.64, +0.07] (8.98 vs 9.27).
+- 64 vs 32: -0.34 [-0.57, -0.10] (8.90 vs 9.24): worse, interval
+  excludes zero, with median turn 80 s and mean 105 s.
+Reading: the 32 KiB cap does not starve luna medium; giving it more
+options and more actor detail lowers judged play and raises latency,
+consistent with the E1c facts result (a bigger, richer context did not
+help either). The pruned, offense-first shortlist is doing work for
+luna medium. Open question for the fixed 16 KiB rerun: whether the
+compact end still holds at 16 (5 rooms fall to the 5 KB compact form).
+Hard basis is at 9.2/10, so a brutal pass at 24 vs 32 is the follow-up
+if the owner wants the cap lowered for latency. Note for D569: the
+blind context is planned at 64 KiB by necessity (stat blocks + reach);
+this result says luna medium handles 64 KiB of options worse, not that
+it cannot read 64 KiB of facts, but latency at 64 KiB (median 80 s)
+must be budgeted.
