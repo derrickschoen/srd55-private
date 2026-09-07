@@ -58,8 +58,8 @@ export const compassDirectionSchema = z.enum(COMPASS_DIRECTIONS);
 export type CompassDirection = z.infer<typeof compassDirectionSchema>;
 
 const COORDINATE_TOKEN = /(?:^|[^\p{L}\p{N}_])\d+\s*,\s*\d+(?:$|[^\p{L}\p{N}_])/u;
-const PATH_OR_COMMAND_TOKEN = /(?:->|=>|\b(?:path|route|option_(?:id|ref)|primary_option|fallback_option|reducer|reduce|execute|dispatch|apply)\b)/iu;
-const ENGINE_MECHANICS_TOKEN = /(?:\b\d+d\d+(?:\s*[+-]\s*\d+)?\b|\b(?:damage|dice|die\s+result|roll\s+result|result\s*=|modifier|attack\s+bonus|save\s+dc|dc\s*\d+)\b)/iu;
+const PATH_OR_COMMAND_TOKEN = /(?:->|=>|\b(?:option_(?:id|ref)|primary_option|fallback_option|reducer|reduce|execute|dispatch|apply)\b)/iu;
+const ENGINE_MECHANICS_TOKEN = /(?:\b\d+d\d+(?:\s*[+-]\s*\d+)?\b|\b(?:dice|die\s+result|roll\s+result|result\s*=|modifier|attack\s+bonus|save\s+dc|dc\s*\d+)\b|\bdamage(?:\s+\p{L}+){0,2}\s*[:=]?\s*\d+\b|\b\d+(?:\s+\p{L}+){0,3}\s+damage\b)/iu;
 
 function isModelSafeProse(value: string): boolean {
   return !COORDINATE_TOKEN.test(value) &&
@@ -72,7 +72,7 @@ function boundedModelString(maximum: number, label: string): z.ZodString {
     .trim()
     .min(1)
     .max(maximum)
-    .refine(isModelSafeProse, `${label} must not contain coordinates, paths, engine ids, mechanics, or commands.`);
+    .refine(isModelSafeProse, `${label} must not contain coordinates, engine ids, numeric mechanics, or commands.`);
 }
 
 export const blindBoundedNameSchema = boundedModelString(120, 'Name');

@@ -39,6 +39,9 @@ import {
   type KbReadRecord,
 } from '../../../src/vtt/mcp/knowledge-base';
 import { ENGINE_TOOL_SPECS } from '../../../src/vtt/mcp/schemas';
+import { createEncounter } from '../../../src/combat/encounter';
+import { hitPointKnowledge } from '../../../src/vtt/intel/actor-knowledge';
+import { monsterProfile, placedToken } from '../combat/fixtures';
 
 const fixturePaths = [
   'tests/fixtures/ai-dm-kb/ai-dm-core.md',
@@ -334,6 +337,48 @@ describe('D569 shared blind/advice knowledge-base fixture package', () => {
       component.byteCount <= D569_KB_COMPONENT_MAX_BYTES)).toBe(true);
     expect(Buffer.byteLength(advice.startupInstructions, 'utf8'))
       .toBeLessThanOrEqual(D569_KB_STARTUP_MAX_BYTES);
+  });
+
+  it('keeps the guide HP claims aligned with actor-knowledge boundary classifications', () => {
+    const maximum = 20;
+    const profile = monsterProfile('kb-hp-boundaries', { hitPoints: maximum });
+    const initial = createEncounter({
+      bounds: { columns: 2, rows: 1 },
+      combatants: [profile],
+      tokens: [placedToken(profile, 0)],
+    });
+    const classify = (hitPoints: number) => {
+      const target = { ...initial.combatants[0]!, hitPoints };
+      const state = { ...initial, combatants: [target] };
+      const knowledge = hitPointKnowledge(state, target);
+      if (knowledge.kind !== 'perceived_band') throw new Error('Positive maximum lost its HP band.');
+      return knowledge.band;
+    };
+    expect([
+      classify(maximum),
+      classify(maximum - 1),
+      classify(maximum / 4),
+      classify(maximum / 4 + 1),
+    ]).toEqual(['uninjured', 'bloodied', 'near_death', 'bloodied']);
+
+    const guide = inputs.fixtures.readText(`${AI_DM_KB_FIXTURE_DIRECTORY}/d569/protocol.md`);
+    const hpSection = guide.split('## Hit-point bars, life glyphs, and corpses\n')[1]
+      ?.split('\n## ')[0];
+    if (hpSection === undefined) throw new Error('HP guide section is missing.');
+    const claims = new Map([...hpSection.matchAll(
+      /<!-- board-feature:hp-(uninjured|bloodied|near-death|unknown) -->\s*([\s\S]*?)(?=<!-- board-feature:hp-|$)/gu,
+    )].map((match) => [match[1], match[2] ?? ''] as const));
+
+    expect([...claims.keys()]).toEqual(['uninjured', 'bloodied', 'near-death', 'unknown']);
+    expect(claims.get('uninjured')).toMatch(/undamaged[\s\S]*full hit points/iu);
+    expect(claims.get('bloodied')).toMatch(/damaged[\s\S]*above (?:a|one) quarter/iu);
+    expect(claims.get('bloodied')).toMatch(/wide range[\s\S]*weak evidence/iu);
+    expect(claims.get('bloodied')).toMatch(/not[\s\S]*half/iu);
+    expect(claims.get('bloodied')).not.toMatch(/(?:at|below|under)\s+(?:or\s+below\s+)?half/iu);
+    expect(claims.get('bloodied')).not.toMatch(/\b(?:means?|indicates?|represents?)\b[^.;]{0,40}\bhalf\b/iu);
+    expect(claims.get('near-death')).toMatch(/at or below (?:a|one) quarter/iu);
+    expect(claims.get('unknown')).toMatch(/withholds the band/iu);
+    expect(hpSection).toMatch(/fixed per-band glyph[\s\S]*not a proportional measure/iu);
   });
 
   it('byte-scans startup, tactics, every subject, and provenance for the complete forbidden vocabulary', async () => {

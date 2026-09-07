@@ -191,7 +191,7 @@ describe('D569 blind DM contracts', () => {
       'Use DC 14.',
       'The attack bonus is 5.',
       'The die result is seventeen.',
-      'Take the north route around the pillar.',
+      'Take the route to 4,7 around the pillar.',
       'Call reducer command now.',
       'Dispatch the encounter mutation now.',
       'Select option_ref alpha.',
@@ -204,6 +204,27 @@ describe('D569 blind DM contracts', () => {
     expect(blindRoundIntentEnvelopeSchema.safeParse(envelope({
       ...baseIntent(), target: { kind: 'object', name: '2,3' },
     })).success).toBe(false);
+    for (const reason of [
+      'Control before damage',
+      'Hold the doorway and avoid damage',
+      'Block the route to the stairs',
+    ]) {
+      expect(blindRoundIntentEnvelopeSchema.safeParse(envelope({
+        ...baseIntent(), reason,
+      })).success).toBe(true);
+    }
+    for (const reason of [
+      'deal 2d6 damage',
+      'damage 12',
+      'deal 12 fire damage',
+      'save dc 15',
+      'move to 4,7',
+      'attack bonus +7',
+    ]) {
+      expect(blindRoundIntentEnvelopeSchema.safeParse(envelope({
+        ...baseIntent(), reason,
+      })).success).toBe(false);
+    }
     const { reason: _reason, ...withoutReason } = baseIntent();
     expect(blindRoundIntentEnvelopeSchema.parse(envelope(withoutReason)).intents[0])
       .not.toHaveProperty('reason');

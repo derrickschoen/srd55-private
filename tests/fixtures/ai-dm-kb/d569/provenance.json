@@ -107,12 +107,12 @@
     },
     {
       "path": "tests/fixtures/ai-dm-kb/d569/protocol.md",
-      "revision": "d569-d570-board-primer-v2",
-      "sha256": "05c767f15ae28f9d3f34fbd3f54260ce857336cfb9cbbac1178c462299505d08",
+      "revision": "d569-d570-board-primer-v3",
+      "sha256": "ce1892481558c084877da16f668843db5071e4d3a28c334b75f9cdd66f57d334",
       "sources": [
         { "kind": "project_experience", "section": "Grid, scale, and coordinate gutter", "locator": "src/vtt/board-chrome.ts:1-14,690-829; src/vtt/board-chrome-layout.ts:13-14; tools/ai-dm-screenshot-probe.ts:63-104" },
         { "kind": "project_experience", "section": "Creature identities, sides, rings, and footprints", "locator": "src/vtt/board-chrome.ts:230-318,830-928,1260-1355; src/vtt/encounter-board.ts:257-320" },
-        { "kind": "project_experience", "section": "Hit-point bars, life glyphs, and corpses", "locator": "src/vtt/board-chrome.ts:321-380,947-1040; src/assets/pixel-font.ts:75-82; src/vtt/encounter-board.ts:760-783" },
+        { "kind": "project_experience", "section": "Hit-point bars, life glyphs, and corpses", "locator": "src/vtt/intel/actor-knowledge.ts:194-209; src/vtt/blind-turn-context.ts:95-99; src/vtt/board-chrome.ts:321-380,947-1040; src/assets/pixel-font.ts:75-82; src/vtt/encounter-board.ts:760-783" },
         { "kind": "project_experience", "section": "Hidden creatures", "locator": "src/assets/board-glyphs.ts:205-240; src/vtt/board-chrome.ts:445-450,947-992,1338-1354" },
         { "kind": "project_experience", "section": "Blocked and difficult cells", "locator": "src/assets/board-glyphs.ts:89-190; src/vtt/board-chrome.ts:451-477,565-594" },
         { "kind": "project_experience", "section": "Obscurement and fog", "locator": "src/assets/board-glyphs.ts:89-190; tools/ai-dm-screenshot-probe.ts:105-130" },

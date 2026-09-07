@@ -44,6 +44,11 @@ export const D569_PREREGISTRATION_AMENDMENTS = Object.freeze([
     timing: 'pre-results',
     reason: 'Fable usage exhausted; no replacement in this registration',
   },
+  {
+    id: 'fresh-context-judge-eligibility',
+    timing: 'pre-results',
+    reason: 'Owner ruling D578.3: "It is ok for the same model to judge if it starts from a fresh context".',
+  },
 ] as const);
 
 export const D569_JUDGE_PANEL_IDENTITIES = Object.freeze([
@@ -74,10 +79,7 @@ export const D569_HINT_ARM_IDENTITIES = Object.freeze([
 ] as const);
 
 const activePlayerModels = new Set<string>(D569_PLAYER_MODELS);
-const eligibleJudgeSeats = (playingModels: ReadonlySet<string>): readonly string[] =>
-  D569_JUDGE_PANEL_IDENTITIES
-    .filter((seat) => !playingModels.has(seat.model))
-    .map((seat) => seat.id);
+const ALL_JUDGE_SEAT_IDS = Object.freeze(D569_JUDGE_PANEL_IDENTITIES.map((seat) => seat.id));
 
 export const D575_ANALYSIS_COMPARISONS = Object.freeze([
   ...D575_PAIRWISE_COMPARISON_IDENTITIES
@@ -90,16 +92,14 @@ export const D575_ANALYSIS_COMPARISONS = Object.freeze([
       estimand: comparison.left.model === comparison.right.model
         ? 'blind_minus_own_advice' as const
         : 'luna_minus_judge_within_mode' as const,
-      eligibleJudgeSeats: eligibleJudgeSeats(new Set([
-        comparison.left.model, comparison.right.model,
-      ])),
+      eligibleJudgeSeats: ALL_JUDGE_SEAT_IDS,
     })),
   {
     id: 'gpt-5.6-luna-blind-vs-gpt-5.6-sol-advice-ceiling',
     leftArm: 'gpt-5.6-luna-blind',
     rightArm: 'gpt-5.6-sol-advice',
     estimand: 'blind_minus_advice_ceiling' as const,
-    eligibleJudgeSeats: eligibleJudgeSeats(new Set(['gpt-5.6-luna', 'gpt-5.6-sol'])),
+    eligibleJudgeSeats: ALL_JUDGE_SEAT_IDS,
   },
 ]);
 
@@ -136,7 +136,7 @@ const repairComparisonSchema = z.strictObject({
 });
 
 export const d569ExperimentManifestSchema = z.strictObject({
-  version: z.literal('d569-blind-experiment-v2'),
+  version: z.literal('d569-blind-experiment-v3'),
   preregistrationAmendments: z.tuple([
     z.strictObject({
       id: z.literal('refusal-risk-upper-bound'),
@@ -149,6 +149,13 @@ export const d569ExperimentManifestSchema = z.strictObject({
       id: z.literal('remove-fable-player-arms'),
       timing: z.literal('pre-results'),
       reason: z.literal('Fable usage exhausted; no replacement in this registration'),
+    }),
+    z.strictObject({
+      id: z.literal('fresh-context-judge-eligibility'),
+      timing: z.literal('pre-results'),
+      reason: z.literal(
+        'Owner ruling D578.3: "It is ok for the same model to judge if it starts from a fresh context".',
+      ),
     }),
   ]),
   experimentWallMs: z.literal(D569_EXPERIMENT_WALL_MS),
@@ -236,7 +243,15 @@ export const d569ExperimentManifestSchema = z.strictObject({
         id: z.literal('gpt-6-astra'), model: z.literal('gpt-6-astra'), effort: z.literal('high'),
       }),
     ]),
-    comparisonSeatPolicy: z.literal('same_eligible_seats_both_sides'),
+    seatEligibilityPolicy: z.literal('all_registered_seats_every_comparison'),
+    comparisonSeatPolicy: z.literal('same_seat_set_both_sides'),
+    sessionPolicy: z.literal('fresh_session_per_packet'),
+    packetExcludes: z.tuple([
+      z.literal('decision_conversation'),
+      z.literal('arm_identities'),
+      z.literal('answer_key'),
+      z.literal('other_seat_scores'),
+    ]),
     minimumConsensusSeats: z.literal(2),
   }),
   coreArms: z.array(armSchema),
@@ -365,17 +380,13 @@ export function validateD569ExperimentManifest(
     addViolation(violations, left !== undefined && right !== undefined,
       'dangling_comparison_arm', `comparison ${comparison.id} references an inactive arm`);
     if (left === undefined || right === undefined) continue;
-    const playingModels = new Set<string>([left.model, right.model]);
-    const expectedSeats = eligibleJudgeSeats(playingModels);
+    const expectedSeats = ALL_JUDGE_SEAT_IDS;
     const registeredSeats = manifest.judgePanel.seats.filter((seat) =>
       comparison.eligibleJudgeSeats.includes(seat.id));
-    const registeredEligibleSeats = registeredSeats.filter((seat) => !playingModels.has(seat.model));
     addViolation(violations, canonicalEqual(comparison.eligibleJudgeSeats, expectedSeats),
-      'judge_eligibility', `comparison ${comparison.id} must use every and only eligible judge seat`);
-    addViolation(violations, registeredSeats.every((seat) => !playingModels.has(seat.model)),
-      'self_scoring', `comparison ${comparison.id} assigns a playing model to judge itself`);
+      'judge_eligibility', `comparison ${comparison.id} must use all three registered judge seats`);
     addViolation(violations, expectedSeats.length >= manifest.judgePanel.minimumConsensusSeats &&
-      registeredEligibleSeats.length >= manifest.judgePanel.minimumConsensusSeats,
+      registeredSeats.length >= manifest.judgePanel.minimumConsensusSeats,
       'judge_consensus', `comparison ${comparison.id} has fewer than two eligible judge seats`);
   }
 
@@ -813,6 +824,14 @@ function panelValues(row: D569AnalysisRow): Readonly<Record<'total' | D569PanelC
   return { ...component, total: D569_PANEL_COMPONENTS.reduce((sum, name) => sum + component[name], 0) };
 }
 
+function panelSeatSet(row: D569AnalysisRow): readonly string[] {
+  const judges = row.seats.map((seat) => seat.judge);
+  if (new Set(judges).size !== judges.length) {
+    throw new TypeError('An analysis row cannot contain duplicate judge seats.');
+  }
+  return [...judges].sort();
+}
+
 function clusterMap(values: readonly { readonly seed: number; readonly value: number }[]): Map<number, number[]> {
   const clusters = new Map<number, number[]>();
   for (const entry of values) clusters.set(entry.seed, [...(clusters.get(entry.seed) ?? []), entry.value]);
@@ -893,6 +912,10 @@ export function analyzeD569Pair(
   const paired = [...left.entries()].flatMap(([key, leftRow]) => {
     const rightRow = right.get(key);
     if (rightRow === undefined) throw new Error('Validated pair disappeared.');
+    if (leftRow.outcome === 'executed' && rightRow.outcome === 'executed' &&
+      !canonicalEqual(panelSeatSet(leftRow), panelSeatSet(rightRow))) {
+      throw new TypeError('Paired analysis requires the same judge seat set on both scored sides.');
+    }
     const leftValues = panelValues(leftRow);
     const rightValues = panelValues(rightRow);
     return leftValues === null || rightValues === null ? [] : [{ leftRow, rightRow, leftValues, rightValues }];

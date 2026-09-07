@@ -214,7 +214,7 @@ describe('D569 preregistered experiment manifest and dry runner', () => {
   it('validates the exact amended arm/cohort/comparison preregistration', () => {
     const frozen = manifest();
     expect(codes(frozen)).toEqual([]);
-    expect(frozen.version).toBe('d569-blind-experiment-v2');
+    expect(frozen.version).toBe('d569-blind-experiment-v3');
     expect(frozen.preregistrationAmendments).toEqual(D569_PREREGISTRATION_AMENDMENTS);
     expect(frozen.preregistrationAmendments.every((amendment) => amendment.timing === 'pre-results'))
       .toBe(true);
@@ -225,7 +225,14 @@ describe('D569 preregistered experiment manifest and dry runner', () => {
     expect(JSON.stringify(frozen.coreArms)).not.toContain('claude-fable-5');
     expect(JSON.stringify(frozen.analysisComparisons)).not.toContain('claude-fable-5');
     expect(frozen.judgePanel.seats).toEqual(D569_JUDGE_PANEL_IDENTITIES);
-    expect(frozen.judgePanel.comparisonSeatPolicy).toBe('same_eligible_seats_both_sides');
+    expect(frozen.judgePanel).toMatchObject({
+      seatEligibilityPolicy: 'all_registered_seats_every_comparison',
+      comparisonSeatPolicy: 'same_seat_set_both_sides',
+      sessionPolicy: 'fresh_session_per_packet',
+      packetExcludes: [
+        'decision_conversation', 'arm_identities', 'answer_key', 'other_seat_scores',
+      ],
+    });
     expect(frozen.judgePanel.seats.map((seat) => seat.model)).toContain('gpt-6-astra');
     expect(frozen.coreArms.map((arm) => arm.model)).not.toContain('gpt-6-astra');
   });
@@ -309,17 +316,16 @@ describe('D569 preregistered experiment manifest and dry runner', () => {
       .toEqual(expect.arrayContaining(['second_family_fixture_hash', 'second_family_independent_regeneration']));
   });
 
-  it('derives same-side judge eligibility from active arm models and rejects dangling, implicit, and self-scored comparisons', () => {
+  it('uses every judge seat under fresh-context isolation and rejects dangling or implicit comparisons', () => {
     const frozen = manifest();
     const arms = new Map([...frozen.coreArms, ...frozen.hintArms].map((arm) => [arm.id, arm]));
     for (const comparison of frozen.analysisComparisons) {
       const left = arms.get(comparison.leftArm);
       const right = arms.get(comparison.rightArm);
       if (left === undefined || right === undefined) throw new Error('registered comparison is dangling');
-      const playingModels = new Set<string>([left.model, right.model]);
       expect(comparison.eligibleJudgeSeats).toEqual(frozen.judgePanel.seats
-        .filter((seat) => !playingModels.has(seat.model)).map((seat) => seat.id));
-      expect(comparison.eligibleJudgeSeats.length).toBeGreaterThanOrEqual(2);
+        .map((seat) => seat.id));
+      expect(comparison.eligibleJudgeSeats).toHaveLength(3);
     }
 
     const dangling = structuredClone(frozen);
@@ -331,13 +337,6 @@ describe('D569 preregistered experiment manifest and dry runner', () => {
     };
     delete implicit.coreArms[0]!.model;
     expect(codes(implicit)).toContain('manifest_shape');
-
-    const selfScored = structuredClone(frozen);
-    const versusSol = selfScored.analysisComparisons.find((comparison) =>
-      comparison.id === 'gpt-5.6-luna-vs-gpt-5.6-sol-blind');
-    if (versusSol === undefined) throw new Error('Sol comparison disappeared');
-    versusSol.eligibleJudgeSeats.push('gpt-5.6-sol');
-    expect(codes(selfScored)).toEqual(expect.arrayContaining(['judge_eligibility', 'self_scoring']));
 
     const insufficient = structuredClone(frozen);
     const comparison = insufficient.analysisComparisons[0]!;
@@ -491,6 +490,17 @@ describe('D569 paired cluster analysis and success labels', () => {
     expect(first.pairedZeroInclusive.total).toMatchObject({
       mean: 4, interval: { lower: 4, upper: 4 }, count: 2,
     });
+  });
+
+  it('rejects a comparison whose scored sides use different judge seat sets', () => {
+    const rows = analysisRows('primary', 'hard', [3], [2]);
+    const changed = rows.map((row) => row.arm === 'right'
+      ? { ...row, seats: [{ judge: 'seat-c', components: components(2) }] }
+      : row);
+    expect(() => analyzeD569Pair(changed, {
+      family: 'primary', basis: 'hard', leftArm: 'left', rightArm: 'right',
+      bootstrapSeed: 79, resamples: 100,
+    })).toThrow('same judge seat set');
   });
 
   it('success_uses_executed_only: refused rows remain zero in primary while executed-only is selection-conditioned', () => {
