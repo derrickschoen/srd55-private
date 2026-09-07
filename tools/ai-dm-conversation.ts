@@ -4689,7 +4689,16 @@ async function runConversationWithConfiguredIntel(
           while (true) {
             let state = engineSession.currentState();
             const activeActorId = state.activeCombatant;
-            if (activeActorId === null || acted.has(activeActorId)) break;
+            if (activeActorId === null) break;
+            if (acted.has(activeActorId)) {
+              if (state.phase.kind !== 'concluded' && state.round <= rendererState.round) {
+                throw new Error(
+                  `Initiative-segment round stalled on already-acted combatant ${activeActorId} ` +
+                  `before advancing from round ${String(rendererState.round)}.`,
+                );
+              }
+              break;
+            }
             const active = state.combatants.find((entry) => entry.profile.id === activeActorId);
             if (active === undefined) throw new Error(`Active initiative actor ${activeActorId} is absent.`);
             if (active.life === 'dead') {

@@ -337,14 +337,28 @@ describe('AI-DM arena', () => {
       .toBe(join(process.cwd(), directory));
   });
 
-  it('loads and runs the first frozen brutal-b room through the arena', { timeout: 30_000 }, async () => {
+  it('loads the first frozen brutal-b room and executes its multi-legendary-window room', { timeout: 30_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-brutal-b-'));
-    const [row] = await runArena(parseArenaArgs([
+    const [firstRow] = await runArena(parseArenaArgs([
       '--rooms', '1', '--reps', '1', '--seed', '6206001',
-      '--basis', 'brutal-b', '--out', join(directory, 'arena.jsonl'), '--dry-run',
+      '--basis', 'brutal-b', '--out', join(directory, 'first.jsonl'), '--dry-run',
     ]));
-    expect(row).toMatchObject({ seed: 6_206_001, room: 1, round: 1, basis: 'brutal-b' });
-    expect(row?.startingRoomDigest).toMatch(/^[a-f0-9]{64}$/u);
+    const [boundaryRow] = await runArena(parseArenaArgs([
+      '--rooms', '1', '--reps', '1', '--seed', '6206009', '--transport', 'final_indices',
+      '--basis', 'brutal-b', '--out', join(directory, 'boundary.jsonl'), '--dry-run',
+    ]));
+    expect(firstRow).toMatchObject({ seed: 6_206_001, room: 1, round: 1, basis: 'brutal-b' });
+    expect(firstRow?.startingRoomDigest).toMatch(/^[a-f0-9]{64}$/u);
+    expect(boundaryRow).toMatchObject({
+      seed: 6_206_009,
+      room: 1,
+      round: 1,
+      basis: 'brutal-b',
+      outcome: 'authorized',
+      executionErrorClass: null,
+      refusals: [],
+    });
+    expect(boundaryRow?.startingRoomDigest).toMatch(/^[a-f0-9]{64}$/u);
   });
 
   it('parses both scripted-party policies, defaults to symmetric, and rejects unknown policies', () => {
