@@ -14223,3 +14223,14 @@ every nesting level validated by the renderer and the ingress
 boundary, an injection test at three depths, and tighter return types.
 A first mutant of mine targeted a shape that does not exist and was
 void.
+
+## D569 increment 1b committed 0510c4ae on claude/blind-dm; increment 2 dispatched (2026-09-07 08:39)
+
+Amendment verified myself: 5 specs 184/184, tsc 0; my exact nested
+`candidate_count` mutant now fails compilation (TS2353 on the typed
+legal-movement return) and three tests (the ingress test, the canonical
+path test, the 32 KiB test) with unrecognized_keys from the strict
+schema; file restored byte-identical. Increment 2 (state-only
+screenshot projections: no offered-path overlay, no DC preview, PNG
+only, roles and hashes per image, advice default pixels unchanged)
+dispatched per the plan.
