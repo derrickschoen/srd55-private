@@ -13516,3 +13516,24 @@ overrides and record why. Otherwise consensus; no round 3.
 
 Increment 1a dispatched on dnd-wt-blind-dm (contracts, clean-room D569
 KB/tips bundle, KB byte scan, legacy byte-invariance fixture).
+
+## D568 luna LOW baseline complete: engine facts take luna low to a strict-gate PASS on the first try (2026-09-06 23:39)
+
+Same 24 boards, seed 6203001, E1b tree 49d782bb, 128 px, primer v10:
+- png only: mean of class means 0.829, strict FAIL (weakest Q6 0.708, Q5 0.744, Q8 0.750, Q9 0.802);
+- semantic facts only: 0.992, strict PASS (weakest Q5 0.954, Q1 0.963, Q9 0.999, Q10 1.000);
+- image + facts: 0.992, strict PASS (weakest Q5 0.952, Q1 0.963, Q10 1.000, Q2 1.000).
+For reference luna medium on the same protocol: png .861, facts .995,
+image+facts .995; sol high image+facts .999. The lever that closed luna
+medium closes most of luna low too; the residual gap is Q5 light and Q1
+identity/coordinates at ~.95-.96 versus ~.99 at medium. Seed-2
+replication (6203002) of the two facts arms at luna low launched
+(run-d568-low-seed2.sh). Next tuning targets for luna low, one factor
+at a time with the second seed as fluke guard: light encoding wording
+(default_light and the partition lists), identity/coordinate answer
+format (answer-schema v2-evidence), primer checklist variant.
+
+E1cb hard arms complete on the budget-fixed build: luna_facts 23x1/6x2/1x3
+attempts, control 25x1/5x2, sol_facts 26x1/3x2/1x3, all 30/30
+authorized. Packets e1cbh (facts vs control, facts vs sol; shuffle 9062)
+built; standing panel launched; brutal arms running.
