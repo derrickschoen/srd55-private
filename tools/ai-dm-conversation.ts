@@ -92,6 +92,7 @@ import {
   DEFAULT_OVERRIDE_POLICY,
   OVERRIDE_POLICIES,
   renderEnginePrompt,
+  SEMANTIC_BOARD_MAX_BYTES,
   TURN_CONTEXT_MAX_BYTES,
 } from '../src/vtt/mcp/engine-server';
 import {
@@ -172,6 +173,7 @@ import {
   type RendererProfile,
   type RendererRemovalCounts,
 } from '../src/vtt/renderer-profile';
+import type { SemanticBoardTruncationClass } from '../src/vtt/semantic-board-payload';
 import {
   DEFAULT_AI_DM_KB_ROOT,
   loadAiDmKnowledgeBase,
@@ -522,6 +524,9 @@ interface ConversationRowBase {
     readonly policyVersion: typeof RENDERER_POLICY_VERSION;
     readonly profile: RendererProfile;
   };
+  readonly baseContextBytes: number;
+  readonly semanticBoardBytes: number;
+  readonly semanticBoardTruncated: readonly SemanticBoardTruncationClass[];
   readonly circumstanceFeatures: CircumstanceFeatureVector;
   readonly combatModel: CombatModel;
   readonly roundProtocolVersion: typeof ROUND_PROTOCOL_VERSION;
@@ -667,8 +672,11 @@ export interface ConversationRunResult {
 export interface TurnContextRenderEvidence {
   readonly preTrimBytes: number;
   readonly postTrimBytes: number;
+  readonly baseContextBytes: number;
   readonly features: CircumstanceFeatureVector;
   readonly removals: RendererRemovalCounts;
+  readonly semanticBoardBytes: number;
+  readonly semanticBoardTruncated: readonly SemanticBoardTruncationClass[];
 }
 
 export interface ConversationRunOptions {
@@ -1689,9 +1697,15 @@ function capturedTurnContext(raw: string): CapturedTurnContext {
       : null;
   const modelVisibleRaw = proseDocument ?? raw;
   const bytes = new TextEncoder().encode(modelVisibleRaw).byteLength;
-  if (bytes > TURN_CONTEXT_MAX_BYTES) {
+  const baseValue = structuredClone(value) as Record<string, unknown>;
+  const hasSemanticBoard = baseValue['semantic_board'] !== undefined;
+  delete baseValue['semantic_board'];
+  delete baseValue['semantic_board_truncated'];
+  const baseBytes = new TextEncoder().encode(JSON.stringify(baseValue)).byteLength;
+  const maximumBytes = TURN_CONTEXT_MAX_BYTES + (hasSemanticBoard ? SEMANTIC_BOARD_MAX_BYTES : 0);
+  if ((proseDocument === null && baseBytes > TURN_CONTEXT_MAX_BYTES) || bytes > maximumBytes) {
     throw new RangeError(
-      `Recorded turn context is ${String(bytes)} UTF-8 bytes; maximum is ${String(TURN_CONTEXT_MAX_BYTES)}.`,
+      `Recorded turn context is ${String(bytes)} UTF-8 bytes with a ${String(baseBytes)}-byte base; maxima are ${String(maximumBytes)} total and ${String(TURN_CONTEXT_MAX_BYTES)} base.`,
     );
   }
   const granularity = value['granularity'];
@@ -5144,6 +5158,9 @@ async function runConversationWithConfiguredIntel(
           policyVersion: RENDERER_POLICY_VERSION,
           profile: config.rendererProfile,
         },
+        semanticBoardBytes: rendererEvidence.semanticBoardBytes,
+        baseContextBytes: rendererEvidence.baseContextBytes,
+        semanticBoardTruncated: rendererEvidence.semanticBoardTruncated,
         circumstanceFeatures: rendererEvidence.features,
         combatModel: config.combatModel,
         roundProtocolVersion: ROUND_PROTOCOL_VERSION,

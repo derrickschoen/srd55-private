@@ -12,6 +12,7 @@ import {
 } from '../src/assets/board-glyphs';
 import { canonicalJson } from '../src/commands/canonical-json';
 import type { CombatantProfile } from '../src/combat/combatant';
+import type { PersistedCoordinatorState } from '../src/combat/coordinator';
 import {
   createEncounter,
   type EncounterState,
@@ -29,6 +30,8 @@ import {
   projectEncounterBoard,
   type EncounterBoardPlacedCombatant,
 } from '../src/vtt/encounter-board';
+import { projectDmBoard } from '../src/vtt/encounter-projections';
+import { semanticBoardJson } from '../src/vtt/semantic-board-payload';
 import {
   assignCreatureBadges,
   type CreatureBadgeColor,
@@ -152,6 +155,7 @@ export type ProbeHitPointBand = HpBand;
 export type ProbeSide = 'party' | 'foe';
 export type ProbeLight = 'bright' | 'dim' | 'dark';
 export type PrimerMode = 'none' | 'general';
+export type BoardInput = 'png' | 'semantic' | 'both';
 export type PrimerVersion =
   | typeof PRIMER_VERSION
   | typeof PREVIOUS_PRIMER_VERSION
@@ -287,6 +291,7 @@ export interface ScreenshotProbeConfig {
   readonly boardGlyphs: BoardGlyphMode;
   /** D561: CSS tile size used for the captured raster. */
   readonly captureTilePx: CaptureTilePx;
+  readonly boardInput: BoardInput;
 }
 
 export interface ProbeTokenUsage {
@@ -308,6 +313,10 @@ interface ScreenshotProbeRowFields {
   readonly generation: string;
   readonly boardGlyphs: BoardGlyphMode;
   readonly captureTilePx: CaptureTilePx;
+  readonly boardInput: BoardInput;
+  readonly semanticPayloadSha256: string | null;
+  readonly semanticPayloadBytes: number | null;
+  readonly semanticPayloadRelativePath: string | null;
   readonly png: {
     readonly sha256: string;
     readonly relativePath: string;
@@ -335,6 +344,9 @@ export type ScreenshotProbeRow = ScreenshotProbeRowFields &
         readonly resultKind: 'generated';
         readonly sourceFileSha256: null;
         readonly normaliserVersion: typeof NORMALISER_VERSION;
+        readonly semanticPayloadSha256: string;
+        readonly semanticPayloadBytes: number;
+        readonly semanticPayloadRelativePath: string;
       }
     | {
         readonly resultKind: 'rescored';
@@ -362,7 +374,7 @@ export interface ProbeAnswerRequest {
   readonly question: ScreenshotQuestionId;
   readonly prompt: string;
   readonly schemaPath: string;
-  readonly imagePath: string;
+  readonly imagePath: string | null;
   readonly truth: ProbeAnswer;
 }
 
@@ -1243,13 +1255,31 @@ export function screenshotQuestionPrompt(
   question: ScreenshotQuestionId,
   primer: PrimerMode = 'general',
   boardGlyphs: BoardGlyphMode = DEFAULT_BOARD_GLYPH_MODE,
+  boardInput: BoardInput = 'png',
+  semanticPayload: string | null = null,
 ): string {
+  if (boardInput !== 'png' && semanticPayload === null)
+    throw new TypeError(`${boardInput} board input requires a semantic payload.`);
+  const inputInstructions = boardInput === 'png'
+    ? ['Inspect only the attached PNG. Return only JSON matching the supplied strict schema.']
+    : boardInput === 'semantic'
+      ? [
+          'Use only the authoritative semantic board facts below. Return only JSON matching the supplied strict schema.',
+          'Cell-list encoding: [column,row] is one cell; [start_column,row,end_column_inclusive] is a horizontal run that includes both endpoints.',
+          `Semantic board JSON:\n${semanticPayload ?? ''}`,
+        ]
+      : [
+          'The semantic facts are authoritative and the attached PNG is illustrative.',
+          'Cell-list encoding: [column,row] is one cell; [start_column,row,end_column_inclusive] is a horizontal run that includes both endpoints.',
+          'Return only JSON matching the supplied strict schema.',
+          `Semantic board JSON:\n${semanticPayload ?? ''}`,
+        ];
   const questionLines = [
     `Question ${question}: ${QUESTION_TEXT[question]}`,
     'Use zero-based column,row coordinates. Column numbers and row numbers appear along the board edges.',
-    'Inspect only the attached PNG. Return only JSON matching the supplied strict schema.',
+    ...inputInstructions,
   ];
-  return primer === 'general'
+  return primer === 'general' && boardInput !== 'semantic'
     ? [
         `General primer ${PRIMER_VERSION}: ${[GENERAL_PRIMER, ...BOARD_GLYPH_PRIMER[boardGlyphs]].join(' ')}`,
         ...questionLines,
@@ -1522,6 +1552,9 @@ export function codexScreenshotAnswerer(): ProbeAnswerer {
     answer(request) {
       const started = performance.now();
       return new Promise<ProbeAnswerResult>((resolvePromise) => {
+        const imageArguments = request.imagePath === null
+          ? []
+          : ['-i', request.imagePath];
         const child = spawn(
           'codex',
           [
@@ -1533,8 +1566,7 @@ export function codexScreenshotAnswerer(): ProbeAnswerer {
             '--json',
             '-m',
             request.model,
-            '-i',
-            request.imagePath,
+            ...imageArguments,
             '--output-schema',
             request.schemaPath,
             '-c',
@@ -1664,6 +1696,7 @@ export function parseScreenshotProbeArgs(
         '--compare',
         '--board-glyphs',
         '--capture-tile-px',
+        '--board-input',
       ].includes(option ?? '')
     ) {
       throw new TypeError(
@@ -1727,6 +1760,15 @@ export function parseScreenshotProbeArgs(
   if (captureTilePxValue !== '64' && captureTilePxValue !== '128')
     throw new TypeError('--capture-tile-px must be 64 or 128.');
   const captureTilePx: CaptureTilePx = captureTilePxValue === '64' ? 64 : 128;
+  const boardInputValue = values.get('--board-input') ?? 'png';
+  if (
+    boardInputValue !== 'png' &&
+    boardInputValue !== 'semantic' &&
+    boardInputValue !== 'both'
+  ) {
+    throw new TypeError('--board-input must be png, semantic or both.');
+  }
+  const boardInput: BoardInput = boardInputValue;
   return {
     models,
     stateCount,
@@ -1740,6 +1782,7 @@ export function parseScreenshotProbeArgs(
     comparePath,
     boardGlyphs,
     captureTilePx,
+    boardInput,
   };
 }
 
@@ -2061,6 +2104,36 @@ function boardSource(state: EncounterState, room: number): BoardImageSource {
   };
 }
 
+const SEMANTIC_BOARD_COORDINATOR: PersistedCoordinatorState = {
+  requestSequence: 1,
+  pendingRequest: null,
+  pendingCommand: null,
+  continuation: { kind: 'idle' },
+  pause: null,
+};
+
+/** Uses the same canonical state and DM board projection as the snapshot page. */
+export function semanticBoardJsonForProbeState(state: EncounterState): string {
+  return semanticBoardJson(projectDmBoard({
+    view: projectDmView(state),
+    coordinator: SEMANTIC_BOARD_COORDINATOR,
+    controllers: [],
+    history: [],
+  }));
+}
+
+async function writeSemanticBoardArtifact(path: string, payload: string): Promise<void> {
+  await mkdir(resolve(path, '..'), { recursive: true });
+  try {
+    await writeFile(path, payload, { encoding: 'utf8', flag: 'wx' });
+  } catch (error: unknown) {
+    if (!(error instanceof Error) || Reflect.get(error, 'code') !== 'EEXIST') throw error;
+    if (await readFile(path, 'utf8') !== payload) {
+      throw new Error('Content-addressed semantic board artifact has conflicting bytes.');
+    }
+  }
+}
+
 async function writeSchemas(
   directory: string,
 ): Promise<Readonly<Record<ScreenshotQuestionId, string>>> {
@@ -2117,6 +2190,10 @@ interface ProbeTask {
   readonly question: ScreenshotQuestionId;
   readonly truth: ProbeAnswer;
   readonly hiddenCreatureNames: readonly string[];
+  readonly semanticPayload: string;
+  readonly semanticPayloadSha256: string;
+  readonly semanticPayloadBytes: number;
+  readonly semanticPayloadRelativePath: string;
 }
 
 async function runTask(
@@ -2128,13 +2205,22 @@ async function runTask(
   generation: string,
   boardGlyphs: BoardGlyphMode,
   captureTilePx: CaptureTilePx,
+  boardInput: BoardInput,
 ): Promise<ScreenshotProbeRow> {
   const result = await answerer.answer({
     ...task.model,
     question: task.question,
-    prompt: screenshotQuestionPrompt(task.question, primer, boardGlyphs),
+    prompt: screenshotQuestionPrompt(
+      task.question,
+      primer,
+      boardGlyphs,
+      boardInput,
+      boardInput === 'png' ? null : task.semanticPayload,
+    ),
     schemaPath: schemas[task.question],
-    imagePath: join(imagesRoot, task.artifact.relativePath),
+    imagePath: boardInput === 'semantic'
+      ? null
+      : join(imagesRoot, task.artifact.relativePath),
     truth: task.truth,
   });
   const base = {
@@ -2152,6 +2238,10 @@ async function runTask(
     generation,
     boardGlyphs,
     captureTilePx,
+    boardInput,
+    semanticPayloadSha256: task.semanticPayloadSha256,
+    semanticPayloadBytes: task.semanticPayloadBytes,
+    semanticPayloadRelativePath: task.semanticPayloadRelativePath,
     png: {
       sha256: task.artifact.sha256,
       relativePath: task.artifact.relativePath,
@@ -2273,6 +2363,10 @@ const savedProbeRowSchema = z
     generation: z.string().min(1),
     boardGlyphs: z.enum(['none', 'light', 'full']),
     captureTilePx: z.union([z.literal(64), z.literal(128)]).optional(),
+    boardInput: z.enum(['png', 'semantic', 'both']).optional(),
+    semanticPayloadSha256: z.string().regex(/^[0-9a-f]{64}$/u).nullable().optional(),
+    semanticPayloadBytes: z.number().int().nonnegative().nullable().optional(),
+    semanticPayloadRelativePath: z.string().min(1).nullable().optional(),
     png: z
       .object({
         sha256: z.string().min(1),
@@ -2541,6 +2635,7 @@ export function renderProbeSummary(
     '',
     `Board glyphs: ${[...new Set(rows.map((row) => row.boardGlyphs))].sort().join(', ')}.`,
     `Capture tile: ${[...new Set(rows.map((row) => row.captureTilePx))].sort((left, right) => left - right).join(', ')} px.`,
+    `Board input: ${[...new Set(rows.map((row) => row.boardInput))].sort().join(', ')}.`,
     'HP vocabulary: uninjured / bloodied / near_death / unknown.',
     '',
   ];
@@ -2666,6 +2761,10 @@ function rescoreSavedRow(
     generation: saved.generation,
     boardGlyphs: saved.boardGlyphs,
     captureTilePx: saved.captureTilePx ?? 128,
+    boardInput: saved.boardInput ?? 'png',
+    semanticPayloadSha256: saved.semanticPayloadSha256 ?? null,
+    semanticPayloadBytes: saved.semanticPayloadBytes ?? null,
+    semanticPayloadRelativePath: saved.semanticPayloadRelativePath ?? null,
     png: saved.png,
     wallMs: saved.wallMs,
     tokens: saved.tokens,
@@ -2828,6 +2927,10 @@ export async function runScreenshotProbe(
       readonly candidate: ProbeStateCandidate;
       readonly artifact: BoardImageArtifact;
       readonly sheet: ScreenshotFactSheet;
+      readonly semanticPayload: string;
+      readonly semanticPayloadSha256: string;
+      readonly semanticPayloadBytes: number;
+      readonly semanticPayloadRelativePath: string;
     }> = [];
     for (let index = 0; index < selected.length; index += 1) {
       const candidate = selected[index];
@@ -2838,13 +2941,39 @@ export async function runScreenshotProbe(
         state: candidate.state,
         source,
       });
+      const semanticPayload = semanticBoardJsonForProbeState(candidate.state);
+      const semanticPayloadSha256 = createHash('sha256')
+        .update(semanticPayload, 'utf8')
+        .digest('hex');
+      const semanticPayloadBytes = Buffer.byteLength(semanticPayload, 'utf8');
+      const semanticPayloadRelativePath = `semantic-boards/${semanticPayloadSha256}.json`;
+      const semanticPayloadPath = join(config.imagesRoot, semanticPayloadRelativePath);
+      await writeSemanticBoardArtifact(semanticPayloadPath, semanticPayload);
+      if (
+        artifact.source.revision !== candidate.state.revision ||
+        artifact.source.stateDigest !== boardStateDigest(candidate.state)
+      ) {
+        throw new Error('Semantic board payload and PNG do not share a source revision.');
+      }
       captured.push({
         candidate,
         artifact,
         sheet: deriveScreenshotFactSheet(candidate.state),
+        semanticPayload,
+        semanticPayloadSha256,
+        semanticPayloadBytes,
+        semanticPayloadRelativePath,
       });
     }
-    const tasks = captured.flatMap(({ candidate, artifact, sheet }) =>
+    const tasks = captured.flatMap(({
+      candidate,
+      artifact,
+      sheet,
+      semanticPayload,
+      semanticPayloadSha256,
+      semanticPayloadBytes,
+      semanticPayloadRelativePath,
+    }) =>
       config.models.flatMap((model) =>
         SCREENSHOT_QUESTION_IDS.map(
           (question): ProbeTask => ({
@@ -2856,6 +2985,10 @@ export async function runScreenshotProbe(
             hiddenCreatureNames: sheet.combatants
               .filter((combatant) => combatant.hiddenFromPlayers)
               .map((combatant) => combatant.displayName),
+            semanticPayload,
+            semanticPayloadSha256,
+            semanticPayloadBytes,
+            semanticPayloadRelativePath,
           }),
         ),
       ),
@@ -2873,6 +3006,7 @@ export async function runScreenshotProbe(
           config.generation,
           config.boardGlyphs,
           config.captureTilePx,
+          config.boardInput,
         ),
     );
     for (const row of rows)

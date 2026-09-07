@@ -36,6 +36,16 @@ export const rendererProfileSchema = z.strictObject({
   optionDetail: z.enum(['full', 'top2_stubs']),
   nullFields: z.enum(['omit', 'explicit']),
   attribution: z.enum(['stamped', 'off']),
+  /** Opt-in DM-only engine facts. Absent is the byte-identical control arm. */
+  semanticBoard: z.literal(true).optional(),
+}).superRefine((profile, context) => {
+  if (profile.semanticBoard === true && profile.format !== 'structured') {
+    context.addIssue({
+      code: 'custom',
+      path: ['semanticBoard'],
+      message: 'semanticBoard requires the structured renderer format.',
+    });
+  }
 });
 
 export type RendererProfile = z.infer<typeof rendererProfileSchema>;
