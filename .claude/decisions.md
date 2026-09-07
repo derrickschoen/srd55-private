@@ -14839,3 +14839,19 @@ selection needs the sol judge JSON and cannot proceed, so the 24/32/48
 cap rerun on brutal-struggle is blocked; D575's blind-vs-advice judging
 is likewise held. Engine work (D576) and the model-free blind-dm
 increments continue, since neither calls a judge.
+
+## D576.3 dispatched: corner-rule amendment of increment 1a (2026-09-07 16:44)
+
+Lane los-cover-i1a-corner on dnd-wt-los-cover (claude/los-cover, HEAD
+c1b024e1, port 4731, sol high), session
+01a07d9c-9bef-7a52-b362-b42710290c40. Brief
+.tmp/runs/briefs-2026-09-06/los-cover-i1a-corner.md carries the eight
+numbered trace rules of D576.3 verbatim, keeps D576.2's two dimensions
+untouched with a test proving passability cannot change a tier or a
+sight answer, reuses the existing corner geometry instead of deleting
+it, and carries the pin ledger amendment with its acceptable and
+unacceptable justifications spelled out. It also requires a re-run era
+census with a bumped engine_revision and the delta against the
+centre-ray census, and adds three named mutants beyond the twelve:
+CORNER-FIXED-SOURCE, COUNT-WITHOUT-CLAMP, BOUNDARY-GRAZE-BLOCKS.
+Marker LOS-COVER-I1A-CORNER-READY.
