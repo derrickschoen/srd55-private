@@ -14234,3 +14234,32 @@ schema; file restored byte-identical. Increment 2 (state-only
 screenshot projections: no offered-path overlay, no DC preview, PNG
 only, roles and hashes per image, advice default pixels unchanged)
 dispatched per the plan.
+
+## D572 — OWNER: build brutal rooms where luna medium struggles and the judges agree the engine's top recommendation is not the best play; rerun caps 24/32/48 there. D573 — OWNER: rerun the luna-medium experiments at luna low (2026-09-07 08:46)
+
+Owner (verbatim): "Make some brutal rooms that Luna medium struggles on
+and that the judges agree that the engine top recommendation is not
+the actual best play. Then rerun the 24/32/48 sizes to see what really
+makes a difference.
+
+—-
+
+Also, rerun the tests we already did with Luna medium using Luna low
+and see if there is a difference"
+
+Supervisor plan for D572: (1) generate a candidate pool of new brutal
+rooms (a contiguous seed range with no per-seed overrides, property-
+validated like brutal-b); (2) on the pool run three arms, 1 rep each as
+a screen: the engine's top recommendation executed as the plan
+(engine-planned arm), luna medium (default profile, 32 KiB), sol high;
+judge engine-top vs sol and luna vs sol with the standing panel; (3)
+select the rooms where luna medium scores in the bottom tertile AND all
+three judge seats score the engine-top round below sol's round on that
+room (the judges' agreement is the selection criterion, recorded per
+room with the seat scores); freeze them as basis `brutal-struggle`
+with the selection evidence beside the fixture hashes; (4) rerun caps
+24/32/48 at luna medium on that set, 3 reps, panel, each cap vs 32.
+D573: at luna low, the same protocols already judged at luna medium:
+the cap sweep on hard (16/24/32/48/64 vs the 32 control) and facts vs
+control on hard and on brutal; same trees, same seeds, same panel.
+Launched now on main's tree.
