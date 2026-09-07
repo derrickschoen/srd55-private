@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { combatantId, encounterSessionId } from '../../../src/combat/values';
+import { mulberry32 } from '../../../src/combat/random';
+import { combatantId, encounterBranchId, encounterSessionId } from '../../../src/combat/values';
 import type { DmTargetIntelRow } from '../../../src/vtt/dm-tactical-intel';
 import {
   DM_TURN_INTEL_POLICY,
@@ -23,9 +24,72 @@ import {
 } from '../../../src/vtt/renderer-profile';
 import { engineOptionId } from '../../../src/vtt/turn-proposal';
 import { applyRevisionDelta, diffTurnContextValues } from '../../../src/vtt/dm-bridge/projection-transport';
+import { EngineRoundSession } from '../../../src/vtt/engine-round-session';
+import { engineSchemaInternals } from '../../../src/vtt/mcp/schemas';
+import { applyRoomInitiativeProfile } from '../../../src/vtt/room-generator';
 
 const actorId = combatantId('combatant:renderer-actor');
 const targetId = combatantId('combatant:renderer-target');
+const HARD_FIXTURE_SEEDS = Array.from({ length: 13 }, (_unused, index) => 5_117_001 + index);
+const TURN_CONTEXT_CAPS_KIB = [4, 8, 16, 24, 32, 48, 64] as const;
+const HARD_FIXTURE_CAP_CASES = HARD_FIXTURE_SEEDS.flatMap((seed) =>
+  TURN_CONTEXT_CAPS_KIB.map((capKib) => [seed, capKib] as const));
+
+function undefinedValuePaths(value: unknown, path = '$'): readonly string[] {
+  if (value === undefined) return [path];
+  if (Array.isArray(value)) {
+    return value.flatMap((entry, index) => undefinedValuePaths(entry, `${path}[${String(index)}]`));
+  }
+  if (typeof value !== 'object' || value === null) return [];
+  return Object.entries(value).flatMap(([key, entry]) =>
+    undefinedValuePaths(entry, `${path}.${key}`));
+}
+
+async function hardFixtureRoundOneContext(seed: number, capKib: number): Promise<unknown> {
+  const loaded = await loadArenaFixture(
+    `tests/fixtures/arena-basis-hard/seed-${String(seed)}.json`,
+  );
+  const session = new EngineRoundSession(
+    applyRoomInitiativeProfile(loaded, 'derived_v1'),
+    mulberry32(seed),
+    { kind: 'unattended', askDefault: 'decline' },
+  );
+  const prepared = session.beginRoundWithoutSkipping({
+    runId: encounterSessionId(`encounter:renderer-cap-${String(seed)}`),
+    branchId: encounterBranchId(`branch:renderer-cap-${String(seed)}`),
+    revision: 1,
+    requestId: `request:renderer-cap-${String(seed)}`,
+    phase: 'initial',
+    room: seed - 5_117_000,
+    historyKind: 'room_ready',
+  }, null);
+  const request = prepared.snapshot.capsule.request;
+  if (request === null || request.phase === 'speculative') {
+    throw new Error(`Hard fixture seed ${String(seed)} did not produce an ordinary request.`);
+  }
+  const runtime = createEngineMcpRuntime(session.currentState(), {
+    toolProfile: 'dm',
+    runId: prepared.snapshot.capsule.runId,
+    branchId: prepared.snapshot.capsule.branchId,
+    revision: prepared.snapshot.capsule.revision,
+    requestId: request.requestId,
+    phase: request.phase,
+    correctionNumber: request.correctionNumber,
+    room: seed - 5_117_000,
+    historyKind: 'room_ready',
+    requestedActorIds: request.actors,
+    initiativeProjection: prepared.snapshot.capsule.projection.initiative,
+    turnContextMaximumBytes: capKib * 1024,
+  });
+  const capsule = runtime.feed.current();
+  return runtime.toolSurface.execute('engine.get_turn_context', {
+    run_id: capsule.runId,
+    expected_revision: capsule.revision,
+    scope: 'round',
+    granularity: 'full',
+    intel_mode: 'full',
+  });
+}
 
 function unresolvedRow(): DmTargetIntelRow {
   return {
@@ -104,6 +168,19 @@ function actorContext() {
 }
 
 describe('renderer profile', () => {
+  it.each(HARD_FIXTURE_CAP_CASES)(
+    'emits a JSON-serializable schema-valid context for hard fixture %i at %i KiB',
+    async (seed, capKib) => {
+      const context = await hardFixtureRoundOneContext(seed, capKib);
+      expect(undefinedValuePaths(context), `seed ${String(seed)}, cap ${String(capKib)} KiB`).toEqual([]);
+      expect(JSON.stringify(context), `seed ${String(seed)}, cap ${String(capKib)} KiB`).toBeTypeOf('string');
+      expect(
+        engineSchemaInternals.turnContextOutput.safeParse(context).success,
+        `seed ${String(seed)}, cap ${String(capKib)} KiB`,
+      ).toBe(true);
+    },
+  );
+
   it('schema-validates every complete planned profile and rejects open or incomplete profiles', () => {
     expect(rendererProfileSchema.parse(DEFAULT_RENDERER_PROFILE)).toEqual(DEFAULT_RENDERER_PROFILE);
     expect(DEFAULT_RENDERER_PROFILE).toMatchObject({
@@ -114,6 +191,15 @@ describe('renderer profile', () => {
     expect(rendererProfileSchema.safeParse({ ...DEFAULT_RENDERER_PROFILE, delta: 'maybe' }).success).toBe(false);
     expect(rendererProfileSchema.safeParse({ ...DEFAULT_RENDERER_PROFILE, nullFields: 'maybe' }).success).toBe(false);
     expect(rendererProfileSchema.safeParse({ ...DEFAULT_RENDERER_PROFILE, attribution: 'maybe' }).success).toBe(false);
+    expect(rendererProfileSchema.parse({ ...DEFAULT_RENDERER_PROFILE, semanticBoard: true }))
+      .toEqual({ ...DEFAULT_RENDERER_PROFILE, semanticBoard: true });
+    expect(rendererProfileSchema.safeParse({ ...DEFAULT_RENDERER_PROFILE, semanticBoard: false }).success).toBe(false);
+    expect(rendererProfileSchema.safeParse({
+      ...DEFAULT_RENDERER_PROFILE,
+      format: 'caveman_prose',
+      semanticBoard: true,
+    }).success).toBe(false);
+    expect(DEFAULT_RENDERER_PROFILE).not.toHaveProperty('semanticBoard');
     const { rows: _rows, ...incomplete } = DEFAULT_RENDERER_PROFILE;
     expect(rendererProfileSchema.safeParse(incomplete).success).toBe(false);
   });

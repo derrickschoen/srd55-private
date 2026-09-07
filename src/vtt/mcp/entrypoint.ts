@@ -53,6 +53,10 @@ import { jsonRpcParseError, type JsonRpcResponse, type McpHandler } from './hand
 import type { McpImageContentBlock, McpTextContentBlock } from './handler';
 import { engineUiFeedbackSchema, type EngineUiFeedback } from './schemas';
 import {
+  projectEngineSemanticBoard,
+  type SemanticBoardTruncationClass,
+} from '../semantic-board-payload';
+import {
   decodeKbReadRecords,
   isKbSubjectSources,
   KbReadBudget,
@@ -247,6 +251,7 @@ export interface EngineMcpLauncherManifest {
   readonly toolProfile?: EngineMcpToolProfile;
   readonly turnContextDeltaBase?: TurnContextDeltaBase;
   readonly rendererProfile?: RendererProfile;
+  readonly turnContextMaximumBytes?: number;
   readonly initiativeProjection?: EngineInitiativeProjection;
   readonly boardImage?: EngineMcpBoardImageBinding;
 }
@@ -278,11 +283,16 @@ export function createEngineMcpRuntime(
     readonly turnContextDeltaBase?: TurnContextDeltaBase;
     readonly rendererProfile?: RendererProfile;
     readonly turnContextMaximumBytes?: number;
+    readonly semanticBoardMaximumBytes?: number;
     readonly onTurnContextRendered?: (result: {
       readonly preTrimBytes: number;
       readonly postTrimBytes: number;
+      readonly baseContextBytes: number;
       readonly features: CircumstanceFeatureVector;
       readonly removals: RendererRemovalCounts;
+      readonly optionsOmittedForSizeByActor: readonly import('./engine-server').TurnContextSizeOmission[];
+      readonly semanticBoardBytes: number;
+      readonly semanticBoardTruncated: readonly SemanticBoardTruncationClass[];
     }) => void;
     readonly initiativeProjection?: EngineInitiativeProjection;
     readonly onTurnContext?: (context: Readonly<Record<string, unknown>>) => void;
@@ -418,6 +428,9 @@ export function createEngineMcpRuntime(
       uiFeedbackAlreadySubmitted: options.uiFeedbackAlreadySubmitted ?? false,
     }),
     rules: options.rules ?? { get: () => null },
+    ...(options.rendererProfile?.semanticBoard === true ? {
+      semanticBoardProjection: projectEngineSemanticBoard(planningState, revision),
+    } : {}),
     ...(options.maximumToolResultBytes === undefined ? {} : { maximumToolResultBytes: options.maximumToolResultBytes }),
     ...(options.maximumResourceBytes === undefined ? {} : { maximumResourceBytes: options.maximumResourceBytes }),
     ...(options.listPageSize === undefined ? {} : { listPageSize: options.listPageSize }),
@@ -428,6 +441,9 @@ export function createEngineMcpRuntime(
     ...(options.rendererProfile === undefined ? {} : { rendererProfile: options.rendererProfile }),
     ...(options.turnContextMaximumBytes === undefined ? {} : {
       turnContextMaximumBytes: options.turnContextMaximumBytes,
+    }),
+    ...(options.semanticBoardMaximumBytes === undefined ? {} : {
+      semanticBoardMaximumBytes: options.semanticBoardMaximumBytes,
     }),
     ...(options.onTurnContextRendered === undefined ? {} : {
       onTurnContextRendered: options.onTurnContextRendered,
@@ -730,6 +746,9 @@ function isLauncherManifest(value: unknown): value is EngineMcpLauncherManifest 
     })()) &&
     (input['toolProfile'] === undefined || input['toolProfile'] === 'full' || input['toolProfile'] === 'dm') &&
     (input['rendererProfile'] === undefined || rendererProfileSchema.safeParse(input['rendererProfile']).success) &&
+    (input['turnContextMaximumBytes'] === undefined ||
+      Number.isSafeInteger(input['turnContextMaximumBytes']) &&
+      typeof input['turnContextMaximumBytes'] === 'number' && input['turnContextMaximumBytes'] >= 1) &&
     (input['boardImage'] === undefined || isEngineMcpBoardImageBinding(input['boardImage']));
 }
 
@@ -818,6 +837,9 @@ export async function runEngineMcpEntrypoint(argv: readonly string[] = process.a
       }),
       ...(manifest.rendererProfile === undefined ? {} : {
         rendererProfile: manifest.rendererProfile,
+      }),
+      ...(manifest.turnContextMaximumBytes === undefined ? {} : {
+        turnContextMaximumBytes: manifest.turnContextMaximumBytes,
       }),
       ...(manifest.initiativeProjection === undefined ? {} : {
         initiativeProjection: manifest.initiativeProjection,

@@ -22,6 +22,7 @@ import {
   type EngineMcpLauncherManifest,
 } from '../../../src/vtt/mcp/entrypoint';
 import { generateRoom } from '../../../src/vtt/room-generator';
+import { DEFAULT_RENDERER_PROFILE } from '../../../src/vtt/renderer-profile';
 import {
   decodeArenaRowEvidence,
   parseArenaArgs,
@@ -53,6 +54,9 @@ const META = mcpRequestMeta({ name: 'board-delivery-test', version: '1.0.0' });
 // state handle are normalised back below so the pin stays independent of that merge.
 const FOOTPRINTS_RAW_CONTEXT_SHA256 = 'aa841063ad0512d0f6b286318db802526da3efc5265a04d8b67f4d8351909d51';
 const FOOTPRINTS_STATE_HANDLE = 'engine-state:c7c7b052bd70a39bf59c83277b7508d8bf52b69100fbde5939c8562ac8686842';
+// The post-merge E1c pin is paired with byte identity across implicit defaults,
+// explicit image-off, and an explicitly semantic-board-off renderer profile.
+const E1C_RAW_CONTEXT_SHA256 = '418b9e16e31c01667a2bea7431e6affe3eccc9f80c353783551872bb6ae16118';
 
 function record(value: unknown, label: string): Readonly<Record<string, unknown>> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -189,11 +193,17 @@ describe('board image parsing and row evidence', () => {
     const conversationBase = ['--rooms', '1', '--rounds', '1', '--out', join(directory, 'c.jsonl')];
     const arenaBase = ['--rooms', '1', '--reps', '1', '--seed', '3943001', '--out', join(directory, 'a.jsonl')];
     expect(parseConversationArgs(conversationBase).boardImageMode).toBe('off');
+    expect(parseConversationArgs(conversationBase).turnContextMaximumBytes).toBe(32 * 1024);
+    expect(parseConversationArgs([
+      ...conversationBase, '--turn-context-max-bytes', '24576',
+    ]).turnContextMaximumBytes).toBe(24 * 1024);
     expect(parseConversationArgs([...conversationBase, '--board-image', 'off']).boardImageMode).toBe('off');
     expect(parseConversationArgs([...conversationBase, '--board-image', 'png']).boardImageMode).toBe('png');
     expect(parseConversationArgs([...conversationBase, '--board-image', 'capture_only']).boardImageMode)
       .toBe('capture_only');
     expect(parseArenaArgs(arenaBase).boardImageMode).toBe('off');
+    expect(parseArenaArgs([...arenaBase, '--turn-context-max-bytes', '49152']).turnContextMaximumBytes)
+      .toBe(48 * 1024);
     expect(parseArenaArgs([...arenaBase, '--board-image', 'off']).boardImageMode).toBe('off');
     expect(parseArenaArgs([...arenaBase, '--board-image', 'png']).boardImageMode).toBe('png');
     expect(parseArenaArgs([...arenaBase, '--board-image', 'capture_only']).boardImageMode)
@@ -208,6 +218,72 @@ describe('board image parsing and row evidence', () => {
     expect(() => parseArenaArgs([
       ...arenaBase, '--board-image', 'png', '--transport', 'final_indices',
     ])).toThrow('--board-image png requires --transport mcp_minimal');
+  });
+
+  it('keeps image bytes outside turn-context and maximum-tool-result accounting', async () => {
+    const state = await loadArenaFixture('tests/fixtures/arena-basis-hard/seed-5117005.json');
+    const maximumBytes = 24 * 1024;
+    const png = dimensionedPng('image-accounting-mutant', 900_000);
+    const evidence: Array<{
+      readonly preTrimBytes: number;
+      readonly postTrimBytes: number;
+      readonly removals: unknown;
+    }> = [];
+    const runtime = (withImage: boolean) => createEngineMcpRuntime(state, {
+      toolProfile: 'dm',
+      turnContextMaximumBytes: maximumBytes,
+      maximumToolResultBytes: maximumBytes,
+      onTurnContextRendered: (value) => { evidence.push(value); },
+      ...(withImage ? {
+        boardImageContent: { type: 'image' as const, mimeType: 'image/png' as const, data: png.toString('base64') },
+      } : {}),
+    });
+    const call = (withImage: boolean) => {
+      const selected = runtime(withImage);
+      const capsule = selected.feed.current();
+      const response = selected.handler.handle({
+        jsonrpc: '2.0', id: withImage ? 'image' : 'off', method: 'tools/call',
+        params: {
+          _meta: META,
+          name: 'engine.get_turn_context',
+          arguments: {
+            run_id: capsule.runId,
+            expected_revision: capsule.revision,
+            scope: 'round',
+            granularity: 'full',
+            intel_mode: 'full',
+          },
+        },
+      });
+      const result = record(record(response, 'MCP response')['result'], 'MCP result');
+      const context = record(result['structuredContent'], 'MCP structured content');
+      return { result, context };
+    };
+    const off = call(false);
+    const image = call(true);
+    const optionIds = (context: Readonly<Record<string, unknown>>) => {
+      const actors = context['actors'];
+      if (!Array.isArray(actors)) throw new TypeError('Turn context omitted actors.');
+      return actors.flatMap((actorValue) => {
+        const options = record(actorValue, 'turn-context actor')['options'];
+        if (!Array.isArray(options)) throw new TypeError('Turn-context actor omitted options.');
+        return options.map((option) => String(record(option, 'turn-context option')['option_id']));
+      });
+    };
+
+    expect(png.byteLength).toBeGreaterThan(maximumBytes);
+    expect(image.result['isError']).toBe(false);
+    expect(off.context).toEqual(image.context);
+    expect(optionIds(off.context)).toEqual(optionIds(image.context));
+    expect(off.context['semantic_board_truncated']).toBe(image.context['semantic_board_truncated']);
+    expect(evidence).toHaveLength(2);
+    expect(evidence[0]).toEqual(evidence[1]);
+    expect(evidence[0]?.postTrimBytes).toBeLessThanOrEqual(maximumBytes);
+    expect(evidence[0]?.preTrimBytes).toBeGreaterThan(evidence[0]?.postTrimBytes ?? maximumBytes);
+    const content = image.result['content'];
+    if (!Array.isArray(content)) throw new TypeError('Image MCP result omitted content blocks.');
+    expect(content.map((block) => record(block, 'MCP content block')['type'])).toEqual(['text', 'image']);
+    expect(Buffer.byteLength(JSON.stringify(image.context))).toBe(evidence[1]?.postTrimBytes);
   });
 
   it('effort_field_defaults_silently is killed by required current fields and explicit D510 null evidence', () => {
@@ -277,6 +353,29 @@ describe('MCP board image content', () => {
 });
 
 describe('arena capture lifecycle and off-arm invariance', () => {
+  it('records delivered semantic-board bytes and truncation on the arena row', { timeout: 60_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'semantic-board-row-'));
+    const profile = { ...DEFAULT_RENDERER_PROFILE, semanticBoard: true as const };
+    const [row] = await runArena(parseArenaArgs([
+      '--rooms', '1', '--reps', '1', '--seed', '3943001',
+      '--out', join(directory, 'rows.jsonl'), '--dry-run', '--effort', 'low',
+      '--model', 'gpt-5.6-luna', '--transport', 'mcp_minimal',
+      '--initiative-profile', 'derived_v1', '--renderer-profile', JSON.stringify(profile),
+    ]));
+    if (row === undefined) throw new TypeError('Semantic-board arena omitted its row.');
+    const context = record(JSON.parse(row.rawTurnContext) as unknown, 'semantic-board context');
+    const board = record(context['semantic_board'], 'semantic-board block');
+    const base = structuredClone(context) as Record<string, unknown>;
+    delete base['semantic_board'];
+    delete base['semantic_board_truncated'];
+
+    expect(row.rendererAttribution.profile).toEqual(profile);
+    expect(row.baseContextBytes).toBe(Buffer.byteLength(JSON.stringify(base)));
+    expect(row.semanticBoardBytes).toBe(Buffer.byteLength(JSON.stringify(board)));
+    expect(row.semanticBoardBytes).toBeGreaterThan(0);
+    expect(row.semanticBoardTruncated).toEqual(context['semantic_board_truncated'] ?? []);
+  });
+
   it.each(['png', 'capture_only'] as const)(
     'captures each changed round state once, persists %s evidence, and closes one service',
     { timeout: 60_000 },
@@ -345,6 +444,47 @@ describe('arena capture lifecycle and off-arm invariance', () => {
     expect(dispatches).toBe(0);
     expect(starts).toBe(1);
     expect(service.closed).toBe(true);
+  });
+
+  it('absent semantic-board and image-off flags preserve the committed raw context and invocation bytes', { timeout: 60_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'semantic-board-off-invariance-'));
+    const invocations = new Map<string, AgentInvocation[]>();
+    const run = async (label: 'default' | 'image-off' | 'semantic-absent') => {
+      const captured: AgentInvocation[] = [];
+      invocations.set(label, captured);
+      const args = [
+        '--rooms', '1', '--reps', '1', '--seed', '3943001',
+        '--out', join(directory, `${label}.jsonl`), '--dry-run', '--effort', 'low',
+        '--model', 'gpt-5.6-luna', '--transport', 'mcp_minimal',
+        '--initiative-profile', 'derived_v1',
+        ...(label === 'image-off' ? ['--board-image', 'off'] : []),
+        ...(label === 'semantic-absent'
+          ? ['--renderer-profile', JSON.stringify(DEFAULT_RENDERER_PROFILE)]
+          : []),
+      ];
+      return runArena(parseArenaArgs(args), {
+        onPrimaryInvocation: (invocation) => { captured.push(structuredClone(invocation)); },
+      });
+    };
+    const defaultResult = await run('default');
+    const offResult = await run('image-off');
+    const absentResult = await run('semantic-absent');
+    expect(absentResult.every((row) =>
+      row.semanticBoardBytes === 0 && row.semanticBoardTruncated.length === 0)).toBe(true);
+    for (const [label, result] of [['image-off', offResult], ['semantic-absent', absentResult]] as const) {
+      expect(result.map((row) => row.rawTurnContext))
+        .toEqual(defaultResult.map((row) => row.rawTurnContext));
+      expect(invocations.get(label)?.map((entry) => ({
+        prompt: entry.prompt, instructions: entry.instructions, output: entry.output,
+      }))).toEqual(invocations.get('default')?.map((entry) => ({
+        prompt: entry.prompt, instructions: entry.instructions, output: entry.output,
+      })));
+    }
+
+    const raw = offResult[0]?.rawTurnContext;
+    if (raw === undefined) throw new TypeError('Semantic-board-off row omitted rawTurnContext.');
+    expect(Buffer.byteLength(raw)).toBe(31_995);
+    expect(createHash('sha256').update(raw).digest('hex')).toBe(E1C_RAW_CONTEXT_SHA256);
   });
 
   it('persists simulated image feedback and gives judges the feedback beside the image', { timeout: 60_000 }, async () => {
