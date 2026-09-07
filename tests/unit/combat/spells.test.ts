@@ -1347,6 +1347,23 @@ describe('spell foundations and implemented value pins', () => {
     });
     expect(outOfRange.combatants.find((subject) => subject.profile.id === caster.id)?.turn.action).toEqual({ kind: 'available' });
   });
+
+  it('M576-E1A-TOTAL-SPELL-TARGET-ALLOWED rejects a sight-required spell through a blocked-cell wall', () => {
+    const definition = spellDefinition('magic-missile');
+    if (definition === null) throw new Error('Magic Missile definition missing.');
+    const { caster, target, state } = fixture(definition);
+    const obstructed = {
+      ...state,
+      tokens: state.tokens.map((entry) => entry.combatantId === target.id
+        ? { ...entry, position: { column: 2, row: 1 } }
+        : entry),
+      blockedCells: [{ column: 1, row: 1 }],
+    };
+    expect(() => reduceEncounter(obstructed, castCommand(definition, caster, target), () => 0.5))
+      .toThrow('cannot select unseen target');
+    expect(obstructed.combatants.find((subject) => subject.profile.id === caster.id)?.spellSlots[0])
+      .toEqual({ level: 1, maximum: 4, remaining: 4 });
+  });
 });
 
 describe('every implemented cantrip and level-1 spell executes through the encounter reducer', () => {

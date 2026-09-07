@@ -1,13 +1,21 @@
 import { describe, expect, it } from 'vitest';
-import type { EncounterState } from '../../../src/combat/encounter';
+import { canCombatantSee, createEncounter, reduceEncounter, type EncounterState } from '../../../src/combat/encounter';
+import { traceCombatantLine } from '../../../src/combat/cover';
+import { monsterCombatantProfile } from '../../../src/combat/combatant';
+import { monsterAttackCommand } from '../../../src/combat/monster-commands';
+import { GOBLIN_WARRIOR } from '../../../src/combat/statblocks/monsters';
 import type { GridCell } from '../../../src/combat/grid';
-import { combatantId, statblockId, type CombatantId } from '../../../src/combat/values';
+import { terrainBlocking, terrainKindOfWireBlocking } from '../../../src/combat/terrain';
+import { armorClass, combatantId, statblockId, worldObjectId, type CombatantId } from '../../../src/combat/values';
+import { projectDmView } from '../../../src/combat/visibility';
+import { projectEncounterBoard } from '../../../src/vtt/encounter-board';
 import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
 import { availableEngineActorOptions, pureTurnProposalResolver } from '../../../src/vtt/intent-resolver';
 import { engineOptionId } from '../../../src/vtt/turn-proposal';
 import { generateRoom } from '../../../src/vtt/room-generator';
 import { freshMonsterPlanningState } from '../../../src/vtt/monster-planning-state';
 import { engineActorOptions } from '../../../src/vtt/turn-option-registry';
+import { placedToken, playerProfile } from '../combat/fixtures';
 
 const SEED = 3_943_001;
 const ACTOR_ID = combatantId('combatant:generated-3943001-monster-2');
@@ -138,6 +146,52 @@ describe('canonical engine query port', () => {
       label: 'Disengage',
       noModeledEffect: { kind: 'disengage_without_movement', action: 'disengage' },
     }));
+  });
+
+  it('M576-E1A-QUERY-PORT-LEGACY-LOS keeps reducer, query, options, and board terrain on one trace', () => {
+    const actor = monsterCombatantProfile(GOBLIN_WARRIOR, {
+      combatantId: 'combatant:parity-goblin', tokenId: 'token:parity-goblin',
+    });
+    const target = playerProfile('parity-target', { initiativeBonus: -20 });
+    const lowCover = {
+      id: worldObjectId('object:parity-low-cover'), name: 'Parity low cover', kind: 'cover' as const,
+      position: { column: 2, row: 0 }, footprint: [{ column: 2, row: 0 }],
+      durability: { kind: 'indestructible' as const }, armorClass: armorClass(10), damageResponses: [],
+      blocking: terrainBlocking('half_cover'), createdRevision: 0,
+    };
+    const setup = (worldObjects: EncounterState['worldObjects'], blockedCells: EncounterState['blockedCells'] = []) =>
+      reduceEncounter(createEncounter({
+        bounds: { columns: 6, rows: 1 }, combatants: [actor, target],
+        tokens: [placedToken(actor, 0), placedToken(target, 5)], worldObjects, blockedCells,
+      }), { type: 'roll_initiative' }, () => 0.5).state;
+    const partial = setup([lowCover]);
+    const partialTrace = traceCombatantLine(partial, actor.id, target.id);
+    expect(partialTrace).toMatchObject({ tier: 'half', blocksSight: false });
+    expect(canCombatantSee(partial, actor.id, target.id)).toBe(true);
+    expect(canonicalEngineQueryPort.cover(partial, actor.id, target.id)).toEqual({
+      tier: 'half', sourceIds: [`object:${lowCover.id}`],
+    });
+    expect(canonicalEngineQueryPort.visibility(partial, actor.id, target.id)).toMatchObject({ visible: true });
+    expect(availableEngineActorOptions(partial, actor.id).some((option) => option.actionSlots.some((slot) =>
+      slot.use.kind === 'attack' && slot.use.target.kind === 'combatant' && slot.use.target.combatantId === target.id))).toBe(true);
+    const boardObject = projectEncounterBoard(projectDmView(partial)).worldObjects.find((object) => object.id === lowCover.id);
+    expect(boardObject === undefined ? null : terrainKindOfWireBlocking(boardObject.blocking)).toBe('half_cover');
+    const attack = canonicalEngineQueryPort.actions(partial, actor.id).find((action) => action.kind === 'attack' && action.id === 'shortbow');
+    if (attack === undefined || attack.kind !== 'attack') throw new Error('Parity fixture omitted Shortbow.');
+    expect(() => reduceEncounter(partial, monsterAttackCommand(attack, actor.id, target.id), () => 0.5)).not.toThrow();
+
+    const walled = setup([], [{ column: 2, row: 0 }]);
+    expect(traceCombatantLine(walled, actor.id, target.id)).toMatchObject({ tier: 'total', blocksSight: true });
+    expect(canCombatantSee(walled, actor.id, target.id)).toBe(false);
+    expect(canonicalEngineQueryPort.cover(walled, actor.id, target.id)).toMatchObject({ tier: 'total' });
+    expect(canonicalEngineQueryPort.visibility(walled, actor.id, target.id)).toMatchObject({
+      visible: false, reason: 'blocked',
+    });
+    expect(availableEngineActorOptions(walled, actor.id).some((option) => option.actionSlots.some((slot) =>
+      slot.use.kind === 'attack' && slot.use.target.kind === 'combatant' && slot.use.target.combatantId === target.id))).toBe(false);
+    expect(() => reduceEncounter(walled, monsterAttackCommand(attack, actor.id, target.id), () => 0.5))
+      .toThrow('Total Cover or is outside line of sight');
+    expect(projectEncounterBoard(projectDmView(walled)).blockedCells).toContainEqual({ column: 2, row: 0 });
   });
 
   it('returns independently hand-computed melee reach and thrown normal range', () => {

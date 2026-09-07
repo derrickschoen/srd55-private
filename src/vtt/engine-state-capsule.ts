@@ -24,6 +24,7 @@ import {
 } from '../combat/creature-space';
 import { wildShapeRulesLens } from '../combat/wild-shape';
 import { creatureSizes } from '../domain/enums';
+import { terrainPassabilityAt } from '../combat/terrain';
 import { sha256 } from '../crypto/sha256';
 import type { DmBoardProjection } from './encounter-projections';
 import type {
@@ -672,11 +673,13 @@ export function projectEngineDmProjection(
     },
     bounds: { ...encounter.bounds },
     blockedCells: encounter.blockedCells.map((cell) => ({ ...cell })),
-    difficultTerrainCells: encounter.environment.difficultTerrainRegions
-      .flatMap((region) => region.cells)
-      .map((cell) => ({ ...cell })),
+    difficultTerrainCells: [
+      ...encounter.environment.difficultTerrainRegions.flatMap((region) => region.cells),
+      ...encounter.worldObjects.flatMap((object) => object.footprint.filter((cell) =>
+        terrainPassabilityAt(encounter, cell) === 'difficult')),
+    ].map((cell) => ({ ...cell })),
     movementBlockingObjects: encounter.worldObjects
-      .filter((object) => object.blocking.movement)
+      .filter((object) => object.footprint.some((cell) => terrainPassabilityAt(encounter, cell) === 'blocked'))
       .map((object) => ({
         id: boundedText(String(object.id), 'world object id', 200),
         name: boundedText(object.name, 'world object name', 200),
@@ -743,11 +746,13 @@ export function projectEngineEncounterState(
     initiative: structuredClone(initiative),
     bounds: { ...state.bounds },
     blockedCells: state.blockedCells.map((cell) => ({ ...cell })),
-    difficultTerrainCells: state.environment.difficultTerrainRegions
-      .flatMap((region) => region.cells)
-      .map((cell) => ({ ...cell })),
+    difficultTerrainCells: [
+      ...state.environment.difficultTerrainRegions.flatMap((region) => region.cells),
+      ...state.worldObjects.flatMap((object) => object.footprint.filter((cell) =>
+        terrainPassabilityAt(state, cell) === 'difficult')),
+    ].map((cell) => ({ ...cell })),
     movementBlockingObjects: state.worldObjects
-      .filter((object) => object.blocking.movement)
+      .filter((object) => object.footprint.some((cell) => terrainPassabilityAt(state, cell) === 'blocked'))
       .map((object) => ({
         id: boundedText(String(object.id), 'world object id', 200),
         name: boundedText(object.name, 'world object name', 200),

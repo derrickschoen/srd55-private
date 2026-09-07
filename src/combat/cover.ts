@@ -1,18 +1,25 @@
 import { combatantSpace, combatantSpaceAt } from './combat-rules';
+import type { CreatureSpace } from './creature-space';
 import type { EncounterState } from './encounter';
 import type { GridCell } from './grid';
+import {
+  coverRank,
+  passabilityRank,
+  terrainKindOfWireBlocking,
+  terrainProfile,
+  type CoverTier,
+  type TerrainPassability,
+} from './terrain';
 import type { CombatantId } from './values';
-import type { CoverTier, WorldObject } from './world-objects';
-
-const COVER_ORDER: Readonly<Record<CoverTier, number>> = {
-  none: 0,
-  half: 1,
-  three_quarters: 2,
-  total: 3,
-};
+import type { WorldObject } from './world-objects';
+import type { KnownCreatureSize } from '../domain/enums';
 
 function cellKey(cell: GridCell): string {
-  return `${String(cell.column)}:${String(cell.row)}`;
+  return `${String(cell.column)},${String(cell.row)}`;
+}
+
+function compareCells(left: GridCell, right: GridCell): number {
+  return left.row - right.row || left.column - right.column;
 }
 
 /** The deterministic cell-line rasterizer shared by sight and cover. */
@@ -41,6 +48,176 @@ function objectOccupiesCell(object: WorldObject, cell: GridCell): boolean {
   return object.footprint.some((candidate) => cellKey(candidate) === cellKey(cell));
 }
 
+export interface TerrainLineSource {
+  readonly kind: 'blocked_cell' | 'world_object' | 'creature';
+  readonly id: string;
+  readonly tier: Exclude<CoverTier, 'none'>;
+  readonly passability: Exclude<TerrainPassability, 'open'>;
+}
+
+export interface TerrainLineTrace {
+  readonly sourceCell: GridCell;
+  readonly targetCell: GridCell;
+  readonly interveningCells: readonly GridCell[];
+  readonly tier: CoverTier;
+  readonly blocksSight: boolean;
+  readonly passability: TerrainPassability;
+  readonly sourceIds: readonly string[];
+  readonly sources: readonly TerrainLineSource[];
+  readonly firstBlockingCell: GridCell | null;
+}
+
+export interface TerrainLineOptions {
+  readonly sourceId?: CombatantId;
+  readonly targetId?: CombatantId;
+  readonly includeCreatures?: boolean;
+}
+
+function taggedSourceId(source: TerrainLineSource): string {
+  switch (source.kind) {
+    case 'blocked_cell': return `blocked:${source.id}`;
+    case 'world_object': return `object:${source.id}`;
+    case 'creature': return `creature:${source.id}`;
+  }
+}
+
+function livingCreatureSourcesAt(
+  state: EncounterState,
+  cell: GridCell,
+  options: TerrainLineOptions,
+): readonly TerrainLineSource[] {
+  if (options.includeCreatures !== true) return [];
+  return state.combatants.flatMap((candidate): readonly TerrainLineSource[] => {
+    const id = candidate.profile.id;
+    if (candidate.life === 'dead' || id === options.sourceId || id === options.targetId) return [];
+    if (!state.tokens.some((token) => token.combatantId === id)) return [];
+    return combatantSpace(state, id).cells.some((occupied) => cellKey(occupied) === cellKey(cell))
+      ? [{ kind: 'creature', id: String(id), tier: 'half', passability: 'difficult' }]
+      : [];
+  });
+}
+
+/** One canonical centre-to-centre trace. Endpoints are excluded by the rasterizer. */
+export function traceTerrainLine(
+  state: EncounterState,
+  sourceCell: GridCell,
+  targetCell: GridCell,
+  options: TerrainLineOptions = {},
+): TerrainLineTrace {
+  const interveningCells = rasterizeInterveningCells(sourceCell, targetCell);
+  let tier: CoverTier = 'none';
+  let passability: TerrainPassability = 'open';
+  let strongest: TerrainLineSource[] = [];
+  let firstBlockingCell: GridCell | null = null;
+  for (const cell of interveningCells) {
+    const cellSources: TerrainLineSource[] = [];
+    if (state.blockedCells.some((candidate) => cellKey(candidate) === cellKey(cell))) {
+      cellSources.push({
+        kind: 'blocked_cell', id: `${String(cell.column)},${String(cell.row)}`,
+        tier: 'total', passability: 'blocked',
+      });
+    }
+    for (const object of state.worldObjects) {
+      if (!objectOccupiesCell(object, cell)) continue;
+      const objectTier = object.blocking.cover;
+      if (objectTier !== 'none') {
+        const objectPassability = terrainProfile(terrainKindOfWireBlocking(object.blocking)).passability;
+        if (objectPassability === 'open') continue;
+        cellSources.push({
+          kind: 'world_object', id: String(object.id), tier: objectTier,
+          passability: objectPassability,
+        });
+      }
+    }
+    cellSources.push(...livingCreatureSourcesAt(state, cell, options));
+    for (const source of cellSources) {
+      if (passabilityRank(source.passability) > passabilityRank(passability)) {
+        passability = source.passability;
+      }
+      const comparison = coverRank(source.tier) - coverRank(tier);
+      if (comparison > 0) {
+        tier = source.tier;
+        strongest = [source];
+      } else if (comparison === 0) {
+        strongest.push(source);
+      }
+    }
+    if (firstBlockingCell === null && cellSources.some((source) => source.tier === 'total')) {
+      firstBlockingCell = { ...cell };
+    }
+  }
+  const sources = strongest
+    .filter((source, index, all) => all.findIndex((candidate) => taggedSourceId(candidate) === taggedSourceId(source)) === index)
+    .sort((left, right) => taggedSourceId(left).localeCompare(taggedSourceId(right)));
+  return {
+    sourceCell: { ...sourceCell },
+    targetCell: { ...targetCell },
+    interveningCells,
+    tier,
+    blocksSight: tier === 'total',
+    passability,
+    sourceIds: sources.map(taggedSourceId),
+    sources,
+    firstBlockingCell,
+  };
+}
+
+export interface CreatureLineOptions {
+  readonly sourceAnchor?: GridCell;
+}
+
+function compareTraces(left: TerrainLineTrace, right: TerrainLineTrace): number {
+  return Number(left.blocksSight) - Number(right.blocksSight) ||
+    coverRank(left.tier) - coverRank(right.tier) ||
+    compareCells(left.sourceCell, right.sourceCell) ||
+    compareCells(left.targetCell, right.targetCell) ||
+    left.sourceIds.join('\0').localeCompare(right.sourceIds.join('\0'));
+}
+
+function leastObstructedTrace(
+  state: EncounterState,
+  source: CreatureSpace<KnownCreatureSize>,
+  targetCells: readonly GridCell[],
+  sourceId: CombatantId,
+  targetId?: CombatantId,
+): TerrainLineTrace {
+  const sourceCells = [...source.cells].sort(compareCells);
+  const targets = [...targetCells].sort(compareCells);
+  const traces = sourceCells.flatMap((from) => targets.map((to) =>
+    traceTerrainLine(state, from, to, {
+      sourceId,
+      ...(targetId === undefined ? {} : { targetId }),
+      includeCreatures: true,
+    })));
+  const first = traces[0];
+  if (first === undefined) throw new RangeError('A line query requires non-empty source and target spaces.');
+  return traces.reduce((best, candidate) => compareTraces(candidate, best) < 0 ? candidate : best, first);
+}
+
+export function traceCombatantLine(
+  state: EncounterState,
+  sourceId: CombatantId,
+  targetId: CombatantId,
+  options: CreatureLineOptions = {},
+): TerrainLineTrace {
+  const source = options.sourceAnchor === undefined
+    ? combatantSpace(state, sourceId)
+    : combatantSpaceAt(state, sourceId, options.sourceAnchor);
+  return leastObstructedTrace(state, source, combatantSpace(state, targetId).cells, sourceId, targetId);
+}
+
+export function traceCombatantLineToCells(
+  state: EncounterState,
+  sourceId: CombatantId,
+  targetCells: readonly GridCell[],
+  options: CreatureLineOptions = {},
+): TerrainLineTrace {
+  const source = options.sourceAnchor === undefined
+    ? combatantSpace(state, sourceId)
+    : combatantSpaceAt(state, sourceId, options.sourceAnchor);
+  return leastObstructedTrace(state, source, targetCells, sourceId);
+}
+
 export function coverTierBetweenObjects(
   objects: readonly WorldObject[],
   from: GridCell,
@@ -49,7 +226,7 @@ export function coverTierBetweenObjects(
   let cover: CoverTier = 'none';
   for (const cell of rasterizeInterveningCells(from, to)) {
     for (const object of objects) {
-      if (objectOccupiesCell(object, cell) && COVER_ORDER[object.blocking.cover] > COVER_ORDER[cover]) {
+      if (objectOccupiesCell(object, cell) && coverRank(object.blocking.cover) > coverRank(cover)) {
         cover = object.blocking.cover;
       }
     }
@@ -57,158 +234,19 @@ export function coverTierBetweenObjects(
   return cover;
 }
 
-export interface CreatureCoverOptions {
-  /** Optional DM variant. The default creature contribution is always Half Cover. */
-  readonly creaturesGrantThreeQuarters?: boolean;
-  /** Evaluate a hypothetical source placement without changing canonical state. */
-  readonly sourceAnchor?: GridCell;
-}
+export type CreatureCoverOptions = CreatureLineOptions;
 
 export interface CombatantCoverResult {
   readonly tier: CoverTier;
   readonly sourceIds: readonly string[];
 }
 
-interface CornerPoint {
-  readonly column: number;
-  readonly row: number;
-}
-
-function outerCorners(cells: readonly GridCell[]): readonly CornerPoint[] {
-  const minimumColumn = Math.min(...cells.map((cell) => cell.column));
-  const maximumColumn = Math.max(...cells.map((cell) => cell.column)) + 1;
-  const minimumRow = Math.min(...cells.map((cell) => cell.row));
-  const maximumRow = Math.max(...cells.map((cell) => cell.row)) + 1;
-  return [
-    { column: minimumColumn, row: minimumRow },
-    { column: maximumColumn, row: minimumRow },
-    { column: minimumColumn, row: maximumRow },
-    { column: maximumColumn, row: maximumRow },
-  ];
-}
-
-function cellCorners(cells: readonly GridCell[]): readonly CornerPoint[] {
-  const corners: CornerPoint[] = [];
-  const seen = new Set<string>();
-  for (const cell of cells) {
-    for (const corner of [
-      { column: cell.column, row: cell.row },
-      { column: cell.column + 1, row: cell.row },
-      { column: cell.column, row: cell.row + 1 },
-      { column: cell.column + 1, row: cell.row + 1 },
-    ]) {
-      const key = `${String(corner.column)}:${String(corner.row)}`;
-      if (!seen.has(key)) {
-        seen.add(key);
-        corners.push(corner);
-      }
-    }
-  }
-  return corners;
-}
-
-function axisIntersection(
-  start: number,
-  delta: number,
-  minimum: number,
-  maximum: number,
-): readonly [number, number] | null {
-  if (delta === 0) return start > minimum && start < maximum
-    ? [Number.NEGATIVE_INFINITY, Number.POSITIVE_INFINITY]
-    : null;
-  const first = (minimum - start) / delta;
-  const second = (maximum - start) / delta;
-  return first <= second ? [first, second] : [second, first];
-}
-
-/** A corner ray blocks only when it crosses a cell interior, not merely its boundary. */
-function cornerLineCrossesCell(from: CornerPoint, to: CornerPoint, cell: GridCell): boolean {
-  const epsilon = 1e-9;
-  const column = axisIntersection(
-    from.column,
-    to.column - from.column,
-    cell.column + epsilon,
-    cell.column + 1 - epsilon,
-  );
-  const row = axisIntersection(
-    from.row,
-    to.row - from.row,
-    cell.row + epsilon,
-    cell.row + 1 - epsilon,
-  );
-  if (column === null || row === null) return false;
-  const entry = Math.max(0, column[0], row[0]);
-  const exit = Math.min(1, column[1], row[1]);
-  return entry <= exit && exit > 0 && entry < 1;
-}
-
-/** Rasterizes a corner-to-corner ray against candidate occupied cells in their given stable order. */
-function rasterizeCornerLine(
-  from: CornerPoint,
-  to: CornerPoint,
-  candidates: readonly GridCell[],
-): readonly GridCell[] {
-  return candidates.filter((cell) => cornerLineCrossesCell(from, to, cell));
-}
-
-/** Least-obstructed occupied-cell line, with one non-stacking creature tier. */
 export function coverBetweenCombatants(
   state: EncounterState,
   sourceId: CombatantId,
   targetId: CombatantId,
   options: CreatureCoverOptions = {},
 ): CombatantCoverResult {
-  const source = options.sourceAnchor === undefined
-    ? combatantSpace(state, sourceId)
-    : combatantSpaceAt(state, sourceId, options.sourceAnchor);
-  const target = combatantSpace(state, targetId);
-  const creatureTier: CoverTier = options.creaturesGrantThreeQuarters === true ? 'three_quarters' : 'half';
-  const occupyingCreatures = state.combatants.flatMap((candidate) => {
-    const id = candidate.profile.id;
-    if (id === sourceId || id === targetId || candidate.life === 'dead') return [];
-    if (!state.tokens.some((entry) => entry.combatantId === id)) return [];
-    return [{ id, cells: combatantSpace(state, id).cells }];
-  });
-
-  let objectTier: CoverTier = 'total';
-  let objectSources: readonly string[] = [];
-  for (const sourceCell of source.cells) {
-    for (const targetCell of target.cells) {
-      const lineCells = rasterizeInterveningCells(sourceCell, targetCell);
-      const tier = coverTierBetweenObjects(state.worldObjects, sourceCell, targetCell);
-      const sourceIds = state.worldObjects
-        .filter((object) => lineCells.some((cell) => objectOccupiesCell(object, cell)))
-        .map((object) => String(object.id));
-      sourceIds.sort();
-      if (
-        COVER_ORDER[tier] < COVER_ORDER[objectTier] ||
-        (COVER_ORDER[tier] === COVER_ORDER[objectTier] && sourceIds.join('\0') < objectSources.join('\0'))
-      ) {
-        objectTier = tier;
-        objectSources = sourceIds;
-      }
-    }
-  }
-
-  const targetCorners = outerCorners(target.cells);
-  let creatureSources: readonly string[] = occupyingCreatures.map((creature) => String(creature.id)).sort();
-  for (const sourceCorner of cellCorners(source.cells)) {
-    const blockedBy = occupyingCreatures
-      .filter((creature) => targetCorners.some((targetCorner) =>
-        rasterizeCornerLine(sourceCorner, targetCorner, creature.cells).length > 0))
-      .map((creature) => String(creature.id))
-      .sort();
-    if (blockedBy.length === 0) {
-      creatureSources = [];
-      break;
-    }
-    if (blockedBy.join('\0') < creatureSources.join('\0')) creatureSources = blockedBy;
-  }
-  const resolvedCreatureTier: CoverTier = creatureSources.length === 0 ? 'none' : creatureTier;
-  const tier = COVER_ORDER[objectTier] >= COVER_ORDER[resolvedCreatureTier] ? objectTier : resolvedCreatureTier;
-  const sourceIds = [
-    ...(COVER_ORDER[objectTier] === COVER_ORDER[tier] ? objectSources : []),
-    ...(COVER_ORDER[resolvedCreatureTier] === COVER_ORDER[tier] ? creatureSources : []),
-  ].sort();
-  return { tier, sourceIds };
+  const trace = traceCombatantLine(state, sourceId, targetId, options);
+  return { tier: trace.tier, sourceIds: trace.sourceIds };
 }

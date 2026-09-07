@@ -12,7 +12,8 @@ import {
 import type { EncounterCommand } from '../../../src/combat/events';
 import { findPath } from '../../../src/combat/movement';
 import { armorClass, damageType, dieSides, feet, worldObjectId } from '../../../src/combat/values';
-import type { CoverTier, WorldObject } from '../../../src/combat/world-objects';
+import type { WorldObject } from '../../../src/combat/world-objects';
+import { terrainBlocking, type TerrainKind } from '../../../src/combat/terrain';
 import { worldObjectClassActionCommands } from '../../../src/combat/world-object-actions';
 import { monsterProfile, placedToken, playerProfile } from './fixtures';
 
@@ -22,9 +23,7 @@ function object(
   id: string,
   cells: readonly { readonly column: number; readonly row: number }[],
   options: {
-    readonly movement?: boolean;
-    readonly sight?: boolean;
-    readonly cover?: CoverTier;
+    readonly terrain?: TerrainKind;
     readonly hitPoints?: number;
   } = {},
 ): WorldObject {
@@ -41,11 +40,7 @@ function object(
       : { kind: 'hit_points', hitPoints: options.hitPoints, maximumHitPoints: options.hitPoints },
     armorClass: armorClass(12),
     damageResponses: [],
-    blocking: {
-      movement: options.movement ?? false,
-      lineOfSight: options.sight ?? false,
-      cover: options.cover ?? 'none',
-    },
+    blocking: terrainBlocking(options.terrain ?? 'open'),
     createdRevision: 0,
   };
 }
@@ -132,14 +127,14 @@ describe('typed world objects and encounter environment', () => {
       cost: 'none',
       operation: {
         kind: 'create_object',
-        object: object('tail-blocker', [{ column: 2, row: 2 }], { movement: true }),
+        object: object('tail-blocker', [{ column: 2, row: 2 }], { terrain: 'wall' }),
       },
     }, () => 0.5)).toThrow('A movement-blocking world object cannot overlap a combatant.');
   });
 
   it('wall_ignored_by_pathing: a movement blocker forces a strictly longer route', () => {
     const wall = object('path-wall', [2, 3, 4].flatMap((column) =>
-      [0, 1, 2, 3].map((row) => ({ column, row }))), { movement: true });
+      [0, 1, 2, 3].map((row) => ({ column, row }))), { terrain: 'wall' });
     const state = setup([wall]);
     const actor = state.combatants[0]?.profile.id;
     if (actor === undefined) throw new Error('Path fixture has no actor.');
@@ -156,29 +151,29 @@ describe('typed world objects and encounter environment', () => {
   });
 
   it('a sight-blocker breaks line of sight and targeting', () => {
-    const blocker = object('sight-wall', [{ column: 3, row: 2 }], { sight: true });
+    const blocker = object('sight-wall', [{ column: 3, row: 2 }], { terrain: 'wall' });
     const state = started([blocker]);
     expect(hasLineOfSight(state, { column: 0, row: 2 }, { column: 6, row: 2 })).toBe(false);
     expect(() => reduceEncounter(state, attack(state), () => 0.65)).toThrow('outside line of sight');
   });
 
   it('cover_tier_off_by_one: half and three-quarters cover change exact attack boundaries', () => {
-    const half = started([object('half-cover', [{ column: 3, row: 2 }], { cover: 'half' })]);
+    const half = started([object('half-cover', [{ column: 3, row: 2 }], { terrain: 'half_cover' })]);
     const halfHit = reduceEncounter(half, attack(half), () => 0.65);
     expect(halfHit.events.find((event) => event.type === 'attack_resolved')?.attack.outcome).toBe('hit');
 
-    const threeQuarters = started([object('three-cover', [{ column: 3, row: 2 }], { cover: 'three_quarters' })]);
+    const threeQuarters = started([object('three-cover', [{ column: 3, row: 2 }], { terrain: 'three_quarters_cover' })]);
     const threeQuarterMiss = reduceEncounter(threeQuarters, attack(threeQuarters), () => 0.65);
     expect(threeQuarterMiss.events.find((event) => event.type === 'attack_resolved')?.attack.outcome).toBe('miss');
   });
 
   it('cover_no_bonus: line-crossing cover grants its cited AC and Dexterity-save bonus', () => {
-    const halfAttack = started([object('half-cover-ac', [{ column: 3, row: 2 }], { cover: 'half' })]);
+    const halfAttack = started([object('half-cover-ac', [{ column: 3, row: 2 }], { terrain: 'half_cover' })]);
     const coveredAttack = reduceEncounter(halfAttack, attack(halfAttack), () => 0.6);
     expect(coveredAttack.events.find((event) => event.type === 'attack_resolved')?.attack)
       .toMatchObject({ outcome: 'miss', total: 13 });
 
-    const halfSave = started([object('half-cover-dex', [{ column: 3, row: 2 }], { cover: 'half' })]);
+    const halfSave = started([object('half-cover-dex', [{ column: 3, row: 2 }], { terrain: 'half_cover' })]);
     const actor = halfSave.activeCombatant;
     const target = halfSave.combatants.find((entry) => entry.profile.kind === 'monster')?.profile.id;
     if (actor === null || target === undefined) throw new Error('Cover save fixture is incomplete.');
@@ -191,7 +186,7 @@ describe('typed world objects and encounter environment', () => {
       .toMatchObject({ outcome: 'success', total: 12 });
 
     const threeQuarterSave = started([
-      object('three-quarter-cover-dex', [{ column: 3, row: 2 }], { cover: 'three_quarters' }),
+      object('three-quarter-cover-dex', [{ column: 3, row: 2 }], { terrain: 'three_quarters_cover' }),
     ]);
     const threeQuarterActor = threeQuarterSave.activeCombatant;
     const threeQuarterTarget = threeQuarterSave.combatants
@@ -209,7 +204,7 @@ describe('typed world objects and encounter environment', () => {
   });
 
   it('cover_blocks_allies_only: line-crossing cover protects monster and player targets symmetrically', () => {
-    const coverObject = object('symmetric-half-cover', [{ column: 3, row: 2 }], { cover: 'half' });
+    const coverObject = object('symmetric-half-cover', [{ column: 3, row: 2 }], { terrain: 'half_cover' });
     const player = playerProfile('cover-symmetry-player', { initiativeBonus: 20 });
     const monster = monsterProfile('cover-symmetry-monster', { initiativeBonus: -20 });
     const playerAttacks = reduceEncounter(createEncounter({
@@ -267,7 +262,7 @@ describe('typed world objects and encounter environment', () => {
   });
 
   it('destroyed_object_still_blocks: damage destroys an HP object and immediately opens its cell', () => {
-    const wall = object('breakable-wall', [{ column: 1, row: 2 }], { movement: true, hitPoints: 5 });
+    const wall = object('breakable-wall', [{ column: 1, row: 2 }], { terrain: 'wall', hitPoints: 5 });
     const state = started([wall]);
     const destroyed = reduceEncounter(state, {
       type: 'world_operation', actor: state.activeCombatant, cost: 'none',
@@ -310,7 +305,7 @@ describe('typed world objects and encounter environment', () => {
     const initial = started();
     const actor = initial.activeCombatant;
     if (actor === null) throw new Error('Replay fixture has no active actor.');
-    const created = object('replay-wall', [{ column: 2, row: 1 }], { movement: true, sight: true });
+    const created = object('replay-wall', [{ column: 2, row: 1 }], { terrain: 'wall' });
     const command: EncounterCommand = {
       type: 'world_operation', actor, cost: 'none', operation: { kind: 'create_object', object: created },
     };
