@@ -13680,3 +13680,13 @@ facts alone on the same boards; seed 1 showed .952 vs .954. At low
 effort the picture pulls the light answer away from the text partition
 instead of confirming it. Facts-only is the luna-low candidate; the
 image is reintroduced only if a later factor makes it help.
+
+## D568 tuning round 1 misfire (mine): --answer-schema does not exist on the E1b tree (2026-09-07 00:07)
+
+I launched the identity-format factor with `--answer-schema v2-evidence`
+on the E1b run tree (49d782bb); the probe rejected the option at
+parse time (exit 1, no model calls). The v2-evidence schema lives on
+claude/a10-unknown and the v9-checklist primer on claude/e3-checklist,
+neither of which carries E1b's encoding. Fix: a tuning tree that merges
+both lanes onto claude/e1-semantic (codex merge lane d568-tune), then
+the factors run there. No result was recorded from the misfire.
