@@ -7,7 +7,11 @@ import {
   generateArenaBasis,
   parseBasisGenerationArgs,
 } from '../../../tools/generate-arena-basis';
-import { mkdtempSync, readFileSync } from '../../helpers/test-filesystem';
+import {
+  D569_SECOND_FAMILY_SEEDS,
+  generatedRoomIntegrityViolations,
+} from '../../../tools/d569-second-family-manifest';
+import { mkdtempSync, readFileSync, readdirSync } from '../../helpers/test-filesystem';
 
 describe('arena basis generator', () => {
   it('parses the explicit difficulty profile and writes deterministic canonical rooms', async () => {
@@ -51,5 +55,43 @@ describe('arena basis generator', () => {
       '--rooms', '3',
       '--out', outPath,
     ])).toEqual({ difficulty: 'brutal', seed: 6_203_001, rooms: 3, outPath });
+  });
+
+  it.each([
+    { difficulty: 'hard' as const, seeds: D569_SECOND_FAMILY_SEEDS.hard },
+    { difficulty: 'brutal' as const, seeds: D569_SECOND_FAMILY_SEEDS.brutal },
+  ])('freezes exactly ten canonical deterministic $difficulty second-family rooms', async ({
+    difficulty,
+    seeds,
+  }) => {
+    const firstPath = mkdtempSync(join(tmpdir(), `dnd-d569-${difficulty}-first-`));
+    const secondPath = mkdtempSync(join(tmpdir(), `dnd-d569-${difficulty}-second-`));
+    const config = {
+      difficulty,
+      seed: seeds[0],
+      rooms: seeds.length,
+    } as const;
+    await generateArenaBasis({ ...config, outPath: firstPath });
+    await generateArenaBasis({ ...config, outPath: secondPath });
+
+    const expectedNames = seeds.map((seed) => `seed-${String(seed)}.json`);
+    expect(readdirSync(firstPath).sort()).toEqual(expectedNames);
+    expect(readdirSync(secondPath).sort()).toEqual(expectedNames);
+    expect(new Set(expectedNames).size).toBe(10);
+
+    for (const seed of seeds) {
+      const name = `seed-${String(seed)}.json`;
+      const firstBytes = readFileSync(join(firstPath, name), 'utf8');
+      const secondBytes = readFileSync(join(secondPath, name), 'utf8');
+      const room = JSON.parse(firstBytes) as ReturnType<typeof generateRoom>;
+      expect(firstBytes, `${difficulty} seed ${String(seed)} is not canonical`).toBe(
+        `${canonicalJson(generateRoom(seed, { difficulty }))}\n`,
+      );
+      expect(secondBytes, `${difficulty} seed ${String(seed)} independent regeneration differs`)
+        .toBe(firstBytes);
+      expect(room.spec.seed).toBe(seed);
+      expect(room.spec.difficultyProfile).toBe(difficulty);
+      expect(generatedRoomIntegrityViolations(room, firstBytes)).toEqual([]);
+    }
   });
 });
