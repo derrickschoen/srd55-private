@@ -13833,3 +13833,19 @@ D567 arms so far: 16 KiB void on the five compact-fallback rooms
 24 KiB 30/30 authorized, no refusals, post-trim 23.8-24.3 KB, 35
 options omitted per room on average, wall 62 s mean. 32 running, then
 48/64.
+
+## D570 knowledge bundle harvested and committed 43ff7779 on claude/blind-dm (2026-09-07 00:46)
+
+Codex claimed 19/19 and 86/86, tsc 0, two mutants killed. Verified
+myself: read the map guide, tactics, movement and conditions files
+(accurate to SRD 5.2.1, clean-room, no private-source or option-
+protocol vocabulary; lane log shows no private-tree access); 4 spec
+files 95/95, tsc 0; my mutant (movement SRD locator shifted 400 lines,
+a plausible wrong range) killed by the locator test, provenance
+restored byte-identical. One amendment before commit (same session):
+two sentences that still forbade coordinates and relative-only
+movement were rewritten to the D571 grammar (gutter label or relative
+phrase, hold by default); codex reran the KB specs 19/19 and I reran
+them 19/19 before committing. Bytes: startup 26,981 delivered
+(protocol.md 7,748), nine components, provenance with section-level
+locators.
