@@ -13072,3 +13072,27 @@ on the planning runtime again) kills the new arena repro test 1/38 and
 was restored byte-identical (self-restoring script, RESTORED OK).
 Committed claude/e6-narration (see git log). E6's mini-A/B re-run
 waits for the quiet box.
+
+## D566 — OWNER: "Run the judge panel now that it matches sol high"; sol-high parity of inputs verified (2026-09-06 20:21)
+
+Verified: the sol-high comprehension probe and luna's r5c run used the
+identical 24 capture PNGs (sha256 sets equal), the same primer
+(d557-general-board-primer-v9), glyph mode full; the sol-high 'both'
+run and luna's E1 'both' run used identical captures, primer v10 and
+identical semantic payloads (semanticSha256 equal), boardInput both.
+The probe has no KB. In the arena baseline sol high got the default
+profile, full intel, no KB (kbReads unused everywhere), with a 240 s
+wall vs luna's 120 s: the only input difference, and it only widens
+what sol may finish.
+
+Judged DM-quality panel launched (E1c tree dd237874 = 5d art + primer
+v10 + semantic board in the live turn context; hard basis R1-10 x 3
+reps, seed 5117001, full intel, 240 s wall for every arm so load cannot
+void rows): (a) luna medium + semanticBoard, (b) luna medium control
+(flag off), (c) sol high + semanticBoard. Packets: (a) vs (b) and (a)
+vs (c), judged by the standing panel via judge-one.sh. Caveat recorded
+from E2: the hard basis is near ceiling for luna medium; a brutal
+protocol for the packet builder (--protocol brutal-10, seeds
+6203001-10) is being added by codex (lane packet-brutal, worktree off
+main) so the same arms can be judged with headroom; those arms run
+after the classic gate frees the box.
