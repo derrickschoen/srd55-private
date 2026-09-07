@@ -14197,3 +14197,29 @@ passed + 1 passed serially, exit 0. Merged from the main repo with
 carries: classic round 5, the E1 semantic-board lineage, the D567 cap
 knob and compact-fallback fix, the second brutal family with the
 boundary fix. Four landings this window, each behind a full gate.
+
+## D569 increment 1b delivered; verified except one surviving supervisor mutant (nested undeclared key), sent back (2026-09-07 07:54)
+
+Codex delivered the blind turn context (allowlist with creature_facts
+from the advice status's typed sources, exact monster HP/resources,
+party bands via the roster projector, E1b board minus reach summaries,
+legal movement from the canonical path query), closed MCP profile,
+profile-aware resources/prompts, typed submit stub with receipt,
+ingress recorder, a fixture report tool and the generated intent
+schema. Byte table over 33 fixtures: base 18.7-53.1 KB, board <= 6.4
+KB, nothing truncated under 64 KiB + 8 KiB. Claims: 5 specs 183/183,
+tsc 0, eight named mutants killed (five by the one large ingress test,
+whose assertions I read and which do check the fields those mutants
+alter).
+Verified myself: same five specs 183/183, tsc 0, the fixture report
+reproduced byte for byte, scans clean, lane log exec lines mentioning
+"claude" are all reads of .claude/decisions.md, contracts.ts unchanged.
+Surviving mutant (mine): an undeclared `candidate_count` inside the
+legal_movement object compiles and passes 52/52; the allowlist is
+enforced at the top level only and the scan rejects known key names,
+so a smuggled value under a neutral name is not denied by construction.
+Not committed; lane resumed with the requirement of a strict schema at
+every nesting level validated by the renderer and the ingress
+boundary, an injection test at three depths, and tighter return types.
+A first mutant of mine targeted a shape that does not exist and was
+void.
