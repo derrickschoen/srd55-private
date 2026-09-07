@@ -13661,3 +13661,14 @@ results, DCs, damage or reducer commands; it states intents and the
 engine resolves and rolls. The intent grammar, resolver, repair arms,
 leak audit (now forbidding recommendation fields, not numbers) and the
 evaluation protocol stand. Plan amendment sent to the planning session.
+
+## D568 seed-2 replication at luna low: both facts arms hold (2026-09-07 00:06)
+
+Seed 6203002, same 24-state protocol, luna low:
+- semantic: mean 0.996, strict PASS, weakest Q1 0.968, Q5 0.993, Q10 1.000
+- both: mean 0.986, strict PASS, weakest Q5 0.909, Q1 0.955, Q9 0.994
+Seed 1 was .992/.992. Not a fluke: engine facts give luna low strict-gate
+comprehension on both seeds; the residual is Q1 identity/coordinates
+(~.96-.97) and, on seed 1 only, Q5 light (.95). Next D568 tuning round
+targets the identity answer format (answer-schema v2-evidence) as the
+single factor, seed 1 then seed 2.
