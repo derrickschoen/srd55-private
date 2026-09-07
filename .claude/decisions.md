@@ -15346,3 +15346,35 @@ Astra's framing of the null, which I accept and which corrects a
 temptation in my own earlier wording: the result supports "no
 demonstrated average improvement", NOT equivalence and NOT "no model can
 win a room". The intervals still admit meaningful differences.
+
+## D576 gate FAILS LINT: the increment 1a call-site test uses raw node:fs (2026-09-07 18:54)
+
+Merged main into claude/los-cover cleanly (ff399f86) and started the
+full gate on a quiet machine, load 0.07. tsc passed. `sg scan` FAILED
+with exactly one error:
+
+  error[no-raw-fs-in-tests]: Test files must read declared repository
+  inputs or use a helper-owned filesystem capability.
+  tests/unit/tools/los-cover-call-sites.test.ts:1:1
+  import { readFileSync } from 'node:fs';
+
+This is a real repository rule the increment 1a lane broke and neither
+it nor I caught, because both of us ran only targeted vitest and tsc.
+The lane brief demanded the exhaustive call-site check but never told
+the lane to run the linter, and my verification repeated the lane's own
+command set instead of the gate's. That is the gap: a lane's own choice
+of checks is not a substitute for the gate, and my independent
+verification must include the checks the lane did not run, not the same
+ones again. Recorded as a finding against my own process.
+
+The fix is small and known: the rule permits either declared inputs or a
+helper-owned capability, and tests/helpers/test-filesystem.ts already
+exports readFileSync, so the import moves there. declareTestInputs is
+NOT the right route here because its categories are fixtures, schemaSql,
+srdText, guides, publicData and content, none of which covers reading
+production source under src/.
+
+Dispatch is held until the gate finishes rather than started now,
+because a lane writing in a worktree while that worktree is being gated
+invalidates the gate. The remaining vitest and browser results are still
+worth having, so the gate runs to completion first.
