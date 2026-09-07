@@ -13556,3 +13556,17 @@ s wall, caps 16/24/32/48/64 KiB (three then two concurrent), rows
 ~/dnd-slim-runs/cap-<n>.jsonl. Each cap is judged pairwise against the
 32 KiB control from the same tree; latency per turn compared from the
 rows.
+
+## E1cbh panel (hard, budget-fixed build): facts neutral, sol gap narrowed (2026-09-06 23:42)
+
+Standing panel, blinded, hard R1-10 x3, 240 s wall, unseal-e1cbh.md:
+- luna_facts - luna_control: -0.11, 95% CI [-0.53, +0.34] (control 8.82,
+  facts 8.71); with the broken block it was -0.38 [-0.78, +0.02]. The
+  earlier loss was the budget collision; a whole block neither helps nor
+  hurts on a basis where the control already scores 8.8/10.
+- sol_facts - luna_facts: +0.57 [+0.16, +1.00] (7.84 vs 8.41 in that
+  packet), down from +0.82 with the broken block.
+Reading: the hard basis is at ceiling and cannot show a comprehension
+gain; the brutal arms (running) are the informative test for D565; the
+sol gap on hard is now mostly attempts/coherence, not board reading.
+Judge outputs e1cbh-judge-{sol,opus,fable}-*; packets shuffle 9062.
