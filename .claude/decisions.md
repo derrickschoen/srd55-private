@@ -13277,3 +13277,14 @@ accepted 10/10, attempts [2,1,1,1,1,1,1,1,1,1], round-1 offense
 targets) = era controls exactly; luna low identical on every vector and
 equal to the intel-leak PASS run. No escalation. Merging from the main
 repo with the full browser suite as the landing gate.
+
+## Classic round 5 landed on main: merge 236aa967 (2026-09-06 21:45)
+
+`git -C <main> merge --no-ff claude/classic-r5` (8661cdbc) exit 0, no
+conflicts (the lane had merged main at 599fbe79; only .claude record
+commits landed on main since). Full landing gate launched on main
+(gate-multiclass-spells-static.log: tsc, sg, locked vitest, full
+chromium suite ~55 min). :4173 restarted on the merged tree (old
+serve.mjs pid 203215 killed; relaunch in a separate call). Codex lane
+e1c-budget keeps running in its own worktree; LOAD FLAKES, if any, are
+rerun serially by the gate runner and never re-pinned.
