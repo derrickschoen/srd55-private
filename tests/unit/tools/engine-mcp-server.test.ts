@@ -254,26 +254,29 @@ describe('engine MCP stdio protocol', () => {
     if (!Array.isArray(requiredActors) || requiredActors.length === 0) {
       throw new Error('Blind context omitted required actors.');
     }
-    const actor = record(requiredActors[0]);
     const receipt = request('tools/call', {
       name: 'engine.submit_blind_round_intents',
       arguments: {
         intent_version: 'blind-round-intent-v1',
-        intents: [{
+        intents: requiredActors.map((value) => {
+          const actor = record(value);
+          return {
           actor: { name: actor['name'], badge: actor['badge'] },
           action: { kind: 'end' },
           reason: 'Hold the line.',
-        }],
+          };
+        }),
       },
     });
-    expect(receipt['structuredContent']).toMatchObject({
-      status: 'recorded',
-      intent_version: 'blind-round-intent-v1',
-      intent_count: 1,
-      attempt: 1,
-    });
+    expect(receipt['structuredContent']).toEqual({ status: 'accepted', attempt: 1 });
     expect(runtime.blindIntentSubmissions).toHaveLength(1);
-    expect(runtime.proposals).toEqual([]);
+    expect(runtime.blindIntentSubmissions[0]?.resolution.status).toBe('accepted');
+    expect(runtime.proposals).toEqual([
+      expect.objectContaining({
+        kind: 'round_turn_proposal',
+        resolutions: requiredActors.map(() => expect.objectContaining({ selectedBranch: 'primary' })),
+      }),
+    ]);
 
     const privateOfferIds = capsule.projection.combatants.flatMap((combatant) =>
       combatant.options.map((option) => option.optionId));
@@ -295,6 +298,145 @@ describe('engine MCP stdio protocol', () => {
     for (const evidence of MOVEMENT_PARITY_EVIDENCE) {
       expect(evidence.actual).toEqual(evidence.expected);
     }
+  });
+
+  it('bounds one-to-three blind attempts under one absolute live deadline and never stages a fallback', async () => {
+    const state = await loadArenaFixture('tests/fixtures/arena-basis/seed-3943001.json');
+    const actorId = state.combatants.find((entry) => entry.profile.kind === 'monster' && entry.life === 'living')?.profile.id;
+    if (actorId === undefined) throw new Error('Blind attempt fixture has no monster.');
+    for (const maximum of [1, 2, 3] as const) {
+      let now = 10_000;
+      const runtime = createEngineMcpRuntime(state, {
+        dmMode: 'blind', toolProfile: 'blind', blindMaxAttempts: maximum,
+        blindDeadlineUnixMs: 20_000, clock: () => now,
+        requestedActorIds: [actorId],
+      });
+      const capsule = runtime.feed.current();
+      const context = record(runtime.toolSurface.execute('engine.get_turn_context', {
+        run_id: capsule.runId, expected_revision: capsule.revision, scope: 'round',
+      }));
+      const requestValue = record(context['request']);
+      const actors = Array.isArray(requestValue['required_actors'])
+        ? requestValue['required_actors'].map(record)
+        : [];
+      const argumentsValue = {
+        intent_version: 'blind-round-intent-v1',
+        intents: actors.map((actor) => ({
+          actor: { name: actor['name'], badge: actor['badge'] },
+          action: { kind: 'help' },
+          reason: 'Support an ally.',
+        })),
+      };
+      for (let attempt = 1; attempt <= maximum; attempt += 1) {
+        expect(runtime.toolSurface.execute('engine.submit_blind_round_intents', argumentsValue))
+          .toEqual(expect.objectContaining({ status: 'rejected', attempt }));
+        now += 1;
+      }
+      expect(() => runtime.toolSurface.execute('engine.submit_blind_round_intents', argumentsValue))
+        .toThrow('BLIND_MAX_ATTEMPTS_EXCEEDED');
+      expect(runtime.blindIntentSubmissions).toHaveLength(maximum);
+      expect(runtime.proposals).toEqual([]);
+    }
+
+    let now = 30_000;
+    const deadlineRuntime = createEngineMcpRuntime(state, {
+      dmMode: 'blind', toolProfile: 'blind', blindMaxAttempts: 3,
+      blindDeadlineUnixMs: 30_002, clock: () => now,
+      requestedActorIds: [actorId],
+    });
+    const capsule = deadlineRuntime.feed.current();
+    const context = record(deadlineRuntime.toolSurface.execute('engine.get_turn_context', {
+      run_id: capsule.runId, expected_revision: capsule.revision, scope: 'round',
+    }));
+    const requestValue = record(context['request']);
+    const actors = Array.isArray(requestValue['required_actors'])
+      ? requestValue['required_actors'].map(record)
+      : [];
+    const rejectedArguments = {
+      intent_version: 'blind-round-intent-v1',
+      intents: actors.map((actor) => ({
+        actor: { name: actor['name'], badge: actor['badge'] },
+        action: { kind: 'ready' },
+        reason: 'Wait for an opening.',
+      })),
+    };
+    expect(deadlineRuntime.toolSurface.execute('engine.submit_blind_round_intents', {
+      intent_version: 'blind-round-intent-v1',
+      intents: [{
+        actor: { name: actors[0]?.['name'], badge: actors[0]?.['badge'] },
+        action: { kind: 'dodge' }, damage: '2d6',
+      }],
+    })).toEqual({ status: 'rejected', attempt: 1, codes: ['INVALID_INTENT_SHAPE'] });
+    now += 1;
+    expect(deadlineRuntime.toolSurface.execute('engine.submit_blind_round_intents', rejectedArguments))
+      .toEqual(expect.objectContaining({ status: 'rejected', attempt: 2 }));
+    now = 30_002;
+    expect(() => deadlineRuntime.toolSurface.execute('engine.submit_blind_round_intents', rejectedArguments))
+      .toThrow('BLIND_INTENT_DEADLINE_EXCEEDED');
+    expect(deadlineRuntime.blindIntentSubmissions).toHaveLength(2);
+    expect(deadlineRuntime.proposals).toEqual([]);
+  });
+
+  it('returns only one lexical minimal hint and refuses a mid-resolution revision change without staging', async () => {
+    const state = await loadArenaFixture('tests/fixtures/arena-basis/seed-3943001.json');
+    const actorId = state.combatants.find((entry) => entry.profile.kind === 'monster' && entry.life === 'living')?.profile.id;
+    if (actorId === undefined) throw new Error('Blind repair fixture has no monster.');
+    const hinted = createEngineMcpRuntime(state, {
+      dmMode: 'blind', toolProfile: 'blind', blindRepairArm: 'minimal_legal_alternative',
+      requestedActorIds: [actorId],
+    });
+    const hintedCapsule = hinted.feed.current();
+    const hintedContext = record(hinted.toolSurface.execute('engine.get_turn_context', {
+      run_id: hintedCapsule.runId, expected_revision: hintedCapsule.revision, scope: 'round',
+    }));
+    const actors = Array.isArray(record(hintedContext['request'])['required_actors'])
+      ? (record(hintedContext['request'])['required_actors'] as readonly unknown[]).map(record)
+      : [];
+    const rejected = record(hinted.toolSurface.execute('engine.submit_blind_round_intents', {
+      intent_version: 'blind-round-intent-v1',
+      intents: actors.map((actor) => ({
+        actor: { name: actor['name'], badge: actor['badge'] },
+        action: { kind: 'help' }, reason: 'Support an ally.',
+      })),
+    }));
+    expect(rejected).toEqual({
+      status: 'rejected', attempt: 1,
+      actor: { name: actors[0]?.['name'], badge: actors[0]?.['badge'] },
+      codes: ['ACTION_UNAVAILABLE'],
+      legal_alternative: expect.objectContaining({ action_kind: expect.any(String) }),
+    });
+    expect(Object.keys(record(rejected['legal_alternative']))).toEqual(
+      expect.arrayContaining(['action_kind']),
+    );
+    expect(JSON.stringify(rejected)).not.toMatch(/option:|path|score|rank|damage/iu);
+
+    let changedRuntime: ReturnType<typeof createEngineMcpRuntime> | null = null;
+    const changing = createEngineMcpRuntime(state, {
+      dmMode: 'blind', toolProfile: 'blind',
+      requestedActorIds: [actorId],
+      beforeBlindIntentStage: () => {
+        const replacement = createEngineMcpRuntime(state, {
+          dmMode: 'blind', toolProfile: 'blind', revision: 2, requestedActorIds: [actorId],
+        }).feed.current();
+        changedRuntime?.feed.replace(replacement);
+      },
+    });
+    changedRuntime = changing;
+    const changingCapsule = changing.feed.current();
+    const changingContext = record(changing.toolSurface.execute('engine.get_turn_context', {
+      run_id: changingCapsule.runId, expected_revision: changingCapsule.revision, scope: 'round',
+    }));
+    const changingActors = Array.isArray(record(changingContext['request'])['required_actors'])
+      ? (record(changingContext['request'])['required_actors'] as readonly unknown[]).map(record)
+      : [];
+    expect(changing.toolSurface.execute('engine.submit_blind_round_intents', {
+      intent_version: 'blind-round-intent-v1',
+      intents: changingActors.map((actor) => ({
+        actor: { name: actor['name'], badge: actor['badge'] },
+        action: { kind: 'end' }, reason: 'Hold the line.',
+      })),
+    })).toEqual({ status: 'rejected', attempt: 1, codes: ['STALE_REVISION'] });
+    expect(changing.proposals).toEqual([]);
   });
 
   it('copies sourced attack to-hit and spell save DC values instead of deriving them', () => {

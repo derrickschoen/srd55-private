@@ -108,6 +108,7 @@ export interface AuthorizedEngineTurnProposal {
   readonly fallbackOption: EngineOfferableOption | null;
   readonly mechanics: ResolvedTurnMechanics;
   readonly selectedBranch: 'primary' | 'fallback';
+  readonly strictNoFallback?: true;
 }
 
 export interface PreparedEngineRound extends EngineBoundaryResolutions {
@@ -584,6 +585,18 @@ export class EngineRoundSession {
     entries: readonly EngineTurnApplication[],
     guidance: ReactionGuidanceDeclaration | null,
   ): AppliedEngineMechanics {
+    return this.#applyResolvedMechanics(
+      entries,
+      guidance,
+      entries.some((entry) => entry.strictNoFallback === true),
+    );
+  }
+
+  #applyResolvedMechanics(
+    entries: readonly EngineTurnApplication[],
+    guidance: ReactionGuidanceDeclaration | null,
+    rejectUnavailablePrimary: boolean,
+  ): AppliedEngineMechanics {
     const beforeRevision = this.#state.revision;
     const trialRng = restoreMulberry32(this.#rng.snapshot());
     const fallbackResolutions: AutoResolvedReactionOffer[] = [];
@@ -616,6 +629,11 @@ export class EngineRoundSession {
         appliedBranch = 'fallback';
         refusalCodes = [primary.code];
       } else {
+        if (rejectUnavailablePrimary) {
+          throw new Error(
+            `Blind proposal became unavailable for ${entry.proposal.actorId}: ${primary.code}.`,
+          );
+        }
         const dodgeOption = availableEngineActorOptions(state, entry.proposal.actorId).find((option) =>
           option.actionSlots.some((slot) => slot.slot === 'main' && slot.use.kind === 'dodge')) ?? null;
         if (dodgeOption === null) throw new Error(`Could not apply deterministic Dodge for ${entry.proposal.actorId}.`);

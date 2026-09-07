@@ -77,7 +77,7 @@ export interface BlindFullContextRequiredResult {
   readonly code: typeof BLIND_FULL_CONTEXT_REQUIRED;
 }
 
-interface BoardDisplayIdentity {
+export interface BoardDisplayIdentity {
   readonly id: string;
   readonly name: string;
   readonly badge: number;
@@ -1054,20 +1054,36 @@ function everyCell(bounds: EncounterState['bounds']): readonly GridCell[] {
     Array.from({ length: bounds.columns }, (_column, column) => ({ column, row }))).flat();
 }
 
+export interface BlindResolvedMovementCell {
+  readonly label: string;
+  readonly cell: GridCell;
+  readonly costFeet: number;
+  readonly path: readonly GridCell[];
+}
+
+export interface BlindResolvedActorMovement {
+  readonly actorId: string;
+  readonly movementBudgetFeet: number;
+  readonly cells: readonly BlindResolvedMovementCell[];
+}
+
 function legalMovement(
   state: EncounterState,
   capsule: EngineStateCapsule,
   queries: EngineQueryPort,
   displays: ReadonlyMap<string, BoardDisplayIdentity>,
-): BlindLegalMovement {
+): {
+  readonly visible: BlindLegalMovement;
+  readonly resolved: readonly BlindResolvedActorMovement[];
+} {
   const required = capsule.request?.actors ?? [];
-  const actors = required.map((actorId): BlindLegalMovementActor => {
+  const resolved = required.map((actorId): BlindResolvedActorMovement => {
     const actor = capsule.projection.combatants.find((candidate) => candidate.id === actorId);
     const display = displays.get(actorId);
     if (actor === undefined || display === undefined) {
       throw new Error(`Blind legal movement cannot bind required actor ${String(actorId)}.`);
     }
-    const cells: BlindLegalMovementCell[] = everyCell(state.bounds).flatMap((destination): BlindLegalMovementCell[] => {
+    const cells: BlindResolvedMovementCell[] = everyCell(state.bounds).flatMap((destination): BlindResolvedMovementCell[] => {
       const result = queries.path(state, {
         actorId,
         destination,
@@ -1075,23 +1091,42 @@ function legalMovement(
         maximumFeet: actor.movementRemainingFeet,
       });
       return result.legal
-        ? [{ label: `${String(destination.column)},${String(destination.row)}`, cost_feet: result.costFeet }]
+        ? [{
+            label: `${String(destination.column)},${String(destination.row)}`,
+            cell: destination,
+            costFeet: result.costFeet,
+            path: result.cells,
+          }]
         : [];
     });
     return {
-      name: display.name,
-      badge: display.badge,
-      movement_budget_feet: actor.movementRemainingFeet,
+      actorId: String(actorId),
+      movementBudgetFeet: actor.movementRemainingFeet,
       cells,
     };
   });
   return {
-    provenance: {
-      kind: 'engine_fact',
-      query: BLIND_LEGAL_MOVEMENT_VERSION,
-      state_digest: capsule.digest,
+    visible: {
+      provenance: {
+        kind: 'engine_fact',
+        query: BLIND_LEGAL_MOVEMENT_VERSION,
+        state_digest: capsule.digest,
+      },
+      actors: resolved.map((entry): BlindLegalMovementActor => {
+        const display = displays.get(entry.actorId);
+        if (display === undefined) throw new Error(`Blind legal movement lost display ${entry.actorId}.`);
+        return {
+          name: display.name,
+          badge: display.badge,
+          movement_budget_feet: entry.movementBudgetFeet,
+          cells: entry.cells.map((cell): BlindLegalMovementCell => ({
+            label: cell.label,
+            cost_feet: cell.costFeet,
+          })),
+        };
+      }),
     },
-    actors,
+    resolved,
   };
 }
 
@@ -1102,6 +1137,8 @@ export interface EngineBlindTurnProjection {
   readonly initiative: BlindTurnContext['initiative'];
   readonly creatureFacts: BlindCreatureFacts;
   readonly legalMovement: BlindLegalMovement;
+  /** Private canonical paths backing the visible destination/cost set. */
+  readonly resolvedMovement: readonly BlindResolvedActorMovement[];
 }
 
 /** Reducer-free projection consumed by the standalone MCP blind renderer. */
@@ -1128,13 +1165,15 @@ export function projectEngineBlindTurn(
       delayed: delayed.get(entry.combatant) ?? false,
     };
   });
+  const movement = legalMovement(state, capsule, queries, displaysById);
   return {
     revision: capsule.revision,
     round: state.round,
     displays,
     initiative,
     creatureFacts: creatureFacts(state, capsule, displaysById),
-    legalMovement: legalMovement(state, capsule, queries, displaysById),
+    legalMovement: movement.visible,
+    resolvedMovement: movement.resolved,
   };
 }
 

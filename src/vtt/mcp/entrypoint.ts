@@ -65,7 +65,11 @@ import {
   type KbReadRecord,
   type KbSubjectSources,
 } from './knowledge-base';
-import type { DmMode } from '../blind-dm-contract';
+import type {
+  BlindMaxAttempts,
+  BlindRepairArm,
+  DmMode,
+} from '../blind-dm-contract';
 import {
   BLIND_TURN_CONTEXT_MAX_BYTES,
   projectEngineBlindTurn,
@@ -288,6 +292,9 @@ export interface EngineMcpLauncherManifest {
   };
   readonly toolProfile?: EngineMcpToolProfile;
   readonly dmMode?: DmMode;
+  readonly blindRepairArm?: BlindRepairArm;
+  readonly blindMaxAttempts?: BlindMaxAttempts;
+  readonly blindDeadlineUnixMs?: number;
   readonly blindVisuals?: readonly BlindVisualDescriptor[];
   readonly turnContextDeltaBase?: TurnContextDeltaBase;
   readonly rendererProfile?: RendererProfile;
@@ -321,6 +328,11 @@ export function createEngineMcpRuntime(
     readonly onSpeculativePlan?: (plan: QueuedSpeculativePlanEnvelope) => void;
     readonly toolProfile?: EngineMcpToolProfile;
     readonly dmMode?: DmMode;
+    readonly blindRepairArm?: BlindRepairArm;
+    readonly blindMaxAttempts?: BlindMaxAttempts;
+    readonly blindDeadlineUnixMs?: number;
+    readonly clock?: () => number;
+    readonly beforeBlindIntentStage?: () => void;
     readonly blindVisuals?: readonly BlindVisualDescriptor[];
     readonly blindIngressRecorder?: BlindModelIngressRecorder;
     readonly onBlindTurnContextRendered?: (evidence: BlindTurnContextBudgetEvidence) => void;
@@ -500,6 +512,15 @@ export function createEngineMcpRuntime(
     ...(options.listPageSize === undefined ? {} : { listPageSize: options.listPageSize }),
     ...(options.toolProfile === undefined ? {} : { toolProfile: options.toolProfile }),
     ...(options.dmMode === undefined ? {} : { dmMode: options.dmMode }),
+    ...(options.blindRepairArm === undefined ? {} : { blindRepairArm: options.blindRepairArm }),
+    ...(options.blindMaxAttempts === undefined ? {} : { blindMaxAttempts: options.blindMaxAttempts }),
+    ...(options.blindDeadlineUnixMs === undefined ? {} : {
+      blindDeadlineUnixMs: options.blindDeadlineUnixMs,
+    }),
+    ...(options.clock === undefined ? {} : { clock: options.clock }),
+    ...(options.beforeBlindIntentStage === undefined ? {} : {
+      beforeBlindIntentStage: options.beforeBlindIntentStage,
+    }),
     ...(options.blindVisuals === undefined ? {} : { blindVisuals: options.blindVisuals }),
     ...(options.blindIngressRecorder === undefined ? {} : {
       blindIngressRecorder: options.blindIngressRecorder,
@@ -870,6 +891,13 @@ function isLauncherManifest(value: unknown): value is EngineMcpLauncherManifest 
     })()) &&
     (input['toolProfile'] === undefined || input['toolProfile'] === 'full' || input['toolProfile'] === 'dm' || input['toolProfile'] === 'blind') &&
     (input['dmMode'] === undefined || input['dmMode'] === 'advice' || input['dmMode'] === 'blind') &&
+    (input['blindRepairArm'] === undefined || input['blindRepairArm'] === 'code_only' ||
+      input['blindRepairArm'] === 'minimal_legal_alternative') &&
+    (input['blindMaxAttempts'] === undefined || typeof input['blindMaxAttempts'] === 'number' &&
+      Number.isSafeInteger(input['blindMaxAttempts']) && input['blindMaxAttempts'] >= 1 &&
+      input['blindMaxAttempts'] <= 3) &&
+    (input['blindDeadlineUnixMs'] === undefined || typeof input['blindDeadlineUnixMs'] === 'number' &&
+      Number.isSafeInteger(input['blindDeadlineUnixMs']) && input['blindDeadlineUnixMs'] >= 1) &&
     (input['blindVisuals'] === undefined || Array.isArray(input['blindVisuals']) &&
       input['blindVisuals'].every(isBlindVisualDescriptor)) &&
     (input['rendererProfile'] === undefined || rendererProfileSchema.safeParse(input['rendererProfile']).success) &&
@@ -975,6 +1003,11 @@ export async function runEngineMcpEntrypoint(argv: readonly string[] = process.a
         ? {}
         : { toolProfile: selectedProfile ?? manifest.toolProfile }),
       ...(manifest.dmMode === undefined ? {} : { dmMode: manifest.dmMode }),
+      ...(manifest.blindRepairArm === undefined ? {} : { blindRepairArm: manifest.blindRepairArm }),
+      ...(manifest.blindMaxAttempts === undefined ? {} : { blindMaxAttempts: manifest.blindMaxAttempts }),
+      ...(manifest.blindDeadlineUnixMs === undefined ? {} : {
+        blindDeadlineUnixMs: manifest.blindDeadlineUnixMs,
+      }),
       ...(manifest.blindVisuals === undefined ? {} : { blindVisuals: manifest.blindVisuals }),
       ...(kbReadBudget === undefined ? {} : {
         kbReadBudget,

@@ -58,8 +58,8 @@ export const compassDirectionSchema = z.enum(COMPASS_DIRECTIONS);
 export type CompassDirection = z.infer<typeof compassDirectionSchema>;
 
 const COORDINATE_TOKEN = /(?:^|[^\p{L}\p{N}_])\d+\s*,\s*\d+(?:$|[^\p{L}\p{N}_])/u;
-const PATH_OR_COMMAND_TOKEN = /(?:->|=>|\b(?:option_(?:id|ref)|primary_option|fallback_option|reducer|execute\s*\(|dispatch\s*\(|apply\s*\()\b)/iu;
-const ENGINE_MECHANICS_TOKEN = /\b(?:damage|dice|modifier|dc\s*\d+)\b/iu;
+const PATH_OR_COMMAND_TOKEN = /(?:->|=>|\b(?:path|route|option_(?:id|ref)|primary_option|fallback_option|reducer|reduce|execute|dispatch|apply)\b)/iu;
+const ENGINE_MECHANICS_TOKEN = /(?:\b\d+d\d+(?:\s*[+-]\s*\d+)?\b|\b(?:damage|dice|die\s+result|roll\s+result|result\s*=|modifier|attack\s+bonus|save\s+dc|dc\s*\d+)\b)/iu;
 
 function isModelSafeProse(value: string): boolean {
   return !COORDINATE_TOKEN.test(value) &&
@@ -164,7 +164,7 @@ export const blindIntentSchema = z.strictObject({
   target: blindTargetSchema.optional(),
   destination: blindDestinationSchema.optional(),
   area: blindAreaSchema.optional(),
-  reason: blindBoundedReasonSchema,
+  reason: blindBoundedReasonSchema.optional(),
 });
 export type BlindIntent = z.infer<typeof blindIntentSchema>;
 

@@ -187,8 +187,13 @@ describe('D569 blind DM contracts', () => {
       'Move through 2,3 before attacking.',
       'Follow 2,3 -> 3,3.',
       'Roll 1d20 for damage.',
+      'Deal 2d6+3 fire.',
       'Use DC 14.',
+      'The attack bonus is 5.',
+      'The die result is seventeen.',
+      'Take the north route around the pillar.',
       'Call reducer command now.',
+      'Dispatch the encounter mutation now.',
       'Select option_ref alpha.',
       'execute(attack).',
     ]) {
@@ -199,6 +204,9 @@ describe('D569 blind DM contracts', () => {
     expect(blindRoundIntentEnvelopeSchema.safeParse(envelope({
       ...baseIntent(), target: { kind: 'object', name: '2,3' },
     })).success).toBe(false);
+    const { reason: _reason, ...withoutReason } = baseIntent();
+    expect(blindRoundIntentEnvelopeSchema.parse(envelope(withoutReason)).intents[0])
+      .not.toHaveProperty('reason');
   });
 
   it('keeps code-only repair receipts free of legal alternatives and constrains the hint arm', () => {

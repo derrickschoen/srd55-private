@@ -1,0 +1,181 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "anyOf": [
+    {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "const": "accepted"
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3
+        }
+      },
+      "required": [
+        "status",
+        "attempt"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "const": "rejected"
+        },
+        "attempt": {
+          "$ref": "#/$defs/__schema0"
+        },
+        "actor": {
+          "$ref": "#/$defs/__schema1"
+        },
+        "codes": {
+          "$ref": "#/$defs/__schema4"
+        }
+      },
+      "required": [
+        "status",
+        "attempt",
+        "codes"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "const": "rejected"
+        },
+        "attempt": {
+          "$ref": "#/$defs/__schema0"
+        },
+        "actor": {
+          "$ref": "#/$defs/__schema1"
+        },
+        "codes": {
+          "$ref": "#/$defs/__schema4"
+        },
+        "legal_alternative": {
+          "type": "object",
+          "properties": {
+            "action_kind": {
+              "type": "string",
+              "enum": [
+                "attack",
+                "cast",
+                "interact",
+                "dash",
+                "dodge",
+                "disengage",
+                "hide",
+                "help",
+                "ready",
+                "end"
+              ]
+            },
+            "target": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "$ref": "#/$defs/__schema2"
+                },
+                "badge": {
+                  "$ref": "#/$defs/__schema3"
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "action_kind"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "status",
+        "attempt",
+        "codes"
+      ],
+      "additionalProperties": false
+    }
+  ],
+  "$defs": {
+    "__schema0": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 3
+    },
+    "__schema1": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/__schema2"
+        },
+        "badge": {
+          "$ref": "#/$defs/__schema3"
+        }
+      },
+      "required": [
+        "name",
+        "badge"
+      ],
+      "additionalProperties": false
+    },
+    "__schema2": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "__schema3": {
+      "type": "integer",
+      "exclusiveMinimum": 0,
+      "maximum": 1000000
+    },
+    "__schema4": {
+      "minItems": 1,
+      "maxItems": 24,
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/__schema5"
+      }
+    },
+    "__schema5": {
+      "type": "string",
+      "enum": [
+        "INVALID_INTENT_SHAPE",
+        "STALE_REVISION",
+        "INTENT_SET_INCOMPLETE",
+        "MISSING_ACTOR",
+        "DUPLICATE_ACTOR",
+        "UNKNOWN_ACTOR",
+        "AMBIGUOUS_ACTOR",
+        "ACTION_UNAVAILABLE",
+        "TARGET_REQUIRED",
+        "TARGET_NOT_ALLOWED",
+        "UNKNOWN_TARGET",
+        "AMBIGUOUS_TARGET",
+        "DESTINATION_REQUIRED",
+        "DESTINATION_NOT_ALLOWED",
+        "DESTINATION_INVALID",
+        "AREA_REQUIRED",
+        "AREA_NOT_ALLOWED",
+        "AREA_INVALID",
+        "AREA_UNDERSPECIFIED",
+        "ACTIVATION_CHOICE_REQUIRED",
+        "MULTI_TARGET_UNDERSPECIFIED",
+        "NO_MATCHING_OPTION",
+        "AMBIGUOUS_INTENT",
+        "OPTION_RESOLUTION_FAILED"
+      ]
+    }
+  }
+}

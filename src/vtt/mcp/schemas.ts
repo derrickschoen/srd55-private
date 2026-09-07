@@ -27,6 +27,8 @@ import {
 } from '../semantic-board-payload';
 import {
   BLIND_INTENT_VERSION,
+  blindCodeOnlyRejectionSchema,
+  blindMinimalLegalAlternativeRejectionSchema,
   blindRoundIntentEnvelopeSchema,
 } from '../blind-dm-contract';
 import {
@@ -1434,13 +1436,14 @@ const blindTurnContextOutput = z.union([
   }).strict(),
 ]);
 
-const blindIntentReceiptOutput = z.object({
-  status: z.literal('recorded'),
-  receipt_id: z.string().regex(/^blind-receipt:[a-f0-9]{48}$/u),
-  intent_version: z.literal(BLIND_INTENT_VERSION),
-  intent_count: z.number().int().min(1).max(64),
-  attempt: z.number().int().min(1).max(3),
-}).strict();
+export const blindIntentSubmissionOutputSchema = z.union([
+  z.strictObject({
+    status: z.literal('accepted'),
+    attempt: z.number().int().min(1).max(3),
+  }),
+  blindCodeOnlyRejectionSchema,
+  blindMinimalLegalAlternativeRejectionSchema,
+]);
 
 export const ENGINE_BLIND_TOOL_SPECS: readonly EngineToolSpec[] = Object.freeze([
   spec('engine.get_turn_context', 'Return the complete revision-bound blind DM facts. Blind v1 requires full context.', z.object({
@@ -1465,9 +1468,9 @@ export const ENGINE_BLIND_TOOL_SPECS: readonly EngineToolSpec[] = Object.freeze(
   ])),
   spec(
     'engine.submit_blind_round_intents',
-    'Record one explicit blind round-intent proposal. The engine validates and resolves mechanics in a later private stage.',
+    'Resolve one explicit blind round-intent proposal privately and stage it only when every required actor has one unique legal semantic match.',
     blindRoundIntentEnvelopeSchema,
-    blindIntentReceiptOutput,
+    blindIntentSubmissionOutputSchema,
     true,
   ),
 ]);
@@ -1527,4 +1530,5 @@ export const engineSchemaInternals = {
   turnContextOutput,
   blindTurnContextOutput,
   blindRoundIntentEnvelopeSchema,
+  blindIntentSubmissionOutputSchema,
 };

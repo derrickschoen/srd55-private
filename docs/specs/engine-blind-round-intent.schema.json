@@ -285,8 +285,7 @@
       },
       "required": [
         "actor",
-        "action",
-        "reason"
+        "action"
       ],
       "additionalProperties": false
     },

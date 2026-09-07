@@ -1113,6 +1113,7 @@ interface SegmentMonsterPlanEntry {
   readonly fallbackOption: EngineOfferableOption | null;
   readonly mechanics: ResolvedTurnMechanics;
   readonly selectedBranch: 'primary' | 'fallback';
+  readonly strictNoFallback?: true;
 }
 
 type ExhaustionPlannerLabel = 'engine_default' | 'sim_controller';
@@ -2880,6 +2881,7 @@ function authorizedMechanics(state: EncounterState, proposal: RoundTurnProposalE
     readonly primaryDeclaredProposal: Readonly<Record<string, unknown>>;
     readonly selectedDeclaredProposal: Readonly<Record<string, unknown>>;
     readonly primaryRejectionReasons: readonly string[];
+    readonly strictNoFallback?: true;
   }[] | null;
   readonly divergences: readonly ConversationChainAttemptEvidence[];
 } {
@@ -2912,6 +2914,7 @@ function authorizedMechanics(state: EncounterState, proposal: RoundTurnProposalE
       primaryDeclaredProposal: externalProposal(entry.proposal),
       selectedDeclaredProposal: externalProposal(entry.proposal),
       primaryRejectionReasons: checked.refusals.map((refusal) => refusal.summary),
+      ...(entry.strictNoFallback === true ? { strictNoFallback: true as const } : {}),
     };
   });
   return {
@@ -2927,6 +2930,7 @@ function authorizedMechanics(state: EncounterState, proposal: RoundTurnProposalE
       readonly primaryDeclaredProposal: Readonly<Record<string, unknown>>;
       readonly selectedDeclaredProposal: Readonly<Record<string, unknown>>;
       readonly primaryRejectionReasons: readonly string[];
+      readonly strictNoFallback?: true;
     }[],
     divergences,
   };
@@ -4363,6 +4367,7 @@ async function runConversationWithConfiguredIntel(
                     fallbackOption: structuredClone(entry.fallbackOption),
                     mechanics: entry.mechanics,
                     selectedBranch: entry.selectedBranch,
+                    ...(entry.strictNoFallback === true ? { strictNoFallback: true as const } : {}),
                   });
                 }
                 segmentPlanId = proposal.proposalId;

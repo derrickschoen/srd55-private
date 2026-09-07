@@ -140,9 +140,16 @@ import {
 import type { KbReadBudget, KbReadCallPhase } from './knowledge-base';
 import {
   BLIND_INTENT_VERSION,
-  type BlindRoundIntentEnvelope,
+  BLIND_MAX_ATTEMPTS_DEFAULT,
+  type BlindMaxAttempts,
+  type BlindRepairArm,
   type DmMode,
 } from '../blind-dm-contract';
+import {
+  BLIND_LIVE_WALL_MS,
+  resolveBlindRoundIntents,
+  type BlindResolutionResult,
+} from '../blind-intent-resolver';
 import {
   BLIND_FULL_CONTEXT_REQUIRED,
   BLIND_SEMANTIC_BOARD_MAX_BYTES,
@@ -272,7 +279,8 @@ export interface BlindIntentSubmissionRecord {
   readonly requestId: string;
   readonly phase: 'initial' | 'correction';
   readonly attempt: number;
-  readonly envelope: BlindRoundIntentEnvelope;
+  readonly envelope: unknown;
+  readonly resolution: BlindResolutionResult;
 }
 
 export interface BlindIntentSink {
@@ -318,6 +326,11 @@ interface EngineMcpDependencies {
   readonly toolProfile?: EngineMcpToolProfile;
   readonly dmMode?: DmMode;
   readonly blindIntents?: BlindIntentSink;
+  readonly blindRepairArm?: BlindRepairArm;
+  readonly blindMaxAttempts?: BlindMaxAttempts;
+  readonly blindDeadlineUnixMs?: number;
+  readonly clock?: () => number;
+  readonly beforeBlindIntentStage?: () => void;
   readonly blindVisuals?: readonly BlindVisualDescriptor[];
   readonly blindIngressRecorder?: BlindModelIngressRecorder;
   readonly onBlindTurnContextRendered?: (evidence: BlindTurnContextBudgetEvidence) => void;
@@ -1483,6 +1496,16 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
   let acceptedRoundDecision = dependencies.roundDecisionAlreadyAccepted ?? false;
   let submittedUiFeedback = dependencies.uiFeedbackAlreadySubmitted ?? false;
   let blindIntentAttempt = 0;
+  const blindMaxAttempts = dependencies.blindMaxAttempts ?? BLIND_MAX_ATTEMPTS_DEFAULT;
+  if (!Number.isSafeInteger(blindMaxAttempts) || blindMaxAttempts < 1 || blindMaxAttempts > 3) {
+    throw new RangeError('blindMaxAttempts must be an integer from 1 through 3.');
+  }
+  const clock = dependencies.clock ?? Date.now;
+  const blindDeadlineUnixMs = dependencies.blindDeadlineUnixMs ?? clock() + BLIND_LIVE_WALL_MS;
+  if (!Number.isSafeInteger(blindDeadlineUnixMs) || blindDeadlineUnixMs < 1) {
+    throw new RangeError('blindDeadlineUnixMs must be a positive safe integer.');
+  }
+  const blindRepairArm = dependencies.blindRepairArm ?? 'code_only';
   const applicationCursors = new Map<string, { readonly digest: string; readonly key: string; readonly offset: number }>();
   const opportunityReports = new Map<string, ReturnType<typeof actorOpportunityReport>>();
   const teamPlanReports = new Map<string, TeamPlanFrontierReport>();
@@ -2213,7 +2236,10 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
     });
   };
   function execute(name: string, value: unknown): unknown {
-    const suppliedInput = record(value, `${name} arguments`);
+    const suppliedInput = name === 'engine.submit_blind_round_intents' &&
+      (typeof value !== 'object' || value === null || Array.isArray(value))
+      ? {}
+      : record(value, `${name} arguments`);
     const roundSubmission = name === 'engine.submit_round_proposals'
       ? prepareRoundSubmission(suppliedInput)
       : null;
@@ -2221,35 +2247,83 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
     const input = roundSubmission === null ? suppliedInput : roundSubmission.envelope;
     if (name === 'engine.submit_blind_round_intents') {
       if (dmMode !== 'blind') throw new RangeError('BLIND_INTENT_SUBMISSION_UNAVAILABLE');
+      if (acceptedRoundDecision) throw new RangeError('BLIND_ROUND_ALREADY_ACCEPTED');
+      if (clock() >= blindDeadlineUnixMs) throw new RangeError('BLIND_INTENT_DEADLINE_EXCEEDED');
       const capsule = feed.current();
       const request = capsule.request;
       if (request === null || request.phase === 'speculative' || request.kind === 'plan_adjustment') {
         throw new RangeError('BLIND_ROUND_REQUEST_UNAVAILABLE');
       }
+      const roundRequest = request;
       blindIntentAttempt += 1;
-      if (blindIntentAttempt > 3) throw new RangeError('BLIND_MAX_ATTEMPTS_EXCEEDED');
-      const envelope = structuredClone(input) as BlindRoundIntentEnvelope;
-      const submission: BlindIntentSubmissionRecord = {
-        stateRef: {
-          runId: capsule.runId,
-          stateHandle: engineStateHandle(capsule),
-          expectedRevision: capsule.revision,
-        },
-        requestId: request.requestId,
-        phase: request.phase,
-        attempt: blindIntentAttempt,
+      if (blindIntentAttempt > blindMaxAttempts) throw new RangeError('BLIND_MAX_ATTEMPTS_EXCEEDED');
+      const envelope: unknown = structuredClone(value);
+      if (blindTurnProjection === null) throw new TypeError('Blind intent resolution requires the blind turn projection.');
+      const resolution = resolveBlindRoundIntents({
+        state,
+        capsule,
+        blindProjection: blindTurnProjection,
         envelope,
-      };
-      dependencies.blindIntents?.append(structuredClone(submission));
-      const receipt = {
-        status: 'recorded' as const,
-        receipt_id: `blind-receipt:${sha256(canonicalJson(submission)).slice(0, 48)}`,
-        intent_version: BLIND_INTENT_VERSION,
-        intent_count: envelope.intents.length,
         attempt: blindIntentAttempt,
+        repairArm: blindRepairArm,
+        dependencies: { queries, proposalResolver: turnProposals },
+      });
+      const recordResolution = (recorded: BlindResolutionResult): void => {
+        dependencies.blindIntents?.append(structuredClone({
+          stateRef: {
+            runId: capsule.runId,
+            stateHandle: engineStateHandle(capsule),
+            expectedRevision: capsule.revision,
+          },
+          requestId: roundRequest.requestId,
+          phase: roundRequest.phase,
+          attempt: blindIntentAttempt,
+          envelope: recorded.status === 'accepted' ? recorded.envelope : envelope,
+          resolution: recorded,
+        }));
       };
-      assertNoForbiddenBlindStructure(receipt);
-      return receipt;
+      if (resolution.status === 'accepted') {
+        dependencies.beforeBlindIntentStage?.();
+        const current = feed.current();
+        if (current.revision !== capsule.revision || current.digest !== capsule.digest ||
+          engineStateHandle(current) !== engineStateHandle(capsule)) {
+          const staleResolution: BlindResolutionResult = {
+            status: 'rejected' as const,
+            attempt: blindIntentAttempt,
+            codes: ['STALE_REVISION' as const],
+            modelResult: {
+              status: 'rejected' as const,
+              attempt: blindIntentAttempt,
+              codes: ['STALE_REVISION' as const],
+            },
+          };
+          recordResolution(staleResolution);
+          assertNoForbiddenBlindStructure(staleResolution.modelResult);
+          return staleResolution.modelResult;
+        }
+        const key = `blind:${roundRequest.requestId}:${String(blindIntentAttempt)}:${sha256(canonicalJson(resolution.envelope)).slice(0, 32)}`;
+        const proposalId = `round:${sha256(canonicalJson({ digest: capsule.digest, key, resolutions: resolution.actors.map((entry) => entry.resolution) })).slice(0, 48)}`;
+        submitEngineProposal(feed, proposals, {
+          kind: 'round_turn_proposal',
+          proposalId,
+          runId: capsule.runId,
+          branchId: capsule.branchId,
+          requestId: roundRequest.requestId,
+          expectedRevision: capsule.revision,
+          stateDigest: capsule.digest,
+          stateHandle: engineStateHandle(capsule),
+          phase: roundRequest.phase,
+          idempotencyKey: key,
+          resolutions: resolution.actors.map((entry) => entry.resolution),
+          rationale: null,
+          reactionGuidance: null,
+          submittedArguments: structuredClone(resolution.envelope),
+        });
+        acceptedRoundDecision = true;
+      }
+      recordResolution(resolution);
+      assertNoForbiddenBlindStructure(resolution.modelResult);
+      return resolution.modelResult;
     }
     if (name === 'engine.submit_ui_feedback') {
       if (!acceptedRoundDecision) {
@@ -3379,7 +3453,9 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       : dmMode === 'blind' || advertisedNames === null || advertisedNames.has(spec.descriptor.name))
     .map((spec) => ({
       descriptor: spec.descriptor,
-      validateArguments: (value) => spec.descriptor.name !== 'engine.submit_round_proposals'
+      validateArguments: (value) => spec.descriptor.name === 'engine.submit_blind_round_intents'
+        ? []
+        : spec.descriptor.name !== 'engine.submit_round_proposals'
         ? schemaViolations(spec.input, value)
         : engineSchemaInternals.minimalSubmitRoundTransportInput.safeParse(value).success ||
           engineSchemaInternals.submitRoundTransportInput.safeParse(value).success

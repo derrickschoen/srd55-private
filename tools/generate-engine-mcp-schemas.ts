@@ -24,3 +24,7 @@ writeSchema(
   'docs/specs/engine-blind-round-intent.schema.json',
   engineSchemaInternals.blindRoundIntentEnvelopeSchema,
 );
+writeSchema(
+  'docs/specs/engine-blind-round-intent-result.schema.json',
+  engineSchemaInternals.blindIntentSubmissionOutputSchema,
+);
