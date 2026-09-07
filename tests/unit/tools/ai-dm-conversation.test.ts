@@ -1465,7 +1465,7 @@ describe('AI-DM engine MCP conversation runner', () => {
     ]);
   });
 
-  it('records when the turn-context 32KB trimmer fired', { timeout: 60_000 }, async () => {
+  it('records when the configured turn-context trimmer fired', { timeout: 60_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-context-trim-'));
     const config = parseConversationArgs([
       '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'), '--dry-run',
@@ -1480,7 +1480,15 @@ describe('AI-DM engine MCP conversation runner', () => {
     const rawTurnContext = result.rows[0]?.rawTurnContext;
     if (rawTurnContext === undefined) throw new Error('Trimmed row omitted its raw turn context.');
     const turnContext = objectValue(JSON.parse(rawTurnContext) as unknown, 'trimmed turn context');
-    expect(new TextEncoder().encode(rawTurnContext).byteLength).toBeLessThanOrEqual(32 * 1024);
+    expect(new TextEncoder().encode(rawTurnContext).byteLength)
+      .toBeLessThanOrEqual(config.turnContextMaximumBytes);
+    expect(result.rows[0]).toEqual(expect.objectContaining({
+      turnContextMaximumBytes: config.turnContextMaximumBytes,
+      preTrimBytes: expect.any(Number),
+      postTrimBytes: expect.any(Number),
+      optionsOmittedForSize: expect.any(Number),
+      optionsOmittedForSizeByActor: expect.any(Array),
+    }));
     expect(turnContext).toMatchObject({
       granularity: 'full',
       context_trimmed: true,

@@ -374,6 +374,11 @@ describe('AI-DM arena', () => {
     }));
     expect(parseArenaArgs(common).intelMode).toBe('full');
     expect(parseArenaArgs(common).overridePolicy).toBe('typed_reason');
+    expect(parseArenaArgs(common).turnContextMaximumBytes).toBe(32 * 1024);
+    expect(parseArenaArgs([...common, '--turn-context-max-bytes', '16384']).turnContextMaximumBytes)
+      .toBe(16 * 1024);
+    expect(() => parseArenaArgs([...common, '--turn-context-max-bytes', '0']))
+      .toThrow('--turn-context-max-bytes must be a positive integer');
     expect(parseArenaArgs([...common, '--override-policy', 'strict']).overridePolicy).toBe('strict');
     expect(() => parseArenaArgs([...common, '--override-policy', 'free_text']))
       .toThrow('--override-policy must be strict or typed_reason');
@@ -395,6 +400,35 @@ describe('AI-DM arena', () => {
       .toThrow('--basis must be standard, hard, brutal, brutal-b, or scenario.');
     expect(() => parseArenaArgs([...common, '--party-policy', 'unknown-policy']))
       .toThrow('--party-policy must be heuristic_v0 or symmetric_evaluator_v1.');
+  });
+
+  it('plumbs the cap into real hard-fixture context construction and arena evidence', { timeout: 60_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-turn-context-cap-'));
+    const run = async (cap: number, name: string) => {
+      const [row] = await runArena(parseArenaArgs([
+        '--rooms', '1', '--reps', '1', '--seed', '5117005', '--basis', 'hard', '--dry-run',
+        '--turn-context-max-bytes', String(cap),
+        '--out', join(directory, `${name}.jsonl`),
+      ]));
+      if (row === undefined) throw new Error(`Cap ${String(cap)} arena emitted no row.`);
+      return row;
+    };
+    const [small, large] = await Promise.all([
+      run(16 * 1024, 'small'),
+      run(64 * 1024, 'large'),
+    ]);
+
+    expect(small.turnContextMaximumBytes).toBe(16 * 1024);
+    expect(large.turnContextMaximumBytes).toBe(64 * 1024);
+    expect(Buffer.byteLength(small.rawTurnContext)).toBeLessThanOrEqual(16 * 1024);
+    expect(small.postTrimBytes).toBeLessThanOrEqual(16 * 1024);
+    expect(large.postTrimBytes).toBeLessThanOrEqual(64 * 1024);
+    expect(small.preTrimBytes).toBe(large.preTrimBytes);
+    expect(small.optionsOmittedForSize).toBeGreaterThan(large.optionsOmittedForSize);
+    expect(small.optionsOmittedForSize).toBe(
+      small.optionsOmittedForSizeByActor.reduce((total, actor) => total + actor.count, 0),
+    );
+    expect(Buffer.byteLength(large.rawTurnContext)).toBeGreaterThan(32 * 1024);
   });
 
   it('persists final indices through the arena and validates them beside an mcp-minimal row', { timeout: 30_000 }, async () => {
@@ -925,8 +959,10 @@ describe('AI-DM arena', () => {
       granularity: 'full',
       state_ref: { expected_revision: rows[1]?.contextRevision },
     });
-    expect(new TextEncoder().encode(rows[0]?.rawTurnContext).byteLength).toBeLessThanOrEqual(32 * 1024);
-    expect(new TextEncoder().encode(rows[1]?.rawTurnContext).byteLength).toBeLessThanOrEqual(32 * 1024);
+    expect(new TextEncoder().encode(rows[0]?.rawTurnContext).byteLength)
+      .toBeLessThanOrEqual(rows[0]?.turnContextMaximumBytes ?? 0);
+    expect(new TextEncoder().encode(rows[1]?.rawTurnContext).byteLength)
+      .toBeLessThanOrEqual(rows[1]?.turnContextMaximumBytes ?? 0);
     expect(rows.every((row) =>
       row.snippetHash === SNIPPET_REGISTRY.snippetHash &&
       row.snippetSetHash === SNIPPET_REGISTRY.snippetSetHash)).toBe(true);

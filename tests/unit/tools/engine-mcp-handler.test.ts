@@ -9,6 +9,7 @@ import {
   MCP_PROTOCOL_VERSION,
   MCP_PROTOCOL_VERSION_META_KEY,
   MCP_STATIC_LIST_TTL_MS,
+  createMcpHandler,
   mcpRequestMeta,
   type JsonRpcResponse,
   type McpHandler,
@@ -120,6 +121,16 @@ function forbiddenAgentKeys(value: unknown): readonly string[] {
     ...Object.keys(candidate).filter((key) => forbidden.has(key)),
     ...Object.values(candidate).flatMap(forbiddenAgentKeys),
   ];
+}
+
+function undefinedValuePaths(value: unknown, path = '$'): readonly string[] {
+  if (value === undefined) return [path];
+  if (Array.isArray(value)) {
+    return value.flatMap((entry, index) => undefinedValuePaths(entry, `${path}[${String(index)}]`));
+  }
+  if (typeof value !== 'object' || value === null) return [];
+  return Object.entries(value).flatMap(([key, entry]) =>
+    undefinedValuePaths(entry, `${path}.${key}`));
 }
 
 function localPointerExists(root: unknown, reference: string): boolean {
@@ -2094,5 +2105,26 @@ describe('engine MCP dual-handshake full surface conformance', () => {
     expect(request(runtime.handler, 600, 'resources/read', {
       uri: 'engine://run/encounter%3Aengine-mcp/turn/current',
     })).toMatchObject({ error: { code: -32602, message: expect.stringContaining('RESOURCE_TOO_LARGE') } });
+  });
+
+  it('never emits undefined from the tool-result wrapper', () => {
+    const handler = createMcpHandler({
+      tools: [{
+        descriptor: {
+          name: 'test.undefined-result',
+          description: 'Exercise the JSON serialization boundary.',
+          inputSchema: { type: 'object' },
+        },
+        validateArguments: () => [],
+        validateOutput: () => [],
+        execute: () => ({ explicit: null, leaked: undefined }),
+      }],
+    });
+    const result = toolCall(handler, 'test.undefined-result', {});
+    expect(undefinedValuePaths(result)).toEqual([]);
+    expect(result).toMatchObject({
+      isError: true,
+      content: [{ type: 'text', text: expect.stringContaining('$.leaked') }],
+    });
   });
 });

@@ -820,6 +820,10 @@ export interface RenderedProseTurnContext {
   readonly shownOptionIdsByActor: ReadonlyMap<string, ReadonlySet<EngineOptionId>>;
   readonly preTrimBytes: number;
   readonly postTrimBytes: number;
+  readonly optionsOmittedForSizeByActor: readonly {
+    readonly actorId: string;
+    readonly count: number;
+  }[];
 }
 
 function proseBytes(value: string): number {
@@ -1715,6 +1719,10 @@ export function renderProseTurnContext(
   const catalog = optionCatalog(structuredContext, optionReferences);
   const hidden = catalog.filter((entry) =>
     !shownOptionIdsByActor.get(entry.actorId)?.has(entry.optionId));
+  const optionsOmittedForSizeByActor = [...shownOptionIdsByActor.keys()].map((actorId) => ({
+    actorId,
+    count: hidden.filter((entry) => entry.actorId === actorId).length,
+  }));
   const declaredSegments = trimmed.segments.map((segment) => {
     if (segment.actorOmissionDeclaration === undefined) return segment;
     const omitted = catalog.filter((entry) => entry.actorId === segment.actorOmissionDeclaration &&
@@ -1744,5 +1752,6 @@ export function renderProseTurnContext(
     shownOptionIdsByActor,
     preTrimBytes: proseBytes(untrimmedDocument),
     postTrimBytes: proseBytes(document),
+    optionsOmittedForSizeByActor,
   };
 }

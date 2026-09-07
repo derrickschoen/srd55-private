@@ -943,12 +943,81 @@ const turnDeltaOutput = z.object({
   renderer_attribution: rendererAttributionSchema.optional(),
   ...semanticBoardContextFields,
 }).strict();
+const compactTurnContextOutput = z.object({
+  granularity: z.literal('full'),
+  context_trimmed: z.literal(true),
+  state_ref: stateRef,
+  request: turnRequest,
+  summary: tacticalSummary,
+  actors: z.array(z.object({
+    actor_id: identifier,
+    status: z.object({
+      life: z.enum(['living', 'dying', 'stable', 'dead']),
+      hit_point_band: z.enum(['uninjured', 'bloodied', 'near_death', 'unknown']),
+      movement_feet: z.number().int().min(0),
+    }).strict(),
+    options: z.array(z.object({
+      option_id: z.string().regex(/^k\d+$/u),
+      action_id: identifier,
+      kind: z.enum(['attack', 'cast_spell', 'use_action', 'dodge', 'disengage', 'dash', 'end_turn']),
+      usable_now: z.boolean(),
+      usable_after_movement: z.boolean(),
+      minimum_movement_feet: z.number().int().min(0).nullable(),
+    }).strict()).min(1).max(2),
+    options_omitted_for_size: z.number().int().min(0),
+    threats: z.array(z.never()).length(0),
+    intel: z.object({
+      policy: z.literal(DM_TURN_INTEL_POLICY),
+      zero_movement_offense_count: z.number().int().min(0),
+      rows: z.array(z.never()).length(0),
+      movement: z.array(z.never()).length(0),
+      opportunity_cost: z.null(),
+      salient_window: z.null(),
+    }).strict(),
+  }).strict()).min(1).max(50),
+  actor_knowledge: z.object({
+    policy: z.literal(ENGINE_ACTOR_KNOWLEDGE_POLICY), actors: z.array(z.never()).length(0),
+  }).strict(),
+  reaction_spend_hold: z.object({
+    policy: z.literal(ENGINE_REACTION_SPEND_HOLD_POLICY), windows: z.array(z.never()).length(0),
+  }).strict(),
+  legendary_windows: z.object({
+    policy: z.literal(ENGINE_LEGENDARY_WINDOWS_POLICY),
+    detail_level: z.literal('compact'), compact: z.array(z.never()).length(0),
+  }).strict(),
+  recovery_capabilities: z.object({
+    policy: z.literal(ENGINE_RECOVERY_CAPABILITY_POLICY), targets: z.array(z.never()).length(0),
+  }).strict(),
+  search_memory: z.object({
+    policy: z.literal(SEARCH_MEMORY_POLICY), memories: z.array(z.never()).length(0),
+  }).strict(),
+  alert_state: z.object({
+    policy: z.literal(ALERTING_POLICY), calls: z.array(z.never()).length(0),
+    joined: z.array(z.never()).length(0),
+  }).strict(),
+  applicable_plays: z.array(z.never()).length(0),
+  applicable_skills: z.array(z.never()).length(0),
+  recent_changes: z.array(z.never()).length(0),
+  team_plan_frontier: omittedTeamPlanFrontier.nullable(),
+  known_failure_modes: z.object({ policy: z.literal(ENGINE_FAILURE_MODES_POLICY) }).strict(),
+  renderer_attribution: rendererAttributionSchema.optional(),
+  compact_fallback: z.literal(true),
+  renderer_defect: z.object({
+    code: z.literal('K_SET_FLOOR_EXCEEDS_CONTEXT_CAP'),
+    measured_bytes: z.number().int().positive(),
+    configured_cap_bytes: z.number().int().positive(),
+  }).strict().optional(),
+  truncated: z.literal(true),
+  next_cursor: z.null(),
+  ...semanticBoardContextFields,
+}).strict();
 const profiledFullTurnContextOutput = z.object({
   granularity: z.literal('full'),
   context_trimmed: z.boolean(),
   state_ref: stateRef,
   request: turnRequest,
   actors: z.array(z.record(z.string(), z.unknown())).min(1).max(50),
+  compact_fallback: z.literal(false).optional(),
   renderer_attribution: rendererAttributionSchema.optional(),
   truncated: z.boolean(),
   next_cursor: z.string().max(500).nullable(),
@@ -960,7 +1029,10 @@ const proseTurnContextOutput = z.object({
   context_trimmed: z.boolean(),
   state_ref: stateRef,
   request: turnRequest,
-  document: z.string().min(1).max(32 * 1024),
+  // The runtime renderer enforces its configured UTF-8 byte cap. A static
+  // character-count ceiling here would incorrectly retain the former 32 KiB
+  // policy when a larger experimental cap is selected.
+  document: z.string().min(1),
   renderer_attribution: rendererAttributionSchema.optional(),
   truncated: z.boolean(),
   next_cursor: z.null(),
@@ -971,6 +1043,7 @@ const turnContextOutput = z.union([
   profiledFullTurnContextOutput,
   proseTurnContextOutput,
   turnDeltaOutput,
+  compactTurnContextOutput,
 ]);
 const proposeFromPlayOutput = z.object({
   state_ref: stateRef,

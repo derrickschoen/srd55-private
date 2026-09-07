@@ -13903,3 +13903,277 @@ the comprehension goal of D568 is met and the next test of luna low is
 DM quality (the D569 arms run low last, as ordered). Rejected factors
 recorded: v2-evidence answer format (-.17 light), checklist primer (no
 gain); the screenshot itself is neutral-to-harmful at low on light.
+
+## D567 cap arms complete (luna medium, hard R1-10 x3, cap-sweep f59f4b49); panel running (2026-09-07 01:39)
+
+| cap | outcomes | post-trim bytes | options omitted (mean) | wall mean / median |
+|---|---|---|---|---|
+| 16 | 15 authorized / 15 refused (serialization defect, void) | 5.2-16.3 KB | 35.3 | 46 s / 34 s |
+| 24 | 30 authorized | 23.8-24.3 KB | 35.1 | 62 s / 50 s |
+| 32 (control) | 30 authorized | 31.3-32.4 KB | 32.2 | 68 s / 59 s |
+| 48 | 30 authorized | 45.7-48.8 KB | 20.1 | 90 s / 74 s |
+| 64 | 30 authorized | 45.7-65.4 KB | 5.9 | 105 s / 80 s |
+
+Latency grows roughly linearly with context (about +18 s per 16 KiB
+at luna medium); at 64 KiB the median turn is 80 s and the mean 105 s
+against the 180 s live wall (D456), with a 240 s experiment wall.
+Attempts: more second/third attempts at 48/64 (8 and 7 rows) than at
+24 (6). Packets 24/48/64 vs the 32 control (60 entries each) with the
+standing panel; 16 KiB is judged after its rerun on the cap-fix build.
+
+## D567 panel verdict: a larger cap makes luna medium WORSE; 24 KiB equals 32 and is faster (2026-09-07 01:54)
+
+Standing panel, blinded, luna medium, default profile, hard R1-10 x3,
+each cap vs the same-tree 32 KiB control (unseal-cap.md):
+- 24 vs 32: cap32 - cap24 = +0.07 [-0.08, +0.24] (9.18 vs 9.24): no
+  difference; 24 KiB turns are 9 s faster at the median (50 vs 59 s).
+- 48 vs 32: -0.29 [-0.64, +0.07] (8.98 vs 9.27).
+- 64 vs 32: -0.34 [-0.57, -0.10] (8.90 vs 9.24): worse, interval
+  excludes zero, with median turn 80 s and mean 105 s.
+Reading: the 32 KiB cap does not starve luna medium; giving it more
+options and more actor detail lowers judged play and raises latency,
+consistent with the E1c facts result (a bigger, richer context did not
+help either). The pruned, offense-first shortlist is doing work for
+luna medium. Open question for the fixed 16 KiB rerun: whether the
+compact end still holds at 16 (5 rooms fall to the 5 KB compact form).
+Hard basis is at 9.2/10, so a brutal pass at 24 vs 32 is the follow-up
+if the owner wants the cap lowered for latency. Note for D569: the
+blind context is planned at 64 KiB by necessity (stat blocks + reach);
+this result says luna medium handles 64 KiB of options worse, not that
+it cannot read 64 KiB of facts, but latency at 64 KiB (median 80 s)
+must be budgeted.
+
+## E1 landing merge committed f36fd253 on claude/e1c-land; full gate launched; stray nohup.out removed from main (2026-09-07 01:54)
+
+Codex resolved 15 hunks (list in the lane log) and claims 22 files
+348/348 (including all asset specs), tsc 0, generator idempotent, one
+raw pin moved with three-way identity invariants. My checks before
+committing: zero markers, contracts.ts hash unchanged, no forbidden
+constructs in the merge diff (the one `any` is prose in the merged
+decisions file), the lane log carries only the header's claude mention,
+duplicate generator and its output deleted. Full landing gate on
+wt-e1c-land (tsc, sg, locked vitest, full Playwright) started while the
+four rerun arenas idle-wait on models; LOAD FLAKES are rerun serially
+by the runner and never re-pinned.
+
+Finding on main: nohup.out has been tracked since footprints inc2
+(d5001aa4); removed from main in its own commit. It rides along in the
+landing worktree via main and disappears when main merges back.
+
+## Both fixes confirmed live: fixed 16 KiB arm and brutal reruns clean (2026-09-07 02:24)
+
+cap-16 on the cap-fix build (1c7c4677): 30/30 authorized, 0 refusals
+(was 15/30 refused), 24x1/6x2 attempts, post-trim 5.2-16.3 KB, 35.3
+options omitted, wall 63 s mean / 50 s median. Packet 16 vs 32
+(shuffle 9016) with the panel.
+E1cc brutal reruns on the schema-fixed E1c tree (56bcd859): luna_facts
+30/30 authorized, luna_control 30/30 authorized, 0 refusals in either,
+semantic_board_truncated [] on 30/30 (was 5 and 1 partial executions).
+sol_facts running; packets and the panel follow it.
+
+## D567 16 KiB (fixed build) panel; brutal reruns complete and with the panel (2026-09-07 02:39)
+
+16 vs 32 (cap-fix build for the 16 arm, luna medium, hard x3): cap16
+9.09 vs cap32 9.37; contrast row: | cap32 − cap16 | 30 | 9.09 | 9.37 | +0.28 | [+0.02, +0.57] |. Combined with 24 (=32), 48
+(-0.29) and 64 (-0.34): the sweep is flat-to-negative on both sides
+of 24-32 KiB; 24 KiB is the smallest cap with no judged loss and the
+fastest turns.
+
+E1cc brutal reruns (schema-fixed 56bcd859): luna_facts 30/30 authorized,
+luna_control 30/30, sol_facts 28/30 (2 refused at attempts 0: see the
+refusal text in the run record; not the schema refusal). Packets
+(brutal-10, shuffle 9064) built with the E1c tree's builder; the
+standing panel is judging both.
+
+## D565 first positive: on brutal, luna medium + semantic board beats its control (+0.54 [+0.12, +1.16]) and reaches parity with sol high + facts (2026-09-07 02:54)
+
+Standing panel, blinded, brutal 10x3, seed 6203001, 240 s wall,
+schema-fixed E1c build 56bcd859 (unseal-e1cc.md):
+- luna_facts - luna_control: +0.54, 95% seed-clustered CI [+0.12,
+  +1.16] (7.18 vs 6.63; sol judge 8.57/8.07, opus 6.60/5.97, fable
+  6.37/5.87: all three seats agree in direction). Per room: no room
+  lost; 6203002 +3.00 (3.89 -> 6.89), 6203001 +0.78, 6203010 +0.78,
+  6203005 +0.56, 6203008 +0.22, 6203009 +0.11, four rooms tied. Rubric:
+  target priority 2.04 -> 2.31, action economy 1.62 -> 1.81, coherence
+  1.63 -> 1.72, positioning unchanged.
+- sol_facts - luna_facts: -0.46 [-1.32, +0.26] (6.86 vs 7.31): parity;
+  sol's two 240 s timeouts (rooms 8 and 9) score zero in that packet,
+  so on executed rows sol is closer to even. Rubric: luna_facts target
+  priority 2.28 vs sol 1.94.
+Reading: with the block delivered whole and the adjustment path
+working, engine facts in the live context are the first change that
+raises luna medium's judged play, and only where the basis has
+headroom (hard: neutral at 8.8/10; brutal: +0.54 at 6.6/10). D565's
+fluke guard applies before this is called an improvement: (1) a
+fresh-session replication of both luna arms on the same rooms
+(sampling noise), launched now; (2) a second brutal seed family with
+no per-seed generator overrides, generated and frozen by a codex lane
+with membership tests and a `brutal-10-b` packet protocol, then the
+same two arms on it. Sol-high parity is reported with the timeout
+caveat and is not the claim.
+
+## E1 landing gate: 185/186 Playwright, one port collision; supervisor self-kill (fourth time) (2026-09-07 03:09)
+
+gate-wt-e1c-land.log: tsc 0, sg 0, vitest-gate 0 (no load flakes),
+Playwright 185 passed in 50.4 min and one failure: the board-snapshot
+spec's own preview server could not bind port 4650 ("Port 4650 is
+already in use"); the spec derives that port from PLAYWRIGHT_PORT, the
+same port the gate's Playwright web server uses, and the collision did
+not occur in the classic or main landing gates on their ports. The
+port is free now; the spec is rerun serially on the landing tree under
+the gate lock with the gate's port before the merge proceeds.
+
+Own error, recorded in full: while relaunching that rerun I put a
+kill-by-pattern (pgrep -f on the spec name) and a launch whose command
+line contained the same pattern in one shell call; the pattern matched
+my own shell and killed it (exit 144), the relaunch never ran, and I
+also missed my own gate-finished marker for two ticks. This is the
+fourth self-kill of the window against a rule I wrote after the first.
+Standing correction, effective now: a kill call contains only kills and
+uses numeric pids from a prior read; a launch is always its own call.
+
+## brutal-b family committed cb39abab; fluke-guard arms on the new rooms and the replication panel launched; port fix delivered (2026-09-07 03:39)
+
+brutal-b (codex, claude/brutal-b off the landing merge): seeds
+6206001-10 (6205 rejected because one room had a monster with no
+productive first-turn offer; the D466 override table names only
+6204004/6/9), regenerated byte-identical, membership pinned only beside
+state-derived property checks, overlap guards, --protocol brutal-10-b,
+--basis brutal-b. Codex claimed 3 specs 54/54, tsc 0, three mutants
+killed. Verified myself: scans clean (the second "claude -p" in the
+lane log is text codex read from the merged decisions file; zero exec
+lines mention claude), contracts.ts unchanged, 54/54 by my run, my
+own regeneration byte-identical, tsc 0, my mutant (one creature moved
+one row in fixture 6206003) killed by the property-then-pin test,
+fixture restored byte-identical. Arms on brutal-b (luna medium facts vs
+control, 10x3, seed 6206001, 240 s) launched.
+
+Replication on the original brutal rooms (fresh sessions): luna_facts
+30/30 authorized, luna_control 30/30, no refusals; packet (brutal-10,
+shuffle 9065) with the panel.
+
+Port fix (codex, claude/e1c-land): the E1 semantic/probe commit
+decf640d had bound the snapshot preview to PLAYWRIGHT_PORT for
+deterministic capture ports; now ephemeral by default with
+BOARD_SNAPSHOT_PREVIEW_PORT as the dedicated override; codex claims
+30/30 unit, the snapshot spec 1/1 on port 4650, tsc 0, mutant killed.
+My verification chain is running; commit and merge to main follow.
+
+## E1 lineage LANDED on main (33dc2a9d); D565 replication FAILED: the +0.54 does not hold (2026-09-07 03:54)
+
+Landing: port fix committed b71980ec after my verification (30/30
+unit, the snapshot spec 1/1 on port 4650 under the gate lock, tsc 0,
+my mutant killed); `git -C <main> merge --no-ff claude/e1c-land` exit 0
+-> 33dc2a9d, tree clean, nohup.out gone. The full gate on the merge
+was 185/186 with the one failure being the port collision now fixed;
+the post-gate change is confined to the snapshot tool's port selection
+and its unit test, both rerun green, so no second 55-minute gate.
+:4173 restarted on the merged tree.
+
+Replication (fresh sessions, same brutal rooms, same build):
+luna_facts - luna_control = -0.29, 95% CI [-0.80, +0.11] (control 7.56,
+facts 7.27). First run was +0.54 [+0.12, +1.16] (control 6.63, facts
+7.18). The control arm alone moved +0.93 between identical runs: the
+per-room panel scores on brutal carry about a point of sampling noise
+per arm at n=30, so a single 30-row contrast with a lower bound of
++0.12 was never enough. Pooled across both runs (per-room-run pairs)
+the effect is near zero; the seed-clustered interval is in the record
+above. Verdict for D565: engine facts in the live context are NOT a
+demonstrated improvement of luna medium's play on brutal; neutral on
+hard. The comprehension gains (probe .83 -> .99) do not carry into the
+judged round at the sample sizes we run. Standing conclusion: the
+board-reading lever is exhausted for DM quality; the remaining levers
+are the decision surface (D569 blind judgement, option pruning, cap
+24 for latency) and effort/attempt budgets. The brutal-b arms (second
+family) still run and are reported when done; they cannot rescue the
+claim on their own.
+
+## Pooled D565 estimate (2026-09-07 03:54)
+
+Both brutal runs pooled as per-room-run pairs (n=20): luna_facts -
+luna_control = +0.13, seed-clustered 95% CI [-0.21, +0.57] (20,000
+resamples, seed 5117). Per room the two runs disagree in sign on
+6203001 (+0.78 then -2.22), 6203005, 6203008, 6203009; only 6203002 is
+positive both times (+3.00, +0.67). No effect at this sample size.
+:4173 serving the merged main.
+
+## brutal-b arms complete; third defect: room 6206009 cannot advance past an unresolved boundary decision (2026-09-07 04:24)
+
+Second family (cb39abab, luna medium facts vs control, 10x3, seed
+6206001, 240 s): both arms 27 authorized / 3 execution_failed, all
+first-attempt, no truncation. All six failures are seed 6206009 (every
+rep, both arms): executionErrorClass unresolved_boundary_decision,
+"The turn cannot advance while a pending decision for this boundary is
+unresolved." The unattended arena harness (askDefault decline) leaves
+some boundary decision in that room unresolved, so the round cannot
+execute; deterministic, arm-independent, engine/harness defect exposed
+by a never-run room (the membership check "every monster has a
+productive first-turn offer" does not cover boundary decisions).
+Packet (brutal-10-b, shuffle 9066, 60 entries) with the panel; the
+room scores zero on both sides and cancels in the contrast. Fix lane
+dispatched on the brutal-b tree (reproduce by dry run, identify the
+pending decision kind, resolve it under the unattended policy or fix
+the engine, add the invariant that every basis room's round 1 executes
+under the unattended harness).
+
+## D565 facts lever: third look on the second brutal family is null; verdict closed (2026-09-07 04:38)
+
+Second family 6206001-10 (never run before), luna medium facts vs
+control, 10x3: luna_facts - luna_control = +0.12, 95% CI [-0.03,
++0.34] (5.53 vs 5.41; all three seats within 0.2 of each other; room
+6206009 zero on both sides from the boundary-decision defect). With the
+first run (+0.54), its fresh-session replication (-0.29) and the pooled
++0.13 [-0.21, +0.57], the semantic board in the live context has no
+demonstrated effect on luna medium's judged play on either basis.
+Closed. Recorded for D565: comprehension solved (probe .83 -> .99 at
+low and medium), play unchanged; the lever for play is elsewhere.
+
+Cap landing merge (claude/cap-fix + main): codex resolved 18 hunks (12 of
+them in the generated schema, regenerated through the generator, not
+by hand), corrected one stale symbol its own tsc caught, claims 9 files
+387/387, tsc 0, idempotent generator; no pins moved. My verification
+chain (same nine specs, generator idempotence, tsc) is running; scans
+clean, contracts.ts unchanged, no markers.
+
+## Cap landing merge committed be3649d4 on claude/cap-fix; full gate launched (2026-09-07 04:53)
+
+Verified myself before committing: 9 spec files 387/387, generator
+idempotent, tsc 0, no markers, scans clean, contracts.ts unchanged.
+Full landing gate (tsc, sg, locked vitest, full Playwright) running on
+wt-cap-fix; merge to main and :4173 rebuild follow a green gate.
+
+## Boundary fix: verified live, but a supervisor mutant SURVIVED; sent back (2026-09-07 05:24)
+
+Codex root cause: seed 6206009 queues two legendary-action windows at
+one turn boundary; the unattended resolver passed the first, replayed
+end_turn, never passed the second. Fix drains every pending decision
+at the boundary before replaying end_turn; adds a no-model dry run of
+6206009 and a round-one execution invariant across 13 hard + 10 brutal
++ 10 brutal-b fixtures with a seeded guard against filtering failures.
+Codex claims 84/84, tsc 0, two mutants killed. Verified myself: my dry
+run of room 9 is authorized, 84/84, tsc 0, scans clean.
+Surviving mutant (mine): never recording the boundary to resume (so the
+end_turn replay never fires) leaves all 46 tests green including the
+33-fixture invariant. Either the replay is dead code or a real state
+needs it and nothing tests it. Not committed; the lane is resumed with
+the finding (prove reachability with a minimal reducer-level test that
+kills the mutant, or remove the replay).
+
+## Cap knob and compact-fallback fix LANDED on main (b091ce71); boundary fix committed a2a01384 on claude/brutal-b (2026-09-07 05:54)
+
+Cap landing gate (gate-wt-cap-fix.log): tsc 0, sg 0, vitest-gate 0 (no
+load flakes), Playwright 186 passed in 50.3 min, exit 0. Merged from
+the main repo with --no-ff, exit 0. :4173 restarted on the new main.
+
+Boundary fix amendment: codex confirmed case (b): resolving the last
+legendary window leaves the same active combatant until a second
+end_turn observes the closed window, so the replay is required; the
+old single-pass code handled one window and broke with two. Added a
+minimal one-window reducer fixture, tightened the 33-fixture invariant
+(an already-acted combatant re-encountered in the same round fails
+even with an empty queue) and made the production arena loop throw on
+that stall instead of breaking out silently. Verified myself: 3 specs
+(arena, brutal-b basis, conversation) 152/152, tsc 0, the exact mutant
+now kills 7 tests (six fixtures plus the minimal case), restored
+byte-identical. Committed; lands behind a merge with the new main and
+its own gate.

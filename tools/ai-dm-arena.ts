@@ -23,6 +23,7 @@ import { BoardSnapshotService } from './ai-dm-board-snapshot';
 import {
   DEFAULT_OVERRIDE_POLICY,
   OVERRIDE_POLICIES,
+  TURN_CONTEXT_MAX_BYTES,
   type IntelMode,
   type OverridePolicy,
 } from '../src/vtt/mcp/engine-server';
@@ -82,6 +83,7 @@ interface ArenaConfigBase {
   readonly intelMode: IntelMode;
   readonly overridePolicy: OverridePolicy;
   readonly rendererProfile: RendererProfile;
+  readonly turnContextMaximumBytes: number;
   readonly combatModel: CombatModel;
   readonly initiativeProfile: RoomInitiativeProfile;
   readonly partyPolicy: ScriptedPartyDecisionPolicy;
@@ -300,6 +302,7 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
       '--intel-mode',
       '--override-policy',
       '--renderer-profile',
+      '--turn-context-max-bytes',
       '--board-image',
       '--basis', '--arm', '--local-base-url', '--local-model', '--local-api-key', '--local-think',
     ].includes(option ?? '')) throw new TypeError(`Unknown arena option ${option ?? '<missing>'}.`);
@@ -394,6 +397,10 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
   const rendererProfile = values.has('--renderer-profile')
     ? rendererProfileSchema.parse(JSON.parse(values.get('--renderer-profile') ?? ''))
     : DEFAULT_RENDERER_PROFILE;
+  const turnContextMaximumBytes = positiveInteger(
+    values.get('--turn-context-max-bytes') ?? String(TURN_CONTEXT_MAX_BYTES),
+    '--turn-context-max-bytes',
+  );
   const boardImageMode = values.get('--board-image') ?? 'off';
   if (!BOARD_IMAGE_MODES.includes(boardImageMode as BoardImageMode)) {
     throw new TypeError('--board-image must be off, png, or capture_only.');
@@ -482,6 +489,7 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
     intelMode,
     overridePolicy: overridePolicy as OverridePolicy,
     rendererProfile,
+    turnContextMaximumBytes,
     combatModel: combatModel as CombatModel,
     initiativeProfile: initiativeProfile as RoomInitiativeProfile,
     partyPolicy: partyPolicy as ScriptedPartyDecisionPolicy,
@@ -635,6 +643,7 @@ function conversationConfig(
     intelMode: config.intelMode,
     overridePolicy: overrides.overridePolicy ?? config.overridePolicy,
     rendererProfile: config.rendererProfile,
+    turnContextMaximumBytes: config.turnContextMaximumBytes,
     combatModel: overrides.combatModel ?? config.combatModel,
     initiativeProfile: config.initiativeProfile,
     partyPolicy: config.partyPolicy,
