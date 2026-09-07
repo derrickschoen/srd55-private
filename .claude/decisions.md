@@ -13117,3 +13117,38 @@ ignores --reps, i.e. `{...BRUTAL_10_PROTOCOL, reps: config.reps}` ->
 Committed 7b1183e7 on claude/packet-brutal. Brutal-judged arms for the
 three D566 arms wait for the box to go quiet (classic gate in
 Playwright, E1c hard arms running).
+
+## FINDING: classic gate at 259bd977 failed Playwright on two specs; both are stale test assumptions, fix lane dispatched (2026-09-06 20:58)
+
+Gate (gate-wt-classic5.log, start 19:55): tsc 0, sg 0, vitest-gate 0 with
+no load flakes, playwright-gate exit 1 at 20:55, exactly two failures.
+
+(1) tests/browser/ai-dm-board-snapshot.spec.ts: expected 2228x2360 /
+3124x2512, received 2280x3056 / 3176x3104. The spec's local
+SNAPSHOT_LAYOUT still holds the 64-px chrome (border 2, gutter 24,
+legend 120, gap 8, header 22, roster row 24, object row 40) beside tile
+128. I checked the deltas by hand against boardChromeMetrics(128):
+width +52 = 2*(4-2)+2*(48-24); height +696 and +592 = +180 chrome +
+doubled roster (214->428, 190->380) + doubled objects (302->604,
+222->444). Every number is explained by D562's lattice scaling; the
+capture is right, the test table is stale. Classic's own chrome-scale
+lane ran only touched specs and never this browser spec: a gap in that
+harvest, mine.
+
+(2) tests/browser/vtt-encounter.spec.ts roster contract: all nine names
+present, order Tamsin, Orin, Mirel, Goblin x2, Wolf x2, Sera, Brann
+instead of party-first. Cause: main's footprints inc4 (3b6d9cd2,
+2026-09-05) sorts projectEncounterBoard combatants by initiative; the
+merge 599fbe79 kept classic's party-first pin. Order is deterministic
+(DEFAULT_ENCOUNTER_SEED 0x315006), so it is not a flake, but pasting the
+received order would be a pin from output.
+
+Dispatched codex lane classic-gate-fix (session
+01a0795f-595e-7bf1-82fc-0e7cc678ab75, worktree dnd-wt-classic5, port
+4721, brief .tmp/runs/briefs-2026-09-06/classic-gate-fix.md): (1)
+derive the expected dimensions from the exported chrome metrics at 128
+and prove the same helper at 64 reproduces main's D516 pin 1140x1012 /
+1588x1140; (2) replace the name-order pin with multiset equality plus
+an order check against an independent initiative source, no renderer
+change beyond an optional initiative-index attribute. Only the two
+specs rerun on the lane port; the full browser suite reruns at landing.
