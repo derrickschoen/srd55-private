@@ -14823,3 +14823,19 @@ a closed-form recomputation of a probability from its named components;
 a membership predicate replacing an exact count. Not acceptable:
 copying the new number the engine now prints. Any assertion the lane
 cannot justify that way stays failing and the lane reports it.
+
+## OWNER: all judge panel work paused (2026-09-07 16:42)
+
+Owner (verbatim): "I am out of fable usage. Pause all judge panel work
+until I say otherwise"
+
+Killed the two running pool3 judge seats by pid (opus 3094460, sol
+3094458/3094472); the fable seat had already failed on its own limit.
+No judge, unseal or panel run starts again until the owner lifts this.
+The pool3 packet and answer key are built and keep on disk
+(~/dnd-slim-runs/pool3-packet-3rep.json, pool3-answer-key.json), so
+judging resumes without rebuilding. Consequences held: D572 struggle-room
+selection needs the sol judge JSON and cannot proceed, so the 24/32/48
+cap rerun on brutal-struggle is blocked; D575's blind-vs-advice judging
+is likewise held. Engine work (D576) and the model-free blind-dm
+increments continue, since neither calls a judge.
