@@ -16,6 +16,7 @@ import {
   assertBoardImageFresh,
   boardSnapshotCaptureGeometry,
   boardStateDigest,
+  configuredPreviewPort,
   createBoardSnapshotSessionBundle,
   type BoardImageArtifact,
   type BoardImageSource,
@@ -53,6 +54,14 @@ function movedState(state: EncounterState): EncounterState {
 }
 
 describe('AI DM board snapshot contracts', () => {
+  it('isolates its preview port from the Playwright worker pool', () => {
+    expect(configuredPreviewPort({ PLAYWRIGHT_PORT: '4650' })).toBe(0);
+    expect(configuredPreviewPort({
+      PLAYWRIGHT_PORT: '4650',
+      BOARD_SNAPSHOT_PREVIEW_PORT: '4750',
+    })).toBe(4_750);
+  });
+
   it('derives the CSS tile, marker height, and default from capture scale', () => {
     expect(boardSnapshotCaptureGeometry(64)).toEqual({
       tileSizeCssPx: 64,

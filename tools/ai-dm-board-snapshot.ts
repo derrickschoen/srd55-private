@@ -43,12 +43,16 @@ const VIEWPORT = Object.freeze({ width: 1_280, height: 1_280 });
 const SNAPSHOT_CANARY = 'board-snapshot-element-crop-canary';
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
 
-function configuredPreviewPort(): number {
-  const raw = process.env['PLAYWRIGHT_PORT'];
+export function configuredPreviewPort(
+  environment: Readonly<NodeJS.ProcessEnv> = process.env,
+): number {
+  const raw = environment['BOARD_SNAPSHOT_PREVIEW_PORT'];
   if (raw === undefined) return 0;
   const port = Number(raw);
   if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) {
-    throw new RangeError(`PLAYWRIGHT_PORT must be a valid port; received "${raw}".`);
+    throw new RangeError(
+      `BOARD_SNAPSHOT_PREVIEW_PORT must be a valid port; received "${raw}".`,
+    );
   }
   return port;
 }
