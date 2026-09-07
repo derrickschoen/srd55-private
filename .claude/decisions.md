@@ -13044,3 +13044,15 @@ Codex: 109 files / 1352 tests green on the expanded sweep; my own sweep
 of tests/unit/assets + tests/unit/vtt + the three named specs is
 running; typecheck 0; the two changed test cases are renames of the
 replaced assertions (no deletions).
+
+## Flag-off control confirms: room-1 zeros are CLI timeouts under load, not flag effects (2026-09-06 20:10)
+
+Default profile (no flags) on the A5 tree, brutal 10x1, seed 6203001,
+luna medium, run at load 3-5 while the classic gate was in vitest/
+Playwright: room 1 refused "Agent CLI timed out after 120000 ms",
+offense [0,1,2,2,3,2,0,2,3,1], rooms 2-10 identical to the era
+controls. So the S3/A5/S7 room-1 deviations are the weather rule, not
+the flags; those three mini-A/Bs are VOID as shape evidence and will be
+re-run one at a time on a quiet box (no gate, no other arena) with the
+default 120 s wall so they stay comparable to the D429.1 controls. Rule
+recorded: flagged mini-A/Bs never overlap a gate or each other.
