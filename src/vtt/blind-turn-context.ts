@@ -4,24 +4,22 @@ import { effectiveCombatRules } from '../combat/combat-rules';
 import type { EncounterState } from '../combat/encounter';
 import type { GridCell } from '../combat/grid';
 import type {
+  MonsterAttackAction,
   MonsterBonusAction,
+  MonsterDamageTerm,
+  MonsterMultiattackAction,
+  MonsterSavingThrowAction,
   MonsterSpellcastingAction,
   MonsterStatblock,
 } from '../combat/statblock';
 import { BUNDLED_MONSTER_ROSTER } from '../combat/statblocks/roster';
 import { spellDefinition } from '../combat/spells/definitions';
+import type { SpellDefinition } from '../combat/spells/types';
 import { sha256 } from '../crypto/sha256';
-import { projectDmView } from '../combat/visibility';
 import {
   BLIND_INTENT_VERSION,
   type DmMode,
 } from './blind-dm-contract';
-import {
-  assignCreatureBadges,
-  hpBandLabel,
-  hpBandOf,
-} from './board-chrome';
-import { projectEncounterBoard } from './encounter-board';
 import { engineStateHandle, type EngineStateCapsule } from './engine-state-capsule';
 import type { EngineQueryPort } from './engine-query-port';
 import {
@@ -36,8 +34,30 @@ export const BLIND_LEGAL_MOVEMENT_VERSION = 'canonical-path-v1' as const;
 export const BLIND_TURN_CONTEXT_MAX_BYTES = 65_536 as const;
 export const BLIND_SEMANTIC_BOARD_MAX_BYTES = 8_192 as const;
 export const BLIND_FULL_CONTEXT_REQUIRED = 'BLIND_FULL_CONTEXT_REQUIRED' as const;
+export const BLIND_STATBLOCK_ESSENTIALS_FORMAT = 'blind-statblock-mechanical-essentials-v1' as const;
+export const BLIND_SPELL_ESSENTIALS_FORMAT = 'blind-spell-mechanical-essentials-v1' as const;
 
-export type BlindHpBand = ReturnType<typeof hpBandLabel>;
+export const BLIND_STATBLOCK_DROPPED_FIELDS = Object.freeze([
+  { path: 'provenance', reason: 'Source attribution is recorded once in creature_facts.provenance.rules_sources; design notes and modification prose are not rules.' },
+  { path: 'sourceDetails.source', reason: 'Source spans are recorded once in creature_facts.provenance.rules_sources.' },
+  { path: 'sourceDetails.classification.alignment', reason: 'Alignment is descriptive and does not change the combat rules engine.' },
+  { path: 'sourceDetails.challenge', reason: 'Challenge rating, experience points, and proficiency provenance do not adjudicate the live creature.' },
+  { path: 'sourceDetails.hitPointDice', reason: 'The sourced maximum HP is retained; construction dice are not live HP.' },
+  { path: 'sourceDetails.abilities', reason: 'The requested saving throws and skills are retained; raw ability-score presentation is omitted.' },
+  { path: 'sourceDetails.gear', reason: 'Inventory prose is omitted; every attack and reaction mechanic remains explicit.' },
+  { path: 'sourceDetails.languages', reason: 'Language presentation is outside this combat-planning payload.' },
+  { path: '*.average', reason: 'Redundant averages are omitted while their sourced damage or healing dice remain.' },
+  { path: '*.source|*.execution|*.note', reason: 'Source locators, implementation status, and absence prose are provenance rather than game mechanics.' },
+] as const);
+
+export const BLIND_SPELL_DROPPED_FIELDS = Object.freeze([
+  { path: 'name', reason: 'Referenced spells are keyed by their stable spell id.' },
+  { path: 'source', reason: 'Source locator prose is not a spell mechanic.' },
+  { path: 'components', reason: 'Monster spell use is already constrained by the typed engine action; component presentation is not needed here.' },
+  { path: 'ritual', reason: 'The monster spell actions in this payload do not offer ritual casting.' },
+] as const);
+
+export type BlindHpBand = 'UNINJURED' | 'BLOODIED' | 'NEAR DEATH' | 'UNKNOWN';
 
 export interface BlindTurnContextBudgetEvidence {
   readonly configuredBaseBytes: typeof BLIND_TURN_CONTEXT_MAX_BYTES;
@@ -58,6 +78,7 @@ export interface BlindFullContextRequiredResult {
 }
 
 interface BoardDisplayIdentity {
+  readonly id: string;
   readonly name: string;
   readonly badge: number;
   readonly side: 'party' | 'foe';
@@ -68,25 +89,48 @@ function encodedBytes(value: unknown): number {
   return new TextEncoder().encode(JSON.stringify(value)).byteLength;
 }
 
-function boardDisplayIdentities(state: EncounterState): ReadonlyMap<string, BoardDisplayIdentity> {
-  const board = projectEncounterBoard(projectDmView(state));
-  const placed = board.combatants.filter(
-    (combatant): combatant is Extract<typeof combatant, { readonly placementStatus: 'placed' }> =>
-      combatant.placementStatus === 'placed',
-  );
-  const assignments = assignCreatureBadges(placed);
-  return new Map(placed.map((combatant, index) => {
-    const assignment = assignments[index];
-    if (assignment === undefined) {
-      throw new Error(`Board display omitted badge assignment for ${String(combatant.id)}.`);
+const BLIND_CREATURE_BADGE_LIMIT = 12;
+const BLIND_CELL_BADGE_LIMIT = 2;
+
+function displayHpBand(hitPoints: number, hitPointMaximum: number): BlindHpBand {
+  if (hitPointMaximum <= 0) return 'UNKNOWN';
+  if (hitPoints >= hitPointMaximum) return 'UNINJURED';
+  return hitPoints * 4 <= hitPointMaximum ? 'NEAR DEATH' : 'BLOODIED';
+}
+
+function boardDisplayIdentities(
+  state: EncounterState,
+  capsule: EngineStateCapsule,
+): readonly BoardDisplayIdentity[] {
+  const initiativeOrder = new Map(state.initiative.map((entry, index) =>
+    [entry.combatant, index] as const));
+  const placed = capsule.projection.combatants
+    .filter((combatant) => combatant.placementStatus === 'placed')
+    .sort((left, right) =>
+      (initiativeOrder.get(left.id) ?? Number.MAX_SAFE_INTEGER) -
+        (initiativeOrder.get(right.id) ?? Number.MAX_SAFE_INTEGER) ||
+      String(left.id).localeCompare(String(right.id)));
+  if (placed.length > BLIND_CREATURE_BADGE_LIMIT) {
+    throw new RangeError(
+      `The closed creature-badge palette supports ${String(BLIND_CREATURE_BADGE_LIMIT)} creatures.`,
+    );
+  }
+  const cellCounts = new Map<string, number>();
+  return placed.map((combatant, index) => {
+    const cellKey = `${String(combatant.position.column)},${String(combatant.position.row)}`;
+    const cellCount = cellCounts.get(cellKey) ?? 0;
+    if (cellCount >= BLIND_CELL_BADGE_LIMIT) {
+      throw new RangeError(`Cell ${cellKey} exceeds the ${String(BLIND_CELL_BADGE_LIMIT)}-badge column.`);
     }
-    return [combatant.id, {
+    cellCounts.set(cellKey, cellCount + 1);
+    return {
+      id: String(combatant.id),
       name: combatant.name,
-      badge: assignment.number,
-      side: combatant.kind === 'player_character' ? 'party' : 'foe',
-      hpBand: hpBandLabel(hpBandOf(combatant.hitPointBand)),
-    }] as const;
-  }));
+      badge: index + 1,
+      side: combatant.side === 'player_character' ? 'party' : 'foe',
+      hpBand: displayHpBand(combatant.hitPoints, combatant.hitPointMaximum),
+    };
+  });
 }
 
 function spellcastingActions(statblock: MonsterStatblock): readonly MonsterSpellcastingAction[] {
@@ -102,16 +146,309 @@ function spellcastingActions(statblock: MonsterStatblock): readonly MonsterSpell
   );
 }
 
-function referencedSpellDefinitions(statblock: MonsterStatblock): Readonly<Record<string, unknown>> {
-  const ids = [...new Set(spellcastingActions(statblock)
-    .flatMap((action) => action.spells.map((spell) => spell.id)))]
-    .sort((left, right) => left.localeCompare(right));
-  return Object.fromEntries(ids.map((id) => {
+type MechanicalJson =
+  | null
+  | boolean
+  | number
+  | string
+  | readonly MechanicalJson[]
+  | { readonly [key: string]: MechanicalJson };
+
+function mechanicalJson(value: unknown): MechanicalJson {
+  if (value === null || typeof value === 'boolean' || typeof value === 'number' || typeof value === 'string') {
+    return value;
+  }
+  if (Array.isArray(value)) return value.map(mechanicalJson);
+  if (typeof value !== 'object') throw new TypeError('Mechanical source value is not JSON-compatible.');
+  return Object.fromEntries(Object.entries(value).flatMap(([key, entry]) =>
+    key === 'source' || key === 'execution' || key === 'note' || key === 'average'
+      ? []
+      : [[key, mechanicalJson(entry)] as const]));
+}
+
+interface BlindDamageTerm {
+  readonly dice: MonsterDamageTerm['dice'];
+  readonly type: MonsterDamageTerm['type'];
+  readonly trigger: MonsterDamageTerm['trigger'];
+}
+
+export interface BlindEssentialAttack {
+  readonly id: string;
+  readonly name: string;
+  readonly attack_bonus: number;
+  readonly delivery: MonsterAttackAction['delivery'];
+  readonly damage: readonly BlindDamageTerm[];
+  readonly attack_roll_advantage: MonsterAttackAction['attackRollAdvantage'];
+  readonly on_hit: MonsterAttackAction['onHit'];
+  readonly mechanics: MechanicalJson;
+}
+
+export interface BlindEssentialMultiattack {
+  readonly id: string;
+  readonly count: number;
+  readonly action_ids: readonly string[];
+  readonly combination: MonsterMultiattackAction['combination'];
+  readonly mechanics: MechanicalJson;
+}
+
+export interface BlindEssentialSavingThrowAction {
+  readonly id: string;
+  readonly name: string;
+  readonly saving_throw: MonsterSavingThrowAction['savingThrow'];
+  readonly target: MonsterSavingThrowAction['target'];
+  readonly failure: {
+    readonly damage: readonly BlindDamageTerm[];
+    readonly effects: MonsterSavingThrowAction['failure']['effects'];
+  };
+  readonly success: MonsterSavingThrowAction['success'];
+  readonly mechanics: MechanicalJson;
+}
+
+export type BlindEssentialSpellcasting =
+  | {
+      readonly kind: 'spellcasting';
+      readonly id: string;
+      readonly action_economy: MonsterSpellcastingAction['actionEconomy'];
+      readonly ability: MonsterSpellcastingAction['ability'];
+      readonly save_dc: number | null;
+      readonly spell_attack_bonus: number | null;
+      readonly spell_list: MonsterSpellcastingAction['spells'];
+      readonly mechanics: MechanicalJson;
+    }
+  | {
+      readonly kind: 'spell_choice';
+      readonly id: string;
+      readonly name: string;
+      readonly action_economy: 'bonus_action';
+      readonly uses: number;
+      readonly recharge: 'day';
+      readonly ability: Extract<MonsterBonusAction, { readonly kind: 'spell_choice' }>['ability'];
+      readonly save_dc: null;
+      readonly spell_attack_bonus: null;
+      readonly spell_list: Extract<MonsterBonusAction, { readonly kind: 'spell_choice' }>['spells'];
+      readonly mechanics: null;
+    };
+
+export interface BlindReferencedSpellDefinition {
+  readonly level: SpellDefinition['level'];
+  readonly casting_time: SpellDefinition['castingTime'];
+  readonly targeting: SpellDefinition['targeting'];
+  readonly effect: SpellDefinition['operation'];
+}
+
+export interface BlindUnavailableSpellDefinition {
+  readonly availability: 'declared_by_statblock';
+  readonly definition: null;
+}
+
+export type BlindReferencedSpell = BlindReferencedSpellDefinition | BlindUnavailableSpellDefinition;
+
+export interface BlindEssentialStatblock {
+  readonly id: MonsterStatblock['id'];
+  readonly name: string;
+  readonly armor_class: MonsterStatblock['armorClass'];
+  readonly hit_points_maximum: number;
+  readonly speeds: Extract<MonsterStatblock['sourceDetails']['movement'], { readonly kind: 'present' }>['value'];
+  readonly size_type: {
+    readonly sizes: Extract<MonsterStatblock['sourceDetails']['classification'], { readonly kind: 'present' }>['value']['sizes'];
+    readonly type: Extract<MonsterStatblock['sourceDetails']['classification'], { readonly kind: 'present' }>['value']['type'];
+    readonly subtype: string | null;
+  };
+  readonly senses: MonsterStatblock['senses'];
+  readonly passive_perception: number;
+  readonly saving_throw_bonuses: MonsterStatblock['savingThrowBonuses'];
+  readonly skills: readonly { readonly name: string; readonly bonus: number }[] | null;
+  readonly damage_responses: MonsterStatblock['damageResponses'];
+  readonly condition_immunities: MonsterStatblock['conditionImmunities'];
+  readonly attacks: readonly BlindEssentialAttack[];
+  readonly multiattacks: readonly BlindEssentialMultiattack[];
+  readonly saving_throw_actions: readonly BlindEssentialSavingThrowAction[];
+  readonly spellcasting: readonly BlindEssentialSpellcasting[];
+  readonly traits: MechanicalJson;
+  readonly bonus_actions: MechanicalJson;
+  readonly reactions: MechanicalJson;
+  readonly legendary_actions: MechanicalJson;
+  readonly legendary_resistance: MechanicalJson;
+}
+
+export interface BlindStatblockFactsEntry {
+  readonly statblock: BlindEssentialStatblock;
+  readonly referenced_spells: Readonly<Record<string, BlindReferencedSpell>>;
+}
+
+function damageTerm(term: MonsterDamageTerm): BlindDamageTerm {
+  return {
+    dice: structuredClone(term.dice),
+    type: term.type,
+    trigger: structuredClone(term.trigger),
+  };
+}
+
+function attackAction(action: MonsterAttackAction): BlindEssentialAttack {
+  return {
+    id: action.id,
+    name: action.name,
+    attack_bonus: action.attackBonus,
+    delivery: structuredClone(action.delivery),
+    damage: action.damage.map(damageTerm),
+    attack_roll_advantage: structuredClone(action.attackRollAdvantage),
+    on_hit: structuredClone(action.onHit),
+    mechanics: mechanicalJson(action.mechanics ?? null),
+  };
+}
+
+function multiattackAction(action: MonsterMultiattackAction): BlindEssentialMultiattack {
+  return {
+    id: action.id,
+    count: action.count,
+    action_ids: [...action.actionIds],
+    combination: action.combination,
+    mechanics: mechanicalJson(action.mechanics ?? null),
+  };
+}
+
+function savingThrowAction(action: MonsterSavingThrowAction): BlindEssentialSavingThrowAction {
+  return {
+    id: action.id,
+    name: action.name,
+    saving_throw: structuredClone(action.savingThrow),
+    target: structuredClone(action.target),
+    failure: {
+      damage: action.failure.damage.map(damageTerm),
+      effects: structuredClone(action.failure.effects),
+    },
+    success: structuredClone(action.success),
+    mechanics: mechanicalJson(action.mechanics ?? null),
+  };
+}
+
+function decodedNumber(value: MonsterSpellcastingAction['saveDc']): number | null {
+  return value.kind === 'present' ? value.value : null;
+}
+
+function spellcastingAction(action: MonsterSpellcastingAction): BlindEssentialSpellcasting {
+  return {
+    kind: 'spellcasting',
+    id: action.id,
+    action_economy: action.actionEconomy,
+    ability: action.ability,
+    save_dc: decodedNumber(action.saveDc),
+    spell_attack_bonus: decodedNumber(action.spellAttackBonus),
+    spell_list: structuredClone(action.spells),
+    mechanics: mechanicalJson(action.mechanics ?? null),
+  };
+}
+
+function spellChoiceAction(
+  action: Extract<MonsterBonusAction, { readonly kind: 'spell_choice' }>,
+): BlindEssentialSpellcasting {
+  return {
+    kind: 'spell_choice',
+    id: action.id,
+    name: action.name,
+    action_economy: 'bonus_action',
+    uses: action.uses,
+    recharge: action.recharge,
+    ability: action.ability,
+    save_dc: null,
+    spell_attack_bonus: null,
+    spell_list: structuredClone(action.spells),
+    mechanics: null,
+  };
+}
+
+function referencedSpellIds(statblock: MonsterStatblock): readonly string[] {
+  const bonusActions = statblock.sourceDetails.bonusActions.kind === 'present'
+    ? statblock.sourceDetails.bonusActions.value
+    : [];
+  const spellChoices = bonusActions.filter(
+    (action): action is Extract<MonsterBonusAction, { readonly kind: 'spell_choice' }> =>
+      action.kind === 'spell_choice',
+  );
+  return [...new Set([
+    ...spellcastingActions(statblock).flatMap((action) => action.spells.map((spell) => spell.id)),
+    ...spellChoices.flatMap((action) => action.spells.map((spell) => spell.id)),
+  ])].sort((left, right) => left.localeCompare(right));
+}
+
+function referencedSpellDefinitions(
+  statblock: MonsterStatblock,
+): Readonly<Record<string, BlindReferencedSpell>> {
+  return Object.fromEntries(referencedSpellIds(statblock).map((id) => {
     const definition = spellDefinition(id);
     return [id, definition === null
-      ? { availability: 'declared_by_statblock', definition: null }
-      : structuredClone(definition)] as const;
+      ? { availability: 'declared_by_statblock' as const, definition: null }
+      : {
+      level: definition.level,
+      casting_time: definition.castingTime,
+      targeting: structuredClone(definition.targeting),
+      effect: structuredClone(definition.operation),
+    }] as const;
   }));
+}
+
+function requiredPresent<Value>(
+  value: { readonly kind: 'present'; readonly value: Value } | { readonly kind: 'absent'; readonly note: string },
+  field: string,
+): Value {
+  if (value.kind === 'absent') {
+    throw new TypeError(`Bundled statblock ${field} is required for blind mechanical essentials.`);
+  }
+  return value.value;
+}
+
+function essentialStatblock(statblock: MonsterStatblock): BlindEssentialStatblock {
+  const details = statblock.sourceDetails;
+  const classification = requiredPresent(details.classification, 'classification');
+  const actions = requiredPresent(details.actions, 'actions');
+  const bonusActions = details.bonusActions.kind === 'present' ? details.bonusActions.value : null;
+  const spellChoices = bonusActions?.filter(
+    (action): action is Extract<MonsterBonusAction, { readonly kind: 'spell_choice' }> =>
+      action.kind === 'spell_choice',
+  ) ?? [];
+  return {
+    id: statblock.id,
+    name: statblock.name,
+    armor_class: statblock.armorClass,
+    hit_points_maximum: statblock.hitPointMaximum,
+    speeds: structuredClone(requiredPresent(details.movement, 'movement')),
+    size_type: {
+      sizes: structuredClone(classification.sizes),
+      type: classification.type,
+      subtype: classification.subtype,
+    },
+    senses: structuredClone(statblock.senses),
+    passive_perception: requiredPresent(details.passivePerception, 'passive perception'),
+    saving_throw_bonuses: structuredClone(statblock.savingThrowBonuses),
+    skills: details.skills.kind === 'present' ? structuredClone(details.skills.value) : null,
+    damage_responses: structuredClone(statblock.damageResponses),
+    condition_immunities: [...statblock.conditionImmunities],
+    attacks: actions
+      .filter((action): action is MonsterAttackAction => action.kind === 'attack')
+      .map(attackAction),
+    multiattacks: actions
+      .filter((action): action is MonsterMultiattackAction => action.kind === 'multiattack')
+      .map(multiattackAction),
+    saving_throw_actions: actions
+      .filter((action): action is MonsterSavingThrowAction => action.kind === 'saving_throw')
+      .map(savingThrowAction),
+    spellcasting: [
+      ...spellcastingActions(statblock).map(spellcastingAction),
+      ...spellChoices.map(spellChoiceAction),
+    ],
+    traits: details.traits.kind === 'present' ? mechanicalJson(details.traits.value) : null,
+    bonus_actions: bonusActions === null
+      ? null
+      : mechanicalJson(bonusActions.filter((action) =>
+          action.kind !== 'spellcasting' && action.kind !== 'spell_choice')),
+    reactions: details.reactions.kind === 'present' ? mechanicalJson(details.reactions.value) : null,
+    legendary_actions: details.legendaryActions.kind === 'present'
+      ? mechanicalJson(details.legendaryActions.value)
+      : null,
+    legendary_resistance: details.legendaryResistance.kind === 'present'
+      ? mechanicalJson(details.legendaryResistance.value)
+      : null,
+  };
 }
 
 function strictKnownJsonSchema(value: unknown): z.ZodType<unknown> {
@@ -256,24 +593,143 @@ const blindSemanticBoardSchema = z.strictObject({
   })),
 });
 
+const blindDamageTermSchema = z.strictObject({
+  dice: z.strictObject({
+    count: nonNegativeIntegerSchema,
+    sides: z.union([z.literal(4), z.literal(6), z.literal(8), z.literal(10), z.literal(12), z.literal(20)]),
+    modifier: safeIntegerSchema,
+  }),
+  type: identifierSchema,
+  trigger: z.unknown(),
+});
+
+const blindAttackSchema = z.strictObject({
+  id: identifierSchema,
+  name: identifierSchema,
+  attack_bonus: safeIntegerSchema,
+  delivery: z.unknown(),
+  damage: z.array(blindDamageTermSchema),
+  attack_roll_advantage: z.unknown(),
+  on_hit: z.array(z.unknown()),
+  mechanics: z.unknown(),
+});
+
+const blindMultiattackSchema = z.strictObject({
+  id: identifierSchema,
+  count: positiveIntegerSchema,
+  action_ids: z.array(identifierSchema),
+  combination: z.enum(['any', 'fixed', 'one_attack_may_be_replaced']),
+  mechanics: z.unknown(),
+});
+
+const blindSavingThrowActionSchema = z.strictObject({
+  id: identifierSchema,
+  name: identifierSchema,
+  saving_throw: z.unknown(),
+  target: z.unknown(),
+  failure: z.strictObject({
+    damage: z.array(blindDamageTermSchema),
+    effects: z.array(z.unknown()),
+  }),
+  success: z.unknown(),
+  mechanics: z.unknown(),
+});
+
+const blindSpellcastingSchema = z.union([
+  z.strictObject({
+    kind: z.literal('spellcasting'),
+    id: identifierSchema,
+    action_economy: z.enum(['action', 'bonus_action']),
+    ability: z.enum(['strength', 'dexterity', 'constitution', 'intelligence', 'wisdom', 'charisma']),
+    save_dc: safeIntegerSchema.nullable(),
+    spell_attack_bonus: safeIntegerSchema.nullable(),
+    spell_list: z.array(z.unknown()),
+    mechanics: z.unknown(),
+  }),
+  z.strictObject({
+    kind: z.literal('spell_choice'),
+    id: identifierSchema,
+    name: identifierSchema,
+    action_economy: z.literal('bonus_action'),
+    uses: positiveIntegerSchema,
+    recharge: z.literal('day'),
+    ability: z.enum(['strength', 'dexterity', 'constitution', 'intelligence', 'wisdom', 'charisma']),
+    save_dc: z.null(),
+    spell_attack_bonus: z.null(),
+    spell_list: z.array(z.unknown()),
+    mechanics: z.null(),
+  }),
+]);
+
+const blindEssentialStatblockSchema = z.strictObject({
+  id: identifierSchema,
+  name: identifierSchema,
+  armor_class: positiveIntegerSchema,
+  hit_points_maximum: positiveIntegerSchema,
+  speeds: z.array(z.strictObject({
+    kind: z.enum(['walk', 'burrow', 'climb', 'fly', 'swim']),
+    feet: nonNegativeIntegerSchema,
+    hover: z.boolean(),
+  })),
+  size_type: z.strictObject({
+    sizes: z.array(identifierSchema),
+    type: identifierSchema,
+    subtype: z.string().nullable(),
+  }),
+  senses: z.array(z.union([
+    z.strictObject({ kind: z.literal('normal_sight') }),
+    z.strictObject({
+      kind: z.enum(['blindsight', 'darkvision', 'tremorsense', 'truesight']),
+      rangeFeet: positiveIntegerSchema,
+    }),
+  ])),
+  passive_perception: nonNegativeIntegerSchema,
+  saving_throw_bonuses: z.strictObject({
+    strength: safeIntegerSchema,
+    dexterity: safeIntegerSchema,
+    constitution: safeIntegerSchema,
+    intelligence: safeIntegerSchema,
+    wisdom: safeIntegerSchema,
+    charisma: safeIntegerSchema,
+  }),
+  skills: z.array(z.strictObject({ name: identifierSchema, bonus: safeIntegerSchema })).nullable(),
+  damage_responses: z.array(z.strictObject({ type: identifierSchema, response: identifierSchema })),
+  condition_immunities: z.array(identifierSchema),
+  attacks: z.array(blindAttackSchema),
+  multiattacks: z.array(blindMultiattackSchema),
+  saving_throw_actions: z.array(blindSavingThrowActionSchema),
+  spellcasting: z.array(blindSpellcastingSchema),
+  traits: z.unknown(),
+  bonus_actions: z.unknown(),
+  reactions: z.unknown(),
+  legendary_actions: z.unknown(),
+  legendary_resistance: z.unknown(),
+});
+
+const blindReferencedSpellSchema = z.union([
+  z.strictObject({
+    level: z.number().int().min(0).max(9),
+    casting_time: z.enum(['action', 'bonus_action', 'reaction', 'minute', 'ten_minutes', 'hour']),
+    targeting: z.unknown(),
+    effect: z.unknown(),
+  }),
+  z.strictObject({
+    availability: z.literal('declared_by_statblock'),
+    definition: z.null(),
+  }),
+]);
+
 const blindStatblockFactsEntrySchema = z.strictObject({
-  statblock: z.unknown(),
-  referenced_spells: z.record(z.string(), z.unknown()),
+  statblock: blindEssentialStatblockSchema,
+  referenced_spells: z.record(identifierSchema, blindReferencedSpellSchema),
 }).superRefine((entry, context) => {
-  if (typeof entry.statblock !== 'object' || entry.statblock === null || Array.isArray(entry.statblock)) {
-    context.addIssue({ code: 'custom', path: ['statblock'], message: 'Statblock must be an object.' });
-    return;
-  }
-  const id = (entry.statblock as Readonly<Record<string, unknown>>)['id'];
-  const source = typeof id === 'string'
-    ? BUNDLED_MONSTER_ROSTER.find((row) => row.statblock.id === id)?.statblock
-    : undefined;
+  const source = BUNDLED_MONSTER_ROSTER.find((row) => row.statblock.id === entry.statblock.id)?.statblock;
   if (source === undefined) {
     context.addIssue({ code: 'custom', path: ['statblock'], message: 'Statblock is not a bundled sourced block.' });
     return;
   }
   const expected = {
-    statblock: source,
+    statblock: essentialStatblock(source),
     referenced_spells: referencedSpellDefinitions(source),
   };
   if (!strictKnownJsonSchema(expected).safeParse(entry).success ||
@@ -350,6 +806,14 @@ const blindCreatureActorSchema = blindDisplayIdentitySchema.extend({
 const blindCreatureFactsSchema = z.strictObject({
   provenance: z.strictObject({
     kind: z.literal('engine_fact'),
+    statblock_projection: z.strictObject({
+      format: z.literal(BLIND_STATBLOCK_ESSENTIALS_FORMAT),
+      dropped_fields: z.array(z.strictObject({ path: identifierSchema, reason: identifierSchema })),
+    }),
+    spell_projection: z.strictObject({
+      format: z.literal(BLIND_SPELL_ESSENTIALS_FORMAT),
+      dropped_fields: z.array(z.strictObject({ path: identifierSchema, reason: identifierSchema })),
+    }),
     rules_sources: z.array(z.strictObject({
       source_id: identifierSchema,
       license: identifierSchema,
@@ -359,6 +823,25 @@ const blindCreatureFactsSchema = z.strictObject({
   statblocks: z.record(identifierSchema, blindStatblockFactsEntrySchema),
   active_rules: blindActiveRulesSchema,
   actors: z.array(blindCreatureActorSchema),
+}).superRefine((facts, context) => {
+  for (const [id, entry] of Object.entries(facts.statblocks)) {
+    if (entry.statblock.id !== id) {
+      context.addIssue({
+        code: 'custom',
+        path: ['statblocks', id],
+        message: 'A shared statblock must be keyed by its sourced statblock id.',
+      });
+    }
+  }
+  for (const [index, actor] of facts.actors.entries()) {
+    if (actor.statblock_ref !== null && facts.statblocks[actor.statblock_ref] === undefined) {
+      context.addIssue({
+        code: 'custom',
+        path: ['actors', index, 'statblock_ref'],
+        message: 'Every monster actor must reference one shared statblock.',
+      });
+    }
+  }
 });
 
 const blindLegalMovementCellSchema = z.strictObject({
@@ -446,7 +929,7 @@ function sourceEvidence(statblock: MonsterStatblock): readonly BlindRulesSourceE
       return [{
         source_id: `project-original:${String(statblock.id)}`,
         license: 'project-original',
-        page_or_entry: provenance.designNote,
+        page_or_entry: String(statblock.id),
       }];
     case 'external_import':
       return [{
@@ -459,9 +942,9 @@ function sourceEvidence(statblock: MonsterStatblock): readonly BlindRulesSourceE
 
 export function blindStatblockFacts(
   statblock: MonsterStatblock,
-): z.infer<typeof blindStatblockFactsEntrySchema> {
+): BlindStatblockFactsEntry {
   return {
-    statblock: structuredClone(statblock),
+    statblock: essentialStatblock(statblock),
     referenced_spells: referencedSpellDefinitions(statblock),
   };
 }
@@ -482,7 +965,7 @@ function creatureFacts(
   capsule: EngineStateCapsule,
   displays: ReadonlyMap<string, BoardDisplayIdentity>,
 ): BlindCreatureFacts {
-  const statblocks = new Map<string, z.infer<typeof blindStatblockFactsEntrySchema>>();
+  const statblocks = new Map<string, BlindStatblockFactsEntry>();
   const activeRules = new Map<string, unknown>();
   const rulesSources = new Map<string, BlindRulesSourceEvidence>();
   const actors = capsule.projection.combatants.map((actor): BlindCreatureActor => {
@@ -547,15 +1030,23 @@ function creatureFacts(
       },
     };
   });
-  return {
+  return blindCreatureFactsSchema.parse({
     provenance: {
       kind: 'engine_fact',
+      statblock_projection: {
+        format: BLIND_STATBLOCK_ESSENTIALS_FORMAT,
+        dropped_fields: BLIND_STATBLOCK_DROPPED_FIELDS.map((field) => ({ ...field })),
+      },
+      spell_projection: {
+        format: BLIND_SPELL_ESSENTIALS_FORMAT,
+        dropped_fields: BLIND_SPELL_DROPPED_FIELDS.map((field) => ({ ...field })),
+      },
       rules_sources: [...rulesSources.values()],
     },
     statblocks: Object.fromEntries([...statblocks.entries()].sort(([left], [right]) => left.localeCompare(right))),
     active_rules: Object.fromEntries([...activeRules.entries()].sort(([left], [right]) => left.localeCompare(right))),
     actors,
-  };
+  });
 }
 
 function everyCell(bounds: EncounterState['bounds']): readonly GridCell[] {
@@ -604,6 +1095,49 @@ function legalMovement(
   };
 }
 
+export interface EngineBlindTurnProjection {
+  readonly revision: number;
+  readonly round: number;
+  readonly displays: readonly BoardDisplayIdentity[];
+  readonly initiative: BlindTurnContext['initiative'];
+  readonly creatureFacts: BlindCreatureFacts;
+  readonly legalMovement: BlindLegalMovement;
+}
+
+/** Reducer-free projection consumed by the standalone MCP blind renderer. */
+export function projectEngineBlindTurn(
+  state: EncounterState,
+  capsule: EngineStateCapsule,
+  queries: EngineQueryPort,
+): EngineBlindTurnProjection {
+  const displays = boardDisplayIdentities(state, capsule);
+  const displaysById = new Map(displays.map((display) => [display.id, display] as const));
+  const delayed = new Map(capsule.projection.initiative.timeline.initiative.map((entry) =>
+    [entry.combatant, entry.delayedThisRound] as const));
+  const initiative = state.initiative.map((entry) => {
+    const display = displaysById.get(entry.combatant);
+    if (display === undefined) {
+      throw new Error(`Blind initiative cannot bind board actor ${String(entry.combatant)}.`);
+    }
+    return {
+      name: display.name,
+      badge: display.badge,
+      side: display.side,
+      hp_band: display.hpBand,
+      current: state.activeCombatant === entry.combatant,
+      delayed: delayed.get(entry.combatant) ?? false,
+    };
+  });
+  return {
+    revision: capsule.revision,
+    round: state.round,
+    displays,
+    initiative,
+    creatureFacts: creatureFacts(state, capsule, displaysById),
+    legalMovement: legalMovement(state, capsule, queries, displaysById),
+  };
+}
+
 export function blindSemanticBoard(
   projection: EngineSemanticBoardProjection,
   stateDigest: string,
@@ -625,9 +1159,8 @@ export function blindSemanticBoard(
 }
 
 export function renderBlindTurnContext(input: {
-  readonly state: EncounterState;
   readonly capsule: EngineStateCapsule;
-  readonly queries: EngineQueryPort;
+  readonly blindProjection: EngineBlindTurnProjection;
   readonly semanticBoardProjection: EngineSemanticBoardProjection;
   readonly visuals?: readonly BlindVisualDescriptor[];
   readonly baseMaximumBytes?: number;
@@ -644,33 +1177,20 @@ export function renderBlindTurnContext(input: {
   if (input.semanticBoardProjection.revision !== input.capsule.revision) {
     throw new RangeError('SEMANTIC_BOARD_REVISION_MISMATCH');
   }
-  const displays = boardDisplayIdentities(input.state);
+  if (input.blindProjection.revision !== input.capsule.revision) {
+    throw new RangeError('BLIND_PROJECTION_REVISION_MISMATCH');
+  }
+  const displays = new Map(input.blindProjection.displays.map((display) => [display.id, display] as const));
   const request = input.capsule.request;
   if (request === null || request.phase === 'speculative' || request.kind === 'plan_adjustment') {
     throw new RangeError('Blind v1 requires an ordinary full-round request.');
   }
-  const roster = [...displays.values()].map((display) => ({
+  const roster = input.blindProjection.displays.map((display) => ({
     name: display.name,
     badge: display.badge,
     side: display.side,
     hp_band: display.hpBand,
   }));
-  const delayed = new Map(input.capsule.projection.initiative.timeline.initiative.map((entry) =>
-    [entry.combatant, entry.delayedThisRound] as const));
-  const initiative = input.state.initiative.map((entry) => {
-    const display = displays.get(entry.combatant);
-    if (display === undefined) {
-      throw new Error(`Blind initiative cannot bind board actor ${String(entry.combatant)}.`);
-    }
-    return {
-      name: display.name,
-      badge: display.badge,
-      side: display.side,
-      hp_band: display.hpBand,
-      current: input.state.activeCombatant === entry.combatant,
-      delayed: delayed.get(entry.combatant) ?? false,
-    };
-  });
   const semanticBoard = blindSemanticBoard(input.semanticBoardProjection, input.capsule.digest);
   const candidate: BlindTurnContext = {
     granularity: 'full' as const,
@@ -692,12 +1212,12 @@ export function renderBlindTurnContext(input: {
         return { name: display.name, badge: display.badge };
       }),
     },
-    round: input.state.round,
-    initiative,
+    round: input.blindProjection.round,
+    initiative: input.blindProjection.initiative,
     roster,
     semantic_board: semanticBoard,
-    creature_facts: creatureFacts(input.state, input.capsule, displays),
-    legal_movement: legalMovement(input.state, input.capsule, input.queries, displays),
+    creature_facts: input.blindProjection.creatureFacts,
+    legal_movement: input.blindProjection.legalMovement,
     visuals: (input.visuals ?? []).map((visual) => ({ ...visual })),
     intent_contract: BLIND_INTENT_VERSION,
   };

@@ -87,7 +87,25 @@ async function prepareHardCapEvidence() {
     granularity: 'full',
   }));
   const { semantic_board: _semanticBoard, ...base } = context;
-  return new TextEncoder().encode(JSON.stringify(base)).byteLength;
+  const facts = record(context['creature_facts']);
+  const statblocks = record(facts['statblocks']);
+  const actors = Array.isArray(facts['actors']) ? facts['actors'].map(record) : [];
+  const compressedStatblockBytes = new TextEncoder().encode(JSON.stringify(statblocks)).byteLength;
+  const fullStatblockBytes = new TextEncoder().encode(JSON.stringify(Object.fromEntries(
+    Object.keys(statblocks).map((id) => {
+      const row = BUNDLED_MONSTER_ROSTER.find((candidate) => candidate.statblock.id === id);
+      if (row === undefined) throw new Error(`Missing source statblock ${id}.`);
+      return [id, row.statblock] as const;
+    }),
+  ))).byteLength;
+  return {
+    baseBytes: new TextEncoder().encode(JSON.stringify(base)).byteLength,
+    compressedStatblockBytes,
+    fullStatblockBytes,
+    guardActorReferences: actors.filter((actor) => actor['statblock_ref'] === 'statblock:guard').length,
+    guardSharedBlocks: Object.keys(statblocks).filter((id) => id === 'statblock:guard').length,
+    inlineStatblocks: actors.filter((actor) => Object.hasOwn(actor, 'statblock')).length,
+  };
 }
 
 const HARD_CAP_EVIDENCE = await prepareHardCapEvidence().catch((error: unknown) => error);
@@ -279,17 +297,61 @@ describe('engine MCP stdio protocol', () => {
     }
   });
 
-  it('copies a sourced spell save DC instead of deriving it', () => {
+  it('copies sourced attack to-hit and spell save DC values instead of deriving them', () => {
     const priest = BUNDLED_MONSTER_ROSTER.find((row) => row.statblock.id === 'statblock:priest');
     if (priest === undefined) throw new Error('Priest statblock missing.');
     const facts = record(blindStatblockFacts(priest.statblock));
+    const block = record(facts['statblock']);
+    const sourceActions = priest.statblock.sourceDetails.actions;
+    if (sourceActions.kind !== 'present') throw new Error('Priest sourced actions missing.');
+    const sourceSpellcasting = sourceActions.value.find((action) => action.kind === 'spellcasting');
+    const sourceAttack = sourceActions.value.find((action) => action.kind === 'attack');
+    if (sourceAttack === undefined || sourceSpellcasting === undefined || sourceSpellcasting.saveDc.kind !== 'present') {
+      throw new Error('Priest sourced attack or spell save DC missing.');
+    }
+    const attack = Array.isArray(block['attacks'])
+      ? block['attacks'].map(record).find((action) => action['id'] === sourceAttack.id)
+      : undefined;
+    const spellcasting = Array.isArray(block['spellcasting'])
+      ? block['spellcasting'].map(record).find((action) => action['id'] === sourceSpellcasting.id)
+      : undefined;
 
-    expect(facts['statblock']).toEqual(priest.statblock);
+    expect(attack?.['attack_bonus']).toBe(sourceAttack.attackBonus);
+    expect(spellcasting?.['save_dc']).toBe(sourceSpellcasting.saveDc.value);
   });
 
-  it('keeps complete seven-monster facts above the legacy 32 KiB cap', () => {
-    if (typeof HARD_CAP_EVIDENCE !== 'number') throw HARD_CAP_EVIDENCE;
-    expect(HARD_CAP_EVIDENCE).toBeGreaterThan(32 * 1024);
+  it('keeps provenance.designNote flavor out of the mechanical statblock', () => {
+    const homebrew = BUNDLED_MONSTER_ROSTER.find(
+      (row) => row.statblock.id === 'statblock:homebrew-beast/brush-bear',
+    );
+    if (homebrew === undefined || homebrew.statblock.provenance.kind !== 'original_homebrew') {
+      throw new Error('Brush Bear original-homebrew fixture missing.');
+    }
+    const projected = blindStatblockFacts(homebrew.statblock).statblock;
+
+    expect(projected).not.toHaveProperty('provenance');
+    expect(JSON.stringify(projected)).not.toContain(homebrew.statblock.provenance.designNote);
+  });
+
+  it('stores one shared Guard block for three actor references', () => {
+    if (HARD_CAP_EVIDENCE instanceof Error) throw HARD_CAP_EVIDENCE;
+    const evidence = record(HARD_CAP_EVIDENCE);
+    expect(evidence['guardActorReferences']).toBe(3);
+    expect(evidence['guardSharedBlocks']).toBe(1);
+    expect(evidence['inlineStatblocks']).toBe(0);
+  });
+
+  it('compresses complete seven-monster statblocks while retaining the protected full context', () => {
+    if (HARD_CAP_EVIDENCE instanceof Error) throw HARD_CAP_EVIDENCE;
+    const evidence = record(HARD_CAP_EVIDENCE);
+    const compressed = evidence['compressedStatblockBytes'];
+    const full = evidence['fullStatblockBytes'];
+    const base = evidence['baseBytes'];
+    if (typeof compressed !== 'number' || typeof full !== 'number' || typeof base !== 'number') {
+      throw new TypeError('Hard-cap byte evidence is malformed.');
+    }
+    expect(compressed).toBeLessThan(full);
+    expect(base).toBeLessThan(65_536);
   });
 
   it('allows sourced mechanics and neutral reach facts through the ingress audit', () => {

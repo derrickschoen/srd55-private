@@ -16,8 +16,10 @@ import {
 } from '../../../src/vtt/blind-model-ingress';
 import {
   BLIND_SEMANTIC_BOARD_MAX_BYTES,
+  BLIND_STATBLOCK_DROPPED_FIELDS,
   BLIND_TURN_CONTEXT_MAX_BYTES,
   blindSemanticBoard,
+  blindStatblockFacts,
   blindTurnContextSchema,
   type BlindTurnContextBudgetEvidence,
 } from '../../../src/vtt/blind-turn-context';
@@ -189,18 +191,62 @@ describe('blind turn context', () => {
     }
   });
 
-  it('copies complete sourced statblocks, save DCs, attacks, and referenced spell definitions', async () => {
+  it('copies sourced mechanical essentials including attack bonuses, damage dice, spell DCs, and reduced spell definitions', async () => {
     const { context } = preparedHardContext();
     const facts = record(context['creature_facts'], 'creature facts');
     const statblocks = record(facts['statblocks'], 'statblocks');
     const priest = BUNDLED_MONSTER_ROSTER.find((row) => row.statblock.id === 'statblock:priest');
     if (priest === undefined) throw new Error('Priest statblock missing.');
     const projected = record(statblocks['statblock:priest'], 'projected priest');
-
-    expect(projected['statblock']).toEqual(priest.statblock);
-    expect(record(projected['statblock'], 'priest block')).toHaveProperty('sourceDetails.actions');
-    expect(record(projected['referenced_spells'], 'priest spells')).toHaveProperty('spirit-guardians');
+    const block = record(projected['statblock'], 'priest block');
+    const attacks = recordArray(block['attacks'], 'priest attacks');
+    const sourceActions = priest.statblock.sourceDetails.actions;
+    if (sourceActions.kind !== 'present') throw new Error('Priest sourced actions missing.');
+    const sourceAttack = sourceActions.value.find((action) => action.kind === 'attack');
+    const sourceSpellcasting = sourceActions.value.find((action) => action.kind === 'spellcasting');
+    if (sourceAttack === undefined || sourceSpellcasting === undefined || sourceSpellcasting.saveDc.kind !== 'present') {
+      throw new Error('Priest sourced attack or spellcasting mechanics missing.');
+    }
+    const attack = attacks.find((candidate) => candidate['id'] === sourceAttack.id);
+    expect(attack?.['attack_bonus']).toBe(sourceAttack.attackBonus);
+    expect(attack?.['delivery']).toEqual(sourceAttack.delivery);
+    expect(recordArray(attack?.['damage'], 'priest attack damage').map((term) => term['dice']))
+      .toEqual(sourceAttack.damage.map((term) => term.dice));
+    const spellcasting = recordArray(block['spellcasting'], 'priest spellcasting')
+      .find((candidate) => candidate['id'] === sourceSpellcasting.id);
+    expect(spellcasting?.['save_dc']).toBe(sourceSpellcasting.saveDc.value);
+    expect(spellcasting?.['spell_list']).toEqual(sourceSpellcasting.spells);
+    const spiritGuardians = record(record(projected['referenced_spells'], 'priest spells')['spirit-guardians'], 'spirit guardians');
+    expect(Object.keys(spiritGuardians).sort()).toEqual(['casting_time', 'effect', 'level', 'targeting']);
     expect(record(facts['provenance'], 'creature provenance')).toMatchObject({ kind: 'engine_fact' });
+  });
+
+  it('shares one Guard block across three actor references', () => {
+    const { context } = preparedHardContext(5_117_002);
+    const facts = record(context['creature_facts'], 'creature facts');
+    const statblocks = record(facts['statblocks'], 'statblocks');
+    const guardActors = recordArray(facts['actors'], 'creature actors')
+      .filter((actor) => actor['statblock_ref'] === 'statblock:guard');
+
+    expect(guardActors).toHaveLength(3);
+    expect(Object.keys(statblocks).filter((id) => id === 'statblock:guard')).toEqual(['statblock:guard']);
+    expect(new Set(guardActors.map((actor) => actor['statblock_ref']))).toEqual(new Set(['statblock:guard']));
+  });
+
+  it('drops the known flavor field provenance.designNote and records why it was removed', () => {
+    const homebrew = BUNDLED_MONSTER_ROSTER.find(
+      (row) => row.statblock.id === 'statblock:homebrew-beast/brush-bear',
+    );
+    if (homebrew === undefined || homebrew.statblock.provenance.kind !== 'original_homebrew') {
+      throw new Error('Brush Bear original-homebrew fixture missing.');
+    }
+    const projected = blindStatblockFacts(homebrew.statblock);
+    const flavor = homebrew.statblock.provenance.designNote;
+
+    expect(projected.statblock).not.toHaveProperty('provenance');
+    expect(projected.statblock).not.toHaveProperty('sourceDetails');
+    expect(JSON.stringify(projected.statblock)).not.toContain(flavor);
+    expect(BLIND_STATBLOCK_DROPPED_FIELDS).toContainEqual(expect.objectContaining({ path: 'provenance' }));
   });
 
   it('preserves every E1b semantic block byte-for-byte except the entire reach/range summary', async () => {
@@ -259,6 +305,12 @@ describe('blind turn context', () => {
     if (actor === undefined) throw new Error('Expected a movement actor.');
     const cell = recordArray(actor['cells'], 'movement cells')[0];
     if (cell === undefined) throw new Error('Expected a movement cell.');
+    const facts = record(context['creature_facts'], 'creature facts');
+    const statblocks = record(facts['statblocks'], 'statblocks');
+    const [statblockId, statblockEntry] = Object.entries(statblocks)[0] ?? [];
+    if (statblockId === undefined || statblockEntry === undefined) throw new Error('Expected a statblock.');
+    const statblockFacts = record(statblockEntry, 'statblock facts');
+    const statblock = record(statblockFacts['statblock'], 'statblock');
     const injections = [
       { ...context, undeclared: true },
       {
@@ -275,6 +327,16 @@ describe('blind turn context', () => {
           actors: [{ ...actor, cells: [{ ...cell, candidate_count: 6 }] }],
         },
       },
+      {
+        ...context,
+        creature_facts: {
+          ...facts,
+          statblocks: {
+            ...statblocks,
+            [statblockId]: { ...statblockFacts, statblock: { ...statblock, flavor: 'undeclared' } },
+          },
+        },
+      },
     ];
 
     for (const injected of injections) {
@@ -284,7 +346,7 @@ describe('blind turn context', () => {
   });
 
   it.each([5_117_002, 5_117_004, 5_117_007])(
-    'proves the seven-actor hard fixture %i cannot fit the legacy 32 KiB base cap',
+    'compresses every shared statblock in seven-actor hard fixture %i without truncation',
     async (seed) => {
       const fixture = BLIND_FIXTURES.find((entry) => entry.seed === seed);
       if (fixture === undefined) throw new Error(`Missing fixture ${String(seed)}.`);
@@ -292,7 +354,17 @@ describe('blind turn context', () => {
       expect(state.combatants.filter((actor) => actor.profile.kind === 'monster')).toHaveLength(7);
       const serialized = SERIALIZED_FIXTURES.get(seed);
       if (serialized === undefined) throw new Error(`Missing serialized fixture ${String(seed)}.`);
-      expect(serialized.baseBytes).toBeGreaterThan(32 * 1024);
+      const facts = record(serialized.context.creature_facts, 'creature facts');
+      const statblocks = record(facts['statblocks'], 'statblocks');
+      for (const [id, entry] of Object.entries(statblocks)) {
+        const source = BUNDLED_MONSTER_ROSTER.find((row) => row.statblock.id === id);
+        if (source === undefined) throw new Error(`Missing source statblock ${id}.`);
+        const projected = record(entry, 'projected statblock');
+        const compressedBytes = new TextEncoder().encode(JSON.stringify(projected['statblock'])).byteLength;
+        const sourceBytes = new TextEncoder().encode(JSON.stringify(source.statblock)).byteLength;
+        expect(compressedBytes, id).toBeLessThan(sourceBytes);
+      }
+      expect(serialized.truncatedBlocks).toEqual([]);
     },
   );
 

@@ -66,9 +66,11 @@ import {
   type KbSubjectSources,
 } from './knowledge-base';
 import type { DmMode } from '../blind-dm-contract';
-import type {
-  BlindTurnContextBudgetEvidence,
-  BlindVisualDescriptor,
+import {
+  BLIND_TURN_CONTEXT_MAX_BYTES,
+  projectEngineBlindTurn,
+  type BlindTurnContextBudgetEvidence,
+  type BlindVisualDescriptor,
 } from '../blind-turn-context';
 import type { BlindModelIngressRecorder } from '../blind-model-ingress';
 
@@ -358,6 +360,11 @@ export function createEngineMcpRuntime(
   if ((options.dmMode === 'blind' || options.toolProfile === 'blind') && options.boardHtmlContent !== undefined) {
     throw new TypeError('Blind MCP delivery prohibits accessible-board HTML attachment.');
   }
+  if ((options.dmMode === 'blind' || options.toolProfile === 'blind') &&
+    options.turnContextMaximumBytes !== undefined &&
+    options.turnContextMaximumBytes !== BLIND_TURN_CONTEXT_MAX_BYTES) {
+    throw new RangeError(`Blind context base cap must be ${String(BLIND_TURN_CONTEXT_MAX_BYTES)} bytes.`);
+  }
   const candidates = state.combatants
     .filter((candidate) => candidate.profile.kind === 'monster' && candidate.life !== 'dead')
     .map((candidate) => candidate.profile.id)
@@ -447,6 +454,9 @@ export function createEngineMcpRuntime(
     ...(options.rulesIndex === undefined ? {} : { rulesIndex: options.rulesIndex }),
   });
   const feed = new MutableEngineCapsuleFeed(capsule);
+  const blindTurnProjection = options.dmMode === 'blind' || options.toolProfile === 'blind'
+    ? projectEngineBlindTurn(planningState, capsule, canonicalEngineQueryPort)
+    : null;
   const proposals: EngineProposalEnvelope[] = [];
   const speculativePlans: QueuedSpeculativePlanEnvelope[] = [];
   const narrations: NarrationEnvelope[] = [];
@@ -484,6 +494,7 @@ export function createEngineMcpRuntime(
     ...(options.rendererProfile?.semanticBoard === true || options.dmMode === 'blind' || options.toolProfile === 'blind' ? {
       semanticBoardProjection: projectEngineSemanticBoard(planningState, revision),
     } : {}),
+    ...(blindTurnProjection === null ? {} : { blindTurnProjection }),
     ...(options.maximumToolResultBytes === undefined ? {} : { maximumToolResultBytes: options.maximumToolResultBytes }),
     ...(options.maximumResourceBytes === undefined ? {} : { maximumResourceBytes: options.maximumResourceBytes }),
     ...(options.listPageSize === undefined ? {} : { listPageSize: options.listPageSize }),

@@ -151,6 +151,7 @@ import {
   renderTurnContextForDmMode,
   type BlindTurnContextBudgetEvidence,
   type BlindVisualDescriptor,
+  type EngineBlindTurnProjection,
 } from '../blind-turn-context';
 import {
   assertBlindTurnContextAllowlist,
@@ -324,6 +325,7 @@ interface EngineMcpDependencies {
   readonly onTurnContext?: (context: Readonly<Record<string, unknown>>) => void;
   readonly rendererProfile?: RendererProfile;
   readonly semanticBoardProjection?: EngineSemanticBoardProjection;
+  readonly blindTurnProjection?: EngineBlindTurnProjection;
   readonly turnContextMaximumBytes?: number;
   readonly semanticBoardMaximumBytes?: number;
   readonly onTurnContextRendered?: (result: {
@@ -1454,6 +1456,15 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         return projection;
       })()
     : null;
+  const blindTurnProjection = dmMode === 'blind'
+    ? (() => {
+        const projection = dependencies.blindTurnProjection;
+        if (projection === undefined) {
+          throw new TypeError('Blind DM mode requires the reducer-free blind turn projection.');
+        }
+        return projection;
+      })()
+    : null;
   const turnContextMaximumBytes = dependencies.turnContextMaximumBytes ??
     (dmMode === 'blind' ? BLIND_TURN_CONTEXT_MAX_BYTES : TURN_CONTEXT_MAX_BYTES);
   if (!Number.isSafeInteger(turnContextMaximumBytes) || turnContextMaximumBytes < 1) {
@@ -2280,15 +2291,17 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         if (blindSemanticBoardProjection === null) {
           throw new TypeError('Blind semantic-board projection is unavailable.');
         }
+        if (blindTurnProjection === null) {
+          throw new TypeError('Blind turn projection is unavailable.');
+        }
         const result = renderTurnContextForDmMode({
           dmMode,
           advice: () => {
             throw new Error('Blind context entered the advice renderer.');
           },
           blind: () => renderBlindTurnContext({
-            state,
             capsule,
-            queries,
+            blindProjection: blindTurnProjection,
             semanticBoardProjection: blindSemanticBoardProjection,
             ...(dependencies.blindVisuals === undefined ? {} : {
               visuals: dependencies.blindVisuals,
