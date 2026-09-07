@@ -15434,3 +15434,55 @@ with engine-wide reach, and my harvest verification must run the checks
 the lane did NOT run rather than repeating its command list. Targeted
 specs chosen by the implementer cannot establish that an engine-wide
 geometry change is safe.
+
+## D580 selector landed (650e1f00) and the nomination pass found FOUR candidate rooms (2026-09-07 19:28)
+
+Lane pool-reps-selector, session 01a07dfd-24d4-7793-9c94-18b76a06ba5d.
+Supervisor verified: sg scan clean (run this time, per the new process
+rule), tsc clean, 3 spec files 62/62. The lane also renamed the freeze
+artifact concept through tools/ai-dm-arena.ts and
+tools/ai-dm-rerun-packet.ts, from brutal-struggle-selection-v1 with
+selectedSeeds to brutal-struggle-nominated-candidates-v1 with
+nominatedCandidateSeeds; that is the rename I asked for propagating to
+the artifact's consumers, not scope creep. Supervisor mutant
+M-SUP-REPS-PARTIAL-AVERAGES made a missing (room, rep, seat, arm)
+observation skip instead of throw, so a partial set would average:
+killed by the named completeness test, restored.
+
+NOMINATION PASS over the judged 30-room three-rep packet, all three
+seats, results saved to ~/dnd-slim-runs/pool3-nominations.json:
+
+  4 of 30 rooms nominated.
+  6208005  luna, seat means astra -4.00, opus -6.00, sol -3.00, 3/3 reps every seat
+  6208007  sol,  seat means astra -1.00, opus -1.00, sol -1.00, 3/3 reps every seat
+  6208027  luna, seat means astra -2.67, opus -2.67, sol -2.67, 2/3 reps every seat
+  6208030  luna, seat means astra -0.67, opus -0.67, sol -0.67, 2/3 reps every seat
+           and sol, astra -2.00, opus -1.67, sol -1.67, 3/3 reps every seat
+
+Two observations that matter more than the count.
+
+FIRST: in 15 of the 30 rooms the model scored IDENTICALLY to engine-top
+on every seat, delta exactly zero. Combined with the earlier finding
+that the model picked the engine's top option in 19 of 30 rooms, the
+picture is that half this pool offers no room to differ at all. That is
+a property of the ROOMS, not of the model, and it explains the null
+population result directly: you cannot beat a recommendation you are
+effectively forced to agree with. If the goal is to find where a model
+can improve on the engine, the pool needs rooms with genuine tactical
+branching, which is a generator question and lands squarely on the
+D576 cover work now in flight.
+
+SECOND: room 6208005 is the strongest candidate by a wide margin, with
+every seat preferring the model by 3 to 6 panel points on every
+repetition. Room 6208007's margin is exactly 1.00 on all three seats,
+which is one rubric point and could be a single shared judging habit
+rather than a real tactical difference.
+
+These are NOMINATIONS, not findings, exactly as ruled: they were
+selected using the same scores that measured them. Confirming any of
+them requires fresh evaluations not used in selection plus a rules check
+of the claimed advantage. Not freezing a brutal-struggle basis from
+them: the arena's brutal-struggle protocol still requires exactly 10
+distinct seeds and --rooms 10, and we have 4, so that path is blocked
+until either the requirement is revisited or more candidates exist.
+Recorded as a latent blocker rather than worked around.
