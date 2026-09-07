@@ -14758,3 +14758,20 @@ the plan's counts cannot be reconciled.
 Pool three-rep arms complete: pool3-engine-top, pool3-luna-medium and
 pool3-sol-high, 90 rows each (30 rooms x 3 reps), all exit 0. Packet
 build, judging and struggle-room selection are the next pool step.
+
+## D572 pool three-rep packet built and judged; FABLE JUDGE SEAT OUT OF CREDITS (2026-09-07 16:39)
+
+Built the three-arm pool packet from the completed three-rep arms:
+rows relabelled from arm 'single' to engine-top / luna-medium / sol-high
+(90 rows each), builder run on dnd-wt-brutal-pool with
+--protocol brutal-pool --reps 3 --shuffle-seed 6208303, producing
+pool3-packet.json (270 entries) and pool3-answer-key.json. Leak scan of
+the packet for model or arm names: zero hits.
+
+Panel launched via judge-one.sh pool3 3rep. Finding: the fable seat
+failed immediately, exit 1, with "You've reached your Fable limit."
+Opus and sol high are running. The D566 panel is three seats, so this
+run will have two unless the limit clears. Not substituting another
+model for the fable seat without an owner ruling; if the owner wants a
+two-seat unseal for this packet, say so, otherwise the fable seat is
+re-run when its limit resets.
