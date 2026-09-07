@@ -20,3 +20,7 @@ writeSchema(
   'docs/specs/engine-proposal-contract-refusal-code.schema.json',
   proposalContractRefusalCodeSchema,
 );
+writeSchema(
+  'docs/specs/engine-blind-round-intent.schema.json',
+  engineSchemaInternals.blindRoundIntentEnvelopeSchema,
+);

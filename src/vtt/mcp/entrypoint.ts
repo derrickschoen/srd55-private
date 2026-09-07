@@ -48,6 +48,7 @@ import {
   type EngineToolSurface,
   type OverridePolicy,
   type TurnContextDeltaBase,
+  type BlindIntentSubmissionRecord,
 } from './engine-server';
 import { jsonRpcParseError, type JsonRpcResponse, type McpHandler } from './handler';
 import type { McpImageContentBlock, McpTextContentBlock } from './handler';
@@ -64,6 +65,12 @@ import {
   type KbReadRecord,
   type KbSubjectSources,
 } from './knowledge-base';
+import type { DmMode } from '../blind-dm-contract';
+import type {
+  BlindTurnContextBudgetEvidence,
+  BlindVisualDescriptor,
+} from '../blind-turn-context';
+import type { BlindModelIngressRecorder } from '../blind-model-ingress';
 
 function record(value: unknown, label: string): Readonly<Record<string, unknown>> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new TypeError(`${label} must be an object.`);
@@ -156,6 +163,7 @@ export interface EngineMcpRuntime {
   readonly narrations: readonly NarrationEnvelope[];
   readonly adjudications: readonly AdjudicationEnvelope[];
   readonly uiFeedback: readonly EngineUiFeedback[];
+  readonly blindIntentSubmissions: readonly BlindIntentSubmissionRecord[];
 }
 
 export function engineMcpUiFeedbackSpoolPath(proposalSpoolPath: string): string {
@@ -280,6 +288,11 @@ export function createEngineMcpRuntime(
     readonly onProposal?: (proposal: EngineProposalEnvelope) => void;
     readonly onSpeculativePlan?: (plan: QueuedSpeculativePlanEnvelope) => void;
     readonly toolProfile?: EngineMcpToolProfile;
+    readonly dmMode?: DmMode;
+    readonly blindVisuals?: readonly BlindVisualDescriptor[];
+    readonly blindIngressRecorder?: BlindModelIngressRecorder;
+    readonly onBlindTurnContextRendered?: (evidence: BlindTurnContextBudgetEvidence) => void;
+    readonly onBlindIntentSubmission?: (submission: BlindIntentSubmissionRecord) => void;
     readonly turnContextDeltaBase?: TurnContextDeltaBase;
     readonly rendererProfile?: RendererProfile;
     readonly turnContextMaximumBytes?: number;
@@ -400,6 +413,7 @@ export function createEngineMcpRuntime(
   const narrations: NarrationEnvelope[] = [];
   const adjudications: AdjudicationEnvelope[] = [];
   const uiFeedback: EngineUiFeedback[] = [];
+  const blindIntentSubmissions: BlindIntentSubmissionRecord[] = [];
   const application = createEngineMcpApplication({
     state: planningState,
     stateSource: feed,
@@ -428,13 +442,29 @@ export function createEngineMcpRuntime(
       uiFeedbackAlreadySubmitted: options.uiFeedbackAlreadySubmitted ?? false,
     }),
     rules: options.rules ?? { get: () => null },
-    ...(options.rendererProfile?.semanticBoard === true ? {
+    ...(options.rendererProfile?.semanticBoard === true || options.dmMode === 'blind' || options.toolProfile === 'blind' ? {
       semanticBoardProjection: projectEngineSemanticBoard(planningState, revision),
     } : {}),
     ...(options.maximumToolResultBytes === undefined ? {} : { maximumToolResultBytes: options.maximumToolResultBytes }),
     ...(options.maximumResourceBytes === undefined ? {} : { maximumResourceBytes: options.maximumResourceBytes }),
     ...(options.listPageSize === undefined ? {} : { listPageSize: options.listPageSize }),
     ...(options.toolProfile === undefined ? {} : { toolProfile: options.toolProfile }),
+    ...(options.dmMode === undefined ? {} : { dmMode: options.dmMode }),
+    ...(options.blindVisuals === undefined ? {} : { blindVisuals: options.blindVisuals }),
+    ...(options.blindIngressRecorder === undefined ? {} : {
+      blindIngressRecorder: options.blindIngressRecorder,
+    }),
+    ...(options.onBlindTurnContextRendered === undefined ? {} : {
+      onBlindTurnContextRendered: options.onBlindTurnContextRendered,
+    }),
+    ...(options.dmMode === 'blind' || options.toolProfile === 'blind' ? {
+      blindIntents: {
+        append: (submission: BlindIntentSubmissionRecord) => {
+          blindIntentSubmissions.push(structuredClone(submission));
+          options.onBlindIntentSubmission?.(structuredClone(submission));
+        },
+      },
+    } : {}),
     ...(options.turnContextDeltaBase === undefined ? {} : {
       turnContextDeltaBase: structuredClone(options.turnContextDeltaBase),
     }),
@@ -470,6 +500,7 @@ export function createEngineMcpRuntime(
     narrations,
     adjudications,
     uiFeedback,
+    blindIntentSubmissions,
   };
 }
 
@@ -744,7 +775,7 @@ function isLauncherManifest(value: unknown): value is EngineMcpLauncherManifest 
         candidate['context'] !== null && !Array.isArray(candidate['context']) &&
         (candidate['context'] as Readonly<Record<string, unknown>>)['granularity'] === 'full';
     })()) &&
-    (input['toolProfile'] === undefined || input['toolProfile'] === 'full' || input['toolProfile'] === 'dm') &&
+    (input['toolProfile'] === undefined || input['toolProfile'] === 'full' || input['toolProfile'] === 'dm' || input['toolProfile'] === 'blind') &&
     (input['rendererProfile'] === undefined || rendererProfileSchema.safeParse(input['rendererProfile']).success) &&
     (input['turnContextMaximumBytes'] === undefined ||
       Number.isSafeInteger(input['turnContextMaximumBytes']) &&
@@ -798,12 +829,12 @@ export async function runEngineMcpEntrypoint(argv: readonly string[] = process.a
   const profileArguments = argv.slice(2).filter((argument) => argument.startsWith('--agent-profile='));
   if (profileArguments.length > 1) throw new TypeError('Engine MCP accepts at most one agent profile flag.');
   const profileValue = profileArguments[0]?.slice('--agent-profile='.length);
-  if (profileValue !== undefined && profileValue !== 'dm' && profileValue !== 'full') {
+  if (profileValue !== undefined && profileValue !== 'dm' && profileValue !== 'full' && profileValue !== 'blind') {
     throw new TypeError(`Unknown engine MCP agent profile ${profileValue}.`);
   }
   const positional = argv.slice(2).filter((argument) => !argument.startsWith('--agent-profile='));
   const launcherPath = positional[0];
-  if (launcherPath === undefined) throw new TypeError('Usage: engine-mcp-server.ts [--agent-profile=full|dm] <arena-fixture-or-launcher.json>');
+  if (launcherPath === undefined) throw new TypeError('Usage: engine-mcp-server.ts [--agent-profile=full|dm|blind] <arena-fixture-or-launcher.json>');
   const selectedProfile = profileValue as EngineMcpToolProfile | undefined;
   const manifest = await launcherManifest(launcherPath);
   if (manifest !== null) {

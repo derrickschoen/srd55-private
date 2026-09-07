@@ -25,6 +25,14 @@ import {
   SEMANTIC_BOARD_FORMAT,
   SEMANTIC_BOARD_TRUNCATION_CLASSES,
 } from '../semantic-board-payload';
+import {
+  BLIND_INTENT_VERSION,
+  blindRoundIntentEnvelopeSchema,
+} from '../blind-dm-contract';
+import {
+  BLIND_FULL_CONTEXT_REQUIRED,
+  blindTurnContextSchema,
+} from '../blind-turn-context';
 
 export const ENGINE_ACTOR_KNOWLEDGE_POLICY = 'actor-knowledge-v3-last-seen' as const;
 export const ENGINE_LEGENDARY_WINDOWS_POLICY = 'legendary-windows-v2' as const;
@@ -1418,6 +1426,54 @@ export const ENGINE_TOOL_SPECS: readonly EngineToolSpec[] = Object.freeze([
   spec('engine.request_dm_adjudication', 'Queue a bounded DM question with no raw mechanical consequence.', z.object({ ...refInput, request_id: identifier, actor_id: identifier, subject: z.string().min(1).max(300), reason: z.string().min(1).max(2_000), blocking: z.boolean(), suggested_outcomes: z.array(z.string().min(1).max(500)).max(5).optional(), idempotency_key: z.string().min(16).max(200) }).strict(), adjudicationOutput, true),
 ]);
 
+const blindTurnContextOutput = z.union([
+  blindTurnContextSchema,
+  z.object({
+    status: z.literal('rejected'),
+    code: z.literal(BLIND_FULL_CONTEXT_REQUIRED),
+  }).strict(),
+]);
+
+const blindIntentReceiptOutput = z.object({
+  status: z.literal('recorded'),
+  receipt_id: z.string().regex(/^blind-receipt:[a-f0-9]{48}$/u),
+  intent_version: z.literal(BLIND_INTENT_VERSION),
+  intent_count: z.number().int().min(1).max(64),
+  attempt: z.number().int().min(1).max(3),
+}).strict();
+
+export const ENGINE_BLIND_TOOL_SPECS: readonly EngineToolSpec[] = Object.freeze([
+  spec('engine.get_turn_context', 'Return the complete revision-bound blind DM facts. Blind v1 requires full context.', z.object({
+    run_id: identifier,
+    expected_revision: z.number().int().min(1),
+    scope: z.literal('round'),
+    granularity: z.enum(['full', 'turn_delta']).optional(),
+    since_revision: z.number().int().min(1).optional(),
+  }).strict().superRefine((value, context) => {
+    if (value.granularity === 'turn_delta' && value.since_revision === undefined) {
+      context.addIssue({ code: 'custom', path: ['since_revision'], message: 'since_revision is required for turn_delta.' });
+    }
+  }), blindTurnContextOutput),
+  spec('engine.read_kb_subject', 'Read one indexed shared rules subject; at most two successful reads are allowed per round.', z.object({
+    subject: z.enum(KB_SUBJECTS),
+  }).strict(), z.union([
+    z.object({
+      kind: z.literal('kb_subject'), subject: z.enum(KB_SUBJECTS), text: z.string(),
+      sha256: z.string().regex(/^[a-f0-9]{64}$/u), byteCount: z.number().int().nonnegative(),
+    }).strict(),
+    z.object({ kind: z.literal('kb_read_budget_exhausted'), allowed: z.literal(2) }).strict(),
+  ])),
+  spec(
+    'engine.submit_blind_round_intents',
+    'Record one explicit blind round-intent proposal. The engine validates and resolves mechanics in a later private stage.',
+    blindRoundIntentEnvelopeSchema,
+    blindIntentReceiptOutput,
+    true,
+  ),
+]);
+
+export const ENGINE_BLIND_ROUND_INTENT_INPUT_SCHEMA = jsonSchema(blindRoundIntentEnvelopeSchema);
+
 export const ENGINE_SUBMIT_ROUND_PROPOSALS_INPUT_SCHEMA = ENGINE_TOOL_SPECS.find(
   (specification) => specification.descriptor.name === 'engine.submit_round_proposals',
 )?.descriptor.inputSchema;
@@ -1469,4 +1525,6 @@ export const engineSchemaInternals = {
   submitRoundTransportInput,
   submitSpeculativeRoundPlanInput,
   turnContextOutput,
+  blindTurnContextOutput,
+  blindRoundIntentEnvelopeSchema,
 };

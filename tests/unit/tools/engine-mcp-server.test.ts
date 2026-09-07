@@ -8,6 +8,24 @@ import {
   MCP_STATIC_LIST_TTL_MS,
   mcpRequestMeta,
 } from '../../../src/vtt/mcp/handler';
+import {
+  createEngineMcpRuntime,
+  loadArenaFixture,
+} from '../../../src/vtt/mcp/entrypoint';
+import {
+  BlindModelIngressRecorder,
+  assertNoForbiddenBlindStructure,
+} from '../../../src/vtt/blind-model-ingress';
+import {
+  loadD569AiDmKnowledgeBase,
+} from '../../../src/vtt/knowledge-base-contract';
+import {
+  kbSubjectSources,
+  KbReadBudget,
+} from '../../../src/vtt/mcp/knowledge-base';
+import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
+import { BUNDLED_MONSTER_ROSTER } from '../../../src/combat/statblocks/roster';
+import { blindStatblockFacts } from '../../../src/vtt/blind-turn-context';
 
 function record(value: unknown): Readonly<Record<string, unknown>> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -16,7 +34,314 @@ function record(value: unknown): Readonly<Record<string, unknown>> {
   return value as Readonly<Record<string, unknown>>;
 }
 
+async function prepareMovementParityEvidence() {
+  const state = await loadArenaFixture('tests/fixtures/arena-basis/seed-3943001.json');
+  const runtime = createEngineMcpRuntime(state, { dmMode: 'blind', toolProfile: 'blind' });
+  const capsule = runtime.feed.current();
+  const context = record(runtime.toolSurface.execute('engine.get_turn_context', {
+    run_id: capsule.runId,
+    expected_revision: capsule.revision,
+    scope: 'round',
+    granularity: 'full',
+  }));
+  const legalMovement = record(context['legal_movement']);
+  const movementActors = Array.isArray(legalMovement['actors'])
+    ? legalMovement['actors'].map(record)
+    : [];
+  const ordinaryRequest = capsule.request;
+  if (ordinaryRequest === null || ordinaryRequest.phase === 'speculative') {
+    throw new Error('Expected an ordinary blind request.');
+  }
+  return movementActors.map((movementActor, actorIndex) => {
+    const actorId = ordinaryRequest.actors[actorIndex];
+    if (actorId === undefined) throw new Error('Blind movement actor order mismatch.');
+    const actual = new Map((Array.isArray(movementActor['cells']) ? movementActor['cells'] : [])
+      .map((cell) => record(cell))
+      .map((cell) => [String(cell['label']), Number(cell['cost_feet'])] as const));
+    const expected = new Map<string, number>();
+    for (let row = 0; row < state.bounds.rows; row += 1) {
+      for (let column = 0; column < state.bounds.columns; column += 1) {
+        const path = canonicalEngineQueryPort.path(state, {
+          actorId,
+          destination: { column, row },
+          movement: 'normal',
+          maximumFeet: Number(movementActor['movement_budget_feet']),
+        });
+        if (path.legal) expected.set(`${String(column)},${String(row)}`, path.costFeet);
+      }
+    }
+    return { actual, expected };
+  });
+}
+
+const MOVEMENT_PARITY_EVIDENCE = await prepareMovementParityEvidence().catch((error: unknown) => error);
+
+async function prepareHardCapEvidence() {
+  const state = await loadArenaFixture('tests/fixtures/arena-basis-hard/seed-5117002.json');
+  const runtime = createEngineMcpRuntime(state, { dmMode: 'blind', toolProfile: 'blind' });
+  const capsule = runtime.feed.current();
+  const context = record(runtime.toolSurface.execute('engine.get_turn_context', {
+    run_id: capsule.runId,
+    expected_revision: capsule.revision,
+    scope: 'round',
+    granularity: 'full',
+  }));
+  const { semantic_board: _semanticBoard, ...base } = context;
+  return new TextEncoder().encode(JSON.stringify(base)).byteLength;
+}
+
+const HARD_CAP_EVIDENCE = await prepareHardCapEvidence().catch((error: unknown) => error);
+
 describe('engine MCP stdio protocol', () => {
+  it('exposes only the closed blind profile and records every simulated MCP ingress channel', async () => {
+    const state = await loadArenaFixture('tests/fixtures/arena-basis/seed-3943001.json');
+    const bundle = await loadD569AiDmKnowledgeBase(process.cwd(), 'blind');
+    const recorder = new BlindModelIngressRecorder();
+    recorder.record('startup', bundle.startupInstructions);
+    recorder.record('initial_prompt', 'Use the complete blind facts and submit one typed intent per required badge.');
+    recorder.record('retry_prompt', 'INVALID_INTENT_SHAPE');
+    recorder.record('replay_history', 'Prior blind attempt rejected with INVALID_INTENT_SHAPE.');
+    recorder.record('image_metadata', '{"kind":"dm_board","ordinal":1}');
+    const runtime = createEngineMcpRuntime(state, {
+      dmMode: 'blind',
+      toolProfile: 'blind',
+      blindIngressRecorder: recorder,
+      kbReadBudget: new KbReadBudget(kbSubjectSources(bundle)),
+      kbReadCallPhase: 'initial',
+      turnContextDeltaBase: {
+        revision: 1,
+        context: { granularity: 'full', actors: [{ options: ['private-advice-base'] }] },
+      },
+    });
+    const capsule = runtime.feed.current();
+    let id = 0;
+    const request = (method: string, params: Readonly<Record<string, unknown>>) => {
+      id += 1;
+      const response = runtime.handler.handle({
+        jsonrpc: '2.0',
+        id,
+        method,
+        params: {
+          ...params,
+          _meta: mcpRequestMeta({ name: 'blind-vitest', version: '1.0.0' }),
+        },
+      });
+      if (response === null || response.error !== undefined) {
+        throw new Error(`Blind MCP ${method} failed: ${JSON.stringify(response)}`);
+      }
+      return record(response.result);
+    };
+
+    const tools = request('tools/list', {})['tools'];
+    expect(Array.isArray(tools) ? tools.map((tool) => record(tool)['name']) : []).toEqual([
+      'engine.get_turn_context',
+      'engine.read_kb_subject',
+      'engine.submit_blind_round_intents',
+    ]);
+    const toolDescriptors = Array.isArray(tools) ? tools.map(record) : [];
+    expect(JSON.stringify(toolDescriptors)).not.toMatch(
+      /query_tactical|option_id|option_ref|submit_round_proposals|validate_proposal/u,
+    );
+
+    const contextResult = request('tools/call', {
+      name: 'engine.get_turn_context',
+      arguments: {
+        run_id: capsule.runId,
+        expected_revision: capsule.revision,
+        scope: 'round',
+        granularity: 'full',
+      },
+    });
+    const context = record(contextResult['structuredContent']);
+    expect(context).toMatchObject({ granularity: 'full', dm_mode: 'blind' });
+    const creatureFacts = record(context['creature_facts']);
+    const creatureActors = Array.isArray(creatureFacts['actors'])
+      ? creatureFacts['actors'].map(record)
+      : [];
+    const roster = Array.isArray(context['roster']) ? context['roster'].map(record) : [];
+    for (const contextActor of creatureActors) {
+      const display = roster.find((entry) => entry['badge'] === contextActor['badge']);
+      if (display === undefined) throw new Error('Blind actor is absent from the display roster.');
+      if (contextActor['side'] === 'party') {
+        expect(contextActor['hp_knowledge']).toEqual({
+          kind: 'displayed_band',
+          band: display['hp_band'],
+        });
+        expect(contextActor['remaining_resources']).toBeNull();
+      }
+    }
+
+    const deltaResult = request('tools/call', {
+      name: 'engine.get_turn_context',
+      arguments: {
+        run_id: capsule.runId,
+        expected_revision: capsule.revision,
+        scope: 'round',
+        granularity: 'turn_delta',
+        since_revision: capsule.revision,
+      },
+    });
+    expect(deltaResult['structuredContent']).toEqual({
+      status: 'rejected',
+      code: 'BLIND_FULL_CONTEXT_REQUIRED',
+    });
+
+    const resourcesResult = request('resources/list', {});
+    const resources = Array.isArray(resourcesResult['resources'])
+      ? resourcesResult['resources'].map(record)
+      : [];
+    expect(resources.map((resource) => resource['name'])).toEqual([
+      'Current blind turn',
+      'Blind round intent v1',
+    ]);
+    expect(JSON.stringify(resources)).not.toMatch(/room\/current|journal|turn-proposal/iu);
+    expect(request('resources/templates/list', {})['resourceTemplates']).toEqual([
+      expect.objectContaining({ name: 'Rule entry' }),
+    ]);
+    const currentUri = String(resources[0]?.['uri']);
+    const schemaUri = String(resources[1]?.['uri']);
+    expect(request('resources/read', { uri: currentUri })['contents']).toEqual([
+      expect.objectContaining({ uri: currentUri }),
+    ]);
+    expect(request('resources/read', { uri: schemaUri })['contents']).toEqual([
+      expect.objectContaining({ uri: schemaUri }),
+    ]);
+
+    const promptsResult = request('prompts/list', {});
+    const prompts = Array.isArray(promptsResult['prompts'])
+      ? promptsResult['prompts'].map(record)
+      : [];
+    expect(prompts.map((prompt) => prompt['name'])).toEqual([
+      'engine.plan_blind_round',
+      'engine.repair_blind_intents',
+    ]);
+    const prompt = request('prompts/get', {
+      name: 'engine.plan_blind_round',
+      arguments: { run_id: capsule.runId, expected_revision: capsule.revision },
+    });
+    expect(JSON.stringify(prompt)).toContain('Never output a path, die result, DC, damage value');
+    expect(JSON.stringify(prompt)).not.toMatch(/offered|option_id|suggested_plan|top recommendation/iu);
+
+    const kbResult = request('tools/call', {
+      name: 'engine.read_kb_subject',
+      arguments: { subject: 'movement' },
+    });
+    expect(record(kbResult['structuredContent'])).toMatchObject({
+      kind: 'kb_subject',
+      subject: 'movement',
+    });
+
+    const requestValue = record(context['request']);
+    const requiredActors = requestValue['required_actors'];
+    if (!Array.isArray(requiredActors) || requiredActors.length === 0) {
+      throw new Error('Blind context omitted required actors.');
+    }
+    const actor = record(requiredActors[0]);
+    const receipt = request('tools/call', {
+      name: 'engine.submit_blind_round_intents',
+      arguments: {
+        intent_version: 'blind-round-intent-v1',
+        intents: [{
+          actor: { name: actor['name'], badge: actor['badge'] },
+          action: { kind: 'end' },
+          reason: 'Hold the line.',
+        }],
+      },
+    });
+    expect(receipt['structuredContent']).toMatchObject({
+      status: 'recorded',
+      intent_version: 'blind-round-intent-v1',
+      intent_count: 1,
+      attempt: 1,
+    });
+    expect(runtime.blindIntentSubmissions).toHaveLength(1);
+    expect(runtime.proposals).toEqual([]);
+
+    const privateOfferIds = capsule.projection.combatants.flatMap((combatant) =>
+      combatant.options.map((option) => option.optionId));
+    const audit = recorder.assertSafe({
+      offeredOptionIds: privateOfferIds,
+      requiredText: [bundle.startupInstructions.slice(0, 80), 'armorClass', 'cost_feet'],
+    });
+    expect(audit).toMatchObject({ passed: true });
+    expect(new Set(recorder.records().map((entry) => entry.channel))).toEqual(new Set([
+      'startup', 'initial_prompt', 'retry_prompt', 'replay_history', 'image_metadata',
+      'tools_list', 'tool_result', 'turn_context', 'resources_list', 'resource_templates',
+      'resource_read', 'prompts_list', 'prompt_get', 'kb_read',
+    ]));
+  });
+
+  it('uses canonical same-revision paths for every legal destination and cost', () => {
+    if (!Array.isArray(MOVEMENT_PARITY_EVIDENCE)) throw MOVEMENT_PARITY_EVIDENCE;
+    expect(MOVEMENT_PARITY_EVIDENCE.length).toBeGreaterThan(0);
+    for (const evidence of MOVEMENT_PARITY_EVIDENCE) {
+      expect(evidence.actual).toEqual(evidence.expected);
+    }
+  });
+
+  it('copies a sourced spell save DC instead of deriving it', () => {
+    const priest = BUNDLED_MONSTER_ROSTER.find((row) => row.statblock.id === 'statblock:priest');
+    if (priest === undefined) throw new Error('Priest statblock missing.');
+    const facts = record(blindStatblockFacts(priest.statblock));
+
+    expect(facts['statblock']).toEqual(priest.statblock);
+  });
+
+  it('keeps complete seven-monster facts above the legacy 32 KiB cap', () => {
+    if (typeof HARD_CAP_EVIDENCE !== 'number') throw HARD_CAP_EVIDENCE;
+    expect(HARD_CAP_EVIDENCE).toBeGreaterThan(32 * 1024);
+  });
+
+  it('allows sourced mechanics and neutral reach facts through the ingress audit', () => {
+    const recorder = new BlindModelIngressRecorder();
+    recorder.recordJson('turn_context', {
+      statblock: {
+        armorClass: 17,
+        hitPoints: 38,
+        attackBonus: 5,
+        damage: { dice: '2d10+3', average: 14 },
+        saveDc: 13,
+        spellSlots: [4, 3, 2],
+      },
+      legal_movement: { cells: [{ label: '12,7', cost_feet: 25 }] },
+    });
+    recorder.record('startup', 'A rules option can be chosen by a human DM.');
+
+    expect(recorder.assertSafe({ requiredText: ['2d10+3', 'saveDc', '12,7'] }))
+      .toMatchObject({ passed: true });
+  });
+
+  it('rejects each recommendation structure independently at the ingress boundary', () => {
+    for (const key of [
+      'options', 'option_count', 'option_order', 'rank', 'score', 'scores', 'intel',
+      'threats', 'adverts', 'plays', 'consequence_cards', 'team_plan_frontier',
+      'suggested_plan', 'tactical_intel', 'opportunity_cost', 'movement_candidates',
+      'top_recommendation',
+    ]) {
+      expect(() => assertNoForbiddenBlindStructure({ neutral_wrapper: { [key]: ['private'] } }), key)
+        .toThrow('Blind structure contains recommendation fields');
+      const recorder = new BlindModelIngressRecorder();
+      expect(() => recorder.recordJson('tool_result', { neutral_wrapper: { [key]: ['private'] } }), key)
+        .toThrow('Blind structure contains recommendation fields');
+    }
+  });
+
+  it('rejects exact private option ids, advice tools, and recommendation prose in byte ingress', () => {
+    for (const forbidden of [
+      'option:private-current-revision',
+      'engine.query_tactical_intel',
+      'Top recommendation: move first.',
+      'Suggested plan: focus fire.',
+      'movement candidate score 9',
+      'path_cells are 1,1 then 1,2',
+    ]) {
+      const recorder = new BlindModelIngressRecorder();
+      recorder.record('retry_prompt', forbidden);
+      expect(() => recorder.assertSafe({ offeredOptionIds: ['option:private-current-revision'] }), forbidden)
+        .toThrow('Blind model ingress contains forbidden recommendation bytes');
+    }
+  });
+
   it('discovers, lists tools, and calls a loaded encounter tool', { timeout: 20_000 }, async () => {
     const child = spawn(process.execPath, [
       resolve('node_modules/vite-node/vite-node.mjs'),
