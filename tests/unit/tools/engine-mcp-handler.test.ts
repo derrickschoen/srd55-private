@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { readFileSync } from '../../helpers/test-filesystem';
 import type { EncounterState } from '../../../src/combat/encounter';
 import {
@@ -29,8 +29,13 @@ import {
 } from '../../../src/vtt/dm-bridge/projection-transport';
 import { feet } from '../../../src/combat/values';
 import { buildHostScenarioMenu } from '../../../src/vtt/speculative-planning';
-import { DEFAULT_RENDERER_PROFILE } from '../../../src/vtt/renderer-profile';
 import {
+  DEFAULT_RENDERER_PROFILE,
+  PLANNED_COMBINED_RENDERER_PROFILES,
+  type RendererProfile,
+} from '../../../src/vtt/renderer-profile';
+import {
+  ENGINE_GET_TURN_CONTEXT_OUTPUT_SCHEMA,
   ENGINE_MINIMAL_SUBMIT_ROUND_PROPOSALS_INPUT_SCHEMA,
   ENGINE_TOOL_SPECS,
   ENGINE_TURN_PROPOSAL_INPUT_SCHEMA,
@@ -861,6 +866,210 @@ describe('engine MCP dual-handshake full surface conformance', () => {
     expect(withoutSemanticBoard(truncated)['actors']).toEqual(off['actors']);
     expect(new TextEncoder().encode(JSON.stringify(truncated)).byteLength - baseBytes)
       .toBeLessThanOrEqual(semanticBoardMaximumBytes);
+  });
+
+  describe('turn-context output schema invariants', () => {
+    const shapeNames = [
+      'round_full_structured',
+      'active_turn_full_structured_board',
+      'round_full_intel_suppressed_board',
+      'round_full_profiled_board',
+      'adjustment_full_structured',
+      'adjustment_full_structured_board',
+      'adjustment_active_turn_structured_board',
+      'adjustment_full_intel_suppressed_board',
+      'adjustment_delta_structured',
+      'adjustment_delta_structured_board',
+      'adjustment_delta_hash_anchor_attributed_board',
+      'adjustment_delta_truncated_board',
+      'adjustment_delta_fully_truncated_board',
+      'adjustment_full_caveman_prose',
+      'adjustment_full_regular_prose',
+      'round_full_caveman_prose',
+      'round_full_regular_prose',
+    ] as const;
+    type ShapeName = (typeof shapeNames)[number];
+    const outputSpecification = ENGINE_TOOL_SPECS.find((candidate) =>
+      candidate.descriptor.name === 'engine.get_turn_context');
+    if (outputSpecification === undefined) throw new Error('Turn-context output schema is absent.');
+    const boardProfile: RendererProfile = { ...DEFAULT_RENDERER_PROFILE, semanticBoard: true };
+    let state: EncounterState | null = null;
+    let actors: readonly import('../../../src/combat/values').CombatantId[] = [];
+    let deltaBase: Readonly<Record<string, unknown>> | null = null;
+    let oneClassMaximumBytes = 0;
+    let allClassesMaximumBytes = 0;
+    const preparedState = (): EncounterState => {
+      if (state === null) throw new Error('Turn-context invariant state is not prepared.');
+      return state;
+    };
+    const preparedDeltaBase = (): Readonly<Record<string, unknown>> => {
+      if (deltaBase === null) throw new Error('Turn-context invariant delta base is not prepared.');
+      return deltaBase;
+    };
+    const renderRound = (
+      rendererProfile: RendererProfile,
+      scope: 'active_turn' | 'round',
+      intelMode: 'full' | 'off' = 'full',
+    ): Readonly<Record<string, unknown>> => {
+      const runtime = createEngineMcpRuntime(preparedState(), {
+        toolProfile: 'dm', requestedActorIds: actors, revision: 2,
+        requestId: 'request:room-1-round-1', rendererProfile,
+      });
+      return structured(toolCall(runtime.handler, 'engine.get_turn_context', {
+        run_id: 'encounter:engine-mcp', expected_revision: 2, scope,
+        granularity: 'full', intel_mode: intelMode,
+      }));
+    };
+    const renderAdjustment = (
+      rendererProfile: RendererProfile,
+      granularity: 'full' | 'turn_delta',
+      semanticBoardMaximumBytes?: number,
+      scope: 'active_turn' | 'round' = 'round',
+      intelMode: 'full' | 'off' = 'full',
+    ): Readonly<Record<string, unknown>> => {
+      const runtime = createEngineMcpRuntime(preparedState(), {
+        toolProfile: 'dm', requestedActorIds: actors, revision: 6,
+        requestId: 'request:room-1-round-1-pc-turn-1',
+        requestKind: 'plan_adjustment',
+        planAdjustment: {
+          ...adjustmentMetadata(actors),
+          triggerPcTurnId: 'pc-turn:room-1-round-1-pc-turn-1',
+          beforeRevision: 2,
+          afterRevision: 6,
+        },
+        rendererProfile,
+        turnContextDeltaBase: { revision: 2, context: preparedDeltaBase() },
+        ...(semanticBoardMaximumBytes === undefined ? {} : { semanticBoardMaximumBytes }),
+      });
+      return structured(toolCall(runtime.handler, 'engine.get_turn_context', {
+        run_id: 'encounter:engine-mcp', expected_revision: 6, scope, intel_mode: intelMode,
+        ...(granularity === 'full'
+          ? { granularity }
+          : { granularity, since_revision: 2 }),
+      }));
+    };
+
+    beforeAll(async () => {
+      state = await loadArenaFixture('tests/fixtures/arena-basis-brutal/seed-6203001.json');
+      actors = state.combatants.flatMap((combatant) =>
+        combatant.profile.kind === 'monster' && combatant.life !== 'dead'
+          ? [combatant.profile.id]
+          : []);
+      if (actors.length === 0) throw new Error('Brutal schema fixture has no living monsters.');
+      deltaBase = renderRound(boardProfile, 'round');
+      const fullDeltaBoard = renderAdjustment(boardProfile, 'turn_delta');
+      const deltaWithoutBoard = withoutSemanticBoard(fullDeltaBoard);
+      const lightTruncatedBoard = structuredClone(
+        record(fullDeltaBoard['semantic_board']),
+      ) as Record<string, unknown>;
+      const lightTruncatedCells = structuredClone(
+        record(lightTruncatedBoard['cells']),
+      ) as Record<string, unknown>;
+      delete lightTruncatedCells['light'];
+      lightTruncatedBoard['cells'] = lightTruncatedCells;
+      delete lightTruncatedBoard['light_sources'];
+      const baseDeltaBytes = new TextEncoder().encode(JSON.stringify(deltaWithoutBoard)).byteLength;
+      oneClassMaximumBytes = new TextEncoder().encode(JSON.stringify({
+        ...deltaWithoutBoard,
+        semantic_board: lightTruncatedBoard,
+        semantic_board_truncated: ['light'],
+      })).byteLength - baseDeltaBytes;
+      const fullyTruncatedBoard = structuredClone(lightTruncatedBoard);
+      delete fullyTruncatedBoard['adjacency_pairs'];
+      delete fullyTruncatedBoard['reach_range_summaries'];
+      delete fullyTruncatedBoard['objects'];
+      delete fullyTruncatedBoard['doors'];
+      allClassesMaximumBytes = new TextEncoder().encode(JSON.stringify({
+        ...deltaWithoutBoard,
+        semantic_board: fullyTruncatedBoard,
+        semantic_board_truncated: ['light', 'adjacency', 'objects'],
+      })).byteLength - baseDeltaBytes;
+    });
+
+    function renderShape(name: ShapeName): Readonly<Record<string, unknown>> {
+      switch (name) {
+        case 'round_full_structured': return renderRound(DEFAULT_RENDERER_PROFILE, 'round');
+        case 'active_turn_full_structured_board': return renderRound(boardProfile, 'active_turn');
+        case 'round_full_intel_suppressed_board': return renderRound(boardProfile, 'round', 'off');
+        case 'round_full_profiled_board': return renderRound(
+          { ...PLANNED_COMBINED_RENDERER_PROFILES.compact, semanticBoard: true },
+          'round',
+        );
+        case 'adjustment_full_structured': return renderAdjustment(DEFAULT_RENDERER_PROFILE, 'full');
+        case 'adjustment_full_structured_board': return renderAdjustment(boardProfile, 'full');
+        case 'adjustment_active_turn_structured_board': return renderAdjustment(
+          boardProfile, 'full', undefined, 'active_turn',
+        );
+        case 'adjustment_full_intel_suppressed_board': return renderAdjustment(
+          boardProfile, 'full', undefined, 'round', 'off',
+        );
+        case 'adjustment_delta_structured': return renderAdjustment(
+          DEFAULT_RENDERER_PROFILE, 'turn_delta',
+        );
+        case 'adjustment_delta_structured_board': return renderAdjustment(boardProfile, 'turn_delta');
+        case 'adjustment_delta_hash_anchor_attributed_board': return renderAdjustment(
+          { ...boardProfile, anchor: 'hash_only', attribution: 'stamped' },
+          'turn_delta',
+        );
+        case 'adjustment_delta_truncated_board': return renderAdjustment(
+          boardProfile, 'turn_delta', oneClassMaximumBytes,
+        );
+        case 'adjustment_delta_fully_truncated_board': return renderAdjustment(
+          boardProfile, 'turn_delta', allClassesMaximumBytes,
+        );
+        case 'adjustment_full_caveman_prose': return renderAdjustment(
+          { ...DEFAULT_RENDERER_PROFILE, format: 'caveman_prose' }, 'full',
+        );
+        case 'adjustment_full_regular_prose': return renderAdjustment(
+          { ...DEFAULT_RENDERER_PROFILE, format: 'regular_prose' }, 'full',
+        );
+        case 'round_full_caveman_prose': return renderRound(
+          { ...DEFAULT_RENDERER_PROFILE, format: 'caveman_prose' }, 'round',
+        );
+        case 'round_full_regular_prose': return renderRound(
+          { ...DEFAULT_RENDERER_PROFILE, format: 'regular_prose' }, 'round',
+        );
+      }
+      name satisfies never;
+      throw new Error('Unknown turn-context shape.');
+    }
+
+    it('keeps the generated schema byte-derived from the handler schema source', () => {
+      expect(JSON.parse(readFileSync(
+        'docs/specs/engine-get-turn-context-output.schema.json',
+        'utf8',
+      )) as unknown).toEqual(ENGINE_GET_TURN_CONTEXT_OUTPUT_SCHEMA);
+    });
+
+    it.each(shapeNames)('validates emitted %s against the handler output schema', (name) => {
+      const context = renderShape(name);
+      expect(outputSpecification.output.safeParse(context).success).toBe(true);
+      if (name === 'adjustment_delta_structured_board') {
+        expect(context).toMatchObject({
+          granularity: 'turn_delta',
+          anchor: {
+            base_revision: 2,
+            revision: 6,
+            request: { kind: 'plan_adjustment' },
+          },
+          semantic_board: { revision: 6, audience: 'dm', provenance: 'engine_fact' },
+        });
+      }
+      if (name === 'adjustment_delta_truncated_board') {
+        expect(context['semantic_board_truncated']).toEqual(['light']);
+      }
+      if (name === 'adjustment_delta_fully_truncated_board') {
+        expect(context['semantic_board_truncated']).toEqual(['light', 'adjacency', 'objects']);
+      }
+    });
+
+    it('rejects semantic_board_truncated emitted as a string', () => {
+      const context = renderShape('adjustment_delta_truncated_board');
+      expect(outputSpecification.output.safeParse({
+        ...context,
+        semantic_board_truncated: 'light',
+      }).success).toBe(false);
+    });
   });
 
   it('returns a revision delta that reconstructs the independently recomputed full turn context', async () => {
