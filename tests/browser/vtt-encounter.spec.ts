@@ -65,6 +65,7 @@ test('DM loads the bundled D365 dungeon and RPC-authored party into room 1', asy
       badgeColors: badges.map((badge) => badge.dataset.badgeColor ?? ''),
       badgeSources: badges.map((badge) => badge instanceof HTMLImageElement ? badge.src : ''),
       rosterNumbers: roster.map((row) => row.dataset.badgeNumber ?? ''),
+      rosterCombatantIds: roster.map((row) => row.dataset.combatantId ?? ''),
       rosterNames: names,
       rosterOrders: roster.map((row) => row.dataset.rosterOrder ?? ''),
       rosterCoordinates: roster.map((row) => row.querySelector<HTMLElement>('.encounter-roster-coordinate')?.dataset.coordinate ?? ''),
@@ -82,10 +83,16 @@ test('DM loads the bundled D365 dungeon and RPC-authored party into room 1', asy
   expect(rosterContract.badgeSources).toEqual(rosterContract.rosterBadgeSources);
   expect(rosterContract.rosterOrders).toEqual(rosterContract.rosterNumbers);
   expect(new Set(rosterContract.badgeColors).size).toBe(9);
-  expect(rosterContract.rosterNames).toEqual([
+  expect([...rosterContract.rosterNames].sort()).toEqual([
     'Mirel Ash', 'Orin Reed', 'Brann Vale', 'Sera Dawn', 'Tamsin Quill',
     'Goblin Warrior', 'Goblin Warrior', 'Wolf', 'Wolf',
-  ]);
+  ].sort());
+  const initiativeEntries = page.locator('.dm-initiative > ol > li');
+  await expect(initiativeEntries).toHaveCount(9);
+  const initiativeCombatantIds = await initiativeEntries.evaluateAll((items) =>
+    items.map((item) => item instanceof HTMLElement ? item.dataset.combatantId ?? '' : ''),
+  );
+  expect(rosterContract.rosterCombatantIds).toEqual(initiativeCombatantIds);
   expect(rosterContract.rosterCoordinates.every((coordinate) => /^\([0-9]+,[0-9]+\)$/u.test(coordinate))).toBe(true);
   for (const dimensions of rosterContract.rosterNameBitmapWidths) {
     expect(dimensions).not.toBeNull();
