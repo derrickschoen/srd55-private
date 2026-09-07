@@ -14177,3 +14177,13 @@ that stall instead of breaking out silently. Verified myself: 3 specs
 now kills 7 tests (six fixtures plus the minimal case), restored
 byte-identical. Committed; lands behind a merge with the new main and
 its own gate.
+
+## brutal-b merged with main cleanly (24d042d5), landing gate launched; main merged into claude/blind-dm for increment 1b (2026-09-07 05:54)
+
+Correction to the previous entry: the :4173 restart happened after
+that entry was written (old pid killed in its own call, relaunched,
+"fresh dist/ available"), not before. Main now carries the E1 lineage
+and the D567/compact-fallback landing; the blind-dm branch (contracts,
+D569/D570 knowledge bundle, legacy invariance) takes main so increment
+1b (blind renderer, closed MCP profile, ingress recorder) can start
+per the approved plan.
