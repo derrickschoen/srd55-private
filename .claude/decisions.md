@@ -16245,3 +16245,82 @@ decision not to run the probe lane during a gate, and the increment 4
 brief's requirements. Astra explicitly ruled that gate cancellation
 after a unit failure is NOT authorized standing policy even though no
 redo is needed.
+
+## D583 — engine blind spots and six candidate rooms where engine-top is not the best play (2026-09-08 08:14)
+
+Owner: "Assist Astra on trying to brainstorm rooms where the engine
+recommendations are not optimal and there is a smarter play that the
+engine doesn't see/rank higher". I supplied the actual ranking code so
+the brainstorm ran against facts, not guesses. Full output:
+.tmp/runs/astra-decision-06.log.
+
+THE RANKING, verbatim from src/vtt/intel/opportunity-cost.ts, sorted
+ascending: [classRank, unresolvedFlag, -expected_damage_milli,
+-attack_count, -approach_feet, resource_costs], where classRank is
+offense 0, approach 1, dodge 2, everything else 3. Nothing in that tuple
+references the target's REMAINING hit points, the opponent's next turn,
+cover at the chosen endpoint, conditions inflicted, action-economy
+denial, concentration, or coordination between two monsters.
+
+TWO CORRECTIONS ASTRA MADE TO MY OWN FRAMING, both from reading code I
+had summarized too confidently:
+- The default is chosen AFTER dominance filtering, not by the tuple
+  alone (opportunity-cost.ts:267). A control option can eliminate an
+  attack before the sort ever runs. So no room may be justified by the
+  tuple; each needs a trace of the actual default.
+- Spells are classified as OFFENSE, so a control spell does not
+  automatically lose on classRank as I implied. It loses on unresolved
+  status or on the damage field.
+
+BLIND SPOTS, in testing priority: (1) an attack that omits a useful
+bonus-action heal, because adding Healing Word makes the evaluation
+unresolved and the resolved attack wins on unresolvedFlag; (2) damaging
+the easy target instead of incapacitating the dangerous one who acts
+next, and overkill generally, since expected damage has no remaining-HP
+term; (3) attacking instead of holding a chokepoint, since defence is
+classRank 2 or 3; (4) preferring damage over a condition that denies a
+turn; (5) no joint allocation across monsters; (6) -approach_feet
+actually REWARDS walking farther for identical output.
+
+SIX CANDIDATE ROOMS designed, A through F. Astra would build three
+first: A, attack plus Healing Word on a nearly-dead frontliner; B, an
+Ogre javelin at the six-HP Fighter who acts next rather than the
+healthier Wizard with better expected damage; C, an exposed advance
+where the Greatclub gains damage but steps into two opponents' reach
+when the javelin from cover is better. Estimated +1 to +4 panel points
+each, subjective planning figures, not measurements.
+
+BUILDABILITY FINDINGS THAT MATTER: healing currently targets the first
+living ally by id rather than offering every ally
+(turn-option-registry.ts:411), so room A qualifies only if the offered
+heal already targets the intended creature. Room E must use Ghast rather
+than Ghoul because the offer builder suppresses standalone attacks when
+a creature has multiattack. Room F needs a NEW capability, engine
+authored split-target multiattack volleys, and the model must select a
+complete engine-authored volley id rather than allocate attacks in
+prose. None of these six is a product of existing seed flags; all need
+authored snapshots with exact HP and initiative.
+
+THE FEASIBILITY CHECK Astra required before any nomination: a
+mechanically verified WITNESS, with no judge involvement. Freeze room
+and information boundary; capture the exact offers, dominance filtering
+and actual default; prove the alternative is not merely selectable but
+EXECUTABLE through the same acceptance and correction path the
+experiment uses; compare consequences with live engine execution rather
+than an imitation; follow through the threatened opponent turn and the
+claimed allied follow-up against credible replies rather than a
+cooperative opponent; and preregister materiality before searching
+seeds. A single valid witness proves a better line exists; failure
+proves only "not found under this search".
+
+THE TRAP, stated by Astra and accepted: hand-built rooms targeting known
+defects demonstrate that this recommendation policy is exploitable on
+deliberately selected cases, and if a model picks the certified
+alternative, that it recognizes those cases. They do NOT establish that
+models beat engine-top on ordinary rooms, that these failures are
+common, that panel points predict encounter success, that the model
+beats a REPAIRED heuristic, or that the earlier null was wrong. Verdict:
+worth doing as a diagnostic challenge set, kept separate from the
+ordinary room distribution, reported by flaw family, and with a simple
+repaired heuristic as a comparator. Otherwise success may only mean the
+model noticed a bug we deliberately placed in front of it.
