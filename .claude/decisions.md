@@ -16563,3 +16563,29 @@ Two operational facts recorded while investigating:
   deadlock. Amended: lanes never run the full gate or wrap runners in
   an outer flock; they run the cumulative contract suite with vitest
   and single Playwright specs through the wrapper config.
+
+## Codex-AIDM sessions archived: 21 GiB to 4.3 GiB, every day's entry count verified before removal (2026-09-08 09:56)
+
+Owner: "Codex-AIDM sessions: 21 GiB, can you clean up and/or compress
+and deduplicate these". Done via .tmp/runs/archive-aidm-sessions.sh
+(log .tmp/runs/archive-aidm-sessions.log), 09:34 to 09:55. Per day,
+tar | zstd -19 -T4 --long=31, then zstd -t, then the archive's .jsonl
+entry count compared to the on-disk count, and only then rm -rf. All
+nine days matched. Today's directory (two probe rollouts) kept live.
+
+| day | files | on disk | archive |
+| 08-30..09-04 | 3,597 | 1.52 GiB | 114 MiB |
+| 09-05 | 3,439 | 11.2 GiB | 3.30 GiB |
+| 09-06 | 5,573 | 7.07 GiB | 889 MiB |
+| 09-07 | 828 | 170 MiB | 10 MiB |
+
+~/.codex-aidm/sessions is now 132 KiB, sessions-archive 4.3 GiB, disk
+used fell from 630 G to 615 G. Dedup: the image-heavy days compress to
+29% and 12%; the extra long-window pass bought about 3%, because most
+board PNG blobs are distinct (1,376 unique of the blobs in a 300-file
+sample). A content-addressed blob store would get further but means
+rewriting the rollouts into a private format; not done, not asked.
+Archived sessions cannot be resumed by codex, which does not matter
+for arena conversations (and the arena now uses throwaway homes under
+/tmp anyway). ~/.codex/sessions (7.4 GiB, lane and judge sessions)
+was outside the request and is untouched.
