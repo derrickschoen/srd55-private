@@ -87,6 +87,8 @@ export function createSpellPicker(options: {
   let acceptedValue = options.value;
 
   const close = (restore: boolean): void => {
+    window.clearTimeout(debounce);
+    debounce = undefined;
     list.hidden = true;
     input.setAttribute('aria-expanded', 'false');
     input.removeAttribute('aria-activedescendant');

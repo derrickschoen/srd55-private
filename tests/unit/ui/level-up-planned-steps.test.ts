@@ -377,6 +377,45 @@ const pickerFactory: SpellPickerFactory = (options) => {
 };
 
 describe('shared eligible spell picker provenance', () => {
+  it('keeps a selected picker closed when its pending input debounce expires', async () => {
+    const search = vi.fn(async () => [eligible]);
+    const picker = createSpellPicker({
+      addressKey: 'debounced-selection',
+      label: 'Debounced spell choice',
+      contextDescriptionId: null,
+      value: null,
+      valueCatalogLayer: null,
+      freeTextValue: false,
+      invalid: false,
+      disabled: false,
+      search,
+      onSelect: () => undefined,
+    });
+    document.body.append(picker.element);
+    const view = interactiveElement(picker.element);
+    const input = view.querySelector('.spell-picker-input');
+    const list = view.querySelector('.spell-options');
+    if (input === null || list === null) {
+      throw new Error('Spell picker did not render its input and options list.');
+    }
+
+    picker.focus();
+    input.dispatchEvent(new Event('input'));
+    await settle();
+    const option = view.querySelector('[role="option"]');
+    if (option === null) throw new Error('Spell search did not render an option.');
+    option.dispatchEvent(new Event('mousedown', { cancelable: true }));
+    expect(list.hidden).toBe(true);
+
+    await new Promise<void>((resolve) => {
+      globalThis.setTimeout(resolve, 160);
+    });
+    expect(search).toHaveBeenCalledTimes(1);
+    expect(list.hidden).toBe(true);
+    expect(input.getAttribute('aria-expanded')).toBe('false');
+    picker.destroy();
+  });
+
   it('keeps a hostile persistent selected value inert with its exact layer', () => {
     const hostile = '</input><img data-ha10-selected-spell src=x>';
     const picker = createSpellPicker({
