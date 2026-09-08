@@ -1146,7 +1146,7 @@ function firstActivationChoice(slot: EngineActivationChoiceSlot | null | undefin
     case 'command_word':
       return { kind: slot.kind, value: slot.values[0] };
     case 'unicorns_blessing_spell':
-      return { kind: slot.kind, value: slot.values[0], condition: null };
+      return { kind: slot.kind, value: slot.values[0] };
     case 'dispel_evil_and_good_mode':
       return { kind: slot.kind, value: slot.values[0] };
     case 'calm_emotions_per_target':

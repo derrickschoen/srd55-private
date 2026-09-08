@@ -54,6 +54,7 @@ import {
   engineOptionId,
   engineSpellId,
   LESSER_RESTORATION_CONDITIONS,
+  UNICORNS_BLESSING_SPELLS,
   type EngineActionSlotUse,
   type EngineActivationChoiceSlot,
   type EngineBonusActionUse,
@@ -69,10 +70,6 @@ const HOLD: EngineMovementObjective = {
   preference: { willingness: 'none', maximumFeet: 0, opportunityRisk: 'avoid' },
   engagement: { stance: 'hold_position' },
 };
-
-function isLesserRestorationCondition(value: string): value is LesserRestorationCondition {
-  return LESSER_RESTORATION_CONDITIONS.some((candidate) => candidate === value);
-}
 
 function target(combatantId: CombatantId) {
   return { kind: 'combatant' as const, combatantId };
@@ -92,6 +89,18 @@ function livingAllies(state: EncounterState, actorId: CombatantId): readonly Com
       combatantsAreAllies(state, actorId, candidate.profile.id))
     .map((candidate) => candidate.profile.id)
     .sort((left, right) => left.localeCompare(right));
+}
+
+function offeredRemovableConditions(
+  state: EncounterState,
+  targetId: CombatantId,
+  spellId: string,
+): readonly LesserRestorationCondition[] {
+  const operation = spellDefinition(spellId)?.operation;
+  if (operation?.kind !== 'remove_condition') return [];
+  const present = new Set(combatantConditions(state, targetId).map((condition) => condition.name));
+  return operation.conditions.filter((condition) =>
+    LESSER_RESTORATION_CONDITIONS.some((candidate) => candidate === condition) && present.has(condition));
 }
 
 interface SpellUseSelection {
@@ -544,24 +553,26 @@ function bonusUses(state: EncounterState, actorId: CombatantId): readonly BonusU
           !action.spells.every((spell) => spell.manifestStatus === 'implemented')) return [];
         const ally = livingAllies(state, actorId).find((candidate) => candidate !== actorId);
         if (ally === undefined) return [];
-        const removableConditions = combatantConditions(state, ally)
-          .map((condition) => condition.name)
-          .filter(isLesserRestorationCondition);
-        return [{
-          label: `${action.name} (${String(remaining)}/${String(action.uses)})`,
+        const removableConditions = offeredRemovableConditions(state, ally, 'lesser-restoration');
+        const resourceCostLabels = [`${String(monsterSpellResourcePoolId(action.id, action.spells[0] as (typeof action.spells)[number]))}:${String(remaining)}/${String(action.uses)}`];
+        if (removableConditions.length === 0) return [{
+          label: `${action.name}/Cure Wounds (${String(remaining)}/${String(action.uses)})`,
           use: {
             kind: 'cast_spell', sourceActionId: engineActionId(action.id),
             spellId: engineSpellId('cure-wounds'), targets: [target(ally)], area: null,
           },
-          resourceCostLabels: [`${String(monsterSpellResourcePoolId(action.id, action.spells[0] as (typeof action.spells)[number]))}:${String(remaining)}/${String(action.uses)}`],
-          activationChoice: {
-            kind: 'unicorns_blessing_spell',
-            values: removableConditions.length === 0
-              ? ['cure-wounds']
-              : ['cure-wounds', 'lesser-restoration'],
-            conditionValues: removableConditions,
-          },
+          resourceCostLabels,
         }];
+        return removableConditions.map((condition): BonusUseOption => ({
+          label: `${action.name} [Lesser Restoration condition: ${condition}] (${String(remaining)}/${String(action.uses)})`,
+          use: {
+            kind: 'cast_spell', sourceActionId: engineActionId(action.id),
+            spellId: engineSpellId('cure-wounds'), targets: [target(ally)], area: null,
+            selectedCondition: condition,
+          },
+          resourceCostLabels,
+          activationChoice: { kind: 'unicorns_blessing_spell', values: UNICORNS_BLESSING_SPELLS },
+        }));
       }
       case 'teleport':
       case 'healing':

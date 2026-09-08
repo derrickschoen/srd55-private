@@ -315,8 +315,9 @@ function monsterSpellCommand(
     selectedOption: use.activationChoice?.kind === 'command_word' ||
       use.activationChoice?.kind === 'dispel_evil_and_good_mode'
       ? use.activationChoice.value
-      : use.activationChoice?.kind === 'unicorns_blessing_spell'
-        ? use.activationChoice.condition
+      : use.activationChoice?.kind === 'unicorns_blessing_spell' &&
+          use.activationChoice.value === 'lesser-restoration'
+        ? use.selectedCondition ?? null
         : null,
     ...(use.activationChoice?.kind === 'calm_emotions_per_target'
       ? { calmEmotionsModes: use.activationChoice.selections.map((entry) => ({ target: entry.targetId, mode: entry.mode })) }

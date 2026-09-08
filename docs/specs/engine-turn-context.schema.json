@@ -1661,25 +1661,22 @@
                   "const": "unicorns_blessing_spell"
                 },
                 "values": {
-                  "minItems": 1,
-                  "maxItems": 2,
                   "type": "array",
-                  "items": {
-                    "$ref": "#/$defs/__schema1"
-                  }
-                },
-                "conditions": {
-                  "maxItems": 4,
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/$defs/__schema1"
-                  }
+                  "prefixItems": [
+                    {
+                      "type": "string",
+                      "const": "cure-wounds"
+                    },
+                    {
+                      "type": "string",
+                      "const": "lesser-restoration"
+                    }
+                  ]
                 }
               },
               "required": [
                 "kind",
-                "values",
-                "conditions"
+                "values"
               ],
               "additionalProperties": false
             },
@@ -3851,10 +3848,11 @@
                   "const": "unicorns_blessing_spell"
                 },
                 "value": {
-                  "$ref": "#/$defs/__schema1"
-                },
-                "condition": {
-                  "type": "string"
+                  "type": "string",
+                  "enum": [
+                    "cure-wounds",
+                    "lesser-restoration"
+                  ]
                 }
               },
               "required": [

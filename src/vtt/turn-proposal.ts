@@ -76,11 +76,7 @@ export type CalmEmotionsMode = (typeof CALM_EMOTIONS_MODES)[number];
 
 export type EngineActivationChoiceSlot =
   | { readonly kind: 'command_word'; readonly values: typeof COMMAND_WORDS }
-  | {
-      readonly kind: 'unicorns_blessing_spell';
-      readonly values: readonly ['cure-wounds'] | typeof UNICORNS_BLESSING_SPELLS;
-      readonly conditionValues: readonly LesserRestorationCondition[];
-    }
+  | { readonly kind: 'unicorns_blessing_spell'; readonly values: typeof UNICORNS_BLESSING_SPELLS }
   | { readonly kind: 'dispel_evil_and_good_mode'; readonly values: typeof DISPEL_EVIL_AND_GOOD_MODES }
   | {
       readonly kind: 'calm_emotions_per_target';
@@ -90,11 +86,7 @@ export type EngineActivationChoiceSlot =
 
 export type EngineActivationChoice =
   | { readonly kind: 'command_word'; readonly value: CommandWord }
-  | {
-      readonly kind: 'unicorns_blessing_spell';
-      readonly value: UnicornsBlessingSpell;
-      readonly condition: LesserRestorationCondition | null;
-    }
+  | { readonly kind: 'unicorns_blessing_spell'; readonly value: UnicornsBlessingSpell }
   | { readonly kind: 'dispel_evil_and_good_mode'; readonly value: DispelEvilAndGoodMode }
   | {
       readonly kind: 'calm_emotions_per_target';
@@ -165,6 +157,8 @@ export type EngineBonusActionUse =
       readonly sourceActionId: EngineActionId;
       readonly spellId: EngineSpellId;
       readonly targets: readonly EngineTargetSelector[];
+      /** Engine-bound condition encoded by a revision-bound offered option. */
+      readonly selectedCondition?: LesserRestorationCondition;
       /** Exact engine-owned placement; null for spells without a placed area. */
       readonly area: AreaTemplate | null;
     }
@@ -207,6 +201,8 @@ export interface ResolvedActionSlotUse {
   readonly targetIds: readonly CombatantId[];
   readonly objectId: WorldObjectId | null;
   readonly omittedRiders: readonly EngineOmittedRider[];
+  /** Engine-bound condition encoded by a revision-bound offered option. */
+  readonly selectedCondition?: LesserRestorationCondition;
   readonly activationChoice?: EngineActivationChoice;
   readonly multiattackComponent?: true;
   /** Present only for a placed-area spell. */

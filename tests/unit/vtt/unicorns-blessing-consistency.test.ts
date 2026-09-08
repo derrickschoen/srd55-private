@@ -211,10 +211,10 @@ describe('Unicorn’s Blessing offer/acceptance/execution consistency', () => {
   );
 
   it('executes Cure Wounds from the bonus source after a main Spellcasting cast', () => {
-    executeCureWounds(fixture(false));
+    executeCureWounds(fixture(true));
   });
 
-  it('executes Lesser Restoration with the offered removable condition selection', () => {
+  it('accepts the legacy Lesser Restoration choice and executes its engine-offered condition', () => {
     const state = fixture(true);
     const runtime = createEngineMcpRuntime(state, {
       requestedActorIds: [UNICORN_ID],
@@ -237,33 +237,11 @@ describe('Unicorn’s Blessing offer/acceptance/execution consistency', () => {
     expect(primary.activationChoice).toMatchObject({
       kind: 'unicorns_blessing_spell',
       values: ['cure-wounds', 'lesser-restoration'],
-      conditionValues: ['Poisoned'],
     });
-    expect(JSON.stringify(context)).toContain('"conditions":["Poisoned"]');
-    const invalid = runtime.toolSurface.execute('engine.submit_round_proposals', {
-      state_ref: typeof context === 'object' && context !== null && 'state_ref' in context
-        ? context.state_ref
-        : null,
-      request_id: capsule.request?.requestId,
-      phase: 'initial',
-      idempotency_key: 'unicorn-restoration-invalid-condition-0001',
-      proposals: [{
-        actor_id: UNICORN_ID,
-        expected_revision: capsule.revision,
-        primary_option_id: primary.optionId,
-        fallback_option_id: fallback.optionId,
-        reason: 'Exercise rejection of a condition absent from the offer.',
-        override_justification: { kind: 'objective' },
-        activation_choice: {
-          kind: 'unicorns_blessing_spell', value: 'lesser-restoration', condition: 'Frightened',
-        },
-      }],
-    });
-    expect(invalid).toMatchObject({
-      status: 'rejected',
-      actor_refusals: [{ codes: ['ACTIVATION_CHOICE_INVALID'] }],
-    });
-    expect(runtime.proposals).toHaveLength(0);
+    expect(primary.label).toContain('Lesser Restoration condition: Poisoned');
+    expect(JSON.stringify(context)).toContain('Lesser Restoration condition: Poisoned');
+    expect(JSON.stringify(context)).not.toContain('"conditions"');
+    expect(actor?.options.some((option) => option.label.includes('condition: Frightened'))).toBe(false);
     const result = runtime.toolSurface.execute('engine.submit_round_proposals', {
       state_ref: typeof context === 'object' && context !== null && 'state_ref' in context
         ? context.state_ref
@@ -278,9 +256,7 @@ describe('Unicorn’s Blessing offer/acceptance/execution consistency', () => {
         fallback_option_id: fallback.optionId,
         reason: 'Conceal the group while curing the poisoned ally.',
         override_justification: { kind: 'objective' },
-        activation_choice: {
-          kind: 'unicorns_blessing_spell', value: 'lesser-restoration', condition: 'Poisoned',
-        },
+        activation_choice: { kind: 'unicorns_blessing_spell', value: 'lesser-restoration' },
       }],
     });
     if (typeof result !== 'object' || result === null || !('status' in result) || result.status !== 'proposed') {
@@ -290,6 +266,12 @@ describe('Unicorn’s Blessing offer/acceptance/execution consistency', () => {
     if (envelope?.kind !== 'round_turn_proposal') throw new Error('Accepted Unicorn round envelope is absent.');
     const accepted = envelope.resolutions[0];
     if (accepted === undefined) throw new Error('Accepted Unicorn resolution is absent.');
+    expect(accepted.mechanics.actionSlots.find((slot) => slot.slot === 'bonus')).toMatchObject({
+      actionId: 'unicorns-blessing',
+      spellId: 'lesser-restoration',
+      selectedCondition: 'Poisoned',
+      activationChoice: { kind: 'unicorns_blessing_spell', value: 'lesser-restoration' },
+    });
     const session = new EngineRoundSession(state, mulberry32(6_208_011), {
       kind: 'unattended', askDefault: 'decline',
     });
@@ -305,13 +287,14 @@ describe('Unicorn’s Blessing offer/acceptance/execution consistency', () => {
       revision: 1,
     });
     const actor = runtime.feed.current().projection.combatants.find((entry) => entry.id === UNICORN_ID);
-    const blessingChoices = actor?.options.flatMap((option) =>
-      option.activationChoice?.kind === 'unicorns_blessing_spell'
-        ? [option.activationChoice]
-        : []) ?? [];
-    expect(blessingChoices.length).toBeGreaterThan(0);
-    expect(blessingChoices.every((choice) =>
-      !choice.values.some((value) => value === 'lesser-restoration') &&
-      choice.conditionValues.length === 0)).toBe(true);
+    const blessingOptions = actor?.options.filter((option) => option.actionSlots.some((slot) =>
+      slot.slot === 'bonus' && slot.use.kind === 'cast_spell' &&
+      slot.use.sourceActionId === 'unicorns-blessing')) ?? [];
+    expect(blessingOptions.length).toBeGreaterThan(0);
+    expect(blessingOptions.every((option) =>
+      option.activationChoice?.kind !== 'unicorns_blessing_spell')).toBe(true);
+    expect(blessingOptions.every((option) => option.actionSlots.some((slot) =>
+      slot.slot === 'bonus' && slot.use.kind === 'cast_spell' && slot.use.spellId === 'cure-wounds'))).toBe(true);
+    expect(blessingOptions.every((option) => !option.label.includes('Lesser Restoration'))).toBe(true);
   });
 });

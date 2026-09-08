@@ -481,6 +481,9 @@ function resolvedUses(
         targetIds: targets,
         objectId: null,
         omittedRiders: omittedRiders.filter((rider) => rider.sourceActionId === use.sourceActionId),
+        ...(!('selectedCondition' in use) || use.selectedCondition === undefined
+          ? {}
+          : { selectedCondition: use.selectedCondition }),
         ...(use.area === null ? {} : { area: use.area }),
       }); break;
       case 'use_world_object': resolved.push({ slot: slot.slot, kind: use.kind, actionId: use.actionId, spellId: null, targetIds: [], objectId: use.objectId, omittedRiders: [] }); break;
@@ -553,11 +556,7 @@ function choiceFitsOption(
     case 'command_word':
       return choice.kind === 'command_word' && slot.values.some((value) => value === choice.value);
     case 'unicorns_blessing_spell':
-      return choice.kind === 'unicorns_blessing_spell' &&
-        slot.values.some((value) => value === choice.value) &&
-        (choice.value === 'cure-wounds'
-          ? choice.condition === null
-          : choice.condition !== null && slot.conditionValues.some((value) => value === choice.condition));
+      return choice.kind === 'unicorns_blessing_spell' && slot.values.some((value) => value === choice.value);
     case 'dispel_evil_and_good_mode':
       return choice.kind === 'dispel_evil_and_good_mode' && slot.values.some((value) => value === choice.value);
     case 'calm_emotions_per_target': {

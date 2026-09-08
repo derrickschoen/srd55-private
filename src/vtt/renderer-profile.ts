@@ -917,10 +917,8 @@ function optionFacts(option: MutableRecord): readonly string[] {
   if (activationChoice !== null) {
     const values = listed(activationChoice['values']);
     const targets = array(activationChoice['target_ids']);
-    const conditions = listed(activationChoice['conditions']);
     facts.push(`Choose ${words(String(activationChoice['kind']))} at activation from ${values}${
-      targets.length === 0 ? '' : ` for each target ${targets.join(', ')}`}${
-      conditions === 'none' ? '' : `; Lesser Restoration condition from ${conditions}`}`);
+      targets.length === 0 ? '' : ` for each target ${targets.join(', ')}`}`);
   }
   for (const riderValue of array(option['omitted_riders'])) {
     const rider = record(riderValue);

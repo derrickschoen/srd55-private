@@ -12,7 +12,7 @@ import type { SpellCastCommand } from '../../../src/combat/spells/types';
 import { UNICORN } from '../../../src/combat/statblocks/monsters';
 import { monsterSpellResourcePoolId } from '../../../src/combat/statblock';
 import { feetPoint } from '../../../src/combat/templates';
-import { damageType, dieSides, feet } from '../../../src/combat/values';
+import { damageType, dieSides, effectStackingIdentity, feet } from '../../../src/combat/values';
 import { engineSchemaInternals } from '../../../src/vtt/mcp/schemas';
 import { freshMonsterPlanningState } from '../../../src/vtt/monster-planning-state';
 import { projectHumanEngineOptions } from '../../../src/vtt/encounter-board-projection';
@@ -21,7 +21,7 @@ import { reconcileStableRenderedChildren } from '../../../src/vtt/stable-dom-ren
 import { engineActorOptions } from '../../../src/vtt/turn-option-registry';
 import type { EngineActivationChoice } from '../../../src/vtt/turn-proposal';
 import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
-import { installInteractiveDocument, interactiveElement } from '../../fixtures/interactive-dom';
+import { elementText, installInteractiveDocument, interactiveElement } from '../../fixtures/interactive-dom';
 
 type OutsideCommandWordIsAccepted = {
   readonly kind: 'command_word';
@@ -152,6 +152,20 @@ describe('D466 B4 spell payloads', () => {
       reason: 'Exercise the invalid command-word choice.', override_justification: null,
       activation_choice: { kind: 'command_word', value: 'dance' },
     }).success).toBe(false);
+    expect(engineSchemaInternals.turnProposal.safeParse({
+      actor_id: 'combatant:unicorn', expected_revision: 1,
+      primary_option_id: 'option:blessing', fallback_option_id: null,
+      reason: 'Exercise the legacy closed Unicorn choice.', override_justification: null,
+      activation_choice: { kind: 'unicorns_blessing_spell', value: 'lesser-restoration' },
+    }).success).toBe(true);
+    expect(engineSchemaInternals.turnProposal.safeParse({
+      actor_id: 'combatant:unicorn', expected_revision: 1,
+      primary_option_id: 'option:blessing', fallback_option_id: null,
+      reason: 'Reject fields outside the legacy protocol.', override_justification: null,
+      activation_choice: {
+        kind: 'unicorns_blessing_spell', value: 'lesser-restoration', condition: 'Poisoned',
+      },
+    }).success).toBe(false);
   });
 
   it('unicorn_blessing_separate_pools: both choices decrement the same three-use pool', () => {
@@ -203,14 +217,15 @@ describe('D466 B4 spell payloads', () => {
       bounds: { columns: 30, rows: 12 }, combatants: [unicorn, ally],
       tokens: [placedToken(unicorn, 0, 2), placedToken(ally, 3, 2)],
     }));
-    const blessingOptions = engineActorOptions(state, unicorn.id).offerable
-      .filter((option) => option.activationChoice?.kind === 'unicorns_blessing_spell');
+    const blessingOptions = engineActorOptions(state, unicorn.id).offerable.filter((option) =>
+      option.actionSlots.some((slot) => slot.slot === 'bonus' && slot.use.kind === 'cast_spell' &&
+        slot.use.sourceActionId === 'unicorns-blessing'));
     expect(blessingOptions.length).toBeGreaterThan(0);
-    expect(blessingOptions.every((option) => option.activationChoice?.kind === 'unicorns_blessing_spell' &&
-      option.activationChoice.values.join('|') === 'cure-wounds' &&
-      option.activationChoice.conditionValues.length === 0)).toBe(true);
-    expect(blessingOptions.some((option) => option.label.includes('cure-wounds') ||
-      option.label.includes('lesser-restoration'))).toBe(false);
+    expect(blessingOptions.every((option) =>
+      option.activationChoice?.kind !== 'unicorns_blessing_spell')).toBe(true);
+    expect(blessingOptions.every((option) => option.actionSlots.some((slot) =>
+      slot.slot === 'bonus' && slot.use.kind === 'cast_spell' && slot.use.spellId === 'cure-wounds'))).toBe(true);
+    expect(blessingOptions.some((option) => option.label.includes('Lesser Restoration'))).toBe(false);
   });
 
   it('choice_values_expand_into_options: the human activation prompt keeps one engine option', () => {
@@ -220,10 +235,17 @@ describe('D466 B4 spell payloads', () => {
         combatantId: 'combatant:ui-unicorn', tokenId: 'token:ui-unicorn',
       });
       const ally = monsterProfile('ui-ally', { initiativeBonus: -100 });
-      const state = freshMonsterPlanningState(createEncounter({
-        bounds: { columns: 30, rows: 12 }, combatants: [unicorn, ally],
-        tokens: [placedToken(unicorn, 0, 2), placedToken(ally, 2, 2)],
-      }));
+      let state = started([unicorn, ally], [0, 3]);
+      state = reduceEncounter(state, {
+        type: 'apply_effect', actor: unicorn.id, cost: 'none',
+        effect: {
+          targets: [ally.id], duration: { kind: 'permanent' }, concentration: false,
+          stackingIdentity: effectStackingIdentity('test:ui-unicorn-poisoned'),
+          stacking: 'replace_any_source', repeatedSave: null,
+          payload: { kind: 'condition', condition: 'Poisoned' },
+        },
+      }, () => 0.5).state;
+      state = freshMonsterPlanningState(state);
       const projected = projectHumanEngineOptions(state, [unicorn.id]);
       const optionCount = projected[0]?.options.filter((entry) =>
         entry.availability === 'offerable' && entry.option.activationChoice?.kind === 'unicorns_blessing_spell').length;
@@ -231,9 +253,10 @@ describe('D466 B4 spell payloads', () => {
       const controls = interactiveElement(catalog).querySelectorAll('select').filter((control) =>
         control.dataset['choiceKind'] === 'unicorns_blessing_spell');
       expect(optionCount).toBeGreaterThan(0);
+      expect(elementText(catalog)).toContain('Lesser Restoration condition: Poisoned');
       expect(controls).toHaveLength(optionCount ?? 0);
       expect(controls[0]?.children.map((entry) => entry.value)).toEqual([
-        '', 'cure-wounds',
+        '', 'cure-wounds', 'lesser-restoration',
       ]);
 
       const live = document.createElement('main');
