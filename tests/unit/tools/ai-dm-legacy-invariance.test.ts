@@ -1,7 +1,5 @@
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { readFileSync, realpathSync } from 'node:fs';
-import { readFile, readdir } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -26,7 +24,14 @@ import {
 import type { BoardImageArtifact, BoardSnapshotCapture } from '../../../tools/ai-dm-board-snapshot';
 import { DEFAULT_RENDERER_PROFILE } from '../../../src/vtt/renderer-profile';
 import { declareTestInputs } from '../../helpers/test-inputs';
-import { mkdirSync, mkdtempSync, writeFileSync } from '../../helpers/test-filesystem';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  writeFileSync,
+} from '../../helpers/test-filesystem';
+import { readFile, readdir } from '../../helpers/test-filesystem-promises';
 
 const legacyFixturePath = 'tests/fixtures/ai-dm-legacy/implicit-advice-v1.json' as const;
 const runnerOraclePath = 'tests/fixtures/ai-dm-legacy/runner-oracle-main.json' as const;
