@@ -15581,3 +15581,63 @@ STILL OPEN, and dispatched as lane los-cover-justify (session
    whether the D365 rooms' tactical character changed.
 The brief explicitly forbids wrapping anything in flock, so the deadlock
 I caused cannot recur.
+
+## D576.3 classification delivered; a weakened assertion self-reported and repaired (8438c99b) (2026-09-07 22:25)
+
+Lane los-cover-justify, session 01a07eba-1097-7aa1-a86a-4086ba11c4cf,
+classified all nine gate failures. Summary, with the split that matters:
+
+GENUINE ERA CONSEQUENCES (5): the D365 cover-cell assertion; both
+controllers-mutation cover expectations; dm-tactical-intel, where the
+R02 Scout-to-Fighter fan is [total,total,none,none] so cover goes none
+to half and exact expected value 5 to 3.7 while the coarse hit
+probability is unchanged; last-seen, where a one-cell object carrying
+lineOfSight true but cover none can no longer block sight because the
+canonical trace does not read that raw flag and one cell cannot block
+all four corner rays, so the fixture became a full-height total-cover
+wall; and vane-warren, where two probe cells moved and Half Cover was
+retained.
+
+IMPLEMENTATION DEFECTS (4): the RangeError, where a Large candidate's
+anchor stayed on the grid while another footprint cell left it, now
+rejected before hazard evaluation; forms.test.ts, where ending Polymorph
+restored the profile but left the token at Large placement size and
+visibility reconciliation threw placement_size_mismatch, now fixed by
+adding polymorph to the size recompute; and three PERFORMANCE failures
+in ai-dm-arena, ai-dm-conversation and js-round-plan-integration, where
+unchanged tests crossed their five-second walls (5.258 s, 5.652 s,
+5.018 s, and one 110-second trimmer case) purely because the corner rule
+costs more, addressed by caching terrain indexes and traces, bounding
+candidate scanning, memoizing knowledge-base loads and removing a
+redundant full-state clone. No timeout was raised, which is the correct
+outcome under the standing rule.
+
+SELF-REPORTED VIOLATION, and the reason this lane was worth running: the
+earlier repair had ALSO weakened the D365 policy assertion from
+"tier === placement.tier" to "tier !== none" without any independent
+invariant. Nobody flagged it; the lane volunteered it. The equality was
+genuinely no longer correct, because a three-quarters feature crossed by
+only two of four rays aggregates to Half, but "not none" is far too weak
+a replacement. The repair pins, for all eight placements, the chosen
+source corner, all four ray tiers, the crossed cells, the aggregate tier
+and the live sight result, plus the original cell's all-clear fan
+wherever one was relocated.
+
+D365 relocation VERDICT: justified and retained. With blocked cells
+excluded, each original cell now produces four clear rays and no cover,
+while each replacement produces a genuinely obstructed fan. Runtime
+tactical character is unchanged: monster positions, blocked cells, cover
+object positions and tiers, movement and legal actions are identical.
+Only the authored annotation naming which cells demonstrate the cover
+moved.
+
+Supervisor verified: sg scan clean, tsc exit 0, policy spec 21/21.
+Supervisor mutant M-SUP-D365-REVERT-SHELTER restored one relocated cell
+to its pre-corner-rule position: killed by 2 tests including the new
+invariant, restored to 8267d92f...
+
+REMAINING WEAKNESS, recorded not hidden: the lane notes that
+vane-warren's test carries its hand derivation in prose but does NOT
+assert the complete fan vector, so it is less robust than the D365
+invariant. That is a known soft spot to close before the next geometry
+change.
