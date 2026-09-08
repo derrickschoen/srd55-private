@@ -15925,3 +15925,44 @@ survival, which is the discipline that makes a surviving mutant
 meaningful.
 
 Gate relaunched on the full branch with port 4500 confirmed free.
+
+## D576 increments 2 and 3 cause a REAL browser regression, proved by differential run (2026-09-08 04:55)
+
+Gate on the branch: tsc clean, sg clean, locked vitest exit 0 with no
+failures, browser suite 185 passed and 1 FAILED in 51.9 minutes.
+
+Failing spec: tests/browser/acceptance-walkthrough.spec.ts:82, the
+guided level-1 character journey. Failure is
+`locator.click: Test timeout of 180000ms exceeded` on option.click() in
+selectLevelUpSpell, with "element is not visible" repeated. The
+preceding toBeVisible assertion passes, so the option satisfies the
+visibility check but is not ACTIONABLE, which usually means covered,
+zero hit area, or displaced by layout.
+
+I did NOT accept the easy reading. The same file was a load flake in an
+earlier run, so the standing rule sent it to a serial rerun:
+  alone, workers=1, retries=0, idle machine, on the BRANCH: FAILS again.
+  same command, same machine, on MAIN: PASSES in 16.9 seconds.
+That differential is decisive. It is not a flake and it is not
+pre-existing: this branch causes it.
+
+Likely mechanism, to be confirmed by the lane rather than assumed:
+increment 3 replaced .encounter-mechanical-blocked with
+.encounter-mechanical-terrain plus [data-terrain-kind] variants, and two
+of those variants add rem-sized borders (border-bottom 1.5rem for half
+cover, border 0.35rem for three-quarters). A rem border on a cell
+element changes layout boxes and overflow, which can displace or overlay
+unrelated UI. The spell picker is character-sheet UI, not board UI, so
+the mechanism is most likely an over-broad selector, a layout shift or a
+stacking change rather than anything about cover itself.
+
+Lane los-cover-i3reg dispatched (session
+01a0803a-1ab9-79f1-a54a-68ae2317adf6) with all of that evidence, and
+with the shortcuts closed: it may not weaken the test, raise its
+timeout, add a wait, or mark it flaky, because the D544 timeout
+allowance covers named flaky tests and this is provably not one. It must
+also keep every increment 3 visual invariant intact and STOP rather than
+trade one requirement against another.
+
+This is the second time the full browser suite caught something the unit
+suite could not, and it is the reason the landing rule requires it.
