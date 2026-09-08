@@ -16120,3 +16120,49 @@ worked examples computed by the production trace, and an explicit proof
 that creature_facts, legal_movement, the player projection and the
 semantic board acquire NO pairwise tactical answer, since that property
 is what keeps the blind arm blind.
+
+## D576 increment 4 harvested (725009c9): blind branch integrated with the new board (2026-09-08 07:40)
+
+Lane blind-dm-i4d576, session 01a0809b-a79c-7173-b69f-9c6ad7269084.
+Supervisor verified with real exit codes: tsc exit 0 with zero errors
+(was exit 1 with 5), sg scan exit 0 (was exit 1), the lane's four spec
+groups green, contracts.ts unchanged, ZERO tests removed, no git writes
+and no claude invocation.
+
+Integration repaired properly rather than papered over: the blind
+semantic board was ported to the v2 payload, the glyph presence contract
+gained its terrain field at all three call sites, the unsafe result cast
+was removed, and the raw node:fs import moved to the repository's test
+helper.
+
+The guide now describes the D576 board, including how a reader tells
+wall from three-quarters from half BY SHAPE, which is the property that
+matters because the compact capture modes strip text entirely. Five
+terrain markers were added, so the renderer-key coverage test still
+binds every marker to a real legend export, and the worked examples are
+computed by the production trace rather than asserted by hand. Pins
+moved with invariants stated: guide and provenance against exact legend
+exports plus three recomputed traces, bundle hash against a recomputed
+component join with byte-identical blind and advice startup bundles at
+30,544 bytes.
+
+BOUNDARY EVIDENCE, AND ITS LIMIT, stated because overclaiming here would
+be worse than the gap itself. I injected a cover tier for every ordered
+creature pair into the blind semantic board. The payload's STRICT schema
+rejected it with a ZodError, so an additive pairwise leak cannot ship.
+That is a real defence and it is verified. But the throw happens at
+module load, so the boundary test never ran, which means I have verified
+the SCHEMA blocks a new key and have NOT verified that the walker would
+catch a pairwise answer smuggled inside an already permitted field.
+Closing that gap needs a leak the schema tolerates, which I could not
+construct without redesigning the payload. Recorded as an open
+verification gap rather than a clean kill.
+
+A first mutant attempt referenced a binding before it existed and
+crashed the module with no tests run: VOID, recorded, not counted. That
+is the third void mutant this window, all three caught by checking
+whether the mutant actually reached the surface under test.
+
+Next per D581.2: increment 5, the probe question classes, then increment
+6, the probe runs, Sol high before Luna medium. The first D569 blind arm
+comes after this branch's validation.
