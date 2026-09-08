@@ -13,7 +13,7 @@ import {
 import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { chromium, type BrowserContext, type Page } from '@playwright/test';
+import { chromium, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { preview, type PreviewServer } from 'vite';
 import { canonicalJson } from '../src/commands/canonical-json';
 import type { ControllerIdentity } from '../src/combat/controllers';
@@ -578,7 +578,7 @@ export class BoardSnapshotService implements AsyncDisposable {
   readonly #server: PreviewServer;
   readonly #context: BrowserContext;
   readonly #page: Page;
-  readonly #profileDirectory: string;
+  readonly #profileDirectory: string | null;
   readonly #chromiumVersion: string;
   readonly #playwrightVersion: string;
   readonly #executableSha256: string;
@@ -598,7 +598,7 @@ export class BoardSnapshotService implements AsyncDisposable {
     readonly server: PreviewServer;
     readonly context: BrowserContext;
     readonly page: Page;
-    readonly profileDirectory: string;
+    readonly profileDirectory: string | null;
     readonly chromiumVersion: string;
     readonly playwrightVersion: string;
     readonly executableSha256: string;
@@ -621,10 +621,31 @@ export class BoardSnapshotService implements AsyncDisposable {
   }
 
   static async start(options: BoardSnapshotServiceOptions): Promise<BoardSnapshotService> {
+    return this.#start(options, null);
+  }
+
+  /**
+   * Starts a snapshot service inside a Playwright test's managed browser.
+   * The caller must have produced the production dist before invoking this entry point.
+   */
+  static async startInProcess(
+    options: BoardSnapshotServiceOptions,
+    browser: Browser,
+  ): Promise<BoardSnapshotService> {
+    if (browser.browserType().name() !== chromium.name()) {
+      throw new TypeError('Board snapshots require Playwright Chromium.');
+    }
+    return this.#start(options, browser);
+  }
+
+  static async #start(
+    options: BoardSnapshotServiceOptions,
+    managedBrowser: Browser | null,
+  ): Promise<BoardSnapshotService> {
     const startedAt = performance.now();
     const outputDirectory = validateOutputDirectory(options.outputDirectory);
     await mkdir(outputDirectory, { recursive: true });
-    await runDistBuildCache();
+    if (managedBrowser === null) await runDistBuildCache();
     const server = await preview({
       root: repositoryRoot,
       configLoader: 'runner',
@@ -635,18 +656,28 @@ export class BoardSnapshotService implements AsyncDisposable {
       await server.close();
       throw new Error('Vite preview selected forbidden port 4173.');
     }
-    const profileDirectory = await mkdtemp(join(tmpdir(), 'dnd-board-snapshot-profile-'));
+    const profileDirectory = managedBrowser === null
+      ? await mkdtemp(join(tmpdir(), 'dnd-board-snapshot-profile-'))
+      : null;
     let context: BrowserContext | null = null;
     try {
-      context = await chromium.launchPersistentContext(profileDirectory, {
-        headless: true,
+      const contextOptions = {
         locale: 'en-US',
         timezoneId: 'UTC',
         colorScheme: 'dark',
         reducedMotion: 'reduce',
         viewport: VIEWPORT,
         deviceScaleFactor: 1,
-      });
+      } as const;
+      if (managedBrowser === null) {
+        if (profileDirectory === null) throw new Error('Snapshot browser profile was not created.');
+        context = await chromium.launchPersistentContext(profileDirectory, {
+          headless: true,
+          ...contextOptions,
+        });
+      } else {
+        context = await managedBrowser.newContext(contextOptions);
+      }
       const page = context.pages()[0] ?? await context.newPage();
       const origin = `http://127.0.0.1:${String(port)}`;
       const boardGlyphs = options.boardGlyphs ?? null;
@@ -687,7 +718,9 @@ export class BoardSnapshotService implements AsyncDisposable {
     } catch (error: unknown) {
       if (context !== null) await context.close();
       await server.close();
-      await rm(profileDirectory, { recursive: true, force: true });
+      if (profileDirectory !== null) {
+        await rm(profileDirectory, { recursive: true, force: true });
+      }
       throw error;
     }
   }
@@ -716,10 +749,26 @@ export class BoardSnapshotService implements AsyncDisposable {
     return this.#capture(input, 1);
   }
 
+  async warm(input: BoardSnapshotCapture): Promise<void> {
+    const role = this.#captureRole(input);
+    await this.#prepareBoard(input, role, this.#captureOrdinal + 1, false);
+  }
+
+  async captureWarmed(
+    input: BoardSnapshotCapture,
+    visualOrdinal: number,
+  ): Promise<BoardImageArtifact> {
+    if (!Number.isSafeInteger(visualOrdinal) || visualOrdinal < 1) {
+      throw new RangeError('Warmed capture ordinal must be a positive safe integer.');
+    }
+    return this.#capture(input, visualOrdinal, true);
+  }
+
   async captureSynchronized(input: {
     readonly state: EncounterState;
     readonly source: BoardImageSource;
     readonly roles: readonly BoardSnapshotImageRole[];
+    readonly firstOrdinal?: number;
   }): Promise<readonly BoardImageArtifact[]> {
     if (this.#informationMode !== 'blind_state') {
       throw new TypeError('Synchronized role families require blind_state information mode.');
@@ -727,9 +776,17 @@ export class BoardSnapshotService implements AsyncDisposable {
     if (input.roles.length === 0 || new Set(input.roles).size !== input.roles.length) {
       throw new TypeError('A synchronized image family requires one or more unique roles.');
     }
+    const firstOrdinal = input.firstOrdinal ?? 1;
+    if (!Number.isSafeInteger(firstOrdinal) || firstOrdinal < 1 ||
+      !Number.isSafeInteger(firstOrdinal + input.roles.length - 1)) {
+      throw new RangeError('Synchronized image ordinals must be positive safe integers.');
+    }
     const artifacts: BoardImageArtifact[] = [];
     for (const [index, role] of input.roles.entries()) {
-      artifacts.push(await this.#capture({ state: input.state, source: input.source, role }, index + 1));
+      artifacts.push(await this.#capture(
+        { state: input.state, source: input.source, role },
+        firstOrdinal + index,
+      ));
     }
     if (artifacts.some((artifact) =>
       artifact.source.revision !== input.source.revision ||
@@ -762,78 +819,26 @@ export class BoardSnapshotService implements AsyncDisposable {
   async #capture(
     input: BoardSnapshotCapture,
     visualOrdinal: number,
+    warmed = false,
   ): Promise<BoardImageArtifact> {
-    if (this.#closed) throw new Error('Board snapshot service is closed.');
-    const role = input.role ?? 'dm_board';
-    if (this.#informationMode === 'advice' && role !== 'dm_board') {
-      throw new TypeError('Advice snapshots support only the legacy dm_board capture.');
-    }
-    if (this.#informationMode === 'blind_state') await this.#selectBlindRole(role);
-    validateSource(input.state, input.source);
+    const role = this.#captureRole(input);
     const captureStartedAt = performance.now();
     this.#captureOrdinal += 1;
     const captureOrdinal = this.#captureOrdinal;
-    const bundle = createBoardSnapshotSessionBundle(input.state, input.source, captureOrdinal);
-    const sessions = join(this.#outputDirectory, 'snapshot-sessions');
-    await mkdir(sessions, { recursive: true });
-    const bundlePath = join(sessions, `${input.source.stateDigest}-${String(captureOrdinal)}.vtt.json`);
-    try {
-      await writeFile(bundlePath, bundle.bytes, { flag: 'wx' });
-    } catch (error: unknown) {
-      if (!(error instanceof Error) || Reflect.get(error, 'code') !== 'EEXIST') throw error;
-      if (await readFile(bundlePath, 'utf8') !== bundle.bytes) {
-        throw new Error(`Snapshot session bundle ${basename(bundlePath)} has conflicting bytes.`);
+    let board: ReturnType<Page['locator']>;
+    if (warmed) {
+      if (this.#informationMode === 'blind_state' && this.#loadedRole !== role) {
+        throw new Error('Warmed snapshot role no longer matches the prepared page.');
       }
+      validateSource(input.state, input.source);
+      await this.#addCanary(captureOrdinal);
+      board = this.#boardLocator(role);
+      await this.#waitForBoardVisible(board, input.source, role);
+      await board.evaluate((element) => element.scrollIntoView({ block: 'start', inline: 'start' }));
+      await this.#waitForSettledBoard(board, input.source, role);
+    } else {
+      board = await this.#prepareBoard(input, role, captureOrdinal, true);
     }
-
-    const fileChooserPromise = this.#page.waitForEvent('filechooser');
-    await this.#page.locator('.dm-save-manager')
-      .getByRole('button', { name: 'Upload save file', exact: true }).click();
-    const fileChooser = await fileChooserPromise;
-    await fileChooser.setFiles(bundlePath);
-    const saveId = `browser:session:${String(bundle.sessionId)}`;
-    const row = this.#page.locator(`.dm-save-row[data-save-id=${JSON.stringify(saveId)}]`);
-    await row.waitFor({ state: 'visible' });
-    await Promise.all([
-      this.#page.waitForURL((url) => url.searchParams.get('session') === bundle.sessionId),
-      row.getByRole('button', { name: 'Load', exact: true }).click(),
-    ]);
-
-    await this.#page.addStyleTag({ content: `
-      *, *::before, *::after {
-        animation: none !important;
-        transition: none !important;
-        caret-color: transparent !important;
-        scroll-behavior: auto !important;
-      }
-      html { scrollbar-width: none !important; }
-      ::-webkit-scrollbar { display: none !important; }
-      .encounter-board {
-        --encounter-tile-size: ${String(this.#captureGeometry.tileSizeCssPx)}px !important;
-        user-select: none !important;
-      }
-    ` });
-    await this.#page.evaluate(({ ordinal, canary, markerHeightCssPx }) => {
-      const marker = document.createElement('p');
-      marker.id = 'board-snapshot-outside-canary';
-      marker.textContent = `${canary}:${String(ordinal)}`;
-      marker.style.height = `${String(markerHeightCssPx)}px`;
-      marker.style.margin = '0';
-      document.body.append(marker);
-    }, {
-      ordinal: captureOrdinal,
-      canary: SNAPSHOT_CANARY,
-      markerHeightCssPx: this.#captureGeometry.markerHeightCssPx,
-    });
-
-    const board = this.#page.locator(
-      this.#informationMode === 'blind_state'
-        ? `[data-blind-snapshot-capture=true][data-blind-snapshot-role=${role}]`
-        : '.encounter-board',
-    );
-    await this.#waitForBoardVisible(board, input.source, role);
-    await board.evaluate((element) => element.scrollIntoView({ block: 'start', inline: 'start' }));
-    await this.#waitForSettledBoard(board, input.source, role);
     const blindDomEvidence = this.#informationMode === 'blind_state'
       ? await this.#inspectBlindStateDom(board)
       : null;
@@ -893,6 +898,95 @@ export class BoardSnapshotService implements AsyncDisposable {
     this.#artifacts.push(artifact);
     await this.#writeManifest();
     return artifact;
+  }
+
+  #captureRole(input: BoardSnapshotCapture): BoardSnapshotImageRole {
+    if (this.#closed) throw new Error('Board snapshot service is closed.');
+    const role = input.role ?? 'dm_board';
+    if (this.#informationMode === 'advice' && role !== 'dm_board') {
+      throw new TypeError('Advice snapshots support only the legacy dm_board capture.');
+    }
+    return role;
+  }
+
+  async #prepareBoard(
+    input: BoardSnapshotCapture,
+    role: BoardSnapshotImageRole,
+    captureOrdinal: number,
+    addCanary: boolean,
+  ): Promise<ReturnType<Page['locator']>> {
+    if (this.#informationMode === 'blind_state') await this.#selectBlindRole(role);
+    validateSource(input.state, input.source);
+    const bundle = createBoardSnapshotSessionBundle(input.state, input.source, captureOrdinal);
+    const sessions = join(this.#outputDirectory, 'snapshot-sessions');
+    await mkdir(sessions, { recursive: true });
+    const bundlePath = join(sessions, `${input.source.stateDigest}-${String(captureOrdinal)}.vtt.json`);
+    try {
+      await writeFile(bundlePath, bundle.bytes, { flag: 'wx' });
+    } catch (error: unknown) {
+      if (!(error instanceof Error) || Reflect.get(error, 'code') !== 'EEXIST') throw error;
+      if (await readFile(bundlePath, 'utf8') !== bundle.bytes) {
+        throw new Error(`Snapshot session bundle ${basename(bundlePath)} has conflicting bytes.`);
+      }
+    }
+
+    const fileChooserPromise = this.#page.waitForEvent('filechooser');
+    await this.#page.locator('.dm-save-manager')
+      .getByRole('button', { name: 'Upload save file', exact: true }).click();
+    const fileChooser = await fileChooserPromise;
+    await fileChooser.setFiles(bundlePath);
+    const saveId = `browser:session:${String(bundle.sessionId)}`;
+    const row = this.#page.locator(`.dm-save-row[data-save-id=${JSON.stringify(saveId)}]`);
+    await row.waitFor({ state: 'visible' });
+    await Promise.all([
+      this.#page.waitForURL((url) => url.searchParams.get('session') === bundle.sessionId),
+      row.getByRole('button', { name: 'Load', exact: true }).click(),
+    ]);
+
+    await this.#page.addStyleTag({ content: `
+      *, *::before, *::after {
+        animation: none !important;
+        transition: none !important;
+        caret-color: transparent !important;
+        scroll-behavior: auto !important;
+      }
+      html { scrollbar-width: none !important; }
+      ::-webkit-scrollbar { display: none !important; }
+      .encounter-board {
+        --encounter-tile-size: ${String(this.#captureGeometry.tileSizeCssPx)}px !important;
+        user-select: none !important;
+      }
+    ` });
+    if (addCanary) await this.#addCanary(captureOrdinal);
+
+    const board = this.#boardLocator(role);
+    await this.#waitForBoardVisible(board, input.source, role);
+    await board.evaluate((element) => element.scrollIntoView({ block: 'start', inline: 'start' }));
+    await this.#waitForSettledBoard(board, input.source, role);
+    return board;
+  }
+
+  #boardLocator(role: BoardSnapshotImageRole): ReturnType<Page['locator']> {
+    return this.#page.locator(
+      this.#informationMode === 'blind_state'
+        ? `[data-blind-snapshot-capture=true][data-blind-snapshot-role=${role}]`
+        : '.encounter-board',
+    );
+  }
+
+  async #addCanary(captureOrdinal: number): Promise<void> {
+    await this.#page.evaluate(({ ordinal, canary, markerHeightCssPx }) => {
+      const marker = document.createElement('p');
+      marker.id = 'board-snapshot-outside-canary';
+      marker.textContent = `${canary}:${String(ordinal)}`;
+      marker.style.height = `${String(markerHeightCssPx)}px`;
+      marker.style.margin = '0';
+      document.body.append(marker);
+    }, {
+      ordinal: captureOrdinal,
+      canary: SNAPSHOT_CANARY,
+      markerHeightCssPx: this.#captureGeometry.markerHeightCssPx,
+    });
   }
 
   async #waitForBoardVisible(
@@ -961,8 +1055,9 @@ export class BoardSnapshotService implements AsyncDisposable {
         throw new Error(`Board provenance ${canonical(attributes())} does not match ${canonical(wanted)}.`);
       }
       await document.fonts.ready;
-      for (const image of Array.from(html.querySelectorAll('img'))) {
-        await image.decode();
+      const images = Array.from(html.querySelectorAll('img'));
+      await Promise.all(images.map(async (image) => image.decode()));
+      for (const image of images) {
         if (!image.complete || image.naturalWidth === 0 || image.naturalHeight === 0) {
           throw new Error('Board image asset did not decode to nonzero dimensions.');
         }
@@ -1099,7 +1194,9 @@ export class BoardSnapshotService implements AsyncDisposable {
     this.#closed = true;
     await this.#context.close();
     await this.#server.close();
-    await rm(this.#profileDirectory, { recursive: true, force: true });
+    if (this.#profileDirectory !== null) {
+      await rm(this.#profileDirectory, { recursive: true, force: true });
+    }
   }
 
   async [Symbol.asyncDispose](): Promise<void> {

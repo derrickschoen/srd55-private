@@ -1,4 +1,6 @@
-import { resolve } from 'node:path';
+import { basename, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import type { Browser } from '@playwright/test';
 import type { EncounterState } from '../src/combat/encounter';
 import { terrainWallCells } from '../src/combat/terrain';
 import { projectDmView } from '../src/combat/visibility';
@@ -12,6 +14,7 @@ import {
   boardStateDigest,
   type BoardImageArtifact,
   type BoardImageSource,
+  type BoardSnapshotImageRole,
 } from './ai-dm-board-snapshot';
 
 function sourceFor(state: EncounterState): BoardImageSource {
@@ -33,7 +36,7 @@ function placedCombatants(state: EncounterState): number {
   ).length;
 }
 
-function inspectFamily(
+export function inspectBlindBoardSnapshotFamily(
   state: EncounterState,
   artifacts: readonly BoardImageArtifact[],
 ): void {
@@ -133,12 +136,7 @@ function inspectFamily(
   );
 }
 
-const outputArgument = process.argv[2];
-if (outputArgument === undefined) {
-  throw new Error('Usage: ai-dm-blind-board-snapshot-check.ts <artifact-directory-images>');
-}
-const outputDirectory = resolve(outputArgument);
-const fixtures = [
+export const BLIND_BOARD_SNAPSHOT_FIXTURES = Object.freeze([
   {
     difficulty: 'hard',
     seed: 5_117_001,
@@ -149,49 +147,195 @@ const fixtures = [
     seed: 6_203_001,
     path: 'tests/fixtures/arena-basis-brutal/seed-6203001.json',
   },
-] as const;
-const service = await BoardSnapshotService.start({
-  outputDirectory,
-  informationMode: 'blind_state',
-  boardGlyphs: 'full',
-  captureTilePx: 128,
-  primerVersion: BLIND_STATE_PRIMER_VERSION,
-});
+] as const);
 
-try {
-  const results = [];
-  for (const fixture of fixtures) {
-    const state = await loadArenaFixture(fixture.path);
-    const source = sourceFor(state);
-    const artifacts = await service.captureSynchronized({
-      state,
-      source,
-      roles: BOARD_SNAPSHOT_IMAGE_ROLES,
-    });
-    inspectFamily(state, artifacts);
-    results.push({
+type BlindBoardSnapshotFixture = typeof BLIND_BOARD_SNAPSHOT_FIXTURES[number];
+
+export interface BlindBrowserCheckResult {
+  readonly outputDirectory: string;
+  readonly manifestPath: string | null;
+  readonly primerVersion: string;
+  readonly captureTilePx: number;
+  readonly results: readonly {
+    readonly difficulty: BlindBoardSnapshotFixture['difficulty'];
+    readonly seed: number;
+    readonly revision: number;
+    readonly stateDigest: string;
+    readonly images: readonly {
+      readonly role: 'dm_board' | 'accessible_board_raster' | 'player_board';
+      readonly ordinal: number;
+      readonly sha256: string;
+      readonly bytes: number;
+      readonly width: number;
+      readonly height: number;
+      readonly path: string;
+    }[];
+  }[];
+}
+
+export interface CapturedBlindBoardSnapshotFamily {
+  readonly fixture: BlindBoardSnapshotFixture;
+  readonly state: EncounterState;
+  readonly source: BoardImageSource;
+  readonly artifacts: readonly BoardImageArtifact[];
+}
+
+export interface PreparedBlindBoardSnapshotFixture {
+  readonly fixture: BlindBoardSnapshotFixture;
+  readonly state: EncounterState;
+  readonly source: BoardImageSource;
+}
+
+export async function prepareBlindBoardSnapshotFixture(
+  fixture: BlindBoardSnapshotFixture,
+): Promise<PreparedBlindBoardSnapshotFixture> {
+  const state = await loadArenaFixture(fixture.path);
+  return { fixture, state, source: sourceFor(state) };
+}
+
+export async function capturePreparedBlindBoardSnapshotRoles(
+  service: BoardSnapshotService,
+  prepared: PreparedBlindBoardSnapshotFixture,
+  roles: readonly BoardSnapshotImageRole[],
+  firstOrdinal: number,
+): Promise<readonly BoardImageArtifact[]> {
+  return service.captureSynchronized({
+    state: prepared.state,
+    source: prepared.source,
+    roles,
+    firstOrdinal,
+  });
+}
+
+export async function warmPreparedBlindBoardSnapshot(
+  service: BoardSnapshotService,
+  prepared: PreparedBlindBoardSnapshotFixture,
+): Promise<void> {
+  await service.warm({
+    state: prepared.state,
+    source: prepared.source,
+    role: 'dm_board',
+  });
+}
+
+export async function captureWarmedPreparedBlindBoardSnapshot(
+  service: BoardSnapshotService,
+  prepared: PreparedBlindBoardSnapshotFixture,
+  role: BoardSnapshotImageRole,
+  visualOrdinal: number,
+): Promise<readonly BoardImageArtifact[]> {
+  return [await service.captureWarmed({
+    state: prepared.state,
+    source: prepared.source,
+    role,
+  }, visualOrdinal)];
+}
+
+export function completeBlindBoardSnapshotFamily(
+  prepared: PreparedBlindBoardSnapshotFixture,
+  artifacts: readonly BoardImageArtifact[],
+): CapturedBlindBoardSnapshotFamily {
+  return { ...prepared, artifacts };
+}
+
+export async function captureBlindBoardSnapshotFixture(
+  service: BoardSnapshotService,
+  fixture: BlindBoardSnapshotFixture,
+): Promise<CapturedBlindBoardSnapshotFamily> {
+  const prepared = await prepareBlindBoardSnapshotFixture(fixture);
+  const artifacts = await capturePreparedBlindBoardSnapshotRoles(
+    service,
+    prepared,
+    BOARD_SNAPSHOT_IMAGE_ROLES,
+    1,
+  );
+  return completeBlindBoardSnapshotFamily(prepared, artifacts);
+}
+
+export async function startInProcessBlindBoardSnapshotService(
+  outputDirectory: string,
+  browser: Browser,
+): Promise<BoardSnapshotService> {
+  return BoardSnapshotService.startInProcess({
+    outputDirectory,
+    informationMode: 'blind_state',
+    boardGlyphs: 'full',
+    captureTilePx: 128,
+    primerVersion: BLIND_STATE_PRIMER_VERSION,
+  }, browser);
+}
+
+export function inspectCapturedBlindBoardSnapshotFamily(
+  family: CapturedBlindBoardSnapshotFamily,
+): void {
+  inspectBlindBoardSnapshotFamily(family.state, family.artifacts);
+}
+
+export function blindBoardSnapshotResult(
+  outputDirectory: string,
+  families: readonly CapturedBlindBoardSnapshotFamily[],
+  manifestPath: string | null = null,
+): BlindBrowserCheckResult {
+  return {
+    outputDirectory,
+    manifestPath,
+    primerVersion: BLIND_STATE_PRIMER_VERSION,
+    captureTilePx: 128,
+    results: families.map(({ fixture, source, artifacts }) => ({
       difficulty: fixture.difficulty,
       seed: fixture.seed,
       revision: source.revision,
       stateDigest: source.stateDigest,
-      images: artifacts.map((artifact) => ({
-        role: artifact.blindState?.role,
-        ordinal: artifact.blindState?.ordinal,
-        sha256: artifact.sha256,
-        bytes: artifact.bytes,
-        width: artifact.width,
-        height: artifact.height,
-        path: resolve(outputDirectory, artifact.relativePath),
-      })),
-    });
-  }
-  process.stdout.write(`BLIND_BOARD_SNAPSHOT_RESULT ${JSON.stringify({
+      images: artifacts.map((artifact) => {
+        const blind = artifact.blindState;
+        if (blind === undefined) throw new Error('State-only artifact omitted blind metadata.');
+        return {
+          role: blind.role,
+          ordinal: blind.ordinal,
+          sha256: artifact.sha256,
+          bytes: artifact.bytes,
+          width: artifact.width,
+          height: artifact.height,
+          path: resolve(outputDirectory, artifact.relativePath),
+        };
+      }),
+    })),
+  };
+}
+
+export async function runBlindBoardSnapshotCheck(
+  outputDirectory: string,
+): Promise<BlindBrowserCheckResult> {
+  const service = await BoardSnapshotService.start({
     outputDirectory,
-    manifestPath: service.manifestPath,
-    primerVersion: BLIND_STATE_PRIMER_VERSION,
+    informationMode: 'blind_state',
+    boardGlyphs: 'full',
     captureTilePx: 128,
-    results,
-  })}\n`);
-} finally {
-  await service.close();
+    primerVersion: BLIND_STATE_PRIMER_VERSION,
+  });
+
+  try {
+    const families: CapturedBlindBoardSnapshotFamily[] = [];
+    for (const fixture of BLIND_BOARD_SNAPSHOT_FIXTURES) {
+      const family = await captureBlindBoardSnapshotFixture(service, fixture);
+      inspectBlindBoardSnapshotFamily(family.state, family.artifacts);
+      families.push(family);
+    }
+    return blindBoardSnapshotResult(outputDirectory, families, service.manifestPath);
+  } finally {
+    await service.close();
+  }
+}
+
+const entrypoint = process.argv[1];
+const invokedByViteNode = entrypoint !== undefined && basename(entrypoint) === 'vite-node';
+if (invokedByViteNode ||
+  (entrypoint !== undefined && resolve(entrypoint) === fileURLToPath(import.meta.url))) {
+  const outputArgument = process.argv[2];
+  if (outputArgument === undefined) {
+    throw new Error('Usage: ai-dm-blind-board-snapshot-check.ts <artifact-directory-images>');
+  }
+  const outputDirectory = resolve(outputArgument);
+  const result = await runBlindBoardSnapshotCheck(outputDirectory);
+  process.stdout.write(`BLIND_BOARD_SNAPSHOT_RESULT ${JSON.stringify(result)}\n`);
 }
