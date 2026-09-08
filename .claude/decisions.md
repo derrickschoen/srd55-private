@@ -15526,3 +15526,58 @@ The lane's classification of the nine failures, era consequence versus
 implementation bug, was never delivered because it died at the gate
 step. That classification is still required before this can land, and I
 will dispatch it against the completed edits once the suite reports.
+
+## D576.3 gate repair committed (e6fc9baf); full suite green; two questions still open (2026-09-07 21:56)
+
+I ran `npm run test:gate` myself, without an outer flock: FAILED (none),
+exit 0, one load flake (tests/unit/tools/ai-dm-arena.test.ts) that
+passed serially. sg scan clean, tsc exit 0.
+
+What the killed lane had actually done, established by reading the diff
+rather than from its report, which never arrived:
+- REAL FIX: movement now refuses a destination whose footprint leaves
+  the grid (spaceFitsBounds guard). That is the cause of the RangeError
+  a template placement raised.
+- REAL FIX: a polymorph effect ending now joins size_alteration and
+  form_alteration in triggering the size recompute, so a creature cannot
+  keep a stale footprint after polymorph ends. This is an engine
+  behaviour change beyond cover and is flagged as such.
+- REAL FIX: the corner crossing test and outer-corner bounds were
+  rewritten without the axisIntersection helper that returned infinite
+  intervals on axis-aligned rays.
+- New: terrain line traces are cached per encounter state behind a
+  terrain signature.
+
+CORRECTION TO MY EARLIER SUSPICION, recorded because it was mine. I said
+the controllers-mutation 'half' answers looked wrong and pointed at a
+bug. I had hand-checked the wrong assertion. The pairs that actually
+failed are cell (5,0) to (7,2) and to (10,2), not to (1,1). Working the
+corner fan from source corner (5,1) to target corner (7,3) gives column
+interval [0.5,1] and row interval [0.5,1], so entry 0.5 is below exit 1
+and the ray genuinely enters cell (6,2); one obstructed line of four is
+Half Cover. So 'half' is CORRECT there and the move is a true era
+consequence. The assertions I did check, to (1,1), still answer none and
+were not touched. The lane also added a hand-derived pin in
+tests/unit/combat/terrain.test.ts listing which of the four target-corner
+rays enters the candidate cell and which graze its boundary, which is
+the independent invariant the ledger requires.
+
+Supervisor mutant M-SUP-CACHE-SIGNATURE-CONSTANT forced the new trace
+cache signature to a constant so different terrain would share cached
+traces: killed by 8 tests, restored to a1eab1e8...
+
+STILL OPEN, and dispatched as lane los-cover-justify (session
+01a07eba-1097-7aa1-a86a-4086ba11c4cf):
+1. The per-file classification of all nine original failures as era
+   consequence or defect, with the derivation for every moved numeric
+   expectation, including the tactical probability that moved from
+   0.5775 to 0.4375. Not yet delivered by anyone.
+2. The d365 sample dungeon relocation. The commit moved authored
+   shelteredCells from (4,1) to (4,0), (4,5) to (4,6), (4,2) to (3,1)
+   and (4,4) to (3,5). Changing authored content so a test passes is
+   how a regression hides, so the lane must prove with the production
+   trace that each original cell genuinely stopped sheltering and each
+   new one shelters, or REVERT and fix the real cause, and must say
+   whether the D365 rooms' tactical character changed.
+The brief explicitly forbids wrapping anything in flock, so the deadlock
+I caused cannot recur.
