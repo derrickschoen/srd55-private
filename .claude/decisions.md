@@ -15676,3 +15676,43 @@ without an outer flock since the runner takes the lock itself.
 So the branch currently stands at: type-check clean, lint clean, full
 unit and integration suite green with no failures, and the browser suite
 running for the first time on this work.
+
+## D576 LANDED ON MAIN as 567cc8aa (2026-09-07 23:53)
+
+Full gate green on claude/los-cover at 8438c99b, every phase run by the
+supervisor:
+  tsc exit 0
+  sg  exit 0
+  vitest test:gate exit 0, FAILED (none), one load flake
+      (tests/unit/tools/ai-dm-arena.test.ts) passed serially
+  playwright test:gate:browser exit 0, 186 specs, FAILED (none), one
+      load flake (acceptance-walkthrough.spec.ts) passed serially
+contracts.ts frozen hash unchanged; worktree clean at merge; owner's
+live app on 4173 untouched throughout.
+
+What landed: one shared terrain vocabulary and one trace for the engine
+and the board. Cover tier and passability are independent typed
+dimensions per D576.2, and the trace is the 2014 corner-to-corner rule
+per D576.3.
+
+Three defects that ONLY the full gate exposed also landed as fixes: a
+Large creature could be offered a destination whose footprint left the
+grid, crashing template placement; a polymorph ending restored the
+creature's profile but left its token oversized, throwing during
+visibility reconciliation; and the corner rule was costly enough to push
+several unchanged tests past their time walls, fixed by caching terrain
+indexes and traces rather than by raising a single timeout.
+
+ERA BOUNDARY, binding: cover changes for 1522 of 3470 ordered creature
+pairs and sight for 736, and three_quarters cover exists for the first
+time (58 transitions into it, where the centre ray produced zero). Every
+judged result recorded before this commit belongs to the previous era.
+Nothing measured after it may be pooled with them, including the pool
+three-rep null, the cap sweeps, and the four nominated candidate rooms,
+all of which were measured on the pre-D576 engine.
+
+Remaining D576 work, in plan order: increment 2 the generator profile,
+which must author genuine three_quarters features since no room contains
+one; 3 the four art treatments; 4 the map guide; 5 the probe questions;
+6 the sol high then luna medium probe runs. D576.4 elevation stays a
+plan-only task behind those.
