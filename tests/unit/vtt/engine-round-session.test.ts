@@ -16,6 +16,8 @@ import {
 } from '../../../src/vtt/intent-resolver';
 import { generateRoom } from '../../../src/vtt/room-generator';
 import { freshMonsterPlanningState, projectFutureMonsterTurns } from '../../../src/vtt/monster-planning-state';
+import { decodeSessionSnapshotV1 } from '../../../src/vtt/arena-fixture';
+import { canonicalJson } from '../../../src/commands/canonical-json';
 
 const REQUEST: EngineRoundCapsuleRequest = {
   runId: encounterSessionId('encounter:engine-round-session-test'),
@@ -387,6 +389,8 @@ describe('authoritative engine round session', () => {
         digest: authorizationCapsule.digest,
       }));
       expect(serialized.encounter.state).toEqual(session.currentState());
+      expect(canonicalJson(decodeSessionSnapshotV1(JSON.parse(prepared.snapshot.fixtureJson) as unknown)))
+        .toBe(canonicalJson(session.currentState()));
       expect(session.currentState().pendingDecisions.some((decision) =>
         decision.kind === 'death_save')).toBe(false);
       for (const actorId of prepared.snapshot.capsule.request?.actors ?? []) {
