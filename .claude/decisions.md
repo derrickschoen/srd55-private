@@ -15794,3 +15794,48 @@ seed, restored to e763cf04... A first attempt was VOID, because the tier
 is derived through a type parameter and no 'three_quarters' literal
 exists to flip; recorded as void and not counted, per the standing rule
 that void mutants prove nothing.
+
+## D576 increment 3 harvested (5e085c71): the board now shows what the engine computes (2026-09-08 02:41)
+
+Lane los-cover-i3, session 01a07f79-25f8-7b50-ba85-226147e60227.
+Supervisor verified: sg scan clean, tsc exit 0, the same 16 affected
+specs 302/302, contracts.ts hash unchanged, zero fixture bytes touched,
+no git writes and no claude invocation in the lane log.
+
+Directly relevant to the owner's original question about the brutal
+room, "do the cross braced piles block line of sight?": the answer was
+no, and the art was part of why that was confusing. The cross-braced
+pile is GONE. Wall is now a fully opaque cell-spanning mass, and the
+lane measured it at 16,384 of 16,384 opaque pixels. Three-quarters is a
+tall bulwark with a narrow aperture of at least 650 pixels.
+Half is a low barricade with a transparent upper band. Pairwise
+silhouette distance stays above 3,000 across four floor and four light
+treatments, which is the invariant that makes the three tiers
+distinguishable by SHAPE rather than only by their marks, as the plan
+requires for the compact glyph modes that strip text entirely.
+
+Semantic board v2 adds the exhaustive cells.terrain partition; objects
+may carry their terrain kind but never a pair answer, so the blind
+experiment cannot be contaminated by a cover answer arriving through the
+payload.
+
+Pins moved WITH their independent invariants listed in the same change:
+87 to 92 assets, art generator v3 to v4, the wall and preview digests,
+three new art digests, three new glyph digests, and the narrow browser
+capture height 3056 to 3200.
+
+Six tests removed and twelve added. I read every removal: each describes
+art this increment replaces, including the old "three inset opaque
+ridges for difficult terrain and a broad stone cross-brace for blocked
+cells" test, which pinned exactly the art the owner found ambiguous.
+
+Supervisor mutant M-SUP-I3-LEGEND-WRONG-AC changed the three-quarters
+legend to teach +2 AC instead of +5. This is deliberately the same class
+of defect as the HP band error found in D579: a legend that teaches a
+wrong mechanic is worse than no legend, because the DM believes it.
+Killed by the legend row test, restored to 63eb992d...
+
+Remaining in D576: increment 4 is the D569 map-guide amendment on the
+blind branch, 5 is the probe question classes, 6 is the sol high then
+luna medium probe runs that finally answer whether any of this is
+readable. A full gate and a main landing come before the probe runs.
