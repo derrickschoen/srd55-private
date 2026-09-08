@@ -5,6 +5,10 @@ import {
   createEncounter,
   type EncounterState,
 } from '../../../src/combat/encounter';
+import {
+  traceCombatantLine,
+  traceCombatantLineToCells,
+} from '../../../src/combat/cover';
 import { armorClass, worldObjectId } from '../../../src/combat/values';
 import type { WorldObject } from '../../../src/combat/world-objects';
 import {
@@ -15,6 +19,7 @@ import {
 import {
   BOARD_GLYPH_PRIMER,
   GENERAL_PRIMER,
+  GENERAL_PRIMER_V10,
   GLYPH_FAMILY_PRIMER,
   LIGHT_PRIMER,
   MIN_FACT_CLASS_STATE_COVERAGE,
@@ -31,11 +36,14 @@ import {
   parseProbeAnswer,
   parseScreenshotProbeArgs,
   parseScreenshotProbeRescoreArgs,
+  probeAnswerJsonSchema,
   probeCatalogueClassCoverage,
+  probeCatalogueLineCoverage,
   runScreenshotProbe,
   rescoreScreenshotProbe,
   renderProbeSummary,
   scoreProbeAnswer,
+  semanticBoardJsonForProbeState,
   screenshotQuestionPrompt,
   shiftedByOneRowAnswer,
   simulatedProbeAnswerer,
@@ -172,10 +180,11 @@ describe('D519 screenshot comprehension fact sheet', () => {
   it('derives every fact class from the DM projection with zero-based coordinates', () => {
     const sheet = deriveScreenshotFactSheet(everyClassState());
 
-    expect(sheet.version).toBe('d519-screenshot-comprehension-v1');
+    expect(sheet.version).toBe('d576-screenshot-comprehension-v2');
     expect(sheet.bounds).toEqual({ columns: 6, rows: 4 });
     expect(sheet.combatants).toEqual([
       {
+        id: 'combatant:screenshot-hero',
         displayName: 'screenshot-hero',
         badgeNumber: 2,
         badgeColor: 'ivory',
@@ -186,6 +195,7 @@ describe('D519 screenshot comprehension fact sheet', () => {
         hiddenFromPlayers: false,
       },
       {
+        id: 'combatant:screenshot-foe',
         displayName: 'screenshot-foe',
         badgeNumber: 1,
         badgeColor: 'deep-forest',
@@ -260,6 +270,10 @@ describe('D519 screenshot comprehension scoring', () => {
       'Q8',
       'Q9',
       'Q10',
+      'Q11',
+      'Q12',
+      'Q13',
+      'Q14',
     ] as const) {
       expect(
         scoreProbeAnswer(
@@ -278,7 +292,7 @@ describe('D519 screenshot comprehension scoring', () => {
     const truth = parseProbeAnswer(
       'Q1',
       JSON.stringify({
-        version: 'd519-screenshot-comprehension-v1',
+        version: 'd576-screenshot-comprehension-v2',
         question: 'Q1',
         creatures: [{ name: 'Mirel Ash', column: 2, row: 1 }],
       }),
@@ -286,7 +300,7 @@ describe('D519 screenshot comprehension scoring', () => {
     const uppercase = parseProbeAnswer(
       'Q1',
       JSON.stringify({
-        version: 'd519-screenshot-comprehension-v1',
+        version: 'd576-screenshot-comprehension-v2',
         question: 'Q1',
         creatures: [{ name: '  MIREL   ASH  ', column: 2, row: 1 }],
       }),
@@ -298,7 +312,7 @@ describe('D519 screenshot comprehension scoring', () => {
       confusions: [],
     });
     expect(normalizeProbeAnswer(uppercase)).toEqual({
-      version: 'd519-screenshot-comprehension-v1',
+      version: 'd576-screenshot-comprehension-v2',
       question: 'Q1',
       creatures: [{ name: 'mirel ash', column: 2, row: 1 }],
     });
@@ -308,7 +322,7 @@ describe('D519 screenshot comprehension scoring', () => {
     const truth = parseProbeAnswer(
       'Q1',
       JSON.stringify({
-        version: 'd519-screenshot-comprehension-v1',
+        version: 'd576-screenshot-comprehension-v2',
         question: 'Q1',
         creatures: [{ name: 'Unicorn', column: 2, row: 1 }],
       }),
@@ -316,7 +330,7 @@ describe('D519 screenshot comprehension scoring', () => {
     const tagged = parseProbeAnswer(
       'Q1',
       JSON.stringify({
-        version: 'd519-screenshot-comprehension-v1',
+        version: 'd576-screenshot-comprehension-v2',
         question: 'Q1',
         creatures: [{ name: 'Unicorn hidden', column: 2, row: 1 }],
       }),
@@ -332,7 +346,7 @@ describe('D519 screenshot comprehension scoring', () => {
     const prefixed = parseProbeAnswer(
       'Q1',
       JSON.stringify({
-        version: 'd519-screenshot-comprehension-v1',
+        version: 'd576-screenshot-comprehension-v2',
         question: 'Q1',
         creatures: [{ name: 'Probe fixture: Unicorn', column: 2, row: 1 }],
       }),
@@ -342,7 +356,7 @@ describe('D519 screenshot comprehension scoring', () => {
     const hiddenTruth = parseProbeAnswer(
       'Q8',
       JSON.stringify({
-        version: 'd519-screenshot-comprehension-v1',
+        version: 'd576-screenshot-comprehension-v2',
         question: 'Q8',
         creatures: [{ name: 'Unicorn', column: 2, row: 1 }],
       }),
@@ -350,7 +364,7 @@ describe('D519 screenshot comprehension scoring', () => {
     const omitted = parseProbeAnswer(
       'Q8',
       JSON.stringify({
-        version: 'd519-screenshot-comprehension-v1',
+        version: 'd576-screenshot-comprehension-v2',
         question: 'Q8',
         creatures: [],
       }),
@@ -362,7 +376,7 @@ describe('D519 screenshot comprehension scoring', () => {
     const truth = parseProbeAnswer(
       'Q4',
       JSON.stringify({
-        version: 'd519-screenshot-comprehension-v1',
+        version: 'd576-screenshot-comprehension-v2',
         question: 'Q4',
         cells: [{ column: 2, row: 0 }],
       }),
@@ -370,7 +384,7 @@ describe('D519 screenshot comprehension scoring', () => {
     const withHallucination = parseProbeAnswer(
       'Q4',
       JSON.stringify({
-        version: 'd519-screenshot-comprehension-v1',
+        version: 'd576-screenshot-comprehension-v2',
         question: 'Q4',
         cells: [
           { column: 2, row: 0 },
@@ -495,13 +509,13 @@ describe('D524 general screenshot primer', () => {
   });
 
   it('D525: appends the light sentence per mode plus one sentence per glyph family under full, chosen by --board-glyphs, defaulting to none', () => {
-    expect(PRIMER_VERSION).toBe('d562-general-board-primer-v10');
-    expect(PREVIOUS_PRIMER_VERSION).toBe('d557-general-board-primer-v9');
+    expect(PRIMER_VERSION).toBe('d576-general-board-primer-v11');
+    expect(PREVIOUS_PRIMER_VERSION).toBe('d562-general-board-primer-v10');
     expect(PRIMER_HISTORY[PREVIOUS_PRIMER_VERSION].general).toBe(
-      "This is a tabletop RPG combat board viewed from above. Each grid square represents 5 feet, and tokens represent creatures. Cool-blue floor plates beneath busts identify party creatures; warm-red floor plates beneath busts identify foes, exactly as the two floor-plate legend swatches show. The upper-left side of world art is lit and its lower-right contact shadow grounds it in the owning cell. Each creature token carries a numbered coloured badge; the roster box under the board repeats that badge and lists the creature's full name, cell, side and HP band. A creature stands in the cell that holds its badge. An OBJECT-sigil tag in the legend rail names an object, and the coordinate printed on that tag is the cell where the object stands. Door rail entries use the door glyph and print DOOR OPEN or DOOR CLOSED with the door's coordinate. The coordinate origin is the top-left cell, whose column and row are both zero; columns increase rightward and rows increase downward, matching the zero-based labels along the board edges. Two creatures are adjacent and within 5 feet when their cells share an edge or a corner, so diagonals count. HP bars and roster words use green for uninjured, amber for bloodied, red for near death, and grey for unknown. Difficult terrain is marked by three broad ochre zigzag ridges spanning its floor. Blocked terrain is marked by a large cross-braced stone pile spanning the cell. The legend box names every terrain overlay (Difficult, Obscured, Bright light, Dim light, Darkness, and Fog) and every board mark (Blocked, Object, and Light source). Doors are drawn only where the engine has a door. Interpret walls, doors, and objects as they are drawn on the board.",
+      GENERAL_PRIMER_V10,
     );
     expect(PRIMER_HISTORY[PREVIOUS_PRIMER_VERSION].glyphFamilies.veil).toBe(
-      'Fog is a veil of diagonal hatching with a cloud glyph in the bottom-right corner of the cell, obscurement is a dotted veil with a wave glyph just left of that corner, and a cell can carry both.',
+      GLYPH_FAMILY_PRIMER.veil,
     );
     expect(GENERAL_PRIMER).toContain(
       'Cool-blue floor plates beneath busts identify party creatures',
@@ -766,6 +780,16 @@ describe('D519 screenshot comprehension schema and CLI', () => {
       expect(semanticPath).toBe(`semantic-boards/${semanticHash ?? ''}.json`);
       const bytes = await readFile(join(imagesRoot, semanticPath ?? ''), 'utf8');
       expect(createHash('sha256').update(bytes).digest('hex')).toBe(semanticHash);
+      expect(requests.map((request) => request.question)).toEqual([
+        'Q1', 'Q2', 'Q3', 'Q4', 'Q5', 'Q6', 'Q7', 'Q8', 'Q9', 'Q10',
+      ]);
+      const semanticBoard = semanticBoardJsonForProbeState(everyClassState());
+      for (const forbiddenPairAnswer of [
+        'queryId', 'creatureLineQuery', 'cellLineQuery', 'sourceCorner',
+        'targetCorner', 'blocksSight', 'sourceIds',
+      ]) {
+        expect(semanticBoard).not.toContain(forbiddenPairAnswer);
+      }
       expect(await readFile(config.summaryPath, 'utf8')).toContain('Board input: semantic.');
     } finally {
       await rm(directory, { recursive: true, force: true });
@@ -805,12 +829,132 @@ describe('D519 screenshot comprehension schema and CLI', () => {
         .flatMap((candidate) => candidate.state.combatants)
         .every((combatant) => !combatant.profile.name.startsWith('Probe ')),
     ).toBe(true);
+    expect(
+      first.every((candidate) => {
+        const terrainCells = new Set([
+          ...candidate.state.blockedCells,
+          ...candidate.state.worldObjects
+            .filter((object) => 'terrainKind' in object)
+            .flatMap((object) => object.footprint),
+        ].map((cell) => `${String(cell.column)},${String(cell.row)}`));
+        return candidate.state.worldObjects.some((object) =>
+          'terrainKind' in object && object.terrainKind === 'half_cover') &&
+          candidate.state.worldObjects.some((object) =>
+            'terrainKind' in object && object.terrainKind === 'three_quarters_cover') &&
+          candidate.state.blockedCells.length > 0 &&
+          terrainCells.size < candidate.state.bounds.columns * candidate.state.bounds.rows;
+      }),
+    ).toBe(true);
     const coverage = probeCatalogueClassCoverage(first);
     for (const [question, count] of Object.entries(coverage)) {
       expect(count, `${question} state coverage`).toBeGreaterThanOrEqual(
         MIN_FACT_CLASS_STATE_COVERAGE,
       );
     }
+    expect(probeCatalogueLineCoverage(first)).toEqual({
+      creatureCover: { none: 6, half: 6, three_quarters: 6, total: 6 },
+      cellCover: { none: 6, half: 6, three_quarters: 6, total: 6 },
+      creatureLineOfSight: { clear: 18, blocked: 6 },
+      cellLineOfSight: { clear: 18, blocked: 6 },
+    });
+    const totalCandidate = first.find((candidate) =>
+      candidate.desiredLineTier === 'total');
+    if (totalCandidate === undefined) throw new Error('Missing total-cover catalogue state.');
+    const totalSheet = deriveScreenshotFactSheet(totalCandidate.state, 'total');
+    expect(truthAnswer(totalSheet, 'Q11')).toMatchObject({
+      question: 'Q11',
+      lineOfSight: 'blocked',
+    });
+    expect(truthAnswer(totalSheet, 'Q12')).toMatchObject({
+      question: 'Q12',
+      cover: 'total',
+    });
+  });
+
+  it('builds PNG-only directional Q11-Q14 prompts without leaking production answers', () => {
+    const sheet = deriveScreenshotFactSheet(everyClassState());
+    for (const question of ['Q11', 'Q12', 'Q13', 'Q14'] as const) {
+      const truth = truthAnswer(sheet, question);
+      if (!('queryId' in truth) || !('source' in truth)) {
+        throw new Error(`${question} truth lacks a directional query.`);
+      }
+      const prompt = screenshotQuestionPrompt(
+        question,
+        'general',
+        'full',
+        'png',
+        null,
+        truth,
+      );
+      expect(prompt).toContain(`Directional query ${truth.queryId}:`);
+      expect(prompt).toContain(truth.source.name);
+      expect(prompt).toContain('Inspect only the attached PNG.');
+      expect(prompt).not.toContain('Semantic board JSON:');
+      if (truth.question === 'Q11' || truth.question === 'Q13') {
+        expect(prompt).not.toContain(`lineOfSight":"${truth.lineOfSight}`);
+      } else if (truth.question === 'Q12' || truth.question === 'Q14') {
+        expect(prompt).not.toContain(`cover":"${truth.cover}`);
+      }
+    }
+    expect(() => screenshotQuestionPrompt('Q11')).toThrow(
+      'Q11 prompt requires its matching directional query.',
+    );
+  });
+
+  it('keeps total, blocked sight, direction, and the four cover tiers distinct in Q11-Q14 schemas and scoring', () => {
+    const sheet = deriveScreenshotFactSheet(everyClassState());
+    const q11 = truthAnswer(sheet, 'Q11');
+    const q12 = truthAnswer(sheet, 'Q12');
+    expect(parseProbeAnswer('Q11', JSON.stringify(q11))).toEqual(q11);
+    expect(parseProbeAnswer('Q12', JSON.stringify(q12))).toEqual(q12);
+    expect(probeAnswerJsonSchema('Q12')).toMatchObject({
+      properties: {
+        cover: { enum: ['none', 'half', 'three_quarters', 'total'] },
+      },
+    });
+    expect(() =>
+      parseProbeAnswer('Q12', JSON.stringify({ ...q12, cover: 'blocked' })),
+    ).toThrow();
+    expect(() =>
+      parseProbeAnswer('Q12', JSON.stringify({ ...q12, cover: '3/4' })),
+    ).toThrow();
+    if (q12.question !== 'Q12') throw new Error('Q12 truth changed class.');
+    const swapped = { ...q12, source: q12.target, target: q12.source };
+    expect(scoreProbeAnswer(swapped, q12)).toMatchObject({
+      score: 0,
+      hallucinations: 1,
+    });
+  });
+
+  it('takes Q11-Q14 truth from production traces even when a local geometry double claims the opposite', () => {
+    const state = everyClassState();
+    const sheet = deriveScreenshotFactSheet(state);
+    const fakeGeometryRule = () => ({ tier: 'total', blocksSight: true } as const);
+    const pairTrace = traceCombatantLine(
+      state,
+      sheet.combatants.find((entry) => entry.displayName === sheet.creatureLineQuery.source.name)?.id ??
+        (() => { throw new Error('Missing pair source.'); })(),
+      sheet.combatants.find((entry) => entry.displayName === sheet.creatureLineQuery.target.name)?.id ??
+        (() => { throw new Error('Missing pair target.'); })(),
+    );
+    const cellTrace = traceCombatantLineToCells(
+      state,
+      sheet.combatants.find((entry) => entry.displayName === sheet.cellLineQuery.source.name)?.id ??
+        (() => { throw new Error('Missing cell source.'); })(),
+      [sheet.cellLineQuery.target],
+    );
+    expect(fakeGeometryRule()).not.toEqual({
+      tier: pairTrace.tier,
+      blocksSight: pairTrace.blocksSight,
+    });
+    expect(sheet.creatureLineQuery).toMatchObject({
+      tier: pairTrace.tier,
+      lineOfSight: pairTrace.blocksSight ? 'blocked' : 'clear',
+    });
+    expect(sheet.cellLineQuery).toMatchObject({
+      tier: cellTrace.tier,
+      lineOfSight: cellTrace.blocksSight ? 'blocked' : 'clear',
+    });
   });
 
   it('re-scores saved raw answers with legacy scope prefixes and plate tags without invoking a model', async () => {
@@ -861,6 +1005,14 @@ describe('D519 screenshot comprehension schema and CLI', () => {
                     : [],
               }
             : savedTruth;
+        const historicalTruth = {
+          ...savedTruth,
+          version: 'd519-screenshot-comprehension-v1',
+        };
+        const historicalRaw = {
+          ...raw,
+          version: 'd519-screenshot-comprehension-v1',
+        };
         return {
           version: 'd525-screenshot-comprehension-row-v5',
           stateId: 'saved-state',
@@ -869,7 +1021,7 @@ describe('D519 screenshot comprehension schema and CLI', () => {
           effort: 'low',
           question,
           promptVersion: 'd519-screenshot-comprehension-v1',
-          primerVersion: PRIMER_VERSION,
+          primerVersion: PREVIOUS_PRIMER_VERSION,
           generation: 'saved-generation',
           boardGlyphs: 'full',
           png: {
@@ -884,10 +1036,10 @@ describe('D519 screenshot comprehension schema and CLI', () => {
           confusions: ['old normalizer'],
           wallMs: 12,
           tokens: null,
-          truth: savedTruth,
+          truth: historicalTruth,
           answer: null,
           normalizedAnswer: null,
-          rawAnswer: JSON.stringify(raw),
+          rawAnswer: JSON.stringify(historicalRaw),
           error: null,
         };
       });
@@ -904,7 +1056,7 @@ describe('D519 screenshot comprehension schema and CLI', () => {
       expect(rescored.every((row) => row.score === 1)).toBe(true);
       expect(
         rescored.every(
-          (row) => row.version === 'd557-screenshot-comprehension-row-v9',
+          (row) => row.version === 'd576-screenshot-comprehension-row-v10',
         ),
       ).toBe(true);
       expect(rescored.every((row) => row.resultKind === 'rescored')).toBe(true);
@@ -933,6 +1085,20 @@ describe('D519 screenshot comprehension schema and CLI', () => {
       );
       expect(strictProbeGate(rescored)).toBe(false);
       await expect(rescoreScreenshotProbe(config)).rejects.toThrow();
+      const historicalQ11Path = join(directory, 'historical-q11.jsonl');
+      const historicalQ11Out = join(directory, 'historical-q11-rescored.jsonl');
+      await writeFile(
+        historicalQ11Path,
+        `${JSON.stringify({ ...rows[0], question: 'Q11' })}\n`,
+        'utf8',
+      );
+      await expect(
+        rescoreScreenshotProbe(
+          parseScreenshotProbeRescoreArgs([
+            '--rescore', historicalQ11Path, '--out', historicalQ11Out,
+          ]),
+        ),
+      ).rejects.toThrow('Historical');
       expect(() =>
         parseScreenshotProbeRescoreArgs([
           '--rescore',
@@ -1017,7 +1183,7 @@ describe('D519 screenshot comprehension schema and CLI', () => {
       parseProbeAnswer(
         'Q1',
         JSON.stringify({
-          version: 'd519-screenshot-comprehension-v1',
+          version: 'd576-screenshot-comprehension-v2',
           question: 'Q2',
           creatures: [],
         }),
@@ -1027,7 +1193,7 @@ describe('D519 screenshot comprehension schema and CLI', () => {
       parseProbeAnswer(
         'Q4',
         JSON.stringify({
-          version: 'd519-screenshot-comprehension-v1',
+          version: 'd576-screenshot-comprehension-v2',
           question: 'Q4',
           cells: [{ column: 0, row: -1 }],
         }),
@@ -1037,7 +1203,7 @@ describe('D519 screenshot comprehension schema and CLI', () => {
       parseProbeAnswer(
         'Q10',
         JSON.stringify({
-          version: 'd519-screenshot-comprehension-v1',
+          version: 'd576-screenshot-comprehension-v2',
           question: 'Q10',
           cells: [],
           prose: 'none',
@@ -1082,7 +1248,7 @@ describe('D519 screenshot comprehension schema and CLI', () => {
         snapshotService: service,
       });
 
-      expect(rows).toHaveLength(20);
+      expect(rows).toHaveLength(28);
       expect(
         rows.every((row) => row.outcome === 'answered' && row.score === 1),
       ).toBe(true);
@@ -1096,7 +1262,7 @@ describe('D519 screenshot comprehension schema and CLI', () => {
       expect(rows.every((row) => row.captureTilePx === 64)).toBe(true);
       expect(
         rows.every(
-          (row) => row.version === 'd557-screenshot-comprehension-row-v9',
+          (row) => row.version === 'd576-screenshot-comprehension-row-v10',
         ),
       ).toBe(true);
       expect(rows.every((row) => row.resultKind === 'generated')).toBe(true);
@@ -1118,8 +1284,13 @@ describe('D519 screenshot comprehension schema and CLI', () => {
         );
       }
       expect(strictProbeGate(rows)).toBe(true);
+      expect(
+        strictProbeGate(
+          rows.map((row) => row.question === 'Q1' ? { ...row, score: 0 } : row),
+        ),
+      ).toBe(false);
       expect((await readFile(outPath, 'utf8')).trim().split('\n')).toHaveLength(
-        20,
+        28,
       );
       const summary = await readFile(config.summaryPath, 'utf8');
       expect(summary).not.toContain('RESCORED ESTIMATE');

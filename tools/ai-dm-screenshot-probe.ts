@@ -11,19 +11,21 @@ import {
   type CornerGlyphFamily,
 } from '../src/assets/board-glyphs';
 import { canonicalJson } from '../src/commands/canonical-json';
-import type { CombatantProfile } from '../src/combat/combatant';
 import type { PersistedCoordinatorState } from '../src/combat/coordinator';
 import {
-  createEncounter,
-  type EncounterState,
-  type LifeState,
-} from '../src/combat/encounter';
+  traceCombatantLine,
+  traceCombatantLineToCells,
+} from '../src/combat/cover';
+import {
+  combatantSpace,
+} from '../src/combat/combat-rules';
+import type { EncounterState, LifeState } from '../src/combat/encounter';
 import type { GridCell } from '../src/combat/grid';
+import type { CoverTier } from '../src/combat/terrain';
 import {
   armorClass,
-  combatantId,
-  tokenId,
   worldObjectId,
+  type CombatantId,
 } from '../src/combat/values';
 import { dmVisibleEncounter, projectDmView } from '../src/combat/visibility';
 import {
@@ -38,14 +40,7 @@ import {
   type CreatureBadgeNumber,
   type HpBand,
 } from '../src/vtt/board-chrome';
-import { loadArenaFixture } from '../src/vtt/mcp/entrypoint';
-import {
-  referenceEncounterSetup,
-  REFERENCE_MONSTER_ID,
-} from '../src/vtt/reference-encounter';
 import { generateRoom } from '../src/vtt/room-generator';
-import { createVaneWarrenFight } from '../src/vtt/vane-warren';
-import { adaptWatabouDungeon } from '../src/vtt/watabou-adapter';
 import {
   BoardSnapshotService,
   boardStateDigest,
@@ -55,19 +50,24 @@ import {
 } from './ai-dm-board-snapshot';
 
 const repositoryRoot = resolve(new URL('../', import.meta.url).pathname);
-const PROBE_VERSION = 'd519-screenshot-comprehension-v1' as const;
+const PREVIOUS_PROBE_VERSION = 'd519-screenshot-comprehension-v1' as const;
+const PROBE_VERSION = 'd576-screenshot-comprehension-v2' as const;
 const LEGACY_ROW_VERSION = 'd525-screenshot-comprehension-row-v5' as const;
 const PREVIOUS_ROW_VERSION = 'd557-screenshot-comprehension-row-v8' as const;
-const ROW_VERSION = 'd557-screenshot-comprehension-row-v9' as const;
+const HISTORICAL_ROW_VERSION = 'd557-screenshot-comprehension-row-v9' as const;
+const ROW_VERSION = 'd576-screenshot-comprehension-row-v10' as const;
 export const NORMALISER_VERSION =
-  'd533-screenshot-vocabulary-normaliser-v3' as const;
+  'd576-screenshot-vocabulary-normaliser-v4' as const;
 export const PREVIOUS_PRIMER_VERSION =
-  'd557-general-board-primer-v9' as const;
+  'd562-general-board-primer-v10' as const;
+const LEGACY_PRIMER_VERSION = 'd557-general-board-primer-v9' as const;
+export const GENERAL_PRIMER_V10 =
+  "This is a tabletop RPG combat board viewed from above. Each grid square represents 5 feet, and tokens represent creatures. Cool-blue floor plates beneath busts identify party creatures; warm-red floor plates beneath busts identify foes, exactly as the two floor-plate legend swatches show. The upper-left side of world art is lit and its lower-right contact shadow grounds it in the owning cell. Each creature token carries a numbered coloured badge; the roster box under the board repeats that badge and lists the creature's full name, cell, side and HP band. A creature stands in the cell that holds its badge. An OBJECT-sigil tag in the legend rail names an object, and the coordinate printed on that tag is the cell where the object stands. Door rail entries use the door glyph and print DOOR OPEN or DOOR CLOSED with the door's coordinate. The coordinate origin is the top-left cell, whose column and row are both zero; columns increase rightward and rows increase downward, matching the zero-based labels along the board edges. Two creatures are adjacent and within 5 feet when their cells share an edge or a corner, so diagonals count. HP bars and roster words use green for uninjured, amber for bloodied, red for near death, and grey for unknown. Difficult terrain is marked by one cell-local emblem of three inset opaque pale-ochre zigzag ridges with a dark outline. Blocked terrain is marked by a large cross-braced stone pile spanning the cell. The legend box names every terrain overlay (Difficult, Obscured, Bright light, Dim light, Darkness, and Fog) and every board mark (Blocked, Object, and Light source). Doors are drawn only where the engine has a door. Interpret walls, doors, and objects as they are drawn on the board." as const;
 export const GENERAL_PRIMER_V9 =
   "This is a tabletop RPG combat board viewed from above. Each grid square represents 5 feet, and tokens represent creatures. Cool-blue floor plates beneath busts identify party creatures; warm-red floor plates beneath busts identify foes, exactly as the two floor-plate legend swatches show. The upper-left side of world art is lit and its lower-right contact shadow grounds it in the owning cell. Each creature token carries a numbered coloured badge; the roster box under the board repeats that badge and lists the creature's full name, cell, side and HP band. A creature stands in the cell that holds its badge. An OBJECT-sigil tag in the legend rail names an object, and the coordinate printed on that tag is the cell where the object stands. Door rail entries use the door glyph and print DOOR OPEN or DOOR CLOSED with the door's coordinate. The coordinate origin is the top-left cell, whose column and row are both zero; columns increase rightward and rows increase downward, matching the zero-based labels along the board edges. Two creatures are adjacent and within 5 feet when their cells share an edge or a corner, so diagonals count. HP bars and roster words use green for uninjured, amber for bloodied, red for near death, and grey for unknown. Difficult terrain is marked by three broad ochre zigzag ridges spanning its floor. Blocked terrain is marked by a large cross-braced stone pile spanning the cell. The legend box names every terrain overlay (Difficult, Obscured, Bright light, Dim light, Darkness, and Fog) and every board mark (Blocked, Object, and Light source). Doors are drawn only where the engine has a door. Interpret walls, doors, and objects as they are drawn on the board." as const;
-export const PRIMER_VERSION = 'd562-general-board-primer-v10' as const;
+export const PRIMER_VERSION = 'd576-general-board-primer-v11' as const;
 export const GENERAL_PRIMER =
-  "This is a tabletop RPG combat board viewed from above. Each grid square represents 5 feet, and tokens represent creatures. Cool-blue floor plates beneath busts identify party creatures; warm-red floor plates beneath busts identify foes, exactly as the two floor-plate legend swatches show. The upper-left side of world art is lit and its lower-right contact shadow grounds it in the owning cell. Each creature token carries a numbered coloured badge; the roster box under the board repeats that badge and lists the creature's full name, cell, side and HP band. A creature stands in the cell that holds its badge. An OBJECT-sigil tag in the legend rail names an object, and the coordinate printed on that tag is the cell where the object stands. Door rail entries use the door glyph and print DOOR OPEN or DOOR CLOSED with the door's coordinate. The coordinate origin is the top-left cell, whose column and row are both zero; columns increase rightward and rows increase downward, matching the zero-based labels along the board edges. Two creatures are adjacent and within 5 feet when their cells share an edge or a corner, so diagonals count. HP bars and roster words use green for uninjured, amber for bloodied, red for near death, and grey for unknown. Difficult terrain is marked by one cell-local emblem of three inset opaque pale-ochre zigzag ridges with a dark outline. Blocked terrain is marked by a large cross-braced stone pile spanning the cell. The legend box names every terrain overlay (Difficult, Obscured, Bright light, Dim light, Darkness, and Fog) and every board mark (Blocked, Object, and Light source). Doors are drawn only where the engine has a door. Interpret walls, doors, and objects as they are drawn on the board." as const;
+  `${GENERAL_PRIMER_V10} The terrain legend has four exact outcomes: OPEN means no cover and line of sight; 1/2 COVER is a low crossable barricade; 3/4 COVER is a tall bulwark with a narrow aperture; WALL means Total Cover and no line of sight. To answer a line query, consider the source space's outer corners in row-major order. From one source corner draw to all four outer target-space corners; a boundary graze does not count and endpoint spaces are excluded. Zero obstructed target-corner rays means none, one or two means half, three means three_quarters, and four wall-blocked rays means total and blocked line of sight. Use the least-obstructed source corner; an intervening living creature supplies half cover without blocking sight.` as const;
 /**
  * D525: the sentence describing how the board draws light levels, one per
  * convention. Each describes only the drawing convention — never a room fact —
@@ -111,6 +111,11 @@ export const GLYPH_FAMILY_PRIMER_V9 = {
 >;
 export const PRIMER_HISTORY = Object.freeze({
   [PREVIOUS_PRIMER_VERSION]: Object.freeze({
+    general: GENERAL_PRIMER_V10,
+    light: LIGHT_PRIMER,
+    glyphFamilies: GLYPH_FAMILY_PRIMER,
+  }),
+  [LEGACY_PRIMER_VERSION]: Object.freeze({
     general: GENERAL_PRIMER_V9,
     light: LIGHT_PRIMER_V9,
     glyphFamilies: GLYPH_FAMILY_PRIMER_V9,
@@ -148,6 +153,10 @@ export const SCREENSHOT_QUESTION_IDS = [
   'Q8',
   'Q9',
   'Q10',
+  'Q11',
+  'Q12',
+  'Q13',
+  'Q14',
 ] as const;
 export type ScreenshotQuestionId = (typeof SCREENSHOT_QUESTION_IDS)[number];
 export type ProbeEffort = 'low' | 'medium' | 'high' | 'xhigh';
@@ -159,6 +168,7 @@ export type BoardInput = 'png' | 'semantic' | 'both';
 export type PrimerVersion =
   | typeof PRIMER_VERSION
   | typeof PREVIOUS_PRIMER_VERSION
+  | typeof LEGACY_PRIMER_VERSION
   | 'd557-general-board-primer-v8'
   | 'd525-general-board-primer-v5'
   | null;
@@ -176,6 +186,7 @@ export interface ProbeCell {
 }
 
 export interface FactSheetCombatant {
+  readonly id: CombatantId;
   readonly displayName: string;
   readonly badgeNumber: CreatureBadgeNumber;
   readonly badgeColor: CreatureBadgeColor['id'];
@@ -184,6 +195,27 @@ export interface FactSheetCombatant {
   readonly hpBand: ProbeHitPointBand;
   readonly life: LifeState;
   readonly hiddenFromPlayers: boolean;
+}
+
+export interface ProbeCreatureEndpoint extends CreatureLocation {
+  readonly badgeNumber: number;
+  readonly badgeColor: string;
+}
+
+export interface ProbeCreatureLineQuery {
+  readonly queryId: string;
+  readonly source: ProbeCreatureEndpoint;
+  readonly target: ProbeCreatureEndpoint;
+  readonly tier: CoverTier;
+  readonly lineOfSight: 'clear' | 'blocked';
+}
+
+export interface ProbeCellLineQuery {
+  readonly queryId: string;
+  readonly source: ProbeCreatureEndpoint;
+  readonly target: ProbeCell;
+  readonly tier: CoverTier;
+  readonly lineOfSight: 'clear' | 'blocked';
 }
 
 export interface ScreenshotFactSheet {
@@ -201,6 +233,8 @@ export interface ScreenshotFactSheet {
     readonly first: Pick<FactSheetCombatant, 'displayName' | 'cell'>;
     readonly second: Pick<FactSheetCombatant, 'displayName' | 'cell'>;
   }[];
+  readonly creatureLineQuery: ProbeCreatureLineQuery;
+  readonly cellLineQuery: ProbeCellLineQuery;
 }
 
 interface CreatureLocation {
@@ -269,6 +303,38 @@ type ProbeAnswer =
       readonly version: typeof PROBE_VERSION;
       readonly question: 'Q10';
       readonly cells: readonly ProbeCell[];
+    }
+  | {
+      readonly version: typeof PROBE_VERSION;
+      readonly question: 'Q11';
+      readonly queryId: string;
+      readonly source: ProbeCreatureEndpoint;
+      readonly target: ProbeCreatureEndpoint;
+      readonly lineOfSight: 'clear' | 'blocked';
+    }
+  | {
+      readonly version: typeof PROBE_VERSION;
+      readonly question: 'Q12';
+      readonly queryId: string;
+      readonly source: ProbeCreatureEndpoint;
+      readonly target: ProbeCreatureEndpoint;
+      readonly cover: CoverTier;
+    }
+  | {
+      readonly version: typeof PROBE_VERSION;
+      readonly question: 'Q13';
+      readonly queryId: string;
+      readonly source: ProbeCreatureEndpoint;
+      readonly target: ProbeCell;
+      readonly lineOfSight: 'clear' | 'blocked';
+    }
+  | {
+      readonly version: typeof PROBE_VERSION;
+      readonly question: 'Q14';
+      readonly queryId: string;
+      readonly source: ProbeCreatureEndpoint;
+      readonly target: ProbeCell;
+      readonly cover: CoverTier;
     };
 
 export interface ProbeModelSpec {
@@ -308,7 +374,7 @@ interface ScreenshotProbeRowFields {
   readonly model: string;
   readonly effort: ProbeEffort;
   readonly question: ScreenshotQuestionId;
-  readonly promptVersion: typeof PROBE_VERSION;
+  readonly promptVersion: typeof PROBE_VERSION | typeof PREVIOUS_PROBE_VERSION;
   readonly primerVersion: PrimerVersion;
   readonly generation: string;
   readonly boardGlyphs: BoardGlyphMode;
@@ -358,6 +424,7 @@ export type ScreenshotProbeRow = ScreenshotProbeRowFields &
 export interface ProbeStateCandidate {
   readonly id: string;
   readonly state: EncounterState;
+  readonly desiredLineTier?: CoverTier;
 }
 
 export interface ProbeSnapshotService {
@@ -407,6 +474,15 @@ const creatureSchema = z
     row: nonNegativeInteger,
   })
   .strict();
+const creatureEndpointSchema = creatureSchema
+  .extend({
+    badgeNumber: z.number().int().min(1).max(99),
+    badgeColor: z.string().min(1),
+  })
+  .strict();
+const lineOfSightSchema = z.enum(['clear', 'blocked']);
+const coverTierSchema = z.enum(['none', 'half', 'three_quarters', 'total']);
+const queryIdSchema = z.string().min(1);
 
 const answerSchemas = {
   Q1: z
@@ -492,6 +568,46 @@ const answerSchemas = {
       cells: z.array(cellSchema),
     })
     .strict(),
+  Q11: z
+    .object({
+      version: z.literal(PROBE_VERSION),
+      question: z.literal('Q11'),
+      queryId: queryIdSchema,
+      source: creatureEndpointSchema,
+      target: creatureEndpointSchema,
+      lineOfSight: lineOfSightSchema,
+    })
+    .strict(),
+  Q12: z
+    .object({
+      version: z.literal(PROBE_VERSION),
+      question: z.literal('Q12'),
+      queryId: queryIdSchema,
+      source: creatureEndpointSchema,
+      target: creatureEndpointSchema,
+      cover: coverTierSchema,
+    })
+    .strict(),
+  Q13: z
+    .object({
+      version: z.literal(PROBE_VERSION),
+      question: z.literal('Q13'),
+      queryId: queryIdSchema,
+      source: creatureEndpointSchema,
+      target: cellSchema,
+      lineOfSight: lineOfSightSchema,
+    })
+    .strict(),
+  Q14: z
+    .object({
+      version: z.literal(PROBE_VERSION),
+      question: z.literal('Q14'),
+      queryId: queryIdSchema,
+      source: creatureEndpointSchema,
+      target: cellSchema,
+      cover: coverTierSchema,
+    })
+    .strict(),
 } as const;
 
 const QUESTION_TEXT = {
@@ -505,6 +621,10 @@ const QUESTION_TEXT = {
   Q8: 'List every creature marked as hidden from players, including its coordinate.',
   Q9: 'List fogged cells and obscured cells separately. A cell may appear in both arrays.',
   Q10: 'List every blocked cell.',
+  Q11: 'State whether the named directional creature-to-creature query has clear or blocked line of sight. Repeat the exact query id and both endpoints.',
+  Q12: 'State the exact cover tier for the named directional creature-to-creature query: none, half, three_quarters, or total. Repeat the exact query id and both endpoints.',
+  Q13: 'State whether the named directional creature-to-cell query has clear or blocked line of sight. Repeat the exact query id and both endpoints.',
+  Q14: 'State the exact cover tier for the named directional creature-to-cell query: none, half, three_quarters, or total. Repeat the exact query id and both endpoints.',
 } as const satisfies Readonly<Record<ScreenshotQuestionId, string>>;
 
 function zeroBasedColumn(value: number): ZeroBasedColumn {
@@ -539,6 +659,121 @@ function orderedCells(cells: readonly GridCell[]): readonly ProbeCell[] {
   );
 }
 
+function endpointForCombatant(
+  combatant: FactSheetCombatant,
+): ProbeCreatureEndpoint {
+  return {
+    ...creatureLocation(combatant),
+    badgeNumber: combatant.badgeNumber,
+    badgeColor: combatant.badgeColor,
+  };
+}
+
+function lineOfSight(blocksSight: boolean): 'clear' | 'blocked' {
+  return blocksSight ? 'blocked' : 'clear';
+}
+
+function compareCreatureEndpoints(
+  left: ProbeCreatureEndpoint,
+  right: ProbeCreatureEndpoint,
+): number {
+  return left.name.localeCompare(right.name) ||
+    left.row - right.row ||
+    left.column - right.column ||
+    left.badgeColor.localeCompare(right.badgeColor) ||
+    left.badgeNumber - right.badgeNumber;
+}
+
+function creatureQueryId(
+  source: ProbeCreatureEndpoint,
+  target: ProbeCreatureEndpoint,
+): string {
+  return `creature-line:${source.badgeColor}-${String(source.badgeNumber)}>${target.badgeColor}-${String(target.badgeNumber)}`;
+}
+
+function cellQueryId(source: ProbeCreatureEndpoint, target: ProbeCell): string {
+  return `cell-line:${source.badgeColor}-${String(source.badgeNumber)}>${String(target.column)},${String(target.row)}`;
+}
+
+/**
+ * D576 ground truth and membership use only the canonical production traces.
+ * The probe selects endpoints; it never reproduces corner/raster geometry.
+ */
+export function deriveProbeLineQueries(
+  state: EncounterState,
+  combatants: readonly FactSheetCombatant[],
+  desiredTier?: CoverTier,
+): {
+  readonly creatureLineQuery: ProbeCreatureLineQuery;
+  readonly cellLineQuery: ProbeCellLineQuery;
+} {
+  const eligibleSources = combatants
+    .filter((combatant) => combatant.life === 'living')
+    .sort((left, right) =>
+      compareCreatureEndpoints(endpointForCombatant(left), endpointForCombatant(right)));
+  const eligibleTargets = combatants
+    .filter((combatant) => combatant.life !== 'dead')
+    .sort((left, right) =>
+      compareCreatureEndpoints(endpointForCombatant(left), endpointForCombatant(right)));
+  const creatureQueries: ProbeCreatureLineQuery[] = [];
+  for (const source of eligibleSources) {
+    for (const target of eligibleTargets) {
+      if (source.id === target.id) continue;
+      const trace = traceCombatantLine(state, source.id, target.id);
+      if (desiredTier !== undefined && trace.tier !== desiredTier) continue;
+      const sourceEndpoint = endpointForCombatant(source);
+      const targetEndpoint = endpointForCombatant(target);
+      creatureQueries.push({
+        queryId: creatureQueryId(sourceEndpoint, targetEndpoint),
+        source: sourceEndpoint,
+        target: targetEndpoint,
+        tier: trace.tier,
+        lineOfSight: lineOfSight(trace.blocksSight),
+      });
+    }
+  }
+  creatureQueries.sort((left, right) =>
+    compareCreatureEndpoints(left.source, right.source) ||
+    compareCreatureEndpoints(left.target, right.target));
+
+  const occupied = new Set(
+    eligibleTargets.flatMap((combatant) =>
+      combatantSpace(state, combatant.id).cells.map(cellKey)),
+  );
+  const cellQueries: ProbeCellLineQuery[] = [];
+  for (const source of eligibleSources) {
+    for (let row = 0; row < state.bounds.rows; row += 1) {
+      for (let column = 0; column < state.bounds.columns; column += 1) {
+        const target = { column, row };
+        if (occupied.has(cellKey(target))) continue;
+        const trace = traceCombatantLineToCells(state, source.id, [target]);
+        if (desiredTier !== undefined && trace.tier !== desiredTier) continue;
+        const sourceEndpoint = endpointForCombatant(source);
+        const targetCell = probeCell(target);
+        cellQueries.push({
+          queryId: cellQueryId(sourceEndpoint, targetCell),
+          source: sourceEndpoint,
+          target: targetCell,
+          tier: trace.tier,
+          lineOfSight: lineOfSight(trace.blocksSight),
+        });
+      }
+    }
+  }
+  cellQueries.sort((left, right) =>
+    compareCreatureEndpoints(left.source, right.source) ||
+    left.target.column - right.target.column ||
+    left.target.row - right.target.row);
+  const creatureLineQuery = creatureQueries[0];
+  const cellLineQuery = cellQueries[0];
+  if (creatureLineQuery === undefined || cellLineQuery === undefined) {
+    throw new RangeError(
+      `Probe state cannot supply both line queries${desiredTier === undefined ? '' : ` for ${desiredTier}`}.`,
+    );
+  }
+  return { creatureLineQuery, cellLineQuery };
+}
+
 /** Matches the prose renderer's HP classifier in src/vtt/mcp/engine-server.ts. */
 export function screenshotHitPointBand(
   hitPoints: number,
@@ -551,6 +786,7 @@ export function screenshotHitPointBand(
 
 export function deriveScreenshotFactSheet(
   state: EncounterState,
+  desiredLineTier?: CoverTier,
 ): ScreenshotFactSheet {
   const dmView = projectDmView(state);
   const dmEncounter = dmVisibleEncounter(dmView);
@@ -583,6 +819,7 @@ export function deriveScreenshotFactSheet(
           `DM board combatant ${String(entry.id)} has no badge projection.`,
         );
       return {
+        id: entry.id,
         displayName: entry.name,
         badgeNumber: badge.number,
         badgeColor: badge.color.id,
@@ -677,6 +914,7 @@ export function deriveScreenshotFactSheet(
       }
     }
   }
+  const lineQueries = deriveProbeLineQueries(state, combatants, desiredLineTier);
   return {
     version: PROBE_VERSION,
     bounds: { ...board.bounds },
@@ -689,6 +927,7 @@ export function deriveScreenshotFactSheet(
     doors,
     worldObjects,
     adjacencyPairs,
+    ...lineQueries,
   };
 }
 
@@ -773,6 +1012,42 @@ export function truthAnswer(
       };
     case 'Q10':
       return { version: PROBE_VERSION, question, cells: sheet.blockedCells };
+    case 'Q11':
+      return {
+        version: PROBE_VERSION,
+        question,
+        queryId: sheet.creatureLineQuery.queryId,
+        source: sheet.creatureLineQuery.source,
+        target: sheet.creatureLineQuery.target,
+        lineOfSight: sheet.creatureLineQuery.lineOfSight,
+      };
+    case 'Q12':
+      return {
+        version: PROBE_VERSION,
+        question,
+        queryId: sheet.creatureLineQuery.queryId,
+        source: sheet.creatureLineQuery.source,
+        target: sheet.creatureLineQuery.target,
+        cover: sheet.creatureLineQuery.tier,
+      };
+    case 'Q13':
+      return {
+        version: PROBE_VERSION,
+        question,
+        queryId: sheet.cellLineQuery.queryId,
+        source: sheet.cellLineQuery.source,
+        target: sheet.cellLineQuery.target,
+        lineOfSight: sheet.cellLineQuery.lineOfSight,
+      };
+    case 'Q14':
+      return {
+        version: PROBE_VERSION,
+        question,
+        queryId: sheet.cellLineQuery.queryId,
+        source: sheet.cellLineQuery.source,
+        target: sheet.cellLineQuery.target,
+        cover: sheet.cellLineQuery.tier,
+      };
   }
 }
 
@@ -877,6 +1152,38 @@ export function parseProbeAnswer(
       const parsed = answerSchemas.Q10.parse(decoded);
       return { ...parsed, cells: parsed.cells.map(brandCell) };
     }
+    case 'Q11': {
+      const parsed = answerSchemas.Q11.parse(decoded);
+      return {
+        ...parsed,
+        source: { ...brandCreature(parsed.source), badgeNumber: parsed.source.badgeNumber, badgeColor: parsed.source.badgeColor },
+        target: { ...brandCreature(parsed.target), badgeNumber: parsed.target.badgeNumber, badgeColor: parsed.target.badgeColor },
+      };
+    }
+    case 'Q12': {
+      const parsed = answerSchemas.Q12.parse(decoded);
+      return {
+        ...parsed,
+        source: { ...brandCreature(parsed.source), badgeNumber: parsed.source.badgeNumber, badgeColor: parsed.source.badgeColor },
+        target: { ...brandCreature(parsed.target), badgeNumber: parsed.target.badgeNumber, badgeColor: parsed.target.badgeColor },
+      };
+    }
+    case 'Q13': {
+      const parsed = answerSchemas.Q13.parse(decoded);
+      return {
+        ...parsed,
+        source: { ...brandCreature(parsed.source), badgeNumber: parsed.source.badgeNumber, badgeColor: parsed.source.badgeColor },
+        target: brandCell(parsed.target),
+      };
+    }
+    case 'Q14': {
+      const parsed = answerSchemas.Q14.parse(decoded);
+      return {
+        ...parsed,
+        source: { ...brandCreature(parsed.source), badgeNumber: parsed.source.badgeNumber, badgeColor: parsed.source.badgeColor },
+        target: brandCell(parsed.target),
+      };
+    }
   }
 }
 
@@ -925,6 +1232,10 @@ export function normalizeProbeAnswer(
     ...entry,
     name: normalizedCreatureAnswerName(entry.name, context),
   });
+  const endpoint = (entry: ProbeCreatureEndpoint): ProbeCreatureEndpoint => ({
+    ...entry,
+    name: normalizedCreatureAnswerName(entry.name, context),
+  });
   switch (answer.question) {
     case 'Q1':
       return { ...answer, creatures: answer.creatures.map(creature) };
@@ -964,11 +1275,21 @@ export function normalizeProbeAnswer(
       return answer;
     case 'Q10':
       return answer;
+    case 'Q11':
+    case 'Q12':
+      return { ...answer, source: endpoint(answer.source), target: endpoint(answer.target) };
+    case 'Q13':
+    case 'Q14':
+      return { ...answer, source: endpoint(answer.source) };
   }
 }
 
 function normalizeProbeTruth(answer: ProbeAnswer): ProbeAnswer {
   const creature = (entry: CreatureLocation): CreatureLocation => ({
+    ...entry,
+    name: normalizedProbeName(entry.name),
+  });
+  const endpoint = (entry: ProbeCreatureEndpoint): ProbeCreatureEndpoint => ({
     ...entry,
     name: normalizedProbeName(entry.name),
   });
@@ -1011,6 +1332,12 @@ function normalizeProbeTruth(answer: ProbeAnswer): ProbeAnswer {
       return answer;
     case 'Q10':
       return answer;
+    case 'Q11':
+    case 'Q12':
+      return { ...answer, source: endpoint(answer.source), target: endpoint(answer.target) };
+    case 'Q13':
+    case 'Q14':
+      return { ...answer, source: endpoint(answer.source) };
   }
 }
 
@@ -1111,6 +1438,58 @@ function factsForAnswer(answer: ProbeAnswer): readonly ScorableFact[] {
       return answer.cells.map((entry) =>
         onePositionFact('blocked', '', entry, null),
       );
+    case 'Q11':
+      return [{
+        key: canonicalJson({
+          prefix: 'creature_line_of_sight',
+          queryId: answer.queryId,
+          source: answer.source,
+          target: answer.target,
+          classification: answer.lineOfSight,
+        }),
+        subject: answer.queryId,
+        positions: [answer.source, answer.target],
+        classification: answer.lineOfSight,
+      }];
+    case 'Q12':
+      return [{
+        key: canonicalJson({
+          prefix: 'creature_cover',
+          queryId: answer.queryId,
+          source: answer.source,
+          target: answer.target,
+          classification: answer.cover,
+        }),
+        subject: answer.queryId,
+        positions: [answer.source, answer.target],
+        classification: answer.cover,
+      }];
+    case 'Q13':
+      return [{
+        key: canonicalJson({
+          prefix: 'cell_line_of_sight',
+          queryId: answer.queryId,
+          source: answer.source,
+          target: answer.target,
+          classification: answer.lineOfSight,
+        }),
+        subject: answer.queryId,
+        positions: [answer.source, answer.target],
+        classification: answer.lineOfSight,
+      }];
+    case 'Q14':
+      return [{
+        key: canonicalJson({
+          prefix: 'cell_cover',
+          queryId: answer.queryId,
+          source: answer.source,
+          target: answer.target,
+          classification: answer.cover,
+        }),
+        subject: answer.queryId,
+        positions: [answer.source, answer.target],
+        classification: answer.cover,
+      }];
   }
 }
 
@@ -1257,6 +1636,7 @@ export function screenshotQuestionPrompt(
   boardGlyphs: BoardGlyphMode = DEFAULT_BOARD_GLYPH_MODE,
   boardInput: BoardInput = 'png',
   semanticPayload: string | null = null,
+  truth: ProbeAnswer | null = null,
 ): string {
   if (boardInput !== 'png' && semanticPayload === null)
     throw new TypeError(`${boardInput} board input requires a semantic payload.`);
@@ -1274,8 +1654,24 @@ export function screenshotQuestionPrompt(
           'Return only JSON matching the supplied strict schema.',
           `Semantic board JSON:\n${semanticPayload ?? ''}`,
         ];
+  const lineQuery = (() => {
+    if (question === 'Q11' || question === 'Q12') {
+      if (truth?.question !== question)
+        throw new TypeError(`${question} prompt requires its matching directional query.`);
+      const endpoint = (value: ProbeCreatureEndpoint): string =>
+        `"${value.name}" (badge ${value.badgeColor} ${String(value.badgeNumber)}, anchor ${String(value.column)},${String(value.row)})`;
+      return `Directional query ${truth.queryId}: source ${endpoint(truth.source)}; target ${endpoint(truth.target)}.`;
+    }
+    if (question === 'Q13' || question === 'Q14') {
+      if (truth?.question !== question)
+        throw new TypeError(`${question} prompt requires its matching directional query.`);
+      return `Directional query ${truth.queryId}: source "${truth.source.name}" (badge ${truth.source.badgeColor} ${String(truth.source.badgeNumber)}, anchor ${String(truth.source.column)},${String(truth.source.row)}); target gutter cell ${String(truth.target.column)},${String(truth.target.row)}.`;
+    }
+    return null;
+  })();
   const questionLines = [
     `Question ${question}: ${QUESTION_TEXT[question]}`,
+    ...(lineQuery === null ? [] : [lineQuery]),
     'Use zero-based column,row coordinates. Column numbers and row numbers appear along the board edges.',
     ...inputInstructions,
   ];
@@ -1309,6 +1705,11 @@ const jsonCreatureSchema = objectSchema({
   name: scalarSchema('string', { minLength: 1 }),
   column: scalarSchema('integer', { minimum: 0 }),
   row: scalarSchema('integer', { minimum: 0 }),
+});
+const jsonCreatureEndpointSchema = objectSchema({
+  ...(jsonCreatureSchema['properties'] as Readonly<Record<string, unknown>>),
+  badgeNumber: scalarSchema('integer', { minimum: 1, maximum: 99 }),
+  badgeColor: scalarSchema('string', { minLength: 1 }),
 });
 
 function answerHeader(
@@ -1409,6 +1810,38 @@ export function probeAnswerJsonSchema(
         ...answerHeader(question),
         cells: array(jsonCellSchema),
       });
+    case 'Q11':
+      return objectSchema({
+        ...answerHeader(question),
+        queryId: scalarSchema('string', { minLength: 1 }),
+        source: jsonCreatureEndpointSchema,
+        target: jsonCreatureEndpointSchema,
+        lineOfSight: scalarSchema('string', { enum: ['clear', 'blocked'] }),
+      });
+    case 'Q12':
+      return objectSchema({
+        ...answerHeader(question),
+        queryId: scalarSchema('string', { minLength: 1 }),
+        source: jsonCreatureEndpointSchema,
+        target: jsonCreatureEndpointSchema,
+        cover: scalarSchema('string', { enum: ['none', 'half', 'three_quarters', 'total'] }),
+      });
+    case 'Q13':
+      return objectSchema({
+        ...answerHeader(question),
+        queryId: scalarSchema('string', { minLength: 1 }),
+        source: jsonCreatureEndpointSchema,
+        target: jsonCellSchema,
+        lineOfSight: scalarSchema('string', { enum: ['clear', 'blocked'] }),
+      });
+    case 'Q14':
+      return objectSchema({
+        ...answerHeader(question),
+        queryId: scalarSchema('string', { minLength: 1 }),
+        source: jsonCreatureEndpointSchema,
+        target: jsonCellSchema,
+        cover: scalarSchema('string', { enum: ['none', 'half', 'three_quarters', 'total'] }),
+      });
   }
 }
 
@@ -1475,6 +1908,20 @@ export function shiftedByOneRowAnswer(answer: ProbeAnswer): ProbeAnswer {
       };
     case 'Q10':
       return { ...answer, cells: answer.cells.map(shiftCell) };
+    case 'Q11':
+    case 'Q12':
+      return {
+        ...answer,
+        source: { ...answer.source, row: zeroBasedRow(answer.source.row + 1) },
+        target: { ...answer.target, row: zeroBasedRow(answer.target.row + 1) },
+      };
+    case 'Q13':
+    case 'Q14':
+      return {
+        ...answer,
+        source: { ...answer.source, row: zeroBasedRow(answer.source.row + 1) },
+        target: shiftCell(answer.target),
+      };
   }
 }
 
@@ -1829,36 +2276,12 @@ export function parseScreenshotProbeRescoreArgs(
   };
 }
 
-function vanePlayers(): readonly CombatantProfile[] {
-  const referencePlayers = referenceEncounterSetup().combatants.filter(
-    (profile) => profile.kind === 'player_character',
-  );
-  const template = referencePlayers[0];
-  if (template === undefined || template.kind !== 'player_character')
-    throw new Error('Reference party has no player template.');
-  return [
-    ...referencePlayers,
-    {
-      ...template,
-      id: combatantId('combatant:vane-probe-four'),
-      tokenId: tokenId('token:vane-probe-four'),
-      name: 'Vane Probe Four',
-      characterId: 4,
-    },
-    {
-      ...template,
-      id: combatantId('combatant:vane-probe-five'),
-      tokenId: tokenId('token:vane-probe-five'),
-      name: 'Vane Probe Five',
-      characterId: 5,
-    },
-  ];
-}
-
-const GENERATED_PROBE_SEEDS = [
-  6_203_101, 6_203_102, 6_203_103, 6_203_104, 6_203_105, 6_203_106, 6_203_107,
-  6_203_108, 6_203_109, 6_203_110,
+const GENERATED_PROBE_BASE_SEEDS = [
+  5_763_001, 5_763_002, 5_763_003, 5_763_006,
 ] as const;
+const CATALOGUE_TIERS = [
+  'none', 'half', 'three_quarters', 'total',
+] as const satisfies readonly CoverTier[];
 
 function perimeterCells(state: EncounterState): readonly GridCell[] {
   const cells: GridCell[] = [];
@@ -1887,7 +2310,19 @@ function firstFreeCell(
 }
 
 /** Adds only engine-owned facts to six seeded rooms whose source fixtures lack them. */
-function withProbeMarkers(state: EncounterState, seed: number): EncounterState {
+function rotatedCells(
+  cells: readonly GridCell[],
+  offset: number,
+): readonly GridCell[] {
+  const split = offset % cells.length;
+  return [...cells.slice(split), ...cells.slice(0, split)];
+}
+
+function withProbeMarkers(
+  state: EncounterState,
+  seed: number,
+  markerOrdinal = 0,
+): EncounterState {
   const hiddenSubject = state.combatants.find(
     (combatant) => combatant.profile.kind === 'monster',
   );
@@ -1895,14 +2330,20 @@ function withProbeMarkers(state: EncounterState, seed: number): EncounterState {
     throw new RangeError(
       `Generated probe room ${String(seed)} has no monster to hide.`,
     );
-  const doorCell = firstFreeCell(state, perimeterCells(state));
+  const doorCell = firstFreeCell(
+    state,
+    rotatedCells(perimeterCells(state), markerOrdinal),
+  );
   const fogCandidates: GridCell[] = [];
   for (let row = 1; row < state.bounds.rows - 1; row += 1) {
     for (let column = 1; column < state.bounds.columns - 1; column += 1)
       fogCandidates.push({ column, row });
   }
-  const fogCell = firstFreeCell(state, fogCandidates);
-  const doorOpen = seed % 2 === 0;
+  const fogCell = firstFreeCell(
+    state,
+    rotatedCells(fogCandidates, markerOrdinal * 7),
+  );
+  const doorOpen = true;
   return {
     ...state,
     foggedCells: [...state.foggedCells, fogCell],
@@ -1938,81 +2379,54 @@ function withProbeMarkers(state: EncounterState, seed: number): EncounterState {
   };
 }
 
+let cachedGeneratedProbeCandidates: readonly ProbeStateCandidate[] | null = null;
+
 export function deterministicGeneratedProbeCandidates(): readonly ProbeStateCandidate[] {
-  return GENERATED_PROBE_SEEDS.map((seed, index) => {
-    const generated = generateRoom(seed, { difficulty: 'brutal' }).encounter
-      .state;
-    return {
-      id: `generated-brutal-${String(seed)}`,
-      state:
-        index < MIN_FACT_CLASS_STATE_COVERAGE
-          ? withProbeMarkers(generated, seed)
-          : generated,
-    };
-  });
+  if (cachedGeneratedProbeCandidates !== null) return cachedGeneratedProbeCandidates;
+  const candidates: ProbeStateCandidate[] = [];
+  const bases = GENERATED_PROBE_BASE_SEEDS.map((seed) => ({
+    seed,
+    state: generateRoom(seed, {
+      difficulty: 'brutal',
+      terrainProfile: 'los_cover_v1',
+    }).encounter.state,
+  }));
+  for (const [tierIndex, desiredLineTier] of CATALOGUE_TIERS.entries()) {
+    const eligibleBases = bases.filter((base) => {
+      try {
+        deriveScreenshotFactSheet(base.state, desiredLineTier);
+        return true;
+      } catch (error) {
+        if (error instanceof RangeError) return false;
+        throw error;
+      }
+    });
+    if (eligibleBases.length === 0) {
+      throw new RangeError(
+        `D576 probe catalogue has no generated ${desiredLineTier} query state.`,
+      );
+    }
+    for (let variant = 0; variant < MIN_FACT_CLASS_STATE_COVERAGE; variant += 1) {
+      const base = eligibleBases[variant % eligibleBases.length];
+      if (base === undefined) throw new Error('Eligible D576 probe base vanished.');
+      const markerOrdinal = tierIndex * MIN_FACT_CLASS_STATE_COVERAGE + variant;
+      const state = withProbeMarkers(base.state, base.seed, markerOrdinal);
+      deriveScreenshotFactSheet(state, desiredLineTier);
+      candidates.push({
+        id: `generated-los-cover-v1-${String(base.seed)}-${desiredLineTier}-v${String(variant + 1)}`,
+        state,
+        desiredLineTier,
+      });
+    }
+  }
+  cachedGeneratedProbeCandidates = Object.freeze(candidates);
+  return cachedGeneratedProbeCandidates;
 }
 
 export async function defaultProbeStateCandidates(): Promise<
   readonly ProbeStateCandidate[]
 > {
-  const [brutalFixtures, watabouBytes] = await Promise.all([
-    Promise.all(
-      Array.from({ length: 10 }, (_, index) => {
-        const seed = 6_203_001 + index;
-        return loadArenaFixture(
-          join(
-            repositoryRoot,
-            `tests/fixtures/arena-basis-brutal/seed-${String(seed)}.json`,
-          ),
-        ).then(
-          (state): ProbeStateCandidate => ({
-            id: `arena-brutal-${String(seed)}`,
-            state,
-          }),
-        );
-      }),
-    ),
-    readFile(
-      join(
-        repositoryRoot,
-        'tests/fixtures/watabou/one-page-dungeon-sample.json',
-      ),
-      'utf8',
-    ),
-  ]);
-  const reference = createEncounter(referenceEncounterSetup());
-  const referenceWithHidden: EncounterState = {
-    ...reference,
-    hiddenCombatants: [
-      {
-        combatant: REFERENCE_MONSTER_ID,
-        stealthTotal: 20,
-        edition: reference.rulesEdition,
-      },
-    ],
-  };
-  const candidates: readonly ProbeStateCandidate[] = [
-    ...brutalFixtures,
-    { id: 'reference-hidden', state: referenceWithHidden },
-    {
-      id: 'vane-warren-cinder-rite',
-      state: createVaneWarrenFight('cinder-rite', vanePlayers()).encounter,
-    },
-    {
-      id: 'watabou-generated-bounds',
-      state: adaptWatabouDungeon(JSON.parse(watabouBytes) as unknown, {
-        seed: 6203003,
-      }).state,
-    },
-    {
-      id: 'generated-bounds-24x24',
-      state: generateRoom(6203001, {
-        dimensions: { columns: 24, rows: 24 },
-        difficulty: 'brutal',
-      }).encounter.state,
-    },
-    ...deterministicGeneratedProbeCandidates(),
-  ];
+  const candidates = deterministicGeneratedProbeCandidates();
   if (candidates.length !== PROBE_CATALOGUE_SIZE) {
     throw new Error(
       `Screenshot probe catalogue has ${String(candidates.length)} states; expected ${String(PROBE_CATALOGUE_SIZE)}.`,
@@ -2048,6 +2462,11 @@ function answerHasFacts(answer: ProbeAnswer): boolean {
       return answer.foggedCells.length + answer.obscuredCells.length > 0;
     case 'Q10':
       return answer.cells.length > 0;
+    case 'Q11':
+    case 'Q12':
+    case 'Q13':
+    case 'Q14':
+      return true;
   }
 }
 
@@ -2065,14 +2484,55 @@ export function probeCatalogueClassCoverage(
     Q8: 0,
     Q9: 0,
     Q10: 0,
+    Q11: 0,
+    Q12: 0,
+    Q13: 0,
+    Q14: 0,
   } satisfies Record<ScreenshotQuestionId, number>;
   for (const candidate of candidates) {
-    const sheet = deriveScreenshotFactSheet(candidate.state);
+    const sheet = deriveScreenshotFactSheet(
+      candidate.state,
+      candidate.desiredLineTier,
+    );
     for (const question of SCREENSHOT_QUESTION_IDS) {
       if (answerHasFacts(truthAnswer(sheet, question))) coverage[question] += 1;
     }
   }
   return coverage;
+}
+
+export interface ProbeCatalogueLineCoverage {
+  readonly creatureCover: Readonly<Record<CoverTier, number>>;
+  readonly cellCover: Readonly<Record<CoverTier, number>>;
+  readonly creatureLineOfSight: Readonly<Record<'clear' | 'blocked', number>>;
+  readonly cellLineOfSight: Readonly<Record<'clear' | 'blocked', number>>;
+}
+
+export function probeCatalogueLineCoverage(
+  candidates: readonly ProbeStateCandidate[],
+): ProbeCatalogueLineCoverage {
+  const cover = (): Record<CoverTier, number> => ({
+    none: 0,
+    half: 0,
+    three_quarters: 0,
+    total: 0,
+  });
+  const sight = (): Record<'clear' | 'blocked', number> => ({ clear: 0, blocked: 0 });
+  const creatureCover = cover();
+  const cellCover = cover();
+  const creatureLineOfSight = sight();
+  const cellLineOfSight = sight();
+  for (const candidate of candidates) {
+    const sheet = deriveScreenshotFactSheet(
+      candidate.state,
+      candidate.desiredLineTier,
+    );
+    creatureCover[sheet.creatureLineQuery.tier] += 1;
+    cellCover[sheet.cellLineQuery.tier] += 1;
+    creatureLineOfSight[sheet.creatureLineQuery.lineOfSight] += 1;
+    cellLineOfSight[sheet.cellLineQuery.lineOfSight] += 1;
+  }
+  return { creatureCover, cellCover, creatureLineOfSight, cellLineOfSight };
 }
 
 function shuffledCandidates(
@@ -2216,6 +2676,7 @@ async function runTask(
       boardGlyphs,
       boardInput,
       boardInput === 'png' ? null : task.semanticPayload,
+      task.truth,
     ),
     schemaPath: schemas[task.question],
     imagePath: boardInput === 'semantic'
@@ -2297,9 +2758,13 @@ async function runTask(
 
 interface ClassSummary {
   readonly question: ScreenshotQuestionId;
+  readonly scoreNumerator: number;
+  readonly denominator: number;
   readonly accuracy: number;
   readonly accuracyInterval95: BootstrapInterval;
   readonly hallucinations: number;
+  readonly refusalCount: number;
+  readonly totalWallMs: number;
   readonly confusions: readonly string[];
   readonly passes: boolean;
   readonly deltaVsPrevious: number | null;
@@ -2340,6 +2805,7 @@ const savedProbeRowSchema = z
     version: z.union([
       z.literal(LEGACY_ROW_VERSION),
       z.literal(PREVIOUS_ROW_VERSION),
+      z.literal(HISTORICAL_ROW_VERSION),
       z.literal(ROW_VERSION),
     ]),
     resultKind: z.enum(['generated', 'rescored']).optional(),
@@ -2352,10 +2818,14 @@ const savedProbeRowSchema = z
     model: z.string().min(1),
     effort: effortSchema,
     question: z.enum(SCREENSHOT_QUESTION_IDS),
-    promptVersion: z.literal(PROBE_VERSION),
+    promptVersion: z.union([
+      z.literal(PROBE_VERSION),
+      z.literal(PREVIOUS_PROBE_VERSION),
+    ]),
     primerVersion: z.union([
       z.literal(PRIMER_VERSION),
       z.literal(PREVIOUS_PRIMER_VERSION),
+      z.literal(LEGACY_PRIMER_VERSION),
       z.literal('d557-general-board-primer-v8'),
       z.literal('d525-general-board-primer-v5'),
       z.null(),
@@ -2459,7 +2929,9 @@ function classSummaries(
   previousRows: readonly ComparisonProbeRow[] | null = null,
   bootstrapSeed = 0,
 ): readonly ClassSummary[] {
-  return SCREENSHOT_QUESTION_IDS.map((question): ClassSummary => {
+  const presentQuestions = SCREENSHOT_QUESTION_IDS.filter((question) =>
+    rows.some((row) => row.question === question));
+  return presentQuestions.map((question): ClassSummary => {
     const selected = rows.filter((row) => row.question === question);
     if (selected.length === 0)
       throw new Error(`Summary has no rows for ${question}.`);
@@ -2506,12 +2978,16 @@ function classSummaries(
           );
     return {
       question,
+      scoreNumerator: selected.reduce((sum, row) => sum + row.score, 0),
+      denominator: selected.length,
       accuracy,
       accuracyInterval95,
       hallucinations: selected.reduce(
         (sum, row) => sum + row.hallucinations,
         0,
       ),
+      refusalCount: selected.filter((row) => row.outcome !== 'answered').length,
+      totalWallMs: selected.reduce((sum, row) => sum + row.wallMs, 0),
       confusions: accuracy < PASS_THRESHOLD ? topConfusions(selected) : [],
       passes: accuracy >= PASS_THRESHOLD,
       deltaVsPrevious:
@@ -2598,9 +3074,15 @@ export function strictProbeGate(rows: readonly ScreenshotProbeRow[]): boolean {
   return (
     rows.every((row) => row.resultKind === 'generated') &&
     groups.size > 0 &&
-    [...groups.values()].every((group) =>
-      classSummaries(group).every((summary) => summary.passes),
-    )
+    [...groups.values()].every((group) => {
+      const expected = group.every((row) => row.boardInput === 'png')
+        ? SCREENSHOT_QUESTION_IDS
+        : SCREENSHOT_QUESTION_IDS.slice(0, 10);
+      const present = SCREENSHOT_QUESTION_IDS.filter((question) =>
+        group.some((row) => row.question === question));
+      return canonicalJson(present) === canonicalJson(expected) &&
+        classSummaries(group).every((summary) => summary.passes);
+    })
   );
 }
 
@@ -2626,7 +3108,7 @@ export function renderProbeSummary(
     groups.set(key, group);
   }
   const lines = [
-    '# D519 screenshot comprehension probe',
+    '# D576 screenshot comprehension probe',
     '',
     ...(resultKind === 'rescored'
       ? ['**RESCORED ESTIMATE (image unchanged)**', '']
@@ -2653,7 +3135,7 @@ export function renderProbeSummary(
       previousGroup,
       labelledSeed(bootstrapSeed, key),
     );
-    const allPass = summaries.every((entry) => entry.passes);
+    const allPass = strictProbeGate(group);
     const deltaHeading =
       previousRows === null
         ? ''
@@ -2664,8 +3146,8 @@ export function renderProbeSummary(
       '',
       `Strict all classes >= 0.9: **${allPass ? 'PASS' : 'FAIL'}**`,
       '',
-      `| Class | Mean Jaccard | Mean 95% bootstrap interval |${deltaHeading} Hallucinations | Three most common confusions | Gate |`,
-      `|---|---:|---:|${deltaDivider}---:|---|---|`,
+      `| Class | Score numerator / denominator | Mean Jaccard | Mean 95% bootstrap interval |${deltaHeading} Refusals | Total latency ms | Hallucinations | Three most common confusions | Gate |`,
+      `|---|---:|---:|---:|${deltaDivider}---:|---:|---:|---|---|`,
     );
     for (const summary of summaries) {
       const delta =
@@ -2673,7 +3155,7 @@ export function renderProbeSummary(
           ? ''
           : ` ${summary.deltaVsPrevious >= 0 ? '+' : ''}${summary.deltaVsPrevious.toFixed(3)} | ${formatInterval(summary.deltaInterval95)} | ${summary.deltaAssessment === 'noise' ? 'noise' : 'signal'} |`;
       lines.push(
-        `| ${summary.question} | ${summary.accuracy.toFixed(3)} | ${formatInterval(summary.accuracyInterval95)} |${delta} ${String(summary.hallucinations)} | ${summary.confusions.join('; ') || '—'} | ${summary.passes ? 'PASS' : 'FAIL'} |`,
+        `| ${summary.question} | ${summary.scoreNumerator.toFixed(3)} / ${String(summary.denominator)} | ${summary.accuracy.toFixed(3)} | ${formatInterval(summary.accuracyInterval95)} |${delta} ${String(summary.refusalCount)} | ${summary.totalWallMs.toFixed(3)} | ${String(summary.hallucinations)} | ${summary.confusions.join('; ') || '—'} | ${summary.passes ? 'PASS' : 'FAIL'} |`,
       );
     }
     lines.push('');
@@ -2713,6 +3195,14 @@ function rescoreSavedRow(
       `Saved probe row ${String(rowNumber)} in ${path} is already rescored.`,
     );
   }
+  if (
+    saved.promptVersion === PREVIOUS_PROBE_VERSION &&
+    !SCREENSHOT_QUESTION_IDS.slice(0, 10).includes(saved.question)
+  ) {
+    throw new TypeError(
+      `Historical ${PREVIOUS_PROBE_VERSION} rows are retained as Q1-Q10 evidence only.`,
+    );
+  }
   const normalizeOldHpVocabulary = (payload: unknown): unknown => {
     const row = record(payload);
     if (
@@ -2738,9 +3228,14 @@ function rescoreSavedRow(
       }),
     };
   };
+  const upgradeHistoricalPromptVersion = (payload: unknown): unknown => {
+    if (saved.promptVersion !== PREVIOUS_PROBE_VERSION) return payload;
+    const row = record(payload);
+    return row === null ? payload : { ...row, version: PROBE_VERSION };
+  };
   const truth = parseProbeAnswer(
     saved.question,
-    canonicalJson(normalizeOldHpVocabulary(saved.truth)),
+    canonicalJson(upgradeHistoricalPromptVersion(normalizeOldHpVocabulary(saved.truth))),
   );
   const nameContext: ProbeNameNormalisationContext = {
     source: legacyGeneration ? 'legacy-rescore' : 'live',
@@ -2789,7 +3284,7 @@ function rescoreSavedRow(
     const rawDecoded: unknown = JSON.parse(saved.rawAnswer) as unknown;
     answer = parseProbeAnswer(
       saved.question,
-      canonicalJson(normalizeOldHpVocabulary(rawDecoded)),
+      canonicalJson(upgradeHistoricalPromptVersion(normalizeOldHpVocabulary(rawDecoded))),
     );
   } catch (error) {
     return {
@@ -2841,7 +3336,15 @@ export async function rescoreScreenshotProbe(
   for (let index = 0; index < decodedRows.length; index += 1) {
     const saved = savedProbeRowSchema.parse(decodedRows[index]);
     if (saved.question !== 'Q8') continue;
-    const truth = parseProbeAnswer('Q8', canonicalJson(saved.truth));
+    const savedTruth = record(saved.truth);
+    const truth = parseProbeAnswer(
+      'Q8',
+      canonicalJson(
+        saved.promptVersion === PREVIOUS_PROBE_VERSION && savedTruth !== null
+          ? { ...savedTruth, version: PROBE_VERSION }
+          : saved.truth,
+      ),
+    );
     if (truth.question !== 'Q8')
       throw new TypeError('Saved Q8 truth parsed as another question.');
     hiddenNamesByState.set(
@@ -2958,7 +3461,10 @@ export async function runScreenshotProbe(
       captured.push({
         candidate,
         artifact,
-        sheet: deriveScreenshotFactSheet(candidate.state),
+        sheet: deriveScreenshotFactSheet(
+          candidate.state,
+          candidate.desiredLineTier,
+        ),
         semanticPayload,
         semanticPayloadSha256,
         semanticPayloadBytes,
@@ -2975,7 +3481,9 @@ export async function runScreenshotProbe(
       semanticPayloadRelativePath,
     }) =>
       config.models.flatMap((model) =>
-        SCREENSHOT_QUESTION_IDS.map(
+        (config.boardInput === 'png'
+          ? SCREENSHOT_QUESTION_IDS
+          : SCREENSHOT_QUESTION_IDS.slice(0, 10)).map(
           (question): ProbeTask => ({
             candidate,
             artifact,
