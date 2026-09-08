@@ -1600,6 +1600,7 @@ export interface McpClient {
   nextId: number;
   stderr: string;
   terminalError: Error | null;
+  terminalErrorDelivered: boolean;
   readonly exit: Promise<number | null>;
 }
 
@@ -1607,14 +1608,22 @@ function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function rejectMcpClient(client: McpClient, error: Error, terminateChild = false): void {
-  if (client.terminalError !== null) return;
-  client.terminalError = error;
-  for (const pending of client.pending.values()) pending.reject(error);
-  client.pending.clear();
-  if (terminateChild && client.child.exitCode === null && client.child.signalCode === null) {
-    client.child.kill('SIGTERM');
+function rejectMcpClient(client: McpClient, error: Error): void {
+  if (client.terminalError === null) {
+    client.terminalError = error;
+    if (client.pending.size > 0) client.terminalErrorDelivered = true;
+    for (const pending of client.pending.values()) pending.reject(error);
+    client.pending.clear();
   }
+}
+
+function ensureMcpChildTermination(client: McpClient, signal: NodeJS.Signals): void {
+  if (client.child.exitCode === null && client.child.signalCode === null) client.child.kill(signal);
+}
+
+function terminateMcpClient(client: McpClient, error: Error): void {
+  rejectMcpClient(client, error);
+  ensureMcpChildTermination(client, 'SIGTERM');
 }
 
 function childExitedError(client: McpClient, detail: string, cause?: unknown): McpChildExited {
@@ -1630,34 +1639,38 @@ export function createMcpClient(child: ChildProcessWithoutNullStreams): McpClien
   let resolveExit: (code: number | null) => void = () => {};
   const exit = new Promise<number | null>((resolvePromise) => { resolveExit = resolvePromise; });
   const client: McpClient = {
-    child, lines, pending: new Map(), nextId: 1, stderr: '', terminalError: null, exit,
+    child, lines, pending: new Map(), nextId: 1, stderr: '',
+    terminalError: null, terminalErrorDelivered: false, exit,
   };
   child.stderr.on('data', (chunk: Buffer) => { client.stderr += chunk.toString('utf8'); });
   child.stderr.on('error', (error) => {
-    rejectMcpClient(client, childExitedError(client, `stderr failed: ${errorText(error)}`, error), true);
+    terminateMcpClient(client, childExitedError(client, `stderr failed: ${errorText(error)}`, error));
   });
   child.stdin.on('error', (error) => {
-    rejectMcpClient(client, childExitedError(client, `stdin failed: ${errorText(error)}`, error), true);
+    terminateMcpClient(client, childExitedError(client, `stdin failed: ${errorText(error)}`, error));
   });
   child.stdout.on('error', (error) => {
-    rejectMcpClient(client, childExitedError(client, `stdout failed: ${errorText(error)}`, error), true);
+    terminateMcpClient(client, childExitedError(client, `stdout failed: ${errorText(error)}`, error));
+  });
+  lines.on('error', (error) => {
+    terminateMcpClient(client, childExitedError(client, `readline failed: ${errorText(error)}`, error));
   });
   lines.on('line', (line) => {
     let response: Readonly<Record<string, unknown>> | null;
     try {
       response = asRecord(JSON.parse(line) as unknown);
     } catch (error) {
-      rejectMcpClient(client, new Error(`Engine MCP response was not valid JSON: ${errorText(error)}`, { cause: error }), true);
+      terminateMcpClient(client, new Error(`Engine MCP response was not valid JSON: ${errorText(error)}`, { cause: error }));
       return;
     }
     if (response === null || typeof response['id'] !== 'number') {
-      rejectMcpClient(client, new Error('Engine MCP response id mismatch.'), true);
+      terminateMcpClient(client, new Error('Engine MCP response id mismatch.'));
       return;
     }
     const id = response['id'];
     const pending = client.pending.get(id);
     if (pending === undefined) {
-      rejectMcpClient(client, new Error('Engine MCP response id mismatch.'), true);
+      terminateMcpClient(client, new Error('Engine MCP response id mismatch.'));
       return;
     }
     client.pending.delete(id);
@@ -1665,7 +1678,7 @@ export function createMcpClient(child: ChildProcessWithoutNullStreams): McpClien
     else pending.resolve(response['result']);
   });
   lines.once('close', () => {
-    rejectMcpClient(client, childExitedError(client, 'stdout closed'));
+    terminateMcpClient(client, childExitedError(client, 'stdout closed'));
   });
   child.once('error', (error) => {
     rejectMcpClient(client, childExitedError(client, `failed: ${errorText(error)}`, error));
@@ -1694,11 +1707,15 @@ export async function mcpRequest(client: McpClient, method: string, params: unkn
   client.nextId += 1;
   const requestParams = asRecord(params);
   if (requestParams === null) throw new TypeError('MCP request params must be an object.');
-  if (client.terminalError !== null) throw client.terminalError;
+  if (client.terminalError !== null) {
+    client.terminalErrorDelivered = true;
+    throw client.terminalError;
+  }
   if (client.child.exitCode !== null || client.child.signalCode !== null ||
     client.child.stdin.destroyed || client.child.stdin.writableEnded || !client.child.stdin.writable) {
     const error = childExitedError(client, 'is not writable');
     rejectMcpClient(client, error);
+    client.terminalErrorDelivered = true;
     throw error;
   }
   const payload = `${JSON.stringify({
@@ -1713,18 +1730,57 @@ export async function mcpRequest(client: McpClient, method: string, params: unkn
   });
   client.child.stdin.write(payload, (error) => {
     if (error !== null && error !== undefined) {
-      rejectMcpClient(client, childExitedError(client, `write failed: ${errorText(error)}`, error), true);
+      terminateMcpClient(client, childExitedError(client, `write failed: ${errorText(error)}`, error));
     }
   });
   return response;
 }
 
-async function stopMcpClient(client: McpClient, allowNonzero = false): Promise<void> {
+const MCP_CHILD_SHUTDOWN_GRACE_MS = 1_000;
+
+async function waitForMcpExit(
+  client: McpClient,
+  timeoutMs: number,
+): Promise<{ readonly exited: true; readonly code: number | null } | { readonly exited: false }> {
+  return new Promise((resolvePromise) => {
+    let settled = false;
+    const timeout = setTimeout(() => {
+      settled = true;
+      resolvePromise({ exited: false });
+    }, timeoutMs);
+    void client.exit.then((code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      resolvePromise({ exited: true, code });
+    });
+  });
+}
+
+export async function stopMcpClient(client: McpClient, allowNonzero = false): Promise<void> {
   if (!client.child.stdin.destroyed && !client.child.stdin.writableEnded) client.child.stdin.end();
-  const code = await client.exit;
+  let outcome = await waitForMcpExit(client, MCP_CHILD_SHUTDOWN_GRACE_MS);
+  if (!outcome.exited) {
+    ensureMcpChildTermination(client, 'SIGKILL');
+    outcome = await waitForMcpExit(client, MCP_CHILD_SHUTDOWN_GRACE_MS);
+  }
   client.lines.close();
-  if (code !== 0 && !allowNonzero) {
-    throw new Error(`Engine MCP server exited ${String(code)}: ${client.stderr}`);
+  if (!outcome.exited) {
+    const error = childExitedError(client, 'did not exit after SIGKILL');
+    rejectMcpClient(client, error);
+    if (!client.terminalErrorDelivered) {
+      client.terminalErrorDelivered = true;
+      throw client.terminalError ?? error;
+    }
+    return;
+  }
+  if (outcome.code !== 0 && !allowNonzero && !client.terminalErrorDelivered) {
+    const error = client.terminalError ?? childExitedError(
+      client,
+      `exited with code ${String(outcome.code)}`,
+    );
+    client.terminalErrorDelivered = true;
+    throw error;
   }
 }
 
