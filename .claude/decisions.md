@@ -15889,3 +15889,39 @@ Killed the gate by pid INCLUDING its vite server this time, and verified
 port 4500 free afterwards, applying the rule I wrote after the earlier
 orphan. Lane los-cover-i3fix dispatched, session
 01a07fd9-d3a1-7980-80eb-6653f70ae6f3.
+
+## NO LEAK: the last-seen gate failure was a substring artefact, and the guard is now structural (388b29b6) (2026-09-08 03:26)
+
+My suspected diagnosis, recorded before the lane reported, was correct.
+The coordinates an invisible monster moved through appear in the player
+board ONLY as public terrain entries, which increment 3 added for every
+cell. Terrain is not secret. There is no position leak: the hidden
+monster is absent from combatants, from events, from movement history,
+and its last-seen marker still reports (2,0) at round 1.
+
+The old test searched the serialized JSON for a raw substring and could
+no longer distinguish a terrain listing from a position. The replacement
+walks every field of the serialized player board and permits those
+coordinates only at their exact public terrain paths, so ANY future
+field exposing them fails. That is stronger than what it replaced, which
+is the condition I set when I forbade deleting the four checks.
+
+The asset-count failure was a distinct pin governing a reviewed art
+exemption; it now enumerates the five new overlays and verifies each
+file's PNG signature, which is the independent invariant.
+
+Supervisor verification: sg scan clean, tsc clean, 3 spec files 22/22.
+Supervisor mutant M-SUP-I3FIX-PLAYER-LEAK made projectPlayerBoard emit
+every token cell, hidden creatures included, which is precisely the leak
+this test exists to catch: KILLED by 5 tests, restored to 0f8e8020...
+
+FIRST ATTEMPT WAS VOID and is recorded as such rather than counted: I
+added the leaking field to projectEncounterBoard, and the player board
+does not embed that projection, so nothing reached player-facing JSON
+and the tests passed for a reason that proved nothing. This is the
+second void mutant this window. Both were caught by asking whether the
+mutant actually reached the surface under test before believing a
+survival, which is the discipline that makes a surviving mutant
+meaningful.
+
+Gate relaunched on the full branch with port 4500 confirmed free.
