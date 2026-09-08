@@ -16495,3 +16495,71 @@ comparison involving the sol arm, astra's seat is ineligible for any
 comparison involving either astra arm, and the sol-high rerun against
 pool3-sol-high gives a within-arm repeatability read. Before the panel
 launches, Astra high reviews that packet design as the reviewer.
+
+## D584.2 — blind snapshot failure ROOT CAUSE: D576 increment 3 renamed the board's blocked layer, the snapshot evidence counter still counts the old class; plus a finding against my own D584.1 record (2026-09-08 09:41)
+
+Cause, established by running the check tool directly on
+dnd-wt-blind-dm (725009c9) with a conforming positional argument:
+
+  npx vite-node tools/ai-dm-blind-board-snapshot-check.ts -- dnd-slim-runs/blind-probe-images
+  -> exit 1, "Error: DM image blocked cells differ from state."
+
+The check (tools/ai-dm-blind-board-snapshot-check.ts:75) requires
+dm.blockedCells === state.blockedCells.length. The DOM evidence
+counter (tools/ai-dm-board-snapshot.ts:1024) counts
+'.encounter-mechanical-blocked'. D576 increment 3 (5e085c71) replaced
+the mechanical layer { kind: 'blocked' } with
+{ kind: 'terrain', terrainKind } for every non-open terrain cell
+(src/vtt/encounter-board.ts:929), and the renderer emits the class from
+layer.kind (src/vtt/encounter-app.ts:1005), so the DOM now carries
+'.encounter-mechanical-terrain' with data-terrain-kind and zero
+'.encounter-mechanical-blocked' nodes. The fixtures have 21 (hard
+5117001) and 16 (brutal 6203001) blocked cells, so the count 0 fails
+both. The unit test tests/unit/assets/board-glyphs.test.ts:726 already
+queries the new class; the snapshot tool was the consumer the D576
+merge (29595e75) missed, and no test bound the two until the browser
+spec ran in the full gate. Same class of gap as D584.
+
+Interpretation and scope, mine under D585: the evidence should count
+terrain by kind, wall / half_cover / three_quarters_cover, from the
+data-terrain-kind attribute, and the check should compare each count
+to an INDEPENDENT state derivation (terrainWallCells for walls, the
+canonical projectEncounterTerrainCells partition for the cover kinds),
+not to the DOM and not to a regenerated pin. That preserves the
+check's purpose (the DM image shows exactly the state's terrain) and
+extends it to the two cover tiers D576 introduced. Dispatched as blind
+increment 7 (brief .tmp/runs/briefs-2026-09-06/blind-dm-i7-snapfix.md).
+
+FINDING AGAINST MY OWN RECORD (D584.1). I wrote that the spec
+"swallows the child process's stdout and stderr, reporting only an
+exit code". False. tests/browser/ai-dm-board-snapshot.spec.ts:116
+appends both streams to the rejection message, and the 180-second
+rerun log (~/dnd-slim-runs/blind-snap-long.log) carries the real
+cause at line 17, seven lines under the "failed (1)" line I stopped
+reading at. The harness did its job; I did not read the log to the
+end. The second half of that record, that a conforming path "still
+reproduced the same message", was also my error: the check tool takes
+its directory POSITIONALLY and I passed `--out`, so process.argv[2]
+was the literal string "--out", which is what the suffix guard
+rejected. Two wrong claims in one record, both from not reading. No
+harness change is needed for output surfacing; D584.1's "defect in the
+harness" is withdrawn.
+
+Two operational facts recorded while investigating:
+- The arena isolates every conversation in a throwaway codex home
+  (/tmp/dnd-ai-dm-conversation-*/codex-home-none, seen in the running
+  pool4 processes' environment), so arena rollouts no longer land in
+  ~/.codex-aidm/sessions. The 21 GiB there is the 5th-6th September
+  screenshot-probe era (board PNGs as base64; one rollout holds a
+  21 MiB line). Per the owner's request it is being archived per day
+  as verified tar.zst (zstd -19 --long=31, entry count checked before
+  the originals are removed); through 2026-09-04: 3,596 files, 1.49
+  GiB to 110 MiB. Long-window dedup buys only about 3% on the
+  image-heavy days because 1,376 of the blobs in a 300-file sample are
+  distinct; plain zstd roughly halves those days. Archived sessions
+  cannot be `codex resume`d, which is irrelevant for arena sessions.
+- The dispatch header's line "Full vitest/Playwright/build runs must
+  be wrapped in flock" was the direct cause of the two-hour gatefix
+  deadlock. Amended: lanes never run the full gate or wrap runners in
+  an outer flock; they run the cumulative contract suite with vitest
+  and single Playwright specs through the wrapper config.
