@@ -1,7 +1,43 @@
 import type { DiceExpression, DiceRollTrace } from './resolution';
 import type { DieSides } from './values';
 
-export type Rng = () => number;
+export type DieRollProvenanceKind =
+  | 'ability_check'
+  | 'attack_damage'
+  | 'attack_roll'
+  | 'damage_reduction'
+  | 'death_save'
+  | 'effect_damage'
+  | 'effect_modifier'
+  | 'healing'
+  | 'initiative'
+  | 'reaction'
+  | 'saving_throw'
+  | 'spell_damage'
+  | 'temporary_hit_points'
+  | 'world_object_damage';
+
+/** Stable semantic identity for a die draw; event payloads are deliberately not used as a substitute. */
+export interface DieRollProvenance {
+  readonly kind: DieRollProvenanceKind;
+  readonly source: string;
+  readonly actor?: string;
+  readonly target?: string;
+  readonly termIndex?: number;
+  readonly dieIndex?: number;
+  readonly phase?: 'initial' | 'reroll' | 'explosion';
+}
+
+export interface DieRollRecord {
+  readonly face: number;
+  readonly sides: DieSides;
+  readonly provenance: DieRollProvenance;
+}
+
+export interface Rng {
+  (): number;
+  readonly drawDie?: (sides: DieSides, provenance: DieRollProvenance) => number;
+}
 
 export interface SerializableRngState {
   readonly algorithm: 'mulberry32-v1';
@@ -17,6 +53,8 @@ export interface SerializableRng extends Rng {
 }
 
 export interface TransactionalRng extends Rng {
+  drawDie(sides: DieSides, provenance: DieRollProvenance): number;
+  dieRollHistory(): readonly DieRollRecord[];
   checkpoint(): RngCheckpoint;
   restoreCheckpoint(checkpoint: RngCheckpoint): void;
 }
@@ -106,34 +144,85 @@ export function transactionalRng(rng: Rng): TransactionalRng {
   const existing = transactionalAdapters.get(rng);
   if (existing !== undefined) return existing;
   if (isSerializableRng(rng)) {
-    const adapted = Object.assign(rng, {
+    const forwardedDrawDie = rng.drawDie?.bind(rng);
+    const observed: DieRollRecord[] = [];
+    const adapted: TransactionalRng = Object.assign(rng, {
+      drawDie: (sides: DieSides, provenance: DieRollProvenance): number => {
+        const face = forwardedDrawDie === undefined
+          ? Math.floor(rng() * sides) + 1
+          : forwardedDrawDie(sides, provenance);
+        observed.push({ face, sides, provenance });
+        return face;
+      },
+      dieRollHistory: (): readonly DieRollRecord[] => observed.map((entry) => ({
+        ...entry,
+        provenance: { ...entry.provenance },
+      })),
       checkpoint: (): RngCheckpoint => {
         const snapshot = rng.snapshot();
-        return { restore: (): void => rng.restore(snapshot) };
+        const observedLength = observed.length;
+        return { restore: (): void => {
+          rng.restore(snapshot);
+          observed.length = observedLength;
+        } };
       },
       restoreCheckpoint: (checkpoint: RngCheckpoint): void => checkpoint.restore(),
     });
     transactionalAdapters.set(rng, adapted);
     return adapted;
   }
-  const history: number[] = [];
+  type HistoricalDraw =
+    | { readonly kind: 'raw'; readonly value: number }
+    | ({ readonly kind: 'die' } & DieRollRecord);
+  const history: HistoricalDraw[] = [];
+  const observed: DieRollRecord[] = [];
   let cursor = 0;
   const adapted: TransactionalRng = Object.assign(
     (): number => {
       const replayed = history[cursor];
       if (replayed !== undefined) {
+        if (replayed.kind !== 'raw') throw new Error('RNG replay kind mismatch: expected a raw draw.');
         cursor += 1;
-        return replayed;
+        return replayed.value;
       }
       const drawn = rng();
-      history.push(drawn);
+      history.push({ kind: 'raw', value: drawn });
       cursor += 1;
       return drawn;
     },
     {
+      drawDie: (sides: DieSides, provenance: DieRollProvenance): number => {
+        const replayed = history[cursor];
+        let face: number;
+        if (replayed !== undefined) {
+          if (
+            replayed.kind !== 'die' || replayed.sides !== sides ||
+            JSON.stringify(replayed.provenance) !== JSON.stringify(provenance)
+          ) {
+            throw new Error('RNG replay die provenance mismatch.');
+          }
+          face = replayed.face;
+        } else {
+          face = rng.drawDie === undefined
+            ? Math.floor(rng() * sides) + 1
+            : rng.drawDie(sides, provenance);
+          history.push({ kind: 'die', face, sides, provenance: { ...provenance } });
+        }
+        cursor += 1;
+        observed.push({ face, sides, provenance: { ...provenance } });
+        return face;
+      },
+      dieRollHistory: (): readonly DieRollRecord[] => observed.map((entry) => ({
+        ...entry,
+        provenance: { ...entry.provenance },
+      })),
       checkpoint: (): RngCheckpoint => {
         const savedCursor = cursor;
-        return { restore: (): void => { cursor = savedCursor; } };
+        const observedLength = observed.length;
+        return { restore: (): void => {
+          cursor = savedCursor;
+          observed.length = observedLength;
+        } };
       },
       restoreCheckpoint: (checkpoint: RngCheckpoint): void => checkpoint.restore(),
     },
@@ -143,11 +232,21 @@ export function transactionalRng(rng: Rng): TransactionalRng {
   return adapted;
 }
 
-export function rollDie(rng: Rng, sides: DieSides): number {
-  return Math.floor(rng() * sides) + 1;
+export function rollDie(
+  rng: Rng,
+  sides: DieSides,
+  provenance: DieRollProvenance = { kind: 'effect_modifier', source: 'non-engine-roll-die' },
+): number {
+  return rng.drawDie === undefined
+    ? Math.floor(rng() * sides) + 1
+    : rng.drawDie(sides, provenance);
 }
 
-export function rollDice(rng: Rng, expression: DiceExpression): DiceRollTrace {
+export function rollDice(
+  rng: Rng,
+  expression: DiceExpression,
+  provenance: DieRollProvenance = { kind: 'effect_modifier', source: 'non-engine-roll-dice' },
+): DiceRollTrace {
   if (!Number.isInteger(expression.count) || expression.count < 0) {
     throw new RangeError('Dice count must be a non-negative integer.');
   }
@@ -187,10 +286,10 @@ export function rollDice(rng: Rng, expression: DiceExpression): DiceRollTrace {
   const rerolls: Array<{ readonly dieIndex: number; readonly discarded: number; readonly replacement: number }> = [];
   const explosionFaces: number[] = [];
   for (let index = 0; index < expression.count; index += 1) {
-    const first = rollDie(rng, expression.sides);
+    const first = rollDie(rng, expression.sides, { ...provenance, dieIndex: index, phase: 'initial' });
     const face = expression.rerollBelow !== undefined && first < expression.rerollBelow.threshold
       ? (() => {
-          const replacement = rollDie(rng, expression.sides);
+          const replacement = rollDie(rng, expression.sides, { ...provenance, dieIndex: index, phase: 'reroll' });
           rerolls.push({ dieIndex: index, discarded: first, replacement });
           return replacement;
         })()
@@ -201,7 +300,7 @@ export function rollDice(rng: Rng, expression: DiceExpression): DiceRollTrace {
       expression.explosion.maximumExplosionsPerDie === 1 &&
       face === expression.sides
     ) {
-      const explosion = rollDie(rng, expression.sides);
+      const explosion = rollDie(rng, expression.sides, { ...provenance, dieIndex: index, phase: 'explosion' });
       faces.push(explosion);
       explosionFaces.push(explosion);
     }

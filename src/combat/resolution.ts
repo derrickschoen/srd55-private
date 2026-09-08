@@ -1,4 +1,9 @@
-import { rollDice, rollDie, type Rng } from './random';
+import {
+  rollDice,
+  rollDie,
+  type DieRollProvenance,
+  type Rng,
+} from './random';
 import {
   dieSides,
   type ArmorClass,
@@ -105,17 +110,21 @@ export interface DamageResult {
   readonly total: number;
 }
 
-export function rollD20(rng: Rng, mode: RollMode): D20Roll {
-  const first = rollDie(rng, dieSides(20));
+export function rollD20(
+  rng: Rng,
+  mode: RollMode,
+  provenance: DieRollProvenance = { kind: 'ability_check', source: 'non-engine-d20' },
+): D20Roll {
+  const first = rollDie(rng, dieSides(20), { ...provenance, dieIndex: 0, phase: 'initial' });
   switch (mode) {
     case 'normal':
       return { mode, faces: [first], chosen: first };
     case 'advantage': {
-      const second = rollDie(rng, dieSides(20));
+      const second = rollDie(rng, dieSides(20), { ...provenance, dieIndex: 1, phase: 'initial' });
       return { mode, faces: [first, second], chosen: Math.max(first, second) };
     }
     case 'disadvantage': {
-      const second = rollDie(rng, dieSides(20));
+      const second = rollDie(rng, dieSides(20), { ...provenance, dieIndex: 1, phase: 'initial' });
       return { mode, faces: [first, second], chosen: Math.min(first, second) };
     }
   }
@@ -152,18 +161,20 @@ export function classifyAttackRoll(
 export function resolveAttackRoll(
   request: AttackRollRequest,
   rng: Rng,
+  provenance: DieRollProvenance = { kind: 'attack_roll', source: 'non-engine-attack' },
 ): AttackRollResult {
-  return classifyAttackRoll(request, rollD20(rng, request.rollMode));
+  return classifyAttackRoll(request, rollD20(rng, request.rollMode, provenance));
 }
 
 export function resolveSavingThrow(
   request: SavingThrowRequest,
   rng: Rng,
+  provenance: DieRollProvenance = { kind: 'saving_throw', source: 'non-engine-save' },
 ): SavingThrowResult {
   if (!Number.isFinite(request.bonus)) {
     throw new RangeError('Saving throw bonus must be finite.');
   }
-  const roll = rollD20(rng, request.rollMode);
+  const roll = rollD20(rng, request.rollMode, provenance);
   const total = roll.chosen + request.bonus;
   return total < request.dc
     ? { outcome: 'failure', roll, total }
@@ -185,12 +196,16 @@ export function applyDamageResponse(damage: number, response: DamageResponse): n
   }
 }
 
-export function resolveDamage(request: DamageRequest, rng: Rng): DamageResult {
-  const terms = request.terms.map((term) => {
+export function resolveDamage(
+  request: DamageRequest,
+  rng: Rng,
+  provenance: DieRollProvenance = { kind: 'attack_damage', source: 'non-engine-damage' },
+): DamageResult {
+  const terms = request.terms.map((term, termIndex) => {
     const expression = request.critical
       ? { ...term.dice, count: term.dice.count * 2 }
       : term.dice;
-    const roll = rollDice(rng, expression);
+    const roll = rollDice(rng, expression, { ...provenance, termIndex });
     const beforeResponse = roll.total;
     const response = request.responses.find(({ type }) => type === term.type)?.response ?? 'normal';
     return {

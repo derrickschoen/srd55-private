@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { combatToken, monsterCombatantProfile } from '../../../src/combat/combatant';
 import { reduceEncounter, type EncounterState } from '../../../src/combat/encounter';
 import { mulberry32 } from '../../../src/combat/random';
-import { armorClass, combatantId, encounterBranchId, encounterSessionId, type CombatantId } from '../../../src/combat/values';
+import {
+  armorClass, combatantId, damageType, dieSides, encounterBranchId, encounterSessionId, type CombatantId,
+} from '../../../src/combat/values';
 import { LION } from '../../../src/combat/statblocks/wild-beasts';
 import {
   EngineRoundSession,
@@ -18,6 +20,7 @@ import { generateRoom } from '../../../src/vtt/room-generator';
 import { freshMonsterPlanningState, projectFutureMonsterTurns } from '../../../src/vtt/monster-planning-state';
 import { decodeSessionSnapshotV1 } from '../../../src/vtt/arena-fixture';
 import { canonicalJson } from '../../../src/commands/canonical-json';
+import { runCommandBoundaryTransaction } from '../../../src/vtt/engine-round-application';
 
 const REQUEST: EngineRoundCapsuleRequest = {
   runId: encounterSessionId('encounter:engine-round-session-test'),
@@ -648,5 +651,44 @@ describe('authoritative engine round session', () => {
     }]);
     expect(session.currentState().combatants.find((entry) => entry.profile.id === ARCHER_ID)?.turn.dodging)
       .toBe(true);
+  });
+
+  it('command boundary advancement and rollback preserve independent state events revisions and RNG', () => {
+    const positioned = segmentedState(new Map([
+      [FOCUS_ID, { column: 5, row: 5 }],
+      [KILLER_ID, { column: 6, row: 5 }],
+    ]));
+    const session = new EngineRoundSession(
+      positioned,
+      mulberry32(58_310_201),
+      { kind: 'unattended', askDefault: 'decline' },
+    );
+    session.beginRoundWithoutSkipping(REQUEST, null);
+    const active = session.currentState();
+    const accepted = runCommandBoundaryTransaction(
+      active,
+      { type: 'dodge', actor: FOCUS_ID, cost: 'action' },
+      mulberry32(58_310_202),
+      { kind: 'unattended', askDefault: 'decline' },
+      null,
+    );
+    expect(accepted.state.revision).toBe(active.revision + accepted.revisionDelta);
+    expect(accepted.events).toContainEqual(expect.objectContaining({
+      type: 'stance_started', combatant: FOCUS_ID, stance: 'dodging',
+    }));
+    expect(accepted.state.combatants.find((entry) => entry.profile.id === FOCUS_ID)?.turn.dodging).toBe(true);
+
+    const rejectedRng = mulberry32(58_310_203);
+    const beforeRng = rejectedRng.snapshot();
+    expect(() => runCommandBoundaryTransaction(active, {
+      type: 'attack', actor: FOCUS_ID, target: KILLER_ID, attackBonus: 7, criticalFloor: 20,
+      rollMode: 'normal', attackerCanSeeTarget: true, targetCanSeeAttacker: true,
+      damage: {
+        terms: [{ type: damageType('Slashing'), dice: { count: 1, sides: dieSides(8), modifier: Number.NaN } }],
+        critical: false, responses: [],
+      },
+    }, rejectedRng, { kind: 'unattended', askDefault: 'decline' }, null)).toThrow('modifier must be finite');
+    expect(rejectedRng.snapshot()).toEqual(beforeRng);
+    expect(active.eventLog).toEqual(session.currentState().eventLog);
   });
 });

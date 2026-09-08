@@ -41,6 +41,7 @@ import {
 import { reduceSessionEncounter } from './session-encounter-reducer';
 import type { ScriptedPartyTurnMaterialization } from './scripted-party-round';
 import type { HostScenario, HostSplitCandidate } from './speculative-plan-types';
+import { runCommandBoundaryTransaction } from './engine-round-application';
 
 export interface EngineOrdinaryRoundCapsuleRequest {
   readonly runId: EncounterSessionId;
@@ -495,11 +496,10 @@ export class EngineRoundSession {
     const fallbackResolutions: AutoResolvedReactionOffer[] = [];
     const guidedResolutions: GuidedReactionResolution[] = [];
     const reduce = (state: EncounterState, command: EncounterCommand): EncounterState => {
-      const reduced = reduceOne(state, command, trialRng);
-      const resolved = resolveBoundaryDecisions(reduced, trialRng, this.policy, guidance, true);
-      fallbackResolutions.push(...resolved.fallbackResolutions);
-      guidedResolutions.push(...resolved.guidedResolutions);
-      return resolved.state;
+      const transaction = runCommandBoundaryTransaction(state, command, trialRng, this.policy, guidance);
+      fallbackResolutions.push(...transaction.fallbackResolutions);
+      guidedResolutions.push(...transaction.guidedResolutions);
+      return transaction.state;
     };
     const initialBoundary = resolveBoundaryDecisions(this.#state, trialRng, this.policy, guidance, true);
     fallbackResolutions.push(...initialBoundary.fallbackResolutions);
@@ -530,11 +530,10 @@ export class EngineRoundSession {
     const fallbackResolutions: AutoResolvedReactionOffer[] = [];
     const guidedResolutions: GuidedReactionResolution[] = [];
     const reduce = (state: EncounterState, command: EncounterCommand): EncounterState => {
-      const reduced = reduceOne(state, command, trialRng);
-      const resolved = resolveBoundaryDecisions(reduced, trialRng, this.policy, guidance, true);
-      fallbackResolutions.push(...resolved.fallbackResolutions);
-      guidedResolutions.push(...resolved.guidedResolutions);
-      return resolved.state;
+      const transaction = runCommandBoundaryTransaction(state, command, trialRng, this.policy, guidance);
+      fallbackResolutions.push(...transaction.fallbackResolutions);
+      guidedResolutions.push(...transaction.guidedResolutions);
+      return transaction.state;
     };
     const initialBoundary = resolveBoundaryDecisions(this.#state, trialRng, this.policy, guidance, true);
     fallbackResolutions.push(...initialBoundary.fallbackResolutions);
@@ -603,11 +602,10 @@ export class EngineRoundSession {
     const guidedResolutions: GuidedReactionResolution[] = [];
     const deviationResolutions: EngineProposalDeviation[] = [];
     const reduce = (state: EncounterState, command: EncounterCommand): EncounterState => {
-      const reduced = reduceOne(state, command, trialRng);
-      const resolved = resolveBoundaryDecisions(reduced, trialRng, this.policy, guidance, true);
-      fallbackResolutions.push(...resolved.fallbackResolutions);
-      guidedResolutions.push(...resolved.guidedResolutions);
-      return resolved.state;
+      const transaction = runCommandBoundaryTransaction(state, command, trialRng, this.policy, guidance);
+      fallbackResolutions.push(...transaction.fallbackResolutions);
+      guidedResolutions.push(...transaction.guidedResolutions);
+      return transaction.state;
     };
     let state = this.#state;
     for (const application of entries) {
