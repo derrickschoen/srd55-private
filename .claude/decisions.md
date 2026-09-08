@@ -16070,3 +16070,53 @@ Note on item 5 against my own recent conduct: under this boundary,
 killing a gate mid-run was not mechanical execution, and the CSS
 hypothesis was a consequential diagnosis that changed where a lane
 looked. Both should have come to Astra.
+
+## D576 increments 2 and 3 LANDED on main as 23b763ef; increment 4 dispatched (2026-09-08 06:41)
+
+Full gate clean on claude/los-cover at b19d55a7, every phase run by me:
+tsc exit 0, sg exit 0, locked vitest exit 0 with no failures, and the
+browser suite 186 PASSED in 48.7 minutes with no flakes. contracts.ts
+hash unchanged, worktree clean at merge. Landed per decider ruling
+D581.1. Owner's live app restarted on the landed main and serving fresh
+output.
+
+What is now on main: the corner-rule engine, a generator that can author
+all four terrain outcomes, and a board that shows them. Three-quarters
+cover exists in nine rooms where the previous 63-room corpus had none,
+and the four tiers separate by silhouette rather than by their marks,
+which matters because the compact capture modes strip text.
+
+Per D581.2 and D581.3, merged the landed D576 work into claude/blind-dm
+(29595e75) BEFORE any blind arm runs, since no D569 result exists and
+starting on the superseded engine would spend the first experiment on
+behaviour we have replaced.
+
+THE MERGE BROKE THE BLIND BRANCH, which I verified with exact exit codes
+rather than a piped tail that would have hidden them:
+  npx tsc -b --force  exit 1, 5 errors
+    src/vtt/blind-turn-context.ts:1197 TS2352, the blind semantic board
+      cast no longer overlaps the payload type, because increment 3
+      versioned that payload to engine-semantic-board-v2 and added the
+      exhaustive cells.terrain partition while the blind context was
+      written against v1
+    tests/unit/tools/ai-dm-knowledge-base.test.ts:479,480,481 TS2345,
+      BoardGlyphPresence now requires terrainKinds, which increment 3
+      added with the terrain glyph family
+  sg scan  exit 1, 1 error
+    tests/unit/vtt/blind-intent-resolver.test.ts:3 imports readFileSync
+      from node:fs
+
+This is exactly the integration risk the decider's ruling 2 named, and
+it is the reason that ruling made integration a prerequisite of the
+guide amendment rather than a separate later step.
+
+Lane blind-dm-i4d576 dispatched (session
+01a0809b-a79c-7173-b69f-9c6ad7269084) with the breakage as its first
+task and the shortcuts closed: no casting through unknown, no loosened
+type, no deleted assertion. Then the guide amendment against the
+integrated state, with markers for every new feature so the existing
+renderer-key coverage test still binds each one to a real legend export,
+worked examples computed by the production trace, and an explicit proof
+that creature_facts, legal_movement, the player projection and the
+semantic board acquire NO pairwise tactical answer, since that property
+is what keeps the blind arm blind.
