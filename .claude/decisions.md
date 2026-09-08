@@ -15716,3 +15716,126 @@ which must author genuine three_quarters features since no room contains
 one; 3 the four art treatments; 4 the map guide; 5 the probe questions;
 6 the sol high then luna medium probe runs. D576.4 elevation stays a
 plan-only task behind those.
+
+## D576 increment 2 dispatched; live app restarted on the landed main (2026-09-08 00:10)
+
+Merged main into claude/los-cover, then dispatched increment 2, the
+versioned D576 generator and basis, as lane los-cover-i2 (session
+01a07f34-7efa-7f83-8840-5de372f58735, port 4731, sol high).
+
+The brief leads with WHY the increment matters rather than only what it
+must do: the era census found that no room among all 63 contains a
+single three_quarters feature, so the tier the corner rule can now
+produce is untested in play and invisible in every screenshot because
+it never occurs. Increment 2 is what makes all four terrain outcomes
+actually happen.
+
+The brief names the shortcuts this task tempts and forbids each: no
+per-seed correction table, no hand-edited fixture, no membership
+predicate that reads a feature's authored kind instead of asking the
+production trace, and no widening of an invariant to rescue a stubborn
+seed. A seed that cannot satisfy membership under the rules must be
+DISCARDED and named, or the lane stops and reports that the rules cannot
+produce a qualifying room. It also requires before and after aggregate
+hashes for all seven existing basis directories, since omitting the new
+profile must reproduce the legacy path byte for byte without consuming
+an extra RNG value. It forbids running the full gate and forbids any
+outer flock, so neither of my two process failures can recur.
+
+Owner's live app on 4173 restarted against the landed main; it rebuilds
+for about two minutes before listening.
+
+## D576 increment 2 harvested (9d92f26c): three-quarters cover now exists in play (2026-09-08 01:13)
+
+Lane los-cover-i2, session 01a07f34-7efa-7f83-8840-5de372f58735.
+Supervisor verified: sg scan clean, tsc exit 0, 6 spec files 243/243,
+contracts.ts hash unchanged, nine new fixtures in the new directory
+tests/fixtures/arena-basis-los-cover-v1 (seeds 5762001-3 standard,
+5762101-3 hard, 5762201-3 brutal), no existing fixture touched.
+
+THE RESULT THAT MATTERS, measured by me rather than taken from the lane:
+I ran a tier census over the nine new rooms calling traceCombatantLine
+directly on every ordered living pair.
+
+  seed 5762001  none 20  half  4  three_quarters 6  total 0
+  seed 5762002  none 20  half  7  three_quarters 3  total 0
+  seed 5762003  none 23  half 12  three_quarters 5  total 2
+  seed 5762101  none 35  half 16  three_quarters 5  total 0
+  seed 5762102  none 54  half 35  three_quarters 1  total 0
+  seed 5762103  none 28  half 13  three_quarters 1  total 0
+  seed 5762201  none 29  half 25  three_quarters 2  total 0
+  seed 5762202  none 28  half 13  three_quarters 1  total 0
+  seed 5762203  none 22  half 16  three_quarters 4  total 0
+
+Three-quarters cover is realized between living creatures in ALL NINE
+rooms, one to six ordered pairs each. The entire pre-D576 corpus of 63
+rooms contained ZERO. The gap the era census exposed is closed.
+
+Honest qualification, since the raw numbers invite a wrong reading:
+total cover between creatures appears in one room only. That is expected
+and arguably correct, because a creature pair with no line at all at
+round start is inert rather than interesting. The plan's total
+requirement is satisfied through creature-to-cell queries, and the
+membership test asserts it through the production trace with blocksSight
+rather than by feature membership.
+
+Legacy byte-identity proved for arena-basis, arena-basis-hard,
+arena-basis-brutal and arena-basis-brutal-b. The lane also listed
+arena-basis-brutal-pool, hard-2 and brutal-2 as unchanged, but honestly
+labelled them absent at both checkpoints with the empty-manifest
+aggregate; those directories live on claude/brutal-pool and
+claude/blind-dm and are not on this branch, so that row is vacuous
+rather than wrong.
+
+Supervisor mutant M-SUP-I2-BULWARK-AUTHORED-AS-HALF authored every
+generated cover object with the half profile, so the arrow-slit bulwark
+would grant only half cover: killed by the tier-exercise tests on every
+seed, restored to e763cf04... A first attempt was VOID, because the tier
+is derived through a type parameter and no 'three_quarters' literal
+exists to flip; recorded as void and not counted, per the standing rule
+that void mutants prove nothing.
+
+## D576 increment 3 harvested (5e085c71): the board now shows what the engine computes (2026-09-08 02:41)
+
+Lane los-cover-i3, session 01a07f79-25f8-7b50-ba85-226147e60227.
+Supervisor verified: sg scan clean, tsc exit 0, the same 16 affected
+specs 302/302, contracts.ts hash unchanged, zero fixture bytes touched,
+no git writes and no claude invocation in the lane log.
+
+Directly relevant to the owner's original question about the brutal
+room, "do the cross braced piles block line of sight?": the answer was
+no, and the art was part of why that was confusing. The cross-braced
+pile is GONE. Wall is now a fully opaque cell-spanning mass, and the
+lane measured it at 16,384 of 16,384 opaque pixels. Three-quarters is a
+tall bulwark with a narrow aperture of at least 650 pixels.
+Half is a low barricade with a transparent upper band. Pairwise
+silhouette distance stays above 3,000 across four floor and four light
+treatments, which is the invariant that makes the three tiers
+distinguishable by SHAPE rather than only by their marks, as the plan
+requires for the compact glyph modes that strip text entirely.
+
+Semantic board v2 adds the exhaustive cells.terrain partition; objects
+may carry their terrain kind but never a pair answer, so the blind
+experiment cannot be contaminated by a cover answer arriving through the
+payload.
+
+Pins moved WITH their independent invariants listed in the same change:
+87 to 92 assets, art generator v3 to v4, the wall and preview digests,
+three new art digests, three new glyph digests, and the narrow browser
+capture height 3056 to 3200.
+
+Six tests removed and twelve added. I read every removal: each describes
+art this increment replaces, including the old "three inset opaque
+ridges for difficult terrain and a broad stone cross-brace for blocked
+cells" test, which pinned exactly the art the owner found ambiguous.
+
+Supervisor mutant M-SUP-I3-LEGEND-WRONG-AC changed the three-quarters
+legend to teach +2 AC instead of +5. This is deliberately the same class
+of defect as the HP band error found in D579: a legend that teaches a
+wrong mechanic is worse than no legend, because the DM believes it.
+Killed by the legend row test, restored to 63eb992d...
+
+Remaining in D576: increment 4 is the D569 map-guide amendment on the
+blind branch, 5 is the probe question classes, 6 is the sol high then
+luna medium probe runs that finally answer whether any of this is
+readable. A full gate and a main landing come before the probe runs.
