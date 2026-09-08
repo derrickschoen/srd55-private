@@ -15839,3 +15839,53 @@ Remaining in D576: increment 4 is the D569 map-guide amendment on the
 blind branch, 5 is the probe question classes, 6 is the sol high then
 luna medium probe runs that finally answer whether any of this is
 readable. A full gate and a main landing come before the probe runs.
+
+## Gate on increments 2 and 3 fails two specs, one of them a possible player-board leak (2026-09-08 03:10)
+
+Gate started 02:53 with port 4500 confirmed free. tsc clean, sg clean,
+then the locked vitest suite FAILED two files, neither run by the lane:
+
+  tests/unit/source-is-greppable.test.ts
+    "keeps the reviewed D516/D525 classic-art exemption limited to the 8"
+    expected 87 assets, got 92
+  tests/unit/vtt/last-seen.test.ts
+    "does not track either hidden movement in history or player-board
+     canonical JSON"
+    the serialized player board now CONTAINS '"cell":{"column":3,"row":0}'
+
+The second matters. That test protects a real boundary: an invisible
+monster moves (2,0) to (3,0) to (4,0) and the PLAYER board must reveal
+only its last seen cell (2,0), never its current or intermediate cells.
+A regression here would leak hidden positions to players, which is the
+same family as the standing rule that the DM semantic export never
+reaches a player channel.
+
+MY SUSPECTED DIAGNOSIS, recorded BEFORE the lane reports so the record
+shows what I predicted rather than what I endorsed afterwards: increment
+3 added the exhaustive terrainCells projection to the encounter board
+(src/vtt/encounter-board.ts:100-101,261). If the player board now
+serializes a terrain entry for every in-bounds cell, the substring
+appears because (3,0) is a floor cell, not because the monster is there.
+Terrain is not secret; players see the map. That would make this a false
+alarm caused by a substring assertion that can no longer distinguish a
+terrain listing from a position leak.
+
+The brief requires the lane to CONFIRM OR REFUTE that with evidence, to
+prove structurally that no position, path, history entry or marker for
+the hidden monster appears, to FIX THE LEAK and report it prominently if
+one genuinely exists, and, only if the match is terrain, to replace the
+fragile substring assertions with structural ones that are at least as
+strong, explaining how. It must also add a test that fails if a hidden
+creature's position ever reaches the player board through ANY field,
+including a future one, so the next projection change cannot reopen it.
+Deleting the four not-to-contain lines is explicitly forbidden.
+
+The asset-count failure is a SECOND pin, distinct from the one increment
+3 already moved, governing a reviewed art exemption. The lane must
+enumerate exactly which five assets are new and confirm each sits inside
+the exemption's intent, or stop rather than widen it.
+
+Killed the gate by pid INCLUDING its vite server this time, and verified
+port 4500 free afterwards, applying the rule I wrote after the earlier
+orphan. Lane los-cover-i3fix dispatched, session
+01a07fd9-d3a1-7980-80eb-6653f70ae6f3.
