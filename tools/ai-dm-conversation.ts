@@ -1579,55 +1579,148 @@ function intentionallyIgnoredProposals(
   });
 }
 
-interface McpClient {
+export class McpChildExited extends Error {
+  override readonly name = 'McpChildExited';
+  readonly code = 'MCP_CHILD_EXITED';
+
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+  }
+}
+
+interface PendingMcpRequest {
+  readonly resolve: (value: unknown) => void;
+  readonly reject: (reason: Error) => void;
+}
+
+export interface McpClient {
   readonly child: ChildProcessWithoutNullStreams;
   readonly lines: Interface;
-  readonly iterator: AsyncIterator<string>;
+  readonly pending: Map<number, PendingMcpRequest>;
   nextId: number;
   stderr: string;
+  terminalError: Error | null;
   readonly exit: Promise<number | null>;
 }
 
-function startMcpClient(cwd: string, launcherPath: string): McpClient {
-  const child = spawn(process.execPath, [
-    resolve(cwd, 'node_modules/vite-node/vite-node.mjs'),
-    resolve(cwd, 'tools/engine-mcp-server.ts'),
-    launcherPath,
-  ], { cwd, stdio: ['pipe', 'pipe', 'pipe'] });
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function rejectMcpClient(client: McpClient, error: Error, terminateChild = false): void {
+  if (client.terminalError !== null) return;
+  client.terminalError = error;
+  for (const pending of client.pending.values()) pending.reject(error);
+  client.pending.clear();
+  if (terminateChild && client.child.exitCode === null && client.child.signalCode === null) {
+    client.child.kill('SIGTERM');
+  }
+}
+
+function childExitedError(client: McpClient, detail: string, cause?: unknown): McpChildExited {
+  const stderr = client.stderr.trim();
+  return new McpChildExited(
+    `Engine MCP child ${detail}${stderr.length === 0 ? '' : `: ${stderr}`}`,
+    cause === undefined ? undefined : { cause },
+  );
+}
+
+export function createMcpClient(child: ChildProcessWithoutNullStreams): McpClient {
   const lines = createInterface({ input: child.stdout, crlfDelay: Number.POSITIVE_INFINITY });
+  let resolveExit: (code: number | null) => void = () => {};
+  const exit = new Promise<number | null>((resolvePromise) => { resolveExit = resolvePromise; });
   const client: McpClient = {
-    child, lines, iterator: lines[Symbol.asyncIterator](), nextId: 1, stderr: '',
-    exit: new Promise<number | null>((resolvePromise, reject) => {
-      child.once('error', reject);
-      child.once('exit', resolvePromise);
-    }),
+    child, lines, pending: new Map(), nextId: 1, stderr: '', terminalError: null, exit,
   };
   child.stderr.on('data', (chunk: Buffer) => { client.stderr += chunk.toString('utf8'); });
+  child.stderr.on('error', (error) => {
+    rejectMcpClient(client, childExitedError(client, `stderr failed: ${errorText(error)}`, error), true);
+  });
+  child.stdin.on('error', (error) => {
+    rejectMcpClient(client, childExitedError(client, `stdin failed: ${errorText(error)}`, error), true);
+  });
+  child.stdout.on('error', (error) => {
+    rejectMcpClient(client, childExitedError(client, `stdout failed: ${errorText(error)}`, error), true);
+  });
+  lines.on('line', (line) => {
+    let response: Readonly<Record<string, unknown>> | null;
+    try {
+      response = asRecord(JSON.parse(line) as unknown);
+    } catch (error) {
+      rejectMcpClient(client, new Error(`Engine MCP response was not valid JSON: ${errorText(error)}`, { cause: error }), true);
+      return;
+    }
+    if (response === null || typeof response['id'] !== 'number') {
+      rejectMcpClient(client, new Error('Engine MCP response id mismatch.'), true);
+      return;
+    }
+    const id = response['id'];
+    const pending = client.pending.get(id);
+    if (pending === undefined) {
+      rejectMcpClient(client, new Error('Engine MCP response id mismatch.'), true);
+      return;
+    }
+    client.pending.delete(id);
+    if (response['error'] !== undefined) pending.reject(new Error(JSON.stringify(response['error'])));
+    else pending.resolve(response['result']);
+  });
+  lines.once('close', () => {
+    rejectMcpClient(client, childExitedError(client, 'stdout closed'));
+  });
+  child.once('error', (error) => {
+    rejectMcpClient(client, childExitedError(client, `failed: ${errorText(error)}`, error));
+    resolveExit(null);
+  });
+  child.once('exit', (code, signal) => {
+    rejectMcpClient(client, childExitedError(
+      client,
+      `exited ${code === null ? `from ${String(signal)}` : `with code ${String(code)}`}`,
+    ));
+    resolveExit(code);
+  });
   return client;
 }
 
-async function mcpRequest(client: McpClient, method: string, params: unknown): Promise<unknown> {
+export function startMcpClient(cwd: string, launcherPath: string): McpClient {
+  return createMcpClient(spawn(process.execPath, [
+    resolve(cwd, 'node_modules/vite-node/vite-node.mjs'),
+    resolve(cwd, 'tools/engine-mcp-server.ts'),
+    launcherPath,
+  ], { cwd, stdio: ['pipe', 'pipe', 'pipe'] }));
+}
+
+export async function mcpRequest(client: McpClient, method: string, params: unknown): Promise<unknown> {
   const id = client.nextId;
   client.nextId += 1;
   const requestParams = asRecord(params);
   if (requestParams === null) throw new TypeError('MCP request params must be an object.');
-  client.child.stdin.write(`${JSON.stringify({
+  if (client.terminalError !== null) throw client.terminalError;
+  if (client.child.exitCode !== null || client.child.signalCode !== null ||
+    client.child.stdin.destroyed || client.child.stdin.writableEnded || !client.child.stdin.writable) {
+    const error = childExitedError(client, 'is not writable');
+    rejectMcpClient(client, error);
+    throw error;
+  }
+  const payload = `${JSON.stringify({
     jsonrpc: '2.0', id, method,
     params: {
       ...requestParams,
       _meta: mcpRequestMeta({ name: 'ai-dm-conversation-SIMULATED', version: '1.0.0' }),
     },
-  })}\n`);
-  const line = await client.iterator.next();
-  if (line.done) throw new Error(`Engine MCP server closed early: ${client.stderr}`);
-  const response = asRecord(JSON.parse(line.value) as unknown);
-  if (response === null || response['id'] !== id) throw new Error('Engine MCP response id mismatch.');
-  if (response['error'] !== undefined) throw new Error(JSON.stringify(response['error']));
-  return response['result'];
+  })}\n`;
+  const response = new Promise<unknown>((resolvePromise, reject) => {
+    client.pending.set(id, { resolve: resolvePromise, reject });
+  });
+  client.child.stdin.write(payload, (error) => {
+    if (error !== null && error !== undefined) {
+      rejectMcpClient(client, childExitedError(client, `write failed: ${errorText(error)}`, error), true);
+    }
+  });
+  return response;
 }
 
 async function stopMcpClient(client: McpClient, allowNonzero = false): Promise<void> {
-  client.child.stdin.end();
+  if (!client.child.stdin.destroyed && !client.child.stdin.writableEnded) client.child.stdin.end();
   const code = await client.exit;
   client.lines.close();
   if (code !== 0 && !allowNonzero) {

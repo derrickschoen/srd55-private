@@ -1,3 +1,5 @@
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
@@ -17,6 +19,9 @@ import {
   proposalResolutionDivergence,
   runConversation,
   structuredFinalDecisionPhase,
+  createMcpClient,
+  McpChildExited,
+  mcpRequest,
 } from '../../../tools/ai-dm-conversation';
 import { buildRerunPacket } from '../../../tools/ai-dm-rerun-packet';
 import { mkdtempSync, readFileSync, writeFileSync } from '../../helpers/test-filesystem';
@@ -472,6 +477,43 @@ const ALL_OPTIONS_TEST_RENDERER_ARGS = [
 ] as const;
 
 describe('AI-DM engine MCP conversation runner', () => {
+  it('rejects a request after the MCP child closes stdin without an unhandled EPIPE', async () => {
+    const child = spawn(process.execPath, ['-e', [
+      "require('node:fs').closeSync(0);",
+      "process.stderr.write('READY\\n');",
+      'setTimeout(() => {}, 100);',
+    ].join(' ')], { stdio: ['pipe', 'pipe', 'pipe'] });
+    const client = createMcpClient(child);
+    await once(child.stderr, 'data');
+
+    await expect(mcpRequest(client, 'tools/list', {})).rejects.toBeInstanceOf(McpChildExited);
+    await client.exit;
+  });
+
+  it('rejects an in-flight MCP request when the child exits without responding', async () => {
+    const child = spawn(process.execPath, ['-e', [
+      'process.stdin.resume();',
+      'setTimeout(() => process.exit(7), 50);',
+    ].join(' ')], { stdio: ['pipe', 'pipe', 'pipe'] });
+    const client = createMcpClient(child);
+
+    await expect(mcpRequest(client, 'tools/list', {})).rejects.toMatchObject({
+      name: 'McpChildExited',
+      code: 'MCP_CHILD_EXITED',
+    });
+    await expect(client.exit).resolves.toBe(7);
+  });
+
+  it('refuses an MCP request issued after the child has exited', async () => {
+    const child = spawn(process.execPath, ['-e', 'process.exit(0)'], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    const client = createMcpClient(child);
+    await client.exit;
+
+    await expect(mcpRequest(client, 'tools/list', {})).rejects.toBeInstanceOf(McpChildExited);
+  });
+
   it('authorizes a serialized revision-bound Dodge proposal', { timeout: 60_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-serialized-dodge-'));
     const adapter = new SerializedRoundTripAdapter('use_action_dodge');
