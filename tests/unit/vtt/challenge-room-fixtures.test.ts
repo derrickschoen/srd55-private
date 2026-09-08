@@ -1,5 +1,5 @@
-import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
+import { declareTestInputs } from '../../helpers/test-inputs';
 import { canonicalJson } from '../../../src/commands/canonical-json';
 import { traceCombatantLine } from '../../../src/combat/cover';
 import { encounterMovementWorld } from '../../../src/combat/encounter-movement-world';
@@ -22,19 +22,38 @@ import { resolveEngineActorOption, availableEngineActorOptions } from '../../../
 import { actorOpportunityReport } from '../../../src/vtt/intel/opportunity-cost';
 import { generateRoom, type GeneratedRoom } from '../../../src/vtt/room-generator';
 
-const FIXTURE_ROOT = 'tests/fixtures/arena-basis-challenge';
 const SEEDS = [5_831_001, 5_831_002, 5_831_003, 5_831_004] as const;
+const ENVELOPE_PATHS = {
+  5_831_001: 'tests/fixtures/arena-basis-challenge/seed-5831001.json',
+  5_831_002: 'tests/fixtures/arena-basis-challenge/seed-5831002.json',
+  5_831_003: 'tests/fixtures/arena-basis-challenge/seed-5831003.json',
+  5_831_004: 'tests/fixtures/arena-basis-challenge/seed-5831004.json',
+} as const;
+const SIDECAR_PATHS = {
+  5_831_001: 'tests/fixtures/arena-basis-challenge/seed-5831001.provenance.json',
+  5_831_002: 'tests/fixtures/arena-basis-challenge/seed-5831002.provenance.json',
+  5_831_003: 'tests/fixtures/arena-basis-challenge/seed-5831003.provenance.json',
+  5_831_004: 'tests/fixtures/arena-basis-challenge/seed-5831004.provenance.json',
+} as const;
+const FIXTURE_INPUTS = [
+  ...Object.values(ENVELOPE_PATHS),
+  ...Object.values(SIDECAR_PATHS),
+  'tests/fixtures/arena-basis-brutal/seed-6203001.json',
+  'tests/fixtures/arena-basis-los-cover-v1/seed-5762001.json',
+] as const;
+const testInputs = declareTestInputs({ fixtures: FIXTURE_INPUTS });
+type FixtureInputPath = typeof FIXTURE_INPUTS[number];
 
-async function json(path: string): Promise<unknown> {
-  return JSON.parse(await readFile(path, 'utf8')) as unknown;
+async function json(path: FixtureInputPath): Promise<unknown> {
+  return JSON.parse(testInputs.fixtures.readText(path)) as unknown;
 }
 
 async function room(seed: typeof SEEDS[number]): Promise<GeneratedRoom> {
-  return decodeArenaBasisEnvelopeV1(await json(`${FIXTURE_ROOT}/seed-${String(seed)}.json`), { mode: 'challenge' });
+  return decodeArenaBasisEnvelopeV1(await json(ENVELOPE_PATHS[seed]), { mode: 'challenge' });
 }
 
 async function sidecar(seed: typeof SEEDS[number]): Promise<ChallengeRoomProvenanceV1> {
-  return decodeChallengeRoomProvenanceV1(await json(`${FIXTURE_ROOT}/seed-${String(seed)}.provenance.json`));
+  return decodeChallengeRoomProvenanceV1(await json(SIDECAR_PATHS[seed]));
 }
 
 function objectClone(value: unknown): Record<string, unknown> {
@@ -103,7 +122,7 @@ describe('D583 challenge room fixtures', () => {
   });
 
   it('rejects a challenge snapshot that violates state or spec agreement', async () => {
-    const envelope = objectClone(await json(`${FIXTURE_ROOT}/seed-5831001.json`));
+    const envelope = objectClone(await json(ENVELOPE_PATHS[5_831_001]));
     const spec = objectClone(envelope['spec']);
     envelope['spec'] = spec;
     spec['blockedCells'] = [];
@@ -112,7 +131,7 @@ describe('D583 challenge room fixtures', () => {
   });
 
   it('rejects duplicate ids illegal occupancy and inconsistent active initiative', async () => {
-    const original = await json(`${FIXTURE_ROOT}/seed-5831001.json`);
+    const original = await json(ENVELOPE_PATHS[5_831_001]);
     const duplicate = objectClone(original);
     const duplicateState = stateRecord(duplicate);
     const combatants = structuredClone(duplicateState['combatants']) as unknown[];
@@ -275,7 +294,7 @@ describe('D583 challenge room fixtures', () => {
     for (const fixturePath of [
       'tests/fixtures/arena-basis-brutal/seed-6203001.json',
       'tests/fixtures/arena-basis-los-cover-v1/seed-5762001.json',
-    ]) {
+    ] as const) {
       const envelope = objectClone(await json(fixturePath));
       const loaded = decodeArenaBasisEnvelopeV1(envelope, { mode: 'legacy_basis' });
       const fixtureState = stateRecord(envelope);
@@ -329,13 +348,13 @@ describe('D583 challenge room fixtures', () => {
   });
 
   it('challenge requires complete initiative and zero omissions', async () => {
-    const empty = objectClone(await json(`${FIXTURE_ROOT}/seed-5831001.json`));
+    const empty = objectClone(await json(ENVELOPE_PATHS[5_831_001]));
     const state = stateRecord(empty);
     state['initiative'] = [];
     state['activeCombatant'] = null;
     state['activeInitiativeIndex'] = null;
     expect(() => decodeArenaBasisEnvelopeV1(empty, { mode: 'challenge' })).toThrow('requires nonempty complete initiative');
-    const omitted = objectClone(await json(`${FIXTURE_ROOT}/seed-5831001.json`));
+    const omitted = objectClone(await json(ENVELOPE_PATHS[5_831_001]));
     const omittedState = stateRecord(omitted);
     const tokens = structuredClone(omittedState['tokens']) as unknown[];
     const token = objectClone(tokens[0]);
@@ -360,7 +379,7 @@ describe('D583 challenge room fixtures', () => {
       expect(selectorMatches(loaded.encounter.state, provenance.actorId, provenance.engineTop)).toHaveLength(1);
       expect(selectorMatches(loaded.encounter.state, provenance.actorId, provenance.certifiedAlternative)).toHaveLength(1);
     }
-    const mutant = objectClone(await json(`${FIXTURE_ROOT}/seed-5831001.provenance.json`));
+    const mutant = objectClone(await json(SIDECAR_PATHS[5_831_001]));
     mutant['seed'] = 5_831_002;
     expect(() => decodeChallengeRoomProvenanceV1(mutant)).toThrow('do not correspond');
   });
