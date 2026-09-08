@@ -3,6 +3,8 @@ import type { NarrowOpeningRegion } from './creature-space';
 import { isCellInside } from './grid';
 import type { DamageRequest, DamageResponse, RollMode } from './resolution';
 import type { ArmorClass, CombatantId, DamageType, WorldObjectId } from './values';
+import type { CoverTier, WorldObjectBlockingWire } from './terrain';
+export type { CanonicalWorldObjectBlocking, CoverTier } from './terrain';
 
 export const WORLD_OBJECT_KINDS = [
   'barrier',
@@ -15,7 +17,6 @@ export const WORLD_OBJECT_KINDS = [
 ] as const;
 
 export type WorldObjectKind = (typeof WORLD_OBJECT_KINDS)[number];
-export type CoverTier = 'none' | 'half' | 'three_quarters' | 'total';
 export type LightLevel = 'bright' | 'dim' | 'darkness';
 
 export type WorldObjectDurability =
@@ -26,11 +27,7 @@ export type WorldObjectDurability =
     }
   | { readonly kind: 'indestructible' };
 
-export interface WorldObjectBlocking {
-  readonly movement: boolean;
-  readonly lineOfSight: boolean;
-  readonly cover: CoverTier;
-}
+export type WorldObjectBlocking = WorldObjectBlockingWire;
 
 export interface WorldObjectClassAction {
   readonly id: string;

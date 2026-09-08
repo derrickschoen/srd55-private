@@ -20,6 +20,7 @@ import { affectedCellsAmong, cubeAffectedCellsAmong, feetPoint, type AreaTemplat
 import { feet, type CombatantId } from '../combat/values';
 import { worldObjectActionWasUsed } from '../combat/world-object-actions';
 import { gridDistance } from '../combat/grid';
+import { terrainWallCells } from '../combat/terrain';
 import { sha256 } from '../crypto/sha256';
 import {
   evaluateHardControlProfile,
@@ -122,10 +123,7 @@ function hardControlSelection(
     .map((token) => ({ token, cells: combatantSpace(state, token.combatantId).cells }));
   const templateGrid = {
     bounds: state.bounds,
-    blockedCells: [
-      ...state.blockedCells,
-      ...state.worldObjects.flatMap((object) => object.blocking.lineOfSight ? object.footprint : []),
-    ],
+    blockedCells: terrainWallCells(state),
   };
   const sizeFeet = targeting.baseSizeFeet;
   const halfSizeFeet = sizeFeet / 2;
@@ -269,10 +267,7 @@ function placedAreaSelection(
     .map((token) => ({ token, cells: combatantSpace(state, token.combatantId).cells }));
   const grid = {
     bounds: state.bounds,
-    blockedCells: [
-      ...state.blockedCells,
-      ...state.worldObjects.flatMap((object) => object.blocking.lineOfSight ? object.footprint : []),
-    ],
+    blockedCells: terrainWallCells(state),
   };
   const size = definition.targeting.baseSizeFeet;
   const targeting = definition.targeting;

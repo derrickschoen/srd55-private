@@ -56,6 +56,21 @@ describe('creature-space Increment 2 integration', () => {
     )).toEqual({ kind: 'enterable', cost: 5, canEnd: true });
   });
 
+  it('rejects a Large destination whose non-anchor footprint cells leave the grid', () => {
+    const mover = sizedMonster('large-outside-grid', 'Large', 100);
+    const state = createEncounter({
+      bounds: { columns: 3, rows: 2 },
+      combatants: [mover],
+      tokens: [placedToken(mover, 1, 0)],
+    });
+
+    expect(encounterMovementWorld(state).traversal(
+      mover.id,
+      { column: 1, row: 0 },
+      { column: 2, row: 0 },
+    )).toEqual({ kind: 'blocked', reason: 'creature footprint is outside the grid' });
+  });
+
   it('fires an entry hazard only for newly entered cells of a Large creature', () => {
     const mover = sizedMonster('large-entry-hazard', 'Large', 100);
     let state = createEncounter({

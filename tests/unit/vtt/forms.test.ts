@@ -233,6 +233,8 @@ describe('D348.1 imported form and stat replacement', () => {
     const exactTarget = targetState(exact.state, exactSubject.target);
     expect(exactTarget.form).toBeUndefined();
     expect(exactTarget.hitPoints).toBe(20);
+    expect(exact.state.tokens.find((token) => token.combatantId === exactSubject.target.id)?.placementMode)
+      .toEqual({ kind: 'normal', actual: 'Medium' });
     expect(exact.events).toContainEqual(expect.objectContaining({
       type: 'effect_ended', reason: 'form_hit_points_depleted',
     }));
@@ -259,6 +261,8 @@ describe('D348.1 imported form and stat replacement', () => {
     expect(endedTarget.hitPoints).toBe(20);
     expect(endedTarget.form).toBeUndefined();
     expect(endedTarget.profile.rules).toMatchObject({ armorClass: 14, speed: 30 });
+    expect(ended.state.tokens.find((token) => token.combatantId === subject.target.id)?.placementMode)
+      .toEqual({ kind: 'normal', actual: 'Medium' });
     expect(ended.events).toContainEqual(expect.objectContaining({
       type: 'effect_ended', reason: 'concentration_ended',
     }));

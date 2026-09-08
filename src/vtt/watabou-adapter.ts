@@ -13,6 +13,7 @@ import type { GridCell } from '../combat/grid';
 import type { KnownCreatureSize } from '../domain/enums';
 import { armorClass, worldObjectId } from '../combat/values';
 import type { WorldObject } from '../combat/world-objects';
+import { terrainPassabilityAt } from '../combat/terrain';
 import { encounterIr, type EncounterIr } from './encounter-ir';
 import { generateRoom, ROOM_GRID_DIMENSIONS, type RoomGridDimension } from './room-generator';
 
@@ -216,8 +217,8 @@ export function adaptWatabouDungeon(
     }
   }
   const worldObjects = source.doors.map((door, index) => doorObject(door, index, minimumX, minimumY));
-  const blockingObjectCells = worldObjects.filter((object) => object.blocking.movement)
-    .flatMap((object) => object.footprint);
+  const blockingObjectCells = worldObjects.flatMap((object) => object.footprint.filter((cell) =>
+    terrainPassabilityAt({ blockedCells: [], worldObjects: [object] }, cell) === 'blocked'));
   const objectCells = new Set(blockingObjectCells.map(cellKey));
   const placementCells = openCells.filter((cell) => !objectCells.has(cellKey(cell)));
   const generated = generateRoom(options.seed ?? 0, { dimensions: { columns, rows } });

@@ -15,6 +15,7 @@ import { ENGINE_FAILURE_MODES_POLICY } from '../../../src/vtt/engine-failure-mod
 import { freshMonsterPlanningState, createEngineMcpRuntime, loadArenaFixture } from '../../../src/vtt/mcp/entrypoint';
 import { TURN_CONTEXT_MAX_BYTES } from '../../../src/vtt/mcp/engine-server';
 import { engineOptionId } from '../../../src/vtt/turn-proposal';
+import { traceCombatantLine } from '../../../src/combat/cover';
 
 const FIGHTER = combatantId('combatant:fighter');
 const SCOUT = combatantId('combatant:generated-5117009-monster-3');
@@ -79,16 +80,26 @@ describe('versioned DM tactical intel', () => {
     const rows = intel['rows'];
     if (!Array.isArray(rows)) throw new TypeError('Scout intel rows are absent.');
     const fighterRow = record(rows.find((value) => record(value, 'intel row')['target_id'] === FIGHTER), 'fighter row');
+    const trace = traceCombatantLine(state, SCOUT, FIGHTER);
+    expect({
+      sourceCorner: trace.sourceCorner,
+      lineTiers: trace.lines.map((line) => line.tier),
+      coverTier: trace.tier,
+    }).toEqual({
+      sourceCorner: { column: 19, row: 3 },
+      lineTiers: ['total', 'total', 'none', 'none'],
+      coverTier: 'half',
+    });
     expect(fighterRow).toMatchObject({
       target_id: FIGHTER,
       attacks: 2,
       visibility: 'VISIBLE',
-      cover: 'NONE',
+      cover: 'HALF',
       range: 'NORMAL',
       distance_feet: 90,
       roll_mode: 'STRAIGHT',
       p_hit: '≈1/2',
-      ev: 5,
+      ev: 4,
       movement_need_feet: 0,
     });
     expect(fighterRow['reason_codes']).toEqual([
@@ -113,11 +124,12 @@ describe('versioned DM tactical intel', () => {
     const exact = exactDmIntelMatrix(state, capsule, canonicalEngineQueryPort)
       .find((row) => row.actorId === SCOUT && row.targetId === FIGHTER);
     if (exact === undefined) throw new Error('Exact Scout-to-Fighter row is absent.');
-    // Two independent 7/20-hit shots: 1 - (13/20)^2 = 231/400.
-    expect(exact.hitProbability).toBeCloseTo(231 / 400, 12);
-    // Two hand-authored 2.5-EV Longbow attacks.
-    expect(exact.expectedDamage).toBe(5);
-    expect(renderDmIntelRow(exact)).toMatchObject({ p_hit: '≈1/2', ev: 5 });
+    // Half Cover makes each +4 Longbow shot hit AC 20 on 16-20: 5/20.
+    // Two independent shots therefore hit at least once with 1 - (15/20)^2 = 7/16.
+    expect(exact.hitProbability).toBeCloseTo(7 / 16, 12);
+    // Per shot: four normal hits at 6.5 plus one critical at 11, over 20 faces.
+    expect(exact.expectedDamage).toBe(2 * ((4 / 20) * 6.5 + (1 / 20) * 11));
+    expect(renderDmIntelRow(exact)).toMatchObject({ p_hit: '≈1/2', ev: 4 });
 
     const first = record(runtime.toolSurface.execute('engine.query_tactical_intel', {
       state_ref: {
@@ -136,8 +148,8 @@ describe('versioned DM tactical intel', () => {
       evaluator_policy: 'tactical-evaluator-v3',
       truncated: false,
     });
-    expect(first['rows']).toEqual([expect.objectContaining({ p_hit: '≈1/2', ev: 5 })]);
-    expect(JSON.stringify(first)).not.toContain('0.5775');
+    expect(first['rows']).toEqual([expect.objectContaining({ p_hit: '≈1/2', ev: 4 })]);
+    expect(JSON.stringify(first)).not.toContain('0.4375');
   });
 
   it('paginates the full matrix with a state-bound cursor and advertises the read tool to the DM', async () => {
@@ -280,6 +292,6 @@ describe('versioned DM tactical intel', () => {
     const actor = capture?.actors.find((candidate) => candidate.actorId === SCOUT);
     expect(actor?.offeredOptionIds.length).toBeGreaterThan(0);
     expect(actor?.rows.find((row) => row.targetId === FIGHTER)?.hitProbability)
-      .toBeCloseTo(231 / 400, 12);
+      .toBeCloseTo(7 / 16, 12);
   });
 });

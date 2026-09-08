@@ -25,6 +25,7 @@ import {
 } from '../combat/encounter';
 import { HIDDEN_ROLL_CATEGORIES, type HiddenRollCategory } from '../combat/roll-visibility';
 import { previewAffectedCells } from '../combat/templates';
+import { terrainWallCells } from '../combat/terrain';
 import { encounterSessionId, type CombatantId } from '../combat/values';
 import {
   ControllerAssignmentError,
@@ -1137,7 +1138,15 @@ class PlayerEncounterView {
     }
     return new Set(
       previewAffectedCells(
-        { bounds: projection.bounds, blockedCells: projection.blockedCells },
+        {
+          bounds: projection.bounds,
+          blockedCells: terrainWallCells({
+            blockedCells: projection.blockedCells,
+            worldObjects: projection.worldObjects.map((object) => ({
+              id: object.id, footprint: object.cells, blocking: object.blocking,
+            })),
+          }),
+        },
         staged.area,
       ).map((cell) => `${cell.column},${cell.row}`),
     );

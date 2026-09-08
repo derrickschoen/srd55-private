@@ -43,7 +43,9 @@ import { EncounterRuleError } from './encounter-rule-error';
 import {
   coverBetweenCombatants,
   coverTierBetweenObjects as coverTierBetweenWorldObjects,
-  rasterizeInterveningCells,
+  traceCombatantLine,
+  traceCombatantLineToCells,
+  traceTerrainLine,
 } from './cover';
 export {
   coverBetweenCombatants,
@@ -241,6 +243,7 @@ import {
   type WorldObject,
   type WorldOperation,
 } from './world-objects';
+import { terrainPassabilityAt, terrainWallCells } from './terrain';
 import {
   WildShapeRuleError,
   wildShapeDurationRounds,
@@ -1190,8 +1193,7 @@ export function createEncounter(setup: EncounterSetup): EncounterState {
     if (space.cells.some((cell) => blockedCells.some((blocked) => cellKey(blocked) === cellKey(cell)))) {
       throw new EncounterRuleError('validation', `Token ${placed.id} footprint intersects a blocked cell.`);
     }
-    if (space.cells.some((cell) => worldObjects.some((object) => object.blocking.movement &&
-      object.footprint.some((occupied) => cellKey(occupied) === cellKey(cell))))) {
+    if (space.cells.some((cell) => terrainPassabilityAt({ blockedCells: [], worldObjects }, cell) === 'blocked')) {
       throw new EncounterRuleError('validation', `Token ${placed.id} footprint intersects a blocking object.`);
     }
     if (placed.placementMode.kind === 'squeezed' &&
@@ -1505,9 +1507,9 @@ function pendingPlacementRefusal(
   if (!spaceFitsBounds(space, state.bounds)) return 'outside_bounds';
   if (space.cells.some((occupied) => state.blockedCells.some((blocked) =>
     cellKey(blocked) === cellKey(occupied)))) return 'blocked_cell';
-  if (space.cells.some((occupied) => state.worldObjects.some((object) =>
-    object.blocking.movement && object.footprint.some((blocked) =>
-      cellKey(blocked) === cellKey(occupied))))) return 'blocking_object';
+  if (space.cells.some((occupied) => terrainPassabilityAt(state, occupied) === 'blocked')) {
+    return 'blocking_object';
+  }
   if (space.cells.some((occupied) => (state.environment.movementRegions ?? []).some((region) =>
     region.entry === 'blocked' && region.cells.some((blocked) =>
       cellKey(blocked) === cellKey(occupied))))) return 'blocked_cell';
@@ -2015,23 +2017,14 @@ function effectDiceModifier(
   }, 0);
 }
 
-function worldObjectOccupiesCell(object: WorldObject, cell: GridCell): boolean {
-  return object.footprint.some((candidate) => cellKey(candidate) === cellKey(cell));
-}
-
 function movementBlocked(state: EncounterState, cell: GridCell): boolean {
-  return state.blockedCells.some((candidate) => cellKey(candidate) === cellKey(cell)) ||
-    state.worldObjects.some((object) => object.blocking.movement && worldObjectOccupiesCell(object, cell)) ||
+  return terrainPassabilityAt(state, cell) === 'blocked' ||
     (state.environment.movementRegions ?? []).some((region) =>
       region.entry === 'blocked' && region.cells.some((candidate) => cellKey(candidate) === cellKey(cell)));
 }
 
-function templateBlockedCells(state: EncounterState): readonly GridCell[] {
-  const cells = [
-    ...state.blockedCells,
-    ...state.worldObjects.flatMap((object) => object.blocking.lineOfSight ? object.footprint : []),
-  ];
-  return [...new Map(cells.map((cell) => [cellKey(cell), cell] as const)).values()];
+export function templateBlockedCells(state: EncounterState): readonly GridCell[] {
+  return terrainWallCells(state);
 }
 
 export function hasLineOfSight(
@@ -2039,10 +2032,7 @@ export function hasLineOfSight(
   from: GridCell,
   to: GridCell,
 ): boolean {
-  const blocked = new Set(state.worldObjects
-    .flatMap((object) => object.blocking.lineOfSight ? object.footprint : [])
-    .map(cellKey));
-  return rasterizeInterveningCells(from, to).every((cell) => !blocked.has(cellKey(cell)));
+  return !traceTerrainLine(state, from, to).blocksSight;
 }
 
 export function coverTierBetween(
@@ -2050,7 +2040,7 @@ export function coverTierBetween(
   from: GridCell,
   to: GridCell,
 ): CoverTier {
-  return coverTierBetweenObjects(state.worldObjects, from, to);
+  return traceTerrainLine(state, from, to).tier;
 }
 
 export function coverTierBetweenObjects(
@@ -2109,14 +2099,13 @@ export function detectCombatant(
   observer: CombatantId,
   subject: CombatantId,
 ): DetectionResult {
-  const line = minimumSpaceLine(combatantSpace(state, observer), combatantSpace(state, subject));
-  const from = line.sourceCell;
+  const line = traceCombatantLine(state, observer, subject);
   const to = line.targetCell;
-  const distance = line.distance;
+  const distance = minimumSpaceDistance(combatantSpace(state, observer), combatantSpace(state, subject));
   const senses = effectiveCombatRules(state, observer).senses;
   const hasBlindsight = senses.some((sense) =>
     sense.kind === 'blindsight' && distance <= sense.rangeFeet);
-  if (hasBlindsight && hasLineOfSight(state, from, to)) {
+  if (hasBlindsight && !line.blocksSight) {
     return { kind: 'seen', sense: 'blindsight' };
   }
   const hasTruesight = senses.some((sense) =>
@@ -2133,7 +2122,7 @@ export function detectCombatant(
   if (observerRules.detectionTraits.includes('web_sense') && sharesWebArea(state, observer, subject)) {
     return { kind: 'located', sense: 'web_sense' };
   }
-  if (!hasLineOfSight(state, from, to)) return { kind: 'undetected', reason: 'blocked' };
+  if (line.blocksSight) return { kind: 'undetected', reason: 'blocked' };
 
   const observerBlinded = combatantConditions(state, observer)
     .some(({ name }) => name === 'Blinded');
@@ -3029,7 +3018,9 @@ function endEffects(
     .flatMap((effect) => effect.targets));
   const sizeTargets = new Set(context.state.effects
     .filter((effect) => ending.has(effect.id) && (
-      effect.payload.kind === 'size_alteration' || effect.payload.kind === 'form_alteration'))
+      effect.payload.kind === 'size_alteration' ||
+      effect.payload.kind === 'form_alteration' ||
+      effect.payload.kind === 'polymorph'))
     .flatMap((effect) => effect.targets));
   for (const effect of context.state.effects) {
     if (!ending.has(effect.id)) continue;
@@ -4721,7 +4712,7 @@ function perceptionMode(
   if (effectiveCombatRules(state, observer).detectionTraits.includes('keen_sight')) {
     modes.push('advantage');
   }
-  const subjectCell = minimumSpaceLine(combatantSpace(state, observer), combatantSpace(state, subject)).targetCell;
+  const subjectCell = traceCombatantLine(state, observer, subject).targetCell;
   const light = environmentLightAt(state.environment, subjectCell);
   const obscurement = environmentObscurementAt(state.environment, subjectCell);
   // Lightly Obscured sight checks have Disadvantage: docs/srd/full/srd-5.2.1.txt:656-660.
@@ -7160,10 +7151,7 @@ function processAttack(
   if (cannotHarmTarget(context.state, command.actor, command.target)) {
     throw new EncounterRuleError('validation', 'The Charmed condition prohibits harming this target.');
   }
-  const attackLine = minimumSpaceLine(
-    combatantSpace(context.state, command.actor),
-    combatantSpace(context.state, command.target),
-  );
+  const attackLine = traceCombatantLine(context.state, command.actor, command.target);
   if (opportunityTrigger === null && command.tacticalRange !== undefined) {
     const range = tacticalRangeVerdictAtDistance(
       minimumSpaceDistance(
@@ -7181,8 +7169,7 @@ function processAttack(
   }
   if (
     opportunityTrigger === null &&
-    (!hasLineOfSight(context.state, attackLine.sourceCell, attackLine.targetCell) ||
-      coverBetweenCombatants(context.state, command.actor, command.target).tier === 'total')
+    (attackLine.blocksSight || attackLine.tier === 'total')
   ) {
     throw new EncounterRuleError('validation', 'The target has Total Cover or is outside line of sight.');
   }
@@ -7444,12 +7431,12 @@ function processSuspectedSquareAttack(
   if (!memory.suspicion.cells.some((cell) => cellKey(cell) === cellKey(command.square))) {
     throw new EncounterRuleError('validation', 'The selected square is outside the active suspicion region.');
   }
-  const selectedLine = minimumSpaceLineToCells(
-    combatantSpace(context.state, command.actor),
-    [command.square],
-  );
+  const selectedLine = traceCombatantLineToCells(context.state, command.actor, [command.square]);
   if (command.tacticalRange !== undefined) {
-    const range = tacticalRangeVerdict(selectedLine.sourceCell, selectedLine.targetCell, command.tacticalRange);
+    const range = tacticalRangeVerdictAtDistance(
+      minimumSpaceDistanceToCells(combatantSpace(context.state, command.actor), [command.square]),
+      command.tacticalRange,
+    );
     if (range.status === 'unresolved') {
       throw new EncounterRuleError('validation', 'The suspected-square attack long range is unresolved.');
     }
@@ -7458,8 +7445,7 @@ function processSuspectedSquareAttack(
     }
   }
   if (
-    !hasLineOfSight(context.state, selectedLine.sourceCell, selectedLine.targetCell) ||
-    coverTierBetween(context.state, selectedLine.sourceCell, selectedLine.targetCell) === 'total'
+    selectedLine.blocksSight || selectedLine.tier === 'total'
   ) {
     throw new EncounterRuleError('validation', 'The suspected square has Total Cover or is outside line of sight.');
   }
@@ -8526,13 +8512,9 @@ function rollSpellAttack(
   command: SpellCastCommand,
   target: CombatantId,
 ): ReturnType<typeof resolveAttackRoll> {
-  const selectedLine = minimumSpaceLine(
-    combatantSpace(context.state, command.actor),
-    combatantSpace(context.state, target),
-  );
+  const selectedLine = traceCombatantLine(context.state, command.actor, target);
   if (
-    !hasLineOfSight(context.state, selectedLine.sourceCell, selectedLine.targetCell) ||
-    coverBetweenCombatants(context.state, command.actor, target).tier === 'total'
+    selectedLine.blocksSight || selectedLine.tier === 'total'
   ) throw new EncounterRuleError('validation', 'The spell target has Total Cover or is outside line of sight.');
   const rollModeEffects = context.state.effects.filter((effect) => {
     if (effect.payload.kind === 'faerie_fire') return effect.targets.includes(target);
@@ -9015,10 +8997,10 @@ function executeHeatMetal(
     throw new EquipmentRuleError('material_mismatch', `${definition.name} requires a metal item.`);
   }
   const targetCells = itemCells(context.state, id);
-  const selectedLine = minimumSpaceLineToCells(combatantSpace(context.state, command.actor), targetCells);
+  const selectedLine = traceCombatantLineToCells(context.state, command.actor, targetCells);
   if (
-    selectedLine.distance > heatMetalRange(definition) ||
-    !hasLineOfSight(context.state, selectedLine.sourceCell, selectedLine.targetCell)
+    minimumSpaceDistanceToCells(combatantSpace(context.state, command.actor), targetCells) > heatMetalRange(definition) ||
+    selectedLine.blocksSight
   ) throw new EncounterRuleError('validation', `${definition.name} item target is out of range or not visible.`);
 
   const contacts = itemContacts(context.state, id);
@@ -10637,20 +10619,19 @@ function executeSpellOperation(
         }
         const destination = declared.destination;
         const destinationSpace = combatantSpaceAt(context.state, mover, destination);
-        const selectedLine = minimumSpaceLineToCells(casterSpace, [destination]);
+        const selectedLine = traceCombatantLineToCells(context.state, command.actor, [destination]);
         const occupied = context.state.tokens.some((placed) =>
           !movingIds.has(placed.combatantId) && combatant(context.state, placed.combatantId).life !== 'dead' &&
           spacesIntersect(destinationSpace, combatantSpace(context.state, placed.combatantId))) ||
           destinationSpaces.some((space) => spacesIntersect(destinationSpace, space));
         if (
           !spaceFitsBounds(destinationSpace, context.state.bounds) ||
-          selectedLine.distance > operation.maximumDistanceFeet ||
+          minimumSpaceDistanceToCells(casterSpace, [destination]) > operation.maximumDistanceFeet ||
           destinationSpace.cells.some((cell) => movementBlocked(context.state, cell)) ||
           (destinationSpace.mode.kind === 'squeezed' &&
             openingContainingSpace(destinationSpace, context.state.environment.narrowOpeningRegions) === null) ||
           occupied ||
-          (operation.destination.requireLineOfSight &&
-            !hasLineOfSight(context.state, selectedLine.sourceCell, selectedLine.targetCell))
+          (operation.destination.requireLineOfSight && selectedLine.blocksSight)
         ) throw new EncounterRuleError('validation', `${definition.name} requires an unoccupied, occupiable destination satisfying its declared constraint.`);
         destinationSpaces.push(destinationSpace);
       }
@@ -11491,7 +11472,8 @@ function validateWorldObjectForState(
   if (state.worldObjects.some((candidate) => candidate.id === object.id && candidate.id !== replacing)) {
     throw new EncounterRuleError('validation', `World object ${object.id} already exists.`);
   }
-  if (object.blocking.movement && state.tokens.some((placed) =>
+  if (object.footprint.some((cell) =>
+    terrainPassabilityAt({ blockedCells: [], worldObjects: [object] }, cell) === 'blocked') && state.tokens.some((placed) =>
     spaceTouchesCellSet(combatantSpace(state, placed.combatantId), object.footprint))) {
     throw new EncounterRuleError('validation', 'A movement-blocking world object cannot overlap a combatant.');
   }

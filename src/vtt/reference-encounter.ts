@@ -5,6 +5,7 @@ import { minimumSpaceDistance, minimumSpaceDistanceToCells } from '../combat/cre
 import type { EncounterCommand } from '../combat/events';
 import { gridDistance, isCellInside, type GridCell } from '../combat/grid';
 import { encounterMovementWorld } from '../combat/encounter-movement-world';
+import { terrainWallCells } from '../combat/terrain';
 import { feetPoint, previewAffectedCells } from '../combat/templates';
 import { referencePartySpellSlots } from '../combat/spells/resources';
 import {
@@ -203,7 +204,7 @@ function shatterActions(state: EncounterState, actor: CombatantId): readonly Enc
         template: { origin: feetPoint(column * 5, row * 5), radius: feet(10) },
       };
       previewAffectedCells(
-        { bounds: state.bounds, blockedCells: state.blockedCells },
+        { bounds: state.bounds, blockedCells: terrainWallCells(state) },
         area,
       );
       if (minimumSpaceDistanceToCells(combatantSpace(state, actor), [{ column, row }]) > 60) continue;
