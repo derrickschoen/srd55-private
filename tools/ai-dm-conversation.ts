@@ -817,6 +817,8 @@ export interface TurnContextRenderEvidence {
 }
 
 export interface ConversationRunOptions {
+  readonly repoCommit?: string;
+  readonly clock?: () => number;
   readonly roomStates?: readonly EncounterState[];
   readonly store?: BrowserSessionStore;
   readonly adapter?: AgentSessionAdapter;
@@ -3316,6 +3318,17 @@ function authorizedMechanics(state: EncounterState, proposal: RoundTurnProposalE
   };
 }
 
+function agentInstructionSource(config: ConversationConfig): AgentInstructionSource {
+  switch (config.instructionSource) {
+    case 'none':
+      return { instructionSource: 'none', skill: null };
+    case 'kb':
+      return { instructionSource: 'kb', skill: null, kbPath: config.kbPath };
+    case 'skill':
+      return { instructionSource: 'skill', skill: config.skill, kbPath: null };
+  }
+}
+
 function invocation(
   config: ConversationConfig,
   runId: EncounterSessionId,
@@ -3329,9 +3342,8 @@ function invocation(
   freshSessionContext?: FreshSessionContext,
   output: AgentInvocationOutput = { kind: 'tool_driven' },
 ): AgentInvocation {
-  const instructionSource: AgentInstructionSource = config;
   return {
-    ...instructionSource,
+    ...agentInstructionSource(config),
     runId, prompt, instructions, model: planner.model, reasoningEffort: planner.effort,
     sessionProfile: 'arena',
     callPhase, output,
@@ -3381,6 +3393,7 @@ async function runConversationWithConfiguredIntel(
   options: ConversationRunOptions,
 ): Promise<ConversationRunResult> {
   const partyPolicy = options.partyPolicyOverride ?? config.partyPolicy;
+  const clock = options.clock ?? (() => performance.now());
   const knowledgeBase = await loadKnowledgeBase(config);
   const blindPrimer = [GENERAL_PRIMER, ...BOARD_GLYPH_PRIMER.full].join(' ');
   const startupInstructions = config.dmMode === 'blind'
@@ -3392,7 +3405,7 @@ async function runConversationWithConfiguredIntel(
     knowledgeBaseBundleHash: knowledgeBase.combinedStartupHash,
     startupInstructions,
   };
-  const repoCommit = await readRepoCommit(config.cwd);
+  const repoCommit = options.repoCommit ?? await readRepoCommit(config.cwd);
   await writeFile(config.outPath, '', 'utf8');
   const artifacts = await mkdtemp(join(tmpdir(), 'dnd-ai-dm-conversation-'));
   const instructionEnvironment = config.cli === 'codex'
@@ -3517,7 +3530,7 @@ async function runConversationWithConfiguredIntel(
 
     for (let round = 1; round <= config.rounds; round += 1) {
       const generationBeforeRound = journal.agentSession()?.generation ?? 0;
-      const roundStarted = performance.now();
+      const roundStarted = clock();
       const modelCallsBeforeRound = adapter.modelCalls;
       observedToolCalls = 0;
       observedTurnContextCalls = 0;
@@ -3667,7 +3680,7 @@ async function runConversationWithConfiguredIntel(
         }),
         ...(boardImageBinding === undefined ? {} : { boardImage: boardImageBinding }),
       });
-      const started = performance.now();
+      const started = clock();
       let localInitialProposal: RoundTurnProposalEnvelope | null = null;
       const initialToolSession = config.cli === 'local-openai'
         ? inProcessDmToolSession({
@@ -3881,7 +3894,7 @@ async function runConversationWithConfiguredIntel(
             })
           : undefined;
         const controller = new AbortController();
-        const dispatchStarted = performance.now();
+        const dispatchStarted = clock();
         const timeout = setTimeout(() => controller.abort(), budgetMs);
         const completion = (async (): Promise<SpeculativeDispatchCompletion> => {
           try {
@@ -3900,7 +3913,7 @@ async function runConversationWithConfiguredIntel(
               toolSession,
               freshSessionContext,
             ), controller.signal);
-            const planningWallMs = performance.now() - dispatchStarted;
+            const planningWallMs = clock() - dispatchStarted;
             return {
               plan: localPlan ?? takeSpeculativePlan(launcher.spoolPath),
               turn,
@@ -3912,7 +3925,7 @@ async function runConversationWithConfiguredIntel(
             return {
               plan: null,
               turn: null,
-              planningWallMs: performance.now() - dispatchStarted,
+              planningWallMs: clock() - dispatchStarted,
               timedOut: controller.signal.aborted,
               error: error instanceof Error ? error.message : String(error),
             };
@@ -5321,7 +5334,7 @@ async function runConversationWithConfiguredIntel(
                 capsuleRevision = Math.max(capsuleRevision, state.revision);
               }
               const pending = inFlightSpeculation.current;
-              const boundaryStarted = performance.now();
+              const boundaryStarted = clock();
               const completed = await pending.completion;
               if (completed.turn !== null) captureCallUsage(completed.turn, 'speculation');
               const decisionSnapshot = engineSession.snapshot({
@@ -5474,7 +5487,7 @@ async function runConversationWithConfiguredIntel(
                   for (const entry of rebound) segmentMonsterPlan.set(entry.proposal.actorId, entry);
                 }
               }
-              const boundaryWaitMs = performance.now() - boundaryStarted;
+              const boundaryWaitMs = clock() - boundaryStarted;
               speculation = {
                 status: adoptedEntries === null ? 'discarded' : 'adopted',
                 proposed: true,
@@ -5589,8 +5602,8 @@ async function runConversationWithConfiguredIntel(
         }
         refusals.push(error instanceof Error ? error.message : String(error));
       }
-      const wall = performance.now() - started;
-      const endToEndWall = performance.now() - roundStarted;
+      const wall = clock() - started;
+      const endToEndWall = clock() - roundStarted;
       const binding = journal.agentSession();
       rowTurnContext = takeTurnContext(
         initialLauncher.turnContextSpoolPath,
