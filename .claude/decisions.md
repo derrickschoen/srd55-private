@@ -15641,3 +15641,38 @@ vane-warren's test carries its hand derivation in prose but does NOT
 assert the complete fan vector, so it is less robust than the D365
 invariant. That is a known soft spot to close before the next geometry
 change.
+
+## Gate run 2: tsc, lint and the full vitest suite PASS; browser suite blocked by my own orphan (2026-09-07 22:54)
+
+gate-wt4.sh wt-los-cover, started 22:38 on a quiet worktree:
+  tsc exit 0
+  sg  exit 0
+  vitest test:gate exit 0, FAILED (none), one LOAD FLAKE
+      (tests/unit/tools/ai-dm-arena.test.ts) that passed serially
+  playwright exit 1 after 303 ms
+
+FINDING AGAINST MY OWN WORK, second cleanup failure this window. The
+playwright phase did not fail on a test. Its report carries exactly one
+error: "http://127.0.0.1:4500 is already used". Port 4500 was held by
+pid 3171754, a vite dev server alive 13,703 seconds, which is the web
+server spawned by the FIRST gate run, the one I killed by pid list at
+around 19:00 when I found the corner rule broken. I killed the flock,
+the runner and the browser processes but not the web server they had
+started, so it survived as an orphan and denied the port to every later
+run. The gate script derives that port deterministically from the
+worktree name, so the collision was guaranteed to recur.
+
+Rule for myself, recorded so it stops recurring: killing a gate means
+killing its SERVER too. After any gate kill, check the derived port with
+`ss -ltnp | grep :<port>` and `fuser -n tcp <port>` before relaunching,
+and never assume a pid list taken from `pgrep -fa gate|playwright`
+covers the dev server, because its argv matches neither pattern.
+
+Recovery: killed 3171754, confirmed 4500 free and the owner's 4173
+untouched, and relaunched only the browser phase with
+PLAYWRIGHT_PORT=4500 PLAYWRIGHT_WORKERS=1 npm run test:gate:browser,
+without an outer flock since the runner takes the lock itself.
+
+So the branch currently stands at: type-check clean, lint clean, full
+unit and integration suite green with no failures, and the browser suite
+running for the first time on this work.
