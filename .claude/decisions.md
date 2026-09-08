@@ -15486,3 +15486,43 @@ them: the arena's brutal-struggle protocol still requires exactly 10
 distinct seeds and --rooms 10, and we have 4, so that path is blocked
 until either the requirement is revisited or more candidates exist.
 Recorded as a latent blocker rather than worked around.
+
+## FINDING AGAINST MY OWN WORK: my gatefix brief deadlocked the lane on the gate lock (2026-09-07 21:40)
+
+The gatefix lane sat for over an hour at load 0.06 with no output. It
+was not slow, it was DEADLOCKED, and the cause was my brief.
+
+I instructed the lane to run `flock -w 7200 /tmp/dnd-gate.lock npm run
+test:gate`. But tools/gate-vitest.mjs takes /tmp/dnd-gate.lock ITSELF,
+which its own header comment states, and gate-wt4.sh says the same in
+its usage line: "the runners take /tmp/dnd-gate.lock themselves". So the
+outer flock held the lock and the runner's inner flock waited on it,
+with a 7200-second timeout. Diagnosis evidence: `fuser -v` showed flock
+3195699 holding the file with npm and a SECOND flock 3195719 also
+attached, that second flock being the only child of gate-vitest.mjs,
+alive 6140 seconds with four idle vitest processes and system load 0.06.
+
+This is exactly the standing rule I have been applying for months and
+wrote into the header myself; I contradicted it in a one-off brief and
+then spent five ticks reporting the lane as "still running the suite"
+without questioning why a busy test run showed no CPU. Load near zero
+with processes alive is a stall signature, not a progress signature,
+and I should have checked it on the first quiet tick rather than the
+fifth.
+
+Recovery: killed the lane and the lock chain by pid. The lane's edits
+survive on disk in the worktree, 16 files changed, 337 insertions and
+94 deletions, touching src/combat/cover.ts, encounter.ts,
+encounter-movement-world.ts, src/vtt/d365-sample-dungeon.ts, the six
+failing test files, plus tools/ai-dm-arena.ts and ai-dm-conversation.ts.
+Nothing was lost. sg scan is clean and `npx tsc -b --force` exits 0 on
+that work, so the lint failure and the type errors it was fighting are
+resolved. I am now running `npm run test:gate` MYSELF, without an outer
+flock, which is the correct invocation and also the correct division of
+labour, since gates are the supervisor's job and my brief should never
+have delegated the full gate to the lane in the first place.
+
+The lane's classification of the nine failures, era consequence versus
+implementation bug, was never delivered because it died at the gate
+step. That classification is still required before this can land, and I
+will dispatch it against the completed edits once the suite reports.
