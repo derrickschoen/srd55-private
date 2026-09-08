@@ -16324,3 +16324,78 @@ worth doing as a diagnostic challenge set, kept separate from the
 ordinary room distribution, reported by flaw family, and with a simple
 repaired heuristic as a comparator. Otherwise success may only mean the
 model noticed a bug we deliberately placed in front of it.
+
+## D584 — a legacy invariance test has been RED SINCE INCREMENT 4 and everyone missed it (2026-09-08 08:17)
+
+The blind branch validation gate failed exactly one spec:
+tests/unit/tools/ai-dm-legacy-invariance.test.ts, "keeps explicit
+incumbent defaults byte-identical to the no-flag fixture".
+`expect(record(implicit)).not.toHaveProperty('dmMode')` fails because
+tools/ai-dm-conversation.ts:979 defaults dmMode to 'advice' and line
+1103 always includes it. The spec's OTHER assertion, that the implicit
+and fully explicit configs are deep-equal, PASSES.
+
+FINDING AGAINST OUR WHOLE VERIFICATION PRACTICE, mine included. I traced
+five commits: the assertion and the field have coexisted since increment
+4 (2167d6f2). So this test has been failing through increments 5 and 6,
+the D578 amendments, the D579 corrections and the D576 integration.
+Nobody saw it because every lane ran only its own "touched specs" list
+and my harvest verification repeated those lists. The full gate is the
+first thing that ever ran it. This is the identical gap I recorded when
+the corner rule broke nine specs, and it recurred because I fixed the
+symptom then rather than the rule.
+
+I did NOT cancel the gate this time, per Astra's ruling that cancelling
+after a unit failure is not authorized standing policy. The browser
+phase ran on.
+
+D584 RULINGS (Astra), all accepted:
+
+1. READING A, with a STRONGER test required. Keep the internal
+   dmMode: 'advice' field. The approved plan defines the invariant as
+   unchanged no-flag OUTPUTS (prompts, tools, rendering, image
+   projection, persisted row shape), not as the absence of an internal
+   config key, and it separately requires mode attribution for explicit
+   D569 invocations. Astra also found a material gap in the EXISTING
+   byte test: it reserializes the fixture's stored row instead of
+   generating a row through the current runner, and its helper
+   constructs the runtime directly, bypassing parsed-config threading.
+   The replacement must therefore drive both configs through the
+   production runner with a deterministic adapter, assert generated
+   legacy rows and launcher manifests lack dmMode including recovery
+   paths, compare protected protocol and row bytes against an
+   independently established legacy oracle rather than against each
+   other, control nondeterminism rather than stripping fields, and
+   demonstrate that making attribution unconditional FAILS the new
+   checks. Merely asserting 'advice', or equality, or successful
+   fixture reserialization, is insufficient.
+2. NO downstream contamination established, and none certified clean
+   either. Static tracing: row attribution is guarded by
+   dmModeExplicit; KB hashing uses KB content; dmMode in judge packets
+   is intentional identity and answer-key material; manifest mode is
+   intentional arm identity. I must inventory artifacts produced since
+   increment 4, separate implicit legacy runs from explicit experiment
+   runs, and check those boundaries. I must NOT regenerate manifests,
+   erase outputs, or rerun paid experiments on this evidence. A failing
+   artifact is retained, its evidence marked unusable, and its
+   dependency chain returned for disposition.
+3. Acceptance of increments 4 through 6 is REOPENED insofar as it rested
+   on incomplete coverage. Their individual checks remain evidence of
+   those checks. Verify the cumulative repaired branch including
+   inherited obligations and downstream consumers; no historical replay
+   by default.
+4. NEW VERIFICATION RULE replacing "run the touched specs": each lane
+   runs a CUMULATIVE CONTRACT SUITE plus affected-consumer tests, drawn
+   from every new or modified spec since the branch's declared base,
+   every test promised by the approved plan and its amendments including
+   inherited invariants, and tests covering affected producers,
+   consumers and integration boundaries even when untouched. A
+   requirement-to-test inventory must be reconciled against actual
+   discovery and results; anything missing, skipped or undiscovered
+   BLOCKS acceptance. Dependency-based selection supplements the
+   inventory and cannot replace it. I audit that selection independently
+   instead of repeating the lane's list, and the supervisor still runs
+   the complete gate on the final integrated revision.
+
+The first D569 arm remains held, now behind both this repair and the
+increment 4 boundary gap from D582.
