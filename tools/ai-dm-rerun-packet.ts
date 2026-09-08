@@ -14,6 +14,16 @@ export const BRUTAL_10_SEEDS = [
   6_203_006, 6_203_007, 6_203_008, 6_203_009, 6_203_010,
 ] as const;
 
+// D466's only typed per-seed generator overrides are 6204004/6/9. This
+// 6206 range deliberately skips that 6204 family and the primary 6203 family,
+// so the second brutal holdout is generated without seed-specific tuning. The
+// earlier clean 6205 candidate was rejected because seed 6205004 lacked a
+// productive first-turn offer for every monster.
+export const BRUTAL_10_B_SEEDS = [
+  6_206_001, 6_206_002, 6_206_003, 6_206_004, 6_206_005,
+  6_206_006, 6_206_007, 6_206_008, 6_206_009, 6_206_010,
+] as const;
+
 export const R1_10_REPS = 3 as const;
 export const BRUTAL_10_REPS = 3 as const;
 export const RERUN_PACKET_VERSION = 'ai-dm-rerun-packet-v1' as const;
@@ -334,7 +344,7 @@ export interface RerunProtocol {
   readonly reps: number;
 }
 
-export type RerunProtocolName = 'r1-10' | 'brutal-10';
+export type RerunProtocolName = 'r1-10' | 'brutal-10' | 'brutal-10-b';
 
 export interface RerunPacketBuilderOptions {
   /** Decision reasons are excluded unless this is explicitly true. */
@@ -348,6 +358,9 @@ export const R1_10_PROTOCOL: RerunProtocol = {
 };
 export const BRUTAL_10_PROTOCOL: RerunProtocol = {
   name: 'brutal-10', seeds: BRUTAL_10_SEEDS, reps: BRUTAL_10_REPS,
+};
+export const BRUTAL_10_B_PROTOCOL: RerunProtocol = {
+  name: 'brutal-10-b', seeds: BRUTAL_10_B_SEEDS, reps: BRUTAL_10_REPS,
 };
 
 export interface RerunPacketConfig {
@@ -619,12 +632,12 @@ export function parseRerunPacketArgs(argv: readonly string[]): RerunPacketConfig
   const answerKeyPath = resolve(answerKey);
   if (packetPath === answerKeyPath) throw new TypeError('--packet and --answer-key must be different files.');
   const protocolValue = values.get('--protocol') ?? 'r1-10';
-  if (protocolValue !== 'r1-10' && protocolValue !== 'brutal-10') {
-    throw new TypeError('--protocol must be r1-10 or brutal-10.');
+  if (protocolValue !== 'r1-10' && protocolValue !== 'brutal-10' && protocolValue !== 'brutal-10-b') {
+    throw new TypeError('--protocol must be r1-10, brutal-10, or brutal-10-b.');
   }
   const repsValue = values.get('--reps');
-  if (repsValue !== undefined && protocolValue !== 'brutal-10') {
-    throw new TypeError('--reps is available only with --protocol brutal-10.');
+  if (repsValue !== undefined && protocolValue === 'r1-10') {
+    throw new TypeError('--reps is available only with a brutal protocol.');
   }
   const reps = repsValue === undefined ? 3 : parseSafeInteger(repsValue, '--reps');
   if (reps !== 1 && reps !== 3) throw new TypeError('--reps must be 1 or 3.');
@@ -1245,7 +1258,9 @@ export async function createRerunPacket(config: RerunPacketConfig): Promise<{ re
   const rows = sources.flatMap(({ path, text }) => parseJsonl(text, path));
   const protocol: RerunProtocol = config.protocol === 'r1-10'
     ? R1_10_PROTOCOL
-    : { ...BRUTAL_10_PROTOCOL, reps: config.reps };
+    : config.protocol === 'brutal-10'
+      ? { ...BRUTAL_10_PROTOCOL, reps: config.reps }
+      : { ...BRUTAL_10_B_PROTOCOL, reps: config.reps };
   const result = buildPacket(
     rows, config.shuffleSeed, protocol, config.crossEra, 'exactly_two', {}, config.protocol,
   );

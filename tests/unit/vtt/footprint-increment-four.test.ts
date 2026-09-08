@@ -24,6 +24,7 @@ import {
 import {
   encounterBoardTokenRenderModels,
   projectEncounterBoard,
+  projectEncounterTerrainCells,
   type EncounterBoardPlacedCombatant,
   type EncounterBoardProjectionShape,
 } from '../../../src/vtt/encounter-board';
@@ -141,6 +142,10 @@ function projection(
 ): EncounterBoardProjectionShape {
   return {
     bounds: { columns: 10, rows: 7 },
+    terrainCells: projectEncounterTerrainCells(
+      { columns: 10, rows: 7 },
+      { blockedCells: [], worldObjects: [] },
+    ),
     combatants,
     highlightedCombatant: options.highlightedCombatant ?? null,
     adjudicatedTargets: options.adjudicatedTargets ?? [],

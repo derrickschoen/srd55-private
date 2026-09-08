@@ -99,6 +99,7 @@ import {
 } from '../../../src/assets/light-glyphs';
 import {
   projectEncounterBoard,
+  projectEncounterTerrainCells,
   type BoardGlyphPresence,
   type EncounterBoardProjectionShape,
 } from '../../../src/vtt/encounter-board';
@@ -652,10 +653,11 @@ const CHROME_CLASSES = new Set([
   'encounter-token-chrome',
   'encounter-legend',
 ]);
-const NOTHING_PRESENT: BoardGlyphPresence = { cells: [], hidden: false };
+const NOTHING_PRESENT: BoardGlyphPresence = { cells: [], hidden: false, terrainKinds: ['open'] };
 const EVERYTHING_PRESENT: BoardGlyphPresence = {
-  cells: ['door-closed', 'door-open', 'blocked', 'fog', 'obscured'],
+  cells: ['door-closed', 'door-open', 'terrain-half', 'terrain-three-quarters', 'terrain-wall', 'fog', 'obscured'],
   hidden: true,
+  terrainKinds: ['open', 'half_cover', 'three_quarters_cover', 'wall'],
 };
 
 function withoutChrome(node: Serialized): Serialized {
@@ -775,6 +777,10 @@ describe('renderBoard: DM board with chrome, player board without', () => {
 
   const projection = {
     bounds: { columns: 10, rows: 7 },
+    terrainCells: projectEncounterTerrainCells(
+      { columns: 10, rows: 7 },
+      { blockedCells: [], worldObjects: [] },
+    ),
     combatants: [
       { id: combatantId('combatant:fighter'), name: 'Reference Fighter', kind: 'player_character', placementStatus: 'placed', position: { column: 2, row: 3 }, effectiveSize: 'Medium', placementMode: { kind: 'normal', actual: 'Medium' }, footprint: [{ column: 2, row: 3 }], life: 'living', hitPointBand: { kind: 'perceived_band', band: 'uninjured' } },
       { id: combatantId('combatant:cleric'), name: 'Reference Cleric', kind: 'player_character', placementStatus: 'placed', position: { column: 2, row: 4 }, effectiveSize: 'Medium', placementMode: { kind: 'normal', actual: 'Medium' }, footprint: [{ column: 2, row: 4 }], life: 'dying', hitPointBand: { kind: 'perceived_band', band: 'near_death' } },
@@ -791,6 +797,7 @@ describe('renderBoard: DM board with chrome, player board without', () => {
         position: { column: 4, row: 1 },
         cells: [{ column: 4, row: 1 }],
         blocking: { movement: false, lineOfSight: false, cover: 'none' },
+        terrainKind: 'open',
         lightClass: 'light-source',
       },
     ],
@@ -1002,7 +1009,7 @@ describe('renderBoard: DM board with chrome, player board without', () => {
     }
   });
 
-  it('keeps objects and doors in an unclipped typed rail with distinct frames, coordinates, and matching sigils', () => {
+  it('M576-E3-RAIL-DISAGREES-WITH-ENGINE repeats canonical tier, movement, sight, name, anchor, and footprint', () => {
     const styles: readonly BoardLabelStyle[] = [
       CREATURE_LABEL_STYLE,
       OBJECT_LABEL_STYLE,
@@ -1016,6 +1023,7 @@ describe('renderBoard: DM board with chrome, player board without', () => {
       position: { column: index, row: 1 },
       cells: [{ column: index, row: 1 }],
       blocking: { movement: false, lineOfSight: false, cover: 'none' as const },
+      terrainKind: 'open' as const,
       lightClass: 'none' as const,
     }));
     const door = {
@@ -1025,6 +1033,7 @@ describe('renderBoard: DM board with chrome, player board without', () => {
       position: { column: 9, row: 1 },
       cells: [{ column: 9, row: 1 }],
       blocking: { movement: true, lineOfSight: true, cover: 'total' as const },
+      terrainKind: 'wall' as const,
       lightClass: 'none' as const,
     };
     const openDoor = {
@@ -1034,10 +1043,15 @@ describe('renderBoard: DM board with chrome, player board without', () => {
       position: { column: 9, row: 2 },
       cells: [{ column: 9, row: 2 }],
       blocking: { movement: false, lineOfSight: false, cover: 'none' as const },
+      terrainKind: 'open' as const,
     };
     const objectProjection = {
       ...projection,
       worldObjects: [...objects, door, openDoor],
+      terrainCells: projection.terrainCells.map((entry) =>
+        entry.cell.column === 9 && entry.cell.row === 1
+          ? { ...entry, kind: 'wall' as const, sourceIds: [`object:${String(door.id)}`] }
+          : entry),
     };
     expect(
       boardRailEntries(objectProjection.worldObjects).map((entry) => [
@@ -1049,10 +1063,10 @@ describe('renderBoard: DM board with chrome, player board without', () => {
       ...objects.map((object) => [
         'object',
         OBJECT_LABEL_STYLE,
-        `${object.name} (${String(object.position.column)},1)`,
+        `${object.name} — OPEN — NO COVER — LINE OF SIGHT — MOVEMENT OPEN — SIGHT OPEN — ANCHOR (${String(object.position.column)},1) — FOOTPRINT (${String(object.position.column)},1)`,
       ]),
-      ['door', DOOR_LABEL_STYLE, 'DOOR CLOSED (9,1)'],
-      ['door', DOOR_LABEL_STYLE, 'DOOR OPEN (9,2)'],
+      ['door', DOOR_LABEL_STYLE, 'Rail Door — DOOR CLOSED — WALL — TOTAL COVER — NO LINE OF SIGHT — MOVEMENT BLOCKED — SIGHT BLOCKED — ANCHOR (9,1) — FOOTPRINT (9,1)'],
+      ['door', DOOR_LABEL_STYLE, 'Open Rail Door — DOOR OPEN — OPEN — NO COVER — LINE OF SIGHT — MOVEMENT OPEN — SIGHT OPEN — ANCHOR (9,2) — FOOTPRINT (9,2)'],
     ]);
     const liveDm = interactiveElement(
       renderBoard(objectProjection, new Set(), null, provenance),
@@ -1085,10 +1099,15 @@ describe('renderBoard: DM board with chrome, player board without', () => {
     );
     expect(objectTag?.getAttribute('data-anchor-column')).toBe('0');
     expect(objectTag?.getAttribute('data-anchor-row')).toBe('1');
-    expect(objectText?.getAttribute('data-full-label')).toBe('Crate 1 (0,1)');
+    const crateLabel = 'Crate 1 — OPEN — NO COVER — LINE OF SIGHT — MOVEMENT OPEN — SIGHT OPEN — ANCHOR (0,1) — FOOTPRINT (0,1)';
+    expect(objectText?.getAttribute('data-full-label')).toBe(crateLabel);
+    expect(objectTag?.getAttribute('data-terrain-kind')).toBe('open');
+    expect(objectTag?.getAttribute('data-movement')).toBe('open');
+    expect(objectTag?.getAttribute('data-sight')).toBe('open');
+    expect(objectTag?.getAttribute('data-footprint')).toBe('0,1');
     expect(objectSigil?.src).toBe(legendSigil?.src);
     const expectedObjectText = renderPixelText(
-      layoutPixelText('Crate 1 (0,1)', 2),
+      layoutPixelText(crateLabel, 2),
       neutral(8),
       CHROME_TEXT_SCALE,
     );
@@ -1120,8 +1139,8 @@ describe('renderBoard: DM board with chrome, player board without', () => {
           ?.getAttribute('data-full-label'),
       ]),
     ).toEqual([
-      [DOOR_LABEL_STYLE, 'closed', 'DOOR CLOSED (9,1)'],
-      [DOOR_LABEL_STYLE, 'open', 'DOOR OPEN (9,2)'],
+      [DOOR_LABEL_STYLE, 'closed', 'Rail Door — DOOR CLOSED — WALL — TOTAL COVER — NO LINE OF SIGHT — MOVEMENT BLOCKED — SIGHT BLOCKED — ANCHOR (9,1) — FOOTPRINT (9,1)'],
+      [DOOR_LABEL_STYLE, 'open', 'Open Rail Door — DOOR OPEN — OPEN — NO COVER — LINE OF SIGHT — MOVEMENT OPEN — SIGHT OPEN — ANCHOR (9,2) — FOOTPRINT (9,2)'],
     ]);
     expect(
       doorTags.every(
@@ -1211,6 +1230,10 @@ describe('renderBoard: DM board with chrome, player board without', () => {
         renderBoard(
           {
             bounds,
+            terrainCells: projectEncounterTerrainCells(
+              bounds,
+              { blockedCells: [], worldObjects: [] },
+            ),
             combatants,
             highlightedCombatant: null,
             adjudicatedTargets: [],
@@ -1517,10 +1540,9 @@ describe('renderBoard: DM board with chrome, player board without', () => {
     for (const root of chromeRoots) visit(root);
   });
 
-  it("D525: 'none' and 'light' keep the D516 rows and swap only the light rows; the glyph modes add the room default", () => {
+  it('M576-E3-LEGEND-OMITS-THREEQUARTERS renders the exact four terrain rows whenever cover is present', () => {
     for (const mode of ['none', 'light'] as const) {
       for (const roomDefault of LIGHT_LEVELS) {
-        // presence never matters outside 'full'
         for (const presence of [NOTHING_PRESENT, EVERYTHING_PRESENT]) {
           const entries = legendEntriesFor(mode, roomDefault, presence);
           const lightRows = lightLegendEntries(mode, roomDefault);
@@ -1541,7 +1563,9 @@ describe('renderBoard: DM board with chrome, player board without', () => {
           );
           expect(keys.slice(5 + lightRows.length)).toEqual([
             'fog',
-            'blocked',
+            ...(presence.terrainKinds.some((kind) => kind !== 'open')
+              ? ['terrain-open', 'terrain-half_cover', 'terrain-three_quarters_cover', 'terrain-wall']
+              : []),
             'object',
             'light-source',
             'hp-uninjured',
@@ -1590,6 +1614,12 @@ describe('renderBoard: DM board with chrome, player board without', () => {
     expect(BOARD_GLYPH_MODES).toEqual(['none', 'light', 'full']);
 
     const fullEntries = legendEntriesFor('full', 'bright', EVERYTHING_PRESENT);
+    expect(fullEntries.filter((entry) => entry.key.startsWith('terrain-')).map((entry) => entry.label)).toEqual([
+      'OPEN — NO COVER — LINE OF SIGHT',
+      '1/2 COVER — +2 AC/DEX — CROSSABLE — DIFFICULT',
+      '3/4 COVER — +5 AC/DEX — BLOCKS MOVEMENT',
+      'WALL — TOTAL COVER — NO LINE OF SIGHT',
+    ]);
     expect(fullEntries.find(({ key }) => key === 'side-party')?.label).toBe(
       'Party cool-blue floor plate',
     );
@@ -1603,25 +1633,25 @@ describe('renderBoard: DM board with chrome, player board without', () => {
       floor: STONE_FLOOR_SET_ID,
       overlay: OVERLAY_ASSETS.difficult,
     });
-    const blocked = fullEntries.find((entry) => entry.key === 'blocked');
-    expect(blocked).toEqual({
-      key: 'blocked',
-      label: 'Blocked — cross-braced stone pile and corner X',
+    const wall = fullEntries.find((entry) => entry.key === 'terrain-wall');
+    expect(wall).toEqual({
+      key: 'terrain-wall',
+      label: 'WALL — TOTAL COVER — NO LINE OF SIGHT',
       style: 'mark',
-      glyph: CELL_GLYPHS.blocked,
+      glyph: CELL_GLYPHS['terrain-wall'],
       floor: STONE_FLOOR_SET_ID,
       overlay: OVERLAY_ASSETS.blocked,
     });
     expect(
       legendEntriesFor('none', 'bright', EVERYTHING_PRESENT).find(
-        (entry) => entry.key === 'blocked',
+        (entry) => entry.key === 'terrain-three_quarters_cover',
       ),
     ).toEqual({
-      key: 'blocked',
-      label: 'Blocked — cross-braced stone pile',
+      key: 'terrain-three_quarters_cover',
+      label: '3/4 COVER — +5 AC/DEX — BLOCKS MOVEMENT',
       style: 'art',
       floor: STONE_FLOOR_SET_ID,
-      overlay: OVERLAY_ASSETS.blocked,
+      overlay: OVERLAY_ASSETS['terrain-three-quarters-cover'],
     });
   });
 

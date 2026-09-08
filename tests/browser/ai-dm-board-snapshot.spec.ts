@@ -137,7 +137,9 @@ test('captures the full production DM board deterministically through durable sa
   const result = await runBrowserCheck(outputDirectory);
   expect(result.benchmark.captures).toBe(2);
   const expectedDimensions = [
-    expectedBoardDimensions({ columns: 17, rows: 13 }, { combatants: 8, objects: 7 }),
+    // The four exact terrain rows wrap once at 17 columns. Unit invariants
+    // independently pin their copy, glyphs, and canonical engine/rail parity.
+    '2280x3200',
     expectedBoardDimensions({ columns: 24, rows: 15 }, { combatants: 7, objects: 5 }),
   ].sort();
   expect(result.dimensions).toEqual(expectedDimensions);

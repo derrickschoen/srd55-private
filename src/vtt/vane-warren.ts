@@ -25,6 +25,7 @@ import {
   spaceTouchesCellSet,
 } from '../combat/creature-space';
 import type { GridCell } from '../combat/grid';
+import { terrainPassabilityAt } from '../combat/terrain';
 import type { Rng } from '../combat/random';
 import {
   GREASE_MATERIAL,
@@ -717,7 +718,8 @@ function openPosition(
   ];
   const blocked = [
     ...state.blockedCells,
-    ...state.worldObjects.filter((object) => object.blocking.movement).flatMap((object) => object.footprint),
+    ...state.worldObjects.flatMap((object) => object.footprint.filter((cell) =>
+      terrainPassabilityAt(state, cell) === 'blocked')),
     ...(state.environment.movementRegions ?? []).filter((region) => region.entry === 'blocked').flatMap((region) => region.cells),
   ];
   for (let radius = 0; radius < Math.max(state.bounds.columns, state.bounds.rows); radius += 1) {

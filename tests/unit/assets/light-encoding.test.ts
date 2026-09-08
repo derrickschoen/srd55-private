@@ -35,6 +35,7 @@ import { renderBoard } from '../../../src/vtt/encounter-app';
 import { encounterArtForBoard } from '../../../src/vtt/encounter-art-selection';
 import {
   encounterBoardRenderModel,
+  projectEncounterTerrainCells,
   roomDefaultLightOf,
   type EncounterBoardProjectionShape,
 } from '../../../src/vtt/encounter-board';
@@ -55,6 +56,10 @@ const OVERRIDDEN = { column: 2, row: 1 };
 
 const litRoom: EncounterBoardProjectionShape = {
   bounds: { columns: 6, rows: 4 },
+  terrainCells: projectEncounterTerrainCells(
+    { columns: 6, rows: 4 },
+    { blockedCells: [], worldObjects: [] },
+  ),
   combatants: [
     { id: combatantId('combatant:hero'), name: 'Hero', kind: 'player_character', placementStatus: 'placed', position: { column: 0, row: 0 }, effectiveSize: 'Medium', placementMode: { kind: 'normal', actual: 'Medium' }, footprint: [{ column: 0, row: 0 }] },
   ],

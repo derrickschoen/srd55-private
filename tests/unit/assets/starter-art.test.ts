@@ -29,7 +29,7 @@ import {
   BUNDLED_LICENSE_FILES,
   bundledLicenseAssets,
 } from '../../../tools/licenses/bundled-license-files';
-import { STARTER_ART_PREVIEW_PATH, generateStarterArt } from '../../../tools/assets/generate-starter-art';
+import { STARTER_ART_PREVIEW_PATH, generateStarterArt, useAsset } from '../../../tools/assets/generate-starter-art';
 import {
   EXPECTED_FIXED_INPUTS_SHA256,
   EXPECTED_PREVIEW_SHA256,
@@ -50,8 +50,8 @@ function sha256(value: string | Uint8Array): string {
   return createHash('sha256').update(value).digest('hex');
 }
 
-/** 36 tokens + 43 D516 room/state assets + 3 D525 light glyphs + 5 D525 cell glyphs (the 'full' vocabulary). */
-const EXPECTED_ASSET_COUNT = 87;
+/** 36 tokens + 43 D516 room/state assets + 8 D525 glyphs + 5 D576 terrain treatment/glyph assets. */
+const EXPECTED_ASSET_COUNT = 92;
 const EXPECTED_TOKEN_COUNT = 36;
 const EXPECTED_GLYPH_OVERLAY_IDS = [
   'art.map.overlay.light-glyph-bright.v1',
@@ -60,6 +60,9 @@ const EXPECTED_GLYPH_OVERLAY_IDS = [
   'art.map.overlay.glyph-door-closed.v1',
   'art.map.overlay.glyph-door-open.v1',
   'art.map.overlay.glyph-blocked.v1',
+  'art.map.overlay.glyph-terrain-half.v1',
+  'art.map.overlay.glyph-terrain-three-quarters.v1',
+  'art.map.overlay.glyph-terrain-wall.v1',
   'art.map.overlay.glyph-fog.v1',
   'art.map.overlay.glyph-obscured.v1',
 ] as const;
@@ -82,8 +85,15 @@ const EXPECTED_NAMED_TOKEN_IDS = [
   'art.token.monster.wolf.v1',
 ] as const;
 
-describe('procedural starter-art manifest and deterministic outputs (native generator 3.0.0)', () => {
-  it('inventories 36 token busts (13 fixture-named, 22 archetype×side, 1 dead) and 51 room/state assets', () => {
+describe('procedural starter-art manifest and deterministic outputs (native generator 4.0.0)', () => {
+  it('M576-E3-FRACTIONAL-RESAMPLE permits only native 128 px integer-scale placement', () => {
+    expect(useAsset('art.map.overlay.terrain-half-cover.v1', 0, 0, 128)).toContain('scale(1)');
+    expect(useAsset('art.map.overlay.terrain-three-quarters-cover.v1', 0, 0, 256)).toContain('scale(2)');
+    expect(() => useAsset('art.map.overlay.blocked.v1', 0, 0, 192)).toThrow(
+      'Preview art must use a positive integer scale.',
+    );
+  });
+  it('inventories 36 token busts (13 fixture-named, 22 archetype×side, 1 dead) and 56 room/state assets', () => {
     expect(STARTER_ART_MANIFEST.assets).toHaveLength(EXPECTED_ASSET_COUNT);
     const tokens = STARTER_ART_MANIFEST.assets.filter((entry) => entry.kind === 'token').map((entry) => entry.id);
     expect(tokens).toHaveLength(EXPECTED_TOKEN_COUNT);
@@ -94,12 +104,12 @@ describe('procedural starter-art manifest and deterministic outputs (native gene
       expect(ids, id).not.toContain(id);
       expect(EXPECTED_STARTER_ART_SHA256[id], id).toBeUndefined();
     }
-    expect(STARTER_ART_MANIFEST.assets.filter((entry) => entry.kind === 'map' && entry.id.startsWith('art.map.overlay.'))).toHaveLength(17);
+    expect(STARTER_ART_MANIFEST.assets.filter((entry) => entry.kind === 'map' && entry.id.startsWith('art.map.overlay.'))).toHaveLength(22);
     expect(Object.keys(EXPECTED_STARTER_ART_SHA256)).toHaveLength(EXPECTED_ASSET_COUNT);
     expect(STARTER_ART_MANIFEST.generator).toEqual({
       id: 'starter-pixel-art',
-      version: '3.0.0',
-      fixedInputSet: 'starter-art-inputs-v3',
+      version: '4.0.0',
+      fixedInputSet: 'starter-art-inputs-v4',
       fixedInputsSha256: EXPECTED_FIXED_INPUTS_SHA256,
     });
     expect(STARTER_ART_MANIFEST.assets.every((entry) =>
@@ -244,7 +254,7 @@ describe('starter-art attribution reaches repository and distribution', () => {
     const preview = text(STARTER_ART_PREVIEW_PATH);
     expect(sha256(preview)).toBe(EXPECTED_PREVIEW_SHA256);
     expect(preview).toContain(`data-sprite-inventory="${String(EXPECTED_TOKEN_COUNT)}"`);
-    // D525: the preview embeds every asset once, so the eight glyph overlays are pinned into its digest.
+    // D576: the preview embeds every asset once, including all tier glyph overlays.
     for (const id of EXPECTED_GLYPH_OVERLAY_IDS) expect(preview).toContain(`id="asset-${id.replaceAll('.', '-')}"`);
     for (const id of REMOVED_OVERLAY_IDS) expect(preview).not.toContain(`id="asset-${id.replaceAll('.', '-')}"`);
     expect(preview.match(/<image id="asset-/gu)).toHaveLength(EXPECTED_ASSET_COUNT);

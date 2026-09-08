@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { canonicalJson } from '../../../src/commands/canonical-json';
 import { STARTER_MONSTER_ROSTER } from '../../../src/combat/statblocks/roster';
 import { dmVisibleEncounter, projectDmView, projectPlayerView } from '../../../src/combat/visibility';
-import { encounterBoardRenderModel } from '../../../src/vtt/encounter-board';
+import { encounterBoardRenderModel, projectEncounterTerrainCells } from '../../../src/vtt/encounter-board';
 import {
   TEST_APPROVED_FIRST_SKIRMISH_ART,
   TEST_APPROVED_FIRST_SKIRMISH_FIXTURE,
@@ -331,6 +331,7 @@ describe('increment 9 generated and approved encounter fixtures', () => {
     });
     const dmCells = encounterBoardRenderModel({
       bounds: dm.bounds,
+      terrainCells: projectEncounterTerrainCells(state.bounds, state),
       combatants: dm.combatants,
       highlightedCombatant: dm.activeCombatant,
       adjudicatedTargets: [],
@@ -338,6 +339,7 @@ describe('increment 9 generated and approved encounter fixtures', () => {
     }, TEST_APPROVED_FIRST_SKIRMISH_ART);
     const playerCells = encounterBoardRenderModel({
       bounds: player.bounds,
+      terrainCells: projectEncounterTerrainCells(state.bounds, state),
       combatants: player.combatants,
       highlightedCombatant: player.activeCombatant,
       adjudicatedTargets: [],

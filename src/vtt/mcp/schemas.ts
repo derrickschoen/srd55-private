@@ -666,6 +666,7 @@ const semanticObject = z.object({
   name: z.string(),
   kind: z.string(),
   cells: z.array(semanticEncodedCell),
+  terrain_kind: z.enum(['open', 'half_cover', 'three_quarters_cover', 'wall']),
 }).strict();
 const semanticBoard = z.object({
   format: z.literal(SEMANTIC_BOARD_FORMAT),
@@ -698,6 +699,13 @@ const semanticBoard = z.object({
   }).strict()),
   cells: z.object({
     blocked: semanticCellFactList,
+    terrain: z.object({
+      partition: z.literal('open, half_cover, three_quarters_cover, and wall together contain every board cell exactly once'),
+      open: semanticCellFactList,
+      half_cover: semanticCellFactList,
+      three_quarters_cover: semanticCellFactList,
+      wall: semanticCellFactList,
+    }).strict(),
     difficult_terrain: semanticCellFactList,
     light: z.object({
       default_light: z.literal('bright'),
@@ -720,11 +728,13 @@ const semanticBoard = z.object({
       id: identifier,
       name: z.string(),
       cells: z.array(semanticEncodedCell),
+      terrain_kind: z.enum(['open', 'half_cover', 'three_quarters_cover', 'wall']),
     }).strict()),
     closed: semanticFactList(z.object({
       id: identifier,
       name: z.string(),
       cells: z.array(semanticEncodedCell),
+      terrain_kind: z.enum(['open', 'half_cover', 'three_quarters_cover', 'wall']),
     }).strict()),
   }).strict().optional(),
   objects: semanticFactList(semanticObject).optional(),

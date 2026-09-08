@@ -13,6 +13,7 @@ import type { MovementWorld } from './movement';
 import { persistentAreaContains } from './persistent-areas';
 import { feet, type CombatantId } from './values';
 import { creatureSizes, type KnownCreatureSize } from '../domain/enums';
+import { terrainPassabilityAt } from './terrain';
 
 function cellKey(cell: GridCell): string {
   return `${String(cell.column)},${String(cell.row)}`;
@@ -33,7 +34,9 @@ export function encounterMovementWorld(state: EncounterState): MovementWorld<Com
 
   const blockedCellKeys = new Set(state.blockedCells.map(cellKey));
   for (const object of state.worldObjects) {
-    if (object.blocking.movement) object.footprint.forEach((cell) => blockedCellKeys.add(cellKey(cell)));
+    for (const cell of object.footprint) {
+      if (terrainPassabilityAt(state, cell) === 'blocked') blockedCellKeys.add(cellKey(cell));
+    }
   }
   for (const region of state.environment.movementRegions ?? []) {
     if (region.entry === 'blocked') region.cells.forEach((cell) => blockedCellKeys.add(cellKey(cell)));
@@ -41,6 +44,11 @@ export function encounterMovementWorld(state: EncounterState): MovementWorld<Com
   const difficultCellKeys = new Set(
     state.environment.difficultTerrainRegions.flatMap((region) => region.cells.map(cellKey)),
   );
+  for (const object of state.worldObjects) {
+    for (const cell of object.footprint) {
+      if (terrainPassabilityAt(state, cell) === 'difficult') difficultCellKeys.add(cellKey(cell));
+    }
+  }
   const combatantsById = new Map(state.combatants.map((combatant) => [combatant.profile.id, combatant] as const));
   const stationarySpaces = new Map(
     state.tokens.map((token) => [token.combatantId, combatantSpace(state, token.combatantId)] as const),
@@ -87,6 +95,9 @@ export function encounterMovementWorld(state: EncounterState): MovementWorld<Com
     traversal: (actorId, from, to) => {
       const sourceSpace = spaceAt(actorId, from);
       const destinationSpace = spaceAt(actorId, to);
+      if (!spaceFitsBounds(destinationSpace, state.bounds)) {
+        return { kind: 'blocked', reason: 'creature footprint is outside the grid' };
+      }
       const enteredCells = newlyEnteredSpaceCells(sourceSpace, destinationSpace);
       if (destinationSpace.cells.some((occupied) => blockedCellKeys.has(cellKey(occupied)))) {
         return { kind: 'blocked', reason: 'blocked cell' };

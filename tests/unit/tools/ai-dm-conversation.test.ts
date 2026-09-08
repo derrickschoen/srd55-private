@@ -65,6 +65,7 @@ import {
 import { declareTestInputs } from '../../helpers/test-inputs';
 import { sha256 } from '../../../src/crypto/sha256';
 import { DEFAULT_RENDERER_PROFILE } from '../../../src/vtt/renderer-profile';
+import { traceCombatantLine } from '../../../src/combat/cover';
 
 const kbInputs = declareTestInputs({ fixtures: [
   'tests/fixtures/ai-dm-kb/ai-dm-core.md',
@@ -1294,6 +1295,35 @@ describe('AI-DM engine MCP conversation runner', () => {
     }));
     expect(firstActorOptions.offerable.some((option) => option.label === 'spellcasting/detect-evil-and-good'))
       .toBe(false);
+    const fourthActorId = actorIds[3];
+    if (fourthActorId === undefined) throw new Error('Brutal fixture has no fourth monster actor.');
+    expect({
+      actor: state.tokens.find((token) => token.combatantId === fourthActorId)?.position,
+      actorSize: state.tokens.find((token) => token.combatantId === fourthActorId)?.placementMode.actual,
+      speed: state.combatants.find((combatant) => combatant.profile.id === fourthActorId)?.profile.rules.speed,
+      targets: state.tokens.filter((token) =>
+        state.combatants.some((combatant) => combatant.profile.id === token.combatantId &&
+          combatant.profile.kind === 'player_character')).map((token) => token.position),
+    }).toEqual({
+      actor: { column: 16, row: 3 },
+      actorSize: 'Large',
+      speed: 34,
+      // Chebyshev separations are 15, 14, and 15 cells before accounting for
+      // the wall whose only gap is at row 6.
+      targets: [{ column: 1, row: 2 }, { column: 2, row: 4 }, { column: 1, row: 6 }],
+    });
+    const playerIds = state.combatants.flatMap((combatant) =>
+      combatant.profile.kind === 'player_character' ? [combatant.profile.id] : []);
+    // Hand tracing the Large 2x2 source against the column-9 wall: its row-6
+    // gap leaves two rays open to Fighter/Cleric and one ray open to Wizard.
+    expect(playerIds.map((targetId) => {
+      const trace = traceCombatantLine(state, fourthActorId, targetId);
+      return { sourceCorner: trace.sourceCorner, blocked: trace.lines.map((line) => line.blocksSight) };
+    })).toEqual([
+      { sourceCorner: { column: 16, row: 3 }, blocked: [true, true, false, false] },
+      { sourceCorner: { column: 16, row: 5 }, blocked: [true, true, false, false] },
+      { sourceCorner: { column: 18, row: 5 }, blocked: [true, true, true, false] },
+    ]);
     const runtime = createEngineMcpRuntime(state, { toolProfile: 'dm', requestedActorIds: actorIds });
     const capsule = runtime.feed.current();
     runtime.toolSurface.execute('engine.get_turn_context', {
@@ -1308,7 +1338,7 @@ describe('AI-DM engine MCP conversation runner', () => {
       'fully_resolved',
       'fully_resolved',
       'fully_resolved',
-      'contains_unresolved',
+      'fully_resolved',
     ]);
     expect(resolutions()).toEqual(beforeRender);
   });

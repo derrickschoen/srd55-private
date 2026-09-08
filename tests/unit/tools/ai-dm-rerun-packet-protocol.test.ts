@@ -1,15 +1,22 @@
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { canonicalJson } from '../../../src/commands/canonical-json';
 import {
+  BRUTAL_10_B_SEEDS,
+  BRUTAL_10_PROTOCOL,
   BRUTAL_10_SEEDS,
   R1_10_SEEDS,
+  buildRerunPacket,
   createRerunPacket,
   parseRerunPacketArgs,
 } from '../../../tools/ai-dm-rerun-packet';
 import { mkdtemp, readFile, writeFile } from '../../helpers/test-filesystem-promises';
 
-type ProtocolSeed = typeof BRUTAL_10_SEEDS[number] | typeof R1_10_SEEDS[number];
+type ProtocolSeed =
+  | typeof BRUTAL_10_B_SEEDS[number]
+  | typeof BRUTAL_10_SEEDS[number]
+  | typeof R1_10_SEEDS[number];
 
 function pairedRows(seeds: readonly ProtocolSeed[], reps: 1 | 3): readonly Record<string, unknown>[] {
   return seeds.flatMap((seed, room) => Array.from({ length: reps }, (_, index) => index + 1)
@@ -73,6 +80,16 @@ describe('AI-DM rerun packet protocol selection', () => {
     expect(brutal.packet).toMatchObject({ protocol: 'brutal-10' });
     expect(brutal.answerKey).toMatchObject({ protocol: 'brutal-10' });
     expect(brutal.packet.entries).toHaveLength(20);
+    const legacyBuilderResult = buildRerunPacket(rows, 6_203, {
+      ...BRUTAL_10_PROTOCOL,
+      reps: 1,
+    });
+    expect(await readFile(brutalConfig.packetPath, 'utf8')).toBe(
+      `${canonicalJson({ ...legacyBuilderResult.packet, protocol: 'brutal-10' })}\n`,
+    );
+    expect(await readFile(brutalConfig.answerKeyPath, 'utf8')).toBe(
+      `${canonicalJson({ ...legacyBuilderResult.answerKey, protocol: 'brutal-10' })}\n`,
+    );
 
     const wrongSeedRows = rows.map((row, index) => index === 0
       ? { ...row, seed: 5_117_001 }
@@ -110,15 +127,45 @@ describe('AI-DM rerun packet protocol selection', () => {
       .toMatchObject({ protocol: 'r1-10' });
   });
 
-  it('allows only one or three reps and only on brutal-10', () => {
+  it('accepts only the second brutal family for brutal-10-b', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'dnd-rerun-brutal-b-protocol-'));
+    const inputPath = join(directory, 'brutal-b.jsonl');
+    const rows = pairedRows(BRUTAL_10_B_SEEDS, 1);
+    await writeFile(inputPath, jsonl(rows), 'utf8');
+
+    const config = parseRerunPacketArgs(packetArgs(
+      directory, inputPath, 'brutal-b', ['--protocol', 'brutal-10-b', '--reps', '1'],
+    ));
+    const result = await createRerunPacket(config);
+    expect(result.packet).toMatchObject({ protocol: 'brutal-10-b' });
+    expect(result.answerKey).toMatchObject({ protocol: 'brutal-10-b' });
+    expect(result.packet.entries).toHaveLength(20);
+
+    const wrongFamilyRows = rows.map((row, index) => index === 0
+      ? { ...row, seed: BRUTAL_10_SEEDS[0] }
+      : row);
+    const wrongFamilyPath = join(directory, 'brutal-b-with-family-a-seed.jsonl');
+    await writeFile(wrongFamilyPath, jsonl(wrongFamilyRows), 'utf8');
+    await expect(createRerunPacket(parseRerunPacketArgs(packetArgs(
+      directory, wrongFamilyPath, 'wrong-brutal-b', ['--protocol', 'brutal-10-b', '--reps', '1'],
+    )))).rejects.toThrow('seed=6203001 is not a brutal-10-b holdout seed');
+  });
+
+  it('allows only one or three reps and only on brutal protocols', () => {
     const directory = join(tmpdir(), 'dnd-rerun-protocol-args');
     const inputPath = join(directory, 'rows.jsonl');
     expect(parseRerunPacketArgs(packetArgs(
       directory, inputPath, 'brutal-three', ['--reps', '3', '--protocol', 'brutal-10'],
     ))).toMatchObject({ protocol: 'brutal-10', reps: 3 });
+    expect(parseRerunPacketArgs(packetArgs(
+      directory, inputPath, 'brutal-b-one', ['--reps', '1', '--protocol', 'brutal-10-b'],
+    ))).toMatchObject({ protocol: 'brutal-10-b', reps: 1 });
+    expect(parseRerunPacketArgs(packetArgs(
+      directory, inputPath, 'brutal-b-three', ['--reps', '3', '--protocol', 'brutal-10-b'],
+    ))).toMatchObject({ protocol: 'brutal-10-b', reps: 3 });
     expect(() => parseRerunPacketArgs(packetArgs(
       directory, inputPath, 'r1-reps', ['--protocol', 'r1-10', '--reps', '3'],
-    ))).toThrow('--reps is available only with --protocol brutal-10');
+    ))).toThrow('--reps is available only with a brutal protocol');
     expect(() => parseRerunPacketArgs(packetArgs(
       directory, inputPath, 'brutal-two', ['--protocol', 'brutal-10', '--reps', '2'],
     ))).toThrow('--reps must be 1 or 3');

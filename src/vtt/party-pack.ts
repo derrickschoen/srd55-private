@@ -20,6 +20,7 @@ import { combatantSpace } from '../combat/combat-rules';
 import { adjacentCells } from '../combat/grid';
 import { minimumSpaceDistance } from '../combat/creature-space';
 import { encounterMovementWorld } from '../combat/encounter-movement-world';
+import { terrainWallCells } from '../combat/terrain';
 import { cubeAffectedCellsAmong, feetPoint } from '../combat/templates';
 import type { PersistentAreaEffectSpec, PersistentAreaShape } from '../combat/persistent-areas';
 import { spellDefinition } from '../combat/spells/definitions';
@@ -3030,10 +3031,7 @@ function slowSpellCommands(
   if (hostiles.length < 3) return [];
   const templateGrid = {
     bounds: state.bounds,
-    blockedCells: [
-      ...state.blockedCells,
-      ...state.worldObjects.flatMap((object) => object.blocking.lineOfSight ? object.footprint : []),
-    ],
+    blockedCells: terrainWallCells(state),
   };
   const occupiedCells = new Map(hostiles.map((target) => [
     target.profile.id,

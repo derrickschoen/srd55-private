@@ -4,6 +4,7 @@ import type { CombatantProfile } from '../../../src/combat/combatant';
 import type { ControllerRequest } from '../../../src/combat/controllers';
 import { createEncounter, reduceEncounter, type EncounterState } from '../../../src/combat/encounter';
 import type { EncounterCommand } from '../../../src/combat/events';
+import { terrainBlocking } from '../../../src/combat/terrain';
 import type {
   BranchSpellOperation,
   CompositionOperation,
@@ -230,6 +231,60 @@ const IDLE = {
 };
 
 describe('D344.3 DM encounter board projection', () => {
+  it('M576-E3-RENDERER-INFERS-OBJECT-KIND projects terrain from canonical mechanics, not object fiction', () => {
+    const hero = playerProfile('terrain-projection-hero');
+    const makeObject = (id: string, column: number, terrainKind: 'half_cover' | 'three_quarters_cover') => ({
+      id: worldObjectId(`world-object:${id}`),
+      name: id,
+      kind: 'generic' as const,
+      position: { column, row: 1 },
+      footprint: [{ column, row: 1 }],
+      durability: { kind: 'indestructible' as const },
+      armorClass: armorClass(15),
+      damageResponses: [],
+      blocking: terrainBlocking(terrainKind),
+      createdRevision: 0,
+    });
+    const state = createEncounter({
+      bounds: { columns: 4, rows: 2 },
+      combatants: [hero],
+      tokens: [placedToken(hero, 0, 0)],
+      blockedCells: [{ column: 3, row: 1 }],
+      worldObjects: [
+        makeObject('fiction-is-generic-half', 1, 'half_cover'),
+        makeObject('fiction-is-generic-three-quarters', 2, 'three_quarters_cover'),
+      ],
+    });
+    const projection = projectEncounterBoard(projectDmView(state));
+    expect(projection.terrainCells).toHaveLength(8);
+    expect(new Set(projection.terrainCells.map((entry) => `${String(entry.cell.column)},${String(entry.cell.row)}`)).size)
+      .toBe(8);
+    expect(projection.terrainCells.filter((entry) => entry.cell.row === 1).map((entry) => entry.kind))
+      .toEqual(['open', 'half_cover', 'three_quarters_cover', 'wall']);
+    expect(projection.worldObjects.map((object) => object.terrainKind))
+      .toEqual(['half_cover', 'three_quarters_cover']);
+    const rendered = encounterBoardRenderModel(projection, {
+      ...REFERENCE_ENCOUNTER_ART,
+      room: { ...REFERENCE_ENCOUNTER_ART.room, columns: 4, rows: 2, doorCell: { column: 2, row: 1 } },
+      combatantTokens: { [hero.id]: REFERENCE_ENCOUNTER_ART.combatantTokens['combatant:fighter']! },
+      terrain: [],
+    });
+    expect(rendered.filter((cell) => cell.row === 1).map((cell) => cell.mechanicalLayers[0] ?? null)).toEqual([
+      null,
+      { kind: 'terrain', terrainKind: 'half_cover' },
+      { kind: 'terrain', terrainKind: 'three_quarters_cover' },
+      { kind: 'terrain', terrainKind: 'wall' },
+    ]);
+    expect(() => encounterBoardRenderModel(
+      { ...projection, terrainCells: projection.terrainCells.slice(1) },
+      {
+        ...REFERENCE_ENCOUNTER_ART,
+        room: { ...REFERENCE_ENCOUNTER_ART.room, columns: 4, rows: 2, doorCell: { column: 2, row: 1 } },
+        combatantTokens: { [hero.id]: REFERENCE_ENCOUNTER_ART.combatantTokens['combatant:fighter']! },
+        terrain: [],
+      },
+    )).toThrow('Canonical terrain projection must contain 8 cells; received 7.');
+  });
   it('human_only_sorted_last: retains every engine candidate and renders its typed no-effect reason after offerable options', () => {
     const generated = generateRoom(3_943_001).encounter.state;
     const monster = generated.combatants.find((combatant) => combatant.profile.kind === 'monster');
@@ -398,17 +453,26 @@ describe('D344.3 DM encounter board projection', () => {
 
     const projection = projectEncounterBoard(projectDmView(state));
     expect(projection.worldObjects.map((object) => ({
-      name: object.name, lightClass: object.lightClass, blocking: object.blocking,
+      name: object.name, lightClass: object.lightClass, blocking: object.blocking, terrainKind: object.terrainKind,
     }))).toEqual([
       {
         name: 'Daylight lantern', lightClass: 'light-source',
         blocking: { movement: false, lineOfSight: false, cover: 'none' },
+        terrainKind: 'open',
       },
       {
         name: 'Stone plinth', lightClass: 'none',
         blocking: { movement: true, lineOfSight: true, cover: 'total' },
+        terrainKind: 'wall',
       },
     ]);
+    expect(projection.terrainCells).toHaveLength(900);
+    expect(projection.terrainCells.find((entry) => entry.cell.column === 1 && entry.cell.row === 1)).toEqual({
+      cell: { column: 1, row: 1 }, kind: 'open', sourceIds: ['object:object:light-source'],
+    });
+    expect(projection.terrainCells.find((entry) => entry.cell.column === 2 && entry.cell.row === 1)).toEqual({
+      cell: { column: 2, row: 1 }, kind: 'wall', sourceIds: ['object:object:generic'],
+    });
     expect(projection.lightOverlays).toHaveLength(1);
     expect(projection.lightOverlays[0]).toMatchObject({
       presentation: 'descriptive', brightRadiusFeet: 60, additionalDimFeet: 60,

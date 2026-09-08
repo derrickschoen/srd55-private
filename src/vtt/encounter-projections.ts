@@ -31,6 +31,8 @@ import {
 import type { CombatantId } from '../combat/values';
 import type { ProjectedHitPointKnowledge } from './intel/contracts';
 import type { EncounterBoardWorldObject } from './encounter-board';
+import { projectEncounterTerrainCells } from './encounter-board';
+import { terrainKindOfWireBlocking } from '../combat/terrain';
 import type { AdjudicationEnvelope } from './mcp/engine-server';
 import { dmWorldObjectOverrideCommand } from '../combat/world-object-actions';
 import type { SessionHistoryEntry } from './session-persistence';
@@ -74,6 +76,7 @@ export interface PlayerBoardProjection {
   readonly round: number;
   readonly bounds: PlayerView['bounds'];
   readonly blockedCells: readonly GridCell[];
+  readonly terrainCells: ReturnType<typeof projectEncounterTerrainCells>;
   readonly concealedCells: readonly GridCell[];
   readonly activeCombatant: CombatantId | null;
   readonly highlightedCombatant: CombatantId | null;
@@ -282,6 +285,10 @@ export function projectPlayerBoard(
     round: view.round,
     bounds: view.bounds,
     blockedCells: view.blockedCells,
+    terrainCells: projectEncounterTerrainCells(view.bounds, {
+      blockedCells: view.blockedCells,
+      worldObjects: view.worldObjects,
+    }),
     concealedCells: view.concealedCells.map((cell) => ({ ...cell })),
     activeCombatant: view.activeCombatant,
     highlightedCombatant: view.activeCombatant,
@@ -294,6 +301,7 @@ export function projectPlayerBoard(
       position: { ...object.position },
       cells: object.footprint.map((cell) => ({ ...cell })),
       blocking: { ...object.blocking },
+      terrainKind: terrainKindOfWireBlocking(object.blocking),
       lightClass: object.kind === 'light-source' ? 'light-source' : 'none',
     })),
     activePcResources: activePc?.turn ?? null,

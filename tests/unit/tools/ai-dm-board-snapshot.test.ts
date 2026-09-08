@@ -125,8 +125,9 @@ describe('AI DM board snapshot contracts', () => {
     expect(art.id).toBe(`encounter-art:generated-${String(state.bounds.columns)}x${String(state.bounds.rows)}:v1`);
     expect(art.terrain).toEqual([]);
     expect(cells).toHaveLength(state.bounds.columns * state.bounds.rows);
-    expect(cells.flatMap((cell) => cell.mechanicalLayers).filter((layer) => layer.kind === 'blocked'))
-      .toHaveLength(state.blockedCells.length);
+    expect(cells.flatMap((cell) => cell.mechanicalLayers).filter(
+      (layer) => layer.kind === 'terrain' && layer.terrainKind === 'wall',
+    )).toHaveLength(projection.terrainCells.filter((cell) => cell.kind === 'wall').length);
 
     const expectedDifficult = new Set(state.environment.difficultTerrainRegions.flatMap(
       (region) => region.cells.map((cell) => `${region.id}:${String(cell.column)},${String(cell.row)}`),

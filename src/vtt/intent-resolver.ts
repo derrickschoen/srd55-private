@@ -1,6 +1,7 @@
 import { canonicalJson } from '../commands/canonical-json';
 import { combatantSpace } from '../combat/combat-rules';
 import { minimumSpaceDistanceToCells, minimumSpaceLine } from '../combat/creature-space';
+import { traceCombatantLine } from '../combat/cover';
 import type { EncounterState } from '../combat/encounter';
 import { gridDistance, type GridCell } from '../combat/grid';
 import type {
@@ -150,13 +151,13 @@ function targetConstraints(
 ): readonly {
   readonly targetId: CombatantId;
   readonly rangeFeet: number;
-  readonly source: { readonly kind: 'action'; readonly actionId: string } | { readonly kind: 'spell' };
+  readonly source: { readonly kind: 'action'; readonly actionId: string } | { readonly kind: 'spell'; readonly requiresSight: boolean };
 }[] | null {
   const actions = monsterActions(state, actorId);
   const constraints: {
     readonly targetId: CombatantId;
     readonly rangeFeet: number;
-    readonly source: { readonly kind: 'action'; readonly actionId: string } | { readonly kind: 'spell' };
+    readonly source: { readonly kind: 'action'; readonly actionId: string } | { readonly kind: 'spell'; readonly requiresSight: boolean };
   }[] = [];
   for (const slot of slots) {
     const use = slot.use;
@@ -218,7 +219,11 @@ function targetConstraints(
         if (definition === null || targetIds === null) return null;
         const rangeFeet = 'rangeFeet' in definition.targeting ? definition.targeting.rangeFeet : 0;
         for (const targetId of targetIds) {
-          constraints.push({ targetId, source: { kind: 'spell' }, rangeFeet });
+          const targeting = definition.targeting;
+          const requiresSight = targeting.kind !== 'self' && targeting.kind !== 'area' &&
+            targeting.kind !== 'area_selected' && targeting.kind !== 'all_in_range' &&
+            targeting.kind !== 'remote' && targeting.kind !== 'utility' && targeting.requiresSight === true;
+          constraints.push({ targetId, source: { kind: 'spell', requiresSight }, rangeFeet });
         }
         break;
       }
@@ -240,7 +245,7 @@ function positionFits(
   constraints: readonly {
     readonly targetId: CombatantId;
     readonly rangeFeet: number;
-    readonly source: { readonly kind: 'action'; readonly actionId: string } | { readonly kind: 'spell' };
+    readonly source: { readonly kind: 'action'; readonly actionId: string } | { readonly kind: 'spell'; readonly requiresSight: boolean };
   }[],
   movement: EngineMovementObjective,
   queries: EngineQueryPort,
@@ -248,7 +253,10 @@ function positionFits(
   for (const constraint of constraints) {
     if (constraint.source.kind === 'spell') {
       const distance = queries.spaceDistance(state, actorId, constraint.targetId, position);
-      if (distance === null || distance > constraint.rangeFeet) return false;
+      if (distance === null || distance > constraint.rangeFeet ||
+        (constraint.source.requiresSight && traceCombatantLine(
+          state, actorId, constraint.targetId, { sourceAnchor: position },
+        ).blocksSight)) return false;
       continue;
     }
     const reach = queries.reach(state, {

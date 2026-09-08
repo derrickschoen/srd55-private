@@ -454,10 +454,35 @@ describe('AI-DM arena', () => {
     ['standard', 'tests/fixtures/arena-basis'],
     ['hard', 'tests/fixtures/arena-basis-hard'],
     ['brutal', 'tests/fixtures/arena-basis-brutal'],
+    ['brutal-b', 'tests/fixtures/arena-basis-brutal-b'],
     ['scenario', 'tests/fixtures/arena-scenarios'],
   ] as const)('maps the %s basis to its frozen fixture directory', (basis, directory) => {
     expect(basisFixturesPath({ cwd: process.cwd(), basis }))
       .toBe(join(process.cwd(), directory));
+  });
+
+  it('loads the first frozen brutal-b room and executes its multi-legendary-window room', { timeout: 30_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-brutal-b-'));
+    const [firstRow] = await runArena(parseArenaArgs([
+      '--rooms', '1', '--reps', '1', '--seed', '6206001',
+      '--basis', 'brutal-b', '--out', join(directory, 'first.jsonl'), '--dry-run',
+    ]));
+    const [boundaryRow] = await runArena(parseArenaArgs([
+      '--rooms', '1', '--reps', '1', '--seed', '6206009', '--transport', 'final_indices',
+      '--basis', 'brutal-b', '--out', join(directory, 'boundary.jsonl'), '--dry-run',
+    ]));
+    expect(firstRow).toMatchObject({ seed: 6_206_001, room: 1, round: 1, basis: 'brutal-b' });
+    expect(firstRow?.startingRoomDigest).toMatch(/^[a-f0-9]{64}$/u);
+    expect(boundaryRow).toMatchObject({
+      seed: 6_206_009,
+      room: 1,
+      round: 1,
+      basis: 'brutal-b',
+      outcome: 'authorized',
+      executionErrorClass: null,
+      refusals: [],
+    });
+    expect(boundaryRow?.startingRoomDigest).toMatch(/^[a-f0-9]{64}$/u);
   });
 
   it('parses both scripted-party policies, defaults to symmetric, and rejects unknown policies', () => {
@@ -494,8 +519,9 @@ describe('AI-DM arena', () => {
     expect(parseArenaArgs([...common, '--party-policy', 'symmetric_evaluator_v1']).partyPolicy)
       .toBe('symmetric_evaluator_v1');
     expect(parseArenaArgs([...common, '--basis', 'brutal']).basis).toBe('brutal');
+    expect(parseArenaArgs([...common, '--basis', 'brutal-b']).basis).toBe('brutal-b');
     expect(() => parseArenaArgs([...common, '--basis', 'nightmare']))
-      .toThrow('--basis must be standard, hard, brutal, or scenario.');
+      .toThrow('--basis must be standard, hard, brutal, brutal-b, or scenario.');
     expect(() => parseArenaArgs([...common, '--party-policy', 'unknown-policy']))
       .toThrow('--party-policy must be heuristic_v0 or symmetric_evaluator_v1.');
   });

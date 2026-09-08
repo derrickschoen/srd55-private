@@ -4,6 +4,7 @@ import { combatantSpace, combatantSpaceAt, type EncounterState } from '../../com
 import { minimumSpaceDistance, spacesIntersect } from '../../combat/creature-space';
 import type { EncounterCommand } from '../../combat/events';
 import { adjacentCells } from '../../combat/grid';
+import { encounterMovementWorld } from '../../combat/encounter-movement-world';
 import type { RollMode } from '../../combat/resolution';
 import {
   monsterAttackCommand,
@@ -213,11 +214,11 @@ export function regretTurnLegalActions(
     !combatantsAreAllies(state, actor, candidate.profile.id) && candidate.life !== 'dead');
   const actions: EncounterCommand[] = [];
   if (acting.turn.movement.remaining >= 5) {
+    const movementWorld = encounterMovementWorld(state);
     for (const cell of adjacentCells(state.bounds, position(state, actor))) {
       const destination = combatantSpaceAt(state, actor, cell);
       if (
-        !destination.cells.some((occupied) => state.blockedCells.some((blocked) =>
-          blocked.column === occupied.column && blocked.row === occupied.row)) &&
+        movementWorld.traversal(actor, position(state, actor), cell).kind !== 'blocked' &&
         state.combatants.every((other) => other.profile.id === actor ||
           !spacesIntersect(destination, combatantSpace(state, other.profile.id)))
       ) {

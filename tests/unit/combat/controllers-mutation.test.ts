@@ -1063,7 +1063,8 @@ describe('controller mutation contract: player-character ranking', () => {
     const lower = { column: 5, row: 2 };
     expect(coverTierBetweenObjects(base.worldObjects, upper, { column: 1, row: 1 })).toBe('none');
     expect(coverTierBetweenObjects(base.worldObjects, lower, { column: 1, row: 1 })).toBe('none');
-    expect(coverTierBetweenObjects(base.worldObjects, upper, { column: 7, row: 2 })).toBe('none');
+    // The corner fan clips (6,2) on one ray, independently pinned in terrain.test.ts.
+    expect(coverTierBetweenObjects(base.worldObjects, upper, { column: 7, row: 2 })).toBe('half');
     expect(coverTierBetweenObjects(base.worldObjects, lower, { column: 7, row: 2 })).toBe('half');
     const state = withEvents(base, [{
       sequence: base.nextEventSequence,
@@ -1105,7 +1106,8 @@ describe('controller mutation contract: player-character ranking', () => {
     base = withHitPoints(base, dead.id, 0, 'dead');
     const upper = { column: 5, row: 0 };
     const lower = { column: 5, row: 2 };
-    expect(coverTierBetweenObjects(base.worldObjects, upper, { column: 10, row: 2 })).toBe('none');
+    // The corner fan clips (8,2), but the dead target remains excluded from policy ranking below.
+    expect(coverTierBetweenObjects(base.worldObjects, upper, { column: 10, row: 2 })).toBe('half');
     expect(coverTierBetweenObjects(base.worldObjects, lower, { column: 10, row: 2 })).toBe('half');
     const state = withEvents(base, [{
       sequence: base.nextEventSequence,

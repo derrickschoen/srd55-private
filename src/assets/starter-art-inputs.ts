@@ -18,8 +18,8 @@ import {
 
 export const STARTER_ART_GENERATOR_ID = 'starter-pixel-art' as const;
 /** Native 128×128 recipes with typed material response and directional light. */
-export const STARTER_ART_GENERATOR_VERSION = '3.0.0' as const;
-export const STARTER_ART_INPUT_SET_ID = 'starter-art-inputs-v3' as const;
+export const STARTER_ART_GENERATOR_VERSION = '4.0.0' as const;
+export const STARTER_ART_INPUT_SET_ID = 'starter-art-inputs-v4' as const;
 
 export type StarterArtKind =
   | 'token'

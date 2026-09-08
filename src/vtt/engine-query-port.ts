@@ -2,7 +2,7 @@ import { combatantFaction, combatantsAreAllies } from '../combat/allies';
 import { conditionSpeedPenaltyFeet, exhaustionPenalty, isIncapacitated } from '../combat/conditions';
 import { creatureSizes, type KnownCreatureSize } from '../domain/enums';
 import type { EncounterCombatantState, EncounterState } from '../combat/encounter';
-import { coverBetweenCombatants, rasterizeInterveningCells } from '../combat/cover';
+import { coverBetweenCombatants, traceCombatantLine } from '../combat/cover';
 import {
   applySizeSteps,
   creatureSpace,
@@ -197,6 +197,7 @@ export type EngineReachResult =
         | 'action_absent'
         | 'action_range_unresolved'
         | 'target_out_of_range'
+        | 'target_has_total_cover'
       )[];
     };
 
@@ -759,13 +760,6 @@ export function monsterBonusActions(
   return executableBonusActions(declaredMonsterBonusActions(state, actorId));
 }
 
-function hasLineOfSight(state: EncounterState, from: GridCell, to: GridCell): boolean {
-  const blocked = new Set(state.worldObjects
-    .flatMap((object) => object.blocking.lineOfSight ? object.footprint : [])
-    .map(cellKey));
-  return rasterizeInterveningCells(from, to).every((cell) => !blocked.has(cellKey(cell)));
-}
-
 function effectConditionNames(state: EncounterState, id: CombatantId): ReadonlySet<string> {
   const names = new Set<string>();
   for (const effect of state.effects) {
@@ -802,27 +796,31 @@ function detect(state: EncounterState, observer: CombatantId, subject: Combatant
   const observerPlaced = state.tokens.some((token) => token.combatantId === observer);
   const subjectPlaced = state.tokens.some((token) => token.combatantId === subject);
   if (observerState === null || combatant(state, subject) === null || !observerPlaced || !subjectPlaced) return null;
-  const line = minimumSpaceLine(queryCombatantSpace(state, observer), queryCombatantSpace(state, subject));
-  const from = line.sourceCell;
-  const to = line.targetCell;
-  const distance = line.distance;
+  const line = traceCombatantLine(state, observer, subject);
+  const distance = minimumSpaceDistance(queryCombatantSpace(state, observer), queryCombatantSpace(state, subject));
   const senses = rulesFor(observerState).senses;
-  if (senses.some((sense) => sense.kind === 'blindsight' && distance <= sense.rangeFeet) && hasLineOfSight(state, from, to)) {
+  if (senses.some((sense) => sense.kind === 'blindsight' && distance <= sense.rangeFeet) && !line.blocksSight) {
     return { kind: 'seen', sense: 'blindsight' };
   }
   const truesight = senses.some((sense) => sense.kind === 'truesight' && distance <= sense.rangeFeet);
   if (rulesFor(observerState).detectionTraits.includes('web_sense') && sharesWebArea(state, observer, subject)) {
     return { kind: 'located', sense: 'web_sense' };
   }
-  if (!hasLineOfSight(state, from, to)) return { kind: 'undetected', reason: 'blocked' };
+  if (line.blocksSight) return { kind: 'undetected', reason: 'blocked' };
   if (effectConditionNames(state, observer).has('Blinded')) return { kind: 'undetected', reason: 'obscured' };
-  if (state.hiddenCombatants.some((entry) => entry.combatant === subject) && !truesight) return { kind: 'undetected', reason: 'hidden' };
-  if (effectConditionNames(state, subject).has('Invisible') && !truesight) return { kind: 'undetected', reason: 'invisible' };
-  const obscurement = environmentObscurementAt(state.environment, to);
+  if (state.hiddenCombatants.some((entry) => entry.combatant === subject) && !truesight) {
+    return { kind: 'undetected', reason: 'hidden' };
+  }
+  if (effectConditionNames(state, subject).has('Invisible') && !truesight) {
+    return { kind: 'undetected', reason: 'invisible' };
+  }
+  const obscurement = environmentObscurementAt(state.environment, line.targetCell);
   if (obscurement === 'heavy') return { kind: 'undetected', reason: 'obscured' };
   if (truesight) return { kind: 'seen', sense: 'truesight' };
   if (obscurement === 'magical_darkness') return { kind: 'undetected', reason: 'darkness' };
-  if (environmentLightAt(state.environment, to) !== 'darkness') return { kind: 'seen', sense: 'normal_sight' };
+  if (environmentLightAt(state.environment, line.targetCell) !== 'darkness') {
+    return { kind: 'seen', sense: 'normal_sight' };
+  }
   const darkvision = senses.some((sense) => sense.kind === 'darkvision' && distance <= sense.rangeFeet);
   return darkvision
     ? { kind: 'seen', sense: 'darkvision' }
@@ -1208,6 +1206,10 @@ function reach(state: EncounterState, request: EngineReachRequest): EngineReachR
   const actorSpace = queryCombatantSpaceAt(state, request.actorId, origin);
   const targetSpace = queryCombatantSpace(state, request.targetId);
   const distanceFeet = minimumSpaceDistance(actorSpace, targetSpace);
+  if ((action.kind === 'attack' || action.kind === 'saving_throw') &&
+    traceCombatantLine(state, request.actorId, request.targetId, { sourceAnchor: origin }).tier === 'total') {
+    return { legal: false, codes: ['target_has_total_cover'] };
+  }
   if (action.kind === 'attack') {
     const verdict = tacticalRangeVerdictAtDistance(distanceFeet, monsterAttackRange(action));
     if (verdict.status === 'unresolved') {
@@ -1579,7 +1581,7 @@ export function projectedMovementOptions(
     if (target.reciprocalVisibility.kind === 'unknown') {
       return { status: 'unresolved', reason: 'visibility_unresolved' };
     }
-    const cover = coverBetweenCombatants(state, request.actorId, request.targetId, { sourceAnchor: position }).tier;
+    const cover = traceCombatantLine(state, request.actorId, request.targetId, { sourceAnchor: position }).tier;
     const selectedLine = minimumSpaceLine(
       queryCombatantSpaceAt(state, request.actorId, position),
       decodeProjectedCreatureSpace(target),

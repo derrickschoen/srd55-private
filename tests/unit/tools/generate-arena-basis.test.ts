@@ -14,7 +14,7 @@ import {
 import { mkdtempSync, readFileSync, readdirSync } from '../../helpers/test-filesystem';
 
 describe('arena basis generator', () => {
-  it('parses the explicit difficulty profile and writes deterministic canonical rooms', async () => {
+  it('kills M576-E2-LEGACY-DEFAULT-CONSUMES-RNG and writes unchanged legacy rooms', async () => {
     const outPath = mkdtempSync(join(tmpdir(), 'dnd-hard-basis-generator-'));
     const config = parseBasisGenerationArgs([
       '--difficulty', 'hard',
@@ -29,6 +29,7 @@ describe('arena basis generator', () => {
       rooms: 2,
       outPath,
     });
+    expect(Object.hasOwn(config, 'terrainProfile')).toBe(false);
     await generateArenaBasis(config);
 
     for (const seed of [5_117_001, 5_117_002]) {
@@ -36,6 +37,41 @@ describe('arena basis generator', () => {
         `${canonicalJson(generateRoom(seed, { difficulty: 'hard' }))}\n`,
       );
     }
+  });
+
+  it('parses los_cover_v1 only when explicit and writes the versioned profile', async () => {
+    const outPath = mkdtempSync(join(tmpdir(), 'dnd-los-cover-basis-generator-'));
+    const config = parseBasisGenerationArgs([
+      '--difficulty', 'standard',
+      '--terrain-profile', 'los_cover_v1',
+      '--seed', '5762001',
+      '--rooms', '1',
+      '--out', outPath,
+    ]);
+    expect(config).toEqual({
+      difficulty: 'standard',
+      terrainProfile: 'los_cover_v1',
+      seed: 5_762_001,
+      rooms: 1,
+      outPath,
+    });
+    await generateArenaBasis(config);
+    expect(readFileSync(join(outPath, 'seed-5762001.json'), 'utf8')).toBe(
+      `${canonicalJson(generateRoom(5_762_001, {
+        difficulty: 'standard',
+        terrainProfile: 'los_cover_v1',
+      }))}\n`,
+    );
+  });
+
+  it('rejects unknown terrain profiles', () => {
+    expect(() => parseBasisGenerationArgs([
+      '--difficulty', 'hard',
+      '--terrain-profile', 'latest',
+      '--seed', '5762101',
+      '--rooms', '1',
+      '--out', tmpdir(),
+    ])).toThrow('--terrain-profile must be los_cover_v1.');
   });
 
   it('rejects unknown difficulty profiles before writing', () => {

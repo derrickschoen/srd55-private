@@ -21,6 +21,7 @@ import type { EffectPayload } from '../combat/effects';
 import type { EncounterEvent } from '../combat/events';
 import type { GridCell } from '../combat/grid';
 import { isCellInside } from '../combat/grid';
+import { effectiveTerrainAt, terrainKindOfWireBlocking, type TerrainKind } from '../combat/terrain';
 import { persistentAreaContains, persistentAreaTouchesSpace } from '../combat/persistent-areas';
 import { affectedCells, feetPoint, type AreaTemplate } from '../combat/templates';
 import { feet, type CombatantId } from '../combat/values';
@@ -96,6 +97,8 @@ export type EncounterBoardCombatant =
 export interface EncounterBoardProjectionShape {
   readonly bounds: { readonly columns: number; readonly rows: number };
   readonly blockedCells?: readonly GridCell[];
+  /** Exhaustive cell-local projection from the canonical terrain service. */
+  readonly terrainCells: readonly EncounterBoardTerrainCell[];
   readonly difficultTerrainRegions?: readonly EncounterBoardEnvironmentRegion[];
   readonly obscurementRegions?: readonly EncounterBoardObscurementRegion[];
   readonly environmentLightRegions?: readonly EncounterBoardLightRegion[];
@@ -133,7 +136,15 @@ export interface EncounterBoardWorldObject {
   readonly position: GridCell;
   readonly cells: readonly GridCell[];
   readonly blocking: WorldObjectBlocking;
+  /** Canonical mechanics; never inferred from `kind` by the renderer. */
+  readonly terrainKind: TerrainKind;
   readonly lightClass: 'light-source' | 'none';
+}
+
+export interface EncounterBoardTerrainCell {
+  readonly cell: GridCell;
+  readonly kind: TerrainKind;
+  readonly sourceIds: readonly string[];
 }
 
 export type EncounterBoardArea =
@@ -247,6 +258,7 @@ export interface DmEncounterBoardModel extends EncounterBoardProjectionShape {
   readonly activeCombatant: CombatantId | null;
   readonly foggedCells: readonly { readonly column: number; readonly row: number }[];
   readonly worldObjects: readonly EncounterBoardWorldObject[];
+  readonly terrainCells: readonly EncounterBoardTerrainCell[];
   readonly areas: readonly EncounterBoardArea[];
   readonly lightOverlays: readonly EncounterBoardLightOverlay[];
   readonly sustainedEffects: readonly EncounterBoardSustainedEffect[];
@@ -294,6 +306,7 @@ export interface EncounterBoardCellModel {
   readonly key: string;
   readonly column: number;
   readonly row: number;
+  readonly terrain: EncounterBoardTerrainCell;
   readonly layers: readonly EncounterBoardLayer[];
   readonly mechanicalLayers: readonly EncounterBoardMechanicalLayer[];
   readonly light: EncounterBoardCellLight;
@@ -309,7 +322,7 @@ export interface EncounterBoardCellModel {
 }
 
 export type EncounterBoardMechanicalLayer =
-  | { readonly kind: 'blocked' }
+  | { readonly kind: 'terrain'; readonly terrainKind: Exclude<TerrainKind, 'open'> }
   | { readonly kind: 'difficult_terrain'; readonly regionId: string }
   | {
       readonly kind: 'obscurement';
@@ -350,6 +363,36 @@ function allCells(bounds: EncounterState['bounds']): readonly GridCell[] {
     }
   }
   return cells;
+}
+
+export function projectEncounterTerrainCells(
+  bounds: { readonly columns: number; readonly rows: number },
+  state: Pick<EncounterState, 'blockedCells' | 'worldObjects'>,
+): readonly EncounterBoardTerrainCell[] {
+  return Object.freeze(allCells(bounds).map((cell) => {
+    const terrain = effectiveTerrainAt(state, cell);
+    return Object.freeze({ cell: Object.freeze({ ...cell }), kind: terrain.kind, sourceIds: terrain.sourceIds });
+  }));
+}
+
+function indexEncounterTerrainCells(
+  bounds: { readonly columns: number; readonly rows: number },
+  cells: readonly EncounterBoardTerrainCell[],
+): ReadonlyMap<string, EncounterBoardTerrainCell> {
+  const expectedCount = bounds.columns * bounds.rows;
+  if (cells.length !== expectedCount) {
+    throw new Error(`Canonical terrain projection must contain ${String(expectedCount)} cells; received ${String(cells.length)}.`);
+  }
+  const indexed = new Map<string, EncounterBoardTerrainCell>();
+  for (const entry of cells) {
+    if (!isCellInside(bounds, entry.cell)) {
+      throw new Error(`Canonical terrain projection contains out-of-bounds cell ${cellKey(entry.cell)}.`);
+    }
+    const key = cellKey(entry.cell);
+    if (indexed.has(key)) throw new Error(`Canonical terrain projection repeats cell ${key}.`);
+    indexed.set(key, entry);
+  }
+  return indexed;
 }
 
 function combatantName(state: DmEncounterState, id: CombatantId): string {
@@ -646,6 +689,7 @@ export function projectEncounterBoard(
   return {
     bounds: { ...state.bounds },
     blockedCells: state.blockedCells.map((cell) => ({ ...cell })),
+    terrainCells: projectEncounterTerrainCells(state.bounds, state),
     difficultTerrainRegions: state.environment.difficultTerrainRegions.map((region) => ({
       id: region.id,
       cells: region.cells.map((cell) => ({ ...cell })),
@@ -683,6 +727,7 @@ export function projectEncounterBoard(
       position: { ...object.position },
       cells: object.footprint.map((cell) => ({ ...cell })),
       blocking: { ...object.blocking },
+      terrainKind: terrainKindOfWireBlocking(object.blocking),
       lightClass: object.kind === 'light-source' ? 'light-source' : 'none',
     })),
     areas: projectedAreas(state),
@@ -704,6 +749,7 @@ export interface BoardGlyphPresence {
   readonly cells: readonly CellGlyphKind[];
   /** Whether any combatant carries the hidden-from-players plate mark. */
   readonly hidden: boolean;
+  readonly terrainKinds: readonly TerrainKind[];
 }
 
 export function boardGlyphPresence(
@@ -714,6 +760,7 @@ export function boardGlyphPresence(
   return {
     cells: CELL_GLYPH_KINDS.filter((kind) => shown.has(kind)),
     hidden: combatants.some((combatant) => combatant.hiddenFromPlayers === true),
+    terrainKinds: [...new Set(cells.map((cell) => cell.terrain.kind))],
   };
 }
 
@@ -823,7 +870,7 @@ export function encounterBoardRenderModel(
   const worldObjects = projection.worldObjects ?? [];
   const areas = projection.areas ?? [];
   const lights = projection.lightOverlays ?? [];
-  const blocked = new Set((projection.blockedCells ?? []).map(cellKey));
+  const projectedTerrain = indexEncounterTerrainCells(projection.bounds, projection.terrainCells);
   const difficultTerrain = new Map<string, string[]>();
   for (const region of projection.difficultTerrainRegions ?? []) {
     for (const cell of region.cells) {
@@ -877,7 +924,9 @@ export function encounterBoardRenderModel(
       if (terrainAsset !== undefined) layers.push({ role: 'terrain', assetId: terrainAsset });
       if (fog.has(key)) layers.push({ role: 'fog', assetId: art.fog.hidden });
       const mechanicalLayers: EncounterBoardMechanicalLayer[] = [];
-      if (blocked.has(key)) mechanicalLayers.push({ kind: 'blocked' });
+      const terrainCell = projectedTerrain.get(key);
+      if (terrainCell === undefined) throw new Error(`Cell ${key} has no canonical terrain projection.`);
+      if (terrainCell.kind !== 'open') mechanicalLayers.push({ kind: 'terrain', terrainKind: terrainCell.kind });
       for (const regionId of difficultTerrain.get(key) ?? []) {
         mechanicalLayers.push({ kind: 'difficult_terrain', regionId });
       }
@@ -901,7 +950,7 @@ export function encounterBoardRenderModel(
       // ART-SEAM (D525): under 'full' every fact class the probe asks about gets its own corner mark.
       const glyphs = cellGlyphsFor(art.boardGlyphs, {
         door: doors.get(key) ?? null,
-        blocked: blocked.has(key),
+        terrain: terrainCell.kind,
         fogged: fog.has(key),
         obscured: obscurement.has(key),
       }).map((kind): EncounterBoardCellGlyph => ({ kind, effect: CELL_GLYPH_EFFECT_BY_KIND[kind] }));
@@ -924,6 +973,7 @@ export function encounterBoardRenderModel(
         key,
         column,
         row,
+        terrain: terrainCell,
         layers: Object.freeze(layers),
         mechanicalLayers: Object.freeze(mechanicalLayers),
         light: Object.freeze(light),
