@@ -15716,3 +15716,31 @@ which must author genuine three_quarters features since no room contains
 one; 3 the four art treatments; 4 the map guide; 5 the probe questions;
 6 the sol high then luna medium probe runs. D576.4 elevation stays a
 plan-only task behind those.
+
+## D576 increment 2 dispatched; live app restarted on the landed main (2026-09-08 00:10)
+
+Merged main into claude/los-cover, then dispatched increment 2, the
+versioned D576 generator and basis, as lane los-cover-i2 (session
+01a07f34-7efa-7f83-8840-5de372f58735, port 4731, sol high).
+
+The brief leads with WHY the increment matters rather than only what it
+must do: the era census found that no room among all 63 contains a
+single three_quarters feature, so the tier the corner rule can now
+produce is untested in play and invisible in every screenshot because
+it never occurs. Increment 2 is what makes all four terrain outcomes
+actually happen.
+
+The brief names the shortcuts this task tempts and forbids each: no
+per-seed correction table, no hand-edited fixture, no membership
+predicate that reads a feature's authored kind instead of asking the
+production trace, and no widening of an invariant to rescue a stubborn
+seed. A seed that cannot satisfy membership under the rules must be
+DISCARDED and named, or the lane stops and reports that the rules cannot
+produce a qualifying room. It also requires before and after aggregate
+hashes for all seven existing basis directories, since omitting the new
+profile must reproduce the legacy path byte for byte without consuming
+an extra RNG value. It forbids running the full gate and forbids any
+outer flock, so neither of my two process failures can recur.
+
+Owner's live app on 4173 restarted against the landed main; it rebuilds
+for about two minutes before listening.
