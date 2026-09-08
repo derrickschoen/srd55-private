@@ -15744,3 +15744,53 @@ outer flock, so neither of my two process failures can recur.
 
 Owner's live app on 4173 restarted against the landed main; it rebuilds
 for about two minutes before listening.
+
+## D576 increment 2 harvested (9d92f26c): three-quarters cover now exists in play (2026-09-08 01:13)
+
+Lane los-cover-i2, session 01a07f34-7efa-7f83-8840-5de372f58735.
+Supervisor verified: sg scan clean, tsc exit 0, 6 spec files 243/243,
+contracts.ts hash unchanged, nine new fixtures in the new directory
+tests/fixtures/arena-basis-los-cover-v1 (seeds 5762001-3 standard,
+5762101-3 hard, 5762201-3 brutal), no existing fixture touched.
+
+THE RESULT THAT MATTERS, measured by me rather than taken from the lane:
+I ran a tier census over the nine new rooms calling traceCombatantLine
+directly on every ordered living pair.
+
+  seed 5762001  none 20  half  4  three_quarters 6  total 0
+  seed 5762002  none 20  half  7  three_quarters 3  total 0
+  seed 5762003  none 23  half 12  three_quarters 5  total 2
+  seed 5762101  none 35  half 16  three_quarters 5  total 0
+  seed 5762102  none 54  half 35  three_quarters 1  total 0
+  seed 5762103  none 28  half 13  three_quarters 1  total 0
+  seed 5762201  none 29  half 25  three_quarters 2  total 0
+  seed 5762202  none 28  half 13  three_quarters 1  total 0
+  seed 5762203  none 22  half 16  three_quarters 4  total 0
+
+Three-quarters cover is realized between living creatures in ALL NINE
+rooms, one to six ordered pairs each. The entire pre-D576 corpus of 63
+rooms contained ZERO. The gap the era census exposed is closed.
+
+Honest qualification, since the raw numbers invite a wrong reading:
+total cover between creatures appears in one room only. That is expected
+and arguably correct, because a creature pair with no line at all at
+round start is inert rather than interesting. The plan's total
+requirement is satisfied through creature-to-cell queries, and the
+membership test asserts it through the production trace with blocksSight
+rather than by feature membership.
+
+Legacy byte-identity proved for arena-basis, arena-basis-hard,
+arena-basis-brutal and arena-basis-brutal-b. The lane also listed
+arena-basis-brutal-pool, hard-2 and brutal-2 as unchanged, but honestly
+labelled them absent at both checkpoints with the empty-manifest
+aggregate; those directories live on claude/brutal-pool and
+claude/blind-dm and are not on this branch, so that row is vacuous
+rather than wrong.
+
+Supervisor mutant M-SUP-I2-BULWARK-AUTHORED-AS-HALF authored every
+generated cover object with the half profile, so the arrow-slit bulwark
+would grant only half cover: killed by the tier-exercise tests on every
+seed, restored to e763cf04... A first attempt was VOID, because the tier
+is derived through a type parameter and no 'three_quarters' literal
+exists to flip; recorded as void and not counted, per the standing rule
+that void mutants prove nothing.
