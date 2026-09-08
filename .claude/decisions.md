@@ -15966,3 +15966,40 @@ trade one requirement against another.
 
 This is the second time the full browser suite caught something the unit
 suite could not, and it is the reason the landing rule requires it.
+
+## The browser regression was a LATENT timer race, not the art (b19d55a7) (2026-09-08 05:26)
+
+My CSS hypothesis was WRONG, and the lane's diagnosis is better. I
+verified the load-bearing claim myself: `git diff main HEAD` on
+src/ui/screens/planner/spell-picker.ts before the fix is EMPTY. The
+picker was byte-identical to main. So increments 2 and 3 did not
+introduce this defect; they changed board rendering enough to expose an
+existing race deterministically.
+
+The defect: a debounced search stayed queued after the picker closed,
+then fired and reopened the option list over the very option the
+walkthrough was clicking. That is exactly why the option passed
+toBeVisible yet was not actionable, the detail I flagged as diagnostic
+when I dispatched.
+
+The fix cancels the pending timer on close, two lines. Coverage is a
+unit test driving the timer lifecycle rather than another minute-long
+browser spec, with the unchanged acceptance walkthrough keeping the
+end-to-end path. No terrain, art, legend, glyph or visual pin was
+touched, so every increment 3 invariant stands.
+
+Supervisor verification: picker identical to main before the fix; unit
+spec 16/16; sg scan clean; tsc clean; and I ran the failing acceptance
+walkthrough MYSELF, 1 passed in 16.6 s where it had timed out at 180 s.
+Supervisor mutant M-SUP-I3REG-DEBOUNCE-NOT-CANCELLED dropped the handle
+without cancelling the timer, the plausible half-fix a hurried author
+would write: killed by the named test, restored.
+
+Worth recording as a general lesson: a regression that appears with a
+change is not necessarily caused by it. The branch-versus-main
+differential proved the branch triggered the failure, which is what
+justified investigating, but the byte-identity check proved the branch
+did not author it. Both facts were needed, and stopping after the first
+would have sent the lane hunting through terrain CSS that was innocent.
+
+Gate relaunched on the full branch.
