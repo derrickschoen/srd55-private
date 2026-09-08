@@ -16399,3 +16399,39 @@ D584 RULINGS (Astra), all accepted:
 
 The first D569 arm remains held, now behind both this repair and the
 increment 4 boundary gap from D582.
+
+## D584.1 — blind gate browser phase: one flake, one REAL failure in the blind snapshot (2026-09-08 09:26)
+
+Blind branch gate finished: 185 browser specs passed, 2 failed, both as
+30-second timeouts rather than substantive assertion failures.
+
+Serial rerun on a quiet machine, workers=1 retries=0:
+  tests/browser/level-up.spec.ts:423  PASSES. Load flake, not real.
+  tests/browser/ai-dm-board-snapshot.spec.ts:154  FAILS AGAIN.
+
+Rerun again at a 180-second timeout to separate slowness from breakage:
+still fails, in 47 seconds, with "Error: Blind snapshot check failed
+(1)." So it is NOT a timeout at all; the underlying check exits non-zero
+and the spec was merely reporting the wall it hit while waiting.
+
+The spec is tests/browser/ai-dm-board-snapshot.spec.ts:154, which is the
+D569 synchronized state-only capture: dm_board, accessible_board_raster
+and player_board for hard 5117001 and brutal 6203001. Both that spec and
+src/vtt/blind-turn-context.ts are branch-only files, so this is in the
+exact path increments 2 through 4 changed, and it is the capture the
+blind experiment depends on.
+
+The spec swallows the child process's stdout and stderr, reporting only
+an exit code, which is why neither the gate nor the serial rerun showed
+a cause. That is a defect in the harness worth fixing alongside.
+
+My own probing note, recorded because it wasted two runs: I invoked
+tools/ai-dm-blind-board-snapshot-check.ts with --out /tmp/blind-snap-probe
+and hit "Board snapshot artifact directories must end in -images", which
+is a rule about MY path, not the failure under investigation. Re-running
+with a conforming path still reproduced the same message, which means
+the guard rejects the path for a different reason than the suffix, so
+the real cause is still unidentified. Not diagnosing further myself:
+under D581.5 the cause is mine to establish but the interpretation and
+any scope change is Astra's, and this needs the harness to stop
+swallowing output before anyone can say what broke.
