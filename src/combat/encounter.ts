@@ -3018,7 +3018,9 @@ function endEffects(
     .flatMap((effect) => effect.targets));
   const sizeTargets = new Set(context.state.effects
     .filter((effect) => ending.has(effect.id) && (
-      effect.payload.kind === 'size_alteration' || effect.payload.kind === 'form_alteration'))
+      effect.payload.kind === 'size_alteration' ||
+      effect.payload.kind === 'form_alteration' ||
+      effect.payload.kind === 'polymorph'))
     .flatMap((effect) => effect.targets));
   for (const effect of context.state.effects) {
     if (!ending.has(effect.id)) continue;

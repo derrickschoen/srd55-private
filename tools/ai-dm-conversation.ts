@@ -953,11 +953,21 @@ export function parseConversationArgs(argv: readonly string[], cwd = process.cwd
   };
 }
 
+const knowledgeBaseLoads = new Map<string, Promise<LoadedAiDmKnowledgeBase>>();
+
 async function loadKnowledgeBase(config: ConversationConfig): Promise<LoadedAiDmKnowledgeBase> {
-  return loadAiDmKnowledgeBase(
-    config.cwd,
-    config.instructionSource === 'kb' ? config.kbPath : DEFAULT_AI_DM_KB_ROOT,
-  );
+  const root = config.instructionSource === 'kb' ? config.kbPath : DEFAULT_AI_DM_KB_ROOT;
+  const key = `${config.cwd}\0${root ?? '<none>'}`;
+  const existing = knowledgeBaseLoads.get(key);
+  if (existing !== undefined) return existing;
+  const pending = loadAiDmKnowledgeBase(config.cwd, root);
+  knowledgeBaseLoads.set(key, pending);
+  try {
+    return await pending;
+  } catch (error) {
+    knowledgeBaseLoads.delete(key);
+    throw error;
+  }
 }
 
 const OPERATOR_CODEX_HOME = '/home/vagrant/.codex-aidm';
@@ -2973,7 +2983,9 @@ function turnContextPrompt(base: TurnContextDeltaBase | undefined, intelMode: In
 async function roomStates(config: ConversationConfig, options: ConversationRunOptions): Promise<readonly EncounterState[]> {
   if (options.roomStates !== undefined) {
     if (options.roomStates.length < config.rooms) throw new RangeError('Conversation options contain too few room states.');
-    return options.roomStates.slice(0, config.rooms).map((state) => structuredClone(state));
+    // EngineRoundSession owns the defensive clone; retaining another full copy
+    // here multiplies setup cost for every interleaved arm without adding isolation.
+    return options.roomStates.slice(0, config.rooms);
   }
   const names = (await readdir(config.fixturesPath)).filter((name) => /^seed-\d+\.json$/u.test(name))
     .sort((left, right) => left.localeCompare(right, 'en', { numeric: true }));

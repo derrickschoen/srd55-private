@@ -233,4 +233,28 @@ describe('D576 canonical terrain vocabulary and cell trace', () => {
       [{ column: 1, row: 0 }, { column: 2, row: 0 }],
     )).toEqual([]);
   });
+
+  it('pins the exact candidate cells crossed by an upper-to-lower corner fan', () => {
+    const candidate = { column: 6, row: 2 };
+    const sourceCorner = { column: 5, row: 0 };
+    const targetCorners = [
+      { column: 7, row: 2 },
+      { column: 8, row: 2 },
+      { column: 7, row: 3 },
+      { column: 8, row: 3 },
+    ] as const;
+
+    // Hand geometry: only the ray to the target's bottom-left corner enters
+    // the interior of (6,2); the other three stay above or graze its boundary.
+    expect(targetCorners.map((targetCorner) =>
+      rasterizeCornerLine(sourceCorner, targetCorner, [candidate]))).toEqual([
+      [],
+      [],
+      [candidate],
+      [],
+    ]);
+    expect(targetCorners.map((targetCorner) =>
+      rasterizeCornerLine(sourceCorner, { column: targetCorner.column - 6, row: targetCorner.row - 1 }, [candidate])))
+      .toEqual([[], [], [], []]);
+  });
 });

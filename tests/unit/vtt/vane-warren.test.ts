@@ -605,14 +605,17 @@ describe('D377.5 The Vane Warren flagship bundle', () => {
       const leader = combatantIdFor(loaded, manifest.leaderRosterId);
       const leaderPosition = loaded.encounter.tokens.find((token) => token.combatantId === leader)?.position;
       if (leaderPosition === undefined) throw new Error(`${manifest.name} has no leader token.`);
+      // From (5,3), the brazier intersects at least one target-corner ray to
+      // both leader columns; from (5,8), the cask intersects one or three.
+      // Its authored Half tier clamps either corner count to Half Cover.
       expect(coverTierBetweenObjects(
         loaded.encounter.worldObjects,
-        { column: 6, row: 4 },
+        { column: 5, row: 3 },
         leaderPosition,
       )).toBe('half');
       expect(coverTierBetweenObjects(
         loaded.encounter.worldObjects,
-        { column: 6, row: 8 },
+        { column: 5, row: 8 },
         leaderPosition,
       )).toBe('half');
     }

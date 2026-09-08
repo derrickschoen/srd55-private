@@ -95,6 +95,9 @@ export function encounterMovementWorld(state: EncounterState): MovementWorld<Com
     traversal: (actorId, from, to) => {
       const sourceSpace = spaceAt(actorId, from);
       const destinationSpace = spaceAt(actorId, to);
+      if (!spaceFitsBounds(destinationSpace, state.bounds)) {
+        return { kind: 'blocked', reason: 'creature footprint is outside the grid' };
+      }
       const enteredCells = newlyEnteredSpaceCells(sourceSpace, destinationSpace);
       if (destinationSpace.cells.some((occupied) => blockedCellKeys.has(cellKey(occupied)))) {
         return { kind: 'blocked', reason: 'blocked cell' };

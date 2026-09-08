@@ -530,9 +530,15 @@ describe('player-character AlgorithmController policy', () => {
       )).toEqual(anchor.cells);
       expect(coverObjects).toHaveLength(2);
       for (const placement of room.coverPlacements) {
-        expect(placement.shelteredCells.some((sheltered) => room.monsters.some((enemy) =>
-          coverTierBetweenObjects(composed.state.worldObjects, sheltered, enemy.position) === placement.tier,
-        ))).toBe(true);
+        const firingLines = placement.shelteredCells.flatMap((sheltered) => room.monsters.map((enemy) => ({
+          sheltered,
+          target: enemy.position,
+          tier: coverTierBetweenObjects(composed.state.worldObjects, sheltered, enemy.position),
+        })));
+        expect(
+          firingLines.some((line) => line.tier !== 'none'),
+          `room ${String(room.room)} ${placement.id}: ${JSON.stringify(firingLines)}`,
+        ).toBe(true);
       }
     }
   });

@@ -714,7 +714,7 @@ export async function runArena(
           ...conversationOptions,
           ...(snapshotService === null ? {} : { boardSnapshotService: snapshotService }),
           rendererEvidenceCache,
-          roomStates: [structuredClone(states[room - 1]!)],
+          roomStates: [states[room - 1]!],
         });
         const [row] = arenaRows(config, result.rows, 'single', [seeds[room - 1]!]);
         if (row === undefined) throw new Error('Independent arena unit produced no row.');
@@ -756,7 +756,7 @@ export async function runArena(
             ...(snapshotService === null ? {} : { boardSnapshotService: snapshotService }),
             rendererEvidenceCache,
             ...(adapterByArm?.[arm.label] === undefined ? {} : { adapter: adapterByArm[arm.label] }),
-            roomStates: [structuredClone(states[room - 1]!)],
+            roomStates: [states[room - 1]!],
             onPrimaryDispatchStart: () => {
               if (announced) return;
               announced = true;
