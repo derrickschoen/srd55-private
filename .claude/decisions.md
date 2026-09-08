@@ -16435,3 +16435,63 @@ the real cause is still unidentified. Not diagnosing further myself:
 under D581.5 the cause is mine to establish but the interpretation and
 any scope change is Astra's, and this needs the harness to stop
 swallowing output before anyone can say what broke.
+
+## D585 — OWNER: Fable mode restored; Astra high for review, judging and high-intelligence work; rerun the sol-high baseline rooms with astra low and astra medium added (2026-09-08 09:32)
+
+Owner (verbatim): "i got my fable usage back. switch back to fable mode,
+but for anything that requires review, or judging or other high
+intelligence tasks, use astra on high effort."
+
+Owner (verbatim): "re run all of the baseline sol high rooms from
+yesterday and try them with astra low and astra medium as well"
+
+Governance: D578's "Astra decides, Claude reviews and executes" ends.
+Claude (Fable) decides again as before D578. Astra at high effort is
+the reviewer for plans and implementations, remains the third judge
+seat (panel stays sol high / opus / astra; fable does NOT return to the
+panel), and takes any other task the supervisor classes as needing high
+intelligence. D581.5's boundary list is no longer binding on Claude,
+but the rulings Astra issued while decider (D578 to D584) stand as
+recorded.
+
+"Baseline sol high rooms from yesterday" resolved, verified from
+.tmp/runs/run-pool-reps.sh and pool-reps.log: the D572 pool three-rep
+sol-high arm, basis brutal-pool, 30 rooms x 3 reps, seed 6208001,
+intel-mode full, timeout 240000 ms, codex home ~/.codex-aidm, run on
+dnd-wt-brutal-pool at c89e1ea4 on 2026-09-07 12:39.
+
+Pre-launch checks, all mine:
+- dnd-wt-brutal-pool is clean at 650e1f00. The three commits since
+  c89e1ea4 touch tools/ai-dm-arena.ts only to rename the
+  brutal-struggle nomination evidence (not the brutal-pool basis) and
+  to label engine-top rows cli/model 'engine'; no change to how a
+  model arm plays. Same tree semantics as the baseline for these arms.
+- gpt-6-astra accepts model_reasoning_effort=low and =medium through
+  the arena's codex home: probes returned ASTRA-LOW-OK (4,586 tokens)
+  and ASTRA-MEDIUM-OK (4,397 tokens), exit 0 both. The adapter
+  (src/vtt/agent-adapters/codex.ts:236) passes --effort straight to
+  that config key, so no code change is needed.
+- Machine quiet: load 0.17, no gate, no playwright, no lane codex.
+  Owner's :4173 untouched.
+
+Launched 09:31:31 via .tmp/runs/run-pool4-arms.sh, three arms in
+parallel, identical protocol to the baseline (basis brutal-pool, rooms
+30, reps 3, seed 6208001, intel-mode full, timeout 240000, codex home
+~/.codex-aidm):
+  pool4-sol-high      gpt-5.6-sol  high     -> ~/dnd-slim-runs/pool4-sol-high.jsonl
+  pool4-astra-low     gpt-6-astra  low      -> ~/dnd-slim-runs/pool4-astra-low.jsonl
+  pool4-astra-medium  gpt-6-astra  medium   -> ~/dnd-slim-runs/pool4-astra-medium.jsonl
+Family name pool4 so nothing overwrites the pool3 artifacts. The 240 s
+per-call wall is kept deliberately; if astra medium hits it repeatedly
+that is a finding to report, not a knob to move silently.
+
+Plan for the rest, my decision under the restored governance: when
+the arms finish, build one packet from pool3-engine-top (the engine is
+deterministic and the tree unchanged for play, so yesterday's rows are
+the anchor), pool4-sol-high, pool4-astra-low and pool4-astra-medium,
+shuffle-seed fresh, leak-scan, then judge on the sol/opus/astra panel
+with D578.2's seat exclusions: sol's seat is ineligible for any
+comparison involving the sol arm, astra's seat is ineligible for any
+comparison involving either astra arm, and the sol-high rerun against
+pool3-sol-high gives a within-arm repeatability read. Before the panel
+launches, Astra high reviews that packet design as the reviewer.
