@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { bytesEqual, type Bitmap } from '../../../src/assets/bitmap';
+import { Bitmap, bytesEqual } from '../../../src/assets/bitmap';
 import {
   BAND_SIDES,
   DOOR_STATES,
@@ -135,6 +135,111 @@ describe('D516 determinism', () => {
       expect(bytesEqual(first, second), input.id).toBe(true);
       expect(pngDimensions(first), input.id).toEqual({ width: TILE_SIZE, height: TILE_SIZE });
       expect(first.length, input.id).toBeLessThan(12_000);
+    }
+  });
+});
+
+describe('D576 native terrain silhouettes', () => {
+  const terrain = {
+    half_cover: paintRecipe({ kind: 'overlay', material: 'semantic', effect: 'terrain-half-cover' }),
+    three_quarters_cover: paintRecipe({ kind: 'overlay', material: 'semantic', effect: 'terrain-three-quarters-cover' }),
+    wall: paintRecipe({ kind: 'overlay', material: 'semantic', effect: 'blocked' }),
+  } as const;
+
+  const occupied = (bitmap: Bitmap, x: number, y: number): boolean => bitmap.get(x, y).alpha > 0;
+  const occupiedCount = (bitmap: Bitmap): number => {
+    let count = 0;
+    for (let y = 0; y < TILE_SIZE; y += 1) {
+      for (let x = 0; x < TILE_SIZE; x += 1) if (occupied(bitmap, x, y)) count += 1;
+    }
+    return count;
+  };
+  const maskDistance = (left: Bitmap, right: Bitmap): number => {
+    let distance = 0;
+    for (let y = 0; y < TILE_SIZE; y += 1) {
+      for (let x = 0; x < TILE_SIZE; x += 1) {
+        if (occupied(left, x, y) !== occupied(right, x, y)) distance += 1;
+      }
+    }
+    return distance;
+  };
+  const composite = (layers: readonly Bitmap[]): Bitmap => {
+    const result = new Bitmap(TILE_SIZE, TILE_SIZE);
+    for (const layer of layers) {
+      for (let y = 0; y < TILE_SIZE; y += 1) {
+        for (let x = 0; x < TILE_SIZE; x += 1) result.blendRgba(x, y, layer.get(x, y));
+      }
+    }
+    return result;
+  };
+  const meanRgbDistance = (left: Bitmap, right: Bitmap): number => {
+    let distance = 0;
+    for (let y = 0; y < TILE_SIZE; y += 1) {
+      for (let x = 0; x < TILE_SIZE; x += 1) {
+        const a = left.get(x, y);
+        const b = right.get(x, y);
+        distance += Math.abs(a.red - b.red) + Math.abs(a.green - b.green) + Math.abs(a.blue - b.blue);
+      }
+    }
+    return distance / (TILE_SIZE * TILE_SIZE * 3);
+  };
+
+  it('M576-E3-WALL-TRANSLUCENT makes wall a fully opaque full-height mass with no pass-through row', () => {
+    expect(terrain.wall.width).toBe(128);
+    expect(terrain.wall.height).toBe(128);
+    expect(occupiedCount(terrain.wall)).toBe(TILE_SIZE * TILE_SIZE);
+    for (let y = 0; y < TILE_SIZE; y += 1) {
+      expect(Array.from({ length: TILE_SIZE }, (_unused, x) => terrain.wall.get(x, y).alpha)
+        .every((alpha) => alpha === 255), `wall row ${String(y)}`).toBe(true);
+    }
+  });
+
+  it('M576-E3-HALF-THREEQUARTERS-SWAPPED measures the low open band and the tall narrow aperture', () => {
+    for (let y = 0; y < 68; y += 1) {
+      expect(Array.from({ length: TILE_SIZE }, (_unused, x) => terrain.half_cover.get(x, y).alpha)
+        .every((alpha) => alpha === 0), `half-cover upper row ${String(y)}`).toBe(true);
+    }
+    const halfTop = Array.from({ length: TILE_SIZE }, (_unused, y) => y)
+      .find((y) => Array.from({ length: TILE_SIZE }, (_unused, x) => occupied(terrain.half_cover, x, y))
+        .some(Boolean));
+    const threeQuartersTop = Array.from({ length: TILE_SIZE }, (_unused, y) => y)
+      .find((y) => Array.from({ length: TILE_SIZE }, (_unused, x) => occupied(terrain.three_quarters_cover, x, y))
+        .some(Boolean));
+    expect(halfTop).toBeGreaterThanOrEqual(68);
+    expect(threeQuartersTop).toBeLessThanOrEqual(8);
+    expect(threeQuartersTop).toBeLessThan(halfTop ?? TILE_SIZE);
+    let aperture = 0;
+    for (let y = 34; y < 73; y += 1) {
+      for (let x = 52; x < 76; x += 1) if (!occupied(terrain.three_quarters_cover, x, y)) aperture += 1;
+    }
+    expect(aperture).toBeGreaterThanOrEqual(650);
+    expect(occupiedCount(terrain.three_quarters_cover)).toBeGreaterThan(occupiedCount(terrain.half_cover));
+    expect(TILE_SIZE * TILE_SIZE - occupiedCount(terrain.three_quarters_cover))
+      .toBeLessThan(TILE_SIZE * TILE_SIZE - occupiedCount(terrain.half_cover));
+    expect(terrain.half_cover.get(64, 91)).not.toEqual(terrain.half_cover.get(50, 91));
+    expect(terrain.half_cover.get(60, 98)).not.toEqual(terrain.half_cover.get(50, 98));
+    expect(terrain.half_cover.get(54, 105)).not.toEqual(terrain.half_cover.get(50, 105));
+  });
+
+  it('M576-E3-TIER-MARK-ONLY-DIFFERENCE keeps every silhouette far apart on every floor/light treatment', () => {
+    const pairs = [
+      ['half_cover', 'three_quarters_cover'],
+      ['half_cover', 'wall'],
+      ['three_quarters_cover', 'wall'],
+    ] as const;
+    for (const [left, right] of pairs) expect(maskDistance(terrain[left], terrain[right]), `${left}/${right}`).toBeGreaterThanOrEqual(3_000);
+    const lightTreatments = [null, 'light-bright', 'light-dim', 'light-darkness'] as const;
+    for (const variant of FLOOR_VARIANTS) {
+      const floor = paintRecipe({ kind: 'floor', material: 'stone', variant });
+      for (const light of lightTreatments) {
+        const lightLayer = light === null ? [] : [paintRecipe({ kind: 'overlay', material: 'semantic', effect: light })];
+        for (const [left, right] of pairs) {
+          const leftCell = composite([floor, terrain[left], ...lightLayer]);
+          const rightCell = composite([floor, terrain[right], ...lightLayer]);
+          expect(meanRgbDistance(leftCell, rightCell), `floor ${String(variant)} / ${String(light)} / ${left}/${right}`)
+            .toBeGreaterThanOrEqual(8);
+        }
+      }
     }
   });
 });

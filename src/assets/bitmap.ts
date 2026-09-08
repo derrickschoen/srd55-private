@@ -98,6 +98,12 @@ export class Bitmap {
     this.writeRgba(x, y, TRANSPARENT);
   }
 
+  clearRect(x: number, y: number, width: number, height: number): void {
+    for (let py = y; py < y + height; py += 1) {
+      for (let px = x; px < x + width; px += 1) this.clear(px, py);
+    }
+  }
+
   fill(ink: Ink): void {
     this.rect(0, 0, this.width, this.height, ink);
   }

@@ -76,10 +76,20 @@
   pointer-events: none;
 }
 
-.encounter-mechanical-blocked {
+.encounter-mechanical-terrain {
   z-index: 1;
-  background: rgb(52 58 70 / 94%);
-  box-shadow: inset 0 0 0 2px #adb6c8;
+}
+
+.encounter-mechanical-terrain[data-terrain-kind='wall'] {
+  background: rgb(52 58 70 / 100%);
+}
+
+.encounter-mechanical-terrain[data-terrain-kind='half_cover'] {
+  border-bottom: 1.5rem solid rgb(126 86 48 / 100%);
+}
+
+.encounter-mechanical-terrain[data-terrain-kind='three_quarters_cover'] {
+  border: 0.35rem solid rgb(81 85 94 / 100%);
 }
 
 .encounter-mechanical-difficult_terrain {
@@ -884,10 +894,24 @@
   background-repeat: no-repeat;
 }
 
-.encounter-mechanical-blocked {
+.encounter-mechanical-terrain {
+  background-color: transparent;
+  box-shadow: none;
+}
+
+.encounter-mechanical-terrain[data-terrain-kind='wall'] {
   background-color: transparent;
   background-image: var(--art-overlay-blocked);
-  box-shadow: none;
+}
+
+.encounter-mechanical-terrain[data-terrain-kind='half_cover'] {
+  border: 0;
+  background-image: var(--art-overlay-terrain-half-cover);
+}
+
+.encounter-mechanical-terrain[data-terrain-kind='three_quarters_cover'] {
+  border: 0;
+  background-image: var(--art-overlay-terrain-three-quarters-cover);
 }
 
 .encounter-mechanical-difficult_terrain {
@@ -1318,7 +1342,9 @@
 
 .encounter-board-glyph[data-glyph-effect='glyph-door-closed'] { background-image: var(--art-overlay-glyph-door-closed); }
 .encounter-board-glyph[data-glyph-effect='glyph-door-open'] { background-image: var(--art-overlay-glyph-door-open); }
-.encounter-board-glyph[data-glyph-effect='glyph-blocked'] { background-image: var(--art-overlay-glyph-blocked); }
+.encounter-board-glyph[data-glyph-effect='glyph-terrain-half'] { background-image: var(--art-overlay-glyph-terrain-half); }
+.encounter-board-glyph[data-glyph-effect='glyph-terrain-three-quarters'] { background-image: var(--art-overlay-glyph-terrain-three-quarters); }
+.encounter-board-glyph[data-glyph-effect='glyph-terrain-wall'] { background-image: var(--art-overlay-glyph-terrain-wall); }
 .encounter-board-glyph[data-glyph-effect='glyph-fog'] { background-image: var(--art-overlay-glyph-fog); }
 .encounter-board-glyph[data-glyph-effect='glyph-obscured'] { background-image: var(--art-overlay-glyph-obscured); }
 

@@ -59,6 +59,7 @@ import {
   boardGlyphPresence,
   encounterBoardRenderModel,
   type EncounterBoardProjectionShape,
+  type EncounterBoardTerrainCell,
 } from '../../../src/vtt/encounter-board';
 import { decodeEncounterArtPackage } from '../../../src/vtt/encounter-package';
 import { REFERENCE_ENCOUNTER_ART } from '../../../src/vtt/reference-encounter-art';
@@ -69,6 +70,17 @@ const MINIMUM_DISTANCE_PX = Math.ceil(0.3 * CELL_GLYPH_SIZE * CELL_GLYPH_SIZE);
 
 function key(cell: { readonly column: number; readonly row: number }): string {
   return `${String(cell.column)},${String(cell.row)}`;
+}
+
+function exhaustiveTerrain(
+  bounds: { readonly columns: number; readonly rows: number },
+  overrides: readonly EncounterBoardTerrainCell[] = [],
+): readonly EncounterBoardTerrainCell[] {
+  const byCell = new Map(overrides.map((entry) => [key(entry.cell), entry] as const));
+  return Array.from({ length: bounds.rows }, (_unused, row) =>
+    Array.from({ length: bounds.columns }, (_alsoUnused, column) =>
+      byCell.get(key({ column, row })) ?? { cell: { column, row }, kind: 'open' as const, sourceIds: [] }))
+    .flat();
 }
 
 // ---------------------------------------------------------------------------
@@ -96,12 +108,14 @@ describe('D525 boardGlyphs option', () => {
   });
 
   it('marks cells only under full, one glyph per qualifying fact, in a fixed order', () => {
-    const everything = { door: 'open' as const, blocked: true, fogged: true, obscured: true };
+    const everything = { door: 'open' as const, terrain: 'wall' as const, fogged: true, obscured: true };
     for (const mode of ['none', 'light'] as const) expect(cellGlyphsFor(mode, everything)).toEqual([]);
-    expect(cellGlyphsFor('full', everything)).toEqual(['door-open', 'blocked', 'fog', 'obscured']);
-    expect(cellGlyphsFor('full', { ...everything, door: 'closed' })).toEqual(['door-closed', 'blocked', 'fog', 'obscured']);
-    expect(cellGlyphsFor('full', { door: null, blocked: false, fogged: false, obscured: false })).toEqual([]);
-    expect(cellGlyphsFor('full', { door: null, blocked: false, fogged: true, obscured: false })).toEqual(['fog']);
+    expect(cellGlyphsFor('full', everything)).toEqual(['door-open', 'terrain-wall', 'fog', 'obscured']);
+    expect(cellGlyphsFor('full', { ...everything, door: 'closed' })).toEqual(['door-closed', 'terrain-wall', 'fog', 'obscured']);
+    expect(cellGlyphsFor('full', { door: null, terrain: 'half_cover', fogged: false, obscured: false })).toEqual(['terrain-half']);
+    expect(cellGlyphsFor('full', { door: null, terrain: 'three_quarters_cover', fogged: false, obscured: false })).toEqual(['terrain-three-quarters']);
+    expect(cellGlyphsFor('full', { door: null, terrain: 'open', fogged: false, obscured: false })).toEqual([]);
+    expect(cellGlyphsFor('full', { door: null, terrain: 'open', fogged: true, obscured: false })).toEqual(['fog']);
   });
 });
 
@@ -123,7 +137,7 @@ describe('D525 glyph families own distinct corners and silhouettes', () => {
     expect(CELL_GLYPHS.fog.slot).not.toBe(CELL_GLYPHS.obscured.slot);
   });
 
-  it('places each kind in its family corner, the bottom row clear of the HP bar, and no two boxes overlap on one cell', () => {
+  it('M576-E3-GLYPH-SLOT-COLLISION places each kind in its reserved family slot without overlap', () => {
     const scale = cellGlyphScale(TILE_SIZE);
     const glyphSize = cellGlyphSizePx(TILE_SIZE);
     const boxes = CELL_GLYPH_KINDS.map((kind) => {
@@ -134,7 +148,9 @@ describe('D525 glyph families own distinct corners and silhouettes', () => {
     const far = TILE_SIZE - near - glyphSize;
     expect(cellGlyphOrigin('door-closed', TILE_SIZE)).toEqual({ x: far, y: near });
     expect(cellGlyphOrigin('door-open', TILE_SIZE)).toEqual({ x: far, y: near });
-    expect(cellGlyphOrigin('blocked', TILE_SIZE)).toEqual({ x: near, y: far - CELL_GLYPH_HP_BAR_CLEARANCE * scale });
+    expect(cellGlyphOrigin('terrain-wall', TILE_SIZE)).toEqual({ x: near, y: far - CELL_GLYPH_HP_BAR_CLEARANCE * scale });
+    expect(cellGlyphOrigin('terrain-half', TILE_SIZE)).toEqual({ x: near, y: far - (CELL_GLYPH_HP_BAR_CLEARANCE + CELL_GLYPH_SLOT_PITCH) * scale });
+    expect(cellGlyphOrigin('terrain-three-quarters', TILE_SIZE)).toEqual({ x: near, y: far - (CELL_GLYPH_HP_BAR_CLEARANCE + 2 * CELL_GLYPH_SLOT_PITCH) * scale });
     expect(cellGlyphOrigin('fog', TILE_SIZE)).toEqual({ x: far, y: far - CELL_GLYPH_HP_BAR_CLEARANCE * scale });
     expect(cellGlyphOrigin('obscured', TILE_SIZE)).toEqual({ x: far, y: far - (CELL_GLYPH_HP_BAR_CLEARANCE + CELL_GLYPH_SLOT_PITCH) * scale });
     for (const box of boxes) {
@@ -198,11 +214,14 @@ describe('D525 glyph families own distinct corners and silhouettes', () => {
     expect(open[0]).toBe('#########');
     expect(open.every((row) => row.startsWith('#'))).toBe(true);
     expect(open[2]?.endsWith('.')).toBe(true);
-    const blocked = CELL_GLYPHS.blocked.rows;
-    expect(blocked[0]).toBe('#########');
-    expect(blocked[8]).toBe('#########');
-    expect(blocked[4]).toBe('#...#...#');
-    expect(blocked.every((row) => row.startsWith('#') && row.endsWith('#'))).toBe(true);
+    expect(CELL_GLYPHS['terrain-half'].label).toBe('1/2 COVER');
+    expect(CELL_GLYPHS['terrain-three-quarters'].label).toBe('3/4 COVER');
+    expect(CELL_GLYPHS['terrain-wall'].label).toBe('WALL');
+    expect(new Set([
+      CELL_GLYPHS['terrain-half'].rows.join(''),
+      CELL_GLYPHS['terrain-three-quarters'].rows.join(''),
+      CELL_GLYPHS['terrain-wall'].rows.join(''),
+    ]).size).toBe(3);
     const fog = CELL_GLYPHS.fog.rows;
     expect(fog[7]).toBe('.########');
     expect(fog[5]).toBe('#.......#');
@@ -217,7 +236,9 @@ describe('D525 glyph families own distinct corners and silhouettes', () => {
     expect(CELL_GLYPH_KINDS.map((kind) => CELL_GLYPHS[kind].label)).toEqual([
       'DOOR CLOSED',
       'DOOR OPEN',
-      'BLOCKED',
+      '1/2 COVER',
+      '3/4 COVER',
+      'WALL',
       'FOG',
       'OBSCURED - CYAN DIAMONDS AND WAVES - NOT FOG',
     ]);
@@ -526,6 +547,7 @@ function doorObject(id: string, name: string, cell: { readonly column: number; r
     position: cell,
     cells: [cell],
     blocking: { movement: !open, lineOfSight: !open, cover: open ? 'none' as const : 'total' as const },
+    terrainKind: open ? 'open' as const : 'wall' as const,
     lightClass: 'none' as const,
   };
 }
@@ -540,6 +562,13 @@ const everyClass: EncounterBoardProjectionShape = {
   highlightedCombatant: null,
   adjudicatedTargets: [],
   blockedCells: [BLOCKED_CELL],
+  terrainCells: exhaustiveTerrain({ columns: 6, rows: 4 }, [
+    { cell: { column: 1, row: 0 }, kind: 'half_cover', sourceIds: ['object:world-object:half-light'] },
+    { cell: { column: 1, row: 1 }, kind: 'half_cover', sourceIds: ['object:world-object:half-token'] },
+    { cell: CLOSED_DOOR, kind: 'wall', sourceIds: ['object:world-object:closed-door'] },
+    { cell: FOGGED_CELL, kind: 'three_quarters_cover', sourceIds: ['object:world-object:three-quarters-fog'] },
+    { cell: BLOCKED_CELL, kind: 'wall', sourceIds: [`blocked:${key(BLOCKED_CELL)}`] },
+  ]),
   foggedCells: [FOGGED_CELL],
   obscurementRegions: [{ id: 'smoke', obscurement: 'heavy', cells: SMOKE_CELLS }],
   environmentLightRegions: [
@@ -554,10 +583,13 @@ const everyClass: EncounterBoardProjectionShape = {
 
 function expectedGlyphsAt(cell: { readonly column: number; readonly row: number }): readonly CellGlyphKind[] {
   const k = key(cell);
+  const terrain = everyClass.terrainCells.find((entry) => key(entry.cell) === k)?.kind ?? 'open';
   return [
     ...(k === key(OPEN_DOOR) ? ['door-open' as const] : []),
     ...(k === key(CLOSED_DOOR) ? ['door-closed' as const] : []),
-    ...(k === key(BLOCKED_CELL) ? ['blocked' as const] : []),
+    ...(terrain === 'half_cover' ? ['terrain-half' as const] : []),
+    ...(terrain === 'three_quarters_cover' ? ['terrain-three-quarters' as const] : []),
+    ...(terrain === 'wall' ? ['terrain-wall' as const] : []),
     ...(k === key(FOGGED_CELL) ? ['fog' as const] : []),
     ...(SMOKE_CELLS.some((smoke) => key(smoke) === k) ? ['obscured' as const] : []),
   ];
@@ -568,7 +600,7 @@ describe('D525 render model under each mode on a room with every fact class', ()
     for (const mode of ['none', 'light'] as const) {
       const cells = encounterBoardRenderModel(everyClass, encounterArtForBoard(everyClass, mode));
       expect(cells.every((cell) => cell.glyphs.length === 0), mode).toBe(true);
-      expect(boardGlyphPresence(cells, everyClass.combatants)).toEqual({ cells: [], hidden: true });
+      expect(boardGlyphPresence(cells, everyClass.combatants)).toEqual({ cells: [], hidden: true, terrainKinds: ['open', 'half_cover', 'wall', 'three_quarters_cover'] });
     }
     const art = encounterArtForBoard(everyClass, 'full');
     const cells = encounterBoardRenderModel(everyClass, art);
@@ -581,8 +613,8 @@ describe('D525 render model under each mode on a room with every fact class', ()
       expect(new Set(slots).size, cell.key).toBe(slots.length);
     }
     const counts = Object.fromEntries(CELL_GLYPH_KINDS.map((kind) => [kind, cells.filter((cell) => cell.glyphs.some((glyph) => glyph.kind === kind)).length]));
-    expect(counts).toEqual({ 'door-closed': 1, 'door-open': 1, blocked: 1, fog: 1, obscured: 2 });
-    expect(boardGlyphPresence(cells, everyClass.combatants)).toEqual({ cells: [...CELL_GLYPH_KINDS], hidden: true });
+    expect(counts).toEqual({ 'door-closed': 1, 'door-open': 1, 'terrain-half': 2, 'terrain-three-quarters': 1, 'terrain-wall': 2, fog: 1, obscured: 2 });
+    expect(boardGlyphPresence(cells, everyClass.combatants)).toEqual({ cells: [...CELL_GLYPH_KINDS], hidden: true, terrainKinds: ['open', 'half_cover', 'wall', 'three_quarters_cover'] });
     // Door art and door glyphs have the same engine-owned source of truth.
     const drawnDoors = cells.filter((cell) => cell.layers.some((layer) => layer.role === 'door'));
     expect(drawnDoors.map((cell) => cell.key).sort()).toEqual(['0,2', '5,2']);
@@ -605,7 +637,9 @@ describe('D525 render model under each mode on a room with every fact class', ()
     };
     const cells = encounterBoardRenderModel(wide, encounterArtForBoard(wide, 'full'));
     expect(cells.filter((cell) => cell.glyphs.some((glyph) => glyph.kind === 'door-closed')).map((cell) => cell.key)).toEqual(['3,3', '4,3']);
-    expect(cells.find((cell) => cell.key === '4,3')?.glyphs.map((glyph) => glyph.kind)).toEqual(['door-closed', 'fog', 'obscured']);
+    expect(cells.find((cell) => cell.key === '4,3')?.glyphs.map((glyph) => glyph.kind)).toEqual([
+      'door-closed', 'terrain-three-quarters', 'fog', 'obscured',
+    ]);
   });
 });
 
@@ -687,7 +721,16 @@ describe('D525 board DOM under each mode on a room with every fact class', () =>
       const marks = cell.querySelectorAll('.encounter-board-glyph');
       expect(marks.map((mark) => mark.getAttribute('data-glyph-kind')), cell.getAttribute('data-cell') ?? '').toEqual(expected);
       expect(marks.map((mark) => mark.getAttribute('data-glyph-effect'))).toEqual(expected.map((kind) => CELL_GLYPH_EFFECT_BY_KIND[kind]));
+      const projectedTerrain = everyClass.terrainCells.find((entry) => key(entry.cell) === cell.getAttribute('data-cell'))?.kind ?? 'open';
+      expect(cell.getAttribute('data-terrain-kind')).toBe(projectedTerrain);
+      const terrainLayer = cell.querySelector('.encounter-mechanical-terrain');
+      expect(terrainLayer?.getAttribute('data-terrain-kind') ?? 'open').toBe(projectedTerrain);
     }
+    const overlapped = full.querySelector('[data-cell="4,3"]');
+    expect(overlapped?.querySelector('[data-terrain-kind="three_quarters_cover"]')).not.toBeNull();
+    expect(overlapped?.querySelector('[data-glyph-kind="terrain-three-quarters"]')).not.toBeNull();
+    expect(overlapped?.querySelector('[data-glyph-kind="fog"]')).not.toBeNull();
+    expect(overlapped?.querySelector('[data-glyph-kind="obscured"]')).not.toBeNull();
     const stripped = (node: Serialized): Serialized => ({
       ...node,
       attributes: node.attributes.filter(([name]) => name !== 'data-board-glyphs'),
@@ -706,11 +749,11 @@ describe('D525 board DOM under each mode on a room with every fact class', () =>
     expect(keys).toEqual([
       'side-party', 'side-foe', 'hidden', 'difficult', 'obscured',
       'bright', 'dim', 'darkness', 'light-default',
-      'fog', 'blocked', 'door-closed', 'door-open',
+      'fog', 'terrain-open', 'terrain-half_cover', 'terrain-three_quarters_cover', 'terrain-wall', 'door-closed', 'door-open',
       'object', 'light-source', 'hp-uninjured', 'hp-bloodied', 'hp-near-death', 'hp-unknown',
     ]);
     const markRows = legend?.querySelectorAll('.encounter-legend-mark').map((item) => item.getAttribute('data-legend-key')) ?? [];
-    expect(markRows).toEqual(['hidden', 'obscured', 'bright', 'dim', 'darkness', 'fog', 'blocked', 'door-closed', 'door-open', 'object']);
+    expect(markRows).toEqual(['hidden', 'obscured', 'bright', 'dim', 'darkness', 'fog', 'terrain-half_cover', 'terrain-three_quarters_cover', 'terrain-wall', 'door-closed', 'door-open', 'object']);
     expect(new Set(legend?.querySelectorAll('.encounter-legend-swatch-mark').map((swatch) => (swatch as StyledElement).src)).size).toBe(markRows.length);
     const obscuredLegend = legend?.querySelector('[data-legend-key="obscured"]');
     const obscuredSwatch = obscuredLegend?.querySelector('.encounter-legend-swatch-mark');
@@ -756,13 +799,14 @@ describe('D525 board DOM under each mode on a room with every fact class', () =>
       expect((styleOf(glyph, 'top') - COORDINATE_GUTTER_PX) % CHROME_TILE_PX).toBe(LIFE_GLYPH_INSET_PX);
     }
     const keys = dm.querySelector('[data-legend]')?.querySelectorAll('.encounter-legend-item').map((item) => item.getAttribute('data-legend-key')) ?? [];
-    expect(keys).toEqual(legendEntriesFor('light', 'bright', { cells: [], hidden: false }).map((entry) => entry.key));
+    expect(keys).toEqual(legendEntriesFor('light', 'bright', { cells: [], hidden: false, terrainKinds: ['open', 'wall'] }).map((entry) => entry.key));
     expect(keys).not.toContain('door-closed');
   });
 
   it("DM board under 'full' on a room with nothing to mark lists no vocabulary rows, and a closed door alone lists only DOOR CLOSED", () => {
     const bare: EncounterBoardProjectionShape = {
       bounds: { columns: 6, rows: 4 },
+      terrainCells: exhaustiveTerrain({ columns: 6, rows: 4 }),
       combatants: [{ id: HERO, name: 'Hero', kind: 'player_character', placementStatus: 'placed', position: { column: 1, row: 1 }, effectiveSize: 'Medium', placementMode: { kind: 'normal', actual: 'Medium' }, footprint: [{ column: 1, row: 1 }] }],
       highlightedCombatant: null,
       adjudicatedTargets: [],
@@ -771,7 +815,7 @@ describe('D525 board DOM under each mode on a room with every fact class', () =>
       interactiveElement(renderBoard(projection, new Set(), null, provenance, 'full'))
         .querySelector('[data-legend]')?.querySelectorAll('.encounter-legend-item').map((item) => item.getAttribute('data-legend-key')) ?? [];
     const bareKeys = keysOf(bare);
-    for (const absent of ['hidden', 'obscured', 'fog', 'blocked', 'door-closed', 'door-open']) expect(bareKeys).not.toContain(absent);
+    for (const absent of ['hidden', 'obscured', 'fog', 'terrain-wall', 'door-closed', 'door-open']) expect(bareKeys).not.toContain(absent);
     expect(bareKeys).toEqual(['side-party', 'side-foe', 'difficult', 'bright', 'dim', 'darkness', 'light-default', 'object', 'light-source', 'hp-uninjured', 'hp-bloodied', 'hp-near-death', 'hp-unknown']);
     const closedOnly = keysOf({ ...bare, worldObjects: [doorObject('closed-door', 'Closed Iron Door', CLOSED_DOOR, false)] });
     expect(closedOnly).toContain('door-closed');

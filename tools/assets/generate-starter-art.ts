@@ -5,7 +5,7 @@ import { renderStarterArtPng } from '../../src/assets/starter-art-resolver';
 import { STARTER_ART_MANIFEST } from '../../src/assets/starter-art-manifest';
 import { TILE_SIZE } from '../../src/assets/pixel-art';
 import { combatantId, worldObjectId } from '../../src/combat/values';
-import { encounterBoardRenderModel } from '../../src/vtt/encounter-board';
+import { encounterBoardRenderModel, projectEncounterTerrainCells } from '../../src/vtt/encounter-board';
 import { REFERENCE_ENCOUNTER_ART } from '../../src/vtt/reference-encounter-art';
 
 /**
@@ -23,7 +23,7 @@ function symbolId(id: string): string {
   return `asset-${id.replaceAll('.', '-')}`;
 }
 
-function useAsset(id: string, x: number, y: number, size: number): string {
+export function useAsset(id: string, x: number, y: number, size: number): string {
   const scale = size / TILE_SIZE;
   if (!Number.isSafeInteger(scale) || scale < 1) throw new RangeError('Preview art must use a positive integer scale.');
   return `<use href="#${symbolId(id)}" transform="translate(${String(x)} ${String(y)}) scale(${String(scale)})" data-asset-id="${id}"/>`;
@@ -79,6 +79,10 @@ function previewSvg(): string {
   }));
   const base = {
     bounds: { columns: 10, rows: 7 },
+    terrainCells: projectEncounterTerrainCells(
+      { columns: 10, rows: 7 },
+      { blockedCells: [{ column: 4, row: 6 }], worldObjects: [] },
+    ),
     combatants: party,
     highlightedCombatant: combatantId('combatant:fighter'),
     adjudicatedTargets: [combatantId('combatant:training-brute')],
@@ -90,6 +94,7 @@ function previewSvg(): string {
       position: { column: 4, row: 6 },
       cells: [{ column: 4, row: 6 }],
       blocking: { movement: true, lineOfSight: true, cover: 'total' as const },
+      terrainKind: 'wall' as const,
       lightClass: 'none' as const,
     }],
   };

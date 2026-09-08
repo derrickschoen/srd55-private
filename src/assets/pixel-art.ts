@@ -3,6 +3,7 @@ import { Bitmap, bayer2, type Ink, type Rgba } from './bitmap';
 import {
   CELL_GLYPHS,
   cellGlyphOrigin,
+  type CellGlyphDefinitionKind,
   type CellGlyphKind,
 } from './board-glyphs';
 import {
@@ -51,7 +52,9 @@ export type LightGlyphEffect = (typeof LIGHT_GLYPH_EFFECTS)[number];
 export const CELL_GLYPH_EFFECTS = [
   'glyph-door-closed',
   'glyph-door-open',
-  'glyph-blocked',
+  'glyph-terrain-half',
+  'glyph-terrain-three-quarters',
+  'glyph-terrain-wall',
   'glyph-fog',
   'glyph-obscured',
 ] as const;
@@ -61,7 +64,9 @@ export const CELL_GLYPH_EFFECT_BY_KIND: Readonly<
 > = Object.freeze({
   'door-closed': 'glyph-door-closed',
   'door-open': 'glyph-door-open',
-  blocked: 'glyph-blocked',
+  'terrain-half': 'glyph-terrain-half',
+  'terrain-three-quarters': 'glyph-terrain-three-quarters',
+  'terrain-wall': 'glyph-terrain-wall',
   fog: 'glyph-fog',
   obscured: 'glyph-obscured',
 });
@@ -74,8 +79,11 @@ export const OVERLAY_EFFECTS = [
   'light-dim',
   'light-darkness',
   'blocked',
+  'terrain-half-cover',
+  'terrain-three-quarters-cover',
   'light-source',
   ...LIGHT_GLYPH_EFFECTS,
+  'glyph-blocked',
   ...CELL_GLYPH_EFFECTS,
 ] as const;
 export type OverlayEffect = (typeof OVERLAY_EFFECTS)[number];
@@ -909,29 +917,45 @@ function paintDifficult(bitmap: Bitmap): void {
   }
 }
 function paintBlocked(bitmap: Bitmap): void {
-  contactShadow(bitmap, 68, 71, 38, 35);
-  bitmap.disc(64, 65, 36, STONE(1));
-  bitmap.disc(60, 60, 31, STONE(3));
-  bitmap.ellipse(49, 48, 17, 14, STONE(4));
-  bitmap.ellipse(76, 77, 15, 13, STONE(2));
-  bitmap.ring(64, 65, 36, STONE(0));
-  crack(bitmap, [
-    { x: 47, y: 51 },
-    { x: 67, y: 72 },
-    { x: 58, y: 91 },
-  ]);
-  for (const [x, y, width, height] of [
-    [9, 91, 21, 14],
-    [98, 80, 18, 13],
-    [91, 13, 16, 12],
-    [15, 21, 15, 11],
-    [50, 107, 19, 12],
-  ] as const)
-    stoneChunk(bitmap, x, y, width, height, 'stone');
-  for (const offset of [-2, -1, 0, 1, 2] as const) {
-    bitmap.line(18 + offset, 18, 110 + offset, 110, STONE(offset < 0 ? 4 : 0));
-    bitmap.line(110 + offset, 18, 18 + offset, 110, STONE(offset < 0 ? 4 : 0));
+  bitmap.fill(STONE(1));
+  for (let y = 0; y < TILE_SIZE; y += 16) {
+    bitmap.hLine(0, TILE_SIZE - 1, y, STONE(0));
+    const offset = (Math.floor(y / 16) % 2) * 18;
+    for (let x = offset; x < TILE_SIZE; x += 36) bitmap.vLine(x, y, Math.min(TILE_SIZE - 1, y + 15), STONE(0));
   }
+  bitmap.rect(3, 3, 6, TILE_SIZE - 6, STONE(3));
+  bitmap.rect(TILE_SIZE - 9, 3, 6, TILE_SIZE - 6, STONE(0));
+}
+
+function paintHalfCover(bitmap: Bitmap): void {
+  contactShadow(bitmap, 64, 112, 55, 9);
+  bitmap.rect(7, 72, 114, 45, WOOD(1));
+  bitmap.rect(7, 72, 114, 6, WOOD(5));
+  bitmap.rect(7, 111, 114, 6, WOOD(0));
+  for (const x of [10, 42, 74, 106] as const) bitmap.rect(x, 78, 5, 33, WOOD(4));
+  bitmap.line(13, 80, 43, 109, WOOD(5));
+  bitmap.line(43, 80, 13, 109, WOOD(0));
+  bitmap.line(77, 80, 107, 109, WOOD(5));
+  bitmap.line(107, 80, 77, 109, WOOD(0));
+  // Three rising steps are the native-density crossable/difficult cue from D576.2.
+  bitmap.hLine(52, 76, 105, WARM(5));
+  bitmap.hLine(57, 71, 98, WARM(5));
+  bitmap.hLine(62, 66, 91, WARM(5));
+}
+
+function paintThreeQuartersCover(bitmap: Bitmap): void {
+  bitmap.rect(7, 8, 114, 112, STONE(1));
+  bitmap.rect(7, 8, 114, 6, STONE(4));
+  bitmap.rect(7, 114, 114, 6, STONE(0));
+  for (let y = 14; y < 114; y += 20) bitmap.hLine(7, 120, y, STONE(0));
+  for (let y = 14; y < 114; y += 20) {
+    const offset = (Math.floor(y / 20) % 2) * 24;
+    for (let x = 7 + offset; x < 121; x += 48) bitmap.vLine(x, y, Math.min(113, y + 19), STONE(0));
+  }
+  bitmap.clearRect(52, 34, 24, 39);
+  bitmap.outline(49, 31, 30, 45, STONE(0));
+  bitmap.rect(55, 34, 3, 39, METAL(4));
+  bitmap.rect(70, 34, 3, 39, METAL(4));
 }
 function paintLightSource(bitmap: Bitmap): void {
   paintVeil(bitmap, translucent(WARM(5), 65), 1, 8);
@@ -993,7 +1017,7 @@ function paintFogHatch(
         bitmap.put(x, y, translucent(neutral(1), FOG_HATCH_ALPHA));
     }
 }
-function paintCellGlyph(bitmap: Bitmap, kind: CellGlyphKind): void {
+function paintCellGlyph(bitmap: Bitmap, kind: CellGlyphDefinitionKind): void {
   const scale = TILE_SIZE / 64;
   if (kind === 'fog') paintFogHatch(bitmap, FOG_HATCH_PITCH * scale, scale);
   stampMark(bitmap, CELL_GLYPHS[kind], cellGlyphOrigin(kind, TILE_SIZE));
@@ -1059,6 +1083,12 @@ function paintOverlay(bitmap: Bitmap, effect: OverlayEffect): void {
     case 'blocked':
       paintBlocked(bitmap);
       return;
+    case 'terrain-half-cover':
+      paintHalfCover(bitmap);
+      return;
+    case 'terrain-three-quarters-cover':
+      paintThreeQuartersCover(bitmap);
+      return;
     case 'light-source':
       paintLightSource(bitmap);
       return;
@@ -1079,6 +1109,15 @@ function paintOverlay(bitmap: Bitmap, effect: OverlayEffect): void {
       return;
     case 'glyph-blocked':
       paintCellGlyph(bitmap, 'blocked');
+      return;
+    case 'glyph-terrain-half':
+      paintCellGlyph(bitmap, 'terrain-half');
+      return;
+    case 'glyph-terrain-three-quarters':
+      paintCellGlyph(bitmap, 'terrain-three-quarters');
+      return;
+    case 'glyph-terrain-wall':
+      paintCellGlyph(bitmap, 'terrain-wall');
       return;
     case 'glyph-fog':
       paintCellGlyph(bitmap, 'fog');

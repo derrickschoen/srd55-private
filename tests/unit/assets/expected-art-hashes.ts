@@ -19,7 +19,7 @@
  * tests/unit/assets/board-glyphs.test.ts carries the pixel-level invariants
  * that license these five pins.
  *
- * Native-density redraw (2026-09-05): all 87 output pins and the preview pin
+ * Native-density redraw (2026-09-05), extended by D576: all 92 output pins and the preview pin
  * changed with the 128-pixel redraw. The independent bitmap invariants in
  * classic-art-techniques.test.ts reject enlargement, contour shading, speckle,
  * palette growth, blended exterior edges, and collapsed silhouettes.
@@ -169,7 +169,11 @@ export const EXPECTED_STARTER_ART_SHA256: Readonly<Record<string, string>> =
     'art.map.overlay.light-darkness.v1':
       'd5bcc7c2f3489f6d5469cefb72cf776649595aa1626426ad5e56871d1668fd7c',
     'art.map.overlay.blocked.v1':
-      '951066b265ecb35a2763ed08ca44db768a26527d0b193dc156c1c7c321ebd6b6',
+      '7c33b3fcf9324a818185c7bfe4464cc38af78f052c86770f6b6b75364da48956',
+    'art.map.overlay.terrain-half-cover.v1':
+      '3cdbc7fb157c3469179e528e8d2b8ed9c2dc14fe6819a6f0afba6bb4782d14d6',
+    'art.map.overlay.terrain-three-quarters-cover.v1':
+      'f9305fa80fd47001e15678ef467b3b8733dd62dffdbc7a8f60093daa7be7f83b',
     'art.map.overlay.light-source.v1':
       'c7d9abf3e1369eb509dcd29865e7413d487a1f645a106af61cc04ff915f97766',
     'art.map.overlay.light-glyph-bright.v1':
@@ -184,6 +188,12 @@ export const EXPECTED_STARTER_ART_SHA256: Readonly<Record<string, string>> =
       '67eab988aa7766b89190664db7b90a34b8c7563857d7bdc666e434b9b6706596',
     'art.map.overlay.glyph-blocked.v1':
       'ed4fd0107db1ec30aa7a610f520c90bb006d5e16dbbb22935ccdbdda3b174b9e',
+    'art.map.overlay.glyph-terrain-half.v1':
+      '6b19cdbf885b366e916dba0d0fd957fcf20568335cc07153a861bb4bcc8d1ba3',
+    'art.map.overlay.glyph-terrain-three-quarters.v1':
+      '34dee7be073df742fbf089fc7db7d6972adb403f765657ee8619446efc6343a0',
+    'art.map.overlay.glyph-terrain-wall.v1':
+      '0a78bfef67294b6fe83a8442f8cf691bd9a8186c8f090089ac24050640faa830',
     'art.map.overlay.glyph-fog.v1':
       '53aa42b20ed165438a0efcd22612a9d653640f70d56eff8c6cfe2772c1c15ee0',
     'art.map.overlay.glyph-obscured.v1':
@@ -212,7 +222,7 @@ export const EXPECTED_STARTER_ART_SHA256: Readonly<Record<string, string>> =
 
 /** sha256 of src/assets/starter-art-inputs.ts (native-density redraw, see above). */
 export const EXPECTED_FIXED_INPUTS_SHA256 =
-  '8649f9165fc76812a931af6e428bacb004caea4d8b70417ff86f3b7bcdc83a97';
-/** sha256 of src/assets/preview/starter-art-board.svg; the preview embeds all 87 assets at integer scale. */
+  '9c5b298f22ed698dd0e46acc2829cbe4ac9429ab322175444710dea3428fb504';
+/** sha256 of src/assets/preview/starter-art-board.svg; the preview embeds all 92 assets at integer scale. */
 export const EXPECTED_PREVIEW_SHA256 =
-  'afd728536fdebb13d6e52738e60bd63985e64f340e65f08ba8905fd6b2a45b46';
+  'dc820bcc67748b5cd4bbadcf8047960b8d3c7f86f65ad1a0058804f9a432ad6c';

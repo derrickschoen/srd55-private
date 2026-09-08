@@ -2,6 +2,7 @@ import { canonicalJson } from '../commands/canonical-json';
 import { combatantConditions, combatantSpace } from '../combat/combat-rules';
 import type { EncounterState } from '../combat/encounter';
 import type { GridCell } from '../combat/grid';
+import { TERRAIN_KINDS, effectiveTerrainAt, terrainKindOfWireBlocking, type TerrainKind } from '../combat/terrain';
 import { persistentAreaContains } from '../combat/persistent-areas';
 import type { CombatantId } from '../combat/values';
 import {
@@ -10,7 +11,7 @@ import {
 } from './engine-query-port';
 import type { DmBoardProjection, PlayerBoardProjection } from './encounter-projections';
 
-export const SEMANTIC_BOARD_FORMAT = 'engine-semantic-board-v1' as const;
+export const SEMANTIC_BOARD_FORMAT = 'engine-semantic-board-v2' as const;
 export const SEMANTIC_BOARD_ENCODING_NOTE =
   'Cells are [column,row]; runs are [start_column,row,end_column_inclusive] with an inclusive endpoint.' as const;
 
@@ -29,6 +30,7 @@ type SemanticBoardSourceShape = Pick<
   DmBoardProjection['board'],
   | 'bounds'
   | 'blockedCells'
+  | 'terrainCells'
   | 'difficultTerrainRegions'
   | 'obscurementRegions'
   | 'environmentLightRegions'
@@ -87,6 +89,7 @@ interface SemanticDoor {
   readonly id: string;
   readonly name: string;
   readonly cells: readonly SemanticEncodedCell[];
+  readonly terrain_kind: TerrainKind;
 }
 
 interface SemanticObject {
@@ -94,6 +97,7 @@ interface SemanticObject {
   readonly name: string;
   readonly kind: string;
   readonly cells: readonly SemanticEncodedCell[];
+  readonly terrain_kind: TerrainKind;
 }
 
 interface SemanticAdjacencyPair {
@@ -124,6 +128,13 @@ export interface SemanticBoardPayload {
   readonly creatures: EngineFactList<SemanticCreature>;
   readonly cells: {
     readonly blocked: EngineCellFactList;
+    readonly terrain: {
+      readonly partition: 'open, half_cover, three_quarters_cover, and wall together contain every board cell exactly once';
+      readonly open: EngineCellFactList;
+      readonly half_cover: EngineCellFactList;
+      readonly three_quarters_cover: EngineCellFactList;
+      readonly wall: EngineCellFactList;
+    };
     readonly difficult_terrain: EngineCellFactList;
     readonly light: {
       readonly default_light: 'bright';
@@ -292,6 +303,7 @@ export function projectEngineSemanticBoard(
     board: {
       bounds: { ...state.bounds },
       blockedCells: state.blockedCells.map((cell) => ({ ...cell })),
+      terrainCells: encounterCells(state).map((cell) => ({ cell, ...effectiveTerrainAt(state, cell) })),
       difficultTerrainRegions: state.environment.difficultTerrainRegions.map((region) => ({
         id: region.id,
         cells: region.cells.map((cell) => ({ ...cell })),
@@ -351,6 +363,7 @@ export function projectEngineSemanticBoard(
         position: { ...object.position },
         cells: object.footprint.map((cell) => ({ ...cell })),
         blocking: { ...object.blocking },
+        terrainKind: terrainKindOfWireBlocking(object.blocking),
         lightClass: object.kind === 'light-source' ? 'light-source' as const : 'none' as const,
       })),
       areas: [...persistentAreas, ...movementAreas],
@@ -373,6 +386,10 @@ export function semanticBoardPayload(
 ): SemanticBoardPayload {
   const audience = options.audience ?? projection.audience;
   const board = projection.board;
+  if (board.terrainCells === undefined) {
+    throw new Error('Semantic board projection has no exhaustive canonical terrain cells.');
+  }
+  const terrainCells = board.terrainCells;
   const orderedCombatants = board.combatants.filter(
     (combatant): combatant is Extract<typeof combatant, { readonly placementStatus: 'placed' }> =>
       combatant.placementStatus === 'placed',
@@ -445,11 +462,13 @@ export function semanticBoardPayload(
     name: object.name,
     kind: object.kind,
     cells: encodedCellItems(object.cells),
+    terrain_kind: object.terrainKind,
   });
   const doorValue = (object: (typeof orderedObjects)[number]): SemanticDoor => ({
     id: String(object.id),
     name: object.name,
     cells: encodedCellItems(object.cells),
+    terrain_kind: object.terrainKind,
   });
   const doors = orderedObjects.filter((object) => object.kind === 'door');
 
@@ -508,6 +527,13 @@ export function semanticBoardPayload(
     creatures: factList(creatures),
     cells: {
       blocked: encodedCells(board.blockedCells ?? []),
+      terrain: {
+        partition: 'open, half_cover, three_quarters_cover, and wall together contain every board cell exactly once',
+        ...Object.fromEntries(TERRAIN_KINDS.map((kind) => [
+          kind,
+          encodedCells(terrainCells.filter((entry) => entry.kind === kind).map((entry) => entry.cell)),
+        ])) as Record<TerrainKind, EngineCellFactList>,
+      },
       difficult_terrain: encodedCells(difficultTerrain),
       light: {
         default_light: 'bright',
