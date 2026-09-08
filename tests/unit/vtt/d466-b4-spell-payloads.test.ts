@@ -191,24 +191,24 @@ describe('D466 B4 spell payloads', () => {
       ?.find((pool) => pool.id === curePool)?.remaining).toBe(1);
   });
 
-  it('command_word_open_set: one offered option carries the exact five-word closed slot', () => {
+  it('unicorn_blessing_without_condition: offers only Cure Wounds to another allied creature', () => {
     expect(spellDefinition('command')).toMatchObject({
       operation: { effect: { payload: { options: ['approach', 'drop', 'flee', 'grovel', 'halt'] } } },
     });
     const unicorn = monsterCombatantProfile(UNICORN, {
       combatantId: 'combatant:option-unicorn', tokenId: 'token:option-unicorn',
     });
-    const humanoidBase = playerProfile('option-humanoid', { initiativeBonus: -100 });
-    const humanoid = { ...humanoidBase, rules: { ...humanoidBase.rules, creatureType: 'Humanoid' } };
+    const ally = monsterProfile('option-unicorn-ally', { initiativeBonus: -100 });
     const state = freshMonsterPlanningState(createEncounter({
-      bounds: { columns: 30, rows: 12 }, combatants: [unicorn, humanoid],
-      tokens: [placedToken(unicorn, 0, 2), placedToken(humanoid, 3, 2)],
+      bounds: { columns: 30, rows: 12 }, combatants: [unicorn, ally],
+      tokens: [placedToken(unicorn, 0, 2), placedToken(ally, 3, 2)],
     }));
     const blessingOptions = engineActorOptions(state, unicorn.id).offerable
       .filter((option) => option.activationChoice?.kind === 'unicorns_blessing_spell');
     expect(blessingOptions.length).toBeGreaterThan(0);
     expect(blessingOptions.every((option) => option.activationChoice?.kind === 'unicorns_blessing_spell' &&
-      option.activationChoice.values.join('|') === 'cure-wounds|lesser-restoration')).toBe(true);
+      option.activationChoice.values.join('|') === 'cure-wounds' &&
+      option.activationChoice.conditionValues.length === 0)).toBe(true);
     expect(blessingOptions.some((option) => option.label.includes('cure-wounds') ||
       option.label.includes('lesser-restoration'))).toBe(false);
   });
@@ -219,7 +219,7 @@ describe('D466 B4 spell payloads', () => {
       const unicorn = monsterCombatantProfile(UNICORN, {
         combatantId: 'combatant:ui-unicorn', tokenId: 'token:ui-unicorn',
       });
-      const ally = playerProfile('ui-ally', { initiativeBonus: -100 });
+      const ally = monsterProfile('ui-ally', { initiativeBonus: -100 });
       const state = freshMonsterPlanningState(createEncounter({
         bounds: { columns: 30, rows: 12 }, combatants: [unicorn, ally],
         tokens: [placedToken(unicorn, 0, 2), placedToken(ally, 2, 2)],
@@ -233,7 +233,7 @@ describe('D466 B4 spell payloads', () => {
       expect(optionCount).toBeGreaterThan(0);
       expect(controls).toHaveLength(optionCount ?? 0);
       expect(controls[0]?.children.map((entry) => entry.value)).toEqual([
-        '', 'cure-wounds', 'lesser-restoration',
+        '', 'cure-wounds',
       ]);
 
       const live = document.createElement('main');

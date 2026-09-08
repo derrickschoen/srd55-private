@@ -67,6 +67,8 @@ export const COMMAND_WORDS = ['approach', 'flee', 'grovel', 'halt', 'drop'] as c
 export type CommandWord = (typeof COMMAND_WORDS)[number];
 export const UNICORNS_BLESSING_SPELLS = ['cure-wounds', 'lesser-restoration'] as const;
 export type UnicornsBlessingSpell = (typeof UNICORNS_BLESSING_SPELLS)[number];
+export const LESSER_RESTORATION_CONDITIONS = ['Blinded', 'Deafened', 'Paralyzed', 'Poisoned'] as const;
+export type LesserRestorationCondition = (typeof LESSER_RESTORATION_CONDITIONS)[number];
 export const DISPEL_EVIL_AND_GOOD_MODES = ['break_enchantment', 'dismissal'] as const;
 export type DispelEvilAndGoodMode = (typeof DISPEL_EVIL_AND_GOOD_MODES)[number];
 export const CALM_EMOTIONS_MODES = ['suppress_charmed_frightened', 'indifferent_toward_monster_side'] as const;
@@ -74,7 +76,11 @@ export type CalmEmotionsMode = (typeof CALM_EMOTIONS_MODES)[number];
 
 export type EngineActivationChoiceSlot =
   | { readonly kind: 'command_word'; readonly values: typeof COMMAND_WORDS }
-  | { readonly kind: 'unicorns_blessing_spell'; readonly values: typeof UNICORNS_BLESSING_SPELLS }
+  | {
+      readonly kind: 'unicorns_blessing_spell';
+      readonly values: readonly ['cure-wounds'] | typeof UNICORNS_BLESSING_SPELLS;
+      readonly conditionValues: readonly LesserRestorationCondition[];
+    }
   | { readonly kind: 'dispel_evil_and_good_mode'; readonly values: typeof DISPEL_EVIL_AND_GOOD_MODES }
   | {
       readonly kind: 'calm_emotions_per_target';
@@ -84,7 +90,11 @@ export type EngineActivationChoiceSlot =
 
 export type EngineActivationChoice =
   | { readonly kind: 'command_word'; readonly value: CommandWord }
-  | { readonly kind: 'unicorns_blessing_spell'; readonly value: UnicornsBlessingSpell }
+  | {
+      readonly kind: 'unicorns_blessing_spell';
+      readonly value: UnicornsBlessingSpell;
+      readonly condition: LesserRestorationCondition | null;
+    }
   | { readonly kind: 'dispel_evil_and_good_mode'; readonly value: DispelEvilAndGoodMode }
   | {
       readonly kind: 'calm_emotions_per_target';

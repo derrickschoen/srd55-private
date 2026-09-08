@@ -1,7 +1,7 @@
 import { canonicalJson } from '../commands/canonical-json';
 import { combatantsAreAllies } from '../combat/allies';
 import type { EncounterState } from '../combat/encounter';
-import { combatantSpace } from '../combat/combat-rules';
+import { combatantConditions, combatantSpace } from '../combat/combat-rules';
 import { minimumSpaceDistanceToCells } from '../combat/creature-space';
 import type {
   MonsterAction,
@@ -53,9 +53,11 @@ import {
   engineActionId,
   engineOptionId,
   engineSpellId,
+  LESSER_RESTORATION_CONDITIONS,
   type EngineActionSlotUse,
   type EngineActivationChoiceSlot,
   type EngineBonusActionUse,
+  type LesserRestorationCondition,
   type EngineMainActionUse,
   type EngineMovementObjective,
   type EngineMultiattackComponentUse,
@@ -67,6 +69,10 @@ const HOLD: EngineMovementObjective = {
   preference: { willingness: 'none', maximumFeet: 0, opportunityRisk: 'avoid' },
   engagement: { stance: 'hold_position' },
 };
+
+function isLesserRestorationCondition(value: string): value is LesserRestorationCondition {
+  return LESSER_RESTORATION_CONDITIONS.some((candidate) => candidate === value);
+}
 
 function target(combatantId: CombatantId) {
   return { kind: 'combatant' as const, combatantId };
@@ -536,8 +542,11 @@ function bonusUses(state: EncounterState, actorId: CombatantId): readonly BonusU
           pool.id === monsterSpellResourcePoolId(action.id, action.spells[0] as (typeof action.spells)[number]))?.remaining ?? action.uses;
         if (remaining < 1 || action.spells.length !== 2 ||
           !action.spells.every((spell) => spell.manifestStatus === 'implemented')) return [];
-        const ally = livingAllies(state, actorId)[0];
+        const ally = livingAllies(state, actorId).find((candidate) => candidate !== actorId);
         if (ally === undefined) return [];
+        const removableConditions = combatantConditions(state, ally)
+          .map((condition) => condition.name)
+          .filter(isLesserRestorationCondition);
         return [{
           label: `${action.name} (${String(remaining)}/${String(action.uses)})`,
           use: {
@@ -545,7 +554,13 @@ function bonusUses(state: EncounterState, actorId: CombatantId): readonly BonusU
             spellId: engineSpellId('cure-wounds'), targets: [target(ally)], area: null,
           },
           resourceCostLabels: [`${String(monsterSpellResourcePoolId(action.id, action.spells[0] as (typeof action.spells)[number]))}:${String(remaining)}/${String(action.uses)}`],
-          activationChoice: { kind: 'unicorns_blessing_spell', values: ['cure-wounds', 'lesser-restoration'] },
+          activationChoice: {
+            kind: 'unicorns_blessing_spell',
+            values: removableConditions.length === 0
+              ? ['cure-wounds']
+              : ['cure-wounds', 'lesser-restoration'],
+            conditionValues: removableConditions,
+          },
         }];
       }
       case 'teleport':

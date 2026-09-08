@@ -113,7 +113,11 @@ const overrideJustification = z.discriminatedUnion('kind', [
 ]).describe('Required for a dominated selection. engine_play requires a current token; missing_metric requires a typed metric id.');
 const activationChoice = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('command_word'), value: z.enum(['approach', 'flee', 'grovel', 'halt', 'drop']) }).strict(),
-  z.object({ kind: z.literal('unicorns_blessing_spell'), value: z.enum(['cure-wounds', 'lesser-restoration']) }).strict(),
+  z.object({
+    kind: z.literal('unicorns_blessing_spell'),
+    value: identifier,
+    condition: z.string().optional(),
+  }).strict(),
   z.object({ kind: z.literal('dispel_evil_and_good_mode'), value: z.enum(['break_enchantment', 'dismissal']) }).strict(),
   z.object({
     kind: z.literal('calm_emotions_per_target'),
@@ -127,9 +131,11 @@ const activationChoiceSlot = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('command_word'), values: z.tuple([
     z.literal('approach'), z.literal('flee'), z.literal('grovel'), z.literal('halt'), z.literal('drop'),
   ]) }).strict(),
-  z.object({ kind: z.literal('unicorns_blessing_spell'), values: z.tuple([
-    z.literal('cure-wounds'), z.literal('lesser-restoration'),
-  ]) }).strict(),
+  z.object({
+    kind: z.literal('unicorns_blessing_spell'),
+    values: z.array(identifier).min(1).max(2),
+    conditions: z.array(identifier).max(4),
+  }).strict(),
   z.object({ kind: z.literal('dispel_evil_and_good_mode'), values: z.tuple([
     z.literal('break_enchantment'), z.literal('dismissal'),
   ]) }).strict(),

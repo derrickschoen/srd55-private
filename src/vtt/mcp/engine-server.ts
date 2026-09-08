@@ -553,9 +553,14 @@ function decodeProposal(value: unknown): EngineTurnProposal {
         const kind = stringField(choice, 'kind');
         switch (kind) {
           case 'command_word':
-          case 'unicorns_blessing_spell':
           case 'dispel_evil_and_good_mode':
             return { kind, value: stringField(choice, 'value') } as NonNullable<EngineTurnProposal['activationChoice']>;
+          case 'unicorns_blessing_spell':
+            return {
+              kind,
+              value: stringField(choice, 'value'),
+              condition: choice['condition'] === undefined ? null : stringField(choice, 'condition'),
+            } as NonNullable<EngineTurnProposal['activationChoice']>;
           case 'calm_emotions_per_target':
             return {
               kind,
@@ -603,7 +608,15 @@ function externalProposal(proposal: EngineTurnProposal): Readonly<Record<string,
         ? null
         : proposal.activationChoice.kind === 'calm_emotions_per_target'
           ? { kind: proposal.activationChoice.kind, selections: proposal.activationChoice.selections.map((entry) => ({ target_id: entry.targetId, mode: entry.mode })) }
-          : { kind: proposal.activationChoice.kind, value: proposal.activationChoice.value },
+          : proposal.activationChoice.kind === 'unicorns_blessing_spell'
+            ? {
+                kind: proposal.activationChoice.kind,
+                value: proposal.activationChoice.value,
+                ...(proposal.activationChoice.condition === null
+                  ? {}
+                  : { condition: proposal.activationChoice.condition }),
+              }
+            : { kind: proposal.activationChoice.kind, value: proposal.activationChoice.value },
     }),
   };
 }
@@ -866,7 +879,9 @@ function tacticalOptions(state: EncounterState, queries: EngineQueryPort, capsul
       ? undefined
       : option.activationChoice.kind === 'calm_emotions_per_target'
         ? { kind: option.activationChoice.kind, target_ids: option.activationChoice.targetIds, values: option.activationChoice.values }
-        : { kind: option.activationChoice.kind, values: option.activationChoice.values };
+        : option.activationChoice.kind === 'unicorns_blessing_spell'
+          ? { kind: option.activationChoice.kind, values: option.activationChoice.values, conditions: option.activationChoice.conditionValues }
+          : { kind: option.activationChoice.kind, values: option.activationChoice.values };
     return {
       option_id: option.optionId, actor_id: option.actorId, revision: option.revision, label: option.label,
       action_slots: option.actionSlots.map((slot) => externalOptionSlot(slot, option.omittedRiders)),
