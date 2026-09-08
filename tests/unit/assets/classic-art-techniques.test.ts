@@ -34,6 +34,9 @@ const TWO_BY_CHROME_OVERLAY_IDS = new Set([
   'art.map.overlay.glyph-door-closed.v1',
   'art.map.overlay.glyph-door-open.v1',
   'art.map.overlay.glyph-blocked.v1',
+  'art.map.overlay.glyph-terrain-half.v1',
+  'art.map.overlay.glyph-terrain-three-quarters.v1',
+  'art.map.overlay.glyph-terrain-wall.v1',
   'art.map.overlay.glyph-fog.v1',
   'art.map.overlay.glyph-obscured.v1',
 ]);
@@ -856,7 +859,7 @@ describe('classic native-density and art-technique invariants', () => {
     expect(isolatedColorIslands(speckled)).toBeGreaterThan(24);
   });
 
-  it('uses exactly three inset opaque ridges for difficult terrain and a broad stone cross-brace for blocked cells', () => {
+  it('uses exactly three inset opaque ridges for difficult terrain and an opaque cell-spanning wall mass', () => {
     const difficult = paintRecipe({
       kind: 'overlay',
       material: 'semantic',
@@ -947,19 +950,11 @@ describe('classic native-density and art-technique invariants', () => {
       material: 'semantic',
       effect: 'blocked',
     });
-    const braceKeys = new Set([
-      colorKey(ramp('stone', 0)),
-      colorKey(ramp('stone', 4)),
-    ]);
-    let bracePixels = 0;
-    for (let y = 16; y <= 112; y += 1) {
-      for (let x = 16; x <= 112; x += 1) {
-        const onBrace = Math.abs(x - y) <= 5 || Math.abs(x + y - 128) <= 5;
-        if (onBrace && braceKeys.has(rgbaKey(blocked.get(x, y))))
-          bracePixels += 1;
-      }
+    expect(opaquePixelCount(blocked)).toBe(TILE_SIZE * TILE_SIZE);
+    for (let y = 0; y < TILE_SIZE; y += 1) {
+      expect(Array.from({ length: TILE_SIZE }, (_unused, x) => blocked.get(x, y).alpha)
+        .every((alpha) => alpha === 255), `wall row ${String(y)}`).toBe(true);
     }
-    expect(bracePixels).toBeGreaterThan(700);
   });
 
   it('gives every archetype a measurably distinct alpha-mask silhouette', () => {

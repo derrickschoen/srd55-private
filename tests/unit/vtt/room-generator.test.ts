@@ -428,6 +428,13 @@ describe('seeded room generator', () => {
     expect(`${canonicalJson(generateRoom(seed))}\n`).toBe(expectedCreatureSpaceFixture(fixtureBytes));
   });
 
+  it('kills M576-E2-LEGACY-DEFAULT-CONSUMES-RNG without serializing a terrain profile', () => {
+    const fixtureBytes = inputs.fixtures.readText('tests/fixtures/arena-basis/seed-3943001.json');
+    const generated = generateRoom(3_943_001);
+    expect(Object.hasOwn(generated.spec, 'terrainProfile')).toBe(false);
+    expect(`${canonicalJson(generated)}\n`).toBe(expectedCreatureSpaceFixture(fixtureBytes));
+  });
+
   it.each(HARD_BASIS_SEEDS)('pins frozen hard arena basis seed %s byte-for-byte', (seed) => {
     // Every hard basis seed has Priest monster-1: Spirit Guardians is 1/day and each Divine Aid spell is 3/day.
     const path = `tests/fixtures/arena-basis-hard/seed-${String(seed)}.json` as

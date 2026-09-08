@@ -7,6 +7,7 @@ import { renderPixelGlyph } from '../assets/pixel-font';
 import {
   CHROME_TILE_PX,
   OBJECT_LABEL_STYLE,
+  TERRAIN_LEGEND_LABELS,
   boardChromeMetrics,
   creatureBadgeLayouts,
   renderBoardChrome,
@@ -25,7 +26,7 @@ import {
 } from '../combat/encounter';
 import { HIDDEN_ROLL_CATEGORIES, type HiddenRollCategory } from '../combat/roll-visibility';
 import { previewAffectedCells } from '../combat/templates';
-import { terrainWallCells } from '../combat/terrain';
+import { terrainProfile, terrainWallCells } from '../combat/terrain';
 import { encounterSessionId, type CombatantId } from '../combat/values';
 import {
   ControllerAssignmentError,
@@ -729,6 +730,8 @@ export function renderBoard(
     const cell = element('div', { className: 'encounter-cell' });
     cell.dataset.renderKey = stableRenderKey('encounter-board', art.id, 'cell', model.key);
     cell.dataset.cell = model.key;
+    cell.dataset.terrainKind = model.terrain.kind;
+    cell.dataset.terrainSources = model.terrain.sourceIds.join(',');
     if (preview.has(model.key)) cell.dataset.preview = 'true';
     for (const layer of model.layers) {
       const image = element('img', { className: `encounter-art-layer encounter-art-${layer.role}` });
@@ -802,6 +805,7 @@ export function renderBoard(
       placed.dataset.blocksMovement = String(object.blocking.movement);
       placed.dataset.blocksLineOfSight = String(object.blocking.lineOfSight);
       placed.dataset.cover = object.blocking.cover;
+      placed.dataset.terrainKind = object.terrainKind;
       placed.dataset.lightClass = object.lightClass;
       if (art.boardGlyphs === 'full' && object.kind !== 'door' && object.lightClass !== 'light-source') {
         const rendered = renderPixelGlyph(
@@ -823,9 +827,10 @@ export function renderBoard(
         model.column === object.position.column &&
         model.row === object.position.row
       ) {
+        const profile = terrainProfile(object.terrainKind);
         placed.append(element('span', {
           className: 'encounter-world-object-label',
-          text: `${object.name} — movement ${object.blocking.movement ? 'blocked' : 'open'}; sight ${object.blocking.lineOfSight ? 'blocked' : 'open'}; cover ${object.blocking.cover}`,
+          text: `${object.name} — ${TERRAIN_LEGEND_LABELS[object.terrainKind]} — movement ${profile.passability}; sight ${profile.blocksSight ? 'blocked' : 'open'}; anchor (${String(object.position.column)},${String(object.position.row)}); footprint ${object.cells.map((cell) => `(${String(cell.column)},${String(cell.row)})`).join(' ')}`,
         }));
         const label = placed.querySelector<HTMLElement>('.encounter-world-object-label');
         if (label !== null) label.dataset.labelStyle = OBJECT_LABEL_STYLE;
@@ -997,8 +1002,9 @@ function renderMechanicalLayer(layer: EncounterBoardMechanicalLayer): HTMLDivEle
   });
   rendered.setAttribute('aria-hidden', 'true');
   switch (layer.kind) {
-    case 'blocked':
+    case 'terrain':
       rendered.dataset.mechanicalKind = layer.kind;
+      rendered.dataset.terrainKind = layer.terrainKind;
       return rendered;
     case 'difficult_terrain':
       rendered.dataset.mechanicalKind = layer.kind;

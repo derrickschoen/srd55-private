@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { SHADE_ASSETS } from '../../../src/assets/art-sets';
 import { combatantId, worldObjectId } from '../../../src/combat/values';
-import { encounterBoardRenderModel } from '../../../src/vtt/encounter-board';
+import { encounterBoardRenderModel, projectEncounterTerrainCells } from '../../../src/vtt/encounter-board';
 import { decodeEncounterArtPackage } from '../../../src/vtt/encounter-package';
 import { encounterArtForBoard } from '../../../src/vtt/encounter-art-selection';
 import { REFERENCE_ENCOUNTER_ART } from '../../../src/vtt/reference-encounter-art';
@@ -13,6 +13,10 @@ const fighter = combatantId('combatant:fighter');
 const ogre = combatantId('combatant:training-brute');
 const projection = {
   bounds: { columns: 10, rows: 7 },
+  terrainCells: projectEncounterTerrainCells(
+    { columns: 10, rows: 7 },
+    { blockedCells: [], worldObjects: [] },
+  ),
   combatants: [
     {
       id: fighter, name: 'Reference Fighter', kind: 'player_character' as const,
@@ -97,6 +101,7 @@ describe('encounter package asset-id consumption', () => {
         position: { column: 4, row: 6 },
         cells: [{ column: 4, row: 6 }],
         blocking: { movement: true, lineOfSight: true, cover: 'total' as const },
+        terrainKind: 'wall' as const,
         lightClass: 'none' as const,
       }],
     }, REFERENCE_ENCOUNTER_ART);
@@ -129,6 +134,10 @@ describe('encounter package asset-id consumption', () => {
 
     const generated = {
       bounds: { columns: 12, rows: 9 },
+      terrainCells: projectEncounterTerrainCells(
+        { columns: 12, rows: 9 },
+        { blockedCells: [], worldObjects: [] },
+      ),
       combatants: [
         { id: combatantId('combatant:pc-1'), name: 'Mirel Ash', kind: 'player_character' as const, placementStatus: 'placed' as const, position: { column: 1, row: 1 }, effectiveSize: 'Medium' as const, placementMode: { kind: 'normal' as const, actual: 'Medium' as const }, footprint: [{ column: 1, row: 1 }] as const },
         { id: combatantId('combatant:m-1'), name: 'Wolf', kind: 'monster' as const, placementStatus: 'placed' as const, position: { column: 5, row: 5 }, effectiveSize: 'Medium' as const, placementMode: { kind: 'normal' as const, actual: 'Medium' as const }, footprint: [{ column: 5, row: 5 }] as const, creatureType: 'Beast' },

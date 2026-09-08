@@ -8,7 +8,7 @@ export const STARTER_ART_OUTPUT_SHA256: {
   readonly fixedInputs: string;
   readonly outputs: Readonly<Record<string, string>>;
 } = Object.freeze({
-  fixedInputs: '8649f9165fc76812a931af6e428bacb004caea4d8b70417ff86f3b7bcdc83a97',
+  fixedInputs: '9c5b298f22ed698dd0e46acc2829cbe4ac9429ab322175444710dea3428fb504',
   outputs: Object.freeze({
     'art.token.pc.fighter.v1': '27c52840d5a02dc3b1f8bd4ea80835cbcc88c0eda79e3a2c337f0431bbfc0120',
     'art.token.pc.cleric.v1': 'a7834461ae60fdb2565b525acbb6e5caf30b78c8d74391cf31cbf4ac60c9d6ce',
@@ -77,7 +77,9 @@ export const STARTER_ART_OUTPUT_SHA256: {
     'art.map.overlay.light-bright.v1': 'c1b584656185cc78ce3e11398fb4be61ccd8e74c6480cf6108e23c3ec24f9948',
     'art.map.overlay.light-dim.v1': 'caa4a45296607dc8735d77d4eb0683ff5ea1cc13b2bd5a09892fb615e4571a57',
     'art.map.overlay.light-darkness.v1': 'd5bcc7c2f3489f6d5469cefb72cf776649595aa1626426ad5e56871d1668fd7c',
-    'art.map.overlay.blocked.v1': '951066b265ecb35a2763ed08ca44db768a26527d0b193dc156c1c7c321ebd6b6',
+    'art.map.overlay.blocked.v1': '7c33b3fcf9324a818185c7bfe4464cc38af78f052c86770f6b6b75364da48956',
+    'art.map.overlay.terrain-half-cover.v1': '3cdbc7fb157c3469179e528e8d2b8ed9c2dc14fe6819a6f0afba6bb4782d14d6',
+    'art.map.overlay.terrain-three-quarters-cover.v1': 'f9305fa80fd47001e15678ef467b3b8733dd62dffdbc7a8f60093daa7be7f83b',
     'art.map.overlay.light-source.v1': 'c7d9abf3e1369eb509dcd29865e7413d487a1f645a106af61cc04ff915f97766',
     'art.map.overlay.light-glyph-bright.v1': '3f938dc9199c4d2dcbb8a4cdab68a6114a692f87dc7f9189bb4a7ecb1dab7e44',
     'art.map.overlay.light-glyph-dim.v1': 'c9dc4ca4547c5b6d9455cf2dda9125bfab29a5ac7c41c57022ef9d0b4a26669d',
@@ -85,6 +87,9 @@ export const STARTER_ART_OUTPUT_SHA256: {
     'art.map.overlay.glyph-door-closed.v1': '9d06a29037ed243e5763b21d95af4b24393ac1a0f6f5a61834706ff56fcbbf19',
     'art.map.overlay.glyph-door-open.v1': '67eab988aa7766b89190664db7b90a34b8c7563857d7bdc666e434b9b6706596',
     'art.map.overlay.glyph-blocked.v1': 'ed4fd0107db1ec30aa7a610f520c90bb006d5e16dbbb22935ccdbdda3b174b9e',
+    'art.map.overlay.glyph-terrain-half.v1': '6b19cdbf885b366e916dba0d0fd957fcf20568335cc07153a861bb4bcc8d1ba3',
+    'art.map.overlay.glyph-terrain-three-quarters.v1': '34dee7be073df742fbf089fc7db7d6972adb403f765657ee8619446efc6343a0',
+    'art.map.overlay.glyph-terrain-wall.v1': '0a78bfef67294b6fe83a8442f8cf691bd9a8186c8f090089ac24050640faa830',
     'art.map.overlay.glyph-fog.v1': '53aa42b20ed165438a0efcd22612a9d653640f70d56eff8c6cfe2772c1c15ee0',
     'art.map.overlay.glyph-obscured.v1': '8409b44e5e7b6bdf1e9e83c6d60c5bcf5120b13a6345dd231de7446056765664',
     'art.terrain.rubble.v1': '9200bcaff30d4f549f458e0741297507920645d4a3b2d72ccd9fd39161c00dd1',

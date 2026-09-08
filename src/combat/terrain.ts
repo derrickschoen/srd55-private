@@ -90,8 +90,43 @@ export interface TerrainState {
   readonly worldObjects: readonly TerrainWorldObject[];
 }
 
+export interface EffectiveTerrain {
+  readonly kind: TerrainKind;
+  /** Stable identities of the sources tied for the effective (strongest) kind. */
+  readonly sourceIds: readonly string[];
+}
+
 function cellKey(cell: GridCell): string {
   return `${String(cell.column)},${String(cell.row)}`;
+}
+
+/**
+ * Canonical cell-local terrain query shared by engine consumers and projections.
+ * Object fiction (`WorldObject.kind`) is deliberately absent from this boundary.
+ */
+export function effectiveTerrainAt(state: TerrainState, cell: GridCell): EffectiveTerrain {
+  const key = cellKey(cell);
+  let kind: TerrainKind = 'open';
+  let rank = coverRank(TERRAIN_PROFILES.open.coverTier);
+  let sourceIds: string[] = [];
+  if (state.blockedCells.some((candidate) => cellKey(candidate) === key)) {
+    kind = 'wall';
+    rank = coverRank(TERRAIN_PROFILES.wall.coverTier);
+    sourceIds = [`blocked:${key}`];
+  }
+  for (const object of state.worldObjects) {
+    if (!object.footprint.some((candidate) => cellKey(candidate) === key)) continue;
+    const candidateKind = terrainKindOfWireBlocking(object.blocking);
+    const candidateRank = coverRank(TERRAIN_PROFILES[candidateKind].coverTier);
+    if (candidateRank < rank) continue;
+    if (candidateRank > rank) {
+      kind = candidateKind;
+      rank = candidateRank;
+      sourceIds = [];
+    }
+    sourceIds.push(`object:${object.id}`);
+  }
+  return Object.freeze({ kind, sourceIds: Object.freeze(sourceIds.sort((left, right) => left.localeCompare(right))) });
 }
 
 export function terrainPassabilityAt(state: TerrainState, cell: GridCell): TerrainPassability {

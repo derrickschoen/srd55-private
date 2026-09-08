@@ -5202,7 +5202,7 @@
       "properties": {
         "format": {
           "type": "string",
-          "const": "engine-semantic-board-v1"
+          "const": "engine-semantic-board-v2"
         },
         "revision": {
           "type": "integer",
@@ -5376,6 +5376,35 @@
             "blocked": {
               "$ref": "#/$defs/__schema92"
             },
+            "terrain": {
+              "type": "object",
+              "properties": {
+                "partition": {
+                  "type": "string",
+                  "const": "open, half_cover, three_quarters_cover, and wall together contain every board cell exactly once"
+                },
+                "open": {
+                  "$ref": "#/$defs/__schema92"
+                },
+                "half_cover": {
+                  "$ref": "#/$defs/__schema92"
+                },
+                "three_quarters_cover": {
+                  "$ref": "#/$defs/__schema92"
+                },
+                "wall": {
+                  "$ref": "#/$defs/__schema92"
+                }
+              },
+              "required": [
+                "partition",
+                "open",
+                "half_cover",
+                "three_quarters_cover",
+                "wall"
+              ],
+              "additionalProperties": false
+            },
             "difficult_terrain": {
               "$ref": "#/$defs/__schema92"
             },
@@ -5442,6 +5471,7 @@
           },
           "required": [
             "blocked",
+            "terrain",
             "difficult_terrain",
             "obscurement",
             "obscured",
@@ -5476,12 +5506,22 @@
                         "items": {
                           "$ref": "#/$defs/__schema93"
                         }
+                      },
+                      "terrain_kind": {
+                        "type": "string",
+                        "enum": [
+                          "open",
+                          "half_cover",
+                          "three_quarters_cover",
+                          "wall"
+                        ]
                       }
                     },
                     "required": [
                       "id",
                       "name",
-                      "cells"
+                      "cells",
+                      "terrain_kind"
                     ],
                     "additionalProperties": false
                   }
@@ -5516,12 +5556,22 @@
                         "items": {
                           "$ref": "#/$defs/__schema93"
                         }
+                      },
+                      "terrain_kind": {
+                        "type": "string",
+                        "enum": [
+                          "open",
+                          "half_cover",
+                          "three_quarters_cover",
+                          "wall"
+                        ]
                       }
                     },
                     "required": [
                       "id",
                       "name",
-                      "cells"
+                      "cells",
+                      "terrain_kind"
                     ],
                     "additionalProperties": false
                   }
@@ -5769,13 +5819,23 @@
           "items": {
             "$ref": "#/$defs/__schema93"
           }
+        },
+        "terrain_kind": {
+          "type": "string",
+          "enum": [
+            "open",
+            "half_cover",
+            "three_quarters_cover",
+            "wall"
+          ]
         }
       },
       "required": [
         "id",
         "name",
         "kind",
-        "cells"
+        "cells",
+        "terrain_kind"
       ],
       "additionalProperties": false
     },

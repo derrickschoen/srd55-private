@@ -3,8 +3,10 @@ import { resolve } from 'node:path';
 import { canonicalJson } from '../src/commands/canonical-json';
 import {
   ROOM_DIFFICULTY_PROFILES,
+  ROOM_TERRAIN_PROFILES,
   generateRoom,
   type RoomDifficultyProfile,
+  type RoomTerrainProfile,
 } from '../src/vtt/room-generator';
 
 export interface BasisGenerationConfig {
@@ -12,6 +14,7 @@ export interface BasisGenerationConfig {
   readonly seed: number;
   readonly rooms: number;
   readonly outPath: string;
+  readonly terrainProfile?: RoomTerrainProfile;
 }
 
 function requiredValue(argv: readonly string[], index: number, option: string): string {
@@ -33,7 +36,7 @@ export function parseBasisGenerationArgs(argv: readonly string[]): BasisGenerati
   const values = new Map<string, string>();
   for (let index = 0; index < argumentsValue.length; index += 1) {
     const option = argumentsValue[index];
-    if (!['--difficulty', '--seed', '--rooms', '--out'].includes(option ?? '')) {
+    if (!['--difficulty', '--seed', '--rooms', '--out', '--terrain-profile'].includes(option ?? '')) {
       throw new TypeError(`Unknown basis-generator option ${option ?? '<missing>'}.`);
     }
     values.set(option ?? '', requiredValue(argumentsValue, index, option ?? '<missing>'));
@@ -45,11 +48,18 @@ export function parseBasisGenerationArgs(argv: readonly string[]): BasisGenerati
   }
   const out = values.get('--out');
   if (out === undefined) throw new TypeError('--out is required.');
+  const terrainProfile = values.get('--terrain-profile');
+  if (terrainProfile !== undefined && !ROOM_TERRAIN_PROFILES.includes(
+    terrainProfile as RoomTerrainProfile,
+  )) {
+    throw new TypeError('--terrain-profile must be los_cover_v1.');
+  }
   return {
     difficulty: difficulty as RoomDifficultyProfile,
     seed: safeInteger(values.get('--seed') ?? '', '--seed', 0),
     rooms: safeInteger(values.get('--rooms') ?? '', '--rooms', 1),
     outPath: resolve(out),
+    ...(terrainProfile === undefined ? {} : { terrainProfile: terrainProfile as RoomTerrainProfile }),
   };
 }
 
@@ -57,7 +67,10 @@ export async function generateArenaBasis(config: BasisGenerationConfig): Promise
   await mkdir(config.outPath, { recursive: true });
   await Promise.all(Array.from({ length: config.rooms }, async (_unused, index) => {
     const seed = config.seed + index;
-    const room = generateRoom(seed, { difficulty: config.difficulty });
+    const room = generateRoom(seed, {
+      difficulty: config.difficulty,
+      ...(config.terrainProfile === undefined ? {} : { terrainProfile: config.terrainProfile }),
+    });
     await writeFile(
       resolve(config.outPath, `seed-${String(seed)}.json`),
       `${canonicalJson(room)}\n`,

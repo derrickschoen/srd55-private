@@ -4,6 +4,7 @@ import { createEncounter } from '../../../src/combat/encounter';
 import { armorClass, worldObjectId } from '../../../src/combat/values';
 import { projectDmView, projectPlayerView } from '../../../src/combat/visibility';
 import type { WorldObject } from '../../../src/combat/world-objects';
+import { terrainBlocking, terrainWallCells, type TerrainKind } from '../../../src/combat/terrain';
 import { projectDmBoard, projectPlayerBoard } from '../../../src/vtt/encounter-projections';
 import {
   SEMANTIC_BOARD_ENCODING_NOTE,
@@ -31,7 +32,7 @@ function worldObject(
   kind: WorldObject['kind'],
   column: number,
   row: number,
-  blocksMovement: boolean,
+  terrainKind: TerrainKind,
 ): WorldObject {
   const cell = { column, row };
   return {
@@ -43,11 +44,7 @@ function worldObject(
     durability: { kind: 'indestructible' },
     armorClass: armorClass(15),
     damageResponses: [],
-    blocking: {
-      movement: blocksMovement,
-      lineOfSight: blocksMovement,
-      cover: blocksMovement ? 'total' : 'none',
-    },
+    blocking: terrainBlocking(terrainKind),
     createdRevision: 0,
   };
 }
@@ -62,9 +59,11 @@ function fixtureProjection() {
     blockedCells: [{ column: 4, row: 3 }],
     foggedCells: [{ column: 3, row: 3 }],
     worldObjects: [
-      worldObject('open-door', 'door', 0, 2, false),
-      worldObject('closed-door', 'door', 4, 2, true),
-      worldObject('torch', 'light-source', 0, 3, false),
+      worldObject('open-door', 'door', 0, 2, 'open'),
+      worldObject('closed-door', 'door', 4, 2, 'wall'),
+      worldObject('torch', 'light-source', 0, 3, 'open'),
+      worldObject('low-barricade', 'cover', 1, 3, 'half_cover'),
+      worldObject('arrow-slit', 'cover', 2, 3, 'three_quarters_cover'),
     ],
     environment: {
       difficultTerrainRegions: [{ id: 'mud', cells: [{ column: 0, row: 1 }] }],
@@ -113,7 +112,7 @@ describe('semantic board payload', () => {
     expect(semanticBoardPayload(engineProjection)).toEqual(semanticBoardPayload(fixture.projection));
   });
 
-  it('lists exact engine terrain facts and keeps absent arrays explicit', () => {
+  it('M576-E3-SEMANTIC-TERRAIN-NOT-A-PARTITION exhaustively partitions cells and matches effective walls', () => {
     const payload = semanticBoardPayload(fixtureProjection().projection);
 
     expect(payload.cells.blocked).toEqual({
@@ -121,6 +120,25 @@ describe('semantic board payload', () => {
       encoding: '[column,row]',
       items: [[4, 3]],
     });
+    expect(payload.cells.terrain.partition).toBe(
+      'open, half_cover, three_quarters_cover, and wall together contain every board cell exactly once',
+    );
+    expect(payload.cells.terrain.half_cover.items).toEqual([[1, 3]]);
+    expect(payload.cells.terrain.three_quarters_cover.items).toEqual([[2, 3]]);
+    expect(payload.cells.terrain.wall.items).toEqual([[4, 2], [4, 3]]);
+    const terrainMembership = Object.values(payload.cells.terrain)
+      .filter((entry): entry is typeof payload.cells.terrain.open => typeof entry === 'object')
+      .flatMap((entry) => entry.items)
+      .flatMap((item) => item.length === 2
+        ? [`${String(item[0])},${String(item[1])}`]
+        : Array.from({ length: item[2] - item[0] + 1 }, (_unused, offset) => `${String(item[0] + offset)},${String(item[1])}`));
+    expect(terrainMembership).toHaveLength(20);
+    expect(new Set(terrainMembership).size).toBe(20);
+    expect(payload.cells.terrain.wall.items).toEqual(
+      terrainWallCells(fixtureProjection().state).map((cell) => [cell.column, cell.row]).sort(
+        (left, right) => (left[1] ?? 0) - (right[1] ?? 0) || (left[0] ?? 0) - (right[0] ?? 0),
+      ),
+    );
     expect(payload.cells.light.dim).toEqual({
       provenance: 'engine_fact',
       encoding: '[column,row]',
@@ -141,19 +159,35 @@ describe('semantic board payload', () => {
       id: 'world-object:open-door',
       name: 'open-door',
       cells: [[0, 2]],
+      terrain_kind: 'open',
     }]);
     expect(payload.doors.closed.items).toEqual([{
       id: 'world-object:closed-door',
       name: 'closed-door',
       cells: [[4, 2]],
+      terrain_kind: 'wall',
     }]);
-    expect(payload.objects.items).toEqual([{
-      id: 'world-object:torch',
-      name: 'torch',
-      kind: 'light-source',
-      cells: [[0, 3]],
-    }]);
-    expect(payload.light_sources.items).toEqual(payload.objects.items);
+    expect(payload.objects.items).toEqual([
+      { id: 'world-object:torch', name: 'torch', kind: 'light-source', cells: [[0, 3]], terrain_kind: 'open' },
+      { id: 'world-object:low-barricade', name: 'low-barricade', kind: 'cover', cells: [[1, 3]], terrain_kind: 'half_cover' },
+      { id: 'world-object:arrow-slit', name: 'arrow-slit', kind: 'cover', cells: [[2, 3]], terrain_kind: 'three_quarters_cover' },
+    ]);
+    expect(payload.light_sources.items).toEqual([payload.objects.items[0]]);
+    const forbiddenPairAnswerKeys = new Set([
+      'line_of_sight', 'cover_between', 'pair_answer', 'hypothetical_origin', 'ranking', 'score', 'recommendation', 'suggested_cell',
+    ]);
+    const visit = (value: unknown): void => {
+      if (Array.isArray(value)) {
+        for (const item of value) visit(item);
+        return;
+      }
+      if (typeof value !== 'object' || value === null) return;
+      for (const [key, child] of Object.entries(value)) {
+        expect(forbiddenPairAnswerKeys.has(key), `forbidden semantic-board field ${key}`).toBe(false);
+        visit(child);
+      }
+    };
+    visit(payload);
 
     const emptyHero = playerProfile('empty-facts-hero');
     const empty = semanticBoardPayload(projectDmBoard({
@@ -168,6 +202,10 @@ describe('semantic board payload', () => {
     }));
     expect(empty.creatures.items).toHaveLength(1);
     expect(empty.cells.blocked.items).toEqual([]);
+    expect(empty.cells.terrain.open.items).toEqual([[0, 0], [1, 0], [0, 1], [1, 1]]);
+    expect(empty.cells.terrain.half_cover.items).toEqual([]);
+    expect(empty.cells.terrain.three_quarters_cover.items).toEqual([]);
+    expect(empty.cells.terrain.wall.items).toEqual([]);
     expect(empty.cells.difficult_terrain.items).toEqual([]);
     expect(empty.cells.obscurement.light.items).toEqual([]);
     expect(empty.cells.obscurement.heavy.items).toEqual([]);
@@ -189,6 +227,17 @@ describe('semantic board payload', () => {
     expect(empty.light_sources.items).toEqual([]);
     expect(empty.adjacency_pairs.items).toEqual([]);
     expect(empty.reach_range_summaries.items).toHaveLength(1);
+  });
+
+  it('M576-E3-SEMANTIC-BOARD-EMITS-PAIR-ANSWER excludes line, cover-pair, hypothetical, rank, and advice fields', () => {
+    const payload = semanticBoardPayload(fixtureProjection().projection);
+    const serialized = JSON.stringify(payload);
+    for (const forbidden of [
+      'line_of_sight', 'cover_between', 'pair_answer', 'hypothetical_origin',
+      'ranking', 'suggested_cell', 'recommendation',
+    ]) expect(serialized, forbidden).not.toContain(`"${forbidden}"`);
+    expect(payload.objects.items.every((object) =>
+      ['open', 'half_cover', 'three_quarters_cover', 'wall'].includes(object.terrain_kind))).toBe(true);
   });
 
   it('uses documented inclusive runs only when a fact class exceeds 200 cells', () => {

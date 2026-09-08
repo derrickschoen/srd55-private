@@ -45,11 +45,18 @@ const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 // These are PWA manifest raster icons: binary by nature and never grep targets.
 // Their SVG source of truth, public/icons/app-icon.svg, remains text and scanned.
 //
-// D516/D525 also generate 87 classic-board PNGs under the one-purpose
+// D516/D525 also generated 87 classic-board PNGs under the one-purpose
 // public/assets/art directory. Their TypeScript generator inputs, manifest and
-// content hashes remain text and scanned. The exact count and PNG signature are
-// pinned below, so another binary cannot silently acquire this exemption and a
-// newly added raster still requires this rationale to change.
+// content hashes remain text and scanned. D576 added exactly five more generated
+// classic-board PNGs: half-cover and three-quarters-cover treatments, plus the
+// half-cover, three-quarters-cover and wall tier glyphs. The wall treatment is
+// the pre-existing map-overlay-blocked-v1.png, redrawn rather than added, so the
+// three treatments plus three glyphs increase the inventory by five. All five
+// additions are procedural map overlays in that same manifest and directory;
+// none widens the exemption beyond classic-board art. The exact inventory,
+// additions and PNG signatures are pinned below, so another binary cannot
+// silently acquire this exemption and a newly added raster still requires this
+// rationale to change.
 //
 // The two zips are the OGL-quarantine archives: the 3.0 and 3.5 SRD
 // distributions committed as published (e0b8b373), kept binary so their
@@ -67,6 +74,13 @@ const BINARY_EXEMPT: readonly string[] = [
 
 const CLASSIC_ART_PNG = /^public\/assets\/art\/[^/]+\.png$/u;
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const D576_CLASSIC_ART_PNG_ADDITIONS = [
+  'public/assets/art/map-overlay-terrain-half-cover-v1.png',
+  'public/assets/art/map-overlay-terrain-three-quarters-cover-v1.png',
+  'public/assets/art/map-overlay-glyph-terrain-half-v1.png',
+  'public/assets/art/map-overlay-glyph-terrain-three-quarters-v1.png',
+  'public/assets/art/map-overlay-glyph-terrain-wall-v1.png',
+] as const;
 
 function trackedFiles(): string[] {
   return execFileSync('git', ['ls-files', '-z'], {
@@ -108,9 +122,10 @@ describe('tracked source is greppable', () => {
     }
   });
 
-  it('keeps the reviewed D516/D525 classic-art exemption limited to the 87 generated PNGs', () => {
+  it('keeps the reviewed D516/D525/D576 classic-art exemption limited to the 92 generated PNGs', () => {
     const rasterArt = files.filter((file) => CLASSIC_ART_PNG.test(file));
-    expect(rasterArt).toHaveLength(87);
+    expect(rasterArt).toHaveLength(92);
+    for (const addition of D576_CLASSIC_ART_PNG_ADDITIONS) expect(rasterArt).toContain(addition);
     for (const file of rasterArt) {
       const contents = readFileSync(join(repoRoot, file));
       expect(contents.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE), file).toBe(true);

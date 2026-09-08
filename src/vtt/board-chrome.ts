@@ -65,6 +65,7 @@ import {
 } from '../assets/starter-art-resolver';
 import type { LifeState } from '../combat/encounter';
 import type { CombatantId } from '../combat/values';
+import { TERRAIN_KINDS, terrainProfile, type TerrainKind } from '../combat/terrain';
 import {
   boardGlyphPresence,
   roomDefaultLightOf,
@@ -116,7 +117,7 @@ export const HP_BAR_TOP_PX = hpBarTopPx();
 export function cellGlyphRingBottomPx(
   tilePx: BoardChromeTilePx = CHROME_TILE_PX,
 ): number {
-  return cellGlyphOrigin('blocked', tilePx).y + cellGlyphSizePx(tilePx);
+  return cellGlyphOrigin('terrain-wall', tilePx).y + cellGlyphSizePx(tilePx);
 }
 export const CELL_GLYPH_RING_BOTTOM_PX = cellGlyphRingBottomPx();
 /** The life glyph's inset from the cell's top-right, and where it drops to under a door mark (D525). */
@@ -467,13 +468,12 @@ const FOG_TINT_ROW: LegendEntry = {
   swatch: neutral(1),
   style: 'tint',
 };
-const BLOCKED_ROW: LegendEntry = {
-  key: 'blocked',
-  label: 'Blocked — cross-braced stone pile',
-  style: 'art',
-  floor: STONE_FLOOR_SET_ID,
-  overlay: OVERLAY_ASSETS.blocked,
-};
+export const TERRAIN_LEGEND_LABELS: Readonly<Record<TerrainKind, string>> = Object.freeze({
+  open: 'OPEN — NO COVER — LINE OF SIGHT',
+  half_cover: '1/2 COVER — +2 AC/DEX — CROSSABLE — DIFFICULT',
+  three_quarters_cover: '3/4 COVER — +5 AC/DEX — BLOCKS MOVEMENT',
+  wall: 'WALL — TOTAL COVER — NO LINE OF SIGHT',
+});
 const OBJECT_ROW: LegendEntry = {
   key: 'object',
   label: 'Object',
@@ -563,16 +563,6 @@ export function lightLegendEntries(
 }
 
 function cellGlyphRow(kind: CellGlyphKind): LegendEntry {
-  if (kind === 'blocked') {
-    return {
-      key: kind,
-      label: 'Blocked — cross-braced stone pile and corner X',
-      style: 'mark',
-      glyph: CELL_GLYPHS[kind],
-      floor: STONE_FLOOR_SET_ID,
-      overlay: OVERLAY_ASSETS.blocked,
-    };
-  }
   if (kind === 'obscured') {
     return {
       key: kind,
@@ -591,6 +581,49 @@ function cellGlyphRow(kind: CellGlyphKind): LegendEntry {
   };
 }
 
+function terrainOverlay(kind: TerrainKind): AssetId | null {
+  switch (kind) {
+    case 'open': return null;
+    case 'half_cover': return OVERLAY_ASSETS['terrain-half-cover'];
+    case 'three_quarters_cover': return OVERLAY_ASSETS['terrain-three-quarters-cover'];
+    case 'wall': return OVERLAY_ASSETS.blocked;
+  }
+}
+
+function terrainGlyph(kind: Exclude<TerrainKind, 'open'>): (typeof CELL_GLYPHS)[
+  'terrain-half' | 'terrain-three-quarters' | 'terrain-wall'
+] {
+  switch (kind) {
+    case 'half_cover': return CELL_GLYPHS['terrain-half'];
+    case 'three_quarters_cover': return CELL_GLYPHS['terrain-three-quarters'];
+    case 'wall': return CELL_GLYPHS['terrain-wall'];
+  }
+}
+
+function terrainLegendEntries(mode: BoardGlyphMode): readonly LegendEntry[] {
+  return TERRAIN_KINDS.map((kind): LegendEntry => {
+    const overlay = terrainOverlay(kind);
+    if (mode === 'full' && kind !== 'open') {
+      if (overlay === null) throw new Error(`Terrain ${kind} has no obstruction overlay.`);
+      return {
+        key: `terrain-${kind}`,
+        label: TERRAIN_LEGEND_LABELS[kind],
+        style: 'mark',
+        glyph: terrainGlyph(kind),
+        floor: STONE_FLOOR_SET_ID,
+        overlay,
+      };
+    }
+    return {
+      key: `terrain-${kind}`,
+      label: TERRAIN_LEGEND_LABELS[kind],
+      style: 'art',
+      floor: STONE_FLOOR_SET_ID,
+      overlay,
+    };
+  });
+}
+
 /**
  * Every legend row for a board. 'none' and 'light' keep the D516 rows and swap
  * the light rows; 'full' replaces the hidden, obscured, fog and blocked rows
@@ -602,6 +635,9 @@ export function legendEntriesFor(
   roomDefault: LightLevel,
   presence: BoardGlyphPresence,
 ): readonly LegendEntry[] {
+  const terrainRows = presence.terrainKinds.some((kind) => kind !== 'open')
+    ? terrainLegendEntries(mode)
+    : [];
   switch (mode) {
     case 'none':
     case 'light':
@@ -613,7 +649,7 @@ export function legendEntriesFor(
         OBSCURED_TINT_ROW,
         ...lightLegendEntries(mode, roomDefault),
         FOG_TINT_ROW,
-        BLOCKED_ROW,
+        ...terrainRows,
         OBJECT_ROW,
         LIGHT_SOURCE_ROW,
         ...HP_ROWS,
@@ -638,7 +674,7 @@ export function legendEntriesFor(
         ...shown('obscured'),
         ...lightLegendEntries(mode, roomDefault),
         ...shown('fog'),
-        ...shown('blocked'),
+        ...terrainRows,
         ...shown('door-closed'),
         ...shown('door-open'),
         OBJECT_ROW,
@@ -1132,6 +1168,7 @@ export type BoardRailEntry =
       readonly labelStyle: typeof OBJECT_LABEL_STYLE;
       readonly label: string;
       readonly glyph: typeof OBJECT_GLYPH;
+      readonly terrainKind: TerrainKind;
     }
   | {
       readonly kind: 'door';
@@ -1140,6 +1177,7 @@ export type BoardRailEntry =
       readonly labelStyle: typeof DOOR_LABEL_STYLE;
       readonly label: string;
       readonly glyph: (typeof CELL_GLYPHS)['door-open' | 'door-closed'];
+      readonly terrainKind: TerrainKind;
     };
 
 /** A closed discriminator chooses both the rail wording and its visual frame. */
@@ -1147,24 +1185,30 @@ export function boardRailEntries(
   objects: ProjectedWorldObjects,
 ): readonly BoardRailEntry[] {
   return objects.map((object): BoardRailEntry => {
-    const coordinate = `(${String(object.position.column)},${String(object.position.row)})`;
+    const terrainKind = object.terrainKind;
+    const profile = terrainProfile(terrainKind);
+    const anchor = `ANCHOR (${String(object.position.column)},${String(object.position.row)})`;
+    const footprint = `FOOTPRINT ${object.cells.map((cell) => `(${String(cell.column)},${String(cell.row)})`).join(' ')}`;
+    const mechanics = `${TERRAIN_LEGEND_LABELS[terrainKind]} — MOVEMENT ${profile.passability.toLocaleUpperCase('en-US')} — SIGHT ${profile.blocksSight ? 'BLOCKED' : 'OPEN'}`;
     if (object.kind !== 'door') {
       return {
         kind: 'object',
         object,
         labelStyle: OBJECT_LABEL_STYLE,
-        label: `${object.name} ${coordinate}`,
-        glyph: OBJECT_GLYPH,
+        label: `${object.name} — ${mechanics} — ${anchor} — ${footprint}`,
+        glyph: terrainKind === 'open' ? OBJECT_GLYPH : terrainGlyph(terrainKind),
+        terrainKind,
       };
     }
-    const state = object.blocking.movement ? 'closed' : 'open';
+    const state = terrainKind === 'wall' ? 'closed' : 'open';
     return {
       kind: 'door',
       state,
       object,
       labelStyle: DOOR_LABEL_STYLE,
-      label: `DOOR ${state.toLocaleUpperCase('en-US')} ${coordinate}`,
+      label: `${object.name} — DOOR ${state.toLocaleUpperCase('en-US')} — ${mechanics} — ${anchor} — ${footprint}`,
       glyph: CELL_GLYPHS[`door-${state}`],
+      terrainKind,
     };
   });
 }
@@ -1182,6 +1226,10 @@ function objectTagRail(
     tag.dataset.labelStyle = entry.labelStyle;
     tag.dataset.anchorColumn = String(entry.object.position.column);
     tag.dataset.anchorRow = String(entry.object.position.row);
+    tag.dataset.terrainKind = entry.terrainKind;
+    tag.dataset.movement = terrainProfile(entry.terrainKind).passability;
+    tag.dataset.sight = terrainProfile(entry.terrainKind).blocksSight ? 'blocked' : 'open';
+    tag.dataset.footprint = entry.object.cells.map((cell) => `${String(cell.column)},${String(cell.row)}`).join(';');
     if (entry.kind === 'door') tag.dataset.doorState = entry.state;
     const sigil = renderPixelGlyph(
       entry.kind,

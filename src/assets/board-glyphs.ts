@@ -15,6 +15,7 @@
  */
 import { neutral, ramp } from './palette';
 import { squareMark, type PixelMark } from './pixel-mark';
+import type { TerrainKind } from '../combat/terrain';
 
 export const BOARD_GLYPH_MODES = ['none', 'light', 'full'] as const;
 export type BoardGlyphMode = (typeof BOARD_GLYPH_MODES)[number];
@@ -71,11 +72,14 @@ export function cellGlyphSizePx(tileSize: number): number {
   return CELL_GLYPH_SIZE * cellGlyphScale(tileSize);
 }
 
-export const CELL_GLYPH_KINDS = ['door-closed', 'door-open', 'blocked', 'fog', 'obscured'] as const;
+export const CELL_GLYPH_KINDS = [
+  'door-closed', 'door-open', 'terrain-half', 'terrain-three-quarters', 'terrain-wall', 'fog', 'obscured',
+] as const;
 export type CellGlyphKind = (typeof CELL_GLYPH_KINDS)[number];
+export type CellGlyphDefinitionKind = CellGlyphKind | 'blocked';
 
 /** Slot 0 is the corner itself; slot 1 climbs the edge so the centred badge lane stays clear. */
-export type GlyphSlot = 0 | 1;
+export type GlyphSlot = 0 | 1 | 2;
 
 export interface CellGlyph extends PixelMark {
   readonly family: CornerGlyphFamily;
@@ -86,7 +90,7 @@ export interface CellGlyph extends PixelMark {
 
 const M = squareMark(CELL_GLYPH_SIZE, 'Cell glyphs');
 
-export const CELL_GLYPHS: Readonly<Record<CellGlyphKind, CellGlyph>> = Object.freeze({
+export const CELL_GLYPHS: Readonly<Record<CellGlyphDefinitionKind, CellGlyph>> = Object.freeze({
   'door-closed': {
     family: 'door',
     slot: 0,
@@ -125,6 +129,7 @@ export const CELL_GLYPHS: Readonly<Record<CellGlyphKind, CellGlyph>> = Object.fr
     ink: ramp('wood', 5),
     outline: neutral(0),
   },
+  /** Historical D525 mark retained for immutable probe primers; D576 boards do not emit it. */
   blocked: {
     family: 'blocked',
     slot: 0,
@@ -139,6 +144,60 @@ export const CELL_GLYPHS: Readonly<Record<CellGlyphKind, CellGlyph>> = Object.fr
       '#.#...#.#',
       '##.....##',
       '#########',
+    ),
+    ink: ramp('cloth-warm', 6),
+    outline: neutral(0),
+  },
+  'terrain-half': {
+    family: 'blocked',
+    slot: 1,
+    label: '1/2 COVER',
+    rows: M(
+      '.##....#.',
+      '..#...#..',
+      '..#..#...',
+      '..#.#....',
+      '.#####...',
+      '...#.....',
+      '..#......',
+      '.#.......',
+      '.#####...',
+    ),
+    ink: ramp('cloth-warm', 6),
+    outline: neutral(0),
+  },
+  'terrain-three-quarters': {
+    family: 'blocked',
+    slot: 2,
+    label: '3/4 COVER',
+    rows: M(
+      '.###...#.',
+      '...#..#..',
+      '.###..#..',
+      '...#.#...',
+      '.###.#...',
+      '....#....',
+      '...#..##.',
+      '..#..#.#.',
+      '.#....##.',
+    ),
+    ink: ramp('cloth-warm', 6),
+    outline: neutral(0),
+  },
+  'terrain-wall': {
+    family: 'blocked',
+    slot: 0,
+    label: 'WALL',
+    rows: M(
+      '#.......#',
+      '#.......#',
+      '#.......#',
+      '#.#...#.#',
+      '#.#...#.#',
+      '#.#.#.#.#',
+      '#.#.#.#.#',
+      '.##...##.',
+      '.#.....#.',
     ),
     ink: ramp('cloth-warm', 6),
     outline: neutral(0),
@@ -183,7 +242,7 @@ export const CELL_GLYPHS: Readonly<Record<CellGlyphKind, CellGlyph>> = Object.fr
 });
 
 /** The tile pixel where a cell glyph's top-left lands, from its family's corner and its slot. */
-export function cellGlyphOrigin(kind: CellGlyphKind, tileSize: number): { readonly x: number; readonly y: number } {
+export function cellGlyphOrigin(kind: CellGlyphDefinitionKind, tileSize: number): { readonly x: number; readonly y: number } {
   const glyph = CELL_GLYPHS[kind];
   const corner = GLYPH_FAMILY_CORNER[glyph.family];
   const scale = cellGlyphScale(tileSize);
@@ -195,7 +254,7 @@ export function cellGlyphOrigin(kind: CellGlyphKind, tileSize: number): { readon
   switch (corner) {
     case 'top-left': return { x: near + glyph.slot * pitch, y: near };
     case 'top-right': return { x: far - glyph.slot * pitch, y: near };
-    case 'bottom-left': return { x: near + glyph.slot * pitch, y: low };
+    case 'bottom-left': return { x: near, y: low - glyph.slot * pitch };
     case 'bottom-right': return { x: far, y: low - glyph.slot * pitch };
   }
 }
@@ -246,7 +305,7 @@ export const HIDDEN_GLYPH: PixelMark = Object.freeze({
  */
 export interface CellGlyphFacts {
   readonly door: 'closed' | 'open' | null;
-  readonly blocked: boolean;
+  readonly terrain: TerrainKind;
   readonly fogged: boolean;
   readonly obscured: boolean;
 }
@@ -260,7 +319,13 @@ export function cellGlyphsFor(mode: BoardGlyphMode, facts: CellGlyphFacts): read
     case 'full':
       return [
         ...(facts.door === null ? [] : [facts.door === 'open' ? 'door-open' as const : 'door-closed' as const]),
-        ...(facts.blocked ? ['blocked' as const] : []),
+        ...(facts.terrain === 'open' ? [] : [
+          facts.terrain === 'half_cover'
+            ? 'terrain-half' as const
+            : facts.terrain === 'three_quarters_cover'
+              ? 'terrain-three-quarters' as const
+              : 'terrain-wall' as const,
+        ]),
         ...(facts.fogged ? ['fog' as const] : []),
         ...(facts.obscured ? ['obscured' as const] : []),
       ];
