@@ -99,7 +99,8 @@ class BlindArenaSnapshotService implements ConversationBoardSnapshotService {
         domEvidence: {
           optionSurfaceAbsent: true, nextEventPreviewAbsent: true,
           coordinateLabels: 1, creatureBadges: 1, rosterEntries: 1, hpBars: 1,
-          legendEntries: 1, blockedCells: 0, difficultCells: 0, obscuredCells: 0,
+          legendEntries: 1, wallCells: 0, halfCoverCells: 0, threeQuartersCoverCells: 0,
+          difficultCells: 0, obscuredCells: 0,
           illuminatedCells: 0, fogMarks: 0, doors: 0, objects: 0,
           hiddenMarks: 0, multiCellFootprints: 0,
         },

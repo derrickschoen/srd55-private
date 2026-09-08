@@ -126,7 +126,9 @@ export interface BoardSnapshotDomEvidence {
   readonly rosterEntries: number;
   readonly hpBars: number;
   readonly legendEntries: number;
-  readonly blockedCells: number;
+  readonly wallCells: number;
+  readonly halfCoverCells: number;
+  readonly threeQuartersCoverCells: number;
   readonly difficultCells: number;
   readonly obscuredCells: number;
   readonly illuminatedCells: number;
@@ -136,6 +138,16 @@ export interface BoardSnapshotDomEvidence {
   readonly hiddenMarks: number;
   readonly multiCellFootprints: number;
 }
+
+export const BOARD_SNAPSHOT_TERRAIN_SELECTORS = Object.freeze({
+  wallCells: '.encounter-mechanical-terrain[data-terrain-kind="wall"]',
+  halfCoverCells: '.encounter-mechanical-terrain[data-terrain-kind="half_cover"]',
+  threeQuartersCoverCells:
+    '.encounter-mechanical-terrain[data-terrain-kind="three_quarters_cover"]',
+} as const satisfies Readonly<Record<
+  'wallCells' | 'halfCoverCells' | 'threeQuartersCoverCells',
+  string
+>>);
 
 export interface BoardHtmlArtifact {
   readonly relativePath: `board-html/${string}/board.html`;
@@ -362,6 +374,21 @@ function pngDimensions(png: Buffer): { readonly width: number; readonly height: 
   return { width, height };
 }
 
+export function isBoardSnapshotDomEvidence(value: unknown): value is BoardSnapshotDomEvidence {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const evidence = value as Readonly<Record<string, unknown>>;
+  const domCountKeys = [
+    'coordinateLabels', 'creatureBadges', 'rosterEntries', 'hpBars', 'legendEntries',
+    'wallCells', 'halfCoverCells', 'threeQuartersCoverCells',
+    'difficultCells', 'obscuredCells', 'illuminatedCells', 'fogMarks',
+    'doors', 'objects', 'hiddenMarks', 'multiCellFootprints',
+  ] as const;
+  return Object.keys(evidence).length === domCountKeys.length + 2 &&
+    evidence['optionSurfaceAbsent'] === true && evidence['nextEventPreviewAbsent'] === true &&
+    domCountKeys.every((key) =>
+      typeof evidence[key] === 'number' && Number.isSafeInteger(evidence[key]) && evidence[key] >= 0);
+}
+
 function validateArtifactShape(artifact: BoardImageArtifact): void {
   if (artifact.version !== 'arena-board-image-v1' || artifact.audience !== 'dm' ||
     artifact.mimeType !== 'image/png') {
@@ -393,11 +420,6 @@ function validateArtifactShape(artifact: BoardImageArtifact): void {
     throw new TypeError('Board HTML artifact must be content-addressed with a positive byte count.');
   }
   const blind = artifact.blindState;
-  const domCountKeys = [
-    'coordinateLabels', 'creatureBadges', 'rosterEntries', 'hpBars', 'legendEntries',
-    'blockedCells', 'difficultCells', 'obscuredCells', 'illuminatedCells', 'fogMarks',
-    'doors', 'objects', 'hiddenMarks', 'multiCellFootprints',
-  ] as const;
   if (blind !== undefined && (
     blind.informationMode !== 'blind_state' ||
     !BOARD_SNAPSHOT_IMAGE_ROLES.includes(blind.role) ||
@@ -405,11 +427,7 @@ function validateArtifactShape(artifact: BoardImageArtifact): void {
     blind.primerVersion.length === 0 ||
     (blind.glyphMode !== 'none' && blind.glyphMode !== 'light' && blind.glyphMode !== 'full') ||
     (blind.captureTilePx !== 64 && blind.captureTilePx !== 128) ||
-    Object.keys(blind.domEvidence).length !== domCountKeys.length + 2 ||
-    blind.domEvidence.optionSurfaceAbsent !== true ||
-    blind.domEvidence.nextEventPreviewAbsent !== true ||
-    domCountKeys.some((key) =>
-      !Number.isSafeInteger(blind.domEvidence[key]) || blind.domEvidence[key] < 0)
+    !isBoardSnapshotDomEvidence(blind.domEvidence)
   )) {
     throw new TypeError('Blind state board metadata is malformed.');
   }
@@ -997,7 +1015,7 @@ export class BoardSnapshotService implements AsyncDisposable {
   async #inspectBlindStateDom(
     board: ReturnType<Page['locator']>,
   ): Promise<BoardSnapshotDomEvidence> {
-    const inspection = await board.evaluate((element) => {
+    const inspection = await board.evaluate((element, terrainSelectors) => {
       const root = element as HTMLElement;
       const forbiddenClass = Array.from(root.querySelectorAll<HTMLElement>('*')).find((node) =>
         Array.from(node.classList).some((name) => name.startsWith('encounter-option-')));
@@ -1021,7 +1039,9 @@ export class BoardSnapshotService implements AsyncDisposable {
           rosterEntries: count('.encounter-roster-entry'),
           hpBars: count('.encounter-hp-bar'),
           legendEntries: count('.encounter-legend-item'),
-          blockedCells: count('.encounter-mechanical-blocked'),
+          wallCells: count(terrainSelectors.wallCells),
+          halfCoverCells: count(terrainSelectors.halfCoverCells),
+          threeQuartersCoverCells: count(terrainSelectors.threeQuartersCoverCells),
           difficultCells: count('.encounter-mechanical-difficult_terrain'),
           obscuredCells: count('.encounter-mechanical-obscurement'),
           illuminatedCells: count('.encounter-mechanical-illumination'),
@@ -1033,7 +1053,7 @@ export class BoardSnapshotService implements AsyncDisposable {
             .filter((node) => Number(node.dataset.columnSpan) > 1 || Number(node.dataset.rowSpan) > 1).length,
         },
       };
-    });
+    }, BOARD_SNAPSHOT_TERRAIN_SELECTORS);
     if (inspection.violation !== null) {
       throw new Error(`Blind state board contains an offered-option DOM leak (${inspection.violation}).`);
     }

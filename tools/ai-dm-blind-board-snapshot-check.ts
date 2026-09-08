@@ -1,7 +1,8 @@
 import { resolve } from 'node:path';
 import type { EncounterState } from '../src/combat/encounter';
+import { terrainWallCells } from '../src/combat/terrain';
 import { projectDmView } from '../src/combat/visibility';
-import { projectEncounterBoard } from '../src/vtt/encounter-board';
+import { projectEncounterBoard, projectEncounterTerrainCells } from '../src/vtt/encounter-board';
 import { loadArenaFixture } from '../src/vtt/mcp/entrypoint';
 import {
   BLIND_STATE_PRIMER_VERSION,
@@ -66,7 +67,28 @@ function inspectFamily(
   requireCondition(dm.rosterEntries === creatureCount, 'DM image roster differs from state.');
   requireCondition(dm.hpBars === creatureCount, 'DM image HP bars differ from state.');
   requireCondition(dm.legendEntries > 0, 'DM image omitted its legend.');
-  requireCondition(dm.blockedCells === state.blockedCells.length, 'DM image blocked cells differ from state.');
+  const wallCells = terrainWallCells(state).length;
+  const projectedTerrain = projectEncounterTerrainCells(state.bounds, state);
+  const halfCoverCells = projectedTerrain.filter((cell) => cell.kind === 'half_cover').length;
+  const threeQuartersCoverCells = projectedTerrain.filter(
+    (cell) => cell.kind === 'three_quarters_cover',
+  ).length;
+  requireCondition(
+    dm.wallCells === wallCells,
+    `DM image wall cells differ from state: DOM ${String(dm.wallCells)}, state ${String(wallCells)}.`,
+  );
+  requireCondition(
+    dm.halfCoverCells === halfCoverCells,
+    `DM image half-cover cells differ from state: DOM ${String(dm.halfCoverCells)}, state ${String(halfCoverCells)}.`,
+  );
+  requireCondition(
+    dm.threeQuartersCoverCells === threeQuartersCoverCells,
+    `DM image three-quarters-cover cells differ from state: DOM ${String(dm.threeQuartersCoverCells)}, state ${String(threeQuartersCoverCells)}.`,
+  );
+  requireCondition(
+    dm.wallCells >= state.blockedCells.length,
+    `DM image wall cell count ${String(dm.wallCells)} is smaller than blocked cell count ${String(state.blockedCells.length)}.`,
+  );
   requireCondition(
     dm.difficultCells === state.environment.difficultTerrainRegions.reduce(
       (total, region) => total + region.cells.length,

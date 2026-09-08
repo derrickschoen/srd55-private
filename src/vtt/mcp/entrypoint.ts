@@ -237,7 +237,9 @@ export interface EngineMcpBoardDomEvidence {
   readonly rosterEntries: number;
   readonly hpBars: number;
   readonly legendEntries: number;
-  readonly blockedCells: number;
+  readonly wallCells: number;
+  readonly halfCoverCells: number;
+  readonly threeQuartersCoverCells: number;
   readonly difficultCells: number;
   readonly obscuredCells: number;
   readonly illuminatedCells: number;
@@ -705,7 +707,8 @@ function isBoardSnapshotDomEvidence(value: unknown): value is EngineMcpBoardDomE
   const evidence = value as Readonly<Record<string, unknown>>;
   const countKeys = [
     'coordinateLabels', 'creatureBadges', 'rosterEntries', 'hpBars', 'legendEntries',
-    'blockedCells', 'difficultCells', 'obscuredCells', 'illuminatedCells', 'fogMarks',
+    'wallCells', 'halfCoverCells', 'threeQuartersCoverCells',
+    'difficultCells', 'obscuredCells', 'illuminatedCells', 'fogMarks',
     'doors', 'objects', 'hiddenMarks', 'multiCellFootprints',
   ] as const;
   return Object.keys(evidence).length === countKeys.length + 2 &&

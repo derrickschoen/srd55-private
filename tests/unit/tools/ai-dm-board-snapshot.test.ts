@@ -2,10 +2,16 @@ import { describe, expect, it } from 'vitest';
 import { readFile } from '../../helpers/test-filesystem-promises';
 import { canonicalJson } from '../../../src/commands/canonical-json';
 import type { EncounterState } from '../../../src/combat/encounter';
+import { terrainWallCells } from '../../../src/combat/terrain';
 import { projectDmView } from '../../../src/combat/visibility';
 import { projectDmBoard, projectStateOnlyDmBoard } from '../../../src/vtt/encounter-projections';
 import { encounterArtForBoard } from '../../../src/vtt/encounter-art-selection';
-import { encounterBoardRenderModel, projectEncounterBoard } from '../../../src/vtt/encounter-board';
+import { renderBoard } from '../../../src/vtt/encounter-app';
+import {
+  encounterBoardRenderModel,
+  projectEncounterBoard,
+  projectEncounterTerrainCells,
+} from '../../../src/vtt/encounter-board';
 import {
   MemoryBrowserSessionStore,
   MemoryMirrorSink,
@@ -18,15 +24,19 @@ import {
   assertSynchronizedBoardImages,
   BLIND_STATE_PRIMER_VERSION,
   BOARD_SNAPSHOT_IMAGE_ROLES,
+  BOARD_SNAPSHOT_TERRAIN_SELECTORS,
   boardSnapshotCaptureGeometry,
   boardSnapshotInformationMode,
   boardSnapshotVisualDescriptor,
   boardStateDigest,
   configuredPreviewPort,
   createBoardSnapshotSessionBundle,
+  isBoardSnapshotDomEvidence,
   type BoardImageArtifact,
   type BoardImageSource,
+  type BoardSnapshotDomEvidence,
 } from '../../../tools/ai-dm-board-snapshot';
+import { installInteractiveDocument, interactiveElement } from '../../fixtures/interactive-dom';
 
 const CONTROL_FIXTURES = Array.from(
   { length: 10 },
@@ -86,6 +96,80 @@ describe('AI DM board snapshot contracts', () => {
     expect(BOARD_SNAPSHOT_IMAGE_ROLES).toEqual([
       'dm_board', 'accessible_board_raster', 'player_board',
     ]);
+  });
+
+  it('accepts the complete terrain evidence shape and rejects legacy or incomplete shapes', () => {
+    const evidence: BoardSnapshotDomEvidence = {
+      optionSurfaceAbsent: true,
+      nextEventPreviewAbsent: true,
+      coordinateLabels: 0,
+      creatureBadges: 0,
+      rosterEntries: 0,
+      hpBars: 0,
+      legendEntries: 0,
+      wallCells: 0,
+      halfCoverCells: 0,
+      threeQuartersCoverCells: 0,
+      difficultCells: 0,
+      obscuredCells: 0,
+      illuminatedCells: 0,
+      fogMarks: 0,
+      doors: 0,
+      objects: 0,
+      hiddenMarks: 0,
+      multiCellFootprints: 0,
+    };
+    expect(isBoardSnapshotDomEvidence(evidence)).toBe(true);
+
+    const legacyShape: Record<string, unknown> = { ...evidence };
+    Reflect.deleteProperty(legacyShape, 'wallCells');
+    Reflect.deleteProperty(legacyShape, 'halfCoverCells');
+    Reflect.deleteProperty(legacyShape, 'threeQuartersCoverCells');
+    legacyShape['blockedCells'] = 0;
+    expect(isBoardSnapshotDomEvidence(legacyShape)).toBe(false);
+
+    const missingHalfCover: Record<string, unknown> = { ...evidence };
+    Reflect.deleteProperty(missingHalfCover, 'halfCoverCells');
+    expect(isBoardSnapshotDomEvidence(missingHalfCover)).toBe(false);
+  });
+
+  it.each([
+    ['hard', 5_117_001, 'tests/fixtures/arena-basis-hard/seed-5117001.json'],
+    ['brutal', 6_203_001, 'tests/fixtures/arena-basis-brutal/seed-6203001.json'],
+  ] as const)('renders state-derived terrain evidence for %s seed %i', async (_difficulty, _seed, path) => {
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const state = await loadArenaFixture(path);
+      const projection = projectEncounterBoard(projectDmView(state));
+      const board = interactiveElement(renderBoard(
+        projection,
+        new Set(),
+        null,
+        { revision: state.revision, round: state.round, stateDigest: boardStateDigest(state) },
+        'full',
+        true,
+        128,
+      ));
+      const projectedTerrain = projectEncounterTerrainCells(state.bounds, state);
+      const expected = {
+        wallCells: terrainWallCells(state).length,
+        halfCoverCells: projectedTerrain.filter((cell) => cell.kind === 'half_cover').length,
+        threeQuartersCoverCells: projectedTerrain.filter(
+          (cell) => cell.kind === 'three_quarters_cover',
+        ).length,
+      };
+
+      for (const key of Object.keys(BOARD_SNAPSHOT_TERRAIN_SELECTORS) as readonly (
+        keyof typeof BOARD_SNAPSHOT_TERRAIN_SELECTORS
+      )[]) {
+        expect(
+          board.querySelectorAll(BOARD_SNAPSHOT_TERRAIN_SELECTORS[key]),
+          `${key} must match its independent state derivation`,
+        ).toHaveLength(expected[key]);
+      }
+    } finally {
+      restoreDocument();
+    }
   });
 
   it('removes offered paths at the projection boundary without changing board state', async () => {
@@ -241,7 +325,9 @@ describe('AI DM board snapshot contracts', () => {
           rosterEntries: 0,
           hpBars: 0,
           legendEntries: 0,
-          blockedCells: 0,
+          wallCells: 0,
+          halfCoverCells: 0,
+          threeQuartersCoverCells: 0,
           difficultCells: 0,
           obscuredCells: 0,
           illuminatedCells: 0,
