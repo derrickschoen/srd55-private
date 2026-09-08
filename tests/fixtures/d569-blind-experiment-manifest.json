@@ -40,7 +40,7 @@
   },
   "sharedKb": {
     "rootPath": "tests/fixtures/ai-dm-kb/d569/ai-dm-core.md",
-    "combinedStartupHash": "1316faa5c090ced1e8f249b190c1b2e2c6c891da03fe478305608625fbea231d",
+    "combinedStartupHash": "9a20176b897ca67233c9402b0dbbb8806dc9f7f12c00c91326942737563b99a5",
     "componentHashes": {
       "root": "19f66c81a0a1c8641a7cc4a3844e5cdd0b49ce72cd056ad72b8932d37085f260",
       "tactics": "4b78bdf95f86bc1a8f7078e96bfb2b2485d0cd35babe1871adbfdfcb8d34f2f7",
@@ -50,7 +50,7 @@
       "spells": "a8e618a972ce98ca4fb5a025229f1d3c08a6bf0bdf297f637d2e68a3d472a13f",
       "conditions": "f57bd5ab6c9626cb9182316f5fb10f8ad2b998758c1dd1ad44c37ce4ded80ae9",
       "reactions": "7c775e9710d57648dd2dbfa6a99159e1e5dc1d0eaa6a89ecb80493579ecd6918",
-      "protocol": "ce1892481558c084877da16f668843db5071e4d3a28c334b75f9cdd66f57d334"
+      "protocol": "549aa50b115b07293cdd86e2370be1eb99d09d59cb76dcc0d103356be8631ea6"
     }
   },
   "visualPins": {
@@ -108,7 +108,7 @@
     "reactionAskDefault": "decline",
     "midRoundAdjustmentsEnabled": false,
     "captureRlData": false,
-    "commonKbHash": "1316faa5c090ced1e8f249b190c1b2e2c6c891da03fe478305608625fbea231d",
+    "commonKbHash": "9a20176b897ca67233c9402b0dbbb8806dc9f7f12c00c91326942737563b99a5",
     "visualPin": "advice",
     "intentionalHistoricalDifference": "common_d570_kb_tips"
   },

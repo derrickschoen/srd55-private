@@ -107,14 +107,15 @@
     },
     {
       "path": "tests/fixtures/ai-dm-kb/d569/protocol.md",
-      "revision": "d569-d570-board-primer-v3",
-      "sha256": "ce1892481558c084877da16f668843db5071e4d3a28c334b75f9cdd66f57d334",
+      "revision": "d569-d570-d576-board-primer-v4",
+      "sha256": "549aa50b115b07293cdd86e2370be1eb99d09d59cb76dcc0d103356be8631ea6",
       "sources": [
         { "kind": "project_experience", "section": "Grid, scale, and coordinate gutter", "locator": "src/vtt/board-chrome.ts:1-14,690-829; src/vtt/board-chrome-layout.ts:13-14; tools/ai-dm-screenshot-probe.ts:63-104" },
         { "kind": "project_experience", "section": "Creature identities, sides, rings, and footprints", "locator": "src/vtt/board-chrome.ts:230-318,830-928,1260-1355; src/vtt/encounter-board.ts:257-320" },
         { "kind": "project_experience", "section": "Hit-point bars, life glyphs, and corpses", "locator": "src/vtt/intel/actor-knowledge.ts:194-209; src/vtt/blind-turn-context.ts:95-99; src/vtt/board-chrome.ts:321-380,947-1040; src/assets/pixel-font.ts:75-82; src/vtt/encounter-board.ts:760-783" },
         { "kind": "project_experience", "section": "Hidden creatures", "locator": "src/assets/board-glyphs.ts:205-240; src/vtt/board-chrome.ts:445-450,947-992,1338-1354" },
-        { "kind": "project_experience", "section": "Blocked and difficult cells", "locator": "src/assets/board-glyphs.ts:89-190; src/vtt/board-chrome.ts:451-477,565-594" },
+        { "kind": "project_experience", "section": "Terrain, cover, and difficult cells", "locator": "src/combat/terrain.ts:1-68; src/assets/pixel-art.ts:919-970; src/assets/board-glyphs.ts:151-205; src/vtt/board-chrome.ts:470-475,582-655" },
+        { "kind": "project_experience", "section": "Corner-rule line and cover traces", "locator": "src/combat/cover.ts:42-480" },
         { "kind": "project_experience", "section": "Obscurement and fog", "locator": "src/assets/board-glyphs.ts:89-190; tools/ai-dm-screenshot-probe.ts:105-130" },
         { "kind": "project_experience", "section": "Bright, dim, and dark cells", "locator": "src/assets/light-encoding.ts:1-100; src/vtt/board-chrome.ts:518-562" },
         { "kind": "project_experience", "section": "Doors and the door rail", "locator": "src/assets/board-glyphs.ts:89-130,245-260; src/vtt/board-chrome.ts:1124-1224" },

@@ -536,9 +536,16 @@ const semanticNamedCellsSchema = z.strictObject({
   id: identifierSchema,
   name: z.string(),
   cells: z.array(semanticCellSchema),
+  terrain_kind: z.enum(['open', 'half_cover', 'three_quarters_cover', 'wall']),
 });
 
-const semanticObjectSchema = semanticNamedCellsSchema.extend({ kind: z.string() });
+const semanticObjectSchema = z.strictObject({
+  id: identifierSchema,
+  name: z.string(),
+  kind: z.string(),
+  cells: z.array(semanticCellSchema),
+  terrain_kind: z.enum(['open', 'half_cover', 'three_quarters_cover', 'wall']),
+});
 
 const blindSemanticBoardSchema = z.strictObject({
   provenance: z.strictObject({
@@ -564,6 +571,13 @@ const blindSemanticBoardSchema = z.strictObject({
   creatures: semanticFactList(semanticCreatureSchema),
   cells: z.strictObject({
     blocked: semanticCellFactListSchema,
+    terrain: z.strictObject({
+      partition: z.literal('open, half_cover, three_quarters_cover, and wall together contain every board cell exactly once'),
+      open: semanticCellFactListSchema,
+      half_cover: semanticCellFactListSchema,
+      three_quarters_cover: semanticCellFactListSchema,
+      wall: semanticCellFactListSchema,
+    }),
     difficult_terrain: semanticCellFactListSchema,
     light: z.strictObject({
       default_light: z.literal('bright'),
@@ -1193,8 +1207,7 @@ export function blindSemanticBoard(
     ...retained,
     audience: 'dm',
   };
-  blindSemanticBoardSchema.parse(candidate);
-  return candidate as BlindSemanticBoard;
+  return blindSemanticBoardSchema.parse(candidate);
 }
 
 export function renderBlindTurnContext(input: {

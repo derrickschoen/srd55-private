@@ -16,8 +16,12 @@ import {
   loadAiDmKnowledgeBase,
   scanD569KnowledgeBaseBytes,
 } from '../../../src/vtt/knowledge-base-contract';
-import { CELL_GLYPH_KINDS } from '../../../src/assets/board-glyphs';
-import { legendEntriesFor } from '../../../src/vtt/board-chrome';
+import { CELL_GLYPH_KINDS, CELL_GLYPHS } from '../../../src/assets/board-glyphs';
+import { legendEntriesFor, TERRAIN_LEGEND_LABELS } from '../../../src/vtt/board-chrome';
+import { traceCombatantLine, traceTerrainLine, type TerrainLineTrace } from '../../../src/combat/cover';
+import { TERRAIN_KINDS, terrainBlocking, type TerrainKind } from '../../../src/combat/terrain';
+import { armorClass, worldObjectId } from '../../../src/combat/values';
+import type { WorldObject } from '../../../src/combat/world-objects';
 import { SRD_ATTRIBUTION_NOTICE } from '../../../src/rules/srd-attribution';
 import {
   existsSync,
@@ -41,7 +45,7 @@ import {
 import { ENGINE_TOOL_SPECS } from '../../../src/vtt/mcp/schemas';
 import { createEncounter } from '../../../src/combat/encounter';
 import { hitPointKnowledge } from '../../../src/vtt/intel/actor-knowledge';
-import { monsterProfile, placedToken } from '../combat/fixtures';
+import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
 
 const fixturePaths = [
   'tests/fixtures/ai-dm-kb/ai-dm-core.md',
@@ -77,6 +81,43 @@ const subjectPaths = KB_SUBJECTS.map((subject) =>
 
 function sha256(text: string): string {
   return createHash('sha256').update(Buffer.from(text, 'utf8')).digest('hex');
+}
+
+function guideTerrainObject(
+  id: string,
+  cells: readonly { readonly column: number; readonly row: number }[],
+  kind: Exclude<TerrainKind, 'open'>,
+): WorldObject {
+  const position = cells[0];
+  if (position === undefined) throw new Error('A guide trace object needs a footprint.');
+  return {
+    id: worldObjectId(`world-object:${id}`),
+    name: id,
+    kind: 'cover',
+    position,
+    footprint: cells,
+    durability: { kind: 'indestructible' },
+    armorClass: armorClass(15),
+    damageResponses: [],
+    blocking: terrainBlocking(kind),
+    createdRevision: 0,
+  };
+}
+
+function guideTraceSummary(label: string, trace: TerrainLineTrace): string {
+  const cell = (value: { readonly column: number; readonly row: number }): string =>
+    `${String(value.column)},${String(value.row)}`;
+  const tier = (value: TerrainLineTrace['tier']): string => value === 'none'
+    ? 'NO COVER'
+    : value === 'half'
+      ? 'HALF COVER'
+      : value === 'three_quarters'
+        ? 'THREE-QUARTERS COVER'
+        : 'TOTAL COVER';
+  return `${label}: source cell ${cell(trace.sourceCell)}, target cell ${cell(trace.targetCell)}, ` +
+    `chosen source corner ${cell(trace.sourceCorner)}, corner-line tiers ` +
+    `${trace.lines.map((line) => line.tier).join(' / ')}; result ${tier(trace.tier)}; ` +
+    `line of sight ${trace.blocksSight ? 'NO' : 'YES'}.`;
 }
 
 function d569ComponentEntries(bundle: Awaited<ReturnType<typeof loadD569AiDmKnowledgeBase>>) {
@@ -472,7 +513,7 @@ describe('D569 shared blind/advice knowledge-base fixture package', () => {
   });
 
   it('documents every renderer legend entry in the map guide', () => {
-    const presence = { cells: CELL_GLYPH_KINDS, hidden: true } as const;
+    const presence = { cells: CELL_GLYPH_KINDS, hidden: true, terrainKinds: TERRAIN_KINDS } as const;
     const rendererKeys = new Set([
       ...CELL_GLYPH_KINDS,
       ...[
@@ -482,9 +523,62 @@ describe('D569 shared blind/advice knowledge-base fixture package', () => {
       ].map((entry) => entry.key),
     ]);
     const guide = inputs.fixtures.readText(`${AI_DM_KB_FIXTURE_DIRECTORY}/d569/protocol.md`);
-    const documentedKeys = new Set([...guide.matchAll(/<!-- board-feature:([a-z-]+) -->/gu)]
+    const documentedKeys = new Set([...guide.matchAll(/<!-- board-feature:([a-z_-]+) -->/gu)]
       .map((match) => match[1] ?? ''));
 
     expect([...rendererKeys].filter((key) => !documentedKeys.has(key))).toEqual([]);
+  });
+
+  it('copies the D576 terrain legend exactly and binds the three worked examples to the production corner trace', () => {
+    const guide = inputs.fixtures.readText(`${AI_DM_KB_FIXTURE_DIRECTORY}/d569/protocol.md`);
+    for (const kind of TERRAIN_KINDS) expect(guide).toContain(TERRAIN_LEGEND_LABELS[kind]);
+    expect(guide).toContain(CELL_GLYPHS['terrain-half'].label);
+    expect(guide).toContain(CELL_GLYPHS['terrain-three-quarters'].label);
+    expect(guide).toContain(CELL_GLYPHS['terrain-wall'].label);
+
+    const tracer = playerProfile('guide-feature-tracer');
+    const featureState = createEncounter({
+      bounds: { columns: 6, rows: 4 },
+      combatants: [tracer],
+      tokens: [placedToken(tracer, 5, 3)],
+      worldObjects: [guideTerrainObject('guide-arrow-slit', [
+        { column: 2, row: 0 },
+        { column: 1, row: 1 },
+      ], 'three_quarters_cover')],
+    });
+
+    const source = playerProfile('guide-source');
+    const screen = playerProfile('guide-screen');
+    const target = playerProfile('guide-target');
+    const creatureState = createEncounter({
+      bounds: { columns: 6, rows: 3 },
+      combatants: [source, screen, target],
+      tokens: [placedToken(source, 0, 1), placedToken(screen, 2, 1), placedToken(target, 4, 1)],
+    });
+
+    const largeBase = playerProfile('guide-large-source');
+    const large = { ...largeBase, rules: { ...largeBase.rules, sizeCategory: 'Large' as const } };
+    const largeTarget = playerProfile('guide-large-target');
+    const largeState = createEncounter({
+      bounds: { columns: 7, rows: 6 },
+      combatants: [large, largeTarget],
+      tokens: [placedToken(large, 0, 0), placedToken(largeTarget, 6, 0)],
+      worldObjects: [guideTerrainObject(
+        'guide-low-barricade',
+        [{ column: 2, row: 0 }],
+        'half_cover',
+      )],
+    });
+
+    const productionExamples = [
+      guideTraceSummary('Feature trace', traceTerrainLine(
+        featureState,
+        { column: 0, row: 0 },
+        { column: 4, row: 2 },
+      )),
+      guideTraceSummary('Creature trace', traceCombatantLine(creatureState, source.id, target.id)),
+      guideTraceSummary('Large-source trace', traceCombatantLine(largeState, large.id, largeTarget.id)),
+    ];
+    for (const example of productionExamples) expect(guide).toContain(example);
   });
 });

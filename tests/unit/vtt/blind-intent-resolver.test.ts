@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readFileSync } from '../../helpers/test-filesystem';
 import { z } from 'zod';
 import { canonicalJson } from '../../../src/commands/canonical-json';
 import type { EncounterState } from '../../../src/combat/encounter';

@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { BUNDLED_MONSTER_ROSTER } from '../../../src/combat/statblocks/roster';
-import { projectDmView } from '../../../src/combat/visibility';
+import type { PersistedCoordinatorState } from '../../../src/combat/coordinator';
+import { projectDmView, projectPlayerView } from '../../../src/combat/visibility';
 import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
 import { projectEncounterBoard } from '../../../src/vtt/encounter-board';
+import { projectPlayerBoard } from '../../../src/vtt/encounter-projections';
 import {
   createEngineMcpRuntime,
   loadArenaFixture,
@@ -49,6 +51,62 @@ function recordArray(value: unknown, label: string): readonly Readonly<Record<st
   return value.map((entry) => record(entry, label));
 }
 
+const IDLE_COORDINATOR: PersistedCoordinatorState = {
+  requestSequence: 1,
+  pendingRequest: null,
+  pendingCommand: null,
+  continuation: { kind: 'idle' },
+  pause: null,
+};
+
+const DIRECT_PAIRWISE_ANSWER_KEYS = new Set([
+  'line_of_sight',
+  'line_of_sight_between',
+  'cover_between',
+  'pair_answer',
+  'pairwise_answers',
+  'visibility_between',
+]);
+const PAIR_ENDPOINTS = [
+  ['source_id', 'target_id'],
+  ['sourceId', 'targetId'],
+  ['from_id', 'to_id'],
+  ['from', 'to'],
+  ['first_id', 'second_id'],
+] as const;
+const PAIR_ANSWER_KEYS = new Set([
+  'line_of_sight',
+  'lineOfSight',
+  'cover',
+  'cover_tier',
+  'coverTier',
+  'blocks_sight',
+  'blocksSight',
+  'answer',
+]);
+
+function pairwiseTacticalAnswerPaths(value: unknown, path = '$'): readonly string[] {
+  if (Array.isArray(value)) {
+    return value.flatMap((entry, index) =>
+      pairwiseTacticalAnswerPaths(entry, `${path}[${String(index)}]`));
+  }
+  if (typeof value !== 'object' || value === null) return [];
+  const entries = Object.entries(value);
+  const keys = new Set(entries.map(([key]) => key));
+  const direct = entries.flatMap(([key]) => DIRECT_PAIRWISE_ANSWER_KEYS.has(key)
+    ? [`${path}.${key}`]
+    : []);
+  const compound = PAIR_ENDPOINTS.some(([source, target]) => keys.has(source) && keys.has(target)) &&
+    [...PAIR_ANSWER_KEYS].some((key) => keys.has(key))
+    ? [`${path}::<pairwise-tactical-answer>`]
+    : [];
+  return [
+    ...direct,
+    ...compound,
+    ...entries.flatMap(([key, child]) => pairwiseTacticalAnswerPaths(child, `${path}.${key}`)),
+  ];
+}
+
 async function hardContext(seed = 5_117_001) {
   const loaded = await loadArenaFixture(
     `tests/fixtures/arena-basis-hard/seed-${String(seed)}.json`,
@@ -57,6 +115,7 @@ async function hardContext(seed = 5_117_001) {
   const runtime = createEngineMcpRuntime(loaded, {
     dmMode: 'blind',
     toolProfile: 'blind',
+    blindFacts: true,
     onBlindTurnContextRendered: (value) => { budget = value; },
   });
   const capsule = runtime.feed.current();
@@ -268,6 +327,39 @@ describe('blind turn context', () => {
     expect(record(semantic['cells'], 'semantic cells')).toHaveProperty('light');
     expect(record(semantic['cells'], 'semantic cells')).toHaveProperty('obscured');
     expect(record(semantic['cells'], 'semantic cells')).toHaveProperty('fogged');
+  });
+
+  it('keeps creature facts, movement, player projection, and semantic board free of pairwise tactical answers', () => {
+    const { planningState, context } = preparedHardContext();
+    const partyActor = planningState.combatants.find(
+      (combatant) => combatant.profile.kind === 'player_character',
+    );
+    if (partyActor === undefined) throw new Error('Boundary fixture has no player character.');
+    const playerProjection = projectPlayerBoard(projectPlayerView(planningState, {
+      seatId: `seat:${String(partyActor.profile.id)}`,
+      combatantId: partyActor.profile.id,
+    }), IDLE_COORDINATOR);
+    const surfaces = {
+      creature_facts: context['creature_facts'],
+      legal_movement: context['legal_movement'],
+      player_projection: playerProjection,
+      semantic_board: context['semantic_board'],
+    } as const;
+
+    expect(pairwiseTacticalAnswerPaths({
+      source_id: 'creature:a', target_id: 'creature:b', cover_tier: 'half',
+    })).toEqual(['$::<pairwise-tactical-answer>']);
+    expect(pairwiseTacticalAnswerPaths({ line_of_sight: true })).toEqual(['$.line_of_sight']);
+    for (const [name, surface] of Object.entries(surfaces)) {
+      expect(pairwiseTacticalAnswerPaths(surface), name).toEqual([]);
+    }
+
+    const semantic = record(context['semantic_board'], 'semantic board');
+    const terrain = record(record(semantic['cells'], 'semantic cells')['terrain'], 'semantic terrain');
+    expect(Object.keys(terrain).sort()).toEqual([
+      'half_cover', 'open', 'partition', 'three_quarters_cover', 'wall',
+    ]);
+    expect(semantic).not.toHaveProperty('reach_range_summaries');
   });
 
   it('prints exactly canonical same-revision destination costs without routes or tactical verdicts', async () => {

@@ -12,8 +12,21 @@ Every living token has a bottom HP bar and the roster repeats only its band. <!-
 ## Hidden creatures
 <!-- board-feature:hidden --> A creature hidden from players has a dashed ring or plate around its bust. In full-glyph boards, an eye crossed by a slash sits on the ring's left rim and HIDDEN appears in the roster row. This is an explicit projected state; ordinary cover, darkness, or obscurement alone is not the hidden mark.
 
-## Blocked and difficult cells
-<!-- board-feature:blocked --> A blocked cell is filled by a large cross-braced stone pile; full-glyph mode also adds an X in a square at bottom-left. It cannot be treated as open movement space. <!-- board-feature:difficult --> Difficult Terrain is one cell-local emblem of three inset opaque pale-ochre zigzag ridges with a dark outline. It costs extra movement but is not itself blocked.
+## Terrain, cover, and difficult cells
+The board has four exhaustive terrain outcomes, and its legend uses exactly these rows. <!-- board-feature:terrain-open --> **OPEN — NO COVER — LINE OF SIGHT** is ordinary floor with no obstruction silhouette and no terrain-tier glyph. <!-- board-feature:terrain-half_cover --><!-- board-feature:terrain-half --> **1/2 COVER — +2 AC/DEX — CROSSABLE — DIFFICULT** is a low wooden barricade confined to the lower part of its cell, leaving a broad transparent upper band; full-glyph mode adds the bottom-left `1/2 COVER` tier mark. <!-- board-feature:terrain-three_quarters_cover --><!-- board-feature:terrain-three-quarters --> **3/4 COVER — +5 AC/DEX — BLOCKS MOVEMENT** is a tall stone bulwark spanning nearly the whole cell with one narrow barred aperture; full-glyph mode adds the distinct bottom-left `3/4 COVER` tier mark. <!-- board-feature:terrain-wall --> **WALL — TOTAL COVER — NO LINE OF SIGHT** is a fully opaque, full-height, cell-spanning stone mass with no aperture or pass-through row; full-glyph mode adds the separate bottom-left `WALL` mark. A canonical blocked cell is rendered as this wall outcome.
+
+Read wall versus three-quarters versus half by silhouette first: wall is solid edge to edge, three-quarters is tall with only a narrow window, and half is low with open space above it. The tier marks reinforce those shapes in full-glyph mode, but the silhouette distinction remains when compact modes strip every text mark. Cover and movement are separate facts: the low barricade is crossable Difficult Terrain, the tall bulwark blocks movement without blocking line of sight, and the wall blocks both.
+
+<!-- board-feature:difficult --> Difficult Terrain that is not the half-cover silhouette is one cell-local emblem of three inset opaque pale-ochre zigzag ridges with a dark outline. It costs extra movement but is not itself blocked.
+
+## Corner-rule line and cover traces
+For a source space, consider each of its outer corners in row-major order. From one source corner, draw to all four outer corners of the target space. A terrain cell counts only when a ray crosses its interior; a boundary graze does not count, and the source and target spaces are excluded. Each ray takes the strongest crossed tier, and an intervening living creature supplies Half Cover. Zero obstructed target-corner rays means No Cover, one or two mean Half Cover, and three mean Three-Quarters Cover, always capped by the strongest source actually crossed. Four sight-blocked rays mean no line of sight and Total Cover. For a multi-cell creature, evaluate its whole footprint and use the least-obstructed source corner, breaking ties in row-major order.
+
+These examples are pinned to the production corner trace rather than copied from hand geometry:
+
+- Feature trace: source cell 0,0, target cell 4,2, chosen source corner 0,0, corner-line tiers none / three_quarters / three_quarters / three_quarters; result THREE-QUARTERS COVER; line of sight YES.
+- Creature trace: source cell 0,1, target cell 4,1, chosen source corner 0,1, corner-line tiers none / none / half / half; result HALF COVER; line of sight YES.
+- Large-source trace: source cell 1,0, target cell 6,0, chosen source corner 0,2, corner-line tiers none / none / none / none; result NO COVER; line of sight YES. The Large source occupies a two-by-two footprint at anchor 0,0; its lower-left outer corner clears the low barricade that the anchor-only line would cross.
 
 ## Obscurement and fog
 <!-- board-feature:obscured --> Obscured terrain is a cool cyan veil of three closed inset diamonds forming a lattice plus a cyan-waves glyph just left of bottom-right in full mode. **Obscured is not fog** and is separate from light level. <!-- board-feature:fog --> Fog is a warm-gray veil of diagonal hatching with a cloud glyph at bottom-right in full mode. A cell can show both facts.
