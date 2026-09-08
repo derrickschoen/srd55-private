@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import type { AgentInvocation } from '../../../src/vtt/agent-session';
 import { KB_SUBJECTS } from '../../../src/vtt/knowledge-base-contract';
 import {
@@ -277,6 +277,15 @@ function correctionCapture(): Promise<LegacyRunnerCapture> {
   return correctionCapturePromise;
 }
 
+let explicitIncumbentCapturePromise: Promise<LegacyRunnerCapture> | null = null;
+function explicitIncumbentCapture(): Promise<LegacyRunnerCapture> {
+  explicitIncumbentCapturePromise ??= captureLegacyRunnerComponents(
+    legacyConfig(join(testDirectory, 'explicit.jsonl'), explicitIncumbentArgs()),
+    { repoCommit: APPROVED_COMMIT, clock: () => 0 },
+  );
+  return explicitIncumbentCapturePromise;
+}
+
 function firstDifference(expected: unknown, actual: unknown, path: string): string | null {
   if (Object.is(expected, actual)) return null;
   if (Array.isArray(expected) && Array.isArray(actual)) {
@@ -392,6 +401,41 @@ class FakeAdviceSnapshotService implements ConversationBoardSnapshotService {
   async close(): Promise<void> {}
 }
 
+interface ExplicitAdviceEvidence {
+  readonly row: ConversationRowPersisted;
+  readonly launcherTexts: readonly string[];
+}
+
+let explicitAdviceEvidencePromise: Promise<ExplicitAdviceEvidence> | null = null;
+function explicitAdviceEvidence(): Promise<ExplicitAdviceEvidence> {
+  explicitAdviceEvidencePromise ??= (async () => {
+    const service = new FakeAdviceSnapshotService();
+    const invocations: AgentInvocation[] = [];
+    const result = await runConversation(
+      legacyConfig(join(testDirectory, 'explicit-advice.jsonl'), ['--dm-mode', 'advice']),
+      {
+        repoCommit: APPROVED_COMMIT,
+        clock: () => 0,
+        boardSnapshotService: service,
+        onPrimaryInvocation: (invocation) => { invocations.push(invocation); },
+      },
+    );
+    const invocation = invocations[0];
+    const row = result.rows[0];
+    if (invocations.length !== 1 || invocation === undefined || row === undefined) {
+      throw new TypeError('Explicit advice runner did not produce one invocation and one row.');
+    }
+    const artifactRoot = dirname(invocation.launcherToken);
+    const launcherNames = (await readdir(artifactRoot))
+      .filter((name) => name.includes('-launcher') && name.endsWith('.json'))
+      .sort();
+    const launcherTexts = await Promise.all(launcherNames.map((name) =>
+      readFile(join(artifactRoot, name), 'utf8')));
+    return { row, launcherTexts };
+  })();
+  return explicitAdviceEvidencePromise;
+}
+
 type LockedComponentName = keyof LegacyAdviceProtocolSurface | 'row';
 
 function lockedFixture(): Readonly<Record<LockedComponentName, LockedBytes>> {
@@ -428,6 +472,14 @@ function expectLockedBytes(actual: LegacyAdviceProtocolSurface): void {
       .toBe(expected[name].sha256);
   }
 }
+
+const runnerCapturePromises = {
+  primary: primaryEvidence(),
+  correction: correctionCapture(),
+  explicitIncumbent: explicitIncumbentCapture(),
+  explicitAdvice: explicitAdviceEvidence(),
+} as const;
+await Promise.all(Object.values(runnerCapturePromises));
 
 describe('D569 implicit advice legacy invariance', () => {
   it('locks the no-flag startup, prompt, tool, resource, context, and row bytes', async () => {
@@ -496,12 +548,11 @@ describe('D569 implicit advice legacy invariance', () => {
   });
 
   describe('approved-main row comparison', () => {
-    let primary: PrimaryEvidence;
-    let correction: LegacyRunnerCapture;
-    beforeAll(async () => { primary = await primaryEvidence(); });
-    beforeAll(async () => { correction = await correctionCapture(); });
-
-    it('matches both approved-main captured JSONL cases after only the frozen timing substitution', () => {
+    it('matches both approved-main captured JSONL cases after only the frozen timing substitution', async () => {
+      const [primary, correction] = await Promise.all([
+        runnerCapturePromises.primary,
+        runnerCapturePromises.correction,
+      ]);
       const oracle = runnerOracle();
       for (const [name, expectedCapture, actualCapture] of [
         ['primary', oracle.runs.primary, primary.capture],
@@ -516,19 +567,11 @@ describe('D569 implicit advice legacy invariance', () => {
   });
 
   describe('literal incumbent-default runner comparison', () => {
-    let implicit: PrimaryEvidence;
-    let explicit: LegacyRunnerCapture;
-    beforeAll(async () => {
-      implicit = await primaryEvidence();
-    });
-    beforeAll(async () => {
-      explicit = await captureLegacyRunnerComponents(
-        legacyConfig(join(testDirectory, 'explicit.jsonl'), explicitIncumbentArgs()),
-        { repoCommit: APPROVED_COMMIT, clock: () => 0 },
-      );
-    });
-
-    it('keeps explicit incumbent-default persisted JSONL literally identical to no-flag JSONL', () => {
+    it('keeps explicit incumbent-default persisted JSONL literally identical to no-flag JSONL', async () => {
+      const [implicit, explicit] = await Promise.all([
+        runnerCapturePromises.primary,
+        runnerCapturePromises.explicitIncumbent,
+      ]);
       const implicitText = lockedText(implicit.capture.rowJsonl, 'implicit row');
       const explicitText = lockedText(explicit.rowJsonl, 'explicit incumbent-default row');
 
@@ -539,10 +582,8 @@ describe('D569 implicit advice legacy invariance', () => {
   });
 
   describe('approved-main initial launcher comparison', () => {
-    let actual: LegacyRunnerCapture;
-    beforeAll(async () => { actual = (await primaryEvidence()).capture; });
-
-    it('matches initial launchers across distinct checkouts modulo only the frozen root inventory and contains no dmMode', () => {
+    it('matches initial launchers across distinct checkouts modulo only the frozen root inventory and contains no dmMode', async () => {
+      const actual = (await runnerCapturePromises.primary).capture;
       const oracle = runnerOracle();
       expect(oracle.provenance.checkoutRoot).not.toBe(realpathSync(process.cwd()));
       for (const name of [
@@ -562,10 +603,8 @@ describe('D569 implicit advice legacy invariance', () => {
   });
 
   describe('approved-main correction launcher comparison', () => {
-    let actual: LegacyRunnerCapture;
-    beforeAll(async () => { actual = await correctionCapture(); });
-
-    it('enters correction and matches every approved-main correction launcher manifest without dmMode at any depth', () => {
+    it('enters correction and matches every approved-main correction launcher manifest without dmMode at any depth', async () => {
+      const actual = await runnerCapturePromises.correction;
       const oracle = runnerOracle();
       const actualRow = record(
         JSON.parse(lockedText(actual.rowJsonl, 'blind correction row').slice(0, -1)) as unknown,
@@ -590,10 +629,8 @@ describe('D569 implicit advice legacy invariance', () => {
   });
 
   describe('approved-main protected invocation comparison', () => {
-    let actual: PrimaryEvidence;
-    beforeAll(async () => { actual = await primaryEvidence(); });
-
-    it('matches protected primary invocation across checkouts modulo exact KB instruction roots and emits no undeclared config keys', () => {
+    it('matches protected primary invocation across checkouts modulo exact KB instruction roots and emits no undeclared config keys', async () => {
+      const actual = await runnerCapturePromises.primary;
       const oracle = runnerOracle();
       expect(oracle.provenance.checkoutRoot).not.toBe(realpathSync(process.cwd()));
       const expectedText = lockedText(
@@ -627,35 +664,10 @@ describe('D569 implicit advice legacy invariance', () => {
   });
 
   describe('explicit advice runner capture', () => {
-    let explicitRow: ConversationRowPersisted;
-    let launcherTexts: readonly string[];
-    beforeAll(async () => {
-      const service = new FakeAdviceSnapshotService();
-      const invocations: AgentInvocation[] = [];
-      const result = await runConversation(
-        legacyConfig(join(testDirectory, 'explicit-advice.jsonl'), ['--dm-mode', 'advice']),
-        {
-          repoCommit: APPROVED_COMMIT,
-          clock: () => 0,
-          boardSnapshotService: service,
-          onPrimaryInvocation: (invocation) => { invocations.push(invocation); },
-        },
-      );
-      const invocation = invocations[0];
-      if (invocations.length !== 1 || invocation === undefined || result.rows[0] === undefined) {
-        throw new TypeError('Explicit advice runner did not produce one invocation and one row.');
-      }
-      explicitRow = result.rows[0];
-      const artifactRoot = dirname(invocation.launcherToken);
-      const launcherNames = (await readdir(artifactRoot))
-        .filter((name) => name.includes('-launcher') && name.endsWith('.json'))
-        .sort();
-      launcherTexts = await Promise.all(launcherNames.map((name) =>
-        readFile(join(artifactRoot, name), 'utf8')));
-    });
-
-    it('threads dmMode advice only when the mode flag is explicit', () => {
-      expect(explicitRow.dmMode).toBe('advice');
+    it('threads dmMode advice only when the mode flag is explicit', async () => {
+      const evidence = await runnerCapturePromises.explicitAdvice;
+      expect(evidence.row.dmMode).toBe('advice');
+      const { launcherTexts } = evidence;
       expect(launcherTexts).toHaveLength(4);
       for (const [index, text] of launcherTexts.entries()) {
         const launcher = record(JSON.parse(text) as unknown, `explicit advice launcher ${String(index)}`);
