@@ -14,6 +14,7 @@ import {
   reduceEncounter,
   type EncounterState,
 } from '../../../src/combat/encounter';
+import { traceTerrainLine } from '../../../src/combat/cover';
 import type { EncounterCommand } from '../../../src/combat/events';
 import { gridDistance } from '../../../src/combat/grid';
 import { mulberry32 } from '../../../src/combat/random';
@@ -540,6 +541,161 @@ describe('player-character AlgorithmController policy', () => {
           `room ${String(room.room)} ${placement.id}: ${JSON.stringify(firingLines)}`,
         ).toBe(true);
       }
+    }
+  });
+
+  it('pins why every D365 shelter cell provides cover under the corner rule', () => {
+    const cases = [
+      {
+        room: 1,
+        placementId: 'north-gate-pillar',
+        original: null,
+        chosen: { column: 3, row: 1 },
+        target: { column: 7, row: 1 },
+        chosenSourceCorner: { column: 3, row: 1 },
+        objectLineTiers: ['none', 'none', 'three_quarters', 'three_quarters'],
+        liveSourceCorner: { column: 3, row: 1 },
+        liveLineTiers: ['none', 'none', 'three_quarters', 'three_quarters'],
+      },
+      {
+        room: 1,
+        placementId: 'south-gate-pillar',
+        original: null,
+        chosen: { column: 3, row: 5 },
+        target: { column: 7, row: 5 },
+        chosenSourceCorner: { column: 3, row: 5 },
+        objectLineTiers: ['none', 'none', 'three_quarters', 'three_quarters'],
+        liveSourceCorner: { column: 3, row: 5 },
+        liveLineTiers: ['none', 'none', 'three_quarters', 'three_quarters'],
+      },
+      {
+        room: 2,
+        placementId: 'north-den-casks',
+        original: { cell: { column: 4, row: 1 }, sourceCorner: { column: 4, row: 2 } },
+        chosen: { column: 4, row: 0 },
+        target: { column: 7, row: 2 },
+        chosenSourceCorner: { column: 4, row: 0 },
+        objectLineTiers: ['half', 'none', 'half', 'half'],
+        liveSourceCorner: { column: 5, row: 0 },
+        liveLineTiers: ['none', 'none', 'total', 'none'],
+      },
+      {
+        room: 2,
+        placementId: 'south-den-casks',
+        original: { cell: { column: 4, row: 5 }, sourceCorner: { column: 4, row: 5 } },
+        chosen: { column: 4, row: 6 },
+        target: { column: 7, row: 4 },
+        chosenSourceCorner: { column: 4, row: 6 },
+        objectLineTiers: ['half', 'half', 'half', 'half'],
+        liveSourceCorner: { column: 5, row: 7 },
+        liveLineTiers: ['total', 'none', 'none', 'none'],
+      },
+      {
+        room: 3,
+        placementId: 'north-gallery-pillar',
+        original: null,
+        chosen: { column: 3, row: 2 },
+        target: { column: 7, row: 2 },
+        chosenSourceCorner: { column: 3, row: 2 },
+        objectLineTiers: ['none', 'none', 'three_quarters', 'three_quarters'],
+        liveSourceCorner: { column: 3, row: 2 },
+        liveLineTiers: ['none', 'none', 'total', 'total'],
+      },
+      {
+        room: 3,
+        placementId: 'south-gallery-pillar',
+        original: null,
+        chosen: { column: 3, row: 4 },
+        target: { column: 7, row: 4 },
+        chosenSourceCorner: { column: 3, row: 4 },
+        objectLineTiers: ['none', 'none', 'three_quarters', 'three_quarters'],
+        liveSourceCorner: { column: 3, row: 4 },
+        liveLineTiers: ['none', 'none', 'total', 'total'],
+      },
+      {
+        room: 4,
+        placementId: 'north-crown-rubble',
+        original: { cell: { column: 4, row: 2 }, sourceCorner: { column: 4, row: 3 } },
+        chosen: { column: 3, row: 1 },
+        target: { column: 8, row: 3 },
+        chosenSourceCorner: { column: 3, row: 1 },
+        objectLineTiers: ['half', 'none', 'half', 'half'],
+        liveSourceCorner: { column: 4, row: 1 },
+        liveLineTiers: ['none', 'none', 'total', 'total'],
+      },
+      {
+        room: 4,
+        placementId: 'south-crown-rubble',
+        original: { cell: { column: 4, row: 4 }, sourceCorner: { column: 4, row: 4 } },
+        chosen: { column: 3, row: 5 },
+        target: { column: 8, row: 3 },
+        chosenSourceCorner: { column: 3, row: 5 },
+        objectLineTiers: ['half', 'half', 'half', 'half'],
+        liveSourceCorner: { column: 4, row: 6 },
+        liveLineTiers: ['total', 'total', 'none', 'none'],
+      },
+    ] as const;
+
+    for (const expected of cases) {
+      const partyState = { ...createPartySessionState(sample.party.members), room: expected.room };
+      const composed = composeD365Room(sample.party.members, sample.displayNames, partyState);
+      const room = D365_SAMPLE_DUNGEON.rooms[expected.room - 1];
+      const placement = room?.coverPlacements.find((candidate) => candidate.id === expected.placementId);
+      if (room === undefined || placement === undefined) {
+        throw new Error(`D365 shelter fixture ${expected.placementId} is missing.`);
+      }
+      expect(placement.shelteredCells).toEqual([expected.chosen]);
+
+      // Isolate the authored objects because shelteredCells names which cover
+      // placement shelters the cell, not the coincident blocked-cell wall.
+      const objectOnlyState: EncounterState = { ...composed.state, blockedCells: [] };
+      if (expected.original !== null) {
+        const original = traceTerrainLine(objectOnlyState, expected.original.cell, expected.target);
+        expect({
+          sourceCorner: original.sourceCorner,
+          lineTiers: original.lines.map((line) => line.tier),
+          lineCells: original.lines.map((line) => line.interveningCells),
+          tier: original.tier,
+        }).toEqual({
+          sourceCorner: expected.original.sourceCorner,
+          lineTiers: ['none', 'none', 'none', 'none'],
+          lineCells: [[], [], [], []],
+          tier: 'none',
+        });
+      }
+
+      // Hand geometry from the listed source corner to the target's corners:
+      // every non-None entry crosses the placement cell interior; every None
+      // entry bypasses or only grazes it. The obstructed-ray count and authored
+      // feature tier independently combine to Half Cover in all eight cases.
+      const objectTrace = traceTerrainLine(objectOnlyState, expected.chosen, expected.target);
+      expect({
+        sourceCorner: objectTrace.sourceCorner,
+        lineTiers: objectTrace.lines.map((line) => line.tier),
+        lineCells: objectTrace.lines.map((line) => line.interveningCells),
+        tier: objectTrace.tier,
+      }).toEqual({
+        sourceCorner: expected.chosenSourceCorner,
+        lineTiers: expected.objectLineTiers,
+        lineCells: expected.objectLineTiers.map((tier) => tier === 'none' ? [] : placement.obstacleCells),
+        tier: 'half',
+      });
+
+      // Where the live room also models a placement cell as blocked, crossed
+      // rays become Total individually. At least one ray remains open, so the
+      // corner-count rule still aggregates the target's cover to Half.
+      const liveTrace = traceTerrainLine(composed.state, expected.chosen, expected.target);
+      expect({
+        sourceCorner: liveTrace.sourceCorner,
+        lineTiers: liveTrace.lines.map((line) => line.tier),
+        tier: liveTrace.tier,
+        blocksSight: liveTrace.blocksSight,
+      }).toEqual({
+        sourceCorner: expected.liveSourceCorner,
+        lineTiers: expected.liveLineTiers,
+        tier: 'half',
+        blocksSight: false,
+      });
     }
   });
 
