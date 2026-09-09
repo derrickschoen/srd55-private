@@ -21127,3 +21127,19 @@ was removed. Astra review launched (brief review-impl-reconcile-inv.md,
 session 01a085be-850c-73c0-98e2-8d00e52acc01), also asked to list any
 other test or tool on the branch that still reads branch state, cwd or
 an untracked path.
+
+## D586.133 — reconciliation inventory fix ACCEPTED; branch re-landed on main; full gate launched (2026-09-09 06:44)
+
+Astra on 88633e05: "ACCEPT. Blockers: none." The 140 + 19 + 12 union
+covers every listed spec and dependent; git-seam probes for an empty
+diff, a missing main and a failed merge-base all return 148 paths
+without throwing; empty inventory 148 / b0561dd5..., normal 193 /
+42b6c1ed...; the logged mutation reconstructed (146, regression fails)
+with restoration hashes matching; two files +74/-12; no other
+main-sensitive dependency found on the branch (the remaining
+filesystem reads use tracked fixtures or test-created temp files).
+One should-fix for a later slice: the "no merge-base" regression
+bypasses git via changedPaths: [] and should also cover git-command
+failures persistently. Re-landing: the revert 580efdef reverted
+(reapply commit) and claude/trial-core-reconciliation merged as 371b5bc8
+(clean). Gate worktree moved to 371b5bc8; full gate launched.
