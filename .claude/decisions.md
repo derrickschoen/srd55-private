@@ -19658,3 +19658,20 @@ if that boundary is absent); slice 6 cannot compile with grants
 required while its consumers wait for slices 10/11. Two should-fixes.
 Round 3 of 3 (FINAL) resumed on 01a0842a-c4c5-7c43-bc96-0cbfac700f1a
 (brief plan-offers-r3.md, marker PLAN-OFFERS-R3 DONE).
+
+## D586.64 — promo180 plan round 2 revised; Astra round 2 launched (2026-09-09 00:46)
+
+Lane exit 0, PLAN-PROMO180-R2 DONE; plan 477 lines, sha256 46b3b945...
+(verified by me), tree clean at b6040267; the three `claude -p` matches
+in the log are the echoed header and two decisions.md lines the lane
+read with nl, not invocations. Nine dispositions all "FIXED": approved
+external scripts invoked unchanged and hash-pinned; separate round-plan
+and adjustment projections for the unchanged extractor; everything
+designer-invisible under protected/ behind a two-file allowlist
+enforced with bubblewrap; section 12 external ownership; fsynced phase
+ledger with startup recovery; routing-mutant genericity proof; triple-
+intersection primary effect; citation fixes. Astra round 2 launched
+(brief review-plan-promo180-r2.md, session
+01a0847c-a3d4-7752-814a-88ad2ce00413) with an explicit check that bwrap
+exists on this machine and an in-memory rerun of the mixed-model
+extractor case.
