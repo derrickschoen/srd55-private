@@ -21795,3 +21795,15 @@ owner's 4173 is untouched. Section 3.2 provenance record then 3.3
 production command follow immediately, verbatim from runbook sha
 84326354…; post-arm validation (4.1) and everything after remain
 separate steps, and packets wait for the comparison's second arm.
+
+## D586.163 — D569 v5 first arm LAUNCHED (2026-09-09 13:08)
+
+3.2 provenance: all five operator-script pins OK, `PROVENANCE PASS
+supplied_fields=13 nulls=0 scripts=5` (gpt-5.6-luna-blind-primary.provenance.json,
+mode 600). 3.3: `LAUNCHED pid=1201481` (detached process group; exit
+status will land in gpt-5.6-luna-blind-primary.exit via the trap;
+launch log gpt-5.6-luna-blind-primary.launch.log). 3.5 monitor at +20 s:
+the hard-basis arena is running on 4530 (dist cache hit 720cc11e…) and
+its first fresh `codex exec … --sandbox read-only` luna cell is live;
+load 1.43. Nothing else is launched until the arm finishes; 4173
+untouched. Post-arm 4.1 validation follows the exit file.
