@@ -19581,3 +19581,34 @@ killed by pid before the rebuild; the relaunched one runs on b279e654
 01a08467-fec3-7610-9b53-c1be5e54f8b9). Review launches now append a
 `review exit:` sentinel so the monitor stops matching log text that
 Astra merely reads.
+
+## D588.1 — owner request: redo requests for all 92 starter art assets; finding against my own commit discipline (2026-09-09 00:28)
+
+Owner (verbatim): "export a redo request for all art assets to
+/home/vagrant/PhpstormProjects/dnd-multiclass-spells-static/art/requests/".
+Done: 92 requests, one per file in public/assets/art/, batch tag
+redo-starter-art-v1, slug redo-<asset>, each with `redoOf`, a prompt
+derived from the asset's recipe in src/assets/starter-art-inputs.ts
+(archetype/side plate colour, wall piece, door side/state, overlay
+effect, fog state, focus mark, terrain object) and the current tiles'
+conventions (I viewed nine reference tiles), the common criteria plus
+kind-specific ones (drop-in footprint, seamless tiling, opacity
+ordering, ring diameter). Schema gains optional `batch` and `redoOf`.
+`--check` 93 requests clean; every file parses. Commit 25d754ca.
+
+Finding against my own work: my command chain ran the greppable-source
+test and then committed without gating on its result; the test was RED
+because the owner had already dropped
+art/incoming/01a08456-...-terrain-low-wall-source.jpg (1.5 MB JPEG) and
+its Windows Zone.Identifier stream at 00:17, my ignore rule covered only
+png/webp/svg, and `git add art` staged both. I read the failure, removed
+both from the index, changed the rule to ignore everything in
+art/incoming except its README, amended the commit (acbcb288 ->
+25d754ca; the bad commit was local and never left the machine), and
+reran source-is-greppable + starter-art: 18/18. The owner's JPG stays on
+disk, untracked, as the reference image for the low-wall request.
+Rule reaffirmed: read the verdict before committing, never `; git
+commit` after a test in the same chain.
+
+Elevation cumulative on b279e654 (D586.61): tsc exit 0, 4 spec files,
+19/19, vitest exit 0.
