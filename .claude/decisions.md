@@ -21849,3 +21849,37 @@ writes only `.tmp-plans/2026-09-09-vtt-handoff-plan.md`) and an independent assu
 01a087af-14c4-7522-8039-f091c2593872) dispatched read-only at 15:40 under a quiet-box rule (no builds/tests) because the D569 v5
 arm is still running until ~16:10; the baseline gate battery runs on the worktree after the arm exits and before any
 implementation step. Owner-side uncommitted art files in the main checkout are left untouched.
+
+### D586.165 — STOP: D569 v5 first arm crashed in the brutal basis (arena code defect), hard rows intact (2026-09-09 15:43 EDT)
+
+The production arm (pid 1201481, claude/blind-dm @ 90484d45) exited 1 at 15:41:59 during brutal cell 27 of 30; the hard basis
+(30 rows, `gpt-5.6-luna-blind-primary-hard.raw.jsonl`, mode 600, 14:38:02) is complete; NO brutal rows file exists because the
+arena writes rows only at basis completion. Launch-log tail (verbatim):
+`TypeError: Invalid tool arguments: {"violations":[{"path":"$","keyword":"unrecognized_keys","message":"Unrecognized key: \"intel_mode\""}]}`
+at `src/vtt/mcp/engine-server.ts:3476` ← `tools/ai-dm-conversation.ts:2177 plannedTurnContext` ← `:3755 getPlannedInitialTurnContext`
+← `:5816 runConversationWithConfiguredIntel` ← `ai-dm-arena.ts:780`.
+
+Root cause (supervisor read, no edits): `plannedTurnContext` (ai-dm-conversation.ts:2177–2185) unconditionally passes
+`intel_mode: intelMode` to `engine.get_turn_context`, but the BLIND tool profile's spec for that tool
+(src/vtt/mcp/schemas.ts:1459, strict object: "Blind v1 requires full context") has no `intel_mode` key — the DM profile's spec
+(schemas.ts:1406) does. The SIMULATED client path already omits it in blind mode (`...(manifest.dmMode === 'blind' ? {} :
+{ intel_mode: intelMode })`, line 2312); the planned-context path does not. The path is reached only through the fallback at
+lines 5815–5817 (`if (config.dmMode === 'blind' && rowTurnContext.value['dm_mode'] !== 'blind') rowTurnContext =
+getPlannedInitialTurnContext()`), which is why 30 hard + 26 brutal cells and both model-free dry runs (60 rows) passed and one
+brutal cell did not. No test references `plannedTurnContext`/`getPlannedInitialTurnContext` under tests/. The two codex lanes for
+D589 (dispatched 15:40, read-only) did not cause this: the failure is a deterministic schema rejection inside the arena process,
+not a load or timeout event, and the crashing cell's conversation started 15:41:01.
+
+Evidence preserved (mode 600/700, untouched): `~/dnd-slim-runs/d569-v5/crash-brutal-cell27/` (the crashing conversation dir
+bRF0Cr and its predecessor hje4JF) and `~/dnd-slim-runs/d569-v5/brutal-cells-partial/` (every per-cell conversation dir created
+since the brutal basis started at 14:38 — the only record of the 26 completed brutal cells: intents, ingress, proposals,
+turn-context spools). `.exit` = 1, launch log, provenance and pid files untouched. STOP rules: nothing edited, nothing relaunched,
+budgets untouched. Section 4 post-arm steps are NOT run (they require both bases).
+
+Owner decision needed (pending question `.claude/pending-questions/d569-v5-brutal-crash.md`): the fix is a one-line guard in
+`plannedTurnContext` plus a regression test on the blind profile, but it changes the arm's pinned code identity (runbook 2.1 pins
+HEAD 90484d45). Options: (a) fix on claude/blind-dm, re-run preflight 2.1–3.2 against the new HEAD, relaunch BOTH bases so hard and
+brutal share one code identity (~3 h); (b) fix and relaunch brutal only, recording the hard rows under 90484d45 and brutal under the
+fix commit as a documented code-identity split; (c) abandon v5 first arm. Supervisor recommendation: (a) — the fix does not touch
+any model-facing byte (the blind profile never carried `intel_mode`), so hard rows would be expected byte-comparable, but
+"expected" is not "verified" and v5 exists to be clean.
