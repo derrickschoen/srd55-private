@@ -19888,3 +19888,22 @@ EXIT traps. Supervisor preflight now: `bwrap --unshare-net --ro-bind / /
 /usr/bin/true` exits 0 with bubblewrap 0.6.1, so the EPERM Astra hit is
 confined to its review sandbox; stated in the brief. Astra round 3
 (FINAL) launched (brief review-plan-promo180-r3.md).
+
+## D586.72 — D569 Amendment 2 implementation ACCEPTED by Astra (code review); cumulative still queued (2026-09-09 01:14)
+
+Astra round 1 on 90484d45: "ACCEPT. Blockers: none. Should-fix: none."
+Verified: four files exactly; v5 arms/comparisons/three-seat scoring/
+notes-only stage match the plan with the four historical amendments
+byte-identical; analysis types, public signature and calculation block
+byte-identical to base; diagnostic membership rejects Opus; all 14 named
+tests mutation-shaped with mutant hashes #1, #3, #9, #10, #12, #14
+reproduced in memory; all 32 ordered pins match 0776af29 and v5; D575
+comment-stripped JS reproduces 49e8744d...; both inventory traversals
+reproduce 77/185/186 = 182 Vitest + 3 type + 1 browser; both manifest
+digests match; tsc 0 diagnostics for both configs; 21 invalid probes
+rejected. Explicitly: this does not close repository verification or
+authorize launch. Open before any v5 arm: the 182-spec cumulative
+(queued behind the main gate, cum-d569-a2.log), then the plan's section 9
+launch preflight (external hashes, provenance, notes|empty), the oracle
+re-capture and a blind gate, and an explicit launch decision recorded
+here.
