@@ -20827,3 +20827,21 @@ still running (so far: d583-contract-inventory 1 failed at 5.3 s,
 arena 1 timeout at 30 s, screenshot-probe 1, room-generator-los-cover 3;
 detail arrives with the summary). Fix round 2 is dispatched once the
 exact inventory failure is known.
+
+## D586.118 — reconciliation slice 1 cumulative on 31e98af5: 4148/4154, all six reds timeouts; serial rerun launched (2026-09-09 04:51)
+
+Supervisor cumulative (writable checkout, real children; started 04:39
+at load 2.3, rising to 7.7 with the room-D lane and the main gate's
+browser stage concurrent): tsc exit 0; 193 files, 189 passed / 4
+failed; 4154 tests, 4148 passed / 6 failed; vitest exit 1. Every red is
+a timeout: the NEW inventory test "unions changed specs and transitive
+consumers without losing inherited coverage" at 5,000 ms
+(d583-contract-inventory.test.ts:39; the 193-path reverse-import walk),
+three room-generator-los-cover cases and the screenshot primer at
+5,000 ms, and the arena intel-surface test at 30,000 ms. No assertion
+failure anywhere; the two MCP-spawning specs that EROFS'd in the lane
+passed. Under D587.3 the four red files get exactly one serial rerun
+(--no-file-parallelism) on the idle reconcile worktree
+(cum-reconcile-s1-serial.log). If the inventory test still exceeds its
+budget serially it is a real performance defect of the new test and
+goes into fix round 2 with the vacuous parent-alias mutant.
