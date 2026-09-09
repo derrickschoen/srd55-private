@@ -21021,3 +21021,16 @@ supervisor evidence. Fix round 2 resumed on the same session
 marker RECONCILE-S2-R2 DONE) for the should-fix alone: assert the
 complete event sequence at test:193; the closing round goes to Astra
 with the evidence afterwards.
+
+## D586.128 — reconciliation slice 2 should-fix harvested; closing review launched (2026-09-09 06:06)
+
+Lane exit 0, RECONCILE-S2-R2 DONE; claims: one file +1/-3 asserting the
+complete event sequence; focused deterministic describe 5/5; bypass-
+accounting mutant 1/1 vs 3/3 and the extra single-doubling control 4/4
+vs 3/3, both restored (log 101 lines, sha cf3380b5...); sg 0; tsc 0;
+diff --check 0. Verified by me: `sg scan` exit 0; header-only
+`claude -p`; committed 6542aa84; the deterministic describe re-run by
+me on the committed candidate: 5 passed, 21 filtered. Astra round 2
+(closing) launched (brief review-impl-reconcile-s2-r2.md, session
+01a085a1-c8bc-7a21-9734-f7da2e52d525) with the 4159/4159 cumulative
+evidence.
