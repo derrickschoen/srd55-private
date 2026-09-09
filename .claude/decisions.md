@@ -19512,3 +19512,19 @@ matches `claude -p`. Round-3 dispositions: killer retargeted to
 double-captures, then hashes the baseline output. Astra FINAL review
 launched (brief review-plan-txn-r3.md, session
 01a0845e-1e48-70c1-a1dc-974f1f9f4399).
+
+## D586.59 — session-command-transaction plan DISPATCHED at round 3; slices 0+1 lane launched (2026-09-09 00:17)
+
+Astra round 3: "DISPATCH SLICE 0. Blockers: none. Should-fix: none
+remaining." Confirmed the corrected killer in memory (removing
+encounter.ts:10025 fails composition.test.ts:333 with draws 3 vs 2),
+STOP/re-plan wording, slice-0 freeze/double-capture/hash order; closure
+counts 69/1/70/77 unchanged; plan and frozen-contract hashes match.
+Supervisor dispatch: slice 0 (zero repository files) then slice 1 (five
+files) in one lane, since slice 0 alone yields nothing reviewable but
+hashes; one path amendment: capture artifacts under the worktree's
+gitignored .tmp/session-command-transaction/ instead of /tmp (D587.4/
+D587.10). Fresh session 01a08462-95cf-7e83-9c48-bf83e5771394, brief
+impl-txn-s1.md, marker TXN-S1 DONE. Known sandbox limit stated: the
+symlinked node_modules may EROFS vitest; the supervisor runs the
+cumulative in that case.
