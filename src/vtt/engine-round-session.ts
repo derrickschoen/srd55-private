@@ -36,7 +36,11 @@ import {
   type GuidedReactionResolution,
   type ReactionGuidanceDeclaration,
 } from './reaction-guidance';
-import { resolveSessionBoundaryDecisions } from './session-command-transaction';
+import {
+  resolveSessionBoundaryDecisions,
+  runSessionCommandTransaction,
+  type CompletedSessionCommandTrial,
+} from './session-command-transaction';
 import { reduceSessionEncounter } from './session-encounter-reducer';
 import type { ScriptedPartyTurnMaterialization } from './scripted-party-round';
 import type { HostScenario, HostSplitCandidate } from './speculative-plan-types';
@@ -468,54 +472,39 @@ export class EngineRoundSession {
       active?.profile.kind !== 'player_character' || active.life !== 'living') {
       throw new Error(`Scripted PC turn ${turn.actorId} is not the active living player character.`);
     }
-    const beforeRevision = this.#state.revision;
-    const trialRng = restoreMulberry32(this.#rng.snapshot());
-    const fallbackResolutions: AutoResolvedReactionOffer[] = [];
-    const guidedResolutions: GuidedReactionResolution[] = [];
-    const reduce = (state: EncounterState, command: EncounterCommand): EncounterState => {
-      const reduced = reduceOne(state, command, trialRng);
-      const resolved = resolveSessionBoundaryDecisions(
-        reduced,
-        trialRng,
-        reduceSessionEncounter,
-        this.policy,
-        guidance,
-        'initiative_segment',
-      );
-      fallbackResolutions.push(...resolved.fallbackResolutions);
-      guidedResolutions.push(...resolved.guidedResolutions);
-      return resolved.state;
-    };
-    const initialBoundary = resolveSessionBoundaryDecisions(
-      this.#state,
-      trialRng,
-      reduceSessionEncounter,
-      this.policy,
+    const outcome = runSessionCommandTransaction({
+      state: this.#state,
+      random: { fork: () => restoreMulberry32(this.#rng.snapshot()) },
+      reducer: reduceSessionEncounter,
+      boundaryPolicy: this.policy,
       guidance,
-      'initiative_segment',
-    );
-    fallbackResolutions.push(...initialBoundary.fallbackResolutions);
-    guidedResolutions.push(...initialBoundary.guidedResolutions);
-    let state = initialBoundary.state;
-    for (const command of turn.reducerCommands) {
-      if (state.activeCombatant !== turn.actorId) {
-        throw new Error(`Scripted PC turn ${turn.actorId} attempted to cross an initiative boundary.`);
+      boundaryScope: 'initiative_segment',
+      initialBoundary: 'resolve_before_program',
+    }, (commands) => {
+      let state = commands.currentState();
+      for (const command of turn.reducerCommands) {
+        if (state.activeCombatant !== turn.actorId) {
+          throw new Error(`Scripted PC turn ${turn.actorId} attempted to cross an initiative boundary.`);
+        }
+        if (!('actor' in command) || command.actor !== turn.actorId) {
+          throw new Error(`Scripted PC turn ${turn.actorId} may apply only that actor's reducer commands.`);
+        }
+        state = commands.apply(command);
       }
-      if (!('actor' in command) || command.actor !== turn.actorId) {
-        throw new Error(`Scripted PC turn ${turn.actorId} may apply only that actor's reducer commands.`);
+      if (state.activeCombatant === turn.actorId) {
+        state = commands.apply({ type: 'end_turn', actor: turn.actorId });
       }
-      state = reduce(state, command);
-    }
-    if (state.activeCombatant === turn.actorId) {
-      state = reduce(state, { type: 'end_turn', actor: turn.actorId });
-    }
-    state = advancePastUnavailableActiveCombatant(state, reduce);
-    this.#state = canonicalEncounterState(state).state;
-    this.#rng = trialRng;
+      return advancePastUnavailableActiveCombatant(
+        state,
+        (_state, command) => commands.apply(command),
+      );
+    });
+    if (outcome.kind === 'rolled_back') throw outcome.error;
+    this.#commitCompletedTrial(outcome);
     return {
-      revisionDelta: this.#state.revision - beforeRevision,
-      fallbackResolutions,
-      guidedResolutions,
+      revisionDelta: outcome.revisionDelta,
+      fallbackResolutions: outcome.fallbackResolutions,
+      guidedResolutions: outcome.guidedResolutions,
     };
   }
 
@@ -638,6 +627,14 @@ export class EngineRoundSession {
       guidedResolutions,
       deviationResolutions,
     };
+  }
+
+  #commitCompletedTrial<TValue>(
+    completed: CompletedSessionCommandTrial<TValue, SerializableRng>,
+  ): void {
+    const canonicalState = canonicalEncounterState(completed.state).state;
+    this.#state = canonicalState;
+    this.#rng = completed.random;
   }
 
   #capsule(request: EngineRoundCapsuleRequest): EngineStateCapsule {
