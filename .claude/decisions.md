@@ -22065,3 +22065,10 @@ the engine's default recommendation, (2) have a strong model (sol high) find it,
 luna medium finds the same play. The engine-side bounded question (does the better play exist and by how much) is the certificate
 for (1), not the product; the product is the sol→luna distillation loop of D586.39/40. Room D slice-2's completeness/memory
 instrumentation is engineering hygiene for that certificate and must be weighed against getting to steps (2) and (3).
+
+## D598 — OWNER: Room D — get the answer, skip slice 2 (2026-09-09)
+
+Q8 answered 2026-09-09 19:21 EDT: "Get the answer, skip slice 2". Merge slices 0+1 (9781b93f on claude/challenge-rooms) to main after a
+main-shaped gate; run the bounded enumeration end to end (slice 3, fresh-process CLI) to learn whether Dodge beats Spear by
+>= 3/20; then start the sol-high → luna-medium loop on Room D per D597. Slice 2 (candidate 212f1acb) stays shelved and its four
+residuals are recorded as open hygiene, not blockers. Alternatives not chosen: reopen slice 2 first; drop Room D; defer.
