@@ -1,9 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { canonicalJson } from '../../../src/commands/canonical-json';
 import { combatToken, monsterCombatantProfile } from '../../../src/combat/combatant';
-import { createEncounter, reduceEncounter, type EncounterState } from '../../../src/combat/encounter';
+import {
+  createEncounter,
+  evaluateMonsterTacticalAttack,
+  reduceEncounter,
+  type EncounterState,
+} from '../../../src/combat/encounter';
 import type { EncounterCommand } from '../../../src/combat/events';
+import { monsterAttackCommand } from '../../../src/combat/monster-commands';
 import { mulberry32 } from '../../../src/combat/random';
+import type { MonsterAttackAction } from '../../../src/combat/statblock';
 import { UNICORN } from '../../../src/combat/statblocks/monsters';
 import {
   armorClass,
@@ -25,8 +32,10 @@ import {
   pureTurnProposalResolver,
   type EngineTurnProposal,
 } from '../../../src/vtt/intent-resolver';
+import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
 import { generateRoom } from '../../../src/vtt/room-generator';
 import { freshMonsterPlanningState, projectFutureMonsterTurns } from '../../../src/vtt/monster-planning-state';
+import { reduceSessionEncounter } from '../../../src/vtt/session-encounter-reducer';
 import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
 
 const REQUEST: EngineRoundCapsuleRequest = {
@@ -529,6 +538,201 @@ describe('authoritative engine round session', () => {
     if (attackEvent?.type !== 'attack_resolved') throw new Error('Missing recovered PC attack event.');
     expect(attackEvent.attack.roll.faces).toEqual([expectedAttackFace]);
     expect(attackEvent.damage?.terms[0]?.roll.faces).toEqual([]);
+  });
+
+  it('discards failed monster state, evidence, and randomness before a control-identical success', () => {
+    const positioned = segmentedState(new Map([
+      [CLERIC_ID, { column: 0, row: 0 }],
+      [KILLER_ID, { column: 1, row: 0 }],
+      [FOCUS_ID, { column: 15, row: 0 }],
+      [ARCHER_ID, { column: 20, row: 0 }],
+    ]));
+    const state: EncounterState = {
+      ...positioned,
+      combatants: positioned.combatants.map((combatant) => {
+        if (combatant.profile.id === FOCUS_ID || combatant.profile.id === KILLER_ID) {
+          return {
+            ...combatant,
+            hitPoints: 1_000,
+            profile: {
+              ...combatant.profile,
+              rules: { ...combatant.profile.rules, armorClass: armorClass(1) },
+            },
+          };
+        }
+        return combatant;
+      }),
+    };
+    const first = authorized(state, attackProposal(state, KILLER_ID, 'dagger', FOCUS_ID));
+    const second = authorized(state, attackProposal(state, ARCHER_ID, 'longbow', FOCUS_ID));
+    expect(first.mechanics.path.length).toBeGreaterThan(0);
+    const rollbackError = new Error('sentinel monster live re-resolution failure');
+    const invalidSecond: AuthorizedEngineTurnProposal = {
+      ...second,
+      get primaryOption(): AuthorizedEngineTurnProposal['primaryOption'] {
+        throw rollbackError;
+      },
+    };
+    const seed = 58_430_001;
+    const failedSession = new EngineRoundSession(
+      state,
+      mulberry32(seed),
+      { kind: 'unattended', askDefault: 'take' },
+    );
+    const untouchedControl = new EngineRoundSession(
+      state,
+      mulberry32(seed),
+      { kind: 'unattended', askDefault: 'take' },
+    );
+    const beforeFailureBytes = canonicalJson(failedSession.currentState());
+
+    let caught: unknown;
+    try {
+      failedSession.applyResolvedMechanics([first, invalidSecond], null);
+    } catch (error: unknown) {
+      caught = error;
+    }
+
+    expect(caught).toBe(rollbackError);
+    expect(canonicalJson(failedSession.currentState())).toBe(beforeFailureBytes);
+    expect(failedSession.currentState()).toEqual(untouchedControl.currentState());
+
+    const recovered = failedSession.applyResolvedMechanics([first], null);
+    const control = untouchedControl.applyResolvedMechanics([first], null);
+    expect(recovered).toEqual(control);
+    expect(recovered).toEqual({
+      revisionDelta: 6,
+      fallbackResolutions: [{
+        decisionId: 'decision:1',
+        combatant: CLERIC_ID,
+        reactionKind: 'opportunity_attack',
+        configuredPolicy: 'ask',
+        askDefault: 'take',
+        resolution: 'accept',
+      }],
+      guidedResolutions: [],
+      deviationResolutions: [],
+    });
+    expect(canonicalJson(failedSession.currentState()))
+      .toBe(canonicalJson(untouchedControl.currentState()));
+  });
+
+  it('commits monster application randomness across two successful calls', () => {
+    const positioned = segmentedState(new Map([
+      [KILLER_ID, { column: 1, row: 0 }],
+      [FOCUS_ID, { column: 4, row: 0 }],
+      [ARCHER_ID, { column: 7, row: 0 }],
+    ]));
+    const durableTarget: EncounterState = {
+      ...positioned,
+      combatants: positioned.combatants.map((combatant) => combatant.profile.id === FOCUS_ID
+        ? {
+            ...combatant,
+            hitPoints: 1_000,
+            profile: {
+              ...combatant.profile,
+              rules: { ...combatant.profile.rules, armorClass: armorClass(1) },
+            },
+          }
+        : combatant),
+    };
+    const started = reduceEncounter(
+      durableTarget,
+      { type: 'roll_initiative' },
+      mulberry32(58_430_002),
+    ).state;
+    expect(started.activeCombatant).toBe(FOCUS_ID);
+    const seed = 58_430_003;
+    const session = new EngineRoundSession(
+      started,
+      mulberry32(seed),
+      { kind: 'unattended', askDefault: 'decline' },
+    );
+    const first = authorized(started, attackProposal(started, KILLER_ID, 'dagger', FOCUS_ID));
+
+    const firstResult = session.applyResolvedMechanics([first], null);
+    const afterFirst = session.currentState();
+    const second = authorized(afterFirst, attackProposal(afterFirst, ARCHER_ID, 'longbow', FOCUS_ID));
+    const secondResult = session.applyResolvedMechanics([second], null);
+    const afterSecond = session.currentState();
+
+    expect(firstResult).toEqual({
+      revisionDelta: 3,
+      fallbackResolutions: [],
+      guidedResolutions: [],
+      deviationResolutions: [],
+    });
+    expect(secondResult).toEqual({
+      revisionDelta: 2,
+      fallbackResolutions: [],
+      guidedResolutions: [],
+      deviationResolutions: [],
+    });
+
+    const directAttack = (
+      current: EncounterState,
+      actorId: CombatantId,
+      actionId: string,
+      targetId: CombatantId,
+      rng: ReturnType<typeof mulberry32>,
+    ): EncounterState => {
+      const action = canonicalEngineQueryPort.actions(current, actorId)
+        .find((candidate): candidate is MonsterAttackAction =>
+          candidate.kind === 'attack' && candidate.id === actionId);
+      if (action === undefined) throw new Error(`Direct oracle omitted ${actionId}.`);
+      const evaluation = evaluateMonsterTacticalAttack(current, action, actorId, targetId);
+      return reduceSessionEncounter(
+        current,
+        monsterAttackCommand(action, actorId, targetId, evaluation.rollMode.mode),
+        rng,
+      ).state;
+    };
+    const applicationFaces = (events: EncounterState['eventLog']): readonly (readonly number[])[] =>
+      events.flatMap((event) => event.type === 'attack_resolved'
+        ? [event.attack.roll.faces, ...(event.damage?.terms.map((term) => term.roll.faces) ?? [])]
+        : []);
+
+    const oracleRng = mulberry32(seed);
+    let oracleState = reduceSessionEncounter(
+      started,
+      { type: 'end_turn', actor: FOCUS_ID },
+      oracleRng,
+    ).state;
+    const firstOracleStart = oracleState.eventLog.length;
+    oracleState = directAttack(oracleState, KILLER_ID, 'dagger', FOCUS_ID, oracleRng);
+    oracleState = reduceSessionEncounter(
+      oracleState,
+      { type: 'end_turn', actor: KILLER_ID },
+      oracleRng,
+    ).state;
+    const firstOracleFaces = applicationFaces(oracleState.eventLog.slice(firstOracleStart));
+    const secondOracleStart = oracleState.eventLog.length;
+    oracleState = directAttack(oracleState, ARCHER_ID, 'longbow', FOCUS_ID, oracleRng);
+    oracleState = reduceSessionEncounter(
+      oracleState,
+      { type: 'end_turn', actor: ARCHER_ID },
+      oracleRng,
+    ).state;
+    const secondOracleFaces = applicationFaces(oracleState.eventLog.slice(secondOracleStart));
+    const firstSessionFaces = applicationFaces(afterFirst.eventLog.slice(started.eventLog.length));
+    const secondSessionFaces = applicationFaces(afterSecond.eventLog.slice(afterFirst.eventLog.length));
+    expect([...firstSessionFaces, ...secondSessionFaces])
+      .toEqual([...firstOracleFaces, ...secondOracleFaces]);
+    expect(oracleRng.snapshot().draws).toBeGreaterThan(0);
+
+    const restartedRng = mulberry32(seed);
+    const restartedSecond = directAttack(
+      afterFirst,
+      ARCHER_ID,
+      'longbow',
+      FOCUS_ID,
+      restartedRng,
+    );
+    const restartedSecondFaces = applicationFaces(
+      restartedSecond.eventLog.slice(afterFirst.eventLog.length),
+    );
+    expect(secondOracleFaces).not.toEqual(restartedSecondFaces);
+    expect(secondSessionFaces).toEqual(secondOracleFaces);
   });
 
   it.each([3_943_004, 3_943_007])(
