@@ -19084,3 +19084,19 @@ Executed under the rulings:
   (vitest, sg scan, tsc -b) launched for both; Astra reviews follow.
 - mcp-request-client fix round DONE (lane claim); Astra round 2 review
   launched with the uncommitted diff.
+
+## D587.10 — OWNER: conversation temp dirs deleted under the same rule; correction of a premature test count (2026-09-08 23:25)
+
+Owner, asked as a follow-up to question 4: "Yes, same rule". Removed
+17,146 dirs (dnd-ai-dm-conversation-* and
+dnd-conversation-tiered-correction-*, older than 60 minutes, no process
+cwd inside); 682 recent ones remain; /tmp went from 20 GB to 9.4 GB and
+free space rose from 318 GB to 329 GB.
+
+CORRECTION to D587.1–9 above: I wrote "Tests 21/21" for
+pool4_contrasts_test.py before the run had finished; the first run had
+one error (a renamed helper in a new test) and judge-one-test.sh had
+seven failing checks (an assertion that counted braces inside the
+packet). Both were test-side defects, fixed; the verified results are
+pool4_contrasts_test.py 21 passed and judge-one-test.sh 43 passed, and
+those numbers, not the earlier ones, went into the Astra brief.
