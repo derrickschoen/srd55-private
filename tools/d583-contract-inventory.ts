@@ -7,6 +7,8 @@ import ts from 'typescript';
 const ROOT = resolve(import.meta.dirname, '..');
 export const D583_BASELINE_SHA256 = '60249dadaf466df9b53eec4e9805e41f70b665f358f81cccec3a0271466d1224';
 export const SESSION_TRANSACTION_BASELINE_SHA256 = 'c79d8d15ea7b292efa9d5a21bcba20454072f267300ddd1428b3cfbd91d3a6df';
+export const TRIAL_CORE_RECONCILIATION_BASELINE_SHA256 =
+  'd798c8db3174b31ba8c2663d8c5702b4981e33d282fdfa656d495d05e8e9a00a';
 
 export const SESSION_TRANSACTION_BASELINE_SPECS = [
   'tests/integration/vtt/ai-dm-combat-model.test.ts',
@@ -25,6 +27,21 @@ export const SESSION_TRANSACTION_BASELINE_SPECS = [
   'tests/unit/vtt/hypnotic-pattern-probe.test.ts',
   'tests/unit/vtt/mixed-kind-multiattack.test.ts',
   'tests/unit/vtt/reaction-guidance.test.ts',
+  'tests/unit/vtt/renderer-profile.test.ts',
+  'tests/unit/vtt/session-command-transaction.test.ts',
+  'tests/unit/vtt/unicorns-blessing-consistency.test.ts',
+];
+
+export const TRIAL_CORE_RECONCILIATION_BASELINE_SPECS = [
+  'tests/unit/combat/roll-provenance.test.ts',
+  'tests/unit/tools/d583-contract-inventory.test.ts',
+  'tests/unit/vtt/arena-basis-brutal-b.test.ts',
+  'tests/unit/vtt/challenge-feasibility.test.ts',
+  'tests/unit/vtt/composite-turn-proposals.test.ts',
+  'tests/unit/vtt/engine-context-integrations.test.ts',
+  'tests/unit/vtt/engine-round-session.test.ts',
+  'tests/unit/vtt/hypnotic-pattern-probe.test.ts',
+  'tests/unit/vtt/mixed-kind-multiattack.test.ts',
   'tests/unit/vtt/renderer-profile.test.ts',
   'tests/unit/vtt/session-command-transaction.test.ts',
   'tests/unit/vtt/unicorns-blessing-consistency.test.ts',
@@ -78,12 +95,14 @@ export function reverseConsumerClosure(
 export function contractInventoryUnion(
   d583Baseline: readonly string[],
   transactionBaseline: readonly string[],
+  reconciliationBaseline: readonly string[],
   changedSpecs: readonly string[],
   consumers: ReadonlySet<string>,
 ): readonly string[] {
   return [...new Set([
     ...d583Baseline,
     ...transactionBaseline,
+    ...reconciliationBaseline,
     ...changedSpecs,
     ...consumers,
   ])].sort();
@@ -159,17 +178,26 @@ function resolveLocal(importer: string, specifier: string): string | null {
   throw new Error(`Unresolved relative dependency ${specifier} from ${importer}.`);
 }
 
+function gitOutput(args: readonly string[]): string | null {
+  try {
+    return execFileSync('git', args, {
+      cwd: ROOT,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+  } catch (_error: unknown) {
+    return null;
+  }
+}
+
 function changedPaths(): readonly string[] {
-  const mergedMain = execFileSync('git', ['merge-base', 'HEAD', 'main'], {
-    cwd: ROOT, encoding: 'utf8',
-  }).trim();
-  const committed = execFileSync('git', ['diff', '--name-only', 'main', '--'], {
-    cwd: ROOT, encoding: 'utf8',
-  });
-  const branchCommitted = new Set(execFileSync('git', ['diff', '--name-only', mergedMain, '--'], {
-    cwd: ROOT, encoding: 'utf8',
-  }).split('\n').filter((path) => path.length > 0));
-  const untracked = execFileSync('git', ['ls-files', '--others', '--exclude-standard'], { cwd: ROOT, encoding: 'utf8' });
+  const mergedMain = gitOutput(['merge-base', 'HEAD', 'main'])?.trim() ?? '';
+  const committed = gitOutput(['diff', '--name-only', 'main', '--']) ?? '';
+  const branchCommitted = new Set((mergedMain === ''
+    ? ''
+    : gitOutput(['diff', '--name-only', mergedMain, '--']) ?? '')
+    .split('\n').filter((path) => path.length > 0));
+  const untracked = gitOutput(['ls-files', '--others', '--exclude-standard']) ?? '';
   const changed = [...new Set(`${committed}\n${untracked}`.split('\n').filter((path) => path.length > 0))].sort();
   for (const path of changed) {
     if (path.startsWith('tests/') && path.endsWith('.test.ts') &&
@@ -180,7 +208,9 @@ function changedPaths(): readonly string[] {
   return changed.filter((path) => existsSync(resolve(ROOT, path)));
 }
 
-export function buildD583ContractInventory(): readonly string[] {
+export function buildD583ContractInventory(
+  input: Readonly<{ changedPaths?: readonly string[] }> = {},
+): readonly string[] {
   if (D583_BASELINE_SPECS.length !== 140 || inventoryDigest(D583_BASELINE_SPECS) !== D583_BASELINE_SHA256) {
     throw new Error('D583 inherited 140-spec baseline count or SHA-256 changed.');
   }
@@ -194,6 +224,13 @@ export function buildD583ContractInventory(): readonly string[] {
   for (const path of SESSION_TRANSACTION_BASELINE_SPECS) if (!existsSync(resolve(ROOT, path))) {
     throw new Error(`Session transaction inherited spec is missing: ${path}`);
   }
+  if (TRIAL_CORE_RECONCILIATION_BASELINE_SPECS.length !== 12 ||
+    inventoryDigest(TRIAL_CORE_RECONCILIATION_BASELINE_SPECS) !== TRIAL_CORE_RECONCILIATION_BASELINE_SHA256) {
+    throw new Error('Trial-core reconciliation 12-spec baseline count or SHA-256 changed.');
+  }
+  for (const path of TRIAL_CORE_RECONCILIATION_BASELINE_SPECS) if (!existsSync(resolve(ROOT, path))) {
+    throw new Error(`Trial-core reconciliation spec is missing: ${path}`);
+  }
   const files = sourceFiles(ROOT);
   const reverse = new Map<string, Set<string>>();
   for (const importer of files) {
@@ -206,7 +243,7 @@ export function buildD583ContractInventory(): readonly string[] {
       reverse.set(resolved, consumers);
     }
   }
-  const changed = changedPaths();
+  const changed = input.changedPaths ?? changedPaths();
   const consumers = reverseConsumerClosure(
     changed.filter((path) => /\.(?:ts|tsx|mts|cts)$/.test(path)),
     reverse,
@@ -215,6 +252,7 @@ export function buildD583ContractInventory(): readonly string[] {
   return contractInventoryUnion(
     D583_BASELINE_SPECS,
     SESSION_TRANSACTION_BASELINE_SPECS,
+    TRIAL_CORE_RECONCILIATION_BASELINE_SPECS,
     changedSpecs,
     consumers,
   );
