@@ -20858,3 +20858,22 @@ parent-alias mutant with a callable parent RNG and the snapshot/
 control-divergence killer; re-run every slice-1 control with
 before/mutant/restored hashes logged; the plan:344 wording; no
 cumulative re-run unless code changes.
+
+## D586.120 — reconciliation slice 1 fix round 2 harvested (controls only, no code change); Astra round 2 launched with the closed cumulative (2026-09-09 05:18)
+
+Lane exit 0, RECONCILE-S1-R2 DONE; claims: the parent-alias mutant redone
+with a callable parent RNG reaching all three snapshot/control-divergence
+assertions; all eleven slice-1 controls re-run with 33 before/mutant/
+restored hash sections and byte-identical restoration, logged to
+.tmp/session-command-transaction/mutations-reconcile-s1.log (158 lines,
+sha 753501bb...); plan:344 wording corrected (plan sha now 20c8dbfa...);
+no control exposed a defect; no production or test change, so the
+cumulative and the challenge report were not re-run; sg 0; tsc 0; diff
+--check 0; manifest 5/5; capture cmp 0; historical report and frozen
+contract hashes intact; tree clean. Verified by me: `sg scan` exit 0;
+manifest `sha256sum -c` 5 OK; the controls log exists; only the echoed
+header matches `claude -p`; candidate still 31e98af5. The corrected plan
+copy was propagated to the txn worktree. Astra round 2 launched (brief
+review-impl-reconcile-s1-r2.md, session 01a08575-6296-7cf1-a1ff-fee260f73ba7)
+carrying my cumulative (4148/4154, six timeouts) and serial rerun
+(187/187) evidence, reconciled 4154/4154.
