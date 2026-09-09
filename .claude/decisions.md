@@ -19293,3 +19293,15 @@ needed. Resumed the planning session (01a0842b-042d-7383-b07c-e970396080e7) with
   30 s "frozen brutal-b room" test that timed out under load passed
   serially. So slice 3's two remaining reds are the pre-merge budget
   (clears on merging main) and a load artefact — no slice defect.
+
+## D586.51 — conversation-row-codec slice 1 ACCEPTED (Astra round 2, no findings) and COMMITTED on claude/p-rowcodec (2026-09-08 23:50)
+
+Astra: "ACCEPT SLICE 1 ... Blockers: none. Should-fix: none", verified
+by reading the reorder at codec line 292 and the new both-violations
+test at line 135, and reconciled the inventory to 11 specs / 218 cases:
+217 passed, one timeout (the D544 round-robin test at its pre-merge 5 s
+budget, b2cd4ec4 absent from that HEAD). Supervisor on the final tree
+after the reorder: sg scan 0, the two changed specs 28/28. Committed
+2af3d941. Queued for main with mcp-client (89d9c4df) and, pending its
+review, elevation (db6f33a6): merge order mcp-client, rowcodec, then a
+main gate; elevation after its verdict.
