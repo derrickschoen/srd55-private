@@ -35,6 +35,8 @@ export interface EngineCommandBoundaryResult extends EngineCommandBoundaryResolu
 export interface ReducerApplicationAccounting {
   /** Called immediately before every attempted reducer application, including automatic boundary work. */
   attempted(): void;
+  /** Called after every reducer application returns or refuses, so resource limits observe the work it performed. */
+  completed(): void;
 }
 
 interface MutableBoundaryEvidence {
@@ -51,9 +53,13 @@ function reduceAndRecord(
   accounting: ReducerApplicationAccounting | null,
 ): EncounterState {
   accounting?.attempted();
-  const reduced = reduceSessionEncounter(state, command, rng);
-  evidence.events.push(...reduced.events);
-  return reduced.state;
+  try {
+    const reduced = reduceSessionEncounter(state, command, rng);
+    evidence.events.push(...reduced.events);
+    return reduced.state;
+  } finally {
+    accounting?.completed();
+  }
 }
 
 export function resolveEngineCommandBoundary(

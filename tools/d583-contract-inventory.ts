@@ -102,9 +102,24 @@ function resolveLocal(importer: string, specifier: string): string | null {
 }
 
 function changedPaths(): readonly string[] {
-  const committed = execFileSync('git', ['diff', '--name-only', '493121dd'], { cwd: ROOT, encoding: 'utf8' });
+  const mergedMain = execFileSync('git', ['merge-base', 'HEAD', 'main'], {
+    cwd: ROOT, encoding: 'utf8',
+  }).trim();
+  const committed = execFileSync('git', ['diff', '--name-only', 'main', '--'], {
+    cwd: ROOT, encoding: 'utf8',
+  });
+  const branchCommitted = new Set(execFileSync('git', ['diff', '--name-only', mergedMain, '--'], {
+    cwd: ROOT, encoding: 'utf8',
+  }).split('\n').filter((path) => path.length > 0));
   const untracked = execFileSync('git', ['ls-files', '--others', '--exclude-standard'], { cwd: ROOT, encoding: 'utf8' });
-  return [...new Set(`${committed}\n${untracked}`.split('\n').filter((path) => path.length > 0))].sort();
+  const changed = [...new Set(`${committed}\n${untracked}`.split('\n').filter((path) => path.length > 0))].sort();
+  for (const path of changed) {
+    if (path.startsWith('tests/') && path.endsWith('.test.ts') &&
+      !existsSync(resolve(ROOT, path)) && branchCommitted.has(path)) {
+      throw new Error(`D583 changed spec was deleted: ${path}`);
+    }
+  }
+  return changed.filter((path) => existsSync(resolve(ROOT, path)));
 }
 
 export function buildD583ContractInventory(): readonly string[] {

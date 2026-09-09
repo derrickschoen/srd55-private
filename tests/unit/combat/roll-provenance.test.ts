@@ -291,7 +291,8 @@ describe('independent roll provenance', () => {
     const left = componentTotals(rollComponentId('left'), dice(1, 4));
     const right = componentTotals(rollComponentId('right'), dice(1, 4));
     expect(convolveIndependentDistributions(left, right).outcomes).toHaveLength(7);
-    expect(() => convolveIndependentDistributions(left, left)).toThrow(RollProvenanceError);
+    const repeated = componentTotals(rollComponentId('left'), dice(1, 4));
+    expect(() => convolveIndependentDistributions(left, repeated)).toThrow(RollProvenanceError);
   });
 
   it('prefixFromTrace preserves canonical attempted interval evidence', () => {
