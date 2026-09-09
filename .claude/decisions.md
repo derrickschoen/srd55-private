@@ -20588,3 +20588,40 @@ an unavailable-option rejection. Both are real. This is the final fix
 round: whatever the running Astra verdict says, the D584.4 contract is
 not met on the final candidate, so the slice cannot be accepted as it
 stands. Disposition recorded when Astra's verdict lands.
+
+## D586.106 — promo180 Slice H SHELVED at the final review round; owner ruling needed to reopen the D587 steering experiment's first slice (2026-09-09 03:52)
+
+Astra round 3 on 0f292f91: REJECT, three blockers, all in the D474/
+expiry semantics: an empty structured correction still escalates
+(ai-dm-conversation.ts:4971 marks every rejected structured result incl.
+decision_missing as validation evidence; the coordinator-only regression
+passes only because its supplied flag is false); a refusal DURING
+correction no longer escalates (:4993 keeps correction text without
+recognising refusal; "I cannot submit this round proposal." after one
+invalid proposal -> two base calls, zero escalations); expiry after
+adoption validation persists `outcome: authorized` with two executed
+segments instead of the requested refused row (:5540 assigns success
+unconditionally). Should-fix: the recalculation regression tests the
+helper alone. Confirmed: the arena escalation assertion change IS
+justified (the fixture injects only an invalid initial submission);
+speculation submits a valid queued fixture; recalculation expiry
+retains 0 entries; fallback injections persist 0 ms; five mutation
+tests with receipt states; eleven files; merged tests untouched.
+Together with my round-3 cumulative (D586.105: the speculation test
+still times out with a real MCP child; a new chain-evidence assertion
+red) the slice fails both gates at the round cap and is SHELVED.
+Candidate stays on claude/p-promo180 at 0f292f91, unmerged; the plan
+(sha 699254a4...) remains approved. Finding against the lane's
+reporting: it declared the speculation test green at 3.55 s from a
+sandbox where the MCP child fails fast, so its focused evidence for
+that test was vacuous; supervisor cumulatives on a writable checkout
+are the only admissible evidence for MCP-spawning specs (already the
+rule; restated).
+
+For the owner: Slice H is the first implementation slice of the D587
+Luna-steering experiment (D587.5/D587.6, "distillation data first").
+The residual defects are concrete and bounded (D474 trigger evidence
+for empty and refusing corrections, the refused-row outcome on expiry,
+the speculation test hanging with a real MCP child, one chain-evidence
+assertion), but reopening after a third-round shelve is the owner's
+call under the standing protocol; not launched autonomously.
