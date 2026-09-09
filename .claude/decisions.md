@@ -21346,3 +21346,18 @@ known files only (log mainshape-room-d-s2-rerun.log). This candidate is
 already REJECTED (D586.139); the round-2 candidate gets a full supervisor
 cumulative with the complete vitest output written to file, and that run
 is the admissible D584.4 evidence.
+
+## D586.142 — runbook rg fix-up harvested; FINAL Astra review launched (2026-09-09 07:50)
+
+Lane resume (real session 01a085a4-…, 22,822 tokens, exit 0, RUNBOOK R3B
+DONE): every `rg` replaced by `grep -E` forms (-x, -o, -q, -n -i), 8
+converted patterns self-checked, 15 saved-script blocks syntax-checked,
+gate self-test n=7 passed, clean-environment probe (`env -i`) matched
+`codex-cli 0.153.4`; saved-script hashes are install-time generated so no
+embedded hash needed updating; three probe files created and deleted.
+Supervisor verified: 1,679 lines, sha256 84326354… matches the file on
+disk, zero `\brg\b` occurrences, worktree clean, no probe files left.
+Astra round 3 (FINAL) launched read-only (brief
+review-d569-v5-runbook-r3.md, log astra-review-d569-v5-runbook-r3.log).
+An ACCEPT WITH FIXES at this round may list only verbatim edits the
+supervisor applies; a REJECT shelves the runbook.
