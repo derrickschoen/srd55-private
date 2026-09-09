@@ -2,14 +2,16 @@ import { describe, expect, it } from 'vitest';
 import { sha256 } from '../../../src/crypto/sha256';
 import {
   D569_BOOTSTRAP_RESAMPLES,
+  D569_ANALYSIS_COMPARISONS,
   D569_CORE_ARM_IDENTITIES,
   D569_EXPERIMENT_MANIFEST_PATH,
   D569_HINT_ARM_IDENTITIES,
   D569_JUDGE_PANEL_IDENTITIES,
   D569_PREREGISTRATION_AMENDMENTS,
   D569_REFUSAL_RISK_MARGIN,
+  REQUIRED_REPAIR_COMPARISONS,
   D569_SECOND_FAMILY_MANIFEST_PATH,
-  D575_ANALYSIS_COMPARISONS,
+  analyzeD569DiagnosticPair,
   analyzeD569Pair,
   d569OverrideImprovement,
   dryRunD569Experiment,
@@ -21,10 +23,12 @@ import {
   validateD569ObservedRows,
   validateD569OverrideEvidence,
   type D569AnalysisRow,
+  type D569DiagnosticPairAnalysis,
   type D569ExperimentManifest,
   type D569ExperimentValidationAccess,
   type D569ObservedRow,
   type D569OverrideEvidence,
+  type D569PairAnalysis,
   type D569PanelComponents,
 } from '../../../tools/d569-blind-experiment';
 import { D569_SECOND_FAMILY_SEEDS } from '../../../tools/d569-second-family-manifest';
@@ -104,6 +108,69 @@ const fixtureBytes = new Map<string, string>(ALL_INPUT_PATHS.map((path) => [
   inputs.fixtures.readText(path),
 ]));
 
+const EXPECTED_V4_AMENDMENTS = [
+  {
+    id: 'refusal-risk-upper-bound',
+    timing: 'pre-results',
+    reason: 'The prior lower-bound check allowed an increased refusal risk compatible with the data.',
+  },
+  {
+    id: 'remove-fable-player-arms',
+    timing: 'pre-results',
+    reason: 'Fable usage exhausted; no replacement in this registration',
+  },
+  {
+    id: 'fresh-context-judge-eligibility',
+    timing: 'pre-results',
+    reason: 'Owner ruling D578.3: "It is ok for the same model to judge if it starts from a fresh context".',
+  },
+  {
+    id: 'add-astra-high-player-arms',
+    timing: 'pre-astra-run-and-analysis',
+    date: '2026-09-08',
+    reason: 'Owner ruling D586.24 requires Astra at high effort for a fair comparison with Sol high; this amendment was recorded before any Astra player arm was run or scored.',
+  },
+] as const;
+
+const EXPECTED_CORE_ARMS = [
+  { id: 'gpt-5.6-luna-blind', model: 'gpt-5.6-luna', effort: 'high', dmMode: 'blind', repair: 'code_only', adviceAssisted: false },
+  { id: 'gpt-5.6-luna-advice', model: 'gpt-5.6-luna', effort: 'high', dmMode: 'advice', repair: null, adviceAssisted: true },
+  { id: 'claude-opus-5-blind', model: 'claude-opus-5', effort: 'high', dmMode: 'blind', repair: 'code_only', adviceAssisted: false },
+  { id: 'claude-opus-5-advice', model: 'claude-opus-5', effort: 'high', dmMode: 'advice', repair: null, adviceAssisted: true },
+  { id: 'gpt-5.6-sol-blind', model: 'gpt-5.6-sol', effort: 'high', dmMode: 'blind', repair: 'code_only', adviceAssisted: false },
+  { id: 'gpt-5.6-sol-advice', model: 'gpt-5.6-sol', effort: 'high', dmMode: 'advice', repair: null, adviceAssisted: true },
+  { id: 'gpt-6-astra-blind', model: 'gpt-6-astra', effort: 'high', dmMode: 'blind', repair: 'code_only', adviceAssisted: false },
+  { id: 'gpt-6-astra-advice', model: 'gpt-6-astra', effort: 'high', dmMode: 'advice', repair: null, adviceAssisted: true },
+] as const;
+
+const EXPECTED_HINT_ARMS = [
+  { id: 'gpt-5.6-luna-blind-minhint', model: 'gpt-5.6-luna', effort: 'high', dmMode: 'blind', repair: 'minimal_legal_alternative', adviceAssisted: true },
+  { id: 'gpt-5.6-sol-blind-minhint', model: 'gpt-5.6-sol', effort: 'high', dmMode: 'blind', repair: 'minimal_legal_alternative', adviceAssisted: true },
+  { id: 'gpt-6-astra-blind-minhint', model: 'gpt-6-astra', effort: 'high', dmMode: 'blind', repair: 'minimal_legal_alternative', adviceAssisted: true },
+] as const;
+
+const EXPECTED_ANALYSIS_COMPARISONS = [
+  { id: 'gpt-5.6-luna-blind-vs-advice', leftArm: 'gpt-5.6-luna-blind', rightArm: 'gpt-5.6-luna-advice', estimand: 'blind_minus_own_advice', eligibleJudgeSeats: ['gpt-5.6-sol', 'claude-opus-5', 'gpt-6-astra'] },
+  { id: 'claude-opus-5-blind-vs-advice', leftArm: 'claude-opus-5-blind', rightArm: 'claude-opus-5-advice', estimand: 'blind_minus_own_advice', eligibleJudgeSeats: ['gpt-5.6-sol', 'claude-opus-5', 'gpt-6-astra'] },
+  { id: 'gpt-5.6-sol-blind-vs-advice', leftArm: 'gpt-5.6-sol-blind', rightArm: 'gpt-5.6-sol-advice', estimand: 'blind_minus_own_advice', eligibleJudgeSeats: ['gpt-5.6-sol', 'claude-opus-5', 'gpt-6-astra'] },
+  { id: 'gpt-5.6-luna-vs-claude-opus-5-blind', leftArm: 'gpt-5.6-luna-blind', rightArm: 'claude-opus-5-blind', estimand: 'luna_minus_judge_within_mode', eligibleJudgeSeats: ['gpt-5.6-sol', 'claude-opus-5', 'gpt-6-astra'] },
+  { id: 'gpt-5.6-luna-vs-gpt-5.6-sol-blind', leftArm: 'gpt-5.6-luna-blind', rightArm: 'gpt-5.6-sol-blind', estimand: 'luna_minus_judge_within_mode', eligibleJudgeSeats: ['gpt-5.6-sol', 'claude-opus-5', 'gpt-6-astra'] },
+  { id: 'gpt-5.6-luna-vs-claude-opus-5-advice', leftArm: 'gpt-5.6-luna-advice', rightArm: 'claude-opus-5-advice', estimand: 'luna_minus_judge_within_mode', eligibleJudgeSeats: ['gpt-5.6-sol', 'claude-opus-5', 'gpt-6-astra'] },
+  { id: 'gpt-5.6-luna-vs-gpt-5.6-sol-advice', leftArm: 'gpt-5.6-luna-advice', rightArm: 'gpt-5.6-sol-advice', estimand: 'luna_minus_judge_within_mode', eligibleJudgeSeats: ['gpt-5.6-sol', 'claude-opus-5', 'gpt-6-astra'] },
+  { id: 'gpt-5.6-luna-blind-vs-gpt-5.6-sol-advice-ceiling', leftArm: 'gpt-5.6-luna-blind', rightArm: 'gpt-5.6-sol-advice', estimand: 'blind_minus_advice_ceiling', eligibleJudgeSeats: ['gpt-5.6-sol', 'claude-opus-5', 'gpt-6-astra'] },
+  { id: 'gpt-6-astra-blind-vs-advice', leftArm: 'gpt-6-astra-blind', rightArm: 'gpt-6-astra-advice', estimand: 'blind_minus_own_advice', eligibleJudgeSeats: ['gpt-5.6-sol', 'claude-opus-5', 'gpt-6-astra'] },
+  { id: 'gpt-5.6-luna-vs-gpt-6-astra-blind', leftArm: 'gpt-5.6-luna-blind', rightArm: 'gpt-6-astra-blind', estimand: 'luna_minus_judge_within_mode', eligibleJudgeSeats: ['gpt-5.6-sol', 'claude-opus-5', 'gpt-6-astra'] },
+  { id: 'gpt-5.6-luna-vs-gpt-6-astra-advice', leftArm: 'gpt-5.6-luna-advice', rightArm: 'gpt-6-astra-advice', estimand: 'luna_minus_judge_within_mode', eligibleJudgeSeats: ['gpt-5.6-sol', 'claude-opus-5', 'gpt-6-astra'] },
+  { id: 'gpt-6-astra-vs-gpt-5.6-sol-blind', leftArm: 'gpt-6-astra-blind', rightArm: 'gpt-5.6-sol-blind', estimand: 'astra_minus_sol_within_mode', eligibleJudgeSeats: ['gpt-5.6-sol', 'claude-opus-5', 'gpt-6-astra'] },
+  { id: 'gpt-6-astra-vs-gpt-5.6-sol-advice', leftArm: 'gpt-6-astra-advice', rightArm: 'gpt-5.6-sol-advice', estimand: 'astra_minus_sol_within_mode', eligibleJudgeSeats: ['gpt-5.6-sol', 'claude-opus-5', 'gpt-6-astra'] },
+] as const;
+
+const EXPECTED_REPAIR_COMPARISONS = [
+  { id: 'gpt-5.6-luna-code-only-vs-minhint', codeOnlyArm: 'gpt-5.6-luna-blind', minimalHintArm: 'gpt-5.6-luna-blind-minhint', reportLabel: 'advice-assisted' },
+  { id: 'gpt-5.6-sol-code-only-vs-minhint', codeOnlyArm: 'gpt-5.6-sol-blind', minimalHintArm: 'gpt-5.6-sol-blind-minhint', reportLabel: 'advice-assisted' },
+  { id: 'gpt-6-astra-code-only-vs-minhint', codeOnlyArm: 'gpt-6-astra-blind', minimalHintArm: 'gpt-6-astra-blind-minhint', reportLabel: 'advice-assisted' },
+] as const;
+
 function readText(path: string): string {
   const bytes = fixtureBytes.get(path);
   if (bytes === undefined) throw new Error(`undeclared fixture ${path}`);
@@ -133,6 +200,10 @@ function codes(candidate: unknown, validationAccess = access()): readonly string
 function observedRows(cells: ReturnType<typeof dryRunD569Experiment>): readonly D569ObservedRow[] {
   return cells.map((cell, index) => ({
     arm: cell.arm,
+    cli: '/usr/local/bin/codex',
+    cliVersion: 'codex-cli 0.148.0',
+    model: cell.model,
+    effort: cell.effort,
     family: cell.family,
     basis: cell.basis,
     seed: cell.seed,
@@ -180,12 +251,29 @@ function analysisRows(
       rep: 1,
       outcome: typeof value === 'number' ? 'executed' : value,
       seats: typeof value !== 'number' ? [] : [
-        { judge: 'seat-a', components: components(value - 1) },
-        { judge: 'seat-b', components: components(value + 1) },
+        { judge: 'gpt-5.6-sol', components: components(value - 1) },
+        { judge: 'claude-opus-5', components: components(value) },
+        { judge: 'gpt-6-astra', components: components(value + 1) },
       ],
     });
-    return [row('left', left), row('right', right)];
+    return [row('gpt-5.6-luna-blind', left), row('gpt-5.6-luna-advice', right)];
   });
+}
+
+function registeredInput(
+  family: 'primary' | 'second',
+  basis: 'hard' | 'brutal',
+  bootstrapSeed: number,
+  resamples?: number,
+) {
+  return {
+    manifest: manifest(),
+    comparisonId: 'gpt-5.6-luna-blind-vs-advice',
+    family,
+    basis,
+    bootstrapSeed,
+    ...(resamples === undefined ? {} : { resamples }),
+  } as const;
 }
 
 function overrideEvidence(): D569OverrideEvidence {
@@ -211,19 +299,38 @@ function overrideEvidence(): D569OverrideEvidence {
 }
 
 describe('D569 preregistered experiment manifest and dry runner', () => {
-  it('validates the exact amended arm/cohort/comparison preregistration', () => {
+  it('validates the exact v4 Astra arm, comparison, repair, and amendment registration', () => {
     const frozen = manifest();
     expect(codes(frozen)).toEqual([]);
-    expect(frozen.version).toBe('d569-blind-experiment-v3');
-    expect(frozen.preregistrationAmendments).toEqual(D569_PREREGISTRATION_AMENDMENTS);
-    expect(frozen.preregistrationAmendments.every((amendment) => amendment.timing === 'pre-results'))
-      .toBe(true);
-    expect(frozen.coreArms).toEqual(D569_CORE_ARM_IDENTITIES);
-    expect(frozen.hintArms).toEqual(D569_HINT_ARM_IDENTITIES);
-    expect(frozen.analysisComparisons).toEqual(D575_ANALYSIS_COMPARISONS);
-    expect(frozen.analysisComparisons).toHaveLength(8);
-    expect(JSON.stringify(frozen.coreArms)).not.toContain('claude-fable-5');
-    expect(JSON.stringify(frozen.analysisComparisons)).not.toContain('claude-fable-5');
+    expect(frozen.version).toBe('d569-blind-experiment-v4');
+    expect(frozen.preregistrationAmendments).toEqual(EXPECTED_V4_AMENDMENTS);
+    expect(D569_PREREGISTRATION_AMENDMENTS).toEqual(EXPECTED_V4_AMENDMENTS);
+    expect(frozen.coreArms).toEqual(EXPECTED_CORE_ARMS);
+    expect(D569_CORE_ARM_IDENTITIES).toEqual(EXPECTED_CORE_ARMS);
+    expect(frozen.hintArms).toEqual(EXPECTED_HINT_ARMS);
+    expect(D569_HINT_ARM_IDENTITIES).toEqual(EXPECTED_HINT_ARMS);
+    expect(frozen.analysisComparisons).toEqual(EXPECTED_ANALYSIS_COMPARISONS);
+    expect(D569_ANALYSIS_COMPARISONS).toEqual(EXPECTED_ANALYSIS_COMPARISONS);
+    expect(frozen.repairComparisons).toEqual(EXPECTED_REPAIR_COMPARISONS);
+    expect(REQUIRED_REPAIR_COMPARISONS).toEqual(EXPECTED_REPAIR_COMPARISONS);
+    expect(frozen.preregistrationAmendments).toHaveLength(4);
+    expect(frozen.coreArms).toHaveLength(8);
+    expect(frozen.hintArms).toHaveLength(3);
+    expect(frozen.analysisComparisons).toHaveLength(13);
+    expect(frozen.repairComparisons).toHaveLength(3);
+    const activeReferences = JSON.stringify({
+      core: frozen.coreArms,
+      hints: frozen.hintArms,
+      comparisons: frozen.analysisComparisons,
+      repairs: frozen.repairComparisons,
+      judges: frozen.judgePanel.seats,
+    });
+    expect(activeReferences).not.toContain('claude-fable-5');
+    expect(frozen.preregistrationAmendments[1]).toEqual({
+      id: 'remove-fable-player-arms',
+      timing: 'pre-results',
+      reason: 'Fable usage exhausted; no replacement in this registration',
+    });
     expect(frozen.judgePanel.seats).toEqual(D569_JUDGE_PANEL_IDENTITIES);
     expect(frozen.judgePanel).toMatchObject({
       seatEligibilityPolicy: 'all_registered_seats_every_comparison',
@@ -232,20 +339,27 @@ describe('D569 preregistered experiment manifest and dry runner', () => {
       packetExcludes: [
         'decision_conversation', 'arm_identities', 'answer_key', 'other_seat_scores',
       ],
+      selfPlayScoringPolicy: 'allowed_only_from_fresh_context',
+      aggregationPolicy: 'equal_weight_all_registered_seats',
+      perSeatReportingPolicy: 'diagnostic_only',
+      minimumConsensusSeats: 3,
     });
-    expect(frozen.judgePanel.seats.map((seat) => seat.model)).toContain('gpt-6-astra');
-    expect(frozen.coreArms.map((arm) => arm.model)).not.toContain('gpt-6-astra');
+    expect(frozen.coreArms.filter((arm) => arm.model === 'gpt-6-astra')).toEqual([
+      EXPECTED_CORE_ARMS[6], EXPECTED_CORE_ARMS[7],
+    ]);
+    expect(frozen.hintArms.filter((arm) => arm.model === 'gpt-6-astra'))
+      .toEqual([EXPECTED_HINT_ARMS[2]]);
   });
 
-  it('dry-runs 30 hard and 30 brutal cells per each of six core arms, 360 total', () => {
+  it('dry-runs 30 hard and 30 brutal cells per each of eight core arms, 480 total', () => {
     const cells = dryRunD569Experiment(manifest(), access());
-    expect(cells).toHaveLength(360);
-    for (const arm of D569_CORE_ARM_IDENTITIES) {
+    expect(cells).toHaveLength(480);
+    for (const arm of EXPECTED_CORE_ARMS) {
       const armCells = cells.filter((cell) => cell.arm === arm.id);
       expect(armCells.filter((cell) => cell.basis === 'hard')).toHaveLength(30);
       expect(armCells.filter((cell) => cell.basis === 'brutal')).toHaveLength(30);
     }
-    expect(new Set(cells.map((cell) => cell.sessionKey))).toHaveLength(360);
+    expect(new Set(cells.map((cell) => cell.sessionKey))).toHaveLength(480);
     expect(cells.every((cell) => cell.sessionPolicy === 'fresh' && cell.timeoutMs === 240_000 &&
       !cell.escalation && !cell.modelDefaultFallback && cell.semanticContextCapBytes === 8_192 &&
       cell.truncatedBlocks.length === 0)).toBe(true);
@@ -261,24 +375,25 @@ describe('D569 preregistered experiment manifest and dry runner', () => {
     expect([...pairedSources.values()].every((hashes) => hashes.size === 1)).toBe(true);
   });
 
-  it('adds exactly 120 separately labeled advice-assisted hint cells, 480 total', () => {
+  it('adds exactly 180 separately labeled advice-assisted hint cells, 660 total', () => {
     const cells = dryRunD569Experiment(manifest(), access(), { includeHintArms: true });
     const hint = cells.filter((cell) => cell.repair === 'minimal_legal_alternative');
-    expect(cells).toHaveLength(480);
-    expect(hint).toHaveLength(120);
+    expect(cells).toHaveLength(660);
+    expect(hint).toHaveLength(180);
+    expect(hint.filter((cell) => cell.arm === 'gpt-6-astra-blind-minhint')).toHaveLength(60);
     expect(hint.every((cell) => cell.adviceAssisted)).toBe(true);
   });
 
-  it('consumes the frozen second encounter family instead of restating or shuffling its seeds', () => {
+  it('consumes the frozen second encounter family for all 480 core cells', () => {
     const cells = dryRunD569Experiment(manifest(), access(), { family: 'second' });
-    expect(cells).toHaveLength(360);
+    expect(cells).toHaveLength(480);
     expect([...new Set(cells.filter((cell) => cell.basis === 'hard').map((cell) => cell.seed))])
       .toEqual(D569_SECOND_FAMILY_SEEDS.hard);
     expect([...new Set(cells.filter((cell) => cell.basis === 'brutal').map((cell) => cell.seed))])
       .toEqual(D569_SECOND_FAMILY_SEEDS.brutal);
   });
 
-  it('validates exact completed rows and rejects missing, duplicate, fallback, cap, and pairing changes', () => {
+  it('records exact model effort cli and cliVersion for every observed row', () => {
     const cells = dryRunD569Experiment(manifest(), access());
     const rows = observedRows(cells);
     expect(validateD569ObservedRows(cells, rows)).toEqual([]);
@@ -296,37 +411,119 @@ describe('D569 preregistered experiment manifest and dry runner', () => {
         'timeout', 'escalation', 'model_default_fallback', 'paired_input_hash',
         'paired_visual_hash', 'required_block_truncated',
       ]));
+    const identityMutants: ReadonlyArray<readonly [D569ObservedRow, string]> = [
+      [{ ...rows[0]!, model: 'gpt-6-astra' }, 'model_identity'],
+      [{ ...rows[0]!, effort: 'medium' as 'high' }, 'effort_identity'],
+      [{ ...rows[0]!, cli: '   ' }, 'cli_identity'],
+      [{ ...rows[0]!, cliVersion: '\t' }, 'cli_version'],
+    ];
+    for (const [mutant, expectedCode] of identityMutants) {
+      expect(validateD569ObservedRows(cells, [mutant, ...rows.slice(1)])
+        .map((violation) => violation.code)).toContain(expectedCode);
+    }
   });
 
-  it('rejects changed advice baseline settings, primer, KB, fixture bytes, and model-default policy', () => {
+  it('rejects changed advice baseline settings, primer, and model-default policy', () => {
     const advice = structuredClone(manifest());
     advice.adviceCeiling.rendererProfile = { changed: true };
     expect(codes(advice)).toContain('advice_renderer');
     const primer = structuredClone(manifest()) as unknown as { visualPins: { blind: { primerVersion: string } } };
     primer.visualPins.blind.primerVersion = 'changed';
     expect(codes(primer)).toContain('manifest_shape');
-    const kb = structuredClone(manifest());
-    kb.sharedKb.componentHashes['actions'] = '0'.repeat(64);
-    expect(codes(kb)).toContain('kb_component_hash');
     const fallback = structuredClone(manifest()) as unknown as { execution: { modelDefaultFallback: boolean } };
     fallback.execution.modelDefaultFallback = true;
     expect(codes(fallback)).toContain('manifest_shape');
+  });
+
+  it('rejects changed KB and fixture bytes', () => {
+    const kb = structuredClone(manifest());
+    kb.sharedKb.componentHashes['actions'] = '0'.repeat(64);
+    expect(codes(kb)).toContain('kb_component_hash');
     const changedSecond = `${readText(SECOND_HARD_PATHS[0])} `;
     expect(codes(manifest(), access((path) => path === SECOND_HARD_PATHS[0] ? changedSecond : undefined)))
       .toEqual(expect.arrayContaining(['second_family_fixture_hash', 'second_family_independent_regeneration']));
   });
 
-  it('uses every judge seat under fresh-context isolation and rejects dangling or implicit comparisons', () => {
+  it('requires every Astra arm and its code-only versus minhint repair contrast', () => {
     const frozen = manifest();
-    const arms = new Map([...frozen.coreArms, ...frozen.hintArms].map((arm) => [arm.id, arm]));
-    for (const comparison of frozen.analysisComparisons) {
-      const left = arms.get(comparison.leftArm);
-      const right = arms.get(comparison.rightArm);
-      if (left === undefined || right === undefined) throw new Error('registered comparison is dangling');
-      expect(comparison.eligibleJudgeSeats).toEqual(frozen.judgePanel.seats
-        .map((seat) => seat.id));
-      expect(comparison.eligibleJudgeSeats).toHaveLength(3);
+    expect(D569_CORE_ARM_IDENTITIES.filter((arm) => arm.model === 'gpt-6-astra')).toEqual([
+      EXPECTED_CORE_ARMS[6], EXPECTED_CORE_ARMS[7],
+    ]);
+    expect(frozen.hintArms).toContainEqual(EXPECTED_HINT_ARMS[2]);
+    expect(frozen.repairComparisons).toContainEqual(EXPECTED_REPAIR_COMPARISONS[2]);
+    for (const armId of ['gpt-6-astra-blind', 'gpt-6-astra-advice'] as const) {
+      const missing = structuredClone(frozen);
+      missing.coreArms = missing.coreArms.filter((arm) => arm.id !== armId);
+      expect(codes(missing)).toContain('core_arm_set');
     }
+  });
+
+  it('rejects an Astra hint arm missing its registered repair mode', () => {
+    const frozen = manifest();
+    const missingHint = structuredClone(frozen);
+    missingHint.hintArms = missingHint.hintArms.filter((arm) => arm.id !== 'gpt-6-astra-blind-minhint');
+    expect(codes(missingHint)).toContain('hint_arm_set');
+  });
+
+  it('rejects Astra blind when code-only repair is replaced by a minimal hint', () => {
+    const frozen = manifest();
+    const changedRepair = structuredClone(frozen);
+    const astraBlind = changedRepair.coreArms.find((arm) => arm.id === 'gpt-6-astra-blind');
+    if (astraBlind === undefined) throw new Error('Astra blind arm is absent');
+    astraBlind.repair = 'minimal_legal_alternative';
+    expect(codes(changedRepair)).toContain('core_arm_set');
+  });
+
+  it('rejects removal of the Astra code-only versus minhint repair comparison', () => {
+    const frozen = manifest();
+    const missingComparison = structuredClone(frozen);
+    missingComparison.repairComparisons = missingComparison.repairComparisons.filter((comparison) =>
+      comparison.id !== 'gpt-6-astra-code-only-vs-minhint');
+    expect(codes(missingComparison)).toContain('repair_comparison_set');
+  });
+
+  it('registers direct high-effort Astra versus Sol contrasts in both modes', () => {
+    const frozen = manifest();
+    expect(D569_ANALYSIS_COMPARISONS.filter((comparison) =>
+      comparison.estimand === 'astra_minus_sol_within_mode')).toEqual([
+      EXPECTED_ANALYSIS_COMPARISONS[11], EXPECTED_ANALYSIS_COMPARISONS[12],
+    ]);
+    expect(frozen.analysisComparisons.filter((comparison) =>
+      comparison.estimand === 'astra_minus_sol_within_mode')).toEqual([
+      EXPECTED_ANALYSIS_COMPARISONS[11], EXPECTED_ANALYSIS_COMPARISONS[12],
+    ]);
+    for (const id of [
+      'gpt-6-astra-vs-gpt-5.6-sol-blind',
+      'gpt-6-astra-vs-gpt-5.6-sol-advice',
+    ] as const) {
+      const missing = structuredClone(frozen);
+      missing.analysisComparisons = missing.analysisComparisons.filter((comparison) => comparison.id !== id);
+      expect(codes(missing)).toContain('analysis_comparison_set');
+    }
+  });
+
+  it('lets every fresh-context seat score Astra play and keeps per-seat tables diagnostic', () => {
+    const frozen = manifest();
+    expect(D569_ANALYSIS_COMPARISONS.find((comparison) =>
+      comparison.id === 'gpt-6-astra-blind-vs-advice')?.eligibleJudgeSeats)
+      .toEqual(['gpt-5.6-sol', 'claude-opus-5', 'gpt-6-astra']);
+    for (const comparison of frozen.analysisComparisons) {
+      expect(comparison.eligibleJudgeSeats).toEqual(['gpt-5.6-sol', 'claude-opus-5', 'gpt-6-astra']);
+    }
+    expect(frozen.judgePanel).toMatchObject({
+      packetExcludes: ['decision_conversation', 'arm_identities', 'answer_key', 'other_seat_scores'],
+      minimumConsensusSeats: 3,
+      selfPlayScoringPolicy: 'allowed_only_from_fresh_context',
+      aggregationPolicy: 'equal_weight_all_registered_seats',
+      perSeatReportingPolicy: 'diagnostic_only',
+    });
+
+    const recused = structuredClone(frozen);
+    const astraComparison = recused.analysisComparisons.find((comparison) =>
+      comparison.id === 'gpt-6-astra-blind-vs-advice');
+    if (astraComparison === undefined) throw new Error('Astra self comparison is absent');
+    astraComparison.eligibleJudgeSeats = ['gpt-5.6-sol', 'claude-opus-5'];
+    expect(codes(recused)).toEqual(expect.arrayContaining(['judge_eligibility', 'judge_consensus']));
 
     const dangling = structuredClone(frozen);
     dangling.analysisComparisons[0]!.rightArm = 'claude-fable-5-advice';
@@ -338,12 +535,14 @@ describe('D569 preregistered experiment manifest and dry runner', () => {
     delete implicit.coreArms[0]!.model;
     expect(codes(implicit)).toContain('manifest_shape');
 
-    const insufficient = structuredClone(frozen);
-    const comparison = insufficient.analysisComparisons[0]!;
-    comparison.leftArm = 'claude-opus-5-blind';
-    comparison.rightArm = 'gpt-5.6-sol-blind';
-    comparison.eligibleJudgeSeats = ['gpt-6-astra'];
-    expect(codes(insufficient)).toContain('judge_consensus');
+  });
+
+  it('rejects a mutated historical amendment record', () => {
+    const changed = structuredClone(manifest()) as unknown as {
+      preregistrationAmendments: Array<{ reason: string }>;
+    };
+    changed.preregistrationAmendments[1]!.reason = 'rewritten history';
+    expect(codes(changed)).toContain('manifest_shape');
   });
 
   it('fluke_guard_uses_shuffle_seed: rejects a trained or replaced second encounter cohort', () => {
@@ -474,17 +673,12 @@ describe('D569 paired cluster analysis and success labels', () => {
 
   it('proves pairing direction, panel-seat averaging, components, and 100000-resample reproducibility', () => {
     const rows = analysisRows('primary', 'hard', [3, 3], [2, 2]);
-    const first = analyzeD569Pair(rows, {
-      family: 'primary', basis: 'hard', leftArm: 'left', rightArm: 'right',
-      bootstrapSeed: 77,
-    });
-    const second = analyzeD569Pair(rows, {
-      family: 'primary', basis: 'hard', leftArm: 'left', rightArm: 'right',
-      bootstrapSeed: 77,
-    });
+    const first = analyzeD569Pair(rows, registeredInput('primary', 'hard', 77));
+    const second = analyzeD569Pair(rows, registeredInput('primary', 'hard', 77));
     expect(D569_BOOTSTRAP_RESAMPLES).toBe(100_000);
     expect(first).toEqual(second);
-    expect(first.direction).toBe('left minus right');
+    expect(first.reportKind).toBe('registered_panel');
+    expect(first.direction).toBe('gpt-5.6-luna-blind minus gpt-5.6-luna-advice');
     expect(first.left.zeroInclusive.targetPriority.mean).toBe(3);
     expect(first.left.zeroInclusive.total.mean).toBe(12);
     expect(first.pairedZeroInclusive.total).toMatchObject({
@@ -492,23 +686,56 @@ describe('D569 paired cluster analysis and success labels', () => {
     });
   });
 
-  it('rejects a comparison whose scored sides use different judge seat sets', () => {
-    const rows = analysisRows('primary', 'hard', [3], [2]);
-    const changed = rows.map((row) => row.arm === 'right'
-      ? { ...row, seats: [{ judge: 'seat-c', components: components(2) }] }
-      : row);
-    expect(() => analyzeD569Pair(changed, {
-      family: 'primary', basis: 'hard', leftArm: 'left', rightArm: 'right',
-      bootstrapSeed: 79, resamples: 100,
-    })).toThrow('same judge seat set');
+  it('registered analysis rejects both executed sides when Astra is absent', () => {
+    const twoSeatRows = analysisRows('primary', 'hard', [3], [2]).map((row) => ({
+      ...row,
+      seats: row.seats.filter((seat) => seat.judge !== 'gpt-6-astra'),
+    }));
+    expect(() => analyzeD569Pair(twoSeatRows, registeredInput('primary', 'hard', 79, 100)))
+      .toThrow('registered panel requires exactly its declared judge seat set');
+  });
+
+  it('registered analysis rejects an unknown third seat substituted for Astra', () => {
+    const substituted = analysisRows('primary', 'hard', [3], [2]).map((row) => ({
+      ...row,
+      seats: row.seats.map((seat) => seat.judge === 'gpt-6-astra'
+        ? { ...seat, judge: 'unknown-seat' }
+        : seat),
+    }));
+    expect(() => analyzeD569Pair(substituted, registeredInput('primary', 'hard', 80, 100)))
+      .toThrow('registered panel requires exactly its declared judge seat set');
+  });
+
+  it('registered analysis still requires Astra when the opposite side failed execution', () => {
+    const rows = analysisRows('primary', 'hard', [3], ['execution_failed']).map((row) =>
+      row.outcome === 'executed'
+        ? { ...row, seats: row.seats.filter((seat) => seat.judge !== 'gpt-6-astra') }
+        : row);
+    expect(() => analyzeD569Pair(rows, registeredInput('primary', 'hard', 81, 100)))
+      .toThrow('registered panel requires exactly its declared judge seat set');
+  });
+
+  it('subset and per-seat analysis is diagnostic and cannot qualify success', () => {
+    const twoSeatRows = analysisRows('primary', 'hard', [3], [2]).map((row) => ({
+      ...row,
+      seats: row.seats.filter((seat) => seat.judge !== 'gpt-6-astra'),
+    }));
+    const report = analyzeD569DiagnosticPair(twoSeatRows, {
+      family: 'primary', basis: 'hard',
+      leftArm: 'gpt-5.6-luna-blind', rightArm: 'gpt-5.6-luna-advice',
+      diagnosticJudgeSeats: ['gpt-5.6-sol', 'claude-opus-5'],
+      bootstrapSeed: 82, resamples: 100,
+    });
+    type CannotQualify = D569DiagnosticPairAnalysis extends D569PairAnalysis ? false : true;
+    const cannotQualify: CannotQualify = true;
+    expect(cannotQualify).toBe(true);
+    expect(report.reportKind).toBe('diagnostic_subset');
+    expect('successLabel' in report).toBe(false);
   });
 
   it('success_uses_executed_only: refused rows remain zero in primary while executed-only is selection-conditioned', () => {
     const rows = analysisRows('primary', 'hard', [3, 'refused'], [2, 2]);
-    const report = analyzeD569Pair(rows, {
-      family: 'primary', basis: 'hard', leftArm: 'left', rightArm: 'right',
-      bootstrapSeed: 88, resamples: 2_000,
-    });
+    const report = analyzeD569Pair(rows, registeredInput('primary', 'hard', 88, 2_000));
     expect(report.pairedExecutedOnly.total.mean).toBe(4);
     expect(report.pairedExecutedOnly.total.count).toBe(1);
     expect(report.pairedZeroInclusive.total.mean).toBe(-2);
@@ -525,10 +752,7 @@ describe('D569 paired cluster analysis and success labels', () => {
     const rows = analysisRows(
       'primary', 'hard', ['execution_failed', 'refused'], ['refused', 0],
     );
-    const blindMinusAdvice = analyzeD569Pair(rows, {
-      family: 'primary', basis: 'hard', leftArm: 'left', rightArm: 'right',
-      bootstrapSeed: 569, resamples: 10_000,
-    });
+    const blindMinusAdvice = analyzeD569Pair(rows, registeredInput('primary', 'hard', 569, 10_000));
     expect(blindMinusAdvice.pairedZeroInclusive.total).toMatchObject({
       mean: 0, interval: { lower: 0, upper: 0 }, count: 2,
     });
@@ -539,36 +763,42 @@ describe('D569 paired cluster analysis and success labels', () => {
     expect(blindMinusAdvice.right.counts.refused).toBe(1);
     expect(blindMinusAdvice.successLabel).toBe('not_noninferior');
 
-    const adviceMinusBlind = analyzeD569Pair(rows, {
-      family: 'primary', basis: 'hard', leftArm: 'right', rightArm: 'left',
-      bootstrapSeed: 570, resamples: 10_000,
-    });
+    const swappedRows = analysisRows(
+      'primary', 'hard', ['refused', 0], ['execution_failed', 'refused'],
+    );
+    const adviceMinusBlind = analyzeD569Pair(
+      swappedRows, registeredInput('primary', 'hard', 570, 10_000),
+    );
     expect(adviceMinusBlind.pairedZeroInclusive.total.interval).toEqual({ lower: 0, upper: 0 });
     expect(adviceMinusBlind.refusalRiskDifference.interval).toEqual({ lower: -1, upper: 0 });
     expect(adviceMinusBlind.successLabel).toBe('noninferior');
   });
 
   it('noninferiority_pools_bases: never lets hard success conceal brutal failure', () => {
-    const hard = analyzeD569Pair(analysisRows('primary', 'hard', [3, 3], [2, 2]), {
-      family: 'primary', basis: 'hard', leftArm: 'left', rightArm: 'right',
-      bootstrapSeed: 1, resamples: 1_000,
-    });
-    const brutal = analyzeD569Pair(analysisRows('primary', 'brutal', [1, 1], [2, 2]), {
-      family: 'primary', basis: 'brutal', leftArm: 'left', rightArm: 'right',
-      bootstrapSeed: 2, resamples: 1_000,
-    });
+    const hard = analyzeD569Pair(
+      analysisRows('primary', 'hard', [3, 3], [2, 2]),
+      registeredInput('primary', 'hard', 1, 1_000),
+    );
+    const brutal = analyzeD569Pair(
+      analysisRows('primary', 'brutal', [1, 1], [2, 2]),
+      registeredInput('primary', 'brutal', 2, 1_000),
+    );
     expect(hard.successLabel).toBe('noninferior');
     expect(brutal.successLabel).toBe('not_noninferior');
-    expect(labelD569Success([hard, brutal], 'left', 'right').primary).toBe('fails');
+    expect(labelD569Success(
+      [hard, brutal], 'gpt-5.6-luna-blind', 'gpt-5.6-luna-advice',
+    ).primary).toBe('fails');
   });
 
   it('requires the second encounter cohort to point the same way and independently pass', () => {
     const reports = (['primary', 'second'] as const).flatMap((family) =>
       (['hard', 'brutal'] as const).map((basis, index) => analyzeD569Pair(
         analysisRows(family, basis, [3, 3], family === 'second' && index === 1 ? [4, 4] : [2, 2]),
-        { family, basis, leftArm: 'left', rightArm: 'right', bootstrapSeed: 10 + index, resamples: 1_000 },
+        registeredInput(family, basis, 10 + index, 1_000),
       )));
-    const summary = labelD569Success(reports, 'left', 'right');
+    const summary = labelD569Success(
+      reports, 'gpt-5.6-luna-blind', 'gpt-5.6-luna-advice',
+    );
     expect(summary.primary).toBe('passes');
     expect(summary.flukeGuard).toBe('fails');
   });
@@ -578,9 +808,8 @@ describe('D569 paired cluster analysis and success labels', () => {
       family: 'primary' | 'second', basis: 'hard' | 'brutal', refusalFails: boolean,
     ) => analyzeD569Pair(refusalFails
       ? analysisRows(family, basis, ['execution_failed', 'refused'], ['refused', 0])
-      : analysisRows(family, basis, [0, 0], [0, 0]), {
-      family, basis, leftArm: 'left', rightArm: 'right', bootstrapSeed: 700, resamples: 5_000,
-    });
+      : analysisRows(family, basis, [0, 0], [0, 0]),
+    registeredInput(family, basis, 700, 5_000));
     for (const failedBasis of ['hard', 'brutal'] as const) {
       const primaryRefusalFailure = [
         report('primary', 'hard', failedBasis === 'hard'),
@@ -590,7 +819,9 @@ describe('D569 paired cluster analysis and success labels', () => {
       expect(primaryRefusalFailure.find((candidate) => candidate.basis === failedBasis &&
         candidate.family === 'primary')?.pairedZeroInclusive.total.interval)
         .toEqual({ lower: 0, upper: 0 });
-      expect(labelD569Success(primaryRefusalFailure, 'left', 'right').primary).toBe('fails');
+      expect(labelD569Success(
+        primaryRefusalFailure, 'gpt-5.6-luna-blind', 'gpt-5.6-luna-advice',
+      ).primary).toBe('fails');
     }
 
     for (const failedBasis of ['hard', 'brutal'] as const) {
@@ -599,7 +830,9 @@ describe('D569 paired cluster analysis and success labels', () => {
         report('second', 'hard', failedBasis === 'hard'),
         report('second', 'brutal', failedBasis === 'brutal'),
       ];
-      const summary = labelD569Success(secondFamilyRefusalFailure, 'left', 'right');
+      const summary = labelD569Success(
+        secondFamilyRefusalFailure, 'gpt-5.6-luna-blind', 'gpt-5.6-luna-advice',
+      );
       expect(summary.primary).toBe('passes');
       expect(summary.flukeGuard).toBe('fails');
     }

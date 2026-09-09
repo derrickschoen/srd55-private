@@ -8,7 +8,6 @@ import {
 import { SEMANTIC_BOARD_MAX_BYTES, TURN_CONTEXT_MAX_BYTES } from '../src/vtt/mcp/engine-server';
 import { DEFAULT_RENDERER_PROFILE } from '../src/vtt/renderer-profile';
 import { BLIND_STATE_PRIMER_VERSION } from './ai-dm-board-snapshot';
-import { D575_PAIRWISE_COMPARISON_IDENTITIES } from './ai-dm-rerun-packet';
 import {
   D569_SECOND_FAMILY_SEEDS,
   validateD569SecondFamilyManifest,
@@ -31,6 +30,7 @@ export const D569_PLAYER_MODELS = Object.freeze([
   'gpt-5.6-luna',
   'claude-opus-5',
   'gpt-5.6-sol',
+  'gpt-6-astra',
 ] as const);
 
 export const D569_PREREGISTRATION_AMENDMENTS = Object.freeze([
@@ -48,6 +48,12 @@ export const D569_PREREGISTRATION_AMENDMENTS = Object.freeze([
     id: 'fresh-context-judge-eligibility',
     timing: 'pre-results',
     reason: 'Owner ruling D578.3: "It is ok for the same model to judge if it starts from a fresh context".',
+  },
+  {
+    id: 'add-astra-high-player-arms',
+    timing: 'pre-astra-run-and-analysis',
+    date: '2026-09-08',
+    reason: 'Owner ruling D586.24 requires Astra at high effort for a fair comparison with Sol high; this amendment was recorded before any Astra player arm was run or scored.',
   },
 ] as const);
 
@@ -76,29 +82,104 @@ export const D569_HINT_ARM_IDENTITIES = Object.freeze([
     id: 'gpt-5.6-sol-blind-minhint', model: 'gpt-5.6-sol', effort: 'high',
     dmMode: 'blind', repair: 'minimal_legal_alternative', adviceAssisted: true,
   },
+  {
+    id: 'gpt-6-astra-blind-minhint', model: 'gpt-6-astra', effort: 'high',
+    dmMode: 'blind', repair: 'minimal_legal_alternative', adviceAssisted: true,
+  },
 ] as const);
 
-const activePlayerModels = new Set<string>(D569_PLAYER_MODELS);
 const ALL_JUDGE_SEAT_IDS = Object.freeze(D569_JUDGE_PANEL_IDENTITIES.map((seat) => seat.id));
 
-export const D575_ANALYSIS_COMPARISONS = Object.freeze([
-  ...D575_PAIRWISE_COMPARISON_IDENTITIES
-    .filter((comparison) => activePlayerModels.has(comparison.left.model) &&
-      activePlayerModels.has(comparison.right.model))
-    .map((comparison) => ({
-      id: comparison.name,
-      leftArm: `${comparison.left.model}-${comparison.left.dmMode}`,
-      rightArm: `${comparison.right.model}-${comparison.right.dmMode}`,
-      estimand: comparison.left.model === comparison.right.model
-        ? 'blind_minus_own_advice' as const
-        : 'luna_minus_judge_within_mode' as const,
-      eligibleJudgeSeats: ALL_JUDGE_SEAT_IDS,
-    })),
+export const D569_ANALYSIS_COMPARISONS = Object.freeze([
+  {
+    id: 'gpt-5.6-luna-blind-vs-advice',
+    leftArm: 'gpt-5.6-luna-blind',
+    rightArm: 'gpt-5.6-luna-advice',
+    estimand: 'blind_minus_own_advice' as const,
+    eligibleJudgeSeats: ALL_JUDGE_SEAT_IDS,
+  },
+  {
+    id: 'claude-opus-5-blind-vs-advice',
+    leftArm: 'claude-opus-5-blind',
+    rightArm: 'claude-opus-5-advice',
+    estimand: 'blind_minus_own_advice' as const,
+    eligibleJudgeSeats: ALL_JUDGE_SEAT_IDS,
+  },
+  {
+    id: 'gpt-5.6-sol-blind-vs-advice',
+    leftArm: 'gpt-5.6-sol-blind',
+    rightArm: 'gpt-5.6-sol-advice',
+    estimand: 'blind_minus_own_advice' as const,
+    eligibleJudgeSeats: ALL_JUDGE_SEAT_IDS,
+  },
+  {
+    id: 'gpt-5.6-luna-vs-claude-opus-5-blind',
+    leftArm: 'gpt-5.6-luna-blind',
+    rightArm: 'claude-opus-5-blind',
+    estimand: 'luna_minus_judge_within_mode' as const,
+    eligibleJudgeSeats: ALL_JUDGE_SEAT_IDS,
+  },
+  {
+    id: 'gpt-5.6-luna-vs-gpt-5.6-sol-blind',
+    leftArm: 'gpt-5.6-luna-blind',
+    rightArm: 'gpt-5.6-sol-blind',
+    estimand: 'luna_minus_judge_within_mode' as const,
+    eligibleJudgeSeats: ALL_JUDGE_SEAT_IDS,
+  },
+  {
+    id: 'gpt-5.6-luna-vs-claude-opus-5-advice',
+    leftArm: 'gpt-5.6-luna-advice',
+    rightArm: 'claude-opus-5-advice',
+    estimand: 'luna_minus_judge_within_mode' as const,
+    eligibleJudgeSeats: ALL_JUDGE_SEAT_IDS,
+  },
+  {
+    id: 'gpt-5.6-luna-vs-gpt-5.6-sol-advice',
+    leftArm: 'gpt-5.6-luna-advice',
+    rightArm: 'gpt-5.6-sol-advice',
+    estimand: 'luna_minus_judge_within_mode' as const,
+    eligibleJudgeSeats: ALL_JUDGE_SEAT_IDS,
+  },
   {
     id: 'gpt-5.6-luna-blind-vs-gpt-5.6-sol-advice-ceiling',
     leftArm: 'gpt-5.6-luna-blind',
     rightArm: 'gpt-5.6-sol-advice',
     estimand: 'blind_minus_advice_ceiling' as const,
+    eligibleJudgeSeats: ALL_JUDGE_SEAT_IDS,
+  },
+  {
+    id: 'gpt-6-astra-blind-vs-advice',
+    leftArm: 'gpt-6-astra-blind',
+    rightArm: 'gpt-6-astra-advice',
+    estimand: 'blind_minus_own_advice' as const,
+    eligibleJudgeSeats: ALL_JUDGE_SEAT_IDS,
+  },
+  {
+    id: 'gpt-5.6-luna-vs-gpt-6-astra-blind',
+    leftArm: 'gpt-5.6-luna-blind',
+    rightArm: 'gpt-6-astra-blind',
+    estimand: 'luna_minus_judge_within_mode' as const,
+    eligibleJudgeSeats: ALL_JUDGE_SEAT_IDS,
+  },
+  {
+    id: 'gpt-5.6-luna-vs-gpt-6-astra-advice',
+    leftArm: 'gpt-5.6-luna-advice',
+    rightArm: 'gpt-6-astra-advice',
+    estimand: 'luna_minus_judge_within_mode' as const,
+    eligibleJudgeSeats: ALL_JUDGE_SEAT_IDS,
+  },
+  {
+    id: 'gpt-6-astra-vs-gpt-5.6-sol-blind',
+    leftArm: 'gpt-6-astra-blind',
+    rightArm: 'gpt-5.6-sol-blind',
+    estimand: 'astra_minus_sol_within_mode' as const,
+    eligibleJudgeSeats: ALL_JUDGE_SEAT_IDS,
+  },
+  {
+    id: 'gpt-6-astra-vs-gpt-5.6-sol-advice',
+    leftArm: 'gpt-6-astra-advice',
+    rightArm: 'gpt-5.6-sol-advice',
+    estimand: 'astra_minus_sol_within_mode' as const,
     eligibleJudgeSeats: ALL_JUDGE_SEAT_IDS,
   },
 ]);
@@ -125,6 +206,7 @@ const comparisonSchema = z.strictObject({
     'blind_minus_own_advice',
     'luna_minus_judge_within_mode',
     'blind_minus_advice_ceiling',
+    'astra_minus_sol_within_mode',
   ]),
   eligibleJudgeSeats: z.array(z.enum(D569_JUDGE_PANEL_IDENTITIES.map((seat) => seat.id))),
 });
@@ -136,7 +218,7 @@ const repairComparisonSchema = z.strictObject({
 });
 
 export const d569ExperimentManifestSchema = z.strictObject({
-  version: z.literal('d569-blind-experiment-v3'),
+  version: z.literal('d569-blind-experiment-v4'),
   preregistrationAmendments: z.tuple([
     z.strictObject({
       id: z.literal('refusal-risk-upper-bound'),
@@ -155,6 +237,14 @@ export const d569ExperimentManifestSchema = z.strictObject({
       timing: z.literal('pre-results'),
       reason: z.literal(
         'Owner ruling D578.3: "It is ok for the same model to judge if it starts from a fresh context".',
+      ),
+    }),
+    z.strictObject({
+      id: z.literal('add-astra-high-player-arms'),
+      timing: z.literal('pre-astra-run-and-analysis'),
+      date: z.literal('2026-09-08'),
+      reason: z.literal(
+        'Owner ruling D586.24 requires Astra at high effort for a fair comparison with Sol high; this amendment was recorded before any Astra player arm was run or scored.',
       ),
     }),
   ]),
@@ -252,7 +342,10 @@ export const d569ExperimentManifestSchema = z.strictObject({
       z.literal('answer_key'),
       z.literal('other_seat_scores'),
     ]),
-    minimumConsensusSeats: z.literal(2),
+    selfPlayScoringPolicy: z.literal('allowed_only_from_fresh_context'),
+    aggregationPolicy: z.literal('equal_weight_all_registered_seats'),
+    perSeatReportingPolicy: z.literal('diagnostic_only'),
+    minimumConsensusSeats: z.literal(3),
   }),
   coreArms: z.array(armSchema),
   hintArms: z.array(armSchema),
@@ -319,7 +412,7 @@ const REQUIRED_ANSWER_KEY_FIELDS = Object.freeze([
   'engineTopPolicyVersion', 'engineTopResolutionDigest', 'blindDiffersFromEngineTop',
   'differenceClass', 'blindCounterfactualDigest', 'engineTopCounterfactualDigest',
 ] as const);
-const REQUIRED_REPAIR_COMPARISONS = Object.freeze([
+export const REQUIRED_REPAIR_COMPARISONS = Object.freeze([
   {
     id: 'gpt-5.6-luna-code-only-vs-minhint',
     codeOnlyArm: 'gpt-5.6-luna-blind',
@@ -330,6 +423,12 @@ const REQUIRED_REPAIR_COMPARISONS = Object.freeze([
     id: 'gpt-5.6-sol-code-only-vs-minhint',
     codeOnlyArm: 'gpt-5.6-sol-blind',
     minimalHintArm: 'gpt-5.6-sol-blind-minhint',
+    reportLabel: 'advice-assisted' as const,
+  },
+  {
+    id: 'gpt-6-astra-code-only-vs-minhint',
+    codeOnlyArm: 'gpt-6-astra-blind',
+    minimalHintArm: 'gpt-6-astra-blind-minhint',
     reportLabel: 'advice-assisted' as const,
   },
 ] as const);
@@ -350,15 +449,15 @@ export function validateD569ExperimentManifest(
   const violations: D569ExperimentViolation[] = [];
 
   addViolation(violations, canonicalEqual(manifest.coreArms, D569_CORE_ARM_IDENTITIES),
-    'core_arm_set', 'manifest must contain the exact six active model/mode arms');
+    'core_arm_set', 'manifest must contain the exact eight active model/mode arms');
   addViolation(violations, canonicalEqual(manifest.hintArms, D569_HINT_ARM_IDENTITIES),
-    'hint_arm_set', 'manifest must contain the two preregistered hint diagnostics');
-  addViolation(violations, canonicalEqual(manifest.analysisComparisons, D575_ANALYSIS_COMPARISONS),
+    'hint_arm_set', 'manifest must contain the three preregistered hint diagnostics');
+  addViolation(violations, canonicalEqual(manifest.analysisComparisons, D569_ANALYSIS_COMPARISONS),
     'analysis_comparison_set', 'manifest must contain the amended active and advice-ceiling comparisons');
   addViolation(violations, canonicalEqual(manifest.judgePanel.seats, D569_JUDGE_PANEL_IDENTITIES),
     'judge_panel', 'judge panel must contain the exact preregistered Sol, Opus, and Astra seats');
   addViolation(violations, canonicalEqual(manifest.repairComparisons, REQUIRED_REPAIR_COMPARISONS),
-    'repair_comparison_set', 'manifest must contain both advice-assisted repair comparisons');
+    'repair_comparison_set', 'manifest must contain all three advice-assisted repair comparisons');
   addViolation(violations,
     canonicalEqual(manifest.adviceCeiling.rendererProfile, DEFAULT_RENDERER_PROFILE),
     'advice_renderer', 'advice ceiling must use the standing default renderer');
@@ -387,7 +486,7 @@ export function validateD569ExperimentManifest(
       'judge_eligibility', `comparison ${comparison.id} must use all three registered judge seats`);
     addViolation(violations, expectedSeats.length >= manifest.judgePanel.minimumConsensusSeats &&
       registeredSeats.length >= manifest.judgePanel.minimumConsensusSeats,
-      'judge_consensus', `comparison ${comparison.id} has fewer than two eligible judge seats`);
+      'judge_consensus', `comparison ${comparison.id} has fewer than three eligible judge seats`);
   }
 
   const componentKeys = D569_AI_DM_KB_COMPONENT_PATHS.map(kbComponentKey);
@@ -482,7 +581,7 @@ export function validateD569ExperimentManifest(
 
 export interface D569DryRunCell {
   readonly arm: string;
-  readonly model: string;
+  readonly model: D569ExperimentArm['model'];
   readonly effort: 'high';
   readonly dmMode: 'blind' | 'advice';
   readonly repair: 'code_only' | 'minimal_legal_alternative' | null;
@@ -571,6 +670,10 @@ export function dryRunD569Experiment(
 
 export interface D569ObservedRow {
   readonly arm: string;
+  readonly cli: string;
+  readonly cliVersion: string;
+  readonly model: D569ExperimentArm['model'];
+  readonly effort: 'high';
   readonly family: D569ExperimentFamily;
   readonly basis: D569ExperimentBasis;
   readonly seed: number;
@@ -608,6 +711,14 @@ export function validateD569ObservedRows(
     addViolation(violations, !seen.has(rowKey), 'duplicate_rep', `duplicate row ${rowKey}`);
     seen.add(rowKey);
     if (cell === undefined) continue;
+    addViolation(violations, row.model === cell.model,
+      'model_identity', `row ${rowKey} changed the registered model identity`);
+    addViolation(violations, row.effort === cell.effort,
+      'effort_identity', `row ${rowKey} changed the registered effort identity`);
+    addViolation(violations, row.cli.trim().length > 0,
+      'cli_identity', `row ${rowKey} omitted the executing CLI identity`);
+    addViolation(violations, row.cliVersion.trim().length > 0,
+      'cli_version', `row ${rowKey} omitted the executing CLI version`);
     addViolation(violations, row.sessionId !== null && !sessionIds.has(row.sessionId),
       'fresh_session', `row ${rowKey} did not use a unique fresh session`);
     if (row.sessionId !== null) sessionIds.add(row.sessionId);
@@ -738,7 +849,7 @@ export interface D569ArmReport {
     readonly infrastructureFailed: number;
   };
 }
-export interface D569PairAnalysis {
+interface D569PairAnalysisMetrics {
   readonly family: D569ExperimentFamily;
   readonly basis: D569ExperimentBasis;
   readonly leftArm: string;
@@ -749,7 +860,13 @@ export interface D569PairAnalysis {
   readonly pairedZeroInclusive: Readonly<Record<'total' | D569PanelComponent, D569MetricReport>>;
   readonly pairedExecutedOnly: Readonly<Record<'total' | D569PanelComponent, D569MetricReport>>;
   readonly refusalRiskDifference: D569MetricReport;
+}
+export interface D569PairAnalysis extends D569PairAnalysisMetrics {
+  readonly reportKind: 'registered_panel';
   readonly successLabel: 'noninferior' | 'not_noninferior';
+}
+export interface D569DiagnosticPairAnalysis extends D569PairAnalysisMetrics {
+  readonly reportKind: 'diagnostic_subset';
 }
 
 function isFiniteOrderedInterval(interval: D569Interval | null): interval is D569Interval {
@@ -832,6 +949,26 @@ function panelSeatSet(row: D569AnalysisRow): readonly string[] {
   return [...judges].sort();
 }
 
+function requireExactSeatSet(
+  rows: readonly D569AnalysisRow[],
+  requiredSeats: readonly string[],
+  reportKind: 'registered panel' | 'diagnostic subset',
+): void {
+  if (requiredSeats.length === 0 || new Set(requiredSeats).size !== requiredSeats.length) {
+    throw new TypeError(`${reportKind} requires a nonempty, unique judge seat set.`);
+  }
+  const expected = [...requiredSeats].sort();
+  for (const row of rows) {
+    if (row.outcome === 'executed') {
+      if (!canonicalEqual(panelSeatSet(row), expected)) {
+        throw new TypeError(`${reportKind} requires exactly its declared judge seat set on every executed row.`);
+      }
+    } else if (row.seats.length !== 0) {
+      throw new TypeError(`${reportKind} requires zero judge seats on every non-executed row.`);
+    }
+  }
+}
+
 function clusterMap(values: readonly { readonly seed: number; readonly value: number }[]): Map<number, number[]> {
   const clusters = new Map<number, number[]>();
   for (const entry of values) clusters.set(entry.seed, [...(clusters.get(entry.seed) ?? []), entry.value]);
@@ -885,18 +1022,17 @@ function armReport(
   };
 }
 
-/** Paired seed-cluster analysis. Primary scores retain refused/execution-failed zeroes. */
-export function analyzeD569Pair(
+function analyzeD569PairMetrics(
   rows: readonly D569AnalysisRow[],
   input: {
     readonly family: D569ExperimentFamily;
     readonly basis: D569ExperimentBasis;
     readonly leftArm: string;
     readonly rightArm: string;
-    readonly resamples?: number;
+    readonly resamples: number;
     readonly bootstrapSeed: number;
   },
-): D569PairAnalysis {
+): D569PairAnalysisMetrics {
   const selected = rows.filter((row) => row.family === input.family && row.basis === input.basis &&
     (row.arm === input.leftArm || row.arm === input.rightArm));
   const leftRows = selected.filter((row) => row.arm === input.leftArm);
@@ -908,14 +1044,10 @@ export function analyzeD569Pair(
     [...left.keys()].some((key) => !right.has(key))) {
     throw new TypeError('Paired analysis requires one row per arm for every (encounter seed, rep).');
   }
-  const resamples = input.resamples ?? D569_BOOTSTRAP_RESAMPLES;
+  const resamples = input.resamples;
   const paired = [...left.entries()].flatMap(([key, leftRow]) => {
     const rightRow = right.get(key);
     if (rightRow === undefined) throw new Error('Validated pair disappeared.');
-    if (leftRow.outcome === 'executed' && rightRow.outcome === 'executed' &&
-      !canonicalEqual(panelSeatSet(leftRow), panelSeatSet(rightRow))) {
-      throw new TypeError('Paired analysis requires the same judge seat set on both scored sides.');
-    }
     const leftValues = panelValues(leftRow);
     const rightValues = panelValues(rightRow);
     return leftValues === null || rightValues === null ? [] : [{ leftRow, rightRow, leftValues, rightValues }];
@@ -925,20 +1057,19 @@ export function analyzeD569Pair(
     paired.map(({ leftRow, leftValues, rightValues }) => ({
       seed: leftRow.seed, value: leftValues[name] - rightValues[name],
     })), resamples, input.bootstrapSeed + 100 + index,
-  )])) as D569PairAnalysis['pairedZeroInclusive'];
+  )])) as D569PairAnalysisMetrics['pairedZeroInclusive'];
   const bothExecuted = paired.filter(({ leftRow, rightRow }) =>
     leftRow.outcome === 'executed' && rightRow.outcome === 'executed');
   const pairedExecutedOnly = Object.fromEntries(metrics.map((name, index) => [name, metric(
     bothExecuted.map(({ leftRow, leftValues, rightValues }) => ({
       seed: leftRow.seed, value: leftValues[name] - rightValues[name],
     })), resamples, input.bootstrapSeed + 200 + index,
-  )])) as D569PairAnalysis['pairedExecutedOnly'];
+  )])) as D569PairAnalysisMetrics['pairedExecutedOnly'];
   const refusalRiskDifference = metric(paired.map(({ leftRow, rightRow }) => ({
     seed: leftRow.seed,
     value: Number(leftRow.outcome === 'refused' || leftRow.outcome === 'execution_failed') -
       Number(rightRow.outcome === 'refused' || rightRow.outcome === 'execution_failed'),
   })), resamples, input.bootstrapSeed + 300);
-  const primary = pairedZeroInclusive.total;
   return {
     family: input.family,
     basis: input.basis,
@@ -950,7 +1081,76 @@ export function analyzeD569Pair(
     pairedZeroInclusive,
     pairedExecutedOnly,
     refusalRiskDifference,
-    successLabel: labelD569PairNoninferiority(primary.interval, refusalRiskDifference),
+  };
+}
+
+/** Qualifying paired analysis derived only from the exact registered comparison and three-seat panel. */
+export function analyzeD569Pair(
+  rows: readonly D569AnalysisRow[],
+  input: {
+    readonly manifest: D569ExperimentManifest;
+    readonly comparisonId: string;
+    readonly family: D569ExperimentFamily;
+    readonly basis: D569ExperimentBasis;
+    readonly resamples?: number;
+    readonly bootstrapSeed: number;
+  },
+): D569PairAnalysis {
+  const comparison = input.manifest.analysisComparisons.find((candidate) => candidate.id === input.comparisonId);
+  const registered = D569_ANALYSIS_COMPARISONS.find((candidate) => candidate.id === input.comparisonId);
+  if (comparison === undefined || registered === undefined || !canonicalEqual(comparison, registered)) {
+    throw new TypeError(`Registered analysis requires the exact comparison ${input.comparisonId}.`);
+  }
+  if (!canonicalEqual(input.manifest.judgePanel.seats, D569_JUDGE_PANEL_IDENTITIES)) {
+    throw new TypeError('Registered analysis requires the exact registered judge panel identities.');
+  }
+  const selected = rows.filter((row) => row.family === input.family && row.basis === input.basis &&
+    (row.arm === comparison.leftArm || row.arm === comparison.rightArm));
+  requireExactSeatSet(selected, comparison.eligibleJudgeSeats, 'registered panel');
+  const metrics = analyzeD569PairMetrics(rows, {
+    family: input.family,
+    basis: input.basis,
+    leftArm: comparison.leftArm,
+    rightArm: comparison.rightArm,
+    resamples: input.resamples ?? D569_BOOTSTRAP_RESAMPLES,
+    bootstrapSeed: input.bootstrapSeed,
+  });
+  return {
+    ...metrics,
+    reportKind: 'registered_panel',
+    successLabel: labelD569PairNoninferiority(
+      metrics.pairedZeroInclusive.total.interval,
+      metrics.refusalRiskDifference,
+    ),
+  };
+}
+
+/** Non-qualifying paired analysis for declared seat subsets and per-seat diagnostics. */
+export function analyzeD569DiagnosticPair(
+  rows: readonly D569AnalysisRow[],
+  input: {
+    readonly family: D569ExperimentFamily;
+    readonly basis: D569ExperimentBasis;
+    readonly leftArm: string;
+    readonly rightArm: string;
+    readonly diagnosticJudgeSeats: readonly string[];
+    readonly resamples?: number;
+    readonly bootstrapSeed: number;
+  },
+): D569DiagnosticPairAnalysis {
+  const selected = rows.filter((row) => row.family === input.family && row.basis === input.basis &&
+    (row.arm === input.leftArm || row.arm === input.rightArm));
+  requireExactSeatSet(selected, input.diagnosticJudgeSeats, 'diagnostic subset');
+  return {
+    ...analyzeD569PairMetrics(rows, {
+      family: input.family,
+      basis: input.basis,
+      leftArm: input.leftArm,
+      rightArm: input.rightArm,
+      resamples: input.resamples ?? D569_BOOTSTRAP_RESAMPLES,
+      bootstrapSeed: input.bootstrapSeed,
+    }),
+    reportKind: 'diagnostic_subset',
   };
 }
 
