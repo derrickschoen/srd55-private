@@ -22053,3 +22053,15 @@ relaunched; exit sentinels in `.exit` files.
 Q7 answered 2026-09-09 18:46 EDT: "docs/vtt-handoff/**". The supervisor authorizes exactly that directory (and the accompanying
 tests/unit/vtt/handoff-docs.test.ts) for unit VTT-HANDOFF-01 lanes; the standing no-docs/** rule stands everywhere else.
 Alternatives not chosen: README files next to the code; docs only in the published exchange root.
+
+## D597 — OWNER: what the challenge rooms are FOR (2026-09-09)
+
+Owner, 2026-09-09 18:59 EDT, answering the Room D slice-2 question with a correction of the supervisor's framing ("rooms used to test whether
+the AI DM's default monster choice is actually bad, with the rules engine as the judge"): "What I intended was to create rooms
+where the ai dm has an opportunity to think of a more winning play than what the default engine algorithm recommends. Then once a
+smart model like sol high finds the better play, what tweaks can we do to the prompts and info provided to get Luna medium to come
+up with the same clever play that sol did." Binding reading: a challenge room exists to (1) contain a discoverable better play than
+the engine's default recommendation, (2) have a strong model (sol high) find it, and (3) drive prompt/information tweaks until
+luna medium finds the same play. The engine-side bounded question (does the better play exist and by how much) is the certificate
+for (1), not the product; the product is the sol→luna distillation loop of D586.39/40. Room D slice-2's completeness/memory
+instrumentation is engineering hygiene for that certificate and must be weighed against getting to steps (2) and (3).
