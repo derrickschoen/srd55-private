@@ -20717,3 +20717,11 @@ round-1 correction confirmed by execution; 512,032 histories, delta
 156/625, margin 249/2500 confirmed. Round 3 of 3 (FINAL) resumed on
 01a084f3-7c9e-73f0-8bfa-1661a246cdbc (brief plan-room-d-r3.md, marker
 PLAN-ROOM-D-R3 DONE).
+
+## D586.112 — room D plan round 3 revised; Astra FINAL review launched (2026-09-09 04:30)
+
+Lane exit 0, PLAN-ROOM-D-R3 DONE in 14 minutes; plan 314 lines, sha256
+56aad613... (computed by me), tree clean, 2 `claude -p` match(es)
+(header/decisions reads). Astra round 3 (FINAL) launched (brief
+review-plan-room-d-r3.md) with the instruction to verify the component
+discriminator, the mass scoping and the attempt accounting by execution.
