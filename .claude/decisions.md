@@ -21509,3 +21509,17 @@ Merged claude/trial-core-reconciliation (319e908b) into main as d31875ae
 (no conflicts). Gate worktree moved to d31875ae; port 4870 free; full gate
 launched (room D slice 2 round 2 lane still running — load flakes get
 their serial rerun per D587.3).
+
+## D586.151 — main gate on d31875ae fully GREEN; inventory git-seam landing complete (2026-09-09 09:31)
+
+Gate worktree dnd-wt-main-493121dd at d31875ae: tsc 0, sg 0, vitest-gate 0
+(one load flake, tests/unit/tools/ai-dm-arena.test.ts, passed serially),
+Playwright 184 passed in 51.4 min with two 30 s timeouts in
+tests/browser/sharing.spec.ts under load ~11 (the slice 2 lane's
+cumulative ran concurrently), both passed on the serial rerun (5 passed,
+1.8 min), playwright-gate 0, GATES DONE 09:30:36. Port 4870 released.
+No budget changed. Main now carries the injected git-runner seam and the
+persistent git-failure tests for the D583 inventory; the reconciliation
+unit has no open findings. Running: room D slice 2 round 2 (lane).
+D569 preflight remains paused at section 2.4 until the machine is free of
+vitest/arena processes.
