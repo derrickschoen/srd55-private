@@ -19979,3 +19979,20 @@ listening. Browser-only rerun launched on the same worktree and
 revision (~/dnd-slim-runs/gate-wt-main-493121dd.browser.log); the
 vitest result stands. The D569 182-spec cumulative started at 01:22 on
 load 2.8 as queued.
+
+## D586.76 — txn slice 1 fix round 2 harvested: candidate committed, cumulative queued, Astra round 2 running (2026-09-09 01:33)
+
+Lane exit 0, TXN-S1-R2 DONE; claims: one test file changed (+17/-3):
+identity error assertions, outer rollback consuming two draws checked
+against an independent Mulberry32 with nonzero draw count and unchanged
+parent RNG; focused 22/22; tsc 0; sg 0; six controls re-run on the final
+candidate with a reconcilable log (mutations-r2.log sha 9cb5b874...);
+capture manifests re-verified, after-s1-r2 byte-identical to the
+baseline (696,676 bytes, 29ca2ded...); capture-commands.log (sha
+d833e1f8...); its 19-spec run 390/443 with 53 EROFS failures in the
+MCP-spawning specs and no timeouts. Verified by me: `sg scan` exit 0;
+only the echoed header matches `claude -p`; committed 4a1e2617. The
+19-spec cumulative is queued behind the D569 cumulative
+(cum-txn-s1-r2-queued.sh -> cum-txn-s1-r2.log) so the two heavy runs do
+not share the box. Astra round 2 launched (brief review-impl-txn-s1-r2.md,
+session 01a084a7-c4da-7761-a514-cc6ffee08ad2).
