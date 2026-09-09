@@ -20309,3 +20309,18 @@ unmerged at ce081ef0 until txn slice 3 is harvested; then a planning
 lane writes that integration plan (reviewed by Astra) before any merge.
 The owner's D587.7 bounded room-D rewrite is dispatched now as a
 planning unit on the idle challenge worktree.
+
+## D586.94 — room D bounded-question planning lane dispatched (D587.7) (2026-09-09 02:56)
+
+Planning-only lane on the idle challenge worktree at ce081ef0 (session
+01a084f3-7c9e-73f0-8bfa-1661a246cdbc, brief plan-room-d.md, marker
+PLAN-ROOM-D DONE, plan file .tmp-plans/2026-09-09-room-d-bounded.md).
+It must state the bounded question exactly, compute the enumeration
+size by hand and show it fits the seven fixed limits with the
+derived-cap headroom (or propose the smallest reduction that does),
+define two-way-computed invariants with mutation-shaped tests, ordered
+slices with D584.4 contracts including the beforeAll-isolation
+should-fix, and an explicit non-dependence on main's session
+transaction (the branch is unmerged because of the engine-round-session
+conflict recorded in D586.93). Astra reviews the plan up to three
+rounds as usual.
