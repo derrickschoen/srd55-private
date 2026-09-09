@@ -19771,3 +19771,23 @@ specs that are risk specs rather than graph dependents; the lane ran
 only the 15, flagged to the reviewer; my cumulative runs the 19-spec
 union (~/dnd-slim-runs/cum-txn-s1.log). Astra round 1 launched (brief
 review-impl-txn-s1.md, session 01a08488-7794-7d31-bce6-0d3cfb6f27ac).
+
+## D586.68 — elevation gate-defect fix harvested and independently verified; Astra round 3 launched (2026-09-09 01:05)
+
+Lane exit 0 with the marker BLOCKED, for a reason outside the slice: the
+fix itself is complete (tracked fixture tests/fixtures/d584/2026-09-08-
+elevation-tiers-plan.md with 72 ownership entries, declared through
+test-inputs; both tool specs free of .tmp-plans and process.cwd(); a
+regression that asserts the manifest from an empty temporary cwd;
+focused 11/11, sg 0, tsc 0), but the inherited D524 screenshot-primer
+test timed out twice (6.895 / 6.903 s at 5,000 ms) under load 23 while
+the main gate ran; the lane correctly refused to raise the budget. That
+spec is untouched by the slice; the supervisor reruns it serially on a
+quieter box before the re-landing. Verified by me: `sg scan` exit 0; the
+only process.cwd() uses left are the two CLI entrypoints; committed
+297e5027; and in a FRESH detached worktree of 297e5027 with no
+.tmp-plans directory the two specs pass 2 files / 11 tests (the
+temporary worktree was removed and pruned). Astra round 3 launched
+(brief review-impl-elevation-s1-r3.md), also asked whether "a test reads
+a lane-local gitignored artifact" should become a standing check in the
+inventory tool.
