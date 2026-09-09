@@ -19274,3 +19274,22 @@ e.g. src/rules/class-traits-srd.ts:52); (3) several mandatory mutants
 have no effective killer in slice 1 because their assigned tests are in
 unmigrated consumers; a session-level two-application RNG test is
 needed. Resumed the planning session (01a0842b-042d-7383-b07c-e970396080e7) with the verdict verbatim.
+
+## D576.6 / D586.50 — elevation slice 1 GO (lane), committed and sent to review; rowcodec inventory completed, round 2 launched; challenge arena rerun explained (2026-09-08 23:48)
+
+- Elevation slice 1: lane reports ELEVATION-S1 GO (5 runtime specs
+  42/42 after the authorized serial rerun; controls S1-DUPLICATE-SPEEDS,
+  S1-ZERO-SPEED killed at runtime, S1-ARBITRARY, S1-FLYING-CELL,
+  S1-EMPTY-SPEEDS killed at compile time; restore hashes recorded; sg
+  scan 0; tsc -b 0). Supervisor: committed the two completing files
+  (db6f33a6) on top of the WIP commit; my own `sg scan` on the committed
+  tree exit 0. Astra implementation review launched.
+- Rowcodec: the five specs my inventory missed ran serially: 32/32
+  across four files plus ai-dm-combat-model run separately (result in
+  the round-2 brief); Astra round 2 launched with the complete
+  11-spec evidence and the lane's reorder fix.
+- Challenge branch serial arena rerun (load ~4.4): 42/43, the only red
+  again the D544 round-robin test at its pre-merge 5,000 ms budget; the
+  30 s "frozen brutal-b room" test that timed out under load passed
+  serially. So slice 3's two remaining reds are the pre-merge budget
+  (clears on merging main) and a load artefact — no slice defect.
