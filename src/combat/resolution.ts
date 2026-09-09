@@ -1,4 +1,13 @@
-import { rollDice, rollDie, type Rng } from './random';
+import {
+  rollDice,
+  type Rng,
+} from './random';
+import {
+  isTransactionalRollRng,
+  rollOperationPath,
+  type RollComponentRef,
+  type RollProvenanceRequest,
+} from './roll-provenance';
 import {
   dieSides,
   type ArmorClass,
@@ -105,18 +114,32 @@ export interface DamageResult {
   readonly total: number;
 }
 
-export function rollD20(rng: Rng, mode: RollMode): D20Roll {
-  const first = rollDie(rng, dieSides(20));
+export function rollD20(
+  rng: Rng,
+  mode: RollMode,
+  provenance: RollProvenanceRequest,
+): D20Roll {
+  const component = isTransactionalRollRng(rng)
+    ? rng.beginComponent(provenance, { kind: 'd20_selection', mode })
+    : null;
+  const drawCandidate = (candidate: 1 | 2): number => component === null || !isTransactionalRollRng(rng)
+    ? Math.floor(rng() * 20) + 1
+    : rng.draw({ sides: dieSides(20), provenance: component, role: { kind: 'd20_candidate', candidate } });
+  const finish = (roll: D20Roll, active: RollComponentRef | null): D20Roll => {
+    if (active !== null && isTransactionalRollRng(rng)) rng.finishComponent(active, roll.chosen);
+    return roll;
+  };
+  const first = drawCandidate(1);
   switch (mode) {
     case 'normal':
-      return { mode, faces: [first], chosen: first };
+      return finish({ mode, faces: [first], chosen: first }, component);
     case 'advantage': {
-      const second = rollDie(rng, dieSides(20));
-      return { mode, faces: [first, second], chosen: Math.max(first, second) };
+      const second = drawCandidate(2);
+      return finish({ mode, faces: [first, second], chosen: Math.max(first, second) }, component);
     }
     case 'disadvantage': {
-      const second = rollDie(rng, dieSides(20));
-      return { mode, faces: [first, second], chosen: Math.min(first, second) };
+      const second = drawCandidate(2);
+      return finish({ mode, faces: [first, second], chosen: Math.min(first, second) }, component);
     }
   }
 }
@@ -152,18 +175,20 @@ export function classifyAttackRoll(
 export function resolveAttackRoll(
   request: AttackRollRequest,
   rng: Rng,
+  provenance: RollProvenanceRequest,
 ): AttackRollResult {
-  return classifyAttackRoll(request, rollD20(rng, request.rollMode));
+  return classifyAttackRoll(request, rollD20(rng, request.rollMode, provenance));
 }
 
 export function resolveSavingThrow(
   request: SavingThrowRequest,
   rng: Rng,
+  provenance: RollProvenanceRequest,
 ): SavingThrowResult {
   if (!Number.isFinite(request.bonus)) {
     throw new RangeError('Saving throw bonus must be finite.');
   }
-  const roll = rollD20(rng, request.rollMode);
+  const roll = rollD20(rng, request.rollMode, provenance);
   const total = roll.chosen + request.bonus;
   return total < request.dc
     ? { outcome: 'failure', roll, total }
@@ -185,12 +210,19 @@ export function applyDamageResponse(damage: number, response: DamageResponse): n
   }
 }
 
-export function resolveDamage(request: DamageRequest, rng: Rng): DamageResult {
-  const terms = request.terms.map((term) => {
+export function resolveDamage(
+  request: DamageRequest,
+  rng: Rng,
+  provenance: RollProvenanceRequest,
+): DamageResult {
+  const terms = request.terms.map((term, termIndex) => {
     const expression = request.critical
       ? { ...term.dice, count: term.dice.count * 2 }
       : term.dice;
-    const roll = rollDice(rng, expression);
+    const roll = rollDice(rng, expression, {
+      ...provenance,
+      operationPath: rollOperationPath(`${provenance.operationPath}/term/${String(termIndex)}`),
+    });
     const beforeResponse = roll.total;
     const response = request.responses.find(({ type }) => type === term.type)?.response ?? 'normal';
     return {

@@ -1,4 +1,4 @@
-import { access, mkdtemp, writeFile } from 'node:fs/promises';
+import { access, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import {
@@ -36,6 +36,8 @@ import {
 } from '../src/vtt/agent-session';
 import type { LocalOpenAiConfig } from '../src/vtt/agent-adapters/local-openai';
 import { loadArenaFixture } from '../src/vtt/mcp/entrypoint';
+import { decodeArenaBasisEnvelopeV1 } from '../src/vtt/arena-fixture';
+import { decodeChallengeRoomProvenanceV1 } from '../src/vtt/challenge-room-fixture';
 import {
   applyRoomInitiativeProfile,
   generateRoom,
@@ -55,7 +57,7 @@ import {
 } from '../src/vtt/renderer-profile';
 import { DEFAULT_AI_DM_KB_ROOT } from '../src/vtt/knowledge-base-contract';
 
-export const ARENA_BASES = ['standard', 'hard', 'brutal', 'brutal-b', 'scenario'] as const;
+export const ARENA_BASES = ['standard', 'hard', 'brutal', 'brutal-b', 'scenario', 'challenge'] as const;
 export type ArenaBasis = (typeof ARENA_BASES)[number];
 
 export interface ArenaProbeVerdict {
@@ -372,7 +374,7 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
   }
   const basis = values.get('--basis') ?? 'standard';
   if (!ARENA_BASES.includes(basis as ArenaBasis)) {
-    throw new TypeError('--basis must be standard, hard, brutal, brutal-b, or scenario.');
+    throw new TypeError('--basis must be standard, hard, brutal, brutal-b, scenario, or challenge.');
   }
   const combatModel = values.get('--combat-model') ?? 'initiative_segments_v1';
   if (!COMBAT_MODELS.includes(combatModel as CombatModel)) {
@@ -485,6 +487,12 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
   if (!interleave && armOverridePolicies.size > 0) {
     throw new TypeError('--arm-override-policy is only valid with --interleave.');
   }
+  const rooms = positiveInteger(values.get('--rooms') ?? '', '--rooms');
+  if (basis === 'challenge') {
+    if (seed !== 5_831_001) throw new TypeError('The challenge basis requires --seed 5831001.');
+    if (rooms > 4) throw new RangeError('The challenge basis contains exactly four consecutive rooms.');
+    if (generateMissingRooms) throw new TypeError('--generate-missing-rooms is unavailable for the closed challenge basis.');
+  }
   return {
     intelMode,
     overridePolicy: overridePolicy as OverridePolicy,
@@ -493,7 +501,7 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
     combatModel: combatModel as CombatModel,
     initiativeProfile: initiativeProfile as RoomInitiativeProfile,
     partyPolicy: partyPolicy as ScriptedPartyDecisionPolicy,
-    rooms: positiveInteger(values.get('--rooms') ?? '', '--rooms'),
+    rooms,
     reps: positiveInteger(values.get('--reps') ?? '', '--reps'),
     seed,
     cli: selectedCli,
@@ -540,6 +548,7 @@ export function basisFixturesPath(config: Pick<ArenaConfig, 'cwd' | 'basis'>): s
     case 'brutal': return resolve(config.cwd, 'tests/fixtures/arena-basis-brutal');
     case 'brutal-b': return resolve(config.cwd, 'tests/fixtures/arena-basis-brutal-b');
     case 'scenario': return resolve(config.cwd, 'tests/fixtures/arena-scenarios');
+    case 'challenge': return resolve(config.cwd, 'tests/fixtures/arena-basis-challenge');
   }
   basis satisfies never;
   throw new TypeError(`Unknown arena basis ${String(basis)}.`);
@@ -552,6 +561,9 @@ async function frozenRoomStates(config: ArenaConfig): Promise<readonly import('.
   if (config.basis === 'scenario' && config.generateMissingRooms) {
     throw new TypeError('--generate-missing-rooms is unavailable for the frozen scenario basis.');
   }
+  if (config.basis === 'challenge' && config.generateMissingRooms) {
+    throw new TypeError('--generate-missing-rooms is unavailable for the closed challenge basis.');
+  }
   const fixturesPath = basisFixturesPath(config);
   return Promise.all(Array.from({ length: config.rooms }, async (_unused, index) => {
     const seed = config.seed + index;
@@ -560,12 +572,24 @@ async function frozenRoomStates(config: ArenaConfig): Promise<readonly import('.
       : `seed-${String(seed)}.json`);
     try {
       await access(fixturePath);
+      if (config.basis === 'challenge') {
+        const sidecarPath = resolve(fixturesPath, `seed-${String(seed)}.provenance.json`);
+        const sidecar = decodeChallengeRoomProvenanceV1(JSON.parse(await readFile(sidecarPath, 'utf8')) as unknown);
+        const room = decodeArenaBasisEnvelopeV1(JSON.parse(await readFile(fixturePath, 'utf8')) as unknown, { mode: 'challenge' });
+        if (sidecar.seed !== seed || room.spec.seed !== seed) {
+          throw new TypeError(`Challenge sidecar seed ${String(sidecar.seed)} does not match envelope seed ${String(room.spec.seed)}.`);
+        }
+        if (sidecar.certification !== 'ready_for_witness') {
+          throw new TypeError(`Challenge room ${sidecar.roomId} is not ready_for_witness.`);
+        }
+        return room.encounter.state;
+      }
       return applyRoomInitiativeProfile(await loadArenaFixture(fixturePath), config.initiativeProfile);
     } catch (error) {
       if (!config.generateMissingRooms || !(error instanceof Error) ||
         !('code' in error) || error.code !== 'ENOENT') throw error;
       return generateRoom(seed, {
-        difficulty: config.basis === 'scenario'
+        difficulty: config.basis === 'scenario' || config.basis === 'challenge'
           ? 'standard'
           : config.basis === 'brutal-b'
             ? 'brutal'
