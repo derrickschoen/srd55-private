@@ -21370,3 +21370,15 @@ timeout was load), tests/unit/tools/d583-contract-inventory.test.ts red
 on the same assertion (the known branch-state defect, deterministic). The
 two unnamed red files from D586.141 remain unknown and are covered only by
 the round-2 candidate's full cumulative. Temp clone deleted.
+
+## D586.144 — main gate on ed2ca3eb (code of merge 371b5bc8) fully GREEN; reconciliation landing complete (2026-09-09 07:51)
+
+Gate worktree dnd-wt-main-493121dd at ed2ca3eb: tsc 0, sg 0, vitest-gate 0
+(load flakes passed serially), Playwright 186 passed in 52.3 min plus load
+flakes passed serially, playwright-gate 0, GATES DONE 07:50:53. Port 4870
+released. Main now carries the shared trial core (D583 challenge branch
+reconciled with the session command transaction) with the
+branch-state-independent inventory. Remaining reconciliation should-fix
+(Astra, D586.133): persistent tests for git-command failures in
+tests/unit/tools/d583-contract-inventory.test.ts, which currently
+bypasses git via `changedPaths: []`.
