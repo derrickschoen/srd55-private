@@ -19861,3 +19861,16 @@ capacities 60/50, 90/80, 30/20, 80/70, rebuilt witnesses (path costs
 the OA boundary, slices 6A1/6A2 for 79 movement references and 57 legacy
 fixtures. Astra round 3 (FINAL) launched (brief review-plan-offers-r3.md,
 session 01a08491-ebdb-7141-9812-2247b5214ce6).
+
+## D586.70a — the txn 19-spec cumulative had finished before it was stopped: 439/443, four 30 s timeouts, no assertion reds (2026-09-09 01:10)
+
+Correction to D586.70: the "stopped" cumulative on c17d8595 had completed
+(tsc 0; 19 files, 17 passed, 2 failed; 443 tests, 439 passed, 4 failed,
+vitest exit 1). All four reds are "Test timed out in 30000ms" under load
+above 20: ai-dm-arena.test.ts:340, :560, :604 (file wall 285 s) and
+rl-generate-data.test.ts:266 (40 s). Two of the arena tests are exactly
+the ones that timed out in the same window's main gate. No assertion
+failures anywhere in the 19 specs, including the four graph dependents
+the plan omitted. Load artefact, not evidence against the candidate; the
+fix-round-2 candidate gets its own cumulative and these four get their
+D587.3 serial rerun on a quieter box.
