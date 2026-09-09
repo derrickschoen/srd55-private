@@ -20668,3 +20668,23 @@ follows.
 Main gate on d95cafb6: tsc 0, sg 0, vitest-gate exit 0 (one load
 flake, room-generator-los-cover, passed serially; FAILED none);
 Playwright on 4870 running.
+
+## D586.109 — reconciliation slice 1 dispatched on a supervisor-prepared merge worktree (2026-09-09 04:03)
+
+Merge procedure steps 1-2 executed by the supervisor: e09feecc is an
+ancestor of main; the overlap files are identical between the plan's
+inspected ab3bded7 and main 1db4717d (0 diff lines); branch
+claude/trial-core-reconciliation created from main in a new worktree
+/home/vagrant/PhpstormProjects/dnd-wt-reconcile (node_modules symlinked
+to the gate worktree; the immutable .tmp/session-command-transaction
+artifacts copied from the txn worktree and re-verified with
+`sha256sum -c`; the historical report /tmp/d583-reducer-feasibility-r3.json
+present at sha 55b972b3...); claude/challenge-rooms at exactly ce081ef0
+merged with --no-commit: 36 index entries, two UU conflicts
+(engine-round-session.ts and its spec) left for the lane to resolve by
+editing per steps 3-4. Fresh lane launched (session
+01a08530-a935-7832-b3e1-38e592d7c1c9, brief impl-reconcile-s1.md, port
+4640, marker RECONCILE-S1 DONE) with the two should-fixes binding
+(attempted() outside try/finally with a hook-failure control; the
+zero-totals wording), no git writes by the lane, the supervisor to
+stage and commit.
