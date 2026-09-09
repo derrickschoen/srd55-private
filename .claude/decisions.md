@@ -19481,3 +19481,23 @@ confirmed: empty-monster counterexample, type-binding runtime edges,
 reproduced, no roll-provenance or mcp-client dependence. Round 3 of 3
 (FINAL) resumed on 01a0842b-042d-7383-b07c-e970396080e7 (brief
 plan-txn-r3.md, marker PLAN-TXN-R3 DONE).
+
+## D586.57 — held-out slice 1 fix round 2 harvested: candidate committed, main merged, cumulative and Astra round 2 running (2026-09-09 00:11)
+
+Lane exit 0, HELDOUT-S1-R2 DONE; claims: all five blockers and both
+should-fixes fixed, focused 4 specs 94/94, tsc 0, sg 0, valid-room
+mutation hashes fa905610 -> 600605c8 -> fa905610, no pin moved. Two
+things the lane did that the reviewer must judge, flagged in the brief:
+after the generation control timed out twice (5,475 / 5,485 ms under a
+5,000 ms budget) it moved basis construction outside the test/hook
+timeout instead of counting the red; and it wrote a scratch script to
+/tmp/inspect-heldout-profile.ts outside the worktree (to be deleted at
+close per D587.4). Verified by me: `sg scan` exit 0 on the candidate;
+the only `claude -p` match is the echoed header. Committed 40837e74
+(15 files) then merged main (ede7fa18) as 0f2ba7af, clean. Inventory
+rebuilt per D584.4 from the branch diff plus every spec importing a
+changed module: 25 specs, same count as round 1 (rg is a shell
+function, grep used). Cumulative tsc + one vitest invocation running on
+0f2ba7af (~/dnd-slim-runs/cum-heldout-s1-r2.log). Astra round 2
+launched (brief review-impl-heldout-s1-r2.md, session
+01a0845c-f89c-7cc3-8c87-aebef32ed016).
