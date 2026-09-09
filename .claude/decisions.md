@@ -19100,3 +19100,40 @@ seven failing checks (an assertion that counted braces inside the
 packet). Both were test-side defects, fixed; the verified results are
 pool4_contrasts_test.py 21 passed and judge-one-test.sh 43 passed, and
 those numbers, not the earlier ones, went into the Astra brief.
+
+## D586.45 — mcp-request-client slice 1 ACCEPTED by Astra at round 3; judge scripts D587.1 unit at round 2; elevation lane blocked again on an inherited timeout under load; one misfire (2026-09-08 23:29)
+
+- mcp-request-client: Astra round 2 REJECT on one blocker (the
+  try/finally test asserted type and cause, not the exact rejection
+  object) plus one should-fix (listeners left installed after a teardown
+  timeout); lane fixed both in a resumed session; Astra round 3:
+  "ACCEPT SLICE 1 ... Blockers: None remaining ... Should-fix: None
+  remaining", verified by reading (toBe identity at test line 482,
+  listener release at module lines 357 and 369, diff limited to the two
+  files). Supervisor cumulative (7 specs incl. every consumer test that
+  names the module, sg scan, tsc -b, diff --check) running; commit after
+  it is green.
+- Judge scripts (D587.1 unit): Astra round 1 DO NOT APPROVE on one
+  blocker that was mine and real: the late-failing-writer fixture was a
+  bash script invoked through python3, so it raised before writing and
+  the regression passed vacuously. Fixed with a python fixture and an
+  assertion that the prompt was really written. Should-fixes applied:
+  cross-packet contrasts now need a declared exposure on both packets
+  (the four historical configs declare "none", which is the truth: no
+  advisory stage existed), every judge-log append is checked, and the
+  opus stage-1 prompt is NOTES-ONLY (rubric sentence replaced; startup
+  guard refuses a header that still carries the rubric; shell check pins
+  stage 1 without and stage 2 with the rubric). Verified: 22 python
+  tests, 45 shell checks, four unseals reproduce. Round 2 running.
+- Elevation slice 1 (resumed after the main merge): BLOCKED again,
+  now on the inherited D524 screenshot-primer test exceeding its fixed
+  5,000 ms budget; the box was at load 10-13 with a full gate, three
+  cumulative runs and six lanes. Under D587.3 it gets one serial rerun
+  by me when the cumulative runs finish; the budget is not touched.
+  Lane's remaining diff: two files (d584-contract-inventory tool and
+  test) on top of the WIP commit.
+- MISFIRE (mine): I resumed the D569 planning session for round 2 with
+  an EMPTY verdict section because Astra's round-1 review was still
+  running (my status grep had matched the verdict-format wording in my
+  own brief). Killed by pid within a minute; the lane log is marked
+  MISFIRE; the resume will be re-sent with the real verdict.
