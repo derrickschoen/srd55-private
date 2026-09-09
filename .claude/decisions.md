@@ -21807,3 +21807,11 @@ the hard-basis arena is running on 4530 (dist cache hit 720cc11e…) and
 its first fresh `codex exec … --sandbox read-only` luna cell is live;
 load 1.43. Nothing else is launched until the arm finishes; 4173
 untouched. Post-arm 4.1 validation follows the exit file.
+
+### D586.164 — D569 v5 first arm: hard basis complete, brutal running (supervisor observation, 2026-09-09 14:39 EDT)
+
+Read-only peek at `~/dnd-slim-runs/d569-v5/gpt-5.6-luna-blind-primary-hard.raw.jsonl` (30 rows, mode 600, written 14:38:02; no validation run yet, no edits). Hard basis took 13:07:48 → 14:38 (~90 min, ~3 min per row, all rows on the 240 s wall: endToEndWall 117–242 s, three rows at 241–242 s). The brutal basis started at 14:38 (second `dist cache hit` line in the launch log); expected to finish around 16:10. My earlier 68–110 min total estimate was derived from the model-free dry run and was wrong; real arm total is ~3 h.
+
+Headline counts (claimed by the rows, not yet validated): model gpt-5.6-luna ×30, effort high ×30, dmMode blind ×30, decisionTransport mcp_minimal ×30, blindRepairArm code_only ×30, blindFacts off ×30, escalated 0, executionErrorClass none, contextTruncated 0, flapRetries 0, `cliVersion` null on every row (expected: 4.2 relabel supplies the real 0.153.4). Round outcome: 4/30 rows accepted a full monster round (all creatures accepted; firstDecisionAccepted true), 18/30 exhausted three attempts with every attempt rejected (codes INVALID_INTENT_SHAPE, NO_MATCHING_OPTION, ACTION_UNAVAILABLE), 8/30 produced no resolver outcome at all (outcome `refused` ×5 / `service_null` ×3 with empty attempts). This is data, not a STOP: no STOP rule 1–16 condition is met, the arm keeps running untouched, and section 4 post-arm steps remain separate.
+
+Cells run under a per-conversation `codex-home-kb` copy inside `/tmp/dnd-ai-dm-conversation-*` (CODEX_HOME of the outer arena is `~/.codex-aidm`); `~/.codex-aidm/sessions` therefore stays empty by design. `/tmp` holds 8,5xx such dirs (1.5 GB) accumulated since 2026-09-08 22:27 across earlier runs; none touched while the arm runs.
