@@ -19692,3 +19692,49 @@ round 2 so the 25-spec inventory stands. Committed 1d6af854. Cumulative
 tsc + one vitest invocation running (~/dnd-slim-runs/cum-heldout-s1-r3.log).
 Astra round 3 (FINAL) launched (brief review-impl-heldout-s1-r3.md,
 session 01a08480-b571-7f52-9bf7-3e019aa916aa); a REJECT shelves the slice.
+
+## D586.66 — main gate on f18a8a1a RED; elevation merge REVERTED for a real defect; promo180 round 2 DO NOT DISPATCH, final round resumed (2026-09-09 00:56)
+
+Gate wt-main-493121dd on f18a8a1a: tsc 0, sg 0, vitest-gate exit 1.
+After the gate's own serial retry, five specs stayed red. Four are
+timeouts under load 18 (six codex lanes plus the heldout cumulative
+concurrent): js-round-plan-integration (5.7 s at 5 s),
+ai-dm-arena dry-run CLI (32.2 s at 30 s), ai-dm-screenshot-probe (6.9 s),
+room-generator-los-cover x4 (6.5-7.8 s); STACK_TRACE_ERROR bodies, no
+assertion text. The fifth is REAL: tests/unit/tools/d584-contract-
+inventory.test.ts:26-28 reads `.tmp-plans/2026-09-08-elevation-tiers.md`
+from process.cwd(); `.tmp-*` is gitignored, the file exists only in the
+los-cover worktree, ENOENT on the gate checkout. Finding against the
+lane (untracked test input), against the reviewer (accepted after
+in-place probes in the worktree where the file exists) and against me
+(my cumulative ran in that same worktree; my inventory never asked
+what the tests read). Actions: gate killed by process group (log kept
+as gate-wt-main-493121dd.f18a8a1a-red.log, Playwright never completed);
+merge f18a8a1a REVERTED on main as efb6dbab (10 files, mainline 1,
+clean); fix round 3 of 3 dispatched on the elevation session
+01a0839a-d233-7ff2-9b43-1caa02af5e10 (brief impl-elevation-s1-r3.md,
+marker ELEVATION-S1-R3 DONE: tests read a tracked fixture, regression
+control from a cwd without .tmp-plans); main gate relaunched on
+efb6dbab (mcp-client + row-codec landings, elevation out). The four
+timeout specs get their fair rerun inside that gate.
+
+Promo180, Astra round 2: DO NOT DISPATCH, one blocker: the designer
+sandbox mounts the whole repository read-only, so the held-out seeds
+and generate-arena-basis.ts:69 let the designer reconstruct held-out
+rooms; hiding protected/ isolates nothing. bwrap 0.6.1 exists but
+`--unshare-net` failed with NETLINK_ROUTE EPERM in the review sandbox.
+Five should-fixes (main drift incl. the row-codec packet boundary,
+consumer dispositions, judge-promo180.log quarantine, split routing
+mutants, ERR+EXIT traps). Owner direction, extractor fix (0 round plans
+/ 1 retained adjustment in memory), 22 analyzer tests and 426 numeric
+fields confirmed. Supervisor merged main 858bd7a1 into claude/p-promo180
+as 8a0cea4e (clean) and resumed round 3 of 3 (FINAL) on
+01a08310-5f9b-7570-96d9-1a3fd906066b (brief plan-promo180-r4.md, marker
+PLAN-PROMO180-R3 DONE) requiring an audited mount allowlist, a
+reconstruction control before teacher calls, and a supervisor-shell
+bwrap preflight with STOP.
+
+Noticed on main's working tree, not mine: 16 new `emberkeep-*` requests
+(ids 01a08474-f84a.. sequential, ~00:40) and an edit to the low-wall
+request, written by the owner's side. Left uncommitted; surfaced to the
+owner.
