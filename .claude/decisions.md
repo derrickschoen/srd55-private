@@ -20521,3 +20521,19 @@ decoder assertion, five retained explicitly), the session manifest
 55b972b3..., heap 1,073,878,568), the frozen contract on both trees.
 Round 2 resumed on 01a08505-d69b-7120-83ae-0509457fdce1 (brief
 plan-trial-core-reconciliation-r2.md, marker PLAN-RECONCILE-R2 DONE).
+
+## D586.103 — blind gate on claude/blind-dm 90484d45 fully GREEN; main gate launched on d95cafb6 (2026-09-09 03:44)
+
+Gate wt-blind-dm (started 02:18, GATES DONE 03:43): tsc 0; sg 0;
+vitest-gate exit 0 with six load flakes passing serially (ai-dm-arena,
+ai-dm-board-delivery, ai-dm-conversation, ai-dm-screenshot-probe,
+engine-mcp-server, room-generator-los-cover) and FAILED (none);
+Playwright on 4530: one initial failure (guided-builder.spec.ts:581,
+equipment-step panel not visible within the 50.3 s test timeout) that
+passed on the serial rerun, 186 passed in 53.1 min, playwright-gate
+exit 0. D569 Amendment 2 is now implementation-accepted, cumulative-
+verified and gate-green on its branch. Remaining before any v5 arm: the
+oracle re-capture, the section-9 launch preflight, and an explicit
+launch decision here. The queued main gate launched itself at 03:43:38
+on main d95cafb6 (mcp-client, row-codec, elevation, txn slices 1-3, the
+art pipeline, decisions), 4870 confirmed free.
