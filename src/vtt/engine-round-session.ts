@@ -29,15 +29,14 @@ import {
 import { createEngineMcpRuntime } from './mcp/entrypoint';
 import { projectEngineInitiativeIntel } from './engine-initiative-intel';
 import {
-  unattendedReactionOfferResolution,
   type AutoResolvedReactionOffer,
   type ReactionOfferHostPolicy,
 } from './reaction-offer-host-policy';
 import {
-  guidedPendingReactionResolution,
   type GuidedReactionResolution,
   type ReactionGuidanceDeclaration,
 } from './reaction-guidance';
+import { resolveSessionBoundaryDecisions } from './session-command-transaction';
 import { reduceSessionEncounter } from './session-encounter-reducer';
 import type { ScriptedPartyTurnMaterialization } from './scripted-party-round';
 import type { HostScenario, HostSplitCandidate } from './speculative-plan-types';
@@ -159,94 +158,6 @@ function livingMonsterIds(state: EncounterState): readonly CombatantId[] {
 
 function reduceOne(state: EncounterState, command: EncounterCommand, rng: SerializableRng): EncounterState {
   return reduceSessionEncounter(state, command, rng).state;
-}
-
-function resolveBoundaryDecisions(
-  initialState: EncounterState,
-  rng: SerializableRng,
-  policy: ReactionOfferHostPolicy,
-  guidance: ReactionGuidanceDeclaration | null,
-  resolveInitiativeSegmentDecisions: boolean,
-): { readonly state: EncounterState } & EngineBoundaryResolutions {
-  if (policy.kind === 'dm_attended') {
-    return { state: initialState, fallbackResolutions: [], guidedResolutions: [] };
-  }
-  let state = initialState;
-  const fallbackResolutions: AutoResolvedReactionOffer[] = [];
-  const guidedResolutions: GuidedReactionResolution[] = [];
-  let legendaryBoundaryToResume: {
-    readonly activeCombatant: CombatantId;
-    readonly round: number;
-  } | null = null;
-  for (;;) {
-    let selected:
-      | { readonly kind: 'guidance'; readonly resolution: GuidedReactionResolution }
-      | { readonly kind: 'fallback'; readonly resolution: AutoResolvedReactionOffer }
-      | undefined;
-    for (const decision of state.pendingDecisions) {
-      if (decision.kind !== 'reaction_offer') continue;
-      const guided = guidedPendingReactionResolution(state, decision, 'algorithm', policy, guidance);
-      if (guided !== null) {
-        selected = { kind: 'guidance', resolution: guided };
-        break;
-      }
-      const fallback = unattendedReactionOfferResolution(state, decision, 'algorithm', policy);
-      if (fallback !== null) {
-        selected = { kind: 'fallback', resolution: fallback };
-        break;
-      }
-    }
-    if (selected !== undefined) {
-      state = reduceOne(state, {
-        type: 'resolve_pending_decision',
-        decisionId: selected.resolution.decisionId,
-        optionId: selected.resolution.resolution,
-      }, rng);
-      if (selected.kind === 'guidance') guidedResolutions.push(selected.resolution);
-      else fallbackResolutions.push(selected.resolution);
-      continue;
-    }
-    const legendaryResistance = resolveInitiativeSegmentDecisions &&
-      state.config.initiativeMode === 'per_combatant'
-      ? state.pendingDecisions.find((decision) => decision.kind === 'legendary_resistance')
-      : undefined;
-    if (legendaryResistance !== undefined) {
-      state = reduceOne(state, {
-        type: 'resolve_pending_decision', decisionId: legendaryResistance.id, optionId: 'suffer',
-      }, rng);
-      continue;
-    }
-    const legendaryWindow = resolveInitiativeSegmentDecisions &&
-      state.config.initiativeMode === 'per_combatant'
-      ? state.pendingDecisions.find((decision) => decision.kind === 'legendary_action_window')
-      : undefined;
-    if (legendaryWindow !== undefined) {
-      legendaryBoundaryToResume ??= { ...legendaryWindow.boundary };
-      state = reduceOne(state, {
-        type: 'resolve_pending_decision', decisionId: legendaryWindow.id, optionId: 'pass',
-      }, rng);
-      continue;
-    }
-    const deathSave = state.pendingDecisions.find((decision) => decision.kind === 'death_save');
-    if (deathSave !== undefined) {
-      state = reduceOne(state, {
-        type: 'resolve_pending_decision', decisionId: deathSave.id, optionId: 'roll',
-      }, rng);
-      continue;
-    }
-    const boundaryToResume = legendaryBoundaryToResume;
-    if (boundaryToResume !== null && state.phase.kind === 'active' &&
-      state.activeCombatant === boundaryToResume.activeCombatant &&
-      state.round === boundaryToResume.round &&
-      !state.pendingDecisions.some((decision) =>
-        decision.boundary.activeCombatant === boundaryToResume.activeCombatant &&
-        decision.boundary.round === boundaryToResume.round)) {
-      legendaryBoundaryToResume = null;
-      state = reduceOne(state, { type: 'end_turn', actor: boundaryToResume.activeCombatant }, rng);
-      continue;
-    }
-    return { state, fallbackResolutions, guidedResolutions };
-  }
 }
 
 function advanceToActor(
@@ -469,14 +380,28 @@ export class EngineRoundSession {
     const guidedResolutions: GuidedReactionResolution[] = [];
     const reduce = (state: EncounterState, command: EncounterCommand): EncounterState => {
       const reduced = reduceOne(state, command, trialRng);
-      const resolved = resolveBoundaryDecisions(reduced, trialRng, this.policy, guidance, false);
+      const resolved = resolveSessionBoundaryDecisions(
+        reduced,
+        trialRng,
+        reduceSessionEncounter,
+        this.policy,
+        guidance,
+        'reaction_offers_only',
+      );
       fallbackResolutions.push(...resolved.fallbackResolutions);
       guidedResolutions.push(...resolved.guidedResolutions);
       return resolved.state;
     };
     const firstMonster = livingMonsterIds(this.#state)[0];
     if (firstMonster === undefined) throw new Error('Encounter has no living monster to prepare.');
-    const initialBoundary = resolveBoundaryDecisions(this.#state, trialRng, this.policy, guidance, false);
+    const initialBoundary = resolveSessionBoundaryDecisions(
+      this.#state,
+      trialRng,
+      reduceSessionEncounter,
+      this.policy,
+      guidance,
+      'reaction_offers_only',
+    );
     fallbackResolutions.push(...initialBoundary.fallbackResolutions);
     guidedResolutions.push(...initialBoundary.guidedResolutions);
     const prepared = advanceToActor(initialBoundary.state, firstMonster, reduce);
@@ -500,12 +425,26 @@ export class EngineRoundSession {
     const guidedResolutions: GuidedReactionResolution[] = [];
     const reduce = (state: EncounterState, command: EncounterCommand): EncounterState => {
       const reduced = reduceOne(state, command, trialRng);
-      const resolved = resolveBoundaryDecisions(reduced, trialRng, this.policy, guidance, true);
+      const resolved = resolveSessionBoundaryDecisions(
+        reduced,
+        trialRng,
+        reduceSessionEncounter,
+        this.policy,
+        guidance,
+        'initiative_segment',
+      );
       fallbackResolutions.push(...resolved.fallbackResolutions);
       guidedResolutions.push(...resolved.guidedResolutions);
       return resolved.state;
     };
-    const initialBoundary = resolveBoundaryDecisions(this.#state, trialRng, this.policy, guidance, true);
+    const initialBoundary = resolveSessionBoundaryDecisions(
+      this.#state,
+      trialRng,
+      reduceSessionEncounter,
+      this.policy,
+      guidance,
+      'initiative_segment',
+    );
     fallbackResolutions.push(...initialBoundary.fallbackResolutions);
     guidedResolutions.push(...initialBoundary.guidedResolutions);
     const begunBeforeDeadActorAdvance = initialBoundary.state.initiative.length === 0
@@ -535,12 +474,26 @@ export class EngineRoundSession {
     const guidedResolutions: GuidedReactionResolution[] = [];
     const reduce = (state: EncounterState, command: EncounterCommand): EncounterState => {
       const reduced = reduceOne(state, command, trialRng);
-      const resolved = resolveBoundaryDecisions(reduced, trialRng, this.policy, guidance, true);
+      const resolved = resolveSessionBoundaryDecisions(
+        reduced,
+        trialRng,
+        reduceSessionEncounter,
+        this.policy,
+        guidance,
+        'initiative_segment',
+      );
       fallbackResolutions.push(...resolved.fallbackResolutions);
       guidedResolutions.push(...resolved.guidedResolutions);
       return resolved.state;
     };
-    const initialBoundary = resolveBoundaryDecisions(this.#state, trialRng, this.policy, guidance, true);
+    const initialBoundary = resolveSessionBoundaryDecisions(
+      this.#state,
+      trialRng,
+      reduceSessionEncounter,
+      this.policy,
+      guidance,
+      'initiative_segment',
+    );
     fallbackResolutions.push(...initialBoundary.fallbackResolutions);
     guidedResolutions.push(...initialBoundary.guidedResolutions);
     let state = initialBoundary.state;
@@ -608,7 +561,14 @@ export class EngineRoundSession {
     const deviationResolutions: EngineProposalDeviation[] = [];
     const reduce = (state: EncounterState, command: EncounterCommand): EncounterState => {
       const reduced = reduceOne(state, command, trialRng);
-      const resolved = resolveBoundaryDecisions(reduced, trialRng, this.policy, guidance, true);
+      const resolved = resolveSessionBoundaryDecisions(
+        reduced,
+        trialRng,
+        reduceSessionEncounter,
+        this.policy,
+        guidance,
+        'initiative_segment',
+      );
       fallbackResolutions.push(...resolved.fallbackResolutions);
       guidedResolutions.push(...resolved.guidedResolutions);
       return resolved.state;

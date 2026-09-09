@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import { canonicalJson } from '../../../src/commands/canonical-json';
 import { combatToken, monsterCombatantProfile } from '../../../src/combat/combatant';
-import { reduceEncounter, type EncounterState } from '../../../src/combat/encounter';
+import { createEncounter, reduceEncounter, type EncounterState } from '../../../src/combat/encounter';
 import { mulberry32 } from '../../../src/combat/random';
+import { UNICORN } from '../../../src/combat/statblocks/monsters';
 import { armorClass, combatantId, encounterBranchId, encounterSessionId, type CombatantId } from '../../../src/combat/values';
 import { LION } from '../../../src/combat/statblocks/wild-beasts';
 import {
@@ -16,6 +18,7 @@ import {
 } from '../../../src/vtt/intent-resolver';
 import { generateRoom } from '../../../src/vtt/room-generator';
 import { freshMonsterPlanningState, projectFutureMonsterTurns } from '../../../src/vtt/monster-planning-state';
+import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
 
 const REQUEST: EngineRoundCapsuleRequest = {
   runId: encounterSessionId('encounter:engine-round-session-test'),
@@ -138,6 +141,68 @@ function completeDodge(session: EngineRoundSession, actorId: CombatantId) {
 }
 
 describe('authoritative engine round session', () => {
+  it('preserves a pending legendary window when an empty monster application does no work', () => {
+    const activeMonster = monsterProfile('empty-application-active', { initiativeBonus: 100 });
+    const legendaryBase = monsterCombatantProfile(UNICORN, {
+      combatantId: 'combatant:empty-application-legendary',
+      tokenId: 'token:empty-application-legendary',
+    });
+    const legendaryMonster = {
+      ...legendaryBase,
+      rules: { ...legendaryBase.rules, initiativeBonus: 50 },
+    };
+    const player = playerProfile('empty-application-player', { initiativeBonus: 0 });
+    const initial = createEncounter({
+      bounds: { columns: 16, rows: 5 },
+      combatants: [activeMonster, legendaryMonster, player],
+      tokens: [
+        placedToken(activeMonster, 0, 1),
+        placedToken(legendaryMonster, 5, 1),
+        placedToken(player, 13, 1),
+      ],
+      config: { initiativeMode: 'per_combatant' },
+    });
+    const started = reduceEncounter(
+      initial,
+      { type: 'roll_initiative' },
+      mulberry32(58_410_001),
+    ).state;
+    expect(started.activeCombatant).toBe(activeMonster.id);
+    const queued = reduceEncounter(
+      started,
+      { type: 'end_turn', actor: activeMonster.id },
+      mulberry32(58_410_002),
+    ).state;
+    expect(queued.combatants.find((entry) => entry.profile.id === activeMonster.id)?.life)
+      .toBe('living');
+    expect(queued.pendingDecisions).toContainEqual(expect.objectContaining({
+      kind: 'legendary_action_window',
+      combatant: legendaryMonster.id,
+      boundary: { activeCombatant: activeMonster.id, round: 1 },
+    }));
+    const beforeBytes = canonicalJson(queued);
+    const session = new EngineRoundSession(
+      queued,
+      mulberry32(58_410_003),
+      { kind: 'unattended', askDefault: 'decline' },
+    );
+
+    const applied = session.applyResolvedMechanics([], null);
+    const after = session.currentState();
+
+    expect(applied).toEqual({
+      revisionDelta: 0,
+      fallbackResolutions: [],
+      guidedResolutions: [],
+      deviationResolutions: [],
+    });
+    expect(after.revision).toBe(queued.revision);
+    expect(after.activeCombatant).toBe(activeMonster.id);
+    expect(after.activeInitiativeIndex).toBe(queued.activeInitiativeIndex);
+    expect(after.pendingDecisions).toEqual(queued.pendingDecisions);
+    expect(canonicalJson(after)).toBe(beforeBytes);
+  });
+
   it('advances past an active PC killed mid-round before the next segment begins', () => {
     const started = reduceEncounter(
       segmentedState(),
