@@ -1,0 +1,39 @@
+{
+  "$schema": "./request.schema.json",
+  "id": "01a08456-d9a9-7f60-b3aa-824115da4b79",
+  "slug": "terrain-low-wall",
+  "createdAt": "2026-09-09T04:04:39Z",
+  "status": "open",
+  "purpose": "Board terrain feature for the classic VTT renderer: a waist-high stone wall segment that grants three-quarters cover. The cover geometry landed in D576 (increment 1) with procedural half- and three-quarters-cover overlays, but every authored three-quarters feature is still missing (decisions record: 'authored three-quarters features are still needed in increment 2'). Existing authored features are terrain-crate, terrain-pillar, terrain-rubble and terrain-hazard; there is no low wall.",
+  "prompt": "Top-down pixel-art game tile of a single straight segment of low stone wall, waist height, running horizontally across the full width of the tile. Roughly cut grey-brown stone blocks in staggered courses, two blocks high, with a slightly lighter flat top course and darker mortar lines. Light comes from the top-left; the top face is the lightest surface, the south face is in shadow with a cool blue-violet tint. The wall sits on a soft circular dark drop shadow, like a game piece standing on the board. Crisp 1:1 pixels, no anti-aliasing, no gradients, no outline glow, no text. The tile background outside the wall and its drop shadow is fully transparent.",
+  "negativePrompt": "photograph, 3D render, isometric, perspective, blur, anti-aliasing, gradient, text, watermark, border, frame, grass, floor tiles, characters",
+  "dimensions": { "width": 128, "height": 128, "aspectRatio": "1:1", "pixelGrid": 1 },
+  "style": {
+    "summary": "Matches the repository's classic-board pixel art: 128 px top-down tile, a single object on a circular drop shadow, flat shading in stepped ramps.",
+    "references": [
+      "public/assets/art/terrain-crate-v1.png",
+      "public/assets/art/terrain-pillar-v1.png",
+      "public/assets/art/terrain-rubble-v1.png",
+      "public/assets/art/map-wall-stone-v1.png",
+      "public/assets/art/map-overlay-terrain-three-quarters-cover-v1.png"
+    ],
+    "palette": "Stone ramp for the blocks (mid-grey with a brown cast at the base step, shadows shifting toward blue-violet, lights toward yellow), neutral cool greys for mortar; the drop shadow is a near-black neutral at partial alpha. See src/assets/palette.ts for the ramp rule."
+  },
+  "background": {
+    "transparent": true,
+    "notes": "True alpha channel. Only the wall and the circular drop shadow may have non-zero alpha; the drop shadow's alpha must be at or below 60 percent and stay inside the tile. No keyed colour, no checkerboard."
+  },
+  "acceptanceCriteria": [
+    "File is a PNG, exactly 128 x 128, 8-bit RGBA (check with the `file` command).",
+    "Alpha is zero everywhere outside the wall and its circular drop shadow; no stray pixels in the corners.",
+    "The wall reads as three-quarters cover at board scale: it is clearly lower than the full-height map-wall-stone tiles and taller than terrain-rubble.",
+    "The wall spans the full 128 px width so adjacent copies tile into a continuous wall with no visible seam at the left and right edges.",
+    "Pixels are crisp: no anti-aliased edges, no gradients; a 4x nearest-neighbour zoom shows only hard-edged pixels.",
+    "Shading matches the references: light from the top-left, lightest top face, shadowed south face with a cool tint, drop shadow comparable in size and darkness to terrain-crate-v1.png.",
+    "No text, signature, watermark, border or frame.",
+    "Placed on map-floor-stone-v1.png at 1:1 the wall is legible at the renderer's default zoom and its colours sit within the existing palette family."
+  ],
+  "deliverable": { "format": "png", "filename": "01a08456-d9a9-7f60-b3aa-824115da4b79-terrain-low-wall.png", "directory": "art/incoming" },
+  "license": "CC0-1.0",
+  "notes": "First request in the pipeline. If the assistant cannot deliver true pixel-art crispness, deliver at 128 x 128 anyway and say so in the delivery note; a rejected asset is re-run under this same id."
+}
