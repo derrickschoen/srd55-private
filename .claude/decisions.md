@@ -22020,3 +22020,14 @@ hand. Resume plan on 2026-09-14 after 21:24: (1) re-check `codex exec` with a on
 (3) resume RCA lane 01a087c6-e5a7-7aa2-a37a-ebfd4c679884 with `resume-rca-d569-crash-r3.md` for the patch specification;
 (4) baseline on wt-vtt-handoff is already green on 0f84e09f and stays valid while main does not move. Alternatives not chosen:
 buy credits now; Claude implements without review.
+
+## D593 — OWNER: Node-mode transport for the Godot client is WebSocket (2026-09-09)
+
+Q4 answered 2026-09-09 18:12 EDT: "WebSocket". The v1 Node runtime ships a WebSocket adapter (bidirectional; JSON envelopes verbatim as frames;
+127.0.0.1 only, opt-in, bearer token at handshake, Host/Origin validation), not HTTP+SSE; HTTP+SSE is not built. The plan's S7 and
+the Astra F9/F10 dispositions are re-targeted accordingly (session binding = the authenticated socket; a hand-rolled RFC 6455 server
+in the style of tools/discord-launcher/relay-server.mjs or an exact-pinned dependency — the plan must choose and justify;
+tools/discord-launcher's echo relay is a spike, not a base). Alternatives not chosen: HTTP+SSE; both.
+
+D592 AMENDED — OWNER (2026-09-09 18:12 EDT): "also, i reset my codex usage now." The wait is over; resume both codex sessions immediately after a
+probe confirms `codex exec` works.
