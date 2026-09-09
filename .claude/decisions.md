@@ -20278,3 +20278,34 @@ Astra round 3 (FINAL) launched (brief review-challenge-s3-r3.md,
 session 01a084ec-95b7-7f83-b13b-64cbce875a26).
 
 ## D586.92a — supervisor run of the changed challenge specs on ce081ef0: 2 files, 41/41, exit 0; blind gate vitest-gate exit 0, Playwright running (2026-09-09 02:50)
+
+## D586.93 — challenge slice 3 ACCEPTED at the final round; landing on main blocked by a real merge conflict with the txn extraction; reconciliation deferred to the txn plan's slice 4 (2026-09-09 02:55)
+
+Astra round 3 on ce081ef0: "ACCEPT SLICE 3. Blockers: none." The
+[10, 1,073,741,825, 10] reproduction now stops on heap_used_bytes with
+both peaks at 1,073,741,825; regression, sibling 250,001 and CLI
+exhaustion verified; all three mutation and restoration hashes
+recompute; the interrupted-vitest substitution judged legitimate;
+report 759 bytes sha 55b972b3..., 0.0127353 % over; inventory 190
+paths; 4,106/4,106 reconciled; three files +104/-3. One should-fix for
+a later slice: isolate the deterministic tests from the production
+feasibility run in the shared beforeAll at challenge-feasibility.test.ts:83
+(a small regression currently triggers expensive synchronous
+exploration that Vitest's timeout cannot pre-empt). My evidence: sg 0,
+changed specs 41/41. SHELVE_D583 for rooms B,C,A is settled three
+times over.
+
+Landing: `git merge claude/challenge-rooms` into main (now at c1f16152
+with txn slices 1-2) conflicts in src/vtt/engine-round-session.ts and
+tests/unit/vtt/engine-round-session.test.ts; aborted, main untouched.
+This is exactly the semantic overlap the txn plan's slice 4 foresaw
+(engine-round-application.ts on the challenge branch vs the session
+transaction on main): per that plan, when the application lands the
+reconciliation STOPs and a focused semantic integration plan decides
+whether both consume a smaller shared trial core or one replaces the
+other while preserving caller-owned checkpoint rollback, events and
+roll history. Disposition: the challenge branch stays accepted-but-
+unmerged at ce081ef0 until txn slice 3 is harvested; then a planning
+lane writes that integration plan (reviewed by Astra) before any merge.
+The owner's D587.7 bounded room-D rewrite is dispatched now as a
+planning unit on the idle challenge worktree.
