@@ -21658,3 +21658,15 @@ closer, re-extracted, all ten section-3 blocks parse (`bash -n`). Not
 yet run: 3.2 provenance record (s3-7) and 3.3 production command (s3-8)
 — those follow the re-run of 2.1/2.2-verify/2.3/2.4 on a quiet machine
 and the explicit launch decision.
+
+## D586.158 — main-shaped run of the rejected round-2 candidate 48cba702: focused 29/29, cumulative 148/150 (2026-09-09 10:23)
+
+Fresh shared clone, main → 48cba702, no .tmp-plans, full vitest output on
+file: focused spec 29/29 in 498 s; 150-path cumulative 148 files passed,
+2,924/2,926 tests, two reds: tests/unit/tools/d583-contract-inventory.test.ts
+(known branch-state defect, deterministic) and
+tests/unit/tools/ai-dm-screenshot-probe.test.ts (5 s timeout under load
+~4 with the final-round lane running). No serial rerun for this
+candidate: it is superseded by the round-3 candidate, whose own
+supervisor cumulative is the evidence that closes the contract. Temp
+clone deleted.
