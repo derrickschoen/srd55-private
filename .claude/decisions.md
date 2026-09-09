@@ -21622,3 +21622,21 @@ control (the seam may alter data/behaviour, never throw the expected
 failure itself), real-boundary instrumentation, a complete retention
 ledger sampled after every mutation, and the plan's equal-total Longbow
 control. A REJECT at round 3 shelves slice 2.
+
+## D586.156 — D569 preflight 2.5 PASS: model-free dry-run rows validate against the v5 manifest (2026-09-09 10:03)
+
+Section 2.5 executed verbatim (extracted fenced blocks, runbook sha
+84326354…): both dry-run arena commands (hard seeds 5117001.., brutal
+6203001.., rooms 10, reps 3, --dry-run, exact registered flags, port
+4530, CODEX_HOME=~/.codex-aidm) completed — hard at 09:55, brutal at
+10:03 (~7 min each, model-free, board PNG captures with dist cache hit
+720cc11e…); 30 + 30 rows written under d569-v5/ (mode 600).
+validate-first-arm.ts installed with its .sha256 pin; verify block:
+`validate-first-arm.ts: OK` then `D569 ROW VALIDATION PASS
+family=primary arm=gpt-5.6-luna-blind rows=60 hard=30 brutal=30`
+(strict manifest + observed-row validator, D569_CLI_VERSION=SIMULATED
+for the synthetic session identity only). Preflight status: 2.1, 2.2,
+2.3, 2.5 PASS; 2.4 must be re-run verbatim on a quiet machine (the
+room D slice 2 final round and its queued supervisor cumulative hold
+vitest processes). The PRODUCTION launch (section 3) is a separate
+decision recorded when issued; nothing model-bound has run.
