@@ -6,7 +6,7 @@ image-generation assistant.
 | Folder | Holds | Tracked in git |
 | --- | --- | --- |
 | `art/requests/` | one JSON request per asset, plus this README, the schema and the scaffolder | yes |
-| `art/incoming/` | the finished assets the assistant delivers | no (rasters are ignored) |
+| `art/incoming/` | the finished assets the assistant delivers, plus any `-source` reference images | no (everything but its README is ignored) |
 
 Every request has a UUIDv7 id. The id is the filename prefix of the request
 **and** of every asset delivered for it, so the pairing is visible in a
@@ -74,6 +74,9 @@ provenance record stays truthful.
   request names a drop shadow.
 - No text, watermark, signature or border unless the prompt asks for it.
 - One asset per request. Variants get their own requests.
+- A `batch` field groups requests issued together; `redoOf` names the
+  current asset a request replaces one-for-one. List a batch with
+  `grep -l '"batch": "redo-starter-art-v1"' art/requests/*.json`.
 
 ## Reference facts about the existing art
 
