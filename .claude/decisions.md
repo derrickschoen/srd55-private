@@ -21640,3 +21640,21 @@ for the synthetic session identity only). Preflight status: 2.1, 2.2,
 room D slice 2 final round and its queued supervisor cumulative hold
 vitest processes). The PRODUCTION launch (section 3) is a separate
 decision recorded when issued; nothing model-bound has run.
+
+## D586.157 — D569 section 3.1 collision check and 3.2 operator-script installs PASS; launch still withheld (2026-09-09 10:05)
+
+Executed verbatim from the runbook (line-exact fence parser this time):
+3.1 collision check (no production artifact exists) PASS; advisory-gate.py
+installed + pinned, `ADVISORY GATE SELFTEST PASS n=7`; judge-staged.sh
+installed + pinned, `JUDGE-STAGED VERIFY PASS` (model-free path only);
+analyze-primary-pair.ts installed + pinned, `D569 ANALYSIS SCRIPT VERIFY
+PASS`. Five operator scripts now sit under d569-v5/scripts/ (mode 600)
+with adjacent .sha256 pins. Second finding against my own extraction: my
+first regex-based fence extractor cut the advisory-gate block at a
+fenced ```json literal inside its Python self-test string, producing an
+unterminated heredoc (bash syntax error, nothing installed); replaced by
+a parser that treats only a line consisting exactly of ``` as a fence
+closer, re-extracted, all ten section-3 blocks parse (`bash -n`). Not
+yet run: 3.2 provenance record (s3-7) and 3.3 production command (s3-8)
+— those follow the re-run of 2.1/2.2-verify/2.3/2.4 on a quiet machine
+and the explicit launch decision.
