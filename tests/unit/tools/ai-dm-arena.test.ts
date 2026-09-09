@@ -333,8 +333,59 @@ describe('AI-DM arena', () => {
     ['brutal-b', 'tests/fixtures/arena-basis-brutal-b'],
     ['scenario', 'tests/fixtures/arena-scenarios'],
   ] as const)('maps the %s basis to its frozen fixture directory', (basis, directory) => {
-    expect(basisFixturesPath({ cwd: process.cwd(), basis }))
+    expect(basisFixturesPath({
+      cwd: process.cwd(),
+      basis,
+      experimentPolicy: { roundWallMs: 180_000, basisDirectory: null },
+    }))
       .toBe(join(process.cwd(), directory));
+  });
+
+  it('parses the exact promo180 wall, basis directory, and per-arm instruction flags', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-promo180-parse-'));
+    const basisDirectory = join(directory, 'heldout');
+    const bundle = join(directory, 'luna-steering-kb');
+    const common = [
+      '--rooms', '1', '--reps', '1', '--seed', '5119001',
+      '--out', join(directory, 'arena.jsonl'), '--interleave',
+      '--arm', 'luna-low-baseline:gpt-5.6-luna:low:gpt-5.6-luna:high',
+      '--arm', 'luna-low-steered:gpt-5.6-luna:low:gpt-5.6-luna:high',
+      '--arm', 'luna-medium-steered:gpt-5.6-luna:medium:gpt-5.6-luna:high',
+      '--arm', 'sol-high:gpt-5.6-sol:high:gpt-5.6-luna:high',
+      '--round-wall-ms', '180000', '--basis-dir', basisDirectory,
+      '--arm-instruction-source', 'luna-low-baseline:none',
+      '--arm-instruction-source', 'luna-low-steered:kb',
+      '--arm-kb', `luna-low-steered:${bundle}`,
+      '--arm-instruction-source', 'luna-medium-steered:kb',
+      '--arm-kb', `luna-medium-steered:${bundle}`,
+      '--arm-instruction-source', 'sol-high:none',
+    ] as const;
+    const parsed = parseArenaArgs(common);
+
+    expect(parsed.experimentPolicy).toEqual({
+      roundWallMs: 180_000,
+      basisDirectory,
+    });
+    expect(parsed.armInstructions).toEqual([
+      { label: 'luna-low-baseline', source: { instructionSource: 'none', skill: null } },
+      { label: 'luna-low-steered', source: { instructionSource: 'kb', skill: null, kbPath: bundle } },
+      { label: 'luna-medium-steered', source: { instructionSource: 'kb', skill: null, kbPath: bundle } },
+      { label: 'sol-high', source: { instructionSource: 'none', skill: null } },
+    ]);
+    expect(parsed.arms.map((arm) => ({ label: arm.label, source: arm.instructionSource }))).toEqual([
+      { label: 'luna-low-baseline', source: 'none' },
+      { label: 'luna-low-steered', source: 'kb' },
+      { label: 'luna-medium-steered', source: 'kb' },
+      { label: 'sol-high', source: 'none' },
+    ]);
+    expect(basisFixturesPath(parsed)).toBe(basisDirectory);
+    expect(() => parseArenaArgs([...common, '--round-wall-ms', '179999']))
+      .toThrow('--round-wall-ms must be exactly 180000');
+    expect(() => parseArenaArgs(common.map((argument) =>
+      argument === `luna-medium-steered:${bundle}`
+        ? `luna-medium-steered:${join(directory, 'different-kb')}`
+        : argument,
+    ))).toThrow('All KB-steered arms must use the same frozen knowledge bundle');
   });
 
   it('loads the first frozen brutal-b room and executes its multi-legendary-window room', { timeout: 30_000 }, async () => {

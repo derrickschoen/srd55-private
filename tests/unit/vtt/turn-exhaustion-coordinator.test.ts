@@ -1,12 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { createEncounter } from '../../../src/combat/encounter';
 import { mulberry32 } from '../../../src/combat/random';
+import { sha256 } from '../../../src/crypto/sha256';
 import {
   agentSessionId,
   encounterBranchId,
   encounterSessionId,
 } from '../../../src/combat/values';
-import { AgentSessionLifecycle } from '../../../src/vtt/agent-session-lifecycle';
+import {
+  AgentSessionLifecycle,
+  createConversationRoundDeadline,
+  type AgentDispatchDeadline,
+} from '../../../src/vtt/agent-session-lifecycle';
 import type { RoundTurnProposalEnvelope } from '../../../src/vtt/engine-envelopes';
 import { engineActionId, engineOptionId } from '../../../src/vtt/turn-proposal';
 import {
@@ -160,10 +165,13 @@ function runtime(
       launcherToken: 'SIMULATED-launcher-token',
       timeoutMs: null,
     },
-    signal: new AbortController().signal,
     activateCapsule: () => { activated.value += 1; },
     takeProposal: () => queued.shift() ?? null,
   };
+}
+
+function deadline(): AgentDispatchDeadline {
+  return createConversationRoundDeadline(60_000, 0, () => 0);
 }
 
 function host(input: {
@@ -192,6 +200,58 @@ function exhausted(f: ReturnType<typeof fixture>, fallbackResult: ProposalFallba
 }
 
 describe('host turn exhaustion coordinator', () => {
+  it('late completion cannot reach acceptance', async () => {
+    let acceptsCompletion = false;
+    const originalHash = sha256(JSON.stringify({ acceptsCompletion }));
+    const prove = async (): Promise<void> => {
+      const f = fixture();
+      let authorizations = 0;
+      const lateDeadline: AgentDispatchDeadline = {
+        signal: new AbortController().signal,
+        dispatch: () => ({ kind: 'exhausted' }),
+        acceptsCompletion: () => acceptsCompletion,
+      };
+      const outcome = await new TurnExhaustionCoordinator(
+        f.journal.turnExhaustionPersistence(),
+      ).coordinate({
+        initial: { kind: 'proposal', proposal: proposal(f, 'initial', 'primary') },
+        correction: runtime(f, new SIMULATEDAgentSessionAdapter({ startIds: [] }), [], { value: 0 }),
+        escalation: null,
+        deadline: lateDeadline,
+        host: {
+          ...host(),
+          authorize: async () => {
+            authorizations += 1;
+            return 'authorized';
+          },
+        },
+      });
+      expect(authorizations).toBe(0);
+      expect(outcome).toEqual({ kind: 'auto_resolved', actorIds: [f.actor] });
+    };
+
+    try {
+      acceptsCompletion = true;
+      console.info('[MUTATION_RECEIPT] late completion cannot reach acceptance APPLIED');
+      expect(sha256(JSON.stringify({ acceptsCompletion }))).not.toBe(originalHash);
+      console.info('[MUTATION_RECEIPT] late completion cannot reach acceptance PROVED_APPLIED');
+      let failed = false;
+      try {
+        await prove();
+      } catch {
+        failed = true;
+      }
+      expect(failed).toBe(true);
+      console.info('[MUTATION_RECEIPT] late completion cannot reach acceptance FAILED_AS_EXPECTED');
+    } finally {
+      acceptsCompletion = false;
+    }
+    expect(sha256(JSON.stringify({ acceptsCompletion }))).toBe(originalHash);
+    console.info(`[MUTATION_RECEIPT] late completion cannot reach acceptance REVERTED hash=${originalHash}`);
+    await prove();
+    console.info(`[MUTATION_RECEIPT] late completion cannot reach acceptance BASELINE_PASSED hash=${originalHash}`);
+  });
+
   it('authorizes an initial declared fallback and journals the selected fallback', async () => {
     const f = fixture();
     const adapter = new SIMULATEDAgentSessionAdapter({ startIds: [] });
@@ -200,6 +260,8 @@ describe('host turn exhaustion coordinator', () => {
     await expect(coordinator.coordinate({
       initial: { kind: 'proposal', proposal: proposal(f, 'initial', 'fallback') },
       correction: runtime(f, adapter, [], { value: 0 }),
+      escalation: null,
+      deadline: deadline(),
       host: host(),
     })).resolves.toEqual({ kind: 'authorized', proposalId: 'proposal:initial', phase: 'initial' });
 
@@ -220,6 +282,8 @@ describe('host turn exhaustion coordinator', () => {
     await expect(coordinator.coordinate({
       initial: exhausted(f),
       correction: runtime(f, adapter, queued, activated),
+      escalation: null,
+      deadline: deadline(),
       host: host(),
     })).resolves.toEqual({ kind: 'authorized', proposalId: 'proposal:correction', phase: 'correction' });
 
@@ -244,6 +308,8 @@ describe('host turn exhaustion coordinator', () => {
     await expect(coordinator.coordinate({
       initial: exhausted(f, 'absent'),
       correction: runtime(f, adapter, [], { value: 0 }),
+      escalation: null,
+      deadline: deadline(),
       host: host({ marks }),
     })).resolves.toEqual({ kind: 'auto_resolved', actorIds: [f.actor] });
 
@@ -270,6 +336,8 @@ describe('host turn exhaustion coordinator', () => {
     await expect(coordinator.coordinate({
       initial: exhausted(f),
       correction: runtime(f, new SIMULATEDAgentSessionAdapter({ startIds: [] }), [], { value: 0 }),
+      escalation: null,
+      deadline: deadline(),
       host: host({ deterministic: null, adjudications }),
     })).resolves.toEqual({ kind: 'awaiting_dm_adjudication', actorId: f.actor });
 
@@ -294,6 +362,8 @@ describe('host turn exhaustion coordinator', () => {
     await resumed.coordinate({
       initial: exhausted(f),
       correction: runtime(f, adapter, [], { value: 0 }),
+      escalation: null,
+      deadline: deadline(),
       host: host({ marks }),
     });
 

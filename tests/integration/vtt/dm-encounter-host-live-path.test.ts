@@ -14,6 +14,10 @@ import {
   MemoryBrowserSessionStore,
   replaySessionRevisions,
 } from '../../../src/vtt/session-persistence';
+import { createConversationRoundDeadline } from '../../../src/vtt/agent-session-lifecycle';
+import { createEngineMcpRuntime } from '../../../src/vtt/mcp/entrypoint';
+import { MAX_PROPOSAL_CORRECTIONS } from '../../../src/vtt/turn-exhaustion-coordinator';
+import { agentSessionIdFromCli } from '../../../src/vtt/agent-session';
 import {
   createVaneWarrenFight,
   reduceVaneWarrenEncounter,
@@ -128,6 +132,96 @@ function hostUntil(
 }
 
 describe('DmEncounterHost live algorithm path', () => {
+  it('constructs and drives turn exhaustion through the supplied round deadline', async () => {
+    const player = playerProfile('host-deadline-player', { initiativeBonus: 20 });
+    const monster = monsterProfile('host-deadline-monster', { initiativeBonus: -20 });
+    const state = startedEncounter({
+      bounds: { columns: 4, rows: 2 },
+      combatants: [player, monster],
+      tokens: [placedToken(player, 0), placedToken(monster, 3)],
+    });
+    const host = new DmEncounterHost(
+      'session:host-turn-exhaustion-deadline',
+      new MemoryBrowserSessionStore(),
+      {
+        initialState: state,
+        initialControllers: algorithmIdentities(state),
+        playerIds: [player.id],
+      },
+    );
+    const runtime = createEngineMcpRuntime(state, {
+      phase: 'correction',
+      correctionNumber: MAX_PROPOSAL_CORRECTIONS,
+      requestedActorIds: [monster.id],
+    });
+    const capsule = runtime.feed.current();
+    const request = capsule.request;
+    if (request === null || request.phase !== 'correction') {
+      throw new Error('Host deadline integration fixture omitted its correction request.');
+    }
+    const deadline = createConversationRoundDeadline(180_000, 0, () => 25);
+    let receivedDeadline = false;
+    let deterministicApplications = 0;
+
+    const outcome = await host.turnExhaustionCoordinator().coordinate({
+      initial: {
+        kind: 'exhausted',
+        requestId: request.requestId,
+        initialProposalId: 'proposal:host-deadline-initial',
+        actorFailures: [{ actorId: monster.id, fallbackResult: 'absent' }],
+      },
+      correction: {
+        capsule,
+        rules: { get: () => null },
+        turnContext: { request: { phase: 'correction' } },
+        lifecycle: {
+          resumeCorrection: async (_invocation, received) => {
+            receivedDeadline = received === deadline;
+            return {
+              resumeSessionId: agentSessionIdFromCli('codex:host-deadline'),
+              sessionId: null,
+              finalText: '',
+              usage: null,
+              exit: 'completed',
+            };
+          },
+        },
+        invocation: {
+          instructionSource: 'none',
+          skill: null,
+          runId: capsule.runId,
+          prompt: 'host deadline boundary',
+          model: 'SIMULATED-model',
+          reasoningEffort: 'SIMULATED-effort',
+          sessionProfile: 'test',
+          callPhase: 'correction',
+          output: { kind: 'tool_driven' },
+          launcherToken: 'SIMULATED-host-deadline-launcher',
+          timeoutMs: 180_000,
+        },
+        activateCapsule: () => undefined,
+        takeProposal: () => null,
+      },
+      escalation: null,
+      deadline,
+      host: {
+        authorize: async () => 'invalid',
+        resolveDeterministically: async (actorId) => ({
+          actorId,
+          expectedRevision: 1,
+          resolutionDigest: 'd'.repeat(64),
+        }),
+        applyAutoResolved: async () => { deterministicApplications += 1; },
+        pauseForDmAdjudication: () => undefined,
+      },
+    });
+
+    expect(receivedDeadline).toBe(true);
+    expect(outcome).toEqual({ kind: 'auto_resolved', actorIds: [monster.id] });
+    expect(deterministicApplications).toBe(1);
+    host.close();
+  });
+
   it('replays the same configured pure reducer used by live host commands', async () => {
     const players = [
       playerProfile('host-replay-player-a', { initiativeBonus: 30, hitPoints: 40 }),

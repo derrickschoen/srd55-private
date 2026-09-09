@@ -23,7 +23,12 @@ import {
   type AgentInvocationOutput, type AgentSessionBinding, type AgentToolSession, type AgentTurnResult, type AgentUsage,
   type AgentInstructionSource, type AgentSkillName, type ContextRolloverPolicy, type FreshSessionContext,
 } from '../src/vtt/agent-session';
-import { AgentSessionLifecycle } from '../src/vtt/agent-session-lifecycle';
+import {
+  AgentDispatchDeadlineExceededError,
+  AgentSessionLifecycle,
+  createConversationRoundDeadline,
+  type AgentDispatchDeadline,
+} from '../src/vtt/agent-session-lifecycle';
 import { AGENT_ADAPTER_VERSION, resolveAgentAdapter } from '../src/vtt/agent-adapters';
 import {
   LocalOpenAiAgentSessionAdapter,
@@ -245,6 +250,7 @@ interface ConversationConfigBase {
   readonly cwd: string;
   readonly cliBin: string;
   readonly timeoutMs: number;
+  readonly roundWallMs: number;
   readonly reactionAskDefault: UnattendedReactionAskDefault;
   readonly captureRlData: boolean;
   readonly localOpenAi: LocalOpenAiConfig | null;
@@ -574,6 +580,9 @@ interface ConversationRowBase {
   readonly timeToFirstAction: number;
   readonly endToEndWall: number;
   readonly wallPerCreature: number;
+  readonly roundWallBudgetMs: number;
+  readonly roundWallTimedOut: boolean;
+  readonly policyElapsedMs: number;
   readonly tokens: ConversationTokenCounts;
   readonly callUsage: readonly AgentCallUsage[];
   readonly agentSessionGeneration: number;
@@ -601,6 +610,8 @@ interface ConversationRowBase {
   }[];
   readonly contextTruncated: boolean;
   readonly plannedBy: ConversationPlannerAttribution | null;
+  readonly speculationPlanner: ConversationPlannerAttribution | null;
+  readonly escalationTrigger: 'refusal' | 'validation_failures' | null;
   readonly planner: ConversationPlanner;
   readonly overrideKinds: readonly ConversationOverrideKind[];
   readonly overrideRejections: readonly ConversationOverrideRejection[];
@@ -746,6 +757,8 @@ export interface ConversationRunOptions {
   ) => ScriptedPartyPlan;
   /** Explicit sitting boundary; omitted means the sitting remains resumable. */
   readonly endSession?: boolean;
+  /** Test-only monotonic clock for the restricted per-round policy wall. */
+  readonly policyNow?: () => number;
 }
 
 export function boardImageOutputDirectory(
@@ -945,6 +958,7 @@ export function parseConversationArgs(argv: readonly string[], cwd = process.cwd
     cwd: resolve(cwd),
     cliBin: values.get('--cli-bin') ?? (selectedCli === 'codex' ? 'codex' : selectedCli === 'claude-code' ? 'claude' : ''),
     timeoutMs: positiveInteger(values.get('--timeout-ms') ?? '120000', '--timeout-ms'),
+    roundWallMs: 180_000,
     ...instructionSource,
     reactionAskDefault,
     captureRlData,
@@ -2456,8 +2470,9 @@ function cancelledSimulated(value: string): AgentTurnResult {
 }
 
 function agentDispatchWasCancelled(error: unknown): boolean {
-  return error instanceof Error && /Agent (?:cold start|resume|recovery cold start|escalation cold start) was cancelled\.$/u
-    .test(error.message);
+  return error instanceof AgentDispatchDeadlineExceededError ||
+    (error instanceof Error && /Agent (?:cold start|resume|recovery cold start|escalation cold start) was cancelled\.$/u
+      .test(error.message));
 }
 
 async function abortableDelay(milliseconds: number, signal: AbortSignal): Promise<void> {
@@ -3284,7 +3299,7 @@ async function runConversationWithConfiguredIntel(
 
     for (let round = 1; round <= config.rounds; round += 1) {
       const generationBeforeRound = journal.agentSession()?.generation ?? 0;
-      const roundStarted = performance.now();
+      const endToEndStarted = performance.now();
       const modelCallsBeforeRound = adapter.modelCalls;
       observedToolCalls = 0;
       observedTurnContextCalls = 0;
@@ -3486,6 +3501,8 @@ async function runConversationWithConfiguredIntel(
       let initialDispatchPlanner: ConversationPlannerAttribution | null = null;
       let correctionDispatchPlanner: ConversationPlannerAttribution | null = null;
       let plannedBy: ConversationRow['plannedBy'] = null;
+      let speculationPlanner: ConversationPlannerAttribution | null = null;
+      let escalationTrigger: ConversationRow['escalationTrigger'] = null;
       let planner: ConversationPlanner = 'model';
       let fallbackReason: ConversationFallbackReason | null = null;
       let partyDefaultTurn = false;
@@ -3513,6 +3530,14 @@ async function runConversationWithConfiguredIntel(
       const autoSubmitBlocks = new Map<CombatantId, ConversationAutoSubmitBlock>();
       let exhaustionIntelCapture: DmIntelCapture | null = null;
       let segmentPlanId: string | null = null;
+      let policyClassifiedAtMs: number | null = null;
+      let roundWallTimedOut = false;
+      const classifyPolicy = (): void => {
+        if (policyClassifiedAtMs !== null) return;
+        const classifiedAt = policyNow();
+        roundWallTimedOut = !roundDeadline.acceptsCompletion();
+        policyClassifiedAtMs = classifiedAt;
+      };
       let speculation: ConversationSpeculation = {
         status: 'not_proposed', reason: 'no_eligible_player_window', budgetMs: 0,
       };
@@ -3578,7 +3603,7 @@ async function runConversationWithConfiguredIntel(
         ).value;
         const ordinaryContext = options.mutateSpeculativeContext?.(renderedOrdinaryContext) ??
           renderedOrdinaryContext;
-        const planner = escalationPlanner ?? basePlanner;
+        const planner = basePlanner;
         if (!sameCombatantSet(renderedContextActorIds(ordinaryContext), window.monsters)) {
           speculation = {
             status: 'discarded', proposed: true, adopted: false, discarded: true,
@@ -3631,8 +3656,7 @@ async function runConversationWithConfiguredIntel(
         const timeout = setTimeout(() => controller.abort(), budgetMs);
         const completion = (async (): Promise<SpeculativeDispatchCompletion> => {
           try {
-            options.onSpeculationDispatchStart?.();
-            const turn = await adapter.start(invocation(
+            const speculativeInvocation = invocation(
               config,
               runId,
               'speculation',
@@ -3645,13 +3669,35 @@ async function runConversationWithConfiguredIntel(
               launcher.recoveryManifestPath,
               toolSession,
               freshSessionContext,
-            ), controller.signal);
+            );
+            const dispatch = roundDeadline.dispatch({
+              ...speculativeInvocation,
+              timeoutMs: Math.min(speculativeInvocation.timeoutMs ?? budgetMs, budgetMs),
+            });
+            if (dispatch.kind === 'exhausted') {
+              return {
+                plan: null,
+                turn: null,
+                planningWallMs: performance.now() - dispatchStarted,
+                timedOut: true,
+                error: 'The conversation round dispatch deadline is exhausted.',
+              };
+            }
+            speculationPlanner = planner;
+            options.onSpeculationDispatchStart?.();
+            const turn = await adapter.start(
+              dispatch.invocation,
+              AbortSignal.any([roundDeadline.signal, controller.signal]),
+            );
             const planningWallMs = performance.now() - dispatchStarted;
+            const acceptedInTime = roundDeadline.acceptsCompletion();
             return {
-              plan: localPlan ?? takeSpeculativePlan(launcher.spoolPath),
-              turn,
+              plan: acceptedInTime
+                ? localPlan ?? takeSpeculativePlan(launcher.spoolPath)
+                : null,
+              turn: acceptedInTime ? turn : null,
               planningWallMs,
-              timedOut: controller.signal.aborted || planningWallMs > budgetMs,
+              timedOut: !acceptedInTime || controller.signal.aborted || planningWallMs > budgetMs,
               error: null,
             };
           } catch (error) {
@@ -3659,7 +3705,7 @@ async function runConversationWithConfiguredIntel(
               plan: null,
               turn: null,
               planningWallMs: performance.now() - dispatchStarted,
-              timedOut: controller.signal.aborted,
+              timedOut: !roundDeadline.acceptsCompletion() || controller.signal.aborted,
               error: error instanceof Error ? error.message : String(error),
             };
           } finally {
@@ -3866,8 +3912,9 @@ async function runConversationWithConfiguredIntel(
           adjustmentCalls += 1;
           const turn = await lifecycle.resumeRound(
             adjustmentInvocation,
-            new AbortController().signal,
+            roundDeadline,
           );
+          if (!roundDeadline.acceptsCompletion()) throw new AgentDispatchDeadlineExceededError();
           adjustmentSessionId = turn.sessionId;
           captureCallUsage(turn, 'adjustment');
           decisionAttempts += 1;
@@ -4044,9 +4091,9 @@ async function runConversationWithConfiguredIntel(
             rules: RULES_SOURCE,
             turnContext: correctionContext.value,
             lifecycle: {
-              resumeCorrection: async (correctionInvocation, signal) => {
+              resumeCorrection: async (correctionInvocation, deadline) => {
                 correctionCalls += 1;
-                const turn = await lifecycle.resumeCorrection(correctionInvocation, signal);
+                const turn = await lifecycle.resumeCorrection(correctionInvocation, deadline);
                 adjustmentCorrectionSessionId = turn.sessionId;
                 captureCallUsage(turn, 'correction');
                 decisionAttempts += 1;
@@ -4103,7 +4150,6 @@ async function runConversationWithConfiguredIntel(
               freshSessionContext,
               correctionInvocationOutput,
             ),
-            signal: new AbortController().signal,
             activateCapsule: () => undefined,
             takeProposal: () => {
               const proposal = localCorrection ?? takePlanAdjustmentProposal(correctionLauncher.spoolPath);
@@ -4121,6 +4167,7 @@ async function runConversationWithConfiguredIntel(
             refusedActorIds,
           },
           correction: correctionRuntime,
+          deadline: roundDeadline,
         });
         const completedCorrectionProposal = recordedAdjustmentCorrectionProposal();
         if (config.captureRlData && adjustmentProposal?.submittedArguments !== undefined) {
@@ -4222,6 +4269,13 @@ async function runConversationWithConfiguredIntel(
           rlData: adjustmentRlData,
         });
       };
+      const policyNow = options.policyNow ?? (() => performance.now());
+      const roundStarted = policyNow();
+      const roundDeadline = createConversationRoundDeadline(
+        config.roundWallMs,
+        roundStarted,
+        policyNow,
+      );
       try {
         if (options.failBeforeDispatch?.includes(key) === true) {
           throw new Error('SIMULATED host failure before agent dispatch.');
@@ -4264,8 +4318,9 @@ async function runConversationWithConfiguredIntel(
             let turn: AgentTurnResult;
             try {
               turn = journal.agentSession() === null
-                ? await lifecycle.coldStartRound(primaryInvocation, new AbortController().signal)
-                : await lifecycle.resumeRound(primaryInvocation, new AbortController().signal);
+                ? await lifecycle.coldStartRound(primaryInvocation, roundDeadline)
+                : await lifecycle.resumeRound(primaryInvocation, roundDeadline);
+              if (!roundDeadline.acceptsCompletion()) throw new AgentDispatchDeadlineExceededError();
             } catch (error) {
               if (!agentDispatchWasCancelled(error)) throw error;
               primaryDispatchTimedOut = true;
@@ -4325,6 +4380,7 @@ async function runConversationWithConfiguredIntel(
             if (attempt === 2) {
               serviceNull = true;
               outcome = 'service_null';
+              classifyPolicy();
               break;
             }
             flapRetries = attempt === 0 ? 1 : 2;
@@ -4356,9 +4412,7 @@ async function runConversationWithConfiguredIntel(
         const correctionCapsule = correctionSnapshot.capsule;
         const correctionActorIds = correctionCapsule.request?.actors;
         if (correctionActorIds === undefined) throw new Error('Correction capsule has no actor set.');
-        const correctionTurnContextBase = escalationPlanner === null
-          ? lastSeenTurnContext
-          : undefined;
+        const correctionTurnContextBase = lastSeenTurnContext;
           let plannedCorrectionTurnContext: CapturedTurnContext | undefined;
           const getPlannedCorrectionTurnContext = (): CapturedTurnContext => {
             plannedCorrectionTurnContext ??= plannedTurnContext(
@@ -4432,8 +4486,45 @@ async function runConversationWithConfiguredIntel(
               },
             })
           : undefined;
+        let localEscalationProposal: RoundTurnProposalEnvelope | null = null;
+        const escalationLauncher = escalationPlanner === null ? null : await writeLauncher({
+          rendererProfile: config.rendererProfile,
+          turnContextMaximumBytes: config.turnContextMaximumBytes,
+          overridePolicy: config.overridePolicy,
+          directory: artifacts,
+          name: `${key}-escalation`,
+          snapshot: correctionSnapshot,
+          room,
+          historyKind: 'proposal_correction_requested',
+          ...(launcherKbRead === undefined ? {} : { kbRead: launcherKbRead }),
+          ...(boardImageBinding === undefined ? {} : { boardImage: boardImageBinding }),
+        });
+        const escalationToolSession = config.cli !== 'local-openai' || escalationLauncher === null
+          ? undefined
+          : inProcessDmToolSession({
+              state: engineSession.currentState(),
+              snapshot: correctionSnapshot,
+              intelMode: config.intelMode,
+              rendererProfile: config.rendererProfile,
+              turnContextMaximumBytes: config.turnContextMaximumBytes,
+              overridePolicy: config.overridePolicy,
+              ...(rowKbReadBudget === undefined ? {} : {
+                kbReadBudget: rowKbReadBudget,
+                kbReadCallPhase: 'correction',
+              }),
+              onProposal: (proposal) => {
+                if (isRoundProposal(proposal)) localEscalationProposal = proposal;
+              },
+              onToolResult: (name, result) => {
+                observedToolCalls += 1;
+                if (name === 'engine.get_turn_context') observedTurnContextCalls += 1;
+                if (eventContextTrimmed(result)) observedContextTruncated = true;
+                observedRejections.push(...rejectionEvidence(result));
+              },
+            });
         const host: TurnExhaustionHost = {
           authorize: async (proposal) => {
+            if (!roundDeadline.acceptsCompletion()) return 'invalidated';
             const expectedCapsule = proposal.phase === 'initial' ? capsule : correctionCapsule;
             const expectedRequest = proposal.phase === 'initial'
               ? authoritativeInitialRequest : correctionRequest;
@@ -4456,20 +4547,26 @@ async function runConversationWithConfiguredIntel(
               });
               return 'invalidated';
             }
+            const proposalPlanner = proposal.phase === 'initial'
+              ? initialDispatchPlanner
+              : correctionDispatchPlanner;
+            const correctionContextPath = escalationTrigger === null || escalationLauncher === null
+              ? correctionLauncher.turnContextSpoolPath
+              : escalationLauncher.turnContextSpoolPath;
             const proposalTurnContext = config.captureRlData
               ? proposal.phase === 'initial'
                 ? takeTurnContext(initialLauncher.turnContextSpoolPath, config.turnContextMaximumBytes) ??
                   getPlannedInitialTurnContext()
-                : takeTurnContext(correctionLauncher.turnContextSpoolPath, config.turnContextMaximumBytes) ??
+                : takeTurnContext(correctionContextPath, config.turnContextMaximumBytes) ??
                   getPlannedCorrectionTurnContext()
               : null;
             const proposalRlData = proposalTurnContext === null
               ? undefined
               : rlCapture(startupInstructions, proposalTurnContext, proposal, config.intelMode, {
                   repoCommit,
-                  model: config.model,
-                  effort: config.effort,
-                  sessionId: rolloutSessionId,
+                  model: proposalPlanner?.model ?? config.model,
+                  effort: proposalPlanner?.effort ?? config.effort,
+                  sessionId: escalationTrigger === null ? rolloutSessionId : escalationSessionId,
                   parentPlanId: null,
                   partyPolicyHash: segmentPartyPlan?.policyHash ?? null,
                   materialityPolicyHash: config.combatModel === 'initiative_segments_v1'
@@ -4491,6 +4588,8 @@ async function runConversationWithConfiguredIntel(
             }
             const mechanics = checkedProposal.entries;
             const effectiveReactionGuidance = proposal.reactionGuidance ?? journal.reactionGuidance();
+            if (!roundDeadline.acceptsCompletion()) return 'invalidated';
+            if (config.combatModel === 'monster_block_v1') classifyPolicy();
             try {
               for (const entry of mechanics) {
                 if (entry.primaryRejectionReasons.length > 0) {
@@ -4575,6 +4674,7 @@ async function runConversationWithConfiguredIntel(
             return 'authorized';
           },
           resolveDeterministically: async (actorId): Promise<DeterministicProposalResolution> => {
+            classifyPolicy();
             const defaultEntry = engineDefaultPlanEntry(
               engineSession.currentState(),
               actorId,
@@ -4628,6 +4728,111 @@ async function runConversationWithConfiguredIntel(
           },
           pauseForDmAdjudication: ({ actorId, reason }) => { refusals.push(`${actorId}: ${reason}`); },
         };
+        const plannedEscalationTrigger = escalationPlanner === null ||
+          primaryDispatchTimedOut || serviceNull
+          ? null
+          : proposed === null
+            ? 'refusal' as const
+            : 'validation_failures' as const;
+        const escalationRuntime = escalationPlanner === null || escalationLauncher === null ||
+          plannedEscalationTrigger === null
+          ? null
+          : {
+              trigger: plannedEscalationTrigger,
+              capsule: correctionCapsule,
+              rules: RULES_SOURCE,
+              turnContext: {
+                revision: contextRevision,
+                room,
+                round,
+                get_turn_context: { granularity: 'full' },
+              },
+              lifecycle: {
+                startEscalation: async (escalationInvocation: AgentInvocation, deadline: AgentDispatchDeadline) => {
+                  correctionDispatchPlanner = plannerAttribution(escalationInvocation);
+                  escalationTrigger = plannedEscalationTrigger;
+                  escalated = true;
+                  firedEscalationModel = correctionDispatchPlanner.model;
+                  correctionCalls += 1;
+                  recordedCorrectionTurnContext = getPlannedCorrectionTurnContext();
+                  let turn: AgentTurnResult;
+                  try {
+                    turn = await lifecycle.startEscalation({
+                      ...escalationInvocation,
+                      instructions: escalationRepairInstructions,
+                    }, deadline);
+                  } catch (error) {
+                    if (!agentDispatchWasCancelled(error)) throw error;
+                    correctionDispatchTimedOut = true;
+                    const activeBinding = journal.agentSession();
+                    if (activeBinding === null) {
+                      throw new Error('Timed-out escalation has no retained base agent session.');
+                    }
+                    turn = {
+                      resumeSessionId: activeBinding.sessionId,
+                      sessionId: null,
+                      finalText: '',
+                      usage: null,
+                      exit: 'completed',
+                    };
+                  }
+                  if (!correctionDispatchTimedOut &&
+                    turn.resumeSessionId === journal.agentSession()?.sessionId) {
+                    throw new Error('Tiered correction did not create an isolated escalation session.');
+                  }
+                  escalationSessionId = turn.sessionId;
+                  captureCallUsage(turn, 'correction');
+                  decisionAttempts += 1;
+                  correctionFinalText = turn.finalText;
+                  if (correctionDecisionCatalog !== null && deadline.acceptsCompletion()) {
+                    const structured = queueStructuredFinalDecision({
+                      finalText: turn.finalText,
+                      exit: turn.exit,
+                      catalog: correctionDecisionCatalog,
+                      state: engineSession.currentState(),
+                      snapshot: correctionSnapshot,
+                      intelMode: config.intelMode,
+                      rendererProfile: config.rendererProfile,
+                      turnContextMaximumBytes: config.turnContextMaximumBytes,
+                      overridePolicy: config.overridePolicy,
+                      inheritedReactionGuidance: journal.reactionGuidance(),
+                      reasonGate: STRUCTURED_FINAL_DECISION_REASON_GATE,
+                    });
+                    if (structured.kind === 'accepted') {
+                      if (!isRoundProposal(structured.proposal)) {
+                        throw new Error('Escalation final-index decision queued a non-round proposal.');
+                      }
+                      localEscalationProposal = structured.proposal;
+                      pendingStructuredDecision = structured.decision;
+                    } else {
+                      decisionRejectionCodes.push(structured.code);
+                      if (structured.normalizationCode !== null) normalizationCodes.push(structured.normalizationCode);
+                      if (structured.engineResult !== null) {
+                        observedRejections.push(...rejectionEvidence(structured.engineResult));
+                      }
+                    }
+                  }
+                  return turn;
+                },
+              },
+              invocation: invocation(
+                config,
+                runId,
+                'correction',
+                correctionDecisionCatalog === null
+                  ? 'replaced by escalation correction renderer'
+                  : structuredFinalPrompt(getPlannedCorrectionTurnContext(), correctionDecisionCatalog),
+                escalationLauncher.manifestPath,
+                null,
+                escalationPlanner,
+                escalationLauncher.recoveryManifestPath,
+                escalationToolSession,
+                freshSessionContext,
+                correctionInvocationOutput,
+              ),
+              activateCapsule: () => undefined,
+              takeProposal: () => localEscalationProposal ?? takeRoundProposal(escalationLauncher.spoolPath),
+            };
         const coordinated = await new TurnExhaustionCoordinator(journal.turnExhaustionPersistence()).coordinate({
           initial,
           correction: {
@@ -4642,27 +4847,15 @@ async function runConversationWithConfiguredIntel(
                   },
             },
             lifecycle: {
-              resumeCorrection: async (correctionInvocation: AgentInvocation, signal: AbortSignal) => {
+              resumeCorrection: async (correctionInvocation: AgentInvocation, deadline: AgentDispatchDeadline) => {
                 correctionDispatchPlanner = plannerAttribution(correctionInvocation);
-                escalated = escalationPlanner !== null;
-                firedEscalationModel = escalationPlanner === null
-                  ? null
-                  : correctionDispatchPlanner.model;
-                /* A model-changing resume contaminates the persistent base session even when
-                 * the next primary argv switches back. Keep untiered corrections in-session,
-                 * but dispatch configured escalation as a fresh, repair-brief-seeded session. */
                 const contextCallsBeforeCorrection = simulated?.contextCallsByRequest.get(requestId) ??
                   observedTurnContextCalls;
                 correctionCalls += 1;
                 recordedCorrectionTurnContext = getPlannedCorrectionTurnContext();
                 let correctionTurn: AgentTurnResult;
                 try {
-                  correctionTurn = escalationPlanner === null
-                    ? await lifecycle.resumeCorrection(correctionInvocation, signal)
-                    : await lifecycle.startEscalation({
-                        ...correctionInvocation,
-                        instructions: escalationRepairInstructions,
-                      }, signal);
+                  correctionTurn = await lifecycle.resumeCorrection(correctionInvocation, deadline);
                 } catch (error) {
                   if (!agentDispatchWasCancelled(error)) throw error;
                   correctionDispatchTimedOut = true;
@@ -4681,18 +4874,13 @@ async function runConversationWithConfiguredIntel(
                 if (correctionTurn.exit !== 'completed') {
                   throw new Error('Agent correction dispatch was cancelled.');
                 }
-                if (escalationPlanner !== null &&
-                  correctionTurn.resumeSessionId === journal.agentSession()?.sessionId) {
-                  throw new Error('Tiered correction did not create an isolated escalation session.');
-                }
-                if (escalationPlanner === null) rolloutSessionId = correctionTurn.sessionId;
-                else escalationSessionId = correctionTurn.sessionId;
+                rolloutSessionId = correctionTurn.sessionId;
                 captureCallUsage(correctionTurn, 'correction');
                 decisionAttempts += 1;
                 recordedCorrectionTurnContext =
                   takeTurnContext(correctionLauncher.turnContextSpoolPath, config.turnContextMaximumBytes) ??
                   recordedCorrectionTurnContext;
-                if (correctionDecisionCatalog !== null) {
+                if (correctionDecisionCatalog !== null && deadline.acceptsCompletion()) {
                   const structured = queueStructuredFinalDecision({
                     finalText: correctionTurn.finalText,
                     exit: correctionTurn.exit,
@@ -4725,8 +4913,7 @@ async function runConversationWithConfiguredIntel(
                 }
                 const contextCallsAfterCorrection = simulated?.contextCallsByRequest.get(requestId) ??
                   observedTurnContextCalls;
-                if (escalationPlanner === null &&
-                  contextCallsAfterCorrection > contextCallsBeforeCorrection) {
+                if (contextCallsAfterCorrection > contextCallsBeforeCorrection) {
                   lastSeenTurnContext = fullTurnContextBase(
                     engineSession.currentState(),
                     correctionSnapshot,
@@ -4736,6 +4923,7 @@ async function runConversationWithConfiguredIntel(
                   );
                 }
                 correctionFinalText = correctionTurn.finalText;
+                if (!deadline.acceptsCompletion()) return correctionTurn;
                 return correctionTurn;
               },
             },
@@ -4748,16 +4936,17 @@ async function runConversationWithConfiguredIntel(
                 : structuredFinalPrompt(getPlannedCorrectionTurnContext(), correctionDecisionCatalog),
               correctionLauncher.manifestPath,
               null,
-              escalationPlanner ?? basePlanner,
+              basePlanner,
               correctionLauncher.recoveryManifestPath,
               correctionToolSession,
               freshSessionContext,
               correctionInvocationOutput,
             ),
-            signal: new AbortController().signal,
             activateCapsule: () => undefined,
             takeProposal: () => localCorrectionProposal ?? takeRoundProposal(correctionLauncher.spoolPath),
           },
+          escalation: escalationRuntime,
+          deadline: roundDeadline,
           host,
         });
         outcome = coordinated.kind;
@@ -5215,6 +5404,7 @@ async function runConversationWithConfiguredIntel(
             });
             const segmentBeforeRevision = state.revision;
             const appliedPlanHash = monsterPlanHash(segmentMonsterPlan);
+            classifyPolicy();
             const applied = engineSession.applyConsecutiveMonsterSegment(
               applications,
               journal.reactionGuidance(),
@@ -5260,6 +5450,7 @@ async function runConversationWithConfiguredIntel(
           initiativeExecutionPending = false;
         }
       } catch (error) {
+        classifyPolicy();
         if (inFlightSpeculation.current !== null) {
           const pending = inFlightSpeculation.current;
           pending.controller.abort();
@@ -5292,8 +5483,12 @@ async function runConversationWithConfiguredIntel(
         }
         refusals.push(error instanceof Error ? error.message : String(error));
       }
+      classifyPolicy();
       const wall = performance.now() - started;
-      const endToEndWall = performance.now() - roundStarted;
+      const endToEndWall = performance.now() - endToEndStarted;
+      const policyElapsedMs = roundWallTimedOut
+        ? config.roundWallMs
+        : Math.min(config.roundWallMs, Math.max(0, (policyClassifiedAtMs ?? roundStarted) - roundStarted));
       const binding = journal.agentSession();
       rowTurnContext = takeTurnContext(
         initialLauncher.turnContextSpoolPath,
@@ -5447,6 +5642,9 @@ async function runConversationWithConfiguredIntel(
         timeToFirstAction: wall,
         endToEndWall,
         wallPerCreature: wall / Math.max(1, livingMonsterIds(engineSession.currentState()).length),
+        roundWallBudgetMs: config.roundWallMs,
+        roundWallTimedOut,
+        policyElapsedMs,
         tokens: totalsTokens,
         callUsage: structuredClone(roundCallUsage),
         agentSessionGeneration: binding?.generation ?? 0,
@@ -5469,6 +5667,8 @@ async function runConversationWithConfiguredIntel(
         } : {}),
         contextTruncated: simulated?.contextTruncatedByRequest.get(requestId) ?? observedContextTruncated,
         plannedBy,
+        speculationPlanner,
+        escalationTrigger,
         planner,
         overrideKinds,
         overrideRejections,
