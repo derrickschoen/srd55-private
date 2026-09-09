@@ -2,7 +2,7 @@ import type {
   EncounterCommandReducer,
   EncounterState,
 } from '../combat/encounter';
-import type { EncounterCommand, EncounterEvent } from '../combat/events';
+import type { EncounterCommand } from '../combat/events';
 import type { Rng } from '../combat/random';
 import type { CombatantId } from '../combat/values';
 import {
@@ -68,28 +68,6 @@ export interface SessionCommandProgramPort {
 
 export interface ResolvedSessionBoundary extends SessionBoundaryResolutions {
   readonly state: EncounterState;
-}
-
-export interface SessionReducerApplicationAccounting {
-  attempted(): void;
-  completed(): void;
-}
-
-export interface SessionCommandTrialCoreInput<TRandom extends Rng> {
-  readonly state: EncounterState;
-  readonly random: TRandom;
-  readonly reducer: EncounterCommandReducer;
-  readonly boundaryPolicy: ReactionOfferHostPolicy;
-  readonly guidance: ReactionGuidanceDeclaration | null;
-  readonly boundaryScope: SessionBoundaryScope;
-  readonly accounting: SessionReducerApplicationAccounting | null;
-}
-
-export interface SessionCommandTrialCoreSnapshot
-  extends SessionBoundaryResolutions {
-  readonly state: EncounterState;
-  readonly events: readonly EncounterEvent[];
-  readonly revisionDelta: number;
 }
 
 export function resolveSessionBoundaryDecisions(
@@ -201,124 +179,29 @@ export function resolveSessionBoundaryDecisions(
   }
 }
 
-export class SessionCommandTrialCore<TRandom extends Rng> {
+const resolveInitialBoundary = Symbol('resolveInitialBoundary');
+
+export class SessionCommandTransaction<TRandom extends Rng>
+implements SessionCommandProgramPort {
   readonly #startingRevision: number;
   readonly #random: TRandom;
   readonly #reducer: EncounterCommandReducer;
   readonly #boundaryPolicy: ReactionOfferHostPolicy;
   readonly #guidance: ReactionGuidanceDeclaration | null;
   readonly #boundaryScope: SessionBoundaryScope;
-  readonly #accounting: SessionReducerApplicationAccounting | null;
   #state: EncounterState;
-  readonly #events: EncounterEvent[] = [];
+  #status: 'active' | 'completed' | 'rolled_back' = 'active';
   readonly #fallbackResolutions: AutoResolvedReactionOffer[] = [];
   readonly #guidedResolutions: GuidedReactionResolution[] = [];
 
-  private constructor(input: SessionCommandTrialCoreInput<TRandom>) {
+  private constructor(input: SessionCommandTransactionInput<TRandom>) {
     this.#state = input.state;
     this.#startingRevision = input.state.revision;
-    this.#random = input.random;
+    this.#random = input.random.fork();
     this.#reducer = input.reducer;
     this.#boundaryPolicy = input.boundaryPolicy;
     this.#guidance = input.guidance;
     this.#boundaryScope = input.boundaryScope;
-    this.#accounting = input.accounting;
-  }
-
-  static begin<TRandom extends Rng>(
-    input: SessionCommandTrialCoreInput<TRandom>,
-  ): SessionCommandTrialCore<TRandom> {
-    return new SessionCommandTrialCore(input);
-  }
-
-  currentState(): EncounterState {
-    return this.#state;
-  }
-
-  resolveBoundary(): EncounterState {
-    const events: EncounterEvent[] = [];
-    const resolved = this.#resolveBoundary(this.#state, events);
-    this.#accept(resolved, events);
-    return this.#state;
-  }
-
-  apply(command: EncounterCommand): EncounterState {
-    const events: EncounterEvent[] = [];
-    const reduced = this.#reduce(this.#state, command, events);
-    const resolved = this.#resolveBoundary(reduced, events);
-    this.#accept(resolved, events);
-    return this.#state;
-  }
-
-  snapshot(): SessionCommandTrialCoreSnapshot {
-    return {
-      state: this.#state,
-      events: [...this.#events],
-      revisionDelta: this.#state.revision - this.#startingRevision,
-      fallbackResolutions: [...this.#fallbackResolutions],
-      guidedResolutions: [...this.#guidedResolutions],
-    };
-  }
-
-  #reduce(
-    state: EncounterState,
-    command: EncounterCommand,
-    events: EncounterEvent[],
-  ): EncounterState {
-    this.#accounting?.attempted();
-    try {
-      const reduced = this.#reducer(state, command, this.#random);
-      events.push(...reduced.events);
-      return reduced.state;
-    } finally {
-      this.#accounting?.completed();
-    }
-  }
-
-  #resolveBoundary(
-    state: EncounterState,
-    events: EncounterEvent[],
-  ): ResolvedSessionBoundary {
-    return resolveSessionBoundaryDecisions(
-      state,
-      this.#random,
-      (candidate, command) => ({
-        state: this.#reduce(candidate, command, events),
-        events: [],
-      }),
-      this.#boundaryPolicy,
-      this.#guidance,
-      this.#boundaryScope,
-    );
-  }
-
-  #accept(resolved: ResolvedSessionBoundary, events: readonly EncounterEvent[]): void {
-    this.#state = resolved.state;
-    this.#events.push(...events);
-    this.#fallbackResolutions.push(...resolved.fallbackResolutions);
-    this.#guidedResolutions.push(...resolved.guidedResolutions);
-  }
-}
-
-const resolveInitialBoundary = Symbol('resolveInitialBoundary');
-
-export class SessionCommandTransaction<TRandom extends Rng>
-implements SessionCommandProgramPort {
-  readonly #random: TRandom;
-  readonly #core: SessionCommandTrialCore<TRandom>;
-  #status: 'active' | 'completed' | 'rolled_back' = 'active';
-
-  private constructor(input: SessionCommandTransactionInput<TRandom>) {
-    this.#random = input.random.fork();
-    this.#core = SessionCommandTrialCore.begin({
-      state: input.state,
-      random: this.#random,
-      reducer: input.reducer,
-      boundaryPolicy: input.boundaryPolicy,
-      guidance: input.guidance,
-      boundaryScope: input.boundaryScope,
-      accounting: null,
-    });
   }
 
   static begin<TRandom extends Rng>(
@@ -328,26 +211,27 @@ implements SessionCommandProgramPort {
   }
 
   currentState(): EncounterState {
-    return this.#core.currentState();
+    return this.#state;
   }
 
   apply(command: EncounterCommand): EncounterState {
     this.#assertActive('apply a command');
-    return this.#core.apply(command);
+    const reduced = this.#reducer(this.#state, command, this.#random).state;
+    this.#acceptBoundaryResolution(this.#resolveBoundary(reduced));
+    return this.#state;
   }
 
   complete<TValue>(value: TValue): CompletedSessionCommandTrial<TValue, TRandom> {
     this.#assertActive('complete');
     this.#status = 'completed';
-    const snapshot = this.#core.snapshot();
     return {
       kind: 'completed',
-      state: snapshot.state,
+      state: this.#state,
       random: this.#random,
-      revisionDelta: snapshot.revisionDelta,
+      revisionDelta: this.#state.revision - this.#startingRevision,
       value,
-      fallbackResolutions: snapshot.fallbackResolutions,
-      guidedResolutions: snapshot.guidedResolutions,
+      fallbackResolutions: [...this.#fallbackResolutions],
+      guidedResolutions: [...this.#guidedResolutions],
     };
   }
 
@@ -359,7 +243,24 @@ implements SessionCommandProgramPort {
 
   [resolveInitialBoundary](): void {
     this.#assertActive('resolve the initial boundary');
-    this.#core.resolveBoundary();
+    this.#acceptBoundaryResolution(this.#resolveBoundary(this.#state));
+  }
+
+  #resolveBoundary(state: EncounterState): ResolvedSessionBoundary {
+    return resolveSessionBoundaryDecisions(
+      state,
+      this.#random,
+      this.#reducer,
+      this.#boundaryPolicy,
+      this.#guidance,
+      this.#boundaryScope,
+    );
+  }
+
+  #acceptBoundaryResolution(resolved: ResolvedSessionBoundary): void {
+    this.#state = resolved.state;
+    this.#fallbackResolutions.push(...resolved.fallbackResolutions);
+    this.#guidedResolutions.push(...resolved.guidedResolutions);
   }
 
   #assertActive(operation: string): void {

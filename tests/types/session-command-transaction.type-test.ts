@@ -3,7 +3,6 @@ import type {
   CompletedSessionCommandTrial,
   RolledBackSessionCommandTrial,
   SessionCommandProgramPort,
-  SessionCommandTrialCore,
   SessionCommandTrialOutcome,
 } from '../../src/vtt/session-command-transaction';
 
@@ -22,20 +21,6 @@ type SessionCommitInput = CompletedSessionCommandTrial<unknown, SerializableRng>
 
 type _ProgramPortExposesExactlyTwoOperations = Assert<
   Exact<keyof SessionCommandProgramPort, 'currentState' | 'apply'>
->;
-
-type _CoreExposesOnlyOwnershipNeutralTrialOperations = Assert<
-  Exact<
-    keyof SessionCommandTrialCore<SerializableRng>,
-    'currentState' | 'resolveBoundary' | 'apply' | 'snapshot'
-  >
->;
-
-type _CoreHasNoForkCheckpointOrTerminalOperation = Assert<
-  Extract<
-    keyof SessionCommandTrialCore<SerializableRng>,
-    'fork' | 'checkpoint' | 'restoreCheckpoint' | 'complete' | 'rollback' | 'commit'
-  > extends never ? true : false
 >;
 
 type _RolledBackContractHasNoCommitPayload = Assert<
@@ -61,8 +46,6 @@ function narrowedCommitInput(outcome: TestOutcome): SessionCommitInput | null {
 
 export type SessionCommandTransactionTypeProof = [
   _ProgramPortExposesExactlyTwoOperations,
-  _CoreExposesOnlyOwnershipNeutralTrialOperations,
-  _CoreHasNoForkCheckpointOrTerminalOperation,
   _RolledBackContractHasNoCommitPayload,
   _OutcomeRolledBackArmRetainsExactContract,
   _CompletedArmIsACommitInput,

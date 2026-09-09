@@ -126,19 +126,6 @@ export interface SampledPartySeat {
   readonly concentrating: boolean;
 }
 
-export interface AuthoredPartySeat {
-  readonly source: 'authored_exact';
-  readonly combatantId: string;
-  readonly hitPoints: number;
-  readonly life: 'living' | 'dying' | 'dead';
-  readonly deathSaves: null | {
-    readonly successes: number;
-    readonly failures: number;
-  };
-  readonly spellSlots: readonly SampledSpellSlot[];
-  readonly concentrating: boolean;
-}
-
 export interface RoomSpec {
   readonly seed: number;
   /** Omitted for the original standard profile so its frozen bytes remain stable. */
@@ -154,7 +141,7 @@ export interface RoomSpec {
   readonly monsterRoster: readonly RoomMonsterRosterEntry[];
   readonly challengeBudgetEighths: number;
   readonly challengeSpentEighths: number;
-  readonly partyState: readonly (SampledPartySeat | AuthoredPartySeat)[];
+  readonly partyState: readonly SampledPartySeat[];
   readonly hardFeatures?: {
     readonly shape: 'single-gate';
     readonly chokepointCells: readonly GridCell[];

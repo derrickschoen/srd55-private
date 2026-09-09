@@ -141,20 +141,7 @@ import {
   type PersistentAreaIgnitionRule,
   type PersistentAreaOptionalRule,
 } from './persistent-areas';
-import {
-  rollDice as rollDicePrimitive,
-  rollDie as rollDiePrimitive,
-  transactionalRng,
-  type Rng,
-} from './random';
-import {
-  isTransactionalRollRng,
-  RollProvenance,
-  rollOccurrenceId,
-  rollOperationPath,
-  type RollProvenanceRequest,
-  type TransactionalRollRng,
-} from './roll-provenance';
+import { rollDice, rollDie, transactionalRng, type Rng, type TransactionalRng } from './random';
 import type { HiddenRollCategory } from './roll-visibility';
 import {
   createSearchMemory,
@@ -164,10 +151,10 @@ import {
 } from './search-memory';
 import {
   applyDamageResponse,
-  resolveAttackRoll as resolveAttackRollPrimitive,
-  resolveDamage as resolveDamagePrimitive,
-  resolveSavingThrow as resolveSavingThrowPrimitive,
-  rollD20 as rollD20Primitive,
+  resolveAttackRoll,
+  resolveDamage,
+  resolveSavingThrow,
+  rollD20,
   type DamageRequest,
   type DiceExpression,
   type DamageResponse,
@@ -235,7 +222,6 @@ import {
   worldObjectId,
   type CombatantId,
   type DamageType,
-  type DieSides,
   type EncounterEffectId,
   type Feet,
   type ItemId,
@@ -268,76 +254,6 @@ import {
   type WildShapeReversionReason,
   type WildShapeUseState,
 } from './wild-shape';
-
-interface ReducerRollDescriptor {
-  readonly kind: string;
-  readonly source: string;
-  readonly actor?: string;
-  readonly target?: string;
-  readonly termIndex?: number;
-}
-
-const reducerRollOccurrenceIds = new WeakMap<TransactionalRollRng, ReturnType<typeof rollOccurrenceId>>();
-
-function escapeRollPath(value: string): string {
-  return value.replaceAll('~', '~0').replaceAll('/', '~1');
-}
-
-function rollRequest(rng: Rng, provenance: ReducerRollDescriptor): RollProvenanceRequest {
-  const source = provenance.actor?.startsWith('combatant:') === true
-    ? combatantId(provenance.actor)
-    : null;
-  const targets = provenance.target?.startsWith('combatant:') === true
-    ? [combatantId(provenance.target)]
-    : [];
-  const identity = [provenance.kind, provenance.source, provenance.actor, provenance.target]
-    .filter((part): part is string => part !== undefined)
-    .map(escapeRollPath)
-    .join('/');
-  return {
-    occurrenceId: isTransactionalRollRng(rng)
-      ? (reducerRollOccurrenceIds.get(rng) ?? rollOccurrenceId('reducer:unbound'))
-      : rollOccurrenceId('reducer:plain-rng'),
-    operationPath: rollOperationPath(
-      `command/${identity}${provenance.termIndex === undefined ? '' : `/term/${String(provenance.termIndex)}`}`,
-    ),
-    source,
-    targets,
-  };
-}
-
-// Every reducer draw enters the independent roll-provenance capability here.
-function rollDie(rng: Rng, sides: DieSides, provenance: ReducerRollDescriptor): number {
-  return rollDiePrimitive(rng, sides, rollRequest(rng, provenance));
-}
-
-function rollDice(rng: Rng, expression: DiceExpression, provenance: ReducerRollDescriptor) {
-  return rollDicePrimitive(rng, expression, rollRequest(rng, provenance));
-}
-
-function rollD20(rng: Rng, mode: RollMode, provenance: ReducerRollDescriptor) {
-  return rollD20Primitive(rng, mode, rollRequest(rng, provenance));
-}
-
-function resolveAttackRoll(
-  request: Parameters<typeof resolveAttackRollPrimitive>[0],
-  rng: Rng,
-  provenance: ReducerRollDescriptor,
-) {
-  return resolveAttackRollPrimitive(request, rng, rollRequest(rng, provenance));
-}
-
-function resolveSavingThrow(
-  request: Parameters<typeof resolveSavingThrowPrimitive>[0],
-  rng: Rng,
-  provenance: ReducerRollDescriptor,
-) {
-  return resolveSavingThrowPrimitive(request, rng, rollRequest(rng, provenance));
-}
-
-function resolveDamage(request: DamageRequest, rng: Rng, provenance: ReducerRollDescriptor) {
-  return resolveDamagePrimitive(request, rng, rollRequest(rng, provenance));
-}
 
 export type LifeState = 'living' | 'dying' | 'stable' | 'dead';
 
@@ -2011,9 +1927,6 @@ function rollDefenseTotalModifier(
     if (modifier.kind === 'flat') return sum + modifier.amount;
     return sum + modifier.sign * rollDice(context.rng, {
       count: modifier.count, sides: dieSides(modifier.sides), modifier: 0,
-    }, {
-      kind: 'effect_modifier', source: `roll-defense:${scope}`, actor: eligibleCombatant,
-      ...(opposingCombatant === null ? {} : { target: opposingCombatant }),
     }).total;
   }, 0);
   endEffects(context, consumed, 'trigger_consumed');
@@ -2079,7 +1992,7 @@ function effectDiceModifier(
         count: payload.count,
         sides: dieSides(payload.sides),
         modifier: 0,
-      }, { kind: 'effect_modifier', source: `d20-test-modifier:${test}`, actor: id }).total;
+      }).total;
     }
     if (
       test === 'ability_check' &&
@@ -2088,7 +2001,7 @@ function effectDiceModifier(
     ) {
       return total + payload.sign * rollDice(rng, {
         count: payload.count, sides: dieSides(payload.sides), modifier: 0,
-      }, { kind: 'effect_modifier', source: `ability-check-modifier:${skill ?? 'unskilled'}`, actor: id }).total;
+      }).total;
     }
     if (
       (test === 'attack_roll' && payload.kind === 'attack_roll_modifier') ||
@@ -2098,7 +2011,7 @@ function effectDiceModifier(
         count: payload.count,
         sides: dieSides(payload.sides),
         modifier: 0,
-      }, { kind: 'effect_modifier', source: `${test}-modifier`, actor: id }).total;
+      }).total;
     }
     return total;
   }, 0);
@@ -2930,7 +2843,7 @@ function targetDamageResponses(
 
 interface ReductionContext {
   state: EncounterState;
-  readonly rng: TransactionalRollRng;
+  readonly rng: TransactionalRng;
   readonly events: EncounterEvent[];
   readonly reactionDecision: ReactionDecisionHook | null;
 }
@@ -2963,19 +2876,12 @@ function resolveTargetDamage(
   source: CombatantId,
   target: CombatantId,
   request: DamageRequest,
-  provenance: { readonly kind: string; readonly source: string } = {
-    kind: 'attack_damage', source: 'target-damage',
-  },
 ): ReturnType<typeof resolveDamage> {
   offerReaction(context, {
     kind: 'taking_damage_of_type', source, target,
     damageTypes: [...new Set(request.terms.map((term) => term.type))],
   });
-  const raw = resolveDamage(
-    { ...request, responses: [] },
-    context.rng,
-    { ...provenance, actor: source, target },
-  );
+  const raw = resolveDamage({ ...request, responses: [] }, context.rng);
   const adjusted = raw.terms.map((term) => term.beforeResponse);
   const reductions = [...context.state.effects]
     .filter((effect) =>
@@ -2993,7 +2899,7 @@ function resolveTargetDamage(
     if (matching.length === 0) continue;
     let remaining = rollDice(context.rng, {
       count: payload.count, sides: dieSides(payload.sides), modifier: 0,
-    }, { kind: 'damage_reduction', source: String(effect.id), actor: target, target: source }).total;
+    }).total;
     for (const { index } of matching) {
       const reduction = Math.min(adjusted[index] ?? 0, remaining);
       adjusted[index] = (adjusted[index] ?? 0) - reduction;
@@ -3587,11 +3493,7 @@ function resolveDeathSave(context: ReductionContext, id: CombatantId): void {
   ) {
     return;
   }
-  const roll = rollD20(
-    context.rng,
-    'normal',
-    { kind: 'death_save', source: 'death-save', actor: id },
-  ).chosen;
+  const roll = rollD20(context.rng, 'normal').chosen;
   const prior = before.deathSaves ?? { successes: 0, failures: 0 };
   let successes = prior.successes;
   let failures = prior.failures;
@@ -3723,10 +3625,9 @@ function resolveTargetSave(
           rollMode: combineRollModes([
             saveRollMode(context.state, target, ability, mode, cause), ...modifierModes.modes,
           ]),
-      },
-      context.rng,
-      { kind: 'saving_throw', source: `save:${ability}`, actor: target, target: source },
-    );
+        },
+        context.rng,
+      );
   endEffects(context, modifierModes.consumed, 'trigger_consumed');
   emit(context, { type: 'save_resolved', source, target, ability, dc, save, effectId });
   const afterRoll = combatant(context.state, target);
@@ -4864,11 +4765,7 @@ function processHide(
     });
     return;
   }
-  const roll = rollD20(
-    context.rng,
-    'normal',
-    { kind: 'ability_check', source: 'hide:stealth', actor },
-  );
+  const roll = rollD20(context.rng, 'normal');
   const total = roll.chosen + (effectiveCombatRules(context.state, actor).skillBonuses?.stealth ?? 0);
   // 2024 fixed gate: docs/srd/full/srd-5.2.1.txt:11774-11784.
   if (context.state.rulesEdition === '2024' && total < 15) {
@@ -4922,7 +4819,7 @@ function processSearch(
   }
   const roll = rollD20(context.rng, perceptionMode(
     context.state, command.actor, command.target, command.reliance,
-  ), { kind: 'ability_check', source: `search:${command.reliance}`, actor: command.actor, target: command.target });
+  ));
   const total = roll.chosen + (effectiveCombatRules(context.state, command.actor).skillBonuses?.perception ?? 0);
   const found = total >= hidden.stealthTotal;
   emit(context, {
@@ -5168,7 +5065,7 @@ function executeLegendaryAction(
     const amount = rollDice(context.rng, {
       ...action.temporaryHitPoints,
       sides: dieSides(action.temporaryHitPoints.sides),
-    }, { kind: 'temporary_hit_points', source: `legendary:${action.id}`, actor }).total;
+    }).total;
     grantTemporaryHitPoints(context, actor, amount);
     applyEffect(context, actor, {
       targets: [actor],
@@ -7302,12 +7199,6 @@ function processAttack(
       criticalFloor: command.criticalFloor,
     },
     context.rng,
-    {
-      kind: command.type === 'opportunity_attack' ? 'reaction' : 'attack_roll',
-      source: command.type,
-      actor: command.actor,
-      target: command.target,
-    },
   );
   endHidden(context, command.actor, 'attack_roll');
   endEffects(context, new Set([...madeModes.consumed, ...againstModes.consumed]), 'trigger_consumed');
@@ -7473,15 +7364,7 @@ function processAttack(
       critical: attack.outcome === 'critical' || criticalWithin,
       responses: [],
     };
-    damageResult = resolveTargetDamage(
-      context,
-      command.actor,
-      command.target,
-      request,
-      command.type === 'opportunity_attack'
-        ? { kind: 'reaction', source: 'opportunity-attack-damage' }
-        : { kind: 'attack_damage', source: 'attack-damage' },
-    );
+    damageResult = resolveTargetDamage(context, command.actor, command.target, request);
     applyDamage(
       context,
       command.actor,
@@ -7602,14 +7485,7 @@ function processSuspectedSquareAttack(
   }
   assertActiveActor(context, command.actor);
   beginAttack(context, ordinaryAttack);
-  const roll = rollD20(
-    context.rng,
-    attackRollMode(context.state, ordinaryAttack),
-    {
-      kind: 'attack_roll', source: 'attack-suspected-square', actor: command.actor,
-      target: command.suspectedTarget,
-    },
-  );
+  const roll = rollD20(context.rng, attackRollMode(context.state, ordinaryAttack));
   endHidden(context, command.actor, 'attack_roll');
   emit(context, {
     type: 'suspected_square_attacked',
@@ -8679,7 +8555,7 @@ function rollSpellAttack(
           ? effect.payload.mode
           : 'normal')]),
     criticalFloor: 20,
-  }, context.rng, { kind: 'attack_roll', source: `spell:${command.spellId}`, actor: command.actor, target });
+  }, context.rng);
   endEffects(context, new Set([...madeModes.consumed, ...againstModes.consumed]), 'trigger_consumed');
   endEffects(context, new Set(rollModeEffects.flatMap((effect) =>
     effect.payload.kind === 'attack_roll_mode_modifier' &&
@@ -9132,7 +9008,7 @@ function executeHeatMetal(
     terms: [{ type: operation.damageType, dice: scaledSpellDamageExpression(context, definition, operation.dice, command) }],
     critical: false,
     responses: [],
-  }, context.rng, { kind: 'spell_damage', source: `spell:${definition.id}:heat-metal`, actor: command.actor });
+  }, context.rng);
   const damaged: EquippedItemContact[] = [];
   for (const contact of contacts) {
     const request: DamageRequest = {
@@ -9586,11 +9462,7 @@ function processSpellCast(context: ReductionContext, command: SpellCastCommand):
       )
     : null;
   if (somaticSlow !== null) {
-  const roll = rollD20(
-    context.rng,
-    'normal',
-    { kind: 'ability_check', source: `spell:${definition.id}:dispel-check`, actor: command.actor },
-  ).chosen;
+    const roll = rollD20(context.rng, 'normal').chosen;
     const failureMaximum = somaticSlow.somaticSpellFailurePercent / 5;
     const failed = roll <= failureMaximum;
     emit(context, {
@@ -9710,11 +9582,7 @@ function sharedOutcomeDamageAmount(
   ) {
     throw new EncounterRuleError('validation', 'A shared outcome damage reference requires one immediate automatic damage packet without a threshold rider.');
   }
-  const rolled = resolveDamage(
-    { ...instance.damage, critical, responses: [] },
-    context.rng,
-    { kind: 'spell_damage', source: `spell:${definition.id}:shared-outcome`, actor: command.actor, target },
-  );
+  const rolled = resolveDamage({ ...instance.damage, critical, responses: [] }, context.rng);
   const rawAmount = transform === 'half_round_down' ? Math.floor(rolled.total / 2) : rolled.total;
   applySpellDamageAmount(
     context,
@@ -10202,11 +10070,7 @@ function executeSpellOperation(
       const subjects = targets.length === 0 ? [command.actor] : targets;
       const outcomes: SpellOperationOutcome[] = [];
       for (const target of subjects) {
-        const rolled = rollDie(
-          context.rng,
-          dieSides(operation.dieSides),
-          { kind: 'spell_damage', source: `spell:${definition.id}:random-branch`, actor: command.actor },
-        );
+        const rolled = rollDie(context.rng, dieSides(operation.dieSides));
         const branch = operation.branches.find((candidate) =>
           rolled >= candidate.minimum && rolled <= candidate.maximum);
         if (branch === undefined) throw new EncounterRuleError('validation', `${definition.name} has no branch for roll ${String(rolled)}.`);
@@ -10925,7 +10789,7 @@ function executeSpellOperation(
         terms: [{ type: operation.saveDamageType, dice: scaledSpellDamageExpression(context, definition, operation.saveDice, command) }],
         critical: false,
         responses: [],
-      }, context.rng, { kind: 'spell_damage', source: `spell:${definition.id}:burst-save`, actor: command.actor });
+      }, context.rng);
       for (const target of burstTargets) {
         const save = resolveTargetSave(context, command.actor, target, operation.saveAbility, command.saveDc, 'normal', null);
         const rawAmount = save.outcome === 'failure'
@@ -10952,11 +10816,7 @@ function executeSpellOperation(
         null,
       );
       if (attack.outcome === 'miss') {
-        const rolled = rollDice(
-          context.rng,
-          scaledSpellDamageExpression(context, definition, operation.initialDice, command),
-          { kind: 'spell_damage', source: `spell:${definition.id}:miss-damage`, actor: command.actor, target },
-        );
+        const rolled = rollDice(context.rng, scaledSpellDamageExpression(context, definition, operation.initialDice, command));
         applySpellDamageAmount(
           context, command.actor, target, operation.damageType, operation.initialDice.sides,
           Math.floor(rolled.total / 2),
@@ -10998,7 +10858,7 @@ function executeSpellOperation(
         terms: [{ type: operation.damageType, dice: scaledSpellDamageExpression(context, definition, operation.dice, command) }],
         critical: false,
         responses: [],
-      }, context.rng, { kind: 'spell_damage', source: `spell:${definition.id}:save-damage`, actor: command.actor });
+      }, context.rng);
       for (const target of targets) {
         const save = resolveTargetSave(context, command.actor, target, operation.ability, command.saveDc, 'normal', null);
         const rawAmount = save.outcome === 'failure'
@@ -11035,9 +10895,7 @@ function executeSpellOperation(
           terms: [{ type: term.damageType, dice: scaledSpellDamageExpression(context, definition, term.dice, command) }],
           critical: false,
           responses: [],
-        }, context.rng, {
-          kind: 'spell_damage', source: `spell:${definition.id}:save-multi-damage`, actor: command.actor,
-        }).total,
+        }, context.rng).total,
       }));
       for (const target of targets) {
         const save = resolveTargetSave(context, command.actor, target, operation.ability, command.saveDc, 'normal', null);
@@ -11059,9 +10917,7 @@ function executeSpellOperation(
         terms: [{ type: operation.damageType, dice: scaledSpellDamageExpression(context, definition, operation.initialDice, command) }],
         critical: false,
         responses: [],
-      }, context.rng, {
-        kind: 'spell_damage', source: `spell:${definition.id}:save-damage-over-time`, actor: command.actor,
-      });
+      }, context.rng);
       for (const target of targets) {
         const save = resolveTargetSave(context, command.actor, target, operation.ability, command.saveDc, 'normal', null);
         const amount = save.outcome === 'failure'
@@ -11093,9 +10949,7 @@ function executeSpellOperation(
         terms: [{ type: operation.damageType, dice: scaledSpellDamageExpression(context, definition, operation.dice, command) }],
         critical: false,
         responses: [],
-      }, context.rng, {
-        kind: 'spell_damage', source: `spell:${definition.id}:save-damage-effect`, actor: command.actor,
-      });
+      }, context.rng);
       for (const target of targets) {
         const save = resolveTargetSave(context, command.actor, target, operation.ability, command.saveDc, 'normal', null);
         const amount = save.outcome === 'failure'
@@ -11110,11 +10964,7 @@ function executeSpellOperation(
       return 'applied';
     }
     case 'healing': {
-      const rolled = rollDice(
-        context.rng,
-        scaledDiceExpression(definition, operation.dice, command),
-        { kind: 'healing', source: `spell:${definition.id}`, actor: command.actor },
-      );
+      const rolled = rollDice(context.rng, scaledDiceExpression(definition, operation.dice, command));
       const amount = rolled.total + (operation.addSpellcastingModifier ? command.spellcastingModifier : 0);
       for (const target of targets) applyHealing(context, command.actor, target, Math.max(0, amount));
       return 'applied';
@@ -11129,11 +10979,7 @@ function executeSpellOperation(
       return 'applied';
     }
     case 'temporary_hit_points': {
-      const rolled = rollDice(
-        context.rng,
-        scaledDiceExpression(definition, operation.dice, command),
-        { kind: 'temporary_hit_points', source: `spell:${definition.id}`, actor: command.actor },
-      );
+      const rolled = rollDice(context.rng, scaledDiceExpression(definition, operation.dice, command));
       grantTemporaryHitPoints(context, command.actor, rolled.total);
       return 'applied';
     }
@@ -11332,9 +11178,7 @@ function executeSpellOperation(
           rollMode: combineRollModes(['normal', ...advantageEffects.map((effect) =>
             effect.payload.kind === 'attack_roll_mode_modifier' ? effect.payload.mode : 'normal')]),
           criticalFloor: 20,
-        }, context.rng, {
-          kind: 'attack_roll', source: `spell:${definition.id}:weapon-attack`, actor: command.actor, target,
-        });
+        }, context.rng);
         endEffects(context, new Set(advantageEffects.flatMap((effect) =>
           effect.payload.kind === 'attack_roll_mode_modifier' &&
           effect.payload.appliesTo.kind === 'next_attack_against_target'
@@ -11517,11 +11361,7 @@ function rollIndividualInitiative(
   context: ReductionContext,
   subject: EncounterCombatantState,
 ): InitiativeSlotDraft {
-  const roll = rollD20(
-    context.rng,
-    initiativeRollModeFor(context.state, subject),
-    { kind: 'initiative', source: 'individual-initiative', actor: subject.profile.id },
-  );
+  const roll = rollD20(context.rng, initiativeRollModeFor(context.state, subject));
   const bonus = initiativeBonusFor(context.state, subject);
   const entry: InitiativeEntryDraft = {
     combatant: subject.profile.id,
@@ -11558,7 +11398,6 @@ function rollEnemyInitiativeBlock(
   const roll = rollD20(
     context.rng,
     initiativeRollModeFor(context.state, representative),
-    { kind: 'initiative', source: 'enemy-initiative-block', actor: representative.profile.id },
   );
   const total = roll.chosen + bonus;
   emit(context, {
@@ -11714,10 +11553,7 @@ function processWorldOperation(
             targetArmorClass: existing.armorClass,
             criticalFloor: operation.delivery.criticalFloor,
             rollMode: operation.delivery.rollMode,
-          }, context.rng, {
-            kind: 'attack_roll', source: 'world-object-attack',
-            ...(actor === null ? {} : { actor }), target: operation.objectId,
-          })
+          }, context.rng)
         : null;
       const damage = attack?.outcome === 'miss'
         ? null
@@ -11725,9 +11561,7 @@ function processWorldOperation(
             ...operation.damage,
             critical: operation.damage.critical || attack?.outcome === 'critical',
             responses: existing.damageResponses,
-          }, context.rng, {
-            kind: 'world_object_damage', source: String(operation.objectId), ...(actor === null ? {} : { actor }),
-          });
+          }, context.rng);
       const before = existing.durability.hitPoints;
       const after = Math.max(0, before - (damage?.total ?? 0));
       context.state = {
@@ -12609,9 +12443,7 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
       );
       const roll = rollD20(context.rng, combineRollModes([
         abilityCheckRollMode(context.state, command.actor, command.rollMode), ...modifierModes.modes,
-      ]), {
-        kind: 'ability_check', source: `ability-check:${command.ability}:${command.skill ?? 'none'}`, actor: command.actor,
-      });
+      ]));
       endEffects(context, modifierModes.consumed, 'trigger_consumed');
       const total = roll.chosen + command.bonus +
         exhaustionPenalty(combatantConditions(context.state, command.actor)) +
@@ -12848,13 +12680,10 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
           ? { ...effect, payload: { ...potion.payload, remainingUses: remaining } }
           : effect),
       };
-      const healing = rollDice(context.rng, {
-        ...potion.payload.dice,
-        sides: dieSides(potion.payload.dice.sides),
-      }, {
-        kind: 'healing', source: `item/healing-potion/${String(potion.id)}`,
-        actor: command.actor, target: command.actor,
-      }).total;
+      let healing = potion.payload.dice.modifier;
+      for (let index = 0; index < potion.payload.dice.count; index += 1) {
+        healing += Math.floor(context.rng() * potion.payload.dice.sides) + 1;
+      }
       applyHealing(context, command.actor, command.actor, healing);
       emit(context, {
         type: 'healing_potion_consumed',
@@ -12931,16 +12760,9 @@ export function reduceEncounter(
 ): EncounterReduction {
   const observedState = reconcileObservationHistory(state);
   const visibilityBefore = monsterVisibilitySnapshot(observedState);
-  const reducerRng = isTransactionalRollRng(rng)
-    ? rng
-    : RollProvenance.recording(transactionalRng(rng)).asRng();
-  reducerRollOccurrenceIds.set(
-    reducerRng,
-    rollOccurrenceId(`reducer/revision/${String(observedState.revision)}/command/${command.type}`),
-  );
   const context: ReductionContext = {
     state: { ...observedState, revision: observedState.revision + 1 },
-    rng: reducerRng,
+    rng: transactionalRng(rng),
     events: [],
     reactionDecision: options.reactionDecision ?? null,
   };

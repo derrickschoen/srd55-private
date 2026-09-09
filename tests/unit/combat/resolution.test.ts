@@ -13,14 +13,6 @@ import {
   dieSides,
   difficultyClass,
 } from '../../../src/combat/values';
-import { rollOccurrenceId, rollOperationPath } from '../../../src/combat/roll-provenance';
-
-const TEST_PROVENANCE = {
-  occurrenceId: rollOccurrenceId('resolution:test'),
-  operationPath: rollOperationPath('attack/roll'),
-  source: null,
-  targets: [],
-} as const;
 
 function scriptedRng(values: readonly number[]): { readonly rng: Rng; readonly draws: () => number } {
   let index = 0;
@@ -60,13 +52,13 @@ describe('checked combat values and random primitives', () => {
 
   it('uses floor(x*sides)+1 once per die and zero times for zero dice', () => {
     const counted = scriptedRng([0, 0.49, 0.999]);
-    expect(rollDie(counted.rng, dieSides(6), TEST_PROVENANCE)).toBe(1);
-    expect(rollDice(counted.rng, { count: 2, sides: dieSides(8), modifier: 3 }, TEST_PROVENANCE)).toEqual({
+    expect(rollDie(counted.rng, dieSides(6))).toBe(1);
+    expect(rollDice(counted.rng, { count: 2, sides: dieSides(8), modifier: 3 })).toEqual({
       expression: { count: 2, sides: 8, modifier: 3 },
       faces: [4, 8],
       total: 15,
     });
-    expect(rollDice(counted.rng, { count: 0, sides: dieSides(12), modifier: 4 }, TEST_PROVENANCE)).toEqual({
+    expect(rollDice(counted.rng, { count: 0, sides: dieSides(12), modifier: 4 })).toEqual({
       expression: { count: 0, sides: 12, modifier: 4 },
       faces: [],
       total: 4,
@@ -78,13 +70,13 @@ describe('checked combat values and random primitives', () => {
 describe('d20, attack, and save resolution', () => {
   it('consumes one draw normally and two sequential draws for advantage and disadvantage', () => {
     const counted = scriptedRng([0.2, 0.1, 0.8, 0.7, 0.3]);
-    expect(rollD20(counted.rng, 'normal', TEST_PROVENANCE)).toEqual({ mode: 'normal', faces: [5], chosen: 5 });
-    expect(rollD20(counted.rng, 'advantage', TEST_PROVENANCE)).toEqual({
+    expect(rollD20(counted.rng, 'normal')).toEqual({ mode: 'normal', faces: [5], chosen: 5 });
+    expect(rollD20(counted.rng, 'advantage')).toEqual({
       mode: 'advantage',
       faces: [3, 17],
       chosen: 17,
     });
-    expect(rollD20(counted.rng, 'disadvantage', TEST_PROVENANCE)).toEqual({
+    expect(rollD20(counted.rng, 'disadvantage')).toEqual({
       mode: 'disadvantage',
       faces: [15, 7],
       chosen: 7,
@@ -101,7 +93,6 @@ describe('d20, attack, and save resolution', () => {
         criticalFloor: 20,
       },
       () => 0.49,
-      TEST_PROVENANCE,
     );
     expect(result).toMatchObject({ outcome: 'hit', total: 15 });
   });
@@ -122,14 +113,12 @@ describe('d20, attack, and save resolution', () => {
       resolveAttackRoll(
         { hitFloor: 8, rollMode: 'normal', criticalFloor: 20 },
         () => 0.35,
-        TEST_PROVENANCE,
       ).outcome,
     ).toBe('hit');
     expect(
       resolveAttackRoll(
         { hitFloor: 8, rollMode: 'normal', criticalFloor: 20 },
         () => 0.34,
-        TEST_PROVENANCE,
       ).outcome,
     ).toBe('miss');
   });
@@ -139,21 +128,18 @@ describe('d20, attack, and save resolution', () => {
       resolveSavingThrow(
         { bonus: 5, dc: difficultyClass(15), rollMode: 'normal' },
         () => 0.49,
-        TEST_PROVENANCE,
       ),
     ).toMatchObject({ outcome: 'success', total: 15 });
     expect(
       resolveSavingThrow(
         { bonus: 20, dc: difficultyClass(15), rollMode: 'normal' },
         () => 0,
-        TEST_PROVENANCE,
       ).outcome,
     ).toBe('success');
     expect(
       resolveSavingThrow(
         { bonus: -10, dc: difficultyClass(15), rollMode: 'normal' },
         () => 0.999,
-        TEST_PROVENANCE,
       ).outcome,
     ).toBe('failure');
   });
@@ -174,7 +160,6 @@ describe('damage resolution', () => {
           responses: [{ type: fire, response: 'resistant' }],
         },
         scriptedRng([0, 0.5, 0.999]).rng,
-        TEST_PROVENANCE,
       ),
     ).toEqual({
       terms: [
@@ -214,7 +199,6 @@ describe('damage resolution', () => {
           responses: [],
         },
         counted.rng,
-        TEST_PROVENANCE,
       ),
     ).toMatchObject({
       terms: [{ roll: { faces: [1, 3], total: 9 }, beforeResponse: 9, afterResponse: 9 }],

@@ -1,10 +1,5 @@
 import { rollDie, type Rng } from '../../src/combat/random';
 import {
-  rollOccurrenceId,
-  rollOperationPath,
-  type RollProvenanceRequest,
-} from '../../src/combat/roll-provenance';
-import {
   classifyAttackRoll,
   resolveAttackRoll,
   resolveDamage,
@@ -22,15 +17,6 @@ import {
 
 export { mulberry32 } from '../../src/combat/random';
 export type { Rng } from '../../src/combat/random';
-
-function simulationRoll(path: string): RollProvenanceRequest {
-  return {
-    occurrenceId: rollOccurrenceId('simulation:srd-board'),
-    operationPath: rollOperationPath(path),
-    source: null,
-    targets: [],
-  };
-}
 
 // DPR + support-channel Monte Carlo sim for the homebrew subclasses and the
 // complete twelve-subclass SRD 5.2.1 board.
@@ -307,15 +293,14 @@ function damage(rng: Rng, count: number, sides: number): number {
       responses: [],
     },
     rng,
-    simulationRoll('helper/damage'),
   ).total;
 }
 
 function rr(rng: Rng, s: number): number {
   // Deuces Are Wild: reroll a 2 once (Veteran damage dice only).
   const sides = dieSides(s);
-  const v = rollDie(rng, sides, simulationRoll('helper/deuces-are-wild/initial'));
-  return v === 2 ? rollDie(rng, sides, simulationRoll('helper/deuces-are-wild/replacement')) : v;
+  const v = rollDie(rng, sides);
+  return v === 2 ? rollDie(rng, sides) : v;
 }
 
 function resolveSimAttack(
@@ -333,7 +318,6 @@ function resolveSimAttack(
       criticalFloor,
     },
     rng,
-    simulationRoll('helper/attack'),
   );
 }
 
@@ -392,7 +376,6 @@ function savingThrowFails(rng: Rng, dc: number, bonus = 2): boolean {
   return resolveSavingThrow(
     { bonus, dc: difficultyClass(dc), rollMode: 'normal' },
     rng,
-    simulationRoll('helper/saving-throw'),
   ).outcome === 'failure';
 }
 
@@ -645,9 +628,7 @@ function championCore(rng: Rng, L: Level, nc: number, ranged: boolean): CombatRe
           const weaponRoll = (): number => {
             let total = 0;
             for (let k = 0; k < rolls; k++) {
-              total += Math.max(rollDie(
-                rng, dieSides(6), simulationRoll('build/berserker/greatsword/minimum-face'),
-              ), 3);
+              total += Math.max(rollDie(rng, dieSides(6)), 3);
             }
             return total;
           };
@@ -1201,9 +1182,7 @@ export function monk(rng: Rng, L: Level, nc: number, initManifest = false): Comb
           // Goad defiance: attack an ally at Disadvantage. Credit the damage
           // the Disadvantage removed (paired rolls vs the front-liner AC).
           for (let k = 0; k < enatk; k++) {
-            const disadvantaged = rollD20(
-              rng, 'disadvantage', simulationRoll('build/warrior-of-elements/goad-defiance'),
-            );
+            const disadvantaged = rollD20(rng, 'disadvantage');
             const first = disadvantaged.faces[0] as number;
             const request = {
               attackBonus: eth,
@@ -1245,9 +1224,7 @@ export function monk(rng: Rng, L: Level, nc: number, initManifest = false): Comb
             // the hit to a duplicate, destroying it (N1).
             let diverted = false;
             for (let im = 0; im < images; im++) {
-              if (rollDie(rng, dieSides(6), simulationRoll('build/warrior-of-elements/mirror-image')) >= 3) {
-                diverted = true;
-              }
+              if (rollDie(rng, dieSides(6)) >= 3) diverted = true;
             }
             if (diverted) {
               images -= 1;
@@ -1665,7 +1642,6 @@ function chromaticOrb(
         responses: [],
       },
       rng,
-      simulationRoll('build/chromatic-orb/damage'),
     );
     const term = result.terms[0];
     if (term === undefined) throw new Error('Chromatic Orb damage term is missing.');
@@ -1856,9 +1832,7 @@ export function lore(rng: Rng, L: Level, nc: number): CombatResult | null {
         if (outcome.outcome === 'miss') continue;
         const incoming = damage(rng, enemyDice * (enemyCrit ? 2 : 1), enemyDie) + enemyFlat;
         if (cuttingWordsAvailable) {
-          prevented += Math.min(incoming, rollDie(
-            rng, dieSides(inspirationDie), simulationRoll('build/lore/cutting-words'),
-          ));
+          prevented += Math.min(incoming, rollDie(rng, dieSides(inspirationDie)));
           cuttingWordsAvailable = false;
         }
       }
@@ -1899,7 +1873,7 @@ export function loreCollege(rng: Rng, L: Level, nc: number): CombatResult {
       const [enemyAttacks, enemyToHit, enemyDice, enemyDie, enemyFlat] = ENEMY[L];
       let reactionFree = cuttingWords > 0;
       for (let a = 0; a < enemyAttacks; a++) {
-        const firstRoll = rollD20(rng, 'normal', simulationRoll('build/lore-college/first-attack'));
+        const firstRoll = rollD20(rng, 'normal');
         const request = {
           attackBonus: enemyToHit,
           targetArmorClass: armorClass(DEF_AC[L]),
@@ -1909,7 +1883,7 @@ export function loreCollege(rng: Rng, L: Level, nc: number): CombatResult {
         const normal = classifyAttackRoll(request, firstRoll);
         let actualRoll: D20Roll = firstRoll;
         if (mocked && a === 0) {
-          const secondRoll = rollD20(rng, 'normal', simulationRoll('build/lore-college/mockery-second-attack'));
+          const secondRoll = rollD20(rng, 'normal');
           actualRoll = {
             mode: 'disadvantage',
             faces: [firstRoll.chosen, secondRoll.chosen],
@@ -1928,9 +1902,7 @@ export function loreCollege(rng: Rng, L: Level, nc: number): CombatResult {
         if (!actualHit) continue;
         const incoming = damage(rng, enemyDice * (actualCrit ? 2 : 1), enemyDie) + enemyFlat;
         if (reactionFree) {
-          prevented += Math.min(incoming, rollDie(
-            rng, dieSides(inspirationDie), simulationRoll('build/lore-college/cutting-words'),
-          ));
+          prevented += Math.min(incoming, rollDie(rng, dieSides(inspirationDie)));
           cuttingWords -= 1;
           reactionFree = false;
         }

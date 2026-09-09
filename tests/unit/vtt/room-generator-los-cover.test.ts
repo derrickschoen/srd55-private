@@ -15,7 +15,6 @@ import { sha256 } from '../../../src/crypto/sha256';
 import { availableEngineActorOptions, resolveEngineActorOption } from '../../../src/vtt/intent-resolver';
 import { freshMonsterPlanningState } from '../../../src/vtt/monster-planning-state';
 import { decodeArenaFixtureText } from '../../../src/vtt/mcp/entrypoint';
-import { decodeArenaBasisEnvelopeV1 } from '../../../src/vtt/arena-fixture';
 import {
   generateRoom,
   type GeneratedRoom,
@@ -50,7 +49,6 @@ const inputs = declareTestInputs({
     'tests/fixtures/arena-basis-los-cover-v1/seed-5762201.json',
     'tests/fixtures/arena-basis-los-cover-v1/seed-5762202.json',
     'tests/fixtures/arena-basis-los-cover-v1/seed-5762203.json',
-    'tests/fixtures/arena-basis-challenge/seed-5831001.json',
   ],
 });
 
@@ -248,16 +246,6 @@ function expectProductiveMonsters(room: GeneratedRoom): void {
 }
 
 describe('D576 los_cover_v1 generator membership', () => {
-  it('generated and authored arena fixtures share one strict decoder', () => {
-    const generated = generateRoom(5_762_001, { terrainProfile: 'los_cover_v1' });
-    expect(canonicalJson(decodeArenaBasisEnvelopeV1(generated, { mode: 'legacy_basis' }).encounter.state))
-      .toBe(canonicalJson(generated.encounter.state));
-    const authoredText = inputs.fixtures.readText('tests/fixtures/arena-basis-challenge/seed-5831001.json');
-    const authored = decodeArenaBasisEnvelopeV1(JSON.parse(authoredText) as unknown, { mode: 'challenge' });
-    expect(authored.spec.seed).toBe(5_831_001);
-    expect(authored.encounter.state.initiative).toHaveLength(4);
-  });
-
   it.each(FIXTURE_CASES)(
     'kills M576-E2-TIER-PRESENT-BUT-NOT-EXERCISED for $difficulty seed $seed',
     ({ difficulty, seed, path }) => {

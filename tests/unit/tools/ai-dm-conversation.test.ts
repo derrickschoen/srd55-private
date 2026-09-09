@@ -49,8 +49,6 @@ import {
   MemoryMirrorSink,
 } from '../../../src/vtt/session-persistence';
 import { codexArgv } from '../../../src/vtt/agent-adapters/codex';
-import { decodeSessionSnapshotV1 } from '../../../src/vtt/arena-fixture';
-import { canonicalJson } from '../../../src/commands/canonical-json';
 import {
   applyRevisionDelta,
   type RevisionDeltaOperation,
@@ -222,13 +220,11 @@ class SerializedRoundTripAdapter implements AgentSessionAdapter {
   readonly turnContexts: Readonly<Record<string, unknown>>[] = [];
   readonly startInvocations: AgentInvocation[] = [];
   readonly resumeInvocations: AgentInvocation[] = [];
-  sessionSnapshotValidations = 0;
   #startCount = 0;
 
   constructor(
     private readonly choice: 'first_shown' | 'use_action_dodge' | 'targeted_web' | 'attack' | 'invalid_then_dodge' | 'option_shaped_end_turn',
     private readonly usageInputs: number[] = [],
-    private readonly validateSessionBytes = false,
   ) {}
 
   async probe() { return { present: true, version: 'SERIALIZED-TEST' }; }
@@ -254,12 +250,6 @@ class SerializedRoundTripAdapter implements AgentSessionAdapter {
     const manifest = JSON.parse(readFileSync(invocation.launcherToken, 'utf8')) as EngineMcpLauncherManifest;
     expect(manifest.toolProfile).toBe('dm');
     const state = await loadArenaFixture(manifest.fixturePath);
-    if (this.validateSessionBytes) {
-      const launcherBytes = readFileSync(manifest.fixturePath, 'utf8');
-      expect(canonicalJson(decodeSessionSnapshotV1(JSON.parse(launcherBytes) as unknown)))
-        .toBe(canonicalJson(state));
-      this.sessionSnapshotValidations += 1;
-    }
     const runtime = createEngineMcpRuntime(state, {
       runId: manifest.runId,
       branchId: manifest.branchId,
@@ -621,7 +611,7 @@ describe('AI-DM engine MCP conversation runner', () => {
 
   it('authorizes a serialized revision-bound Dodge proposal', { timeout: 60_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-serialized-dodge-'));
-    const adapter = new SerializedRoundTripAdapter('use_action_dodge', [], true);
+    const adapter = new SerializedRoundTripAdapter('use_action_dodge');
     const config = parseConversationArgs([
       '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
       ...LEGACY_BLOCK_ARGS,
@@ -652,7 +642,6 @@ describe('AI-DM engine MCP conversation runner', () => {
       })]),
     }));
     expect(result.rows[0]?.stateBinding.authorization).toEqual(result.rows[0]?.stateBinding.capsule);
-    expect(adapter.sessionSnapshotValidations).toBeGreaterThan(0);
   });
 
   it('authorizes targeted Web and non-targeted Dodge through composite options', { timeout: 60_000 }, async () => {
