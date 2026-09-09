@@ -21574,3 +21574,17 @@ any PRODUCTION launch, 2.4 is re-run verbatim on a machine with no
 supervisor monitor shells carrying those words, and the runner is fixed
 to capture exit codes without pipes. Both findings are against my own
 execution, not the runbook.
+
+## D586.154 — fourteen stale wait loops from earlier sessions killed (2026-09-09 09:51)
+
+The shells the 2.4 guard matched were fourteen day-old (up to 2 d 12 h)
+supervisor wait loops from earlier sessions — `while pgrep -f "gate-wt4.sh
+wt-los-cover"`, `while pgrep -f "claude --model claude-opus-5 -p"`,
+`while pgrep -f "ai-dm-board-snapshot.spec.ts …"`, an `until grep -q
+"RESTORED OK"` loop, and similar — each using an UNBRACKETED `pgrep -f`
+that matched its own `bash -c` argv and therefore never exited (the exact
+defect recorded in memory as "pgrep: bracket the pattern or it
+self-matches"). They spawned only `sleep`, but their command text carried
+the words the runbook guard scans for. Killed by numeric pid (call 1
+listed, call 2 killed); no other process touched. After the running
+model-free dry-run finishes, section 2.4 is re-run verbatim.
