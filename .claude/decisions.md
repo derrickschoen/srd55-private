@@ -20029,3 +20029,18 @@ bytes, 29ca2ded...); guard traversal 72/4; sg and diff --check clean.
 Disposition: no lane dispatch. The supervisor cumulative on 4a1e2617 is
 running (cum-txn-s1-r2.log, started 01:34); its result plus any D587.3
 serial rerun goes back to Astra as the round-3 closing evidence.
+
+## D586.79 — txn slice 1 cumulative on 4a1e2617: 441/443, two arena timeouts; serial rerun queued (2026-09-09 01:46)
+
+Supervisor cumulative (started 01:34 at load 4.9, browser gate and two
+lanes concurrent, load 18 by the end): tsc exit 0; 19 spec files, 18
+passed, 1 failed; 443 tests, 441 passed, 2 failed; vitest exit 1. Both
+reds are "Test timed out in 30000ms" in the inherited
+tests/unit/tools/ai-dm-arena.test.ts (renderer-profile threading;
+intel-surface suppression), file wall 296 s; the two MCP-spawning specs
+that EROFS'd in the lane's sandbox pass here (conversation 74/74,
+board-delivery 16/16), and ai-dm-combat-model passes. No assertion
+failure. Under D587.3 the arena spec gets one serial rerun, queued
+behind the D569 serial rerun (cum-txn-s1-r2-serial-queued.sh ->
+cum-txn-s1-r2-serial.log). Green there closes the D584.4 contract for the
+slice and goes to Astra as the round-3 closing evidence.
