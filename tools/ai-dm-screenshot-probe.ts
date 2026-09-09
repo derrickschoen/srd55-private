@@ -15,6 +15,7 @@ import type { PersistedCoordinatorState } from '../src/combat/coordinator';
 import {
   traceCombatantLine,
   traceCombatantLineToCells,
+  type TerrainLineTrace,
 } from '../src/combat/cover';
 import {
   combatantSpace,
@@ -59,15 +60,19 @@ const ROW_VERSION = 'd576-screenshot-comprehension-row-v10' as const;
 export const NORMALISER_VERSION =
   'd576-screenshot-vocabulary-normaliser-v4' as const;
 export const PREVIOUS_PRIMER_VERSION =
+  'd576-general-board-primer-v11' as const;
+export const HISTORICAL_PRIMER_VERSION =
   'd562-general-board-primer-v10' as const;
-const LEGACY_PRIMER_VERSION = 'd557-general-board-primer-v9' as const;
+export const LEGACY_PRIMER_VERSION = 'd557-general-board-primer-v9' as const;
 export const GENERAL_PRIMER_V10 =
   "This is a tabletop RPG combat board viewed from above. Each grid square represents 5 feet, and tokens represent creatures. Cool-blue floor plates beneath busts identify party creatures; warm-red floor plates beneath busts identify foes, exactly as the two floor-plate legend swatches show. The upper-left side of world art is lit and its lower-right contact shadow grounds it in the owning cell. Each creature token carries a numbered coloured badge; the roster box under the board repeats that badge and lists the creature's full name, cell, side and HP band. A creature stands in the cell that holds its badge. An OBJECT-sigil tag in the legend rail names an object, and the coordinate printed on that tag is the cell where the object stands. Door rail entries use the door glyph and print DOOR OPEN or DOOR CLOSED with the door's coordinate. The coordinate origin is the top-left cell, whose column and row are both zero; columns increase rightward and rows increase downward, matching the zero-based labels along the board edges. Two creatures are adjacent and within 5 feet when their cells share an edge or a corner, so diagonals count. HP bars and roster words use green for uninjured, amber for bloodied, red for near death, and grey for unknown. Difficult terrain is marked by one cell-local emblem of three inset opaque pale-ochre zigzag ridges with a dark outline. Blocked terrain is marked by a large cross-braced stone pile spanning the cell. The legend box names every terrain overlay (Difficult, Obscured, Bright light, Dim light, Darkness, and Fog) and every board mark (Blocked, Object, and Light source). Doors are drawn only where the engine has a door. Interpret walls, doors, and objects as they are drawn on the board." as const;
 export const GENERAL_PRIMER_V9 =
   "This is a tabletop RPG combat board viewed from above. Each grid square represents 5 feet, and tokens represent creatures. Cool-blue floor plates beneath busts identify party creatures; warm-red floor plates beneath busts identify foes, exactly as the two floor-plate legend swatches show. The upper-left side of world art is lit and its lower-right contact shadow grounds it in the owning cell. Each creature token carries a numbered coloured badge; the roster box under the board repeats that badge and lists the creature's full name, cell, side and HP band. A creature stands in the cell that holds its badge. An OBJECT-sigil tag in the legend rail names an object, and the coordinate printed on that tag is the cell where the object stands. Door rail entries use the door glyph and print DOOR OPEN or DOOR CLOSED with the door's coordinate. The coordinate origin is the top-left cell, whose column and row are both zero; columns increase rightward and rows increase downward, matching the zero-based labels along the board edges. Two creatures are adjacent and within 5 feet when their cells share an edge or a corner, so diagonals count. HP bars and roster words use green for uninjured, amber for bloodied, red for near death, and grey for unknown. Difficult terrain is marked by three broad ochre zigzag ridges spanning its floor. Blocked terrain is marked by a large cross-braced stone pile spanning the cell. The legend box names every terrain overlay (Difficult, Obscured, Bright light, Dim light, Darkness, and Fog) and every board mark (Blocked, Object, and Light source). Doors are drawn only where the engine has a door. Interpret walls, doors, and objects as they are drawn on the board." as const;
-export const PRIMER_VERSION = 'd576-general-board-primer-v11' as const;
-export const GENERAL_PRIMER =
+export const GENERAL_PRIMER_V11 =
   `${GENERAL_PRIMER_V10} The terrain legend has four exact outcomes: OPEN means no cover and line of sight; 1/2 COVER is a low crossable barricade; 3/4 COVER is a tall bulwark with a narrow aperture; WALL means Total Cover and no line of sight. To answer a line query, consider the source space's outer corners in row-major order. From one source corner draw to all four outer target-space corners; a boundary graze does not count and endpoint spaces are excluded. Zero obstructed target-corner rays means none, one or two means half, three means three_quarters, and four wall-blocked rays means total and blocked line of sight. Use the least-obstructed source corner; an intervening living creature supplies half cover without blocking sight.` as const;
+export const PRIMER_VERSION = 'd576-general-board-primer-v12' as const;
+export const GENERAL_PRIMER =
+  `${GENERAL_PRIMER_V10} The terrain legend has four exact outcomes: OPEN means no cover and line of sight; 1/2 COVER is a low crossable barricade; 3/4 COVER is a tall bulwark with a narrow aperture; WALL means Total Cover and no line of sight. For a line query, the engine considers every outer source-space corner in row-major order and draws four rays from each one to the target space's outer corners. Only cell interiors count: boundary grazes and the source and target spaces are excluded. Each ray takes the strongest crossed feature; a living intervening creature supplies half cover without blocking sight, while only a WALL blocks sight. Sight is blocked only when all four rays from the chosen source corner cross a WALL, which gives total cover. Otherwise the cover tier is the weakest of the ray-count tier (zero none, one or two half, three three_quarters, four total), the strongest tier crossed by any ray, and three_quarters. The engine chooses the least-protective source-corner result, with row-major order breaking ties. Thus three or four rays that cross only 1/2 COVER still give half cover. Worked feature trace: source cell 0,0 to target cell 4,2 has chosen source corner 0,0 and ray tiers none, three_quarters, three_quarters, three_quarters, so the result is three_quarters with clear sight; replacing that feature with a full wall strip makes all four rays wall-blocked, for total cover and blocked sight, while features in only the source or target cell are excluded and give none. Worked creature trace: source cell 0,1 to target cell 4,1 with one living creature in cell 2,1 has chosen source corner 0,1 and ray tiers none, none, half, half, so the result is half with clear sight; a dead creature contributes nothing, and the source and target creatures are excluded. Worked Large-source trace: a Large source anchored at 0,0 to target cell 6,0 has an upper occupied-cell trace obstructed by 1/2 COVER, but the whole-space trace chooses source corner 0,2 and has four none rays, so the least-protective result is none with clear sight; total cover would require all four rays from every eligible source corner to cross a WALL.` as const;
 /**
  * D525: the sentence describing how the board draws light levels, one per
  * convention. Each describes only the drawing convention — never a room fact —
@@ -111,6 +116,11 @@ export const GLYPH_FAMILY_PRIMER_V9 = {
 >;
 export const PRIMER_HISTORY = Object.freeze({
   [PREVIOUS_PRIMER_VERSION]: Object.freeze({
+    general: GENERAL_PRIMER_V11,
+    light: LIGHT_PRIMER,
+    glyphFamilies: GLYPH_FAMILY_PRIMER,
+  }),
+  [HISTORICAL_PRIMER_VERSION]: Object.freeze({
     general: GENERAL_PRIMER_V10,
     light: LIGHT_PRIMER,
     glyphFamilies: GLYPH_FAMILY_PRIMER,
@@ -165,9 +175,11 @@ export type ProbeSide = 'party' | 'foe';
 export type ProbeLight = 'bright' | 'dim' | 'dark';
 export type PrimerMode = 'none' | 'general';
 export type BoardInput = 'png' | 'semantic' | 'both';
+export type ComparisonMode = 'ablation' | 'acceptance';
 export type PrimerVersion =
   | typeof PRIMER_VERSION
   | typeof PREVIOUS_PRIMER_VERSION
+  | typeof HISTORICAL_PRIMER_VERSION
   | typeof LEGACY_PRIMER_VERSION
   | 'd557-general-board-primer-v8'
   | 'd525-general-board-primer-v5'
@@ -353,6 +365,7 @@ export interface ScreenshotProbeConfig {
   readonly primer: PrimerMode;
   readonly generation: string;
   readonly comparePath: string | null;
+  readonly comparisonMode: ComparisonMode;
   /** D525: the glyph mode every board is captured under and the primer sentences that describe it. */
   readonly boardGlyphs: BoardGlyphMode;
   /** D561: CSS tile size used for the captured raster. */
@@ -695,6 +708,27 @@ function cellQueryId(source: ProbeCreatureEndpoint, target: ProbeCell): string {
   return `cell-line:${source.badgeColor}-${String(source.badgeNumber)}>${String(target.column)},${String(target.row)}`;
 }
 
+type ProbeLineResult = Pick<TerrainLineTrace, 'tier' | 'blocksSight'>;
+
+/** Injectable seam around the two canonical production trace entry points. */
+export interface ProbeLineTracer {
+  traceCombatantLine(
+    state: EncounterState,
+    sourceId: CombatantId,
+    targetId: CombatantId,
+  ): ProbeLineResult;
+  traceCombatantLineToCells(
+    state: EncounterState,
+    sourceId: CombatantId,
+    targetCells: readonly GridCell[],
+  ): ProbeLineResult;
+}
+
+const PRODUCTION_PROBE_LINE_TRACER: ProbeLineTracer = {
+  traceCombatantLine,
+  traceCombatantLineToCells,
+};
+
 /**
  * D576 ground truth and membership use only the canonical production traces.
  * The probe selects endpoints; it never reproduces corner/raster geometry.
@@ -703,6 +737,7 @@ export function deriveProbeLineQueries(
   state: EncounterState,
   combatants: readonly FactSheetCombatant[],
   desiredTier?: CoverTier,
+  tracer: ProbeLineTracer = PRODUCTION_PROBE_LINE_TRACER,
 ): {
   readonly creatureLineQuery: ProbeCreatureLineQuery;
   readonly cellLineQuery: ProbeCellLineQuery;
@@ -719,7 +754,7 @@ export function deriveProbeLineQueries(
   for (const source of eligibleSources) {
     for (const target of eligibleTargets) {
       if (source.id === target.id) continue;
-      const trace = traceCombatantLine(state, source.id, target.id);
+      const trace = tracer.traceCombatantLine(state, source.id, target.id);
       if (desiredTier !== undefined && trace.tier !== desiredTier) continue;
       const sourceEndpoint = endpointForCombatant(source);
       const targetEndpoint = endpointForCombatant(target);
@@ -746,7 +781,7 @@ export function deriveProbeLineQueries(
       for (let column = 0; column < state.bounds.columns; column += 1) {
         const target = { column, row };
         if (occupied.has(cellKey(target))) continue;
-        const trace = traceCombatantLineToCells(state, source.id, [target]);
+        const trace = tracer.traceCombatantLineToCells(state, source.id, [target]);
         if (desiredTier !== undefined && trace.tier !== desiredTier) continue;
         const sourceEndpoint = endpointForCombatant(source);
         const targetCell = probeCell(target);
@@ -787,6 +822,7 @@ export function screenshotHitPointBand(
 export function deriveScreenshotFactSheet(
   state: EncounterState,
   desiredLineTier?: CoverTier,
+  tracer: ProbeLineTracer = PRODUCTION_PROBE_LINE_TRACER,
 ): ScreenshotFactSheet {
   const dmView = projectDmView(state);
   const dmEncounter = dmVisibleEncounter(dmView);
@@ -914,7 +950,12 @@ export function deriveScreenshotFactSheet(
       }
     }
   }
-  const lineQueries = deriveProbeLineQueries(state, combatants, desiredLineTier);
+  const lineQueries = deriveProbeLineQueries(
+    state,
+    combatants,
+    desiredLineTier,
+    tracer,
+  );
   return {
     version: PROBE_VERSION,
     bounds: { ...board.bounds },
@@ -1640,6 +1681,15 @@ export function screenshotQuestionPrompt(
 ): string {
   if (boardInput !== 'png' && semanticPayload === null)
     throw new TypeError(`${boardInput} board input requires a semantic payload.`);
+  if (
+    boardInput !== 'png' &&
+    (question === 'Q11' ||
+      question === 'Q12' ||
+      question === 'Q13' ||
+      question === 'Q14')
+  ) {
+    throw new TypeError(`${question} is a PNG-only directional query.`);
+  }
   const inputInstructions = boardInput === 'png'
     ? ['Inspect only the attached PNG. Return only JSON matching the supplied strict schema.']
     : boardInput === 'semantic'
@@ -2141,6 +2191,7 @@ export function parseScreenshotProbeArgs(
         '--primer',
         '--generation',
         '--compare',
+        '--comparison-mode',
         '--board-glyphs',
         '--capture-tile-px',
         '--board-input',
@@ -2200,6 +2251,15 @@ export function parseScreenshotProbeArgs(
       : insideRepository(compareValue, '--compare');
   if (comparePath !== null && !comparePath.endsWith('.jsonl'))
     throw new RangeError('--compare must end in .jsonl.');
+  const comparisonModeValue = values.get('--comparison-mode') ?? 'acceptance';
+  if (
+    comparisonModeValue !== 'ablation' &&
+    comparisonModeValue !== 'acceptance'
+  ) {
+    throw new TypeError('--comparison-mode must be ablation or acceptance.');
+  }
+  if (comparePath === null && values.has('--comparison-mode'))
+    throw new TypeError('--comparison-mode requires --compare.');
   const boardGlyphs = values.get('--board-glyphs') ?? DEFAULT_BOARD_GLYPH_MODE;
   if (!isBoardGlyphMode(boardGlyphs))
     throw new TypeError('--board-glyphs must be none, light or full.');
@@ -2227,6 +2287,7 @@ export function parseScreenshotProbeArgs(
     primer: primerValue,
     generation,
     comparePath,
+    comparisonMode: comparisonModeValue,
     boardGlyphs,
     captureTilePx,
     boardInput,
@@ -2277,7 +2338,11 @@ export function parseScreenshotProbeRescoreArgs(
 }
 
 const GENERATED_PROBE_BASE_SEEDS = [
-  5_763_001, 5_763_002, 5_763_003, 5_763_006,
+  5_763_006,
+  5_763_022,
+  5_763_027,
+  5_763_040,
+  5_763_047,
 ] as const;
 const CATALOGUE_TIERS = [
   'none', 'half', 'three_quarters', 'total',
@@ -2343,7 +2408,7 @@ function withProbeMarkers(
     state,
     rotatedCells(fogCandidates, markerOrdinal * 7),
   );
-  const doorOpen = true;
+  const doorOpen = markerOrdinal % 2 === 0;
   return {
     ...state,
     foggedCells: [...state.foggedCells, fogCell],
@@ -2360,7 +2425,9 @@ function withProbeMarkers(
     worldObjects: [
       ...state.worldObjects,
       {
-        id: worldObjectId(`world-object:screenshot-probe-door-${String(seed)}`),
+        id: worldObjectId(
+          `world-object:screenshot-probe-door-${String(seed)}-${String(markerOrdinal)}`,
+        ),
         name: doorOpen ? 'Probe Archway' : 'Probe Door',
         kind: 'door',
         position: doorCell,
@@ -2783,6 +2850,15 @@ export interface ComparisonProbeRow {
   readonly model: string;
   readonly effort: ProbeEffort;
   readonly question: ScreenshotQuestionId;
+  readonly promptVersion: typeof PROBE_VERSION | typeof PREVIOUS_PROBE_VERSION;
+  readonly primerVersion: PrimerVersion;
+  readonly generation: string;
+  readonly boardGlyphs: BoardGlyphMode;
+  readonly captureTilePx: CaptureTilePx;
+  readonly boardInput: BoardInput;
+  readonly semanticPayloadSha256: string | null;
+  readonly png: { readonly sha256: string };
+  readonly truth: unknown;
   readonly score: number;
 }
 
@@ -2796,6 +2872,23 @@ const comparisonProbeRowSchema = z
     model: z.string().min(1),
     effort: effortSchema,
     question: z.enum(SCREENSHOT_QUESTION_IDS),
+    promptVersion: z.literal(PROBE_VERSION),
+    primerVersion: z.union([
+      z.literal(PRIMER_VERSION),
+      z.literal(PREVIOUS_PRIMER_VERSION),
+      z.literal(HISTORICAL_PRIMER_VERSION),
+      z.literal(LEGACY_PRIMER_VERSION),
+      z.literal('d557-general-board-primer-v8'),
+      z.literal('d525-general-board-primer-v5'),
+      z.null(),
+    ]),
+    generation: z.string().min(1),
+    boardGlyphs: z.enum(['none', 'light', 'full']),
+    captureTilePx: z.union([z.literal(64), z.literal(128)]),
+    boardInput: z.enum(['png', 'semantic', 'both']),
+    semanticPayloadSha256: z.string().regex(/^[0-9a-f]{64}$/u),
+    png: z.object({ sha256: z.string().regex(/^[0-9a-f]{64}$/u) }).passthrough(),
+    truth: z.unknown(),
     score: z.number().min(0).max(1),
   })
   .passthrough();
@@ -2825,6 +2918,7 @@ const savedProbeRowSchema = z
     primerVersion: z.union([
       z.literal(PRIMER_VERSION),
       z.literal(PREVIOUS_PRIMER_VERSION),
+      z.literal(HISTORICAL_PRIMER_VERSION),
       z.literal(LEGACY_PRIMER_VERSION),
       z.literal('d557-general-board-primer-v8'),
       z.literal('d525-general-board-primer-v5'),
@@ -3030,9 +3124,57 @@ function comparisonKey(row: ComparisonProbeRow): string {
   });
 }
 
+function acceptanceIdentity(row: ComparisonProbeRow): string {
+  return canonicalJson({
+    stateId: row.stateId,
+    stateDigest: row.stateDigest,
+    question: row.question,
+    promptVersion: row.promptVersion,
+    primerVersion: row.primerVersion,
+    generation: row.generation,
+    boardGlyphs: row.boardGlyphs,
+    captureTilePx: row.captureTilePx,
+    boardInput: row.boardInput,
+    semanticPayloadSha256: row.semanticPayloadSha256,
+    pngSha256: row.png.sha256,
+    truth: row.truth,
+  });
+}
+
+const COMPARISON_DIMENSIONS = [
+  ['PNG sha256', (row: ComparisonProbeRow): unknown => row.png.sha256],
+  ['primer version', (row: ComparisonProbeRow): unknown => row.primerVersion],
+  ['generation', (row: ComparisonProbeRow): unknown => row.generation],
+  ['prompt version', (row: ComparisonProbeRow): unknown => row.promptVersion],
+  ['board glyphs', (row: ComparisonProbeRow): unknown => row.boardGlyphs],
+  ['capture tile', (row: ComparisonProbeRow): unknown => row.captureTilePx],
+  ['board input', (row: ComparisonProbeRow): unknown => row.boardInput],
+  ['semantic payload sha256', (row: ComparisonProbeRow): unknown => row.semanticPayloadSha256],
+  ['truth/query identity', (row: ComparisonProbeRow): unknown => row.truth],
+] as const;
+
+function changedComparisonDimensions(
+  rows: readonly ScreenshotProbeRow[],
+  previousRows: readonly ComparisonProbeRow[],
+): readonly string[] {
+  const previousByKey = new Map(
+    previousRows.map((row) => [comparisonKey(row), row] as const),
+  );
+  return COMPARISON_DIMENSIONS.flatMap(([name, value]) =>
+    rows.some((row) => {
+      const previous = previousByKey.get(comparisonKey(row));
+      return previous !== undefined &&
+        canonicalJson(value(row)) !== canonicalJson(value(previous));
+    })
+      ? [name]
+      : [],
+  );
+}
+
 function assertComparableRuns(
   rows: readonly ScreenshotProbeRow[],
   previousRows: readonly ComparisonProbeRow[],
+  mode: ComparisonMode,
 ): void {
   const keys = rows.map(comparisonKey);
   const previousKeys = previousRows.map(comparisonKey);
@@ -3048,6 +3190,21 @@ function assertComparableRuns(
     throw new TypeError(
       '--compare requires the same models, efforts, states, and questions as the current run.',
     );
+  }
+  if (mode === 'acceptance') {
+    const previousByKey = new Map(
+      previousRows.map((row) => [comparisonKey(row), row] as const),
+    );
+    const mismatch = rows.find((row) => {
+      const previous = previousByKey.get(comparisonKey(row));
+      return previous === undefined ||
+        acceptanceIdentity(row) !== acceptanceIdentity(previous);
+    });
+    if (mismatch !== undefined) {
+      throw new TypeError(
+        `Acceptance comparison requires identical capture, primer, generation, board input, and query identity for ${comparisonKey(mismatch)}.`,
+      );
+    }
   }
 }
 
@@ -3090,6 +3247,7 @@ export function renderProbeSummary(
   rows: readonly ScreenshotProbeRow[],
   previousRows: readonly ComparisonProbeRow[] | null = null,
   bootstrapSeed = 0,
+  comparisonMode: ComparisonMode = 'acceptance',
 ): string {
   const resultKinds = new Set(rows.map((row) => row.resultKind));
   if (resultKinds.size !== 1)
@@ -3099,7 +3257,8 @@ export function renderProbeSummary(
   const resultKind = rows[0]?.resultKind;
   if (resultKind === undefined)
     throw new RangeError('A probe summary requires at least one row.');
-  if (previousRows !== null) assertComparableRuns(rows, previousRows);
+  if (previousRows !== null)
+    assertComparableRuns(rows, previousRows, comparisonMode);
   const groups = new Map<string, ScreenshotProbeRow[]>();
   for (const row of rows) {
     const key = `${row.model}:${row.effort}`;
@@ -3118,6 +3277,12 @@ export function renderProbeSummary(
     `Board glyphs: ${[...new Set(rows.map((row) => row.boardGlyphs))].sort().join(', ')}.`,
     `Capture tile: ${[...new Set(rows.map((row) => row.captureTilePx))].sort((left, right) => left - right).join(', ')} px.`,
     `Board input: ${[...new Set(rows.map((row) => row.boardInput))].sort().join(', ')}.`,
+    ...(previousRows === null
+      ? []
+      : [
+          `Comparison mode: ${comparisonMode}.`,
+          `Changed comparison dimensions: ${changedComparisonDimensions(rows, previousRows).join(', ') || 'none'}.`,
+        ]),
     'HP vocabulary: uninjured / bloodied / near_death / unknown.',
     '',
   ];
@@ -3521,7 +3686,12 @@ export async function runScreenshotProbe(
       await appendFile(config.outPath, `${canonicalJson(row)}\n`, 'utf8');
     await writeFile(
       config.summaryPath,
-      renderProbeSummary(rows, comparisonRows, config.seed),
+      renderProbeSummary(
+        rows,
+        comparisonRows,
+        config.seed,
+        config.comparisonMode,
+      ),
       'utf8',
     );
     return rows;

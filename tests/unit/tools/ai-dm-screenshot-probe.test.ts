@@ -7,7 +7,7 @@ import {
 } from '../../../src/combat/encounter';
 import {
   traceCombatantLine,
-  traceCombatantLineToCells,
+  traceTerrainLine,
 } from '../../../src/combat/cover';
 import { armorClass, worldObjectId } from '../../../src/combat/values';
 import type { WorldObject } from '../../../src/combat/world-objects';
@@ -20,7 +20,11 @@ import {
   BOARD_GLYPH_PRIMER,
   GENERAL_PRIMER,
   GENERAL_PRIMER_V10,
+  GENERAL_PRIMER_V11,
+  GENERAL_PRIMER_V9,
   GLYPH_FAMILY_PRIMER,
+  HISTORICAL_PRIMER_VERSION,
+  LEGACY_PRIMER_VERSION,
   LIGHT_PRIMER,
   MIN_FACT_CLASS_STATE_COVERAGE,
   NORMALISER_VERSION,
@@ -51,6 +55,7 @@ import {
   truthAnswer,
   type ProbeSnapshotService,
   type ProbeAnswerRequest,
+  type ProbeLineTracer,
   type ScreenshotFactSheet,
 } from '../../../tools/ai-dm-screenshot-probe';
 import {
@@ -89,6 +94,31 @@ function object(
       movement,
       lineOfSight: movement,
       cover: movement ? 'total' : 'none',
+    },
+    createdRevision: 0,
+  };
+}
+
+function coverObject(
+  id: string,
+  cells: readonly { readonly column: number; readonly row: number }[],
+  cover: 'half' | 'three_quarters',
+): WorldObject {
+  const position = cells[0];
+  if (position === undefined) throw new RangeError('Cover fixture needs a cell.');
+  return {
+    id: worldObjectId(`world-object:${id}`),
+    name: id,
+    kind: 'cover',
+    position,
+    footprint: cells,
+    durability: { kind: 'indestructible' },
+    armorClass: armorClass(15),
+    damageResponses: [],
+    blocking: {
+      movement: cover !== 'half',
+      lineOfSight: false,
+      cover,
     },
     createdRevision: 0,
   };
@@ -145,6 +175,8 @@ function cells(
 class FakeSnapshotService implements ProbeSnapshotService {
   closed = false;
 
+  constructor(private readonly pngSha256 = 'a'.repeat(64)) {}
+
   capture(input: {
     readonly state: EncounterState;
     readonly source: BoardImageSource;
@@ -153,8 +185,8 @@ class FakeSnapshotService implements ProbeSnapshotService {
       version: 'arena-board-image-v1',
       audience: 'dm',
       mimeType: 'image/png',
-      relativePath: `board-images/${'a'.repeat(64)}.png`,
-      sha256: 'a'.repeat(64),
+      relativePath: `board-images/${this.pngSha256}.png`,
+      sha256: this.pngSha256,
       bytes: 24,
       width: input.state.bounds.columns * 40,
       height: input.state.bounds.rows * 40,
@@ -509,13 +541,21 @@ describe('D524 general screenshot primer', () => {
   });
 
   it('D525: appends the light sentence per mode plus one sentence per glyph family under full, chosen by --board-glyphs, defaulting to none', () => {
-    expect(PRIMER_VERSION).toBe('d576-general-board-primer-v11');
-    expect(PREVIOUS_PRIMER_VERSION).toBe('d562-general-board-primer-v10');
+    expect(PRIMER_VERSION).toBe('d576-general-board-primer-v12');
+    expect(PREVIOUS_PRIMER_VERSION).toBe('d576-general-board-primer-v11');
+    expect(HISTORICAL_PRIMER_VERSION).toBe('d562-general-board-primer-v10');
+    expect(LEGACY_PRIMER_VERSION).toBe('d557-general-board-primer-v9');
     expect(PRIMER_HISTORY[PREVIOUS_PRIMER_VERSION].general).toBe(
-      GENERAL_PRIMER_V10,
+      GENERAL_PRIMER_V11,
     );
     expect(PRIMER_HISTORY[PREVIOUS_PRIMER_VERSION].glyphFamilies.veil).toBe(
       GLYPH_FAMILY_PRIMER.veil,
+    );
+    expect(PRIMER_HISTORY[HISTORICAL_PRIMER_VERSION].general).toBe(
+      GENERAL_PRIMER_V10,
+    );
+    expect(PRIMER_HISTORY[LEGACY_PRIMER_VERSION].general).toBe(
+      GENERAL_PRIMER_V9,
     );
     expect(GENERAL_PRIMER).toContain(
       'Cool-blue floor plates beneath busts identify party creatures',
@@ -664,6 +704,218 @@ describe('D524 general screenshot primer', () => {
     ).toThrow('Unknown screenshot probe option --light-encoding.');
   });
 
+  it('D576-I5-HISTORICAL-PRIMER-PINS independently preserves v9, v10, and v11 primer bundles', () => {
+    const historicalPrimerHash = (version: keyof typeof PRIMER_HISTORY): string =>
+      createHash('sha256')
+        .update(JSON.stringify(PRIMER_HISTORY[version]))
+        .digest('hex');
+    expect(historicalPrimerHash(PREVIOUS_PRIMER_VERSION)).toBe(
+      '5430cb20d5ec766cd634bbfbfef710a1ceac4e54958dbc1f6b2c41806634e3e9',
+    );
+    expect(historicalPrimerHash(HISTORICAL_PRIMER_VERSION)).toBe(
+      'c4d8503e80bd16d8e4d69b3c3d2cbeddcfc05f256c0e9ecbeccbdb50b30262db',
+    );
+    expect(historicalPrimerHash(LEGACY_PRIMER_VERSION)).toBe(
+      '404e242a5dd2c0dc90b976e2d468ad5456188dfa0505b17eb6a7f95dccf3f9f0',
+    );
+  });
+
+  it('D576-I5-PRIMER-TRACES keeps all three worked examples identical to canonical corner traces', () => {
+    const fixtureActor = playerProfile('primer-feature-actor');
+    const featureState = createEncounter({
+      bounds: { columns: 6, rows: 4 },
+      combatants: [fixtureActor],
+      tokens: [placedToken(fixtureActor, 5, 3)],
+      worldObjects: [
+        coverObject(
+          'primer-three-quarters',
+          [{ column: 2, row: 0 }, { column: 1, row: 1 }],
+          'three_quarters',
+        ),
+      ],
+    });
+    const featureTrace = traceTerrainLine(
+      featureState,
+      { column: 0, row: 0 },
+      { column: 4, row: 2 },
+    );
+    expect(featureTrace).toMatchObject({
+      sourceCorner: { column: 0, row: 0 },
+      tier: 'three_quarters',
+      blocksSight: false,
+    });
+    expect(featureTrace.lines.map((line) => line.tier)).toEqual([
+      'none',
+      'three_quarters',
+      'three_quarters',
+      'three_quarters',
+    ]);
+    const threeHalfState = {
+      ...featureState,
+      worldObjects: [
+        coverObject(
+          'primer-three-half-rays',
+          [{ column: 2, row: 0 }, { column: 1, row: 1 }],
+          'half',
+        ),
+      ],
+    };
+    const threeHalfTrace = traceTerrainLine(
+      threeHalfState,
+      { column: 0, row: 0 },
+      { column: 4, row: 2 },
+    );
+    expect(threeHalfTrace.lines.map((line) => line.tier)).toEqual([
+      'none',
+      'half',
+      'half',
+      'half',
+    ]);
+    expect(threeHalfTrace).toMatchObject({ tier: 'half', blocksSight: false });
+
+    const fourHalfState = {
+      ...featureState,
+      worldObjects: [
+        coverObject(
+          'primer-four-half-rays',
+          [0, 1, 2, 3, 4, 5].map((row) => ({ column: 1, row })),
+          'half',
+        ),
+      ],
+    };
+    const fourHalfTrace = traceTerrainLine(
+      fourHalfState,
+      { column: 0, row: 0 },
+      { column: 4, row: 2 },
+    );
+    expect(fourHalfTrace.lines.map((line) => line.tier)).toEqual([
+      'half',
+      'half',
+      'half',
+      'half',
+    ]);
+    expect(fourHalfTrace).toMatchObject({ tier: 'half', blocksSight: false });
+
+    const wallState = createEncounter({
+      bounds: { columns: 6, rows: 6 },
+      combatants: [fixtureActor],
+      tokens: [placedToken(fixtureActor, 5, 5)],
+      blockedCells: [0, 1, 2, 3, 4, 5].map((row) => ({ column: 1, row })),
+    });
+    expect(
+      traceTerrainLine(
+        wallState,
+        { column: 0, row: 0 },
+        { column: 4, row: 2 },
+      ),
+    ).toMatchObject({ tier: 'total', blocksSight: true });
+    const endpointFeatureState = {
+      ...featureState,
+      worldObjects: [
+        coverObject(
+          'primer-source-endpoint',
+          [{ column: 0, row: 0 }],
+          'three_quarters',
+        ),
+        coverObject(
+          'primer-target-endpoint',
+          [{ column: 4, row: 2 }],
+          'three_quarters',
+        ),
+      ],
+    };
+    expect(
+      traceTerrainLine(
+        endpointFeatureState,
+        { column: 0, row: 0 },
+        { column: 4, row: 2 },
+      ),
+    ).toMatchObject({ tier: 'none', blocksSight: false });
+
+    const creatureSource = playerProfile('primer-creature-source');
+    const creatureMiddle = monsterProfile('primer-creature-middle');
+    const creatureTarget = monsterProfile('primer-creature-target');
+    const creatureState = createEncounter({
+      bounds: { columns: 6, rows: 3 },
+      combatants: [creatureSource, creatureMiddle, creatureTarget],
+      tokens: [
+        placedToken(creatureSource, 0, 1),
+        placedToken(creatureMiddle, 2, 1),
+        placedToken(creatureTarget, 4, 1),
+      ],
+    });
+    const creatureTrace = traceCombatantLine(
+      creatureState,
+      creatureSource.id,
+      creatureTarget.id,
+    );
+    expect(creatureTrace).toMatchObject({
+      sourceCorner: { column: 0, row: 1 },
+      tier: 'half',
+      blocksSight: false,
+    });
+    expect(creatureTrace.lines.map((line) => line.tier)).toEqual([
+      'none',
+      'none',
+      'half',
+      'half',
+    ]);
+    const deadCreatureState: EncounterState = {
+      ...creatureState,
+      combatants: creatureState.combatants.map((combatant) =>
+        combatant.profile.id === creatureMiddle.id
+          ? { ...combatant, hitPoints: 0, life: 'dead' as const }
+          : combatant),
+    };
+    expect(
+      traceCombatantLine(deadCreatureState, creatureSource.id, creatureTarget.id),
+    ).toMatchObject({ tier: 'none', blocksSight: false });
+
+    const baseLargeSource = playerProfile('primer-large-source');
+    const largeSource = {
+      ...baseLargeSource,
+      rules: { ...baseLargeSource.rules, sizeCategory: 'Large' as const },
+    };
+    const largeTarget = monsterProfile('primer-large-target');
+    const largeState = createEncounter({
+      bounds: { columns: 8, rows: 4 },
+      combatants: [largeSource, largeTarget],
+      tokens: [placedToken(largeSource, 0, 0), placedToken(largeTarget, 6, 0)],
+      worldObjects: [
+        coverObject('primer-large-low', [{ column: 2, row: 0 }], 'half'),
+      ],
+    });
+    const largeTrace = traceCombatantLine(
+      largeState,
+      largeSource.id,
+      largeTarget.id,
+    );
+    expect(
+      traceTerrainLine(
+        largeState,
+        { column: 0, row: 0 },
+        { column: 6, row: 0 },
+      ).tier,
+    ).toBe('half');
+    expect(largeTrace).toMatchObject({
+      sourceCorner: { column: 0, row: 2 },
+      tier: 'none',
+      blocksSight: false,
+    });
+    expect(largeTrace.lines.map((line) => line.tier)).toEqual([
+      'none',
+      'none',
+      'none',
+      'none',
+    ]);
+
+    expect(GENERAL_PRIMER).toContain('the weakest of the ray-count tier');
+    expect(GENERAL_PRIMER).toContain(
+      'three or four rays that cross only 1/2 COVER still give half cover',
+    );
+    expect(GENERAL_PRIMER.match(/Worked /gu)).toHaveLength(3);
+  });
+
   it('omits the general primer when explicitly disabled', () => {
     const prompt = screenshotQuestionPrompt('Q1', 'none');
     expect(prompt).not.toContain(PRIMER_VERSION);
@@ -800,7 +1052,7 @@ describe('D519 screenshot comprehension schema and CLI', () => {
     expect(PASS_THRESHOLD).toBe(0.9);
   });
 
-  it('builds a deterministic 24-state catalogue with every fact class in at least six states', async () => {
+  it('D576-I5-CATALOGUE-DIVERSITY builds 24 balanced states from diverse queries and open/closed doors', async () => {
     const first = await defaultProbeStateCandidates();
     const second = await defaultProbeStateCandidates();
     expect(PROBE_CATALOGUE_SIZE).toBe(24);
@@ -857,6 +1109,26 @@ describe('D519 screenshot comprehension schema and CLI', () => {
       creatureLineOfSight: { clear: 18, blocked: 6 },
       cellLineOfSight: { clear: 18, blocked: 6 },
     });
+    const catalogueDoors = first.flatMap((candidate) =>
+      candidate.state.worldObjects.filter((worldObject) =>
+        worldObject.id.startsWith('world-object:screenshot-probe-door-')),
+    );
+    expect(catalogueDoors).toHaveLength(PROBE_CATALOGUE_SIZE);
+    expect(catalogueDoors.filter((door) => !door.blocking.movement)).toHaveLength(12);
+    expect(catalogueDoors.filter((door) => door.blocking.movement)).toHaveLength(12);
+    for (const tier of ['none', 'half', 'three_quarters', 'total'] as const) {
+      const sheets = first
+        .filter((candidate) => candidate.desiredLineTier === tier)
+        .map((candidate) => deriveScreenshotFactSheet(candidate.state, tier));
+      expect(
+        new Set(sheets.map((sheet) => JSON.stringify(sheet.creatureLineQuery))).size,
+        `${tier} creature-query diversity`,
+      ).toBeGreaterThanOrEqual(5);
+      expect(
+        new Set(sheets.map((sheet) => JSON.stringify(sheet.cellLineQuery))).size,
+        `${tier} cell-query diversity`,
+      ).toBeGreaterThanOrEqual(5);
+    }
     const totalCandidate = first.find((candidate) =>
       candidate.desiredLineTier === 'total');
     if (totalCandidate === undefined) throw new Error('Missing total-cover catalogue state.');
@@ -899,6 +1171,16 @@ describe('D519 screenshot comprehension schema and CLI', () => {
     expect(() => screenshotQuestionPrompt('Q11')).toThrow(
       'Q11 prompt requires its matching directional query.',
     );
+    expect(() =>
+      screenshotQuestionPrompt(
+        'Q11',
+        'general',
+        'full',
+        'semantic',
+        '{}',
+        truthAnswer(sheet, 'Q11'),
+      ),
+    ).toThrow('Q11 is a PNG-only directional query.');
   });
 
   it('keeps total, blocked sight, direction, and the four cover tiers distinct in Q11-Q14 schemas and scoring', () => {
@@ -926,38 +1208,39 @@ describe('D519 screenshot comprehension schema and CLI', () => {
     });
   });
 
-  it('takes Q11-Q14 truth from production traces even when a local geometry double claims the opposite', () => {
+  it('D576-I5-TRACE-SEAM forwards both directional query paths through the injected canonical tracer dependency', () => {
     const state = everyClassState();
-    const sheet = deriveScreenshotFactSheet(state);
-    const fakeGeometryRule = () => ({ tier: 'total', blocksSight: true } as const);
-    const pairTrace = traceCombatantLine(
-      state,
-      sheet.combatants.find((entry) => entry.displayName === sheet.creatureLineQuery.source.name)?.id ??
-        (() => { throw new Error('Missing pair source.'); })(),
-      sheet.combatants.find((entry) => entry.displayName === sheet.creatureLineQuery.target.name)?.id ??
-        (() => { throw new Error('Missing pair target.'); })(),
-    );
-    const cellTrace = traceCombatantLineToCells(
-      state,
-      sheet.combatants.find((entry) => entry.displayName === sheet.cellLineQuery.source.name)?.id ??
-        (() => { throw new Error('Missing cell source.'); })(),
-      [sheet.cellLineQuery.target],
-    );
-    expect(fakeGeometryRule()).not.toEqual({
-      tier: pairTrace.tier,
-      blocksSight: pairTrace.blocksSight,
-    });
+    let creatureCalls = 0;
+    let cellCalls = 0;
+    const tracer: ProbeLineTracer = {
+      traceCombatantLine: () => {
+        creatureCalls += 1;
+        return { tier: 'total', blocksSight: true };
+      },
+      traceCombatantLineToCells: () => {
+        cellCalls += 1;
+        return { tier: 'three_quarters', blocksSight: false };
+      },
+    };
+    const sheet = deriveScreenshotFactSheet(state, undefined, tracer);
+    expect(creatureCalls).toBeGreaterThan(0);
+    expect(cellCalls).toBeGreaterThan(0);
     expect(sheet.creatureLineQuery).toMatchObject({
-      tier: pairTrace.tier,
-      lineOfSight: pairTrace.blocksSight ? 'blocked' : 'clear',
+      tier: 'total',
+      lineOfSight: 'blocked',
     });
     expect(sheet.cellLineQuery).toMatchObject({
-      tier: cellTrace.tier,
-      lineOfSight: cellTrace.blocksSight ? 'blocked' : 'clear',
+      tier: 'three_quarters',
+      lineOfSight: 'clear',
     });
+    const productionSheet = deriveScreenshotFactSheet(state);
+    expect({
+      creature: productionSheet.creatureLineQuery.tier,
+      cell: productionSheet.cellLineQuery.tier,
+    }).not.toEqual({ creature: 'total', cell: 'three_quarters' });
   });
 
-  it('re-scores saved raw answers with legacy scope prefixes and plate tags without invoking a model', async () => {
+  it('D576-I5-HISTORICAL-ROW re-scores Q1-Q10 but rejects a valid-shaped Q11 with historical provenance', async () => {
     const artifactRoot = resolve('dnd-slim-runs');
     mkdirSync(artifactRoot, { recursive: true });
     const directory = await mkdtemp(join(artifactRoot, 'd519-rescore-test-'));
@@ -1021,7 +1304,7 @@ describe('D519 screenshot comprehension schema and CLI', () => {
           effort: 'low',
           question,
           promptVersion: 'd519-screenshot-comprehension-v1',
-          primerVersion: PREVIOUS_PRIMER_VERSION,
+          primerVersion: HISTORICAL_PRIMER_VERSION,
           generation: 'saved-generation',
           boardGlyphs: 'full',
           png: {
@@ -1087,9 +1370,18 @@ describe('D519 screenshot comprehension schema and CLI', () => {
       await expect(rescoreScreenshotProbe(config)).rejects.toThrow();
       const historicalQ11Path = join(directory, 'historical-q11.jsonl');
       const historicalQ11Out = join(directory, 'historical-q11-rescored.jsonl');
+      const historicalBase = rows[0];
+      if (historicalBase === undefined)
+        throw new Error('Historical Q11 witness needs a base row.');
+      const q11 = truthAnswer(sheet, 'Q11');
       await writeFile(
         historicalQ11Path,
-        `${JSON.stringify({ ...rows[0], question: 'Q11' })}\n`,
+        `${JSON.stringify({
+          ...historicalBase,
+          question: 'Q11',
+          truth: q11,
+          rawAnswer: JSON.stringify(q11),
+        })}\n`,
         'utf8',
       );
       await expect(
@@ -1165,6 +1457,15 @@ describe('D519 screenshot comprehension schema and CLI', () => {
     ).toThrow(
       `--states cannot exceed the ${String(PROBE_CATALOGUE_SIZE)}-state catalogue.`,
     );
+    expect(() =>
+      parseScreenshotProbeArgs([
+        ...base,
+        '--states',
+        '1',
+        '--comparison-mode',
+        'acceptance',
+      ]),
+    ).toThrow('--comparison-mode requires --compare.');
   });
 
   it('computes deterministic seeded 95% bootstrap intervals', () => {
@@ -1212,7 +1513,7 @@ describe('D519 screenshot comprehension schema and CLI', () => {
     ).toThrow();
   });
 
-  it('runs perfect and impostor answerers through the strict gate and writes comparison metadata', async () => {
+  it('D576-I5-COMPARISON-IDENTITY separates explicit ablation metadata from exact acceptance pairs', async () => {
     const artifactRoot = resolve('dnd-slim-runs');
     mkdirSync(artifactRoot, { recursive: true });
     const directory = await mkdtemp(join(artifactRoot, 'd519-probe-test-'));
@@ -1241,6 +1542,7 @@ describe('D519 screenshot comprehension schema and CLI', () => {
       ]);
       expect(config.primer).toBe('general');
       expect(config.comparePath).toBeNull();
+      expect(config.comparisonMode).toBe('acceptance');
       expect(config.boardGlyphs).toBe('full');
       expect(config.captureTilePx).toBe(64);
       const rows = await runScreenshotProbe(config, {
@@ -1320,8 +1622,11 @@ describe('D519 screenshot comprehension schema and CLI', () => {
         'g1-like-for-like',
         '--compare',
         outPath,
+        '--comparison-mode',
+        'ablation',
         '--simulate',
       ]);
+      expect(comparisonConfig.comparisonMode).toBe('ablation');
       const impostorRows = await runScreenshotProbe(comparisonConfig, {
         candidates: [{ id: 'fixture-all-classes', state: everyClassState() }],
         snapshotService: service,
@@ -1342,12 +1647,78 @@ describe('D519 screenshot comprehension schema and CLI', () => {
         'utf8',
       );
       expect(comparisonSummary).toContain('Delta vs previous run');
+      expect(comparisonSummary).toContain('Comparison mode: ablation.');
+      expect(comparisonSummary).toContain(
+        'Changed comparison dimensions: primer version, generation, board glyphs, capture tile.',
+      );
       expect(comparisonSummary).toContain('Delta 95% bootstrap interval');
       expect(comparisonSummary).toContain('signal');
       expect(comparisonSummary).toContain('-1.000');
       expect(
         comparisonSummary.match(/Strict all classes >= 0\.9: \*\*FAIL\*\*/gu),
       ).toHaveLength(2);
+
+      const acceptanceConfig = parseScreenshotProbeArgs([
+        '--models',
+        'gpt-5.6-luna:low,gpt-5.6-luna:medium',
+        '--states',
+        '1',
+        '--seed',
+        '6203001',
+        '--images-root',
+        join(directory, 'acceptance-images'),
+        '--out',
+        join(directory, 'acceptance.jsonl'),
+        '--generation',
+        'g2-classic-general',
+        '--board-glyphs',
+        'full',
+        '--capture-tile-px',
+        '64',
+        '--compare',
+        outPath,
+        '--comparison-mode',
+        'acceptance',
+        '--simulate',
+      ]);
+      const acceptanceRows = await runScreenshotProbe(acceptanceConfig, {
+        candidates: [{ id: 'fixture-all-classes', state: everyClassState() }],
+        snapshotService: service,
+      });
+      expect(acceptanceRows).toHaveLength(28);
+      expect(await readFile(acceptanceConfig.summaryPath, 'utf8')).toContain(
+        'Changed comparison dimensions: none.',
+      );
+
+      const changedPngConfig = parseScreenshotProbeArgs([
+        '--models',
+        'gpt-5.6-luna:low,gpt-5.6-luna:medium',
+        '--states',
+        '1',
+        '--seed',
+        '6203001',
+        '--images-root',
+        join(directory, 'changed-png-images'),
+        '--out',
+        join(directory, 'changed-png.jsonl'),
+        '--generation',
+        'g2-classic-general',
+        '--board-glyphs',
+        'full',
+        '--capture-tile-px',
+        '64',
+        '--compare',
+        outPath,
+        '--comparison-mode',
+        'acceptance',
+        '--simulate',
+      ]);
+      await expect(
+        runScreenshotProbe(changedPngConfig, {
+          candidates: [{ id: 'fixture-all-classes', state: everyClassState() }],
+          snapshotService: new FakeSnapshotService('c'.repeat(64)),
+        }),
+      ).rejects.toThrow('Acceptance comparison requires identical capture');
       expect(service.closed).toBe(false);
     } finally {
       await rm(directory, { recursive: true, force: true });
