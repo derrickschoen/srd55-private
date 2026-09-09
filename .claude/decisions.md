@@ -21588,3 +21588,37 @@ self-matches"). They spawned only `sleep`, but their command text carried
 the words the runbook guard scans for. Killed by numeric pid (call 1
 listed, call 2 killed); no other process touched. After the running
 model-free dry-run finishes, section 2.4 is re-run verbatim.
+
+## D586.155 — room D slice 2: Astra REJECT round 2 (B3 closed; B1, B2, B4 and the control inventory still open); lane resumed for the FINAL round 3 (2026-09-09 09:55)
+
+Astra (session 01a0866e-110d-71a2-91d5-dbe929ad9de5, 99,706 tokens) on
+48cba702: REJECT. Closed: the distribution assertions (6/11, 8/15
+totals, exact conditional and branch weights; the `total`-dropped and
+kind-only/component-only mutants would fail); per-policy subtotals;
+fault surface a closed typed union, inert when omitted; no state
+merging, no float masses, no B/C/A path. Open: (1) peakLiveNodes still
+drops the active seed on push, samples zero command entries while
+leaves remain populated, has no update on outer pops, and
+activeReplayFrames is still inferred (historical die sides / prefix
+length) — 3,286 not established as a complete peak; (2) the forbidden
+counters increment only inside the fault routine (~1766) and the fault
+dispatch (~2128) throws before either policy runs, so no fault reaches
+the normal validator — removing the aggregation increment or call would
+still pass the seam test; (3) most of the "25 kills" are unconditional
+fault-specific throws or validator-direct calls, not faults traversing
+the normal checks (only the AC/HP fixture perturbations are real);
+(4) the Longbow control manufactures nextEventSequence 9, a truncated
+log and a 61-HP miss arm vs the fixture's 67-HP hit arm — not the
+plan's equal-total executed histories. Should-fix: exhaustive run at
+module collection with fake clock/heap cannot establish the 90 s
+headroom gate. Supervisor disposition for the should-fix: two-file scope
+and no-timeout-raise stand, so the import-time deterministic run stays
+but the in-process report must type its resource evidence as
+unmeasured and the headroom gate belongs to slice 3's fresh-process CLI.
+Lane resumed on the real session 01a08599-… for round 3 of 3 (brief
+resume-room-d-s2-r3.md, log log-impl-room-d-s2-r3.log, marker
+ROOM-D-S2 R3 DONE) with boundary-level injection required for every
+control (the seam may alter data/behaviour, never throw the expected
+failure itself), real-boundary instrumentation, a complete retention
+ledger sampled after every mutation, and the plan's equal-total Longbow
+control. A REJECT at round 3 shelves slice 2.
