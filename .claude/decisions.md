@@ -19738,3 +19738,36 @@ Noticed on main's working tree, not mine: 16 new `emberkeep-*` requests
 (ids 01a08474-f84a.. sequential, ~00:40) and an edit to the low-wall
 request, written by the owner's side. Left uncommitted; surfaced to the
 owner.
+
+## D586.67 — held-out slice 1 SHELVED at the final review round; txn slices 0+1 harvested, cumulative and Astra round 1 running (2026-09-09 00:59)
+
+Held-out basis slice 1, Astra round 3 (FINAL): REJECT, one blocker: the
+regex leak wall at tools/heldout-leak-check.ts:49 accepts whitespace
+between tokens but not comments, so `await import /* x */ ('...')`,
+`import /* x */ '...'`, `from /* x */ '...'` and `require /* x */ (...)`
+all pass with zero findings; the three round-2 probes and 42 plain
+variants now reject; every other fix verified (bounded generation
+without overrides, type-valid suppression seam, 15-file scope, fixtures
+unchanged, hashes match, Astra's own sg scan 0). Under the three-round
+cap the slice is SHELVED. Candidate stays committed on claude/p-heldout
+at 1d6af854 (not merged); the running cumulative was killed by process
+group. Re-plan note for the owner: the residual defect is the
+text-matching design of the leak wall; the elevation lane's TypeScript
+AST import discovery (accepted in D586.63) is the obvious replacement,
+which is a fresh bounded plan, not a fourth round.
+
+Txn slices 0+1: lane exit 0, TXN-S1 DONE; claims: five files exactly,
+slice-0 baseline captured twice byte-identically (696,676 bytes, sha
+29ca2ded...), five-entry manifest verified, slice-1 after-capture cmp 0,
+focused 2 files 39/39, sg 0, tsc 0, diff --check 0, protected pin blocks
+byte-identical, six negative controls killed with restore hashes; its
+15-spec cumulative 354/393 with 39 EROFS failures from spawned Engine
+MCP children (the known sandbox limit). Verified by me: `sg scan` exit
+0; only the echoed header matches `claude -p`; committed c17d8595.
+Inventory: my transitive reverse-import graph finds 16 dependents, four
+absent from the plan's 15 (ai-dm-combat-model, ai-dm-arena,
+local-openai-conversation.SIMULATED, rl-generate-data) and three plan
+specs that are risk specs rather than graph dependents; the lane ran
+only the 15, flagged to the reviewer; my cumulative runs the 19-spec
+union (~/dnd-slim-runs/cum-txn-s1.log). Astra round 1 launched (brief
+review-impl-txn-s1.md, session 01a08488-7794-7d31-bce6-0d3cfb6f27ac).
