@@ -19528,3 +19528,30 @@ D587.10). Fresh session 01a08462-95cf-7e83-9c48-bf83e5771394, brief
 impl-txn-s1.md, marker TXN-S1 DONE. Known sandbox limit stated: the
 symlinked node_modules may EROFS vitest; the supervisor runs the
 cumulative in that case.
+
+## D586.60 — heldout round 2 REJECT (budget bypass, leak-wall gaps); final fix round resumed; offers plan round 2 to Astra (2026-09-09 00:20)
+
+Astra round 2 on the held-out candidate: REJECT. Blocker 1: the
+generation control at generate-arena-basis.test.ts:90 awaits the full
+24-room construction during module collection, before Vitest applies
+test/hook timeouts; after two reported timeout reds that is a budget
+bypass under D587.3 (my flag (a) confirmed). Blocker 2: the leak wall
+at heldout-leak-check.ts:105 still passes template-literal dynamic
+imports, .js-suffixed specifiers and bare side-effect imports (zero
+findings in Astra's probe). Should-fix: an unknown-cast of
+['Unconscious'] into the Charmed/Frightened effect tuple. Every other
+round-1 fix confirmed (HP probe 1.25 for 25/20, no dependency on the
+/tmp scratch script, 25-spec inventory cross-checked, contract hash
+intact). Supervisor: the running cumulative on the rejected candidate
+was killed by pid (log marked KILLED) so the fix lane edits a quiet
+tree; fix round 3 of 3 (FINAL) resumed on
+01a083a8-e7ff-76f3-af9b-4c6e21c886dc (brief impl-heldout-s1-r3.md,
+marker HELDOUT-S1-R3 DONE) with the instruction to resolve the
+performance failure inside the 5,000 ms budget or STOP with
+measurements, and to cover every import form.
+
+Offers roadmap round 2: lane exit 0, PLAN-OFFERS-R2 DONE; plan 739
+lines, 17 slices, sha256 b44dc386... (verified by me), tree clean.
+Astra round 2 launched (brief review-plan-offers-r2.md, session
+01a08463-c29d-7563-a7ab-a3cef404fa20) with instructions to re-run its
+own Dash/Grapple probe and derive the 441/2500 tree independently.
