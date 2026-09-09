@@ -1,4 +1,12 @@
 import { beforeAll, describe, expect, it } from 'vitest';
+import {
+  createEncounter,
+  reduceEncounter,
+  type EncounterCommandReducer,
+  type EncounterState,
+} from '../../../src/combat/encounter';
+import type { EncounterCommand } from '../../../src/combat/events';
+import { mulberry32, transactionalRng } from '../../../src/combat/random';
 import { decodeArenaBasisEnvelopeV1 } from '../../../src/vtt/arena-fixture';
 import {
   challengeProvenanceMigrationEvidenceV1,
@@ -23,12 +31,20 @@ import { ARENA_REACTION_OFFER_POLICY } from '../../../src/vtt/reaction-offer-hos
 import {
   componentTotals,
   exactFraction,
+  exactWeight,
+  RollProvenance,
   rollComponentId,
+  rollOccurrenceId,
+  rollOperationPath,
   type ExactTotalDistribution,
   type RollComponentSpec,
+  type TransactionalRollRng,
 } from '../../../src/combat/roll-provenance';
 import { combatantId, dieSides } from '../../../src/combat/values';
+import { SessionCommandTrialCore } from '../../../src/vtt/session-command-transaction';
+import { reduceSessionEncounter } from '../../../src/vtt/session-encounter-reducer';
 import { declareTestInputs } from '../../helpers/test-inputs';
+import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
 
 const inputs = declareTestInputs({
   fixtures: [
@@ -70,20 +86,234 @@ function expression(count: number, sides: number): RollComponentSpec {
 let report: ChallengeReducerFeasibilityReportV1;
 let migrationEvidence: ChallengeProvenanceMigrationEvidenceV1;
 
-beforeAll(async () => {
-  const roomA = decodeArenaBasisEnvelopeV1(
-    JSON.parse(inputs.fixtures.readText('tests/fixtures/arena-basis-challenge/seed-5831003.json')) as unknown,
-    { mode: 'challenge' },
-  ).encounter.state;
-  const roomD = decodeArenaBasisEnvelopeV1(
-    JSON.parse(inputs.fixtures.readText('tests/fixtures/arena-basis-challenge/seed-5831004.json')) as unknown,
-    { mode: 'challenge' },
-  ).encounter.state;
-  migrationEvidence = challengeProvenanceMigrationEvidenceV1(roomA, roomD);
-  report = await runChallengeReducerFeasibility(fixture);
-}, 180_000);
+function accountingReactionFixture(): Readonly<{
+  state: EncounterState;
+  moverId: ReturnType<typeof playerProfile>['id'];
+  reactorIds: readonly [
+    ReturnType<typeof monsterProfile>['id'],
+    ReturnType<typeof monsterProfile>['id'],
+  ];
+}> {
+  const mover = playerProfile('feasibility-accounting-mover', { hitPoints: 100, initiativeBonus: 20 });
+  const first = monsterProfile('feasibility-accounting-first', { hitPoints: 100, initiativeBonus: -10 });
+  const second = monsterProfile('feasibility-accounting-second', { hitPoints: 100, initiativeBonus: -20 });
+  const state = reduceEncounter(createEncounter({
+    bounds: { columns: 6, rows: 4 },
+    combatants: [mover, first, second],
+    tokens: [
+      placedToken(mover, 1, 1),
+      placedToken(first, 0, 1),
+      placedToken(second, 1, 0),
+    ],
+  }), { type: 'roll_initiative' }, () => 0.5).state;
+  return { state, moverId: mover.id, reactorIds: [first.id, second.id] };
+}
+
+function accountingMove(
+  moverId: ReturnType<typeof playerProfile>['id'],
+): EncounterCommand {
+  return {
+    type: 'move', actor: moverId,
+    path: [{ column: 2, row: 1 }, { column: 3, row: 1 }],
+    cause: 'voluntary',
+  };
+}
+
+function recordAccountingDraw(rng: TransactionalRollRng, command: EncounterCommand['type']): void {
+  const component = rng.beginComponent({
+    occurrenceId: rollOccurrenceId(`test:feasibility-accounting:${command}`),
+    operationPath: rollOperationPath(`feasibility-accounting/${command}`),
+    source: null,
+    targets: [],
+  }, {
+    kind: 'discrete_branch',
+    outcomes: [
+      { total: 1, weight: exactWeight(1n, 2n) },
+      { total: 2, weight: exactWeight(1n, 2n) },
+    ],
+  });
+  const face = rng.draw({
+    sides: dieSides(2),
+    provenance: component,
+    role: { kind: 'branch_selection' },
+  });
+  rng.finishComponent(component, face);
+}
+
+describe('D584.4 deterministic feasibility accounting closure', () => {
+  it('counts one refused main reducer application as exactly one attempt and completion', () => {
+    const fixtureState = accountingReactionFixture().state;
+    const sentinel = new Error('refused main reducer accounting sentinel');
+    const refused: EncounterCommand = {
+      type: 'dodge',
+      get actor(): ReturnType<typeof playerProfile>['id'] {
+        throw sentinel;
+      },
+    };
+    let attempts = 0;
+    let completions = 0;
+    let failure: unknown;
+    try {
+      runCommandBoundaryTransaction(
+        fixtureState,
+        refused,
+        mulberry32(58_420_201),
+        { kind: 'unattended', askDefault: 'decline' },
+        null,
+        {
+          attempted: (): void => { attempts += 1; },
+          completed: (): void => { completions += 1; },
+        },
+      );
+    } catch (error: unknown) {
+      failure = error;
+    }
+    expect(failure).toBe(sentinel);
+    expect({ attempts, completions }).toEqual({ attempts: 1, completions: 1 });
+  });
+
+  it('counts the main command and each automatic resolver exactly once in event order', () => {
+    const accountingFixture = accountingReactionFixture();
+    let attempts = 0;
+    let completions = 0;
+    const result = runCommandBoundaryTransaction(
+      accountingFixture.state,
+      accountingMove(accountingFixture.moverId),
+      mulberry32(58_420_202),
+      { kind: 'unattended', askDefault: 'decline' },
+      null,
+      {
+        attempted: (): void => { attempts += 1; },
+        completed: (): void => { completions += 1; },
+      },
+    );
+    expect({ attempts, completions }).toEqual({ attempts: 3, completions: 3 });
+    expect(result.fallbackResolutions.map((resolution) => resolution.combatant))
+      .toEqual(accountingFixture.reactorIds);
+    expect(result.events.filter((event) =>
+      event.type === 'pending_decision_queued' || event.type === 'movement_completed' ||
+      event.type === 'pending_decision_resolved').map((event) => event.type)).toEqual([
+      'pending_decision_queued',
+      'pending_decision_queued',
+      'movement_completed',
+      'pending_decision_resolved',
+      'pending_decision_resolved',
+    ]);
+    expect(result.state.pendingDecisions).toEqual([]);
+  });
+
+  it('retains accounting and provenance attempts while rejecting a throwing automatic batch', () => {
+    const accountingFixture = accountingReactionFixture();
+    const sentinel = new Error('automatic feasibility accounting sentinel');
+    const provenance = RollProvenance.recording(transactionalRng(mulberry32(58_420_203)));
+    const random = provenance.asRng();
+    const commands: EncounterCommand['type'][] = [];
+    let attempts = 0;
+    let completions = 0;
+    const reducer: EncounterCommandReducer = (state, command, rng, options) => {
+      commands.push(command.type);
+      recordAccountingDraw(random, command.type);
+      const reduced = reduceSessionEncounter(state, command, rng, options);
+      if (command.type === 'resolve_pending_decision') throw sentinel;
+      return reduced;
+    };
+    const core = SessionCommandTrialCore.begin({
+      state: accountingFixture.state,
+      random,
+      reducer,
+      boundaryPolicy: { kind: 'unattended', askDefault: 'decline' },
+      guidance: null,
+      boundaryScope: 'initiative_segment',
+      accounting: {
+        attempted: (): void => { attempts += 1; },
+        completed: (): void => { completions += 1; },
+      },
+    });
+
+    expect(() => core.apply(accountingMove(accountingFixture.moverId))).toThrow(sentinel);
+    expect(core.currentState()).toBe(accountingFixture.state);
+    expect(core.snapshot()).toEqual({
+      state: accountingFixture.state,
+      events: [],
+      revisionDelta: 0,
+      fallbackResolutions: [],
+      guidedResolutions: [],
+    });
+    expect(commands).toEqual(['move', 'resolve_pending_decision']);
+    expect({ attempts, completions }).toEqual({ attempts: 2, completions: 2 });
+    expect(provenance.trace().attempts).toHaveLength(2);
+    expect(provenance.trace().committedDraws).toHaveLength(2);
+  });
+
+  it('attaches each event and DrawRecord history to its command checkpoint', () => {
+    const state = decodeArenaBasisEnvelopeV1(
+      JSON.parse(inputs.fixtures.readText('tests/fixtures/arena-basis-challenge/seed-5831001.json')) as unknown,
+      { mode: 'challenge' },
+    ).encounter.state;
+    const actor = state.activeCombatant;
+    if (actor === null) throw new Error('Room B requires an active combatant.');
+    const provenance = RollProvenance.recording(transactionalRng(mulberry32(58_420_204)));
+    const random = provenance.asRng();
+    const first = runCommandBoundaryTransaction(state, {
+      type: 'roll_ability_check', actor, ability: 'strength', skill: null,
+      bonus: 0, dc: 10, rollMode: 'normal', cost: 'none',
+    }, random, ARENA_REACTION_OFFER_POLICY, null);
+    const firstAttemptCount = provenance.trace().attempts.length;
+    const second = runCommandBoundaryTransaction(first.state, {
+      type: 'roll_ability_check', actor, ability: 'wisdom', skill: null,
+      bonus: 0, dc: 10, rollMode: 'normal', cost: 'none',
+    }, random, ARENA_REACTION_OFFER_POLICY, null);
+
+    expect(first.events).toEqual(first.state.eventLog.slice(state.eventLog.length));
+    expect(second.events).toEqual(second.state.eventLog.slice(first.state.eventLog.length));
+    expect(first.events).toHaveLength(1);
+    expect(second.events).toHaveLength(1);
+    expect(first.dieRolls).toEqual(provenance.trace().attempts.slice(0, firstAttemptCount));
+    expect(second.dieRolls).toEqual(provenance.trace().attempts.slice(firstAttemptCount));
+    expect(first.dieRolls).toHaveLength(1);
+    expect(second.dieRolls).toHaveLength(1);
+    expect(provenance.trace().attempts).toEqual([...first.dieRolls, ...second.dieRolls]);
+  });
+
+  it('deterministically reports injected heap exhaustion before an injected wall excess', async () => {
+    const observedHeap = D583_BCA_FEASIBILITY_LIMITS_V1.maxHeapUsedBytes + 17;
+    let fixtureLoads = 0;
+    let nowCalls = 0;
+    const measured = await runChallengeReducerFeasibility(async () => {
+      fixtureLoads += 1;
+      throw new Error('resource exhaustion must precede fixture loading');
+    }, {
+      now: (): number => {
+        nowCalls += 1;
+        return nowCalls === 1 ? 0 : D583_BCA_FEASIBILITY_LIMITS_V1.maxWallMilliseconds + 1;
+      },
+      heapUsed: (): number => observedHeap,
+    });
+    expect(measured.failure).toEqual({
+      kind: 'limit_exhausted',
+      counter: 'heap_used_bytes',
+      observed: observedHeap,
+      limit: D583_BCA_FEASIBILITY_LIMITS_V1.maxHeapUsedBytes,
+    });
+    expect(measured.verdict).toBe('SHELVE_D583');
+    expect({ fixtureLoads, nowCalls }).toEqual({ fixtureLoads: 0, nowCalls: 1 });
+  });
+});
 
 describe('D583 reducer-backed challenge feasibility', () => {
+  beforeAll(async () => {
+    const roomA = decodeArenaBasisEnvelopeV1(
+      JSON.parse(inputs.fixtures.readText('tests/fixtures/arena-basis-challenge/seed-5831003.json')) as unknown,
+      { mode: 'challenge' },
+    ).encounter.state;
+    const roomD = decodeArenaBasisEnvelopeV1(
+      JSON.parse(inputs.fixtures.readText('tests/fixtures/arena-basis-challenge/seed-5831004.json')) as unknown,
+      { mode: 'challenge' },
+    ).encounter.state;
+    migrationEvidence = challengeProvenanceMigrationEvidenceV1(roomA, roomD);
+    report = await runChallengeReducerFeasibility(fixture);
+  }, 180_000);
+
   it('transactional adapter preserves die provenance across checkpoint replay and rollback', () => {
     expect(migrationEvidence.provenanceManifest).toHaveLength(33);
     expect(migrationEvidence.provenanceManifest.every((record) =>
