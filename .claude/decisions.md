@@ -21883,3 +21883,38 @@ brutal share one code identity (~3 h); (b) fix and relaunch brutal only, recordi
 fix commit as a documented code-identity split; (c) abandon v5 first arm. Supervisor recommendation: (a) — the fix does not touch
 any model-facing byte (the blind profile never carried `intel_mode`), so hard rows would be expected byte-comparable, but
 "expected" is not "verified" and v5 exists to be clean.
+
+### D586.166 — D569 crash: the real trigger is an engine-MCP startup timeout, and the supervisor's own dispatches are the probable cause of it (2026-09-09 16:11 EDT)
+
+Owner asked (16:0x) to collaborate with codex on why the crash happened and whether a patch or a rethink is needed; codex RCA lane
+dispatched (sol, session 01a087c6-e5a7-7aa2-a37a-ebfd4c679884, read-only, brief `.tmp/runs/briefs-2026-09-06/rca-d569-crash.md`).
+While it runs, the supervisor read the preserved cell's own codex rollout
+(`crash-brutal-cell27/dnd-ai-dm-conversation-bRF0Cr/codex-home-kb/sessions/2026/09/09/rollout-…01a087b0-1f76-….jsonl`) and the spools:
+
+1. In the crashing cell the luna session had NO engine tools. The model enumerated `ALL_TOOLS` (only built-ins, codex_apps, web, image_gen;
+   `typeof tools.mcp__engine__get_turn_context === "undefined"`), tried four name variants, and ended at +43 s with
+   "Unable to retrieve the turn context: `engine.get_turn_context` is unavailable in the current tool environment." It never called
+   the engine; the turn-context and intents spools have 0 rows. It is the only such cell among 57 model cells (the three hard
+   `service_null` rows had 8–41 ingress rows and 1–17 turn-context rows, i.e. the tool WAS available there).
+2. Timing (file mtimes + rollout timestamps): cell dir created 15:41:01.03; codex session 15:41:01.75; model's first turn 15:41:04;
+   first (failed) engine lookup 15:41:08 (+7.3 s); the engine MCP server's own `tools_list` ingress row was written at 15:41:18.47
+   (+17.4 s). In the 25 healthy brutal cells the model's first successful `get_turn_context` exec happened at +5.5–7.9 s (three at
+   +13 s), so the vite-node engine server normally initializes inside ~5 s. Codex drops an MCP server that misses its startup
+   deadline (config key `startup_timeout_sec`, NOT overridden by the arena's per-cell `-c mcp_servers.engine.*` flags) and runs the
+   model without its tools — exactly what the rollout shows.
+3. What was different at 15:41: the supervisor launched two codex lanes for D589 at 15:40:40 (sol planning lane + astra assumptions
+   pass). Their rollouts show 40 and 37 tool events respectively between 15:40:30 and 15:41:15 (bursts of `nl -ba`/rg over large
+   files plus their own model traffic), i.e. exactly the window in which the crashing cell's vite-node server was compiling. Load
+   1-min at 15:42 was 1.64 versus 0.3–0.7 during the rest of the arm. This is the only cell that overlapped those bursts. Causation
+   is not proved (no per-second load log; codex's MCP startup log lines went to the arena's captured stderr, which was lost with the
+   row), but it is the simplest explanation and the supervisor records it against itself: D586.165's sentence "the two codex lanes
+   … did not cause this" was wrong as stated — the schema TypeError is deterministic, but the PATH to it was almost certainly opened
+   by the load the supervisor added while calling the box "quiet". The standing rule was "launch nothing else on the machine while
+   the arm runs"; read-only planning lanes were judged light enough. They were not light enough for a 10-s MCP startup deadline.
+4. Two defects therefore compose: (a) fragility — the arena gives codex no `startup_timeout_sec` override for a vite-node server whose
+   cold start is ~5 s nominal and easily >10 s under load, and a cell whose model has no engine tools is not detected as an
+   infrastructure failure (it is treated as a model turn); (b) the crash — with no recorded blind turn context, the row-building
+   fallback (`ai-dm-conversation.ts:5815–5817`) calls `plannedTurnContext`, which passes `intel_mode` to the blind-profile
+   `engine.get_turn_context` whose strict schema rejects it (`schemas.ts:1459`), so an infrastructure failure became a process
+   crash that discarded 26 completed brutal cells. The RCA lane is being asked to fold this evidence in; verdict (patch vs rethink)
+   follows its review.
