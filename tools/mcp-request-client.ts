@@ -182,6 +182,8 @@ export interface ChildProcessMcpTransportOptions {
   readonly stderrMaximumCharacters: number | null;
 }
 
+const MCP_CHILD_SHUTDOWN_GRACE_MS = 1_000;
+
 type TransportTerminal =
   | { readonly kind: 'failed'; readonly reason: unknown }
   | { readonly kind: 'ended' };
@@ -199,6 +201,7 @@ export class ChildProcessMcpTransport implements McpByteLineTransport {
   #exitCode: number | null;
   #exitSettled = false;
   #aborted = false;
+  readonly #sentSignals = new Set<NodeJS.Signals>();
   #linesClosed = false;
   #closePromise: Promise<void> | null = null;
 
@@ -209,7 +212,6 @@ export class ChildProcessMcpTransport implements McpByteLineTransport {
     this.#child = child;
     this.#options = options;
     this.#exitCode = child.exitCode;
-    this.#lines = createInterface({ input: child.stdout, crlfDelay: Number.POSITIVE_INFINITY });
     this.#exit = new Promise<number | null>((resolve) => { this.#resolveExit = resolve; });
 
     child.stderr.setEncoding('utf8');
@@ -217,6 +219,7 @@ export class ChildProcessMcpTransport implements McpByteLineTransport {
     child.stderr.on('error', this.#onStderrError);
     child.stdin.on('error', this.#onStdinError);
     child.stdout.on('error', this.#onStdoutError);
+    this.#lines = createInterface({ input: child.stdout, crlfDelay: Number.POSITIVE_INFINITY });
     this.#lines.on('line', this.#onLine);
     this.#lines.on('error', this.#onLinesError);
     this.#lines.once('close', this.#onLinesClose);
@@ -270,12 +273,12 @@ export class ChildProcessMcpTransport implements McpByteLineTransport {
             return;
           }
           const reason = this.#childExitedError(`write failed: ${errorText(error)}`, error);
-          this.#terminate({ kind: 'failed', reason });
+          this.#failAndTerminate(reason);
           reject(reason);
         });
       } catch (error) {
         const reason = this.#childExitedError(`write failed: ${errorText(error)}`, error);
-        this.#terminate({ kind: 'failed', reason });
+        this.#failAndTerminate(reason);
         reject(reason);
       }
     });
@@ -285,9 +288,7 @@ export class ChildProcessMcpTransport implements McpByteLineTransport {
     if (this.#aborted) return;
     this.#aborted = true;
     this.#terminate({ kind: 'failed', reason });
-    if (this.#child.exitCode === null && this.#child.signalCode === null) {
-      this.#child.kill('SIGTERM');
-    }
+    this.#signalChild('SIGTERM');
   }
 
   close(): Promise<void> {
@@ -297,10 +298,19 @@ export class ChildProcessMcpTransport implements McpByteLineTransport {
         if (!this.#child.stdin.destroyed && !this.#child.stdin.writableEnded) {
           this.#child.stdin.end();
         }
-        await this.#exit;
+        if (!await this.#waitForExit(MCP_CHILD_SHUTDOWN_GRACE_MS)) {
+          this.#signalChild('SIGKILL');
+          if (!await this.#waitForExit(MCP_CHILD_SHUTDOWN_GRACE_MS)) {
+            const reason = this.#terminal?.kind === 'failed'
+              ? this.#terminal.reason
+              : this.#childExitedError('did not exit after SIGKILL');
+            this.#terminate({ kind: 'failed', reason });
+            throw reason;
+          }
+        }
       } finally {
         this.#closeLines();
-        this.#removeListeners();
+        if (this.#exitSettled) this.#removeListeners();
       }
     })();
     return this.#closePromise;
@@ -314,24 +324,15 @@ export class ChildProcessMcpTransport implements McpByteLineTransport {
   };
 
   readonly #onStderrError = (error: Error): void => {
-    this.#terminate({
-      kind: 'failed',
-      reason: this.#childExitedError(`stderr failed: ${errorText(error)}`, error),
-    });
+    this.#failAndTerminate(this.#childExitedError(`stderr failed: ${errorText(error)}`, error));
   };
 
   readonly #onStdinError = (error: Error): void => {
-    this.#terminate({
-      kind: 'failed',
-      reason: this.#childExitedError(`stdin failed: ${errorText(error)}`, error),
-    });
+    this.#failAndTerminate(this.#childExitedError(`stdin failed: ${errorText(error)}`, error));
   };
 
   readonly #onStdoutError = (error: Error): void => {
-    this.#terminate({
-      kind: 'failed',
-      reason: this.#childExitedError(`stdout failed: ${errorText(error)}`, error),
-    });
+    this.#failAndTerminate(this.#childExitedError(`stdout failed: ${errorText(error)}`, error));
   };
 
   readonly #onLine = (line: string): void => {
@@ -339,15 +340,12 @@ export class ChildProcessMcpTransport implements McpByteLineTransport {
   };
 
   readonly #onLinesError = (error: Error): void => {
-    this.#terminate({
-      kind: 'failed',
-      reason: this.#childExitedError(`stdout failed: ${errorText(error)}`, error),
-    });
+    this.#failAndTerminate(this.#childExitedError(`readline failed: ${errorText(error)}`, error));
   };
 
   readonly #onLinesClose = (): void => {
     this.#linesClosed = true;
-    this.#terminate({ kind: 'ended' });
+    this.#failAndTerminate(this.#childExitedError('stdout closed'));
   };
 
   readonly #onChildError = (error: Error): void => {
@@ -356,6 +354,7 @@ export class ChildProcessMcpTransport implements McpByteLineTransport {
       reason: this.#childExitedError(`failed: ${errorText(error)}`, error),
     });
     this.#settleExit(null);
+    if (this.#closePromise !== null) this.#removeListeners();
   };
 
   readonly #onChildExit = (code: number | null, signal: NodeJS.Signals | null): void => {
@@ -367,6 +366,7 @@ export class ChildProcessMcpTransport implements McpByteLineTransport {
       ),
     });
     this.#settleExit(code);
+    if (this.#closePromise !== null) this.#removeListeners();
   };
 
   #childExitedError(detail: string, cause?: unknown): McpChildExited {
@@ -384,6 +384,17 @@ export class ChildProcessMcpTransport implements McpByteLineTransport {
     else this.#receiver?.ended();
   }
 
+  #failAndTerminate(reason: unknown): void {
+    this.#terminate({ kind: 'failed', reason });
+    this.#signalChild('SIGTERM');
+  }
+
+  #signalChild(signal: NodeJS.Signals): void {
+    if (this.#sentSignals.has(signal) || this.#child.exitCode !== null || this.#child.signalCode !== null) return;
+    this.#sentSignals.add(signal);
+    this.#child.kill(signal);
+  }
+
   #terminalReason(): unknown {
     return this.#terminal?.kind === 'failed'
       ? this.#terminal.reason
@@ -394,6 +405,23 @@ export class ChildProcessMcpTransport implements McpByteLineTransport {
     if (this.#exitSettled) return;
     this.#exitSettled = true;
     this.#resolveExit(code);
+  }
+
+  #waitForExit(timeoutMs: number): Promise<boolean> {
+    if (this.#exitSettled) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      let settled = false;
+      const timeout = setTimeout(() => {
+        settled = true;
+        resolve(false);
+      }, timeoutMs);
+      void this.#exit.then(() => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        resolve(true);
+      });
+    });
   }
 
   #closeLines(): void {

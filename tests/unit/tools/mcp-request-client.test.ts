@@ -358,6 +358,18 @@ describe('McpRequestClient', () => {
   });
 
   it('replays EOF to one late receiver, rejects a second receiver, and detaches once', async () => {
+    const detachedFake = fakeChild();
+    const detachedTransport = new ChildProcessMcpTransport(
+      detachedFake.child,
+      { stderrMaximumCharacters: null },
+    );
+    const detachedLog = receiverLog();
+    const detachLive = detachedTransport.attach(detachedLog.receiver);
+    detachLive();
+    detachLive();
+    detachedFake.stdout.write('not delivered\n');
+    expect(detachedLog.lines).toEqual([]);
+
     const fake = fakeChild();
     const transport = new ChildProcessMcpTransport(fake.child, { stderrMaximumCharacters: null });
     fake.stdout.end();
@@ -366,13 +378,15 @@ describe('McpRequestClient', () => {
 
     const detach = transport.attach(log.receiver);
 
-    expect(log.failures).toEqual([]);
-    expect(log.ended.count).toBe(1);
+    expect(log.failures).toHaveLength(1);
+    expect(log.failures[0]).toBeInstanceOf(McpChildExited);
+    expect((log.failures[0] as Error).message).toContain('stdout closed');
+    expect(log.ended.count).toBe(0);
+    expect(fake.kill).toHaveBeenCalledOnce();
+    expect(fake.kill).toHaveBeenCalledWith('SIGTERM');
     expect(() => { transport.attach(receiverLog().receiver); }).toThrow(TypeError);
     detach();
     detach();
-    fake.child.emit('error', new Error('after detach'));
-    expect(log.failures).toEqual([]);
   });
 
   it('reports stdin, stdout, stderr, and child failures through the Node adapter', async () => {
@@ -393,7 +407,26 @@ describe('McpRequestClient', () => {
       expect(log.failures[0]).toMatchObject({ cause: failure });
       expect((log.failures[0] as Error).message).toContain(`${source} ${source === 'child' ? 'failed' : 'failed:'}`);
       expect(transport.stderr).toBe('abc');
+      if (source === 'child') expect(fake.kill).not.toHaveBeenCalled();
+      else expect(fake.kill).toHaveBeenCalledWith('SIGTERM');
     }
+
+    const readline = fakeChild();
+    const readlineTransport = new ChildProcessMcpTransport(
+      readline.child,
+      { stderrMaximumCharacters: null },
+    );
+    const readlineLog = receiverLog();
+    readlineTransport.attach(readlineLog.receiver);
+    const readlineInputError = readline.stdout.listeners('error').at(-1);
+    if (readlineInputError === undefined) throw new Error('Readline did not install its input error listener.');
+    const readlineFailure = new Error('line reader broke');
+    const readlineOutcome = Reflect.apply(readlineInputError, readline.stdout, [readlineFailure]);
+    expect(readlineOutcome).toBeUndefined();
+    expect(readlineLog.failures).toHaveLength(1);
+    expect(readlineLog.failures[0]).toMatchObject({ cause: readlineFailure });
+    expect((readlineLog.failures[0] as Error).message).toContain('readline failed: line reader broke');
+    expect(readline.kill).toHaveBeenCalledWith('SIGTERM');
 
     const live = fakeChild();
     const liveTransport = new ChildProcessMcpTransport(live.child, { stderrMaximumCharacters: null });
@@ -409,9 +442,89 @@ describe('McpRequestClient', () => {
 
     const exited = fakeChild();
     const exitedTransport = new ChildProcessMcpTransport(exited.child, { stderrMaximumCharacters: null });
-    exitedTransport.attach(receiverLog().receiver);
-    exited.exit(0);
-    exitedTransport.abort(new Error('too late'));
+    const exitedClient = new McpRequestClient(exitedTransport, { name: 'exit-test', version: '1' });
+    const pendingAtExit = exitedClient.request('pending-at-exit', {}, INERT_SIGNAL);
+    const bytesBeforeExit = exited.stdin.readableLength;
+    exited.exit(7);
+    const exitFailure = await pendingAtExit.catch((reason: unknown) => reason);
+    expect(exitFailure).toBeInstanceOf(McpChildExited);
+    expect(exitFailure).toMatchObject({ code: 'MCP_CHILD_EXITED' });
+    await expect(exitedClient.request('after-exit', {}, INERT_SIGNAL)).rejects.toBe(exitFailure);
+    expect(exited.stdin.readableLength).toBe(bytesBeforeExit);
+    await expect(exitedClient.close()).resolves.toBeUndefined();
     expect(exited.kill).not.toHaveBeenCalled();
+
+    const ordinary = fakeChild();
+    const ordinaryTransport = new ChildProcessMcpTransport(
+      ordinary.child,
+      { stderrMaximumCharacters: null },
+    );
+    const ordinaryClient = new McpRequestClient(ordinaryTransport, { name: 'cleanup-test', version: '1' });
+    let requestFailure: unknown;
+    const pendingAtFailure = ordinaryClient.request('pending-at-failure', {}, INERT_SIGNAL)
+      .catch((reason: unknown) => {
+        requestFailure = reason;
+        throw reason;
+      });
+    const lifecycle = (async () => {
+      try {
+        return await pendingAtFailure;
+      } finally {
+        await ordinaryClient.close();
+      }
+    })();
+    const sourceFailure = new Error('stderr failed at source');
+    ordinary.stderr.emit('error', sourceFailure);
+    await Promise.resolve();
+    expect(requestFailure).toBeInstanceOf(McpChildExited);
+    ordinary.exit(null, 'SIGTERM');
+    const observedFailure = await lifecycle.catch((reason: unknown) => reason);
+    expect(observedFailure).toBe(requestFailure);
+
+    vi.useFakeTimers();
+    try {
+      const resistant = fakeChild();
+      resistant.kill.mockImplementation((signal) => {
+        if (signal === 'SIGKILL') resistant.exit(null, 'SIGKILL');
+        return true;
+      });
+      const resistantTransport = new ChildProcessMcpTransport(
+        resistant.child,
+        { stderrMaximumCharacters: null },
+      );
+      const resistantClient = new McpRequestClient(
+        resistantTransport,
+        { name: 'resistant-test', version: '1' },
+      );
+      const resistantRequest = resistantClient.request('pending', {}, INERT_SIGNAL);
+      resistant.stderr.emit('error', new Error('requires escalation'));
+      const resistantFailure = await resistantRequest.catch((reason: unknown) => reason);
+      const resistantClose = resistantClient.close();
+      await vi.advanceTimersByTimeAsync(1_000);
+      await expect(resistantClose).resolves.toBeUndefined();
+      expect(resistant.kill.mock.calls.map(([signal]) => signal)).toEqual(['SIGTERM', 'SIGKILL']);
+      expect(resistantFailure).toBeInstanceOf(McpChildExited);
+
+      const neverExits = fakeChild();
+      const neverTransport = new ChildProcessMcpTransport(
+        neverExits.child,
+        { stderrMaximumCharacters: null },
+      );
+      const neverClient = new McpRequestClient(neverTransport, { name: 'never-exits', version: '1' });
+      const neverRequest = neverClient.request('pending', {}, INERT_SIGNAL);
+      neverExits.stdin.emit('error', new Error('terminal stdin failure'));
+      const neverFailure = await neverRequest.catch((reason: unknown) => reason);
+      const neverClose = neverClient.close();
+      const neverCloseRejection = expect(neverClose).rejects.toBe(neverFailure);
+      await vi.advanceTimersByTimeAsync(1_000);
+      await vi.advanceTimersByTimeAsync(1_000);
+      await neverCloseRejection;
+      expect(neverExits.kill.mock.calls.map(([signal]) => signal)).toEqual(['SIGTERM', 'SIGKILL']);
+      expect(neverExits.stderr.listenerCount('error')).toBe(1);
+      neverExits.exit(null, 'SIGKILL');
+      expect(neverExits.stderr.listenerCount('error')).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
