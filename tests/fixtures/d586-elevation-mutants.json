@@ -1,0 +1,71 @@
+{
+  "version": "d586-elevation-mutants-v1",
+  "mutations": [
+    {
+      "id": "S1-ARBITRARY",
+      "phase": "type",
+      "source": "src/combat/elevation.ts",
+      "selector": {
+        "nodeKind": "TypeAliasDeclaration",
+        "name": "GroundElevationTier"
+      },
+      "replacement": "export type GroundElevationTier = string;",
+      "spec": "tests/types/elevation-vocabulary.type-test.ts",
+      "title": "_S1ArbitraryGroundTierRejected",
+      "expectedDiagnostic": "_S1ArbitraryGroundTierRejected"
+    },
+    {
+      "id": "S1-FLYING-CELL",
+      "phase": "type",
+      "source": "src/combat/elevation.ts",
+      "selector": {
+        "nodeKind": "PropertySignature",
+        "name": "tier",
+        "within": "ElevationRegion"
+      },
+      "replacement": "readonly tier: ElevationTier;",
+      "spec": "tests/types/elevation-vocabulary.type-test.ts",
+      "title": "_S1FlyingCellRejected",
+      "expectedDiagnostic": "_S1FlyingCellRejected"
+    },
+    {
+      "id": "S1-EMPTY-SPEEDS",
+      "phase": "type",
+      "source": "src/combat/movement-speeds.ts",
+      "selector": {
+        "nodeKind": "TypeAliasDeclaration",
+        "name": "MovementSpeeds"
+      },
+      "replacement": "export type MovementSpeeds = readonly MovementSpeed[] & { readonly [movementSpeedsBrand]: true };",
+      "spec": "tests/types/elevation-vocabulary.type-test.ts",
+      "title": "_S1EmptySpeedsRejected",
+      "expectedDiagnostic": "_S1EmptySpeedsRejected"
+    },
+    {
+      "id": "S1-DUPLICATE-SPEEDS",
+      "phase": "runtime",
+      "source": "src/combat/movement-speeds.ts",
+      "selector": {
+        "nodeKind": "IfStatement",
+        "within": "movementSpeeds",
+        "text": "if (kinds.has(value.kind)) {\n      throw new RangeError(`Duplicate movement kind: ${value.kind}.`);\n    }"
+      },
+      "replacement": "if (false) {\n      throw new RangeError(`Duplicate movement kind: ${value.kind}.`);\n    }",
+      "spec": "tests/unit/combat/movement-speeds.test.ts",
+      "title": "S1-DUPLICATE-SPEEDS rejects duplicate kinds at runtime"
+    },
+    {
+      "id": "S1-ZERO-SPEED",
+      "phase": "runtime",
+      "source": "src/combat/movement-speeds.ts",
+      "selector": {
+        "nodeKind": "BinaryExpression",
+        "within": "movementSpeeds",
+        "text": "value.feet < 0"
+      },
+      "replacement": "value.feet <= 0",
+      "spec": "tests/unit/combat/movement-speeds.test.ts",
+      "title": "S1-ZERO-SPEED retains a present zero-foot walk mode"
+    }
+  ]
+}
