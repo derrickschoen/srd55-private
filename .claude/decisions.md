@@ -20569,3 +20569,22 @@ provenance and notes|empty checks are performed at launch. The first
 v5 arm is a long model phase; it is deferred until the main gate on
 d95cafb6 finishes and the box is quiet, and will be recorded here as
 an explicit launch decision with the exact commands.
+
+## D586.105 — promo180 Slice H round-3 cumulative on 0f292f91: 596/598, the speculation test still times out with a real MCP child, and a different inherited arena assertion now fails (2026-09-09 03:50)
+
+Supervisor cumulative (writable checkout, real MCP children, load about
+2, tsc 0, ONE invocation over the 39 specs): 39 files, 37 passed / 2
+failed; 598 tests, 596 passed / 2 failed; vitest exit 1. Red 1:
+tests/unit/tools/ai-dm-conversation.test.ts "speculation uses arm base
+until trigger" still times out at 5,000 ms (file wall 594 s) although
+the lane reported it passing in 3.55 s in its EROFS sandbox, where the
+MCP child fails fast instead of running; the round-2 red is therefore
+NOT fixed on a real checkout. Red 2: a NEW assertion failure in an
+inherited arena test, "records the engine actual unavailable-option
+rejection strings in chain evidence" (deep-equality mismatch on a
+106-key row), which passed on the round-2 candidate; the round-3 D474
+rework (correction validation evidence) has changed chain evidence for
+an unavailable-option rejection. Both are real. This is the final fix
+round: whatever the running Astra verdict says, the D584.4 contract is
+not met on the final candidate, so the slice cannot be accepted as it
+stands. Disposition recorded when Astra's verdict lands.
