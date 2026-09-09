@@ -5,6 +5,8 @@ import {
   D583_BASELINE_SHA256,
   D583_BASELINE_SPECS,
   dependencySpecifiers,
+  type GitRunner,
+  gitOutput,
   healingPotionUsesComponentIngress,
   inventoryDigest,
   reverseConsumerClosure,
@@ -13,6 +15,26 @@ import {
   TRIAL_CORE_RECONCILIATION_BASELINE_SHA256,
   TRIAL_CORE_RECONCILIATION_BASELINE_SPECS,
 } from '../../../tools/d583-contract-inventory';
+
+const EMPTY_INVENTORY_SHA256 = 'b0561dd58ab1a12acfbe43d34f3edbfc76c7805cb21ec4188708b0952daaaec6';
+const EMPTY_INVENTORY = contractInventoryUnion(
+  D583_BASELINE_SPECS,
+  SESSION_TRANSACTION_BASELINE_SPECS,
+  TRIAL_CORE_RECONCILIATION_BASELINE_SPECS,
+  [],
+  new Set(),
+);
+
+function expectEmptyInventory(git: GitRunner): void {
+  let inventory: readonly string[] = [];
+  expect(() => {
+    inventory = buildD583ContractInventory({ git });
+  }).not.toThrow();
+  expect(inventory).toEqual(EMPTY_INVENTORY);
+  expect(inventory).toHaveLength(148);
+  expect(inventory).toEqual([...inventory].sort());
+  expect(inventoryDigest(inventory)).toBe(EMPTY_INVENTORY_SHA256);
+}
 
 describe('D583 cumulative contract inventory', () => {
   it('owns the exact inherited 140-spec baseline and pinned digest', () => {
@@ -59,17 +81,99 @@ describe('D583 cumulative contract inventory', () => {
     expect(inventory).toContain('tests/unit/vtt/challenge-feasibility.test.ts');
   });
 
-  it('retains every reconciliation-owned spec with an empty branch diff and no merge-base', () => {
-    const inventory = buildD583ContractInventory({ changedPaths: [] });
+  it('retains the exact empty inventory when Git is absent', () => {
+    expectEmptyInventory(() => null);
+  });
+
+  it('retains the exact empty inventory without probing a missing merge-base', () => {
+    const calls: string[] = [];
+    expectEmptyInventory((args) => {
+      const call = args.join(' ');
+      calls.push(call);
+      if (call === 'merge-base HEAD main') return null;
+      if (call === 'diff --name-only main --') return '';
+      if (call === 'ls-files --others --exclude-standard') return '';
+      throw new Error(`Unexpected Git call: ${call}`);
+    });
+    expect(calls).toEqual([
+      'merge-base HEAD main',
+      'diff --name-only main --',
+      'ls-files --others --exclude-standard',
+    ]);
+  });
+
+  it('retains the exact empty inventory when the main diff fails', () => {
+    expectEmptyInventory((args) => {
+      const call = args.join(' ');
+      if (call === 'merge-base HEAD main') return 'base\n';
+      if (call === 'diff --name-only main --') return null;
+      if (call === 'diff --name-only base --') return '';
+      if (call === 'ls-files --others --exclude-standard') return '';
+      throw new Error(`Unexpected Git call: ${call}`);
+    });
+  });
+
+  it('retains the exact empty inventory when listing untracked files fails', () => {
+    expectEmptyInventory((args) => {
+      const call = args.join(' ');
+      if (call === 'merge-base HEAD main') return 'base\n';
+      if (call === 'diff --name-only main --' || call === 'diff --name-only base --') return '';
+      if (call === 'ls-files --others --exclude-standard') return null;
+      throw new Error(`Unexpected Git call: ${call}`);
+    });
+  });
+
+  it('propagates injected runner exceptions while the default runner maps Git failures to null', () => {
+    const failure = new Error('injected Git runner failed');
+    expect(() => buildD583ContractInventory({
+      git: () => {
+        throw failure;
+      },
+    })).toThrow(failure);
+
+    let output: string | null = 'not called';
+    expect(() => {
+      output = gitOutput(['d583-intentional-invalid-subcommand']);
+    }).not.toThrow();
+    expect(output).toBeNull();
+  });
+
+  it('discovers changed specs and reverse source consumers through the Git seam', () => {
+    const changedSpec = 'tests/unit/combat/movement.test.ts';
+    const changedSource = 'src/combat/movement.ts';
+    const inventory = buildD583ContractInventory({
+      git: (args) => {
+        const call = args.join(' ');
+        if (call === 'merge-base HEAD main') return 'base\n';
+        if (call === 'diff --name-only main --' || call === 'diff --name-only base --') {
+          return `${changedSource}\n${changedSpec}\n`;
+        }
+        if (call === 'ls-files --others --exclude-standard') return '';
+        throw new Error(`Unexpected Git call: ${call}`);
+      },
+    });
+
     expect(inventory).toEqual([...inventory].sort());
-    expect(inventory).toEqual(expect.arrayContaining(D583_BASELINE_SPECS));
-    expect(inventory).toEqual(expect.arrayContaining(SESSION_TRANSACTION_BASELINE_SPECS));
-    expect(inventory).toEqual(expect.arrayContaining(TRIAL_CORE_RECONCILIATION_BASELINE_SPECS));
-    expect(inventory).toContain('tests/unit/combat/roll-provenance.test.ts');
-    expect(inventory).toContain('tests/unit/tools/d583-contract-inventory.test.ts');
-    expect(inventory).toContain('tests/unit/vtt/session-command-transaction.test.ts');
-    expect(inventory).toContain('tests/unit/vtt/engine-round-session.test.ts');
-    expect(inventory).toContain('tests/unit/vtt/challenge-feasibility.test.ts');
+    expect(inventory).toEqual(expect.arrayContaining([...EMPTY_INVENTORY]));
+    expect(inventory).toContain(changedSpec);
+    expect(inventory).toContain('tests/unit/combat/movement-evaluator.test.ts');
+    expect(inventory).toContain('tests/unit/vtt/team-scorer.test.ts');
+    expect(inventory.length).toBeGreaterThan(EMPTY_INVENTORY.length);
+  });
+
+  it('rejects a deleted committed spec discovered through the Git seam', () => {
+    const deletedSpec = 'tests/unit/d583-deleted-control.test.ts';
+    expect(() => buildD583ContractInventory({
+      git: (args) => {
+        const call = args.join(' ');
+        if (call === 'merge-base HEAD main') return 'base\n';
+        if (call === 'diff --name-only main --' || call === 'diff --name-only base --') {
+          return `${deletedSpec}\n`;
+        }
+        if (call === 'ls-files --others --exclude-standard') return '';
+        throw new Error(`Unexpected Git call: ${call}`);
+      },
+    })).toThrow(`D583 changed spec was deleted: ${deletedSpec}`);
   });
 
   it('walks reverse consumers to a fixed point rather than stopping at direct consumers', () => {
