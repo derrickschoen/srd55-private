@@ -18,6 +18,7 @@ import {
   STARTER_MONSTER_ROSTER,
   type BundledMonsterRosterRow,
   type StarterMonsterFamily,
+  type StarterMonsterRosterRow,
 } from '../combat/statblocks/roster';
 import {
   armorClass,
@@ -33,6 +34,8 @@ import {
   d466GeneratedRoomOverride,
   d466ReplacementStatblock,
 } from './d466-room-overrides';
+import type { HeldoutPartyLevel } from './heldout-evaluation';
+import type { LoadedExternalPartyPack } from './party-pack';
 
 export const ROOM_GRID_DIMENSIONS = [12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24] as const;
 export type RoomGridDimension = (typeof ROOM_GRID_DIMENSIONS)[number];
@@ -52,6 +55,20 @@ export type RoomInitiativeProfile = (typeof ROOM_INITIATIVE_PROFILES)[number];
 
 export const ROOM_TERRAIN_PROFILES = ['los_cover_v1'] as const;
 export type RoomTerrainProfile = (typeof ROOM_TERRAIN_PROFILES)[number];
+
+export const HELDOUT_ORDINARY_PROTOCOLS = [
+  'heldout-ordinary-v1',
+  'heldout-development-v1',
+] as const;
+export type HeldoutOrdinaryProtocol = (typeof HELDOUT_ORDINARY_PROTOCOLS)[number];
+export type HeldoutTargetXp = 900 | 1_500 | 3_000 | 4_000;
+
+export interface HeldoutOrdinaryRoomOptions {
+  readonly protocol: HeldoutOrdinaryProtocol;
+  readonly party: LoadedExternalPartyPack;
+  readonly partyLevel: HeldoutPartyLevel;
+  readonly targetXp: HeldoutTargetXp;
+}
 
 type CoverBlocking<Tier extends 'half' | 'three_quarters'> = Extract<
   CanonicalWorldObjectBlocking,
@@ -141,6 +158,22 @@ export interface RoomSpec {
   readonly monsterRoster: readonly RoomMonsterRosterEntry[];
   readonly challengeBudgetEighths: number;
   readonly challengeSpentEighths: number;
+  readonly heldoutOrdinary?: {
+    readonly protocol: HeldoutOrdinaryProtocol;
+    readonly partyLevel: HeldoutPartyLevel;
+    readonly targetXp: HeldoutTargetXp;
+    readonly spentXp: number;
+    readonly family: StarterMonsterFamily;
+    readonly eligibleStatblockIds: readonly string[];
+    readonly maximizingVectorCount: number;
+    readonly maximizingVectorIndex: number;
+    readonly rng: {
+      readonly algorithm: 'mulberry32';
+      readonly normalizedSeed: number;
+      readonly familyDrawIndex: number;
+      readonly vectorDrawIndex: number;
+    };
+  };
   readonly partyState: readonly SampledPartySeat[];
   readonly hardFeatures?: {
     readonly shape: 'single-gate';
@@ -163,6 +196,7 @@ export interface GenerateRoomOptions {
     readonly rows: RoomGridDimension;
   };
   readonly provenance?: EncounterProvenance;
+  readonly heldoutOrdinary?: HeldoutOrdinaryRoomOptions;
 }
 
 const GENERATED_PARTY_ABILITY_SCORES = {
@@ -422,6 +456,181 @@ function sampledRoster(
     if (entries.length >= 2 && rng() < 0.3) break;
   }
   return { budget, spent: budget - remaining, entries, profiles };
+}
+
+export const HELDOUT_STARTER_MONSTER_FAMILIES = [
+  'goblinoid_warband',
+  'undead_crypt',
+  'mercenary_company',
+  'wild_beasts',
+] as const satisfies readonly StarterMonsterFamily[];
+
+type HeldoutRosterSource = Pick<
+  StarterMonsterRosterRow,
+  'id' | 'family' | 'challengeRating' | 'statblock'
+>;
+
+export interface HeldoutMaximizingRoster {
+  readonly statblockIds: readonly string[];
+  readonly spentXp: number;
+}
+
+function codePointCompare(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+export function heldoutMaximizingMonsterRosters(
+  family: StarterMonsterFamily,
+  targetXp: HeldoutTargetXp,
+  roster: readonly HeldoutRosterSource[] = STARTER_MONSTER_ROSTER,
+): readonly HeldoutMaximizingRoster[] {
+  const candidates = roster.filter((row) => row.family === family).map((row) => {
+    const challenge = row.statblock.sourceDetails.challenge;
+    if (challenge.kind !== 'present') {
+      throw new Error(`Held-out starter monster ${row.id} has no sourced challenge XP.`);
+    }
+    return { row, xp: challenge.value.experiencePoints };
+  });
+  if (candidates.length === 0) {
+    throw new Error(`Held-out starter family ${family} has no eligible monsters.`);
+  }
+  const reachable: Array<Array<Set<number>>> = Array.from(
+    { length: candidates.length + 1 },
+    () => Array.from({ length: 9 }, () => new Set<number>()),
+  );
+  reachable[candidates.length]?.[0]?.add(0);
+  for (let index = candidates.length - 1; index >= 0; index -= 1) {
+    const candidate = candidates[index];
+    if (candidate === undefined) throw new Error('Held-out roster dynamic program lost a candidate.');
+    for (let count = 0; count <= 8; count += 1) {
+      const values = reachable[index]?.[count];
+      if (values === undefined) throw new Error('Held-out roster dynamic-program state is absent.');
+      for (let take = 0; take <= count; take += 1) {
+        const suffix = reachable[index + 1]?.[count - take];
+        if (suffix === undefined) throw new Error('Held-out roster suffix state is absent.');
+        for (const suffixXp of suffix) {
+          const xp = suffixXp + take * candidate.xp;
+          if (xp <= targetXp) values.add(xp);
+        }
+      }
+    }
+  }
+  let maximumXp = -1;
+  for (let count = 2; count <= 8; count += 1) {
+    for (const xp of reachable[0]?.[count] ?? []) maximumXp = Math.max(maximumXp, xp);
+  }
+  if (maximumXp < 0) {
+    throw new Error(`Held-out starter family ${family} has no roster within ${String(targetXp)} XP.`);
+  }
+  const maximizing: HeldoutMaximizingRoster[] = [];
+  const counts = Array.from({ length: candidates.length }, () => 0);
+  const visit = (index: number, creaturesRemaining: number, xpRemaining: number): void => {
+    if (index === candidates.length) {
+      if (creaturesRemaining !== 0 || xpRemaining !== 0) return;
+      const statblockIds = candidates.flatMap(({ row }, candidateIndex) =>
+        Array.from({ length: counts[candidateIndex] ?? 0 }, () => row.id))
+        .sort(codePointCompare);
+      maximizing.push({ statblockIds, spentXp: maximumXp });
+      return;
+    }
+    const candidate = candidates[index];
+    if (candidate === undefined) throw new Error('Held-out roster enumeration lost a candidate.');
+    for (let take = 0; take <= creaturesRemaining; take += 1) {
+      const suffixXp = xpRemaining - take * candidate.xp;
+      if (suffixXp < 0) break;
+      if (!(reachable[index + 1]?.[creaturesRemaining - take]?.has(suffixXp) ?? false)) continue;
+      counts[index] = take;
+      visit(index + 1, creaturesRemaining - take, suffixXp);
+    }
+    counts[index] = 0;
+  };
+  for (let creatureCount = 2; creatureCount <= 8; creatureCount += 1) {
+    if (reachable[0]?.[creatureCount]?.has(maximumXp) ?? false) {
+      visit(0, creatureCount, maximumXp);
+    }
+  }
+  return maximizing.sort((left, right) =>
+    codePointCompare(left.statblockIds.join('\0'), right.statblockIds.join('\0')));
+}
+
+const heldoutRosterCache = new Map<string, readonly HeldoutMaximizingRoster[]>();
+
+function cachedHeldoutMaximizingRosters(
+  family: StarterMonsterFamily,
+  targetXp: HeldoutTargetXp,
+): readonly HeldoutMaximizingRoster[] {
+  const key = `${family}:${String(targetXp)}`;
+  const existing = heldoutRosterCache.get(key);
+  if (existing !== undefined) return existing;
+  const computed = heldoutMaximizingMonsterRosters(family, targetXp);
+  heldoutRosterCache.set(key, computed);
+  return computed;
+}
+
+function sampledHeldoutRoster(
+  rng: Rng,
+  seed: number,
+  targetXp: HeldoutTargetXp,
+): {
+  readonly budget: number;
+  readonly spent: number;
+  readonly entries: readonly RoomMonsterRosterEntry[];
+  readonly profiles: readonly CombatantProfile[];
+  readonly provenance: NonNullable<RoomSpec['heldoutOrdinary']>;
+} {
+  const familyDrawIndex = integer(rng, 0, HELDOUT_STARTER_MONSTER_FAMILIES.length - 1);
+  const family = HELDOUT_STARTER_MONSTER_FAMILIES[familyDrawIndex];
+  if (family === undefined) throw new Error('Held-out family draw was outside its closed registry.');
+  const familyRows = STARTER_MONSTER_ROSTER.filter((row) => row.family === family);
+  const maximizing = cachedHeldoutMaximizingRosters(family, targetXp);
+  const vectorDrawIndex = integer(rng, 0, maximizing.length - 1);
+  const selected = maximizing[vectorDrawIndex];
+  if (selected === undefined) throw new Error('Held-out roster draw was outside its maximizing set.');
+  const rowsById = new Map<string, (typeof familyRows)[number]>(
+    familyRows.map((row) => [row.id, row]),
+  );
+  const entries = selected.statblockIds.map((statblockId, index): RoomMonsterRosterEntry => {
+    const row = rowsById.get(statblockId);
+    if (row === undefined) throw new Error(`Held-out roster selected unknown statblock ${statblockId}.`);
+    return {
+      combatantId: `combatant:generated-${String(seed)}-monster-${String(index + 1)}`,
+      tokenId: `token:generated-${String(seed)}-monster-${String(index + 1)}`,
+      statblockId,
+      challengeRating: row.challengeRating,
+      challengeEighths: challengeEighths(row.challengeRating),
+    };
+  });
+  const profiles = entries.map((entry) => {
+    const row = rowsById.get(entry.statblockId);
+    if (row === undefined) throw new Error(`Held-out roster lost statblock ${entry.statblockId}.`);
+    return monsterCombatantProfile(row.statblock, {
+      combatantId: entry.combatantId,
+      tokenId: entry.tokenId,
+    });
+  });
+  const challengeTotal = entries.reduce((sum, entry) => sum + entry.challengeEighths, 0);
+  return {
+    budget: challengeTotal,
+    spent: challengeTotal,
+    entries,
+    profiles,
+    provenance: {
+      protocol: 'heldout-ordinary-v1',
+      partyLevel: 3,
+      targetXp,
+      spentXp: selected.spentXp,
+      family,
+      eligibleStatblockIds: familyRows.map((row) => row.id).sort(codePointCompare),
+      maximizingVectorCount: maximizing.length,
+      maximizingVectorIndex: vectorDrawIndex,
+      rng: {
+        algorithm: 'mulberry32',
+        normalizedSeed: seed,
+        familyDrawIndex,
+        vectorDrawIndex,
+      },
+    },
+  };
 }
 
 function sampledHardRoster(
@@ -696,19 +905,49 @@ function generateLegacyRoom(seed: number, options: GenerateRoomOptions): Generat
   if (!Number.isSafeInteger(seed)) throw new RangeError('Room seed must be a safe integer.');
   const normalizedSeed = seed >>> 0;
   const rng = mulberry32(normalizedSeed);
+  const heldout = options.heldoutOrdinary;
+  if (heldout !== undefined) {
+    if (options.difficulty !== undefined && options.difficulty !== 'standard') {
+      throw new TypeError('Held-out ordinary rooms use only the standard difficulty layout.');
+    }
+    if (heldout.party.members.length !== 4) {
+      throw new RangeError('Held-out ordinary rooms require exactly four player characters.');
+    }
+    const expectedTargetXp: Readonly<Record<HeldoutPartyLevel, HeldoutTargetXp>> = {
+      3: 900,
+      4: 1_500,
+      5: 3_000,
+      6: 4_000,
+    };
+    if (heldout.targetXp !== expectedTargetXp[heldout.partyLevel]) {
+      throw new RangeError(
+        `Held-out level ${String(heldout.partyLevel)} requires ${String(expectedTargetXp[heldout.partyLevel])} XP.`,
+      );
+    }
+    for (const member of heldout.party.members) {
+      const level = member.source.classes.reduce((sum, heldClass) => sum + heldClass.level, 0);
+      if (level !== heldout.partyLevel) {
+        throw new RangeError(
+          `Held-out party member ${member.source.combatantId} is level ${String(level)}, expected ${String(heldout.partyLevel)}.`,
+        );
+      }
+    }
+  }
   const dimensions = options.dimensions ?? {
     columns: pick(rng, ROOM_GRID_DIMENSIONS),
     rows: pick(rng, ROOM_GRID_DIMENSIONS),
   };
-  const partyProfiles = referenceEncounterSetup().combatants.filter(
-    (profile) => profile.kind === 'player_character',
-  );
+  const partyProfiles = heldout === undefined
+    ? referenceEncounterSetup().combatants.filter((profile) => profile.kind === 'player_character')
+    : heldout.party.members.map((member) => member.profile);
   const difficulty = options.difficulty ?? 'standard';
-  const sampledRoomRoster = difficulty === 'brutal'
-    ? sampledBrutalRoster(rng, normalizedSeed)
-    : difficulty === 'hard'
-      ? sampledHardRoster(rng, normalizedSeed)
-      : sampledRoster(rng, normalizedSeed);
+  const sampledRoomRoster = heldout !== undefined
+    ? sampledHeldoutRoster(rng, normalizedSeed, heldout.targetXp)
+    : difficulty === 'brutal'
+      ? sampledBrutalRoster(rng, normalizedSeed)
+      : difficulty === 'hard'
+        ? sampledHardRoster(rng, normalizedSeed)
+        : sampledRoster(rng, normalizedSeed);
   const roster = difficulty === 'brutal'
     ? applyD466GeneratedRoomOverride(normalizedSeed, sampledRoomRoster)
     : sampledRoomRoster;
@@ -828,11 +1067,35 @@ function generateLegacyRoom(seed: number, options: GenerateRoomOptions): Generat
     },
     dmNotes: [`Deterministic generated room seed ${String(normalizedSeed)}.`],
   });
-  const sampled = samplePartyState(rng, fresh);
+  const sampled = heldout === undefined
+    ? samplePartyState(rng, fresh)
+    : {
+        state: fresh,
+        samples: fresh.combatants.flatMap((subject): readonly SampledPartySeat[] =>
+          subject.profile.kind === 'player_character'
+            ? [{
+                combatantId: subject.profile.id,
+                hitPointFraction: 1,
+                hitPoints: subject.profile.rules.hitPointMaximum,
+                life: 'living',
+                deathSaves: null,
+                spellSlots: subject.spellSlots.map((slot) => ({
+                  level: slot.level,
+                  maximum: slot.maximum,
+                  remaining: slot.remaining,
+                  spent: 0,
+                })),
+                concentrating: false,
+              }]
+            : []),
+      };
   const profiledState = applyRoomInitiativeProfile(
     sampled.state,
     options.initiativeProfile ?? 'legacy',
   );
+  const heldoutRosterProvenance = heldout === undefined
+    ? undefined
+    : (sampledRoomRoster as ReturnType<typeof sampledHeldoutRoster>).provenance;
   const spec: RoomSpec = {
     seed: normalizedSeed,
     ...(difficulty === 'standard' ? {} : { difficultyProfile: difficulty }),
@@ -842,6 +1105,13 @@ function generateLegacyRoom(seed: number, options: GenerateRoomOptions): Generat
     monsterRoster: roster.entries,
     challengeBudgetEighths: roster.budget,
     challengeSpentEighths: roster.spent,
+    ...(heldout === undefined || heldoutRosterProvenance === undefined ? {} : {
+      heldoutOrdinary: {
+        ...heldoutRosterProvenance,
+        protocol: heldout.protocol,
+        partyLevel: heldout.partyLevel,
+      },
+    }),
     partyState: sampled.samples,
     ...(hardLayout === null ? {} : {
       hardFeatures: {

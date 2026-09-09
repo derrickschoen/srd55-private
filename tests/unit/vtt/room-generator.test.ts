@@ -18,9 +18,12 @@ import {
   BRUTAL_CHALLENGE_BUDGET_SCALE,
   BRUTAL_TERRAIN_FEATURE_COUNT_BAND,
   generateRoom,
+  heldoutMaximizingMonsterRosters,
+  HELDOUT_STARTER_MONSTER_FAMILIES,
   ROOM_GRID_DIMENSIONS,
   type GeneratedRoom,
 } from '../../../src/vtt/room-generator';
+import { loadExternalPartyPackBytes } from '../../../src/vtt/party-pack';
 import { declareTestInputs } from '../../helpers/test-inputs';
 
 const BASIS_SEEDS = [
@@ -129,8 +132,35 @@ const inputs = declareTestInputs({
     'tests/fixtures/arena-basis-brutal/seed-6203001.json',
     'tests/fixtures/arena-basis-brutal/seed-6203002.json',
     'tests/fixtures/arena-basis-brutal/seed-6203003.json',
+    'tests/fixtures/heldout-party/level-3.json',
+    'tests/fixtures/heldout-party/level-4.json',
+    'tests/fixtures/heldout-party/level-5.json',
+    'tests/fixtures/heldout-party/level-6.json',
   ],
 });
+
+function heldoutParty(level: 3 | 4 | 5 | 6) {
+  const paths = {
+    3: 'tests/fixtures/heldout-party/level-3.json',
+    4: 'tests/fixtures/heldout-party/level-4.json',
+    5: 'tests/fixtures/heldout-party/level-5.json',
+    6: 'tests/fixtures/heldout-party/level-6.json',
+  } as const;
+  const loaded = loadExternalPartyPackBytes(inputs.fixtures.readText(paths[level]));
+  if (loaded.status !== 'loaded') throw new Error(`Held-out party ${String(level)} did not load.`);
+  return loaded.party;
+}
+
+function independentMulberry32(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let mixed = state;
+    mixed = Math.imul(mixed ^ (mixed >>> 15), mixed | 1);
+    mixed ^= mixed + Math.imul(mixed ^ (mixed >>> 7), mixed | 61);
+    return ((mixed ^ (mixed >>> 14)) >>> 0) / 4_294_967_296;
+  };
+}
 
 function omitUndefined(value: unknown): unknown {
   return JSON.parse(JSON.stringify(value)) as unknown;
@@ -628,4 +658,148 @@ describe('seeded room generator', () => {
       }
     },
   );
+
+  it.each([
+    [3, 900],
+    [4, 1_500],
+    [5, 3_000],
+    [6, 4_000],
+  ] as const)('builds four full level-matched PCs at level %s', (level, targetXp) => {
+    const party = heldoutParty(level);
+    const room = generateRoom(7_850_001 + level, {
+      initiativeProfile: 'derived_v1',
+      heldoutOrdinary: {
+        protocol: 'heldout-development-v1',
+        party,
+        partyLevel: level,
+        targetXp,
+      },
+    });
+    const players = room.encounter.state.combatants.filter((subject) =>
+      subject.profile.kind === 'player_character');
+
+    expect(players).toHaveLength(4);
+    expect(players.map((subject) => subject.profile.id)).toEqual(
+      party.members.map((member) => member.profile.id),
+    );
+    expect(players.every((subject) =>
+      subject.life === 'living' && subject.hitPoints === subject.profile.rules.hitPointMaximum &&
+      subject.deathSaves === null)).toBe(true);
+    expect(room.spec.partyState.every((seat) =>
+      seat.hitPointFraction === 1 && seat.concentrating === false &&
+      seat.spellSlots.every((slot) => slot.remaining === slot.maximum))).toBe(true);
+    expect(room.spec.heldoutOrdinary).toMatchObject({
+      protocol: 'heldout-development-v1',
+      partyLevel: level,
+      targetXp,
+      spentXp: targetXp,
+    });
+  });
+
+  it('all 16 family/budget cells have exact maximizing vectors', () => {
+    const expectedCounts = {
+      goblinoid_warband: [90, 151, 125, 44],
+      undead_crypt: [213, 505, 279, 36],
+      mercenary_company: [323, 548, 294, 56],
+      wild_beasts: [4_820, 12_158, 25_354, 22_467],
+    } as const;
+    const budgets = [900, 1_500, 3_000, 4_000] as const;
+
+    for (const family of HELDOUT_STARTER_MONSTER_FAMILIES) {
+      expect(budgets.map((budget) => {
+        const vectors = heldoutMaximizingMonsterRosters(family, budget);
+        expect(vectors.every((vector) => vector.spentXp === budget)).toBe(true);
+        return vectors.length;
+      })).toEqual(expectedCounts[family]);
+    }
+  });
+
+  it('maximal XP roster follows the canonical tie draw', () => {
+    const seed = 7_850_009;
+    const rng = independentMulberry32(seed);
+    const expectedFamilyIndex = Math.floor(rng() * HELDOUT_STARTER_MONSTER_FAMILIES.length);
+    const expectedFamily = HELDOUT_STARTER_MONSTER_FAMILIES[expectedFamilyIndex];
+    if (expectedFamily === undefined) throw new Error('Independent family draw escaped its registry.');
+    const vectors = heldoutMaximizingMonsterRosters(expectedFamily, 3_000);
+    const expectedVectorIndex = Math.floor(rng() * vectors.length);
+    const expectedVector = vectors[expectedVectorIndex];
+    if (expectedVector === undefined) throw new Error('Independent vector draw escaped its registry.');
+    const room = generateRoom(seed, {
+      dimensions: { columns: 12, rows: 12 },
+      heldoutOrdinary: {
+        protocol: 'heldout-development-v1',
+        party: heldoutParty(5),
+        partyLevel: 5,
+        targetXp: 3_000,
+      },
+    });
+    const provenance = room.spec.heldoutOrdinary;
+    if (provenance === undefined) throw new Error('Held-out provenance is absent.');
+
+    expect(provenance.family).toBe(expectedFamily);
+    expect(provenance.rng.familyDrawIndex).toBe(expectedFamilyIndex);
+    expect(provenance.maximizingVectorIndex).toBe(expectedVectorIndex);
+    expect(provenance.rng.vectorDrawIndex).toBe(expectedVectorIndex);
+    expect(room.spec.monsterRoster.map((entry) => entry.statblockId)).toEqual(expectedVector.statblockIds);
+    expect(provenance.maximizingVectorCount).toBe(vectors.length);
+    expect(provenance.spentXp).toBe(provenance.targetXp);
+  });
+
+  it('challenge absence fails explicitly', () => {
+    const source = STARTER_MONSTER_ROSTER.find((row) => row.family === 'goblinoid_warband');
+    if (source === undefined) throw new Error('Starter roster lost its goblinoid family.');
+    const missingChallenge = {
+      ...source,
+      statblock: {
+        ...source.statblock,
+        sourceDetails: {
+          ...source.statblock.sourceDetails,
+          challenge: { kind: 'absent' as const, note: 'negative control' },
+        },
+      },
+    };
+
+    expect(() => heldoutMaximizingMonsterRosters(
+      'goblinoid_warband',
+      900,
+      [missingChallenge],
+    )).toThrow(`Held-out starter monster ${source.id} has no sourced challenge XP.`);
+  });
+
+  it('allows any loaded built character to replace a default companion', () => {
+    const original = JSON.parse(inputs.fixtures.readText(
+      'tests/fixtures/heldout-party/level-3.json',
+    )) as unknown;
+    if (typeof original !== 'object' || original === null || !('members' in original) ||
+      !Array.isArray(original.members)) throw new Error('Party fixture structure changed.');
+    const loadedOriginal = loadExternalPartyPackBytes(JSON.stringify(original));
+    if (loadedOriginal.status !== 'loaded') throw new Error('Original held-out party did not load.');
+    const replacement = structuredClone(loadedOriginal.party.pack.members[0]);
+    if (replacement === undefined) throw new Error('Held-out party has no replacement source.');
+    const members = [...loadedOriginal.party.pack.members];
+    members[1] = {
+      ...replacement,
+      combatantId: 'combatant:arbitrary-built-replacement',
+      tokenId: 'token:arbitrary-built-replacement',
+      characterId: 58_617,
+    };
+    const loadedReplacement = loadExternalPartyPackBytes(JSON.stringify({
+      ...loadedOriginal.party.pack,
+      members,
+    }));
+    if (loadedReplacement.status !== 'loaded') throw new Error('Arbitrary replacement did not load.');
+
+    const room = generateRoom(7_850_017, {
+      heldoutOrdinary: {
+        protocol: 'heldout-development-v1',
+        party: loadedReplacement.party,
+        partyLevel: 3,
+        targetXp: 900,
+      },
+    });
+    expect(room.encounter.state.combatants.filter((subject) =>
+      subject.profile.kind === 'player_character').map((subject) => subject.profile.id)).toContain(
+      'combatant:arbitrary-built-replacement',
+    );
+  });
 });
