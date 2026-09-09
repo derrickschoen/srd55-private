@@ -19364,3 +19364,331 @@ brief states the new HEAD. Not yet compiled by me; the lane's
 Still running: elevation Astra review, promo180 plan Astra round 1,
 heldout fix round 2, txn plan round 2, main gate browser stage
 (vitest-gate exit 0, Playwright on 4870).
+
+## D586.53 — elevation REJECT, promo180 plan DO NOT DISPATCH, txn plan round 2 done; three more dispatches; main merged into claude/p-promo180 (2026-09-08 23:59)
+
+- Elevation slice 1, review round 1: REJECT confined to
+  tools/d584-contract-inventory.ts; the domain foundation PASSED (ten
+  allowed files, seven trace probes reproduced, three compile-time
+  mutants killed, both runtime mutants reproduced, app+node tsc 0
+  diagnostics, sg scan 0). Blockers: baseline paths excluded without
+  blob/SHA comparison (a mutated owned baseline yielded no collision)
+  and a HEAD == dispatch-HEAD requirement that rejects the committed
+  tree; a deleted required spec is silently filtered and the CLI still
+  succeeds; text-matched imports count comments/strings as edges.
+  Should-fix: producer control by transitive reachability. Fix round 2
+  resumed on 01a0839a-d233-7ff2-9b43-1caa02af5e10 (brief
+  impl-elevation-s1-r2.md, marker ELEVATION-S1-R2 DONE).
+- Promo180 plan, review round 1: DO NOT DISPATCH. Blockers: panel
+  wiring started from .bak-opus5 and omits advisory_status /
+  historical provenance; the Sol projection breaks the unchanged
+  extractor for luna-escalated authorized rows (extract-sft.ts:475,
+  :353); labelled rows, engine rows, adjudications, notes and
+  certificates sit outside protected/ so chmod 000 isolates nothing;
+  the D584.4 inventory omits the external judge scripts and two
+  consumers; the phase-0 trap ends before judging/extraction. Four
+  should-fixes (main drift, genericity mutation, missingness, two
+  citation slips). Supervisor merged main (65fcfcad) into
+  claude/p-promo180 as b6040267 (clean) before the resume. Round 2
+  resumed on 01a08310-5f9b-7570-96d9-1a3fd906066b (brief
+  plan-promo180-r3.md, marker PLAN-PROMO180-R2 DONE).
+- Txn plan round 2: lane exit 0, PLAN-TXN-R2 DONE, plan 379 lines,
+  sha256 8075a610... (verified by me), ten dispositions all "fixed",
+  tree clean; the only `claude -p` string in the log is the echoed
+  rules header. Astra review round 2 launched (brief
+  review-plan-txn-r2.md, session 01a08451-3587-74b2-9e9c-e2f0673ed5bb).
+
+Running now: heldout fix r2, offers plan r2, D569 panel plan r3
+(final), challenge s3 fix r2, elevation fix r2, promo180 plan r2, txn
+Astra r2, main gate browser stage.
+
+## D586.54 — D569 panel plan round 3 (final) revised; Astra final review launched (2026-09-09 00:00)
+
+Lane exit 0, PLAN-D569-PANEL-R4 DONE in about four minutes. Plan 486
+lines, sha256 1500ce2f... (verified by me), tree clean, only the echoed
+rules header matches `claude -p`. Round-3 dispositions: the D575 Opus 5
+builder is declared an archived-D575 reconstruction boundary with no
+v5 caller, and a fourth allowed file enters as an annotation-only
+exception (two JSDoc blocks in tools/ai-dm-rerun-packet.ts, lines 1167
+and 1182); duplicate-seat expectations use the exact tool error; 180
+specs throughout. Astra FINAL review launched (brief
+review-plan-d569-panel-r3.md, session
+01a08452-9eb0-7960-9ceb-349b06ba48f0); a DO NOT DISPATCH shelves the
+plan and the D569 first arm waits.
+
+## D588 — owner request: art-asset request/delivery folders with UUIDv7 ids (2026-09-09 00:07)
+
+Owner (verbatim): "Create two project folders: one for art-asset request
+JSON files and one where the image-generation assistant can save
+completed art assets. Use UUIDv7 for every request ID and as the
+filename prefix for both the request and corresponding assets:
+<uuidv7>-<slug>.json and <uuidv7>-<slug>.png. Include the prompt, asset
+purpose, dimensions/aspect ratio, style, background/transparency
+requirements, and acceptance criteria in each request. Document the
+workflow, create an initial needed-art request, and report both
+absolute folder paths, including Windows-accessible paths if using WSL."
+
+Done directly by the supervisor (small scaffold, owner-facing), commit
+d53412c9 on main: `art/requests/` (tracked: README workflow,
+request.schema.json, new-request.mjs scaffolder/UUIDv7 printer/checker,
+first request) and `art/incoming/` (README; *.png/*.webp/*.svg
+gitignored). Constraints found and documented: `public/assets/art/` is a
+pinned inventory (starter-art.test.ts) and source-is-greppable.test.ts
+rejects any tracked raster outside its exemption list, so deliveries stay
+untracked until a reviewed promotion; ART-PROVENANCE.md covers only
+generator output, so promoting an assistant-made asset needs its own
+provenance section; prompts fall under the licensing wall; license fixed
+to CC0-1.0. First request 01a08456-d9a9-7f60-b3aa-824115da4b79
+terrain-low-wall: the authored three-quarters cover feature still missing
+after D576 increment 1 (decisions line "authored three-quarters features
+are still needed in increment 2"), 128x128 RGBA transparent, eight
+acceptance criteria. Verified by me: UUIDv7 timestamp bits match epoch
+millis, version nibble 7, variant 8-b; `--check` clean; sg scan 0;
+source-is-greppable and starter-art specs 18/18 with the files staged.
+Finding against my own work: an unquoted heredoc command-substituted a
+backticked `file` in one criterion; caught by re-reading the JSON, fixed
+before commit. The .mjs scaffolder has no vitest spec (it is outside
+tsconfig.node includes); flagged, not hidden.
+
+## D586.55 — D569 Amendment 2 plan DISPATCHED at round 3; main merged into claude/blind-dm; implementation lane launched (2026-09-09 00:07)
+
+Astra round 3: "DISPATCH. Blockers: none. Should-fix: none remaining."
+D575 exception bounded (two files, comment-stripped JS identical),
+three-file v5 boundary holds, controls mutation-shaped, inventory
+26/76/183/184 reproduced by independent AST traversal, external hashes
+match, 12 accepted / 15 rejected analyzer probes. Supervisor merged main
+(d53412c9) into claude/blind-dm as 3eb57be8 (clean, none of the four
+allowed files touched) before dispatch; the brief amends the plan's HEAD
+test to 3eb57be8 and requires the inventory recomputed from the new
+merge-base with deltas explained. Resolver /tmp/d569-import-inventory.mjs
+present, sha matches the pin. Lane launched fresh: brief impl-d569-a2.md,
+session 01a08458-ed76-7461-9693-80f8770f0e35, marker D569-A2 DONE.
+Implementation acceptance is not launch authorization (plan section 9);
+the first v5 arm still needs the oracle re-capture and a blind gate.
+
+## D586.56 — txn plan round 2: DO NOT DISPATCH on one control mapping; final round resumed (2026-09-09 00:09)
+
+Astra round 2: one blocker only. Plan line 339 names the nested
+composition test as the killer for removing the enclosing RNG restore at
+encounter.ts:10025, but that test survives (the parent step at :9554
+restores the random-consuming subtree). Astra reproduced that
+tests/unit/vtt/composition.test.ts:319 kills the mutant at its snapshot
+assertion (draws 3 vs expected 2); the fix is naming that assertion, no
+new test. Two should-fixes (line 31 extract/replace -> STOP/re-plan;
+line 234 separate input freezing from output hashing). Everything else
+confirmed: empty-monster counterexample, type-binding runtime edges,
+?raw policy sound under six probe classes, closure counts 69/1/70/77
+reproduced, no roll-provenance or mcp-client dependence. Round 3 of 3
+(FINAL) resumed on 01a0842b-042d-7383-b07c-e970396080e7 (brief
+plan-txn-r3.md, marker PLAN-TXN-R3 DONE).
+
+## D586.57 — held-out slice 1 fix round 2 harvested: candidate committed, main merged, cumulative and Astra round 2 running (2026-09-09 00:11)
+
+Lane exit 0, HELDOUT-S1-R2 DONE; claims: all five blockers and both
+should-fixes fixed, focused 4 specs 94/94, tsc 0, sg 0, valid-room
+mutation hashes fa905610 -> 600605c8 -> fa905610, no pin moved. Two
+things the lane did that the reviewer must judge, flagged in the brief:
+after the generation control timed out twice (5,475 / 5,485 ms under a
+5,000 ms budget) it moved basis construction outside the test/hook
+timeout instead of counting the red; and it wrote a scratch script to
+/tmp/inspect-heldout-profile.ts outside the worktree (to be deleted at
+close per D587.4). Verified by me: `sg scan` exit 0 on the candidate;
+the only `claude -p` match is the echoed header. Committed 40837e74
+(15 files) then merged main (ede7fa18) as 0f2ba7af, clean. Inventory
+rebuilt per D584.4 from the branch diff plus every spec importing a
+changed module: 25 specs, same count as round 1 (rg is a shell
+function, grep used). Cumulative tsc + one vitest invocation running on
+0f2ba7af (~/dnd-slim-runs/cum-heldout-s1-r2.log). Astra round 2
+launched (brief review-impl-heldout-s1-r2.md, session
+01a0845c-f89c-7cc3-8c87-aebef32ed016).
+
+## D586.58 — txn plan round 3 revised; Astra final review launched (2026-09-09 00:13)
+
+Lane exit 0, PLAN-TXN-R3 DONE in about four minutes; plan 387 lines,
+sha256 c3ef6f01... (verified by me), tree clean, only the echoed header
+matches `claude -p`. Round-3 dispositions: killer retargeted to
+`abort_leaks_rng` at composition.test.ts:319-336, snapshot assertion
+:333; STOP/re-plan wording made consistent; slice 0 freezes inputs,
+double-captures, then hashes the baseline output. Astra FINAL review
+launched (brief review-plan-txn-r3.md, session
+01a0845e-1e48-70c1-a1dc-974f1f9f4399).
+
+## D586.59 — session-command-transaction plan DISPATCHED at round 3; slices 0+1 lane launched (2026-09-09 00:17)
+
+Astra round 3: "DISPATCH SLICE 0. Blockers: none. Should-fix: none
+remaining." Confirmed the corrected killer in memory (removing
+encounter.ts:10025 fails composition.test.ts:333 with draws 3 vs 2),
+STOP/re-plan wording, slice-0 freeze/double-capture/hash order; closure
+counts 69/1/70/77 unchanged; plan and frozen-contract hashes match.
+Supervisor dispatch: slice 0 (zero repository files) then slice 1 (five
+files) in one lane, since slice 0 alone yields nothing reviewable but
+hashes; one path amendment: capture artifacts under the worktree's
+gitignored .tmp/session-command-transaction/ instead of /tmp (D587.4/
+D587.10). Fresh session 01a08462-95cf-7e83-9c48-bf83e5771394, brief
+impl-txn-s1.md, marker TXN-S1 DONE. Known sandbox limit stated: the
+symlinked node_modules may EROFS vitest; the supervisor runs the
+cumulative in that case.
+
+## D586.60 — heldout round 2 REJECT (budget bypass, leak-wall gaps); final fix round resumed; offers plan round 2 to Astra (2026-09-09 00:20)
+
+Astra round 2 on the held-out candidate: REJECT. Blocker 1: the
+generation control at generate-arena-basis.test.ts:90 awaits the full
+24-room construction during module collection, before Vitest applies
+test/hook timeouts; after two reported timeout reds that is a budget
+bypass under D587.3 (my flag (a) confirmed). Blocker 2: the leak wall
+at heldout-leak-check.ts:105 still passes template-literal dynamic
+imports, .js-suffixed specifiers and bare side-effect imports (zero
+findings in Astra's probe). Should-fix: an unknown-cast of
+['Unconscious'] into the Charmed/Frightened effect tuple. Every other
+round-1 fix confirmed (HP probe 1.25 for 25/20, no dependency on the
+/tmp scratch script, 25-spec inventory cross-checked, contract hash
+intact). Supervisor: the running cumulative on the rejected candidate
+was killed by pid (log marked KILLED) so the fix lane edits a quiet
+tree; fix round 3 of 3 (FINAL) resumed on
+01a083a8-e7ff-76f3-af9b-4c6e21c886dc (brief impl-heldout-s1-r3.md,
+marker HELDOUT-S1-R3 DONE) with the instruction to resolve the
+performance failure inside the 5,000 ms budget or STOP with
+measurements, and to cover every import form.
+
+Offers roadmap round 2: lane exit 0, PLAN-OFFERS-R2 DONE; plan 739
+lines, 17 slices, sha256 b44dc386... (verified by me), tree clean.
+Astra round 2 launched (brief review-plan-offers-r2.md, session
+01a08463-c29d-7563-a7ab-a3cef404fa20) with instructions to re-run its
+own Dash/Grapple probe and derive the 441/2500 tree independently.
+
+## D586.61 — elevation fix round 2 harvested: candidate committed, cumulative and Astra round 2 running (2026-09-09 00:23)
+
+Lane exit 0, ELEVATION-S1-R2 DONE; claims: all four reviewer fixes in
+the inventory tool (ancestor-HEAD provenance with blob/index/worktree
+SHA validation; drift, missing specs and uncontrolled producers fail
+the CLI; TypeScript-AST import discovery with computed/template dynamic
+imports documented as unsupported; transitive producer control),
+hashes printed by the mutation contract, inventory 72 manifest / 10
+owned / 4 producers / 0 collisions, focused 11/11, its cumulative 5
+files 45/45, tsc 0, sg 0, nine negative controls killed with hash
+table. Verified by me: `sg scan` exit 0; only the echoed header matches
+`claude -p`. Committed b279e654 (5 files, incl. the mutant-definition
+fixture tests/fixtures/d586-elevation-mutants.json, flagged to the
+reviewer as needing confirmation it is an input, not a regenerated
+pin). Finding against my own work: my first inventory was direct
+importers only; rebuilt as a transitive reverse-import graph over
+src/tools/tests (still 4 Vitest specs + 1 type-test; the lane's fifth
+spec, the screenshot probe, is not a dependent in my graph and the
+reviewer is asked to say whether it is owed). The first cumulative was
+killed by pid before the rebuild; the relaunched one runs on b279e654
+(~/dnd-slim-runs/cum-elevation-s1-r2.log). Astra round 2 launched
+(brief review-impl-elevation-s1-r2.md, session
+01a08467-fec3-7610-9b53-c1be5e54f8b9). Review launches now append a
+`review exit:` sentinel so the monitor stops matching log text that
+Astra merely reads.
+
+## D588.1 — owner request: redo requests for all 92 starter art assets; finding against my own commit discipline (2026-09-09 00:28)
+
+Owner (verbatim): "export a redo request for all art assets to
+/home/vagrant/PhpstormProjects/dnd-multiclass-spells-static/art/requests/".
+Done: 92 requests, one per file in public/assets/art/, batch tag
+redo-starter-art-v1, slug redo-<asset>, each with `redoOf`, a prompt
+derived from the asset's recipe in src/assets/starter-art-inputs.ts
+(archetype/side plate colour, wall piece, door side/state, overlay
+effect, fog state, focus mark, terrain object) and the current tiles'
+conventions (I viewed nine reference tiles), the common criteria plus
+kind-specific ones (drop-in footprint, seamless tiling, opacity
+ordering, ring diameter). Schema gains optional `batch` and `redoOf`.
+`--check` 93 requests clean; every file parses. Commit 25d754ca.
+
+Finding against my own work: my command chain ran the greppable-source
+test and then committed without gating on its result; the test was RED
+because the owner had already dropped
+art/incoming/01a08456-...-terrain-low-wall-source.jpg (1.5 MB JPEG) and
+its Windows Zone.Identifier stream at 00:17, my ignore rule covered only
+png/webp/svg, and `git add art` staged both. I read the failure, removed
+both from the index, changed the rule to ignore everything in
+art/incoming except its README, amended the commit (acbcb288 ->
+25d754ca; the bad commit was local and never left the machine), and
+reran source-is-greppable + starter-art: 18/18. The owner's JPG stays on
+disk, untracked, as the reference image for the low-wall request.
+Rule reaffirmed: read the verdict before committing, never `; git
+commit` after a test in the same chain.
+
+Elevation cumulative on b279e654 (D586.61): tsc exit 0, 4 spec files,
+19/19, vitest exit 0.
+
+## D586.62 — main gate on eb778854 GREEN; mcp-client and row-codec merged into main; gate relaunched on the integrated revision (2026-09-09 00:30)
+
+Gate wt-main-493121dd on eb778854 (started 23:14, GATES DONE 00:28):
+tsc exit 0; sg exit 0; vitest-gate exit 0 with six load flakes that
+passed serially (pc-algorithm-policy, js-round-plan-integration,
+source-is-greppable, ai-dm-arena, ai-dm-screenshot-probe,
+room-generator-los-cover) and FAILED (none); Playwright 186 passed in
+55.5 min, exit 0. Log kept as gate-wt-main-493121dd.eb778854.log.
+Main since eb778854 carried only decisions commits and the art-request
+pipeline (JSON, Markdown, one .mjs outside the build).
+
+Merged per D586.51 from the main repo, both clean: claude/p-mcpclient
+89d9c4df -> 9e891314, then claude/p-rowcodec 2af3d941 -> 673ef07e.
+Gate worktree moved to 673ef07e and the full gate relaunched; the
+integrated revision is not on the owner's live port. Elevation
+(b279e654) follows after its round-2 verdict and cumulative (already
+green, D588.1).
+
+## D586.63 — elevation slice 1 ACCEPTED and merged into main; offers roadmap round 2 DO NOT DISPATCH, final round resumed; gate relaunched on f18a8a1a (2026-09-09 00:32)
+
+Elevation, Astra round 2: "ACCEPT SLICE 1. Blockers: none. Code
+should-fix: none." All four round-1 findings verified against the tree
+(collision on worktree and index-only drift; missing/committed-deleted/
+staged-deleted/unstaged-deleted specs fail the CLI; five AST import
+forms incl. comment-separated; transitive producer control); fixture
+confirmed as mutant-definition input; all nine mutant hashes recomputed
+(three transcription slips in the lane's report, report-only); the
+screenshot-probe spec is owed to the plan's inherited-D576 inventory
+rule at plan line 423, not surplus; ten whole-slice files all allowed.
+Supervisor evidence on b279e654: sg scan 0, tsc 0, 4 specs 19/19.
+Merged claude/los-cover into main as f18a8a1a (clean). The gate that had
+started on 673ef07e at 00:30 was killed by process group (log kept as
+gate-wt-main-493121dd.673ef07e-killed.log) and relaunched on f18a8a1a
+so one gate covers all three landings.
+
+Offers roadmap, Astra round 2: DO NOT DISPATCH, four blockers: captured
+Dash grants contradict SRD 11590-11596 (Speed 15 + Dash = 30 ft total,
+the plan yields 45); all four reposition witnesses fail independent
+derivation (unspecified Speeds/ranges, reachable uncovered squares, the
+sphere touching both squares, the alcove route); the Grapple tree omits
+the opportunity attack every escape face raises (441/2500 holds only
+if that boundary is absent); slice 6 cannot compile with grants
+required while its consumers wait for slices 10/11. Two should-fixes.
+Round 3 of 3 (FINAL) resumed on 01a0842a-c4c5-7c43-bc96-0cbfac700f1a
+(brief plan-offers-r3.md, marker PLAN-OFFERS-R3 DONE).
+
+## D586.64 — promo180 plan round 2 revised; Astra round 2 launched (2026-09-09 00:46)
+
+Lane exit 0, PLAN-PROMO180-R2 DONE; plan 477 lines, sha256 46b3b945...
+(verified by me), tree clean at b6040267; the three `claude -p` matches
+in the log are the echoed header and two decisions.md lines the lane
+read with nl, not invocations. Nine dispositions all "FIXED": approved
+external scripts invoked unchanged and hash-pinned; separate round-plan
+and adjustment projections for the unchanged extractor; everything
+designer-invisible under protected/ behind a two-file allowlist
+enforced with bubblewrap; section 12 external ownership; fsynced phase
+ledger with startup recovery; routing-mutant genericity proof; triple-
+intersection primary effect; citation fixes. Astra round 2 launched
+(brief review-plan-promo180-r2.md, session
+01a0847c-a3d4-7752-814a-88ad2ce00413) with an explicit check that bwrap
+exists on this machine and an in-memory rerun of the mixed-model
+extractor case.
+
+## D586.65 — heldout fix round 3 harvested: candidate committed, cumulative and FINAL Astra review running (2026-09-09 00:50)
+
+Lane exit 0, HELDOUT-S1-R3 DONE; claims: the 24-room control split into
+preparation / per-room generation / finalization tests, each under the
+unchanged 5,000 ms budget (slowest room 1,766 ms; attribution: cover-room
+generation dominates, byte loads 12 ms, serialization 9 ms, hashing 4 ms);
+leak wall covering named/default/namespace/side-effect, dynamic single/
+double/template-literal, require, and no/.js/.ts suffixes; type-valid
+effective-condition seam with the Charmed/Frightened limitation stated;
+focused 3 files 63/63, tsc 0, sg 0, mutation hashes unchanged, six
+allowed files, no scratch left. Verified by me: `sg scan` exit 0; only
+the echoed header matches `claude -p`; changed-file set identical to
+round 2 so the 25-spec inventory stands. Committed 1d6af854. Cumulative
+tsc + one vitest invocation running (~/dnd-slim-runs/cum-heldout-s1-r3.log).
+Astra round 3 (FINAL) launched (brief review-impl-heldout-s1-r3.md,
+session 01a08480-b571-7f52-9bf7-3e019aa916aa); a REJECT shelves the slice.

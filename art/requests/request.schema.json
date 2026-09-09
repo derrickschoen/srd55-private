@@ -1,0 +1,183 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "art/requests/request.schema.json",
+  "title": "Art asset request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "slug",
+    "createdAt",
+    "status",
+    "purpose",
+    "prompt",
+    "dimensions",
+    "style",
+    "background",
+    "acceptanceCriteria",
+    "deliverable",
+    "license"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "description": "UUIDv7; also the filename prefix of the request and of every delivered asset."
+    },
+    "slug": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "open",
+        "delivered",
+        "accepted",
+        "rejected",
+        "withdrawn"
+      ]
+    },
+    "purpose": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Where the asset is used in the app and why it is needed."
+    },
+    "prompt": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Self-contained generation prompt. Must not name third-party games, artists or products."
+    },
+    "negativePrompt": {
+      "type": "string"
+    },
+    "dimensions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "width",
+        "height",
+        "aspectRatio"
+      ],
+      "properties": {
+        "width": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "aspectRatio": {
+          "type": "string",
+          "pattern": "^[0-9]+:[0-9]+$"
+        },
+        "pixelGrid": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Logical pixel size for pixel art (1 = every output pixel is a logical pixel)."
+        }
+      }
+    },
+    "style": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "summary"
+      ],
+      "properties": {
+        "summary": {
+          "type": "string",
+          "minLength": 1
+        },
+        "references": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Repository-relative paths of existing assets to match."
+        },
+        "palette": {
+          "type": "string"
+        }
+      }
+    },
+    "background": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "transparent"
+      ],
+      "properties": {
+        "transparent": {
+          "type": "boolean"
+        },
+        "color": {
+          "type": "string",
+          "description": "Required when transparent is false."
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    },
+    "acceptanceCriteria": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "deliverable": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "format",
+        "filename",
+        "directory"
+      ],
+      "properties": {
+        "format": {
+          "type": "string",
+          "enum": [
+            "png",
+            "webp",
+            "svg"
+          ]
+        },
+        "filename": {
+          "type": "string",
+          "pattern": "^[0-9a-f-]{36}-[a-z0-9-]+\\.(?:png|webp|svg)$"
+        },
+        "directory": {
+          "type": "string",
+          "const": "art/incoming"
+        }
+      }
+    },
+    "license": {
+      "type": "string",
+      "const": "CC0-1.0"
+    },
+    "notes": {
+      "type": "string"
+    },
+    "batch": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+      "description": "Optional batch tag grouping requests issued together (for example redo-starter-art-v1)."
+    },
+    "redoOf": {
+      "type": "string",
+      "description": "Repository-relative path of the existing asset this request replaces one-for-one at promotion."
+    }
+  }
+}
