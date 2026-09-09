@@ -21143,3 +21143,24 @@ bypasses git via changedPaths: [] and should also cover git-command
 failures persistently. Re-landing: the revert 580efdef reverted
 (reapply commit) and claude/trial-core-reconciliation merged as 371b5bc8
 (clean). Gate worktree moved to 371b5bc8; full gate launched.
+
+## D586.134 — D569 v5 first-arm runbook harvested; Astra review launched (2026-09-09 06:53)
+
+Runbook lane (session 01a085a4-feb0-74e3-b85c-5a9ae9c69c45, 435,632 tokens,
+exit 0, RUNBOOK DONE) wrote only the ignored
+.tmp-plans/2026-09-09-d569-v5-first-arm-runbook.md on dnd-wt-blind-dm
+(1,172 lines; worktree otherwise clean at 90484d45). Supervisor checks:
+every pinned hash in the runbook (judge-one.sh 6ae7f6b8…, judge-advisory.py
+671bfedf…, pool4-contrasts.py 0c20f794…, contracts.ts 0f0e1d8f…, manifest
+raw 8c0bcb3c…) matches the tree; no `claude -p` invocation in the log (the
+three hits are the rules header and quoted decisions text). Finding against
+the lane's report: it stated sha256 c2a6e4aa… for the file; the file on
+disk hashes b16558e1… (0ca641fb… without the trailing RUNBOOK DONE line), so
+the lane hashed a different revision of its own file than it left behind.
+Content is the reviewed artifact, not the claimed hash. First arm chosen:
+gpt-5.6-luna-blind, primary family, 60 rows (hard 5117001..5117010, brutal
+6203001..6203010, reps 3); second family explicitly excluded from this
+launch partition. Astra review launched read-only (session
+01a085cc-ecee-7ce2-b98e-a28e682a48f4, brief review-d569-v5-runbook.md,
+log astra-review-d569-v5-runbook.log). Launch remains a separate explicit
+decision.
