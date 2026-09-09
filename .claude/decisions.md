@@ -20640,3 +20640,31 @@ slice 2 one file) with a digest-checked 140+19 union; the risk mutant
 qualified per ref; the drain mutant replaced by post-command drain
 omission/misordering observed through a command-created pending
 reaction. Astra round 2 launched (brief review-plan-reconcile-r2.md).
+
+## D586.108 — reconciliation plan DISPATCH SLICE 1 at round 2; main gate on d95cafb6 vitest GREEN (2026-09-09 04:01)
+
+Astra round 2 on the 507-line plan (sha 1691ea0c...): "DISPATCH SLICE 1.
+Blockers: none." Staged acceptance preserves session-command-
+transaction.ts:217-220 (caught-failure probe: accepted revision 0 vs
+modelled 0, 2 attempts / 2 completions / 2 recorded roll attempts; the
+eager-acceptance mutant fails the oracle); the modelled core matches
+the accepted ce081ef0 wrapper on results, error identity, command
+order, accounting, caller RNG restoration and provenance; drain
+omission is observable through the command-created reaction; the
+report validator accepts a changed heap observation while rejecting
+changed limits, first-exhausted counter, deterministic totals or non-
+exhaustion; slice 1 eight files incl. the inventory; 140 + 19 -> 146
+distinct baseline paths; 20 test blocks preserved; the risk mutant
+located per ref. Two should-fixes, binding for the dispatch: keep
+`attempted()` OUTSIDE the reducer's try/finally as at
+ce081ef0:engine-round-application.ts:55-61 and add a hook-failure
+control (moving it inside flips first exhaustion from
+reducer_applications to heap_used_bytes with zero reducer calls);
+correct plan:344 (empty rooms and zero totals are emitted
+unconditionally for shelved reports, challenge-feasibility.ts:1047-1062,
+and do not date the exhaustion). Slice 1 implementation dispatch
+follows.
+
+Main gate on d95cafb6: tsc 0, sg 0, vitest-gate exit 0 (one load
+flake, room-generator-los-cover, passed serially; FAILED none);
+Playwright on 4870 running.
