@@ -19182,3 +19182,27 @@ budget is still 5 s on that pre-merge worktree); one serial rerun each
 queued after the gate's vitest stage (running). Astra implementation
 reviews of both slices launched with the vitest result marked
 PENDING. mcp-request-client cumulative still running.
+
+## D586.46 — heldout slice 1 REJECTED (five blockers, lane resumed); rowcodec slice 1 REJECTED on MY incomplete inventory, not the code (2026-09-08 23:39)
+
+Astra on heldout slice 1: REJECT — frozen basis verified against the
+candidate HEAD instead of its generation provenance (unusable after any
+repair commit); leak check misses reserve digests/result paths and
+dynamic `await import` of the held-out module (both accepted in an
+executable probe); the metric clamps current HP to the initial maximum
+where the plan says max(0, currentHP) (25 over 20 returned 1 instead of
+1.25); structural verification only counts four profiles; acceptance
+controls use a placeholder hash and an empty object instead of a
+mutated valid room, no successful generation->verification control,
+suppression coverage missing. Lane resumed for round 2 with the verdict
+verbatim.
+
+Astra on rowcodec slice 1: REJECT with NO implementation blocker; the
+blocker is the SUPERVISOR's cumulative inventory: I ran 6 specs (185
+cases) where the plan's line 308 requires 11 (218); missing
+ai-dm-combat-model, ai-dm-board-delivery, ai-dm-skills,
+local-openai-conversation.SIMULATED, rl-generate-data. FINDING AGAINST
+MY OWN WORK: I built the inventory from a name grep instead of the
+plan's inventory plus the import graph, exactly the D584.4 rule I hold
+lanes to. The five specs are queued as a serial run behind the current
+reruns. One should-fix (check order at codec line 292) sent to the lane.
