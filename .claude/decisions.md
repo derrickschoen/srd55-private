@@ -22010,3 +22010,13 @@ State preserved: plan candidate r1 + Astra review r1 (17 findings, all accepted)
 `resume-rca-d569-crash-r3.md`; owner rulings D590 (rerun only what is broken) and D591 (rely on the patch) recorded. Resumable session
 ids: plan 01a087af-14c8-7a00-bcb2-9ab987d0b42e, RCA 01a087c6-e5a7-7aa2-a37a-ebfd4c679884. Owner asked (question 3) whether to
 purchase credits now, wait until Sep 14, or rebind roles.
+
+## D592 — OWNER: codex usage limit — wait until the reset (2026-09-14 21:24) (2026-09-09)
+
+Q3 answered 2026-09-09 17:54 EDT: "Wait until Sep 14". No credit purchase; no Claude substitution for the codex roles. Until the reset the
+supervisor monitors only, records state, and asks the remaining queued questions so the resumed lanes start with all rulings in
+hand. Resume plan on 2026-09-14 after 21:24: (1) re-check `codex exec` with a one-line probe; (2) resume plan lane
+01a087af-14c8-7a00-bcb2-9ab987d0b42e with `resume-plan-vtt-handoff-r2.md` (restating COMMON RULES in full) for candidate r2;
+(3) resume RCA lane 01a087c6-e5a7-7aa2-a37a-ebfd4c679884 with `resume-rca-d569-crash-r3.md` for the patch specification;
+(4) baseline on wt-vtt-handoff is already green on 0f84e09f and stays valid while main does not move. Alternatives not chosen:
+buy credits now; Claude implements without review.
