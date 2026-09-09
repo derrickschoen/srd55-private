@@ -19415,3 +19415,53 @@ specs throughout. Astra FINAL review launched (brief
 review-plan-d569-panel-r3.md, session
 01a08452-9eb0-7960-9ceb-349b06ba48f0); a DO NOT DISPATCH shelves the
 plan and the D569 first arm waits.
+
+## D588 — owner request: art-asset request/delivery folders with UUIDv7 ids (2026-09-09 00:07)
+
+Owner (verbatim): "Create two project folders: one for art-asset request
+JSON files and one where the image-generation assistant can save
+completed art assets. Use UUIDv7 for every request ID and as the
+filename prefix for both the request and corresponding assets:
+<uuidv7>-<slug>.json and <uuidv7>-<slug>.png. Include the prompt, asset
+purpose, dimensions/aspect ratio, style, background/transparency
+requirements, and acceptance criteria in each request. Document the
+workflow, create an initial needed-art request, and report both
+absolute folder paths, including Windows-accessible paths if using WSL."
+
+Done directly by the supervisor (small scaffold, owner-facing), commit
+d53412c9 on main: `art/requests/` (tracked: README workflow,
+request.schema.json, new-request.mjs scaffolder/UUIDv7 printer/checker,
+first request) and `art/incoming/` (README; *.png/*.webp/*.svg
+gitignored). Constraints found and documented: `public/assets/art/` is a
+pinned inventory (starter-art.test.ts) and source-is-greppable.test.ts
+rejects any tracked raster outside its exemption list, so deliveries stay
+untracked until a reviewed promotion; ART-PROVENANCE.md covers only
+generator output, so promoting an assistant-made asset needs its own
+provenance section; prompts fall under the licensing wall; license fixed
+to CC0-1.0. First request 01a08456-d9a9-7f60-b3aa-824115da4b79
+terrain-low-wall: the authored three-quarters cover feature still missing
+after D576 increment 1 (decisions line "authored three-quarters features
+are still needed in increment 2"), 128x128 RGBA transparent, eight
+acceptance criteria. Verified by me: UUIDv7 timestamp bits match epoch
+millis, version nibble 7, variant 8-b; `--check` clean; sg scan 0;
+source-is-greppable and starter-art specs 18/18 with the files staged.
+Finding against my own work: an unquoted heredoc command-substituted a
+backticked `file` in one criterion; caught by re-reading the JSON, fixed
+before commit. The .mjs scaffolder has no vitest spec (it is outside
+tsconfig.node includes); flagged, not hidden.
+
+## D586.55 — D569 Amendment 2 plan DISPATCHED at round 3; main merged into claude/blind-dm; implementation lane launched (2026-09-09 00:07)
+
+Astra round 3: "DISPATCH. Blockers: none. Should-fix: none remaining."
+D575 exception bounded (two files, comment-stripped JS identical),
+three-file v5 boundary holds, controls mutation-shaped, inventory
+26/76/183/184 reproduced by independent AST traversal, external hashes
+match, 12 accepted / 15 rejected analyzer probes. Supervisor merged main
+(d53412c9) into claude/blind-dm as 3eb57be8 (clean, none of the four
+allowed files touched) before dispatch; the brief amends the plan's HEAD
+test to 3eb57be8 and requires the inventory recomputed from the new
+merge-base with deltas explained. Resolver /tmp/d569-import-inventory.mjs
+present, sha matches the pin. Lane launched fresh: brief impl-d569-a2.md,
+session 01a08458-ed76-7461-9693-80f8770f0e35, marker D569-A2 DONE.
+Implementation acceptance is not launch authorization (plan section 9);
+the first v5 arm still needs the oracle re-capture and a blind gate.
