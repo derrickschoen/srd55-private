@@ -19934,3 +19934,31 @@ remains unproved in the review sandbox; my shell preflight passes.
 Next: phase-0 implementation dispatch (tooling only); Sol teacher calls
 are a separate supervisor launch after the isolation controls pass on
 this shell, recorded here when made.
+
+## D586.74 — offers roadmap SHELVED at the final planning round (two residual blockers); owner decision needed to reopen (2026-09-09 01:20)
+
+Astra round 3 on the 792-line roadmap (sha256 e27b440c...): DO NOT
+DISPATCH with two blockers, everything else repaired and independently
+reproduced (Speed-sensitive capacities 60/50, 90/80, 30/20, 80/70 against
+SRD 11590; retreat/kite/disperse winners (3,0)/(6,0)/(0,0) with controls
+that remove the benefit; Grapple tree with the OA boundary, 441/2500 and
+weights 25/400, 336/400, 39/400, pressure 3/40; 6A1 constructor closure
+17 literals, zero diagnostics). Blocker 1: the bottleneck positive
+fixture still admits the bypass (0,0)->(1,0)->(2,0)->(3,1) for 15 ft with
+5 ft left, adjacent to the ally at (4,0), visible, no cover, melee
+resolved, because the movement world permits the diagonal into the
+vacated alcove (encounter-movement-world.ts:82); A is empty and the
+control proves nothing. Blocker 2: the legacy migration assigns
+grants:[] to every pre-ledger payload, so a lawful Dash -> move 10 state
+{60,10,50} refreshes to {30,10,20} and the earned Dash vanishes; the
+57 checked-in legacy fixtures have no boosted-capacity example, so
+migrating them would not catch it. Under the three-round cap the
+roadmap is SHELVED (fourth shelving in this family: offer-help-ready,
+grapple, reposition, now the combined roadmap). Plan file retained at
+.tmp-plans/2026-09-08-offers-roadmap.md on claude/p-offer-help.
+Supervisor assessment for the owner: both residual defects are narrow
+(one fixture geometry that must block the diagonal or choose another
+alcove shape; one migration rule that must carry earned grants or mark
+provenance unresolved with import witnesses for one-Dash, double-Dash
+and Flee). Reopening as a fresh planning unit from the current draft is
+the owner's call under D587.8; not launched autonomously.
