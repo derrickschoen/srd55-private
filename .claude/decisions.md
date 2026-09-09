@@ -22037,3 +22037,13 @@ probe confirms `codex exec` works.
 Q5 answered 2026-09-09 18:42 EDT: "No pin". The plan's S0 drops `engines` and `.nvmrc`; doctor records the installed Node/npm versions in its
 report and warns on a major-version mismatch with the recorded baseline but never fails on version. Alternatives not chosen:
 exact 24.13.0; floor >=24.
+
+## D595 — OWNER: owner-side art files stay uncommitted (2026-09-09)
+
+Q6 answered 2026-09-09 18:45 EDT: "Leave them uncommitted". The 16 emberkeep request JSONs, the terrain-low-wall request edit and the owner's
+art/requests/README.md edits remain working-tree changes in the main checkout; lanes never touch them; main merges must step
+around them (worktree-based landings already do). Alternatives not chosen: commit as the owner's; fold into a reviewed change.
+
+Supervisor (2026-09-09 18:45 EDT): codex availability probe (luna low, "READY") passed at 18:1x after the owner's usage reset; the plan r2 lane
+(resume 01a087af-14c8…, brief now carrying D593 WebSocket and D594 no-pin rulings) and the RCA r3 lane (resume 01a087c6…) were
+relaunched; exit sentinels in `.exit` files.
