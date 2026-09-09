@@ -21690,3 +21690,31 @@ Emberkeep floor is far too contrasty and repeats without variants; the
 wall is a front elevation that stripes instead of turning corners; the
 busts fit but their opaque bases hide the faction plate and the HP bar
 row. Owner-side request/delivery files remain uncommitted.
+
+## D586.159 — room D slice 2 final fix round harvested as candidate 212f1acb; supervisor run and FINAL Astra review launched; lane self-disclosed an interrupted sub-agent spawn (2026-09-09 12:45)
+
+Lane resume (real session 01a08599-…, 499,085 tokens, exit 0, marker
+present but ended "BLOCKED: accidental forbidden sub-agent invocation;
+implementation and verification otherwise complete"). The lane disclosed
+that it issued one sub-agent spawn with the task "x", interrupted it at
+once and used no output; the log carries no other agent call and no
+`claude -p`; the diff is exactly the two authorized files
+(+684/-582, a rewrite of the fault routine into consumed-boundary seams
+and an instrumentation context threaded into aggregateByFutureState /
+continuationSignature / exploreCommand). Supervisor disposition: recorded
+as a process finding against the lane (self-reported, immediately
+interrupted, no output consumed); the artifact is judged on the tree by
+the independent reviewer and on supervisor-run evidence, so it is not
+voided. Lane-claimed: retention ledger peak 3,284 (bound 3,348, derived
+cap 4,105, max 4,185); totals unchanged; the plan's same-start Longbow
+control (61 HP, equal revision, sequences 14/15); resourceEvidence typed
+in_process_unmeasured; focused 29/29 in 499 s; cumulative 149/150 with
+only the known inventory red, no timeouts. Supervisor verified: two-file
+scope, zero forbidden tokens, zero timeout changes, diff --check clean,
+frozen contract and plan hashes unchanged, my own sg scan 0 and tsc -b
+--force 0. Committed on claude/challenge-rooms as 212f1acb. Supervisor
+main-shaped run launched (focused spec + 150-path cumulative, full
+output on file, log mainshape-room-d-s2-r3.log). Astra round 3 (FINAL)
+launched read-only, no vitest (session 01a0870f-06f7-7fc0-bd0b-
+b3c3b408d614, brief review-room-d-s2-r3.md, log
+astra-review-room-d-s2-r3.log). A REJECT shelves slice 2.
