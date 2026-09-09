@@ -20944,3 +20944,16 @@ Verified by me: `sg scan` exit 0; manifest 5 OK; s2 report present;
 committed (hash per fanout log); my 193-spec cumulative running
 (cum-reconcile-s2.log). Astra round 1 launched (brief
 review-impl-reconcile-s2.md).
+
+## D586.123a — hashes and a launch misfire corrected (2026-09-09 05:50)
+
+Room D slices 0+1 candidate is 9781b93f on claude/challenge-rooms (Astra
+round 1 session 01a08591-d0f2-78a1-bcb2-2227aa5a95aa). Reconciliation
+slice 2 candidate is 7385dc13 on claude/trial-core-reconciliation.
+Finding against my own work: the first attempt to launch the slice-2
+review ran its brief-writing step from the reconcile worktree instead
+of the briefs directory, so the brief was never written and the codex
+launch failed on a missing stdin file before starting (no log, no
+process); caught on the next check, the brief written from the correct
+directory and the review launched (session
+01a08592-e083-7722-b966-37576cff44eb). No lane or review ran twice.
