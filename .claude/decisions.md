@@ -21718,3 +21718,41 @@ output on file, log mainshape-room-d-s2-r3.log). Astra round 3 (FINAL)
 launched read-only, no vitest (session 01a0870f-06f7-7fc0-bd0b-
 b3c3b408d614, brief review-room-d-s2-r3.md, log
 astra-review-room-d-s2-r3.log). A REJECT shelves slice 2.
+
+## D586.160 — room D slice 2 SHELVED at the final review round (Astra REJECT round 3); owner ruling needed to reopen (2026-09-09 12:51)
+
+Astra (session 01a0870f-06f7-7fc0-bd0b-b3c3b408d614) on 212f1acb: REJECT.
+Closed: B3 (distributions), B4 (the plan's same-start Longbow control —
+Astra reproduced 67 HP fixture, 1d8+2, 61/61, revisions 6/6, sequences
+14/15 in memory), the resource should-fix under the supervisor's
+disposition (in_process_unmeasured, no wall/heap claim), no new
+state-merging / float / D583 change; non-D callers pass no
+instrumentation context, so B/C/A behaviour is unchanged; most controls
+now behavioural (menu validation, attack_local_no_damage_mass,
+component_grouping_collision, second_attack_line_mass, trace validators,
+incomplete_replay_accounting, hidden_automatic_boundary, raw-oracle
+fixture perturbations). Residual blockers: (1) the retention ledger is
+still incomplete — populated leaves are unregistered while sampled
+(~1537), roomDPop samples with the popped live node absent (~1555,
+~1968), the local attack accumulator (~1348) is not in attackMassCells,
+and replay/checkpoint sets are hand-made markers (~1359-1364) rather
+than the real containers — so 3,284 is the peak of the registered
+ledger, completeness unproved; (2) the boundary counters are now
+incremented inside exploreCommand / continuationSignature /
+aggregateByFutureState (2423/2505/2545), but the aggregation, retention
+and provenance seams still call roomDAssertForbiddenMeasurements
+directly (1672/1485/1819) instead of letting the normal completed-
+measurement validator (~2215) fail; (3) three controls remain
+fault-specific: wrong_cover_after_death throws unconditionally (~1857),
+the headroom seams manufacture `observed > observed-1` (wall `0 > -1`),
+the seven fixed-limit seams lower thresholds instead of injecting
+measurements past the immutable limits, and the limit+1 tests call the
+classifier directly. Should-fix: the four AC/HP names are accepted
+injectFault values with no implementation. Three review rounds are
+spent: slice 2 is SHELVED with candidate 212f1acb on
+claude/challenge-rooms (not merged), the room D question stays
+unanswered at the bounded level, slice 3 (fresh-process CLI) does not
+start. Reopening needs an owner ruling (as for promo180 Slice H,
+D586.106); the residual list above is precise enough for one more fix
+round if reopened. The supervisor main-shaped run of 212f1acb continues
+to completion for the record.
