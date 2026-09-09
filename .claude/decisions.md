@@ -21768,3 +21768,30 @@ under the parallel run). No serial rerun: the candidate is shelved
 (D586.160); the evidence is recorded, not used to close a contract. Temp
 clone deleted. Machine now quiet (no arena/vitest/Playwright/gate
 process, load1 0.63) — D569 preflight recheck follows.
+
+## D586.162 — D569 v5 FIRST ARM LAUNCH DECISION: gpt-5.6-luna-blind, primary family, 60 rows (2026-09-09 13:07)
+
+Preflight recheck executed verbatim on the quiet machine (log
+d569-v5/recheck-1307.log): 2.1 `REVISION AND EXTERNAL HASHES PASS`; 2.2
+verify `check-manifest.ts: OK` + `D569 MANIFEST PASS … raw=8c0bcb3c…
+canonical=0316244a…`; 2.3 `codex-cli 0.153.4`, `MODEL IDENTITY PASS
+slug=gpt-5.6-luna effort=high`; 2.4 `LOAD/PID/PORT PASS load1=0.92
+port=4530-free` (the busy-process guard passed with the stale loops gone);
+3.1 collision check passed (no production artifact exists). Earlier: 2.5
+dry-run `D569 ROW VALIDATION PASS … rows=60`, 3.2 installs and verifies
+PASS (D586.156/157).
+
+Decision (supervisor, per plan section 9 and the owner's standing
+rulings): LAUNCH the first v5 arm now — arm gpt-5.6-luna-blind, model
+gpt-5.6-luna high, dmMode blind, code_only repair, max attempts 3, facts
+off, transport mcp_minimal, board PNG, 65,536-byte cap, KB
+tests/fixtures/ai-dm-kb/d569/ai-dm-core.md, timeout 240,000 ms, fresh
+session per cell, escalation and model-default fallback disabled; hard
+seeds 5117001-5117010 then brutal 6203001-6203010, reps 3, 30 + 30 rows;
+port 4530; isolated home ~/.codex-aidm; launch commit 90484d45 on
+claude/blind-dm. Expected wall ~68-110 min (extrapolated from the astra/
+sol arms). Nothing else is launched on the machine while it runs; the
+owner's 4173 is untouched. Section 3.2 provenance record then 3.3
+production command follow immediately, verbatim from runbook sha
+84326354…; post-arm validation (4.1) and everything after remain
+separate steps, and packets wait for the comparison's second arm.
