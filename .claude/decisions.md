@@ -20434,3 +20434,25 @@ corrected afterward" is not identifiable in the diff. Fix round 3 of 3
 impl-promo180-h-r3.md, marker PROMO180-H-R3 DONE) carrying Astra's
 three blockers, the should-fix, and my two cumulative reds with the
 arena assertion diff pasted.
+
+## D586.99 — txn slice 3: cumulative fully green, merged into main; slice 4 reconciliation dispatched as a planning unit (2026-09-09 03:15)
+
+Supervisor cumulative on c4e525c3 (writable checkout, load about 4):
+tsc exit 0; 19 files, 19 passed; 446 tests, 446 passed; vitest exit 0;
+no timeouts, no serial rerun needed. With Astra's acceptance on merits
+(D586.97) the slice is accepted; merged claude/p-txn into main as e09feecc
+(clean). Both first consumers now use the transaction on main. Slice 4
+per the plan: engine-round-application.ts exists on the accepted
+challenge branch (ce081ef0) and conflicts with main, so the extraction
+STOPs at reconciliation and a focused semantic integration plan is
+written first, taking Astra's read (D586.97) as input: decide shared
+trial core versus replacement while preserving caller-owned checkpoint
+rollback, events, DrawRecord history and the feasibility accounting on
+one side, and session-wide atomicity, completed-only publication, exact
+error identity, distinct initial-boundary policies and the narrow
+program port on the other; keep both sides' behavioural assertions.
+Planning lane dispatched fresh on the txn worktree at c4e525c3 (brief
+plan-trial-core-reconciliation.md, plan file
+.tmp-plans/2026-09-09-trial-core-reconciliation.md, marker
+PLAN-RECONCILE DONE); it reads the challenge side through read-only git
+commands. Astra reviews up to three rounds.
