@@ -21008,3 +21008,16 @@ calls for D, streamed terminals, incomplete attempts charged, and
 before/after sampling through the checked sampler; the plan's twelve
 control classes; STOP with exact counters on any fixed or headroom
 overflow; no CLI (slice 3 later).
+
+## D586.127 — reconciliation slice 2 cumulative closed at 4159/4159; should-fix round resumed (2026-09-09 06:00)
+
+Supervisor cumulative on 7385dc13 (writable checkout): tsc 0; 193
+files, 192 passed / 1 failed; 4159 tests, 4158 passed / 1 failed; the
+single red a 5,000 ms timeout in the inherited screenshot primer; D587.3
+serial rerun of that file: 26/26, exit 0 (started 05:59 at load 1.6);
+reconciled 4159/4159, zero skipped. Astra's only blocker is closed by
+supervisor evidence. Fix round 2 resumed on the same session
+01a08530-a935-7832-b3e1-38e592d7c1c9 (brief impl-reconcile-s2-r2.md,
+marker RECONCILE-S2-R2 DONE) for the should-fix alone: assert the
+complete event sequence at test:193; the closing round goes to Astra
+with the evidence afterwards.
