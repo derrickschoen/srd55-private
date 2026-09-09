@@ -20784,3 +20784,19 @@ matches `claude -p`; staged everything and committed the merge as
 checkout at load 2.3 (cum-reconcile-s1.log). Astra round 1 launched
 (brief review-impl-reconcile-s1.md, session
 01a08552-4efd-7e00-b5c1-ff36506599ba).
+
+## D586.116 — main gate on d95cafb6: vitest GREEN; Playwright stage VOID (runner ended without its JSON report); browser-only rerun queued (2026-09-09 04:43)
+
+Gate wt-main-493121dd on d95cafb6 (started 03:43, GATES DONE 04:42): tsc
+0; sg 0; vitest-gate exit 0 (one load flake, room-generator-los-cover,
+passed serially; FAILED none). Playwright: the initial phase ran 45 min
+and exited 1 with two 30 s-class timeouts (homebrew-draft-save-truth
+26.9 s; sharing.spec 30 s, "browserContext.close: Test ended") while the
+room-D and reconciliation lanes ran vitest on the box, and the runner
+did not write its reporter JSON (reporterReadError ENOENT, results
+empty), so the gate's retry phase had nothing to classify and reported
+exit 1. Treated as a void browser stage, not a code red: no assertion
+failure is recorded, and 186/186 passed on the previous revision one
+hour earlier. Browser-only rerun queued behind the reconcile cumulative
+with a 4870 check (browser-main-queued.sh -> gate-wt-main-493121dd.
+browser2.log). The vitest result for d95cafb6 stands.
