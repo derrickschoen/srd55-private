@@ -19364,3 +19364,40 @@ brief states the new HEAD. Not yet compiled by me; the lane's
 Still running: elevation Astra review, promo180 plan Astra round 1,
 heldout fix round 2, txn plan round 2, main gate browser stage
 (vitest-gate exit 0, Playwright on 4870).
+
+## D586.53 — elevation REJECT, promo180 plan DO NOT DISPATCH, txn plan round 2 done; three more dispatches; main merged into claude/p-promo180 (2026-09-08 23:59)
+
+- Elevation slice 1, review round 1: REJECT confined to
+  tools/d584-contract-inventory.ts; the domain foundation PASSED (ten
+  allowed files, seven trace probes reproduced, three compile-time
+  mutants killed, both runtime mutants reproduced, app+node tsc 0
+  diagnostics, sg scan 0). Blockers: baseline paths excluded without
+  blob/SHA comparison (a mutated owned baseline yielded no collision)
+  and a HEAD == dispatch-HEAD requirement that rejects the committed
+  tree; a deleted required spec is silently filtered and the CLI still
+  succeeds; text-matched imports count comments/strings as edges.
+  Should-fix: producer control by transitive reachability. Fix round 2
+  resumed on 01a0839a-d233-7ff2-9b43-1caa02af5e10 (brief
+  impl-elevation-s1-r2.md, marker ELEVATION-S1-R2 DONE).
+- Promo180 plan, review round 1: DO NOT DISPATCH. Blockers: panel
+  wiring started from .bak-opus5 and omits advisory_status /
+  historical provenance; the Sol projection breaks the unchanged
+  extractor for luna-escalated authorized rows (extract-sft.ts:475,
+  :353); labelled rows, engine rows, adjudications, notes and
+  certificates sit outside protected/ so chmod 000 isolates nothing;
+  the D584.4 inventory omits the external judge scripts and two
+  consumers; the phase-0 trap ends before judging/extraction. Four
+  should-fixes (main drift, genericity mutation, missingness, two
+  citation slips). Supervisor merged main (65fcfcad) into
+  claude/p-promo180 as b6040267 (clean) before the resume. Round 2
+  resumed on 01a08310-5f9b-7570-96d9-1a3fd906066b (brief
+  plan-promo180-r3.md, marker PLAN-PROMO180-R2 DONE).
+- Txn plan round 2: lane exit 0, PLAN-TXN-R2 DONE, plan 379 lines,
+  sha256 8075a610... (verified by me), ten dispositions all "fixed",
+  tree clean; the only `claude -p` string in the log is the echoed
+  rules header. Astra review round 2 launched (brief
+  review-plan-txn-r2.md, session 01a08451-3587-74b2-9e9c-e2f0673ed5bb).
+
+Running now: heldout fix r2, offers plan r2, D569 panel plan r3
+(final), challenge s3 fix r2, elevation fix r2, promo180 plan r2, txn
+Astra r2, main gate browser stage.
