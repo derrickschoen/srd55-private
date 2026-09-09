@@ -20011,3 +20011,21 @@ rerun (--no-file-parallelism), queued behind the txn cumulative so the
 box is quieter (cum-d569-a2-serial-queued.sh -> cum-d569-a2-serial.log);
 budgets untouched. If the rerun is green the D584.4 contract for the
 amendment closes; the launch preflight and oracle re-capture remain.
+
+## D586.78 — txn slice 1 round 2: code accepted in substance, verdict REJECT only on the pending cumulative (2026-09-09 01:40)
+
+Astra round 2 on 4a1e2617: "REJECT" with a single blocker that is the
+supervisor's, not the lane's: the D584.4 cumulative acceptance remains
+incomplete (the lane's sandbox run was 390/443 with 19 explicit EROFS
+failures and 34 downstream symptoms; Astra found no independently
+established non-EROFS regression). "No implementation blocker
+identified." Round-1 fixes verified: the outer rollback consumes two
+draws matching an independently stepped Mulberry32 and the zero-draw
+mutant now fails; both error assertions are identity and the cloned-
+error mutant kills both; all six mutations reconstructed in memory with
+every before/mutant/restored hash matching the log and restored bytes
+equal to HEAD; capture logs match, six stored captures equal (696,676
+bytes, 29ca2ded...); guard traversal 72/4; sg and diff --check clean.
+Disposition: no lane dispatch. The supervisor cumulative on 4a1e2617 is
+running (cum-txn-s1-r2.log, started 01:34); its result plus any D587.3
+serial rerun goes back to Astra as the round-3 closing evidence.
