@@ -1164,7 +1164,7 @@ const D575_JUDGE_PLAYER_MODELS = Object.freeze([
   'claude-opus-5', 'claude-fable-5', 'gpt-5.6-sol',
 ] as const);
 
-/** The ten D575 packet-layer identities consumed by later experiment manifests. */
+/** Historical D575-only identities; preserve recorded models and never use this registry for D569 v5 or a new experiment. */
 export const D575_PAIRWISE_COMPARISON_IDENTITIES = Object.freeze([
   ...[D575_LUNA_MODEL, ...D575_JUDGE_PLAYER_MODELS].map((model) => ({
     name: `${model}-blind-vs-advice`,
@@ -1179,7 +1179,7 @@ export const D575_PAIRWISE_COMPARISON_IDENTITIES = Object.freeze([
     }))),
 ] satisfies readonly D575PairwiseComparisonIdentity[]);
 
-/** Builds the preregistered D575 comparisons without changing the standing two-arm judge format. */
+/** Rebuilds archived D575 comparisons only; it is not a current player-arm registry. */
 export function buildD575PairwiseRerunPackets(
   rows: readonly JsonRecord[],
   shuffleSeeds: Readonly<Record<string, number>>,

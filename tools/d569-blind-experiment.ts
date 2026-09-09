@@ -28,7 +28,7 @@ export const D569_REPS = 3 as const;
 
 export const D569_PLAYER_MODELS = Object.freeze([
   'gpt-5.6-luna',
-  'claude-opus-5',
+  'claude-opus-4-8',
   'gpt-5.6-sol',
   'gpt-6-astra',
 ] as const);
@@ -55,13 +55,22 @@ export const D569_PREREGISTRATION_AMENDMENTS = Object.freeze([
     date: '2026-09-08',
     reason: 'Owner ruling D586.24 requires Astra at high effort for a fair comparison with Sol high; this amendment was recorded before any Astra player arm was run or scored.',
   },
+  {
+    id: 'replace-opus-and-notes-only-panel',
+    timing: 'pre-opus-4-8-player-run-and-new-panel-scoring',
+    date: '2026-09-08',
+    reason: 'Owner rulings replace every active claude-opus-5 use with claude-opus-4-8 and set claude-fable-5-1, gpt-6-astra, and gpt-5.6-sol at high effort as the scoring panel; claude-opus-4-8 supplies labelled notes only and never participates in analysis or decisions.',
+  },
 ] as const);
 
-export const D569_JUDGE_PANEL_IDENTITIES = Object.freeze([
-  { id: 'gpt-5.6-sol', model: 'gpt-5.6-sol', effort: 'high' },
-  { id: 'claude-opus-5', model: 'claude-opus-5', effort: 'high' },
-  { id: 'gpt-6-astra', model: 'gpt-6-astra', effort: 'high' },
+export const D569_SCORING_PANEL_IDENTITIES = Object.freeze([
+  { id: 'claude-fable-5-1', model: 'claude-fable-5-1', effort: 'high', role: 'scoring' },
+  { id: 'gpt-6-astra', model: 'gpt-6-astra', effort: 'high', role: 'scoring' },
+  { id: 'gpt-5.6-sol', model: 'gpt-5.6-sol', effort: 'high', role: 'scoring' },
 ] as const);
+export const D569_ADVISORY_NOTES_SOURCE = Object.freeze({
+  id: 'claude-opus-4-8', model: 'claude-opus-4-8', effort: 'high', role: 'advisory_notes',
+} as const);
 
 export const D569_CORE_ARM_IDENTITIES = Object.freeze(D569_PLAYER_MODELS.flatMap((model) =>
   (['blind', 'advice'] as const).map((dmMode) => ({
@@ -88,7 +97,7 @@ export const D569_HINT_ARM_IDENTITIES = Object.freeze([
   },
 ] as const);
 
-const ALL_JUDGE_SEAT_IDS = Object.freeze(D569_JUDGE_PANEL_IDENTITIES.map((seat) => seat.id));
+const ALL_SCORING_SEAT_IDS = Object.freeze(D569_SCORING_PANEL_IDENTITIES.map((seat) => seat.id));
 
 export const D569_ANALYSIS_COMPARISONS = Object.freeze([
   {
@@ -96,91 +105,91 @@ export const D569_ANALYSIS_COMPARISONS = Object.freeze([
     leftArm: 'gpt-5.6-luna-blind',
     rightArm: 'gpt-5.6-luna-advice',
     estimand: 'blind_minus_own_advice' as const,
-    eligibleJudgeSeats: ALL_JUDGE_SEAT_IDS,
+    eligibleJudgeSeats: ALL_SCORING_SEAT_IDS,
   },
   {
-    id: 'claude-opus-5-blind-vs-advice',
-    leftArm: 'claude-opus-5-blind',
-    rightArm: 'claude-opus-5-advice',
+    id: 'claude-opus-4-8-blind-vs-advice',
+    leftArm: 'claude-opus-4-8-blind',
+    rightArm: 'claude-opus-4-8-advice',
     estimand: 'blind_minus_own_advice' as const,
-    eligibleJudgeSeats: ALL_JUDGE_SEAT_IDS,
+    eligibleJudgeSeats: ALL_SCORING_SEAT_IDS,
   },
   {
     id: 'gpt-5.6-sol-blind-vs-advice',
     leftArm: 'gpt-5.6-sol-blind',
     rightArm: 'gpt-5.6-sol-advice',
     estimand: 'blind_minus_own_advice' as const,
-    eligibleJudgeSeats: ALL_JUDGE_SEAT_IDS,
+    eligibleJudgeSeats: ALL_SCORING_SEAT_IDS,
   },
   {
-    id: 'gpt-5.6-luna-vs-claude-opus-5-blind',
+    id: 'gpt-5.6-luna-vs-claude-opus-4-8-blind',
     leftArm: 'gpt-5.6-luna-blind',
-    rightArm: 'claude-opus-5-blind',
+    rightArm: 'claude-opus-4-8-blind',
     estimand: 'luna_minus_judge_within_mode' as const,
-    eligibleJudgeSeats: ALL_JUDGE_SEAT_IDS,
+    eligibleJudgeSeats: ALL_SCORING_SEAT_IDS,
   },
   {
     id: 'gpt-5.6-luna-vs-gpt-5.6-sol-blind',
     leftArm: 'gpt-5.6-luna-blind',
     rightArm: 'gpt-5.6-sol-blind',
     estimand: 'luna_minus_judge_within_mode' as const,
-    eligibleJudgeSeats: ALL_JUDGE_SEAT_IDS,
+    eligibleJudgeSeats: ALL_SCORING_SEAT_IDS,
   },
   {
-    id: 'gpt-5.6-luna-vs-claude-opus-5-advice',
+    id: 'gpt-5.6-luna-vs-claude-opus-4-8-advice',
     leftArm: 'gpt-5.6-luna-advice',
-    rightArm: 'claude-opus-5-advice',
+    rightArm: 'claude-opus-4-8-advice',
     estimand: 'luna_minus_judge_within_mode' as const,
-    eligibleJudgeSeats: ALL_JUDGE_SEAT_IDS,
+    eligibleJudgeSeats: ALL_SCORING_SEAT_IDS,
   },
   {
     id: 'gpt-5.6-luna-vs-gpt-5.6-sol-advice',
     leftArm: 'gpt-5.6-luna-advice',
     rightArm: 'gpt-5.6-sol-advice',
     estimand: 'luna_minus_judge_within_mode' as const,
-    eligibleJudgeSeats: ALL_JUDGE_SEAT_IDS,
+    eligibleJudgeSeats: ALL_SCORING_SEAT_IDS,
   },
   {
     id: 'gpt-5.6-luna-blind-vs-gpt-5.6-sol-advice-ceiling',
     leftArm: 'gpt-5.6-luna-blind',
     rightArm: 'gpt-5.6-sol-advice',
     estimand: 'blind_minus_advice_ceiling' as const,
-    eligibleJudgeSeats: ALL_JUDGE_SEAT_IDS,
+    eligibleJudgeSeats: ALL_SCORING_SEAT_IDS,
   },
   {
     id: 'gpt-6-astra-blind-vs-advice',
     leftArm: 'gpt-6-astra-blind',
     rightArm: 'gpt-6-astra-advice',
     estimand: 'blind_minus_own_advice' as const,
-    eligibleJudgeSeats: ALL_JUDGE_SEAT_IDS,
+    eligibleJudgeSeats: ALL_SCORING_SEAT_IDS,
   },
   {
     id: 'gpt-5.6-luna-vs-gpt-6-astra-blind',
     leftArm: 'gpt-5.6-luna-blind',
     rightArm: 'gpt-6-astra-blind',
     estimand: 'luna_minus_judge_within_mode' as const,
-    eligibleJudgeSeats: ALL_JUDGE_SEAT_IDS,
+    eligibleJudgeSeats: ALL_SCORING_SEAT_IDS,
   },
   {
     id: 'gpt-5.6-luna-vs-gpt-6-astra-advice',
     leftArm: 'gpt-5.6-luna-advice',
     rightArm: 'gpt-6-astra-advice',
     estimand: 'luna_minus_judge_within_mode' as const,
-    eligibleJudgeSeats: ALL_JUDGE_SEAT_IDS,
+    eligibleJudgeSeats: ALL_SCORING_SEAT_IDS,
   },
   {
     id: 'gpt-6-astra-vs-gpt-5.6-sol-blind',
     leftArm: 'gpt-6-astra-blind',
     rightArm: 'gpt-5.6-sol-blind',
     estimand: 'astra_minus_sol_within_mode' as const,
-    eligibleJudgeSeats: ALL_JUDGE_SEAT_IDS,
+    eligibleJudgeSeats: ALL_SCORING_SEAT_IDS,
   },
   {
     id: 'gpt-6-astra-vs-gpt-5.6-sol-advice',
     leftArm: 'gpt-6-astra-advice',
     rightArm: 'gpt-5.6-sol-advice',
     estimand: 'astra_minus_sol_within_mode' as const,
-    eligibleJudgeSeats: ALL_JUDGE_SEAT_IDS,
+    eligibleJudgeSeats: ALL_SCORING_SEAT_IDS,
   },
 ]);
 
@@ -208,7 +217,7 @@ const comparisonSchema = z.strictObject({
     'blind_minus_advice_ceiling',
     'astra_minus_sol_within_mode',
   ]),
-  eligibleJudgeSeats: z.array(z.enum(D569_JUDGE_PANEL_IDENTITIES.map((seat) => seat.id))),
+  eligibleJudgeSeats: z.array(z.enum(D569_SCORING_PANEL_IDENTITIES.map((seat) => seat.id))),
 });
 const repairComparisonSchema = z.strictObject({
   id: z.string(),
@@ -218,7 +227,7 @@ const repairComparisonSchema = z.strictObject({
 });
 
 export const d569ExperimentManifestSchema = z.strictObject({
-  version: z.literal('d569-blind-experiment-v4'),
+  version: z.literal('d569-blind-experiment-v5'),
   preregistrationAmendments: z.tuple([
     z.strictObject({
       id: z.literal('refusal-risk-upper-bound'),
@@ -245,6 +254,14 @@ export const d569ExperimentManifestSchema = z.strictObject({
       date: z.literal('2026-09-08'),
       reason: z.literal(
         'Owner ruling D586.24 requires Astra at high effort for a fair comparison with Sol high; this amendment was recorded before any Astra player arm was run or scored.',
+      ),
+    }),
+    z.strictObject({
+      id: z.literal('replace-opus-and-notes-only-panel'),
+      timing: z.literal('pre-opus-4-8-player-run-and-new-panel-scoring'),
+      date: z.literal('2026-09-08'),
+      reason: z.literal(
+        'Owner rulings replace every active claude-opus-5 use with claude-opus-4-8 and set claude-fable-5-1, gpt-6-astra, and gpt-5.6-sol at high effort as the scoring panel; claude-opus-4-8 supplies labelled notes only and never participates in analysis or decisions.',
       ),
     }),
   ]),
@@ -322,28 +339,50 @@ export const d569ExperimentManifestSchema = z.strictObject({
   }),
   trainingSeeds: z.array(z.number().int().nonnegative()),
   judgePanel: z.strictObject({
-    seats: z.tuple([
+    scoringSeats: z.tuple([
       z.strictObject({
-        id: z.literal('gpt-5.6-sol'), model: z.literal('gpt-5.6-sol'), effort: z.literal('high'),
+        id: z.literal('claude-fable-5-1'), model: z.literal('claude-fable-5-1'),
+        effort: z.literal('high'), role: z.literal('scoring'),
       }),
       z.strictObject({
-        id: z.literal('claude-opus-5'), model: z.literal('claude-opus-5'), effort: z.literal('high'),
+        id: z.literal('gpt-6-astra'), model: z.literal('gpt-6-astra'),
+        effort: z.literal('high'), role: z.literal('scoring'),
       }),
       z.strictObject({
-        id: z.literal('gpt-6-astra'), model: z.literal('gpt-6-astra'), effort: z.literal('high'),
+        id: z.literal('gpt-5.6-sol'), model: z.literal('gpt-5.6-sol'),
+        effort: z.literal('high'), role: z.literal('scoring'),
       }),
     ]),
+    advisoryNotesStage: z.strictObject({
+      source: z.strictObject({
+        id: z.literal('claude-opus-4-8'), model: z.literal('claude-opus-4-8'),
+        effort: z.literal('high'), role: z.literal('advisory_notes'),
+      }),
+      stageOrder: z.tuple([
+        z.literal('advisory_notes_first'), z.literal('scoring_panel_second'),
+      ]),
+      advisoryTransmission: z.literal('labelled_per_entry_note_text_only'),
+      advisoryPromptNoteMaxWords: z.literal(15),
+      advisoryNoteMaxChars: z.literal(120),
+      advisoryInvalidPolicy: z.literal('nonzero_exit_or_invalid_existing_output_becomes_empty_block'),
+      advisoryExposureStatuses: z.tuple([z.literal('notes'), z.literal('empty')]),
+      advisoryAnalysisPolicy: z.literal('exposure_status_only_source_artifact_never_loaded'),
+      scoringSeatAdvisoryPolicy: z.literal('consider_or_ignore_untrusted_no_weight_no_anchor'),
+    }),
+    advisoryCoveragePolicy: z.literal('notes_stage_before_every_scored_packet'),
+    armScoringPolicy: z.literal('all_scoring_seats_score_every_active_arm'),
     seatEligibilityPolicy: z.literal('all_registered_seats_every_comparison'),
-    comparisonSeatPolicy: z.literal('same_seat_set_both_sides'),
-    sessionPolicy: z.literal('fresh_session_per_packet'),
+    comparisonSeatPolicy: z.literal('same_scoring_seat_set_both_sides'),
+    sessionPolicy: z.literal('fresh_session_per_source_and_scoring_seat_per_packet'),
     packetExcludes: z.tuple([
       z.literal('decision_conversation'),
       z.literal('arm_identities'),
       z.literal('answer_key'),
-      z.literal('other_seat_scores'),
+      z.literal('other_scoring_seat_scores'),
+      z.literal('opus_numeric_fields'),
     ]),
     selfPlayScoringPolicy: z.literal('allowed_only_from_fresh_context'),
-    aggregationPolicy: z.literal('equal_weight_all_registered_seats'),
+    aggregationPolicy: z.literal('equal_weight_three_scoring_seats_only'),
     perSeatReportingPolicy: z.literal('diagnostic_only'),
     minimumConsensusSeats: z.literal(3),
   }),
@@ -454,8 +493,12 @@ export function validateD569ExperimentManifest(
     'hint_arm_set', 'manifest must contain the three preregistered hint diagnostics');
   addViolation(violations, canonicalEqual(manifest.analysisComparisons, D569_ANALYSIS_COMPARISONS),
     'analysis_comparison_set', 'manifest must contain the amended active and advice-ceiling comparisons');
-  addViolation(violations, canonicalEqual(manifest.judgePanel.seats, D569_JUDGE_PANEL_IDENTITIES),
-    'judge_panel', 'judge panel must contain the exact preregistered Sol, Opus, and Astra seats');
+  addViolation(violations,
+    canonicalEqual(manifest.judgePanel.scoringSeats, D569_SCORING_PANEL_IDENTITIES),
+    'judge_panel', 'judge panel must contain the exact preregistered Fable, Astra, and Sol scoring seats');
+  addViolation(violations,
+    canonicalEqual(manifest.judgePanel.advisoryNotesStage.source, D569_ADVISORY_NOTES_SOURCE),
+    'advisory_notes_source', 'advisory notes must come only from the preregistered Opus 4.8 source');
   addViolation(violations, canonicalEqual(manifest.repairComparisons, REQUIRED_REPAIR_COMPARISONS),
     'repair_comparison_set', 'manifest must contain all three advice-assisted repair comparisons');
   addViolation(violations,
@@ -479,8 +522,8 @@ export function validateD569ExperimentManifest(
     addViolation(violations, left !== undefined && right !== undefined,
       'dangling_comparison_arm', `comparison ${comparison.id} references an inactive arm`);
     if (left === undefined || right === undefined) continue;
-    const expectedSeats = ALL_JUDGE_SEAT_IDS;
-    const registeredSeats = manifest.judgePanel.seats.filter((seat) =>
+    const expectedSeats = ALL_SCORING_SEAT_IDS;
+    const registeredSeats = manifest.judgePanel.scoringSeats.filter((seat) =>
       comparison.eligibleJudgeSeats.includes(seat.id));
     addViolation(violations, canonicalEqual(comparison.eligibleJudgeSeats, expectedSeats),
       'judge_eligibility', `comparison ${comparison.id} must use all three registered judge seats`);
@@ -1101,7 +1144,7 @@ export function analyzeD569Pair(
   if (comparison === undefined || registered === undefined || !canonicalEqual(comparison, registered)) {
     throw new TypeError(`Registered analysis requires the exact comparison ${input.comparisonId}.`);
   }
-  if (!canonicalEqual(input.manifest.judgePanel.seats, D569_JUDGE_PANEL_IDENTITIES)) {
+  if (!canonicalEqual(input.manifest.judgePanel.scoringSeats, D569_SCORING_PANEL_IDENTITIES)) {
     throw new TypeError('Registered analysis requires the exact registered judge panel identities.');
   }
   const selected = rows.filter((row) => row.family === input.family && row.basis === input.basis &&
@@ -1138,6 +1181,12 @@ export function analyzeD569DiagnosticPair(
     readonly bootstrapSeed: number;
   },
 ): D569DiagnosticPairAnalysis {
+  const registeredScoringSeats = new Set<string>(ALL_SCORING_SEAT_IDS);
+  if (input.diagnosticJudgeSeats.length === 0 ||
+    new Set(input.diagnosticJudgeSeats).size !== input.diagnosticJudgeSeats.length ||
+    input.diagnosticJudgeSeats.some((seat) => !registeredScoringSeats.has(seat))) {
+    throw new TypeError('diagnostic subset may contain only registered scoring seats');
+  }
   const selected = rows.filter((row) => row.family === input.family && row.basis === input.basis &&
     (row.arm === input.leftArm || row.arm === input.rightArm));
   requireExactSeatSet(selected, input.diagnosticJudgeSeats, 'diagnostic subset');

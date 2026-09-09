@@ -4,11 +4,12 @@ import {
   D569_BOOTSTRAP_RESAMPLES,
   D569_ANALYSIS_COMPARISONS,
   D569_CORE_ARM_IDENTITIES,
+  D569_ADVISORY_NOTES_SOURCE,
   D569_EXPERIMENT_MANIFEST_PATH,
   D569_HINT_ARM_IDENTITIES,
-  D569_JUDGE_PANEL_IDENTITIES,
   D569_PREREGISTRATION_AMENDMENTS,
   D569_REFUSAL_RISK_MARGIN,
+  D569_SCORING_PANEL_IDENTITIES,
   REQUIRED_REPAIR_COMPARISONS,
   D569_SECOND_FAMILY_MANIFEST_PATH,
   analyzeD569DiagnosticPair,
@@ -132,44 +133,148 @@ const EXPECTED_V4_AMENDMENTS = [
   },
 ] as const;
 
-const EXPECTED_CORE_ARMS = [
+const EXPECTED_V4_FROZEN_INPUT_HASHES = [
+  ['sharedKb.combinedStartupHash', '9a20176b897ca67233c9402b0dbbb8806dc9f7f12c00c91326942737563b99a5'],
+  ['sharedKb.componentHashes.root', '19f66c81a0a1c8641a7cc4a3844e5cdd0b49ce72cd056ad72b8932d37085f260'],
+  ['sharedKb.componentHashes.tactics', '4b78bdf95f86bc1a8f7078e96bfb2b2485d0cd35babe1871adbfdfcb8d34f2f7'],
+  ['sharedKb.componentHashes.actions', '551561024a73750fb250d88d7b64c2a357bb6de5bb2f6dcb99755511a859bbd6'],
+  ['sharedKb.componentHashes.movement', '549fc7e27d73ea4250b00c94b4c17067c440c2cdf905e003b4c11e153a0e6c3d'],
+  ['sharedKb.componentHashes.targeting', 'da6c04dacb471ef9a8b1bd60f5229418ab25a692b0a86d8a41e10248ac5b98e3'],
+  ['sharedKb.componentHashes.spells', 'a8e618a972ce98ca4fb5a025229f1d3c08a6bf0bdf297f637d2e68a3d472a13f'],
+  ['sharedKb.componentHashes.conditions', 'f57bd5ab6c9626cb9182316f5fb10f8ad2b998758c1dd1ad44c37ce4ded80ae9'],
+  ['sharedKb.componentHashes.reactions', '7c775e9710d57648dd2dbfa6a99159e1e5dc1d0eaa6a89ecb80493579ecd6918'],
+  ['sharedKb.componentHashes.protocol', '549aa50b115b07293cdd86e2370be1eb99d09d59cb76dcc0d103356be8631ea6'],
+  ['adviceCeiling.commonKbHash', '9a20176b897ca67233c9402b0dbbb8806dc9f7f12c00c91326942737563b99a5'],
+  ['primaryCohorts[0].fixtures[0].sha256', 'fb5c2811fa4751b4e3e25f1f2aa4fac74c1235aee998f7a232f24b70164d132d'],
+  ['primaryCohorts[0].fixtures[1].sha256', '85daa5615a594cd3cc89f19d605946e33975954ecdae8204b5df216ce3e804ff'],
+  ['primaryCohorts[0].fixtures[2].sha256', '67e4ab39e3a7c89e8d96d1deadcb67820c848c78a0ca5fa0a3d8ed40b45007fb'],
+  ['primaryCohorts[0].fixtures[3].sha256', 'a23f8912e86d84d091633cd3494af0d886731a7c13af74fdb915d209d8f96e30'],
+  ['primaryCohorts[0].fixtures[4].sha256', '8caae8d94f1eeb9ac46f6cabb2ad3578bc1f63b921e59e00911935827d0bac4c'],
+  ['primaryCohorts[0].fixtures[5].sha256', '04b6f6af41237fd30e5d486d26d44e929a29ddd5df5cc9689010f5b7fa54e11d'],
+  ['primaryCohorts[0].fixtures[6].sha256', '2eb3ff898ebb3e413ef30cbcf9d7611553f4c38b8bfe9135e665ce011ff9b45a'],
+  ['primaryCohorts[0].fixtures[7].sha256', 'b59c2a1f6360b80db375363faad7e2212ffaa3db09ed25428c9d8f91ad580805'],
+  ['primaryCohorts[0].fixtures[8].sha256', 'b679f1135883166b7a151e95ac969cc4b7d474d10cd180cac85a9a416eb6898a'],
+  ['primaryCohorts[0].fixtures[9].sha256', '6388153ab3eec04b77475f328d38b837de1f571c41aeaf6cfcf8a5fd62b44e94'],
+  ['primaryCohorts[1].fixtures[0].sha256', '3f737f1ddf714b0381abdc0e822b3a07cda4c55287a4bc0b1a97cd4d7d71d63b'],
+  ['primaryCohorts[1].fixtures[1].sha256', '8a7738bd2606792bae65da8f39f709ffad5b0bb5487f8e5749cecac4f29f9860'],
+  ['primaryCohorts[1].fixtures[2].sha256', 'd54761b2864fcdc1a777f645ade96279da751b3247bca1e042fb997326dc060f'],
+  ['primaryCohorts[1].fixtures[3].sha256', '6f9465eccac77eb60ffab2be1832f8f1bcd3290c655130c2ac752a38e6d75a20'],
+  ['primaryCohorts[1].fixtures[4].sha256', '5b3be6abbdf2fcccff3243639d582bea2fb1098099fa91cf2208a0f143a2364e'],
+  ['primaryCohorts[1].fixtures[5].sha256', '3e6818fe70e276e9ee7407d76b01e3afab7254cc1c27e649d5f445a5f6a6480c'],
+  ['primaryCohorts[1].fixtures[6].sha256', 'e6215e5b6388a79bc850e7ff97867f2618733acbb434526a77133e382cba2d1b'],
+  ['primaryCohorts[1].fixtures[7].sha256', 'b067b1aa081f368859979415c468d997b6fa504cad6ad70dc6998c90eeb3207c'],
+  ['primaryCohorts[1].fixtures[8].sha256', '9780276cdec0ee71c99cc13217d73376990866f5ab3ab471c7a793196665f7ce'],
+  ['primaryCohorts[1].fixtures[9].sha256', '2ec7f3c1298e7b6f3519cf765bcb88f36be3426e02cf7572730a77af9e32114d'],
+  ['secondFamily.manifestSha256', '83daa7ea3ca89b270e5149368d09fa97074124dfe438cf95b346e996996026c8'],
+] as const;
+
+function frozenInputHashes(value: unknown): ReadonlyArray<readonly [string, string]> {
+  const pairs: Array<readonly [string, string]> = [];
+  const visit = (candidate: unknown, path: string): void => {
+    if (typeof candidate === 'string' && /^[a-f0-9]{64}$/u.test(candidate)) {
+      pairs.push([path, candidate]);
+      return;
+    }
+    if (Array.isArray(candidate)) {
+      candidate.forEach((entry, index) => visit(entry, `${path}[${String(index)}]`));
+      return;
+    }
+    if (candidate !== null && typeof candidate === 'object') {
+      for (const [key, entry] of Object.entries(candidate)) {
+        visit(entry, path.length === 0 ? key : `${path}.${key}`);
+      }
+    }
+  };
+  visit(value, '');
+  return pairs;
+}
+
+const EXPECTED_V5_AMENDMENTS = [
+  {
+    id: 'refusal-risk-upper-bound',
+    timing: 'pre-results',
+    reason: 'The prior lower-bound check allowed an increased refusal risk compatible with the data.',
+  },
+  {
+    id: 'remove-fable-player-arms',
+    timing: 'pre-results',
+    reason: 'Fable usage exhausted; no replacement in this registration',
+  },
+  {
+    id: 'fresh-context-judge-eligibility',
+    timing: 'pre-results',
+    reason: 'Owner ruling D578.3: "It is ok for the same model to judge if it starts from a fresh context".',
+  },
+  {
+    id: 'add-astra-high-player-arms',
+    timing: 'pre-astra-run-and-analysis',
+    date: '2026-09-08',
+    reason: 'Owner ruling D586.24 requires Astra at high effort for a fair comparison with Sol high; this amendment was recorded before any Astra player arm was run or scored.',
+  },
+  {
+    id: 'replace-opus-and-notes-only-panel',
+    timing: 'pre-opus-4-8-player-run-and-new-panel-scoring',
+    date: '2026-09-08',
+    reason: 'Owner rulings replace every active claude-opus-5 use with claude-opus-4-8 and set claude-fable-5-1, gpt-6-astra, and gpt-5.6-sol at high effort as the scoring panel; claude-opus-4-8 supplies labelled notes only and never participates in analysis or decisions.',
+  },
+] as const;
+
+const EXPECTED_V5_CORE_ARMS = [
   { id: 'gpt-5.6-luna-blind', model: 'gpt-5.6-luna', effort: 'high', dmMode: 'blind', repair: 'code_only', adviceAssisted: false },
   { id: 'gpt-5.6-luna-advice', model: 'gpt-5.6-luna', effort: 'high', dmMode: 'advice', repair: null, adviceAssisted: true },
-  { id: 'claude-opus-5-blind', model: 'claude-opus-5', effort: 'high', dmMode: 'blind', repair: 'code_only', adviceAssisted: false },
-  { id: 'claude-opus-5-advice', model: 'claude-opus-5', effort: 'high', dmMode: 'advice', repair: null, adviceAssisted: true },
+  { id: 'claude-opus-4-8-blind', model: 'claude-opus-4-8', effort: 'high', dmMode: 'blind', repair: 'code_only', adviceAssisted: false },
+  { id: 'claude-opus-4-8-advice', model: 'claude-opus-4-8', effort: 'high', dmMode: 'advice', repair: null, adviceAssisted: true },
   { id: 'gpt-5.6-sol-blind', model: 'gpt-5.6-sol', effort: 'high', dmMode: 'blind', repair: 'code_only', adviceAssisted: false },
   { id: 'gpt-5.6-sol-advice', model: 'gpt-5.6-sol', effort: 'high', dmMode: 'advice', repair: null, adviceAssisted: true },
   { id: 'gpt-6-astra-blind', model: 'gpt-6-astra', effort: 'high', dmMode: 'blind', repair: 'code_only', adviceAssisted: false },
   { id: 'gpt-6-astra-advice', model: 'gpt-6-astra', effort: 'high', dmMode: 'advice', repair: null, adviceAssisted: true },
 ] as const;
 
-const EXPECTED_HINT_ARMS = [
+const EXPECTED_V5_HINT_ARMS = [
   { id: 'gpt-5.6-luna-blind-minhint', model: 'gpt-5.6-luna', effort: 'high', dmMode: 'blind', repair: 'minimal_legal_alternative', adviceAssisted: true },
   { id: 'gpt-5.6-sol-blind-minhint', model: 'gpt-5.6-sol', effort: 'high', dmMode: 'blind', repair: 'minimal_legal_alternative', adviceAssisted: true },
   { id: 'gpt-6-astra-blind-minhint', model: 'gpt-6-astra', effort: 'high', dmMode: 'blind', repair: 'minimal_legal_alternative', adviceAssisted: true },
 ] as const;
 
-const EXPECTED_ANALYSIS_COMPARISONS = [
-  { id: 'gpt-5.6-luna-blind-vs-advice', leftArm: 'gpt-5.6-luna-blind', rightArm: 'gpt-5.6-luna-advice', estimand: 'blind_minus_own_advice', eligibleJudgeSeats: ['gpt-5.6-sol', 'claude-opus-5', 'gpt-6-astra'] },
-  { id: 'claude-opus-5-blind-vs-advice', leftArm: 'claude-opus-5-blind', rightArm: 'claude-opus-5-advice', estimand: 'blind_minus_own_advice', eligibleJudgeSeats: ['gpt-5.6-sol', 'claude-opus-5', 'gpt-6-astra'] },
-  { id: 'gpt-5.6-sol-blind-vs-advice', leftArm: 'gpt-5.6-sol-blind', rightArm: 'gpt-5.6-sol-advice', estimand: 'blind_minus_own_advice', eligibleJudgeSeats: ['gpt-5.6-sol', 'claude-opus-5', 'gpt-6-astra'] },
-  { id: 'gpt-5.6-luna-vs-claude-opus-5-blind', leftArm: 'gpt-5.6-luna-blind', rightArm: 'claude-opus-5-blind', estimand: 'luna_minus_judge_within_mode', eligibleJudgeSeats: ['gpt-5.6-sol', 'claude-opus-5', 'gpt-6-astra'] },
-  { id: 'gpt-5.6-luna-vs-gpt-5.6-sol-blind', leftArm: 'gpt-5.6-luna-blind', rightArm: 'gpt-5.6-sol-blind', estimand: 'luna_minus_judge_within_mode', eligibleJudgeSeats: ['gpt-5.6-sol', 'claude-opus-5', 'gpt-6-astra'] },
-  { id: 'gpt-5.6-luna-vs-claude-opus-5-advice', leftArm: 'gpt-5.6-luna-advice', rightArm: 'claude-opus-5-advice', estimand: 'luna_minus_judge_within_mode', eligibleJudgeSeats: ['gpt-5.6-sol', 'claude-opus-5', 'gpt-6-astra'] },
-  { id: 'gpt-5.6-luna-vs-gpt-5.6-sol-advice', leftArm: 'gpt-5.6-luna-advice', rightArm: 'gpt-5.6-sol-advice', estimand: 'luna_minus_judge_within_mode', eligibleJudgeSeats: ['gpt-5.6-sol', 'claude-opus-5', 'gpt-6-astra'] },
-  { id: 'gpt-5.6-luna-blind-vs-gpt-5.6-sol-advice-ceiling', leftArm: 'gpt-5.6-luna-blind', rightArm: 'gpt-5.6-sol-advice', estimand: 'blind_minus_advice_ceiling', eligibleJudgeSeats: ['gpt-5.6-sol', 'claude-opus-5', 'gpt-6-astra'] },
-  { id: 'gpt-6-astra-blind-vs-advice', leftArm: 'gpt-6-astra-blind', rightArm: 'gpt-6-astra-advice', estimand: 'blind_minus_own_advice', eligibleJudgeSeats: ['gpt-5.6-sol', 'claude-opus-5', 'gpt-6-astra'] },
-  { id: 'gpt-5.6-luna-vs-gpt-6-astra-blind', leftArm: 'gpt-5.6-luna-blind', rightArm: 'gpt-6-astra-blind', estimand: 'luna_minus_judge_within_mode', eligibleJudgeSeats: ['gpt-5.6-sol', 'claude-opus-5', 'gpt-6-astra'] },
-  { id: 'gpt-5.6-luna-vs-gpt-6-astra-advice', leftArm: 'gpt-5.6-luna-advice', rightArm: 'gpt-6-astra-advice', estimand: 'luna_minus_judge_within_mode', eligibleJudgeSeats: ['gpt-5.6-sol', 'claude-opus-5', 'gpt-6-astra'] },
-  { id: 'gpt-6-astra-vs-gpt-5.6-sol-blind', leftArm: 'gpt-6-astra-blind', rightArm: 'gpt-5.6-sol-blind', estimand: 'astra_minus_sol_within_mode', eligibleJudgeSeats: ['gpt-5.6-sol', 'claude-opus-5', 'gpt-6-astra'] },
-  { id: 'gpt-6-astra-vs-gpt-5.6-sol-advice', leftArm: 'gpt-6-astra-advice', rightArm: 'gpt-5.6-sol-advice', estimand: 'astra_minus_sol_within_mode', eligibleJudgeSeats: ['gpt-5.6-sol', 'claude-opus-5', 'gpt-6-astra'] },
+const EXPECTED_V5_ANALYSIS_COMPARISONS = [
+  { id: 'gpt-5.6-luna-blind-vs-advice', leftArm: 'gpt-5.6-luna-blind', rightArm: 'gpt-5.6-luna-advice', estimand: 'blind_minus_own_advice', eligibleJudgeSeats: ['claude-fable-5-1', 'gpt-6-astra', 'gpt-5.6-sol'] },
+  { id: 'claude-opus-4-8-blind-vs-advice', leftArm: 'claude-opus-4-8-blind', rightArm: 'claude-opus-4-8-advice', estimand: 'blind_minus_own_advice', eligibleJudgeSeats: ['claude-fable-5-1', 'gpt-6-astra', 'gpt-5.6-sol'] },
+  { id: 'gpt-5.6-sol-blind-vs-advice', leftArm: 'gpt-5.6-sol-blind', rightArm: 'gpt-5.6-sol-advice', estimand: 'blind_minus_own_advice', eligibleJudgeSeats: ['claude-fable-5-1', 'gpt-6-astra', 'gpt-5.6-sol'] },
+  { id: 'gpt-5.6-luna-vs-claude-opus-4-8-blind', leftArm: 'gpt-5.6-luna-blind', rightArm: 'claude-opus-4-8-blind', estimand: 'luna_minus_judge_within_mode', eligibleJudgeSeats: ['claude-fable-5-1', 'gpt-6-astra', 'gpt-5.6-sol'] },
+  { id: 'gpt-5.6-luna-vs-gpt-5.6-sol-blind', leftArm: 'gpt-5.6-luna-blind', rightArm: 'gpt-5.6-sol-blind', estimand: 'luna_minus_judge_within_mode', eligibleJudgeSeats: ['claude-fable-5-1', 'gpt-6-astra', 'gpt-5.6-sol'] },
+  { id: 'gpt-5.6-luna-vs-claude-opus-4-8-advice', leftArm: 'gpt-5.6-luna-advice', rightArm: 'claude-opus-4-8-advice', estimand: 'luna_minus_judge_within_mode', eligibleJudgeSeats: ['claude-fable-5-1', 'gpt-6-astra', 'gpt-5.6-sol'] },
+  { id: 'gpt-5.6-luna-vs-gpt-5.6-sol-advice', leftArm: 'gpt-5.6-luna-advice', rightArm: 'gpt-5.6-sol-advice', estimand: 'luna_minus_judge_within_mode', eligibleJudgeSeats: ['claude-fable-5-1', 'gpt-6-astra', 'gpt-5.6-sol'] },
+  { id: 'gpt-5.6-luna-blind-vs-gpt-5.6-sol-advice-ceiling', leftArm: 'gpt-5.6-luna-blind', rightArm: 'gpt-5.6-sol-advice', estimand: 'blind_minus_advice_ceiling', eligibleJudgeSeats: ['claude-fable-5-1', 'gpt-6-astra', 'gpt-5.6-sol'] },
+  { id: 'gpt-6-astra-blind-vs-advice', leftArm: 'gpt-6-astra-blind', rightArm: 'gpt-6-astra-advice', estimand: 'blind_minus_own_advice', eligibleJudgeSeats: ['claude-fable-5-1', 'gpt-6-astra', 'gpt-5.6-sol'] },
+  { id: 'gpt-5.6-luna-vs-gpt-6-astra-blind', leftArm: 'gpt-5.6-luna-blind', rightArm: 'gpt-6-astra-blind', estimand: 'luna_minus_judge_within_mode', eligibleJudgeSeats: ['claude-fable-5-1', 'gpt-6-astra', 'gpt-5.6-sol'] },
+  { id: 'gpt-5.6-luna-vs-gpt-6-astra-advice', leftArm: 'gpt-5.6-luna-advice', rightArm: 'gpt-6-astra-advice', estimand: 'luna_minus_judge_within_mode', eligibleJudgeSeats: ['claude-fable-5-1', 'gpt-6-astra', 'gpt-5.6-sol'] },
+  { id: 'gpt-6-astra-vs-gpt-5.6-sol-blind', leftArm: 'gpt-6-astra-blind', rightArm: 'gpt-5.6-sol-blind', estimand: 'astra_minus_sol_within_mode', eligibleJudgeSeats: ['claude-fable-5-1', 'gpt-6-astra', 'gpt-5.6-sol'] },
+  { id: 'gpt-6-astra-vs-gpt-5.6-sol-advice', leftArm: 'gpt-6-astra-advice', rightArm: 'gpt-5.6-sol-advice', estimand: 'astra_minus_sol_within_mode', eligibleJudgeSeats: ['claude-fable-5-1', 'gpt-6-astra', 'gpt-5.6-sol'] },
 ] as const;
 
-const EXPECTED_REPAIR_COMPARISONS = [
+const EXPECTED_V5_REPAIR_COMPARISONS = [
   { id: 'gpt-5.6-luna-code-only-vs-minhint', codeOnlyArm: 'gpt-5.6-luna-blind', minimalHintArm: 'gpt-5.6-luna-blind-minhint', reportLabel: 'advice-assisted' },
   { id: 'gpt-5.6-sol-code-only-vs-minhint', codeOnlyArm: 'gpt-5.6-sol-blind', minimalHintArm: 'gpt-5.6-sol-blind-minhint', reportLabel: 'advice-assisted' },
   { id: 'gpt-6-astra-code-only-vs-minhint', codeOnlyArm: 'gpt-6-astra-blind', minimalHintArm: 'gpt-6-astra-blind-minhint', reportLabel: 'advice-assisted' },
 ] as const;
+
+const EXPECTED_V5_SCORING_SEATS = [
+  { id: 'claude-fable-5-1', model: 'claude-fable-5-1', effort: 'high', role: 'scoring' },
+  { id: 'gpt-6-astra', model: 'gpt-6-astra', effort: 'high', role: 'scoring' },
+  { id: 'gpt-5.6-sol', model: 'gpt-5.6-sol', effort: 'high', role: 'scoring' },
+] as const;
+
+const EXPECTED_V5_ADVISORY_NOTES_STAGE = {
+  source: { id: 'claude-opus-4-8', model: 'claude-opus-4-8', effort: 'high', role: 'advisory_notes' },
+  stageOrder: ['advisory_notes_first', 'scoring_panel_second'],
+  advisoryTransmission: 'labelled_per_entry_note_text_only',
+  advisoryPromptNoteMaxWords: 15,
+  advisoryNoteMaxChars: 120,
+  advisoryInvalidPolicy: 'nonzero_exit_or_invalid_existing_output_becomes_empty_block',
+  advisoryExposureStatuses: ['notes', 'empty'],
+  advisoryAnalysisPolicy: 'exposure_status_only_source_artifact_never_loaded',
+  scoringSeatAdvisoryPolicy: 'consider_or_ignore_untrusted_no_weight_no_anchor',
+} as const;
 
 function readText(path: string): string {
   const bytes = fixtureBytes.get(path);
@@ -251,9 +356,9 @@ function analysisRows(
       rep: 1,
       outcome: typeof value === 'number' ? 'executed' : value,
       seats: typeof value !== 'number' ? [] : [
-        { judge: 'gpt-5.6-sol', components: components(value - 1) },
-        { judge: 'claude-opus-5', components: components(value) },
-        { judge: 'gpt-6-astra', components: components(value + 1) },
+        { judge: 'claude-fable-5-1', components: components(value - 1) },
+        { judge: 'gpt-6-astra', components: components(value) },
+        { judge: 'gpt-5.6-sol', components: components(value + 1) },
       ],
     });
     return [row('gpt-5.6-luna-blind', left), row('gpt-5.6-luna-advice', right)];
@@ -299,62 +404,75 @@ function overrideEvidence(): D569OverrideEvidence {
 }
 
 describe('D569 preregistered experiment manifest and dry runner', () => {
-  it('validates the exact v4 Astra arm, comparison, repair, and amendment registration', () => {
+  it('validates the exact v5 Opus 4.8 arms and notes-only Fable Astra Sol panel amendment', () => {
     const frozen = manifest();
     expect(codes(frozen)).toEqual([]);
-    expect(frozen.version).toBe('d569-blind-experiment-v4');
-    expect(frozen.preregistrationAmendments).toEqual(EXPECTED_V4_AMENDMENTS);
-    expect(D569_PREREGISTRATION_AMENDMENTS).toEqual(EXPECTED_V4_AMENDMENTS);
-    expect(frozen.coreArms).toEqual(EXPECTED_CORE_ARMS);
-    expect(D569_CORE_ARM_IDENTITIES).toEqual(EXPECTED_CORE_ARMS);
-    expect(frozen.hintArms).toEqual(EXPECTED_HINT_ARMS);
-    expect(D569_HINT_ARM_IDENTITIES).toEqual(EXPECTED_HINT_ARMS);
-    expect(frozen.analysisComparisons).toEqual(EXPECTED_ANALYSIS_COMPARISONS);
-    expect(D569_ANALYSIS_COMPARISONS).toEqual(EXPECTED_ANALYSIS_COMPARISONS);
-    expect(frozen.repairComparisons).toEqual(EXPECTED_REPAIR_COMPARISONS);
-    expect(REQUIRED_REPAIR_COMPARISONS).toEqual(EXPECTED_REPAIR_COMPARISONS);
-    expect(frozen.preregistrationAmendments).toHaveLength(4);
+    expect(frozen.version).toBe('d569-blind-experiment-v5');
+    expect(frozen.preregistrationAmendments).toEqual(EXPECTED_V5_AMENDMENTS);
+    expect(D569_PREREGISTRATION_AMENDMENTS).toEqual(EXPECTED_V5_AMENDMENTS);
+    expect(frozen.coreArms).toEqual(EXPECTED_V5_CORE_ARMS);
+    expect(D569_CORE_ARM_IDENTITIES).toEqual(EXPECTED_V5_CORE_ARMS);
+    expect(frozen.hintArms).toEqual(EXPECTED_V5_HINT_ARMS);
+    expect(D569_HINT_ARM_IDENTITIES).toEqual(EXPECTED_V5_HINT_ARMS);
+    expect(frozen.analysisComparisons).toEqual(EXPECTED_V5_ANALYSIS_COMPARISONS);
+    expect(D569_ANALYSIS_COMPARISONS).toEqual(EXPECTED_V5_ANALYSIS_COMPARISONS);
+    expect(frozen.repairComparisons).toEqual(EXPECTED_V5_REPAIR_COMPARISONS);
+    expect(REQUIRED_REPAIR_COMPARISONS).toEqual(EXPECTED_V5_REPAIR_COMPARISONS);
+    expect(frozen.judgePanel.scoringSeats).toEqual(EXPECTED_V5_SCORING_SEATS);
+    expect(D569_SCORING_PANEL_IDENTITIES).toEqual(EXPECTED_V5_SCORING_SEATS);
+    expect(frozen.judgePanel.advisoryNotesStage).toEqual(EXPECTED_V5_ADVISORY_NOTES_STAGE);
+    expect(D569_ADVISORY_NOTES_SOURCE).toEqual(EXPECTED_V5_ADVISORY_NOTES_STAGE.source);
+    expect(frozen.preregistrationAmendments).toHaveLength(5);
     expect(frozen.coreArms).toHaveLength(8);
     expect(frozen.hintArms).toHaveLength(3);
     expect(frozen.analysisComparisons).toHaveLength(13);
     expect(frozen.repairComparisons).toHaveLength(3);
+    expect(frozen.judgePanel.scoringSeats).toHaveLength(3);
+    expect(frozen.judgePanel).toMatchObject({
+      advisoryCoveragePolicy: 'notes_stage_before_every_scored_packet',
+      armScoringPolicy: 'all_scoring_seats_score_every_active_arm',
+      seatEligibilityPolicy: 'all_registered_seats_every_comparison',
+      comparisonSeatPolicy: 'same_scoring_seat_set_both_sides',
+      sessionPolicy: 'fresh_session_per_source_and_scoring_seat_per_packet',
+      packetExcludes: [
+        'decision_conversation', 'arm_identities', 'answer_key',
+        'other_scoring_seat_scores', 'opus_numeric_fields',
+      ],
+      selfPlayScoringPolicy: 'allowed_only_from_fresh_context',
+      aggregationPolicy: 'equal_weight_three_scoring_seats_only',
+      perSeatReportingPolicy: 'diagnostic_only',
+      minimumConsensusSeats: 3,
+    });
+    expect(frozen.coreArms.filter((arm) => arm.model === 'gpt-6-astra')).toEqual([
+      EXPECTED_V5_CORE_ARMS[6], EXPECTED_V5_CORE_ARMS[7],
+    ]);
+    expect(frozen.hintArms.filter((arm) => arm.model === 'gpt-6-astra'))
+      .toEqual([EXPECTED_V5_HINT_ARMS[2]]);
+  });
+
+  it('keeps historical amendments exact while excluding Opus 5 from every active registry', () => {
+    const frozen = manifest();
+    expect(frozen.preregistrationAmendments.slice(0, 4)).toEqual(EXPECTED_V4_AMENDMENTS);
     const activeReferences = JSON.stringify({
       core: frozen.coreArms,
       hints: frozen.hintArms,
       comparisons: frozen.analysisComparisons,
       repairs: frozen.repairComparisons,
-      judges: frozen.judgePanel.seats,
+      scoringSeats: frozen.judgePanel.scoringSeats,
+      notesSource: frozen.judgePanel.advisoryNotesStage.source,
     });
-    expect(activeReferences).not.toContain('claude-fable-5');
+    expect(activeReferences).not.toContain('claude-opus-5');
     expect(frozen.preregistrationAmendments[1]).toEqual({
       id: 'remove-fable-player-arms',
       timing: 'pre-results',
       reason: 'Fable usage exhausted; no replacement in this registration',
     });
-    expect(frozen.judgePanel.seats).toEqual(D569_JUDGE_PANEL_IDENTITIES);
-    expect(frozen.judgePanel).toMatchObject({
-      seatEligibilityPolicy: 'all_registered_seats_every_comparison',
-      comparisonSeatPolicy: 'same_seat_set_both_sides',
-      sessionPolicy: 'fresh_session_per_packet',
-      packetExcludes: [
-        'decision_conversation', 'arm_identities', 'answer_key', 'other_seat_scores',
-      ],
-      selfPlayScoringPolicy: 'allowed_only_from_fresh_context',
-      aggregationPolicy: 'equal_weight_all_registered_seats',
-      perSeatReportingPolicy: 'diagnostic_only',
-      minimumConsensusSeats: 3,
-    });
-    expect(frozen.coreArms.filter((arm) => arm.model === 'gpt-6-astra')).toEqual([
-      EXPECTED_CORE_ARMS[6], EXPECTED_CORE_ARMS[7],
-    ]);
-    expect(frozen.hintArms.filter((arm) => arm.model === 'gpt-6-astra'))
-      .toEqual([EXPECTED_HINT_ARMS[2]]);
   });
 
-  it('dry-runs 30 hard and 30 brutal cells per each of eight core arms, 480 total', () => {
+  it('dry-runs versioned Opus 4.8 cells without accepting historical Opus 5 rows', () => {
     const cells = dryRunD569Experiment(manifest(), access());
     expect(cells).toHaveLength(480);
-    for (const arm of EXPECTED_CORE_ARMS) {
+    for (const arm of EXPECTED_V5_CORE_ARMS) {
       const armCells = cells.filter((cell) => cell.arm === arm.id);
       expect(armCells.filter((cell) => cell.basis === 'hard')).toHaveLength(30);
       expect(armCells.filter((cell) => cell.basis === 'brutal')).toHaveLength(30);
@@ -373,6 +491,144 @@ describe('D569 preregistered experiment manifest and dry runner', () => {
       ));
     }
     expect([...pairedSources.values()].every((hashes) => hashes.size === 1)).toBe(true);
+    const rows = observedRows(cells);
+    const opusIndex = rows.findIndex((row) => row.arm === 'claude-opus-4-8-blind');
+    if (opusIndex < 0) throw new Error('Opus 4.8 blind cell is absent');
+    const historical = [...rows];
+    historical[opusIndex] = { ...rows[opusIndex]!, arm: 'claude-opus-5-blind' };
+    expect(validateD569ObservedRows(cells, historical).map((violation) => violation.code))
+      .toEqual(expect.arrayContaining(['unexpected_row', 'missing_row']));
+  });
+
+  it('rejects the Opus notes source counted in the scoring panel or eligibility', () => {
+    type MutableSeat = { id: string; model: string; effort: string; role: string };
+    type MutablePanelManifest = {
+      judgePanel: { scoringSeats: MutableSeat[] };
+      analysisComparisons: Array<{ eligibleJudgeSeats: string[] }>;
+    };
+    const opusSeat: MutableSeat = {
+      id: 'claude-opus-4-8', model: 'claude-opus-4-8', effort: 'high', role: 'scoring',
+    };
+    const substituted = structuredClone(manifest()) as unknown as MutablePanelManifest;
+    substituted.judgePanel.scoringSeats[0] = opusSeat;
+    expect(codes(substituted)).toEqual(expect.arrayContaining(['manifest_shape']));
+
+    const fourth = structuredClone(manifest()) as unknown as MutablePanelManifest;
+    fourth.judgePanel.scoringSeats.push(opusSeat);
+    expect(codes(fourth)).toEqual(expect.arrayContaining(['manifest_shape']));
+
+    const duplicate = structuredClone(manifest()) as unknown as MutablePanelManifest;
+    duplicate.judgePanel.scoringSeats[0] = { ...duplicate.judgePanel.scoringSeats[1]! };
+    expect(codes(duplicate)).toEqual(expect.arrayContaining(['manifest_shape']));
+
+    const eligibility = structuredClone(manifest()) as unknown as MutablePanelManifest;
+    eligibility.analysisComparisons[0]!.eligibleJudgeSeats.push('claude-opus-4-8');
+    expect(codes(eligibility)).toEqual(expect.arrayContaining(['manifest_shape']));
+
+    const rows = analysisRows('primary', 'hard', [3], [2]);
+    const rowSubstitution = rows.map((row) => row.outcome === 'executed' ? {
+      ...row,
+      seats: row.seats.map((seat) => seat.judge === 'claude-fable-5-1'
+        ? { ...seat, judge: 'claude-opus-4-8' }
+        : seat),
+    } : row);
+    expect(() => analyzeD569Pair(rowSubstitution, registeredInput('primary', 'hard', 83, 100)))
+      .toThrow('registered panel requires exactly its declared judge seat set');
+    const rowDuplicate = rows.map((row) => row.outcome === 'executed' ? {
+      ...row,
+      seats: row.seats.map((seat) => seat.judge === 'claude-fable-5-1'
+        ? { ...seat, judge: 'gpt-6-astra' }
+        : seat),
+    } : row);
+    expect(() => analyzeD569Pair(rowDuplicate, registeredInput('primary', 'hard', 84, 100)))
+      .toThrow('An analysis row cannot contain duplicate judge seats.');
+  });
+
+  it('rejects a panel of only two scoring seats in manifest and registered analysis', () => {
+    const reduced = structuredClone(manifest()) as unknown as {
+      judgePanel: { scoringSeats: Array<{ id: string }> };
+    };
+    reduced.judgePanel.scoringSeats = reduced.judgePanel.scoringSeats.filter(
+      (seat) => seat.id !== 'claude-fable-5-1',
+    );
+    expect(codes(reduced)).toEqual(expect.arrayContaining(['manifest_shape']));
+    const rows = analysisRows('primary', 'hard', [3], [2]).map((row) => ({
+      ...row,
+      seats: row.seats.filter((seat) => seat.judge !== 'claude-fable-5-1'),
+    }));
+    expect(() => analyzeD569Pair(rows, registeredInput('primary', 'hard', 85, 100)))
+      .toThrow('registered panel requires exactly its declared judge seat set');
+  });
+
+  it('rejects Opus 5 in any active arm or panel position', () => {
+    type MutableIdentity = { id: string; model: string };
+    type MutableIdentityManifest = {
+      coreArms: MutableIdentity[];
+      hintArms: MutableIdentity[];
+      judgePanel: {
+        scoringSeats: MutableIdentity[];
+        advisoryNotesStage: { source: MutableIdentity };
+      };
+    };
+    const mutations: ReadonlyArray<(candidate: MutableIdentityManifest) => void> = [
+      (candidate) => { candidate.coreArms[2]!.id = 'claude-opus-5'; },
+      (candidate) => { candidate.coreArms[2]!.model = 'claude-opus-5'; },
+      (candidate) => { candidate.hintArms[0]!.id = 'claude-opus-5'; },
+      (candidate) => { candidate.hintArms[0]!.model = 'claude-opus-5'; },
+      (candidate) => { candidate.judgePanel.scoringSeats[0]!.id = 'claude-opus-5'; },
+      (candidate) => { candidate.judgePanel.scoringSeats[0]!.model = 'claude-opus-5'; },
+      (candidate) => { candidate.judgePanel.advisoryNotesStage.source.id = 'claude-opus-5'; },
+      (candidate) => { candidate.judgePanel.advisoryNotesStage.source.model = 'claude-opus-5'; },
+    ];
+    for (const mutate of mutations) {
+      const candidate = structuredClone(manifest()) as unknown as MutableIdentityManifest;
+      mutate(candidate);
+      expect(codes(candidate).length).toBeGreaterThan(0);
+    }
+  });
+
+  it('accepts only notes or empty exposure and rejects a deciding Opus policy', () => {
+    const exposure = structuredClone(manifest()) as unknown as {
+      judgePanel: { advisoryNotesStage: {
+        advisoryExposureStatuses: string[];
+        advisoryAnalysisPolicy: string;
+      } };
+    };
+    exposure.judgePanel.advisoryNotesStage.advisoryExposureStatuses = ['notes', 'scored'];
+    expect(codes(exposure)).toContain('manifest_shape');
+    const deciding = structuredClone(manifest()) as unknown as {
+      judgePanel: { advisoryNotesStage: { advisoryAnalysisPolicy: string } };
+    };
+    deciding.judgePanel.advisoryNotesStage.advisoryAnalysisPolicy = 'opus_breaks_ties';
+    expect(codes(deciding)).toContain('manifest_shape');
+  });
+
+  it('rejects reversed notes and scoring stages and altered panel aggregation', () => {
+    const reversed = structuredClone(manifest()) as unknown as {
+      judgePanel: { advisoryNotesStage: { stageOrder: string[] } };
+    };
+    reversed.judgePanel.advisoryNotesStage.stageOrder = [
+      'scoring_panel_second', 'advisory_notes_first',
+    ];
+    expect(codes(reversed)).toContain('manifest_shape');
+    const aggregation = structuredClone(manifest()) as unknown as {
+      judgePanel: { aggregationPolicy: string };
+    };
+    aggregation.judgePanel.aggregationPolicy = 'opus_weighted_four_seat_mean';
+    expect(codes(aggregation)).toContain('manifest_shape');
+  });
+
+  it('preserves all 32 committed input hash pins across Amendment 2', () => {
+    expect(EXPECTED_V4_FROZEN_INPUT_HASHES).toHaveLength(32);
+    expect(frozenInputHashes(manifest())).toEqual(EXPECTED_V4_FROZEN_INPUT_HASHES);
+    const changedPin = structuredClone(manifest());
+    changedPin.sharedKb.componentHashes['actions'] = '0'.repeat(64);
+    expect(frozenInputHashes(changedPin)).not.toEqual(EXPECTED_V4_FROZEN_INPUT_HASHES);
+    expect(codes(changedPin)).toContain('kb_component_hash');
+    const changedBytes = `${readText(PRIMARY_HARD_PATHS[0])} `;
+    expect(codes(manifest(), access((path) => path === PRIMARY_HARD_PATHS[0]
+      ? changedBytes
+      : undefined))).toContain('primary_fixture_hash');
   });
 
   it('adds exactly 180 separately labeled advice-assisted hint cells, 660 total', () => {
@@ -447,10 +703,10 @@ describe('D569 preregistered experiment manifest and dry runner', () => {
   it('requires every Astra arm and its code-only versus minhint repair contrast', () => {
     const frozen = manifest();
     expect(D569_CORE_ARM_IDENTITIES.filter((arm) => arm.model === 'gpt-6-astra')).toEqual([
-      EXPECTED_CORE_ARMS[6], EXPECTED_CORE_ARMS[7],
+      EXPECTED_V5_CORE_ARMS[6], EXPECTED_V5_CORE_ARMS[7],
     ]);
-    expect(frozen.hintArms).toContainEqual(EXPECTED_HINT_ARMS[2]);
-    expect(frozen.repairComparisons).toContainEqual(EXPECTED_REPAIR_COMPARISONS[2]);
+    expect(frozen.hintArms).toContainEqual(EXPECTED_V5_HINT_ARMS[2]);
+    expect(frozen.repairComparisons).toContainEqual(EXPECTED_V5_REPAIR_COMPARISONS[2]);
     for (const armId of ['gpt-6-astra-blind', 'gpt-6-astra-advice'] as const) {
       const missing = structuredClone(frozen);
       missing.coreArms = missing.coreArms.filter((arm) => arm.id !== armId);
@@ -486,11 +742,11 @@ describe('D569 preregistered experiment manifest and dry runner', () => {
     const frozen = manifest();
     expect(D569_ANALYSIS_COMPARISONS.filter((comparison) =>
       comparison.estimand === 'astra_minus_sol_within_mode')).toEqual([
-      EXPECTED_ANALYSIS_COMPARISONS[11], EXPECTED_ANALYSIS_COMPARISONS[12],
+      EXPECTED_V5_ANALYSIS_COMPARISONS[11], EXPECTED_V5_ANALYSIS_COMPARISONS[12],
     ]);
     expect(frozen.analysisComparisons.filter((comparison) =>
       comparison.estimand === 'astra_minus_sol_within_mode')).toEqual([
-      EXPECTED_ANALYSIS_COMPARISONS[11], EXPECTED_ANALYSIS_COMPARISONS[12],
+      EXPECTED_V5_ANALYSIS_COMPARISONS[11], EXPECTED_V5_ANALYSIS_COMPARISONS[12],
     ]);
     for (const id of [
       'gpt-6-astra-vs-gpt-5.6-sol-blind',
@@ -502,19 +758,29 @@ describe('D569 preregistered experiment manifest and dry runner', () => {
     }
   });
 
-  it('lets every fresh-context seat score Astra play and keeps per-seat tables diagnostic', () => {
+  it('scores Astra by Astra and Sol by Sol while Fable has no player arm', () => {
     const frozen = manifest();
     expect(D569_ANALYSIS_COMPARISONS.find((comparison) =>
       comparison.id === 'gpt-6-astra-blind-vs-advice')?.eligibleJudgeSeats)
-      .toEqual(['gpt-5.6-sol', 'claude-opus-5', 'gpt-6-astra']);
+      .toEqual(['claude-fable-5-1', 'gpt-6-astra', 'gpt-5.6-sol']);
     for (const comparison of frozen.analysisComparisons) {
-      expect(comparison.eligibleJudgeSeats).toEqual(['gpt-5.6-sol', 'claude-opus-5', 'gpt-6-astra']);
+      expect(comparison.eligibleJudgeSeats).toEqual(['claude-fable-5-1', 'gpt-6-astra', 'gpt-5.6-sol']);
     }
+    expect(frozen.analysisComparisons.find((comparison) =>
+      comparison.id === 'gpt-6-astra-blind-vs-advice')?.eligibleJudgeSeats)
+      .toEqual(EXPECTED_V5_SCORING_SEATS.map((seat) => seat.id));
+    expect(frozen.analysisComparisons.find((comparison) =>
+      comparison.id === 'gpt-5.6-sol-blind-vs-advice')?.eligibleJudgeSeats)
+      .toEqual(EXPECTED_V5_SCORING_SEATS.map((seat) => seat.id));
+    expect(new Set<string>(frozen.coreArms.map((arm) => arm.model)).has('claude-fable-5-1')).toBe(false);
     expect(frozen.judgePanel).toMatchObject({
-      packetExcludes: ['decision_conversation', 'arm_identities', 'answer_key', 'other_seat_scores'],
+      packetExcludes: [
+        'decision_conversation', 'arm_identities', 'answer_key',
+        'other_scoring_seat_scores', 'opus_numeric_fields',
+      ],
       minimumConsensusSeats: 3,
       selfPlayScoringPolicy: 'allowed_only_from_fresh_context',
-      aggregationPolicy: 'equal_weight_all_registered_seats',
+      aggregationPolicy: 'equal_weight_three_scoring_seats_only',
       perSeatReportingPolicy: 'diagnostic_only',
     });
 
@@ -522,7 +788,7 @@ describe('D569 preregistered experiment manifest and dry runner', () => {
     const astraComparison = recused.analysisComparisons.find((comparison) =>
       comparison.id === 'gpt-6-astra-blind-vs-advice');
     if (astraComparison === undefined) throw new Error('Astra self comparison is absent');
-    astraComparison.eligibleJudgeSeats = ['gpt-5.6-sol', 'claude-opus-5'];
+    astraComparison.eligibleJudgeSeats = ['gpt-6-astra', 'gpt-5.6-sol'];
     expect(codes(recused)).toEqual(expect.arrayContaining(['judge_eligibility', 'judge_consensus']));
 
     const dangling = structuredClone(frozen);
@@ -706,31 +972,112 @@ describe('D569 paired cluster analysis and success labels', () => {
       .toThrow('registered panel requires exactly its declared judge seat set');
   });
 
-  it('registered analysis still requires Astra when the opposite side failed execution', () => {
-    const rows = analysisRows('primary', 'hard', [3], ['execution_failed']).map((row) =>
+  it('requires Fable Astra and Sol when the opposite side failed execution', () => {
+    const baseline = analysisRows('primary', 'hard', [3], ['execution_failed']);
+    const removed = baseline.map((row) =>
       row.outcome === 'executed'
-        ? { ...row, seats: row.seats.filter((seat) => seat.judge !== 'gpt-6-astra') }
+        ? { ...row, seats: row.seats.filter((seat) => seat.judge !== 'claude-fable-5-1') }
         : row);
-    expect(() => analyzeD569Pair(rows, registeredInput('primary', 'hard', 81, 100)))
+    expect(() => analyzeD569Pair(removed, registeredInput('primary', 'hard', 81, 100)))
+      .toThrow('registered panel requires exactly its declared judge seat set');
+    const substituted = baseline.map((row) => row.outcome === 'executed' ? {
+      ...row,
+      seats: row.seats.map((seat) => seat.judge === 'claude-fable-5-1'
+        ? { ...seat, judge: 'claude-opus-4-8' }
+        : seat),
+    } : row);
+    expect(() => analyzeD569Pair(substituted, registeredInput('primary', 'hard', 82, 100)))
+      .toThrow('registered panel requires exactly its declared judge seat set');
+    const duplicate = baseline.map((row) => row.outcome === 'executed' ? {
+      ...row,
+      seats: row.seats.map((seat) => seat.judge === 'claude-fable-5-1'
+        ? { ...seat, judge: 'gpt-6-astra' }
+        : seat),
+    } : row);
+    expect(() => analyzeD569Pair(duplicate, registeredInput('primary', 'hard', 83, 100)))
+      .toThrow('An analysis row cannot contain duplicate judge seats.');
+  });
+
+  it('registered analysis exposes no Opus input output or deciding path', () => {
+    type ForbiddenKey = `${string}${'opus' | 'Opus' | 'advisory' | 'Advisory'}${string}`;
+    type InputForbiddenKeys = Extract<keyof Parameters<typeof analyzeD569Pair>[1], ForbiddenKey>;
+    type OutputForbiddenKeys = Extract<keyof D569PairAnalysis, ForbiddenKey>;
+    const noInput: InputForbiddenKeys extends never ? true : false = true;
+    const noOutput: OutputForbiddenKeys extends never ? true : false = true;
+    expect(noInput).toBe(true);
+    expect(noOutput).toBe(true);
+    const report = analyzeD569Pair(
+      analysisRows('primary', 'hard', [3], [2]),
+      registeredInput('primary', 'hard', 84, 100),
+    );
+    expect(Object.keys(report).some((key) => /opus|advisory/iu.test(key))).toBe(false);
+    const opusRows = analysisRows('primary', 'hard', [3], [2]).map((row) => row.outcome === 'executed'
+      ? { ...row, seats: [...row.seats, { judge: 'claude-opus-4-8', components: components(4) }] }
+      : row);
+    expect(() => analyzeD569Pair(opusRows, registeredInput('primary', 'hard', 85, 100)))
       .toThrow('registered panel requires exactly its declared judge seat set');
   });
 
-  it('subset and per-seat analysis is diagnostic and cannot qualify success', () => {
+  it('rejects Opus-only and mixed Opus scoring diagnostic subsets', () => {
+    const baseline = analysisRows('primary', 'hard', [3], [2]);
+    const opusOnly = baseline.map((row) => row.outcome === 'executed' ? {
+      ...row,
+      seats: [{ judge: 'claude-opus-4-8', components: row.seats[0]!.components }],
+    } : row);
+    expect(() => analyzeD569DiagnosticPair(opusOnly, {
+      family: 'primary', basis: 'hard',
+      leftArm: 'gpt-5.6-luna-blind', rightArm: 'gpt-5.6-luna-advice',
+      diagnosticJudgeSeats: ['claude-opus-4-8'], bootstrapSeed: 86, resamples: 100,
+    })).toThrow('diagnostic subset may contain only registered scoring seats');
+    const mixed = baseline.map((row) => row.outcome === 'executed' ? {
+      ...row,
+      seats: [row.seats[0]!, { judge: 'claude-opus-4-8', components: row.seats[1]!.components }],
+    } : row);
+    expect(() => analyzeD569DiagnosticPair(mixed, {
+      family: 'primary', basis: 'hard',
+      leftArm: 'gpt-5.6-luna-blind', rightArm: 'gpt-5.6-luna-advice',
+      diagnosticJudgeSeats: ['claude-fable-5-1', 'claude-opus-4-8'],
+      bootstrapSeed: 87, resamples: 100,
+    })).toThrow('diagnostic subset may contain only registered scoring seats');
+  });
+
+  it('keeps registered scoring-seat subsets diagnostic and unable to qualify', () => {
+    const oneSeatRows = analysisRows('primary', 'hard', [3], [2]).map((row) => ({
+      ...row,
+      seats: row.seats.filter((seat) => seat.judge === 'claude-fable-5-1'),
+    }));
+    const oneSeatReport = analyzeD569DiagnosticPair(oneSeatRows, {
+      family: 'primary', basis: 'hard',
+      leftArm: 'gpt-5.6-luna-blind', rightArm: 'gpt-5.6-luna-advice',
+      diagnosticJudgeSeats: ['claude-fable-5-1'], bootstrapSeed: 88, resamples: 100,
+    });
     const twoSeatRows = analysisRows('primary', 'hard', [3], [2]).map((row) => ({
       ...row,
-      seats: row.seats.filter((seat) => seat.judge !== 'gpt-6-astra'),
+      seats: row.seats.filter((seat) => seat.judge !== 'gpt-5.6-sol'),
     }));
     const report = analyzeD569DiagnosticPair(twoSeatRows, {
       family: 'primary', basis: 'hard',
       leftArm: 'gpt-5.6-luna-blind', rightArm: 'gpt-5.6-luna-advice',
-      diagnosticJudgeSeats: ['gpt-5.6-sol', 'claude-opus-5'],
-      bootstrapSeed: 82, resamples: 100,
+      diagnosticJudgeSeats: ['claude-fable-5-1', 'gpt-6-astra'],
+      bootstrapSeed: 89, resamples: 100,
     });
     type CannotQualify = D569DiagnosticPairAnalysis extends D569PairAnalysis ? false : true;
     const cannotQualify: CannotQualify = true;
     expect(cannotQualify).toBe(true);
+    expect(oneSeatReport.reportKind).toBe('diagnostic_subset');
     expect(report.reportKind).toBe('diagnostic_subset');
     expect('successLabel' in report).toBe(false);
+    expect(() => analyzeD569DiagnosticPair(oneSeatRows, {
+      family: 'primary', basis: 'hard',
+      leftArm: 'gpt-5.6-luna-blind', rightArm: 'gpt-5.6-luna-advice',
+      diagnosticJudgeSeats: ['unknown-seat'], bootstrapSeed: 90, resamples: 100,
+    })).toThrow('diagnostic subset may contain only registered scoring seats');
+    expect(() => analyzeD569DiagnosticPair(oneSeatRows, {
+      family: 'primary', basis: 'hard',
+      leftArm: 'gpt-5.6-luna-blind', rightArm: 'gpt-5.6-luna-advice',
+      diagnosticJudgeSeats: ['claude-fable-5-1', 'claude-fable-5-1'],
+      bootstrapSeed: 91, resamples: 100,
+    })).toThrow('diagnostic subset may contain only registered scoring seats');
   });
 
   it('success_uses_executed_only: refused rows remain zero in primary while executed-only is selection-conditioned', () => {

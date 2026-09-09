@@ -1,5 +1,5 @@
 {
-  "version": "d569-blind-experiment-v4",
+  "version": "d569-blind-experiment-v5",
   "preregistrationAmendments": [
     {
       "id": "refusal-risk-upper-bound",
@@ -21,6 +21,12 @@
       "timing": "pre-astra-run-and-analysis",
       "date": "2026-09-08",
       "reason": "Owner ruling D586.24 requires Astra at high effort for a fair comparison with Sol high; this amendment was recorded before any Astra player arm was run or scored."
+    },
+    {
+      "id": "replace-opus-and-notes-only-panel",
+      "timing": "pre-opus-4-8-player-run-and-new-panel-scoring",
+      "date": "2026-09-08",
+      "reason": "Owner rulings replace every active claude-opus-5 use with claude-opus-4-8 and set claude-fable-5-1, gpt-6-astra, and gpt-5.6-sol at high effort as the scoring panel; claude-opus-4-8 supplies labelled notes only and never participates in analysis or decisions."
     }
   ],
   "experimentWallMs": 240000,
@@ -158,25 +164,38 @@
   },
   "trainingSeeds": [],
   "judgePanel": {
-    "seats": [
-      { "id": "gpt-5.6-sol", "model": "gpt-5.6-sol", "effort": "high" },
-      { "id": "claude-opus-5", "model": "claude-opus-5", "effort": "high" },
-      { "id": "gpt-6-astra", "model": "gpt-6-astra", "effort": "high" }
+    "scoringSeats": [
+      { "id": "claude-fable-5-1", "model": "claude-fable-5-1", "effort": "high", "role": "scoring" },
+      { "id": "gpt-6-astra", "model": "gpt-6-astra", "effort": "high", "role": "scoring" },
+      { "id": "gpt-5.6-sol", "model": "gpt-5.6-sol", "effort": "high", "role": "scoring" }
     ],
+    "advisoryNotesStage": {
+      "source": { "id": "claude-opus-4-8", "model": "claude-opus-4-8", "effort": "high", "role": "advisory_notes" },
+      "stageOrder": ["advisory_notes_first", "scoring_panel_second"],
+      "advisoryTransmission": "labelled_per_entry_note_text_only",
+      "advisoryPromptNoteMaxWords": 15,
+      "advisoryNoteMaxChars": 120,
+      "advisoryInvalidPolicy": "nonzero_exit_or_invalid_existing_output_becomes_empty_block",
+      "advisoryExposureStatuses": ["notes", "empty"],
+      "advisoryAnalysisPolicy": "exposure_status_only_source_artifact_never_loaded",
+      "scoringSeatAdvisoryPolicy": "consider_or_ignore_untrusted_no_weight_no_anchor"
+    },
+    "advisoryCoveragePolicy": "notes_stage_before_every_scored_packet",
+    "armScoringPolicy": "all_scoring_seats_score_every_active_arm",
     "seatEligibilityPolicy": "all_registered_seats_every_comparison",
-    "comparisonSeatPolicy": "same_seat_set_both_sides",
-    "sessionPolicy": "fresh_session_per_packet",
-    "packetExcludes": ["decision_conversation", "arm_identities", "answer_key", "other_seat_scores"],
+    "comparisonSeatPolicy": "same_scoring_seat_set_both_sides",
+    "sessionPolicy": "fresh_session_per_source_and_scoring_seat_per_packet",
+    "packetExcludes": ["decision_conversation", "arm_identities", "answer_key", "other_scoring_seat_scores", "opus_numeric_fields"],
     "selfPlayScoringPolicy": "allowed_only_from_fresh_context",
-    "aggregationPolicy": "equal_weight_all_registered_seats",
+    "aggregationPolicy": "equal_weight_three_scoring_seats_only",
     "perSeatReportingPolicy": "diagnostic_only",
     "minimumConsensusSeats": 3
   },
   "coreArms": [
     { "id": "gpt-5.6-luna-blind", "model": "gpt-5.6-luna", "effort": "high", "dmMode": "blind", "repair": "code_only", "adviceAssisted": false },
     { "id": "gpt-5.6-luna-advice", "model": "gpt-5.6-luna", "effort": "high", "dmMode": "advice", "repair": null, "adviceAssisted": true },
-    { "id": "claude-opus-5-blind", "model": "claude-opus-5", "effort": "high", "dmMode": "blind", "repair": "code_only", "adviceAssisted": false },
-    { "id": "claude-opus-5-advice", "model": "claude-opus-5", "effort": "high", "dmMode": "advice", "repair": null, "adviceAssisted": true },
+    { "id": "claude-opus-4-8-blind", "model": "claude-opus-4-8", "effort": "high", "dmMode": "blind", "repair": "code_only", "adviceAssisted": false },
+    { "id": "claude-opus-4-8-advice", "model": "claude-opus-4-8", "effort": "high", "dmMode": "advice", "repair": null, "adviceAssisted": true },
     { "id": "gpt-5.6-sol-blind", "model": "gpt-5.6-sol", "effort": "high", "dmMode": "blind", "repair": "code_only", "adviceAssisted": false },
     { "id": "gpt-5.6-sol-advice", "model": "gpt-5.6-sol", "effort": "high", "dmMode": "advice", "repair": null, "adviceAssisted": true },
     { "id": "gpt-6-astra-blind", "model": "gpt-6-astra", "effort": "high", "dmMode": "blind", "repair": "code_only", "adviceAssisted": false },
@@ -188,19 +207,19 @@
     { "id": "gpt-6-astra-blind-minhint", "model": "gpt-6-astra", "effort": "high", "dmMode": "blind", "repair": "minimal_legal_alternative", "adviceAssisted": true }
   ],
   "analysisComparisons": [
-    { "id": "gpt-5.6-luna-blind-vs-advice", "leftArm": "gpt-5.6-luna-blind", "rightArm": "gpt-5.6-luna-advice", "estimand": "blind_minus_own_advice", "eligibleJudgeSeats": ["gpt-5.6-sol", "claude-opus-5", "gpt-6-astra"] },
-    { "id": "claude-opus-5-blind-vs-advice", "leftArm": "claude-opus-5-blind", "rightArm": "claude-opus-5-advice", "estimand": "blind_minus_own_advice", "eligibleJudgeSeats": ["gpt-5.6-sol", "claude-opus-5", "gpt-6-astra"] },
-    { "id": "gpt-5.6-sol-blind-vs-advice", "leftArm": "gpt-5.6-sol-blind", "rightArm": "gpt-5.6-sol-advice", "estimand": "blind_minus_own_advice", "eligibleJudgeSeats": ["gpt-5.6-sol", "claude-opus-5", "gpt-6-astra"] },
-    { "id": "gpt-5.6-luna-vs-claude-opus-5-blind", "leftArm": "gpt-5.6-luna-blind", "rightArm": "claude-opus-5-blind", "estimand": "luna_minus_judge_within_mode", "eligibleJudgeSeats": ["gpt-5.6-sol", "claude-opus-5", "gpt-6-astra"] },
-    { "id": "gpt-5.6-luna-vs-gpt-5.6-sol-blind", "leftArm": "gpt-5.6-luna-blind", "rightArm": "gpt-5.6-sol-blind", "estimand": "luna_minus_judge_within_mode", "eligibleJudgeSeats": ["gpt-5.6-sol", "claude-opus-5", "gpt-6-astra"] },
-    { "id": "gpt-5.6-luna-vs-claude-opus-5-advice", "leftArm": "gpt-5.6-luna-advice", "rightArm": "claude-opus-5-advice", "estimand": "luna_minus_judge_within_mode", "eligibleJudgeSeats": ["gpt-5.6-sol", "claude-opus-5", "gpt-6-astra"] },
-    { "id": "gpt-5.6-luna-vs-gpt-5.6-sol-advice", "leftArm": "gpt-5.6-luna-advice", "rightArm": "gpt-5.6-sol-advice", "estimand": "luna_minus_judge_within_mode", "eligibleJudgeSeats": ["gpt-5.6-sol", "claude-opus-5", "gpt-6-astra"] },
-    { "id": "gpt-5.6-luna-blind-vs-gpt-5.6-sol-advice-ceiling", "leftArm": "gpt-5.6-luna-blind", "rightArm": "gpt-5.6-sol-advice", "estimand": "blind_minus_advice_ceiling", "eligibleJudgeSeats": ["gpt-5.6-sol", "claude-opus-5", "gpt-6-astra"] },
-    { "id": "gpt-6-astra-blind-vs-advice", "leftArm": "gpt-6-astra-blind", "rightArm": "gpt-6-astra-advice", "estimand": "blind_minus_own_advice", "eligibleJudgeSeats": ["gpt-5.6-sol", "claude-opus-5", "gpt-6-astra"] },
-    { "id": "gpt-5.6-luna-vs-gpt-6-astra-blind", "leftArm": "gpt-5.6-luna-blind", "rightArm": "gpt-6-astra-blind", "estimand": "luna_minus_judge_within_mode", "eligibleJudgeSeats": ["gpt-5.6-sol", "claude-opus-5", "gpt-6-astra"] },
-    { "id": "gpt-5.6-luna-vs-gpt-6-astra-advice", "leftArm": "gpt-5.6-luna-advice", "rightArm": "gpt-6-astra-advice", "estimand": "luna_minus_judge_within_mode", "eligibleJudgeSeats": ["gpt-5.6-sol", "claude-opus-5", "gpt-6-astra"] },
-    { "id": "gpt-6-astra-vs-gpt-5.6-sol-blind", "leftArm": "gpt-6-astra-blind", "rightArm": "gpt-5.6-sol-blind", "estimand": "astra_minus_sol_within_mode", "eligibleJudgeSeats": ["gpt-5.6-sol", "claude-opus-5", "gpt-6-astra"] },
-    { "id": "gpt-6-astra-vs-gpt-5.6-sol-advice", "leftArm": "gpt-6-astra-advice", "rightArm": "gpt-5.6-sol-advice", "estimand": "astra_minus_sol_within_mode", "eligibleJudgeSeats": ["gpt-5.6-sol", "claude-opus-5", "gpt-6-astra"] }
+    { "id": "gpt-5.6-luna-blind-vs-advice", "leftArm": "gpt-5.6-luna-blind", "rightArm": "gpt-5.6-luna-advice", "estimand": "blind_minus_own_advice", "eligibleJudgeSeats": ["claude-fable-5-1", "gpt-6-astra", "gpt-5.6-sol"] },
+    { "id": "claude-opus-4-8-blind-vs-advice", "leftArm": "claude-opus-4-8-blind", "rightArm": "claude-opus-4-8-advice", "estimand": "blind_minus_own_advice", "eligibleJudgeSeats": ["claude-fable-5-1", "gpt-6-astra", "gpt-5.6-sol"] },
+    { "id": "gpt-5.6-sol-blind-vs-advice", "leftArm": "gpt-5.6-sol-blind", "rightArm": "gpt-5.6-sol-advice", "estimand": "blind_minus_own_advice", "eligibleJudgeSeats": ["claude-fable-5-1", "gpt-6-astra", "gpt-5.6-sol"] },
+    { "id": "gpt-5.6-luna-vs-claude-opus-4-8-blind", "leftArm": "gpt-5.6-luna-blind", "rightArm": "claude-opus-4-8-blind", "estimand": "luna_minus_judge_within_mode", "eligibleJudgeSeats": ["claude-fable-5-1", "gpt-6-astra", "gpt-5.6-sol"] },
+    { "id": "gpt-5.6-luna-vs-gpt-5.6-sol-blind", "leftArm": "gpt-5.6-luna-blind", "rightArm": "gpt-5.6-sol-blind", "estimand": "luna_minus_judge_within_mode", "eligibleJudgeSeats": ["claude-fable-5-1", "gpt-6-astra", "gpt-5.6-sol"] },
+    { "id": "gpt-5.6-luna-vs-claude-opus-4-8-advice", "leftArm": "gpt-5.6-luna-advice", "rightArm": "claude-opus-4-8-advice", "estimand": "luna_minus_judge_within_mode", "eligibleJudgeSeats": ["claude-fable-5-1", "gpt-6-astra", "gpt-5.6-sol"] },
+    { "id": "gpt-5.6-luna-vs-gpt-5.6-sol-advice", "leftArm": "gpt-5.6-luna-advice", "rightArm": "gpt-5.6-sol-advice", "estimand": "luna_minus_judge_within_mode", "eligibleJudgeSeats": ["claude-fable-5-1", "gpt-6-astra", "gpt-5.6-sol"] },
+    { "id": "gpt-5.6-luna-blind-vs-gpt-5.6-sol-advice-ceiling", "leftArm": "gpt-5.6-luna-blind", "rightArm": "gpt-5.6-sol-advice", "estimand": "blind_minus_advice_ceiling", "eligibleJudgeSeats": ["claude-fable-5-1", "gpt-6-astra", "gpt-5.6-sol"] },
+    { "id": "gpt-6-astra-blind-vs-advice", "leftArm": "gpt-6-astra-blind", "rightArm": "gpt-6-astra-advice", "estimand": "blind_minus_own_advice", "eligibleJudgeSeats": ["claude-fable-5-1", "gpt-6-astra", "gpt-5.6-sol"] },
+    { "id": "gpt-5.6-luna-vs-gpt-6-astra-blind", "leftArm": "gpt-5.6-luna-blind", "rightArm": "gpt-6-astra-blind", "estimand": "luna_minus_judge_within_mode", "eligibleJudgeSeats": ["claude-fable-5-1", "gpt-6-astra", "gpt-5.6-sol"] },
+    { "id": "gpt-5.6-luna-vs-gpt-6-astra-advice", "leftArm": "gpt-5.6-luna-advice", "rightArm": "gpt-6-astra-advice", "estimand": "luna_minus_judge_within_mode", "eligibleJudgeSeats": ["claude-fable-5-1", "gpt-6-astra", "gpt-5.6-sol"] },
+    { "id": "gpt-6-astra-vs-gpt-5.6-sol-blind", "leftArm": "gpt-6-astra-blind", "rightArm": "gpt-5.6-sol-blind", "estimand": "astra_minus_sol_within_mode", "eligibleJudgeSeats": ["claude-fable-5-1", "gpt-6-astra", "gpt-5.6-sol"] },
+    { "id": "gpt-6-astra-vs-gpt-5.6-sol-advice", "leftArm": "gpt-6-astra-advice", "rightArm": "gpt-5.6-sol-advice", "estimand": "astra_minus_sol_within_mode", "eligibleJudgeSeats": ["claude-fable-5-1", "gpt-6-astra", "gpt-5.6-sol"] }
   ],
   "repairComparisons": [
     { "id": "gpt-5.6-luna-code-only-vs-minhint", "codeOnlyArm": "gpt-5.6-luna-blind", "minimalHintArm": "gpt-5.6-luna-blind-minhint", "reportLabel": "advice-assisted" },
