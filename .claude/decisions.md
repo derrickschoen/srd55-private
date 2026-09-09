@@ -19612,3 +19612,21 @@ commit` after a test in the same chain.
 
 Elevation cumulative on b279e654 (D586.61): tsc exit 0, 4 spec files,
 19/19, vitest exit 0.
+
+## D586.62 — main gate on eb778854 GREEN; mcp-client and row-codec merged into main; gate relaunched on the integrated revision (2026-09-09 00:30)
+
+Gate wt-main-493121dd on eb778854 (started 23:14, GATES DONE 00:28):
+tsc exit 0; sg exit 0; vitest-gate exit 0 with six load flakes that
+passed serially (pc-algorithm-policy, js-round-plan-integration,
+source-is-greppable, ai-dm-arena, ai-dm-screenshot-probe,
+room-generator-los-cover) and FAILED (none); Playwright 186 passed in
+55.5 min, exit 0. Log kept as gate-wt-main-493121dd.eb778854.log.
+Main since eb778854 carried only decisions commits and the art-request
+pipeline (JSON, Markdown, one .mjs outside the build).
+
+Merged per D586.51 from the main repo, both clean: claude/p-mcpclient
+89d9c4df -> 9e891314, then claude/p-rowcodec 2af3d941 -> 673ef07e.
+Gate worktree moved to 673ef07e and the full gate relaunched; the
+integrated revision is not on the owner's live port. Elevation
+(b279e654) follows after its round-2 verdict and cumulative (already
+green, D588.1).
