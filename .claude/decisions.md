@@ -20085,3 +20085,12 @@ is in progress (focused-challenge-s3-r2.log). Astra round 2 launched
 the tooling, the D583 outcome for rooms B,C,A remains SHELVE_D583 and
 the owner's D587.7 bounded room-D rewrite is the next planning unit in
 this family once the tooling is accepted.
+
+## D586.82 — txn slice 1: serial rerun green, D584.4 contract closed; closing round sent to Astra (2026-09-09 01:58)
+
+D587.3 serial rerun of tests/unit/tools/ai-dm-arena.test.ts on 4a1e2617:
+39/39, vitest exit 0 (started 01:52 after the D569 serial). Reconciled
+with the 19-spec run (441/443, the two reds being these arena timeouts):
+443/443, zero skipped, tsc 0. Both logs handed to Astra as the round-3
+closing evidence (brief review-impl-txn-s1-r3.md); the candidate is
+unchanged since round 2, which found no implementation blocker.
