@@ -178,7 +178,10 @@ function resolveLocal(importer: string, specifier: string): string | null {
   throw new Error(`Unresolved relative dependency ${specifier} from ${importer}.`);
 }
 
-function gitOutput(args: readonly string[]): string | null {
+export type GitRunner = (args: readonly string[]) => string | null;
+
+// Injected runners propagate exceptions; only this default adapter converts Git execution failures to null.
+export function gitOutput(args: readonly string[]): string | null {
   try {
     return execFileSync('git', args, {
       cwd: ROOT,
@@ -190,14 +193,14 @@ function gitOutput(args: readonly string[]): string | null {
   }
 }
 
-function changedPaths(): readonly string[] {
-  const mergedMain = gitOutput(['merge-base', 'HEAD', 'main'])?.trim() ?? '';
-  const committed = gitOutput(['diff', '--name-only', 'main', '--']) ?? '';
+function changedPaths(git: GitRunner): readonly string[] {
+  const mergedMain = git(['merge-base', 'HEAD', 'main'])?.trim() ?? '';
+  const committed = git(['diff', '--name-only', 'main', '--']) ?? '';
   const branchCommitted = new Set((mergedMain === ''
     ? ''
-    : gitOutput(['diff', '--name-only', mergedMain, '--']) ?? '')
+    : git(['diff', '--name-only', mergedMain, '--']) ?? '')
     .split('\n').filter((path) => path.length > 0));
-  const untracked = gitOutput(['ls-files', '--others', '--exclude-standard']) ?? '';
+  const untracked = git(['ls-files', '--others', '--exclude-standard']) ?? '';
   const changed = [...new Set(`${committed}\n${untracked}`.split('\n').filter((path) => path.length > 0))].sort();
   for (const path of changed) {
     if (path.startsWith('tests/') && path.endsWith('.test.ts') &&
@@ -209,7 +212,7 @@ function changedPaths(): readonly string[] {
 }
 
 export function buildD583ContractInventory(
-  input: Readonly<{ changedPaths?: readonly string[] }> = {},
+  input: Readonly<{ changedPaths?: readonly string[]; git?: GitRunner }> = {},
 ): readonly string[] {
   if (D583_BASELINE_SPECS.length !== 140 || inventoryDigest(D583_BASELINE_SPECS) !== D583_BASELINE_SHA256) {
     throw new Error('D583 inherited 140-spec baseline count or SHA-256 changed.');
@@ -243,7 +246,7 @@ export function buildD583ContractInventory(
       reverse.set(resolved, consumers);
     }
   }
-  const changed = input.changedPaths ?? changedPaths();
+  const changed = input.changedPaths ?? changedPaths(input.git ?? gitOutput);
   const consumers = reverseConsumerClosure(
     changed.filter((path) => /\.(?:ts|tsx|mts|cts)$/.test(path)),
     reverse,
