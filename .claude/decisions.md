@@ -21073,3 +21073,37 @@ challenge-rooms, ahead of ce081ef0 by slices 0-1 and the running
 slice 2) will need main merged into it after this gate; its
 challenge-feasibility.test.ts overlaps the reconciliation's slice-2
 additions and is a known conflict for that step.
+
+## D586.131 — main gate on 3f71418f RED on a real defect (branch-state-dependent inventory test); reconciliation merge REVERTED; fix round dispatched (2026-09-09 06:28)
+
+Gate wt-main-493121dd on 3f71418f: tsc 0; sg 0; vitest-gate exit 1:
+three load flakes passed serially (ai-dm-arena, ai-dm-screenshot-probe,
+room-generator-los-cover) and ONE real red: tests/unit/tools/d583-
+contract-inventory.test.ts "unions changed specs and transitive
+consumers without losing inherited coverage": AssertionError expected
+[...(146)] to include 'tests/unit/combat/roll-provenance.test.ts'.
+Cause: buildD583ContractInventory() seeds its reverse-import discovery
+from `git diff --name-only main` and `git merge-base HEAD main`
+(tools/d583-contract-inventory.ts:163-172); on a checkout of main the
+diff is empty, so only the 146 pinned baseline paths remain and the
+reconciliation's own specs are absent. The test passed everywhere it
+was run before (lane, my cumulative, Astra's in-memory rebuild) because
+every run was on the branch. Second occurrence of the class "a test
+depends on lane-local state" (first: D586.66); finding against the
+lane, both reviewers (round 1 and round 2 rebuilt the inventory on the
+branch) and me (my cumulative ran on the branch, and I did not run the
+inventory spec on a main-shaped checkout although D586.66 had shown the
+pattern). Actions: gate killed by process group and its 4870 server by
+pid (log kept as gate-wt-main-493121dd.3f71418f-red.log); merge
+REVERTED on main as 580efdef (main's code is again d95cafb6's, fully
+gate-green); gate worktree moved to 580efdef; fix round dispatched on
+the reconciliation session (brief impl-reconcile-inventory-fix.md,
+marker RECONCILE-INV DONE): a third pinned baseline of reconciliation-
+owned specs unioned unconditionally, branch-diff discovery additive
+only, tolerance of an empty diff and a missing main ref, an empty-diff
+regression with injected git seams, a pin-drop control, two allowed
+files. Standing rule added for harvests: before any main merge the
+supervisor runs the branch's NEW or CHANGED specs once in a detached
+worktree of the candidate commit (no .tmp-plans, HEAD == the commit, no
+branch ref), as D586.68 did for elevation; that check is now part of
+the landing procedure, not optional.
