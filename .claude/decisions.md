@@ -20845,3 +20845,16 @@ passed. Under D587.3 the four red files get exactly one serial rerun
 (cum-reconcile-s1-serial.log). If the inventory test still exceeds its
 budget serially it is a real performance defect of the new test and
 goes into fix round 2 with the vacuous parent-alias mutant.
+
+## D586.119 — reconciliation slice 1: serial rerun green, cumulative contract closed at 4154/4154; fix round 2 resumed for the vacuous mutant and the should-fixes (2026-09-09 04:57)
+
+D587.3 serial rerun on 31e98af5 (--no-file-parallelism, started 04:51 at
+load 3.1): 4 files, 187/187, vitest exit 0, incl. the new inventory
+test; reconciled with the 193-spec run: 4154/4154, zero skipped, tsc 0.
+Astra's blocker 1 is therefore closed by supervisor evidence. Fix
+round 2 of 3 resumed on 01a08530-a935-7832-b3e1-38e592d7c1c9 (brief
+impl-reconcile-s1-r2.md, marker RECONCILE-S1-R2 DONE): redo the
+parent-alias mutant with a callable parent RNG and the snapshot/
+control-divergence killer; re-run every slice-1 control with
+before/mutant/restored hashes logged; the plan:344 wording; no
+cumulative re-run unless code changes.
