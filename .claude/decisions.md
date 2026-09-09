@@ -20977,3 +20977,21 @@ complete event sequence. Disposition: when my cumulative (running, one
 screenshot-probe timeout so far) finishes and any timeouts pass their
 serial rerun, the lane applies the should-fix on the idle tree and the
 closing round goes to Astra with the evidence.
+
+## D586.125 — room D slices 0+1 ACCEPTED at round 1 (2026-09-09 05:56)
+
+Astra round 1 on 9781b93f: "ACCEPT SLICES 0-1. Blockers: none.
+Should-fix: none." Slice 0: all 73 original assertion statements
+retained across the 15 deterministic + 9 production blocks; injected
+failure before module evaluation leaves the 20 deterministic tests
+passing and fails only production setup. Slice 1: bounded types,
+revision-bound offers, fail-closed menus, normal/critical specification
+separation, conditional and non-normalized masses, independent
+fractions, executed miss/kill/end-turn paths, replay-local consistency,
+cover 124/140/124; seven control classes plus an extra critical-
+specification control reproduced; four files; sidecars, frozen contract
+and the accepted 759-byte report unchanged; 44/44 test bodies executed
+in its harness. My evidence: sg 0; 3 files 44/44 native. Slice 2
+(non-merging depth-first reducer enumeration) dispatches next on the
+same worktree; the full-run heap/wall feasibility remains the empirical
+STOP gate the plan names.
