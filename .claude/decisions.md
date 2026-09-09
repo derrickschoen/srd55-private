@@ -19874,3 +19874,17 @@ failures anywhere in the 19 specs, including the four graph dependents
 the plan omitted. Load artefact, not evidence against the candidate; the
 fix-round-2 candidate gets its own cumulative and these four get their
 D587.3 serial rerun on a quieter box.
+
+## D586.71 — promo180 plan round 3 revised; bwrap preflight passes in the supervisor shell; Astra final review launched (2026-09-09 01:11)
+
+Lane exit 0, PLAN-PROMO180-R3 DONE; plan 493 lines, sha256 699254a4...
+(verified by me), tree clean at 8a0cea4e, one `claude -p` match (the
+header). Six Round-3 dispositions: audited mount allowlist (node plus 15
+ldd libraries and the loader), reconstruction and access controls before
+teacher calls, supervisor-shell bwrap preflight with STOP, row-codec
+producers and tests in the contract, consumer dispositions, explicit
+judge-promo180.log quarantine, four independent routing mutants, ERR and
+EXIT traps. Supervisor preflight now: `bwrap --unshare-net --ro-bind / /
+/usr/bin/true` exits 0 with bubblewrap 0.6.1, so the EPERM Astra hit is
+confined to its review sandbox; stated in the brief. Astra round 3
+(FINAL) launched (brief review-plan-promo180-r3.md).
