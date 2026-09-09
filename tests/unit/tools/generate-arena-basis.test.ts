@@ -6,10 +6,15 @@ import { sha256 } from '../../../src/crypto/sha256';
 import { generateRoom, type GeneratedRoom } from '../../../src/vtt/room-generator';
 import {
   basisRepositoryRevision,
+  finalizeHeldoutBasis,
   generateArenaBasis,
+  generateHeldoutBasisRoom,
   heldoutBasisSchedule,
   parseBasisGenerationArgs,
+  prepareHeldoutBasis,
+  type HeldoutBasisBuildContext,
   type HeldoutBasisManifest,
+  type HeldoutBasisRoomManifestRow,
   type HeldoutBasisVerificationConfig,
 } from '../../../tools/generate-arena-basis';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from '../../helpers/test-filesystem';
@@ -48,67 +53,42 @@ interface BasisVerificationControl {
   readonly verifyConfig: HeldoutBasisVerificationConfig;
 }
 
-async function createBasisVerificationControl(): Promise<BasisVerificationControl> {
-  const root = mkdtempSync(join(tmpdir(), 'dnd-heldout-basis-mutation-'));
-  const partyPackPath = copiedHeldoutParties(root);
-  const outPath = join(root, 'basis');
-  const manifestPath = join(root, 'manifest.json');
-  const generated = await generateArenaBasis({
-    protocol: 'heldout-development-v1',
-    rooms: 24,
-    seed: 7_850_001,
-    partyPackPath,
-    outPath,
-    manifestPath,
-  });
-  if (generated === null) throw new Error('Held-out generation returned no manifest.');
-  const generationRevision = generated.repoRevision;
-  if (generationRevision !== basisRepositoryRevision()) {
-    throw new Error('Held-out generation did not record its source revision.');
-  }
-  const frozenRevision = generationRevision === '1111111111111111111111111111111111111111'
-    ? '2222222222222222222222222222222222222222'
-    : '1111111111111111111111111111111111111111';
-  const manifest = { ...generated, repoRevision: frozenRevision };
-  const manifestBytes = `${canonicalJson(manifest)}\n`;
-  writeFileSync(manifestPath, manifestBytes, 'utf8');
-  return {
-    manifest,
-    manifestBytes,
-    roomPath: join(outPath, 'seed-7850001.json'),
-    verifyConfig: {
-      verifyOnly: true,
-      protocol: 'heldout-development-v1',
-      basisPath: outPath,
-      manifestPath,
-      manifestSha256: sha256(manifestBytes),
-      expectRooms: 24,
-    },
-  };
-}
-
-const basisControl = await createBasisVerificationControl();
-
-function writeReboundRoom(bytes: string): HeldoutBasisVerificationConfig {
-  writeFileSync(basisControl.roomPath, bytes, 'utf8');
-  const rooms = basisControl.manifest.rooms.map((row, index) =>
+function writeReboundRoom(
+  control: BasisVerificationControl,
+  bytes: string,
+): HeldoutBasisVerificationConfig {
+  writeFileSync(control.roomPath, bytes, 'utf8');
+  const rooms = control.manifest.rooms.map((row, index) =>
     index === 0 ? { ...row, sha256: sha256(bytes) } : row);
   const manifest = {
-    ...basisControl.manifest,
+    ...control.manifest,
     rooms,
-    aggregateSha256: sha256(canonicalJson({ parties: basisControl.manifest.parties, rooms })),
+    aggregateSha256: sha256(canonicalJson({ parties: control.manifest.parties, rooms })),
   };
   const manifestBytes = `${canonicalJson(manifest)}\n`;
-  writeFileSync(basisControl.verifyConfig.manifestPath, manifestBytes, 'utf8');
-  return { ...basisControl.verifyConfig, manifestSha256: sha256(manifestBytes) };
+  writeFileSync(control.verifyConfig.manifestPath, manifestBytes, 'utf8');
+  return { ...control.verifyConfig, manifestSha256: sha256(manifestBytes) };
 }
 
-function restoreBasisControl(originalRoomBytes: string): void {
-  writeFileSync(basisControl.roomPath, originalRoomBytes, 'utf8');
-  writeFileSync(basisControl.verifyConfig.manifestPath, basisControl.manifestBytes, 'utf8');
+function restoreBasisControl(control: BasisVerificationControl, originalRoomBytes: string): void {
+  writeFileSync(control.roomPath, originalRoomBytes, 'utf8');
+  writeFileSync(control.verifyConfig.manifestPath, control.manifestBytes, 'utf8');
 }
 
-describe('arena basis generator', () => {
+describe.sequential('arena basis generator', () => {
+  let buildContext: HeldoutBasisBuildContext | null = null;
+  let basisControl: BasisVerificationControl | null = null;
+  const generatedRooms: HeldoutBasisRoomManifestRow[] = [];
+
+  function requiredBuildContext(): HeldoutBasisBuildContext {
+    if (buildContext === null) throw new Error('Held-out basis build context is not prepared.');
+    return buildContext;
+  }
+
+  function requiredBasisControl(): BasisVerificationControl {
+    if (basisControl === null) throw new Error('Held-out basis control is not finalized.');
+    return basisControl;
+  }
 
   it('kills M576-E2-LEGACY-DEFAULT-CONSUMES-RNG and writes unchanged legacy rooms', async () => {
     const outPath = mkdtempSync(join(tmpdir(), 'dnd-hard-basis-generator-'));
@@ -221,15 +201,64 @@ describe('arena basis generator', () => {
     }
   });
 
-  it('successfully verifies a generated basis using its frozen generation revision', async () => {
-    await expect(generateArenaBasis(basisControl.verifyConfig)).resolves.toMatchObject({
-      repoRevision: basisControl.manifest.repoRevision,
+  it('prepares the complete development basis within the ordinary test budget', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dnd-heldout-basis-mutation-'));
+    buildContext = await prepareHeldoutBasis({
+      protocol: 'heldout-development-v1',
+      rooms: 24,
+      seed: 7_850_001,
+      partyPackPath: copiedHeldoutParties(root),
+      outPath: join(root, 'basis'),
+      manifestPath: join(root, 'manifest.json'),
+    });
+    expect(buildContext.parties.size).toBe(4);
+  });
+
+  it.each(Array.from({ length: 24 }, (_unused, ordinal) => ordinal))(
+    'generates development room ordinal %i within its ordinary test budget',
+    async (ordinal) => {
+      const context = requiredBuildContext();
+      const row = await generateHeldoutBasisRoom(context, ordinal);
+      generatedRooms.push(row);
+      const bytes = readFileSync(join(context.config.outPath, row.path), 'utf8');
+      expect(row).toMatchObject({ ordinal, seed: 7_850_001 + ordinal });
+      expect(sha256(bytes)).toBe(row.sha256);
+    },
+  );
+
+  it('successfully finalizes and verifies the generated basis using its frozen revision', async () => {
+    const context = requiredBuildContext();
+    const generated = await finalizeHeldoutBasis(context, generatedRooms);
+    expect(generated.repoRevision).toBe(basisRepositoryRevision());
+    const frozenRevision = generated.repoRevision === '1111111111111111111111111111111111111111'
+      ? '2222222222222222222222222222222222222222'
+      : '1111111111111111111111111111111111111111';
+    const manifest = { ...generated, repoRevision: frozenRevision };
+    const manifestBytes = `${canonicalJson(manifest)}\n`;
+    writeFileSync(context.config.manifestPath, manifestBytes, 'utf8');
+    basisControl = {
+      manifest,
+      manifestBytes,
+      roomPath: join(context.config.outPath, 'seed-7850001.json'),
+      verifyConfig: {
+        verifyOnly: true,
+        protocol: 'heldout-development-v1',
+        basisPath: context.config.outPath,
+        manifestPath: context.config.manifestPath,
+        manifestSha256: sha256(manifestBytes),
+        expectRooms: 24,
+      },
+    };
+    const control = requiredBasisControl();
+    await expect(generateArenaBasis(control.verifyConfig)).resolves.toMatchObject({
+      repoRevision: control.manifest.repoRevision,
       roomCount: 24,
     });
   });
 
   it('detects a plausible mutation of a valid room and verifies its byte restoration', async () => {
-    const originalBytes = readFileSync(basisControl.roomPath, 'utf8');
+    const control = requiredBasisControl();
+    const originalBytes = readFileSync(control.roomPath, 'utf8');
     const originalSha256 = sha256(originalBytes);
     const room = JSON.parse(originalBytes) as GeneratedRoom;
     let changedMonster = false;
@@ -260,31 +289,32 @@ describe('arena basis generator', () => {
     if (!changedMonster) throw new Error('Valid mutation room lacks a monster.');
     const mutatedBytes = `${canonicalJson(mutatedRoom)}\n`;
     const mutatedSha256 = sha256(mutatedBytes);
-    writeFileSync(basisControl.roomPath, mutatedBytes, 'utf8');
+    writeFileSync(control.roomPath, mutatedBytes, 'utf8');
     process.stdout.write(`${canonicalJson({
       control: 'heldout-room-mutation-applied', originalSha256, mutatedSha256,
     })}\n`);
     expect(mutatedSha256).not.toBe(originalSha256);
-    await expect(generateArenaBasis(basisControl.verifyConfig)).rejects.toThrow(
+    await expect(generateArenaBasis(control.verifyConfig)).rejects.toThrow(
       'Held-out room 7850001 SHA-256 mismatch.',
     );
 
-    const reboundConfig = writeReboundRoom(mutatedBytes);
+    const reboundConfig = writeReboundRoom(control, mutatedBytes);
     await expect(generateArenaBasis(reboundConfig)).rejects.toThrow(
       'monster profiles do not match its declared roster.',
     );
 
-    restoreBasisControl(originalBytes);
-    const restoredSha256 = sha256(readFileSync(basisControl.roomPath, 'utf8'));
+    restoreBasisControl(control, originalBytes);
+    const restoredSha256 = sha256(readFileSync(control.roomPath, 'utf8'));
     process.stdout.write(`${canonicalJson({
       control: 'heldout-room-mutation-restored', originalSha256, restoredSha256,
     })}\n`);
     expect(restoredSha256).toBe(originalSha256);
-    await expect(generateArenaBasis(basisControl.verifyConfig)).resolves.toMatchObject({ roomCount: 24 });
+    await expect(generateArenaBasis(control.verifyConfig)).resolves.toMatchObject({ roomCount: 24 });
   });
 
   it('rejects re-pinned room bytes whose player profile differs from the pinned party', async () => {
-    const originalBytes = readFileSync(basisControl.roomPath, 'utf8');
+    const control = requiredBasisControl();
+    const originalBytes = readFileSync(control.roomPath, 'utf8');
     const room = JSON.parse(originalBytes) as GeneratedRoom;
     let changedPlayer = false;
     const mutatedRoom = {
@@ -302,15 +332,16 @@ describe('arena basis generator', () => {
       },
     };
     if (!changedPlayer) throw new Error('Valid identity-control room lacks a player.');
-    const verifyConfig = writeReboundRoom(`${canonicalJson(mutatedRoom)}\n`);
+    const verifyConfig = writeReboundRoom(control, `${canonicalJson(mutatedRoom)}\n`);
     await expect(generateArenaBasis(verifyConfig)).rejects.toThrow(
       'player profiles do not match its pinned party.',
     );
-    restoreBasisControl(originalBytes);
+    restoreBasisControl(control, originalBytes);
   });
 
   it('rejects re-pinned room bytes whose declared monster roster loses sourced XP', async () => {
-    const originalBytes = readFileSync(basisControl.roomPath, 'utf8');
+    const control = requiredBasisControl();
+    const originalBytes = readFileSync(control.roomPath, 'utf8');
     const room = JSON.parse(originalBytes) as GeneratedRoom;
     if (room.spec.monsterRoster.length < 2) {
       throw new Error('Valid roster-control room needs at least two monsters.');
@@ -319,25 +350,26 @@ describe('arena basis generator', () => {
       ...room,
       spec: { ...room.spec, monsterRoster: room.spec.monsterRoster.slice(0, -1) },
     };
-    const verifyConfig = writeReboundRoom(`${canonicalJson(mutatedRoom)}\n`);
+    const verifyConfig = writeReboundRoom(control, `${canonicalJson(mutatedRoom)}\n`);
     await expect(generateArenaBasis(verifyConfig)).rejects.toThrow('roster selection or XP mismatch.');
-    restoreBasisControl(originalBytes);
+    restoreBasisControl(control, originalBytes);
   });
 
   it('fully decodes nested manifest provenance instead of accepting a shallow cast', async () => {
+    const control = requiredBasisControl();
     const malformedManifest = {
-      ...basisControl.manifest,
-      rooms: basisControl.manifest.rooms.map((row, index) => index === 0 ? {
+      ...control.manifest,
+      rooms: control.manifest.rooms.map((row, index) => index === 0 ? {
         ...row,
         roster: { ...row.roster, rng: { ...row.roster.rng, algorithm: 'not-an-rng' } },
       } : row),
     };
     const malformedBytes = `${canonicalJson(malformedManifest)}\n`;
-    writeFileSync(basisControl.verifyConfig.manifestPath, malformedBytes, 'utf8');
+    writeFileSync(control.verifyConfig.manifestPath, malformedBytes, 'utf8');
     await expect(generateArenaBasis({
-      ...basisControl.verifyConfig,
+      ...control.verifyConfig,
       manifestSha256: sha256(malformedBytes),
     })).rejects.toThrow('rng.algorithm must be mulberry32');
-    writeFileSync(basisControl.verifyConfig.manifestPath, basisControl.manifestBytes, 'utf8');
+    writeFileSync(control.verifyConfig.manifestPath, control.manifestBytes, 'utf8');
   });
 });

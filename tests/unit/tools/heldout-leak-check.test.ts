@@ -25,9 +25,23 @@ describe('held-out reserve leak wall', () => {
   });
 
   it.each([
-    "import type { HeldoutSlice } from '../vtt/heldout-evaluation';",
-    "const protocol = await import('../vtt/heldout-evaluation');",
-  ])('rejects static and dynamic protocol import %s outside evaluation tooling and tests', (addedText) => {
+    ['static named import', "import { heldoutSideHp } from '../vtt/heldout-evaluation';"],
+    ['static named import with .js',
+      "import { heldoutSideHp } from '../vtt/heldout-evaluation.js';"],
+    ['static type import', "import type { HeldoutSlice } from '../vtt/heldout-evaluation';"],
+    ['static default import with .js', "import heldout from '../vtt/heldout-evaluation.js';"],
+    ['static namespace import with .ts', "import * as heldout from '../vtt/heldout-evaluation.ts';"],
+    ['static side-effect import', "import '../vtt/heldout-evaluation';"],
+    ['single-quoted dynamic import', "const protocol = await import('../vtt/heldout-evaluation');"],
+    ['double-quoted dynamic import with .js', 'const protocol = await import("../vtt/heldout-evaluation.js");'],
+    ['template-literal dynamic import with .ts',
+      'const protocol = await import(`../vtt/heldout-evaluation.ts`);'],
+    ['template-literal dynamic import',
+      'const protocol = await import(`../vtt/heldout-evaluation`);'],
+    ['require', "const protocol = require('../vtt/heldout-evaluation');"],
+    ['double-quoted require with .js',
+      'const protocol = require("../vtt/heldout-evaluation.js");'],
+  ])('rejects %s outside evaluation tooling and tests', (_label, addedText) => {
     const report = inspectHeldoutLeakChanges([{
       path: 'src/ui/repair-ranking.ts',
       addedText,

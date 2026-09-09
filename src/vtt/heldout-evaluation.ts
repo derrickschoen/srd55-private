@@ -38,9 +38,17 @@ function combatant(state: EncounterState, id: CombatantId) {
 }
 
 export function pcNeutralized(state: EncounterState, id: CombatantId): boolean {
+  return pcNeutralizedFromEffectiveConditions(state, id, combatantConditions(state, id));
+}
+
+export function pcNeutralizedFromEffectiveConditions(
+  state: EncounterState,
+  id: CombatantId,
+  effectiveConditions: ReturnType<typeof combatantConditions>,
+): boolean {
   const subject = combatant(state, id);
   return subject.life !== 'living' ||
-    combatantConditions(state, id).some((condition) => condition.name === 'Unconscious');
+    effectiveConditions.some((condition) => condition.name === 'Unconscious');
 }
 
 export function heldoutEncounterOutcome(

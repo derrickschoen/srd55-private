@@ -10,6 +10,7 @@ import {
   heldoutEncounterOutcome,
   heldoutSideHp,
   pcNeutralized,
+  pcNeutralizedFromEffectiveConditions,
 } from '../../../src/vtt/heldout-evaluation';
 import { generateRoom } from '../../../src/vtt/room-generator';
 
@@ -37,28 +38,6 @@ function unconsciousEffect(state: EncounterState, target: CombatantId, ordinal: 
     repeatedSave: null,
     damageBreak: null,
     payload: { kind: 'condition', condition: 'Unconscious' },
-  };
-}
-
-function unconsciousSuppressionEffect(
-  state: EncounterState,
-  target: CombatantId,
-): EncounterEffect {
-  const source = state.combatants.find((subject) => subject.profile.kind === 'monster')?.profile.id;
-  if (source === undefined) throw new Error('Held-out fixture has no monster.');
-  const conditions = ['Unconscious'] as unknown as readonly ['Charmed', 'Frightened'];
-  return {
-    id: encounterEffectId('effect:heldout-unconscious-suppression'),
-    source,
-    targets: [target],
-    createdRevision: state.revision,
-    duration: { kind: 'permanent' },
-    concentrationOwner: null,
-    stackingIdentity: effectStackingIdentity('heldout:unconscious-suppression'),
-    stacking: 'replace_same_source',
-    repeatedSave: null,
-    damageBreak: null,
-    payload: { kind: 'condition_suppression', conditions, grantsImmunity: true },
   };
 }
 
@@ -108,21 +87,19 @@ describe('held-out encounter scoring', () => {
     });
   });
 
-  it('removing or effectively suppressing Unconscious restores a living PC', () => {
+  it('uses a type-valid effective-condition seam for suppression the engine cannot yet represent', () => {
     const initial = fixture();
     const target = playerIds(initial)[0];
     if (target === undefined) throw new Error('Held-out fixture has no PC.');
     const affected = { ...initial, effects: [...initial.effects, unconsciousEffect(initial, target, 1)] };
     const restored = { ...affected, effects: affected.effects.filter((effect) =>
       effect.payload.kind !== 'condition' || effect.payload.condition !== 'Unconscious') };
-    const suppressed = {
-      ...affected,
-      effects: [...affected.effects, unconsciousSuppressionEffect(initial, target)],
-    };
 
     expect(pcNeutralized(affected, target)).toBe(true);
     expect(pcNeutralized(restored, target)).toBe(false);
-    expect(pcNeutralized(suppressed, target)).toBe(false);
+    // Production suppression effects only permit Charmed/Frightened. An empty engine-resolved
+    // effective list verifies scoring suppression without fabricating an impossible effect.
+    expect(pcNeutralizedFromEffectiveConditions(affected, target, [])).toBe(false);
   });
 
   it('capture remains rejected and cap, flight, and objective are not wins', () => {

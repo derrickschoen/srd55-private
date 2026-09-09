@@ -46,6 +46,11 @@ function normalizedDigits(text: string): readonly number[] {
 }
 
 const RESERVE_RESULT_PATH = /(?:\/home\/vagrant\/dnd-slim-runs\/)?heldout-[a-f]-(?:encounters|rounds|packet|key|judge|report)[a-z0-9._/-]*/iu;
+const HELDOUT_PROTOCOL_IMPORT = new RegExp(
+  "(?:\\bfrom\\s*|\\bimport\\s*(?:\\(\\s*)?|\\brequire\\s*\\(\\s*)['\"`]" +
+  "[^'\"`]*heldout-evaluation(?:\\.(?:js|ts))?['\"`]",
+  'u',
+);
 
 function reserveReference(text: string, bindings: HeldoutLeakBindings): string | null {
   if (text.includes('heldout-ordinary-v1') || text.includes('heldout-ordinary-v1-basis')) {
@@ -102,8 +107,7 @@ export function inspectHeldoutLeakChanges(
     )) {
       findings.push({ path: change.path, kind: 'reserve_reference', detail: reference });
     }
-    if (/(?:from\s+|import\s*\(\s*|require\s*\(\s*)['"][^'"]*heldout-evaluation(?:\.ts)?['"]/u
-      .test(change.addedText) &&
+    if (HELDOUT_PROTOCOL_IMPORT.test(change.addedText) &&
       !EVALUATION_FILES.has(change.path) && !isTestOrFixture(change.path)) {
       findings.push({
         path: change.path,

@@ -256,18 +256,26 @@ async function generateLegacyBasis(config: LegacyBasisGenerationConfig): Promise
   return null;
 }
 
-type LoadedParty = Extract<ReturnType<typeof loadExternalPartyPackBytes>, { readonly status: 'loaded' }>['party'];
+export type LoadedParty = Extract<
+  ReturnType<typeof loadExternalPartyPackBytes>,
+  { readonly status: 'loaded' }
+>['party'];
 
-async function loadHeldoutParties(path: string): Promise<ReadonlyMap<HeldoutPartyLevel, {
+export interface HeldoutBasisPartyEntry {
   readonly party: LoadedParty;
   readonly bytes: string;
   readonly manifest: HeldoutBasisPartyManifestRow;
-}>> {
-  const result = new Map<HeldoutPartyLevel, {
-    readonly party: LoadedParty;
-    readonly bytes: string;
-    readonly manifest: HeldoutBasisPartyManifestRow;
-  }>();
+}
+
+export interface HeldoutBasisBuildContext {
+  readonly config: HeldoutBasisGenerationConfig;
+  readonly parties: ReadonlyMap<HeldoutPartyLevel, HeldoutBasisPartyEntry>;
+}
+
+async function loadHeldoutParties(
+  path: string,
+): Promise<ReadonlyMap<HeldoutPartyLevel, HeldoutBasisPartyEntry>> {
+  const result = new Map<HeldoutPartyLevel, HeldoutBasisPartyEntry>();
   for (const level of [3, 4, 5, 6] as const) {
     const filePath = resolve(path, `level-${String(level)}.json`);
     const bytes = await readFile(filePath, 'utf8');
@@ -293,7 +301,7 @@ async function loadHeldoutParties(path: string): Promise<ReadonlyMap<HeldoutPart
   return result;
 }
 
-async function generateHeldoutBasis(config: HeldoutBasisGenerationConfig): Promise<HeldoutBasisManifest> {
+function validateHeldoutBasisGenerationConfig(config: HeldoutBasisGenerationConfig): void {
   if (config.protocol === 'heldout-development-v1' &&
     (config.rooms !== 24 || config.seed !== 7_850_001)) {
     throw new RangeError('The held-out development basis is exactly 24 rooms from seed 7850001.');
@@ -302,44 +310,69 @@ async function generateHeldoutBasis(config: HeldoutBasisGenerationConfig): Promi
     (config.rooms !== 144 || config.seed !== 7_860_001)) {
     throw new RangeError('The held-out reserve is exactly 144 rooms from seed 7860001.');
   }
+}
+
+export async function prepareHeldoutBasis(
+  config: HeldoutBasisGenerationConfig,
+): Promise<HeldoutBasisBuildContext> {
+  validateHeldoutBasisGenerationConfig(config);
   const parties = await loadHeldoutParties(config.partyPackPath);
   await mkdir(config.outPath, { recursive: true });
   await mkdir(resolve(config.outPath, 'parties'), { recursive: true });
   await Promise.all([...parties.values()].map((entry) =>
     writeFile(resolve(config.outPath, entry.manifest.path), entry.bytes, 'utf8')));
-  const rooms = await Promise.all(Array.from({ length: config.rooms }, async (_unused, ordinal) => {
-    const seed = config.seed + ordinal;
-    const schedule = heldoutBasisSchedule(config.protocol, ordinal);
-    const party = parties.get(schedule.level);
-    if (party === undefined) throw new Error(`Held-out party level ${String(schedule.level)} is absent.`);
-    const room = generateRoom(seed, {
-      initiativeProfile: 'derived_v1',
-      ...(schedule.terrainProfile === null ? {} : { terrainProfile: schedule.terrainProfile }),
-      heldoutOrdinary: {
-        protocol: config.protocol,
-        party: party.party,
-        partyLevel: schedule.level,
-        targetXp: schedule.targetXp,
-      },
-    });
-    const roster = room.spec.heldoutOrdinary;
-    if (roster === undefined) throw new Error(`Held-out room ${String(seed)} lost roster provenance.`);
-    const bytes = `${canonicalJson(room)}\n`;
-    const roomPath = resolve(config.outPath, `seed-${String(seed)}.json`);
-    await writeFile(roomPath, bytes, 'utf8');
-    return {
-      ordinal,
-      partition: schedule.partition,
-      seed,
+  return { config, parties };
+}
+
+export async function generateHeldoutBasisRoom(
+  context: HeldoutBasisBuildContext,
+  ordinal: number,
+): Promise<HeldoutBasisRoomManifestRow> {
+  const { config, parties } = context;
+  if (!Number.isSafeInteger(ordinal) || ordinal < 0 || ordinal >= config.rooms) {
+    throw new RangeError(`Held-out room ordinal ${String(ordinal)} is outside the registered basis.`);
+  }
+  const seed = config.seed + ordinal;
+  const schedule = heldoutBasisSchedule(config.protocol, ordinal);
+  const party = parties.get(schedule.level);
+  if (party === undefined) throw new Error(`Held-out party level ${String(schedule.level)} is absent.`);
+  const room = generateRoom(seed, {
+    initiativeProfile: 'derived_v1',
+    ...(schedule.terrainProfile === null ? {} : { terrainProfile: schedule.terrainProfile }),
+    heldoutOrdinary: {
+      protocol: config.protocol,
+      party: party.party,
       partyLevel: schedule.level,
       targetXp: schedule.targetXp,
-      terrainProfile: schedule.terrainProfile,
-      partySha256: party.manifest.sha256,
-      path: basename(roomPath),
-      sha256: sha256(bytes),
-      roster,
-    } satisfies HeldoutBasisRoomManifestRow;
-  }));
+    },
+  });
+  const roster = room.spec.heldoutOrdinary;
+  if (roster === undefined) throw new Error(`Held-out room ${String(seed)} lost roster provenance.`);
+  const bytes = `${canonicalJson(room)}\n`;
+  const roomPath = resolve(config.outPath, `seed-${String(seed)}.json`);
+  await writeFile(roomPath, bytes, 'utf8');
+  return {
+    ordinal,
+    partition: schedule.partition,
+    seed,
+    partyLevel: schedule.level,
+    targetXp: schedule.targetXp,
+    terrainProfile: schedule.terrainProfile,
+    partySha256: party.manifest.sha256,
+    path: basename(roomPath),
+    sha256: sha256(bytes),
+    roster,
+  };
+}
+
+export async function finalizeHeldoutBasis(
+  context: HeldoutBasisBuildContext,
+  rooms: readonly HeldoutBasisRoomManifestRow[],
+): Promise<HeldoutBasisManifest> {
+  const { config, parties } = context;
+  if (rooms.length !== config.rooms || rooms.some((row, ordinal) => row.ordinal !== ordinal)) {
+    throw new Error('Held-out basis finalization requires every room in ordinal order.');
+  }
   const partyRows = [...parties.values()].map((entry) => entry.manifest);
   const manifestWithoutAggregate = {
     format: 'heldout-basis-manifest-v1' as const,
@@ -361,6 +394,15 @@ async function generateHeldoutBasis(config: HeldoutBasisGenerationConfig): Promi
   await mkdir(dirname(config.manifestPath), { recursive: true });
   await writeFile(config.manifestPath, `${canonicalJson(manifest)}\n`, 'utf8');
   return manifest;
+}
+
+async function generateHeldoutBasis(config: HeldoutBasisGenerationConfig): Promise<HeldoutBasisManifest> {
+  const context = await prepareHeldoutBasis(config);
+  const rooms = await Promise.all(Array.from(
+    { length: config.rooms },
+    async (_unused, ordinal) => generateHeldoutBasisRoom(context, ordinal),
+  ));
+  return finalizeHeldoutBasis(context, rooms);
 }
 
 function objectValue(value: unknown, label: string): Readonly<Record<string, unknown>> {
