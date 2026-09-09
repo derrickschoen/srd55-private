@@ -21212,3 +21212,29 @@ astra-review-d569-v5-runbook-r2.log), asked specifically to verify that
 scripts saved outside the repo resolve worktree imports under vite-node,
 that the advisory gate truly precedes the pinned judge-one.sh scoring
 launch, and that the SIMULATED switch cannot leak into production.
+
+## D586.137 — room D slice 2 harvested as candidate 16851799; Astra review launched (2026-09-09 07:26)
+
+Lane (session 01a08599-2b42-7982-8c9d-11db2b2a112f, 306,584 tokens, exit 0)
+ended "BLOCKED: the mandatory D584.4 inventory test deterministically omits
+required roll-provenance coverage after the concurrent main/reconciliation
+advance" — the challenge branch still carries the branch-state-dependent
+inventory tool that main fixed at 88633e05 (D586.133); the lane's manual
+plan-union cumulative (150 paths) had three load timeouts that passed on the
+single serial rerun (154/154) and the one deterministic inventory failure.
+Implementation itself: exactly two files (+1,117 src, +251 test, zero
+removed lines), lane-claimed 512,032 terminal histories / 574,462
+expansions / 1,087,704 applications (1,025,272 completed + 62,432
+incomplete) / peak nodes 3,019 / fractions 4/25 vs 256/625, focused spec
+26/26 in 567 s. Supervisor verified: zero forbidden tokens in added lines,
+diff --check clean, no timeout changes, frozen contract 0f0e1d8f… and plan
+56aad613… unchanged, the fourteen `claude -p` strings in the log are the
+rules header and quotations of decisions.md (lane read the record), my own
+sg scan 0 and tsc -b --force 0 on the committed tree. Committed on
+claude/challenge-rooms as 16851799 (commit before anything else). Astra
+review launched read-only (session 01a085eb-281b-7ef2-ad96-fea91b191009,
+brief review-room-d-s2.md, log astra-review-room-d-s2.log). The inventory
+blocker is not a slice-2 defect; it is resolved by the planned main →
+challenge merge before slice 3 (known conflict in
+challenge-feasibility.test.ts). Supervisor main-shaped focused-spec run
+launched separately.
