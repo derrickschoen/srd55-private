@@ -20877,3 +20877,20 @@ copy was propagated to the txn worktree. Astra round 2 launched (brief
 review-impl-reconcile-s1-r2.md, session 01a08575-6296-7cf1-a1ff-fee260f73ba7)
 carrying my cumulative (4148/4154, six timeouts) and serial rerun
 (187/187) evidence, reconciled 4154/4154.
+
+## D586.121 — reconciliation slice 1 ACCEPTED at round 2 (2026-09-09 05:23)
+
+Astra round 2 on 31e98af5: "ACCEPT SLICE 1. Blockers: none." The
+callable-parent mutant reproduced in memory (parent advances 2 draws
+instead of 0; all three controls kill it, no TypeError); all eleven
+mutations reconstructed with every recorded mutant hash matched and all
+33 before/mutant/restored sections verified against HEAD; plan:344
+correct; HEAD unchanged and tree clean; the inventory rebuilt
+byte-identically (193 paths, 8,308 bytes, 42b6c1ed...), its four serial
+paths exactly the failed files; the cumulative's six timeout-only reds
+and the 187/187 serial rerun reconcile to 4,154/4,154 under D587.3.
+One documentation-only should-fix: the mutation log mislocates the PC
+divergence assertion (:553 vs engine-round-session.test.ts:560). Slice 2
+(feasibility accounting closure, one test file) dispatches next on the
+same worktree; the supervisor merges the branch into main only after
+both slices per the plan's step 8.
