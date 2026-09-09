@@ -20472,3 +20472,30 @@ fixed-point inventory and feasibility accounting closure, 3 files);
 D584.4 contract; must-not-change; acceptance and STOP rules. Log check:
 8 `claude -p` matches in the log, 0 of them shaped like a command line; the rest are the echoed header and decisions.md lines the lane read. Astra round 1 launched (brief review-plan-reconcile-r1.md,
 read-only with cross-ref git commands allowed).
+
+## D586.101 — room D plan written (Astra round 1 launched); promo180 Slice H final fix round harvested (cumulative and final Astra review running) (2026-09-09 03:39)
+
+Room D: lane exit 0, PLAN-ROOM-D DONE in 43 minutes; plan 278 lines,
+31,694 bytes, sha256 7d0163de... (verified by me), tree clean; 6
+`claude -p` matches in the log, 0 shaped like a command (the rest
+are the header and decisions.md lines it read). Astra round 1 launched
+(brief review-plan-room-d-r1.md).
+
+Promo180 Slice H round 3: lane exit 0, PROMO180-H-R3 DONE; claims: six
+of the eleven files (+293/-117); final deadline gates after adoption
+validation and recalculation authorization; deterministic fallback
+excluded from the policy clock; D474 requires explicit correction
+validation evidence; valid QUEUED-SPECULATIVE fixture; the inherited
+arena escalation assertion REWRITTEN (the lane argues the fixture is one
+invalid submission plus a valid arm-base correction, so under D474 it
+must not escalate: now asserts two calls, base-model attribution,
+escalated false, escalationModel null) which the final review must
+judge; deterministic reproductions for adoption expiry, recalculation
+expiry, fallback clock exclusion and the one-failure/no-response
+boundary; five named mutation tests with receipt states and restored
+hashes; tsc 0; sg 0; its 39-spec run 543/598 with 55 EROFS failures in
+seven MCP-spawning specs. Verified by me: `sg scan` exit 0; one
+`claude -p` match (the header); committed as the round-3 candidate (hash
+in the fanout log and the review brief). My 39-spec cumulative runs on
+the writable checkout at load about 2 (cum-promo180-h-r3.log). Astra
+round 3 (FINAL) launched (brief review-impl-promo180-h-r3.md).
