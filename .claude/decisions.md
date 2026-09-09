@@ -20121,3 +20121,25 @@ the browser rerun log is separate; a note file records the clobber. The
 script now waits for the blind-queue's rename of the stale log, then
 for GATES DONE in the fresh log, then for 4870 to free, and never
 writes the gate log itself.
+
+## D586.84 — challenge slice 3 round 2: REJECT on one sampler gap; final fix round resumed (2026-09-09 02:07)
+
+Astra round 2 on 0011d8b8: REJECT, one blocker: challenge-feasibility.ts:938
+samples heap into the variant-local peak without enforcing the limit or
+updating the invocation peak, and :941 takes a second reading that can
+hide the exhaustion (reproduced: heap readings 10 / 1,073,741,825 / 10
+let execution continue to a later wall 180001 failure; invocation peak
+recorded 10), so the first-exhausted-counter guarantee is incomplete.
+One should-fix: the limits test at :275 asserts constants; add
+deterministic sibling-accounting and valid-profile CLI exhaustion
+coverage. Everything else verified: Dodge/refusal/boundary exhaustion,
+all seven limit paths, 250,001-node sibling exhaustion, differing
+depleted-Priest keys, continuations over all 20 d20 outcomes, 400
+provenance branches, the 33 draws, CLI shelving reports, all 14 mutation
+hashes and reversals, the 190-path inventory, 278/278 reruns reconciling
+4,103/4,103, the 759-byte report (0.009863 % over), seven allowed files,
+frozen contract intact. SHELVE_D583 remains valid. Fix round 3 of 3
+(FINAL) resumed on 01a083ce-5391-76d0-8dfc-9045eb0e37ae (brief
+impl-challenge-s3-r3.md) with the regression named ([10, 1073741825, 10]
+must exhaust on heap) and one more phase-3b run under the corrected
+sampler required.
