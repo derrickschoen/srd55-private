@@ -20800,3 +20800,30 @@ failure is recorded, and 186/186 passed on the previous revision one
 hour earlier. Browser-only rerun queued behind the reconcile cumulative
 with a 4870 check (browser-main-queued.sh -> gate-wt-main-493121dd.
 browser2.log). The vitest result for d95cafb6 stands.
+
+## D586.117 — reconciliation slice 1 round 1: REJECT on verification (cumulative not green; one vacuous mutant); core semantics verified (2026-09-09 04:50)
+
+Astra round 1 on 31e98af5: REJECT. Blockers: the cumulative is not
+green (it read my still-running log: tests/unit/tools/d583-contract-
+inventory.test.ts:39 failing plus reds in other specs; the lane's own
+run was 184/193 files, 4,096 passed / 58 failed); and the parent-alias
+mutation was performed wrongly (a non-callable provider substituted via
+a double cast at session-command-transaction.ts:312 fails with a
+TypeError before proving parent-stream isolation, so plan:453 is
+unsatisfied). Should-fixes: plan:344 still explains zero totals by
+exhaustion timing; restoration hashes were not recorded after each
+control. Verified: four core names, ownership-neutral core, positive
+Exact proofs, in-memory API mutants; caught automatic failure preserves
+revision 0 with 2 attempts / 2 completions / 2 roll attempts and eager
+acceptance gives revision 1; hook placement; both wrappers match in
+isolated probes incl. exact errors, accounting, events, caller
+restoration, provenance; session production byte-identical to
+c4e525c3; 20-block union; 146 baseline paths, 193-path inventory digest
+42b6c1ed... reproduced; manifests, capture, historical report and frozen
+contract match; candidate heap reported not matched; six mutant hashes
+recompute; the Dodge assertion correction independently justified
+(resource_spent precedes stance_started). My cumulative on 31e98af5 is
+still running (so far: d583-contract-inventory 1 failed at 5.3 s,
+arena 1 timeout at 30 s, screenshot-probe 1, room-generator-los-cover 3;
+detail arrives with the summary). Fix round 2 is dispatched once the
+exact inventory failure is known.
