@@ -21269,3 +21269,33 @@ acceptance aligned with the pinned extractor while the forbidden-field
 check stays an independent raw-text check; rule 13 rewritten with
 permitted external roots and the read-only main-checkout exception. A
 REJECT at round 3 shelves the runbook.
+
+## D586.139 — room D slice 2: Astra REJECT round 1 (four blockers); lane resumed for round 2 (2026-09-09 07:32)
+
+Astra (session 01a085eb-281b-7ef2-ad96-fea91b191009, 86,965 tokens) on
+candidate 16851799: REJECT. Blockers: (1) peakLiveNodes is not a complete
+runtime inventory — the retained-telemetry sample counts cells and 3 per
+attack only, omitting the components ledger and distribution cache maps,
+the finalized Spear telemetry kept during Dodge enumeration, and the
+materialized step.branches array; ancestor states and active frames are
+inferred from checkpoint/draw counts — so the claimed 3,019 peak and its
+headroom are unproven; (2) the six forbidden-call/retention measurements
+are literal zeros (src ~1598-1603) and the test only overwrites report
+fields; (3) per-component damage-total distributions are never checked —
+removing `total` from the cell key (src ~1092) collapses every bucket while
+every assertion still passes; (4) most plan-required negative controls are
+asserted against constructed objects, not injected through the enumerator
+(AC 15/17 and HP 4/6 perturbations absent; the executed Longbow 11-vs-12
+nextEventSequence control absent; fixed-limit tests use limit, not
+limit+1). Should-fix: exhaustive enumeration runs at module import.
+Confirmed correct: non-merging traversal, streamed terminals, attempted-hook
+accounting (1,087,704 = 1,025,272 + 62,432), exact rational masses, no
+D583 path change, no weakened assertions, no any-equivalent. Supervisor
+verified the cited lines (literal zeros at 1598-1603; retained telemetry
+at 1109-1115 omits components/distributionCache; cell key at 1092;
+inferred ancestors/frames at 1131-1132; at-limit cases at 649-660). Lane
+resumed on the real session 01a08599-2b42-7982-8c9d-11db2b2a112f (brief
+resume-room-d-s2-r2.md, log log-impl-room-d-s2-r2.log, marker
+ROOM-D-S2 R2 DONE) with the D584.4 cumulative pointed at the 150-path
+union ~/dnd-slim-runs/room-d-s2.specs and the inventory test declared a
+known branch-state defect to be reported, not touched. Round 2 of 3.
