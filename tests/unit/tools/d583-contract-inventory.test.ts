@@ -10,6 +10,8 @@ import {
   reverseConsumerClosure,
   SESSION_TRANSACTION_BASELINE_SHA256,
   SESSION_TRANSACTION_BASELINE_SPECS,
+  TRIAL_CORE_RECONCILIATION_BASELINE_SHA256,
+  TRIAL_CORE_RECONCILIATION_BASELINE_SPECS,
 } from '../../../tools/d583-contract-inventory';
 
 describe('D583 cumulative contract inventory', () => {
@@ -29,6 +31,7 @@ describe('D583 cumulative contract inventory', () => {
       ['tests/unit/d583.test.ts'],
       ['tests/unit/transaction.test.ts'],
       [],
+      [],
       new Set(),
     )).toEqual([
       'tests/unit/d583.test.ts',
@@ -36,11 +39,32 @@ describe('D583 cumulative contract inventory', () => {
     ]);
   });
 
+  it('owns the exact reconciliation baseline and pinned digest', () => {
+    expect(TRIAL_CORE_RECONCILIATION_BASELINE_SPECS).toHaveLength(12);
+    expect(inventoryDigest(TRIAL_CORE_RECONCILIATION_BASELINE_SPECS))
+      .toBe(TRIAL_CORE_RECONCILIATION_BASELINE_SHA256);
+    expect(TRIAL_CORE_RECONCILIATION_BASELINE_SPECS)
+      .toEqual([...TRIAL_CORE_RECONCILIATION_BASELINE_SPECS].sort());
+  });
+
   it('unions changed specs and transitive consumers without losing inherited coverage', () => {
     const inventory = buildD583ContractInventory();
     expect(inventory).toEqual([...inventory].sort());
     expect(inventory).toEqual(expect.arrayContaining(D583_BASELINE_SPECS));
     expect(inventory).toEqual(expect.arrayContaining(SESSION_TRANSACTION_BASELINE_SPECS));
+    expect(inventory).toContain('tests/unit/combat/roll-provenance.test.ts');
+    expect(inventory).toContain('tests/unit/tools/d583-contract-inventory.test.ts');
+    expect(inventory).toContain('tests/unit/vtt/session-command-transaction.test.ts');
+    expect(inventory).toContain('tests/unit/vtt/engine-round-session.test.ts');
+    expect(inventory).toContain('tests/unit/vtt/challenge-feasibility.test.ts');
+  });
+
+  it('retains every reconciliation-owned spec with an empty branch diff and no merge-base', () => {
+    const inventory = buildD583ContractInventory({ changedPaths: [] });
+    expect(inventory).toEqual([...inventory].sort());
+    expect(inventory).toEqual(expect.arrayContaining(D583_BASELINE_SPECS));
+    expect(inventory).toEqual(expect.arrayContaining(SESSION_TRANSACTION_BASELINE_SPECS));
+    expect(inventory).toEqual(expect.arrayContaining(TRIAL_CORE_RECONCILIATION_BASELINE_SPECS));
     expect(inventory).toContain('tests/unit/combat/roll-provenance.test.ts');
     expect(inventory).toContain('tests/unit/tools/d583-contract-inventory.test.ts');
     expect(inventory).toContain('tests/unit/vtt/session-command-transaction.test.ts');
