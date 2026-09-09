@@ -20907,3 +20907,40 @@ inventory recomputed with the slice-1 tool; one vitest invocation; the
 after-reconcile-s2 session capture and the s2 challenge report through
 the validator. The slice-1 log mislocation (:553 -> :560) to be
 corrected in passing.
+
+## D586.123 — main gate on d95cafb6 fully GREEN (browser rerun); room D slices 0+1 and reconciliation slice 2 harvested; both to Astra (2026-09-09 05:49)
+
+Browser-only rerun on d95cafb6 (started 04:51, BROWSER DONE 05:47): four
+initial failures (replacement-repair.spec:174 and :221, sharing.spec:385
+and :453, one a toContainText assertion) while two lanes ran vitest;
+all eight rerun serially passed; 182 + 8 = 190 of 190 passed,
+playwright-gate exit 0. With D586.116 (tsc 0, sg 0, vitest-gate 0) the
+revision carrying mcp-client, row-codec, elevation and txn slices 1-3 is
+fully green. Main has since advanced only by decisions commits.
+
+Room D slices 0+1: lane exit 0, ROOM-D-S1 DONE; claims: slice 0 split
+the production exploration into challenge-feasibility-production.test.ts
+(deterministic 15/15 in 3.2 s; injected production failure isolated;
+focused 24/24), slice 1 added the closed types, offer/menu validation,
+specification keys, mass tables, the independent raw-loop oracle
+(4/25, 256/625, 156/625, 249/2500), menu execution, replay-scoped
+consistency and cover probes 124/140/124 (focused 35/35); seven controls
+killed and restored; its own cumulatives 4,106/4,109 and 4,112/4,115
+each with three timeouts rerun serially green; sg 0; tsc 0. Verified
+by me: `sg scan` exit 0; header-only `claude -p`; committed on
+claude/challenge-rooms (hash per fanout log); my run of the three
+changed/new specs in progress (focused-room-d-s1.log). Astra round 1
+launched (brief review-impl-room-d-s1.md).
+
+Reconciliation slice 2: lane exit 0, RECONCILE-S2 DONE; claims: one file
+(+242/-12), five deterministic accounting cases under the injected
+runtime with the 180 s beforeAll scoped away from them; five controls
+killed and restored (mutations-reconcile-s2.log); session capture
+byte-identical; s2 challenge report validator exit 0 with heap
+1,073,899,848 (+0.002 %); its cumulative 181/193 files with EROFS
+cascades, four 5 s load timeouts and the production beforeAll timing out
+at 180 s under load; sg 0; tsc 0; the :553 -> :560 log correction.
+Verified by me: `sg scan` exit 0; manifest 5 OK; s2 report present;
+committed (hash per fanout log); my 193-spec cumulative running
+(cum-reconcile-s2.log). Astra round 1 launched (brief
+review-impl-reconcile-s2.md).
