@@ -21327,3 +21327,22 @@ marker RUNBOOK R3B DONE) to replace every `rg` with POSIX grep -E
 equivalents and prove the wrapper's verify path under `env -i /bin/bash
 -c`. The third and final Astra review follows that fix-up; the review
 round count stays at 2 used, 1 remaining.
+
+## D586.141 — main-shaped cumulative of room D slice 2 candidate 16851799: 4 red files, two names LOST by my own log truncation; serial rerun launched (2026-09-09 07:49)
+
+Supervisor run in a fresh main-shaped shared clone at 16851799 (no
+.tmp-plans): focused spec 1 file, 26/26, 514.8 s; the lane's 150-path
+union: 146 files passed / 4 failed, 2,919 tests passed / 4 failed, 731 s
+under load ~10 (gate Playwright and two Sol lanes concurrent). Named
+reds: tests/unit/tools/d583-contract-inventory.test.ts (the known
+branch-state defect fixed on main at 88633e05, deterministic) and
+tests/unit/vtt/room-generator-los-cover.test.ts (5 s timeout, load).
+FINDING AGAINST MY OWN TOOLING: the run script piped vitest through
+`| tail -40`, so the first and fourth FAIL headers were cut off and two
+red file names are unrecoverable from the log — exactly the pattern the
+memory rule "no tail -N pipes on backgrounded suites, tee to a log"
+forbids. Serial rerun (`--no-file-parallelism`) launched for the two
+known files only (log mainshape-room-d-s2-rerun.log). This candidate is
+already REJECTED (D586.139); the round-2 candidate gets a full supervisor
+cumulative with the complete vitest output written to file, and that run
+is the admissible D584.4 evidence.
