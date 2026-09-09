@@ -543,89 +543,83 @@ export class EngineRoundSession {
     entries: readonly EngineTurnApplication[],
     guidance: ReactionGuidanceDeclaration | null,
   ): AppliedEngineMechanics {
-    const beforeRevision = this.#state.revision;
-    const trialRng = restoreMulberry32(this.#rng.snapshot());
-    const fallbackResolutions: AutoResolvedReactionOffer[] = [];
-    const guidedResolutions: GuidedReactionResolution[] = [];
-    const deviationResolutions: EngineProposalDeviation[] = [];
-    const reduce = (state: EncounterState, command: EncounterCommand): EncounterState => {
-      const reduced = reduceOne(state, command, trialRng);
-      const resolved = resolveSessionBoundaryDecisions(
-        reduced,
-        trialRng,
-        reduceSessionEncounter,
-        this.policy,
-        guidance,
-        'initiative_segment',
-      );
-      fallbackResolutions.push(...resolved.fallbackResolutions);
-      guidedResolutions.push(...resolved.guidedResolutions);
-      return resolved.state;
-    };
-    let state = this.#state;
-    for (const application of entries) {
-      const entry = application;
-      state = advanceToActor(state, entry.proposal.actorId, reduce);
-      const primary = resolveEngineActorOption(state, entry.primaryOption);
-      const fallback = primary.valid || entry.fallbackOption === null
-        ? null
-        : resolveEngineActorOption(state, entry.fallbackOption);
-      let mechanics: ResolvedTurnMechanics;
-      let appliedBranch: EngineAppliedProposalBranch;
-      let refusalCodes: string[];
-      if (primary.valid) {
-        mechanics = mechanicsWithChoice(primary.mechanics, entry.proposal.activationChoice, entry.primaryOption);
-        appliedBranch = 'primary';
-        refusalCodes = [];
-      } else if (fallback?.valid === true) {
-        if (entry.fallbackOption === null) throw new Error('Resolved fallback option is absent.');
-        mechanics = mechanicsWithChoice(fallback.mechanics, entry.proposal.activationChoice, entry.fallbackOption);
-        appliedBranch = 'fallback';
-        refusalCodes = [primary.code];
-      } else {
-        const dodgeOption = availableEngineActorOptions(state, entry.proposal.actorId).find((option) =>
-          option.actionSlots.some((slot) => slot.slot === 'main' && slot.use.kind === 'dodge')) ?? null;
-        if (dodgeOption === null) throw new Error(`Could not apply deterministic Dodge for ${entry.proposal.actorId}.`);
-        const dodge = resolveEngineActorOption(state, dodgeOption);
-        if (!dodge.valid) throw new Error(`Could not apply deterministic Dodge for ${entry.proposal.actorId}.`);
-        mechanics = dodge.mechanics;
-        appliedBranch = 'dodge';
-        refusalCodes = [primary.code, ...(fallback !== null && !fallback.valid ? [fallback.code] : [])];
-      }
+    const outcome = runSessionCommandTransaction({
+      state: this.#state,
+      random: { fork: () => restoreMulberry32(this.#rng.snapshot()) },
+      reducer: reduceSessionEncounter,
+      boundaryPolicy: this.policy,
+      guidance,
+      boundaryScope: 'initiative_segment',
+      initialBoundary: 'preserve',
+    }, (commands) => {
+      const deviationResolutions: EngineProposalDeviation[] = [];
+      let state = commands.currentState();
+      const reduce = (_state: EncounterState, command: EncounterCommand): EncounterState =>
+        commands.apply(command);
+      for (const entry of entries) {
+        state = advanceToActor(state, entry.proposal.actorId, reduce);
+        const primary = resolveEngineActorOption(state, entry.primaryOption);
+        const fallback = primary.valid || entry.fallbackOption === null
+          ? null
+          : resolveEngineActorOption(state, entry.fallbackOption);
+        let mechanics: ResolvedTurnMechanics;
+        let appliedBranch: EngineAppliedProposalBranch;
+        let refusalCodes: string[];
+        if (primary.valid) {
+          mechanics = mechanicsWithChoice(primary.mechanics, entry.proposal.activationChoice, entry.primaryOption);
+          appliedBranch = 'primary';
+          refusalCodes = [];
+        } else if (fallback?.valid === true) {
+          if (entry.fallbackOption === null) throw new Error('Resolved fallback option is absent.');
+          mechanics = mechanicsWithChoice(fallback.mechanics, entry.proposal.activationChoice, entry.fallbackOption);
+          appliedBranch = 'fallback';
+          refusalCodes = [primary.code];
+        } else {
+          const dodgeOption = availableEngineActorOptions(state, entry.proposal.actorId).find((option) =>
+            option.actionSlots.some((slot) => slot.slot === 'main' && slot.use.kind === 'dodge')) ?? null;
+          if (dodgeOption === null) throw new Error(`Could not apply deterministic Dodge for ${entry.proposal.actorId}.`);
+          const dodge = resolveEngineActorOption(state, dodgeOption);
+          if (!dodge.valid) throw new Error(`Could not apply deterministic Dodge for ${entry.proposal.actorId}.`);
+          mechanics = dodge.mechanics;
+          appliedBranch = 'dodge';
+          refusalCodes = [primary.code, ...(fallback !== null && !fallback.valid ? [fallback.code] : [])];
+        }
 
-      const reasonCodes: EngineProposalDeviation['reasonCodes'][number][] = [];
-      if (appliedBranch === 'dodge') {
-        reasonCodes.push('degraded_to_dodge');
-      } else {
-        if (appliedBranch !== entry.selectedBranch) reasonCodes.push('branch_changed');
-        if (mechanics.optionId !== entry.mechanics.optionId) reasonCodes.push('option_changed');
+        const reasonCodes: EngineProposalDeviation['reasonCodes'][number][] = [];
+        if (appliedBranch === 'dodge') {
+          reasonCodes.push('degraded_to_dodge');
+        } else {
+          if (appliedBranch !== entry.selectedBranch) reasonCodes.push('branch_changed');
+          if (mechanics.optionId !== entry.mechanics.optionId) reasonCodes.push('option_changed');
+        }
+        const appliedProposal = applyOneResolvedProposal(state, mechanics, reduce);
+        state = appliedProposal.state;
+        if (appliedProposal.remainingAttackTargetDead) {
+          reasonCodes.push('remaining_attack_target_dead');
+          refusalCodes.push('TARGET_DIED_DURING_OPTION');
+        }
+        if (reasonCodes.length > 0) {
+          deviationResolutions.push({
+            actorId: entry.proposal.actorId,
+            authorizedBranch: entry.selectedBranch,
+            appliedBranch,
+            authorizedOptionId: entry.mechanics.optionId,
+            appliedOptionId: mechanics.optionId,
+            reasonCodes,
+            refusalCodes,
+          });
+        }
       }
-      const appliedProposal = applyOneResolvedProposal(state, mechanics, reduce);
-      state = appliedProposal.state;
-      if (appliedProposal.remainingAttackTargetDead) {
-        reasonCodes.push('remaining_attack_target_dead');
-        refusalCodes.push('TARGET_DIED_DURING_OPTION');
-      }
-      if (reasonCodes.length > 0) {
-        deviationResolutions.push({
-          actorId: entry.proposal.actorId,
-          authorizedBranch: entry.selectedBranch,
-          appliedBranch,
-          authorizedOptionId: entry.mechanics.optionId,
-          appliedOptionId: mechanics.optionId,
-          reasonCodes,
-          refusalCodes,
-        });
-      }
-    }
-    state = advancePastUnavailableActiveCombatant(state, reduce);
-    this.#state = canonicalEncounterState(state).state;
-    this.#rng = trialRng;
+      advancePastUnavailableActiveCombatant(state, reduce);
+      return deviationResolutions;
+    });
+    if (outcome.kind === 'rolled_back') throw outcome.error;
+    this.#commitCompletedTrial(outcome);
     return {
-      revisionDelta: this.#state.revision - beforeRevision,
-      fallbackResolutions,
-      guidedResolutions,
-      deviationResolutions,
+      revisionDelta: outcome.revisionDelta,
+      fallbackResolutions: outcome.fallbackResolutions,
+      guidedResolutions: outcome.guidedResolutions,
+      deviationResolutions: outcome.value,
     };
   }
 
