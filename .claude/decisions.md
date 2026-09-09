@@ -20696,3 +20696,24 @@ sha256 f109fa50... (computed by me), tree clean; 1 `claude -p`
 match(es) in the log (header/decisions reads). Astra round 2 launched
 (brief review-plan-room-d-r2.md) with the instruction to re-run its
 own engine probes against every disposition.
+
+## D586.111 — room D plan round 2: DO NOT DISPATCH on one contract contradiction; final round resumed (2026-09-09 04:15)
+
+Astra round 2 on the 270-line plan (sha f109fa50...): DO NOT DISPATCH,
+one blocker: the damage-grouping acceptance contract (plan:89, exact
+weights and component mass 1) contradicts plan:100 (normal and critical
+components have different IDs/kinds): executed enumeration shows they
+share occurrenceId, componentId and kind dice_expression and differ
+only in specification (Dodge-line normal 143/400 vs critical 1/400;
+normal Fighter 11/20 and 1/20), so the mass/duplicate controls would
+reject valid enumeration or invite normalisation. Three should-fixes:
+count incomplete replay attempts explicitly (probes: Spear 111/95,
+normal Fighter 181/160, Dodge Fighter 1,637/1,464; a prefix-sharing
+traversal derives 1,087,704 applications and 574,462 expansions, within
+the ceilings); replace the unexplained 111 component paths / 42
+terminal categories with retained DFS frames, siblings, ancestors and
+telemetry (160 raw outcomes); derive 256 misses as 400 - 12^2. Every
+round-1 correction confirmed by execution; 512,032 histories, delta
+156/625, margin 249/2500 confirmed. Round 3 of 3 (FINAL) resumed on
+01a084f3-7c9e-73f0-8bfa-1661a246cdbc (brief plan-room-d-r3.md, marker
+PLAN-ROOM-D-R3 DONE).
