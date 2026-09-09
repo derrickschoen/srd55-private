@@ -22031,3 +22031,9 @@ tools/discord-launcher's echo relay is a spike, not a base). Alternatives not ch
 
 D592 AMENDED — OWNER (2026-09-09 18:12 EDT): "also, i reset my codex usage now." The wait is over; resume both codex sessions immediately after a
 probe confirms `codex exec` works.
+
+## D594 — OWNER: no Node version pin (2026-09-09)
+
+Q5 answered 2026-09-09 18:42 EDT: "No pin". The plan's S0 drops `engines` and `.nvmrc`; doctor records the installed Node/npm versions in its
+report and warns on a major-version mismatch with the recorded baseline but never fails on version. Alternatives not chosen:
+exact 24.13.0; floor >=24.
