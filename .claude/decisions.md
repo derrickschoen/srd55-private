@@ -20232,3 +20232,15 @@ monster mechanics consumer, two files) dispatched fresh on 733c1446:
 session per fanout log, brief impl-txn-s3.md, marker TXN-S3 DONE, with
 the four slice-3 mutants incl. the encounter.ts:10025 risk mutant and
 the after-s3 byte-identical proof.
+
+## D586.90 — txn slice 2 cumulative on 733c1446: 442/444, the same two arena timeouts; serial rerun in a detached worktree (2026-09-09 02:38)
+
+Supervisor cumulative (started 02:26 at load 6.3 with the blind gate
+concurrent): tsc exit 0; 19 files, 18 passed / 1 failed; 444 tests, 442
+passed / 2 failed; vitest exit 1. Both reds are the two 30 s arena
+timeouts already seen on slice 1 (renderer-profile threading, intel-
+surface suppression; file wall 288 s); no assertion failures; all MCP-
+spawning specs passed. Because the slice-3 lane is now editing the txn
+worktree, the D587.3 serial rerun of ai-dm-arena.test.ts runs in a fresh
+detached worktree of 733c1446 with symlinked node_modules
+(dnd-wt-verify-txn-s2, removed after; log cum-txn-s2-serial.log).
