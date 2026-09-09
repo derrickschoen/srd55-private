@@ -20255,3 +20255,24 @@ skipped, tsc 0. With Astra's "ACCEPT SLICE 2 on implementation merits"
 main as c1f16152 (clean, two files). The verification worktree was
 removed and pruned. The queued main gate reads main's revision at its
 launch, so it will gate c1f16152 (or later) after the blind gate.
+
+## D586.92 — challenge slice 3 final fix round harvested; SHELVE_D583 confirmed a third time; final Astra review running (2026-09-09 02:48)
+
+Lane exit 0, CHALLENGE-S3-R3 SHELVE_D583; claims: three files (+104/-3);
+the first variant heap observation through the common checked sampler
+updating both peaks before enforcement; the [10, 1,073,741,825, 10]
+regression; sibling 250,001 and valid-profile CLI exhaustion coverage
+through injected IO; three plausible-wrong-value controls with
+application/restoration hashes; corrected feasibility for B,C,A: heap
+1,073,878,568 vs 1,073,741,824 (0.0127 % over; report 759 bytes, sha
+55b972b3..., earlier reports kept); focused 6 files 75/75; its
+cumulative 4,106 tests, 4,096 + 10 load timeouts, six files rerun
+serially green, reconciled 4,106/4,106; tsc 0; sg 0. It also reports
+that its first vitest-based control attempt was interrupted (exit 130)
+because a synchronous production beforeAll ran on after timeout, and it
+substituted isolated injected-runtime probes; flagged to the reviewer.
+Verified by me: `sg scan` exit 0; only the echoed header matches
+`claude -p`; committed ce081ef0; my run of the changed feasibility spec
+plus roll-provenance is in progress (focused-challenge-s3-r3.log).
+Astra round 3 (FINAL) launched (brief review-challenge-s3-r3.md,
+session 01a084ec-95b7-7f83-b13b-64cbce875a26).
