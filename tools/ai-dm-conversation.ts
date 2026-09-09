@@ -766,6 +766,10 @@ export interface ConversationRunOptions {
     base: ConversationPlannerAttribution,
     escalation: ConversationPlannerAttribution | null,
   ) => ConversationPlannerAttribution;
+  /** Test-only boundary immediately after speculative branch validation. */
+  readonly onSpeculationAdoptionValidated?: () => void;
+  /** Test-only work injected inside deterministic fallback computation. */
+  readonly onDeterministicFallback?: () => void;
 }
 
 export function boardImageOutputDirectory(
@@ -2489,6 +2493,15 @@ function explicitlyRefusedTurn(turn: AgentTurnResult): boolean {
     /^(?:(?:i|we)\s+)?(?:cannot|can't|am unable to|are unable to)\b/iu.test(text);
 }
 
+export function acceptSpeculationRecalculationBeforeDeadline<Value>(
+  deadline: AgentDispatchDeadline,
+  authorize: () => Value,
+): Value | null {
+  if (!deadline.acceptsCompletion()) return null;
+  const authorized = authorize();
+  return deadline.acceptsCompletion() ? authorized : null;
+}
+
 async function abortableDelay(milliseconds: number, signal: AbortSignal): Promise<void> {
   if (milliseconds <= 0) return;
   await new Promise<void>((resolvePromise, reject) => {
@@ -3523,6 +3536,8 @@ async function runConversationWithConfiguredIntel(
       let terminalOutcome: ConversationTerminalOutcome | null = null;
       let primaryDispatchTimedOut = false;
       let primaryExplicitRefusal = false;
+      let correctionValidationFailureObserved = false;
+      let fallbackPolicyClassified = false;
       let correctionDispatchTimedOut = false;
       let escalated = false;
       let firedEscalationModel: string | null = null;
@@ -4514,9 +4529,11 @@ async function runConversationWithConfiguredIntel(
                   JSON.stringify(result),
                   config.turnContextMaximumBytes,
                 );
-              }
+                }
                 if (eventContextTrimmed(result)) observedContextTruncated = true;
-                observedRejections.push(...rejectionEvidence(result));
+                const rejections = rejectionEvidence(result);
+                if (rejections.length > 0) correctionValidationFailureObserved = true;
+                observedRejections.push(...rejections);
               },
             })
           : undefined;
@@ -4709,38 +4726,44 @@ async function runConversationWithConfiguredIntel(
             return 'authorized';
           },
           resolveDeterministically: async (actorId): Promise<DeterministicProposalResolution> => {
-            classifyPolicy();
-            const defaultEntry = engineDefaultPlanEntry(
-              engineSession.currentState(),
-              actorId,
-              capsuleRevision,
-            );
-            const exhaustionEntry = defaultEntry.frontierResolution === 'fully_resolved'
-              ? defaultEntry
-              : simControllerPlanEntry(
-                  engineSession.currentState(),
-                  actorId,
-                  capsuleRevision,
-                );
-            if (defaultEntry.frontierResolution === 'contains_unresolved') {
-              autoSubmitBlocks.set(actorId, {
-                actorId,
-                reason: 'auto_submit_blocked_unresolved_frontier',
-              });
+            if (!fallbackPolicyClassified) {
+              classifyPolicy();
+              fallbackPolicyClassified = true;
             }
-            exhaustionEntries.set(actorId, exhaustionEntry);
-            if (config.intelMode === 'full') {
-              exhaustionIntelCapture ??= captureDmIntel(
+            return withoutPolicyClock(() => {
+              options.onDeterministicFallback?.();
+              const defaultEntry = engineDefaultPlanEntry(
                 engineSession.currentState(),
-                correctionCapsule,
-                canonicalEngineQueryPort,
+                actorId,
+                capsuleRevision,
               );
-            }
-            return {
-              actorId,
-              expectedRevision: capsuleRevision,
-              resolutionDigest: exhaustionEntry.resolutionDigest,
-            };
+              const exhaustionEntry = defaultEntry.frontierResolution === 'fully_resolved'
+                ? defaultEntry
+                : simControllerPlanEntry(
+                    engineSession.currentState(),
+                    actorId,
+                    capsuleRevision,
+                  );
+              if (defaultEntry.frontierResolution === 'contains_unresolved') {
+                autoSubmitBlocks.set(actorId, {
+                  actorId,
+                  reason: 'auto_submit_blocked_unresolved_frontier',
+                });
+              }
+              exhaustionEntries.set(actorId, exhaustionEntry);
+              if (config.intelMode === 'full') {
+                exhaustionIntelCapture ??= captureDmIntel(
+                  engineSession.currentState(),
+                  correctionCapsule,
+                  canonicalEngineQueryPort,
+                );
+              }
+              return {
+                actorId,
+                expectedRevision: capsuleRevision,
+                resolutionDigest: exhaustionEntry.resolutionDigest,
+              };
+            });
           },
           applyAutoResolved: async (resolution) => {
             const exhaustionEntry = exhaustionEntries.get(resolution.actorId);
@@ -4889,6 +4912,7 @@ async function runConversationWithConfiguredIntel(
             lifecycle: {
               resumeCorrection: async (correctionInvocation: AgentInvocation, deadline: AgentDispatchDeadline) => {
                 correctionDispatchPlanner = plannerAttribution(correctionInvocation);
+                const correctionRejectionsBefore = canonicalJson(rejectionsObserved());
                 const contextCallsBeforeCorrection = simulated?.contextCallsByRequest.get(requestId) ??
                   observedTurnContextCalls;
                 correctionCalls += 1;
@@ -4944,6 +4968,7 @@ async function runConversationWithConfiguredIntel(
                     localCorrectionProposal = structured.proposal;
                     pendingStructuredDecision = structured.decision;
                   } else {
+                    correctionValidationFailureObserved = true;
                     decisionRejectionCodes.push(structured.code);
                     if (structured.normalizationCode !== null) normalizationCodes.push(structured.normalizationCode);
                     if (structured.engineResult !== null) {
@@ -4953,6 +4978,9 @@ async function runConversationWithConfiguredIntel(
                 }
                 const contextCallsAfterCorrection = simulated?.contextCallsByRequest.get(requestId) ??
                   observedTurnContextCalls;
+                if (canonicalJson(rejectionsObserved()) !== correctionRejectionsBefore) {
+                  correctionValidationFailureObserved = true;
+                }
                 if (contextCallsAfterCorrection > contextCallsBeforeCorrection) {
                   lastSeenTurnContext = fullTurnContextBase(
                     engineSession.currentState(),
@@ -4984,6 +5012,7 @@ async function runConversationWithConfiguredIntel(
             ),
             activateCapsule: () => undefined,
             takeProposal: () => localCorrectionProposal ?? takeRoundProposal(correctionLauncher.spoolPath),
+            validationFailureObserved: () => correctionValidationFailureObserved,
           },
           escalation: escalationRuntime,
           deadline: roundDeadline,
@@ -5287,7 +5316,11 @@ async function runConversationWithConfiguredIntel(
                   sourceCapsule: pending.sourceSnapshot.capsule,
                 });
                 if (adoption.entries === null) discardReason = adoption.reason;
-                else adoptedEntries = adoption.entries;
+                else {
+                  options.onSpeculationAdoptionValidated?.();
+                  if (!roundDeadline.acceptsCompletion()) discardReason = 'budget_expired';
+                  else adoptedEntries = adoption.entries;
+                }
               }
               if (adoptedEntries !== null) {
                 for (const entry of adoptedEntries) {
@@ -5390,20 +5423,24 @@ async function runConversationWithConfiguredIntel(
                       const proposal = localRecalculationProposal ??
                         takeRoundProposal(recalculationLauncher.spoolPath);
                       if (proposal !== null && roundDeadline.acceptsCompletion()) {
-                        const checked = authorizedMechanics(state, proposal);
-                        if (checked.entries !== null && sameCombatantSet(
-                          checked.entries.map((entry) => entry.proposal.actorId),
-                          segmentActors,
-                        )) {
-                          recalculated = checked.entries.map((entry) => ({
-                            proposal: structuredClone(entry.proposal),
-                            option: structuredClone(entry.option),
-                            primaryOption: structuredClone(entry.primaryOption),
-                            fallbackOption: structuredClone(entry.fallbackOption),
-                            mechanics: entry.mechanics,
-                            selectedBranch: entry.selectedBranch,
-                          }));
-                        }
+                        recalculated = acceptSpeculationRecalculationBeforeDeadline(
+                          roundDeadline,
+                          () => {
+                            const checked = authorizedMechanics(state, proposal);
+                            if (checked.entries === null || !sameCombatantSet(
+                              checked.entries.map((entry) => entry.proposal.actorId),
+                              segmentActors,
+                            )) return null;
+                            return checked.entries.map((entry) => ({
+                              proposal: structuredClone(entry.proposal),
+                              option: structuredClone(entry.option),
+                              primaryOption: structuredClone(entry.primaryOption),
+                              fallbackOption: structuredClone(entry.fallbackOption),
+                              mechanics: entry.mechanics,
+                              selectedBranch: entry.selectedBranch,
+                            }));
+                          },
+                        );
                       }
                     } catch {
                       recalculated = null;

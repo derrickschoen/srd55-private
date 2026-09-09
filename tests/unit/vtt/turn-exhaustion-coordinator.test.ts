@@ -167,6 +167,7 @@ function runtime(
     },
     activateCapsule: () => { activated.value += 1; },
     takeProposal: () => queued.shift() ?? null,
+    validationFailureObserved: () => false,
   };
 }
 
@@ -360,6 +361,49 @@ describe('host turn exhaustion coordinator', () => {
       correctionNumber: 1,
       autoResolvedActorIds: [f.actor],
     });
+  });
+
+  it('does not escalate one validation failure followed by an empty correction', async () => {
+    const f = fixture();
+    let escalationStarts = 0;
+    const escalationProposal = proposal(f, 'correction', 'primary', 'proposal:escalation');
+    const outcome = await new TurnExhaustionCoordinator(
+      f.journal.turnExhaustionPersistence(),
+    ).coordinate({
+      initial: exhausted(f, 'invalid'),
+      correction: runtime(f, new SIMULATEDAgentSessionAdapter({ startIds: [] }), [], { value: 0 }),
+      escalation: {
+        trigger: 'validation_failures',
+        capsule: f.capsule,
+        rules: { get: () => null },
+        turnContext: { request: { phase: 'correction' } },
+        lifecycle: {
+          startEscalation: async () => {
+            escalationStarts += 1;
+            return {
+              resumeSessionId: agentSessionId('agent-session:unexpected-escalation'),
+              sessionId: null,
+              finalText: '',
+              usage: null,
+              exit: 'completed',
+            };
+          },
+        },
+        invocation: runtime(
+          f,
+          new SIMULATEDAgentSessionAdapter({ startIds: [] }),
+          [],
+          { value: 0 },
+        ).invocation,
+        activateCapsule: () => undefined,
+        takeProposal: () => escalationProposal,
+      },
+      deadline: deadline(),
+      host: host(),
+    });
+
+    expect(escalationStarts).toBe(0);
+    expect(outcome).toEqual({ kind: 'auto_resolved', actorIds: [f.actor] });
   });
 
   it('pauses for DM adjudication instead of skipping when the deterministic controller fails', async () => {

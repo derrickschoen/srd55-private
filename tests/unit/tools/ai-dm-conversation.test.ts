@@ -27,6 +27,7 @@ import {
   McpChildExited,
   mcpRequest,
   stopMcpClient,
+  acceptSpeculationRecalculationBeforeDeadline,
   type ConversationRunOptions,
 } from '../../../tools/ai-dm-conversation';
 import { buildRerunPacket } from '../../../tools/ai-dm-rerun-packet';
@@ -61,6 +62,7 @@ import {
 import { projectActorKnowledge } from '../../../src/vtt/intel/actor-knowledge';
 import { actorOpportunityReport } from '../../../src/vtt/intel/opportunity-cost';
 import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
+import { engineStateHandle } from '../../../src/vtt/engine-state-capsule';
 import { engineActorOptions } from '../../../src/vtt/turn-option-registry';
 import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
 import { alternatingInitiativeRoom } from '../../fixtures/initiative-segments/alternating-room';
@@ -285,6 +287,49 @@ class SerializedRoundTripAdapter implements AgentSessionAdapter {
         speculativeRequest: manifest.speculativeRequest,
       } : {}),
     });
+    if (manifest.phase === 'speculative') {
+      if (manifest.speculativeRequest === undefined) {
+        throw new Error('Serialized speculative request has no scenarios.');
+      }
+      const capsule = runtime.feed.current();
+      const actors = capsule.request?.actors;
+      if (actors === undefined) throw new Error('Serialized speculative request has no actors.');
+      const proposals = actors.map((actorId) => {
+        const option = capsule.projection.combatants.find((actor) => actor.id === actorId)?.options[0];
+        if (option === undefined) {
+          throw new Error(`Serialized speculative capsule has no offered option for ${actorId}.`);
+        }
+        return {
+          actor_id: actorId,
+          expected_revision: capsule.revision,
+          primary_option_id: option.optionId,
+          fallback_option_id: null,
+          reason: 'Exercise the bounded speculative decision path.',
+          override_justification: null,
+        };
+      });
+      const submitted = serializedToolCall(runtime.handler, 'engine.submit_speculative_round_plan', {
+        state_ref: {
+          run_id: capsule.runId,
+          state_handle: engineStateHandle(capsule),
+          expected_revision: capsule.revision,
+        },
+        request_id: manifest.requestId,
+        target_room: manifest.speculativeRequest.targetRoom,
+        target_monster_round: manifest.speculativeRequest.targetMonsterRound,
+        refresh_generation: manifest.speculativeRequest.refreshGeneration,
+        branches: manifest.speculativeRequest.scenarios.map((scenario) => ({
+          scenario_id: scenario.scenarioId,
+          proposals,
+        })),
+        idempotency_key: `SERIALIZED-${manifest.requestId}`.slice(0, 200),
+      });
+      if (submitted['status'] !== 'QUEUED-SPECULATIVE' || runtime.speculativePlans.length !== 1) {
+        throw new Error(`Serialized speculative round was not queued: ${JSON.stringify(submitted)}`);
+      }
+      writeFileSync(manifest.proposalSpoolPath, `${JSON.stringify(runtime.speculativePlans[0])}\n`, 'utf8');
+      return this.completed(sessionId);
+    }
     const wireContext = serializedToolCall(runtime.handler, 'engine.get_turn_context', {
       run_id: manifest.runId, expected_revision: manifest.revision, scope: 'round',
       ...(manifest.turnContextDeltaBase === undefined ? { granularity: 'full' } : {
@@ -306,46 +351,6 @@ class SerializedRoundTripAdapter implements AgentSessionAdapter {
     if (actors === undefined) throw new Error('Serialized round request has no actors.');
     const renderedActors = context['actors'];
     if (!Array.isArray(renderedActors)) throw new Error('Serialized turn context has no actors.');
-    if (manifest.phase === 'speculative') {
-      if (manifest.speculativeRequest === undefined) {
-        throw new Error('Serialized speculative request has no scenarios.');
-      }
-      const proposals = actors.map((actorId) => {
-        const renderedActor = renderedActors.map((value) => objectValue(value, 'rendered actor'))
-          .find((actor) => actor['actor_id'] === actorId);
-        const optionValues = renderedActor?.['options'];
-        if (!Array.isArray(optionValues) || optionValues.length < 2) {
-          throw new Error(`Serialized speculative context has fewer than two options for ${actorId}.`);
-        }
-        const primary = objectValue(optionValues[0], 'serialized speculative primary');
-        const fallback = objectValue(optionValues[1], 'serialized speculative fallback');
-        return {
-          actor_id: actorId,
-          expected_revision: manifest.revision,
-          primary_option_id: String(primary['option_id']),
-          fallback_option_id: String(fallback['option_id']),
-          reason: 'Exercise the bounded speculative decision path.',
-          override_justification: null,
-        };
-      });
-      const submitted = serializedToolCall(runtime.handler, 'engine.submit_speculative_round_plan', {
-        state_ref: context['state_ref'],
-        request_id: manifest.requestId,
-        target_room: manifest.speculativeRequest.targetRoom,
-        target_monster_round: manifest.speculativeRequest.targetMonsterRound,
-        refresh_generation: manifest.speculativeRequest.refreshGeneration,
-        branches: manifest.speculativeRequest.scenarios.map((scenario) => ({
-          scenario_id: scenario.scenarioId,
-          proposals,
-        })),
-        idempotency_key: `SERIALIZED-${manifest.requestId}`.slice(0, 200),
-      });
-      if (submitted['status'] !== 'proposed' || runtime.speculativePlans.length !== 1) {
-        throw new Error(`Serialized speculative round was not proposed: ${JSON.stringify(submitted)}`);
-      }
-      writeFileSync(manifest.proposalSpoolPath, `${JSON.stringify(runtime.speculativePlans[0])}\n`, 'utf8');
-      return this.completed(sessionId);
-    }
     let specialSubmitted = false;
     const proposals = actors.map((actorId) => {
       const renderedActor = renderedActors.map((value) => objectValue(value, 'rendered actor'))
@@ -876,36 +881,14 @@ describe('AI-DM engine MCP conversation runner', () => {
       });
       const speculativeRow = speculative.rows[0];
       if (speculativeRow === undefined) throw new Error('Speculation planner fixture produced no row.');
-
-      const escalationDirectory = mkdtempSync(join(tmpdir(), 'dnd-conversation-triggered-escalation-'));
-      const escalationAdapter = new SerializedRoundTripAdapter('invalid_initial_and_correction');
-      const escalated = await runConversation(parseConversationArgs([
-        '--rooms', '1', '--rounds', '1', '--out', join(escalationDirectory, 'rows.jsonl'),
-        '--model', 'gpt-base', '--effort', 'low',
-        '--escalation-model', 'gpt-5.6-luna', '--escalation-effort', 'high',
-        ...LEGACY_BLOCK_ARGS,
-      ]), {
-        adapter: escalationAdapter,
-        roomStates: [generateRoom(3_943_006).encounter.state],
-      });
-      const escalatedRow = escalated.rows[0];
-      if (escalatedRow === undefined) throw new Error('Escalation trigger fixture produced no row.');
       return {
         speculationPlanner: speculativeRow.speculationPlanner,
         speculationEntryPlanners: speculativeRow.speculations.flatMap((entry) =>
           'plannedBy' in entry ? [entry.plannedBy] : []),
+        speculationStatuses: speculativeRow.speculations.map((entry) => entry.status),
+        speculationDiscardReasons: speculativeRow.speculations.flatMap((entry) =>
+          entry.status === 'discarded' ? [entry.discardReason] : []),
         preTriggerEscalated: speculativeRow.escalated,
-        baseCorrection: escalationAdapter.resumeInvocations[0] === undefined ? null : {
-          model: escalationAdapter.resumeInvocations[0].model,
-          effort: escalationAdapter.resumeInvocations[0].reasoningEffort,
-        },
-        escalation: escalationAdapter.startInvocations[1] === undefined ? null : {
-          model: escalationAdapter.startInvocations[1].model,
-          effort: escalationAdapter.startInvocations[1].reasoningEffort,
-          bootstrap: escalationAdapter.startInvocations[1].bootstrap?.kind ?? null,
-        },
-        escalationTrigger: escalatedRow.escalationTrigger,
-        plannedBy: escalatedRow.plannedBy,
       };
     };
     type Evidence = Awaited<ReturnType<typeof produce>>;
@@ -913,11 +896,9 @@ describe('AI-DM engine MCP conversation runner', () => {
       expect(value.speculationPlanner).toEqual({ model: 'gpt-5.6-luna', effort: 'low' });
       expect(value.speculationEntryPlanners.every((planner) =>
         planner.model === 'gpt-5.6-luna' && planner.effort === 'low')).toBe(true);
+      expect(value.speculationStatuses.length).toBeGreaterThan(0);
+      expect(value.speculationDiscardReasons).not.toContain('dispatch_failed');
       expect(value.preTriggerEscalated).toBe(false);
-      expect(value.baseCorrection).toEqual({ model: 'gpt-base', effort: 'low' });
-      expect(value.escalation).toEqual({ model: 'gpt-5.6-luna', effort: 'high', bootstrap: 'escalation' });
-      expect(value.escalationTrigger).toBe('validation_failures');
-      expect(value.plannedBy).toEqual({ model: 'gpt-5.6-luna', effort: 'high' });
     };
     await producerMutationReceipt(
       'speculation uses arm base until trigger',
@@ -926,6 +907,29 @@ describe('AI-DM engine MCP conversation runner', () => {
       produce,
       prove,
     );
+
+    const escalationDirectory = mkdtempSync(join(tmpdir(), 'dnd-conversation-triggered-escalation-'));
+    const escalationAdapter = new SerializedRoundTripAdapter('invalid_initial_and_correction');
+    const escalated = await runConversation(parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(escalationDirectory, 'rows.jsonl'),
+      '--model', 'gpt-base', '--effort', 'low',
+      '--escalation-model', 'gpt-5.6-luna', '--escalation-effort', 'high',
+      ...LEGACY_BLOCK_ARGS,
+    ]), {
+      adapter: escalationAdapter,
+      roomStates: [generateRoom(3_943_006).encounter.state],
+    });
+    expect(escalationAdapter.resumeInvocations[0]).toEqual(expect.objectContaining({
+      model: 'gpt-base', reasoningEffort: 'low',
+    }));
+    expect(escalationAdapter.startInvocations[1]).toEqual(expect.objectContaining({
+      model: 'gpt-5.6-luna', reasoningEffort: 'high',
+      bootstrap: expect.objectContaining({ kind: 'escalation' }),
+    }));
+    expect(escalated.rows[0]).toEqual(expect.objectContaining({
+      escalationTrigger: 'validation_failures',
+      plannedBy: { model: 'gpt-5.6-luna', effort: 'high' },
+    }));
   });
 
   it('restricted wall excludes engine work and includes later speculation', async () => {
@@ -958,6 +962,82 @@ describe('AI-DM engine MCP conversation runner', () => {
       roundWallTimedOut: false,
       speculationPlanner: { model: 'gpt-5.6-luna', effort: 'low' },
     }));
+  });
+
+  it.each([1_000, 200_000])(
+    'fallback computation of %i ms remains outside the restricted wall',
+    async (fallbackWorkMs) => {
+      const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-fallback-wall-'));
+      const adapter = new SerializedRoundTripAdapter('invalid_initial_and_correction');
+      let policyMs = 0;
+      let fallbackComputations = 0;
+      const result = await runConversation(parseConversationArgs([
+        '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+        ...LEGACY_BLOCK_ARGS,
+      ]), {
+        adapter,
+        roomStates: [generateRoom(3_943_006).encounter.state],
+        policyNow: () => policyMs,
+        onDeterministicFallback: () => {
+          fallbackComputations += 1;
+          policyMs += fallbackWorkMs;
+        },
+      });
+
+      expect(fallbackComputations).toBeGreaterThan(1);
+      expect(result.rows[0]).toEqual(expect.objectContaining({
+        outcome: 'authorized',
+        planner: 'sim_controller',
+        policyElapsedMs: 0,
+        roundWallTimedOut: false,
+      }));
+    },
+  );
+
+  it('expired speculative adoption validation cannot adopt or execute that branch', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-adoption-deadline-'));
+    const adapter = new SerializedRoundTripAdapter('first_shown');
+    let policyMs = 0;
+    let validated = false;
+    const result = await runConversation(parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      '--combat-model', 'initiative_segments_v1', '--dry-run',
+    ]), {
+      adapter,
+      roomStates: [await alternatingInitiativeRoom()],
+      policyNow: () => policyMs,
+      onSpeculationAdoptionValidated: () => {
+        validated = true;
+        policyMs = 180_000;
+      },
+    });
+
+    expect(validated).toBe(true);
+    expect(result.rows[0]?.speculations).toContainEqual(expect.objectContaining({
+      status: 'discarded',
+      adopted: false,
+      discardReason: 'budget_expired',
+    }));
+    expect(result.rows[0]).toEqual(expect.objectContaining({
+      roundWallTimedOut: true,
+      policyElapsedMs: 180_000,
+    }));
+  });
+
+  it('expired recalculation authorization cannot retain recalculated entries', () => {
+    let policyMs = 0;
+    const deadline = createConversationRoundDeadline(180_000, 0, () => policyMs);
+    let authorizations = 0;
+
+    const accepted = acceptSpeculationRecalculationBeforeDeadline(deadline, () => {
+      authorizations += 1;
+      policyMs = 180_000;
+      return [{ actorId: 'combatant:SIMULATED-recalculation' }] as const;
+    });
+
+    expect(authorizations).toBe(1);
+    expect(accepted).toBeNull();
+    expect(deadline.acceptsCompletion()).toBe(false);
   });
 
   it('one rejected submission uses arm-base correction before D474 escalation', async () => {

@@ -1161,7 +1161,7 @@ describe('AI-DM arena', () => {
     expect(rows.map(({ arm }) => arm)).toEqual(['control', 'candidate']);
   });
 
-  it('applies escalation to only the configured arm and attributes the resulting row', { timeout: 30_000 }, async () => {
+  it('keeps configured escalation dormant after one invalid submission and attributes arm-base correction', { timeout: 30_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-arm-escalation-'));
     const config = parseArenaArgs([
       '--rooms', '1', '--reps', '1', '--seed', '3943001',
@@ -1182,9 +1182,10 @@ describe('AI-DM arena', () => {
     }));
     expect(rows[1]).toEqual(expect.objectContaining({
       arm: 'tiered',
-      plannedBy: { model: 'model-escalation', effort: 'xhigh' },
-      escalated: true,
-      escalationModel: 'model-escalation',
+      callsPerRound: 2,
+      plannedBy: { model: 'model-tiered', effort: 'high' },
+      escalated: false,
+      escalationModel: null,
     }));
   });
 

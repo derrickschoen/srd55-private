@@ -85,6 +85,8 @@ export interface TurnExhaustionCorrectionRuntime {
   activateCapsule(): void;
   /** Removes at most one proposal from the host-owned spool for this request. */
   takeProposal(): RoundTurnProposalEnvelope | null;
+  /** True only when this correction produced explicit engine/structured validation evidence. */
+  validationFailureObserved(): boolean;
 }
 
 export type ProposalEscalationTrigger = 'refusal' | 'validation_failures';
@@ -293,6 +295,7 @@ export class TurnExhaustionCoordinator {
     }
 
     let correctionResult: ProposalCorrectionResult = 'no_response';
+    let correctionValidationFailed = false;
     let correctedProposal: RoundTurnProposalEnvelope | null = null;
     if (prior === null) {
       this.persistence.record({
@@ -331,11 +334,17 @@ export class TurnExhaustionCoordinator {
     }
 
     let proposal = correctedProposal;
-    if (proposal === null) correctionResult = 'no_response';
+    if (proposal === null) {
+      correctionResult = 'no_response';
+      correctionValidationFailed = input.correction.validationFailureObserved();
+    }
     else if (
       proposal.requestId !== input.requestId ||
       !exactProposalActors(proposal, actorIds, 'correction')
-    ) correctionResult = 'invalid';
+    ) {
+      correctionResult = 'invalid';
+      correctionValidationFailed = true;
+    }
     else {
       const authorization = input.deadline.acceptsCompletion()
         ? await input.host.authorize(proposal)
@@ -348,10 +357,14 @@ export class TurnExhaustionCoordinator {
           actorIds,
         });
         return { kind: 'authorized', proposalId: proposal.proposalId, phase: 'correction' };
-      } else correctionResult = authorization;
+      } else {
+        correctionResult = authorization;
+        correctionValidationFailed = true;
+      }
     }
 
-    if (input.escalation?.trigger === 'validation_failures' && input.deadline.acceptsCompletion()) {
+    if (input.escalation?.trigger === 'validation_failures' && correctionValidationFailed &&
+      input.deadline.acceptsCompletion()) {
       input.escalation.activateCapsule();
       const prompt = correctionPrompt(input.escalation);
       await input.escalation.lifecycle.startEscalation(

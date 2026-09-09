@@ -201,6 +201,7 @@ describe('DmEncounterHost live algorithm path', () => {
         },
         activateCapsule: () => undefined,
         takeProposal: () => null,
+        validationFailureObserved: () => false,
       },
       escalation: null,
       deadline,
