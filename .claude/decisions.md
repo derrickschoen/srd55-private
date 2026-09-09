@@ -20044,3 +20044,18 @@ failure. Under D587.3 the arena spec gets one serial rerun, queued
 behind the D569 serial rerun (cum-txn-s1-r2-serial-queued.sh ->
 cum-txn-s1-r2-serial.log). Green there closes the D584.4 contract for the
 slice and goes to Astra as the round-3 closing evidence.
+
+## D586.80 — D569 Amendment 2: serial rerun green, D584.4 contract closed; blind gate queued (2026-09-09 01:53)
+
+D587.3 serial rerun (--no-file-parallelism) of the five timeout-red
+specs on 90484d45: 5 files, 246/246, vitest exit 0 (started 01:45).
+Together with the 3456 passes of the 182-spec run, every spec in the
+amendment's conservative inventory has passed on the candidate; the
+three type specs compiled under tsc -b; the browser handoff
+(tests/browser/ai-dm-board-snapshot.spec.ts) is covered by the full
+blind gate, which is queued to start when the main browser gate
+finishes (gate-blind-queued.sh; checks port 4530 free first; log
+gate-wt-blind-dm.log). Amendment 2 stands accepted on claude/blind-dm at
+90484d45. Still before any v5 arm: green blind gate, the oracle
+re-capture, the plan's section-9 launch preflight, and an explicit
+launch decision here.
