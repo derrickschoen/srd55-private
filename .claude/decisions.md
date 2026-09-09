@@ -21399,3 +21399,32 @@ throw; two mutation controls with sha-verified restoration; CLI output
 {paths, sha256} unchanged before/after; then the D584.4 cumulative on the
 CLI's own inventory. Lands on main after Astra review and a main-shaped
 check.
+
+## D586.146 — D569 v5 first-arm runbook ACCEPTED at the final round; preflight to be executed by the supervisor, production launch deferred to a quiet machine (2026-09-09 07:55)
+
+Astra round 3 (session 01a08601-2974-7e23-a69e-4f7096d139d9, 82,280 tokens)
+on runbook sha 84326354…: "ACCEPT. Blockers: none. Should-fix: none.
+Nits: none." — B1 (install-once/verify split; section 3.1 excludes
+installers), B2 (gate executed in memory: `{"ranking": 1`, a `total`
+entry and a nested forbidden key all STOP; valid/fenced notes pass;
+incomplete coverage yields empty), SF1 (seven-case self-test plus 68
+in-memory comparisons against the pinned extractor), SF2 (rule 13),
+eight converted ERE patterns probed positive/negative, executables
+resolve under `env -i` with a minimal PATH, no new defect in saved-script
+provenance / pid and exit files / umask in both detached shells / the
+staged wrapper's exact three seats at high effort in fresh sessions.
+"Acceptance remains separate from launch authorization."
+
+Supervisor decision: the plan's section 9 leaves the launch to the
+supervisor's explicit decision (owner rulings: dispatch freely, spend is
+not a constraint; Fable seat trips the usage limit → stop loudly).
+Decision: EXECUTE PREFLIGHT (sections 2.1-2.5: pins, manifest digests,
+isolated Codex home and luna-high identity, port/load conditions, the
+model-free dry-run with row validation) now, as the runbook prescribes,
+recording every expected-output line; the PRODUCTION arena launch (60
+rows, ~68-110 min extrapolated) waits until the two running Sol lanes
+finish so the runbook's load condition and "no other arena/gate/
+Playwright" rule hold, and is recorded as its own decision when issued.
+The runbook file (gitignored .tmp-plans) is copied verbatim to
+/home/vagrant/dnd-slim-runs/d569-v5/runbook-84326354.md (mode 600, hash
+verified 84326354…) as the durable operator copy.
