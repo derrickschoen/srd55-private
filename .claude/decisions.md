@@ -21382,3 +21382,20 @@ branch-state-independent inventory. Remaining reconciliation should-fix
 (Astra, D586.133): persistent tests for git-command failures in
 tests/unit/tools/d583-contract-inventory.test.ts, which currently
 bypasses git via `changedPaths: []`.
+
+## D586.145 — reconciliation should-fix dispatched: injected git-runner seam and persistent git-failure tests for the inventory tool (2026-09-09 07:52)
+
+Small unit on dnd-wt-reconcile (claude/trial-core-reconciliation at
+88633e05, port 4640, fresh session; brief impl-inv-git-seam.md, log
+log-impl-inv-git-seam.log, marker INV-GIT-SEAM DONE). Scope: exactly
+tools/d583-contract-inventory.ts and its test. Required: a typed injected
+git runner defaulting to the real execFileSync runner; persistent tests
+driving the real changedPaths through failing runners (git absent,
+merge-base null, diff null, ls-files null, throwing runner with an
+explicit documented contract) asserting the exact 148-path union and
+digest; a positive control through the seam (changed spec + source →
+union plus spec plus transitive consumers) and the deleted-committed-spec
+throw; two mutation controls with sha-verified restoration; CLI output
+{paths, sha256} unchanged before/after; then the D584.4 cumulative on the
+CLI's own inventory. Lands on main after Astra review and a main-shaped
+check.
