@@ -19218,3 +19218,7 @@ round 3 recorded in D586.45). Queued for main behind the current gate.
 Session-command-transaction plan (lane DONE) sent to Astra, round 1.
 Offers-roadmap and promo180 planning lanes have written their plans
 and are exiting; reviews launch when their exit lines land.
+
+## D586.48 — heldout serial rerun: 3 of 4 red files green serially; the one remaining red is the D544 round-robin test at its pre-merge 5 s budget (2026-09-08 23:41)
+
+Serial rerun (D587.3, load ~6-8) on dnd-wt-p-heldout: generate-heldout-party-basis, room-generator-los-cover and ai-dm-board-delivery all green; ai-dm-arena 166/167 with the single red being "runs configured arms round-robin for every room-rep unit" timing out at 5,000 ms. That is the D544-named test main raised to 30 s in b2cd4ec4; the planning worktree is still at 493121dd and carries the old budget. Not a slice defect and not re-pinned: it clears when main is merged into the branch after the lane's round completes (a merge onto a dirty lane tree is not done). The rowcodec rerun is running.
