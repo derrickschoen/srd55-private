@@ -21107,3 +21107,23 @@ supervisor runs the branch's NEW or CHANGED specs once in a detached
 worktree of the candidate commit (no .tmp-plans, HEAD == the commit, no
 branch ref), as D586.68 did for elevation; that check is now part of
 the landing procedure, not optional.
+
+## D586.132 — reconciliation inventory fix harvested and verified in a main-shaped clone; Astra review launched (2026-09-09 06:37)
+
+Lane exit 0, RECONCILE-INV DONE in 8 minutes; claims: a 12-spec
+unconditional reconciliation baseline (sha d798c8db...) unioned with the
+D583 and txn baselines; branch-diff discovery additive and tolerant of
+an absent main/merge-base; empty-diff regression retaining every
+required spec (148 paths, sha b0561dd5...; the defective state had 146);
+normal inventory unchanged (193, 42b6c1ed...); pin-removal mutant
+collapses to 146 and fails the regression, restored by hash; inventory
+spec 9/9; slice-1 focused 46/46; slice-2 describe 5/5; sg 0; tsc 0;
+two files +74/-12. Verified by me: `sg scan` exit 0; committed 88633e05;
+and per the new standing rule, in a fresh `git clone --shared` with
+`main` pointed at 88633e05 and main checked out (diff main..HEAD empty,
+no .tmp-plans, node_modules symlinked) the inventory, session-command-
+transaction and roll-provenance specs pass 3 files / 54 tests; the clone
+was removed. Astra review launched (brief review-impl-reconcile-inv.md,
+session 01a085be-850c-73c0-98e2-8d00e52acc01), also asked to list any
+other test or tool on the branch that still reads branch state, cwd or
+an untracked path.
