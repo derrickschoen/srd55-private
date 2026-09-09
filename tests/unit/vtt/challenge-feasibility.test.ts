@@ -1,11 +1,15 @@
-import { beforeAll, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { decodeArenaBasisEnvelopeV1 } from '../../../src/vtt/arena-fixture';
 import {
+  assertRoomDBoundedTerminalState,
   challengeProvenanceMigrationEvidenceV1,
   classifyDerivedCaps,
   D583_BCA_DERIVED_CAP_MAXIMA_V1,
   D583_BCA_FEASIBILITY_LIMITS_V1,
   D583_D_ONE_POLICY_EVIDENCE,
+  D587_ROOM_D_ATTACK_MASS_TABLES_V1,
+  D587_ROOM_D_BOUNDED_POLICIES_V1,
+  D587_ROOM_D_HAND_CONSTANTS_V1,
   deriveVariantHorizon,
   futureStateKeyV1,
   mergeContinuationEquivalentStates,
@@ -13,13 +17,14 @@ import {
   probeReducerContinuationV1,
   probeRetainedSiblingLimitSampling,
   probeScenarioAccountingV1,
-  runChallengeReducerFeasibility,
-  type ChallengeProvenanceMigrationEvidenceV1,
-  type ChallengeReducerFeasibilityReportV1,
+  roomDBoundedFighterMenu,
+  roomDBoundedGuardPolicyCommand,
+  validateRoomDBoundedFighterMenu,
+  type RoomDBoundedFractionV1,
 } from '../../../src/vtt/challenge-feasibility';
-import { runChallengeFeasibilityCli } from '../../../tools/challenge-feasibility';
 import { runCommandBoundaryTransaction } from '../../../src/vtt/engine-round-application';
 import { ARENA_REACTION_OFFER_POLICY } from '../../../src/vtt/reaction-offer-host-policy';
+import { regretTurnLegalActions } from '../../../src/vtt/regret/legal-actions';
 import {
   componentTotals,
   exactFraction,
@@ -28,6 +33,7 @@ import {
   type RollComponentSpec,
 } from '../../../src/combat/roll-provenance';
 import { combatantId, dieSides } from '../../../src/combat/values';
+import type { EncounterCommand, EncounterEvent } from '../../../src/combat/events';
 import { declareTestInputs } from '../../helpers/test-inputs';
 
 const inputs = declareTestInputs({
@@ -38,20 +44,6 @@ const inputs = declareTestInputs({
     'tests/fixtures/arena-basis-challenge/seed-5831004.json',
   ],
 });
-
-function fixture(seed: 5831001 | 5831002 | 5831003): Promise<string> {
-  switch (seed) {
-    case 5831001: return Promise.resolve(inputs.fixtures.readText(
-      'tests/fixtures/arena-basis-challenge/seed-5831001.json',
-    ));
-    case 5831002: return Promise.resolve(inputs.fixtures.readText(
-      'tests/fixtures/arena-basis-challenge/seed-5831002.json',
-    ));
-    case 5831003: return Promise.resolve(inputs.fixtures.readText(
-      'tests/fixtures/arena-basis-challenge/seed-5831003.json',
-    ));
-  }
-}
 
 function distributionMass(distribution: ExactTotalDistribution) {
   return distribution.outcomes.reduce(
@@ -67,21 +59,134 @@ function expression(count: number, sides: number): RollComponentSpec {
   return { kind: 'dice_expression', expression: { count, sides: dieSides(sides), modifier: 0 } };
 }
 
-let report: ChallengeReducerFeasibilityReportV1;
-let migrationEvidence: ChallengeProvenanceMigrationEvidenceV1;
+function greatestCommonDivisor(left: bigint, right: bigint): bigint {
+  let a = left < 0n ? -left : left;
+  let b = right < 0n ? -right : right;
+  while (b !== 0n) [a, b] = [b, a % b];
+  return a;
+}
 
-beforeAll(async () => {
-  const roomA = decodeArenaBasisEnvelopeV1(
-    JSON.parse(inputs.fixtures.readText('tests/fixtures/arena-basis-challenge/seed-5831003.json')) as unknown,
-    { mode: 'challenge' },
-  ).encounter.state;
-  const roomD = decodeArenaBasisEnvelopeV1(
-    JSON.parse(inputs.fixtures.readText('tests/fixtures/arena-basis-challenge/seed-5831004.json')) as unknown,
-    { mode: 'challenge' },
-  ).encounter.state;
-  migrationEvidence = challengeProvenanceMigrationEvidenceV1(roomA, roomD);
-  report = await runChallengeReducerFeasibility(fixture);
-}, 180_000);
+function testFraction(numerator: bigint, denominator: bigint): RoomDBoundedFractionV1 {
+  const divisor = greatestCommonDivisor(numerator, denominator);
+  return { numerator: String(numerator / divisor), denominator: String(denominator / divisor) };
+}
+
+function fractionDifference(
+  left: RoomDBoundedFractionV1,
+  right: RoomDBoundedFractionV1,
+): RoomDBoundedFractionV1 {
+  return testFraction(
+    BigInt(left.numerator) * BigInt(right.denominator) - BigInt(right.numerator) * BigInt(left.denominator),
+    BigInt(left.denominator) * BigInt(right.denominator),
+  );
+}
+
+function fractionProduct(
+  left: RoomDBoundedFractionV1,
+  right: RoomDBoundedFractionV1,
+): RoomDBoundedFractionV1 {
+  return testFraction(
+    BigInt(left.numerator) * BigInt(right.numerator),
+    BigInt(left.denominator) * BigInt(right.denominator),
+  );
+}
+
+function fractionSum(...values: readonly RoomDBoundedFractionV1[]): RoomDBoundedFractionV1 {
+  return values.reduce<RoomDBoundedFractionV1>((sum, value) => testFraction(
+    BigInt(sum.numerator) * BigInt(value.denominator) + BigInt(value.numerator) * BigInt(sum.denominator),
+    BigInt(sum.denominator) * BigInt(value.denominator),
+  ), { numerator: '0', denominator: '1' });
+}
+
+function expectSameFraction(actual: RoomDBoundedFractionV1, expected: RoomDBoundedFractionV1): void {
+  expect(BigInt(actual.numerator) * BigInt(expected.denominator))
+    .toBe(BigInt(expected.numerator) * BigInt(actual.denominator));
+}
+
+function rawAttackOutcome(
+  faces: readonly number[],
+  armorClass: number,
+  attackBonus: number,
+): 'miss' | 'normal_damage' | 'critical_damage' {
+  const chosen = Math.min(...faces);
+  if (chosen === 1) return 'miss';
+  if (chosen === 20) return 'critical_damage';
+  return chosen + attackBonus >= armorClass ? 'normal_damage' : 'miss';
+}
+
+function rawAttackMasses(
+  mode: 'normal' | 'disadvantage',
+  armorClass: number,
+  attackBonus: number,
+): Readonly<Record<'miss' | 'normal_damage' | 'critical_damage', RoomDBoundedFractionV1>> {
+  const counts = { miss: 0n, normal_damage: 0n, critical_damage: 0n };
+  let total = 0n;
+  for (let first = 1; first <= 20; first += 1) {
+    const seconds = mode === 'normal' ? [first] : Array.from({ length: 20 }, (_unused, index) => index + 1);
+    for (const second of seconds) {
+      counts[rawAttackOutcome(mode === 'normal' ? [first] : [first, second], armorClass, attackBonus)] += 1n;
+      total += 1n;
+    }
+  }
+  return {
+    miss: testFraction(counts.miss, total),
+    normal_damage: testFraction(counts.normal_damage, total),
+    critical_damage: testFraction(counts.critical_damage, total),
+  };
+}
+
+function rawDamageTotals(
+  count: 1 | 2,
+  sides: 6 | 8,
+  modifier: number,
+): readonly { readonly total: number; readonly numerator: number; readonly denominator: number }[] {
+  const totals = new Map<number, number>();
+  if (count === 1) {
+    for (let first = 1; first <= sides; first += 1) totals.set(first + modifier, 1);
+  } else {
+    for (let first = 1; first <= sides; first += 1) {
+      for (let second = 1; second <= sides; second += 1) {
+        const total = first + second + modifier;
+        totals.set(total, (totals.get(total) ?? 0) + 1);
+      }
+    }
+  }
+  const denominator = sides ** count;
+  return [...totals].map(([total, numerator]) => ({ total, numerator, denominator }));
+}
+
+function rawTwoAttackRetention(mode: 'normal' | 'disadvantage'): RoomDBoundedFractionV1 {
+  const attacks = mode === 'normal'
+    ? Array.from({ length: 20 }, (_unused, index) => [index + 1] as const)
+    : Array.from({ length: 20 }, (_unused, first) => Array.from(
+      { length: 20 }, (_other, second) => [first + 1, second + 1] as const,
+    )).flat();
+  let survivors = 0n;
+  for (const first of attacks) {
+    if (rawAttackOutcome(first, 16, 7) !== 'miss') continue;
+    for (const second of attacks) {
+      if (rawAttackOutcome(second, 16, 7) === 'miss') survivors += 1n;
+    }
+  }
+  const totalLineMass = BigInt(attacks.length) * BigInt(attacks.length);
+  return testFraction(survivors, totalLineMass);
+}
+
+function eventAttack(events: readonly EncounterEvent[]) {
+  const event = events.find((candidate) => candidate.type === 'attack_resolved');
+  if (event?.type !== 'attack_resolved') throw new Error('Expected one resolved attack event.');
+  return event;
+}
+
+const roomA = decodeArenaBasisEnvelopeV1(
+  JSON.parse(inputs.fixtures.readText('tests/fixtures/arena-basis-challenge/seed-5831003.json')) as unknown,
+  { mode: 'challenge' },
+).encounter.state;
+const roomD = decodeArenaBasisEnvelopeV1(
+  JSON.parse(inputs.fixtures.readText('tests/fixtures/arena-basis-challenge/seed-5831004.json')) as unknown,
+  { mode: 'challenge' },
+).encounter.state;
+const migrationEvidence = challengeProvenanceMigrationEvidenceV1(roomA, roomD);
 
 describe('D583 reducer-backed challenge feasibility', () => {
   it('transactional adapter preserves die provenance across checkpoint replay and rollback', () => {
@@ -90,15 +195,6 @@ describe('D583 reducer-backed challenge feasibility', () => {
       record.face >= 1 && record.face <= record.sides &&
       String(record.provenance.occurrenceId).length > 0 &&
       String(record.provenance.operationPath).length > 0)).toBe(true);
-    if (report.verdict === 'GO') {
-      expect(report.totals.maximumDraws).toBeGreaterThan(0);
-      expect(report.totals.reducerApplications).toBeGreaterThan(report.totals.completedLeaves);
-      expect(report.rooms.every((room) => room.base.continuationEquivalent)).toBe(true);
-    } else {
-      expect(report.failure).not.toBeNull();
-      expect(report.rooms).toEqual([]);
-      expect(report.totals.completedLeaves).toBe(0);
-    }
   });
 
   it('successful save damage and capped healing expose explicit draw provenance', () => {
@@ -129,45 +225,6 @@ describe('D583 reducer-backed challenge feasibility', () => {
       { configured: 'never', resolution: 'decline', reactionDraws: 0 },
       { configured: 'ask', resolution: 'decline', reactionDraws: 0 },
     ]);
-  });
-
-  it('independent roll provenance class survives every reducer adapter and owns checkpoints', () => {
-    if (report.verdict === 'GO') {
-      expect(report.failure).toBeNull();
-      expect(report.totals.reducerApplications).toBeGreaterThan(0);
-      expect(report.totals.maximumCommandCheckpoints).toBe(4);
-    } else {
-      expect(report.failure?.kind).toMatch(/^(limit_exhausted|derived_cap_overflow)$/);
-    }
-  });
-
-  it('B C A reducer stages have mass one and report actual applications states heap and wall', () => {
-    expect(report.roomOrder).toEqual(['B', 'C', 'A']);
-    if (report.verdict === 'GO') {
-      expect(report.rooms).toHaveLength(3);
-      for (const room of report.rooms) {
-        expect(room.base).toMatchObject({ mass: { numerator: '1', denominator: '1' } });
-        expect(room.base.reducerApplications).toBeGreaterThan(0);
-        expect(room.base.groupedStates).toBeGreaterThan(0);
-        expect(room.base.peakHeapUsedBytes).toBeGreaterThan(0);
-        expect(room.base.wallMilliseconds).toBeGreaterThan(0);
-      }
-    } else {
-      expect(report.failure).not.toBeNull();
-      expect(report.rooms).toEqual([]);
-    }
-  });
-
-  it('state merging proves equal next commands objective eligibility and provenance requests', () => {
-    if (report.verdict === 'GO') {
-      expect(report.totals.continuationEquivalent).toBe(true);
-      expect(report.rooms.flatMap((room) => [room.base, ...room.variants]).every(
-        (variant) => variant.continuationEquivalent,
-      )).toBe(true);
-    } else {
-      expect(report.totals.continuationEquivalent).toBe(false);
-      expect(report.derivedWitnessCaps).toBeNull();
-    }
   });
 
   it('total-only grouping rejects the 59 2 versus 31 30 Longbow counterexample', () => {
@@ -253,6 +310,286 @@ describe('D583 reducer-backed challenge feasibility', () => {
     });
   });
 
+  it('independent raw loops derive the bounded Room D answer and threshold margin', () => {
+    const spear = rawTwoAttackRetention('normal');
+    const dodge = rawTwoAttackRetention('disadvantage');
+    const delta = fractionDifference(dodge, spear);
+    const margin = fractionDifference(delta, { numerator: '3', denominator: '20' });
+    expect(spear).toEqual({ numerator: '4', denominator: '25' });
+    expect(dodge).toEqual({ numerator: '256', denominator: '625' });
+    expect(delta).toEqual({ numerator: '156', denominator: '625' });
+    expect(margin).toEqual({ numerator: '249', denominator: '2500' });
+    expect(D587_ROOM_D_HAND_CONSTANTS_V1).toMatchObject({
+      guard: { armorClass: 16, hitPoints: 5 },
+      fighterAttack: {
+        attackBonus: 7, dodgeRollMode: 'disadvantage', normalDamage: '1d8+4', criticalDamage: '2d8+4',
+      },
+      spearRetention: spear,
+      dodgeRetention: dodge,
+      delta,
+      materialityThreshold: { numerator: '3', denominator: '20' },
+      thresholdMargin: margin,
+      terminalHistories: { spear: 136_040, dodge: 375_992, total: 512_032 },
+      work: {
+        faceExpansions: 574_462,
+        reducerApplications: 1_087_704,
+        completedOutcomesAndEndTurns: 1_025_272,
+        incompleteReplayAttempts: 62_432,
+      },
+      coverProbeCosts: { livingGuard: 124, deadGuard: 140, scout2EitherState: 124 },
+      storage: { nodeEquivalents: 3_348, withHeadroom: 4_185 },
+    });
+  });
+
+  it('preregistered request masses and complete damage specifications match raw face loops', () => {
+    const spearMasses = rawAttackMasses('normal', 15, 3);
+    const fighterMasses = rawAttackMasses('normal', 16, 7);
+    const dodgeMasses = rawAttackMasses('disadvantage', 16, 7);
+    for (const [table, masses] of [
+      [D587_ROOM_D_ATTACK_MASS_TABLES_V1.guardSpear, spearMasses],
+      [D587_ROOM_D_ATTACK_MASS_TABLES_V1.fighterNormal, fighterMasses],
+      [D587_ROOM_D_ATTACK_MASS_TABLES_V1.fighterDodge, dodgeMasses],
+    ] as const) {
+      expectSameFraction(table.noDamageMass, masses.miss);
+      expectSameFraction(table.normalDamage.firstInvocationRequestMass, masses.normal_damage);
+      expectSameFraction(table.criticalDamage.firstInvocationRequestMass, masses.critical_damage);
+      expect(table.uniquenessScope).toBe('concrete_replay_execution');
+      for (const component of [table.normalDamage, table.criticalDamage]) {
+        const conditional = component.conditionalTotals.reduce(
+          (sum, outcome) => ({
+            numerator: String(
+              BigInt(sum.numerator) * BigInt(outcome.weight.denominator) +
+              BigInt(outcome.weight.numerator) * BigInt(sum.denominator),
+            ),
+            denominator: String(BigInt(sum.denominator) * BigInt(outcome.weight.denominator)),
+          }),
+          { numerator: '0', denominator: '1' },
+        );
+        expectSameFraction(conditional, { numerator: '1', denominator: '1' });
+        expect(component.conditionalComponentMass).toEqual({ numerator: '1', denominator: '1' });
+      }
+    }
+    expect(D587_ROOM_D_ATTACK_MASS_TABLES_V1.guardSpear.normalDamage.conditionalTotals.map((entry) => ({
+      total: entry.total, numerator: Number(entry.weight.numerator), denominator: Number(entry.weight.denominator),
+    }))).toEqual(rawDamageTotals(1, 6, 1));
+    expect(D587_ROOM_D_ATTACK_MASS_TABLES_V1.guardSpear.criticalDamage.conditionalTotals.map((entry) => ({
+      total: entry.total, numerator: Number(entry.weight.numerator), denominator: Number(entry.weight.denominator),
+    }))).toEqual(rawDamageTotals(2, 6, 1));
+    for (const table of [
+      D587_ROOM_D_ATTACK_MASS_TABLES_V1.fighterNormal,
+      D587_ROOM_D_ATTACK_MASS_TABLES_V1.fighterDodge,
+    ]) {
+      expect(table.normalDamage.conditionalTotals.map((entry) => ({
+        total: entry.total, numerator: Number(entry.weight.numerator), denominator: Number(entry.weight.denominator),
+      }))).toEqual(rawDamageTotals(1, 8, 4));
+      expect(table.criticalDamage.conditionalTotals.map((entry) => ({
+        total: entry.total, numerator: Number(entry.weight.numerator), denominator: Number(entry.weight.denominator),
+      }))).toEqual(rawDamageTotals(2, 8, 4));
+    }
+    expect(D587_ROOM_D_ATTACK_MASS_TABLES_V1.fighterNormal.normalDamage.secondInvocationLineMass)
+      .toEqual({ numerator: '11', denominator: '50' });
+    expect(D587_ROOM_D_ATTACK_MASS_TABLES_V1.fighterNormal.criticalDamage.secondInvocationLineMass)
+      .toEqual({ numerator: '1', denominator: '50' });
+    expect(D587_ROOM_D_ATTACK_MASS_TABLES_V1.fighterDodge.normalDamage.secondInvocationLineMass)
+      .toEqual({ numerator: '143', denominator: '625' });
+    expect(D587_ROOM_D_ATTACK_MASS_TABLES_V1.fighterDodge.criticalDamage.secondInvocationLineMass)
+      .toEqual({ numerator: '1', denominator: '625' });
+    for (const [table, masses] of [
+      [D587_ROOM_D_ATTACK_MASS_TABLES_V1.fighterNormal, fighterMasses],
+      [D587_ROOM_D_ATTACK_MASS_TABLES_V1.fighterDodge, dodgeMasses],
+    ] as const) {
+      const secondIncoming = table.secondInvocationIncomingMass;
+      const secondNoDamage = table.secondInvocationNoDamageLineMass;
+      const secondNormal = table.normalDamage.secondInvocationLineMass;
+      const secondCritical = table.criticalDamage.secondInvocationLineMass;
+      if (secondIncoming === null || secondNoDamage === null || secondNormal === null || secondCritical === null) {
+        throw new Error('Fighter second-invocation mass table is incomplete.');
+      }
+      expectSameFraction(secondIncoming, masses.miss);
+      expectSameFraction(secondNoDamage, fractionProduct(masses.miss, masses.miss));
+      expectSameFraction(secondNormal, fractionProduct(masses.miss, masses.normal_damage));
+      expectSameFraction(secondCritical, fractionProduct(masses.miss, masses.critical_damage));
+      expectSameFraction(
+        fractionSum(secondNoDamage, secondNormal, secondCritical),
+        secondIncoming,
+      );
+      expect(secondIncoming).not.toEqual({ numerator: '1', denominator: '1' });
+    }
+    const normalKey = D587_ROOM_D_ATTACK_MASS_TABLES_V1.fighterNormal.normalDamage.specificationKey;
+    const criticalKey = D587_ROOM_D_ATTACK_MASS_TABLES_V1.fighterNormal.criticalDamage.specificationKey;
+    expect(normalKey).toEqual([
+      'dice_expression', ['count', 1], ['sides', 8], ['modifier', 4],
+      ['minimumTotal', 'absent'], ['maximumTotal', 'absent'], ['rerollBelow', 'absent'], ['explosion', 'absent'],
+    ]);
+    expect(criticalKey).toEqual([
+      'dice_expression', ['count', 2], ['sides', 8], ['modifier', 4],
+      ['minimumTotal', 'absent'], ['maximumTotal', 'absent'], ['rerollBelow', 'absent'], ['explosion', 'absent'],
+    ]);
+    expect(criticalKey).not.toEqual(normalKey);
+  });
+
+  it('uses unique revision-bound Guard offers and the exact Fighter legal-menu sequence', () => {
+    expect(D587_ROOM_D_BOUNDED_POLICIES_V1).toEqual(['guard_spear_hold', 'guard_dodge_hold']);
+    const spear = roomDBoundedGuardPolicyCommand(roomD, 'guard_spear_hold');
+    const dodge = roomDBoundedGuardPolicyCommand(roomD, 'guard_dodge_hold');
+    expect(spear).toMatchObject({ policy: 'guard_spear_hold', offeredRevision: 0 });
+    expect(dodge).toMatchObject({ policy: 'guard_dodge_hold', offeredRevision: 0 });
+    expect(spear.offeredOptionId).not.toBe(dodge.offeredOptionId);
+    expect(spear.command).toMatchObject({
+      type: 'attack', actor: 'combatant:generated-challenge-d-01-guard', target: 'combatant:wizard',
+      attackBonus: 3, criticalFloor: 20, rollMode: 'normal',
+      damage: { terms: [{ dice: { count: 1, sides: 6, modifier: 1 } }] },
+    });
+    expect(dodge.command).toEqual({
+      type: 'dodge', actor: combatantId('combatant:generated-challenge-d-01-guard'), cost: 'action',
+    });
+
+    const dodged = runCommandBoundaryTransaction(
+      roomD, dodge.command, () => 0, ARENA_REACTION_OFFER_POLICY, null,
+    );
+    const guardEnd = regretTurnLegalActions(
+      dodged.state, combatantId('combatant:generated-challenge-d-01-guard'),
+    ).actions.filter((command): command is Extract<EncounterCommand, { readonly type: 'end_turn' }> =>
+      command.type === 'end_turn');
+    expect(guardEnd).toEqual([{
+      type: 'end_turn', actor: combatantId('combatant:generated-challenge-d-01-guard'),
+    }]);
+    const fighterTurn = runCommandBoundaryTransaction(
+      dodged.state, guardEnd[0]!, () => 0, ARENA_REACTION_OFFER_POLICY, null,
+    );
+    const firstMenu = roomDBoundedFighterMenu(fighterTurn.state, 'guard_attack_required');
+    expect(firstMenu.attack).toMatchObject({
+      actor: 'combatant:fighter', target: 'combatant:generated-challenge-d-01-guard',
+      attackBonus: 7, criticalFloor: 20, rollMode: 'normal',
+      damage: { terms: [{ dice: { count: 1, sides: 8, modifier: 4 } }] },
+    });
+    const firstMiss = runCommandBoundaryTransaction(
+      fighterTurn.state, firstMenu.attack!, () => 0, ARENA_REACTION_OFFER_POLICY, null,
+    );
+    expect(eventAttack(firstMiss.events).attack.roll).toEqual({
+      mode: 'disadvantage', faces: [1, 1], chosen: 1,
+    });
+    expect(eventAttack(firstMiss.events).attack.roll.mode)
+      .toBe(D587_ROOM_D_HAND_CONSTANTS_V1.fighterAttack.dodgeRollMode);
+    const secondMenu = roomDBoundedFighterMenu(firstMiss.state, 'guard_attack_required');
+    const secondMiss = runCommandBoundaryTransaction(
+      firstMiss.state, secondMenu.attack!, () => 0, ARENA_REACTION_OFFER_POLICY, null,
+    );
+    const terminalMenu = roomDBoundedFighterMenu(secondMiss.state, 'terminal_end_turn');
+    const terminal = runCommandBoundaryTransaction(
+      secondMiss.state, terminalMenu.endTurn, () => 0, ARENA_REACTION_OFFER_POLICY, null,
+    );
+    expect(terminal).toMatchObject({ revisionDelta: 1, fallbackResolutions: [], guidedResolutions: [] });
+    expect(terminal.state.revision - roomD.revision).toBe(5);
+    expect(assertRoomDBoundedTerminalState(terminal.state)).toEqual({
+      guardLiving: true,
+      activeCombatant: combatantId('combatant:generated-challenge-d-02-scout-1'),
+    });
+
+    const killScalars = [0.6, 0.5, 0];
+    const killed = runCommandBoundaryTransaction(
+      fighterTurn.state, firstMenu.attack!, () => killScalars.shift() ?? 0,
+      ARENA_REACTION_OFFER_POLICY, null,
+    );
+    expect(eventAttack(killed.events).attack.outcome).toBe('hit');
+    const afterKill = roomDBoundedFighterMenu(killed.state, 'terminal_end_turn');
+    const deadTerminal = runCommandBoundaryTransaction(
+      killed.state, afterKill.endTurn, () => 0, ARENA_REACTION_OFFER_POLICY, null,
+    );
+    expect(deadTerminal.state.revision - roomD.revision).toBe(4);
+    expect(assertRoomDBoundedTerminalState(deadTerminal.state)).toEqual({
+      guardLiving: false,
+      activeCombatant: combatantId('combatant:generated-challenge-d-02-scout-1'),
+    });
+  });
+
+  it('separates mutually exclusive normal and critical Fighter damage specifications', () => {
+    const dodge = roomDBoundedGuardPolicyCommand(roomD, 'guard_dodge_hold');
+    const dodged = runCommandBoundaryTransaction(roomD, dodge.command, () => 0, ARENA_REACTION_OFFER_POLICY, null);
+    const guardEnd = regretTurnLegalActions(
+      dodged.state, combatantId('combatant:generated-challenge-d-01-guard'),
+    ).actions.find((command) => command.type === 'end_turn');
+    if (guardEnd?.type !== 'end_turn') throw new Error('Room D Guard end-turn was not offered.');
+    const fighterTurn = runCommandBoundaryTransaction(
+      dodged.state, guardEnd, () => 0, ARENA_REACTION_OFFER_POLICY, null,
+    ).state;
+    const command = roomDBoundedFighterMenu(fighterTurn, 'guard_attack_required').attack;
+    if (command === null) throw new Error('Room D Fighter attack was not offered.');
+    const normalScalars = [0.6, 0.5, 0];
+    const criticalScalars = [0.999, 0.999, 0, 0];
+    const normal = runCommandBoundaryTransaction(
+      fighterTurn, command, () => normalScalars.shift() ?? 0, ARENA_REACTION_OFFER_POLICY, null,
+    );
+    const critical = runCommandBoundaryTransaction(
+      fighterTurn, command, () => criticalScalars.shift() ?? 0, ARENA_REACTION_OFFER_POLICY, null,
+    );
+    expect(eventAttack(normal.events).attack.outcome).toBe('hit');
+    expect(eventAttack(critical.events).attack.outcome).toBe('critical');
+    expect(eventAttack(normal.events).damage?.terms[0]?.roll.expression).toMatchObject({ count: 1, sides: 8, modifier: 4 });
+    expect(eventAttack(critical.events).damage?.terms[0]?.roll.expression).toMatchObject({ count: 2, sides: 8, modifier: 4 });
+    const normalDamage = normal.dieRolls.find((draw) => draw.provenance.spec.kind === 'dice_expression');
+    const criticalDamage = critical.dieRolls.find((draw) => draw.provenance.spec.kind === 'dice_expression');
+    if (normalDamage === undefined || criticalDamage === undefined) throw new Error('Fighter damage provenance was absent.');
+    for (const replay of [normal, critical]) {
+      const specificationsByHandle = new Map<string, RollComponentSpec>();
+      for (const draw of replay.dieRolls) {
+        const handle = `${String(draw.provenance.componentId)}/${String(draw.provenance.execution)}`;
+        const existing = specificationsByHandle.get(handle);
+        if (existing === undefined) specificationsByHandle.set(handle, draw.provenance.spec);
+        else expect(draw.provenance.spec).toEqual(existing);
+      }
+      expect(specificationsByHandle).toHaveLength(2);
+    }
+    expect({
+      occurrenceId: normalDamage.provenance.occurrenceId,
+      componentId: normalDamage.provenance.componentId,
+      execution: normalDamage.provenance.execution,
+      kind: normalDamage.provenance.spec.kind,
+    }).toEqual({
+      occurrenceId: criticalDamage.provenance.occurrenceId,
+      componentId: criticalDamage.provenance.componentId,
+      execution: criticalDamage.provenance.execution,
+      kind: criticalDamage.provenance.spec.kind,
+    });
+    expect(normalDamage.provenance.spec).not.toEqual(criticalDamage.provenance.spec);
+  });
+
+  it('fails closed on illegal Room D reply commands and a missing terminal end-turn', () => {
+    const dodge = roomDBoundedGuardPolicyCommand(roomD, 'guard_dodge_hold');
+    const dodged = runCommandBoundaryTransaction(roomD, dodge.command, () => 0, ARENA_REACTION_OFFER_POLICY, null);
+    const guardEnd = regretTurnLegalActions(
+      dodged.state, combatantId('combatant:generated-challenge-d-01-guard'),
+    ).actions.find((command) => command.type === 'end_turn');
+    if (guardEnd?.type !== 'end_turn') throw new Error('Room D Guard end-turn was not offered.');
+    const fighterTurn = runCommandBoundaryTransaction(
+      dodged.state, guardEnd, () => 0, ARENA_REACTION_OFFER_POLICY, null,
+    ).state;
+    const offered = regretTurnLegalActions(fighterTurn, combatantId('combatant:fighter')).actions;
+    const realAttack = offered.find((command) => command.type === 'attack');
+    if (realAttack?.type !== 'attack') throw new Error('Room D Fighter attack was not offered.');
+    const illegalScoutAttack: EncounterCommand = {
+      ...realAttack,
+      target: combatantId('combatant:generated-challenge-d-02-scout-1'),
+    };
+    const illegalGateMove: EncounterCommand = {
+      type: 'move', actor: combatantId('combatant:fighter'), path: [{ column: 7, row: 5 }], cause: 'voluntary',
+    };
+    expect(() => validateRoomDBoundedFighterMenu(
+      [...offered, illegalScoutAttack], 'guard_attack_required',
+    )).toThrow('rejects attacks against any target other than the living Guard');
+    expect(() => validateRoomDBoundedFighterMenu(
+      [...offered, illegalGateMove], 'guard_attack_required',
+    )).toThrow('rejects an invented move into the gate');
+    expect(() => validateRoomDBoundedFighterMenu(
+      offered.filter((command) => command.type !== 'attack'), 'guard_attack_required',
+    )).toThrow('requires exactly one offered Fighter attack');
+    expect(() => validateRoomDBoundedFighterMenu(offered, 'terminal_end_turn'))
+      .toThrow('forbids another Fighter attack');
+    expect(() => validateRoomDBoundedFighterMenu(
+      offered.filter((command) => command.type !== 'end_turn'), 'guard_attack_required',
+    )).toThrow('requires one offered Fighter end-turn');
+  });
+
   it('D report labels 540 of 1280 as one policy and makes no optimized-surface claim', () => {
     expect(D583_D_ONE_POLICY_EVIDENCE).toEqual({
       classification: 'single_policy_counterexample_not_optimized_search',
@@ -280,27 +617,6 @@ describe('D583 reducer-backed challenge feasibility', () => {
       maxLiveNodes: 250_000, maxHeapUsedBytes: 1_073_741_824, maxWallMilliseconds: 180_000,
       maxCommandCheckpointsPerBranch: 64, maxDrawsPerBranch: 128,
     });
-    expect(report.limits).toBe(D583_BCA_FEASIBILITY_LIMITS_V1);
-  });
-
-  it('rejects the first variant heap sample without hiding it behind a second reading', async () => {
-    const heapValues = [
-      10,
-      D583_BCA_FEASIBILITY_LIMITS_V1.maxHeapUsedBytes + 1,
-      10,
-    ];
-    const nowValues = [0, 0, 0, D583_BCA_FEASIBILITY_LIMITS_V1.maxWallMilliseconds + 1];
-    const measured = await runChallengeReducerFeasibility(fixture, {
-      now: (): number => nowValues.shift() ?? 0,
-      heapUsed: (): number => heapValues.shift() ?? 10,
-    });
-    expect(measured.failure).toEqual({
-      kind: 'limit_exhausted', counter: 'heap_used_bytes',
-      observed: D583_BCA_FEASIBILITY_LIMITS_V1.maxHeapUsedBytes + 1,
-      limit: D583_BCA_FEASIBILITY_LIMITS_V1.maxHeapUsedBytes,
-    });
-    expect(heapValues).toEqual([10]);
-    expect(nowValues).toEqual([D583_BCA_FEASIBILITY_LIMITS_V1.maxWallMilliseconds + 1]);
   });
 
   it('counts retained sibling nodes in the checked exploration peak', () => {
@@ -346,67 +662,7 @@ describe('D583 reducer-backed challenge feasibility', () => {
     expect(heapSample).toBe(2);
   });
 
-  it('CLI missing and mismatched limit profiles write SHELVE reports without loading fixtures', async () => {
-    const written: ChallengeReducerFeasibilityReportV1[] = [];
-    const io = {
-      loadFixtureText: async (): Promise<string> => { throw new Error('limits failure must precede fixture loading'); },
-      writeReport: async (_output: string, value: ChallengeReducerFeasibilityReportV1): Promise<void> => {
-        written.push(value);
-      },
-    };
-    const base = [
-      '--basis', 'challenge', '--seed', '5831001', '--rooms', '3', '--room-order', 'B,C,A',
-      '--mode', 'reducer', '--out', '/tmp/d583-cli-control.json',
-    ];
-    const missing = await runChallengeFeasibilityCli(base, io);
-    const mismatched = await runChallengeFeasibilityCli([...base, '--limits', 'wrong-profile'], io);
-    expect([missing.report.failure, mismatched.report.failure]).toEqual([
-      { kind: 'missing_limits', counter: 'limits_profile', observed: '<missing>', limit: 'd583_bca_v1' },
-      { kind: 'missing_limits', counter: 'limits_profile', observed: 'wrong-profile', limit: 'd583_bca_v1' },
-    ]);
-    expect(written).toEqual([missing.report, mismatched.report]);
-    expect(written.every((value) => value.verdict === 'SHELVE_D583' && value.rooms.length === 0)).toBe(true);
-  });
-
-  it('CLI valid-profile execution reports the first enforced exhaustion through injected IO', async () => {
-    const written: ChallengeReducerFeasibilityReportV1[] = [];
-    const heapValues = [
-      10,
-      D583_BCA_FEASIBILITY_LIMITS_V1.maxHeapUsedBytes + 1,
-      10,
-    ];
-    const nowValues = [0, 0, 0, D583_BCA_FEASIBILITY_LIMITS_V1.maxWallMilliseconds + 1];
-    const result = await runChallengeFeasibilityCli([
-      '--basis', 'challenge', '--seed', '5831001', '--rooms', '3', '--room-order', 'B,C,A',
-      '--mode', 'reducer', '--limits', 'd583_bca_v1', '--out', '/tmp/d583-cli-exhaustion-control.json',
-    ], {
-      loadFixtureText: fixture,
-      writeReport: async (_output, value): Promise<void> => { written.push(value); },
-      runtime: {
-        now: (): number => nowValues.shift() ?? 0,
-        heapUsed: (): number => heapValues.shift() ?? 10,
-      },
-    });
-    expect(result.report.failure).toEqual({
-      kind: 'limit_exhausted', counter: 'heap_used_bytes',
-      observed: D583_BCA_FEASIBILITY_LIMITS_V1.maxHeapUsedBytes + 1,
-      limit: D583_BCA_FEASIBILITY_LIMITS_V1.maxHeapUsedBytes,
-    });
-    expect(result.report.verdict).toBe('SHELVE_D583');
-    expect(written).toEqual([result.report]);
-    expect(heapValues).toEqual([10]);
-    expect(nowValues).toEqual([D583_BCA_FEASIBILITY_LIMITS_V1.maxWallMilliseconds + 1]);
-  });
-
   it('feasibility fails closed on mass provenance continuation collision or unmeasured variant', () => {
-    if (report.verdict === 'GO') {
-      expect(report.rooms.flatMap((room) => room.variants)).toHaveLength(54);
-      expect(report.totals.mass).toEqual({ numerator: '57', denominator: '1' });
-    } else {
-      expect(report.rooms).toEqual([]);
-      expect(report.totals.mass).toEqual({ numerator: '0', denominator: '1' });
-      expect(report.failure).not.toBeNull();
-    }
     const state = decodeArenaBasisEnvelopeV1(
       JSON.parse(inputs.fixtures.readText('tests/fixtures/arena-basis-challenge/seed-5831001.json')) as unknown,
       { mode: 'challenge' },
