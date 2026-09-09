@@ -9,7 +9,14 @@ import {
 } from '../../../src/combat/encounter';
 import type { EncounterCommand } from '../../../src/combat/events';
 import { monsterAttackCommand } from '../../../src/combat/monster-commands';
-import { mulberry32 } from '../../../src/combat/random';
+import { mulberry32, transactionalRng } from '../../../src/combat/random';
+import {
+  exactWeight,
+  RollProvenance,
+  rollOccurrenceId,
+  rollOperationPath,
+  type TransactionalRollRng,
+} from '../../../src/combat/roll-provenance';
 import type { MonsterAttackAction } from '../../../src/combat/statblock';
 import { UNICORN } from '../../../src/combat/statblocks/monsters';
 import {
@@ -35,6 +42,8 @@ import {
 import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
 import { generateRoom } from '../../../src/vtt/room-generator';
 import { freshMonsterPlanningState, projectFutureMonsterTurns } from '../../../src/vtt/monster-planning-state';
+import { decodeSessionSnapshotV1 } from '../../../src/vtt/arena-fixture';
+import { runCommandBoundaryTransaction } from '../../../src/vtt/engine-round-application';
 import { reduceSessionEncounter } from '../../../src/vtt/session-encounter-reducer';
 import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
 
@@ -54,6 +63,27 @@ const ARCHER_ID = combatantId('combatant:generated-3943001-monster-3');
 const FOCUS_ID = combatantId('combatant:fighter');
 const CLERIC_ID = combatantId('combatant:cleric');
 const WIZARD_ID = combatantId('combatant:wizard');
+
+function recordBoundaryPrefixDraw(rng: TransactionalRollRng): void {
+  const component = rng.beginComponent({
+    occurrenceId: rollOccurrenceId('test:engine-boundary-prefix'),
+    operationPath: rollOperationPath('engine-boundary-prefix'),
+    source: null,
+    targets: [],
+  }, {
+    kind: 'discrete_branch',
+    outcomes: [
+      { total: 1, weight: exactWeight(1n, 2n) },
+      { total: 2, weight: exactWeight(1n, 2n) },
+    ],
+  });
+  const face = rng.draw({
+    sides: dieSides(2),
+    provenance: component,
+    role: { kind: 'branch_selection' },
+  });
+  rng.finishComponent(component, face);
+}
 
 function fixedPositions(
   positions: ReadonlyMap<CombatantId, { readonly column: number; readonly row: number }>,
@@ -759,6 +789,8 @@ describe('authoritative engine round session', () => {
         digest: authorizationCapsule.digest,
       }));
       expect(serialized.encounter.state).toEqual(session.currentState());
+      expect(canonicalJson(decodeSessionSnapshotV1(JSON.parse(prepared.snapshot.fixtureJson) as unknown)))
+        .toBe(canonicalJson(session.currentState()));
       expect(session.currentState().pendingDecisions.some((decision) =>
         decision.kind === 'death_save')).toBe(false);
       for (const actorId of prepared.snapshot.capsule.request?.actors ?? []) {
@@ -1016,5 +1048,217 @@ describe('authoritative engine round session', () => {
     }]);
     expect(session.currentState().combatants.find((entry) => entry.profile.id === ARCHER_ID)?.turn.dodging)
       .toBe(true);
+  });
+
+  it('command boundary advancement and rollback preserve independent state events revisions and RNG', () => {
+    const positioned = segmentedState(new Map([
+      [FOCUS_ID, { column: 5, row: 5 }],
+      [KILLER_ID, { column: 6, row: 5 }],
+    ]));
+    const session = new EngineRoundSession(
+      positioned,
+      mulberry32(58_310_201),
+      { kind: 'unattended', askDefault: 'decline' },
+    );
+    session.beginRoundWithoutSkipping(REQUEST, null);
+    const active = session.currentState();
+    let acceptedApplications = 0;
+    let acceptedCompletions = 0;
+    const accepted = runCommandBoundaryTransaction(
+      active,
+      { type: 'dodge', actor: FOCUS_ID, cost: 'action' },
+      mulberry32(58_310_202),
+      { kind: 'unattended', askDefault: 'decline' },
+      null,
+      {
+        attempted: (): void => { acceptedApplications += 1; },
+        completed: (): void => { acceptedCompletions += 1; },
+      },
+    );
+    expect(acceptedApplications).toBe(1);
+    expect(acceptedCompletions).toBe(1);
+    expect(accepted.state.revision).toBe(active.revision + accepted.revisionDelta);
+    expect(accepted.events).toEqual([
+      expect.objectContaining({
+        type: 'resource_spent', combatant: FOCUS_ID, resource: 'action', purpose: 'Dodge',
+      }),
+      expect.objectContaining({
+        type: 'stance_started', combatant: FOCUS_ID, stance: 'dodging',
+      }),
+    ]);
+    expect(accepted.state.combatants.find((entry) => entry.profile.id === FOCUS_ID)?.turn.dodging).toBe(true);
+
+    const prePostPositioned = segmentedState(new Map([
+      [FOCUS_ID, { column: 5, row: 5 }],
+      [KILLER_ID, { column: 6, row: 5 }],
+      [BRUTE_ID, { column: 2, row: 5 }],
+    ]));
+    const prePostSession = new EngineRoundSession(
+      prePostPositioned,
+      mulberry32(58_310_204),
+      { kind: 'unattended', askDefault: 'decline' },
+    );
+    prePostSession.beginRoundWithoutSkipping(REQUEST, null);
+    const beforePreBoundary = prePostSession.currentState();
+    const pendingBeforeCommand = reduceSessionEncounter(beforePreBoundary, {
+      type: 'move', actor: FOCUS_ID, path: [{ column: 4, row: 5 }], cause: 'voluntary',
+    }, mulberry32(58_310_205)).state;
+    expect(pendingBeforeCommand.pendingDecisions).toEqual([
+      expect.objectContaining({ kind: 'reaction_offer', combatant: KILLER_ID }),
+    ]);
+    let boundaryAttempts = 0;
+    let boundaryCompletions = 0;
+    const prePost = runCommandBoundaryTransaction(
+      pendingBeforeCommand,
+      { type: 'move', actor: FOCUS_ID, path: [{ column: 5, row: 5 }], cause: 'voluntary' },
+      mulberry32(58_310_206),
+      { kind: 'unattended', askDefault: 'decline' },
+      null,
+      {
+        attempted: (): void => { boundaryAttempts += 1; },
+        completed: (): void => { boundaryCompletions += 1; },
+      },
+    );
+    expect(boundaryAttempts).toBe(3);
+    expect(boundaryCompletions).toBe(3);
+    expect(prePost.fallbackResolutions.map((resolution) => resolution.combatant))
+      .toEqual([KILLER_ID, BRUTE_ID]);
+    expect(prePost.events.filter((event) =>
+      event.type === 'pending_decision_resolved' || event.type === 'movement_completed' ||
+      event.type === 'pending_decision_queued').map((event) => event.type)).toEqual([
+      'pending_decision_resolved',
+      'pending_decision_queued',
+      'movement_completed',
+      'pending_decision_resolved',
+    ]);
+    expect(prePost.state.pendingDecisions).toEqual([]);
+
+    const provenance = RollProvenance.recording(transactionalRng(mulberry32(58_310_207)));
+    const callerOwnedRng = provenance.asRng();
+    recordBoundaryPrefixDraw(callerOwnedRng);
+    const beforeAttemptCount = provenance.trace().attempts.length;
+    const withDrawSuffix = runCommandBoundaryTransaction(active, {
+      type: 'attack', actor: FOCUS_ID, target: KILLER_ID, attackBonus: 100, criticalFloor: 20,
+      rollMode: 'normal', attackerCanSeeTarget: true, targetCanSeeAttacker: true,
+      damage: {
+        terms: [{ type: damageType('Slashing'), dice: { count: 1, sides: dieSides(8), modifier: 0 } }],
+        critical: false, responses: [],
+      },
+    }, callerOwnedRng, { kind: 'unattended', askDefault: 'decline' }, null);
+    expect(beforeAttemptCount).toBe(1);
+    expect(withDrawSuffix.dieRolls).toEqual(provenance.trace().attempts.slice(beforeAttemptCount));
+    expect(withDrawSuffix.dieRolls.length).toBeGreaterThan(0);
+    expect(withDrawSuffix.dieRolls).not.toContainEqual(provenance.trace().attempts[0]);
+
+    const rejectedRng = mulberry32(58_310_203);
+    const beforeRng = rejectedRng.snapshot();
+    let refusedApplications = 0;
+    let refusedCompletions = 0;
+    let refusalError: unknown;
+    try {
+      runCommandBoundaryTransaction(active, {
+      type: 'attack', actor: FOCUS_ID, target: KILLER_ID, attackBonus: 7, criticalFloor: 20,
+      rollMode: 'normal', attackerCanSeeTarget: true, targetCanSeeAttacker: true,
+      damage: {
+        terms: [{ type: damageType('Slashing'), dice: { count: 1, sides: dieSides(8), modifier: Number.NaN } }],
+        critical: false, responses: [],
+      },
+      }, rejectedRng, { kind: 'unattended', askDefault: 'decline' }, null, {
+        attempted: (): void => { refusedApplications += 1; },
+        completed: (): void => { refusedCompletions += 1; },
+      });
+    } catch (error: unknown) {
+      refusalError = error;
+    }
+    expect(refusalError).toBeInstanceOf(Error);
+    expect((refusalError as Error).message).toContain('modifier must be finite');
+    expect(refusedApplications).toBe(1);
+    expect(refusedCompletions).toBe(1);
+    expect(rejectedRng.snapshot()).toEqual(beforeRng);
+    expect(active.eventLog).toEqual(session.currentState().eventLog);
+
+    const mainSentinel = new Error('main command identity sentinel');
+    const mainFailureRng = mulberry32(58_310_208);
+    const mainFailureBefore = mainFailureRng.snapshot();
+    const invalidMainCommand: EncounterCommand = {
+      type: 'dodge',
+      get actor(): CombatantId {
+        throw mainSentinel;
+      },
+    };
+    let mainFailure: unknown;
+    let mainAttempts = 0;
+    let mainCompletions = 0;
+    try {
+      runCommandBoundaryTransaction(
+        active,
+        invalidMainCommand,
+        mainFailureRng,
+        { kind: 'unattended', askDefault: 'decline' },
+        null,
+        {
+          attempted: (): void => { mainAttempts += 1; },
+          completed: (): void => { mainCompletions += 1; },
+        },
+      );
+    } catch (error: unknown) {
+      mainFailure = error;
+    }
+    expect(mainFailure).toBe(mainSentinel);
+    expect({ mainAttempts, mainCompletions }).toEqual({ mainAttempts: 1, mainCompletions: 1 });
+    expect(mainFailureRng.snapshot()).toEqual(mainFailureBefore);
+
+    const preBoundarySentinel = new Error('pre-boundary rollback identity sentinel');
+    const preBoundaryFailureRng = mulberry32(58_310_210);
+    const preBoundaryFailureBefore = preBoundaryFailureRng.snapshot();
+    const invalidAfterPreBoundary: EncounterCommand = {
+      type: 'dodge',
+      get actor(): CombatantId {
+        throw preBoundarySentinel;
+      },
+    };
+    let preBoundaryFailure: unknown;
+    try {
+      runCommandBoundaryTransaction(
+        pendingBeforeCommand,
+        invalidAfterPreBoundary,
+        preBoundaryFailureRng,
+        { kind: 'unattended', askDefault: 'take' },
+        null,
+      );
+    } catch (error: unknown) {
+      preBoundaryFailure = error;
+    }
+    expect(preBoundaryFailure).toBe(preBoundarySentinel);
+    expect(preBoundaryFailureRng.snapshot()).toEqual(preBoundaryFailureBefore);
+
+    const automaticSentinel = new Error('automatic boundary identity sentinel');
+    const automaticFailureRng = mulberry32(58_310_209);
+    const automaticFailureBefore = automaticFailureRng.snapshot();
+    let automaticFailure: unknown;
+    let automaticAttempts = 0;
+    let automaticCompletions = 0;
+    try {
+      runCommandBoundaryTransaction(
+        active,
+        { type: 'move', actor: FOCUS_ID, path: [{ column: 4, row: 5 }], cause: 'voluntary' },
+        automaticFailureRng,
+        { kind: 'unattended', askDefault: 'decline' },
+        null,
+        {
+          attempted: (): void => { automaticAttempts += 1; },
+          completed: (): void => {
+            automaticCompletions += 1;
+            if (automaticCompletions === 2) throw automaticSentinel;
+          },
+        },
+      );
+    } catch (error: unknown) {
+      automaticFailure = error;
+    }
+    expect(automaticFailure).toBe(automaticSentinel);
+    expect({ automaticAttempts, automaticCompletions })
+      .toEqual({ automaticAttempts: 2, automaticCompletions: 2 });
+    expect(automaticFailureRng.snapshot()).toEqual(automaticFailureBefore);
   });
 });
