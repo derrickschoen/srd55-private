@@ -19630,3 +19630,31 @@ Gate worktree moved to 673ef07e and the full gate relaunched; the
 integrated revision is not on the owner's live port. Elevation
 (b279e654) follows after its round-2 verdict and cumulative (already
 green, D588.1).
+
+## D586.63 — elevation slice 1 ACCEPTED and merged into main; offers roadmap round 2 DO NOT DISPATCH, final round resumed; gate relaunched on f18a8a1a (2026-09-09 00:32)
+
+Elevation, Astra round 2: "ACCEPT SLICE 1. Blockers: none. Code
+should-fix: none." All four round-1 findings verified against the tree
+(collision on worktree and index-only drift; missing/committed-deleted/
+staged-deleted/unstaged-deleted specs fail the CLI; five AST import
+forms incl. comment-separated; transitive producer control); fixture
+confirmed as mutant-definition input; all nine mutant hashes recomputed
+(three transcription slips in the lane's report, report-only); the
+screenshot-probe spec is owed to the plan's inherited-D576 inventory
+rule at plan line 423, not surplus; ten whole-slice files all allowed.
+Supervisor evidence on b279e654: sg scan 0, tsc 0, 4 specs 19/19.
+Merged claude/los-cover into main as f18a8a1a (clean). The gate that had
+started on 673ef07e at 00:30 was killed by process group (log kept as
+gate-wt-main-493121dd.673ef07e-killed.log) and relaunched on f18a8a1a
+so one gate covers all three landings.
+
+Offers roadmap, Astra round 2: DO NOT DISPATCH, four blockers: captured
+Dash grants contradict SRD 11590-11596 (Speed 15 + Dash = 30 ft total,
+the plan yields 45); all four reposition witnesses fail independent
+derivation (unspecified Speeds/ranges, reachable uncovered squares, the
+sphere touching both squares, the alcove route); the Grapple tree omits
+the opportunity attack every escape face raises (441/2500 holds only
+if that boundary is absent); slice 6 cannot compile with grants
+required while its consumers wait for slices 10/11. Two should-fixes.
+Round 3 of 3 (FINAL) resumed on 01a0842a-c4c5-7c43-bc96-0cbfac700f1a
+(brief plan-offers-r3.md, marker PLAN-OFFERS-R3 DONE).
