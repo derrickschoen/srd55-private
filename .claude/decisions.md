@@ -21995,3 +21995,18 @@ failures on the row (excluded from scoring), other lanes, reviews, gates and bui
 contention then costs reruns, not data. Alternatives not chosen: nothing else ever; read-only lanes only. Supervisor note: this
 supersedes the informal "launch nothing else while the arm runs" practice ONLY after the patch is landed and reviewed; until then the
 old practice stands because unpatched arms cannot detect the failure.
+
+### D586.169 — STOP LOUDLY: codex usage limit reached; all codex-side roles blocked until 2026-09-14 21:24 (2026-09-09 17:50 EDT)
+
+Both running lanes died at 17:45 with `ERROR: You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to
+purchase more credits or try again at Sep 14th, 2026 9:24 PM.`: the VTT-handoff plan round-2 lane (sol, resume of 01a087af-14c8…;
+its one apply_patch had already failed on a multi-operation patch, so `.tmp-plans/2026-09-09-vtt-handoff-plan.md` is unchanged at
+sha256 02e54eec — candidate r1, REJECTED) and the D569 RCA round-3 lane (sol, resume of 01a087c6…; no round-3 output). gpt-6-astra
+runs through the same codex account and is therefore equally blocked. Per the standing rule (codex out of credits → stop loudly,
+never substitute a Claude agent for the codex role) and HARD_GATE (c) of the consensus protocol (reviewer unavailable), NO
+implementer or reviewer work can proceed: not the VTT-handoff plan r2, not the D569 patch spec/implementation, not any review.
+State preserved: plan candidate r1 + Astra review r1 (17 findings, all accepted) + the r2 dispositions in
+`.tmp/runs/briefs-2026-09-06/resume-plan-vtt-handoff-r2.md`; RCA r1/r2 + Astra RCA review + the r3 brief in
+`resume-rca-d569-crash-r3.md`; owner rulings D590 (rerun only what is broken) and D591 (rely on the patch) recorded. Resumable session
+ids: plan 01a087af-14c8-7a00-bcb2-9ab987d0b42e, RCA 01a087c6-e5a7-7aa2-a37a-ebfd4c679884. Owner asked (question 3) whether to
+purchase credits now, wait until Sep 14, or rebind roles.
