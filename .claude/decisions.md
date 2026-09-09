@@ -21756,3 +21756,15 @@ start. Reopening needs an owner ruling (as for promo180 Slice H,
 D586.106); the residual list above is precise enough for one more fix
 round if reopened. The supervisor main-shaped run of 212f1acb continues
 to completion for the record.
+
+## D586.161 — supervisor run of the shelved slice 2 candidate 212f1acb for the record (2026-09-09 13:06)
+
+Fresh main-shaped clone, main → 212f1acb, no .tmp-plans, full vitest
+output on file: focused spec 29/29 in 511 s; 150-path cumulative 148
+files / 2,924 of 2,926 tests: tests/unit/tools/d583-contract-inventory.test.ts
+(known branch-state red, deterministic) and
+tests/unit/tools/ai-dm-arena.test.ts (30 s timeout, the known load flake
+under the parallel run). No serial rerun: the candidate is shelved
+(D586.160); the evidence is recorded, not used to close a contract. Temp
+clone deleted. Machine now quiet (no arena/vitest/Playwright/gate
+process, load1 0.63) — D569 preflight recheck follows.
