@@ -21964,3 +21964,26 @@ round 2 (`rca-r2-sol.md`) now agrees on the trigger chain and adds findings the 
 Astra review of the RCA dispatched (brief review-rca-d569-crash.md); the patch is not implemented until it returns. Pending question
 `d569-v5-brutal-crash.md` updated: the supervisor now recommends relaunching BOTH bases under the patched code (30+30), because the
 hard basis needs at least 3 identical-manifest reruns anyway and one code identity is cleaner than a 27+3 stitch.
+
+## D590 — OWNER: D569 v5 relaunch policy — "Rerun only what is broken" (2026-09-09)
+
+Asked one question at a time per the owner's instruction; answer to Q1 (recorded 2026-09-09 17:39 EDT): keep the clean hard rows, rerun the
+infrastructure-failed hard cells plus the full brutal basis under the identical manifest under the patched code, and record the
+code-identity split. Alternatives offered and not chosen: relaunch both bases; abandon the v5 first arm; wait for the Astra RCA review.
+
+### D586.168 — Astra review of the RCA: REJECT (5 significant) — the patch as specified was insufficient (2026-09-09 17:39 EDT)
+
+Astra (session 01a08815-0ef6-7731-8206-7d9163aa1558; text `.claude/consensus/d569-crash-rca/rca-review-astra.md`) confirmed the
+trigger chain, the three contaminated hard cells and the site inventory, and REJECTED the round-2 patch spec: F1 a longer
+`startup_timeout_sec` alone does not make the engine tools ready — codex treats the server as OPTIONAL (catalog grace
+`mcp_optional_startup_grace_ms`, default 1 s) unless `required=true`; F2 a stderr-string classifier is unproven and codex's
+required-server failure path exits non-zero, which the adapter currently throws on; F3 the proposed fix still crashes later at
+ai-dm-conversation.ts:5911 (blind finalization requires creature_facts/legal_movement in RECORDED model ingress; the crash cell's
+ingress has neither) — missing delivery needs an explicit evidence state, never fabricated; F4 the pinned external analysis script
+(~/dnd-slim-runs/d569-v5/scripts/analyze-primary-pair.ts:103, runbook:855) maps every service_null → infrastructure_failed and rejects a
+literal infrastructure_failed outcome, so the row-class change must migrate the pinned consumers and packet conversion; F5 hard rows
+6, 19, 20 carry `sessionId:null` + "Agent CLI timed out after 240000 ms" and fail validate-first-arm.ts:66 — so the hard basis is 24
+clean rows + 3 timeouts needing provenance repair + 3 infrastructure cells, not "27 clean"; F6 (trivial) fullTurnContextBase has
+callers (:3743, :5189). Astra's own answer to the owner: "patch + structural follow-up — bounded, but the patch must add catalog
+readiness, the second finalization crash and the experimental-consumer migration". Supervisor accepted all six; RCA lane resumed for
+round 3 (final) to produce an implementable patch specification honouring D590. No code changed; nothing relaunched.
