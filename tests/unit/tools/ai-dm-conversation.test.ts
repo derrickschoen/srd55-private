@@ -1,6 +1,8 @@
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   agentSessionIdFromCli,
   contextTokenCount,
@@ -17,6 +19,10 @@ import {
   proposalResolutionDivergence,
   runConversation,
   structuredFinalDecisionPhase,
+  createMcpClient,
+  McpChildExited,
+  mcpRequest,
+  stopMcpClient,
 } from '../../../tools/ai-dm-conversation';
 import { buildRerunPacket } from '../../../tools/ai-dm-rerun-packet';
 import { mkdtempSync, readFileSync, writeFileSync } from '../../helpers/test-filesystem';
@@ -482,6 +488,137 @@ const ALL_OPTIONS_TEST_RENDERER_ARGS = [
 ] as const;
 
 describe('AI-DM engine MCP conversation runner', () => {
+  it('rejects a request after the MCP child closes stdin without an unhandled EPIPE', async () => {
+    const child = spawn(process.execPath, ['-e', [
+      "process.on('SIGTERM', () => {});",
+      "require('node:fs').closeSync(0);",
+      "process.stderr.write('READY\\n');",
+      'setInterval(() => {}, 1_000);',
+    ].join(' ')], { stdio: ['pipe', 'pipe', 'pipe'] });
+    const client = createMcpClient(child);
+    await once(child.stderr, 'data');
+
+    await expect(mcpRequest(client, 'tools/list', {})).rejects.toBeInstanceOf(McpChildExited);
+    expect(child.exitCode).toBeNull();
+    expect(child.signalCode).toBeNull();
+    await stopMcpClient(client, true);
+    expect(child.signalCode).toBe('SIGKILL');
+  });
+
+  it('routes a readline input error through typed rejection and complete teardown', async () => {
+    const child = spawn(process.execPath, ['-e', [
+      'process.stdin.resume();',
+      'setInterval(() => {}, 1_000);',
+    ].join(' ')], { stdio: ['pipe', 'pipe', 'pipe'] });
+    const client = createMcpClient(child);
+    const request = mcpRequest(client, 'tools/list', {});
+    void request.catch(() => {});
+    const failure = new Error('SIMULATED stdout failure');
+
+    try {
+      expect(() => child.stdout.emit('error', failure)).not.toThrow();
+      await expect(request).rejects.toMatchObject({
+        name: 'McpChildExited',
+        code: 'MCP_CHILD_EXITED',
+        cause: failure,
+      });
+      expect(client.pending.size).toBe(0);
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+      await client.exit;
+      await request.catch(() => {});
+    }
+  });
+
+  it('rejects an in-flight MCP request specifically on child exit', async () => {
+    const child = spawn(process.execPath, ['-e', [
+      'process.stdin.resume();',
+      'setInterval(() => {}, 1_000);',
+    ].join(' ')], { stdio: ['pipe', 'pipe', 'pipe'] });
+    const client = createMcpClient(child);
+    const request = mcpRequest(client, 'tools/list', {});
+    const closed = once(child, 'close');
+
+    child.emit('exit', 7, null);
+
+    await expect(request).rejects.toMatchObject({
+      name: 'McpChildExited',
+      code: 'MCP_CHILD_EXITED',
+      message: expect.stringContaining('exited with code 7'),
+    });
+    await expect(client.exit).resolves.toBe(7);
+    child.kill('SIGKILL');
+    await closed;
+  });
+
+  it('rejects on stdout closure and terminates a child that remains alive', async () => {
+    const child = spawn(process.execPath, ['-e', [
+      'process.stdin.resume();',
+      "process.stdin.once('data', () => require('node:fs').closeSync(1));",
+      'setInterval(() => {}, 1_000);',
+    ].join(' ')], { stdio: ['pipe', 'pipe', 'pipe'] });
+    const client = createMcpClient(child);
+
+    await expect(mcpRequest(client, 'tools/list', {})).rejects.toMatchObject({
+      name: 'McpChildExited',
+      code: 'MCP_CHILD_EXITED',
+      message: expect.stringContaining('stdout closed'),
+    });
+    expect(client.pending.size).toBe(0);
+    await stopMcpClient(client, true);
+    expect(child.exitCode !== null || child.signalCode !== null).toBe(true);
+  });
+
+  it('refuses an MCP request issued after the child has exited', async () => {
+    const child = spawn(process.execPath, ['-e', 'process.exit(0)'], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    const client = createMcpClient(child);
+    await client.exit;
+    const write = vi.spyOn(child.stdin, 'write');
+
+    await expect(mcpRequest(client, 'tools/list', {})).rejects.toBeInstanceOf(McpChildExited);
+    expect(write).not.toHaveBeenCalled();
+    write.mockRestore();
+  });
+
+  it('preserves a request failure through the caller try/finally cleanup path', async () => {
+    const child = spawn(process.execPath, ['-e', [
+      'process.stdin.resume();',
+      "process.stdin.once('data', () => process.exit(7));",
+    ].join(' ')], { stdio: ['pipe', 'pipe', 'pipe'] });
+    const client = createMcpClient(child);
+    let primaryFailure: unknown;
+    let surfacedFailure: unknown;
+
+    try {
+      await (async () => {
+        try {
+          await mcpRequest(client, 'tools/list', {});
+        } catch (error) {
+          primaryFailure = error;
+          throw error;
+        } finally {
+          await stopMcpClient(client);
+        }
+      })();
+    } catch (error) {
+      surfacedFailure = error;
+    }
+
+    expect(surfacedFailure).toBe(primaryFailure);
+    expect(surfacedFailure).toBeInstanceOf(McpChildExited);
+  });
+
+  it('reports standalone abnormal MCP termination as a typed error', async () => {
+    const child = spawn(process.execPath, ['-e', 'process.exit(9)'], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    const client = createMcpClient(child);
+
+    await expect(stopMcpClient(client)).rejects.toBeInstanceOf(McpChildExited);
+  });
+
   it('authorizes a serialized revision-bound Dodge proposal', { timeout: 60_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-serialized-dodge-'));
     const adapter = new SerializedRoundTripAdapter('use_action_dodge', [], true);

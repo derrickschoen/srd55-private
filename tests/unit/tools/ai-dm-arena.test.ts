@@ -1066,7 +1066,7 @@ describe('AI-DM arena', () => {
     });
   });
 
-  it('runs configured arms round-robin for every room-rep unit with basis and arm tags', async () => {
+  it('runs configured arms round-robin for every room-rep unit with basis and arm tags', { timeout: 30_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-interleaved-'));
     const ordering: string[] = [];
     const config = parseArenaArgs([

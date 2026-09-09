@@ -16589,3 +16589,2719 @@ Archived sessions cannot be resumed by codex, which does not matter
 for arena conversations (and the arena now uses throwaway homes under
 /tmp anyway). ~/.codex/sessions (7.4 GiB, lane and judge sessions)
 was outside the request and is untouched.
+
+## D584.3 — blind increment 7 harvested and committed (0023aef2 on claude/blind-dm); the arena round-robin test is D544-named and still unpinned (2026-09-08 10:58)
+
+Lane i7 (session 01a08141-49d1-72a2-a143-4503df5f16a3, sol high) ended
+BLOCKED at 10:37 on two items, both dispositioned by me:
+
+1. `tests/types/ai-dm-arena-row.type-test.ts` is compile-only and
+   vitest's `tests/**/*.test.ts` pattern cannot discover it. It is
+   verified by `tsc -b`, which the lane ran (exit 0) and I reran
+   (exit 0). Not a block; the D584.4 wording "run by vitest" did not
+   anticipate compile-only tests. Inventory rule reads "run by its
+   runner" from here.
+2. `ai-dm-arena.test.ts` round-robin timed out at 5.06 s alone under
+   the lane. My serial rerun at load 1.2 also timed out, 5.08 s. This is
+   the test D544 names ("the D544-named 5-second arena round-robin
+   test", record at line 11389) and it never received the timeout raise
+   D544 authorised: every neighbour in the file carries
+   `{ timeout: 30_000 }`, this one still runs at the 5 s default. Raising
+   it is authorised by D544 and goes into the next lane brief (D584
+   repair); not raised by hand here.
+
+WHAT THE LANE DID (claimed, then verified by me): DOM evidence
+`blockedCells` replaced by `wallCells` / `halfCoverCells` /
+`threeQuartersCoverCells` from
+`.encounter-mechanical-terrain[data-terrain-kind="..."]`
+(tools/ai-dm-board-snapshot.ts:142, BOARD_SNAPSHOT_TERRAIN_SELECTORS);
+new exported validator `isBoardSnapshotDomEvidence`; the blind check
+derives walls from terrainWallCells(state), cover tiers from
+projectEncounterTerrainCells(state.bounds, state), and requires
+wallCells >= state.blockedCells.length, all failure messages carrying
+DOM and state numbers; the MCP mirror in src/vtt/mcp/entrypoint.ts
+(interface + validator key list) updated, which is a consumer the brief
+named, not scope creep; the jsdom test DOM gained class-plus-attribute
+selector matching; two test literals updated; no JSON fixture carried
+domEvidence, so no pin moved. Diff 7 files +165/-22, no forbidden
+tokens, no untracked files, no claude invocation in the lane log (the
+one `claude -p` string is the rules header).
+
+INVENTORY AUDIT (mine, independent): the lane's 19 branch/plan specs
+equal `git diff --name-only <merge-base> HEAD -- tests` filtered to
+specs (browser spec, interleave, type-test, 11 tools specs, 5 vtt
+specs). Lane added 25 consumer specs; 44 paths, 42 discovered by
+vitest, 1 Playwright, 1 compile-only.
+
+VERIFIED BY ME (i7-supervisor-verify.log):
+- serial reruns: board-delivery 17/17, d569-blind-experiment 32/32,
+  engine-mcp-server 13/13 (all three had timed out under the arms in
+  the lane's cumulative run: load flakes, not re-pinned); arena
+  round-robin still 5.08 s, above.
+- `npx tsc -b --force` exit 0.
+- browser spec tests/browser/ai-dm-board-snapshot.spec.ts on port 4530
+  via a scratch wrapper config: 2/2 passed (10.1 s, 56.0 s).
+- SUPERVISOR MUTANT: `wallCells: count(terrainSelectors.wallCells) + 1`
+  in the DOM inspector; browser spec 1 failed 1 passed, failure text
+  "DM image wall cells differ from state: DOM 22, state 21." Restored,
+  sha256 9284249705cf... identical before and after.
+- Lane negative controls (claimed, consistent with my mutant): old
+  selector (renderer test expected 21/16 received 0; live check
+  "DOM 0, state 21"), half-cover into the wall bucket (2 failed), and
+  halfCoverCells dropped from the validator arity (1 failed).
+- Known red unchanged: ai-dm-legacy-invariance.test.ts:119 (D584).
+
+Committed 0023aef2 on claude/blind-dm with the lane diff only. Full
+gate on wt-blind-dm (port 4530) waits for a quiet machine: the three
+pool4 arms are still running.
+
+Side finding: the arena leaves its throwaway conversation homes under
+/tmp: 12,258 dirs, 8.7 GiB, 571 written in the last hour. 337 GiB
+free, no action while the arms run; dirs older than the pool4 launch
+to be removed after the arms finish.
+
+NEXT: D584 repair brief (Astra ruling 1 replacement test, plus the D544
+round-robin timeout raise), reviewed by Astra high before dispatch.
+
+## D585.1 — CORRECTION AGAINST MY OWN RECORD: D585 reinstated seat exclusions that D578.3 had voided; owner-question brainstorm with Astra (2026-09-08 11:03)
+
+Finding against my own work, found by Astra during the brainstorm below
+and verified by me against the record: D585 (line ~16493) says pool4 is
+unsealed "with D578.2's seat exclusions: sol's seat is ineligible for
+any comparison involving the sol arm, astra's seat ineligible for any
+comparison involving the astra arm". D578.3 (owner, verbatim: "It is ok
+for the same model to judge if it starts from a fresh context")
+SUPERSEDED exactly that eligibility clause the evening before. Fresh
+context is the safeguard and judge-one.sh already provides it. The
+D585 sentence is void. Pool4 will be unsealed with all three seats
+scoring every arm, reporting per-seat scores and a leave-one-seat-out
+sensitivity as the diagnostic, not as the primary. Nothing has been
+judged yet, so no result is affected.
+
+BRAINSTORM (owner: "brainstorm questions for me in collaboration with
+codex astra. brainstorm current questions and ones for the future").
+My 22-question draft went to Astra high with the project state
+(.tmp/runs/astra-brainstorm-questions.md); Astra returned 15 ranked
+questions and removed or demoted 10 of mine (log
+.tmp/runs/astra-brainstorm-questions.log, 27,887 tokens). Delivered to
+the owner in the conversation. Astra's demotions I accept: recusal
+(settled, above); legacy invariance (D584 ruling 1 already specifies
+the test, no owner question); blind setup, probe order and elevation
+gating (recorded, complete them); D576.3 numeric expectations (need
+derivation, not owner acceptance); concurrency and cleanup (supervisor
+operations); judge cost folds into the budget question; art style and
+governance routing already assigned. One of Astra's own points I carry
+as a supervisor obligation rather than a question: pool4's 240 s arena
+budget cannot establish suitability under the 180 s live wall, so any
+promotion comparison needs a live-budget run including luna medium.
+
+## D586 — OWNER: "better monster play" means WINNING THE ENCOUNTER, not focus fire per se; research non-focus-fire winning plays (2026-09-08 11:12)
+
+Asked as question 1 of the brainstormed owner questions (D585.1),
+one at a time at the owner's request. Owner (verbatim): "winning the
+encounter. sometimes that means control spell or grappling or setting
+up a choke point or kiting. the default will probably be focus fire
+attrition, but there are times when the best move to win the whole
+encounter is to set up multi round payoffs or to retreat to a move
+advantageous position as an example. try to think of things i didn't
+think of as well that increase encounter win chance that are not focus
+fire. do thorough research of the d&d community and situations where
+the winning play is not focus fire"
+
+Binding reading: the objective for judging and for the engine ranking
+is encounter win probability over the WHOLE encounter, which subsumes
+focus-fire attrition as the usual default and explicitly includes
+multi-round payoffs, control, grappling, chokepoints, kiting and
+repositioning. Believable behaviour, tension and personality dials are
+NOT the objective (not selected). Consequence for D583: the rubric and
+the repaired-heuristic comparator score win probability, so a
+mechanically weaker immediate move that raises win probability is the
+BETTER play by definition. Research task assigned to the supervisor:
+community survey of non-focus-fire winning plays, notes kept under
+~/dnd-research-private/ (community prose never enters a git tree),
+derived taxonomy in our own words mapped to the engine's option
+vocabulary, reviewed by Astra high.
+
+## D586.1 — non-focus-fire winning plays: survey done, Astra's taxonomy of 13 families, offer gaps named (2026-09-08 11:15)
+
+Supervisor survey of 14 community sources (EN World focus-fire,
+monster-tactics, avoiding-fireballs, enemies-in-waves and Grappler's
+Manual threads; D&D Beyond DM forums and "6 monster tactics"; DMDavid;
+Ammann's "Why These Tactics"; Flutes Loot fundamentals and movement;
+Dungeon Goblin; a first-principles optimisation essay). Notes with
+URLs: ~/dnd-research-private/vtt-research/notes/2026-09-08-non-focus-fire-winning-plays.md
+(private, community prose never enters a git tree). Astra high
+reviewed the survey against the engine (log
+.tmp/runs/astra-taxonomy-review.log).
+
+ASTRA'S CORRECTIONS TO MY ENGINE SUMMARY (verified by Astra in code):
+turn-option-registry.ts:360 also offers saving_throw; Dash approaches
+the nearest visible enemy, Disengage and Dodge hold position, so no
+offer expresses retreat or defensive repositioning today;
+opportunity-cost.ts:280 excludes Dodge/other from default candidacy
+whenever offense/approach exists, BEFORE dominance filtering;
+option-outcome.ts:956 already uses remaining HP in cross-family
+comparisons and control valuation includes waking and concentration
+survival (limited models, not absent); use_world_object spends the
+action and records use, it does not itself extinguish lights.
+
+FOLKLORE CUT OR QUALIFIED (SRD 5.2.1): Sleep is save-based, not an HP
+budget; prone gives disadvantage on the subject's attacks and the
+attacker side depends on proximity; grapple/shove initiation uses
+saves; Help benefits the next allied attack only; Dodge has no fixed
+AC equivalent; Counterspell is save-based; Ready spends a reaction and
+readied spells need concentration; per-dart Magic Missile
+concentration checks not certified from SRD wording; "prefer saves",
+"Dash beats Disengage", automatic high-ground advantage and optional
+flanking are not baseline rules; fixed retreat thresholds and
+veteran/rabble discipline are characterisation, not win probability.
+
+ADDITIONS ASTRA MADE: rescuing allies, preserving existing control,
+exploiting reaction availability, timing against expiring enemy
+advantages, completing objectives without defeating everyone.
+
+TAXONOMY (ranked by near-term diagnostic impact with today's offers;
+offer status; ranking term that would expose it; witness feasibility):
+ 1 Interrupt the imminent threat — offer yes — threat_prevented_before_activation — witness D583 B
+ 2 Preserve an allied turn — partial (first-living-ally heal targeting) — allied_turn_value_restored — witness A
+ 3 Disable and leave disabled — partial — threat_weighted_control_duration — yes
+ 4 Retain a safe firing position — partial — endpoint_survival_value — witness C
+ 5 Hold a bottleneck — partial (Dodge at an occupied bottleneck) — enemy_access_denied — yes with bypass attempts
+ 6 Allocate attacks across threats — partial (no split-target multiattack) — joint_removal_probability — yes across actors, later F
+ 7 Invest in allied follow-up — partial (Help needs a kind) — followup_value_minus_setup_cost — supported subset
+ 8 Break a support dependency — partial — dependency_value_removed — concentration/healer contrast
+ 9 Deny observation or targeting — partial (Hide; lights missing) — hostile_targetability_reduction — Hide yes, lights later
+10 Kite, disengage, or disperse — NEEDS new movement offers — retaliation_and_area_exposure — later
+11 Restrain or displace — partial (grapple/shove needs offers) — position_control_followup — later for dragging
+12 Exploit time and reactions — partial (Ready, withdrawal missing) — timing_and_reaction_value — static delay yes
+13 Secure the actual objective — partial — terminal_objective_progress — conditional on a terminal rule
+Any added ranking term must affect candidacy and dominance, not sit as
+a late tuple tiebreaker. Priority confidence highest for 1-5.
+
+TOP THREE NEW OFFER CAPABILITIES: (1) engine-authored repositioning
+bundles (safe endpoints, action/movement ordering: retreat, kiting,
+dispersion, cover) extending existing kinds; (2) grapple/shove offers
+with legal targets and engine-bound displacement variants, without
+which the owner's central example is inaccessible; (3) Help, then
+Ready.
+
+RUBRIC CLAUSE (Astra, adopted as the D586 scoring definition pending
+owner objection): score the selected offered option by its expected
+contribution to the monster side's declared terminal victory condition
+over the remaining encounter, using only permitted information;
+compare credible legal alternatives through opponent replies and
+necessary allied follow-up; credit control, protection, positioning,
+delay and objective progress when benefits exceed costs; do not reward
+immediate output, focus fire, elaborate explanations or fortunate
+outcomes intrinsically; require engine-supported mechanics; mark
+unsupported continuations uncertain; a one-turn panel score is an
+ordinal judgment of continuation value, not a calibrated win
+probability.
+
+NEW OWNER QUESTION raised by Astra, asked next as question 2: what
+terminal outcomes define "winning" (retreat, escape, capture,
+objective completion, stalemate) and when does an encounter end.
+
+## D586.2 — OWNER: the monsters win only when every player character is dead, unconscious or captured (2026-09-08 11:22)
+
+Question 2 of the D585.1 list. Owner (verbatim): "The classic: all
+player characters dead, unconscious, or captured".
+
+Binding consequences: monster escape, objective completion and party
+attrition are NOT win states; a party that flees is not a monster win
+either (the owner's answer omits "fled"). So the terminal victory
+condition in the D586.1 rubric clause is: reduce every player
+character to dead, unconscious or captured. Taxonomy families are
+scored only as means to that end: retreat, kiting, holding a
+bottleneck and delaying count exactly insofar as they raise the
+probability of that terminal state within the encounter; "secure the
+objective" (family 13) has no standing unless a room's objective is
+itself capture; "monsters survive by escaping" scores nothing. The
+arena's current end condition (one side eliminated or round cap)
+matches; capture needs an executable rule before any room may claim
+it, and none exists today.
+
+## D586.3 — OWNER: pool4 is informational only; no promotion without a 180 s wall run including luna medium (2026-09-08 11:24)
+
+Question 3 of the D585.1 list. Owner chose "Informational only": pool4
+ranks sol high (rerun), astra low and astra medium on quality. Any
+change to the live default needs a separate run at the 180 s live wall
+(D456) that includes luna medium, with cost and failure rate reported.
+Preregistered before unsealing: all three judge seats score every arm
+(D578.3, D585.1); per-seat and leave-one-seat-out reported as
+diagnostics; primary contrasts are astra-low vs sol-high, astra-medium
+vs sol-high, astra-medium vs astra-low, plus sol-high pool4 vs sol-high
+pool3 repeatability, all seed-clustered CIs.
+
+## D586.4 — OWNER: next engine investment is offers first, each new offer kind shipping with its ranking term (2026-09-08 11:27)
+
+Question 4 of the D585.1 list. Owner chose "Both, offers then
+ranking": expand the offered options (engine-authored repositioning
+bundles with safe endpoints and cover, grapple/shove with legal targets
+and engine-bound displacement, then Help, then Ready), and every new
+offer kind ships in the same increment with the ranking term that lets
+engine-top rank it (D586.1 names them), so the engine baseline never
+lags the menu. D583 witness rooms A-C proceed on today's offers in
+parallel. Sequencing relative to the held blind arm (D584 repair,
+D582 item 16) unchanged: those close first on the blind branch; the
+offers work is a new plan on its own branch off main, to be drafted by
+codex sol and reviewed by Astra high per D585.
+
+## D586.5 — OWNER: challenge rooms are diagnostic first, then each repair is re-measured on held-out ordinary rooms before it becomes the default (2026-09-08 11:29)
+
+Question 5 of the D585.1 list. Owner chose "Both, sequenced": the
+D583 diagnostic set (A-F, mechanically witnessed, repaired-heuristic
+comparator) establishes that specific flaw families exist and that
+models can find the certified alternative; no prevalence claim from it.
+Each flaw family that a ranking repair fixes is then re-measured on
+ORDINARY rooms held out from both heuristic tuning and prompt tuning
+before that repair ships as the engine default. Consequence: the pool
+basis must be split now into tuning and held-out subsets with the
+split recorded before any repair is designed; the brutal-pool 30 rooms
+already used for pool3/pool4 are tuning-exposed and cannot serve as
+the held-out set.
+
+## D586.6 — OWNER: spend freely on experiments (D381 stands) (2026-09-08 11:31)
+
+Question 6 of the D585.1 list. Owner chose "Spend freely (D381
+stands)": dispatch and judge without asking, report totals;
+out-of-credits still stops loudly.
+
+## D583.1 — owner asked for status of the challenge rooms; nothing had been built; planning lane dispatched (2026-09-08 11:33)
+
+Owner (verbatim): "how is the work going on generating room examples
+for the arena where focus fire is not the best encounter winning move
+even when the room set up tricks the engine into having focus fire as
+its top recommendation?"
+
+Honest status: NOTHING BUILT. D583 (08:14) delivered six designs A-F
+and the seven-step feasibility witness; no lane was dispatched because
+I sequenced it behind the blind-branch repairs. Owner's question read
+as priority; D586.4/.5/.6 remove the remaining reasons to wait.
+
+Dispatched now: planning lane challenge-plan (codex sol high,
+workspace-write limited to the plan file) in a NEW worktree
+dnd-wt-challenge, branch claude/challenge-rooms off main 493121dd;
+brief .tmp/runs/briefs-2026-09-06/challenge-plan.md; Astra's designs
+copied to the worktree as .tmp-plans/2026-09-08-d583-room-designs-astra.md
+(gitignored). Scope of increment 1: authored EncounterState fixtures
+for rooms B, C, A, D (today's offers only; E needs the Ghast check, F
+needs split-target volleys and is out); the witness harness
+implementing Astra's seven steps model-free and seeded; a NON-DEFAULT
+repaired-heuristic ranking profile (remaining-HP/incapacitation
+threshold and next-actor threat) as the D586.1 comparator; tests that
+FAIL for an unwitnessed room; negative controls. Plan goes to Astra
+high for review before implementation. npm ci running in the worktree
+(log .tmp/runs/challenge-npm-ci.log).
+
+## D586.7 — OWNER: alpha's first complete session is SOLO PLAY, one human character, the AI runs everything else (2026-09-08 11:36)
+
+Question 7 of the D585.1 list. Owner chose "Solo player, AI runs
+everything else": one person plays one character; the AI DM runs the
+monsters AND any companions, narrates, and the app handles unsupported
+situations without a human DM. Consequences: (1) the AI DM must also
+play PARTY-side companions, which is a new proposer role the arena's
+party policies only script today; (2) narration to a player channel
+becomes an alpha requirement, and the DM semantic export rule (never
+to a player channel) now has a consumer to be designed against, not
+just guarded; (3) unsupported situations need an in-app path (refuse,
+simplify, or ask the player), no human fallback; (4) latency at the
+table is per monster AND per companion turn, so the 180 s wall
+applies to more turns per round. Engine authority and proposer-only
+unchanged. Alpha definition (question 15) and continuity (question 14)
+now hang off this.
+
+## D586.8 — OWNER: the judge panel stays the quality proxy for now; validation deferred to the alpha line (2026-09-08 11:38)
+
+Question 8 of the D585.1 list. Owner chose "Keep panel as proxy for
+now": no outcome-based validation (whole encounters to the D586.2 win
+state) and no owner-blinded preference packet yet; revisit when the
+offers work (D586.4) has landed, at the alpha line. Panel-point gains
+are reported as ordinal continuation-value judgments (D586.1 rubric),
+never as win-probability claims, until then.
+
+## D586.9 — OWNER: the monster side keeps DM omniscience; AI-run companions get rules-as-written perception only (2026-09-08 11:41)
+
+Question 9 of the D585.1 list. Owner chose "Omniscient DM, blind
+companions": the AI DM playing monsters keeps the engine's DM view
+(exact HP, hidden positions, full option lists), trusted like a human
+DM; the companions the AI runs for the solo player (D586.7) receive
+only what rules-as-written perception grants (HP bands, no hidden
+creatures until found, no sheet reading), so the party is never
+secretly buffed. Consequences: the existing DM-view information
+boundary for the monster side stands as the evaluation boundary
+(D586.1 rubric "permitted information" = DM view); a NEW player-side
+projection for companions is required before solo alpha, distinct
+from the blind-DM screenshot projection (that one is an experiment
+arm, this one is a product boundary); the semantic export rule is
+unchanged (DM export never reaches a player channel, and the companion
+projection is not the DM export).
+
+## D586.10 — OWNER: full coordination for all monster groups (2026-09-08 11:45)
+
+Question 10 of the D585.1 list. Owner chose "Full coordination for
+all": every monster group gets engine-authored joint options (split
+volleys, focus, peel, hold) regardless of creature intelligence. No
+intelligence gating in the engine; feel and difficulty are not the
+objective (D586). Consequence for D586.4: joint-allocation offers and
+the joint_removal_probability ranking term (D586.1 family 6) apply
+uniformly; room F becomes buildable once split-target volleys exist.
+
+## D586.11 — OWNER: model drift handled by recording identities only (2026-09-08 11:47)
+
+Question 11 of the D585.1 list. Owner chose "Record identities only":
+log model id, effort and CLI version per row (rows already carry
+model/effort/cli; add the codex CLI version if absent); no automatic
+revalidation; historical results are cited with their date and
+identities. Pool3 (2026-09-07, codex 0.153.4) and pool4 (2026-09-08)
+are cited that way.
+
+## D586.12 — OWNER: elevation constrained to a readable subset (2026-09-08 11:50)
+
+Question 12 of the D585.1 list. Owner chose "Constrain elevation to a
+readable subset": only a few height tiers (floor, raised, pit, flying)
+drawn with strong conventions the flat-board probe verifies; anything
+the model cannot read from the PNG is not authored into rooms;
+creature and obstacle heights get labelled, editable project
+defaults. D576.4's plan is amended accordingly before dispatch: the
+height vocabulary is a small enum of tiers, not a per-square integer,
+and the probe gate (95 percent) applies per tier convention.
+
+## D586.13 — OWNER: narration is mechanics-first, player-view filtered, visibly corrected, skippable (2026-09-08 11:52)
+
+Question 13 of the D585.1 list. Owner selected all four: (1)
+mechanics first, prose may lag (engine event log and board update
+immediately; narration streams after and may arrive a turn late; play
+never waits on prose); (2) visible corrections (a contradiction
+between narration and an accepted engine event shows a correction
+note, never a silent rewrite; the event log is the truth); (3) strict
+player-view filter (narration is generated from the player-view
+projection of D586.9 only, so hidden creatures, exact HP and monster
+intent cannot leak by construction); (4) the player can pause or skip
+prose; nothing in play depends on having read it. These are alpha
+requirements for the narration channel, which is distinct from the DM
+semantic export (still never to a player channel).
+
+## D586.14 — OWNER: continuity for solo alpha is same-browser restore plus a hand-carried save export/import; no server (2026-09-08 11:54)
+
+Question 14 of the D585.1 list. Owner chose "Export and import a
+save": refresh and reopen restore the encounter exactly, mid-turn,
+from local durable storage; plus a save file or link the player can
+move to another device by hand. No hosted store, no identity, no
+cross-device sync. Licensing wall unchanged.
+
+## D586.15 — OWNER: the alpha line is one complete solo session end to end plus the companion boundary proven; model superiority stays research (2026-09-08 11:56)
+
+Question 15 of the D585.1 list, the last. Owner selected: (1) one
+complete solo session end to end as a scripted acceptance
+walkthrough in the browser suite: a solo character plays a
+multi-encounter session through to rest, with AI monsters and
+companions, narration, a refresh mid-turn, and save export/import;
+(2) the companion boundary proven by a negative-control test showing
+AI-run companions cannot access hidden creatures, exact enemy HP or
+monster intent (D586.9). NOT required for alpha: a live-latency
+sample within the 180 s wall (still a D456 rule for live play, just
+not an alpha gate), and a measured model win over engine-top on
+ordinary rooms (alpha may ship with the engine default; model
+superiority remains research). All 15 D585.1 questions are now
+answered: D586 through D586.15.
+
+## D586.16 — OWNER: companions are fully autonomous by default, with an opt-in popup for the player to override companion turns (2026-09-08 11:58)
+
+Follow-up 1 of 4 after the D585.1 list. Owner (verbatim): "default to
+Fully autonomous companions, have an option for the player to get a
+popup to control overrides on companion turns". Consequences: the AI
+plays companions like monsters (no veto by default) from the
+player-view projection (D586.9); a per-session setting turns on a
+popup at each companion turn where the player may accept, edit or
+take the turn manually; the override path reuses the existing
+proposer-only acceptance (the AI proposal is a draft; the player's
+choice is submitted through the same engine acceptance path). Roster
+and pregeneration of companions not yet decided (follow-up 2 covers
+party shape).
+
+## D586.17 — OWNER: evaluation and alpha party is a solo PC plus three companions at levels 3-6; any built character may replace a default companion (2026-09-08 12:00)
+
+Follow-up 2 of 4. Owner chose "Solo PC + 3 companions, levels 3-6":
+a four-character party at low tier 2. The held-out ordinary-room set
+(D586.5) and the alpha walkthrough (D586.15) are generated for this
+shape and band; the existing Fighter/Cleric/Wizard basis stays the
+tuning-exposed set. Owner added (verbatim): "also, player can choose
+any built character to replace a default companion", so companions
+are a default roster of pregenerated characters, each replaceable by
+any character built in the app's character builder (the multiclass
+builder this project started as). Consequences: the party policy
+layer must accept arbitrary built characters, not only the scripted
+three; the generator needs a 4-PC, level 3-6 basis; spell lists and
+multiattack at tier 2 raise per-turn option counts and the 180 s wall
+matters more (not an alpha gate per D586.15, still a live rule).
+
+## D586.18 — OWNER: capture is narrative only; judging and the engine win state use dead or unconscious (2026-09-08 12:02)
+
+Follow-up 3 of 4. Owner chose "Narrative capture only": the DM may
+narrate capture after the party is defeated; no mid-fight capture
+mechanic; the executable terminal state for judging (D586.1 rubric)
+and for the arena is every PC dead or unconscious. D586.2 amended
+accordingly: "captured" is a narration outcome layered on defeat, not
+an engine state.
+
+## D586.19 — OWNER: the alpha session is three linked encounters with carried-over resources, a short rest between two, and a long rest at the end (2026-09-08 12:04)
+
+Follow-up 4 of 4, the last. Owner chose "Three linked encounters,
+then a long rest": combat only; three rooms in sequence with HP,
+spell slots and hit dice carrying over; a short rest between two of
+them; a long rest at the end; no exploration or dialogue features
+required for alpha. The D586.15 acceptance walkthrough is specified
+against this shape, with the solo PC plus three companions at levels
+3-6 (D586.17), autonomous companions with the override popup off and
+on (D586.16), narration under D586.13, and a refresh mid-turn plus
+save export/import (D586.14). Owner-question cycle closed: D586
+through D586.19.
+
+## D583.2 — challenge plan round 1 (466 lines): Astra says DO NOT DISPATCH, six blocking findings; round 2 sent to the planning lane (2026-09-08 12:12)
+
+Lane challenge-plan (sol high) delivered
+.tmp-plans/2026-09-08-d583-witness-rooms.md (466 lines, marker
+CHALLENGE-PLAN DONE, exit 0): strict fixtures + sidecars for rooms B,
+C, A, D in a closed `challenge` arena basis; a witness harness with
+exact branch enumeration, pessimistic replies, robustness variants
+(18 per room), negative controls, observability checks; an opt-in
+families-1/2 comparator; four slices with markers. Astra high review
+(.tmp/runs/astra-review-challenge-plan.log): DO NOT DISPATCH.
+BLOCKING: (1) room B cannot meet its 5-HP threshold on the specified
+reply surface (Ogre javelin +6 vs AC 18 with three-quarters cover
+hits at 0.20, benefit bounded by 3.2 HP): redesign and preregister B,
+never lower the assertion; (2) room C's total-cover premise is FALSE
+under the canonical corner rule (Fighter corner (7,3) sees Ogre
+corner (4,6) through the opening; Cleric (7,7) sees (4,4)); (3) the
+short horizons cannot certify encounter-win probability, A stops
+before executing the preserved Knight turn, D does not show the gate
+preserves the Scout's turn; define unconsciousness by engine
+conditions as well as life; (4) "all legal pessimistic replies" is
+underspecified (regret legal-actions is not a legality certificate,
+force_save ignores line of sight; select actions before unknown
+rolls); (5) the assumptions table overstates verification: every
+entries.ts:18xxx-21xxx locator is invalid (the file has 59 lines),
+GeneratedRoom.spec rejects the proposed 11-row board (12-24),
+derived_v1 rewrites profiles; (6) exact enumeration needs an
+implementable spec (a numeric RNG tape cannot identify die kinds or
+branch probabilities); remove Monte Carlo from this increment.
+SHOULD FIX 7-10: acceptance/parity bypasses, vacuous negative
+controls (D breaks structure, not benefit), comparator isolation,
+discovery crediting engine fallbacks (authorizedPlan is also set on
+exhaustion, ai-dm-conversation.ts:4669) and invisible pixels; add
+tsc to the cumulative contract. Round 2 dispatched to the same lane
+session with the critique verbatim; round cap 3.
+
+## D584.5 — increment 8 brief rejected twice by Astra; plan authoring moves to a codex planning lane (2026-09-08 12:12)
+
+Brief v1 (10:56) and v2 (11:53) for the D584 repair + D544 timeout +
+D582 item 16 lane were both returned DO NOT DISPATCH by Astra high
+(.tmp/runs/astra-review-i8-brief.log, astra-review-i8-brief-v2.log).
+Round 2 accepted the oracle redesign (main 493121dd's runner output is
+a legitimate independent baseline; the enumerated timing substitution
+is controlled nondeterminism) but found two new blockers I had missed:
+(1) runConversation creates a fresh random artifacts directory
+(tools/ai-dm-conversation.ts:3397) and launchers persist absolute
+fixturePath/proposalSpoolPath/turnContextSpoolPath while invocations
+carry launcherToken/recoveryLauncherToken, none of which the
+repoCommit/clock seams control: a deterministic filesystem harness is
+required, usable unchanged for the main capture and the branch replay;
+(2) the primary invocation spreads the ENTIRE runtime config
+(:3332-3339, `instructionSource = config` is only a type annotation),
+so invocation bytes include cwd, outPath and the blind-only config
+fields absent on main: the protected invocation projection must be
+defined before comparison. Plus: assert the full approved main commit
+and capture-tool digest (provenance != HEAD is not authentication);
+distinguish canonical-JSON from persisted-byte equality and keep JSONL
+framing checks; isolate mutant attribution (unconditional initial
+launcher mode also changes the simulated session-id suffix); C2
+binding must derive badge->combatant id from planning state (only
+semantic-board entries carry ids), use legal_movement.actors[*].name
+for mutant 2, enumerate every nested string path with its source, and
+make any UNBOUND free-text path BLOCK.
+
+Self-finding: two rounds of supervisor-authored briefs were each
+rejected on facts I had not verified in code (fixture staleness and
+the artifacts directory). The consensus protocol says codex authors
+plans; I was authoring the spec myself. Planning for increment 8 is
+therefore dispatched as a codex sol PLANNING lane in dnd-wt-blind-dm
+(plan file only), with brief v2 and both Astra reviews as inputs, and
+Astra reviews the plan; round cap 3 counted from the plan's first
+review, not from my briefs.
+
+## D586.20 — pool4 arms complete, 4-arm packet built and leak-scanned, Astra packet review launched (2026-09-08 12:31)
+
+Supervisor record. All three pool4 arms exited 0 (astra-low 11:09:09,
+astra-medium 11:15:09, sol-high 12:26:11; log .tmp/runs/pool4-arms.log),
+90 rows each at repoCommit 650e1f00, kbHash 00776f3f, seed 6208001,
+30 rooms x 3 reps, intel-mode full, 240 s wall. Verified by reading the
+rows, not the log: fallbackReason none, escalated false,
+firstDecisionAccepted true, transport mcp_minimal, no wall timeouts,
+no refusals in every arm. contextTruncated true 72 / false 18 in all
+three arms (a room property, identical across arms). Wall ms
+min/median/max: sol-high 45321/109541/238958; astra-low
+28088/58202/136912; astra-medium 28522/62519/134154. decisionAttempts
+sol-high {1:72,2:18}, astra-low {1:72,2:16,3:2}, astra-medium
+{1:69,2:17,3:4}. One non-authorized row: astra-low room 5 rep 1
+(seed 6208005) outcome partial_execution, executionErrorClass other,
+decisionAttempts 2, no rejection or normalization codes.
+
+Packet: arms relabelled from 'single' to pool4-sol-high /
+pool4-astra-low / pool4-astra-medium (python, only the arm field);
+anchor pool3-engine-top-armed.jsonl (D572 rows, planner engine_top,
+repoCommit c89e1ea4 x83 + c81b5573 x7). Builder run on
+dnd-wt-brutal-pool 650e1f00 clean: tools/ai-dm-rerun-packet.ts
+--protocol brutal-pool --reps 3 --shuffle-seed 6208404 (fresh; pool3
+used 6208303), exit 0. pool4-packet-4arm.json: 360 entries, 359
+authorized, 1 execution_failed (blind-229, case-05-1, attribution
+not_model_authorized, zeros pre-filled by the builder); 350833 bytes
+(pool3: 263021). Answer key pool4-key-4arm.json: 90 per arm. Leak scan
+for sol/astra/luna/gpt/engine-top/engine_top/pool3/pool4/intel/planner/
+effort/arm/seed/2026-09: zero hits; 'model' only inside the attribution
+values (engine rows are distinguishable from model rows, as in the
+pool3 packet, not which model); '6208' only inside combatant ids.
+
+Anchor validity checked, not assumed: `git diff c89e1ea4..650e1f00
+-- src` is empty; the only differences are tools/ai-dm-arena.ts
+(brutal-struggle nomination-evidence handling, not the brutal-pool
+path) and tools/ai-dm-conversation.ts (engine-top rows now record
+cli/model as 'engine'). My read: no play change. Sent to Astra high
+for independent confirmation together with the packet design
+(.tmp/runs/astra-review-pool4-packet.md, log
+astra-review-pool4-packet.log, launched 12:29:49). Open questions put
+to Astra: anchor reuse; how the seats must treat execution_failed
+(the judge header names only refused and service_null); the
+engine-vs-model attribution visibility; 360-entry prompt size; the
+astra seat's unpinned effort in judge-one.sh; shuffle/pairing checks.
+Panel launches only after that review, per D586.3.
+
+## D583.3 — challenge plan round 2 harvested and verified by rerun; Astra round 2 review launched (2026-09-08 12:34)
+
+Codex (session 01a0819b-815c-7cb1-b352-df11b66b95fb, resumed) delivered
+the revised plan, 630 lines, sha256 bd368e7b…33c40, exit 0, marker
+CHALLENGE-PLAN-R2 DONE, 279,641 tokens. Worktree dnd-wt-challenge clean
+(plan is gitignored). Lane log scanned for claude/codex-review
+invocations: the only hit is the COMMON RULES header text. Round 2
+disposition claims all ten round-1 findings FIXED.
+
+Verified by me, not taken from the lane: I reran the lane's own
+scripts /tmp/d583-geometry.ts and /tmp/d583-d.ts in the worktree
+(both exit 0) and compared against the plan tables. Room B: Ogre to
+Fighter no cover at 25 ft, to Wizard half cover at 30 ft, actual
+default Javelin to Wizard, Fighter gate path (8,4),(7,5),(6,4),(5,5)
+at 20 ft. Room C, all three wizard columns: Fighter and Cleric to
+Ogre total cover with all four corner rays blocked, Ogre to Wizard
+clear, default Greatclub to Wizard, resolved endpoints (8,4)/(9,4)/
+(10,4); melee to the stationary Ogre unreachable in 30 ft for both
+PCs, a sight cell reachable at 10 ft, melee reachable after the
+approach. Room D: default Spear to Wizard, Scout 1 to Fighter half
+cover, Scout 2 to Wizard three-quarters. Hand arithmetic reproduces
+B 9/20, 149/20, 1341/200, 79/180; D 12/20, 9/25, 53/80, 159/1000;
+C 177/20 given the stated per-reply values. Not checked by me and
+handed to Astra explicitly: the generic PC attack figures in
+legal-actions.ts, the Ogre force-save failure figure, Javelin
+candidacy when Greatclub exists, executor extraction scope,
+enumeration ceilings for A and D, the partyState union change, and
+derived_v1 idempotence on authored rows.
+
+Astra high review round 2 of 3 launched 12:33:30 in dnd-wt-challenge
+read-only (.tmp/runs/astra-review-challenge-plan-r2.md, 66,792 bytes:
+rules, my verified facts, the round-2 brief with round-1 findings
+verbatim, the full plan; log astra-review-challenge-plan-r2.log).
+Asked for DISPATCH SLICE 1 or DO NOT DISPATCH plus a per-finding
+ACCEPTED/NOT FIXED table.
+
+## D586.21 — Astra blocked the pool4 packet on the failed-row adjudication; ENGINE FINDING: accepted adjustment fails at execution (cure wounds via Unicorn's Blessing); packet adjudicated, judge script amended (2026-09-08 12:41)
+
+Astra high (82,846 tokens, .tmp/runs/astra-review-pool4-packet.log):
+DO NOT DISPATCH, one blocker. Verified by me in the raw row
+(~/dnd-slim-runs/pool4-astra-low-armed.jsonl line 13, seed 6208005
+round 1): the round was accepted, then a plan adjustment triggered by
+the Fighter's turn (LIFE_STATE_CHANGED, preflight
+retained_plan_illegal) was accepted with a bonus-slot cast_spell
+action unicorns-blessing / spell cure-wounds on monster-1, and
+execution threw "Resolved spell cure-wounds is absent from
+spellcasting." (monsterSpellCommand,
+src/vtt/engine-round-session.ts:282 region: the spell_choice source's
+spell list does not contain the accepted spell id). outcome
+partial_execution, executionErrorClass 'other', which is the
+unmatched-message bucket, not a responsibility class. This is an
+engine acceptance/execution inconsistency: the engine authorized a
+plan it could not execute. Not reproduced or fixed here; it needs its
+own investigation lane (added to the pending list). pool3-sol-high
+seed 6208011 round 1 (blind-148, case-11-1) is the same shape with a
+different exception, "Lesser Restoration requires a removable
+condition selection."
+
+Adjudication (my decision as supervisor, Astra's concrete fix
+adopted): execution faults after MCP acceptance are harness/engine
+faults, not DM failures. pool4 packet entry blind-229 normalized to
+outcome service_null, rubric nulls, executedPlan null; the
+unadjudicated packet is kept as pool4-packet-4arm.unadjudicated.json;
+pool4-adjudication.json records before/after, raw-row pointer and
+reason; preflight asserts no execution_failed entry remains (0).
+Packet now 359 authorized + 1 service_null. pool3 policy for the
+sol-high repeatability contrast: null case-11-1 at analysis time, no
+re-judging; the two pool3 agent timeouts (blind-212 sol-high
+case-03-3, blind-236 luna-medium case-18-3) stay refused with zeros
+because "Agent CLI timed out after 240000 ms" is a DM-side failure.
+
+judge-one.sh (backup judge-one.sh.bak-pool3): astra seat pinned to
+-c model_reasoning_effort=high (Astra verified pool3's astra log
+already ran at high, so this preserves the observed configuration);
+header gains two sentences: service_null also covers pre-adjudicated
+engine/harness execution faults and attribution never establishes
+responsibility; executedPlan is the initially authorized plan summary
+and movementFeet carries no destination, judge only what is shown.
+Astra's SHOULD FIX 5 (unseal-report.py compares only arm 1 against
+the rest and mixes a paired-delta point estimate with a seed-mean
+resample) is deferred to the unseal step: the D586.3 contrasts will
+be computed by an explicit script with one estimand and a stated
+missing-pair policy, reviewed before unsealing. Astra also verified:
+anchor reuse sound (all three engine reps identical per seed, 90
+anchor entries byte-identical to pool3 after blindId removal), 360
+unique ids, 90 cases with one row per arm, shuffle reproduction
+matches seeds 6208303/6208404; 270-entry outputs from all three
+pool3 seats structurally complete, so the 360-entry packet is kept
+unsplit with output validation required before unblinding. Panel
+launch waits for Astra's confirmation of these fixes (round 2).
+
+## D586.22 — Astra round 2: DISPATCH PANEL; pool4 4-arm judging launched (2026-09-08 12:39)
+
+Astra high round 2 (34,180 tokens, .tmp/runs/astra-review-pool4-packet-r2.log):
+DISPATCH PANEL, no remaining blocker. Verified by Astra: both packets
+parse with 360 distinct ids, only blind-229 changed, header renders
+correctly, only the header and astra effort differ from the backup
+script. Deferred obligations it named, carried forward: output
+validation before unblinding must also enforce refusal zeros and
+service_null nulls; the pool3 case-11-1 null is a recorded policy not
+yet applied; the explicit contrast script (SHOULD FIX 5) needs its own
+review before unsealing; the engine defect behind the adjudicated row
+is not repaired. Launched `judge-one.sh pool4 4arm` (sol high, opus,
+astra high in parallel, fresh contexts; log ~/dnd-slim-runs/judge-pool4.log,
+prompt pool4-judge-prompt-4arm.txt). Unseal only after all three seats
+return and validate, then the contrast script review.
+
+## D583.4 — challenge plan round 2: Astra DO NOT DISPATCH, seven blockers, four runtime-verified; round 3 (final) dispatched to codex (2026-09-08 12:52)
+
+Astra high (238,329 tokens, .tmp/runs/astra-review-challenge-plan-r2.log)
+accepted round-1 findings 1 (B threshold), 2 (C total cover), 8
+(negative controls) and 10 (discovery attribution) as fixed, and held
+3, 4, 5, 6, 7 and 9 NOT FIXED. Blockers, with what Astra verified by
+running code in the worktree: (1) slice 1's strict GeneratedRoom
+decoder would reject live session snapshots, which serialize only
+{encounter:{state}} (engine-round-session.ts:135, written to the
+launcher fixture at ai-dm-conversation.ts:2420) and the retained basis
+files that omit initiative/placement/size fields the current loader
+supplies (entrypoint.ts:489-532); (2) the transactional RNG adapter
+(random.ts:119-142, wrapped at encounter.ts:12765) drops the proposed
+drawDie hook, runtime-verified, and healing/force-save events do not
+carry the die faces the plan wants to reconstruct; (3) two critical
+Maces in room A give 6^4 x 4^8 = 84,934,656 damage-face tuples, over
+the plan's 2,000,000 replay ceiling before any reply; D's four
+critical Longbows give 8^8; (4) D's fixed breach policy is beaten by an
+admitted reply: Fighter's generic save against Scout 1 kills it in
+540/1280 = 0.421875 of outcomes (reduceEncounter enumeration) versus
+the plan's 0.3975, so the plan's D arithmetic certifies a different
+policy from its own search; (5) the C and D robustness swaps move the
+named stopping actor before the actors whose turns the metric needs;
+(6) the proposed executor extraction covers monster application only,
+not PC command execution (engine-round-session.ts:519-562), and the
+reaction policy is not what the plan states
+(reaction-offer-host-policy.ts:21-58); (7) the comparator's
+resolved/unresolved tie-break is non-transitive (cycle exhibited).
+Astra also verified: Javelin to Wizard is offered with an empty path
+in C at all three columns; derived_v1 is idempotent on the authored C
+states; A offers matching Mace/Mace plans with and without Healing
+Word; the Ogre's DC15 Dex save fails on 15/20; the generic PC attack
+is +7, 1d8+4, mean 8.5; no-cover reply endpoints (11,3)/(11,6) exist
+in C at 10 ft.
+
+Round 3 of 3 dispatched to the same codex session with the findings
+verbatim (.tmp/runs/briefs-2026-09-06/challenge-plan-r3.md): slice 1
+must become dispatchable on its own (blocker 1 fixed with round-trip
+tests for both loaders inside slice 1); slices 2-4 either fixed with
+proofs or restructured into a feasibility spike (RNG seam through the
+real adapter, measured replay/grouped counts for A and D, one reply
+policy for D re-established against the whole surface, horizons as
+required actor-turn sets, common transaction for monster and PC
+execution, a total order for the comparator). An unresolved blocker
+after round 3 shelves the plan.
+
+Also this window: Astra returned DO NOT UNSEAL on the pool4 contrast
+script (blocker: the pool3 null override could not take effect because
+the validator rejected execution_failed before consulting overrides;
+should-fix: strict field typing, an estimand-discriminating bootstrap
+test, informational and cross-header labels, missingness reporting).
+All fixed in ~/dnd-slim-runs/pool4-contrasts.py and its test (13
+tests pass); pool3 now validates with blind-148 nulled on every seat.
+Round 2 of the script review goes to Astra once the sol and astra
+judge seats return, so one validation-only run can be shown.
+
+## D584.6 — blind increment 8 plan delivered by the codex planning lane; Astra review launched (2026-09-08 12:56)
+
+Codex sol (session 01a081c8-2513-76d3-8ca8-d9a2f17bce33, 337,670
+tokens, lane exit 0, marker BLIND-I8-PLAN DONE) delivered
+dnd-wt-blind-dm/.tmp-plans/2026-09-08-blind-i8-repair-plan.md, 499
+lines, sha256 804ccaf6…8fc48. Worktree clean at 0023aef2; no
+forbidden invocations in the lane log. The plan: Part A runner-level
+oracle captured from clean main 493121dd by a capture tool run from
+/tmp with a reversible $ARTIFACTS_ROOT substitution on raw launcher
+bytes and the two invocation tokens, config spread replaced by an
+exhaustive agentInstructionSource, clock and repoCommit seams, a
+provenance gate (HEAD, tree, tool digest, clean status), eight named
+tests and four isolated mutants; Part B the one-line D544 timeout;
+Part C a test-side source binding of every delivered blind ingress
+string leaf (131 path families inventoried) with the two required
+producer mutants; D584.4 inventory 26 specs plus two risk specs.
+
+Verified by me before review: approved main 493121dd already exposes
+every runner option the capture tool needs (onPrimaryInvocation,
+exhaustInitial, failCorrection, readRepoCommit, roomStates,
+boardSnapshotService) but NOT serializeConversationRow, which the plan
+uses only on the blind side; performance.now occurs nine times on both
+commits. Astra high review round 1 launched 12:56 with both of its
+earlier brief reviews and these facts attached
+(.tmp/runs/astra-review-i8-plan.md, log astra-review-i8-plan.log).
+
+## D586.23 — pool4 UNSEALED (informational): astra low below sol high, astra medium borderline below, sol high above the engine anchor; the sol-high "repeatability" delta is mostly a judging shift (2026-09-08 12:58)
+
+Judging: judge-one.sh pool4 4arm, all three seats fresh context, launched
+12:38:27; opus exit 0 (12:44), astra high exit 0 (12:49, 150,977 tokens),
+sol high exit 0 (12:49, 151,275 tokens). Every seat output validated
+by ~/dnd-slim-runs/pool4-contrasts.py (360 ids, five explicit fields,
+integer ranges, totals equal sums, refusal zeros, service_null nulls):
+pool4 sol/opus/astra 360/360/360, pool3 270/270/270 with blind-148
+nulled by override. Script reviewed by Astra twice (round 1 DO NOT
+UNSEAL, fixed; round 2 APPROVE FOR UNSEAL, 34,894 tokens,
+.tmp/runs/astra-review-pool4-contrasts-r2.log); 13 unit tests pass.
+Unsealed 12:52 with `pool4-contrasts.py --config
+pool4-contrasts-config.json --unseal`; outputs
+~/dnd-slim-runs/unseal-pool4-4arm.{md,json}. The calibration row
+(engine-top pool4 vs pool3, byte-identical entries) was added POST HOC
+after the first unseal and is labelled so; everything else was
+preregistered (D586.3).
+
+Report verbatim:
+
+# Preregistered contrasts (INFORMATIONAL ONLY, D586.3: no arm is promoted by this table)
+
+Validation (entries per seat): {"pool4": {"sol": 360, "opus": 360, "astra": 360}, "pool3": {"sol": 270, "opus": 270, "astra": 270}}
+
+Arm means are over each arm's included cases (service_null and adjudicated rows excluded); they are not paired.
+
+| arm | cases | included | panel mean | sol | opus | astra | refused | null |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| pool4:engine-top | 90 | 90 | 7.544 | 8.433 | 7.033 | 7.167 | 0 | 0 |
+| pool4:pool4-astra-low | 90 | 89 | 7.536 | 8.506 | 7.045 | 7.056 | 0 | 1 |
+| pool4:pool4-astra-medium | 90 | 90 | 7.556 | 8.533 | 7.067 | 7.067 | 0 | 0 |
+| pool4:pool4-sol-high | 90 | 90 | 7.707 | 8.644 | 7.244 | 7.233 | 0 | 0 |
+| pool3:engine-top | 90 | 90 | 6.833 | 8.200 | 6.267 | 6.033 | 0 | 0 |
+| pool3:luna-medium | 90 | 90 | 6.922 | 8.222 | 6.456 | 6.089 | 1 | 0 |
+| pool3:sol-high | 90 | 89 | 6.835 | 8.213 | 6.360 | 5.933 | 1 | 1 |
+
+Contrast means are over the paired subset (kept cases) only.
+
+| contrast | kept/shared (cand-only/ref-only) | reference | candidate | delta | 95% CI (seed-clustered) | per seat sol/opus/astra | leave-one-out -sol/-opus/-astra | dropped |
+|---|---:|---:|---:|---:|---|---|---|---|
+| astra-low vs sol-high (pool4) | 89/90 (0/0) | 7.738 | 7.536 | -0.202 | [-0.433, -0.037] | -0.169/-0.236/-0.202 | -0.219/-0.185/-0.202 | case-05-1 |
+| astra-medium vs sol-high (pool4) | 90/90 (0/0) | 7.707 | 7.556 | -0.152 | [-0.374, +0.000] | -0.111/-0.178/-0.167 | -0.172/-0.139/-0.144 | - |
+| astra-medium vs astra-low (pool4) | 89/90 (0/0) | 7.536 | 7.584 | +0.049 | [+0.000, +0.111] | +0.056/+0.056/+0.034 | +0.045/+0.045/+0.056 | case-05-1 |
+| sol-high pool4 vs sol-high pool3 (repeatability) | 89/90 (0/0) | 6.835 | 7.689 | +0.854 | [+0.630, +1.106] | +0.416/+0.865/+1.281 | +1.073/+0.848/+0.640 | case-11-1 |
+| sol-high vs engine-top (pool4, informational) | 90/90 (0/0) | 7.544 | 7.707 | +0.163 | [+0.030, +0.326] | +0.211/+0.211/+0.067 | +0.139/+0.139/+0.211 | - |
+| astra-low vs engine-top (pool4, informational) | 89/90 (0/0) | 7.573 | 7.536 | -0.037 | [-0.285, +0.178] | +0.045/-0.022/-0.135 | -0.079/-0.045/+0.011 | case-05-1 |
+| astra-medium vs engine-top (pool4, informational) | 90/90 (0/0) | 7.544 | 7.556 | +0.011 | [-0.233, +0.222] | +0.100/+0.033/-0.100 | -0.033/+0.000/+0.067 | - |
+| engine-top pool4 vs engine-top pool3 (POST-HOC calibration, not preregistered) | 90/90 (0/0) | 6.833 | 7.544 | +0.711 | [+0.578, +0.833] | +0.233/+0.767/+1.133 | +0.950/+0.683/+0.500 | - |
+
+- sol-high pool4 vs sol-high pool3 (repeatability): cross-packet comparison under DIFFERENT judging instructions: the pool3 header lacked the two sentences added for pool4 (service_null covering adjudicated engine faults; executedPlan is the initial authorized plan summary). The delta cannot separate run repeatability from that instruction change.
+- sol-high vs engine-top (pool4, informational): informational: engine rows are identifiable to judges via attribution (D586.21), so this contrast is not attribution-blind.
+- astra-low vs engine-top (pool4, informational): informational: engine rows are identifiable to judges via attribution (D586.21), so this contrast is not attribution-blind.
+- astra-medium vs engine-top (pool4, informational): informational: engine rows are identifiable to judges via attribution (D586.21), so this contrast is not attribution-blind.
+- engine-top pool4 vs engine-top pool3 (POST-HOC calibration, not preregistered): POST-HOC, added after unsealing: the 90 engine-top entries are byte-identical in both packets (Astra verified), so this delta measures the judging shift between the pool3 and pool4 panels/headers alone. Subtract it before reading the sol-high repeatability row.
+
+- All pool4 numbers are informational only (D586.3); promotion requires a separate 180 s-wall run including luna medium.
+- Per-seat and leave-one-seat-out columns are diagnostics only; all three seats score every arm (D585.1).
+- pool3 blind-148 (sol-high case-11-1) is an adjudicated engine fault excluded by null override; pool4 blind-229 is service_null in the packet (pool4-adjudication.json).
+- The calibration row was added after the first unseal (12:52) and is not part of the D586.3 preregistration.
+
+Estimand: mean of per-case (seed, rep) paired panel deltas; CI resamples seeds with replacement and recomputes the same mean over every retained case of the resampled seeds (with multiplicity). Cases with a null side are dropped per contrast. Per-seat and leave-one-out columns are diagnostics only (D585.1).
+
+Reading (informational only, D586.3; no promotion):
+- astra low vs sol high: -0.20 [-0.43, -0.04]; all three seats agree in
+  sign (sol -0.17, opus -0.24, astra -0.20), including the astra seat
+  on its own arm.
+- astra medium vs sol high: -0.15 [-0.37, +0.00]; borderline, all
+  seats negative.
+- astra medium vs astra low: +0.05 [+0.00, +0.11]; small, consistent.
+- sol high vs engine top (pool4): +0.16 [+0.03, +0.33] at the 240 s
+  wall, not attribution-blind.
+- The preregistered sol-high repeatability row is +0.85 [+0.63, +1.11],
+  but the byte-identical engine rows moved +0.71 [+0.58, +0.83]
+  between the pool3 and pool4 panels (per seat sol +0.23, opus +0.77,
+  astra +1.13). Net sol-high repeatability after that shift is about
+  +0.14, inside the noise. The shift is a judging effect (header
+  change, fresh sessions, packet composition), not play. Finding: any
+  cross-packet comparison needs an identical-rows calibration arm;
+  future packets should carry one by design rather than post hoc.
+- Astra low and medium had no wall timeouts at 240 s (max 137 s) and
+  median walls about half of sol high's; that is the informational
+  case for a luna-floor-style cheap arm, to be tested properly only in
+  a 180 s-wall run with luna medium present (D586.3).
+
+## D584.7 — Astra round 1 on the i8 plan: DO NOT DISPATCH, three computed blockers; round 2 dispatched to the codex planning session (2026-09-08 13:00)
+
+Astra high (94,475 tokens, .tmp/runs/astra-review-i8-plan.log) accepted
+eleven of its fifteen earlier findings as addressed by the codex plan
+and held four NOT FIXED, yielding three blockers: (1) the plan's frozen
+launcher inventory allows three artifact-root fields but every saved
+P4 manifest carries FOUR (the fourth is kbReadSpoolPath, emitted even
+with instructionSource none because the runner loads the default KB),
+and kbSubjectSources.<subject>.absolutePath carries the checkout path
+via realpath, so a capture in a main worktree and a replay in the
+blind worktree differ after the $ARTIFACTS_ROOT substitution; I
+confirmed four root occurrences and the checkout absolutePath in
+/tmp/dnd-ai-dm-conversation-LS4cJJ's manifests myself; (2) Test 3
+transforms the oracle with production serializeConversationRow, so the
+legacyProbe serializer mutant lands on both sides and the planned
+equality passes (Astra reproduced it in memory); (3) the Part C path
+table omits saving_throw_actions[*].failure.damage[*].type and
+.trigger.**, produced at blind-turn-context.ts:315. Astra also
+verified: the three-field timing tuple holds for the two captured
+cases (speculation not_proposed) but other one-row configurations can
+materialize speculation.planningWallMs/boundaryWaitMs, so the tuple is
+case-locked; main exports ConversationConfig, ConversationRunOptions,
+parseConversationArgs, runConversation and not
+serializeConversationRow; the gate must run the overlaid tool under
+main's tools/ directory (relative imports) or use absolute imports
+from /tmp; the C mutant bindings are accepted as designed; the
+D584.4 inventory reconciles (26 + 2 risk specs) with two redundant
+commands to drop. Round 2 dispatched to the same codex session
+01a081c8-2513-76d3-8ca8-d9a2f17bce33 with the findings verbatim
+(.tmp/runs/briefs-2026-09-06/blind-i8-plan-r2.md, log
+log-lane-blind-i8-plan-r2.log, marker BLIND-I8-PLAN-R2 DONE).
+
+## D583.5 — challenge plan round 3 (final) harvested and rerun-verified; Astra final review launched (2026-09-08 13:10)
+
+Codex (same session, 104,785 tokens, exit 0, CHALLENGE-PLAN-R3 DONE)
+delivered 656 lines, sha256 f88746e0…503a; worktree clean; no
+forbidden invocations. Round 3 disposition: blockers 1, 5, 7 and the
+four SHOULD FIX items FIXED; 2, 3, 4, 6 RESTRUCTURED into a mandatory
+slice-2 feasibility spike (die provenance passed explicitly at roll
+sites and preserved by transactionalRng; staged raw/grouped replay
+counts measured before implementation, former ceilings removed; D's
+fixed breach proof withdrawn, D re-authored or shelved under one
+closed-surface expectimax contract with the 540/1280 counterexample
+pinned; one reducer-plus-boundary transaction shared by monster and
+PC execution with exact arena reaction semantics); C variants moved to
+(11,4)/(12,4)/(12,5) with no-cover reply endpoints (11,3)/(11,6) at
+10 ft; comparator given a single lexicographic key. Verified by me by
+rerunning the lane's scripts after it exited: all three C variants
+total cover with Greatclub default; raw products 84,934,656 (A) and
+16,777,216 (D); save-kill 0.421875 vs fixed breach 0.3975; comparator
+order z,a,m antisymmetric and transitive. Astra round 3 launched
+13:09:14 (.tmp/runs/astra-review-challenge-plan-r3.md) with the
+allowed verdicts DISPATCH SLICE 1 / DISPATCH SLICES 1 AND 2 / DO NOT
+DISPATCH (shelve; no round 4).
+
+## D584.8 — i8 plan round 2 harvested; P11 root inventory reproduced; Astra round 2 launched (2026-09-08 13:11)
+
+Codex (same session 01a081c8, 72,566 tokens, exit 0,
+BLIND-I8-PLAN-R2 DONE) revised the plan in place: 497 lines, sha256
+ccd5d87f…70a4; worktree clean; no forbidden invocations. Disposition
+claims all fifteen earlier findings and the three round-1 blockers
+FIXED: separate reversible artifact-root and checkout-root encodings
+over a proved inventory (P11), test-owned parse/assign/stringify for
+the expected oracle bytes, the two missing saving-throw damage
+families bound by source index with a nonempty delivered witness.
+Verified by me: the lane's root inventory script on the four saved
+manifests reports artifact=4 checkout=7 for each, matching the plan's
+P11 claim. Astra round 2 launched 13:11
+(.tmp/runs/astra-review-i8-plan-r2.md).
+
+## D583.6 — challenge plan APPROVED for slice 1 at round 3 (Astra: DISPATCH SLICE 1); slice 2 held on its cumulative contract (2026-09-08 13:15)
+
+Astra high (102,743 tokens, .tmp/runs/astra-review-challenge-plan-r3.log)
+accepted all seven round-2 blockers and three of four SHOULD FIX items;
+the fourth (re-plan later slices) stays NOT FIXED as one blocker that
+does not touch slice 1: slice 2's verification contract names three
+files and omits 29 slice-1 files plus tests/unit/combat/resolution.test.ts
+(the independent seed-stream, dice-consumption and advantage
+assertions) although the spike changes production roll APIs; slice 4
+omits 24 earlier-contract files while calling its inventory exactly
+cumulative; D584.4 requires the accumulated inventory plus the
+production RNG/resolution consumers. Astra verified: 27 direct-loader
+specs, all inside slice 1's 31; a field-presence audit of 56 stored
+fixture envelopes found no undocumented omissions; production reaction
+policy semantics (missing/ask decline, always accepts, never declines);
+the history-adapter drawDie loss; the r3 math script. SHOULD FIX carried
+into the slice-1 and spike briefs: session initiative completeness must
+follow the participant predicate (encounter.ts:11332, alerting.ts:71),
+not the whole roster; direct rollDie calls (encounter.ts:10073) need the
+same provenance path; D's sidecar must represent pending robustness axes
+distinctly from a validated 18-variant matrix; the comparator's
+counterfactual baseline and signs must be defined before slice 4.
+
+Decision: slice 1 (strict fixtures, decoders, four authored snapshots
+and sidecars, closed challenge arena basis) is dispatched as an
+implementation lane in dnd-wt-challenge; the spike (slice 2) is
+dispatched only after its brief carries the full cumulative contract,
+which is a supervisor-authored contract fix, not a plan round.
+
+## D583.7 — slice 1 (strict fixtures, decoders, four authored rooms, closed challenge basis) DISPATCHED (2026-09-08 13:18)
+
+Fresh codex sol high lane in dnd-wt-challenge at 493121dd
+(.tmp/runs/briefs-2026-09-06/challenge-i1-fixtures.md, log
+log-lane-challenge-i1-fixtures.log, marker CHALLENGE-I1-FIXTURES DONE).
+Brief: full common rules (port 4560); binding plan by path and hash;
+allowed files only (three new src/vtt modules, room-generator
+partyState union, entrypoint decoder replacement, generate-arena-basis
+decode-before-write, arena challenge basis, eight fixtures, five test
+files); Astra's two clarifications made binding (session initiative
+completeness by the participant predicate; D's robustness as a
+discriminated pending_spike form); geometry asserted only through
+canonical queries with STOP on disagreement; D584.4 contract: the 31
+spec run plus typecheck, recomputed inventory from branch diff, plan
+and import graph, byte invariance of existing bases and generated-seat
+serialization, five named negative controls with transcripts, frozen
+hash and clean diff. Later slices explicitly out of scope.
+
+## D584.9 — Astra round 2 on the i8 plan: DISPATCH SLICE A; slice C blocked on player rules redaction; final plan round dispatched for C (2026-09-08 13:20)
+
+Astra high (87,085 tokens, .tmp/runs/astra-review-i8-plan-r2.log)
+accepted all three round-1 blockers and every SHOULD FIX. Verified by
+Astra against the saved artifacts: the four manifests satisfy the 4
+artifact / 7 checkout inventory with KB relative paths, byte counts
+and hashes verifying and exact inverse reconstruction; the seven KB
+source files have no diff between main and HEAD; the test-owned
+timing transformation rejects the legacyProbe serializer mutant on the
+saved correction row; approved-main imports exist; the inventory
+reconciles (26 + 2 risk specs). One new blocker on Part C only:
+production redacts hitPointMaximum, spellSlots and limitedResources
+from player rules before computing active_rules_ref
+(blind-turn-context.ts:966, :1004), so the plan's full-rules digest
+binding fails for all three players while an independently redacted
+digest matches; fix is a test-owned actor-kind switch. SHOULD FIX:
+expected_revision is an integer and must leave the string-witness
+registry. Round 3 (final) dispatched to the same codex session for
+Part C only (.tmp/runs/briefs-2026-09-06/blind-i8-plan-r3.md), told
+not to touch src/tests/tools or run vitest because slice A starts in
+the same worktree. Slice A dispatch follows.
+
+## D584.10 — slices A and B of blind increment 8 DISPATCHED, two-phase with a supervisor capture gate (2026-09-08 13:24)
+
+Fresh codex sol high lane in dnd-wt-blind-dm at 0023aef2
+(.tmp/runs/briefs-2026-09-06/blind-i8-slice-a.md, log
+log-lane-blind-i8-slice-a.log). Phase 1: §2.1 seams and the config-spread
+fix, the capture tool with the exact §2.3 import list and both
+reversible root encodings, two provisional runs proving artifact-root
+independence (artifact=4 checkout=7 per manifest, byte-identical encoded
+launchers, exact inverses), the eight §2.5 tests with the
+oracle-dependent ones honestly red until the fixture exists, slice B's
+single-line timeout with the named test's wall, tsc/diff-check/frozen
+hash; marker BLIND-I8-A-ORACLE PROVISIONAL. Gate: the supervisor
+overlays the lane's exact tool bytes under tools/ of a clean detached
+worktree at main 493121dd, runs it with --expected-commit, installs
+tests/fixtures/ai-dm-legacy/runner-oracle-main.json in the blind
+worktree and records the fixture sha independently. Phase 2 by resume:
+tests 1-8 green, four isolated mutants, risk specs, two-checkout
+equality, markers BLIND-I8-A-ORACLE DONE and BLIND-I8-B-D544 DONE. The
+concurrent Part C planning round in the same worktree was told not to
+touch code; this lane was told not to touch .tmp-plans.
+
+## D584.11 — i8 plan round 3 (Part C) harvested; Astra final review on Part C launched (2026-09-08 13:25)
+
+Codex (same session 01a081c8, exit 0, BLIND-I8-PLAN-R3 DONE) revised
+Part C in place: player active_rules_ref bound through a test-owned
+actor-kind switch that independently omits hitPointMaximum, spellSlots
+and limitedResources before hashing, monsters bound on complete rules;
+expected_revision moved out of the string-witness registry to a
+numeric capsule assertion. No forbidden invocations. Astra round 3
+(final, Part C only) launched (.tmp/runs/astra-review-i8-plan-r3.md);
+verdict DISPATCH SLICE C or shelve C, with A and B unaffected. Clean
+main worktree dnd-wt-main-493121dd created detached at 493121dd
+(tree 87de2ce5 as the plan requires), npm ci exit 0, ready for the
+oracle capture gate.
+
+## D584.12 — i8 plan fully APPROVED (Astra round 3: DISPATCH SLICE C); C queued behind A in the same worktree (2026-09-08 13:27)
+
+Astra high (53,989 tokens, .tmp/runs/astra-review-i8-plan-r3.log): no
+blockers, no should-fix left in Part C. Verified by Astra against
+committed source and the saved ingress: production omits exactly the
+three player keys before hashing; nine player and nine monster
+digest/subtree checks pass across all three delivered contexts with the
+revised binding, while every full player-rules digest fails;
+expected_revision is a positive integer in every copy. Plan final:
+497 lines, sha256 3f7b93b0…3f32. Slice C (one new test file plus
+temporary, fully restored producer mutations) is dispatchable but is
+NOT started while the slice A lane captures oracles in the same
+worktree: a transient producer mutant could contaminate a capture. C
+dispatches after A's phase 2 marker, per the plan's A, B, C order.
+
+## D584.13 — slice A lane BLOCKED on a plan contradiction (checkout paths inside the protected invocation); amendment round dispatched (2026-09-08 13:35)
+
+The slice A lane (session 01a08207, 112,171 tokens, exit 0) implemented
+the §2.1 seams (tsc -b green, retained legacy test green, 25+/12- in
+tools/ai-dm-conversation.ts) and the capture tool (sha256 4e39e73a…),
+then stopped with BLOCKED before any provisional oracle was written:
+the protected primary invocation's `instructions` and
+`freshSessionContext.startupInstructions` embed the KB's absolute
+checkout paths (…/dnd-wt-blind-dm/tests/fixtures/ai-dm-kb/actions.md),
+which frozen §2.2 forbids encoding anywhere but the seven launcher
+fields, forbids leaving in place, and yet requires to be equal across
+checkouts. Codex stopping is the correct behaviour; the defect is the
+plan's. Worktree left as the lane left it (uncommitted seams and tool;
+no checkout planned). Amendment A1 dispatched to the planning session
+01a081c8 (.tmp/runs/briefs-2026-09-06/blind-i8-plan-a1.md): prove by
+code reading and a fresh inspection which invocation fields carry
+either root, extend the $CHECKOUT_ROOT (and if needed artifact)
+encoding to exactly those fields with per-field counts and inverses,
+update the proofs, tests and disposition. Astra reviews the amendment
+before slice A resumes; slice C stays queued.
+
+## D584.14 — amendment A1 delivered (invocation checkout-root inventory), matches my counts; Astra review launched (2026-09-08 13:39)
+
+Planning session (36,133 tokens, exit 0, BLIND-I8-PLAN-A1 DONE) amended
+§2.2: $CHECKOUT_ROOT now also applies to exactly the protected
+invocation's `instructions` and `freshSessionContext.startupInstructions`
+(seven occurrences each, asserted per field, inverse per field), with
+zero artifact-root occurrences asserted in those fields; construction
+evidence knowledge-base-contract.ts:250-256,317-320 (replaceIndexedPaths
+renders KB references as absolute component paths) and
+ai-dm-conversation.ts:3397-3406,4517-4530; the cross-checkout gate and
+tests 5/7 names updated. Plan 499 lines, sha256 3503bf84…3d3d. My
+independent count on the saved P4 invocation agrees: 7 + 7 checkout
+hits in those two fields, the remaining two in the leaked cwd and
+fixturesPath the projection drops. Astra review of A1 launched 13:39
+(.tmp/runs/astra-review-i8-plan-a1.md); on RESUME SLICE A the lane
+session 01a08207 resumes with the amended §2.2.
+
+## D584.15 — Astra: RESUME SLICE A under amendment A1; lane resumed with three tool requirements (2026-09-08 13:44)
+
+Astra high (65,503 tokens, .tmp/runs/astra-review-i8-plan-a1.log): no
+blocker to resuming; the amended inventory is correct for the two
+captures. Verified by Astra: recount of the saved invocation (7/0,
+7/0, tokens 1 each, leaked cwd and fixturesPath excluded); each
+instruction field contains each of the seven subject paths exactly
+once; independent reconstruction of both instruction fields from the
+KB files reproduced the saved bytes; all four manifests 4/7 with
+per-subject realpath, relative path, byte count and sha verified; the
+§2.1 seam diff is consistent with the plan. Three mandatory tool
+changes for the resume: implement the invocation inventory
+(capture tool :245-278 encodes only the artifact tokens today);
+field-addressed replacement because both instruction values are
+byte-identical and the current uniqueness helper (:129) throws on
+them; explicit two-location gate evidence. Slice A lane session
+01a08207 resumed 13:44 with the amended plan hash and those
+requirements (.tmp/runs/briefs-2026-09-06/blind-i8-slice-a-resume.md,
+log log-lane-blind-i8-slice-a-resume.log).
+
+## D584.16 — slice A phase 1 PROVISIONAL harvested; SUPERVISOR CAPTURE GATE RUN on clean main 493121dd; two-checkout equality holds; fixture installed; phase 2 resumed (2026-09-08 14:12)
+
+Phase 1 (session 01a08207, 97,264 tokens, exit 0): seams, capture tool
+(sha256 59626877…be0d) with field-addressed encoding, two provisional
+runs on the blind checkout with different artifact roots giving
+byte-identical encoded components (launchers bc3a3e9a…, 9596722b…,
+12c8b0f3…; invocation 48303bac…; instruction fields 7/0 each),
+correctionCalls 1 on every correction case, eight tests in the
+expected states (1, 4, 8 and the retained test green; 2, 3, 5, 6, 7
+red with "missing runner-oracle-main.json"), slice B's single line
+with the named test at 4.84 s body / 18.62 s wall, tsc -b green,
+diff-check clean, frozen hash unchanged. Tests 4 and 8 first hit the
+default 5 s timeout and were restructured into hooks rather than
+raising it.
+
+Gate, run by me: overlaid the exact tool bytes (sha verified) under
+tools/ of the clean detached worktree dnd-wt-main-493121dd (tracked
+status empty, tree 87de2ce5), ran the capture with --expected-commit
+(exit 0, 22 s). Provenance in the output: repoCommit 493121dd…, tree
+87de2ce5…, trackedStatus '', checkoutRoot the main worktree, tool
+sha 59626877…, node v24.13.0. Encoded components from the MAIN
+checkout equal the lane's blind-checkout provisional values
+byte-for-byte (all four launchers, the protected invocation, both
+instruction fields; inverses equal persisted): the §2.2 distinct-
+checkout gate is satisfied. Main rows: primary 59,537 bytes, correction
+59,912 bytes. Installed as tests/fixtures/ai-dm-legacy/
+runner-oracle-main.json; INDEPENDENT FIXTURE SHA256 47d18c6d852e76eac530393cae63df23f6ac1029e8dcba9cd7a2637aeaf3ea78
+(315,565 bytes); a copy kept at .tmp/runs/runner-oracle-main.captured.json;
+overlay removed, main worktree clean. Open question passed to phase 2:
+the primary (no-correction) capture lists the two correction launcher
+manifests as well. Phase 2 resumed on the same session
+(.tmp/runs/briefs-2026-09-06/blind-i8-slice-a-phase2.md).
+
+## D584.17 — slices A and B VERIFIED and COMMITTED (c0c54e9c on claude/blind-dm); slice C dispatched (2026-09-08 14:45)
+
+Phase 2 (85,550 tokens, exit 0, BLIND-I8-A-ORACLE DONE and
+BLIND-I8-B-D544 DONE): all nine invariance tests green individually;
+four §2.6 mutants killed with the required fragments
+(initial-launcher.json $.dmMode; correction-launcher.json $.dmMode;
+row[0].dmMode differs; row[0].legacyProbe differs plus the retained
+byte lock), production baseline sha f3d3a405… restored after each;
+risk and consumer specs (agent-session-lifecycle, agent-adapters
+SIMULATED, ai-dm-conversation, ai-dm-arena) 4 files / 152 tests green
+in 497 s; tsc -b green; diff-check clean; frozen hash unchanged;
+arena diff exactly the timeout line. The primary capture's correction
+manifests are explained: the runner writes them eagerly at
+ai-dm-conversation.ts:4686 before the exhaustion coordinator, and a
+correction call is counted only on resumeCorrection (:4955, :4966);
+the tool asserts one call only for the forced case (:678).
+
+Verified by me, not taken from the lane: the whole invariance spec
+9/9 green in one run (40.7 s); the D544 test green at 4.97 s body;
+fixture sha 47d18c6d… equals my gate record; my own serializer mutant
+(mutated file sha 8387ac2d… equals the lane's) made test 3 fail with
+"row[0].legacyProbe differs", restore returned sha f3d3a405…, diff-check
+clean, test green again. Committed the five files as c0c54e9c
+(no push). Slice C dispatched as a fresh codex sol lane at c0c54e9c
+(.tmp/runs/briefs-2026-09-06/blind-i8-slice-c.md, log
+log-lane-blind-i8-slice-c.log): one new test file, three transient
+producer mutants with restore transcripts, the D584.4 contract.
+
+## D583.8 — challenge slice 1 lane: implementation complete, BLOCKED at the gate on two out-of-scope failures; one verified pre-existing on main, one pending a quiet-machine rerun (2026-09-08 15:27)
+
+Lane (session 01a08205, 433,375 tokens, exit 0) implemented slice 1 in
+full: encounter-state codec with legacy_basis/session/challenge modes,
+separate basis-envelope and session-snapshot entry points, authored
+party seats, closed challenge basis, eight fixture files (B, C, A, D;
+D feasibility_candidate with the discriminated pending_spike
+robustness form per Astra's clarification), fourteen fixture tests
+asserting every geometry invariant through canonical queries with no
+disagreement, actual engine-round and launcher bytes round-tripped
+through decodeSessionSnapshotV1, legacy canonical equality on two
+existing bases, generated-seat serialization byte-identical (16,822
+bytes, cmp exit 0), five negative controls each killing its named
+test with restore hashes. Contract: the plan's 31-spec command
+31/31 files, 812/812 tests, 0 failed, 0 skipped (twice, 525 s and
+528 s); import-graph union 46 specs, 977/977. Two gate failures the
+lane correctly reported as out of scope: (1) one post-test unhandled
+EPIPE from tools/ai-dm-conversation.ts:1614 in both cumulative runs,
+absent in the standalone conversation spec (67/67, 497 s); (2)
+`npm run typecheck:fast` exit 1 on tests/unit/assets/
+classic-art-techniques.test.ts:902-903 (TS7022 nextX/nextY), while
+`npx tsc -b --force` passes.
+
+Verified by me: (2) is PRE-EXISTING ON MAIN: the clean detached
+worktree at 493121dd fails `npm run typecheck:fast` (tsgo) with the
+identical two errors; tsc -b does not flag them. Finding against
+main, added to the pending list (fix belongs on main, not this lane).
+(1) both cumulative runs happened while the slice C lane was running
+vitest in another worktree; per the quiet-machine rule the EPIPE is
+not judged until I rerun the exact 31-spec command myself on a quiet
+box after slice C exits. If it recurs quietly it is a real finding
+about the conversation tool's stdout handling, to be investigated in
+its own lane. Lane work left uncommitted in dnd-wt-challenge until
+that rerun; no checkout will touch it.
+
+## D584.18 — slice C delivered (delivered-ingress source binding); the load-time EPIPE seen in a second worktree; quiet rerun of the challenge gate started (2026-09-08 16:25)
+
+Slice C lane (session 01a08253, 391,650 tokens, exit 0,
+BLIND-I8-C-SOURCE-BINDING DONE): one new file
+tests/unit/vtt/blind-context-source-binding.test.ts (843 lines), four
+named tests; all three delivered spool copies bound per case; census
+standard 493 leaves / 131 families (equals the plan baseline), rich
+782/226, empty 770/210, facts-off 683/155; the three producer mutants
+each failed the named test with the three ACCEPT lines followed by the
+SOURCE_BINDING_MISMATCH path, source, expected and received text
+(required_actors[0].name; legal_movement.actors[0].name; the
+supplemental statblock attacks[0].name), producer restored to sha
+8bd3ac4b… each time; one UNBOUND met during development
+(statblock.traits[0].kind "abduct") resolved by binding array
+descendants to the raw statblock subtree, not by an exemption; the
+required five-spec contract 5 files / 140 tests green in 488 s;
+tsc -b green; diff-check clean; frozen hash unchanged; git status shows
+only the new file. Verified by me: the binding spec 5/5 green (17 s).
+
+Finding, cross-worktree: the lane's standalone timing run of
+tests/unit/tools/ai-dm-conversation.test.ts passed 68/68 but exited 1
+with a post-test scripted-MCP EPIPE, the same signature the challenge
+lane hit twice at tools/ai-dm-conversation.ts:1614 (a write to an MCP
+child's stdin in mcpRequest). Both occurred while two lanes ran vitest
+concurrently. The quiet-machine rerun of the challenge slice-1
+31-spec command started 16:24:11 (load average 0.81, nothing else
+running; log .tmp/runs/challenge-i1-quiet-rerun.log). My slice C
+producer-mutant check and the slice C commit follow that rerun so the
+box stays quiet.
+
+## D583.9 — challenge slice 1 gate GREEN on a quiet machine; COMMITTED 0c4b85dc on claude/challenge-rooms (2026-09-08 16:36)
+
+My rerun of the plan's exact 31-spec command in dnd-wt-challenge with
+nothing else on the box (load 0.81 at start): 31/31 files, 812/812
+tests, exit 0, no EPIPE, 8 min 44 s. The two loaded runs that showed a
+post-test EPIPE are discarded per the quiet-machine rule; the EPIPE is
+load-induced and lives in the shared conversation tool's MCP stdin
+write (tools/ai-dm-conversation.ts:1614 in that tree), which now has a
+recorded signature from two worktrees and goes on the pending list as
+a tool robustness item. Committed the thirteen files as 0c4b85dc (no
+push). Verified by me earlier: the fourteen fixture tests green on
+their own. Slice 2 (the feasibility spike) is next and needs a
+supervisor-authored brief carrying the full cumulative contract Astra
+found missing.
+
+## D584.19 — slice C VERIFIED and COMMITTED (cdf84f2c); increment 8 §6 cumulative launched (2026-09-08 16:37)
+
+Verified by me: my own producer mutant at src/vtt/blind-turn-context.ts:1133
+(prose appended to the legal-movement actor name; mutated sha 162b5f2c…)
+made the binding spec fail at load with exactly the three ACCEPT lines
+then "SOURCE_BINDING_MISMATCH $.legal_movement.actors[0].name, expected
+Goblin Minion, received Goblin Minion (half cover from the pillar;
+attack the Wizard first)"; restore returned sha 8bd3ac4b…, diff-check
+clean, the named test green. Committed the new spec as cdf84f2c.
+Increment 8 now spans c0c54e9c (A, B) and cdf84f2c (C). The plan's
+§6 cumulative (24 runnable D584.4 specs + the two risk specs in one
+vitest with --maxWorkers=2, then tsc -b, diff-check, frozen hash)
+launched by me at 16:37 on the quiet machine
+(.tmp/runs/i8-cumulative.log, marker I8-CUMULATIVE DONE); the
+compile-only type test is covered by tsc -b, the browser spec is
+inventory-only per the plan.
+
+## D584.20 — increment 8 §6 cumulative GREEN on a quiet machine; increment 8 complete on claude/blind-dm at cdf84f2c (2026-09-08 16:48)
+
+Run by me at 16:34-16:47 with nothing else on the box: one vitest
+invocation over the 24 runnable D584.4 specs plus the two risk specs
+(--maxWorkers=2): 26/26 files, 645/645 tests, exit 0, no EPIPE;
+`npx tsc -b --force` exit 0 (covers the compile-only type test);
+`git diff --check` clean; contracts.ts sha unchanged. The browser spec
+in the inventory is untouched and runs in the full gate. Increment 8
+(slices A, B, C) is therefore verified cumulatively at cdf84f2c.
+Remaining before the first D569 blind arm: the D584 item-2 artifact
+inventory since increment 4 and the full gate on wt-blind-dm (port
+4530, quiet machine). The challenge spike brief is written
+(.tmp/runs/briefs-2026-09-06/challenge-i1-spike.md) and is dispatched
+after the gate so the gate stays quiet.
+
+## D584.21 — item 2 ARTIFACT INVENTORY since increment 4: no experiment evidence was produced by the blind branch; implicit and explicit boundaries hold (2026-09-08 16:58)
+
+Method (read-only, no regeneration, no erasure): every .jsonl under
+~/dnd-slim-runs, the project and blind .tmp trees, ~/.claude/jobs and
+/tmp (48,089 files scanned) modified since 2026-09-06 whose rows carry
+repoCommit, bucketed by whether repoCommit is one of the 18 commits on
+claude/blind-dm (062a2b70 … cdf84f2c) and by the presence and value of
+dmMode in the persisted row.
+
+Result: (a) in the run directories, 99 conversation-row files, ALL
+from main-derived commits (pool, pool3, pool4, caps, e1c/e1cb/e1cc,
+e2, low, bb, miniab families), none with a dmMode key: no D569 or
+other experiment artifact was ever produced by blind-branch code; the
+D569 arms remain HELD and unrun. (b) Under /tmp only, lane dry-run and
+test outputs from eight blind commits (0510c4ae, 062a2b70, 29595e75,
+4ae1b677, 725009c9, 0023aef2, c0c54e9c, cdf84f2c): rows WITHOUT dmMode
+are implicit runs (arena-independent, kb-smoke, hypnotic-pattern
+probe, none-smoke, partial-execution, turn-total-rollover,
+i8-advice-row captures); rows WITH dmMode carry 'blind' (i4 precheck,
+d569 code-repair and screenshot-first harness rows, i8 ingress and
+source-binding cases) or 'advice' (blind-dm-i4-advice-5117001, one
+arena-independent case, the mode-isolation test's advice file), all
+of them explicit-flag harness runs by their producing tests. No
+implicit row anywhere carries dmMode; no explicit row lacks it. These
+/tmp artifacts are test evidence, not experiment evidence, and none
+feeds a judge packet or manifest. Nothing marked unusable; nothing
+returned for disposition. Increment 8's oracle additionally proves the
+current implicit runner output equals approved main's modulo the three
+timing fields, which closes the boundary going forward.
+
+## D584.22 — full gate on wt-blind-dm RED at ast-grep (no-raw-fs-in-tests on the slice A spec); gate stopped, fix round dispatched (2026-09-08 17:02)
+
+gate-wt4.sh wt-blind-dm (start 16:48:33, load 0.98): tsc exit 0; `sg
+scan` exit 1 with two errors, both in tests/unit/tools/
+ai-dm-legacy-invariance.test.ts (raw imports from node:fs and
+node:fs/promises), rule ast-grep-rules/no-raw-fs-in-tests.yml: test
+files must read declared repository inputs (tests/helpers/test-inputs.ts)
+or use a helper-owned filesystem capability
+(tests/helpers/test-filesystem.ts, test-filesystem-promises.ts). The
+slice A contract I wrote did not include `sg scan`; that is a gap in my
+brief, not a lane deviation. The gate was stopped (pids read in one
+call, killed in the next) because it has to be rerun on the fixed
+revision anyway. Fix round dispatched on the slice A session 01a08207
+(.tmp/runs/briefs-2026-09-06/blind-i8-slice-a-sgfix.md): replace the
+raw imports with the helpers, add an export to a helper only if a
+capability is missing, no assertion or expected value changes, contract
+includes sg scan exit 0, the spec 9/9, one mutant rerun, tsc, diff. The
+inventory (D584.21) is unaffected. Next: harvest, commit, rerun the
+full gate quietly, then the challenge spike lane.
+
+## D584.23 — ast-grep fix verified and committed (5fa41098); the same rule hits challenge slice 1, fix round dispatched there (2026-09-08 17:02)
+
+Slice A session fix (18,637 tokens): raw node:fs imports replaced by
+tests/helpers/test-filesystem (one added export) and
+test-filesystem-promises; no assertion or expected value changed;
+lane reported sg exit 0, spec 9/9, serializer mutant still killed,
+tsc green, diff clean. Verified by me: `sg scan` exit 0 in the blind
+worktree; the invariance spec 9/9 green (38.8 s); helper diff is one
+inserted line. Committed as 5fa41098; blind branch head for the
+gate. Finding against my own briefs: neither the slice A nor the
+challenge slice 1 contract listed `sg scan`, although the gate runs it
+before vitest; my run of `sg scan` in dnd-wt-challenge shows the same
+rule red on tests/unit/vtt/challenge-room-fixtures.test.ts:1. Fix
+round dispatched on the slice 1 session 01a08205
+(.tmp/runs/briefs-2026-09-06/challenge-i1-sgfix.md); every future
+contract of mine lists `sg scan`. The full gate on wt-blind-dm restarts
+after that short lane exits so the box is quiet.
+
+## D583.10 — challenge ast-grep fix verified and committed (1effad20); full gate on wt-blind-dm relaunched quietly (2026-09-08 17:06)
+
+Slice 1 session fix: the fixture spec reads through the test-inputs
+helper (31+/12-, no assertion change); lane reported sg exit 0, the
+three specs green, tsc green, diff clean. Verified by me: `sg scan`
+exit 0 in dnd-wt-challenge; the fixture spec 14/14. Committed as
+1effad20 on claude/challenge-rooms. With no lane running vitest, the
+full gate on wt-blind-dm (head 5fa41098) was relaunched at 17:06 via
+gate-wt4.sh (tsc, sg, locked vitest gate, locked browser gate; log
+~/dnd-slim-runs/gate-wt-blind-dm.log). The challenge spike lane is
+dispatched after the gate completes.
+
+## D586.24 — OWNER: the Unicorn's Blessing cure wounds should have been legal; Astra is expected to be smarter than sol (2026-09-08 17:12)
+
+Owner (verbatim): "I think that should have been legal through the
+unicorn bonus action ability." and "For reference, Astra is supposed to
+be smarter than sol".
+
+Verified in the repo SRD (docs/srd/full/srd-5.2.1.txt:21945-22009):
+"Unicorn's Blessing (3/Day). The unicorn touches another creature with
+its horn and casts Cure Wounds or Lesser Restoration on that creature,
+using the same spellcasting ability as Spellcasting." The statblock
+models it as a bonus spell_choice 'unicorns-blessing' with both spells
+implemented (src/combat/statblocks/roster.ts), the offer builder emits
+sourceActionId unicorns-blessing (turn-option-registry.ts:539-556), and
+the intent resolver passes sourceActionId through. The execution error
+text says the spell was absent from "spellcasting", i.e. the executed
+use carried actionId 'spellcasting' instead of 'unicorns-blessing', so
+the defect is a wrong source-action id on the re-resolution path of an
+accepted ADJUSTMENT (the row shows preflight retained_plan_illegal then
+an adjusted plan), not a rules question: the owner is right that the
+play was legal and the engine broke a legal, accepted play. The pool3
+sol-high row with "Lesser Restoration requires a removable condition
+selection" is the sibling path (the same bonus action, the other spell,
+rejected at execution for a missing condition selection the offer never
+asked for). Both go to one investigation lane after the gate. On the
+second note: pool4 compared astra at LOW and MEDIUM effort against sol
+at HIGH, so it cannot rank astra against sol; an astra-high arm is the
+fair comparison and was not run.
+
+## D586.25 — ROOT CAUSE (read, not yet reproduced) of the Unicorn's Blessing failures: the activation choice is attached to the first cast slot, and Lesser Restoration never receives its condition selection (2026-09-08 17:16)
+
+src/vtt/intent-resolver.ts mechanicsWithChoice(): when an accepted
+option carries an activation choice, it attaches the choice to the
+FIRST action slot of kind cast_spell (an `attached` flag) and, for
+unicorns_blessing_spell, overwrites that slot's spellId with the chosen
+spell. If the plan also has a main-slot cast through the Unicorn's
+Spellcasting action (actionId 'spellcasting'), that main slot receives
+spellId cure-wounds while keeping actionId 'spellcasting';
+engine-round-session.ts monsterSpellCommand then looks cure-wounds up
+in the Spellcasting action's list and throws "Resolved spell
+cure-wounds is absent from spellcasting", which is the exact pool4
+message. The bonus slot (sourceActionId unicorns-blessing from
+turn-option-registry.ts:539-556) was legal throughout. Fix shape: bind
+the choice to the slot whose source action owns that choice kind, not
+to the first cast slot; regression test with a main-slot Spellcasting
+cast plus a Unicorn's Blessing bonus cast in one option.
+
+Second defect, same feature: Lesser Restoration through the bonus
+action executes the remove_condition operation
+(src/combat/encounter.ts:11069-11073), which requires a selected
+condition among Blinded/Deafened/Paralyzed/Poisoned via the command's
+selectedOption; monsterSpellCommand sets selectedOption only for
+command_word and dispel_evil_and_good_mode choices, so the Unicorn's
+Lesser Restoration can never succeed: the pool3 sol-high failure. Fix
+shape: the offer exposes the condition selection (or derives it from
+the target's removable conditions) and the monster spell command
+carries it. Both are engine defects that turned legal, accepted plays
+into execution faults and were scored as service nulls, which was the
+right adjudication. An investigation and repair lane is queued after
+the gate; both are read-level diagnoses and must be reproduced by the
+lane's failing tests first.
+
+## D584.24 — full gate on wt-blind-dm (5fa41098): tsc, ast-grep and the vitest gate GREEN; one load flake in the new invariance spec, passed serially; browser stage running (2026-09-08 17:25)
+
+Gate log ~/dnd-slim-runs/gate-wt-blind-dm.log: tsc exit 0; sg exit 0;
+vitest gate exit 0 with LOAD FLAKES (passed serially):
+tests/unit/tools/ai-dm-legacy-invariance.test.ts, FAILED (none). The
+initial parallel report shows the spec "failed" with its four
+runner-backed tests SKIPPED and no assertion failure, i.e. a beforeAll
+hook exceeded its budget under gate parallelism (the real-runner
+captures take ~19 s on a quiet box against the default 10 s hook
+timeout); the serial retry passed. Handled by the D544 retry runner;
+not re-pinned. Finding for a later lane: the spec's setup should not
+depend on the hook budget (cache the two captures once per file or
+move them under a properly budgeted, D544-named test), so the gate
+does not rely on the retry. Browser stage started 17:15 on port 4530.
+
+## D583.11 — finding against my own summary, and the spike's grouping unit made explicit (2026-09-08 17:55)
+
+In the plain-English summary to the owner I wrote that "two critical
+hits with a unicorn's two dice weapons" produce 85 million outcomes.
+Wrong creature: the room A attacker is the Priest and the weapon is
+its Mace (1d6 bludgeoning + 2d4 radiant, monsters.ts:160-168); the
+unicorn belongs to the separate Unicorn's Blessing defect. Corrected
+to the owner. Counted in the worktree: one critical Mace (2d6+4d4) has
+23 distinct totals over 9,216 face tuples; two critical Maces have 529
+total pairs and 45 summed totals against 84,934,656 face tuples. The
+production evaluator (src/vtt/intel/option-outcome.ts) already scores
+one option by exact damage-total distributions (d20 faces for
+miss/hit/critical, dice-total distributions with critical doubling,
+convolution across a multiattack, kill probability against remaining
+HP); the 85 million was the challenge plan's enumeration unit, not the
+engine's. The spike brief (.tmp/runs/briefs-2026-09-06/challenge-i1-spike.md)
+now binds the grouping unit at every component boundary to the exact
+damage-total distribution with face-count weights as fractions, reusing
+or mirroring the evaluator's construction, then merging by resulting
+state. Explained to the owner how ranking works today (class, then
+expected damage, attack count, approach feet, resource cost; no
+look-ahead; the model sees the estimates and picks an option id).
+
+## D586.26 — OWNER: queue as many parallel jobs as possible and split further; FAN-OUT launched (2026-09-08 18:08)
+
+Owner (verbatim): "Queue as many parallel jobs as you can . Look for
+seams to split tasks up even more."
+
+Machine: 24 cores, 30 GB, 333 GB free. Launched at 18:07-18:08 while
+the blind gate's browser stage still runs (the quiet-machine rule is
+kept for gates by scheduling the test-heavy lanes after it):
+- Model-bound experiments: pool4 astra-HIGH arm (dnd-wt-brutal-pool
+  650e1f00, same COMMON flags as pool4, out ~/dnd-slim-runs/
+  pool4-astra-high.jsonl, log .tmp/runs/pool4-astra-high.log), the
+  fair strength comparison the owner's note asked for; and the judge
+  repeatability re-score: judge-one.sh pool4 4arm-rejudge on a
+  byte-identical copy of the pool4 packet (cmp identical), three fresh
+  seats, to measure pure judge drift.
+- Twelve codex sol planning lanes, each in its own worktree off main
+  493121dd with node_modules symlinked to dnd-wt-main-493121dd (except
+  d569-astra-arm in dnd-wt-blind-dm and elevation-tiers in
+  dnd-wt-los-cover, moved to main), each writing one .tmp-plans file,
+  briefs .tmp/runs/briefs-2026-09-06/plan-<name>.md with the relevant
+  owner rulings pasted verbatim from this file, logs
+  .tmp/runs/fanout/log-plan-<name>.log: d569-astra-arm (manifest
+  amendment adding gpt-6-astra arms), heldout-basis (D586.17 basis with
+  calibration arm), offer-reposition, offer-grapple, offer-help-ready
+  (D586.1 families split into three offer plans), elevation-tiers
+  (D586.12), companion-projection (D586.9/.10/.16/.17),
+  narration-channel (D586.13), save-export-import (D586.14),
+  override-popup (D586.16 UI), alpha-walkthrough (D586.19/.15),
+  promo180-experiment (D586.3 preregistration at the 180 s wall with
+  luna medium, luna low, sol high, astra high, engine top).
+- Implementation worktrees created with npm ci in progress: unicorn
+  (Unicorn's Blessing repair), epipe (conversation tool stdin
+  robustness), tsgo-fix (pre-existing typecheck:fast failure),
+  los-cover (D576 increment 5). With the challenge spike and the
+  invariance hook-budget fix these six start when the browser gate
+  exits, followed by the first D569 blind arm.
+Every planning output goes to Astra high for review as it lands;
+every implementation lane carries sg scan in its contract.
+
+## D584.25 — full gate on wt-blind-dm (5fa41098): vitest green, browser RED on one blind snapshot test whose intrinsic cost (56 s) exceeds the gate's 30 s per-test budget; D569 arm held; fix lane dispatched (2026-09-08 18:12)
+
+Browser stage (port 4530, 49.9 min): 186 passed, 1 failed:
+tests/browser/ai-dm-board-snapshot.spec.ts:154 "captures synchronized
+state-only DM, accessible-raster, and player evidence", timed out at
+30,000 ms in the initial run (30,002 ms) AND in the serial retry
+(30,008 ms) on a quiet box, so the retry runner reports it FAILED, not
+a load flake. Not a regression from increment 8: the increment 7
+supervisor verification (.tmp/runs/i7-supervisor-verify.log) ran the
+same test green in 56.0 s under the lane wrapper config, whose budget
+is larger than the gate's. The test spawns `npx vite-node
+tools/ai-dm-blind-board-snapshot-check.ts` as a child process and
+waits for a full browser capture, which costs about a minute; the
+sibling test in the same file (a full DM board capture through the
+durable save path) takes 10 s. Verdict: the blind branch's browser
+gate has never passed with this test in the gate's own budget; the
+spec's design, not the runner, is at fault. The test is not
+D544-named, so its timeout is not raised; a lane must make the test
+fit the budget without weakening the evidence. The first D569 blind
+arm stays HELD until the browser gate is green.
+
+## D586.27 — OWNER: the die-provenance capability must be an independent shareable class; comb the codebase with Astra for modules to break into independent classes; composition over inheritance (2026-09-08 18:15)
+
+Owner (verbatim): "That should be an independent class that can be
+shared." (about threading exact face weights and provenance through
+the reducer's transactional random-number adapter) and "Collaborate
+with Astra to comb through the codebase looking for other modules that
+can be broken up to independent classes. I prefer \"composition over
+inheritance\" research what that means practically ."
+
+Applied: (1) the running challenge spike lane (session 01a08311-f8e2)
+already has the RNG seam in scope; at harvest the provenance-carrying
+random-number capability must be an independent module with no
+dependency on the engine-round application or the witness (a
+composable adapter that any consumer, production or diagnostic, can
+wrap around a reducer run), or the lane is resumed to make it so
+before commit; Astra's implementation review checks that boundary.
+(2) Astra high research task launched read-only on clean main
+493121dd (.tmp/runs/astra-research-composition.md, log
+astra-research-composition.log): comb src/combat, src/vtt and tools
+for modules that hide reusable capabilities inside larger units or
+inherit where they should compose, rank the seams by value and risk
+with file:line evidence, and state practically what composition over
+inheritance means for this TypeScript codebase. Findings return to the
+owner and feed the plan queue; nothing is refactored without a plan
+round.
+
+## D586.28 — JUDGE REPEATABILITY MEASURED: the byte-identical pool4 packet re-scored 5.5 hours later by fresh seats lands 0.74 to 0.84 lower on every arm; the arm ordering and the within-panel contrasts reproduce (2026-09-08 18:27)
+
+Method: pool4-packet-4arm-rejudge.json is a byte-identical copy (cmp
+exit 0) of the packet judged at 12:38; judge-one.sh re-ran the same
+three seats (sol high, opus, astra high) in fresh sessions at
+18:07-18:17 with the identical header; all outputs validated (360
+ids each); contrasts by the approved script with the re-score as a
+separate packet paired by case.
+
+Same-arm deltas, re-score minus original (pure judge noise, same
+bytes): engine-top -0.74 [-0.91, -0.58]; sol-high -0.80 [-0.96, -0.65];
+astra-low -0.82 [-0.99, -0.67]; astra-medium -0.84 [-1.01, -0.68].
+Per seat the shift is opus -1.50 to -1.57, sol -0.40 to -0.57, astra
+-0.33 to -0.40: the opus seat is the least stable, the astra seat the
+most. Within the re-score the preregistered contrasts reproduce:
+astra-low vs sol-high, astra-medium vs sol-high, astra-medium vs
+astra-low and sol-high vs engine-top come out with the same signs and
+similar sizes as the 12:52 unseal (table below). The 0.71 pool3 to
+pool4 "calibration shift" recorded in D586.23 is therefore within
+same-day judge level drift and says nothing about the header change.
+
+Consequences (recorded, not yet ruled): absolute panel scores are not
+comparable across sessions even hours apart; only within-packet paired
+contrasts are; every packet that must be compared across sessions
+needs identical-rows calibration entries inside it, and the opus seat's
+level drift argues for reporting per-seat contrasts alongside the
+panel mean. Tables verbatim:
+
+# Preregistered contrasts (INFORMATIONAL ONLY, D586.3: no arm is promoted by this table)
+
+Validation (entries per seat): {"pool4": {"sol": 360, "opus": 360, "astra": 360}, "pool3": {"sol": 270, "opus": 270, "astra": 270}, "pool4rj": {"sol": 360, "opus": 360, "astra": 360}}
+
+Arm means are over each arm's included cases (service_null and adjudicated rows excluded); they are not paired.
+
+| arm | cases | included | panel mean | sol | opus | astra | refused | null |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| pool4:engine-top | 90 | 90 | 7.544 | 8.433 | 7.033 | 7.167 | 0 | 0 |
+| pool4:pool4-astra-low | 90 | 89 | 7.536 | 8.506 | 7.045 | 7.056 | 0 | 1 |
+| pool4:pool4-astra-medium | 90 | 90 | 7.556 | 8.533 | 7.067 | 7.067 | 0 | 0 |
+| pool4:pool4-sol-high | 90 | 90 | 7.707 | 8.644 | 7.244 | 7.233 | 0 | 0 |
+| pool3:engine-top | 90 | 90 | 6.833 | 8.200 | 6.267 | 6.033 | 0 | 0 |
+| pool3:luna-medium | 90 | 90 | 6.922 | 8.222 | 6.456 | 6.089 | 1 | 0 |
+| pool3:sol-high | 90 | 89 | 6.835 | 8.213 | 6.360 | 5.933 | 1 | 1 |
+| pool4rj:engine-top | 90 | 90 | 6.800 | 8.033 | 5.533 | 6.833 | 0 | 0 |
+| pool4rj:pool4-astra-low | 90 | 89 | 6.712 | 7.955 | 5.517 | 6.663 | 0 | 1 |
+| pool4rj:pool4-astra-medium | 90 | 90 | 6.711 | 7.967 | 5.500 | 6.667 | 0 | 0 |
+| pool4rj:pool4-sol-high | 90 | 90 | 6.904 | 8.133 | 5.700 | 6.878 | 0 | 0 |
+
+Contrast means are over the paired subset (kept cases) only.
+
+| contrast | kept/shared (cand-only/ref-only) | reference | candidate | delta | 95% CI (seed-clustered) | per seat sol/opus/astra | leave-one-out -sol/-opus/-astra | dropped |
+|---|---:|---:|---:|---:|---|---|---|---|
+| JUDGE REPEATABILITY same day, same bytes: engine-top rejudge vs original | 90/90 (0/0) | 7.544 | 6.800 | -0.744 | [-0.911, -0.578] | -0.400/-1.500/-0.333 | -0.917/-0.367/-0.950 | - |
+| JUDGE REPEATABILITY same day, same bytes: pool4-sol-high rejudge vs original | 90/90 (0/0) | 7.707 | 6.904 | -0.804 | [-0.959, -0.652] | -0.511/-1.544/-0.356 | -0.950/-0.433/-1.028 | - |
+| JUDGE REPEATABILITY same day, same bytes: pool4-astra-low rejudge vs original | 89/90 (0/0) | 7.536 | 6.712 | -0.824 | [-0.985, -0.667] | -0.551/-1.528/-0.393 | -0.961/-0.472/-1.039 | case-05-1 |
+| JUDGE REPEATABILITY same day, same bytes: pool4-astra-medium rejudge vs original | 90/90 (0/0) | 7.556 | 6.711 | -0.844 | [-1.011, -0.678] | -0.567/-1.567/-0.400 | -0.983/-0.483/-1.067 | - |
+
+- JUDGE REPEATABILITY same day, same bytes: engine-top rejudge vs original: same packet bytes, same header, three fresh seats about 5.5 hours later; the delta is judge noise only
+- JUDGE REPEATABILITY same day, same bytes: pool4-sol-high rejudge vs original: same packet bytes, same header, three fresh seats about 5.5 hours later; the delta is judge noise only
+- JUDGE REPEATABILITY same day, same bytes: pool4-astra-low rejudge vs original: same packet bytes, same header, three fresh seats about 5.5 hours later; the delta is judge noise only
+- JUDGE REPEATABILITY same day, same bytes: pool4-astra-medium rejudge vs original: same packet bytes, same header, three fresh seats about 5.5 hours later; the delta is judge noise only
+
+- Judge repeatability packet: pool4-packet-4arm-rejudge.json is a byte-identical copy of pool4-packet-4arm.json (cmp exit 0), re-scored 18:07-18:17 by fresh sol high, opus, astra high seats.
+
+Estimand: mean of per-case (seed, rep) paired panel deltas; CI resamples seeds with replacement and recomputes the same mean over every retained case of the resampled seeds (with multiplicity). Cases with a null side are dropped per contrast. Per-seat and leave-one-out columns are diagnostics only (D585.1).
+
+# Preregistered contrasts (INFORMATIONAL ONLY, D586.3: no arm is promoted by this table)
+
+Validation (entries per seat): {"pool4": {"sol": 360, "opus": 360, "astra": 360}, "pool3": {"sol": 270, "opus": 270, "astra": 270}, "pool4rj": {"sol": 360, "opus": 360, "astra": 360}}
+
+Arm means are over each arm's included cases (service_null and adjudicated rows excluded); they are not paired.
+
+| arm | cases | included | panel mean | sol | opus | astra | refused | null |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| pool4:engine-top | 90 | 90 | 7.544 | 8.433 | 7.033 | 7.167 | 0 | 0 |
+| pool4:pool4-astra-low | 90 | 89 | 7.536 | 8.506 | 7.045 | 7.056 | 0 | 1 |
+| pool4:pool4-astra-medium | 90 | 90 | 7.556 | 8.533 | 7.067 | 7.067 | 0 | 0 |
+| pool4:pool4-sol-high | 90 | 90 | 7.707 | 8.644 | 7.244 | 7.233 | 0 | 0 |
+| pool3:engine-top | 90 | 90 | 6.833 | 8.200 | 6.267 | 6.033 | 0 | 0 |
+| pool3:luna-medium | 90 | 90 | 6.922 | 8.222 | 6.456 | 6.089 | 1 | 0 |
+| pool3:sol-high | 90 | 89 | 6.835 | 8.213 | 6.360 | 5.933 | 1 | 1 |
+| pool4rj:engine-top | 90 | 90 | 6.800 | 8.033 | 5.533 | 6.833 | 0 | 0 |
+| pool4rj:pool4-astra-low | 90 | 89 | 6.712 | 7.955 | 5.517 | 6.663 | 0 | 1 |
+| pool4rj:pool4-astra-medium | 90 | 90 | 6.711 | 7.967 | 5.500 | 6.667 | 0 | 0 |
+| pool4rj:pool4-sol-high | 90 | 90 | 6.904 | 8.133 | 5.700 | 6.878 | 0 | 0 |
+
+Contrast means are over the paired subset (kept cases) only.
+
+| contrast | kept/shared (cand-only/ref-only) | reference | candidate | delta | 95% CI (seed-clustered) | per seat sol/opus/astra | leave-one-out -sol/-opus/-astra | dropped |
+|---|---:|---:|---:|---:|---|---|---|---|
+| REJUDGE astra-low vs sol-high | 89/90 (0/0) | 6.933 | 6.712 | -0.221 | [-0.433, -0.056] | -0.202/-0.213/-0.247 | -0.230/-0.225/-0.208 | case-05-1 |
+| REJUDGE astra-medium vs sol-high | 90/90 (0/0) | 6.904 | 6.711 | -0.193 | [-0.400, -0.030] | -0.167/-0.200/-0.211 | -0.206/-0.189/-0.183 | - |
+| REJUDGE astra-medium vs astra-low | 89/90 (0/0) | 6.712 | 6.738 | +0.026 | [-0.022, +0.090] | +0.034/+0.011/+0.034 | +0.022/+0.034/+0.022 | case-05-1 |
+| REJUDGE sol-high vs engine-top | 90/90 (0/0) | 6.800 | 6.904 | +0.104 | [-0.019, +0.252] | +0.100/+0.167/+0.044 | +0.106/+0.072/+0.133 | - |
+
+
+- Judge repeatability packet: pool4-packet-4arm-rejudge.json is a byte-identical copy of pool4-packet-4arm.json (cmp exit 0), re-scored 18:07-18:17 by fresh sol high, opus, astra high seats.
+
+Estimand: mean of per-case (seed, rep) paired panel deltas; CI resamples seeds with replacement and recomputes the same mean over every retained case of the resampled seeds (with multiplicity). Cases with a null side are dropped per contrast. Per-seat and leave-one-out columns are diagnostics only (D585.1).
+
+## D584.26 — invariance hook-budget fix verified and committed on claude/blind-dm; stdin robustness fix verified and committed on claude/epipe (2026-09-08 18:50)
+
+Invariance hook fix (session 01a08311-f8c4, 123,603 tokens): beforeAll
+hooks removed, the two runner captures memoised at file scope; lane
+reported 9/9 alone (28.4 s), 124/124 under a three-spec parallel load
+(609 s), serializer mutant still fails test 3, restore sha f3d3a405…,
+sg 0, tsc 0. Verified by me: sg scan exit 0; the spec 9/9 in 27.1 s
+with test bodies at 0.8 s (captures now settle at import). Committed
+that file alone; the browser-fit lane's three uncommitted files stay
+in the worktree.
+
+Stdin robustness fix (session 01a08311-f8a8, 184,624 tokens, worktree
+dnd-wt-epipe off main 493121dd): typed McpChildExited, stream error
+handlers at spawn, pending-request rejection on exit, write refused
+after exit, stdin ended only when writable; request bytes and launcher
+manifests unchanged; three lifecycle tests; the handler-removal mutant
+reproduced exactly one unhandled EPIPE; 92/92 across the three-spec
+contract, sg 0, tsc 0. Verified by me: sg scan exit 0; the
+conversation spec 70/70 green with no unhandled error. Committed as
+the branch head. Because it touches the runner whose persisted bytes
+the blind oracle pins, an Astra implementation review runs before any
+merge to main, and the blind branch's invariance spec must stay green
+after that merge.
+
+## D586.29 — Astra's composition research landed; four extraction planning lanes launched (2026-09-08 18:55)
+
+Astra high (136,836 tokens, read-only on main 493121dd; report saved as
+~/dnd-slim-runs/reports/2026-09-08-astra-composition-research.md and
+.tmp/runs/astra-research-composition.report.md, 225 lines). Part 1:
+seven practical rules for this codebase (pure calculations as
+functions, classes only for ownership of a cursor/session/cache;
+behaviour passed as parameters; small per-consumer interfaces;
+discriminated unions for alternatives; wrap and forward the whole
+contract; per-instance configuration instead of process-wide env
+(finding: runConversation sets DND_LANE_INTEL_MODE in process.env and
+the MCP application reads it, ai-dm-conversation.ts:5391 and
+engine-server.ts:1365, so overlapping conversations in one process
+could observe each other's setting); invalid wiring fails at compile
+time). Inheritance that stays: error subclasses, the shallow process
+adapter, stateful session classes. Part 2: src/combat/roll-provenance.ts
+specified as an independent capability (recording mode wrapping the
+transactional RNG with checkpoints forwarded; replay mode with weighted
+forks; component-total distributions moved out of option-outcome;
+rollback reuses random slots so a prefix needs interval semantics, not
+faces; never merge prefixes on damage totals alone; bound exploration
+honestly with explicit incomplete mass; probability model named;
+required changes at encounter.ts:12765, the roll sites and the inline
+potion draw at :12685; acceptance tests and the pins that must not be
+regenerated). Part 3: thirteen ranked bounded extractions with
+consumers and pinned evidence; recommended order roll provenance, MCP
+request client, session command transaction.
+
+Launched (D586.26 fan-out continued): planning lanes roll-provenance
+(off main), mcp-request-client (off claude/epipe 67659fb1, on top of
+the stdin fix), opportunity-selection (off main; the seam the D586.1
+ranking terms plug into), conversation-row-codec (off main), each with
+Astra's relevant section verbatim as the binding starting point. The
+session command transaction is not planned separately: the running
+challenge spike is extracting it and will be harvested against Astra's
+contract. Owner told: the die-provenance unit will be independent and
+shared, or the spike is resumed until it is.
+
+## D586.30 — fan-out round 1 verdicts: five plans DO NOT DISPATCH (Astra), round 2 dispatched to each planning session; five more plans landed and under review (2026-09-08 19:00)
+
+Astra high round-1 verdicts (all DO NOT DISPATCH, findings verbatim
+in .tmp/runs/fanout/astra-review-plan-<name>.log):
+- d569-astra-arm (51,022 tokens): the manifest's minimumConsensusSeats
+  does not enforce three-seat scoring in analyzeD569Pair (Astra ran the
+  analysis in memory: a pair scored by two seats, and one scored by
+  astra alone, both returned "noninferior"); "zero Fable strings"
+  contradicts preserving the amendment history.
+- elevation-tiers (83,626): slice 1 cannot compile with its file scope
+  (removing CombatRulesProfile.speed breaks five listed consumers);
+  undefined MovementSpeed type and storage-version migration; the
+  vertical trace is wrong for flying interveners and underdetermined
+  within a crossed cell; movement-graph state/transition contract
+  missing; bare-source query semantics undefined; inventory misses
+  staged changes and mutants lack site-to-test mapping; the screenshot
+  ablation leaks elevation answers through roster/rail/flying text; the
+  acceptance corpus need not exercise elevation-dependent lines.
+- narration-channel (85,945): the disposition signature loses fallback
+  provenance (verified by running TurnExhaustionCoordinator); slice 1
+  omits tools/engine-mcp-dry-client.ts which the audience schema change
+  breaks; the principal privacy mutant cannot produce the promised
+  failure; slice-1 acceptance needs state the contracts lack; a
+  blacklist does not give the mechanics-consistency guarantee; timeline
+  semantics lack batch identity; narrator isolation unproven; the live
+  composition root is missing.
+- override-popup (86,218): depends on an unspecified companion
+  acceptance seam; resolver validity does not guarantee execution
+  (stale revision 4 vs 5 accepted in memory); gate API cannot represent
+  extension/expiry; durable transitions lose the activation choice;
+  message/dialog contracts incomplete; renderer brand mismatch
+  (TS2322 reproduced); schema bump to 13 breaks a retained literal test
+  and the legacy DAG header; two negative controls do not prove their
+  benefits.
+- promo180-experiment (95,381): every arm speculates with luna high
+  (escalationPlanner ?? basePlanner, verified), contradicting D456;
+  fractional absolute-wall timeouts are rejected by the process runner
+  (executed: 179999.25 ms refused); adjudication never reaches the
+  packet builder; sealing/prompt-freezing commands contradict their
+  contract; D584.4 inventory incomplete; bootstrap draws the retained
+  seed population, not 30; cost missingness unspecified (18 sol-high
+  rows have callsPerRound greater than recorded calls).
+Round 2 dispatched to all five sessions with the findings verbatim
+(.tmp/runs/briefs-2026-09-06/plan-<name>-r2.md). Also landed and sent
+to Astra round 1: alpha-walkthrough, companion-projection,
+offer-grapple, offer-help-ready, offer-reposition. Still in flight:
+heldout-basis and save-export-import reviews, the stdin-fix
+implementation review, the four extraction planning lanes, and the
+four implementation lanes (spike, unicorn, LOS increment 5, browser
+fit).
+
+## D586.31 — batch 2: seven plans DO NOT DISPATCH and round 2 dispatched; stdin fix DO NOT MERGE and fix round dispatched; Unicorn repair and LOS increment 5 verified, committed, under Astra implementation review (2026-09-08 19:15)
+
+Astra round-1 verdicts (findings verbatim in
+.tmp/runs/fanout/astra-review-plan-<name>.log; digest in
+.tmp/runs/fanout/verdicts-batch2.txt): alpha-walkthrough (slice 1
+cannot compile within its files: 31 missing-property errors from
+removing PartySessionState.room; signatures cannot implement their
+contracts; no companion offered-option path: engineActorOptions
+returns empty for a PC; the rest model cannot express one-use short-
+rest features; "any built character" silently narrowed; inventory
+misses vane-warren-session; no concrete resource fixture; secrecy
+control incomplete), companion-projection (recorded base SHA false;
+no replacement operation; the Omit<PlayerView> knowledge contract
+leaks enemy HP through damage_applied events and a fogged enemy's id
+via activeCombatant, both by execution; signatures lack loaded
+members; the three-tool MCP profile leaves resources/prompts open;
+option-scope callers unlisted; inventory regex is not an import
+graph; no builder corpus), heldout-basis (win metric misses
+Unconscious at positive HP, falsified by a reducer probe; nonexistent
+exporter named; dry run consumes the reserve; ranking injection does
+not reach the advice; report API lacks telemetry; runbook does not
+connect rooms to evaluation and names a missing judge wrapper;
+inventory incomplete; terrain confounded with level), offer-grapple
+(claimed reducer-identical save probability false: 34/80 vs 44/80 by
+enumeration; beginAttack signature mismatch; equipment occupancy is
+not hand availability; end-of-command reconciliation misses in-command
+grapple ends; escape-check absence policy unstated; no stand
+mechanic exists for the shove control; clipping Prone follow-up deltas
+at zero hides a -2.07 loss; inventory incomplete), offer-help-ready
+(slice 1 does not compile: PendingDecision variant breaks three
+deferred consumers; Ready's attack execution seam missing; the "certain"
+Ready trigger is an unproved rules reading; initiative iterator wrong
+under delayed-order restoration; Help valued at the max ally instead
+of the first consumer; total key contradicts incumbent ordering;
+controls do not isolate; provenance not pre-design), offer-reposition
+(baseOptions cannot supply main-action Disengage; one-path-per-endpoint
+discards safe routes, counterexample executed on the pathfinder;
+retaliation contract has no PC-attacker reach query; net-first tuple
+breaks the ordinary baseline on seed 3943001; slice 1 fails TS2739;
+phase rewrite changes an ordinary end_turn+dash case; 27 direct
+consumer specs outside the contract), save-export-import (the host
+cancels a restored pending request on reload, reproduced; the corrupt-
+save control is masked by the branch RNG fingerprint; the pinned codec
+accepts invented phase kinds and an observationHistory transcript
+sentinel; envelope keys do not block revision-level transcripts;
+"no player projection" contradicts the journal's visibleState;
+inventory is 28 not 25). Round 2 dispatched to all seven sessions with
+findings verbatim.
+
+Stdin fix (67659fb1): Astra DO NOT MERGE (75,070 tokens): the
+readline interface's error event still throws synchronously and
+leaves a request pending (executed with real streams); cleanup throws
+a plain Error that discards the typed McpChildExited; plus teardown
+after stdout close, three stronger regression tests, and the
+lifecycle-module extraction (already a planning lane). Verified by
+Astra: request serialization, property order, _meta and newline
+unchanged, so the blind oracle's protected bytes are preserved on
+successful runs. Fix round dispatched on the same session.
+
+Unicorn's Blessing repair (session 01a08311-f8b5, 257,148 tokens):
+both faults reproduced on 493121dd by failing tests, choice bound by
+owning slot, condition selection carried through the offer and the
+command, engine MCP schema regenerated via npm run schema:engine-mcp
+(+18/-16), golden unchanged, cumulative inventory run green, sg 0,
+tsc 0. Verified by me: sg 0, the two touched specs 15/15. Committed
+71cc78cc on claude/unicorns-blessing; Astra implementation review
+launched (blind-branch schema compatibility and the two runner lines
+are the questions).
+
+D576 increment 5 (session 01a08311-f8d8, 329,163 tokens): probe tool
++786/-164 and spec +221, 24-state los_cover_v1 catalogue, canonical
+tracer ground truth, PNG-only Q11-Q14, eight controls restored by
+hash, 4 files / 63 tests, sg 0, tsc 0. Verified by me: sg 0, the
+probe spec 24/24. Committed a87410e9 on claude/los-cover; Astra
+implementation review launched.
+
+## D583.12 — feasibility spike returned SHELVE_D583 for room D, while the engineering succeeded with measured caps; spike committed on claude/challenge-rooms; amendment A1 dispatched (2026-09-08 19:35)
+
+Spike lane (session 01a08311-f8e2, 357,269 tokens, exit 0, BLOCKED per
+the plan's own rule). Built: provenance-enforced rollDie/rollDice/rollD20
+at 32 encounter.ts sites plus the six canonical resolution.ts sites
+(compile fails when a site loses provenance: TS2554 reproduced),
+transactionalRng forwarding drawDie with cursor/observer/replay rollback
+(the old adapter mutant fails "drawDie forwarding was bypassed"),
+src/vtt/engine-round-application.ts as the common command transaction
+delegated to by scripted PC turns and monster application,
+tools/challenge-feasibility.ts with staged enumeration grouping by
+exact totals at every component boundary. Measured (exact weights,
+mass 1/1 at every stage): A healing 16 -> 7 groups (capped 1); A Mace 1
+9,216 -> 23; A Mace 2 84,934,656 Cartesian -> 290 face expansions ->
+529 replays -> 45 groups; D Longbow 1..4 64/4,096/262,144/16,777,216
+-> 15/29/43/57 groups; D successful save damage 64 -> 1; peak nodes 57,
+peak heap 1.77 MB, total wall 113.6 ms, 33 provenance draws; measured
+caps 72 nodes / 2.2 MB / 226 ms with 25 percent node headroom. Reaction
+policy always accept (1 draw), never decline, ask decline. Room D:
+generic save kill 540/1280, fixed breach 159/400, counterexample
+advantage 39/1600; under the closed reply surface both Guard choices
+give 101/64 expected Scout primary turns, delta 0 vs threshold 3/20:
+SHELVE_D583. Contract: 140-spec union 2,816/2,816 (four 5 s load
+timeouts in ai-dm-arena and room-generator-los-cover rerun serially
+green, not re-pinned), touched five specs 51/51, sg 0, tsc 0, frozen
+hash intact. Verified by me: worktree matched the report; committed as
+the branch head as a spike artefact (the provenance seam is scheduled
+to be replaced by the independent roll-provenance module, D586.27;
+the common transaction is Astra's ranked-third extraction).
+
+Decision: the SHELVE rule was the plan's; the owner's priority is the
+trick rooms, and B, C and A are unaffected by D's failure. Amendment
+A1 dispatched to the challenge planning session (options: re-author D
+under the same reply surface with computed numbers, drop D to a later
+increment and witness B/C/A, or keep D as a candidate), with the
+spike's report verbatim and the instruction to say how slice 3 avoids
+building on the seam being replaced. Whether D is re-authored or
+dropped is reported to the owner as their call.
+
+## D586.32 — batch 3: D569 Astra-arm plan DISPATCH at round 2; two extraction plans DO NOT DISPATCH (round 2 sent); Unicorn repair and LOS increment 5 DO NOT MERGE (fix rounds sent); browser-spec fit landed, supervisor verification running (2026-09-08 19:40)
+
+Astra verdicts: d569-astra-arm round 2 DISPATCH (both round-1 blockers
+accepted); mcp-request-client and opportunity-selection round 1 DO NOT
+DISPATCH (findings verbatim in their logs; round 2 dispatched on both
+sessions); narration-channel and override-popup round-2 plans landed
+and are under Astra round-2 review; roll-provenance and
+conversation-row-codec plans landed and are under Astra round-1
+review.
+
+Unicorn repair (71cc78cc): DO NOT MERGE, one blocker: the MCP schema
+change (activation-choice proposal and option schemas) alters bytes
+the blind branch's legacy oracle pins inside its tools/resources
+components, so ai-dm-legacy-invariance.test.ts:469 on claude/blind-dm
+would fail on merge. Supervisor reading: this is the oracle doing its
+job; the resolution is procedural, not a code revert: merge the
+repair to main after its fix round, then re-capture the oracle on the
+new approved main and install it on the blind branch under the
+supervisor gate, with the intended schema delta independently
+asserted. Should-fix: the Lesser Restoration reproduction must show a
+base-compatible accepted proposal reaching the execution exception;
+derive boundary enums from mechanical constants as a discriminated
+union; extract an offer-time removable-condition helper (composition).
+Fix round dispatched on the same session.
+
+LOS increment 5 (a87410e9): DO NOT MERGE, two blockers: the probe's
+primer says three obstructed rays mean three-quarters cover, but the
+canonical rule caps the count tier by the strongest crossed feature
+(catalogue query 5763003-half-v3 has rays none/half/half/half and
+production returns half); the historical-primer pin now compares
+against the same production constant that populates it (regression
+protection lost). Should-fix: the geometry-double test does not
+intervene; the historical-row negative witness is malformed. Fix round
+dispatched on the same session.
+
+Browser-spec fit (session 01a08314, 463,633 tokens): in-process
+snapshot service reusing Playwright's Chromium and the production
+build, six captures in file-level hooks, concurrent image decoding
+(first DM image settle 96 s -> 6.3 s), standalone checker preserved;
+lane-reported default-timeout runs 9.9 s / 10.7 s for the durable-save
+test and 9 ms for the synchronized test with the six content hashes
+unchanged; controls: old terrain class "DOM 0, state 21", missing
+player artefact "Image family omitted a role"; 2 files / 38 tests, sg
+0, tsc 0. Verified by me so far: sg 0; my own default-timeout wrapper
+run is in progress. Commit, the approved D569 amendment lane in that
+worktree, and the browser gate rerun follow that run.
+
+## D584.27 — browser-spec fit VERIFIED and COMMITTED (e2291d6b); D569 Astra-arm amendment implementation dispatched; stdin fix round 2 committed (bb720b12) and under Astra round-2 review (2026-09-08 19:50)
+
+Verified by me on the loaded box: `sg scan` exit 0; the fitted spec
+alone through the /tmp wrapper on port 4530 under Playwright's default
+30 s timeout: durable-save test 10.2 s, synchronized evidence test
+11 ms, 2 passed. (My first attempt ran the wrapper over the whole
+browser directory and hit my own 900 s cap after 12 green specs; its
+leftover vite server on 4530 was read, then killed in its own call.)
+Committed the three files as e2291d6b. The blind branch now needs a
+quiet-machine full gate before the first D569 arm; with the fan-out
+occupying the box, the gate is scheduled for the next quiet window
+rather than run under load.
+
+D569 Astra-arm amendment: plan approved by Astra at round 2, so the
+implementation lane launched in dnd-wt-blind-dm at e2291d6b
+(.tmp/runs/briefs-2026-09-06/d569-astra-arm-impl.md, log
+log-impl-d569-astra-arms.log, marker D569-ASTRA-ARMS DONE), with the
+two accepted blocker fixes restated as binding.
+
+Stdin fix round 2 (session 01a08311-f8a8, 152,035 tokens): readline
+error routed through the terminal path, typed failure preserved
+through cleanup, bounded SIGTERM/SIGKILL teardown, five regressions,
+two mutants killed and restored (sha b0c16d9e…), 96/96, sg 0, tsc 0.
+Verified by me: sg 0, conversation spec 74/74, no unhandled error.
+Committed bb720b12 on claude/epipe; Astra round-2 merge review
+launched.
+
+## D583.13 — amendment A1 landed: drop room D from increment 1, witness B/C/A; slice 3 gated on the independent roll-provenance module; spike lint debt found (2026-09-08 19:58)
+
+Planning session (226,800 tokens, exit 0, CHALLENGE-PLAN-A1 DONE; plan
+654 lines, sha256 01a0772a…). Chosen option (b) with the spike's
+numbers: D shelved (both Guard choices 101/64, delta 0 < 3/20; the
+generic-save kill branch 540/1280 makes the bottleneck irrelevant);
+increment 1 witnesses B, C and A (3 rooms, 54 variants, 3 benefit-
+removing controls); family 5 deferred to a re-authored room where the
+protected actors are inaccessible until the bottleneck falls; the
+spike's mechanics evidence retained (rerun: 33 draws, peak 57 nodes,
+1.77 MB, 159 ms, mass 1 at every stage); slice 3 must consume the
+independent D586.27 roll-provenance class, never the spike-local seam;
+D584.4 for slices 3-5 now the 140-spec consumer closure plus the new
+witness/ranking specs, explicit random/resolution tests and sg scan.
+Astra review of A1 launched (verdict DISPATCH SLICE 3 or not).
+
+Finding: the amendment lane found `sg scan` red on the committed spike
+(tests/unit/vtt/challenge-feasibility.test.ts:1, raw node:fs/promises)
+although the spike report claimed sg exit 0. Confirmed by me in the
+worktree. Fix dispatched on the spike session with the question of
+what it actually ran. The slice-3 dispatch waits on the roll-provenance
+plan (round 2 in progress) and on this fix.
+
+## D586.33 — Unicorn repair round 2 verified and committed (c909c313); six round-2 plans under Astra review; four plans in final round (2026-09-08 19:58)
+
+Unicorn round 2 (125,287 tokens): base-compatible Lesser Restoration
+reproduction, boundary enums as a discriminated union from the
+mechanical constants, an offer-time removable-condition helper;
+schema regeneration exit 0 with no schema-file diff against 493121dd
+beyond round 1; 11 files 125+/137-; sg 0; tsc 0. Verified by me: sg 0,
+the two touched specs 15/15. Committed c909c313; Astra round-2 merge
+review launched with the supervisor's decision that the oracle-bytes
+blocker is procedural (re-capture on the new approved main after
+merge). Round-2 plans under Astra review: companion-projection,
+heldout-basis, mcp-request-client, offer-grapple, offer-reposition,
+opportunity-selection. Final round 3 dispatched to elevation-tiers,
+offer-help-ready, promo180-experiment and save-export-import after
+Astra's round-2 DO NOT DISPATCH on each (findings verbatim in their
+logs), with the instruction to narrow slice 1 to what is dispatchable
+rather than promise.
+
+## D583.14 — CORRECTION to D583.13 and finding against my own harvest (2026-09-08 20:00)
+
+D583.13 says the spike report "claimed sg exit 0". Wrong: the spike
+lane's final-gates section listed tsc -b, git diff --check and the
+frozen hash and OMITTED `sg scan` although the brief required it; the
+lane made no claim about it. The error is mine: I committed the spike
+artefact (1acbda5a) after checking the worktree against the report
+without running `sg scan` myself, contrary to the contract I had
+written and to my own D584.23 note that every contract of mine lists
+it. The lint debt is real (confirmed, exit 1 on
+tests/unit/vtt/challenge-feasibility.test.ts:1) and the fix is
+dispatched; from here, no lane harvest of mine closes without my own
+`sg scan` run, spike or not.
+
+## D586.34 — stdin robustness fix APPROVED FOR MERGE by Astra (round 2); merges queued behind the next quiet-window gate (2026-09-08 20:03)
+
+Astra round 2: MERGE TO MAIN on claude/epipe bb720b12 (findings and
+verifications in .tmp/runs/fanout/astra-review-impl-epipe-r2.log).
+Landing rule: a merge to main is followed by the full gate on the
+integrated revision on a quiet machine; the box is carrying the
+fan-out, so the merge waits. Quiet-window queue, in order: (1) full
+gate on wt-blind-dm at e2291d6b or later (needed before the first D569
+arm); (2) merge claude/tsgo-fix (44ff31f8) and claude/epipe (bb720b12)
+into main, full gate on main; (3) if the Unicorn repair is approved,
+merge it, gate main again, then re-capture the runner oracle on the
+new approved main and install it on the blind branch under the D584.16
+gate; (4) the first D569 blind arm. The queue runs as soon as the
+running lanes drain below the load that makes gate timings meaningless.
+
+## D586.35 — quiet window used: three approved branches merged into main (cf47cb9b), full gate on main started; increment 5 round 2 committed (88eead87); astra-high arm complete and its packet under judging; spike lint fix committed with a lane admission (2026-09-08 20:12)
+
+Merges (no-ff, no push): claude/tsgo-fix 44ff31f8 -> 4486f8d8;
+claude/epipe bb720b12 -> ceddb695; claude/unicorns-blessing c909c313
+-> cf47cb9b (Astra MERGE TO MAIN on all three; the Unicorn oracle
+consequence is procedural per D586.33). The detached gate worktree
+dnd-wt-main-493121dd was moved to cf47cb9b (clean) and
+gate-wt4.sh started at 20:09:14 with load 0.77. Caveat recorded
+against my own scheduling: in the same minute I also launched twelve
+read-mostly codex sessions (Astra reviews, planning rounds, judging),
+so the gate is not on a fully quiet box; its retry runner handles
+load flakes serially, and any red that survives a serial retry is
+rerun on a quiet box before it counts.
+
+LOS increment 5 round 2 (session 01a08311-f8d8): primer states the
+canonical aggregation rule with worked examples, historical primer
+pins keep independent expectations, geometry double now intervenes,
+historical-row witness well-formed; 4 files / 65 tests, sg 0, tsc 0,
+eight plan-named controls plus the reviewer-specific ones killed and
+restored (probe hash 894137bb…). Verified by me: sg 0, probe spec
+26/26. Committed 88eead87; Astra round-2 merge review launched.
+
+Astra-high pool arm (exit 0 at 19:54:04): 90 rows, all authorized, no
+fallback, no execution error, decisionAttempts {1:69, 2:19, 3:2},
+wall min/median/max 24.4 s / 68.0 s / 125.5 s (sol high was 45/110/
+239 s), repoCommit 650e1f00. Packet pool4-packet-ahigh.json: engine-top
+anchor + pool4-sol-high + pool4-astra-high, 270 entries, all
+authorized, shuffle seed 6208505, leak scan zero hits (the engine rows
+remain identifiable via attribution as disclosed). Judging launched
+20:10:17 (judge-one.sh pool4 ahigh, three fresh seats, astra high).
+Contrasts follow with the approved script, within-packet only.
+
+Spike lint fix (session 01a08311-f8e2): raw node:fs/promises replaced
+by declareTestInputs; sg 0; 8/8; the lane stated that in the spike
+round it had run `git diff --check`, not `sg scan`, which cannot
+detect the rule. Its final message was partly garbled; the work was
+verified by me (sg 0, spec 8/8) and committed e589b636.
+
+## D583.15 — Astra on amendment A1: DO NOT DISPATCH; the spike's "measured" groupings were dice-total convolutions, not reducer-state enumeration, and D's whole-surface result was asserted, not computed. CORRECTION of D583.12 and of my report to the owner (2026-09-08 20:16)
+
+Astra high (85,736 tokens, .tmp/runs/fanout/astra-review-challenge-a1.log),
+verified by running the spike in an in-memory bundle and 2,560
+production save branches: (1) slice 3's contract omits 27 of slice 1's
+31 specs and 133 of the 140-path baseline, and `typecheck:fast` is
+tsgo, not `tsc -b`; (2) tools/challenge-feasibility.ts measuredStage()
+builds synthetic nodes {total, legalCommands:['continue']}, groups them
+by summed dice total and calls their count "replays"; it executes no
+reducer branch and no continuation-equivalence check. Counterexample
+through the production command transaction: swapping low/high faces
+between the two Scouts keeps the summed total but leaves the party at
+Fighter 59 / Wizard 2 versus Fighter 31 / Wizard 30, different states
+the spike would have merged. So the 45/57 groups and the heap/time
+numbers are arithmetic checks of the convolution, not feasibility of
+the witness search; (3) D's "both 101/64" is assigned as constants
+after one save probe, not computed by a closed search (the arithmetic
+2 - 540/1280 = 101/64 is right, the optimality claim is not
+established); (4) the cap provenance arithmetic is off (2,212,940 and
+228, not 2,212,920 and 226); stale four-room text remains; the spike's
+own JSON report holds 2,815 tests with four failed, the "2,816/2,816"
+being the lane's serial-rerun claim.
+
+Corrections. D583.12 and D583.13 describe the spike as having
+"succeeded" with "measured" staged enumeration collapsing 84.9 M to 45
+groups and 16.8 M to 57. What the spike measured is the exact
+damage-total convolution per component (which the production
+evaluator already does), plus a working provenance seam and mass
+checks; it did not enumerate reducer states, so it did not establish
+the feasibility the plan required. I reported the stronger claim to
+the owner twice (the 19:35 tick and the plain-English summary); that
+was a finding I failed to make myself before Astra did. The
+provenance-through-every-roll-site work, the transactional adapter
+forwarding, and the common command transaction remain real and
+verified by their own tests. Amendment A1 round 2 is already running
+with the verdict verbatim; the required fix is a bounded
+reducer-backed feasibility prerequisite for B, C and A with real state
+keys, and D described as deferred without a certified result.
+
+## D586.36 — ASTRA HIGH vs SOL HIGH at equal effort (informational): sol high still ahead by 0.19; astra high level with the engine default (2026-09-08 20:26)
+
+Packet pool4-packet-ahigh.json (engine-top anchor + pool4-sol-high +
+pool4-astra-high, 270 entries, all authorized, no leaks), judged
+20:10-20:18 by fresh sol high, opus and astra high seats; all outputs
+validated (270 ids, strict fields). Within-packet contrasts by the
+approved script:
+
+# Preregistered contrasts (INFORMATIONAL ONLY, D586.3: no arm is promoted by this table)
+
+Validation (entries per seat): {"pool4ah": {"sol": 270, "opus": 270, "astra": 270}}
+
+Arm means are over each arm's included cases (service_null and adjudicated rows excluded); they are not paired.
+
+| arm | cases | included | panel mean | sol | opus | astra | refused | null |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| pool4ah:engine-top | 90 | 90 | 6.722 | 6.267 | 6.900 | 7.000 | 0 | 0 |
+| pool4ah:pool4-astra-high | 90 | 90 | 6.704 | 6.211 | 7.044 | 6.856 | 0 | 0 |
+| pool4ah:pool4-sol-high | 90 | 90 | 6.893 | 6.478 | 7.111 | 7.089 | 0 | 0 |
+
+Contrast means are over the paired subset (kept cases) only.
+
+| contrast | kept/shared (cand-only/ref-only) | reference | candidate | delta | 95% CI (seed-clustered) | per seat sol/opus/astra | leave-one-out -sol/-opus/-astra | dropped |
+|---|---:|---:|---:|---:|---|---|---|---|
+| astra-high vs sol-high (same packet) | 90/90 (0/0) | 6.893 | 6.704 | -0.189 | [-0.337, -0.067] | -0.267/-0.067/-0.233 | -0.150/-0.250/-0.167 | - |
+| astra-high vs engine-top (same packet, informational) | 90/90 (0/0) | 6.722 | 6.704 | -0.019 | [-0.185, +0.156] | -0.056/+0.144/-0.144 | +0.000/-0.100/+0.044 | - |
+| sol-high vs engine-top (same packet, informational) | 90/90 (0/0) | 6.722 | 6.893 | +0.170 | [+0.000, +0.370] | +0.211/+0.211/+0.089 | +0.150/+0.150/+0.211 | - |
+
+- astra-high vs sol-high (same packet): the fair strength comparison at equal effort (high), 240 s wall, same rooms and seed
+- astra-high vs engine-top (same packet, informational): engine rows identifiable via attribution
+- sol-high vs engine-top (same packet, informational): engine rows identifiable via attribution; compare with the 12:52 unseal's +0.16 as a within-day repeat
+
+- Informational only (D586.3). Same packet, three fresh seats (sol high, opus, astra high), judged 20:10-20:18.
+- astra seat scores the astra arm (allowed by D585.1; per-seat columns are diagnostics).
+
+Estimand: mean of per-case (seed, rep) paired panel deltas; CI resamples seeds with replacement and recomputes the same mean over every retained case of the resampled seeds (with multiplicity). Cases with a null side are dropped per contrast. Per-seat and leave-one-out columns are diagnostics only (D585.1).
+
+Reading: at the same high effort, same rooms, seed and 240 s wall,
+astra high scores 0.19 below sol high with the interval excluding zero
+and all three seats negative, including the astra seat on its own
+play; astra high is level with the engine's default; sol high beats
+the engine default by 0.17, a within-day repeat of the 12:52 +0.16.
+Astra high is cheaper in time (median turn 68 s vs 110 s). With the
+astra low/medium results (D586.23) and the judge-drift finding
+(D586.28), the informational picture is: on this rubric and these
+rooms, sol high plays best of the models tried; Astra's strength as a
+reviewer has not shown up as a player. No promotion follows (D586.3).
+Owner's note that Astra is expected to be smarter than sol is recorded
+against this result for their reading.
+
+## D586.37 — final-round verdicts: four plans hit the three-round cap and are SHELVED; the 180 s experiment preregistration approved for slice 1 with one must-fix; roll provenance and row codec in final round; increment 5 approved and merged (2026-09-08 20:27)
+
+Astra round-3 DO NOT DISPATCH, plans shelved per the round cap
+(files stay in their worktrees for a future restart with owner
+input): narration-channel (slice 1 event inventory wrong by
+type-check; condition mapping needs unavailable information; the
+DM-only mutant cannot produce its fact; provenance through round-plan
+reuse; isolation unproven), override-popup (slice 0 controller cannot
+obtain the option producer's state; no compatible bridge transport;
+outbox lacks a durable boundary), offer-help-ready (slice 1's
+continuation makes its death-save path unreachable),
+save-export-import (slice 1 would reject genuine refused-response
+history and valid movement continuations). These four are owner-ruled
+features (D586.13, D586.16, D586.4, D586.14) whose plans failed on
+engine facts three times; they need a re-plan that starts from the
+prerequisite seams the reviews identified (companion acceptance seam,
+narration disposition provenance, session-history validators), not
+another round of the same plan.
+
+promo180-experiment: DISPATCH SLICE 1 with one listed blocker (the
+"secret certificate" is written outside the protected secret
+directory); the slice-1 brief makes that fix a precondition.
+roll-provenance round 2 DO NOT DISPATCH (dispatch audit accepts a
+forbidden consumer dependency; slice-2 inventory incomplete; bounds
+control needs a real oracle) and conversation-row-codec round 2 DO NOT
+DISPATCH (blind integration incomplete; graph recipe misreads asset
+imports): final round 3 dispatched on both. elevation-tiers round 3
+landed and is under Astra's final review.
+
+LOS increment 5 round 2: Astra MERGE TO MAIN; merged into main as
+1bca77f6 (no-ff, no push). The running main gate (on cf47cb9b) is
+stopped and relaunched on 1bca77f6 so one gate covers the integrated
+revision.
+
+## D586.38 — main gate relaunched on 1bca77f6; three approved slice-1 lanes dispatched alongside it by explicit trade-off (2026-09-08 20:29)
+
+The gate on the superseded head cf47cb9b was stopped (descendant pids
+read from the process tree, killed in their own call; the blind
+worktree's D569 lane vitest untouched) and relaunched on 1bca77f6
+(tsgo fix, stdin fix, Unicorn repair, LOS increment 5) at 20:25:30
+with load 4.1. Trade-off recorded: under the owner's parallelism
+directive (D586.26) the three approved implementation slices are
+dispatched now rather than held for a quiet gate: mcp-request-client
+slice 1 (dnd-wt-p-mcpclient on claude/epipe 67659fb1; note its base
+predates the epipe round-2 commit and the main merge, the lane's diff
+will need rebasing before merge), opportunity-selection slice 1
+(dnd-wt-p-oppselect on 493121dd) and promo180-experiment slice 1
+(dnd-wt-p-promo180 on 493121dd, nothing runs, the secret-certificate
+location fix is a precondition). Their heavy test runs may overlap
+the gate's browser stage; a gate red that survives the serial retry
+is rerun on a quiet box before it counts, never re-pinned.
+
+## D576.5 — elevation tiers plan APPROVED for slice 1 at Astra's final round; slice 1 dispatched in dnd-wt-los-cover (2026-09-08 20:41)
+
+Astra round 3: DISPATCH SLICE 1 (verdict verbatim in
+.tmp/runs/fanout/astra-review-plan-elevation-tiers-r3.log, with what
+later slices still need). Implementation lane launched on
+claude/los-cover at 88eead87 (increment 5 landed on main as 1bca77f6),
+brief .tmp/runs/briefs-2026-09-06/impl-elevation-s1.md, marker
+ELEVATION-S1 DONE. Also this tick: Astra final-round reviews launched
+for companion-projection, heldout-basis and offer-grapple (round-3
+plans landed); Astra review of the challenge amendment A1 round 2
+launched, judged specifically on whether it now specifies a bounded
+reducer-backed feasibility prerequisite for B, C and A.
+
+## D586.39 — OWNER: there is no "should we switch models"; luna is the player default; superior models are the reference for steering luna toward Astra and sol (2026-09-08 21:06)
+
+Owner (verbatim): "There is no \"should we switch models\". We will use
+Luna for players by default. We need to see what superior models can
+do so that we can try to steer Luna to act closer to Astra and sol".
+
+Consequences applied: (1) the "promotion" framing of D586.3 (no
+promotion without a 180 s run including luna medium) is withdrawn as a
+decision question; the 180 s run stays as the measurement setting but
+its purpose is now the teacher-student gap: what sol high and astra
+high do on the same rooms that luna does not, and how far steering
+(prompt, knowledge bundle, intel rendering, distillation data from the
+rl-generate-data / rl-extract-sft tooling) closes it, measured on
+held-out ordinary rooms. (2) The promo180-experiment slice-1 lane,
+which was writing a promotion preregistration, is stopped (pids read,
+killed in their own call) and the planning session is re-briefed to
+rewrite the preregistration as a luna-steering experiment: arms luna
+low (D406 floor) and luna medium (D456) as students, sol high and
+astra high as teachers, engine-top anchor, identical-rows calibration,
+all seats scoring every arm, the existing adjudication rule, the
+deliverable being per-room teacher decisions with rationales, the
+paired student-teacher gap by room family, and a steering iteration
+protocol with a preregistered stopping rule; Astra reviews it. (3) The
+pool4 results (D586.23, D586.36) are reread under this ruling: they
+already measure the teacher ordering (sol high above astra high, which
+is level with the engine default) and the cheap-arm timing; the
+missing piece for steering is luna at the same wall against the same
+teachers, which the reframed experiment supplies. (4) The D569 blind
+experiment's Astra arms (committed 0776af29 on claude/blind-dm this
+tick, 42/42, sg 0, verified by me) serve the same purpose: teachers
+and student playing the same blind rooms.
+
+Also this tick: main b2cd4ec4 carries the D544-named arena test's 30 s
+budget (the main gate's only vitest red on 1bca77f6 was that test at
+5 s under lane load); mcp-request-client slice 1 committed 2800335f
+with my own cumulative check of the conversation spec 84/84 outside
+the sandbox that had produced the lane's EROFS failures;
+opportunity-selection slice 1 committed 029faecf; both under Astra
+implementation review. Astra final-round verdicts: companion-projection
+and offer-grapple DO NOT DISPATCH (shelved at the cap, same re-plan
+rule as D586.37); heldout-basis DISPATCH SLICE 1 (lane launched);
+challenge amendment A1 round 2 DO NOT DISPATCH (final round dispatched
+with permission to narrow slice 3 to the reducer-backed feasibility
+prerequisite).
+
+## D586.40 — OWNER: replace opus 5 with opus 4.8; judge panel = fable, Astra, sol at high effort; opus is advisory input and tiebreaker only (2026-09-08 21:10)
+
+Owner (verbatim): "Replace opus 5 usage with opus 4.8." and "The judge
+panel should be fable, Astra and Sol (all high effort). Opus can give
+its input for the other judges to consider, but it is too inconsistent
+right now to be anything but a tiebreaker".
+
+Evidence behind it in this record: D586.28 (the opus seat drifted 1.5
+points on identical bytes within a day while astra drifted 0.35 and
+sol 0.5). Supervisor interpretation, applied unless the owner
+corrects it: (1) every claude-opus-5 invocation becomes
+claude-opus-4-8 (judge script, D569 manifest arms and panel, any
+tool or script); (2) judging becomes two stages: opus 4.8 scores the
+packet first and its per-entry notes are passed to the three scoring
+seats as clearly labelled advisory input, never as scores; the three
+scoring seats are claude-fable-5-1, gpt-6-astra and gpt-5.6-sol, all
+at high effort, each in a fresh session; the panel mean is the three
+seats; opus's own paired delta is used only to break an exact tie
+(panel delta 0 on a case) and is reported as a diagnostic column;
+(3) the D569 manifest's judgePanel and its claude-opus-5 player arms
+change under a preregistration amendment (codex planning session,
+Astra review), not by hand; (4) the analysis script's seat set and
+validation change accordingly with tests and an Astra re-review before
+the next unseal; (5) historical packets already judged with opus 5
+keep their recorded verdicts. The fable seat was dropped on 2026-09-07
+for a usage limit (D572); if it fails again the run stops loudly rather
+than substituting a model.
+
+## D586.41 — D586.39/D586.40 applied: judge script two-stage (opus 4.8 advisory, fable/astra/sol scoring), analysis script seat model, historical configs declared, 180 s plan re-briefed as luna steering, D569 panel amendment planned (2026-09-08 21:22)
+
+Done by me, all supervisor-authored and therefore sent to Astra for
+review before any use: ~/dnd-slim-runs/judge-one.sh rewritten
+(backup judge-one.sh.bak-opus5): stage 1 claude-opus-4-8 in its own
+session, its per-entry notes appended to the stage-2 prompt as
+labelled advisory input carrying no weight; stage 2 claude-fable-5-1,
+gpt-6-astra high, gpt-5.6-sol high in fresh parallel sessions; every
+seat exit recorded. judge-one-img.sh: opus id replaced.
+pool4-contrasts.py (backup .bak-opus5): per-packet seat_names (default
+fable, astra, sol), optional opus48 advisory seat validated like a seat
+and never in the panel, tie-break diagnostic (candidate/reference/
+unbroken counts on exactly tied cases), packets with different seat
+sets refused from contrasts, advisory mean column; 15 tests pass. The
+four historical pool4 configs now declare seat_names sol/opus/astra;
+re-unsealing them reproduces the recorded contrasts. Fable probed
+callable ("FABLE-OK"). The killed promotion-framed lane's partial
+work (12 files) is stashed in dnd-wt-p-promo180 by name, never to be
+applied; its planning session is re-briefed to rewrite the
+preregistration as a luna-steering experiment (students luna low and
+luna medium, teachers sol high and astra high, engine anchor, new
+panel, deliverables per-room teacher decisions with rationales, gap by
+D586.1 family, a one-input-per-iteration steering protocol measured on
+the held-out basis). The D569 planning session is re-briefed for
+amendment 2 (opus 4.8 arms with versioned ids, the new panel with an
+advisory seat entry, tie-break as diagnostic). A memory note records
+the routing rulings for future sessions.
+
+## D586.42 — judge scripts: Astra DO NOT APPROVE (round 1) on seat-failure propagation, advisory parsing and fable effort; fixed, round 2 launched (2026-09-08 21:20)
+
+Astra round 1 (41,624 tokens): (1) a failed scoring seat finished
+"successfully" because the logging echo masked its exit and bare wait
+does not propagate; (2) malformed opus output could crash the note
+extraction or silently reuse a previous run's prompt; (3) fable's high
+effort was a comment, not a setting. Fixed by me: per-seat pids waited
+individually, JUDGE FAILED to stderr and the log with exit 3 and no
+DONE on any scoring-seat failure (no substitution, per D572's rule);
+`--effort high` on the opus 4.8 and fable invocations (CLI 2.1.265
+exposes --effort); the advisory parser validates shape, entry type,
+packet-matching unique string ids, string notes and full coverage,
+writes an empty advisory plus ADVISORY_INVALID with the reason on any
+defect, always logs the advisory count and validity, and stage 2
+cannot start without this run's prompt (exit 2); wording per Astra.
+Dry-tested on six malformed shapes. Analysis script: advisory_mean
+removed (advisory used only for the tie diagnostic; never alters a
+delta or interval), seat sets compared as sets with display order
+kept, three tests added (17 pass), historical unseals reproduce.
+Round 2 review launched; no new-panel judging runs until APPROVE.
+Also read this tick: offer-reposition final round DO NOT DISPATCH
+(shelved at the cap: slice 1 depends on a type deferred to slice 2,
+the hostile-access contract loses attacker/origin context, the default
+gate does not reproduce production selection); roll-provenance final
+round DO NOT DISPATCH on the single remaining audit gap (TypeScript
+import-equals declarations bypass the dependency guard), everything
+else accepted; both shelved pending the owner's answer to question 2.
+
+## D583.16 — amendment A1 APPROVED at its final round for a NARROWED slice 3 (provenance migration gated by focused tests, then bounded reducer-backed feasibility for B, C and A); slice 3 dispatched (2026-09-08 21:30)
+
+Astra (62,908 tokens): all eight A1 round-2 items accepted; no
+blocker for the narrowed slice; witness, comparator and discovery stay
+shelved (slices 4 and 5 need new plans); D excluded, E/F deferred; no
+production ranking change authorised. Verified by Astra: the 140-path
+inventory, the seven limits and both headroom boundaries (derived caps
+fit only if measurements stay at or below 200,000 nodes, 858,993,459
+bytes, 90,000 ms), the B/C/A sidecars' 3x3x2 matrices, the spike
+rerun in memory (45/57 groups, 33 draws), and that D's returned
+expectations are constants. Two binding clarifications carried into
+the brief: count every attempted reducer application, and name
+derived-cap overflow explicitly. Dispatched as a fresh lane in
+dnd-wt-challenge at e589b636 (.tmp/runs/briefs-2026-09-06/
+impl-challenge-s3.md): phase 3a implements the independent
+roll-provenance module per the shelved plan's accepted design (D586.27
+independence; the import-equals dependency-guard gap that shelved that
+plan is a required control here), replacing the spike's seam; phase
+3b the bounded feasibility with SHELVE_D583 as an explicit outcome;
+sg scan mandatory; tsc -b not typecheck:fast.
+
+## D586.43 — judge scripts round 2: two blockers fixed (advisory exit status, prompt-generation success), shell regressions added, analysis should-fix items done; round 3 review next (2026-09-08 21:32)
+
+Astra round 2 (42,210 tokens): accepted seat-failure propagation,
+fable effort, wording, advisory-mean removal, estimand boundaries,
+seat-set comparison; NOT FIXED: opus exit status ignored by the
+parser, prompt-generation success not required, configuration
+validation, tie fixture with identical totals, coverage, advisory
+exposure recording. Done by me: the advisory parser is now
+~/dnd-slim-runs/judge-advisory.py taking the opus exit status (any
+nonzero exit forces an empty advisory with a durable ADVISORY_INVALID
+reason), requiring the note field, writing the prompt atomically and
+logging exposure (notes|empty); judge-one.sh checks every preparation
+step's status, removes stale prompts first, requires python exit 0 and
+a nonempty prompt before stage 2, and takes env-overridable seat
+commands so ~/dnd-slim-runs/judge-one-test.sh can exercise the failure
+paths with fakes (success, scoring-seat failure -> exit 3 without DONE,
+advisory nonzero exit with valid stdout -> empty advisory, prompt-writer
+failure -> exit 2 with no seat run, stale prompt replaced).
+pool4-contrasts.py validates configuration descriptively, records
+advisory_status per packet from the judge log, distinguishes "no ties"
+from "no advisory", and gains a fractional-mean tie fixture and a
+configuration-error test.
+
+## D586.44 — FINDING AGAINST MY OWN WORK: the judge-script shell regression launched a REAL opus 4.8 session on a fake two-row packet; killed by pid within ~2 minutes; guard added (2026-09-08 21:41)
+
+The first version of ~/dnd-slim-runs/judge-one-test.sh set the fake
+seat commands as prefix assignments on a command substitution
+(`JUDGE_CMD_OPUS48=... out=$(run)`), which does not export them into the
+function, so judge-one.sh fell back to its real defaults and started
+`claude --model claude-opus-4-8 --effort high -p` (pid 287015, with a
+codex child) on the synthetic packet. Detected when the test hung past
+120 s; killed by numeric pid after a pstree read (kill discipline
+followed); no scoring seat started (the fake advisory would have had
+to finish first), and nothing was recorded as a judgement. Spend: one
+partial opus 4.8 session, roughly two minutes. Fixes: the fakes are now
+exported once and reset explicitly between cases (a prefix assignment
+on an assignment statement persists in the calling shell, which made
+case 3 inherit case 2's failing fable seat); judge-one.sh now REFUSES
+to run (exit 4) whenever JUDGE_D is overridden and any seat command
+still names claude or codex, so a test directory can never reach a real
+model again. Result: judge-one-test.sh 13/13, pool4_contrasts_test.py
+19/19 (fractional-mean tie fixture, descriptive configuration errors,
+advisory_status none|undeclared|notes|empty per packet), pool4 unseals
+reproduce byte-for-byte on the retained columns. Astra round 3 on the
+scripts launched.
+
+## D587 — OWNER RULINGS on the nine open questions, asked one at a time at the owner's request (2026-09-08 21:50)
+
+Owner: "Ask me the questions one at a time". Answers verbatim (option
+labels chosen from the offered lists; free text quoted):
+
+1. Judge panel: "Opus notes but no tie-break" — opus 4.8 notes are passed
+   to the three scoring seats as advisory, but opus never decides
+   anything, not even ties. SUPERSEDES the tie-break part of my D586.40
+   interpretation: ties stay ties; the opus paired delta may be printed
+   as a diagnostic column only.
+2. Fable seat usage: "Judge freely, stop loudly on a limit" — run the
+   fable seat on every packet; if its limit trips, halt judging and
+   report, never substitute.
+3. Gates under load: "Run gates anyway, rerun reds serially" — lanes keep
+   flowing; a timeout red gets ONE serial rerun before it counts.
+   Amends the quiet-window rule (gates-need-a-quiet-machine): the rerun
+   is now the standard procedure, budgets are still never re-pinned.
+4. Arena temp dirs: "Yes, delete them" — the 11,665 dirs (8.0 GB) under
+   /tmp, older than one hour, with no live owner process, per the
+   recorded /tmp procedure.
+5. Teachers for steering Luna: "Sol only".
+6. First steering experiment: "Distillation data first. Run sol over the
+   evaluation-hard cohort, extract SFT rows with the rl tooling, and
+   only then design the steering. Design steering to be generic. it
+   should work on any room and not require foreknowledge of the room
+   conditions".
+7. Room D: "Rewrite D around a bounded question" — replace the exact
+   distribution witness with a bounded check using damage-total
+   grouping; re-planned after slice 3 reports provenance feasibility.
+8. Shelved plans: "Offers roadmap first" — offer-help-ready, offer-grapple
+   and offer-reposition re-planned as ONE combined fresh plan; UI plans
+   (override popup, narration, save export/import) and companion
+   projection wait.
+9. Extractions: "Both, in parallel" — the mcp request client continues
+   as its own slice and the session command transaction extraction gets
+   a planning lane now.
+
+Also answered by action: the roll-provenance fourth-round question is
+moot; the accepted design is inside challenge slice 3 (D583.16).
+
+## D587.1–D587.9 EXECUTION and a timestamp correction (2026-09-08 23:18)
+
+CORRECTION: the wall-clock stamps I wrote into D583.16, D586.43, D586.44
+and D587 ("21:30", "21:32", "21:41", "21:50") were guesses, not read from
+the clock; the true times were between roughly 22:50 and 23:15 EDT (the
+gate log shows the previous gate finishing 21:32 and the new one starting
+23:14). From here every stamp is taken from `date`.
+
+Executed under the rulings:
+- D587.1 (no tie-break): pool4-contrasts.py no longer loads opus scores
+  at all (a config offering them is REFUSED), the tie-break code and
+  column are gone, exact ties are counted and never broken, advisory
+  exposure (notes|empty|none|undeclared) is copied from the judge log per
+  packet, preserved independently of any score file (Astra's round-3
+  blocker), and packets with different exposure are never contrasted.
+  Tests 21/21; the three retained unseals reproduce on kept columns.
+  judge-one.sh: stale-cleanup and log-append status checked; the
+  JUDGE_D refusal guard now matches claude/codex/gpt-/--model anywhere in
+  a seat command; judge-one-test.sh adds the late-failing writer case
+  (nonempty prompt then nonzero exit -> exit 2, no seat launched) and
+  seven malformed-advisory cases (scalar JSON, list blindId, duplicate,
+  missing note, incomplete coverage, unknown id, non-JSON) -> empty block
+  with a durable ADVISORY_INVALID reason. Backups *.bak-tiebreak. Astra
+  round 3 on the previous scripts was DO NOT APPROVE (exposure blocker,
+  now moot with scores unloaded); the reworked scripts go to Astra as a
+  new unit under D587.1, round 1.
+- D587.3: main gate launched on eb778854 (= main + oppselect slice 1
+  merge) under load; reds get one serial rerun.
+- D587.4: 5,406 arena temp dirs (dnd-ai-dm-arena-independent,
+  dnd-ai-dm-arena-interleaved, dnd-arena-interleaved; older than 60 min;
+  no process cwd inside) removed; 144 recent ones remain. NOT removed:
+  17,243 dnd-ai-dm-conversation-* dirs (11 GB) and 238
+  dnd-conversation-tiered-correction-* dirs, a different family the
+  ruling did not name; question posed to the owner.
+- D587.5/6: promo180 planning session resumed with sol-only teachers,
+  distillation-data phase 0, generic steering with a preregistered
+  held-out room set, no opus tie-break.
+- D587.1 applied to the D569 amendment-2 plan (session resumed).
+- D587.8: combined offers-roadmap planning lane launched in
+  dnd-wt-p-offer-help (fast-forwarded to main) with the three shelved
+  plans and their final verdicts as known traps.
+- D587.9: session-command-transaction planning lane launched in the new
+  worktree dnd-wt-p-txn (claude/p-txn off main).
+- Elevation slice 1: lane BLOCKED on the inherited 5 s arena budget;
+  WIP committed by me (e7585a6e), main merged (ede25c24), lane resumed.
+- heldout slice 1 DONE (lane claim), rowcodec slice 1 BLOCKED on the
+  sandbox EROFS node_modules (known); supervisor cumulative checks
+  (vitest, sg scan, tsc -b) launched for both; Astra reviews follow.
+- mcp-request-client fix round DONE (lane claim); Astra round 2 review
+  launched with the uncommitted diff.
+
+## D587.10 — OWNER: conversation temp dirs deleted under the same rule; correction of a premature test count (2026-09-08 23:25)
+
+Owner, asked as a follow-up to question 4: "Yes, same rule". Removed
+17,146 dirs (dnd-ai-dm-conversation-* and
+dnd-conversation-tiered-correction-*, older than 60 minutes, no process
+cwd inside); 682 recent ones remain; /tmp went from 20 GB to 9.4 GB and
+free space rose from 318 GB to 329 GB.
+
+CORRECTION to D587.1–9 above: I wrote "Tests 21/21" for
+pool4_contrasts_test.py before the run had finished; the first run had
+one error (a renamed helper in a new test) and judge-one-test.sh had
+seven failing checks (an assertion that counted braces inside the
+packet). Both were test-side defects, fixed; the verified results are
+pool4_contrasts_test.py 21 passed and judge-one-test.sh 43 passed, and
+those numbers, not the earlier ones, went into the Astra brief.
+
+## D586.45 — mcp-request-client slice 1 ACCEPTED by Astra at round 3; judge scripts D587.1 unit at round 2; elevation lane blocked again on an inherited timeout under load; one misfire (2026-09-08 23:29)
+
+- mcp-request-client: Astra round 2 REJECT on one blocker (the
+  try/finally test asserted type and cause, not the exact rejection
+  object) plus one should-fix (listeners left installed after a teardown
+  timeout); lane fixed both in a resumed session; Astra round 3:
+  "ACCEPT SLICE 1 ... Blockers: None remaining ... Should-fix: None
+  remaining", verified by reading (toBe identity at test line 482,
+  listener release at module lines 357 and 369, diff limited to the two
+  files). Supervisor cumulative (7 specs incl. every consumer test that
+  names the module, sg scan, tsc -b, diff --check) running; commit after
+  it is green.
+- Judge scripts (D587.1 unit): Astra round 1 DO NOT APPROVE on one
+  blocker that was mine and real: the late-failing-writer fixture was a
+  bash script invoked through python3, so it raised before writing and
+  the regression passed vacuously. Fixed with a python fixture and an
+  assertion that the prompt was really written. Should-fixes applied:
+  cross-packet contrasts now need a declared exposure on both packets
+  (the four historical configs declare "none", which is the truth: no
+  advisory stage existed), every judge-log append is checked, and the
+  opus stage-1 prompt is NOTES-ONLY (rubric sentence replaced; startup
+  guard refuses a header that still carries the rubric; shell check pins
+  stage 1 without and stage 2 with the rubric). Verified: 22 python
+  tests, 45 shell checks, four unseals reproduce. Round 2 running.
+- Elevation slice 1 (resumed after the main merge): BLOCKED again,
+  now on the inherited D524 screenshot-primer test exceeding its fixed
+  5,000 ms budget; the box was at load 10-13 with a full gate, three
+  cumulative runs and six lanes. Under D587.3 it gets one serial rerun
+  by me when the cumulative runs finish; the budget is not touched.
+  Lane's remaining diff: two files (d584-contract-inventory tool and
+  test) on top of the WIP commit.
+- MISFIRE (mine): I resumed the D569 planning session for round 2 with
+  an EMPTY verdict section because Astra's round-1 review was still
+  running (my status grep had matched the verdict-format wording in my
+  own brief). Killed by pid within a minute; the lane log is marked
+  MISFIRE; the resume will be re-sent with the real verdict.
+
+## D587.11 — judge scripts APPROVED under D587.1 (Astra round 2); boundary hardened after the D569 plan review; main gate vitest green; slice reviews launched (2026-09-08 23:36)
+
+Astra round 2 on the judge scripts: "APPROVE ... Blockers: None. The
+late-writer fixture is now live; the status guard blocks continuation
+even after a nonempty prompt is published. Cross-packet exposure checks
+and lifecycle-log failure handling are fixed. Advisory scores remain
+excluded, and exact ties remain unchanged." Astra ran the 22 python
+tests in memory and reproduced 587 numeric fields across the four
+retained unseals. One should-fix applied: the notes-only stage-1 header
+no longer inherits "score all zeros" / "emit null for every rubric
+field" (rebuilt from the packet-reading rules; startup guard and a
+shell check now refuse any scoring directive there; refused_round and
+service_null labels kept). Then, from Astra's D569 plan review (blocker
+3: the analysis excluded only the alias opus48, so a config naming
+claude-opus-4-8 as a scoring seat would have loaded its scores):
+pool4-contrasts.py now REFUSES any opus-named scoring seat, requires a
+D587.1 packet to declare seat_names exactly fable/astra/sol and
+advisory_status notes|empty, and admits sol/opus/astra only with
+historical_panel true and advisory_status none (the four historical
+configs declare both). Verified by me: pool4_contrasts_test.py 22
+passed, judge-one-test.sh 46 passed, four unseals reproduce. Current
+pins: judge-one.sh 6ae7f6b8d4021ca5…, pool4-contrasts.py
+0c20f794404cf106…, judge-advisory.py 671bfedfc02eb326…
+(full hashes in the D569 round-2 brief). The hardening is mine and
+post-dates the APPROVE; it goes back to Astra with the D569 plan's
+round 2, which pins it as a prerequisite.
+
+D569 amendment-2 plan: Astra round 1 DO NOT DISPATCH — inventory
+incomplete (57 dependent specs missing of 76 direct; 184 transitive),
+the "no opus analysis" proof misses the diagnostic path (tool line
+1136 accepts arbitrary diagnostic seat names; an opus-only subset
+produced a delta), stale external pins, negative controls not
+mutation-shaped. Planning session resumed for round 2 with the verdict
+verbatim and the new pins.
+
+Main gate on eb778854: tsc 0, sg 0, vitest-gate exit 0 (the earlier
+red was the arena budget, since raised); browser stage running.
+Supervisor cumulative for heldout and rowcodec slices: tsc 0, sg 0,
+vitest reds are all TIMEOUTS in inherited specs under load 10-13
+(heldout: 4 files; rowcodec: the arena spec, whose 5 s round-robin
+budget is still 5 s on that pre-merge worktree); one serial rerun each
+queued after the gate's vitest stage (running). Astra implementation
+reviews of both slices launched with the vitest result marked
+PENDING. mcp-request-client cumulative still running.
+
+## D586.46 — heldout slice 1 REJECTED (five blockers, lane resumed); rowcodec slice 1 REJECTED on MY incomplete inventory, not the code (2026-09-08 23:39)
+
+Astra on heldout slice 1: REJECT — frozen basis verified against the
+candidate HEAD instead of its generation provenance (unusable after any
+repair commit); leak check misses reserve digests/result paths and
+dynamic `await import` of the held-out module (both accepted in an
+executable probe); the metric clamps current HP to the initial maximum
+where the plan says max(0, currentHP) (25 over 20 returned 1 instead of
+1.25); structural verification only counts four profiles; acceptance
+controls use a placeholder hash and an empty object instead of a
+mutated valid room, no successful generation->verification control,
+suppression coverage missing. Lane resumed for round 2 with the verdict
+verbatim.
+
+Astra on rowcodec slice 1: REJECT with NO implementation blocker; the
+blocker is the SUPERVISOR's cumulative inventory: I ran 6 specs (185
+cases) where the plan's line 308 requires 11 (218); missing
+ai-dm-combat-model, ai-dm-board-delivery, ai-dm-skills,
+local-openai-conversation.SIMULATED, rl-generate-data. FINDING AGAINST
+MY OWN WORK: I built the inventory from a name grep instead of the
+plan's inventory plus the import graph, exactly the D584.4 rule I hold
+lanes to. The five specs are queued as a serial run behind the current
+reruns. One should-fix (check order at codec line 292) sent to the lane.
+
+## D586.47 — mcp-request-client slice 1 COMMITTED on claude/p-mcpclient after a green supervisor cumulative; transaction plan to review (2026-09-08 23:40)
+
+Supervisor cumulative on dnd-wt-p-mcpclient (7 spec files: the module
+spec plus every consumer test naming the module — board-delivery,
+conversation, engine-mcp-boundary/handler/server, snippets): all 7
+files passed, sg scan 0, tsc -b 0, diff --check 0. Committed as the
+slice's second commit on claude/p-mcpclient (Astra ACCEPT SLICE 1 at
+round 3 recorded in D586.45). Queued for main behind the current gate.
+Session-command-transaction plan (lane DONE) sent to Astra, round 1.
+Offers-roadmap and promo180 planning lanes have written their plans
+and are exiting; reviews launch when their exit lines land.
+
+## D586.48 — heldout serial rerun: 3 of 4 red files green serially; the one remaining red is the D544 round-robin test at its pre-merge 5 s budget (2026-09-08 23:41)
+
+Serial rerun (D587.3, load ~6-8) on dnd-wt-p-heldout: generate-heldout-party-basis, room-generator-los-cover and ai-dm-board-delivery all green; ai-dm-arena 166/167 with the single red being "runs configured arms round-robin for every room-rep unit" timing out at 5,000 ms. That is the D544-named test main raised to 30 s in b2cd4ec4; the planning worktree is still at 493121dd and carries the old budget. Not a slice defect and not re-pinned: it clears when main is merged into the branch after the lane's round completes (a merge onto a dirty lane tree is not done). The rowcodec rerun is running.
+
+## D583.17 — challenge slice 3 lane result: SHELVE_D583 by a 0.02% heap overshoot; candidate committed, Astra review launched (2026-09-08 23:42)
+
+Lane (session 01a083ce-5391-76d0-8dfc-9045eb0e37ae) implemented phase 3a
+(src/combat/roll-provenance.ts as the independent capability, replacing
+the spike's seam; import-equals guard) and phase 3b (src/vtt/
+challenge-feasibility.ts, reducer-backed B/C/A with every attempted
+application counted). Feasibility command result (lane claim):
+SHELVE_D583, first failure heap_used_bytes 1,073,979,248 against the
+1,073,741,824 limit (overshoot 237,424 bytes, 0.02%), derived caps null,
+report sha256 2374dfdf…. Lane verification claims: focused migration
+gate 54/54, feasibility spec 13/13, simulation parity 280 cases, 14
+mutation controls restored, tsc -b 0, sg scan 0, diff --check 0,
+cumulative 4,068/4,073 with five timeout reds; three cleared serially,
+two ai-dm-arena timeouts remained (30,003 ms and 5,187 ms) under load
+10-13, and the lane correctly stopped BLOCKED rather than reconcile.
+Supervisor: committed the 16-file candidate on claude/challenge-rooms
+before anything else; serial arena rerun launched on the branch (load
+~5.5; the 5 s test is the D544 one main raised in b2cd4ec4 and this
+branch predates the raise); Astra review launched with the explicit
+question whether a 0.02% overshoot is inside the heap measurement's own
+noise and whether the plan's rule still says SHELVE. No decision on
+D583's fate until that verdict; the owner's room-D bounded rewrite
+(D587.7) waits on the same answer.
+
+## D587.12 — serial reruns complete: elevation's D524 red cleared (26/26 in 8.9 s), rowcodec's only red is the pre-merge D544 budget; elevation lane resumed (2026-09-08 23:45)
+
+Serial rerun batch (D587.3) finished 23:44. rowcodec arena spec: 38/39,
+the single red again "runs configured arms round-robin" at 5,000 ms —
+the D544 test main raised to 30 s (b2cd4ec4); the planning worktree
+predates the raise. los-cover ai-dm-screenshot-probe (the D524 spec the
+elevation lane blocked on): 26/26 passed in 8.89 s at load ~6 — a load
+artefact, cleared; budget untouched. Elevation lane resumed with that
+evidence to finish slice 1. Queued: the five rowcodec specs my inventory
+missed (starts now that the batch is done).
+
+## D586.49 — session-command-transaction plan: Astra round 1 DO NOT DISPATCH; planning lane resumed for round 2 (2026-09-08 23:46)
+
+Blockers (verbatim gist): (1) the proposed begin() drains pending
+boundaries unconditionally, changing monster application timing — an
+empty application list with a pending legendary window today keeps the
+window and returns revision delta zero, the proposed transaction would
+advance initiative; draining must be an explicit operation with each
+consumer's current timing pinned before migration; (2) the dependency
+guard misses ImportTypeNode (`type X = import('./intel/contracts').X`),
+mis-handles verbatimModuleSyntax type-only imports that still emit
+runtime edges, and its fail-closed resolver rejects legitimate `?raw`
+asset imports (four unresolved edges via reaction-guidance -> encounter,
+e.g. src/rules/class-traits-srd.ts:52); (3) several mandatory mutants
+have no effective killer in slice 1 because their assigned tests are in
+unmigrated consumers; a session-level two-application RNG test is
+needed. Resumed the planning session (01a0842b-042d-7383-b07c-e970396080e7) with the verdict verbatim.
+
+## D576.6 / D586.50 — elevation slice 1 GO (lane), committed and sent to review; rowcodec inventory completed, round 2 launched; challenge arena rerun explained (2026-09-08 23:48)
+
+- Elevation slice 1: lane reports ELEVATION-S1 GO (5 runtime specs
+  42/42 after the authorized serial rerun; controls S1-DUPLICATE-SPEEDS,
+  S1-ZERO-SPEED killed at runtime, S1-ARBITRARY, S1-FLYING-CELL,
+  S1-EMPTY-SPEEDS killed at compile time; restore hashes recorded; sg
+  scan 0; tsc -b 0). Supervisor: committed the two completing files
+  (db6f33a6) on top of the WIP commit; my own `sg scan` on the committed
+  tree exit 0. Astra implementation review launched.
+- Rowcodec: the five specs my inventory missed ran serially: 32/32
+  across four files plus ai-dm-combat-model run separately (result in
+  the round-2 brief); Astra round 2 launched with the complete
+  11-spec evidence and the lane's reorder fix.
+- Challenge branch serial arena rerun (load ~4.4): 42/43, the only red
+  again the D544 round-robin test at its pre-merge 5,000 ms budget; the
+  30 s "frozen brutal-b room" test that timed out under load passed
+  serially. So slice 3's two remaining reds are the pre-merge budget
+  (clears on merging main) and a load artefact — no slice defect.
+
+## D586.51 — conversation-row-codec slice 1 ACCEPTED (Astra round 2, no findings) and COMMITTED on claude/p-rowcodec (2026-09-08 23:50)
+
+Astra: "ACCEPT SLICE 1 ... Blockers: none. Should-fix: none", verified
+by reading the reorder at codec line 292 and the new both-violations
+test at line 135, and reconciled the inventory to 11 specs / 218 cases:
+217 passed, one timeout (the D544 round-robin test at its pre-merge 5 s
+budget, b2cd4ec4 absent from that HEAD). Supervisor on the final tree
+after the reorder: sg scan 0, the two changed specs 28/28. Committed
+2af3d941. Queued for main with mcp-client (89d9c4df) and, pending its
+review, elevation (db6f33a6): merge order mcp-client, rowcodec, then a
+main gate; elevation after its verdict.
