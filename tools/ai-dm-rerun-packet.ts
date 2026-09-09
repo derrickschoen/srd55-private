@@ -2,7 +2,13 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { z } from 'zod';
 import { canonicalJson } from '../src/commands/canonical-json';
-import { engineUiFeedbackSchema } from '../src/vtt/mcp/schemas';
+import {
+  ArenaRowDecodeError,
+  conversationRowCodec,
+  type ConversationRowCodec,
+  type DecodedPlanSummary,
+  type KnownArenaRow,
+} from './ai-dm-conversation-row-codec';
 
 export const R1_10_SEEDS = [
   5_117_001, 5_117_002, 5_117_003, 5_117_004, 5_117_005,
@@ -27,99 +33,17 @@ export const BRUTAL_10_B_SEEDS = [
 export const R1_10_REPS = 3 as const;
 export const BRUTAL_10_REPS = 3 as const;
 export const RERUN_PACKET_VERSION = 'ai-dm-rerun-packet-v1' as const;
-const STANDARD_INITIATIVE_POLICY = 'initiative-intel-v1';
 
 const jsonRecordSchema = z.record(z.string(), z.unknown());
 type JsonRecord = z.infer<typeof jsonRecordSchema>;
-
-const safeIntegerSchema = z.number().int()
-  .min(Number.MIN_SAFE_INTEGER)
-  .max(Number.MAX_SAFE_INTEGER);
-
-const engineIntelSchema = z.object({
-  policy: z.enum(['dm-intel-capture-v1', 'dm-intel-capture-v2-creature-space']),
-  policyVersions: z.object({
-    initiative: z.literal(STANDARD_INITIATIVE_POLICY),
-  }).passthrough(),
-  actors: z.array(z.unknown()),
-}).passthrough();
-
-// The two era-specific authorized-plan shapes. Baseline-era entries carry
-// acceptedIntent (single choice); post-intel entries carry resolutionSummary
-// with actionSlots. Both normalize to NeutralPlanEntry below — the packet must
-// never expose either raw shape, because the shape itself identifies the era.
-const baselineChoiceSchema = z.object({
-  kind: z.string(),
-  action_id: z.string().optional(),
-  spell_id: z.string().optional(),
-  target: z.object({ kind: z.string(), combatant_id: z.string().optional() }).passthrough().nullable().optional(),
-}).passthrough();
-
-const currentActionSlotSchema = z.object({
-  kind: z.string(),
-  actionId: z.string().nullable().optional(),
-  spellId: z.string().nullable().optional(),
-  objectId: z.string().nullable().optional(),
-  targetIds: z.array(z.string()).optional(),
-}).passthrough();
-
-// Post-intel executed summary: multi-slot.
-const currentResolutionSummarySchema = z.object({
-  actionSlots: z.array(currentActionSlotSchema),
-  movementFeet: z.number().optional(),
-}).passthrough();
-
-// Baseline-era executed summary: single action. Real baseline rows carry BOTH
-// acceptedIntent and this summary (round-2 review finding, verified against
-// harvested R1-10 rows).
-const baselineResolutionSummarySchema = z.object({
-  actionId: z.string().nullable(),
-  targetId: z.string().nullable(),
-  movementFeet: z.number().optional(),
-}).passthrough();
-
-const authorizedPlanEntrySchema = z.object({
-  actorId: z.unknown(),
-  reason: z.string().max(240).optional(),
-  acceptedIntent: z.object({ choice: baselineChoiceSchema }).passthrough().optional(),
-  resolutionSummary: z.union([currentResolutionSummarySchema, baselineResolutionSummarySchema]).optional(),
-}).passthrough();
-
-const plannerSchema = z.union([
-  z.literal('sim_controller'),
-  z.object({ model: z.string(), effort: z.string() }).passthrough(),
-  z.null(),
-]);
-const primaryPlannerSchema = z.enum(['model', 'engine_default', 'sim_controller']);
-const overrideKindSchema = z.enum([
-  'objective', 'morale', 'roleplay', 'resource_conservation', 'unknown_engine_gap',
-  'engine_play', 'missing_metric',
-]);
-const overrideRejectionSchema = z.object({
-  actorId: z.string().nullable(),
-  code: z.literal('OVERRIDE_UNJUSTIFIED'),
-}).strict();
-const boardImageSchema = z.discriminatedUnion('mode', [
-  z.object({ mode: z.literal('off') }).strict(),
-  z.object({
-    mode: z.literal('png'),
-    sha256: z.string().regex(/^[a-f0-9]{64}$/u),
-    bytes: safeIntegerSchema.min(24).max(1_000_000),
-    width: safeIntegerSchema.min(1),
-    height: safeIntegerSchema.min(1),
-    captureMs: z.number().finite().nonnegative(),
-    relativePath: z.string().regex(/^board-images\/[a-f0-9]{64}\.png$/u),
-  }).strict(),
-  z.object({
-    mode: z.literal('capture_only'),
-    sha256: z.string().regex(/^[a-f0-9]{64}$/u),
-    bytes: safeIntegerSchema.min(24).max(1_000_000),
-    width: safeIntegerSchema.min(1),
-    height: safeIntegerSchema.min(1),
-    captureMs: z.number().finite().nonnegative(),
-    relativePath: z.string().regex(/^board-images\/[a-f0-9]{64}\.png$/u),
-  }).strict(),
-]);
+type ArenaRow = KnownArenaRow['row'];
+type AuthorizedPlanEntry = NonNullable<ArenaRow['authorizedPlan']>[number];
+type Planner = ArenaRow['plannedBy'];
+type PrimaryPlanner = NonNullable<ArenaRow['planner']>;
+type OverrideKind = NonNullable<ArenaRow['overrideKinds']>[number];
+type OverrideRejection = NonNullable<ArenaRow['overrideRejections']>[number];
+type BoardImage = NonNullable<ArenaRow['boardImage']>;
+type UiFeedback = Exclude<ArenaRow['uiFeedback'], undefined>;
 
 export interface NeutralAction {
   readonly kind: string;
@@ -137,129 +61,6 @@ export interface NeutralPlanEntry {
   readonly movementFeet: number | null;
 }
 
-const commonArenaRowSchema = z.object({
-  seed: safeIntegerSchema,
-  arm: z.string().min(1),
-  room: safeIntegerSchema,
-  round: safeIntegerSchema,
-  startingRoomDigest: z.string().min(1),
-  combatModel: z.literal('initiative_segments_v1'),
-  initiativeOrder: z.array(z.unknown()),
-  outcome: z.enum([
-    'authorized', 'auto_resolved', 'awaiting_dm_adjudication',
-    'refused', 'service_null', 'local_error', 'execution_failed', 'partial_execution',
-  ]),
-  plannedBy: plannerSchema,
-  roundNarrative: z.string().nullable(),
-  authorizedPlan: z.array(authorizedPlanEntrySchema).nullable(),
-  // Optional/nullable: pre-intel-era arms have no engineIntel, and the current
-  // producer writes null on failed rows. It must never reach the blinded
-  // packet — its mere presence identifies the arm.
-  engineIntel: engineIntelSchema.nullable().optional(),
-  // Post-intel rows label the planner ('model' | 'engine_default'); pre-intel
-  // rows have no such field. Attribution uses it when present.
-  plannerLabel: z.string().nullable().optional(),
-  planner: primaryPlannerSchema.optional(),
-  overrideKinds: z.array(overrideKindSchema).optional(),
-  overrideRejections: z.array(overrideRejectionSchema).optional(),
-  boardImage: boardImageSchema.optional(),
-  uiFeedback: engineUiFeedbackSchema.nullable().optional(),
-  // Required in cross-era mode, where it is the arm partition key.
-  repoCommit: z.string().min(1).optional(),
-});
-
-const postShiftOnlyFieldNames = [
-  'decisionTransport', 'firstDecisionAccepted', 'decisionAttempts',
-  'decisionRejectionCodes', 'normalizationCodes', 'chosenOptionIndices',
-  'instructionSource', 'skillName', 'skillHash', 'rationale', 'overridePolicy',
-] as const;
-
-const chosenOptionIndicesSchema = z.array(z.object({
-  actorId: z.unknown(),
-  primaryOptionIndex: safeIntegerSchema.min(0),
-  fallbackOptionIndex: safeIntegerSchema.min(0).nullable(),
-}));
-
-const postShiftCommonArenaRowSchema = commonArenaRowSchema.extend({
-  overridePolicy: z.enum(['strict', 'typed_reason']).default('typed_reason'),
-  firstDecisionAccepted: z.boolean(),
-  decisionAttempts: safeIntegerSchema.min(0),
-  decisionRejectionCodes: z.array(z.string()),
-  normalizationCodes: z.array(z.string()),
-  instructionSource: z.enum(['none', 'kb', 'skill']),
-  skillName: z.enum(['engine-submission', 'dm-round']).nullable(),
-  skillHash: z.string().regex(/^[0-9a-f]{64}$/u).nullable(),
-  rationale: z.string().max(600).nullable(),
-});
-
-const mcpMinimalPostShiftArenaRowSchema = postShiftCommonArenaRowSchema.extend({
-  decisionTransport: z.literal('mcp_minimal'),
-}).passthrough();
-
-const finalIndicesPostShiftArenaRowSchema = postShiftCommonArenaRowSchema.extend({
-  decisionTransport: z.literal('final_indices'),
-  chosenOptionIndices: chosenOptionIndicesSchema,
-}).passthrough();
-
-const postShiftArenaRowSchema = z.discriminatedUnion('decisionTransport', [
-  mcpMinimalPostShiftArenaRowSchema,
-  finalIndicesPostShiftArenaRowSchema,
-]).superRefine((row, context) => {
-  if (row.decisionTransport === 'mcp_minimal' && Object.prototype.hasOwnProperty.call(row, 'chosenOptionIndices')) {
-    context.addIssue({
-      code: 'custom',
-      path: ['chosenOptionIndices'],
-      message: 'must be absent when decisionTransport is mcp_minimal',
-    });
-  }
-});
-
-const preShiftArenaRowSchema = commonArenaRowSchema.passthrough().superRefine((row, context) => {
-  for (const field of postShiftOnlyFieldNames) {
-    if (Object.prototype.hasOwnProperty.call(row, field)) {
-      context.addIssue({
-        code: 'custom',
-        path: [field],
-        message: 'must be absent on a pre-shift row',
-      });
-    }
-  }
-});
-
-type PreShiftArenaRow = z.infer<typeof preShiftArenaRowSchema>;
-type CommonArenaRow = z.infer<typeof commonArenaRowSchema>;
-type ChosenOptionIndices = z.infer<typeof chosenOptionIndicesSchema>;
-type McpMinimalPostShiftArenaRow = CommonArenaRow & {
-  readonly decisionTransport: 'mcp_minimal';
-  readonly overridePolicy: 'strict' | 'typed_reason';
-  readonly firstDecisionAccepted: boolean;
-  readonly decisionAttempts: number;
-  readonly decisionRejectionCodes: readonly string[];
-  readonly normalizationCodes: readonly string[];
-  readonly instructionSource: 'none' | 'kb' | 'skill';
-  readonly skillName: 'engine-submission' | 'dm-round' | null;
-  readonly skillHash: string | null;
-  readonly rationale: string | null;
-};
-type FinalIndicesPostShiftArenaRow = CommonArenaRow & {
-  readonly decisionTransport: 'final_indices';
-  readonly overridePolicy: 'strict' | 'typed_reason';
-  readonly firstDecisionAccepted: boolean;
-  readonly decisionAttempts: number;
-  readonly decisionRejectionCodes: readonly string[];
-  readonly normalizationCodes: readonly string[];
-  readonly chosenOptionIndices: ChosenOptionIndices;
-  readonly instructionSource: 'none' | 'kb' | 'skill';
-  readonly skillName: 'engine-submission' | 'dm-round' | null;
-  readonly skillHash: string | null;
-  readonly rationale: string | null;
-};
-type PostShiftArenaRow = McpMinimalPostShiftArenaRow | FinalIndicesPostShiftArenaRow;
-
-type ParsedArenaRow =
-  | { readonly rowEra: 'pre_shift'; readonly row: PreShiftArenaRow }
-  | { readonly rowEra: 'post_shift'; readonly row: PostShiftArenaRow };
-
 export interface RerunProtocol {
   readonly name?: RerunProtocolName;
   readonly seeds: readonly number[];
@@ -273,6 +74,11 @@ export interface RerunPacketBuilderOptions {
   readonly reasonsVisible?: boolean;
   /** Optional arm allowlist for a mixed visibility packet such as D490's V arm. */
   readonly reasonVisibleArms?: readonly string[];
+  readonly rowCodec?: Pick<ConversationRowCodec, 'decodeArenaRow'>;
+}
+
+export interface RerunRowValidationOptions {
+  readonly rowCodec?: Pick<ConversationRowCodec, 'decodeArenaRow'>;
 }
 
 export const R1_10_PROTOCOL: RerunProtocol = {
@@ -314,15 +120,16 @@ interface CommonValidatedArenaRow {
   readonly rep: number;
   readonly startingRoomDigest: string;
   readonly outcome: string;
-  readonly plannedBy: z.infer<typeof plannerSchema>;
+  readonly plannedBy: Planner;
   readonly plannerLabel: string | null | undefined;
-  readonly planner: z.infer<typeof primaryPlannerSchema>;
-  readonly overrideKinds: readonly z.infer<typeof overrideKindSchema>[];
-  readonly overrideRejections: readonly z.infer<typeof overrideRejectionSchema>[];
+  readonly planner: PrimaryPlanner;
+  readonly overrideKinds: readonly OverrideKind[];
+  readonly overrideRejections: readonly OverrideRejection[];
   readonly roundNarrative: string | null;
-  readonly authorizedPlan: readonly z.infer<typeof authorizedPlanEntrySchema>[] | null;
-  readonly boardImage?: z.infer<typeof boardImageSchema>;
-  readonly uiFeedback?: z.infer<typeof engineUiFeedbackSchema> | null;
+  readonly authorizedPlan: readonly AuthorizedPlanEntry[] | null;
+  readonly planSummaries: readonly DecodedPlanSummary[] | null;
+  readonly boardImage?: BoardImage;
+  readonly uiFeedback?: UiFeedback;
 }
 
 interface PreShiftValidatedArenaRow extends CommonValidatedArenaRow {
@@ -400,8 +207,8 @@ export interface JudgePacketEntry {
   readonly outcome: string;
   readonly attribution: 'model_authorized' | 'engine_default' | 'not_model_authorized';
   readonly executedPlan: readonly NeutralPlanEntry[] | null;
-  readonly boardImage?: z.infer<typeof boardImageSchema>;
-  readonly uiFeedback?: z.infer<typeof engineUiFeedbackSchema> | null;
+  readonly boardImage?: BoardImage;
+  readonly uiFeedback?: UiFeedback;
   readonly rubric: BlindRubric;
 }
 
@@ -422,9 +229,9 @@ export interface JudgePacket {
 interface CommonAnswerKeyEntry {
   readonly blindId: string;
   readonly arm: string;
-  readonly planner: z.infer<typeof primaryPlannerSchema>;
-  readonly overrideKinds: readonly z.infer<typeof overrideKindSchema>[];
-  readonly overrideRejections: readonly z.infer<typeof overrideRejectionSchema>[];
+  readonly planner: PrimaryPlanner;
+  readonly overrideKinds: readonly OverrideKind[];
+  readonly overrideRejections: readonly OverrideRejection[];
   readonly decisionReasons: readonly { readonly actorId: unknown; readonly reason: string }[];
 }
 
@@ -570,71 +377,14 @@ function parseJsonl(text: string, source: string): readonly JsonRecord[] {
   });
 }
 
-function isMcpMinimalPostShiftArenaRow(value: unknown): value is McpMinimalPostShiftArenaRow {
-  return mcpMinimalPostShiftArenaRowSchema.safeParse(value).success;
-}
-
-function isFinalIndicesPostShiftArenaRow(value: unknown): value is FinalIndicesPostShiftArenaRow {
-  return finalIndicesPostShiftArenaRowSchema.safeParse(value).success;
-}
-
-function parseArenaRow(source: JsonRecord, sourceLabel: string): ParsedArenaRow {
-  const isPostShift = Object.prototype.hasOwnProperty.call(source, 'decisionTransport');
-  if (isPostShift) {
-    const parsed = postShiftArenaRowSchema.safeParse(source);
-    if (!parsed.success) {
-      const issue = parsed.error.issues[0];
-      const property = issue === undefined || issue.path.length === 0 ? '' : `.${issue.path.join('.')}`;
-      throw new TypeError(`${sourceLabel}${property} is invalid: ${issue?.message ?? 'unknown schema failure'}.`);
-    }
-    if (isMcpMinimalPostShiftArenaRow(parsed.data) || isFinalIndicesPostShiftArenaRow(parsed.data)) {
-      return { rowEra: 'post_shift', row: parsed.data };
-    }
-    throw new TypeError(`${sourceLabel} did not match a post-shift decision transport shape.`);
-  }
-  const parsed = preShiftArenaRowSchema.safeParse(source);
-  if (!parsed.success) {
-    const issue = parsed.error.issues[0];
-    const property = issue === undefined || issue.path.length === 0 ? '' : `.${issue.path.join('.')}`;
-    throw new TypeError(`${sourceLabel}${property} is invalid: ${issue?.message ?? 'unknown schema failure'}.`);
-  }
-  return { rowEra: 'pre_shift', row: parsed.data };
-}
-
 function validateRow(
-  source: JsonRecord,
+  parsedRow: KnownArenaRow,
   sourceLabel: string,
   protocol: RerunProtocol,
   crossEra: boolean,
   partitionCrossEraByRowEra: boolean,
 ): ValidatedArenaRow {
-  if ('rlData' in source) {
-    throw new TypeError(`${sourceLabel} contains rlData; ${protocolLabel(protocol)} is a permanent holdout and cannot contain training data.`);
-  }
-  const parsedRow = parseArenaRow(source, sourceLabel);
-  if (parsedRow.rowEra === 'post_shift') {
-    const postShiftRow = parsedRow.row;
-    if (postShiftRow.instructionSource === 'skill') {
-      if (postShiftRow.skillName === null || postShiftRow.skillHash === null) {
-        throw new TypeError(`${sourceLabel} skill instruction source requires skillName and skillHash.`);
-      }
-    } else if (postShiftRow.skillName !== null || postShiftRow.skillHash !== null) {
-      throw new TypeError(`${sourceLabel} non-skill instruction source requires null skillName and skillHash.`);
-    }
-  }
   const sourceRow = parsedRow.row;
-  const hasBoardImage = sourceRow.boardImage !== undefined;
-  const hasUiFeedback = sourceRow.uiFeedback !== undefined;
-  if (hasBoardImage !== hasUiFeedback) {
-    throw new TypeError(`${sourceLabel} must carry boardImage and uiFeedback together.`);
-  }
-  if (sourceRow.boardImage !== undefined && sourceRow.boardImage.mode !== 'png' && sourceRow.uiFeedback !== null) {
-    throw new TypeError(`${sourceLabel} cannot carry UI feedback without a PNG board image.`);
-  }
-  if (sourceRow.boardImage !== undefined && sourceRow.boardImage.mode !== 'off' &&
-    sourceRow.boardImage.relativePath !== `board-images/${sourceRow.boardImage.sha256}.png`) {
-    throw new TypeError(`${sourceLabel}.boardImage path must match its SHA-256.`);
-  }
   if (crossEra && !partitionCrossEraByRowEra && sourceRow.repoCommit === undefined) {
     throw new TypeError(`${sourceLabel}.repoCommit is required in cross-era mode (it is the arm partition key).`);
   }
@@ -668,6 +418,7 @@ function validateRow(
     overrideRejections: sourceRow.overrideRejections ?? [],
     roundNarrative: sourceRow.roundNarrative,
     authorizedPlan: sourceRow.authorizedPlan,
+    planSummaries: parsedRow.planSummaries,
     ...(sourceRow.boardImage === undefined ? {} : {
       boardImage: sourceRow.boardImage,
       uiFeedback: sourceRow.uiFeedback ?? null,
@@ -703,10 +454,26 @@ function validateRows(
   protocol: RerunProtocol,
   crossEra: boolean,
   armCardinality: ArmCardinality,
-  partitionCrossEraByRowEra = false,
+  decoder: ConversationRowCodec['decodeArenaRow'],
 ): readonly ValidatedArenaRow[] {
-  const validated = rows.map((row, index) =>
-    validateRow(row, `row ${String(index + 1)}`, protocol, crossEra, partitionCrossEraByRowEra));
+  const decoded = rows.map((row, index) => {
+    const sourceLabel = `row ${String(index + 1)}`;
+    if ('rlData' in row) {
+      throw new TypeError(`${sourceLabel} contains rlData; ${protocolLabel(protocol)} is a permanent holdout and cannot contain training data.`);
+    }
+    try {
+      return { sourceLabel, parsedRow: decoder(row) };
+    } catch (error) {
+      if (error instanceof ArenaRowDecodeError) {
+        throw new TypeError(`${sourceLabel}${error.sourceSuffix}`);
+      }
+      throw error;
+    }
+  });
+  const inferredCrossEra = !crossEra && new Set(decoded.map(({ parsedRow }) => parsedRow.rowEra)).size > 1;
+  const effectiveCrossEra = crossEra || inferredCrossEra;
+  const validated = decoded.map(({ parsedRow, sourceLabel }) =>
+    validateRow(parsedRow, sourceLabel, protocol, effectiveCrossEra, inferredCrossEra));
   const arms = [...new Set(validated.map((row) => row.arm))].sort((left, right) => left.localeCompare(right));
   assertArmCardinality(arms.length, armCardinality, protocol);
   const label = protocolLabel(protocol);
@@ -728,7 +495,7 @@ function validateRows(
       if (seenArms.size !== arms.length || arms.some((arm) => !seenArms.has(arm))) {
         throw new TypeError(`${label} requires paired arms for seed ${String(seed)} rep ${String(rep)}.`);
       }
-      if (!crossEra) {
+      if (!effectiveCrossEra) {
         const digests = new Set(caseRows.map((row) => row.startingRoomDigest));
         if (digests.size !== 1) {
           throw new TypeError(`Paired arms for seed ${String(seed)} rep ${String(rep)} must use the same frozen room artifact.`);
@@ -736,7 +503,7 @@ function validateRows(
       }
     }
   }
-  if (crossEra) {
+  if (effectiveCrossEra) {
     // Cross-era arms cannot share canonical-state digests (state shape differs
     // by era), so the digest invariant becomes: within an arm, every rep of a
     // seed must load the identical room. Cross-era room-INPUT identity is an
@@ -760,20 +527,15 @@ function validateRows(
   return validated;
 }
 
-function hasMixedRowEras(rows: readonly JsonRecord[]): boolean {
-  const eras = new Set(rows.map((row) =>
-    Object.prototype.hasOwnProperty.call(row, 'decisionTransport') ? 'post_shift' : 'pre_shift'));
-  return eras.size > 1;
-}
-
 /** Validates the frozen two-arm R1-10 experiment shape before anything can be judged. */
 export function validateRerunRows(
   rows: readonly JsonRecord[],
   protocol: RerunProtocol = R1_10_PROTOCOL,
   crossEra = false,
+  options: RerunRowValidationOptions = {},
 ): readonly ValidatedArenaRow[] {
-  const inferredCrossEra = !crossEra && hasMixedRowEras(rows);
-  return validateRows(rows, protocol, crossEra || inferredCrossEra, 'exactly_two', inferredCrossEra);
+  const decoder = options.rowCodec?.decodeArenaRow ?? conversationRowCodec.decodeArenaRow;
+  return validateRows(rows, protocol, crossEra, 'exactly_two', decoder);
 }
 
 function engineAttribution(row: ValidatedArenaRow): JudgePacketEntry['attribution'] {
@@ -785,7 +547,8 @@ function engineAttribution(row: ValidatedArenaRow): JudgePacketEntry['attributio
 }
 
 function neutralPlanEntry(
-  plan: z.infer<typeof authorizedPlanEntrySchema>,
+  plan: AuthorizedPlanEntry,
+  decodedSummary: DecodedPlanSummary,
   reasonsVisible: boolean,
 ): NeutralPlanEntry {
   const visibleReason = reasonsVisible && plan.reason !== undefined
@@ -796,23 +559,19 @@ function neutralPlanEntry(
   // dodge, direct combatant targets). A rerun whose rows include spell or
   // world-object actions must re-verify id equivalence across eras first
   // (round-2 review finding 5, accepted as a known limitation).
-  const summary = plan.resolutionSummary;
-  if (summary !== undefined) {
-    const current = currentResolutionSummarySchema.safeParse(summary);
-    if (current.success) {
+  switch (decodedSummary.kind) {
+    case 'current':
       return {
         actorId: plan.actorId,
         ...visibleReason,
-        actions: current.data.actionSlots.map((slot) => ({
+        actions: decodedSummary.summary.actionSlots.map((slot) => ({
           kind: slot.kind,
           actionId: slot.actionId ?? slot.spellId ?? slot.objectId ?? null,
           targetIds: slot.targetIds ?? [],
         })),
-        movementFeet: current.data.movementFeet ?? null,
+        movementFeet: decodedSummary.summary.movementFeet ?? null,
       };
-    }
-    const baseline = baselineResolutionSummarySchema.safeParse(summary);
-    if (baseline.success) {
+    case 'baseline':
       // Baseline-era executed summary; the action kind lives on the intent.
       // Never fabricate a kind — a summary without its intent is malformed.
       if (plan.acceptedIntent === undefined) {
@@ -823,12 +582,13 @@ function neutralPlanEntry(
         ...visibleReason,
         actions: [{
           kind: plan.acceptedIntent.choice.kind,
-          actionId: baseline.data.actionId,
-          targetIds: baseline.data.targetId === null ? [] : [baseline.data.targetId],
+          actionId: decodedSummary.summary.actionId,
+          targetIds: decodedSummary.summary.targetId === null ? [] : [decodedSummary.summary.targetId],
         }],
-        movementFeet: baseline.data.movementFeet ?? null,
+        movementFeet: decodedSummary.summary.movementFeet ?? null,
       };
-    }
+    case 'absent':
+      break;
   }
   if (plan.acceptedIntent !== undefined) {
     const choice = plan.acceptedIntent.choice;
@@ -851,10 +611,17 @@ function neutralPlanEntry(
 
 function executedPlan(
   value: ValidatedArenaRow['authorizedPlan'],
+  planSummaries: ValidatedArenaRow['planSummaries'],
   reasonsVisible: boolean,
 ): readonly NeutralPlanEntry[] | null {
   if (value === null) return null;
-  return value.map((entry) => neutralPlanEntry(entry, reasonsVisible));
+  return value.map((entry, index) => {
+    const decodedSummary = planSummaries?.[index];
+    if (decodedSummary === undefined) {
+      throw new TypeError('decoded plan summary is missing for an authorizedPlan entry.');
+    }
+    return neutralPlanEntry(entry, decodedSummary, reasonsVisible);
+  });
 }
 
 function packetOutcome(outcome: string): 'authorized' | 'refused' | 'service_null' | 'execution_failed' {
@@ -923,18 +690,17 @@ function buildPacket(
   crossEra: boolean,
   armCardinality: ArmCardinality,
   options: RerunPacketBuilderOptions,
+  decoder: ConversationRowCodec['decodeArenaRow'],
   protocolName?: RerunProtocolName,
 ): { readonly packet: JudgePacket; readonly answerKey: RerunAnswerKey } {
   if (!Number.isSafeInteger(shuffleSeed)) throw new TypeError('shuffleSeed must be a safe integer.');
-  const inferredCrossEra = !crossEra && hasMixedRowEras(rows);
-  const effectiveCrossEra = crossEra || inferredCrossEra;
   if (options.reasonsVisible !== true && options.reasonVisibleArms !== undefined) {
     throw new TypeError('reasonVisibleArms requires reasonsVisible: true.');
   }
   const reasonVisibleArms = options.reasonVisibleArms === undefined
     ? null
     : new Set(options.reasonVisibleArms);
-  const validated = [...validateRows(rows, protocol, effectiveCrossEra, armCardinality, inferredCrossEra)]
+  const validated = [...validateRows(rows, protocol, crossEra, armCardinality, decoder)]
     .sort((left, right) => left.seed - right.seed || left.rep - right.rep || left.arm.localeCompare(right.arm));
   const blinded = shuffled(validated, shuffleSeed).map((row, index) => ({
     blindId: `blind-${String(index + 1).padStart(3, '0')}`,
@@ -958,6 +724,7 @@ function buildPacket(
         executedPlan: outcome === 'authorized'
           ? executedPlan(
               row.authorizedPlan,
+              row.planSummaries,
               options.reasonsVisible === true &&
                 (reasonVisibleArms === null || reasonVisibleArms.has(row.arm)),
             )
@@ -1026,7 +793,8 @@ export function buildRerunPacket(
 ): { readonly packet: JudgePacket; readonly answerKey: RerunAnswerKey } {
   const crossEra = typeof crossEraOrOptions === 'boolean' ? crossEraOrOptions : false;
   const selectedOptions = typeof crossEraOrOptions === 'boolean' ? options : crossEraOrOptions;
-  return buildPacket(rows, shuffleSeed, protocol, crossEra, 'exactly_two', selectedOptions);
+  const decoder = selectedOptions.rowCodec?.decodeArenaRow ?? conversationRowCodec.decodeArenaRow;
+  return buildPacket(rows, shuffleSeed, protocol, crossEra, 'exactly_two', selectedOptions, decoder);
 }
 
 /** Builds one blinded packet from two or more arms sharing a case protocol. */
@@ -1039,7 +807,8 @@ export function buildMultiArmRerunPacket(
 ): { readonly packet: JudgePacket; readonly answerKey: RerunAnswerKey } {
   const crossEra = typeof crossEraOrOptions === 'boolean' ? crossEraOrOptions : false;
   const selectedOptions = typeof crossEraOrOptions === 'boolean' ? options : crossEraOrOptions;
-  return buildPacket(rows, shuffleSeed, protocol, crossEra, 'two_or_more', selectedOptions);
+  const decoder = selectedOptions.rowCodec?.decodeArenaRow ?? conversationRowCodec.decodeArenaRow;
+  return buildPacket(rows, shuffleSeed, protocol, crossEra, 'two_or_more', selectedOptions, decoder);
 }
 
 /**
@@ -1051,6 +820,7 @@ export function buildReasonVisibilityIsolationPacket(
   rows: readonly JsonRecord[],
   shuffleSeed: number,
   protocol: RerunProtocol = R1_10_PROTOCOL,
+  options: RerunRowValidationOptions = {},
 ): { readonly packet: JudgePacket; readonly answerKey: RerunAnswerKey } {
   const sourceArms = new Set(rows.map((row) => row['arm']));
   if (sourceArms.size !== 1 || [...sourceArms][0] === undefined ||
@@ -1066,7 +836,7 @@ export function buildReasonVisibilityIsolationPacket(
   return buildPacket(duplicated, shuffleSeed, protocol, false, 'exactly_two', {
     reasonsVisible: true,
     reasonVisibleArms: [visibleArm],
-  });
+  }, options.rowCodec?.decodeArenaRow ?? conversationRowCodec.decodeArenaRow);
 }
 
 export async function createRerunPacket(config: RerunPacketConfig): Promise<{ readonly packet: JudgePacket; readonly answerKey: RerunAnswerKey }> {
@@ -1078,7 +848,8 @@ export async function createRerunPacket(config: RerunPacketConfig): Promise<{ re
       ? { ...BRUTAL_10_PROTOCOL, reps: config.reps }
       : { ...BRUTAL_10_B_PROTOCOL, reps: config.reps };
   const result = buildPacket(
-    rows, config.shuffleSeed, protocol, config.crossEra, 'exactly_two', {}, config.protocol,
+    rows, config.shuffleSeed, protocol, config.crossEra, 'exactly_two', {},
+    conversationRowCodec.decodeArenaRow, config.protocol,
   );
   await Promise.all([
     writeFile(config.packetPath, `${canonicalJson(result.packet)}\n`, 'utf8'),
