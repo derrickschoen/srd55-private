@@ -19305,3 +19305,62 @@ after the reorder: sg scan 0, the two changed specs 28/28. Committed
 2af3d941. Queued for main with mcp-client (89d9c4df) and, pending its
 review, elevation (db6f33a6): merge order mcp-client, rowcodec, then a
 main gate; elevation after its verdict.
+
+## D586.52 — three Astra verdicts harvested, all negative; three resumes launched; main merged into claude/challenge-rooms (2026-09-08 23:56)
+
+Verdicts (extracted to `.tmp/runs/fanout/*.verdict.txt`, read in full):
+
+- Offers roadmap, review round 1: DO NOT DISPATCH. Blockers: the
+  planned Grappled movement refresh `max(0, effectiveSpeed - spent)`
+  discards Dash movement (Astra's in-memory probe: Dash then 10 ft
+  moved = remaining 50; the plan's refresh yields 20); the
+  repositioning policy (four purpose predicates, budgets, tie-breaks)
+  is promised but never specified; the 441/2500 oracle has no fixture
+  or branch-by-branch derivation (current Dash approaches the nearest
+  VISIBLE enemy, registry:413, and a satisfied goal moves zero,
+  movement.ts:193). Four should-fixes (mutation pairing, the
+  encounter.ts:1697 capacity seam missing from slice 5, slice 17
+  limits, a capsule-hash citation). Round 2 resumed on
+  01a0842a-c4c5-7c43-bc96-0cbfac700f1a (brief plan-offers-r2.md,
+  marker PLAN-OFFERS-R2 DONE).
+- D569 panel plan, review round 2: DO NOT DISPATCH with the Round-2
+  dispositions otherwise confirmed (76/183/184 inventory reproduced,
+  180+3+1 partition, all three external hashes match, 12 accepted /
+  13 rejected boundary probes). One blocker: the D575 builder at
+  tools/ai-dm-rerun-packet.ts:1164 still requires exactly one
+  claude-opus-5 arm and the plan neither declares it historical-only
+  nor reconciles it with the opus-5 -> opus-4.8 ruling. Two
+  should-fixes (duplicate-seat expected error text; 18 -> 180 specs).
+  Round 3 of 3 (FINAL) resumed on 01a08310-5e7f-7e53-8be7-c51eb0263bd7
+  (brief plan-d569-panel-r4.md, marker PLAN-D569-PANEL-R4 DONE); a DO
+  NOT DISPATCH at this round shelves the plan.
+- Challenge slice 3, review round 1: REJECT; SHELVE_D583 confirmed for
+  the recorded observation (report 759 bytes, sha 2374dfdf..., excess
+  237,424 bytes = 0.0221 %, no noise distribution, no tolerance in the
+  approved rule). Five blockers against the tooling: limits sampled
+  only before reduction (a Dodge probe at 1,073,741,825 bytes after
+  application still returned success), queue accounting misses
+  flatMap siblings and restarts draw counts per command; the state key
+  omits limitedResources (depleted Priest pools -> identical keys and
+  continuation signatures) and merging keeps only the first trace;
+  the phase-3a provenance test at challenge-feasibility.test.ts:80
+  was weakened to arithmetic distributions and the manifest /
+  reaction-policy draw checks vanished; missing CLI limits throw a
+  usage error instead of a SHELVE_D583 report; cumulative 4,068/4,073
+  + 41/43 with the two arena tests outstanding. Independent
+  provenance, reducer counting, the import-equals guard and scope are
+  verified; the 14 negative controls are partly deletion/bypass
+  controls. Fix round 2 resumed on
+  01a083ce-5391-76d0-8dfc-9045eb0e37ae (brief impl-challenge-s3-r2.md,
+  markers CHALLENGE-S3-R2 GO / SHELVE_D583 / BLOCKED) with a rerun of
+  phase 3b under the corrected accounting required.
+
+Supervisor git write: main (8f76896c) merged into claude/challenge-rooms
+as 9ef2e8e8 (`--no-ff`, clean, 15 files) BEFORE the resume so the fix
+round's cumulative runs with the D544 30 s arena budget; the resume
+brief states the new HEAD. Not yet compiled by me; the lane's
+`npx tsc -b --force` and my harvest check cover it.
+
+Still running: elevation Astra review, promo180 plan Astra round 1,
+heldout fix round 2, txn plan round 2, main gate browser stage
+(vitest-gate exit 0, Playwright on 4870).
