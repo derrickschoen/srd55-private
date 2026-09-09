@@ -19791,3 +19791,27 @@ temporary worktree was removed and pruned). Astra round 3 launched
 (brief review-impl-elevation-s1-r3.md), also asked whether "a test reads
 a lane-local gitignored artifact" should become a standing check in the
 inventory tool.
+
+## D586.69 — D569 Amendment 2 implemented; cumulative blocked by load, queued behind the gate; Astra round 1 launched (2026-09-09 01:07)
+
+Lane exit 0, marker BLOCKED for the cumulative only: claims: exactly the
+four allowed files; v5 manifest with Opus 4.8 arms; notes-only advisory
+stage with notes|empty exposure; scoring restricted to Fable/Astra/Sol
+with Opus out of scoring, ties, analysis inputs, outputs and diagnostics;
+14 named tests plus the test-owned 32-pair v4 ledger (32/32 unchanged);
+two D575 JSDoc replacements with comment-stripped JS byte-identical
+(49e8744d...); focused 51/51; sg 0 (targeted and repository-wide); tsc 0
+after one test-only impossible-union fix; new manifest digests raw
+8c0bcb3c... / canonical 0316244a...; 14 mutants killed with hashes;
+revised inventory 77/185/186 = 182 Vitest + 3 type + 1 browser (the two
+merge-added specs explained). The 182-spec cumulative: attempt 1
+689.9 s, 3442/3464 with 22 timeouts; the D587.3 serial rerun 873.3 s,
+3433/3464 with 31 timeout/ETIMEDOUT reds plus one ENOTEMPTY cleanup
+fallout, under load above 20 with the main gate concurrent; the lane
+correctly refused a third run or any budget change. Verified by me:
+`sg scan` exit 0; the four `claude -p` matches are the echoed header and
+decisions.md lines the lane read. Committed 90484d45. Astra round 1
+launched (brief review-impl-d569-a2.md, session
+01a0848f-f1ee-7691-a0e8-6aec71607e3f). The 182-spec cumulative is queued
+(~/dnd-slim-runs/cum-d569-a2-queued.sh) to start only after the main gate
+reaches GATES DONE or a red vitest line, logging to cum-d569-a2.log.
