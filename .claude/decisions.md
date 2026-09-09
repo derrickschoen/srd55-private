@@ -19501,3 +19501,14 @@ function, grep used). Cumulative tsc + one vitest invocation running on
 0f2ba7af (~/dnd-slim-runs/cum-heldout-s1-r2.log). Astra round 2
 launched (brief review-impl-heldout-s1-r2.md, session
 01a0845c-f89c-7cc3-8c87-aebef32ed016).
+
+## D586.58 — txn plan round 3 revised; Astra final review launched (2026-09-09 00:13)
+
+Lane exit 0, PLAN-TXN-R3 DONE in about four minutes; plan 387 lines,
+sha256 c3ef6f01... (verified by me), tree clean, only the echoed header
+matches `claude -p`. Round-3 dispositions: killer retargeted to
+`abort_leaks_rng` at composition.test.ts:319-336, snapshot assertion
+:333; STOP/re-plan wording made consistent; slice 0 freezes inputs,
+double-captures, then hashes the baseline output. Astra FINAL review
+launched (brief review-plan-txn-r3.md, session
+01a0845e-1e48-70c1-a1dc-974f1f9f4399).
