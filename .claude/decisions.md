@@ -19907,3 +19907,30 @@ authorize launch. Open before any v5 arm: the 182-spec cumulative
 launch preflight (external hashes, provenance, notes|empty), the oracle
 re-capture and a blind gate, and an explicit launch decision recorded
 here.
+
+## D586.73 — promo180 plan DISPATCH PHASE 0 at the final round (2026-09-09 01:18)
+
+Astra round 3: "DISPATCH PHASE 0. Blockers: none remaining at the plan
+level. The repository-mount leak is closed." The allowlist at plan line
+276 exposes only node, its loader, 15 verified libraries, the audited
+standalone bundle, two sanitized inputs, empty output storage and
+synthetic /proc, /dev, /tmp; no repository, generator, fixtures,
+registration, decisions, seeds or reports; access and reconstruction
+controls precede teacher calls and are repeated before design. Owner
+direction intact (Sol-only capture, extraction before design, generic
+steering, luna low floor, proposer-only, Fable/Astra/Sol with Opus notes
+only). Three should-fixes, binding for the implementation dispatch:
+esbuild rejects `--sourcemap=false` (omit it) and the mounted
+/usr/bin/node is v12.22.9 while the shell node is v24.13.0, so the
+bundle must target the node actually mounted (mount the nvm v24 binary
+and its loader/libraries, re-derive the ldd list); add an explicit
+turnExhaustionCoordinator() boundary assertion (the existing suite never
+calls it); bind the bootstrap seed 5870003 in the wrapper in memory
+while preserving pool4-contrasts.py's hash (its module constant is
+44320260903). Reviewer evidence: extractor executed in memory (0 round
+plans / 1 retained Sol adjustment), 22 analyzer tests, 426 historical
+fields, 90/90 rows, all pins. Execution of the isolation controls
+remains unproved in the review sandbox; my shell preflight passes.
+Next: phase-0 implementation dispatch (tooling only); Sol teacher calls
+are a separate supervisor launch after the isolation controls pass on
+this shell, recorded here when made.
