@@ -20324,3 +20324,25 @@ should-fix, and an explicit non-dependence on main's session
 transaction (the branch is unmerged because of the engine-round-session
 conflict recorded in D586.93). Astra reviews the plan up to three
 rounds as usual.
+
+## D586.95 — promo180 Slice H fix round 2 harvested: candidate committed, 39-spec cumulative and Astra round 2 running (2026-09-09 02:57)
+
+Lane exit 0, PROMO180-H-R2 DONE; claims: nine of the eleven approved
+files modified (+398/-139), no new production file; the shared deadline
+now covers speculative recalculation and adoption; engine execution is
+excluded from the restricted wall and cannot trigger a duplicate
+fallback; expired adjustments discard staged updates; D474 requires an
+explicit refusal or two validation failures, with arm-base correction
+for a rejected structured submission; the two vacuous receipts now
+mutate deadline creation and planner selection; effective arm sources
+validated; clock-controlled regressions added; inventory recomputed to
+the 39-spec reverse-import fixed point (13 runtime modules, 28
+consumers + 23 promised); tsc 0; sg 0; its 39-spec run 536/593 with 57
+EROFS-cascade failures in seven MCP-spawning specs and no timeouts; one
+independent arena assertion corrected afterward (flagged to the
+reviewer). Verified by me: `sg scan` exit 0; only the echoed header
+matches `claude -p`; committed 13beb989; all 39 specs exist. My
+cumulative runs on the writable checkout at load 3.1
+(cum-promo180-h-r2.log). Astra round 2 launched (brief
+review-impl-promo180-h-r2.md, session 01a084f4-b850-7dd0-b104-b1a7fca1f935)
+with every round-1 reproduction to be re-run.
