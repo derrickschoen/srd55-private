@@ -190,9 +190,7 @@ describe('D584.4 deterministic feasibility accounting closure', () => {
     expect({ attempts, completions }).toEqual({ attempts: 3, completions: 3 });
     expect(result.fallbackResolutions.map((resolution) => resolution.combatant))
       .toEqual(accountingFixture.reactorIds);
-    expect(result.events.filter((event) =>
-      event.type === 'pending_decision_queued' || event.type === 'movement_completed' ||
-      event.type === 'pending_decision_resolved').map((event) => event.type)).toEqual([
+    expect(result.events.map((event) => event.type)).toEqual([
       'pending_decision_queued',
       'pending_decision_queued',
       'movement_completed',
