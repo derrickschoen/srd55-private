@@ -20759,3 +20759,28 @@ legal-menu sequence, end-turn and cover probes, the plan's six negative
 controls). Slices 2-3 excluded. The lane runs its own D584.4 cumulative
 (real node_modules); the supervisor re-runs the changed specs and scans
 at harvest.
+
+## D586.115 — reconciliation slice 1 harvested: merge committed, 193-spec cumulative and Astra round 1 running (2026-09-09 04:39)
+
+Lane exit 0, RECONCILE-S1 DONE in 36 minutes; claims: shared
+SessionCommandTrialCore with staged batch acceptance and no fork/
+checkpoint/restore/commit/completion/rollback ownership; both wrappers
+compose it with unchanged result/error shapes; attempted() outside the
+try/finally with a hook-failure control; both conflicts resolved (session
+production byte-identical to c4e525c3; the spec a 20-block union);
+inventory 193 specs (8,308 bytes, sha 42b6c1ed...); its run 184/193 files
+with 57 EROFS-cascade failures plus one self-authored assertion corrected
+mid-run (expected stance_started only, actual resource_spent then
+stance_started; flagged to the reviewer); mutants killed and restored by
+apply_patch; session capture 696,676 bytes sha 29ca2ded..., cmp 0,
+manifests OK; candidate B,C,A report 759 bytes with heap 1,073,801,848
+(-76,720 bytes, -0.007 %), deterministic identity retained, historical
+artifact untouched; sg 0, tsc 0, diff --check 0. Verified by me: `sg
+scan` exit 0; `sha256sum -c` of the five-entry manifest 5 OK; the
+after-reconcile-s1 capture is 696,676 bytes; only the echoed header
+matches `claude -p`; staged everything and committed the merge as
+31e98af5 (parents 1db4717d and ce081ef0; index clean). My cumulative
+(tsc + ONE vitest invocation over the 193 specs) runs on the writable
+checkout at load 2.3 (cum-reconcile-s1.log). Astra round 1 launched
+(brief review-impl-reconcile-s1.md, session
+01a08552-4efd-7e00-b5c1-ff36506599ba).
