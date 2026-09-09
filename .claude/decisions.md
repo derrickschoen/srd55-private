@@ -20174,3 +20174,28 @@ sg 0, vitest-gate 0) the integrated revision carrying the mcp-client,
 row-codec and elevation landings is fully green. Main has since taken
 the txn slice-1 merge (77681784), covered by the queued full main gate
 behind the blind gate, which the queue launches now.
+
+## D586.87 — promo180 Slice H round 1: REJECT on seven blockers; fix round 2 resumed (2026-09-09 02:24)
+
+Astra round 1 on 86a3c80c: REJECT. Blockers: speculative continuation
+(ai-dm-conversation.ts:5320, adoption :5235) bypasses the deadline and
+acceptsCompletion(); expiration during engine execution yields a model
+application plus a fallback application and auto_resolved (:4604 with
+turn-exhaustion-coordinator.ts:222); restricted-wall boundaries include
+player engine execution and exclude later speculation/adjustment calls
+(:5407, :5143, :3536); an exhausted adjustment still persists 'adjusted'
+(adjustment-exhaustion-coordinator.ts:225); D474 triggers inferred from
+proposal absence so one rejected submission skips the arm-base correction
+(:4731); two of the five mutation receipts swap captured evidence rather
+than mutating production (ai-dm-conversation.test.ts:531); the 23-spec
+inventory is not the reverse-import fixed point (28 runtime-consumer
+specs, union 39; e.g. engine-host-integration, refusal-handling). One
+should-fix: ai-dm-arena.ts:525 lets baseline/Sol arms inherit a global
+KB instruction. Confirmed: types/flags/basis override, eleven-file scope,
+merged tests untouched, the host-boundary test substantive, three
+production mutants killed in memory, the 0->1 resume-count assertion
+change legitimate. My cumulative on the rejected candidate was killed by
+process group. Fix round 2 of 3 resumed on
+01a0849b-1dab-7581-a796-01ebd81acb10 (brief impl-promo180-h-r2.md,
+marker PROMO180-H-R2 DONE) with each defect, its reproduction-as-test
+and the 39-spec union spelled out.
