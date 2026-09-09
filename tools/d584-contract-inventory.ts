@@ -167,6 +167,16 @@ export function parseNameStatus(text: string): readonly ChangeEntry[] {
   });
 }
 
+/** Keeps inherited branch-test selection anchored to the merge base. */
+export function branchTestDiffArguments(base: string): readonly string[] {
+  return ['diff', '--name-status', `${base}...HEAD`, '--', 'tests'];
+}
+
+/** Resolves a moving branch ref to the immutable base actually shared with HEAD. */
+export function inventoryBaseArguments(base: string): readonly string[] {
+  return ['merge-base', base, 'HEAD'];
+}
+
 function matchesManifest(path: string, manifest: readonly string[]): boolean {
   return manifest.some((entry) =>
     entry.endsWith('/**') ? path.startsWith(entry.slice(0, -2)) : path === entry,
@@ -291,7 +301,7 @@ export async function collectContractInventory(
     readFile(arguments_.baseline, 'utf8'),
   ]);
   const baseline = parseBaseline(baselineText);
-  const base = git(root, ['rev-parse', arguments_.base]).trim();
+  const base = git(root, inventoryBaseArguments(arguments_.base)).trim();
   const head = git(root, ['rev-parse', 'HEAD']).trim();
   if (baseline.base !== base || baseline.head !== head) {
     throw new Error('Baseline base/head does not match this inventory run.');
@@ -321,9 +331,9 @@ export async function collectContractInventory(
     .sort();
   const preExistingExclusions = [...baselinePaths].sort();
 
-  const branchTestEntries = parseNameStatus(git(root, [
-    'diff', '--name-status', base, '--', 'tests',
-  ]));
+  const branchTestEntries = parseNameStatus(
+    git(root, branchTestDiffArguments(base)),
+  );
   const branchTestInventory = branchTestEntries
     .filter((entry) => entry.status !== 'D' && entry.path.endsWith('.test.ts'))
     .map((entry) => entry.path);

@@ -4,7 +4,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+  branchTestDiffArguments,
   buildImportGraph,
+  inventoryBaseArguments,
   parseBaseline,
   parseInventoryArguments,
   parseNameStatus,
@@ -72,6 +74,12 @@ describe('D584.4 elevation contract inventory', () => {
         { status: 'M', path: 'src/a.ts' },
         { status: 'R100', path: 'src/new.ts' },
       ]);
+    expect(branchTestDiffArguments('abc123')).toEqual([
+      'diff', '--name-status', 'abc123...HEAD', '--', 'tests',
+    ]);
+    expect(inventoryBaseArguments('main')).toEqual([
+      'merge-base', 'main', 'HEAD',
+    ]);
   });
 
   it('follows producer-to-consumer imports transitively without widening through dependencies', async () => {
