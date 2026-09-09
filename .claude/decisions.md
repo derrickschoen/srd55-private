@@ -19246,3 +19246,14 @@ question whether a 0.02% overshoot is inside the heap measurement's own
 noise and whether the plan's rule still says SHELVE. No decision on
 D583's fate until that verdict; the owner's room-D bounded rewrite
 (D587.7) waits on the same answer.
+
+## D587.12 — serial reruns complete: elevation's D524 red cleared (26/26 in 8.9 s), rowcodec's only red is the pre-merge D544 budget; elevation lane resumed (2026-09-08 23:45)
+
+Serial rerun batch (D587.3) finished 23:44. rowcodec arena spec: 38/39,
+the single red again "runs configured arms round-robin" at 5,000 ms —
+the D544 test main raised to 30 s (b2cd4ec4); the planning worktree
+predates the raise. los-cover ai-dm-screenshot-probe (the D524 spec the
+elevation lane blocked on): 26/26 passed in 8.89 s at load ~6 — a load
+artefact, cleared; budget untouched. Elevation lane resumed with that
+evidence to finish slice 1. Queued: the five rowcodec specs my inventory
+missed (starts now that the batch is done).
