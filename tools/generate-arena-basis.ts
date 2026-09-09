@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { canonicalJson } from '../src/commands/canonical-json';
+import { decodeArenaBasisEnvelopeV1 } from '../src/vtt/arena-fixture';
 import {
   ROOM_DIFFICULTY_PROFILES,
   ROOM_TERRAIN_PROFILES,
@@ -67,10 +68,11 @@ export async function generateArenaBasis(config: BasisGenerationConfig): Promise
   await mkdir(config.outPath, { recursive: true });
   await Promise.all(Array.from({ length: config.rooms }, async (_unused, index) => {
     const seed = config.seed + index;
-    const room = generateRoom(seed, {
+    const generated = generateRoom(seed, {
       difficulty: config.difficulty,
       ...(config.terrainProfile === undefined ? {} : { terrainProfile: config.terrainProfile }),
     });
+    const room = decodeArenaBasisEnvelopeV1(generated, { mode: 'legacy_basis' });
     await writeFile(
       resolve(config.outPath, `seed-${String(seed)}.json`),
       `${canonicalJson(room)}\n`,

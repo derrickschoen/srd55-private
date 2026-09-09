@@ -6,8 +6,6 @@ import { readFile, realpath } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { canonicalJson } from '../../commands/canonical-json';
 import type { EncounterState } from '../../combat/encounter';
-import { creatureSizes } from '../../domain/enums';
-import { BUNDLED_MONSTER_ROSTER } from '../../combat/statblocks/roster';
 import {
   encounterBranchId,
   encounterSessionId,
@@ -64,6 +62,7 @@ import {
   type KbReadRecord,
   type KbSubjectSources,
 } from './knowledge-base';
+import { decodeEngineFixtureV1 } from '../arena-fixture';
 
 function record(value: unknown, label: string): Readonly<Record<string, unknown>> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new TypeError(`${label} must be an object.`);
@@ -482,55 +481,7 @@ export function handleMcpRequest(state: EncounterState, message: unknown): JsonR
 }
 
 export function decodeArenaFixture(decoded: unknown): EncounterState {
-  const root = record(decoded, 'arena fixture');
-  const encounter = record(root['encounter'], 'arena fixture encounter');
-  const state = record(encounter['state'], 'arena fixture encounter state');
-  if (!Array.isArray(state['combatants']) || !Array.isArray(state['tokens']) || typeof state['round'] !== 'number') throw new TypeError('Arena fixture encounter state is incomplete.');
-  const explicitLegacyPlayerSizes: ReadonlyMap<string, (typeof creatureSizes)[number]> = new Map([
-    ['combatant:fighter', 'Medium'],
-    ['combatant:cleric', 'Medium'],
-    ['combatant:wizard', 'Medium'],
-  ] as const);
-  const combatants = state['combatants'].map((value) => {
-    const combatant = record(value, 'arena fixture combatant');
-    const profile = record(combatant['profile'], 'arena fixture combatant profile');
-    const rules = record(profile['rules'], 'arena fixture combatant rules');
-    const sourced = rules['sizeCategory'];
-    const statblockId = String(profile['statblockId']);
-    const sourcedStatblockSize = BUNDLED_MONSTER_ROSTER.find((entry) => entry.id === statblockId)
-      ?.statblock.sourceDetails.classification;
-    const firstStatblockSize = sourcedStatblockSize?.kind === 'present'
-      ? sourcedStatblockSize.value.sizes.find((size) => creatureSizes.includes(size as (typeof creatureSizes)[number]))
-      : undefined;
-    const carried = typeof sourced === 'string' && creatureSizes.includes(sourced as (typeof creatureSizes)[number])
-      ? sourced as (typeof creatureSizes)[number]
-      : explicitLegacyPlayerSizes.get(String(profile['id'])) ?? firstStatblockSize as (typeof creatureSizes)[number] | undefined;
-    if (carried === undefined) throw new TypeError(`Arena fixture combatant ${String(profile['id'])} has no known mechanical size.`);
-    return { ...combatant, profile: { ...profile, rules: { ...rules, sizeCategory: carried } } };
-  });
-  const sizes = new Map(combatants.map((combatant) => {
-    const profile = record(combatant['profile'], 'arena fixture combatant profile');
-    const rules = record(profile['rules'], 'arena fixture combatant rules');
-    return [String(profile['id']), rules['sizeCategory'] as (typeof creatureSizes)[number]] as const;
-  }));
-  const tokens = state['tokens'].map((value) => {
-    const token = record(value, 'arena fixture token');
-    const size = sizes.get(String(token['combatantId']));
-    if (size === undefined) throw new TypeError(`Arena fixture token ${String(token['id'])} has no known mechanical size.`);
-    return { ...token, placementMode: { kind: 'normal' as const, actual: size } };
-  });
-  const environment = record(state['environment'], 'arena fixture environment');
-  return {
-    ...state,
-    combatants,
-    tokens,
-    environment: { ...environment, narrowOpeningRegions: [] },
-    sharedSpaceRelations: [],
-    adjudicationPending: [],
-    observationHistory: Array.isArray(state['observationHistory'])
-      ? structuredClone(state['observationHistory'])
-      : [],
-  } as unknown as EncounterState;
+  return decodeEngineFixtureV1(decoded);
 }
 
 export function decodeArenaFixtureText(text: string): EncounterState {
