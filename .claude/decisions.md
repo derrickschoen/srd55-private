@@ -19555,3 +19555,29 @@ lines, 17 slices, sha256 b44dc386... (verified by me), tree clean.
 Astra round 2 launched (brief review-plan-offers-r2.md, session
 01a08463-c29d-7563-a7ab-a3cef404fa20) with instructions to re-run its
 own Dash/Grapple probe and derive the 441/2500 tree independently.
+
+## D586.61 — elevation fix round 2 harvested: candidate committed, cumulative and Astra round 2 running (2026-09-09 00:23)
+
+Lane exit 0, ELEVATION-S1-R2 DONE; claims: all four reviewer fixes in
+the inventory tool (ancestor-HEAD provenance with blob/index/worktree
+SHA validation; drift, missing specs and uncontrolled producers fail
+the CLI; TypeScript-AST import discovery with computed/template dynamic
+imports documented as unsupported; transitive producer control),
+hashes printed by the mutation contract, inventory 72 manifest / 10
+owned / 4 producers / 0 collisions, focused 11/11, its cumulative 5
+files 45/45, tsc 0, sg 0, nine negative controls killed with hash
+table. Verified by me: `sg scan` exit 0; only the echoed header matches
+`claude -p`. Committed b279e654 (5 files, incl. the mutant-definition
+fixture tests/fixtures/d586-elevation-mutants.json, flagged to the
+reviewer as needing confirmation it is an input, not a regenerated
+pin). Finding against my own work: my first inventory was direct
+importers only; rebuilt as a transitive reverse-import graph over
+src/tools/tests (still 4 Vitest specs + 1 type-test; the lane's fifth
+spec, the screenshot probe, is not a dependent in my graph and the
+reviewer is asked to say whether it is owed). The first cumulative was
+killed by pid before the rebuild; the relaunched one runs on b279e654
+(~/dnd-slim-runs/cum-elevation-s1-r2.log). Astra round 2 launched
+(brief review-impl-elevation-s1-r2.md, session
+01a08467-fec3-7610-9b53-c1be5e54f8b9). Review launches now append a
+`review exit:` sentinel so the monitor stops matching log text that
+Astra merely reads.
