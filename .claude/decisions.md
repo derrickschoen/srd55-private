@@ -20096,3 +20096,28 @@ closing evidence (brief review-impl-txn-s1-r3.md); the candidate is
 unchanged since round 2, which found no implementation blocker.
 
 ## D586.81a — supervisor run of the three changed challenge specs on 0011d8b8: 3 files, 55/55, exit 0 (2026-09-09 01:58)
+
+## D586.83 — txn slice 1 ACCEPTED and merged into main; slice 2 dispatched; gates queued; a queued-script finding against my own tooling (2026-09-09 02:01)
+
+Astra round 3 on 4a1e2617: "ACCEPT SLICE 1. Blockers: none." Verified the
+19-spec inventory, the supervisor tsc/cumulative (441 + 2 arena
+timeouts at :560/:604, budgets unchanged) and the serial rerun 39/39;
+reconciled 443/443. Merged claude/p-txn into main as 77681784 (clean).
+Slice 2 (scripted PC consumer, two files) dispatched fresh on
+claude/p-txn at 4a1e2617: session 01a084c1-69d4-7423-93f7-3fc77c6cf03c,
+brief impl-txn-s2.md, marker TXN-S2 DONE, with the ratified 19-spec
+inventory, the two slice-2 mutants, the after-s2 byte-identical proof
+and identity assertions spelled out.
+
+Gates: the blind gate (claude/blind-dm 90484d45) is queued behind the
+main browser rerun; a full main gate on 77681784 is queued behind the
+blind gate. Finding against my own work: the first version of the
+main-gate queue script read GATES DONE from yesterday's stale blind log,
+woke at once, found 4870 busy and, by design error, wrote its refusal
+over ~/dnd-slim-runs/gate-wt-main-493121dd.log, clobbering the
+f3c84c01 vitest-green text. The result survives in D586.75 and in
+/tmp/dnd-gate-reports/vitest-gate-2026-09-09T05-22-05.244Z-*.json, and
+the browser rerun log is separate; a note file records the clobber. The
+script now waits for the blind-queue's rename of the stale log, then
+for GATES DONE in the fresh log, then for 4870 to free, and never
+writes the gate log itself.
