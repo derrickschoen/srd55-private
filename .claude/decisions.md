@@ -21361,3 +21361,12 @@ Astra round 3 (FINAL) launched read-only (brief
 review-d569-v5-runbook-r3.md, log astra-review-d569-v5-runbook-r3.log).
 An ACCEPT WITH FIXES at this round may list only verbatim edits the
 supervisor applies; a REJECT shelves the runbook.
+
+## D586.143 — serial rerun of the two named reds at 16851799: los-cover green, inventory red as expected (2026-09-09 07:50)
+
+`--no-file-parallelism` rerun in a fresh main-shaped clone: 2 files, 115/116
+tests; tests/unit/vtt/room-generator-los-cover.test.ts green (its 5 s
+timeout was load), tests/unit/tools/d583-contract-inventory.test.ts red
+on the same assertion (the known branch-state defect, deterministic). The
+two unnamed red files from D586.141 remain unknown and are covered only by
+the round-2 candidate's full cumulative. Temp clone deleted.
