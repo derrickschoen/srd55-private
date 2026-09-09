@@ -11,6 +11,7 @@ import {
   mergeContinuationEquivalentStates,
   probeReducerApplicationLimitSampling,
   probeReducerContinuationV1,
+  probeRetainedSiblingLimitSampling,
   probeScenarioAccountingV1,
   runChallengeReducerFeasibility,
   type ChallengeProvenanceMigrationEvidenceV1,
@@ -272,7 +273,7 @@ describe('D583 reducer-backed challenge feasibility', () => {
     expect(horizon.endpointActorId).toBe(combatantId('combatant:generated-challenge-a-01-knight'));
   });
 
-  it('d583 bca limits are immutable cumulative and checked before and after work', () => {
+  it('publishes the immutable cumulative d583 bca limit profile', () => {
     expect(Object.isFrozen(D583_BCA_FEASIBILITY_LIMITS_V1)).toBe(true);
     expect(D583_BCA_FEASIBILITY_LIMITS_V1).toEqual({
       profile: 'd583_bca_v1', maxFaceExpansions: 10_000_000, maxReducerApplications: 5_000_000,
@@ -280,6 +281,45 @@ describe('D583 reducer-backed challenge feasibility', () => {
       maxCommandCheckpointsPerBranch: 64, maxDrawsPerBranch: 128,
     });
     expect(report.limits).toBe(D583_BCA_FEASIBILITY_LIMITS_V1);
+  });
+
+  it('rejects the first variant heap sample without hiding it behind a second reading', async () => {
+    const heapValues = [
+      10,
+      D583_BCA_FEASIBILITY_LIMITS_V1.maxHeapUsedBytes + 1,
+      10,
+    ];
+    const nowValues = [0, 0, 0, D583_BCA_FEASIBILITY_LIMITS_V1.maxWallMilliseconds + 1];
+    const measured = await runChallengeReducerFeasibility(fixture, {
+      now: (): number => nowValues.shift() ?? 0,
+      heapUsed: (): number => heapValues.shift() ?? 10,
+    });
+    expect(measured.failure).toEqual({
+      kind: 'limit_exhausted', counter: 'heap_used_bytes',
+      observed: D583_BCA_FEASIBILITY_LIMITS_V1.maxHeapUsedBytes + 1,
+      limit: D583_BCA_FEASIBILITY_LIMITS_V1.maxHeapUsedBytes,
+    });
+    expect(heapValues).toEqual([10]);
+    expect(nowValues).toEqual([D583_BCA_FEASIBILITY_LIMITS_V1.maxWallMilliseconds + 1]);
+  });
+
+  it('counts retained sibling nodes in the checked exploration peak', () => {
+    const state = decodeArenaBasisEnvelopeV1(
+      JSON.parse(inputs.fixtures.readText('tests/fixtures/arena-basis-challenge/seed-5831001.json')) as unknown,
+      { mode: 'challenge' },
+    ).encounter.state;
+    const active = state.activeCombatant;
+    if (active === null) throw new Error('Room B requires an active combatant.');
+    expect(probeRetainedSiblingLimitSampling(state, {
+      type: 'dodge', actor: active, cost: 'action',
+    }, {
+      now: (): number => 0,
+      heapUsed: (): number => 10,
+    })).toEqual({
+      kind: 'limit_exhausted', counter: 'live_nodes',
+      observed: D583_BCA_FEASIBILITY_LIMITS_V1.maxLiveNodes + 1,
+      limit: D583_BCA_FEASIBILITY_LIMITS_V1.maxLiveNodes,
+    });
   });
 
   it('samples fixed heap limits after a real reducer application', () => {
@@ -326,6 +366,36 @@ describe('D583 reducer-backed challenge feasibility', () => {
     ]);
     expect(written).toEqual([missing.report, mismatched.report]);
     expect(written.every((value) => value.verdict === 'SHELVE_D583' && value.rooms.length === 0)).toBe(true);
+  });
+
+  it('CLI valid-profile execution reports the first enforced exhaustion through injected IO', async () => {
+    const written: ChallengeReducerFeasibilityReportV1[] = [];
+    const heapValues = [
+      10,
+      D583_BCA_FEASIBILITY_LIMITS_V1.maxHeapUsedBytes + 1,
+      10,
+    ];
+    const nowValues = [0, 0, 0, D583_BCA_FEASIBILITY_LIMITS_V1.maxWallMilliseconds + 1];
+    const result = await runChallengeFeasibilityCli([
+      '--basis', 'challenge', '--seed', '5831001', '--rooms', '3', '--room-order', 'B,C,A',
+      '--mode', 'reducer', '--limits', 'd583_bca_v1', '--out', '/tmp/d583-cli-exhaustion-control.json',
+    ], {
+      loadFixtureText: fixture,
+      writeReport: async (_output, value): Promise<void> => { written.push(value); },
+      runtime: {
+        now: (): number => nowValues.shift() ?? 0,
+        heapUsed: (): number => heapValues.shift() ?? 10,
+      },
+    });
+    expect(result.report.failure).toEqual({
+      kind: 'limit_exhausted', counter: 'heap_used_bytes',
+      observed: D583_BCA_FEASIBILITY_LIMITS_V1.maxHeapUsedBytes + 1,
+      limit: D583_BCA_FEASIBILITY_LIMITS_V1.maxHeapUsedBytes,
+    });
+    expect(result.report.verdict).toBe('SHELVE_D583');
+    expect(written).toEqual([result.report]);
+    expect(heapValues).toEqual([10]);
+    expect(nowValues).toEqual([D583_BCA_FEASIBILITY_LIMITS_V1.maxWallMilliseconds + 1]);
   });
 
   it('feasibility fails closed on mass provenance continuation collision or unmeasured variant', () => {

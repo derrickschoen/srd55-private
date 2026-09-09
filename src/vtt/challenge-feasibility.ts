@@ -935,7 +935,7 @@ function runVariant(
 ): ChallengeReducerVariantReportV1 {
   const before = copyCounters(counters);
   const scope: VariantScope = {
-    started: runtime.now(), peakLiveNodes: 0, peakHeapUsedBytes: runtime.heapUsed(),
+    started: runtime.now(), peakLiveNodes: 0, peakHeapUsedBytes: 0,
     maximumCommandCheckpoints: 0, maximumDraws: 0,
   };
   sampleResources(counters, scope, runtime, invocationStarted, 0);
@@ -1082,6 +1082,35 @@ export function probeReducerApplicationLimitSampling(
       state, command, recordingTransactionRng(583_200_001), ARENA_REACTION_OFFER_POLICY, null,
       accounting(counters, scope, runtime, scope.started, () => 1),
     );
+    return null;
+  } catch (error) {
+    if (error instanceof FeasibilityStop) return error.failure;
+    throw error;
+  }
+}
+
+export function probeRetainedSiblingLimitSampling(
+  state: EncounterState,
+  command: EncounterCommand,
+  runtime: FeasibilityRuntime,
+): FeasibilityFailureV1 | null {
+  const started = runtime.now();
+  const counters: MutableCounters = {
+    faceExpansions: 0, reducerApplications: 0, completedLeaves: 0,
+    peakLiveNodes: 0, peakHeapUsedBytes: 0,
+    maximumCommandCheckpoints: 0, maximumDraws: 0,
+  };
+  const scope: VariantScope = {
+    started, peakLiveNodes: 0, peakHeapUsedBytes: 0,
+    maximumCommandCheckpoints: 0, maximumDraws: 0,
+  };
+  try {
+    exploreCommand({
+      state, weight: exactWeight(1n, 1n),
+      branchProvenance: [{
+        weight: exactWeight(1n, 1n), traces: [], events: [], draws: 0, commandCheckpoints: 0,
+      }],
+    }, command, counters, scope, runtime, started, D583_BCA_FEASIBILITY_LIMITS_V1.maxLiveNodes);
     return null;
   } catch (error) {
     if (error instanceof FeasibilityStop) return error.failure;

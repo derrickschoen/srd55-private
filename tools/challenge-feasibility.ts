@@ -4,6 +4,7 @@ import {
   runChallengeReducerFeasibility,
   shelvedChallengeFeasibilityReport,
   type ChallengeReducerFeasibilityReportV1,
+  type FeasibilityRuntime,
 } from '../src/vtt/challenge-feasibility';
 
 const ROOT = resolve(import.meta.dirname, '..');
@@ -16,6 +17,7 @@ function argument(args: readonly string[], name: string): string | null {
 export interface ChallengeFeasibilityCliIo {
   readonly loadFixtureText: (seed: 5831001 | 5831002 | 5831003) => Promise<string>;
   readonly writeReport: (output: string, report: ChallengeReducerFeasibilityReportV1) => Promise<void>;
+  readonly runtime?: FeasibilityRuntime;
 }
 
 const PRODUCTION_IO: ChallengeFeasibilityCliIo = {
@@ -47,7 +49,7 @@ export async function runChallengeFeasibilityCli(
   }
   const suppliedLimits = argument(args, '--limits');
   const report = suppliedLimits === 'd583_bca_v1'
-    ? await runChallengeReducerFeasibility(io.loadFixtureText)
+    ? await runChallengeReducerFeasibility(io.loadFixtureText, io.runtime)
     : shelvedChallengeFeasibilityReport({
         kind: 'missing_limits', counter: 'limits_profile',
         observed: suppliedLimits ?? '<missing>', limit: 'd583_bca_v1',
