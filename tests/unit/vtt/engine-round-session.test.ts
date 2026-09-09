@@ -665,13 +665,16 @@ describe('authoritative engine round session', () => {
     );
     session.beginRoundWithoutSkipping(REQUEST, null);
     const active = session.currentState();
+    let acceptedApplications = 0;
     const accepted = runCommandBoundaryTransaction(
       active,
       { type: 'dodge', actor: FOCUS_ID, cost: 'action' },
       mulberry32(58_310_202),
       { kind: 'unattended', askDefault: 'decline' },
       null,
+      { attempted: (): void => { acceptedApplications += 1; } },
     );
+    expect(acceptedApplications).toBe(1);
     expect(accepted.state.revision).toBe(active.revision + accepted.revisionDelta);
     expect(accepted.events).toContainEqual(expect.objectContaining({
       type: 'stance_started', combatant: FOCUS_ID, stance: 'dodging',
@@ -680,6 +683,7 @@ describe('authoritative engine round session', () => {
 
     const rejectedRng = mulberry32(58_310_203);
     const beforeRng = rejectedRng.snapshot();
+    let refusedApplications = 0;
     expect(() => runCommandBoundaryTransaction(active, {
       type: 'attack', actor: FOCUS_ID, target: KILLER_ID, attackBonus: 7, criticalFloor: 20,
       rollMode: 'normal', attackerCanSeeTarget: true, targetCanSeeAttacker: true,
@@ -687,7 +691,10 @@ describe('authoritative engine round session', () => {
         terms: [{ type: damageType('Slashing'), dice: { count: 1, sides: dieSides(8), modifier: Number.NaN } }],
         critical: false, responses: [],
       },
-    }, rejectedRng, { kind: 'unattended', askDefault: 'decline' }, null)).toThrow('modifier must be finite');
+    }, rejectedRng, { kind: 'unattended', askDefault: 'decline' }, null, {
+      attempted: (): void => { refusedApplications += 1; },
+    })).toThrow('modifier must be finite');
+    expect(refusedApplications).toBe(1);
     expect(rejectedRng.snapshot()).toEqual(beforeRng);
     expect(active.eventLog).toEqual(session.currentState().eventLog);
   });

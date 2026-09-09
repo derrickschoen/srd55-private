@@ -13,8 +13,14 @@ import {
   dieSides,
   difficultyClass,
 } from '../../../src/combat/values';
+import { rollOccurrenceId, rollOperationPath } from '../../../src/combat/roll-provenance';
 
-const TEST_PROVENANCE = { kind: 'attack_roll', source: 'resolution-test' } as const;
+const TEST_PROVENANCE = {
+  occurrenceId: rollOccurrenceId('resolution:test'),
+  operationPath: rollOperationPath('attack/roll'),
+  source: null,
+  targets: [],
+} as const;
 
 function scriptedRng(values: readonly number[]): { readonly rng: Rng; readonly draws: () => number } {
   let index = 0;

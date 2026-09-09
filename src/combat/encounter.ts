@@ -145,11 +145,16 @@ import {
   rollDice as rollDicePrimitive,
   rollDie as rollDiePrimitive,
   transactionalRng,
-  type DieRollProvenance,
-  type DieRollProvenanceKind,
   type Rng,
-  type TransactionalRng,
 } from './random';
+import {
+  isTransactionalRollRng,
+  RollProvenance,
+  rollOccurrenceId,
+  rollOperationPath,
+  type RollProvenanceRequest,
+  type TransactionalRollRng,
+} from './roll-provenance';
 import type { HiddenRollCategory } from './roll-visibility';
 import {
   createSearchMemory,
@@ -264,38 +269,74 @@ import {
   type WildShapeUseState,
 } from './wild-shape';
 
-// Engine reducer sites deliberately have no provenance-free overload. The public
-// primitives retain their legacy overload only for non-engine simulation tools.
-function rollDie(rng: Rng, sides: DieSides, provenance: DieRollProvenance): number {
-  return rollDiePrimitive(rng, sides, provenance);
+interface ReducerRollDescriptor {
+  readonly kind: string;
+  readonly source: string;
+  readonly actor?: string;
+  readonly target?: string;
+  readonly termIndex?: number;
 }
 
-function rollDice(rng: Rng, expression: DiceExpression, provenance: DieRollProvenance) {
-  return rollDicePrimitive(rng, expression, provenance);
+const reducerRollOccurrenceIds = new WeakMap<TransactionalRollRng, ReturnType<typeof rollOccurrenceId>>();
+
+function escapeRollPath(value: string): string {
+  return value.replaceAll('~', '~0').replaceAll('/', '~1');
 }
 
-function rollD20(rng: Rng, mode: RollMode, provenance: DieRollProvenance) {
-  return rollD20Primitive(rng, mode, provenance);
+function rollRequest(rng: Rng, provenance: ReducerRollDescriptor): RollProvenanceRequest {
+  const source = provenance.actor?.startsWith('combatant:') === true
+    ? combatantId(provenance.actor)
+    : null;
+  const targets = provenance.target?.startsWith('combatant:') === true
+    ? [combatantId(provenance.target)]
+    : [];
+  const identity = [provenance.kind, provenance.source, provenance.actor, provenance.target]
+    .filter((part): part is string => part !== undefined)
+    .map(escapeRollPath)
+    .join('/');
+  return {
+    occurrenceId: isTransactionalRollRng(rng)
+      ? (reducerRollOccurrenceIds.get(rng) ?? rollOccurrenceId('reducer:unbound'))
+      : rollOccurrenceId('reducer:plain-rng'),
+    operationPath: rollOperationPath(
+      `command/${identity}${provenance.termIndex === undefined ? '' : `/term/${String(provenance.termIndex)}`}`,
+    ),
+    source,
+    targets,
+  };
+}
+
+// Every reducer draw enters the independent roll-provenance capability here.
+function rollDie(rng: Rng, sides: DieSides, provenance: ReducerRollDescriptor): number {
+  return rollDiePrimitive(rng, sides, rollRequest(rng, provenance));
+}
+
+function rollDice(rng: Rng, expression: DiceExpression, provenance: ReducerRollDescriptor) {
+  return rollDicePrimitive(rng, expression, rollRequest(rng, provenance));
+}
+
+function rollD20(rng: Rng, mode: RollMode, provenance: ReducerRollDescriptor) {
+  return rollD20Primitive(rng, mode, rollRequest(rng, provenance));
 }
 
 function resolveAttackRoll(
   request: Parameters<typeof resolveAttackRollPrimitive>[0],
   rng: Rng,
-  provenance: DieRollProvenance,
+  provenance: ReducerRollDescriptor,
 ) {
-  return resolveAttackRollPrimitive(request, rng, provenance);
+  return resolveAttackRollPrimitive(request, rng, rollRequest(rng, provenance));
 }
 
 function resolveSavingThrow(
   request: Parameters<typeof resolveSavingThrowPrimitive>[0],
   rng: Rng,
-  provenance: DieRollProvenance,
+  provenance: ReducerRollDescriptor,
 ) {
-  return resolveSavingThrowPrimitive(request, rng, provenance);
+  return resolveSavingThrowPrimitive(request, rng, rollRequest(rng, provenance));
 }
 
-function resolveDamage(request: DamageRequest, rng: Rng, provenance: DieRollProvenance) {
-  return resolveDamagePrimitive(request, rng, provenance);
+function resolveDamage(request: DamageRequest, rng: Rng, provenance: ReducerRollDescriptor) {
+  return resolveDamagePrimitive(request, rng, rollRequest(rng, provenance));
 }
 
 export type LifeState = 'living' | 'dying' | 'stable' | 'dead';
@@ -2889,7 +2930,7 @@ function targetDamageResponses(
 
 interface ReductionContext {
   state: EncounterState;
-  readonly rng: TransactionalRng;
+  readonly rng: TransactionalRollRng;
   readonly events: EncounterEvent[];
   readonly reactionDecision: ReactionDecisionHook | null;
 }
@@ -2922,7 +2963,7 @@ function resolveTargetDamage(
   source: CombatantId,
   target: CombatantId,
   request: DamageRequest,
-  provenance: { readonly kind: DieRollProvenanceKind; readonly source: string } = {
+  provenance: { readonly kind: string; readonly source: string } = {
     kind: 'attack_damage', source: 'target-damage',
   },
 ): ReturnType<typeof resolveDamage> {
@@ -12807,17 +12848,13 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
           ? { ...effect, payload: { ...potion.payload, remainingUses: remaining } }
           : effect),
       };
-      let healing = potion.payload.dice.modifier;
-      for (let index = 0; index < potion.payload.dice.count; index += 1) {
-        healing += rollDie(
-          context.rng,
-          dieSides(potion.payload.dice.sides),
-          {
-            kind: 'healing', source: `potion:${potion.payload.itemId}`, actor: command.actor,
-            target: command.actor, dieIndex: index, phase: 'initial',
-          },
-        );
-      }
+      const healing = rollDice(context.rng, {
+        ...potion.payload.dice,
+        sides: dieSides(potion.payload.dice.sides),
+      }, {
+        kind: 'healing', source: `item/healing-potion/${String(potion.id)}`,
+        actor: command.actor, target: command.actor,
+      }).total;
       applyHealing(context, command.actor, command.actor, healing);
       emit(context, {
         type: 'healing_potion_consumed',
@@ -12894,9 +12931,16 @@ export function reduceEncounter(
 ): EncounterReduction {
   const observedState = reconcileObservationHistory(state);
   const visibilityBefore = monsterVisibilitySnapshot(observedState);
+  const reducerRng = isTransactionalRollRng(rng)
+    ? rng
+    : RollProvenance.recording(transactionalRng(rng)).asRng();
+  reducerRollOccurrenceIds.set(
+    reducerRng,
+    rollOccurrenceId(`reducer/revision/${String(observedState.revision)}/command/${command.type}`),
+  );
   const context: ReductionContext = {
     state: { ...observedState, revision: observedState.revision + 1 },
-    rng: transactionalRng(rng),
+    rng: reducerRng,
     events: [],
     reactionDecision: options.reactionDecision ?? null,
   };

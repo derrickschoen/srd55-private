@@ -1,6 +1,12 @@
 import type { EncounterState } from '../combat/encounter';
 import type { EncounterCommand, EncounterEvent } from '../combat/events';
-import { transactionalRng, type Rng, type TransactionalRng } from '../combat/random';
+import { transactionalRng, type Rng } from '../combat/random';
+import {
+  isTransactionalRollRng,
+  RollProvenance,
+  type DrawRecord,
+  type TransactionalRollRng,
+} from '../combat/roll-provenance';
 import type { CombatantId } from '../combat/values';
 import {
   unattendedReactionOfferResolution,
@@ -23,7 +29,12 @@ export interface EngineCommandBoundaryResult extends EngineCommandBoundaryResolu
   readonly state: EncounterState;
   readonly events: readonly EncounterEvent[];
   readonly revisionDelta: number;
-  readonly dieRolls: ReturnType<TransactionalRng['dieRollHistory']>;
+  readonly dieRolls: readonly DrawRecord[];
+}
+
+export interface ReducerApplicationAccounting {
+  /** Called immediately before every attempted reducer application, including automatic boundary work. */
+  attempted(): void;
 }
 
 interface MutableBoundaryEvidence {
@@ -35,9 +46,11 @@ interface MutableBoundaryEvidence {
 function reduceAndRecord(
   state: EncounterState,
   command: EncounterCommand,
-  rng: TransactionalRng,
+  rng: TransactionalRollRng,
   evidence: MutableBoundaryEvidence,
+  accounting: ReducerApplicationAccounting | null,
 ): EncounterState {
+  accounting?.attempted();
   const reduced = reduceSessionEncounter(state, command, rng);
   evidence.events.push(...reduced.events);
   return reduced.state;
@@ -45,10 +58,11 @@ function reduceAndRecord(
 
 export function resolveEngineCommandBoundary(
   initialState: EncounterState,
-  rng: TransactionalRng,
+  rng: TransactionalRollRng,
   hostPolicy: ReactionOfferHostPolicy,
   guidance: ReactionGuidanceDeclaration | null,
   evidence: MutableBoundaryEvidence,
+  accounting: ReducerApplicationAccounting | null = null,
 ): EncounterState {
   if (hostPolicy.kind === 'dm_attended') return initialState;
   let state = initialState;
@@ -76,7 +90,7 @@ export function resolveEngineCommandBoundary(
         type: 'resolve_pending_decision',
         decisionId: selected.resolution.decisionId,
         optionId: selected.resolution.resolution,
-      }, rng, evidence);
+      }, rng, evidence, accounting);
       if (selected.kind === 'guidance') evidence.guidedResolutions.push(selected.resolution);
       else evidence.fallbackResolutions.push(selected.resolution);
       continue;
@@ -87,7 +101,7 @@ export function resolveEngineCommandBoundary(
     if (legendaryResistance !== undefined) {
       state = reduceAndRecord(state, {
         type: 'resolve_pending_decision', decisionId: legendaryResistance.id, optionId: 'suffer',
-      }, rng, evidence);
+      }, rng, evidence, accounting);
       continue;
     }
     const legendaryWindow = state.config.initiativeMode === 'per_combatant'
@@ -97,14 +111,14 @@ export function resolveEngineCommandBoundary(
       legendaryBoundaryToResume ??= { ...legendaryWindow.boundary };
       state = reduceAndRecord(state, {
         type: 'resolve_pending_decision', decisionId: legendaryWindow.id, optionId: 'pass',
-      }, rng, evidence);
+      }, rng, evidence, accounting);
       continue;
     }
     const deathSave = state.pendingDecisions.find((decision) => decision.kind === 'death_save');
     if (deathSave !== undefined) {
       state = reduceAndRecord(state, {
         type: 'resolve_pending_decision', decisionId: deathSave.id, optionId: 'roll',
-      }, rng, evidence);
+      }, rng, evidence, accounting);
       continue;
     }
     const boundaryToResume = legendaryBoundaryToResume;
@@ -118,7 +132,7 @@ export function resolveEngineCommandBoundary(
       legendaryBoundaryToResume = null;
       state = reduceAndRecord(state, {
         type: 'end_turn', actor: boundaryToResume.activeCombatant,
-      }, rng, evidence);
+      }, rng, evidence, accounting);
       continue;
     }
     return state;
@@ -135,25 +149,30 @@ export function runCommandBoundaryTransaction(
   rng: Rng,
   hostPolicy: ReactionOfferHostPolicy,
   guidance: ReactionGuidanceDeclaration | null,
+  accounting: ReducerApplicationAccounting | null = null,
 ): EngineCommandBoundaryResult {
-  const transactional = transactionalRng(rng);
+  const transactional = isTransactionalRollRng(rng)
+    ? rng
+    : RollProvenance.recording(transactionalRng(rng)).asRng();
   const checkpoint = transactional.checkpoint();
   const beforeRevision = state.revision;
-  const beforeRollCount = transactional.dieRollHistory().length;
+  const beforeRollCount = transactional.trace().attempts.length;
   const evidence: MutableBoundaryEvidence = {
     events: [], fallbackResolutions: [], guidedResolutions: [],
   };
   try {
-    const ready = resolveEngineCommandBoundary(state, transactional, hostPolicy, guidance, evidence);
-    const reduced = reduceAndRecord(ready, command, transactional, evidence);
-    const resolved = resolveEngineCommandBoundary(reduced, transactional, hostPolicy, guidance, evidence);
+    const ready = resolveEngineCommandBoundary(state, transactional, hostPolicy, guidance, evidence, accounting);
+    const reduced = reduceAndRecord(ready, command, transactional, evidence, accounting);
+    const resolved = resolveEngineCommandBoundary(
+      reduced, transactional, hostPolicy, guidance, evidence, accounting,
+    );
     return {
       state: resolved,
       events: evidence.events,
       revisionDelta: resolved.revision - beforeRevision,
       fallbackResolutions: evidence.fallbackResolutions,
       guidedResolutions: evidence.guidedResolutions,
-      dieRolls: transactional.dieRollHistory().slice(beforeRollCount),
+      dieRolls: transactional.trace().attempts.slice(beforeRollCount),
     };
   } catch (error) {
     transactional.restoreCheckpoint(checkpoint);
