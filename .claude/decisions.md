@@ -20216,3 +20216,19 @@ Verified by me: `sg scan` exit 0; only the echoed header matches
 runs on the writable checkout at load 6.3 (cum-txn-s2.log). Astra
 round 1 launched (brief review-impl-txn-s2.md, session
 01a084d8-7bd2-7473-b148-4bd563708067).
+
+## D586.89 — txn slice 2 ACCEPTED on merits (cumulative pending); slice 3 dispatched (2026-09-09 02:33)
+
+Astra round 1 on 733c1446: "ACCEPT SLICE 2 on implementation merits. No
+code blockers." 18 session cases passed in its in-memory harness; five
+invalid-actor probes created zero forks and preserved parent RNG,
+revision and canonical state; both mutants failed at test lines 521 and
+499; restored hashes equal HEAD; fresh capture equals the baseline;
+manifest checks before and after. One should-fix: capture-commands.log
+line 78 records a hash missing "7d" (the artifact itself is correct);
+passed to slice 3 as a re-check of every recorded digest. Merge waits
+on my 19-spec cumulative (cum-txn-s2.log, running). Slice 3 (resolved
+monster mechanics consumer, two files) dispatched fresh on 733c1446:
+session per fanout log, brief impl-txn-s3.md, marker TXN-S3 DONE, with
+the four slice-3 mutants incl. the encounter.ts:10025 risk mutant and
+the after-s3 byte-identical proof.
