@@ -20164,3 +20164,13 @@ committed 86a3c80c. My cumulative (tsc + one vitest invocation over the
 23 specs, all present) runs on a writable checkout at load 3.7
 (cum-promo180-h.log). Astra round 1 launched (brief
 review-impl-promo180-h.md, session 01a084cf-083a-7231-a9fb-75ec4bb3c36f).
+
+## D586.86 — main gate on f3c84c01 fully GREEN (browser stage rerun) (2026-09-09 02:19)
+
+Browser-only rerun on f3c84c01 (started 01:23 after the stale 4870
+server was killed): Playwright 186 passed in 55.1 min, load flakes none,
+playwright-gate exit 0, BROWSER DONE 02:18. Together with D586.75 (tsc 0,
+sg 0, vitest-gate 0) the integrated revision carrying the mcp-client,
+row-codec and elevation landings is fully green. Main has since taken
+the txn slice-1 merge (77681784), covered by the queued full main gate
+behind the blind gate, which the queue launches now.
