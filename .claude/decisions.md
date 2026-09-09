@@ -20059,3 +20059,29 @@ gate-wt-blind-dm.log). Amendment 2 stands accepted on claude/blind-dm at
 90484d45. Still before any v5 arm: green blind gate, the oracle
 re-capture, the plan's section-9 launch preflight, and an explicit
 launch decision here.
+
+## D586.81 — challenge slice 3 fix round 2 harvested: SHELVE_D583 stands under corrected accounting; Astra round 2 running (2026-09-09 01:57)
+
+Lane exit 0, CHALLENGE-S3-R2 SHELVE_D583 after about two hours; claims:
+limits sampled before and after every attempted application incl.
+refusals and boundary resolutions; sibling-retaining queue accounting
+with accumulating branch counts; state keys over all reducer-owned state
+except event history; continuations through unresolved draws; merges
+keep every provenance branch; CLI SHELVE_D583 reports for missing or
+mismatched limits; per-variant deltas separated; derived-cap overflow
+explicit; the 33-draw migration evidence restored (4 healing, 1 save,
+22 attack-damage, 6 attack-roll); 14 plausible-wrong-value controls
+with exact restore hashes; corrected feasibility for B,C,A: first
+exhausted counter heap_used_bytes 1,073,847,728 vs 1,073,741,824
+(0.0099 % over, report 759 bytes sha 9b52386e..., earlier reports
+kept); its own cumulative in this real-node_modules worktree: 4,103
+tests, 4,091 + 12 load timeouts, seven specs rerun serially 278/278,
+reconciled 4,103/4,103; tsc 0; sg 0; seven allowed files, +838/-191.
+Verified by me: `sg scan` exit 0; only the echoed header matches
+`claude -p`; committed 0011d8b8; my own run of the three changed specs
+is in progress (focused-challenge-s3-r2.log). Astra round 2 launched
+(brief review-challenge-s3-r2.md, session
+01a084bd-7a6f-7e92-a3d4-501befc31b4b). Whatever the review says about
+the tooling, the D583 outcome for rooms B,C,A remains SHELVE_D583 and
+the owner's D587.7 bounded room-D rewrite is the next planning unit in
+this family once the tooling is accepted.
