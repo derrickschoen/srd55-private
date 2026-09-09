@@ -20995,3 +20995,16 @@ in its harness. My evidence: sg 0; 3 files 44/44 native. Slice 2
 (non-merging depth-first reducer enumeration) dispatches next on the
 same worktree; the full-run heap/wall feasibility remains the empirical
 STOP gate the plan names.
+
+## D586.126 — room D slice 2 dispatched (2026-09-09 05:57)
+
+Fresh lane on claude/challenge-rooms at 9781b93f (session
+01a08599-2b42-7982-8c9d-11db2b2a112f, brief impl-room-d-s2.md, marker
+ROOM-D-S2 DONE): the exhaustive RollComponentSpec discriminator,
+execution-scoped uniqueness, separate mass ledgers, occurrence-scoped
+telemetry and the prefix-sharing depth-first controller through the
+accepted transaction, with zero aggregation/continuation/comparison
+calls for D, streamed terminals, incomplete attempts charged, and
+before/after sampling through the checked sampler; the plan's twelve
+control classes; STOP with exact counters on any fixed or headroom
+overflow; no CLI (slice 3 later).
