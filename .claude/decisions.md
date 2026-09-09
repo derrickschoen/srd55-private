@@ -21238,3 +21238,34 @@ blocker is not a slice-2 defect; it is resolved by the planned main →
 challenge merge before slice 3 (known conflict in
 challenge-feasibility.test.ts). Supervisor main-shaped focused-spec run
 launched separately.
+
+## D586.138 — D569 v5 runbook: Astra REJECT round 2 (two new blockers, all round-1 items closed); lane resumed for the FINAL round 3 (2026-09-09 07:29)
+
+Astra (session 01a085e7-805d-7080-a3fc-aba630fa0f64, 102,208 tokens) on
+runbook sha 4fde544d…: every round-1 blocker and should-fix verified closed
+against the tree (absolute-path vite-node imports proven by a write-blocked
+probe; SIMULATED-only synthetic sessions with production overriding the
+value; jq record and read-back executed; pgrep guard probed for statuses
+0/1/2; advisory ordering fixed with scoring commands inert until the gate;
+umask in both detached shells; real canonicalD569SecondFamilyRegeneration
+callback; execution_failed STOP before judging; STOP 13-16; submissions vs
+dispatches; timing citation). Two NEW blockers: (1) section 3.1 re-runs
+2.1-2.4 after the launch decision, but every script install block requires
+`test ! -e` on files it then creates, so the mandatory recheck always
+aborts under set -e; (2) the advisory gate's raw-string regexes use
+`[^"\\n]` (excludes backslash and the letter n, not newline) — Astra ran the
+gate on `{"ranking": 1` with exposure empty and it printed PASS, bypassing
+STOP rule 10. Should-fixes: the gate rejects fenced/partial outputs the
+pinned extractor (judge-advisory.py:19-33, 51-54) deliberately accepts;
+STOP rule 13 forbids operating outside the worktree although the runbook
+and the pinned judge-one.sh (lines 4-5) use external artifact roots and the
+main checkout. Nit: judge-one.sh cited as 31-69, file has 43 lines.
+Supervisor confirmed both blockers by reading lines 110-111/432-433 and
+506/510. Lane resumed on the real session 01a085a4-… for round 3 of 3
+(brief resume-d569-v5-runbook-r3.md, log log-plan-d569-v5-runbook-r3.log,
+marker RUNBOOK R3 DONE) with exact fixes: install-once/verify-repeatable
+split; single-backslash newline classes plus a seven-case gate self-test;
+acceptance aligned with the pinned extractor while the forbidden-field
+check stays an independent raw-text check; rule 13 rewritten with
+permitted external roots and the read-only main-checkout exception. A
+REJECT at round 3 shelves the runbook.
