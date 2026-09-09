@@ -20199,3 +20199,20 @@ process group. Fix round 2 of 3 resumed on
 01a0849b-1dab-7581-a796-01ebd81acb10 (brief impl-promo180-h-r2.md,
 marker PROMO180-H-R2 DONE) with each defect, its reproduction-as-test
 and the 39-spec union spelled out.
+
+## D586.88 — txn slice 2 harvested: candidate committed, cumulative and Astra round 1 running (2026-09-09 02:26)
+
+Lane exit 0, TXN-S2 DONE; claims: exactly two files (+146/-46);
+completeScriptedPcTurn through the narrow program port with the
+precondition before begin, resolve_before_program, completed-only
+canonical commit, exact rollback rethrow; new tests for random-consuming
+failure rollback, error identity, exact result/evidence,
+untouched-control byte equality and an independently stepped one-draw
+Mulberry32; both slice-2 mutants killed and restored (mutations-s2.log);
+after-s2 capture byte-identical to the baseline; protected blocks intact;
+sg 0; tsc 0; its 19-spec run 391/444 with 53 EROFS failures (sandbox).
+Verified by me: `sg scan` exit 0; only the echoed header matches
+`claude -p`; committed 733c1446. My cumulative (tsc + the 19-spec union)
+runs on the writable checkout at load 6.3 (cum-txn-s2.log). Astra
+round 1 launched (brief review-impl-txn-s2.md, session
+01a084d8-7bd2-7473-b148-4bd563708067).
