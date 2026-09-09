@@ -21194,3 +21194,21 @@ marker RUNBOOK R2 DONE). Round 2 of 3.
 
 Main gate at ed2ca3eb so far: tsc 0, sg 0, vitest-gate 0; Playwright
 running on 4870.
+
+## D586.136 — D569 v5 runbook round 2 harvested; Astra round-2 review launched (2026-09-09 07:22)
+
+Runbook lane resume (real session 01a085a4-feb0-74e3-b85c-5a9ae9c69c45,
+113,301 tokens, exit 0, RUNBOOK R2 DONE): runbook now 1,453 lines, sha256
+4fde544d… — this time the lane's reported hash matches the file on disk.
+Worktree clean at 90484d45; probe file removed; no `claude -p` beyond the
+rules header. Supervisor spot-checks: zero `tsx -` invocations remain, 13
+vite-node references, umask 077 in 29 blocks, `name:$name` jq fields, an
+explicit pgrep conditional with status handling (lines 206-213), the
+production-only session check keyed on D569_CLI_VERSION=SIMULATED (lines
+362, 381, 416), STOP rules 13-16 added (git writes, D406 floor, 180 s live
+wall vs 240 s experiment wall, proposer-only). Astra round-2 review launched
+read-only (brief review-d569-v5-runbook-r2.md, log
+astra-review-d569-v5-runbook-r2.log), asked specifically to verify that
+scripts saved outside the repo resolve worktree imports under vite-node,
+that the advisory gate truly precedes the pinned judge-one.sh scoring
+launch, and that the SIMULATED switch cannot leak into production.
