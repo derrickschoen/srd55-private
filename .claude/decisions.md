@@ -21428,3 +21428,31 @@ Playwright" rule hold, and is recorded as its own decision when issued.
 The runbook file (gitignored .tmp-plans) is copied verbatim to
 /home/vagrant/dnd-slim-runs/d569-v5/runbook-84326354.md (mode 600, hash
 verified 84326354…) as the durable operator copy.
+
+## D586.147 — D569 v5 preflight 2.1-2.3 PASS; 2.4 waits on lane test processes; a finding against my own script extraction (2026-09-09 07:56)
+
+Executed from dnd-wt-blind-dm (clean at 90484d45) with umask 077:
+- 2.1: `REVISION AND EXTERNAL HASHES PASS` (branch, HEAD, clean status,
+  frozen contract, three external script hashes).
+- 2.2: check-manifest.ts installed under
+  /home/vagrant/dnd-slim-runs/d569-v5/scripts/ with its .sha256 pin;
+  verify block: `check-manifest.ts: OK` then `D569 MANIFEST PASS
+  version=d569-blind-experiment-v5 raw=8c0bcb3c… canonical=0316244a…`
+  (strict validator with the real second-family regeneration callback).
+- 2.3: isolated home present, auth symlink → /home/vagrant/.codex/auth.json,
+  codex at the pinned nvm path, `codex-cli 0.153.4` recorded to
+  codex-version.txt, `MODEL IDENTITY PASS slug=gpt-5.6-luna effort=high`.
+- 2.4 (informational): port 4530 free, load1 1.61 (≤ 2.0), but 20 busy
+  vitest/arena-pattern processes from the two running Sol lanes → the
+  runbook's STOP condition holds; 2.4/2.5 (dry-run) wait until the lanes
+  finish. No arena, no model call, nothing on 4173.
+
+FINDING AGAINST MY OWN EXECUTION: my first install of check-manifest.ts
+extracted the heredoc with a sed range whose start pattern re-matched the
+verify block's `manifest_script=` line, so the saved file ran on into the
+next section (297 lines instead of 29) and vite-node failed on line 31
+with a syntax error. The two bad files (mine, seconds old, model-free)
+were removed and re-extracted exactly (runbook lines 112-140, 29 lines)
+before the verify block; the pinned hash on disk is of the correct body.
+The runbook's install-once guard behaved correctly; the defect was in my
+extraction, not in the runbook.
