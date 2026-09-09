@@ -20725,3 +20725,22 @@ Lane exit 0, PLAN-ROOM-D-R3 DONE in 14 minutes; plan 314 lines, sha256
 (header/decisions reads). Astra round 3 (FINAL) launched (brief
 review-plan-room-d-r3.md) with the instruction to verify the component
 discriminator, the mass scoping and the attempt accounting by execution.
+
+## D586.113 — room D bounded-question plan DISPATCH SLICE 1 at the final round (2026-09-09 04:36)
+
+Astra round 3 on the 314-line plan (sha 56aad613...): "DISPATCH SLICE 1.
+Blockers: none. Should-fix: none outstanding." Verified by execution:
+the complete-specification discriminator separates normal and critical
+damage despite identical occurrence/component/execution/kind, with
+conditional distributions summing to 1 and branch-weighted masses
+11/20 and 1/20, or 143/400 and 1/400 under Dodge; attempts/outcomes
+Spear 111/95, normal Fighter 181/160, Dodge Fighter 1,637/1,464;
+512,032 terminal histories, 574,462 expansions, 1,087,704 applications
+incl. 62,432 incomplete attempts; retained-structure accounting 3,348
+node-equivalents (4,185 with headroom) under the seven fixed limits;
+bounded answer retention 4/25 vs 256/625, delta 156/625, margin
+249/2500; cover 124/140/124; key distinction 11/12. Full-run heap/wall
+feasibility remains an empirical STOP gate. Instruction to preserve
+the Slice 0 isolation prerequisite. Implementation dispatch of slice 0
+then slice 1 on the challenge worktree follows (the ref ce081ef0 stays
+the reconciliation's immutable input; the branch may advance).
