@@ -19996,3 +19996,18 @@ only the echoed header matches `claude -p`; committed 4a1e2617. The
 (cum-txn-s1-r2-queued.sh -> cum-txn-s1-r2.log) so the two heavy runs do
 not share the box. Astra round 2 launched (brief review-impl-txn-s1-r2.md,
 session 01a084a7-c4da-7761-a514-cc6ffee08ad2).
+
+## D586.77 — D569 Amendment 2 cumulative: 3456/3464, eight timeout reds in five inherited specs; serial rerun queued (2026-09-09 01:34)
+
+Supervisor cumulative on 90484d45 (started 01:22 at load 2.8, but the
+browser gate and two lanes joined during the run): tsc exit 0; 182 spec
+files, 177 passed, 5 failed; 3464 tests, 3456 passed, 8 failed; 621 s.
+Every red is a timeout: seven at 5,000 ms and one at 30,000 ms, in
+room-generator-los-cover (3), engine-mcp-server (2),
+experiment-orchestrator (1), ai-dm-screenshot-probe (1), ai-dm-arena
+(1); no assertion failure anywhere, none of the five specs is touched
+by the amendment. Under D587.3 the five specs get exactly one serial
+rerun (--no-file-parallelism), queued behind the txn cumulative so the
+box is quieter (cum-d569-a2-serial-queued.sh -> cum-d569-a2-serial.log);
+budgets untouched. If the rerun is green the D584.4 contract for the
+amendment closes; the launch preflight and oracle re-capture remain.
