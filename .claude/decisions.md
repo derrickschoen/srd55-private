@@ -19137,3 +19137,48 @@ those numbers, not the earlier ones, went into the Astra brief.
   running (my status grep had matched the verdict-format wording in my
   own brief). Killed by pid within a minute; the lane log is marked
   MISFIRE; the resume will be re-sent with the real verdict.
+
+## D587.11 — judge scripts APPROVED under D587.1 (Astra round 2); boundary hardened after the D569 plan review; main gate vitest green; slice reviews launched (2026-09-08 23:36)
+
+Astra round 2 on the judge scripts: "APPROVE ... Blockers: None. The
+late-writer fixture is now live; the status guard blocks continuation
+even after a nonempty prompt is published. Cross-packet exposure checks
+and lifecycle-log failure handling are fixed. Advisory scores remain
+excluded, and exact ties remain unchanged." Astra ran the 22 python
+tests in memory and reproduced 587 numeric fields across the four
+retained unseals. One should-fix applied: the notes-only stage-1 header
+no longer inherits "score all zeros" / "emit null for every rubric
+field" (rebuilt from the packet-reading rules; startup guard and a
+shell check now refuse any scoring directive there; refused_round and
+service_null labels kept). Then, from Astra's D569 plan review (blocker
+3: the analysis excluded only the alias opus48, so a config naming
+claude-opus-4-8 as a scoring seat would have loaded its scores):
+pool4-contrasts.py now REFUSES any opus-named scoring seat, requires a
+D587.1 packet to declare seat_names exactly fable/astra/sol and
+advisory_status notes|empty, and admits sol/opus/astra only with
+historical_panel true and advisory_status none (the four historical
+configs declare both). Verified by me: pool4_contrasts_test.py 22
+passed, judge-one-test.sh 46 passed, four unseals reproduce. Current
+pins: judge-one.sh 6ae7f6b8d4021ca5…, pool4-contrasts.py
+0c20f794404cf106…, judge-advisory.py 671bfedfc02eb326…
+(full hashes in the D569 round-2 brief). The hardening is mine and
+post-dates the APPROVE; it goes back to Astra with the D569 plan's
+round 2, which pins it as a prerequisite.
+
+D569 amendment-2 plan: Astra round 1 DO NOT DISPATCH — inventory
+incomplete (57 dependent specs missing of 76 direct; 184 transitive),
+the "no opus analysis" proof misses the diagnostic path (tool line
+1136 accepts arbitrary diagnostic seat names; an opus-only subset
+produced a delta), stale external pins, negative controls not
+mutation-shaped. Planning session resumed for round 2 with the verdict
+verbatim and the new pins.
+
+Main gate on eb778854: tsc 0, sg 0, vitest-gate exit 0 (the earlier
+red was the arena budget, since raised); browser stage running.
+Supervisor cumulative for heldout and rowcodec slices: tsc 0, sg 0,
+vitest reds are all TIMEOUTS in inherited specs under load 10-13
+(heldout: 4 files; rowcodec: the arena spec, whose 5 s round-robin
+budget is still 5 s on that pre-merge worktree); one serial rerun each
+queued after the gate's vitest stage (running). Astra implementation
+reviews of both slices launched with the vitest result marked
+PENDING. mcp-request-client cumulative still running.
