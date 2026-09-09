@@ -21456,3 +21456,27 @@ were removed and re-extracted exactly (runbook lines 112-140, 29 lines)
 before the verify block; the pinned hash on disk is of the correct body.
 The runbook's install-once guard behaved correctly; the defect was in my
 extraction, not in the runbook.
+
+## D586.148 — inventory git-seam lane harvested as candidate 319e908b; main-shaped cumulative and Astra review launched (2026-09-09 08:10)
+
+Lane (session 01a08603-51f0-75a1-9afa-ade1459a3024, 99,860 tokens, exit 0)
+ended BLOCKED only on the known sandbox limit: child vite-node processes
+cannot write node_modules/.vite-temp through the read-only link, so its
+cumulative showed 7 EROFS files (not load, not assertion reds) and the
+unmodified CLI exited 1 with EROFS in the sandbox; with a /tmp vite config
+the CLI produced 148 paths / b0561dd5… unchanged. Lane-claimed: focused
+spec 15/15, two mutants killed (gitOutput rethrow at test line 137;
+merge-base guard removal) and restored with sha verification. Supervisor
+verified: exactly two files (+125/-18), the 18 removed lines are the
+replaced `changedPaths: []` test (superseded by four seam-driven
+failure tests plus a positive control and the deleted-spec control) and
+the mechanical gitOutput → injected runner refactor; zero forbidden
+tokens, diff --check clean, my own sg scan 0 and tsc -b --force 0; the
+seam's documented contract (only the default adapter maps failures to
+null; injected runners propagate) matches the code. Committed on
+claude/trial-core-reconciliation as 319e908b. Supervisor main-shaped run
+launched (fresh shared clone, main → 319e908b, no .tmp-plans, full vitest
+output to mainshape-inv-git-seam.full.log — no tail pipe this time): CLI
+inventory, focused spec, then the CLI's own 148-path cumulative. Astra
+review launched read-only (session 01a08613-99ee-7fd3-a846-607137b654d9,
+brief review-inv-git-seam.md, log astra-review-inv-git-seam.log).
