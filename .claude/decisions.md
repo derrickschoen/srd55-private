@@ -20959,3 +20959,21 @@ directory and the review launched (session
 01a08592-e083-7722-b966-37576cff44eb). No lane or review ran twice.
 
 ## D586.123b — supervisor run of the three room D specs on 9781b93f: 3 files, 44/44, exit 0 (2026-09-09 05:51)
+
+## D586.124 — reconciliation slice 2 round 1: REJECT only on the pending cumulative; one test-strengthening should-fix (2026-09-09 05:54)
+
+Astra round 1 on 7385dc13: "REJECT: cumulative verification remains
+incomplete. No implementation blocker found." Verified: all 21 original
+test bodies byte-identical, 26 blocks, the 180 s beforeAll scoped to the
+original describe; all five new tests pass in memory; all five mutant
+hashes and 15 before/mutant/restored sections reconcile, controls
+reproduce every logged failure incl. composition draws 3 vs 2 (note:
+control 4 doubles both automatic calls, 5/5, rather than one); session
+capture exact; historical report unchanged; the candidate passes the
+plan validator (heap 1,073,899,848, +0.001982 %); slice-1 log
+correction verified; inventory 193 paths; one file +242/-12; clean tree.
+Should-fix: test:193 filters events before checking order; assert the
+complete event sequence. Disposition: when my cumulative (running, one
+screenshot-probe timeout so far) finishes and any timeouts pass their
+serial rerun, the lane applies the should-fix on the idle tree and the
+closing round goes to Astra with the evidence.
