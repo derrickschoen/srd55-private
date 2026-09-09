@@ -21815,3 +21815,37 @@ Read-only peek at `~/dnd-slim-runs/d569-v5/gpt-5.6-luna-blind-primary-hard.raw.j
 Headline counts (claimed by the rows, not yet validated): model gpt-5.6-luna ×30, effort high ×30, dmMode blind ×30, decisionTransport mcp_minimal ×30, blindRepairArm code_only ×30, blindFacts off ×30, escalated 0, executionErrorClass none, contextTruncated 0, flapRetries 0, `cliVersion` null on every row (expected: 4.2 relabel supplies the real 0.153.4). Round outcome: 4/30 rows accepted a full monster round (all creatures accepted; firstDecisionAccepted true), 18/30 exhausted three attempts with every attempt rejected (codes INVALID_INTENT_SHAPE, NO_MATCHING_OPTION, ACTION_UNAVAILABLE), 8/30 produced no resolver outcome at all (outcome `refused` ×5 / `service_null` ×3 with empty attempts). This is data, not a STOP: no STOP rule 1–16 condition is met, the arm keeps running untouched, and section 4 post-arm steps remain separate.
 
 Cells run under a per-conversation `codex-home-kb` copy inside `/tmp/dnd-ai-dm-conversation-*` (CODEX_HOME of the outer arena is `~/.codex-aidm`); `~/.codex-aidm/sessions` therefore stays empty by design. `/tmp` holds 8,5xx such dirs (1.5 GB) accumulated since 2026-09-08 22:27 across earlier runs; none touched while the arm runs.
+
+## D589 — OWNER: VTT handoff — backend/preparation half of a two-part project (2026-09-09)
+
+Owner directive received 2026-09-09 15:40 EDT, recorded verbatim (282 lines) at `.claude/consensus/vtt-handoff/OWNER-SPEC.md`
+(sha256 f33a7f7d86c2df7a3211fe4404401dee797afadb6d57ac140622099068c412a4). Binding summary: implement the backend/preparation
+half of a two-part project in this repository — one authoritative TypeScript engine behind a renderer-neutral session service,
+preserved in BOTH runtime modes (a real browser Web Worker with postMessage/MessageChannel and the DM-local Node/npm process),
+the existing top-down UI routed through the extracted boundary (typed intents in, safe snapshots out), a versioned bootstrap wire
+protocol v1 (`{v,id,method,params}` / `{v,id,ok,result|error{code,message}}` / `{v,event:"scene.snapshot",seq,data}`; methods
+session.open, scene.snapshot, token.move, door.set, light.set; SceneSnapshot fields exactly as specified; UNSUPPORTED never
+invented success; requestedRole is not authentication), published as immutable checksummed contract bundles with READY.json
+written last under the shared handoff root `<repo>/.tmp/vtt-handoff` (Windows view `\\wsl.localhost\Ubuntu\...`), a synthetic
+two-room scene and example exchanges, and a UUIDv7 art exchange (art/outbox requests, art/inbox result bundles with .partial copy
+discipline, validated and STAGED for review, never promoted or relicensed). A separate agent (ChatGPT on Windows) builds art and an
+optional Godot 2.5D client against a mock engine; the two applications are NOT connected in this phase and the Windows workspace
+is never edited from here. Required npm scripts: doctor, test:engine, test:protocol, test:worker, test:runtime-node,
+handoff:publish, art:request, art:validate, art:stage; an idempotent bootstrap script; durable docs; reports/claude/READY.md
+plus a machine-readable handoff (PARTIAL if any gate fails). Constraints restated by the owner: preserve uncommitted work, no
+reset/clean/stash/force-push/branch changes under a running agent, no push, no public listeners or firewall changes, no sudo
+policy changes, no Blender/Godot toolchain here, no real art generation, keep existing dev/build/test commands working, never
+change saved coordinates, never delete tests or discard campaigns. "Do not stop after planning: implement, run, fix and leave
+reproducible results."
+
+Supervisor execution record (2026-09-09 15:40 EDT): unit VTT-HANDOFF-01 opened under /codex-consensus (IMPLEMENTER = codex sol high, REVIEWER =
+astra high, supervisor = this session); loop log and assumption register at `.claude/consensus/vtt-handoff/`; branch
+`claude/vtt-handoff` in worktree dnd-wt-vtt-handoff from main @ 0f84e09f, gate port 4410. Audit facts recorded
+(`.tmp/runs/briefs-2026-09-06/vtt-handoff-AUDIT.md`): the encounter app runs the engine on the main thread and NO engine Web
+Worker exists (only the character-database worker); the Node side is the static server on 4173 plus the stdio engine MCP server;
+no network engine listener exists; `python3 -m venv` fails without sudo but a user-local bootstrap works (`--without-pip` +
+`pip --python`, or `uv`), so no approval request is needed. Planning lane (sol, session 01a087af-14c8-7a00-bcb2-9ab987d0b42e,
+writes only `.tmp-plans/2026-09-09-vtt-handoff-plan.md`) and an independent assumptions pass (astra, session
+01a087af-14c4-7522-8039-f091c2593872) dispatched read-only at 15:40 under a quiet-box rule (no builds/tests) because the D569 v5
+arm is still running until ~16:10; the baseline gate battery runs on the worktree after the arm exits and before any
+implementation step. Owner-side uncommitted art files in the main checkout are left untouched.
