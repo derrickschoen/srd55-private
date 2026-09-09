@@ -1,5 +1,4 @@
-import { readFile } from '../../helpers/test-filesystem-promises';
-import { join } from 'node:path';
+import { declareTestInputs } from '../../helpers/test-inputs';
 import { describe, expect, it } from 'vitest';
 import ts from 'typescript';
 import {
@@ -8,13 +7,17 @@ import {
   parseMutationRegistry,
 } from '../../../tools/d586-mutation-contract';
 
+const MUTATION_FIXTURE = 'tests/fixtures/d586-elevation-mutants.json' as const;
+const PLAN_FIXTURE = 'tests/fixtures/d584/2026-09-08-elevation-tiers-plan.md' as const;
+const fixtureInputs = declareTestInputs({ fixtures: [MUTATION_FIXTURE, PLAN_FIXTURE] });
+const mutationRegistry = fixtureInputs.fixtures.readText(MUTATION_FIXTURE);
+const ownershipPlan = fixtureInputs.fixtures.readText(PLAN_FIXTURE);
+
 describe('D586 executable mutation contract', () => {
-  it('registers the three type controls and six Slice 1 runtime controls exactly', async () => {
-    const value: unknown = JSON.parse(await readFile(
-      join(process.cwd(), 'tests/fixtures/d586-elevation-mutants.json'),
-      'utf8',
-    ));
+  it('registers the three type controls and six Slice 1 runtime controls exactly', () => {
+    const value: unknown = JSON.parse(mutationRegistry);
     const registry = parseMutationRegistry(value);
+    expect(ownershipPlan).toContain('`tests/fixtures/d586-elevation-mutants.json`');
     expect(registry.version).toBe(MUTATION_REGISTRY_VERSION);
     expect(registry.mutations.map((mutation) => mutation.id)).toEqual([
       'S1-ARBITRARY',
