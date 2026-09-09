@@ -2,9 +2,18 @@ import { describe, expect, it } from 'vitest';
 import { canonicalJson } from '../../../src/commands/canonical-json';
 import { combatToken, monsterCombatantProfile } from '../../../src/combat/combatant';
 import { createEncounter, reduceEncounter, type EncounterState } from '../../../src/combat/encounter';
+import type { EncounterCommand } from '../../../src/combat/events';
 import { mulberry32 } from '../../../src/combat/random';
 import { UNICORN } from '../../../src/combat/statblocks/monsters';
-import { armorClass, combatantId, encounterBranchId, encounterSessionId, type CombatantId } from '../../../src/combat/values';
+import {
+  armorClass,
+  combatantId,
+  damageType,
+  dieSides,
+  encounterBranchId,
+  encounterSessionId,
+  type CombatantId,
+} from '../../../src/combat/values';
 import { LION } from '../../../src/combat/statblocks/wild-beasts';
 import {
   EngineRoundSession,
@@ -426,6 +435,100 @@ describe('authoritative engine round session', () => {
       reactionKind: 'opportunity_attack',
       optionId: 'accept',
     }));
+  });
+
+  it('rolls back a failed random-consuming PC turn before a control-identical success', () => {
+    const started = reduceEncounter(
+      segmentedState(new Map([
+        [FOCUS_ID, { column: 0, row: 0 }],
+        [KILLER_ID, { column: 1, row: 0 }],
+      ])),
+      { type: 'roll_initiative' },
+      mulberry32(58_420_001),
+    ).state;
+    expect(started.activeCombatant).toBe(FOCUS_ID);
+    const attack: Extract<EncounterCommand, { readonly type: 'attack' }> = {
+      type: 'attack',
+      actor: FOCUS_ID,
+      target: KILLER_ID,
+      attackBonus: 100,
+      criticalFloor: 20,
+      rollMode: 'normal',
+      attackerCanSeeTarget: true,
+      targetCanSeeAttacker: true,
+      damage: {
+        terms: [{
+          type: damageType('Force'),
+          dice: { count: 0, sides: dieSides(6), modifier: 0 },
+        }],
+        critical: false,
+        responses: [],
+      },
+    };
+    const rollbackError = new Error('sentinel scripted PC validation failure');
+    const invalidAfterAttack: EncounterCommand = {
+      type: 'dodge',
+      get actor(): CombatantId {
+        throw rollbackError;
+      },
+    };
+    const seed = 58_420_002;
+    const failedSession = new EngineRoundSession(
+      started,
+      mulberry32(seed),
+      { kind: 'unattended', askDefault: 'decline' },
+    );
+    const untouchedControl = new EngineRoundSession(
+      started,
+      mulberry32(seed),
+      { kind: 'unattended', askDefault: 'decline' },
+    );
+    const beforeFailureBytes = canonicalJson(failedSession.currentState());
+
+    let caught: unknown;
+    try {
+      failedSession.completeScriptedPcTurn({
+        actorId: FOCUS_ID,
+        reducerCommands: [attack, invalidAfterAttack],
+      }, null);
+    } catch (error: unknown) {
+      caught = error;
+    }
+
+    expect(caught).toBe(rollbackError);
+    expect(canonicalJson(failedSession.currentState())).toBe(beforeFailureBytes);
+    expect(failedSession.currentState()).toEqual(untouchedControl.currentState());
+
+    const recovered = failedSession.completeScriptedPcTurn({
+      actorId: FOCUS_ID,
+      reducerCommands: [attack],
+    }, null);
+    const control = untouchedControl.completeScriptedPcTurn({
+      actorId: FOCUS_ID,
+      reducerCommands: [attack],
+    }, null);
+    expect(recovered).toEqual({
+      revisionDelta: 2,
+      fallbackResolutions: [],
+      guidedResolutions: [],
+    });
+    expect(control).toEqual({
+      revisionDelta: 2,
+      fallbackResolutions: [],
+      guidedResolutions: [],
+    });
+    expect(canonicalJson(failedSession.currentState()))
+      .toBe(canonicalJson(untouchedControl.currentState()));
+
+    const oracle = mulberry32(seed);
+    const expectedAttackFace = Math.floor(oracle() * 20) + 1;
+    expect(oracle.snapshot().draws).toBe(1);
+    const attackEvent = failedSession.currentState().eventLog.find((event) =>
+      event.type === 'attack_resolved' && event.actor === FOCUS_ID && event.target === KILLER_ID);
+    expect(attackEvent?.type).toBe('attack_resolved');
+    if (attackEvent?.type !== 'attack_resolved') throw new Error('Missing recovered PC attack event.');
+    expect(attackEvent.attack.roll.faces).toEqual([expectedAttackFace]);
+    expect(attackEvent.damage?.terms[0]?.roll.faces).toEqual([]);
   });
 
   it.each([3_943_004, 3_943_007])(
