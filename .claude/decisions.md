@@ -20143,3 +20143,24 @@ frozen contract intact. SHELVE_D583 remains valid. Fix round 3 of 3
 impl-challenge-s3-r3.md) with the regression named ([10, 1073741825, 10]
 must exhaust on heap) and one more phase-3b run under the corrected
 sampler required.
+
+## D586.85 — promo180 Slice H harvested: candidate committed, cumulative and Astra round 1 running (2026-09-09 02:16)
+
+Lane exit 0, PROMO180-H DONE; claims: 11 files (five section-4 production
+files, six specs), +1216/-149; the 180,000 ms shared round deadline with
+fractional-floor budgeting threaded through initial/resume/recovery/
+adjustment/correction/D474 escalation; late-completion gates before
+acceptance, authorization, execution and persistence; wall timing and
+planner/trigger attribution persisted; arena policy, arm-instruction
+types and the exact parser flags; the explicit
+DmEncounterHost.turnExhaustionCoordinator() boundary assertion; all five
+named mutation-shaped tests with receipt states and hash restoration;
+tsc 0; sg 0; its 23-spec run 328/385 with 57 EROFS-cascade failures in
+seven MCP-spawning specs (sandbox limit), no timeouts; the two deferred
+should-fixes recorded. It also "corrected one test-only assertion
+exposed before the EROFS cascade", flagged to the reviewer. Verified by
+me: `sg scan` exit 0; only the echoed header matches `claude -p`;
+committed 86a3c80c. My cumulative (tsc + one vitest invocation over the
+23 specs, all present) runs on a writable checkout at load 3.7
+(cum-promo180-h.log). Astra round 1 launched (brief
+review-impl-promo180-h.md, session 01a084cf-083a-7231-a9fb-75ec4bb3c36f).
