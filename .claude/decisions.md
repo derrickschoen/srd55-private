@@ -20625,3 +20625,18 @@ for empty and refusing corrections, the refused-row outcome on expiry,
 the speculation test hanging with a real MCP child, one chain-evidence
 assertion), but reopening after a third-round shelve is the owner's
 call under the standing protocol; not launched autonomously.
+
+## D586.107 — reconciliation plan round 2 revised; Astra round 2 launched (2026-09-09 03:53)
+
+Lane exit 0, PLAN-RECONCILE-R2 DONE in 11 minutes; plan 507 lines,
+55,914 bytes, sha256 1691ea0c... (verified by me), tree clean, one
+`claude -p` match (the header). Five dispositions all "Fixed": staged
+acceptance of each apply/resolveBoundary batch only after the automatic
+drain succeeds, with the caught-boundary-failure regression and no
+rewinding of attempted accounting; deterministic semantic oracles
+replace live byte matching, the 759-byte artifact kept as history;
+inventory implementation and tests moved into slice 1 (eight files,
+slice 2 one file) with a digest-checked 140+19 union; the risk mutant
+qualified per ref; the drain mutant replaced by post-command drain
+omission/misordering observed through a command-created pending
+reaction. Astra round 2 launched (brief review-plan-reconcile-r2.md).
