@@ -314,7 +314,11 @@ function monsterSpellCommand(
     weaponAttack: null,
     selectedOption: use.activationChoice?.kind === 'command_word' ||
       use.activationChoice?.kind === 'dispel_evil_and_good_mode'
-      ? use.activationChoice.value : null,
+      ? use.activationChoice.value
+      : use.activationChoice?.kind === 'unicorns_blessing_spell' &&
+          use.activationChoice.value === 'lesser-restoration'
+        ? use.selectedCondition ?? null
+        : null,
     ...(use.activationChoice?.kind === 'calm_emotions_per_target'
       ? { calmEmotionsModes: use.activationChoice.selections.map((entry) => ({ target: entry.targetId, mode: entry.mode })) }
       : {}),
@@ -621,11 +625,12 @@ export class EngineRoundSession {
       let appliedBranch: EngineAppliedProposalBranch;
       let refusalCodes: string[];
       if (primary.valid) {
-        mechanics = mechanicsWithChoice(primary.mechanics, entry.proposal.activationChoice);
+        mechanics = mechanicsWithChoice(primary.mechanics, entry.proposal.activationChoice, entry.primaryOption);
         appliedBranch = 'primary';
         refusalCodes = [];
       } else if (fallback?.valid === true) {
-        mechanics = mechanicsWithChoice(fallback.mechanics, entry.proposal.activationChoice);
+        if (entry.fallbackOption === null) throw new Error('Resolved fallback option is absent.');
+        mechanics = mechanicsWithChoice(fallback.mechanics, entry.proposal.activationChoice, entry.fallbackOption);
         appliedBranch = 'fallback';
         refusalCodes = [primary.code];
       } else {
