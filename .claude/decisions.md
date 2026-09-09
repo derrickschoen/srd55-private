@@ -20688,3 +20688,11 @@ editing per steps 3-4. Fresh lane launched (session
 (attempted() outside try/finally with a hook-failure control; the
 zero-totals wording), no git writes by the lane, the supervisor to
 stage and commit.
+
+## D586.110 — room D plan round 2 revised; Astra round 2 launched (2026-09-09 04:08)
+
+Lane exit 0, PLAN-ROOM-D-R2 DONE in 21 minutes; plan now 270 lines,
+sha256 f109fa50... (computed by me), tree clean; 1 `claude -p`
+match(es) in the log (header/decisions reads). Astra round 2 launched
+(brief review-plan-room-d-r2.md) with the instruction to re-run its
+own engine probes against every disposition.
