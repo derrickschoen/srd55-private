@@ -20744,3 +20744,18 @@ feasibility remains an empirical STOP gate. Instruction to preserve
 the Slice 0 isolation prerequisite. Implementation dispatch of slice 0
 then slice 1 on the challenge worktree follows (the ref ce081ef0 stays
 the reconciliation's immutable input; the branch may advance).
+
+## D586.114 — room D slices 0+1 dispatched on the challenge worktree (2026-09-09 04:37)
+
+Fresh lane on claude/challenge-rooms at ce081ef0 (session
+01a08550-608b-7712-a933-638f0c6112b9, brief impl-room-d-s1.md, marker
+ROOM-D-S1 DONE): slice 0 (test isolation: the production-run consumers
+and the 180 s beforeAll move to a new production spec, no assertion
+lost, injected production failure never reaches the deterministic spec)
+then slice 1 (closed bounded contract types, offered-command validation,
+hand constants, the independent raw-loop oracle, the conditional/
+request-mass tables with the complete-specification discriminator,
+legal-menu sequence, end-turn and cover probes, the plan's six negative
+controls). Slices 2-3 excluded. The lane runs its own D584.4 cumulative
+(real node_modules); the supervisor re-runs the changed specs and scans
+at harvest.
