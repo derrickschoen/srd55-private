@@ -19962,3 +19962,20 @@ alcove shape; one migration rule that must carry earned grants or mark
 provenance unresolved with import witnesses for one-Dash, double-Dash
 and Flee). Reopening as a fresh planning unit from the current draft is
 the owner's call under D587.8; not launched autonomously.
+
+## D586.75 — main gate on f3c84c01: vitest GREEN; Playwright stage void (stale server on 4870 from a killed gate); browser stage relaunched (2026-09-09 01:23)
+
+Gate on f3c84c01 (mcp-client + row-codec + elevation with the fixture
+fix): tsc 0, sg 0, vitest-gate exit 0 with two load flakes passing
+serially (ai-dm-screenshot-probe, room-generator-los-cover) and FAILED
+(none); the elevation ENOENT is gone on a fresh checkout. Playwright
+exited 1 after 325 ms: "http://127.0.0.1:4870 is already used". Cause:
+the vite webServer of the gate I killed at 00:56/01:09 (pid 534616, its
+own process group 534602) survived the group kill and kept 4870. Finding
+against my own kills: killing the gate's group does not reap the
+Playwright webServer's group; port 4870 must be checked before every
+gate relaunch. Killed it by pid; 4173 (owner) untouched, still
+listening. Browser-only rerun launched on the same worktree and
+revision (~/dnd-slim-runs/gate-wt-main-493121dd.browser.log); the
+vitest result stands. The D569 182-spec cumulative started at 01:22 on
+load 2.8 as queued.
