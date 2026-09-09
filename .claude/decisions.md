@@ -21164,3 +21164,33 @@ launch partition. Astra review launched read-only (session
 01a085cc-ecee-7ce2-b98e-a28e682a48f4, brief review-d569-v5-runbook.md,
 log astra-review-d569-v5-runbook.log). Launch remains a separate explicit
 decision.
+
+## D586.135 — D569 v5 runbook: Astra REJECT round 1 (five blockers), lane resumed for round 2 (2026-09-09 07:01)
+
+Astra (session 01a085cc-ecee-7ce2-b98e-a28e682a48f4, 149,812 tokens):
+REJECT. Blockers: (1) every inline `tsx -` snippet cannot load the D569
+tool (ERR_UNKNOWN_FILE_EXTENSION on docs/srd/full/srd-5.2.1.txt) — the
+TypeScript itself type-checks clean; (2) dry-run validation rejects
+sessionId null although the simulated adapter always persists null
+(tools/ai-dm-conversation.ts:2741-2747, arena test :1139); (3) the jq
+provenance record uses `{branch,...}` shorthand, which writes null for every
+--arg field; (4) `! pgrep ...` does not stop under errexit, so the busy
+guard can print PASS; (5) the Opus forbidden-field check runs after
+judge-one.sh has already launched the three scoring seats. Six should-fixes
+(umask/mode-600 custody, tautological regenerate callback, execution_failed
+rows blocked by empty null_overrides, STOP-list omissions for git writes /
+D406 floor / 180 s live wall, submissions-vs-dispatches cost unit, timing
+citation). Confirmed correct: first arm, 60-cell grid, flags, both-arms
+packet wait, no registered shuffle seed (569575 is the bootstrap seed),
+judge regex, analysis exports, hashes.
+
+Supervisor reproduced blockers 1, 3 and 4 directly (tsx import fails;
+`node_modules/.bin/vite-node <file.ts>` loads the tool; jq shorthand yields
+null and `{$branch}` yields the value; `bash -ec '! true; echo continued'`
+prints continued). Lane resumed on the real session
+01a085a4-feb0-74e3-b85c-5a9ae9c69c45 with the full header and every item
+(brief resume-d569-v5-runbook-r2.md, log log-plan-d569-v5-runbook-r2.log,
+marker RUNBOOK R2 DONE). Round 2 of 3.
+
+Main gate at ed2ca3eb so far: tsc 0, sg 0, vitest-gate 0; Playwright
+running on 4870.
