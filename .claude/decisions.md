@@ -21987,3 +21987,11 @@ clean rows + 3 timeouts needing provenance repair + 3 infrastructure cells, not 
 callers (:3743, :5189). Astra's own answer to the owner: "patch + structural follow-up — bounded, but the patch must add catalog
 readiness, the second finalization crash and the experimental-consumer migration". Supervisor accepted all six; RCA lane resumed for
 round 3 (final) to produce an implementable patch specification honouring D590. No code changed; nothing relaunched.
+
+## D591 — OWNER: quiet-box rule — "Anything, rely on the patch" (2026-09-09)
+
+Q2 answered 2026-09-09 17:50 EDT: once the D569 patch makes the engine MCP server mandatory with an explicit startup timeout and types infrastructure
+failures on the row (excluded from scoring), other lanes, reviews, gates and builds may run on the machine while an arm runs;
+contention then costs reruns, not data. Alternatives not chosen: nothing else ever; read-only lanes only. Supervisor note: this
+supersedes the informal "launch nothing else while the arm runs" practice ONLY after the patch is landed and reviewed; until then the
+old practice stands because unpatched arms cannot detect the failure.
