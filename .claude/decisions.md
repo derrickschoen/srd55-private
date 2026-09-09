@@ -20244,3 +20244,14 @@ spawning specs passed. Because the slice-3 lane is now editing the txn
 worktree, the D587.3 serial rerun of ai-dm-arena.test.ts runs in a fresh
 detached worktree of 733c1446 with symlinked node_modules
 (dnd-wt-verify-txn-s2, removed after; log cum-txn-s2-serial.log).
+
+## D586.91 — txn slice 2: serial rerun green, contract closed, merged into main (2026-09-09 02:42)
+
+D587.3 serial rerun of tests/unit/tools/ai-dm-arena.test.ts on 733c1446
+in the detached verification worktree: 39/39, vitest exit 0 (started
+02:37). Reconciled with the 19-spec run (442/444): 444/444, zero
+skipped, tsc 0. With Astra's "ACCEPT SLICE 2 on implementation merits"
+(D586.89) the slice is accepted; merged claude/p-txn at 733c1446 into
+main as c1f16152 (clean, two files). The verification worktree was
+removed and pruned. The queued main gate reads main's revision at its
+launch, so it will gate c1f16152 (or later) after the blind gate.
