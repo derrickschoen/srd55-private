@@ -194,7 +194,8 @@ describe('session command transaction', () => {
 
     const rolledBack = transaction.rollback(error);
 
-    expect(rolledBack).toEqual({ kind: 'rolled_back', error });
+    expect(rolledBack.kind).toBe('rolled_back');
+    expect(rolledBack.error).toBe(error);
     expect(transaction.currentState()).toBe(state);
     expect(() => transaction.rollback(error)).toThrow(
       'Cannot roll back after the session command transaction is rolled_back.',
@@ -359,12 +360,19 @@ describe('session command transaction', () => {
     const fixture = pendingReaction();
     const parent = mulberry32(58_410_107);
     const parentBefore = parent.snapshot();
+    const independentlyStepped = restoreMulberry32(parentBefore);
+    const expectedTrialDraws = [independentlyStepped(), independentlyStepped()];
+    const trialDraws: number[] = [];
+    const randomConsumingReducer: EncounterCommandReducer = (state, command, rng, options) => {
+      trialDraws.push(rng());
+      return reduceSessionEncounter(state, command, rng, options);
+    };
     const error = new Error('outer rollback sentinel');
     const outcome = runSessionCommandTransaction(
       transactionInput(
         fixture.beforeOffer,
         parent,
-        reduceSessionEncounter,
+        randomConsumingReducer,
       ),
       (commands) => {
         const attempted = commands.apply({
@@ -374,11 +382,17 @@ describe('session command transaction', () => {
           cause: 'voluntary',
         });
         expect(attempted.revision).toBe(fixture.beforeOffer.revision + 2);
+        expect(trialDraws.length).toBeGreaterThan(0);
+        expect(trialDraws).toEqual(expectedTrialDraws);
         throw error;
       },
     );
 
-    expect(outcome).toEqual({ kind: 'rolled_back', error });
+    expect(outcome.kind).toBe('rolled_back');
+    if (outcome.kind !== 'rolled_back') {
+      throw new Error('Failed transaction unexpectedly completed.');
+    }
+    expect(outcome.error).toBe(error);
     expect(Reflect.has(outcome, 'state')).toBe(false);
     expect(Reflect.has(outcome, 'random')).toBe(false);
     expect(Reflect.has(outcome, 'fallbackResolutions')).toBe(false);
