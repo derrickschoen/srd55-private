@@ -20399,3 +20399,38 @@ initial-boundary policies and the narrow port; a re-export or wholesale
 replacement would not preserve the contracts; resolve the session/spec
 conflicts by retaining both sides' behavioural assertions. Merge of
 slice 3 waits on my cumulative (cum-txn-s3.log, running).
+
+## D586.98 — correction to D586.97; promo180 Slice H round 2 REJECT; final fix round resumed with both findings sets (2026-09-09 03:09)
+
+Correction (finding against my own report): in D586.97 I paired the two
+cumulative reds the wrong way round. Reading the log in context: the
+conversation test "speculation uses arm base until trigger" is the
+5,000 ms TIMEOUT (file wall 559 s), and the ASSERTION failure is the
+arena test "applies escalation to only the configured arm and
+attributes the resulting row": the received row lacks `escalated: true`
+and `escalationModel: 'model-escalation'` although the fixture
+configures escalation, so under the new D474 rule the configured
+escalation no longer triggers or is not attributed. Both are real
+findings against the candidate either way.
+
+Astra round 2 on 13beb989: REJECT, three blockers: speculative adoption
+(ai-dm-conversation.ts:5290) and post-authorizedMechanics recalculation
+(:5393) lack the final acceptsCompletion() gate (clock advanced to
+expiry at adoption -> adopted, roundWallTimedOut true, authorized,
+executed); fallback work still contaminates the restricted wall (:4712;
+1,000 ms injected into two fallback computations persisted as policy
+time; 200,000 ms timed the round out from fallback alone); the
+coordinator escalates after one validation failure plus a no_response
+correction (turn-exhaustion-coordinator.ts:354). Should-fix: the
+speculation test adapter (ai-dm-conversation.test.ts:285) uses an
+unavailable phase and expects `proposed` instead of QUEUED-SPECULATIVE,
+so the named tests exercise dispatch_failed speculation. Confirmed:
+double-application fix, exhausted-adjustment fix, 7,000 ms engine time
+excluded / 20 ms retained, rejected-submission correction, both producer
+mutations, exact 39-spec inventory, inherited-KB rejection, eleven
+files, merged tests untouched; the "independent arena assertion
+corrected afterward" is not identifiable in the diff. Fix round 3 of 3
+(FINAL) resumed on 01a0849b-1dab-7581-a796-01ebd81acb10 (brief
+impl-promo180-h-r3.md, marker PROMO180-H-R3 DONE) carrying Astra's
+three blockers, the should-fix, and my two cumulative reds with the
+arena assertion diff pasted.
