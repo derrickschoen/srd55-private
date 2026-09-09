@@ -19206,3 +19206,15 @@ MY OWN WORK: I built the inventory from a name grep instead of the
 plan's inventory plus the import graph, exactly the D584.4 rule I hold
 lanes to. The five specs are queued as a serial run behind the current
 reruns. One should-fix (check order at codec line 292) sent to the lane.
+
+## D586.47 — mcp-request-client slice 1 COMMITTED on claude/p-mcpclient after a green supervisor cumulative; transaction plan to review (2026-09-08 23:40)
+
+Supervisor cumulative on dnd-wt-p-mcpclient (7 spec files: the module
+spec plus every consumer test naming the module — board-delivery,
+conversation, engine-mcp-boundary/handler/server, snippets): all 7
+files passed, sg scan 0, tsc -b 0, diff --check 0. Committed as the
+slice's second commit on claude/p-mcpclient (Astra ACCEPT SLICE 1 at
+round 3 recorded in D586.45). Queued for main behind the current gate.
+Session-command-transaction plan (lane DONE) sent to Astra, round 1.
+Offers-roadmap and promo180 planning lanes have written their plans
+and are exiting; reviews launch when their exit lines land.
