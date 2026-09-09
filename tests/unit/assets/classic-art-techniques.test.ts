@@ -899,8 +899,8 @@ describe('classic native-density and art-technique invariants', () => {
             [-1, 0], [1, 0],
             [-1, 1], [0, 1], [1, 1],
           ] as const) {
-            const nextX = point.x + dx;
-            const nextY = point.y + dy;
+            const nextX: number = point.x + dx;
+            const nextY: number = point.y + dy;
             if (!difficult.inside(nextX, nextY)) continue;
             const nextOffset = nextY * TILE_SIZE + nextX;
             if (
