@@ -21670,3 +21670,23 @@ tests/unit/tools/ai-dm-screenshot-probe.test.ts (5 s timeout under load
 candidate: it is superseded by the round-3 candidate, whose own
 supervisor cumulative is the evidence that closes the contract. Temp
 clone deleted.
+
+## D588.2 — owner request: board screenshots for art requests and a fit assessment (2026-09-09 12:15)
+
+Added art/requests/capture-screenshots.mjs (Playwright + vite preview of a
+built dist on a chosen port, never 4173): loads /vtt?encounter=d365, clicks
+the bundled-dungeon load, screenshots the page and the .encounter-board
+element; `--mode emberkeep` swaps starter-art data URIs for the delivered
+Emberkeep PNGs in the browser only (30 mapped; the app, manifest and pins
+untouched). Captures under art/requests/screenshots/ (gitignored: tracked
+rasters are rejected by source-is-greppable): current-topdown-ui-{page,
+board}.png and emberkeep-integrated-mock-{page,board}.png, built from the
+gate worktree's dist at d31875ae. README gained "Reference screenshots" and
+"Assessment: what fits the top-down board" (plan-view camera, tile sets
+with edge variants, contrast budget, lighting, drop-shadow objects,
+palette ramps, pixel discipline, prove-it-in-place step). Checks: 109
+requests validate; source-is-greppable 7/7. Findings from the mock: the
+Emberkeep floor is far too contrasty and repeats without variants; the
+wall is a front elevation that stripes instead of turning corners; the
+busts fit but their opaque bases hide the faction plate and the HP bar
+row. Owner-side request/delivery files remain uncommitted.
