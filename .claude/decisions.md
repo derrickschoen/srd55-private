@@ -19815,3 +19815,49 @@ launched (brief review-impl-d569-a2.md, session
 01a0848f-f1ee-7691-a0e8-6aec71607e3f). The 182-spec cumulative is queued
 (~/dnd-slim-runs/cum-d569-a2-queued.sh) to start only after the main gate
 reaches GATES DONE or a red vitest line, logging to cum-d569-a2.log.
+
+## D586.70 — elevation gate-defect fix ACCEPTED and re-landed on main; txn slice 1 REJECT round 1, fix round resumed; offers round 3 to Astra; gate relaunched (2026-09-09 01:10)
+
+Elevation, Astra round 3: "ACCEPT SLICE 1. Blockers: none." Fixture
+byte-identical to the plan section (72 entries), both specs declare
+inputs through test-inputs, no lane-local artifact reads remain, all 35
+round-2 assertions retained plus two, contract hash matches; missing-
+fixture fault injection makes both specs throw. Qualification recorded:
+fixture loading happens before the cwd change and test-inputs.ts:106
+keeps a cwd fallback. Two should-fixes for a later slice: add stable-
+test-input provenance checking (reject ignored/untracked prerequisite
+inputs, with a negative control reproducing this failure) to the D584.4
+inventory tool beside inventoryGateErrors:498; exercise fixture loading
+under isolation in the cwd regression. Re-landing: a plain merge hit
+modify/delete conflicts against the revert, so the merge was aborted,
+the revert reverted (1a914dab "Reapply"), then claude/los-cover merged
+cleanly as f3c84c01 bringing only 297e5027's fixture change. Gate on
+efb6dbab (tsc 0, sg 0, vitest in progress) killed by process group and
+relaunched on f3c84c01; the queued D569 cumulative keeps waiting for it.
+
+Txn slice 1, Astra round 1: REJECT, three blockers: the lane's cumulative
+omitted the four import-graph dependents (Astra's traversal agrees with
+mine: 16 dependents, union 19); two promised regression assertions are
+ineffective (the outer-rollback fixture consumes zero RNG draws; error
+assertions use deep equality, so a cloned same-constructor error passed
+all seven lifecycle tests); mutation restoration provenance cannot be
+reconciled (committed guard test hashes 06efb627... vs the reported
+restored b209ec...). Should-fix: timestamped capture-command evidence.
+Confirmed: five-file scope, three equal captures (696,676 bytes,
+29ca2ded...), harness replayed in memory against base and candidate,
+six protected blocks byte-identical, guard traversal 72 modules / 4
+terminal assets with ?raw and ?url into intel rejected, all six mutation
+mechanisms reproduced. My 19-spec cumulative on the rejected candidate
+was stopped (log marked). Fix round 2 of 3 resumed on
+01a08462-95cf-7e83-9c48-bf83e5771394 (brief impl-txn-s1-r2.md, marker
+TXN-S1-R2 DONE): random-consuming failed trial, toBe(error), all six
+controls repeated on the final candidate with a reconcilable log, the
+19-spec union, capture-command log.
+
+Offers roadmap round 3: lane exit 0, PLAN-OFFERS-R3 DONE; plan 792 lines,
+sha256 e27b440c... (verified by me), tree clean; claims Speed-sensitive
+capacities 60/50, 90/80, 30/20, 80/70, rebuilt witnesses (path costs
+5,5,5,10,10,15,15; joint-centre counts 6,4,2,0), 441/2500 and 3/40 with
+the OA boundary, slices 6A1/6A2 for 79 movement references and 57 legacy
+fixtures. Astra round 3 (FINAL) launched (brief review-plan-offers-r3.md,
+session 01a08491-ebdb-7141-9812-2247b5214ce6).
