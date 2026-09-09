@@ -20346,3 +20346,22 @@ cumulative runs on the writable checkout at load 3.1
 (cum-promo180-h-r2.log). Astra round 2 launched (brief
 review-impl-promo180-h-r2.md, session 01a084f4-b850-7dd0-b104-b1a7fca1f935)
 with every round-1 reproduction to be re-run.
+
+## D586.96 — txn slice 3 harvested: candidate committed, cumulative and Astra round 1 running (2026-09-09 03:05)
+
+Lane exit 0, TXN-S3 DONE; claims: exactly two files (+279/-81);
+applyResolvedMechanics through the narrow port with initialBoundary
+preserve, completed-only state/RNG commit, exact rollback identity;
+tests for rollback isolation after a random-consuming entry and the
+sequential two-application RNG-commit oracle; four mutants killed and
+restored (composition risk mutant draws 3 vs 2; mutations-s3.log);
+after-s3 capture byte-identical to the baseline; the truncated
+capture-log digest corrected; tsc 0; sg 0; its 19-spec run 393/446 with
+53 EROFS failures (sandbox), no timeouts. Verified by me: `sg scan` exit
+0; the two `claude -p` matches are the echoed header and the lane's own
+remark about it; committed c4e525c3. My 19-spec cumulative runs on the
+writable checkout at load 3.9 (cum-txn-s3.log). Astra round 1 launched
+(brief review-impl-txn-s3.md, session
+01a084fb-c23d-7d80-93b4-4ce75b0fd285), also asked for a one-paragraph
+read on what the slice-4 reconciliation with the challenge branch's
+engine-round-application must decide.
