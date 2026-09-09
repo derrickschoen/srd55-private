@@ -169,6 +169,45 @@ function deadline() {
 }
 
 describe('plan adjustment correction and exhaustion coordinator', () => {
+  it('expiration before adjustment correction persists nothing', async () => {
+    const f = await fixture();
+    const transitions = journal();
+    const activations = { value: 0 };
+    let policyMs = 0;
+    const base = correction(f.correctionRuntime.feed.current(), [], [], activations);
+    const runtime: AdjustmentCorrectionRuntime = {
+      ...base,
+      activateCapsule: () => {
+        activations.value += 1;
+        policyMs = 100;
+      },
+    };
+    const coordinator = new AdjustmentExhaustionCoordinator(transitions);
+
+    const outcome = await coordinator.coordinate({
+      initial: f.initial,
+      correction: runtime,
+      deadline: createConversationRoundDeadline(100, 0, () => policyMs),
+    });
+
+    expect(outcome).toEqual({
+      kind: 'baseline_kept',
+      requestId: 'request:engine-mcp',
+      baselinePlanHash: 'a'.repeat(64),
+      updates: [],
+      stagedActorIds: [],
+      correctedActorIds: [],
+      baselineActorIds: [f.first, f.second].sort(),
+      correctionResult: 'no_response',
+    });
+    expect(activations.value).toBe(1);
+    expect(transitions.transitions().at(-1)).toEqual({
+      kind: 'adjustment_completed',
+      requestId: 'request:engine-mcp',
+      outcome,
+    });
+  });
+
   it('retains partial staging and combines one accepted correction without synthesizing Dodge', async () => {
     const f = await fixture();
     const transitions = journal();

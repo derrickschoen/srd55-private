@@ -200,6 +200,40 @@ function exhausted(f: ReturnType<typeof fixture>, fallbackResult: ProposalFallba
 }
 
 describe('host turn exhaustion coordinator', () => {
+  it('expiration during engine execution does not apply fallback', async () => {
+    const f = fixture();
+    let acceptsCompletion = true;
+    let modelApplications = 0;
+    let fallbackApplications = 0;
+    const executionDeadline: AgentDispatchDeadline = {
+      signal: new AbortController().signal,
+      dispatch: (invocation) => ({ kind: 'open', timeoutMs: 60_000, invocation }),
+      acceptsCompletion: () => acceptsCompletion,
+    };
+
+    const outcome = await new TurnExhaustionCoordinator(
+      f.journal.turnExhaustionPersistence(),
+    ).coordinate({
+      initial: { kind: 'proposal', proposal: proposal(f, 'initial', 'primary') },
+      correction: runtime(f, new SIMULATEDAgentSessionAdapter({ startIds: [] }), [], { value: 0 }),
+      escalation: null,
+      deadline: executionDeadline,
+      host: {
+        ...host(),
+        authorize: async () => {
+          modelApplications += 1;
+          acceptsCompletion = false;
+          return 'authorized';
+        },
+        applyAutoResolved: async () => { fallbackApplications += 1; },
+      },
+    });
+
+    expect(outcome).toEqual({ kind: 'authorized', proposalId: 'proposal:initial', phase: 'initial' });
+    expect(modelApplications).toBe(1);
+    expect(fallbackApplications).toBe(0);
+  });
+
   it('late completion cannot reach acceptance', async () => {
     let acceptsCompletion = false;
     const originalHash = sha256(JSON.stringify({ acceptsCompletion }));

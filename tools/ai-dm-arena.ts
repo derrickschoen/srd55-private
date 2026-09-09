@@ -550,10 +550,10 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
   if (unknownInstructionArm !== undefined) {
     throw new TypeError(`--arm-instruction-source names unknown arm ${unknownInstructionArm.label}.`);
   }
-  for (const entry of armInstructions) {
-    if ((entry.label.includes('baseline') || entry.label === 'sol-high') &&
-      entry.source.instructionSource !== 'none') {
-      throw new TypeError(`Arena arm ${entry.label} must use instruction source none.`);
+  for (const arm of arms) {
+    if ((arm.label.includes('baseline') || arm.label === 'sol-high') &&
+      arm.instructionSource !== 'none') {
+      throw new TypeError(`Arena arm ${arm.label} must use instruction source none.`);
     }
   }
   if (!interleave && armInstructions.length > 0) {

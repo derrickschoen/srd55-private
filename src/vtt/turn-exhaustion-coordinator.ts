@@ -219,7 +219,7 @@ export class TurnExhaustionCoordinator {
       const authorization = input.deadline.acceptsCompletion()
         ? await input.host.authorize(proposal)
         : 'invalidated';
-      if (authorization === 'authorized' && input.deadline.acceptsCompletion()) {
+      if (authorization === 'authorized') {
         for (const resolution of proposal.resolutions) {
           if (resolution.selectedBranch !== 'fallback') continue;
           this.persistence.record({
@@ -237,9 +237,7 @@ export class TurnExhaustionCoordinator {
         initialProposalId: proposal.proposalId,
         actorFailures: actors.map((actorId) => ({
           actorId,
-          fallbackResult: authorization === 'invalidated' || !input.deadline.acceptsCompletion()
-            ? 'invalidated'
-            : 'invalid',
+          fallbackResult: authorization === 'invalidated' ? 'invalidated' : 'invalid',
         })),
         correction: input.correction,
         escalation: input.escalation,
@@ -342,7 +340,7 @@ export class TurnExhaustionCoordinator {
       const authorization = input.deadline.acceptsCompletion()
         ? await input.host.authorize(proposal)
         : 'invalidated';
-      if (authorization === 'authorized' && input.deadline.acceptsCompletion()) {
+      if (authorization === 'authorized') {
         this.persistence.record({
           kind: 'proposal_correction_resolved',
           requestId: input.requestId,
@@ -350,9 +348,7 @@ export class TurnExhaustionCoordinator {
           actorIds,
         });
         return { kind: 'authorized', proposalId: proposal.proposalId, phase: 'correction' };
-      } else {
-        correctionResult = authorization === 'authorized' ? 'invalidated' : authorization;
-      }
+      } else correctionResult = authorization;
     }
 
     if (input.escalation?.trigger === 'validation_failures' && input.deadline.acceptsCompletion()) {
@@ -366,7 +362,7 @@ export class TurnExhaustionCoordinator {
       if (proposal !== null && proposal.requestId === input.requestId &&
         exactProposalActors(proposal, actorIds, 'correction') && input.deadline.acceptsCompletion()) {
         const authorization = await input.host.authorize(proposal);
-        if (authorization === 'authorized' && input.deadline.acceptsCompletion()) {
+        if (authorization === 'authorized') {
           this.persistence.record({
             kind: 'proposal_correction_resolved',
             requestId: input.requestId,
@@ -375,7 +371,7 @@ export class TurnExhaustionCoordinator {
           });
           return { kind: 'authorized', proposalId: proposal.proposalId, phase: 'correction' };
         }
-        correctionResult = authorization === 'authorized' ? 'invalidated' : authorization;
+        correctionResult = authorization;
       } else {
         correctionResult = proposal === null ? 'no_response' : 'invalid';
       }

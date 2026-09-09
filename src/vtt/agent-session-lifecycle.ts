@@ -48,12 +48,16 @@ export function createConversationRoundDeadline(
     throw new RangeError('Conversation round deadline must be finite.');
   }
   const controller = new AbortController();
-  const initialRemainder = expiresAtMs - finiteNow(now);
-  if (Math.floor(initialRemainder) < 1) controller.abort();
-  else {
-    const timer = setTimeout(() => controller.abort(), Math.ceil(initialRemainder));
+  const scheduleAbort = (): void => {
+    const remainderMs = expiresAtMs - finiteNow(now);
+    if (Math.floor(remainderMs) < 1) {
+      controller.abort();
+      return;
+    }
+    const timer = setTimeout(scheduleAbort, Math.ceil(remainderMs));
     timer.unref();
-  }
+  };
+  scheduleAbort();
   return {
     signal: controller.signal,
     dispatch(invocation): AgentDispatchBudget {

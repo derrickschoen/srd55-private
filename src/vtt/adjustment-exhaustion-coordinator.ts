@@ -225,7 +225,7 @@ export class AdjustmentExhaustionCoordinator {
       if (!input.deadline.acceptsCompletion()) {
         const outcome = completion({
           initial: input.initial,
-          staged,
+          staged: [],
           corrected: [],
           correctionResult: 'no_response',
         });

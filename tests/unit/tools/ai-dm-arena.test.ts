@@ -386,6 +386,13 @@ describe('AI-DM arena', () => {
         ? `luna-medium-steered:${join(directory, 'different-kb')}`
         : argument,
     ))).toThrow('All KB-steered arms must use the same frozen knowledge bundle');
+    expect(() => parseArenaArgs([
+      '--rooms', '1', '--reps', '1', '--seed', '5119001',
+      '--out', join(directory, 'inherited-kb.jsonl'), '--interleave',
+      '--instruction-source', 'kb', '--kb', DEFAULT_AI_DM_KB_ROOT,
+      '--arm', 'luna-low-baseline:gpt-5.6-luna:low:gpt-5.6-luna:high',
+      '--arm', 'luna-low-steered:gpt-5.6-luna:low:gpt-5.6-luna:high',
+    ])).toThrow('Arena arm luna-low-baseline must use instruction source none.');
   });
 
   it('loads the first frozen brutal-b room and executes its multi-legendary-window room', { timeout: 30_000 }, async () => {

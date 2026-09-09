@@ -759,6 +759,13 @@ export interface ConversationRunOptions {
   readonly endSession?: boolean;
   /** Test-only monotonic clock for the restricted per-round policy wall. */
   readonly policyNow?: () => number;
+  /** Test-only producer seam for mutation-testing the round-deadline origin. */
+  readonly roundDeadlineFactory?: typeof createConversationRoundDeadline;
+  /** Test-only producer seam for mutation-testing speculative planner routing. */
+  readonly selectSpeculationPlanner?: (
+    base: ConversationPlannerAttribution,
+    escalation: ConversationPlannerAttribution | null,
+  ) => ConversationPlannerAttribution;
 }
 
 export function boardImageOutputDirectory(
@@ -2475,6 +2482,13 @@ function agentDispatchWasCancelled(error: unknown): boolean {
       .test(error.message));
 }
 
+function explicitlyRefusedTurn(turn: AgentTurnResult): boolean {
+  if (turn.exit !== 'completed') return false;
+  const text = turn.finalText.trim();
+  return /^(?:(?:i|we)\s+)?(?:(?:must|have to)\s+)?(?:refuse|decline)\b/iu.test(text) ||
+    /^(?:(?:i|we)\s+)?(?:cannot|can't|am unable to|are unable to)\b/iu.test(text);
+}
+
 async function abortableDelay(milliseconds: number, signal: AbortSignal): Promise<void> {
   if (milliseconds <= 0) return;
   await new Promise<void>((resolvePromise, reject) => {
@@ -3508,6 +3522,7 @@ async function runConversationWithConfiguredIntel(
       let partyDefaultTurn = false;
       let terminalOutcome: ConversationTerminalOutcome | null = null;
       let primaryDispatchTimedOut = false;
+      let primaryExplicitRefusal = false;
       let correctionDispatchTimedOut = false;
       let escalated = false;
       let firedEscalationModel: string | null = null;
@@ -3533,9 +3548,8 @@ async function runConversationWithConfiguredIntel(
       let policyClassifiedAtMs: number | null = null;
       let roundWallTimedOut = false;
       const classifyPolicy = (): void => {
-        if (policyClassifiedAtMs !== null) return;
         const classifiedAt = policyNow();
-        roundWallTimedOut = !roundDeadline.acceptsCompletion();
+        roundWallTimedOut ||= !roundDeadline.acceptsCompletion();
         policyClassifiedAtMs = classifiedAt;
       };
       let speculation: ConversationSpeculation = {
@@ -3603,7 +3617,7 @@ async function runConversationWithConfiguredIntel(
         ).value;
         const ordinaryContext = options.mutateSpeculativeContext?.(renderedOrdinaryContext) ??
           renderedOrdinaryContext;
-        const planner = basePlanner;
+        const planner = options.selectSpeculationPlanner?.(basePlanner, escalationPlanner) ?? basePlanner;
         if (!sameCombatantSet(renderedContextActorIds(ordinaryContext), window.monsters)) {
           speculation = {
             status: 'discarded', proposed: true, adopted: false, discarded: true,
@@ -3754,9 +3768,13 @@ async function runConversationWithConfiguredIntel(
       }): Promise<void> => {
         if (segmentPlanId === null) throw new Error('Material PC turn has no authorized monster plan to adjust.');
         if (options.mutateBeforeAdjustmentPreflight !== undefined) {
-          engineSession.replaceEncounterState(
-            options.mutateBeforeAdjustmentPreflight(engineSession.currentState()),
-          );
+          classifyPolicy();
+          withoutPolicyClock(() => {
+            engineSession.replaceEncounterState(
+              options.mutateBeforeAdjustmentPreflight?.(engineSession.currentState()) ??
+                engineSession.currentState(),
+            );
+          });
           capsuleRevision = Math.max(capsuleRevision, engineSession.currentState().revision);
         }
         const baselineEntries = input.openActorIds.map((actorId) => {
@@ -4269,9 +4287,23 @@ async function runConversationWithConfiguredIntel(
           rlData: adjustmentRlData,
         });
       };
-      const policyNow = options.policyNow ?? (() => performance.now());
+      const policySourceNow = options.policyNow ?? (() => performance.now());
+      let excludedPolicyMs = 0;
+      const policyNow = (): number => policySourceNow() - excludedPolicyMs;
+      const withoutPolicyClock = <Value>(operation: () => Value): Value => {
+        const excludedAt = policySourceNow();
+        try {
+          return operation();
+        } finally {
+          const durationMs = policySourceNow() - excludedAt;
+          if (!Number.isFinite(durationMs) || durationMs < 0) {
+            throw new RangeError('Conversation policy clock must be finite and monotonic.');
+          }
+          excludedPolicyMs += durationMs;
+        }
+      };
       const roundStarted = policyNow();
-      const roundDeadline = createConversationRoundDeadline(
+      const roundDeadline = (options.roundDeadlineFactory ?? createConversationRoundDeadline)(
         config.roundWallMs,
         roundStarted,
         policyNow,
@@ -4332,6 +4364,7 @@ async function runConversationWithConfiguredIntel(
             }
             rolloutSessionId = turn.sessionId;
             captureCallUsage(turn, 'initial');
+            primaryExplicitRefusal ||= explicitlyRefusedTurn(turn);
             decisionAttempts += 1;
             if (initialDecisionCatalog === null) {
               rowTurnContext = takeTurnContext(
@@ -4371,6 +4404,7 @@ async function runConversationWithConfiguredIntel(
               }
             }
             const flapped = initialDecisionCatalog === null && turn.exit === 'completed' && proposed === null &&
+              !primaryExplicitRefusal &&
               toolCallsObserved() === callsBefore && rejectionsObserved().length === rejectionsBefore;
             if (contextCallsObserved() > contextCallsBefore || proposed !== null) {
               lastSeenTurnContext = getCurrentTurnContext();
@@ -4601,7 +4635,8 @@ async function runConversationWithConfiguredIntel(
                 }
               }
               if (config.combatModel === 'monster_block_v1') {
-              const applied = engineSession.applyResolvedMechanics(mechanics, effectiveReactionGuidance);
+              const applied = withoutPolicyClock(() =>
+                engineSession.applyResolvedMechanics(mechanics, effectiveReactionGuidance));
               capsuleRevision += Math.max(1, applied.revisionDelta);
               recordAutoResolvedReactions(journal, applied);
               } else {
@@ -4722,18 +4757,23 @@ async function runConversationWithConfiguredIntel(
               if (entry === undefined) throw new Error(`Exhaustion resolution is absent for ${actorId}.`);
               return entry;
             });
-            const applied = engineSession.applyResolvedMechanics(entries, journal.reactionGuidance());
+            const applied = withoutPolicyClock(() =>
+              engineSession.applyResolvedMechanics(entries, journal.reactionGuidance()));
             capsuleRevision += Math.max(1, applied.revisionDelta);
             recordAutoResolvedReactions(journal, applied);
           },
           pauseForDmAdjudication: ({ actorId, reason }) => { refusals.push(`${actorId}: ${reason}`); },
         };
+        const initialValidationEvidence = proposed !== null || engineRejections.length > 0 ||
+          decisionRejectionCodes.some((code) => code !== 'decision_timeout');
         const plannedEscalationTrigger = escalationPlanner === null ||
           primaryDispatchTimedOut || serviceNull
           ? null
-          : proposed === null
+          : primaryExplicitRefusal && proposed === null
             ? 'refusal' as const
-            : 'validation_failures' as const;
+            : initialValidationEvidence
+              ? 'validation_failures' as const
+              : null;
         const escalationRuntime = escalationPlanner === null || escalationLauncher === null ||
           plannedEscalationTrigger === null
           ? null
@@ -5140,10 +5180,11 @@ async function runConversationWithConfiguredIntel(
                 actorId: activeActorId,
               });
               if (materialized.partyDefaultTurn !== null) partyDefaultTurn = true;
-              const applied = engineSession.completeScriptedPcTurn(
+              classifyPolicy();
+              const applied = withoutPolicyClock(() => engineSession.completeScriptedPcTurn(
                 materialized,
                 journal.reactionGuidance(),
-              );
+              ));
               capsuleRevision += Math.max(1, applied.revisionDelta);
               recordAutoResolvedReactions(journal, applied);
               acted.add(activeActorId);
@@ -5208,7 +5249,10 @@ async function runConversationWithConfiguredIntel(
             if (inFlightSpeculation.current !== null &&
               inFlightSpeculation.current.targetActorIds.includes(segmentActors[0]!)) {
               if (options.mutateBeforeSpeculationBoundary !== undefined) {
-                engineSession.replaceEncounterState(options.mutateBeforeSpeculationBoundary(state));
+                classifyPolicy();
+                withoutPolicyClock(() => {
+                  engineSession.replaceEncounterState(options.mutateBeforeSpeculationBoundary?.(state) ?? state);
+                });
                 state = engineSession.currentState();
                 capsuleRevision = Math.max(capsuleRevision, state.revision);
               }
@@ -5225,7 +5269,8 @@ async function runConversationWithConfiguredIntel(
               });
               let discardReason: ConversationSpeculationDiscardReason | null = null;
               let adoptedEntries: readonly SegmentMonsterPlanEntry[] | null = null;
-              if (completed.timedOut) discardReason = 'budget_expired';
+              if (!roundDeadline.acceptsCompletion()) discardReason = 'budget_expired';
+              else if (completed.timedOut) discardReason = 'budget_expired';
               else if (completed.error !== null || completed.plan === null) discardReason = 'dispatch_failed';
               else if (!sameCombatantSet(segmentActors, pending.targetActorIds)) {
                 discardReason = 'target_disappeared';
@@ -5317,9 +5362,7 @@ async function runConversationWithConfiguredIntel(
                       status: 'active',
                     };
                     try {
-                      const recalculationTurn = await adapter.resume(
-                        binding,
-                        invocation(
+                      const recalculationInvocation = invocation(
                           config,
                           runId,
                           'speculation_recalculation',
@@ -5330,13 +5373,23 @@ async function runConversationWithConfiguredIntel(
                           recalculationLauncher.recoveryManifestPath,
                           recalculationToolSession,
                           freshSessionContext,
-                        ),
-                        new AbortController().signal,
+                        );
+                      const recalculationDispatch = roundDeadline.dispatch(recalculationInvocation);
+                      if (recalculationDispatch.kind === 'exhausted') {
+                        throw new AgentDispatchDeadlineExceededError();
+                      }
+                      const recalculationTurn = await adapter.resume(
+                        binding,
+                        recalculationDispatch.invocation,
+                        roundDeadline.signal,
                       );
+                      if (!roundDeadline.acceptsCompletion()) {
+                        throw new AgentDispatchDeadlineExceededError();
+                      }
                       captureCallUsage(recalculationTurn, 'speculation_recalculation');
                       const proposal = localRecalculationProposal ??
                         takeRoundProposal(recalculationLauncher.spoolPath);
-                      if (proposal !== null) {
+                      if (proposal !== null && roundDeadline.acceptsCompletion()) {
                         const checked = authorizedMechanics(state, proposal);
                         if (checked.entries !== null && sameCombatantSet(
                           checked.entries.map((entry) => entry.proposal.actorId),
@@ -5405,10 +5458,10 @@ async function runConversationWithConfiguredIntel(
             const segmentBeforeRevision = state.revision;
             const appliedPlanHash = monsterPlanHash(segmentMonsterPlan);
             classifyPolicy();
-            const applied = engineSession.applyConsecutiveMonsterSegment(
+            const applied = withoutPolicyClock(() => engineSession.applyConsecutiveMonsterSegment(
               applications,
               journal.reactionGuidance(),
-            );
+            ));
             capsuleRevision += Math.max(1, applied.revisionDelta);
             recordAutoResolvedReactions(journal, applied);
             monsterSegments.push({
@@ -5424,6 +5477,7 @@ async function runConversationWithConfiguredIntel(
           }
           if (inFlightSpeculation.current !== null) {
             const pending = inFlightSpeculation.current;
+            classifyPolicy();
             pending.controller.abort();
             const completed = await pending.completion;
             speculation = {
@@ -5483,7 +5537,7 @@ async function runConversationWithConfiguredIntel(
         }
         refusals.push(error instanceof Error ? error.message : String(error));
       }
-      classifyPolicy();
+      if (policyClassifiedAtMs === null) classifyPolicy();
       const wall = performance.now() - started;
       const endToEndWall = performance.now() - endToEndStarted;
       const policyElapsedMs = roundWallTimedOut
