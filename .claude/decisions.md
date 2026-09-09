@@ -19675,3 +19675,20 @@ intersection primary effect; citation fixes. Astra round 2 launched
 01a0847c-a3d4-7752-814a-88ad2ce00413) with an explicit check that bwrap
 exists on this machine and an in-memory rerun of the mixed-model
 extractor case.
+
+## D586.65 — heldout fix round 3 harvested: candidate committed, cumulative and FINAL Astra review running (2026-09-09 00:50)
+
+Lane exit 0, HELDOUT-S1-R3 DONE; claims: the 24-room control split into
+preparation / per-room generation / finalization tests, each under the
+unchanged 5,000 ms budget (slowest room 1,766 ms; attribution: cover-room
+generation dominates, byte loads 12 ms, serialization 9 ms, hashing 4 ms);
+leak wall covering named/default/namespace/side-effect, dynamic single/
+double/template-literal, require, and no/.js/.ts suffixes; type-valid
+effective-condition seam with the Charmed/Frightened limitation stated;
+focused 3 files 63/63, tsc 0, sg 0, mutation hashes unchanged, six
+allowed files, no scratch left. Verified by me: `sg scan` exit 0; only
+the echoed header matches `claude -p`; changed-file set identical to
+round 2 so the 25-spec inventory stands. Committed 1d6af854. Cumulative
+tsc + one vitest invocation running (~/dnd-slim-runs/cum-heldout-s1-r3.log).
+Astra round 3 (FINAL) launched (brief review-impl-heldout-s1-r3.md,
+session 01a08480-b571-7f52-9bf7-3e019aa916aa); a REJECT shelves the slice.
