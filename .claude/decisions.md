@@ -21299,3 +21299,31 @@ resume-room-d-s2-r2.md, log log-impl-room-d-s2-r2.log, marker
 ROOM-D-S2 R2 DONE) with the D584.4 cumulative pointed at the 150-path
 union ~/dnd-slim-runs/room-d-s2.specs and the inventory test declared a
 known branch-state defect to be reported, not touched. Round 2 of 3.
+
+## D586.140 — D569 v5 runbook round 3 harvested; supervisor finding (`rg` is a shell function) sent back before the final review (2026-09-09 07:44)
+
+Round-3 lane resume (real session 01a085a4-…, 106,444 tokens, exit 0,
+RUNBOOK R3 DONE): 1,672 lines, sha256 702faf2d… (matches the file on
+disk); worktree clean; two probe files created and deleted. Lane-reported:
+advisory self-test `ADVISORY GATE SELFTEST PASS n=7`, 15 saved-script
+shell blocks syntax-checked, 5 install/verify script pairs, absolute
+vite-node import and --verify-only probes passed. Supervisor checks:
+install blocks are now `if test ! -e … then install … elif … fail …
+else verify` (29 `test ! -e`, 16 `sha256sum -c`); judge-one.sh citations
+corrected to 31-34 / 35-38; STOP rule 13 rewritten with both checkouts
+git-write-forbidden, the two permitted external roots and the read-only
+main-checkout exception.
+
+Supervisor finding before spending the final review: the runbook uses
+`rg` in at least eight places (lines 193, 934, 1312, 1354, 1412-1416),
+including detached shells and saved scripts. On this machine `rg` is a
+shell FUNCTION from the interactive profile, not a binary
+(`env -i bash -c 'command -v rg'` prints nothing — the same trap recorded
+in memory as "skipped is not passed": rg invisible to subprocesses).
+Every `set -e` block would abort with "command not found", and `if rg …`
+conditionals would silently take the false branch. Lane resumed once more
+(brief resume-d569-v5-runbook-r3b.md, log log-plan-d569-v5-runbook-r3b.log,
+marker RUNBOOK R3B DONE) to replace every `rg` with POSIX grep -E
+equivalents and prove the wrapper's verify path under `env -i /bin/bash
+-c`. The third and final Astra review follows that fix-up; the review
+round count stays at 2 used, 1 remaining.
