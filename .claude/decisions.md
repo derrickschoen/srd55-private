@@ -19033,3 +19033,54 @@ labels chosen from the offered lists; free text quoted):
 
 Also answered by action: the roll-provenance fourth-round question is
 moot; the accepted design is inside challenge slice 3 (D583.16).
+
+## D587.1–D587.9 EXECUTION and a timestamp correction (2026-09-08 23:18)
+
+CORRECTION: the wall-clock stamps I wrote into D583.16, D586.43, D586.44
+and D587 ("21:30", "21:32", "21:41", "21:50") were guesses, not read from
+the clock; the true times were between roughly 22:50 and 23:15 EDT (the
+gate log shows the previous gate finishing 21:32 and the new one starting
+23:14). From here every stamp is taken from `date`.
+
+Executed under the rulings:
+- D587.1 (no tie-break): pool4-contrasts.py no longer loads opus scores
+  at all (a config offering them is REFUSED), the tie-break code and
+  column are gone, exact ties are counted and never broken, advisory
+  exposure (notes|empty|none|undeclared) is copied from the judge log per
+  packet, preserved independently of any score file (Astra's round-3
+  blocker), and packets with different exposure are never contrasted.
+  Tests 21/21; the three retained unseals reproduce on kept columns.
+  judge-one.sh: stale-cleanup and log-append status checked; the
+  JUDGE_D refusal guard now matches claude/codex/gpt-/--model anywhere in
+  a seat command; judge-one-test.sh adds the late-failing writer case
+  (nonempty prompt then nonzero exit -> exit 2, no seat launched) and
+  seven malformed-advisory cases (scalar JSON, list blindId, duplicate,
+  missing note, incomplete coverage, unknown id, non-JSON) -> empty block
+  with a durable ADVISORY_INVALID reason. Backups *.bak-tiebreak. Astra
+  round 3 on the previous scripts was DO NOT APPROVE (exposure blocker,
+  now moot with scores unloaded); the reworked scripts go to Astra as a
+  new unit under D587.1, round 1.
+- D587.3: main gate launched on eb778854 (= main + oppselect slice 1
+  merge) under load; reds get one serial rerun.
+- D587.4: 5,406 arena temp dirs (dnd-ai-dm-arena-independent,
+  dnd-ai-dm-arena-interleaved, dnd-arena-interleaved; older than 60 min;
+  no process cwd inside) removed; 144 recent ones remain. NOT removed:
+  17,243 dnd-ai-dm-conversation-* dirs (11 GB) and 238
+  dnd-conversation-tiered-correction-* dirs, a different family the
+  ruling did not name; question posed to the owner.
+- D587.5/6: promo180 planning session resumed with sol-only teachers,
+  distillation-data phase 0, generic steering with a preregistered
+  held-out room set, no opus tie-break.
+- D587.1 applied to the D569 amendment-2 plan (session resumed).
+- D587.8: combined offers-roadmap planning lane launched in
+  dnd-wt-p-offer-help (fast-forwarded to main) with the three shelved
+  plans and their final verdicts as known traps.
+- D587.9: session-command-transaction planning lane launched in the new
+  worktree dnd-wt-p-txn (claude/p-txn off main).
+- Elevation slice 1: lane BLOCKED on the inherited 5 s arena budget;
+  WIP committed by me (e7585a6e), main merged (ede25c24), lane resumed.
+- heldout slice 1 DONE (lane claim), rowcodec slice 1 BLOCKED on the
+  sandbox EROFS node_modules (known); supervisor cumulative checks
+  (vitest, sg scan, tsc -b) launched for both; Astra reviews follow.
+- mcp-request-client fix round DONE (lane claim); Astra round 2 review
+  launched with the uncommitted diff.
