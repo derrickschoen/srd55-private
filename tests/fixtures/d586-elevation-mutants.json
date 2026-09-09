@@ -66,6 +66,56 @@
       "replacement": "value.feet <= 0",
       "spec": "tests/unit/combat/movement-speeds.test.ts",
       "title": "S1-ZERO-SPEED retains a present zero-foot walk mode"
+    },
+    {
+      "id": "S1-BASELINE-COLLISION",
+      "phase": "runtime",
+      "source": "tools/d584-contract-inventory.ts",
+      "selector": {
+        "nodeKind": "ConditionalExpression",
+        "within": "compareBaselineOwnership",
+        "text": "stable\n        ? 'stable'\n        : matchesManifest(baseline.path, planManifest)\n          ? 'owned_collision'\n          : 'excluded_drift'"
+      },
+      "replacement": "'stable'",
+      "spec": "tests/unit/tools/d584-contract-inventory.test.ts",
+      "title": "S1-BASELINE-COLLISION preserves committed provenance and rejects owned drift"
+    },
+    {
+      "id": "S1-MISSING-REQUIRED-SPEC",
+      "phase": "runtime",
+      "source": "tools/d584-contract-inventory.ts",
+      "selector": {
+        "nodeKind": "ReturnStatement",
+        "within": "missingRequiredSpecPaths"
+      },
+      "replacement": "return [];",
+      "spec": "tests/unit/tools/d584-contract-inventory.test.ts",
+      "title": "S1-MISSING-REQUIRED-SPEC fails for missing and staged or unstaged deleted specs"
+    },
+    {
+      "id": "S1-IMPORT-TEXT-DECOY",
+      "phase": "runtime",
+      "source": "tools/d584-contract-inventory.ts",
+      "selector": {
+        "nodeKind": "FunctionDeclaration",
+        "name": "extractRelativeImportSpecifiers"
+      },
+      "replacement": "export function extractRelativeImportSpecifiers(\n  path: string,\n  source: string,\n): readonly string[] {\n  void path;\n  const expressions = [\n    /(?:import|export)\\s+(?:type\\s+)?(?:[^'\";]+?\\s+from\\s+)?['\"]([^'\"]+)['\"]/gu,\n    /import\\(\\s*['\"]([^'\"]+)['\"]\\s*\\)/gu,\n  ];\n  return expressions.flatMap((expression) =>\n    [...source.matchAll(expression)]\n      .map((match) => match[1])\n      .filter((specifier): specifier is string => specifier?.startsWith('.') === true),\n  );\n}",
+      "spec": "tests/unit/tools/d584-contract-inventory.test.ts",
+      "title": "S1-IMPORT-AST accepts every supported syntax form and rejects comment and string decoys"
+    },
+    {
+      "id": "S1-TRANSITIVE-CONTROL",
+      "phase": "runtime",
+      "source": "tools/d584-contract-inventory.ts",
+      "selector": {
+        "nodeKind": "CallExpression",
+        "within": "uncontrolledProducerPaths",
+        "text": "reverseConsumerClosure(graph, [producer])"
+      },
+      "replacement": "(graph.consumersByProducer[producer] ?? [])",
+      "spec": "tests/unit/tools/d584-contract-inventory.test.ts",
+      "title": "S1-TRANSITIVE-CONTROL accepts producer re-exports that reach a runtime test"
     }
   ]
 }

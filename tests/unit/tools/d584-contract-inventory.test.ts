@@ -4,13 +4,20 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+  IMPORT_GRAPH_UNSUPPORTED_FORMS,
+  baselineAncestorArguments,
   branchTestDiffArguments,
   buildImportGraph,
+  compareBaselineOwnership,
+  extractRelativeImportSpecifiers,
+  inventoryGateErrors,
   inventoryBaseArguments,
+  missingRequiredSpecPaths,
   parseBaseline,
   parseInventoryArguments,
   parseNameStatus,
   parsePlanManifest,
+  uncontrolledProducerPaths,
   reverseTestClosure,
 } from '../../../tools/d584-contract-inventory';
 
@@ -80,9 +87,60 @@ describe('D584.4 elevation contract inventory', () => {
     expect(inventoryBaseArguments('main')).toEqual([
       'merge-base', 'main', 'HEAD',
     ]);
+    expect(baselineAncestorArguments('dispatch-head')).toEqual([
+      'merge-base', '--is-ancestor', 'dispatch-head', 'HEAD',
+    ]);
   });
 
-  it('follows producer-to-consumer imports transitively without widening through dependencies', async () => {
+  it('S1-IMPORT-AST accepts every supported syntax form and rejects comment and string decoys', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'd584-import-syntax-'));
+    const producer = 'export interface Value { readonly n: number }\nexport const value = 1;\n';
+    const fixtures = {
+      'producer.ts': producer,
+      'import-declaration.ts': "import /* split */ { value } from /* split */ './producer'; void value;\n",
+      'export-declaration.ts': "export /* split */ { value } from /* split */ './producer';\n",
+      'import-equals.ts': "import Producer = require /* split */ ('./producer'); void Producer;\n",
+      'import-type.ts': "export type Imported = import /* split */ ('./producer').Value;\n",
+      'dynamic-import.ts': "void import /* split */ ('./producer');\n",
+      'decoys.ts': [
+        'const prose = \"import { value } from \'./producer\'\";',
+        'const exportProse = \"export { value } from \'./producer\'\";',
+        'const equalsProse = \"import Producer = require(\'./producer\')\";',
+        'const typeProse = \"type Imported = import(\'./producer\').Value\";',
+        'const dynamicProse = \"void import(\'./producer\')\";',
+        "// export { value } from './producer';",
+        "// import Producer = require('./producer');",
+        "// type Imported = import('./producer').Value;",
+        "/* void import('./producer'); */",
+        "const specifier = './producer';",
+        'void import(specifier);',
+        'void import(`./producer`);',
+        'void prose; void exportProse; void equalsProse; void typeProse; void dynamicProse;',
+        '',
+      ].join('\n'),
+    } as const;
+    await Promise.all(Object.entries(fixtures).map(([path, source]) =>
+      writeFile(join(root, path), source),
+    ));
+    const graph = await buildImportGraph(root, Object.keys(fixtures));
+    for (const consumer of [
+      'import-declaration.ts',
+      'export-declaration.ts',
+      'import-equals.ts',
+      'import-type.ts',
+      'dynamic-import.ts',
+    ]) {
+      expect(graph.importsByConsumer[consumer]).toEqual(['producer.ts']);
+    }
+    expect(graph.importsByConsumer['decoys.ts']).toBeUndefined();
+    expect(extractRelativeImportSpecifiers('decoys.ts', fixtures['decoys.ts'])).toEqual([]);
+    expect(IMPORT_GRAPH_UNSUPPORTED_FORMS).toEqual([
+      'computed dynamic-import specifiers',
+      'template-literal dynamic-import specifiers',
+    ]);
+  });
+
+  it('S1-TRANSITIVE-CONTROL accepts producer re-exports that reach a runtime test', async () => {
     const root = await mkdtemp(join(tmpdir(), 'd584-import-graph-'));
     await Promise.all([
       writeFile(join(root, 'producer.ts'), 'export const value = 1;\n'),
@@ -104,5 +162,70 @@ describe('D584.4 elevation contract inventory', () => {
     ]);
     expect(reverseTestClosure(expanded, ['producer.ts']))
       .toEqual(['tests/direct.test.ts']);
+    expect(uncontrolledProducerPaths(
+      expanded,
+      ['producer.ts'],
+      ['tests/direct.test.ts'],
+      [],
+    )).toEqual([]);
+    expect(reverseTestClosure(expanded, ['dependency.ts'])).toEqual([]);
+  });
+
+  it('S1-BASELINE-COLLISION preserves committed provenance and rejects owned drift', () => {
+    const worktreeSha = 'a'.repeat(64);
+    const baseline = [
+      { path: 'src/owned.ts', status: 'M', indexBlob: '1'.repeat(40), worktreeSha256: worktreeSha },
+      { path: 'src/unrelated.ts', status: 'M', indexBlob: '2'.repeat(40), worktreeSha256: worktreeSha },
+    ];
+    const comparisons = compareBaselineOwnership(baseline, [
+      {
+        path: 'src/owned.ts',
+        indexBlob: '3'.repeat(40),
+        indexBlobSha256: worktreeSha,
+        worktreeSha256: 'b'.repeat(64),
+      },
+      {
+        path: 'src/unrelated.ts',
+        indexBlob: '2'.repeat(40),
+        indexBlobSha256: 'c'.repeat(64),
+        worktreeSha256: 'b'.repeat(64),
+      },
+    ], ['src/owned.ts']);
+    expect(comparisons.map(({ path, state }) => ({ path, state }))).toEqual([
+      { path: 'src/owned.ts', state: 'owned_collision' },
+      { path: 'src/unrelated.ts', state: 'excluded_drift' },
+    ]);
+
+    const committed = compareBaselineOwnership([baseline[0]!], [{
+      path: 'src/owned.ts',
+      indexBlob: '3'.repeat(40),
+      indexBlobSha256: worktreeSha,
+      worktreeSha256: worktreeSha,
+    }], ['src/owned.ts']);
+    expect(committed[0]?.state).toBe('stable');
+    expect(inventoryGateErrors({
+      baselineCollisions: ['src/owned.ts'],
+      missingRequiredSpecs: [],
+      uncontrolledProducers: [],
+    })).toEqual(['Owned baseline paths changed after dispatch: src/owned.ts']);
+  });
+
+  it('S1-MISSING-REQUIRED-SPEC fails for missing and staged or unstaged deleted specs', () => {
+    const missing = missingRequiredSpecPaths(
+      ['tests/present.test.ts', 'tests/missing.test.ts'],
+      ['tests/present.test.ts', 'tests/deleted.test.ts'],
+      ['tests/deleted.test.ts'],
+    );
+    expect(missing).toEqual([
+      'tests/deleted.test.ts',
+      'tests/missing.test.ts',
+    ]);
+    expect(inventoryGateErrors({
+      baselineCollisions: [],
+      missingRequiredSpecs: missing,
+      uncontrolledProducers: [],
+    })).toEqual([
+      'Required specs are missing or deleted: tests/deleted.test.ts, tests/missing.test.ts',
+    ]);
   });
 });

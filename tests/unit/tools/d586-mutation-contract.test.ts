@@ -9,7 +9,7 @@ import {
 } from '../../../tools/d586-mutation-contract';
 
 describe('D586 executable mutation contract', () => {
-  it('registers the three type controls and two Slice 1 runtime controls exactly', async () => {
+  it('registers the three type controls and six Slice 1 runtime controls exactly', async () => {
     const value: unknown = JSON.parse(await readFile(
       join(process.cwd(), 'tests/fixtures/d586-elevation-mutants.json'),
       'utf8',
@@ -22,11 +22,15 @@ describe('D586 executable mutation contract', () => {
       'S1-EMPTY-SPEEDS',
       'S1-DUPLICATE-SPEEDS',
       'S1-ZERO-SPEED',
+      'S1-BASELINE-COLLISION',
+      'S1-MISSING-REQUIRED-SPEC',
+      'S1-IMPORT-TEXT-DECOY',
+      'S1-TRANSITIVE-CONTROL',
     ]);
     expect(registry.mutations.filter((mutation) => mutation.phase === 'type'))
       .toHaveLength(3);
     expect(registry.mutations.filter((mutation) => mutation.phase === 'runtime'))
-      .toHaveLength(2);
+      .toHaveLength(6);
   });
 
   it('uses an AST selector and performs exactly one in-memory replacement', () => {

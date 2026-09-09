@@ -36,6 +36,9 @@ export interface MutationResult {
   readonly status: 'killed';
   readonly spec: string;
   readonly title: string;
+  readonly sourceShaBefore: string;
+  readonly mutantSha: string;
+  readonly sourceShaAfter: string;
 }
 
 interface JsonAssertionResult {
@@ -357,6 +360,7 @@ export async function runMutationContract(
       const original = await readFile(sourcePath, 'utf8');
       const originalSha = sha256(original);
       const mutated = injectAstMutation(sourcePath, original, mutation);
+      const mutantSha = sha256(mutated);
       if (mutation.phase === 'type') {
         const diagnostics = compileWithOverlay(root, { path: sourcePath, source: mutated });
         const intended = mutation.expectedDiagnostic;
@@ -390,7 +394,8 @@ export async function runMutationContract(
         }
       }
       const after = await readFile(sourcePath, 'utf8');
-      if (sha256(after) !== originalSha) {
+      const sourceShaAfter = sha256(after);
+      if (sourceShaAfter !== originalSha) {
         throw new Error(`${mutation.id} changed its repository source file.`);
       }
       results.push({
@@ -399,6 +404,9 @@ export async function runMutationContract(
         status: 'killed',
         spec: mutation.spec,
         title: mutation.title,
+        sourceShaBefore: originalSha,
+        mutantSha,
+        sourceShaAfter,
       });
     }
   } finally {

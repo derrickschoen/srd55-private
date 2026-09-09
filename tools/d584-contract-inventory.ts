@@ -1,6 +1,9 @@
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
 import { dirname, extname, isAbsolute, relative, resolve } from 'node:path';
+import ts from 'typescript';
 
 export const INVENTORY_FORMAT = 'd584-contract-inventory-v1' as const;
 
@@ -13,6 +16,11 @@ export const SLICE_ONE_RUNTIME_SPECS = [
 
 export const INHERITED_D576_RUNTIME_SPECS = [
   'tests/unit/tools/ai-dm-screenshot-probe.test.ts',
+] as const;
+
+export const IMPORT_GRAPH_UNSUPPORTED_FORMS = [
+  'computed dynamic-import specifiers',
+  'template-literal dynamic-import specifiers',
 ] as const;
 
 export interface InventoryArguments {
@@ -42,6 +50,19 @@ export interface BaselineRecord {
   readonly paths: readonly BaselinePath[];
 }
 
+export interface BaselinePathSnapshot {
+  readonly path: string;
+  readonly indexBlob: string | null;
+  readonly indexBlobSha256: string | null;
+  readonly worktreeSha256: string | null;
+}
+
+export interface BaselinePathComparison extends BaselinePathSnapshot {
+  readonly recordedIndexBlob: string | null;
+  readonly recordedWorktreeSha256: string;
+  readonly state: 'stable' | 'owned_collision' | 'excluded_drift';
+}
+
 export interface ImportGraph {
   readonly importsByConsumer: Readonly<Record<string, readonly string[]>>;
   readonly consumersByProducer: Readonly<Record<string, readonly string[]>>;
@@ -62,10 +83,15 @@ export interface ContractInventory {
   readonly planManifest: readonly string[];
   readonly changedOwnedPaths: readonly string[];
   readonly preExistingExclusions: readonly string[];
+  readonly baselineComparisons: readonly BaselinePathComparison[];
+  readonly baselineCollisions: readonly string[];
+  readonly baselineDrift: readonly string[];
   readonly branchTestInventory: readonly string[];
   readonly missingBranchTests: readonly string[];
   readonly producerPaths: readonly string[];
   readonly runtimeSpecs: readonly string[];
+  readonly requiredRuntimeSpecs: readonly string[];
+  readonly missingRequiredSpecs: readonly string[];
   readonly compileControls: readonly string[];
   readonly importGraphRuntimeSpecs: readonly string[];
   readonly uncontrolledProducers: readonly string[];
@@ -73,10 +99,14 @@ export interface ContractInventory {
     readonly planManifest: number;
     readonly changedOwnedPaths: number;
     readonly preExistingExclusions: number;
+    readonly baselineCollisions: number;
+    readonly baselineDrift: number;
     readonly branchTestInventory: number;
     readonly missingBranchTests: number;
     readonly producerPaths: number;
     readonly runtimeSpecs: number;
+    readonly requiredRuntimeSpecs: number;
+    readonly missingRequiredSpecs: number;
     readonly compileControls: number;
     readonly importGraphRuntimeSpecs: number;
   };
@@ -183,16 +213,61 @@ function matchesManifest(path: string, manifest: readonly string[]): boolean {
   );
 }
 
-function importSpecifiers(source: string): readonly string[] {
-  const expressions = [
-    /(?:import|export)\s+(?:type\s+)?(?:[^'";]+?\s+from\s+)?['"]([^'"]+)['"]/gu,
-    /import\(\s*['"]([^'"]+)['"]\s*\)/gu,
-  ];
-  return expressions.flatMap((expression) =>
-    [...source.matchAll(expression)]
-      .map((match) => match[1])
-      .filter((specifier): specifier is string => specifier?.startsWith('.') === true),
+function scriptKind(path: string): ts.ScriptKind {
+  if (path.endsWith('.tsx')) return ts.ScriptKind.TSX;
+  if (path.endsWith('.js') || path.endsWith('.mjs')) return ts.ScriptKind.JS;
+  return ts.ScriptKind.TS;
+}
+
+function stringModuleSpecifier(node: ts.Expression | undefined): string | null {
+  return node !== undefined && ts.isStringLiteral(node) && node.text.startsWith('.')
+    ? node.text
+    : null;
+}
+
+/**
+ * Extracts only statically-known relative module edges from TypeScript syntax.
+ * Computed and template-literal dynamic imports are deliberately unsupported:
+ * they do not name one statically provable repository edge.
+ */
+export function extractRelativeImportSpecifiers(
+  path: string,
+  source: string,
+): readonly string[] {
+  const sourceFile = ts.createSourceFile(
+    path,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    scriptKind(path),
   );
+  const specifiers = new Set<string>();
+  const add = (value: string | null): void => {
+    if (value !== null) specifiers.add(value);
+  };
+  const visit = (node: ts.Node): void => {
+    if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
+      add(stringModuleSpecifier(node.moduleSpecifier));
+    } else if (
+      ts.isImportEqualsDeclaration(node) &&
+      ts.isExternalModuleReference(node.moduleReference)
+    ) {
+      add(stringModuleSpecifier(node.moduleReference.expression));
+    } else if (ts.isImportTypeNode(node)) {
+      const argument = node.argument;
+      add(ts.isLiteralTypeNode(argument)
+        ? stringModuleSpecifier(argument.literal)
+        : null);
+    } else if (
+      ts.isCallExpression(node) &&
+      node.expression.kind === ts.SyntaxKind.ImportKeyword
+    ) {
+      add(stringModuleSpecifier(node.arguments[0]));
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return [...specifiers].sort();
 }
 
 function resolveRelativeImport(
@@ -222,7 +297,7 @@ export async function buildImportGraph(
     } catch {
       return;
     }
-    for (const specifier of importSpecifiers(source)) {
+    for (const specifier of extractRelativeImportSpecifiers(consumer, source)) {
       const producer = resolveRelativeImport(consumer, specifier, absoluteFiles);
       if (producer === null) continue;
       const consumerPath = relative(root, consumer);
@@ -271,6 +346,72 @@ export function reverseTestClosure(
   return [...tests].sort();
 }
 
+export function reverseConsumerClosure(
+  graph: ImportGraph,
+  producers: readonly string[],
+): readonly string[] {
+  const pending = [...producers];
+  const visited = new Set(pending);
+  const consumers = new Set<string>();
+  while (pending.length > 0) {
+    const producer = pending.shift();
+    if (producer === undefined) break;
+    for (const consumer of graph.consumersByProducer[producer] ?? []) {
+      consumers.add(consumer);
+      if (!visited.has(consumer)) {
+        visited.add(consumer);
+        pending.push(consumer);
+      }
+    }
+  }
+  return [...consumers].sort();
+}
+
+export function uncontrolledProducerPaths(
+  graph: ImportGraph,
+  producers: readonly string[],
+  runtimeSpecs: readonly string[],
+  compileControls: readonly string[],
+): readonly string[] {
+  const controls = new Set([...runtimeSpecs, ...compileControls]);
+  return producers.filter((producer) =>
+    !reverseConsumerClosure(graph, [producer]).some((consumer) => controls.has(consumer)),
+  );
+}
+
+function recordedIndexBlob(value: string): string | null {
+  return value === '-' || value === 'untracked' ? null : value;
+}
+
+export function compareBaselineOwnership(
+  baselinePaths: readonly BaselinePath[],
+  snapshots: readonly BaselinePathSnapshot[],
+  planManifest: readonly string[],
+): readonly BaselinePathComparison[] {
+  const byPath = new Map(snapshots.map((snapshot) => [snapshot.path, snapshot]));
+  return baselinePaths.map((baseline): BaselinePathComparison => {
+    const snapshot = byPath.get(baseline.path);
+    if (snapshot === undefined) {
+      throw new Error(`Missing current baseline snapshot for ${baseline.path}.`);
+    }
+    const expectedIndex = recordedIndexBlob(baseline.indexBlob);
+    const indexMatches = snapshot.indexBlob === expectedIndex ||
+      snapshot.indexBlobSha256 === baseline.worktreeSha256;
+    const worktreeMatches = snapshot.worktreeSha256 === baseline.worktreeSha256;
+    const stable = indexMatches && worktreeMatches;
+    return {
+      ...snapshot,
+      recordedIndexBlob: expectedIndex,
+      recordedWorktreeSha256: baseline.worktreeSha256,
+      state: stable
+        ? 'stable'
+        : matchesManifest(baseline.path, planManifest)
+          ? 'owned_collision'
+          : 'excluded_drift',
+    };
+  });
+}
+
 function git(root: string, arguments_: readonly string[]): string {
   return execFileSync('git', arguments_, {
     cwd: root,
@@ -278,6 +419,99 @@ function git(root: string, arguments_: readonly string[]): string {
     stdio: ['ignore', 'pipe', 'pipe'],
     maxBuffer: 64 * 1024 * 1024,
   });
+}
+
+function gitBuffer(root: string, arguments_: readonly string[]): Buffer {
+  return execFileSync('git', arguments_, {
+    cwd: root,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    maxBuffer: 64 * 1024 * 1024,
+  });
+}
+
+function gitSucceeds(root: string, arguments_: readonly string[]): boolean {
+  try {
+    execFileSync('git', arguments_, {
+      cwd: root,
+      stdio: 'ignore',
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function sha256(value: string | Uint8Array): string {
+  return createHash('sha256').update(value).digest('hex');
+}
+
+export function baselineAncestorArguments(head: string): readonly string[] {
+  return ['merge-base', '--is-ancestor', head, 'HEAD'];
+}
+
+function indexBlob(root: string, path: string): string | null {
+  const row = git(root, ['ls-files', '--stage', '--', path]).trim();
+  if (row.length === 0) return null;
+  const blob = row.split(/\s+/u)[1];
+  return blob ?? null;
+}
+
+async function captureBaselineSnapshots(
+  root: string,
+  baselinePaths: readonly BaselinePath[],
+): Promise<readonly BaselinePathSnapshot[]> {
+  return Promise.all(baselinePaths.map(async (baseline): Promise<BaselinePathSnapshot> => {
+    const currentIndexBlob = indexBlob(root, baseline.path);
+    const absolute = resolve(root, baseline.path);
+    const worktreeBytes = existsSync(absolute) ? await readFile(absolute) : null;
+    const currentIndexBytes = currentIndexBlob === null
+      ? null
+      : gitBuffer(root, ['cat-file', 'blob', currentIndexBlob]);
+    const recordedBlob = recordedIndexBlob(baseline.indexBlob);
+    if (recordedBlob !== null) {
+      gitBuffer(root, ['cat-file', 'blob', recordedBlob]);
+    }
+    return {
+      path: baseline.path,
+      indexBlob: currentIndexBlob,
+      indexBlobSha256: currentIndexBytes === null ? null : sha256(currentIndexBytes),
+      worktreeSha256: worktreeBytes === null ? null : sha256(worktreeBytes),
+    };
+  }));
+}
+
+function isDeletion(entry: ChangeEntry): boolean {
+  return entry.status.startsWith('D');
+}
+
+export function missingRequiredSpecPaths(
+  requiredSpecs: readonly string[],
+  availablePaths: readonly string[],
+  deletedPaths: readonly string[],
+): readonly string[] {
+  const available = new Set(availablePaths);
+  return [...new Set([...requiredSpecs, ...deletedPaths])]
+    .filter((path) => !available.has(path) || deletedPaths.includes(path))
+    .sort();
+}
+
+export function inventoryGateErrors(
+  inventory: Pick<
+    ContractInventory,
+    'baselineCollisions' | 'missingRequiredSpecs' | 'uncontrolledProducers'
+  >,
+): readonly string[] {
+  return [
+    ...(inventory.baselineCollisions.length === 0 ? [] : [
+      `Owned baseline paths changed after dispatch: ${inventory.baselineCollisions.join(', ')}`,
+    ]),
+    ...(inventory.missingRequiredSpecs.length === 0 ? [] : [
+      `Required specs are missing or deleted: ${inventory.missingRequiredSpecs.join(', ')}`,
+    ]),
+    ...(inventory.uncontrolledProducers.length === 0 ? [] : [
+      `Owned producers lack runtime or compile controls: ${inventory.uncontrolledProducers.join(', ')}`,
+    ]),
+  ];
 }
 
 function allRepositoryFiles(root: string): readonly string[] {
@@ -289,6 +523,7 @@ function allRepositoryFiles(root: string): readonly string[] {
     .split(/\r?\n/u);
   return [...new Set([...tracked, ...untracked])]
     .filter((path) => /\.(?:ts|tsx|mts|mjs)$/u.test(path))
+    .filter((path) => existsSync(resolve(root, path)))
     .sort();
 }
 
@@ -303,8 +538,11 @@ export async function collectContractInventory(
   const baseline = parseBaseline(baselineText);
   const base = git(root, inventoryBaseArguments(arguments_.base)).trim();
   const head = git(root, ['rev-parse', 'HEAD']).trim();
-  if (baseline.base !== base || baseline.head !== head) {
-    throw new Error('Baseline base/head does not match this inventory run.');
+  if (baseline.base !== base) {
+    throw new Error('Baseline base does not match this inventory run.');
+  }
+  if (!gitSucceeds(root, baselineAncestorArguments(baseline.head))) {
+    throw new Error('Baseline HEAD is not an ancestor of this inventory run.');
   }
 
   const domains = {
@@ -324,54 +562,82 @@ export async function collectContractInventory(
     ...domains.unstaged,
     ...domains.untracked,
   ];
-  const baselinePaths = new Set(baseline.paths.map((entry) => entry.path));
+  const baselineSnapshots = await captureBaselineSnapshots(root, baseline.paths);
+  const baselineComparisons = compareBaselineOwnership(
+    baseline.paths,
+    baselineSnapshots,
+    planManifest,
+  );
+  const baselineCollisions = baselineComparisons
+    .filter((comparison) => comparison.state === 'owned_collision')
+    .map((comparison) => comparison.path)
+    .sort();
+  const baselineDrift = baselineComparisons
+    .filter((comparison) => comparison.state === 'excluded_drift')
+    .map((comparison) => comparison.path)
+    .sort();
+  const stableBaselinePaths = new Set(baselineComparisons
+    .filter((comparison) => comparison.state === 'stable')
+    .map((comparison) => comparison.path));
   const changedOwnedPaths = [...new Set(allChanges
     .map((entry) => entry.path)
-    .filter((path) => matchesManifest(path, planManifest) && !baselinePaths.has(path)))]
+    .filter((path) => matchesManifest(path, planManifest) && !stableBaselinePaths.has(path)))]
     .sort();
-  const preExistingExclusions = [...baselinePaths].sort();
+  const preExistingExclusions = [...stableBaselinePaths].sort();
 
   const branchTestEntries = parseNameStatus(
     git(root, branchTestDiffArguments(base)),
   );
   const branchTestInventory = branchTestEntries
-    .filter((entry) => entry.status !== 'D' && entry.path.endsWith('.test.ts'))
+    .filter((entry) => !isDeletion(entry) && entry.path.endsWith('.test.ts'))
     .map((entry) => entry.path);
-  const missingBranchTests = branchTestEntries
-    .filter((entry) => entry.status === 'D')
+  const deletedTests = allChanges
+    .filter((entry) => isDeletion(entry) && entry.path.startsWith('tests/'))
     .map((entry) => entry.path);
+  const missingBranchTests = [...new Set([
+    ...branchTestEntries.filter(isDeletion).map((entry) => entry.path),
+    ...deletedTests,
+  ])].sort();
   const producerPaths = changedOwnedPaths.filter((path) =>
     /^(?:src|tools)\/.*\.ts$/u.test(path),
   );
   const repositoryFiles = allRepositoryFiles(root);
   const graph = await buildImportGraph(root, repositoryFiles);
   const importGraphRuntimeSpecs = reverseTestClosure(graph, producerPaths);
-  const runtimeSpecs = [...new Set([
+  const requiredRuntimeSpecs = [...new Set([
     ...SLICE_ONE_RUNTIME_SPECS,
     ...INHERITED_D576_RUNTIME_SPECS,
     ...branchTestInventory,
     ...importGraphRuntimeSpecs,
-  ])].filter((path) => repositoryFiles.includes(path)).sort();
+  ])].sort();
+  const runtimeSpecs = requiredRuntimeSpecs
+    .filter((path) => repositoryFiles.includes(path));
   const compileControls = changedOwnedPaths
     .filter((path) => path.startsWith('tests/types/') && path.endsWith('-test.ts'));
-  const controlled = new Set<string>();
-  for (const producer of producerPaths) {
-    const consumers = graph.consumersByProducer[producer] ?? [];
-    if (consumers.some((path) =>
-      runtimeSpecs.includes(path) || compileControls.includes(path),
-    )) controlled.add(producer);
-  }
-  const uncontrolledProducers = producerPaths
-    .filter((producer) => !controlled.has(producer));
+  const missingRequiredSpecs = missingRequiredSpecPaths(
+    [...requiredRuntimeSpecs, ...compileControls],
+    repositoryFiles,
+    missingBranchTests,
+  );
+  const uncontrolledProducers = uncontrolledProducerPaths(
+    graph,
+    producerPaths,
+    runtimeSpecs,
+    compileControls,
+  );
 
   const counts = {
     planManifest: planManifest.length,
     changedOwnedPaths: changedOwnedPaths.length,
     preExistingExclusions: preExistingExclusions.length,
+    baselineCollisions: baselineCollisions.length,
+    baselineDrift: baselineDrift.length,
     branchTestInventory: branchTestInventory.length,
     missingBranchTests: missingBranchTests.length,
     producerPaths: producerPaths.length,
     runtimeSpecs: runtimeSpecs.length,
+    requiredRuntimeSpecs: requiredRuntimeSpecs.length,
+    missingRequiredSpecs: missingRequiredSpecs.length,
     compileControls: compileControls.length,
     importGraphRuntimeSpecs: importGraphRuntimeSpecs.length,
   };
@@ -385,10 +651,15 @@ export async function collectContractInventory(
     planManifest,
     changedOwnedPaths,
     preExistingExclusions,
+    baselineComparisons,
+    baselineCollisions,
+    baselineDrift,
     branchTestInventory: [...new Set(branchTestInventory)].sort(),
     missingBranchTests: [...new Set(missingBranchTests)].sort(),
     producerPaths,
     runtimeSpecs,
+    requiredRuntimeSpecs,
+    missingRequiredSpecs,
     compileControls,
     importGraphRuntimeSpecs,
     uncontrolledProducers,
@@ -404,10 +675,9 @@ async function main(): Promise<void> {
     writeFile(arguments_.out, `${JSON.stringify(inventory, null, 2)}\n`, 'utf8'),
     writeFile(arguments_.runtimeOut, `${inventory.runtimeSpecs.join('\n')}\n`, 'utf8'),
   ]);
-  if (inventory.uncontrolledProducers.length > 0) {
-    throw new Error(
-      `Owned producers lack runtime or compile controls: ${inventory.uncontrolledProducers.join(', ')}`,
-    );
+  const errors = inventoryGateErrors(inventory);
+  if (errors.length > 0) {
+    throw new Error(errors.join('\n'));
   }
   process.stdout.write(`${JSON.stringify(inventory.counts)}\n`);
 }
