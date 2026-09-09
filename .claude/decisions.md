@@ -20499,3 +20499,25 @@ seven MCP-spawning specs. Verified by me: `sg scan` exit 0; one
 in the fanout log and the review brief). My 39-spec cumulative runs on
 the writable checkout at load about 2 (cum-promo180-h-r3.log). Astra
 round 3 (FINAL) launched (brief review-impl-promo180-h-r3.md).
+
+## D586.102 — reconciliation plan round 1: DO NOT DISPATCH (direction endorsed); round 2 resumed (2026-09-09 03:41)
+
+Astra round 1: "DO NOT DISPATCH. The shared-core composition is the right
+direction and respects D586.27." Blockers: the proposed core advances
+state after each reducer return, but session-command-transaction.ts:
+217-220 accepts state only after the whole boundary drain succeeds, so a
+caught failure in automatic work could complete with partial state
+(probe: accepted revision 0 vs modelled 1); the challenge byte-equality
+gate assumes deterministic heap/time although challenge-feasibility.ts:
+170-172/228-237 read live process memory and time, making a STOP-and-
+replan inevitable; slice 1 depends on the two-baseline inventory
+enforcement that slice 2 defers (d583-contract-inventory.ts:125-160 pins
+only the 140-path baseline). Should-fixes: the risk mutant is at
+encounter.ts:10025 on c4e525c3 but :10157 on ce081ef0; the double-drain
+mutant can be a no-op. Verified: overlap anchors, exactly two conflict
+files, the 20-block test union (14 byte-identical, one adds only the
+decoder assertion, five retained explicitly), the session manifest
+(696,676 bytes, 29ca2ded...), the challenge artifact (759 bytes,
+55b972b3..., heap 1,073,878,568), the frozen contract on both trees.
+Round 2 resumed on 01a08505-d69b-7120-83ae-0509457fdce1 (brief
+plan-trial-core-reconciliation-r2.md, marker PLAN-RECONCILE-R2 DONE).
