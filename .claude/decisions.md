@@ -21053,3 +21053,23 @@ from the earlier pool arms; post-arm validation, provenance capture,
 packet/judge/analysis steps with the notes|empty check; STOP rules;
 cost and duration for the arm and the grid. Astra reviews it; the
 launch itself remains a separate recorded decision.
+
+## D586.130 — reconciliation slice 2 ACCEPTED; the reconciliation branch merged into main; full gate launched on 3f71418f (2026-09-09 06:11)
+
+Astra round 2 on 6542aa84: "ACCEPT SLICE 2. Blockers: none. Should-fix:
+resolved." Test:193 asserts the complete sequence; the only change +1/-3;
+both controls reproduced in memory (bypass 1/1 vs 3/3; single doubling
+4/4 vs 3/3) with restoration hashes matching HEAD; inventory reproduced
+(193 paths, 42b6c1ed...); the supervisor cumulative and serial rerun
+reconcile to 4,159/4,159. Per the plan's merge step 8, merged
+claude/trial-core-reconciliation into main as 3f71418f (clean): main
+now carries the accepted D583 challenge work (rooms, independent roll
+provenance, reducer-backed feasibility tooling, contract inventory)
+with both wrappers composed over the shared SessionCommandTrialCore.
+Gate worktree moved to 3f71418f and the full gate launched at 06:10 on
+load 0.4 with 4870 free; the previous log kept as gate-wt-main-
+493121dd.d95cafb6-vitest-green.log. The room D branch (claude/
+challenge-rooms, ahead of ce081ef0 by slices 0-1 and the running
+slice 2) will need main merged into it after this gate; its
+challenge-feasibility.test.ts overlaps the reconciliation's slice-2
+additions and is a known conflict for that step.
