@@ -20957,3 +20957,5 @@ launch failed on a missing stdin file before starting (no log, no
 process); caught on the next check, the brief written from the correct
 directory and the review launched (session
 01a08592-e083-7722-b966-37576cff44eb). No lane or review ran twice.
+
+## D586.123b — supervisor run of the three room D specs on 9781b93f: 3 files, 44/44, exit 0 (2026-09-09 05:51)
