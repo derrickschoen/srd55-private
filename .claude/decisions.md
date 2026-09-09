@@ -20094,3 +20094,5 @@ with the 19-spec run (441/443, the two reds being these arena timeouts):
 443/443, zero skipped, tsc 0. Both logs handed to Astra as the round-3
 closing evidence (brief review-impl-txn-s1-r3.md); the candidate is
 unchanged since round 2, which found no implementation blocker.
+
+## D586.81a — supervisor run of the three changed challenge specs on 0011d8b8: 3 files, 55/55, exit 0 (2026-09-09 01:58)
