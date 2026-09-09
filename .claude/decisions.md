@@ -21034,3 +21034,22 @@ me on the committed candidate: 5 passed, 21 filtered. Astra round 2
 (closing) launched (brief review-impl-reconcile-s2-r2.md, session
 01a085a1-c8bc-7a21-9734-f7da2e52d525) with the 4159/4159 cumulative
 evidence.
+
+## D586.129 — D569 v5 first-arm launch runbook dispatched as a planning unit (2026-09-09 06:10)
+
+The v5 grid is eight core arms (luna, opus 4.8, sol, astra; blind and
+advice each) plus three minhint arms over evaluation-hard and
+evaluation-brutal at 3 reps, fresh session per cell, 240 s wall,
+mcp_minimal transport, png boards, escalation and default fallback off.
+Rather than hand-assemble the launch from memory, a planning-only lane
+on the blind worktree (session 01a085a4-feb0-74e3-b85c-5a9ae9c69c45,
+brief plan-d569-v5-runbook.md, marker RUNBOOK DONE, file
+.tmp-plans/2026-09-09-d569-v5-first-arm-runbook.md) writes the
+copy-pasteable procedure: which arm goes first and its cell grid;
+preflight commands with expected outputs (external hashes, HEAD and
+manifest digests, model availability, dry-run rows validated through
+the D569 tool); the exact launch commands, paths and runtime estimate
+from the earlier pool arms; post-arm validation, provenance capture,
+packet/judge/analysis steps with the notes|empty check; STOP rules;
+cost and duration for the arm and the grid. Astra reviews it; the
+launch itself remains a separate recorded decision.
