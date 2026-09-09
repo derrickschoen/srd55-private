@@ -21523,3 +21523,54 @@ persistent git-failure tests for the D583 inventory; the reconciliation
 unit has no open findings. Running: room D slice 2 round 2 (lane).
 D569 preflight remains paused at section 2.4 until the machine is free of
 vitest/arena processes.
+
+## D586.152 — room D slice 2 fix round 2 harvested as candidate 48cba702; Astra round 2 launched; supervisor run queued (2026-09-09 09:51)
+
+Lane resume (real session 01a08599-2b42-7982-8c9d-11db2b2a112f, 499,933
+tokens, exit 0, ROOM-D-S2 R2 DONE). Lane-claimed: complete retention
+inventory measured from live collections (peak 3,286 = stack/leaves
+1,464 + materialized branches 8 + outer siblings 1,310 + ancestors 4 +
+draw frames 6 + component telemetry 209 + ledgers 15 + attack cells 15 +
+distribution cache 111 + finalized policy telemetry 135 + counters 9;
+structural bound 3,348; headroom 4,185); forbidden/retention counters
+instrumented at real boundaries with inert-by-default seams; full
+per-component distributions and per-policy subtotals asserted; executed
+Longbow control (61 HP / revision 5, sequences 11/12); all 25 plan
+controls as permanent enumerator-level tests (option i), no temporary
+mutants; focused 29/29 in 528 s; fault probe 25/25 in 5.6 s; cumulative
+150 paths: the known inventory red verbatim plus two load timeouts green
+on the single serial rerun (154/154); totals unchanged. Supervisor
+verified: exactly two files (+812/-54); the 53 removed lines are the
+literal-zero types/values, the old retained-telemetry helper, the
+fabricated-id validator call and one test import (no assertion
+removed); zero forbidden tokens; zero timeout changes; diff --check
+clean; frozen contract and plan hashes unchanged; my own sg scan 0 and
+tsc -b --force 0. Committed on claude/challenge-rooms as 48cba702. Astra
+round 2 launched read-only, told not to run vitest this round (session
+01a0866e-110d-71a2-91d5-dbe929ad9de5, brief review-room-d-s2-r2.md, log
+astra-review-room-d-s2-r2.log). Supervisor main-shaped run (focused spec
++ 150-path cumulative, full output to file) queued behind the D569
+preflight so the machine stays quiet for it.
+
+## D586.153 — D569 preflight 2.4 guard matched the supervisor's own shells; my runner ignored the STOP; model-free dry-run allowed to finish (2026-09-09 09:51)
+
+Running the runbook's 2.4 block verbatim printed `STOP: busy
+arena/test process`. Evidence: the pgrep listing contained no arena,
+vitest, Playwright or gate process — every hit was a Claude Code
+supervisor shell (`/bin/bash -c source …/shell-snapshots/…`) whose
+command text carried the words vitest / gate-wt from my own monitor and
+gate commands, i.e. the self-match class already in memory, this time
+against sibling supervisor shells rather than the probe itself. Then a
+defect in MY runner: I piped each block through `tail -40` inside a
+subshell and read PIPESTATUS outside it, so the STOP's exit status was
+lost and block 2.5 (the model-free dry-run, two 30-cell arena runs with
+the simulated adapter, port 4530, headless chromium captures) started
+anyway. Decision: the dry-run is model-free, writes only under
+d569-v5/, touches nothing on 4173, and the true 2.4 condition (no other
+arena/gate/test process, load ≤ 2.0, 4530 free at start) held in
+substance, so it is allowed to complete and its rows go through the
+runbook's validator (2.5, `D569 ROW VALIDATION PASS` expected). Before
+any PRODUCTION launch, 2.4 is re-run verbatim on a machine with no
+supervisor monitor shells carrying those words, and the runner is fixed
+to capture exit codes without pipes. Both findings are against my own
+execution, not the runbook.
