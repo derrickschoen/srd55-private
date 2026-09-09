@@ -1,5 +1,3 @@
-import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { decodeArenaBasisEnvelopeV1 } from '../../../src/vtt/arena-fixture';
 import {
@@ -9,6 +7,11 @@ import {
   runChallengeFeasibility,
 } from '../../../tools/challenge-feasibility';
 import { combatantId } from '../../../src/combat/values';
+import { declareTestInputs } from '../../helpers/test-inputs';
+
+const inputs = declareTestInputs({
+  fixtures: ['tests/fixtures/arena-basis-challenge/seed-5831004.json'],
+});
 
 describe('D583 challenge feasibility spike', () => {
   it('transactional adapter preserves die provenance across checkpoint replay and rollback', async () => {
@@ -70,9 +73,9 @@ describe('D583 challenge feasibility spike', () => {
   });
 
   it('variant horizons derive endpoints from and complete required actor sets', async () => {
-    const fixture = JSON.parse(await readFile(resolve(
-      process.cwd(), 'tests/fixtures/arena-basis-challenge/seed-5831004.json',
-    ), 'utf8')) as unknown;
+    const fixture = JSON.parse(inputs.fixtures.readText(
+      'tests/fixtures/arena-basis-challenge/seed-5831004.json',
+    )) as unknown;
     const state = decodeArenaBasisEnvelopeV1(fixture, { mode: 'challenge' }).encounter.state;
     const required = [
       combatantId('combatant:fighter'),
