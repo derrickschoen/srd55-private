@@ -20894,3 +20894,16 @@ divergence assertion (:553 vs engine-round-session.test.ts:560). Slice 2
 (feasibility accounting closure, one test file) dispatches next on the
 same worktree; the supervisor merges the branch into main only after
 both slices per the plan's step 8.
+
+## D586.122 — reconciliation slice 2 dispatched on the same session (2026-09-09 05:24)
+
+Slice 2 (feasibility accounting closure, one test file) resumed on
+01a08530-a935-7832-b3e1-38e592d7c1c9 in the reconcile worktree at
+31e98af5 (brief impl-reconcile-s2.md, marker RECONCILE-S2 DONE): the
+deterministic exact accounting cases under the injected runtime, never
+the production beforeAll; the five slice-2 controls incl. the
+composition-abort restore mutant killed by composition.test.ts:333;
+inventory recomputed with the slice-1 tool; one vitest invocation; the
+after-reconcile-s2 session capture and the s2 challenge report through
+the validator. The slice-1 log mislocation (:553 -> :560) to be
+corrected in passing.
