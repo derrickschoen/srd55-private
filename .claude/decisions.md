@@ -20456,3 +20456,19 @@ plan-trial-core-reconciliation.md, plan file
 .tmp-plans/2026-09-09-trial-core-reconciliation.md, marker
 PLAN-RECONCILE DONE); it reads the challenge side through read-only git
 commands. Astra reviews up to three rounds.
+
+## D586.100 — trial-core reconciliation plan written; Astra round 1 launched (2026-09-09 03:34)
+
+Lane exit 0, PLAN-RECONCILE DONE in 17 minutes; plan 457 lines,
+45,097 bytes, sha256 07a6a3df... (verified by me), tree clean.
+Sections: outcome; locally verified facts and immutable inputs; exact
+overlap inventory on both refs (session side at c4e525c3, challenge
+side at ce081ef0, incl. every overlapping test block); decision and
+rejected alternatives; target shape with exact interfaces and
+ownership; merge procedure and conflict resolution; byte-identical
+proofs for both the session capture and the B,C,A feasibility report;
+two ordered slices (merge union and shared core composition, 6 files;
+fixed-point inventory and feasibility accounting closure, 3 files);
+D584.4 contract; must-not-change; acceptance and STOP rules. Log check:
+8 `claude -p` matches in the log, 0 of them shaped like a command line; the rest are the echoed header and decisions.md lines the lane read. Astra round 1 launched (brief review-plan-reconcile-r1.md,
+read-only with cross-ref git commands allowed).
