@@ -20365,3 +20365,37 @@ writable checkout at load 3.9 (cum-txn-s3.log). Astra round 1 launched
 01a084fb-c23d-7d80-93b4-4ce75b0fd285), also asked for a one-paragraph
 read on what the slice-4 reconciliation with the challenge branch's
 engine-round-application must decide.
+
+## D586.97 — promo180 Slice H round-2 cumulative: one REAL assertion red in a named test plus one arena timeout; txn slice 3 ACCEPTED on merits (2026-09-09 03:08)
+
+Supervisor cumulative on 13beb989 (writable checkout, real MCP children,
+load ~4): tsc 0; 39 files, 37 passed / 2 failed; 593 tests, 591 passed
+/ 2 failed. One red is an ASSERTION failure, not load:
+tests/unit/tools/ai-dm-conversation.test.ts > "speculation uses arm base
+until trigger" (one of the five mandatory named tests) fails with a
+deep-equality mismatch (expected ObjectContaining, received a 106-key
+object); the lane had reported it passing under a `-t` filter in its
+EROFS sandbox. The other red is a 5 s timeout in ai-dm-arena
+"applies escalation to only the configured arm and attributes the
+resulting row" (file wall 228 s), which touches the new escalation
+logic and gets its D587.3 serial rerun but is also suspicious. Both go
+to the lane at fix round 3 with the assertion diff, after Astra's
+round-2 verdict lands (its review is still running; a REJECT is now
+certain on the evidence regardless).
+
+Txn slice 3, Astra round 1 on c4e525c3: "ACCEPT SLICE 3 on
+implementation merits. Blockers: none. Should-fix: none." Segment
+validation outside, narrow port, preserve policy, completed-only
+commit, exact error identity; both oracles satisfied; pinned blocks and
+the slice-1 pin unchanged; all four mutant hashes reconstructed in
+memory incl. composition draws 3 vs 2; captures equal; manifest line 78
+corrected. Its read on slice 4: the challenge branch's
+runCommandBoundaryTransaction works per command with caller-owned
+transactional RNG checkpoints, returns events/revision/evidence/
+DrawRecord history and feeds the feasibility accounting (refusals and
+automatic boundary work included); these must coexist with session-wide
+atomicity, completed-only publication, exact error identity, distinct
+initial-boundary policies and the narrow port; a re-export or wholesale
+replacement would not preserve the contracts; resolve the session/spec
+conflicts by retaining both sides' behavioural assertions. Merge of
+slice 3 waits on my cumulative (cum-txn-s3.log, running).
