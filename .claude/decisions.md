@@ -19465,3 +19465,19 @@ present, sha matches the pin. Lane launched fresh: brief impl-d569-a2.md,
 session 01a08458-ed76-7461-9693-80f8770f0e35, marker D569-A2 DONE.
 Implementation acceptance is not launch authorization (plan section 9);
 the first v5 arm still needs the oracle re-capture and a blind gate.
+
+## D586.56 — txn plan round 2: DO NOT DISPATCH on one control mapping; final round resumed (2026-09-09 00:09)
+
+Astra round 2: one blocker only. Plan line 339 names the nested
+composition test as the killer for removing the enclosing RNG restore at
+encounter.ts:10025, but that test survives (the parent step at :9554
+restores the random-consuming subtree). Astra reproduced that
+tests/unit/vtt/composition.test.ts:319 kills the mutant at its snapshot
+assertion (draws 3 vs expected 2); the fix is naming that assertion, no
+new test. Two should-fixes (line 31 extract/replace -> STOP/re-plan;
+line 234 separate input freezing from output hashing). Everything else
+confirmed: empty-monster counterexample, type-binding runtime edges,
+?raw policy sound under six probe classes, closure counts 69/1/70/77
+reproduced, no roll-provenance or mcp-client dependence. Round 3 of 3
+(FINAL) resumed on 01a0842b-042d-7383-b07c-e970396080e7 (brief
+plan-txn-r3.md, marker PLAN-TXN-R3 DONE).
