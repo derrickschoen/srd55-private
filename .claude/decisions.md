@@ -21918,3 +21918,49 @@ While it runs, the supervisor read the preserved cell's own codex rollout
    `engine.get_turn_context` whose strict schema rejects it (`schemas.ts:1459`), so an infrastructure failure became a process
    crash that discarded 26 completed brutal cells. The RCA lane is being asked to fold this evidence in; verdict (patch vs rethink)
    follows its review.
+
+### D586.167 — D569 crash RCA round 2 (codex sol, supervisor-verified): the hard basis is also infrastructure-contaminated; D586.166's self-attribution corrected (2026-09-09 17:31 EDT)
+
+Owner (17:0x): "Collaborate with codex to figure out why the crash and if we need just a patch, or a rethink of the architecture."
+Unit D569-CRASH-RCA: codex sol (session 01a087c6-e5a7-7aa2-a37a-ebfd4c679884) wrote round 1 (`.claude/consensus/d569-crash-rca/rca-r1-sol.md`,
+trigger mis-stated as "the model ignored an advertised tool"); the supervisor resumed it with the rollout/timing evidence from D586.166;
+round 2 (`rca-r2-sol.md`) now agrees on the trigger chain and adds findings the supervisor verified by opening the cited rollouts:
+
+1. Trigger chain (verified): engine MCP server's tools/list landed at +17.443 s after cell start; codex had registered no engine tools
+   (the model's own `ALL_TOOLS` enumeration shows none); the arena passes `mcp_servers.engine.command/args` only — no
+   `startup_timeout_sec`/`tool_timeout_sec` (src/vtt/agent-adapters/codex.ts:227–242); codex's stderr (where an MCP-start warning
+   would appear) is buffered but discarded on exit 0 except for the session id (codex.ts:181–204), so the failure left no row
+   evidence; empty spools → placeholder `rowTurnContext` (no dm_mode) → fallback at ai-dm-conversation.ts:5815 → plannedTurnContext
+   sends `intel_mode` to the strict blind schema (schemas.ts:1459) → TypeError from the direct tool surface (engine-server.ts:3471–3478).
+2. NEW — the hard basis is contaminated too: hard rows 4, 10, 22 (1-based; the three `service_null`/`toolCalls:0` rows) were the SAME
+   failure — their rollouts (hard-era cells nDXgPJ 13:16, CUAnqn 13:34, bvZkpX 14:13) show the model searching for engine tools (4–6
+   tool-search calls each), finding none, and surviving only by reading the engine's generic MCP resources (3–20 `read_mcp_resource`/
+   `list_mcp_resource_templates` calls), which populate the turn-context spool through the resource callback (engine-server.ts:3486)
+   and therefore dodge the crashing fallback; they emitted intents as plain text with no submission tool. `toolCalls` counts only
+   engine-named tool calls (ai-dm-conversation.ts:1202/3607), so 0 there means "no direct engine surface", not "model idle".
+   Supervisor spot-check: nDXgPJ 27 calls / 0 direct-engine / 20 generic; CUAnqn 21 / 1 / 15; bvZkpX 10 / 0 / 3.
+3. CORRECTION to D586.166: the MCP-startup failure hit 4 of 57 cells across the whole arm (13:16, 13:34, 14:13, 15:41). Three of
+   them predate the supervisor's 15:40 lane dispatch by hours, so the dispatch is NOT the cause of the fragility and at most a
+   contributor to the fourth cell's timing. The crash cell differed from the three survivors only in luna's recovery behaviour
+   (refusal versus generic-resource reads), not in its infrastructure state. D586.166's "probable cause" sentence is withdrawn as
+   overstated; what stands is that the box was not quiet and the rule "nothing else during an arm" is still right.
+4. Verdict (codex, supervisor concurs pending Astra review): PATCH NOW + STRUCTURAL FOLLOW-UP, not a rethink. Patch = (a) the
+   profile conditional at :2181 and blind config into the planned correction context at :4811; (b) explicit
+   `mcp_servers.engine.startup_timeout_sec`/`tool_timeout_sec` (60 s proposed — policy, below the 180 s live wall and 240 s cell
+   timeout); (c) a typed `outcome:'infrastructure_failed'` / `infrastructureFailureClass:'engine_mcp_unavailable'` row class detected
+   from preserved codex stderr (never from "zero calls" alone), guarded out of coordination/execution like service_null, threaded
+   through the row outcome union (:690) and the rerun-packet schema (ai-dm-rerun-packet.ts:148); (d) fallback resolution moved
+   before `contextBytes` (:5789 vs :5815); (e) three regression tests (arena blind dry-run with a forced primary flap exercising the
+   fallback on the real blind surface; adapter argv + stderr diagnosis; conversation infrastructure_failed row). Follow-up =
+   profile-indexed tool surfaces (`EngineToolSurface<'dm'|'blind'>`) with one `getTurnContextArguments(profile, …)` builder for the
+   14 host-side call sites — no advertised schema or model-facing byte changes. Rejected alternatives: blind schema
+   accept-and-ignore (widens the advertised schema, hides future mismatches); removing the fallback (blind row evidence needs
+   creature_facts/legal_movement, :5943).
+5. Arm integrity: the intel_mode/telemetry changes touch nothing model-facing for healthy cells; the timeout DOES change
+   model-facing tool availability for infrastructure cells. So the 27 unaffected hard rows stay comparable; the 3 infrastructure
+   cells must be typed and excluded (the D569 scorer already excludes infrastructure failures, tools/d569-blind-experiment.ts:975/
+   1091) or rerun under the identical manifest (tools/vtt-experiment.ts:791). The advice arm has no intel_mode mismatch but the same
+   MCP-startup exposure and NO fallback guard (it would silently produce a refused row), so the detection must cover both arms.
+Astra review of the RCA dispatched (brief review-rca-d569-crash.md); the patch is not implemented until it returns. Pending question
+`d569-v5-brutal-crash.md` updated: the supervisor now recommends relaunching BOTH bases under the patched code (30+30), because the
+hard basis needs at least 3 identical-manifest reruns anyway and one code identity is cleaner than a 27+3 stitch.

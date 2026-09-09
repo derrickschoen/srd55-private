@@ -8,3 +8,5 @@ Options:
 - (c) Abandon the v5 first arm.
 
 Nothing is relaunched until you rule. The VTT-handoff unit (D589) proceeds meanwhile and now has a quiet box for its baseline gates.
+
+UPDATE 2026-09-09 17:31 EDT (D586.167): the hard basis is also infrastructure-contaminated (rows 4, 10, 22 ran without engine tools because the engine MCP server missed codex's startup deadline — the same failure as the crash cell, hours before any supervisor lane ran). Revised recommendation: patch (profile conditional + explicit MCP startup/tool timeouts + typed infrastructure_failed rows + tests), then relaunch BOTH bases under the patched code. Alternative (b') keep the 27 clean hard rows and rerun only the 3 contaminated hard cells plus the full brutal basis under the identical manifest. Astra review of the RCA pending; nothing relaunched.
