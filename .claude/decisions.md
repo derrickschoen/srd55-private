@@ -19222,3 +19222,27 @@ and are exiting; reviews launch when their exit lines land.
 ## D586.48 — heldout serial rerun: 3 of 4 red files green serially; the one remaining red is the D544 round-robin test at its pre-merge 5 s budget (2026-09-08 23:41)
 
 Serial rerun (D587.3, load ~6-8) on dnd-wt-p-heldout: generate-heldout-party-basis, room-generator-los-cover and ai-dm-board-delivery all green; ai-dm-arena 166/167 with the single red being "runs configured arms round-robin for every room-rep unit" timing out at 5,000 ms. That is the D544-named test main raised to 30 s in b2cd4ec4; the planning worktree is still at 493121dd and carries the old budget. Not a slice defect and not re-pinned: it clears when main is merged into the branch after the lane's round completes (a merge onto a dirty lane tree is not done). The rowcodec rerun is running.
+
+## D583.17 — challenge slice 3 lane result: SHELVE_D583 by a 0.02% heap overshoot; candidate committed, Astra review launched (2026-09-08 23:42)
+
+Lane (session 01a083ce-5391-76d0-8dfc-9045eb0e37ae) implemented phase 3a
+(src/combat/roll-provenance.ts as the independent capability, replacing
+the spike's seam; import-equals guard) and phase 3b (src/vtt/
+challenge-feasibility.ts, reducer-backed B/C/A with every attempted
+application counted). Feasibility command result (lane claim):
+SHELVE_D583, first failure heap_used_bytes 1,073,979,248 against the
+1,073,741,824 limit (overshoot 237,424 bytes, 0.02%), derived caps null,
+report sha256 2374dfdf…. Lane verification claims: focused migration
+gate 54/54, feasibility spec 13/13, simulation parity 280 cases, 14
+mutation controls restored, tsc -b 0, sg scan 0, diff --check 0,
+cumulative 4,068/4,073 with five timeout reds; three cleared serially,
+two ai-dm-arena timeouts remained (30,003 ms and 5,187 ms) under load
+10-13, and the lane correctly stopped BLOCKED rather than reconcile.
+Supervisor: committed the 16-file candidate on claude/challenge-rooms
+before anything else; serial arena rerun launched on the branch (load
+~5.5; the 5 s test is the D544 one main raised in b2cd4ec4 and this
+branch predates the raise); Astra review launched with the explicit
+question whether a 0.02% overshoot is inside the heap measurement's own
+noise and whether the plan's rule still says SHELVE. No decision on
+D583's fate until that verdict; the owner's room-D bounded rewrite
+(D587.7) waits on the same answer.
