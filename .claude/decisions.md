@@ -22047,3 +22047,9 @@ around them (worktree-based landings already do). Alternatives not chosen: commi
 Supervisor (2026-09-09 18:45 EDT): codex availability probe (luna low, "READY") passed at 18:1x after the owner's usage reset; the plan r2 lane
 (resume 01a087af-14c8…, brief now carrying D593 WebSocket and D594 no-pin rulings) and the RCA r3 lane (resume 01a087c6…) were
 relaunched; exit sentinels in `.exit` files.
+
+## D596 — OWNER: handoff documentation lives in docs/vtt-handoff/** (2026-09-09)
+
+Q7 answered 2026-09-09 18:46 EDT: "docs/vtt-handoff/**". The supervisor authorizes exactly that directory (and the accompanying
+tests/unit/vtt/handoff-docs.test.ts) for unit VTT-HANDOFF-01 lanes; the standing no-docs/** rule stands everywhere else.
+Alternatives not chosen: README files next to the code; docs only in the published exchange root.
