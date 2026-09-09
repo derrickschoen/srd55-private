@@ -21480,3 +21480,21 @@ output to mainshape-inv-git-seam.full.log — no tail pipe this time): CLI
 inventory, focused spec, then the CLI's own 148-path cumulative. Astra
 review launched read-only (session 01a08613-99ee-7fd3-a846-607137b654d9,
 brief review-inv-git-seam.md, log astra-review-inv-git-seam.log).
+
+## D586.149 — inventory git-seam ACCEPTED by Astra (no findings); landing waits on the supervisor cumulative (2026-09-09 08:12)
+
+Astra (session 01a08613-99ee-7fd3-a846-607137b654d9, 36,500 tokens) on
+319e908b: "ACCEPT. Blockers: none. Should-fix: none. Nits: none." —
+default adapter, git arguments, call order, null handling and the
+deleted-spec throw unchanged; the four null-runner tests drive real
+discovery through the seam and assert exact union equality, 148 paths,
+sorting and the pinned digest; injected exceptions propagate as
+documented and the real adapter's invalid-command control verifies
+null-on-failure; positive-control files tracked with real transitive
+consumers; the deletion control models branchCommitted correctly; the 18
+removals are ten bypass-test lines subsumed by exact checks plus eight
+mechanical tool lines; both mutants would be killed. Astra could not run
+the focused spec in its read-only sandbox (ENOENT on a temp dir) — no
+independent pass claim from the reviewer. Supervisor main-shaped run so
+far: CLI inventory produced, focused spec 15/15; the 148-path cumulative
+is running. Landing = cumulative green → merge into main → full gate.
