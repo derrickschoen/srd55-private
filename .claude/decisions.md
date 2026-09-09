@@ -20537,3 +20537,35 @@ oracle re-capture, the section-9 launch preflight, and an explicit
 launch decision here. The queued main gate launched itself at 03:43:38
 on main d95cafb6 (mcp-client, row-codec, elevation, txn slices 1-3, the
 art pipeline, decisions), 4870 confirmed free.
+
+## D586.104 — room D plan round 1: DO NOT DISPATCH on four executed counterexamples; round 2 resumed. D569 launch preflight: hashes match, oracle held, arm launch deferred behind the main gate (2026-09-09 03:46)
+
+Room D, Astra round 1: DO NOT DISPATCH. Every blocker came from
+executing the engine: the fixed reply has the Fighter at (6,5) attack
+Scout 1 at (9,5) without moving although reach is 5 ft and
+legal-actions.ts:118 never offers it (SRD 904-906, 920-930); the
+"35 two-Longbow groups" assume damage-total keys, but FutureStateKeyV1
+excludes only eventLog so miss-then-6 and 3-then-3 are different keys
+(nextEventSequence 11 vs 12); both Scout lanes are budgeted at
+effective AC 20 although Scout 1 -> Fighter loses half cover when the
+Guard dies (cover.ts:258), so 140 not 124 raw face expansions;
+continuation verification (challenge-feasibility.ts:470) and
+component-member replays are missing from the application ceiling
+(3,500,924 unproved). Two should-fixes (list the two inventory files
+the reconciliation touches; resolve the Scout 2 end-turn horizon).
+Confirmed: the bounded question is clearly stated; Astra's own raw-face
+oracle reproduces 641/400, 3523/2000, 159/1000 under the assumed attack
+availability; the arithmetic sums are right; scope and contracts sound.
+Round 2 resumed on 01a084f3-7c9e-73f0-8bfa-1661a246cdbc (brief
+plan-room-d-r2.md, marker PLAN-ROOM-D-R2 DONE) with the instruction to
+fix by executing, as the reviewer did.
+
+D569 launch preflight (plan section 9): the three external hashes
+match their pins now (judge-one.sh 6ae7f6b8..., judge-advisory.py
+671bfedf..., pool4-contrasts.py 0c20f794...); the legacy oracle
+captured under D584.16 held through the green blind gate on 90484d45
+(ai-dm-legacy-invariance passed), so no re-capture is needed; the
+provenance and notes|empty checks are performed at launch. The first
+v5 arm is a long model phase; it is deferred until the main gate on
+d95cafb6 finishes and the box is quiet, and will be recorded here as
+an explicit launch decision with the exact commands.
