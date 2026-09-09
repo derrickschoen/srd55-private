@@ -19257,3 +19257,20 @@ elevation lane blocked on): 26/26 passed in 8.89 s at load ~6 — a load
 artefact, cleared; budget untouched. Elevation lane resumed with that
 evidence to finish slice 1. Queued: the five rowcodec specs my inventory
 missed (starts now that the batch is done).
+
+## D586.49 — session-command-transaction plan: Astra round 1 DO NOT DISPATCH; planning lane resumed for round 2 (2026-09-08 23:46)
+
+Blockers (verbatim gist): (1) the proposed begin() drains pending
+boundaries unconditionally, changing monster application timing — an
+empty application list with a pending legendary window today keeps the
+window and returns revision delta zero, the proposed transaction would
+advance initiative; draining must be an explicit operation with each
+consumer's current timing pinned before migration; (2) the dependency
+guard misses ImportTypeNode (`type X = import('./intel/contracts').X`),
+mis-handles verbatimModuleSyntax type-only imports that still emit
+runtime edges, and its fail-closed resolver rejects legitimate `?raw`
+asset imports (four unresolved edges via reaction-guidance -> encounter,
+e.g. src/rules/class-traits-srd.ts:52); (3) several mandatory mutants
+have no effective killer in slice 1 because their assigned tests are in
+unmigrated consumers; a session-level two-application RNG test is
+needed. Resumed the planning session (01a0842b-042d-7383-b07c-e970396080e7) with the verdict verbatim.
