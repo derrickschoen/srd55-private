@@ -481,6 +481,9 @@ function resolvedUses(
         targetIds: targets,
         objectId: null,
         omittedRiders: omittedRiders.filter((rider) => rider.sourceActionId === use.sourceActionId),
+        ...(!('selectedCondition' in use) || use.selectedCondition === undefined
+          ? {}
+          : { selectedCondition: use.selectedCondition }),
         ...(use.area === null ? {} : { area: use.area }),
       }); break;
       case 'use_world_object': resolved.push({ slot: slot.slot, kind: use.kind, actionId: use.actionId, spellId: null, targetIds: [], objectId: use.objectId, omittedRiders: [] }); break;
@@ -570,14 +573,26 @@ function choiceFitsOption(
 export function mechanicsWithChoice(
   mechanics: ResolvedTurnMechanics,
   choice: EngineActivationChoice | null | undefined,
+  option: EngineOfferableOption,
 ): ResolvedTurnMechanics {
   if (choice === null || choice === undefined) return mechanics;
-  let attached = false;
+  const owningSpellIds = choice.kind === 'command_word'
+    ? ['command']
+    : choice.kind === 'unicorns_blessing_spell'
+      ? ['cure-wounds', 'lesser-restoration']
+      : choice.kind === 'dispel_evil_and_good_mode'
+        ? ['dispel-evil-and-good']
+        : ['calm-emotions'];
+  const owner = option.actionSlots.flatMap((slot) => slot.use.kind === 'cast_spell'
+    ? [{ slot: slot.slot, use: slot.use }]
+    : []).find((slot) => owningSpellIds.includes(slot.use.spellId) &&
+      (choice.kind !== 'unicorns_blessing_spell' || slot.slot === 'bonus'));
+  if (owner === undefined) return mechanics;
   return {
     ...mechanics,
     actionSlots: mechanics.actionSlots.map((slot) => {
-      if (attached || slot.kind !== 'cast_spell') return slot;
-      attached = true;
+      if (slot.kind !== 'cast_spell' || slot.slot !== owner.slot ||
+        slot.actionId !== owner.use.sourceActionId || slot.spellId !== owner.use.spellId) return slot;
       return {
         ...slot,
         spellId: choice.kind === 'unicorns_blessing_spell' ? engineSpellId(choice.value) : slot.spellId,
@@ -635,7 +650,7 @@ export function createPureTurnProposalResolver(
           if (!choiceFitsOption(primary, proposal.activationChoice)) {
             return { valid: false, selectedBranch: 'none', refusals: [{ branch: 'primary', code: 'ACTIVATION_CHOICE_INVALID', summary: `${proposal.actorId}: activation choice does not match the offered option` }] };
           }
-          return accepted('primary', primary, mechanicsWithChoice(resolution.mechanics, proposal.activationChoice), primary, fallback);
+          return accepted('primary', primary, mechanicsWithChoice(resolution.mechanics, proposal.activationChoice, primary), primary, fallback);
         }
       }
       const primaryRefusal = {
@@ -655,7 +670,7 @@ export function createPureTurnProposalResolver(
       const resolution = resolveEngineActorOption(state, fallback, queries);
       return resolution.valid
         ? choiceFitsOption(fallback, proposal.activationChoice)
-          ? accepted('fallback', fallback, mechanicsWithChoice(resolution.mechanics, proposal.activationChoice), primary ?? fallback, fallback, [primaryRefusal])
+          ? accepted('fallback', fallback, mechanicsWithChoice(resolution.mechanics, proposal.activationChoice, fallback), primary ?? fallback, fallback, [primaryRefusal])
           : { valid: false, selectedBranch: 'none', refusals: [primaryRefusal, { branch: 'fallback', code: 'ACTIVATION_CHOICE_INVALID', summary: `${proposal.actorId}: activation choice does not match the fallback option` }] }
         : { valid: false, selectedBranch: 'none', refusals: [primaryRefusal, { branch: 'fallback', code: resolution.code, summary: resolution.summary }] };
     },

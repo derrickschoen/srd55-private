@@ -67,6 +67,8 @@ export const COMMAND_WORDS = ['approach', 'flee', 'grovel', 'halt', 'drop'] as c
 export type CommandWord = (typeof COMMAND_WORDS)[number];
 export const UNICORNS_BLESSING_SPELLS = ['cure-wounds', 'lesser-restoration'] as const;
 export type UnicornsBlessingSpell = (typeof UNICORNS_BLESSING_SPELLS)[number];
+export const LESSER_RESTORATION_CONDITIONS = ['Blinded', 'Deafened', 'Paralyzed', 'Poisoned'] as const;
+export type LesserRestorationCondition = (typeof LESSER_RESTORATION_CONDITIONS)[number];
 export const DISPEL_EVIL_AND_GOOD_MODES = ['break_enchantment', 'dismissal'] as const;
 export type DispelEvilAndGoodMode = (typeof DISPEL_EVIL_AND_GOOD_MODES)[number];
 export const CALM_EMOTIONS_MODES = ['suppress_charmed_frightened', 'indifferent_toward_monster_side'] as const;
@@ -155,6 +157,8 @@ export type EngineBonusActionUse =
       readonly sourceActionId: EngineActionId;
       readonly spellId: EngineSpellId;
       readonly targets: readonly EngineTargetSelector[];
+      /** Engine-bound condition encoded by a revision-bound offered option. */
+      readonly selectedCondition?: LesserRestorationCondition;
       /** Exact engine-owned placement; null for spells without a placed area. */
       readonly area: AreaTemplate | null;
     }
@@ -197,6 +201,8 @@ export interface ResolvedActionSlotUse {
   readonly targetIds: readonly CombatantId[];
   readonly objectId: WorldObjectId | null;
   readonly omittedRiders: readonly EngineOmittedRider[];
+  /** Engine-bound condition encoded by a revision-bound offered option. */
+  readonly selectedCondition?: LesserRestorationCondition;
   readonly activationChoice?: EngineActivationChoice;
   readonly multiattackComponent?: true;
   /** Present only for a placed-area spell. */
