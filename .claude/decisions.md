@@ -21498,3 +21498,14 @@ the focused spec in its read-only sandbox (ENOENT on a temp dir) — no
 independent pass claim from the reviewer. Supervisor main-shaped run so
 far: CLI inventory produced, focused spec 15/15; the 148-path cumulative
 is running. Landing = cumulative green → merge into main → full gate.
+
+## D586.150 — inventory git-seam cumulative closed green; branch merged into main as d31875ae; full gate launched (2026-09-09 08:23)
+
+Serial rerun of tests/unit/vtt/room-generator-los-cover.test.ts at
+319e908b in a fresh main-shaped clone: 111/111 in 77.8 s (the parallel
+run's 5 s timeout was load). Cumulative contract closed: 148 files, 2,933
+tests, all green counting the serial rerun; temp clones deleted.
+Merged claude/trial-core-reconciliation (319e908b) into main as d31875ae
+(no conflicts). Gate worktree moved to d31875ae; port 4870 free; full gate
+launched (room D slice 2 round 2 lane still running — load flakes get
+their serial rerun per D587.3).
