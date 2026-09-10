@@ -22087,3 +22087,28 @@ rewrote tests/unit/vtt/challenge-feasibility.test.ts) into 9781b93f leaves seman
 resolution fails typecheck with 5 errors and one D584.4 accounting test. Attempt aborted; worktree dnd-wt-room-d-s01 (branch
 claude/room-d-s01 @ 9781b93f) is clean; a codex reconciliation lane will do the merge under review, as the trial-core
 reconciliation was done.
+
+### D586.170 — round-2 verdicts: plan r2 REJECT (13), RCA r3 REJECT (7+1); final rounds launched; D593 amended; Room D and promo180 lanes dispatched (2026-09-09 20:18 EDT)
+
+VTT-HANDOFF-01 plan r2 (sha 90eecbf3…): Astra REJECT — F5 art shapes changed the agreement (required `view`, `{path,sha256}`
+image fields); F7 refusal/cancel outcomes + fabricated `id:""`; F8 stale continuation legalActions after a door change; F11
+missed callers (tools/ai-dm-conversation.ts:109, local-session-store.ts:326); F13 gate ordering vs build; F14 opaque art
+wrongly rejected; F15 ancestor-directory symlink race; F17 ineffective mutants; F19 auth after upgrade vs D593; F20 forward
+dependencies (S2c before S3/S4, S7a auth before S7b); F21 a five-method transport cannot host the rich DM UI in the Worker;
+F22 closed doors double-projected + player-light audience rule lost; F23 missing --save-exact. All accepted. D593 AMENDED by the
+supervisor for browser compatibility: the bearer is presented at the handshake in `Sec-WebSocket-Protocol` (`vtt.v1` +
+`bearer.<token>`), validated in the upgrade handler before any socket/session exists; principals come from a mode-600
+`VTT_RUNTIME_TOKENS_FILE`; requestedRole/playerId must match the token's claim. F21 resolution: the DM UI stays in-process;
+Worker mode is a shipped renderer harness hosting the same service behind v1. Round 3 (FINAL) launched (resume 01a087af-14c8…).
+
+D569-CRASH-RCA r3 spec: Astra REJECT — F1 resource reads counted as engine calls; F2 readiness timestamps lack dispatch
+correlation/live capture; F3 delivery state cannot express healthy zero-call service_null; F4 `timed_out` return path unspecified
+(a staged proposal could be authorized after timeout; pi.ts contractEvidence dropped); F5 mixed old/new row validation; F6 blind
+host-authorization failure still renders the DM correction protocol to the model; F7 runbook clauses for D591 unspecified; F8
+wrong validator pin. All accepted; supervisor policy for F6: blind host-authorization failure terminates the cell as `refused`
+(host_authorization_failed), never a DM correction prompt. Round 4 (FINAL) launched (resume 01a087c6…). Astra's owner answer both
+times: patch + structural follow-up.
+
+Room D (D598): reconciliation lane ROOM-D-LAND-01 dispatched (sol 01a088ac-d01b-7c01-b704-ab85310c3e5a) on worktree
+dnd-wt-room-d-s01 with `git merge main` in progress (one conflicted test file); supervisor commits. promo180 Slice H (D599):
+remediation unit PROMO180-H-REM-01 dispatched on dnd-wt-p-promo180 @ 0f292f91 (brief impl-promo180-h-rem.md).
