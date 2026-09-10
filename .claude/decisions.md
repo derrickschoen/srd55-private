@@ -22112,3 +22112,10 @@ times: patch + structural follow-up.
 Room D (D598): reconciliation lane ROOM-D-LAND-01 dispatched (sol 01a088ac-d01b-7c01-b704-ab85310c3e5a) on worktree
 dnd-wt-room-d-s01 with `git merge main` in progress (one conflicted test file); supervisor commits. promo180 Slice H (D599):
 remediation unit PROMO180-H-REM-01 dispatched on dnd-wt-p-promo180 @ 0f292f91 (brief impl-promo180-h-rem.md).
+
+## D600 — OWNER: offers roadmap — reopen the plan as a fresh unit (2026-09-09)
+
+Q10 answered 2026-09-09 20:21 EDT: "Reopen the plan as a fresh unit". One new planning unit (OFFERS-PLAN-02) from the current draft
+`.tmp-plans/2026-09-08-offers-roadmap.md` on claude/p-offer-help, scoped to the two D586.74 blockers (bottleneck fixture admits
+the diagonal bypass through the vacated alcove; legacy migration assigns `grants:[]` and loses an earned Dash), with its own
+three review rounds; implementation slices follow approval. Alternatives not chosen: straight to implementation; abandon; defer.
