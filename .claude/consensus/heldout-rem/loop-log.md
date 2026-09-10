@@ -52,3 +52,5 @@
 - 2026-09-10 13:14 EDT — r14 BLOCKED correctly on the real vitest.config.ts (non-literal cacheDir/include/setupFiles). F47 refined: literal-only applies to resolve/alias positions, object spreads, computed keys, accessors; other non-literal values are opaque-harmless. Lane resumed (r14b).
 
 - 2026-09-10 13:55 EDT — r14 lane DONE; supervisor verification tsc/sg/diffcheck 0, 9 specs 530/530; committed 1cecccc3; Astra r14 dispatched (resume 01a088d6…).
+
+- 2026-09-10 14:03 EDT — r14 Astra REJECT: F47–F53 probes resolved; F54 opaque arrays wrongly marked reachable (implementation error vs the refinement), F55 loader keys in rest/untyped-param patterns, F56 computed members on typed-global params, F57 await regression. Supervisor ruled plugin config() hooks out of scope (category b). r15 dispatched (resume 01a088b4…).
