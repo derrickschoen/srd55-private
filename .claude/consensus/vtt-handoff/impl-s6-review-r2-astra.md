@@ -1,0 +1,46 @@
+S6-F69 — **SIGNIFICANT: Request normalization changes validation and correlation semantics.**
+
+The transport reconstructs every object as `{v,id,method,params}`, silently discarding extra envelope keys before authoritative validation. A malformed request with an extra field can therefore execute successfully. It also converts `Uint8Array` inputs into that object, bypassing the dispatcher’s UTF-8 handling. Conversely, JSON strings pass through, but their pending entries have no method; a successful JSON-text mutation then triggers “uncorrelated mutation receipt.” Evidence: [worker-transport.ts:68](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/handoff/worker-transport.ts:68), [worker-transport.ts:131](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/handoff/worker-transport.ts:131), [protocol-runtime.ts:145](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/handoff/protocol-runtime.ts:145).
+
+**Required change:** Preserve authoritative input-validation semantics while retaining the getter/lifecycle protections. Add transport regressions for extra envelope keys, arrays, valid/invalid UTF-8 bytes and successful JSON-text mutations—including receipt-preserving closure. Invalid inputs must not reserve mutation IDs or execute.
+
+S6-F70 — **SIGNIFICANT: A stale binding can remove a replacement session and recreate split authority.**
+
+Destroying one binding deletes the session-map entry but leaves other bindings referencing the old session. Consider:
+
+1. A and B share key K.
+2. A destroys K.
+3. C connects to K, creating a replacement session.
+4. B closes; its old session’s binding count reaches zero and unconditionally deletes K.
+5. D connects to K, creating another service while C remains live.
+
+C and D then have independent states sharing the ledger keyed by session ID—the original F66 failure again. Other bindings also receive no immediate closure notification when their session is destroyed. Evidence: [worker-entry.ts:190](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/handoff/worker-entry.ts:190), [worker-entry.ts:207](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/handoff/worker-entry.ts:207), [mutation-ledger.ts:47](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/handoff/mutation-ledger.ts:47).
+
+**Required change:** Associate cleanup with the exact session instance; stale releases must never delete a replacement. Destroy all bindings of the destroyed session, settling pending work and preserving established receipts. Add the sequence above, plus last-detach/reopen and independent-key isolation regressions.
+
+S6-F71 — **SIGNIFICANT: The serialization measurement still excludes helper-mediated serialization.**
+
+The spies instrument real APIs, but count calls only when the first `/src/` stack frame belongs to four named files. Moving serialization into a new source helper makes that first frame fail the whitelist, so the test remains green. The direct aliased-call control does not close the helper gap identified in F68. Evidence: [worker-boundary.test.ts:44](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/tests/unit/vtt/worker-boundary.test.ts:44), [worker-boundary.test.ts:87](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/tests/unit/vtt/worker-boundary.test.ts:87).
+
+**Required change:** Measure the complete adapter call path, with narrowly defined exclusions for established engine/persistence work rather than a filename whitelist. Add an effective helper-mediated serialization control alongside the direct alias control.
+
+S6-F72 — **SIGNIFICANT: Platform controls do not independently prove alias and destructuring detection.**
+
+The single control file combines direct `document`, alias use and destructuring. Its assertions require only two diagnostics ending in `to document`. The direct identifier and alias path can already satisfy that count; removing destructuring support can leave the test green. Evidence: [engine-boundary.test.ts:402](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/tests/unit/vtt/engine-boundary.test.ts:402).
+
+**Required change:** Isolate each control or assert its exact resolved use site. Demonstrate that disabling alias resolution and disabling destructuring resolution each independently fail their corresponding assertion. Retain the builtin/computed-access controls and exact reducer-call pins.
+
+### Verified claims
+
+- **F62 resolved:** Invocation numbers are reserved before dispatch; reuse emits an uncorrelated typed fault without another dispatch or receipt. The delayed-response tests exercise identical and different wire IDs. [worker-entry.ts:151](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/handoff/worker-entry.ts:151), [worker-boundary.test.ts:248](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/tests/unit/vtt/worker-boundary.test.ts:248).
+- **F63’s local fault handling is corrected:** Malformed responses, correlation failures, Worker errors, message errors and peer closure now close status and settle pending work. Established receipts are resolved before port closure and termination. Shared-session destruction remains blocked by S6-F70. [worker-transport.ts:124](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/handoff/worker-transport.ts:124), [worker-transport.ts:207](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/handoff/worker-transport.ts:207).
+- **F64’s closure leak is corrected:** Terminal state is rechecked after property access; nested-clone closure tests assert pending cleanup and no Worker response beyond closure. The normalization introduced alongside it causes S6-F69. [worker-transport.ts:59](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/handoff/worker-transport.ts:59), [worker-boundary.test.ts:397](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/tests/unit/vtt/worker-boundary.test.ts:397).
+- **F65’s binding and movement implementation is corrected:** Connections establish principals outside `session.open`; the unchanged authorizer rejects a player principal requesting DM. Real-Worker browser coverage checks hidden-token omission, ownership refusal and successful offered movement. [worker-entry.ts:119](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/handoff/worker-entry.ts:119), [session-authorizer.ts:39](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/handoff/session-authorizer.ts:39), [worker.spec.ts:30](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/tests/browser/vtt-handoff/worker.spec.ts:30).
+- **F66 partially resolved:** Ordinary bindings now share one service/FIFO; distinct keys create separate services. Normal last-detach destroys the session, and the shared host terminates when its final transport detaches. Memory is explicitly page-lifetime; destruction/recreation remains unsafe under S6-F70. [worker-entry.ts:81](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/handoff/worker-entry.ts:81), [worker-transport.ts:304](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/handoff/worker-transport.ts:304), [worker-memory-session-store.ts:3](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/handoff/worker-memory-session-store.ts:3).
+- **F67 substantially improved:** Platform analysis follows symbol declarations and recognizes bare Node builtins. Exact reducer-call pins remain. Both Worker files are roots; **excluding the page-only harness is correct**, because it intentionally uses DOM APIs. Its control strength remains limited by S6-F72. [engine-boundary.test.ts:115](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/tests/unit/vtt/engine-boundary.test.ts:115), [engine-boundary.test.ts:355](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/tests/unit/vtt/engine-boundary.test.ts:355), [engine-boundary.test.ts:425](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/tests/unit/vtt/engine-boundary.test.ts:425).
+- **F68 partially resolved:** Real adapters are measured across open, snapshot, invalid parameters and mutation/event delivery. `_zod.run` uses the pinned version, with an explicit finite module-initialization warm-up. S6-F71 prevents accepting the complete measurement claim. [worker-messages.ts:33](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/handoff/worker-messages.ts:33), [worker-messages.ts:66](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/handoff/worker-messages.ts:66), [worker-boundary.test.ts:65](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/tests/unit/vtt/worker-boundary.test.ts:65).
+- Inline Worker construction, strict JavaScript stamp selection, browser isolation and the dist server remain intact. The inspected Worker SHA-256 matches the disclosed stamp; the browser spec checks the fetched resource against it. [worker-transport.ts:276](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/handoff/worker-transport.ts:276), [worker.spec.ts:180](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/tests/browser/vtt-handoff/worker.spec.ts:180).
+- Frozen-contract/example hashes match. S8 and other protected surfaces are untouched; no prohibited additions were found. I ran no tests, builds or agents.
+
+VERDICT: REJECT
+review complete
