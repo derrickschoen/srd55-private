@@ -16,3 +16,5 @@
 - 2026-09-10 09:04 EDT — r6 lane DONE; supervisor verification tsc/sg/diffcheck 0, 9 specs 391/391; committed 472d5262; Astra r6 review dispatched (resume 01a088d6…).
 
 - 2026-09-10 09:14 EDT — r6 Astra REJECT (F18 glob base/spread, F19 nested conditions fail open, F20 loader escapes incl. export/bind/nullish, F21 alias discovery, F22 .d.ts transpile abort). Supervisor structural ruling: r7 must convert loader tracking and config discovery to default-deny (generic escape check), not add cases. r7 dispatched (resume 01a088b4…).
+
+- 2026-09-10 09:51 EDT — r7 lane DONE (default-deny restructure); supervisor verification tsc/sg/diffcheck 0, 9 specs 423/423; committed 32f45ac5; Astra r7 review dispatched (resume 01a088d6…) with adversarial unenumerated-form probes.
