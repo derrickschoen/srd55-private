@@ -22199,3 +22199,13 @@ restored pending requests lack the new field) — persistence boundary must be s
 freshness with a restore policy, or an explicit compatibility design with baseline-authored pending-request fixtures). Three
 rounds spent → HARD_GATE (b): the plan is shelved; a remediation artifact needs the owner's authorization (asked, as for the RCA in
 D602). Implementation of VTT-HANDOFF-01 has not started; the worktree is clean at 0f84e09f.
+
+## D603 — OWNER: VTT-handoff — start implementing S0–S2 now; remediate the four residuals in parallel (2026-09-09)
+
+Answered 2026-09-09 22:16 EDT: "Start implementing S0–S2 now". The uncontested early steps of plan r3 (S0a/S0b toolchain-doctor-bootstrap, S1
+contract/Zod/JSON-Schema/semantics, S2a snapshot adapter, S2b two-room fixture, S2c early immutable publication) begin as
+implementation unit VTT-HANDOFF-IMPL-01 while a remediation artifact for the four D586.174 residuals (F8, F13, F20, F24) runs in
+parallel. Supervisor binding for S2a to avoid pre-empting F24: the player token id is a RENDERER-ONLY enrichment computed in the
+snapshot adapter from the filtered player projection (no new field on PlayerVisiblePlacedCombatant / PersistedCoordinatorState;
+persisted bytes unchanged) — the remediation may confirm or replace this design before S3. Alternatives not chosen: authorize
+remediation first; stop the unit.
