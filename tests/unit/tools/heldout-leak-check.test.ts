@@ -318,6 +318,7 @@ describe('held-out reserve leak wall', () => {
         'Rule C interprets Vite and Vitest aliases only as strict literals in the exact-node graph reached from export default, symbol-proven defineConfig or mergeConfig, factory returns, conditional branches, and same-file const object/array composition',
         'Rule C uses no flow tracking: each tracked-const reference is classified by its maximal constant-key address, including whether its path crosses resolve, test, or alias, the addressed subtree, and its immediate syntactic position',
         'Rule C classifies configuration roots, resolve/test/alias bindings, and bindings spread transitively into those containers as alias-capable regardless of current literal contents',
+        'Rule C records every configuration placement prefix for a binding and composes each prefix with descendant and const-alias paths; any semantic placement makes the reference alias-capable',
         'Rule C permits non-exported plain-const aliases to preserve the same addressed subtree and allows non-alias-bearing subtrees in otherwise escaping positions',
         'subtrees strictly below a configuration root at nonsemantic addresses remain non-alias-capable unless their contents or binding position makes them capable',
         'resolve and Vitest test are alias-capable containers whose values must be literal objects or tracked const literals; their alias values are interpreted identically',
@@ -2263,6 +2264,87 @@ describe('held-out reserve leak wall', () => {
 
     expect(report.findings.some((finding) => finding.path === 'vite.config.ts' &&
       finding.kind === 'unresolved_module_edge')).toBe(unresolved);
+  });
+
+  it.each([
+    ['resolve alias-array entry', 'vite.config.mjs', [
+      "const rules = [{ find: '@ordinary', replacement: '/ordinary' }];",
+      "install(rules['0']);",
+      'export default { resolve: { alias: rules } };',
+    ].join('\n')],
+    ['const alias of a resolve alias-array entry', 'vite.config.mjs', [
+      "const rules = [{ find: '@ordinary', replacement: '/ordinary' }];",
+      "const entry = rules['0'];",
+      'install(entry);',
+      'export default { resolve: { alias: rules } };',
+    ].join('\n')],
+    ['test alias-array entry', 'vitest.config.mjs', [
+      "const rules = [{ find: '@ordinary', replacement: '/ordinary' }];",
+      'install(rules[0]);',
+      'export default { test: { alias: rules } };',
+    ].join('\n')],
+    ['spread alias-array entry source', 'vite.config.mjs', [
+      "const entries = [{ find: '@a', replacement: '/lit' }];",
+      'export default { resolve: { alias: [...entries] } };',
+      'install(entries[0]);',
+    ].join('\n')],
+    ['entry from a multiply placed alias array', 'vite.config.mjs', [
+      "const rules = [{ find: '@ordinary', replacement: '/ordinary' }];",
+      'install(rules[0]);',
+      'export default { plugins: rules, resolve: { alias: rules } };',
+    ].join('\n')],
+  ] as const)('fails closed for %s using its semantic placement prefix',
+  (_label, path, configSource) => {
+    const report = inspectHeldoutLeakChanges([{
+      path,
+      addedText: configSource,
+      sourceText: configSource,
+    }], 'F', bindings);
+
+    expect(report.findings).toContainEqual(expect.objectContaining({
+      path,
+      kind: 'unresolved_module_edge',
+    }));
+  });
+
+  it('discovers an unescaped alias-array binding at its semantic placement', () => {
+    const configSource = [
+      "const rules = [{ find: '@x', replacement: '/lit' }];",
+      'export default { resolve: { alias: rules } };',
+    ].join('\n');
+    const report = inspectHeldoutLeakChanges([{
+      path: 'vite.config.mjs',
+      addedText: configSource,
+      sourceText: configSource,
+    }], 'F', bindings, {
+      candidateSourceFiles: {
+        'src/ui/placement-prefix-control.ts': "import value from '@x';",
+      },
+    });
+
+    expect(report.findings).not.toContainEqual(expect.objectContaining({
+      path: 'vite.config.mjs',
+      kind: 'unresolved_module_edge',
+    }));
+    expect(report.findings).toContainEqual(expect.objectContaining({
+      path: 'src/ui/placement-prefix-control.ts',
+      kind: 'unresolved_module_edge',
+    }));
+  });
+
+  it('keeps an escaped plugin-list entry non-alias-capable', () => {
+    const configSource = [
+      "const list = [{ name: 'p' }];",
+      'install(list[0]);',
+      'export default { plugins: list };',
+    ].join('\n');
+    const report = inspectHeldoutLeakChanges([{
+      path: 'vite.config.mjs',
+      addedText: configSource,
+      sourceText: configSource,
+    }], 'F', bindings);
+
+    expect(report.findings).toEqual([]);
   });
 
   it('interprets a symbol-proven defineConfig callback, conditional, and const spread', () => {
