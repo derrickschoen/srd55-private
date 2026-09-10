@@ -24,3 +24,7 @@
 - 2026-09-10 10:23 EDT — r8 lane DONE; supervisor verification tsc/sg/diffcheck 0, 9 specs 440/440; committed 74839d5c; Astra r8 review dispatched (resume 01a088d6…).
 
 - 2026-09-10 10:29 EDT — r8 Astra REJECT (F28 regex pre-gate disables tracking, F29 class-heritage exempted as type node, F30 computed destructuring from inert namespace, F31 alias reassignment stale initializer, F32 builtinModules false positive, F33 injected control not in real sweep). r9 dispatched (resume 01a088b4…) with a binding no-pre-gate rule; owner asked (non-blocking) whether to cap the unit.
+
+- 2026-09-10 10:55 EDT — r9 lane DONE; supervisor verification tsc/sg/diffcheck 0, 9 specs 453/453; committed a899f896; Astra r9 review dispatched (resume 01a088d6…) asking for a bounded-defect vs out-of-scope classification of any residual.
+
+- 2026-09-10 11:00 EDT — r9 Astra REJECT: F28–F33 all resolved; four bounded defects remain (F34 second SourceFile/checker mismatch in data-module path, F35 ambient declare shadows loaders, F36 nested binding patterns skipped, F37 alias mutation via references/push/Object.assign). r10 dispatched (resume 01a088b4…).
