@@ -1,8 +1,24 @@
+import { createHash } from 'node:crypto';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
 import { canonicalJson } from '../../../src/commands/canonical-json';
 import { sha256 } from '../../../src/crypto/sha256';
+import type { EncounterState } from '../../../src/combat/encounter';
 import { applyRoomInitiativeProfile } from '../../../src/vtt/room-generator';
-import { decodeArenaFixtureText } from '../../../src/vtt/mcp/entrypoint';
+import {
+  createEngineMcpRuntime,
+  decodeArenaFixtureText,
+  type EngineMcpLauncherManifest,
+} from '../../../src/vtt/mcp/entrypoint';
+import { BlindModelIngressRecorder, type BlindIngressRecord } from '../../../src/vtt/blind-model-ingress';
+import {
+  agentSessionIdFromCli,
+  type AgentInvocation,
+  type AgentSessionAdapter,
+  type AgentSessionBinding,
+  type AgentTurnResult,
+} from '../../../src/vtt/agent-session';
 import {
   analyzeRegisteredPrimaryPair,
   D569_PRIMARY_JUDGES,
@@ -27,7 +43,10 @@ import {
 } from '../../../tools/d569-blind-experiment';
 import { canonicalD569SecondFamilyRegeneration } from '../../../tools/d569-second-family-manifest';
 import { BRUTAL_10_PROTOCOL, buildRerunPacket } from '../../../tools/ai-dm-rerun-packet';
-import { readFileSync } from '../../helpers/test-filesystem';
+import { parseArenaArgs, runArena } from '../../../tools/ai-dm-arena';
+import type { ConversationBoardSnapshotService } from '../../../tools/ai-dm-conversation';
+import type { BoardImageArtifact, BoardSnapshotCapture } from '../../../tools/ai-dm-board-snapshot';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from '../../helpers/test-filesystem';
 
 const PATCHED_COMMIT = 'd60a0571a4588879c65992a17ab95023911d17c1';
 const MANIFEST = JSON.parse(readFileSync(D569_EXPERIMENT_MANIFEST_PATH, 'utf8')) as D569ExperimentManifest;
@@ -40,6 +59,10 @@ const access = {
 };
 const CELLS = dryRunD569Experiment(MANIFEST, access).filter((cell) =>
   cell.arm === 'gpt-5.6-luna-blind');
+const FIRST_BRUTAL_STATE = applyRoomInitiativeProfile(
+  decodeArenaFixtureText(readFileSync('tests/fixtures/arena-basis-brutal/seed-6203001.json', 'utf8')),
+  'derived_v1',
+);
 
 function historical(room: number, rep: number, sessionId: string | null) {
   return { room, round: rep, outcome: 'authorized', sessionId };
@@ -174,8 +197,9 @@ function retainedHistorical(cell: D569DryRunCell, lineNumber: number): Readonly<
   };
 }
 
-function pairedDocuments(rows: readonly ReturnType<typeof current>[]): D569PairedAnalysisDocuments {
-  const rawRows = rows.flatMap((row) => ['gpt-5.6-luna-blind', 'gpt-5.6-luna-advice'].map((arm) => ({ ...row, arm })));
+function pairedDocuments(rows: readonly object[]): D569PairedAnalysisDocuments {
+  const rawRows: Readonly<Record<string, unknown>>[] = rows.flatMap((row) =>
+    ['gpt-5.6-luna-blind', 'gpt-5.6-luna-advice'].map((arm) => ({ ...row, arm })));
   const constructed = buildRerunPacket(rawRows, 569_575, BRUTAL_10_PROTOCOL);
   const packet = constructed.packet.entries.map((entry) => ({ ...entry }));
   const answerKey = constructed.answerKey.entries.map((entry) => ({ ...entry }));
@@ -200,6 +224,135 @@ function validateBrutal(rawText: string, manifest = MANIFEST) {
     rawText, basis: 'brutal', cliVersion: 'codex-cli 0.153.4', patchedCommit: PATCHED_COMMIT, manifest,
   });
 }
+
+class D569CancellationSnapshotService implements ConversationBoardSnapshotService {
+  readonly outputDirectory = mkdtempSync(join(tmpdir(), 'd569-cancelled-delivery-board-'));
+
+  async capture(input: BoardSnapshotCapture): Promise<BoardImageArtifact> {
+    const png = Buffer.alloc(96);
+    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).copy(png);
+    png.writeUInt32BE(1, 16);
+    png.writeUInt32BE(1, 20);
+    Buffer.from(input.source.stateDigest, 'utf8').copy(png, 24, 0, 64);
+    const digest = createHash('sha256').update(png).digest('hex');
+    const relativePath = `board-images/${digest}.png` as const;
+    mkdirSync(join(this.outputDirectory, 'board-images'), { recursive: true });
+    writeFileSync(join(this.outputDirectory, relativePath), png);
+    const html = Buffer.from('<!doctype html><main>D569 cancellation evidence</main>\n');
+    const htmlDigest = createHash('sha256').update(html).digest('hex');
+    const htmlRelativePath = `board-html/${htmlDigest}/board.html` as const;
+    mkdirSync(join(this.outputDirectory, 'board-html', htmlDigest), { recursive: true });
+    writeFileSync(join(this.outputDirectory, htmlRelativePath), html);
+    return {
+      version: 'arena-board-image-v1', audience: 'dm', mimeType: 'image/png',
+      relativePath, sha256: digest, bytes: png.byteLength, width: 1, height: 1,
+      capturedAtUnixMs: Date.now(), captureMs: 1, source: { ...input.source },
+      chromiumVersion: 'SIMULATED Chromium',
+      html: { relativePath: htmlRelativePath, sha256: htmlDigest, bytes: html.byteLength },
+      blindState: {
+        informationMode: 'blind_state', role: 'dm_board', ordinal: 1,
+        primerVersion: MANIFEST.visualPins.blind.primerVersion,
+        glyphMode: MANIFEST.visualPins.blind.glyphMode,
+        captureTilePx: MANIFEST.visualPins.blind.captureTilePx,
+        domEvidence: {
+          optionSurfaceAbsent: true, nextEventPreviewAbsent: true,
+          coordinateLabels: 1, creatureBadges: 1, rosterEntries: 1, hpBars: 1,
+          legendEntries: 1, wallCells: 0, halfCoverCells: 0, threeQuartersCoverCells: 0,
+          difficultCells: 0, obscuredCells: 0, illuminatedCells: 0, fogMarks: 0,
+          doors: 0, objects: 0, hiddenMarks: 0, multiCellFootprints: 0,
+        },
+      },
+    };
+  }
+
+  async close(): Promise<void> { return undefined; }
+}
+
+class D569CancellationAfterDeliveryAdapter implements AgentSessionAdapter {
+  readonly kind = 'codex' as const;
+
+  constructor(private readonly state: EncounterState) {}
+
+  async probe() { return { present: true, version: 'D569-CANCELLATION-AFTER-DELIVERY' }; }
+
+  async start(invocation: AgentInvocation): Promise<AgentTurnResult> {
+    if (invocation.engineDispatchId === undefined) throw new Error('Cancellation fixture omitted dispatch identity.');
+    const manifest = JSON.parse(readFileSync(invocation.launcherToken, 'utf8')) as EngineMcpLauncherManifest;
+    if (manifest.turnContextSpoolPath === undefined || manifest.blindIngressSpoolPath === undefined ||
+      manifest.dispatchPhase === undefined) {
+      throw new Error('Cancellation fixture launcher omitted blind evidence spools.');
+    }
+    const runtime = createEngineMcpRuntime(this.state, {
+      runId: manifest.runId, branchId: manifest.branchId, revision: manifest.revision,
+      requestId: manifest.requestId, phase: manifest.phase, correctionNumber: manifest.correctionNumber,
+      room: manifest.room, historyKind: manifest.historyKind, toolProfile: 'blind', dmMode: 'blind',
+    });
+    const context = record(runtime.toolSurface.execute('engine.get_turn_context', {
+      run_id: manifest.runId, expected_revision: manifest.revision, scope: 'round', granularity: 'full',
+    }));
+    const deliveredContext = {
+      ...context,
+      semantic_board: {
+        provenance: { format: 'd569-cancellation-semantic-board-v1' },
+        cells: [{ badge: 1, relation: 'occupied' }],
+      },
+    };
+    writeFileSync(manifest.turnContextSpoolPath, `${JSON.stringify({
+      ...deliveredContext, dispatchId: invocation.engineDispatchId,
+      dispatchProfile: 'blind', dispatchPhase: manifest.dispatchPhase,
+    })}\n`, 'utf8');
+    const existing = readFileSync(manifest.blindIngressSpoolPath, 'utf8').split('\n')
+      .filter((line) => line.trim().length > 0)
+      .map((line) => JSON.parse(line) as BlindIngressRecord);
+    const ingress = new BlindModelIngressRecorder(existing);
+    ingress.record('turn_context', canonicalJson(deliveredContext));
+    writeFileSync(manifest.blindIngressSpoolPath,
+      `${ingress.records().map((entry) => JSON.stringify(entry)).join('\n')}\n`, 'utf8');
+    return {
+      exit: 'cancelled', resumeSessionId: agentSessionIdFromCli('d569-cancelled-delivery-session'),
+      sessionId: 'd569-cancelled-delivery-session', finalText: 'cancelled after context retrieval', usage: null,
+      cancellationReason: 'operator_cancelled_after_delivery',
+      processEvidence: {
+        startedAtUnixMs: 1, endedAtUnixMs: 2, exitCode: null, signal: 'SIGTERM',
+        stdout: 'context delivered', stderr: '', decodedEvents: [],
+      },
+      partialResultEvidence: {
+        status: 'partial', decodedEventCount: 1, finalTextFragment: 'cancelled after context retrieval',
+        observedUsage: null, stagedInvocationIds: [],
+      },
+      engineCatalogEvidence: {
+        status: 'ready', basis: 'advertised_tool_invoked', dispatchId: invocation.engineDispatchId,
+        advertisedInvocationCount: 1, resourceOperationCount: 0,
+      },
+    };
+  }
+
+  async resume(_binding: AgentSessionBinding, invocation: AgentInvocation): Promise<AgentTurnResult> {
+    return this.start(invocation);
+  }
+
+  classifyFailure(): 'unknown' { return 'unknown'; }
+}
+
+async function produceCancellationAfterDeliveryRow(): Promise<Readonly<Record<string, unknown>>> {
+  const directory = mkdtempSync(join(tmpdir(), 'd569-runner-cancelled-delivery-'));
+  const service = new D569CancellationSnapshotService();
+  const state = structuredClone(FIRST_BRUTAL_STATE);
+  const rows = await runArena(parseArenaArgs([
+    '--rooms', '1', '--reps', '1', '--seed', '6203001', '--basis', 'brutal',
+    '--out', join(directory, 'rows.jsonl'), '--dm-mode', 'blind', '--cli', 'codex',
+    '--model', 'gpt-5.6-luna', '--effort', 'high',
+  ]), {
+    adapter: new D569CancellationAfterDeliveryAdapter(state), repoCommit: PATCHED_COMMIT,
+    heartbeat: () => undefined, boardSnapshotServiceFactory: async () => service,
+    fixtureStates: [state],
+  });
+  const produced = rows[0];
+  if (produced === undefined) throw new Error('Cancellation arena produced no row.');
+  return JSON.parse(JSON.stringify(produced)) as Readonly<Record<string, unknown>>;
+}
+
+const RUNNER_CANCELLATION_AFTER_DELIVERY_ROW = await produceCancellationAfterDeliveryRow();
 
 describe('D569 v5 replacement validation and paired analysis tools', () => {
   it('validates a mixed 27-historical/3-current hard grid without rewriting retained bytes', () => {
@@ -277,6 +430,31 @@ describe('D569 v5 replacement validation and paired analysis tools', () => {
       };
     });
     expect(validateBrutal(cancelled)).toHaveLength(30);
+  });
+
+  it('carries one finalized semantic delivery object through runner cancellation, packet decoding, and registered validation', () => {
+    const produced = RUNNER_CANCELLATION_AFTER_DELIVERY_ROW;
+    expect(produced).toMatchObject({
+      outcome: 'infrastructure_failed', fallbackReason: 'dispatch_cancelled',
+      turnContextDelivery: { status: 'delivered', measurement: { semanticBytes: expect.any(Number) } },
+      failingDispatch: {
+        phase: 'primary', exit: 'cancelled',
+        turnContextDelivery: { status: 'delivered', measurement: { semanticBytes: expect.any(Number) } },
+      },
+    });
+    expect(produced['semanticBoardBytes']).toEqual(expect.any(Number));
+    expect(Number(produced['semanticBoardBytes'])).toBeGreaterThan(0);
+    const failure = record(produced['failingDispatch']);
+    expect(failure['turnContextDelivery']).toEqual(produced['turnContextDelivery']);
+    const packetRows: object[] = CELLS.filter((cell) => cell.basis === 'brutal')
+      .map((cell) => current(cell, 'authorized'));
+    packetRows[0] = produced;
+    expect(pairedDocuments(packetRows).packet).toHaveLength(60);
+
+    const registeredRows = BRUTAL_SOURCE.trimEnd().split('\n')
+      .map((line) => JSON.parse(line) as Readonly<Record<string, unknown>>);
+    registeredRows[0] = produced;
+    expect(validateBrutal(raw(registeredRows))).toHaveLength(30);
   });
 
   it('rejects incomplete v3 evidence objects', () => {

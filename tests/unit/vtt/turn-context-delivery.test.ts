@@ -37,6 +37,7 @@ describe('turn-context delivery classification', () => {
     expect(classifyTurnContextDelivery({ turn: turn('completed'), catalogEvidence: ready, delivered: { contextSha256: 'a'.repeat(64), measurement: { baseBytes: 10, semanticBytes: 2 } } })).toEqual({ status: 'delivered', dispatchId, contextSha256: 'a'.repeat(64), measurement: { baseBytes: 10, semanticBytes: 2 } });
     expect(classifyTurnContextDelivery({ turn: turn('completed'), catalogEvidence: ready, delivered: null })).toEqual({ status: 'not_requested', dispatchId, reason: 'catalog_ready_model_did_not_fetch', measurement: null });
     expect(classifyTurnContextDelivery({ turn: turn('timed_out'), catalogEvidence: ready, delivered: null })).toEqual({ status: 'timeout_before_delivery', dispatchId, measurement: null });
+    expect(classifyTurnContextDelivery({ turn: turn('timed_out'), catalogEvidence: inconclusive, delivered: null })).toEqual({ status: 'timeout_before_delivery', dispatchId, measurement: null });
     expect(classifyTurnContextDelivery({ turn: turn('infrastructure_failed'), catalogEvidence: absent, delivered: null })).toEqual({ status: 'infrastructure_absent', dispatchId, measurement: null });
     expect(classifyTurnContextDelivery({ turn: turn('completed'), catalogEvidence: inconclusive, delivered: null })).toEqual({ status: 'indeterminate', dispatchId, reason: 'catalog_inconclusive_empty_context_spool', measurement: null, integrityAction: 'stop_after_persist' });
   });

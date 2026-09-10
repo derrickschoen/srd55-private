@@ -9,8 +9,8 @@ export interface D569DispatchIntegrityArtifact {
   readonly launcherSha256: string;
   readonly processEvidenceSha256: string;
   readonly catalogEvidence: Extract<EngineCatalogEvidence, { readonly status: 'inconclusive' }>;
-  readonly delivery: Extract<TurnContextDelivery, { readonly status: 'indeterminate' }>;
-  readonly contextSpool: { readonly recordCount: 0; readonly sha256: string };
+  readonly delivery: Extract<TurnContextDelivery, { readonly status: 'delivered' | 'indeterminate' }>;
+  readonly contextSpool: { readonly recordCount: number; readonly sha256: string };
   readonly proposalSpool: {
     readonly recordCount: number;
     readonly sha256: string;

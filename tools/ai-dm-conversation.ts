@@ -31,6 +31,7 @@ import {
   type HostContextDiagnostic,
   type TurnContextConfiguredCaps,
   type TurnContextDelivery,
+  type TurnContextMeasurement,
 } from '../src/vtt/turn-context-delivery';
 import { AgentSessionLifecycle } from '../src/vtt/agent-session-lifecycle';
 import { AGENT_ADAPTER_VERSION, resolveAgentAdapter } from '../src/vtt/agent-adapters';
@@ -899,7 +900,7 @@ export interface ConversationRunOptions {
   readonly stagedSpeculationTimeout?: boolean;
   /** SIMULATED-only recalculation dispatch that stages evidence before engine startup failure. */
   readonly failSpeculationRecalculation?: boolean;
-  /** SIMULATED-only speculative dispatch classified as required-engine infrastructure failure. */
+  /** SIMULATED-adapter injection of a returned required-engine infrastructure failure. */
   readonly failSpeculationInfrastructure?: boolean;
   /** Test-only join controls for end-of-round and exception-cleanup transition coverage. */
   readonly endRoundAfterSpeculationStartForTest?: boolean;
@@ -2131,6 +2132,28 @@ function capturedTurnContext(raw: string, maximumBytes: number): CapturedTurnCon
   return { raw: modelVisibleRaw, granularity, value };
 }
 
+function deliveredTurnContextMeasurement(context: CapturedTurnContext): TurnContextMeasurement {
+  const proseDocument =
+    (context.value['format'] === 'caveman_prose' || context.value['format'] === 'regular_prose') &&
+    typeof context.value['document'] === 'string';
+  if (proseDocument) {
+    return {
+      baseBytes: new TextEncoder().encode(context.raw).byteLength,
+      semanticBytes: 0,
+    };
+  }
+  const base = structuredClone(context.value) as Record<string, unknown>;
+  const semantic = base['semantic_board'];
+  delete base['semantic_board'];
+  delete base['semantic_board_truncated'];
+  return {
+    baseBytes: new TextEncoder().encode(JSON.stringify(base)).byteLength,
+    semanticBytes: semantic === undefined
+      ? 0
+      : new TextEncoder().encode(JSON.stringify(semantic)).byteLength,
+  };
+}
+
 function blindRendererEvidence(
   state: EncounterState,
   capsule: EngineStateCapsule,
@@ -2309,14 +2332,19 @@ export function persistD569IntegrityStop(input: {
   readonly proposalSpoolPath: string;
   readonly contextSpoolPath: string;
   readonly catalogEvidence: Extract<EngineCatalogEvidence, { readonly status: 'inconclusive' }>;
-  readonly delivery: Extract<TurnContextDelivery, { readonly status: 'indeterminate' }>;
+  readonly delivery: Extract<TurnContextDelivery, { readonly status: 'delivered' | 'indeterminate' }>;
   readonly turn: AgentTurnResult;
 }): never {
   if (input.turn.processEvidence === null) {
     throw new Error('Indeterminate integrity STOP requires complete process evidence.');
   }
   const contextSpool = spoolEvidence(input.contextSpoolPath);
-  if (contextSpool.recordCount !== 0) throw new Error('Indeterminate integrity STOP requires an empty correlated context spool.');
+  if (input.delivery.status === 'indeterminate' && contextSpool.recordCount !== 0) {
+    throw new Error('Indeterminate delivery requires an empty correlated context spool.');
+  }
+  if (input.delivery.status === 'delivered' && contextSpool.recordCount === 0) {
+    throw new Error('Delivered contradictory evidence requires a correlated context spool record.');
+  }
   const proposalSpool = spoolEvidence(input.proposalSpoolPath);
   const artifact: D569DispatchIntegrityArtifact & Pick<AgentTurnResult, 'processEvidence' | 'partialResultEvidence'> = {
     version: 1,
@@ -2329,7 +2357,7 @@ export function persistD569IntegrityStop(input: {
     partialResultEvidence: input.turn.partialResultEvidence,
     catalogEvidence: input.catalogEvidence,
     delivery: input.delivery,
-    contextSpool: { recordCount: 0, sha256: contextSpool.sha256 },
+    contextSpool,
     proposalSpool: { ...proposalSpool, stagedUnconsumed: true },
     recordedAtUnixMs: Date.now(),
   };
@@ -2735,6 +2763,7 @@ class SimulatedConversationAdapter implements AgentSessionAdapter {
   readonly #stagedAdjustmentCorrectionTimeout: ReadonlySet<string>;
   readonly #stagedSpeculationTimeout: boolean;
   readonly #failSpeculationRecalculation: boolean;
+  readonly #failSpeculationInfrastructure: boolean;
   readonly #failCorrection: ReadonlySet<string>;
   readonly #remainingPrimaryFlaps: Map<string, number>;
   readonly #reactionGuidanceByRequest: Readonly<Record<string, ReactionGuidanceDeclaration>>;
@@ -2755,6 +2784,7 @@ class SimulatedConversationAdapter implements AgentSessionAdapter {
     stagedAdjustmentCorrectionTimeout: readonly string[],
     stagedSpeculationTimeout: boolean,
     failSpeculationRecalculation: boolean,
+    failSpeculationInfrastructure: boolean,
     fail: readonly string[],
     primaryFlaps: Readonly<Record<string, number>>,
     reactionGuidanceByRequest: Readonly<Record<string, ReactionGuidanceDeclaration>>,
@@ -2771,6 +2801,7 @@ class SimulatedConversationAdapter implements AgentSessionAdapter {
     this.#stagedAdjustmentCorrectionTimeout = new Set(stagedAdjustmentCorrectionTimeout);
     this.#stagedSpeculationTimeout = stagedSpeculationTimeout;
     this.#failSpeculationRecalculation = failSpeculationRecalculation;
+    this.#failSpeculationInfrastructure = failSpeculationInfrastructure;
     this.#failCorrection = new Set(fail);
     this.#remainingPrimaryFlaps = new Map(Object.entries(primaryFlaps));
     this.#reactionGuidanceByRequest = reactionGuidanceByRequest;
@@ -2813,6 +2844,23 @@ class SimulatedConversationAdapter implements AgentSessionAdapter {
   ): Promise<AgentTurnResult> {
     const manifest = JSON.parse(await readFile(invocation.launcherToken, 'utf8')) as EngineMcpLauncherManifest;
     const key = manifest.requestId.replace(/^request:/u, '');
+    if (invocation.callPhase === 'speculation' && this.#failSpeculationInfrastructure) {
+      await Promise.resolve();
+      if (manifest.dispatchId === undefined) throw new Error('Speculation launcher omitted dispatch id.');
+      return {
+        resumeSessionId: null, sessionId: null, finalText: '', usage: null,
+        exit: 'infrastructure_failed', failureReason: 'SIMULATED speculative engine startup failure',
+        component: 'engine_mcp_startup', processEvidence: null,
+        engineCatalogEvidence: {
+          status: 'absent', basis: 'required_engine_initialization_failed', dispatchId: manifest.dispatchId,
+          corroboration: ['SIMULATED speculative engine startup failure'],
+        },
+        partialResultEvidence: {
+          status: 'partial', decodedEventCount: 0, finalTextFragment: '', observedUsage: null,
+          stagedInvocationIds: [],
+        },
+      };
+    }
     if (invocation.callPhase === 'speculation_recalculation' && this.#failSpeculationRecalculation) {
       await driveScriptedMcp(
         this.cwd, invocation.launcherToken, this.intelMode, true, false, null,
@@ -3391,13 +3439,14 @@ function enforceCompletedDispatchIntegrity(input: {
     catalogEvidence,
     delivered: correlatedContext === null ? null : {
       contextSha256: sha256(correlatedContext.raw),
-      measurement: {
-        baseBytes: new TextEncoder().encode(correlatedContext.raw).byteLength,
-        semanticBytes: 0,
-      },
+      measurement: deliveredTurnContextMeasurement(correlatedContext),
     },
   });
-  if (delivery.status !== 'indeterminate') return;
+  const contradictoryStartup = input.turn.exit === 'infrastructure_failed';
+  if (delivery.status !== 'indeterminate' && !contradictoryStartup) return;
+  if (delivery.status !== 'indeterminate' && delivery.status !== 'delivered') {
+    throw new Error('Contradictory startup evidence produced an unsupported delivery state.');
+  }
   persistD569IntegrityStop({
     artifactPath: input.artifactPath,
     rowPath: input.rowPath,
@@ -3428,10 +3477,7 @@ function classifyFailedDispatch(input: {
     catalogEvidence: catalog,
     delivered: context === null ? null : {
       contextSha256: sha256(context.raw),
-      measurement: {
-        baseBytes: new TextEncoder().encode(context.raw).byteLength,
-        semanticBytes: 0,
-      },
+      measurement: deliveredTurnContextMeasurement(context),
     },
   });
   return {
@@ -4056,6 +4102,7 @@ async function runConversationWithConfiguredIntel(
     options.stagedAdjustmentCorrectionTimeout ?? [],
     options.stagedSpeculationTimeout ?? false,
     options.failSpeculationRecalculation ?? false,
+    options.failSpeculationInfrastructure ?? false,
     options.failCorrection ?? [],
     options.flapPrimaryByRequest ?? {},
     options.reactionGuidanceByRequest ?? {},
@@ -4422,23 +4469,7 @@ async function runConversationWithConfiguredIntel(
       const inFlightSpeculation: { current: InFlightSpeculation | null } = { current: null };
       const applyJoinedSpeculativeInfrastructure = (
         completed: SpeculativeDispatchCompletion,
-        dispatchId: import('../src/vtt/agent-session').EngineDispatchId,
       ): boolean => {
-        if (options.failSpeculationInfrastructure === true && completed.turn?.exit !== 'infrastructure_failed') {
-          outcome = 'infrastructure_failed';
-          serviceNull = true;
-          refusals.push('SIMULATED speculative engine startup failure');
-          failingDispatch = {
-            phase: 'speculative', exit: 'infrastructure_failed', dispatchId,
-            engineCatalogEvidence: {
-              status: 'absent', basis: 'required_engine_initialization_failed', dispatchId,
-              corroboration: ['SIMULATED speculative engine startup failure'],
-            },
-            turnContextDelivery: { status: 'infrastructure_absent', dispatchId, measurement: null },
-            failureReason: 'SIMULATED speculative engine startup failure',
-          };
-          return true;
-        }
         if (completed.turn?.exit !== 'infrastructure_failed') return false;
         outcome = 'infrastructure_failed';
         serviceNull = true;
@@ -4579,23 +4610,7 @@ async function runConversationWithConfiguredIntel(
               { engineDispatchId: launcher.dispatchId, recoveryEngineDispatchId: launcher.recoveryDispatchId },
             );
             options.onAgentInvocation?.(speculativeInvocation);
-            const observedTurn = await adapter.start(speculativeInvocation, controller.signal);
-            const turn: AgentTurnResult = options.failSpeculationInfrastructure === true ? {
-              resumeSessionId: observedTurn.resumeSessionId, sessionId: observedTurn.sessionId,
-              finalText: observedTurn.finalText, usage: observedTurn.usage,
-              exit: 'infrastructure_failed', failureReason: 'SIMULATED speculative engine startup failure',
-              component: 'engine_mcp_startup', processEvidence: observedTurn.processEvidence,
-              engineCatalogEvidence: {
-                status: 'absent', basis: 'required_engine_initialization_failed',
-                dispatchId: launcher.dispatchId,
-                corroboration: ['SIMULATED speculative engine startup failure'],
-              },
-              partialResultEvidence: {
-                status: 'partial', decodedEventCount: observedTurn.partialResultEvidence.decodedEventCount,
-                finalTextFragment: observedTurn.finalText, observedUsage: observedTurn.usage,
-                stagedInvocationIds: [],
-              },
-            } : observedTurn;
+            const turn = await adapter.start(speculativeInvocation, controller.signal);
             const planningWallMs = clock() - dispatchStarted;
             const spools = dispatchSpools(launcher, turn);
             enforceCompletedDispatchIntegrity({
@@ -5382,14 +5397,14 @@ async function runConversationWithConfiguredIntel(
                 catalogEvidence: primaryCatalogEvidence,
                 delivered: correlatedContext === null ? null : {
                   contextSha256: sha256(correlatedContext.raw),
-                  measurement: {
-                    baseBytes: new TextEncoder().encode(correlatedContext.raw).byteLength,
-                    semanticBytes: 0,
-                  },
+                  measurement: deliveredTurnContextMeasurement(correlatedContext),
                 },
               });
               if (primaryCatalogEvidence.status === 'inconclusive' &&
-                primaryDelivery.status === 'indeterminate') {
+                (primaryDelivery.status === 'indeterminate' || turn.exit === 'infrastructure_failed')) {
+                if (primaryDelivery.status !== 'indeterminate' && primaryDelivery.status !== 'delivered') {
+                  throw new Error('Contradictory primary startup evidence produced an unsupported delivery state.');
+                }
                 persistD569IntegrityStop({
                   artifactPath: join(artifacts, `${key}-dispatch-integrity.json`),
                   rowPath: config.outPath,
@@ -6257,7 +6272,7 @@ async function runConversationWithConfiguredIntel(
               const boundaryStarted = clock();
               const completed = await pending.completion;
               if (completed.turn !== null) captureCallUsage(completed.turn, 'speculation');
-              if (applyJoinedSpeculativeInfrastructure(completed, pending.dispatchId)) {
+              if (applyJoinedSpeculativeInfrastructure(completed)) {
                 inFlightSpeculation.current = null;
                 throw new CellInfrastructureAbort('Speculative engine MCP infrastructure failed.');
               }
@@ -6538,7 +6553,7 @@ async function runConversationWithConfiguredIntel(
             const pending = inFlightSpeculation.current;
             pending.controller.abort();
             const completed = await pending.completion;
-            const joinedInfrastructureFailure = applyJoinedSpeculativeInfrastructure(completed, pending.dispatchId);
+            const joinedInfrastructureFailure = applyJoinedSpeculativeInfrastructure(completed);
             speculation = {
               status: 'discarded', proposed: true, adopted: false, discarded: true,
               discardReason: 'target_disappeared',
@@ -6571,7 +6586,7 @@ async function runConversationWithConfiguredIntel(
           const pending = inFlightSpeculation.current;
           pending.controller.abort();
           const completed = await pending.completion;
-          const joinedInfrastructureFailure = applyJoinedSpeculativeInfrastructure(completed, pending.dispatchId);
+          const joinedInfrastructureFailure = applyJoinedSpeculativeInfrastructure(completed);
           speculation = {
             status: 'discarded', proposed: true, adopted: false, discarded: true,
             discardReason: 'target_disappeared',
@@ -6700,15 +6715,6 @@ async function runConversationWithConfiguredIntel(
             config.turnContextMaximumBytes,
           ).rendering;
       if (rendererEvidence === undefined) throw new Error('Turn-context renderer emitted no attribution evidence.');
-      if (primaryDelivery?.status === 'delivered') {
-        primaryDelivery = {
-          ...primaryDelivery,
-          measurement: {
-            baseBytes: rendererEvidence.baseContextBytes,
-            semanticBytes: rendererEvidence.semanticBoardBytes,
-          },
-        };
-      }
       options.rendererEvidenceCache?.set(rendererEvidenceCacheKey, rendererEvidence);
       const optionsOmittedForSize = rendererEvidence.optionsOmittedForSizeByActor
         .reduce((total, actor) => total + actor.count, 0);
@@ -6752,7 +6758,7 @@ async function runConversationWithConfiguredIntel(
             root: knowledgeBase.componentSha256.root,
             tactics: knowledgeBase.componentSha256.tactics,
             ...Object.fromEntries(Object.entries(knowledgeBase.componentSha256.subjects)
-              .map(([subject, hash]) => [`subject:${subject}`, hash])),
+              .map(([subject, hash]) => [subject, hash])),
           }
         : {};
       const d569AdviceFields = config.dmModeExplicit && config.dmMode === 'advice'
@@ -6835,6 +6841,9 @@ async function runConversationWithConfiguredIntel(
         });
         const contextRecord = rowTurnContext.value;
         const deliveredContext = primaryDelivery.status === 'delivered';
+        const deliveredMeasurement = primaryDelivery.status === 'delivered'
+          ? primaryDelivery.measurement
+          : null;
         const creatureFacts = !deliveredContext ? null
           : requiredRecord(contextRecord['creature_facts'], 'blind creature_facts');
         const legalMovement = !deliveredContext ? null
@@ -6924,13 +6933,13 @@ async function runConversationWithConfiguredIntel(
               };
             }) : [],
           } }),
-          ...(deliveredContext ? { turnContextBudget: {
+          ...(deliveredMeasurement === null ? {} : { turnContextBudget: {
             configuredBaseBytes: BLIND_TURN_CONTEXT_MAX_BYTES,
             configuredSemanticBytes: BLIND_SEMANTIC_BOARD_MAX_BYTES,
-            actualBaseBytes: rendererEvidence.baseContextBytes,
-            actualSemanticBytes: rendererEvidence.semanticBoardBytes,
+            actualBaseBytes: deliveredMeasurement.baseBytes,
+            actualSemanticBytes: deliveredMeasurement.semanticBytes,
             truncatedBlocks: [],
-          } } : {}),
+          } }),
           blindPrivateAnswerKey: {
             selectedOfferedIds,
             semanticDigests: finalSubmission?.resolution.status === 'accepted'
@@ -6974,8 +6983,12 @@ async function runConversationWithConfiguredIntel(
           policyVersion: RENDERER_POLICY_VERSION,
           profile: config.rendererProfile,
         },
-        semanticBoardBytes: deliveredPrimaryContext ? rendererEvidence.semanticBoardBytes : null,
-        baseContextBytes: deliveredPrimaryContext ? rendererEvidence.baseContextBytes : null,
+        semanticBoardBytes: primaryDelivery?.status === 'delivered'
+          ? primaryDelivery.measurement.semanticBytes
+          : deliveredPrimaryContext ? rendererEvidence.semanticBoardBytes : null,
+        baseContextBytes: primaryDelivery?.status === 'delivered'
+          ? primaryDelivery.measurement.baseBytes
+          : deliveredPrimaryContext ? rendererEvidence.baseContextBytes : null,
         semanticBoardTruncated: deliveredPrimaryContext ? rendererEvidence.semanticBoardTruncated : [],
         circumstanceFeatures: deliveredPrimaryContext ? rendererEvidence.features : {
           ...rendererEvidence.features,

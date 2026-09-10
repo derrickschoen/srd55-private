@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { join, resolve } from 'node:path';
+import { createHash } from 'node:crypto';
+import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it, vi } from 'vitest';
 import {
@@ -27,9 +28,10 @@ import {
   stopMcpClient,
   profiledTurnContextArguments,
   persistD569IntegrityStop,
+  type ConversationBoardSnapshotService,
 } from '../../../tools/ai-dm-conversation';
 import { buildRerunPacket } from '../../../tools/ai-dm-rerun-packet';
-import { mkdtempSync, readFileSync, writeFileSync } from '../../helpers/test-filesystem';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from '../../helpers/test-filesystem';
 import { createEncounter, reduceEncounter, type EncounterState } from '../../../src/combat/encounter';
 import { armorClass, encounterSessionId, feet, type CombatantId } from '../../../src/combat/values';
 import type { EncounterCommand } from '../../../src/combat/events';
@@ -559,15 +561,89 @@ describe('AI-DM engine MCP conversation runner', () => {
     expect(readFileSync(proposalSpoolPath, 'utf8')).toBe('{"staged":"unconsumed"}\n');
   });
 
-  it('persists a runner forensic row before propagating conflicting startup evidence', async () => {
-    const directory = mkdtempSync(join(tmpdir(), 'd569-runner-startup-integrity-'));
+  it('classifies a timeout after catalog observation but before a tool call without an integrity STOP', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'd569-runner-catalog-timeout-'));
     const outPath = join(directory, 'rows.jsonl');
+    const boardSnapshotService: ConversationBoardSnapshotService = {
+      outputDirectory: directory,
+      capture: async (input) => {
+        const png = Buffer.alloc(24);
+        Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).copy(png);
+        png.writeUInt32BE(1, 16);
+        png.writeUInt32BE(1, 20);
+        const digest = createHash('sha256').update(png).digest('hex');
+        const relativePath = `board-images/${digest}.png` as const;
+        mkdirSync(join(directory, 'board-images'), { recursive: true });
+        writeFileSync(join(directory, relativePath), png);
+        const html = Buffer.from('<!doctype html><main>timeout evidence</main>\n');
+        const htmlDigest = createHash('sha256').update(html).digest('hex');
+        const htmlRelativePath = `board-html/${htmlDigest}/board.html` as const;
+        mkdirSync(join(directory, 'board-html', htmlDigest), { recursive: true });
+        writeFileSync(join(directory, htmlRelativePath), html);
+        return {
+          version: 'arena-board-image-v1', audience: 'dm', mimeType: 'image/png',
+          relativePath, sha256: digest, bytes: png.byteLength, width: 1, height: 1,
+          capturedAtUnixMs: 1, captureMs: 0, source: { ...input.source },
+          chromiumVersion: 'SIMULATED Chromium',
+          html: { relativePath: htmlRelativePath, sha256: htmlDigest, bytes: html.byteLength },
+        };
+      },
+      close: async () => undefined,
+    };
     const adapter: AgentSessionAdapter = {
       kind: 'codex',
       probe: async () => ({ present: true, version: 'SIMULATED' }),
       start: async (invocation) => {
+        if (invocation.engineDispatchId === undefined) throw new Error('Timeout fixture lacks dispatch identity.');
+        return {
+          exit: 'timed_out', resumeSessionId: null, sessionId: 'partial-timeout-session',
+          finalText: 'catalog observed before timeout', usage: null, timeoutMs: 180_000,
+          processEvidence: {
+            startedAtUnixMs: 10, endedAtUnixMs: 20, exitCode: null, signal: 'SIGTERM',
+            stdout: 'catalog observed before timeout', stderr: '', decodedEvents: [],
+          },
+          partialResultEvidence: {
+            status: 'partial', decodedEventCount: 1, finalTextFragment: 'catalog observed before timeout',
+            observedUsage: null, stagedInvocationIds: [],
+          },
+          engineCatalogEvidence: {
+            status: 'inconclusive', dispatchId: invocation.engineDispatchId,
+            reason: 'no_correlated_catalog',
+          },
+        };
+      },
+      resume: async () => { throw new Error('Timeout fixture unexpectedly resumed.'); },
+      classifyFailure: () => 'unknown',
+    };
+    const result = await runConversation(parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', outPath,
+      '--dm-mode', 'advice', '--dry-run',
+    ]), { adapter, boardSnapshotService });
+    expect(result.rows[0]).toMatchObject({
+      outcome: 'refused', fallbackReason: 'timeout',
+      engineCatalogEvidence: { status: 'inconclusive', reason: 'no_correlated_catalog' },
+      turnContextDelivery: { status: 'timeout_before_delivery', measurement: null },
+    });
+  });
+
+  it('persists delivered context and process evidence before propagating conflicting startup evidence', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'd569-runner-startup-integrity-'));
+    const outPath = join(directory, 'rows.jsonl');
+    let launcherToken: string | null = null;
+    const adapter: AgentSessionAdapter = {
+      kind: 'codex',
+      probe: async () => ({ present: true, version: 'SIMULATED' }),
+      start: async (invocation) => {
+        launcherToken = invocation.launcherToken;
         const manifest = JSON.parse(readFileSync(invocation.launcherToken, 'utf8')) as EngineMcpLauncherManifest;
         if (manifest.dispatchId === undefined) throw new Error('Integrity fixture launcher lacks dispatch identity.');
+        if (manifest.turnContextSpoolPath === undefined || manifest.dispatchPhase === undefined) {
+          throw new Error('Integrity fixture launcher lacks a context spool.');
+        }
+        writeFileSync(manifest.turnContextSpoolPath, `${JSON.stringify({
+          granularity: 'full', semantic_board: { provenance: { format: 'test-semantic-board-v1' } },
+          dispatchId: manifest.dispatchId, dispatchProfile: 'dm', dispatchPhase: manifest.dispatchPhase,
+        })}\n`, 'utf8');
         return {
           exit: 'infrastructure_failed', resumeSessionId: null, sessionId: 'partial-session',
           finalText: 'partial startup output', usage: null,
@@ -596,7 +672,14 @@ describe('AI-DM engine MCP conversation runner', () => {
     expect(JSON.parse(readFileSync(outPath, 'utf8'))).toMatchObject({
       rowContractVersion: 'arena-row-v3', outcome: 'integrity_indeterminate',
       engineCatalogEvidence: { status: 'inconclusive', reason: 'conflicting_success_and_failure' },
-      turnContextDelivery: { status: 'indeterminate' },
+      turnContextDelivery: { status: 'delivered', measurement: { semanticBytes: expect.any(Number) } },
+    });
+    if (launcherToken === null) throw new Error('Integrity fixture did not observe its launcher.');
+    const artifactPath = join(dirname(launcherToken), 'room-1-round-1-dispatch-integrity.json');
+    expect(JSON.parse(readFileSync(artifactPath, 'utf8'))).toMatchObject({
+      delivery: { status: 'delivered' }, contextSpool: { recordCount: 1 },
+      processEvidence: { stdout: 'partial startup output', stderr: 'required engine startup failed' },
+      partialResultEvidence: { status: 'partial', finalTextFragment: 'partial startup output' },
     });
   });
 
