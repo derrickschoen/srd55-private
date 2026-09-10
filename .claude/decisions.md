@@ -22143,3 +22143,29 @@ paths, wrong Node version in a citation, truncated provenance commit; the builde
 restored. Astra's owner answer, unchanged across three reviews: patch + structural follow-up. Three review rounds are spent; the
 specification is SHELVED under HARD_GATE (b); reopening as a remediation artifact needs the owner's word (asked). Until then: no
 patch implementation, no relaunch; hard rows and crash evidence stay preserved.
+
+## D602 — OWNER: D569 crash-patch specification — one remediation round authorized (2026-09-09)
+
+Answered 2026-09-09 20:58 EDT: "Authorize one remediation round". A new bounded artifact (D569-CRASH-RCA-REM-01): the same codex session amends
+only the two residuals of D586.171 (explicit indeterminate-delivery/integrity-stop row variant with its transition before proposal
+authorization; the complete adapter result/response types keeping the branded reusable `resumeSessionId`, rollout id, text, usage
+and partial evidence, with migration of `coldStart`/`coldStartRound`/recovery) plus the trivial corrections; one Astra review; on
+ACCEPT the patch implementation unit starts and the reruns follow D590. Alternatives not chosen: implement now with residuals as
+first tasks; stop.
+
+### D586.172 — harvests: Room D r2 (hook scoped), held-out remediation (merge reconciled + AST leak wall), offers plan r1 written; RCA remediation dispatched (2026-09-09 20:59 EDT)
+
+Room D (ROOM-D-LAND-01 r2, lane 01a088ac…): the production `beforeAll` and `report` moved into a nested describe holding exactly
+the six report-consuming tests; the 20 direct tests including the five bounded Room D tests run without the hook (lane: focused
+Room D run 17 ms execution, 5-spec 86/86, tsc 0, sg 0); supervisor verification running; then commit, Astra r2, fresh gate.
+Held-out (HELDOUT-S1-REM-01 r1, lane 01a088b4-c55a-7013-bb77-97f63936d912): both merge conflicts reconciled (room-generator.ts
+keeps held-out provenance + main's partyState union; generate-arena-basis.ts keeps held-out hashing/types + main's envelope
+decoder, legacy rooms via decodeArenaBasisEnvelopeV1), the regex leak wall replaced by a TypeScript-compiler-API walker
+(static/side-effect/type-only/re-export/import-equals/import-type/dynamic import()/require; comments are trivia; syntax errors
+fail closed) with 60 wall tests incl. the four comment bypasses; lane-claimed 9-spec cumulative 296/296, 66 fixture hashes
+byte-identical; supervisor verification running; then stage+commit the merge, Astra r1. Offers (OFFERS-PLAN-02 r1, lane
+01a088b0…): plan revised to sha 213f0b39… (902 lines): bottleneck fixture rebuilt (5×2 board, blocker (2,1)→gate (3,0),
+movement-only walls; probe through the real movement world shows zero bypass paths with the gate occupied, four when vacated),
+legacy migration carries only a reducer-corroborated multiplier count as `legacy_unresolved` and fails closed on grant-sensitive
+mutations until next turn start, witnesses for one-Dash/double-Dash/Flee; Astra review r1 dispatched. D569 RCA remediation
+(D602) dispatched (resume 01a087c6…). Owner rulings today: D590–D602.

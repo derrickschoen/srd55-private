@@ -1,0 +1,1 @@
+- 2026-09-09 20:59 EDT r1 candidate sha 213f0b39… frozen; Astra review r1 dispatched
