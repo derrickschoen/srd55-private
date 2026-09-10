@@ -9,3 +9,5 @@
 - 2026-09-10 11:01 EDT — supervisor 17-spec cumulative 386/392; serial rerun: engine-mcp-server load flake cleared, but 4 ai-dm-conversation tests fail deterministically (speculative/speculation literal mismatch + three 5 s timeouts in new adjustment/speculation tests). Fix pass dispatched (resume 01a088e3…): deterministic tests via injection seams, no timeout raises.
 
 - 2026-09-10 11:23 EDT — fix pass 1 ineffective: supervisor writable cumulative 387/392, same three timeouts + literal mismatch now adjustment/correction; lane timing evidence was vacuous (tests failed at EROFS before the wait). Fix pass 2 dispatched with the real failure output and a trace-the-wait requirement.
+
+- 2026-09-10 12:25 EDT — fix pass 2 traced the real wait (unbounded SIMULATED stdio response), added in-process SIMULATED dispatch + injected timeouts + a test-only recalculation seam, fixed correction dispatch phase. Supervisor cumulative 390/392, serial rerun 95/95. Committed df7531b8; Astra r2 review dispatched (resume 01a08815…) with the fix-pass additions flagged for scrutiny.
