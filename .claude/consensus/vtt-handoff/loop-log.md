@@ -60,3 +60,5 @@ Machine constraint: the D569 v5 first arm (pid 1201481, port 4530) runs until ~1
 - 2026-09-10 12:34 EDT — S3 r4 lane DONE; supervisor verification tsc/sg/diffcheck 0, 17 specs 187/187, baseline OK; committed ef0ef4f6; Astra S3 r4 review dispatched (resume 01a087f9…).
 
 - 2026-09-10 12:38 EDT — S3 Astra r4 ACCEPT at ef0ef4f6 (F37–F39 resolved). S4/S5/S5b lane dispatched (fresh session).
+
+- 2026-09-10 13:11 EDT — S4–S5b lane DONE; supervisor verification tsc/sg/diffcheck 0, test:engine 41/41, test:protocol 24/24, 20 specs 205/205, isolated publish core 8 + examples 3 verified, all 8 owner-root S2c hashes reproduced; committed e873b426; Astra S4–S5b review dispatched (resume 01a087f9…).
