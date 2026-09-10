@@ -41,6 +41,8 @@
     "rl:generate-data": "vite-node tools/rl/generate-data.ts --",
     "bootstrap": "node --experimental-strip-types tools/vtt-handoff/bootstrap.ts --",
     "doctor": "node --experimental-strip-types tools/vtt-handoff/doctor.ts --",
+    "test:engine": "vitest run --configLoader runner tests/unit/vtt/encounter-session-service.test.ts tests/unit/vtt/door-intent.test.ts tests/unit/vtt/encounter-selectors.test.ts tests/unit/vtt/engine-boundary.test.ts",
+    "test:protocol": "vitest run --configLoader runner tests/unit/vtt/handoff-contract.test.ts tests/unit/vtt/protocol-runtime.test.ts tests/unit/vtt/in-process-transport.test.ts tests/unit/vtt/engine-boundary.test.ts",
     "handoff:publish": "node --experimental-strip-types tools/vtt-handoff/publish.ts --"
   },
   "dependencies": {

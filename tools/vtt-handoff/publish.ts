@@ -52,6 +52,26 @@ function publicationEntries(repositoryRoot: string): readonly PublicationEntry[]
   ];
 }
 
+function exampleEntries(repositoryRoot: string): readonly PublicationEntry[] {
+  const fixture = readFileSync(join(repositoryRoot, 'fixtures/protocol/examples.v1.json'));
+  const payload = { path: 'fixtures/protocol/examples.v1.json', bytes: fixture };
+  return [
+    payload,
+    {
+      path: 'contracts/v1/manifest.entries/examples.json',
+      bytes: json({
+        schemaVersion: 1,
+        bundle: 'contracts/v1',
+        entries: [{ path: payload.path, sha256: sha256(payload.bytes), length: payload.bytes.length }],
+      }),
+    },
+    {
+      path: 'contracts/v1/examples.READY.json',
+      bytes: json({ core: 'ready', examples: 'ready' }),
+    },
+  ];
+}
+
 function syncDirectory(directory: string): void {
   const handle = openSync(directory, 'r');
   try { fsyncSync(handle); } finally { closeSync(handle); }
@@ -181,9 +201,84 @@ export function publishCore(options: {
   }
 }
 
+export function publishExamples(options: {
+  readonly repositoryRoot?: string;
+  readonly handoffRoot?: string;
+  readonly check?: boolean;
+  readonly identityPolicy?: RepositoryIdentityPolicy;
+  readonly hooks?: PublishHooks;
+} = {}): PublishResult {
+  const paths = handoffPaths({
+    ...(options.repositoryRoot === undefined ? {} : { repositoryRoot: options.repositoryRoot }),
+    ...(options.handoffRoot === undefined ? {} : { handoffRoot: options.handoffRoot }),
+    ...(options.identityPolicy === undefined ? {} : { identityPolicy: options.identityPolicy }),
+  });
+  publishCore({
+    repositoryRoot: paths.repositoryRoot,
+    handoffRoot: paths.handoffRoot,
+    check: true,
+    ...(options.identityPolicy === undefined ? {} : { identityPolicy: options.identityPolicy }),
+  });
+  const entries = exampleEntries(paths.repositoryRoot);
+  const readyPath = join(paths.handoffRoot, 'contracts/v1/examples.READY.json');
+  const check = options.check ?? false;
+  if (check) {
+    const sealed = existsSync(readyPath);
+    for (const entry of entries) {
+      if (assertEntry(entry, paths.handoffRoot, sealed) === 'missing') {
+        throw new Error(`IMMUTABLE_BUNDLE_MISSING: ${entry.path}`);
+      }
+    }
+    return { root: paths.handoffRoot, status: 'verified', files: entries.length };
+  }
+
+  const lockPath = join(paths.handoffRoot, '.contracts-v1.examples.publish.lock');
+  let lock: number;
+  try {
+    lock = openSync(lockPath, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new Error('PUBLICATION_IN_PROGRESS');
+    throw error;
+  }
+  try {
+    closeSync(lock);
+    const sealed = existsSync(readyPath);
+    const states = entries.map((entry) => assertEntry(entry, paths.handoffRoot, sealed));
+    if (sealed) return { root: paths.handoffRoot, status: 'unchanged', files: entries.length };
+    const nonce = options.hooks?.nonce ?? (() => `${String(process.pid)}.${randomBytes(12).toString('hex')}`);
+    let created = 0;
+    for (const [index, entry] of entries.entries()) {
+      if (states[index] === 'present') continue;
+      createNoReplace(
+        join(paths.handoffRoot, entry.path),
+        entry.bytes,
+        nonce,
+        options.hooks?.beforeFinalPlacement,
+      );
+      created += 1;
+      options.hooks?.afterCreate?.(entry.path);
+    }
+    return {
+      root: paths.handoffRoot, status: created === 0 ? 'unchanged' : 'published', files: entries.length,
+    };
+  } finally {
+    unlinkSync(lockPath);
+    syncDirectory(paths.handoffRoot);
+  }
+}
+
 if (process.env.VITEST === undefined && process.argv[1] !== undefined &&
   (fileURLToPath(import.meta.url) === process.argv[1] || process.argv[1].endsWith('/vite-node'))) {
-  if (!process.argv.includes('--core')) throw new Error('PUBLISH_MODE_REQUIRED: --core');
-  const result = publishCore({ check: process.argv.includes('--check') });
-  process.stdout.write(`${JSON.stringify(result)}\n`);
+  const coreOnly = process.argv.includes('--core') && !process.argv.includes('--examples');
+  const examplesOnly = process.argv.includes('--examples') && !process.argv.includes('--core');
+  const check = process.argv.includes('--check');
+  if (coreOnly) {
+    process.stdout.write(`${JSON.stringify(publishCore({ check }))}\n`);
+  } else if (examplesOnly) {
+    process.stdout.write(`${JSON.stringify(publishExamples({ check }))}\n`);
+  } else {
+    const core = publishCore({ check });
+    const examples = publishExamples({ check });
+    process.stdout.write(`${JSON.stringify({ core, examples })}\n`);
+  }
 }

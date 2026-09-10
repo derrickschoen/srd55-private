@@ -291,6 +291,8 @@ const CORE_ENTRYPOINTS = [
   'src/combat/coordinator.ts',
   'src/vtt/dm-encounter-host.ts',
   'src/vtt/encounter-session-service.ts',
+  'src/vtt/handoff/protocol-runtime.ts',
+  'src/vtt/handoff/in-process-transport.ts',
 ] as const;
 
 describe('renderer-neutral engine boundary graph', () => {
