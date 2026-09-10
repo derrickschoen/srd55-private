@@ -13,9 +13,16 @@ import {
 } from './worker-messages';
 import { ProtocolRuntime } from './protocol-runtime';
 import type { HandoffPrincipal } from './session-authorizer';
+import { postWorkerMessage } from './worker-message-post';
 
 function post(port: MessagePort, message: WorkerServerMessage): void {
-  port.postMessage(message);
+  postWorkerMessage(port, message);
+}
+
+interface HeldWorkerEvent {
+  readonly event: Parameters<Parameters<ProtocolRuntime['subscribe']>[0]>[0];
+  readonly receiptInvocation?: number;
+  readonly receiptRevision?: number;
 }
 
 function workerLegalActions(state: EncounterState, actor: CombatantId): LegalActionSummary {
@@ -35,8 +42,12 @@ interface WorkerSession {
   readonly key: string;
   readonly service: EncounterSessionService;
   readonly seats: readonly PlayerSeatRegistration[];
-  bindings: number;
+  readonly bindings: Set<WorkerBinding>;
   startPromise: Promise<void> | null;
+}
+
+interface WorkerBinding {
+  destroyFromSession(): void;
 }
 
 const workerSessions = new Map<string, WorkerSession>();
@@ -75,7 +86,10 @@ function createWorkerSession(key: string): WorkerSession {
       .filter((binding) => binding.combatantId === combatant.profile.id)
       .map((binding) => binding.tokenId),
   }));
-  return { key, service: new EncounterSessionService(host, seats), seats, bindings: 0, startPromise: null };
+  return {
+    key, service: new EncounterSessionService(host, seats), seats,
+    bindings: new Set(), startPromise: null,
+  };
 }
 
 function workerSession(key: string): WorkerSession {
@@ -115,7 +129,6 @@ export function attachHandoffWorkerPort(
 ): () => void {
   const sessionKey = options.sessionKey ?? `anonymous:${String(++anonymousSessionSequence)}`;
   const session = workerSession(sessionKey);
-  session.bindings += 1;
   const runtime = new ProtocolRuntime({
     service: session.service,
     principal: options.principal ?? { role: 'dm' },
@@ -124,16 +137,25 @@ export function attachHandoffWorkerPort(
   });
   const invocations = new Map<SessionInvocationToken, number>();
   const seenInvocations = new Set<number>();
+  let heldEvents: { readonly token: SessionInvocationToken; readonly events: HeldWorkerEvent[] } | null = null;
   let detached = false;
   const unsubscribeEvent = runtime.subscribe((event, receipt) => {
     const receiptInvocation = receipt === undefined ? undefined : invocations.get(receipt.invocationToken);
-    post(port, {
-      kind: 'event',
+    const held: HeldWorkerEvent = {
       event,
       ...(receiptInvocation === undefined || receipt === undefined
         ? {}
         : { receiptInvocation, receiptRevision: receipt.revision }),
-    });
+    };
+    if (heldEvents !== null) {
+      heldEvents.events.push(held);
+      return;
+    }
+    if (receipt !== undefined && receiptInvocation !== undefined) {
+      heldEvents = { token: receipt.invocationToken, events: [held] };
+      return;
+    }
+    post(port, { kind: 'event', event });
   });
   const unsubscribeFault = runtime.subscribeFaults((fault) => post(port, { kind: 'fault', fault }));
   const onMessage = (messageEvent: MessageEvent<unknown>): void => {
@@ -164,6 +186,22 @@ export function attachHandoffWorkerPort(
       invocations.set(token, message.invocation);
       void runtime.dispatch(message.request, undefined, token).then(async (result) => {
         invocations.delete(token);
+        if (heldEvents?.token === token) {
+          const events = heldEvents.events;
+          heldEvents = null;
+          for (const held of events) {
+            post(port, {
+              kind: 'event', event: held.event,
+              ...(held.receiptInvocation === undefined || held.receiptRevision === undefined || result.kind !== 'response'
+                ? {}
+                : {
+                    receiptInvocation: held.receiptInvocation,
+                    receiptRevision: held.receiptRevision,
+                    receiptId: result.response.id,
+                  }),
+            });
+          }
+        }
         await options.responseBarrier?.();
         if (result.kind === 'transport_fault') {
           post(port, { kind: 'request-fault', invocation: message.invocation, fault: result.fault });
@@ -187,13 +225,16 @@ export function attachHandoffWorkerPort(
     }
     release(message.kind, true);
   };
-  const release = (kind: 'close' | 'dispose' | 'destroy', notifyPeer: boolean): void => {
+  const release = (
+    kind: 'close' | 'dispose' | 'destroy' | 'session-destroyed',
+    notifyPeer: boolean,
+  ): void => {
     if (detached) return;
     detached = true;
     let cleanupFailed = false;
     try {
       if (kind === 'close') runtime.close();
-      else if (kind === 'dispose') runtime.dispose();
+      else if (kind === 'dispose' || kind === 'session-destroyed') runtime.dispose();
       else runtime.destroySession();
     } catch {
       cleanupFailed = true;
@@ -203,10 +244,13 @@ export function attachHandoffWorkerPort(
       unsubscribeFault();
       invocations.clear();
       seenInvocations.clear();
-      session.bindings -= 1;
-      if (kind === 'destroy') workerSessions.delete(session.key);
-      if (session.bindings === 0 && kind !== 'destroy') {
-        workerSessions.delete(session.key);
+      heldEvents = null;
+      session.bindings.delete(binding);
+      if (kind === 'destroy') {
+        if (workerSessions.get(session.key) === session) workerSessions.delete(session.key);
+        for (const attached of [...session.bindings]) attached.destroyFromSession();
+      } else if (session.bindings.size === 0 && kind !== 'session-destroyed') {
+        if (workerSessions.get(session.key) === session) workerSessions.delete(session.key);
         try { runtime.destroySession(); } catch { cleanupFailed = true; }
       }
       if (notifyPeer) {
@@ -224,6 +268,10 @@ export function attachHandoffWorkerPort(
       port.close();
     }
   };
+  const binding: WorkerBinding = {
+    destroyFromSession: () => release('session-destroyed', true),
+  };
+  session.bindings.add(binding);
   port.addEventListener('message', onMessage);
   port.start();
   return () => release('dispose', false);

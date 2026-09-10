@@ -5,9 +5,10 @@ import {
   decodeWorkerServerMessage, type WorkerClientMessage, type WorkerConnectMessage,
 } from './worker-messages';
 import type { HandoffPrincipal } from './session-authorizer';
+import { postWorkerMessage } from './worker-message-post';
 
 interface Pending {
-  readonly id: string | null;
+  id: string | null;
   readonly method: string | null;
   readonly resolve: (response: HandoffResponse) => void;
   readonly reject: (error: Error) => void;
@@ -67,12 +68,7 @@ export class WorkerSceneTransport implements SceneTransport {
     const invocation = this.#invocation;
     const idValue = property(request, 'id');
     const methodValue = property(request, 'method');
-    const versionValue = property(request, 'v');
-    const paramsValue = property(request, 'params');
     if (this.#terminal()) return Promise.reject(new SceneTransportClosedError());
-    const outbound = typeof request === 'object' && request !== null
-      ? { v: versionValue, id: idValue, method: methodValue, params: paramsValue }
-      : request;
     let rejectRequest: ((error: Error) => void) | undefined;
     const promise = new Promise<HandoffResponse>((resolve, reject) => {
       rejectRequest = reject;
@@ -84,7 +80,7 @@ export class WorkerSceneTransport implements SceneTransport {
     });
     try {
       if (this.#terminal()) throw new SceneTransportClosedError();
-      this.#post({ kind: 'request', invocation, request: outbound });
+      this.#post({ kind: 'request', invocation, request });
     } catch {
       this.#pending.delete(invocation);
       if (this.#terminal()) {
@@ -130,11 +126,15 @@ export class WorkerSceneTransport implements SceneTransport {
     if (message.kind === 'event') {
       if (message.receiptInvocation !== undefined) {
         const pending = this.#pending.get(message.receiptInvocation);
-        if (pending === undefined || (pending.method !== 'token.move' && pending.method !== 'door.set')) {
+        if (
+          pending === undefined || message.receiptRevision === undefined || message.receiptId === undefined ||
+          pending.id !== null && pending.id !== message.receiptId
+        ) {
           this.#terminalFault(this.#fault('PROTOCOL_ERROR', 'Worker emitted an uncorrelated mutation receipt.'));
           return;
         }
-        pending.receiptRevision = message.receiptRevision ?? null;
+        pending.id = message.receiptId;
+        pending.receiptRevision = message.receiptRevision;
       }
       this.#resolveInitial?.(message.event.data);
       this.#resolveInitial = null;
@@ -177,7 +177,7 @@ export class WorkerSceneTransport implements SceneTransport {
     this.#terminalFault(this.#fault('PROTOCOL_ERROR', 'Worker could not decode a host message.'));
   };
 
-  #post(message: WorkerClientMessage): void { this.port.postMessage(message); }
+  #post(message: WorkerClientMessage): void { postWorkerMessage(this.port, message); }
   #fault(code: ProtocolTransportFault['code'], message: string): ProtocolTransportFault {
     return { kind: 'transport_fault', code, message, websocketCloseCode: code === 'PROTOCOL_ERROR' ? 1002 : 1007 };
   }
@@ -211,7 +211,7 @@ export class WorkerSceneTransport implements SceneTransport {
     this.#resolveInitial = null;
     this.#rejectInitial = null;
     for (const [invocation, pending] of this.#pending) {
-      if (pending.receiptRevision !== null && pending.id !== null && (pending.method === 'token.move' || pending.method === 'door.set')) {
+      if (pending.receiptRevision !== null && pending.id !== null) {
         pending.resolve({ v: 1, id: pending.id, ok: true, result: { revision: pending.receiptRevision } });
       } else pending.reject(error);
       this.#pending.delete(invocation);

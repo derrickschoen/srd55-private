@@ -369,6 +369,17 @@ function coreDependencyGraph(): ReadonlyMap<string, SourceModule> {
   return cachedCoreGraph;
 }
 
+function platformControlViolations(name: string, source: string): readonly string[] {
+  const directory = mkdtempSync(resolve(tmpdir(), `vtt-worker-${name}-`));
+  try {
+    const control = resolve(directory, `${name}.ts`);
+    writeFileSync(control, source);
+    return platformViolations(dependencyGraph([control]));
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
 describe('renderer-neutral engine boundary graph', () => {
   it('recognizes static, re-export, side-effect, import-equals, dynamic, and require value edges', () => {
     const sample = ts.createSourceFile('forms.ts', `
@@ -399,27 +410,39 @@ describe('renderer-neutral engine boundary graph', () => {
     expect(platformViolations(graph)).toEqual([]);
   });
 
-  it('catches aliased, destructured, computed and bare-builtin Worker platform controls', () => {
-    const directory = mkdtempSync(resolve(tmpdir(), 'vtt-worker-boundary-'));
-    try {
-      const controls = resolve(directory, 'controls.ts');
-      writeFileSync(controls, `
-        const d = document;
-        d.createElement('div');
-        const { document: doc } = globalThis;
-        doc.createElement('span');
-        globalThis['SharedArrayBuffer'];
-        import fs from 'fs';
-        void fs;
-      `);
-      const violations = platformViolations(dependencyGraph([controls]));
-      expect(violations.some((violation) => violation.endsWith('imports fs'))).toBe(true);
-      expect(violations.some((violation) => violation.endsWith('to document'))).toBe(true);
-      expect(violations.some((violation) => violation.endsWith('to SharedArrayBuffer'))).toBe(true);
-      expect(violations.filter((violation) => violation.endsWith('to document')).length).toBeGreaterThanOrEqual(2);
-    } finally {
-      rmSync(directory, { recursive: true, force: true });
-    }
+  it('catches the direct platform control at its exact use site', () => {
+    const violations = platformControlViolations('direct', `document.createElement('div');`);
+    expect(violations.some((violation) => /\/direct\.ts resolves document\.createElement to document$/u.test(violation)))
+      .toBe(true);
+  });
+
+  it('catches the alias platform control at its exact resolved use site', () => {
+    const violations = platformControlViolations('alias', `
+      const d = document;
+      d.createElement('div');
+    `);
+    expect(violations.some((violation) => /\/vtt-worker-alias-[^/]+\/alias\.ts resolves d\.createElement to document$/u.test(violation)))
+      .toBe(true);
+  });
+
+  it('catches the destructuring platform control at its exact resolved use site', () => {
+    const violations = platformControlViolations('destructuring', `
+      const { document: doc } = globalThis;
+      doc.createElement('span');
+    `);
+    expect(violations.some((violation) => /\/vtt-worker-destructuring-[^/]+\/destructuring\.ts resolves doc\.createElement to document$/u.test(violation)))
+      .toBe(true);
+  });
+
+  it('catches the computed-property platform control at its exact use site', () => {
+    const violations = platformControlViolations('computed', `globalThis['SharedArrayBuffer'];`);
+    expect(violations.some((violation) => /\/computed\.ts resolves globalThis\['SharedArrayBuffer'\] to SharedArrayBuffer$/u.test(violation)))
+      .toBe(true);
+  });
+
+  it('catches the bare-builtin platform control at its exact import site', () => {
+    const violations = platformControlViolations('builtin', `import fs from 'fs'; void fs;`);
+    expect(violations.some((violation) => /\/builtin\.ts imports fs$/u.test(violation))).toBe(true);
   });
 
   it('all runtime entries converge on the pinned session reducer edges', () => {

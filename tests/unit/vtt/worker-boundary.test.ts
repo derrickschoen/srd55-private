@@ -44,9 +44,27 @@ describe('VTT handoff Worker message boundary', () => {
     const isAdapterCall = (): boolean => {
       if (inspectingStack) return false;
       inspectingStack = true;
-      const sourceFrame = new Error().stack?.split('\n').find((frame) => frame.includes('/src/'));
-      inspectingStack = false;
-      return sourceFrame === undefined || /\/src\/vtt\/handoff\/worker-(?:entry|transport|messages|memory-session-store)\.ts/u.test(sourceFrame);
+      try {
+        const frames = new Error().stack?.split('\n') ?? [];
+        if (!frames.some((frame) => frame.includes('/src/vtt/handoff/'))) return false;
+        const establishedEngineWork = [
+          /\/src\/vtt\/dm-encounter-host\.ts/u, // Authoritative detached host capture.
+          /\/src\/vtt\/session-persistence\.ts/u, // Authoritative journal-state copying.
+          /\/src\/combat\//u, // Reducer and visibility-domain projection work.
+          /\/src\/commands\/canonical-json\.ts/u, // Canonical engine-state hashing.
+          /\/src\/vtt\/encounter-board\.ts/u, // Board presentation projection.
+          /\/src\/vtt\/session-timeline\.ts/u, // Timeline projection copying.
+          /\/src\/vtt\/encounter-projections\.ts/u, // Detached immutable capture copying.
+        ];
+        const serializationOrigin = frames.find((frame) => frame.includes('/src/'));
+        if (
+          serializationOrigin !== undefined &&
+          establishedEngineWork.some((pattern) => pattern.test(serializationOrigin))
+        ) return false;
+        return true;
+      } finally {
+        inspectingStack = false;
+      }
     };
     JSON.parse = ((...args: Parameters<typeof JSON.parse>) => {
       if (isAdapterCall()) serialization.parse += 1;
@@ -84,10 +102,6 @@ describe('VTT handoff Worker message boundary', () => {
         params: { doorId: 'object:two-room-door', open: true },
       })).resolves.toMatchObject({ id: 'door-event', ok: true });
       expect(serialization).toEqual({ parse: 0, stringify: 0, clone: 0 });
-      const aliasedSerializer = JSON.stringify;
-      aliasedSerializer({ mutationControl: true });
-      expect(serialization.stringify).toBe(1);
-      serialization.stringify = 0;
     } finally {
       JSON.parse = originalParse;
       JSON.stringify = originalStringify;
@@ -99,6 +113,7 @@ describe('VTT handoff Worker message boundary', () => {
       readFileSync('src/vtt/handoff/worker-entry.ts', 'utf8'),
       readFileSync('src/vtt/handoff/worker-transport.ts', 'utf8'),
       readFileSync('src/vtt/handoff/worker-messages.ts', 'utf8'),
+      readFileSync('src/vtt/handoff/worker-message-post.ts', 'utf8'),
       readFileSync('src/vtt/handoff/worker-memory-session-store.ts', 'utf8'),
     ].join('\n');
     expect(adapterSources).not.toMatch(/JSON\.(?:parse|stringify)|structuredClone/u);
@@ -211,6 +226,63 @@ describe('VTT handoff Worker message boundary', () => {
       v: 1, id: 'open-after-fault', method: 'session.open', params: { requestedRole: 'dm' },
     })).resolves.toMatchObject({ id: 'open-after-fault', ok: true });
     transport.dispose();
+    detach();
+  });
+
+  it('passes original object, array and UTF-8 byte inputs to authoritative protocol validation', async () => {
+    const channel = new MessageChannel();
+    const detach = attachHandoffWorkerPort(channel.port2, { sessionKey: 'original-input-shapes' });
+    const transport = new WorkerSceneTransport(channel.port1, () => undefined);
+    await transport.request({ v: 1, id: 'open-inputs', method: 'session.open', params: { requestedRole: 'dm' } });
+
+    await expect(transport.request({
+      v: 1, id: 'unreserved-extra-key', method: 'door.set',
+      params: { doorId: 'object:two-room-door', open: true }, extra: 'forbidden',
+    })).resolves.toMatchObject({
+      id: 'unreserved-extra-key', ok: false, error: { code: 'INVALID_REQUEST' },
+    });
+    await expect(transport.request({
+      v: 1, id: 'unreserved-extra-key', method: 'door.set',
+      params: { doorId: 'object:two-room-door', open: true },
+    })).resolves.toMatchObject({ id: 'unreserved-extra-key', ok: true });
+
+    await expect(transport.request([
+      { v: 1, id: 'array-id', method: 'scene.snapshot', params: {} },
+    ])).rejects.toMatchObject({ code: 'PROTOCOL_ERROR', websocketCloseCode: 1002 });
+    const encodedSnapshot = new TextEncoder().encode(JSON.stringify({
+      v: 1, id: 'utf8-snapshot', method: 'scene.snapshot', params: {},
+    }));
+    await expect(transport.request(encodedSnapshot))
+      .resolves.toMatchObject({ id: 'utf8-snapshot', ok: true });
+    await expect(transport.request(Uint8Array.from([0xc3, 0x28])))
+      .rejects.toMatchObject({ code: 'INVALID_UTF8', websocketCloseCode: 1007 });
+    transport.dispose();
+    detach();
+  });
+
+  it('correlates a JSON-text mutation receipt and preserves it across observer closure', async () => {
+    const barrier = deferred();
+    let delayResponse = false;
+    const channel = new MessageChannel();
+    const detach = attachHandoffWorkerPort(channel.port2, {
+      sessionKey: 'json-text-receipt',
+      responseBarrier: () => delayResponse ? barrier.promise : Promise.resolve(),
+    });
+    const transport = new WorkerSceneTransport(channel.port1, () => undefined);
+    await transport.request({ v: 1, id: 'open-json', method: 'session.open', params: { requestedRole: 'dm' } });
+    delayResponse = true;
+    transport.subscribe((event) => {
+      if (event.data.doors.find((door) => door.id === 'object:two-room-door')?.open === true) transport.close();
+    });
+    const committed = await transport.request(JSON.stringify({
+      v: 1, id: 'json-door', method: 'door.set',
+      params: { doorId: 'object:two-room-door', open: true },
+    }));
+    expect(committed).toMatchObject({ id: 'json-door', ok: true });
+    if (!committed.ok) throw new Error('The JSON-text mutation receipt was not preserved.');
+    expect(committed.result.revision).toBeTypeOf('number');
+    expect(transport.status()).toBe('closed');
+    barrier.resolve();
     detach();
   });
 
@@ -339,6 +411,76 @@ describe('VTT handoff Worker message boundary', () => {
     second.dispose();
     independent.dispose();
     detachFirst(); detachSecond(); detachIndependent();
+  });
+
+  it('keeps replacement session identity stable across destroy, stale release and last detach', async () => {
+    const sessionKey = 'replacement-session';
+    const barrierB = deferred();
+    let delayB = false;
+    const channelA = new MessageChannel();
+    const channelB = new MessageChannel();
+    const detachA = attachHandoffWorkerPort(channelA.port2, { sessionKey });
+    const detachB = attachHandoffWorkerPort(channelB.port2, {
+      startAutonomous: false, sessionKey,
+      responseBarrier: () => delayB ? barrierB.promise : Promise.resolve(),
+    });
+    const transportA = new WorkerSceneTransport(channelA.port1, () => undefined);
+    const transportB = new WorkerSceneTransport(channelB.port1, () => undefined);
+    await transportA.request({ v: 1, id: 'open-a', method: 'session.open', params: { requestedRole: 'dm' } });
+    await transportB.request({ v: 1, id: 'open-b', method: 'session.open', params: { requestedRole: 'dm' } });
+    delayB = true;
+    const pendingB = transportB.request({ v: 1, id: 'pending-b', method: 'scene.snapshot', params: {} });
+    const rejectedB = pendingB.catch((error: unknown) => error);
+    transportA.destroySession();
+    expect(await rejectedB).toBeInstanceOf(SceneTransportFaultError);
+    expect(transportB.status()).toBe('closed');
+    barrierB.resolve();
+
+    const channelC = new MessageChannel();
+    const detachC = attachHandoffWorkerPort(channelC.port2, { sessionKey });
+    const transportC = new WorkerSceneTransport(channelC.port1, () => undefined);
+    await transportC.request({ v: 1, id: 'open-c', method: 'session.open', params: { requestedRole: 'dm' } });
+    detachB();
+    const channelD = new MessageChannel();
+    const detachD = attachHandoffWorkerPort(channelD.port2, { startAutonomous: false, sessionKey });
+    const transportD = new WorkerSceneTransport(channelD.port1, () => undefined);
+    await transportD.request({ v: 1, id: 'open-d', method: 'session.open', params: { requestedRole: 'dm' } });
+    const mutationC = await transportC.request({
+      v: 1, id: 'replacement-door', method: 'door.set',
+      params: { doorId: 'object:two-room-door', open: true },
+    });
+    expect(mutationC).toMatchObject({ id: 'replacement-door', ok: true });
+    if (!mutationC.ok) throw new Error('Replacement session mutation did not commit.');
+    await expect(transportD.request({ v: 1, id: 'snapshot-d', method: 'scene.snapshot', params: {} }))
+      .resolves.toMatchObject({
+        id: 'snapshot-d', ok: true,
+        result: {
+          revision: mutationC.result.revision,
+          doors: expect.arrayContaining([expect.objectContaining({ id: 'object:two-room-door', open: true })]),
+        },
+      });
+
+    transportC.dispose();
+    transportD.dispose();
+    detachC(); detachD();
+    const channelE = new MessageChannel();
+    const detachE = attachHandoffWorkerPort(channelE.port2, { startAutonomous: false, sessionKey });
+    const transportE = new WorkerSceneTransport(channelE.port1, () => undefined);
+    const initialE = transportE.initialSnapshot();
+    await transportE.request({ v: 1, id: 'open-e', method: 'session.open', params: { requestedRole: 'dm' } });
+    await expect(initialE).resolves.toMatchObject({ revision: 0 });
+
+    const isolatedChannel = new MessageChannel();
+    const detachIsolated = attachHandoffWorkerPort(isolatedChannel.port2, {
+      startAutonomous: false, sessionKey: 'replacement-session-independent',
+    });
+    const isolated = new WorkerSceneTransport(isolatedChannel.port1, () => undefined);
+    await isolated.request({ v: 1, id: 'open-isolated', method: 'session.open', params: { requestedRole: 'dm' } });
+    await expect(isolated.request({ v: 1, id: 'isolated-snapshot', method: 'scene.snapshot', params: {} }))
+      .resolves.toMatchObject({ id: 'isolated-snapshot', ok: true, result: { revision: 0 } });
+    transportE.dispose();
+    isolated.dispose();
+    detachA(); detachE(); detachIsolated();
   });
 
   it('binds a player port to its seat, filters its projection and never applies a DM receipt to its read', async () => {

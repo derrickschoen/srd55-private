@@ -25,6 +25,7 @@ export const workerServerMessageSchema = z.discriminatedUnion('kind', [
   z.strictObject({
     kind: z.literal('event'), event: handoffEventSchema,
     receiptInvocation: invocationSchema.optional(), receiptRevision: z.number().int().safe().optional(),
+    receiptId: z.string().optional(),
   }),
   z.strictObject({ kind: z.literal('fault'), fault: transportFaultSchema }),
   z.strictObject({ kind: z.literal('closed') }),
@@ -52,7 +53,13 @@ export type WorkerClientMessage =
 export type WorkerServerMessage =
   | { readonly kind: 'response'; readonly invocation: number; readonly response: HandoffResponse }
   | { readonly kind: 'request-fault'; readonly invocation: number; readonly fault: ProtocolTransportFault }
-  | { readonly kind: 'event'; readonly event: SceneSnapshotEvent; readonly receiptInvocation?: number; readonly receiptRevision?: number }
+  | {
+      readonly kind: 'event';
+      readonly event: SceneSnapshotEvent;
+      readonly receiptInvocation?: number;
+      readonly receiptRevision?: number;
+      readonly receiptId?: string;
+    }
   | { readonly kind: 'fault'; readonly fault: ProtocolTransportFault }
   | { readonly kind: 'closed' };
 
