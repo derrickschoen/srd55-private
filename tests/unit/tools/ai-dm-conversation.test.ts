@@ -9,6 +9,7 @@ import {
   turnInputTotal,
   measuredContextRolloverThreshold,
   engineDispatchId,
+  engineDispatchPhaseForCallPhase,
   type AgentInvocation,
   type AgentSessionAdapter,
   type AgentSessionBinding,
@@ -1721,7 +1722,7 @@ describe('AI-DM engine MCP conversation runner', () => {
 
     expect(result.rows[0]).toEqual(expect.objectContaining({ contextTruncated: true }));
     const rawTurnContext = result.rows[0]?.rawTurnContext;
-    if (rawTurnContext === undefined) throw new Error('Trimmed row omitted its raw turn context.');
+    if (rawTurnContext === undefined || rawTurnContext === null) throw new Error('Trimmed row omitted its raw turn context.');
     const turnContext = objectValue(JSON.parse(rawTurnContext) as unknown, 'trimmed turn context');
     expect(new TextEncoder().encode(rawTurnContext).byteLength)
       .toBeLessThanOrEqual(config.turnContextMaximumBytes);
@@ -2710,6 +2711,40 @@ describe('AI-DM engine MCP conversation runner', () => {
     expect(result.rows[0]?.refusals).not.toContainEqual(expect.stringContaining('SPECULATION_RECALC_REQUIRED'));
   });
 
+  it('aborts the cell when speculation recalculation infrastructure fails after staging output', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'd569-speculation-recalc-infrastructure-'));
+    let mutated = false;
+    const result = await runConversation(parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      '--combat-model', 'initiative_segments_v1', '--dry-run',
+    ]), {
+      roomStates: [await alternatingInitiativeRoom()],
+      mutateBeforeSpeculationBoundary: (state) => {
+        if (mutated) return state;
+        mutated = true;
+        return {
+          ...state,
+          revision: state.revision + 1,
+          combatants: state.combatants.map((combatant) => combatant.profile.kind === 'player_character'
+            ? { ...combatant, hitPoints: 0, life: 'dead' as const }
+            : combatant),
+        };
+      },
+      failSpeculationRecalculation: true,
+      simulatedInProcessDispatchDelayMs: 10,
+      forceSpeculationRecalculationForTest: true,
+    });
+    expect(result.rows[0]).toMatchObject({
+      outcome: 'infrastructure_failed',
+      failingDispatch: {
+        phase: 'speculation_recalculation', exit: 'infrastructure_failed',
+        engineCatalogEvidence: { status: 'absent' },
+        turnContextDelivery: { status: 'infrastructure_absent' },
+      },
+    });
+    expect(result.rows[0]?.monsterSegments).toEqual([]);
+  });
+
   it('aborts speculative planning at the D407 pacing deadline', { timeout: 30_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-speculation-budget-'));
     const config = parseConversationArgs([
@@ -2733,6 +2768,24 @@ describe('AI-DM engine MCP conversation runner', () => {
     }));
     expect(expired?.status === 'discarded' ? expired.planningWallMs : Number.POSITIVE_INFINITY)
       .toBeLessThan(1_000);
+  });
+
+  it('discards a speculative proposal staged before timeout without authorizing it', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'd569-speculation-staged-timeout-'));
+    const result = await runConversation(parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      '--combat-model', 'initiative_segments_v1', '--dry-run',
+      ...ALL_OPTIONS_TEST_RENDERER_ARGS,
+    ]), {
+      roomStates: [await alternatingInitiativeRoom()],
+      suggestionResponseByRequest: { 'room-1-round-1': 'ignored' },
+      stagedSpeculationTimeout: true,
+    });
+    expect(result.rows[0]?.speculations).toContainEqual(expect.objectContaining({
+      status: 'discarded', adopted: false, discarded: true, discardReason: 'budget_expired',
+    }));
+    expect(result.rows[0]?.outcome).not.toBe('infrastructure_failed');
+    expect(result.rows[0]?.monsterSegments.flatMap((segment) => segment.actors).length).toBeGreaterThan(0);
   });
 
   it('does not spend a second adjustment flap budget when preflight finds no material plan change', { timeout: 30_000 }, async () => {
@@ -2802,6 +2855,7 @@ describe('AI-DM engine MCP conversation runner', () => {
 
   it('runs one adjustment correction and retains the corrected replacement', { timeout: 30_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-segments-correction-'));
+    const phaseInvocations: AgentInvocation[] = [];
     const config = parseConversationArgs([
       '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
       '--combat-model', 'initiative_segments_v1', '--dry-run',
@@ -2812,6 +2866,9 @@ describe('AI-DM engine MCP conversation runner', () => {
       roomStates: [await alternatingInitiativeRoom({ fragileMonsterCount: 1 })],
       suggestionResponseByRequest: { 'room-1-round-1': 'ignored' },
       adjustmentResponseByRequest: { 'room-1-round-1-pc-turn-1': 'invalid' },
+      simulatedInProcessDispatchDelayMs: 10,
+      speculationDispatchDelayMs: 50,
+      onAgentInvocation: (invocation) => { phaseInvocations.push(invocation); },
     });
 
     expect(result.rows[0]?.adjustments?.[0]).toEqual(expect.objectContaining({
@@ -2819,6 +2876,20 @@ describe('AI-DM engine MCP conversation runner', () => {
       flapRetries: 0,
     }));
     expect(result.rows[0]?.callsPerRound).toBeGreaterThanOrEqual(3);
+    expect(new Set(phaseInvocations.map((invocation) => invocation.callPhase))).toEqual(new Set([
+      'initial', 'speculation', 'adjustment', 'correction',
+    ]));
+    const dispatchIds = phaseInvocations.map((invocation) => invocation.engineDispatchId);
+    expect(dispatchIds.every((dispatchId) => dispatchId !== undefined)).toBe(true);
+    expect(new Set(dispatchIds).size).toBe(dispatchIds.length);
+    for (const invocation of phaseInvocations) {
+      const manifest = JSON.parse(readFileSync(invocation.launcherToken, 'utf8')) as EngineMcpLauncherManifest;
+      expect(manifest).toMatchObject({
+        readinessSpoolPath: expect.stringMatching(/-engine-readiness\.jsonl$/u),
+        dispatchId: invocation.engineDispatchId,
+      });
+      expect(manifest.dispatchPhase).toBe(engineDispatchPhaseForCallPhase(invocation.callPhase));
+    }
   });
 
   it('keeps the baseline after three adjustment service nulls and continues the round', { timeout: 30_000 }, async () => {
@@ -2842,6 +2913,56 @@ describe('AI-DM engine MCP conversation runner', () => {
     expect(result.rows[0]?.pcTurns).toHaveLength(3);
     expect(result.rows[0]?.monsterSegments?.flatMap((segment) => segment.actors).length)
       .toBeGreaterThan(0);
+  });
+
+  it('ignores a staged adjustment proposal after timeout and retains the authorized baseline', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'd569-adjustment-staged-timeout-'));
+    const result = await runConversationWithPartyPolicy('heuristic_v0', parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      '--combat-model', 'initiative_segments_v1', '--dry-run',
+      ...ALL_OPTIONS_TEST_RENDERER_ARGS,
+    ]), {
+      roomStates: [await alternatingInitiativeRoom({ fragileMonsterCount: 1 })],
+      suggestionResponseByRequest: { 'room-1-round-1': 'ignored' },
+      stagedAdjustmentTimeout: ['room-1-round-1-pc-turn-1'],
+      simulatedInProcessDispatchDelayMs: 10,
+      speculationDispatchDelayMs: 50,
+    });
+    const adjustment = result.rows[0]?.adjustments?.[0];
+    if (adjustment === undefined || adjustment.skipped !== null) {
+      throw new Error('Timed-out adjustment was not recorded.');
+    }
+    expect(adjustment).toMatchObject({
+      outcome: 'service_null', proposalId: null, changedActors: [], flapRetries: 0,
+    });
+    expect(adjustment.resultPlanHash).toBe(adjustment.baselinePlanHash);
+    expect(result.rows[0]?.monsterSegments.flatMap((segment) => segment.actors).length).toBeGreaterThan(0);
+  });
+
+  it('ignores an adjustment correction proposal staged before timeout and retains the authorized baseline', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'd569-adjustment-correction-staged-timeout-'));
+    const result = await runConversationWithPartyPolicy('heuristic_v0', parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      '--combat-model', 'initiative_segments_v1', '--dry-run',
+      ...ALL_OPTIONS_TEST_RENDERER_ARGS,
+    ]), {
+      roomStates: [await alternatingInitiativeRoom({ fragileMonsterCount: 1 })],
+      suggestionResponseByRequest: { 'room-1-round-1': 'ignored' },
+      adjustmentResponseByRequest: { 'room-1-round-1-pc-turn-1': 'invalid' },
+      stagedAdjustmentCorrectionTimeout: ['room-1-round-1-pc-turn-1'],
+      simulatedInProcessDispatchDelayMs: 10,
+      speculationDispatchDelayMs: 50,
+    });
+    const adjustment = result.rows[0]?.adjustments?.[0];
+    if (adjustment === undefined || adjustment.skipped !== null) {
+      throw new Error('Timed-out adjustment correction was not recorded.');
+    }
+    expect(adjustment).toMatchObject({
+      outcome: 'baseline_kept', proposalId: null, changedActors: [], flapRetries: 0,
+      correctionChain: expect.objectContaining({ result: 'timed_out', proposalId: null }),
+    });
+    expect(adjustment.resultPlanHash).toBe(adjustment.baselinePlanHash);
+    expect(result.rows[0]?.monsterSegments.flatMap((segment) => segment.actors).length).toBeGreaterThan(0);
   });
 
   it('treats adjustment correction no-response as protocol exhaustion, not a flap', { timeout: 30_000 }, async () => {

@@ -106,6 +106,33 @@ function blindRowFields(): Readonly<Record<string, unknown>> {
   };
 }
 
+function v3MissingDeliveryRow(base: Readonly<Record<string, unknown>>, dispatchId: string) {
+  const delivery = {
+    status: 'not_requested' as const, dispatchId,
+    reason: 'catalog_ready_model_did_not_fetch' as const, measurement: null,
+  };
+  return record({
+    ...base, rowContractVersion: 'arena-row-v3', scheduledCellKey: `${String(base['room'])}:${String(base['round'])}`,
+    dispatchId, outcome: 'service_null',
+    engineCatalogEvidence: {
+      status: 'ready', basis: 'required_cli_completed_with_valid_catalog', dispatchId,
+      advertisedInvocationCount: 0, resourceOperationCount: 0,
+    },
+    turnContextDelivery: delivery,
+    turnContextConfiguredCaps: { baseBytes: 65_536, semanticBytes: 8_192 },
+    hostContextDiagnostic: null,
+    baseContextBytes: null, semanticBoardBytes: null, rawTurnContext: null,
+    preTrimBytes: null, postTrimBytes: null, turnContextGranularity: null,
+    optionsOmittedForSize: 0, optionsOmittedForSizeByActor: [],
+    roundTotals: { contextBytes: 0 },
+    turnContextBudget: undefined,
+    blindIngressAudit: {
+      version: 2, status: 'incomplete', passed: false, forbiddenContentPassed: true,
+      delivery, missingRequiredFields: ['turn_context'],
+    },
+  });
+}
+
 describe('AI-DM R1-10 rerun packet', () => {
   it('maps every historical terminal outcome explicitly without relabeling infrastructure', () => {
     expect([
@@ -135,6 +162,20 @@ describe('AI-DM R1-10 rerun packet', () => {
       turnContextDelivery: { status: 'infrastructure_absent', dispatchId, measurement: null },
       turnContextConfiguredCaps: { baseBytes: 65_536, semanticBytes: 8_192 },
       hostContextDiagnostic: null,
+      failingDispatch: {
+        phase: 'primary', exit: 'infrastructure_failed', dispatchId,
+        engineCatalogEvidence: {
+          status: 'absent', basis: 'required_engine_initialization_failed', dispatchId,
+          corroboration: ['required MCP server failed'],
+        },
+        turnContextDelivery: { status: 'infrastructure_absent', dispatchId, measurement: null },
+        failureReason: 'required MCP server failed',
+      },
+      baseContextBytes: null, semanticBoardBytes: null, rawTurnContext: null,
+      preTrimBytes: null, postTrimBytes: null, turnContextGranularity: null,
+      optionsOmittedForSize: 0, optionsOmittedForSizeByActor: [],
+      roundTotals: { contextBytes: 0 },
+      turnContextBudget: undefined,
     });
     const serviceDispatchId = 'engine-dispatch:packet-v3-0002';
     rows[2] = record({
@@ -153,6 +194,11 @@ describe('AI-DM R1-10 rerun packet', () => {
       },
       turnContextConfiguredCaps: { baseBytes: 65_536, semanticBytes: 8_192 },
       hostContextDiagnostic: { status: 'unavailable', errorClass: 'TypeError' },
+      baseContextBytes: null, semanticBoardBytes: null, rawTurnContext: null,
+      preTrimBytes: null, postTrimBytes: null, turnContextGranularity: null,
+      optionsOmittedForSize: 0, optionsOmittedForSizeByActor: [],
+      roundTotals: { contextBytes: 0 },
+      turnContextBudget: undefined,
     });
 
     const { packet } = buildRerunPacket(rows, 771, R1_10_PROTOCOL);
@@ -166,6 +212,66 @@ describe('AI-DM R1-10 rerun packet', () => {
       outcome: 'service_null',
       rubric: { targetPriority: 0, actionEconomy: 0, positioning: 0, coherence: 0, total: 0 },
     }));
+  });
+
+  it('rejects inconclusive, forbidden, and cross-field inconsistent v3 packet evidence', () => {
+    const baseRows = registeredRows();
+    const valid = v3MissingDeliveryRow(baseRows[0]!, 'engine-dispatch:packet-integrity-0001');
+    const withFirst = (first: Readonly<Record<string, unknown>>) => [first, ...baseRows.slice(1)];
+    const indeterminateDelivery = {
+      status: 'indeterminate' as const, dispatchId: valid['dispatchId'],
+      reason: 'catalog_inconclusive_empty_context_spool' as const, measurement: null,
+      integrityAction: 'stop_after_persist' as const,
+    };
+    expect(() => buildRerunPacket(withFirst(record({
+      ...valid,
+      engineCatalogEvidence: {
+        status: 'inconclusive', dispatchId: valid['dispatchId'], reason: 'invalid_catalog_response',
+      },
+      turnContextDelivery: indeterminateDelivery,
+      blindIngressAudit: {
+        ...record(valid['blindIngressAudit']), delivery: indeterminateDelivery,
+      },
+    })), 771, R1_10_PROTOCOL)).toThrow('inconclusive');
+    expect(() => buildRerunPacket(withFirst(record({
+      ...valid,
+      blindIngressAudit: {
+        ...record(valid['blindIngressAudit']), forbiddenContentPassed: false,
+      },
+    })), 771, R1_10_PROTOCOL)).toThrow('forbidden-content');
+    expect(() => buildRerunPacket(withFirst(record({
+      ...valid, outcome: 'infrastructure_failed',
+    })), 771, R1_10_PROTOCOL)).toThrow('correlated failing dispatch');
+  });
+
+  it('accepts a correlated primary dispatch cancellation as unscored infrastructure', () => {
+    const rows = registeredRows();
+    const dispatchId = 'engine-dispatch:packet-cancelled-0001';
+    const base = v3MissingDeliveryRow(rows[0]!, dispatchId);
+    const delivery = {
+      status: 'not_requested' as const, dispatchId,
+      reason: 'dispatch_cancelled' as const, measurement: null,
+    };
+    rows[0] = record({
+      ...base,
+      outcome: 'infrastructure_failed',
+      fallbackReason: 'dispatch_cancelled',
+      turnContextDelivery: delivery,
+      blindIngressAudit: {
+        ...record(base['blindIngressAudit']), delivery,
+      },
+      failingDispatch: {
+        phase: 'primary', exit: 'cancelled', dispatchId,
+        engineCatalogEvidence: base['engineCatalogEvidence'],
+        turnContextDelivery: delivery,
+        failureReason: 'operator cancelled dispatch',
+      },
+    });
+    const { packet } = buildRerunPacket(rows, 771, R1_10_PROTOCOL);
+    expect(packet.entries.find((entry) => entry.scheduledCellKey === '1:1')).toMatchObject({
+      outcome: 'infrastructure_failed',
+      rubric: { total: null },
+    });
   });
   it('carries UI feedback beside its board image into the judge packet', () => {
     const feedback = {

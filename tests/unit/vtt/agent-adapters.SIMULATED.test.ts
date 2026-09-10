@@ -43,6 +43,7 @@ import {
   type AgentProcessSpec,
 } from '../../../src/vtt/agent-adapters/process';
 import { readdir } from '../../helpers/test-filesystem-promises';
+import { D569IntegrityStop } from '../../../src/vtt/d569-integrity';
 
 const cwd = '/workspace/dnd-wt-vtt';
 const engineCommand = '/workspace/node';
@@ -363,6 +364,33 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
     });
   });
 
+  it.each(['malformed', 'conflicting'] as const)(
+    'SIMULATED Codex routes %s readiness plus startup text to integrity handling',
+    async (kind) => {
+      const directory = mkdtempSync(resolve(tmpdir(), `d569-readiness-${kind}-`));
+      const readinessSpoolPath = resolve(directory, 'readiness.jsonl');
+      const launcherToken = resolve(directory, 'launcher.json');
+      const dispatchId = `engine-dispatch:${kind}-readiness-0001`;
+      writeFileSync(launcherToken, JSON.stringify({
+        dispatchId, readinessSpoolPath, toolProfile: 'blind', dispatchPhase: 'primary',
+        requestId: 'request:readiness-conflict',
+      }), 'utf8');
+      writeFileSync(readinessSpoolPath, kind === 'malformed' ? '{"version":\n' : `${JSON.stringify({
+        version: 1, dispatchId, phase: 'primary', profile: 'blind',
+        requestId: 'request:readiness-conflict', event: 'tools_list_stream_write_completed',
+        generatedAtUnixMs: 10, writeCompletedAtUnixMs: 11, responseId: '1',
+        responseSha256: 'a'.repeat(64), expectedToolNames: ['engine.get_turn_context'],
+        returnedToolNames: ['engine.get_turn_context'], descriptorSha256: 'b'.repeat(64),
+        validation: { status: 'valid' },
+      })}\n`, 'utf8');
+      const adapter = new CodexAgentSessionAdapter(options(new SIMULATEDChildProcessRunner([
+        output('', 'Required MCP server engine failed to initialize', 1),
+      ])));
+      await expect(adapter.start({ ...invocation, launcherToken }, new AbortController().signal))
+        .rejects.toBeInstanceOf(D569IntegrityStop);
+    },
+  );
+
   it('SIMULATED Codex exposes each completed call usage independently (mutation: summing)', async () => {
     const usages = [
       { input_tokens: 101, cached_input_tokens: 31, output_tokens: 17, reasoning_output_tokens: 7 },
@@ -609,7 +637,7 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
       finalText: 'OC_EVIDENCE',
       usage: { turnInputTotal: 2051, contextInputTokens: 2051, modelContextWindow: null, cachedInputTokens: 0, outputTokens: 68, reasoningTokens: 0 },
       exit: 'completed',
-      processEvidence: expectedProcessEvidence(transcript, false),
+      processEvidence: expectedProcessEvidence(transcript, true),
       partialResultEvidence: { status: 'complete', decodedEventCount: 3 },
       engineCatalogEvidence: null,
     });
@@ -750,6 +778,18 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
     expect(adapter.classifyFailure(failure)).toBe(expected);
   });
 
+  it('SIMULATED does not attribute another required MCP server failure to engine infrastructure', async () => {
+    const runner = new SIMULATEDChildProcessRunner([
+      output('', "required MCP server 'memory' failed to initialize", 1),
+    ]);
+    const adapter = new CodexAgentSessionAdapter(options(runner));
+    let failure: unknown;
+    try { await adapter.start(invocation, new AbortController().signal); }
+    catch (error) { failure = error; }
+    expect(failure).toMatchObject({ code: 'agent_exit' });
+    expect(adapter.classifyFailure(failure)).toBe('agent_exit');
+  });
+
   it.each([
     ['cli_absent', 'cli_absent'],
     ['spawn_failed', 'transport'],
@@ -819,5 +859,62 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
         stagedInvocationIds: [],
       },
     });
+  });
+
+  it('SIMULATED Claude Code retains decoded partial session, text, usage, and live timestamps on timeout', async () => {
+    const transcript = fixture('claude-code-start');
+    const adapter = new ClaudeCodeAgentSessionAdapter(options(new SIMULATEDChildProcessRunner([{
+      ...output(transcript, 'timeout', null), timedOut: true, signal: 'SIGTERM',
+    }])));
+    const result = await adapter.start(invocation, new AbortController().signal);
+    expect(result).toMatchObject({
+      exit: 'timed_out', resumeSessionId: 'claude-session-123', finalText: '{"proposals":[]}',
+      partialResultEvidence: { status: 'partial', decodedEventCount: 2, finalTextFragment: '{"proposals":[]}' },
+    });
+    expect(result.usage).not.toBeNull();
+    expect(result.processEvidence?.decodedEvents).toHaveLength(2);
+    expect(result.processEvidence?.decodedEvents.map((event) => event.observedAtUnixMs)).toEqual([1_000, 1_001]);
+  });
+
+  it('SIMULATED OpenCode retains decoded partial session, text, usage, invocation IDs, and timestamps on cancellation', async () => {
+    const base = fixture('opencode-1.18.23');
+    const transcript = `${base}\n${JSON.stringify({ type: 'tool', part: { id: 'oc-staged-1' } })}`;
+    const adapter = new OpenCodeAgentSessionAdapter(options(new SIMULATEDChildProcessRunner([{
+      ...output(transcript, '', null, true), signal: 'SIGTERM',
+    }])));
+    const result = await adapter.start(invocation, new AbortController().signal);
+    expect(result).toMatchObject({
+      exit: 'cancelled', resumeSessionId: 'ses_fba44c8fcffewZFncFkCWbLLuB', finalText: 'OC_EVIDENCE',
+      partialResultEvidence: {
+        status: 'partial', decodedEventCount: 4, finalTextFragment: 'OC_EVIDENCE',
+        stagedInvocationIds: [
+          'oc-staged-1',
+          'prt_045bb38520011ifKCyZczTrxgQ',
+          'prt_045bb9da6001VI9q3qpFC0c3D6',
+          'prt_045bbac97001RfgtLLiY0vGPyl',
+        ],
+      },
+    });
+    expect(result.usage).not.toBeNull();
+    expect(result.processEvidence?.decodedEvents).toHaveLength(4);
+  });
+
+  it('SIMULATED Pi retains decoded partial text, usage, invocation IDs, and timestamps on timeout', async () => {
+    const base = fixture('pi-print');
+    const transcript = `${base}\n${JSON.stringify({ type: 'tool_call', tool_call_id: 'pi-staged-1' })}`;
+    const adapter = new PiAgentSessionAdapter(options(new SIMULATEDChildProcessRunner([{
+      ...output(transcript, '', null), timedOut: true, signal: 'SIGTERM',
+    }])));
+    const result = await adapter.start(invocation, new AbortController().signal);
+    expect(result).toMatchObject({
+      exit: 'timed_out', finalText: 'PI_EVIDENCE',
+      partialResultEvidence: {
+        status: 'partial', decodedEventCount: 3, finalTextFragment: 'PI_EVIDENCE',
+        stagedInvocationIds: ['pi-staged-1'],
+      },
+    });
+    expect(result.resumeSessionId).toMatch(/^\/tmp\/dnd-wt-vtt-pi-session-/u);
+    expect(result.usage).not.toBeNull();
+    expect(result.processEvidence?.decodedEvents).toHaveLength(3);
   });
 });

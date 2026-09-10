@@ -85,26 +85,23 @@ export function classifyEngineCatalogEvidence(input: {
   readonly readiness: readonly EngineReadinessRecord[];
   readonly completed: boolean;
   readonly requiredStartupFailed: boolean;
+  readonly malformedReadiness?: boolean;
   readonly corroboration?: readonly string[];
 }): EngineCatalogEvidence {
   const expected = new Set(input.expectedToolNames);
   const invocationIds = new Set<string>();
   const resourceInvocationIds = new Set<string>();
   let missingTimestamp = false;
+  let advertisedObserved = false;
   for (const event of input.events) {
     if (event.server === 'engine' && event.toolName !== null && expected.has(event.toolName)) {
+      advertisedObserved = true;
       if (event.observedAtUnixMs === null) missingTimestamp = true;
       if (event.invocationId !== null) invocationIds.add(event.invocationId);
     }
     if (event.toolName !== null && RESOURCE_OPERATIONS.has(event.toolName) && event.invocationId !== null) {
       resourceInvocationIds.add(event.invocationId);
     }
-  }
-  if (invocationIds.size > 0) {
-    return {
-      status: 'ready', basis: 'advertised_tool_invoked', dispatchId: input.dispatchId,
-      advertisedInvocationCount: invocationIds.size, resourceOperationCount: resourceInvocationIds.size,
-    };
   }
   const correlated = input.readiness.filter((record) => record.dispatchId === input.dispatchId);
   const matchesDispatchContract = (record: EngineReadinessRecord): boolean =>
@@ -113,10 +110,16 @@ export function classifyEngineCatalogEvidence(input: {
     (input.expectedRequestId === undefined || record.requestId === input.expectedRequestId);
   const valid = correlated.some((record) => record.event === 'tools_list_stream_write_completed' &&
     record.validation.status === 'valid' && matchesDispatchContract(record));
-  const invalid = correlated.some((record) => record.validation.status === 'invalid' ||
-    !matchesDispatchContract(record));
-  if (valid && input.requiredStartupFailed) {
+  const invalid = input.malformedReadiness === true || correlated.some((record) =>
+    record.validation.status === 'invalid' || !matchesDispatchContract(record));
+  if ((valid || advertisedObserved) && input.requiredStartupFailed) {
     return { status: 'inconclusive', dispatchId: input.dispatchId, reason: 'conflicting_success_and_failure' };
+  }
+  if (invocationIds.size > 0) {
+    return {
+      status: 'ready', basis: 'advertised_tool_invoked', dispatchId: input.dispatchId,
+      advertisedInvocationCount: invocationIds.size, resourceOperationCount: resourceInvocationIds.size,
+    };
   }
   if (input.completed && valid) {
     return {
@@ -124,13 +127,13 @@ export function classifyEngineCatalogEvidence(input: {
       advertisedInvocationCount: 0, resourceOperationCount: resourceInvocationIds.size,
     };
   }
+  if (invalid) return { status: 'inconclusive', dispatchId: input.dispatchId, reason: 'invalid_catalog_response' };
   if (input.requiredStartupFailed && !valid) {
     return {
       status: 'absent', basis: 'required_engine_initialization_failed', dispatchId: input.dispatchId,
       corroboration: input.corroboration ?? [],
     };
   }
-  if (invalid) return { status: 'inconclusive', dispatchId: input.dispatchId, reason: 'invalid_catalog_response' };
   if (missingTimestamp) return { status: 'inconclusive', dispatchId: input.dispatchId, reason: 'missing_live_timestamp' };
   return {
     status: 'inconclusive', dispatchId: input.dispatchId,

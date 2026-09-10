@@ -9,8 +9,11 @@ import {
   agentProcessEvidence,
   completedOutput,
   jsonEventLines,
+  observedInvocationIds,
+  processEventInvocationId,
   ProcessAgentSessionAdapter,
   record,
+  tolerantObservedJsonEvents,
   type AgentAdapterOptions,
   type AgentProcessSpec,
 } from './process';
@@ -94,21 +97,38 @@ export class OpenCodeAgentSessionAdapter extends ProcessAgentSessionAdapter {
         signal,
         invocation.timeoutMs,
       );
-      const processEvidence = agentProcessEvidence(output);
+      const observedEvents = tolerantObservedJsonEvents(output);
+      const processEvidence = agentProcessEvidence(output, observedEvents.map((entry) => ({
+        invocationId: processEventInvocationId(entry.event),
+        kind: typeof entry.event['type'] === 'string' ? entry.event['type'] : 'unknown',
+        observedAtUnixMs: entry.observedAtUnixMs,
+      })));
+      const partial = decodeOpenCodeObserved(observedEvents.map((entry) => entry.event), sessionId);
+      const partialResumeSessionId = partial.sessionId === null
+        ? null
+        : agentSessionIdFromCli(partial.sessionId);
       completedOutput(output, sessionId !== null);
       if (output.timedOut) {
         return {
-          resumeSessionId: sessionId === null ? null : agentSessionIdFromCli(sessionId), sessionId: null,
-          finalText: output.stdout, usage: null, exit: 'timed_out', timeoutMs: invocation.timeoutMs ?? 1,
+          resumeSessionId: partialResumeSessionId, sessionId: null,
+          finalText: partial.finalText, usage: partial.usage, exit: 'timed_out', timeoutMs: invocation.timeoutMs ?? 1,
           processEvidence, engineCatalogEvidence: null,
-          partialResultEvidence: { status: 'partial', decodedEventCount: 0, finalTextFragment: output.stdout, observedUsage: null, stagedInvocationIds: [] },
+          partialResultEvidence: {
+            status: 'partial', decodedEventCount: observedEvents.length,
+            finalTextFragment: partial.finalText, observedUsage: partial.usage,
+            stagedInvocationIds: observedInvocationIds(observedEvents),
+          },
         };
       }
       if (output.cancelled) return {
-        resumeSessionId: sessionId === null ? null : agentSessionIdFromCli(sessionId), sessionId: null,
-        finalText: output.stdout, usage: null, exit: 'cancelled', cancellationReason: String(signal.reason ?? 'abort_signal'),
+        resumeSessionId: partialResumeSessionId, sessionId: null,
+        finalText: partial.finalText, usage: partial.usage, exit: 'cancelled', cancellationReason: String(signal.reason ?? 'abort_signal'),
         processEvidence, engineCatalogEvidence: null,
-        partialResultEvidence: { status: 'partial', decodedEventCount: 0, finalTextFragment: output.stdout, observedUsage: null, stagedInvocationIds: [] },
+        partialResultEvidence: {
+          status: 'partial', decodedEventCount: observedEvents.length,
+          finalTextFragment: partial.finalText, observedUsage: partial.usage,
+          stagedInvocationIds: observedInvocationIds(observedEvents),
+        },
       };
       const decoded = decodeOpenCodeTurn(output.stdout, sessionId, (event) => this.observe(event));
       return {
@@ -123,6 +143,27 @@ export class OpenCodeAgentSessionAdapter extends ProcessAgentSessionAdapter {
       await rm(configPath, { force: true });
     }
   }
+}
+
+function decodeOpenCodeObserved(
+  events: readonly Readonly<Record<string, unknown>>[],
+  priorSessionId: string | null,
+): { readonly sessionId: string | null; readonly finalText: string; readonly usage: AgentUsage | null } {
+  let sessionId = priorSessionId;
+  let finalText = '';
+  let usage: AgentUsage | null = null;
+  for (const event of events) {
+    if (typeof event['sessionID'] === 'string' && event['sessionID'].length > 0) sessionId = event['sessionID'];
+    const part = record(event['part']);
+    if (event['type'] === 'text' && part?.['type'] === 'text' && typeof part['text'] === 'string') {
+      finalText = part['text'];
+    }
+    if (event['type'] === 'step_finish' && part?.['type'] === 'step-finish') {
+      const candidate = record(part['tokens']);
+      if (candidate !== null) usage = decodeUsage(candidate) ?? usage;
+    }
+  }
+  return { sessionId, finalText, usage };
 }
 
 interface OpenCodeArgvInput {

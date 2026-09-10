@@ -16,6 +16,7 @@ import {
   type EngineObservedEvent,
   type EngineReadinessRecord,
 } from '../engine-dispatch-evidence';
+import { D569IntegrityStop } from '../d569-integrity';
 import {
   AgentAdapterError,
   agentProcessEvidence,
@@ -229,6 +230,10 @@ export class CodexAgentSessionAdapter extends ProcessAgentSessionAdapter {
       };
     }
     if (output.exitCode !== 0 && requiredEngineStartupFailed(output)) {
+      if (catalog?.status === 'inconclusive') {
+        throw new D569IntegrityStop('Required engine startup text conflicts with correlated catalog evidence.');
+      }
+      if (catalog?.status !== 'absent') completedOutput(output, sessionId !== null);
       return {
         exit: 'infrastructure_failed', resumeSessionId: observedResumeSessionId,
         sessionId: partial.sessionId, finalText: partial.finalText, usage: observedUsage, processEvidence,
@@ -428,7 +433,7 @@ function stagedInvocationIds(events: readonly EngineObservedEvent[]): readonly s
 
 function requiredEngineStartupFailed(output: AgentProcessOutput): boolean {
   const detail = `${output.stderr}\n${output.stdout}`;
-  return /required MCP server[^\n]*(?:failed|timed out)|MCP server[^\n]*engine[^\n]*(?:failed|timed out)|engine[^\n]*(?:initialization|startup)[^\n]*(?:failed|timed out)/iu.test(detail);
+  return /required MCP server[^\n]*\bengine\b[^\n]*(?:failed|timed out)|MCP server[^\n]*\bengine\b[^\n]*(?:failed|timed out)|\bengine\b[^\n]*(?:initialization|startup)[^\n]*(?:failed|timed out)/iu.test(detail);
 }
 
 async function codexCatalogEvidence(
@@ -446,15 +451,21 @@ async function codexCatalogEvidence(
   const dispatchId = engineDispatchId(launcher['dispatchId']);
   const readinessPath = launcher['readinessSpoolPath'];
   const readiness: EngineReadinessRecord[] = [];
+  let malformedReadiness = false;
   if (typeof readinessPath === 'string') {
     try {
       const source = await readFile(readinessPath, 'utf8');
       for (const line of source.split('\n')) {
         if (line.trim().length === 0) continue;
-        readiness.push(decodeEngineReadinessRecord(JSON.parse(line) as unknown));
+        try {
+          readiness.push(decodeEngineReadinessRecord(JSON.parse(line) as unknown));
+        } catch {
+          malformedReadiness = true;
+        }
       }
-    } catch {
-      // Missing or malformed readiness remains inconclusive; the classifier must not fabricate absence.
+    } catch (error) {
+      const code = typeof error === 'object' && error !== null && 'code' in error ? error.code : null;
+      if (code !== 'ENOENT') malformedReadiness = true;
     }
   }
   const profile = launcher['toolProfile'] === 'blind' ? 'blind' as const : 'dm' as const;
@@ -476,6 +487,7 @@ async function codexCatalogEvidence(
     readiness,
     completed: output.exitCode === 0 && !output.cancelled && !output.timedOut,
     requiredStartupFailed: output.exitCode !== 0 && requiredEngineStartupFailed(output),
+    malformedReadiness,
     corroboration: output.stderr.length === 0 ? [] : [output.stderr],
   });
 }

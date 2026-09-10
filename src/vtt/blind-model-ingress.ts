@@ -69,7 +69,8 @@ export type BlindIngressAudit =
       readonly status: 'incomplete';
       readonly passed: false;
       readonly forbiddenContentPassed: boolean;
-      readonly delivery: Exclude<TurnContextDelivery, { readonly status: 'delivered' }>;
+      /** Delivered evidence remains recorded when a forbidden-content violation requires persist-then-STOP. */
+      readonly delivery: TurnContextDelivery;
       readonly missingRequiredFields: readonly string[];
     };
 
@@ -242,7 +243,7 @@ export function auditBlindIngress(
     forbidden.length === 0 && missingRequiredFields.length === 0) {
     return { version: 2, status: 'complete', passed: true, forbiddenContentPassed: true, delivery };
   }
-  if (delivery.status === 'delivered') {
+  if (delivery.status === 'delivered' && forbidden.length === 0) {
     throw new TypeError('Delivered blind ingress is missing required evidence and cannot be finalized as complete.');
   }
   return {

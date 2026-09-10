@@ -39,4 +39,19 @@ describe('blind model ingress v2 finalization', () => {
     if (audit.version !== 2) throw new Error('Expected a v2 ingress audit.');
     expect(audit.forbiddenContentPassed).toBe(false);
   });
+
+  it('returns persistable violation evidence when delivered ingress contains forbidden content', () => {
+    const recorder = new BlindModelIngressRecorder();
+    recorder.record('startup', 'blind-turn-context-v1 creature_facts legal_movement engine default option');
+    const delivery = {
+      status: 'delivered', dispatchId, contextSha256: 'c'.repeat(64),
+      measurement: { baseBytes: 20, semanticBytes: 5 },
+    } as const;
+    expect(auditBlindIngress(recorder.records(), delivery, {
+      requiredText: ['creature_facts', 'legal_movement'],
+    })).toEqual({
+      version: 2, status: 'incomplete', passed: false, forbiddenContentPassed: false,
+      delivery, missingRequiredFields: [],
+    });
+  });
 });

@@ -1,5 +1,4 @@
 import { createInterface } from 'node:readline';
-import { once } from 'node:events';
 import { createHash } from 'node:crypto';
 import { appendFileSync, readFileSync } from 'node:fs';
 import { readFile, realpath } from 'node:fs/promises';
@@ -162,8 +161,12 @@ export function parseEngineMcpJsonLine(line: string): unknown {
 }
 
 async function writeJsonLine(value: unknown): Promise<void> {
-  if (process.stdout.write(`${JSON.stringify(value)}\n`)) return;
-  await once(process.stdout, 'drain');
+  await new Promise<void>((resolveWrite, rejectWrite) => {
+    process.stdout.write(`${JSON.stringify(value)}\n`, (error) => {
+      if (error === null || error === undefined) resolveWrite();
+      else rejectWrite(error);
+    });
+  });
 }
 
 export interface EngineMcpRuntime {
@@ -712,13 +715,23 @@ export async function runEngineMcpServer(
   const loaded = await loadArenaFixture(resolve(fixturePath));
   const state = directFixturePlanning ? freshMonsterPlanningState(loaded) : loaded;
   const runtime = createEngineMcpRuntime(state, options);
-  const handler = runtime.handler;
   const lines = createInterface({ input: process.stdin, crlfDelay: Number.POSITIVE_INFINITY });
+  await runEngineMcpLines(runtime, lines, options);
+}
+
+/** The request loop shared by real stdio and cheap in-process protocol regressions. */
+export async function runEngineMcpLines(
+  runtime: EngineMcpRuntime,
+  lines: AsyncIterable<string>,
+  options: Parameters<typeof createEngineMcpRuntime>[1] = {},
+  writeResponse: (value: unknown) => Promise<void> = writeJsonLine,
+): Promise<void> {
+  const handler = runtime.handler;
   for await (const line of lines) {
     if (line.trim().length === 0) continue;
     let decoded: unknown;
     try { decoded = parseEngineMcpJsonLine(line); }
-    catch { await writeJsonLine(jsonRpcParseError()); continue; }
+    catch { await writeResponse(jsonRpcParseError()); continue; }
     const response = handler.handle(decoded);
     const request = typeof decoded === 'object' && decoded !== null && !Array.isArray(decoded)
       ? decoded as Readonly<Record<string, unknown>>
@@ -727,7 +740,7 @@ export async function runEngineMcpServer(
       ? null
       : readinessRecord(options.readinessEvidence, request, response, runtime.toolSurface.tools);
     if (readiness !== null) appendFileSync(readiness.spoolPath, `${JSON.stringify(readiness.generated)}\n`, 'utf8');
-    if (response !== null) await writeJsonLine(response);
+    if (response !== null) await writeResponse(response);
     if (readiness !== null) {
       const completed: EngineReadinessRecord = {
         ...readiness.generated,
@@ -736,7 +749,7 @@ export async function runEngineMcpServer(
       };
       appendFileSync(readiness.spoolPath, `${JSON.stringify(completed)}\n`, 'utf8');
     }
-    for (const notification of handler.drainNotifications()) await writeJsonLine(notification);
+    for (const notification of handler.drainNotifications()) await writeResponse(notification);
   }
 }
 

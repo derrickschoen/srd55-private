@@ -121,7 +121,7 @@ export type TurnExhaustionOutcome =
   | { readonly kind: 'awaiting_dm_adjudication'; readonly actorId: CombatantId }
   | {
       readonly kind: 'refused';
-      readonly reason: 'host_authorization_failed' | 'correction_cancelled' | 'correction_timeout';
+      readonly reason: 'host_authorization_failed' | 'no_proposal' | 'resolver_rejected' | 'correction_cancelled' | 'correction_timeout';
       readonly attemptConsumed: true;
     }
   | { readonly kind: 'infrastructure_failed'; readonly component: 'engine_mcp_startup' };
@@ -245,6 +245,15 @@ export class TurnExhaustionCoordinator {
         correction: input.correction,
         host: input.host,
       });
+    }
+    if (input.authorizationFailurePolicy?.kind === 'refuse_blind') {
+      return {
+        kind: 'refused',
+        reason: input.initial.actorFailures.some((failure) => failure.fallbackResult !== 'absent')
+          ? 'resolver_rejected'
+          : 'no_proposal',
+        attemptConsumed: true,
+      };
     }
     return this.#correctAndResolve({
       ...input.initial,

@@ -729,6 +729,13 @@ export interface D569ObservedRow {
   readonly engineCatalogEvidence?: { readonly status: 'ready' | 'absent' | 'inconclusive' };
   readonly turnContextDelivery?: { readonly status: 'delivered' | 'not_requested' |
     'timeout_before_delivery' | 'infrastructure_absent' | 'indeterminate' };
+  readonly failingDispatch?: {
+    readonly dispatchId: string;
+    readonly exit: 'cancelled' | 'infrastructure_failed';
+    readonly engineCatalogEvidence: { readonly status: 'ready' | 'absent' | 'inconclusive' };
+    readonly turnContextDelivery: { readonly status: 'delivered' | 'not_requested' |
+      'timeout_before_delivery' | 'infrastructure_absent' | 'indeterminate' };
+  };
   readonly timeoutMs: number;
   readonly escalationModel: string | null;
   readonly modelDefaultFallback: boolean;
@@ -753,6 +760,7 @@ export function validateD569ObservedRows(
   const expected = new Map(cells.map((cell) => [key(cell), cell]));
   const seen = new Set<string>();
   const sessionIds = new Set<string>();
+  const dispatchIds = new Set<string>();
   const pairedVisualHashes = new Map<string, string>();
   for (const row of rows) {
     const rowKey = key(row);
@@ -775,14 +783,37 @@ export function validateD569ObservedRows(
     addViolation(violations, !integrityIndeterminate,
       'integrity_indeterminate', `row ${rowKey} has indeterminate integrity evidence`);
     addViolation(violations, diagnosedInfrastructure
-      ? row.sessionId === null && typeof row.scheduledCellKey === 'string' && row.scheduledCellKey.length > 0 &&
+      ? typeof row.scheduledCellKey === 'string' && row.scheduledCellKey.length > 0 &&
         typeof row.dispatchId === 'string' && row.dispatchId.length >= 16 &&
-        row.engineCatalogEvidence?.status === 'absent' &&
-        row.turnContextDelivery?.status === 'infrastructure_absent'
+        row.failingDispatch !== undefined && row.failingDispatch.dispatchId.length >= 16 &&
+        (row.failingDispatch.exit === 'cancelled'
+          ? row.failingDispatch.turnContextDelivery.status === 'not_requested'
+          : row.failingDispatch.engineCatalogEvidence.status === 'absent' &&
+            row.failingDispatch.turnContextDelivery.status === 'infrastructure_absent')
       : row.sessionId !== null && !sessionIds.has(row.sessionId),
     'fresh_session', diagnosedInfrastructure
       ? `row ${rowKey} lacks typed infrastructure identity/evidence`
       : `row ${rowKey} did not use a unique fresh session`);
+    for (const dispatchId of [
+      ...(row.dispatchId === undefined ? [] : [row.dispatchId]),
+      ...(row.failingDispatch === undefined || row.failingDispatch.dispatchId === row.dispatchId
+        ? [] : [row.failingDispatch.dispatchId]),
+    ]) {
+      addViolation(violations, !dispatchIds.has(dispatchId), 'dispatch_identity',
+        `row ${rowKey} reused dispatch identity ${dispatchId}`);
+      dispatchIds.add(dispatchId);
+    }
+    addViolation(violations, diagnosedInfrastructure || row.failingDispatch === undefined,
+      'failure_attribution', `row ${rowKey} identifies a failing dispatch without an infrastructure outcome`);
+    if (diagnosedInfrastructure && row.failingDispatch !== undefined && row.dispatchId !== undefined) {
+      const primaryFailure = row.failingDispatch.dispatchId === row.dispatchId;
+      addViolation(violations, !primaryFailure ||
+        row.engineCatalogEvidence?.status === row.failingDispatch.engineCatalogEvidence.status &&
+        row.turnContextDelivery?.status === row.failingDispatch.turnContextDelivery.status,
+      'failure_attribution', `row ${rowKey} primary and failing-dispatch evidence diverge`);
+    }
+    addViolation(violations, row.engineCatalogEvidence?.status !== 'absent' || diagnosedInfrastructure,
+      'failure_attribution', `row ${rowKey} reports engine absence without an infrastructure outcome`);
     if (row.sessionId !== null) sessionIds.add(row.sessionId);
     addViolation(violations, row.timeoutMs === cell.timeoutMs, 'timeout', `row ${rowKey} changed timeout`);
     addViolation(violations, row.escalationModel === null, 'escalation', `row ${rowKey} escalated`);

@@ -13,7 +13,14 @@ import {
 
 export const MAX_ADJUSTMENT_CORRECTIONS = 1 as const;
 
-export type AdjustmentCorrectionResult = 'accepted' | 'invalid' | 'no_response' | 'not_required';
+export type AdjustmentCorrectionResult =
+  | 'accepted'
+  | 'invalid'
+  | 'no_response'
+  | 'not_required'
+  | 'cancelled'
+  | 'timed_out'
+  | 'infrastructure_failed';
 
 export interface AdjustmentCompletion {
   readonly kind: 'adjusted' | 'baseline_kept';
@@ -219,10 +226,20 @@ export class AdjustmentExhaustionCoordinator {
             undefined,
             input.correction.turnContext,
           );
-      await input.correction.lifecycle.resumeCorrection({
+      const correctionTurn = await input.correction.lifecycle.resumeCorrection({
         ...input.correction.invocation,
         prompt,
       }, input.correction.signal);
+      if (correctionTurn.exit !== 'completed') {
+        const outcome = completion({
+          initial: input.initial,
+          staged: correctionTurn.exit === 'infrastructure_failed' ? [] : staged,
+          corrected: [],
+          correctionResult: correctionTurn.exit,
+        });
+        this.persistence.record({ kind: 'adjustment_completed', requestId: outcome.requestId, outcome });
+        return outcome;
+      }
     }
 
     const proposal = input.correction.takeProposal();

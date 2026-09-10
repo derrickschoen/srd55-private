@@ -5,8 +5,11 @@ import {
   agentProcessEvidence,
   completedOutput,
   jsonEventLines,
+  observedInvocationIds,
+  processEventInvocationId,
   ProcessAgentSessionAdapter,
   record,
+  tolerantObservedJsonEvents,
   type AgentAdapterOptions,
   type AgentProcessSpec,
 } from './process';
@@ -113,21 +116,38 @@ export class ClaudeCodeAgentSessionAdapter extends ProcessAgentSessionAdapter {
       signal,
       invocation.timeoutMs,
     );
-    const processEvidence = agentProcessEvidence(output);
+    const observedEvents = tolerantObservedJsonEvents(output);
+    const processEvidence = agentProcessEvidence(output, observedEvents.map((entry) => ({
+      invocationId: processEventInvocationId(entry.event),
+      kind: typeof entry.event['type'] === 'string' ? entry.event['type'] : 'unknown',
+      observedAtUnixMs: entry.observedAtUnixMs,
+    })));
+    const partial = decodeClaudeCodeObserved(observedEvents.map((entry) => entry.event), sessionId);
+    const partialResumeSessionId = partial.sessionId === null
+      ? null
+      : agentSessionIdFromCli(partial.sessionId);
     completedOutput(output, sessionId !== null);
     if (output.timedOut) {
       return {
-        resumeSessionId: sessionId === null ? null : agentSessionIdFromCli(sessionId), sessionId: null,
-        finalText: output.stdout, usage: null, exit: 'timed_out', timeoutMs: invocation.timeoutMs ?? 1,
+        resumeSessionId: partialResumeSessionId, sessionId: null,
+        finalText: partial.finalText, usage: partial.usage, exit: 'timed_out', timeoutMs: invocation.timeoutMs ?? 1,
         processEvidence, engineCatalogEvidence: null,
-        partialResultEvidence: { status: 'partial', decodedEventCount: 0, finalTextFragment: output.stdout, observedUsage: null, stagedInvocationIds: [] },
+        partialResultEvidence: {
+          status: 'partial', decodedEventCount: observedEvents.length,
+          finalTextFragment: partial.finalText, observedUsage: partial.usage,
+          stagedInvocationIds: observedInvocationIds(observedEvents),
+        },
       };
     }
     if (output.cancelled) return {
-      resumeSessionId: sessionId === null ? null : agentSessionIdFromCli(sessionId), sessionId: null,
-      finalText: output.stdout, usage: null, exit: 'cancelled', cancellationReason: String(signal.reason ?? 'abort_signal'),
+      resumeSessionId: partialResumeSessionId, sessionId: null,
+      finalText: partial.finalText, usage: partial.usage, exit: 'cancelled', cancellationReason: String(signal.reason ?? 'abort_signal'),
       processEvidence, engineCatalogEvidence: null,
-      partialResultEvidence: { status: 'partial', decodedEventCount: 0, finalTextFragment: output.stdout, observedUsage: null, stagedInvocationIds: [] },
+      partialResultEvidence: {
+        status: 'partial', decodedEventCount: observedEvents.length,
+        finalTextFragment: partial.finalText, observedUsage: partial.usage,
+        stagedInvocationIds: observedInvocationIds(observedEvents),
+      },
     };
     const decoded = decodeClaudeCodeTurn(
       output.stdout,
@@ -152,6 +172,34 @@ export class ClaudeCodeAgentSessionAdapter extends ProcessAgentSessionAdapter {
       partialResultEvidence: { status: 'complete', decodedEventCount: output.stdoutLines.length },
     };
   }
+}
+
+function decodeClaudeCodeObserved(
+  events: readonly Readonly<Record<string, unknown>>[],
+  priorSessionId: string | null,
+): { readonly sessionId: string | null; readonly finalText: string; readonly usage: AgentUsage | null } {
+  let sessionId = priorSessionId;
+  let finalText = '';
+  let usage: AgentUsage | null = null;
+  for (const event of events) {
+    if (typeof event['session_id'] === 'string' && event['session_id'].length > 0) {
+      sessionId = event['session_id'];
+    }
+    if (event['type'] === 'result' && typeof event['result'] === 'string') finalText = event['result'];
+    const message = record(event['message']);
+    const content = message?.['content'];
+    if (Array.isArray(content)) {
+      const fragments = content.flatMap((part) => {
+        const candidate = record(part);
+        return candidate?.['type'] === 'text' && typeof candidate['text'] === 'string'
+          ? [candidate['text']] : [];
+      });
+      if (fragments.length > 0) finalText = fragments.join('');
+    }
+    const candidate = record(event['usage']);
+    if (candidate !== null) usage = decodeUsage(candidate) ?? usage;
+  }
+  return { sessionId, finalText, usage };
 }
 
 interface ClaudeArgvInput {

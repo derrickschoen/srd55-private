@@ -421,6 +421,7 @@ describe('arena capture lifecycle and off-arm invariance', () => {
       '--initiative-profile', 'derived_v1', '--renderer-profile', JSON.stringify(profile),
     ]));
     if (row === undefined) throw new TypeError('Semantic-board arena omitted its row.');
+    if (row.rawTurnContext === null) throw new Error('Semantic-board row omitted delivered context.');
     const context = record(JSON.parse(row.rawTurnContext) as unknown, 'semantic-board context');
     const board = record(context['semantic_board'], 'semantic-board block');
     const base = structuredClone(context) as Record<string, unknown>;
@@ -460,6 +461,7 @@ describe('arena capture lifecycle and off-arm invariance', () => {
       row.boardImageEvidence.capturedAtUnixMs <= row.boardImageEvidence.primaryDispatchStartedAtUnixMs)).toBe(true);
     for (const row of result.rows) {
       if (row.boardImage.mode === 'off') throw new Error('Capturing lifecycle row lost its board image.');
+      if (row.rawTurnContext === null) throw new Error('Capturing lifecycle row omitted delivered context.');
       expect(row.rawTurnContext).not.toContain(row.boardImage.sha256);
       expect(row.rawTurnContext).not.toContain(row.boardImage.relativePath);
       expect(JSON.stringify(row.rlData ?? null)).not.toContain(row.boardImage.sha256);
@@ -540,7 +542,7 @@ describe('arena capture lifecycle and off-arm invariance', () => {
     }
 
     const raw = offResult[0]?.rawTurnContext;
-    if (raw === undefined) throw new TypeError('Semantic-board-off row omitted rawTurnContext.');
+    if (raw === undefined || raw === null) throw new TypeError('Semantic-board-off row omitted rawTurnContext.');
     expect(Buffer.byteLength(raw)).toBe(31_995);
     expect(createHash('sha256').update(raw).digest('hex')).toBe(E1C_RAW_CONTEXT_SHA256);
   });
@@ -656,7 +658,7 @@ describe('arena capture lifecycle and off-arm invariance', () => {
     expect(JSON.stringify(captureOnlyMcp.content)).not.toContain('image/png');
 
     const raw = offResult[0]?.rawTurnContext;
-    if (raw === undefined) throw new TypeError('Off-arm row omitted rawTurnContext.');
+    if (raw === undefined || raw === null) throw new TypeError('Off-arm row omitted rawTurnContext.');
     expect(Buffer.byteLength(raw)).toBe(31_995);
     const rawRecord = record(JSON.parse(raw) as unknown, 'off raw context');
     expect(record(rawRecord['actor_knowledge'], 'off actor knowledge')['policy'])

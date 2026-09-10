@@ -236,6 +236,36 @@ describe('host turn exhaustion coordinator', () => {
       .not.toContain('proposal_correction_requested');
   });
 
+  it('does not label a missing proposal as host authorization failure under blind policy', async () => {
+    const f = fixture();
+    const adapter = new SIMULATEDAgentSessionAdapter({ startIds: [] });
+    const coordinator = new TurnExhaustionCoordinator(f.journal.turnExhaustionPersistence());
+
+    await expect(coordinator.coordinate({
+      initial: exhausted(f, 'absent'),
+      correction: runtime(f, adapter, [], { value: 0 }),
+      host: host(),
+      authorizationFailurePolicy: { kind: 'refuse_blind' },
+    })).resolves.toEqual({ kind: 'refused', reason: 'no_proposal', attemptConsumed: true });
+
+    expect(adapter.resumeInvocations).toHaveLength(0);
+  });
+
+  it('retains resolver-rejection attribution without claiming host authorization ran', async () => {
+    const f = fixture();
+    const adapter = new SIMULATEDAgentSessionAdapter({ startIds: [] });
+    const coordinator = new TurnExhaustionCoordinator(f.journal.turnExhaustionPersistence());
+
+    await expect(coordinator.coordinate({
+      initial: exhausted(f, 'invalid'),
+      correction: runtime(f, adapter, [], { value: 0 }),
+      host: host(),
+      authorizationFailurePolicy: { kind: 'refuse_blind' },
+    })).resolves.toEqual({ kind: 'refused', reason: 'resolver_rejected', attemptConsumed: true });
+
+    expect(adapter.resumeInvocations).toHaveLength(0);
+  });
+
   it('dispatches exactly one proposal correction and accepts its complete proposal', async () => {
     const f = fixture();
     const queued: RoundTurnProposalEnvelope[] = [];

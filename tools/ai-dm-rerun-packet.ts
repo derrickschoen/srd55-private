@@ -340,6 +340,23 @@ const arenaRowV3BaseSchema = postShiftCommonArenaRowSchema.extend({
     z.object({ status: z.literal('unavailable'), errorClass: z.string().min(1) }).strict(),
     z.null(),
   ]),
+  baseContextBytes: safeIntegerSchema.min(0).nullable(),
+  semanticBoardBytes: safeIntegerSchema.min(0).nullable(),
+  rawTurnContext: z.string().nullable(),
+  preTrimBytes: safeIntegerSchema.min(0).nullable(),
+  postTrimBytes: safeIntegerSchema.min(0).nullable(),
+  turnContextGranularity: z.enum(['full', 'turn_delta']).nullable(),
+  optionsOmittedForSize: safeIntegerSchema.min(0),
+  optionsOmittedForSizeByActor: z.array(z.unknown()),
+  roundTotals: z.object({ contextBytes: safeIntegerSchema.min(0) }).passthrough(),
+  failingDispatch: z.object({
+    phase: z.enum(['primary', 'correction', 'adjustment', 'speculative', 'speculation_recalculation']),
+    exit: z.enum(['cancelled', 'infrastructure_failed']),
+    dispatchId: z.string().min(16),
+    engineCatalogEvidence: catalogEvidenceSchema,
+    turnContextDelivery: turnContextDeliverySchema,
+    failureReason: z.string(),
+  }).strict().optional(),
   blindIngressAudit: z.union([
     z.object({
       version: z.literal('blind-model-ingress-v1'), stringCount: safeIntegerSchema.min(1),
@@ -354,11 +371,7 @@ const arenaRowV3BaseSchema = postShiftCommonArenaRowSchema.extend({
       version: z.literal(2), status: z.literal('incomplete'), passed: z.literal(false),
       forbiddenContentPassed: z.boolean(), delivery: turnContextDeliverySchema,
       missingRequiredFields: z.array(z.string()),
-    }).strict().superRefine((audit, context) => {
-      if (audit.delivery.status === 'delivered') {
-        context.addIssue({ code: 'custom', path: ['delivery'], message: 'incomplete audit requires incomplete delivery' });
-      }
-    }),
+    }).strict(),
   ]).optional(),
 });
 const mcpMinimalArenaRowV3Schema = arenaRowV3BaseSchema.extend({ decisionTransport: z.literal('mcp_minimal') }).passthrough();
@@ -377,15 +390,68 @@ const arenaRowV3Schema = z.discriminatedUnion('decisionTransport', [
     context.addIssue({ code: 'custom', path: ['blindIngressAudit'], message: 'is required on a blind v3 row' });
   }
   if (row.blindIngressAudit?.version === 2 &&
-    row.blindIngressAudit.delivery.status !== row.turnContextDelivery.status) {
+    (row.blindIngressAudit.delivery.status !== row.turnContextDelivery.status ||
+      row.blindIngressAudit.delivery.dispatchId !== row.turnContextDelivery.dispatchId)) {
     context.addIssue({ code: 'custom', path: ['blindIngressAudit', 'delivery'], message: 'must match row delivery' });
   }
-  if (row.outcome === 'integrity_indeterminate') {
-    context.addIssue({ code: 'custom', path: ['outcome'], message: 'cannot become a rerun packet' });
+  if (row.outcome === 'integrity_indeterminate' || row.engineCatalogEvidence.status === 'inconclusive' ||
+    row.turnContextDelivery.status === 'indeterminate') {
+    context.addIssue({
+      code: 'custom', path: ['outcome'],
+      message: 'inconclusive or indeterminate integrity evidence cannot become a rerun packet',
+    });
   }
-  if (row.outcome === 'infrastructure_failed' &&
-    (row.engineCatalogEvidence.status !== 'absent' || row.turnContextDelivery.status !== 'infrastructure_absent')) {
-    context.addIssue({ code: 'custom', path: ['outcome'], message: 'requires diagnosed absent infrastructure evidence' });
+  if (row.blindIngressAudit?.version === 2 && !row.blindIngressAudit.forbiddenContentPassed) {
+    context.addIssue({ code: 'custom', path: ['blindIngressAudit'], message: 'forbidden-content failure cannot become a rerun packet' });
+  }
+  if (row.blindIngressAudit?.version === 2 && row.blindIngressAudit.status === 'incomplete' &&
+    row.blindIngressAudit.delivery.status === 'delivered' && row.blindIngressAudit.forbiddenContentPassed) {
+    context.addIssue({ code: 'custom', path: ['blindIngressAudit'], message: 'incomplete delivered audit requires a forbidden-content violation' });
+  }
+  const delivered = row.turnContextDelivery.status === 'delivered';
+  if (delivered !== (row.rawTurnContext !== null && row.baseContextBytes !== null &&
+    row.semanticBoardBytes !== null && row.preTrimBytes !== null && row.postTrimBytes !== null &&
+    row.turnContextGranularity !== null) || !delivered && (row.roundTotals.contextBytes !== 0 ||
+      row.optionsOmittedForSize !== 0 || row.optionsOmittedForSizeByActor.length !== 0)) {
+    context.addIssue({ code: 'custom', path: ['turnContextDelivery'], message: 'delivered telemetry must derive exclusively from delivered evidence' });
+  }
+  if ((row.engineCatalogEvidence.status === 'absent') !==
+    (row.turnContextDelivery.status === 'infrastructure_absent')) {
+    context.addIssue({ code: 'custom', path: ['turnContextDelivery'], message: 'absent catalog and delivery evidence must agree' });
+  }
+  if (row.turnContextDelivery.status === 'not_requested' &&
+    row.turnContextDelivery.reason === 'dispatch_cancelled' && row.outcome !== 'infrastructure_failed') {
+    context.addIssue({ code: 'custom', path: ['outcome'], message: 'dispatch cancellation must remain infrastructure' });
+  }
+  if (row.outcome === 'infrastructure_failed') {
+    const failure = row.failingDispatch;
+    if (failure === undefined || failure.dispatchId !== failure.engineCatalogEvidence.dispatchId ||
+      failure.dispatchId !== failure.turnContextDelivery.dispatchId ||
+      failure.exit === 'cancelled' && (failure.turnContextDelivery.status !== 'not_requested' ||
+        failure.turnContextDelivery.reason !== 'dispatch_cancelled') ||
+      failure.exit === 'infrastructure_failed' && (failure.engineCatalogEvidence.status !== 'absent' ||
+        failure.turnContextDelivery.status !== 'infrastructure_absent')) {
+      context.addIssue({ code: 'custom', path: ['failingDispatch'], message: 'must identify the correlated failing dispatch' });
+    } else if (failure.phase === 'primary' && (failure.dispatchId !== row.dispatchId ||
+      canonicalJson(failure.engineCatalogEvidence) !== canonicalJson(row.engineCatalogEvidence) ||
+      canonicalJson(failure.turnContextDelivery) !== canonicalJson(row.turnContextDelivery))) {
+      context.addIssue({ code: 'custom', path: ['failingDispatch'], message: 'primary failure must match primary dispatch evidence' });
+    } else if (failure.phase !== 'primary' && failure.dispatchId === row.dispatchId) {
+      context.addIssue({ code: 'custom', path: ['failingDispatch'], message: 'later failure must use a distinct dispatch identity' });
+    } else if (failure.exit === 'cancelled' && row['fallbackReason'] !== 'dispatch_cancelled') {
+      context.addIssue({ code: 'custom', path: ['fallbackReason'], message: 'cancelled dispatch requires dispatch_cancelled attribution' });
+    }
+  } else if (row.failingDispatch !== undefined) {
+    context.addIssue({ code: 'custom', path: ['failingDispatch'], message: 'is only valid for an infrastructure outcome' });
+  }
+  if (row.outcome === 'authorized' &&
+    (row.engineCatalogEvidence.status !== 'ready' || row.turnContextDelivery.status !== 'delivered')) {
+    context.addIssue({ code: 'custom', path: ['outcome'], message: 'authorized outcome requires ready delivered primary evidence' });
+  }
+  if (row.outcome === 'service_null' &&
+    (row.engineCatalogEvidence.status !== 'ready' || row.turnContextDelivery.status !== 'not_requested' ||
+      row.turnContextDelivery.reason !== 'catalog_ready_model_did_not_fetch')) {
+    context.addIssue({ code: 'custom', path: ['outcome'], message: 'service-null outcome requires ready not-requested evidence' });
   }
 });
 

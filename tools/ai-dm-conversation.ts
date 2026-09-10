@@ -492,6 +492,7 @@ interface SpeculativeDispatchCompletion {
   readonly planningWallMs: number;
   readonly timedOut: boolean;
   readonly error: string | null;
+  readonly failingDispatch: NonNullable<ConversationRowBase['failingDispatch']> | null;
 }
 
 interface InFlightSpeculation {
@@ -535,8 +536,10 @@ export type ConversationFallbackReason =
   | 'auto_submit_blocked'
   | 'timeout'
   | 'host_authorization_failed'
+  | 'resolver_rejected'
   | 'correction_cancelled'
-  | 'correction_timeout';
+  | 'correction_timeout'
+  | 'dispatch_cancelled';
 
 export type ConversationTerminalOutcome = {
   readonly kind: 'encounter_over';
@@ -660,6 +663,14 @@ interface ConversationRowBase {
   readonly turnContextDelivery?: TurnContextDelivery;
   readonly turnContextConfiguredCaps?: TurnContextConfiguredCaps;
   readonly hostContextDiagnostic?: HostContextDiagnostic;
+  readonly failingDispatch?: {
+    readonly phase: 'primary' | 'correction' | 'adjustment' | 'speculative' | 'speculation_recalculation';
+    readonly exit: 'cancelled' | 'infrastructure_failed';
+    readonly dispatchId: string;
+    readonly engineCatalogEvidence: EngineCatalogEvidence;
+    readonly turnContextDelivery: TurnContextDelivery;
+    readonly failureReason: string;
+  };
   readonly knowledgeModel: 'engine_state';
   readonly hiddenOptions: readonly HiddenOptionRecord[];
   readonly intelMode: IntelMode;
@@ -669,8 +680,8 @@ interface ConversationRowBase {
     readonly policyVersion: typeof RENDERER_POLICY_VERSION;
     readonly profile: RendererProfile;
   };
-  readonly baseContextBytes: number;
-  readonly semanticBoardBytes: number;
+  readonly baseContextBytes: number | null;
+  readonly semanticBoardBytes: number | null;
   readonly semanticBoardTruncated: readonly SemanticBoardTruncationClass[];
   readonly circumstanceFeatures: CircumstanceFeatureVector;
   readonly combatModel: CombatModel;
@@ -696,13 +707,13 @@ interface ConversationRowBase {
   readonly skillHash: string | null;
   readonly kbReads: readonly KbReadRecord[];
   readonly repoCommit: string;
-  readonly rawTurnContext: string;
+  readonly rawTurnContext: string | null;
   readonly turnContextMaximumBytes: number;
-  readonly preTrimBytes: number;
-  readonly postTrimBytes: number;
+  readonly preTrimBytes: number | null;
+  readonly postTrimBytes: number | null;
   readonly optionsOmittedForSize: number;
   readonly optionsOmittedForSizeByActor: readonly TurnContextSizeOmission[];
-  readonly turnContextGranularity: 'full' | 'turn_delta';
+  readonly turnContextGranularity: 'full' | 'turn_delta' | null;
   readonly snippetHash: string;
   readonly snippetSetHash: string;
   readonly suggestedPlay: ConversationSuggestedPlay | null;
@@ -849,11 +860,17 @@ export interface ConversationRunOptions {
   readonly onPrimaryDispatchStart?: () => void;
   /** Test evidence seam for exact model-facing primary invocation bytes. */
   readonly onPrimaryInvocation?: (invocation: AgentInvocation) => void;
+  /** Test evidence seam for the immutable invocation emitted at every runner phase. */
+  readonly onAgentInvocation?: (invocation: AgentInvocation) => void;
   readonly onSpeculationDispatchStart?: () => void;
   /** Test-only lower pacing cap; production derives 60 seconds per eligible PC, capped at five minutes. */
   readonly speculationBudgetMs?: number;
   /** SIMULATED-only delay injected before speculative dispatch. */
   readonly speculationDispatchDelayMs?: number;
+  /** Test-only delay for deterministic in-process SIMULATED dispatches; omitted keeps real MCP children. */
+  readonly simulatedInProcessDispatchDelayMs?: number;
+  /** Test-only seam that deterministically exercises the post-speculation recalculation transition. */
+  readonly forceSpeculationRecalculationForTest?: boolean;
   /** SIMULATED-only immutable state replacement immediately before speculative boundary validation. */
   readonly mutateBeforeSpeculationBoundary?: (state: EncounterState) => EncounterState;
   /** Test-only immutable state replacement immediately before adjustment legality preflight. */
@@ -873,6 +890,16 @@ export interface ConversationRunOptions {
   readonly invalidInitial?: readonly string[];
   /** SIMULATED-only cancelled initial dispatches, encoded as `room-N-round-N`. */
   readonly timeoutInitial?: readonly string[];
+  /** SIMULATED-only adjustment dispatch that stages evidence before timing out. */
+  readonly stagedAdjustmentTimeout?: readonly string[];
+  /** SIMULATED-only adjustment correction that stages evidence before timing out. */
+  readonly stagedAdjustmentCorrectionTimeout?: readonly string[];
+  /** SIMULATED-only speculative dispatch that stages evidence before timing out. */
+  readonly stagedSpeculationTimeout?: boolean;
+  /** SIMULATED-only recalculation dispatch that stages evidence before engine startup failure. */
+  readonly failSpeculationRecalculation?: boolean;
+  /** Test-only forensic ingress appended immediately before the final blind audit. */
+  readonly blindIngressAuditProbeText?: string;
   readonly failCorrection?: readonly string[];
   /** SIMULATED-only count of consecutive service-null primary turns by request key. */
   readonly flapPrimaryByRequest?: Readonly<Record<string, number>>;
@@ -2338,43 +2365,70 @@ async function driveScriptedMcp(
   adjustmentResponse: 'keep' | 'change' | 'invalid',
   signal?: AbortSignal,
   speculativeDelayMs = 0,
+  inProcessToolSession?: AgentToolSession,
 ): Promise<{
   readonly calls: number;
   readonly rejections: readonly ConversationChainAttemptEvidence[];
   readonly contextTruncated: boolean;
 }> {
   const manifest = JSON.parse(await readFile(launcherPath, 'utf8')) as EngineMcpLauncherManifest;
-  const state = await loadArenaFixture(manifest.fixturePath);
-  const client = startMcpClient(cwd, launcherPath);
-  const abortClient = (): void => { client.child.kill('SIGTERM'); };
-  if (signal?.aborted === true) abortClient();
-  else signal?.addEventListener('abort', abortClient, { once: true });
+  const state = inProcessToolSession !== undefined &&
+    'simulatedEncounterState' in inProcessToolSession
+    ? structuredClone(inProcessToolSession.simulatedEncounterState as EncounterState)
+    : await loadArenaFixture(manifest.fixturePath);
+  const client = inProcessToolSession === undefined ? startMcpClient(cwd, launcherPath) : null;
+  const abortClient = (): void => { client?.child.kill('SIGTERM'); };
+  if (client !== null && signal?.aborted === true) abortClient();
+  else if (client !== null) signal?.addEventListener('abort', abortClient, { once: true });
+  const requestMcp = (method: string, params: unknown): Promise<unknown> => {
+    if (client !== null) return mcpRequest(client, method, params);
+    if (inProcessToolSession === undefined) throw new Error('In-process MCP dispatch omitted its tool session.');
+    if (method === 'server/discover') return Promise.resolve({});
+    if (method === 'tools/list') return Promise.resolve({ tools: inProcessToolSession.tools });
+    if (method === 'resources/read' && manifest.phase === 'speculative') {
+      const stateRef = 'stateRef' in inProcessToolSession
+        ? asRecord(inProcessToolSession.stateRef)
+        : null;
+      if (stateRef === null) throw new Error('In-process speculative dispatch omitted its state_ref.');
+      return Promise.resolve({ contents: [{ text: JSON.stringify({ state_ref: stateRef }) }] });
+    }
+    if (method === 'tools/call') {
+      const call = requiredRecord(params, 'in-process tools/call parameters');
+      const name = call['name'];
+      if (typeof name !== 'string') throw new TypeError('In-process tools/call omitted its name.');
+      return Promise.resolve({
+        isError: false,
+        structuredContent: inProcessToolSession.execute(name, call['arguments']),
+      });
+    }
+    throw new Error(`In-process SIMULATED MCP does not implement ${method}.`);
+  };
   let calls = 0;
   try {
-    await mcpRequest(client, 'server/discover', {});
-    const listedTools = asRecord(await mcpRequest(client, 'tools/list', {}))?.['tools'];
+    await requestMcp('server/discover', {});
+    const listedTools = asRecord(await requestMcp('tools/list', {}))?.['tools'];
     if (manifest.kbReadSpoolPath !== undefined &&
       (!Array.isArray(listedTools) || !listedTools.some((tool) =>
         asRecord(tool)?.['name'] === 'engine.read_kb_subject'))) {
       throw new Error('Launcher-owned KB subject tool is not advertised.');
     }
     if (manifest.dmMode === 'blind') {
-      const resources = asRecord(await mcpRequest(client, 'resources/list', {}));
-      await mcpRequest(client, 'resources/templates/list', {});
-      const prompts = asRecord(await mcpRequest(client, 'prompts/list', {}));
+      const resources = asRecord(await requestMcp('resources/list', {}));
+      await requestMcp('resources/templates/list', {});
+      const prompts = asRecord(await requestMcp('prompts/list', {}));
       for (const resource of Array.isArray(resources?.['resources']) ? resources['resources'] : []) {
         const uri = asRecord(resource)?.['uri'];
-        if (typeof uri === 'string') await mcpRequest(client, 'resources/read', { uri });
+        if (typeof uri === 'string') await requestMcp('resources/read', { uri });
       }
       for (const prompt of Array.isArray(prompts?.['prompts']) ? prompts['prompts'] : []) {
         const name = asRecord(prompt)?.['name'];
         if (name === 'engine.plan_blind_round') {
-          await mcpRequest(client, 'prompts/get', {
+          await requestMcp('prompts/get', {
             name,
             arguments: { run_id: manifest.runId, expected_revision: manifest.revision },
           });
         } else if (name === 'engine.repair_blind_intents' && manifest.phase === 'correction') {
-          await mcpRequest(client, 'prompts/get', {
+          await requestMcp('prompts/get', {
             name,
             arguments: {
               run_id: manifest.runId,
@@ -2392,7 +2446,7 @@ async function driveScriptedMcp(
       if (speculative === undefined || actors === undefined) {
         throw new Error('SIMULATED speculative launcher omitted its bounded request.');
       }
-      const resource = asRecord(await mcpRequest(client, 'resources/read', {
+      const resource = asRecord(await requestMcp('resources/read', {
         uri: `engine://run/${encodeURIComponent(manifest.runId)}/revision/${String(manifest.revision)}/turn`,
       }));
       const contents = resource?.['contents'];
@@ -2404,7 +2458,7 @@ async function driveScriptedMcp(
       if (stateRef === null) throw new Error('Speculative revision resource omitted state_ref.');
       const proposals = actors.map((actorId) =>
         externalProposal(engineDefaultPlanEntry(state, actorId, manifest.revision).proposal));
-      const result = asRecord(await mcpRequest(client, 'tools/call', {
+      const result = asRecord(await requestMcp('tools/call', {
         name: 'engine.submit_speculative_round_plan',
         arguments: {
           state_ref: stateRef,
@@ -2425,7 +2479,7 @@ async function driveScriptedMcp(
       }
       return { calls, rejections: rejectionEvidence(result), contextTruncated: false };
     }
-    const contextResult = asRecord(await mcpRequest(client, 'tools/call', {
+    const contextResult = asRecord(await requestMcp('tools/call', {
       name: 'engine.get_turn_context',
       arguments: profiledTurnContextArguments({
         runId: manifest.runId,
@@ -2490,7 +2544,7 @@ async function driveScriptedMcp(
       }, envelope] : [envelope];
       let finalResult: Readonly<Record<string, unknown>> | null = null;
       for (const attempted of attempts.slice(0, manifest.blindMaxAttempts ?? BLIND_MAX_ATTEMPTS_DEFAULT)) {
-        const result = asRecord(await mcpRequest(client, 'tools/call', {
+        const result = asRecord(await requestMcp('tools/call', {
           name: 'engine.submit_blind_round_intents',
           arguments: attempted,
         }));
@@ -2534,7 +2588,7 @@ async function driveScriptedMcp(
                 } : {}),
               })];
             })();
-      const submitResult = asRecord(await mcpRequest(client, 'tools/call', {
+      const submitResult = asRecord(await requestMcp('tools/call', {
         name: 'engine.submit_plan_adjustment',
         arguments: {
           state_ref: stateRef,
@@ -2569,7 +2623,7 @@ async function driveScriptedMcp(
       const firstPlay = Array.isArray(advertised) ? asRecord(advertised[0]) : null;
       const playName = firstPlay?.['name'];
       if (typeof playName === 'string') {
-        const expansionResult = asRecord(await mcpRequest(client, 'tools/call', {
+        const expansionResult = asRecord(await requestMcp('tools/call', {
           name: 'engine.propose_from_play',
           arguments: { play_name: playName },
         }));
@@ -2614,7 +2668,7 @@ async function driveScriptedMcp(
       primary_option_id: 'SIMULATED-unavailable-option',
       fallback_option_id: manifest.phase === 'correction' ? null : 'SIMULATED-unavailable-fallback',
     })) : responseProposals;
-    const submitResult = asRecord(await mcpRequest(client, 'tools/call', {
+    const submitResult = asRecord(await requestMcp('tools/call', {
       name: 'engine.submit_round_proposals',
       arguments: {
         proposals: submittedProposals,
@@ -2627,7 +2681,7 @@ async function driveScriptedMcp(
     }
     const submitted = asRecord(submitResult['structuredContent']);
     if (manifest.boardImage !== undefined && submitted?.['status'] === 'proposed') {
-      const feedbackResult = asRecord(await mcpRequest(client, 'tools/call', {
+      const feedbackResult = asRecord(await requestMcp('tools/call', {
         name: 'engine.submit_ui_feedback',
         arguments: {
           readability: 4,
@@ -2649,8 +2703,10 @@ async function driveScriptedMcp(
       contextTruncated: eventContextTrimmed(contextResult),
     };
   } finally {
-    signal?.removeEventListener('abort', abortClient);
-    await stopMcpClient(client, signal?.aborted === true);
+    if (client !== null) {
+      signal?.removeEventListener('abort', abortClient);
+      await stopMcpClient(client, signal?.aborted === true);
+    }
   }
 }
 
@@ -2663,12 +2719,17 @@ class SimulatedConversationAdapter implements AgentSessionAdapter {
   readonly #exhaustInitial: ReadonlySet<string>;
   readonly #invalidInitial: ReadonlySet<string>;
   readonly #timeoutInitial: ReadonlySet<string>;
+  readonly #stagedAdjustmentTimeout: ReadonlySet<string>;
+  readonly #stagedAdjustmentCorrectionTimeout: ReadonlySet<string>;
+  readonly #stagedSpeculationTimeout: boolean;
+  readonly #failSpeculationRecalculation: boolean;
   readonly #failCorrection: ReadonlySet<string>;
   readonly #remainingPrimaryFlaps: Map<string, number>;
   readonly #reactionGuidanceByRequest: Readonly<Record<string, ReactionGuidanceDeclaration>>;
   readonly #suggestionResponseByRequest: Readonly<Record<string, ConversationSuggestionAdoption>>;
   readonly #adjustmentResponseByRequest: Readonly<Record<string, 'keep' | 'change' | 'invalid'>>;
   readonly #speculativeDelayMs: number;
+  readonly #inProcessDispatchDelayMs: number | null;
   #starts = 0;
 
   constructor(
@@ -2678,23 +2739,33 @@ class SimulatedConversationAdapter implements AgentSessionAdapter {
     exhaust: readonly string[],
     invalid: readonly string[],
     timeout: readonly string[],
+    stagedAdjustmentTimeout: readonly string[],
+    stagedAdjustmentCorrectionTimeout: readonly string[],
+    stagedSpeculationTimeout: boolean,
+    failSpeculationRecalculation: boolean,
     fail: readonly string[],
     primaryFlaps: Readonly<Record<string, number>>,
     reactionGuidanceByRequest: Readonly<Record<string, ReactionGuidanceDeclaration>>,
     suggestionResponseByRequest: Readonly<Record<string, ConversationSuggestionAdoption>>,
     adjustmentResponseByRequest: Readonly<Record<string, 'keep' | 'change' | 'invalid'>>,
     speculativeDelayMs: number,
+    inProcessDispatchDelayMs: number | null,
   ) {
     this.kind = kind;
     this.#exhaustInitial = new Set(exhaust);
     this.#invalidInitial = new Set(invalid);
     this.#timeoutInitial = new Set(timeout);
+    this.#stagedAdjustmentTimeout = new Set(stagedAdjustmentTimeout);
+    this.#stagedAdjustmentCorrectionTimeout = new Set(stagedAdjustmentCorrectionTimeout);
+    this.#stagedSpeculationTimeout = stagedSpeculationTimeout;
+    this.#failSpeculationRecalculation = failSpeculationRecalculation;
     this.#failCorrection = new Set(fail);
     this.#remainingPrimaryFlaps = new Map(Object.entries(primaryFlaps));
     this.#reactionGuidanceByRequest = reactionGuidanceByRequest;
     this.#suggestionResponseByRequest = suggestionResponseByRequest;
     this.#adjustmentResponseByRequest = adjustmentResponseByRequest;
     this.#speculativeDelayMs = speculativeDelayMs;
+    this.#inProcessDispatchDelayMs = inProcessDispatchDelayMs;
   }
 
   async probe() { return { present: true, version: 'SIMULATED' }; }
@@ -2730,8 +2801,43 @@ class SimulatedConversationAdapter implements AgentSessionAdapter {
   ): Promise<AgentTurnResult> {
     const manifest = JSON.parse(await readFile(invocation.launcherToken, 'utf8')) as EngineMcpLauncherManifest;
     const key = manifest.requestId.replace(/^request:/u, '');
+    if (invocation.callPhase === 'speculation_recalculation' && this.#failSpeculationRecalculation) {
+      await writeFile(manifest.proposalSpoolPath, '{"staged":"must-not-be-consumed"}\n', 'utf8');
+      await abortableDelay(this.#inProcessDispatchDelayMs ?? 0, signal);
+      if (manifest.dispatchId === undefined) throw new Error('Recalculation launcher omitted dispatch id.');
+      return {
+        resumeSessionId: agentSessionId(sessionId), sessionId: null, finalText: '', usage: null,
+        exit: 'infrastructure_failed', failureReason: 'SIMULATED recalculation engine startup failure',
+        component: 'engine_mcp_startup',
+        processEvidence: null,
+        engineCatalogEvidence: {
+          status: 'absent', basis: 'required_engine_initialization_failed', dispatchId: manifest.dispatchId,
+          corroboration: ['SIMULATED recalculation engine startup failure'],
+        },
+        partialResultEvidence: {
+          status: 'partial', decodedEventCount: 0, finalTextFragment: '', observedUsage: null,
+          stagedInvocationIds: ['SIMULATED-recalculation-staged-before-failure'],
+        },
+      };
+    }
     if (!roomTransition && manifest.phase === 'initial' && this.#timeoutInitial.has(key)) {
       return cancelledSimulated(sessionId, manifest);
+    }
+    if (manifest.requestKind === 'plan_adjustment' && manifest.phase === 'initial' &&
+      this.#stagedAdjustmentTimeout.has(key)) {
+      await writeFile(manifest.proposalSpoolPath, '{"staged":"must-not-be-consumed"}\n', 'utf8');
+      await abortableDelay(this.#inProcessDispatchDelayMs ?? 0, signal);
+      return timedOutSimulated(sessionId, manifest);
+    }
+    if (manifest.requestKind === 'plan_adjustment' && manifest.phase === 'correction' &&
+      this.#stagedAdjustmentCorrectionTimeout.has(key)) {
+      await writeFile(manifest.proposalSpoolPath, '{"staged":"must-not-be-consumed"}\n', 'utf8');
+      await abortableDelay(this.#inProcessDispatchDelayMs ?? 0, signal);
+      return timedOutSimulated(sessionId, manifest);
+    }
+    if (manifest.phase === 'speculative' && this.#stagedSpeculationTimeout) {
+      await writeFile(manifest.proposalSpoolPath, '{"staged":"must-not-be-consumed"}\n', 'utf8');
+      return timedOutSimulated(sessionId, manifest);
     }
     if (invocation.output.kind === 'structured_final') {
       const finalText = !roomTransition && manifest.phase === 'initial' && this.#exhaustInitial.has(key)
@@ -2751,6 +2857,7 @@ class SimulatedConversationAdapter implements AgentSessionAdapter {
     }
     const submit = !roomTransition && !(manifest.phase === 'initial'
       ? this.#exhaustInitial.has(key) : this.#failCorrection.has(key));
+    await abortableDelay(this.#inProcessDispatchDelayMs ?? 0, signal);
     const driven = await driveScriptedMcp(
       this.cwd,
       invocation.launcherToken,
@@ -2762,6 +2869,7 @@ class SimulatedConversationAdapter implements AgentSessionAdapter {
       this.#adjustmentResponseByRequest[key] ?? 'keep',
       signal,
       manifest.phase === 'speculative' ? this.#speculativeDelayMs : 0,
+      this.#inProcessDispatchDelayMs === null ? undefined : invocation.toolSession,
     );
     this.callsByRequest.set(manifest.requestId, (this.callsByRequest.get(manifest.requestId) ?? 0) + driven.calls);
     this.contextCallsByRequest.set(
@@ -2895,6 +3003,21 @@ function cancelledSimulated(value: string, manifest?: EngineMcpLauncherManifest)
     partialResultEvidence: {
       status: 'partial', decodedEventCount: 0, finalTextFragment: '', observedUsage: null,
       stagedInvocationIds: [],
+    },
+  };
+}
+
+function timedOutSimulated(value: string, manifest: EngineMcpLauncherManifest): AgentTurnResult {
+  return {
+    resumeSessionId: agentSessionId(value), sessionId: null, finalText: '', usage: null,
+    exit: 'timed_out', timeoutMs: 1, processEvidence: null,
+    engineCatalogEvidence: manifest.dispatchId === undefined ? null : {
+      status: 'ready', basis: 'required_cli_completed_with_valid_catalog',
+      dispatchId: manifest.dispatchId, advertisedInvocationCount: 0, resourceOperationCount: 0,
+    },
+    partialResultEvidence: {
+      status: 'partial', decodedEventCount: 0, finalTextFragment: '', observedUsage: null,
+      stagedInvocationIds: ['SIMULATED-staged-before-timeout'],
     },
   };
 }
@@ -3106,9 +3229,9 @@ async function writeLauncher(input: {
   if (request === null) throw new Error('Conversation launcher requires a pending request.');
   const dispatchPhase = request.phase === 'speculative'
     ? 'speculative' as const
-    : request.kind === 'plan_adjustment'
-      ? 'adjustment' as const
-      : request.phase === 'correction' ? 'correction' as const : 'primary' as const;
+    : request.phase === 'correction'
+      ? 'correction' as const
+      : request.kind === 'plan_adjustment' ? 'adjustment' as const : 'primary' as const;
   const dispatchId = engineDispatchId(`engine-dispatch:${randomUUID()}`);
   const manifest: EngineMcpLauncherManifest = {
     format: 'engine-mcp-launcher-v1', fixturePath, proposalSpoolPath: spoolPath,
@@ -3265,6 +3388,39 @@ function enforceCompletedDispatchIntegrity(input: {
   });
 }
 
+function classifyFailedDispatch(input: {
+  readonly phase: NonNullable<ConversationRowBase['failingDispatch']>['phase'];
+  readonly turn: AgentTurnResult;
+  readonly contextSpoolPath: string;
+  readonly maximumBytes: number;
+}): NonNullable<ConversationRowBase['failingDispatch']> | null {
+  if (input.turn.exit !== 'cancelled' && input.turn.exit !== 'infrastructure_failed') return null;
+  const catalog = input.turn.engineCatalogEvidence;
+  if (catalog === null) return null;
+  const context = takeCorrelatedTurnContext(input.contextSpoolPath, input.maximumBytes, catalog.dispatchId);
+  const delivery = classifyTurnContextDelivery({
+    turn: input.turn,
+    catalogEvidence: catalog,
+    delivered: context === null ? null : {
+      contextSha256: sha256(context.raw),
+      measurement: {
+        baseBytes: new TextEncoder().encode(context.raw).byteLength,
+        semanticBytes: 0,
+      },
+    },
+  });
+  return {
+    phase: input.phase,
+    exit: input.turn.exit,
+    dispatchId: catalog.dispatchId,
+    engineCatalogEvidence: catalog,
+    turnContextDelivery: delivery,
+    failureReason: input.turn.exit === 'cancelled'
+      ? input.turn.cancellationReason
+      : input.turn.failureReason,
+  };
+}
+
 class CellInfrastructureAbort extends Error {
   override readonly name = 'CellInfrastructureAbort' as const;
 }
@@ -3344,7 +3500,7 @@ function inProcessDmToolSession(input: {
   readonly onTurnContextRendered?: (evidence: NonNullable<CapturedTurnContext['rendering']>) => void;
   readonly kbReadBudget?: KbReadBudget;
   readonly kbReadCallPhase?: KbReadCallPhase;
-}): AgentToolSession {
+}): AgentToolSession & { readonly simulatedEncounterState: EncounterState } {
   const capsule = input.snapshot.capsule;
   const request = capsule.request;
   if (request === null || request.phase === 'speculative') {
@@ -3395,6 +3551,7 @@ function inProcessDmToolSession(input: {
     },
   });
   return {
+    simulatedEncounterState: structuredClone(input.state),
     tools: runtime.toolSurface.tools,
     execute(name, argumentsValue) {
       try {
@@ -3600,7 +3757,10 @@ function inProcessSpeculativeToolSession(input: {
   readonly state: EncounterState;
   readonly snapshot: EngineRoundSnapshot;
   readonly onPlan: (plan: QueuedSpeculativePlanEnvelope) => void;
-}): AgentToolSession {
+}): AgentToolSession & {
+  readonly stateRef: Readonly<Record<string, unknown>>;
+  readonly simulatedEncounterState: EncounterState;
+} {
   const capsule = input.snapshot.capsule;
   const request = capsule.request;
   if (request?.phase !== 'speculative') {
@@ -3629,6 +3789,12 @@ function inProcessSpeculativeToolSession(input: {
     onSpeculativePlan: (plan) => input.onPlan(structuredClone(plan)),
   });
   return {
+    simulatedEncounterState: structuredClone(input.state),
+    stateRef: {
+      run_id: capsule.runId,
+      state_handle: engineStateHandle(capsule),
+      expected_revision: capsule.revision,
+    },
     tools: runtime.toolSurface.tools,
     execute(name, argumentsValue) {
       return runtime.toolSurface.execute(name, argumentsValue);
@@ -3857,12 +4023,17 @@ async function runConversationWithConfiguredIntel(
   const simulated = config.dryRun ? new SimulatedConversationAdapter(
     config.cli, config.cwd, config.intelMode, options.exhaustInitial ?? [], options.invalidInitial ?? [],
     options.timeoutInitial ?? [],
+    options.stagedAdjustmentTimeout ?? [],
+    options.stagedAdjustmentCorrectionTimeout ?? [],
+    options.stagedSpeculationTimeout ?? false,
+    options.failSpeculationRecalculation ?? false,
     options.failCorrection ?? [],
     options.flapPrimaryByRequest ?? {},
     options.reactionGuidanceByRequest ?? {},
     options.suggestionResponseByRequest ?? {},
     options.adjustmentResponseByRequest ?? {},
     options.speculationDispatchDelayMs ?? 0,
+    options.simulatedInProcessDispatchDelayMs ?? null,
   ) : null;
   const selectedAdapter = options.adapter ?? simulated ?? (config.cli === 'local-openai'
     ? new LocalOpenAiAgentSessionAdapter({
@@ -4113,7 +4284,8 @@ async function runConversationWithConfiguredIntel(
       };
       const started = clock();
       let localInitialProposal: RoundTurnProposalEnvelope | null = null;
-      const initialToolSession = config.cli === 'local-openai'
+      const initialToolSession = config.cli === 'local-openai' ||
+        options.simulatedInProcessDispatchDelayMs !== undefined
         ? inProcessDmToolSession({
             state: engineSession.currentState(),
             snapshot: initialSnapshot,
@@ -4195,6 +4367,7 @@ async function runConversationWithConfiguredIntel(
       let primaryTurn: AgentTurnResult | null = null;
       let primaryCatalogEvidence: EngineCatalogEvidence | null = null;
       let primaryDelivery: TurnContextDelivery | null = null;
+      let failingDispatch: NonNullable<ConversationRowBase['failingDispatch']> | null = null;
       let escalationSessionId: string | null = null;
       let capturedRlData: ConversationRlData | undefined;
       let correctionTurnContextSpoolPath: string | null = null;
@@ -4320,7 +4493,8 @@ async function runConversationWithConfiguredIntel(
           historyKind: 'speculative_plan_requested',
         });
         let localPlan: QueuedSpeculativePlanEnvelope | null = null;
-        const toolSession = config.cli === 'local-openai'
+        const toolSession = config.cli === 'local-openai' ||
+          options.simulatedInProcessDispatchDelayMs !== undefined
           ? inProcessSpeculativeToolSession({
               state: sourceState,
               snapshot: sourceSnapshot,
@@ -4333,7 +4507,7 @@ async function runConversationWithConfiguredIntel(
         const completion = (async (): Promise<SpeculativeDispatchCompletion> => {
           try {
             options.onSpeculationDispatchStart?.();
-            const turn = await adapter.start(invocation(
+            const speculativeInvocation = invocation(
               config,
               runId,
               'speculation',
@@ -4348,7 +4522,9 @@ async function runConversationWithConfiguredIntel(
               freshSessionContext,
               { kind: 'tool_driven' },
               { engineDispatchId: launcher.dispatchId, recoveryEngineDispatchId: launcher.recoveryDispatchId },
-            ), controller.signal);
+            );
+            options.onAgentInvocation?.(speculativeInvocation);
+            const turn = await adapter.start(speculativeInvocation, controller.signal);
             const planningWallMs = clock() - dispatchStarted;
             const spools = dispatchSpools(launcher, turn);
             enforceCompletedDispatchIntegrity({
@@ -4366,14 +4542,22 @@ async function runConversationWithConfiguredIntel(
               planningWallMs,
               timedOut: turn.exit === 'timed_out' || controller.signal.aborted || planningWallMs > budgetMs,
               error: turn.exit === 'infrastructure_failed' ? turn.failureReason : null,
+              failingDispatch: turn.exit === 'infrastructure_failed'
+                ? classifyFailedDispatch({
+                    phase: 'speculative', turn, contextSpoolPath: spools.context,
+                    maximumBytes: config.turnContextMaximumBytes,
+                  })
+                : null,
             };
           } catch (error) {
+            if (error instanceof D569IntegrityStop) throw error;
             return {
               plan: null,
               turn: null,
               planningWallMs: clock() - dispatchStarted,
               timedOut: controller.signal.aborted,
               error: error instanceof Error ? error.message : String(error),
+              failingDispatch: null,
             };
           } finally {
             clearTimeout(timeout);
@@ -4513,7 +4697,8 @@ async function runConversationWithConfiguredIntel(
         });
         const adjustmentLauncher = await writeAdjustmentLauncher(`${adjustmentKey}-initial`);
         let localAdjustmentProposal: PlanAdjustmentProposalEnvelope | null = null;
-        const adjustmentToolSession = config.cli === 'local-openai'
+        const adjustmentToolSession = config.cli === 'local-openai' ||
+          options.simulatedInProcessDispatchDelayMs !== undefined
           ? inProcessDmToolSession({
               state: engineSession.currentState(),
               snapshot: adjustmentSnapshot,
@@ -4585,6 +4770,7 @@ async function runConversationWithConfiguredIntel(
               recoveryEngineDispatchId: dispatchAdjustmentLauncher.recoveryDispatchId,
             },
           );
+          options.onAgentInvocation?.(adjustmentInvocation);
           adjustmentCalls += 1;
           const turn = await lifecycle.resumeRound(
             adjustmentInvocation,
@@ -4610,6 +4796,11 @@ async function runConversationWithConfiguredIntel(
               outcome = 'infrastructure_failed';
               serviceNull = true;
               refusals.push(turn.failureReason);
+              failingDispatch = classifyFailedDispatch({
+                phase: 'adjustment', turn,
+                contextSpoolPath: adjustmentSpools.context,
+                maximumBytes: config.turnContextMaximumBytes,
+              });
               throw new CellInfrastructureAbort('Adjustment engine MCP infrastructure failed.');
             }
             break;
@@ -4760,7 +4951,8 @@ async function runConversationWithConfiguredIntel(
             engineCatalogEvidence: null,
           });
           let localCorrection: PlanAdjustmentProposalEnvelope | null = null;
-          const correctionToolSession = config.cli === 'local-openai'
+          const correctionToolSession = config.cli === 'local-openai' ||
+            options.simulatedInProcessDispatchDelayMs !== undefined
             ? inProcessDmToolSession({
                 state: engineSession.currentState(),
                 snapshot: correctionSnapshot,
@@ -4793,6 +4985,7 @@ async function runConversationWithConfiguredIntel(
             turnContext: correctionContext.value,
             lifecycle: {
               resumeCorrection: async (correctionInvocation, signal) => {
+                options.onAgentInvocation?.(correctionInvocation);
                 correctionCalls += 1;
                 const turn = await lifecycle.resumeCorrection(correctionInvocation, signal);
                 correctionSpools = dispatchSpools(correctionLauncher, turn);
@@ -4805,6 +4998,13 @@ async function runConversationWithConfiguredIntel(
                   rowPath: config.outPath,
                   scheduledCellKey: config.scheduledCellKey ?? `${String(room)}:${String(round)}`,
                 });
+                if (turn.exit === 'infrastructure_failed') {
+                  failingDispatch = classifyFailedDispatch({
+                    phase: 'correction', turn,
+                    contextSpoolPath: correctionSpools.context,
+                    maximumBytes: config.turnContextMaximumBytes,
+                  });
+                }
                 adjustmentCorrectionSessionId = turn.sessionId;
                 captureCallUsage(turn, 'correction');
                 decisionAttempts += 1;
@@ -4884,6 +5084,11 @@ async function runConversationWithConfiguredIntel(
           },
           correction: correctionRuntime,
         });
+        if (completion.correctionResult === 'infrastructure_failed') {
+          outcome = 'infrastructure_failed';
+          serviceNull = true;
+          throw new CellInfrastructureAbort('Adjustment correction engine MCP infrastructure failed.');
+        }
         const completedCorrectionProposal = recordedAdjustmentCorrectionProposal();
         if (config.captureRlData && adjustmentProposal?.submittedArguments !== undefined) {
           adjustmentRlData.push(rlCapture(
@@ -5062,6 +5267,7 @@ async function runConversationWithConfiguredIntel(
               appendBlindIngress(dispatchLauncher.recoveryBlindIngressSpoolPath, ingress);
             }
             options.onPrimaryInvocation?.(primaryInvocation);
+            options.onAgentInvocation?.(primaryInvocation);
             options.onPrimaryDispatchStart?.();
             initialCalls += 1;
             let turn: AgentTurnResult;
@@ -5130,13 +5336,37 @@ async function runConversationWithConfiguredIntel(
               if (initialDecisionCatalog !== null) {
                 decisionRejectionCodes.push('decision_timeout');
               }
-              if (turn.exit === 'timed_out' || turn.exit === 'cancelled') {
+              if (turn.exit === 'cancelled' && config.dmModeExplicit && initialDecisionCatalog === null) {
+                primaryDispatchTimedOut = false;
+                outcome = 'infrastructure_failed';
+                fallbackReason = 'dispatch_cancelled';
+                if (primaryCatalogEvidence === null || primaryDelivery === null) {
+                  throw new D569IntegrityStop('Cancelled D569 dispatch lacks correlated catalog or delivery evidence.');
+                }
+                failingDispatch = {
+                  phase: 'primary', exit: 'cancelled',
+                  dispatchId: primaryCatalogEvidence.dispatchId,
+                  engineCatalogEvidence: primaryCatalogEvidence,
+                  turnContextDelivery: primaryDelivery,
+                  failureReason: turn.cancellationReason,
+                };
+              } else if (turn.exit === 'timed_out' || turn.exit === 'cancelled') {
                 primaryDispatchTimedOut = true;
                 outcome = 'refused';
                 fallbackReason = 'timeout';
               } else if (turn.exit === 'infrastructure_failed') {
                 outcome = 'infrastructure_failed';
                 refusals.push(turn.failureReason);
+                if (config.dmModeExplicit && (primaryCatalogEvidence === null || primaryDelivery === null)) {
+                  throw new D569IntegrityStop('Failed D569 dispatch lacks correlated catalog or delivery evidence.');
+                }
+                if (primaryCatalogEvidence !== null && primaryDelivery !== null) failingDispatch = {
+                  phase: 'primary', exit: 'infrastructure_failed',
+                  dispatchId: primaryCatalogEvidence.dispatchId,
+                  engineCatalogEvidence: primaryCatalogEvidence,
+                  turnContextDelivery: primaryDelivery,
+                  failureReason: turn.failureReason,
+                };
               } else {
                 outcome = 'refused';
               }
@@ -5206,7 +5436,7 @@ async function runConversationWithConfiguredIntel(
               { attempt: 'primary', actorId, declaredProposal: null, rejectionReasons: ['No engine rejection was returned because the agent submitted no initial proposal.'] },
               { attempt: 'fallback', actorId, declaredProposal: null, rejectionReasons: ['No engine rejection was returned because the agent submitted no fallback proposal.'] },
             );
-            return { actorId, fallbackResult: 'absent' };
+            return { actorId, fallbackResult: actorRejections.length > 0 ? 'invalid' : 'absent' };
           }),
         } : { kind: 'proposal', proposal: proposed };
         const correctionRequest: EngineOrdinaryRoundCapsuleRequest = {
@@ -5277,7 +5507,8 @@ async function runConversationWithConfiguredIntel(
         correctionTurnContextSpoolPath = correctionLauncher.turnContextSpoolPath;
         correctionUiFeedbackSpoolPath = correctionLauncher.uiFeedbackSpoolPath;
         let localCorrectionProposal: RoundTurnProposalEnvelope | null = null;
-        const correctionToolSession = config.cli === 'local-openai'
+        const correctionToolSession = config.cli === 'local-openai' ||
+          options.simulatedInProcessDispatchDelayMs !== undefined
           ? inProcessDmToolSession({
               state: engineSession.currentState(),
               snapshot: correctionSnapshot,
@@ -5506,9 +5737,7 @@ async function runConversationWithConfiguredIntel(
           },
           pauseForDmAdjudication: ({ actorId, reason }) => { refusals.push(`${actorId}: ${reason}`); },
         };
-        const coordinated = config.dmMode === 'blind' && proposed === null
-          ? { kind: 'refused' as const, reason: 'host_authorization_failed' as const, attemptConsumed: true as const }
-          : await new TurnExhaustionCoordinator(journal.turnExhaustionPersistence()).coordinate({
+        const coordinated = await new TurnExhaustionCoordinator(journal.turnExhaustionPersistence()).coordinate({
           initial,
           authorizationFailurePolicy: config.dmMode === 'blind'
             ? { kind: 'refuse_blind' }
@@ -5526,6 +5755,7 @@ async function runConversationWithConfiguredIntel(
             },
             lifecycle: {
               resumeCorrection: async (correctionInvocation: AgentInvocation, signal: AbortSignal) => {
+                options.onAgentInvocation?.(correctionInvocation);
                 correctionDispatchPlanner = plannerAttribution(correctionInvocation);
                 escalated = escalationPlanner !== null;
                 firedEscalationModel = escalationPlanner === null
@@ -5580,6 +5810,13 @@ async function runConversationWithConfiguredIntel(
                 });
                 correctionTurnContextSpoolPath = mainCorrectionSpools.context;
                 correctionUiFeedbackSpoolPath = mainCorrectionSpools.uiFeedback;
+                if (correctionTurn.exit === 'infrastructure_failed') {
+                  failingDispatch = classifyFailedDispatch({
+                    phase: 'correction', turn: correctionTurn,
+                    contextSpoolPath: mainCorrectionSpools.context,
+                    maximumBytes: config.turnContextMaximumBytes,
+                  });
+                }
                 if (correctionTurn.exit !== 'completed') {
                   correctionDispatchTimedOut = correctionTurn.exit === 'timed_out';
                   captureCallUsage(correctionTurn, 'correction');
@@ -5942,6 +6179,7 @@ async function runConversationWithConfiguredIntel(
                 outcome = 'infrastructure_failed';
                 serviceNull = true;
                 refusals.push(completed.turn.failureReason);
+                failingDispatch = completed.failingDispatch;
                 inFlightSpeculation.current = null;
                 throw new CellInfrastructureAbort('Speculative engine MCP infrastructure failed.');
               }
@@ -5973,6 +6211,10 @@ async function runConversationWithConfiguredIntel(
                 if (adoption.entries === null) discardReason = adoption.reason;
                 else adoptedEntries = adoption.entries;
               }
+              if (options.forceSpeculationRecalculationForTest === true) {
+                discardReason = 'proposal_validation_failed';
+                adoptedEntries = null;
+              }
               if (adoptedEntries !== null) {
                 for (const entry of adoptedEntries) {
                   segmentMonsterPlan.set(entry.proposal.actorId, entry);
@@ -5981,7 +6223,9 @@ async function runConversationWithConfiguredIntel(
               } else {
                 const currentEntries = segmentActors.map((actorId) => segmentMonsterPlan.get(actorId))
                   .filter((entry): entry is SegmentMonsterPlanEntry => entry !== undefined);
-                const rebound = currentEntries.length === segmentActors.length
+                const rebound = options.forceSpeculationRecalculationForTest === true
+                  ? null
+                  : currentEntries.length === segmentActors.length
                   ? rebaseStoredPlanEntries({ state, actualRevision: capsuleRevision, entries: currentEntries })
                   : null;
                 if (rebound === null) {
@@ -6010,7 +6254,8 @@ async function runConversationWithConfiguredIntel(
                       turnContextDeltaBase: pending.sourceTurnContext,
                     });
                     let localRecalculationProposal: RoundTurnProposalEnvelope | null = null;
-                    const recalculationToolSession = config.cli === 'local-openai'
+                    const recalculationToolSession = config.cli === 'local-openai' ||
+                      options.simulatedInProcessDispatchDelayMs !== undefined
                       ? inProcessDmToolSession({
                           state,
                           snapshot: recalculationSnapshot,
@@ -6047,25 +6292,27 @@ async function runConversationWithConfiguredIntel(
                       status: 'active',
                     };
                     try {
+                      const recalculationInvocation = invocation(
+                        config,
+                        runId,
+                        'speculation_recalculation',
+                        `${turnContextPrompt(pending.sourceTurnContext, config.intelMode)}\n\n${renderEnginePrompt('plan_round', recalculationSnapshot.capsule, RULES_SOURCE)}`,
+                        recalculationLauncher.manifestPath,
+                        null,
+                        pending.planner,
+                        recalculationLauncher.recoveryManifestPath,
+                        recalculationToolSession,
+                        freshSessionContext,
+                        { kind: 'tool_driven' },
+                        {
+                          engineDispatchId: recalculationLauncher.dispatchId,
+                          recoveryEngineDispatchId: recalculationLauncher.recoveryDispatchId,
+                        },
+                      );
+                      options.onAgentInvocation?.(recalculationInvocation);
                       const recalculationTurn = await adapter.resume(
                         binding,
-                        invocation(
-                          config,
-                          runId,
-                          'speculation_recalculation',
-                          `${turnContextPrompt(pending.sourceTurnContext, config.intelMode)}\n\n${renderEnginePrompt('plan_round', recalculationSnapshot.capsule, RULES_SOURCE)}`,
-                          recalculationLauncher.manifestPath,
-                          null,
-                          pending.planner,
-                          recalculationLauncher.recoveryManifestPath,
-                          recalculationToolSession,
-                          freshSessionContext,
-                          { kind: 'tool_driven' },
-                          {
-                            engineDispatchId: recalculationLauncher.dispatchId,
-                            recoveryEngineDispatchId: recalculationLauncher.recoveryDispatchId,
-                          },
-                        ),
+                        recalculationInvocation,
                         new AbortController().signal,
                       );
                       captureCallUsage(recalculationTurn, 'speculation_recalculation');
@@ -6079,10 +6326,20 @@ async function runConversationWithConfiguredIntel(
                         rowPath: config.outPath,
                         scheduledCellKey: config.scheduledCellKey ?? `${String(room)}:${String(round)}`,
                       });
-                      const proposal = localRecalculationProposal ??
-                        (recalculationTurn.exit === 'completed'
-                          ? takeRoundProposal(recalculationSpools.proposal)
-                          : null);
+                      if (recalculationTurn.exit === 'infrastructure_failed') {
+                        outcome = 'infrastructure_failed';
+                        serviceNull = true;
+                        refusals.push(recalculationTurn.failureReason);
+                        failingDispatch = classifyFailedDispatch({
+                          phase: 'speculation_recalculation', turn: recalculationTurn,
+                          contextSpoolPath: recalculationSpools.context,
+                          maximumBytes: config.turnContextMaximumBytes,
+                        });
+                        throw new CellInfrastructureAbort('Speculation recalculation engine MCP infrastructure failed.');
+                      }
+                      const proposal = recalculationTurn.exit === 'completed'
+                        ? localRecalculationProposal ?? takeRoundProposal(recalculationSpools.proposal)
+                        : null;
                       if (proposal !== null) {
                         const checked = authorizedMechanics(state, proposal);
                         if (checked.entries !== null && sameCombatantSet(
@@ -6100,7 +6357,7 @@ async function runConversationWithConfiguredIntel(
                         }
                       }
                     } catch (error) {
-                      if (error instanceof D569IntegrityStop) throw error;
+                      if (error instanceof D569IntegrityStop || error instanceof CellInfrastructureAbort) throw error;
                       recalculated = null;
                     }
                   }
@@ -6270,15 +6527,18 @@ async function runConversationWithConfiguredIntel(
         },
       };
       const totalsTokens = tokenCounts(roundUsage);
-      const contextBytes = [
-        rowTurnContext.raw,
-        ...(recordedCorrectionTurnContext === null ? [] : [recordedCorrectionTurnContext.raw]),
-        ...adjustments.flatMap((entry) => entry.skipped === 'no_material_change' ? [] : [
-          entry.rawContext,
-          ...(entry.correctionChain === null ? [] : [entry.correctionChain.rawContext]),
-        ]),
-      ]
-        .reduce((total, context) => total + new TextEncoder().encode(context).byteLength, 0);
+      const contextBytes = config.dmModeExplicit
+        ? primaryDelivery?.status === 'delivered'
+          ? new TextEncoder().encode(rowTurnContext.raw).byteLength
+          : 0
+        : [
+            rowTurnContext.raw,
+            ...(recordedCorrectionTurnContext === null ? [] : [recordedCorrectionTurnContext.raw]),
+            ...adjustments.flatMap((entry) => entry.skipped === 'no_material_change' ? [] : [
+              entry.rawContext,
+              ...(entry.correctionChain === null ? [] : [entry.correctionChain.rawContext]),
+            ]),
+          ].reduce((total, context) => total + new TextEncoder().encode(context).byteLength, 0);
       const rendererEvidenceCacheKey = canonicalJson({
         startingRoomDigest,
         revision: initialSnapshot.capsule.revision,
@@ -6333,6 +6593,7 @@ async function runConversationWithConfiguredIntel(
       options.rendererEvidenceCache?.set(rendererEvidenceCacheKey, rendererEvidence);
       const optionsOmittedForSize = rendererEvidence.optionsOmittedForSizeByActor
         .reduce((total, actor) => total + actor.count, 0);
+      const deliveredPrimaryContext = !config.dmModeExplicit || primaryDelivery?.status === 'delivered';
       const kbReads = rowKbSubjectSources === undefined
         ? []
         : decodeKbReadRecords(readFileSync(kbReadSpoolPath, 'utf8'));
@@ -6407,7 +6668,16 @@ async function runConversationWithConfiguredIntel(
       let d569BlindFields: Partial<ConversationBlindRowEvidence> = {};
       if (config.dmMode === 'blind') {
         const submissions = takeBlindIntentSubmissions(activeInitialSpools.blindIntent);
-        const ingressRecords = takeBlindIngressRecords(activeInitialSpools.blindIngress);
+        const observedIngressRecords = takeBlindIngressRecords(activeInitialSpools.blindIngress);
+        const ingressRecords = options.blindIngressAuditProbeText === undefined
+          ? observedIngressRecords
+          : [...observedIngressRecords, {
+              ordinal: observedIngressRecords.length + 1,
+              channel: 'initial_prompt' as const,
+              text: options.blindIngressAuditProbeText,
+              utf8Bytes: new TextEncoder().encode(options.blindIngressAuditProbeText).byteLength,
+              sha256: sha256(options.blindIngressAuditProbeText),
+            }];
         const offeredOptions = (capsule.request?.actors ?? []).flatMap((actorId) =>
           availableEngineActorOptions(optionProjectionState, actorId, canonicalEngineQueryPort, capsule.revision));
         const offeredOptionIds = offeredOptions.map((option) => String(option.optionId));
@@ -6560,6 +6830,9 @@ async function runConversationWithConfiguredIntel(
           if (primaryTurn === null || primaryCatalogEvidence === null || primaryDelivery === null) {
             throw new Error('D569 row lacks primary dispatch evidence.');
           }
+          if (outcome === 'infrastructure_failed' && failingDispatch === null) {
+            throw new D569IntegrityStop('D569 infrastructure outcome lacks failing-dispatch evidence.');
+          }
           return {
             rowContractVersion: 'arena-row-v3' as const,
             scheduledCellKey: config.scheduledCellKey ?? `${String(room)}:${String(round)}`,
@@ -6573,6 +6846,7 @@ async function runConversationWithConfiguredIntel(
             hostContextDiagnostic,
           };
         })() : {}),
+        ...(failingDispatch === null ? {} : { failingDispatch }),
         knowledgeModel: 'engine_state',
         hiddenOptions,
         intelMode: config.intelMode,
@@ -6581,10 +6855,15 @@ async function runConversationWithConfiguredIntel(
           policyVersion: RENDERER_POLICY_VERSION,
           profile: config.rendererProfile,
         },
-        semanticBoardBytes: rendererEvidence.semanticBoardBytes,
-        baseContextBytes: rendererEvidence.baseContextBytes,
-        semanticBoardTruncated: rendererEvidence.semanticBoardTruncated,
-        circumstanceFeatures: rendererEvidence.features,
+        semanticBoardBytes: deliveredPrimaryContext ? rendererEvidence.semanticBoardBytes : null,
+        baseContextBytes: deliveredPrimaryContext ? rendererEvidence.baseContextBytes : null,
+        semanticBoardTruncated: deliveredPrimaryContext ? rendererEvidence.semanticBoardTruncated : [],
+        circumstanceFeatures: deliveredPrimaryContext ? rendererEvidence.features : {
+          ...rendererEvidence.features,
+          pre_trim_bytes: 0,
+          trim_bytes_removed: 0,
+          trim_engaged: false,
+        },
         combatModel: config.combatModel,
         roundProtocolVersion: ROUND_PROTOCOL_VERSION,
         startingRoomDigest,
@@ -6607,13 +6886,15 @@ async function runConversationWithConfiguredIntel(
         skillHash: instructionEnvironment.skillHash,
         kbReads,
         repoCommit,
-        rawTurnContext: rowTurnContext.raw,
+        rawTurnContext: deliveredPrimaryContext ? rowTurnContext.raw : null,
         turnContextMaximumBytes: config.turnContextMaximumBytes,
-        preTrimBytes: rendererEvidence.preTrimBytes,
-        postTrimBytes: rendererEvidence.postTrimBytes,
-        optionsOmittedForSize,
-        optionsOmittedForSizeByActor: structuredClone(rendererEvidence.optionsOmittedForSizeByActor),
-        turnContextGranularity: rowTurnContext.granularity,
+        preTrimBytes: deliveredPrimaryContext ? rendererEvidence.preTrimBytes : null,
+        postTrimBytes: deliveredPrimaryContext ? rendererEvidence.postTrimBytes : null,
+        optionsOmittedForSize: deliveredPrimaryContext ? optionsOmittedForSize : 0,
+        optionsOmittedForSizeByActor: deliveredPrimaryContext
+          ? structuredClone(rendererEvidence.optionsOmittedForSizeByActor)
+          : [],
+        turnContextGranularity: deliveredPrimaryContext ? rowTurnContext.granularity : null,
         snippetHash: SNIPPET_REGISTRY.snippetHash,
         snippetSetHash: SNIPPET_REGISTRY.snippetSetHash,
         suggestedPlay: suggestedPlan?.play ?? null,
@@ -6641,7 +6922,8 @@ async function runConversationWithConfiguredIntel(
         ...(config.decisionTransport === 'final_indices' ? {
           chosenOptionIndices: authorizedChosenOptionIndices,
         } : {}),
-        contextTruncated: simulated?.contextTruncatedByRequest.get(requestId) ?? observedContextTruncated,
+        contextTruncated: deliveredPrimaryContext &&
+          (simulated?.contextTruncatedByRequest.get(requestId) ?? observedContextTruncated),
         plannedBy,
         planner,
         overrideKinds,
@@ -6687,6 +6969,10 @@ async function runConversationWithConfiguredIntel(
       };
       rows.push(row);
       await appendFile(config.outPath, `${serializeConversationRow(row)}\n`, 'utf8');
+      const persistedBlindAudit = d569BlindFields.blindIngressAudit;
+      if (persistedBlindAudit?.version === 2 && !persistedBlindAudit.forbiddenContentPassed) {
+        throw new D569IntegrityStop('Blind ingress contained forbidden content after the forensic row was persisted.');
+      }
       completedRounds += 1;
       if (!restoredMidRun && options.restoreAfterRound === completedRounds) {
         const saved = journal.export();

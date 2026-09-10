@@ -39,6 +39,7 @@ function classify(input: {
   readonly records?: readonly EngineReadinessRecord[];
   readonly completed?: boolean;
   readonly failed?: boolean;
+  readonly malformedReadiness?: boolean;
 }) {
   return classifyEngineCatalogEvidence({
     dispatchId: dispatch,
@@ -50,6 +51,7 @@ function classify(input: {
     readiness: input.records ?? [],
     completed: input.completed ?? true,
     requiredStartupFailed: input.failed ?? false,
+    ...(input.malformedReadiness === undefined ? {} : { malformedReadiness: input.malformedReadiness }),
   });
 }
 
@@ -128,6 +130,9 @@ describe('engine dispatch catalog evidence', () => {
     });
     expect(() => decodeEngineReadinessRecord({ ...readiness(), returnedToolNames: [3] }))
       .toThrow('Engine readiness record is malformed.');
+    expect(classify({ malformedReadiness: true })).toEqual({
+      status: 'inconclusive', dispatchId: dispatch, reason: 'invalid_catalog_response',
+    });
   });
 
   it('does not correlate an earlier successful list to a failed retry', () => {
@@ -139,6 +144,22 @@ describe('engine dispatch catalog evidence', () => {
 
   it('marks success plus startup failure for one dispatch inconclusive', () => {
     expect(classify({ records: [readiness()], completed: false, failed: true })).toEqual({
+      status: 'inconclusive', dispatchId: dispatch, reason: 'conflicting_success_and_failure',
+    });
+  });
+
+  it('marks an untimestamped advertised invocation plus startup failure inconclusive', () => {
+    expect(classify({
+      events: [{
+        invocationId: null,
+        kind: 'item.completed',
+        server: 'engine',
+        toolName: 'engine.get_turn_context',
+        observedAtUnixMs: null,
+      }],
+      completed: false,
+      failed: true,
+    })).toEqual({
       status: 'inconclusive', dispatchId: dispatch, reason: 'conflicting_success_and_failure',
     });
   });

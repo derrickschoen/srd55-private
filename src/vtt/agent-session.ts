@@ -47,6 +47,17 @@ export type AgentCallPhase =
   | 'speculation'
   | 'speculation_recalculation';
 
+export function engineDispatchPhaseForCallPhase(callPhase: AgentCallPhase): EngineDispatchPhase {
+  switch (callPhase) {
+    case 'initial': return 'primary';
+    case 'adjustment': return 'adjustment';
+    case 'correction': return 'correction';
+    case 'speculation':
+    case 'speculation_recalculation':
+      return 'speculative';
+  }
+}
+
 export interface AgentCallUsage {
   readonly turnInputTotal: TurnInputTotal;
   readonly contextInputTokens: ContextTokenCount;

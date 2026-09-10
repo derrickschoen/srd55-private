@@ -38,6 +38,12 @@ export interface AgentProcessOutput {
   }[];
 }
 
+export interface ObservedJsonEvent {
+  readonly event: Readonly<Record<string, unknown>>;
+  readonly observedAtUnixMs: number;
+  readonly invocationId: string | null;
+}
+
 export interface AgentProcessRunner {
   run(
     spec: AgentProcessSpec,
@@ -264,6 +270,33 @@ export function jsonEventLines(stdout: string): readonly Readonly<Record<string,
       throw new AgentAdapterError('malformed_output', 'Agent emitted malformed JSON event output.', { cause: error });
     }
   });
+}
+
+/** Decodes every complete observed JSON object without letting a truncated tail erase prior evidence. */
+export function tolerantObservedJsonEvents(output: AgentProcessOutput): readonly ObservedJsonEvent[] {
+  return output.stdoutLines.flatMap((line): readonly ObservedJsonEvent[] => {
+    let event: Readonly<Record<string, unknown>> | null = null;
+    try { event = record(JSON.parse(line.line) as unknown); } catch { return []; }
+    if (event === null) return [];
+    const item = record(event['item']);
+    const part = record(event['part']);
+    const invocationId = [
+      item?.['id'], item?.['call_id'], item?.['tool_call_id'],
+      part?.['id'], part?.['callID'], part?.['callId'], part?.['toolCallId'],
+      event['invocationId'], event['call_id'], event['tool_call_id'],
+    ].find((candidate): candidate is string => typeof candidate === 'string' && candidate.length > 0) ?? null;
+    return [{ event, observedAtUnixMs: line.observedAtUnixMs, invocationId }];
+  });
+}
+
+export function observedInvocationIds(events: readonly ObservedJsonEvent[]): readonly string[] {
+  return [...new Set(events.flatMap((entry) => entry.invocationId === null ? [] : [entry.invocationId]))].sort();
+}
+
+/** Retains the established process-event identity contract while partial-result evidence records broader CLI ids. */
+export function processEventInvocationId(event: Readonly<Record<string, unknown>>): string | null {
+  const item = record(event['item']);
+  return typeof item?.['id'] === 'string' ? item['id'] : null;
 }
 
 export function completedOutput(output: AgentProcessOutput, resuming: boolean): void {
