@@ -38,3 +38,5 @@
 - 2026-09-10 11:44 EDT — r11 Astra REJECT: F38/F39 resolved; three bounded defects (F40 plain namespace aliases drop provenance, F41 destructuring assignments, F42 returned config references). r12 dispatched with a mandatory flow-position self-audit table.
 
 - 2026-09-10 12:16 EDT — r12 lane DONE; supervisor verification tsc/sg/diffcheck 0, 9 specs 497/497; committed be769471; Astra r12 dispatched (resume 01a088d6…) with audit-table probing.
+
+- 2026-09-10 12:24 EDT — r12 Astra REJECT (F43 boxed namespaces, F44 computed-property transfer, F45 for-of assignment heads, F46 new/fill/textual defineConfig). Supervisor structural ruling for r13: RULE C configuration literal-in-place or unresolved (delete reference-following machinery); RULE N namespace roots only as receiver or plain alias. r13 dispatched (resume 01a088b4…).
