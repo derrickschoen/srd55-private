@@ -180,12 +180,17 @@ function verifyReview(root: string, reviewId: string): void {
   if (new Set(manifestPaths).size !== manifestPaths.length || JSON.stringify(expectedPaths) !== JSON.stringify(manifestPaths)) {
     throw new Error('REVIEW_FILE_SET_MISMATCH');
   }
+  const provenanceByPath = new Map(result.provenance.files.map((entry) => [entry.path, entry]));
   let totalBytes = 0;
   for (const entry of manifest.files) {
     safeRelativeComponents(entry.path);
     const staged = readAnchoredFile(root, `${directory}/files/${entry.path}`, ART_STAGE_FILE_LIMIT);
     if (staged.identity.sha256 !== entry.sha256 || staged.identity.size !== entry.size) {
       throw new Error(`REVIEW_FILE_IDENTITY_MISMATCH: ${entry.path}`);
+    }
+    const provenance = provenanceByPath.get(entry.path);
+    if (provenance === undefined || staged.identity.sha256 !== provenance.sha256) {
+      throw new Error(`REVIEW_PROVENANCE_IDENTITY_MISMATCH: ${entry.path}`);
     }
     totalBytes += entry.size;
   }

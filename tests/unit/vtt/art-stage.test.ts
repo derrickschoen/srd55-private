@@ -74,6 +74,18 @@ function manifestPath(root: string): string {
   return join(root, 'art/review', requestId, 'review-manifest.json');
 }
 
+function runStageChild(root: string, args: readonly string[], timeout: number) {
+  return spawnSync(process.execPath, [
+    '--experimental-strip-types', join(process.cwd(), 'tools/vtt-handoff/art-stage.ts'), ...args,
+  ], {
+    cwd: process.cwd(),
+    encoding: 'utf8',
+    env: { ...process.env, VITEST: undefined, VTT_HANDOFF_ROOT: root },
+    killSignal: 'SIGKILL',
+    timeout,
+  });
+}
+
 describe('descriptor-anchored art staging', () => {
   it('copies through partial files, revalidates, and writes the review manifest strictly last', () => {
     const value = fixture();
@@ -254,15 +266,45 @@ describe('descriptor-anchored art staging', () => {
     expect(() => checkArtStage({ handoffRoot: hash.root })).toThrow('REVIEW_FILE_IDENTITY_MISMATCH');
   });
 
-  it('rejects an unwritten FIFO promptly before any read', () => {
+  it('binds staged payload identity to both the review manifest and copied result provenance', () => {
+    const value = fixture();
+    stageArtResult({ handoffRoot: value.root, resultRelativePath: value.resultPath, nonce: () => 'fixed' });
+    const inboxResultBefore = readFileSync(value.resultAbsolute);
+    const inboxPayloadBefore = readFileSync(join(value.bundle, value.firstImage));
+    const stagedPath = join(value.root, 'art/review', requestId, 'files', value.firstImage);
+    const changedBytes = Buffer.from('consistently forged staged payload\n');
+    writeFileSync(stagedPath, changedBytes);
+    const manifest = JSON.parse(readFileSync(manifestPath(value.root), 'utf8')) as {
+      files: { path: string; sha256: string; size: number }[];
+      totalBytes: number;
+    };
+    const index = manifest.files.findIndex((entry) => entry.path === value.firstImage);
+    const previous = manifest.files[index];
+    if (index < 0 || previous === undefined) throw new Error('test manifest entry missing');
+    manifest.files[index] = { path: previous.path, sha256: sha256(changedBytes), size: changedBytes.length };
+    manifest.totalBytes += changedBytes.length - previous.size;
+    writeFileSync(manifestPath(value.root), `${JSON.stringify(manifest)}\n`);
+
+    expect(() => checkArtStage({ handoffRoot: value.root })).toThrow('REVIEW_PROVENANCE_IDENTITY_MISMATCH');
+    const child = runStageChild(value.root, ['--check'], 2_000);
+    expect(child.status).toBe(1);
+    expect(child.signal).toBeNull();
+    expect(child.error).toBeUndefined();
+    expect(child.stderr).toContain(`Error: REVIEW_PROVENANCE_IDENTITY_MISMATCH: ${value.firstImage}`);
+    expect(readFileSync(value.resultAbsolute)).toEqual(inboxResultBefore);
+    expect(readFileSync(join(value.bundle, value.firstImage))).toEqual(inboxPayloadBefore);
+  });
+
+  it('rejects an unwritten FIFO in a deadline-enforced child before any read', () => {
     const value = fixture();
     const fifo = join(value.bundle, value.source);
     rmSync(fifo);
     expect(spawnSync('mkfifo', [fifo]).status).toBe(0);
-    const started = performance.now();
-    expect(() => stageArtResult({ handoffRoot: value.root, resultRelativePath: value.resultPath }))
-      .toThrow('REGULAR_FILE_REQUIRED');
-    expect(performance.now() - started).toBeLessThan(1_000);
+    const child = runStageChild(value.root, [value.resultPath], 2_000);
+    expect(child.status).toBe(1);
+    expect(child.signal).toBeNull();
+    expect(child.error).toBeUndefined();
+    expect(child.stderr).toContain(`Error: REGULAR_FILE_REQUIRED: art/inbox/${requestId}/${value.source}`);
     expect(existsSync(manifestPath(value.root))).toBe(false);
   });
 
