@@ -16,7 +16,11 @@ import type {
   EnginePlanAdjustmentMetadata,
   EngineStateCapsule,
 } from './engine-state-capsule';
-import { canonicalEngineQueryPort, monsterActions, monsterBonusActions } from './engine-query-port';
+import { canonicalEngineQueryPort, monsterActions, monsterBonusActions, type EngineQueryPort } from './engine-query-port';
+import {
+  createLegacyEngineOptionEnvironment,
+  type EngineOptionEnvironment,
+} from './offers/offer-environment';
 import {
   availableEngineActorOptions,
   mechanicsWithChoice,
@@ -197,6 +201,7 @@ function advancePastUnavailableActiveCombatant(
 function monsterSpellCommand(
   state: EncounterState,
   use: ResolvedActionSlotUse,
+  queries: EngineQueryPort,
 ): Extract<EncounterCommand, { readonly type: 'cast_spell' }> {
   if (use.spellId === null) throw new Error('Resolved spell use omitted its spell id.');
   const caster = state.combatants.find((candidate) => candidate.profile.id === state.activeCombatant);
@@ -246,6 +251,7 @@ function applyOneResolvedProposal(
   initialState: EncounterState,
   mechanics: ResolvedTurnMechanics,
   reduce: (state: EncounterState, command: EncounterCommand) => EncounterState,
+  queries: EngineQueryPort,
 ): { readonly state: EncounterState; readonly remainingAttackTargetDead: boolean } {
   let state = initialState;
   let remainingAttackTargetDead = false;
@@ -277,7 +283,7 @@ function applyOneResolvedProposal(
         remainingAttackTargetDead = true;
         break;
       }
-      const action = canonicalEngineQueryPort.actions(state, mechanics.actorId)
+      const action = queries.actions(state, mechanics.actorId)
         .find((candidate): candidate is MonsterAttackAction =>
           candidate.kind === 'attack' && candidate.id === use.actionId);
       if (action === undefined) throw new Error(`Resolved attack ${use.actionId} is absent.`);
@@ -310,7 +316,7 @@ function applyOneResolvedProposal(
         const targetId = use.targetIds[0];
         if (targetId === undefined) throw new Error(`Resolved save action ${use.actionId} omitted its target.`);
         const sources = use.slot === 'main' ? monsterActions(state, mechanics.actorId) : monsterBonusActions(state, mechanics.actorId);
-        const action = canonicalEngineQueryPort.actions(state, mechanics.actorId)
+        const action = queries.actions(state, mechanics.actorId)
           .find((candidate): candidate is MonsterSavingThrowAction =>
             candidate.kind === 'saving_throw' && candidate.id === use.actionId) ??
           sources.find((candidate): candidate is MonsterSavingThrowAction =>
@@ -326,7 +332,7 @@ function applyOneResolvedProposal(
         ));
         break;
     }
-    case 'cast_spell': state = reduce(state, monsterSpellCommand(state, use)); break;
+    case 'cast_spell': state = reduce(state, monsterSpellCommand(state, use, queries)); break;
     case 'use_world_object': {
       if (use.objectId === null) throw new Error(`Resolved world-object action ${use.actionId} omitted its object.`);
       state = reduce(state, { type: 'use_world_object', actor: mechanics.actorId, objectId: use.objectId, actionId: use.actionId });
@@ -348,6 +354,7 @@ export class EngineRoundSession {
     initialState: EncounterState,
     rng: SerializableRng,
     private readonly policy: ReactionOfferHostPolicy,
+    private readonly offerEnvironment: EngineOptionEnvironment = createLegacyEngineOptionEnvironment(canonicalEngineQueryPort),
   ) {
     this.#state = structuredClone(initialState);
     this.#rng = rng;
@@ -558,10 +565,10 @@ export class EngineRoundSession {
         commands.apply(command);
       for (const entry of entries) {
         state = advanceToActor(state, entry.proposal.actorId, reduce);
-        const primary = resolveEngineActorOption(state, entry.primaryOption);
+        const primary = resolveEngineActorOption(state, entry.primaryOption, this.offerEnvironment.queries);
         const fallback = primary.valid || entry.fallbackOption === null
           ? null
-          : resolveEngineActorOption(state, entry.fallbackOption);
+          : resolveEngineActorOption(state, entry.fallbackOption, this.offerEnvironment.queries);
         let mechanics: ResolvedTurnMechanics;
         let appliedBranch: EngineAppliedProposalBranch;
         let refusalCodes: string[];
@@ -575,10 +582,14 @@ export class EngineRoundSession {
           appliedBranch = 'fallback';
           refusalCodes = [primary.code];
         } else {
-          const dodgeOption = availableEngineActorOptions(state, entry.proposal.actorId).find((option) =>
+          const dodgeOption = availableEngineActorOptions(
+            state,
+            entry.proposal.actorId,
+            this.offerEnvironment.queries,
+          ).find((option) =>
             option.actionSlots.some((slot) => slot.slot === 'main' && slot.use.kind === 'dodge')) ?? null;
           if (dodgeOption === null) throw new Error(`Could not apply deterministic Dodge for ${entry.proposal.actorId}.`);
-          const dodge = resolveEngineActorOption(state, dodgeOption);
+          const dodge = resolveEngineActorOption(state, dodgeOption, this.offerEnvironment.queries);
           if (!dodge.valid) throw new Error(`Could not apply deterministic Dodge for ${entry.proposal.actorId}.`);
           mechanics = dodge.mechanics;
           appliedBranch = 'dodge';
@@ -592,7 +603,7 @@ export class EngineRoundSession {
           if (appliedBranch !== entry.selectedBranch) reasonCodes.push('branch_changed');
           if (mechanics.optionId !== entry.mechanics.optionId) reasonCodes.push('option_changed');
         }
-        const appliedProposal = applyOneResolvedProposal(state, mechanics, reduce);
+        const appliedProposal = applyOneResolvedProposal(state, mechanics, reduce, this.offerEnvironment.queries);
         state = appliedProposal.state;
         if (appliedProposal.remainingAttackTargetDead) {
           reasonCodes.push('remaining_attack_target_dead');
@@ -634,6 +645,7 @@ export class EngineRoundSession {
   #capsule(request: EngineRoundCapsuleRequest): EngineStateCapsule {
     if (request.phase === 'speculative') {
       return createEngineMcpRuntime(this.#state, {
+        offerEnvironment: this.offerEnvironment,
         runId: request.runId,
         branchId: request.branchId,
         revision: request.revision,
@@ -653,6 +665,7 @@ export class EngineRoundSession {
       }).feed.current();
     }
     return createEngineMcpRuntime(this.#state, {
+      offerEnvironment: this.offerEnvironment,
       runId: request.runId,
       branchId: request.branchId,
       revision: request.revision,

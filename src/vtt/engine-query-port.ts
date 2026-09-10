@@ -67,6 +67,7 @@ import type {
   PerceivedTargetKnowledge,
 } from './intel/actor-knowledge';
 import type { EngineOfferableOption, EngineOptionId } from './turn-proposal';
+import type { EngineOptionEnvironment } from './offers/offer-environment';
 
 export interface TacticalAllocationChoice {
   readonly actorId: CombatantId;
@@ -899,7 +900,11 @@ export function engineActionRangeFeet(
 }
 
 /** Canonical registry lens used while minting a read-only state capsule. */
-export function engineActionRegistry(state: EncounterState, revision = state.revision): {
+export function engineActionRegistry(
+  state: EncounterState,
+  revision = state.revision,
+  queries: EngineQueryPort = canonicalEngineQueryPort,
+): {
   actionsFor(combatantId: CombatantId): readonly {
     readonly actionId: string;
     readonly slot: 'main' | 'bonus';
@@ -1018,7 +1023,7 @@ export function engineActionRegistry(state: EncounterState, revision = state.rev
       }));
     },
     optionsFor(combatantId) {
-      return availableEngineActorOptions(state, combatantId, canonicalEngineQueryPort, revision);
+      return availableEngineActorOptions(state, combatantId, queries, revision);
     },
     planningFactsFor(combatantId) {
       return enginePlanningCombatantFacts(state, combatantId);
@@ -1033,6 +1038,14 @@ export function engineActionRegistry(state: EncounterState, revision = state.rev
       return enginePlanningSemanticZones(state);
     },
   };
+}
+
+export function engineActionRegistryForEnvironment(
+  state: EncounterState,
+  environment: EngineOptionEnvironment,
+  revision = state.revision,
+) {
+  return engineActionRegistry(state, revision, environment.queries);
 }
 
 function positionedCandidates(
