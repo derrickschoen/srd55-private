@@ -218,6 +218,12 @@ export type SaveManagerIntent =
   | { readonly kind: 'choose_folder' }
   | { readonly kind: 'upload_file' };
 
+/** Browser-owned navigation is performed only after lifecycle persistence settles. */
+export type SaveManagerNavigationInstruction = {
+  readonly kind: 'open_new_session';
+  readonly deletedSessionId: EncounterSessionId;
+};
+
 export interface SaveManagerOperations {
   load(save: SaveManagerEntry): void | Promise<void>;
   rename(save: SaveManagerEntry, name: string): void | Promise<void>;

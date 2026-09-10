@@ -15,13 +15,14 @@ import {
   StaleControllerResponseError,
   type Controller,
   type ControllerDecision,
+  type ControllerIdentity,
   type ControllerRequest,
 } from '../../../src/combat/controllers';
 import {
   TurnCoordinator,
   type PersistedCoordinatorState,
 } from '../../../src/combat/coordinator';
-import { createEncounter } from '../../../src/combat/encounter';
+import { createEncounter, type EncounterState } from '../../../src/combat/encounter';
 import { dmVisibleEncounter, projectDmView, projectPlayerView } from '../../../src/combat/visibility';
 import type { EncounterCommand } from '../../../src/combat/events';
 import { mulberry32 } from '../../../src/combat/random';
@@ -53,7 +54,7 @@ import {
   replaySessionRevisions,
   sessionHistory,
   validateVttSessionMigrationRegistry,
-  type BrowserSessionStore,
+  type SessionStore,
   type MirrorSink,
   type SessionRevision,
 } from '../../../src/vtt/session-persistence';
@@ -64,6 +65,7 @@ import {
   dieSides,
 } from '../../../src/combat/values';
 import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
+import { DmEncounterHost } from '../../../src/vtt/dm-encounter-host';
 
 const INITIAL_COORDINATOR_STATE: PersistedCoordinatorState = {
   requestSequence: 1,
@@ -74,7 +76,11 @@ const INITIAL_COORDINATOR_STATE: PersistedCoordinatorState = {
 };
 
 const declaredInputs = declareTestInputs({
-  fixtures: ['tests/fixtures/vtt/pre-agent-binding-v7-save.json'],
+  fixtures: [
+    'tests/fixtures/vtt/pre-agent-binding-v7-save.json',
+    'tests/fixtures/vtt/pending-request-baseline.v1.json',
+    'tests/fixtures/vtt/pending-request-baseline.v1.sha256',
+  ],
 });
 
 function pair() {
@@ -92,7 +98,7 @@ function pair() {
 }
 
 function createJournal(
-  store: BrowserSessionStore,
+  store: SessionStore,
   mirror: MirrorSink,
   registry: ControllerRegistry,
   state = pair().state,
@@ -122,7 +128,7 @@ function copyPrefix(
 }
 
 function latestProof(
-  store: BrowserSessionStore,
+  store: SessionStore,
   sessionId = encounterSessionId('session:persistence-test'),
 ): string {
   const revisions = store.revisions(sessionId);
@@ -138,7 +144,7 @@ function latestProof(
   });
 }
 
-function expectEveryRevisionReloads(store: BrowserSessionStore): void {
+function expectEveryRevisionReloads(store: SessionStore): void {
   const sessionId = encounterSessionId('session:persistence-test');
   const revisions = store.revisions(sessionId);
   for (let count = 1; count <= revisions.length; count += 1) {
@@ -178,6 +184,95 @@ class CountingController extends HumanController {
 }
 
 describe('event-sourced encounter persistence', () => {
+  it('keeps the supervisor-authored pending-request baseline byte-identical', () => {
+    const path = 'tests/fixtures/vtt/pending-request-baseline.v1.json';
+    const bytes = declaredInputs.fixtures.readText(path);
+    const recorded = declaredInputs.fixtures.readText(
+      'tests/fixtures/vtt/pending-request-baseline.v1.sha256',
+    ).trim().split(/\s+/u)[0];
+    const baseline = JSON.parse(bytes) as {
+      readonly coordinatorState: PersistedCoordinatorState;
+      readonly hashes: {
+        readonly coordinatorStateCanonicalJsonSha256: string;
+        readonly pendingRequestCanonicalJsonSha256: string;
+      };
+    };
+
+    expect(sha256(bytes)).toBe('8e2e2f0e3d26fb7c43d350716c4aad881a10af98fed1a32b90039c9c8baea4e6');
+    expect(recorded).toBe(sha256(bytes));
+    expect(sha256(canonicalJson(baseline.coordinatorState)))
+      .toBe(baseline.hashes.coordinatorStateCanonicalJsonSha256);
+    expect(sha256(canonicalJson(baseline.coordinatorState.pendingRequest)))
+      .toBe(baseline.hashes.pendingRequestCanonicalJsonSha256);
+  });
+
+  it('restores a pending request as stale and re-offers only after resume', async () => {
+    const baseline = JSON.parse(declaredInputs.fixtures.readText(
+      'tests/fixtures/vtt/pending-request-baseline.v1.json',
+    )) as {
+      readonly encounterState: EncounterState;
+      readonly coordinatorState: PersistedCoordinatorState;
+      readonly reconstruction: {
+        readonly sessionId: string;
+        readonly branchId: string;
+        readonly seed: number;
+        readonly controllers: readonly ControllerIdentity[];
+      };
+    };
+    const request = baseline.coordinatorState.pendingRequest;
+    if (request === null) throw new Error('Supervisor baseline is missing its pending request.');
+    const store = new MemoryBrowserSessionStore();
+    EncounterSessionJournal.create({
+      sessionId: encounterSessionId(baseline.reconstruction.sessionId),
+      branchId: encounterBranchId(baseline.reconstruction.branchId),
+      encounterState: baseline.encounterState,
+      coordinatorState: baseline.coordinatorState,
+      controllers: baseline.reconstruction.controllers,
+      rng: mulberry32(baseline.reconstruction.seed),
+      store,
+      mirror: new MemoryMirrorSink(),
+    });
+    const playerId = baseline.encounterState.combatants.find(
+      (combatant) => combatant.profile.kind === 'player_character',
+    )?.profile.id;
+    if (playerId === undefined) throw new Error('Supervisor baseline is missing its player.');
+    const host = new DmEncounterHost(baseline.reconstruction.sessionId, store, {
+      playerIds: [playerId],
+      turnLegalActions: (_state, actor) => ({ actions: [{ type: 'end_turn', actor }] }),
+    });
+
+    expect(host.snapshot().dm.coordinator.pause).toEqual({ kind: 'interrupted' });
+    expect(host.snapshot().dm.pendingRequest).toBeNull();
+    await expect(host.submitHumanDecisionTransaction(request.actorId, {
+      requestId: request.requestId,
+      encounterRevision: request.encounterRevision,
+      action: request.legalActions.actions[0]!,
+    })).resolves.toMatchObject({ kind: 'refused' });
+
+    const fresh = new Promise<NonNullable<typeof request>>((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('Restored request was not refreshed.')), 1_000);
+      const unsubscribe = host.subscribe((snapshot) => {
+        const pending = snapshot.dm.pendingRequest;
+        if (pending === null) return;
+        clearTimeout(timeout);
+        unsubscribe();
+        resolve(pending);
+      });
+    });
+    host.resume();
+    const reoffered = await fresh;
+    expect(reoffered.requestId).not.toBe(request.requestId);
+    expect(reoffered.encounterRevision).toBe(baseline.encounterState.revision);
+    expect(reoffered.legalActions.actions).toEqual(request.legalActions.actions);
+    host.close();
+  });
+
+  it('exposes an explicit no-op durability barrier for memory storage', async () => {
+    const store: SessionStore = new MemoryBrowserSessionStore();
+
+    await expect(store.flush()).resolves.toBeUndefined();
+  });
+
   it('preserves known sizes and emits explicit v10 adjudication records for every unknown', () => {
     const migration = VTT_SESSION_MIGRATIONS.find((candidate) => candidate.from === 10 && candidate.to === 11);
     if (migration === undefined) throw new Error('The session 10-to-11 migration is not registered.');
@@ -702,7 +797,7 @@ describe('event-sourced encounter persistence', () => {
     expectEveryRevisionReloads(store);
   });
 
-  it('REACTION-PROMPT-RESUME keeps the unresolved request id and finishes the movement continuation', async () => {
+  it('REACTION-PROMPT-RESUME refreshes the unresolved request and finishes the movement continuation', async () => {
     const mover = monsterProfile('resume-mover', { initiativeBonus: 20 });
     const reactor = playerProfile('resume-reactor', { initiativeBonus: -20 });
     const state = createEncounter({
@@ -796,7 +891,9 @@ describe('event-sourced encounter persistence', () => {
     await Promise.resolve();
     const recoveredRequest = resumedHuman.pendingRequest();
     if (recoveredRequest === null) throw new Error('Expected the resumed prompt.');
-    expect(recoveredRequest.requestId).toBe(originalRequest.requestId);
+    expect(recoveredRequest.requestId).not.toBe(originalRequest.requestId);
+    expect(recoveredRequest.encounterRevision).toBe(originalRequest.encounterRevision);
+    expect(recoveredRequest.legalActions).toEqual(originalRequest.legalActions);
     resumedHuman.submit({
       requestId: recoveredRequest.requestId,
       encounterRevision: recoveredRequest.encounterRevision,
@@ -1058,7 +1155,7 @@ describe('event-sourced encounter persistence', () => {
     expectEveryRevisionReloads(refusalStore);
   });
 
-  it('IN-FLIGHT-AGENT-RESUME redispatches the exact durable request envelope', async () => {
+  it('IN-FLIGHT-AGENT-RESUME refreshes a stale durable request before redispatch', async () => {
     const fixture = pair();
     let originalRequestId: string | null = null;
     const never = new Promise<unknown>(() => undefined);
@@ -1121,7 +1218,8 @@ describe('event-sourced encounter persistence', () => {
       },
     );
     expect((await recovered.step()).kind).toBe('applied');
-    expect(recoveredRequestId).toBe(originalRequestId);
+    expect(recoveredRequestId).not.toBe(originalRequestId);
+    expect(recoveredRequestId).toBe('turn:1:combatant:persist-player:2');
   });
 
   it('MIRROR-QUEUE-AND-MIGRATION keeps browser authority and deterministic export', () => {
@@ -1178,6 +1276,7 @@ describe('event-sourced encounter persistence', () => {
       ]);
       const database = new DatabaseContext(connection);
       const store = new SqliteBrowserSessionStore(database);
+      await expect(store.flush()).resolves.toBeUndefined();
       const { journal, rng } = createJournal(
         store,
         new MemoryMirrorSink(),

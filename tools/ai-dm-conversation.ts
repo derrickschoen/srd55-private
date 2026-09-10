@@ -106,7 +106,7 @@ import {
 } from '../src/vtt/dm-bridge/projection-transport';
 import {
   EncounterSessionJournal, importSavedSession, MemoryBrowserSessionStore,
-  MemoryMirrorSink, type BrowserSessionStore,
+  MemoryMirrorSink, type SessionStore,
 } from '../src/vtt/session-persistence';
 import {
   TurnExhaustionCoordinator, type DeterministicProposalResolution,
@@ -693,7 +693,7 @@ export interface TurnContextRenderEvidence {
 
 export interface ConversationRunOptions {
   readonly roomStates?: readonly EncounterState[];
-  readonly store?: BrowserSessionStore;
+  readonly store?: SessionStore;
   readonly adapter?: AgentSessionAdapter;
   readonly boardSnapshotService?: ConversationBoardSnapshotService;
   readonly boardSnapshotServiceFactory?: (

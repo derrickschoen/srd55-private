@@ -7,6 +7,7 @@ import {
 } from '../combat/controllers';
 import {
   TurnCoordinator,
+  type CoordinatorStep,
   type PersistedCoordinatorState,
   type ReactionLegalActions,
   type TurnLegalActions,
@@ -32,7 +33,7 @@ import type { AgentSessionBinding } from './agent-session';
 import {
   DeferredMirrorSink,
   EncounterSessionJournal,
-  type BrowserSessionStore,
+  type SessionStore,
   type MirrorSink,
   type SessionResume,
 } from './session-persistence';
@@ -75,6 +76,8 @@ import {
   projectPlayerBoard,
   type DmBoardProjection,
   type PlayerBoardProjection,
+  type PlayerSeatBinding,
+  type RendererTokenBinding,
 } from './encounter-projections';
 import {
   REFERENCE_PLAYER_IDS,
@@ -197,6 +200,33 @@ export interface DmEncounterHostSnapshot {
   readonly player: PlayerBoardProjection;
 }
 
+export type HostCoordinatorTransactionOutcome =
+  | { readonly kind: 'committed'; readonly revision: number }
+  | { readonly kind: 'refused'; readonly reason: string }
+  | { readonly kind: 'cancelled'; readonly reason: string }
+  | { readonly kind: 'closed' }
+  | {
+      readonly kind: 'failed';
+      readonly phase: 'pre_apply' | 'post_apply';
+      readonly error: unknown;
+      readonly currentRevision: number;
+    };
+
+export type HostDoorSetOutcome =
+  | { readonly kind: 'committed'; readonly revision: number; readonly changed: boolean }
+  | { readonly kind: 'unsupported'; readonly reason: string }
+  | { readonly kind: 'closed' }
+  | {
+      readonly kind: 'failed';
+      readonly phase: 'pre_apply' | 'post_apply';
+      readonly error: unknown;
+      readonly currentRevision: number;
+    };
+
+interface HostTransactionWaiter {
+  readonly resolve: (outcome: HostCoordinatorTransactionOutcome) => void;
+}
+
 export class ControllerAssignmentError extends Error {
   override readonly name = 'ControllerAssignmentError' as const;
 
@@ -211,17 +241,27 @@ export class ControllerAssignmentError extends Error {
 
 export interface DmBridgeConnection extends DmBridgeExchange, MirrorSink {}
 
-function hasDurableFlush(
-  store: BrowserSessionStore,
-): store is BrowserSessionStore & { flush(): Promise<void> } {
-  return typeof Reflect.get(store, 'flush') === 'function';
+type DoorBlocking = EncounterState['worldObjects'][number]['blocking'];
+
+function canonicalDoorState(blocking: DoorBlocking): boolean | null {
+  if (!blocking.movement && !blocking.lineOfSight && blocking.cover === 'none') return true;
+  if (blocking.movement && blocking.lineOfSight && blocking.cover === 'total') return false;
+  return null;
+}
+
+function doorBlockingFor(open: boolean): DoorBlocking {
+  return open
+    ? { movement: false, lineOfSight: false, cover: 'none' }
+    : { movement: true, lineOfSight: true, cover: 'total' };
 }
 
 export class DmEncounterHost {
   readonly sessionId: EncounterSessionId;
-  readonly #store: BrowserSessionStore;
+  readonly #store: SessionStore;
   readonly #mirror = new DeferredMirrorSink();
   readonly #listeners = new Set<(snapshot: DmEncounterHostSnapshot) => void>();
+  readonly #transactionWaiters = new Map<string, HostTransactionWaiter>();
+  #activeTransactionRequestId: string | null = null;
   #journal: EncounterSessionJournal;
   #registry: ControllerRegistry;
   #humans: ReadonlyMap<CombatantId, HumanController>;
@@ -229,6 +269,7 @@ export class DmEncounterHost {
   #rng: SerializableRng;
   #pump: Promise<void> | null = null;
   #repumpRequested = false;
+  #repumpBlocked = false;
   #closed = false;
   #bridgeFailureGuard: BridgeFailureGuard | null = null;
   #roundPlanSession: DmRoundPlanSession | null = null;
@@ -254,7 +295,7 @@ export class DmEncounterHost {
 
   constructor(
     sessionKey: string,
-    store: BrowserSessionStore,
+    store: SessionStore,
     options: {
       readonly initialState?: EncounterState;
       readonly initialSeed?: EncounterSeed;
@@ -449,6 +490,26 @@ export class DmEncounterHost {
     };
   }
 
+  playerSnapshot(binding: PlayerSeatBinding): PlayerBoardProjection {
+    const player = projectPlayerBoard(
+      projectPlayerView(this.#coordinator.state(), {
+        seatId: binding.seatId,
+        combatantId: binding.observerCombatantId,
+        ownedCombatantIds: binding.ownedCombatantIds,
+      }),
+      this.#coordinator.coordinatorState(),
+      this.#journal.partyState(),
+    );
+    return this.#closed ? { ...player, authorityStatus: 'hard_paused' } : player;
+  }
+
+  rendererTokenBindings(): readonly RendererTokenBinding[] {
+    return this.#coordinator.state().tokens.map((token) => ({
+      tokenId: String(token.id),
+      combatantId: token.combatantId,
+    }));
+  }
+
   sessionEnded(): boolean {
     return this.#journal.ended();
   }
@@ -516,37 +577,68 @@ export class DmEncounterHost {
   }
 
   async #pumpCoordinator(): Promise<void> {
-    if (this.#closed) return;
+    if (this.#closed || this.#repumpBlocked) return;
     if (this.#pump !== null) {
       if (this.#coordinator.pauseState() === null) this.#repumpRequested = true;
       return this.#pump;
     }
     this.#pump = (async () => {
       for (;;) {
-        if (this.#closed || this.#coordinator.pauseState() !== null) return;
+        if (this.#closed || this.#repumpBlocked || this.#coordinator.pauseState() !== null) return;
         const step = this.#coordinator.step();
-        await Promise.resolve();
         const pendingRequest = this.#coordinator.coordinatorState().pendingRequest;
+        const transactionRequestId = this.#activeTransactionRequestId ?? pendingRequest?.requestId ?? null;
         if (
           pendingRequest !== null &&
           this.#registry.kindFor(pendingRequest.actorId) !== 'algorithm'
         ) {
-          const preStepFlush = this.#flushStore();
-          if (preStepFlush !== null) await preStepFlush;
+          await this.#store.flush();
         }
         this.#publish();
-        let result;
+        let result: CoordinatorStep;
         try {
           result = await step;
         } catch (error: unknown) {
+          if (transactionRequestId !== null) {
+            this.#settleTransaction(transactionRequestId, {
+              kind: 'failed',
+              phase: 'pre_apply',
+              error,
+              currentRevision: this.#coordinator.state().revision,
+            });
+          }
           if (this.#bridgeFailureGuard?.report() !== null) return;
           throw error;
         }
-        const autoResolvedReactions = this.#autoResolveUnattendedReactionOffers();
-        const postStepFlush = this.#flushStore();
-        if (postStepFlush !== null) await postStepFlush;
+        try {
+          await this.#store.flush();
+        } catch (error: unknown) {
+          if (transactionRequestId !== null) {
+            this.#settleTransaction(transactionRequestId, {
+              kind: 'failed',
+              phase: result.kind === 'applied' ? 'post_apply' : 'pre_apply',
+              error,
+              currentRevision: this.#coordinator.state().revision,
+            });
+          }
+          this.#closed = true;
+          this.#publish();
+          this.#settleAllTransactions({ kind: 'closed' });
+          throw error;
+        }
         this.#completeHandbacksAtTransactionBoundary();
         this.#publish();
+        if (transactionRequestId !== null && result.kind === 'applied') {
+          this.#settleTransaction(transactionRequestId, {
+            kind: 'committed',
+            revision: result.state.revision,
+          });
+        }
+        const autoResolvedReactions = this.#autoResolveUnattendedReactionOffers();
+        if (autoResolvedReactions > 0) {
+          await this.#store.flush();
+          this.#publish();
+        }
         if (
           autoResolvedReactions > 0 &&
           result.kind === 'refused' &&
@@ -561,6 +653,11 @@ export class DmEncounterHost {
             : null;
           if (result.actionRefusal !== undefined) this.#routeActionRefusal(result.actionRefusal);
           this.#publish();
+          if (transactionRequestId !== null) {
+            this.#settleTransaction(transactionRequestId, result.reason === 'Coordinator is paused.'
+              ? { kind: 'cancelled', reason: result.reason }
+              : { kind: 'refused', reason: result.reason });
+          }
           return;
         }
         this.#boundaryRefusal = null;
@@ -572,12 +669,27 @@ export class DmEncounterHost {
       if (
         repump &&
         !this.#closed &&
+        !this.#repumpBlocked &&
         this.#coordinator.pauseState() === null
       ) {
         void this.#pumpCoordinator();
       }
     });
     return this.#pump;
+  }
+
+  #settleTransaction(requestId: string, outcome: HostCoordinatorTransactionOutcome): void {
+    const waiter = this.#transactionWaiters.get(requestId);
+    if (waiter === undefined) return;
+    this.#transactionWaiters.delete(requestId);
+    if (this.#activeTransactionRequestId === requestId) this.#activeTransactionRequestId = null;
+    waiter.resolve(outcome);
+  }
+
+  #settleAllTransactions(outcome: HostCoordinatorTransactionOutcome): void {
+    for (const requestId of [...this.#transactionWaiters.keys()]) {
+      this.#settleTransaction(requestId, outcome);
+    }
   }
 
   #autoResolveUnattendedReactionOffers(): number {
@@ -626,10 +738,6 @@ export class DmEncounterHost {
         : { kind: 'unattended_reaction_auto_resolved', ...selected.resolution });
       resolved += 1;
     }
-  }
-
-  #flushStore(): Promise<void> | null {
-    return hasDurableFlush(this.#store) ? this.#store.flush() : null;
   }
 
   #routeActionRefusal(refusal: NonBoundaryActionRefusal): void {
@@ -752,6 +860,148 @@ export class DmEncounterHost {
     const human = this.#humans.get(actor);
     if (human === undefined) throw new Error(`Combatant ${actor} is not locally human-controlled.`);
     human.submit(decision);
+  }
+
+  submitHumanDecisionTransaction(
+    actor: CombatantId,
+    decision: Parameters<HumanController['submit']>[0],
+  ): Promise<HostCoordinatorTransactionOutcome> {
+    if (this.#closed) return Promise.resolve({ kind: 'closed' });
+    const pending = this.#coordinator.coordinatorState().pendingRequest;
+    if (
+      pending === null ||
+      pending.actorId !== actor ||
+      pending.requestId !== decision.requestId ||
+      pending.encounterRevision !== decision.encounterRevision
+    ) {
+      return Promise.resolve({ kind: 'refused', reason: 'The offered controller request is stale.' });
+    }
+    if (this.#activeTransactionRequestId !== null || this.#transactionWaiters.has(decision.requestId)) {
+      return Promise.resolve({ kind: 'refused', reason: 'The offered controller request is already settling.' });
+    }
+    return new Promise((resolve, reject) => {
+      this.#transactionWaiters.set(decision.requestId, { resolve });
+      this.#activeTransactionRequestId = decision.requestId;
+      try {
+        this.submitHumanDecision(actor, decision);
+      } catch (error: unknown) {
+        this.#transactionWaiters.delete(decision.requestId);
+        this.#activeTransactionRequestId = null;
+        reject(error);
+      }
+    });
+  }
+
+  async setDoorOpen(doorId: string, open: boolean): Promise<HostDoorSetOutcome> {
+    if (this.#closed) return { kind: 'closed' };
+    const initialState = this.#coordinator.state();
+    const initialRevision = initialState.revision;
+    const activeCombatant = initialState.activeCombatant;
+    if (activeCombatant === null) {
+      return { kind: 'unsupported', reason: 'Door changes require an active combatant.' };
+    }
+    const door = initialState.worldObjects.find((object) => String(object.id) === doorId);
+    if (door === undefined || door.kind !== 'door') {
+      return { kind: 'unsupported', reason: 'The requested world object is not a door.' };
+    }
+    const canonicalState = canonicalDoorState(door.blocking);
+    if (canonicalState === null) {
+      return { kind: 'unsupported', reason: 'The door has a noncanonical blocking state.' };
+    }
+    if (canonicalState === open) {
+      try {
+        await this.#store.flush();
+        return { kind: 'committed', revision: initialRevision, changed: false };
+      } catch (error: unknown) {
+        return {
+          kind: 'failed', phase: 'pre_apply', error,
+          currentRevision: this.#coordinator.state().revision,
+        };
+      }
+    }
+
+    const previousRequestId = this.#coordinator.coordinatorState().pendingRequest?.requestId ?? null;
+    this.#repumpBlocked = true;
+    const previousPause = this.#coordinator.pauseForExternalMutation();
+    await this.#pump;
+    const currentState = this.#coordinator.state();
+    const currentDoor = currentState.worldObjects.find((object) => String(object.id) === doorId);
+    if (
+      currentState.revision !== initialRevision ||
+      currentState.activeCombatant !== activeCombatant ||
+      currentDoor === undefined ||
+      currentDoor.kind !== 'door' ||
+      canonicalDoorState(currentDoor.blocking) !== canonicalState
+    ) {
+      this.#repumpBlocked = false;
+      if (previousPause === null) this.#coordinator.resume();
+      return { kind: 'unsupported', reason: 'The door offer became stale before apply.' };
+    }
+
+    let result: CoordinatorStep;
+    try {
+      result = this.#coordinator.applyExternalWorldOperation({
+        type: 'world_operation',
+        actor: activeCombatant,
+        cost: 'none',
+        operation: {
+          kind: 'modify_object',
+          objectId: currentDoor.id,
+          changes: { blocking: doorBlockingFor(open) },
+        },
+      });
+    } catch (error: unknown) {
+      this.#repumpBlocked = false;
+      if (previousPause === null) this.#coordinator.resume();
+      return {
+        kind: 'failed', phase: 'pre_apply', error,
+        currentRevision: this.#coordinator.state().revision,
+      };
+    }
+    if (result.kind !== 'applied') {
+      this.#repumpBlocked = false;
+      if (previousPause === null) this.#coordinator.resume();
+      return { kind: 'unsupported', reason: result.reason };
+    }
+    try {
+      await this.#store.flush();
+    } catch (error: unknown) {
+      this.#closed = true;
+      this.#repumpBlocked = false;
+      this.#publish();
+      this.#settleAllTransactions({ kind: 'closed' });
+      return {
+        kind: 'failed', phase: 'post_apply', error,
+        currentRevision: this.#coordinator.state().revision,
+      };
+    }
+    this.#publish();
+    if (previousPause === null) {
+      const freshOffer = this.#waitForFreshOffer(previousRequestId, result.state.revision);
+      this.#coordinator.resume();
+      this.#repumpBlocked = false;
+      this.#publish();
+      void this.#pumpCoordinator();
+      await freshOffer;
+    } else {
+      this.#repumpBlocked = false;
+    }
+    return { kind: 'committed', revision: result.state.revision, changed: true };
+  }
+
+  #waitForFreshOffer(previousRequestId: string | null, revision: number): Promise<void> {
+    const current = this.#coordinator.coordinatorState().pendingRequest;
+    if (current !== null && current.requestId !== previousRequestId && current.encounterRevision === revision) {
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => {
+      const unsubscribe = this.subscribe((snapshot) => {
+        const pending = snapshot.dm.pendingRequest;
+        if (pending === null || pending.requestId === previousRequestId || pending.encounterRevision !== revision) return;
+        unsubscribe();
+        resolve();
+      });
+    });
   }
 
   async resolvePendingDecision(
@@ -1117,6 +1367,7 @@ export class DmEncounterHost {
     this.#coordinator.interrupt();
     this.#closed = true;
     this.#publish();
+    this.#settleAllTransactions({ kind: 'closed' });
     this.#listeners.clear();
   }
 }

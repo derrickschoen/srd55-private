@@ -6,7 +6,7 @@ import {
   exportSavedSession,
   importSavedSession,
   migrateStoredSessionRevisions,
-  type BrowserSessionStore,
+  type SessionStore,
   type DecodedSavedSessionFingerprint,
   type SessionRevision,
 } from './session-persistence';
@@ -19,6 +19,14 @@ const LEGACY_SESSION_PREFIX = 'srd55:vtt-session:';
 const LEGACY_METADATA_PREFIX = 'srd55:vtt-session-metadata:';
 const LEGACY_TRUNCATED_PREFIX = 'srd55:vtt-session-truncated:';
 const LIKELY_LOCAL_STORAGE_LIMIT_BYTES = 4 * 1024 * 1024;
+
+export interface Clock {
+  now(): Date;
+}
+
+const SYSTEM_CLOCK: Clock = {
+  now: () => new Date(),
+};
 
 function defaultDatabaseName(): string {
   return 'srd55-vtt-sessions';
@@ -240,7 +248,7 @@ function legacySnapshot(value: string): LegacyAutosaveSnapshot | null {
  * Browser-authoritative VTT store. Rules-engine reads use the cache populated by
  * open(); flush() is the acknowledgement boundary for queued IndexedDB writes.
  */
-export class IndexedDbBrowserSessionStore implements BrowserSessionStore {
+export class IndexedDbBrowserSessionStore implements SessionStore {
   #memory = new MemoryBrowserSessionStore();
   readonly #metadata = new Map<EncounterSessionId, BrowserSaveMetadata>();
   readonly #snapshots = new Map<string, StoredAutosaveSnapshot>();
@@ -252,12 +260,13 @@ export class IndexedDbBrowserSessionStore implements BrowserSessionStore {
   private constructor(
     private readonly database: IDBDatabase,
     private readonly legacyStorage: Storage,
+    private readonly clock: Clock,
   ) {}
 
   static async open(
     indexedDb: IDBFactory,
     legacyStorage: Storage,
-    options: { readonly databaseName?: string } = {},
+    options: { readonly databaseName?: string; readonly clock?: Clock } = {},
   ): Promise<IndexedDbBrowserSessionStore> {
     let database: IDBDatabase;
     try {
@@ -265,7 +274,11 @@ export class IndexedDbBrowserSessionStore implements BrowserSessionStore {
     } catch (error: unknown) {
       throw storageError('open', error);
     }
-    const store = new IndexedDbBrowserSessionStore(database, legacyStorage);
+    const store = new IndexedDbBrowserSessionStore(
+      database,
+      legacyStorage,
+      options.clock ?? SYSTEM_CLOCK,
+    );
     try {
       await store.#migrateLegacy();
       await store.#preload();
@@ -290,7 +303,7 @@ export class IndexedDbBrowserSessionStore implements BrowserSessionStore {
     const metadata: BrowserSaveMetadata = {
       sessionId: revision.sessionId,
       name: current?.name ?? revision.sessionId,
-      updatedAt: new Date().toISOString(),
+      updatedAt: this.clock.now().toISOString(),
       retention: current?.retention ?? { kind: 'autosave', pool: 'per_round' },
       migrationStatus: current?.migrationStatus ?? 'native',
     };
@@ -323,7 +336,7 @@ export class IndexedDbBrowserSessionStore implements BrowserSessionStore {
     const metadata: BrowserSaveMetadata = {
       sessionId: first.sessionId,
       name: current?.name ?? first.sessionId,
-      updatedAt: new Date().toISOString(),
+      updatedAt: this.clock.now().toISOString(),
       retention: current?.retention ?? { kind: 'autosave', pool: 'per_round' },
       migrationStatus: current?.migrationStatus ?? 'native',
     };
@@ -496,7 +509,7 @@ export class IndexedDbBrowserSessionStore implements BrowserSessionStore {
       trigger,
       pool,
       name: `${pool === 'per_round' ? 'Round' : 'Encounter boundary'} — ${trigger.replaceAll('_', ' ')} — r${String(revision.encounterState.round)}`,
-      updatedAt: new Date().toISOString(),
+      updatedAt: this.clock.now().toISOString(),
       retention: { kind: 'autosave', pool },
     };
   }

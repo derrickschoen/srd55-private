@@ -319,6 +319,22 @@ function boundaryPartyMembers(): readonly LoadedPartyMember[] {
 }
 
 describe('IndexedDB durable VTT session adapter', () => {
+  it('uses the injected clock for imported session metadata', async () => {
+    const source = legacySession('session:clocked-import');
+    const store = await IndexedDbBrowserSessionStore.open(new IDBFactory(), new MemoryStorage(), {
+      databaseName: 'clocked-import',
+      clock: { now: () => new Date('2042-08-24T12:34:56.000Z') },
+    });
+
+    store.import(source.bytes);
+    await store.flush();
+
+    expect(store.savedSessions()).toEqual([
+      expect.objectContaining({ updatedAt: '2042-08-24T12:34:56.000Z' }),
+    ]);
+    store.close();
+  });
+
   it('opens the exact default database and stores, and close delegates to IndexedDB', async () => {
     const indexedDb = new IDBFactory();
     const close = vi.spyOn(IDBDatabase.prototype, 'close');

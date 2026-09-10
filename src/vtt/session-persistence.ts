@@ -300,10 +300,11 @@ export interface SessionRevision extends SessionRevisionBody {
   readonly checksum: string;
 }
 
-export interface BrowserSessionStore {
+export interface SessionStore {
   append(revision: SessionRevision): void;
   appendAll(revisions: readonly SessionRevision[]): void;
   revisions(sessionId: EncounterSessionId): readonly SessionRevision[];
+  flush(): Promise<void>;
 }
 
 export interface MirrorSink {
@@ -373,7 +374,7 @@ function verifyRevisionSequence(
   }
 }
 
-export class MemoryBrowserSessionStore implements BrowserSessionStore {
+export class MemoryBrowserSessionStore implements SessionStore {
   readonly #bySession = new Map<EncounterSessionId, SessionRevision[]>();
 
   append(revision: SessionRevision): void {
@@ -404,9 +405,11 @@ export class MemoryBrowserSessionStore implements BrowserSessionStore {
   revisions(sessionId: EncounterSessionId): readonly SessionRevision[] {
     return [...(this.#bySession.get(sessionId) ?? [])];
   }
+
+  async flush(): Promise<void> {}
 }
 
-export class SqliteBrowserSessionStore implements BrowserSessionStore {
+export class SqliteBrowserSessionStore implements SessionStore {
   constructor(private readonly db: DatabaseContext) {}
 
   append(revision: SessionRevision): void {
@@ -482,6 +485,8 @@ export class SqliteBrowserSessionStore implements BrowserSessionStore {
     });
     return stored.length === 0 ? [] : migrateStoredSessionRevisions(stored);
   }
+
+  async flush(): Promise<void> {}
 }
 
 function revisionChecksum(body: SessionRevisionBody): string {
@@ -1619,7 +1624,7 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
 
   private constructor(
     readonly sessionId: EncounterSessionId,
-    private readonly store: BrowserSessionStore,
+    private readonly store: SessionStore,
     private readonly mirror: MirrorSink,
     rng: SerializableRng,
   ) {
@@ -1634,7 +1639,7 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
     readonly coordinatorState: PersistedCoordinatorState;
     readonly controllers: readonly ControllerIdentity[];
     readonly rng: SerializableRng;
-    readonly store: BrowserSessionStore;
+    readonly store: SessionStore;
     readonly mirror: MirrorSink;
   }): EncounterSessionJournal {
     if (input.store.revisions(input.sessionId).length !== 0) {
@@ -1661,7 +1666,7 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
 
   static resume(
     sessionId: EncounterSessionId,
-    store: BrowserSessionStore,
+    store: SessionStore,
     mirror: MirrorSink,
   ): SessionResume {
     const revisions = store.revisions(sessionId);
@@ -3362,7 +3367,7 @@ export function migrateStoredSessionRevisions(
 }
 
 export function exportSavedSession(
-  store: BrowserSessionStore,
+  store: SessionStore,
   sessionId: EncounterSessionId,
 ): string {
   const revisions = store.revisions(sessionId);
@@ -3399,7 +3404,7 @@ export function decodeSavedSessionFingerprint(
 }
 
 export function importSavedSession(
-  store: BrowserSessionStore,
+  store: SessionStore,
   bytes: string,
 ): EncounterSessionId {
   const bundle = migrateSavedBundle(JSON.parse(bytes));
@@ -3412,7 +3417,7 @@ export function importSavedSession(
 }
 
 export function exportSavedSessionV1ForMigrationTest(
-  store: BrowserSessionStore,
+  store: SessionStore,
   sessionId: EncounterSessionId,
 ): string {
   const revisions = store.revisions(sessionId).map((revision) => {
@@ -3445,7 +3450,7 @@ export function exportSavedSessionV1ForMigrationTest(
 }
 
 export function exportSavedSessionV5ForMigrationTest(
-  store: BrowserSessionStore,
+  store: SessionStore,
   sessionId: EncounterSessionId,
 ): string {
   const revisions = store.revisions(sessionId).map((revision) => {

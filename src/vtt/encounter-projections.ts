@@ -68,6 +68,19 @@ export interface ProjectedControllerRequest {
   readonly actorId: CombatantId;
   readonly moverId?: CombatantId;
   readonly legalActions: readonly EncounterCommand[];
+  readonly offeredActionIds: readonly string[];
+}
+
+/** Authority-owned seat data used only as input to the canonical visibility filter. */
+export interface PlayerSeatBinding {
+  readonly seatId: string;
+  readonly observerCombatantId: CombatantId;
+  readonly ownedCombatantIds: readonly CombatantId[];
+}
+
+export interface RendererTokenBinding {
+  readonly tokenId: string;
+  readonly combatantId: CombatantId;
 }
 
 export interface PlayerBoardProjection {
@@ -221,6 +234,9 @@ function projectedRequest(
     actorId: request.actorId,
     ...(request.kind === 'reaction' ? { moverId: request.moverId } : {}),
     legalActions: request.legalActions.actions,
+    offeredActionIds: request.legalActions.actions.map(
+      (_action, index) => `${request.requestId}:option:${String(index)}`,
+    ),
   };
 }
 

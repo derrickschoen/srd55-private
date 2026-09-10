@@ -246,6 +246,7 @@ export class TurnCoordinator {
   #lastAttemptedCommand: EncounterCommand | null = null;
   #continuation: CoordinatorContinuation;
   #pause: CoordinatorPause | null;
+  #restoredOfferStale: boolean;
   readonly #pendingAbort = new Map<CombatantId, AbortController>();
   readonly #policies = new Map<CombatantId, StandingReactionPolicy>();
   readonly #turnLegalActions: TurnLegalActions;
@@ -267,6 +268,12 @@ export class TurnCoordinator {
     this.#pendingCommand = options.resume?.pendingCommand ?? null;
     this.#continuation = options.resume?.continuation ?? IDLE;
     this.#pause = options.resume?.pause ?? null;
+    this.#restoredOfferStale = options.resume?.pendingRequest !== null &&
+      options.resume?.pendingRequest !== undefined;
+    if (this.#restoredOfferStale) {
+      this.#pendingRequest = null;
+      this.#pendingCommand = null;
+    }
     this.#persistence = options.persistence;
     this.#reactionDecision = options.reactionDecision;
     this.#pendingDecisionTray = options.pendingDecisionTray ?? false;
@@ -343,6 +350,24 @@ export class TurnCoordinator {
     this.#cancelPendingRequest();
     this.#pause = { kind: 'interrupted' };
     this.#record({ kind: 'coordinator_paused', pause: this.#pause });
+  }
+
+  pauseForExternalMutation(): CoordinatorPause | null {
+    const previous = this.#pause;
+    if (this.#pause === null) {
+      this.#pause = { kind: 'interrupted' };
+      this.#record({ kind: 'coordinator_paused', pause: this.#pause });
+    }
+    this.#cancelPendingRequest();
+    return previous;
+  }
+
+  applyExternalWorldOperation(
+    command: Extract<EncounterCommand, { readonly type: 'world_operation' }>,
+  ): CoordinatorStep {
+    const reduction = this.#apply(command, this.#continuation);
+    this.#restoredOfferStale = true;
+    return { kind: 'applied', state: this.#state, events: reduction.events };
   }
 
   resume(): void {
@@ -773,6 +798,22 @@ export class TurnCoordinator {
     try {
       if (this.#pause !== null) {
         return { kind: 'refused', state: this.#state, reason: 'Coordinator is paused.' };
+      }
+      if (this.#restoredOfferStale) {
+        this.#restoredOfferStale = false;
+        this.#pendingRequest = null;
+        this.#pendingCommand = null;
+        if (this.#continuation.kind === 'turn') {
+          this.#continuation = {
+            kind: 'turn',
+            actor: this.#continuation.actor,
+            legalActions: legalizeTurnActions(
+              this.#state,
+              this.#continuation.actor,
+              this.#turnLegalActions(this.#state, this.#continuation.actor),
+            ),
+          };
+        }
       }
       if (this.#state.phase.kind === 'concluded') {
         const error = new EncounterConcludedBoundaryError(
