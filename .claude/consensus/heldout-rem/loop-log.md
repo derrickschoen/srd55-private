@@ -12,3 +12,5 @@
 - 2026-09-10 08:30 r5 verified (serial; two D576 load flakes cleared alone 111/111); committed c0dab908; Astra r5 dispatched.
 
 - 2026-09-10 08:41 EDT — r5 Astra REJECT (F12–F17 High: glob base/extglob/**, #imports ordering, loader escapes, worker aliases, data: whitespace, config-only changes); review saved review-r5-astra.md; r6 dispatched (resume 01a088b4…, brief resume-heldout-rem-r6.md, header restated in full — the r5 brief had omitted it).
+
+- 2026-09-10 09:04 EDT — r6 lane DONE; supervisor verification tsc/sg/diffcheck 0, 9 specs 391/391; committed 472d5262; Astra r6 review dispatched (resume 01a088d6…).
