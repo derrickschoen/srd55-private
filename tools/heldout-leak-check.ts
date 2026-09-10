@@ -29,6 +29,8 @@ export interface HeldoutLeakReport {
   readonly reserveDigests: readonly string[];
   readonly resultPaths: readonly string[];
   readonly checkedFiles: number;
+  /** Files which completed the full TypeScript AST and symbol inspection pass. */
+  readonly astInspectedFiles: number;
   readonly findings: readonly HeldoutLeakFinding[];
 }
 
@@ -88,6 +90,41 @@ function isTypeScriptOrJavaScript(path: string): boolean {
     .some((extension) => path.endsWith(extension));
 }
 
+interface PreparedModuleAnalysis {
+  readonly sourceFile: ts.SourceFile;
+  readonly checker: ts.TypeChecker;
+}
+
+function prepareModuleAnalyses(
+  sources: ReadonlyMap<string, string>,
+): ReadonlyMap<string, PreparedModuleAnalysis> {
+  const sourceFiles = new Map([...sources].map(([path, source]) => [
+    path,
+    ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, scriptKind(path)),
+  ]));
+  const compilerOptions: ts.CompilerOptions = {
+    allowJs: true,
+    checkJs: false,
+    noLib: true,
+    noResolve: true,
+    target: ts.ScriptTarget.Latest,
+  };
+  const compilerHost: ts.CompilerHost = {
+    fileExists: (fileName) => sourceFiles.has(fileName),
+    getCanonicalFileName: (fileName) => fileName,
+    getCurrentDirectory: () => '',
+    getDefaultLibFileName: () => '',
+    getDirectories: () => [],
+    getNewLine: () => '\n',
+    getSourceFile: (fileName) => sourceFiles.get(fileName),
+    readFile: (fileName) => sources.get(fileName),
+    useCaseSensitiveFileNames: () => true,
+    writeFile: () => undefined,
+  };
+  const checker = ts.createProgram([...sources.keys()], compilerOptions, compilerHost).getTypeChecker();
+  return new Map([...sourceFiles].map(([path, sourceFile]) => [path, { sourceFile, checker }]));
+}
+
 type ModuleEdgeSyntax =
   | 'static_import'
   | 're_export'
@@ -140,10 +177,11 @@ export const HELDOUT_MODULE_SPECIFIER_POLICY = {
     'a known loader reference escaping recognized call syntax is loader_reference_escaped',
   ],
   interpreted: [
-    'loader-valued expressions are built-in loaders, their load/resolve/glob members, createRequire factories and results, workers, script loaders, and exact plain const aliases',
+    'loader-valued expressions are require, module.require, importScripts, Worker or SharedWorker (bare or global-qualified), require.resolve, import.meta.resolve, import.meta.glob, createRequire from module built-ins and its result, worker_threads.Worker, and exact aliases',
     'namespace roots such as window, self, globalThis, import.meta, and module namespaces are inspected only to derive loader-valued members and are never findings themselves',
-    'a loader-valued expression is allowed only as a recognized direct callee/receiver with a statically resolved target or the whole initializer of a non-exported plain const alias',
+    'a loader-valued expression is allowed only as a direct callee with a constant specifier, a receiver leading to a recognized member call, or the whole initializer of a non-exported plain-identifier const alias',
     'resolution configuration changes invalidate candidate consumers for reinspection',
+    'every eligible candidate file receives the full AST and symbol inspection pass without a textual pre-gate',
   ],
   failsClosed: [
     'every other position of a loader-valued expression is loader_reference_escaped from one generic check',
@@ -406,14 +444,10 @@ function discoverModuleEdges(
   source: string,
   context: HeldoutLeakInspectionContext = {},
   dataDepth = 0,
+  prepared?: PreparedModuleAnalysis,
 ): readonly ModuleEdge[] {
-  const sourceFile = ts.createSourceFile(
-    path,
-    source,
-    ts.ScriptTarget.Latest,
-    true,
-    scriptKind(path),
-  );
+  const sourceFile = prepared?.sourceFile ?? ts.createSourceFile(
+    path, source, ts.ScriptTarget.Latest, true, scriptKind(path));
   const parseDiagnostics = (sourceFile as ts.SourceFile & {
     readonly parseDiagnostics?: readonly ts.Diagnostic[];
   }).parseDiagnostics ?? [];
@@ -436,32 +470,12 @@ function discoverModuleEdges(
     | 'worker'
     | 'shared_worker'
     | 'script_loader';
-  const compilerOptions: ts.CompilerOptions = {
-    allowJs: true,
-    checkJs: false,
-    noLib: true,
-    noResolve: true,
-    target: ts.ScriptTarget.Latest,
-  };
-  const compilerHost: ts.CompilerHost = {
-    fileExists: (fileName) => fileName === path,
-    getCanonicalFileName: (fileName) => fileName,
-    getCurrentDirectory: () => '',
-    getDefaultLibFileName: () => '',
-    getDirectories: () => [],
-    getNewLine: () => '\n',
-    getSourceFile: (fileName) => fileName === path ? sourceFile : undefined,
-    readFile: (fileName) => fileName === path ? source : undefined,
-    useCaseSensitiveFileNames: () => true,
-    writeFile: () => undefined,
-  };
-  const needsLoaderSymbols = /\b(?:require|createRequire|Worker|SharedWorker|importScripts)\b|import\.meta|['"](?:node:)?(?:module|worker_threads)['"]/u.test(source);
-  const checker = needsLoaderSymbols
-    ? ts.createProgram([path], compilerOptions, compilerHost).getTypeChecker()
-    : null;
+  const checker = prepared?.checker ??
+    prepareModuleAnalyses(new Map([[path, source]])).get(path)?.checker;
+  if (checker === undefined) throw new TypeError(`Held-out leak inspection lost ${path}.`);
   const trackedSymbols = new Map<ts.Symbol, Set<TrackedLoaderKind>>();
+  const trackedNames = new Set<string>();
   const symbolAt = (identifier: ts.Identifier): ts.Symbol | undefined => {
-    if (checker === null) return undefined;
     if (ts.isExportSpecifier(identifier.parent)) {
       return checker.getExportSpecifierLocalTargetSymbol(identifier.parent) ??
         checker.getSymbolAtLocation(identifier);
@@ -472,6 +486,7 @@ function discoverModuleEdges(
     }
     return checker.getSymbolAtLocation(identifier);
   };
+  const identifierText = (identifier: ts.Identifier): string => String(identifier.escapedText);
   const addTrackedSymbol = (
     identifier: ts.Identifier,
     kinds: ReadonlySet<TrackedLoaderKind>,
@@ -482,15 +497,17 @@ function discoverModuleEdges(
     const before = existing.size;
     for (const kind of kinds) existing.add(kind);
     trackedSymbols.set(symbol, existing);
+    trackedNames.add(identifierText(identifier));
     return existing.size !== before;
   };
   const singletonKind = (kind: TrackedLoaderKind): ReadonlySet<TrackedLoaderKind> => new Set([kind]);
   const ambientIdentifierKind = (identifier: ts.Identifier): TrackedLoaderKind | null => {
-    if (identifier.text === 'require') return 'loader';
-    if (identifier.text === 'module') return 'module_namespace';
-    if (identifier.text === 'Worker') return 'worker';
-    if (identifier.text === 'SharedWorker') return 'shared_worker';
-    if (identifier.text === 'importScripts') return 'script_loader';
+    const name = identifierText(identifier);
+    if (name === 'require') return 'loader';
+    if (name === 'module') return 'module_namespace';
+    if (name === 'Worker') return 'worker';
+    if (name === 'SharedWorker') return 'shared_worker';
+    if (name === 'importScripts') return 'script_loader';
     return null;
   };
   const isUnshadowedAmbientIdentifier = (
@@ -498,7 +515,7 @@ function discoverModuleEdges(
     names: readonly string[],
   ): boolean => {
     const unwrapped = unwrapTransparentExpression(expression);
-    if (!ts.isIdentifier(unwrapped) || !names.includes(unwrapped.text)) return false;
+    if (!ts.isIdentifier(unwrapped) || !names.includes(identifierText(unwrapped))) return false;
     const symbol = symbolAt(unwrapped);
     return symbol === undefined ||
       symbol.declarations?.some((declaration) => declaration.getSourceFile() === sourceFile) !== true;
@@ -506,6 +523,8 @@ function discoverModuleEdges(
   const isGlobalNamespace = (expression: ts.Expression): boolean =>
     isUnshadowedAmbientIdentifier(expression, ['self', 'globalThis', 'window']);
   const identifierKinds = (identifier: ts.Identifier): ReadonlySet<TrackedLoaderKind> => {
+    const ambient = ambientIdentifierKind(identifier);
+    if (ambient === null && !trackedNames.has(identifierText(identifier))) return new Set();
     const symbol = symbolAt(identifier);
     if (symbol !== undefined) {
       const tracked = trackedSymbols.get(symbol);
@@ -514,7 +533,6 @@ function discoverModuleEdges(
         return new Set();
       }
     }
-    const ambient = ambientIdentifierKind(identifier);
     return ambient === null ? new Set() : singletonKind(ambient);
   };
   const moduleNamespaceKind = (specifier: string | null): TrackedLoaderKind | null => {
@@ -565,6 +583,7 @@ function discoverModuleEdges(
     }
     return new Set();
   };
+  const aliasDeclarations: ts.VariableDeclaration[] = [];
   const seedImports = (node: ts.Node): void => {
     if (ts.isImportDeclaration(node)) {
       const namespace = moduleNamespaceKind(constantString(node.moduleSpecifier));
@@ -597,45 +616,46 @@ function discoverModuleEdges(
       const namespace = moduleNamespaceKind(constantString(node.moduleReference.expression));
       if (namespace !== null) addTrackedSymbol(node.name, singletonKind(namespace));
     }
+    if (ts.isVariableDeclaration(node) && node.initializer !== undefined) {
+      aliasDeclarations.push(node);
+    }
     ts.forEachChild(node, seedImports);
   };
   seedImports(sourceFile);
   let propagated = true;
   while (propagated) {
     propagated = false;
-    const propagateAliases = (node: ts.Node): void => {
-      if (ts.isVariableDeclaration(node) && node.initializer !== undefined) {
-        const sourceKinds = expressionKinds(node.initializer);
-        if (ts.isIdentifier(node.name) && sourceKinds.size > 0) {
-          propagated = addTrackedSymbol(node.name, sourceKinds) || propagated;
-        } else if (ts.isObjectBindingPattern(node.name) &&
-          (sourceKinds.size > 0 || isImportMeta(node.initializer) || isGlobalNamespace(node.initializer))) {
-          for (const element of node.name.elements) {
-            if (!ts.isIdentifier(element.name)) continue;
-            const key = element.propertyName === undefined
-              ? element.name.text
-              : propertyNameText(element.propertyName);
-            let kind: TrackedLoaderKind | null = null;
-            if (sourceKinds.has('loader') && key === 'resolve') kind = 'resolver';
-            if (sourceKinds.has('module_namespace') && key === 'createRequire') kind = 'factory';
-            if (sourceKinds.has('module_namespace') && key === 'require') kind = 'loader';
-            if (sourceKinds.has('module_namespace') && (key === 'default' || key === 'Module')) {
-              kind = 'module_namespace';
-            }
-            if (isImportMeta(node.initializer) && key === 'resolve') kind = 'resolver';
-            if (isImportMeta(node.initializer) && key === 'glob') kind = 'glob';
-            if ((sourceKinds.has('worker_namespace') || isGlobalNamespace(node.initializer)) &&
-              key === 'Worker') kind = 'worker';
-            if (sourceKinds.has('worker_namespace') && key === 'default') kind = 'worker_namespace';
-            if (isGlobalNamespace(node.initializer) && key === 'SharedWorker') kind = 'shared_worker';
-            if (isGlobalNamespace(node.initializer) && key === 'importScripts') kind = 'script_loader';
-            if (kind !== null) propagated = addTrackedSymbol(element.name, singletonKind(kind)) || propagated;
+    for (const node of aliasDeclarations) {
+      const initializer = node.initializer;
+      if (initializer === undefined) continue;
+      const sourceKinds = expressionKinds(initializer);
+      if (ts.isIdentifier(node.name) && sourceKinds.size > 0) {
+        propagated = addTrackedSymbol(node.name, sourceKinds) || propagated;
+      } else if (ts.isObjectBindingPattern(node.name) &&
+        (sourceKinds.size > 0 || isImportMeta(initializer) || isGlobalNamespace(initializer))) {
+        for (const element of node.name.elements) {
+          if (!ts.isIdentifier(element.name)) continue;
+          const key = element.propertyName === undefined
+            ? identifierText(element.name)
+            : propertyNameText(element.propertyName);
+          let kind: TrackedLoaderKind | null = null;
+          if (sourceKinds.has('loader') && key === 'resolve') kind = 'resolver';
+          if (sourceKinds.has('module_namespace') && key === 'createRequire') kind = 'factory';
+          if (sourceKinds.has('module_namespace') && key === 'require') kind = 'loader';
+          if (sourceKinds.has('module_namespace') && (key === 'default' || key === 'Module')) {
+            kind = 'module_namespace';
           }
+          if (isImportMeta(initializer) && key === 'resolve') kind = 'resolver';
+          if (isImportMeta(initializer) && key === 'glob') kind = 'glob';
+          if ((sourceKinds.has('worker_namespace') || isGlobalNamespace(initializer)) &&
+            key === 'Worker') kind = 'worker';
+          if (sourceKinds.has('worker_namespace') && key === 'default') kind = 'worker_namespace';
+          if (isGlobalNamespace(initializer) && key === 'SharedWorker') kind = 'shared_worker';
+          if (isGlobalNamespace(initializer) && key === 'importScripts') kind = 'script_loader';
+          if (kind !== null) propagated = addTrackedSymbol(element.name, singletonKind(kind)) || propagated;
         }
       }
-      ts.forEachChild(node, propagateAliases);
-    };
-    propagateAliases(sourceFile);
+    }
   }
   const loaderReference = (expression: ts.Expression): boolean =>
     expressionKinds(expression).has('loader');
@@ -774,9 +794,25 @@ function discoverModuleEdges(
     loaderEscapeRecorded = true;
     addUnresolved('loader_reference');
   };
-  const isTrackedModuleReExport = (node: ts.Node): boolean =>
-    ts.isExportDeclaration(node) && node.moduleSpecifier !== undefined && !node.isTypeOnly &&
-    moduleNamespaceKind(constantString(node.moduleSpecifier)) !== null;
+  const isTrackedModuleReExport = (node: ts.Node): boolean => {
+    if (!ts.isExportDeclaration(node) || node.moduleSpecifier === undefined || node.isTypeOnly) {
+      return false;
+    }
+    const namespace = moduleNamespaceKind(constantString(node.moduleSpecifier));
+    if (namespace === null) return false;
+    if (node.exportClause === undefined) return true;
+    if (ts.isNamespaceExport(node.exportClause)) return false;
+    return node.exportClause.elements.some((element) => {
+      if (element.isTypeOnly) return false;
+      const exportedName = element.propertyName ?? element.name;
+      const exportedSourceName = ts.isIdentifier(exportedName)
+        ? identifierText(exportedName)
+        : exportedName.text;
+      return namespace === 'module_namespace'
+        ? exportedSourceName === 'createRequire' || exportedSourceName === 'require'
+        : exportedSourceName === 'Worker';
+    });
+  };
   const loaderValuedExpression = (node: ts.Node): ts.Expression | null => {
     if (!(ts.isIdentifier(node) || ts.isPropertyAccessExpression(node) ||
       ts.isElementAccessExpression(node) || ts.isCallExpression(node))) return null;
@@ -785,16 +821,32 @@ function discoverModuleEdges(
   const isWithinTypeNode = (node: ts.Node): boolean => {
     let current = node.parent;
     while (!ts.isSourceFile(current)) {
+      if (ts.isExpressionWithTypeArguments(current) && ts.isHeritageClause(current.parent) &&
+        current.parent.token === ts.SyntaxKind.ExtendsKeyword &&
+        (ts.isClassDeclaration(current.parent.parent) || ts.isClassExpression(current.parent.parent))) {
+        return false;
+      }
       if (ts.isTypeNode(current)) return true;
       current = current.parent;
     }
     return false;
   };
+  const destructuresUnknownNamespaceMember = (node: ts.Node): boolean => {
+    if (!ts.isVariableDeclaration(node) || node.initializer === undefined ||
+      !ts.isObjectBindingPattern(node.name)) return false;
+    const sourceKinds = expressionKinds(node.initializer);
+    const namespaceSource = sourceKinds.has('module_namespace') ||
+      sourceKinds.has('worker_namespace') || isImportMeta(node.initializer) ||
+      isGlobalNamespace(node.initializer);
+    return namespaceSource && node.name.elements.some((element) =>
+      element.dotDotDotToken !== undefined ||
+      (element.propertyName !== undefined && propertyNameText(element.propertyName) === null));
+  };
   const visited = new Set<ts.Node>();
   const visit = (node: ts.Node): void => {
     if (visited.has(node)) return;
     visited.add(node);
-    if (isTrackedModuleReExport(node)) {
+    if (isTrackedModuleReExport(node) || destructuresUnknownNamespaceMember(node)) {
       recordLoaderEscape();
     } else {
       const loaderValue = loaderValuedExpression(node);
@@ -1154,19 +1206,6 @@ function semanticInputPath(path: string): boolean {
   return /(ranking|opportunity-cost|prompt|tuning|challenge|play|score)/iu.test(path);
 }
 
-function unchangedCandidateNeedsAstInspection(
-  source: string,
-  context: HeldoutLeakInspectionContext,
-): boolean {
-  if (/(?:\brequire\s*[.(\[]|\bcreateRequire\s*[(.]|\bnew\s+(?:globalThis\.|self\.|window\.)?(?:Worker|SharedWorker)\b|\b(?:globalThis\.|self\.|window\.)?importScripts\b|import\.meta|heldout-evaluation)/iu.test(source)) return true;
-  if (/['"]#[^'"]+['"]/u.test(source)) return true;
-  const resolutionCanAffectAnySpecifier = (context.configuredAliasPrefixes?.length ?? 0) > 0 ||
-    (context.configuredAliasRegexes?.length ?? 0) > 0 ||
-    Object.values(context.packageJsonFiles ?? {}).some((packageSource) =>
-      /"imports"\s*:\s*\{\s*[^}]/u.test(packageSource));
-  return resolutionCanAffectAnySpecifier && /\b(?:import|export|require)\b/u.test(source);
-}
-
 export function inspectHeldoutLeakChanges(
   changes: readonly HeldoutChangedText[],
   slice: HeldoutSlice,
@@ -1210,7 +1249,6 @@ export function inspectHeldoutLeakChanges(
     unresolvedResolutionConfigPaths,
   };
   const effectiveChanges = new Map(changes.map((change) => [change.path, change]));
-  const directlyChangedPaths = new Set(changes.map((change) => change.path));
   const resolutionConfigChanged = inspectionContext.resolutionConfigChanged === true ||
     changes.some((change) => isResolutionConfigPath(change.path));
   if (resolutionConfigChanged) {
@@ -1218,6 +1256,10 @@ export function inspectHeldoutLeakChanges(
       if (!effectiveChanges.has(path)) effectiveChanges.set(path, { path, addedText: '', sourceText });
     }
   }
+  const astSources = new Map([...effectiveChanges.values()]
+    .filter((change) => isTypeScriptOrJavaScript(change.path))
+    .map((change) => [change.path, change.sourceText ?? change.addedText]));
+  const preparedAnalyses = prepareModuleAnalyses(astSources);
   for (const configPath of unresolvedResolutionConfigPaths) {
     findings.push({
       path: configPath,
@@ -1225,6 +1267,7 @@ export function inspectHeldoutLeakChanges(
       detail: 'Vite alias configuration is not statically resolvable',
     });
   }
+  let astInspectedFiles = 0;
   for (const change of effectiveChanges.values()) {
     const reference = reserveReference(change.addedText, bindings);
     if (reference !== null && (
@@ -1233,11 +1276,17 @@ export function inspectHeldoutLeakChanges(
     )) {
       findings.push({ path: change.path, kind: 'reserve_reference', detail: reference });
     }
-    const astInspectionRequired = directlyChangedPaths.has(change.path) ||
-      unchangedCandidateNeedsAstInspection(change.sourceText ?? change.addedText, inspectionContext);
-    const edges = isTypeScriptOrJavaScript(change.path) && astInspectionRequired
-      ? discoverModuleEdges(change.path, change.sourceText ?? change.addedText, inspectionContext)
+    const eligibleForAstInspection = isTypeScriptOrJavaScript(change.path);
+    const edges = eligibleForAstInspection
+      ? discoverModuleEdges(
+        change.path,
+        change.sourceText ?? change.addedText,
+        inspectionContext,
+        0,
+        preparedAnalyses.get(change.path),
+      )
       : [];
+    if (eligibleForAstInspection) astInspectedFiles += 1;
     const restrictedPath = !EVALUATION_FILES.has(change.path) && !isTestOrFixture(change.path);
     const heldoutImport = firstHeldoutEdge(edges, 'import', change.path, inspectionContext);
     if (restrictedPath && heldoutImport !== null) {
@@ -1275,6 +1324,7 @@ export function inspectHeldoutLeakChanges(
     reserveDigests: [...bindings.reserveDigests],
     resultPaths: [...bindings.resultPaths],
     checkedFiles: effectiveChanges.size,
+    astInspectedFiles,
     findings,
   };
 }
@@ -1437,10 +1487,26 @@ function viteAliases(source: string, path: string): ViteAliasDiscovery {
     return checker.getSymbolAtLocation(identifier);
   };
   const localExpressions = new Map<ts.Symbol, ts.Expression>();
+  const writtenSymbols = new Set<ts.Symbol>();
+  const assignedRootIdentifier = (expression: ts.Expression): ts.Identifier | null => {
+    const unwrapped = unwrapTransparentExpression(expression);
+    if (ts.isIdentifier(unwrapped)) return unwrapped;
+    if (ts.isPropertyAccessExpression(unwrapped) || ts.isElementAccessExpression(unwrapped)) {
+      return assignedRootIdentifier(unwrapped.expression);
+    }
+    return null;
+  };
   const collectLocals = (node: ts.Node): void => {
     if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer !== undefined) {
       const symbol = symbolAt(node.name);
       if (symbol !== undefined) localExpressions.set(symbol, node.initializer);
+    }
+    if (ts.isBinaryExpression(node) &&
+      node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
+      node.operatorToken.kind <= ts.SyntaxKind.LastAssignment) {
+      const root = assignedRootIdentifier(node.left);
+      const symbol = root === null ? undefined : symbolAt(root);
+      if (symbol !== undefined) writtenSymbols.add(symbol);
     }
     ts.forEachChild(node, collectLocals);
   };
@@ -1452,7 +1518,7 @@ function viteAliases(source: string, path: string): ViteAliasDiscovery {
     const unwrapped = unwrapTransparentExpression(expression);
     if (!ts.isIdentifier(unwrapped)) return unwrapped;
     const symbol = symbolAt(unwrapped);
-    if (symbol === undefined || seen.has(symbol)) return null;
+    if (symbol === undefined || seen.has(symbol) || writtenSymbols.has(symbol)) return null;
     const local = localExpressions.get(symbol);
     return local === undefined
       ? null
