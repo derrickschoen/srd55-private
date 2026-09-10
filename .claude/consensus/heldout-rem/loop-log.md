@@ -7,3 +7,4 @@
 - 2026-09-09 22:31 r3 supervisor serial verification: tsc 0, sg 0, diff-check 0, 321/321; committed a9595454; Astra r3 (FINAL) dispatched.
 - 2026-09-09 22:33 r3 Astra REJECT at the round cap: F3 resolved; NEW F4 query/fragment-suffixed specifiers (`../vtt/heldout-evaluation.ts?raw`) bypass the exact-suffix protocol matcher (pre-existing, in scope). SHELVED under HARD_GATE (b) at a9595454; owner ruling needed to reopen.
 - 2026-09-10 07:48 r4 verified (serial) 331/331; committed 9b6d7783; Astra r4 dispatched with an exhaustive-enumeration request.
+- 2026-09-10 07:49 NOTE: the r4 review brief lost its backticked example list to heredoc command substitution; the exhaustive-enumeration instruction survived; not redispatched.
