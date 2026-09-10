@@ -4,3 +4,4 @@
 - 2026-09-09 22:17 r2 lane DONE: two files; unwrapping, 2-arg import(), constant-template resolution, unresolved_module_edge + protocol_resolution findings; lane-claimed 77/77 wall, 9-spec 313/313, fixtures unchanged; supervisor verification running (verify-heldout-r2).
 - 2026-09-09 22:21 r2 supervisor verification: tsc 0, sg 0, diff-check 0; 9-spec 309/313 with four load-flake timeouts (room-generator-los-cover under load 11) → serial rerun 111/111 (D587 rule 3); committed 09afc77a; Astra r2 dispatched.
 - 2026-09-09 22:23 r2 Astra REJECT: F1/F2/policy resolved; new F3 bracket-notation resolver calls bypass the policy. Accepted; lane resumed r3 (FINAL).
+- 2026-09-09 22:31 r3 supervisor serial verification: tsc 0, sg 0, diff-check 0, 321/321; committed a9595454; Astra r3 (FINAL) dispatched.
