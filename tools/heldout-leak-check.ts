@@ -239,7 +239,9 @@ export const HELDOUT_MODULE_SPECIFIER_POLICY = {
     'a loader-valued expression is allowed only as a direct callee with a constant specifier, a receiver leading to a recognized member call, or the whole initializer of a non-exported plain-identifier const alias',
     'Rule C interprets Vite and Vitest aliases only as strict literals in the exact-node graph reached from export default, symbol-proven defineConfig or mergeConfig, factory returns, conditional branches, and same-file const object/array composition',
     'Rule C uses no flow tracking: each tracked-const reference is classified by its maximal constant-key address, including whether its path crosses resolve, test, or alias, the addressed subtree, and its immediate syntactic position',
+    'Rule C classifies configuration roots, resolve/test/alias bindings, and bindings spread transitively into those containers as alias-capable regardless of current literal contents',
     'Rule C permits non-exported plain-const aliases to preserve the same addressed subtree and allows non-alias-bearing subtrees in otherwise escaping positions',
+    'subtrees strictly below a configuration root at nonsemantic addresses remain non-alias-capable unless their contents or binding position makes them capable',
     'resolve and Vitest test are alias-capable containers whose values must be literal objects or tracked const literals; their alias values are interpreted identically',
     'reachable object spreads require tracked const literals; computed keys, accessors, methods, and nonliteral resolve, test, or alias values fail closed, while unrelated nonliteral values are opaque',
     'root vite*.config.* and vitest*.config.* entry points are inspected, including symbol-proven defineConfig and mergeConfig imports from Vite or Vitest',
@@ -2007,7 +2009,8 @@ function viteAliases(source: string, path: string): ViteAliasDiscovery {
   };
   const reachableNodes = new Set<ts.Node>();
   const reachableSymbols = new Map<ts.Symbol, ts.VariableDeclaration>();
-  const aliasBearingSymbols = new Set<ts.Symbol>();
+  const aliasCapableSymbols = new Set<ts.Symbol>();
+  const rootConfigurationSymbols = new Set<ts.Symbol>();
   const visitingSymbols = new Set<ts.Symbol>();
   const regexAlias = (
     expression: ts.Expression,
@@ -2140,7 +2143,7 @@ function viteAliases(source: string, path: string): ViteAliasDiscovery {
     const value = unwrapTransparentExpression(expression);
     if (ts.isIdentifier(value)) {
       const symbol = visitReachableIdentifier(value, visitAliasValue);
-      if (symbol !== null) aliasBearingSymbols.add(symbol);
+      if (symbol !== null) aliasCapableSymbols.add(symbol);
       return;
     }
     reachableNodes.add(value);
@@ -2154,7 +2157,7 @@ function viteAliases(source: string, path: string): ViteAliasDiscovery {
     const value = unwrapTransparentExpression(expression);
     if (ts.isIdentifier(value)) {
       const symbol = visitReachableIdentifier(value, visitResolveObject);
-      if (symbol !== null) aliasBearingSymbols.add(symbol);
+      if (symbol !== null) aliasCapableSymbols.add(symbol);
       return;
     }
     if (!ts.isObjectLiteralExpression(value)) {
@@ -2166,7 +2169,10 @@ function viteAliases(source: string, path: string): ViteAliasDiscovery {
       if (ts.isSpreadAssignment(property)) {
         reachableNodes.add(property);
         const spread = unwrapTransparentExpression(property.expression);
-        if (ts.isIdentifier(spread)) visitReachableIdentifier(spread, visitResolveObject);
+        if (ts.isIdentifier(spread)) {
+          const symbol = visitReachableIdentifier(spread, visitResolveObject);
+          if (symbol !== null) aliasCapableSymbols.add(symbol);
+        }
         else unresolved = true;
         continue;
       }
@@ -2174,7 +2180,7 @@ function viteAliases(source: string, path: string): ViteAliasDiscovery {
         reachableNodes.add(property);
         if (property.name.text === 'alias') {
           const symbol = visitReachableIdentifier(property.name, visitAliasValue);
-          if (symbol !== null) aliasBearingSymbols.add(symbol);
+          if (symbol !== null) aliasCapableSymbols.add(symbol);
         } else if (property.name.text === 'resolve' || property.name.text === 'test') {
           visitResolveObject(property.name);
         }
@@ -2191,23 +2197,31 @@ function viteAliases(source: string, path: string): ViteAliasDiscovery {
       else visitOrdinaryPropertyValue(property.initializer);
     }
   };
-  const visitReachableObject = (object: ts.ObjectLiteralExpression): void => {
+  const visitReachableObject = (
+    object: ts.ObjectLiteralExpression,
+    aliasCapableContainer = false,
+  ): void => {
     reachableNodes.add(object);
     for (const property of object.properties) {
       if (ts.isSpreadAssignment(property)) {
         reachableNodes.add(property);
         const spread = unwrapTransparentExpression(property.expression);
-        if (ts.isIdentifier(spread)) visitReachableIdentifier(spread, visitReachableExpression);
+        if (ts.isIdentifier(spread)) {
+          const symbol = visitReachableIdentifier(spread, (initializer) =>
+            visitReachableExpression(initializer, aliasCapableContainer));
+          if (symbol !== null && aliasCapableContainer) aliasCapableSymbols.add(symbol);
+        }
         else unresolved = true;
         continue;
       }
       if (ts.isShorthandPropertyAssignment(property)) {
         reachableNodes.add(property);
         if (property.name.text === 'resolve' || property.name.text === 'test') {
-          visitReachableIdentifier(property.name, visitResolveObject);
+          const symbol = visitReachableIdentifier(property.name, visitResolveObject);
+          if (symbol !== null) aliasCapableSymbols.add(symbol);
         } else if (property.name.text === 'alias') {
           const symbol = visitReachableIdentifier(property.name, visitAliasValue);
-          if (symbol !== null) aliasBearingSymbols.add(symbol);
+          if (symbol !== null) aliasCapableSymbols.add(symbol);
         }
         continue;
       }
@@ -2241,7 +2255,7 @@ function viteAliases(source: string, path: string): ViteAliasDiscovery {
     }
   };
   const visitReachableFunction = (fn: ts.ArrowFunction | ts.FunctionExpression): void => {
-    for (const expression of returnedExpressions(fn.body)) visitReachableExpression(expression);
+    for (const expression of returnedExpressions(fn.body)) visitReachableExpression(expression, true);
   };
   function visitReachableIdentifier(
     identifier: ts.Identifier,
@@ -2263,17 +2277,22 @@ function viteAliases(source: string, path: string): ViteAliasDiscovery {
     visitingSymbols.delete(resolved.symbol);
     return resolved.symbol;
   }
-  function visitReachableExpression(expression: ts.Expression): void {
+  function visitReachableExpression(
+    expression: ts.Expression,
+    rootPosition = false,
+  ): void {
     const value = unwrapTransparentExpression(expression);
     if (ts.isObjectLiteralExpression(value)) {
-      visitReachableObject(value);
+      visitReachableObject(value, rootPosition);
     } else if (ts.isArrayLiteralExpression(value)) {
       visitReachableArray(value);
     } else if (ts.isIdentifier(value)) {
-      visitReachableIdentifier(value, visitReachableExpression);
+      const symbol = visitReachableIdentifier(value, (initializer) =>
+        visitReachableExpression(initializer, rootPosition));
+      if (symbol !== null && rootPosition) rootConfigurationSymbols.add(symbol);
     } else if (ts.isConditionalExpression(value)) {
-      visitReachableExpression(value.whenTrue);
-      visitReachableExpression(value.whenFalse);
+      visitReachableExpression(value.whenTrue, rootPosition);
+      visitReachableExpression(value.whenFalse, rootPosition);
     } else if (ts.isArrowFunction(value) || ts.isFunctionExpression(value)) {
       visitReachableFunction(value);
     } else if (ts.isCallExpression(value)) {
@@ -2281,11 +2300,11 @@ function viteAliases(source: string, path: string): ViteAliasDiscovery {
       if (helper === 'defineConfig' && value.arguments.length === 1) {
         const argument = value.arguments[0];
         if (argument === undefined || ts.isSpreadElement(argument)) unresolved = true;
-        else visitReachableExpression(argument);
+        else visitReachableExpression(argument, true);
       } else if (helper === 'mergeConfig' && value.arguments.length === 2) {
         for (const argument of value.arguments) {
           if (ts.isSpreadElement(argument)) unresolved = true;
-          else visitReachableExpression(argument);
+          else visitReachableExpression(argument, true);
         }
       } else unresolved = true;
     } else {
@@ -2296,7 +2315,7 @@ function viteAliases(source: string, path: string): ViteAliasDiscovery {
     ts.isExportAssignment(statement) && !statement.isExportEquals);
   const exported = exportAssignments[0];
   if (exportAssignments.length !== 1 || exported === undefined) unresolved = true;
-  else visitReachableExpression(exported.expression);
+  else visitReachableExpression(exported.expression, true);
   const isAssignmentOperator = (kind: ts.SyntaxKind): boolean =>
     kind >= ts.SyntaxKind.FirstAssignment && kind <= ts.SyntaxKind.LastAssignment;
   const isUpdateOperator = (kind: ts.SyntaxKind): boolean =>
@@ -2304,6 +2323,10 @@ function viteAliases(source: string, path: string): ViteAliasDiscovery {
   interface ConfigurationAddress {
     readonly root: ts.Symbol;
     readonly path: readonly string[];
+  }
+  interface ConfigurationReferenceAddress extends ConfigurationAddress {
+    readonly binding: ts.Symbol;
+    readonly relativePath: readonly string[];
   }
   const referenceChain = (
     identifier: ts.Identifier,
@@ -2383,6 +2406,13 @@ function viteAliases(source: string, path: string): ViteAliasDiscovery {
       ? null
       : { root: receiver.root, path: [...receiver.path, key] };
   };
+  const baseSymbolForExpression = (expression: ts.Expression): ts.Symbol | null => {
+    const value = unwrapTransparentExpression(expression);
+    if (ts.isIdentifier(value)) return symbolAt(value) ?? null;
+    return ts.isPropertyAccessExpression(value) || ts.isElementAccessExpression(value)
+      ? baseSymbolForExpression(value.expression)
+      : null;
+  };
   let aliasesChanged = true;
   while (aliasesChanged) {
     aliasesChanged = false;
@@ -2399,6 +2429,40 @@ function viteAliases(source: string, path: string): ViteAliasDiscovery {
       ts.forEachChild(node, collectConstAliases);
     };
     collectConstAliases(sourceFile);
+  }
+  const semanticAddressKey = (key: string): boolean =>
+    key === 'resolve' || key === 'test' || key === 'alias';
+  let capabilitiesChanged = true;
+  while (capabilitiesChanged) {
+    capabilitiesChanged = false;
+    const propagateConstCapabilities = (node: ts.Node): void => {
+      if (ts.isVariableDeclaration(node) && node.initializer !== undefined &&
+        isNonExportedPlainConst(node) && ts.isIdentifier(node.name)) {
+        const targetSymbol = symbolAt(node.name);
+        const targetAddress = targetSymbol === undefined
+          ? undefined
+          : configurationAddresses.get(targetSymbol);
+        const sourceSymbol = baseSymbolForExpression(node.initializer);
+        const sourceAddress = sourceSymbol === null
+          ? undefined
+          : configurationAddresses.get(sourceSymbol);
+        const sameAddress = targetAddress !== undefined && sourceAddress !== undefined &&
+          targetAddress.root === sourceAddress.root &&
+          targetAddress.path.length === sourceAddress.path.length &&
+          targetAddress.path.every((key, index) => key === sourceAddress.path[index]);
+        const capable = targetAddress !== undefined && (
+          targetAddress.path.some(semanticAddressKey) ||
+          (rootConfigurationSymbols.has(targetAddress.root) && targetAddress.path.length === 0) ||
+          (sameAddress && sourceSymbol !== null && aliasCapableSymbols.has(sourceSymbol))
+        );
+        if (capable && targetSymbol !== undefined && !aliasCapableSymbols.has(targetSymbol)) {
+          aliasCapableSymbols.add(targetSymbol);
+          capabilitiesChanged = true;
+        }
+      }
+      ts.forEachChild(node, propagateConstCapabilities);
+    };
+    propagateConstCapabilities(sourceFile);
   }
   const rootDeclaration = (address: ConfigurationAddress): ts.VariableDeclaration | null =>
     reachableSymbols.get(address.root) ?? null;
@@ -2496,16 +2560,21 @@ function viteAliases(source: string, path: string): ViteAliasDiscovery {
   const addressForReference = (
     identifier: ts.Identifier,
     chain: ReturnType<typeof referenceChain>,
-  ): ConfigurationAddress | null => {
+  ): ConfigurationReferenceAddress | null => {
     const symbol = symbolAt(identifier);
-    const base = symbol === undefined ? undefined : configurationAddresses.get(symbol);
-    return base === undefined || !chain.constantElements
-      ? null
-      : { root: base.root, path: [...base.path, ...chain.path] };
+    if (symbol === undefined || !chain.constantElements) return null;
+    const base = configurationAddresses.get(symbol);
+    return base === undefined ? null : {
+      root: base.root,
+      path: [...base.path, ...chain.path],
+      binding: symbol,
+      relativePath: chain.path,
+    };
   };
-  const isAliasBearing = (address: ConfigurationAddress): boolean => {
-    if (aliasBearingSymbols.has(address.root) ||
-      address.path.some((key) => key === 'resolve' || key === 'test' || key === 'alias')) return true;
+  const isAliasBearing = (address: ConfigurationReferenceAddress): boolean => {
+    if ((address.relativePath.length === 0 && aliasCapableSymbols.has(address.binding)) ||
+      (rootConfigurationSymbols.has(address.root) && address.path.length === 0) ||
+      address.path.some(semanticAddressKey)) return true;
     const value = addressedValue(address);
     return value === null || value !== 'known_scalar' && subtreeContainsAliasKey(value);
   };
