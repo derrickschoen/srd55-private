@@ -36,3 +36,5 @@ Machine constraint: the D569 v5 first arm (pid 1201481, port 4530) runs until ~1
 - 2026-09-10 09:12 EDT — S0–S2 r3 Astra REJECT on one residual (F20: zero-write regression dropped directory-tree comparison); F14–F18 resolved, widening accepted. r4 dispatched (resume 01a0891a…, test-only).
 
 - 2026-09-10 09:18 EDT — S0–S2 r4 lane DONE (test-only); supervisor verification tsc/sg/diffcheck 0, 8 files 46/46; committed a791d5da; Astra r4 review dispatched (resume 01a087f9…).
+
+- 2026-09-10 09:23 EDT — S0–S2 r4 Astra ACCEPT (a791d5da). S2c supervisor verification in temp root (publish/check/unchanged/conflict) then owner-root publication: 8 files, verified. S3a–S3e lane + 0f84e09f baseline capture lane dispatched.
