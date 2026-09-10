@@ -22256,3 +22256,13 @@ spec sections 4.1–4.9 incl. tools/d569-v5/{analyze-primary-pair,validate-first
 in tests/unit/tools/ai-dm-arena.test.ts; reconciliation lane PROMO180-LAND-01 dispatched; the r1-state gate's only red
 (d584-contract-inventory) was the gitignored plan file missing from the worktree (copied in). Room D slices 0+1 are on main
 (D586.176).
+
+### D586.178 — OFFERS-PLAN-02 ACCEPTED at round 4 (2026-09-10 07:53 EDT)
+
+Astra (session 01a088d3…, `.claude/consensus/offers-plan-02/review-r4-astra.md`): no findings. Rounds: r1 REJECT (migration
+contract: legacy speed-modified states, replay equality, turn-start ordering, Flee witness), r2 REJECT (replay numeric drift,
+skip/delay transitions, outgoing-boundary expiry), r3 REJECT (historical spend formula), r4 ACCEPT — bottleneck fixture verified
+bypass-proof by the reviewer's own movement-world probe from r1 on; historical spend formula now matches movement.ts:427 with
+both writer journals replayed through a subsequent move and exact event assertions. Plan sha 911a10f1… (963 lines, copy
+`plan-candidate-r4-911a10f1.md`) on claude/p-offer-help @ eb778854 is the binding plan for the offers implementation slices
+(D600); slice 1 dispatch follows from the plan's step order.
