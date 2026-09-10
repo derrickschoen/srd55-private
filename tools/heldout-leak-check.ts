@@ -42,6 +42,10 @@ export interface HeldoutLeakInspectionContext {
   readonly candidateFiles?: readonly string[];
   /** Candidate-revision package.json contents keyed by repository-relative path. */
   readonly packageJsonFiles?: Readonly<Record<string, string>>;
+  /** Complete candidate sources used when resolution configuration invalidates unchanged consumers. */
+  readonly candidateSourceFiles?: Readonly<Record<string, string>>;
+  readonly resolutionConfigChanged?: boolean;
+  readonly configuredAliasPrefixes?: readonly string[];
 }
 
 const EVALUATION_FILES = new Set([
@@ -116,8 +120,8 @@ export const HELDOUT_MODULE_SPECIFIER_POLICY = {
     'a trailing index, index.js, or index.ts resolves to its containing module path',
     'a trailing .js or .ts extension resolves to the extensionless module identity',
     'file URLs use fileURLToPath semantics, including percent-decoding, before identity comparison',
-    'package #imports use the nearest candidate package.json imports map',
-    'literal Vite globs expand against candidate-revision paths with negative patterns applied',
+    'package #imports use exact-first Node pattern ordering in the nearest candidate package.json',
+    'literal filesystem Vite globs support base, leading **, *, **, ?, arrays, exclusions, and query options',
   ],
   meaningChangingQueries: [
     'raw', 'url', 'inline', 'worker', 'sharedworker', 'init', 'import', 'no-inline',
@@ -129,6 +133,17 @@ export const HELDOUT_MODULE_SPECIFIER_POLICY = {
     'an undecodable or unknown-scheme edge and an unresolved package #import fail closed',
     'a known loader reference escaping recognized call syntax is loader_reference_escaped',
   ],
+  interpreted: [
+    'TypeScript and JavaScript import, re-export, require, resolver, import type, and JSDoc edges',
+    'recognized createRequire, Worker, SharedWorker, and importScripts aliases and qualified forms',
+    'configuration changes re-inspect candidate sources and configured #imports or alias consumers',
+  ],
+  failsClosed: [
+    'non-constant edge targets, ambiguous package conditions, and unmatched package #imports',
+    'unsupported glob syntax including extglobs, braces, character classes, escapes, and package or alias globs',
+    'unknown URL schemes, undecodable data modules, and recognized loader references in unsupported syntax',
+  ],
+  outOfScope: HELDOUT_LEAK_AST_OUT_OF_SCOPE,
 } as const;
 
 function unwrapTransparentExpression(expression: ts.Expression): ts.Expression {
@@ -187,6 +202,13 @@ function propertyKey(expression: ts.Expression): string | null {
   return null;
 }
 
+function propertyNameText(name: ts.PropertyName): string | null {
+  if (ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNumericLiteral(name)) {
+    return name.text;
+  }
+  return ts.isComputedPropertyName(name) ? constantString(name.expression) : null;
+}
+
 function propertyReceiver(expression: ts.Expression): ts.Expression | null {
   const unwrapped = unwrapTransparentExpression(expression);
   if (ts.isPropertyAccessExpression(unwrapped) || ts.isElementAccessExpression(unwrapped)) {
@@ -215,7 +237,7 @@ function globPatternExpression(expression: ts.Expression | undefined): readonly 
 }
 
 function globRegex(pattern: string): RegExp | null {
-  if (/[{}[\]]/u.test(pattern)) return null;
+  if (/[{}[\]\\]/u.test(pattern) || /(?:@|\+|\?|\*|!)\(/u.test(pattern)) return null;
   let source = '^';
   for (let index = 0; index < pattern.length; index += 1) {
     const character = pattern[index];
@@ -240,60 +262,104 @@ function globRegex(pattern: string): RegExp | null {
   return new RegExp(`${source}$`, 'u');
 }
 
-function repositoryGlobPattern(importer: string, pattern: string): string {
+function repositoryGlobPattern(
+  importer: string,
+  pattern: string,
+  base: string | null,
+): string | null {
+  const bareOrAlias = !pattern.startsWith('./') && !pattern.startsWith('../') &&
+    !pattern.startsWith('/') && !pattern.startsWith('**');
+  if (pattern.startsWith('#') || bareOrAlias) return null;
+  if (base !== null && (base.startsWith('#') || (
+    !base.startsWith('./') && !base.startsWith('../') && !base.startsWith('/')
+  ))) return null;
+  const baseDirectory = base === null
+    ? posix.dirname(importer)
+    : base.startsWith('/')
+      ? base.slice(1)
+      : posix.join(posix.dirname(importer), base);
   const absolute = pattern.startsWith('/')
     ? pattern.slice(1)
-    : posix.join(posix.dirname(importer), pattern);
+    : base === null && pattern.startsWith('**')
+      ? pattern
+      : posix.join(baseDirectory, pattern);
   return posix.normalize(absolute).replace(/^\.\//u, '');
 }
 
-function globQuery(expression: ts.Expression | undefined): string | null {
-  if (expression === undefined) return '';
+interface GlobOptions {
+  readonly query: string;
+  readonly base: string | null;
+}
+
+function globOptions(expression: ts.Expression | undefined): GlobOptions | null {
+  if (expression === undefined) return { query: '', base: null };
   const unwrapped = unwrapTransparentExpression(expression);
   if (!ts.isObjectLiteralExpression(unwrapped)) return null;
   const queryProperty = unwrapped.properties.find((property) =>
-    ts.isPropertyAssignment(property) && property.name.getText().replaceAll(/["']/gu, '') === 'query');
-  if (queryProperty === undefined) return '';
-  if (!ts.isPropertyAssignment(queryProperty)) return null;
-  const initializer = unwrapTransparentExpression(queryProperty.initializer);
-  const value = constantString(initializer);
-  if (value !== null) return value.length === 0 || value.startsWith('?') ? value : `?${value}`;
-  if (!ts.isObjectLiteralExpression(initializer)) return null;
-  const parameters: string[] = [];
-  for (const property of initializer.properties) {
-    if (!ts.isPropertyAssignment(property)) return null;
-    const key = property.name.getText().replaceAll(/["']/gu, '');
-    const queryValue = constantString(property.initializer) ??
-      (ts.isNumericLiteral(property.initializer) ? property.initializer.text : null) ??
-      (property.initializer.kind === ts.SyntaxKind.TrueKeyword ? 'true' : null) ??
-      (property.initializer.kind === ts.SyntaxKind.FalseKeyword ? 'false' : null);
-    if (queryValue === null) return null;
-    parameters.push(`${encodeURIComponent(key)}=${encodeURIComponent(queryValue)}`);
+    ts.isPropertyAssignment(property) && propertyNameText(property.name) === 'query');
+  let query = '';
+  if (queryProperty !== undefined) {
+    if (!ts.isPropertyAssignment(queryProperty)) return null;
+    const initializer = unwrapTransparentExpression(queryProperty.initializer);
+    const value = constantString(initializer);
+    if (value !== null) {
+      query = value.length === 0 || value.startsWith('?') ? value : `?${value}`;
+    } else {
+      if (!ts.isObjectLiteralExpression(initializer)) return null;
+      const parameters: string[] = [];
+      for (const property of initializer.properties) {
+        if (!ts.isPropertyAssignment(property)) return null;
+        const key = propertyNameText(property.name);
+        if (key === null) return null;
+        const queryValue = constantString(property.initializer) ??
+          (ts.isNumericLiteral(property.initializer) ? property.initializer.text : null) ??
+          (property.initializer.kind === ts.SyntaxKind.TrueKeyword ? 'true' : null) ??
+          (property.initializer.kind === ts.SyntaxKind.FalseKeyword ? 'false' : null);
+        if (queryValue === null) return null;
+        parameters.push(`${encodeURIComponent(key)}=${encodeURIComponent(queryValue)}`);
+      }
+      query = parameters.length === 0 ? '' : `?${parameters.join('&')}`;
+    }
   }
-  return parameters.length === 0 ? '' : `?${parameters.join('&')}`;
+  const baseProperty = unwrapped.properties.find((property) =>
+    ts.isPropertyAssignment(property) && propertyNameText(property.name) === 'base');
+  const base = baseProperty === undefined
+    ? null
+    : ts.isPropertyAssignment(baseProperty)
+      ? constantString(baseProperty.initializer)
+      : null;
+  if (baseProperty !== undefined && base === null) return null;
+  return { query, base };
 }
 
 function expandGlobEdges(
   importer: string,
   patterns: readonly string[],
-  query: string,
+  options: GlobOptions,
   candidateFiles: readonly string[] | undefined,
 ): readonly string[] | null {
   const positive = patterns.filter((pattern) => !pattern.startsWith('!'));
   const negative = patterns.filter((pattern) => pattern.startsWith('!')).map((pattern) => pattern.slice(1));
   if (positive.length === 0) return null;
-  const positiveRegexes = positive.map((pattern) => globRegex(repositoryGlobPattern(importer, pattern)));
-  const negativeRegexes = negative.map((pattern) => globRegex(repositoryGlobPattern(importer, pattern)));
+  const normalizedPositive = positive.map((pattern) =>
+    repositoryGlobPattern(importer, pattern, options.base));
+  const normalizedNegative = negative.map((pattern) =>
+    repositoryGlobPattern(importer, pattern, options.base));
+  if ([...normalizedPositive, ...normalizedNegative].some((pattern) => pattern === null)) return null;
+  const positiveRegexes = normalizedPositive.map((pattern) =>
+    pattern === null ? null : globRegex(pattern));
+  const negativeRegexes = normalizedNegative.map((pattern) =>
+    pattern === null ? null : globRegex(pattern));
   if ([...positiveRegexes, ...negativeRegexes].some((regex) => regex === null)) return null;
   if (candidateFiles === undefined) {
     return positive.every((pattern) => !/[*?{}[\]]/u.test(pattern))
-      ? positive.map((pattern) => `${repositoryGlobPattern(importer, pattern)}${query}`)
+      ? normalizedPositive.map((pattern) => `${pattern ?? ''}${options.query}`)
       : null;
   }
   return candidateFiles.filter((candidatePath) =>
     positiveRegexes.some((regex) => regex?.test(candidatePath) === true) &&
     !negativeRegexes.some((regex) => regex?.test(candidatePath) === true))
-    .map((candidatePath) => `${candidatePath}${query}`);
+    .map((candidatePath) => `${candidatePath}${options.query}`);
 }
 
 /**
@@ -333,6 +399,13 @@ function discoverModuleEdges(
   const loaderNames = new Set(['require']);
   const resolverNames = new Set<string>();
   const createRequireNames = new Set<string>();
+  const moduleNamespaceNames = new Set<string>();
+  const workerConstructorNames = new Map<string, Extract<ModuleEdgeSyntax, 'worker' | 'shared_worker'>>([
+    ['Worker', 'worker'],
+    ['SharedWorker', 'shared_worker'],
+  ]);
+  const workerNamespaceNames = new Set<string>();
+  const scriptLoaderNames = new Set(['importScripts']);
 
   const moduleRequire = (expression: ts.Expression): boolean => {
     const unwrapped = unwrapTransparentExpression(expression);
@@ -340,21 +413,38 @@ function discoverModuleEdges(
     return receiver !== null && ts.isIdentifier(unwrapTransparentExpression(receiver)) &&
       unwrapTransparentExpression(receiver).getText() === 'module' && propertyKey(unwrapped) === 'require';
   };
+  const createRequireReference = (expression: ts.Expression): boolean => {
+    const unwrapped = unwrapTransparentExpression(expression);
+    if (ts.isIdentifier(unwrapped)) return createRequireNames.has(unwrapped.text);
+    if (ts.isConditionalExpression(unwrapped)) {
+      return createRequireReference(unwrapped.whenTrue) && createRequireReference(unwrapped.whenFalse);
+    }
+    const receiver = propertyReceiver(unwrapped);
+    return receiver !== null && ts.isIdentifier(unwrapTransparentExpression(receiver)) &&
+      moduleNamespaceNames.has(unwrapTransparentExpression(receiver).getText()) &&
+      propertyKey(unwrapped) === 'createRequire';
+  };
   const loaderReference = (expression: ts.Expression): boolean => {
     const unwrapped = unwrapTransparentExpression(expression);
     if (ts.isIdentifier(unwrapped)) return loaderNames.has(unwrapped.text);
+    if (ts.isConditionalExpression(unwrapped)) {
+      return loaderReference(unwrapped.whenTrue) && loaderReference(unwrapped.whenFalse);
+    }
     if (ts.isBinaryExpression(unwrapped) &&
       unwrapped.operatorToken.kind === ts.SyntaxKind.CommaToken) {
       return loaderReference(unwrapped.right);
     }
     if (moduleRequire(unwrapped)) return true;
-    return ts.isCallExpression(unwrapped) &&
-      ts.isIdentifier(unwrapTransparentExpression(unwrapped.expression)) &&
-      createRequireNames.has(unwrapTransparentExpression(unwrapped.expression).getText());
+    return ts.isCallExpression(unwrapped) && createRequireReference(unwrapped.expression);
   };
   const resolverReference = (expression: ts.Expression): ResolutionSyntax | null => {
     const unwrapped = unwrapTransparentExpression(expression);
     if (ts.isIdentifier(unwrapped) && resolverNames.has(unwrapped.text)) return 'require_resolve';
+    if (ts.isConditionalExpression(unwrapped)) {
+      const whenTrue = resolverReference(unwrapped.whenTrue);
+      const whenFalse = resolverReference(unwrapped.whenFalse);
+      return whenTrue !== null && whenTrue === whenFalse ? whenTrue : null;
+    }
     if (ts.isBinaryExpression(unwrapped) &&
       unwrapped.operatorToken.kind === ts.SyntaxKind.CommaToken) {
       return resolverReference(unwrapped.right);
@@ -364,14 +454,76 @@ function discoverModuleEdges(
     if (isImportMeta(receiver)) return 'import_meta_resolve';
     return loaderReference(receiver) ? 'require_resolve' : null;
   };
+  const globalReceiver = (expression: ts.Expression): boolean => {
+    const unwrapped = unwrapTransparentExpression(expression);
+    return ts.isIdentifier(unwrapped) && ['globalThis', 'self', 'window'].includes(unwrapped.text);
+  };
+  const workerSyntax = (
+    expression: ts.Expression,
+  ): Extract<ModuleEdgeSyntax, 'worker' | 'shared_worker'> | null => {
+    const unwrapped = unwrapTransparentExpression(expression);
+    if (ts.isIdentifier(unwrapped)) return workerConstructorNames.get(unwrapped.text) ?? null;
+    if (ts.isConditionalExpression(unwrapped)) {
+      const whenTrue = workerSyntax(unwrapped.whenTrue);
+      const whenFalse = workerSyntax(unwrapped.whenFalse);
+      return whenTrue !== null && whenTrue === whenFalse ? whenTrue : null;
+    }
+    const receiver = propertyReceiver(unwrapped);
+    const key = propertyKey(unwrapped);
+    if (receiver === null || !['Worker', 'SharedWorker'].includes(key ?? '')) return null;
+    const qualified = globalReceiver(receiver) || (
+      ts.isIdentifier(unwrapTransparentExpression(receiver)) &&
+      workerNamespaceNames.has(unwrapTransparentExpression(receiver).getText())
+    );
+    if (!qualified) return null;
+    return key === 'Worker' ? 'worker' : 'shared_worker';
+  };
+  const scriptLoaderReference = (expression: ts.Expression): boolean => {
+    const unwrapped = unwrapTransparentExpression(expression);
+    if (ts.isIdentifier(unwrapped)) return scriptLoaderNames.has(unwrapped.text);
+    if (ts.isConditionalExpression(unwrapped)) {
+      return scriptLoaderReference(unwrapped.whenTrue) && scriptLoaderReference(unwrapped.whenFalse);
+    }
+    const receiver = propertyReceiver(unwrapped);
+    return receiver !== null && globalReceiver(receiver) && propertyKey(unwrapped) === 'importScripts';
+  };
+  const loaderNamespaceReference = (expression: ts.Expression): boolean => {
+    const unwrapped = unwrapTransparentExpression(expression);
+    return ts.isIdentifier(unwrapped) && (
+      moduleNamespaceNames.has(unwrapped.text) || workerNamespaceNames.has(unwrapped.text)
+    );
+  };
+  const knownLoaderReference = (expression: ts.Expression): boolean =>
+    loaderReference(expression) || resolverReference(expression) !== null ||
+    createRequireReference(expression) || workerSyntax(expression) !== null ||
+    scriptLoaderReference(expression) || loaderNamespaceReference(expression);
 
   const collectAliases = (node: ts.Node): void => {
-    if (ts.isImportDeclaration(node) && constantString(node.moduleSpecifier) === 'node:module') {
-      const named = node.importClause?.namedBindings;
-      if (named !== undefined && ts.isNamedImports(named)) {
-        for (const element of named.elements) {
-          if ((element.propertyName?.text ?? element.name.text) === 'createRequire') {
-            createRequireNames.add(element.name.text);
+    if (ts.isImportDeclaration(node)) {
+      const moduleSpecifier = constantString(node.moduleSpecifier);
+      const importClause = node.importClause;
+      if (moduleSpecifier === 'node:module' || moduleSpecifier === 'module') {
+        if (importClause?.name !== undefined) moduleNamespaceNames.add(importClause.name.text);
+        const bindings = importClause?.namedBindings;
+        if (bindings !== undefined && ts.isNamespaceImport(bindings)) {
+          moduleNamespaceNames.add(bindings.name.text);
+        } else if (bindings !== undefined) {
+          for (const element of bindings.elements) {
+            if ((element.propertyName?.text ?? element.name.text) === 'createRequire') {
+              createRequireNames.add(element.name.text);
+            }
+          }
+        }
+      }
+      if (moduleSpecifier === 'node:worker_threads' || moduleSpecifier === 'worker_threads') {
+        if (importClause?.name !== undefined) workerNamespaceNames.add(importClause.name.text);
+        const bindings = importClause?.namedBindings;
+        if (bindings !== undefined && ts.isNamespaceImport(bindings)) {
+          workerNamespaceNames.add(bindings.name.text);
+        } else if (bindings !== undefined) {
+          for (const element of bindings.elements) {
+            const imported = element.propertyName?.text ?? element.name.text;
+            if (imported === 'Worker') workerConstructorNames.set(element.name.text, 'worker');
           }
         }
       }
@@ -384,23 +536,48 @@ function discoverModuleEdges(
       if (ts.isVariableDeclaration(node) && node.initializer !== undefined) {
         const initializer = unwrapTransparentExpression(node.initializer);
         if (ts.isIdentifier(node.name)) {
+          if (ts.isCallExpression(initializer) && loaderReference(initializer.expression)) {
+            const loadedModule = constantString(initializer.arguments[0]);
+            if (loadedModule === 'node:module' || loadedModule === 'module') {
+              moduleNamespaceNames.add(node.name.text);
+            }
+            if (loadedModule === 'node:worker_threads' || loadedModule === 'worker_threads') {
+              workerNamespaceNames.add(node.name.text);
+            }
+          }
           if (loaderReference(initializer)) loaderNames.add(node.name.text);
           if (resolverReference(initializer) !== null) resolverNames.add(node.name.text);
-          if (ts.isIdentifier(initializer) && createRequireNames.has(initializer.text)) {
-            createRequireNames.add(node.name.text);
-          }
+          if (createRequireReference(initializer)) createRequireNames.add(node.name.text);
+          const constructor = workerSyntax(initializer);
+          if (constructor !== null) workerConstructorNames.set(node.name.text, constructor);
+          if (scriptLoaderReference(initializer)) scriptLoaderNames.add(node.name.text);
         } else if (ts.isObjectBindingPattern(node.name)) {
           for (const element of node.name.elements) {
             if (!ts.isIdentifier(element.name)) continue;
-            const key = element.propertyName?.getText().replaceAll(/["']/gu, '') ?? element.name.text;
-            if (key === 'resolve' && loaderReference(initializer)) resolverNames.add(element.name.text);
+            const key = element.propertyName === undefined
+              ? element.name.text
+              : propertyNameText(element.propertyName);
+            if (key === 'resolve' && (loaderReference(initializer) || isImportMeta(initializer))) {
+              resolverNames.add(element.name.text);
+            }
             if (key === 'require' && ts.isIdentifier(initializer) && initializer.text === 'module') {
               loaderNames.add(element.name.text);
             }
             if (key === 'createRequire' && ts.isCallExpression(initializer) &&
               loaderReference(initializer.expression) &&
-              constantString(initializer.arguments[0]) === 'node:module') {
+              ['node:module', 'module'].includes(constantString(initializer.arguments[0]) ?? '')) {
               createRequireNames.add(element.name.text);
+            }
+            if (key === 'createRequire' && ts.isIdentifier(initializer) &&
+              moduleNamespaceNames.has(initializer.text)) createRequireNames.add(element.name.text);
+            if (key === 'Worker' && globalReceiver(initializer)) {
+              workerConstructorNames.set(element.name.text, 'worker');
+            }
+            if (key === 'SharedWorker' && globalReceiver(initializer)) {
+              workerConstructorNames.set(element.name.text, 'shared_worker');
+            }
+            if (key === 'importScripts' && globalReceiver(initializer)) {
+              scriptLoaderNames.add(element.name.text);
             }
           }
         }
@@ -441,6 +618,13 @@ function discoverModuleEdges(
     }
     add(syntax, first, resolvedKind);
   };
+  const partiallyKnownConditional = (expression: ts.Expression): boolean => {
+    const unwrapped = unwrapTransparentExpression(expression);
+    if (!ts.isConditionalExpression(unwrapped)) return false;
+    const trueKnown = knownLoaderReference(unwrapped.whenTrue);
+    const falseKnown = knownLoaderReference(unwrapped.whenFalse);
+    return (trueKnown || falseKnown) && !knownLoaderReference(unwrapped);
+  };
   const visited = new Set<ts.Node>();
   const visit = (node: ts.Node): void => {
     if (visited.has(node)) return;
@@ -458,10 +642,13 @@ function discoverModuleEdges(
       add('import_type', ts.isLiteralTypeNode(node.argument) ? node.argument.literal : undefined);
     } else if (ts.isJSDocImportTag(node)) {
       add('jsdoc_import', node.moduleSpecifier);
+    } else if (ts.isVariableDeclaration(node) && node.initializer !== undefined &&
+      partiallyKnownConditional(node.initializer)) {
+      addUnresolved('loader_reference');
     } else if (ts.isNewExpression(node)) {
       const constructor = unwrapTransparentExpression(node.expression);
-      if (ts.isIdentifier(constructor) && ['Worker', 'SharedWorker'].includes(constructor.text)) {
-        const syntax = constructor.text === 'Worker' ? 'worker' : 'shared_worker';
+      const syntax = workerSyntax(constructor);
+      if (syntax !== null) {
         const first = node.arguments?.[0];
         const url = first === undefined ? undefined : unwrapTransparentExpression(first);
         if (url !== undefined && ts.isNewExpression(url) &&
@@ -469,39 +656,41 @@ function discoverModuleEdges(
           unwrapTransparentExpression(url.expression).getText() === 'URL' &&
           url.arguments?.[1] !== undefined && importMetaProperty(url.arguments[1], 'url')) {
           add(syntax, url.arguments[0]);
+        } else if (first !== undefined && constantString(first) !== null) {
+          add(syntax, first);
         } else {
           addUnresolved(syntax);
         }
       } else if (node.arguments?.some((argument) =>
-        loaderReference(argument) || resolverReference(argument) !== null) === true) {
+        knownLoaderReference(argument)) === true) {
         addUnresolved('loader_reference');
       }
     } else if (ts.isReturnStatement(node) && node.expression !== undefined &&
-      (loaderReference(node.expression) || resolverReference(node.expression) !== null)) {
+      knownLoaderReference(node.expression)) {
       addUnresolved('loader_reference');
     } else if (ts.isPropertyAssignment(node) &&
-      (loaderReference(node.initializer) || resolverReference(node.initializer) !== null)) {
+      knownLoaderReference(node.initializer)) {
       addUnresolved('loader_reference');
     } else if (ts.isShorthandPropertyAssignment(node) &&
-      (loaderReference(node.name) || resolverReference(node.name) !== null)) {
+      knownLoaderReference(node.name)) {
       addUnresolved('loader_reference');
     } else if (ts.isArrayLiteralExpression(node) && node.elements.some((element) =>
       !ts.isSpreadElement(element) &&
-      (loaderReference(element) || resolverReference(element) !== null))) {
+      knownLoaderReference(element))) {
       addUnresolved('loader_reference');
     } else if (ts.isArrowFunction(node) && ts.isExpression(node.body) &&
-      (loaderReference(node.body) || resolverReference(node.body) !== null)) {
+      knownLoaderReference(node.body)) {
       addUnresolved('loader_reference');
     } else if (ts.isExportAssignment(node) &&
-      (loaderReference(node.expression) || resolverReference(node.expression) !== null)) {
+      knownLoaderReference(node.expression)) {
       addUnresolved('loader_reference');
     } else if (ts.isTaggedTemplateExpression(node) &&
-      (loaderReference(node.tag) || resolverReference(node.tag) !== null)) {
+      knownLoaderReference(node.tag)) {
       addUnresolved('loader_reference');
     } else if (ts.isBinaryExpression(node) &&
       node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
       node.operatorToken.kind <= ts.SyntaxKind.LastAssignment &&
-      (loaderReference(node.right) || resolverReference(node.right) !== null)) {
+      knownLoaderReference(node.right)) {
       addUnresolved('loader_reference');
     } else if (ts.isCallExpression(node)) {
       const callee = unwrapTransparentExpression(node.expression);
@@ -510,15 +699,15 @@ function discoverModuleEdges(
         add('dynamic_import', firstArgument);
       } else if (importMetaProperty(callee, 'glob')) {
         const patterns = globPatternExpression(firstArgument);
-        const query = globQuery(node.arguments[1]);
-        const matches = patterns === null || query === null
+        const options = globOptions(node.arguments[1]);
+        const matches = patterns === null || options === null
           ? null
-          : expandGlobEdges(path, patterns, query, context.candidateFiles);
+          : expandGlobEdges(path, patterns, options, context.candidateFiles);
         if (matches === null) addUnresolved('import_meta_glob');
         else for (const match of matches) {
           result.push({ kind: 'import', syntax: 'import_meta_glob', specifier: match });
         }
-      } else if (ts.isIdentifier(callee) && callee.text === 'importScripts') {
+      } else if (scriptLoaderReference(callee)) {
         if (node.arguments.length === 0) addUnresolved('import_scripts');
         for (const argument of node.arguments) add('import_scripts', argument);
       } else if (loaderReference(callee)) {
@@ -540,9 +729,10 @@ function discoverModuleEdges(
               receiverResolution === null ? 'import' : 'resolution');
           } else if ((receiverResolution !== null || receiverLoader) && method === 'bind') {
             addUnresolved('loader_reference');
-          } else if (ts.isPropertyAccessExpression(callee) &&
-            ts.isIdentifier(callee.expression) && callee.expression.text === 'Reflect' &&
-            callee.name.text === 'apply') {
+          } else if (propertyReceiver(callee) !== null &&
+            ts.isIdentifier(unwrapTransparentExpression(propertyReceiver(callee) ?? callee)) &&
+            unwrapTransparentExpression(propertyReceiver(callee) ?? callee).getText() === 'Reflect' &&
+            propertyKey(callee) === 'apply') {
             const target = node.arguments[0];
             const targetResolution = target === undefined ? null : resolverReference(target);
             const targetLoader = target !== undefined && loaderReference(target);
@@ -552,14 +742,19 @@ function discoverModuleEdges(
             }
           } else if (ts.isElementAccessExpression(callee)) {
             const elementReceiver = callee.expression;
+            let interpreted = false;
             if ((loaderReference(elementReceiver) || isImportMeta(elementReceiver)) &&
               constantString(callee.argumentExpression) === null) {
               addUnresolved(loaderReference(elementReceiver)
                 ? 'require_resolve'
                 : 'import_meta_resolve');
+              interpreted = true;
+            }
+            if (!interpreted && node.arguments.some((argument) => knownLoaderReference(argument))) {
+              addUnresolved('loader_reference');
             }
           } else if (node.arguments.some((argument) =>
-            loaderReference(argument) || resolverReference(argument) !== null)) {
+            knownLoaderReference(argument))) {
             addUnresolved('loader_reference');
           }
         }
@@ -573,7 +768,7 @@ function discoverModuleEdges(
   if (dataDepth < 4) {
     const nested: ModuleEdge[] = [];
     for (const edge of result) {
-      if (edge.specifier === null || !edge.specifier.startsWith('data:')) continue;
+      if (edge.specifier === null || !edge.specifier.trimStart().startsWith('data:')) continue;
       const decoded = decodeDataModule(edge.specifier);
       if (decoded === null) {
         nested.push({ kind: 'unresolved', syntax: edge.syntax, specifier: null });
@@ -582,14 +777,14 @@ function discoverModuleEdges(
       }
     }
     result.push(...nested);
-  } else if (result.some((edge) => edge.specifier?.startsWith('data:') === true)) {
+  } else if (result.some((edge) => edge.specifier?.trimStart().startsWith('data:') === true)) {
     addUnresolved('dynamic_import');
   }
   return result;
 }
 
 function decodeDataModule(specifier: string): string | null {
-  const match = /^data:([^,]*),(.*)$/isu.exec(specifier);
+  const match = /^data:([^,]*),(.*)$/isu.exec(specifier.trimStart());
   if (match === null) return null;
   const metadata = match[1] ?? '';
   const payload = match[2] ?? '';
@@ -644,22 +839,34 @@ function resolvePackageImport(
         const imports = Reflect.get(parsed, 'imports');
         if (imports === null || typeof imports !== 'object' || Array.isArray(imports)) return null;
         const entries = Object.entries(imports);
-        for (const [key, value] of entries) {
-          let target = importsTarget(value);
-          if (target === null) continue;
-          if (key === specifier) {
-            return target.startsWith('./') ? posix.join(directory, target) : target;
-          }
-          const star = key.indexOf('*');
-          if (star >= 0 && specifier.startsWith(key.slice(0, star)) &&
-            specifier.endsWith(key.slice(star + 1))) {
-            const prefix = key.slice(0, star);
-            const suffix = key.slice(star + 1);
-            const substitution = specifier.slice(prefix.length, specifier.length - suffix.length);
-            target = target.replaceAll('*', substitution);
-            return target.startsWith('./') ? posix.join(directory, target) : target;
-          }
+        const exact = entries.find(([key]) => key === specifier);
+        if (exact !== undefined) {
+          const target = importsTarget(exact[1]);
+          if (target === null) return null;
+          return target.startsWith('./') ? posix.join(directory, target) : target;
         }
+        const patterns = entries.flatMap(([key, value]) => {
+          const star = key.indexOf('*');
+          if (star < 0 || star !== key.lastIndexOf('*')) return [];
+          const prefix = key.slice(0, star);
+          const suffix = key.slice(star + 1);
+          return specifier.startsWith(prefix) && specifier.endsWith(suffix)
+            ? [{ key, value, prefix, suffix }]
+            : [];
+        }).sort((left, right) =>
+          right.prefix.length - left.prefix.length ||
+          right.suffix.length - left.suffix.length ||
+          right.key.length - left.key.length);
+        const selected = patterns[0];
+        if (selected === undefined) return null;
+        let target = importsTarget(selected.value);
+        if (target === null) return null;
+        const substitution = specifier.slice(
+          selected.prefix.length,
+          specifier.length - selected.suffix.length,
+        );
+        target = target.replaceAll('*', substitution);
+        return target.startsWith('./') ? posix.join(directory, target) : target;
       } catch {
         return null;
       }
@@ -686,11 +893,21 @@ function normalizeModuleSpecifier(
   importer: string,
   context: HeldoutLeakInspectionContext,
 ): NormalizedModuleSpecifier | null {
-  let specifier = originalSpecifier;
+  const schemeCandidate = originalSpecifier.trimStart();
+  let specifier = /^[a-z][a-z0-9+.-]*:/iu.test(schemeCandidate)
+    ? schemeCandidate
+    : originalSpecifier;
   if (specifier.startsWith('#')) {
     const resolved = resolvePackageImport(importer, specifier, context.packageJsonFiles);
     if (resolved === null) return null;
     specifier = resolved;
+  }
+  const bareSpecifier = !specifier.startsWith('./') && !specifier.startsWith('../') &&
+    !specifier.startsWith('/') && !specifier.startsWith('node:') &&
+    !specifier.startsWith('data:') && !specifier.startsWith('file:');
+  if (context.configuredAliasPrefixes?.some((alias) =>
+    (alias === '*' && bareSpecifier) || specifier === alias || specifier.startsWith(alias)) === true) {
+    return null;
   }
   if (specifier.startsWith('file:')) {
     try {
@@ -815,7 +1032,15 @@ export function inspectHeldoutLeakChanges(
     throw new TypeError('Held-out reserve result paths must use the registered result root.');
   }
   const findings: HeldoutLeakFinding[] = [];
-  for (const change of changes) {
+  const effectiveChanges = new Map(changes.map((change) => [change.path, change]));
+  const resolutionConfigChanged = context.resolutionConfigChanged === true ||
+    changes.some((change) => isResolutionConfigPath(change.path));
+  if (resolutionConfigChanged) {
+    for (const [path, sourceText] of Object.entries(context.candidateSourceFiles ?? {})) {
+      if (!effectiveChanges.has(path)) effectiveChanges.set(path, { path, addedText: '', sourceText });
+    }
+  }
+  for (const change of effectiveChanges.values()) {
     const reference = reserveReference(change.addedText, bindings);
     if (reference !== null && (
       semanticInputPath(change.path) ||
@@ -862,7 +1087,7 @@ export function inspectHeldoutLeakChanges(
     slice,
     reserveDigests: [...bindings.reserveDigests],
     resultPaths: [...bindings.resultPaths],
-    checkedFiles: changes.length,
+    checkedFiles: effectiveChanges.size,
     findings,
   };
 }
@@ -895,7 +1120,7 @@ export function parseGitNameStatusZ(output: string): readonly GitCandidatePath[]
     } else {
       const path = fields[index];
       if (path === undefined) throw new TypeError('Truncated Git name-status record.');
-      if (status !== 'D') changes.push({ status, path });
+      changes.push({ status, path });
       index += 1;
     }
   }
@@ -907,7 +1132,7 @@ export function changesFromGitNameStatus(
   sourceForPath: (path: string) => string,
   addedTextForPath: (path: string) => string,
 ): readonly HeldoutChangedText[] {
-  return parseGitNameStatusZ(output).map((change) => ({
+  return parseGitNameStatusZ(output).filter((change) => change.status !== 'D').map((change) => ({
     path: change.path,
     addedText: addedTextForPath(change.path),
     sourceText: sourceForPath(change.path),
@@ -929,12 +1154,19 @@ function addedLines(base: string, candidate: string, path: string): string {
 function addedChanges(base: string, candidate: string): readonly HeldoutChangedText[] {
   const nameStatus = execFileSync(
     'git',
-    ['diff', '--name-status', '-z', '--diff-filter=ACMRTUXB', base, candidate,
-      '--', 'src', 'tools', 'tests'],
+    ['diff', '--name-status', '-z', '--diff-filter=ACMRTUXB', base, candidate],
     { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
   );
+  const selected = parseGitNameStatusZ(nameStatus).filter((change) =>
+    change.status !== 'D' && (
+      change.path.startsWith('src/') || change.path.startsWith('tools/') ||
+      change.path.startsWith('tests/') || isResolutionConfigPath(change.path)
+    ));
+  const selectedStatus = selected.flatMap((change) => change.previousPath === undefined
+    ? [change.status, change.path]
+    : [change.status, change.previousPath, change.path]).join('\0');
   return changesFromGitNameStatus(
-    nameStatus,
+    selectedStatus.length === 0 ? '' : `${selectedStatus}\0`,
     (path) => execFileSync('git', ['show', `${candidate}:${path}`], {
       encoding: 'utf8',
       maxBuffer: 64 * 1024 * 1024,
@@ -943,20 +1175,124 @@ function addedChanges(base: string, candidate: string): readonly HeldoutChangedT
   );
 }
 
-function candidateInspectionContext(candidate: string): HeldoutLeakInspectionContext {
+function isResolutionConfigPath(path: string): boolean {
+  const basename = posix.basename(path);
+  return basename === 'package.json' || /^tsconfig(?:\.[^.]+)?\.json$/u.test(basename) ||
+    /^vite\.config\.(?:ts|mts|cts|js|mjs|cjs)$/u.test(basename);
+}
+
+function jsonAliases(source: string, path: string): readonly string[] {
+  try {
+    const parsed = ts.parseConfigFileTextToJson(path, source);
+    if (parsed.error !== undefined || parsed.config === undefined) return [];
+    const config: unknown = parsed.config;
+    if (config === null || typeof config !== 'object' || Array.isArray(config)) return [];
+    const compilerOptions = Reflect.get(config, 'compilerOptions');
+    const paths = compilerOptions !== null && typeof compilerOptions === 'object'
+      ? Reflect.get(compilerOptions, 'paths')
+      : undefined;
+    const aliases = paths !== null && typeof paths === 'object' && !Array.isArray(paths)
+      ? Object.keys(paths).map((key) => key === '*'
+        ? '*'
+        : key.slice(0, key.indexOf('*') < 0 ? key.length : key.indexOf('*')))
+      : [];
+    const exportsValue = Reflect.get(config, 'exports');
+    const packageName = typeof Reflect.get(config, 'name') === 'string'
+      ? Reflect.get(config, 'name')
+      : null;
+    return exportsValue === undefined || typeof packageName !== 'string'
+      ? aliases
+      : [...aliases, packageName];
+  } catch {
+    return [];
+  }
+}
+
+function viteAliases(source: string, path: string): readonly string[] {
+  const sourceFile = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, scriptKind(path));
+  const aliases = new Set<string>();
+  const collectAliasInitializer = (initializer: ts.Expression): void => {
+    const unwrapped = unwrapTransparentExpression(initializer);
+    if (ts.isObjectLiteralExpression(unwrapped)) {
+      for (const property of unwrapped.properties) {
+        if (ts.isPropertyAssignment(property)) {
+          const key = propertyNameText(property.name);
+          aliases.add(key ?? '*');
+        } else {
+          aliases.add('*');
+        }
+      }
+    } else if (ts.isArrayLiteralExpression(unwrapped)) {
+      for (const element of unwrapped.elements) {
+        if (!ts.isObjectLiteralExpression(element)) continue;
+        const find = element.properties.find((property) =>
+          ts.isPropertyAssignment(property) && propertyNameText(property.name) === 'find');
+        if (find !== undefined && ts.isPropertyAssignment(find)) {
+          const key = constantString(find.initializer);
+          aliases.add(key ?? '*');
+        } else {
+          aliases.add('*');
+        }
+      }
+    } else {
+      aliases.add('*');
+    }
+  };
+  const visit = (node: ts.Node): void => {
+    if (ts.isPropertyAssignment(node) && propertyNameText(node.name) === 'alias') {
+      collectAliasInitializer(node.initializer);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return [...aliases];
+}
+
+function candidateInspectionContext(base: string, candidate: string): HeldoutLeakInspectionContext {
   const tree = execFileSync('git', ['ls-tree', '-r', '-z', '--name-only', candidate], {
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
   }).split('\0').filter((path) => path.length > 0);
   const packageJsonFiles: Record<string, string> = {};
+  const configSources: Record<string, string> = {};
   for (const path of tree.filter((candidatePath) =>
-    candidatePath === 'package.json' || candidatePath.endsWith('/package.json'))) {
-    packageJsonFiles[path] = execFileSync('git', ['show', `${candidate}:${path}`], {
+    isResolutionConfigPath(candidatePath))) {
+    const source = execFileSync('git', ['show', `${candidate}:${path}`], {
       encoding: 'utf8',
       maxBuffer: 64 * 1024 * 1024,
     });
+    configSources[path] = source;
+    if (posix.basename(path) === 'package.json') packageJsonFiles[path] = source;
   }
-  return { candidateFiles: tree, packageJsonFiles };
+  const changedPaths = parseGitNameStatusZ(execFileSync(
+    'git', ['diff', '--name-status', '-z', base, candidate],
+    { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
+  ));
+  const resolutionConfigChanged = changedPaths.some((change) =>
+    isResolutionConfigPath(change.path) ||
+    (change.previousPath !== undefined && isResolutionConfigPath(change.previousPath)));
+  const candidateSourceFiles: Record<string, string> = {};
+  if (resolutionConfigChanged) {
+    for (const path of tree.filter((candidatePath) =>
+      (candidatePath.startsWith('src/') || candidatePath.startsWith('tools/') ||
+        candidatePath.startsWith('tests/')) && isTypeScriptOrJavaScript(candidatePath))) {
+      candidateSourceFiles[path] = execFileSync('git', ['show', `${candidate}:${path}`], {
+        encoding: 'utf8',
+        maxBuffer: 64 * 1024 * 1024,
+      });
+    }
+  }
+  const configuredAliasPrefixes = [...new Set(Object.entries(configSources).flatMap(([path, source]) =>
+    posix.basename(path).startsWith('vite.config.')
+      ? viteAliases(source, path)
+      : jsonAliases(source, path)))].filter((alias) => alias.length > 0);
+  return {
+    candidateFiles: tree,
+    packageJsonFiles,
+    candidateSourceFiles,
+    resolutionConfigChanged,
+    configuredAliasPrefixes,
+  };
 }
 
 function parseArgs(argv: readonly string[]): {
@@ -1009,7 +1345,7 @@ function main(argv: readonly string[]): void {
     addedChanges(config.base, config.candidate),
     config.slice,
     config.bindings,
-    candidateInspectionContext(config.candidate),
+    candidateInspectionContext(config.base, config.candidate),
   );
   process.stdout.write(`${canonicalJson(report)}\n`);
   if (report.findings.length > 0) process.exitCode = 1;

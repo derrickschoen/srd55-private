@@ -247,8 +247,8 @@ describe('held-out reserve leak wall', () => {
         'a trailing index, index.js, or index.ts resolves to its containing module path',
         'a trailing .js or .ts extension resolves to the extensionless module identity',
         'file URLs use fileURLToPath semantics, including percent-decoding, before identity comparison',
-        'package #imports use the nearest candidate package.json imports map',
-        'literal Vite globs expand against candidate-revision paths with negative patterns applied',
+        'package #imports use exact-first Node pattern ordering in the nearest candidate package.json',
+        'literal filesystem Vite globs support base, leading **, *, **, ?, arrays, exclusions, and query options',
       ],
       meaningChangingQueries: [
         'raw', 'url', 'inline', 'worker', 'sharedworker', 'init', 'import', 'no-inline',
@@ -259,6 +259,22 @@ describe('held-out reserve leak wall', () => {
         'a recognized non-constant module edge is an unresolved_module_edge',
         'an undecodable or unknown-scheme edge and an unresolved package #import fail closed',
         'a known loader reference escaping recognized call syntax is loader_reference_escaped',
+      ],
+      interpreted: [
+        'TypeScript and JavaScript import, re-export, require, resolver, import type, and JSDoc edges',
+        'recognized createRequire, Worker, SharedWorker, and importScripts aliases and qualified forms',
+        'configuration changes re-inspect candidate sources and configured #imports or alias consumers',
+      ],
+      failsClosed: [
+        'non-constant edge targets, ambiguous package conditions, and unmatched package #imports',
+        'unsupported glob syntax including extglobs, braces, character classes, escapes, and package or alias globs',
+        'unknown URL schemes, undecodable data modules, and recognized loader references in unsupported syntax',
+      ],
+      outOfScope: [
+        'eval executable strings',
+        'new Function executable strings',
+        'custom loader implementations',
+        'runtime-generated code',
       ],
     });
   });
@@ -376,6 +392,41 @@ describe('held-out reserve leak wall', () => {
     }));
   });
 
+  it('honours a literal Vite glob base relative to the importer', () => {
+    const report = inspectHeldoutLeakChanges([{
+      path: 'src/ui/repair-ranking.ts',
+      addedText: [
+        "import.meta.glob('./heldout-evaluation.ts', { base: '../vtt', eager: true });",
+      ].join('\n'),
+    }], 'F', bindings, { candidateFiles: ['src/vtt/heldout-evaluation.ts'] });
+
+    expect(report.findings).toContainEqual(expect.objectContaining({ kind: 'protocol_import' }));
+  });
+
+  it('treats a leading ** Vite glob as candidate-rooted', () => {
+    const report = inspectHeldoutLeakChanges([{
+      path: 'src/ui/repair-ranking.ts',
+      addedText: "import.meta.glob('**/heldout-evaluation.ts');",
+    }], 'F', bindings, { candidateFiles: ['src/vtt/heldout-evaluation.ts'] });
+
+    expect(report.findings).toContainEqual(expect.objectContaining({ kind: 'protocol_import' }));
+  });
+
+  it.each([
+    ['extglob', "import.meta.glob('../vtt/@(heldout-evaluation).ts');"],
+    ['package-import glob', "import.meta.glob('#policy/*.ts');"],
+    ['alias glob', "import.meta.glob('@policy/*.ts');"],
+  ] as const)('fails closed instead of silently missing an unsupported %s', (_label, addedText) => {
+    const report = inspectHeldoutLeakChanges([{
+      path: 'src/ui/repair-ranking.ts',
+      addedText,
+    }], 'F', bindings, { candidateFiles: ['src/vtt/heldout-evaluation.ts'] });
+
+    expect(report.findings).toContainEqual(expect.objectContaining({
+      kind: 'unresolved_module_edge',
+    }));
+  });
+
   it.each([
     ['Worker', [
       "new Worker(new URL('../vtt/heldout-evaluation.ts', import.meta.url), { type: 'module' });",
@@ -465,6 +516,96 @@ describe('held-out reserve leak wall', () => {
     }));
   });
 
+  it.each([
+    ['node:module namespace import', [
+      "import * as M from 'node:module';",
+      "M.createRequire(import.meta.url).resolve('../vtt/heldout-evaluation.ts');",
+    ].join('\n')],
+    ['prefixless module default import', [
+      "import M from 'module';",
+      "M.createRequire(import.meta.url)('../vtt/heldout-evaluation.ts');",
+    ].join('\n')],
+    ['prefixless CommonJS module namespace', [
+      "const M = require('module');",
+      "M.createRequire(import.meta.url)('../vtt/heldout-evaluation.ts');",
+    ].join('\n')],
+    ['destructured import.meta resolver', [
+      'const { resolve: locate } = import.meta;',
+      "locate('../vtt/heldout-evaluation.ts');",
+    ].join('\n')],
+    ['computed destructured resolver', [
+      "const { ['resolve']: locate } = import.meta;",
+      "locate('../vtt/heldout-evaluation.ts');",
+    ].join('\n')],
+    ['element-access Reflect.apply', [
+      "Reflect['apply'](require.resolve, undefined, ['../vtt/heldout-evaluation.ts']);",
+    ].join('\n')],
+    ['conditional loader alias', [
+      'const load = true ? require : require;',
+      "load('../vtt/heldout-evaluation.ts');",
+    ].join('\n')],
+  ] as const)('rejects held-out access through %s', (_label, addedText) => {
+    const report = inspectHeldoutLeakChanges([{
+      path: 'tools/tuning/repair-ranking.ts',
+      addedText,
+    }], 'F', bindings);
+
+    expect(report.findings.some((finding) =>
+      finding.kind === 'protocol_import' || finding.kind === 'protocol_resolution')).toBe(true);
+  });
+
+  it('fails closed when a createRequire factory reference escapes through an object', () => {
+    const report = inspectHeldoutLeakChanges([{
+      path: 'tools/tuning/repair-ranking.ts',
+      addedText: [
+        "import { createRequire } from 'node:module';",
+        'const escaped = { createRequire };',
+      ].join('\n'),
+    }], 'F', bindings);
+
+    expect(report.findings).toContainEqual(expect.objectContaining({
+      kind: 'loader_reference_escaped',
+    }));
+  });
+
+  it('fails closed when a loader enters an uninterpreted conditional alias', () => {
+    const report = inspectHeldoutLeakChanges([{
+      path: 'tools/tuning/repair-ranking.ts',
+      addedText: 'const escaped = condition ? require : ordinaryFunction;',
+    }], 'F', bindings);
+
+    expect(report.findings).toContainEqual(expect.objectContaining({
+      kind: 'loader_reference_escaped',
+    }));
+  });
+
+  it.each([
+    ['Worker alias', [
+      'const Spawn = Worker;',
+      "new Spawn(new URL('../vtt/heldout-evaluation.ts', import.meta.url), { type: 'module' });",
+    ].join('\n')],
+    ['globalThis.Worker',
+      "new globalThis.Worker(new URL('../vtt/heldout-evaluation.ts', import.meta.url));"],
+    ['qualified SharedWorker',
+      "new self.SharedWorker(new URL('../vtt/heldout-evaluation.ts', import.meta.url));"],
+    ['renamed Node worker import', [
+      "import { Worker as Thread } from 'node:worker_threads';",
+      "new Thread('../vtt/heldout-evaluation.ts');",
+    ].join('\n')],
+    ['self.importScripts', "self.importScripts('../vtt/heldout-evaluation.ts');"],
+    ['aliased importScripts', [
+      'const loadScripts = self.importScripts;',
+      "loadScripts('../vtt/heldout-evaluation.ts');",
+    ].join('\n')],
+  ] as const)('rejects held-out access through %s', (_label, addedText) => {
+    const report = inspectHeldoutLeakChanges([{
+      path: 'src/ui/repair-ranking.ts',
+      addedText,
+    }], 'F', bindings);
+
+    expect(report.findings).toContainEqual(expect.objectContaining({ kind: 'protocol_import' }));
+  });
+
   it('decodes and recursively inspects a base64 JavaScript data module', () => {
     const inlineSource = "export * from 'file:///repo/src/vtt/heldout-evaluation.ts';";
     const encoded = Buffer.from(inlineSource, 'utf8').toString('base64');
@@ -481,6 +622,17 @@ describe('held-out reserve leak wall', () => {
     const report = inspectHeldoutLeakChanges([{
       path: 'src/ui/repair-ranking.ts',
       addedText: `void import("data:text/javascript,${encodeURIComponent(inlineSource)}");`,
+    }], 'F', bindings);
+
+    expect(report.findings).toContainEqual(expect.objectContaining({ kind: 'protocol_import' }));
+  });
+
+  it('trims loader-significant whitespace before decoding a data module', () => {
+    const inlineSource = "export * from 'file:///repo/src/vtt/heldout-evaluation.ts';";
+    const encoded = Buffer.from(inlineSource, 'utf8').toString('base64');
+    const report = inspectHeldoutLeakChanges([{
+      path: 'src/ui/repair-ranking.ts',
+      addedText: `void import(' data:text/javascript;base64,${encoded}');`,
     }], 'F', bindings);
 
     expect(report.findings).toContainEqual(expect.objectContaining({ kind: 'protocol_import' }));
@@ -533,6 +685,105 @@ describe('held-out reserve leak wall', () => {
     }], 'F', bindings, { packageJsonFiles: { 'package.json': '{"imports":{}}' } });
 
     expect(report.findings).toContainEqual(expect.objectContaining({
+      kind: 'unresolved_module_edge',
+    }));
+  });
+
+  it('selects an exact package import before an earlier wildcard', () => {
+    const report = inspectHeldoutLeakChanges([{
+      path: 'src/ui/repair-ranking.ts',
+      addedText: "void import('#heldout');",
+    }], 'F', bindings, {
+      packageJsonFiles: {
+        'package.json': JSON.stringify({
+          imports: {
+            '#*': './src/vtt/party-pack.ts',
+            '#heldout': './src/vtt/heldout-evaluation.ts',
+          },
+        }),
+      },
+    });
+
+    expect(report.findings).toContainEqual(expect.objectContaining({ kind: 'protocol_import' }));
+  });
+
+  it('orders overlapping package patterns by longest prefix and then suffix', () => {
+    const report = inspectHeldoutLeakChanges([{
+      path: 'src/ui/repair-ranking.ts',
+      addedText: "void import('#policy/heldout-evaluation');",
+    }], 'F', bindings, {
+      packageJsonFiles: {
+        'package.json': JSON.stringify({
+          imports: {
+            '#policy/*': './src/vtt/party-pack.ts',
+            '#policy/heldout-*': './src/vtt/heldout-*.ts',
+          },
+        }),
+      },
+    });
+
+    expect(report.findings).toContainEqual(expect.objectContaining({ kind: 'protocol_import' }));
+  });
+
+  it('fails closed on an ambiguous exact package target without falling back to a wildcard', () => {
+    const report = inspectHeldoutLeakChanges([{
+      path: 'src/ui/repair-ranking.ts',
+      addedText: "void import('#policy');",
+    }], 'F', bindings, {
+      packageJsonFiles: {
+        'package.json': JSON.stringify({
+          imports: {
+            '#*': './src/vtt/party-pack.ts',
+            '#policy': {
+              import: './src/vtt/heldout-evaluation.ts',
+              default: './src/vtt/party-pack.ts',
+            },
+          },
+        }),
+      },
+    });
+
+    expect(report.findings).toContainEqual(expect.objectContaining({
+      kind: 'unresolved_module_edge',
+    }));
+  });
+
+  it('re-inspects an unchanged #imports consumer after a package-only configuration change', () => {
+    const packageSource = JSON.stringify({
+      imports: { '#policy': './src/vtt/heldout-evaluation.ts' },
+    });
+    const report = inspectHeldoutLeakChanges([{
+      path: 'package.json',
+      addedText: packageSource,
+      sourceText: packageSource,
+    }], 'F', bindings, {
+      packageJsonFiles: { 'package.json': packageSource },
+      candidateSourceFiles: {
+        'src/ui/unchanged-policy-consumer.ts': "import policy from '#policy';",
+      },
+    });
+
+    expect(report).toMatchObject({ checkedFiles: 2 });
+    expect(report.findings).toContainEqual(expect.objectContaining({
+      path: 'src/ui/unchanged-policy-consumer.ts',
+      kind: 'protocol_import',
+    }));
+  });
+
+  it('fails closed on an unchanged configured-alias consumer after resolution config changes', () => {
+    const report = inspectHeldoutLeakChanges([{
+      path: 'vite.config.ts',
+      addedText: "export default { resolve: { alias: { '@policy': './src/vtt/heldout-evaluation.ts' } } };",
+    }], 'F', bindings, {
+      resolutionConfigChanged: true,
+      configuredAliasPrefixes: ['@policy'],
+      candidateSourceFiles: {
+        'src/ui/unchanged-policy-consumer.ts': "import policy from '@policy';",
+      },
+    });
+
+    expect(report.findings).toContainEqual(expect.objectContaining({
+      path: 'src/ui/unchanged-policy-consumer.ts',
       kind: 'unresolved_module_edge',
     }));
   });
