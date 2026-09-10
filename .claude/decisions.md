@@ -22169,3 +22169,16 @@ movement-only walls; probe through the real movement world shows zero bypass pat
 legacy migration carries only a reducer-corroborated multiplier count as `legacy_unresolved` and fails closed on grant-sensitive
 mutations until next turn start, witnesses for one-Dash/double-Dash/Flee; Astra review r1 dispatched. D569 RCA remediation
 (D602) dispatched (resume 01a087c6…). Owner rulings today: D590–D602.
+
+### D586.173 — D569 crash-patch specification ACCEPTED after the authorized remediation round; implementation unit opened (2026-09-09 21:17 EDT)
+
+Astra (session 01a08815…, text `.claude/consensus/d569-crash-rca/rca-review-rem-astra.md`): ACCEPT — the indeterminate delivery
+variant now persists a durable artifact and forensic row and enters a typed STOP before authorization; the complete adapter result
+types keep the branded reusable identity, nullable rollout id, text, usage, partial evidence and contractEvidence with completed-
+only binding for both cold-start entry points, recovery, rollover and escalation; inventory/paths/commit corrected; one TRIVIAL
+carried into implementation (`packetOutcome` must map the historical `auto_resolved`/`awaiting_dm_adjudication`/`local_error`
+explicitly to `refused`). Astra's owner answer, final: "patch + structural follow-up". Binding spec copied to the new worktree
+dnd-wt-d569-patch (branch claude/d569-patch from 90484d45) as `.tmp-plans/2026-09-09-d569-crash-patch-spec.md`; unit
+D569-PATCH-01 round 1 dispatched (codex sol; replacement external scripts go under tools/d569-v5/ and the runbook v2 under
+.tmp-plans/ for the supervisor to install and pin; ~/dnd-slim-runs untouched by lanes). Relaunch (spec 4.10, D590) follows the
+patch's acceptance, its main-shaped gate and the pin re-review.
