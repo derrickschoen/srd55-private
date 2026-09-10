@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { canonicalJson } from '../../src/commands/canonical-json';
 import { applyRoomInitiativeProfile } from '../../src/vtt/room-generator';
 import { decodeArenaFixtureText } from '../../src/vtt/mcp/entrypoint';
+import { d569DeliveryHasIntegritySignal } from '../../src/vtt/turn-context-delivery';
 import { canonicalD569SecondFamilyRegeneration } from '../d569-second-family-manifest';
 import {
   D569_EXPERIMENT_MANIFEST_PATH,
@@ -119,7 +120,7 @@ function validateV3(row: Readonly<Record<string, unknown>>): void {
   if (scheduledCellKey !== historicalCellKey(row)) {
     throw new TypeError(`D569 v3 scheduled key does not match room/round for ${scheduledCellKey}.`);
   }
-  if (row['outcome'] === 'integrity_indeterminate' || catalog.status === 'inconclusive' || delivery.status === 'indeterminate') {
+  if (row['outcome'] === 'integrity_indeterminate' || d569DeliveryHasIntegritySignal(catalog, delivery)) {
     throw new TypeError(`D569 integrity-indeterminate observation ${scheduledCellKey} cannot enter validation.`);
   }
   if ((catalog.status === 'absent') !== (delivery.status === 'infrastructure_absent')) {
@@ -383,8 +384,8 @@ export function validateD569RegisteredFirstArm(
       scheduledCellKey: observation.scheduledCellKey,
       ...(typeof row['dispatchId'] === 'string' ? { dispatchId: row['dispatchId'] } : {}),
       ...(current ? {
-        engineCatalogEvidence: { status: catalogSchema.parse(row['engineCatalogEvidence']).status },
-        turnContextDelivery: { status: deliverySchema.parse(row['turnContextDelivery']).status },
+        engineCatalogEvidence: catalogSchema.parse(row['engineCatalogEvidence']),
+        turnContextDelivery: deliverySchema.parse(row['turnContextDelivery']),
       } : {}),
       ...(current && row['failingDispatch'] !== undefined ? {
         failingDispatch: (() => {

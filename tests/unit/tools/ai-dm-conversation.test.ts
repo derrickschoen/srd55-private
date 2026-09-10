@@ -130,6 +130,81 @@ function objectValue(value: unknown, label: string): Readonly<Record<string, unk
   return value as Readonly<Record<string, unknown>>;
 }
 
+type IncompleteCatalogExit = 'timed_out' | 'cancelled' | 'infrastructure_failed';
+
+function incompleteCatalogAdapter(
+  exit: IncompleteCatalogExit,
+  reason: Extract<NonNullable<AgentTurnResult['engineCatalogEvidence']>, { status: 'inconclusive' }>['reason'],
+  observeLauncher?: (path: string) => void,
+): AgentSessionAdapter {
+  const dispatch = async (invocation: AgentInvocation): Promise<AgentTurnResult> => {
+    if (invocation.engineDispatchId === undefined) throw new Error('Incomplete fixture lacks dispatch identity.');
+    observeLauncher?.(invocation.launcherToken);
+    const common = {
+      resumeSessionId: null, sessionId: `partial-${exit}-session`,
+      finalText: `partial ${exit} output`, usage: null,
+      processEvidence: {
+        startedAtUnixMs: 10, endedAtUnixMs: 20, exitCode: exit === 'infrastructure_failed' ? 1 : null,
+        signal: exit === 'infrastructure_failed' ? null : 'SIGTERM',
+        stdout: `partial ${exit} output`, stderr: exit === 'infrastructure_failed' ? 'startup failed' : '',
+        decodedEvents: [],
+      },
+      partialResultEvidence: {
+        status: 'partial' as const, decodedEventCount: 0, finalTextFragment: `partial ${exit} output`,
+        observedUsage: null, stagedInvocationIds: [],
+      },
+      engineCatalogEvidence: { status: 'inconclusive' as const, dispatchId: invocation.engineDispatchId, reason },
+    };
+    switch (exit) {
+      case 'timed_out': return { ...common, exit, timeoutMs: 180_000 };
+      case 'cancelled': return { ...common, exit, cancellationReason: 'operator_cancelled' };
+      case 'infrastructure_failed': return {
+        ...common, exit, component: 'engine_mcp_startup', failureReason: 'required engine startup failed',
+      };
+    }
+  };
+  return {
+    kind: 'codex',
+    probe: async () => ({ present: true, version: 'SIMULATED' }),
+    start: dispatch,
+    resume: async () => { throw new Error('Incomplete fixture unexpectedly resumed.'); },
+    classifyFailure: () => 'unknown',
+  };
+}
+
+async function runIncompleteCatalogIntegrityStop(
+  exit: IncompleteCatalogExit,
+  reason: Extract<NonNullable<AgentTurnResult['engineCatalogEvidence']>, { status: 'inconclusive' }>['reason'],
+): Promise<{
+  readonly row: Readonly<Record<string, unknown>>;
+  readonly artifact: Readonly<Record<string, unknown>>;
+  readonly launcher: EngineMcpLauncherManifest;
+}> {
+  const directory = mkdtempSync(join(tmpdir(), `d569-${exit}-catalog-integrity-`));
+  const outPath = join(directory, 'rows.jsonl');
+  let launcherPath: string | null = null;
+  let stopped: unknown;
+  try {
+    await runConversation(parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', outPath,
+      '--dm-mode', 'advice', '--board-image', 'off', '--dry-run',
+    ]), {
+      adapter: incompleteCatalogAdapter(exit, reason, (path) => { launcherPath = path; }),
+    });
+  } catch (error) {
+    stopped = error;
+  }
+  if (!(stopped instanceof D569IntegrityStop)) {
+    throw new Error(`Expected ${exit} catalog evidence to raise D569IntegrityStop.`, { cause: stopped });
+  }
+  if (launcherPath === null) throw new Error('Integrity fixture did not observe its launcher.');
+  const launcher = JSON.parse(readFileSync(launcherPath, 'utf8')) as EngineMcpLauncherManifest;
+  const row = JSON.parse(readFileSync(outPath, 'utf8')) as Readonly<Record<string, unknown>>;
+  const artifactPath = join(dirname(launcherPath), 'room-1-round-1-dispatch-integrity.json');
+  const artifact = JSON.parse(readFileSync(artifactPath, 'utf8')) as Readonly<Record<string, unknown>>;
+  return { row, artifact, launcher };
+}
+
 class BoilerplateThenValidStructuredFinalAdapter implements AgentSessionAdapter {
   readonly kind = 'codex' as const;
   decisionAttempts = 0;
@@ -624,6 +699,59 @@ describe('AI-DM engine MCP conversation runner', () => {
       engineCatalogEvidence: { status: 'inconclusive', reason: 'no_correlated_catalog' },
       turnContextDelivery: { status: 'timeout_before_delivery', measurement: null },
     });
+  });
+
+  it.each(['timed_out', 'cancelled'] as const)(
+    'persists forensic evidence and STOPs on a %s dispatch with a contradictory catalog',
+    async (exit) => {
+      const { row, artifact, launcher } = await runIncompleteCatalogIntegrityStop(
+        exit,
+        'conflicting_success_and_failure',
+      );
+      expect(row).toMatchObject({
+        rowContractVersion: 'arena-row-v3', outcome: 'integrity_indeterminate', passed: false,
+        engineCatalogEvidence: { status: 'inconclusive', reason: 'conflicting_success_and_failure' },
+        turnContextDelivery: {
+          status: 'indeterminate', measurement: null, integrityAction: 'stop_after_persist',
+        },
+        authorizedPlan: null, execution: null,
+      });
+      expect(row).not.toHaveProperty('failingDispatch');
+      expect(row).not.toHaveProperty('planner');
+      expect(artifact).toMatchObject({
+        kind: 'dispatch_integrity_indeterminate',
+        catalogEvidence: { status: 'inconclusive', reason: 'conflicting_success_and_failure' },
+        delivery: { status: 'indeterminate' }, contextSpool: { recordCount: 0 },
+        processEvidence: { stdout: `partial ${exit} output` },
+        partialResultEvidence: { status: 'partial', finalTextFragment: `partial ${exit} output` },
+      });
+      if (launcher.proposalSpoolPath === undefined) throw new Error('Integrity launcher omitted proposal spool.');
+      expect(readFileSync(launcher.proposalSpoolPath, 'utf8')).toBe('');
+    },
+  );
+
+  it('persists a runner forensic row before propagating conflicting startup evidence', async () => {
+    const { row, artifact, launcher } = await runIncompleteCatalogIntegrityStop(
+      'infrastructure_failed',
+      'no_correlated_catalog',
+    );
+    expect(row).toMatchObject({
+      rowContractVersion: 'arena-row-v3', outcome: 'integrity_indeterminate', passed: false,
+      engineCatalogEvidence: { status: 'inconclusive', reason: 'no_correlated_catalog' },
+      turnContextDelivery: {
+        status: 'indeterminate', measurement: null, integrityAction: 'stop_after_persist',
+      },
+      authorizedPlan: null, execution: null,
+    });
+    expect(row).not.toHaveProperty('failingDispatch');
+    expect(artifact).toMatchObject({
+      kind: 'dispatch_integrity_indeterminate',
+      delivery: { status: 'indeterminate' }, contextSpool: { recordCount: 0 },
+      processEvidence: { stdout: 'partial infrastructure_failed output', stderr: 'startup failed' },
+      partialResultEvidence: { status: 'partial', finalTextFragment: 'partial infrastructure_failed output' },
+    });
+    if (launcher.turnContextSpoolPath === undefined) throw new Error('Integrity launcher omitted context spool.');
+    expect(readFileSync(launcher.turnContextSpoolPath, 'utf8')).toBe('');
   });
 
   it('persists delivered context and process evidence before propagating conflicting startup evidence', async () => {

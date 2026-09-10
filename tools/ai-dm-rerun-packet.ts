@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { D569IntegrityStop } from '../src/vtt/d569-integrity';
 import { canonicalJson } from '../src/commands/canonical-json';
 import { engineUiFeedbackSchema } from '../src/vtt/mcp/schemas';
+import { d569DeliveryHasIntegritySignal } from '../src/vtt/turn-context-delivery';
 
 export const R1_10_SEEDS = [
   5_117_001, 5_117_002, 5_117_003, 5_117_004, 5_117_005,
@@ -400,8 +401,8 @@ const arenaRowV3Schema = z.discriminatedUnion('decisionTransport', [
       row.blindIngressAudit.delivery.dispatchId !== row.turnContextDelivery.dispatchId)) {
     context.addIssue({ code: 'custom', path: ['blindIngressAudit', 'delivery'], message: 'must match row delivery' });
   }
-  if (row.outcome === 'integrity_indeterminate' || row.engineCatalogEvidence.status === 'inconclusive' ||
-    row.turnContextDelivery.status === 'indeterminate') {
+  if (row.outcome === 'integrity_indeterminate' ||
+    d569DeliveryHasIntegritySignal(row.engineCatalogEvidence, row.turnContextDelivery)) {
     context.addIssue({
       code: 'custom', path: ['outcome'],
       message: 'inconclusive or indeterminate integrity evidence cannot become a rerun packet',

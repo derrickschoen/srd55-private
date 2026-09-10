@@ -42,6 +42,39 @@ export type HostContextDiagnostic =
   | { readonly status: 'unavailable'; readonly errorClass: string }
   | null;
 
+export type EngineCatalogIntegrityView =
+  | { readonly status: 'ready' | 'absent' }
+  | {
+      readonly status: 'inconclusive';
+      readonly reason:
+        | 'no_correlated_catalog'
+        | 'invalid_catalog_response'
+        | 'missing_live_timestamp'
+        | 'conflicting_success_and_failure'
+        | 'timestamp_only';
+    };
+
+export type TurnContextDeliveryIntegrityView =
+  | { readonly status: 'delivered' }
+  | { readonly status: 'not_requested'; readonly reason: 'catalog_ready_model_did_not_fetch' | 'dispatch_cancelled' }
+  | { readonly status: 'timeout_before_delivery' | 'infrastructure_absent' | 'indeterminate' };
+
+export function engineCatalogHasContradiction(evidence: EngineCatalogIntegrityView): boolean {
+  return evidence.status === 'inconclusive' && evidence.reason === 'conflicting_success_and_failure';
+}
+
+/** True when D569 evidence must be persisted and stopped rather than packetized or scored. */
+export function d569DeliveryHasIntegritySignal(
+  catalog: EngineCatalogIntegrityView,
+  delivery: TurnContextDeliveryIntegrityView,
+): boolean {
+  if (delivery.status === 'indeterminate' || engineCatalogHasContradiction(catalog)) return true;
+  if (delivery.status === 'delivered') return catalog.status !== 'ready';
+  if (catalog.status !== 'inconclusive') return false;
+  return delivery.status !== 'timeout_before_delivery' &&
+    !(delivery.status === 'not_requested' && delivery.reason === 'dispatch_cancelled');
+}
+
 export function classifyTurnContextDelivery(input: {
   readonly turn: AgentTurnResult;
   readonly catalogEvidence: EngineCatalogEvidence;
@@ -50,6 +83,13 @@ export function classifyTurnContextDelivery(input: {
   const dispatchId = input.catalogEvidence.dispatchId;
   if (input.delivered !== null) {
     return { status: 'delivered', dispatchId, ...input.delivered };
+  }
+  if (engineCatalogHasContradiction(input.catalogEvidence)) {
+    return {
+      status: 'indeterminate', dispatchId,
+      reason: 'catalog_inconclusive_empty_context_spool', measurement: null,
+      integrityAction: 'stop_after_persist',
+    };
   }
   switch (input.turn.exit) {
     case 'cancelled':

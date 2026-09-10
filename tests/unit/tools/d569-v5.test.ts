@@ -38,8 +38,10 @@ import {
 import {
   D569_EXPERIMENT_MANIFEST_PATH,
   dryRunD569Experiment,
+  validateD569ObservedRows,
   type D569DryRunCell,
   type D569ExperimentManifest,
+  type D569ObservedRow,
 } from '../../../tools/d569-blind-experiment';
 import { canonicalD569SecondFamilyRegeneration } from '../../../tools/d569-second-family-manifest';
 import { BRUTAL_10_PROTOCOL, buildRerunPacket } from '../../../tools/ai-dm-rerun-packet';
@@ -334,6 +336,37 @@ class D569CancellationAfterDeliveryAdapter implements AgentSessionAdapter {
   classifyFailure(): 'unknown' { return 'unknown'; }
 }
 
+class D569TimeoutBeforeDeliveryAdapter implements AgentSessionAdapter {
+  readonly kind = 'codex' as const;
+
+  async probe() { return { present: true, version: 'D569-TIMEOUT-BEFORE-DELIVERY' }; }
+
+  async start(invocation: AgentInvocation): Promise<AgentTurnResult> {
+    if (invocation.engineDispatchId === undefined) throw new Error('Timeout fixture omitted dispatch identity.');
+    return {
+      exit: 'timed_out', resumeSessionId: null, sessionId: 'd569-timeout-before-delivery-session',
+      finalText: 'catalog observed before timeout', usage: null, timeoutMs: 240_000,
+      processEvidence: {
+        startedAtUnixMs: 1, endedAtUnixMs: 2, exitCode: null, signal: 'SIGTERM',
+        stdout: 'catalog observed before timeout', stderr: '', decodedEvents: [],
+      },
+      partialResultEvidence: {
+        status: 'partial', decodedEventCount: 1, finalTextFragment: 'catalog observed before timeout',
+        observedUsage: null, stagedInvocationIds: [],
+      },
+      engineCatalogEvidence: {
+        status: 'inconclusive', dispatchId: invocation.engineDispatchId, reason: 'no_correlated_catalog',
+      },
+    };
+  }
+
+  async resume(_binding: AgentSessionBinding, invocation: AgentInvocation): Promise<AgentTurnResult> {
+    return this.start(invocation);
+  }
+
+  classifyFailure(): 'unknown' { return 'unknown'; }
+}
+
 async function produceCancellationAfterDeliveryRow(): Promise<Readonly<Record<string, unknown>>> {
   const directory = mkdtempSync(join(tmpdir(), 'd569-runner-cancelled-delivery-'));
   const service = new D569CancellationSnapshotService();
@@ -352,7 +385,99 @@ async function produceCancellationAfterDeliveryRow(): Promise<Readonly<Record<st
   return JSON.parse(JSON.stringify(produced)) as Readonly<Record<string, unknown>>;
 }
 
+async function produceTimeoutBeforeDeliveryRow(): Promise<Readonly<Record<string, unknown>>> {
+  const directory = mkdtempSync(join(tmpdir(), 'd569-runner-timeout-before-delivery-'));
+  const service = new D569CancellationSnapshotService();
+  const state = structuredClone(FIRST_BRUTAL_STATE);
+  const rows = await runArena(parseArenaArgs([
+    '--rooms', '1', '--reps', '1', '--seed', '6203001', '--basis', 'brutal',
+    '--out', join(directory, 'rows.jsonl'), '--dm-mode', 'blind', '--cli', 'codex',
+    '--model', 'gpt-5.6-luna', '--effort', 'high',
+  ]), {
+    adapter: new D569TimeoutBeforeDeliveryAdapter(), repoCommit: PATCHED_COMMIT,
+    heartbeat: () => undefined, boardSnapshotServiceFactory: async () => service,
+    fixtureStates: [state],
+  });
+  const produced = rows[0];
+  if (produced === undefined) throw new Error('Timeout arena produced no row.');
+  return JSON.parse(JSON.stringify(produced)) as Readonly<Record<string, unknown>>;
+}
+
 const RUNNER_CANCELLATION_AFTER_DELIVERY_ROW = await produceCancellationAfterDeliveryRow();
+const RUNNER_TIMEOUT_BEFORE_DELIVERY_ROW = await produceTimeoutBeforeDeliveryRow();
+
+function capturedFailure(action: () => void): string {
+  try {
+    action();
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+  throw new Error('Expected consumer validation to reject contradictory evidence.');
+}
+
+function evaluateRunnerTimeoutConsumers(): {
+  readonly packetRows: number;
+  readonly registeredRows: number;
+  readonly observedViolations: readonly string[];
+  readonly contradictoryPacketError: string;
+  readonly contradictoryRegisteredError: string;
+  readonly contradictoryObservedViolations: readonly string[];
+} {
+  const produced = RUNNER_TIMEOUT_BEFORE_DELIVERY_ROW;
+  const packetRows: object[] = CELLS.filter((cell) => cell.basis === 'brutal')
+    .map((cell) => current(cell, 'authorized'));
+  packetRows[0] = produced;
+  const packetCount = pairedDocuments(packetRows).packet.length;
+  const registeredRows = BRUTAL_SOURCE.trimEnd().split('\n')
+    .map((line) => JSON.parse(line) as Readonly<Record<string, unknown>>);
+  registeredRows[0] = produced;
+  const registeredCount = validateBrutal(raw(registeredRows)).length;
+  const cell = CELLS.find((candidate) => candidate.basis === 'brutal' && candidate.seed === 6_203_001 && candidate.rep === 1);
+  if (cell === undefined) throw new Error('Registered timeout cell is absent.');
+  const boardImage = record(produced['boardImage']);
+  const observedSessionId = produced['sessionId'];
+  const scheduledCellKey = produced['scheduledCellKey'];
+  const dispatchId = produced['dispatchId'];
+  if (typeof observedSessionId !== 'string' || observedSessionId.length === 0 ||
+    typeof scheduledCellKey !== 'string' || typeof dispatchId !== 'string') {
+    throw new Error('Runner timeout row omitted its observed session or dispatch identity.');
+  }
+  const observed: D569ObservedRow = {
+    arm: cell.arm, cli: 'codex', cliVersion: 'codex-cli 0.153.4', model: cell.model, effort: cell.effort,
+    family: cell.family, basis: cell.basis, seed: cell.seed, rep: cell.rep,
+    sessionId: observedSessionId, outcome: 'refused', scheduledCellKey, dispatchId,
+    engineCatalogEvidence: { status: 'inconclusive', reason: 'no_correlated_catalog' },
+    turnContextDelivery: { status: 'timeout_before_delivery' },
+    timeoutMs: cell.timeoutMs, escalationModel: null, modelDefaultFallback: false,
+    stateHash: cell.stateHash, sharedKbHash: cell.sharedKbHash,
+    visualSourceHash: cell.visualSourceHash, visualProfileHash: cell.visualProfileHash,
+    visualArtifactHash: String(boardImage['sha256']), baseContextCapBytes: cell.baseContextCapBytes,
+    semanticContextCapBytes: cell.semanticContextCapBytes, truncatedBlocks: [],
+  };
+  const observedViolations = validateD569ObservedRows([cell], [observed]).map((violation) => violation.code);
+  const catalog = record(produced['engineCatalogEvidence']);
+  const contradictory = {
+    ...produced,
+    engineCatalogEvidence: { ...catalog, reason: 'conflicting_success_and_failure' },
+  };
+  const contradictoryPacketRows = [...packetRows];
+  contradictoryPacketRows[0] = contradictory;
+  const contradictoryRegisteredRows = [...registeredRows];
+  contradictoryRegisteredRows[0] = contradictory;
+  return {
+    packetRows: packetCount,
+    registeredRows: registeredCount,
+    observedViolations,
+    contradictoryPacketError: capturedFailure(() => { pairedDocuments(contradictoryPacketRows); }),
+    contradictoryRegisteredError: capturedFailure(() => { validateBrutal(raw(contradictoryRegisteredRows)); }),
+    contradictoryObservedViolations: validateD569ObservedRows([cell], [{
+      ...observed,
+      engineCatalogEvidence: { status: 'inconclusive', reason: 'conflicting_success_and_failure' },
+    }]).map((violation) => violation.code),
+  };
+}
+
+const RUNNER_TIMEOUT_CONSUMERS = evaluateRunnerTimeoutConsumers();
 
 describe('D569 v5 replacement validation and paired analysis tools', () => {
   it('validates a mixed 27-historical/3-current hard grid without rewriting retained bytes', () => {
@@ -455,6 +580,21 @@ describe('D569 v5 replacement validation and paired analysis tools', () => {
       .map((line) => JSON.parse(line) as Readonly<Record<string, unknown>>);
     registeredRows[0] = produced;
     expect(validateBrutal(raw(registeredRows))).toHaveLength(30);
+  });
+
+  it('carries a runner timeout with an ordinary incomplete catalog through packet and registered observation validation', () => {
+    const produced = RUNNER_TIMEOUT_BEFORE_DELIVERY_ROW;
+    expect(produced).toMatchObject({
+      outcome: 'refused', fallbackReason: 'timeout',
+      engineCatalogEvidence: { status: 'inconclusive', reason: 'no_correlated_catalog' },
+      turnContextDelivery: { status: 'timeout_before_delivery', measurement: null },
+    });
+    expect(RUNNER_TIMEOUT_CONSUMERS.packetRows).toBe(60);
+    expect(RUNNER_TIMEOUT_CONSUMERS.registeredRows).toBe(30);
+    expect(RUNNER_TIMEOUT_CONSUMERS.observedViolations).toEqual([]);
+    expect(RUNNER_TIMEOUT_CONSUMERS.contradictoryPacketError).toContain('integrity evidence');
+    expect(RUNNER_TIMEOUT_CONSUMERS.contradictoryRegisteredError).toContain('integrity-indeterminate');
+    expect(RUNNER_TIMEOUT_CONSUMERS.contradictoryObservedViolations).toContain('integrity_indeterminate');
   });
 
   it('rejects incomplete v3 evidence objects', () => {

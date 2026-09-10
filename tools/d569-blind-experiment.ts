@@ -7,6 +7,11 @@ import {
 } from '../src/vtt/knowledge-base-contract';
 import { SEMANTIC_BOARD_MAX_BYTES, TURN_CONTEXT_MAX_BYTES } from '../src/vtt/mcp/engine-server';
 import { DEFAULT_RENDERER_PROFILE } from '../src/vtt/renderer-profile';
+import {
+  d569DeliveryHasIntegritySignal,
+  type EngineCatalogIntegrityView,
+  type TurnContextDeliveryIntegrityView,
+} from '../src/vtt/turn-context-delivery';
 import { BLIND_STATE_PRIMER_VERSION } from './ai-dm-board-snapshot';
 import {
   D569_SECOND_FAMILY_SEEDS,
@@ -726,9 +731,8 @@ export interface D569ObservedRow {
     'partial_execution' | 'infrastructure_failed' | 'integrity_indeterminate';
   readonly scheduledCellKey?: string;
   readonly dispatchId?: string;
-  readonly engineCatalogEvidence?: { readonly status: 'ready' | 'absent' | 'inconclusive' };
-  readonly turnContextDelivery?: { readonly status: 'delivered' | 'not_requested' |
-    'timeout_before_delivery' | 'infrastructure_absent' | 'indeterminate' };
+  readonly engineCatalogEvidence?: EngineCatalogIntegrityView;
+  readonly turnContextDelivery?: TurnContextDeliveryIntegrityView;
   readonly failingDispatch?: {
     readonly dispatchId: string;
     readonly exit: 'cancelled' | 'infrastructure_failed';
@@ -779,7 +783,8 @@ export function validateD569ObservedRows(
       'cli_version', `row ${rowKey} omitted the executing CLI version`);
     const diagnosedInfrastructure = row.outcome === 'infrastructure_failed';
     const integrityIndeterminate = row.outcome === 'integrity_indeterminate' ||
-      row.engineCatalogEvidence?.status === 'inconclusive' || row.turnContextDelivery?.status === 'indeterminate';
+      row.engineCatalogEvidence !== undefined && row.turnContextDelivery !== undefined &&
+        d569DeliveryHasIntegritySignal(row.engineCatalogEvidence, row.turnContextDelivery);
     addViolation(violations, !integrityIndeterminate,
       'integrity_indeterminate', `row ${rowKey} has indeterminate integrity evidence`);
     addViolation(violations, diagnosedInfrastructure

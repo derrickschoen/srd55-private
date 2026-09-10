@@ -22,6 +22,9 @@ const absent: EngineCatalogEvidence = {
 const inconclusive: EngineCatalogEvidence = {
   status: 'inconclusive', dispatchId, reason: 'no_correlated_catalog',
 };
+const conflicting: EngineCatalogEvidence = {
+  status: 'inconclusive', dispatchId, reason: 'conflicting_success_and_failure',
+};
 
 function turn(exit: AgentTurnResult['exit']): AgentTurnResult {
   switch (exit) {
@@ -38,6 +41,14 @@ describe('turn-context delivery classification', () => {
     expect(classifyTurnContextDelivery({ turn: turn('completed'), catalogEvidence: ready, delivered: null })).toEqual({ status: 'not_requested', dispatchId, reason: 'catalog_ready_model_did_not_fetch', measurement: null });
     expect(classifyTurnContextDelivery({ turn: turn('timed_out'), catalogEvidence: ready, delivered: null })).toEqual({ status: 'timeout_before_delivery', dispatchId, measurement: null });
     expect(classifyTurnContextDelivery({ turn: turn('timed_out'), catalogEvidence: inconclusive, delivered: null })).toEqual({ status: 'timeout_before_delivery', dispatchId, measurement: null });
+    for (const exit of ['timed_out', 'cancelled'] as const) {
+      expect(classifyTurnContextDelivery({ turn: turn(exit), catalogEvidence: conflicting, delivered: null }))
+        .toEqual({
+          status: 'indeterminate', dispatchId,
+          reason: 'catalog_inconclusive_empty_context_spool', measurement: null,
+          integrityAction: 'stop_after_persist',
+        });
+    }
     expect(classifyTurnContextDelivery({ turn: turn('infrastructure_failed'), catalogEvidence: absent, delivered: null })).toEqual({ status: 'infrastructure_absent', dispatchId, measurement: null });
     expect(classifyTurnContextDelivery({ turn: turn('completed'), catalogEvidence: inconclusive, delivered: null })).toEqual({ status: 'indeterminate', dispatchId, reason: 'catalog_inconclusive_empty_context_spool', measurement: null, integrityAction: 'stop_after_persist' });
   });

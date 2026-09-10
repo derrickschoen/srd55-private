@@ -28,6 +28,7 @@ import {
 import { D569IntegrityStop, type D569DispatchIntegrityArtifact } from '../src/vtt/d569-integrity';
 import {
   classifyTurnContextDelivery,
+  d569DeliveryHasIntegritySignal,
   type HostContextDiagnostic,
   type TurnContextConfiguredCaps,
   type TurnContextDelivery,
@@ -2331,7 +2332,7 @@ export function persistD569IntegrityStop(input: {
   readonly launcherPath: string;
   readonly proposalSpoolPath: string;
   readonly contextSpoolPath: string;
-  readonly catalogEvidence: Extract<EngineCatalogEvidence, { readonly status: 'inconclusive' }>;
+  readonly catalogEvidence: EngineCatalogEvidence;
   readonly delivery: Extract<TurnContextDelivery, { readonly status: 'delivered' | 'indeterminate' }>;
   readonly turn: AgentTurnResult;
 }): never {
@@ -3428,7 +3429,7 @@ function enforceCompletedDispatchIntegrity(input: {
   readonly scheduledCellKey: string;
 }): void {
   const catalogEvidence = input.turn.engineCatalogEvidence;
-  if (catalogEvidence?.status !== 'inconclusive') return;
+  if (catalogEvidence === null) return;
   const correlatedContext = takeCorrelatedTurnContext(
     input.spools.context,
     input.maximumBytes,
@@ -3442,8 +3443,7 @@ function enforceCompletedDispatchIntegrity(input: {
       measurement: deliveredTurnContextMeasurement(correlatedContext),
     },
   });
-  const contradictoryStartup = input.turn.exit === 'infrastructure_failed';
-  if (delivery.status !== 'indeterminate' && !contradictoryStartup) return;
+  if (!d569DeliveryHasIntegritySignal(catalogEvidence, delivery)) return;
   if (delivery.status !== 'indeterminate' && delivery.status !== 'delivered') {
     throw new Error('Contradictory startup evidence produced an unsupported delivery state.');
   }
@@ -5400,8 +5400,7 @@ async function runConversationWithConfiguredIntel(
                   measurement: deliveredTurnContextMeasurement(correlatedContext),
                 },
               });
-              if (primaryCatalogEvidence.status === 'inconclusive' &&
-                (primaryDelivery.status === 'indeterminate' || turn.exit === 'infrastructure_failed')) {
+              if (d569DeliveryHasIntegritySignal(primaryCatalogEvidence, primaryDelivery)) {
                 if (primaryDelivery.status !== 'indeterminate' && primaryDelivery.status !== 'delivered') {
                   throw new Error('Contradictory primary startup evidence produced an unsupported delivery state.');
                 }
