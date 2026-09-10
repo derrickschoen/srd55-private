@@ -66,3 +66,5 @@ Machine constraint: the D569 v5 first arm (pid 1201481, port 4530) runs until ~1
 - 2026-09-10 13:19 EDT — S4–S5b Astra r1 REJECT: F40 dispatcher flattens notification kinds into snapshots, F41 observer close loses committed result, F42 throwing observers strand requests, F43 ledger/session ownership inconsistent, F44 token identity frozen at open, F45 transcript unsubscribes players, F46 terminal-outcome regressions absent, F47 weak zero-serialization proof, F48 examples publisher tests weaker than core. r2 dispatched (resume 01a08c2e…).
 
 - 2026-09-10 14:05 EDT — S4–S5b r2 lane DONE (9 files 4817+/343−; 3 tests replaced, 15 added; examples fixture regenerated as a consequence, sha 9fc9a587…); supervisor verification launched.
+
+- 2026-09-10 14:06 EDT — S4–S5b r2 supervisor verification tsc/sg/diffcheck 0, test:engine 41/41, test:protocol 40/40, 20 specs 223/223, isolated publish+check verified, S2c hashes reproduced; committed 75fbf004; Astra r2 dispatched (resume 01a087f9…).
