@@ -3,3 +3,5 @@
 - 2026-09-10 07:48 supervisor cumulative (writable): tsc/sg/diff 0; vitest 353/359 — 6 reds (5 regressions of existing conversation tests + byte-equality test timeout); lane resumed for a fix pass before review.
 - 2026-09-10 08:12 supervisor cumulative after fix pass: tsc 0, sg 0, diff-check 0, 17 files / 359 tests; committed d60a0571; Astra implementation review r1 dispatched (resume 01a08815…).
 - 2026-09-10 08:20 r1 Astra REJECT: 11 significant (validator/analyzer migrations incomplete, adjustment/speculation/recalculation transitions, text-regex attribution, contract disagreement, placeholder telemetry, ingress integrity, non-Codex adapters, vacuous byte test, host_authorization_failed misattribution) + 1 trivial. All accepted; lane resumed r2.
+
+- 2026-09-10 10:40 EDT — D569 patch r2 lane DONE after ~3 h (25 files + new pre-patch byte fixture tests/fixtures/d569-prepatch-primary-bytes.json sha 000b375c…; 2116+/261−; 3 validator tests restructured into 8, 31 tests added); lane focused 7 specs 109/109, 17-spec cumulative inadmissible (EROFS, 4 MCP-spawning files). Supervisor 17-spec cumulative launched on the writable worktree.
