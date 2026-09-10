@@ -48,6 +48,7 @@ import {
   type RepoRelativeKbPath,
 } from '../../../src/vtt/knowledge-base-contract';
 import type { KbReadRecord } from '../../../src/vtt/mcp/knowledge-base';
+import { decodeChallengeRoomProvenanceV1 } from '../../../src/vtt/challenge-room-fixture';
 import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
 
 const DEFAULT_KB_HASH = '00776f3f2d4cd7468a1eb2a63028e9c3f846b43b14a4e5787d3e9c94e02633c0';
@@ -332,6 +333,7 @@ describe('AI-DM arena', () => {
     ['brutal', 'tests/fixtures/arena-basis-brutal'],
     ['brutal-b', 'tests/fixtures/arena-basis-brutal-b'],
     ['scenario', 'tests/fixtures/arena-scenarios'],
+    ['challenge', 'tests/fixtures/arena-basis-challenge'],
   ] as const)('maps the %s basis to its frozen fixture directory', (basis, directory) => {
     expect(basisFixturesPath({
       cwd: process.cwd(),
@@ -395,6 +397,38 @@ describe('AI-DM arena', () => {
     ])).toThrow('Arena arm luna-low-baseline must use instruction source none.');
   });
 
+  it('parses the closed challenge basis and preserves B C A D room order', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-challenge-order-'));
+    const config = parseArenaArgs([
+      '--rooms', '3', '--reps', '1', '--seed', '5831001', '--basis', 'challenge',
+      '--out', join(directory, 'challenge.jsonl'), '--dry-run',
+    ]);
+    expect(config).toMatchObject({ basis: 'challenge', seed: 5_831_001, rooms: 3, generateMissingRooms: false });
+    const roomOrder = Array.from({ length: config.rooms }, (_unused, index) => {
+      const seed = config.seed + index;
+      const path = join(basisFixturesPath(config), `seed-${String(seed)}.provenance.json`);
+      return decodeChallengeRoomProvenanceV1(JSON.parse(readFileSync(path, 'utf8')) as unknown).roomId;
+    });
+    expect(roomOrder).toEqual(['B', 'C', 'A']);
+  });
+
+  it('refuses arena execution while any requested room is a feasibility candidate', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-challenge-candidate-'));
+    const config = parseArenaArgs([
+      '--rooms', '4', '--reps', '1', '--seed', '5831001', '--basis', 'challenge',
+      '--out', join(directory, 'challenge.jsonl'), '--dry-run',
+    ]);
+    await expect(runArena(config, { heartbeat: () => undefined })).rejects.toThrow('Challenge room D is not ready_for_witness');
+  });
+
+  it('rejects generation missing seeds and more than four challenge rooms', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-challenge-parse-'));
+    const common = ['--reps', '1', '--basis', 'challenge', '--out', join(directory, 'challenge.jsonl'), '--dry-run'] as const;
+    expect(() => parseArenaArgs(['--rooms', '1', '--seed', '5831002', ...common])).toThrow('requires --seed 5831001');
+    expect(() => parseArenaArgs(['--rooms', '5', '--seed', '5831001', ...common])).toThrow('exactly four consecutive rooms');
+    expect(() => parseArenaArgs(['--rooms', '1', '--seed', '5831001', '--generate-missing-rooms', ...common])).toThrow('unavailable for the closed challenge basis');
+  });
+
   it('loads the first frozen brutal-b room and executes its multi-legendary-window room', { timeout: 30_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-brutal-b-'));
     const [firstRow] = await runArena(parseArenaArgs([
@@ -455,7 +489,7 @@ describe('AI-DM arena', () => {
     expect(parseArenaArgs([...common, '--basis', 'brutal']).basis).toBe('brutal');
     expect(parseArenaArgs([...common, '--basis', 'brutal-b']).basis).toBe('brutal-b');
     expect(() => parseArenaArgs([...common, '--basis', 'nightmare']))
-      .toThrow('--basis must be standard, hard, brutal, brutal-b, or scenario.');
+      .toThrow('--basis must be standard, hard, brutal, brutal-b, scenario, or challenge.');
     expect(() => parseArenaArgs([...common, '--party-policy', 'unknown-policy']))
       .toThrow('--party-policy must be heuristic_v0 or symmetric_evaluator_v1.');
   });

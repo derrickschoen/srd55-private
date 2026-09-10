@@ -1,5 +1,6 @@
-import { mkdtemp, readFile, writeFile } from '../../helpers/test-filesystem-promises';
+import { mkdtemp, writeFile } from '../../helpers/test-filesystem-promises';
 import { mkdirSync } from '../../helpers/test-filesystem';
+import { declareTestInputs } from '../../helpers/test-inputs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -21,25 +22,33 @@ import {
   reverseTestClosure,
 } from '../../../tools/d584-contract-inventory';
 
+const PLAN_FIXTURE = 'tests/fixtures/d584/2026-09-08-elevation-tiers-plan.md' as const;
+const fixtureInputs = declareTestInputs({ fixtures: [PLAN_FIXTURE] });
+const ownershipPlan = fixtureInputs.fixtures.readText(PLAN_FIXTURE);
+const repositoryRoot = join(import.meta.dirname, '../../..');
+
 describe('D584.4 elevation contract inventory', () => {
-  it('extracts the exact ten-file Slice 1 ownership boundary from the plan', async () => {
-    const plan = await readFile(
-      join(process.cwd(), '.tmp-plans/2026-09-08-elevation-tiers.md'),
-      'utf8',
-    );
-    const manifest = parsePlanManifest(plan);
-    expect(manifest.filter((path) => [
-      'src/combat/elevation.ts',
-      'src/combat/movement-speeds.ts',
-      'tests/unit/combat/elevation.test.ts',
-      'tests/unit/combat/movement-speeds.test.ts',
-      'tests/types/elevation-vocabulary.type-test.ts',
-      'tools/d584-contract-inventory.ts',
-      'tools/d586-mutation-contract.ts',
-      'tests/unit/tools/d584-contract-inventory.test.ts',
-      'tests/unit/tools/d586-mutation-contract.test.ts',
-      'tests/fixtures/d586-elevation-mutants.json',
-    ].includes(path))).toHaveLength(10);
+  it('extracts the exact ten-file ownership boundary without an untracked planning directory', async () => {
+    const isolatedCwd = await mkdtemp(join(tmpdir(), 'd584-no-planning-directory-'));
+    process.chdir(isolatedCwd);
+    try {
+      const manifest = parsePlanManifest(ownershipPlan);
+      expect(manifest.filter((path) => [
+        'src/combat/elevation.ts',
+        'src/combat/movement-speeds.ts',
+        'tests/unit/combat/elevation.test.ts',
+        'tests/unit/combat/movement-speeds.test.ts',
+        'tests/types/elevation-vocabulary.type-test.ts',
+        'tools/d584-contract-inventory.ts',
+        'tools/d586-mutation-contract.ts',
+        'tests/unit/tools/d584-contract-inventory.test.ts',
+        'tests/unit/tools/d586-mutation-contract.test.ts',
+        'tests/fixtures/d586-elevation-mutants.json',
+      ].includes(path))).toHaveLength(10);
+      expect(manifest).toHaveLength(72);
+    } finally {
+      process.chdir(repositoryRoot);
+    }
   });
 
   it('requires every CLI output and provenance input explicitly', () => {

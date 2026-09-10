@@ -5,6 +5,11 @@
 
 import { rollDie, type Rng } from '../../src/combat/random';
 import {
+  rollOccurrenceId,
+  rollOperationPath,
+  type RollProvenanceRequest,
+} from '../../src/combat/roll-provenance';
+import {
   classifyAttackRoll,
   resolveAttackRoll,
   resolveDamage,
@@ -12,6 +17,15 @@ import {
 } from '../../src/combat/resolution';
 import { armorClass, damageType, dieSides } from '../../src/combat/values';
 import type { CombatResult } from './sim';
+
+function simulationRoll(path: string): RollProvenanceRequest {
+  return {
+    occurrenceId: rollOccurrenceId('simulation:homebrew'),
+    operationPath: rollOperationPath(path),
+    source: null,
+    targets: [],
+  };
+}
 
 export type ValidationLevel = 5 | 11 | 17;
 export type ChorusLevel = ValidationLevel | 6;
@@ -95,6 +109,7 @@ function damageDice(
       responses: [],
     },
     rng,
+    simulationRoll('helper/damage'),
   ).total;
 }
 
@@ -107,6 +122,7 @@ function fixedThresholdAttack(rng: Rng, criticalFloor = 20, advantage = false): 
       criticalFloor,
     },
     rng,
+    simulationRoll('helper/fixed-threshold-attack'),
   );
   return {
     roll: result.roll.chosen,
@@ -223,8 +239,8 @@ interface BoostedAttack {
 function boostedRapierAttack(rng: Rng, inspirationSides: number): BoostedAttack {
   // The homebrew die is rolled before the attack roll, as specified. A
   // natural 1 remains a miss; only a natural 20 is a critical hit.
-  const inspiration = rollDie(rng, dieSides(inspirationSides));
-  const roll = rollD20(rng, 'normal');
+  const inspiration = rollDie(rng, dieSides(inspirationSides), simulationRoll('build/valor/inspiration'));
+  const roll = rollD20(rng, 'normal', simulationRoll('build/valor/rapier-attack'));
   const base = classifyAttackRoll(
     { hitFloor: 8, rollMode: 'normal', criticalFloor: 20 },
     roll,

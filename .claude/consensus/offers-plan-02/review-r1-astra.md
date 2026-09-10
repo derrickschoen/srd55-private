@@ -1,0 +1,31 @@
+**F1 — SIGNIFICANT: The legacy validator rejects states produced by the current reducer.**  
+[Plan:266](/home/vagrant/PhpstormProjects/dnd-wt-p-offer-help/.tmp-plans/2026-09-08-offers-roadmap.md:266) requires `remaining = speed - spent`. However, applying a speed-modification spell first refreshes movement through [encounter.ts:6083](/home/vagrant/PhpstormProjects/dnd-wt-p-offer-help/src/combat/encounter.ts:6083), then adjusts remaining movement again at [encounter.ts:10735](/home/vagrant/PhpstormProjects/dnd-wt-p-offer-help/src/combat/encounter.ts:10735). An active `{30,0,30}` receiving +10 therefore becomes `{40,0,50}`. This is an old-engine output, not necessarily corrupt input. The proposed import rejects it outright instead of preserving it as indeterminate. Add an explicit migration disposition and accepted-import witnesses for legacy speed/mode writers.
+
+**F2 — SIGNIFICANT: Per-state migration does not preserve saved-session replay.**  
+[Plan:543–545](/home/vagrant/PhpstormProjects/dnd-wt-p-offer-help/.tmp-plans/2026-09-08-offers-roadmap.md:543) migrates snapshots into `legacy_unresolved` grants, while fresh Dash execution creates `source:'dash'` grants. Saved sessions replay each command and require canonical equality of the complete resulting state at [session-persistence.ts:1530–1548](/home/vagrant/PhpstormProjects/dnd-wt-p-offer-help/src/vtt/session-persistence.ts:1530). A migrated pre-Dash → post-Dash journal therefore disagrees with replay even when both preserve `{60,10,50}`. Wrapping a final arena snapshot does not exercise this failure. Specify the journal migration/replay contract and require a genuine multi-revision import → replay → export → reimport witness without weakening replay verification.
+
+**F3 — SIGNIFICANT: The fail-closed rule can prevent its own turn-start recovery.**  
+[Plan:268](/home/vagrant/PhpstormProjects/dnd-wt-p-offer-help/.tmp-plans/2026-09-08-offers-roadmap.md:268) refuses indeterminate movement refreshes until `startTurnMovement` clears uncertainty. Actual turn start sets the entering actor active and processes boundary effects **before** calling that reset: [encounter.ts:6285–6315](/home/vagrant/PhpstormProjects/dnd-wt-p-offer-help/src/combat/encounter.ts:6285). A movement effect expiring at that boundary invokes `endEffects` and then movement refresh ([encounter.ts:5611–5619](/home/vagrant/PhpstormProjects/dnd-wt-p-offer-help/src/combat/encounter.ts:5611), [encounter.ts:3050](/home/vagrant/PhpstormProjects/dnd-wt-p-offer-help/src/combat/encounter.ts:3050)). The proposed guard refuses before reaching the clearing operation. Define how the new turn invalidates expired uncertainty before boundary-triggered refreshes, and test this through a real turn transition.
+
+**F4 — SIGNIFICANT: The commanded-Flee import witness is not a reducer-boundary state.**  
+[Plan:545](/home/vagrant/PhpstormProjects/dnd-wt-p-offer-help/.tmp-plans/2026-09-08-offers-roadmap.md:545) requires `{60,10,50}` after commanded Flee. Flee grants movement, performs its movement, and unconditionally exhausts turn resources before returning ([encounter.ts:6238–6267](/home/vagrant/PhpstormProjects/dnd-wt-p-offer-help/src/combat/encounter.ts:6238)). Exhaustion sets `spent = speed` and `remaining = 0` ([encounter.ts:6179–6190](/home/vagrant/PhpstormProjects/dnd-wt-p-offer-help/src/combat/encounter.ts:6179)). With unchanged Speed 30, the exported triplet is `{60,60,0}`, even if only 10 feet were travelled. Replace the invented boundary with a realizable Flee witness and preserve exhaustion through migration and subsequent refresh.
+
+**F5 — TRIVIAL: The bottleneck control needs explicit attack-range and Reaction fields.**  
+The geometric reach-10 control works, but [plan:357](/home/vagrant/PhpstormProjects/dnd-wt-p-offer-help/.tmp-plans/2026-09-08-offers-roadmap.md:357) should explicitly distinguish attack-specific range from ordinary OA reach and instantiate the “unmentioned resources absent” convention as `reactionAvailable:false`. My production `planMovement` probe found no OA window at reach 5, but one at reach 10 for `(2,1)→(3,0)` when Reaction is available. The predicate is [movement.ts:332–346](/home/vagrant/PhpstormProjects/dnd-wt-p-offer-help/src/combat/movement.ts:332). Without that resource pin, the roadmap’s OA-avoidance policy can remove the former winner independently of its benefit.
+
+**F6 — TRIVIAL: There is an out-of-scope operational change.**  
+The hash-verified shelved candidate specified Playwright port `4600`; [plan:840](/home/vagrant/PhpstormProjects/dnd-wt-p-offer-help/.tmp-plans/2026-09-08-offers-roadmap.md:840) changes it to `4360`. This is outside the two blockers and D597 paragraph. Record the exception explicitly rather than claiming only the two blocker contracts changed.
+
+**Verified claims**
+
+- Frozen hash, 902 lines, HEAD `eb778854`, clean tree, and frozen contracts hash all match.
+- Independently reproduced the bottleneck through the real movement world: occupied gate reachable set `{(0,0):0,(1,0):5,(2,0):10,(2,1):10}`, zero reach-5 attack paths; removing only occupancy restores exactly four paths, costing `15,15,20,20`. Reach 10 restores access from both permitted candidate states.
+- Recovered the complete shelved candidate from the author’s session and verified SHA-256 `e27b440c…`. Previously repaired Help/Ready, Grapple recurrence, other reposition witnesses, and held-out requirements remain textually intact.
+- Reproduced retreat paths/cover, disperse joint-center counts, and Grapple arithmetic `441/2500` versus `3/40`. Confirmed the 17 explicit movement-triplet literals and the **tests-tree** inventory of 57 JSON files containing 418 triplets, none boosted.
+- One-/double-Dash carry arithmetic fixes `{60,10,50}→{30,10,20}` for coherent snapshots. It does not resolve F1–F4.
+- File allocations, focused gates, supervisor `npm run test:gate`, and rollback steps are present. Migration implementation remains blocked by the semantic gaps above.
+- No files edited; no tests or builds run.
+
+VERDICT: REJECT
+
+review complete
