@@ -22209,3 +22209,16 @@ parallel. Supervisor binding for S2a to avoid pre-empting F24: the player token 
 snapshot adapter from the filtered player projection (no new field on PlayerVisiblePlacedCombatant / PersistedCoordinatorState;
 persisted bytes unchanged) — the remediation may confirm or replace this design before S3. Alternatives not chosen: authorize
 remediation first; stop the unit.
+
+### D586.175 — promo180 Slice H remediation ACCEPTED (Astra round 2); Room D landing accepted; held-out and offers in final rounds (2026-09-09 22:29 EDT)
+
+PROMO180-H-REM-01: candidate ced82dc2 on claude/p-promo180 (three files over the shelved 0f292f91) accepted by Astra at round 2
+(`.claude/consensus/promo180-h-rem/review-r2-astra.md`): empty/decision_missing corrections are no longer validation evidence,
+refusal during correction escalates, expiry after adoption validation persists `refused` with zero executed segments, the
+recalculation regression proves rejection of a valid late result (mutation-proved), the speculation test passes with real MCP
+children in 1.74 s on a minimal fixture without a raised timeout; supervisor cumulative 39 files / 600 tests on a writable checkout.
+Landing follows D586.131 once the running gate releases the worktree. ROOM-D-LAND-01: r2 (6ec0911e) accepted by Astra; r1 gate
+fully green; fresh gate on r2 running; then merge to main. HELDOUT-S1-REM-01: r3 (final) lane done — bracket-notation resolver
+calls recognised, 85/85 wall tests, 321/321 cumulative lane-claimed; supervisor serial verification running; then Astra final.
+OFFERS-PLAN-02: r3 (final) lane running on the replay/recovery contract. VTT-HANDOFF: plan remediation lane and S0–S2
+implementation lane running in parallel (D603). D569-PATCH-01: implementation lane running.
