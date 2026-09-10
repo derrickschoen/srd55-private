@@ -20,3 +20,5 @@
 - 2026-09-10 09:51 EDT — r7 lane DONE (default-deny restructure); supervisor verification tsc/sg/diffcheck 0, 9 specs 423/423; committed 32f45ac5; Astra r7 review dispatched (resume 01a088d6…) with adversarial unenumerated-form probes.
 
 - 2026-09-10 09:55 EDT — r7 Astra REJECT (F23 binding-pattern aliases, F24 factory results escape, F25 import-equals seeding, F26 scope-unaware config locals/spread overrides, F27 default-deny flags ordinary window/import.meta.env uses + regex alias → reject-all). Rule refined: track loader-VALUED expressions, not namespace roots; real-repository zero-findings regression required. r8 dispatched (resume 01a088b4…).
+
+- 2026-09-10 10:23 EDT — r8 lane DONE; supervisor verification tsc/sg/diffcheck 0, 9 specs 440/440; committed 74839d5c; Astra r8 review dispatched (resume 01a088d6…).
