@@ -11,3 +11,5 @@
 - 2026-09-10 11:23 EDT — fix pass 1 ineffective: supervisor writable cumulative 387/392, same three timeouts + literal mismatch now adjustment/correction; lane timing evidence was vacuous (tests failed at EROFS before the wait). Fix pass 2 dispatched with the real failure output and a trace-the-wait requirement.
 
 - 2026-09-10 12:25 EDT — fix pass 2 traced the real wait (unbounded SIMULATED stdio response), added in-process SIMULATED dispatch + injected timeouts + a test-only recalculation seam, fixed correction dispatch phase. Supervisor cumulative 390/392, serial rerun 95/95. Committed df7531b8; Astra r2 review dispatched (resume 01a08815…) with the fix-pass additions flagged for scrutiny.
+
+- 2026-09-10 12:36 EDT — r2 Astra REJECT: F3/F7/F9/F11/F12 resolved, fixture + fix-pass additions accepted; F13–F22 (refusal vs default-fallback, persist-before-STOP on conflicting startup, mixed readiness, cancellation-after-delivery, cleanup joins, potential infinite loop on incomplete speculation, recalculation phase, v3 validator completeness/hybrid rejection, runbook drift, removed invariants + hand-built packet regression). r3 dispatched (resume 01a088e3…).
