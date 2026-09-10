@@ -180,34 +180,35 @@ export const HELDOUT_LEAK_AST_OUT_OF_SCOPE = [
   'eval executable strings',
   'new Function executable strings',
   'custom loader implementations',
+  'Vite plugin config hooks',
   'runtime-generated code',
 ] as const;
 
 /** Rule N/Rule C audit: every expression-flow position is interpreted or fails closed. */
 export const HELDOUT_LEAK_FLOW_AUDIT = [
-  { position: 'declaration initializer', loaderValues: 'Rule N1 permits only a plain const namespace alias; Rule N2 permits inert browser-global transfer', configurationReferences: 'Rule C interprets only same-file const object/array literals reached from export default' },
-  { position: 'member receiver', loaderValues: 'Rule N1 permits direct namespace receipt; Rule N2 validates browser loader members by symbol at use', configurationReferences: 'Rule C does not follow receiver flow outside its reachable graph' },
-  { position: 'assignment', loaderValues: 'Rule N1 failed_closed; Rule N2 browser globals remain inert until loader-member use', configurationReferences: 'Rule C failed_closed outside the reachable set' },
-  { position: 'destructuring declaration', loaderValues: 'Rule N1 failed_closed when extraction is not an interpreted loader member; Rule N2 validates loader use', configurationReferences: 'Rule C failed_closed' },
-  { position: 'destructuring assignment', loaderValues: 'Rule N1 failed_closed when extraction is not an interpreted loader member; Rule N2 validates loader use', configurationReferences: 'Rule C failed_closed' },
-  { position: 'parameter default', loaderValues: 'Rule N1 failed_closed; Rule N2 permits browser-global transfer but not loader use through the parameter', configurationReferences: 'Rule C failed_closed' },
-  { position: 'return', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global transfer', configurationReferences: 'Rule C interprets only returns of the exported configuration factory' },
-  { position: 'yield', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global transfer', configurationReferences: 'Rule C failed_closed' },
-  { position: 'throw', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global transfer', configurationReferences: 'Rule C failed_closed' },
-  { position: 'await or promise resolution', loaderValues: 'Rule N1 failed_closed; Rule N2 validates loader use', configurationReferences: 'Rule C failed_closed' },
-  { position: 'template substitution', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global transfer', configurationReferences: 'Rule C failed_closed' },
-  { position: 'spread', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global transfer', configurationReferences: 'Rule C permits only reachable same-file const literal composition' },
-  { position: 'property value', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global storage', configurationReferences: 'Rule C visits exact literal nodes; unrelated non-literal values are opaque and tracked-const references within them fail_closed' },
-  { position: 'array element', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global storage', configurationReferences: 'Rule C interprets outer configuration arrays; arrays under unrelated keys are opaque and harmless' },
-  { position: 'call argument', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global transfer', configurationReferences: 'Rule C accepts only symbol-proven defineConfig and mergeConfig graph entries' },
-  { position: 'constructor argument', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global transfer', configurationReferences: 'Rule C failed_closed' },
-  { position: 'call receiver', loaderValues: 'Rule N1 permits only direct namespace member derivation; Rule N2 validates loader members by symbol', configurationReferences: 'Rule C failed_closed outside its reachable graph' },
-  { position: 'conditional, logical, or comma expression', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global transfer', configurationReferences: 'Rule C unions conditional export branches and otherwise fails_closed' },
-  { position: 'class field or heritage', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global storage', configurationReferences: 'Rule C failed_closed' },
-  { position: 'export', loaderValues: 'Rule N1 failed_closed except its exact alias initializer; Rule N2 permits inert global transfer', configurationReferences: 'Rule C starts at export default and otherwise fails_closed' },
-  { position: 'for-of head', loaderValues: 'Rule N1 failed_closed; Rule N2 validates later loader use', configurationReferences: 'Rule C failed_closed' },
-  { position: 'for-in head', loaderValues: 'Rule N1 failed_closed; Rule N2 validates later loader use', configurationReferences: 'Rule C failed_closed' },
-  { position: 'tagged template', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global transfer', configurationReferences: 'Rule C failed_closed' },
+  { position: 'declaration initializer', loaderValues: 'Rule N1 permits only a plain const namespace alias; Rule N2 permits inert browser-global transfer', configurationReferences: 'Rule C permits exact non-exported const aliases of statically addressed subtrees and fails closed for alias-bearing let, var, destructuring, or exported initializers' },
+  { position: 'member receiver', loaderValues: 'Rule N1 permits direct namespace receipt; Rule N2 validates browser loader members by symbol at use', configurationReferences: 'Rule C extends the static address through constant property and element reads; nonconstant addresses fail closed' },
+  { position: 'assignment', loaderValues: 'Rule N1 failed_closed; Rule N2 browser globals remain inert until loader-member use', configurationReferences: 'Rule C always fails closed on mutation targets and fails closed on alias-bearing assignment values' },
+  { position: 'destructuring declaration', loaderValues: 'Rule N1 and Rule N2 track recognized loader keys and fail_closed for any loader key extracted from an unknown source', configurationReferences: 'Rule C fails closed when an alias-bearing subtree enters a binding pattern' },
+  { position: 'destructuring assignment', loaderValues: 'Rule N1 and Rule N2 track recognized loader keys and fail_closed for any loader key extracted from an unknown source', configurationReferences: 'Rule C fails closed on assignment-pattern targets and alias-bearing assignment values' },
+  { position: 'parameter default', loaderValues: 'Rule N1 failed_closed; Rule N2 permits browser-global transfer but not loader use through the parameter', configurationReferences: 'Rule C fails closed for alias-bearing defaults' },
+  { position: 'return', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global transfer', configurationReferences: 'Rule C interprets exported configuration-factory returns and otherwise fails closed for alias-bearing subtrees' },
+  { position: 'yield', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global transfer', configurationReferences: 'Rule C fails closed for alias-bearing yielded values' },
+  { position: 'throw', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global transfer', configurationReferences: 'Rule C fails closed for alias-bearing thrown values' },
+  { position: 'await or promise resolution', loaderValues: 'Rule N1 permits only await import of a constant built-in namespace and otherwise failed_closed; Rule N2 validates loader use', configurationReferences: 'Rule C fails closed for alias-bearing awaited or promise-resolved values' },
+  { position: 'template substitution', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global transfer', configurationReferences: 'Rule C fails closed for alias-bearing template substitutions' },
+  { position: 'spread', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global transfer', configurationReferences: 'Rule C permits visited-graph literal composition and non-alias-bearing subtree reuse; alias-bearing spreads into untracked literals fail closed' },
+  { position: 'property value', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global storage', configurationReferences: 'Rule C visits exact literal nodes; alias-bearing values stored in untracked objects fail closed' },
+  { position: 'array element', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global storage', configurationReferences: 'Rule C leaves arrays under unrelated keys opaque; alias-bearing values stored in them fail closed while non-alias-bearing addressed subtrees remain usable' },
+  { position: 'call argument', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global transfer', configurationReferences: 'Rule C interprets symbol-proven defineConfig and mergeConfig graph entries and otherwise fails closed for alias-bearing arguments' },
+  { position: 'constructor argument', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global transfer', configurationReferences: 'Rule C fails closed for alias-bearing constructor arguments' },
+  { position: 'call receiver', loaderValues: 'Rule N1 permits only direct namespace member derivation; Rule N2 validates loader members by symbol', configurationReferences: 'Rule C always fails closed when a tracked chain is the receiver of a method call' },
+  { position: 'conditional, logical, or comma expression', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global transfer', configurationReferences: 'Rule C permits tests, unions exported configuration branches, and otherwise fails closed for alias-bearing result values' },
+  { position: 'class field or heritage', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global storage', configurationReferences: 'Rule C fails closed for alias-bearing class storage or heritage values' },
+  { position: 'export', loaderValues: 'Rule N1 failed_closed except its exact alias initializer; Rule N2 permits inert global transfer', configurationReferences: 'Rule C starts at the single export-default graph and fails closed for other alias-bearing exports' },
+  { position: 'for-of head', loaderValues: 'Rule N1 failed_closed; Rule N2 validates later loader use', configurationReferences: 'Rule C always fails closed on tracked loop assignment heads' },
+  { position: 'for-in head', loaderValues: 'Rule N1 failed_closed; Rule N2 validates later loader use', configurationReferences: 'Rule C always fails closed on tracked loop assignment heads' },
+  { position: 'tagged template', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global transfer', configurationReferences: 'Rule C fails closed for alias-bearing tagged-template use' },
 ] as const;
 
 export const HELDOUT_MODULE_SPECIFIER_POLICY = {
@@ -237,7 +238,8 @@ export const HELDOUT_MODULE_SPECIFIER_POLICY = {
     'Rule N2 permits browser globals to transfer inertly and validates Worker, SharedWorker, and importScripts members at use by symbol-proven global provenance',
     'a loader-valued expression is allowed only as a direct callee with a constant specifier, a receiver leading to a recognized member call, or the whole initializer of a non-exported plain-identifier const alias',
     'Rule C interprets Vite and Vitest aliases only as strict literals in the exact-node graph reached from export default, symbol-proven defineConfig or mergeConfig, factory returns, conditional branches, and same-file const object/array composition',
-    'Rule C uses no mutation or transfer analysis: every reference to a reachable const must be its declaration or an exact node visited in the reachable graph',
+    'Rule C uses no flow tracking: each tracked-const reference is classified by its maximal constant-key address, the addressed subtree, and its immediate syntactic position',
+    'Rule C permits non-exported plain-const aliases to preserve the same addressed subtree and allows non-alias-bearing subtrees in otherwise escaping positions',
     'reachable object spreads require tracked const literals; computed keys, accessors, methods, and nonliteral resolve or alias values fail closed, while unrelated nonliteral values are opaque',
     'root vite*.config.* and vitest*.config.* entry points are inspected, including symbol-proven defineConfig and mergeConfig imports from Vite or Vitest',
     'resolution configuration changes re-inspect consumers; unresolved configuration makes every encountered consumer edge unresolved',
@@ -247,6 +249,7 @@ export const HELDOUT_MODULE_SPECIFIER_POLICY = {
     'every other position of a loader-valued expression is loader_reference_escaped from one generic check',
     'every disallowed Rule N1 namespace position and every non-symbol-proven Rule N2 loader-member use is loader_reference_escaped from the same generic check',
     'a nonliteral Vite or Vitest alias, unreachable alias/resolve property, or invalid reachable-const reference is unresolved configuration under Rule C',
+    'tracked configuration references with nonconstant addresses or mutation targets fail closed; alias-bearing subtrees also fail closed when returned, stored outside the visited graph, passed, exported, templated, awaited, yielded, or otherwise escaped',
     'unresolved targets, options, package conditions, globs, aliases, URL schemes, and data modules are findings',
   ],
   outOfScope: HELDOUT_LEAK_AST_OUT_OF_SCOPE,
@@ -753,15 +756,15 @@ function discoverModuleEdges(
         return singletonKind('resolver');
       }
       if (isImportMetaNamespace(unwrapped.expression) && key === 'glob') return singletonKind('glob');
-      if ((receiverKinds.has('worker_namespace') || isGlobalNamespace(unwrapped.expression)) &&
+      if ((receiverKinds.has('worker_namespace') || isBrowserGlobalSource(unwrapped.expression)) &&
         key === 'Worker') return singletonKind('worker');
       if (receiverKinds.has('worker_namespace') && key === 'default') {
         return singletonKind('worker_namespace');
       }
-      if (isGlobalNamespace(unwrapped.expression) && key === 'SharedWorker') {
+      if (isBrowserGlobalSource(unwrapped.expression) && key === 'SharedWorker') {
         return singletonKind('shared_worker');
       }
-      if (isGlobalNamespace(unwrapped.expression) && key === 'importScripts') {
+      if (isBrowserGlobalSource(unwrapped.expression) && key === 'importScripts') {
         return singletonKind('script_loader');
       }
       return new Set();
@@ -841,7 +844,8 @@ function discoverModuleEdges(
       if (namespace !== null) addTrackedSymbol(node.name, singletonKind(namespace));
     }
     if ((ts.isVariableDeclaration(node) && node.initializer !== undefined) ||
-      (ts.isParameter(node) && (node.initializer !== undefined || parameterHasBrowserGlobalType(node)))) {
+      (ts.isParameter(node) && (node.initializer !== undefined || parameterHasBrowserGlobalType(node) ||
+        !ts.isIdentifier(node.name)))) {
       bindingDeclarations.push(node);
     }
     if (ts.isParameter(node) && ts.isIdentifier(node.name) && parameterHasBrowserGlobalType(node)) {
@@ -913,9 +917,9 @@ function discoverModuleEdges(
   type BrowserLoaderExtraction = 'loader' | 'unknown' | 'none';
   const combineBrowserExtractions = (
     values: readonly BrowserLoaderExtraction[],
-  ): BrowserLoaderExtraction => values.includes('unknown')
-    ? 'unknown'
-    : values.includes('loader') ? 'loader' : 'none';
+  ): BrowserLoaderExtraction => values.includes('loader')
+    ? 'loader'
+    : values.includes('unknown') ? 'unknown' : 'none';
   const browserLoaderExtraction = (
     target: ts.BindingName | ts.Expression,
   ): BrowserLoaderExtraction => {
@@ -1191,23 +1195,21 @@ function discoverModuleEdges(
       (parent.parent.flags & ts.NodeFlags.Const) !== 0;
   };
   const isAllowedLoaderValue = (reference: ts.Expression): boolean => {
-    if (ts.isElementAccessExpression(unwrapTransparentExpression(reference))) return false;
+    const initial = unwrapTransparentExpression(reference);
+    if (ts.isElementAccessExpression(initial)) {
+      const kinds = expressionKinds(initial);
+      if (propertyKey(initial) === null || (!kinds.has('worker') &&
+        !kinds.has('shared_worker') && !kinds.has('script_loader'))) return false;
+    }
     let current = reference;
     while (true) {
       const parent = current.parent;
       if ((ts.isParenthesizedExpression(parent) || ts.isAsExpression(parent) ||
         ts.isSatisfiesExpression(parent) || ts.isNonNullExpression(parent) ||
-        ts.isTypeAssertionExpression(parent) || ts.isAwaitExpression(parent)) &&
+        ts.isTypeAssertionExpression(parent)) &&
         parent.expression === current) {
         current = parent;
         continue;
-      }
-      if (ts.isAwaitExpression(parent) && parent.expression === current) {
-        const awaited = unwrapTransparentExpression(current);
-        if (ts.isCallExpression(awaited) && awaited.expression.kind === ts.SyntaxKind.ImportKeyword) {
-          current = parent;
-          continue;
-        }
       }
       if (ts.isPropertyAccessExpression(parent) && parent.expression === current &&
         isLoaderValued(expressionKinds(parent))) {
@@ -1277,7 +1279,7 @@ function discoverModuleEdges(
     const key = propertyKey(node);
     const recognizedReceiver = receiverKinds.has('module_namespace') ||
       receiverKinds.has('worker_namespace') || receiverKinds.has('loader') ||
-      isImportMetaNamespace(node.expression) || isGlobalNamespace(node.expression);
+      isImportMetaNamespace(node.expression) || isBrowserGlobalSource(node.expression);
     if (!recognizedReceiver) return false;
     if (key === null) return true;
     if (!receiverKinds.has('module_namespace') && !receiverKinds.has('worker_namespace')) return false;
@@ -1299,6 +1301,14 @@ function discoverModuleEdges(
         parent.expression === current) {
         current = parent;
         continue;
+      }
+      if (ts.isAwaitExpression(parent) && parent.expression === current) {
+        const awaited = unwrapTransparentExpression(current);
+        if (ts.isCallExpression(awaited) && awaited.expression.kind === ts.SyntaxKind.ImportKeyword &&
+          moduleNamespaceKind(constantString(awaited.arguments[0])) !== null) {
+          current = parent;
+          continue;
+        }
       }
       if ((ts.isPropertyAccessExpression(parent) || ts.isElementAccessExpression(parent)) &&
         parent.expression === current) return true;
@@ -1996,6 +2006,7 @@ function viteAliases(source: string, path: string): ViteAliasDiscovery {
   };
   const reachableNodes = new Set<ts.Node>();
   const reachableSymbols = new Map<ts.Symbol, ts.VariableDeclaration>();
+  const aliasBearingSymbols = new Set<ts.Symbol>();
   const visitingSymbols = new Set<ts.Symbol>();
   const regexAlias = (
     expression: ts.Expression,
@@ -2124,17 +2135,11 @@ function viteAliases(source: string, path: string): ViteAliasDiscovery {
     visitReturn(body);
     return returned;
   };
-  const markOpaqueArray = (array: ts.ArrayLiteralExpression): void => {
-    const mark = (node: ts.Node): void => {
-      reachableNodes.add(node);
-      ts.forEachChild(node, mark);
-    };
-    mark(array);
-  };
   const visitAliasValue = (expression: ts.Expression): void => {
     const value = unwrapTransparentExpression(expression);
     if (ts.isIdentifier(value)) {
-      visitReachableIdentifier(value, visitAliasValue);
+      const symbol = visitReachableIdentifier(value, visitAliasValue);
+      if (symbol !== null) aliasBearingSymbols.add(symbol);
       return;
     }
     reachableNodes.add(value);
@@ -2143,7 +2148,6 @@ function viteAliases(source: string, path: string): ViteAliasDiscovery {
   const visitOrdinaryPropertyValue = (expression: ts.Expression): void => {
     const value = unwrapTransparentExpression(expression);
     if (ts.isObjectLiteralExpression(value)) visitReachableObject(value);
-    else if (ts.isArrayLiteralExpression(value)) markOpaqueArray(value);
   };
   const visitResolveObject = (expression: ts.Expression): void => {
     const value = unwrapTransparentExpression(expression);
@@ -2166,7 +2170,10 @@ function viteAliases(source: string, path: string): ViteAliasDiscovery {
       }
       if (ts.isShorthandPropertyAssignment(property)) {
         reachableNodes.add(property);
-        if (property.name.text === 'alias') visitReachableIdentifier(property.name, visitAliasValue);
+        if (property.name.text === 'alias') {
+          const symbol = visitReachableIdentifier(property.name, visitAliasValue);
+          if (symbol !== null) aliasBearingSymbols.add(symbol);
+        }
         continue;
       }
       if (!ts.isPropertyAssignment(property) || ts.isComputedPropertyName(property.name)) {
@@ -2194,7 +2201,8 @@ function viteAliases(source: string, path: string): ViteAliasDiscovery {
         if (property.name.text === 'resolve') {
           visitReachableIdentifier(property.name, visitResolveObject);
         } else if (property.name.text === 'alias') {
-          visitReachableIdentifier(property.name, visitAliasValue);
+          const symbol = visitReachableIdentifier(property.name, visitAliasValue);
+          if (symbol !== null) aliasBearingSymbols.add(symbol);
         }
         continue;
       }
@@ -2233,21 +2241,22 @@ function viteAliases(source: string, path: string): ViteAliasDiscovery {
   function visitReachableIdentifier(
     identifier: ts.Identifier,
     visitor: (expression: ts.Expression) => void,
-  ): void {
+  ): ts.Symbol | null {
     reachableNodes.add(identifier);
     const resolved = declarationForReachableIdentifier(identifier);
     if (resolved === null) {
       unresolved = true;
-      return;
+      return null;
     }
     reachableSymbols.set(resolved.symbol, resolved.declaration);
     if (visitingSymbols.has(resolved.symbol)) {
       unresolved = true;
-      return;
+      return null;
     }
     visitingSymbols.add(resolved.symbol);
     visitor(resolved.declaration.initializer as ts.Expression);
     visitingSymbols.delete(resolved.symbol);
+    return resolved.symbol;
   }
   function visitReachableExpression(expression: ts.Expression): void {
     const value = unwrapTransparentExpression(expression);
@@ -2283,11 +2292,260 @@ function viteAliases(source: string, path: string): ViteAliasDiscovery {
   const exported = exportAssignments[0];
   if (exportAssignments.length !== 1 || exported === undefined) unresolved = true;
   else visitReachableExpression(exported.expression);
+  const isAssignmentOperator = (kind: ts.SyntaxKind): boolean =>
+    kind >= ts.SyntaxKind.FirstAssignment && kind <= ts.SyntaxKind.LastAssignment;
+  const isUpdateOperator = (kind: ts.SyntaxKind): boolean =>
+    kind === ts.SyntaxKind.PlusPlusToken || kind === ts.SyntaxKind.MinusMinusToken;
+  interface ConfigurationAddress {
+    readonly root: ts.Symbol;
+    readonly path: readonly string[];
+  }
+  const referenceChain = (
+    identifier: ts.Identifier,
+  ): {
+    readonly expression: ts.Expression;
+    readonly constantElements: boolean;
+    readonly path: readonly string[];
+  } => {
+    let expression: ts.Expression = identifier;
+    let constantElements = true;
+    const path: string[] = [];
+    while (true) {
+      const parent = expression.parent;
+      if ((ts.isParenthesizedExpression(parent) || ts.isAsExpression(parent) ||
+        ts.isSatisfiesExpression(parent) || ts.isNonNullExpression(parent) ||
+        ts.isTypeAssertionExpression(parent)) && parent.expression === expression) {
+        expression = parent;
+        continue;
+      }
+      if (ts.isPropertyAccessExpression(parent) && parent.expression === expression) {
+        path.push(parent.name.text);
+        expression = parent;
+        continue;
+      }
+      if (ts.isElementAccessExpression(parent) && parent.expression === expression) {
+        const key = propertyKey(parent);
+        if (key === null) constantElements = false;
+        else path.push(key);
+        expression = parent;
+        continue;
+      }
+      return { expression, constantElements, path };
+    }
+  };
+  const isAssignmentPatternContainer = (node: ts.Node): boolean =>
+    ts.isParenthesizedExpression(node) || ts.isObjectLiteralExpression(node) ||
+    ts.isArrayLiteralExpression(node) || ts.isPropertyAssignment(node) ||
+    ts.isShorthandPropertyAssignment(node) || ts.isSpreadAssignment(node) ||
+    ts.isSpreadElement(node);
+  const isMutationTarget = (expression: ts.Expression): boolean => {
+    let current: ts.Node = expression;
+    while (true) {
+      const parent = current.parent;
+      if (ts.isBinaryExpression(parent) && isAssignmentOperator(parent.operatorToken.kind)) {
+        return parent.left === current;
+      }
+      if ((ts.isPrefixUnaryExpression(parent) || ts.isPostfixUnaryExpression(parent)) &&
+        isUpdateOperator(parent.operator) && parent.operand === current) return true;
+      if (ts.isDeleteExpression(parent) && parent.expression === current) return true;
+      if ((ts.isForInStatement(parent) || ts.isForOfStatement(parent)) &&
+        parent.initializer === current) return true;
+      if (!isAssignmentPatternContainer(parent)) return false;
+      current = parent;
+    }
+  };
+  const isNonExportedPlainConst = (declaration: ts.VariableDeclaration): boolean => {
+    if (!ts.isIdentifier(declaration.name) || !ts.isVariableDeclarationList(declaration.parent) ||
+      (declaration.parent.flags & ts.NodeFlags.Const) === 0) return false;
+    const statement = declaration.parent.parent;
+    return !ts.isVariableStatement(statement) || ts.getModifiers(statement)?.some((modifier) =>
+      modifier.kind === ts.SyntaxKind.ExportKeyword) !== true;
+  };
+  const configurationAddresses = new Map<ts.Symbol, ConfigurationAddress>();
+  for (const symbol of reachableSymbols.keys()) {
+    configurationAddresses.set(symbol, { root: symbol, path: [] });
+  }
+  const addressForExpression = (expression: ts.Expression): ConfigurationAddress | null => {
+    const value = unwrapTransparentExpression(expression);
+    if (ts.isIdentifier(value)) {
+      const symbol = symbolAt(value);
+      return symbol === undefined ? null : configurationAddresses.get(symbol) ?? null;
+    }
+    if (!ts.isPropertyAccessExpression(value) && !ts.isElementAccessExpression(value)) return null;
+    const receiver = addressForExpression(value.expression);
+    const key = propertyKey(value);
+    return receiver === null || key === null
+      ? null
+      : { root: receiver.root, path: [...receiver.path, key] };
+  };
+  let aliasesChanged = true;
+  while (aliasesChanged) {
+    aliasesChanged = false;
+    const collectConstAliases = (node: ts.Node): void => {
+      if (ts.isVariableDeclaration(node) && node.initializer !== undefined &&
+        isNonExportedPlainConst(node)) {
+        const address = addressForExpression(node.initializer);
+        const symbol = ts.isIdentifier(node.name) ? symbolAt(node.name) : undefined;
+        if (address !== null && symbol !== undefined && !configurationAddresses.has(symbol)) {
+          configurationAddresses.set(symbol, address);
+          aliasesChanged = true;
+        }
+      }
+      ts.forEachChild(node, collectConstAliases);
+    };
+    collectConstAliases(sourceFile);
+  }
+  const rootDeclaration = (address: ConfigurationAddress): ts.VariableDeclaration | null =>
+    reachableSymbols.get(address.root) ?? null;
+  const propertyValue = (
+    object: ts.ObjectLiteralExpression,
+    key: string,
+  ): ts.Expression | null => {
+    const matches = object.properties.filter((property) =>
+      (ts.isPropertyAssignment(property) || ts.isShorthandPropertyAssignment(property)) &&
+      propertyNameText(property.name) === key);
+    if (matches.length !== 1) return null;
+    const property = matches[0];
+    if (property === undefined) return null;
+    if (ts.isPropertyAssignment(property)) return property.initializer;
+    return ts.isShorthandPropertyAssignment(property) ? property.name : null;
+  };
+  type AddressedValue = ts.Expression | 'known_scalar';
+  const addressedValue = (address: ConfigurationAddress): AddressedValue | null => {
+    const declaration = rootDeclaration(address);
+    if (declaration?.initializer === undefined) return null;
+    let value: ts.Expression = declaration.initializer;
+    for (const key of address.path) {
+      const current = unwrapTransparentExpression(value);
+      if (ts.isObjectLiteralExpression(current)) {
+        const next = propertyValue(current, key);
+        if (next === null) return null;
+        value = next;
+        continue;
+      }
+      if (ts.isArrayLiteralExpression(current)) {
+        if (key === 'length') return 'known_scalar';
+        const index = Number(key);
+        if (!Number.isSafeInteger(index) || index < 0) return null;
+        const element = current.elements[index];
+        if (element === undefined || ts.isOmittedExpression(element) || ts.isSpreadElement(element)) {
+          return null;
+        }
+        value = element;
+        continue;
+      }
+      const nested = addressForExpression(current);
+      if (nested === null) return null;
+      const nestedValue = addressedValue(nested);
+      if (nestedValue === null || nestedValue === 'known_scalar') return null;
+      value = nestedValue;
+      const restarted = addressedValue({ root: nested.root, path: [...nested.path, key] });
+      if (restarted === null) return null;
+      if (restarted === 'known_scalar') return restarted;
+      value = restarted;
+    }
+    return unwrapTransparentExpression(value);
+  };
+  const isPrimitiveLiteral = (expression: ts.Expression): boolean =>
+    ts.isLiteralExpression(expression) || expression.kind === ts.SyntaxKind.TrueKeyword ||
+    expression.kind === ts.SyntaxKind.FalseKeyword || expression.kind === ts.SyntaxKind.NullKeyword;
+  const subtreeContainsAliasKey = (
+    expression: ts.Expression,
+    seen: Set<ts.Node> = new Set(),
+  ): boolean => {
+    const value = unwrapTransparentExpression(expression);
+    if (seen.has(value)) return true;
+    seen.add(value);
+    if (ts.isObjectLiteralExpression(value)) {
+      for (const property of value.properties) {
+        if (ts.isSpreadAssignment(property)) {
+          const address = addressForExpression(property.expression);
+          const spreadValue = address === null ? null : addressedValue(address);
+          if (spreadValue === null || spreadValue === 'known_scalar' ||
+            subtreeContainsAliasKey(spreadValue, seen)) return true;
+          continue;
+        }
+        if (!ts.isPropertyAssignment(property) && !ts.isShorthandPropertyAssignment(property)) {
+          return true;
+        }
+        const key = propertyNameText(property.name);
+        if (key === null || key === 'resolve' || key === 'alias') return true;
+        const child = ts.isPropertyAssignment(property) ? property.initializer : property.name;
+        const unwrappedChild = unwrapTransparentExpression(child);
+        if ((ts.isObjectLiteralExpression(unwrappedChild) ||
+          ts.isArrayLiteralExpression(unwrappedChild)) && subtreeContainsAliasKey(child, seen)) {
+          return true;
+        }
+      }
+      return false;
+    }
+    if (ts.isArrayLiteralExpression(value)) {
+      return value.elements.some((element) => !ts.isOmittedExpression(element) &&
+        !ts.isSpreadElement(element) &&
+        (ts.isObjectLiteralExpression(unwrapTransparentExpression(element)) ||
+          ts.isArrayLiteralExpression(unwrapTransparentExpression(element))) &&
+        subtreeContainsAliasKey(element, seen));
+    }
+    return !isPrimitiveLiteral(value);
+  };
+  const addressForReference = (
+    identifier: ts.Identifier,
+    chain: ReturnType<typeof referenceChain>,
+  ): ConfigurationAddress | null => {
+    const symbol = symbolAt(identifier);
+    const base = symbol === undefined ? undefined : configurationAddresses.get(symbol);
+    return base === undefined || !chain.constantElements
+      ? null
+      : { root: base.root, path: [...base.path, ...chain.path] };
+  };
+  const isAliasBearing = (address: ConfigurationAddress): boolean => {
+    if (aliasBearingSymbols.has(address.root)) return true;
+    const value = addressedValue(address);
+    return value === null || value !== 'known_scalar' && subtreeContainsAliasKey(value);
+  };
+  const isExactConstAliasInitializer = (expression: ts.Expression): boolean => {
+    const parent = expression.parent;
+    return ts.isVariableDeclaration(parent) && parent.initializer === expression &&
+      isNonExportedPlainConst(parent);
+  };
+  const isComparisonOperator = (kind: ts.SyntaxKind): boolean => [
+    ts.SyntaxKind.LessThanToken,
+    ts.SyntaxKind.LessThanEqualsToken,
+    ts.SyntaxKind.GreaterThanToken,
+    ts.SyntaxKind.GreaterThanEqualsToken,
+    ts.SyntaxKind.EqualsEqualsToken,
+    ts.SyntaxKind.ExclamationEqualsToken,
+    ts.SyntaxKind.EqualsEqualsEqualsToken,
+    ts.SyntaxKind.ExclamationEqualsEqualsToken,
+    ts.SyntaxKind.InKeyword,
+    ts.SyntaxKind.InstanceOfKeyword,
+  ].includes(kind);
+  const configurationReferenceEscapes = (identifier: ts.Identifier): boolean => {
+    const chain = referenceChain(identifier);
+    const address = addressForReference(identifier, chain);
+    if (address === null || addressedValue(address) === null ||
+      isMutationTarget(chain.expression)) return true;
+    const parent = chain.expression.parent;
+    if ((ts.isCallExpression(parent) || ts.isNewExpression(parent)) &&
+      parent.expression === chain.expression) return true;
+    if (reachableNodes.has(identifier) || isExactConstAliasInitializer(chain.expression)) return false;
+    if ((ts.isTypeOfExpression(parent) || ts.isVoidExpression(parent)) &&
+      parent.expression === chain.expression) return false;
+    if (ts.isPrefixUnaryExpression(parent) &&
+      parent.operator === ts.SyntaxKind.ExclamationToken && parent.operand === chain.expression) return false;
+    if (ts.isBinaryExpression(parent) && isComparisonOperator(parent.operatorToken.kind)) return false;
+    if ((ts.isIfStatement(parent) || ts.isWhileStatement(parent) || ts.isDoStatement(parent)) &&
+      parent.expression === chain.expression) return false;
+    if (ts.isConditionalExpression(parent) && parent.condition === chain.expression) return false;
+    return isAliasBearing(address);
+  };
   const verifyReachability = (node: ts.Node): void => {
     if (ts.isIdentifier(node)) {
       const symbol = symbolAt(node);
-      const declaration = symbol === undefined ? undefined : reachableSymbols.get(symbol);
-      if (declaration !== undefined && node !== declaration.name && !reachableNodes.has(node)) {
+      const address = symbol === undefined ? undefined : configurationAddresses.get(symbol);
+      const declaration = address === undefined ? undefined : rootDeclaration(address);
+      if (declaration !== null && declaration !== undefined && node !== declaration.name &&
+        configurationReferenceEscapes(node)) {
         unresolved = true;
       }
     }

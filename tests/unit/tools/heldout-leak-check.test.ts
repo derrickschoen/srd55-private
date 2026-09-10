@@ -316,7 +316,8 @@ describe('held-out reserve leak wall', () => {
         'Rule N2 permits browser globals to transfer inertly and validates Worker, SharedWorker, and importScripts members at use by symbol-proven global provenance',
         'a loader-valued expression is allowed only as a direct callee with a constant specifier, a receiver leading to a recognized member call, or the whole initializer of a non-exported plain-identifier const alias',
         'Rule C interprets Vite and Vitest aliases only as strict literals in the exact-node graph reached from export default, symbol-proven defineConfig or mergeConfig, factory returns, conditional branches, and same-file const object/array composition',
-        'Rule C uses no mutation or transfer analysis: every reference to a reachable const must be its declaration or an exact node visited in the reachable graph',
+        'Rule C uses no flow tracking: each tracked-const reference is classified by its maximal constant-key address, the addressed subtree, and its immediate syntactic position',
+        'Rule C permits non-exported plain-const aliases to preserve the same addressed subtree and allows non-alias-bearing subtrees in otherwise escaping positions',
         'reachable object spreads require tracked const literals; computed keys, accessors, methods, and nonliteral resolve or alias values fail closed, while unrelated nonliteral values are opaque',
         'root vite*.config.* and vitest*.config.* entry points are inspected, including symbol-proven defineConfig and mergeConfig imports from Vite or Vitest',
         'resolution configuration changes re-inspect consumers; unresolved configuration makes every encountered consumer edge unresolved',
@@ -326,12 +327,14 @@ describe('held-out reserve leak wall', () => {
         'every other position of a loader-valued expression is loader_reference_escaped from one generic check',
         'every disallowed Rule N1 namespace position and every non-symbol-proven Rule N2 loader-member use is loader_reference_escaped from the same generic check',
         'a nonliteral Vite or Vitest alias, unreachable alias/resolve property, or invalid reachable-const reference is unresolved configuration under Rule C',
+        'tracked configuration references with nonconstant addresses or mutation targets fail closed; alias-bearing subtrees also fail closed when returned, stored outside the visited graph, passed, exported, templated, awaited, yielded, or otherwise escaped',
         'unresolved targets, options, package conditions, globs, aliases, URL schemes, and data modules are findings',
       ],
       outOfScope: [
         'eval executable strings',
         'new Function executable strings',
         'custom loader implementations',
+        'Vite plugin config hooks',
         'runtime-generated code',
       ],
     });
@@ -928,6 +931,25 @@ describe('held-out reserve leak wall', () => {
     }));
   });
 
+  it.each([
+    ['typeof-window parameter', 'root: typeof window'],
+    ['Window parameter', 'root: Window'],
+  ] as const)('fails closed on a computed loader member from a %s', (_label, parameter) => {
+    const report = inspectHeldoutLeakChanges([{
+      path: 'tools/probe.mts',
+      addedText: [
+        `function spawn(${parameter}, key: 'Worker') {`,
+        "  new root[key]('../src/vtt/heldout-evaluation.ts');",
+        '}',
+        "spawn(window, 'Worker');",
+      ].join('\n'),
+    }], 'F', bindings);
+
+    expect(report.findings).toContainEqual(expect.objectContaining({
+      kind: 'loader_reference_escaped',
+    }));
+  });
+
   it.each(([
     ['import.meta', '', 'import.meta', 'resolver'],
     ['window', '', 'window', 'worker'],
@@ -1119,6 +1141,30 @@ describe('held-out reserve leak wall', () => {
   });
 
   it.each([
+    ['loader key plus rest from a boxed source', [
+      'const box = { w: window };',
+      "const { 'Worker': Spawn, ...rest } = box.w;",
+      "new Spawn('../src/vtt/heldout-evaluation.ts');",
+      'void rest;',
+    ].join('\n'), true],
+    ['untyped JavaScript parameter loader key', [
+      "function spawn({ 'Worker': Spawn }) {",
+      "  new Spawn('../src/vtt/heldout-evaluation.ts');",
+      '}',
+      'spawn(window);',
+    ].join('\n'), true],
+    ['inert browser-global member', 'const { addEventListener } = window;', false],
+  ] as const)('classifies %s destructuring structurally', (_label, addedText, escaped) => {
+    const report = inspectHeldoutLeakChanges([{
+      path: 'tools/probe.js',
+      addedText,
+    }], 'F', bindings);
+
+    expect(report.findings.some((finding) => finding.kind === 'loader_reference_escaped'))
+      .toBe(escaped);
+  });
+
+  it.each([
     ['awaited namespace alias', [
       'const meta = await import.meta;',
       "meta.resolve('../src/vtt/heldout-evaluation.ts');",
@@ -1132,6 +1178,45 @@ describe('held-out reserve leak wall', () => {
     }], 'F', bindings);
 
     expect(report.findings).toContainEqual(expect.objectContaining({
+      kind: 'loader_reference_escaped',
+    }));
+  });
+
+  it.each([
+    ['awaited createRequire result', [
+      "import { createRequire } from 'node:module';",
+      'const load = await createRequire(import.meta.url);',
+      "load.resolve('../src/vtt/heldout-evaluation.ts');",
+    ].join('\n')],
+    ['awaited require loader', [
+      'const load = await require;',
+      "load('../src/vtt/heldout-evaluation.ts');",
+    ].join('\n')],
+  ] as const)('rejects %s as a loader escape', (_label, addedText) => {
+    const report = inspectHeldoutLeakChanges([{
+      path: 'tools/probe.mts',
+      addedText,
+    }], 'F', bindings);
+
+    expect(report.findings).toContainEqual(expect.objectContaining({
+      kind: 'loader_reference_escaped',
+    }));
+  });
+
+  it('permits only awaited dynamic import of a built-in namespace', () => {
+    const report = inspectHeldoutLeakChanges([{
+      path: 'tools/probe.mts',
+      addedText: [
+        "const M = await import('node:module');",
+        'const load = M.createRequire(import.meta.url);',
+        "load.resolve('../src/vtt/heldout-evaluation.ts');",
+      ].join('\n'),
+    }], 'F', bindings);
+
+    expect(report.findings).toContainEqual(expect.objectContaining({
+      kind: 'protocol_resolution',
+    }));
+    expect(report.findings).not.toContainEqual(expect.objectContaining({
       kind: 'loader_reference_escaped',
     }));
   });
@@ -1900,6 +1985,58 @@ describe('held-out reserve leak wall', () => {
     }));
   });
 
+  it.each([
+    ['assignment inside an opaque plugin array', [
+      'const shared = { resolve: { alias: {} } };',
+      'export default {',
+      '  ...shared,',
+      "  plugins: [(shared.resolve.alias['@policy'] = './src/vtt/heldout-evaluation.ts', false)],",
+      '};',
+    ].join('\n'), true],
+    ['tracked const passed to a helper inside an opaque plugin array', [
+      'const shared = { resolve: { alias: {} } };',
+      'export default { ...shared, plugins: [helper(shared)] };',
+    ].join('\n'), true],
+    ['property read inside an opaque plugin array', [
+      'const shared = { resolve: { alias: {} }, plugins: [] };',
+      'export default { ...shared, plugins: [shared.plugins.length] };',
+    ].join('\n'), false],
+    ['array spread read inside an opaque plugin array', [
+      'const shared = { resolve: { alias: {} }, plugins: [] };',
+      'export default { ...shared, plugins: [...shared.plugins] };',
+    ].join('\n'), false],
+    ['plain calls inside an opaque plugin array', [
+      'export default { plugins: [foo(), bar({ x: 1 })] };',
+    ].join('\n'), false],
+    ['plain-const alias of a non-alias-bearing subtree', [
+      'const shared = { resolve: { alias: {} }, plugins: [] };',
+      'const p = shared.plugins;',
+      'export default { ...shared, plugins: [...p] };',
+    ].join('\n'), false],
+    ['let alias of an alias-bearing subtree', [
+      'const shared = { resolve: { alias: {} }, plugins: [] };',
+      'let p = shared;',
+      'export default shared;',
+      'void p;',
+    ].join('\n'), true],
+    ['plain-const alias escaped through a call', [
+      'const shared = { resolve: { alias: {} }, plugins: [] };',
+      'const q = shared.resolve;',
+      'use(q);',
+      'export default shared;',
+    ].join('\n'), true],
+  ] as const)('classifies %s with the Rule C addressed-subtree guard',
+  (_label, configSource, unresolved) => {
+    const report = inspectHeldoutLeakChanges([{
+      path: 'vite.config.ts',
+      addedText: configSource,
+      sourceText: configSource,
+    }], 'F', bindings);
+
+    expect(report.findings.some((finding) => finding.path === 'vite.config.ts' &&
+      finding.kind === 'unresolved_module_edge')).toBe(unresolved);
+  });
+
   it('interprets a symbol-proven defineConfig callback, conditional, and const spread', () => {
     const configSource = [
       "import { defineConfig } from 'vite';",
@@ -2066,6 +2203,7 @@ describe('held-out reserve leak wall', () => {
       'eval executable strings',
       'new Function executable strings',
       'custom loader implementations',
+      'Vite plugin config hooks',
       'runtime-generated code',
     ]);
     expect(moduleSpecifiers('tools/tuning/repair-ranking.ts', [
