@@ -1,4 +1,4 @@
-import { defineConfig } from 'vitest/config';
+import { configDefaults, defineConfig } from 'vitest/config';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -32,6 +32,7 @@ export default defineConfig({
     // Run BOTH unit and integration .test.ts under vitest. Browser tests are
     // .spec.ts under tests/browser and belong to Playwright (npm run test:browser).
     include: ['tests/**/*.test.ts', ...liveInclusions],
+    exclude: [...configDefaults.exclude, 'tests/integration-supervisor/**'],
     setupFiles: verdictRecorderSetup,
     /**
      * Derives the SRD spell-source parse ONCE, before any worker is forked,

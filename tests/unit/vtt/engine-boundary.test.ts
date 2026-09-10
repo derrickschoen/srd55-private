@@ -234,6 +234,59 @@ function reducerCallSites(graph: ReadonlyMap<string, SourceModule>): readonly st
   return calls.sort();
 }
 
+function runtimeConvergenceEvidence(graph: ReadonlyMap<string, SourceModule>): {
+  readonly constructedClasses: ReadonlySet<string>;
+  readonly reducerCalls: readonly string[];
+} {
+  const program = ts.createProgram({
+    rootNames: [...graph.keys()],
+    options: {
+      module: ts.ModuleKind.ESNext,
+      moduleResolution: ts.ModuleResolutionKind.Bundler,
+      noLib: true,
+      skipLibCheck: true,
+      target: ts.ScriptTarget.ESNext,
+      types: [],
+    },
+  });
+  const checker = program.getTypeChecker();
+  const definitions = new Set<string>();
+  const reducerCalls: string[] = [];
+  for (const module of graph.values()) {
+    const sourceFile = program.getSourceFile(module.file);
+    if (sourceFile === undefined) throw new Error(`TypeScript program omitted ${module.file}`);
+    const visit = (node: ts.Node): void => {
+      if (ts.isNewExpression(node)) {
+        let symbol = checker.getSymbolAtLocation(node.expression);
+        const visited = new Set<ts.Symbol>();
+        while (symbol !== undefined && (symbol.flags & ts.SymbolFlags.Alias) !== 0 && !visited.has(symbol)) {
+          visited.add(symbol);
+          symbol = checker.getAliasedSymbol(symbol);
+        }
+        const declaration = symbol?.getDeclarations()?.find((candidate) => {
+          const file = candidate.getSourceFile().fileName;
+          return file.startsWith(`${ROOT}/`) && !file.includes('/node_modules/');
+        });
+        if (symbol !== undefined && declaration !== undefined) {
+          definitions.add(`${symbol.getName()}@${repositoryPath(declaration.getSourceFile().fileName)}`);
+        }
+      }
+      if (ts.isCallExpression(node) && !insideImport(node)) {
+        const definition = definingReducer(checker, node.expression);
+        if (definition !== null) {
+          reducerCalls.push(
+            `${repositoryPath(module.file)}#${enclosingOperation(node, sourceFile)} -> ` +
+            `${repositoryPath(definition.file)}#${definition.symbol}`,
+          );
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    ts.forEachChild(sourceFile, visit);
+  }
+  return { constructedClasses: definitions, reducerCalls: reducerCalls.sort() };
+}
+
 function selectorAuthorityViolations(file: string): readonly string[] {
   const sourceFile = ts.createSourceFile(
     file,
@@ -344,6 +397,32 @@ describe('renderer-neutral engine boundary graph', () => {
       'src/vtt/vane-warren.ts#reduceVaneWarrenEncounter -> src/combat/encounter.ts#reduceEncounter',
       'src/vtt/vane-warren.ts#reduceVaneWarrenWorldObjectAction -> src/combat/encounter.ts#reduceEncounter',
     ]);
+  });
+
+  it('all renderer adapters converge on the session service', () => {
+    const graph = dependencyGraph([
+      'tests/helpers/vtt-handoff/transport-conformance.ts',
+      'src/vtt/handoff/worker-entry.ts',
+      'src/vtt/handoff/worker-transport.ts',
+      'tools/vtt-handoff/node-runtime.ts',
+      'src/vtt/handoff/websocket-transport.ts',
+    ]);
+    const evidence = runtimeConvergenceEvidence(graph);
+    expect([...evidence.constructedClasses]).toEqual(expect.arrayContaining([
+      'EncounterSessionService@src/vtt/encounter-session-service.ts',
+      'ProtocolRuntime@src/vtt/handoff/protocol-runtime.ts',
+      'InProcessSceneTransport@src/vtt/handoff/in-process-transport.ts',
+      'WorkerSceneTransport@src/vtt/handoff/worker-transport.ts',
+      'WebSocketSceneTransport@src/vtt/handoff/websocket-transport.ts',
+    ]));
+    expect(evidence.reducerCalls).toContain(
+      'src/vtt/dm-encounter-host.ts#commandReducer -> src/vtt/session-encounter-reducer.ts#reduceSessionEncounter',
+    );
+    expect(platformViolations(dependencyGraph([
+      'src/vtt/handoff/websocket-transport.ts',
+      'src/vtt/handoff/worker-transport.ts',
+    ]))).toEqual([]);
+    expect([...graph.keys()].map(repositoryPath)).not.toContain('src/vtt/encounter-app.ts');
   });
 
   it('keeps the complete selector value graph projection-only and platform-neutral', () => {

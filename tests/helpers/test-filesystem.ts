@@ -3,6 +3,7 @@
  * ephemeral outputs. Stable repository inputs belong in test-inputs.ts.
  */
 export {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
