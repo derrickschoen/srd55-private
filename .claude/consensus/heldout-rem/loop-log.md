@@ -8,3 +8,4 @@
 - 2026-09-09 22:33 r3 Astra REJECT at the round cap: F3 resolved; NEW F4 query/fragment-suffixed specifiers (`../vtt/heldout-evaluation.ts?raw`) bypass the exact-suffix protocol matcher (pre-existing, in scope). SHELVED under HARD_GATE (b) at a9595454; owner ruling needed to reopen.
 - 2026-09-10 07:48 r4 verified (serial) 331/331; committed 9b6d7783; Astra r4 dispatched with an exhaustive-enumeration request.
 - 2026-09-10 07:49 NOTE: the r4 review brief lost its backticked example list to heredoc command substitution; the exhaustive-enumeration instruction survived; not redispatched.
+- 2026-09-10 07:57 r4 Astra REJECT with the exhaustive enumeration: F5 percent-encoded file URLs, F6 import.meta.glob, F7 Worker/SharedWorker/importScripts, F8 loader indirection, F9 data: modules, F10 JSDoc imports, F11 rename-only diffs; plus #imports handling. All accepted; lane resumed r5 (D604).
