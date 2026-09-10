@@ -46,3 +46,5 @@
 - 2026-09-10 12:43 EDT — r13b BLOCKED correctly: real tree passes `window` to constructors/defaults (encounter-app.ts:1365, router.ts:113). RULE N refined: N1 strict for import.meta + module/worker namespaces; N2 browser globals inert to transfer, loader-member USE sites must resolve to a recognised root by symbol. Lane resumed (r13c).
 
 - 2026-09-10 13:04 EDT — r13 lane DONE (structural rules C/N1/N2; reference-flow machinery deleted); supervisor verification tsc/sg/diffcheck 0, 9 specs 512/512; committed 7e1b6f86; Astra r13 dispatched (resume 01a088d6…) with rule-probing instructions.
+
+- 2026-09-10 13:12 EDT — r13 Astra REJECT: rules C/N1/N2 accepted as design, F43–F46 caught, machinery gone; seven implementation holes F47–F53 (ancestor-based reachability + accessors, export specifiers, namespace re-exports, non-constant keys, quoted destructuring, await, vitest config entry point). r14 dispatched (resume 01a088b4…).
