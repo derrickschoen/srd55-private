@@ -148,6 +148,17 @@ function immutableBinding(registration: PlayerSeatRegistration): RegisteredPlaye
   };
 }
 
+function closureSignal(): {
+  readonly promise: Promise<{ readonly kind: 'closed' }>;
+  readonly close: () => void;
+} {
+  let resolveClosure: (() => void) | undefined;
+  const promise = new Promise<{ readonly kind: 'closed' }>((resolve) => {
+    resolveClosure = () => resolve({ kind: 'closed' });
+  });
+  return { promise, close: () => resolveClosure?.() };
+}
+
 export class EncounterSessionService {
   readonly sessionId: EncounterSessionId;
   readonly #seats = new Map<string, RegisteredPlayerSeat>();
@@ -156,6 +167,7 @@ export class EncounterSessionService {
   readonly #playerEventsByRevision = new Map<string, PlayerSessionSnapshotEvent>();
   readonly #dmEventsByRevision = new Map<number, DmSessionSnapshotEvent>();
   readonly #subscriberErrors: SessionSubscriberError[] = [];
+  readonly #closure = closureSignal();
   readonly #unsubscribeHost: () => void;
   #tail: Promise<void> = Promise.resolve();
   #seq = 0;
@@ -244,6 +256,10 @@ export class EncounterSessionService {
     return [...this.#subscriberErrors];
   }
 
+  mutationEventRevisions(): readonly number[] {
+    return [...this.#dmEventsByRevision.keys()].sort((left, right) => left - right);
+  }
+
   submitOfferedAction(input: OfferedActionMutation): Promise<SessionMutationOutcome> {
     const playerId = input.playerId;
     if (playerId === undefined) {
@@ -288,7 +304,11 @@ export class EncounterSessionService {
         return;
       }
       try {
-        settle?.(this.#doorOutcome(await this.host.setDoorOpen(input.doorId, input.open)));
+        const hostOutcome = await Promise.race([
+          this.host.setDoorOpen(input.doorId, input.open),
+          this.#closure.promise,
+        ]);
+        settle?.(hostOutcome.kind === 'closed' ? hostOutcome : this.#doorOutcome(hostOutcome));
       } catch (error: unknown) {
         settle?.({ kind: 'failed', phase: 'pre_apply', error });
       }
@@ -299,6 +319,7 @@ export class EncounterSessionService {
 
   close(): void {
     this.#closed = true;
+    this.#closure.close();
     try {
       this.host.close();
     } finally {
@@ -317,7 +338,7 @@ export class EncounterSessionService {
         return;
       }
       try {
-        settle?.(await operation());
+        settle?.(await Promise.race([operation(), this.#closure.promise]));
       } catch (error: unknown) {
         settle?.({ kind: 'failed', phase: 'pre_apply', error });
       }
@@ -460,6 +481,12 @@ export class EncounterSessionService {
   }
 
   #publish(notification: HostSnapshotNotification): void {
+    if (
+      notification.kind === 'recovery' &&
+      notification.snapshot.player.authorityStatus === 'hard_paused'
+    ) {
+      this.#closed = true;
+    }
     this.#seq += 1;
     const dmEvent = {
       kind: notification.kind,
@@ -471,7 +498,7 @@ export class EncounterSessionService {
       const event = {
         kind: notification.kind,
         seq: this.#seq,
-        projection: this.host.playerSnapshot(seat.binding),
+        projection: notification.playerSnapshot(seat.binding),
       } satisfies PlayerSessionSnapshotEvent;
       playerEvents.set(playerId, event);
     }

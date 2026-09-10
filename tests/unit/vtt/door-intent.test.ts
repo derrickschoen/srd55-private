@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import type { EncounterCommand } from '../../../src/combat/events';
 import type { EncounterState } from '../../../src/combat/encounter';
 import type { LegalActionSummary } from '../../../src/combat/controllers';
 import type { GridCell } from '../../../src/combat/grid';
@@ -7,7 +8,10 @@ import { EncounterSessionService, type PlayerSeatRegistration } from '../../../s
 import { DmEncounterHost } from '../../../src/vtt/dm-encounter-host';
 import type { ProjectedControllerRequest } from '../../../src/vtt/encounter-projections';
 import { buildTwoRoomEncounter } from '../../../src/vtt/handoff/fixtures/two-room';
-import { MemoryBrowserSessionStore } from '../../../src/vtt/session-persistence';
+import {
+  MemoryBrowserSessionStore,
+  type SessionRevision,
+} from '../../../src/vtt/session-persistence';
 
 const DOOR_ID = 'object:two-room-door';
 
@@ -15,9 +19,11 @@ class ControlledFlushStore extends MemoryBrowserSessionStore {
   #next: Promise<void> | null = null;
   #remaining = 0;
   #markReached: (() => void) | null = null;
+  #markPassed: (() => void) | null = null;
 
   blockNextFlush(): {
     readonly reached: Promise<void>;
+    readonly passed: Promise<void>;
     readonly resolve: () => void;
     readonly reject: (error: Error) => void;
   } {
@@ -26,21 +32,26 @@ class ControlledFlushStore extends MemoryBrowserSessionStore {
 
   blockFlushIn(ordinal: number): {
     readonly reached: Promise<void>;
+    readonly passed: Promise<void>;
     readonly resolve: () => void;
     readonly reject: (error: Error) => void;
   } {
     let resolveBarrier: (() => void) | undefined;
     let rejectBarrier: ((error: Error) => void) | undefined;
     let markReached: (() => void) | undefined;
+    let markPassed: (() => void) | undefined;
     this.#remaining = ordinal;
     const reached = new Promise<void>((resolve) => { markReached = resolve; });
+    const passed = new Promise<void>((resolve) => { markPassed = resolve; });
     this.#markReached = () => markReached?.();
+    this.#markPassed = () => markPassed?.();
     this.#next = new Promise<void>((resolve, reject) => {
       resolveBarrier = resolve;
       rejectBarrier = reject;
     });
     return {
       reached,
+      passed,
       resolve: () => resolveBarrier?.(),
       reject: (error) => rejectBarrier?.(error),
     };
@@ -56,7 +67,31 @@ class ControlledFlushStore extends MemoryBrowserSessionStore {
     this.#next = null;
     this.#markReached?.();
     this.#markReached = null;
-    if (next !== null) await next;
+    try {
+      if (next !== null) await next;
+    } finally {
+      this.#markPassed?.();
+      this.#markPassed = null;
+    }
+  }
+}
+
+class CancellationFailureStore extends MemoryBrowserSessionStore {
+  #appendCountdown: number | null = null;
+
+  failAppendIn(count: number): void {
+    this.#appendCountdown = count;
+  }
+
+  override append(revision: SessionRevision): void {
+    if (this.#appendCountdown !== null) {
+      this.#appendCountdown -= 1;
+      if (this.#appendCountdown === 0) {
+        this.#appendCountdown = null;
+        throw new Error('injected cancellation recording failure');
+      }
+    }
+    super.append(revision);
   }
 }
 
@@ -119,6 +154,7 @@ function waitForOffer(service: EncounterSessionService, playerId: string): Promi
 function runningDoorService(
   blocking: EncounterState['worldObjects'][number]['blocking'],
   store: MemoryBrowserSessionStore = new MemoryBrowserSessionStore(),
+  onReducerInvocation?: (command: EncounterCommand) => void,
 ): {
   readonly store: MemoryBrowserSessionStore;
   readonly host: DmEncounterHost;
@@ -136,6 +172,7 @@ function runningDoorService(
     })),
     playerIds: initialState.combatants.map((combatant) => combatant.profile.id),
     turnLegalActions: legalActions,
+    ...(onReducerInvocation === undefined ? {} : { onReducerInvocation }),
   });
   const seat = allSeat(host);
   const service = new EncounterSessionService(host, [seat]);
@@ -225,19 +262,76 @@ describe('deadlock-safe door intent', () => {
     service.close();
   });
 
+  it('preserves the durable door revision and projections when state advances during offer refresh', async () => {
+    const { host, service, seat } = runningDoorService({
+      movement: true, lineOfSight: true, cover: 'total',
+    });
+    const originalOfferPromise = waitForOffer(service, seat.playerId);
+    void service.start();
+    const originalOffer = await originalOfferPromise;
+    const mutationRevisions: number[] = [];
+    const playerMutationRevisions: number[] = [];
+    service.subscribeDm((event) => {
+      if (event.kind === 'mutation') mutationRevisions.push(event.projection.encounter.revision);
+    });
+    service.subscribePlayer(seat.playerId, (event) => {
+      if (event.kind === 'mutation') playerMutationRevisions.push(event.projection.revision);
+    });
+    let adjudicatedRevision: number | null = null;
+    const unsubscribe = host.subscribeNotifications((notification) => {
+      const fresh = notification.snapshot.dm.pendingRequest;
+      if (
+        notification.kind !== 'offer' ||
+        fresh === null ||
+        fresh.requestId === originalOffer.requestId ||
+        adjudicatedRevision !== null
+      ) return;
+      host.adjudicate({
+        type: 'adjudicate',
+        target: fresh.actorId,
+        subject: 'door-refresh-reentrant-adjudication',
+        reasoning: 'Advance the host after the fresh offer while preserving the door acknowledgment.',
+        consequence: { kind: 'no_effect' },
+      });
+      adjudicatedRevision = host.snapshot().dm.encounter.revision;
+    });
+
+    const result = await service.setDoor({
+      principal: { kind: 'dm' }, doorId: DOOR_ID, open: true,
+    });
+    expect(result.kind).toBe('committed');
+    if (result.kind !== 'committed' || !result.changed) {
+      throw new Error(`Expected a changed door commit, received ${result.kind}.`);
+    }
+    expect(result.revision).toBe(originalOffer.encounterRevision + 1);
+    expect(result.event.projection.encounter.revision).toBe(result.revision);
+    expect(result.event.projection.encounter.worldObjects.find(
+      (object) => String(object.id) === DOOR_ID,
+    )?.blocking).toEqual({ movement: false, lineOfSight: false, cover: 'none' });
+    expect(adjudicatedRevision).toBe(result.revision + 1);
+    expect(host.snapshot().dm.encounter.revision).toBe(result.revision + 1);
+    expect(mutationRevisions).toEqual([result.revision]);
+    expect(playerMutationRevisions).toEqual([result.revision]);
+    unsubscribe();
+    service.close();
+  });
+
   it('same-state success waits for durability without abort, reducer, journal, or snapshot changes', async () => {
     const controlled = new ControlledFlushStore();
+    const reducerCommands: EncounterCommand[] = [];
+    const abort = vi.spyOn(AbortController.prototype, 'abort');
     const { store, host, service, seat } = runningDoorService({
       movement: true, lineOfSight: true, cover: 'total',
-    }, controlled);
+    }, controlled, (command) => reducerCommands.push(command));
     const offerPromise = waitForOffer(service, seat.playerId);
     void service.start();
     const offer = await offerPromise;
+    abort.mockClear();
+    reducerCommands.length = 0;
     let snapshots = 0;
     const unsubscribe = service.subscribeDm(() => { snapshots += 1; });
     snapshots = 0;
     const rowsBefore = store.revisions(host.sessionId).length;
-    const metricsBefore = host.doorTransactionMetrics();
     const barrier = controlled.blockNextFlush();
     let settled = false;
     const result = service.setDoor({ principal: { kind: 'dm' }, doorId: DOOR_ID, open: false })
@@ -245,14 +339,16 @@ describe('deadlock-safe door intent', () => {
 
     await barrier.reached;
     expect(settled).toBe(false);
-    expect(host.doorTransactionMetrics()).toEqual(metricsBefore);
+    expect(abort).not.toHaveBeenCalled();
+    expect(reducerCommands).toEqual([]);
     barrier.resolve();
     await expect(result)
       .resolves.toEqual({ kind: 'committed', revision: offer.encounterRevision, changed: false });
     expect(service.playerSnapshot(seat.playerId)?.pendingRequest?.requestId).toBe(offer.requestId);
     expect(store.revisions(host.sessionId)).toHaveLength(rowsBefore);
     expect(snapshots).toBe(0);
-    expect(host.doorTransactionMetrics()).toEqual(metricsBefore);
+    expect(abort).not.toHaveBeenCalled();
+    expect(reducerCommands).toEqual([]);
 
     const failedBarrier = controlled.blockNextFlush();
     const failed = service.setDoor({ principal: { kind: 'dm' }, doorId: DOOR_ID, open: false });
@@ -262,8 +358,40 @@ describe('deadlock-safe door intent', () => {
     expect(service.playerSnapshot(seat.playerId)?.pendingRequest?.requestId).toBe(offer.requestId);
     expect(store.revisions(host.sessionId)).toHaveLength(rowsBefore);
     expect(snapshots).toBe(0);
-    expect(host.doorTransactionMetrics()).toEqual(metricsBefore);
+    expect(abort).not.toHaveBeenCalled();
+    expect(reducerCommands).toEqual([]);
+    abort.mockRestore();
     unsubscribe();
+    service.close();
+  });
+
+  it('aborts the human wait and restores the running pause policy when cancellation recording fails', async () => {
+    const store = new CancellationFailureStore();
+    const reducerCommands: EncounterCommand[] = [];
+    const abort = vi.spyOn(AbortController.prototype, 'abort');
+    const { host, service, seat } = runningDoorService({
+      movement: true, lineOfSight: true, cover: 'total',
+    }, store, (command) => reducerCommands.push(command));
+    const offerPromise = waitForOffer(service, seat.playerId);
+    const start = service.start();
+    const offer = await offerPromise;
+    abort.mockClear();
+    reducerCommands.length = 0;
+    store.failAppendIn(2);
+
+    await expect(service.setDoor({
+      principal: { kind: 'dm' }, doorId: DOOR_ID, open: true,
+    })).resolves.toMatchObject({ kind: 'failed', phase: 'pre_apply' });
+    await expect(start).rejects.toThrow('Controller request was cancelled.');
+    const recovered = service.playerSnapshot(seat.playerId)?.pendingRequest;
+    expect(recovered?.requestId).not.toBe(offer.requestId);
+    expect(host.snapshot().dm.coordinator.pause).toBeNull();
+    expect(abort).toHaveBeenCalledTimes(1);
+    expect(reducerCommands).toEqual([]);
+    expect(host.snapshot().dm.encounter.worldObjects.find(
+      (object) => String(object.id) === DOOR_ID,
+    )?.blocking).toEqual({ movement: true, lineOfSight: true, cover: 'total' });
+    abort.mockRestore();
     service.close();
   });
 
@@ -363,12 +491,18 @@ describe('deadlock-safe door intent', () => {
     });
     await barrier.reached;
     service.close();
-    barrier.resolve();
 
     await expect(door).resolves.toEqual({ kind: 'closed' });
     await expect(queued).resolves.toEqual({ kind: 'closed' });
+    const rowsAtClose = controlled.revisions(host.sessionId).length;
+    const revisionAtClose = host.snapshot().dm.encounter.revision;
     expect(mutations).toEqual([]);
     expect(host.snapshot().dm.coordinator.pause).toEqual({ kind: 'interrupted' });
+    barrier.resolve();
+    await barrier.passed;
+    await Promise.resolve();
+    expect(controlled.revisions(host.sessionId)).toHaveLength(rowsAtClose);
+    expect(host.snapshot().dm.encounter.revision).toBe(revisionAtClose);
   });
 
   it('settles a door and queued mutation closed when closure crosses fresh-offer refresh', async () => {
@@ -394,12 +528,18 @@ describe('deadlock-safe door intent', () => {
     });
     await refreshBarrier.reached;
     service.close();
-    refreshBarrier.resolve();
 
     await expect(door).resolves.toEqual({ kind: 'closed' });
     await expect(queued).resolves.toEqual({ kind: 'closed' });
+    const rowsAtClose = controlled.revisions(host.sessionId).length;
+    const revisionAtClose = host.snapshot().dm.encounter.revision;
     expect(mutations).toEqual([]);
     expect(host.snapshot().dm.coordinator.pause).toEqual({ kind: 'interrupted' });
+    refreshBarrier.resolve();
+    await refreshBarrier.passed;
+    await Promise.resolve();
+    expect(controlled.revisions(host.sessionId)).toHaveLength(rowsAtClose);
+    expect(host.snapshot().dm.encounter.revision).toBe(revisionAtClose);
   });
 
   it('uses authority rather than a requested role', async () => {

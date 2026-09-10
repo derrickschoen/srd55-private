@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { EncounterCommand } from '../../../src/combat/events';
-import type { CombatantId } from '../../../src/combat/values';
+import { createEncounter, reduceEncounter, REACTION_KINDS, type EncounterState } from '../../../src/combat/encounter';
+import { mulberry32 } from '../../../src/combat/random';
+import { damageType, dieSides, type CombatantId } from '../../../src/combat/values';
 import {
   EncounterSessionService,
   type EncounterSessionHostPort,
@@ -13,20 +15,37 @@ import {
   type HostSnapshotNotification,
 } from '../../../src/vtt/dm-encounter-host';
 import type { PlayerBoardProjection, PlayerSeatBinding } from '../../../src/vtt/encounter-projections';
+import type { PartySessionState } from '../../../src/vtt/party-session-state';
+import { DEFAULT_REFUSAL_HANDLING_SETTINGS } from '../../../src/vtt/refusal-handling';
 import {
   MemoryBrowserSessionStore,
   type MirrorSink,
   type SessionRevision,
 } from '../../../src/vtt/session-persistence';
+import {
+  REFERENCE_FIGHTER_ID,
+  REFERENCE_MONSTER_ID,
+  REFERENCE_PLAYER_IDS,
+  referenceEncounterSetup,
+} from '../../../src/vtt/reference-encounter';
 
 class ControlledFlushStore extends MemoryBrowserSessionStore {
   #blocked: Promise<void> | null = null;
   #release: (() => void) | null = null;
+  #blockCountdown: number | null = null;
+  #markReached: (() => void) | null = null;
   #nextFailure: Error | null = null;
 
   blockNextFlush(): () => void {
+    return this.blockFlushIn(1).release;
+  }
+
+  blockFlushIn(count: number): { readonly reached: Promise<void>; readonly release: () => void } {
+    if (count < 1 || !Number.isSafeInteger(count)) throw new RangeError('Flush count must be positive.');
+    this.#blockCountdown = count;
     this.#blocked = new Promise((resolve) => { this.#release = resolve; });
-    return () => this.#release?.();
+    const reached = new Promise<void>((resolve) => { this.#markReached = resolve; });
+    return { reached, release: () => this.#release?.() };
   }
 
   failNextFlush(error: Error): void {
@@ -34,13 +53,93 @@ class ControlledFlushStore extends MemoryBrowserSessionStore {
   }
 
   override async flush(): Promise<void> {
-    const blocked = this.#blocked;
-    this.#blocked = null;
-    if (blocked !== null) await blocked;
+    if (this.#blockCountdown !== null) {
+      this.#blockCountdown -= 1;
+      if (this.#blockCountdown === 0) {
+        this.#blockCountdown = null;
+        const blocked = this.#blocked;
+        this.#blocked = null;
+        this.#markReached?.();
+        this.#markReached = null;
+        if (blocked !== null) await blocked;
+      }
+    }
     const failure = this.#nextFailure;
     this.#nextFailure = null;
     if (failure !== null) throw failure;
   }
+}
+
+function refusalPartyState(): PartySessionState {
+  const hitPoints = [67, 52, 38] as const;
+  return {
+    schemaVersion: 1,
+    rulesEdition: '2024',
+    room: 1,
+    adventuringDayStatus: 'active',
+    characters: REFERENCE_PLAYER_IDS.map((combatantId, index) => ({
+      characterId: index + 1,
+      combatantId,
+      currentHitPoints: hitPoints[index] ?? 1,
+      hitPointMaximum: hitPoints[index] ?? 1,
+      exhaustionLevel: 0,
+      constitutionModifier: 0,
+      life: 'living' as const,
+      deathSaves: null,
+      spellSlots: [],
+      limitedResources: [],
+      hitDice: [{ sides: 8 as const, maximum: 1, remaining: 1 }],
+      consumables: [],
+      aid: null,
+      equipment: null,
+    })),
+    reactionPolicies: REFERENCE_PLAYER_IDS.flatMap((combatant) => REACTION_KINDS.map((reactionKind) => ({
+      combatant, reactionKind, policy: 'ask' as const,
+    }))),
+    refusalHandling: { ...DEFAULT_REFUSAL_HANDLING_SETTINGS, rule_gap: 'default_and_log' },
+  };
+}
+
+function pendingReactionState(): EncounterState {
+  const state = reduceEncounter(
+    createEncounter(referenceEncounterSetup()),
+    { type: 'roll_initiative' },
+    mulberry32(9),
+  ).state;
+  return {
+    ...state,
+    pendingDecisions: [{
+      kind: 'reaction_offer',
+      id: 'service-reaction-fixture',
+      combatant: REFERENCE_MONSTER_ID,
+      boundary: { activeCombatant: REFERENCE_FIGHTER_ID, round: state.round },
+      reactionKind: 'opportunity_attack',
+      options: [{ id: 'accept', label: 'Accept' }, { id: 'decline', label: 'Decline' }],
+      opportunityAttack: {
+        mover: REFERENCE_FIGHTER_ID,
+        from: { column: 2, row: 3 },
+        to: { column: 2, row: 4 },
+        command: {
+          type: 'opportunity_attack',
+          actor: REFERENCE_MONSTER_ID,
+          target: REFERENCE_FIGHTER_ID,
+          attackBonus: 0,
+          criticalFloor: 20,
+          rollMode: 'normal',
+          attackerCanSeeTarget: true,
+          targetCanSeeAttacker: true,
+          damage: {
+            terms: [{
+              type: damageType('Bludgeoning'),
+              dice: { count: 0, sides: dieSides(4), modifier: 1 },
+            }],
+            critical: false,
+            responses: [],
+          },
+        },
+      },
+    }],
+  };
 }
 
 class FaultInjectingStore extends ControlledFlushStore {
@@ -139,6 +238,86 @@ describe('encounter session service', () => {
     service.close();
   });
 
+  it('classifies a real algorithm decision as autonomous without creating a mutation cache entry', async () => {
+    const initialState = createEncounter(referenceEncounterSetup());
+    const algorithmId = REFERENCE_PLAYER_IDS[0];
+    if (algorithmId === undefined) throw new Error('Expected a reference algorithm combatant.');
+    const host = new DmEncounterHost(
+      'session:service-algorithm-autonomous',
+      new MemoryBrowserSessionStore(),
+      {
+        initialState,
+        initialControllers: initialState.combatants.map((combatant) => ({
+          combatantId: combatant.profile.id,
+          controllerId: `${combatant.profile.id}:algorithm-classification`,
+          kind: combatant.profile.id === algorithmId ? 'algorithm' as const : 'human' as const,
+          generation: 0,
+        })).sort((left, right) => left.combatantId.localeCompare(right.combatantId)),
+      },
+    );
+    const seats = registrations(host);
+    const service = new EncounterSessionService(host, seats);
+    const autonomousRevisions: number[] = [];
+    const mutationRevisions: number[] = [];
+    service.subscribeDm((event) => {
+      if (event.kind === 'autonomous') autonomousRevisions.push(event.projection.encounter.revision);
+      if (event.kind === 'mutation') mutationRevisions.push(event.projection.encounter.revision);
+    });
+    const offerPromise = new Promise<PlayerBoardProjection>((resolve, reject) => {
+      const unsubscribers: Array<() => void> = [];
+      const timeout = setTimeout(() => reject(new Error('Timed out waiting beyond the algorithm turn.')), 2_000);
+      for (const seat of seats) {
+        const subscription = service.subscribePlayer(seat.playerId, (event) => {
+          const pending = event.projection.pendingRequest;
+          if (pending === null || pending.actorId === algorithmId) return;
+          clearTimeout(timeout);
+          for (const unsubscribe of unsubscribers) unsubscribe();
+          resolve(event.projection);
+        });
+        if (subscription.kind === 'subscribed') unsubscribers.push(subscription.unsubscribe);
+      }
+    });
+
+    void service.start();
+    const offer = await offerPromise;
+    expect(offer.pendingRequest?.actorId).not.toBe(algorithmId);
+    expect(autonomousRevisions).toContain(1);
+    expect(autonomousRevisions.some((revision) => revision > 1)).toBe(true);
+    expect(mutationRevisions).toEqual([]);
+    expect(service.mutationEventRevisions()).toEqual([]);
+    service.close();
+  });
+
+  it('closes cleanly when durability fails before the initial human offer is delivered', async () => {
+    const store = new ControlledFlushStore();
+    const host = new DmEncounterHost('session:service-initial-offer-failure', store);
+    const seats = registrations(host);
+    const service = new EncounterSessionService(host, seats);
+    const notifications: string[] = [];
+    service.subscribeDm((event) => {
+      notifications.push(event.kind);
+      if (event.kind === 'autonomous') {
+        store.failNextFlush(new Error('initial offer durability failed'));
+      }
+    });
+
+    await expect(service.start()).rejects.toThrow('initial offer durability failed');
+    expect(notifications).toContain('autonomous');
+    expect(notifications).not.toContain('offer');
+    expect(notifications).toContain('recovery');
+    expect(host.snapshot().dm.coordinator.pendingRequest).toBeNull();
+    const seat = seats[0];
+    if (seat === undefined) throw new Error('Expected an authority seat.');
+    await expect(service.submitOfferedAction({
+      playerId: seat.playerId,
+      tokenId: seat.controlledTokenIds[0]!,
+      requestId: 'closed-offer',
+      encounterRevision: host.snapshot().dm.encounter.revision,
+      offeredActionId: 'closed-offer',
+    })).resolves.toEqual({ kind: 'closed' });
+    service.close();
+  });
+
   it('acknowledges the exact consuming revision only after durable flush', async () => {
     const store = new ControlledFlushStore();
     const host = new DmEncounterHost('session:service-durable-commit', store);
@@ -226,6 +405,166 @@ describe('encounter session service', () => {
     service.close();
   });
 
+  it('flushes an automatic refusal consequence as a separate autonomous change before settling refusal', async () => {
+    const action: Extract<EncounterCommand, { readonly type: 'cast_spell' }> = {
+      type: 'cast_spell',
+      actor: REFERENCE_FIGHTER_ID,
+      spellId: 'missing-service-refusal-spell',
+      slotLevel: null,
+      castAsRitual: false,
+      casterLevel: 1,
+      attackBonus: 0,
+      saveDc: 10,
+      spellcastingModifier: 0,
+      targets: [REFERENCE_MONSTER_ID],
+      area: null,
+      weaponAttack: null,
+      selectedOption: null,
+    };
+    const store = new ControlledFlushStore();
+    const host = new DmEncounterHost('session:service-automatic-refusal', store, {
+      initialPartyState: refusalPartyState(),
+      turnLegalActions: () => ({ actions: [action] }),
+    });
+    const seats = registrations(host);
+    const service = new EncounterSessionService(host, seats);
+    const autonomousRevisions: number[] = [];
+    const mutationRevisions: number[] = [];
+    service.subscribeDm((event) => {
+      if (event.kind === 'autonomous') autonomousRevisions.push(event.projection.encounter.revision);
+      if (event.kind === 'mutation') mutationRevisions.push(event.projection.encounter.revision);
+    });
+    const offerPromise = waitForOffer(service, seats.map((seat) => seat.playerId));
+    void service.start();
+    const offer = await offerPromise;
+    const pending = offer.projection.pendingRequest;
+    if (pending === null) throw new Error('Expected the automatic-refusal offer.');
+    const seat = seats.find((candidate) => candidate.playerId === offer.playerId);
+    if (seat === undefined) throw new Error('Expected the automatic-refusal seat.');
+    const autonomousBefore = [...autonomousRevisions];
+    const barrier = store.blockFlushIn(2);
+    let settled = false;
+    const result = service.submitOfferedAction({
+      playerId: offer.playerId,
+      tokenId: seat.controlledTokenIds[0]!,
+      requestId: pending.requestId,
+      encounterRevision: pending.encounterRevision,
+      offeredActionId: pending.offeredActionIds[0]!,
+    }).then((outcome) => { settled = true; return outcome; });
+
+    await barrier.reached;
+    expect(settled).toBe(false);
+    expect(autonomousRevisions).toEqual(autonomousBefore);
+    expect(mutationRevisions).toEqual([]);
+    barrier.release();
+    await expect(result).resolves.toMatchObject({ kind: 'refused', code: 'ENGINE_REFUSED' });
+    expect(autonomousRevisions.at(-1)).toBe(pending.encounterRevision + 1);
+    expect(mutationRevisions).toEqual([]);
+    expect(service.mutationEventRevisions()).toEqual([]);
+    expect(host.snapshot().dm.encounter.recentEvents.at(-1)).toMatchObject({
+      type: 'adjudicated',
+      subject: 'dm-override:refusal-default:rule_gap',
+    });
+    service.close();
+  });
+
+  it('classifies reaction host-recording failure after reducer application and settles the refusal independently', async () => {
+    const state = pendingReactionState();
+    const store = new FaultInjectingStore();
+    const mirror = new FaultInjectingMirror();
+    const host = new DmEncounterHost('session:service-reaction-record-failure', store, {
+      initialState: state,
+      initialControllers: state.combatants.map((combatant) => ({
+        combatantId: combatant.profile.id,
+        controllerId: `${combatant.profile.id}:reaction-classification`,
+        kind: combatant.profile.id === REFERENCE_MONSTER_ID ? 'algorithm' as const : 'human' as const,
+        generation: 0,
+      })).sort((left, right) => left.combatantId.localeCompare(right.combatantId)),
+      reactionOfferPolicy: { kind: 'unattended', askDefault: 'decline' },
+      turnLegalActions: () => ({ actions: [{ type: 'end_turn', actor: REFERENCE_FIGHTER_ID }] }),
+    });
+    host.connectBridgeMirror(mirror);
+    const seats = registrations(host);
+    const service = new EncounterSessionService(host, seats);
+    const notifications: string[] = [];
+    service.subscribeDm((event) => notifications.push(event.kind));
+    const offerPromise = waitForOffer(service, seats.map((seat) => seat.playerId));
+    void service.start();
+    const offer = await offerPromise;
+    const pending = offer.projection.pendingRequest;
+    if (pending === null) throw new Error('Expected the boundary-blocked human offer.');
+    const seat = seats.find((candidate) => candidate.playerId === offer.playerId);
+    if (seat === undefined) throw new Error('Expected the boundary-blocked player seat.');
+    mirror.failAppendIn(3);
+    const mutation = {
+      playerId: offer.playerId,
+      tokenId: seat.controlledTokenIds[0]!,
+      requestId: pending.requestId,
+      encounterRevision: pending.encounterRevision,
+      offeredActionId: pending.offeredActionIds[0]!,
+    };
+
+    const refused = service.submitOfferedAction(mutation);
+    const queued = service.submitOfferedAction(mutation);
+    await expect(refused).resolves.toMatchObject({ kind: 'refused', code: 'ENGINE_REFUSED' });
+    await expect(queued).resolves.toEqual({ kind: 'closed' });
+    expect(host.snapshot().dm.encounter.revision).toBe(pending.encounterRevision + 1);
+    expect(host.snapshot().dm.encounter.recentEvents.at(-1)).toMatchObject({
+      type: 'pending_decision_resolved', combatant: REFERENCE_MONSTER_ID,
+    });
+    expect(notifications).not.toContain('mutation');
+    expect(notifications).toContain('recovery');
+    service.close();
+  });
+
+  it('publishes unattended reaction resolution as autonomous while settling the blocked mutation refused', async () => {
+    const state = pendingReactionState();
+    const host = new DmEncounterHost(
+      'session:service-reaction-autonomous',
+      new MemoryBrowserSessionStore(),
+      {
+        initialState: state,
+        initialControllers: state.combatants.map((combatant) => ({
+          combatantId: combatant.profile.id,
+          controllerId: `${combatant.profile.id}:reaction-autonomous`,
+          kind: combatant.profile.id === REFERENCE_MONSTER_ID ? 'algorithm' as const : 'human' as const,
+          generation: 0,
+        })).sort((left, right) => left.combatantId.localeCompare(right.combatantId)),
+        reactionOfferPolicy: { kind: 'unattended', askDefault: 'decline' },
+        turnLegalActions: () => ({ actions: [{ type: 'end_turn', actor: REFERENCE_FIGHTER_ID }] }),
+      },
+    );
+    const seats = registrations(host);
+    const service = new EncounterSessionService(host, seats);
+    const autonomousRevisions: number[] = [];
+    const mutationRevisions: number[] = [];
+    service.subscribeDm((event) => {
+      if (event.kind === 'autonomous') autonomousRevisions.push(event.projection.encounter.revision);
+      if (event.kind === 'mutation') mutationRevisions.push(event.projection.encounter.revision);
+    });
+    const offerPromise = waitForOffer(service, seats.map((seat) => seat.playerId));
+    void service.start();
+    const offer = await offerPromise;
+    const pending = offer.projection.pendingRequest;
+    if (pending === null) throw new Error('Expected the boundary-blocked human offer.');
+    const seat = seats.find((candidate) => candidate.playerId === offer.playerId);
+    if (seat === undefined) throw new Error('Expected the boundary-blocked player seat.');
+
+    await expect(service.submitOfferedAction({
+      playerId: offer.playerId,
+      tokenId: seat.controlledTokenIds[0]!,
+      requestId: pending.requestId,
+      encounterRevision: pending.encounterRevision,
+      offeredActionId: pending.offeredActionIds[0]!,
+    })).resolves.toMatchObject({ kind: 'refused', code: 'ENGINE_REFUSED' });
+    expect(autonomousRevisions).toContain(pending.encounterRevision + 1);
+    expect(mutationRevisions).toEqual([]);
+    expect(service.mutationEventRevisions()).toEqual([]);
+    expect(host.snapshot().dm.history.map((entry) => entry.transition.kind))
+      .toContain('unattended_reaction_auto_resolved');
+    service.close();
+  });
+
   it.each(['append', 'mirror', 'flush'] as const)(
     'classifies a real post-application %s failure, emits recovery only, and closes queued work',
     async (failureMode) => {
@@ -268,6 +607,47 @@ describe('encounter session service', () => {
       service.close();
     },
   );
+
+  it('settles active and queued mutations closed before an ordinary post-step barrier is released', async () => {
+    const store = new ControlledFlushStore();
+    const host = new DmEncounterHost('session:service-close-during-step-flush', store);
+    const seats = registrations(host);
+    const service = new EncounterSessionService(host, seats);
+    const offerPromise = waitForOffer(service, seats.map((seat) => seat.playerId));
+    const start = service.start();
+    const offer = await offerPromise;
+    const pending = offer.projection.pendingRequest;
+    if (pending === null) throw new Error('Expected a real controller offer.');
+    const seat = seats.find((candidate) => candidate.playerId === offer.playerId);
+    if (seat === undefined) throw new Error('Expected the offered player seat.');
+    const endTurnIndex = pending.legalActions.findIndex((action) => action.type === 'end_turn');
+    if (endTurnIndex < 0) throw new Error('Expected an end-turn offer.');
+    const mutationEvents: number[] = [];
+    service.subscribeDm((event) => {
+      if (event.kind === 'mutation') mutationEvents.push(event.projection.encounter.revision);
+    });
+    const barrier = store.blockFlushIn(1);
+    const mutation = {
+      playerId: offer.playerId,
+      tokenId: seat.controlledTokenIds[0]!,
+      requestId: pending.requestId,
+      encounterRevision: pending.encounterRevision,
+      offeredActionId: pending.offeredActionIds[endTurnIndex]!,
+    };
+    const active = service.submitOfferedAction(mutation);
+    const queued = service.submitOfferedAction(mutation);
+    await barrier.reached;
+    service.close();
+
+    await expect(active).resolves.toEqual({ kind: 'closed' });
+    await expect(queued).resolves.toEqual({ kind: 'closed' });
+    const revisionAtClose = host.snapshot().dm.encounter.revision;
+    expect(mutationEvents).toEqual([]);
+    barrier.release();
+    await start;
+    expect(host.snapshot().dm.encounter.revision).toBe(revisionAtClose);
+    expect(mutationEvents).toEqual([]);
+  });
 
   it('keeps the FIFO usable after a real pre-application append failure', async () => {
     const store = new FaultInjectingStore();
@@ -380,7 +760,7 @@ describe('encounter session service', () => {
       rendererTokenBindings: () => real.rendererTokenBindings(),
       subscribeNotifications: (next: Parameters<EncounterSessionHostPort['subscribeNotifications']>[0]) => {
         listener = next;
-        next({ kind: 'status', snapshot: real.snapshot() });
+        next({ kind: 'status', snapshot: real.snapshot(), playerSnapshot: () => projection });
         return () => { listener = null; };
       },
       start: async () => undefined,
@@ -390,7 +770,7 @@ describe('encounter session service', () => {
         if (result === undefined) return { kind: 'closed' };
         if (result.kind === 'failed' && result.phase === 'post_apply') {
           projection = { ...projection, revision: result.currentRevision, pendingRequest: null };
-          listener?.({ kind: 'recovery', snapshot: real.snapshot() });
+          listener?.({ kind: 'recovery', snapshot: real.snapshot(), playerSnapshot: () => projection });
         }
         return result;
       },

@@ -20,6 +20,7 @@ interface SourceModule {
   readonly sourceFile: ts.SourceFile;
   readonly imports: readonly ImportEdge[];
   readonly reducerAliases: ReadonlyMap<string, { readonly imported: string; readonly resolved: string | null }>;
+  readonly reducerNamespaces: ReadonlyMap<string, string | null>;
 }
 
 function repositoryPath(absolutePath: string): string {
@@ -92,10 +93,16 @@ function parseModule(file: string): SourceModule {
     resolved: resolveImport(file, specifier),
   }));
   const reducerAliases = new Map<string, { readonly imported: string; readonly resolved: string | null }>();
+  const reducerNamespaces = new Map<string, string | null>();
   for (const statement of sourceFile.statements) {
     if (!ts.isImportDeclaration(statement) || statement.importClause?.isTypeOnly === true) continue;
     const bindings = statement.importClause?.namedBindings;
-    if (bindings === undefined || !ts.isNamedImports(bindings) || !ts.isStringLiteral(statement.moduleSpecifier)) continue;
+    if (bindings === undefined || !ts.isStringLiteral(statement.moduleSpecifier)) continue;
+    if (ts.isNamespaceImport(bindings)) {
+      reducerNamespaces.set(bindings.name.text, resolveImport(file, statement.moduleSpecifier.text));
+      continue;
+    }
+    if (!ts.isNamedImports(bindings)) continue;
     for (const element of bindings.elements) {
       if (element.isTypeOnly) continue;
       const imported = element.propertyName?.text ?? element.name.text;
@@ -106,7 +113,7 @@ function parseModule(file: string): SourceModule {
       });
     }
   }
-  return { file, sourceFile, imports, reducerAliases };
+  return { file, sourceFile, imports, reducerAliases, reducerNamespaces };
 }
 
 function dependencyGraph(entrypoints: readonly string[]): ReadonlyMap<string, SourceModule> {
@@ -166,30 +173,169 @@ function insideImport(node: ts.Node): boolean {
   return false;
 }
 
-function reducerEdges(graph: ReadonlyMap<string, SourceModule>): readonly string[] {
-  const edges = new Set<string>();
+interface ReducerDefinition {
+  readonly file: string;
+  readonly symbol: string;
+}
+
+function definesSymbol(sourceFile: ts.SourceFile, symbol: string): boolean {
+  return sourceFile.statements.some((statement) => {
+    if (ts.isFunctionDeclaration(statement)) return statement.name?.text === symbol;
+    if (!ts.isVariableStatement(statement)) return false;
+    return statement.declarationList.declarations.some(
+      (declaration) => ts.isIdentifier(declaration.name) && declaration.name.text === symbol,
+    );
+  });
+}
+
+function resolveReducerDefinition(
+  file: string,
+  symbol: string,
+  visited: ReadonlySet<string> = new Set(),
+): ReducerDefinition | null {
+  const visitKey = `${file}\u0000${symbol}`;
+  if (visited.has(visitKey)) return null;
+  const nextVisited = new Set(visited).add(visitKey);
+  const sourceFile = ts.createSourceFile(
+    file,
+    readFileSync(file, 'utf8'),
+    ts.ScriptTarget.Latest,
+    true,
+    file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+  );
+  if (REDUCERS.has(symbol) && definesSymbol(sourceFile, symbol)) return { file, symbol };
+  for (const statement of sourceFile.statements) {
+    if (
+      !ts.isExportDeclaration(statement) ||
+      statement.isTypeOnly ||
+      statement.moduleSpecifier === undefined ||
+      !ts.isStringLiteral(statement.moduleSpecifier)
+    ) continue;
+    const target = resolveImport(file, statement.moduleSpecifier.text);
+    if (target === null) continue;
+    if (statement.exportClause === undefined) {
+      const resolved = resolveReducerDefinition(target, symbol, nextVisited);
+      if (resolved !== null) return resolved;
+      continue;
+    }
+    if (!ts.isNamedExports(statement.exportClause)) continue;
+    for (const element of statement.exportClause.elements) {
+      if (element.isTypeOnly || element.name.text !== symbol) continue;
+      const imported = element.propertyName?.text ?? element.name.text;
+      const resolved = resolveReducerDefinition(target, imported, nextVisited);
+      if (resolved !== null) return resolved;
+    }
+  }
+  return null;
+}
+
+function enclosingOperation(node: ts.Node, sourceFile: ts.SourceFile): string {
+  for (let current: ts.Node | undefined = node.parent; current !== undefined; current = current.parent) {
+    if (
+      ts.isMethodDeclaration(current) ||
+      ts.isFunctionDeclaration(current) ||
+      ts.isGetAccessorDeclaration(current) ||
+      ts.isSetAccessorDeclaration(current)
+    ) {
+      return current.name?.getText(sourceFile) ?? '<anonymous>';
+    }
+    if (ts.isConstructorDeclaration(current)) return 'constructor';
+    if (
+      (ts.isArrowFunction(current) || ts.isFunctionExpression(current)) &&
+      ts.isVariableDeclaration(current.parent) &&
+      ts.isIdentifier(current.parent.name)
+    ) return current.parent.name.text;
+  }
+  return '<module>';
+}
+
+function reducerCallSites(graph: ReadonlyMap<string, SourceModule>): readonly string[] {
+  const calls: string[] = [];
   for (const module of graph.values()) {
-    const addAlias = (identifier: ts.Identifier): void => {
-      const target = module.reducerAliases.get(identifier.text);
-      if (target?.resolved !== null && target?.resolved !== undefined) {
-        edges.add(`${repositoryPath(module.file)} -> ${repositoryPath(target.resolved)}#${target.imported}`);
-      }
+    const add = (definition: ReducerDefinition | null, node: ts.CallExpression): void => {
+      if (definition === null) return;
+      calls.push(
+        `${repositoryPath(module.file)}#${enclosingOperation(node, module.sourceFile)} -> ` +
+        `${repositoryPath(definition.file)}#${definition.symbol}`,
+      );
     };
     const visit = (node: ts.Node): void => {
-      if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && !insideImport(node)) {
-        addAlias(node.expression);
-      } else if (
-        ts.isPropertyAssignment(node) &&
-        node.name.getText(module.sourceFile) === 'commandReducer' &&
-        ts.isIdentifier(node.initializer)
-      ) {
-        addAlias(node.initializer);
+      if (ts.isCallExpression(node) && !insideImport(node)) {
+        if (ts.isIdentifier(node.expression)) {
+          const target = module.reducerAliases.get(node.expression.text);
+          if (target?.resolved !== null && target?.resolved !== undefined) {
+            add(resolveReducerDefinition(target.resolved, target.imported), node);
+          }
+        } else if (ts.isPropertyAccessExpression(node.expression)) {
+          const owner = node.expression.expression;
+          const symbol = node.expression.name.text;
+          if (ts.isIdentifier(owner) && REDUCERS.has(symbol)) {
+            const target = module.reducerNamespaces.get(owner.text);
+            if (target !== null && target !== undefined) {
+              add(resolveReducerDefinition(target, symbol), node);
+            }
+          }
+        }
       }
       ts.forEachChild(node, visit);
     };
     ts.forEachChild(module.sourceFile, visit);
   }
-  return [...edges].sort();
+  return calls.sort();
+}
+
+function selectorAuthorityViolations(file: string): readonly string[] {
+  const sourceFile = ts.createSourceFile(
+    file,
+    readFileSync(file, 'utf8'),
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  const authorityTypes = new Set(['DmView', 'EncounterState']);
+  const authorityNamespaces = new Set<string>();
+  const violations: string[] = [];
+  for (const statement of sourceFile.statements) {
+    if (!ts.isImportDeclaration(statement)) continue;
+    if (ts.isStringLiteral(statement.moduleSpecifier)) {
+      const specifier = statement.moduleSpecifier.text;
+      if (
+        /(?:dm-encounter-host|session-persistence|local-session-store)/u.test(specifier) ||
+        specifier.includes('/transports/')
+      ) violations.push(`imports forbidden selector dependency ${specifier}`);
+    }
+    const bindings = statement.importClause?.namedBindings;
+    if (bindings === undefined) continue;
+    if (ts.isNamespaceImport(bindings)) {
+      authorityNamespaces.add(bindings.name.text);
+      continue;
+    }
+    if (!ts.isNamedImports(bindings)) continue;
+    for (const element of bindings.elements) {
+      const imported = element.propertyName?.text ?? element.name.text;
+      if (authorityTypes.has(imported)) violations.push(`imports authority type ${imported}`);
+    }
+  }
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isTypeReferenceNode(node) &&
+      ts.isQualifiedName(node.typeName) &&
+      ts.isIdentifier(node.typeName.left) &&
+      authorityNamespaces.has(node.typeName.left.text) &&
+      authorityTypes.has(node.typeName.right.text)
+    ) {
+      violations.push(`uses namespace authority type ${node.typeName.right.text}`);
+    }
+    if (ts.isImportTypeNode(node) && node.qualifier !== undefined) {
+      const qualifier = node.qualifier.getText(sourceFile).split('.').at(-1);
+      if (qualifier !== undefined && authorityTypes.has(qualifier)) {
+        violations.push(`uses imported authority type ${qualifier}`);
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  ts.forEachChild(sourceFile, visit);
+  return [...new Set(violations)].sort();
 }
 
 const CORE_ENTRYPOINTS = [
@@ -229,12 +375,13 @@ describe('renderer-neutral engine boundary graph', () => {
   });
 
   it('all runtime entries converge on the pinned session reducer edges', () => {
-    expect(reducerEdges(dependencyGraph(CORE_ENTRYPOINTS))).toEqual([
-      'src/vtt/dm-encounter-host.ts -> src/vtt/session-encounter-reducer.ts#reduceSessionEncounter',
-      'src/vtt/session-encounter-reducer.ts -> src/vtt/vane-warren.ts#reduceVaneWarrenEncounter',
-      'src/vtt/session-persistence.ts -> src/combat/encounter.ts#reduceEncounter',
-      'src/vtt/session-persistence.ts -> src/vtt/session-encounter-reducer.ts#reduceSessionEncounter',
-      'src/vtt/vane-warren.ts -> src/combat/encounter.ts#reduceEncounter',
+    expect(reducerCallSites(dependencyGraph(CORE_ENTRYPOINTS))).toEqual([
+      'src/vtt/dm-encounter-host.ts#commandReducer -> src/vtt/session-encounter-reducer.ts#reduceSessionEncounter',
+      'src/vtt/session-encounter-reducer.ts#reduceSessionEncounter -> src/vtt/vane-warren.ts#reduceVaneWarrenEncounter',
+      'src/vtt/session-persistence.ts#advanceSkippedTurn -> src/combat/encounter.ts#reduceEncounter',
+      'src/vtt/session-persistence.ts#replaySessionRevisions -> src/vtt/session-encounter-reducer.ts#reduceSessionEncounter',
+      'src/vtt/vane-warren.ts#reduceVaneWarrenEncounter -> src/combat/encounter.ts#reduceEncounter',
+      'src/vtt/vane-warren.ts#reduceVaneWarrenWorldObjectAction -> src/combat/encounter.ts#reduceEncounter',
     ]);
   });
 
@@ -246,6 +393,7 @@ describe('renderer-neutral engine boundary graph', () => {
     expect(files).not.toContain('src/vtt/session-persistence.ts');
     expect(files).not.toContain('src/vtt/local-session-store.ts');
     expect(files.some((file) => file.includes('/transports/'))).toBe(false);
+    expect(selectorAuthorityViolations(resolve(ROOT, 'src/vtt/encounter-selectors.ts'))).toEqual([]);
     expect(readFileSync(resolve(ROOT, 'src/vtt/encounter-selectors.ts'), 'utf8'))
       .toContain('projection: PlayerBoardProjection');
   });

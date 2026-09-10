@@ -354,24 +354,48 @@ export class TurnCoordinator {
     const request = this.#pendingRequest;
     if (request === null) return;
     this.#pendingRequest = null;
-    this.#record({ kind: 'controller_request_cancelled', request });
-    this.#pendingAbort.get(request.actorId)?.abort();
+    try {
+      this.#record({ kind: 'controller_request_cancelled', request });
+    } finally {
+      this.#pendingAbort.get(request.actorId)?.abort();
+    }
   }
 
   interrupt(): void {
     if (this.#pause !== null) return;
+    const pause = { kind: 'interrupted' } as const;
+    this.#pause = pause;
+    try {
+      this.#record({ kind: 'coordinator_paused', pause });
+    } catch (error: unknown) {
+      this.#pause = null;
+      throw error;
+    }
     this.#cancelPendingRequest();
-    this.#pause = { kind: 'interrupted' };
-    this.#record({ kind: 'coordinator_paused', pause: this.#pause });
   }
 
   pauseForExternalMutation(): CoordinatorPause | null {
     const previous = this.#pause;
+    let establishedPause: CoordinatorPause | null = null;
     if (this.#pause === null) {
-      this.#pause = { kind: 'interrupted' };
-      this.#record({ kind: 'coordinator_paused', pause: this.#pause });
+      establishedPause = { kind: 'interrupted' };
+      this.#pause = establishedPause;
+      try {
+        this.#record({ kind: 'coordinator_paused', pause: establishedPause });
+      } catch (error: unknown) {
+        this.#pause = previous;
+        throw error;
+      }
     }
-    this.#cancelPendingRequest();
+    try {
+      this.#cancelPendingRequest();
+    } catch (error: unknown) {
+      if (establishedPause !== null) {
+        this.#pause = previous;
+        this.#record({ kind: 'coordinator_resumed', pause: establishedPause });
+      }
+      throw error;
+    }
     return previous;
   }
 
