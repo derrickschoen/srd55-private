@@ -6,6 +6,7 @@ import {
   type ControllerKind,
 } from '../combat/controllers';
 import {
+  CoordinatorPostApplicationError,
   TurnCoordinator,
   type CoordinatorStep,
   type PersistedCoordinatorState,
@@ -74,6 +75,8 @@ import {
 import {
   projectDmBoard,
   projectPlayerBoard,
+  detachedImmutable,
+  offeredActionId,
   type DmBoardProjection,
   type PlayerBoardProjection,
   type PlayerSeatBinding,
@@ -200,6 +203,23 @@ export interface DmEncounterHostSnapshot {
   readonly player: PlayerBoardProjection;
 }
 
+export type HostSnapshotNotificationKind =
+  | 'offer'
+  | 'status'
+  | 'mutation'
+  | 'autonomous'
+  | 'recovery';
+
+export interface HostSnapshotNotification {
+  readonly kind: HostSnapshotNotificationKind;
+  readonly snapshot: DmEncounterHostSnapshot;
+}
+
+export interface HostSubscriberError {
+  readonly channel: 'snapshot' | 'notification';
+  readonly error: unknown;
+}
+
 export type HostCoordinatorTransactionOutcome =
   | { readonly kind: 'committed'; readonly revision: number }
   | { readonly kind: 'refused'; readonly reason: string }
@@ -225,6 +245,18 @@ export type HostDoorSetOutcome =
 
 interface HostTransactionWaiter {
   readonly resolve: (outcome: HostCoordinatorTransactionOutcome) => void;
+}
+
+type FreshOfferOutcome =
+  | { readonly kind: 'fresh' }
+  | { readonly kind: 'closed' }
+  | { readonly kind: 'refused'; readonly reason: string }
+  | { readonly kind: 'failed'; readonly error: unknown };
+
+interface FreshOfferWaiter {
+  readonly previousRequestId: string | null;
+  readonly minimumRevision: number;
+  readonly resolve: (outcome: FreshOfferOutcome) => void;
 }
 
 export class ControllerAssignmentError extends Error {
@@ -260,7 +292,10 @@ export class DmEncounterHost {
   readonly #store: SessionStore;
   readonly #mirror = new DeferredMirrorSink();
   readonly #listeners = new Set<(snapshot: DmEncounterHostSnapshot) => void>();
+  readonly #notificationListeners = new Set<(notification: HostSnapshotNotification) => void>();
+  readonly #subscriberErrors: HostSubscriberError[] = [];
   readonly #transactionWaiters = new Map<string, HostTransactionWaiter>();
+  readonly #freshOfferWaiters = new Set<FreshOfferWaiter>();
   #activeTransactionRequestId: string | null = null;
   #journal: EncounterSessionJournal;
   #registry: ControllerRegistry;
@@ -271,6 +306,8 @@ export class DmEncounterHost {
   #repumpRequested = false;
   #repumpBlocked = false;
   #closed = false;
+  #externalAbortCount = 0;
+  #externalReducerCount = 0;
   #bridgeFailureGuard: BridgeFailureGuard | null = null;
   #roundPlanSession: DmRoundPlanSession | null = null;
   #boundaryRefusal: null | {
@@ -474,7 +511,7 @@ export class DmEncounterHost {
       coordinator,
       this.#journal.partyState(),
     );
-    return {
+    return detachedImmutable({
       dm: projectDmBoard({
         view: projectDmView(state),
         coordinator,
@@ -487,7 +524,7 @@ export class DmEncounterHost {
         engineAdjudications: this.#engineAdjudications,
       }),
       player: this.#closed ? { ...player, authorityStatus: 'hard_paused' } : player,
-    };
+    });
   }
 
   playerSnapshot(binding: PlayerSeatBinding): PlayerBoardProjection {
@@ -500,14 +537,14 @@ export class DmEncounterHost {
       this.#coordinator.coordinatorState(),
       this.#journal.partyState(),
     );
-    return this.#closed ? { ...player, authorityStatus: 'hard_paused' } : player;
+    return detachedImmutable(this.#closed ? { ...player, authorityStatus: 'hard_paused' } : player);
   }
 
   rendererTokenBindings(): readonly RendererTokenBinding[] {
-    return this.#coordinator.state().tokens.map((token) => ({
+    return detachedImmutable(this.#coordinator.state().tokens.map((token) => ({
       tokenId: String(token.id),
       combatantId: token.combatantId,
-    }));
+    })));
   }
 
   sessionEnded(): boolean {
@@ -516,13 +553,54 @@ export class DmEncounterHost {
 
   subscribe(listener: (snapshot: DmEncounterHostSnapshot) => void): () => void {
     this.#listeners.add(listener);
-    listener(this.snapshot());
+    this.#notifySnapshotListener(listener, this.snapshot());
     return () => this.#listeners.delete(listener);
   }
 
-  #publish(): void {
+  subscribeNotifications(listener: (notification: HostSnapshotNotification) => void): () => void {
+    this.#notificationListeners.add(listener);
+    this.#notifyNotificationListener(listener, { kind: 'status', snapshot: this.snapshot() });
+    return () => this.#notificationListeners.delete(listener);
+  }
+
+  subscriberErrors(): readonly HostSubscriberError[] {
+    return [...this.#subscriberErrors];
+  }
+
+  doorTransactionMetrics(): { readonly aborts: number; readonly reducerCalls: number } {
+    return { aborts: this.#externalAbortCount, reducerCalls: this.#externalReducerCount };
+  }
+
+  #notifySnapshotListener(
+    listener: (snapshot: DmEncounterHostSnapshot) => void,
+    snapshot: DmEncounterHostSnapshot,
+  ): void {
+    try {
+      listener(snapshot);
+    } catch (error: unknown) {
+      this.#subscriberErrors.push({ channel: 'snapshot', error });
+    }
+  }
+
+  #notifyNotificationListener(
+    listener: (notification: HostSnapshotNotification) => void,
+    notification: HostSnapshotNotification,
+  ): void {
+    try {
+      listener(notification);
+    } catch (error: unknown) {
+      this.#subscriberErrors.push({ channel: 'notification', error });
+    }
+  }
+
+  #publish(kind: HostSnapshotNotificationKind = 'status'): void {
     const snapshot = this.snapshot();
-    for (const listener of this.#listeners) listener(snapshot);
+    const notification = { kind, snapshot } satisfies HostSnapshotNotification;
+    this.#settleFreshOffers(snapshot);
+    for (const listener of this.#notificationListeners) {
+      this.#notifyNotificationListener(listener, notification);
+    }
+    for (const listener of this.#listeners) this.#notifySnapshotListener(listener, snapshot);
   }
 
   start(): Promise<void> {
@@ -588,56 +666,63 @@ export class DmEncounterHost {
         const step = this.#coordinator.step();
         const pendingRequest = this.#coordinator.coordinatorState().pendingRequest;
         const transactionRequestId = this.#activeTransactionRequestId ?? pendingRequest?.requestId ?? null;
-        if (
-          pendingRequest !== null &&
-          this.#registry.kindFor(pendingRequest.actorId) !== 'algorithm'
-        ) {
-          await this.#store.flush();
+        try {
+          if (
+            pendingRequest !== null &&
+            this.#registry.kindFor(pendingRequest.actorId) !== 'algorithm'
+          ) {
+            await this.#store.flush();
+          }
+        } catch (error: unknown) {
+          const handled = this.#handlePumpFailure(error, 'pre_apply', transactionRequestId);
+          if (handled) return;
+          throw error;
         }
-        this.#publish();
+        if (this.#closed) return;
+        if (pendingRequest !== null) this.#publish('offer');
         let result: CoordinatorStep;
         try {
           result = await step;
         } catch (error: unknown) {
-          if (transactionRequestId !== null) {
-            this.#settleTransaction(transactionRequestId, {
-              kind: 'failed',
-              phase: 'pre_apply',
-              error,
-              currentRevision: this.#coordinator.state().revision,
-            });
-          }
-          if (this.#bridgeFailureGuard?.report() !== null) return;
+          if (this.#bridgeFailureGuard !== null && this.#bridgeFailureGuard.report() !== null) return;
+          const phase = error instanceof CoordinatorPostApplicationError ? 'post_apply' : 'pre_apply';
+          const handled = this.#handlePumpFailure(error, phase, transactionRequestId);
+          if (handled) return;
           throw error;
         }
+        if (this.#closed) return;
         try {
+          this.#completeHandbacksAtTransactionBoundary();
           await this.#store.flush();
         } catch (error: unknown) {
-          if (transactionRequestId !== null) {
-            this.#settleTransaction(transactionRequestId, {
-              kind: 'failed',
-              phase: result.kind === 'applied' ? 'post_apply' : 'pre_apply',
-              error,
-              currentRevision: this.#coordinator.state().revision,
-            });
-          }
-          this.#closed = true;
-          this.#publish();
-          this.#settleAllTransactions({ kind: 'closed' });
+          const phase = result.kind === 'applied' ? 'post_apply' : 'pre_apply';
+          const handled = this.#handlePumpFailure(error, phase, transactionRequestId);
+          if (handled) return;
           throw error;
         }
-        this.#completeHandbacksAtTransactionBoundary();
-        this.#publish();
         if (transactionRequestId !== null && result.kind === 'applied') {
           this.#settleTransaction(transactionRequestId, {
             kind: 'committed',
             revision: result.state.revision,
           });
         }
-        const autoResolvedReactions = this.#autoResolveUnattendedReactionOffers();
-        if (autoResolvedReactions > 0) {
-          await this.#store.flush();
-          this.#publish();
+        this.#publish(result.kind === 'applied'
+          ? (transactionRequestId === null ? 'autonomous' : 'mutation')
+          : 'status');
+        let autoResolvedReactions = 0;
+        try {
+          autoResolvedReactions = this.#autoResolveUnattendedReactionOffers();
+          if (autoResolvedReactions > 0) {
+            await this.#store.flush();
+            this.#publish('autonomous');
+          }
+        } catch (error: unknown) {
+          const phase = error instanceof CoordinatorPostApplicationError || autoResolvedReactions > 0
+            ? 'post_apply'
+            : 'pre_apply';
+          const handled = this.#handlePumpFailure(error, phase, transactionRequestId);
+          if (handled) return;
+          throw error;
         }
         if (
           autoResolvedReactions > 0 &&
@@ -652,12 +737,13 @@ export class DmEncounterHost {
             ? { code: result.pendingDecisionCode, message: result.reason }
             : null;
           if (result.actionRefusal !== undefined) this.#routeActionRefusal(result.actionRefusal);
-          this.#publish();
+          this.#publish('status');
           if (transactionRequestId !== null) {
             this.#settleTransaction(transactionRequestId, result.reason === 'Coordinator is paused.'
               ? { kind: 'cancelled', reason: result.reason }
               : { kind: 'refused', reason: result.reason });
           }
+          this.#settleFreshOfferWaiters({ kind: 'refused', reason: result.reason });
           return;
         }
         this.#boundaryRefusal = null;
@@ -678,6 +764,37 @@ export class DmEncounterHost {
     return this.#pump;
   }
 
+  #handlePumpFailure(
+    error: unknown,
+    phase: 'pre_apply' | 'post_apply',
+    transactionRequestId: string | null,
+  ): boolean {
+    const handled = transactionRequestId !== null || this.#freshOfferWaiters.size > 0;
+    if (transactionRequestId !== null) {
+      this.#settleTransaction(transactionRequestId, {
+        kind: 'failed',
+        phase,
+        error,
+        currentRevision: this.#coordinator.state().revision,
+      });
+    }
+    this.#settleFreshOfferWaiters({ kind: 'failed', error });
+    if (phase === 'post_apply') {
+      this.#degradeAfterApplicationFailure();
+    } else if (!this.#closed && this.#coordinator.pauseState() === null) {
+      this.#repumpRequested = true;
+    }
+    return handled;
+  }
+
+  #degradeAfterApplicationFailure(): void {
+    this.#closed = true;
+    this.#repumpBlocked = false;
+    this.#publish('recovery');
+    this.#settleAllTransactions({ kind: 'closed' });
+    this.#settleFreshOfferWaiters({ kind: 'closed' });
+  }
+
   #settleTransaction(requestId: string, outcome: HostCoordinatorTransactionOutcome): void {
     const waiter = this.#transactionWaiters.get(requestId);
     if (waiter === undefined) return;
@@ -689,6 +806,27 @@ export class DmEncounterHost {
   #settleAllTransactions(outcome: HostCoordinatorTransactionOutcome): void {
     for (const requestId of [...this.#transactionWaiters.keys()]) {
       this.#settleTransaction(requestId, outcome);
+    }
+  }
+
+  #settleFreshOffers(snapshot: DmEncounterHostSnapshot): void {
+    const pending = snapshot.dm.pendingRequest;
+    if (pending === null) return;
+    for (const waiter of [...this.#freshOfferWaiters]) {
+      if (
+        pending.requestId !== waiter.previousRequestId &&
+        pending.encounterRevision >= waiter.minimumRevision
+      ) {
+        this.#freshOfferWaiters.delete(waiter);
+        waiter.resolve({ kind: 'fresh' });
+      }
+    }
+  }
+
+  #settleFreshOfferWaiters(outcome: FreshOfferOutcome): void {
+    for (const waiter of [...this.#freshOfferWaiters]) {
+      this.#freshOfferWaiters.delete(waiter);
+      waiter.resolve(outcome);
     }
   }
 
@@ -892,6 +1030,35 @@ export class DmEncounterHost {
     });
   }
 
+  submitOfferedActionTransaction(
+    actor: CombatantId,
+    requestId: string,
+    encounterRevision: number,
+    selectedOfferedActionId: string,
+  ): Promise<HostCoordinatorTransactionOutcome> {
+    const pending = this.#coordinator.coordinatorState().pendingRequest;
+    if (
+      pending === null ||
+      pending.actorId !== actor ||
+      pending.requestId !== requestId ||
+      pending.encounterRevision !== encounterRevision
+    ) {
+      return Promise.resolve({ kind: 'refused', reason: 'The offered controller request is stale.' });
+    }
+    const index = pending.legalActions.actions.findIndex(
+      (_action, actionIndex) => offeredActionId(pending.requestId, actionIndex) === selectedOfferedActionId,
+    );
+    const action = pending.legalActions.actions[index];
+    if (index < 0 || action === undefined) {
+      return Promise.resolve({ kind: 'refused', reason: 'The selected offered action id is unknown.' });
+    }
+    return this.submitHumanDecisionTransaction(actor, {
+      requestId,
+      encounterRevision,
+      action,
+    });
+  }
+
   async setDoorOpen(doorId: string, open: boolean): Promise<HostDoorSetOutcome> {
     if (this.#closed) return { kind: 'closed' };
     const initialState = this.#coordinator.state();
@@ -911,8 +1078,10 @@ export class DmEncounterHost {
     if (canonicalState === open) {
       try {
         await this.#store.flush();
+        if (this.#closed) return { kind: 'closed' };
         return { kind: 'committed', revision: initialRevision, changed: false };
       } catch (error: unknown) {
+        if (this.#closed) return { kind: 'closed' };
         return {
           kind: 'failed', phase: 'pre_apply', error,
           currentRevision: this.#coordinator.state().revision,
@@ -922,8 +1091,23 @@ export class DmEncounterHost {
 
     const previousRequestId = this.#coordinator.coordinatorState().pendingRequest?.requestId ?? null;
     this.#repumpBlocked = true;
-    const previousPause = this.#coordinator.pauseForExternalMutation();
-    await this.#pump;
+    let previousPause: ReturnType<TurnCoordinator['pauseState']>;
+    try {
+      previousPause = this.#coordinator.pauseForExternalMutation();
+      if (previousRequestId !== null) this.#externalAbortCount += 1;
+      await this.#pump;
+    } catch (error: unknown) {
+      this.#repumpBlocked = false;
+      if (this.#closed) return { kind: 'closed' };
+      return {
+        kind: 'failed', phase: 'pre_apply', error,
+        currentRevision: this.#coordinator.state().revision,
+      };
+    }
+    if (this.#closed) {
+      this.#repumpBlocked = false;
+      return { kind: 'closed' };
+    }
     const currentState = this.#coordinator.state();
     const currentDoor = currentState.worldObjects.find((object) => String(object.id) === doorId);
     if (
@@ -934,12 +1118,13 @@ export class DmEncounterHost {
       canonicalDoorState(currentDoor.blocking) !== canonicalState
     ) {
       this.#repumpBlocked = false;
-      if (previousPause === null) this.#coordinator.resume();
+      if (previousPause === null && !this.#closed) this.#coordinator.resume();
       return { kind: 'unsupported', reason: 'The door offer became stale before apply.' };
     }
 
     let result: CoordinatorStep;
     try {
+      this.#externalReducerCount += 1;
       result = this.#coordinator.applyExternalWorldOperation({
         type: 'world_operation',
         actor: activeCombatant,
@@ -952,9 +1137,14 @@ export class DmEncounterHost {
       });
     } catch (error: unknown) {
       this.#repumpBlocked = false;
-      if (previousPause === null) this.#coordinator.resume();
+      const phase = error instanceof CoordinatorPostApplicationError ? 'post_apply' : 'pre_apply';
+      if (phase === 'post_apply') {
+        this.#degradeAfterApplicationFailure();
+      } else if (previousPause === null && !this.#closed) {
+        this.#coordinator.resume();
+      }
       return {
-        kind: 'failed', phase: 'pre_apply', error,
+        kind: 'failed', phase, error,
         currentRevision: this.#coordinator.state().revision,
       };
     }
@@ -966,41 +1156,66 @@ export class DmEncounterHost {
     try {
       await this.#store.flush();
     } catch (error: unknown) {
-      this.#closed = true;
-      this.#repumpBlocked = false;
-      this.#publish();
-      this.#settleAllTransactions({ kind: 'closed' });
+      if (this.#closed) {
+        this.#repumpBlocked = false;
+        return { kind: 'closed' };
+      }
+      this.#degradeAfterApplicationFailure();
       return {
         kind: 'failed', phase: 'post_apply', error,
         currentRevision: this.#coordinator.state().revision,
       };
     }
-    this.#publish();
+    if (this.#closed) {
+      this.#repumpBlocked = false;
+      return { kind: 'closed' };
+    }
     if (previousPause === null) {
       const freshOffer = this.#waitForFreshOffer(previousRequestId, result.state.revision);
-      this.#coordinator.resume();
+      try {
+        this.#coordinator.resume();
+      } catch (error: unknown) {
+        this.#repumpBlocked = false;
+        this.#degradeAfterApplicationFailure();
+        return {
+          kind: 'failed', phase: 'post_apply', error,
+          currentRevision: this.#coordinator.state().revision,
+        };
+      }
+      if (this.#closed) {
+        this.#repumpBlocked = false;
+        return { kind: 'closed' };
+      }
       this.#repumpBlocked = false;
-      this.#publish();
       void this.#pumpCoordinator();
-      await freshOffer;
+      const freshOutcome = await freshOffer;
+      if (freshOutcome.kind === 'closed' || this.#closed) return { kind: 'closed' };
+      if (freshOutcome.kind !== 'fresh') {
+        const error = freshOutcome.kind === 'failed'
+          ? freshOutcome.error
+          : new Error(freshOutcome.reason);
+        this.#degradeAfterApplicationFailure();
+        return {
+          kind: 'failed', phase: 'post_apply', error,
+          currentRevision: this.#coordinator.state().revision,
+        };
+      }
     } else {
       this.#repumpBlocked = false;
     }
+    if (this.#closed) return { kind: 'closed' };
+    this.#publish('mutation');
     return { kind: 'committed', revision: result.state.revision, changed: true };
   }
 
-  #waitForFreshOffer(previousRequestId: string | null, revision: number): Promise<void> {
+  #waitForFreshOffer(previousRequestId: string | null, revision: number): Promise<FreshOfferOutcome> {
+    if (this.#closed) return Promise.resolve({ kind: 'closed' });
     const current = this.#coordinator.coordinatorState().pendingRequest;
-    if (current !== null && current.requestId !== previousRequestId && current.encounterRevision === revision) {
-      return Promise.resolve();
+    if (current !== null && current.requestId !== previousRequestId && current.encounterRevision >= revision) {
+      return Promise.resolve({ kind: 'fresh' });
     }
     return new Promise((resolve) => {
-      const unsubscribe = this.subscribe((snapshot) => {
-        const pending = snapshot.dm.pendingRequest;
-        if (pending === null || pending.requestId === previousRequestId || pending.encounterRevision !== revision) return;
-        unsubscribe();
-        resolve();
-      });
+      this.#freshOfferWaiters.add({ previousRequestId, minimumRevision: revision, resolve });
     });
   }
 
@@ -1363,11 +1578,23 @@ export class DmEncounterHost {
   }
 
   close(): void {
-    if (this.#closed) return;
-    this.#coordinator.interrupt();
+    let interruptionFailed = false;
+    let interruptionError: unknown;
+    if (!this.#closed) {
+      try {
+        this.#coordinator.interrupt();
+      } catch (error: unknown) {
+        interruptionFailed = true;
+        interruptionError = error;
+      }
+    }
     this.#closed = true;
-    this.#publish();
+    this.#repumpBlocked = false;
+    this.#publish('status');
     this.#settleAllTransactions({ kind: 'closed' });
+    this.#settleFreshOfferWaiters({ kind: 'closed' });
     this.#listeners.clear();
+    this.#notificationListeners.clear();
+    if (interruptionFailed) throw interruptionError;
   }
 }

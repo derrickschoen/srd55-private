@@ -71,6 +71,22 @@ export interface ProjectedControllerRequest {
   readonly offeredActionIds: readonly string[];
 }
 
+export function offeredActionId(requestId: string, index: number): string {
+  return `${requestId}:option:${String(index)}`;
+}
+
+function freezeRecursively(value: unknown): void {
+  if (typeof value !== 'object' || value === null || Object.isFrozen(value)) return;
+  Object.freeze(value);
+  for (const nested of Object.values(value)) freezeRecursively(nested);
+}
+
+export function detachedImmutable<T>(value: T): T {
+  const detached = structuredClone(value);
+  freezeRecursively(detached);
+  return detached;
+}
+
 /** Authority-owned seat data used only as input to the canonical visibility filter. */
 export interface PlayerSeatBinding {
   readonly seatId: string;
@@ -233,10 +249,9 @@ function projectedRequest(
     encounterRevision: request.encounterRevision,
     actorId: request.actorId,
     ...(request.kind === 'reaction' ? { moverId: request.moverId } : {}),
-    legalActions: request.legalActions.actions,
-    offeredActionIds: request.legalActions.actions.map(
-      (_action, index) => `${request.requestId}:option:${String(index)}`,
-    ),
+    legalActions: detachedImmutable(request.legalActions.actions),
+    offeredActionIds: request.legalActions.actions.map((_action, index) =>
+      offeredActionId(request.requestId, index)),
   };
 }
 

@@ -1,9 +1,10 @@
-import type { EncounterCommand } from '../combat/events';
 import type { CombatantId, EncounterSessionId } from '../combat/values';
 import type {
   DmEncounterHostSnapshot,
   HostCoordinatorTransactionOutcome,
   HostDoorSetOutcome,
+  HostSnapshotNotification,
+  HostSnapshotNotificationKind,
 } from './dm-encounter-host';
 import type {
   DmBoardProjection,
@@ -28,28 +29,34 @@ export interface EncounterSessionHostPort {
   snapshot(): DmEncounterHostSnapshot;
   playerSnapshot(binding: PlayerSeatBinding): PlayerBoardProjection;
   rendererTokenBindings(): readonly RendererTokenBinding[];
-  subscribe(listener: (snapshot: DmEncounterHostSnapshot) => void): () => void;
+  subscribeNotifications(listener: (notification: HostSnapshotNotification) => void): () => void;
   start(): Promise<void>;
-  submitHumanDecisionTransaction(
+  submitOfferedActionTransaction(
     actor: CombatantId,
-    decision: {
-      readonly requestId: string;
-      readonly encounterRevision: number;
-      readonly action: EncounterCommand;
-    },
+    requestId: string,
+    encounterRevision: number,
+    offeredActionId: string,
   ): Promise<HostCoordinatorTransactionOutcome>;
   setDoorOpen(doorId: string, open: boolean): Promise<HostDoorSetOutcome>;
   close(): void;
 }
 
 export interface DmSessionSnapshotEvent {
+  readonly kind: HostSnapshotNotificationKind;
   readonly seq: number;
   readonly projection: DmBoardProjection;
 }
 
 export interface PlayerSessionSnapshotEvent {
+  readonly kind: HostSnapshotNotificationKind;
   readonly seq: number;
   readonly projection: PlayerBoardProjection;
+}
+
+export interface SessionSubscriberError {
+  readonly audience: 'dm' | 'player';
+  readonly playerId?: string;
+  readonly error: unknown;
 }
 
 export type PlayerSubscriptionResult =
@@ -148,6 +155,7 @@ export class EncounterSessionService {
   readonly #playerListeners = new Map<string, Set<(event: PlayerSessionSnapshotEvent) => void>>();
   readonly #playerEventsByRevision = new Map<string, PlayerSessionSnapshotEvent>();
   readonly #dmEventsByRevision = new Map<number, DmSessionSnapshotEvent>();
+  readonly #subscriberErrors: SessionSubscriberError[] = [];
   readonly #unsubscribeHost: () => void;
   #tail: Promise<void> = Promise.resolve();
   #seq = 0;
@@ -188,7 +196,7 @@ export class EncounterSessionService {
       }
       this.#seats.set(registration.playerId, seat);
     }
-    this.#unsubscribeHost = host.subscribe((snapshot) => this.#publish(snapshot));
+    this.#unsubscribeHost = host.subscribeNotifications((notification) => this.#publish(notification));
   }
 
   start(): Promise<void> {
@@ -207,7 +215,7 @@ export class EncounterSessionService {
   subscribeDm(listener: (event: DmSessionSnapshotEvent) => void): () => void {
     this.#dmListeners.add(listener);
     const projection = this.dmSnapshot();
-    listener({ seq: this.#seq, projection });
+    this.#notifyDm(listener, { kind: 'status', seq: this.#seq, projection });
     return () => this.#dmListeners.delete(listener);
   }
 
@@ -220,7 +228,9 @@ export class EncounterSessionService {
     const listeners = this.#playerListeners.get(playerId) ?? new Set();
     listeners.add(listener);
     this.#playerListeners.set(playerId, listeners);
-    listener({ seq: this.#seq, projection: this.host.playerSnapshot(seat.binding) });
+    this.#notifyPlayer(playerId, listener, {
+      kind: 'status', seq: this.#seq, projection: this.host.playerSnapshot(seat.binding),
+    });
     return {
       kind: 'subscribed',
       unsubscribe: () => {
@@ -228,6 +238,10 @@ export class EncounterSessionService {
         if (listeners.size === 0) this.#playerListeners.delete(playerId);
       },
     };
+  }
+
+  subscriberErrors(): readonly SessionSubscriberError[] {
+    return [...this.#subscriberErrors];
   }
 
   submitOfferedAction(input: OfferedActionMutation): Promise<SessionMutationOutcome> {
@@ -284,12 +298,14 @@ export class EncounterSessionService {
   }
 
   close(): void {
-    if (this.#closed) return;
     this.#closed = true;
-    this.host.close();
-    this.#unsubscribeHost();
-    this.#dmListeners.clear();
-    this.#playerListeners.clear();
+    try {
+      this.host.close();
+    } finally {
+      this.#unsubscribeHost();
+      this.#dmListeners.clear();
+      this.#playerListeners.clear();
+    }
   }
 
   #enqueue(operation: () => Promise<SessionMutationOutcome>): Promise<SessionMutationOutcome> {
@@ -331,15 +347,15 @@ export class EncounterSessionService {
       return { kind: 'refused', code: 'FORBIDDEN', reason: 'The pending actor belongs to another player seat.' };
     }
     const optionIndex = pending.offeredActionIds.indexOf(input.offeredActionId);
-    const action = pending.legalActions[optionIndex];
-    if (optionIndex < 0 || action === undefined) {
+    if (optionIndex < 0 || pending.legalActions[optionIndex] === undefined) {
       return { kind: 'refused', code: 'UNKNOWN_OFFER', reason: 'The selected offered action id is unknown.' };
     }
-    const outcome = await this.host.submitHumanDecisionTransaction(pending.actorId, {
-      requestId: pending.requestId,
-      encounterRevision: pending.encounterRevision,
-      action,
-    });
+    const outcome = await this.host.submitOfferedActionTransaction(
+      pending.actorId,
+      pending.requestId,
+      pending.encounterRevision,
+      input.offeredActionId,
+    );
     return this.#terminalOutcome(playerId, seat, outcome);
   }
 
@@ -372,6 +388,7 @@ export class EncounterSessionService {
           phase: 'post_apply',
           error: outcome.error,
           recovery: {
+            kind: 'recovery',
             seq: this.#seq,
             projection: this.host.playerSnapshot(seat.binding),
           },
@@ -385,15 +402,18 @@ export class EncounterSessionService {
         if (!outcome.changed) {
           return { kind: 'committed', revision: outcome.revision, changed: false };
         }
-        return {
-          kind: 'committed',
-          revision: outcome.revision,
-          changed: true,
-          event: this.#dmEventsByRevision.get(outcome.revision) ?? {
-            seq: this.#seq,
-            projection: this.dmSnapshot(),
-          },
-        };
+        {
+          const event = this.#dmEventsByRevision.get(outcome.revision);
+          if (event === undefined) {
+            throw new Error(`The committed door revision ${String(outcome.revision)} has no durable snapshot event.`);
+          }
+          return {
+            kind: 'committed',
+            revision: outcome.revision,
+            changed: true,
+            event,
+          };
+        }
       case 'unsupported':
         return { kind: 'refused', code: 'UNSUPPORTED', reason: outcome.reason };
       case 'closed':
@@ -408,6 +428,7 @@ export class EncounterSessionService {
           phase: 'post_apply',
           error: outcome.error,
           recovery: {
+            kind: 'recovery',
             seq: this.#seq,
             projection: this.dmSnapshot(),
           },
@@ -415,21 +436,59 @@ export class EncounterSessionService {
     }
   }
 
-  #publish(snapshot: DmEncounterHostSnapshot): void {
+  #notifyDm(
+    listener: (event: DmSessionSnapshotEvent) => void,
+    event: DmSessionSnapshotEvent,
+  ): void {
+    try {
+      listener(event);
+    } catch (error: unknown) {
+      this.#subscriberErrors.push({ audience: 'dm', error });
+    }
+  }
+
+  #notifyPlayer(
+    playerId: string,
+    listener: (event: PlayerSessionSnapshotEvent) => void,
+    event: PlayerSessionSnapshotEvent,
+  ): void {
+    try {
+      listener(event);
+    } catch (error: unknown) {
+      this.#subscriberErrors.push({ audience: 'player', playerId, error });
+    }
+  }
+
+  #publish(notification: HostSnapshotNotification): void {
     this.#seq += 1;
-    const dmEvent = { seq: this.#seq, projection: snapshot.dm } satisfies DmSessionSnapshotEvent;
-    this.#dmEventsByRevision.set(snapshot.dm.encounter.revision, dmEvent);
-    for (const listener of this.#dmListeners) listener(dmEvent);
+    const dmEvent = {
+      kind: notification.kind,
+      seq: this.#seq,
+      projection: notification.snapshot.dm,
+    } satisfies DmSessionSnapshotEvent;
+    const playerEvents = new Map<string, PlayerSessionSnapshotEvent>();
     for (const [playerId, seat] of this.#seats) {
       const event = {
+        kind: notification.kind,
         seq: this.#seq,
         projection: this.host.playerSnapshot(seat.binding),
       } satisfies PlayerSessionSnapshotEvent;
-      this.#playerEventsByRevision.set(
-        `${playerId}\u0000${String(event.projection.revision)}`,
-        event,
-      );
-      for (const listener of this.#playerListeners.get(playerId) ?? []) listener(event);
+      playerEvents.set(playerId, event);
+    }
+    if (notification.kind === 'mutation') {
+      this.#dmEventsByRevision.set(dmEvent.projection.encounter.revision, dmEvent);
+      for (const [playerId, event] of playerEvents) {
+        this.#playerEventsByRevision.set(
+          `${playerId}\u0000${String(event.projection.revision)}`,
+          event,
+        );
+      }
+    }
+    for (const listener of this.#dmListeners) this.#notifyDm(listener, dmEvent);
+    for (const [playerId, event] of playerEvents) {
+      for (const listener of this.#playerListeners.get(playerId) ?? []) {
+        this.#notifyPlayer(playerId, listener, event);
+      }
     }
   }
 }

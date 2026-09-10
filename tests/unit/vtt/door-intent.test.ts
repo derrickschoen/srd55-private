@@ -11,6 +11,55 @@ import { MemoryBrowserSessionStore } from '../../../src/vtt/session-persistence'
 
 const DOOR_ID = 'object:two-room-door';
 
+class ControlledFlushStore extends MemoryBrowserSessionStore {
+  #next: Promise<void> | null = null;
+  #remaining = 0;
+  #markReached: (() => void) | null = null;
+
+  blockNextFlush(): {
+    readonly reached: Promise<void>;
+    readonly resolve: () => void;
+    readonly reject: (error: Error) => void;
+  } {
+    return this.blockFlushIn(1);
+  }
+
+  blockFlushIn(ordinal: number): {
+    readonly reached: Promise<void>;
+    readonly resolve: () => void;
+    readonly reject: (error: Error) => void;
+  } {
+    let resolveBarrier: (() => void) | undefined;
+    let rejectBarrier: ((error: Error) => void) | undefined;
+    let markReached: (() => void) | undefined;
+    this.#remaining = ordinal;
+    const reached = new Promise<void>((resolve) => { markReached = resolve; });
+    this.#markReached = () => markReached?.();
+    this.#next = new Promise<void>((resolve, reject) => {
+      resolveBarrier = resolve;
+      rejectBarrier = reject;
+    });
+    return {
+      reached,
+      resolve: () => resolveBarrier?.(),
+      reject: (error) => rejectBarrier?.(error),
+    };
+  }
+
+  override async flush(): Promise<void> {
+    if (this.#remaining > 1) {
+      this.#remaining -= 1;
+      return;
+    }
+    if (this.#remaining === 1) this.#remaining = 0;
+    const next = this.#next;
+    this.#next = null;
+    this.#markReached?.();
+    this.#markReached = null;
+    if (next !== null) await next;
+  }
+}
+
 function stateWithDoor(blocking: EncounterState['worldObjects'][number]['blocking']): EncounterState {
   const state = buildTwoRoomEncounter();
   return {
@@ -67,13 +116,15 @@ function waitForOffer(service: EncounterSessionService, playerId: string): Promi
   });
 }
 
-function runningDoorService(blocking: EncounterState['worldObjects'][number]['blocking']): {
+function runningDoorService(
+  blocking: EncounterState['worldObjects'][number]['blocking'],
+  store: MemoryBrowserSessionStore = new MemoryBrowserSessionStore(),
+): {
   readonly store: MemoryBrowserSessionStore;
   readonly host: DmEncounterHost;
   readonly service: EncounterSessionService;
   readonly seat: PlayerSeatRegistration;
 } {
-  const store = new MemoryBrowserSessionStore();
   const initialState = stateWithDoor(blocking);
   const host = new DmEncounterHost('session:door-intent', store, {
     initialState,
@@ -91,6 +142,20 @@ function runningDoorService(blocking: EncounterState['worldObjects'][number]['bl
   return { store, host, service, seat };
 }
 
+function reopenDoorService(store: MemoryBrowserSessionStore): {
+  readonly host: DmEncounterHost;
+  readonly service: EncounterSessionService;
+  readonly seat: PlayerSeatRegistration;
+} {
+  const playerIds = buildTwoRoomEncounter().combatants.map((combatant) => combatant.profile.id);
+  const host = new DmEncounterHost('session:door-intent', store, {
+    playerIds,
+    turnLegalActions: legalActions,
+  });
+  const seat = allSeat(host);
+  return { host, service: new EncounterSessionService(host, [seat]), seat };
+}
+
 describe('deadlock-safe door intent', () => {
   it('opens and closes through the exact attributed world operation and refreshes offers', async () => {
     const { host, service, seat } = runningDoorService({
@@ -101,16 +166,26 @@ describe('deadlock-safe door intent', () => {
     const originalOffer = await originalOfferPromise;
     expect(originalOffer.legalActions.some((action) => action.type === 'move')).toBe(false);
     const activeActor = originalOffer.actorId;
+    const healthyDoorMutations: number[] = [];
+    service.subscribeDm(() => { throw new Error('throwing door subscriber'); });
+    service.subscribeDm((event) => {
+      if (event.kind === 'mutation') healthyDoorMutations.push(event.projection.encounter.revision);
+    });
 
     const opened = await Promise.race([
       service.setDoor({ principal: { kind: 'dm' }, doorId: DOOR_ID, open: true }),
       new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error('door.set deadlocked')), 1_000)),
     ]);
     expect(opened).toMatchObject({ kind: 'committed', changed: true });
+    expect(opened).not.toMatchObject({ kind: 'failed', phase: 'pre_apply' });
+    expect(service.subscriberErrors().some((failure) => failure.audience === 'dm')).toBe(true);
     const freshOpen = service.playerSnapshot(seat.playerId)?.pendingRequest;
     expect(freshOpen?.requestId).not.toBe(originalOffer.requestId);
     expect(freshOpen?.encounterRevision).toBe(opened.kind === 'committed' ? opened.revision : -1);
     expect(freshOpen?.legalActions.some((action) => action.type === 'move')).toBe(true);
+    expect(healthyDoorMutations).toEqual([
+      opened.kind === 'committed' ? opened.revision : -1,
+    ]);
     const openReducer = [...host.snapshot().dm.history].reverse().find(
       (entry) => entry.transition.kind === 'reducer_applied',
     );
@@ -130,6 +205,10 @@ describe('deadlock-safe door intent', () => {
 
     const closed = await service.setDoor({ principal: { kind: 'dm' }, doorId: DOOR_ID, open: false });
     expect(closed).toMatchObject({ kind: 'committed', changed: true });
+    expect(healthyDoorMutations).toEqual([
+      opened.kind === 'committed' ? opened.revision : -1,
+      closed.kind === 'committed' ? closed.revision : -1,
+    ]);
     const freshClosed = service.playerSnapshot(seat.playerId)?.pendingRequest;
     expect(freshClosed?.requestId).not.toBe(freshOpen?.requestId);
     expect(freshClosed?.legalActions.some((action) => action.type === 'move')).toBe(false);
@@ -147,9 +226,10 @@ describe('deadlock-safe door intent', () => {
   });
 
   it('same-state success waits for durability without abort, reducer, journal, or snapshot changes', async () => {
+    const controlled = new ControlledFlushStore();
     const { store, host, service, seat } = runningDoorService({
       movement: true, lineOfSight: true, cover: 'total',
-    });
+    }, controlled);
     const offerPromise = waitForOffer(service, seat.playerId);
     void service.start();
     const offer = await offerPromise;
@@ -157,12 +237,32 @@ describe('deadlock-safe door intent', () => {
     const unsubscribe = service.subscribeDm(() => { snapshots += 1; });
     snapshots = 0;
     const rowsBefore = store.revisions(host.sessionId).length;
+    const metricsBefore = host.doorTransactionMetrics();
+    const barrier = controlled.blockNextFlush();
+    let settled = false;
+    const result = service.setDoor({ principal: { kind: 'dm' }, doorId: DOOR_ID, open: false })
+      .then((outcome) => { settled = true; return outcome; });
 
-    await expect(service.setDoor({ principal: { kind: 'dm' }, doorId: DOOR_ID, open: false }))
+    await barrier.reached;
+    expect(settled).toBe(false);
+    expect(host.doorTransactionMetrics()).toEqual(metricsBefore);
+    barrier.resolve();
+    await expect(result)
       .resolves.toEqual({ kind: 'committed', revision: offer.encounterRevision, changed: false });
     expect(service.playerSnapshot(seat.playerId)?.pendingRequest?.requestId).toBe(offer.requestId);
     expect(store.revisions(host.sessionId)).toHaveLength(rowsBefore);
     expect(snapshots).toBe(0);
+    expect(host.doorTransactionMetrics()).toEqual(metricsBefore);
+
+    const failedBarrier = controlled.blockNextFlush();
+    const failed = service.setDoor({ principal: { kind: 'dm' }, doorId: DOOR_ID, open: false });
+    await failedBarrier.reached;
+    failedBarrier.reject(new Error('same-state durability failed'));
+    await expect(failed).resolves.toMatchObject({ kind: 'failed', phase: 'pre_apply' });
+    expect(service.playerSnapshot(seat.playerId)?.pendingRequest?.requestId).toBe(offer.requestId);
+    expect(store.revisions(host.sessionId)).toHaveLength(rowsBefore);
+    expect(snapshots).toBe(0);
+    expect(host.doorTransactionMetrics()).toEqual(metricsBefore);
     unsubscribe();
     service.close();
   });
@@ -190,8 +290,8 @@ describe('deadlock-safe door intent', () => {
     inactive.service.close();
   });
 
-  it('preserves a prior pause and publishes the refreshed offer only on resume', async () => {
-    const { host, service, seat } = runningDoorService({
+  it('invalidates paused continuation offers across durable close, reopen, and resume', async () => {
+    const { store, host, service, seat } = runningDoorService({
       movement: true, lineOfSight: true, cover: 'total',
     });
     const originalPromise = waitForOffer(service, seat.playerId);
@@ -205,12 +305,101 @@ describe('deadlock-safe door intent', () => {
     expect(host.snapshot().dm.coordinator.pause).toEqual({ kind: 'interrupted' });
     expect(service.playerSnapshot(seat.playerId)?.pendingRequest).toBeNull();
 
-    const freshPromise = waitForOffer(service, seat.playerId);
-    host.resume();
+    const persistedAfterOpen = store.revisions(host.sessionId);
+    expect(persistedAfterOpen.at(-1)?.encounterState.worldObjects.find(
+      (object) => String(object.id) === DOOR_ID,
+    )?.blocking).toEqual({ movement: false, lineOfSight: false, cover: 'none' });
+    service.close();
+
+    const reopened = reopenDoorService(store);
+    expect(reopened.host.snapshot().dm.coordinator.pause).toEqual({ kind: 'interrupted' });
+    expect(reopened.service.playerSnapshot(reopened.seat.playerId)?.pendingRequest).toBeNull();
+    const freshPromise = waitForOffer(reopened.service, reopened.seat.playerId);
+    reopened.host.resume();
     const fresh = await freshPromise;
     expect(fresh.requestId).not.toBe(original.requestId);
     expect(fresh.legalActions.some((action) => action.type === 'move')).toBe(true);
+
+    reopened.host.interrupt();
+    await expect(reopened.service.setDoor({
+      principal: { kind: 'dm' }, doorId: DOOR_ID, open: false,
+    })).resolves.toMatchObject({ kind: 'committed', changed: true });
+    reopened.service.close();
+
+    const reopenedAgain = reopenDoorService(store);
+    const invalidatedPromise = waitForOffer(reopenedAgain.service, reopenedAgain.seat.playerId);
+    reopenedAgain.host.resume();
+    const invalidated = await invalidatedPromise;
+    expect(invalidated.requestId).not.toBe(fresh.requestId);
+    expect(invalidated.legalActions.some((action) => action.type === 'move')).toBe(false);
+    expect(store.revisions(reopenedAgain.host.sessionId).every((revision) => revision.checksum.length === 64))
+      .toBe(true);
+    expect(reopenedAgain.host.snapshot().dm.encounter.revision).toBe(
+      store.revisions(reopenedAgain.host.sessionId).at(-1)?.encounterState.revision,
+    );
+    reopenedAgain.service.close();
+  });
+
+  it('settles a door and queued mutation closed when closure crosses the door durability barrier', async () => {
+    const controlled = new ControlledFlushStore();
+    const { host, service, seat } = runningDoorService({
+      movement: true, lineOfSight: true, cover: 'total',
+    }, controlled);
+    const offerPromise = waitForOffer(service, seat.playerId);
+    void service.start();
+    const offer = await offerPromise;
+    const mutations: number[] = [];
+    service.subscribeDm((event) => {
+      if (event.kind === 'mutation') mutations.push(event.projection.encounter.revision);
+    });
+    const barrier = controlled.blockNextFlush();
+    const door = service.setDoor({ principal: { kind: 'dm' }, doorId: DOOR_ID, open: true });
+    const queued = service.submitOfferedAction({
+      playerId: seat.playerId,
+      tokenId: seat.controlledTokenIds[0]!,
+      requestId: offer.requestId,
+      encounterRevision: offer.encounterRevision,
+      offeredActionId: offer.offeredActionIds[0]!,
+    });
+    await barrier.reached;
     service.close();
+    barrier.resolve();
+
+    await expect(door).resolves.toEqual({ kind: 'closed' });
+    await expect(queued).resolves.toEqual({ kind: 'closed' });
+    expect(mutations).toEqual([]);
+    expect(host.snapshot().dm.coordinator.pause).toEqual({ kind: 'interrupted' });
+  });
+
+  it('settles a door and queued mutation closed when closure crosses fresh-offer refresh', async () => {
+    const controlled = new ControlledFlushStore();
+    const { host, service, seat } = runningDoorService({
+      movement: true, lineOfSight: true, cover: 'total',
+    }, controlled);
+    const offerPromise = waitForOffer(service, seat.playerId);
+    void service.start();
+    const offer = await offerPromise;
+    const mutations: number[] = [];
+    service.subscribeDm((event) => {
+      if (event.kind === 'mutation') mutations.push(event.projection.encounter.revision);
+    });
+    const refreshBarrier = controlled.blockFlushIn(2);
+    const door = service.setDoor({ principal: { kind: 'dm' }, doorId: DOOR_ID, open: true });
+    const queued = service.submitOfferedAction({
+      playerId: seat.playerId,
+      tokenId: seat.controlledTokenIds[0]!,
+      requestId: offer.requestId,
+      encounterRevision: offer.encounterRevision,
+      offeredActionId: offer.offeredActionIds[0]!,
+    });
+    await refreshBarrier.reached;
+    service.close();
+    refreshBarrier.resolve();
+
+    await expect(door).resolves.toEqual({ kind: 'closed' });
+    await expect(queued).resolves.toEqual({ kind: 'closed' });
+    expect(mutations).toEqual([]);
+    expect(host.snapshot().dm.coordinator.pause).toEqual({ kind: 'interrupted' });
   });
 
   it('uses authority rather than a requested role', async () => {

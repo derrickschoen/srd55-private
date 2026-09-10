@@ -99,5 +99,12 @@ describe('audience-safe encounter selectors', () => {
     });
     expect(matchOfferedMoveDestination(projection, TWO_ROOM_GOBLIN_ID, { column: 3, row: 5 }))
       .toEqual({ kind: 'unavailable', reason: 'no_current_offer' });
+    expect(matchOfferedMoveDestination({
+      ...projection,
+      pendingRequest: {
+        ...projection.pendingRequest!, encounterRevision: projection.revision - 1,
+      },
+    }, TWO_ROOM_ADVENTURER_ID, { column: 3, row: 5 }))
+      .toEqual({ kind: 'unavailable', reason: 'no_current_offer' });
   });
 });

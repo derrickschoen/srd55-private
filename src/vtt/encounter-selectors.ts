@@ -68,7 +68,11 @@ export function matchOfferedMoveDestination(
   destination: GridCell,
 ): OfferedDestinationMatch {
   const pending = projection.pendingRequest;
-  if (pending === null || String(pending.actorId) !== actorId) {
+  if (
+    pending === null ||
+    pending.encounterRevision !== projection.revision ||
+    String(pending.actorId) !== actorId
+  ) {
     return { kind: 'unavailable', reason: 'no_current_offer' };
   }
   const matches = pending.legalActions.flatMap((action, index) =>

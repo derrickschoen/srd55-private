@@ -81,6 +81,18 @@ export interface PersistedCoordinatorState {
   readonly pause: CoordinatorPause | null;
 }
 
+/** Marks failures after the authoritative reducer state has already been installed. */
+export class CoordinatorPostApplicationError extends Error {
+  override readonly name = 'CoordinatorPostApplicationError' as const;
+
+  constructor(
+    readonly currentRevision: number,
+    cause: unknown,
+  ) {
+    super('Coordinator persistence failed after the command was applied.', { cause });
+  }
+}
+
 export type CoordinatorPause =
   | { readonly kind: 'interrupted' }
   | { readonly kind: 'adjudicated'; readonly eventSequence: number };
@@ -268,8 +280,9 @@ export class TurnCoordinator {
     this.#pendingCommand = options.resume?.pendingCommand ?? null;
     this.#continuation = options.resume?.continuation ?? IDLE;
     this.#pause = options.resume?.pause ?? null;
-    this.#restoredOfferStale = options.resume?.pendingRequest !== null &&
-      options.resume?.pendingRequest !== undefined;
+    this.#restoredOfferStale = options.resume !== undefined &&
+      options.resume.pendingCommand === null &&
+      (options.resume.pendingRequest !== null || options.resume.continuation.kind !== 'idle');
     if (this.#restoredOfferStale) {
       this.#pendingRequest = null;
       this.#pendingCommand = null;
@@ -538,7 +551,13 @@ export class TurnCoordinator {
         }
         this.#pendingRequest = null;
         this.#pendingCommand = decision.action;
-        this.#record({ kind: 'controller_response_received', decision });
+        try {
+          this.#record({ kind: 'controller_response_received', decision });
+        } catch (error: unknown) {
+          this.#pendingCommand = null;
+          this.#pendingRequest = request;
+          throw error;
+        }
         return decision;
       } catch (error: unknown) {
         if (generation !== this.registry.generationFor(actor)) continue;
@@ -558,31 +577,35 @@ export class TurnCoordinator {
       ...(this.#reactionDecision === undefined ? {} : { reactionDecision: this.#reactionDecision }),
     });
     this.#state = reduction.state;
-    for (const event of reduction.events) {
-      if (event.type === 'combatant_summoned') {
-        this.registry.assignFrom(event.combatant, event.summoner);
-      } else if (event.type === 'summoned_combatant_despawned') {
-        this.registry.remove(event.combatant);
-      } else if (
-        event.type === 'reinforcement_wave_deployed' ||
-        event.type === 'conditional_joiners_deployed'
-      ) {
-        const source = event.type === 'reinforcement_wave_deployed'
-          ? event.calledBy
-          : event.leader;
-        for (const combatantId of event.combatants) {
-          this.registry.assignFrom(combatantId, source);
+    try {
+      for (const event of reduction.events) {
+        if (event.type === 'combatant_summoned') {
+          this.registry.assignFrom(event.combatant, event.summoner);
+        } else if (event.type === 'summoned_combatant_despawned') {
+          this.registry.remove(event.combatant);
+        } else if (
+          event.type === 'reinforcement_wave_deployed' ||
+          event.type === 'conditional_joiners_deployed'
+        ) {
+          const source = event.type === 'reinforcement_wave_deployed'
+            ? event.calledBy
+            : event.leader;
+          for (const combatantId of event.combatants) {
+            this.registry.assignFrom(combatantId, source);
+          }
         }
       }
+      this.#pendingCommand = null;
+      this.#lastAttemptedCommand = null;
+      this.#continuation = continuation;
+      this.#record({
+        kind: 'reducer_applied',
+        command,
+        events: reduction.events,
+      });
+    } catch (error: unknown) {
+      throw new CoordinatorPostApplicationError(this.#state.revision, error);
     }
-    this.#pendingCommand = null;
-    this.#lastAttemptedCommand = null;
-    this.#continuation = continuation;
-    this.#record({
-      kind: 'reducer_applied',
-      command,
-      events: reduction.events,
-    });
     return reduction;
   }
 
