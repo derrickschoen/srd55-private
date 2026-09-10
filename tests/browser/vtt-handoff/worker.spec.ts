@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { createHash } from 'node:crypto';
 import type {} from '../../../src/vtt/handoff/worker-harness';
 
 test('drives the v1 handoff across an actual module Worker', async ({ page }, testInfo) => {
@@ -117,9 +118,24 @@ test('drives the v1 handoff across an actual module Worker', async ({ page }, te
     expect(artifact.artifact).not.toBe('dev');
     expect(artifact.commit).toMatch(/^[0-9a-f]{40}$/u);
     expect(artifact.worker?.sha256).toMatch(/^[0-9a-f]{64}$/u);
-    expect(new URL(workerUrls[0]!).pathname).toBe(artifact.worker?.url);
+    const workerPath = new URL(workerUrls[0]!).pathname;
+    expect(workerPath).toMatch(/\.js$/u);
+    expect(workerPath).not.toMatch(/\.ts$/u);
+    expect(artifact.worker?.url).toMatch(/\.js$/u);
+    expect(workerPath).toBe(artifact.worker?.url);
+    const workerResponse = await page.context().request.get(workerUrls[0]!);
+    expect(workerResponse.ok()).toBe(true);
+    expect(createHash('sha256').update(await workerResponse.body()).digest('hex'))
+      .toBe(artifact.worker?.sha256);
   }
   const record = JSON.stringify({ artifact, pageUrl: page.url(), workerUrls });
   await testInfo.attach('vtt-handoff-artifact', { body: record, contentType: 'application/json' });
-  console.log(`artifact=${expectedArtifact} page=${page.url()} worker=${workerUrls.join(',')}`);
+  if (artifact.artifact === 'dist') {
+    console.log(
+      `artifact=dist commit=${artifact.commit ?? '<missing>'} worker=${workerUrls[0] ?? '<missing>'} ` +
+      `sha256=${artifact.worker?.sha256 ?? '<missing>'}`,
+    );
+  } else {
+    console.log(`artifact=dev page=${page.url()} worker=${workerUrls.join(',')}`);
+  }
 });

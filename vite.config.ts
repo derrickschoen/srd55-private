@@ -88,6 +88,18 @@ function bundledLicenseTexts(): Plugin {
   };
 }
 
+export function selectVttHandoffWorkerAsset(assets: readonly BuildAsset[]): BuildAsset {
+  const workers = assets.filter((asset) => /(?:^|\/)worker-entry-[^/]+\.js$/u.test(asset.fileName));
+  if (workers.length !== 1) {
+    throw new Error(
+      workers.length === 0
+        ? 'The built VTT handoff Worker asset is unavailable.'
+        : 'The built VTT handoff Worker asset is ambiguous.',
+    );
+  }
+  return workers[0]!;
+}
+
 function vttHandoffArtifactStamp(): Plugin {
   let outputDirectory: string | undefined;
   return {
@@ -98,9 +110,7 @@ function vttHandoffArtifactStamp(): Plugin {
     },
     writeBundle() {
       if (outputDirectory === undefined) throw new Error('VTT handoff output directory is unavailable.');
-      const worker = deployableAssets(outputDirectory).find((asset) =>
-        /(?:^|\/)worker-entry-[^/]+\.js$/u.test(asset.fileName));
-      if (worker === undefined) throw new Error('The built VTT handoff Worker asset is unavailable.');
+      const worker = selectVttHandoffWorkerAsset(deployableAssets(outputDirectory));
       const commit = execFileSync('git', ['rev-parse', 'HEAD'], {
         cwd: process.cwd(), encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'],
       }).trim();

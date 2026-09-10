@@ -3,8 +3,24 @@ import { attachHandoffWorkerPort } from '../../../src/vtt/handoff/worker-entry';
 import { WorkerSceneTransport } from '../../../src/vtt/handoff/worker-transport';
 import { SceneTransportClosedError, SceneTransportFaultError } from '../../../src/vtt/handoff/scene-transport';
 import { readFileSync } from '../../helpers/test-filesystem';
+import { selectVttHandoffWorkerAsset } from '../../../vite.config';
 
 describe('VTT handoff Worker message boundary', () => {
+  it('pins Vite inline Worker discovery and selects only one emitted JavaScript Worker', () => {
+    const source = readFileSync('src/vtt/handoff/worker-transport.ts', 'utf8');
+    expect(source).toMatch(
+      /new Worker\(\s*new URL\('\.\/worker-entry\.ts', import\.meta\.url\),\s*\{ type: 'module', name: 'vtt-handoff-worker' \},\s*\)/u,
+    );
+    expect(source).not.toContain('const workerUrl = new URL');
+    const javascript = { fileName: 'assets/worker-entry-AbCd1234.js', source: 'compiled worker' };
+    const typescript = { fileName: 'assets/worker-entry-AbCd1234.ts', source: 'raw worker' };
+    expect(selectVttHandoffWorkerAsset([typescript, javascript])).toBe(javascript);
+    expect(() => selectVttHandoffWorkerAsset([typescript])).toThrow('Worker asset is unavailable');
+    expect(() => selectVttHandoffWorkerAsset([javascript, {
+      fileName: 'assets/worker-entry-EfGh5678.js', source: 'second compiled worker',
+    }])).toThrow('Worker asset is ambiguous');
+  });
+
   it('crosses one structured-clone boundary per port post without internal re-serialization', async () => {
     const channel = new MessageChannel();
     const clientPosts = vi.spyOn(channel.port1, 'postMessage');

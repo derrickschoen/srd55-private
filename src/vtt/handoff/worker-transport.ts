@@ -164,8 +164,10 @@ export class WorkerSceneTransport implements SceneTransport {
 }
 
 export function createHandoffWorkerTransport(): WorkerSceneTransport {
-  const workerUrl = new URL('./worker-entry.ts', import.meta.url);
-  const worker = new Worker(workerUrl, { type: 'module', name: 'vtt-handoff-worker' });
+  const worker = new Worker(
+    new URL('./worker-entry.ts', import.meta.url),
+    { type: 'module', name: 'vtt-handoff-worker' },
+  );
   const channel = new MessageChannel();
   const connect: WorkerConnectMessage = { kind: 'vtt-handoff.connect', port: channel.port2 };
   worker.postMessage(connect, [channel.port2]);
