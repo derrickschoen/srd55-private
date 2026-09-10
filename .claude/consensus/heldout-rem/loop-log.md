@@ -40,3 +40,5 @@
 - 2026-09-10 12:16 EDT — r12 lane DONE; supervisor verification tsc/sg/diffcheck 0, 9 specs 497/497; committed be769471; Astra r12 dispatched (resume 01a088d6…) with audit-table probing.
 
 - 2026-09-10 12:24 EDT — r12 Astra REJECT (F43 boxed namespaces, F44 computed-property transfer, F45 for-of assignment heads, F46 new/fill/textual defineConfig). Supervisor structural ruling for r13: RULE C configuration literal-in-place or unresolved (delete reference-following machinery); RULE N namespace roots only as receiver or plain alias. r13 dispatched (resume 01a088b4…).
+
+- 2026-09-10 12:26 EDT — r13 lane BLOCKED correctly: real vite.config.ts is a defineConfig callback + conditional + spread of a same-file const (no alias key). RULE C refined to a reachable-literal set with the "every symbol reference inside the reachable set" guard replacing all mutation/transfer tracking; lane resumed (r13b).
