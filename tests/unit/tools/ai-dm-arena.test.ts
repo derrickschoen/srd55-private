@@ -693,7 +693,8 @@ describe('AI-DM arena', () => {
     }
   });
 
-  it('suppresses every intel context surface while attributing off rows and preserving full bytes', { timeout: 30_000 }, async () => {
+  // D606: D544-named marginal-duration case (25 s alone against the 30 s wall); wall raised to 60 s pending the cost-cutting lane.
+  it('suppresses every intel context surface while attributing off rows and preserving full bytes', { timeout: 60_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-intel-mode-'));
     const common = [
       '--rooms', '1', '--reps', '1', '--seed', '3943001', '--dry-run',
