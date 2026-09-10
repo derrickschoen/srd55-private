@@ -19,7 +19,7 @@ import type {
   QueuedSpeculativePlanEnvelope,
 } from '../speculative-plan-types';
 import {
-  createEngineStateCapsule,
+  createEngineStateCapsuleForEnvironment,
   projectEngineEncounterState,
   type EngineCapsuleRequest,
   type EngineInitiativeProjection,
@@ -27,8 +27,15 @@ import {
   type EnginePlanAdjustmentMetadata,
   type RuleReference,
 } from '../engine-state-capsule';
-import { canonicalEngineQueryPort, engineActionRegistry } from '../engine-query-port';
-import { pureTurnProposalResolver } from '../intent-resolver';
+import { canonicalEngineQueryPort, engineActionRegistryForEnvironment } from '../engine-query-port';
+import { createPureTurnProposalResolver } from '../intent-resolver';
+import {
+  createLegacyEngineOptionEnvironment,
+  decodeEngineOptionEnvironmentBinding,
+  engineOptionEnvironmentFromBinding,
+  type EngineOptionEnvironment,
+  type EngineOptionEnvironmentBinding,
+} from '../offers/offer-environment';
 import { freshMonsterPlanningState, projectFutureMonsterTurns } from '../monster-planning-state';
 import {
   rendererProfileSchema,
@@ -233,6 +240,8 @@ export interface EngineMcpLauncherManifest {
   readonly requestId: string;
   readonly phase: 'initial' | 'correction' | 'speculative';
   readonly correctionNumber: 0 | 1;
+  /** Required by the strict launcher decoder; optional only on the transitional construction type. */
+  readonly offerEnvironment?: EngineOptionEnvironmentBinding;
   readonly overridePolicy?: OverridePolicy;
   readonly room: number;
   readonly historyKind: string;
@@ -303,8 +312,11 @@ export function createEngineMcpRuntime(
     readonly onUiFeedback?: (feedback: EngineUiFeedback) => void;
     readonly roundDecisionAlreadyAccepted?: boolean;
     readonly uiFeedbackAlreadySubmitted?: boolean;
+    /** Transitional Slice-2 surface; every runtime immediately materializes an explicit binding. */
+    readonly offerEnvironment?: EngineOptionEnvironment;
   } = {},
 ): EngineMcpRuntime {
+  const offerEnvironment = options.offerEnvironment ?? createLegacyEngineOptionEnvironment(canonicalEngineQueryPort);
   const candidates = state.combatants
     .filter((candidate) => candidate.profile.kind === 'monster' && candidate.life !== 'dead')
     .map((candidate) => candidate.profile.id)
@@ -362,15 +374,16 @@ export function createEngineMcpRuntime(
       actors,
     };
   }
-  const capsule = createEngineStateCapsule({
+  const capsule = createEngineStateCapsuleForEnvironment({
     runId: options.runId ?? encounterSessionId('encounter:engine-mcp'),
     branchId: options.branchId ?? encounterBranchId('branch:engine-mcp'),
     revision,
     generatedAt: '2026-08-27T12:00:00.000Z',
+    offerEnvironment: offerEnvironment.binding,
     request,
     projection: projectEngineEncounterState(
       planningState,
-      engineActionRegistry(planningState, revision),
+      engineActionRegistryForEnvironment(planningState, offerEnvironment, revision),
       options.initiativeProjection ?? {
         policy: 'initiative-intel-v1',
         timeline: {
@@ -402,8 +415,8 @@ export function createEngineMcpRuntime(
   const application = createEngineMcpApplication({
     state: planningState,
     stateSource: feed,
-    queries: canonicalEngineQueryPort,
-    turnProposals: pureTurnProposalResolver,
+    queries: offerEnvironment.queries,
+    turnProposals: createPureTurnProposalResolver(offerEnvironment.queries),
     proposals: {
       append: (envelope) => {
         proposals.push(envelope);
@@ -710,11 +723,23 @@ export type DecodedEngineMcpLauncherManifest = EngineMcpLauncherManifest & {
 
 export function decodeEngineMcpLauncherManifest(value: unknown): DecodedEngineMcpLauncherManifest | null {
   if (!isLauncherManifest(value)) return null;
+  const offerEnvironment = value.offerEnvironment === undefined
+    ? undefined
+    : decodeEngineOptionEnvironmentBinding(value.offerEnvironment);
   return {
     ...value,
+    ...(offerEnvironment === undefined ? {} : { offerEnvironment }),
     requestKind: value.requestKind ?? 'round_plan',
     overridePolicy: value.overridePolicy ?? DEFAULT_OVERRIDE_POLICY,
   };
+}
+
+export function reconstructLauncherOfferEnvironment(
+  manifest: DecodedEngineMcpLauncherManifest,
+): EngineOptionEnvironment {
+  return manifest.offerEnvironment === undefined
+    ? createLegacyEngineOptionEnvironment(canonicalEngineQueryPort)
+    : engineOptionEnvironmentFromBinding(canonicalEngineQueryPort, manifest.offerEnvironment);
 }
 
 async function launcherManifest(path: string): Promise<DecodedEngineMcpLauncherManifest | null> {
@@ -758,6 +783,7 @@ export async function runEngineMcpEntrypoint(argv: readonly string[] = process.a
   const selectedProfile = profileValue as EngineMcpToolProfile | undefined;
   const manifest = await launcherManifest(launcherPath);
   if (manifest !== null) {
+    const offerEnvironment = reconstructLauncherOfferEnvironment(manifest);
     const kbReadBudget = createLauncherKbReadBudget(manifest);
     const state = await loadArenaFixture(manifest.fixturePath);
     const [boardImageContent, boardHtmlContent] = await Promise.all([
@@ -774,6 +800,7 @@ export async function runEngineMcpEntrypoint(argv: readonly string[] = process.a
       overridePolicy: manifest.overridePolicy,
       room: manifest.room,
       historyKind: manifest.historyKind,
+      offerEnvironment,
       ...(manifest.requestKind === 'plan_adjustment' ? {
         requestKind: manifest.requestKind,
         requestedActorIds: manifest.requestedActorIds,

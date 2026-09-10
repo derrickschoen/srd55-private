@@ -54,6 +54,10 @@ import {
 } from '../src/vtt/engine-round-session';
 import { canonicalEngineQueryPort } from '../src/vtt/engine-query-port';
 import {
+  createRevisionBoundEngineOptionEnvironment,
+  engineOptionEnvironmentFromBinding,
+} from '../src/vtt/offers/offer-environment';
+import {
   availableEngineActorOptions, pureTurnProposalResolver,
   type EngineOfferableOption, type EngineTurnProposal, type ResolvedTurnMechanics,
 } from '../src/vtt/intent-resolver';
@@ -2639,6 +2643,7 @@ async function writeLauncher(input: {
     runId: capsule.runId, branchId: capsule.branchId,
     revision: capsule.revision, requestId: request.requestId,
     phase: request.phase, correctionNumber: request.correctionNumber,
+    offerEnvironment: capsule.offerEnvironment,
     overridePolicy: input.overridePolicy,
     room: input.room, historyKind: input.historyKind, toolProfile: 'dm',
     rendererProfile: input.rendererProfile,
@@ -2691,6 +2696,10 @@ function fullTurnContextBase(
     throw new Error('Turn-context base requires an ordinary pending request.');
   }
   const runtime = createEngineMcpRuntime(state, {
+    offerEnvironment: engineOptionEnvironmentFromBinding(
+      canonicalEngineQueryPort,
+      snapshot.capsule.offerEnvironment,
+    ),
     runId: capsule.runId,
     branchId: capsule.branchId,
     revision: capsule.revision,
@@ -3280,10 +3289,12 @@ async function runConversationWithConfiguredIntel(
   const adapter = new ModelCallBookkeepingAdapter(selectedAdapter);
   const rows: ConversationRow[] = [];
   let capsuleRevision = 1;
+  const offerEnvironment = createRevisionBoundEngineOptionEnvironment(canonicalEngineQueryPort);
   const engineSession = new EngineRoundSession(
     states[0]!,
     mulberry32(8_274_113),
     { kind: 'unattended', askDefault: config.reactionAskDefault },
+    offerEnvironment,
   );
   let completedRounds = 0;
   let restoredMidRun = false;

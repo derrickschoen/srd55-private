@@ -96,6 +96,11 @@ import {
   type ReactionOfferHostPolicy,
 } from './reaction-offer-host-policy';
 import { guidedPendingReactionResolution } from './reaction-guidance';
+import { canonicalEngineQueryPort } from './engine-query-port';
+import {
+  createRevisionBoundEngineOptionEnvironment,
+  type EngineOptionEnvironment,
+} from './offers/offer-environment';
 
 const INITIAL_COORDINATOR_STATE: PersistedCoordinatorState = {
   requestSequence: 1,
@@ -251,6 +256,7 @@ export class DmEncounterHost {
   readonly #partyDisplayNames: ReadonlyMap<number, string>;
   readonly #composeRoom: StoredCharacterRoomComposer;
   readonly #reactionOfferPolicy: ReactionOfferHostPolicy;
+  readonly #offerEnvironment: EngineOptionEnvironment;
 
   constructor(
     sessionKey: string,
@@ -272,6 +278,7 @@ export class DmEncounterHost {
       readonly steeringMode?: SteeringCoordinatorMode;
       readonly onSteeringTelemetry?: (telemetry: SteeringTelemetry) => void;
       readonly reactionOfferPolicy?: ReactionOfferHostPolicy;
+      readonly offerEnvironment?: EngineOptionEnvironment;
     } = {},
   ) {
     this.sessionId = encounterSessionId(sessionKey);
@@ -285,6 +292,8 @@ export class DmEncounterHost {
     this.#partyDisplayNames = options.partyDisplayNames ?? new Map();
     this.#composeRoom = options.composeRoom ?? composeStoredCharacterEncounter;
     this.#reactionOfferPolicy = options.reactionOfferPolicy ?? DM_ATTENDED_REACTION_OFFER_POLICY;
+    this.#offerEnvironment = options.offerEnvironment ??
+      createRevisionBoundEngineOptionEnvironment(canonicalEngineQueryPort);
     if (options.bridge !== undefined) {
       this.#mirror.connect(options.bridge);
       this.#roundPlanSession = new DmRoundPlanSession(
@@ -356,6 +365,10 @@ export class DmEncounterHost {
       if (this.#coordinator.pauseState() === null) this.#coordinator.interrupt();
     }
     this.#restoreHostIntegrationState();
+  }
+
+  engineOptionEnvironment(): EngineOptionEnvironment {
+    return this.#offerEnvironment;
   }
 
   #restoreHostIntegrationState(): void {
