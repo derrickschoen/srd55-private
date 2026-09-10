@@ -14,6 +14,97 @@ import { agentCallUsage, measuredContextRolloverThreshold } from './agent-sessio
 import { verifyAgentSessionDigest } from './agent-session-digest';
 import type { EncounterSessionJournal } from './session-persistence';
 
+export type AgentDispatchBudget =
+  | { readonly kind: 'open'; readonly timeoutMs: number; readonly invocation: AgentInvocation }
+  | { readonly kind: 'exhausted' };
+
+export interface AgentDispatchDeadline {
+  readonly signal: AbortSignal;
+  dispatch(invocation: AgentInvocation): AgentDispatchBudget;
+  acceptsCompletion(): boolean;
+}
+
+export class AgentDispatchDeadlineExceededError extends Error {
+  override readonly name = 'AgentDispatchDeadlineExceededError' as const;
+
+  constructor() {
+    super('The conversation round dispatch deadline is exhausted.');
+  }
+}
+
+export function createConversationRoundDeadline(
+  budgetMs: number,
+  startedAtMs: number,
+  now: () => number,
+): AgentDispatchDeadline {
+  if (!Number.isSafeInteger(budgetMs) || budgetMs < 1) {
+    throw new RangeError('Conversation round budget must be a positive safe integer.');
+  }
+  if (!Number.isFinite(startedAtMs)) {
+    throw new RangeError('Conversation round start must be finite.');
+  }
+  const expiresAtMs = startedAtMs + budgetMs;
+  if (!Number.isFinite(expiresAtMs)) {
+    throw new RangeError('Conversation round deadline must be finite.');
+  }
+  const controller = new AbortController();
+  const scheduleAbort = (): void => {
+    const remainderMs = expiresAtMs - finiteNow(now);
+    if (Math.floor(remainderMs) < 1) {
+      controller.abort();
+      return;
+    }
+    const timer = setTimeout(scheduleAbort, Math.ceil(remainderMs));
+    timer.unref();
+  };
+  scheduleAbort();
+  return {
+    signal: controller.signal,
+    dispatch(invocation): AgentDispatchBudget {
+      const remainderMs = Math.floor(expiresAtMs - finiteNow(now));
+      if (remainderMs < 1 || controller.signal.aborted) {
+        if (!controller.signal.aborted) controller.abort();
+        return { kind: 'exhausted' };
+      }
+      const timeoutMs = Math.min(invocation.timeoutMs ?? remainderMs, remainderMs);
+      return {
+        kind: 'open',
+        timeoutMs,
+        invocation: timeoutMs === invocation.timeoutMs
+          ? invocation
+          : { ...invocation, timeoutMs },
+      };
+    },
+    acceptsCompletion(): boolean {
+      if (controller.signal.aborted) return false;
+      if (expiresAtMs - finiteNow(now) < 1) {
+        controller.abort();
+        return false;
+      }
+      return true;
+    },
+  };
+}
+
+function finiteNow(now: () => number): number {
+  const value = now();
+  if (!Number.isFinite(value)) throw new RangeError('Conversation round clock must be finite.');
+  return value;
+}
+
+function openDispatch(
+  deadline: AgentDispatchDeadline,
+  invocation: AgentInvocation,
+): Extract<AgentDispatchBudget, { readonly kind: 'open' }> {
+  const budget = deadline.dispatch(invocation);
+  if (budget.kind === 'exhausted') throw new AgentDispatchDeadlineExceededError();
+  return budget;
+}
+
+function requireAcceptedCompletion(deadline: AgentDispatchDeadline): void {
+  if (!deadline.acceptsCompletion()) throw new AgentDispatchDeadlineExceededError();
+}
+
 export class AgentSessionLifecycle {
   constructor(
     private readonly journal: EncounterSessionJournal,
@@ -26,8 +117,9 @@ export class AgentSessionLifecycle {
     }
   }
 
-  async coldStart(invocation: AgentInvocation, signal: AbortSignal): Promise<AgentSessionBinding> {
-    const result = await this.#coldStart(invocation, signal);
+  async coldStart(invocation: AgentInvocation, deadline: AgentDispatchDeadline): Promise<AgentSessionBinding> {
+    const result = await this.#coldStart(invocation, deadline);
+    requireAcceptedCompletion(deadline);
     const binding = this.journal.startAgentSession({
       cli: this.adapter.kind,
       sessionId: result.resumeSessionId,
@@ -38,8 +130,9 @@ export class AgentSessionLifecycle {
     return this.journal.agentSession() ?? binding;
   }
 
-  async coldStartRound(invocation: AgentInvocation, signal: AbortSignal): Promise<AgentTurnResult> {
-    const result = await this.#coldStart(invocation, signal);
+  async coldStartRound(invocation: AgentInvocation, deadline: AgentDispatchDeadline): Promise<AgentTurnResult> {
+    const result = await this.#coldStart(invocation, deadline);
+    requireAcceptedCompletion(deadline);
     this.journal.startAgentSession({
       cli: this.adapter.kind,
       sessionId: result.resumeSessionId,
@@ -51,7 +144,7 @@ export class AgentSessionLifecycle {
     return result;
   }
 
-  async #coldStart(invocation: AgentInvocation, signal: AbortSignal): Promise<AgentTurnResult> {
+  async #coldStart(invocation: AgentInvocation, deadline: AgentDispatchDeadline): Promise<AgentTurnResult> {
     if (invocation.runId !== this.journal.sessionId) {
       throw new Error('Agent invocation run does not match the authoritative journal.');
     }
@@ -62,25 +155,31 @@ export class AgentSessionLifecycle {
       this.rolloverPolicy.kind === 'unmeasured') {
       throw new UnmeasuredContextRolloverPolicyError();
     }
-    return requireCompleted(await this.adapter.start({
+    const dispatch = openDispatch(deadline, {
       ...invocation,
       bootstrap: invocation.bootstrap ?? { kind: 'cold_start' },
-    }, signal), 'Agent cold start');
+    });
+    const result = requireCompleted(
+      await this.adapter.start(dispatch.invocation, deadline.signal),
+      'Agent cold start',
+    );
+    requireAcceptedCompletion(deadline);
+    return result;
   }
 
-  resumeRound(invocation: AgentInvocation, signal: AbortSignal): Promise<AgentTurnResult> {
-    return this.#resume(invocation, signal);
+  resumeRound(invocation: AgentInvocation, deadline: AgentDispatchDeadline): Promise<AgentTurnResult> {
+    return this.#resume(invocation, deadline);
   }
 
-  resumeRoomTransition(invocation: AgentInvocation, signal: AbortSignal): Promise<AgentTurnResult> {
-    return this.#resume(invocation, signal);
+  resumeRoomTransition(invocation: AgentInvocation, deadline: AgentDispatchDeadline): Promise<AgentTurnResult> {
+    return this.#resume(invocation, deadline);
   }
 
-  resumeCorrection(invocation: AgentInvocation, signal: AbortSignal): Promise<AgentTurnResult> {
-    return this.#resume(invocation, signal);
+  resumeCorrection(invocation: AgentInvocation, deadline: AgentDispatchDeadline): Promise<AgentTurnResult> {
+    return this.#resume(invocation, deadline);
   }
 
-  async #resume(invocation: AgentInvocation, signal: AbortSignal): Promise<AgentTurnResult> {
+  async #resume(invocation: AgentInvocation, deadline: AgentDispatchDeadline): Promise<AgentTurnResult> {
     if (invocation.runId !== this.journal.sessionId) {
       throw new Error('Agent invocation run does not match the authoritative journal.');
     }
@@ -98,16 +197,18 @@ export class AgentSessionLifecycle {
       persisted.currentContextTokens,
       this.rolloverPolicy,
     )) {
-      return this.#rollOver(persisted, invocation, signal);
+      return this.#rollOver(persisted, invocation, deadline);
     }
+    const dispatch = openDispatch(deadline, invocation);
     const dispatched = this.journal.recordAgentSessionDispatch();
     try {
       const result = requireResumedSameSession(
-        await this.adapter.resume(dispatched, invocation, signal),
+        await this.adapter.resume(dispatched, dispatch.invocation, deadline.signal),
         dispatched,
         'Agent resume',
       );
-      this.#recordUsage(result, invocation);
+      requireAcceptedCompletion(deadline);
+      this.#recordUsage(result, dispatch.invocation);
       return result;
     } catch (error) {
       const classification = this.adapter.classifyFailure(error);
@@ -130,10 +231,12 @@ export class AgentSessionLifecycle {
         bootstrap: typedBootstrap,
         launcherToken: requireFullContextLauncher(invocation, 'resume recovery'),
       };
+      const recoveryDispatch = openDispatch(deadline, recoveryInvocation);
       const bootstrapResult = requireCompleted(
-        await this.adapter.start(recoveryInvocation, signal),
+        await this.adapter.start(recoveryDispatch.invocation, deadline.signal),
         'Agent recovery cold start',
       );
+      requireAcceptedCompletion(deadline);
       if (bootstrapResult.resumeSessionId === dispatched.sessionId) {
         throw new Error('Agent recovery cold start did not create a successor session.');
       }
@@ -149,12 +252,12 @@ export class AgentSessionLifecycle {
         successor,
         'Recovered agent dispatch',
       );
-      this.#recordUsage(result, invocation);
+      this.#recordUsage(result, recoveryDispatch.invocation);
       return result;
     }
   }
 
-  async startEscalation(invocation: AgentInvocation, signal: AbortSignal): Promise<AgentTurnResult> {
+  async startEscalation(invocation: AgentInvocation, deadline: AgentDispatchDeadline): Promise<AgentTurnResult> {
     if (this.journal.ended()) throw new Error('Explicitly ended sitting cannot escalate.');
     const freshContext = requireFreshSessionContext(invocation, 'escalation');
     const digest = this.journal.agentSessionDigest();
@@ -165,18 +268,24 @@ export class AgentSessionLifecycle {
       digest,
       stateDelivery: 'full_engine_context',
     };
-    return requireCompleted(await this.adapter.start({
+    const dispatch = openDispatch(deadline, {
       ...invocation,
       instructions: freshSessionInstructions(freshContext, bootstrap, invocation.instructions),
       bootstrap,
       launcherToken: requireFullContextLauncher(invocation, 'escalation'),
-    }, signal), 'Agent escalation cold start');
+    });
+    const result = requireCompleted(
+      await this.adapter.start(dispatch.invocation, deadline.signal),
+      'Agent escalation cold start',
+    );
+    requireAcceptedCompletion(deadline);
+    return result;
   }
 
   async #rollOver(
     persisted: AgentSessionBinding,
     invocation: AgentInvocation,
-    signal: AbortSignal,
+    deadline: AgentDispatchDeadline,
   ): Promise<AgentTurnResult> {
     if (this.rolloverPolicy.kind !== 'measured' || persisted.currentContextTokens === null) {
       throw new Error('Context rollover requires measured usage and policy.');
@@ -190,12 +299,17 @@ export class AgentSessionLifecycle {
       digest,
       stateDelivery: 'full_engine_context',
     };
-    const result = requireCompleted(await this.adapter.start({
+    const dispatch = openDispatch(deadline, {
       ...invocation,
       instructions: freshSessionInstructions(freshContext, bootstrap),
       bootstrap,
       launcherToken: requireFullContextLauncher(invocation, 'context rollover'),
-    }, signal), 'Agent context rollover cold start');
+    });
+    const result = requireCompleted(
+      await this.adapter.start(dispatch.invocation, deadline.signal),
+      'Agent context rollover cold start',
+    );
+    requireAcceptedCompletion(deadline);
     if (result.resumeSessionId === persisted.sessionId) {
       throw new Error('Agent context rollover did not create a successor session.');
     }
@@ -208,7 +322,7 @@ export class AgentSessionLifecycle {
     });
     this.journal.recordAgentSessionDispatch();
     const dispatched = requireResumedSameSession(result, successor, 'Context rollover dispatch');
-    this.#recordUsage(dispatched, invocation);
+    this.#recordUsage(dispatched, dispatch.invocation);
     return dispatched;
   }
 

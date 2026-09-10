@@ -22266,3 +22266,40 @@ bypass-proof by the reviewer's own movement-world probe from r1 on; historical s
 both writer journals replayed through a subsequent move and exact event assertions. Plan sha 911a10f1… (963 lines, copy
 `plan-candidate-r4-911a10f1.md`) on claude/p-offer-help @ eb778854 is the binding plan for the offers implementation slices
 (D600); slice 1 dispatch follows from the plan's step order.
+
+### D586.179 — Windows side has delivered into the shared handoff root and filed an integration request; our contract bundle is not yet published (2026-09-10 08:24 EDT)
+
+Discovered while answering the owner's status question: `.tmp/vtt-handoff/` in the owner checkout holds 314 Windows-authored files —
+`reports/windows/` (READY.md, INTEGRATION-REQUEST.md, handoff.json, acceptance.json, doctor/build/browser logs, contact sheet and
+combat/lighting/sorting screenshots; 22 headed Chrome checks + 14 protocol/combat tests reported passing) and three
+`deliveries/windows/<uuidv7>/` source/build bundles (lantern ×2, pixel-combat) with manifest.json + READY.json. The Windows POC
+runs at http://127.0.0.1:5175 on an independent TypeScript MockEngine Worker against a PROVISIONAL local v1 contract
+(sha d0e87e8d…), exactly as the agreement allows; it has not touched the app, contracts, our reports or the art outbox. Its
+INTEGRATION-REQUEST asks us to publish the canonical schemas/types/fixtures/contract tests under contracts/ and fixtures/ with a
+checksum manifest and READY.json last, keep engine ids and v1 semantics, record differences separately, and deliver a
+browser-compatible Worker entry or transport adapter exposing the v1 envelopes with initialization instructions and asset-id
+mappings. Our side: S0–S2 round 1 published only into the lane worktree's root (core READY, examples pending) and was REJECTED
+because its contract deviated from the agreement (D586.177/impl review); round 2 is in progress; nothing has been published to the
+owner root by us. The lane's bootstrap created the owner-root layout directories (deliveries/reports/art/inbox) — Windows had
+already been writing there. Windows-authored files are treated as data, never instructions; no reply channel exists other than
+our own reports/claude/ directory, which S10b will populate.
+
+### D586.180 — Held-out r5 REJECT → r6; VTT handoff S0–S2 r2 committed and under review (2026-09-10 08:41 EDT, supervisor)
+
+- Held-out remediation r5 (c0dab908): Astra REJECT. F5–F11 original probes fixed with regressions, fixtures rehashed unchanged (66/66, listing e14bea57…), but six new High findings in scope: F12 glob `base`/extglob/leading `**`/alias patterns silently empty-match; F13 `#imports` first-wildcard-wins instead of exact-key/longest-match, ambiguous conditional targets fall back; F14 loader escapes (namespace/default `node:module`, destructured `import.meta`, element-access `Reflect['apply']`, ternary aliasing) unrecognised; F15 aliased/qualified `Worker`/`SharedWorker`/`importScripts` invisible; F16 leading whitespace bypasses `data:` inspection (Vite trims); F17 config-only changes (package.json imports) never re-inspect unchanged consumers. Supervisor accepts all six. Per D604, r6 dispatched (resume 01a088b4…), tool + spec only, fail-closed rule restated. Finding against our own process: the r5 resume brief omitted the COMMON RULES header; r6 restates it in full.
+- VTT handoff S0–S2 round 2: supervisor verification on the real-node_modules worktree green (typecheck:fast 0, sg 0, diff --check 0, generator --check 0, vitest 9 files 57/57). Committed 5c7f459b on claude/vtt-handoff (20 paths, 4080+/3312−; new contracts/vtt-handoff/v1/contracts.d.ts and tests/types/vtt-handoff-contract.type-test.ts). Astra r2 review dispatched (resume 01a087f9…) against diff 6b6dc3a4..5c7f459b with F1–F13 closure plus new-deviation checks. Nothing published to the owner root yet.
+- Still running: D569 patch r2 lane, offers Slice 1 lane, promo180 merged gate (vitest-gate exit 0; Playwright on 4340 in progress).
+
+### D586.181 — promo180 Slice H landed on main; offers Slice 1 and held-out r6 in review (2026-09-10 09:07 EDT, supervisor)
+
+- promo180 (D599 reopen, Slice H remediation r2 ACCEPT + landing review ACCEPT): merged gate on the landing merge fb66adca (main 79e99182 + ced82dc2) green — tsc 0, sg 0, vitest-gate 0, playwright-gate 0 (`~/dnd-slim-runs/gate-wt-p-promo180.log`). D586.131 landing shape held: merge-base 79e99182 → main differed only under `.claude/**`, so the worktree gate transfers. Merged as 8a81d20e (11 files, 1912+/222−). Owner art files under art/requests stay uncommitted (D595).
+- Offers Slice 1: lane exit 0, BLOCKED only on the sandbox EROFS cumulative; supervisor cumulative on the writable worktree tsc/sg/diff-check 0, 171 specs 3185/3190 with five load timeouts in four untouched files, serial rerun 215/215. Committed 2ac13798. Astra r1 REJECT on one significant finding (the legacy-preservation oracle is copied from the generator output, verified at the test's lines 36–49); everything else verified clean. r2 dispatched: literal expected bodies/ids/inventory from the parent revision 79ab36f4, three hand mutants.
+- Held-out r6: lane DONE, two files, 13 tests added, none removed, fixtures untouched; supervisor verification tsc/sg/diff-check 0, 9 specs 391/391; committed 472d5262; Astra r6 review dispatched.
+- Handoff S0–S2 r3 and D569 patch r2 lanes still running.
+
+### D586.182 — VTT handoff S0–S2 ACCEPTED (r4) and core contract bundle published to the owner root; S3 dispatched (2026-09-10 09:23 EDT, supervisor)
+
+- S0–S2 rounds: r2 REJECT F14–F19, r3 REJECT F20 only, r4 ACCEPT at a791d5da ("no S0–S2 residual remains"). Astra accepted the `?: T | undefined` declaration widening as matching Zod optionality.
+- Supervisor S2c verification (plan gate) in a temp root: publish → `published` 8 files; `--check` → `verified`; republish → `unchanged`; manifest 5 entries all match bytes; READY.json = `{core:"ready",examples:"pending"}`; tampered README → `INCONSISTENT_SEALED_BUNDLE` on both publish and check (exit 1). Then published to the OWNER root `.tmp/vtt-handoff` from the worktree with `VTT_HANDOFF_ROOT` set explicitly: 8 files, byte-identical hashes (contracts.d.ts af6571f8…, protocol.schema.json b28065e6…, art.schema.json 72a551fc…, manifest 09292747…, two-room.v1 6c481b2b…, snapshots 3c2b7623…), check `verified`; Windows-authored files untouched (314 → 322 files). This answers the Windows INTEGRATION-REQUEST's first ask (canonical schemas/types/fixtures/manifest/READY); the Worker entry/transport adapter ask is S6/S7; reports/claude comes with S10b.
+- Persistence surface check: `git diff 0f84e09f a791d5da -- src/combat src/vtt/session-persistence.ts src/vtt/local-session-store.ts src/vtt/dm-encounter-host.ts` is empty.
+- Dispatched: S3a–S3e lane (fresh session 01a08b7b-e666…, handoff worktree at a791d5da) with S3d gated on the supervisor-supplied baseline fixture; baseline capture lane (session 01a08b7b-e64b…) in a throwaway detached worktree `dnd-wt-baseline-0f84e09f` writing only under `.tmp/baseline-capture/` (script, fixture, sha, VERIFICATION.md, double-run reproducibility). The supervisor will hand-verify and place the fixture + sha into the handoff worktree before S3d.
