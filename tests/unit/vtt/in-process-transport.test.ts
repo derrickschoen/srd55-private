@@ -1,3 +1,4 @@
+import { IDBFactory, IDBObjectStore } from 'fake-indexeddb';
 import { describe, expect, it, vi } from 'vitest';
 import type {
   DmSessionSnapshotEvent,
@@ -14,13 +15,21 @@ import type { LegalActionSummary } from '../../../src/combat/controllers';
 import type { EncounterState } from '../../../src/combat/encounter';
 import type { CombatantId } from '../../../src/combat/values';
 import { DmEncounterHost } from '../../../src/vtt/dm-encounter-host';
-import type { DmBoardProjection, PlayerBoardProjection } from '../../../src/vtt/encounter-projections';
+import type {
+  DmBoardProjection,
+  PlayerBoardProjection,
+  RendererTokenBinding,
+} from '../../../src/vtt/encounter-projections';
 import {
   buildTwoRoomEncounter,
   twoRoomArtPackage,
 } from '../../../src/vtt/handoff/fixtures/two-room';
 import { InProcessSceneTransport } from '../../../src/vtt/handoff/in-process-transport';
 import { ProtocolRuntime, type ProtocolSessionPort } from '../../../src/vtt/handoff/protocol-runtime';
+import {
+  BrowserSessionWriteError,
+  IndexedDbBrowserSessionStore,
+} from '../../../src/vtt/local-session-store';
 import {
   SceneTransportClosedError,
   SceneTransportFaultError,
@@ -29,13 +38,20 @@ import {
 import { MemoryBrowserSessionStore } from '../../../src/vtt/session-persistence';
 
 interface ControlledPort extends ProtocolSessionPort {
-  emitDm(event: DmSessionSnapshotEvent): void;
+  emitDm(event: Omit<DmSessionSnapshotEvent, 'tokenBindings'> & {
+    readonly tokenBindings?: readonly RendererTokenBinding[];
+  }): void;
   delayDoor(): { readonly reached: Promise<void>; readonly resolve: () => void };
   doorCalls(): number;
   closeCalls(): number;
 }
 
-function controlledPort(dm: DmBoardProjection, player: PlayerBoardProjection): ControlledPort {
+function controlledPort(
+  dm: DmBoardProjection,
+  player: PlayerBoardProjection,
+  tokenBindings: readonly RendererTokenBinding[],
+  sessionId = 'scene:in-process-test',
+): ControlledPort {
   const dmListeners = new Set<(event: DmSessionSnapshotEvent) => void>();
   let doorCalls = 0;
   let closeCalls = 0;
@@ -43,29 +59,43 @@ function controlledPort(dm: DmBoardProjection, player: PlayerBoardProjection): C
   let release: (() => void) | null = null;
   let reached: (() => void) | null = null;
   return {
-    sessionId: 'scene:in-process-test',
+    sessionId,
     dmSnapshot: () => dm,
+    dmCapture: () => ({ projection: dm, tokenBindings }),
     playerSnapshot: () => player,
+    playerCapture: () => ({ projection: player, tokenBindings }),
     subscribeDm: (listener) => {
       dmListeners.add(listener);
-      listener({ kind: 'status', seq: 0, projection: dm });
+      listener({ kind: 'status', seq: 0, projection: dm, tokenBindings });
       return () => dmListeners.delete(listener);
     },
     subscribePlayer: (_playerId, listener): PlayerSubscriptionResult => {
-      listener({ kind: 'status', seq: 0, projection: player });
+      listener({ kind: 'status', seq: 0, projection: player, tokenBindings });
       return { kind: 'subscribed', unsubscribe: () => undefined };
     },
     submitOfferedAction: async (): Promise<SessionMutationOutcome> => ({
       kind: 'refused', code: 'ENGINE_REFUSED', reason: 'not configured',
     }),
-    setDoor: async (): Promise<DoorSetOutcome> => {
+    setDoor: async (input): Promise<DoorSetOutcome> => {
       doorCalls += 1;
       reached?.();
       if (delayed !== null) await delayed;
-      return { kind: 'committed', revision: dm.encounter.revision, changed: false };
+      const event = {
+        kind: 'mutation',
+        seq: doorCalls,
+        projection: dm,
+        tokenBindings,
+        ...(input.clientRequestId === undefined
+          ? {}
+          : { terminalReceipt: { requestId: input.clientRequestId, revision: dm.encounter.revision } }),
+      } satisfies DmSessionSnapshotEvent;
+      for (const listener of dmListeners) listener(event);
+      return { kind: 'committed', revision: dm.encounter.revision, changed: true, event };
     },
     close: () => { closeCalls += 1; },
-    emitDm: (event) => { for (const listener of dmListeners) listener(event); },
+    emitDm: (event) => {
+      for (const listener of dmListeners) listener({ ...event, tokenBindings: event.tokenBindings ?? tokenBindings });
+    },
     delayDoor: () => {
       let resolveDelay: (() => void) | undefined;
       let markReached: (() => void) | undefined;
@@ -78,6 +108,17 @@ function controlledPort(dm: DmBoardProjection, player: PlayerBoardProjection): C
     doorCalls: () => doorCalls,
     closeCalls: () => closeCalls,
   };
+}
+
+class TransportMemoryStorage implements Storage {
+  readonly #values = new Map<string, string>();
+
+  get length(): number { return this.#values.size; }
+  clear(): void { this.#values.clear(); }
+  getItem(key: string): string | null { return this.#values.get(key) ?? null; }
+  key(index: number): string | null { return [...this.#values.keys()][index] ?? null; }
+  removeItem(key: string): void { this.#values.delete(key); }
+  setItem(key: string, value: string): void { this.#values.set(key, value); }
 }
 
 function fixture(): {
@@ -101,13 +142,12 @@ function fixture(): {
   const player = host.playerSnapshot({
     seatId: 'seat:transport', observerCombatantId: first, ownedCombatantIds: [first],
   });
-  const port = controlledPort(host.snapshot().dm, player);
+  const port = controlledPort(host.snapshot().dm, player, host.rendererTokenBindings());
   const runtime = new ProtocolRuntime({
     service: port,
     principal: { role: 'dm' },
     seats: [],
     art: twoRoomArtPackage(),
-    tokenBindings: () => host.rendererTokenBindings(),
   });
   return { host, port, runtime };
 }
@@ -162,6 +202,42 @@ function closingOffer(
   });
 }
 
+function delayedResponsePort(service: EncounterSessionService): {
+  readonly port: ProtocolSessionPort;
+  readonly release: () => void;
+  readonly crossed: () => boolean;
+  readonly completion: Promise<void>;
+} {
+  let releaseBarrier: (() => void) | undefined;
+  const barrier = new Promise<void>((resolve) => { releaseBarrier = resolve; });
+  let crossed = false;
+  let complete: (() => void) | undefined;
+  const completion = new Promise<void>((resolve) => { complete = resolve; });
+  const waitAfterReceipt = async <T>(outcome: T): Promise<T> => {
+    await barrier;
+    crossed = true;
+    complete?.();
+    return outcome;
+  };
+  return {
+    port: {
+      sessionId: service.sessionId,
+      dmSnapshot: () => service.dmSnapshot(),
+      dmCapture: () => service.dmCapture(),
+      playerSnapshot: (playerId) => service.playerSnapshot(playerId),
+      playerCapture: (playerId) => service.playerCapture(playerId),
+      subscribeDm: (listener) => service.subscribeDm(listener),
+      subscribePlayer: (playerId, listener) => service.subscribePlayer(playerId, listener),
+      submitOfferedAction: async (input) => waitAfterReceipt(await service.submitOfferedAction(input)),
+      setDoor: async (input) => waitAfterReceipt(await service.setDoor(input)),
+      close: () => service.close(),
+    },
+    release: () => releaseBarrier?.(),
+    crossed: () => crossed,
+    completion,
+  };
+}
+
 describe('in-process scene transport', () => {
   it.each(['move', 'door'] as const)(
     'preserves a real-host committed %s response when its snapshot observer closes transport',
@@ -180,13 +256,13 @@ describe('in-process scene transport', () => {
       });
       const seat = closingSeat(host);
       const service = new EncounterSessionService(host, [seat]);
+      const delayed = delayedResponsePort(service);
       const makeRuntime = (principal: { readonly role: 'dm' } | { readonly role: 'player'; readonly playerId: string }) =>
         new ProtocolRuntime({
-          service,
+          service: delayed.port,
           principal,
           seats: [seat],
           art: twoRoomArtPackage(),
-          tokenBindings: () => host.rendererTokenBindings(),
         });
       const dm = new InProcessSceneTransport(makeRuntime({ role: 'dm' }));
       const player = new InProcessSceneTransport(makeRuntime({ role: 'player', playerId: seat.playerId }));
@@ -221,6 +297,10 @@ describe('in-process scene transport', () => {
         });
       expect(response).toMatchObject({ ok: true, result: { revision: expectedRevision } });
       expect(closingTransport.status()).toBe('closed');
+      expect(delayed.crossed()).toBe(false);
+      delayed.release();
+      await delayed.completion;
+      expect(delayed.crossed()).toBe(true);
       dm.destroySession();
       host.close();
     },
@@ -315,6 +395,62 @@ describe('in-process scene transport', () => {
     host.close();
   });
 
+  it('does not treat an unrelated autonomous event as receipt evidence for a pending request', async () => {
+    const { host, port, runtime } = fixture();
+    const transport = new InProcessSceneTransport(runtime);
+    await transport.request(OPEN);
+    const barrier = port.delayDoor();
+    transport.subscribe((event) => {
+      if (event.seq === 2) transport.close();
+    });
+    const pending = transport.request({
+      v: 1, id: 'pending-during-autonomous', method: 'door.set',
+      params: { doorId: 'object:two-room-door', open: true },
+    });
+    const secondPending = transport.request({
+      v: 1, id: 'second-pending-during-autonomous', method: 'door.set',
+      params: { doorId: 'object:two-room-door', open: false },
+    });
+    await barrier.reached;
+    const firstRejection = expect(pending).rejects.toBeInstanceOf(SceneTransportClosedError);
+    const secondRejection = expect(secondPending).rejects.toBeInstanceOf(SceneTransportClosedError);
+    port.emitDm({ kind: 'autonomous', seq: 80, projection: port.dmSnapshot() });
+    await firstRejection;
+    await secondRejection;
+    expect(transport.status()).toBe('closed');
+    barrier.resolve();
+    runtime.destroySession();
+    host.close();
+  });
+
+  it('keeps close terminal when session.open response settlement is still deferred', async () => {
+    const { host, runtime } = fixture();
+    const transport = new InProcessSceneTransport(runtime);
+    const statuses: string[] = [];
+    transport.subscribeStatus((status) => statuses.push(status));
+    const opening = transport.request(OPEN);
+    transport.close();
+    await expect(opening).rejects.toBeInstanceOf(SceneTransportClosedError);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(transport.status()).toBe('closed');
+    expect(statuses).toEqual(['connecting', 'closed']);
+    runtime.destroySession();
+    host.close();
+  });
+
+  it('preserves a settled open response when its status observer closes transport', async () => {
+    const { host, runtime } = fixture();
+    const transport = new InProcessSceneTransport(runtime);
+    transport.subscribeStatus((status) => {
+      if (status === 'open') transport.close();
+    });
+    await expect(transport.request(OPEN)).resolves.toMatchObject({ id: '', ok: true });
+    expect(transport.status()).toBe('closed');
+    runtime.destroySession();
+    host.close();
+  });
+
   it('rejects an immediately pending snapshot read when close is not observer-triggered', async () => {
     const { host, runtime } = fixture();
     const transport = new InProcessSceneTransport(runtime);
@@ -359,11 +495,100 @@ describe('in-process scene transport', () => {
     host.close();
   });
 
+  it('finishes failed authoritative destruction, rejects pending work, and permits session recreation', async () => {
+    const sessionId = 'scene:destroy-write-failure-r3';
+    const store = await IndexedDbBrowserSessionStore.open(
+      new IDBFactory(),
+      new TransportMemoryStorage(),
+      { databaseName: 'dnd-vtt-handoff-destroy-write-failure-r3' },
+    );
+    const put = vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementationOnce(() => {
+      throw new DOMException('simulated destruction quota failure', 'QuotaExceededError');
+    });
+    const state = buildTwoRoomEncounter();
+    const failingHost = new DmEncounterHost(sessionId, store, {
+      initialState: state,
+      initialControllers: state.combatants.map((combatant) => ({
+        combatantId: combatant.profile.id,
+        controllerId: `${combatant.profile.id}:destroy-write-failure`,
+        kind: 'human' as const,
+        generation: 0,
+      })),
+      playerIds: state.combatants.map((combatant) => combatant.profile.id),
+    });
+    await expect(store.flush()).rejects.toBeInstanceOf(BrowserSessionWriteError);
+    put.mockRestore();
+    const failingService = new EncounterSessionService(failingHost, []);
+    const failingRuntime = new ProtocolRuntime({
+      service: failingService,
+      principal: { role: 'dm' },
+      seats: [],
+      art: twoRoomArtPackage(),
+    });
+
+    const first = state.combatants[0]?.profile.id;
+    if (first === undefined) throw new Error('Expected a destruction-failure player.');
+    const player = failingHost.playerSnapshot({
+      seatId: 'seat:destroy-write-failure', observerCombatantId: first, ownedCombatantIds: [first],
+    });
+    const attached = controlledPort(
+      failingHost.snapshot().dm,
+      player,
+      failingHost.rendererTokenBindings(),
+      sessionId,
+    );
+    const attachedRuntime = new ProtocolRuntime({
+      service: attached,
+      principal: { role: 'dm' },
+      seats: [],
+      art: twoRoomArtPackage(),
+    });
+    const transport = new InProcessSceneTransport(attachedRuntime);
+    await transport.request({
+      v: 1, id: 'open:destruction-failure', method: 'session.open', params: { requestedRole: 'dm' },
+    });
+    const barrier = attached.delayDoor();
+    const pending = transport.request({
+      v: 1, id: 'pending:destruction-failure', method: 'door.set',
+      params: { doorId: 'object:two-room-door', open: true },
+    });
+    await barrier.reached;
+    const pendingRejection = expect(pending).rejects.toBeInstanceOf(SceneTransportClosedError);
+    expect(() => transport.destroySession()).toThrow(BrowserSessionWriteError);
+    await pendingRejection;
+    expect(transport.status()).toBe('disposed');
+    expect(attached.closeCalls()).toBe(1);
+    expect(() => transport.destroySession()).not.toThrow();
+    expect(attached.closeCalls()).toBe(1);
+    barrier.resolve();
+
+    const replacement = controlledPort(
+      failingHost.snapshot().dm,
+      player,
+      failingHost.rendererTokenBindings(),
+      sessionId,
+    );
+    const replacementRuntime = new ProtocolRuntime({
+      service: replacement,
+      principal: { role: 'dm' },
+      seats: [],
+      art: twoRoomArtPackage(),
+    });
+    const replacementTransport = new InProcessSceneTransport(replacementRuntime);
+    await expect(replacementTransport.request({
+      v: 1, id: 'open:replacement', method: 'session.open', params: { requestedRole: 'dm' },
+    })).resolves.toMatchObject({ id: 'open:replacement', ok: true });
+    expect(() => replacementTransport.destroySession()).not.toThrow();
+    expect(replacement.closeCalls()).toBe(1);
+    failingRuntime.dispose();
+    store.close();
+  });
+
   it('uses zero serialization for object transport and detects copied-request and snapshot controls', async () => {
     const { host, runtime } = fixture();
     const transport = new InProcessSceneTransport(runtime);
-    const openResponse = await transport.request(OPEN);
-    expect(openResponse).toMatchObject({ ok: true });
+    const events: number[] = [];
+    transport.subscribe((event) => events.push(event.seq));
     const withoutSerialization = async (operation: () => Promise<void>): Promise<void> => {
       const parse = vi.spyOn(JSON, 'parse');
       const stringify = vi.spyOn(JSON, 'stringify');
@@ -381,16 +606,36 @@ describe('in-process scene transport', () => {
         clone.mockRestore();
       }
     };
+    let openResponse: Awaited<ReturnType<SceneTransport['request']>> | null = null;
     let snapshot: Awaited<ReturnType<SceneTransport['initialSnapshot']>> | null = null;
+    let snapshotResponse: Awaited<ReturnType<SceneTransport['request']>> | null = null;
+    let invalidResponse: Awaited<ReturnType<SceneTransport['request']>> | null = null;
+    let mutationResponse: Awaited<ReturnType<SceneTransport['request']>> | null = null;
     let unsupportedResponse: Awaited<ReturnType<SceneTransport['request']>> | null = null;
     await expect(withoutSerialization(async () => {
+      openResponse = await transport.request(OPEN);
       snapshot = await transport.initialSnapshot();
+      invalidResponse = await transport.request({
+        v: 1, id: 'invalid-known', method: 'scene.snapshot', params: new Date(0),
+      });
+      snapshotResponse = await transport.request({
+        v: 1, id: 'fresh-snapshot', method: 'scene.snapshot', params: {},
+      });
+      mutationResponse = await transport.request({
+        v: 1, id: 'fresh-mutation', method: 'door.set',
+        params: { doorId: 'object:two-room-door', open: true },
+      });
       unsupportedResponse = await transport.request({
         v: 1, id: 'unsupported', method: 'extension.future', params: {},
       });
     })).resolves.toBeUndefined();
+    expect(openResponse).toMatchObject({ ok: true });
     expect(snapshot).toMatchObject({ sceneId: 'scene:in-process-test' });
+    expect(snapshotResponse).toMatchObject({ ok: true, result: { sceneId: 'scene:in-process-test' } });
+    expect(invalidResponse).toMatchObject({ ok: false, error: { code: 'INVALID_REQUEST' } });
+    expect(mutationResponse).toMatchObject({ ok: true, result: { revision: 0 } });
     expect(unsupportedResponse).toMatchObject({ ok: false, error: { code: 'UNSUPPORTED' } });
+    expect(events).toEqual([1, 2]);
     await expect(withoutSerialization(async () => {
       const copied = JSON.parse(JSON.stringify({
         v: 1, id: 'copied', method: 'scene.snapshot', params: {},

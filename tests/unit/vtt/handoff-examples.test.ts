@@ -188,7 +188,6 @@ export async function buildHandoffExamples(): Promise<HandoffExamplesFixture> {
       principal,
       seats,
       art: twoRoomArtPackage(),
-      tokenBindings: () => host.rendererTokenBindings(),
     });
   const dm = new InProcessSceneTransport(runtime({ role: 'dm' }));
   const playerA = new InProcessSceneTransport(runtime({ role: 'player', playerId: PLAYER_A }));
@@ -443,6 +442,14 @@ describe('real executable VTT handoff examples', () => {
     expect(fileBytes(handoffRoot, S2C_PATHS)).toEqual(coreBefore);
   });
 
+  it('refuses normal examples publication when the immutable core is missing without creating anything', () => {
+    const handoffRoot = mkdtempSync(join(tmpdir(), 'vtt-handoff-examples-write-missing-core-'));
+    const beforePublish = completeTree(handoffRoot);
+    expect(() => publishExamples({ repositoryRoot: process.cwd(), handoffRoot }))
+      .toThrow('IMMUTABLE_BUNDLE_MISSING');
+    assertTreeUnchanged(beforePublish, completeTree(handoffRoot));
+  });
+
   it('keeps the complete tree and every core byte unchanged on conflicting examples checks', () => {
     const handoffRoot = mkdtempSync(join(tmpdir(), 'vtt-handoff-examples-conflict-'));
     publishCore({ repositoryRoot: process.cwd(), handoffRoot });
@@ -451,6 +458,10 @@ describe('real executable VTT handoff examples', () => {
     writeFileSync(join(handoffRoot, 'fixtures/protocol/examples.v1.json'), '{}\n');
     const beforeCheck = completeTree(handoffRoot);
     expect(() => publishExamples({ repositoryRoot: process.cwd(), handoffRoot, check: true }))
+      .toThrow('INCONSISTENT_SEALED_BUNDLE');
+    assertTreeUnchanged(beforeCheck, completeTree(handoffRoot));
+    expect(fileBytes(handoffRoot, S2C_PATHS)).toEqual(coreBefore);
+    expect(() => publishExamples({ repositoryRoot: process.cwd(), handoffRoot }))
       .toThrow('INCONSISTENT_SEALED_BUNDLE');
     assertTreeUnchanged(beforeCheck, completeTree(handoffRoot));
     expect(fileBytes(handoffRoot, S2C_PATHS)).toEqual(coreBefore);

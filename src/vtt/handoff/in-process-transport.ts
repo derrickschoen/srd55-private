@@ -18,6 +18,21 @@ interface Deferred<T> {
   readonly reject: (error: Error) => void;
 }
 
+interface PendingRequest extends Deferred<HandoffResponse> {
+  readonly requestId: string | null;
+  receiptRevision: number | null;
+}
+
+function requestIdOf(request: unknown): string | null {
+  if (typeof request !== 'object' || request === null || Array.isArray(request)) return null;
+  try {
+    const id = Reflect.get(request, 'id');
+    return typeof id === 'string' ? id : null;
+  } catch {
+    return null;
+  }
+}
+
 function deferred<T>(): Deferred<T> {
   let resolvePromise: ((value: T) => void) | undefined;
   let rejectPromise: ((error: Error) => void) | undefined;
@@ -36,17 +51,16 @@ export class InProcessSceneTransport implements SceneTransport {
   readonly #eventListeners = new Set<(event: SceneSnapshotEvent) => void>();
   readonly #statusListeners = new Set<(status: SceneTransportStatus) => void>();
   readonly #errorListeners = new Set<(error: SceneTransportFaultError) => void>();
-  readonly #pending = new Set<Deferred<HandoffResponse>>();
+  readonly #pending = new Set<PendingRequest>();
   readonly #initial = deferred<SceneSnapshot>();
   readonly #unsubscribeRuntimeEvent: () => void;
   readonly #unsubscribeRuntimeFault: () => void;
   #state: SceneTransportStatus = 'connecting';
   #initialSettled = false;
-  #deliveringReceiptCandidate = false;
 
   constructor(private readonly runtime: ProtocolRuntime) {
     void this.#initial.promise.catch(() => undefined);
-    this.#unsubscribeRuntimeEvent = runtime.subscribe((event) => this.#receiveEvent(event));
+    this.#unsubscribeRuntimeEvent = runtime.subscribe((event, receipt) => this.#receiveEvent(event, receipt));
     this.#unsubscribeRuntimeFault = runtime.subscribeFaults((event) => this.#receiveFault(event));
   }
 
@@ -54,7 +68,11 @@ export class InProcessSceneTransport implements SceneTransport {
     if (this.#state === 'closed' || this.#state === 'disposed') {
       return Promise.reject(new SceneTransportClosedError());
     }
-    const pending = deferred<HandoffResponse>();
+    const pending = {
+      ...deferred<HandoffResponse>(),
+      requestId: requestIdOf(request),
+      receiptRevision: null,
+    } satisfies PendingRequest;
     this.#pending.add(pending);
     void this.runtime.dispatch(request).then((result) => {
       if (!this.#pending.delete(pending)) return;
@@ -63,6 +81,7 @@ export class InProcessSceneTransport implements SceneTransport {
         return;
       }
       if (
+        this.#state === 'connecting' &&
         result.response.ok &&
         typeof request === 'object' && request !== null &&
         Reflect.get(request, 'method') === 'session.open'
@@ -107,55 +126,72 @@ export class InProcessSceneTransport implements SceneTransport {
 
   close(): void {
     if (this.#state === 'closed' || this.#state === 'disposed') return;
-    this.#unsubscribeRuntimeEvent();
-    this.#unsubscribeRuntimeFault();
-    this.runtime.close();
-    this.#eventListeners.clear();
-    this.#errorListeners.clear();
-    this.#setStatus('closed');
-    this.#statusListeners.clear();
-    this.#rejectPendingForClose();
+    let closeError: unknown;
+    try {
+      this.#unsubscribeRuntimeEvent();
+      this.#unsubscribeRuntimeFault();
+      this.runtime.close();
+    } catch (error: unknown) {
+      closeError = error;
+    } finally {
+      this.#eventListeners.clear();
+      this.#errorListeners.clear();
+      this.#setStatus('closed');
+      this.#statusListeners.clear();
+      this.#settleReceiptsAndRejectPending();
+    }
+    if (closeError !== undefined) throw closeError;
   }
 
   dispose(): void {
     if (this.#state === 'disposed') return;
-    if (this.#state !== 'closed') {
+    let disposeError: unknown;
+    try {
       this.#unsubscribeRuntimeEvent();
       this.#unsubscribeRuntimeFault();
+      this.runtime.dispose();
+    } catch (error: unknown) {
+      disposeError = error;
+    } finally {
       this.#eventListeners.clear();
       this.#errorListeners.clear();
+      this.#setStatus('disposed');
+      this.#statusListeners.clear();
+      this.#settleReceiptsAndRejectPending();
     }
-    this.runtime.dispose();
-    this.#setStatus('disposed');
-    this.#statusListeners.clear();
-    this.#rejectPendingForClose();
+    if (disposeError !== undefined) throw disposeError;
   }
 
   destroySession(): void {
-    if (this.#state !== 'closed' && this.#state !== 'disposed') {
+    let destroyError: unknown;
+    try {
       this.#unsubscribeRuntimeEvent();
       this.#unsubscribeRuntimeFault();
+      this.runtime.destroySession();
+    } catch (error: unknown) {
+      destroyError = error;
+    } finally {
       this.#eventListeners.clear();
       this.#errorListeners.clear();
+      this.#setStatus('disposed');
+      this.#statusListeners.clear();
+      this.#settleReceiptsAndRejectPending();
     }
-    this.runtime.destroySession();
-    this.#setStatus('disposed');
-    this.#statusListeners.clear();
-    this.#rejectPendingForClose();
+    if (destroyError !== undefined) throw destroyError;
   }
 
-  #receiveEvent(event: SceneSnapshotEvent): void {
-    this.#deliveringReceiptCandidate = this.#initialSettled;
-    try {
-      if (!this.#initialSettled) {
-        this.#initialSettled = true;
-        this.#initial.resolve(event.data);
-      }
-      for (const listener of this.#eventListeners) {
-        try { listener(event); } catch { /* Observer failure is isolated. */ }
-      }
-    } finally {
-      this.#deliveringReceiptCandidate = false;
+  #receiveEvent(event: SceneSnapshotEvent, receipt?: { readonly requestId: string; readonly revision: number }): void {
+    if (receipt !== undefined) {
+      const pending = [...this.#pending].find((candidate) =>
+        candidate.requestId === receipt.requestId && candidate.receiptRevision === null);
+      if (pending !== undefined) pending.receiptRevision = receipt.revision;
+    }
+    if (!this.#initialSettled) {
+      this.#initialSettled = true;
+      this.#initial.resolve(event.data);
+    }
+    for (const listener of this.#eventListeners) {
+      try { listener(event); } catch { /* Observer failure is isolated. */ }
     }
   }
 
@@ -166,19 +202,25 @@ export class InProcessSceneTransport implements SceneTransport {
     }
   }
 
-  #rejectPending(): void {
+  #settleReceiptsAndRejectPending(): void {
     const error = new SceneTransportClosedError();
     if (!this.#initialSettled) {
       this.#initialSettled = true;
       this.#initial.reject(error);
     }
-    for (const pending of this.#pending) pending.reject(error);
+    for (const pending of this.#pending) {
+      if (pending.requestId !== null && pending.receiptRevision !== null) {
+        pending.resolve({
+          v: 1,
+          id: pending.requestId,
+          ok: true,
+          result: { revision: pending.receiptRevision },
+        });
+      } else {
+        pending.reject(error);
+      }
+    }
     this.#pending.clear();
-  }
-
-  #rejectPendingForClose(): void {
-    if (this.#deliveringReceiptCandidate) setTimeout(() => this.#rejectPending(), 0);
-    else this.#rejectPending();
   }
 
   #setStatus(status: SceneTransportStatus): void {

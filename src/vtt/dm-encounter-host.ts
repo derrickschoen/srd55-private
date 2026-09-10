@@ -227,6 +227,7 @@ export interface HostSnapshotNotification {
   readonly kind: HostSnapshotNotificationKind;
   readonly snapshot: DmEncounterHostSnapshot;
   readonly playerSnapshot: (binding: PlayerSeatBinding) => PlayerBoardProjection;
+  readonly rendererTokenBindings: readonly RendererTokenBinding[];
   readonly terminalReceipt?: HostTerminalReceipt;
 }
 
@@ -625,9 +626,14 @@ export class DmEncounterHost {
     const coordinator = structuredClone(this.#coordinator.coordinatorState());
     const partyState = this.#journal.partyState();
     const closed = this.#closed;
+    const rendererTokenBindings = detachedImmutable(state.tokens.map((token) => ({
+      tokenId: String(token.id),
+      combatantId: token.combatantId,
+    })));
     return {
       kind,
       snapshot: this.snapshot(),
+      rendererTokenBindings,
       ...(terminalReceipt === undefined ? {} : { terminalReceipt }),
       playerSnapshot: (binding) => {
         const player = projectPlayerBoard(projectPlayerView(state, {

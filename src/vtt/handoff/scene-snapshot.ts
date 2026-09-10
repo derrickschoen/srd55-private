@@ -1,6 +1,7 @@
 import type { GridCell } from '../../combat/grid';
 import type { CombatToken } from '../../combat/combatant';
 import type { EncounterArtPackage } from '../encounter-package';
+import { assetId } from '../../assets/ids';
 import {
   encounterBoardRenderModel, encounterBoardTokenRenderModels,
   type EncounterBoardProjectionShape, type EncounterBoardWorldObject,
@@ -150,6 +151,24 @@ function projectedBoard(projection: DmBoardProjection | PlayerBoardProjection): 
   return projection.audience === 'dm' ? projection.board : projection;
 }
 
+function artForCapturedBoard(
+  board: EncounterBoardProjectionShape,
+  art: EncounterArtPackage,
+): EncounterArtPackage {
+  const missing = board.combatants.filter((combatant) => art.combatantTokens[combatant.id] === undefined);
+  if (missing.length === 0) return art;
+  return {
+    ...art,
+    combatantTokens: {
+      ...art.combatantTokens,
+      ...Object.fromEntries(missing.map((combatant) => [
+        combatant.id,
+        assetId(`art.token.unmapped.${combatant.kind === 'player_character' ? 'player' : 'monster'}.v1`),
+      ])),
+    },
+  };
+}
+
 export function sceneSnapshot(options: {
   readonly sceneId: string;
   readonly projection: DmBoardProjection | PlayerBoardProjection;
@@ -158,8 +177,9 @@ export function sceneSnapshot(options: {
 }): SceneSnapshotResult {
   const { projection, art } = options;
   const board = projectedBoard(projection);
-  const cells = encounterBoardRenderModel(board, art);
-  const tokenModels = encounterBoardTokenRenderModels(board, art);
+  const capturedArt = artForCapturedBoard(board, art);
+  const cells = encounterBoardRenderModel(board, capturedArt);
+  const tokenModels = encounterBoardTokenRenderModels(board, capturedArt);
   const fallbacks: SnapshotAssetFallback[] = [];
   const tiles = cells.map((cell) => {
     const floor = cell.layers.find((layer) => layer.role === 'floor');

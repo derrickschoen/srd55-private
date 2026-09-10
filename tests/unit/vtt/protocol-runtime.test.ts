@@ -1,3 +1,4 @@
+import { readFileSync } from '../../helpers/test-filesystem';
 import { describe, expect, it } from 'vitest';
 import { combatantId, type CombatantId } from '../../../src/combat/values';
 import type {
@@ -12,9 +13,16 @@ import {
   type PlayerSeatRegistration,
 } from '../../../src/vtt/encounter-session-service';
 import type { LegalActionSummary } from '../../../src/combat/controllers';
-import type { EncounterState } from '../../../src/combat/encounter';
+import { createEncounter, reduceEncounter, type EncounterState } from '../../../src/combat/encounter';
+import type { SpellCastCommand } from '../../../src/combat/spells/types';
+import { loadContentPack } from '../../../src/content/content-pack';
 import { DmEncounterHost } from '../../../src/vtt/dm-encounter-host';
-import type { DmBoardProjection, PlayerBoardProjection } from '../../../src/vtt/encounter-projections';
+import {
+  projectPlayerBoard,
+  type DmBoardProjection,
+  type PlayerBoardProjection,
+} from '../../../src/vtt/encounter-projections';
+import { projectPlayerView } from '../../../src/combat/visibility';
 import {
   buildTwoRoomEncounter,
   TWO_ROOM_ADVENTURER_ID,
@@ -30,11 +38,88 @@ import {
   MemoryBrowserSessionStore,
   type SessionRevision,
 } from '../../../src/vtt/session-persistence';
+import {
+  genericHandoffRequestSchema,
+  HANDOFF_METHODS,
+  handoffRequestSchema,
+} from '../../../src/vtt/handoff/v1/contracts';
+import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
 
 const PLAYER_A = 'player:adventurer';
 const PLAYER_B = 'player:goblin';
 const TOKEN_A = 'token:two-room-adventurer';
 const TOKEN_B = 'token:two-room-goblin';
+
+interface SummonPackSource {
+  spells: Array<Record<string, unknown>>;
+  monsters: Array<Record<string, unknown>>;
+  [key: string]: unknown;
+}
+
+function realEngineSummonStates(): {
+  readonly casterId: CombatantId;
+  readonly summonedId: CombatantId;
+  readonly opening: EncounterState;
+  readonly appeared: EncounterState;
+  readonly hidden: EncounterState;
+  readonly removed: EncounterState;
+} {
+  const source = JSON.parse(
+    readFileSync('tests/fixtures/content-pack-v1-homebrew.json', 'utf8'),
+  ) as SummonPackSource;
+  const template = source.spells[0];
+  if (template === undefined) throw new Error('Summon fixture spell template is missing.');
+  source.spells = [{
+    ...template,
+    recordId: 'call-brassleaf',
+    name: 'Call Brassleaf',
+    level: 2,
+    range: { kind: 'feet', feet: 30 },
+    duration: { kind: 'rounds', rounds: 10 },
+    concentration: true,
+    targeting: { kind: 'utility', rangeFeet: 30 },
+    operation: {
+      kind: 'summon', monsterId: 'brassleaf-mote',
+      count: { kind: 'fixed', count: 1 },
+      placementRangeFeet: 30,
+      lifecycle: { concentration: true, durationRounds: 10, expiresAt: 'source_start' },
+    },
+  }];
+  const loaded = loadContentPack(source);
+  if (loaded.status !== 'loaded') throw new Error(`Summon pack refused: ${loaded.refusal.reason}`);
+  const caster = playerProfile('handoff-summoner', {
+    initiativeBonus: 20,
+    spellSlots: [{ level: 2, maximum: 1 }],
+  });
+  const enemy = monsterProfile('handoff-summon-enemy', { initiativeBonus: -20, hitPoints: 30 });
+  const opening = reduceEncounter(createEncounter({
+    config: { initiativeMode: 'per_combatant' },
+    bounds: { columns: 12, rows: 8 },
+    combatants: [caster, enemy],
+    tokens: [placedToken(caster, 0), placedToken(enemy, 10)],
+    contentPacks: [loaded.content],
+  }), { type: 'roll_initiative' }, () => 0).state;
+  const summonCommand: SpellCastCommand = {
+    type: 'cast_spell', actor: caster.id, spellId: 'greenforge:call-brassleaf',
+    slotLevel: 2, castAsRitual: false, casterLevel: 7, attackBonus: 7, saveDc: 15,
+    spellcastingModifier: 4, targets: [], area: null,
+    summonDestinations: [{ column: 6, row: 0 }], weaponAttack: null, selectedOption: null,
+  };
+  const appeared = reduceEncounter(opening, summonCommand, () => 0).state;
+  const summonedId = appeared.effects.flatMap((effect) => effect.ownedCombatants ?? [])[0];
+  if (summonedId === undefined) throw new Error('Expected an engine-created summon.');
+  const hidden: EncounterState = {
+    ...appeared,
+    revision: appeared.revision + 1,
+    hiddenCombatants: [{ combatant: summonedId, stealthTotal: 99, edition: '2024' }],
+  };
+  const removed = reduceEncounter(
+    hidden,
+    { type: 'end_concentration', actor: caster.id },
+    () => 0,
+  ).state;
+  return { casterId: caster.id, summonedId, opening, appeared, hidden, removed };
+}
 
 class ProtocolFaultStore extends MemoryBrowserSessionStore {
   #appendFailure = false;
@@ -140,7 +225,6 @@ async function realOutcomeRuntime(
     principal: { role: 'player', playerId: seat.playerId },
     seats: [seat],
     art: twoRoomArtPackage(),
-    tokenBindings: () => host.rendererTokenBindings(),
   });
   const events: SceneSnapshotEvent[] = [];
   runtime.subscribe((event) => events.push(event));
@@ -174,7 +258,10 @@ async function realOutcomeRuntime(
 }
 
 interface MutableProtocolPort extends ProtocolSessionPort {
-  emitPlayer(playerId: string, event: PlayerSessionSnapshotEvent): void;
+  emitPlayer(playerId: string, event: Omit<PlayerSessionSnapshotEvent, 'tokenBindings'> & {
+    readonly tokenBindings?: PlayerSessionSnapshotEvent['tokenBindings'];
+  }): void;
+  setTokenBindings(bindings: ReturnType<DmEncounterHost['rendererTokenBindings']>): void;
   doorCalls(): number;
   closeCalls(): number;
 }
@@ -222,6 +309,7 @@ function mutablePort(input: {
   readonly dm: DmBoardProjection;
   readonly playerA: PlayerBoardProjection;
   readonly playerB: PlayerBoardProjection;
+  readonly tokenBindings: ReturnType<DmEncounterHost['rendererTokenBindings']>;
 }): MutableProtocolPort {
   const playerProjections = new Map<string, PlayerBoardProjection>([
     [PLAYER_A, input.playerA],
@@ -231,13 +319,19 @@ function mutablePort(input: {
   const playerListeners = new Map<string, Set<(event: PlayerSessionSnapshotEvent) => void>>();
   let calls = 0;
   let closes = 0;
+  let tokenBindings = input.tokenBindings;
   return {
     sessionId: 'scene:protocol-test',
     dmSnapshot: () => input.dm,
+    dmCapture: () => ({ projection: input.dm, tokenBindings }),
     playerSnapshot: (playerId) => playerId === undefined ? null : playerProjections.get(playerId) ?? null,
+    playerCapture: (playerId) => {
+      const projection = playerId === undefined ? undefined : playerProjections.get(playerId);
+      return projection === undefined ? null : { projection, tokenBindings };
+    },
     subscribeDm: (listener) => {
       dmListeners.add(listener);
-      listener({ kind: 'status', seq: 0, projection: input.dm });
+      listener({ kind: 'status', seq: 0, projection: input.dm, tokenBindings });
       return () => dmListeners.delete(listener);
     },
     subscribePlayer: (playerId, listener): PlayerSubscriptionResult => {
@@ -246,7 +340,7 @@ function mutablePort(input: {
       const listeners = playerListeners.get(playerId) ?? new Set();
       listeners.add(listener);
       playerListeners.set(playerId, listeners);
-      listener({ kind: 'status', seq: 0, projection });
+      listener({ kind: 'status', seq: 0, projection, tokenBindings });
       return { kind: 'subscribed', unsubscribe: () => listeners.delete(listener) };
     },
     submitOfferedAction: async (): Promise<SessionMutationOutcome> => ({
@@ -259,8 +353,11 @@ function mutablePort(input: {
     close: () => { closes += 1; },
     emitPlayer: (playerId, event) => {
       playerProjections.set(playerId, event.projection);
-      for (const listener of playerListeners.get(playerId) ?? []) listener(event);
+      for (const listener of playerListeners.get(playerId) ?? []) {
+        listener({ ...event, tokenBindings: event.tokenBindings ?? tokenBindings });
+      }
     },
+    setTokenBindings: (next) => { tokenBindings = next; },
     doorCalls: () => calls,
     closeCalls: () => closes,
   };
@@ -273,7 +370,6 @@ const SEATS = [
 
 function runtimeFor(
   port: ProtocolSessionPort,
-  tokenBindings: ReturnType<DmEncounterHost['rendererTokenBindings']>,
   principal: { readonly role: 'dm' } | { readonly role: 'player'; readonly playerId: string },
 ): ProtocolRuntime {
   return new ProtocolRuntime({
@@ -281,7 +377,6 @@ function runtimeFor(
     principal,
     seats: SEATS,
     art: twoRoomArtPackage(),
-    tokenBindings: () => tokenBindings,
   });
 }
 
@@ -289,7 +384,7 @@ describe('v1 protocol dispatcher', () => {
   it('requested role cannot grant DM authority', async () => {
     const source = projections();
     const port = mutablePort(source);
-    const runtime = runtimeFor(port, source.tokenBindings, { role: 'player', playerId: PLAYER_A });
+    const runtime = runtimeFor(port, { role: 'player', playerId: PLAYER_A });
     const before = port.dmSnapshot().encounter.revision;
     await expect(runtime.dispatch({
       v: 1, id: 'open-as-dm', method: 'session.open', params: { requestedRole: 'dm' },
@@ -305,8 +400,8 @@ describe('v1 protocol dispatcher', () => {
   it('binds two players independently and rejects cross-seat tokens', async () => {
     const source = projections();
     const port = mutablePort(source);
-    const playerA = runtimeFor(port, source.tokenBindings, { role: 'player', playerId: PLAYER_A });
-    const playerB = runtimeFor(port, source.tokenBindings, { role: 'player', playerId: PLAYER_B });
+    const playerA = runtimeFor(port, { role: 'player', playerId: PLAYER_A });
+    const playerB = runtimeFor(port, { role: 'player', playerId: PLAYER_B });
     await expect(playerA.dispatch({
       v: 1, id: 'open-a', method: 'session.open', params: { requestedRole: 'player', playerId: PLAYER_A },
     })).resolves.toMatchObject({ kind: 'response', response: { ok: true } });
@@ -326,7 +421,7 @@ describe('v1 protocol dispatcher', () => {
 
   it('parses structure before feasibility and correlates every valid string id including empty', async () => {
     const source = projections();
-    const runtime = runtimeFor(mutablePort(source), source.tokenBindings, { role: 'dm' });
+    const runtime = runtimeFor(mutablePort(source), { role: 'dm' });
     await expect(runtime.dispatch({
       v: 1, id: '', method: 'door.set', params: { doorId: 42, open: true },
     })).resolves.toEqual({
@@ -347,9 +442,91 @@ describe('v1 protocol dispatcher', () => {
     source.closeHost();
   });
 
+  it('keeps object-transport validation equivalent to the authoritative v1 Zod contracts', async () => {
+    class RequestInstance {
+      readonly v = 1;
+      readonly id = 'class-root';
+      readonly method = 'scene.snapshot';
+      readonly params = {};
+    }
+    class ParamsInstance {}
+    const symbolRequest = {
+      v: 1, id: 'symbol-root', method: 'scene.snapshot', params: {},
+      [Symbol('ignored-root')]: true,
+    };
+    const symbolParams = {
+      v: 1, id: 'symbol-params', method: 'scene.snapshot',
+      params: { [Symbol('ignored-param')]: true },
+    };
+    const accessorParams = { v: 1, id: 'accessor', method: 'scene.snapshot' };
+    Object.defineProperty(accessorParams, 'params', { enumerable: true, get: () => ({}) });
+    const throwingAccessor = { v: 1, id: 'throwing-accessor', method: 'scene.snapshot' };
+    Object.defineProperty(throwingAccessor, 'params', {
+      enumerable: true,
+      get: () => { throw new Error('injected request accessor failure'); },
+    });
+    const nullPrototypeParams: unknown = Object.create(null);
+    const customPrototypeParams: unknown = Object.create({ inherited: true });
+    const customPrototypeRoot: unknown = Object.assign(Object.create({ inherited: true }), {
+      v: 1, id: 'custom-root', method: 'scene.snapshot', params: {},
+    });
+    const corpus: readonly { readonly label: string; readonly value: unknown }[] = [
+      { label: 'open-positive', value: { v: 1, id: 'positive-open', method: 'session.open', params: { requestedRole: 'dm' } } },
+      { label: 'snapshot-positive', value: { v: 1, id: 'positive-snapshot', method: 'scene.snapshot', params: {} } },
+      { label: 'move-positive', value: { v: 1, id: 'positive-move', method: 'token.move', params: { tokenId: '', to: { x: -1, y: 0.5, z: 0 } } } },
+      { label: 'door-positive', value: { v: 1, id: 'positive-door', method: 'door.set', params: { doorId: '', open: false } } },
+      { label: 'light-positive', value: { v: 1, id: 'positive-light', method: 'light.set', params: { lightId: '', enabled: true } } },
+      { label: 'open-negative', value: { v: 1, id: 'negative-open', method: 'session.open', params: { requestedRole: 'dm', extra: true } } },
+      { label: 'snapshot-negative', value: { v: 1, id: 'negative-snapshot', method: 'scene.snapshot', params: { sceneId: '' } } },
+      { label: 'move-negative', value: { v: 1, id: 'negative-move', method: 'token.move', params: { tokenId: '', to: { x: 0, y: 0, z: 0 }, revision: 0 } } },
+      { label: 'door-negative', value: { v: 1, id: 'negative-door', method: 'door.set', params: { doorId: '' } } },
+      { label: 'light-negative', value: { v: 1, id: 'negative-light', method: 'light.set', params: { lightId: '', enabled: true, sceneId: '' } } },
+      { label: 'generic-extension', value: { v: 1, id: 'generic', method: 'extension.future', params: { future: true } } },
+      { label: 'date-params', value: { v: 1, id: 'date', method: 'scene.snapshot', params: new Date(0) } },
+      { label: 'map-params', value: { v: 1, id: 'map', method: 'scene.snapshot', params: new Map() } },
+      { label: 'class-root', value: new RequestInstance() },
+      { label: 'class-params', value: { v: 1, id: 'class-params', method: 'scene.snapshot', params: new ParamsInstance() } },
+      { label: 'custom-root-prototype', value: customPrototypeRoot },
+      { label: 'custom-params-prototype', value: { v: 1, id: 'custom-params', method: 'scene.snapshot', params: customPrototypeParams } },
+      { label: 'null-params-prototype', value: { v: 1, id: 'null-params', method: 'scene.snapshot', params: nullPrototypeParams } },
+      { label: 'symbol-root', value: symbolRequest },
+      { label: 'symbol-params', value: symbolParams },
+      { label: 'accessor', value: accessorParams },
+      { label: 'throwing-accessor', value: throwingAccessor },
+    ];
+    const knownMethods = new Set<string>(HANDOFF_METHODS);
+    const schemaDisposition = (value: unknown): 'accepted' | 'rejected' | 'throws' => {
+      try {
+        const generic = genericHandoffRequestSchema.safeParse(value);
+        if (!generic.success) return 'rejected';
+        if (!knownMethods.has(generic.data.method)) return 'accepted';
+        return handoffRequestSchema.safeParse(value).success ? 'accepted' : 'rejected';
+      } catch {
+        return 'throws';
+      }
+    };
+    const source = projections();
+    const runtime = runtimeFor(mutablePort(source), { role: 'dm' });
+    const runtimeDisposition = async (value: unknown): Promise<'accepted' | 'rejected' | 'throws'> => {
+      try {
+        const result = await runtime.dispatch(value);
+        if (result.kind === 'transport_fault') return 'rejected';
+        return !result.response.ok && result.response.error.code === 'INVALID_REQUEST' ? 'rejected' : 'accepted';
+      } catch {
+        return 'throws';
+      }
+    };
+    for (const entry of corpus) {
+      expect(await runtimeDisposition(entry.value), entry.label).toBe(schemaDisposition(entry.value));
+    }
+    expect(schemaDisposition(corpus.find((entry) => entry.label === 'date-params')?.value)).toBe('rejected');
+    runtime.destroySession();
+    source.closeHost();
+  });
+
   it('keeps a legitimate empty-id request correlated beside malformed transport faults', async () => {
     const source = projections();
-    const runtime = runtimeFor(mutablePort(source), source.tokenBindings, { role: 'dm' });
+    const runtime = runtimeFor(mutablePort(source), { role: 'dm' });
     const faults: string[] = [];
     runtime.subscribeFaults((event) => faults.push(event.code));
     const pending = runtime.dispatch({
@@ -377,7 +554,7 @@ describe('v1 protocol dispatcher', () => {
   it('never executes a duplicate mutation id', async () => {
     const source = projections();
     const port = mutablePort(source);
-    const runtime = runtimeFor(port, source.tokenBindings, { role: 'dm' });
+    const runtime = runtimeFor(port, { role: 'dm' });
     await runtime.dispatch({ v: 1, id: 'open', method: 'session.open', params: { requestedRole: 'dm' } });
     const mutation = { v: 1, id: 'door-mutation', method: 'door.set', params: { doorId: 'object:two-room-door', open: false } };
     const [first, second] = await Promise.all([runtime.dispatch(mutation), runtime.dispatch(mutation)]);
@@ -393,7 +570,7 @@ describe('v1 protocol dispatcher', () => {
   it('removes a token that becomes hidden', async () => {
     const source = projections();
     const port = mutablePort(source);
-    const runtime = runtimeFor(port, source.tokenBindings, { role: 'player', playerId: PLAYER_A });
+    const runtime = runtimeFor(port, { role: 'player', playerId: PLAYER_A });
     const events: SceneSnapshotEvent[] = [];
     runtime.subscribe((event) => events.push(event));
     await runtime.dispatch({
@@ -418,7 +595,7 @@ describe('v1 protocol dispatcher', () => {
   it('maps only durable mutations and autonomous changes to wire replacement snapshots', async () => {
     const source = projections();
     const port = mutablePort(source);
-    const runtime = runtimeFor(port, source.tokenBindings, { role: 'player', playerId: PLAYER_A });
+    const runtime = runtimeFor(port, { role: 'player', playerId: PLAYER_A });
     const events: SceneSnapshotEvent[] = [];
     runtime.subscribe((event) => events.push(event));
     await runtime.dispatch({
@@ -438,7 +615,7 @@ describe('v1 protocol dispatcher', () => {
   it('isolates throwing runtime event and fault observers from healthy observers and settlement', async () => {
     const source = projections();
     const port = mutablePort(source);
-    const runtime = runtimeFor(port, source.tokenBindings, { role: 'player', playerId: PLAYER_A });
+    const runtime = runtimeFor(port, { role: 'player', playerId: PLAYER_A });
     const events: number[] = [];
     const faults: string[] = [];
     runtime.subscribe(() => { throw new Error('throwing runtime event observer'); });
@@ -459,24 +636,12 @@ describe('v1 protocol dispatcher', () => {
   it('derives token identities for each captured projection after appearance, hiding, and removal', async () => {
     const source = projections();
     const port = mutablePort(source);
-    let bindings = [...source.tokenBindings];
     const summonedId = combatantId('combatant:runtime-summon');
-    const baseArt = twoRoomArtPackage();
-    const summonedArt = baseArt.combatantTokens[TWO_ROOM_ADVENTURER_ID];
-    if (summonedArt === undefined) throw new Error('Expected adventurer art for the runtime summon.');
-    const art = {
-      ...baseArt,
-      combatantTokens: {
-        ...baseArt.combatantTokens,
-        [summonedId]: summonedArt,
-      },
-    };
     const runtime = new ProtocolRuntime({
       service: port,
       principal: { role: 'player', playerId: PLAYER_A },
       seats: SEATS,
-      art,
-      tokenBindings: () => bindings,
+      art: twoRoomArtPackage(),
     });
     const events: SceneSnapshotEvent[] = [];
     runtime.subscribe((event) => events.push(event));
@@ -495,22 +660,115 @@ describe('v1 protocol dispatcher', () => {
         position: { column: 3, row: 4 },
       }],
     };
-    bindings = [...bindings, { combatantId: summonedId, tokenId: 'token:runtime-summon' }];
-    port.emitPlayer(PLAYER_A, { kind: 'autonomous', seq: 1, projection: appeared });
-    expect(events.at(-1)?.data.tokens.map((token) => token.id)).toContain('token:runtime-summon');
+    const capturedBindings = [
+      ...source.tokenBindings,
+      { combatantId: summonedId, tokenId: 'token:runtime-summon' },
+    ];
+    const capturedAppearance = {
+      kind: 'autonomous' as const,
+      seq: 1,
+      projection: appeared,
+      tokenBindings: capturedBindings,
+    };
+    port.setTokenBindings(source.tokenBindings);
+    port.emitPlayer(PLAYER_A, capturedAppearance);
+    expect(events.at(-1)?.data.tokens).toContainEqual(expect.objectContaining({
+      id: 'token:runtime-summon', assetId: 'token.adventurer',
+    }));
 
     const hidden: PlayerBoardProjection = {
       ...appeared,
       revision: appeared.revision + 1,
       combatants: source.playerA.combatants,
     };
-    port.emitPlayer(PLAYER_A, { kind: 'autonomous', seq: 2, projection: hidden });
+    port.emitPlayer(PLAYER_A, {
+      kind: 'autonomous', seq: 2, projection: hidden, tokenBindings: source.tokenBindings,
+    });
     expect(events.at(-1)?.data.tokens.map((token) => token.id)).not.toContain('token:runtime-summon');
 
-    bindings = bindings.filter((binding) => binding.tokenId !== 'token:runtime-summon');
     const removed = { ...hidden, revision: hidden.revision + 1 };
-    port.emitPlayer(PLAYER_A, { kind: 'autonomous', seq: 3, projection: removed });
+    port.emitPlayer(PLAYER_A, {
+      kind: 'autonomous', seq: 3, projection: removed, tokenBindings: source.tokenBindings,
+    });
     expect(events.at(-1)?.data.tokens.map((token) => token.id)).not.toContain('token:runtime-summon');
+    runtime.destroySession();
+    source.closeHost();
+  });
+
+  it('renders a real engine-created token absent from the opening art, then drops hiding and removal replacements', async () => {
+    const states = realEngineSummonStates();
+    const seat = {
+      seatId: 'seat:real-summon',
+      combatantId: states.casterId,
+      ownedCombatantIds: [states.casterId],
+    } as const;
+    const project = (state: EncounterState): PlayerBoardProjection => projectPlayerBoard(
+      projectPlayerView(state, seat),
+      {
+        requestSequence: 1,
+        pendingRequest: null,
+        pendingCommand: null,
+        continuation: { kind: 'idle' },
+        pause: null,
+      },
+    );
+    const bindings = (state: EncounterState) => state.tokens.map((token) => ({
+      tokenId: String(token.id),
+      combatantId: token.combatantId,
+    }));
+    const source = projections();
+    const openingPlayer = project(states.opening);
+    const port = mutablePort({
+      dm: source.dm,
+      playerA: openingPlayer,
+      playerB: openingPlayer,
+      tokenBindings: bindings(states.opening),
+    });
+    const art = twoRoomArtPackage();
+    expect(art.combatantTokens[states.summonedId]).toBeUndefined();
+    const runtime = new ProtocolRuntime({
+      service: port,
+      principal: { role: 'player', playerId: PLAYER_A },
+      seats: SEATS,
+      art,
+    });
+    const events: SceneSnapshotEvent[] = [];
+    runtime.subscribe((event) => events.push(event));
+    await runtime.dispatch({
+      v: 1, id: 'open:real-summon', method: 'session.open',
+      params: { requestedRole: 'player', playerId: PLAYER_A },
+    });
+
+    port.emitPlayer(PLAYER_A, {
+      kind: 'autonomous', seq: 1,
+      projection: project(states.appeared),
+      tokenBindings: bindings(states.appeared),
+    });
+    const summonedToken = bindings(states.appeared)
+      .find((binding) => binding.combatantId === states.summonedId)?.tokenId;
+    if (summonedToken === undefined) throw new Error('Expected a renderer identity for the engine-created summon.');
+    expect(events.at(-1)?.data.tokens).toContainEqual(expect.objectContaining({
+      id: summonedToken,
+      assetId: 'token.adventurer',
+      x: 6,
+      y: 0,
+    }));
+
+    port.emitPlayer(PLAYER_A, {
+      kind: 'autonomous', seq: 2,
+      projection: project(states.hidden),
+      tokenBindings: bindings(states.hidden),
+    });
+    expect(events.at(-1)?.data.tokens.map((token) => token.id)).not.toContain(summonedToken);
+
+    port.emitPlayer(PLAYER_A, {
+      kind: 'autonomous', seq: 3,
+      projection: project(states.removed),
+      tokenBindings: bindings(states.removed),
+    });
+    expect(bindings(states.removed).map((binding) => binding.tokenId)).not.toContain(summonedToken);
+    expect(events.at(-1)?.data.tokens.map((token) => token.id)).not.toContain(summonedToken);
+
     runtime.destroySession();
     source.closeHost();
   });
@@ -518,7 +776,7 @@ describe('v1 protocol dispatcher', () => {
   it('shares the default ledger across seats and reconnections until explicit session destruction', async () => {
     const source = projections();
     const port = mutablePort(source);
-    const first = runtimeFor(port, source.tokenBindings, { role: 'dm' });
+    const first = runtimeFor(port, { role: 'dm' });
     await first.dispatch({ v: 1, id: 'open:first', method: 'session.open', params: { requestedRole: 'dm' } });
     await expect(first.dispatch({
       v: 1, id: 'shared-id', method: 'door.set', params: { doorId: 'object:two-room-door', open: false },
@@ -526,14 +784,14 @@ describe('v1 protocol dispatcher', () => {
     first.dispose();
     expect(port.closeCalls()).toBe(0);
 
-    const reconnected = runtimeFor(port, source.tokenBindings, { role: 'dm' });
+    const reconnected = runtimeFor(port, { role: 'dm' });
     await reconnected.dispatch({ v: 1, id: 'open:second', method: 'session.open', params: { requestedRole: 'dm' } });
     await expect(reconnected.dispatch({
       v: 1, id: 'shared-id', method: 'door.set', params: { doorId: 'object:two-room-door', open: false },
     })).resolves.toMatchObject({
       kind: 'response', response: { ok: false, error: { code: 'DUPLICATE_MUTATION' } },
     });
-    const player = runtimeFor(port, source.tokenBindings, { role: 'player', playerId: PLAYER_A });
+    const player = runtimeFor(port, { role: 'player', playerId: PLAYER_A });
     await player.dispatch({
       v: 1, id: 'open:player', method: 'session.open', params: { requestedRole: 'player', playerId: PLAYER_A },
     });
@@ -551,13 +809,13 @@ describe('v1 protocol dispatcher', () => {
   it('detaches after a refused open without destroying the authoritative session', async () => {
     const source = projections();
     const port = mutablePort(source);
-    const refused = runtimeFor(port, source.tokenBindings, { role: 'player', playerId: PLAYER_A });
+    const refused = runtimeFor(port, { role: 'player', playerId: PLAYER_A });
     await expect(refused.dispatch({
       v: 1, id: 'refused-open', method: 'session.open', params: { requestedRole: 'dm' },
     })).resolves.toMatchObject({ kind: 'response', response: { ok: false, error: { code: 'UNAUTHORIZED' } } });
     refused.dispose();
     expect(port.closeCalls()).toBe(0);
-    const dm = runtimeFor(port, source.tokenBindings, { role: 'dm' });
+    const dm = runtimeFor(port, { role: 'dm' });
     await expect(dm.dispatch({
       v: 1, id: 'healthy-open', method: 'session.open', params: { requestedRole: 'dm' },
     })).resolves.toMatchObject({ kind: 'response', response: { ok: true } });
@@ -591,7 +849,9 @@ describe('v1 protocol dispatcher', () => {
         const refusingPort = {
           sessionId: setup.service.sessionId,
           dmSnapshot: () => setup.service.dmSnapshot(),
+          dmCapture: () => setup.service.dmCapture(),
           playerSnapshot: (playerId?: string) => setup.service.playerSnapshot(playerId),
+          playerCapture: (playerId?: string) => setup.service.playerCapture(playerId),
           subscribeDm: (listener: Parameters<EncounterSessionService['subscribeDm']>[0]) =>
             setup.service.subscribeDm(listener),
           subscribePlayer: (
@@ -616,7 +876,6 @@ describe('v1 protocol dispatcher', () => {
           principal: { role: 'player', playerId: setup.seat.playerId },
           seats: [setup.seat],
           art: twoRoomArtPackage(),
-          tokenBindings: () => setup.host.rendererTokenBindings(),
         });
         observedEvents = [];
         activeRuntime.subscribe((event) => observedEvents.push(event));
@@ -632,7 +891,6 @@ describe('v1 protocol dispatcher', () => {
           principal: { role: 'dm' },
           seats: [setup.seat],
           art: twoRoomArtPackage(),
-          tokenBindings: () => setup.host.rendererTokenBindings(),
         });
         observedEvents = [];
         activeRuntime.subscribe((event) => observedEvents.push(event));
@@ -686,7 +944,6 @@ describe('v1 protocol dispatcher', () => {
       principal: { role: 'dm' },
       seats: [setup.seat],
       art: twoRoomArtPackage(),
-      tokenBindings: () => setup.host.rendererTokenBindings(),
     });
     const events: SceneSnapshotEvent[] = [];
     dm.subscribe((event) => events.push(event));
@@ -737,7 +994,7 @@ describe('v1 protocol dispatcher', () => {
   it('keeps event sequence independent from repeated encounter revisions and emits no door no-op event', async () => {
     const source = projections();
     const port = mutablePort(source);
-    const runtime = runtimeFor(port, source.tokenBindings, { role: 'dm' });
+    const runtime = runtimeFor(port, { role: 'dm' });
     const events: SceneSnapshotEvent[] = [];
     runtime.subscribe((event) => events.push(event));
     await runtime.dispatch({ v: 1, id: 'open', method: 'session.open', params: { requestedRole: 'dm' } });
@@ -751,7 +1008,7 @@ describe('v1 protocol dispatcher', () => {
 
   it('rejects malformed protocol ids before dispatch and does not fabricate a response envelope', async () => {
     const source = projections();
-    const runtime = runtimeFor(mutablePort(source), source.tokenBindings, { role: 'dm' });
+    const runtime = runtimeFor(mutablePort(source), { role: 'dm' });
     const result = await runtime.dispatch({ v: 1, id: 3, method: 'scene.snapshot', params: {} });
     expect(result.kind).toBe('transport_fault');
     expect('response' in result).toBe(false);
@@ -768,7 +1025,6 @@ describe('v1 protocol dispatcher', () => {
       principal: { role: 'player', playerId: PLAYER_A },
       seats: [{ playerId: PLAYER_A, controlledTokenIds: mutableTokens }],
       art: twoRoomArtPackage(),
-      tokenBindings: () => source.tokenBindings,
     });
     mutableTokens.push(TOKEN_B);
     await runtime.dispatch({

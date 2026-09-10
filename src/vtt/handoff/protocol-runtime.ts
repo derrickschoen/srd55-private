@@ -7,6 +7,7 @@ import type {
   SessionMutationOutcome,
 } from '../encounter-session-service';
 import type { DmBoardProjection, PlayerBoardProjection, RendererTokenBinding } from '../encounter-projections';
+import type { RendererProjectionCapture } from '../encounter-projections';
 import { groundAnchor, sceneSnapshot, type CanonicalTokenIdentityIndex } from './scene-snapshot';
 import { LogicalSessionAuthority } from './mutation-ledger';
 import { SessionAuthorizer, type HandoffPrincipal } from './session-authorizer';
@@ -52,6 +53,11 @@ export interface SceneSnapshotEvent {
   readonly data: SceneSnapshot;
 }
 
+export interface ProtocolEstablishedReceipt {
+  readonly requestId: string;
+  readonly revision: number;
+}
+
 export type ProtocolDispatchResult =
   | { readonly kind: 'response'; readonly response: HandoffResponse }
   | { readonly kind: 'transport_fault'; readonly fault: ProtocolTransportFault };
@@ -61,14 +67,15 @@ export interface ProtocolRuntimeOptions {
   readonly principal: HandoffPrincipal;
   readonly seats: readonly { readonly playerId: string; readonly controlledTokenIds: readonly string[] }[];
   readonly art: EncounterArtPackage;
-  readonly tokenBindings: () => readonly RendererTokenBinding[];
   readonly session?: LogicalSessionAuthority;
 }
 
 export interface ProtocolSessionPort {
   readonly sessionId: string;
   dmSnapshot(): DmBoardProjection;
+  dmCapture(): RendererProjectionCapture<DmBoardProjection>;
   playerSnapshot(playerId?: string): PlayerBoardProjection | null;
+  playerCapture(playerId?: string): RendererProjectionCapture<PlayerBoardProjection> | null;
   subscribeDm(listener: (event: DmSessionSnapshotEvent) => void): () => void;
   subscribePlayer(
     playerId: string | undefined,
@@ -78,11 +85,13 @@ export interface ProtocolSessionPort {
     readonly playerId?: string;
     readonly tokenId: string;
     readonly requestId: string;
+    readonly clientRequestId?: string;
     readonly encounterRevision: number;
     readonly offeredActionId: string;
     readonly signal?: AbortSignal;
   }): Promise<SessionMutationOutcome>;
   setDoor(input: {
+    readonly clientRequestId?: string;
     readonly principal?: { readonly kind: 'dm' } | { readonly kind: 'player'; readonly playerId: string };
     readonly doorId: string;
     readonly open: boolean;
@@ -136,7 +145,12 @@ function decodedInput(input: unknown): DecodedInput {
 
 function usableId(value: unknown): string | null {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
-  return typeof Reflect.get(value, 'id') === 'string' ? Reflect.get(value, 'id') as string : null;
+  try {
+    const id = Reflect.get(value, 'id');
+    return typeof id === 'string' ? id : null;
+  } catch {
+    return null;
+  }
 }
 
 interface GenericWireRequest {
@@ -146,8 +160,18 @@ interface GenericWireRequest {
   readonly params: Readonly<Record<string, unknown>>;
 }
 
+function requestObject(value: unknown): value is Readonly<Record<string, unknown>> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  for (const key in value) {
+    if (!Object.hasOwn(value, key)) return false;
+  }
+  return true;
+}
+
 function record(value: unknown): value is Readonly<Record<string, unknown>> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
+  if (!requestObject(value)) return false;
+  const prototype = Object.getPrototypeOf(value) as unknown;
+  return prototype === Object.prototype || prototype === null;
 }
 
 function exactKeys(
@@ -155,13 +179,17 @@ function exactKeys(
   required: readonly string[],
   optional: readonly string[] = [],
 ): boolean {
-  const keys = Object.keys(value);
+  const keys = Reflect.ownKeys(value);
   return required.every((key) => Object.hasOwn(value, key)) &&
-    keys.every((key) => required.includes(key) || optional.includes(key));
+    keys.every((key) => typeof key === 'string' && (required.includes(key) || optional.includes(key)));
 }
 
 function genericRequest(value: unknown): GenericWireRequest | null {
-  if (!record(value) || !exactKeys(value, ['v', 'id', 'method', 'params'])) return null;
+  if (
+    !requestObject(value) ||
+    !['v', 'id', 'method', 'params'].every((key) => Object.hasOwn(value, key)) ||
+    !Object.keys(value).every((key) => ['v', 'id', 'method', 'params'].includes(key))
+  ) return null;
   if (value.v !== 1 || typeof value.id !== 'string' || typeof value.method !== 'string' || !record(value.params)) {
     return null;
   }
@@ -248,9 +276,11 @@ export class ProtocolRuntime {
   readonly #principal: HandoffPrincipal;
   readonly #authorizer: SessionAuthorizer;
   readonly #art: EncounterArtPackage;
-  readonly #tokenBindings: () => readonly RendererTokenBinding[];
   readonly #session: LogicalSessionAuthority;
-  readonly #eventListeners = new Set<(event: SceneSnapshotEvent) => void>();
+  readonly #eventListeners = new Set<(
+    event: SceneSnapshotEvent,
+    receipt?: ProtocolEstablishedReceipt,
+  ) => void>();
   readonly #faultListeners = new Set<(event: ProtocolTransportFault) => void>();
   #unsubscribeService: (() => void) | null = null;
   #audience: 'dm' | 'player' | null = null;
@@ -263,12 +293,11 @@ export class ProtocolRuntime {
     this.#principal = options.principal;
     this.#authorizer = new SessionAuthorizer(options.seats);
     this.#art = options.art;
-    this.#tokenBindings = options.tokenBindings;
     this.#session = options.session ?? LogicalSessionAuthority.for(options.service);
     this.#session.attach(options.service);
   }
 
-  subscribe(listener: (event: SceneSnapshotEvent) => void): () => void {
+  subscribe(listener: (event: SceneSnapshotEvent, receipt?: ProtocolEstablishedReceipt) => void): () => void {
     this.#eventListeners.add(listener);
     return () => this.#eventListeners.delete(listener);
   }
@@ -315,10 +344,14 @@ export class ProtocolRuntime {
   close(): void {
     if (this.#closed) return;
     this.#closed = true;
-    this.#unsubscribeService?.();
+    const unsubscribe = this.#unsubscribeService;
     this.#unsubscribeService = null;
-    this.#eventListeners.clear();
-    this.#faultListeners.clear();
+    try {
+      unsubscribe?.();
+    } finally {
+      this.#eventListeners.clear();
+      this.#faultListeners.clear();
+    }
   }
 
   dispose(): void {
@@ -328,9 +361,12 @@ export class ProtocolRuntime {
   }
 
   destroySession(): void {
-    this.close();
     this.#disposed = true;
-    this.#session.destroy();
+    const errors: unknown[] = [];
+    try { this.close(); } catch (error: unknown) { errors.push(error); }
+    try { this.#session.destroy(); } catch (error: unknown) { errors.push(error); }
+    if (errors.length === 1) throw errors[0];
+    if (errors.length > 1) throw new AggregateError(errors, 'Runtime and session cleanup both failed.');
   }
 
   async #dispatchKnown(request: HandoffRequest, signal?: AbortSignal): Promise<HandoffResponse> {
@@ -338,10 +374,10 @@ export class ProtocolRuntime {
       case 'session.open':
         return this.#open(request.id, request.params.requestedRole, request.params.playerId);
       case 'scene.snapshot': {
-        const projection = this.#projection();
-        return projection === null
+        const capture = this.#capture();
+        return capture === null
           ? failure(request.id, 'SESSION_NOT_OPEN', 'Open the session before requesting a snapshot.')
-          : success(request.id, this.#snapshot(projection));
+          : success(request.id, this.#snapshot(capture));
       }
       case 'token.move':
         if (!this.#reserve(request.id)) return failure(request.id, 'DUPLICATE_MUTATION', 'The mutation id was already used.');
@@ -364,13 +400,16 @@ export class ProtocolRuntime {
     const authorization = this.#authorizer.authorizeOpen(this.#principal, role, playerId);
     if (!authorization.authorized) return failure(id, authorization.code, authorization.message);
     let initial = true;
+    const opening = { event: null as DmSessionSnapshotEvent | PlayerSessionSnapshotEvent | null };
     if (role === 'dm') {
       this.#unsubscribeService = this.#service.subscribeDm((event) => {
-        if (!initial) this.#publish(event);
+        if (initial) opening.event = event;
+        else this.#publish(event);
       });
     } else {
       const subscription = this.#service.subscribePlayer(playerId, (event) => {
-        if (!initial) this.#publish(event);
+        if (initial) opening.event = event;
+        else this.#publish(event);
       });
       if (subscription.kind === 'refused') {
         return failure(id, subscription.code, 'The player seat is not registered.');
@@ -379,9 +418,11 @@ export class ProtocolRuntime {
     }
     initial = false;
     this.#audience = role;
-    const projection = this.#projection();
-    if (projection === null) throw new Error('The authorized session projection is unavailable.');
-    this.#emitSnapshot(projection);
+    const capture = opening.event === null
+      ? this.#capture()
+      : { projection: opening.event.projection, tokenBindings: opening.event.tokenBindings };
+    if (capture === null) throw new Error('The authorized session projection is unavailable.');
+    this.#emitSnapshot(capture);
     return success(id, {
       sessionId: String(this.#service.sessionId),
       capabilities: ['scene.snapshot', 'token.move', 'door.set'],
@@ -398,9 +439,10 @@ export class ProtocolRuntime {
     const authorization = this.#authorizer.authorizeToken(this.#principal, tokenId);
     if (!authorization.authorized) return failure(id, authorization.code, authorization.message);
     if (this.#principal.role !== 'player') return failure(id, 'FORBIDDEN', 'A player seat is required.');
-    const projection = this.#service.playerSnapshot(this.#principal.playerId);
-    if (projection === null) return failure(id, 'UNAUTHORIZED', 'The player seat is not registered.');
-    const snapshot = this.#snapshot(projection);
+    const capture = this.#service.playerCapture(this.#principal.playerId);
+    if (capture === null) return failure(id, 'UNAUTHORIZED', 'The player seat is not registered.');
+    const projection = capture.projection;
+    const snapshot = this.#snapshot(capture);
     const token = snapshot.tokens.find((candidate) => candidate.id === tokenId);
     if (token === undefined) return failure(id, 'FORBIDDEN', 'The token is not visible to this player seat.');
     const anchor = groundAnchor(to, token.footprint);
@@ -414,7 +456,7 @@ export class ProtocolRuntime {
     }
     const pending = projection.pendingRequest;
     if (pending === null) return failure(id, 'ILLEGAL_MOVE', 'There is no current offered move for this player.');
-    const actor = this.#tokenActor(tokenId);
+    const actor = this.#tokenActor(tokenId, capture.tokenBindings);
     if (actor === null || pending.actorId !== actor) {
       return failure(id, 'FORBIDDEN', 'The offered actor does not control this token.');
     }
@@ -432,6 +474,7 @@ export class ProtocolRuntime {
       playerId: this.#principal.playerId,
       tokenId,
       requestId: pending.requestId,
+      clientRequestId: id,
       encounterRevision: pending.encounterRevision,
       offeredActionId,
       ...(signal === undefined ? {} : { signal }),
@@ -442,7 +485,7 @@ export class ProtocolRuntime {
   async #door(id: string, doorId: string, open: boolean): Promise<HandoffResponse> {
     if (this.#audience === null) return failure(id, 'SESSION_NOT_OPEN', 'Open the session before mutating it.');
     if (this.#principal.role !== 'dm') return failure(id, 'FORBIDDEN', 'Players cannot change door state.');
-    const outcome = await this.#service.setDoor({ principal: { kind: 'dm' }, doorId, open });
+    const outcome = await this.#service.setDoor({ clientRequestId: id, principal: { kind: 'dm' }, doorId, open });
     switch (outcome.kind) {
       case 'committed': return success(id, { revision: outcome.revision });
       case 'refused': return failure(id, outcome.code, outcome.reason);
@@ -453,26 +496,26 @@ export class ProtocolRuntime {
     }
   }
 
-  #projection(): DmBoardProjection | PlayerBoardProjection | null {
-    if (this.#audience === 'dm') return this.#service.dmSnapshot();
+  #capture(): RendererProjectionCapture<DmBoardProjection | PlayerBoardProjection> | null {
+    if (this.#audience === 'dm') return this.#service.dmCapture();
     if (this.#audience === 'player' && this.#principal.role === 'player') {
-      return this.#service.playerSnapshot(this.#principal.playerId);
+      return this.#service.playerCapture(this.#principal.playerId);
     }
     return null;
   }
 
-  #snapshot(projection: DmBoardProjection | PlayerBoardProjection): SceneSnapshot {
-    const tokenIdentities = identityIndex(this.#tokenBindings());
+  #snapshot(capture: RendererProjectionCapture<DmBoardProjection | PlayerBoardProjection>): SceneSnapshot {
+    const tokenIdentities = identityIndex(capture.tokenBindings);
     return sceneSnapshot({
       sceneId: String(this.#service.sessionId),
-      projection,
+      projection: capture.projection,
       art: this.#art,
       tokenIdentities,
     }).snapshot;
   }
 
-  #tokenActor(tokenId: string): string | null {
-    for (const [combatantId, candidateTokenId] of identityIndex(this.#tokenBindings()).byCombatantId) {
+  #tokenActor(tokenId: string, bindings: readonly RendererTokenBinding[]): string | null {
+    for (const [combatantId, candidateTokenId] of identityIndex(bindings).byCombatantId) {
       if (candidateTokenId === tokenId) return combatantId;
     }
     return null;
@@ -482,7 +525,10 @@ export class ProtocolRuntime {
     switch (event.kind) {
       case 'mutation':
       case 'autonomous':
-        this.#emitSnapshot(event.projection);
+        this.#emitSnapshot(
+          { projection: event.projection, tokenBindings: event.tokenBindings },
+          event.terminalReceipt,
+        );
         return;
       case 'offer':
       case 'status':
@@ -491,9 +537,12 @@ export class ProtocolRuntime {
     }
   }
 
-  #emitSnapshot(projection: DmBoardProjection | PlayerBoardProjection): void {
+  #emitSnapshot(
+    capture: RendererProjectionCapture<DmBoardProjection | PlayerBoardProjection>,
+    receipt?: ProtocolEstablishedReceipt,
+  ): void {
     this.#seq += 1;
-    const snapshot = this.#snapshot(projection);
+    const snapshot = this.#snapshot(capture);
     const event = {
       v: 1,
       event: 'scene.snapshot',
@@ -501,7 +550,7 @@ export class ProtocolRuntime {
       data: snapshot,
     } satisfies SceneSnapshotEvent;
     for (const listener of this.#eventListeners) {
-      try { listener(event); } catch { /* Observer failure cannot alter protocol settlement. */ }
+      try { listener(event, receipt); } catch { /* Observer failure cannot alter protocol settlement. */ }
     }
   }
 

@@ -73,8 +73,16 @@ export class LogicalSessionAuthority {
     if (this.#destroyed) return;
     this.#destroyed = true;
     this.ledger.dispose();
-    for (const service of this.#services) service.close();
-    this.#services.clear();
-    if (authorities.get(this.sessionId) === this) authorities.delete(this.sessionId);
+    const errors: unknown[] = [];
+    try {
+      for (const service of this.#services) {
+        try { service.close(); } catch (error: unknown) { errors.push(error); }
+      }
+    } finally {
+      this.#services.clear();
+      if (authorities.get(this.sessionId) === this) authorities.delete(this.sessionId);
+    }
+    if (errors.length === 1) throw errors[0];
+    if (errors.length > 1) throw new AggregateError(errors, 'Multiple services failed while destroying the logical session.');
   }
 }

@@ -872,7 +872,10 @@ describe('encounter session service', () => {
       rendererTokenBindings: () => real.rendererTokenBindings(),
       subscribeNotifications: (next: Parameters<EncounterSessionHostPort['subscribeNotifications']>[0]) => {
         listener = next;
-        next({ kind: 'status', snapshot: real.snapshot(), playerSnapshot: () => projection });
+        next({
+          kind: 'status', snapshot: real.snapshot(), playerSnapshot: () => projection,
+          rendererTokenBindings: real.rendererTokenBindings(),
+        });
         return () => { listener = null; };
       },
       start: async () => undefined,
@@ -882,7 +885,10 @@ describe('encounter session service', () => {
         if (result === undefined) return { kind: 'closed' };
         if (result.kind === 'failed' && result.phase === 'post_apply') {
           projection = { ...projection, revision: result.currentRevision, pendingRequest: null };
-          listener?.({ kind: 'recovery', snapshot: real.snapshot(), playerSnapshot: () => projection });
+          listener?.({
+            kind: 'recovery', snapshot: real.snapshot(), playerSnapshot: () => projection,
+            rendererTokenBindings: real.rendererTokenBindings(),
+          });
         }
         return result;
       },

@@ -10,6 +10,7 @@ import type {
   DmBoardProjection,
   PlayerBoardProjection,
   PlayerSeatBinding,
+  RendererProjectionCapture,
   RendererTokenBinding,
 } from './encounter-projections';
 
@@ -28,12 +29,19 @@ type ActiveTerminalReceipt =
   | {
       readonly kind: 'offered_action';
       readonly requestId: string;
+      readonly clientRequestId?: string;
       established: boolean;
     }
   | {
       readonly kind: 'door';
+      readonly clientRequestId?: string;
       established: boolean;
     };
+
+export interface SessionTerminalReceipt {
+  readonly requestId: string;
+  readonly revision: number;
+}
 
 export interface EncounterSessionHostPort {
   readonly sessionId: EncounterSessionId;
@@ -56,12 +64,16 @@ export interface DmSessionSnapshotEvent {
   readonly kind: HostSnapshotNotificationKind;
   readonly seq: number;
   readonly projection: DmBoardProjection;
+  readonly tokenBindings: readonly RendererTokenBinding[];
+  readonly terminalReceipt?: SessionTerminalReceipt;
 }
 
 export interface PlayerSessionSnapshotEvent {
   readonly kind: HostSnapshotNotificationKind;
   readonly seq: number;
   readonly projection: PlayerBoardProjection;
+  readonly tokenBindings: readonly RendererTokenBinding[];
+  readonly terminalReceipt?: SessionTerminalReceipt;
 }
 
 export interface SessionSubscriberError {
@@ -75,6 +87,7 @@ export type PlayerSubscriptionResult =
   | { readonly kind: 'refused'; readonly code: 'UNAUTHORIZED' };
 
 export interface OfferedActionMutation {
+  readonly clientRequestId?: string;
   readonly playerId?: string;
   readonly tokenId: string;
   readonly requestId: string;
@@ -228,18 +241,32 @@ export class EncounterSessionService {
   }
 
   dmSnapshot(): DmBoardProjection {
-    return this.host.snapshot().dm;
+    return this.dmCapture().projection;
+  }
+
+  dmCapture(): RendererProjectionCapture<DmBoardProjection> {
+    return {
+      projection: this.host.snapshot().dm,
+      tokenBindings: this.host.rendererTokenBindings(),
+    };
   }
 
   playerSnapshot(playerId?: string): PlayerBoardProjection | null {
+    return this.playerCapture(playerId)?.projection ?? null;
+  }
+
+  playerCapture(playerId?: string): RendererProjectionCapture<PlayerBoardProjection> | null {
     const seat = playerId === undefined ? undefined : this.#seats.get(playerId);
-    return seat === undefined ? null : this.host.playerSnapshot(seat.binding);
+    return seat === undefined ? null : {
+      projection: this.host.playerSnapshot(seat.binding),
+      tokenBindings: this.host.rendererTokenBindings(),
+    };
   }
 
   subscribeDm(listener: (event: DmSessionSnapshotEvent) => void): () => void {
     this.#dmListeners.add(listener);
-    const projection = this.dmSnapshot();
-    this.#notifyDm(listener, { kind: 'status', seq: this.#seq, projection });
+    const capture = this.dmCapture();
+    this.#notifyDm(listener, { kind: 'status', seq: this.#seq, ...capture });
     return () => this.#dmListeners.delete(listener);
   }
 
@@ -252,9 +279,9 @@ export class EncounterSessionService {
     const listeners = this.#playerListeners.get(playerId) ?? new Set();
     listeners.add(listener);
     this.#playerListeners.set(playerId, listeners);
-    this.#notifyPlayer(playerId, listener, {
-      kind: 'status', seq: this.#seq, projection: this.host.playerSnapshot(seat.binding),
-    });
+    const capture = this.playerCapture(playerId);
+    if (capture === null) throw new Error('The registered player capture is unavailable.');
+    this.#notifyPlayer(playerId, listener, { kind: 'status', seq: this.#seq, ...capture });
     return {
       kind: 'subscribed',
       unsubscribe: () => {
@@ -292,11 +319,17 @@ export class EncounterSessionService {
     }
     return this.#enqueue(
       async () => this.#applyOfferedAction(playerId, seat, input),
-      { kind: 'offered_action', requestId: input.requestId, established: false },
+      {
+        kind: 'offered_action',
+        requestId: input.requestId,
+        ...(input.clientRequestId === undefined ? {} : { clientRequestId: input.clientRequestId }),
+        established: false,
+      },
     );
   }
 
   setDoor(input: {
+    readonly clientRequestId?: string;
     readonly principal?: SessionPrincipal;
     readonly doorId: string;
     readonly open: boolean;
@@ -318,7 +351,11 @@ export class EncounterSessionService {
         settle?.({ kind: 'closed' });
         return;
       }
-      const receipt: ActiveTerminalReceipt = { kind: 'door', established: false };
+      const receipt: ActiveTerminalReceipt = {
+        kind: 'door',
+        ...(input.clientRequestId === undefined ? {} : { clientRequestId: input.clientRequestId }),
+        established: false,
+      };
       this.#activeTerminalReceipt = receipt;
       try {
         const hostPromise = this.host.setDoorOpen(input.doorId, input.open);
@@ -444,6 +481,8 @@ export class EncounterSessionService {
           return { kind: 'failed', phase: 'pre_apply', error: outcome.error };
         }
         this.#closed = true;
+        const recoveryCapture = this.playerCapture(playerId);
+        if (recoveryCapture === null) throw new Error('The failed player capture is unavailable.');
         return {
           kind: 'failed',
           phase: 'post_apply',
@@ -451,7 +490,7 @@ export class EncounterSessionService {
           recovery: {
             kind: 'recovery',
             seq: this.#seq,
-            projection: this.host.playerSnapshot(seat.binding),
+            ...recoveryCapture,
           },
         };
     }
@@ -484,6 +523,7 @@ export class EncounterSessionService {
           return { kind: 'failed', phase: 'pre_apply', error: outcome.error };
         }
         this.#closed = true;
+        const recoveryCapture = this.dmCapture();
         return {
           kind: 'failed',
           phase: 'post_apply',
@@ -491,7 +531,7 @@ export class EncounterSessionService {
           recovery: {
             kind: 'recovery',
             seq: this.#seq,
-            projection: this.dmSnapshot(),
+            ...recoveryCapture,
           },
         };
     }
@@ -528,10 +568,31 @@ export class EncounterSessionService {
       this.#closed = true;
     }
     this.#seq += 1;
+    const tokenBindings = notification.rendererTokenBindings;
+    const receipt = notification.terminalReceipt;
+    const activeReceipt = this.#activeTerminalReceipt;
+    let terminalReceipt: SessionTerminalReceipt | undefined;
+    if (
+      receipt?.kind === 'offered_action' &&
+      activeReceipt?.kind === 'offered_action' &&
+      receipt.requestId === activeReceipt.requestId
+    ) {
+      activeReceipt.established = true;
+      if (activeReceipt.clientRequestId !== undefined) {
+        terminalReceipt = { requestId: activeReceipt.clientRequestId, revision: receipt.revision };
+      }
+    } else if (receipt?.kind === 'door' && activeReceipt?.kind === 'door') {
+      activeReceipt.established = true;
+      if (activeReceipt.clientRequestId !== undefined) {
+        terminalReceipt = { requestId: activeReceipt.clientRequestId, revision: receipt.revision };
+      }
+    }
     const dmEvent = {
       kind: notification.kind,
       seq: this.#seq,
       projection: notification.snapshot.dm,
+      tokenBindings,
+      ...(terminalReceipt === undefined ? {} : { terminalReceipt }),
     } satisfies DmSessionSnapshotEvent;
     const playerEvents = new Map<string, PlayerSessionSnapshotEvent>();
     for (const [playerId, seat] of this.#seats) {
@@ -539,6 +600,8 @@ export class EncounterSessionService {
         kind: notification.kind,
         seq: this.#seq,
         projection: notification.playerSnapshot(seat.binding),
+        tokenBindings,
+        ...(terminalReceipt === undefined ? {} : { terminalReceipt }),
       } satisfies PlayerSessionSnapshotEvent;
       playerEvents.set(playerId, event);
     }
@@ -550,17 +613,6 @@ export class EncounterSessionService {
           event,
         );
       }
-    }
-    const receipt = notification.terminalReceipt;
-    const activeReceipt = this.#activeTerminalReceipt;
-    if (
-      receipt?.kind === 'offered_action' &&
-      activeReceipt?.kind === 'offered_action' &&
-      receipt.requestId === activeReceipt.requestId
-    ) {
-      activeReceipt.established = true;
-    } else if (receipt?.kind === 'door' && activeReceipt?.kind === 'door') {
-      activeReceipt.established = true;
     }
     for (const listener of this.#dmListeners) this.#notifyDm(listener, dmEvent);
     for (const [playerId, event] of playerEvents) {

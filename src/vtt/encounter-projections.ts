@@ -99,6 +99,12 @@ export interface RendererTokenBinding {
   readonly combatantId: CombatantId;
 }
 
+/** Renderer-only identity enrichment captured alongside a detached board projection. */
+export interface RendererProjectionCapture<TProjection extends DmBoardProjection | PlayerBoardProjection> {
+  readonly projection: TProjection;
+  readonly tokenBindings: readonly RendererTokenBinding[];
+}
+
 export interface PlayerBoardProjection {
   readonly audience: 'player';
   readonly revision: number;
