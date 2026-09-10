@@ -46,3 +46,5 @@ Machine constraint: the D569 v5 first arm (pid 1201481, port 4530) runs until ~1
 - 2026-09-10 10:27 EDT — S3 Astra r1 REJECT: F21 snapshots not durability/outcome-gated, F22 post-apply exceptions labelled pre_apply, F23 closure leaves door wait pending, F24 restore freshness only from pendingRequest presence, F25 legal-action array escapes by reference, F26 subscriber exceptions break settlement, F27 boundary test is a regex not a graph, F28 same-state barrier unproven, F29 stale offers matched. F25/F27/F29 verified by supervisor. r2 dispatched (resume 01a08b7b-e666…).
 
 - 2026-09-10 11:14 EDT — S3 r2 lane DONE; supervisor verification tsc/sg/diffcheck 0, 17 specs 173/173, baseline OK; committed dfe62475; Astra S3 r2 review dispatched (resume 01a087f9…).
+
+- 2026-09-10 11:21 EDT — S3 Astra r2 REJECT: F24/F25/F26/F29 resolved; F30–F36 (closure not barrier-independent, failed initial-offer flush strands human wait, auto-refusal/reaction outside boundary, autonomous steps labelled mutation, door revision lost across refresh, graph pins module pairs not call sites, self-reported counters). r3 dispatched (resume 01a08b7b-e666…).
