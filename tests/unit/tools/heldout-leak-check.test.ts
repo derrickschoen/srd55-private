@@ -261,14 +261,13 @@ describe('held-out reserve leak wall', () => {
         'a known loader reference escaping recognized call syntax is loader_reference_escaped',
       ],
       interpreted: [
-        'TypeScript and JavaScript import, re-export, require, resolver, import type, and JSDoc edges',
-        'recognized createRequire, Worker, SharedWorker, and importScripts aliases and qualified forms',
-        'configuration changes re-inspect candidate sources and configured #imports or alias consumers',
+        'loader bindings are tracked by TypeScript symbol identity and exact aliases inherit their loader role',
+        'tracked symbols are allowed only in a direct recognized load/resolve call or an exact alias declaration',
+        'resolution configuration changes invalidate candidate consumers for reinspection',
       ],
       failsClosed: [
-        'non-constant edge targets, ambiguous package conditions, and unmatched package #imports',
-        'unsupported glob syntax including extglobs, braces, character classes, escapes, and package or alias globs',
-        'unknown URL schemes, undecodable data modules, and recognized loader references in unsupported syntax',
+        'every other reference to a tracked loader symbol is loader_reference_escaped',
+        'unresolved targets, options, package conditions, globs, aliases, URL schemes, and data modules are findings',
       ],
       outOfScope: [
         'eval executable strings',
@@ -403,6 +402,55 @@ describe('held-out reserve leak wall', () => {
     expect(report.findings).toContainEqual(expect.objectContaining({ kind: 'protocol_import' }));
   });
 
+  it('keeps a leading ** Vite glob candidate-rooted even when base is present', () => {
+    const report = inspectHeldoutLeakChanges([{
+      path: 'src/ui/repair-ranking.ts',
+      addedText: "import.meta.glob('**/heldout-evaluation.ts', { base: './', eager: true });",
+    }], 'F', bindings, { candidateFiles: ['src/vtt/heldout-evaluation.ts'] });
+
+    expect(report.findings).toContainEqual(expect.objectContaining({ kind: 'protocol_import' }));
+  });
+
+  it('evaluates literal object spreads in Vite glob options', () => {
+    const report = inspectHeldoutLeakChanges([{
+      path: 'src/ui/repair-ranking.ts',
+      addedText: [
+        "import.meta.glob('./heldout-evaluation.ts', {",
+        "  ...{ base: '../vtt' }, eager: true,",
+        '});',
+      ].join('\n'),
+    }], 'F', bindings, { candidateFiles: ['src/vtt/heldout-evaluation.ts'] });
+
+    expect(report.findings).toContainEqual(expect.objectContaining({ kind: 'protocol_import' }));
+  });
+
+  it('tracks an exact import.meta.glob alias into a recognized glob call', () => {
+    const report = inspectHeldoutLeakChanges([{
+      path: 'src/ui/repair-ranking.ts',
+      addedText: [
+        'const discover = import.meta.glob;',
+        "discover('../vtt/heldout-*.ts', { eager: true });",
+      ].join('\n'),
+    }], 'F', bindings, { candidateFiles: ['src/vtt/heldout-evaluation.ts'] });
+
+    expect(report.findings).toContainEqual(expect.objectContaining({ kind: 'protocol_import' }));
+  });
+
+  it.each([
+    ['identifier spread', "const options = { base: '../vtt' }; import.meta.glob('./x.ts', { ...options });"],
+    ['computed option key', "import.meta.glob('./x.ts', { ['base']: '../vtt' });"],
+    ['non-constant base', "import.meta.glob('./x.ts', { base: globBase });"],
+  ] as const)('fails closed on Vite glob options with a non-literal %s', (_label, addedText) => {
+    const report = inspectHeldoutLeakChanges([{
+      path: 'src/ui/repair-ranking.ts',
+      addedText,
+    }], 'F', bindings, { candidateFiles: ['src/vtt/heldout-evaluation.ts'] });
+
+    expect(report.findings).toContainEqual(expect.objectContaining({
+      kind: 'unresolved_module_edge',
+    }));
+  });
+
   it('treats a leading ** Vite glob as candidate-rooted', () => {
     const report = inspectHeldoutLeakChanges([{
       path: 'src/ui/repair-ranking.ts',
@@ -463,35 +511,34 @@ describe('held-out reserve leak wall', () => {
     ['createRequire receiver', [
       "import { createRequire } from 'node:module';",
       "createRequire(import.meta.url).resolve('../vtt/heldout-evaluation.ts');",
-    ].join('\n')],
+    ].join('\n'), 'protocol_resolution'],
     ['destructured createRequire receiver', [
       "const { createRequire: makeRequire } = require('node:module');",
       "makeRequire(import.meta.url)('../vtt/heldout-evaluation.ts');",
-    ].join('\n')],
+    ].join('\n'), 'protocol_import'],
     ['renamed loader alias', [
       'const load = require;',
       "load('../vtt/heldout-evaluation.ts');",
-    ].join('\n')],
+    ].join('\n'), 'protocol_import'],
     ['destructured resolver alias', [
       'const { resolve: locate } = require;',
       "locate('../vtt/heldout-evaluation.ts');",
-    ].join('\n')],
-    ['comma resolver', "(0, require.resolve)('../vtt/heldout-evaluation.ts');"],
+    ].join('\n'), 'protocol_resolution'],
+    ['comma resolver', "(0, require.resolve)('../vtt/heldout-evaluation.ts');", 'loader_reference_escaped'],
     ['resolver call',
-      "require.resolve.call(require, '../vtt/heldout-evaluation.ts');"],
+      "require.resolve.call(require, '../vtt/heldout-evaluation.ts');", 'protocol_resolution'],
     ['resolver apply',
-      "require.resolve.apply(require, ['../vtt/heldout-evaluation.ts']);"],
+      "require.resolve.apply(require, ['../vtt/heldout-evaluation.ts']);", 'protocol_resolution'],
     ['Reflect.apply',
-      "Reflect.apply(require.resolve, require, ['../vtt/heldout-evaluation.ts']);"],
-    ['module.require', "module.require('../vtt/heldout-evaluation.ts');"],
-  ] as const)('rejects held-out access through %s', (_label, addedText) => {
+      "Reflect.apply(require.resolve, require, ['../vtt/heldout-evaluation.ts']);", 'protocol_resolution'],
+    ['module.require', "module.require('../vtt/heldout-evaluation.ts');", 'protocol_import'],
+  ] as const)('rejects held-out access through %s', (_label, addedText, expectedKind) => {
     const report = inspectHeldoutLeakChanges([{
       path: 'tools/tuning/repair-ranking.ts',
       addedText,
     }], 'F', bindings);
 
-    expect(report.findings.some((finding) =>
-      finding.kind === 'protocol_import' || finding.kind === 'protocol_resolution')).toBe(true);
+    expect(report.findings).toContainEqual(expect.objectContaining({ kind: expectedKind }));
   });
 
   it('fails closed when bind lets a known resolver reference escape', () => {
@@ -520,38 +567,50 @@ describe('held-out reserve leak wall', () => {
     ['node:module namespace import', [
       "import * as M from 'node:module';",
       "M.createRequire(import.meta.url).resolve('../vtt/heldout-evaluation.ts');",
-    ].join('\n')],
+    ].join('\n'), 'protocol_resolution'],
     ['prefixless module default import', [
       "import M from 'module';",
       "M.createRequire(import.meta.url)('../vtt/heldout-evaluation.ts');",
-    ].join('\n')],
+    ].join('\n'), 'protocol_import'],
     ['prefixless CommonJS module namespace', [
       "const M = require('module');",
       "M.createRequire(import.meta.url)('../vtt/heldout-evaluation.ts');",
-    ].join('\n')],
+    ].join('\n'), 'protocol_import'],
     ['destructured import.meta resolver', [
       'const { resolve: locate } = import.meta;',
       "locate('../vtt/heldout-evaluation.ts');",
-    ].join('\n')],
+    ].join('\n'), 'protocol_resolution'],
     ['computed destructured resolver', [
       "const { ['resolve']: locate } = import.meta;",
       "locate('../vtt/heldout-evaluation.ts');",
-    ].join('\n')],
+    ].join('\n'), 'protocol_resolution'],
     ['element-access Reflect.apply', [
       "Reflect['apply'](require.resolve, undefined, ['../vtt/heldout-evaluation.ts']);",
-    ].join('\n')],
+    ].join('\n'), 'protocol_resolution'],
     ['conditional loader alias', [
       'const load = true ? require : require;',
       "load('../vtt/heldout-evaluation.ts');",
-    ].join('\n')],
-  ] as const)('rejects held-out access through %s', (_label, addedText) => {
+    ].join('\n'), 'loader_reference_escaped'],
+  ] as const)('rejects held-out access through %s', (_label, addedText, expectedKind) => {
     const report = inspectHeldoutLeakChanges([{
       path: 'tools/tuning/repair-ranking.ts',
       addedText,
     }], 'F', bindings);
 
-    expect(report.findings.some((finding) =>
-      finding.kind === 'protocol_import' || finding.kind === 'protocol_resolution')).toBe(true);
+    expect(report.findings).toContainEqual(expect.objectContaining({ kind: expectedKind }));
+  });
+
+  it('tracks loader bindings by symbol rather than identifier spelling', () => {
+    const report = inspectHeldoutLeakChanges([{
+      path: 'tools/tuning/repair-ranking.ts',
+      addedText: [
+        'function useOrdinaryLoader(require: (path: string) => unknown) {',
+        "  return require('./ordinary-module');",
+        '}',
+      ].join('\n'),
+    }], 'F', bindings);
+
+    expect(report.findings).toEqual([]);
   });
 
   it('fails closed when a createRequire factory reference escapes through an object', () => {
@@ -572,6 +631,96 @@ describe('held-out reserve leak wall', () => {
     const report = inspectHeldoutLeakChanges([{
       path: 'tools/tuning/repair-ranking.ts',
       addedText: 'const escaped = condition ? require : ordinaryFunction;',
+    }], 'F', bindings);
+
+    expect(report.findings).toContainEqual(expect.objectContaining({
+      kind: 'loader_reference_escaped',
+    }));
+  });
+
+  it('fails closed when tracked resolvers enter a nullish expression', () => {
+    const report = inspectHeldoutLeakChanges([{
+      path: 'tools/probe.cjs',
+      addedText: [
+        'const locate = require.resolve ?? require.resolve;',
+        "locate('../src/vtt/heldout-evaluation.ts');",
+      ].join('\n'),
+    }], 'F', bindings);
+
+    expect(report.findings).toContainEqual(expect.objectContaining({
+      kind: 'loader_reference_escaped',
+    }));
+  });
+
+  it.each([
+    ['module namespace alias', [
+      "import * as M from 'node:module';",
+      'const N = M;',
+      "N.createRequire(import.meta.url).resolve('../vtt/heldout-evaluation.ts');",
+    ].join('\n')],
+    ['inline CommonJS module factory', [
+      "require('node:module').createRequire(__filename).resolve('../vtt/heldout-evaluation.ts');",
+    ].join('\n')],
+    ['await-import destructured factory', [
+      "const { createRequire } = await import('node:module');",
+      "createRequire(import.meta.url).resolve('../vtt/heldout-evaluation.ts');",
+    ].join('\n')],
+    ['await-import destructured default module', [
+      "const { default: M } = await import('node:module');",
+      "M.createRequire(import.meta.url).resolve('../vtt/heldout-evaluation.ts');",
+    ].join('\n')],
+  ] as const)('tracks %s through to the held-out edge', (_label, addedText) => {
+    const report = inspectHeldoutLeakChanges([{
+      path: 'tools/tuning/repair-ranking.ts',
+      addedText,
+    }], 'F', bindings);
+
+    expect(report.findings).toContainEqual(expect.objectContaining({
+      kind: 'protocol_resolution',
+    }));
+  });
+
+  it.each([
+    ['named export', 'const load = require; export { load };'],
+    ['default export', 'const load = require; export default load;'],
+    ['exported alias declaration', 'export const load = require;'],
+    ['bound script loader', 'const loadScripts = self.importScripts.bind(self);'],
+    ['builtin re-export', "export { createRequire } from 'node:module';"],
+  ] as const)('fails closed when a tracked loader escapes through %s', (_label, addedText) => {
+    const report = inspectHeldoutLeakChanges([{
+      path: 'tools/tuning/repair-ranking.ts',
+      addedText,
+    }], 'F', bindings);
+
+    expect(report.findings).toContainEqual(expect.objectContaining({
+      kind: 'loader_reference_escaped',
+    }));
+  });
+
+  it.each([
+    ['a nested object-array value', 'const escaped = { nested: [require] };'],
+    ['a spread argument payload', 'ordinaryFunction(...[require.resolve]);'],
+    ['tagged-template invocation', 'const escaped = require.resolve`policy`;'],
+  ] as const)('default-denies the unenumerated loader use in %s', (_label, addedText) => {
+    const report = inspectHeldoutLeakChanges([{
+      path: 'tools/tuning/repair-ranking.ts',
+      addedText,
+    }], 'F', bindings);
+
+    expect(report.findings).toContainEqual(expect.objectContaining({
+      kind: 'loader_reference_escaped',
+    }));
+  });
+
+  it.each([
+    ['call', "require.resolve.call(require, '../vtt/heldout-evaluation.ts');"],
+    ['apply', "require.resolve.apply(require, ['../vtt/heldout-evaluation.ts']);"],
+    ['bind', 'const locate = require.resolve.bind(require);'],
+    ['computed member access', "require['resolve']('../vtt/heldout-evaluation.ts');"],
+  ] as const)('default-denies tracked loader .%s-style indirection', (_label, addedText) => {
+    const report = inspectHeldoutLeakChanges([{
+      path: 'tools/tuning/repair-ranking.ts',
+      addedText,
     }], 'F', bindings);
 
     expect(report.findings).toContainEqual(expect.objectContaining({
@@ -748,6 +897,31 @@ describe('held-out reserve leak wall', () => {
     }));
   });
 
+  it('fails closed when ambiguity occurs inside a nested package condition', () => {
+    const report = inspectHeldoutLeakChanges([{
+      path: 'src/ui/repair-ranking.ts',
+      addedText: "void import('#policy');",
+    }], 'F', bindings, {
+      packageJsonFiles: {
+        'package.json': JSON.stringify({
+          imports: {
+            '#policy': {
+              import: {
+                browser: './src/vtt/heldout-evaluation.ts',
+                default: './src/vtt/party-pack.ts',
+              },
+              default: './src/vtt/party-pack.ts',
+            },
+          },
+        }),
+      },
+    });
+
+    expect(report.findings).toContainEqual(expect.objectContaining({
+      kind: 'unresolved_module_edge',
+    }));
+  });
+
   it('re-inspects an unchanged #imports consumer after a package-only configuration change', () => {
     const packageSource = JSON.stringify({
       imports: { '#policy': './src/vtt/heldout-evaluation.ts' },
@@ -775,8 +949,6 @@ describe('held-out reserve leak wall', () => {
       path: 'vite.config.ts',
       addedText: "export default { resolve: { alias: { '@policy': './src/vtt/heldout-evaluation.ts' } } };",
     }], 'F', bindings, {
-      resolutionConfigChanged: true,
-      configuredAliasPrefixes: ['@policy'],
       candidateSourceFiles: {
         'src/ui/unchanged-policy-consumer.ts': "import policy from '@policy';",
       },
@@ -786,6 +958,77 @@ describe('held-out reserve leak wall', () => {
       path: 'src/ui/unchanged-policy-consumer.ts',
       kind: 'unresolved_module_edge',
     }));
+  });
+
+  it.each([
+    ['shorthand literal object', [
+      "const alias = { '@policy': './src/vtt/heldout-evaluation.ts' };",
+      'export default { resolve: { alias } };',
+    ].join('\n'), "import policy from '@policy';"],
+    ['identifier array with find/replacement', [
+      "const alias = [{ find: '@policy', replacement: './src/vtt/heldout-evaluation.ts' }];",
+      'export default { resolve: { alias } };',
+    ].join('\n'), "import policy from '@policy';"],
+    ['spread literal alias array', [
+      "const baseAliases = [{ find: '@policy', replacement: './src/vtt/heldout-evaluation.ts' }];",
+      'export default { resolve: { alias: [...baseAliases] } };',
+    ].join('\n'), "import policy from '@policy';"],
+    ['non-literal alias source', [
+      'const alias = loadAliases();',
+      'export default { resolve: { alias } };',
+    ].join('\n'), "import policy from './public-policy';"],
+    ['regex alias applied to a relative specifier', [
+      "const alias = [{ find: /^\\.\\/public-policy$/, replacement: './src/vtt/heldout-evaluation.ts' }];",
+      'export default { resolve: { alias } };',
+    ].join('\n'), "import policy from './public-policy';"],
+  ] as const)('discovers and fails closed for Vite alias configuration using %s',
+  (_label, configSource, consumerSource) => {
+    const report = inspectHeldoutLeakChanges([{
+      path: 'vite.config.ts',
+      addedText: configSource,
+      sourceText: configSource,
+    }], 'F', bindings, {
+      candidateSourceFiles: {
+        'src/ui/unchanged-policy-consumer.ts': consumerSource,
+      },
+    });
+
+    expect(report.findings).toContainEqual(expect.objectContaining({
+      path: 'src/ui/unchanged-policy-consumer.ts',
+      kind: 'unresolved_module_edge',
+    }));
+  });
+
+  it('fails the Vite config itself when its alias source is non-literal', () => {
+    const configSource = [
+      'const alias = loadAliases();',
+      'export default { resolve: { alias } };',
+    ].join('\n');
+    const report = inspectHeldoutLeakChanges([{
+      path: 'vite.config.ts',
+      addedText: configSource,
+      sourceText: configSource,
+    }], 'F', bindings);
+
+    expect(report.findings).toContainEqual(expect.objectContaining({
+      path: 'vite.config.ts',
+      kind: 'unresolved_module_edge',
+    }));
+  });
+
+  it('skips declaration-only files during configuration-wide inspection', () => {
+    const report = inspectHeldoutLeakChanges([{
+      path: 'package.json',
+      addedText: '{"imports":{}}',
+    }], 'F', bindings, {
+      packageJsonFiles: { 'package.json': '{"imports":{}}' },
+      candidateSourceFiles: {
+        'src/vite-env.d.ts': 'declare module "*.svg" { const source: string; export default source; }',
+        'src/ui/clean.ts': 'export const clean = true;',
+      },
+    });
+
+    expect(report).toMatchObject({ checkedFiles: 3, findings: [] });
   });
 
   it('uses NUL-delimited Git records so rename-only and quoted paths are inspected', () => {
