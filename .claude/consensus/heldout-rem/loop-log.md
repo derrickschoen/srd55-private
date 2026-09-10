@@ -44,3 +44,5 @@
 - 2026-09-10 12:26 EDT — r13 lane BLOCKED correctly: real vite.config.ts is a defineConfig callback + conditional + spread of a same-file const (no alias key). RULE C refined to a reachable-literal set with the "every symbol reference inside the reachable set" guard replacing all mutation/transfer tracking; lane resumed (r13b).
 
 - 2026-09-10 12:43 EDT — r13b BLOCKED correctly: real tree passes `window` to constructors/defaults (encounter-app.ts:1365, router.ts:113). RULE N refined: N1 strict for import.meta + module/worker namespaces; N2 browser globals inert to transfer, loader-member USE sites must resolve to a recognised root by symbol. Lane resumed (r13c).
+
+- 2026-09-10 13:04 EDT — r13 lane DONE (structural rules C/N1/N2; reference-flow machinery deleted); supervisor verification tsc/sg/diffcheck 0, 9 specs 512/512; committed 7e1b6f86; Astra r13 dispatched (resume 01a088d6…) with rule-probing instructions.
