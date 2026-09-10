@@ -91,8 +91,6 @@ function expression(count: number, sides: number): RollComponentSpec {
   return { kind: 'dice_expression', expression: { count, sides: dieSides(sides), modifier: 0 } };
 }
 
-let report: ChallengeReducerFeasibilityReportV1;
-
 function greatestCommonDivisor(left: bigint, right: bigint): bigint {
   let a = left < 0n ? -left : left;
   let b = right < 0n ? -right : right;
@@ -435,25 +433,96 @@ describe('D584.4 deterministic feasibility accounting closure', () => {
 });
 
 describe('D583 reducer-backed challenge feasibility', () => {
-  beforeAll(async () => {
-    report = await runChallengeReducerFeasibility(fixture);
-  }, 180_000);
+  describe('production feasibility report consumers', () => {
+    let report: ChallengeReducerFeasibilityReportV1;
 
-  it('transactional adapter preserves die provenance across checkpoint replay and rollback', () => {
-    expect(migrationEvidence.provenanceManifest).toHaveLength(33);
-    expect(migrationEvidence.provenanceManifest.every((record) =>
-      record.face >= 1 && record.face <= record.sides &&
-      String(record.provenance.occurrenceId).length > 0 &&
-      String(record.provenance.operationPath).length > 0)).toBe(true);
-    if (report.verdict === 'GO') {
-      expect(report.totals.maximumDraws).toBeGreaterThan(0);
-      expect(report.totals.reducerApplications).toBeGreaterThan(report.totals.completedLeaves);
-      expect(report.rooms.every((room) => room.base.continuationEquivalent)).toBe(true);
-    } else {
-      expect(report.failure).not.toBeNull();
-      expect(report.rooms).toEqual([]);
-      expect(report.totals.completedLeaves).toBe(0);
-    }
+    beforeAll(async () => {
+      report = await runChallengeReducerFeasibility(fixture);
+    }, 180_000);
+
+    it('transactional adapter preserves die provenance across checkpoint replay and rollback', () => {
+      expect(migrationEvidence.provenanceManifest).toHaveLength(33);
+      expect(migrationEvidence.provenanceManifest.every((record) =>
+        record.face >= 1 && record.face <= record.sides &&
+        String(record.provenance.occurrenceId).length > 0 &&
+        String(record.provenance.operationPath).length > 0)).toBe(true);
+      if (report.verdict === 'GO') {
+        expect(report.totals.maximumDraws).toBeGreaterThan(0);
+        expect(report.totals.reducerApplications).toBeGreaterThan(report.totals.completedLeaves);
+        expect(report.rooms.every((room) => room.base.continuationEquivalent)).toBe(true);
+      } else {
+        expect(report.failure).not.toBeNull();
+        expect(report.rooms).toEqual([]);
+        expect(report.totals.completedLeaves).toBe(0);
+      }
+    });
+
+    it('independent roll provenance class survives every reducer adapter and owns checkpoints', () => {
+      if (report.verdict === 'GO') {
+        expect(report.failure).toBeNull();
+        expect(report.totals.reducerApplications).toBeGreaterThan(0);
+        expect(report.totals.maximumCommandCheckpoints).toBe(4);
+      } else {
+        expect(report.failure?.kind).toMatch(/^(limit_exhausted|derived_cap_overflow)$/);
+      }
+    });
+
+    it('B C A reducer stages have mass one and report actual applications states heap and wall', () => {
+      expect(report.roomOrder).toEqual(['B', 'C', 'A']);
+      if (report.verdict === 'GO') {
+        expect(report.rooms).toHaveLength(3);
+        for (const room of report.rooms) {
+          expect(room.base).toMatchObject({ mass: { numerator: '1', denominator: '1' } });
+          expect(room.base.reducerApplications).toBeGreaterThan(0);
+          expect(room.base.groupedStates).toBeGreaterThan(0);
+          expect(room.base.peakHeapUsedBytes).toBeGreaterThan(0);
+          expect(room.base.wallMilliseconds).toBeGreaterThan(0);
+        }
+      } else {
+        expect(report.failure).not.toBeNull();
+        expect(report.rooms).toEqual([]);
+      }
+    });
+
+    it('state merging proves equal next commands objective eligibility and provenance requests', () => {
+      if (report.verdict === 'GO') {
+        expect(report.totals.continuationEquivalent).toBe(true);
+        expect(report.rooms.flatMap((room) => [room.base, ...room.variants]).every(
+          (variant) => variant.continuationEquivalent,
+        )).toBe(true);
+      } else {
+        expect(report.totals.continuationEquivalent).toBe(false);
+        expect(report.derivedWitnessCaps).toBeNull();
+      }
+    });
+
+    it('publishes the immutable cumulative d583 bca limit profile', () => {
+      expect(Object.isFrozen(D583_BCA_FEASIBILITY_LIMITS_V1)).toBe(true);
+      expect(D583_BCA_FEASIBILITY_LIMITS_V1).toEqual({
+        profile: 'd583_bca_v1', maxFaceExpansions: 10_000_000, maxReducerApplications: 5_000_000,
+        maxLiveNodes: 250_000, maxHeapUsedBytes: 1_073_741_824, maxWallMilliseconds: 180_000,
+        maxCommandCheckpointsPerBranch: 64, maxDrawsPerBranch: 128,
+      });
+      expect(report.limits).toBe(D583_BCA_FEASIBILITY_LIMITS_V1);
+    });
+
+    it('feasibility fails closed on mass provenance continuation collision or unmeasured variant', () => {
+      if (report.verdict === 'GO') {
+        expect(report.rooms.flatMap((room) => room.variants)).toHaveLength(54);
+        expect(report.totals.mass).toEqual({ numerator: '57', denominator: '1' });
+      } else {
+        expect(report.rooms).toEqual([]);
+        expect(report.totals.mass).toEqual({ numerator: '0', denominator: '1' });
+        expect(report.failure).not.toBeNull();
+      }
+      const state = decodeArenaBasisEnvelopeV1(
+        JSON.parse(inputs.fixtures.readText('tests/fixtures/arena-basis-challenge/seed-5831001.json')) as unknown,
+        { mode: 'challenge' },
+      ).encounter.state;
+      const first = { ...state, combatants: state.combatants.map((entry, index) => index === 0 ? { ...entry, hitPoints: 59 } : entry) };
+      const second = { ...state, combatants: state.combatants.map((entry, index) => index === 0 ? { ...entry, hitPoints: 31 } : entry) };
+      expect(futureStateKeyV1(first, [])).not.toEqual(futureStateKeyV1(second, []));
+    });
   });
 
   it('successful save damage and capped healing expose explicit draw provenance', () => {
@@ -484,45 +553,6 @@ describe('D583 reducer-backed challenge feasibility', () => {
       { configured: 'never', resolution: 'decline', reactionDraws: 0 },
       { configured: 'ask', resolution: 'decline', reactionDraws: 0 },
     ]);
-  });
-
-  it('independent roll provenance class survives every reducer adapter and owns checkpoints', () => {
-    if (report.verdict === 'GO') {
-      expect(report.failure).toBeNull();
-      expect(report.totals.reducerApplications).toBeGreaterThan(0);
-      expect(report.totals.maximumCommandCheckpoints).toBe(4);
-    } else {
-      expect(report.failure?.kind).toMatch(/^(limit_exhausted|derived_cap_overflow)$/);
-    }
-  });
-
-  it('B C A reducer stages have mass one and report actual applications states heap and wall', () => {
-    expect(report.roomOrder).toEqual(['B', 'C', 'A']);
-    if (report.verdict === 'GO') {
-      expect(report.rooms).toHaveLength(3);
-      for (const room of report.rooms) {
-        expect(room.base).toMatchObject({ mass: { numerator: '1', denominator: '1' } });
-        expect(room.base.reducerApplications).toBeGreaterThan(0);
-        expect(room.base.groupedStates).toBeGreaterThan(0);
-        expect(room.base.peakHeapUsedBytes).toBeGreaterThan(0);
-        expect(room.base.wallMilliseconds).toBeGreaterThan(0);
-      }
-    } else {
-      expect(report.failure).not.toBeNull();
-      expect(report.rooms).toEqual([]);
-    }
-  });
-
-  it('state merging proves equal next commands objective eligibility and provenance requests', () => {
-    if (report.verdict === 'GO') {
-      expect(report.totals.continuationEquivalent).toBe(true);
-      expect(report.rooms.flatMap((room) => [room.base, ...room.variants]).every(
-        (variant) => variant.continuationEquivalent,
-      )).toBe(true);
-    } else {
-      expect(report.totals.continuationEquivalent).toBe(false);
-      expect(report.derivedWitnessCaps).toBeNull();
-    }
   });
 
   it('total-only grouping rejects the 59 2 versus 31 30 Longbow counterexample', () => {
@@ -908,16 +938,6 @@ describe('D583 reducer-backed challenge feasibility', () => {
     expect(horizon.endpointActorId).toBe(combatantId('combatant:generated-challenge-a-01-knight'));
   });
 
-  it('publishes the immutable cumulative d583 bca limit profile', () => {
-    expect(Object.isFrozen(D583_BCA_FEASIBILITY_LIMITS_V1)).toBe(true);
-    expect(D583_BCA_FEASIBILITY_LIMITS_V1).toEqual({
-      profile: 'd583_bca_v1', maxFaceExpansions: 10_000_000, maxReducerApplications: 5_000_000,
-      maxLiveNodes: 250_000, maxHeapUsedBytes: 1_073_741_824, maxWallMilliseconds: 180_000,
-      maxCommandCheckpointsPerBranch: 64, maxDrawsPerBranch: 128,
-    });
-    expect(report.limits).toBe(D583_BCA_FEASIBILITY_LIMITS_V1);
-  });
-
   it('rejects the first variant heap sample without hiding it behind a second reading', async () => {
     const heapValues = [
       10,
@@ -1031,24 +1051,6 @@ describe('D583 reducer-backed challenge feasibility', () => {
     expect(written).toEqual([result.report]);
     expect(heapValues).toEqual([10]);
     expect(nowValues).toEqual([D583_BCA_FEASIBILITY_LIMITS_V1.maxWallMilliseconds + 1]);
-  });
-
-  it('feasibility fails closed on mass provenance continuation collision or unmeasured variant', () => {
-    if (report.verdict === 'GO') {
-      expect(report.rooms.flatMap((room) => room.variants)).toHaveLength(54);
-      expect(report.totals.mass).toEqual({ numerator: '57', denominator: '1' });
-    } else {
-      expect(report.rooms).toEqual([]);
-      expect(report.totals.mass).toEqual({ numerator: '0', denominator: '1' });
-      expect(report.failure).not.toBeNull();
-    }
-    const state = decodeArenaBasisEnvelopeV1(
-      JSON.parse(inputs.fixtures.readText('tests/fixtures/arena-basis-challenge/seed-5831001.json')) as unknown,
-      { mode: 'challenge' },
-    ).encounter.state;
-    const first = { ...state, combatants: state.combatants.map((entry, index) => index === 0 ? { ...entry, hitPoints: 59 } : entry) };
-    const second = { ...state, combatants: state.combatants.map((entry, index) => index === 0 ? { ...entry, hitPoints: 31 } : entry) };
-    expect(futureStateKeyV1(first, [])).not.toEqual(futureStateKeyV1(second, []));
   });
 
   it('names derived-cap overflow and never clamps a completed exploration into GO', () => {
