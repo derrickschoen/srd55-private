@@ -19,3 +19,4 @@
 - 2026-09-10 13:08 EDT — Slice 2 fix pass DONE (legacy default, snapshot env on MCP paths, paired pin move); supervisor cumulative 3209/3213 (load timeouts), serial 2 files green, arena alone 44/44; committed 03bdf1ef; Astra r1 dispatched (fresh session).
 
 - 2026-09-10 13:13 EDT — Slice 2 Astra r1 REJECT (F1 scope/11th file — supervisor-authorized deviation D586.186; F2 launcher infers legacy from missing binding; F3 ledger rows). r2 dispatched (resume 01a08bc1…).
+- 2026-09-10 14:19 EDT — Slice 2 r2 supervisor cumulative (172 specs, verify-offers-s2c.*): 3203/3213, ten reds all load timeouts; serial rerun of five files (verify-offers-s2c-serial.*): 238/239, the one red is the D544 arena 30 s case (`suppresses every intel context surface…`, timed out at 30000 ms under concurrent lanes + browser check). Arena file alone rerun queued after the browser check; commit + Astra r2 on green.
