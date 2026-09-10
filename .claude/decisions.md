@@ -22351,3 +22351,7 @@ Asked one question at a time, with the supervisor's explanation of the wall (sta
 ### D607.1 — OWNER (2026-09-10 17:08): "the wall will never be perfect. watch out for diminishing returns"
 
 Binding reading for HELDOUT-RUNTIME-GUARD-01: the plan gets at most two Astra review rounds; the implementation gets one end-of-lane Astra review and at most two fix rounds (the D605 shape); after that the guard lands at its bounded level with the residual classes in a ledger. No further rounds on the static wall. The supervisor stops any unit whose findings-per-round has stopped falling and puts the residual to the owner instead of dispatching another round.
+
+### D607.2 — clock correction (supervisor, 2026-09-10 17:01 EDT)
+
+The headings of D605, D606, D607 and D607.1 carry estimated times (16:50, 16:55, 17:05, 17:08). The machine clock at the moment D607.1 was committed read 17:00 EDT; the four rulings were received between roughly 16:50 and 17:00 in that order. Git commit times on 83011328, 3e3b48e9, 6f958c0a and 289a09d8 are authoritative. Same drift the supervisor already corrected in the loop-logs earlier today; timestamps are now taken from `date` into a variable before writing.
