@@ -10,6 +10,7 @@ import {
   createEngineOptionEnvironment,
   createLegacyEngineOptionEnvironment,
   decodeEngineOptionEnvironmentBinding,
+  type EngineOptionEnvironment,
 } from '../../../src/vtt/offers/offer-environment';
 import { ENGINE_OFFER_CAPABILITIES } from '../../../src/vtt/offers/offer-generator-registry';
 import { createPartyThreatCatalog } from '../../../src/vtt/offers/party-threat-catalog';
@@ -58,7 +59,7 @@ function representedEnvironment() {
   });
 }
 
-function launcher(environment: ReturnType<typeof representedEnvironment>): EngineMcpLauncherManifest {
+function launcher(environment: EngineOptionEnvironment): EngineMcpLauncherManifest {
   return {
     format: 'engine-mcp-launcher-v1',
     fixturePath: '/tmp/offers-s2-fixture.json',
@@ -108,6 +109,7 @@ describe('immutable offer environment', () => {
     if (decoded === null) throw new Error('Valid offer-bound launcher was not decoded.');
     const reconstructed = reconstructLauncherOfferEnvironment(decoded);
     expect(reconstructed).not.toBe(environment);
+    expect(reconstructed.binding.mode).toBe('revision_bound');
     expect(reconstructed.queries).toBe(canonicalEngineQueryPort);
     expect(reconstructed.binding).toEqual(environment.binding);
     expect(reconstructed.digest).toBe(EXPECTED_REPRESENTED_ENVIRONMENT_DIGEST);
@@ -152,7 +154,11 @@ describe('immutable offer environment', () => {
       offerEnvironment?: unknown;
     };
     delete launcherWithoutBinding.offerEnvironment;
-    const decodedLegacyLauncher = decodeEngineMcpLauncherManifest(launcherWithoutBinding);
+    expect(() => decodeEngineMcpLauncherManifest(launcherWithoutBinding)).toThrow(
+      new TypeError('Engine MCP launcher requires an explicit offer environment binding.'),
+    );
+
+    const decodedLegacyLauncher = decodeEngineMcpLauncherManifest(launcher(environment));
     if (decodedLegacyLauncher === null) throw new Error('Valid legacy launcher was not decoded.');
     const reconstructedLegacy = reconstructLauncherOfferEnvironment(decodedLegacyLauncher);
     expect(reconstructedLegacy.binding.mode).toBe('legacy_standard');

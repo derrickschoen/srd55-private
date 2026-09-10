@@ -716,19 +716,21 @@ function isLauncherManifest(value: unknown): value is EngineMcpLauncherManifest 
     (input['boardImage'] === undefined || isEngineMcpBoardImageBinding(input['boardImage']));
 }
 
-export type DecodedEngineMcpLauncherManifest = EngineMcpLauncherManifest & {
+export type DecodedEngineMcpLauncherManifest = Omit<EngineMcpLauncherManifest, 'offerEnvironment'> & {
+  readonly offerEnvironment: EngineOptionEnvironmentBinding;
   readonly requestKind: EngineOrdinaryRequestKind;
   readonly overridePolicy: OverridePolicy;
 };
 
 export function decodeEngineMcpLauncherManifest(value: unknown): DecodedEngineMcpLauncherManifest | null {
   if (!isLauncherManifest(value)) return null;
-  const offerEnvironment = value.offerEnvironment === undefined
-    ? undefined
-    : decodeEngineOptionEnvironmentBinding(value.offerEnvironment);
+  if (value.offerEnvironment === undefined) {
+    throw new TypeError('Engine MCP launcher requires an explicit offer environment binding.');
+  }
+  const offerEnvironment = decodeEngineOptionEnvironmentBinding(value.offerEnvironment);
   return {
     ...value,
-    ...(offerEnvironment === undefined ? {} : { offerEnvironment }),
+    offerEnvironment,
     requestKind: value.requestKind ?? 'round_plan',
     overridePolicy: value.overridePolicy ?? DEFAULT_OVERRIDE_POLICY,
   };
@@ -737,9 +739,7 @@ export function decodeEngineMcpLauncherManifest(value: unknown): DecodedEngineMc
 export function reconstructLauncherOfferEnvironment(
   manifest: DecodedEngineMcpLauncherManifest,
 ): EngineOptionEnvironment {
-  return manifest.offerEnvironment === undefined
-    ? createLegacyEngineOptionEnvironment(canonicalEngineQueryPort)
-    : engineOptionEnvironmentFromBinding(canonicalEngineQueryPort, manifest.offerEnvironment);
+  return engineOptionEnvironmentFromBinding(canonicalEngineQueryPort, manifest.offerEnvironment);
 }
 
 async function launcherManifest(path: string): Promise<DecodedEngineMcpLauncherManifest | null> {

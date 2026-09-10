@@ -9,6 +9,7 @@ import {
   freshMonsterPlanningState,
   loadArenaFixture,
 } from '../../../src/vtt/mcp/entrypoint';
+import { createLegacyEngineOptionEnvironmentBinding } from '../../../src/vtt/offers/offer-environment';
 
 const FIXTURE = 'tests/fixtures/arena-basis/seed-3943006.json';
 const META = mcpRequestMeta({ name: 'SUBSTITUTED_LOCAL', version: '1.0.0' });
@@ -80,6 +81,7 @@ describe('engine MCP process mutation boundary', () => {
       requestId: 'request:legacy-launcher',
       phase: 'initial',
       correctionNumber: 0,
+      offerEnvironment: createLegacyEngineOptionEnvironmentBinding(),
       room: 1,
       historyKind: 'room_ready',
     };
