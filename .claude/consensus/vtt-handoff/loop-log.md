@@ -20,3 +20,4 @@ Machine constraint: the D569 v5 first arm (pid 1201481, port 4530) runs until ~1
 - 2026-09-09 21:11 PLAN ROUND 3 (FINAL): candidate r3 sha 72ef78a19ae55b1d4b2c8d2a04e7caad10fc2357ec53ccf73b3eb99a9f118b7f frozen (copy plan-candidate-r3-72ef78a1.md); Astra review r3 dispatched (resume 01a087f9…).
 - 2026-09-09 21:18 PLAN ROUND 3 CLOSED: Astra REJECT (F8, F13, F20 partial; F24 new) → shelved under HARD_GATE (b); owner asked to authorize a remediation round.
 - 2026-09-09 22:30 PLAN REMEDIATION: candidate sha 39415d8c82e6692f57a60ce0aec54727665bfb0525f4e68263ec4672b2b956b6 frozen (copy plan-candidate-rem-39415d8c.md); Astra remediation review dispatched.
+- 2026-09-09 22:34 remediation review: F8/F13/F20/F24 RESOLVED; rewrite regressions F25 (door semantics lost), F26 (parity matrix lost), F27 (summary stale). Supervisor: restoring lost text completes the same remediation; lane resumed (pass 2).
