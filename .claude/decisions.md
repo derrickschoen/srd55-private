@@ -22182,3 +22182,20 @@ dnd-wt-d569-patch (branch claude/d569-patch from 90484d45) as `.tmp-plans/2026-0
 D569-PATCH-01 round 1 dispatched (codex sol; replacement external scripts go under tools/d569-v5/ and the runbook v2 under
 .tmp-plans/ for the supervisor to install and pin; ~/dnd-slim-runs untouched by lanes). Relaunch (spec 4.10, D590) follows the
 patch's acceptance, its main-shaped gate and the pin re-review.
+
+### D586.174 — VTT-HANDOFF-01 plan SHELVED at the round cap: final Astra review REJECT with four residuals (2026-09-09 21:18 EDT)
+
+Candidate r3 (sha 72ef78a1…, 548 lines; copy `.claude/consensus/vtt-handoff/plan-candidate-r3-72ef78a1.md`) reviewed by Astra
+(session 01a087f9…, text `plan-review-r3-astra.md`): REJECT. Nine of the thirteen round-2 findings resolved (F5, F7, F11, F14,
+F15, F17, F19, F21, F22, F23); residual SIGNIFICANT: F8 door.set during a pending human request still deadlocks (the proposed
+wait-for-step-quiescence needs the cancellation it prevents; required order: validate → block repump → set pause state → abort the
+pending request → await settlement → revalidate + apply → recompute offers → resume per prior pause state; test with no human
+response); F13 `tests/integration/vtt/node-runtime-launch.test.ts` is auto-discovered by vitest (`tests/**/*.test.ts`) and would
+run `serve` (which builds dist) inside `npm run test:gate` before `npm run build` — it must live outside ordinary discovery in an
+explicit supervisor integration config run after the build; F20 S7c's UI-to-service convergence assertion precedes the S8 UI
+refactor — split the assertion (adapters now, UI after S8); F24 NEW: `tokenId` on `PlayerVisiblePlacedCombatant` and
+revision-stamped continuations reach `PersistedCoordinatorState` (ControllerRequest.visibleState is persisted and checksummed;
+restored pending requests lack the new field) — persistence boundary must be specified (renderer-only enrichment + transient
+freshness with a restore policy, or an explicit compatibility design with baseline-authored pending-request fixtures). Three
+rounds spent → HARD_GATE (b): the plan is shelved; a remediation artifact needs the owner's authorization (asked, as for the RCA in
+D602). Implementation of VTT-HANDOFF-01 has not started; the worktree is clean at 0f84e09f.
