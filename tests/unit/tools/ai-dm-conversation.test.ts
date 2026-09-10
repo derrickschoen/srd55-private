@@ -108,6 +108,23 @@ async function minimalAlternatingInitiativeRoom(): Promise<EncounterState> {
   };
 }
 
+async function validRecalculationRoom(): Promise<EncounterState> {
+  const state = await alternatingInitiativeRoom();
+  return {
+    ...state,
+    combatants: state.combatants.map((combatant) => ({
+      ...combatant,
+      profile: {
+        ...combatant.profile,
+        rules: {
+          ...combatant.profile.rules,
+          initiativeBonus: combatant.profile.kind === 'monster' ? -20 : 20,
+        },
+      },
+    })),
+  };
+}
+
 class RecordingConversationAdapter implements AgentSessionAdapter {
   readonly kind = 'codex' as const;
   readonly startInvocations: AgentInvocation[] = [];
@@ -1068,27 +1085,35 @@ describe('AI-DM engine MCP conversation runner', () => {
 
   it('expired recalculation authorization cannot retain or execute recalculated entries on the real path', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-recalculation-deadline-'));
-    const adapter = new SerializedRoundTripAdapter('first_shown');
+    const adapter = new SerializedRoundTripAdapter('attack');
     let policyMs = 0;
-    let recalculationValidated = false;
+    let validatedActorIds: readonly CombatantId[] | null = null;
+    let retainedRecalculation: readonly unknown[] | null | undefined;
     const result = await runConversation(parseConversationArgs([
       '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
       '--combat-model', 'initiative_segments_v1', '--dry-run',
     ]), {
       adapter,
-      roomStates: [await alternatingInitiativeRoom()],
+      roomStates: [await validRecalculationRoom()],
       policyNow: () => policyMs,
       forceSpeculationRecalculation: true,
-      onSpeculationRecalculationValidated: () => {
-        recalculationValidated = true;
+      onSpeculationRecalculationValidated: (entries) => {
+        validatedActorIds = entries.map((entry) => entry.proposal.actorId);
         policyMs = 180_000;
       },
+      onSpeculationRecalculationResolved: (entries) => { retainedRecalculation = entries; },
     });
 
     expect(adapter.resumeInvocations).toContainEqual(expect.objectContaining({
       callPhase: 'speculation_recalculation',
     }));
-    expect(recalculationValidated).toBe(true);
+    expect(validatedActorIds).toHaveLength(3);
+    expect(validatedActorIds).toEqual(expect.arrayContaining([
+      combatantId('combatant:generated-3943001-monster-1'),
+      combatantId('combatant:generated-3943001-monster-2'),
+      combatantId('combatant:generated-3943001-monster-3'),
+    ]));
+    expect(retainedRecalculation).toBeNull();
     expect(result.rows[0]).toEqual(expect.objectContaining({
       outcome: 'refused',
       roundWallTimedOut: true,

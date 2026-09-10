@@ -770,8 +770,14 @@ export interface ConversationRunOptions {
   ) => ConversationPlannerAttribution;
   /** Test-only boundary immediately after speculative branch validation. */
   readonly onSpeculationAdoptionValidated?: () => void;
-  /** Test-only boundary inside speculative recalculation validation. */
-  readonly onSpeculationRecalculationValidated?: () => void;
+  /** Test-only boundary after speculative recalculation mechanics and actor-set validation. */
+  readonly onSpeculationRecalculationValidated?: (
+    entries: readonly SegmentMonsterPlanEntry[],
+  ) => void;
+  /** Test-only observation of the recalculation deadline helper's retained result. */
+  readonly onSpeculationRecalculationResolved?: (
+    entries: readonly SegmentMonsterPlanEntry[] | null,
+  ) => void;
   /** Test-only work injected inside deterministic fallback computation. */
   readonly onDeterministicFallback?: () => void;
 }
@@ -5447,13 +5453,12 @@ async function runConversationWithConfiguredIntel(
                         recalculated = acceptSpeculationRecalculationBeforeDeadline(
                           roundDeadline,
                           () => {
-                            options.onSpeculationRecalculationValidated?.();
                             const checked = authorizedMechanics(state, proposal);
                             if (checked.entries === null || !sameCombatantSet(
                               checked.entries.map((entry) => entry.proposal.actorId),
                               segmentActors,
                             )) return null;
-                            return checked.entries.map((entry) => ({
+                            const validatedEntries = checked.entries.map((entry) => ({
                               proposal: structuredClone(entry.proposal),
                               option: structuredClone(entry.option),
                               primaryOption: structuredClone(entry.primaryOption),
@@ -5461,8 +5466,11 @@ async function runConversationWithConfiguredIntel(
                               mechanics: entry.mechanics,
                               selectedBranch: entry.selectedBranch,
                             }));
+                            options.onSpeculationRecalculationValidated?.(validatedEntries);
+                            return validatedEntries;
                           },
                         );
+                        options.onSpeculationRecalculationResolved?.(recalculated);
                       }
                     } catch {
                       recalculated = null;
