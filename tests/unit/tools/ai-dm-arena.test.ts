@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
-import { encounterSessionId } from '../../../src/combat/values';
+import { encounterSessionId, type AgentSessionId } from '../../../src/combat/values';
 import { createEncounter } from '../../../src/combat/encounter';
 import {
   agentSessionIdFromCli,
@@ -37,6 +37,7 @@ import {
   extractArenaProbeVerdict,
   mapConversationKbReads,
   parseArenaArgs,
+  parseArenaCells,
   runArena,
   type ArenaRow,
 } from '../../../tools/ai-dm-arena';
@@ -200,7 +201,7 @@ class FakeCodexUsageAdapter implements AgentSessionAdapter {
   }
 
   private completed(
-    sessionId: AgentTurnResult['resumeSessionId'],
+    sessionId: AgentSessionId,
     invocation: AgentInvocation,
   ): AgentTurnResult {
     const usages = [
@@ -228,6 +229,9 @@ class FakeCodexUsageAdapter implements AgentSessionAdapter {
         modelContextWindow: contextTokenCount(258_400),
       },
       exit: 'completed',
+      processEvidence: null,
+      engineCatalogEvidence: null,
+      partialResultEvidence: { status: 'complete', decodedEventCount: 1 },
     };
   }
 
@@ -267,7 +271,7 @@ class ArenaRolloverFixtureAdapter implements AgentSessionAdapter {
 
   classifyFailure(): 'unknown' { return 'unknown'; }
 
-  #completed(sessionId: AgentTurnResult['resumeSessionId']): AgentTurnResult {
+  #completed(sessionId: AgentSessionId): AgentTurnResult {
     const usage = this.#usages.shift();
     if (usage === undefined) throw new Error('Arena rollover usage fixture was exhausted.');
     this.modelCalls += 1;
@@ -284,6 +288,9 @@ class ArenaRolloverFixtureAdapter implements AgentSessionAdapter {
         reasoningTokens: 0,
       },
       exit: 'completed',
+      processEvidence: null,
+      engineCatalogEvidence: null,
+      partialResultEvidence: { status: 'complete', decodedEventCount: 0 },
     };
   }
 }
@@ -317,6 +324,9 @@ class OrderingNullAdapter implements AgentSessionAdapter {
       finalText: '',
       usage: null,
       exit: 'completed',
+      processEvidence: null,
+      engineCatalogEvidence: null,
+      partialResultEvidence: { status: 'complete', decodedEventCount: 0 },
     };
   }
 
@@ -324,6 +334,8 @@ class OrderingNullAdapter implements AgentSessionAdapter {
     return {
       resumeSessionId: binding.sessionId, sessionId: null,
       finalText: '', usage: null, exit: 'completed',
+      processEvidence: null, engineCatalogEvidence: null,
+      partialResultEvidence: { status: 'complete', decodedEventCount: 0 },
     };
   }
 
@@ -357,7 +369,7 @@ class InProcessArenaAdapter implements AgentSessionAdapter {
   classifyFailure(): 'unknown' { return 'unknown'; }
 
   #dispatch(
-    sessionId: AgentTurnResult['resumeSessionId'],
+    sessionId: AgentSessionId,
     invocation: AgentInvocation,
   ): AgentTurnResult {
     const manifest = JSON.parse(readFileSync(invocation.launcherToken, 'utf8')) as EngineMcpLauncherManifest;
@@ -400,13 +412,16 @@ class InProcessArenaAdapter implements AgentSessionAdapter {
     return this.#completed(sessionId);
   }
 
-  #completed(sessionId: AgentTurnResult['resumeSessionId']): AgentTurnResult {
+  #completed(sessionId: AgentSessionId): AgentTurnResult {
     return {
       resumeSessionId: sessionId,
       sessionId: null,
       finalText: 'SIMULATED in-process arena proposal',
       usage: null,
       exit: 'completed',
+      processEvidence: null,
+      engineCatalogEvidence: null,
+      partialResultEvidence: { status: 'complete', decodedEventCount: 0 },
     };
   }
 }
@@ -433,6 +448,13 @@ const ALL_OPTIONS_TEST_RENDERER_ARGS = [
 ] as const;
 
 describe('AI-DM arena', () => {
+  it('filters explicit room:rep cells without renumbering or accepting duplicates', () => {
+    expect(parseArenaCells('2:1,4:1,8:1', 10, 3)).toEqual([
+      { room: 2, rep: 1 }, { room: 4, rep: 1 }, { room: 8, rep: 1 },
+    ]);
+    expect(() => parseArenaCells('2:1,2:1', 10, 3)).toThrow('--cells entries must be unique.');
+    expect(() => parseArenaCells('11:1', 10, 3)).toThrow('outside rooms 1..10 and reps 1..3');
+  });
   it('maps rows with zero, one, and two KB reads without losing hashes or order (mutation: omit arena kbReads)', () => {
     const records: readonly KbReadRecord[] = [
       {

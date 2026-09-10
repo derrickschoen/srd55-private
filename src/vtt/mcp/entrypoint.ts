@@ -70,6 +70,8 @@ import type {
   BlindRepairArm,
   DmMode,
 } from '../blind-dm-contract';
+import { engineDispatchId, type EngineDispatchId, type EngineDispatchPhase } from '../agent-session';
+import { descriptorSha256, type EngineReadinessRecord } from '../engine-dispatch-evidence';
 import {
   BLIND_TURN_CONTEXT_MAX_BYTES,
   projectEngineBlindTurn,
@@ -229,6 +231,20 @@ function launcherHasUiFeedback(manifest: EngineMcpLauncherManifest): boolean {
   return lines.length === 1;
 }
 
+function dispatchStamped(
+  manifest: EngineMcpLauncherManifest,
+  value: Readonly<Record<string, unknown>>,
+): Readonly<Record<string, unknown>> {
+  return manifest.dispatchId === undefined || manifest.dispatchPhase === undefined
+    ? value
+    : {
+        ...value,
+        dispatchId: manifest.dispatchId,
+        dispatchProfile: manifest.toolProfile === 'blind' ? 'blind' : 'dm',
+        dispatchPhase: manifest.dispatchPhase,
+      };
+}
+
 export interface EngineMcpBoardDomEvidence {
   readonly optionSurfaceAbsent: true;
   readonly nextEventPreviewAbsent: true;
@@ -294,6 +310,9 @@ export interface EngineMcpLauncherManifest {
   readonly format: 'engine-mcp-launcher-v1';
   readonly fixturePath: string;
   readonly proposalSpoolPath: string;
+  readonly readinessSpoolPath?: string;
+  readonly dispatchId?: EngineDispatchId;
+  readonly dispatchPhase?: EngineDispatchPhase;
   readonly turnContextSpoolPath?: string;
   readonly kbReadSpoolPath?: string;
   readonly kbSubjectSources?: KbSubjectSources;
@@ -356,6 +375,13 @@ export function createEngineMcpRuntime(
     readonly planAdjustment?: EnginePlanAdjustmentMetadata;
     readonly speculativeRequest?: EngineMcpLauncherManifest['speculativeRequest'];
     readonly onProposal?: (proposal: EngineProposalEnvelope) => void;
+    readonly readinessEvidence?: {
+      readonly spoolPath: string;
+      readonly dispatchId: EngineDispatchId;
+      readonly phase: EngineDispatchPhase;
+      readonly profile: 'dm' | 'blind';
+      readonly requestId: string;
+    };
     readonly onSpeculativePlan?: (plan: QueuedSpeculativePlanEnvelope) => void;
     readonly toolProfile?: EngineMcpToolProfile;
     readonly dmMode?: DmMode;
@@ -685,7 +711,8 @@ export async function runEngineMcpServer(
 ): Promise<void> {
   const loaded = await loadArenaFixture(resolve(fixturePath));
   const state = directFixturePlanning ? freshMonsterPlanningState(loaded) : loaded;
-  const handler = createEngineMcpRuntime(state, options).handler;
+  const runtime = createEngineMcpRuntime(state, options);
+  const handler = runtime.handler;
   const lines = createInterface({ input: process.stdin, crlfDelay: Number.POSITIVE_INFINITY });
   for await (const line of lines) {
     if (line.trim().length === 0) continue;
@@ -693,9 +720,74 @@ export async function runEngineMcpServer(
     try { decoded = parseEngineMcpJsonLine(line); }
     catch { await writeJsonLine(jsonRpcParseError()); continue; }
     const response = handler.handle(decoded);
+    const request = typeof decoded === 'object' && decoded !== null && !Array.isArray(decoded)
+      ? decoded as Readonly<Record<string, unknown>>
+      : null;
+    const readiness = response === null || request?.['method'] !== 'tools/list'
+      ? null
+      : readinessRecord(options.readinessEvidence, request, response, runtime.toolSurface.tools);
+    if (readiness !== null) appendFileSync(readiness.spoolPath, `${JSON.stringify(readiness.generated)}\n`, 'utf8');
     if (response !== null) await writeJsonLine(response);
+    if (readiness !== null) {
+      const completed: EngineReadinessRecord = {
+        ...readiness.generated,
+        event: 'tools_list_stream_write_completed',
+        writeCompletedAtUnixMs: Date.now(),
+      };
+      appendFileSync(readiness.spoolPath, `${JSON.stringify(completed)}\n`, 'utf8');
+    }
     for (const notification of handler.drainNotifications()) await writeJsonLine(notification);
   }
+}
+
+function readinessRecord(
+  evidence: NonNullable<Parameters<typeof createEngineMcpRuntime>[1]>['readinessEvidence'],
+  request: Readonly<Record<string, unknown>>,
+  response: JsonRpcResponse,
+  expectedDescriptors: readonly import('./handler').McpToolDescriptor[],
+): { readonly spoolPath: string; readonly generated: EngineReadinessRecord } | null {
+  if (evidence === undefined) return null;
+  const result = typeof response.result === 'object' && response.result !== null && !Array.isArray(response.result)
+    ? response.result as Readonly<Record<string, unknown>>
+    : null;
+  const tools = result?.['tools'];
+  const returnedDescriptors = Array.isArray(tools)
+    ? tools.filter((tool): tool is Readonly<Record<string, unknown>> =>
+        typeof tool === 'object' && tool !== null && !Array.isArray(tool))
+    : [];
+  const expectedToolNames = expectedDescriptors.map((descriptor) => descriptor.name);
+  const returnedToolNames = returnedDescriptors.flatMap((descriptor) =>
+    typeof descriptor['name'] === 'string' ? [descriptor['name']] : []);
+  const expectedDescriptorSha256 = descriptorSha256(expectedDescriptors);
+  const returnedDescriptorSha256 = returnedDescriptors.length === 0
+    ? null
+    : descriptorSha256(returnedDescriptors);
+  const violations: string[] = [];
+  if (response.error !== undefined || result === null) violations.push('response_not_successful');
+  if (String(response.id) !== String(request['id'])) violations.push('response_id_mismatch');
+  if (returnedDescriptors.length !== (Array.isArray(tools) ? tools.length : -1)) violations.push('malformed_descriptors');
+  if (canonicalJson(returnedToolNames) !== canonicalJson(expectedToolNames)) violations.push('tool_names_mismatch');
+  if (returnedDescriptorSha256 !== expectedDescriptorSha256) violations.push('tool_descriptors_mismatch');
+  const generatedAtUnixMs = Date.now();
+  return {
+    spoolPath: evidence.spoolPath,
+    generated: {
+      version: 1,
+      dispatchId: evidence.dispatchId,
+      phase: evidence.phase,
+      profile: evidence.profile,
+      requestId: evidence.requestId,
+      event: 'tools_list_response_generated',
+      generatedAtUnixMs,
+      writeCompletedAtUnixMs: null,
+      responseId: String(response.id),
+      responseSha256: createHash('sha256').update(canonicalJson(response), 'utf8').digest('hex'),
+      expectedToolNames,
+      returnedToolNames,
+      descriptorSha256: returnedDescriptorSha256,
+      validation: violations.length === 0 ? { status: 'valid' } : { status: 'invalid', violations },
+    },
+  };
 }
 
 function isPositiveSafeInteger(value: unknown): value is number {
@@ -875,6 +967,13 @@ function isLauncherManifest(value: unknown): value is EngineMcpLauncherManifest 
   return input['format'] === 'engine-mcp-launcher-v1' &&
     typeof input['fixturePath'] === 'string' && input['fixturePath'].length > 0 &&
     typeof input['proposalSpoolPath'] === 'string' && input['proposalSpoolPath'].length > 0 &&
+    ((input['readinessSpoolPath'] === undefined && input['dispatchId'] === undefined &&
+      input['dispatchPhase'] === undefined) ||
+      typeof input['readinessSpoolPath'] === 'string' && input['readinessSpoolPath'].length > 0 &&
+      typeof input['dispatchId'] === 'string' && (() => {
+        try { engineDispatchId(input['dispatchId']); return true; } catch { return false; }
+      })() && (input['dispatchPhase'] === 'primary' || input['dispatchPhase'] === 'correction' ||
+        input['dispatchPhase'] === 'adjustment' || input['dispatchPhase'] === 'speculative')) &&
     (input['turnContextSpoolPath'] === undefined ||
       typeof input['turnContextSpoolPath'] === 'string' && input['turnContextSpoolPath'].length > 0) &&
     ((input['kbReadSpoolPath'] === undefined && input['kbSubjectSources'] === undefined) ||
@@ -1016,13 +1115,26 @@ export async function runEngineMcpEntrypoint(argv: readonly string[] = process.a
     const blindIngressRecorder = manifest.dmMode !== 'blind' || manifest.blindIngressSpoolPath === undefined
       ? undefined
       : new BlindModelIngressRecorder(ingressRecords, (record) => {
-          appendFileSync(manifest.blindIngressSpoolPath ?? '', `${JSON.stringify(record)}\n`, 'utf8');
+          appendFileSync(manifest.blindIngressSpoolPath ?? '', `${JSON.stringify(dispatchStamped(
+            manifest,
+            record as unknown as Readonly<Record<string, unknown>>,
+          ))}\n`, 'utf8');
         });
     await runEngineMcpServer(manifest.fixturePath, {
       runId: manifest.runId,
       branchId: manifest.branchId,
       revision: manifest.revision,
       requestId: manifest.requestId,
+      ...(manifest.readinessSpoolPath === undefined || manifest.dispatchId === undefined ||
+        manifest.dispatchPhase === undefined ? {} : {
+          readinessEvidence: {
+            spoolPath: manifest.readinessSpoolPath,
+            dispatchId: manifest.dispatchId,
+            phase: manifest.dispatchPhase,
+            profile: (selectedProfile ?? manifest.toolProfile) === 'blind' ? 'blind' as const : 'dm' as const,
+            requestId: manifest.requestId,
+          },
+        }),
       phase: manifest.phase,
       correctionNumber: manifest.correctionNumber,
       overridePolicy: manifest.overridePolicy,
@@ -1086,19 +1198,28 @@ export async function runEngineMcpEntrypoint(argv: readonly string[] = process.a
         },
       }),
       onProposal: (proposal) => {
-        appendFileSync(manifest.proposalSpoolPath, `${JSON.stringify(proposal)}\n`, 'utf8');
+        appendFileSync(manifest.proposalSpoolPath, `${JSON.stringify(dispatchStamped(
+          manifest,
+          proposal as unknown as Readonly<Record<string, unknown>>,
+        ))}\n`, 'utf8');
       },
       onSpeculativePlan: (plan) => {
-        appendFileSync(manifest.proposalSpoolPath, `${JSON.stringify(plan)}\n`, 'utf8');
+        appendFileSync(manifest.proposalSpoolPath, `${JSON.stringify(dispatchStamped(
+          manifest,
+          plan as unknown as Readonly<Record<string, unknown>>,
+        ))}\n`, 'utf8');
       },
       ...(manifest.blindIntentSpoolPath === undefined ? {} : {
         onBlindIntentSubmission: (submission: BlindIntentSubmissionRecord) => {
-          appendFileSync(manifest.blindIntentSpoolPath ?? '', `${JSON.stringify(submission)}\n`, 'utf8');
+          appendFileSync(manifest.blindIntentSpoolPath ?? '', `${JSON.stringify(dispatchStamped(
+            manifest,
+            submission as unknown as Readonly<Record<string, unknown>>,
+          ))}\n`, 'utf8');
         },
       }),
       ...(manifest.turnContextSpoolPath === undefined ? {} : {
         onTurnContext: (context: Readonly<Record<string, unknown>>) => {
-          appendFileSync(manifest.turnContextSpoolPath ?? '', `${JSON.stringify(context)}\n`, 'utf8');
+          appendFileSync(manifest.turnContextSpoolPath ?? '', `${JSON.stringify(dispatchStamped(manifest, context))}\n`, 'utf8');
         },
       }),
     });

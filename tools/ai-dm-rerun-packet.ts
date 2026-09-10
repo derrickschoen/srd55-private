@@ -1,6 +1,7 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { z } from 'zod';
+import { D569IntegrityStop } from '../src/vtt/d569-integrity';
 import { canonicalJson } from '../src/commands/canonical-json';
 import { engineUiFeedbackSchema } from '../src/vtt/mcp/schemas';
 
@@ -292,6 +293,102 @@ const postShiftArenaRowSchema = z.discriminatedUnion('decisionTransport', [
   }
 });
 
+const catalogEvidenceSchema = z.discriminatedUnion('status', [
+  z.object({
+    status: z.literal('ready'), basis: z.enum(['advertised_tool_invoked', 'required_cli_completed_with_valid_catalog']),
+    dispatchId: z.string().min(16), advertisedInvocationCount: safeIntegerSchema.min(0),
+    resourceOperationCount: safeIntegerSchema.min(0),
+  }).strict(),
+  z.object({
+    status: z.literal('absent'), basis: z.literal('required_engine_initialization_failed'),
+    dispatchId: z.string().min(16), corroboration: z.array(z.string()),
+  }).strict(),
+  z.object({
+    status: z.literal('inconclusive'), dispatchId: z.string().min(16),
+    reason: z.enum(['no_correlated_catalog', 'invalid_catalog_response', 'missing_live_timestamp',
+      'conflicting_success_and_failure', 'timestamp_only']),
+  }).strict(),
+]);
+
+const deliveredContextSchema = z.object({
+  status: z.literal('delivered'), dispatchId: z.string().min(16),
+  contextSha256: z.string().regex(/^[a-f0-9]{64}$/u),
+  measurement: z.object({ baseBytes: safeIntegerSchema.min(0), semanticBytes: safeIntegerSchema.min(0) }).strict(),
+}).strict();
+const turnContextDeliverySchema = z.discriminatedUnion('status', [
+  deliveredContextSchema,
+  z.object({ status: z.literal('not_requested'), dispatchId: z.string().min(16), reason: z.enum(['catalog_ready_model_did_not_fetch', 'dispatch_cancelled']), measurement: z.null() }).strict(),
+  z.object({ status: z.literal('timeout_before_delivery'), dispatchId: z.string().min(16), measurement: z.null() }).strict(),
+  z.object({ status: z.literal('infrastructure_absent'), dispatchId: z.string().min(16), measurement: z.null() }).strict(),
+  z.object({ status: z.literal('indeterminate'), dispatchId: z.string().min(16), reason: z.literal('catalog_inconclusive_empty_context_spool'), measurement: z.null(), integrityAction: z.literal('stop_after_persist') }).strict(),
+]);
+
+const arenaRowV3BaseSchema = postShiftCommonArenaRowSchema.extend({
+  rowContractVersion: z.literal('arena-row-v3'),
+  outcome: z.enum([
+    'authorized', 'auto_resolved', 'awaiting_dm_adjudication', 'refused', 'service_null',
+    'local_error', 'execution_failed', 'partial_execution', 'infrastructure_failed',
+    'integrity_indeterminate',
+  ]),
+  engineCatalogEvidence: catalogEvidenceSchema,
+  turnContextDelivery: turnContextDeliverySchema,
+  turnContextConfiguredCaps: z.object({ baseBytes: safeIntegerSchema.min(1), semanticBytes: safeIntegerSchema.min(0) }).strict(),
+  scheduledCellKey: z.string().min(1),
+  dispatchId: z.string().min(16),
+  hostContextDiagnostic: z.union([
+    z.object({ status: z.literal('rendered'), contextSha256: z.string().regex(/^[a-f0-9]{64}$/u) }).strict(),
+    z.object({ status: z.literal('unavailable'), errorClass: z.string().min(1) }).strict(),
+    z.null(),
+  ]),
+  blindIngressAudit: z.union([
+    z.object({
+      version: z.literal('blind-model-ingress-v1'), stringCount: safeIntegerSchema.min(1),
+      utf8Bytes: safeIntegerSchema.min(1), sha256: z.string().regex(/^[a-f0-9]{64}$/u),
+      passed: z.literal(true),
+    }).strict(),
+    z.object({
+      version: z.literal(2), status: z.literal('complete'), passed: z.literal(true),
+      forbiddenContentPassed: z.literal(true), delivery: deliveredContextSchema,
+    }).strict(),
+    z.object({
+      version: z.literal(2), status: z.literal('incomplete'), passed: z.literal(false),
+      forbiddenContentPassed: z.boolean(), delivery: turnContextDeliverySchema,
+      missingRequiredFields: z.array(z.string()),
+    }).strict().superRefine((audit, context) => {
+      if (audit.delivery.status === 'delivered') {
+        context.addIssue({ code: 'custom', path: ['delivery'], message: 'incomplete audit requires incomplete delivery' });
+      }
+    }),
+  ]).optional(),
+});
+const mcpMinimalArenaRowV3Schema = arenaRowV3BaseSchema.extend({ decisionTransport: z.literal('mcp_minimal') }).passthrough();
+const finalIndicesArenaRowV3Schema = arenaRowV3BaseSchema.extend({
+  decisionTransport: z.literal('final_indices'), chosenOptionIndices: chosenOptionIndicesSchema,
+}).passthrough();
+const arenaRowV3Schema = z.discriminatedUnion('decisionTransport', [
+  mcpMinimalArenaRowV3Schema,
+  finalIndicesArenaRowV3Schema,
+]).superRefine((row, context) => {
+  if (row.engineCatalogEvidence.dispatchId !== row.dispatchId ||
+    row.turnContextDelivery.dispatchId !== row.dispatchId) {
+    context.addIssue({ code: 'custom', path: ['dispatchId'], message: 'must correlate catalog and delivery evidence' });
+  }
+  if (row.dmMode === 'blind' && row.blindIngressAudit === undefined) {
+    context.addIssue({ code: 'custom', path: ['blindIngressAudit'], message: 'is required on a blind v3 row' });
+  }
+  if (row.blindIngressAudit?.version === 2 &&
+    row.blindIngressAudit.delivery.status !== row.turnContextDelivery.status) {
+    context.addIssue({ code: 'custom', path: ['blindIngressAudit', 'delivery'], message: 'must match row delivery' });
+  }
+  if (row.outcome === 'integrity_indeterminate') {
+    context.addIssue({ code: 'custom', path: ['outcome'], message: 'cannot become a rerun packet' });
+  }
+  if (row.outcome === 'infrastructure_failed' &&
+    (row.engineCatalogEvidence.status !== 'absent' || row.turnContextDelivery.status !== 'infrastructure_absent')) {
+    context.addIssue({ code: 'custom', path: ['outcome'], message: 'requires diagnosed absent infrastructure evidence' });
+  }
+});
+
 const preShiftArenaRowSchema = commonArenaRowSchema.passthrough().superRefine((row, context) => {
   for (const field of postShiftOnlyFieldNames) {
     if (Object.prototype.hasOwnProperty.call(row, field)) {
@@ -336,7 +433,7 @@ type PostShiftArenaRow = McpMinimalPostShiftArenaRow | FinalIndicesPostShiftAren
 
 type ParsedArenaRow =
   | { readonly rowEra: 'pre_shift'; readonly row: PreShiftArenaRow }
-  | { readonly rowEra: 'post_shift'; readonly row: PostShiftArenaRow };
+  | { readonly rowEra: 'post_shift'; readonly row: PostShiftArenaRow | z.infer<typeof arenaRowV3Schema> };
 
 export interface RerunProtocol {
   readonly name?: RerunProtocolName;
@@ -391,7 +488,7 @@ interface CommonValidatedArenaRow {
   readonly room: number;
   readonly rep: number;
   readonly startingRoomDigest: string;
-  readonly outcome: string;
+  readonly outcome: z.infer<typeof arenaRowV3BaseSchema>['outcome'];
   readonly plannedBy: z.infer<typeof plannerSchema>;
   readonly plannerLabel: string | null | undefined;
   readonly planner: z.infer<typeof primaryPlannerSchema>;
@@ -399,6 +496,7 @@ interface CommonValidatedArenaRow {
   readonly overrideRejections: readonly z.infer<typeof overrideRejectionSchema>[];
   readonly roundNarrative: string | null;
   readonly authorizedPlan: readonly z.infer<typeof authorizedPlanEntrySchema>[] | null;
+  readonly scheduledCellKey?: string;
   readonly boardImage?: z.infer<typeof boardImageSchema>;
   readonly uiFeedback?: z.infer<typeof engineUiFeedbackSchema> | null;
 }
@@ -476,6 +574,7 @@ export interface BlindRubric {
 export interface JudgePacketEntry {
   readonly blindId: string;
   readonly caseId: string;
+  readonly scheduledCellKey?: string;
   readonly outcome: string;
   readonly attribution: 'model_authorized' | 'engine_default' | 'not_model_authorized';
   readonly executedPlan: readonly NeutralPlanEntry[] | null;
@@ -562,6 +661,8 @@ const MODEL_IDENTITY_FIELDS = new Set([
   'acceptedIntent', 'acceptedProposal', 'resolutionSummary', 'actionSlots',
   'selectedBranch', 'optionId', 'plannerLabel', 'planner', 'overrideKinds', 'overrideRejections',
   'rowEra',
+  'rowContractVersion', 'engineCatalogEvidence', 'turnContextDelivery',
+  'turnContextConfiguredCaps', 'dispatchId', 'hostContextDiagnostic',
   'decisionTransport', 'firstDecisionAccepted', 'decisionAttempts',
   'overridePolicy',
   'decisionRejectionCodes', 'normalizationCodes',
@@ -680,6 +781,21 @@ function isFinalIndicesPostShiftArenaRow(value: unknown): value is FinalIndicesP
 }
 
 function parseArenaRow(source: JsonRecord, sourceLabel: string): ParsedArenaRow {
+  if (Object.prototype.hasOwnProperty.call(source, 'rowContractVersion')) {
+    const parsed = arenaRowV3Schema.safeParse(source);
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0];
+      const property = issue === undefined || issue.path.length === 0 ? '' : `.${issue.path.join('.')}`;
+      throw new TypeError(`${sourceLabel}${property} is invalid: ${issue?.message ?? 'unknown schema failure'}.`);
+    }
+    return { rowEra: 'post_shift', row: parsed.data };
+  }
+  for (const field of ['engineCatalogEvidence', 'turnContextDelivery', 'turnContextConfiguredCaps',
+    'scheduledCellKey', 'dispatchId', 'hostContextDiagnostic']) {
+    if (Object.prototype.hasOwnProperty.call(source, field)) {
+      throw new TypeError(`${sourceLabel}.${field} is invalid without rowContractVersion.`);
+    }
+  }
   const isPostShift = Object.prototype.hasOwnProperty.call(source, 'decisionTransport');
   if (isPostShift) {
     const parsed = postShiftArenaRowSchema.safeParse(source);
@@ -769,6 +885,9 @@ function validateRow(
     overrideRejections: sourceRow.overrideRejections ?? [],
     roundNarrative: sourceRow.roundNarrative,
     authorizedPlan: sourceRow.authorizedPlan,
+    ...('scheduledCellKey' in sourceRow && typeof sourceRow.scheduledCellKey === 'string'
+      ? { scheduledCellKey: sourceRow.scheduledCellKey }
+      : {}),
     ...(sourceRow.boardImage === undefined ? {} : {
       boardImage: sourceRow.boardImage,
       uiFeedback: sourceRow.uiFeedback ?? null,
@@ -959,15 +1078,28 @@ function executedPlan(
   return value.map((entry) => neutralPlanEntry(entry, reasonsVisible));
 }
 
-function packetOutcome(outcome: string): 'authorized' | 'refused' | 'service_null' | 'execution_failed' {
-  if (outcome === 'authorized') return 'authorized';
-  if (outcome === 'service_null') return 'service_null';
-  if (outcome === 'execution_failed' || outcome === 'partial_execution') return 'execution_failed';
-  return 'refused';
+export type PacketOutcome = 'authorized' | 'refused' | 'service_null' | 'execution_failed' | 'infrastructure_failed';
+
+export function packetOutcome(outcome: ValidatedArenaRow['outcome']): PacketOutcome {
+  switch (outcome) {
+    case 'authorized': return 'authorized';
+    case 'refused':
+    case 'auto_resolved':
+    case 'awaiting_dm_adjudication':
+    case 'local_error':
+      return 'refused';
+    case 'service_null': return 'service_null';
+    case 'execution_failed':
+    case 'partial_execution':
+      return 'execution_failed';
+    case 'infrastructure_failed': return 'infrastructure_failed';
+    case 'integrity_indeterminate':
+      throw new D569IntegrityStop('An integrity-indeterminate row cannot become a rerun packet.');
+  }
 }
 
 function rubric(outcome: ReturnType<typeof packetOutcome>): BlindRubric {
-  return outcome === 'refused' || outcome === 'execution_failed'
+  return outcome === 'refused' || outcome === 'execution_failed' || outcome === 'service_null'
     ? { targetPriority: 0, actionEconomy: 0, positioning: 0, coherence: 0, total: 0 }
     : { targetPriority: null, actionEconomy: null, positioning: null, coherence: null, total: null };
 }
@@ -1055,6 +1187,8 @@ function buildPacket(
       return {
         blindId,
         caseId: `case-${String(row.room).padStart(2, '0')}-${String(row.rep)}`,
+        ...(outcome !== 'infrastructure_failed' || row.scheduledCellKey === undefined
+          ? {} : { scheduledCellKey: row.scheduledCellKey }),
         outcome,
         attribution: engineAttribution(row),
         executedPlan: outcome === 'authorized'

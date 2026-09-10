@@ -1,7 +1,7 @@
 import type { ConversationRowPersisted } from '../../tools/ai-dm-conversation';
 import type { ArenaConversationPart } from '../../tools/ai-dm-arena';
 import type { BlindMaxAttempts, BlindRepairArm, DmMode } from '../../src/vtt/blind-dm-contract';
-import type { BlindIngressAuditSummary } from '../../src/vtt/blind-model-ingress';
+import type { BlindIngressAudit } from '../../src/vtt/blind-model-ingress';
 
 type Equal<Left, Right> =
   (<Value>() => Value extends Left ? 1 : 2) extends
@@ -26,7 +26,7 @@ type AttemptCapMatches = Assert<
   Equal<ConversationRowPersisted['blindMaxAttempts'], BlindMaxAttempts | undefined>
 >;
 type IngressAuditMatches = Assert<
-  Equal<ConversationRowPersisted['blindIngressAudit'], BlindIngressAuditSummary | undefined>
+  Equal<ConversationRowPersisted['blindIngressAudit'], BlindIngressAudit | undefined>
 >;
 type FirstTokenNullable = Assert<Equal<
   NonNullable<ConversationRowPersisted['blindAttempts']>[number]['modelFirstTokenMs'],

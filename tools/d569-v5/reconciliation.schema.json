@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dnd.local/schemas/d569-reconciliation-v1.json",
+  "title": "D569 hard-row reconciliation sidecar",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "rawFileSha256", "entries"],
+  "properties": {
+    "version": { "const": "d569-reconciliation-v1" },
+    "rawFileSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "entries": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["rawLineNumber", "rawLineSha256", "scheduledCellKey", "recoveredSessionId", "rolloutPath", "rolloutSha256", "reviewerApproval"],
+        "properties": {
+          "rawLineNumber": { "enum": [6, 19, 20] },
+          "rawLineSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "scheduledCellKey": { "type": "string", "pattern": "^\\d+:[1-9]\\d*$" },
+          "recoveredSessionId": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "rolloutPath": { "type": "string", "minLength": 1 },
+          "rolloutSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "reviewerApproval": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["reviewer", "approvedAt", "decision"],
+            "properties": {
+              "reviewer": { "type": "string", "minLength": 1 },
+              "approvedAt": { "type": "string", "format": "date-time" },
+              "decision": { "const": "approved" }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -118,7 +118,19 @@ export type InitialProposalAttempt =
 export type TurnExhaustionOutcome =
   | { readonly kind: 'authorized'; readonly proposalId: string; readonly phase: 'initial' | 'correction' }
   | { readonly kind: 'auto_resolved'; readonly actorIds: readonly CombatantId[] }
-  | { readonly kind: 'awaiting_dm_adjudication'; readonly actorId: CombatantId };
+  | { readonly kind: 'awaiting_dm_adjudication'; readonly actorId: CombatantId }
+  | {
+      readonly kind: 'refused';
+      readonly reason: 'host_authorization_failed' | 'correction_cancelled' | 'correction_timeout';
+      readonly attemptConsumed: true;
+    }
+  | { readonly kind: 'infrastructure_failed'; readonly component: 'engine_mcp_startup' };
+
+export type AuthorizationFailurePolicy =
+  | { readonly kind: 'correct_with_dm_protocol' }
+  | { readonly kind: 'refuse_blind' };
+
+export type CorrectionPromptRenderer = typeof renderEnginePrompt;
 
 export interface ReconstructedTurnExhaustionState {
   readonly requestId: string;
@@ -161,7 +173,10 @@ function validResolutionDigest(digest: string): boolean {
 }
 
 export class TurnExhaustionCoordinator {
-  constructor(private readonly persistence: TurnExhaustionPersistence) {}
+  constructor(
+    private readonly persistence: TurnExhaustionPersistence,
+    private readonly renderCorrection: CorrectionPromptRenderer = renderEnginePrompt,
+  ) {}
 
   reconstruct(requestId: string): ReconstructedTurnExhaustionState | null {
     const transitions = this.persistence.transitions().filter((entry) => entry.requestId === requestId);
@@ -195,6 +210,7 @@ export class TurnExhaustionCoordinator {
     readonly initial: InitialProposalAttempt;
     readonly correction: TurnExhaustionCorrectionRuntime;
     readonly host: TurnExhaustionHost;
+    readonly authorizationFailurePolicy?: AuthorizationFailurePolicy;
   }): Promise<TurnExhaustionOutcome> {
     if (input.initial.kind === 'proposal') {
       const proposal = input.initial.proposal;
@@ -215,6 +231,9 @@ export class TurnExhaustionCoordinator {
           });
         }
         return { kind: 'authorized', proposalId: proposal.proposalId, phase: 'initial' };
+      }
+      if (input.authorizationFailurePolicy?.kind === 'refuse_blind') {
+        return { kind: 'refused', reason: 'host_authorization_failed', attemptConsumed: true };
       }
       return this.#correctAndResolve({
         requestId: proposal.requestId,
@@ -281,17 +300,26 @@ export class TurnExhaustionCoordinator {
       input.correction.activateCapsule();
       const prompt = input.correction.invocation.output.kind === 'structured_final'
         ? input.correction.invocation.prompt
-        : renderEnginePrompt(
+        : this.renderCorrection(
             'correct_proposal',
             input.correction.capsule,
             input.correction.rules,
             undefined,
             input.correction.turnContext,
           );
-      await input.correction.lifecycle.resumeCorrection(
+      const correctionTurn = await input.correction.lifecycle.resumeCorrection(
         { ...input.correction.invocation, prompt },
         input.correction.signal,
       );
+      switch (correctionTurn.exit) {
+        case 'completed': break;
+        case 'cancelled':
+          return { kind: 'refused', reason: 'correction_cancelled', attemptConsumed: true };
+        case 'timed_out':
+          return { kind: 'refused', reason: 'correction_timeout', attemptConsumed: true };
+        case 'infrastructure_failed':
+          return { kind: 'infrastructure_failed', component: correctionTurn.component };
+      }
     } else if (prior.stage !== 'correction_requested') {
       throw new Error(`Proposal exhaustion chain cannot resume from ${prior.stage}.`);
     }

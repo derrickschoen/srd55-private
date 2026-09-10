@@ -4,12 +4,41 @@ import type { AgentSessionDigest } from './agent-session-digest';
 declare const contextTokenCountBrand: unique symbol;
 declare const turnInputTotalBrand: unique symbol;
 declare const measuredContextRolloverThresholdBrand: unique symbol;
+declare const engineDispatchIdBrand: unique symbol;
 
 export type ContextTokenCount = number & { readonly [contextTokenCountBrand]: true };
 export type TurnInputTotal = number & { readonly [turnInputTotalBrand]: true };
 export type MeasuredContextRolloverThreshold = number & {
   readonly [measuredContextRolloverThresholdBrand]: true;
 };
+export type EngineDispatchId = string & { readonly [engineDispatchIdBrand]: true };
+
+export type EngineDispatchPhase = 'primary' | 'correction' | 'adjustment' | 'speculative';
+
+export type EngineCatalogEvidence =
+  | {
+      readonly status: 'ready';
+      readonly basis: 'advertised_tool_invoked' | 'required_cli_completed_with_valid_catalog';
+      readonly dispatchId: EngineDispatchId;
+      readonly advertisedInvocationCount: number;
+      readonly resourceOperationCount: number;
+    }
+  | {
+      readonly status: 'absent';
+      readonly basis: 'required_engine_initialization_failed';
+      readonly dispatchId: EngineDispatchId;
+      readonly corroboration: readonly string[];
+    }
+  | {
+      readonly status: 'inconclusive';
+      readonly dispatchId: EngineDispatchId;
+      readonly reason:
+        | 'no_correlated_catalog'
+        | 'invalid_catalog_response'
+        | 'missing_live_timestamp'
+        | 'conflicting_success_and_failure'
+        | 'timestamp_only';
+    };
 
 export type AgentCallPhase =
   | 'initial'
@@ -127,8 +156,11 @@ export type AgentInvocation = AgentInstructionSource & {
   readonly callPhase: AgentCallPhase;
   readonly output: AgentInvocationOutput;
   readonly launcherToken: string;
+  /** Dispatch identity carried by the immutable launcher used for this process. */
+  readonly engineDispatchId?: EngineDispatchId;
   /** Full-context launcher used only if resume recovery creates a fresh agent session. */
   readonly recoveryLauncherToken?: string;
+  readonly recoveryEngineDispatchId?: EngineDispatchId;
   readonly timeoutMs: number | null;
   /** Direct in-process engine surface used by adapters that do not speak MCP. */
   readonly toolSession?: AgentToolSession;
@@ -143,17 +175,83 @@ export interface AgentUsage {
   readonly reasoningTokens: number;
 }
 
-export interface AgentTurnResult {
-  /** Opaque adapter session used by the generic resume lifecycle. */
-  readonly resumeSessionId: AgentSessionId;
-  /** Codex rollout session ID; null for adapters without Codex rollout logs. */
+export interface AgentProcessEvidence {
+  readonly startedAtUnixMs: number;
+  readonly endedAtUnixMs: number;
+  readonly exitCode: number | null;
+  readonly signal: string | null;
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly decodedEvents: readonly {
+    readonly invocationId: string | null;
+    readonly kind: string;
+    readonly observedAtUnixMs: number;
+  }[];
+}
+
+export type AgentPartialResultEvidence =
+  | { readonly status: 'complete'; readonly decodedEventCount: number }
+  | {
+      readonly status: 'partial';
+      readonly decodedEventCount: number;
+      readonly finalTextFragment: string;
+      readonly observedUsage: AgentUsage | null;
+      readonly stagedInvocationIds: readonly string[];
+    };
+
+interface AgentTurnResultBase {
+  /** Codex rollout session ID only; null for Pi, simulated, and other adapters. */
   readonly sessionId: string | null;
+  /** Complete text, or captured forensic text on an incomplete exit. */
   readonly finalText: string;
   readonly usage: AgentUsage | null;
-  /** Non-completed exits are censored transport outcomes, never absent decisions. */
-  readonly exit: 'completed' | 'cancelled' | 'timed_out';
+  readonly processEvidence: AgentProcessEvidence | null;
+  readonly partialResultEvidence: AgentPartialResultEvidence;
   readonly contractEvidence?: readonly string[];
+  readonly engineCatalogEvidence: EngineCatalogEvidence | null;
 }
+
+export interface AgentTurnCompletedResult extends AgentTurnResultBase {
+  readonly exit: 'completed';
+  /** Generic reusable identity used by lifecycle binding. */
+  readonly resumeSessionId: AgentSessionId;
+  readonly partialResultEvidence: Extract<AgentPartialResultEvidence, { readonly status: 'complete' }>;
+}
+
+export interface AgentTurnCancelledResult extends AgentTurnResultBase {
+  readonly exit: 'cancelled';
+  readonly resumeSessionId: AgentSessionId | null;
+  readonly cancellationReason: string;
+  readonly partialResultEvidence: Extract<AgentPartialResultEvidence, { readonly status: 'partial' }>;
+}
+
+export interface AgentTurnTimedOutResult extends AgentTurnResultBase {
+  readonly exit: 'timed_out';
+  readonly resumeSessionId: AgentSessionId | null;
+  readonly timeoutMs: number;
+  readonly partialResultEvidence: Extract<AgentPartialResultEvidence, { readonly status: 'partial' }>;
+}
+
+export interface AgentTurnInfrastructureFailedResult extends AgentTurnResultBase {
+  readonly exit: 'infrastructure_failed';
+  readonly resumeSessionId: AgentSessionId | null;
+  readonly component: 'engine_mcp_startup';
+  readonly failureReason: string;
+  readonly partialResultEvidence: Extract<AgentPartialResultEvidence, { readonly status: 'partial' }>;
+}
+
+export type AgentTurnResult =
+  | AgentTurnCompletedResult
+  | AgentTurnCancelledResult
+  | AgentTurnTimedOutResult
+  | AgentTurnInfrastructureFailedResult;
+
+export type AgentColdStartOutcome =
+  | { readonly kind: 'bound'; readonly binding: AgentSessionBinding; readonly turn: AgentTurnCompletedResult }
+  | {
+      readonly kind: 'unbound';
+      readonly turn: AgentTurnCancelledResult | AgentTurnTimedOutResult | AgentTurnInfrastructureFailedResult;
+    };
 
 export interface CliProbe {
   readonly present: boolean;
@@ -186,6 +284,13 @@ export function agentSessionIdFromCli(value: string): AgentSessionId {
     throw new TypeError('Agent CLI session ID must be a non-empty, trimmed opaque string of at most 200 characters.');
   }
   return value as AgentSessionId;
+}
+
+export function engineDispatchId(value: string): EngineDispatchId {
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9:._-]{15,199}$/u.test(value)) {
+    throw new TypeError('Engine dispatch ID must be a trimmed opaque identifier of 16 to 200 characters.');
+  }
+  return value as EngineDispatchId;
 }
 
 export function contextTokenCount(value: number): ContextTokenCount {

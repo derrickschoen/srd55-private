@@ -142,6 +142,9 @@ function correction(
           finalText: '',
           usage: null,
           exit: 'completed' as const,
+          processEvidence: null,
+          engineCatalogEvidence: null,
+          partialResultEvidence: { status: 'complete' as const, decodedEventCount: 0 },
         });
       },
     },

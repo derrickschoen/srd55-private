@@ -11,6 +11,7 @@ import {
   buildReasonVisibilityIsolationPacket,
   buildRerunPacket,
   parseRerunPacketArgs,
+  packetOutcome,
   validateRerunRows,
 } from '../../../tools/ai-dm-rerun-packet';
 import { declareTestInputs } from '../../helpers/test-inputs';
@@ -106,6 +107,66 @@ function blindRowFields(): Readonly<Record<string, unknown>> {
 }
 
 describe('AI-DM R1-10 rerun packet', () => {
+  it('maps every historical terminal outcome explicitly without relabeling infrastructure', () => {
+    expect([
+      packetOutcome('auto_resolved'),
+      packetOutcome('awaiting_dm_adjudication'),
+      packetOutcome('local_error'),
+    ]).toEqual(['refused', 'refused', 'refused']);
+    expect(packetOutcome('infrastructure_failed')).toBe('infrastructure_failed');
+    expect(() => packetOutcome('integrity_indeterminate')).toThrow(
+      'An integrity-indeterminate row cannot become a rerun packet.',
+    );
+  });
+
+  it('retains v3 scheduled identity and gives only service-null a scored zero while infrastructure is unscored', () => {
+    const rows = registeredRows();
+    const dispatchId = 'engine-dispatch:packet-v3-0001';
+    rows[0] = record({
+      ...rows[0],
+      rowContractVersion: 'arena-row-v3',
+      scheduledCellKey: '1:1',
+      dispatchId,
+      outcome: 'infrastructure_failed',
+      engineCatalogEvidence: {
+        status: 'absent', basis: 'required_engine_initialization_failed', dispatchId,
+        corroboration: ['required MCP server failed'],
+      },
+      turnContextDelivery: { status: 'infrastructure_absent', dispatchId, measurement: null },
+      turnContextConfiguredCaps: { baseBytes: 65_536, semanticBytes: 8_192 },
+      hostContextDiagnostic: null,
+    });
+    const serviceDispatchId = 'engine-dispatch:packet-v3-0002';
+    rows[2] = record({
+      ...rows[2],
+      rowContractVersion: 'arena-row-v3',
+      scheduledCellKey: '1:2',
+      dispatchId: serviceDispatchId,
+      outcome: 'service_null',
+      engineCatalogEvidence: {
+        status: 'ready', basis: 'required_cli_completed_with_valid_catalog',
+        dispatchId: serviceDispatchId, advertisedInvocationCount: 0, resourceOperationCount: 0,
+      },
+      turnContextDelivery: {
+        status: 'not_requested', dispatchId: serviceDispatchId,
+        reason: 'catalog_ready_model_did_not_fetch', measurement: null,
+      },
+      turnContextConfiguredCaps: { baseBytes: 65_536, semanticBytes: 8_192 },
+      hostContextDiagnostic: { status: 'unavailable', errorClass: 'TypeError' },
+    });
+
+    const { packet } = buildRerunPacket(rows, 771, R1_10_PROTOCOL);
+    const infrastructure = packet.entries.find((entry) => entry.scheduledCellKey === '1:1');
+    const service = packet.entries.find((entry) => entry.outcome === 'service_null');
+    expect(infrastructure).toEqual(expect.objectContaining({
+      scheduledCellKey: '1:1', outcome: 'infrastructure_failed',
+      rubric: { targetPriority: null, actionEconomy: null, positioning: null, coherence: null, total: null },
+    }));
+    expect(service).toEqual(expect.objectContaining({
+      outcome: 'service_null',
+      rubric: { targetPriority: 0, actionEconomy: 0, positioning: 0, coherence: 0, total: 0 },
+    }));
+  });
   it('carries UI feedback beside its board image into the judge packet', () => {
     const feedback = {
       readability: 3,

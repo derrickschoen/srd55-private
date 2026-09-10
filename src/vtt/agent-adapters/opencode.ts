@@ -6,6 +6,7 @@ import { agentSessionIdFromCli, contextTokenCount, turnInputTotal } from '../age
 import type { AgentInvocation, AgentSessionBinding, AgentTurnResult, AgentUsage } from '../agent-session';
 import {
   AgentAdapterError,
+  agentProcessEvidence,
   completedOutput,
   jsonEventLines,
   ProcessAgentSessionAdapter,
@@ -93,20 +94,30 @@ export class OpenCodeAgentSessionAdapter extends ProcessAgentSessionAdapter {
         signal,
         invocation.timeoutMs,
       );
+      const processEvidence = agentProcessEvidence(output);
       completedOutput(output, sessionId !== null);
-      if (output.cancelled && sessionId !== null) {
+      if (output.timedOut) {
         return {
-          resumeSessionId: agentSessionIdFromCli(sessionId), sessionId: null,
-          finalText: '', usage: null, exit: 'cancelled',
+          resumeSessionId: sessionId === null ? null : agentSessionIdFromCli(sessionId), sessionId: null,
+          finalText: output.stdout, usage: null, exit: 'timed_out', timeoutMs: invocation.timeoutMs ?? 1,
+          processEvidence, engineCatalogEvidence: null,
+          partialResultEvidence: { status: 'partial', decodedEventCount: 0, finalTextFragment: output.stdout, observedUsage: null, stagedInvocationIds: [] },
         };
       }
+      if (output.cancelled) return {
+        resumeSessionId: sessionId === null ? null : agentSessionIdFromCli(sessionId), sessionId: null,
+        finalText: output.stdout, usage: null, exit: 'cancelled', cancellationReason: String(signal.reason ?? 'abort_signal'),
+        processEvidence, engineCatalogEvidence: null,
+        partialResultEvidence: { status: 'partial', decodedEventCount: 0, finalTextFragment: output.stdout, observedUsage: null, stagedInvocationIds: [] },
+      };
       const decoded = decodeOpenCodeTurn(output.stdout, sessionId, (event) => this.observe(event));
       return {
         resumeSessionId: agentSessionIdFromCli(decoded.sessionId),
         sessionId: null,
         finalText: decoded.finalText,
         usage: decoded.usage,
-        exit: output.cancelled ? 'cancelled' : 'completed',
+        exit: 'completed', processEvidence, engineCatalogEvidence: null,
+        partialResultEvidence: { status: 'complete', decodedEventCount: output.stdoutLines.length },
       };
     } finally {
       await rm(configPath, { force: true });

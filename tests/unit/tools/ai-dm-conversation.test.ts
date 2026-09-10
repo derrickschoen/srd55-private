@@ -8,6 +8,7 @@ import {
   contextTokenCount,
   turnInputTotal,
   measuredContextRolloverThreshold,
+  engineDispatchId,
   type AgentInvocation,
   type AgentSessionAdapter,
   type AgentSessionBinding,
@@ -23,6 +24,8 @@ import {
   McpChildExited,
   mcpRequest,
   stopMcpClient,
+  profiledTurnContextArguments,
+  persistD569IntegrityStop,
 } from '../../../tools/ai-dm-conversation';
 import { buildRerunPacket } from '../../../tools/ai-dm-rerun-packet';
 import { mkdtempSync, readFileSync, writeFileSync } from '../../helpers/test-filesystem';
@@ -107,8 +110,12 @@ class RecordingConversationAdapter implements AgentSessionAdapter {
 
   classifyFailure(): 'unknown' { return 'unknown'; }
 
-  private completed(sessionId: AgentTurnResult['resumeSessionId']): AgentTurnResult {
-    return { resumeSessionId: sessionId, sessionId: null, finalText: 'SIMULATED', usage: null, exit: 'completed' };
+  private completed(sessionId: NonNullable<AgentTurnResult['resumeSessionId']>): AgentTurnResult {
+    return {
+      resumeSessionId: sessionId, sessionId: null, finalText: 'SIMULATED', usage: null, exit: 'completed',
+      processEvidence: null, engineCatalogEvidence: null,
+      partialResultEvidence: { status: 'complete', decodedEventCount: 0 },
+    };
   }
 }
 
@@ -142,7 +149,7 @@ class BoilerplateThenValidStructuredFinalAdapter implements AgentSessionAdapter 
   classifyFailure(): 'unknown' { return 'unknown'; }
 
   private dispatch(
-    sessionId: AgentTurnResult['resumeSessionId'],
+    sessionId: NonNullable<AgentTurnResult['resumeSessionId']>,
     invocation: AgentInvocation,
   ): AgentTurnResult {
     if (invocation.output.kind !== 'structured_final') {
@@ -187,6 +194,9 @@ class BoilerplateThenValidStructuredFinalAdapter implements AgentSessionAdapter 
       }),
       usage: null,
       exit: 'completed',
+      processEvidence: null,
+      engineCatalogEvidence: null,
+      partialResultEvidence: { status: 'complete', decodedEventCount: 0 },
     };
   }
 }
@@ -244,7 +254,7 @@ class SerializedRoundTripAdapter implements AgentSessionAdapter {
   }
 
   private async dispatch(
-    sessionId: AgentTurnResult['resumeSessionId'],
+    sessionId: NonNullable<AgentTurnResult['resumeSessionId']>,
     invocation: AgentInvocation,
   ): Promise<AgentTurnResult> {
     const manifest = JSON.parse(readFileSync(invocation.launcherToken, 'utf8')) as EngineMcpLauncherManifest;
@@ -371,7 +381,7 @@ class SerializedRoundTripAdapter implements AgentSessionAdapter {
 
   classifyFailure(): 'unknown' { return 'unknown'; }
 
-  private completed(sessionId: AgentTurnResult['resumeSessionId']): AgentTurnResult {
+  private completed(sessionId: NonNullable<AgentTurnResult['resumeSessionId']>): AgentTurnResult {
     return {
       resumeSessionId: sessionId,
       sessionId,
@@ -385,6 +395,9 @@ class SerializedRoundTripAdapter implements AgentSessionAdapter {
         reasoningTokens: 0,
       },
       exit: 'completed',
+      processEvidence: null,
+      engineCatalogEvidence: null,
+      partialResultEvidence: { status: 'complete', decodedEventCount: 0 },
     };
   }
 }
@@ -478,6 +491,69 @@ const ALL_OPTIONS_TEST_RENDERER_ARGS = [
 ] as const;
 
 describe('AI-DM engine MCP conversation runner', () => {
+  it('omits DM-only intel_mode from blind planned context arguments', () => {
+    const common = { runId: 'encounter:profiled-context', expectedRevision: 7, intelMode: 'full' as const };
+    expect(profiledTurnContextArguments({ ...common, blind: true })).toEqual({
+      run_id: common.runId, expected_revision: 7, scope: 'round', granularity: 'full',
+    });
+    expect(profiledTurnContextArguments({ ...common, blind: false })).toEqual({
+      run_id: common.runId, expected_revision: 7, scope: 'round', intel_mode: 'full', granularity: 'full',
+    });
+  });
+
+  it('persists indeterminate artifact and forensic row before raising the typed integrity STOP', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'd569-integrity-stop-'));
+    const launcherPath = join(directory, 'launcher.json');
+    const proposalSpoolPath = join(directory, 'proposal.jsonl');
+    const contextSpoolPath = join(directory, 'context.jsonl');
+    const artifactPath = join(directory, 'integrity.json');
+    const rowPath = join(directory, 'rows.jsonl');
+    writeFileSync(launcherPath, '{"immutable":true}', 'utf8');
+    writeFileSync(proposalSpoolPath, '{"staged":"unconsumed"}\n', 'utf8');
+    writeFileSync(contextSpoolPath, '', 'utf8');
+    writeFileSync(rowPath, '', 'utf8');
+    const dispatchId = engineDispatchId('engine-dispatch:indeterminate-test-0001');
+    let stopped: unknown;
+    try {
+      persistD569IntegrityStop({
+        artifactPath,
+        rowPath,
+        scheduledCellKey: '9:3',
+        launcherPath,
+        proposalSpoolPath,
+        contextSpoolPath,
+        catalogEvidence: { status: 'inconclusive', dispatchId, reason: 'no_correlated_catalog' },
+        delivery: {
+          status: 'indeterminate', dispatchId, reason: 'catalog_inconclusive_empty_context_spool',
+          measurement: null, integrityAction: 'stop_after_persist',
+        },
+        turn: {
+          exit: 'completed', resumeSessionId: agentSessionIdFromCli('agent-session:indeterminate'),
+          sessionId: null, finalText: 'model reported no engine interface', usage: null,
+          processEvidence: {
+            startedAtUnixMs: 1, endedAtUnixMs: 2, exitCode: 0, signal: null,
+            stdout: 'partial evidence', stderr: '', decodedEvents: [],
+          },
+          partialResultEvidence: { status: 'complete', decodedEventCount: 0 },
+          engineCatalogEvidence: { status: 'inconclusive', dispatchId, reason: 'no_correlated_catalog' },
+        },
+      });
+    } catch (error) { stopped = error; }
+
+    expect(stopped).toMatchObject({ name: 'D569IntegrityStop' });
+    expect(JSON.parse(readFileSync(artifactPath, 'utf8'))).toEqual(expect.objectContaining({
+      kind: 'dispatch_integrity_indeterminate', scheduledCellKey: '9:3', dispatchId,
+      proposalSpool: expect.objectContaining({ recordCount: 1, stagedUnconsumed: true }),
+      contextSpool: expect.objectContaining({ recordCount: 0 }),
+    }));
+    expect(JSON.parse(readFileSync(rowPath, 'utf8'))).toEqual(expect.objectContaining({
+      rowContractVersion: 'arena-row-v3', outcome: 'integrity_indeterminate', passed: false,
+      authorizedPlan: null, execution: null,
+      engineCatalogEvidence: { status: 'inconclusive', dispatchId, reason: 'no_correlated_catalog' },
+      turnContextDelivery: expect.objectContaining({ status: 'indeterminate', dispatchId }),
+    }));
+    expect(readFileSync(proposalSpoolPath, 'utf8')).toBe('{"staged":"unconsumed"}\n');
+  });
   it('rejects a request after the MCP child closes stdin without an unhandled EPIPE', async () => {
     const child = spawn(process.execPath, ['-e', [
       "process.on('SIGTERM', () => {});",

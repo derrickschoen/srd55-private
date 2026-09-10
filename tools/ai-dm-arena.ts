@@ -106,6 +106,7 @@ interface ArenaConfigBase {
   readonly partyPolicy: ScriptedPartyDecisionPolicy;
   readonly rooms: number;
   readonly reps: number;
+  readonly cells: readonly { readonly room: number; readonly rep: number }[] | null;
   readonly seed: number;
   readonly cli: ConversationCli;
   readonly decisionTransport: ConversationTransport;
@@ -308,7 +309,7 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
     if (option === '--capture-rl-data') { captureRlData = true; continue; }
     if (option === '--generate-missing-rooms') { generateMissingRooms = true; continue; }
     if (![
-      '--rooms', '--reps', '--seed', '--cli', '--model', '--effort', '--out',
+      '--rooms', '--reps', '--cells', '--seed', '--cli', '--model', '--effort', '--out',
       '--escalation-model', '--escalation-effort',
       '--cli-bin', '--timeout-ms', '--kb',
       '--instruction-source', '--skill',
@@ -333,6 +334,11 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
   }
   const seed = Number(values.get('--seed'));
   if (!Number.isSafeInteger(seed)) throw new TypeError('--seed must be a safe integer.');
+  const rooms = positiveInteger(values.get('--rooms') ?? '', '--rooms');
+  const reps = positiveInteger(values.get('--reps') ?? '', '--reps');
+  const cells = values.has('--cells')
+    ? parseArenaCells(values.get('--cells') ?? '', rooms, reps)
+    : null;
   const outPath = resolve(values.get('--out') ?? '');
   if ((values.get('--out') ?? '').length === 0) throw new TypeError('--out is required.');
   if (pathIsInside(cwd, outPath)) throw new TypeError('--out must be outside the repository working tree.');
@@ -554,8 +560,9 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
     combatModel: combatModel as CombatModel,
     initiativeProfile: initiativeProfile as RoomInitiativeProfile,
     partyPolicy: partyPolicy as ScriptedPartyDecisionPolicy,
-    rooms: positiveInteger(values.get('--rooms') ?? '', '--rooms'),
-    reps: positiveInteger(values.get('--reps') ?? '', '--reps'),
+    rooms,
+    reps,
+    cells,
     seed,
     cli: selectedCli,
     decisionTransport: transport as ConversationTransport,
@@ -578,6 +585,28 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
     localOpenAi,
     boardImageMode: boardImageMode as BoardImageMode,
   };
+}
+
+export function parseArenaCells(
+  source: string,
+  rooms: number,
+  reps: number,
+): readonly { readonly room: number; readonly rep: number }[] {
+  if (source.length === 0) throw new TypeError('--cells requires a comma-separated room:rep list.');
+  const cells = source.split(',').map((entry) => {
+    const match = /^(\d+):(\d+)$/u.exec(entry);
+    if (match === null) throw new TypeError(`Invalid --cells entry ${entry}.`);
+    const room = Number(match[1]);
+    const rep = Number(match[2]);
+    if (!Number.isSafeInteger(room) || room < 1 || room > rooms ||
+      !Number.isSafeInteger(rep) || rep < 1 || rep > reps) {
+      throw new RangeError(`--cells entry ${entry} is outside rooms 1..${String(rooms)} and reps 1..${String(reps)}.`);
+    }
+    return { room, rep };
+  });
+  const keys = cells.map((cell) => `${String(cell.room)}:${String(cell.rep)}`);
+  if (new Set(keys).size !== keys.length) throw new TypeError('--cells entries must be unique.');
+  return cells;
 }
 
 export interface ArenaRunOptions extends Omit<
@@ -696,6 +725,7 @@ function conversationConfig(
     readonly combatModel?: CombatModel;
     readonly overridePolicy?: OverridePolicy;
     readonly instruction?: AgentInstructionSource;
+    readonly scheduledCellKey?: string;
   },
 ): import('./ai-dm-conversation').ConversationConfig {
   const instructionSource: AgentInstructionSource = overrides.instruction ?? config;
@@ -735,6 +765,7 @@ function conversationConfig(
       model: overrides.model,
     },
     boardImageMode: config.boardImageMode,
+    ...(overrides.scheduledCellKey === undefined ? {} : { scheduledCellKey: overrides.scheduledCellKey }),
   };
 }
 
@@ -777,6 +808,7 @@ export async function runArena(
     const independent: ArenaRow[] = [];
     for (let room = 1; room <= config.rooms; room += 1) {
       for (let rep = 1; rep <= config.reps; rep += 1) {
+        if (config.cells !== null && !config.cells.some((cell) => cell.room === room && cell.rep === rep)) continue;
         const result = await runConversation(conversationConfig(config, {
           rooms: 1,
           rounds: 1,
@@ -785,6 +817,7 @@ export async function runArena(
           escalationModel: config.escalationModel,
           escalationEffort: config.escalationEffort,
           outPath: resolve(temporaryDirectory, `${String(room)}-${String(rep)}-single.jsonl`),
+          scheduledCellKey: `${String(room)}:${String(rep)}`,
         }), {
           ...conversationOptions,
           ...(snapshotService === null ? {} : { boardSnapshotService: snapshotService }),
@@ -806,6 +839,7 @@ export async function runArena(
     );
     for (let room = 1; room <= config.rooms; room += 1) {
       for (let rep = 1; rep <= config.reps; rep += 1) {
+        if (config.cells !== null && !config.cells.some((cell) => cell.room === room && cell.rep === rep)) continue;
         const pendingResults: Promise<import('./ai-dm-conversation').ConversationRunResult>[] = [];
         for (const arm of config.arms) {
           let markDispatchStarted = (): void => {
@@ -823,6 +857,7 @@ export async function runArena(
             escalationModel: arm.escalationModel ?? config.escalationModel,
             escalationEffort: arm.escalationEffort ?? config.escalationEffort,
             outPath: resolve(temporaryDirectory, `${String(room)}-${String(rep)}-${arm.label}.jsonl`),
+            scheduledCellKey: `${String(room)}:${String(rep)}`,
             combatModel: arm.combatModel,
             overridePolicy: arm.overridePolicy,
             instruction: arm,

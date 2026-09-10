@@ -197,6 +197,7 @@ async function verifyCli(
     turnMarkers.push(...(started.contractEvidence ?? []));
     lifecycle.coldStart = started.exit === 'completed';
     lifecycle.sessionIdCaptured = String(started.resumeSessionId).length > 0;
+    if (started.exit !== 'completed') throw new Error(`Agent cold start ended as ${started.exit}.`);
     if (turnMarkers.includes(PI_MCP_SKIPPED_NO_EXTENSION)) {
       return {
         cli: kind,

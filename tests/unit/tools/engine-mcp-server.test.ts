@@ -12,6 +12,9 @@ import {
   createEngineMcpRuntime,
   loadArenaFixture,
 } from '../../../src/vtt/mcp/entrypoint';
+import { renderBlindEnginePrompt } from '../../../src/vtt/mcp/engine-server';
+import { encounterBranchId, encounterSessionId } from '../../../src/combat/values';
+import { engineDispatchId } from '../../../src/vtt/agent-session';
 import {
   BlindModelIngressRecorder,
   assertNoForbiddenBlindStructure,
@@ -26,6 +29,7 @@ import {
 import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
 import { BUNDLED_MONSTER_ROSTER } from '../../../src/combat/statblocks/roster';
 import { blindStatblockFacts } from '../../../src/vtt/blind-turn-context';
+import { createOptionPathFixtureEncounter } from '../../fixtures/vtt-option-path-encounter';
 
 function record(value: unknown): Readonly<Record<string, unknown>> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -111,6 +115,32 @@ async function prepareHardCapEvidence() {
 const HARD_CAP_EVIDENCE = await prepareHardCapEvidence().catch((error: unknown) => error);
 
 describe('engine MCP stdio protocol', () => {
+  it('keeps healthy primary prompt and descriptor bytes equal with readiness instrumentation', () => {
+    const state = createOptionPathFixtureEncounter();
+    const common = {
+      runId: encounterSessionId('encounter:d569-byte-equality'),
+      branchId: encounterBranchId('branch:d569-byte-equality'),
+      requestId: 'request:d569-byte-equality',
+      phase: 'initial' as const,
+      toolProfile: 'blind' as const,
+      dmMode: 'blind' as const,
+    };
+    const before = createEngineMcpRuntime(state, common);
+    const after = createEngineMcpRuntime(state, {
+      ...common,
+      readinessEvidence: {
+        spoolPath: '/tmp/d569-byte-equality-readiness.jsonl',
+        dispatchId: engineDispatchId('engine-dispatch:byte-equality-0001'),
+        phase: 'primary',
+        profile: 'blind',
+        requestId: common.requestId,
+      },
+    });
+    const rules = { get: () => null } as const;
+    expect(JSON.stringify(after.toolSurface.tools)).toBe(JSON.stringify(before.toolSurface.tools));
+    expect(renderBlindEnginePrompt('plan_blind_round', after.feed.current(), rules))
+      .toBe(renderBlindEnginePrompt('plan_blind_round', before.feed.current(), rules));
+  });
   it('exposes only the closed blind profile and records every simulated MCP ingress channel', async () => {
     const state = await loadArenaFixture('tests/fixtures/arena-basis/seed-3943001.json');
     const bundle = await loadD569AiDmKnowledgeBase(process.cwd(), 'blind');

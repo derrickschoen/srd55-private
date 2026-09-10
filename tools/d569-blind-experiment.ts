@@ -722,6 +722,13 @@ export interface D569ObservedRow {
   readonly seed: number;
   readonly rep: number;
   readonly sessionId: string | null;
+  readonly outcome?: 'authorized' | 'refused' | 'service_null' | 'execution_failed' |
+    'partial_execution' | 'infrastructure_failed' | 'integrity_indeterminate';
+  readonly scheduledCellKey?: string;
+  readonly dispatchId?: string;
+  readonly engineCatalogEvidence?: { readonly status: 'ready' | 'absent' | 'inconclusive' };
+  readonly turnContextDelivery?: { readonly status: 'delivered' | 'not_requested' |
+    'timeout_before_delivery' | 'infrastructure_absent' | 'indeterminate' };
   readonly timeoutMs: number;
   readonly escalationModel: string | null;
   readonly modelDefaultFallback: boolean;
@@ -762,8 +769,20 @@ export function validateD569ObservedRows(
       'cli_identity', `row ${rowKey} omitted the executing CLI identity`);
     addViolation(violations, row.cliVersion.trim().length > 0,
       'cli_version', `row ${rowKey} omitted the executing CLI version`);
-    addViolation(violations, row.sessionId !== null && !sessionIds.has(row.sessionId),
-      'fresh_session', `row ${rowKey} did not use a unique fresh session`);
+    const diagnosedInfrastructure = row.outcome === 'infrastructure_failed';
+    const integrityIndeterminate = row.outcome === 'integrity_indeterminate' ||
+      row.engineCatalogEvidence?.status === 'inconclusive' || row.turnContextDelivery?.status === 'indeterminate';
+    addViolation(violations, !integrityIndeterminate,
+      'integrity_indeterminate', `row ${rowKey} has indeterminate integrity evidence`);
+    addViolation(violations, diagnosedInfrastructure
+      ? row.sessionId === null && typeof row.scheduledCellKey === 'string' && row.scheduledCellKey.length > 0 &&
+        typeof row.dispatchId === 'string' && row.dispatchId.length >= 16 &&
+        row.engineCatalogEvidence?.status === 'absent' &&
+        row.turnContextDelivery?.status === 'infrastructure_absent'
+      : row.sessionId !== null && !sessionIds.has(row.sessionId),
+    'fresh_session', diagnosedInfrastructure
+      ? `row ${rowKey} lacks typed infrastructure identity/evidence`
+      : `row ${rowKey} did not use a unique fresh session`);
     if (row.sessionId !== null) sessionIds.add(row.sessionId);
     addViolation(violations, row.timeoutMs === cell.timeoutMs, 'timeout', `row ${rowKey} changed timeout`);
     addViolation(violations, row.escalationModel === null, 'escalation', `row ${rowKey} escalated`);

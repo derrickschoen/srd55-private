@@ -1,4 +1,4 @@
-import { readFileSync } from '../../helpers/test-filesystem';
+import { mkdtempSync, readFileSync, writeFileSync } from '../../helpers/test-filesystem';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -86,11 +86,43 @@ class SIMULATEDChildProcessRunner implements AgentProcessRunner {
 }
 
 function output(stdout: string, stderr = '', exitCode: number | null = 0, cancelled = false): AgentProcessOutput {
-  return { stdout, stderr, exitCode, cancelled };
+  const startedAtUnixMs = 1_000;
+  return {
+    stdout, stderr, exitCode, signal: null, cancelled, timedOut: false,
+    startedAtUnixMs, endedAtUnixMs: 1_001,
+    stdoutLines: stdout.split('\n').filter((line) => line.length > 0)
+      .map((line, index) => ({ line, observedAtUnixMs: startedAtUnixMs + index })),
+  };
 }
 
 function fixture(name: string): string {
   return readFileSync(resolve(`tests/fixtures/agent-adapters/${name}.SIMULATED.jsonl`), 'utf8');
+}
+
+function expectedProcessEvidence(
+  stdout: string,
+  decodeJsonEvents: boolean,
+): NonNullable<Awaited<ReturnType<CodexAgentSessionAdapter['start']>>['processEvidence']> {
+  const lines = stdout.split('\n').filter((line) => line.length > 0);
+  return {
+    startedAtUnixMs: 1_000,
+    endedAtUnixMs: 1_001,
+    exitCode: 0,
+    signal: null,
+    stdout,
+    stderr: '',
+    decodedEvents: decodeJsonEvents ? lines.flatMap((line, index) => {
+      let event: Readonly<Record<string, unknown>>;
+      try { event = JSON.parse(line) as Readonly<Record<string, unknown>>; } catch { return []; }
+      const item = typeof event['item'] === 'object' && event['item'] !== null && !Array.isArray(event['item'])
+        ? event['item'] as Readonly<Record<string, unknown>> : null;
+      return [{
+        invocationId: typeof item?.['id'] === 'string' ? item['id'] : null,
+        kind: typeof event['type'] === 'string' ? event['type'] : 'unknown',
+        observedAtUnixMs: 1_000 + index,
+      }];
+    }) : [],
+  };
 }
 
 function binding(kind: AgentCliKind, id: string): AgentSessionBinding {
@@ -127,7 +159,8 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
   });
 
   it('SIMULATED Codex uses the measured JSON event stream and places shared flags before resume', async () => {
-    const runner = new SIMULATEDChildProcessRunner([output(fixture('codex-start')), output(fixture('codex-start').replaceAll('codex-thread-123', 'codex-thread-123'))]);
+    const transcript = fixture('codex-start');
+    const runner = new SIMULATEDChildProcessRunner([output(transcript), output(transcript.replaceAll('codex-thread-123', 'codex-thread-123'))]);
     const adapter = new CodexAgentSessionAdapter(options(runner));
 
     const started = await adapter.start(invocation, new AbortController().signal);
@@ -146,6 +179,9 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
         reasoningTokens: 9,
       },
       exit: 'completed',
+      processEvidence: expectedProcessEvidence(transcript, true),
+      partialResultEvidence: { status: 'complete', decodedEventCount: 3 },
+      engineCatalogEvidence: null,
     });
     expect(resumed.resumeSessionId).toBe('codex-thread-123');
     expect(resumed.sessionId).toBe('codex-thread-123');
@@ -159,6 +195,9 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
       '-c', 'model_reasoning_effort="high"',
       '-c', `mcp_servers.engine.command=${JSON.stringify(engineCommand)}`,
       '-c', `mcp_servers.engine.args=${JSON.stringify([...engineArgs, invocation.launcherToken])}`,
+      '-c', 'mcp_servers.engine.required=true',
+      '-c', 'mcp_servers.engine.startup_timeout_sec=60',
+      '-c', 'mcp_servers.engine.tool_timeout_sec=60',
     ];
     expect(runner.calls[0]?.spec.argv).toEqual([
       ...expectedPrefix,
@@ -257,8 +296,9 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
   });
 
   it('SIMULATED Codex extracts the UUID from captured stdout session id output', async () => {
+    const transcript = fixture('codex-session-id-stdout');
     const adapter = new CodexAgentSessionAdapter(options(new SIMULATEDChildProcessRunner([
-      output(fixture('codex-session-id-stdout')),
+      output(transcript),
     ])));
 
     expect(await adapter.start(invocation, new AbortController().signal)).toEqual({
@@ -274,6 +314,52 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
         reasoningTokens: 5,
       },
       exit: 'completed',
+      processEvidence: expectedProcessEvidence(transcript, true),
+      partialResultEvidence: { status: 'complete', decodedEventCount: 2 },
+      engineCatalogEvidence: null,
+    });
+  });
+
+  it('SIMULATED Codex returns required-engine startup failure with complete process evidence', async () => {
+    const directory = mkdtempSync(resolve(tmpdir(), 'd569-required-engine-'));
+    const readinessSpoolPath = resolve(directory, 'readiness.jsonl');
+    const launcherToken = resolve(directory, 'launcher.json');
+    const dispatchId = 'engine-dispatch:required-startup-0001';
+    writeFileSync(readinessSpoolPath, '', 'utf8');
+    writeFileSync(launcherToken, JSON.stringify({
+      dispatchId, readinessSpoolPath, toolProfile: 'blind', dispatchPhase: 'primary',
+      requestId: 'request:required-startup',
+    }), 'utf8');
+    const transcript = [
+      JSON.stringify({ type: 'thread.started', thread_id: 'codex-partial-thread' }),
+      JSON.stringify({ type: 'item.completed', item: { id: 'staged-1', type: 'agent_message', text: 'partial' } }),
+    ].join('\n');
+    const stderr = 'Required MCP server engine failed to initialize: simulated startup failure';
+    const adapter = new CodexAgentSessionAdapter(options(new SIMULATEDChildProcessRunner([
+      output(transcript, stderr, 1),
+    ])));
+
+    expect(await adapter.start({ ...invocation, launcherToken }, new AbortController().signal)).toEqual({
+      exit: 'infrastructure_failed',
+      resumeSessionId: 'codex-partial-thread',
+      sessionId: 'codex-partial-thread',
+      finalText: 'partial',
+      usage: null,
+      component: 'engine_mcp_startup',
+      failureReason: stderr,
+      processEvidence: {
+        ...expectedProcessEvidence(transcript, true),
+        exitCode: 1,
+        stderr,
+      },
+      partialResultEvidence: {
+        status: 'partial', decodedEventCount: 2, finalTextFragment: 'partial',
+        observedUsage: null, stagedInvocationIds: ['staged-1'],
+      },
+      engineCatalogEvidence: {
+        status: 'absent', basis: 'required_engine_initialization_failed', dispatchId,
+        corroboration: [stderr],
+      },
     });
   });
 
@@ -334,6 +420,9 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
       '-c', 'skills.include_instructions=false',
       '-c', `mcp_servers.engine.command=${JSON.stringify(engineCommand)}`,
       '-c', `mcp_servers.engine.args=${JSON.stringify(engineArgs)}`,
+      '-c', 'mcp_servers.engine.required=true',
+      '-c', 'mcp_servers.engine.startup_timeout_sec=60',
+      '-c', 'mcp_servers.engine.tool_timeout_sec=60',
       '-',
     ]);
     expect(arenaResume).toEqual(expect.arrayContaining([
@@ -520,6 +609,9 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
       finalText: 'OC_EVIDENCE',
       usage: { turnInputTotal: 2051, contextInputTokens: 2051, modelContextWindow: null, cachedInputTokens: 0, outputTokens: 68, reasoningTokens: 0 },
       exit: 'completed',
+      processEvidence: expectedProcessEvidence(transcript, false),
+      partialResultEvidence: { status: 'complete', decodedEventCount: 3 },
+      engineCatalogEvidence: null,
     });
     await adapter.resume(
       binding('opencode', 'ses_fba44c8fcffewZFncFkCWbLLuB'),
@@ -582,6 +674,7 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
     });
     expect(started.sessionId).toBeNull();
     expect(started.resumeSessionId).toMatch(/^\/tmp\/dnd-wt-vtt-pi-session-[0-9a-f-]{36}\.jsonl$/u);
+    if (started.exit !== 'completed') throw new Error('SIMULATED Pi start did not complete.');
     const resumeAdapter = new PiAgentSessionAdapter({ ...options(runner), piMcpExtensionPath: '/workspace/pi-engine-extension.mjs' });
     await resumeAdapter.resume(binding('pi', started.resumeSessionId), invocation, new AbortController().signal);
 
@@ -678,6 +771,33 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
     expect(runner.calls[0]?.timeoutMs).toBe(invocation.timeoutMs);
   });
 
+  it('SIMULATED preserves partial stdout, stderr, signal, and staged ids on timeout', async () => {
+    const transcript = [
+      JSON.stringify({ type: 'thread.started', thread_id: 'codex-timeout-thread' }),
+      JSON.stringify({ type: 'item.completed', item: { id: 'staged-timeout-1', type: 'agent_message', text: 'partial timeout text' } }),
+    ].join('\n');
+    const timedOut = {
+      ...output(transcript, 'timeout stderr', null),
+      signal: 'SIGTERM',
+      timedOut: true,
+    } as const;
+    const adapter = new CodexAgentSessionAdapter(options(new SIMULATEDChildProcessRunner([timedOut])));
+    const result = await adapter.start(invocation, new AbortController().signal);
+
+    expect(result).toEqual({
+      exit: 'timed_out', resumeSessionId: 'codex-timeout-thread', sessionId: 'codex-timeout-thread',
+      finalText: 'partial timeout text', usage: null, timeoutMs: 12_345,
+      processEvidence: {
+        ...expectedProcessEvidence(transcript, true), exitCode: null, signal: 'SIGTERM', stderr: 'timeout stderr',
+      },
+      partialResultEvidence: {
+        status: 'partial', decodedEventCount: 2, finalTextFragment: 'partial timeout text',
+        observedUsage: null, stagedInvocationIds: ['staged-timeout-1'],
+      },
+      engineCatalogEvidence: null,
+    });
+  });
+
   it('SIMULATED preserves the existing binding when a resume is cancelled before output', async () => {
     const runner = new SIMULATEDChildProcessRunner([output('', '', null, true)]);
     const adapter = new ClaudeCodeAgentSessionAdapter(options(runner));
@@ -688,6 +808,16 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
     )).toEqual({
       resumeSessionId: 'claude-session-cancelled', sessionId: null,
       finalText: '', usage: null, exit: 'cancelled',
+      processEvidence: {
+        startedAtUnixMs: 1_000, endedAtUnixMs: 1_001, exitCode: null, signal: null,
+        stdout: '', stderr: '', decodedEvents: [],
+      },
+      engineCatalogEvidence: null,
+      cancellationReason: 'abort_signal',
+      partialResultEvidence: {
+        status: 'partial', decodedEventCount: 0, finalTextFragment: '', observedUsage: null,
+        stagedInvocationIds: [],
+      },
     });
   });
 });

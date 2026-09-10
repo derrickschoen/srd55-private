@@ -207,6 +207,35 @@ describe('host turn exhaustion coordinator', () => {
     expect(f.journal.history().map((entry) => entry.transition.kind)).toContain('proposal_fallback_resolved');
   });
 
+  it('refuses blind host-authorization failure without rendering or dispatching DM correction', async () => {
+    const f = fixture();
+    const adapter = new SIMULATEDAgentSessionAdapter({ startIds: [] });
+    const activated = { value: 0 };
+    const renderedMethods: string[] = [];
+    const coordinator = new TurnExhaustionCoordinator(
+      f.journal.turnExhaustionPersistence(),
+      (method, capsule, rules, context) => {
+        renderedMethods.push(method);
+        return JSON.stringify({ capsule, rules: rules.get('irrelevant'), context });
+      },
+    );
+
+    await expect(coordinator.coordinate({
+      initial: { kind: 'proposal', proposal: proposal(f, 'initial', 'primary') },
+      correction: runtime(f, adapter, [], activated),
+      host: host({ authorization: 'invalid' }),
+      authorizationFailurePolicy: { kind: 'refuse_blind' },
+    })).resolves.toEqual({
+      kind: 'refused', reason: 'host_authorization_failed', attemptConsumed: true,
+    });
+
+    expect(renderedMethods.filter((method) => method === 'correct_proposal')).toHaveLength(0);
+    expect(adapter.resumeInvocations).toHaveLength(0);
+    expect(activated.value).toBe(0);
+    expect(f.journal.history().map((entry) => entry.transition.kind))
+      .not.toContain('proposal_correction_requested');
+  });
+
   it('dispatches exactly one proposal correction and accepts its complete proposal', async () => {
     const f = fixture();
     const queued: RoundTurnProposalEnvelope[] = [];

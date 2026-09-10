@@ -9,7 +9,7 @@ import {
   type AgentSessionBinding,
   type AgentTurnResult,
 } from '../../../src/vtt/agent-session';
-import { encounterBranchId, encounterSessionId } from '../../../src/combat/values';
+import { encounterBranchId, encounterSessionId, type AgentSessionId } from '../../../src/combat/values';
 import { canonicalJson } from '../../../src/commands/canonical-json';
 import { sha256 } from '../../../src/crypto/sha256';
 import { mcpRequestMeta, createMcpHandler } from '../../../src/vtt/mcp/handler';
@@ -129,7 +129,7 @@ class FastProposalAdapter implements AgentSessionAdapter {
   }
   classifyFailure(): 'unknown' { return 'unknown'; }
   private async dispatch(
-    sessionId: AgentTurnResult['resumeSessionId'],
+    sessionId: AgentSessionId,
     invocation: AgentInvocation,
   ): Promise<AgentTurnResult> {
     const manifest = JSON.parse(readFileSync(invocation.launcherToken, 'utf8')) as EngineMcpLauncherManifest;
@@ -173,6 +173,8 @@ class FastProposalAdapter implements AgentSessionAdapter {
     return {
       resumeSessionId: sessionId,
       sessionId: null, finalText: 'SIMULATED', usage: null, exit: 'completed',
+      processEvidence: null, engineCatalogEvidence: null,
+      partialResultEvidence: { status: 'complete', decodedEventCount: 0 },
     };
   }
 }

@@ -1,6 +1,7 @@
 import { sha256 } from '../crypto/sha256';
 import type {
   AgentInvocation,
+  AgentColdStartOutcome,
   AgentSessionAdapter,
   AgentSessionBinding,
   AgentTurnResult,
@@ -26,8 +27,9 @@ export class AgentSessionLifecycle {
     }
   }
 
-  async coldStart(invocation: AgentInvocation, signal: AbortSignal): Promise<AgentSessionBinding> {
+  async coldStart(invocation: AgentInvocation, signal: AbortSignal): Promise<AgentColdStartOutcome> {
     const result = await this.#coldStart(invocation, signal);
+    if (result.exit !== 'completed') return { kind: 'unbound', turn: result };
     const binding = this.journal.startAgentSession({
       cli: this.adapter.kind,
       sessionId: result.resumeSessionId,
@@ -35,12 +37,13 @@ export class AgentSessionLifecycle {
       measuredRolloverThreshold: measuredThreshold(this.rolloverPolicy),
     });
     this.#recordUsage(result, invocation);
-    return this.journal.agentSession() ?? binding;
+    return { kind: 'bound', binding: this.journal.agentSession() ?? binding, turn: result };
   }
 
-  async coldStartRound(invocation: AgentInvocation, signal: AbortSignal): Promise<AgentTurnResult> {
+  async coldStartRound(invocation: AgentInvocation, signal: AbortSignal): Promise<AgentColdStartOutcome> {
     const result = await this.#coldStart(invocation, signal);
-    this.journal.startAgentSession({
+    if (result.exit !== 'completed') return { kind: 'unbound', turn: result };
+    const binding = this.journal.startAgentSession({
       cli: this.adapter.kind,
       sessionId: result.resumeSessionId,
       adapterVersion: this.adapterVersion,
@@ -48,7 +51,7 @@ export class AgentSessionLifecycle {
     });
     this.journal.recordAgentSessionDispatch();
     this.#recordUsage(result, invocation);
-    return result;
+    return { kind: 'bound', binding: this.journal.agentSession() ?? binding, turn: result };
   }
 
   async #coldStart(invocation: AgentInvocation, signal: AbortSignal): Promise<AgentTurnResult> {
@@ -62,10 +65,10 @@ export class AgentSessionLifecycle {
       this.rolloverPolicy.kind === 'unmeasured') {
       throw new UnmeasuredContextRolloverPolicyError();
     }
-    return requireCompleted(await this.adapter.start({
+    return this.adapter.start({
       ...invocation,
       bootstrap: invocation.bootstrap ?? { kind: 'cold_start' },
-    }, signal), 'Agent cold start');
+    }, signal);
   }
 
   resumeRound(invocation: AgentInvocation, signal: AbortSignal): Promise<AgentTurnResult> {
@@ -107,6 +110,7 @@ export class AgentSessionLifecycle {
         dispatched,
         'Agent resume',
       );
+      if (result.exit !== 'completed') return result;
       this.#recordUsage(result, invocation);
       return result;
     } catch (error) {
@@ -130,10 +134,18 @@ export class AgentSessionLifecycle {
         bootstrap: typedBootstrap,
         launcherToken: requireFullContextLauncher(invocation, 'resume recovery'),
       };
-      const bootstrapResult = requireCompleted(
-        await this.adapter.start(recoveryInvocation, signal),
-        'Agent recovery cold start',
-      );
+      const bootstrapResult = await this.adapter.start(recoveryInvocation, signal);
+      if (bootstrapResult.exit !== 'completed') {
+        if (invocation.recoveryEngineDispatchId === undefined) {
+          throw new Error('Failed recovery dispatch omitted its engine dispatch identity.');
+        }
+        this.journal.recordAgentSessionRecoveryFailure({
+          predecessorSessionHash,
+          dispatchId: invocation.recoveryEngineDispatchId,
+          exit: bootstrapResult.exit,
+        });
+        return bootstrapResult;
+      }
       if (bootstrapResult.resumeSessionId === dispatched.sessionId) {
         throw new Error('Agent recovery cold start did not create a successor session.');
       }
@@ -165,12 +177,12 @@ export class AgentSessionLifecycle {
       digest,
       stateDelivery: 'full_engine_context',
     };
-    return requireCompleted(await this.adapter.start({
+    return this.adapter.start({
       ...invocation,
       instructions: freshSessionInstructions(freshContext, bootstrap, invocation.instructions),
       bootstrap,
       launcherToken: requireFullContextLauncher(invocation, 'escalation'),
-    }, signal), 'Agent escalation cold start');
+    }, signal);
   }
 
   async #rollOver(
@@ -190,12 +202,13 @@ export class AgentSessionLifecycle {
       digest,
       stateDelivery: 'full_engine_context',
     };
-    const result = requireCompleted(await this.adapter.start({
+    const result = await this.adapter.start({
       ...invocation,
       instructions: freshSessionInstructions(freshContext, bootstrap),
       bootstrap,
       launcherToken: requireFullContextLauncher(invocation, 'context rollover'),
-    }, signal), 'Agent context rollover cold start');
+    }, signal);
+    if (result.exit !== 'completed') return result;
     if (result.resumeSessionId === persisted.sessionId) {
       throw new Error('Agent context rollover did not create a successor session.');
     }
@@ -277,17 +290,12 @@ export function freshSessionInstructions(
   ].join('\n\n');
 }
 
-function requireCompleted(result: AgentTurnResult, operation: string): AgentTurnResult {
-  if (result.exit !== 'completed') throw new Error(`${operation} was cancelled.`);
-  return result;
-}
-
 function requireResumedSameSession(
   result: AgentTurnResult,
   binding: AgentSessionBinding,
   operation: string,
 ): AgentTurnResult {
-  requireCompleted(result, operation);
+  if (result.exit !== 'completed') return result;
   if (result.resumeSessionId !== binding.sessionId) {
     throw new Error(`${operation} returned a different session ID.`);
   }

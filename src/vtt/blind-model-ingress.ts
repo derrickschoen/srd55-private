@@ -1,6 +1,7 @@
 import { canonicalJson } from '../commands/canonical-json';
 import { sha256 } from '../crypto/sha256';
 import { blindTurnContextSchema } from './blind-turn-context';
+import type { TurnContextDelivery } from './turn-context-delivery';
 
 export const BLIND_INGRESS_AUDIT_VERSION = 'blind-model-ingress-v1' as const;
 
@@ -53,6 +54,24 @@ export interface BlindIngressAuditSummary {
   readonly sha256: string;
   readonly passed: true;
 }
+
+export type BlindIngressAudit =
+  | BlindIngressAuditSummary
+  | {
+      readonly version: 2;
+      readonly status: 'complete';
+      readonly passed: true;
+      readonly forbiddenContentPassed: true;
+      readonly delivery: Extract<TurnContextDelivery, { readonly status: 'delivered' }>;
+    }
+  | {
+      readonly version: 2;
+      readonly status: 'incomplete';
+      readonly passed: false;
+      readonly forbiddenContentPassed: boolean;
+      readonly delivery: Exclude<TurnContextDelivery, { readonly status: 'delivered' }>;
+      readonly missingRequiredFields: readonly string[];
+    };
 
 export interface BlindIngressScanOracle {
   readonly offeredOptionIds?: readonly string[];
@@ -203,6 +222,39 @@ export function assertBlindIngressSafe(
     sha256: sha256(records.map((record) =>
       `${String(record.ordinal)}\0${record.channel}\0${record.text}`).join('\n')),
     passed: true,
+  };
+}
+
+export function auditBlindIngress(
+  records: readonly BlindIngressRecord[],
+  delivery: TurnContextDelivery,
+  oracle: BlindIngressScanOracle = {},
+): BlindIngressAudit {
+  const joined = records.map((record) => record.text).join('\n');
+  const lower = joined.toLowerCase();
+  const forbidden = [
+    ...FORBIDDEN_SURFACE_NAMES.filter((name) => lower.includes(name.toLowerCase())),
+    ...FORBIDDEN_ADVICE_TEXT.filter((text) => lower.includes(text)),
+    ...(oracle.offeredOptionIds ?? []).filter((id) => id.length > 0 && joined.includes(id)),
+  ];
+  const missingRequiredFields = (oracle.requiredText ?? []).filter((expected) => !joined.includes(expected));
+  if (delivery.status === 'delivered' && records.length > 0 &&
+    forbidden.length === 0 && missingRequiredFields.length === 0) {
+    return { version: 2, status: 'complete', passed: true, forbiddenContentPassed: true, delivery };
+  }
+  if (delivery.status === 'delivered') {
+    throw new TypeError('Delivered blind ingress is missing required evidence and cannot be finalized as complete.');
+  }
+  return {
+    version: 2,
+    status: 'incomplete',
+    passed: false,
+    forbiddenContentPassed: forbidden.length === 0,
+    delivery,
+    missingRequiredFields: [
+      ...(records.length === 0 ? ['ingress_records'] : []),
+      ...missingRequiredFields,
+    ],
   };
 }
 

@@ -6,6 +6,7 @@ import { agentSessionIdFromCli, contextTokenCount, turnInputTotal } from '../age
 import type { AgentInvocation, AgentSessionBinding, AgentTurnResult, AgentUsage } from '../agent-session';
 import {
   AgentAdapterError,
+  agentProcessEvidence,
   completedOutput,
   jsonEventLines,
   ProcessAgentSessionAdapter,
@@ -93,15 +94,28 @@ export class PiAgentSessionAdapter extends ProcessAgentSessionAdapter {
       signal,
       invocation.timeoutMs,
     );
+    const processEvidence = agentProcessEvidence(output);
     completedOutput(output, resuming);
+    if (output.timedOut) {
+      return {
+        resumeSessionId: agentSessionIdFromCli(sessionId), sessionId: null,
+        finalText: output.stdout, usage: null, exit: 'timed_out', timeoutMs: invocation.timeoutMs ?? 1,
+        contractEvidence: piContractEvidence(this.options.piMcpExtensionPath),
+        processEvidence, engineCatalogEvidence: null,
+        partialResultEvidence: { status: 'partial', decodedEventCount: 0, finalTextFragment: output.stdout, observedUsage: null, stagedInvocationIds: [] },
+      };
+    }
     if (output.cancelled) {
       return {
         resumeSessionId: agentSessionIdFromCli(sessionId),
         sessionId: null,
-        finalText: '',
+        finalText: output.stdout,
         usage: null,
         exit: 'cancelled',
+        cancellationReason: String(signal.reason ?? 'abort_signal'),
         contractEvidence: piContractEvidence(this.options.piMcpExtensionPath),
+        processEvidence, engineCatalogEvidence: null,
+        partialResultEvidence: { status: 'partial', decodedEventCount: 0, finalTextFragment: output.stdout, observedUsage: null, stagedInvocationIds: [] },
       };
     }
     const decoded = decodePiTurn(output.stdout, sessionId, (event) => this.observe(event));
@@ -112,6 +126,8 @@ export class PiAgentSessionAdapter extends ProcessAgentSessionAdapter {
       usage: decoded.usage,
       exit: 'completed',
       contractEvidence: piContractEvidence(this.options.piMcpExtensionPath),
+      processEvidence, engineCatalogEvidence: null,
+      partialResultEvidence: { status: 'complete', decodedEventCount: output.stdoutLines.length },
     };
   }
 }
