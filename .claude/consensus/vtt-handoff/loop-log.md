@@ -58,3 +58,5 @@ Machine constraint: the D569 v5 first arm (pid 1201481, port 4530) runs until ~1
 - 2026-09-10 12:12 EDT — S3 Astra r3 REJECT: F30/F32/F33/F34/F36 resolved; F37 (first pause write failure deadlocks / initial-offer cleanup with failed store), F38 (publication precedes terminal receipt; subscriber close turns committed into closed), F39 (renamed re-export reducers escape). r4 dispatched (resume 01a08b7b-e666…).
 
 - 2026-09-10 12:34 EDT — S3 r4 lane DONE; supervisor verification tsc/sg/diffcheck 0, 17 specs 187/187, baseline OK; committed ef0ef4f6; Astra S3 r4 review dispatched (resume 01a087f9…).
+
+- 2026-09-10 12:38 EDT — S3 Astra r4 ACCEPT at ef0ef4f6 (F37–F39 resolved). S4/S5/S5b lane dispatched (fresh session).
