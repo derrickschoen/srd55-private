@@ -46,6 +46,10 @@ export interface HeldoutLeakInspectionContext {
   readonly candidateSourceFiles?: Readonly<Record<string, string>>;
   readonly resolutionConfigChanged?: boolean;
   readonly configuredAliasPrefixes?: readonly string[];
+  readonly configuredAliasRegexes?: readonly {
+    readonly source: string;
+    readonly flags: string;
+  }[];
   readonly unresolvedResolutionConfigPaths?: readonly string[];
 }
 
@@ -136,12 +140,13 @@ export const HELDOUT_MODULE_SPECIFIER_POLICY = {
     'a known loader reference escaping recognized call syntax is loader_reference_escaped',
   ],
   interpreted: [
-    'loader bindings are tracked by TypeScript symbol identity and exact aliases inherit their loader role',
-    'tracked symbols are allowed only in a direct recognized load/resolve call or an exact alias declaration',
+    'loader-valued expressions are built-in loaders, their load/resolve/glob members, createRequire factories and results, workers, script loaders, and exact plain const aliases',
+    'namespace roots such as window, self, globalThis, import.meta, and module namespaces are inspected only to derive loader-valued members and are never findings themselves',
+    'a loader-valued expression is allowed only as a recognized direct callee/receiver with a statically resolved target or the whole initializer of a non-exported plain const alias',
     'resolution configuration changes invalidate candidate consumers for reinspection',
   ],
   failsClosed: [
-    'every other reference to a tracked loader symbol is loader_reference_escaped',
+    'every other position of a loader-valued expression is loader_reference_escaped from one generic check',
     'unresolved targets, options, package conditions, globs, aliases, URL schemes, and data modules are findings',
   ],
   outOfScope: HELDOUT_LEAK_AST_OUT_OF_SCOPE,
@@ -402,22 +407,6 @@ function discoverModuleEdges(
   context: HeldoutLeakInspectionContext = {},
   dataDepth = 0,
 ): readonly ModuleEdge[] {
-  const transpiled = ts.transpileModule(source, {
-    compilerOptions: {
-      target: ts.ScriptTarget.Latest,
-      jsx: ts.JsxEmit.Preserve,
-    },
-    fileName: path,
-    reportDiagnostics: true,
-  });
-  const parseErrors = (transpiled.diagnostics ?? []).filter((diagnostic) =>
-    diagnostic.category === ts.DiagnosticCategory.Error);
-  if (parseErrors.length > 0) {
-    const detail = parseErrors.map((diagnostic) =>
-      ts.flattenDiagnosticMessageText(diagnostic.messageText, ' ')).join('; ');
-    throw new TypeError(`Held-out leak inspection could not parse ${path}: ${detail}`);
-  }
-
   const sourceFile = ts.createSourceFile(
     path,
     source,
@@ -425,20 +414,28 @@ function discoverModuleEdges(
     true,
     scriptKind(path),
   );
+  const parseDiagnostics = (sourceFile as ts.SourceFile & {
+    readonly parseDiagnostics?: readonly ts.Diagnostic[];
+  }).parseDiagnostics ?? [];
+  const parseErrors = parseDiagnostics.filter((diagnostic) =>
+    diagnostic.category === ts.DiagnosticCategory.Error);
+  if (parseErrors.length > 0) {
+    const detail = parseErrors.map((diagnostic) =>
+      ts.flattenDiagnosticMessageText(diagnostic.messageText, ' ')).join('; ');
+    throw new TypeError(`Held-out leak inspection could not parse ${path}: ${detail}`);
+  }
   const result: ModuleEdge[] = [];
 
   type TrackedLoaderKind =
     | 'loader'
     | 'resolver'
-    | 'import_meta'
     | 'glob'
     | 'factory'
     | 'module_namespace'
     | 'worker_namespace'
     | 'worker'
     | 'shared_worker'
-    | 'script_loader'
-    | 'global_namespace';
+    | 'script_loader';
   const compilerOptions: ts.CompilerOptions = {
     allowJs: true,
     checkJs: false,
@@ -458,9 +455,13 @@ function discoverModuleEdges(
     useCaseSensitiveFileNames: () => true,
     writeFile: () => undefined,
   };
-  const checker = ts.createProgram([path], compilerOptions, compilerHost).getTypeChecker();
+  const needsLoaderSymbols = /\b(?:require|createRequire|Worker|SharedWorker|importScripts)\b|import\.meta|['"](?:node:)?(?:module|worker_threads)['"]/u.test(source);
+  const checker = needsLoaderSymbols
+    ? ts.createProgram([path], compilerOptions, compilerHost).getTypeChecker()
+    : null;
   const trackedSymbols = new Map<ts.Symbol, Set<TrackedLoaderKind>>();
   const symbolAt = (identifier: ts.Identifier): ts.Symbol | undefined => {
+    if (checker === null) return undefined;
     if (ts.isExportSpecifier(identifier.parent)) {
       return checker.getExportSpecifierLocalTargetSymbol(identifier.parent) ??
         checker.getSymbolAtLocation(identifier);
@@ -490,9 +491,20 @@ function discoverModuleEdges(
     if (identifier.text === 'Worker') return 'worker';
     if (identifier.text === 'SharedWorker') return 'shared_worker';
     if (identifier.text === 'importScripts') return 'script_loader';
-    if (['self', 'globalThis', 'window'].includes(identifier.text)) return 'global_namespace';
     return null;
   };
+  const isUnshadowedAmbientIdentifier = (
+    expression: ts.Expression,
+    names: readonly string[],
+  ): boolean => {
+    const unwrapped = unwrapTransparentExpression(expression);
+    if (!ts.isIdentifier(unwrapped) || !names.includes(unwrapped.text)) return false;
+    const symbol = symbolAt(unwrapped);
+    return symbol === undefined ||
+      symbol.declarations?.some((declaration) => declaration.getSourceFile() === sourceFile) !== true;
+  };
+  const isGlobalNamespace = (expression: ts.Expression): boolean =>
+    isUnshadowedAmbientIdentifier(expression, ['self', 'globalThis', 'window']);
   const identifierKinds = (identifier: ts.Identifier): ReadonlySet<TrackedLoaderKind> => {
     const symbol = symbolAt(identifier);
     if (symbol !== undefined) {
@@ -518,7 +530,6 @@ function discoverModuleEdges(
       unwrapped = unwrapTransparentExpression(unwrapped.expression);
     }
     if (ts.isIdentifier(unwrapped)) return identifierKinds(unwrapped);
-    if (isImportMeta(unwrapped)) return singletonKind('import_meta');
     if (ts.isPropertyAccessExpression(unwrapped) || ts.isElementAccessExpression(unwrapped)) {
       const receiverKinds = expressionKinds(unwrapped.expression);
       const key = propertyKey(unwrapped);
@@ -528,14 +539,14 @@ function discoverModuleEdges(
         return singletonKind('factory');
       }
       if (receiverKinds.has('module_namespace') && key === 'require') return singletonKind('loader');
-      if (receiverKinds.has('import_meta') && key === 'resolve') return singletonKind('resolver');
-      if (receiverKinds.has('import_meta') && key === 'glob') return singletonKind('glob');
-      if ((receiverKinds.has('worker_namespace') || receiverKinds.has('global_namespace')) &&
+      if (isImportMeta(unwrapped.expression) && key === 'resolve') return singletonKind('resolver');
+      if (isImportMeta(unwrapped.expression) && key === 'glob') return singletonKind('glob');
+      if ((receiverKinds.has('worker_namespace') || isGlobalNamespace(unwrapped.expression)) &&
         key === 'Worker') return singletonKind('worker');
-      if (receiverKinds.has('global_namespace') && key === 'SharedWorker') {
+      if (isGlobalNamespace(unwrapped.expression) && key === 'SharedWorker') {
         return singletonKind('shared_worker');
       }
-      if (receiverKinds.has('global_namespace') && key === 'importScripts') {
+      if (isGlobalNamespace(unwrapped.expression) && key === 'importScripts') {
         return singletonKind('script_loader');
       }
       return new Set();
@@ -581,6 +592,10 @@ function discoverModuleEdges(
           }
         }
       }
+    } else if (ts.isImportEqualsDeclaration(node) &&
+      ts.isExternalModuleReference(node.moduleReference)) {
+      const namespace = moduleNamespaceKind(constantString(node.moduleReference.expression));
+      if (namespace !== null) addTrackedSymbol(node.name, singletonKind(namespace));
     }
     ts.forEachChild(node, seedImports);
   };
@@ -593,7 +608,8 @@ function discoverModuleEdges(
         const sourceKinds = expressionKinds(node.initializer);
         if (ts.isIdentifier(node.name) && sourceKinds.size > 0) {
           propagated = addTrackedSymbol(node.name, sourceKinds) || propagated;
-        } else if (ts.isObjectBindingPattern(node.name) && sourceKinds.size > 0) {
+        } else if (ts.isObjectBindingPattern(node.name) &&
+          (sourceKinds.size > 0 || isImportMeta(node.initializer) || isGlobalNamespace(node.initializer))) {
           for (const element of node.name.elements) {
             if (!ts.isIdentifier(element.name)) continue;
             const key = element.propertyName === undefined
@@ -606,13 +622,13 @@ function discoverModuleEdges(
             if (sourceKinds.has('module_namespace') && (key === 'default' || key === 'Module')) {
               kind = 'module_namespace';
             }
-            if (sourceKinds.has('import_meta') && key === 'resolve') kind = 'resolver';
-            if (sourceKinds.has('import_meta') && key === 'glob') kind = 'glob';
-            if ((sourceKinds.has('worker_namespace') || sourceKinds.has('global_namespace')) &&
+            if (isImportMeta(node.initializer) && key === 'resolve') kind = 'resolver';
+            if (isImportMeta(node.initializer) && key === 'glob') kind = 'glob';
+            if ((sourceKinds.has('worker_namespace') || isGlobalNamespace(node.initializer)) &&
               key === 'Worker') kind = 'worker';
             if (sourceKinds.has('worker_namespace') && key === 'default') kind = 'worker_namespace';
-            if (sourceKinds.has('global_namespace') && key === 'SharedWorker') kind = 'shared_worker';
-            if (sourceKinds.has('global_namespace') && key === 'importScripts') kind = 'script_loader';
+            if (isGlobalNamespace(node.initializer) && key === 'SharedWorker') kind = 'shared_worker';
+            if (isGlobalNamespace(node.initializer) && key === 'importScripts') kind = 'script_loader';
             if (kind !== null) propagated = addTrackedSymbol(element.name, singletonKind(kind)) || propagated;
           }
         }
@@ -621,8 +637,6 @@ function discoverModuleEdges(
     };
     propagateAliases(sourceFile);
   }
-  const createRequireReference = (expression: ts.Expression): boolean =>
-    expressionKinds(expression).has('factory');
   const loaderReference = (expression: ts.Expression): boolean =>
     expressionKinds(expression).has('loader');
   const resolverReference = (expression: ts.Expression): ResolutionSyntax | null =>
@@ -671,12 +685,7 @@ function discoverModuleEdges(
   };
   const isDeclarationIdentifier = (identifier: ts.Identifier): boolean => {
     const parent = identifier.parent;
-    const exportedVariable = ts.isVariableDeclaration(parent) && parent.name === identifier &&
-      ts.isVariableDeclarationList(parent.parent) && ts.isVariableStatement(parent.parent.parent) &&
-      ts.canHaveModifiers(parent.parent.parent) &&
-      ts.getModifiers(parent.parent.parent)?.some((modifier) =>
-        modifier.kind === ts.SyntaxKind.ExportKeyword) === true;
-    return (ts.isVariableDeclaration(parent) && parent.name === identifier && !exportedVariable) ||
+    return (ts.isVariableDeclaration(parent) && parent.name === identifier) ||
       (ts.isBindingElement(parent) && parent.name === identifier) ||
       (ts.isImportClause(parent) && parent.name === identifier) ||
       (ts.isImportSpecifier(parent)) ||
@@ -691,20 +700,30 @@ function discoverModuleEdges(
   const isCallableTrackedKind = (kinds: ReadonlySet<TrackedLoaderKind>): boolean =>
     kinds.has('loader') || kinds.has('resolver') || kinds.has('glob') ||
     kinds.has('factory') || kinds.has('script_loader');
-  const isMetaUrlFactoryArgument = (expression: ts.Expression): boolean => {
-    if (!ts.isPropertyAccessExpression(expression) || expression.name.text !== 'url' ||
-      !isImportMeta(expression.expression)) return false;
-    const parent = expression.parent;
-    if (ts.isCallExpression(parent) && parent.arguments.includes(expression) &&
-      expressionKinds(parent.expression).has('factory')) return true;
-    if (!ts.isNewExpression(parent) || !ts.isIdentifier(parent.expression) ||
-      parent.expression.text !== 'URL' || parent.arguments?.[1] !== expression) return false;
-    const workerConstruction = parent.parent;
-    return ts.isNewExpression(workerConstruction) && workerConstruction.arguments?.[0] === parent &&
-      (expressionKinds(workerConstruction.expression).has('worker') ||
-        expressionKinds(workerConstruction.expression).has('shared_worker'));
+  const isLoaderValued = (kinds: ReadonlySet<TrackedLoaderKind>): boolean =>
+    kinds.has('loader') || kinds.has('resolver') || kinds.has('glob') || kinds.has('factory') ||
+    kinds.has('worker') || kinds.has('shared_worker') || kinds.has('script_loader');
+  const variableDeclarationForBinding = (node: ts.Node): ts.VariableDeclaration | null => {
+    let current = node;
+    while (ts.isBindingElement(current.parent) || ts.isObjectBindingPattern(current.parent) ||
+      ts.isArrayBindingPattern(current.parent)) current = current.parent;
+    return ts.isVariableDeclaration(current.parent) ? current.parent : null;
   };
-  const isAllowedTrackedReference = (reference: ts.Expression): boolean => {
+  const isExportedVariable = (declaration: ts.VariableDeclaration): boolean => {
+    const declarationList = declaration.parent;
+    const statement = ts.isVariableDeclarationList(declarationList) ? declarationList.parent : undefined;
+    return statement !== undefined && ts.isVariableStatement(statement) &&
+      ts.getModifiers(statement)?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword) === true;
+  };
+  const isExactAliasInitializer = (expression: ts.Expression): boolean => {
+    const parent = expression.parent;
+    if (!ts.isVariableDeclaration(parent) || parent.initializer !== expression ||
+      !ts.isIdentifier(parent.name) || isExportedVariable(parent)) return false;
+    return ts.isVariableDeclarationList(parent.parent) &&
+      (parent.parent.flags & ts.NodeFlags.Const) !== 0;
+  };
+  const isAllowedLoaderValue = (reference: ts.Expression): boolean => {
+    if (ts.isElementAccessExpression(unwrapTransparentExpression(reference))) return false;
     let current = reference;
     while (true) {
       const parent = current.parent;
@@ -715,22 +734,38 @@ function discoverModuleEdges(
         current = parent;
         continue;
       }
-      if (ts.isPropertyAccessExpression(parent) && parent.expression === current) {
+      if (ts.isPropertyAccessExpression(parent) && parent.expression === current &&
+        isLoaderValued(expressionKinds(parent))) {
         current = parent;
         continue;
       }
       if (ts.isElementAccessExpression(parent) && parent.expression === current) return false;
       if (ts.isCallExpression(parent) && parent.expression === current) {
-        return isCallableTrackedKind(expressionKinds(current));
+        const kinds = expressionKinds(current);
+        if (!isCallableTrackedKind(kinds)) return false;
+        if (kinds.has('factory')) return true;
+        if (kinds.has('glob')) {
+          return globPatternExpression(parent.arguments[0]) !== null &&
+            globOptions(parent.arguments[1]) !== null;
+        }
+        if (kinds.has('script_loader')) {
+          return parent.arguments.length > 0 &&
+            parent.arguments.every((argument) => constantString(argument) !== null);
+        }
+        return constantString(parent.arguments[0]) !== null;
       }
       if (ts.isNewExpression(parent) && parent.expression === current) {
         const kinds = expressionKinds(current);
-        return kinds.has('worker') || kinds.has('shared_worker');
+        if (!kinds.has('worker') && !kinds.has('shared_worker')) return false;
+        const first = parent.arguments?.[0];
+        if (first === undefined) return false;
+        const target = unwrapTransparentExpression(first);
+        return constantString(target) !== null ||
+          (ts.isNewExpression(target) && target.arguments?.[0] !== undefined &&
+            constantString(target.arguments[0]) !== null && target.arguments[1] !== undefined &&
+            importMetaProperty(target.arguments[1], 'url'));
       }
-      if (ts.isVariableDeclaration(parent) && parent.initializer === current) {
-        return expressionKinds(current).size > 0;
-      }
-      return isMetaUrlFactoryArgument(current);
+      return isExactAliasInitializer(current);
     }
   };
   let loaderEscapeRecorded = false;
@@ -742,17 +777,32 @@ function discoverModuleEdges(
   const isTrackedModuleReExport = (node: ts.Node): boolean =>
     ts.isExportDeclaration(node) && node.moduleSpecifier !== undefined && !node.isTypeOnly &&
     moduleNamespaceKind(constantString(node.moduleSpecifier)) !== null;
+  const loaderValuedExpression = (node: ts.Node): ts.Expression | null => {
+    if (!(ts.isIdentifier(node) || ts.isPropertyAccessExpression(node) ||
+      ts.isElementAccessExpression(node) || ts.isCallExpression(node))) return null;
+    return isLoaderValued(expressionKinds(node)) ? node : null;
+  };
+  const isWithinTypeNode = (node: ts.Node): boolean => {
+    let current = node.parent;
+    while (!ts.isSourceFile(current)) {
+      if (ts.isTypeNode(current)) return true;
+      current = current.parent;
+    }
+    return false;
+  };
   const visited = new Set<ts.Node>();
   const visit = (node: ts.Node): void => {
     if (visited.has(node)) return;
     visited.add(node);
     if (isTrackedModuleReExport(node)) {
       recordLoaderEscape();
-    } else if (ts.isIdentifier(node) && !isDeclarationIdentifier(node) &&
-      identifierKinds(node).size > 0 && !isAllowedTrackedReference(node)) {
-      recordLoaderEscape();
-    } else if (ts.isMetaProperty(node) && isImportMeta(node) && !isAllowedTrackedReference(node)) {
-      recordLoaderEscape();
+    } else {
+      const loaderValue = loaderValuedExpression(node);
+      const declaration = ts.isIdentifier(node) ? variableDeclarationForBinding(node) : null;
+      const exportedBinding = declaration !== null && isExportedVariable(declaration);
+      if (loaderValue !== null && !isWithinTypeNode(node) &&
+        (!ts.isIdentifier(node) || !isDeclarationIdentifier(node) || exportedBinding) &&
+        !isAllowedLoaderValue(loaderValue)) recordLoaderEscape();
     }
     if (ts.isImportDeclaration(node)) {
       add('static_import', node.moduleSpecifier);
@@ -987,9 +1037,17 @@ function normalizeModuleSpecifier(
     specifier = resolved;
   }
   if (context.configuredAliasPrefixes?.some((alias) =>
-    alias === '*' || specifier === alias || specifier.startsWith(alias)) === true) {
+    alias === '*' || specifier === alias ||
+    specifier.startsWith(alias.endsWith('/') ? alias : `${alias}/`)) === true) {
     return null;
   }
+  if (context.configuredAliasRegexes?.some(({ source, flags }) => {
+    try {
+      return new RegExp(source, flags).test(specifier);
+    } catch {
+      return true;
+    }
+  }) === true) return null;
   if (specifier.startsWith('file:')) {
     try {
       const url = new URL(specifier);
@@ -1096,6 +1154,19 @@ function semanticInputPath(path: string): boolean {
   return /(ranking|opportunity-cost|prompt|tuning|challenge|play|score)/iu.test(path);
 }
 
+function unchangedCandidateNeedsAstInspection(
+  source: string,
+  context: HeldoutLeakInspectionContext,
+): boolean {
+  if (/(?:\brequire\s*[.(\[]|\bcreateRequire\s*[(.]|\bnew\s+(?:globalThis\.|self\.|window\.)?(?:Worker|SharedWorker)\b|\b(?:globalThis\.|self\.|window\.)?importScripts\b|import\.meta|heldout-evaluation)/iu.test(source)) return true;
+  if (/['"]#[^'"]+['"]/u.test(source)) return true;
+  const resolutionCanAffectAnySpecifier = (context.configuredAliasPrefixes?.length ?? 0) > 0 ||
+    (context.configuredAliasRegexes?.length ?? 0) > 0 ||
+    Object.values(context.packageJsonFiles ?? {}).some((packageSource) =>
+      /"imports"\s*:\s*\{\s*[^}]/u.test(packageSource));
+  return resolutionCanAffectAnySpecifier && /\b(?:import|export|require)\b/u.test(source);
+}
+
 export function inspectHeldoutLeakChanges(
   changes: readonly HeldoutChangedText[],
   slice: HeldoutSlice,
@@ -1121,6 +1192,7 @@ export function inspectHeldoutLeakChanges(
     ) }];
   });
   const discoveredAliases = aliasDiscoveries.flatMap(({ discovery }) => discovery.aliases);
+  const discoveredAliasRegexes = aliasDiscoveries.flatMap(({ discovery }) => discovery.regexes);
   const unresolvedResolutionConfigPaths = [...new Set([
     ...(context.unresolvedResolutionConfigPaths ?? []),
     ...aliasDiscoveries.filter(({ discovery }) => discovery.unresolved).map(({ path }) => path),
@@ -1131,9 +1203,14 @@ export function inspectHeldoutLeakChanges(
       ...(context.configuredAliasPrefixes ?? []),
       ...discoveredAliases,
     ])],
+    configuredAliasRegexes: [
+      ...(context.configuredAliasRegexes ?? []),
+      ...discoveredAliasRegexes,
+    ],
     unresolvedResolutionConfigPaths,
   };
   const effectiveChanges = new Map(changes.map((change) => [change.path, change]));
+  const directlyChangedPaths = new Set(changes.map((change) => change.path));
   const resolutionConfigChanged = inspectionContext.resolutionConfigChanged === true ||
     changes.some((change) => isResolutionConfigPath(change.path));
   if (resolutionConfigChanged) {
@@ -1156,7 +1233,9 @@ export function inspectHeldoutLeakChanges(
     )) {
       findings.push({ path: change.path, kind: 'reserve_reference', detail: reference });
     }
-    const edges = isTypeScriptOrJavaScript(change.path)
+    const astInspectionRequired = directlyChangedPaths.has(change.path) ||
+      unchangedCandidateNeedsAstInspection(change.sourceText ?? change.addedText, inspectionContext);
+    const edges = isTypeScriptOrJavaScript(change.path) && astInspectionRequired
       ? discoverModuleEdges(change.path, change.sourceText ?? change.addedText, inspectionContext)
       : [];
     const restrictedPath = !EVALUATION_FILES.has(change.path) && !isTestOrFixture(change.path);
@@ -1318,97 +1397,166 @@ function jsonAliases(source: string, path: string): readonly string[] {
 
 interface ViteAliasDiscovery {
   readonly aliases: readonly string[];
+  readonly regexes: readonly {
+    readonly source: string;
+    readonly flags: string;
+  }[];
   readonly unresolved: boolean;
 }
 
 function viteAliases(source: string, path: string): ViteAliasDiscovery {
   const sourceFile = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, scriptKind(path));
   const aliases = new Set<string>();
+  const regexes = new Map<string, { readonly source: string; readonly flags: string }>();
   let unresolved = false;
-  const localExpressions = new Map<string, ts.Expression>();
+  const compilerOptions: ts.CompilerOptions = {
+    allowJs: true,
+    checkJs: false,
+    noLib: true,
+    noResolve: true,
+    target: ts.ScriptTarget.Latest,
+  };
+  const compilerHost: ts.CompilerHost = {
+    fileExists: (fileName) => fileName === path,
+    getCanonicalFileName: (fileName) => fileName,
+    getCurrentDirectory: () => '',
+    getDefaultLibFileName: () => '',
+    getDirectories: () => [],
+    getNewLine: () => '\n',
+    getSourceFile: (fileName) => fileName === path ? sourceFile : undefined,
+    readFile: (fileName) => fileName === path ? source : undefined,
+    useCaseSensitiveFileNames: () => true,
+    writeFile: () => undefined,
+  };
+  const checker = ts.createProgram([path], compilerOptions, compilerHost).getTypeChecker();
+  const symbolAt = (identifier: ts.Identifier): ts.Symbol | undefined => {
+    if (ts.isShorthandPropertyAssignment(identifier.parent)) {
+      return checker.getShorthandAssignmentValueSymbol(identifier.parent) ??
+        checker.getSymbolAtLocation(identifier);
+    }
+    return checker.getSymbolAtLocation(identifier);
+  };
+  const localExpressions = new Map<ts.Symbol, ts.Expression>();
   const collectLocals = (node: ts.Node): void => {
     if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer !== undefined) {
-      localExpressions.set(node.name.text, node.initializer);
+      const symbol = symbolAt(node.name);
+      if (symbol !== undefined) localExpressions.set(symbol, node.initializer);
     }
     ts.forEachChild(node, collectLocals);
   };
   collectLocals(sourceFile);
-  const resolveLocal = (expression: ts.Expression, seen: ReadonlySet<string>): ts.Expression | null => {
+  const resolveLocal = (
+    expression: ts.Expression,
+    seen: ReadonlySet<ts.Symbol>,
+  ): ts.Expression | null => {
     const unwrapped = unwrapTransparentExpression(expression);
     if (!ts.isIdentifier(unwrapped)) return unwrapped;
-    if (seen.has(unwrapped.text)) return null;
-    const local = localExpressions.get(unwrapped.text);
+    const symbol = symbolAt(unwrapped);
+    if (symbol === undefined || seen.has(symbol)) return null;
+    const local = localExpressions.get(symbol);
     return local === undefined
       ? null
-      : resolveLocal(local, new Set([...seen, unwrapped.text]));
+      : resolveLocal(local, new Set([...seen, symbol]));
   };
-  const collectAliasInitializer = (initializer: ts.Expression, seen: ReadonlySet<string>): void => {
-    const resolved = resolveLocal(initializer, seen);
-    if (resolved === null) {
-      aliases.add('*');
+  const literalProperties = (
+    expression: ts.Expression,
+    seen: ReadonlySet<ts.Symbol>,
+  ): ReadonlyMap<string, ts.Expression> | null => {
+    const resolved = resolveLocal(expression, seen);
+    if (resolved === null || !ts.isObjectLiteralExpression(resolved)) return null;
+    const properties = new Map<string, ts.Expression>();
+    for (const property of resolved.properties) {
+      if (ts.isSpreadAssignment(property)) {
+        const spread = literalProperties(property.expression, seen);
+        if (spread === null) return null;
+        for (const [key, value] of spread) properties.set(key, value);
+        continue;
+      }
+      if (!ts.isPropertyAssignment(property) || ts.isComputedPropertyName(property.name)) return null;
+      const key = propertyNameText(property.name);
+      if (key === null) return null;
+      properties.set(key, property.initializer);
+    }
+    return properties;
+  };
+  const regexAlias = (
+    expression: ts.Expression,
+  ): { readonly source: string; readonly flags: string } | null => {
+    const unwrapped = unwrapTransparentExpression(expression);
+    if (!ts.isRegularExpressionLiteral(unwrapped)) return null;
+    const text = unwrapped.getText(sourceFile);
+    const closingSlash = text.lastIndexOf('/');
+    if (!text.startsWith('/') || closingSlash <= 0) return null;
+    const pattern = { source: text.slice(1, closingSlash), flags: text.slice(closingSlash + 1) };
+    try {
+      new RegExp(pattern.source, pattern.flags);
+      return pattern;
+    } catch {
+      return null;
+    }
+  };
+  const collectAliasEntry = (expression: ts.Expression): void => {
+    const properties = literalProperties(expression, new Set());
+    if (properties === null) {
       unresolved = true;
       return;
     }
-    const unwrapped = unwrapTransparentExpression(resolved);
-    if (ts.isObjectLiteralExpression(unwrapped)) {
-      for (const property of unwrapped.properties) {
-        if (ts.isSpreadAssignment(property)) {
-          collectAliasInitializer(property.expression, seen);
-        } else if (ts.isPropertyAssignment(property) &&
-          !ts.isComputedPropertyName(property.name) && constantString(property.initializer) !== null) {
-          const key = propertyNameText(property.name);
-          aliases.add(key ?? '*');
-        } else {
-          aliases.add('*');
-          unresolved = true;
-        }
+    const find = properties.get('find');
+    const replacement = properties.get('replacement');
+    if (find === undefined || replacement === undefined || constantString(replacement) === null) {
+      unresolved = true;
+      return;
+    }
+    const key = constantString(find);
+    if (key !== null) {
+      aliases.add(key);
+      return;
+    }
+    const regex = regexAlias(find);
+    if (regex === null) {
+      unresolved = true;
+      return;
+    }
+    regexes.set(`${regex.source}/${regex.flags}`, regex);
+  };
+  const collectAliasInitializer = (initializer: ts.Expression): void => {
+    const resolved = resolveLocal(initializer, new Set());
+    if (resolved === null) {
+      unresolved = true;
+      return;
+    }
+    if (ts.isObjectLiteralExpression(resolved)) {
+      const properties = literalProperties(resolved, new Set());
+      if (properties === null) {
+        unresolved = true;
+        return;
       }
-    } else if (ts.isArrayLiteralExpression(unwrapped)) {
-      for (const element of unwrapped.elements) {
+      for (const [key, replacement] of properties) {
+        if (constantString(replacement) === null) unresolved = true;
+        else aliases.add(key);
+      }
+    } else if (ts.isArrayLiteralExpression(resolved)) {
+      for (const element of resolved.elements) {
         if (ts.isSpreadElement(element)) {
-          collectAliasInitializer(element.expression, seen);
+          collectAliasInitializer(element.expression);
           continue;
         }
-        const resolvedElement = resolveLocal(element, seen);
-        if (resolvedElement === null || !ts.isObjectLiteralExpression(resolvedElement)) {
-          aliases.add('*');
-          unresolved = true;
-          continue;
-        }
-        const find = resolvedElement.properties.find((property) =>
-          ts.isPropertyAssignment(property) && propertyNameText(property.name) === 'find');
-        const replacement = resolvedElement.properties.find((property) =>
-          ts.isPropertyAssignment(property) && propertyNameText(property.name) === 'replacement');
-        if (find === undefined || replacement === undefined ||
-          !ts.isPropertyAssignment(find) || !ts.isPropertyAssignment(replacement) ||
-          constantString(replacement.initializer) === null) {
-          aliases.add('*');
-          unresolved = true;
-          continue;
-        }
-        const key = constantString(find.initializer);
-        if (key !== null) aliases.add(key);
-        else if (ts.isRegularExpressionLiteral(unwrapTransparentExpression(find.initializer))) aliases.add('*');
-        else {
-          aliases.add('*');
-          unresolved = true;
-        }
+        collectAliasEntry(element);
       }
     } else {
-      aliases.add('*');
       unresolved = true;
     }
   };
   const visit = (node: ts.Node): void => {
     if (ts.isPropertyAssignment(node) && propertyNameText(node.name) === 'alias') {
-      collectAliasInitializer(node.initializer, new Set());
+      collectAliasInitializer(node.initializer);
     } else if (ts.isShorthandPropertyAssignment(node) && node.name.text === 'alias') {
-      collectAliasInitializer(node.name, new Set());
+      collectAliasInitializer(node.name);
     }
     ts.forEachChild(node, visit);
   };
   visit(sourceFile);
-  return { aliases: [...aliases], unresolved };
+  return { aliases: [...aliases], regexes: [...regexes.values()], unresolved };
 }
 
 function candidateInspectionContext(base: string, candidate: string): HeldoutLeakInspectionContext {
@@ -1454,12 +1602,14 @@ function candidateInspectionContext(base: string, candidate: string): HeldoutLea
       posix.basename(path).startsWith('vite.config.') ? [] : jsonAliases(source, path)),
     ...viteDiscoveries.flatMap(({ discovery }) => discovery.aliases),
   ])].filter((alias) => alias.length > 0);
+  const configuredAliasRegexes = viteDiscoveries.flatMap(({ discovery }) => discovery.regexes);
   return {
     candidateFiles: tree,
     packageJsonFiles,
     candidateSourceFiles,
     resolutionConfigChanged,
     configuredAliasPrefixes,
+    configuredAliasRegexes,
     unresolvedResolutionConfigPaths: viteDiscoveries
       .filter(({ discovery }) => discovery.unresolved)
       .map(({ path }) => path),
