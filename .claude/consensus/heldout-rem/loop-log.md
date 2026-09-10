@@ -18,3 +18,5 @@
 - 2026-09-10 09:14 EDT — r6 Astra REJECT (F18 glob base/spread, F19 nested conditions fail open, F20 loader escapes incl. export/bind/nullish, F21 alias discovery, F22 .d.ts transpile abort). Supervisor structural ruling: r7 must convert loader tracking and config discovery to default-deny (generic escape check), not add cases. r7 dispatched (resume 01a088b4…).
 
 - 2026-09-10 09:51 EDT — r7 lane DONE (default-deny restructure); supervisor verification tsc/sg/diffcheck 0, 9 specs 423/423; committed 32f45ac5; Astra r7 review dispatched (resume 01a088d6…) with adversarial unenumerated-form probes.
+
+- 2026-09-10 09:55 EDT — r7 Astra REJECT (F23 binding-pattern aliases, F24 factory results escape, F25 import-equals seeding, F26 scope-unaware config locals/spread overrides, F27 default-deny flags ordinary window/import.meta.env uses + regex alias → reject-all). Rule refined: track loader-VALUED expressions, not namespace roots; real-repository zero-findings regression required. r8 dispatched (resume 01a088b4…).
