@@ -8,6 +8,7 @@ import { canonicalJson } from '../src/commands/canonical-json';
 import { sha256 } from '../src/crypto/sha256';
 import type { HeldoutPartyLevel, HeldoutPartition } from '../src/vtt/heldout-evaluation';
 import { loadExternalPartyPackBytes } from '../src/vtt/party-pack';
+import { decodeArenaBasisEnvelopeV1 } from '../src/vtt/arena-fixture';
 import {
   HELDOUT_ORDINARY_PROTOCOLS,
   HELDOUT_STARTER_MONSTER_FAMILIES,
@@ -247,11 +248,16 @@ async function generateLegacyBasis(config: LegacyBasisGenerationConfig): Promise
   await mkdir(config.outPath, { recursive: true });
   await Promise.all(Array.from({ length: config.rooms }, async (_unused, index) => {
     const seed = config.seed + index;
-    const room = generateRoom(seed, {
+    const generated = generateRoom(seed, {
       difficulty: config.difficulty,
       ...(config.terrainProfile === undefined ? {} : { terrainProfile: config.terrainProfile }),
     });
-    await writeFile(resolve(config.outPath, `seed-${String(seed)}.json`), `${canonicalJson(room)}\n`, 'utf8');
+    const room = decodeArenaBasisEnvelopeV1(generated, { mode: 'legacy_basis' });
+    await writeFile(
+      resolve(config.outPath, `seed-${String(seed)}.json`),
+      `${canonicalJson(room)}\n`,
+      'utf8',
+    );
   }));
   return null;
 }

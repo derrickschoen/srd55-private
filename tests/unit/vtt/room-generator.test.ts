@@ -686,7 +686,7 @@ describe('seeded room generator', () => {
       subject.life === 'living' && subject.hitPoints === subject.profile.rules.hitPointMaximum &&
       subject.deathSaves === null)).toBe(true);
     expect(room.spec.partyState.every((seat) =>
-      seat.hitPointFraction === 1 && seat.concentrating === false &&
+      'hitPointFraction' in seat && seat.hitPointFraction === 1 && seat.concentrating === false &&
       seat.spellSlots.every((slot) => slot.remaining === slot.maximum))).toBe(true);
     expect(room.spec.heldoutOrdinary).toMatchObject({
       protocol: 'heldout-development-v1',
