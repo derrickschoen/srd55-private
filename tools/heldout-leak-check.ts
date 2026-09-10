@@ -187,7 +187,7 @@ export const HELDOUT_LEAK_AST_OUT_OF_SCOPE = [
 /** Rule N/Rule C audit: every expression-flow position is interpreted or fails closed. */
 export const HELDOUT_LEAK_FLOW_AUDIT = [
   { position: 'declaration initializer', loaderValues: 'Rule N1 permits only a plain const namespace alias; Rule N2 permits inert browser-global transfer', configurationReferences: 'Rule C permits exact non-exported const aliases of statically addressed subtrees and fails closed for alias-bearing let, var, destructuring, or exported initializers' },
-  { position: 'member receiver', loaderValues: 'Rule N1 permits direct namespace receipt; Rule N2 validates browser loader members by symbol at use', configurationReferences: 'Rule C extends the static address through constant property and element reads; nonconstant addresses fail closed' },
+  { position: 'member receiver', loaderValues: 'Rule N1 permits direct namespace receipt; Rule N2 validates browser loader members by symbol at use', configurationReferences: 'Rule C extends the static address through constant property and element reads; paths crossing resolve, test, or alias are alias-bearing and nonconstant addresses fail closed' },
   { position: 'assignment', loaderValues: 'Rule N1 failed_closed; Rule N2 browser globals remain inert until loader-member use', configurationReferences: 'Rule C always fails closed on mutation targets and fails closed on alias-bearing assignment values' },
   { position: 'destructuring declaration', loaderValues: 'Rule N1 and Rule N2 track recognized loader keys and fail_closed for any loader key extracted from an unknown source', configurationReferences: 'Rule C fails closed when an alias-bearing subtree enters a binding pattern' },
   { position: 'destructuring assignment', loaderValues: 'Rule N1 and Rule N2 track recognized loader keys and fail_closed for any loader key extracted from an unknown source', configurationReferences: 'Rule C fails closed on assignment-pattern targets and alias-bearing assignment values' },
@@ -203,7 +203,7 @@ export const HELDOUT_LEAK_FLOW_AUDIT = [
   { position: 'call argument', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global transfer', configurationReferences: 'Rule C interprets symbol-proven defineConfig and mergeConfig graph entries and otherwise fails closed for alias-bearing arguments' },
   { position: 'constructor argument', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global transfer', configurationReferences: 'Rule C fails closed for alias-bearing constructor arguments' },
   { position: 'call receiver', loaderValues: 'Rule N1 permits only direct namespace member derivation; Rule N2 validates loader members by symbol', configurationReferences: 'Rule C always fails closed when a tracked chain is the receiver of a method call' },
-  { position: 'conditional, logical, or comma expression', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global transfer', configurationReferences: 'Rule C permits tests, unions exported configuration branches, and otherwise fails closed for alias-bearing result values' },
+  { position: 'conditional, logical, or comma expression', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global transfer', configurationReferences: 'Rule C permits condition tests and strict equality, unions exported configuration branches, and otherwise fails closed for alias-bearing result values' },
   { position: 'class field or heritage', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global storage', configurationReferences: 'Rule C fails closed for alias-bearing class storage or heritage values' },
   { position: 'export', loaderValues: 'Rule N1 failed_closed except its exact alias initializer; Rule N2 permits inert global transfer', configurationReferences: 'Rule C starts at the single export-default graph and fails closed for other alias-bearing exports' },
   { position: 'for-of head', loaderValues: 'Rule N1 failed_closed; Rule N2 validates later loader use', configurationReferences: 'Rule C always fails closed on tracked loop assignment heads' },
@@ -238,9 +238,10 @@ export const HELDOUT_MODULE_SPECIFIER_POLICY = {
     'Rule N2 permits browser globals to transfer inertly and validates Worker, SharedWorker, and importScripts members at use by symbol-proven global provenance',
     'a loader-valued expression is allowed only as a direct callee with a constant specifier, a receiver leading to a recognized member call, or the whole initializer of a non-exported plain-identifier const alias',
     'Rule C interprets Vite and Vitest aliases only as strict literals in the exact-node graph reached from export default, symbol-proven defineConfig or mergeConfig, factory returns, conditional branches, and same-file const object/array composition',
-    'Rule C uses no flow tracking: each tracked-const reference is classified by its maximal constant-key address, the addressed subtree, and its immediate syntactic position',
+    'Rule C uses no flow tracking: each tracked-const reference is classified by its maximal constant-key address, including whether its path crosses resolve, test, or alias, the addressed subtree, and its immediate syntactic position',
     'Rule C permits non-exported plain-const aliases to preserve the same addressed subtree and allows non-alias-bearing subtrees in otherwise escaping positions',
-    'reachable object spreads require tracked const literals; computed keys, accessors, methods, and nonliteral resolve or alias values fail closed, while unrelated nonliteral values are opaque',
+    'resolve and Vitest test are alias-capable containers whose values must be literal objects or tracked const literals; their alias values are interpreted identically',
+    'reachable object spreads require tracked const literals; computed keys, accessors, methods, and nonliteral resolve, test, or alias values fail closed, while unrelated nonliteral values are opaque',
     'root vite*.config.* and vitest*.config.* entry points are inspected, including symbol-proven defineConfig and mergeConfig imports from Vite or Vitest',
     'resolution configuration changes re-inspect consumers; unresolved configuration makes every encountered consumer edge unresolved',
     'every eligible candidate file receives the full AST and symbol inspection pass without a textual pre-gate',
@@ -248,7 +249,7 @@ export const HELDOUT_MODULE_SPECIFIER_POLICY = {
   failsClosed: [
     'every other position of a loader-valued expression is loader_reference_escaped from one generic check',
     'every disallowed Rule N1 namespace position and every non-symbol-proven Rule N2 loader-member use is loader_reference_escaped from the same generic check',
-    'a nonliteral Vite or Vitest alias, unreachable alias/resolve property, or invalid reachable-const reference is unresolved configuration under Rule C',
+    'a nonliteral Vite or Vitest alias, unreachable alias/resolve/test property, or invalid reachable-const reference is unresolved configuration under Rule C',
     'tracked configuration references with nonconstant addresses or mutation targets fail closed; alias-bearing subtrees also fail closed when returned, stored outside the visited graph, passed, exported, templated, awaited, yielded, or otherwise escaped',
     'unresolved targets, options, package conditions, globs, aliases, URL schemes, and data modules are findings',
   ],
@@ -2152,7 +2153,8 @@ function viteAliases(source: string, path: string): ViteAliasDiscovery {
   const visitResolveObject = (expression: ts.Expression): void => {
     const value = unwrapTransparentExpression(expression);
     if (ts.isIdentifier(value)) {
-      visitReachableIdentifier(value, visitResolveObject);
+      const symbol = visitReachableIdentifier(value, visitResolveObject);
+      if (symbol !== null) aliasBearingSymbols.add(symbol);
       return;
     }
     if (!ts.isObjectLiteralExpression(value)) {
@@ -2173,6 +2175,8 @@ function viteAliases(source: string, path: string): ViteAliasDiscovery {
         if (property.name.text === 'alias') {
           const symbol = visitReachableIdentifier(property.name, visitAliasValue);
           if (symbol !== null) aliasBearingSymbols.add(symbol);
+        } else if (property.name.text === 'resolve' || property.name.text === 'test') {
+          visitResolveObject(property.name);
         }
         continue;
       }
@@ -2183,6 +2187,7 @@ function viteAliases(source: string, path: string): ViteAliasDiscovery {
       reachableNodes.add(property);
       const key = propertyNameText(property.name);
       if (key === 'alias') visitAliasValue(property.initializer);
+      else if (key === 'resolve' || key === 'test') visitResolveObject(property.initializer);
       else visitOrdinaryPropertyValue(property.initializer);
     }
   };
@@ -2198,7 +2203,7 @@ function viteAliases(source: string, path: string): ViteAliasDiscovery {
       }
       if (ts.isShorthandPropertyAssignment(property)) {
         reachableNodes.add(property);
-        if (property.name.text === 'resolve') {
+        if (property.name.text === 'resolve' || property.name.text === 'test') {
           visitReachableIdentifier(property.name, visitResolveObject);
         } else if (property.name.text === 'alias') {
           const symbol = visitReachableIdentifier(property.name, visitAliasValue);
@@ -2212,7 +2217,7 @@ function viteAliases(source: string, path: string): ViteAliasDiscovery {
       }
       reachableNodes.add(property);
       const key = propertyNameText(property.name);
-      if (key === 'resolve') visitResolveObject(property.initializer);
+      if (key === 'resolve' || key === 'test') visitResolveObject(property.initializer);
       else if (key === 'alias') visitAliasValue(property.initializer);
       else visitOrdinaryPropertyValue(property.initializer);
     }
@@ -2469,7 +2474,7 @@ function viteAliases(source: string, path: string): ViteAliasDiscovery {
           return true;
         }
         const key = propertyNameText(property.name);
-        if (key === null || key === 'resolve' || key === 'alias') return true;
+        if (key === null || key === 'resolve' || key === 'test' || key === 'alias') return true;
         const child = ts.isPropertyAssignment(property) ? property.initializer : property.name;
         const unwrappedChild = unwrapTransparentExpression(child);
         if ((ts.isObjectLiteralExpression(unwrappedChild) ||
@@ -2499,7 +2504,8 @@ function viteAliases(source: string, path: string): ViteAliasDiscovery {
       : { root: base.root, path: [...base.path, ...chain.path] };
   };
   const isAliasBearing = (address: ConfigurationAddress): boolean => {
-    if (aliasBearingSymbols.has(address.root)) return true;
+    if (aliasBearingSymbols.has(address.root) ||
+      address.path.some((key) => key === 'resolve' || key === 'test' || key === 'alias')) return true;
     const value = addressedValue(address);
     return value === null || value !== 'known_scalar' && subtreeContainsAliasKey(value);
   };
@@ -2508,17 +2514,9 @@ function viteAliases(source: string, path: string): ViteAliasDiscovery {
     return ts.isVariableDeclaration(parent) && parent.initializer === expression &&
       isNonExportedPlainConst(parent);
   };
-  const isComparisonOperator = (kind: ts.SyntaxKind): boolean => [
-    ts.SyntaxKind.LessThanToken,
-    ts.SyntaxKind.LessThanEqualsToken,
-    ts.SyntaxKind.GreaterThanToken,
-    ts.SyntaxKind.GreaterThanEqualsToken,
-    ts.SyntaxKind.EqualsEqualsToken,
-    ts.SyntaxKind.ExclamationEqualsToken,
+  const isStrictEqualityOperator = (kind: ts.SyntaxKind): boolean => [
     ts.SyntaxKind.EqualsEqualsEqualsToken,
     ts.SyntaxKind.ExclamationEqualsEqualsToken,
-    ts.SyntaxKind.InKeyword,
-    ts.SyntaxKind.InstanceOfKeyword,
   ].includes(kind);
   const configurationReferenceEscapes = (identifier: ts.Identifier): boolean => {
     const chain = referenceChain(identifier);
@@ -2533,7 +2531,7 @@ function viteAliases(source: string, path: string): ViteAliasDiscovery {
       parent.expression === chain.expression) return false;
     if (ts.isPrefixUnaryExpression(parent) &&
       parent.operator === ts.SyntaxKind.ExclamationToken && parent.operand === chain.expression) return false;
-    if (ts.isBinaryExpression(parent) && isComparisonOperator(parent.operatorToken.kind)) return false;
+    if (ts.isBinaryExpression(parent) && isStrictEqualityOperator(parent.operatorToken.kind)) return false;
     if ((ts.isIfStatement(parent) || ts.isWhileStatement(parent) || ts.isDoStatement(parent)) &&
       parent.expression === chain.expression) return false;
     if (ts.isConditionalExpression(parent) && parent.condition === chain.expression) return false;
@@ -2544,7 +2542,10 @@ function viteAliases(source: string, path: string): ViteAliasDiscovery {
       const symbol = symbolAt(node);
       const address = symbol === undefined ? undefined : configurationAddresses.get(symbol);
       const declaration = address === undefined ? undefined : rootDeclaration(address);
-      if (declaration !== null && declaration !== undefined && node !== declaration.name &&
+      const trackedDeclarationName = symbol?.declarations?.some((candidate) =>
+        ts.isVariableDeclaration(candidate) && candidate.name === node &&
+        isNonExportedPlainConst(candidate)) === true;
+      if (declaration !== null && declaration !== undefined && !trackedDeclarationName &&
         configurationReferenceEscapes(node)) {
         unresolved = true;
       }
@@ -2552,7 +2553,7 @@ function viteAliases(source: string, path: string): ViteAliasDiscovery {
     if ((ts.isPropertyAssignment(node) || ts.isShorthandPropertyAssignment(node) ||
       ts.isMethodDeclaration(node) || ts.isGetAccessorDeclaration(node) ||
       ts.isSetAccessorDeclaration(node)) && ts.isObjectLiteralExpression(node.parent) &&
-      ['alias', 'resolve'].includes(propertyNameText(node.name) ?? '') &&
+      ['alias', 'resolve', 'test'].includes(propertyNameText(node.name) ?? '') &&
       !reachableNodes.has(node)) unresolved = true;
     ts.forEachChild(node, verifyReachability);
   };

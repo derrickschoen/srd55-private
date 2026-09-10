@@ -316,9 +316,10 @@ describe('held-out reserve leak wall', () => {
         'Rule N2 permits browser globals to transfer inertly and validates Worker, SharedWorker, and importScripts members at use by symbol-proven global provenance',
         'a loader-valued expression is allowed only as a direct callee with a constant specifier, a receiver leading to a recognized member call, or the whole initializer of a non-exported plain-identifier const alias',
         'Rule C interprets Vite and Vitest aliases only as strict literals in the exact-node graph reached from export default, symbol-proven defineConfig or mergeConfig, factory returns, conditional branches, and same-file const object/array composition',
-        'Rule C uses no flow tracking: each tracked-const reference is classified by its maximal constant-key address, the addressed subtree, and its immediate syntactic position',
+        'Rule C uses no flow tracking: each tracked-const reference is classified by its maximal constant-key address, including whether its path crosses resolve, test, or alias, the addressed subtree, and its immediate syntactic position',
         'Rule C permits non-exported plain-const aliases to preserve the same addressed subtree and allows non-alias-bearing subtrees in otherwise escaping positions',
-        'reachable object spreads require tracked const literals; computed keys, accessors, methods, and nonliteral resolve or alias values fail closed, while unrelated nonliteral values are opaque',
+        'resolve and Vitest test are alias-capable containers whose values must be literal objects or tracked const literals; their alias values are interpreted identically',
+        'reachable object spreads require tracked const literals; computed keys, accessors, methods, and nonliteral resolve, test, or alias values fail closed, while unrelated nonliteral values are opaque',
         'root vite*.config.* and vitest*.config.* entry points are inspected, including symbol-proven defineConfig and mergeConfig imports from Vite or Vitest',
         'resolution configuration changes re-inspect consumers; unresolved configuration makes every encountered consumer edge unresolved',
         'every eligible candidate file receives the full AST and symbol inspection pass without a textual pre-gate',
@@ -326,7 +327,7 @@ describe('held-out reserve leak wall', () => {
       failsClosed: [
         'every other position of a loader-valued expression is loader_reference_escaped from one generic check',
         'every disallowed Rule N1 namespace position and every non-symbol-proven Rule N2 loader-member use is loader_reference_escaped from the same generic check',
-        'a nonliteral Vite or Vitest alias, unreachable alias/resolve property, or invalid reachable-const reference is unresolved configuration under Rule C',
+        'a nonliteral Vite or Vitest alias, unreachable alias/resolve/test property, or invalid reachable-const reference is unresolved configuration under Rule C',
         'tracked configuration references with nonconstant addresses or mutation targets fail closed; alias-bearing subtrees also fail closed when returned, stored outside the visited graph, passed, exported, templated, awaited, yielded, or otherwise escaped',
         'unresolved targets, options, package conditions, globs, aliases, URL schemes, and data modules are findings',
       ],
@@ -2027,6 +2028,134 @@ describe('held-out reserve leak wall', () => {
     ].join('\n'), true],
   ] as const)('classifies %s with the Rule C addressed-subtree guard',
   (_label, configSource, unresolved) => {
+    const report = inspectHeldoutLeakChanges([{
+      path: 'vite.config.ts',
+      addedText: configSource,
+      sourceText: configSource,
+    }], 'F', bindings);
+
+    expect(report.findings.some((finding) => finding.path === 'vite.config.ts' &&
+      finding.kind === 'unresolved_module_edge')).toBe(unresolved);
+  });
+
+  it.each([
+    ['resolve.alias address', 'vite.config.ts', [
+      'const shared = { resolve: { alias: {} } };',
+      'const p = shared.resolve.alias;',
+      "Object.assign(p, { '@policy': './src/vtt/heldout-evaluation.ts' });",
+      'export default shared;',
+    ].join('\n')],
+    ['test.alias address', 'vitest.config.ts', [
+      'const shared = { test: { alias: {} } };',
+      'const p = shared.test.alias;',
+      "Object.assign(p, { '@policy': './src/vtt/heldout-evaluation.ts' });",
+      'export default shared;',
+    ].join('\n')],
+    ['identifier bound at resolve', 'vite.config.ts', [
+      'const r = {};',
+      'export default { resolve: r };',
+      'use(r);',
+    ].join('\n')],
+    ['identifier bound at test', 'vitest.config.ts', [
+      'const t = {};',
+      'export default { test: t };',
+      'use(t);',
+    ].join('\n')],
+  ] as const)('fails closed when %s escapes', (_label, path, configSource) => {
+    const report = inspectHeldoutLeakChanges([{
+      path,
+      addedText: configSource,
+      sourceText: configSource,
+    }], 'F', bindings);
+
+    expect(report.findings).toContainEqual(expect.objectContaining({
+      path,
+      kind: 'unresolved_module_edge',
+    }));
+  });
+
+  it('fails closed for a nonliteral Vitest test container', () => {
+    const configSource = [
+      'function makeTestConfig() {',
+      '  const t = Object.create(null);',
+      "  t.alias = { '@policy': './src/vtt/heldout-evaluation.ts' };",
+      '  return t;',
+      '}',
+      'export default { test: makeTestConfig() };',
+    ].join('\n');
+    const report = inspectHeldoutLeakChanges([{
+      path: 'vitest.config.ts',
+      addedText: configSource,
+      sourceText: configSource,
+    }], 'F', bindings);
+
+    expect(report.findings).toContainEqual(expect.objectContaining({
+      path: 'vitest.config.ts',
+      kind: 'unresolved_module_edge',
+    }));
+  });
+
+  it('discovers a literal alias inside a Vitest test container', () => {
+    const configSource = [
+      "export default { test: { alias: { '@policy': './src/vtt/heldout-evaluation.ts' } } };",
+    ].join('\n');
+    const report = inspectHeldoutLeakChanges([{
+      path: 'vitest.config.ts',
+      addedText: configSource,
+      sourceText: configSource,
+    }], 'F', bindings, {
+      candidateSourceFiles: {
+        'src/ui/unchanged-policy-consumer.ts': "import policy from '@policy';",
+      },
+    });
+
+    expect(report.findings).not.toContainEqual(expect.objectContaining({
+      path: 'vitest.config.ts',
+      kind: 'unresolved_module_edge',
+    }));
+    expect(report.findings).toContainEqual(expect.objectContaining({
+      path: 'src/ui/unchanged-policy-consumer.ts',
+      kind: 'unresolved_module_edge',
+    }));
+  });
+
+  it.each([
+    ['instanceof on an alias-bearing root', [
+      'const shared = { resolve: { alias: {} } };',
+      'shared instanceof receiver;',
+      'export default shared;',
+    ].join('\n'), true],
+    ['strict equality on an alias-bearing root', [
+      'const shared = { resolve: { alias: {} } };',
+      'shared === other;',
+      'export default shared;',
+    ].join('\n'), false],
+    ['instanceof on a non-alias-bearing subtree', [
+      'const shared = { resolve: { alias: {} }, plugins: [] };',
+      'shared.plugins instanceof Array;',
+      'export default shared;',
+    ].join('\n'), false],
+  ] as const)('classifies %s by comparison semantics', (_label, configSource, unresolved) => {
+    const report = inspectHeldoutLeakChanges([{
+      path: 'vite.config.ts',
+      addedText: configSource,
+      sourceText: configSource,
+    }], 'F', bindings);
+
+    expect(report.findings.some((finding) => finding.path === 'vite.config.ts' &&
+      finding.kind === 'unresolved_module_edge')).toBe(unresolved);
+  });
+
+  it.each([
+    ['void-only use', 'void p;', false],
+    ['call-argument use', 'use(p);', true],
+  ] as const)('classifies a permitted const alias with %s', (_label, use, unresolved) => {
+    const configSource = [
+      'const shared = { resolve: { alias: {} } };',
+      'const p = shared;',
+      use,
+      'export default shared;',
+    ].join('\n');
     const report = inspectHeldoutLeakChanges([{
       path: 'vite.config.ts',
       addedText: configSource,
