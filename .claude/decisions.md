@@ -22240,3 +22240,19 @@ the landing worktree was main + slice; between the merge-base and main only `.cl
 byte-identical to the gated 6ec0911e (`git diff 6ec0911e HEAD -- . ':!.claude'` empty), so the r2 gate is the gate on the
 integrated revision. Slice 2 (212f1acb) stays shelved (D598). Next for Room D: slice 3 (fresh-process CLI run of the bounded
 enumeration) to obtain the Spear-vs-Dodge answer, then the sol→luna loop (D597).
+
+### D586.177 — VTT-handoff plan ACCEPTED after remediation; S0–S2 and the D569 patch harvested; promo180 landing merge in progress (2026-09-10 07:37 EDT)
+
+VTT-HANDOFF-01 plan: remediation pass 1 resolved F8/F13/F20/F24 but lost two sections (F25 door semantics, F26 parity matrix) and
+left a stale summary (F27); pass 2 restored them; Astra ACCEPT (`plan-review-rem2-astra.md`; candidate sha 25816309…, 550 lines,
+copy `plan-candidate-rem2-25816309.md`) — "accepts the plan for S3 onward; implementation still requires its specified gates".
+S0–S2 lane (session 01a0891a-8a6c-7260-ad9e-8eb49f039478) DONE: S0a manifest-only exact pins (ajv, ws, @types/ws; no Node pin),
+S0b paths/bootstrap/doctor with shared-node_modules refusal, S1 Zod + independent Ajv + semantic layer + schemas, S2a snapshot
+adapter with renderer-only token ids (no visibility-domain or persisted fields), S2b 12×8 two-room real-engine fixture, S2c
+immutable core publisher with READY.json last and `examples: pending`; lane-claimed 8 files / 36 tests, tsc 0, sg 0. Supervisor
+materialized a real node_modules in the worktree (npm ci) and is verifying. D569-PATCH-01 lane (01a088e3…) DONE: 39 files across
+spec sections 4.1–4.9 incl. tools/d569-v5/{analyze-primary-pair,validate-first-arm,merge-repaired-hard}.ts with hashes, arena
+--cells, replacement runbook v2; supervisor cumulative running. promo180 landing: `git merge main` into claude/p-promo180 conflicts
+in tests/unit/tools/ai-dm-arena.test.ts; reconciliation lane PROMO180-LAND-01 dispatched; the r1-state gate's only red
+(d584-contract-inventory) was the gitignored plan file missing from the worktree (copied in). Room D slices 0+1 are on main
+(D586.176).

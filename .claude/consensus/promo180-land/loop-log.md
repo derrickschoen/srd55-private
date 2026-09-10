@@ -1,0 +1,1 @@
+- 2026-09-10 07:37 EDT unit opened: merge main into claude/p-promo180 (1 conflict: ai-dm-arena.test.ts); lane resumed 01a088ae… to reconcile; elevation plan file copied for d584 inventory test.
