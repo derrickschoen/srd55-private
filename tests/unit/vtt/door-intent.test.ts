@@ -316,6 +316,52 @@ describe('deadlock-safe door intent', () => {
     service.close();
   });
 
+  it.each(['dm', 'player'] as const)(
+    'keeps a door commit irrevocable when a %s mutation subscriber closes the service',
+    async (audience) => {
+      const { host, service, seat } = runningDoorService({
+        movement: true, lineOfSight: true, cover: 'total',
+      });
+      const offerPromise = waitForOffer(service, seat.playerId);
+      void service.start();
+      const offer = await offerPromise;
+      const observedMutationRevisions: number[] = [];
+      const closeOnMutation = (kind: string, revision: number): void => {
+        if (kind !== 'mutation') return;
+        observedMutationRevisions.push(revision);
+        service.close();
+      };
+      if (audience === 'dm') {
+        service.subscribeDm((event) => closeOnMutation(event.kind, event.projection.encounter.revision));
+      } else {
+        service.subscribePlayer(seat.playerId, (event) => closeOnMutation(event.kind, event.projection.revision));
+      }
+
+      const committed = service.setDoor({
+        principal: { kind: 'dm' }, doorId: DOOR_ID, open: true,
+      });
+      const queued = service.submitOfferedAction({
+        playerId: seat.playerId,
+        tokenId: seat.controlledTokenIds[0]!,
+        requestId: offer.requestId,
+        encounterRevision: offer.encounterRevision,
+        offeredActionId: offer.offeredActionIds[0]!,
+      });
+      const result = await committed;
+      expect(result.kind).toBe('committed');
+      if (result.kind !== 'committed' || !result.changed) {
+        throw new Error(`Expected a changed door commit, received ${result.kind}.`);
+      }
+      await expect(queued).resolves.toEqual({ kind: 'closed' });
+      expect(result.event.kind).toBe('mutation');
+      expect(result.event.projection.encounter.revision).toBe(result.revision);
+      expect(observedMutationRevisions).toEqual([result.revision]);
+      const revisionAtReceipt = host.snapshot().dm.encounter.revision;
+      await Promise.resolve();
+      expect(host.snapshot().dm.encounter.revision).toBe(revisionAtReceipt);
+    },
+  );
+
   it('same-state success waits for durability without abort, reducer, journal, or snapshot changes', async () => {
     const controlled = new ControlledFlushStore();
     const reducerCommands: EncounterCommand[] = [];
@@ -382,6 +428,42 @@ describe('deadlock-safe door intent', () => {
     await expect(service.setDoor({
       principal: { kind: 'dm' }, doorId: DOOR_ID, open: true,
     })).resolves.toMatchObject({ kind: 'failed', phase: 'pre_apply' });
+    await expect(start).rejects.toThrow('Controller request was cancelled.');
+    const recovered = service.playerSnapshot(seat.playerId)?.pendingRequest;
+    expect(recovered?.requestId).not.toBe(offer.requestId);
+    expect(host.snapshot().dm.coordinator.pause).toBeNull();
+    expect(abort).toHaveBeenCalledTimes(1);
+    expect(reducerCommands).toEqual([]);
+    expect(host.snapshot().dm.encounter.worldObjects.find(
+      (object) => String(object.id) === DOOR_ID,
+    )?.blocking).toEqual({ movement: true, lineOfSight: true, cover: 'total' });
+    abort.mockRestore();
+    service.close();
+  });
+
+  it('cancels and settles the human wait when the first external-pause append fails', async () => {
+    const store = new CancellationFailureStore();
+    const reducerCommands: EncounterCommand[] = [];
+    const abort = vi.spyOn(AbortController.prototype, 'abort');
+    const { host, service, seat } = runningDoorService({
+      movement: true, lineOfSight: true, cover: 'total',
+    }, store, (command) => reducerCommands.push(command));
+    const offerPromise = waitForOffer(service, seat.playerId);
+    const start = service.start();
+    const offer = await offerPromise;
+    abort.mockClear();
+    reducerCommands.length = 0;
+    store.failAppendIn(1);
+
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const result = await Promise.race([
+      service.setDoor({ principal: { kind: 'dm' }, doorId: DOOR_ID, open: true }),
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(() => reject(new Error('first-pause failure did not settle')), 1_000);
+      }),
+    ]);
+    if (timeout !== undefined) clearTimeout(timeout);
+    expect(result).toMatchObject({ kind: 'failed', phase: 'pre_apply' });
     await expect(start).rejects.toThrow('Controller request was cancelled.');
     const recovered = service.playerSnapshot(seat.playerId)?.pendingRequest;
     expect(recovered?.requestId).not.toBe(offer.requestId);

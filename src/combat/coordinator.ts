@@ -93,6 +93,19 @@ export class CoordinatorPostApplicationError extends Error {
   }
 }
 
+/** Reports a failed external-pause journal operation after mandatory controller cleanup. */
+export class CoordinatorExternalPauseError extends Error {
+  override readonly name = 'CoordinatorExternalPauseError' as const;
+
+  constructor(
+    readonly pendingStepCancelled: boolean,
+    cause: unknown,
+    readonly restorationError?: unknown,
+  ) {
+    super('Coordinator external pause persistence failed.', { cause });
+  }
+}
+
 export type CoordinatorPause =
   | { readonly kind: 'interrupted' }
   | { readonly kind: 'adjudicated'; readonly eventSequence: number };
@@ -362,39 +375,72 @@ export class TurnCoordinator {
   }
 
   interrupt(): void {
-    if (this.#pause !== null) return;
+    if (this.#pause !== null) {
+      this.#cancelPendingRequest();
+      return;
+    }
     const pause = { kind: 'interrupted' } as const;
     this.#pause = pause;
+    let pauseFailed = false;
+    let pauseError: unknown;
     try {
       this.#record({ kind: 'coordinator_paused', pause });
     } catch (error: unknown) {
       this.#pause = null;
-      throw error;
+      pauseFailed = true;
+      pauseError = error;
     }
-    this.#cancelPendingRequest();
+    let cancellationFailed = false;
+    let cancellationError: unknown;
+    try {
+      this.#cancelPendingRequest();
+    } catch (error: unknown) {
+      cancellationFailed = true;
+      cancellationError = error;
+    }
+    if (pauseFailed) throw pauseError;
+    if (cancellationFailed) throw cancellationError;
   }
 
   pauseForExternalMutation(): CoordinatorPause | null {
     const previous = this.#pause;
     let establishedPause: CoordinatorPause | null = null;
+    let pauseFailed = false;
+    let pauseError: unknown;
     if (this.#pause === null) {
       establishedPause = { kind: 'interrupted' };
       this.#pause = establishedPause;
       try {
         this.#record({ kind: 'coordinator_paused', pause: establishedPause });
       } catch (error: unknown) {
-        this.#pause = previous;
-        throw error;
+        pauseFailed = true;
+        pauseError = error;
       }
     }
+    const pendingStepCancelled = this.#pendingRequest !== null;
+    let cancellationFailed = false;
+    let cancellationError: unknown;
     try {
       this.#cancelPendingRequest();
     } catch (error: unknown) {
+      cancellationFailed = true;
+      cancellationError = error;
+    }
+    if (pauseFailed || cancellationFailed) {
+      let restorationError: unknown;
       if (establishedPause !== null) {
         this.#pause = previous;
-        this.#record({ kind: 'coordinator_resumed', pause: establishedPause });
+        try {
+          this.#record({ kind: 'coordinator_resumed', pause: establishedPause });
+        } catch (error: unknown) {
+          restorationError = error;
+        }
       }
-      throw error;
+      throw new CoordinatorExternalPauseError(
+        pendingStepCancelled,
+        pauseFailed ? pauseError : cancellationError,
+        restorationError,
+      );
     }
     return previous;
   }

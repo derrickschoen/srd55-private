@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { EncounterCommand } from '../../../src/combat/events';
 import { createEncounter, reduceEncounter, REACTION_KINDS, type EncounterState } from '../../../src/combat/encounter';
 import { mulberry32 } from '../../../src/combat/random';
@@ -161,6 +161,28 @@ class FaultInjectingStore extends ControlledFlushStore {
   }
 }
 
+class PersistentlyFailingStore extends MemoryBrowserSessionStore {
+  #failNextFlush = false;
+  #failed = false;
+
+  failNextFlushAndAllFollowingWrites(): void {
+    this.#failNextFlush = true;
+  }
+
+  override append(revision: SessionRevision): void {
+    if (this.#failed) throw new Error('persistent session store failure');
+    super.append(revision);
+  }
+
+  override async flush(): Promise<void> {
+    if (this.#failNextFlush) {
+      this.#failNextFlush = false;
+      this.#failed = true;
+    }
+    if (this.#failed) throw new Error('persistent session store failure');
+  }
+}
+
 class FaultInjectingMirror implements MirrorSink {
   #appendCountdown: number | null = null;
 
@@ -318,6 +340,43 @@ describe('encounter session service', () => {
     service.close();
   });
 
+  it('settles initial-offer cleanup with no human wait when every later store operation fails', async () => {
+    const store = new PersistentlyFailingStore();
+    const abort = vi.spyOn(AbortController.prototype, 'abort');
+    const host = new DmEncounterHost('session:service-persistent-initial-offer-failure', store);
+    const seats = registrations(host);
+    const service = new EncounterSessionService(host, seats);
+    const notifications: string[] = [];
+    service.subscribeDm((event) => {
+      notifications.push(event.kind);
+      if (event.kind === 'autonomous') store.failNextFlushAndAllFollowingWrites();
+    });
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const start = Promise.race([
+      service.start(),
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(() => reject(new Error('persistent initial-offer cleanup did not settle')), 1_000);
+      }),
+    ]);
+
+    await expect(start).rejects.toThrow('persistent session store failure');
+    if (timeout !== undefined) clearTimeout(timeout);
+    expect(notifications).toContain('recovery');
+    expect(host.snapshot().dm.coordinator.pendingRequest).toBeNull();
+    expect(abort).toHaveBeenCalledTimes(1);
+    const seat = seats[0];
+    if (seat === undefined) throw new Error('Expected an authority seat.');
+    await expect(service.submitOfferedAction({
+      playerId: seat.playerId,
+      tokenId: seat.controlledTokenIds[0]!,
+      requestId: 'closed-persistent-offer',
+      encounterRevision: host.snapshot().dm.encounter.revision,
+      offeredActionId: 'closed-persistent-offer',
+    })).resolves.toEqual({ kind: 'closed' });
+    abort.mockRestore();
+    service.close();
+  });
+
   it('acknowledges the exact consuming revision only after durable flush', async () => {
     const store = new ControlledFlushStore();
     const host = new DmEncounterHost('session:service-durable-commit', store);
@@ -364,6 +423,59 @@ describe('encounter session service', () => {
     expect(playerMutations).toEqual([result.revision]);
     service.close();
   });
+
+  it.each(['dm', 'player'] as const)(
+    'keeps a pump commit irrevocable when a %s mutation subscriber closes the service',
+    async (audience) => {
+      const host = new DmEncounterHost(
+        `session:service-receipt-close-${audience}`,
+        new MemoryBrowserSessionStore(),
+      );
+      const seats = registrations(host);
+      const service = new EncounterSessionService(host, seats);
+      const offerPromise = waitForOffer(service, seats.map((seat) => seat.playerId));
+      void service.start();
+      const offer = await offerPromise;
+      const pending = offer.projection.pendingRequest;
+      if (pending === null) throw new Error('Expected a controller offer for the receipt test.');
+      const seat = seats.find((candidate) => candidate.playerId === offer.playerId);
+      if (seat === undefined) throw new Error('Expected the offered receipt-test seat.');
+      const endTurnIndex = pending.legalActions.findIndex((action) => action.type === 'end_turn');
+      if (endTurnIndex < 0) throw new Error('Expected an end-turn offer.');
+      const observedMutationRevisions: number[] = [];
+      const closeOnMutation = (kind: string, revision: number): void => {
+        if (kind !== 'mutation') return;
+        observedMutationRevisions.push(revision);
+        service.close();
+      };
+      if (audience === 'dm') {
+        service.subscribeDm((event) => closeOnMutation(event.kind, event.projection.encounter.revision));
+      } else {
+        service.subscribePlayer(offer.playerId, (event) => closeOnMutation(event.kind, event.projection.revision));
+      }
+      const mutation = {
+        playerId: offer.playerId,
+        tokenId: seat.controlledTokenIds[0]!,
+        requestId: pending.requestId,
+        encounterRevision: pending.encounterRevision,
+        offeredActionId: pending.offeredActionIds[endTurnIndex]!,
+      };
+
+      const committed = service.submitOfferedAction(mutation);
+      const queued = service.submitOfferedAction(mutation);
+      const result = await committed;
+      expect(result.kind).toBe('committed');
+      if (result.kind !== 'committed') throw new Error(`Expected commit, received ${result.kind}.`);
+      await expect(queued).resolves.toEqual({ kind: 'closed' });
+      expect(result.event.kind).toBe('mutation');
+      expect(result.event.projection.revision).toBe(result.revision);
+      expect(observedMutationRevisions).toEqual([result.revision]);
+      const revisionAtReceipt = host.snapshot().dm.encounter.revision;
+      await Promise.resolve();
+      expect(host.snapshot().dm.encounter.revision).toBe(revisionAtReceipt);
+      expect(service.mutationEventRevisions()).toEqual([result.revision]);
+    },
+  );
 
   it('publishes no mutation snapshot for a real coordinator refusal', async () => {
     const store = new MemoryBrowserSessionStore();

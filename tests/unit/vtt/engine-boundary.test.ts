@@ -19,8 +19,6 @@ interface SourceModule {
   readonly file: string;
   readonly sourceFile: ts.SourceFile;
   readonly imports: readonly ImportEdge[];
-  readonly reducerAliases: ReadonlyMap<string, { readonly imported: string; readonly resolved: string | null }>;
-  readonly reducerNamespaces: ReadonlyMap<string, string | null>;
 }
 
 function repositoryPath(absolutePath: string): string {
@@ -92,28 +90,7 @@ function parseModule(file: string): SourceModule {
     specifier,
     resolved: resolveImport(file, specifier),
   }));
-  const reducerAliases = new Map<string, { readonly imported: string; readonly resolved: string | null }>();
-  const reducerNamespaces = new Map<string, string | null>();
-  for (const statement of sourceFile.statements) {
-    if (!ts.isImportDeclaration(statement) || statement.importClause?.isTypeOnly === true) continue;
-    const bindings = statement.importClause?.namedBindings;
-    if (bindings === undefined || !ts.isStringLiteral(statement.moduleSpecifier)) continue;
-    if (ts.isNamespaceImport(bindings)) {
-      reducerNamespaces.set(bindings.name.text, resolveImport(file, statement.moduleSpecifier.text));
-      continue;
-    }
-    if (!ts.isNamedImports(bindings)) continue;
-    for (const element of bindings.elements) {
-      if (element.isTypeOnly) continue;
-      const imported = element.propertyName?.text ?? element.name.text;
-      if (!REDUCERS.has(imported)) continue;
-      reducerAliases.set(element.name.text, {
-        imported,
-        resolved: resolveImport(file, statement.moduleSpecifier.text),
-      });
-    }
-  }
-  return { file, sourceFile, imports, reducerAliases, reducerNamespaces };
+  return { file, sourceFile, imports };
 }
 
 function dependencyGraph(entrypoints: readonly string[]): ReadonlyMap<string, SourceModule> {
@@ -178,55 +155,29 @@ interface ReducerDefinition {
   readonly symbol: string;
 }
 
-function definesSymbol(sourceFile: ts.SourceFile, symbol: string): boolean {
-  return sourceFile.statements.some((statement) => {
-    if (ts.isFunctionDeclaration(statement)) return statement.name?.text === symbol;
-    if (!ts.isVariableStatement(statement)) return false;
-    return statement.declarationList.declarations.some(
-      (declaration) => ts.isIdentifier(declaration.name) && declaration.name.text === symbol,
-    );
-  });
-}
-
-function resolveReducerDefinition(
-  file: string,
-  symbol: string,
-  visited: ReadonlySet<string> = new Set(),
+function definingReducer(
+  checker: ts.TypeChecker,
+  expression: ts.LeftHandSideExpression,
 ): ReducerDefinition | null {
-  const visitKey = `${file}\u0000${symbol}`;
-  if (visited.has(visitKey)) return null;
-  const nextVisited = new Set(visited).add(visitKey);
-  const sourceFile = ts.createSourceFile(
-    file,
-    readFileSync(file, 'utf8'),
-    ts.ScriptTarget.Latest,
-    true,
-    file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
-  );
-  if (REDUCERS.has(symbol) && definesSymbol(sourceFile, symbol)) return { file, symbol };
-  for (const statement of sourceFile.statements) {
-    if (
-      !ts.isExportDeclaration(statement) ||
-      statement.isTypeOnly ||
-      statement.moduleSpecifier === undefined ||
-      !ts.isStringLiteral(statement.moduleSpecifier)
-    ) continue;
-    const target = resolveImport(file, statement.moduleSpecifier.text);
-    if (target === null) continue;
-    if (statement.exportClause === undefined) {
-      const resolved = resolveReducerDefinition(target, symbol, nextVisited);
-      if (resolved !== null) return resolved;
-      continue;
-    }
-    if (!ts.isNamedExports(statement.exportClause)) continue;
-    for (const element of statement.exportClause.elements) {
-      if (element.isTypeOnly || element.name.text !== symbol) continue;
-      const imported = element.propertyName?.text ?? element.name.text;
-      const resolved = resolveReducerDefinition(target, imported, nextVisited);
-      if (resolved !== null) return resolved;
-    }
+  const location = ts.isPropertyAccessExpression(expression) ? expression.name : expression;
+  let symbol = checker.getSymbolAtLocation(location);
+  if (symbol === undefined) return null;
+  const visited = new Set<ts.Symbol>();
+  while ((symbol.flags & ts.SymbolFlags.Alias) !== 0 && !visited.has(symbol)) {
+    visited.add(symbol);
+    const aliased = checker.getAliasedSymbol(symbol);
+    if (aliased === symbol) break;
+    symbol = aliased;
   }
-  return null;
+  const name = symbol.getName();
+  if (!REDUCERS.has(name)) return null;
+  const declaration = symbol.getDeclarations()?.find((candidate) => {
+    const file = candidate.getSourceFile().fileName;
+    return file.startsWith(`${ROOT}/`) && !file.includes('/node_modules/');
+  });
+  return declaration === undefined
+    ? null
+    : { file: declaration.getSourceFile().fileName, symbol: name };
 }
 
 function enclosingOperation(node: ts.Node, sourceFile: ts.SourceFile): string {
@@ -250,36 +201,34 @@ function enclosingOperation(node: ts.Node, sourceFile: ts.SourceFile): string {
 }
 
 function reducerCallSites(graph: ReadonlyMap<string, SourceModule>): readonly string[] {
+  const program = ts.createProgram({
+    rootNames: [...graph.keys()],
+    options: {
+      module: ts.ModuleKind.ESNext,
+      moduleResolution: ts.ModuleResolutionKind.Bundler,
+      skipLibCheck: true,
+      target: ts.ScriptTarget.ESNext,
+      types: [],
+    },
+  });
+  const checker = program.getTypeChecker();
   const calls: string[] = [];
   for (const module of graph.values()) {
-    const add = (definition: ReducerDefinition | null, node: ts.CallExpression): void => {
-      if (definition === null) return;
-      calls.push(
-        `${repositoryPath(module.file)}#${enclosingOperation(node, module.sourceFile)} -> ` +
-        `${repositoryPath(definition.file)}#${definition.symbol}`,
-      );
-    };
+    const sourceFile = program.getSourceFile(module.file);
+    if (sourceFile === undefined) throw new Error(`TypeScript program omitted ${module.file}`);
     const visit = (node: ts.Node): void => {
       if (ts.isCallExpression(node) && !insideImport(node)) {
-        if (ts.isIdentifier(node.expression)) {
-          const target = module.reducerAliases.get(node.expression.text);
-          if (target?.resolved !== null && target?.resolved !== undefined) {
-            add(resolveReducerDefinition(target.resolved, target.imported), node);
-          }
-        } else if (ts.isPropertyAccessExpression(node.expression)) {
-          const owner = node.expression.expression;
-          const symbol = node.expression.name.text;
-          if (ts.isIdentifier(owner) && REDUCERS.has(symbol)) {
-            const target = module.reducerNamespaces.get(owner.text);
-            if (target !== null && target !== undefined) {
-              add(resolveReducerDefinition(target, symbol), node);
-            }
-          }
+        const definition = definingReducer(checker, node.expression);
+        if (definition !== null) {
+          calls.push(
+            `${repositoryPath(module.file)}#${enclosingOperation(node, sourceFile)} -> ` +
+            `${repositoryPath(definition.file)}#${definition.symbol}`,
+          );
         }
       }
       ts.forEachChild(node, visit);
     };
-    ts.forEachChild(module.sourceFile, visit);
+    ts.forEachChild(sourceFile, visit);
   }
   return calls.sort();
 }

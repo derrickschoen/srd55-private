@@ -24,6 +24,17 @@ interface RegisteredPlayerSeat {
   readonly controlledTokenIds: ReadonlySet<string>;
 }
 
+type ActiveTerminalReceipt =
+  | {
+      readonly kind: 'offered_action';
+      readonly requestId: string;
+      established: boolean;
+    }
+  | {
+      readonly kind: 'door';
+      established: boolean;
+    };
+
 export interface EncounterSessionHostPort {
   readonly sessionId: EncounterSessionId;
   snapshot(): DmEncounterHostSnapshot;
@@ -172,6 +183,7 @@ export class EncounterSessionService {
   #tail: Promise<void> = Promise.resolve();
   #seq = 0;
   #closed = false;
+  #activeTerminalReceipt: ActiveTerminalReceipt | null = null;
 
   constructor(
     private readonly host: EncounterSessionHostPort,
@@ -278,7 +290,10 @@ export class EncounterSessionService {
         kind: 'refused', code: 'FORBIDDEN', reason: 'The token belongs to another player seat.',
       });
     }
-    return this.#enqueue(async () => this.#applyOfferedAction(playerId, seat, input));
+    return this.#enqueue(
+      async () => this.#applyOfferedAction(playerId, seat, input),
+      { kind: 'offered_action', requestId: input.requestId, established: false },
+    );
   }
 
   setDoor(input: {
@@ -303,14 +318,24 @@ export class EncounterSessionService {
         settle?.({ kind: 'closed' });
         return;
       }
+      const receipt: ActiveTerminalReceipt = { kind: 'door', established: false };
+      this.#activeTerminalReceipt = receipt;
       try {
-        const hostOutcome = await Promise.race([
-          this.host.setDoorOpen(input.doorId, input.open),
-          this.#closure.promise,
+        const hostPromise = this.host.setDoorOpen(input.doorId, input.open);
+        const raced = await Promise.race([
+          hostPromise.then((value) => ({ kind: 'host' as const, value })),
+          this.#closure.promise.then(() => ({ kind: 'closure' as const })),
         ]);
+        const hostOutcome = raced.kind === 'host'
+          ? raced.value
+          : receipt.established
+            ? await hostPromise
+            : { kind: 'closed' as const };
         settle?.(hostOutcome.kind === 'closed' ? hostOutcome : this.#doorOutcome(hostOutcome));
       } catch (error: unknown) {
         settle?.({ kind: 'failed', phase: 'pre_apply', error });
+      } finally {
+        if (this.#activeTerminalReceipt === receipt) this.#activeTerminalReceipt = null;
       }
     });
     this.#tail = run.catch(() => undefined);
@@ -329,7 +354,10 @@ export class EncounterSessionService {
     }
   }
 
-  #enqueue(operation: () => Promise<SessionMutationOutcome>): Promise<SessionMutationOutcome> {
+  #enqueue(
+    operation: () => Promise<SessionMutationOutcome>,
+    receipt: ActiveTerminalReceipt,
+  ): Promise<SessionMutationOutcome> {
     let settle: ((outcome: SessionMutationOutcome) => void) | undefined;
     const outcome = new Promise<SessionMutationOutcome>((resolve) => { settle = resolve; });
     const run = this.#tail.then(async () => {
@@ -337,10 +365,22 @@ export class EncounterSessionService {
         settle?.({ kind: 'closed' });
         return;
       }
+      this.#activeTerminalReceipt = receipt;
       try {
-        settle?.(await Promise.race([operation(), this.#closure.promise]));
+        const operationPromise = operation();
+        const raced = await Promise.race([
+          operationPromise.then((value) => ({ kind: 'operation' as const, value })),
+          this.#closure.promise.then(() => ({ kind: 'closure' as const })),
+        ]);
+        settle?.(raced.kind === 'operation'
+          ? raced.value
+          : receipt.established
+            ? await operationPromise
+            : { kind: 'closed' });
       } catch (error: unknown) {
         settle?.({ kind: 'failed', phase: 'pre_apply', error });
+      } finally {
+        if (this.#activeTerminalReceipt === receipt) this.#activeTerminalReceipt = null;
       }
     });
     this.#tail = run.catch(() => undefined);
@@ -510,6 +550,17 @@ export class EncounterSessionService {
           event,
         );
       }
+    }
+    const receipt = notification.terminalReceipt;
+    const activeReceipt = this.#activeTerminalReceipt;
+    if (
+      receipt?.kind === 'offered_action' &&
+      activeReceipt?.kind === 'offered_action' &&
+      receipt.requestId === activeReceipt.requestId
+    ) {
+      activeReceipt.established = true;
+    } else if (receipt?.kind === 'door' && activeReceipt?.kind === 'door') {
+      activeReceipt.established = true;
     }
     for (const listener of this.#dmListeners) this.#notifyDm(listener, dmEvent);
     for (const [playerId, event] of playerEvents) {

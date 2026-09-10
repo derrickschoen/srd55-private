@@ -6,6 +6,7 @@ import {
   type ControllerKind,
 } from '../combat/controllers';
 import {
+  CoordinatorExternalPauseError,
   CoordinatorPostApplicationError,
   TurnCoordinator,
   type CoordinatorStep,
@@ -211,10 +212,22 @@ export type HostSnapshotNotificationKind =
   | 'autonomous'
   | 'recovery';
 
+export type HostTerminalReceipt =
+  | {
+      readonly kind: 'offered_action';
+      readonly requestId: string;
+      readonly revision: number;
+    }
+  | {
+      readonly kind: 'door';
+      readonly revision: number;
+    };
+
 export interface HostSnapshotNotification {
   readonly kind: HostSnapshotNotificationKind;
   readonly snapshot: DmEncounterHostSnapshot;
   readonly playerSnapshot: (binding: PlayerSeatBinding) => PlayerBoardProjection;
+  readonly terminalReceipt?: HostTerminalReceipt;
 }
 
 export interface HostSubscriberError {
@@ -604,7 +617,10 @@ export class DmEncounterHost {
     }
   }
 
-  #captureNotification(kind: HostSnapshotNotificationKind): HostSnapshotNotification {
+  #captureNotification(
+    kind: HostSnapshotNotificationKind,
+    terminalReceipt?: HostTerminalReceipt,
+  ): HostSnapshotNotification {
     const state = structuredClone(this.#coordinator.state());
     const coordinator = structuredClone(this.#coordinator.coordinatorState());
     const partyState = this.#journal.partyState();
@@ -612,6 +628,7 @@ export class DmEncounterHost {
     return {
       kind,
       snapshot: this.snapshot(),
+      ...(terminalReceipt === undefined ? {} : { terminalReceipt }),
       playerSnapshot: (binding) => {
         const player = projectPlayerBoard(projectPlayerView(state, {
           seatId: binding.seatId,
@@ -753,6 +770,13 @@ export class DmEncounterHost {
           if (result.kind === 'applied') {
             primaryNotification = this.#captureNotification(
               transactionRequestId === null ? 'autonomous' : 'mutation',
+              transactionRequestId === null
+                ? undefined
+                : {
+                    kind: 'offered_action',
+                    requestId: transactionRequestId,
+                    revision: result.state.revision,
+                  },
             );
           }
           if (this.#coordinator.state().pendingDecisions.some((decision) => decision.kind === 'reaction_offer')) {
@@ -775,17 +799,19 @@ export class DmEncounterHost {
           throw error;
         }
         if (this.#closed) return;
+        if (result.kind === 'applied' && transactionRequestId !== null) {
+          this.#settleTransaction(transactionRequestId, {
+            kind: 'committed',
+            revision: result.state.revision,
+          });
+        }
         if (primaryNotification !== null) this.#deliverNotification(primaryNotification);
+        if (this.#closed) return;
         for (const notification of autonomousReactionNotifications) {
           this.#deliverNotification(notification);
+          if (this.#closed) return;
         }
         if (result.kind === 'applied') {
-          if (transactionRequestId !== null) {
-            this.#settleTransaction(transactionRequestId, {
-              kind: 'committed',
-              revision: result.state.revision,
-            });
-          }
           this.#boundaryRefusal = null;
           continue;
         }
@@ -859,22 +885,17 @@ export class DmEncounterHost {
   }
 
   async #closeAfterInitialOfferFailure(step: Promise<CoordinatorStep>): Promise<void> {
-    let cancellationFailed = false;
     try {
       this.#coordinator.interrupt();
     } catch {
-      cancellationFailed = true;
+      // Controller cleanup is unconditional even when its journal writes fail.
     }
     this.#closed = true;
     this.#repumpRequested = false;
-    if (cancellationFailed) {
-      void step.catch(() => undefined);
-    } else {
-      try {
-        await step;
-      } catch {
-        // The host is closing; the failed offer cannot be resumed.
-      }
+    try {
+      await step;
+    } catch {
+      // The host is closing; the cancelled offer cannot be resumed.
     }
     this.#publish('recovery');
     this.#settleAllTransactions({ kind: 'closed' });
@@ -1222,10 +1243,12 @@ export class DmEncounterHost {
     try {
       previousPause = this.#coordinator.pauseForExternalMutation();
     } catch (error: unknown) {
-      try {
-        await pendingPump;
-      } catch {
-        // Cancellation failures are returned below after the original step settles.
+      if (error instanceof CoordinatorExternalPauseError && error.pendingStepCancelled) {
+        try {
+          await pendingPump;
+        } catch {
+          // The typed failure confirms that the pending controller step was cancelled.
+        }
       }
       this.#repumpBlocked = false;
       if (this.#closed) return { kind: 'closed' };
@@ -1310,7 +1333,10 @@ export class DmEncounterHost {
       this.#repumpBlocked = false;
       return { kind: 'closed' };
     }
-    const doorNotification = this.#captureNotification('mutation');
+    const doorNotification = this.#captureNotification('mutation', {
+      kind: 'door',
+      revision: result.state.revision,
+    });
     if (previousPause === null) {
       const freshOffer = this.#waitForFreshOffer(previousRequestId, result.state.revision);
       try {
