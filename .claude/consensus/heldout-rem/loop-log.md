@@ -36,3 +36,5 @@
 - 2026-09-10 11:41 EDT — r11 lane DONE; supervisor verification tsc/sg/diffcheck 0, 9 specs 471/471; committed e9cf5d84; Astra r11 dispatched (resume 01a088d6…).
 
 - 2026-09-10 11:44 EDT — r11 Astra REJECT: F38/F39 resolved; three bounded defects (F40 plain namespace aliases drop provenance, F41 destructuring assignments, F42 returned config references). r12 dispatched with a mandatory flow-position self-audit table.
+
+- 2026-09-10 12:16 EDT — r12 lane DONE; supervisor verification tsc/sg/diffcheck 0, 9 specs 497/497; committed be769471; Astra r12 dispatched (resume 01a088d6…) with audit-table probing.
