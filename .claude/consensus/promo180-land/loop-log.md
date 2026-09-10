@@ -1,1 +1,2 @@
 - 2026-09-10 07:37 EDT unit opened: merge main into claude/p-promo180 (1 conflict: ai-dm-arena.test.ts); lane resumed 01a088ae… to reconcile; elevation plan file copied for d584 inventory test.
+- 2026-09-10 07:56 merge verified: tsc 0, sg 0, diff-check 0, 610/612 + serial rerun 7/7 (two child-spawn load flakes); merge committed fb66adca; Astra landing review dispatched; full gate launched.
