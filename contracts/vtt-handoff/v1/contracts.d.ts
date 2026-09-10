@@ -15,13 +15,13 @@ export interface SceneWall {
   readonly height: number;
   readonly blocksMovement: boolean;
   readonly blocksVision: boolean;
-  readonly assetId?: string;
+  readonly assetId?: string | undefined;
 }
 export interface SceneDoor {
   readonly id: string;
   readonly wallId: string;
   readonly open: boolean;
-  readonly assetId?: string;
+  readonly assetId?: string | undefined;
 }
 export interface SceneLight extends Point3 {
   readonly id: string;
@@ -56,7 +56,7 @@ export interface HandoffRequest<M extends string = string, P extends object = ob
 }
 export type SessionOpenRequest = HandoffRequest<'session.open', {
   readonly requestedRole: 'dm' | 'player';
-  readonly playerId?: string;
+  readonly playerId?: string | undefined;
 }>;
 export type SceneSnapshotRequest = HandoffRequest<'scene.snapshot', Record<string, never>>;
 export type TokenMoveRequest = HandoffRequest<'token.move', { readonly tokenId: string; readonly to: Point3 }>;
@@ -103,13 +103,13 @@ export interface ArtRequest {
 export interface ArtFrame {
   readonly facing: number;
   readonly frameIndex: number;
-  readonly view?: ArtView;
+  readonly view?: ArtView | undefined;
   readonly width: number;
   readonly height: number;
   readonly pivotPx: readonly [number, number];
   readonly albedo: string;
-  readonly normal?: string;
-  readonly emissive?: string;
+  readonly normal?: string | undefined;
+  readonly emissive?: string | undefined;
 }
 export interface ArtAsset {
   readonly assetId: string;
@@ -121,7 +121,7 @@ export interface ArtAsset {
 export interface ArtProvenance {
   readonly sourceFiles: readonly string[];
   readonly files: readonly { readonly path: string; readonly sha256: string }[];
-  readonly frameViews?: readonly { readonly path: string; readonly view: ArtView }[];
+  readonly frameViews?: readonly { readonly path: string; readonly view: ArtView }[] | undefined;
   readonly normalMapConvention: 'opengl-positive-y' | 'directx-negative-y' | 'none';
   readonly tool: string;
   readonly notes: string;

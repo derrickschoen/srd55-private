@@ -1,7 +1,7 @@
 import {
   existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, symlinkSync, writeFileSync,
 } from '../../helpers/test-filesystem';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
@@ -13,6 +13,36 @@ function root(): string {
 
 function tree(directory: string): readonly string[] {
   return readdirSync(directory, { recursive: true, encoding: 'utf8' }).sort();
+}
+
+interface FileSnapshot {
+  readonly path: string;
+  readonly bytes: string;
+  readonly mtimeMs: number;
+  readonly size: number;
+}
+
+function fileSnapshots(rootDirectory: string, directory = rootDirectory): readonly FileSnapshot[] {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry): readonly FileSnapshot[] => {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) return fileSnapshots(rootDirectory, path);
+    const stat = statSync(path);
+    return [{
+      path: relative(rootDirectory, path),
+      bytes: readFileSync(path).toString('base64'),
+      mtimeMs: stat.mtimeMs,
+      size: stat.size,
+    }];
+  }).sort((left, right) => left.path.localeCompare(right.path));
+}
+
+function assertCheckMadeNoFilesystemMutation(
+  before: readonly FileSnapshot[],
+  after: readonly FileSnapshot[],
+): void {
+  if (JSON.stringify(before) !== JSON.stringify(after)) {
+    throw new Error('CHECK_MODE_FILESYSTEM_MUTATION');
+  }
 }
 
 describe('immutable VTT core publication', () => {
@@ -120,14 +150,28 @@ describe('immutable VTT core publication', () => {
   });
 
   it('performs zero writes in check mode', () => {
-    const handoffRoot = root();
-    const before = tree(handoffRoot);
-    expect(() => publishCore({ repositoryRoot: process.cwd(), handoffRoot, check: true }))
+    const missingRoot = root();
+    const beforeMissingCheck = fileSnapshots(missingRoot);
+    expect(() => publishCore({ repositoryRoot: process.cwd(), handoffRoot: missingRoot, check: true }))
       .toThrow('IMMUTABLE_BUNDLE_MISSING');
-    expect(tree(handoffRoot)).toEqual(before);
+    assertCheckMadeNoFilesystemMutation(beforeMissingCheck, fileSnapshots(missingRoot));
+
+    const handoffRoot = root();
     publishCore({ repositoryRoot: process.cwd(), handoffRoot });
-    const publishedTree = tree(handoffRoot);
+    const beforeSuccessfulCheck = fileSnapshots(handoffRoot);
     expect(publishCore({ repositoryRoot: process.cwd(), handoffRoot, check: true }).status).toBe('verified');
-    expect(tree(handoffRoot)).toEqual(publishedTree);
+    assertCheckMadeNoFilesystemMutation(beforeSuccessfulCheck, fileSnapshots(handoffRoot));
+
+    const protocolPath = join(handoffRoot, 'contracts/v1/protocol.schema.json');
+    writeFileSync(protocolPath, 'pre-existing conflict\n');
+    const beforeFailingCheck = fileSnapshots(handoffRoot);
+    expect(() => publishCore({ repositoryRoot: process.cwd(), handoffRoot, check: true }))
+      .toThrow('INCONSISTENT_SEALED_BUNDLE');
+    assertCheckMadeNoFilesystemMutation(beforeFailingCheck, fileSnapshots(handoffRoot));
+
+    const controlBefore = fileSnapshots(handoffRoot);
+    writeFileSync(protocolPath, 'mutant check rewrite\n');
+    expect(() => assertCheckMadeNoFilesystemMutation(controlBefore, fileSnapshots(handoffRoot)))
+      .toThrow('CHECK_MODE_FILESYSTEM_MUTATION');
   });
 });

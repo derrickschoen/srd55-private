@@ -72,6 +72,9 @@ export function artSemanticIssues(requestValue: unknown, resultValue: unknown): 
   issues.push(...duplicateIssues(request.views, '$.views', 'DUPLICATE_VIEW'));
   issues.push(...duplicateIssues(request.passes, '$.passes', 'DUPLICATE_PASS'));
   issues.push(...duplicateIssues(result.assets.map((asset) => asset.assetId), '$.assets', 'DUPLICATE_ASSET_ID'));
+  if (result.status === 'complete' && !result.assets.some((asset) => asset.assetId === request.assetId)) {
+    issues.push({ code: 'MISSING_REQUESTED_ASSET', path: '$.assets', message: request.assetId });
+  }
   const imagePaths: string[] = [];
   const frameKeys: string[] = [];
   for (const [assetIndex, asset] of result.assets.entries()) {
@@ -79,7 +82,6 @@ export function artSemanticIssues(requestValue: unknown, resultValue: unknown): 
       issues.push({ code: 'ASSET_ID_MISMATCH', path: `$.assets[${String(assetIndex)}].assetId`, message: asset.assetId });
     }
     const resolvedViews = new Set<string>();
-    const deliveredPasses = new Set<string>();
     for (const [frameIndex, frame] of asset.frames.entries()) {
       const view = resolvedView(request, result, frame);
       if (view === null) issues.push({ code: 'UNRESOLVED_FRAME_VIEW', path: `$.assets[${String(assetIndex)}].frames[${String(frameIndex)}]`, message: frame.albedo });
@@ -91,18 +93,31 @@ export function artSemanticIssues(requestValue: unknown, resultValue: unknown): 
         }
       }
       imagePaths.push(frame.albedo);
-      deliveredPasses.add('albedo');
-      if (frame.normal !== undefined) { imagePaths.push(frame.normal); deliveredPasses.add('normal'); }
-      if (frame.emissive !== undefined) { imagePaths.push(frame.emissive); deliveredPasses.add('emissive'); }
+      if (frame.normal !== undefined) imagePaths.push(frame.normal);
+      if (frame.emissive !== undefined) imagePaths.push(frame.emissive);
       if (!request.passes.includes('albedo')) issues.push({ code: 'UNREQUESTED_PASS', path: '$.assets', message: 'albedo' });
       if (!request.passes.includes('normal') && frame.normal !== undefined) issues.push({ code: 'UNREQUESTED_PASS', path: '$.assets', message: 'normal' });
       if (!request.passes.includes('emissive') && frame.emissive !== undefined) issues.push({ code: 'UNREQUESTED_PASS', path: '$.assets', message: 'emissive' });
+      if (result.status === 'complete') {
+        for (const pass of request.passes) {
+          const delivered = pass === 'albedo' || (pass === 'normal' && frame.normal !== undefined) ||
+            (pass === 'emissive' && frame.emissive !== undefined);
+          if (!delivered) {
+            issues.push({
+              code: 'MISSING_REQUESTED_PASS',
+              path: `$.assets[${String(assetIndex)}].frames[${String(frameIndex)}].${pass}`,
+              message: pass,
+            });
+          }
+        }
+      }
     }
-    for (const view of request.views) {
-      if (!resolvedViews.has(view)) issues.push({ code: 'MISSING_REQUESTED_VIEW', path: `$.assets[${String(assetIndex)}]`, message: view });
-    }
-    for (const pass of request.passes) {
-      if (!deliveredPasses.has(pass)) issues.push({ code: 'MISSING_REQUESTED_PASS', path: `$.assets[${String(assetIndex)}]`, message: pass });
+    if (result.status === 'complete' && asset.assetId === request.assetId) {
+      for (const view of request.views) {
+        if (!resolvedViews.has(view)) issues.push({
+          code: 'MISSING_REQUESTED_VIEW', path: `$.assets[${String(assetIndex)}]`, message: view,
+        });
+      }
     }
   }
   issues.push(...duplicateIssues(frameKeys, '$.assets', 'DUPLICATE_FRAME'));

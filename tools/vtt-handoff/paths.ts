@@ -58,8 +58,23 @@ export function validateRepositoryRoot(
 ): string {
   const root = realpathSync(repositoryRoot);
   const owner = realpathSync(policy.ownerCheckout);
-  const allowed = new Set([owner, ...policy.authorizedWorktrees.map((entry) => realpathSync(entry))]);
-  if (!allowed.has(root)) throw new Error('UNAUTHORIZED_REPOSITORY_ROOT');
+  let allowed = root === owner;
+  if (!allowed) {
+    for (const entry of policy.authorizedWorktrees) {
+      let candidate: string;
+      try {
+        candidate = realpathSync(entry);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+        throw error;
+      }
+      if (candidate === root) {
+        allowed = true;
+        break;
+      }
+    }
+  }
+  if (!allowed) throw new Error('UNAUTHORIZED_REPOSITORY_ROOT');
   if (packageNameAt(root) !== 'srd-55') throw new Error('REPOSITORY_PACKAGE_IDENTITY_INVALID');
   if (commonGitDirectory(root) !== commonGitDirectory(owner)) throw new Error('REPOSITORY_GIT_IDENTITY_INVALID');
   return root;

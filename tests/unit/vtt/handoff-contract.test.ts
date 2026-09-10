@@ -197,6 +197,52 @@ describe('VTT handoff v1 contracts', () => {
     }
   });
 
+  it('requires complete art deliveries to cover the asset, every view, and every pass per frame', () => {
+    const emptyComplete: ArtResult = {
+      ...result, assets: [], provenance: { ...result.provenance, sourceFiles: [], files: [] },
+    };
+    expect(artResultSchema.safeParse(emptyComplete).success).toBe(true);
+    expect(artSemanticIssues(request, emptyComplete).map((issue) => issue.code))
+      .toContain('MISSING_REQUESTED_ASSET');
+
+    const secondAlbedo = `bundle/${requestId}__token-2.png`;
+    const firstNormal = `bundle/${requestId}__token-1-normal.png`;
+    const mixedRequest: ArtRequest = { ...request, passes: ['albedo', 'normal'] };
+    const mixed: ArtResult = {
+      ...result,
+      assets: [{
+        ...result.assets[0]!,
+        frames: [
+          { ...result.assets[0]!.frames[0]!, frameIndex: 0, albedo: image, normal: firstNormal },
+          { ...result.assets[0]!.frames[0]!, facing: 90, frameIndex: 1, albedo: secondAlbedo },
+        ],
+      }],
+      provenance: {
+        ...result.provenance,
+        files: [
+          { path: image, sha256: 'a'.repeat(64) },
+          { path: firstNormal, sha256: 'b'.repeat(64) },
+          { path: secondAlbedo, sha256: 'c'.repeat(64) },
+          { path: source, sha256: 'd'.repeat(64) },
+        ],
+      },
+    };
+    expect(artResultSchema.safeParse(mixed).success).toBe(true);
+    expect(artSemanticIssues(mixedRequest, mixed)).toContainEqual({
+      code: 'MISSING_REQUESTED_PASS',
+      path: '$.assets[0].frames[1].normal',
+      message: 'normal',
+    });
+
+    for (const status of ['partial', 'blocked'] as const) {
+      const incomplete: ArtResult = {
+        ...emptyComplete, status,
+      };
+      expect(artResultSchema.safeParse(incomplete).success).toBe(true);
+      expect(artSemanticIssues(request, incomplete)).toEqual([]);
+    }
+  });
+
   it('rejects semantic-only broken references while preserving structural acceptance', () => {
     const brokenDoor = { ...snapshot, doors: [{ ...snapshot.doors[0]!, wallId: 'missing' }] };
     expect(sceneSnapshotSchema.safeParse(brokenDoor).success).toBe(true);

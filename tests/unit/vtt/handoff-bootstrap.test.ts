@@ -9,7 +9,7 @@ import { doctorReport } from '../../../tools/vtt-handoff/doctor';
 import { publishCore } from '../../../tools/vtt-handoff/publish';
 import {
   HANDOFF_LAYOUT, handoffPaths, inspectNodeModules, resolveHandoffRoot, uncPathFor,
-  type RepositoryIdentityPolicy,
+  validateRepositoryRoot, type RepositoryIdentityPolicy,
 } from '../../../tools/vtt-handoff/paths';
 
 function repository(): { readonly root: string; readonly policy: RepositoryIdentityPolicy } {
@@ -77,7 +77,12 @@ describe('VTT handoff bootstrap and paths', () => {
   it('refuses repository lookalikes and unauthorized default publication roots', () => {
     const owner = repository();
     const lookalike = repository();
-    const ownerPolicy = { ownerCheckout: owner.root, authorizedWorktrees: [] };
+    const absentAuthorizedWorktree = join(owner.root, 'worktrees', 'already-removed');
+    const ownerPolicy = {
+      ownerCheckout: owner.root,
+      authorizedWorktrees: [absentAuthorizedWorktree],
+    };
+    expect(validateRepositoryRoot(owner.root, ownerPolicy)).toBe(owner.root);
     expect(() => handoffPaths({
       repositoryRoot: lookalike.root, handoffRoot: join(lookalike.root, '.tmp', 'handoff'),
       identityPolicy: ownerPolicy,
@@ -90,7 +95,11 @@ describe('VTT handoff bootstrap and paths', () => {
     writeFileSync(join(worktreeGit, 'commondir'), '../..\n');
     rmSync(join(worktree.root, '.git'), { recursive: true });
     writeFileSync(join(worktree.root, '.git'), `gitdir: ${worktreeGit}\n`);
-    const policy = { ownerCheckout: owner.root, authorizedWorktrees: [worktree.root] };
+    const policy = {
+      ownerCheckout: owner.root,
+      authorizedWorktrees: [absentAuthorizedWorktree, worktree.root],
+    };
+    expect(validateRepositoryRoot(worktree.root, policy)).toBe(worktree.root);
     expect(() => resolveHandoffRoot(worktree.root, undefined, policy)).toThrow('UNAUTHORIZED_DEFAULT_HANDOFF_ROOT');
     expect(() => publishCore({ repositoryRoot: worktree.root, identityPolicy: policy }))
       .toThrow('UNAUTHORIZED_DEFAULT_HANDOFF_ROOT');

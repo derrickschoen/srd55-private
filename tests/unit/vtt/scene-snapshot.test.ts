@@ -1,9 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { createHash } from 'node:crypto';
 import { combatToken } from '../../../src/combat/combatant';
+import type { PersistedCoordinatorState } from '../../../src/combat/coordinator';
 import { createEncounter } from '../../../src/combat/encounter';
+import { mulberry32 } from '../../../src/combat/random';
 import { projectDmView, projectPlayerView } from '../../../src/combat/visibility';
-import { armorClass, worldObjectId } from '../../../src/combat/values';
+import {
+  armorClass, encounterBranchId, encounterSessionId, worldObjectId,
+} from '../../../src/combat/values';
+import { canonicalJson } from '../../../src/commands/canonical-json';
+import { sha256 } from '../../../src/crypto/sha256';
 import { projectDmBoard, projectPlayerBoard } from '../../../src/vtt/encounter-projections';
 import { REFERENCE_ENCOUNTER_ART } from '../../../src/vtt/reference-encounter-art';
 import {
@@ -13,6 +18,9 @@ import {
   canonicalTokenIdentityIndex, groundAnchor, groundCenter, sceneSnapshot,
 } from '../../../src/vtt/handoff/scene-snapshot';
 import { logicalAssetId } from '../../../src/vtt/handoff/asset-id-map';
+import {
+  EncounterSessionJournal, MemoryBrowserSessionStore, MemoryMirrorSink,
+} from '../../../src/vtt/session-persistence';
 
 const IDLE = {
   requestSequence: 1,
@@ -72,6 +80,56 @@ function sizedSnapshot(size: 'Large' | 'Huge' | 'Gargantuan', squeezed = false) 
     sceneId: 'scene:sizes', projection, art: REFERENCE_ENCOUNTER_ART,
     tokenIdentities: canonicalTokenIdentityIndex(state.tokens),
   }).snapshot.tokens[0];
+}
+
+interface PersistedByteBaseline {
+  readonly pendingRequestHash: string;
+  readonly coordinatorHash: string;
+  readonly revisionChecksum: string;
+}
+
+function persistedRevisionChecksum(
+  state: ReturnType<typeof fixtureState>,
+  coordinatorState: PersistedCoordinatorState,
+): string {
+  const store = new MemoryBrowserSessionStore();
+  const sessionId = encounterSessionId('session:handoff-persistence-baseline');
+  EncounterSessionJournal.create({
+    sessionId,
+    branchId: encounterBranchId('branch:handoff-persistence-baseline'),
+    encounterState: state,
+    coordinatorState,
+    controllers: [],
+    rng: mulberry32(16_603),
+    store,
+    mirror: new MemoryMirrorSink(),
+  });
+  const revision = store.revisions(sessionId)[0];
+  if (revision === undefined) throw new Error('PERSISTENCE_BASELINE_REVISION_MISSING');
+  return revision.checksum;
+}
+
+function persistedByteBaseline(
+  state: ReturnType<typeof fixtureState>,
+  coordinatorState: PersistedCoordinatorState,
+): PersistedByteBaseline {
+  if (coordinatorState.pendingRequest === null) throw new Error('PERSISTENCE_BASELINE_REQUEST_MISSING');
+  return {
+    pendingRequestHash: sha256(canonicalJson(coordinatorState.pendingRequest)),
+    coordinatorHash: sha256(canonicalJson(coordinatorState)),
+    revisionChecksum: persistedRevisionChecksum(state, coordinatorState),
+  };
+}
+
+function assertPersistedHandoffBytesUnchanged(
+  expected: PersistedByteBaseline,
+  state: ReturnType<typeof fixtureState>,
+  coordinatorState: PersistedCoordinatorState,
+): void {
+  const actual = persistedByteBaseline(state, coordinatorState);
+  if (canonicalJson(actual) !== canonicalJson(expected)) {
+    throw new Error('PERSISTED_HANDOFF_BYTES_CHANGED');
+  }
 }
 
 describe('renderer-neutral scene snapshot', () => {
@@ -145,10 +203,10 @@ describe('renderer-neutral scene snapshot', () => {
     expect(after.tokens.map((token) => token.id)).not.toContain(monsterTokenId);
   });
 
-  it('pins projected pending-request JSON and checksum without altering it in the snapshot adapter', () => {
+  it('preserves full persisted request/coordinator bytes and the actual revision checksum', () => {
     const state = fixtureState();
     const view = projectPlayerView(state, { seatId: 'player:one', combatantId: REFERENCE_FIGHTER_ID });
-    const coordinator = {
+    const coordinator: PersistedCoordinatorState = {
       ...IDLE,
       pendingRequest: {
         kind: 'turn' as const,
@@ -159,22 +217,46 @@ describe('renderer-neutral scene snapshot', () => {
         legalActions: { actions: [{ type: 'end_turn' as const, actor: REFERENCE_FIGHTER_ID }] },
       },
     };
+    const before = persistedByteBaseline(state, coordinator);
     const projection = projectPlayerBoard(view, coordinator);
-    const baseline = '{"actorId":"combatant:fighter","encounterRevision":0,"kind":"turn","legalActions":[{"actor":"combatant:fighter","type":"end_turn"}],"requestId":"request:handoff-baseline"}';
-    const canonicalize = (value: unknown) => JSON.stringify(value, (_key, nested: unknown) => {
-      if (typeof nested !== 'object' || nested === null || Array.isArray(nested)) return nested;
-      return Object.fromEntries(Object.entries(nested).sort(([left], [right]) => left.localeCompare(right)));
-    });
-    const before = canonicalize(projection.pendingRequest);
     sceneSnapshot({
       sceneId: 'scene:pending', projection, art: REFERENCE_ENCOUNTER_ART,
       tokenIdentities: canonicalTokenIdentityIndex(state.tokens),
     });
-    const after = canonicalize(projection.pendingRequest);
-    expect(before).toBe(baseline);
-    expect(after).toBe(before);
-    expect(createHash('sha256').update(after).digest('hex'))
-      .toBe('9af09dd07be8fae6494e127248114a5067c2aa80483cd2f35d6ef2358d46ae0f');
+    const after = persistedByteBaseline(state, coordinator);
+    expect(before).toEqual({
+      pendingRequestHash: 'a0e19e534b070ffc1a82b2f303588573578852bc75720abd780af7e749e0d44a',
+      coordinatorHash: '336fc59733a7f90a51b0cb1dbe95ce690a411ef0dab428fc5ef3c9f1e5344f22',
+      revisionChecksum: '519a01b4fdcc4f02bf8f8c925c8ec70acd09443924944bac454dcb293a751d3d',
+    });
+    expect(coordinator.pendingRequest).toMatchObject({
+      kind: 'turn',
+      requestId: 'request:handoff-baseline',
+      encounterRevision: 0,
+      actorId: 'combatant:fighter',
+      legalActions: { actions: [{ type: 'end_turn', actor: 'combatant:fighter' }] },
+    });
+    expect(coordinator.pendingRequest?.visibleState).toBe(view);
+    expect(coordinator.pendingRequest?.visibleState !== undefined &&
+      'tokenIdentityByCombatant' in coordinator.pendingRequest.visibleState).toBe(false);
+    expect(after).toEqual(before);
+    assertPersistedHandoffBytesUnchanged(before, state, coordinator);
+
+    if (coordinator.pendingRequest === null) throw new Error('PERSISTENCE_CONTROL_REQUEST_MISSING');
+    const enrichedRequest = {
+      ...coordinator.pendingRequest,
+      visibleState: {
+        ...coordinator.pendingRequest.visibleState,
+        tokenIdentityByCombatant: { [String(REFERENCE_FIGHTER_ID)]: 'token:fighter' },
+      },
+    };
+    const enrichedCoordinator: PersistedCoordinatorState = {
+      ...coordinator,
+      pendingRequest: enrichedRequest,
+    };
+    expect(() => assertPersistedHandoffBytesUnchanged(before, state, enrichedCoordinator))
+      .toThrow('PERSISTED_HANDOFF_BYTES_CHANGED');
+    expect(persistedRevisionChecksum(state, enrichedCoordinator)).not.toBe(before.revisionChecksum);
   });
 
   it('emits DM environment lights, exclusive door companions and no door cell wall union', () => {
@@ -192,7 +274,7 @@ describe('renderer-neutral scene snapshot', () => {
     expect(snapshot.vision.mode).toBe('all');
   });
 
-  it('handles isolated, adjacent, multicell, open/closed, and ambiguous door geometry', () => {
+  it('uses the object-position north edge for adjacent and multicell doors, open and closed', () => {
     const snapshotFor = (state: ReturnType<typeof fixtureState>) => sceneSnapshot({
       sceneId: 'scene:doors',
       projection: projectDmBoard({ view: projectDmView(state), coordinator: IDLE, controllers: [], history: [] }),
@@ -203,31 +285,41 @@ describe('renderer-neutral scene snapshot', () => {
     const door = base.worldObjects.find((object) => object.kind === 'door');
     if (door === undefined) throw new Error('Missing door fixture.');
 
-    const isolated = {
-      ...base,
-      blockedCells: [door.position],
-      worldObjects: base.worldObjects.filter((object) => object.kind !== 'barrier'),
-    };
-    const isolatedSnapshot = snapshotFor(isolated);
-    expect(isolatedSnapshot.doors[0]).toMatchObject({ open: false });
-    expect(isolatedSnapshot.walls.filter((wall) =>
-      wall.id !== isolatedSnapshot.doors[0]?.wallId &&
-      (wall.id.includes('5.5,2.5') || wall.id.includes('6.5,3.5')))).toEqual([]);
-
-    const open = {
-      ...base,
-      worldObjects: base.worldObjects.map((object) => object.kind === 'door'
-        ? { ...object, blocking: { movement: false, lineOfSight: false, cover: 'none' as const } }
-        : object),
-    };
-    const openSnapshot = snapshotFor(open);
-    expect(openSnapshot.doors[0]).toMatchObject({ open: true });
-    expect(openSnapshot.walls.find((wall) => wall.id === openSnapshot.doors[0]?.wallId))
-      .toMatchObject({ blocksMovement: false, blocksVision: false });
+    for (const open of [false, true]) {
+      const northAdjacent = {
+        ...base,
+        blockedCells: [{ column: door.position.column, row: door.position.row - 1 }],
+        worldObjects: base.worldObjects
+          .filter((object) => object.kind !== 'barrier')
+          .map((object) => object.kind === 'door'
+            ? {
+                ...object,
+                blocking: open
+                  ? { movement: false, lineOfSight: false, cover: 'none' as const }
+                  : { movement: true, lineOfSight: true, cover: 'total' as const },
+              }
+            : object),
+      };
+      const snapshot = snapshotFor(northAdjacent);
+      const projectedDoor = snapshot.doors[0];
+      const companion = snapshot.walls.find((wall) => wall.id === projectedDoor?.wallId);
+      expect(projectedDoor).toMatchObject({ open });
+      expect(companion).toMatchObject({
+        a: { x: 5.5, y: 2.5 }, b: { x: 6.5, y: 2.5 },
+        blocksMovement: !open, blocksVision: !open,
+      });
+      expect(snapshot.walls.filter((wall) =>
+        wall.id !== companion?.id &&
+        wall.a.x === 5.5 && wall.a.y === 2.5 && wall.b.x === 6.5 && wall.b.y === 2.5)).toEqual([]);
+    }
 
     const secondCell = { column: door.position.column + 1, row: door.position.row };
     const multicell = {
       ...base,
+      blockedCells: [
+        { column: door.position.column, row: door.position.row - 1 },
+        { column: secondCell.column, row: secondCell.row - 1 },
+      ],
       worldObjects: base.worldObjects.map((object) => object.kind === 'door'
         ? { ...object, footprint: [object.position, secondCell] }
         : object),
@@ -237,8 +329,11 @@ describe('renderer-neutral scene snapshot', () => {
       (wall) => wall.id === multicellSnapshot.doors[0]?.wallId,
     );
     expect(multicellWall).toMatchObject({
-      a: { x: 5.5, y: 2.5 }, b: { x: 7.5, y: 2.5 },
+      a: { x: 5.5, y: 2.5 }, b: { x: 6.5, y: 2.5 },
     });
+    expect(multicellSnapshot.walls.filter((wall) =>
+      wall.id !== multicellWall?.id &&
+      wall.a.x === 5.5 && wall.a.y === 2.5 && wall.b.x === 6.5 && wall.b.y === 2.5)).toEqual([]);
 
     const ambiguous = {
       ...base,

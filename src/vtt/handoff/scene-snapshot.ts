@@ -59,6 +59,18 @@ function edgeKey(edge: Edge): string {
   return `${String(edge.x1)},${String(edge.y1)}:${String(edge.x2)},${String(edge.y2)}`;
 }
 
+function edgesOverlap(left: Edge, right: Edge): boolean {
+  if (left.y1 === left.y2 && right.y1 === right.y2 && left.y1 === right.y1) {
+    return Math.max(Math.min(left.x1, left.x2), Math.min(right.x1, right.x2)) <
+      Math.min(Math.max(left.x1, left.x2), Math.max(right.x1, right.x2));
+  }
+  if (left.x1 === left.x2 && right.x1 === right.x2 && left.x1 === right.x1) {
+    return Math.max(Math.min(left.y1, left.y2), Math.min(right.y1, right.y2)) <
+      Math.min(Math.max(left.y1, left.y2), Math.max(right.y1, right.y2));
+  }
+  return false;
+}
+
 function edgesFor(cell: GridCell): readonly Edge[] {
   const left = cell.column - 0.5;
   const right = cell.column + 0.5;
@@ -203,6 +215,7 @@ export function sceneSnapshot(options: {
   const doors = (board.worldObjects ?? []).filter((object) => object.kind === 'door')
     .sort((left, right) => String(left.id).localeCompare(String(right.id)));
   const doorEdges = new Map<string, EncounterBoardWorldObject>();
+  const doorCompanionEdges: Edge[] = [];
   const doorWalls: SceneWall[] = [];
   let cachedWallAssetId: string | null = null;
   const wallAssetId = (): string => {
@@ -210,18 +223,12 @@ export function sceneSnapshot(options: {
     return cachedWallAssetId;
   };
   const doorRows = doors.map((door) => {
-    let footprint: GroundFootprint;
-    try { footprint = footprintOf(door.cells); } catch { throw new Error('AMBIGUOUS_DOOR_GEOMETRY'); }
-    const left = Math.min(...door.cells.map((cell) => cell.column)) - 0.5;
-    const right = Math.max(...door.cells.map((cell) => cell.column)) + 0.5;
-    const top = Math.min(...door.cells.map((cell) => cell.row)) - 0.5;
-    const bottom = Math.max(...door.cells.map((cell) => cell.row)) + 0.5;
-    const edge: Edge = footprint.w >= footprint.h
-      ? { x1: left, y1: top, x2: right, y2: top }
-      : { x1: left, y1: top, x2: left, y2: bottom };
+    const edge = edgesFor(door.position)[0];
+    if (edge === undefined) throw new Error('MISSING_DOOR_EDGE');
     const key = edgeKey(edge);
     if (doorEdges.has(key)) throw new Error('AMBIGUOUS_DOOR_GEOMETRY');
     doorEdges.set(key, door);
+    doorCompanionEdges.push(edge);
     const wallId = `wall:door:${String(door.id)}`;
     doorWalls.push(wallFromEdge(wallId, edge, door.blocking.movement, door.blocking.lineOfSight, wallAssetId()));
     return {
@@ -230,10 +237,6 @@ export function sceneSnapshot(options: {
       open: !door.blocking.movement,
     };
   });
-  for (const door of doors) {
-    for (const cell of door.cells) wallCells.delete(`${String(cell.column)},${String(cell.row)}`);
-  }
-
   const perimeter = new Map<string, { readonly edge: Edge; readonly movement: boolean; readonly vision: boolean }>();
   for (const source of wallCells.values()) {
     for (const edge of edgesFor(source.cell)) {
@@ -242,8 +245,10 @@ export function sceneSnapshot(options: {
       else perimeter.set(key, { edge, movement: source.movement, vision: source.vision });
     }
   }
-  const regularWalls = [...perimeter.entries()].filter(([key]) => !doorEdges.has(key)).map(([key, value]) =>
-    wallFromEdge(`wall:${key}`, value.edge, value.movement, value.vision, wallAssetId()));
+  const regularWalls = [...perimeter.entries()]
+    .filter(([_key, value]) => !doorCompanionEdges.some((doorEdge) => edgesOverlap(value.edge, doorEdge)))
+    .map(([key, value]) =>
+      wallFromEdge(`wall:${key}`, value.edge, value.movement, value.vision, wallAssetId()));
   const walls = [...regularWalls, ...doorWalls].sort((left, right) => left.id.localeCompare(right.id));
 
   const objectLights = (board.worldObjects ?? []).filter((object) => object.lightClass === 'light-source').map((object) => {
