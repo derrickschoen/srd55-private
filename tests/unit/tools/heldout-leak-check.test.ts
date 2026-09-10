@@ -318,7 +318,8 @@ describe('held-out reserve leak wall', () => {
         'Rule C interprets Vite and Vitest aliases only as strict literals in the exact-node graph reached from export default, symbol-proven defineConfig or mergeConfig, factory returns, conditional branches, and same-file const object/array composition',
         'Rule C uses no flow tracking: each tracked-const reference is classified by its maximal constant-key address, including whether its path crosses resolve, test, or alias, the addressed subtree, and its immediate syntactic position',
         'Rule C classifies configuration roots, resolve/test/alias bindings, and bindings spread transitively into those containers as alias-capable regardless of current literal contents',
-        'Rule C records every configuration placement prefix for a binding and composes each prefix with descendant and const-alias paths; any semantic placement makes the reference alias-capable',
+        'Rule C records every configuration placement prefix and unions outer paths with every embedded binding dereferenced, composing each placement with remaining descendant and const-alias paths; any semantic placement makes the reference alias-capable',
+        'Rule C visits ordinary shorthand and literal-array composition; installed Vitest 4 test.projects array elements are nested configuration roots, while removed test.workspace is not interpreted',
         'Rule C permits non-exported plain-const aliases to preserve the same addressed subtree and allows non-alias-bearing subtrees in otherwise escaping positions',
         'subtrees strictly below a configuration root at nonsemantic addresses remain non-alias-capable unless their contents or binding position makes them capable',
         'resolve and Vitest test are alias-capable containers whose values must be literal objects or tracked const literals; their alias values are interpreted identically',
@@ -2345,6 +2346,112 @@ describe('held-out reserve leak wall', () => {
     }], 'F', bindings);
 
     expect(report.findings).toEqual([]);
+  });
+
+  it.each([
+    ['indirect multiply placed entry', [
+      "const rules = [{ name: 'p', find: '@ordinary', replacement: '/ordinary' }];",
+      'const shared = { plugins: rules };',
+      'install(shared.plugins[0]);',
+      'export default { ...shared, resolve: { alias: rules } };',
+    ].join('\n')],
+    ['const alias of an indirect multiply placed entry', [
+      "const rules = [{ name: 'p', find: '@ordinary', replacement: '/ordinary' }];",
+      'const shared = { plugins: rules };',
+      'const entry = shared.plugins[0];',
+      'install(entry);',
+      'export default { ...shared, resolve: { alias: rules } };',
+    ].join('\n')],
+    ['two-level indirect multiply placed entry', [
+      "const rules = [{ name: 'p', find: '@ordinary', replacement: '/ordinary' }];",
+      'const shared = { plugins: rules };',
+      'const outer = { inner: shared };',
+      'install(outer.inner.plugins[0]);',
+      'export default { ...outer, resolve: { alias: rules } };',
+    ].join('\n')],
+  ] as const)('unions embedded placements for %s', (_label, configSource) => {
+    const report = inspectHeldoutLeakChanges([{
+      path: 'vite.config.mjs',
+      addedText: configSource,
+      sourceText: configSource,
+    }], 'F', bindings);
+
+    expect(report.findings).toContainEqual(expect.objectContaining({
+      path: 'vite.config.mjs',
+      kind: 'unresolved_module_edge',
+    }));
+  });
+
+  it('keeps an indirectly accessed entry clean when it is placed only under plugins', () => {
+    const configSource = [
+      "const rules = [{ name: 'p' }];",
+      'const shared = { plugins: rules };',
+      'install(shared.plugins[0]);',
+      'export default { ...shared };',
+    ].join('\n');
+    const report = inspectHeldoutLeakChanges([{
+      path: 'vite.config.mjs',
+      addedText: configSource,
+      sourceText: configSource,
+    }], 'F', bindings);
+
+    expect(report.findings).toEqual([]);
+  });
+
+  it.each([
+    ['shorthand projects array', [
+      'const projects = [{}];',
+      'install(projects[0]);',
+      'export default { test: { projects } };',
+    ].join('\n')],
+    ['inline projects array', [
+      'const project = {};',
+      'install(project);',
+      'export default { test: { projects: [project] } };',
+    ].join('\n')],
+    ['referenced projects array contents', [
+      'const project = {};',
+      'const projects = [project];',
+      'install(project);',
+      'export default { test: { projects: projects } };',
+    ].join('\n')],
+  ] as const)('treats each test.projects element as a nested configuration root: %s',
+  (_label, configSource) => {
+    const report = inspectHeldoutLeakChanges([{
+      path: 'vitest.config.mjs',
+      addedText: configSource,
+      sourceText: configSource,
+    }], 'F', bindings);
+
+    expect(report.findings).toContainEqual(expect.objectContaining({
+      path: 'vitest.config.mjs',
+      kind: 'unresolved_module_edge',
+    }));
+  });
+
+  it('discovers a literal alias in a test.projects element', () => {
+    const configSource = [
+      "const project = { resolve: { alias: { '@project': './src/vtt/heldout-evaluation.ts' } } };",
+      'export default { test: { projects: [project] } };',
+    ].join('\n');
+    const report = inspectHeldoutLeakChanges([{
+      path: 'vitest.config.mjs',
+      addedText: configSource,
+      sourceText: configSource,
+    }], 'F', bindings, {
+      candidateSourceFiles: {
+        'src/ui/project-alias-consumer.ts': "import policy from '@project';",
+      },
+    });
+
+    expect(report.findings).not.toContainEqual(expect.objectContaining({
+      path: 'vitest.config.mjs',
+      kind: 'unresolved_module_edge',
+    }));
+    expect(report.findings).toContainEqual(expect.objectContaining({
+      path: 'src/ui/project-alias-consumer.ts',
+      kind: 'unresolved_module_edge',
+    }));
   });
 
   it('interprets a symbol-proven defineConfig callback, conditional, and const spread', () => {
