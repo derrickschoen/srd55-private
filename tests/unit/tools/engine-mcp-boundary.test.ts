@@ -5,7 +5,10 @@ import { EngineMcpStdioClient } from '../../../tools/engine-mcp-dry-client';
 import { collectEngineMcpRuntimeGraph, engineMcpImportBoundaryFailures, scanEngineMcpArtifacts } from '../../../tools/engine-mcp-proof';
 import {
   createEngineMcpRuntime,
+  decodeArenaFixture,
+  decodeEngineMcpEntrypointDocument,
   decodeEngineMcpLauncherManifest,
+  ENGINE_MCP_LAUNCHER_FORMAT,
   freshMonsterPlanningState,
   loadArenaFixture,
 } from '../../../src/vtt/mcp/entrypoint';
@@ -67,12 +70,56 @@ class SUBSTITUTED_LOCALAdapter {
   }
 }
 describe('engine MCP process mutation boundary', () => {
+  it('never routes a malformed claimed launcher through fixture fallback', async () => {
+    const state = await loadArenaFixture(FIXTURE);
+    const counterexample = {
+      format: ENGINE_MCP_LAUNCHER_FORMAT,
+      revision: 0,
+      spec: {},
+      encounter: { state },
+    };
+    let fixtureFallback: ReturnType<typeof decodeArenaFixture> | null = null;
+    expect(() => decodeEngineMcpEntrypointDocument(counterexample, (fixture) => {
+      fixtureFallback = decodeArenaFixture(fixture);
+      return fixtureFallback;
+    })).toThrow(
+      new TypeError('Engine MCP launcher requires an explicit offer environment binding.'),
+    );
+    expect(fixtureFallback).toBeNull();
+  });
+
+  it('rejects a structurally invalid claimed launcher even when its environment is bound', () => {
+    const malformed = {
+      format: ENGINE_MCP_LAUNCHER_FORMAT,
+      revision: 0,
+      offerEnvironment: createLegacyEngineOptionEnvironmentBinding(),
+    };
+    let fixtureDecodeCount = 0;
+    expect(() => decodeEngineMcpEntrypointDocument(malformed, () => {
+      fixtureDecodeCount += 1;
+      return decodeArenaFixture({});
+    })).toThrow(
+      new TypeError('Engine MCP launcher manifest structure is invalid.'),
+    );
+    expect(fixtureDecodeCount).toBe(0);
+  });
+
+  it('continues to route a genuine fixture without the launcher discriminator', async () => {
+    const state = await loadArenaFixture(FIXTURE);
+    let fixtureFallback: ReturnType<typeof decodeArenaFixture> | null = null;
+    expect(decodeEngineMcpEntrypointDocument({ spec: {}, encounter: { state } }, (fixture) => {
+      fixtureFallback = decodeArenaFixture(fixture);
+      return fixtureFallback;
+    })).toBeNull();
+    expect(fixtureFallback).toEqual(state);
+  });
+
   it('decodes legacy launchers as round plans and preserves adjustment correlation fields', async () => {
     const state = await loadArenaFixture(FIXTURE);
     const actors = state.combatants.flatMap((combatant) =>
       combatant.profile.kind === 'monster' && combatant.life !== 'dead' ? [combatant.profile.id] : []);
     const legacy = {
-      format: 'engine-mcp-launcher-v1',
+      format: ENGINE_MCP_LAUNCHER_FORMAT,
       fixturePath: FIXTURE,
       proposalSpoolPath: '/tmp/engine-proposals.jsonl',
       runId: 'encounter:legacy-launcher',

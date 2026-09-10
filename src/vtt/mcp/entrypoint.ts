@@ -227,8 +227,10 @@ export interface EngineMcpBoardImageBinding {
   readonly primaryDispatchStartedAtUnixMs: number;
 }
 
+export const ENGINE_MCP_LAUNCHER_FORMAT = 'engine-mcp-launcher-v1' as const;
+
 export interface EngineMcpLauncherManifest {
-  readonly format: 'engine-mcp-launcher-v1';
+  readonly format: typeof ENGINE_MCP_LAUNCHER_FORMAT;
   readonly fixturePath: string;
   readonly proposalSpoolPath: string;
   readonly turnContextSpoolPath?: string;
@@ -657,7 +659,7 @@ export async function validatedLauncherBoardHtmlReference(
 function isLauncherManifest(value: unknown): value is EngineMcpLauncherManifest {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
   const input = value as Readonly<Record<string, unknown>>;
-  return input['format'] === 'engine-mcp-launcher-v1' &&
+  return input['format'] === ENGINE_MCP_LAUNCHER_FORMAT &&
     typeof input['fixturePath'] === 'string' && input['fixturePath'].length > 0 &&
     typeof input['proposalSpoolPath'] === 'string' && input['proposalSpoolPath'].length > 0 &&
     (input['turnContextSpoolPath'] === undefined ||
@@ -723,9 +725,14 @@ export type DecodedEngineMcpLauncherManifest = Omit<EngineMcpLauncherManifest, '
 };
 
 export function decodeEngineMcpLauncherManifest(value: unknown): DecodedEngineMcpLauncherManifest | null {
-  if (!isLauncherManifest(value)) return null;
-  if (value.offerEnvironment === undefined) {
+  if (typeof value !== 'object' || value === null || Array.isArray(value) ||
+    (value as Readonly<Record<string, unknown>>)['format'] !== ENGINE_MCP_LAUNCHER_FORMAT) return null;
+  const claimedLauncher = value as Readonly<Record<string, unknown>>;
+  if (!Object.hasOwn(claimedLauncher, 'offerEnvironment') || claimedLauncher['offerEnvironment'] === undefined) {
     throw new TypeError('Engine MCP launcher requires an explicit offer environment binding.');
+  }
+  if (!isLauncherManifest(value)) {
+    throw new TypeError('Engine MCP launcher manifest structure is invalid.');
   }
   const offerEnvironment = decodeEngineOptionEnvironmentBinding(value.offerEnvironment);
   return {
@@ -734,6 +741,15 @@ export function decodeEngineMcpLauncherManifest(value: unknown): DecodedEngineMc
     requestKind: value.requestKind ?? 'round_plan',
     overridePolicy: value.overridePolicy ?? DEFAULT_OVERRIDE_POLICY,
   };
+}
+
+export function decodeEngineMcpEntrypointDocument(
+  value: unknown,
+  decodeFixture: (fixture: unknown) => EncounterState,
+): DecodedEngineMcpLauncherManifest | null {
+  const manifest = decodeEngineMcpLauncherManifest(value);
+  if (manifest === null) decodeFixture(value);
+  return manifest;
 }
 
 export function reconstructLauncherOfferEnvironment(
@@ -749,7 +765,7 @@ async function launcherManifest(path: string): Promise<DecodedEngineMcpLauncherM
   } catch {
     return null;
   }
-  return decodeEngineMcpLauncherManifest(decoded);
+  return decodeEngineMcpEntrypointDocument(decoded, decodeArenaFixture);
 }
 
 function kbReadRecords(path: string): readonly KbReadRecord[] {

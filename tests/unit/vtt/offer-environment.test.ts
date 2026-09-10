@@ -17,6 +17,7 @@ import { createPartyThreatCatalog } from '../../../src/vtt/offers/party-threat-c
 import {
   createEngineMcpRuntime,
   decodeEngineMcpLauncherManifest,
+  ENGINE_MCP_LAUNCHER_FORMAT,
   reconstructLauncherOfferEnvironment,
   type EngineMcpLauncherManifest,
 } from '../../../src/vtt/mcp/entrypoint';
@@ -61,7 +62,7 @@ function representedEnvironment() {
 
 function launcher(environment: EngineOptionEnvironment): EngineMcpLauncherManifest {
   return {
-    format: 'engine-mcp-launcher-v1',
+    format: ENGINE_MCP_LAUNCHER_FORMAT,
     fixturePath: '/tmp/offers-s2-fixture.json',
     proposalSpoolPath: '/tmp/offers-s2-proposals.jsonl',
     runId: encounterSessionId('encounter:offers-s2'),

@@ -13,6 +13,7 @@ import { encounterBranchId, encounterSessionId } from '../../../src/combat/value
 import { canonicalJson } from '../../../src/commands/canonical-json';
 import { sha256 } from '../../../src/crypto/sha256';
 import { mcpRequestMeta, createMcpHandler } from '../../../src/vtt/mcp/handler';
+import { createLegacyEngineOptionEnvironmentBinding } from '../../../src/vtt/offers/offer-environment';
 import {
   decodeEngineMcpLauncherManifest,
   createEngineMcpRuntime,
@@ -688,6 +689,7 @@ describe('launcher image containment and binding', () => {
       proposalSpoolPath, runId: encounterSessionId('encounter:test'),
       branchId: encounterBranchId('branch:test'),
       revision: 2, requestId: 'request:test', phase: 'initial', correctionNumber: 0,
+      offerEnvironment: createLegacyEngineOptionEnvironmentBinding(),
       room: 1, historyKind: 'room_ready', requestKind: 'round_plan',
       boardImage: {
         artifactRoot: root,
@@ -714,6 +716,8 @@ describe('launcher image containment and binding', () => {
     const binding = record(escaped['boardImage'], 'board binding');
     const artifact = { ...record(binding['artifact'], 'artifact'), relativePath: '../outside.png' };
     escaped['boardImage'] = { ...binding, artifact };
-    expect(decodeEngineMcpLauncherManifest(escaped)).toBeNull();
+    expect(() => decodeEngineMcpLauncherManifest(escaped)).toThrow(
+      new TypeError('Engine MCP launcher manifest structure is invalid.'),
+    );
   });
 });
