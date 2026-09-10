@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { posix } from 'node:path';
 import { canonicalJson } from '../src/commands/canonical-json';
 import type { HeldoutSlice } from '../src/vtt/heldout-evaluation';
 import ts from 'typescript';
@@ -89,6 +90,24 @@ export const HELDOUT_LEAK_AST_OUT_OF_SCOPE = [
   'eval executable strings',
   'new Function executable strings',
 ] as const;
+
+export const HELDOUT_MODULE_SPECIFIER_POLICY = {
+  normalized: [
+    'query and fragment suffixes are removed for module identity and retained for finding detail',
+    'repeated and trailing slashes are collapsed',
+    'dot and parent path segments are resolved lexically',
+    'a trailing index, index.js, or index.ts resolves to its containing module path',
+    'a trailing .js or .ts extension resolves to the extensionless module identity',
+  ],
+  meaningChangingQueries: [
+    'raw', 'url', 'inline', 'worker', 'sharedworker', 'init', 'import', 'no-inline',
+  ],
+  findings: [
+    'a normalized held-out import is a protocol_import',
+    'a normalized held-out resolver call is a protocol_resolution',
+    'a recognized non-constant module edge is an unresolved_module_edge',
+  ],
+} as const;
 
 function unwrapTransparentExpression(expression: ts.Expression): ts.Expression {
   let current = expression;
@@ -252,11 +271,70 @@ export function moduleSpecifiers(path: string, source: string): readonly string[
     edge.specifier === null ? [] : [edge.specifier]))].sort();
 }
 
-function isHeldoutProtocolSpecifier(specifier: string): boolean {
-  return specifier === 'heldout-evaluation' ||
-    specifier.endsWith('/heldout-evaluation') ||
-    specifier.endsWith('/heldout-evaluation.js') ||
-    specifier.endsWith('/heldout-evaluation.ts');
+interface NormalizedModuleSpecifier {
+  readonly path: string;
+  readonly suffix: string;
+  readonly meaningChangingQuery: boolean;
+}
+
+function stripKnownModuleSuffix(path: string): string {
+  for (const suffix of ['/index.js', '/index.ts', '/index']) {
+    if (path.endsWith(suffix)) return path.slice(0, -suffix.length);
+  }
+  for (const extension of ['.js', '.ts']) {
+    if (path.endsWith(extension)) return path.slice(0, -extension.length);
+  }
+  return path;
+}
+
+function normalizeModuleSpecifier(specifier: string): NormalizedModuleSpecifier {
+  const queryIndex = specifier.indexOf('?');
+  const fragmentIndex = specifier.indexOf('#');
+  const suffixIndexes = [queryIndex, fragmentIndex].filter((index) => index >= 0);
+  const suffixIndex = suffixIndexes.length === 0 ? specifier.length : Math.min(...suffixIndexes);
+  const suffix = specifier.slice(suffixIndex);
+  let path = posix.normalize(specifier.slice(0, suffixIndex));
+  while (path.length > 1 && path.endsWith('/')) path = path.slice(0, -1);
+  path = stripKnownModuleSuffix(path);
+
+  const query = queryIndex < 0
+    ? ''
+    : specifier.slice(queryIndex + 1, fragmentIndex > queryIndex ? fragmentIndex : specifier.length);
+  const meaningChangingQueries: readonly string[] =
+    HELDOUT_MODULE_SPECIFIER_POLICY.meaningChangingQueries;
+  const meaningChangingQuery = query.split('&').some((parameter) => {
+    const key = parameter.split('=', 1)[0];
+    return key !== undefined && meaningChangingQueries.includes(key);
+  });
+  return { path, suffix, meaningChangingQuery };
+}
+
+function heldoutProtocolSpecifier(specifier: string): NormalizedModuleSpecifier | null {
+  const normalized = normalizeModuleSpecifier(specifier);
+  return normalized.path === 'heldout-evaluation' ||
+    normalized.path.endsWith('/heldout-evaluation')
+    ? normalized
+    : null;
+}
+
+function firstHeldoutEdge(
+  edges: readonly ModuleEdge[],
+  kind: Extract<ModuleEdge['kind'], 'import' | 'resolution'>,
+): NormalizedModuleSpecifier | null {
+  for (const edge of edges) {
+    if (edge.kind !== kind || edge.specifier === null) continue;
+    const normalized = heldoutProtocolSpecifier(edge.specifier);
+    if (normalized !== null) return normalized;
+  }
+  return null;
+}
+
+function specifierSuffixDetail(specifier: NormalizedModuleSpecifier): string {
+  if (specifier.suffix.length === 0) return '';
+  const kind = specifier.meaningChangingQuery
+    ? 'meaning-changing loader suffix'
+    : 'specifier suffix';
+  return ` via ${kind} ${JSON.stringify(specifier.suffix)}`;
 }
 
 function reserveReference(text: string, bindings: HeldoutLeakBindings): string | null {
@@ -318,20 +396,20 @@ export function inspectHeldoutLeakChanges(
       ? discoverModuleEdges(change.path, change.sourceText ?? change.addedText)
       : [];
     const restrictedPath = !EVALUATION_FILES.has(change.path) && !isTestOrFixture(change.path);
-    if (restrictedPath && edges.some((edge) =>
-      edge.kind === 'import' && edge.specifier !== null && isHeldoutProtocolSpecifier(edge.specifier))) {
+    const heldoutImport = firstHeldoutEdge(edges, 'import');
+    if (restrictedPath && heldoutImport !== null) {
       findings.push({
         path: change.path,
         kind: 'protocol_import',
-        detail: 'held-out protocol imported outside evaluation tooling',
+        detail: `held-out protocol imported outside evaluation tooling${specifierSuffixDetail(heldoutImport)}`,
       });
     }
-    if (restrictedPath && edges.some((edge) =>
-      edge.kind === 'resolution' && edge.specifier !== null && isHeldoutProtocolSpecifier(edge.specifier))) {
+    const heldoutResolution = firstHeldoutEdge(edges, 'resolution');
+    if (restrictedPath && heldoutResolution !== null) {
       findings.push({
         path: change.path,
         kind: 'protocol_resolution',
-        detail: 'held-out protocol resolved outside evaluation tooling',
+        detail: `held-out protocol resolved outside evaluation tooling${specifierSuffixDetail(heldoutResolution)}`,
       });
     }
     const unresolved = edges.find((edge) => edge.kind === 'unresolved');

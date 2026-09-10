@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   HELDOUT_LEAK_AST_OUT_OF_SCOPE,
+  HELDOUT_MODULE_SPECIFIER_POLICY,
   inspectHeldoutLeakChanges,
   moduleSpecifiers,
 } from '../../../tools/heldout-leak-check';
@@ -233,6 +234,66 @@ describe('held-out reserve leak wall', () => {
     expect(report.findings).toContainEqual(expect.objectContaining({
       kind: 'unresolved_module_edge',
     }));
+  });
+
+  it('enumerates module-specifier normalization and finding policy', () => {
+    expect(HELDOUT_MODULE_SPECIFIER_POLICY).toEqual({
+      normalized: [
+        'query and fragment suffixes are removed for module identity and retained for finding detail',
+        'repeated and trailing slashes are collapsed',
+        'dot and parent path segments are resolved lexically',
+        'a trailing index, index.js, or index.ts resolves to its containing module path',
+        'a trailing .js or .ts extension resolves to the extensionless module identity',
+      ],
+      meaningChangingQueries: [
+        'raw', 'url', 'inline', 'worker', 'sharedworker', 'init', 'import', 'no-inline',
+      ],
+      findings: [
+        'a normalized held-out import is a protocol_import',
+        'a normalized held-out resolver call is a protocol_resolution',
+        'a recognized non-constant module edge is an unresolved_module_edge',
+      ],
+    });
+  });
+
+  it.each([
+    ['trailing slash', "import '../vtt/heldout-evaluation/';"],
+    ['dot segment', "import '../vtt/./heldout-evaluation';"],
+    ['index resolution', "import '../vtt/heldout-evaluation/index.ts';"],
+  ] as const)('rejects a held-out import after %s normalization', (_label, addedText) => {
+    const report = inspectHeldoutLeakChanges([{
+      path: 'tools/tuning/repair-ranking.ts',
+      addedText,
+    }], 'F', bindings);
+
+    expect(report.findings).toContainEqual(expect.objectContaining({ kind: 'protocol_import' }));
+  });
+
+  it.each([
+    ['?raw', "import source from '../vtt/heldout-evaluation.ts?raw';"],
+    ['?url', "const url = import('../vtt/heldout-evaluation?url');"],
+    ['?worker', "const Worker = require('../vtt/heldout-evaluation.js?worker');"],
+    ['#frag', "export * from '../vtt/heldout-evaluation#frag';"],
+    ['?raw#x', "import type Source from '../vtt/heldout-evaluation.ts?raw#x';"],
+  ] as const)('rejects and records a held-out import with %s', (suffix, addedText) => {
+    const report = inspectHeldoutLeakChanges([{
+      path: 'tools/tuning/repair-ranking.ts',
+      addedText,
+    }], 'F', bindings);
+
+    expect(report.findings).toContainEqual(expect.objectContaining({
+      kind: 'protocol_import',
+      detail: expect.stringContaining(suffix),
+    }));
+  });
+
+  it('does not report a non-held-out module with a meaning-changing query', () => {
+    const report = inspectHeldoutLeakChanges([{
+      path: 'tools/tuning/repair-ranking.ts',
+      addedText: "import source from '../vtt/public-evaluation.ts?raw';",
+    }], 'F', bindings);
+
+    expect(report.findings).toEqual([]);
   });
 
   it('documents executable eval and new Function strings as outside AST edge discovery', () => {
