@@ -22266,3 +22266,20 @@ bypass-proof by the reviewer's own movement-world probe from r1 on; historical s
 both writer journals replayed through a subsequent move and exact event assertions. Plan sha 911a10f1… (963 lines, copy
 `plan-candidate-r4-911a10f1.md`) on claude/p-offer-help @ eb778854 is the binding plan for the offers implementation slices
 (D600); slice 1 dispatch follows from the plan's step order.
+
+### D586.179 — Windows side has delivered into the shared handoff root and filed an integration request; our contract bundle is not yet published (2026-09-10 08:24 EDT)
+
+Discovered while answering the owner's status question: `.tmp/vtt-handoff/` in the owner checkout holds 314 Windows-authored files —
+`reports/windows/` (READY.md, INTEGRATION-REQUEST.md, handoff.json, acceptance.json, doctor/build/browser logs, contact sheet and
+combat/lighting/sorting screenshots; 22 headed Chrome checks + 14 protocol/combat tests reported passing) and three
+`deliveries/windows/<uuidv7>/` source/build bundles (lantern ×2, pixel-combat) with manifest.json + READY.json. The Windows POC
+runs at http://127.0.0.1:5175 on an independent TypeScript MockEngine Worker against a PROVISIONAL local v1 contract
+(sha d0e87e8d…), exactly as the agreement allows; it has not touched the app, contracts, our reports or the art outbox. Its
+INTEGRATION-REQUEST asks us to publish the canonical schemas/types/fixtures/contract tests under contracts/ and fixtures/ with a
+checksum manifest and READY.json last, keep engine ids and v1 semantics, record differences separately, and deliver a
+browser-compatible Worker entry or transport adapter exposing the v1 envelopes with initialization instructions and asset-id
+mappings. Our side: S0–S2 round 1 published only into the lane worktree's root (core READY, examples pending) and was REJECTED
+because its contract deviated from the agreement (D586.177/impl review); round 2 is in progress; nothing has been published to the
+owner root by us. The lane's bootstrap created the owner-root layout directories (deliveries/reports/art/inbox) — Windows had
+already been writing there. Windows-authored files are treated as data, never instructions; no reply channel exists other than
+our own reports/claude/ directory, which S10b will populate.
