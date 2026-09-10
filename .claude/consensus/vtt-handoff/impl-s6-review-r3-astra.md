@@ -1,0 +1,38 @@
+**S6-F73 — SIGNIFICANT — S6-F69 remains partially resolved: caller-side getter values can invalidate an established receipt.**
+
+`request()` reads `id` before posting the original object. Structured cloning reads an enumerable getter again. If those reads return different strings, the Worker commits using the cloned ID, but the transport rejects its receipt because it differs from the earlier cached ID. The receipt is discarded before `receiptRevision` is recorded, so closure rejects an already-committed mutation.
+
+Evidence: [worker-transport.ts:69](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/handoff/worker-transport.ts:69), [worker-transport.ts:130](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/handoff/worker-transport.ts:130). The Worker correctly supplies the dispatcher’s response ID: [worker-entry.ts:195](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/handoff/worker-entry.ts:195).
+
+**Required change:** correlate by the single-use invocation and Worker-established metadata; do not reject that metadata against a pre-clone getter value. Add a changing-ID getter regression covering both ordinary response delivery and receipt-preserving observer closure. Reading the getter “once” in the transport does not prevent its subsequent structured-clone evaluation.
+
+**S6-F74 — SIGNIFICANT — Encoded `session.open` succeeds without completing Worker startup or transport status.**
+
+JSON-text and UTF-8 requests reach the dispatcher correctly, but successful-open handling still examines the original representation. The Worker starts the session only when that input is an object whose `method` property equals `session.open`; text and byte inputs fail that condition. Likewise, the transport records no method for encoded requests and therefore leaves its status `connecting` after their successful open response.
+
+Evidence: [worker-entry.ts:210](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/handoff/worker-entry.ts:210), [worker-transport.ts:18](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/handoff/worker-transport.ts:18), [worker-transport.ts:163](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/handoff/worker-transport.ts:163). Current encoded-input tests first open with an ordinary object, masking this difference: [worker-boundary.test.ts:236](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/tests/unit/vtt/worker-boundary.test.ts:236), [worker-boundary.test.ts:272](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/tests/unit/vtt/worker-boundary.test.ts:272).
+
+**Required change:** derive successful-open handling from authoritative dispatch metadata rather than re-inspecting the original representation. Test fresh sessions opened through JSON text and UTF-8 bytes, requiring `open` status, initial snapshot, autonomous progression and a usable offered move.
+
+**S6-F75 — SIGNIFICANT — S6-F70’s session destruction escalates into destruction of the entire shared Worker.**
+
+Destroying a session now correctly sends `closed` to its other bindings. However, the transport treats that expected closure as a terminal fault. The production shared-host callback responds to that fault by terminating the Worker and closing **every** transport, including unrelated session keys. It also prevents creating the replacement session through that host.
+
+Evidence: [worker-entry.ts:249](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/handoff/worker-entry.ts:249), [worker-entry.ts:266](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/handoff/worker-entry.ts:266), [worker-transport.ts:167](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/handoff/worker-transport.ts:167), [worker-transport.ts:304](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/handoff/worker-transport.ts:304).
+
+The replacement regression injects no-op termination callbacks, bypassing this production behavior: [worker-boundary.test.ts:427](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/tests/unit/vtt/worker-boundary.test.ts:427).
+
+**Required change:** distinguish session/port closure from Worker-wide failure. Preserve receipts and settle affected bindings without terminating unrelated sessions. Exercise the production host lifecycle with two bindings on one key and another live key; destroy the first session, verify the independent session remains usable, and recreate the destroyed key.
+
+### Verified claims
+
+- **S6-F69 partially resolved:** original envelopes reach authoritative validation; extra keys are rejected without reserving the mutation ID; arrays fault; valid and invalid UTF-8 receive the expected outcomes. JSON-text mutation receipts survive observer closure. [worker-boundary.test.ts:232](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/tests/unit/vtt/worker-boundary.test.ts:232), [worker-boundary.test.ts:263](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/tests/unit/vtt/worker-boundary.test.ts:263)
+- **S6-F70 partially resolved:** registry deletion compares session-instance identity, attached bindings receive closure, and the direct-port regression covers stale release and last-detach reset. S6-F75 identifies the production-host integration gap. [worker-entry.ts:248](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/handoff/worker-entry.ts:248), [worker-boundary.test.ts:416](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/tests/unit/vtt/worker-boundary.test.ts:416)
+- **S6-F71’s helper-measurement gap is addressed:** posting uses the common seam; measurement examines handoff ancestry and separately documents excluded engine/persistence origins. The measured region includes open, snapshot, invalid request and mutation. Recorded direct/helper mutants report stringify counts 4 and 12. [worker-message-post.ts:1](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/handoff/worker-message-post.ts:1), [worker-boundary.test.ts:44](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/tests/unit/vtt/worker-boundary.test.ts:44), [helper-mutant log:11](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/.tmp/vtt-handoff-s6-r4-f71-helper-mutant-red.log:11)
+- **S6-F72 resolved:** five independent controls assert exact use sites. Alias/destructuring mutant logs each show precisely one failing control; restored logs show nine passing tests. Reducer call-site pins remain intact. [engine-boundary.test.ts:413](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/tests/unit/vtt/engine-boundary.test.ts:413), [engine-boundary.test.ts:448](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/tests/unit/vtt/engine-boundary.test.ts:448)
+- Inline Worker construction, unique JavaScript asset selection, fetched-resource hash verification, isolated browser configuration and loopback-only dist serving remain present. [worker-transport.ts:247](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/handoff/worker-transport.ts:247), [vite.config.ts:91](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/vite.config.ts:91), [worker.spec.ts:183](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/tests/browser/vtt-handoff/worker.spec.ts:183), [playwright.config.ts:6](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/tests/browser/vtt-handoff/playwright.config.ts:6), [serve-existing-dist.mjs:124](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/tools/vtt-handoff/serve-existing-dist.mjs:124)
+
+The six-file diff leaves S8 surfaces untouched. Frozen-contract and example hashes match the supplied values; no prohibited additions were found. I ran no tests or builds. The remaining blockers are behavioral defects, not diminishing-return test refinements.
+
+VERDICT: REJECT
+review complete

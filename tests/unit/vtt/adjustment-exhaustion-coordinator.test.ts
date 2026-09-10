@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { CombatantId } from '../../../src/combat/values';
 import { agentSessionIdFromCli } from '../../../src/vtt/agent-session';
+import { createConversationRoundDeadline } from '../../../src/vtt/agent-session-lifecycle';
 import type {
   PlanAdjustmentProposalEnvelope,
   ProposedTurnResolution,
@@ -161,13 +162,55 @@ function correction(
       launcherToken: 'SIMULATED-launcher-token',
       timeoutMs: null,
     },
-    signal: new AbortController().signal,
     activateCapsule: () => { activations.value += 1; },
     takeProposal: () => queued.shift() ?? null,
   };
 }
 
+function deadline() {
+  return createConversationRoundDeadline(60_000, 0, () => 0);
+}
+
 describe('plan adjustment correction and exhaustion coordinator', () => {
+  it('expiration before adjustment correction persists nothing', async () => {
+    const f = await fixture();
+    const transitions = journal();
+    const activations = { value: 0 };
+    let policyMs = 0;
+    const base = correction(f.correctionRuntime.feed.current(), [], [], activations);
+    const runtime: AdjustmentCorrectionRuntime = {
+      ...base,
+      activateCapsule: () => {
+        activations.value += 1;
+        policyMs = 100;
+      },
+    };
+    const coordinator = new AdjustmentExhaustionCoordinator(transitions);
+
+    const outcome = await coordinator.coordinate({
+      initial: f.initial,
+      correction: runtime,
+      deadline: createConversationRoundDeadline(100, 0, () => policyMs),
+    });
+
+    expect(outcome).toEqual({
+      kind: 'baseline_kept',
+      requestId: 'request:engine-mcp',
+      baselinePlanHash: 'a'.repeat(64),
+      updates: [],
+      stagedActorIds: [],
+      correctedActorIds: [],
+      baselineActorIds: [f.first, f.second].sort(),
+      correctionResult: 'no_response',
+    });
+    expect(activations.value).toBe(1);
+    expect(transitions.transitions().at(-1)).toEqual({
+      kind: 'adjustment_completed',
+      requestId: 'request:engine-mcp',
+      outcome,
+    });
+  });
+
   it('retains partial staging and combines one accepted correction without synthesizing Dodge', async () => {
     const f = await fixture();
     const transitions = journal();
@@ -184,6 +227,7 @@ describe('plan adjustment correction and exhaustion coordinator', () => {
     await expect(coordinator.coordinate({
       initial: f.initial,
       correction: correction(f.correctionRuntime.feed.current(), queued, dispatches, activations),
+      deadline: deadline(),
     })).resolves.toMatchObject({
       kind: 'adjusted',
       stagedActorIds: [f.first],
@@ -222,7 +266,11 @@ describe('plan adjustment correction and exhaustion coordinator', () => {
       },
     };
 
-    await new AdjustmentExhaustionCoordinator(journal()).coordinate({ initial: f.initial, correction: runtime });
+    await new AdjustmentExhaustionCoordinator(journal()).coordinate({
+      initial: f.initial,
+      correction: runtime,
+      deadline: deadline(),
+    });
 
     expect(dispatches).toEqual(['[TURN_CONTEXT]\npre-rendered\n[DECISION_CATALOG]\nindexed']);
   });
@@ -233,6 +281,7 @@ describe('plan adjustment correction and exhaustion coordinator', () => {
     const outcome = await coordinator.coordinate({
       initial: f.initial,
       correction: correction(f.correctionRuntime.feed.current(), [], [], { value: 0 }),
+      deadline: deadline(),
     });
 
     expect(outcome).toMatchObject({
@@ -285,6 +334,7 @@ describe('plan adjustment correction and exhaustion coordinator', () => {
     const outcome = await new AdjustmentExhaustionCoordinator(journal()).coordinate({
       initial,
       correction: correction(f.correctionRuntime.feed.current(), [], [], { value: 0 }),
+      deadline: deadline(),
     });
 
     expect(outcome).toEqual({
@@ -311,6 +361,7 @@ describe('plan adjustment correction and exhaustion coordinator', () => {
     const outcome = await new AdjustmentExhaustionCoordinator(journal()).coordinate({
       initial: f.initial,
       correction: correction(f.correctionRuntime.feed.current(), [malformed], [], { value: 0 }),
+      deadline: deadline(),
     });
 
     expect(outcome).toMatchObject({
@@ -340,8 +391,8 @@ describe('plan adjustment correction and exhaustion coordinator', () => {
     const dispatches: string[] = [];
     const coordinator = new AdjustmentExhaustionCoordinator(transitions);
     const runtime = correction(f.correctionRuntime.feed.current(), queued, dispatches, { value: 0 });
-    const first = await coordinator.coordinate({ initial: f.initial, correction: runtime });
-    const replay = await coordinator.coordinate({ initial: f.initial, correction: runtime });
+    const first = await coordinator.coordinate({ initial: f.initial, correction: runtime, deadline: deadline() });
+    const replay = await coordinator.coordinate({ initial: f.initial, correction: runtime, deadline: deadline() });
 
     expect(first.correctionResult).toBe('accepted');
     expect(replay).toEqual(first);

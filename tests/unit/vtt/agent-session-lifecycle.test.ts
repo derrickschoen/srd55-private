@@ -18,8 +18,10 @@ import {
   type AgentTurnResult,
 } from '../../../src/vtt/agent-session';
 import {
+  type AgentDispatchDeadline,
   AgentSessionLifecycle,
   CONTEXT_ROLLOVER_POLICY,
+  createConversationRoundDeadline,
   shouldRollOver,
   UnmeasuredContextRolloverPolicyError,
 } from '../../../src/vtt/agent-session-lifecycle';
@@ -90,6 +92,76 @@ function setup(adapter: AgentSessionAdapter, policy = CONTEXT_ROLLOVER_POLICY) {
   };
 }
 
+function openDeadline() {
+  return createConversationRoundDeadline(60_000, 0, () => 0);
+}
+
+type DeadlineFactory = typeof createConversationRoundDeadline;
+
+async function mutationReceipt<T>(
+  name: string,
+  baseline: T,
+  mutant: T,
+  prove: (implementation: T) => Promise<void>,
+): Promise<void> {
+  let implementation = baseline;
+  const originalHash = sha256(String(implementation));
+  try {
+    implementation = mutant;
+    console.info(`[MUTATION_RECEIPT] ${name} APPLIED`);
+    expect(sha256(String(implementation))).not.toBe(originalHash);
+    console.info(`[MUTATION_RECEIPT] ${name} PROVED_APPLIED`);
+    let failed = false;
+    try {
+      await prove(implementation);
+    } catch {
+      failed = true;
+    }
+    expect(failed).toBe(true);
+    console.info(`[MUTATION_RECEIPT] ${name} FAILED_AS_EXPECTED`);
+  } finally {
+    implementation = baseline;
+  }
+  expect(sha256(String(implementation))).toBe(originalHash);
+  console.info(`[MUTATION_RECEIPT] ${name} REVERTED hash=${originalHash}`);
+  await prove(implementation);
+  console.info(`[MUTATION_RECEIPT] ${name} BASELINE_PASSED hash=${originalHash}`);
+}
+
+function ceilingDeadlineFactory(
+  budgetMs: number,
+  startedAtMs: number,
+  now: () => number,
+): AgentDispatchDeadline {
+  const signal = new AbortController().signal;
+  return {
+    signal,
+    dispatch(candidate) {
+      const timeoutMs = Math.min(candidate.timeoutMs ?? budgetMs, Math.ceil(startedAtMs + budgetMs - now()));
+      return timeoutMs < 1
+        ? { kind: 'exhausted' }
+        : { kind: 'open', timeoutMs, invocation: { ...candidate, timeoutMs } };
+    },
+    acceptsCompletion: () => startedAtMs + budgetMs - now() > 0,
+  };
+}
+
+function freshBudgetDeadlineFactory(
+  budgetMs: number,
+  _startedAtMs: number,
+  _now: () => number,
+): AgentDispatchDeadline {
+  const signal = new AbortController().signal;
+  return {
+    signal,
+    dispatch(candidate) {
+      const timeoutMs = Math.min(candidate.timeoutMs ?? budgetMs, budgetMs);
+      return { kind: 'open', timeoutMs, invocation: { ...candidate, timeoutMs } };
+    },
+    acceptsCompletion: () => true,
+  };
+}
+
 describe('SIMULATED agent session lifecycle', () => {
   it.each(['cancelled', 'timed_out', 'infrastructure_failed'] as const)(
     'keeps an observed reusable identity unbound after a %s cold start',
@@ -109,11 +181,11 @@ describe('SIMULATED agent session lifecycle', () => {
         start: async () => result, resume: async () => result, classifyFailure: () => 'unknown',
       };
       const first = setup(adapter);
-      await expect(first.lifecycle.coldStart(invocation(first.sessionId, 'cold'), new AbortController().signal))
+      await expect(first.lifecycle.coldStart(invocation(first.sessionId, 'cold'), openDeadline()))
         .resolves.toEqual({ kind: 'unbound', turn: result });
       expect(first.journal.agentSession()).toBeNull();
       const round = setup(adapter);
-      await expect(round.lifecycle.coldStartRound(invocation(round.sessionId, 'round'), new AbortController().signal))
+      await expect(round.lifecycle.coldStartRound(invocation(round.sessionId, 'round'), openDeadline()))
         .resolves.toEqual({ kind: 'unbound', turn: result });
       expect(round.journal.agentSession()).toBeNull();
       expect(round.store.revisions(round.sessionId).map((revision) => revision.transition.kind))
@@ -121,6 +193,70 @@ describe('SIMULATED agent session lifecycle', () => {
     },
   );
 
+  it('fractional remainder floors and below one does not spawn', async () => {
+    const prove = async (factory: DeadlineFactory): Promise<void> => {
+      let now = 98.2;
+      const open = factory(100, 0, () => now).dispatch(
+        invocation(encounterSessionId('session:fractional-open'), 'fractional open'),
+      );
+      expect(open).toMatchObject({ kind: 'open', timeoutMs: 1, invocation: { timeoutMs: 1 } });
+      now = 99.2;
+      const exhausted = factory(100, 0, () => now).dispatch(
+        invocation(encounterSessionId('session:fractional-exhausted'), 'fractional exhausted'),
+      );
+      expect(exhausted).toEqual({ kind: 'exhausted' });
+    };
+
+    await mutationReceipt(
+      'fractional remainder floors and below one does not spawn',
+      createConversationRoundDeadline,
+      ceilingDeadlineFactory,
+      prove,
+    );
+  });
+
+  it('same deadline reaches recovery', async () => {
+    const prove = async (factory: DeadlineFactory): Promise<void> => {
+      let now = 0;
+      const timeouts: number[] = [];
+      let starts = 0;
+      const adapter: AgentSessionAdapter = {
+        kind: 'codex',
+        probe: async () => ({ present: true, version: 'SIMULATED' }),
+        start: async (candidate) => {
+          starts += 1;
+          timeouts.push(candidate.timeoutMs ?? -1);
+          return {
+            resumeSessionId: agentSessionId(`agent-session:deadline-${String(starts)}`),
+            sessionId: null,
+            finalText: '',
+            usage: null,
+            exit: 'completed',
+            ...COMPLETED_EVIDENCE,
+          };
+        },
+        resume: async (_binding, candidate) => {
+          timeouts.push(candidate.timeoutMs ?? -1);
+          now = 40;
+          throw new SIMULATEDResumeFailure('resume_not_found');
+        },
+        classifyFailure: (error) => error instanceof SIMULATEDResumeFailure
+          ? error.classification
+          : 'unknown',
+      };
+      const { lifecycle, sessionId } = setup(adapter);
+      await lifecycle.coldStart(invocation(sessionId, 'bootstrap'), factory(1_000, 0, () => now));
+      await lifecycle.resumeRound(invocation(sessionId, 'recover'), factory(100, 0, () => now));
+      expect(timeouts).toEqual([1_000, 100, 60]);
+    };
+
+    await mutationReceipt(
+      'same deadline reaches recovery',
+      createConversationRoundDeadline,
+      freshBudgetDeadlineFactory,
+      prove,
+    );
+  });
   it('rollover threshold is measured', () => {
     expect(CONTEXT_ROLLOVER_POLICY).toEqual({
       kind: 'measured',
@@ -143,7 +279,7 @@ describe('SIMULATED agent session lifecycle', () => {
     const lifecycle = new AgentSessionLifecycle(journal, adapter, 4, { kind: 'unmeasured' });
     const { sessionProfile: _testProfile, ...realInvocation } = invocation(sessionId, 'real startup');
 
-    await expect(lifecycle.coldStart(realInvocation, new AbortController().signal))
+    await expect(lifecycle.coldStart(realInvocation, openDeadline()))
       .rejects.toBeInstanceOf(UnmeasuredContextRolloverPolicyError);
     expect(adapter.startInvocations).toEqual([]);
   });
@@ -199,14 +335,14 @@ describe('SIMULATED agent session lifecycle', () => {
     };
     const policy = { kind: 'measured', threshold, evidence: 'SIMULATED boundary' } as const;
     const { lifecycle, journal, sessionId } = setup(adapter, policy);
-    const signal = new AbortController().signal;
+    const deadline = openDeadline();
 
-    await lifecycle.coldStartRound(invocation(sessionId, 'first'), signal);
-    await lifecycle.resumeRound(invocation(sessionId, 'threshold call'), signal);
+    await lifecycle.coldStartRound(invocation(sessionId, 'first'), deadline);
+    await lifecycle.resumeRound(invocation(sessionId, 'threshold call'), deadline);
     expect(adapter.resumes).toHaveLength(1);
     expect(journal.agentSession()?.sessionId).toBe(agentSessionId('agent-session:threshold-base'));
 
-    const rolled = await lifecycle.resumeRound(invocation(sessionId, 'post-threshold call'), signal);
+    const rolled = await lifecycle.resumeRound(invocation(sessionId, 'post-threshold call'), deadline);
     expect(rolled.resumeSessionId).toBe(agentSessionId('agent-session:threshold-successor'));
     expect(adapter.resumes).toHaveLength(1);
     expect(adapter.starts[1]?.bootstrap).toMatchObject({
@@ -270,10 +406,10 @@ describe('SIMULATED agent session lifecycle', () => {
       classifyFailure: () => 'unknown',
     };
     const { lifecycle, journal, sessionId } = setup(adapter);
-    const signal = new AbortController().signal;
+    const deadline = openDeadline();
 
-    await lifecycle.coldStartRound(invocation(sessionId, 'first'), signal);
-    await lifecycle.resumeCorrection({ ...invocation(sessionId, 'second'), callPhase: 'correction' }, signal);
+    await lifecycle.coldStartRound(invocation(sessionId, 'first'), deadline);
+    await lifecycle.resumeCorrection({ ...invocation(sessionId, 'second'), callPhase: 'correction' }, deadline);
 
     expect(journal.agentSession()?.callUsage).toEqual([
       { turnInputTotal: 190320, contextInputTokens: 101, modelContextWindow: 258400, cachedInput: 31, output: 17, reasoning: 7, callPhase: 'initial', ordinal: 1 },
@@ -285,13 +421,13 @@ describe('SIMULATED agent session lifecycle', () => {
   it('cold-starts once, then resumes one persisted run-scoped session for round, room transition, and correction', async () => {
     const adapter = new SIMULATEDAgentSessionAdapter({ startIds: ['agent-session:stable'] });
     const { lifecycle, journal, sessionId, store } = setup(adapter);
-    const signal = new AbortController().signal;
+    const deadline = openDeadline();
 
     expect(journal.agentSession()).toBeNull();
-    await lifecycle.coldStart(invocation(sessionId, 'cold-start bootstrap'), signal);
-    await lifecycle.resumeRound(invocation(sessionId, 'round:1'), signal);
-    await lifecycle.resumeRoomTransition(invocation(sessionId, 'room_transition:2'), signal);
-    await lifecycle.resumeCorrection(invocation(sessionId, 'correction:1'), signal);
+    await lifecycle.coldStart(invocation(sessionId, 'cold-start bootstrap'), deadline);
+    await lifecycle.resumeRound(invocation(sessionId, 'round:1'), deadline);
+    await lifecycle.resumeRoomTransition(invocation(sessionId, 'room_transition:2'), deadline);
+    await lifecycle.resumeCorrection(invocation(sessionId, 'correction:1'), deadline);
 
     expect(adapter.startInvocations.map((entry) => entry.prompt)).toEqual(['cold-start bootstrap']);
     expect(adapter.resumeInvocations.map((entry) => entry.invocation.prompt)).toEqual([
@@ -336,14 +472,14 @@ describe('SIMULATED agent session lifecycle', () => {
         resumeFailures: [new SIMULATEDResumeFailure(classification)],
       });
       const { lifecycle, journal, sessionId, store } = setup(adapter);
-      const signal = new AbortController().signal;
-      await lifecycle.coldStart(invocation(sessionId, 'cold-start bootstrap'), signal);
+      const deadline = openDeadline();
+      await lifecycle.coldStart(invocation(sessionId, 'cold-start bootstrap'), deadline);
 
       const result = await lifecycle.resumeRound({
         ...invocation(sessionId, 'pending-round'),
         launcherToken: 'SIMULATED-delta-launcher-token',
         recoveryLauncherToken: 'SIMULATED-full-launcher-token',
-      }, signal);
+      }, deadline);
 
       const predecessorHash = sha256('agent-session:failed');
       expect(result.resumeSessionId).toBe(agentSessionId('agent-session:successor'));
@@ -411,11 +547,11 @@ describe('SIMULATED agent session lifecycle', () => {
       classifyFailure: (error) => error instanceof SIMULATEDResumeFailure ? error.classification : 'unknown',
     };
     const { lifecycle, journal, sessionId, store } = setup(adapter);
-    await lifecycle.coldStart(invocation(sessionId, 'cold'), new AbortController().signal);
+    await lifecycle.coldStart(invocation(sessionId, 'cold'), openDeadline());
     const recoveryDispatchId = engineDispatchId('engine-dispatch:recovery-failure-0001');
     const recovered = await lifecycle.resumeRound({
       ...invocation(sessionId, 'resume'), recoveryEngineDispatchId: recoveryDispatchId,
-    }, new AbortController().signal);
+    }, openDeadline());
 
     expect(recovered).toEqual(failedRecovery);
     expect(journal.agentSession()?.sessionId).toBe(agentSessionId('agent-session:recovery-predecessor'));
@@ -433,10 +569,10 @@ describe('SIMULATED agent session lifecycle', () => {
       resumeFailures: [new SIMULATEDResumeFailure('authentication')],
     });
     const { lifecycle, journal, sessionId, store } = setup(adapter);
-    const signal = new AbortController().signal;
-    await lifecycle.coldStart(invocation(sessionId, 'cold-start bootstrap'), signal);
+    const deadline = openDeadline();
+    await lifecycle.coldStart(invocation(sessionId, 'cold-start bootstrap'), deadline);
 
-    await expect(lifecycle.resumeCorrection(invocation(sessionId, 'correction'), signal))
+    await expect(lifecycle.resumeCorrection(invocation(sessionId, 'correction'), deadline))
       .rejects.toThrow('SIMULATED authentication');
 
     expect(adapter.startInvocations).toHaveLength(1);

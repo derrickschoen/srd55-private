@@ -14,6 +14,7 @@ import {
   packetOutcome,
   validateRerunRows,
 } from '../../../tools/ai-dm-rerun-packet';
+import { conversationRowCodec } from '../../../tools/ai-dm-conversation-row-codec';
 import { declareTestInputs } from '../../helpers/test-inputs';
 
 const fixtureRowSchema = z.record(z.string(), z.unknown());
@@ -709,6 +710,114 @@ describe('AI-DM R1-10 rerun packet', () => {
     );
     for (const entry of exhaustion.packet.entries) expect(entry.attribution).toBe('engine_default');
     expect(JSON.stringify(exhaustion.packet)).not.toContain('plannerLabel');
+  });
+
+  it('normalizes a baseline-valid current-invalid summary from the decoder tag', () => {
+    const rows = rowsFromFixture('tests/fixtures/ai-dm-rerun/paired-tiny.SIMULATED.jsonl')
+      .map((row) => ({
+        ...row,
+        outcome: 'authorized',
+        plannedBy: { model: 'model', effort: 'low' },
+        authorizedPlan: [{
+          actorId: 'monster:ogre',
+          acceptedIntent: { choice: { kind: 'attack' } },
+          resolutionSummary: {
+            actionId: 'baseline-greatclub',
+            targetId: 'pc:fighter',
+            movementFeet: 5,
+            actionSlots: [42],
+          },
+        }],
+      }));
+
+    const result = buildRerunPacket(rows, 1, tinyProtocol);
+    for (const entry of result.packet.entries) {
+      expect(entry.executedPlan).toEqual([{
+        actorId: 'monster:ogre',
+        actions: [{ kind: 'attack', actionId: 'baseline-greatclub', targetIds: ['pc:fighter'] }],
+        movementFeet: 5,
+      }]);
+    }
+  });
+
+  it('normalizes a both-valid summary as current by decoder schema order', () => {
+    const rows = rowsFromFixture('tests/fixtures/ai-dm-rerun/paired-tiny.SIMULATED.jsonl')
+      .map((row) => ({
+        ...row,
+        outcome: 'authorized',
+        plannedBy: { model: 'model', effort: 'low' },
+        authorizedPlan: [{
+          actorId: 'monster:ogre',
+          acceptedIntent: { choice: { kind: 'baseline-kind' } },
+          resolutionSummary: {
+            actionSlots: [{
+              kind: 'current-kind',
+              actionId: 'current-action',
+              targetIds: ['pc:wizard'],
+            }],
+            actionId: 'baseline-action',
+            targetId: 'pc:fighter',
+            movementFeet: 10,
+          },
+        }],
+      }));
+
+    const result = buildRerunPacket(rows, 1, tinyProtocol);
+    for (const entry of result.packet.entries) {
+      expect(entry.executedPlan).toEqual([{
+        actorId: 'monster:ogre',
+        actions: [{ kind: 'current-kind', actionId: 'current-action', targetIds: ['pc:wizard'] }],
+        movementFeet: 10,
+      }]);
+    }
+  });
+
+  it('uses the injected decoder for answer-key-only evidence', () => {
+    const rows = rowsFromFixture('tests/fixtures/ai-dm-rerun/paired-tiny.SIMULATED.jsonl');
+    const baseline = buildRerunPacket(rows, 1, tinyProtocol);
+    const injected = buildRerunPacket(rows, 1, tinyProtocol, {
+      rowCodec: {
+        decodeArenaRow(value: unknown) {
+          const decoded = conversationRowCodec.decodeArenaRow(value);
+          if (decoded.rowEra === 'pre_shift' || decoded.row.arm !== 'baseline') return decoded;
+          switch (decoded.row.decisionTransport) {
+            case 'mcp_minimal':
+              return {
+                ...decoded,
+                row: { ...decoded.row, firstDecisionAccepted: !decoded.row.firstDecisionAccepted },
+              };
+            case 'final_indices':
+              return {
+                ...decoded,
+                row: { ...decoded.row, firstDecisionAccepted: !decoded.row.firstDecisionAccepted },
+              };
+          }
+        },
+      },
+    });
+
+    expect(injected.packet).toEqual(baseline.packet);
+    expect(injected.answerKey.entries).toEqual(baseline.answerKey.entries.map((entry) =>
+      entry.rowEra === 'post_shift' && entry.arm === 'baseline'
+        ? { ...entry, firstDecisionAccepted: !entry.firstDecisionAccepted }
+        : entry));
+  });
+
+  it('refuses rlData before decoding the same malformed row', () => {
+    let decoderCalls = 0;
+    const malformedHoldoutRow = { rlData: { leaked: true }, decisionTransport: 'coordinates' };
+    expect(() => buildRerunPacket([
+      malformedHoldoutRow,
+      rowsFromFixture('tests/fixtures/ai-dm-rerun/paired-tiny.SIMULATED.jsonl')[1]!,
+    ], 1, tinyProtocol, {
+      rowCodec: {
+        decodeArenaRow(value: unknown) {
+          decoderCalls += 1;
+          return conversationRowCodec.decodeArenaRow(value);
+        },
+      },
+    })).toThrow('row 1 contains rlData; Rerun protocol is a permanent holdout and cannot contain training data.');
+    expect(decoderCalls).toBe(0);
   });
 
   it('cross-era mode partitions arms by repoCommit and requires within-arm digest consistency only', () => {

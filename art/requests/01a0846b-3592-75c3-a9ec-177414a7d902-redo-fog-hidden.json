@@ -1,0 +1,47 @@
+{
+  "$schema": "./request.schema.json",
+  "id": "01a0846b-3592-75c3-a9ec-177414a7d902",
+  "slug": "redo-fog-hidden",
+  "createdAt": "2026-09-09T04:26:51Z",
+  "status": "open",
+  "batch": "redo-starter-art-v1",
+  "redoOf": "public/assets/art/fog-hidden-v1.png",
+  "purpose": "Fog art for asset id art.fog.hidden.v1 (Hidden fog); drawn over cells in the 'hidden' visibility state. This is a REDO: the delivered asset replaces the current file one-for-one at promotion.",
+  "prompt": "Fog-of-war overlay tile: hidden-cell fog: a dark, mostly opaque veil with faint diagonal hatch. Uniform across the whole tile so adjacent fog tiles form a seamless field, crisp 1:1 pixels, no text.",
+  "negativePrompt": "photograph, 3D render, isometric perspective, blur, anti-aliasing, smooth gradients, text, watermark, signature, border, frame",
+  "dimensions": {
+    "width": 128,
+    "height": 128,
+    "aspectRatio": "1:1",
+    "pixelGrid": 1
+  },
+  "style": {
+    "summary": "Matches the repository's classic-board pixel art: 128 x 128 top-down tile, crisp 1:1 pixels, flat stepped shading with light from the top-left, shadows shifting toward blue-violet and lights toward yellow, the generated palette of eight hue ramps (stone, wood, earth, moss, cloth-warm, cloth-cool, metal, skin) plus cool-grey neutrals.",
+    "references": [
+      "public/assets/art/fog-hidden-v1.png",
+      "public/assets/art/fog-unexplored-v1.png",
+      "public/assets/art/fog-hidden-v1.png",
+      "public/assets/art/fog-revealed-v1.png"
+    ],
+    "palette": "Generated ramp palette, see src/assets/palette.ts; keep to the same hue families as the current asset."
+  },
+  "background": {
+    "transparent": true,
+    "notes": "Translucent veil with uniform alpha; no drop shadow."
+  },
+  "acceptanceCriteria": [
+    "File is a PNG, exactly 128 x 128, 8-bit RGBA.",
+    "Composition, footprint and transparency class match the current fog-hidden-v1.png so the file is a drop-in replacement (same name at promotion).",
+    "Pixels are crisp: no anti-aliased edges, no smooth gradients; a 4x nearest-neighbour zoom shows only hard-edged pixels.",
+    "No text, signature, watermark, border or frame.",
+    "Seamless with itself on all four edges.",
+    "Opacity ordering preserved: unexplored darker than hidden, hidden darker than revealed (compare the three current fog tiles)."
+  ],
+  "deliverable": {
+    "format": "png",
+    "filename": "01a0846b-3592-75c3-a9ec-177414a7d902-redo-fog-hidden.png",
+    "directory": "art/incoming"
+  },
+  "license": "CC0-1.0",
+  "notes": "Part of batch redo-starter-art-v1: a redo of every starter art asset. Recipe from src/assets/starter-art-inputs.ts: {\"kind\": \"fog\", \"material\": \"fog\", \"state\": \"hidden\"}."
+}

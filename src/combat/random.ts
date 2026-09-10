@@ -1,7 +1,16 @@
 import type { DiceExpression, DiceRollTrace } from './resolution';
+import {
+  exactWeight,
+  isTransactionalRollRng,
+  type RollComponentRef,
+  type RollDrawRole,
+  type RollProvenanceRequest,
+} from './roll-provenance';
 import type { DieSides } from './values';
 
-export type Rng = () => number;
+export interface Rng {
+  (): number;
+}
 
 export interface SerializableRngState {
   readonly algorithm: 'mulberry32-v1';
@@ -96,6 +105,11 @@ export function restoreMulberry32(state: SerializableRngState): SerializableRng 
 
 const transactionalAdapters = new WeakMap<Rng, TransactionalRng>();
 
+function isTransactional(rng: Rng): rng is TransactionalRng {
+  const candidate = rng as Partial<TransactionalRng>;
+  return typeof candidate.checkpoint === 'function' && typeof candidate.restoreCheckpoint === 'function';
+}
+
 function isSerializableRng(rng: Rng): rng is SerializableRng {
   const candidate = rng as Partial<SerializableRng>;
   return typeof candidate.snapshot === 'function' && typeof candidate.restore === 'function';
@@ -103,13 +117,16 @@ function isSerializableRng(rng: Rng): rng is SerializableRng {
 
 /** Gives every reducer RNG a restorable cursor without changing its call shape. */
 export function transactionalRng(rng: Rng): TransactionalRng {
+  if (isTransactional(rng)) return rng;
   const existing = transactionalAdapters.get(rng);
   if (existing !== undefined) return existing;
   if (isSerializableRng(rng)) {
-    const adapted = Object.assign(rng, {
+    const adapted: TransactionalRng = Object.assign(rng, {
       checkpoint: (): RngCheckpoint => {
         const snapshot = rng.snapshot();
-        return { restore: (): void => rng.restore(snapshot) };
+        return { restore: (): void => {
+          rng.restore(snapshot);
+        } };
       },
       restoreCheckpoint: (checkpoint: RngCheckpoint): void => checkpoint.restore(),
     });
@@ -133,7 +150,9 @@ export function transactionalRng(rng: Rng): TransactionalRng {
     {
       checkpoint: (): RngCheckpoint => {
         const savedCursor = cursor;
-        return { restore: (): void => { cursor = savedCursor; } };
+        return { restore: (): void => {
+          cursor = savedCursor;
+        } };
       },
       restoreCheckpoint: (checkpoint: RngCheckpoint): void => checkpoint.restore(),
     },
@@ -143,11 +162,38 @@ export function transactionalRng(rng: Rng): TransactionalRng {
   return adapted;
 }
 
-export function rollDie(rng: Rng, sides: DieSides): number {
-  return Math.floor(rng() * sides) + 1;
+export function rollDie(
+  rng: Rng,
+  sides: DieSides,
+  provenance: RollProvenanceRequest,
+): number {
+  if (!isTransactionalRollRng(rng)) return Math.floor(rng() * sides) + 1;
+  const outcomes = Array.from({ length: sides }, (_, index) => ({
+    total: index + 1,
+    weight: exactWeight(1n, BigInt(sides)),
+  }));
+  const component = rng.beginComponent(provenance, { kind: 'discrete_branch', outcomes });
+  const face = rng.draw({ sides, provenance: component, role: { kind: 'branch_selection' } });
+  rng.finishComponent(component, face);
+  return face;
 }
 
-export function rollDice(rng: Rng, expression: DiceExpression): DiceRollTrace {
+function drawComponentFace(
+  rng: Rng,
+  sides: DieSides,
+  component: RollComponentRef | null,
+  role: RollDrawRole,
+): number {
+  return component === null || !isTransactionalRollRng(rng)
+    ? Math.floor(rng() * sides) + 1
+    : rng.draw({ sides, provenance: component, role });
+}
+
+export function rollDice(
+  rng: Rng,
+  expression: DiceExpression,
+  provenance: RollProvenanceRequest,
+): DiceRollTrace {
   if (!Number.isInteger(expression.count) || expression.count < 0) {
     throw new RangeError('Dice count must be a non-negative integer.');
   }
@@ -186,11 +232,16 @@ export function rollDice(rng: Rng, expression: DiceExpression): DiceRollTrace {
   const faces: number[] = [];
   const rerolls: Array<{ readonly dieIndex: number; readonly discarded: number; readonly replacement: number }> = [];
   const explosionFaces: number[] = [];
+  const component = isTransactionalRollRng(rng)
+    ? rng.beginComponent(provenance, { kind: 'dice_expression', expression })
+    : null;
   for (let index = 0; index < expression.count; index += 1) {
-    const first = rollDie(rng, expression.sides);
+    const first = drawComponentFace(rng, expression.sides, component, { kind: 'ordinary_face', dieIndex: index });
     const face = expression.rerollBelow !== undefined && first < expression.rerollBelow.threshold
       ? (() => {
-          const replacement = rollDie(rng, expression.sides);
+          const replacement = drawComponentFace(
+            rng, expression.sides, component, { kind: 'reroll_replacement', dieIndex: index, attempt: 1 },
+          );
           rerolls.push({ dieIndex: index, discarded: first, replacement });
           return replacement;
         })()
@@ -201,22 +252,26 @@ export function rollDice(rng: Rng, expression: DiceExpression): DiceRollTrace {
       expression.explosion.maximumExplosionsPerDie === 1 &&
       face === expression.sides
     ) {
-      const explosion = rollDie(rng, expression.sides);
+      const explosion = drawComponentFace(
+        rng, expression.sides, component, { kind: 'explosion', dieIndex: index, explosion: 1 },
+      );
       faces.push(explosion);
       explosionFaces.push(explosion);
     }
   }
+  const total = Math.min(
+    expression.maximumTotal ?? Number.POSITIVE_INFINITY,
+    Math.max(
+      expression.minimumTotal ?? Number.NEGATIVE_INFINITY,
+      faces.reduce((sum, face) => sum + face, expression.modifier),
+    ),
+  );
+  if (component !== null && isTransactionalRollRng(rng)) rng.finishComponent(component, total);
   return {
     expression,
     faces,
     ...(rerolls.length === 0 ? {} : { rerolls }),
     ...(explosionFaces.length === 0 ? {} : { explosionFaces }),
-    total: Math.min(
-      expression.maximumTotal ?? Number.POSITIVE_INFINITY,
-      Math.max(
-        expression.minimumTotal ?? Number.NEGATIVE_INFINITY,
-        faces.reduce((sum, face) => sum + face, expression.modifier),
-      ),
-    ),
+    total,
   };
 }

@@ -1,8 +1,33 @@
 import { describe, expect, it } from 'vitest';
+import { canonicalJson } from '../../../src/commands/canonical-json';
 import { combatToken, monsterCombatantProfile } from '../../../src/combat/combatant';
-import { reduceEncounter, type EncounterState } from '../../../src/combat/encounter';
-import { mulberry32 } from '../../../src/combat/random';
-import { armorClass, combatantId, encounterBranchId, encounterSessionId, type CombatantId } from '../../../src/combat/values';
+import {
+  createEncounter,
+  evaluateMonsterTacticalAttack,
+  reduceEncounter,
+  type EncounterState,
+} from '../../../src/combat/encounter';
+import type { EncounterCommand } from '../../../src/combat/events';
+import { monsterAttackCommand } from '../../../src/combat/monster-commands';
+import { mulberry32, transactionalRng } from '../../../src/combat/random';
+import {
+  exactWeight,
+  RollProvenance,
+  rollOccurrenceId,
+  rollOperationPath,
+  type TransactionalRollRng,
+} from '../../../src/combat/roll-provenance';
+import type { MonsterAttackAction } from '../../../src/combat/statblock';
+import { UNICORN } from '../../../src/combat/statblocks/monsters';
+import {
+  armorClass,
+  combatantId,
+  damageType,
+  dieSides,
+  encounterBranchId,
+  encounterSessionId,
+  type CombatantId,
+} from '../../../src/combat/values';
 import { LION } from '../../../src/combat/statblocks/wild-beasts';
 import {
   EngineRoundSession,
@@ -14,8 +39,13 @@ import {
   pureTurnProposalResolver,
   type EngineTurnProposal,
 } from '../../../src/vtt/intent-resolver';
+import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
 import { generateRoom } from '../../../src/vtt/room-generator';
 import { freshMonsterPlanningState, projectFutureMonsterTurns } from '../../../src/vtt/monster-planning-state';
+import { decodeSessionSnapshotV1 } from '../../../src/vtt/arena-fixture';
+import { runCommandBoundaryTransaction } from '../../../src/vtt/engine-round-application';
+import { reduceSessionEncounter } from '../../../src/vtt/session-encounter-reducer';
+import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
 
 const REQUEST: EngineRoundCapsuleRequest = {
   runId: encounterSessionId('encounter:engine-round-session-test'),
@@ -33,6 +63,27 @@ const ARCHER_ID = combatantId('combatant:generated-3943001-monster-3');
 const FOCUS_ID = combatantId('combatant:fighter');
 const CLERIC_ID = combatantId('combatant:cleric');
 const WIZARD_ID = combatantId('combatant:wizard');
+
+function recordBoundaryPrefixDraw(rng: TransactionalRollRng): void {
+  const component = rng.beginComponent({
+    occurrenceId: rollOccurrenceId('test:engine-boundary-prefix'),
+    operationPath: rollOperationPath('engine-boundary-prefix'),
+    source: null,
+    targets: [],
+  }, {
+    kind: 'discrete_branch',
+    outcomes: [
+      { total: 1, weight: exactWeight(1n, 2n) },
+      { total: 2, weight: exactWeight(1n, 2n) },
+    ],
+  });
+  const face = rng.draw({
+    sides: dieSides(2),
+    provenance: component,
+    role: { kind: 'branch_selection' },
+  });
+  rng.finishComponent(component, face);
+}
 
 function fixedPositions(
   positions: ReadonlyMap<CombatantId, { readonly column: number; readonly row: number }>,
@@ -138,6 +189,68 @@ function completeDodge(session: EngineRoundSession, actorId: CombatantId) {
 }
 
 describe('authoritative engine round session', () => {
+  it('preserves a pending legendary window when an empty monster application does no work', () => {
+    const activeMonster = monsterProfile('empty-application-active', { initiativeBonus: 100 });
+    const legendaryBase = monsterCombatantProfile(UNICORN, {
+      combatantId: 'combatant:empty-application-legendary',
+      tokenId: 'token:empty-application-legendary',
+    });
+    const legendaryMonster = {
+      ...legendaryBase,
+      rules: { ...legendaryBase.rules, initiativeBonus: 50 },
+    };
+    const player = playerProfile('empty-application-player', { initiativeBonus: 0 });
+    const initial = createEncounter({
+      bounds: { columns: 16, rows: 5 },
+      combatants: [activeMonster, legendaryMonster, player],
+      tokens: [
+        placedToken(activeMonster, 0, 1),
+        placedToken(legendaryMonster, 5, 1),
+        placedToken(player, 13, 1),
+      ],
+      config: { initiativeMode: 'per_combatant' },
+    });
+    const started = reduceEncounter(
+      initial,
+      { type: 'roll_initiative' },
+      mulberry32(58_410_001),
+    ).state;
+    expect(started.activeCombatant).toBe(activeMonster.id);
+    const queued = reduceEncounter(
+      started,
+      { type: 'end_turn', actor: activeMonster.id },
+      mulberry32(58_410_002),
+    ).state;
+    expect(queued.combatants.find((entry) => entry.profile.id === activeMonster.id)?.life)
+      .toBe('living');
+    expect(queued.pendingDecisions).toContainEqual(expect.objectContaining({
+      kind: 'legendary_action_window',
+      combatant: legendaryMonster.id,
+      boundary: { activeCombatant: activeMonster.id, round: 1 },
+    }));
+    const beforeBytes = canonicalJson(queued);
+    const session = new EngineRoundSession(
+      queued,
+      mulberry32(58_410_003),
+      { kind: 'unattended', askDefault: 'decline' },
+    );
+
+    const applied = session.applyResolvedMechanics([], null);
+    const after = session.currentState();
+
+    expect(applied).toEqual({
+      revisionDelta: 0,
+      fallbackResolutions: [],
+      guidedResolutions: [],
+      deviationResolutions: [],
+    });
+    expect(after.revision).toBe(queued.revision);
+    expect(after.activeCombatant).toBe(activeMonster.id);
+    expect(after.activeInitiativeIndex).toBe(queued.activeInitiativeIndex);
+    expect(after.pendingDecisions).toEqual(queued.pendingDecisions);
+    expect(canonicalJson(after)).toBe(beforeBytes);
+  });
+
   it('advances past an active PC killed mid-round before the next segment begins', () => {
     const started = reduceEncounter(
       segmentedState(),
@@ -363,6 +476,295 @@ describe('authoritative engine round session', () => {
     }));
   });
 
+  it('rolls back a failed random-consuming PC turn before a control-identical success', () => {
+    const started = reduceEncounter(
+      segmentedState(new Map([
+        [FOCUS_ID, { column: 0, row: 0 }],
+        [KILLER_ID, { column: 1, row: 0 }],
+      ])),
+      { type: 'roll_initiative' },
+      mulberry32(58_420_001),
+    ).state;
+    expect(started.activeCombatant).toBe(FOCUS_ID);
+    const attack: Extract<EncounterCommand, { readonly type: 'attack' }> = {
+      type: 'attack',
+      actor: FOCUS_ID,
+      target: KILLER_ID,
+      attackBonus: 100,
+      criticalFloor: 20,
+      rollMode: 'normal',
+      attackerCanSeeTarget: true,
+      targetCanSeeAttacker: true,
+      damage: {
+        terms: [{
+          type: damageType('Force'),
+          dice: { count: 0, sides: dieSides(6), modifier: 0 },
+        }],
+        critical: false,
+        responses: [],
+      },
+    };
+    const rollbackError = new Error('sentinel scripted PC validation failure');
+    const invalidAfterAttack: EncounterCommand = {
+      type: 'dodge',
+      get actor(): CombatantId {
+        throw rollbackError;
+      },
+    };
+    const seed = 58_420_002;
+    const failedSession = new EngineRoundSession(
+      started,
+      mulberry32(seed),
+      { kind: 'unattended', askDefault: 'decline' },
+    );
+    const untouchedControl = new EngineRoundSession(
+      started,
+      mulberry32(seed),
+      { kind: 'unattended', askDefault: 'decline' },
+    );
+    const beforeFailureBytes = canonicalJson(failedSession.currentState());
+
+    let caught: unknown;
+    try {
+      failedSession.completeScriptedPcTurn({
+        actorId: FOCUS_ID,
+        reducerCommands: [attack, invalidAfterAttack],
+      }, null);
+    } catch (error: unknown) {
+      caught = error;
+    }
+
+    expect(caught).toBe(rollbackError);
+    expect(canonicalJson(failedSession.currentState())).toBe(beforeFailureBytes);
+    expect(failedSession.currentState()).toEqual(untouchedControl.currentState());
+
+    const recovered = failedSession.completeScriptedPcTurn({
+      actorId: FOCUS_ID,
+      reducerCommands: [attack],
+    }, null);
+    const control = untouchedControl.completeScriptedPcTurn({
+      actorId: FOCUS_ID,
+      reducerCommands: [attack],
+    }, null);
+    expect(recovered).toEqual({
+      revisionDelta: 2,
+      fallbackResolutions: [],
+      guidedResolutions: [],
+    });
+    expect(control).toEqual({
+      revisionDelta: 2,
+      fallbackResolutions: [],
+      guidedResolutions: [],
+    });
+    expect(canonicalJson(failedSession.currentState()))
+      .toBe(canonicalJson(untouchedControl.currentState()));
+
+    const oracle = mulberry32(seed);
+    const expectedAttackFace = Math.floor(oracle() * 20) + 1;
+    expect(oracle.snapshot().draws).toBe(1);
+    const attackEvent = failedSession.currentState().eventLog.find((event) =>
+      event.type === 'attack_resolved' && event.actor === FOCUS_ID && event.target === KILLER_ID);
+    expect(attackEvent?.type).toBe('attack_resolved');
+    if (attackEvent?.type !== 'attack_resolved') throw new Error('Missing recovered PC attack event.');
+    expect(attackEvent.attack.roll.faces).toEqual([expectedAttackFace]);
+    expect(attackEvent.damage?.terms[0]?.roll.faces).toEqual([]);
+  });
+
+  it('discards failed monster state, evidence, and randomness before a control-identical success', () => {
+    const positioned = segmentedState(new Map([
+      [CLERIC_ID, { column: 0, row: 0 }],
+      [KILLER_ID, { column: 1, row: 0 }],
+      [FOCUS_ID, { column: 15, row: 0 }],
+      [ARCHER_ID, { column: 20, row: 0 }],
+    ]));
+    const state: EncounterState = {
+      ...positioned,
+      combatants: positioned.combatants.map((combatant) => {
+        if (combatant.profile.id === FOCUS_ID || combatant.profile.id === KILLER_ID) {
+          return {
+            ...combatant,
+            hitPoints: 1_000,
+            profile: {
+              ...combatant.profile,
+              rules: { ...combatant.profile.rules, armorClass: armorClass(1) },
+            },
+          };
+        }
+        return combatant;
+      }),
+    };
+    const first = authorized(state, attackProposal(state, KILLER_ID, 'dagger', FOCUS_ID));
+    const second = authorized(state, attackProposal(state, ARCHER_ID, 'longbow', FOCUS_ID));
+    expect(first.mechanics.path.length).toBeGreaterThan(0);
+    const rollbackError = new Error('sentinel monster live re-resolution failure');
+    const invalidSecond: AuthorizedEngineTurnProposal = {
+      ...second,
+      get primaryOption(): AuthorizedEngineTurnProposal['primaryOption'] {
+        throw rollbackError;
+      },
+    };
+    const seed = 58_430_001;
+    const failedSession = new EngineRoundSession(
+      state,
+      mulberry32(seed),
+      { kind: 'unattended', askDefault: 'take' },
+    );
+    const untouchedControl = new EngineRoundSession(
+      state,
+      mulberry32(seed),
+      { kind: 'unattended', askDefault: 'take' },
+    );
+    const beforeFailureBytes = canonicalJson(failedSession.currentState());
+
+    let caught: unknown;
+    try {
+      failedSession.applyResolvedMechanics([first, invalidSecond], null);
+    } catch (error: unknown) {
+      caught = error;
+    }
+
+    expect(caught).toBe(rollbackError);
+    expect(canonicalJson(failedSession.currentState())).toBe(beforeFailureBytes);
+    expect(failedSession.currentState()).toEqual(untouchedControl.currentState());
+
+    const recovered = failedSession.applyResolvedMechanics([first], null);
+    const control = untouchedControl.applyResolvedMechanics([first], null);
+    expect(recovered).toEqual(control);
+    expect(recovered).toEqual({
+      revisionDelta: 6,
+      fallbackResolutions: [{
+        decisionId: 'decision:1',
+        combatant: CLERIC_ID,
+        reactionKind: 'opportunity_attack',
+        configuredPolicy: 'ask',
+        askDefault: 'take',
+        resolution: 'accept',
+      }],
+      guidedResolutions: [],
+      deviationResolutions: [],
+    });
+    expect(canonicalJson(failedSession.currentState()))
+      .toBe(canonicalJson(untouchedControl.currentState()));
+  });
+
+  it('commits monster application randomness across two successful calls', () => {
+    const positioned = segmentedState(new Map([
+      [KILLER_ID, { column: 1, row: 0 }],
+      [FOCUS_ID, { column: 4, row: 0 }],
+      [ARCHER_ID, { column: 7, row: 0 }],
+    ]));
+    const durableTarget: EncounterState = {
+      ...positioned,
+      combatants: positioned.combatants.map((combatant) => combatant.profile.id === FOCUS_ID
+        ? {
+            ...combatant,
+            hitPoints: 1_000,
+            profile: {
+              ...combatant.profile,
+              rules: { ...combatant.profile.rules, armorClass: armorClass(1) },
+            },
+          }
+        : combatant),
+    };
+    const started = reduceEncounter(
+      durableTarget,
+      { type: 'roll_initiative' },
+      mulberry32(58_430_002),
+    ).state;
+    expect(started.activeCombatant).toBe(FOCUS_ID);
+    const seed = 58_430_003;
+    const session = new EngineRoundSession(
+      started,
+      mulberry32(seed),
+      { kind: 'unattended', askDefault: 'decline' },
+    );
+    const first = authorized(started, attackProposal(started, KILLER_ID, 'dagger', FOCUS_ID));
+
+    const firstResult = session.applyResolvedMechanics([first], null);
+    const afterFirst = session.currentState();
+    const second = authorized(afterFirst, attackProposal(afterFirst, ARCHER_ID, 'longbow', FOCUS_ID));
+    const secondResult = session.applyResolvedMechanics([second], null);
+    const afterSecond = session.currentState();
+
+    expect(firstResult).toEqual({
+      revisionDelta: 3,
+      fallbackResolutions: [],
+      guidedResolutions: [],
+      deviationResolutions: [],
+    });
+    expect(secondResult).toEqual({
+      revisionDelta: 2,
+      fallbackResolutions: [],
+      guidedResolutions: [],
+      deviationResolutions: [],
+    });
+
+    const directAttack = (
+      current: EncounterState,
+      actorId: CombatantId,
+      actionId: string,
+      targetId: CombatantId,
+      rng: ReturnType<typeof mulberry32>,
+    ): EncounterState => {
+      const action = canonicalEngineQueryPort.actions(current, actorId)
+        .find((candidate): candidate is MonsterAttackAction =>
+          candidate.kind === 'attack' && candidate.id === actionId);
+      if (action === undefined) throw new Error(`Direct oracle omitted ${actionId}.`);
+      const evaluation = evaluateMonsterTacticalAttack(current, action, actorId, targetId);
+      return reduceSessionEncounter(
+        current,
+        monsterAttackCommand(action, actorId, targetId, evaluation.rollMode.mode),
+        rng,
+      ).state;
+    };
+    const applicationFaces = (events: EncounterState['eventLog']): readonly (readonly number[])[] =>
+      events.flatMap((event) => event.type === 'attack_resolved'
+        ? [event.attack.roll.faces, ...(event.damage?.terms.map((term) => term.roll.faces) ?? [])]
+        : []);
+
+    const oracleRng = mulberry32(seed);
+    let oracleState = reduceSessionEncounter(
+      started,
+      { type: 'end_turn', actor: FOCUS_ID },
+      oracleRng,
+    ).state;
+    const firstOracleStart = oracleState.eventLog.length;
+    oracleState = directAttack(oracleState, KILLER_ID, 'dagger', FOCUS_ID, oracleRng);
+    oracleState = reduceSessionEncounter(
+      oracleState,
+      { type: 'end_turn', actor: KILLER_ID },
+      oracleRng,
+    ).state;
+    const firstOracleFaces = applicationFaces(oracleState.eventLog.slice(firstOracleStart));
+    const secondOracleStart = oracleState.eventLog.length;
+    oracleState = directAttack(oracleState, ARCHER_ID, 'longbow', FOCUS_ID, oracleRng);
+    oracleState = reduceSessionEncounter(
+      oracleState,
+      { type: 'end_turn', actor: ARCHER_ID },
+      oracleRng,
+    ).state;
+    const secondOracleFaces = applicationFaces(oracleState.eventLog.slice(secondOracleStart));
+    const firstSessionFaces = applicationFaces(afterFirst.eventLog.slice(started.eventLog.length));
+    const secondSessionFaces = applicationFaces(afterSecond.eventLog.slice(afterFirst.eventLog.length));
+    expect([...firstSessionFaces, ...secondSessionFaces])
+      .toEqual([...firstOracleFaces, ...secondOracleFaces]);
+    expect(oracleRng.snapshot().draws).toBeGreaterThan(0);
+
+    const restartedRng = mulberry32(seed);
+    const restartedSecond = directAttack(
+      afterFirst,
+      ARCHER_ID,
+      'longbow',
+      FOCUS_ID,
+      restartedRng,
+    );
+    const restartedSecondFaces = applicationFaces(
+      restartedSecond.eventLog.slice(afterFirst.eventLog.length),
+    );
+    expect(secondOracleFaces).not.toEqual(restartedSecondFaces);
+    expect(secondSessionFaces).toEqual(secondOracleFaces);
+  });
+
   it.each([3_943_004, 3_943_007])(
     'uses one canonical state for generated room %i capsule, fixture, and authorization',
     (seed) => {
@@ -387,6 +789,8 @@ describe('authoritative engine round session', () => {
         digest: authorizationCapsule.digest,
       }));
       expect(serialized.encounter.state).toEqual(session.currentState());
+      expect(canonicalJson(decodeSessionSnapshotV1(JSON.parse(prepared.snapshot.fixtureJson) as unknown)))
+        .toBe(canonicalJson(session.currentState()));
       expect(session.currentState().pendingDecisions.some((decision) =>
         decision.kind === 'death_save')).toBe(false);
       for (const actorId of prepared.snapshot.capsule.request?.actors ?? []) {
@@ -644,5 +1048,217 @@ describe('authoritative engine round session', () => {
     }]);
     expect(session.currentState().combatants.find((entry) => entry.profile.id === ARCHER_ID)?.turn.dodging)
       .toBe(true);
+  });
+
+  it('command boundary advancement and rollback preserve independent state events revisions and RNG', () => {
+    const positioned = segmentedState(new Map([
+      [FOCUS_ID, { column: 5, row: 5 }],
+      [KILLER_ID, { column: 6, row: 5 }],
+    ]));
+    const session = new EngineRoundSession(
+      positioned,
+      mulberry32(58_310_201),
+      { kind: 'unattended', askDefault: 'decline' },
+    );
+    session.beginRoundWithoutSkipping(REQUEST, null);
+    const active = session.currentState();
+    let acceptedApplications = 0;
+    let acceptedCompletions = 0;
+    const accepted = runCommandBoundaryTransaction(
+      active,
+      { type: 'dodge', actor: FOCUS_ID, cost: 'action' },
+      mulberry32(58_310_202),
+      { kind: 'unattended', askDefault: 'decline' },
+      null,
+      {
+        attempted: (): void => { acceptedApplications += 1; },
+        completed: (): void => { acceptedCompletions += 1; },
+      },
+    );
+    expect(acceptedApplications).toBe(1);
+    expect(acceptedCompletions).toBe(1);
+    expect(accepted.state.revision).toBe(active.revision + accepted.revisionDelta);
+    expect(accepted.events).toEqual([
+      expect.objectContaining({
+        type: 'resource_spent', combatant: FOCUS_ID, resource: 'action', purpose: 'Dodge',
+      }),
+      expect.objectContaining({
+        type: 'stance_started', combatant: FOCUS_ID, stance: 'dodging',
+      }),
+    ]);
+    expect(accepted.state.combatants.find((entry) => entry.profile.id === FOCUS_ID)?.turn.dodging).toBe(true);
+
+    const prePostPositioned = segmentedState(new Map([
+      [FOCUS_ID, { column: 5, row: 5 }],
+      [KILLER_ID, { column: 6, row: 5 }],
+      [BRUTE_ID, { column: 2, row: 5 }],
+    ]));
+    const prePostSession = new EngineRoundSession(
+      prePostPositioned,
+      mulberry32(58_310_204),
+      { kind: 'unattended', askDefault: 'decline' },
+    );
+    prePostSession.beginRoundWithoutSkipping(REQUEST, null);
+    const beforePreBoundary = prePostSession.currentState();
+    const pendingBeforeCommand = reduceSessionEncounter(beforePreBoundary, {
+      type: 'move', actor: FOCUS_ID, path: [{ column: 4, row: 5 }], cause: 'voluntary',
+    }, mulberry32(58_310_205)).state;
+    expect(pendingBeforeCommand.pendingDecisions).toEqual([
+      expect.objectContaining({ kind: 'reaction_offer', combatant: KILLER_ID }),
+    ]);
+    let boundaryAttempts = 0;
+    let boundaryCompletions = 0;
+    const prePost = runCommandBoundaryTransaction(
+      pendingBeforeCommand,
+      { type: 'move', actor: FOCUS_ID, path: [{ column: 5, row: 5 }], cause: 'voluntary' },
+      mulberry32(58_310_206),
+      { kind: 'unattended', askDefault: 'decline' },
+      null,
+      {
+        attempted: (): void => { boundaryAttempts += 1; },
+        completed: (): void => { boundaryCompletions += 1; },
+      },
+    );
+    expect(boundaryAttempts).toBe(3);
+    expect(boundaryCompletions).toBe(3);
+    expect(prePost.fallbackResolutions.map((resolution) => resolution.combatant))
+      .toEqual([KILLER_ID, BRUTE_ID]);
+    expect(prePost.events.filter((event) =>
+      event.type === 'pending_decision_resolved' || event.type === 'movement_completed' ||
+      event.type === 'pending_decision_queued').map((event) => event.type)).toEqual([
+      'pending_decision_resolved',
+      'pending_decision_queued',
+      'movement_completed',
+      'pending_decision_resolved',
+    ]);
+    expect(prePost.state.pendingDecisions).toEqual([]);
+
+    const provenance = RollProvenance.recording(transactionalRng(mulberry32(58_310_207)));
+    const callerOwnedRng = provenance.asRng();
+    recordBoundaryPrefixDraw(callerOwnedRng);
+    const beforeAttemptCount = provenance.trace().attempts.length;
+    const withDrawSuffix = runCommandBoundaryTransaction(active, {
+      type: 'attack', actor: FOCUS_ID, target: KILLER_ID, attackBonus: 100, criticalFloor: 20,
+      rollMode: 'normal', attackerCanSeeTarget: true, targetCanSeeAttacker: true,
+      damage: {
+        terms: [{ type: damageType('Slashing'), dice: { count: 1, sides: dieSides(8), modifier: 0 } }],
+        critical: false, responses: [],
+      },
+    }, callerOwnedRng, { kind: 'unattended', askDefault: 'decline' }, null);
+    expect(beforeAttemptCount).toBe(1);
+    expect(withDrawSuffix.dieRolls).toEqual(provenance.trace().attempts.slice(beforeAttemptCount));
+    expect(withDrawSuffix.dieRolls.length).toBeGreaterThan(0);
+    expect(withDrawSuffix.dieRolls).not.toContainEqual(provenance.trace().attempts[0]);
+
+    const rejectedRng = mulberry32(58_310_203);
+    const beforeRng = rejectedRng.snapshot();
+    let refusedApplications = 0;
+    let refusedCompletions = 0;
+    let refusalError: unknown;
+    try {
+      runCommandBoundaryTransaction(active, {
+      type: 'attack', actor: FOCUS_ID, target: KILLER_ID, attackBonus: 7, criticalFloor: 20,
+      rollMode: 'normal', attackerCanSeeTarget: true, targetCanSeeAttacker: true,
+      damage: {
+        terms: [{ type: damageType('Slashing'), dice: { count: 1, sides: dieSides(8), modifier: Number.NaN } }],
+        critical: false, responses: [],
+      },
+      }, rejectedRng, { kind: 'unattended', askDefault: 'decline' }, null, {
+        attempted: (): void => { refusedApplications += 1; },
+        completed: (): void => { refusedCompletions += 1; },
+      });
+    } catch (error: unknown) {
+      refusalError = error;
+    }
+    expect(refusalError).toBeInstanceOf(Error);
+    expect((refusalError as Error).message).toContain('modifier must be finite');
+    expect(refusedApplications).toBe(1);
+    expect(refusedCompletions).toBe(1);
+    expect(rejectedRng.snapshot()).toEqual(beforeRng);
+    expect(active.eventLog).toEqual(session.currentState().eventLog);
+
+    const mainSentinel = new Error('main command identity sentinel');
+    const mainFailureRng = mulberry32(58_310_208);
+    const mainFailureBefore = mainFailureRng.snapshot();
+    const invalidMainCommand: EncounterCommand = {
+      type: 'dodge',
+      get actor(): CombatantId {
+        throw mainSentinel;
+      },
+    };
+    let mainFailure: unknown;
+    let mainAttempts = 0;
+    let mainCompletions = 0;
+    try {
+      runCommandBoundaryTransaction(
+        active,
+        invalidMainCommand,
+        mainFailureRng,
+        { kind: 'unattended', askDefault: 'decline' },
+        null,
+        {
+          attempted: (): void => { mainAttempts += 1; },
+          completed: (): void => { mainCompletions += 1; },
+        },
+      );
+    } catch (error: unknown) {
+      mainFailure = error;
+    }
+    expect(mainFailure).toBe(mainSentinel);
+    expect({ mainAttempts, mainCompletions }).toEqual({ mainAttempts: 1, mainCompletions: 1 });
+    expect(mainFailureRng.snapshot()).toEqual(mainFailureBefore);
+
+    const preBoundarySentinel = new Error('pre-boundary rollback identity sentinel');
+    const preBoundaryFailureRng = mulberry32(58_310_210);
+    const preBoundaryFailureBefore = preBoundaryFailureRng.snapshot();
+    const invalidAfterPreBoundary: EncounterCommand = {
+      type: 'dodge',
+      get actor(): CombatantId {
+        throw preBoundarySentinel;
+      },
+    };
+    let preBoundaryFailure: unknown;
+    try {
+      runCommandBoundaryTransaction(
+        pendingBeforeCommand,
+        invalidAfterPreBoundary,
+        preBoundaryFailureRng,
+        { kind: 'unattended', askDefault: 'take' },
+        null,
+      );
+    } catch (error: unknown) {
+      preBoundaryFailure = error;
+    }
+    expect(preBoundaryFailure).toBe(preBoundarySentinel);
+    expect(preBoundaryFailureRng.snapshot()).toEqual(preBoundaryFailureBefore);
+
+    const automaticSentinel = new Error('automatic boundary identity sentinel');
+    const automaticFailureRng = mulberry32(58_310_209);
+    const automaticFailureBefore = automaticFailureRng.snapshot();
+    let automaticFailure: unknown;
+    let automaticAttempts = 0;
+    let automaticCompletions = 0;
+    try {
+      runCommandBoundaryTransaction(
+        active,
+        { type: 'move', actor: FOCUS_ID, path: [{ column: 4, row: 5 }], cause: 'voluntary' },
+        automaticFailureRng,
+        { kind: 'unattended', askDefault: 'decline' },
+        null,
+        {
+          attempted: (): void => { automaticAttempts += 1; },
+          completed: (): void => {
+            automaticCompletions += 1;
+            if (automaticCompletions === 2) throw automaticSentinel;
+          },
+        },
+      );
+    } catch (error: unknown) {
+      automaticFailure = error;
+    }
+    expect(automaticFailure).toBe(automaticSentinel);
+    expect({ automaticAttempts, automaticCompletions })
+      .toEqual({ automaticAttempts: 2, automaticCompletions: 2 });
+    expect(automaticFailureRng.snapshot()).toEqual(automaticFailureBefore);
   });
 });

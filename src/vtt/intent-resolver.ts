@@ -40,7 +40,7 @@ import {
   type ResolvedTurnMechanics,
 } from './turn-proposal';
 import type { EngineOmittedRider } from './option-modeling';
-import { legalMultiattackCombinations } from './turn-option-registry';
+import { legalMultiattackCombinations } from './offers/offer-declarations';
 
 export type {
   EngineActionId,

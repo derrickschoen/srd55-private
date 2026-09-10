@@ -72,6 +72,7 @@ import {
   type RepoRelativeKbPath,
 } from '../../../src/vtt/knowledge-base-contract';
 import type { KbReadRecord } from '../../../src/vtt/mcp/knowledge-base';
+import { decodeChallengeRoomProvenanceV1 } from '../../../src/vtt/challenge-room-fixture';
 import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
 
 const DEFAULT_KB_HASH = '00776f3f2d4cd7468a1eb2a63028e9c3f846b43b14a4e5787d3e9c94e02633c0';
@@ -853,9 +854,100 @@ describe('AI-DM arena', () => {
     ['brutal', 'tests/fixtures/arena-basis-brutal'],
     ['brutal-b', 'tests/fixtures/arena-basis-brutal-b'],
     ['scenario', 'tests/fixtures/arena-scenarios'],
+    ['challenge', 'tests/fixtures/arena-basis-challenge'],
   ] as const)('maps the %s basis to its frozen fixture directory', (basis, directory) => {
-    expect(basisFixturesPath({ cwd: process.cwd(), basis }))
+    expect(basisFixturesPath({
+      cwd: process.cwd(),
+      basis,
+      experimentPolicy: { roundWallMs: 180_000, basisDirectory: null },
+    }))
       .toBe(join(process.cwd(), directory));
+  });
+
+  it('parses the exact promo180 wall, basis directory, and per-arm instruction flags', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-promo180-parse-'));
+    const basisDirectory = join(directory, 'heldout');
+    const bundle = join(directory, 'luna-steering-kb');
+    const common = [
+      '--rooms', '1', '--reps', '1', '--seed', '5119001',
+      '--out', join(directory, 'arena.jsonl'), '--interleave',
+      '--arm', 'luna-low-baseline:gpt-5.6-luna:low:gpt-5.6-luna:high',
+      '--arm', 'luna-low-steered:gpt-5.6-luna:low:gpt-5.6-luna:high',
+      '--arm', 'luna-medium-steered:gpt-5.6-luna:medium:gpt-5.6-luna:high',
+      '--arm', 'sol-high:gpt-5.6-sol:high:gpt-5.6-luna:high',
+      '--round-wall-ms', '180000', '--basis-dir', basisDirectory,
+      '--arm-instruction-source', 'luna-low-baseline:none',
+      '--arm-instruction-source', 'luna-low-steered:kb',
+      '--arm-kb', `luna-low-steered:${bundle}`,
+      '--arm-instruction-source', 'luna-medium-steered:kb',
+      '--arm-kb', `luna-medium-steered:${bundle}`,
+      '--arm-instruction-source', 'sol-high:none',
+    ] as const;
+    const parsed = parseArenaArgs(common);
+
+    expect(parsed.experimentPolicy).toEqual({
+      roundWallMs: 180_000,
+      basisDirectory,
+    });
+    expect(parsed.armInstructions).toEqual([
+      { label: 'luna-low-baseline', source: { instructionSource: 'none', skill: null } },
+      { label: 'luna-low-steered', source: { instructionSource: 'kb', skill: null, kbPath: bundle } },
+      { label: 'luna-medium-steered', source: { instructionSource: 'kb', skill: null, kbPath: bundle } },
+      { label: 'sol-high', source: { instructionSource: 'none', skill: null } },
+    ]);
+    expect(parsed.arms.map((arm) => ({ label: arm.label, source: arm.instructionSource }))).toEqual([
+      { label: 'luna-low-baseline', source: 'none' },
+      { label: 'luna-low-steered', source: 'kb' },
+      { label: 'luna-medium-steered', source: 'kb' },
+      { label: 'sol-high', source: 'none' },
+    ]);
+    expect(basisFixturesPath(parsed)).toBe(basisDirectory);
+    expect(() => parseArenaArgs([...common, '--round-wall-ms', '179999']))
+      .toThrow('--round-wall-ms must be exactly 180000');
+    expect(() => parseArenaArgs(common.map((argument) =>
+      argument === `luna-medium-steered:${bundle}`
+        ? `luna-medium-steered:${join(directory, 'different-kb')}`
+        : argument,
+    ))).toThrow('All KB-steered arms must use the same frozen knowledge bundle');
+    expect(() => parseArenaArgs([
+      '--rooms', '1', '--reps', '1', '--seed', '5119001',
+      '--out', join(directory, 'inherited-kb.jsonl'), '--interleave',
+      '--instruction-source', 'kb', '--kb', DEFAULT_AI_DM_KB_ROOT,
+      '--arm', 'luna-low-baseline:gpt-5.6-luna:low:gpt-5.6-luna:high',
+      '--arm', 'luna-low-steered:gpt-5.6-luna:low:gpt-5.6-luna:high',
+    ])).toThrow('Arena arm luna-low-baseline must use instruction source none.');
+  });
+
+  it('parses the closed challenge basis and preserves B C A D room order', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-challenge-order-'));
+    const config = parseArenaArgs([
+      '--rooms', '3', '--reps', '1', '--seed', '5831001', '--basis', 'challenge',
+      '--out', join(directory, 'challenge.jsonl'), '--dry-run',
+    ]);
+    expect(config).toMatchObject({ basis: 'challenge', seed: 5_831_001, rooms: 3, generateMissingRooms: false });
+    const roomOrder = Array.from({ length: config.rooms }, (_unused, index) => {
+      const seed = config.seed + index;
+      const path = join(basisFixturesPath(config), `seed-${String(seed)}.provenance.json`);
+      return decodeChallengeRoomProvenanceV1(JSON.parse(readFileSync(path, 'utf8')) as unknown).roomId;
+    });
+    expect(roomOrder).toEqual(['B', 'C', 'A']);
+  });
+
+  it('refuses arena execution while any requested room is a feasibility candidate', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-challenge-candidate-'));
+    const config = parseArenaArgs([
+      '--rooms', '4', '--reps', '1', '--seed', '5831001', '--basis', 'challenge',
+      '--out', join(directory, 'challenge.jsonl'), '--dry-run',
+    ]);
+    await expect(runArena(config, { heartbeat: () => undefined })).rejects.toThrow('Challenge room D is not ready_for_witness');
+  });
+
+  it('rejects generation missing seeds and more than four challenge rooms', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-challenge-parse-'));
+    const common = ['--reps', '1', '--basis', 'challenge', '--out', join(directory, 'challenge.jsonl'), '--dry-run'] as const;
+    expect(() => parseArenaArgs(['--rooms', '1', '--seed', '5831002', ...common])).toThrow('requires --seed 5831001');
+    expect(() => parseArenaArgs(['--rooms', '5', '--seed', '5831001', ...common])).toThrow('exactly four consecutive rooms');
+    expect(() => parseArenaArgs(['--rooms', '1', '--seed', '5831001', '--generate-missing-rooms', ...common])).toThrow('unavailable for the closed challenge basis');
   });
 
   it('loads the first frozen brutal-b room and executes its multi-legendary-window room', { timeout: 30_000 }, async () => {
@@ -918,7 +1010,7 @@ describe('AI-DM arena', () => {
     expect(parseArenaArgs([...common, '--basis', 'brutal']).basis).toBe('brutal');
     expect(parseArenaArgs([...common, '--basis', 'brutal-b']).basis).toBe('brutal-b');
     expect(() => parseArenaArgs([...common, '--basis', 'nightmare']))
-      .toThrow('--basis must be standard, hard, brutal, brutal-b, or scenario.');
+      .toThrow('--basis must be standard, hard, brutal, brutal-b, scenario, or challenge.');
     expect(() => parseArenaArgs([...common, '--party-policy', 'unknown-policy']))
       .toThrow('--party-policy must be heuristic_v0 or symmetric_evaluator_v1.');
   });
@@ -1229,7 +1321,8 @@ describe('AI-DM arena', () => {
     }
   });
 
-  it('suppresses every intel context surface while attributing off rows and preserving full bytes', { timeout: 30_000 }, async () => {
+  // D606: D544-named marginal-duration case (25 s alone against the 30 s wall); wall raised to 60 s pending the cost-cutting lane.
+  it('suppresses every intel context surface while attributing off rows and preserving full bytes', { timeout: 60_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-intel-mode-'));
     const common = [
       '--rooms', '1', '--reps', '1', '--seed', '3943001', '--dry-run',
@@ -1732,7 +1825,7 @@ describe('AI-DM arena', () => {
     expect(rows.map(({ arm }) => arm)).toEqual(['control', 'candidate']);
   });
 
-  it('applies escalation to only the configured arm and attributes the resulting row', { timeout: 30_000 }, async () => {
+  it('keeps configured escalation dormant after one invalid submission and attributes arm-base correction', { timeout: 30_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-arm-escalation-'));
     const config = parseArenaArgs([
       '--rooms', '1', '--reps', '1', '--seed', '3943001',
@@ -1753,9 +1846,10 @@ describe('AI-DM arena', () => {
     }));
     expect(rows[1]).toEqual(expect.objectContaining({
       arm: 'tiered',
-      plannedBy: { model: 'model-escalation', effort: 'xhigh' },
-      escalated: true,
-      escalationModel: 'model-escalation',
+      callsPerRound: 2,
+      plannedBy: { model: 'model-tiered', effort: 'high' },
+      escalated: false,
+      escalationModel: null,
     }));
   });
 

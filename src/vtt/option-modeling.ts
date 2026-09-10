@@ -1,10 +1,12 @@
 import type { EncounterState } from '../combat/encounter';
+import { canonicalJson } from '../commands/canonical-json';
 import { combatantSpace } from '../combat/combat-rules';
 import { minimumSpaceDistance } from '../combat/creature-space';
 import type { MonsterAction, MonsterBonusAction } from '../combat/statblock';
 import { combatantsAreAllies } from '../combat/allies';
 import type { CombatantId } from '../combat/values';
 import type { Brand } from '../domain/ids';
+import { sha256 } from '../crypto/sha256';
 import { spellDefinition } from '../combat/spells/definitions';
 import type {
   EngineActionId,
@@ -13,12 +15,23 @@ import type {
   EngineMovementObjective,
   EngineSpellId,
 } from './turn-proposal';
+import { canonicalOfferBody, type EngineOfferEnvelope } from './offers/offer-envelope';
 
 export type EngineOptionId = Brand<string, 'EngineOptionId'>;
 export type EngineHumanOptionId = Brand<string, 'EngineHumanOptionId'>;
 
 export const engineOptionId = (value: string): EngineOptionId => value as EngineOptionId;
 export const engineHumanOptionId = (value: string): EngineHumanOptionId => value as EngineHumanOptionId;
+
+export function engineOfferableOption(offer: EngineOfferEnvelope): EngineOfferableOption {
+  const body = canonicalOfferBody(offer);
+  return {
+    optionId: engineOptionId(
+      `option:${String(body.revision)}:${sha256(canonicalJson(body)).slice(0, 48)}`,
+    ),
+    ...body,
+  };
+}
 
 interface EngineOmittedRiderSource {
   readonly sourceActionId: EngineActionId;

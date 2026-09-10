@@ -1,4 +1,4 @@
-import { access, mkdtemp, writeFile } from 'node:fs/promises';
+import { access, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import {
@@ -36,6 +36,8 @@ import {
 } from '../src/vtt/agent-session';
 import type { LocalOpenAiConfig } from '../src/vtt/agent-adapters/local-openai';
 import { loadArenaFixture } from '../src/vtt/mcp/entrypoint';
+import { decodeArenaBasisEnvelopeV1 } from '../src/vtt/arena-fixture';
+import { decodeChallengeRoomProvenanceV1 } from '../src/vtt/challenge-room-fixture';
 import {
   applyRoomInitiativeProfile,
   generateRoom,
@@ -66,7 +68,7 @@ import {
 import { BLIND_TURN_CONTEXT_MAX_BYTES } from '../src/vtt/blind-turn-context';
 import { BLIND_STATE_PRIMER_VERSION } from './ai-dm-board-snapshot';
 
-export const ARENA_BASES = ['standard', 'hard', 'brutal', 'brutal-b', 'scenario'] as const;
+export const ARENA_BASES = ['standard', 'hard', 'brutal', 'brutal-b', 'scenario', 'challenge'] as const;
 export type ArenaBasis = (typeof ARENA_BASES)[number];
 
 export interface ArenaProbeVerdict {
@@ -89,6 +91,16 @@ interface ArenaArmBase {
 }
 
 export type ArenaArm = ArenaArmBase & AgentInstructionSource;
+
+export interface ArenaExperimentPolicy {
+  readonly roundWallMs: 180000;
+  readonly basisDirectory: string | null;
+}
+
+export interface ArenaArmInstruction {
+  readonly label: string;
+  readonly source: AgentInstructionSource;
+}
 
 interface ArenaConfigBase {
   readonly dmMode: DmMode;
@@ -127,6 +139,8 @@ interface ArenaConfigBase {
   readonly generateMissingRooms: boolean;
   readonly localOpenAi: LocalOpenAiConfig | null;
   readonly boardImageMode: BoardImageMode;
+  readonly experimentPolicy: ArenaExperimentPolicy;
+  readonly armInstructions: readonly ArenaArmInstruction[];
 }
 
 export type ArenaConfig = ArenaConfigBase & AgentInstructionSource;
@@ -302,6 +316,8 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
   const rawArms: string[] = [];
   const rawArmCombatModels: string[] = [];
   const rawArmOverridePolicies: string[] = [];
+  const rawArmInstructionSources: string[] = [];
+  const rawArmKbs: string[] = [];
   for (let index = 0; index < argumentsValue.length; index += 1) {
     const option = argumentsValue[index];
     if (option === '--dry-run') { dryRun = true; continue; }
@@ -323,12 +339,15 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
       '--turn-context-max-bytes',
       '--board-image',
       '--dm-mode', '--blind-repair-arm', '--blind-max-attempts', '--blind-facts',
+      '--round-wall-ms', '--basis-dir', '--arm-instruction-source', '--arm-kb',
       '--basis', '--arm', '--local-base-url', '--local-model', '--local-api-key', '--local-think',
     ].includes(option ?? '')) throw new TypeError(`Unknown arena option ${option ?? '<missing>'}.`);
     const value = requiredValue(argumentsValue, index, option ?? '<missing>');
     if (option === '--arm') rawArms.push(value);
     else if (option === '--arm-combat-model') rawArmCombatModels.push(value);
     else if (option === '--arm-override-policy') rawArmOverridePolicies.push(value);
+    else if (option === '--arm-instruction-source') rawArmInstructionSources.push(value);
+    else if (option === '--arm-kb') rawArmKbs.push(value);
     else values.set(option ?? '', value);
     index += 1;
   }
@@ -399,13 +418,23 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
       }
     : null;
   const instructionSource = parsedInstructionSource(values, cwd, selectedCli);
+  const roundWallMs = positiveInteger(
+    values.get('--round-wall-ms') ?? '180000',
+    '--round-wall-ms',
+  );
+  if (roundWallMs !== 180_000) {
+    throw new TypeError('--round-wall-ms must be exactly 180000.');
+  }
+  const basisDirectory = values.has('--basis-dir')
+    ? resolve(cwd, values.get('--basis-dir') ?? '')
+    : null;
   const reactionAskDefault = values.get('--reaction-ask-default') ?? 'decline';
   if (reactionAskDefault !== 'decline' && reactionAskDefault !== 'take') {
     throw new TypeError('--reaction-ask-default must be decline or take.');
   }
   const basis = values.get('--basis') ?? 'standard';
   if (!ARENA_BASES.includes(basis as ArenaBasis)) {
-    throw new TypeError('--basis must be standard, hard, brutal, brutal-b, or scenario.');
+    throw new TypeError('--basis must be standard, hard, brutal, brutal-b, scenario, or challenge.');
   }
   const combatModel = values.get('--combat-model') ?? 'initiative_segments_v1';
   if (!COMBAT_MODELS.includes(combatModel as CombatModel)) {
@@ -494,6 +523,53 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
     }
     armOverridePolicies.set(label, policy as OverridePolicy);
   }
+  const armInstructionKinds = new Map<string, 'none' | 'kb'>();
+  for (const raw of rawArmInstructionSources) {
+    const [label, source, extra] = raw.split(':');
+    if (label === undefined || !/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/u.test(label) ||
+      (source !== 'none' && source !== 'kb') || extra !== undefined) {
+      throw new TypeError('--arm-instruction-source must use LABEL:none|kb syntax.');
+    }
+    if (armInstructionKinds.has(label)) {
+      throw new TypeError(`Duplicate --arm-instruction-source for ${label}.`);
+    }
+    armInstructionKinds.set(label, source);
+  }
+  const armKbPaths = new Map<string, string>();
+  for (const raw of rawArmKbs) {
+    const separator = raw.indexOf(':');
+    const label = separator < 0 ? '' : raw.slice(0, separator);
+    const path = separator < 0 ? '' : raw.slice(separator + 1);
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/u.test(label) || path.length === 0) {
+      throw new TypeError('--arm-kb must use LABEL:PATH syntax.');
+    }
+    if (armKbPaths.has(label)) throw new TypeError(`Duplicate --arm-kb for ${label}.`);
+    armKbPaths.set(label, resolve(cwd, path));
+  }
+  const armInstructions = [...armInstructionKinds].map(([label, source]): ArenaArmInstruction => {
+    const kbPath = armKbPaths.get(label);
+    if (source === 'kb' && kbPath === undefined) {
+      throw new TypeError(`--arm-instruction-source ${label}:kb requires --arm-kb ${label}:PATH.`);
+    }
+    if (source === 'none' && kbPath !== undefined) {
+      throw new TypeError(`--arm-kb ${label}:PATH requires --arm-instruction-source ${label}:kb.`);
+    }
+    return {
+      label,
+      source: source === 'kb'
+        ? { instructionSource: 'kb', skill: null, kbPath: kbPath ?? '' }
+        : { instructionSource: 'none', skill: null },
+    };
+  });
+  const orphanArmKb = [...armKbPaths.keys()].find((label) => !armInstructionKinds.has(label));
+  if (orphanArmKb !== undefined) {
+    throw new TypeError(`--arm-kb ${orphanArmKb}:PATH requires --arm-instruction-source ${orphanArmKb}:kb.`);
+  }
+  const knowledgeBundlePaths = armInstructions.flatMap((entry) =>
+    entry.source.instructionSource === 'kb' ? [entry.source.kbPath] : []);
+  if (new Set(knowledgeBundlePaths).size > 1) {
+    throw new TypeError('All KB-steered arms must use the same frozen knowledge bundle.');
+  }
   const arms = rawArms.map((raw): ArenaArm => {
     const [label, armModel, armEffort, armEscalationModel, armEscalationEffort, extra] = raw.split(':');
     if (label === undefined || !/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/u.test(label) ||
@@ -509,8 +585,9 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
       !CONVERSATION_EFFORTS.includes(armEscalationEffort as ConversationEffort)) {
       throw new TypeError('--arm escalation effort must be low, medium, high, or xhigh.');
     }
+    const armInstruction = armInstructions.find((entry) => entry.label === label)?.source ?? instructionSource;
     return {
-      ...instructionSource,
+      ...armInstruction,
       label,
       model: armModel,
       effort: armEffort as ConversationEffort,
@@ -532,6 +609,19 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
     throw new TypeError('--arm is only valid with --interleave.');
   }
   const armLabels = new Set(arms.map((arm) => arm.label));
+  const unknownInstructionArm = armInstructions.find((entry) => !armLabels.has(entry.label));
+  if (unknownInstructionArm !== undefined) {
+    throw new TypeError(`--arm-instruction-source names unknown arm ${unknownInstructionArm.label}.`);
+  }
+  for (const arm of arms) {
+    if ((arm.label.includes('baseline') || arm.label === 'sol-high') &&
+      arm.instructionSource !== 'none') {
+      throw new TypeError(`Arena arm ${arm.label} must use instruction source none.`);
+    }
+  }
+  if (!interleave && armInstructions.length > 0) {
+    throw new TypeError('--arm-instruction-source is only valid with --interleave.');
+  }
   const unknownArmModel = [...armCombatModels.keys()].find((label) => !armLabels.has(label));
   if (unknownArmModel !== undefined) {
     throw new TypeError(`--arm-combat-model names unknown arm ${unknownArmModel}.`);
@@ -545,6 +635,11 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
   }
   if (!interleave && armOverridePolicies.size > 0) {
     throw new TypeError('--arm-override-policy is only valid with --interleave.');
+  }
+  if (basis === 'challenge') {
+    if (seed !== 5_831_001) throw new TypeError('The challenge basis requires --seed 5831001.');
+    if (rooms > 4) throw new RangeError('The challenge basis contains exactly four consecutive rooms.');
+    if (generateMissingRooms) throw new TypeError('--generate-missing-rooms is unavailable for the closed challenge basis.');
   }
   return {
     dmMode: dmMode as DmMode,
@@ -584,6 +679,8 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
     generateMissingRooms,
     localOpenAi,
     boardImageMode: boardImageMode as BoardImageMode,
+    experimentPolicy: { roundWallMs: 180_000, basisDirectory },
+    armInstructions,
   };
 }
 
@@ -622,7 +719,10 @@ function stdoutHeartbeat(line: string): void {
   process.stdout.write(`[arena] ${line}\n`);
 }
 
-export function basisFixturesPath(config: Pick<ArenaConfig, 'cwd' | 'basis'>): string {
+export function basisFixturesPath(config: Pick<ArenaConfig, 'cwd' | 'basis' | 'experimentPolicy'>): string {
+  if (config.experimentPolicy.basisDirectory !== null) {
+    return config.experimentPolicy.basisDirectory;
+  }
   const basis = config.basis;
   switch (basis) {
     case 'standard': return resolve(config.cwd, 'tests/fixtures/arena-basis');
@@ -630,6 +730,7 @@ export function basisFixturesPath(config: Pick<ArenaConfig, 'cwd' | 'basis'>): s
     case 'brutal': return resolve(config.cwd, 'tests/fixtures/arena-basis-brutal');
     case 'brutal-b': return resolve(config.cwd, 'tests/fixtures/arena-basis-brutal-b');
     case 'scenario': return resolve(config.cwd, 'tests/fixtures/arena-scenarios');
+    case 'challenge': return resolve(config.cwd, 'tests/fixtures/arena-basis-challenge');
   }
   basis satisfies never;
   throw new TypeError(`Unknown arena basis ${String(basis)}.`);
@@ -642,6 +743,9 @@ async function frozenRoomStates(config: ArenaConfig): Promise<readonly import('.
   if (config.basis === 'scenario' && config.generateMissingRooms) {
     throw new TypeError('--generate-missing-rooms is unavailable for the frozen scenario basis.');
   }
+  if (config.basis === 'challenge' && config.generateMissingRooms) {
+    throw new TypeError('--generate-missing-rooms is unavailable for the closed challenge basis.');
+  }
   const fixturesPath = basisFixturesPath(config);
   return Promise.all(Array.from({ length: config.rooms }, async (_unused, index) => {
     const seed = config.seed + index;
@@ -650,12 +754,24 @@ async function frozenRoomStates(config: ArenaConfig): Promise<readonly import('.
       : `seed-${String(seed)}.json`);
     try {
       await access(fixturePath);
+      if (config.basis === 'challenge') {
+        const sidecarPath = resolve(fixturesPath, `seed-${String(seed)}.provenance.json`);
+        const sidecar = decodeChallengeRoomProvenanceV1(JSON.parse(await readFile(sidecarPath, 'utf8')) as unknown);
+        const room = decodeArenaBasisEnvelopeV1(JSON.parse(await readFile(fixturePath, 'utf8')) as unknown, { mode: 'challenge' });
+        if (sidecar.seed !== seed || room.spec.seed !== seed) {
+          throw new TypeError(`Challenge sidecar seed ${String(sidecar.seed)} does not match envelope seed ${String(room.spec.seed)}.`);
+        }
+        if (sidecar.certification !== 'ready_for_witness') {
+          throw new TypeError(`Challenge room ${sidecar.roomId} is not ready_for_witness.`);
+        }
+        return room.encounter.state;
+      }
       return applyRoomInitiativeProfile(await loadArenaFixture(fixturePath), config.initiativeProfile);
     } catch (error) {
       if (!config.generateMissingRooms || !(error instanceof Error) ||
         !('code' in error) || error.code !== 'ENOENT') throw error;
       return generateRoom(seed, {
-        difficulty: config.basis === 'scenario'
+        difficulty: config.basis === 'scenario' || config.basis === 'challenge'
           ? 'standard'
           : config.basis === 'brutal-b'
             ? 'brutal'
@@ -699,13 +815,20 @@ export function arenaRows(
   seeds: readonly number[],
 ): readonly ArenaRow[] {
   return rows.map((row): ArenaRow => {
+    const restrictedWall = row.roundWallTimedOut
+      ? config.experimentPolicy.roundWallMs
+      : row.policyElapsedMs;
+    if (!Number.isFinite(restrictedWall) || restrictedWall < 0 ||
+      restrictedWall > config.experimentPolicy.roundWallMs) {
+      throw new RangeError('Arena restricted wall must be within the registered round wall.');
+    }
     const arenaRow: ArenaRow = {
     ...conversationPart(row),
     seed: seeds[row.room - 1]!,
     basis: config.basis,
     probeVerdict: extractArenaProbeVerdict(config.basis, row.authorizedPlan),
     arm,
-    wall: row.wallPerCreature,
+    wall: restrictedWall,
     };
     decodeArenaRowEvidence(arenaRow, 'increment_2');
     return arenaRow;
@@ -758,6 +881,7 @@ function conversationConfig(
     cwd: config.cwd,
     cliBin: config.cliBin,
     timeoutMs: config.timeoutMs,
+    roundWallMs: config.experimentPolicy.roundWallMs,
     reactionAskDefault: config.reactionAskDefault,
     captureRlData: config.captureRlData,
     localOpenAi: config.localOpenAi === null ? null : {
