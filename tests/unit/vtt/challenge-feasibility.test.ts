@@ -1,4 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
+import {
+  createEncounter,
+  reduceEncounter,
+  type EncounterCommandReducer,
+  type EncounterState,
+} from '../../../src/combat/encounter';
+import type { EncounterCommand, EncounterEvent } from '../../../src/combat/events';
+import { mulberry32, transactionalRng } from '../../../src/combat/random';
 import { decodeArenaBasisEnvelopeV1 } from '../../../src/vtt/arena-fixture';
 import {
   assertRoomDBoundedTerminalState,
@@ -17,24 +25,34 @@ import {
   probeReducerContinuationV1,
   probeRetainedSiblingLimitSampling,
   probeScenarioAccountingV1,
+  runChallengeReducerFeasibility,
   roomDBoundedFighterMenu,
   roomDBoundedGuardPolicyCommand,
   validateRoomDBoundedFighterMenu,
+  type ChallengeReducerFeasibilityReportV1,
   type RoomDBoundedFractionV1,
 } from '../../../src/vtt/challenge-feasibility';
+import { runChallengeFeasibilityCli } from '../../../tools/challenge-feasibility';
 import { runCommandBoundaryTransaction } from '../../../src/vtt/engine-round-application';
 import { ARENA_REACTION_OFFER_POLICY } from '../../../src/vtt/reaction-offer-host-policy';
 import { regretTurnLegalActions } from '../../../src/vtt/regret/legal-actions';
 import {
   componentTotals,
   exactFraction,
+  exactWeight,
+  RollProvenance,
   rollComponentId,
+  rollOccurrenceId,
+  rollOperationPath,
   type ExactTotalDistribution,
   type RollComponentSpec,
+  type TransactionalRollRng,
 } from '../../../src/combat/roll-provenance';
 import { combatantId, dieSides } from '../../../src/combat/values';
-import type { EncounterCommand, EncounterEvent } from '../../../src/combat/events';
+import { SessionCommandTrialCore } from '../../../src/vtt/session-command-transaction';
+import { reduceSessionEncounter } from '../../../src/vtt/session-encounter-reducer';
 import { declareTestInputs } from '../../helpers/test-inputs';
+import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
 
 const inputs = declareTestInputs({
   fixtures: [
@@ -44,6 +62,20 @@ const inputs = declareTestInputs({
     'tests/fixtures/arena-basis-challenge/seed-5831004.json',
   ],
 });
+
+function fixture(seed: 5831001 | 5831002 | 5831003): Promise<string> {
+  switch (seed) {
+    case 5831001: return Promise.resolve(inputs.fixtures.readText(
+      'tests/fixtures/arena-basis-challenge/seed-5831001.json',
+    ));
+    case 5831002: return Promise.resolve(inputs.fixtures.readText(
+      'tests/fixtures/arena-basis-challenge/seed-5831002.json',
+    ));
+    case 5831003: return Promise.resolve(inputs.fixtures.readText(
+      'tests/fixtures/arena-basis-challenge/seed-5831003.json',
+    ));
+  }
+}
 
 function distributionMass(distribution: ExactTotalDistribution) {
   return distribution.outcomes.reduce(
@@ -58,6 +90,8 @@ function distributionMass(distribution: ExactTotalDistribution) {
 function expression(count: number, sides: number): RollComponentSpec {
   return { kind: 'dice_expression', expression: { count, sides: dieSides(sides), modifier: 0 } };
 }
+
+let report: ChallengeReducerFeasibilityReportV1;
 
 function greatestCommonDivisor(left: bigint, right: bigint): bigint {
   let a = left < 0n ? -left : left;
@@ -188,13 +222,238 @@ const roomD = decodeArenaBasisEnvelopeV1(
 ).encounter.state;
 const migrationEvidence = challengeProvenanceMigrationEvidenceV1(roomA, roomD);
 
+function accountingReactionFixture(): Readonly<{
+  state: EncounterState;
+  moverId: ReturnType<typeof playerProfile>['id'];
+  reactorIds: readonly [
+    ReturnType<typeof monsterProfile>['id'],
+    ReturnType<typeof monsterProfile>['id'],
+  ];
+}> {
+  const mover = playerProfile('feasibility-accounting-mover', { hitPoints: 100, initiativeBonus: 20 });
+  const first = monsterProfile('feasibility-accounting-first', { hitPoints: 100, initiativeBonus: -10 });
+  const second = monsterProfile('feasibility-accounting-second', { hitPoints: 100, initiativeBonus: -20 });
+  const state = reduceEncounter(createEncounter({
+    bounds: { columns: 6, rows: 4 },
+    combatants: [mover, first, second],
+    tokens: [
+      placedToken(mover, 1, 1),
+      placedToken(first, 0, 1),
+      placedToken(second, 1, 0),
+    ],
+  }), { type: 'roll_initiative' }, () => 0.5).state;
+  return { state, moverId: mover.id, reactorIds: [first.id, second.id] };
+}
+
+function accountingMove(
+  moverId: ReturnType<typeof playerProfile>['id'],
+): EncounterCommand {
+  return {
+    type: 'move', actor: moverId,
+    path: [{ column: 2, row: 1 }, { column: 3, row: 1 }],
+    cause: 'voluntary',
+  };
+}
+
+function recordAccountingDraw(rng: TransactionalRollRng, command: EncounterCommand['type']): void {
+  const component = rng.beginComponent({
+    occurrenceId: rollOccurrenceId(`test:feasibility-accounting:${command}`),
+    operationPath: rollOperationPath(`feasibility-accounting/${command}`),
+    source: null,
+    targets: [],
+  }, {
+    kind: 'discrete_branch',
+    outcomes: [
+      { total: 1, weight: exactWeight(1n, 2n) },
+      { total: 2, weight: exactWeight(1n, 2n) },
+    ],
+  });
+  const face = rng.draw({
+    sides: dieSides(2),
+    provenance: component,
+    role: { kind: 'branch_selection' },
+  });
+  rng.finishComponent(component, face);
+}
+
+describe('D584.4 deterministic feasibility accounting closure', () => {
+  it('counts one refused main reducer application as exactly one attempt and completion', () => {
+    const fixtureState = accountingReactionFixture().state;
+    const sentinel = new Error('refused main reducer accounting sentinel');
+    const refused: EncounterCommand = {
+      type: 'dodge',
+      get actor(): ReturnType<typeof playerProfile>['id'] {
+        throw sentinel;
+      },
+    };
+    let attempts = 0;
+    let completions = 0;
+    let failure: unknown;
+    try {
+      runCommandBoundaryTransaction(
+        fixtureState,
+        refused,
+        mulberry32(58_420_201),
+        { kind: 'unattended', askDefault: 'decline' },
+        null,
+        {
+          attempted: (): void => { attempts += 1; },
+          completed: (): void => { completions += 1; },
+        },
+      );
+    } catch (error: unknown) {
+      failure = error;
+    }
+    expect(failure).toBe(sentinel);
+    expect({ attempts, completions }).toEqual({ attempts: 1, completions: 1 });
+  });
+
+  it('counts the main command and each automatic resolver exactly once in event order', () => {
+    const accountingFixture = accountingReactionFixture();
+    let attempts = 0;
+    let completions = 0;
+    const result = runCommandBoundaryTransaction(
+      accountingFixture.state,
+      accountingMove(accountingFixture.moverId),
+      mulberry32(58_420_202),
+      { kind: 'unattended', askDefault: 'decline' },
+      null,
+      {
+        attempted: (): void => { attempts += 1; },
+        completed: (): void => { completions += 1; },
+      },
+    );
+    expect({ attempts, completions }).toEqual({ attempts: 3, completions: 3 });
+    expect(result.fallbackResolutions.map((resolution) => resolution.combatant))
+      .toEqual(accountingFixture.reactorIds);
+    expect(result.events.map((event) => event.type)).toEqual([
+      'pending_decision_queued',
+      'pending_decision_queued',
+      'movement_completed',
+      'pending_decision_resolved',
+      'pending_decision_resolved',
+    ]);
+    expect(result.state.pendingDecisions).toEqual([]);
+  });
+
+  it('retains accounting and provenance attempts while rejecting a throwing automatic batch', () => {
+    const accountingFixture = accountingReactionFixture();
+    const sentinel = new Error('automatic feasibility accounting sentinel');
+    const provenance = RollProvenance.recording(transactionalRng(mulberry32(58_420_203)));
+    const random = provenance.asRng();
+    const commands: EncounterCommand['type'][] = [];
+    let attempts = 0;
+    let completions = 0;
+    const reducer: EncounterCommandReducer = (state, command, rng, options) => {
+      commands.push(command.type);
+      recordAccountingDraw(random, command.type);
+      const reduced = reduceSessionEncounter(state, command, rng, options);
+      if (command.type === 'resolve_pending_decision') throw sentinel;
+      return reduced;
+    };
+    const core = SessionCommandTrialCore.begin({
+      state: accountingFixture.state,
+      random,
+      reducer,
+      boundaryPolicy: { kind: 'unattended', askDefault: 'decline' },
+      guidance: null,
+      boundaryScope: 'initiative_segment',
+      accounting: {
+        attempted: (): void => { attempts += 1; },
+        completed: (): void => { completions += 1; },
+      },
+    });
+
+    expect(() => core.apply(accountingMove(accountingFixture.moverId))).toThrow(sentinel);
+    expect(core.currentState()).toBe(accountingFixture.state);
+    expect(core.snapshot()).toEqual({
+      state: accountingFixture.state,
+      events: [],
+      revisionDelta: 0,
+      fallbackResolutions: [],
+      guidedResolutions: [],
+    });
+    expect(commands).toEqual(['move', 'resolve_pending_decision']);
+    expect({ attempts, completions }).toEqual({ attempts: 2, completions: 2 });
+    expect(provenance.trace().attempts).toHaveLength(2);
+    expect(provenance.trace().committedDraws).toHaveLength(2);
+  });
+
+  it('attaches each event and DrawRecord history to its command checkpoint', () => {
+    const state = decodeArenaBasisEnvelopeV1(
+      JSON.parse(inputs.fixtures.readText('tests/fixtures/arena-basis-challenge/seed-5831001.json')) as unknown,
+      { mode: 'challenge' },
+    ).encounter.state;
+    const actor = state.activeCombatant;
+    if (actor === null) throw new Error('Room B requires an active combatant.');
+    const provenance = RollProvenance.recording(transactionalRng(mulberry32(58_420_204)));
+    const random = provenance.asRng();
+    const first = runCommandBoundaryTransaction(state, {
+      type: 'roll_ability_check', actor, ability: 'strength', skill: null,
+      bonus: 0, dc: 10, rollMode: 'normal', cost: 'none',
+    }, random, ARENA_REACTION_OFFER_POLICY, null);
+    const firstAttemptCount = provenance.trace().attempts.length;
+    const second = runCommandBoundaryTransaction(first.state, {
+      type: 'roll_ability_check', actor, ability: 'wisdom', skill: null,
+      bonus: 0, dc: 10, rollMode: 'normal', cost: 'none',
+    }, random, ARENA_REACTION_OFFER_POLICY, null);
+
+    expect(first.events).toEqual(first.state.eventLog.slice(state.eventLog.length));
+    expect(second.events).toEqual(second.state.eventLog.slice(first.state.eventLog.length));
+    expect(first.events).toHaveLength(1);
+    expect(second.events).toHaveLength(1);
+    expect(first.dieRolls).toEqual(provenance.trace().attempts.slice(0, firstAttemptCount));
+    expect(second.dieRolls).toEqual(provenance.trace().attempts.slice(firstAttemptCount));
+    expect(first.dieRolls).toHaveLength(1);
+    expect(second.dieRolls).toHaveLength(1);
+    expect(provenance.trace().attempts).toEqual([...first.dieRolls, ...second.dieRolls]);
+  });
+
+  it('deterministically reports injected heap exhaustion before an injected wall excess', async () => {
+    const observedHeap = D583_BCA_FEASIBILITY_LIMITS_V1.maxHeapUsedBytes + 17;
+    let fixtureLoads = 0;
+    let nowCalls = 0;
+    const measured = await runChallengeReducerFeasibility(async () => {
+      fixtureLoads += 1;
+      throw new Error('resource exhaustion must precede fixture loading');
+    }, {
+      now: (): number => {
+        nowCalls += 1;
+        return nowCalls === 1 ? 0 : D583_BCA_FEASIBILITY_LIMITS_V1.maxWallMilliseconds + 1;
+      },
+      heapUsed: (): number => observedHeap,
+    });
+    expect(measured.failure).toEqual({
+      kind: 'limit_exhausted',
+      counter: 'heap_used_bytes',
+      observed: observedHeap,
+      limit: D583_BCA_FEASIBILITY_LIMITS_V1.maxHeapUsedBytes,
+    });
+    expect(measured.verdict).toBe('SHELVE_D583');
+    expect({ fixtureLoads, nowCalls }).toEqual({ fixtureLoads: 0, nowCalls: 1 });
+  });
+});
+
 describe('D583 reducer-backed challenge feasibility', () => {
+  beforeAll(async () => {
+    report = await runChallengeReducerFeasibility(fixture);
+  }, 180_000);
+
   it('transactional adapter preserves die provenance across checkpoint replay and rollback', () => {
     expect(migrationEvidence.provenanceManifest).toHaveLength(33);
     expect(migrationEvidence.provenanceManifest.every((record) =>
       record.face >= 1 && record.face <= record.sides &&
       String(record.provenance.occurrenceId).length > 0 &&
       String(record.provenance.operationPath).length > 0)).toBe(true);
+    if (report.verdict === 'GO') {
+      expect(report.totals.maximumDraws).toBeGreaterThan(0);
+      expect(report.totals.reducerApplications).toBeGreaterThan(report.totals.completedLeaves);
+      expect(report.rooms.every((room) => room.base.continuationEquivalent)).toBe(true);
+    } else {
+      expect(report.failure).not.toBeNull();
+      expect(report.rooms).toEqual([]);
+      expect(report.totals.completedLeaves).toBe(0);
+    }
   });
 
   it('successful save damage and capped healing expose explicit draw provenance', () => {
@@ -225,6 +484,45 @@ describe('D583 reducer-backed challenge feasibility', () => {
       { configured: 'never', resolution: 'decline', reactionDraws: 0 },
       { configured: 'ask', resolution: 'decline', reactionDraws: 0 },
     ]);
+  });
+
+  it('independent roll provenance class survives every reducer adapter and owns checkpoints', () => {
+    if (report.verdict === 'GO') {
+      expect(report.failure).toBeNull();
+      expect(report.totals.reducerApplications).toBeGreaterThan(0);
+      expect(report.totals.maximumCommandCheckpoints).toBe(4);
+    } else {
+      expect(report.failure?.kind).toMatch(/^(limit_exhausted|derived_cap_overflow)$/);
+    }
+  });
+
+  it('B C A reducer stages have mass one and report actual applications states heap and wall', () => {
+    expect(report.roomOrder).toEqual(['B', 'C', 'A']);
+    if (report.verdict === 'GO') {
+      expect(report.rooms).toHaveLength(3);
+      for (const room of report.rooms) {
+        expect(room.base).toMatchObject({ mass: { numerator: '1', denominator: '1' } });
+        expect(room.base.reducerApplications).toBeGreaterThan(0);
+        expect(room.base.groupedStates).toBeGreaterThan(0);
+        expect(room.base.peakHeapUsedBytes).toBeGreaterThan(0);
+        expect(room.base.wallMilliseconds).toBeGreaterThan(0);
+      }
+    } else {
+      expect(report.failure).not.toBeNull();
+      expect(report.rooms).toEqual([]);
+    }
+  });
+
+  it('state merging proves equal next commands objective eligibility and provenance requests', () => {
+    if (report.verdict === 'GO') {
+      expect(report.totals.continuationEquivalent).toBe(true);
+      expect(report.rooms.flatMap((room) => [room.base, ...room.variants]).every(
+        (variant) => variant.continuationEquivalent,
+      )).toBe(true);
+    } else {
+      expect(report.totals.continuationEquivalent).toBe(false);
+      expect(report.derivedWitnessCaps).toBeNull();
+    }
   });
 
   it('total-only grouping rejects the 59 2 versus 31 30 Longbow counterexample', () => {
@@ -617,6 +915,27 @@ describe('D583 reducer-backed challenge feasibility', () => {
       maxLiveNodes: 250_000, maxHeapUsedBytes: 1_073_741_824, maxWallMilliseconds: 180_000,
       maxCommandCheckpointsPerBranch: 64, maxDrawsPerBranch: 128,
     });
+    expect(report.limits).toBe(D583_BCA_FEASIBILITY_LIMITS_V1);
+  });
+
+  it('rejects the first variant heap sample without hiding it behind a second reading', async () => {
+    const heapValues = [
+      10,
+      D583_BCA_FEASIBILITY_LIMITS_V1.maxHeapUsedBytes + 1,
+      10,
+    ];
+    const nowValues = [0, 0, 0, D583_BCA_FEASIBILITY_LIMITS_V1.maxWallMilliseconds + 1];
+    const measured = await runChallengeReducerFeasibility(fixture, {
+      now: (): number => nowValues.shift() ?? 0,
+      heapUsed: (): number => heapValues.shift() ?? 10,
+    });
+    expect(measured.failure).toEqual({
+      kind: 'limit_exhausted', counter: 'heap_used_bytes',
+      observed: D583_BCA_FEASIBILITY_LIMITS_V1.maxHeapUsedBytes + 1,
+      limit: D583_BCA_FEASIBILITY_LIMITS_V1.maxHeapUsedBytes,
+    });
+    expect(heapValues).toEqual([10]);
+    expect(nowValues).toEqual([D583_BCA_FEASIBILITY_LIMITS_V1.maxWallMilliseconds + 1]);
   });
 
   it('counts retained sibling nodes in the checked exploration peak', () => {
@@ -662,7 +981,67 @@ describe('D583 reducer-backed challenge feasibility', () => {
     expect(heapSample).toBe(2);
   });
 
+  it('CLI missing and mismatched limit profiles write SHELVE reports without loading fixtures', async () => {
+    const written: ChallengeReducerFeasibilityReportV1[] = [];
+    const io = {
+      loadFixtureText: async (): Promise<string> => { throw new Error('limits failure must precede fixture loading'); },
+      writeReport: async (_output: string, value: ChallengeReducerFeasibilityReportV1): Promise<void> => {
+        written.push(value);
+      },
+    };
+    const base = [
+      '--basis', 'challenge', '--seed', '5831001', '--rooms', '3', '--room-order', 'B,C,A',
+      '--mode', 'reducer', '--out', '/tmp/d583-cli-control.json',
+    ];
+    const missing = await runChallengeFeasibilityCli(base, io);
+    const mismatched = await runChallengeFeasibilityCli([...base, '--limits', 'wrong-profile'], io);
+    expect([missing.report.failure, mismatched.report.failure]).toEqual([
+      { kind: 'missing_limits', counter: 'limits_profile', observed: '<missing>', limit: 'd583_bca_v1' },
+      { kind: 'missing_limits', counter: 'limits_profile', observed: 'wrong-profile', limit: 'd583_bca_v1' },
+    ]);
+    expect(written).toEqual([missing.report, mismatched.report]);
+    expect(written.every((value) => value.verdict === 'SHELVE_D583' && value.rooms.length === 0)).toBe(true);
+  });
+
+  it('CLI valid-profile execution reports the first enforced exhaustion through injected IO', async () => {
+    const written: ChallengeReducerFeasibilityReportV1[] = [];
+    const heapValues = [
+      10,
+      D583_BCA_FEASIBILITY_LIMITS_V1.maxHeapUsedBytes + 1,
+      10,
+    ];
+    const nowValues = [0, 0, 0, D583_BCA_FEASIBILITY_LIMITS_V1.maxWallMilliseconds + 1];
+    const result = await runChallengeFeasibilityCli([
+      '--basis', 'challenge', '--seed', '5831001', '--rooms', '3', '--room-order', 'B,C,A',
+      '--mode', 'reducer', '--limits', 'd583_bca_v1', '--out', '/tmp/d583-cli-exhaustion-control.json',
+    ], {
+      loadFixtureText: fixture,
+      writeReport: async (_output, value): Promise<void> => { written.push(value); },
+      runtime: {
+        now: (): number => nowValues.shift() ?? 0,
+        heapUsed: (): number => heapValues.shift() ?? 10,
+      },
+    });
+    expect(result.report.failure).toEqual({
+      kind: 'limit_exhausted', counter: 'heap_used_bytes',
+      observed: D583_BCA_FEASIBILITY_LIMITS_V1.maxHeapUsedBytes + 1,
+      limit: D583_BCA_FEASIBILITY_LIMITS_V1.maxHeapUsedBytes,
+    });
+    expect(result.report.verdict).toBe('SHELVE_D583');
+    expect(written).toEqual([result.report]);
+    expect(heapValues).toEqual([10]);
+    expect(nowValues).toEqual([D583_BCA_FEASIBILITY_LIMITS_V1.maxWallMilliseconds + 1]);
+  });
+
   it('feasibility fails closed on mass provenance continuation collision or unmeasured variant', () => {
+    if (report.verdict === 'GO') {
+      expect(report.rooms.flatMap((room) => room.variants)).toHaveLength(54);
+      expect(report.totals.mass).toEqual({ numerator: '57', denominator: '1' });
+    } else {
+      expect(report.rooms).toEqual([]);
+      expect(report.totals.mass).toEqual({ numerator: '0', denominator: '1' });
+      expect(report.failure).not.toBeNull();
+    }
     const state = decodeArenaBasisEnvelopeV1(
       JSON.parse(inputs.fixtures.readText('tests/fixtures/arena-basis-challenge/seed-5831001.json')) as unknown,
       { mode: 'challenge' },
