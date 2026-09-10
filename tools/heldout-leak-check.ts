@@ -566,10 +566,16 @@ function discoverModuleEdges(
         return singletonKind('factory');
       }
       if (receiverKinds.has('module_namespace') && key === 'require') return singletonKind('loader');
+      if (receiverKinds.has('module_namespace') && (key === 'default' || key === 'Module')) {
+        return singletonKind('module_namespace');
+      }
       if (isImportMeta(unwrapped.expression) && key === 'resolve') return singletonKind('resolver');
       if (isImportMeta(unwrapped.expression) && key === 'glob') return singletonKind('glob');
       if ((receiverKinds.has('worker_namespace') || isGlobalNamespace(unwrapped.expression)) &&
         key === 'Worker') return singletonKind('worker');
+      if (receiverKinds.has('worker_namespace') && key === 'default') {
+        return singletonKind('worker_namespace');
+      }
       if (isGlobalNamespace(unwrapped.expression) && key === 'SharedWorker') {
         return singletonKind('shared_worker');
       }
@@ -879,6 +885,14 @@ function discoverModuleEdges(
       ts.isElementAccessExpression(node) || ts.isCallExpression(node))) return null;
     return isLoaderValued(expressionKinds(node)) ? node : null;
   };
+  const isUnsupportedNamespaceMemberAccess = (node: ts.Node): boolean => {
+    if (!ts.isPropertyAccessExpression(node) && !ts.isElementAccessExpression(node)) return false;
+    const receiverKinds = expressionKinds(node.expression);
+    if (!receiverKinds.has('module_namespace') && !receiverKinds.has('worker_namespace')) return false;
+    const key = propertyKey(node);
+    if (key === null) return true;
+    return expressionKinds(node).size === 0;
+  };
   const isWithinTypeNode = (node: ts.Node): boolean => {
     let current = node.parent;
     while (!ts.isSourceFile(current)) {
@@ -896,7 +910,7 @@ function discoverModuleEdges(
   const visit = (node: ts.Node): void => {
     if (visited.has(node)) return;
     visited.add(node);
-    if (isTrackedModuleReExport(node) ||
+    if (isTrackedModuleReExport(node) || isUnsupportedNamespaceMemberAccess(node) ||
       (ts.isVariableDeclaration(node) && unresolvedNamespaceBindings.has(node))) {
       recordLoaderEscape();
     } else {
@@ -1539,6 +1553,7 @@ function viteAliases(source: string, path: string): ViteAliasDiscovery {
   };
   const localExpressions = new Map<ts.Symbol, ts.Expression>();
   const mutatedSymbols = new Set<ts.Symbol>();
+  const untrackableTransferSymbols = new Set<ts.Symbol>();
   const aliasLinks = new Map<ts.Symbol, Set<ts.Symbol>>();
   const assignedRootIdentifier = (expression: ts.Expression): ts.Identifier | null => {
     const unwrapped = unwrapTransparentExpression(expression);
@@ -1556,22 +1571,40 @@ function viteAliases(source: string, path: string): ViteAliasDiscovery {
     rightLinks.add(left);
     aliasLinks.set(right, rightLinks);
   };
-  const linkTransferredReferences = (target: ts.Symbol, expression: ts.Expression): void => {
+  const linkTransferredReferences = (target: ts.Symbol, expression: ts.Expression): boolean => {
     const unwrapped = unwrapTransparentExpression(expression);
     if (ts.isIdentifier(unwrapped)) {
       const sourceSymbol = symbolAt(unwrapped);
-      if (sourceSymbol !== undefined) addAliasLink(target, sourceSymbol);
-      return;
+      if (sourceSymbol === undefined) return false;
+      addAliasLink(target, sourceSymbol);
+      return true;
     }
     if (ts.isObjectLiteralExpression(unwrapped)) {
+      let complete = true;
       for (const property of unwrapped.properties) {
-        if (ts.isSpreadAssignment(property)) linkTransferredReferences(target, property.expression);
+        if (ts.isSpreadAssignment(property)) {
+          complete = linkTransferredReferences(target, property.expression) && complete;
+        } else if (ts.isPropertyAssignment(property) && !ts.isComputedPropertyName(property.name)) {
+          complete = linkTransferredReferences(target, property.initializer) && complete;
+        } else if (ts.isShorthandPropertyAssignment(property)) {
+          complete = linkTransferredReferences(target, property.name) && complete;
+        } else {
+          complete = false;
+        }
       }
+      return complete;
     } else if (ts.isArrayLiteralExpression(unwrapped)) {
+      let complete = true;
       for (const element of unwrapped.elements) {
-        if (ts.isSpreadElement(element)) linkTransferredReferences(target, element.expression);
+        if (ts.isOmittedExpression(element)) continue;
+        const transferred = ts.isSpreadElement(element) ? element.expression : element;
+        complete = linkTransferredReferences(target, transferred) && complete;
       }
+      return complete;
     }
+    return constantString(unwrapped) !== null || ts.isNumericLiteral(unwrapped) ||
+      ts.isRegularExpressionLiteral(unwrapped) || unwrapped.kind === ts.SyntaxKind.TrueKeyword ||
+      unwrapped.kind === ts.SyntaxKind.FalseKeyword || unwrapped.kind === ts.SyntaxKind.NullKeyword;
   };
   const markExpressionMutation = (expression: ts.Expression): void => {
     const root = assignedRootIdentifier(expression);
@@ -1583,7 +1616,9 @@ function viteAliases(source: string, path: string): ViteAliasDiscovery {
       const symbol = symbolAt(node.name);
       if (symbol !== undefined) {
         localExpressions.set(symbol, node.initializer);
-        linkTransferredReferences(symbol, node.initializer);
+        if (!linkTransferredReferences(symbol, node.initializer)) {
+          untrackableTransferSymbols.add(symbol);
+        }
       }
     }
     if (ts.isBinaryExpression(node) &&
@@ -1605,7 +1640,7 @@ function viteAliases(source: string, path: string): ViteAliasDiscovery {
   };
   collectLocals(sourceFile);
   const symbolIsMutated = (symbol: ts.Symbol, seen: ReadonlySet<ts.Symbol>): boolean => {
-    if (mutatedSymbols.has(symbol)) return true;
+    if (mutatedSymbols.has(symbol) || untrackableTransferSymbols.has(symbol)) return true;
     if (seen.has(symbol)) return false;
     const nextSeen = new Set([...seen, symbol]);
     return [...(aliasLinks.get(symbol) ?? [])].some((linked) => symbolIsMutated(linked, nextSeen));

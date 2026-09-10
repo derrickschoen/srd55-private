@@ -785,6 +785,35 @@ describe('held-out reserve leak wall', () => {
   });
 
   it.each([
+    ['Module namespace member chain', [
+      "import * as M from 'node:module';",
+      'const make = M.Module.createRequire;',
+      'const load = make(import.meta.url);',
+      "load.resolve('../src/vtt/heldout-evaluation.ts');",
+    ].join('\n'), 'tools/probe.mts', 'protocol_resolution'],
+    ['default module namespace member chain', [
+      "import * as M from 'node:module';",
+      'const make = M.default.createRequire;',
+      'const load = make(import.meta.url);',
+      "load.resolve('../src/vtt/heldout-evaluation.ts');",
+    ].join('\n'), 'tools/probe.mts', 'protocol_resolution'],
+    ['default worker namespace member chain', [
+      "import * as Threads from 'node:worker_threads';",
+      'const Spawn = Threads.default.Worker;',
+      "new Spawn('../src/vtt/heldout-evaluation.ts');",
+    ].join('\n'), 'tools/probe.mts', 'protocol_import'],
+    ['non-constant computed module member', [
+      "import * as M from 'node:module';",
+      "const key = 'Module';",
+      'const make = M[key].createRequire;',
+    ].join('\n'), 'tools/probe.mts', 'loader_reference_escaped'],
+  ] as const)('preserves or rejects %s', (_label, addedText, path, kind) => {
+    const report = inspectHeldoutLeakChanges([{ path, addedText }], 'F', bindings);
+
+    expect(report.findings).toContainEqual(expect.objectContaining({ kind }));
+  });
+
+  it.each([
     ['named export', 'const load = require; export { load };'],
     ['default export', 'const load = require; export default load;'],
     ['exported alias declaration', 'export const load = require;'],
@@ -1393,6 +1422,42 @@ describe('held-out reserve leak wall', () => {
       'const alias = {};',
       'const edit = { ...alias };',
       "edit['@policy'] = './src/vtt/heldout-evaluation.ts';",
+      'export default { resolve: { alias } };',
+    ].join('\n')],
+  ] as const)('invalidates Vite alias discovery after %s', (_label, configSource) => {
+    const report = inspectHeldoutLeakChanges([{
+      path: 'vite.config.ts',
+      addedText: configSource,
+      sourceText: configSource,
+    }], 'F', bindings);
+
+    expect(report.findings).toContainEqual(expect.objectContaining({
+      path: 'vite.config.ts',
+      kind: 'unresolved_module_edge',
+    }));
+  });
+
+  it.each([
+    ['object-property transfer', [
+      'const alias = {};',
+      'const box = { value: alias };',
+      "box.value['@policy'] = './src/vtt/heldout-evaluation.ts';",
+      'export default { resolve: { alias } };',
+    ].join('\n')],
+    ['array-element transfer', [
+      'const alias = [];',
+      'const box = [alias];',
+      "box[0].push({ find: '@policy', replacement: './src/vtt/heldout-evaluation.ts' });",
+      'export default { resolve: { alias } };',
+    ].join('\n')],
+    ['nested literal transfer', [
+      'const alias = {};',
+      'const box = { nested: [{ value: alias }] };',
+      "box.nested[0].value['@policy'] = './src/vtt/heldout-evaluation.ts';",
+      'export default { resolve: { alias } };',
+    ].join('\n')],
+    ['untrackable call-result transfer', [
+      'const alias = { nested: { value: loadAliases() } };',
       'export default { resolve: { alias } };',
     ].join('\n')],
   ] as const)('invalidates Vite alias discovery after %s', (_label, configSource) => {
