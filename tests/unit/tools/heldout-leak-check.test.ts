@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  HELDOUT_LEAK_AST_OUT_OF_SCOPE,
   inspectHeldoutLeakChanges,
   moduleSpecifiers,
 } from '../../../tools/heldout-leak-check';
@@ -94,6 +95,104 @@ describe('held-out reserve leak wall', () => {
     }], 'C', bindings);
 
     expect(report.findings).toContainEqual(expect.objectContaining({ kind: 'protocol_import' }));
+  });
+
+  it('rejects a dynamic import with an attributes/options argument', () => {
+    const report = inspectHeldoutLeakChanges([{
+      path: 'tools/tuning/repair-ranking.ts',
+      addedText: [
+        "const protocol = import('../vtt/heldout-evaluation', {",
+        "  with: { type: 'json' },",
+        '});',
+      ].join('\n'),
+    }], 'B', bindings);
+
+    expect(report.findings).toContainEqual(expect.objectContaining({ kind: 'protocol_import' }));
+  });
+
+  it.each([
+    ['parenthesized dynamic-import argument',
+      "const protocol = import(('../vtt/heldout-evaluation'));"],
+    ['parenthesized require argument',
+      "const protocol = require(('../vtt/heldout-evaluation'));"],
+    ['parenthesized require callee',
+      "const protocol = (require)('../vtt/heldout-evaluation');"],
+    ['as-wrapped argument',
+      "const protocol = import(('../vtt/heldout-evaluation' as string));"],
+    ['satisfies-wrapped argument',
+      "const protocol = require(('../vtt/heldout-evaluation' satisfies string));"],
+    ['non-null-wrapped require callee',
+      "const protocol = (require!)('../vtt/heldout-evaluation');"],
+  ] as const)('rejects %s', (_label, addedText) => {
+    const report = inspectHeldoutLeakChanges([{
+      path: 'tools/tuning/repair-ranking.ts',
+      addedText,
+    }], 'B', bindings);
+
+    expect(report.findings).toContainEqual(expect.objectContaining({ kind: 'protocol_import' }));
+  });
+
+  it.each([
+    ['string-literal substitution',
+      "const protocol = import(`../vtt/${'heldout-evaluation'}`);"],
+    ['no-substitution-template substitution',
+      'const protocol = require(`../vtt/${`heldout-evaluation`}`);'],
+    ['constant concatenation substitution',
+      "const protocol = import(`../vtt/${'heldout-' + 'evaluation'}`);"],
+    ['multiple constant substitutions',
+      "const protocol = import(`../${'vtt'}/${'heldout-' + `evaluation`}`);"],
+  ] as const)('resolves and rejects a substitution template with %s', (_label, addedText) => {
+    const report = inspectHeldoutLeakChanges([{
+      path: 'tools/tuning/repair-ranking.ts',
+      addedText,
+    }], 'C', bindings);
+
+    expect(report.findings).toContainEqual(expect.objectContaining({ kind: 'protocol_import' }));
+    expect(report.findings).not.toContainEqual(expect.objectContaining({ kind: 'unresolved_module_edge' }));
+  });
+
+  it.each([
+    ['dynamic-import template substitution',
+      "const target = 'heldout-evaluation'; void import(`../vtt/${target}`);"],
+    ['dynamic-import expression',
+      "const target = '../vtt/heldout-evaluation'; void import(target);"],
+    ['require expression',
+      "const target = '../vtt/heldout-evaluation'; void require(target);"],
+  ] as const)('fails closed on unresolved %s', (_label, addedText) => {
+    const report = inspectHeldoutLeakChanges([{
+      path: 'tools/tuning/repair-ranking.ts',
+      addedText,
+    }], 'D', bindings);
+
+    expect(report.findings).toContainEqual(expect.objectContaining({
+      kind: 'unresolved_module_edge',
+    }));
+  });
+
+  it.each([
+    ['require.resolve', "const path = require.resolve('../vtt/heldout-evaluation');"],
+    ['import.meta.resolve',
+      "const path = import.meta.resolve('../vtt/heldout-evaluation');"],
+  ] as const)('rejects a held-out %s resolution edge', (_label, addedText) => {
+    const report = inspectHeldoutLeakChanges([{
+      path: 'tools/tuning/repair-ranking.ts',
+      addedText,
+    }], 'E', bindings);
+
+    expect(report.findings).toContainEqual(expect.objectContaining({
+      kind: 'protocol_resolution',
+    }));
+  });
+
+  it('documents executable eval and new Function strings as outside AST edge discovery', () => {
+    expect(HELDOUT_LEAK_AST_OUT_OF_SCOPE).toEqual([
+      'eval executable strings',
+      'new Function executable strings',
+    ]);
+    expect(moduleSpecifiers('tools/tuning/repair-ranking.ts', [
+      "eval(\"import('../vtt/heldout-evaluation')\");",
+      "new Function(\"return require('../vtt/heldout-evaluation')\");",
+    ].join('\n'))).toEqual([]);
   });
 
   it('enumerates import-equals and import-type edges without matching prose or comments', () => {

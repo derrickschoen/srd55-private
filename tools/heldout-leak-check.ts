@@ -12,7 +12,11 @@ export interface HeldoutChangedText {
 
 export interface HeldoutLeakFinding {
   readonly path: string;
-  readonly kind: 'reserve_reference' | 'protocol_import';
+  readonly kind:
+    | 'reserve_reference'
+    | 'protocol_import'
+    | 'protocol_resolution'
+    | 'unresolved_module_edge';
   readonly detail: string;
 }
 
@@ -64,18 +68,91 @@ function isTypeScriptOrJavaScript(path: string): boolean {
     .some((extension) => path.endsWith(extension));
 }
 
-function literalModuleSpecifier(expression: ts.Expression | undefined): string | null {
+type ModuleEdgeSyntax =
+  | 'static_import'
+  | 're_export'
+  | 'import_equals'
+  | 'import_type'
+  | 'dynamic_import'
+  | 'require'
+  | 'require_resolve'
+  | 'import_meta_resolve';
+
+interface ModuleEdge {
+  readonly kind: 'import' | 'resolution' | 'unresolved';
+  readonly syntax: ModuleEdgeSyntax;
+  readonly specifier: string | null;
+}
+
+/** Executable source strings are not syntax-level module edges and are intentionally outside this wall. */
+export const HELDOUT_LEAK_AST_OUT_OF_SCOPE = [
+  'eval executable strings',
+  'new Function executable strings',
+] as const;
+
+function unwrapTransparentExpression(expression: ts.Expression): ts.Expression {
+  let current = expression;
+  while (
+    ts.isParenthesizedExpression(current) ||
+    ts.isAsExpression(current) ||
+    ts.isSatisfiesExpression(current) ||
+    ts.isNonNullExpression(current) ||
+    ts.isTypeAssertionExpression(current)
+  ) {
+    current = current.expression;
+  }
+  return current;
+}
+
+function constantString(expression: ts.Expression | undefined): string | null {
   if (expression === undefined) return null;
-  return ts.isStringLiteral(expression) || ts.isNoSubstitutionTemplateLiteral(expression)
-    ? expression.text
-    : null;
+  const unwrapped = unwrapTransparentExpression(expression);
+  if (ts.isStringLiteral(unwrapped) || ts.isNoSubstitutionTemplateLiteral(unwrapped)) {
+    return unwrapped.text;
+  }
+  if (ts.isBinaryExpression(unwrapped) &&
+    unwrapped.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+    const left = constantString(unwrapped.left);
+    const right = constantString(unwrapped.right);
+    return left === null || right === null ? null : left + right;
+  }
+  if (ts.isTemplateExpression(unwrapped)) {
+    let result = unwrapped.head.text;
+    for (const span of unwrapped.templateSpans) {
+      const substitution = constantString(span.expression);
+      if (substitution === null) return null;
+      result += substitution + span.literal.text;
+    }
+    return result;
+  }
+  return null;
+}
+
+function isRequireCallee(expression: ts.Expression): boolean {
+  const callee = unwrapTransparentExpression(expression);
+  return ts.isIdentifier(callee) && callee.text === 'require';
+}
+
+function resolutionSyntax(expression: ts.Expression): Extract<
+  ModuleEdgeSyntax,
+  'require_resolve' | 'import_meta_resolve'
+> | null {
+  const callee = unwrapTransparentExpression(expression);
+  if (!ts.isPropertyAccessExpression(callee) || callee.name.text !== 'resolve') return null;
+  const receiver = unwrapTransparentExpression(callee.expression);
+  if (ts.isIdentifier(receiver) && receiver.text === 'require') return 'require_resolve';
+  if (ts.isMetaProperty(receiver) &&
+    receiver.keywordToken === ts.SyntaxKind.ImportKeyword && receiver.name.text === 'meta') {
+    return 'import_meta_resolve';
+  }
+  return null;
 }
 
 /**
  * Enumerates statically named module edges from TypeScript syntax. Comments and
  * whitespace are trivia, so they cannot split a token sequence past this wall.
  */
-export function moduleSpecifiers(path: string, source: string): readonly string[] {
+function discoverModuleEdges(path: string, source: string): readonly ModuleEdge[] {
   const transpiled = ts.transpileModule(source, {
     compilerOptions: {
       target: ts.ScriptTarget.Latest,
@@ -99,31 +176,52 @@ export function moduleSpecifiers(path: string, source: string): readonly string[
     true,
     scriptKind(path),
   );
-  const result = new Set<string>();
-  const add = (specifier: string | null): void => {
-    if (specifier !== null) result.add(specifier);
+  const result: ModuleEdge[] = [];
+  const add = (
+    syntax: ModuleEdgeSyntax,
+    expression: ts.Expression | undefined,
+    resolvedKind: 'import' | 'resolution' = 'import',
+  ): void => {
+    const specifier = constantString(expression);
+    result.push({
+      kind: specifier === null ? 'unresolved' : resolvedKind,
+      syntax,
+      specifier,
+    });
   };
   const visit = (node: ts.Node): void => {
-    if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
-      add(literalModuleSpecifier(node.moduleSpecifier));
+    if (ts.isImportDeclaration(node)) {
+      add('static_import', node.moduleSpecifier);
+    } else if (ts.isExportDeclaration(node) && node.moduleSpecifier !== undefined) {
+      add('re_export', node.moduleSpecifier);
     } else if (
       ts.isImportEqualsDeclaration(node) &&
       ts.isExternalModuleReference(node.moduleReference)
     ) {
-      add(literalModuleSpecifier(node.moduleReference.expression));
+      add('import_equals', node.moduleReference.expression);
     } else if (ts.isImportTypeNode(node)) {
-      add(ts.isLiteralTypeNode(node.argument)
-        ? literalModuleSpecifier(node.argument.literal)
-        : null);
-    } else if (ts.isCallExpression(node) && node.arguments.length === 1) {
-      const argument = literalModuleSpecifier(node.arguments[0]);
-      if (node.expression.kind === ts.SyntaxKind.ImportKeyword) add(argument);
-      if (ts.isIdentifier(node.expression) && node.expression.text === 'require') add(argument);
+      add('import_type', ts.isLiteralTypeNode(node.argument) ? node.argument.literal : undefined);
+    } else if (ts.isCallExpression(node)) {
+      const callee = unwrapTransparentExpression(node.expression);
+      const firstArgument = node.arguments[0];
+      if (callee.kind === ts.SyntaxKind.ImportKeyword) {
+        add('dynamic_import', firstArgument);
+      } else if (isRequireCallee(callee)) {
+        add('require', firstArgument);
+      } else {
+        const syntax = resolutionSyntax(callee);
+        if (syntax !== null) add(syntax, firstArgument, 'resolution');
+      }
     }
     ts.forEachChild(node, visit);
   };
   visit(sourceFile);
-  return [...result].sort();
+  return result;
+}
+
+export function moduleSpecifiers(path: string, source: string): readonly string[] {
+  return [...new Set(discoverModuleEdges(path, source).flatMap((edge) =>
+    edge.specifier === null ? [] : [edge.specifier]))].sort();
 }
 
 function isHeldoutProtocolSpecifier(specifier: string): boolean {
@@ -188,15 +286,32 @@ export function inspectHeldoutLeakChanges(
     )) {
       findings.push({ path: change.path, kind: 'reserve_reference', detail: reference });
     }
-    const imports = isTypeScriptOrJavaScript(change.path)
-      ? moduleSpecifiers(change.path, change.sourceText ?? change.addedText)
+    const edges = isTypeScriptOrJavaScript(change.path)
+      ? discoverModuleEdges(change.path, change.sourceText ?? change.addedText)
       : [];
-    if (imports.some(isHeldoutProtocolSpecifier) &&
-      !EVALUATION_FILES.has(change.path) && !isTestOrFixture(change.path)) {
+    const restrictedPath = !EVALUATION_FILES.has(change.path) && !isTestOrFixture(change.path);
+    if (restrictedPath && edges.some((edge) =>
+      edge.kind === 'import' && edge.specifier !== null && isHeldoutProtocolSpecifier(edge.specifier))) {
       findings.push({
         path: change.path,
         kind: 'protocol_import',
         detail: 'held-out protocol imported outside evaluation tooling',
+      });
+    }
+    if (restrictedPath && edges.some((edge) =>
+      edge.kind === 'resolution' && edge.specifier !== null && isHeldoutProtocolSpecifier(edge.specifier))) {
+      findings.push({
+        path: change.path,
+        kind: 'protocol_resolution',
+        detail: 'held-out protocol resolved outside evaluation tooling',
+      });
+    }
+    const unresolved = edges.find((edge) => edge.kind === 'unresolved');
+    if (restrictedPath && unresolved !== undefined) {
+      findings.push({
+        path: change.path,
+        kind: 'unresolved_module_edge',
+        detail: `unresolved ${unresolved.syntax} edge outside evaluation tooling`,
       });
     }
   }
