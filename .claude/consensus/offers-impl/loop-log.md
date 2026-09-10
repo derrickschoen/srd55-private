@@ -11,3 +11,5 @@
 - 2026-09-10 10:37 EDT — landing gate on c3b3d9b0 green (tsc/sg/vitest-gate/playwright-gate 0); merged to main d2350c57; offers worktree fast-forwarded. Slice 2 next.
 
 - 2026-09-10 10:38 EDT — Slice 2 lane dispatched (fresh session; worktree at main d2350c57).
+
+- 2026-09-10 11:28 EDT — Slice 2 lane DONE (10 files; 2 schema-3 tests removed per plan "no compatibility arm", 3 added; lane focused 17/17, three mutants red→green, six digests independently reproduced; lane cumulative inadmissible EROFS + surfaced the D583 inventory break from the archived capture.ts on main). Committed 7403f498; merged main fix a18bb30e → 528d1146; supervisor 172-spec cumulative launched.

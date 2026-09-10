@@ -28,3 +28,5 @@
 - 2026-09-10 10:55 EDT — r9 lane DONE; supervisor verification tsc/sg/diffcheck 0, 9 specs 453/453; committed a899f896; Astra r9 review dispatched (resume 01a088d6…) asking for a bounded-defect vs out-of-scope classification of any residual.
 
 - 2026-09-10 11:00 EDT — r9 Astra REJECT: F28–F33 all resolved; four bounded defects remain (F34 second SourceFile/checker mismatch in data-module path, F35 ambient declare shadows loaders, F36 nested binding patterns skipped, F37 alias mutation via references/push/Object.assign). r10 dispatched (resume 01a088b4…).
+
+- 2026-09-10 11:27 EDT — r10 lane DONE; supervisor verification tsc/sg/diffcheck 0, 9 specs 463/463 (first launch had a relative-path redirect bug and never ran; relaunched); committed ca5e0f01; Astra r10 dispatched (resume 01a088d6…).
