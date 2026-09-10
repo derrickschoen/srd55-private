@@ -14,3 +14,5 @@
 - 2026-09-10 08:41 EDT — r5 Astra REJECT (F12–F17 High: glob base/extglob/**, #imports ordering, loader escapes, worker aliases, data: whitespace, config-only changes); review saved review-r5-astra.md; r6 dispatched (resume 01a088b4…, brief resume-heldout-rem-r6.md, header restated in full — the r5 brief had omitted it).
 
 - 2026-09-10 09:04 EDT — r6 lane DONE; supervisor verification tsc/sg/diffcheck 0, 9 specs 391/391; committed 472d5262; Astra r6 review dispatched (resume 01a088d6…).
+
+- 2026-09-10 09:14 EDT — r6 Astra REJECT (F18 glob base/spread, F19 nested conditions fail open, F20 loader escapes incl. export/bind/nullish, F21 alias discovery, F22 .d.ts transpile abort). Supervisor structural ruling: r7 must convert loader tracking and config discovery to default-deny (generic escape check), not add cases. r7 dispatched (resume 01a088b4…).
