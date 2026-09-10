@@ -56,10 +56,15 @@ const bindings = {
 
 const actualSourceFiles = repositorySourcesUnder('src');
 const emptyImportsPackageSource = '{"imports":{}}';
+const actualViteConfigSource = readFileSync('vite.config.ts', 'utf8');
 const actualTreeConfigChange = [{
   path: 'package.json',
   addedText: emptyImportsPackageSource,
   sourceText: emptyImportsPackageSource,
+}, {
+  path: 'vite.config.ts',
+  addedText: actualViteConfigSource,
+  sourceText: actualViteConfigSource,
 }] as const;
 const actualTreeReport = inspectHeldoutLeakChanges(actualTreeConfigChange, 'F', bindings, {
   packageJsonFiles: { 'package.json': emptyImportsPackageSource },
@@ -302,13 +307,18 @@ describe('held-out reserve leak wall', () => {
       ],
       interpreted: [
         'loader-valued expressions are require, module.require, importScripts, Worker or SharedWorker (bare or global-qualified), require.resolve, import.meta.resolve, import.meta.glob, createRequire from module built-ins and its result, worker_threads.Worker, and exact aliases',
-        'namespace roots such as window, self, globalThis, import.meta, and module namespaces are inspected only to derive loader-valued members and are never findings themselves',
+        'Rule N1 permits import.meta and module/worker namespaces only as direct member receivers or exact plain-const aliases',
+        'Rule N2 permits browser globals to transfer inertly and validates Worker, SharedWorker, and importScripts members at use by symbol-proven global provenance',
         'a loader-valued expression is allowed only as a direct callee with a constant specifier, a receiver leading to a recognized member call, or the whole initializer of a non-exported plain-identifier const alias',
-        'resolution configuration changes invalidate candidate consumers for reinspection',
+        'Rule C interprets Vite aliases only as strict literals in the graph reachable from export default, symbol-proven Vite defineConfig, factory returns, conditional branches, and same-file const object/array composition',
+        'Rule C uses no mutation or transfer analysis: every reference to a reachable const must be its declaration or occur inside the reachable graph',
+        'resolution configuration changes re-inspect consumers; unresolved configuration makes every encountered consumer edge unresolved',
         'every eligible candidate file receives the full AST and symbol inspection pass without a textual pre-gate',
       ],
       failsClosed: [
         'every other position of a loader-valued expression is loader_reference_escaped from one generic check',
+        'every disallowed Rule N1 namespace position and every non-symbol-proven Rule N2 loader-member use is loader_reference_escaped from the same generic check',
+        'a nonliteral Vite alias, unreachable alias/resolve property, or invalid reachable-const reference is unresolved configuration under Rule C',
         'unresolved targets, options, package conditions, globs, aliases, URL schemes, and data modules are findings',
       ],
       outOfScope: [
@@ -323,6 +333,7 @@ describe('held-out reserve leak wall', () => {
   it('documents every audited expression-flow position without a silent case', () => {
     expect(HELDOUT_LEAK_FLOW_AUDIT.map((entry) => entry.position)).toEqual([
       'declaration initializer',
+      'member receiver',
       'assignment',
       'destructuring declaration',
       'destructuring assignment',
@@ -336,15 +347,18 @@ describe('held-out reserve leak wall', () => {
       'property value',
       'array element',
       'call argument',
+      'constructor argument',
+      'call receiver',
       'conditional, logical, or comma expression',
       'class field or heritage',
       'export',
       'for-of head',
+      'for-in head',
       'tagged template',
     ]);
     for (const entry of HELDOUT_LEAK_FLOW_AUDIT) {
-      expect(entry.loaderValues).toMatch(/^(?:interpreted|failed_closed)/u);
-      expect(entry.configurationReferences).toMatch(/^(?:interpreted|failed_closed)/u);
+      expect(entry.loaderValues).toContain('Rule N');
+      expect(entry.configurationReferences).toContain('Rule C');
       expect(`${entry.loaderValues} ${entry.configurationReferences}`).not.toContain('unhandled');
     }
   });
@@ -1021,14 +1035,17 @@ describe('held-out reserve leak wall', () => {
       'let Spawn;',
       '({ Worker: Spawn } = window);',
       "new Spawn('../src/vtt/heldout-evaluation.ts');",
-    ].join('\n'), 'protocol_import'],
+    ].join('\n'), 'loader_reference_escaped'],
     ['import.meta array assignment', 'let value; [value] = import.meta;',
       'loader_reference_escaped'],
     ['node:module array assignment', [
       "import * as M from 'node:module';",
       'let value; [value] = M;',
     ].join('\n'), 'loader_reference_escaped'],
-    ['window array assignment', 'let value; [value] = window;',
+    ['window array assignment', [
+      'let value; [value] = [window];',
+      "new value.Worker('../src/vtt/heldout-evaluation.ts');",
+    ].join('\n'),
       'loader_reference_escaped'],
   ] as const)('handles %s', (_label, addedText, kind) => {
     const report = inspectHeldoutLeakChanges([{
@@ -1640,10 +1657,155 @@ describe('held-out reserve leak wall', () => {
     }));
   });
 
+  it.each([
+    ['boxed import.meta namespace', [
+      'const box = { meta: import.meta };',
+      "box.meta.resolve('../src/vtt/heldout-evaluation.ts');",
+    ].join('\n')],
+    ['smuggled browser-global loader member', [
+      'const box = { w: window };',
+      "new box.w.Worker('../src/vtt/heldout-evaluation.ts');",
+    ].join('\n')],
+  ] as const)('applies Rule N to %s', (_label, addedText) => {
+    const report = inspectHeldoutLeakChanges([{
+      path: 'tools/probe.mts',
+      addedText,
+    }], 'F', bindings);
+
+    expect(report.findings).toContainEqual(expect.objectContaining({
+      kind: 'loader_reference_escaped',
+    }));
+  });
+
+  it.each([
+    ['constructor injection', [
+      'class UsesWindow { constructor(readonly root = window) {} }',
+      'const use = new UsesWindow(window);',
+      'use.root.addEventListener;',
+    ].join('\n')],
+    ['parameter default', [
+      'function locationOf(root = window) { return root.location.href; }',
+      'locationOf();',
+    ].join('\n')],
+    ['conditional storage', [
+      'const root = Math.random() > 0.5 ? window : self;',
+      'root.addEventListener;',
+    ].join('\n')],
+  ] as const)('keeps Rule N2 %s inert for non-loader members', (_label, addedText) => {
+    const report = inspectHeldoutLeakChanges([{
+      path: 'src/ui/global-injection-control.ts',
+      addedText,
+    }], 'F', bindings);
+
+    expect(report.findings).toEqual([]);
+  });
+
+  it.each([
+    ['computed-property transfer', [
+      'const alias: Record<string, string> = {};',
+      "const box = { ['value']: alias };",
+      "box.value['@policy'] = './src/vtt/heldout-evaluation.ts';",
+      'export default { resolve: { alias } };',
+    ].join('\n')],
+    ['for-of assignment head', [
+      'const alias: Record<string, string> = {};',
+      "for (alias['@policy'] of ['./src/vtt/heldout-evaluation.ts']) {}",
+      'export default { resolve: { alias } };',
+    ].join('\n')],
+    ['for-in assignment head', [
+      'const alias: Record<string, string> = {};',
+      "for (alias['@policy'] in { './src/vtt/heldout-evaluation.ts': true }) {}",
+      'export default { resolve: { alias } };',
+    ].join('\n')],
+    ['constructor argument', [
+      'const alias = {};',
+      'new Update(alias);',
+      'export default { resolve: { alias } };',
+    ].join('\n')],
+    ['fill-style receiver mutation', [
+      "const alias = [{ find: '@safe', replacement: './safe.ts' }];",
+      "alias.fill({ find: '@policy', replacement: './src/vtt/heldout-evaluation.ts' });",
+      'export default { resolve: { alias } };',
+    ].join('\n')],
+    ['locally shadowed defineConfig', [
+      "const alias = { '@safe': './safe.ts' };",
+      "function defineConfig(value) { value.resolve.alias['@policy'] = './src/vtt/heldout-evaluation.ts'; return value; }",
+      'export default defineConfig({ resolve: { alias } });',
+    ].join('\n')],
+  ] as const)('applies Rule C to %s', (_label, configSource) => {
+    const report = inspectHeldoutLeakChanges([{
+      path: 'vite.config.ts',
+      addedText: configSource,
+      sourceText: configSource,
+    }], 'F', bindings, {
+      candidateSourceFiles: {
+        'src/ui/unchanged-policy-consumer.ts': "import policy from '@policy';",
+      },
+    });
+
+    expect(report.findings).toContainEqual(expect.objectContaining({
+      path: 'vite.config.ts',
+      kind: 'unresolved_module_edge',
+    }));
+  });
+
+  it('interprets a symbol-proven defineConfig callback, conditional, and const spread', () => {
+    const configSource = [
+      "import { defineConfig } from 'vite';",
+      "const core = { base: '/' };",
+      "const shared = { ...core, resolve: { alias: { '@policy': './src/vtt/heldout-evaluation.ts' } } };",
+      "export default defineConfig(({ command }) => command === 'serve' ? { ...shared } : shared);",
+    ].join('\n');
+    const report = inspectHeldoutLeakChanges([{
+      path: 'vite.config.ts',
+      addedText: configSource,
+      sourceText: configSource,
+    }], 'F', bindings, {
+      candidateSourceFiles: {
+        'src/ui/unchanged-policy-consumer.ts': "import policy from '@policy';",
+      },
+    });
+
+    expect(report.findings).not.toContainEqual(expect.objectContaining({
+      path: 'vite.config.ts',
+      kind: 'unresolved_module_edge',
+    }));
+    expect(report.findings).toContainEqual(expect.objectContaining({
+      path: 'src/ui/unchanged-policy-consumer.ts',
+      kind: 'unresolved_module_edge',
+    }));
+  });
+
+  it.each([
+    ['reachable const referenced elsewhere', [
+      'const shared = { resolve: { alias: {} } };',
+      'consume(shared);',
+      'export default shared;',
+    ].join('\n')],
+    ['reachable identifier initialized by a call', [
+      'const shared = makeConfig();',
+      'export default shared;',
+    ].join('\n')],
+    ['alias property outside the reachable set', [
+      'const stray = { alias: {} };',
+      'export default {};',
+    ].join('\n')],
+  ] as const)('fails Rule C for %s', (_label, configSource) => {
+    const report = inspectHeldoutLeakChanges([{
+      path: 'vite.config.ts',
+      addedText: configSource,
+      sourceText: configSource,
+    }], 'F', bindings);
+
+    expect(report.findings).toContainEqual(expect.objectContaining({
+      path: 'vite.config.ts',
+      kind: 'unresolved_module_edge',
+    }));
+  });
+
   it('applies a regex alias only to matching specifiers', () => {
     const configSource = [
-      "const alias = [{ find: /^@policy$/, replacement: './src/vtt/heldout-evaluation.ts' }];",
-      'export default { resolve: { alias } };',
+      "export default { resolve: { alias: [{ find: /^@policy$/, replacement: './src/vtt/heldout-evaluation.ts' }] } };",
     ].join('\n');
     const report = inspectHeldoutLeakChanges([{
       path: 'vite.config.ts',
@@ -1660,14 +1822,14 @@ describe('held-out reserve leak wall', () => {
 
   it('reports zero findings when a configuration change reinspects the actual src tree', () => {
     expect(Object.keys(actualSourceFiles)).toHaveLength(674);
-    expect(actualTreeReport.checkedFiles).toBe(Object.keys(actualSourceFiles).length + 1);
-    expect(actualTreeReport.astInspectedFiles).toBe(Object.keys(actualSourceFiles).length);
+    expect(actualTreeReport.checkedFiles).toBe(Object.keys(actualSourceFiles).length + 2);
+    expect(actualTreeReport.astInspectedFiles).toBe(Object.keys(actualSourceFiles).length + 1);
     expect(actualTreeReport.findings).toEqual([]);
   });
 
   it('still reports an injected leak in configuration-reinspection mode', () => {
     expect(injectedActualTreeReport.astInspectedFiles)
-      .toBe(Object.keys(injectedActualSourceFiles).length);
+      .toBe(Object.keys(injectedActualSourceFiles).length + 1);
     expect(injectedActualTreeReport.findings).toEqual([expect.objectContaining({
       path: 'src/ui/injected-heldout-leak.ts',
       kind: 'protocol_import',

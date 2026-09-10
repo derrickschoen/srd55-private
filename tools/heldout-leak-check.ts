@@ -155,27 +155,31 @@ export const HELDOUT_LEAK_AST_OUT_OF_SCOPE = [
   'runtime-generated code',
 ] as const;
 
-/** Exhaustive expression-flow audit for the source-level wall; no listed position is silent. */
+/** Rule N/Rule C audit: every expression-flow position is interpreted or fails closed. */
 export const HELDOUT_LEAK_FLOW_AUDIT = [
-  { position: 'declaration initializer', loaderValues: 'interpreted for exact aliases; failed_closed otherwise', configurationReferences: 'interpreted for literal/reference transfers; failed_closed when opaque' },
-  { position: 'assignment', loaderValues: 'interpreted for namespace aliases/extraction; failed_closed otherwise', configurationReferences: 'interpreted as a reference link and invalidated on writes; failed_closed for opaque receivers' },
-  { position: 'destructuring declaration', loaderValues: 'interpreted for constant namespace members; failed_closed otherwise', configurationReferences: 'failed_closed' },
-  { position: 'destructuring assignment', loaderValues: 'interpreted for constant namespace members; failed_closed otherwise', configurationReferences: 'failed_closed' },
-  { position: 'parameter default', loaderValues: 'interpreted for namespace aliases/extraction; failed_closed otherwise', configurationReferences: 'failed_closed' },
-  { position: 'return', loaderValues: 'failed_closed', configurationReferences: 'failed_closed' },
-  { position: 'yield', loaderValues: 'failed_closed', configurationReferences: 'failed_closed' },
-  { position: 'throw', loaderValues: 'failed_closed', configurationReferences: 'failed_closed' },
-  { position: 'await or promise resolution', loaderValues: 'interpreted only while preserving a recognized namespace/call; failed_closed otherwise', configurationReferences: 'failed_closed' },
-  { position: 'template substitution', loaderValues: 'failed_closed', configurationReferences: 'failed_closed' },
-  { position: 'spread', loaderValues: 'failed_closed', configurationReferences: 'interpreted for literal/reference transfer; failed_closed when opaque' },
-  { position: 'property value', loaderValues: 'failed_closed', configurationReferences: 'interpreted recursively for literals; failed_closed when opaque' },
-  { position: 'array element', loaderValues: 'failed_closed', configurationReferences: 'interpreted recursively for literals; failed_closed when opaque' },
-  { position: 'call argument', loaderValues: 'failed_closed unless it is the constant target of the recognized loader call', configurationReferences: 'failed_closed' },
-  { position: 'conditional, logical, or comma expression', loaderValues: 'failed_closed', configurationReferences: 'failed_closed' },
-  { position: 'class field or heritage', loaderValues: 'failed_closed', configurationReferences: 'failed_closed' },
-  { position: 'export', loaderValues: 'failed_closed', configurationReferences: 'interpreted for the Vite config object; failed_closed otherwise' },
-  { position: 'for-of head', loaderValues: 'interpreted for a statically identified namespace element; failed_closed otherwise', configurationReferences: 'failed_closed' },
-  { position: 'tagged template', loaderValues: 'failed_closed', configurationReferences: 'failed_closed' },
+  { position: 'declaration initializer', loaderValues: 'Rule N1 permits only a plain const namespace alias; Rule N2 permits inert browser-global transfer', configurationReferences: 'Rule C interprets only same-file const object/array literals reached from export default' },
+  { position: 'member receiver', loaderValues: 'Rule N1 permits direct namespace receipt; Rule N2 validates browser loader members by symbol at use', configurationReferences: 'Rule C does not follow receiver flow outside its reachable graph' },
+  { position: 'assignment', loaderValues: 'Rule N1 failed_closed; Rule N2 browser globals remain inert until loader-member use', configurationReferences: 'Rule C failed_closed outside the reachable set' },
+  { position: 'destructuring declaration', loaderValues: 'Rule N1 failed_closed when extraction is not an interpreted loader member; Rule N2 validates loader use', configurationReferences: 'Rule C failed_closed' },
+  { position: 'destructuring assignment', loaderValues: 'Rule N1 failed_closed when extraction is not an interpreted loader member; Rule N2 validates loader use', configurationReferences: 'Rule C failed_closed' },
+  { position: 'parameter default', loaderValues: 'Rule N1 failed_closed; Rule N2 permits browser-global transfer but not loader use through the parameter', configurationReferences: 'Rule C failed_closed' },
+  { position: 'return', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global transfer', configurationReferences: 'Rule C interprets only returns of the exported configuration factory' },
+  { position: 'yield', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global transfer', configurationReferences: 'Rule C failed_closed' },
+  { position: 'throw', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global transfer', configurationReferences: 'Rule C failed_closed' },
+  { position: 'await or promise resolution', loaderValues: 'Rule N1 failed_closed unless still a direct receiver; Rule N2 validates loader use', configurationReferences: 'Rule C failed_closed' },
+  { position: 'template substitution', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global transfer', configurationReferences: 'Rule C failed_closed' },
+  { position: 'spread', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global transfer', configurationReferences: 'Rule C permits only reachable same-file const literal composition' },
+  { position: 'property value', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global storage', configurationReferences: 'Rule C interprets only literal properties inside its reachable graph' },
+  { position: 'array element', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global storage', configurationReferences: 'Rule C interprets only literal arrays inside its reachable graph' },
+  { position: 'call argument', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global transfer', configurationReferences: 'Rule C accepts only symbol-proven Vite defineConfig graph entry' },
+  { position: 'constructor argument', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global transfer', configurationReferences: 'Rule C failed_closed' },
+  { position: 'call receiver', loaderValues: 'Rule N1 permits only direct namespace member derivation; Rule N2 validates loader members by symbol', configurationReferences: 'Rule C failed_closed outside its reachable graph' },
+  { position: 'conditional, logical, or comma expression', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global transfer', configurationReferences: 'Rule C unions conditional export branches and otherwise fails_closed' },
+  { position: 'class field or heritage', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global storage', configurationReferences: 'Rule C failed_closed' },
+  { position: 'export', loaderValues: 'Rule N1 failed_closed except its exact alias initializer; Rule N2 permits inert global transfer', configurationReferences: 'Rule C starts at export default and otherwise fails_closed' },
+  { position: 'for-of head', loaderValues: 'Rule N1 failed_closed; Rule N2 validates later loader use', configurationReferences: 'Rule C failed_closed' },
+  { position: 'for-in head', loaderValues: 'Rule N1 failed_closed; Rule N2 validates later loader use', configurationReferences: 'Rule C failed_closed' },
+  { position: 'tagged template', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global transfer', configurationReferences: 'Rule C failed_closed' },
 ] as const;
 
 export const HELDOUT_MODULE_SPECIFIER_POLICY = {
@@ -201,13 +205,18 @@ export const HELDOUT_MODULE_SPECIFIER_POLICY = {
   ],
   interpreted: [
     'loader-valued expressions are require, module.require, importScripts, Worker or SharedWorker (bare or global-qualified), require.resolve, import.meta.resolve, import.meta.glob, createRequire from module built-ins and its result, worker_threads.Worker, and exact aliases',
-    'namespace roots such as window, self, globalThis, import.meta, and module namespaces are inspected only to derive loader-valued members and are never findings themselves',
+    'Rule N1 permits import.meta and module/worker namespaces only as direct member receivers or exact plain-const aliases',
+    'Rule N2 permits browser globals to transfer inertly and validates Worker, SharedWorker, and importScripts members at use by symbol-proven global provenance',
     'a loader-valued expression is allowed only as a direct callee with a constant specifier, a receiver leading to a recognized member call, or the whole initializer of a non-exported plain-identifier const alias',
-    'resolution configuration changes invalidate candidate consumers for reinspection',
+    'Rule C interprets Vite aliases only as strict literals in the graph reachable from export default, symbol-proven Vite defineConfig, factory returns, conditional branches, and same-file const object/array composition',
+    'Rule C uses no mutation or transfer analysis: every reference to a reachable const must be its declaration or occur inside the reachable graph',
+    'resolution configuration changes re-inspect consumers; unresolved configuration makes every encountered consumer edge unresolved',
     'every eligible candidate file receives the full AST and symbol inspection pass without a textual pre-gate',
   ],
   failsClosed: [
     'every other position of a loader-valued expression is loader_reference_escaped from one generic check',
+    'every disallowed Rule N1 namespace position and every non-symbol-proven Rule N2 loader-member use is loader_reference_escaped from the same generic check',
+    'a nonliteral Vite alias, unreachable alias/resolve property, or invalid reachable-const reference is unresolved configuration under Rule C',
     'unresolved targets, options, package conditions, globs, aliases, URL schemes, and data modules are findings',
   ],
   outOfScope: HELDOUT_LEAK_AST_OUT_OF_SCOPE,
@@ -498,7 +507,6 @@ function discoverModuleEdges(
   const trackedNames = new Set<string>();
   const importMetaSymbols = new Set<ts.Symbol>();
   const globalNamespaceSymbols = new Set<ts.Symbol>();
-  const ambiguousNamespaceSymbols = new Set<ts.Symbol>();
   const symbolAt = (identifier: ts.Identifier): ts.Symbol | undefined => {
     if (ts.isExportSpecifier(identifier.parent)) {
       return checker.getExportSpecifierLocalTargetSymbol(identifier.parent) ??
@@ -716,6 +724,16 @@ function discoverModuleEdges(
   });
   const bindingSourceIsRecognized = (sourceBinding: BindingSource): boolean =>
     sourceBinding.kinds.size > 0 || sourceBinding.importMeta || sourceBinding.globalNamespace;
+  const permitsNamespaceAlias = (
+    declaration: ts.VariableDeclaration | ts.ParameterDeclaration,
+  ): declaration is ts.VariableDeclaration => {
+    if (!ts.isVariableDeclaration(declaration) || !ts.isIdentifier(declaration.name) ||
+      !ts.isVariableDeclarationList(declaration.parent) ||
+      (declaration.parent.flags & ts.NodeFlags.Const) === 0) return false;
+    const statement = declaration.parent.parent;
+    return !ts.isVariableStatement(statement) || ts.getModifiers(statement)?.some((modifier) =>
+      modifier.kind === ts.SyntaxKind.ExportKeyword) !== true;
+  };
   const bindingMemberKind = (
     sourceBinding: BindingSource,
     key: string,
@@ -736,6 +754,22 @@ function discoverModuleEdges(
     if (sourceBinding.globalNamespace && key === 'SharedWorker') return 'shared_worker';
     if (sourceBinding.globalNamespace && key === 'importScripts') return 'script_loader';
     return null;
+  };
+  const bindingExtractsBrowserLoader = (target: ts.BindingName | ts.Expression): boolean => {
+    if (ts.isObjectBindingPattern(target)) {
+      return target.elements.some((element) => {
+        const key = element.propertyName === undefined && ts.isIdentifier(element.name)
+          ? identifierText(element.name)
+          : element.propertyName === undefined
+            ? null
+            : propertyNameText(element.propertyName);
+        return key !== null && ['Worker', 'SharedWorker', 'importScripts'].includes(key);
+      });
+    }
+    const unwrapped = ts.isExpression(target) ? unwrapTransparentExpression(target) : target;
+    return ts.isObjectLiteralExpression(unwrapped) && unwrapped.properties.some((property) =>
+      (ts.isPropertyAssignment(property) || ts.isShorthandPropertyAssignment(property)) &&
+      ['Worker', 'SharedWorker', 'importScripts'].includes(propertyNameText(property.name) ?? ''));
   };
   const propagateIdentifier = (
     identifier: ts.Identifier,
@@ -852,84 +886,27 @@ function discoverModuleEdges(
       if (initializer === undefined) continue;
       const sourceBinding = bindingSourceFor(initializer);
       if (!bindingSourceIsRecognized(sourceBinding)) continue;
-      const propagation = propagateBinding(node.name, sourceBinding);
+      if (sourceBinding.globalNamespace && !permitsNamespaceAlias(node) &&
+        bindingExtractsBrowserLoader(node.name)) unresolvedNamespaceBindings.add(node);
+      const propagation = propagateBinding(node.name, {
+        ...sourceBinding,
+        globalNamespace: sourceBinding.globalNamespace && permitsNamespaceAlias(node),
+      });
       propagated = propagation.changed || propagated;
       if (!propagation.complete) unresolvedNamespaceBindings.add(node);
     }
     for (const binding of assignmentBindings) {
       const sourceBinding = bindingSourceFor(binding.source);
       if (!bindingSourceIsRecognized(sourceBinding)) continue;
-      const propagation = propagateAssignmentBinding(binding.target, sourceBinding);
-      propagated = propagation.changed || propagated;
-      if (!propagation.complete) unresolvedNamespaceBindings.add(binding.node);
-    }
-  }
-  const containsRecognizedNamespace = (node: ts.Node): boolean => {
-    if (ts.isExpression(node)) {
-      if (ts.isIdentifier(node)) {
-        const symbol = symbolAt(node);
-        if (symbol !== undefined && ambiguousNamespaceSymbols.has(symbol)) return true;
-      }
-      const nodeKinds = expressionKinds(node);
-      if ((ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) && [
-        'loader', 'resolver', 'glob', 'factory', 'worker', 'shared_worker', 'script_loader',
-      ].some((kind) => nodeKinds.has(kind as TrackedLoaderKind))) return false;
-      if (ts.isCallExpression(node)) {
-        const calleeKinds = expressionKinds(node.expression);
-        if (['loader', 'resolver', 'glob', 'factory', 'script_loader']
-          .some((kind) => calleeKinds.has(kind as TrackedLoaderKind))) return false;
-      }
-      const sourceBinding = bindingSourceFor(node);
-      if (sourceBinding.importMeta || sourceBinding.globalNamespace ||
-        sourceBinding.kinds.has('module_namespace') ||
-        sourceBinding.kinds.has('worker_namespace')) return true;
-      if ((ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) &&
-        (isImportMetaNamespace(node.expression) || isGlobalNamespace(node.expression))) {
-        return false;
-      }
-      if (ts.isPropertyAccessExpression(node)) {
-        return containsRecognizedNamespace(node.expression);
-      }
-      if (ts.isElementAccessExpression(node)) {
-        return containsRecognizedNamespace(node.expression) ||
-          containsRecognizedNamespace(node.argumentExpression);
-      }
-    }
-    let found = false;
-    ts.forEachChild(node, (child) => {
-      if (!found && containsRecognizedNamespace(child)) found = true;
-    });
-    return found;
-  };
-  let ambiguityPropagated = true;
-  while (ambiguityPropagated) {
-    ambiguityPropagated = false;
-    for (const node of bindingDeclarations) {
-      if (node.initializer === undefined ||
-        bindingSourceIsRecognized(bindingSourceFor(node.initializer)) ||
-        !containsRecognizedNamespace(node.initializer)) continue;
-      if (ts.isIdentifier(node.name)) {
-        const symbol = symbolAt(node.name);
-        if (symbol !== undefined && !ambiguousNamespaceSymbols.has(symbol)) {
-          ambiguousNamespaceSymbols.add(symbol);
-          ambiguityPropagated = true;
-        }
-      } else {
-        unresolvedNamespaceBindings.add(node);
-      }
-    }
-    for (const binding of assignmentBindings) {
-      if (bindingSourceIsRecognized(bindingSourceFor(binding.source)) ||
-        !containsRecognizedNamespace(binding.source)) continue;
-      if (ts.isIdentifier(binding.target)) {
-        const symbol = symbolAt(binding.target);
-        if (symbol !== undefined && !ambiguousNamespaceSymbols.has(symbol)) {
-          ambiguousNamespaceSymbols.add(symbol);
-          ambiguityPropagated = true;
-        }
-      } else {
+      if (sourceBinding.globalNamespace && bindingExtractsBrowserLoader(binding.target)) {
         unresolvedNamespaceBindings.add(binding.node);
       }
+      const propagation = propagateAssignmentBinding(binding.target, {
+        ...sourceBinding,
+        globalNamespace: false,
+      });
+      propagated = propagation.changed || propagated;
+      if (!propagation.complete) unresolvedNamespaceBindings.add(binding.node);
     }
   }
   const loaderReference = (expression: ts.Expression): boolean =>
@@ -1095,22 +1072,47 @@ function discoverModuleEdges(
   };
   const isUnsupportedNamespaceMemberAccess = (node: ts.Node): boolean => {
     if (!ts.isPropertyAccessExpression(node) && !ts.isElementAccessExpression(node)) return false;
-    const receiver = unwrapTransparentExpression(node.expression);
-    if (ts.isIdentifier(receiver)) {
-      const receiverSymbol = symbolAt(receiver);
-      if (receiverSymbol !== undefined && ambiguousNamespaceSymbols.has(receiverSymbol)) {
-        const key = propertyKey(node);
-        return key === null || [
-          'resolve', 'glob', 'Worker', 'SharedWorker', 'importScripts',
-          'createRequire', 'require', 'default', 'Module',
-        ].includes(key);
-      }
-    }
     const receiverKinds = expressionKinds(node.expression);
     if (!receiverKinds.has('module_namespace') && !receiverKinds.has('worker_namespace')) return false;
     const key = propertyKey(node);
     if (key === null) return true;
     return expressionKinds(node).size === 0;
+  };
+  const n1NamespaceRoot = (node: ts.Node): ts.Expression | null => {
+    if (!ts.isExpression(node)) return null;
+    const kinds = expressionKinds(node);
+    return isImportMetaNamespace(node) || kinds.has('module_namespace') ||
+      kinds.has('worker_namespace') ? node : null;
+  };
+  const isAllowedN1NamespaceRoot = (reference: ts.Expression): boolean => {
+    let current = reference;
+    while (true) {
+      const parent = current.parent;
+      if ((ts.isParenthesizedExpression(parent) || ts.isAsExpression(parent) ||
+        ts.isSatisfiesExpression(parent) || ts.isNonNullExpression(parent) ||
+        ts.isTypeAssertionExpression(parent) || ts.isAwaitExpression(parent)) &&
+        parent.expression === current) {
+        current = parent;
+        continue;
+      }
+      if ((ts.isPropertyAccessExpression(parent) || ts.isElementAccessExpression(parent)) &&
+        parent.expression === current) return true;
+      return isExactAliasInitializer(current);
+    }
+  };
+  const globalLoaderMember = (node: ts.Node): boolean => {
+    if (!ts.isPropertyAccessExpression(node) && !ts.isElementAccessExpression(node)) return false;
+    const key = propertyKey(node);
+    if (key === null || !['Worker', 'SharedWorker', 'importScripts'].includes(key)) return false;
+    const kinds = expressionKinds(node);
+    return !kinds.has('worker') && !kinds.has('shared_worker') && !kinds.has('script_loader');
+  };
+  const unrecognizedBareGlobalLoader = (node: ts.Node): boolean => {
+    if (!ts.isIdentifier(node) || isDeclarationIdentifier(node)) return false;
+    const name = identifierText(node);
+    if (!['Worker', 'SharedWorker', 'importScripts'].includes(name)) return false;
+    const kinds = identifierKinds(node);
+    return !kinds.has('worker') && !kinds.has('shared_worker') && !kinds.has('script_loader');
   };
   const isWithinTypeNode = (node: ts.Node): boolean => {
     let current = node.parent;
@@ -1129,8 +1131,13 @@ function discoverModuleEdges(
   const visit = (node: ts.Node): void => {
     if (visited.has(node)) return;
     visited.add(node);
+    const namespaceRoot = n1NamespaceRoot(node);
+    const escapedNamespace = namespaceRoot !== null && !isWithinTypeNode(node) &&
+      (!ts.isIdentifier(node) || !isDeclarationIdentifier(node)) &&
+      !isAllowedN1NamespaceRoot(namespaceRoot);
     if (isTrackedModuleReExport(node) || isUnsupportedNamespaceMemberAccess(node) ||
-      unresolvedNamespaceBindings.has(node)) {
+      unresolvedNamespaceBindings.has(node) || escapedNamespace || globalLoaderMember(node) ||
+      unrecognizedBareGlobalLoader(node)) {
       recordLoaderEscape();
     } else {
       const loaderValue = loaderValuedExpression(node);
@@ -1447,6 +1454,9 @@ function firstInvalidSpecifier(
   importer: string,
   context: HeldoutLeakInspectionContext,
 ): ModuleEdge | undefined {
+  if ((context.unresolvedResolutionConfigPaths?.length ?? 0) > 0) {
+    return edges.find((edge) => edge.kind === 'import' || edge.kind === 'resolution');
+  }
   return edges.find((edge) => edge.specifier !== null &&
     normalizeModuleSpecifier(edge.specifier, importer, context) === null);
 }
@@ -1764,210 +1774,15 @@ function viteAliases(source: string, path: string): ViteAliasDiscovery {
   };
   const checker = ts.createProgram([path], compilerOptions, compilerHost).getTypeChecker();
   const symbolAt = (identifier: ts.Identifier): ts.Symbol | undefined => {
-    if (ts.isExportSpecifier(identifier.parent)) {
-      return checker.getExportSpecifierLocalTargetSymbol(identifier.parent) ??
-        checker.getSymbolAtLocation(identifier);
-    }
     if (ts.isShorthandPropertyAssignment(identifier.parent)) {
       return checker.getShorthandAssignmentValueSymbol(identifier.parent) ??
         checker.getSymbolAtLocation(identifier);
     }
     return checker.getSymbolAtLocation(identifier);
   };
-  const localExpressions = new Map<ts.Symbol, ts.Expression>();
-  const mutatedSymbols = new Set<ts.Symbol>();
-  const untrackableTransferSymbols = new Set<ts.Symbol>();
-  const aliasLinks = new Map<ts.Symbol, Set<ts.Symbol>>();
-  const assignedRootIdentifier = (expression: ts.Expression): ts.Identifier | null => {
-    const unwrapped = unwrapTransparentExpression(expression);
-    if (ts.isIdentifier(unwrapped)) return unwrapped;
-    if (ts.isPropertyAccessExpression(unwrapped) || ts.isElementAccessExpression(unwrapped)) {
-      return assignedRootIdentifier(unwrapped.expression);
-    }
-    return null;
-  };
-  const addAliasLink = (left: ts.Symbol, right: ts.Symbol): void => {
-    const leftLinks = aliasLinks.get(left) ?? new Set<ts.Symbol>();
-    leftLinks.add(right);
-    aliasLinks.set(left, leftLinks);
-    const rightLinks = aliasLinks.get(right) ?? new Set<ts.Symbol>();
-    rightLinks.add(left);
-    aliasLinks.set(right, rightLinks);
-  };
-  const linkOpaqueReferences = (target: ts.Symbol, node: ts.Node): void => {
-    if (ts.isIdentifier(node)) {
-      const sourceSymbol = symbolAt(node);
-      if (sourceSymbol !== undefined) addAliasLink(target, sourceSymbol);
-      return;
-    }
-    ts.forEachChild(node, (child) => linkOpaqueReferences(target, child));
-  };
-  const linkTransferredReferences = (target: ts.Symbol, expression: ts.Expression): boolean => {
-    const unwrapped = unwrapTransparentExpression(expression);
-    if (ts.isIdentifier(unwrapped)) {
-      const sourceSymbol = symbolAt(unwrapped);
-      if (sourceSymbol === undefined) return false;
-      addAliasLink(target, sourceSymbol);
-      return true;
-    }
-    if (ts.isObjectLiteralExpression(unwrapped)) {
-      let complete = true;
-      for (const property of unwrapped.properties) {
-        if (ts.isSpreadAssignment(property)) {
-          complete = linkTransferredReferences(target, property.expression) && complete;
-        } else if (ts.isPropertyAssignment(property) && !ts.isComputedPropertyName(property.name)) {
-          complete = linkTransferredReferences(target, property.initializer) && complete;
-        } else if (ts.isShorthandPropertyAssignment(property)) {
-          complete = linkTransferredReferences(target, property.name) && complete;
-        } else {
-          complete = false;
-        }
-      }
-      return complete;
-    } else if (ts.isArrayLiteralExpression(unwrapped)) {
-      let complete = true;
-      for (const element of unwrapped.elements) {
-        if (ts.isOmittedExpression(element)) continue;
-        const transferred = ts.isSpreadElement(element) ? element.expression : element;
-        complete = linkTransferredReferences(target, transferred) && complete;
-      }
-      return complete;
-    }
-    const complete = constantString(unwrapped) !== null || ts.isNumericLiteral(unwrapped) ||
-      ts.isRegularExpressionLiteral(unwrapped) || unwrapped.kind === ts.SyntaxKind.TrueKeyword ||
-      unwrapped.kind === ts.SyntaxKind.FalseKeyword || unwrapped.kind === ts.SyntaxKind.NullKeyword;
-    if (!complete) linkOpaqueReferences(target, unwrapped);
-    return complete;
-  };
-  const markReferencedSymbols = (node: ts.Node): void => {
-    if (ts.isIdentifier(node)) {
-      const symbol = symbolAt(node);
-      if (symbol !== undefined) mutatedSymbols.add(symbol);
-      return;
-    }
-    ts.forEachChild(node, markReferencedSymbols);
-  };
-  const markExpressionMutation = (expression: ts.Expression): void => {
-    const root = assignedRootIdentifier(expression);
-    const symbol = root === null ? undefined : symbolAt(root);
-    if (symbol !== undefined) mutatedSymbols.add(symbol);
-  };
-  const collectLocals = (node: ts.Node): void => {
-    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer !== undefined) {
-      const symbol = symbolAt(node.name);
-      if (symbol !== undefined) {
-        localExpressions.set(symbol, node.initializer);
-        if (!linkTransferredReferences(symbol, node.initializer)) {
-          untrackableTransferSymbols.add(symbol);
-        }
-      }
-    }
-    if (ts.isVariableDeclaration(node) && !ts.isIdentifier(node.name) &&
-      node.initializer !== undefined) markReferencedSymbols(node.initializer);
-    if (ts.isBinaryExpression(node) &&
-      node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
-      node.operatorToken.kind <= ts.SyntaxKind.LastAssignment) {
-      const root = assignedRootIdentifier(node.left);
-      const rootSymbol = root === null ? undefined : symbolAt(root);
-      if (rootSymbol === undefined) {
-        markReferencedSymbols(node.left);
-        markReferencedSymbols(node.right);
-      } else {
-        mutatedSymbols.add(rootSymbol);
-        if (!linkTransferredReferences(rootSymbol, node.right)) {
-          untrackableTransferSymbols.add(rootSymbol);
-        }
-      }
-    }
-    if (ts.isCallExpression(node)) {
-      const callee = unwrapTransparentExpression(node.expression);
-      if ((ts.isPropertyAccessExpression(callee) || ts.isElementAccessExpression(callee)) &&
-        ['push', 'splice', 'unshift'].includes(propertyKey(callee) ?? '')) {
-        markExpressionMutation(callee.expression);
-      }
-      const transparentDefineConfig = ts.isIdentifier(callee) && callee.text === 'defineConfig';
-      for (const argument of node.arguments) {
-        const transferred = ts.isSpreadElement(argument) ? argument.expression : argument;
-        const root = assignedRootIdentifier(transferred);
-        if (root !== null) markExpressionMutation(transferred);
-        else if (!transparentDefineConfig) markReferencedSymbols(transferred);
-      }
-    }
-    if ((ts.isReturnStatement(node) || ts.isThrowStatement(node) || ts.isYieldExpression(node)) &&
-      node.expression !== undefined) {
-      markReferencedSymbols(node.expression);
-    }
-    if (ts.isAwaitExpression(node)) markReferencedSymbols(node.expression);
-    if ((ts.isPropertyDeclaration(node) || ts.isParameter(node)) && node.initializer !== undefined) {
-      markReferencedSymbols(node.initializer);
-    }
-    if (ts.isArrowFunction(node) && !ts.isBlock(node.body)) markReferencedSymbols(node.body);
-    if (ts.isTemplateExpression(node)) {
-      for (const span of node.templateSpans) markReferencedSymbols(span.expression);
-    }
-    if (ts.isTaggedTemplateExpression(node)) {
-      markReferencedSymbols(node.tag);
-      markReferencedSymbols(node.template);
-    }
-    if (ts.isConditionalExpression(node) || (ts.isBinaryExpression(node) && [
-      ts.SyntaxKind.AmpersandAmpersandToken,
-      ts.SyntaxKind.BarBarToken,
-      ts.SyntaxKind.QuestionQuestionToken,
-      ts.SyntaxKind.CommaToken,
-    ].includes(node.operatorToken.kind))) markReferencedSymbols(node);
-    if (ts.isHeritageClause(node)) {
-      for (const type of node.types) markReferencedSymbols(type.expression);
-    }
-    if (ts.isForOfStatement(node)) markReferencedSymbols(node.expression);
-    if (ts.isExportAssignment(node) && !ts.isObjectLiteralExpression(
-      unwrapTransparentExpression(node.expression))) markReferencedSymbols(node.expression);
-    if (ts.isExportDeclaration(node) && node.moduleSpecifier === undefined &&
-      node.exportClause !== undefined && ts.isNamedExports(node.exportClause)) {
-      for (const element of node.exportClause.elements) markReferencedSymbols(element.propertyName ?? element.name);
-    }
-    ts.forEachChild(node, collectLocals);
-  };
-  collectLocals(sourceFile);
-  const symbolIsMutated = (symbol: ts.Symbol, seen: ReadonlySet<ts.Symbol>): boolean => {
-    if (mutatedSymbols.has(symbol) || untrackableTransferSymbols.has(symbol)) return true;
-    if (seen.has(symbol)) return false;
-    const nextSeen = new Set([...seen, symbol]);
-    return [...(aliasLinks.get(symbol) ?? [])].some((linked) => symbolIsMutated(linked, nextSeen));
-  };
-  const resolveLocal = (
-    expression: ts.Expression,
-    seen: ReadonlySet<ts.Symbol>,
-  ): ts.Expression | null => {
-    const unwrapped = unwrapTransparentExpression(expression);
-    if (!ts.isIdentifier(unwrapped)) return unwrapped;
-    const symbol = symbolAt(unwrapped);
-    if (symbol === undefined || seen.has(symbol) || symbolIsMutated(symbol, new Set())) return null;
-    const local = localExpressions.get(symbol);
-    return local === undefined
-      ? null
-      : resolveLocal(local, new Set([...seen, symbol]));
-  };
-  const literalProperties = (
-    expression: ts.Expression,
-    seen: ReadonlySet<ts.Symbol>,
-  ): ReadonlyMap<string, ts.Expression> | null => {
-    const resolved = resolveLocal(expression, seen);
-    if (resolved === null || !ts.isObjectLiteralExpression(resolved)) return null;
-    const properties = new Map<string, ts.Expression>();
-    for (const property of resolved.properties) {
-      if (ts.isSpreadAssignment(property)) {
-        const spread = literalProperties(property.expression, seen);
-        if (spread === null) return null;
-        for (const [key, value] of spread) properties.set(key, value);
-        continue;
-      }
-      if (!ts.isPropertyAssignment(property) || ts.isComputedPropertyName(property.name)) return null;
-      const key = propertyNameText(property.name);
-      if (key === null) return null;
-      properties.set(key, property.initializer);
-    }
-    return properties;
-  };
+  const reachableRoots = new Set<ts.Node>();
+  const reachableSymbols = new Map<ts.Symbol, ts.VariableDeclaration>();
+  const visitingSymbols = new Set<ts.Symbol>();
   const regexAlias = (
     expression: ts.Expression,
   ): { readonly source: string; readonly flags: string } | null => {
@@ -1985,20 +1800,32 @@ function viteAliases(source: string, path: string): ViteAliasDiscovery {
     }
   };
   const collectAliasEntry = (expression: ts.Expression): void => {
-    const properties = literalProperties(expression, new Set());
-    if (properties === null) {
+    const entry = unwrapTransparentExpression(expression);
+    if (!ts.isObjectLiteralExpression(entry)) {
       unresolved = true;
       return;
+    }
+    const properties = new Map<string, ts.Expression>();
+    for (const property of entry.properties) {
+      if (!ts.isPropertyAssignment(property) || ts.isComputedPropertyName(property.name)) {
+        unresolved = true;
+        return;
+      }
+      const key = propertyNameText(property.name);
+      if (key === null) {
+        unresolved = true;
+        return;
+      }
+      properties.set(key, property.initializer);
     }
     const find = properties.get('find');
     const replacement = properties.get('replacement');
-    if (find === undefined || replacement === undefined || constantString(replacement) === null) {
+    if (find === undefined || replacement === undefined || !ts.isStringLiteral(replacement)) {
       unresolved = true;
       return;
     }
-    const key = constantString(find);
-    if (key !== null) {
-      aliases.add(key);
+    if (ts.isStringLiteral(find)) {
+      aliases.add(find.text);
       return;
     }
     const regex = regexAlias(find);
@@ -2009,42 +1836,209 @@ function viteAliases(source: string, path: string): ViteAliasDiscovery {
     regexes.set(`${regex.source}/${regex.flags}`, regex);
   };
   const collectAliasInitializer = (initializer: ts.Expression): void => {
-    const resolved = resolveLocal(initializer, new Set());
-    if (resolved === null) {
-      unresolved = true;
-      return;
-    }
-    if (ts.isObjectLiteralExpression(resolved)) {
-      const properties = literalProperties(resolved, new Set());
-      if (properties === null) {
-        unresolved = true;
-        return;
-      }
-      for (const [key, replacement] of properties) {
-        if (constantString(replacement) === null) unresolved = true;
-        else aliases.add(key);
-      }
-    } else if (ts.isArrayLiteralExpression(resolved)) {
-      for (const element of resolved.elements) {
-        if (ts.isSpreadElement(element)) {
-          collectAliasInitializer(element.expression);
-          continue;
+    const literal = unwrapTransparentExpression(initializer);
+    if (ts.isObjectLiteralExpression(literal)) {
+      for (const property of literal.properties) {
+        if (!ts.isPropertyAssignment(property) || ts.isComputedPropertyName(property.name) ||
+          !ts.isStringLiteral(property.initializer)) {
+          unresolved = true;
+          return;
         }
-        collectAliasEntry(element);
+        const key = propertyNameText(property.name);
+        if (key === null) {
+          unresolved = true;
+          return;
+        }
+        aliases.add(key);
+      }
+    } else if (ts.isArrayLiteralExpression(literal)) {
+      for (const element of literal.elements) {
+        if (ts.isSpreadElement(element) || ts.isOmittedExpression(element)) unresolved = true;
+        else collectAliasEntry(element);
       }
     } else {
       unresolved = true;
     }
   };
-  const visit = (node: ts.Node): void => {
-    if (ts.isPropertyAssignment(node) && propertyNameText(node.name) === 'alias') {
-      collectAliasInitializer(node.initializer);
-    } else if (ts.isShorthandPropertyAssignment(node) && node.name.text === 'alias') {
-      collectAliasInitializer(node.name);
-    }
-    ts.forEachChild(node, visit);
+  const declarationForReachableIdentifier = (
+    identifier: ts.Identifier,
+  ): { readonly symbol: ts.Symbol; readonly declaration: ts.VariableDeclaration } | null => {
+    const symbol = symbolAt(identifier);
+    if (symbol === undefined) return null;
+    const declarations = symbol.declarations?.filter((declaration): declaration is ts.VariableDeclaration =>
+      ts.isVariableDeclaration(declaration) && declaration.getSourceFile() === sourceFile &&
+      ts.isIdentifier(declaration.name) && declaration.initializer !== undefined &&
+      ts.isVariableDeclarationList(declaration.parent) &&
+      (declaration.parent.flags & ts.NodeFlags.Const) !== 0) ?? [];
+    if (declarations.length !== 1) return null;
+    const declaration = declarations[0];
+    const initializer = declaration?.initializer === undefined
+      ? undefined
+      : unwrapTransparentExpression(declaration.initializer);
+    return declaration === undefined || initializer === undefined ||
+      (!ts.isObjectLiteralExpression(initializer) && !ts.isArrayLiteralExpression(initializer))
+      ? null
+      : { symbol, declaration };
   };
-  visit(sourceFile);
+  const isViteDefineConfig = (expression: ts.Expression): boolean => {
+    const callee = unwrapTransparentExpression(expression);
+    if (!ts.isIdentifier(callee)) return false;
+    const symbol = symbolAt(callee);
+    return symbol?.declarations?.some((declaration) => {
+      if (!ts.isImportSpecifier(declaration)) return false;
+      const importedName = declaration.propertyName?.text ?? declaration.name.text;
+      const importClause = declaration.parent.parent;
+      const importDeclaration = importClause.parent;
+      return importedName === 'defineConfig' && ts.isImportDeclaration(importDeclaration) &&
+        constantString(importDeclaration.moduleSpecifier) === 'vite';
+    }) === true;
+  };
+  const returnedExpressions = (body: ts.ConciseBody): readonly ts.Expression[] => {
+    if (!ts.isBlock(body)) return [body];
+    const returned: ts.Expression[] = [];
+    const visitReturn = (node: ts.Node): void => {
+      if (node !== body && ts.isFunctionLike(node)) return;
+      if (ts.isReturnStatement(node) && node.expression !== undefined) {
+        returned.push(node.expression);
+        return;
+      }
+      ts.forEachChild(node, visitReturn);
+    };
+    visitReturn(body);
+    return returned;
+  };
+  const visitResolveObject = (expression: ts.Expression): void => {
+    const value = unwrapTransparentExpression(expression);
+    if (ts.isIdentifier(value)) {
+      visitReachableIdentifier(value, visitResolveObject);
+      return;
+    }
+    if (!ts.isObjectLiteralExpression(value)) {
+      unresolved = true;
+      return;
+    }
+    reachableRoots.add(value);
+    for (const property of value.properties) {
+      if (ts.isSpreadAssignment(property)) {
+        const spread = unwrapTransparentExpression(property.expression);
+        if (ts.isIdentifier(spread)) visitReachableIdentifier(spread, visitResolveObject);
+        else unresolved = true;
+        continue;
+      }
+      if (!ts.isPropertyAssignment(property) || ts.isComputedPropertyName(property.name)) {
+        unresolved = true;
+        continue;
+      }
+      if (propertyNameText(property.name) === 'alias') collectAliasInitializer(property.initializer);
+    }
+  };
+  const visitReachableObject = (object: ts.ObjectLiteralExpression): void => {
+    reachableRoots.add(object);
+    for (const property of object.properties) {
+      if (ts.isSpreadAssignment(property)) {
+        const spread = unwrapTransparentExpression(property.expression);
+        if (ts.isIdentifier(spread)) visitReachableIdentifier(spread, visitReachableExpression);
+        else if (ts.isObjectLiteralExpression(spread) || ts.isArrayLiteralExpression(spread)) {
+          visitReachableExpression(spread);
+        } else unresolved = true;
+        continue;
+      }
+      if (ts.isComputedPropertyName(property.name)) {
+        unresolved = true;
+        continue;
+      }
+      if (ts.isPropertyAssignment(property) && propertyNameText(property.name) === 'resolve') {
+        visitResolveObject(property.initializer);
+      } else if (ts.isShorthandPropertyAssignment(property) && property.name.text === 'resolve') {
+        visitReachableIdentifier(property.name, visitResolveObject);
+      }
+    }
+  };
+  const visitReachableArray = (array: ts.ArrayLiteralExpression): void => {
+    reachableRoots.add(array);
+    for (const element of array.elements) {
+      if (ts.isOmittedExpression(element)) continue;
+      const value = ts.isSpreadElement(element) ? element.expression : element;
+      const unwrapped = unwrapTransparentExpression(value);
+      if (ts.isIdentifier(unwrapped)) visitReachableIdentifier(unwrapped, visitReachableExpression);
+      else if (ts.isObjectLiteralExpression(unwrapped) || ts.isArrayLiteralExpression(unwrapped)) {
+        visitReachableExpression(unwrapped);
+      } else unresolved = true;
+    }
+  };
+  const visitReachableFunction = (fn: ts.ArrowFunction | ts.FunctionExpression): void => {
+    for (const expression of returnedExpressions(fn.body)) visitReachableExpression(expression);
+  };
+  function visitReachableIdentifier(
+    identifier: ts.Identifier,
+    visitor: (expression: ts.Expression) => void,
+  ): void {
+    reachableRoots.add(identifier);
+    const resolved = declarationForReachableIdentifier(identifier);
+    if (resolved === null) {
+      unresolved = true;
+      return;
+    }
+    reachableSymbols.set(resolved.symbol, resolved.declaration);
+    if (visitingSymbols.has(resolved.symbol)) {
+      unresolved = true;
+      return;
+    }
+    visitingSymbols.add(resolved.symbol);
+    visitor(resolved.declaration.initializer as ts.Expression);
+    visitingSymbols.delete(resolved.symbol);
+  }
+  function visitReachableExpression(expression: ts.Expression): void {
+    const value = unwrapTransparentExpression(expression);
+    if (ts.isObjectLiteralExpression(value)) {
+      visitReachableObject(value);
+    } else if (ts.isArrayLiteralExpression(value)) {
+      visitReachableArray(value);
+    } else if (ts.isIdentifier(value)) {
+      visitReachableIdentifier(value, visitReachableExpression);
+    } else if (ts.isConditionalExpression(value)) {
+      visitReachableExpression(value.whenTrue);
+      visitReachableExpression(value.whenFalse);
+    } else if (ts.isArrowFunction(value) || ts.isFunctionExpression(value)) {
+      visitReachableFunction(value);
+    } else if (ts.isCallExpression(value)) {
+      const argument = value.arguments[0];
+      if (!isViteDefineConfig(value.expression) || value.arguments.length !== 1 ||
+        argument === undefined || ts.isSpreadElement(argument)) unresolved = true;
+      else visitReachableExpression(argument);
+    } else {
+      unresolved = true;
+    }
+  }
+  const exportAssignments = sourceFile.statements.filter((statement): statement is ts.ExportAssignment =>
+    ts.isExportAssignment(statement) && !statement.isExportEquals);
+  const exported = exportAssignments[0];
+  if (exportAssignments.length !== 1 || exported === undefined) unresolved = true;
+  else visitReachableExpression(exported.expression);
+  const liesInsideReachableSet = (node: ts.Node): boolean => {
+    let current: ts.Node | undefined = node;
+    while (current !== undefined) {
+      if (reachableRoots.has(current)) return true;
+      current = current.parent;
+    }
+    return false;
+  };
+  const verifyReachability = (node: ts.Node): void => {
+    if (ts.isIdentifier(node)) {
+      const symbol = symbolAt(node);
+      const declaration = symbol === undefined ? undefined : reachableSymbols.get(symbol);
+      if (declaration !== undefined && node !== declaration.name && !liesInsideReachableSet(node)) {
+        unresolved = true;
+      }
+    }
+    if ((ts.isPropertyAssignment(node) || ts.isShorthandPropertyAssignment(node) ||
+      ts.isMethodDeclaration(node) || ts.isGetAccessorDeclaration(node) ||
+      ts.isSetAccessorDeclaration(node)) && ts.isObjectLiteralExpression(node.parent) &&
+      ['alias', 'resolve'].includes(propertyNameText(node.name) ?? '') &&
+      !liesInsideReachableSet(node)) unresolved = true;
+    ts.forEachChild(node, verifyReachability);
+  };
+  verifyReachability(sourceFile);
   return { aliases: [...aliases], regexes: [...regexes.values()], unresolved };
 }
 
