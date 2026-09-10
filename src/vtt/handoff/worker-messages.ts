@@ -44,6 +44,14 @@ export function decodeWorkerServerMessage(input: unknown): WorkerServerMessage |
   return decoded.issues.length === 0 ? decoded.value as WorkerServerMessage : null;
 }
 
+export function isSuccessfulSessionOpenResponse(response: HandoffResponse): boolean {
+  if (!response.ok) return false;
+  const sessionId = Reflect.get(response.result, 'sessionId');
+  const capabilities = Reflect.get(response.result, 'capabilities');
+  return typeof sessionId === 'string' && Array.isArray(capabilities) &&
+    capabilities.every((capability: unknown) => typeof capability === 'string');
+}
+
 export type WorkerClientMessage =
   | { readonly kind: 'request'; readonly invocation: number; readonly request: unknown }
   | { readonly kind: 'close' }

@@ -2,14 +2,14 @@ import type { SceneSnapshot } from './v1/contracts';
 import type { HandoffResponse, ProtocolTransportFault, SceneSnapshotEvent } from './protocol-runtime';
 import { SceneTransportClosedError, SceneTransportFaultError, type SceneTransport, type SceneTransportStatus } from './scene-transport';
 import {
-  decodeWorkerServerMessage, type WorkerClientMessage, type WorkerConnectMessage,
+  decodeWorkerServerMessage, isSuccessfulSessionOpenResponse,
+  type WorkerClientMessage, type WorkerConnectMessage,
 } from './worker-messages';
 import type { HandoffPrincipal } from './session-authorizer';
 import { postWorkerMessage } from './worker-message-post';
 
 interface Pending {
   id: string | null;
-  readonly method: string | null;
   readonly resolve: (response: HandoffResponse) => void;
   readonly reject: (error: Error) => void;
   receiptRevision: number | null;
@@ -66,16 +66,17 @@ export class WorkerSceneTransport implements SceneTransport {
     }
     this.#invocation += 1;
     const invocation = this.#invocation;
-    const idValue = property(request, 'id');
-    const methodValue = property(request, 'method');
+    // Snapshot caller-controlled envelope getters only to preserve the lifecycle
+    // recheck. Correlation relies exclusively on the single-use invocation and
+    // metadata established by the Worker after structured cloning.
+    property(request, 'id');
+    property(request, 'method');
     if (this.#terminal()) return Promise.reject(new SceneTransportClosedError());
     let rejectRequest: ((error: Error) => void) | undefined;
     const promise = new Promise<HandoffResponse>((resolve, reject) => {
       rejectRequest = reject;
       this.#pending.set(invocation, {
-        id: typeof idValue === 'string' ? idValue : null,
-        method: typeof methodValue === 'string' ? methodValue : null,
-        resolve, reject, receiptRevision: null,
+        id: null, resolve, reject, receiptRevision: null,
       });
     });
     try {
@@ -127,8 +128,7 @@ export class WorkerSceneTransport implements SceneTransport {
       if (message.receiptInvocation !== undefined) {
         const pending = this.#pending.get(message.receiptInvocation);
         if (
-          pending === undefined || message.receiptRevision === undefined || message.receiptId === undefined ||
-          pending.id !== null && pending.id !== message.receiptId
+          pending === undefined || message.receiptRevision === undefined || message.receiptId === undefined
         ) {
           this.#terminalFault(this.#fault('PROTOCOL_ERROR', 'Worker emitted an uncorrelated mutation receipt.'));
           return;
@@ -155,16 +155,17 @@ export class WorkerSceneTransport implements SceneTransport {
     }
     if (message.kind === 'response') {
       const pending = this.#pending.get(message.invocation);
-      if (pending === undefined || pending.id !== null && message.response.id !== pending.id) {
+      if (pending === undefined || pending.id !== null && pending.id !== message.response.id) {
         this.#terminalFault(this.#fault('PROTOCOL_ERROR', 'Worker response correlation failed.'));
         return;
       }
       this.#pending.delete(message.invocation);
-      if (pending.method === 'session.open' && message.response.ok) this.#setStatus('open');
+      pending.id = message.response.id;
+      if (isSuccessfulSessionOpenResponse(message.response)) this.#setStatus('open');
       pending.resolve(message.response);
       return;
     }
-    this.#terminalFault(this.#fault('PROTOCOL_ERROR', 'Worker peer closed the transport.'));
+    this.#peerClosed();
   };
 
   readonly #onPortMessageError = (): void => {
@@ -203,6 +204,14 @@ export class WorkerSceneTransport implements SceneTransport {
     this.#setStatus('closed');
     this.#emitFault(fault);
     this.#finishShutdown(error, true);
+  }
+  #peerClosed(): void {
+    if (this.#terminal()) return;
+    const fault = this.#fault('PROTOCOL_ERROR', 'Worker peer closed the transport.');
+    const error = new SceneTransportFaultError(fault);
+    this.#setStatus('closed');
+    this.#emitFault(fault);
+    this.#finishShutdown(error, false);
   }
   #finishShutdown(error: Error, terminalFault: boolean): void {
     if (this.#finished) return;

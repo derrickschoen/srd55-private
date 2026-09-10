@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import { attachHandoffWorkerPort } from '../../../src/vtt/handoff/worker-entry';
-import { WorkerSceneTransport } from '../../../src/vtt/handoff/worker-transport';
+import {
+  createHandoffWorkerHost, WorkerSceneTransport,
+} from '../../../src/vtt/handoff/worker-transport';
 import { SceneTransportClosedError, SceneTransportFaultError } from '../../../src/vtt/handoff/scene-transport';
+import type { HandoffPrincipal } from '../../../src/vtt/handoff/session-authorizer';
 import { readFileSync } from '../../helpers/test-filesystem';
 import { selectVttHandoffWorkerAsset } from '../../../vite.config';
 
@@ -165,7 +168,7 @@ describe('VTT handoff Worker message boundary', () => {
     detachLive();
   });
 
-  it('rejects a wrong-shaped Worker response instead of inventing success', async () => {
+  it('rejects an uncorrelated Worker response invocation instead of inventing success', async () => {
     const channel = new MessageChannel();
     const transport = new WorkerSceneTransport(channel.port1, () => undefined);
     const faults: string[] = [];
@@ -173,8 +176,8 @@ describe('VTT handoff Worker message boundary', () => {
     const pending = transport.request({ v: 1, id: 'expected', method: 'scene.snapshot', params: {} });
     const rejected = pending.catch((error: unknown) => error);
     channel.port2.postMessage({
-      kind: 'response', invocation: 1,
-      response: { v: 1, id: 'wrong', ok: true, result: {} },
+      kind: 'response', invocation: 2,
+      response: { v: 1, id: 'expected', ok: true, result: {} },
     });
     const error = await rejected;
     expect(faults).toEqual(['PROTOCOL_ERROR']);
@@ -285,6 +288,89 @@ describe('VTT handoff Worker message boundary', () => {
     barrier.resolve();
     detach();
   });
+
+  it('correlates changing id getters only from Worker-established response and receipt metadata', async () => {
+    const barrier = deferred();
+    let delayResponse = false;
+    const channel = new MessageChannel();
+    const detach = attachHandoffWorkerPort(channel.port2, {
+      sessionKey: 'changing-id-getter',
+      responseBarrier: () => delayResponse ? barrier.promise : Promise.resolve(),
+    });
+    const transport = new WorkerSceneTransport(channel.port1, () => undefined);
+    await transport.request({ v: 1, id: 'open-changing-id', method: 'session.open', params: { requestedRole: 'dm' } });
+
+    let readIdAccesses = 0;
+    const read = await transport.request({
+      v: 1,
+      get id(): string { readIdAccesses += 1; return readIdAccesses === 1 ? 'caller-read' : 'worker-read'; },
+      method: 'scene.snapshot', params: {},
+    });
+    expect({ readIdAccesses, responseId: read.id, ok: read.ok })
+      .toEqual({ readIdAccesses: 2, responseId: 'worker-read', ok: true });
+
+    delayResponse = true;
+    transport.subscribe((event) => {
+      if (event.data.doors.find((door) => door.id === 'object:two-room-door')?.open === true) transport.close();
+    });
+    let mutationIdAccesses = 0;
+    const committed = await transport.request({
+      v: 1,
+      get id(): string {
+        mutationIdAccesses += 1;
+        return mutationIdAccesses === 1 ? 'caller-mutation' : 'worker-mutation';
+      },
+      method: 'door.set', params: { doorId: 'object:two-room-door', open: true },
+    });
+    expect({ mutationIdAccesses, responseId: committed.id, ok: committed.ok })
+      .toEqual({ mutationIdAccesses: 2, responseId: 'worker-mutation', ok: true });
+    if (!committed.ok) throw new Error('The changing-id mutation receipt was not preserved.');
+    expect(committed.result.revision).toBeTypeOf('number');
+    expect(transport.status()).toBe('closed');
+    barrier.resolve();
+    detach();
+  });
+
+  it.each(['json', 'bytes'] as const)(
+    'opens a fresh player session from %s with initial, autonomous and offered-move progress',
+    async (encoding) => {
+      const sessionKey = `encoded-open:${encoding}`;
+      const channel = new MessageChannel();
+      const detach = attachHandoffWorkerPort(channel.port2, {
+        sessionKey,
+        principal: { role: 'player', playerId: 'combatant:two-room-goblin' },
+      });
+      const transport = new WorkerSceneTransport(channel.port1, () => undefined);
+      const encode = (request: Readonly<Record<string, unknown>>): string | Uint8Array => {
+        const text = JSON.stringify(request);
+        return encoding === 'json' ? text : new TextEncoder().encode(text);
+      };
+      const revisions: number[] = [];
+      transport.subscribe((event) => revisions.push(event.data.revision));
+      const initial = transport.initialSnapshot();
+
+      await expect(transport.request(encode({
+        v: 1, id: `unauthorized-${encoding}`, method: 'session.open', params: { requestedRole: 'dm' },
+      }))).resolves.toMatchObject({ ok: false, error: { code: 'UNAUTHORIZED' } });
+      expect(transport.status()).toBe('connecting');
+      await expect(transport.request(encode({
+        v: 1, id: `open-${encoding}`, method: 'session.open',
+        params: { requestedRole: 'player', playerId: 'combatant:two-room-goblin' },
+      }))).resolves.toMatchObject({ id: `open-${encoding}`, ok: true });
+      expect(transport.status()).toBe('open');
+      await expect(initial).resolves.toMatchObject({
+        sceneId: `scene:vtt-handoff-worker:${sessionKey}`, revision: 0,
+      });
+      expect(revisions[0]).toBe(0);
+      expect(revisions.some((revision) => revision > 0)).toBe(true);
+      await expect(transport.request({
+        v: 1, id: `move-${encoding}`, method: 'token.move',
+        params: { tokenId: 'token:two-room-goblin', to: { x: 7, y: 4, z: 0 } },
+      })).resolves.toMatchObject({ id: `move-${encoding}`, ok: true });
+      transport.dispose();
+      detach();
+    },
+  );
 
   it('preserves an established mutation receipt when its snapshot observer closes the transport', async () => {
     const channel = new MessageChannel();
@@ -483,6 +569,87 @@ describe('VTT handoff Worker message boundary', () => {
     detachA(); detachE(); detachIsolated();
   });
 
+  it('keeps unrelated sessions alive when production host lifecycle destroys one shared session', async () => {
+    const responseBarrier = deferred();
+    let delayDestroyedSession = false;
+    let workerTerminations = 0;
+    const serverDetachers = new Set<() => void>();
+    class PortBackedWorker {
+      postMessage(message: unknown): void {
+        if (typeof message !== 'object' || message === null) throw new TypeError('Expected a Worker connect message.');
+        const port = Reflect.get(message, 'port');
+        const sessionKey = Reflect.get(message, 'sessionKey');
+        const principal = Reflect.get(message, 'principal');
+        if (!(port instanceof MessagePort) || typeof sessionKey !== 'string' || typeof principal !== 'object' || principal === null) {
+          throw new TypeError('Expected a complete Worker connection.');
+        }
+        serverDetachers.add(attachHandoffWorkerPort(port, {
+          sessionKey,
+          principal: principal as HandoffPrincipal,
+          responseBarrier: () => sessionKey === 'production-session-k' && delayDestroyedSession
+            ? responseBarrier.promise
+            : Promise.resolve(),
+        }));
+      }
+      addEventListener(_type: string, _listener: () => void): void {}
+      removeEventListener(_type: string, _listener: () => void): void {}
+      terminate(): void {
+        workerTerminations += 1;
+        for (const detach of serverDetachers) detach();
+        serverDetachers.clear();
+      }
+    }
+    vi.stubGlobal('Worker', PortBackedWorker);
+    try {
+      const host = createHandoffWorkerHost();
+      const firstK = host.connect({ sessionKey: 'production-session-k', principal: { role: 'dm' } });
+      const secondK = host.connect({ sessionKey: 'production-session-k', principal: { role: 'dm' } });
+      const independentL = host.connect({ sessionKey: 'production-session-l', principal: { role: 'dm' } });
+      for (const [transport, id] of [[firstK, 'open-k1'], [secondK, 'open-k2'], [independentL, 'open-l']] as const) {
+        await transport.request({ v: 1, id, method: 'session.open', params: { requestedRole: 'dm' } });
+      }
+
+      const secondFaults: SceneTransportFaultError[] = [];
+      secondK.subscribeErrors((error) => secondFaults.push(error));
+      delayDestroyedSession = true;
+      secondK.subscribe((event) => {
+        if (event.data.doors.find((door) => door.id === 'object:two-room-door')?.open === true) firstK.destroySession();
+      });
+      const preserved = await secondK.request({
+        v: 1, id: 'preserved-k', method: 'door.set',
+        params: { doorId: 'object:two-room-door', open: true },
+      });
+      expect(preserved).toMatchObject({ id: 'preserved-k', ok: true });
+      if (!preserved.ok) throw new Error('Destroyed session lost its established receipt.');
+      expect(preserved.result.revision).toBeTypeOf('number');
+      expect(secondFaults).toHaveLength(1);
+      expect(secondFaults[0]).toMatchObject({ code: 'PROTOCOL_ERROR', websocketCloseCode: 1002 });
+      expect(secondK.status()).toBe('closed');
+      expect(workerTerminations).toBe(0);
+      responseBarrier.resolve();
+
+      await expect(independentL.request({
+        v: 1, id: 'independent-l-door', method: 'door.set',
+        params: { doorId: 'object:two-room-door', open: true },
+      })).resolves.toMatchObject({ id: 'independent-l-door', ok: true });
+      const replacementK = host.connect({ sessionKey: 'production-session-k', principal: { role: 'dm' } });
+      const replacementInitial = replacementK.initialSnapshot();
+      await expect(replacementK.request({
+        v: 1, id: 'open-replacement-k', method: 'session.open', params: { requestedRole: 'dm' },
+      })).resolves.toMatchObject({ id: 'open-replacement-k', ok: true });
+      await expect(replacementInitial).resolves.toMatchObject({ revision: 0 });
+      expect(workerTerminations).toBe(0);
+
+      independentL.dispose();
+      expect(workerTerminations).toBe(0);
+      replacementK.dispose();
+      expect(workerTerminations).toBe(1);
+    } finally {
+      vi.unstubAllGlobals();
+      for (const detach of serverDetachers) detach();
+    }
+  });
+
   it('binds a player port to its seat, filters its projection and never applies a DM receipt to its read', async () => {
     const barrier = deferred();
     let delayPlayer = false;
@@ -577,8 +744,9 @@ describe('VTT handoff Worker message boundary', () => {
         'request',
         lifecycle === 'destroySession' ? 'destroy' : lifecycle,
       ]);
-      await new Promise<void>((resolve) => setTimeout(resolve, 0));
-      expect(workerPost.mock.calls.map((call) => Reflect.get(call[0], 'kind'))).toEqual(['closed']);
+      await vi.waitFor(() => {
+        expect(workerPost.mock.calls.map((call) => Reflect.get(call[0], 'kind'))).toEqual(['closed']);
+      });
       detach();
     },
   );

@@ -9,7 +9,8 @@ import {
 } from './fixtures/two-room';
 import { NamedWorkerMemorySessionStore } from './worker-memory-session-store';
 import {
-  decodeWorkerClientMessage, type WorkerConnectMessage, type WorkerServerMessage,
+  decodeWorkerClientMessage, isSuccessfulSessionOpenResponse,
+  type WorkerConnectMessage, type WorkerServerMessage,
 } from './worker-messages';
 import { ProtocolRuntime } from './protocol-runtime';
 import type { HandoffPrincipal } from './session-authorizer';
@@ -207,11 +208,8 @@ export function attachHandoffWorkerPort(
           post(port, { kind: 'request-fault', invocation: message.invocation, fault: result.fault });
           return;
         }
-        if (options.startAutonomous !== false && result.response.ok && result.response.id !== undefined) {
-          const request = message.request;
-          if (typeof request === 'object' && request !== null && Reflect.get(request, 'method') === 'session.open') {
-            await startWorkerSession(session);
-          }
+        if (options.startAutonomous !== false && isSuccessfulSessionOpenResponse(result.response)) {
+          await startWorkerSession(session);
         }
         post(port, { kind: 'response', invocation: message.invocation, response: result.response });
       }).catch(() => {
