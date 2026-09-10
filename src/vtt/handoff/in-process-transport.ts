@@ -93,12 +93,20 @@ export class InProcessSceneTransport implements SceneTransport {
       receiptRevision: null,
     };
     this.#pending.add(pending);
-    void this.runtime.dispatch(request, undefined, invocationToken, (response) => {
-      if (
-        this.#pending.has(pending) &&
-        (pending.method === 'token.move' || pending.method === 'door.set' || pending.method === 'light.set')
-      ) pending.establishedResponse = response;
-    }).then((result) => {
+    let dispatched: ReturnType<ProtocolRuntime['dispatch']>;
+    try {
+      dispatched = this.runtime.dispatch(request, undefined, invocationToken, (response) => {
+        if (
+          this.#pending.has(pending) &&
+          (pending.method === 'token.move' || pending.method === 'door.set' || pending.method === 'light.set')
+        ) pending.establishedResponse = response;
+      });
+    } catch (error: unknown) {
+      this.#pending.delete(pending);
+      pending.reject(error instanceof Error ? error : new Error(String(error)));
+      return pending.promise;
+    }
+    void dispatched.then((result) => {
       if (!this.#pending.delete(pending)) return;
       if (result.kind === 'transport_fault') {
         pending.reject(new SceneTransportFaultError(result.fault));
@@ -133,6 +141,10 @@ export class InProcessSceneTransport implements SceneTransport {
 
   status(): SceneTransportStatus {
     return this.#state;
+  }
+
+  pendingRequestCount(): number {
+    return this.#pending.size;
   }
 
   subscribeStatus(listener: (status: SceneTransportStatus) => void): () => void {

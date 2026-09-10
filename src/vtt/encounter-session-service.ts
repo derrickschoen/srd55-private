@@ -40,7 +40,6 @@ type ActiveTerminalReceipt =
 
 /** Process-local identity for exactly one protocol invocation. */
 export interface SessionInvocationToken {
-  readonly runtime: symbol;
   readonly invocation: symbol;
 }
 

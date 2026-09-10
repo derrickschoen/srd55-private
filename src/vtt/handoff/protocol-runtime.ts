@@ -68,6 +68,7 @@ const knownMethods = new Set<string>(HANDOFF_METHODS);
 // Warm Zod's generated validators before object transport is measured. Dispatch invokes
 // those authoritative schemas through `_zod.run` so invalid input does not materialize a
 // ZodError (whose formatter serializes issues) inside the zero-serialization boundary.
+// Recheck this exact-pinned internal boundary whenever Zod is upgraded.
 const validatorWarmups: readonly HandoffRequest[] = [
   { v: 1, id: '', method: 'session.open', params: { requestedRole: 'dm' } },
   { v: 1, id: '', method: 'scene.snapshot', params: {} },
@@ -208,7 +209,7 @@ export class ProtocolRuntime {
   readonly #authorizer: SessionAuthorizer;
   readonly #art: EncounterArtPackage;
   readonly #session: LogicalSessionAuthority;
-  readonly #runtimeIdentity = Symbol('protocol-runtime');
+  readonly #mintedInvocationTokens = new Map<SessionInvocationToken, 'minted'>();
   readonly #activeMutationInvocations = new Set<SessionInvocationToken>();
   readonly #eventListeners = new Set<(
     event: SceneSnapshotEvent,
@@ -241,7 +242,15 @@ export class ProtocolRuntime {
   }
 
   createInvocationToken(): SessionInvocationToken {
-    return Object.freeze({ runtime: this.#runtimeIdentity, invocation: Symbol('protocol-invocation') });
+    const token = Object.freeze({ invocation: Symbol('protocol-invocation') });
+    if (!this.#closed && !this.#disposed && !this.#session.destroyed) {
+      this.#mintedInvocationTokens.set(token, 'minted');
+    }
+    return token;
+  }
+
+  invocationTrackingCounts(): { readonly minted: number; readonly active: number } {
+    return { minted: this.#mintedInvocationTokens.size, active: this.#activeMutationInvocations.size };
   }
 
   dispatch(
@@ -254,6 +263,9 @@ export class ProtocolRuntime {
       onResponseEstablished?.(response);
       return Promise.resolve({ kind: 'response', response });
     };
+    const token = this.#disposed || this.#closed || this.#session.destroyed
+      ? null
+      : this.#consumeInvocationToken(invocationToken);
     const decoded = decodedInput(input);
     if (!('ok' in decoded)) {
       this.#emitFault(decoded.fault);
@@ -269,7 +281,7 @@ export class ProtocolRuntime {
       if (result.kind === 'transport_fault') this.#emitFault(result.fault);
       return Promise.resolve(result);
     }
-    if (this.#disposed || this.#closed || this.#session.destroyed) {
+    if (token === null) {
       return respond(failure(id, 'CLOSED', 'The logical transport is closed.'));
     }
     const structural = genericHandoffRequestSchema._zod.run(
@@ -292,9 +304,6 @@ export class ProtocolRuntime {
     if (known.issues.length > 0) {
       return respond(failure(id, 'INVALID_REQUEST', 'The request parameters are invalid.'));
     }
-    const token = invocationToken?.runtime === this.#runtimeIdentity
-      ? invocationToken
-      : this.createInvocationToken();
     const dispatched = this.#dispatchKnown(known.value as HandoffRequest, token, signal);
     if (dispatched instanceof Promise) {
       return dispatched.then((response) => {
@@ -313,6 +322,7 @@ export class ProtocolRuntime {
     try {
       unsubscribe?.();
     } finally {
+      this.#clearInvocationTracking();
       this.#eventListeners.clear();
       this.#faultListeners.clear();
     }
@@ -320,8 +330,12 @@ export class ProtocolRuntime {
 
   dispose(): void {
     if (this.#disposed) return;
-    this.close();
-    this.#disposed = true;
+    try {
+      this.close();
+    } finally {
+      this.#disposed = true;
+      this.#clearInvocationTracking();
+    }
   }
 
   destroySession(): void {
@@ -329,6 +343,7 @@ export class ProtocolRuntime {
     const errors: unknown[] = [];
     try { this.close(); } catch (error: unknown) { errors.push(error); }
     try { this.#session.destroy(); } catch (error: unknown) { errors.push(error); }
+    this.#clearInvocationTracking();
     if (errors.length === 1) throw errors[0];
     if (errors.length > 1) throw new AggregateError(errors, 'Runtime and session cleanup both failed.');
   }
@@ -378,6 +393,19 @@ export class ProtocolRuntime {
       throw error;
     }
     return response.finally(() => this.#activeMutationInvocations.delete(invocationToken));
+  }
+
+  #consumeInvocationToken(supplied?: SessionInvocationToken): SessionInvocationToken {
+    if (supplied !== undefined && this.#mintedInvocationTokens.delete(supplied)) {
+      return supplied;
+    }
+    // Foreign and already-consumed objects receive a fresh, already-consumed internal identity.
+    return Object.freeze({ invocation: Symbol('protocol-invocation') });
+  }
+
+  #clearInvocationTracking(): void {
+    this.#activeMutationInvocations.clear();
+    this.#mintedInvocationTokens.clear();
   }
 
   #reserve(id: string): boolean {

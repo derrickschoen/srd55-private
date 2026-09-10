@@ -268,8 +268,10 @@ describe('in-process scene transport', () => {
           seats: [seat],
           art: twoRoomArtPackage(),
         });
-      const dm = new InProcessSceneTransport(makeRuntime({ role: 'dm' }));
-      const player = new InProcessSceneTransport(makeRuntime({ role: 'player', playerId: seat.playerId }));
+      const dmRuntime = makeRuntime({ role: 'dm' });
+      const playerRuntime = makeRuntime({ role: 'player', playerId: seat.playerId });
+      const dm = new InProcessSceneTransport(dmRuntime);
+      const player = new InProcessSceneTransport(playerRuntime);
       await dm.request({ v: 1, id: 'open:dm', method: 'session.open', params: { requestedRole: 'dm' } });
       await player.request({
         v: 1, id: 'open:player', method: 'session.open',
@@ -280,11 +282,14 @@ describe('in-process scene transport', () => {
       const pending = await offerPromise;
       const expectedRevision = pending.encounterRevision + 1;
       const closingTransport = kind === 'move' ? player : dm;
+      const closingRuntime = kind === 'move' ? playerRuntime : dmRuntime;
+      const statuses: string[] = [];
+      closingTransport.subscribeStatus((status) => statuses.push(status));
       closingTransport.subscribe((event) => {
         if (event.data.revision === expectedRevision) closingTransport.close();
       });
-      const response = kind === 'move'
-        ? await (() => {
+      const responsePromise = kind === 'move'
+        ? (() => {
           const move = pending.legalActions[0];
           const binding = host.rendererTokenBindings().find((candidate) => candidate.combatantId === pending.actorId);
           if (move?.type !== 'move' || binding === undefined) throw new Error('Expected the receipt move offer.');
@@ -295,16 +300,31 @@ describe('in-process scene transport', () => {
             params: { tokenId: binding.tokenId, to: { x: destination.column, y: destination.row, z: 0 } },
           });
         })()
-        : await dm.request({
+        : dm.request({
           v: 1, id: 'mutation:door', method: 'door.set',
           params: { doorId: 'object:two-room-door', open: true },
         });
+      let settlements = 0;
+      const response = await responsePromise.then(
+        (value) => {
+          settlements += 1;
+          return value;
+        },
+        (error: unknown) => {
+          settlements += 1;
+          throw error;
+        },
+      );
       expect(response).toMatchObject({ ok: true, result: { revision: expectedRevision } });
       expect(closingTransport.status()).toBe('closed');
+      expect(closingRuntime.invocationTrackingCounts()).toEqual({ minted: 0, active: 0 });
       expect(delayed.crossed()).toBe(false);
       delayed.release();
       await delayed.completion;
       expect(delayed.crossed()).toBe(true);
+      expect(closingTransport.status()).toBe('closed');
+      expect(statuses).toEqual(['open', 'closed']);
+      expect(settlements).toBe(1);
       dm.destroySession();
       host.close();
     },
@@ -485,6 +505,43 @@ describe('in-process scene transport', () => {
     await Promise.resolve();
     await Promise.resolve();
     expect(port.doorCalls()).toBe(1);
+    runtime.destroySession();
+    host.close();
+  });
+
+  it('turns synchronous dispatcher exceptions into settled request rejections without orphaning pending work', async () => {
+    const { host, runtime } = fixture();
+    const transport = new InProcessSceneTransport(runtime);
+    const throwingAccessor = { v: 1, id: 'throwing-transport-accessor', method: 'scene.snapshot' };
+    Object.defineProperty(throwingAccessor, 'params', {
+      enumerable: true,
+      get: () => { throw new Error('injected transport request accessor failure'); },
+    });
+    let rejected: Promise<HandoffResponse> | undefined;
+    expect(() => {
+      rejected = transport.request(throwingAccessor);
+    }).not.toThrow();
+    if (rejected === undefined) throw new Error('Expected transport.request to return a promise.');
+    let settlements = 0;
+    const observed = rejected.then(
+      (response) => {
+        settlements += 1;
+        return response;
+      },
+      (error: unknown) => {
+        settlements += 1;
+        throw error;
+      },
+    );
+    await expect(observed).rejects.toThrow('injected transport request accessor failure');
+    expect(transport.pendingRequestCount()).toBe(0);
+
+    await expect(transport.request(OPEN)).resolves.toMatchObject({ id: '', ok: true });
+    expect(transport.pendingRequestCount()).toBe(0);
+    transport.close();
+    await Promise.resolve();
+    expect(settlements).toBe(1);
+    expect(transport.pendingRequestCount()).toBe(0);
     runtime.destroySession();
     host.close();
   });

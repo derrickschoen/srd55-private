@@ -6,6 +6,7 @@ import type {
   DoorSetOutcome,
   PlayerSessionSnapshotEvent,
   PlayerSubscriptionResult,
+  SessionInvocationToken,
   SessionMutationOutcome,
 } from '../../../src/vtt/encounter-session-service';
 import {
@@ -258,6 +259,9 @@ async function realOutcomeRuntime(
 }
 
 interface MutableProtocolPort extends ProtocolSessionPort {
+  emitDm(event: Omit<DmSessionSnapshotEvent, 'tokenBindings'> & {
+    readonly tokenBindings?: DmSessionSnapshotEvent['tokenBindings'];
+  }): void;
   emitPlayer(playerId: string, event: Omit<PlayerSessionSnapshotEvent, 'tokenBindings'> & {
     readonly tokenBindings?: PlayerSessionSnapshotEvent['tokenBindings'];
   }): void;
@@ -310,7 +314,7 @@ function mutablePort(input: {
   readonly playerA: PlayerBoardProjection;
   readonly playerB: PlayerBoardProjection;
   readonly tokenBindings: ReturnType<DmEncounterHost['rendererTokenBindings']>;
-}): MutableProtocolPort {
+}, sessionId = 'scene:protocol-test'): MutableProtocolPort {
   const playerProjections = new Map<string, PlayerBoardProjection>([
     [PLAYER_A, input.playerA],
     [PLAYER_B, input.playerB],
@@ -321,7 +325,7 @@ function mutablePort(input: {
   let closes = 0;
   let tokenBindings = input.tokenBindings;
   return {
-    sessionId: 'scene:protocol-test',
+    sessionId,
     dmSnapshot: () => input.dm,
     dmCapture: () => ({ projection: input.dm, tokenBindings }),
     playerSnapshot: (playerId) => playerId === undefined ? null : playerProjections.get(playerId) ?? null,
@@ -351,6 +355,11 @@ function mutablePort(input: {
       return { kind: 'committed', revision: input.dm.encounter.revision, changed: false };
     },
     close: () => { closes += 1; },
+    emitDm: (event) => {
+      for (const listener of dmListeners) {
+        listener({ ...event, tokenBindings: event.tokenBindings ?? tokenBindings });
+      }
+    },
     emitPlayer: (playerId, event) => {
       playerProjections.set(playerId, event.projection);
       for (const listener of playerListeners.get(playerId) ?? []) {
@@ -360,6 +369,46 @@ function mutablePort(input: {
     setTokenBindings: (next) => { tokenBindings = next; },
     doorCalls: () => calls,
     closeCalls: () => closes,
+  };
+}
+
+function receiptPort(
+  input: ReturnType<typeof projections>,
+  sessionId: string,
+  barrierCount = 0,
+): {
+  readonly port: ProtocolSessionPort;
+  readonly release: (index: number) => void;
+} {
+  const base = mutablePort(input, sessionId);
+  const releases: Array<(() => void) | undefined> = [];
+  const barriers = Array.from({ length: barrierCount }, (_, index) => new Promise<void>((resolve) => {
+    releases[index] = resolve;
+  }));
+  let calls = 0;
+  return {
+    port: {
+      ...base,
+      setDoor: async (request): Promise<DoorSetOutcome> => {
+        const call = calls;
+        calls += 1;
+        const barrier = barriers[call];
+        if (barrier !== undefined) await barrier;
+        const revision = input.dm.encounter.revision + call + 1;
+        const event = {
+          kind: 'mutation',
+          seq: calls,
+          projection: input.dm,
+          tokenBindings: input.tokenBindings,
+          ...(request.invocationToken === undefined
+            ? {}
+            : { terminalReceipt: { invocationToken: request.invocationToken, revision } }),
+        } satisfies DmSessionSnapshotEvent;
+        base.emitDm(event);
+        return { kind: 'committed', revision, changed: true, event };
+      },
+    },
+    release: (index) => releases[index]?.(),
   };
 }
 
@@ -442,6 +491,98 @@ describe('v1 protocol dispatcher', () => {
     source.closeHost();
   });
 
+  it('accepts only privately minted single-use invocation tokens from the originating runtime', async () => {
+    const source = projections();
+    const firstPort = receiptPort(source, 'scene:private-invocation:first').port;
+    const secondPort = receiptPort(source, 'scene:private-invocation:second').port;
+    const first = runtimeFor(firstPort, { role: 'dm' });
+    const second = runtimeFor(secondPort, { role: 'dm' });
+    const firstReceipts: SessionInvocationToken[] = [];
+    const secondReceipts: SessionInvocationToken[] = [];
+    first.subscribe((_event, receipt) => {
+      if (receipt !== undefined) firstReceipts.push(receipt.invocationToken);
+    });
+    second.subscribe((_event, receipt) => {
+      if (receipt !== undefined) secondReceipts.push(receipt.invocationToken);
+    });
+    await first.dispatch({
+      v: 1, id: 'open:first-private-invocation', method: 'session.open', params: { requestedRole: 'dm' },
+    });
+    await second.dispatch({
+      v: 1, id: 'open:second-private-invocation', method: 'session.open', params: { requestedRole: 'dm' },
+    });
+
+    const minted = first.createInvocationToken();
+    const constructed = Object.freeze({ ...minted, invocation: Symbol('constructed-invocation') });
+    await expect(first.dispatch({
+      v: 1, id: 'door:constructed-invocation', method: 'door.set',
+      params: { doorId: 'object:two-room-door', open: true },
+    }, undefined, constructed)).resolves.toMatchObject({ kind: 'response', response: { ok: true } });
+    expect(firstReceipts).toHaveLength(1);
+    expect(firstReceipts[0]).not.toBe(constructed);
+    expect(first.invocationTrackingCounts().minted).toBe(1);
+
+    await expect(first.dispatch({
+      v: 1, id: 'door:minted-invocation', method: 'door.set',
+      params: { doorId: 'object:two-room-door', open: false },
+    }, undefined, minted)).resolves.toMatchObject({ kind: 'response', response: { ok: true } });
+    expect(firstReceipts).toHaveLength(2);
+    expect(firstReceipts[1]).toBe(minted);
+    expect(first.invocationTrackingCounts().minted).toBe(0);
+
+    const foreign = first.createInvocationToken();
+    await expect(second.dispatch({
+      v: 1, id: 'door:foreign-invocation', method: 'door.set',
+      params: { doorId: 'object:two-room-door', open: true },
+    }, undefined, foreign)).resolves.toMatchObject({ kind: 'response', response: { ok: true } });
+    expect(secondReceipts).toHaveLength(1);
+    expect(secondReceipts[0]).not.toBe(foreign);
+    expect(first.invocationTrackingCounts().minted).toBe(1);
+    expect(second.invocationTrackingCounts().minted).toBe(0);
+
+    first.destroySession();
+    second.destroySession();
+    source.closeHost();
+  });
+
+  it('gives concurrent dispatches independent receipt eligibility when a minted token is reused', async () => {
+    const source = projections();
+    const controlled = receiptPort(source, 'scene:reused-invocation', 2);
+    const runtime = runtimeFor(controlled.port, { role: 'dm' });
+    const receipts: SessionInvocationToken[] = [];
+    runtime.subscribe((_event, receipt) => {
+      if (receipt !== undefined) receipts.push(receipt.invocationToken);
+    });
+    await runtime.dispatch({
+      v: 1, id: 'open:reused-invocation', method: 'session.open', params: { requestedRole: 'dm' },
+    });
+    const reused = runtime.createInvocationToken();
+    const first = runtime.dispatch({
+      v: 1, id: 'door:reused-invocation:first', method: 'door.set',
+      params: { doorId: 'object:two-room-door', open: true },
+    }, undefined, reused);
+    const second = runtime.dispatch({
+      v: 1, id: 'door:reused-invocation:second', method: 'door.set',
+      params: { doorId: 'object:two-room-door', open: false },
+    }, undefined, reused);
+    expect(runtime.invocationTrackingCounts()).toEqual({ minted: 0, active: 2 });
+
+    controlled.release(0);
+    await expect(first).resolves.toMatchObject({ kind: 'response', response: { ok: true } });
+    expect(receipts).toEqual([reused]);
+    expect(runtime.invocationTrackingCounts().active).toBe(1);
+
+    controlled.release(1);
+    await expect(second).resolves.toMatchObject({ kind: 'response', response: { ok: true } });
+    expect(receipts).toHaveLength(2);
+    expect(receipts[1]).not.toBe(reused);
+    expect(new Set(receipts).size).toBe(2);
+    expect(runtime.invocationTrackingCounts().active).toBe(0);
+
+    runtime.destroySession();
+    source.closeHost();
+  });
+
   it('keeps object-transport validation equivalent to the authoritative v1 Zod contracts', async () => {
     class RequestInstance {
       readonly v = 1;
@@ -484,6 +625,9 @@ describe('v1 protocol dispatcher', () => {
     const corpus: readonly { readonly label: string; readonly value: unknown }[] = [
       { label: 'open-positive', value: { v: 1, id: 'positive-open', method: 'session.open', params: { requestedRole: 'dm' } } },
       { label: 'snapshot-positive', value: { v: 1, id: 'positive-snapshot', method: 'scene.snapshot', params: {} } },
+      { label: 'wrong-v-number', value: { v: 2, id: 'wrong-v-number', method: 'scene.snapshot', params: {} } },
+      { label: 'wrong-v-string', value: { v: '1', id: 'wrong-v-string', method: 'scene.snapshot', params: {} } },
+      { label: 'missing-v', value: { id: 'missing-v', method: 'scene.snapshot', params: {} } },
       { label: 'move-positive', value: { v: 1, id: 'positive-move', method: 'token.move', params: { tokenId: '', to: { x: -1, y: 0.5, z: 0 } } } },
       { label: 'door-positive', value: { v: 1, id: 'positive-door', method: 'door.set', params: { doorId: '', open: false } } },
       { label: 'light-positive', value: { v: 1, id: 'positive-light', method: 'light.set', params: { lightId: '', enabled: true } } },
@@ -515,6 +659,7 @@ describe('v1 protocol dispatcher', () => {
     ];
     const expected = new Map<string, 'accepted' | 'rejected' | 'throws'>([
       ['open-positive', 'accepted'], ['snapshot-positive', 'accepted'], ['move-positive', 'accepted'],
+      ['wrong-v-number', 'rejected'], ['wrong-v-string', 'rejected'], ['missing-v', 'rejected'],
       ['door-positive', 'accepted'], ['light-positive', 'accepted'], ['open-negative', 'rejected'],
       ['snapshot-negative', 'rejected'], ['move-negative', 'rejected'], ['door-negative', 'rejected'],
       ['light-negative', 'rejected'], ['generic-extension', 'accepted'], ['date-params', 'rejected'],
@@ -539,14 +684,17 @@ describe('v1 protocol dispatcher', () => {
     };
     const source = projections();
     const runtime = runtimeFor(mutablePort(source), { role: 'dm' });
-    const runtimeDisposition = async (value: unknown): Promise<'accepted' | 'rejected' | 'throws'> => {
+    const runtimeDisposition = (value: unknown): Promise<'accepted' | 'rejected' | 'throws' | 'promise-rejected'> => {
+      let dispatched: ReturnType<ProtocolRuntime['dispatch']>;
       try {
-        const result = await runtime.dispatch(value);
+        dispatched = runtime.dispatch(value);
+      } catch {
+        return Promise.resolve('throws');
+      }
+      return dispatched.then((result) => {
         if (result.kind === 'transport_fault') return 'rejected';
         return !result.response.ok && result.response.error.code === 'INVALID_REQUEST' ? 'rejected' : 'accepted';
-      } catch {
-        return 'throws';
-      }
+      }, () => 'promise-rejected');
     };
     for (const entry of corpus) {
       const contractDisposition = schemaDisposition(entry.value);
