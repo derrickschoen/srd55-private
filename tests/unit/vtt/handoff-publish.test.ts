@@ -15,30 +15,48 @@ function tree(directory: string): readonly string[] {
   return readdirSync(directory, { recursive: true, encoding: 'utf8' }).sort();
 }
 
+interface DirectorySnapshot {
+  readonly kind: 'directory';
+  readonly path: string;
+}
+
 interface FileSnapshot {
+  readonly kind: 'file';
   readonly path: string;
   readonly bytes: string;
   readonly mtimeMs: number;
   readonly size: number;
 }
 
-function fileSnapshots(rootDirectory: string, directory = rootDirectory): readonly FileSnapshot[] {
-  return readdirSync(directory, { withFileTypes: true }).flatMap((entry): readonly FileSnapshot[] => {
+type FilesystemSnapshot = DirectorySnapshot | FileSnapshot;
+
+function filesystemSnapshots(
+  rootDirectory: string,
+  directory = rootDirectory,
+): readonly FilesystemSnapshot[] {
+  const directorySnapshot: DirectorySnapshot = {
+    kind: 'directory',
+    path: relative(rootDirectory, directory) || '.',
+  };
+  const descendants = readdirSync(directory, { withFileTypes: true }).flatMap((entry): readonly FilesystemSnapshot[] => {
     const path = join(directory, entry.name);
-    if (entry.isDirectory()) return fileSnapshots(rootDirectory, path);
+    if (entry.isDirectory()) return filesystemSnapshots(rootDirectory, path);
     const stat = statSync(path);
     return [{
+      kind: 'file',
       path: relative(rootDirectory, path),
       bytes: readFileSync(path).toString('base64'),
       mtimeMs: stat.mtimeMs,
       size: stat.size,
     }];
-  }).sort((left, right) => left.path.localeCompare(right.path));
+  });
+  return [directorySnapshot, ...descendants]
+    .sort((left, right) => left.path.localeCompare(right.path) || left.kind.localeCompare(right.kind));
 }
 
 function assertCheckMadeNoFilesystemMutation(
-  before: readonly FileSnapshot[],
-  after: readonly FileSnapshot[],
+  before: readonly FilesystemSnapshot[],
+  after: readonly FilesystemSnapshot[],
 ): void {
   if (JSON.stringify(before) !== JSON.stringify(after)) {
     throw new Error('CHECK_MODE_FILESYSTEM_MUTATION');
@@ -151,27 +169,35 @@ describe('immutable VTT core publication', () => {
 
   it('performs zero writes in check mode', () => {
     const missingRoot = root();
-    const beforeMissingCheck = fileSnapshots(missingRoot);
+    const beforeMissingCheck = filesystemSnapshots(missingRoot);
     expect(() => publishCore({ repositoryRoot: process.cwd(), handoffRoot: missingRoot, check: true }))
       .toThrow('IMMUTABLE_BUNDLE_MISSING');
-    assertCheckMadeNoFilesystemMutation(beforeMissingCheck, fileSnapshots(missingRoot));
+    assertCheckMadeNoFilesystemMutation(beforeMissingCheck, filesystemSnapshots(missingRoot));
 
     const handoffRoot = root();
     publishCore({ repositoryRoot: process.cwd(), handoffRoot });
-    const beforeSuccessfulCheck = fileSnapshots(handoffRoot);
+    const beforeSuccessfulCheck = filesystemSnapshots(handoffRoot);
     expect(publishCore({ repositoryRoot: process.cwd(), handoffRoot, check: true }).status).toBe('verified');
-    assertCheckMadeNoFilesystemMutation(beforeSuccessfulCheck, fileSnapshots(handoffRoot));
+    assertCheckMadeNoFilesystemMutation(beforeSuccessfulCheck, filesystemSnapshots(handoffRoot));
 
     const protocolPath = join(handoffRoot, 'contracts/v1/protocol.schema.json');
     writeFileSync(protocolPath, 'pre-existing conflict\n');
-    const beforeFailingCheck = fileSnapshots(handoffRoot);
+    const beforeFailingCheck = filesystemSnapshots(handoffRoot);
     expect(() => publishCore({ repositoryRoot: process.cwd(), handoffRoot, check: true }))
       .toThrow('INCONSISTENT_SEALED_BUNDLE');
-    assertCheckMadeNoFilesystemMutation(beforeFailingCheck, fileSnapshots(handoffRoot));
+    assertCheckMadeNoFilesystemMutation(beforeFailingCheck, filesystemSnapshots(handoffRoot));
 
-    const controlBefore = fileSnapshots(handoffRoot);
+    const directoryControlRoot = root();
+    const directoryControlBefore = filesystemSnapshots(directoryControlRoot);
+    mkdirSync(join(directoryControlRoot, 'unexpected'));
+    expect(() => assertCheckMadeNoFilesystemMutation(
+      directoryControlBefore,
+      filesystemSnapshots(directoryControlRoot),
+    )).toThrow('CHECK_MODE_FILESYSTEM_MUTATION');
+
+    const controlBefore = filesystemSnapshots(handoffRoot);
     writeFileSync(protocolPath, 'mutant check rewrite\n');
-    expect(() => assertCheckMadeNoFilesystemMutation(controlBefore, fileSnapshots(handoffRoot)))
+    expect(() => assertCheckMadeNoFilesystemMutation(controlBefore, filesystemSnapshots(handoffRoot)))
       .toThrow('CHECK_MODE_FILESYSTEM_MUTATION');
   });
 });
