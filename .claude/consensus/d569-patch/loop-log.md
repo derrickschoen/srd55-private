@@ -17,3 +17,5 @@
 - 2026-09-10 13:21 EDT — r3 lane DONE (13 files 512+/64−, 14 tests added, none removed; runbook v2 updated sha fb228c91…; lane focused 53/53 + 11/11, MCP files inadmissible in-sandbox). Supervisor replaced the worktree node_modules symlink with a real npm ci install (lockfile identical to main) and launched the 17-spec cumulative.
 
 - 2026-09-10 13:31 EDT — r3 supervisor cumulative (real node_modules) 406/407, serial 14/14; committed 8e77ca50; runbook v2 r3 archived (sha fb228c91…); Astra r3 review dispatched (resume 01a08815…).
+
+- 2026-09-10 13:39 EDT — r3 Astra REJECT: F13–F15/F20–F22 resolved; F23 (r3 regression: ordinary pre-delivery timeout now STOPs), F24 (cancellation-row measurements diverge from finalized delivery), F25 (delivery-first bypasses contradiction STOP), F26 (self-certifying cleanup tests via a fabrication flag). r4 dispatched (resume 01a088e3…); MCP specs now admissible in-lane.
