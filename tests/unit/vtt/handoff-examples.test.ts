@@ -1,4 +1,6 @@
-import { readFileSync } from '../../helpers/test-filesystem';
+import {
+  mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync,
+} from '../../helpers/test-filesystem';
 import { describe, expect, it } from 'vitest';
 import type { LegalActionSummary } from '../../../src/combat/controllers';
 import type { EncounterState } from '../../../src/combat/encounter';
@@ -16,7 +18,6 @@ import {
   twoRoomArtPackage,
 } from '../../../src/vtt/handoff/fixtures/two-room';
 import { InProcessSceneTransport } from '../../../src/vtt/handoff/in-process-transport';
-import { MutationLedger } from '../../../src/vtt/handoff/mutation-ledger';
 import {
   ProtocolRuntime,
   type HandoffResponse,
@@ -27,11 +28,9 @@ import { MemoryBrowserSessionStore } from '../../../src/vtt/session-persistence'
 import { encounterSeed } from '../../../src/vtt/session-seed';
 import type { ProjectedControllerRequest } from '../../../src/vtt/encounter-projections';
 import { publishCore, publishExamples } from '../../../tools/vtt-handoff/publish';
-import {
-  mkdirSync, mkdtempSync, statSync, writeFileSync,
-} from '../../helpers/test-filesystem';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { tmpdir } from 'node:os';
+import { createHash } from 'node:crypto';
 
 const DOOR_ID = 'object:two-room-door';
 const PLAYER_A = 'player:adventurer';
@@ -54,6 +53,59 @@ export interface HandoffExamplesFixture {
   readonly sceneId: string;
   readonly exchanges: readonly ExampleExchange[];
   readonly events: Readonly<Record<Exclude<ExampleChannel, 'unauthorized'>, readonly SceneSnapshotEvent[]>>;
+}
+
+interface TreeDirectory {
+  readonly kind: 'directory';
+  readonly path: string;
+}
+
+interface TreeFile {
+  readonly kind: 'file';
+  readonly path: string;
+  readonly bytes: string;
+  readonly mtimeMs: number;
+  readonly size: number;
+}
+
+type TreeEntry = TreeDirectory | TreeFile;
+
+function completeTree(root: string, directory = root): readonly TreeEntry[] {
+  const current: TreeDirectory = { kind: 'directory', path: relative(root, directory) || '.' };
+  return [
+    current,
+    ...readdirSync(directory, { withFileTypes: true }).flatMap((entry): readonly TreeEntry[] => {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) return completeTree(root, path);
+      const stat = statSync(path);
+      return [{
+        kind: 'file',
+        path: relative(root, path),
+        bytes: readFileSync(path).toString('base64'),
+        mtimeMs: stat.mtimeMs,
+        size: stat.size,
+      }];
+    }),
+  ].sort((left, right) => left.path.localeCompare(right.path) || left.kind.localeCompare(right.kind));
+}
+
+function assertTreeUnchanged(before: readonly TreeEntry[], after: readonly TreeEntry[]): void {
+  if (JSON.stringify(before) !== JSON.stringify(after)) throw new Error('EXAMPLES_CHECK_MUTATED_TREE');
+}
+
+const S2C_PATHS = [
+  'contracts/v1/protocol.schema.json',
+  'contracts/v1/art.schema.json',
+  'contracts/v1/contracts.d.ts',
+  'fixtures/scenes/two-room.v1.json',
+  'fixtures/scenes/two-room.snapshots.v1.json',
+  'contracts/v1/README.md',
+  'contracts/v1/manifest.json',
+  'contracts/v1/READY.json',
+] as const;
+
+function fileBytes(root: string, paths: readonly string[]): Readonly<Record<string, string>> {
+  return Object.fromEntries(paths.map((path) => [path, readFileSync(join(root, path)).toString('base64')]));
 }
 
 function legalActions(state: EncounterState, actor: CombatantId): LegalActionSummary {
@@ -125,7 +177,6 @@ export async function buildHandoffExamples(): Promise<HandoffExamplesFixture> {
   });
   const seats = registrations(host);
   const service = new EncounterSessionService(host, seats);
-  const ledger = new MutationLedger(String(service.sessionId));
   const events: Record<Exclude<ExampleChannel, 'unauthorized'>, SceneSnapshotEvent[]> = {
     dm: [],
     'player:adventurer': [],
@@ -137,8 +188,7 @@ export async function buildHandoffExamples(): Promise<HandoffExamplesFixture> {
       principal,
       seats,
       art: twoRoomArtPackage(),
-      tokenBindings: host.rendererTokenBindings(),
-      ledger,
+      tokenBindings: () => host.rendererTokenBindings(),
     });
   const dm = new InProcessSceneTransport(runtime({ role: 'dm' }));
   const playerA = new InProcessSceneTransport(runtime({ role: 'player', playerId: PLAYER_A }));
@@ -149,12 +199,8 @@ export async function buildHandoffExamples(): Promise<HandoffExamplesFixture> {
     'player:adventurer': playerA,
     'player:goblin': playerB,
   };
-  const transcriptSubscriptions = new Map<Exclude<ExampleChannel, 'unauthorized'>, () => void>();
   for (const channel of ['dm', PLAYER_A, PLAYER_B] as const) {
-    transcriptSubscriptions.set(
-      channel,
-      transports[channel].subscribe((event) => events[channel].push(event)),
-    );
+    transports[channel].subscribe((event) => events[channel].push(event));
   }
   const exchanges: ExampleExchange[] = [];
   const exchange = async (
@@ -187,8 +233,6 @@ export async function buildHandoffExamples(): Promise<HandoffExamplesFixture> {
   await exchange('player-b.open', PLAYER_B, playerB, {
     v: 1, id: 'open:player-b', method: 'session.open', params: { requestedRole: 'player', playerId: PLAYER_B },
   });
-  transcriptSubscriptions.get(PLAYER_A)?.();
-  transcriptSubscriptions.get(PLAYER_B)?.();
   await exchange('dm.snapshot', 'dm', dm, {
     v: 1, id: 'snapshot:dm', method: 'scene.snapshot', params: {},
   });
@@ -248,7 +292,7 @@ export async function buildHandoffExamples(): Promise<HandoffExamplesFixture> {
   playerA.close();
   playerB.close();
   unauthorized.close();
-  service.close();
+  dm.destroySession();
   return {
     schemaVersion: 1,
     seed: TWO_ROOM_SEED,
@@ -294,10 +338,55 @@ describe('real executable VTT handoff examples', () => {
       expect(stream.map((event) => event.seq)).toEqual(stream.map((_event, index) => index + 1));
       expect(stream.every((event) => event.v === 1 && event.event === 'scene.snapshot')).toBe(true);
     }
+    expect(fixture.events.dm[0]?.data.tokens.map((token) => token.id).sort()).toEqual([
+      'token:two-room-adventurer', 'token:two-room-goblin',
+    ]);
+    for (const event of fixture.events[PLAYER_A]) {
+      expect(event.data.tokens.map((token) => token.id)).toEqual(['token:two-room-adventurer']);
+    }
+    for (const event of fixture.events[PLAYER_B]) {
+      expect(event.data.tokens.map((token) => token.id)).toEqual([
+        'token:two-room-adventurer', 'token:two-room-goblin',
+      ]);
+    }
+    const moved = exchange(fixture, 'token.move');
+    if (!moved.response.ok) throw new Error('The transcript move must succeed.');
+    const movedRevision = moved.response.result.revision;
+    const moveParams = moved.request.params;
+    if (typeof moveParams !== 'object' || moveParams === null || Array.isArray(moveParams)) {
+      throw new Error('The transcript move params are malformed.');
+    }
+    const tokenId = Reflect.get(moveParams, 'tokenId');
+    const to = Reflect.get(moveParams, 'to');
+    if (typeof tokenId !== 'string' || typeof to !== 'object' || to === null || Array.isArray(to)) {
+      throw new Error('The transcript move destination is malformed.');
+    }
+    const moveEvent = fixture.events[moved.channel === PLAYER_A ? PLAYER_A : PLAYER_B]
+      .find((event) => event.data.revision === movedRevision);
+    expect(moveEvent?.data.tokens.find((token) => token.id === tokenId)).toMatchObject({
+      x: Reflect.get(to, 'x'), y: Reflect.get(to, 'y'), z: Reflect.get(to, 'z'),
+    });
+    for (const label of ['token.move', 'door.open', 'door.close'] as const) {
+      const committed = exchange(fixture, label).response;
+      if (!committed.ok) throw new Error(`The transcript ${label} must succeed.`);
+      for (const channel of ['dm', PLAYER_A, PLAYER_B] as const) {
+        expect(fixture.events[channel].some(
+          (event) => event.data.revision === committed.result.revision,
+        )).toBe(true);
+      }
+    }
     const dmDoorStates = fixture.events.dm.flatMap((event) =>
       event.data.doors.find((door) => door.id === DOOR_ID)?.open ?? []);
     expect(dmDoorStates).toContain(true);
     expect(dmDoorStates.at(-1)).toBe(false);
+    const openRevision = Number(doorOpen.result.revision);
+    const closeRevision = Number(doorClose.result.revision);
+    for (const channel of ['dm', PLAYER_A, PLAYER_B] as const) {
+      expect(fixture.events[channel].find((event) => event.data.revision === openRevision)?.data.doors)
+        .toContainEqual(expect.objectContaining({ id: DOOR_ID, open: true }));
+      expect(fixture.events[channel].find((event) => event.data.revision === closeRevision)?.data.doors)
+        .toContainEqual(expect.objectContaining({ id: DOOR_ID, open: false }));
+    }
     expect(exchange(fixture, 'door.close-noop').eventCounts)
       .toEqual(exchange(fixture, 'door.close').eventCounts);
     const tracked = JSON.parse(readFileSync('fixtures/protocol/examples.v1.json', 'utf8')) as unknown;
@@ -307,6 +396,7 @@ describe('real executable VTT handoff examples', () => {
   it('publishes the append-only examples entry after core and seals examples READY last', () => {
     const handoffRoot = mkdtempSync(join(tmpdir(), 'vtt-handoff-examples-publish-'));
     publishCore({ repositoryRoot: process.cwd(), handoffRoot });
+    const coreBefore = fileBytes(handoffRoot, S2C_PATHS);
     const order: string[] = [];
     expect(publishExamples({
       repositoryRoot: process.cwd(), handoffRoot,
@@ -321,24 +411,73 @@ describe('real executable VTT handoff examples', () => {
     const before = statSync(ready).mtimeMs;
     expect(publishExamples({ repositoryRoot: process.cwd(), handoffRoot }).status).toBe('unchanged');
     expect(statSync(ready).mtimeMs).toBe(before);
+    expect(fileBytes(handoffRoot, S2C_PATHS)).toEqual(coreBefore);
+    const fixturePath = join(handoffRoot, 'fixtures/protocol/examples.v1.json');
+    const fixtureBytes = readFileSync(fixturePath);
+    const manifest = JSON.parse(readFileSync(
+      join(handoffRoot, 'contracts/v1/manifest.entries/examples.json'), 'utf8',
+    )) as unknown;
+    expect(manifest).toEqual({
+      schemaVersion: 1,
+      bundle: 'contracts/v1',
+      entries: [{
+        path: 'fixtures/protocol/examples.v1.json',
+        sha256: createHash('sha256').update(fixtureBytes).digest('hex'),
+        length: fixtureBytes.length,
+      }],
+    });
+    const beforeCheck = completeTree(handoffRoot);
     expect(publishExamples({ repositoryRoot: process.cwd(), handoffRoot, check: true }).status).toBe('verified');
+    assertTreeUnchanged(beforeCheck, completeTree(handoffRoot));
+    expect(fileBytes(handoffRoot, S2C_PATHS)).toEqual(coreBefore);
   });
 
-  it('refuses conflicting examples without changing either READY marker', () => {
+  it('keeps the complete tree and every core byte unchanged on missing examples checks', () => {
+    const handoffRoot = mkdtempSync(join(tmpdir(), 'vtt-handoff-examples-missing-'));
+    publishCore({ repositoryRoot: process.cwd(), handoffRoot });
+    const coreBefore = fileBytes(handoffRoot, S2C_PATHS);
+    const beforeCheck = completeTree(handoffRoot);
+    expect(() => publishExamples({ repositoryRoot: process.cwd(), handoffRoot, check: true }))
+      .toThrow('IMMUTABLE_BUNDLE_MISSING');
+    assertTreeUnchanged(beforeCheck, completeTree(handoffRoot));
+    expect(fileBytes(handoffRoot, S2C_PATHS)).toEqual(coreBefore);
+  });
+
+  it('keeps the complete tree and every core byte unchanged on conflicting examples checks', () => {
     const handoffRoot = mkdtempSync(join(tmpdir(), 'vtt-handoff-examples-conflict-'));
     publishCore({ repositoryRoot: process.cwd(), handoffRoot });
     publishExamples({ repositoryRoot: process.cwd(), handoffRoot });
-    const coreReady = join(handoffRoot, 'contracts/v1/READY.json');
-    const examplesReady = join(handoffRoot, 'contracts/v1/examples.READY.json');
-    const before = [statSync(coreReady).mtimeMs, statSync(examplesReady).mtimeMs];
+    const coreBefore = fileBytes(handoffRoot, S2C_PATHS);
     writeFileSync(join(handoffRoot, 'fixtures/protocol/examples.v1.json'), '{}\n');
-    expect(() => publishExamples({ repositoryRoot: process.cwd(), handoffRoot }))
+    const beforeCheck = completeTree(handoffRoot);
+    expect(() => publishExamples({ repositoryRoot: process.cwd(), handoffRoot, check: true }))
       .toThrow('INCONSISTENT_SEALED_BUNDLE');
-    expect([statSync(coreReady).mtimeMs, statSync(examplesReady).mtimeMs]).toEqual(before);
+    assertTreeUnchanged(beforeCheck, completeTree(handoffRoot));
+    expect(fileBytes(handoffRoot, S2C_PATHS)).toEqual(coreBefore);
+  });
 
-    const incomplete = mkdtempSync(join(tmpdir(), 'vtt-handoff-examples-incomplete-'));
-    mkdirSync(join(incomplete, 'contracts/v1'), { recursive: true });
-    expect(() => publishExamples({ repositoryRoot: process.cwd(), handoffRoot: incomplete }))
-      .toThrow('IMMUTABLE_BUNDLE_MISSING');
+  it('proves complete-tree controls detect directory creation and payload writes', () => {
+    const handoffRoot = mkdtempSync(join(tmpdir(), 'vtt-handoff-examples-controls-'));
+    publishCore({ repositoryRoot: process.cwd(), handoffRoot });
+    publishExamples({ repositoryRoot: process.cwd(), handoffRoot });
+    const baseline = completeTree(handoffRoot);
+
+    const unexpected = join(handoffRoot, 'contracts/v1/unexpected-check-directory');
+    mkdirSync(unexpected);
+    expect(() => assertTreeUnchanged(baseline, completeTree(handoffRoot)))
+      .toThrow('EXAMPLES_CHECK_MUTATED_TREE');
+    rmSync(unexpected, { recursive: true });
+    expect(() => assertTreeUnchanged(baseline, completeTree(handoffRoot))).not.toThrow();
+
+    const fixturePath = join(handoffRoot, 'fixtures/protocol/examples.v1.json');
+    const fixtureBytes = readFileSync(fixturePath);
+    writeFileSync(fixturePath, '{}\n');
+    expect(() => assertTreeUnchanged(baseline, completeTree(handoffRoot)))
+      .toThrow('EXAMPLES_CHECK_MUTATED_TREE');
+    writeFileSync(fixturePath, fixtureBytes);
+    expect(readFileSync(fixturePath).equals(fixtureBytes)).toBe(true);
+    const restored = completeTree(handoffRoot);
+    expect(publishExamples({ repositoryRoot: process.cwd(), handoffRoot, check: true }).status).toBe('verified');
+    expect(() => assertTreeUnchanged(restored, completeTree(handoffRoot))).not.toThrow();
   });
 });

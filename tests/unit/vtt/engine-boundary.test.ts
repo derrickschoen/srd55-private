@@ -206,6 +206,7 @@ function reducerCallSites(graph: ReadonlyMap<string, SourceModule>): readonly st
     options: {
       module: ts.ModuleKind.ESNext,
       moduleResolution: ts.ModuleResolutionKind.Bundler,
+      noLib: true,
       skipLibCheck: true,
       target: ts.ScriptTarget.ESNext,
       types: [],
@@ -295,6 +296,13 @@ const CORE_ENTRYPOINTS = [
   'src/vtt/handoff/in-process-transport.ts',
 ] as const;
 
+let cachedCoreGraph: ReadonlyMap<string, SourceModule> | null = null;
+
+function coreDependencyGraph(): ReadonlyMap<string, SourceModule> {
+  cachedCoreGraph ??= dependencyGraph(CORE_ENTRYPOINTS);
+  return cachedCoreGraph;
+}
+
 describe('renderer-neutral engine boundary graph', () => {
   it('recognizes static, re-export, side-effect, import-equals, dynamic, and require value edges', () => {
     const sample = ts.createSourceFile('forms.ts', `
@@ -320,13 +328,13 @@ describe('renderer-neutral engine boundary graph', () => {
   });
 
   it('resolves every value-import form and transitive platform dependency', () => {
-    const graph = dependencyGraph(CORE_ENTRYPOINTS);
+    const graph = coreDependencyGraph();
     expect(graph.size).toBeGreaterThan(20);
     expect(platformViolations(graph)).toEqual([]);
   });
 
   it('all runtime entries converge on the pinned session reducer edges', () => {
-    expect(reducerCallSites(dependencyGraph(CORE_ENTRYPOINTS))).toEqual([
+    expect(reducerCallSites(coreDependencyGraph())).toEqual([
       'src/vtt/dm-encounter-host.ts#commandReducer -> src/vtt/session-encounter-reducer.ts#reduceSessionEncounter',
       'src/vtt/session-encounter-reducer.ts#reduceSessionEncounter -> src/vtt/vane-warren.ts#reduceVaneWarrenEncounter',
       'src/vtt/session-persistence.ts#advanceSkippedTurn -> src/combat/encounter.ts#reduceEncounter',

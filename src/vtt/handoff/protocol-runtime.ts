@@ -8,11 +8,9 @@ import type {
 } from '../encounter-session-service';
 import type { DmBoardProjection, PlayerBoardProjection, RendererTokenBinding } from '../encounter-projections';
 import { groundAnchor, sceneSnapshot, type CanonicalTokenIdentityIndex } from './scene-snapshot';
-import { MutationLedger } from './mutation-ledger';
+import { LogicalSessionAuthority } from './mutation-ledger';
 import { SessionAuthorizer, type HandoffPrincipal } from './session-authorizer';
 import {
-  genericHandoffRequestSchema,
-  handoffRequestSchema,
   type HandoffRequest,
   type SceneSnapshot,
 } from './v1/contracts';
@@ -63,8 +61,8 @@ export interface ProtocolRuntimeOptions {
   readonly principal: HandoffPrincipal;
   readonly seats: readonly { readonly playerId: string; readonly controlledTokenIds: readonly string[] }[];
   readonly art: EncounterArtPackage;
-  readonly tokenBindings: readonly RendererTokenBinding[];
-  readonly ledger?: MutationLedger;
+  readonly tokenBindings: () => readonly RendererTokenBinding[];
+  readonly session?: LogicalSessionAuthority;
 }
 
 export interface ProtocolSessionPort {
@@ -82,6 +80,7 @@ export interface ProtocolSessionPort {
     readonly requestId: string;
     readonly encounterRevision: number;
     readonly offeredActionId: string;
+    readonly signal?: AbortSignal;
   }): Promise<SessionMutationOutcome>;
   setDoor(input: {
     readonly principal?: { readonly kind: 'dm' } | { readonly kind: 'player'; readonly playerId: string };
@@ -140,6 +139,83 @@ function usableId(value: unknown): string | null {
   return typeof Reflect.get(value, 'id') === 'string' ? Reflect.get(value, 'id') as string : null;
 }
 
+interface GenericWireRequest {
+  readonly v: 1;
+  readonly id: string;
+  readonly method: string;
+  readonly params: Readonly<Record<string, unknown>>;
+}
+
+function record(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function exactKeys(
+  value: Readonly<Record<string, unknown>>,
+  required: readonly string[],
+  optional: readonly string[] = [],
+): boolean {
+  const keys = Object.keys(value);
+  return required.every((key) => Object.hasOwn(value, key)) &&
+    keys.every((key) => required.includes(key) || optional.includes(key));
+}
+
+function genericRequest(value: unknown): GenericWireRequest | null {
+  if (!record(value) || !exactKeys(value, ['v', 'id', 'method', 'params'])) return null;
+  if (value.v !== 1 || typeof value.id !== 'string' || typeof value.method !== 'string' || !record(value.params)) {
+    return null;
+  }
+  return { v: 1, id: value.id, method: value.method, params: value.params };
+}
+
+function finitePoint3(value: unknown): { readonly x: number; readonly y: number; readonly z: number } | null {
+  if (!record(value) || !exactKeys(value, ['x', 'y', 'z'])) return null;
+  if (
+    typeof value.x !== 'number' || !Number.isFinite(value.x) ||
+    typeof value.y !== 'number' || !Number.isFinite(value.y) ||
+    typeof value.z !== 'number' || !Number.isFinite(value.z)
+  ) return null;
+  return { x: value.x, y: value.y, z: value.z };
+}
+
+function knownRequest(request: GenericWireRequest): HandoffRequest | null {
+  const { id, params } = request;
+  switch (request.method) {
+    case 'session.open': {
+      if (!exactKeys(params, ['requestedRole'], ['playerId'])) return null;
+      const requestedRole = params.requestedRole;
+      const playerId = params.playerId;
+      if (
+        (requestedRole !== 'dm' && requestedRole !== 'player') ||
+        (playerId !== undefined && typeof playerId !== 'string')
+      ) return null;
+      return {
+        v: 1, id, method: 'session.open',
+        params: { requestedRole, ...(playerId === undefined ? {} : { playerId }) },
+      };
+    }
+    case 'scene.snapshot':
+      return exactKeys(params, []) ? { v: 1, id, method: 'scene.snapshot', params: {} } : null;
+    case 'token.move': {
+      if (!exactKeys(params, ['tokenId', 'to']) || typeof params.tokenId !== 'string') return null;
+      const to = finitePoint3(params.to);
+      return to === null ? null : { v: 1, id, method: 'token.move', params: { tokenId: params.tokenId, to } };
+    }
+    case 'door.set':
+      return exactKeys(params, ['doorId', 'open']) &&
+        typeof params.doorId === 'string' && typeof params.open === 'boolean'
+        ? { v: 1, id, method: 'door.set', params: { doorId: params.doorId, open: params.open } }
+        : null;
+    case 'light.set':
+      return exactKeys(params, ['lightId', 'enabled']) &&
+        typeof params.lightId === 'string' && typeof params.enabled === 'boolean'
+        ? { v: 1, id, method: 'light.set', params: { lightId: params.lightId, enabled: params.enabled } }
+        : null;
+    default:
+      return null;
+  }
+}
+
 function identityIndex(bindings: readonly RendererTokenBinding[]): CanonicalTokenIdentityIndex {
   const byCombatantId = new Map<string, string>();
   for (const binding of bindings) {
@@ -172,8 +248,8 @@ export class ProtocolRuntime {
   readonly #principal: HandoffPrincipal;
   readonly #authorizer: SessionAuthorizer;
   readonly #art: EncounterArtPackage;
-  readonly #tokenIdentities: CanonicalTokenIdentityIndex;
-  readonly #ledger: MutationLedger;
+  readonly #tokenBindings: () => readonly RendererTokenBinding[];
+  readonly #session: LogicalSessionAuthority;
   readonly #eventListeners = new Set<(event: SceneSnapshotEvent) => void>();
   readonly #faultListeners = new Set<(event: ProtocolTransportFault) => void>();
   #unsubscribeService: (() => void) | null = null;
@@ -187,8 +263,9 @@ export class ProtocolRuntime {
     this.#principal = options.principal;
     this.#authorizer = new SessionAuthorizer(options.seats);
     this.#art = options.art;
-    this.#tokenIdentities = identityIndex(options.tokenBindings);
-    this.#ledger = options.ledger ?? new MutationLedger(String(options.service.sessionId));
+    this.#tokenBindings = options.tokenBindings;
+    this.#session = options.session ?? LogicalSessionAuthority.for(options.service);
+    this.#session.attach(options.service);
   }
 
   subscribe(listener: (event: SceneSnapshotEvent) => void): () => void {
@@ -201,7 +278,7 @@ export class ProtocolRuntime {
     return () => this.#faultListeners.delete(listener);
   }
 
-  async dispatch(input: unknown): Promise<ProtocolDispatchResult> {
+  async dispatch(input: unknown, signal?: AbortSignal): Promise<ProtocolDispatchResult> {
     const decoded = decodedInput(input);
     if (!('ok' in decoded)) {
       this.#emitFault(decoded.fault);
@@ -217,21 +294,21 @@ export class ProtocolRuntime {
       if (result.kind === 'transport_fault') this.#emitFault(result.fault);
       return result;
     }
-    if (this.#disposed || this.#closed) {
+    if (this.#disposed || this.#closed || this.#session.destroyed) {
       return { kind: 'response', response: failure(id, 'CLOSED', 'The logical transport is closed.') };
     }
-    const structural = genericHandoffRequestSchema.safeParse(decoded.value);
-    if (!structural.success) {
+    const structural = genericRequest(decoded.value);
+    if (structural === null) {
       return { kind: 'response', response: failure(id, 'INVALID_REQUEST', 'The request structure is invalid.') };
     }
-    const known = handoffRequestSchema.safeParse(structural.data);
-    if (!known.success) {
-      if (!['session.open', 'scene.snapshot', 'token.move', 'door.set', 'light.set'].includes(structural.data.method)) {
-        return { kind: 'response', response: failure(id, 'UNSUPPORTED', `Unsupported method ${structural.data.method}.`) };
+    const known = knownRequest(structural);
+    if (known === null) {
+      if (!['session.open', 'scene.snapshot', 'token.move', 'door.set', 'light.set'].includes(structural.method)) {
+        return { kind: 'response', response: failure(id, 'UNSUPPORTED', `Unsupported method ${structural.method}.`) };
       }
       return { kind: 'response', response: failure(id, 'INVALID_REQUEST', 'The request parameters are invalid.') };
     }
-    const response = await this.#dispatchKnown(known.data);
+    const response = await this.#dispatchKnown(known, signal);
     return { kind: 'response', response };
   }
 
@@ -248,11 +325,15 @@ export class ProtocolRuntime {
     if (this.#disposed) return;
     this.close();
     this.#disposed = true;
-    this.#ledger.dispose();
-    this.#service.close();
   }
 
-  async #dispatchKnown(request: HandoffRequest): Promise<HandoffResponse> {
+  destroySession(): void {
+    this.close();
+    this.#disposed = true;
+    this.#session.destroy();
+  }
+
+  async #dispatchKnown(request: HandoffRequest, signal?: AbortSignal): Promise<HandoffResponse> {
     switch (request.method) {
       case 'session.open':
         return this.#open(request.id, request.params.requestedRole, request.params.playerId);
@@ -264,7 +345,7 @@ export class ProtocolRuntime {
       }
       case 'token.move':
         if (!this.#reserve(request.id)) return failure(request.id, 'DUPLICATE_MUTATION', 'The mutation id was already used.');
-        return this.#move(request.id, request.params.tokenId, request.params.to);
+        return this.#move(request.id, request.params.tokenId, request.params.to, signal);
       case 'door.set':
         if (!this.#reserve(request.id)) return failure(request.id, 'DUPLICATE_MUTATION', 'The mutation id was already used.');
         return this.#door(request.id, request.params.doorId, request.params.open);
@@ -275,7 +356,7 @@ export class ProtocolRuntime {
   }
 
   #reserve(id: string): boolean {
-    return this.#ledger.reserve(id).reserved;
+    return this.#session.ledger.reserve(id).reserved;
   }
 
   #open(id: string, role: 'dm' | 'player', playerId?: string): HandoffResponse {
@@ -311,6 +392,7 @@ export class ProtocolRuntime {
     id: string,
     tokenId: string,
     to: { readonly x: number; readonly y: number; readonly z: number },
+    signal?: AbortSignal,
   ): Promise<HandoffResponse> {
     if (this.#audience === null) return failure(id, 'SESSION_NOT_OPEN', 'Open the session before mutating it.');
     const authorization = this.#authorizer.authorizeToken(this.#principal, tokenId);
@@ -352,6 +434,7 @@ export class ProtocolRuntime {
       requestId: pending.requestId,
       encounterRevision: pending.encounterRevision,
       offeredActionId,
+      ...(signal === undefined ? {} : { signal }),
     });
     return terminalResponse(id, outcome);
   }
@@ -379,37 +462,52 @@ export class ProtocolRuntime {
   }
 
   #snapshot(projection: DmBoardProjection | PlayerBoardProjection): SceneSnapshot {
+    const tokenIdentities = identityIndex(this.#tokenBindings());
     return sceneSnapshot({
       sceneId: String(this.#service.sessionId),
       projection,
       art: this.#art,
-      tokenIdentities: this.#tokenIdentities,
+      tokenIdentities,
     }).snapshot;
   }
 
   #tokenActor(tokenId: string): string | null {
-    for (const [combatantId, candidateTokenId] of this.#tokenIdentities.byCombatantId) {
+    for (const [combatantId, candidateTokenId] of identityIndex(this.#tokenBindings()).byCombatantId) {
       if (candidateTokenId === tokenId) return combatantId;
     }
     return null;
   }
 
   #publish(event: DmSessionSnapshotEvent | PlayerSessionSnapshotEvent): void {
-    this.#emitSnapshot(event.projection);
+    switch (event.kind) {
+      case 'mutation':
+      case 'autonomous':
+        this.#emitSnapshot(event.projection);
+        return;
+      case 'offer':
+      case 'status':
+      case 'recovery':
+        return;
+    }
   }
 
   #emitSnapshot(projection: DmBoardProjection | PlayerBoardProjection): void {
     this.#seq += 1;
+    const snapshot = this.#snapshot(projection);
     const event = {
       v: 1,
       event: 'scene.snapshot',
       seq: this.#seq,
-      data: this.#snapshot(projection),
+      data: snapshot,
     } satisfies SceneSnapshotEvent;
-    for (const listener of this.#eventListeners) listener(event);
+    for (const listener of this.#eventListeners) {
+      try { listener(event); } catch { /* Observer failure cannot alter protocol settlement. */ }
+    }
   }
 
   #emitFault(event: ProtocolTransportFault): void {
-    for (const listener of this.#faultListeners) listener(event);
+    for (const listener of this.#faultListeners) {
+      try { listener(event); } catch { /* Observer failure cannot alter protocol settlement. */ }
+    }
   }
 }

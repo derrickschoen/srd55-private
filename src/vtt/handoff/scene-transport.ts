@@ -37,4 +37,5 @@ export interface SceneTransport {
   subscribeErrors(listener: (error: SceneTransportFaultError) => void): () => void;
   close(): void;
   dispose(): void;
+  destroySession(): void;
 }

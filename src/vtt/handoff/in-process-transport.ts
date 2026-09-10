@@ -42,6 +42,7 @@ export class InProcessSceneTransport implements SceneTransport {
   readonly #unsubscribeRuntimeFault: () => void;
   #state: SceneTransportStatus = 'connecting';
   #initialSettled = false;
+  #deliveringReceiptCandidate = false;
 
   constructor(private readonly runtime: ProtocolRuntime) {
     void this.#initial.promise.catch(() => undefined);
@@ -92,7 +93,7 @@ export class InProcessSceneTransport implements SceneTransport {
   }
 
   subscribeStatus(listener: (status: SceneTransportStatus) => void): () => void {
-    listener(this.#state);
+    try { listener(this.#state); } catch { /* Observer failure is isolated. */ }
     if (this.#state === 'closed' || this.#state === 'disposed') return () => undefined;
     this.#statusListeners.add(listener);
     return () => this.#statusListeners.delete(listener);
@@ -106,7 +107,6 @@ export class InProcessSceneTransport implements SceneTransport {
 
   close(): void {
     if (this.#state === 'closed' || this.#state === 'disposed') return;
-    this.#rejectPending();
     this.#unsubscribeRuntimeEvent();
     this.#unsubscribeRuntimeFault();
     this.runtime.close();
@@ -114,12 +114,12 @@ export class InProcessSceneTransport implements SceneTransport {
     this.#errorListeners.clear();
     this.#setStatus('closed');
     this.#statusListeners.clear();
+    this.#rejectPendingForClose();
   }
 
   dispose(): void {
     if (this.#state === 'disposed') return;
     if (this.#state !== 'closed') {
-      this.#rejectPending();
       this.#unsubscribeRuntimeEvent();
       this.#unsubscribeRuntimeFault();
       this.#eventListeners.clear();
@@ -128,19 +128,42 @@ export class InProcessSceneTransport implements SceneTransport {
     this.runtime.dispose();
     this.#setStatus('disposed');
     this.#statusListeners.clear();
+    this.#rejectPendingForClose();
+  }
+
+  destroySession(): void {
+    if (this.#state !== 'closed' && this.#state !== 'disposed') {
+      this.#unsubscribeRuntimeEvent();
+      this.#unsubscribeRuntimeFault();
+      this.#eventListeners.clear();
+      this.#errorListeners.clear();
+    }
+    this.runtime.destroySession();
+    this.#setStatus('disposed');
+    this.#statusListeners.clear();
+    this.#rejectPendingForClose();
   }
 
   #receiveEvent(event: SceneSnapshotEvent): void {
-    if (!this.#initialSettled) {
-      this.#initialSettled = true;
-      this.#initial.resolve(event.data);
+    this.#deliveringReceiptCandidate = this.#initialSettled;
+    try {
+      if (!this.#initialSettled) {
+        this.#initialSettled = true;
+        this.#initial.resolve(event.data);
+      }
+      for (const listener of this.#eventListeners) {
+        try { listener(event); } catch { /* Observer failure is isolated. */ }
+      }
+    } finally {
+      this.#deliveringReceiptCandidate = false;
     }
-    for (const listener of this.#eventListeners) listener(event);
   }
 
   #receiveFault(fault: ProtocolTransportFault): void {
     const error = new SceneTransportFaultError(fault);
-    for (const listener of this.#errorListeners) listener(error);
+    for (const listener of this.#errorListeners) {
+      try { listener(error); } catch { /* Observer failure is isolated. */ }
+    }
   }
 
   #rejectPending(): void {
@@ -153,9 +176,16 @@ export class InProcessSceneTransport implements SceneTransport {
     this.#pending.clear();
   }
 
+  #rejectPendingForClose(): void {
+    if (this.#deliveringReceiptCandidate) setTimeout(() => this.#rejectPending(), 0);
+    else this.#rejectPending();
+  }
+
   #setStatus(status: SceneTransportStatus): void {
     if (this.#state === status) return;
     this.#state = status;
-    for (const listener of this.#statusListeners) listener(status);
+    for (const listener of this.#statusListeners) {
+      try { listener(status); } catch { /* Observer failure is isolated. */ }
+    }
   }
 }
