@@ -15,3 +15,5 @@
 - 2026-09-10 12:36 EDT — r2 Astra REJECT: F3/F7/F9/F11/F12 resolved, fixture + fix-pass additions accepted; F13–F22 (refusal vs default-fallback, persist-before-STOP on conflicting startup, mixed readiness, cancellation-after-delivery, cleanup joins, potential infinite loop on incomplete speculation, recalculation phase, v3 validator completeness/hybrid rejection, runbook drift, removed invariants + hand-built packet regression). r3 dispatched (resume 01a088e3…).
 
 - 2026-09-10 13:21 EDT — r3 lane DONE (13 files 512+/64−, 14 tests added, none removed; runbook v2 updated sha fb228c91…; lane focused 53/53 + 11/11, MCP files inadmissible in-sandbox). Supervisor replaced the worktree node_modules symlink with a real npm ci install (lockfile identical to main) and launched the 17-spec cumulative.
+
+- 2026-09-10 13:31 EDT — r3 supervisor cumulative (real node_modules) 406/407, serial 14/14; committed 8e77ca50; runbook v2 r3 archived (sha fb228c91…); Astra r3 review dispatched (resume 01a08815…).
