@@ -31,6 +31,7 @@ import {
 } from './engine-round-application';
 import { monsterActions, monsterBonusActions } from './engine-query-port';
 import { availableEngineActorOptions, resolveEngineActorOption } from './intent-resolver';
+import type { EngineOptionId } from './intent-resolver';
 import { ARENA_REACTION_OFFER_POLICY } from './reaction-offer-host-policy';
 import { regretTurnLegalActions } from './regret/legal-actions';
 
@@ -189,6 +190,343 @@ export const D583_D_ONE_POLICY_EVIDENCE = Object.freeze({
   expectedScoutPrimaryTurns: '101/64' as const,
   optimizedSurfaceClaim: false as const,
 });
+
+export const D587_ROOM_D_BOUNDED_POLICIES_V1 = [
+  'guard_spear_hold',
+  'guard_dodge_hold',
+] as const;
+export type RoomDBoundedPolicyV1 = (typeof D587_ROOM_D_BOUNDED_POLICIES_V1)[number];
+
+export const D587_ROOM_D_REPLY_MENU_PHASES_V1 = [
+  'guard_attack_required',
+  'terminal_end_turn',
+] as const;
+export type RoomDBoundedReplyMenuPhaseV1 = (typeof D587_ROOM_D_REPLY_MENU_PHASES_V1)[number];
+
+export interface RoomDBoundedFractionV1 {
+  readonly numerator: string;
+  readonly denominator: string;
+}
+
+export type RoomDBoundedDiceSpecificationKeyV1 = readonly [
+  'dice_expression',
+  readonly ['count', number],
+  readonly ['sides', number],
+  readonly ['modifier', number],
+  readonly ['minimumTotal', 'absent' | readonly ['present', number]],
+  readonly ['maximumTotal', 'absent' | readonly ['present', number]],
+  readonly ['rerollBelow', 'absent' | readonly [
+    'present',
+    readonly ['threshold', number],
+    readonly ['maximumRerollsPerDie', 1],
+  ]],
+  readonly ['explosion', 'absent' | readonly [
+    'present',
+    readonly ['triggerFace', 'maximum'],
+    readonly ['maximumExplosionsPerDie', 1],
+  ]],
+];
+
+export interface RoomDBoundedDamageComponentTableV1 {
+  readonly semanticOutcome: 'normal_damage' | 'critical_damage';
+  readonly specificationKey: RoomDBoundedDiceSpecificationKeyV1;
+  readonly conditionalTotals: readonly {
+    readonly total: number;
+    readonly weight: RoomDBoundedFractionV1;
+  }[];
+  readonly conditionalComponentMass: RoomDBoundedFractionV1;
+  readonly firstInvocationRequestMass: RoomDBoundedFractionV1;
+  readonly secondInvocationLineMass: RoomDBoundedFractionV1 | null;
+}
+
+export interface RoomDBoundedAttackMassTableV1 {
+  readonly incomingMass: RoomDBoundedFractionV1;
+  readonly noDamageMass: RoomDBoundedFractionV1;
+  readonly secondInvocationIncomingMass: RoomDBoundedFractionV1 | null;
+  readonly secondInvocationNoDamageLineMass: RoomDBoundedFractionV1 | null;
+  readonly normalDamage: RoomDBoundedDamageComponentTableV1;
+  readonly criticalDamage: RoomDBoundedDamageComponentTableV1;
+  readonly uniquenessScope: 'concrete_replay_execution';
+}
+
+export interface RoomDBoundedPolicyReportV1 {
+  readonly policy: RoomDBoundedPolicyV1;
+  readonly offeredOptionId: EngineOptionId;
+  readonly offeredRevision: number;
+  readonly retention: RoomDBoundedFractionV1;
+  readonly terminalHistories: number;
+}
+
+export interface RoomDBoundedGuardRetentionReportV1 {
+  readonly schemaVersion: 1;
+  readonly classification: 'feasibility_candidate';
+  readonly basis: 'challenge';
+  readonly seed: 5831004;
+  readonly roomId: 'D';
+  readonly mode: 'bounded_guard_retention';
+  readonly policies: readonly [RoomDBoundedPolicyReportV1, RoomDBoundedPolicyReportV1];
+  readonly delta: RoomDBoundedFractionV1;
+  readonly threshold: RoomDBoundedFractionV1;
+  readonly thresholdMargin: RoomDBoundedFractionV1;
+  readonly rawTerminalHistories: 512032;
+  readonly failure: FeasibilityFailureV1 | null;
+}
+
+const fraction = (numerator: string, denominator: string): RoomDBoundedFractionV1 =>
+  Object.freeze({ numerator, denominator });
+
+const diceSpecification = (
+  count: number,
+  sides: number,
+  modifier: number,
+): RoomDBoundedDiceSpecificationKeyV1 => Object.freeze([
+  'dice_expression',
+  Object.freeze(['count', count] as const),
+  Object.freeze(['sides', sides] as const),
+  Object.freeze(['modifier', modifier] as const),
+  Object.freeze(['minimumTotal', 'absent'] as const),
+  Object.freeze(['maximumTotal', 'absent'] as const),
+  Object.freeze(['rerollBelow', 'absent'] as const),
+  Object.freeze(['explosion', 'absent'] as const),
+]);
+
+const uniformTotals = (
+  first: number,
+  last: number,
+  denominator: string,
+): readonly { readonly total: number; readonly weight: RoomDBoundedFractionV1 }[] => Object.freeze(
+  Array.from({ length: last - first + 1 }, (_unused, index) => Object.freeze({
+    total: first + index,
+    weight: fraction('1', denominator),
+  })),
+);
+
+const triangularTotals = (
+  first: number,
+  numerators: readonly number[],
+  denominator: string,
+): readonly { readonly total: number; readonly weight: RoomDBoundedFractionV1 }[] => Object.freeze(
+  numerators.map((numerator, index) => Object.freeze({
+    total: first + index,
+    weight: fraction(String(numerator), denominator),
+  })),
+);
+
+const fighterNormalDamage = (
+  requestMass: RoomDBoundedFractionV1,
+  secondInvocationLineMass: RoomDBoundedFractionV1,
+): RoomDBoundedDamageComponentTableV1 => Object.freeze({
+  semanticOutcome: 'normal_damage',
+  specificationKey: diceSpecification(1, 8, 4),
+  conditionalTotals: uniformTotals(5, 12, '8'),
+  conditionalComponentMass: fraction('1', '1'),
+  firstInvocationRequestMass: requestMass,
+  secondInvocationLineMass,
+});
+
+const fighterCriticalDamage = (
+  requestMass: RoomDBoundedFractionV1,
+  secondInvocationLineMass: RoomDBoundedFractionV1,
+): RoomDBoundedDamageComponentTableV1 => Object.freeze({
+  semanticOutcome: 'critical_damage',
+  specificationKey: diceSpecification(2, 8, 4),
+  conditionalTotals: triangularTotals(6, [1, 2, 3, 4, 5, 6, 7, 8, 7, 6, 5, 4, 3, 2, 1], '64'),
+  conditionalComponentMass: fraction('1', '1'),
+  firstInvocationRequestMass: requestMass,
+  secondInvocationLineMass,
+});
+
+export const D587_ROOM_D_ATTACK_MASS_TABLES_V1 = Object.freeze({
+  guardSpear: Object.freeze({
+    incomingMass: fraction('1', '1'),
+    noDamageMass: fraction('11', '20'),
+    secondInvocationIncomingMass: null,
+    secondInvocationNoDamageLineMass: null,
+    normalDamage: Object.freeze({
+      semanticOutcome: 'normal_damage',
+      specificationKey: diceSpecification(1, 6, 1),
+      conditionalTotals: uniformTotals(2, 7, '6'),
+      conditionalComponentMass: fraction('1', '1'),
+      firstInvocationRequestMass: fraction('2', '5'),
+      secondInvocationLineMass: null,
+    }),
+    criticalDamage: Object.freeze({
+      semanticOutcome: 'critical_damage',
+      specificationKey: diceSpecification(2, 6, 1),
+      conditionalTotals: triangularTotals(3, [1, 2, 3, 4, 5, 6, 5, 4, 3, 2, 1], '36'),
+      conditionalComponentMass: fraction('1', '1'),
+      firstInvocationRequestMass: fraction('1', '20'),
+      secondInvocationLineMass: null,
+    }),
+    uniquenessScope: 'concrete_replay_execution',
+  }) satisfies RoomDBoundedAttackMassTableV1,
+  fighterNormal: Object.freeze({
+    incomingMass: fraction('1', '1'),
+    noDamageMass: fraction('2', '5'),
+    secondInvocationIncomingMass: fraction('2', '5'),
+    secondInvocationNoDamageLineMass: fraction('4', '25'),
+    normalDamage: fighterNormalDamage(fraction('11', '20'), fraction('11', '50')),
+    criticalDamage: fighterCriticalDamage(fraction('1', '20'), fraction('1', '50')),
+    uniquenessScope: 'concrete_replay_execution',
+  }) satisfies RoomDBoundedAttackMassTableV1,
+  fighterDodge: Object.freeze({
+    incomingMass: fraction('1', '1'),
+    noDamageMass: fraction('16', '25'),
+    secondInvocationIncomingMass: fraction('16', '25'),
+    secondInvocationNoDamageLineMass: fraction('256', '625'),
+    normalDamage: fighterNormalDamage(fraction('143', '400'), fraction('143', '625')),
+    criticalDamage: fighterCriticalDamage(fraction('1', '400'), fraction('1', '625')),
+    uniquenessScope: 'concrete_replay_execution',
+  }) satisfies RoomDBoundedAttackMassTableV1,
+});
+
+export const D587_ROOM_D_HAND_CONSTANTS_V1 = Object.freeze({
+  seed: 5_831_004 as const,
+  guard: Object.freeze({ armorClass: 16, hitPoints: 5 }),
+  fighterAttack: Object.freeze({
+    attackBonus: 7,
+    dodgeRollMode: 'disadvantage' as const,
+    normalDamage: '1d8+4',
+    criticalDamage: '2d8+4',
+  }),
+  spearRetention: fraction('4', '25'),
+  dodgeRetention: fraction('256', '625'),
+  delta: fraction('156', '625'),
+  materialityThreshold: fraction('3', '20'),
+  thresholdMargin: fraction('249', '2500'),
+  terminalHistories: Object.freeze({ spear: 136_040, dodge: 375_992, total: 512_032 }),
+  work: Object.freeze({
+    faceExpansions: 574_462,
+    reducerApplications: 1_087_704,
+    completedOutcomesAndEndTurns: 1_025_272,
+    incompleteReplayAttempts: 62_432,
+  }),
+  coverProbeCosts: Object.freeze({ livingGuard: 124, deadGuard: 140, scout2EitherState: 124 }),
+  storage: Object.freeze({ nodeEquivalents: 3_348, withHeadroom: 4_185 }),
+});
+
+function optionMatchesRoomDPolicy(
+  option: ReturnType<typeof availableEngineActorOptions>[number],
+  policy: RoomDBoundedPolicyV1,
+): boolean {
+  if (option.actorId !== D_GUARD || option.actionSlots.length !== 1) return false;
+  const slot = option.actionSlots[0];
+  if (slot?.slot !== 'main') return false;
+  switch (policy) {
+    case 'guard_spear_hold':
+      return slot.use.kind === 'attack' && String(slot.use.actionId) === 'spear' &&
+        slot.use.target.kind === 'combatant' && slot.use.target.combatantId === WIZARD;
+    case 'guard_dodge_hold':
+      return slot.use.kind === 'dodge';
+  }
+}
+
+export function roomDBoundedGuardPolicyCommand(
+  state: EncounterState,
+  policy: RoomDBoundedPolicyV1,
+): Readonly<{
+  policy: RoomDBoundedPolicyV1;
+  offeredOptionId: EngineOptionId;
+  offeredRevision: number;
+  command: EncounterCommand;
+}> {
+  if (state.activeCombatant !== D_GUARD) {
+    throw new Error('Room D bounded policy requires the Guard to be active.');
+  }
+  const matches = availableEngineActorOptions(state, D_GUARD, undefined, state.revision)
+    .filter((option) => option.revision === state.revision && optionMatchesRoomDPolicy(option, policy));
+  if (matches.length !== 1) {
+    throw new Error(`Room D bounded policy ${policy} requires exactly one current offered option.`);
+  }
+  const option = matches[0];
+  if (option === undefined) throw new Error('Room D bounded policy option disappeared.');
+  const resolution = resolveEngineActorOption(state, option);
+  if (!resolution.valid || resolution.mechanics.movementCostFeet !== 0 || resolution.mechanics.path.length !== 0) {
+    throw new Error(`Room D bounded policy ${policy} did not resolve as a hold option.`);
+  }
+  let command: EncounterCommand;
+  switch (policy) {
+    case 'guard_spear_hold': {
+      const action = monsterActions(state, D_GUARD).find((candidate): candidate is MonsterAttackAction =>
+        candidate.kind === 'attack' && candidate.id === 'spear');
+      if (action === undefined) throw new Error('Room D Guard has no offered Spear action.');
+      const evaluation = evaluateMonsterTacticalAttack(state, action, D_GUARD, WIZARD);
+      command = monsterAttackCommand(action, D_GUARD, WIZARD, evaluation.rollMode.mode);
+      break;
+    }
+    case 'guard_dodge_hold':
+      command = { type: 'dodge', actor: D_GUARD, cost: 'action' };
+      break;
+  }
+  return Object.freeze({
+    policy,
+    offeredOptionId: option.optionId,
+    offeredRevision: option.revision,
+    command,
+  });
+}
+
+export function validateRoomDBoundedFighterMenu(
+  actions: readonly EncounterCommand[],
+  phase: RoomDBoundedReplyMenuPhaseV1,
+): Readonly<{
+  attack: Extract<EncounterCommand, { readonly type: 'attack' }> | null;
+  endTurn: Extract<EncounterCommand, { readonly type: 'end_turn' }>;
+}> {
+  const attacks = actions.filter((command): command is Extract<EncounterCommand, { readonly type: 'attack' }> =>
+    command.type === 'attack');
+  if (attacks.some((command) => command.actor !== FIGHTER || command.target !== D_GUARD)) {
+    throw new Error('Room D bounded reply rejects attacks against any target other than the living Guard.');
+  }
+  if (actions.some((command) => command.type === 'move' && command.path.at(-1)?.column === 7 &&
+    command.path.at(-1)?.row === 5)) {
+    throw new Error('Room D bounded reply rejects an invented move into the gate.');
+  }
+  const endTurns = actions.filter((command): command is Extract<EncounterCommand, { readonly type: 'end_turn' }> =>
+    command.type === 'end_turn' && command.actor === FIGHTER);
+  if (endTurns.length !== 1) throw new Error('Room D bounded reply requires one offered Fighter end-turn.');
+  switch (phase) {
+    case 'guard_attack_required':
+      if (attacks.length !== 1) {
+        throw new Error('Room D bounded reply requires exactly one offered Fighter attack against the Guard.');
+      }
+      break;
+    case 'terminal_end_turn':
+      if (attacks.length !== 0) {
+        throw new Error('Room D bounded terminal reply forbids another Fighter attack.');
+      }
+      break;
+  }
+  return Object.freeze({ attack: attacks[0] ?? null, endTurn: endTurns[0]! });
+}
+
+export function roomDBoundedFighterMenu(
+  state: EncounterState,
+  phase: RoomDBoundedReplyMenuPhaseV1,
+): ReturnType<typeof validateRoomDBoundedFighterMenu> {
+  if (state.activeCombatant !== FIGHTER) {
+    throw new Error('Room D bounded reply requires the Fighter to be active.');
+  }
+  return validateRoomDBoundedFighterMenu(regretTurnLegalActions(state, FIGHTER).actions, phase);
+}
+
+export function assertRoomDBoundedTerminalState(state: EncounterState): Readonly<{
+  guardLiving: boolean;
+  activeCombatant: typeof D_SCOUT_1;
+}> {
+  if (state.pendingDecisions.length !== 0) {
+    throw new Error('Room D bounded terminal state retains pending decisions.');
+  }
+  if (state.phase.kind !== 'active' || state.activeCombatant !== D_SCOUT_1) {
+    throw new Error('Room D bounded terminal state must advance to living Scout 1.');
+  }
+  const scout = state.combatants.find((combatant) => combatant.profile.id === D_SCOUT_1);
+  const guard = state.combatants.find((combatant) => combatant.profile.id === D_GUARD);
+  if (scout?.life !== 'living' || guard === undefined) {
+    throw new Error('Room D bounded terminal participants are missing or invalid.');
+  }
+  return Object.freeze({ guardLiving: guard.life === 'living', activeCombatant: D_SCOUT_1 });
+}
 
 export function deriveVariantHorizon(
   state: Pick<EncounterState, 'initiative' | 'activeInitiativeIndex'>,

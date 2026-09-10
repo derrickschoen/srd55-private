@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { declareTestInputs } from '../../helpers/test-inputs';
 import { canonicalJson } from '../../../src/commands/canonical-json';
+import { combatantSpace } from '../../../src/combat/combat-rules';
 import { traceCombatantLine } from '../../../src/combat/cover';
+import { minimumSpaceDistance } from '../../../src/combat/creature-space';
 import { encounterMovementWorld } from '../../../src/combat/encounter-movement-world';
 import { findPath, findPathToAny } from '../../../src/combat/movement';
 import { feet, type CombatantId } from '../../../src/combat/values';
@@ -18,8 +20,11 @@ import {
   decodeEncounterStateV1,
 } from '../../../src/vtt/encounter-state-codec';
 import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
+import { runCommandBoundaryTransaction } from '../../../src/vtt/engine-round-application';
 import { resolveEngineActorOption, availableEngineActorOptions } from '../../../src/vtt/intent-resolver';
 import { actorOpportunityReport } from '../../../src/vtt/intel/opportunity-cost';
+import { ARENA_REACTION_OFFER_POLICY } from '../../../src/vtt/reaction-offer-host-policy';
+import { regretTurnLegalActions } from '../../../src/vtt/regret/legal-actions';
 import { generateRoom, type GeneratedRoom } from '../../../src/vtt/room-generator';
 
 const SEEDS = [5_831_001, 5_831_002, 5_831_003, 5_831_004] as const;
@@ -74,6 +79,12 @@ function monsterId(loaded: GeneratedRoom, suffix: string): CombatantId {
   const found = loaded.encounter.state.combatants.find((entry) => String(entry.profile.id).endsWith(suffix));
   if (found === undefined) throw new Error(`Missing monster ${suffix}.`);
   return found.profile.id;
+}
+
+function hypotheticalLongbowExpansionCost(effectiveArmorClass: number): number {
+  const firstNoncriticalHit = Math.max(2, effectiveArmorClass - 4);
+  const noncriticalHitFaces = Math.max(0, 20 - firstNoncriticalHit);
+  return 20 + noncriticalHitFaces * 8 + 8 + 64;
 }
 
 function selectorMatches(
@@ -267,6 +278,69 @@ describe('D583 challenge room fixtures', () => {
     expect(actorOpportunityReport(state, guard, canonicalEngineQueryPort, 0).defaultOption.label).toBe('Spear -> combatant:wizard');
     expect(traceCombatantLine(state, scouts[0]!, 'combatant:fighter' as CombatantId)).toMatchObject({ tier: 'half', blocksSight: false });
     expect(traceCombatantLine(state, scouts[1]!, 'combatant:wizard' as CombatantId)).toMatchObject({ tier: 'three_quarters', blocksSight: false });
+  });
+
+  it('room D cover changes only when an executed Fighter attack kills the Guard', async () => {
+    const loaded = await room(5_831_004);
+    const initial = loaded.encounter.state;
+    const guard = monsterId(loaded, '-guard');
+    const scouts = initial.combatants.filter((entry) => entry.profile.kind === 'monster' && entry.profile.name === 'Scout')
+      .map((entry) => entry.profile.id).sort((left, right) => left.localeCompare(right));
+    const scout1 = scouts[0];
+    const scout2 = scouts[1];
+    if (scout1 === undefined || scout2 === undefined) throw new Error('Room D requires two Scouts.');
+    const fighter = 'combatant:fighter' as CombatantId;
+    const wizard = 'combatant:wizard' as CombatantId;
+    expect(minimumSpaceDistance(combatantSpace(initial, fighter), combatantSpace(initial, guard))).toBe(5);
+    expect(traceCombatantLine(initial, fighter, guard)).toMatchObject({ tier: 'none', blocksSight: false });
+    expect(initial.combatants.find((entry) => entry.profile.id === guard)).toMatchObject({
+      hitPoints: 5, life: 'living', profile: { rules: { armorClass: 16 } },
+    });
+    expect(initial.combatants.find((entry) => entry.profile.id === fighter)?.profile.rules.armorClass).toBe(18);
+    expect(initial.combatants.find((entry) => entry.profile.id === wizard)?.profile.rules.armorClass).toBe(15);
+    expect(traceCombatantLine(initial, scout1, fighter)).toMatchObject({ tier: 'half', blocksSight: false });
+    expect(traceCombatantLine(initial, scout2, wizard)).toMatchObject({ tier: 'three_quarters', blocksSight: false });
+    expect(hypotheticalLongbowExpansionCost(18 + 2)).toBe(124);
+    expect(hypotheticalLongbowExpansionCost(15 + 5)).toBe(124);
+
+    const dodged = runCommandBoundaryTransaction(
+      initial, { type: 'dodge', actor: guard, cost: 'action' }, () => 0,
+      ARENA_REACTION_OFFER_POLICY, null,
+    );
+    const guardEnd = regretTurnLegalActions(dodged.state, guard).actions.find((command) => command.type === 'end_turn');
+    if (guardEnd?.type !== 'end_turn') throw new Error('Room D Guard end-turn was not offered.');
+    const fighterTurn = runCommandBoundaryTransaction(
+      dodged.state, guardEnd, () => 0, ARENA_REACTION_OFFER_POLICY, null,
+    );
+    const attack = regretTurnLegalActions(fighterTurn.state, fighter).actions.find((command) =>
+      command.type === 'attack' && command.target === guard);
+    if (attack?.type !== 'attack') throw new Error('Room D Fighter attack against the Guard was not offered.');
+    const scalars = [0.6, 0.5, 0];
+    const killed = runCommandBoundaryTransaction(
+      fighterTurn.state, attack, () => scalars.shift() ?? 0,
+      ARENA_REACTION_OFFER_POLICY, null,
+    );
+    const attackEvent = killed.events.find((event) => event.type === 'attack_resolved');
+    if (attackEvent?.type !== 'attack_resolved') throw new Error('Room D Fighter attack did not resolve.');
+    expect(attackEvent.attack.roll).toEqual({ mode: 'disadvantage', faces: [13, 11], chosen: 11 });
+    expect(attackEvent.damage?.terms[0]?.roll.expression).toMatchObject({ count: 1, sides: 8, modifier: 4 });
+    expect(killed.state.combatants.find((entry) => entry.profile.id === guard)?.life).toBe('dead');
+    expect(traceCombatantLine(killed.state, scout1, fighter)).toMatchObject({ tier: 'none', blocksSight: false });
+    expect(traceCombatantLine(killed.state, scout2, wizard)).toMatchObject({ tier: 'three_quarters', blocksSight: false });
+    expect(hypotheticalLongbowExpansionCost(18)).toBe(140);
+    expect(hypotheticalLongbowExpansionCost(15 + 5)).toBe(124);
+    const terminalActions = regretTurnLegalActions(killed.state, fighter).actions;
+    expect(terminalActions.filter((command) => command.type === 'attack')).toEqual([]);
+    expect(terminalActions.some((command) => command.type === 'move' &&
+      command.path.at(-1)?.column === 7 && command.path.at(-1)?.row === 5)).toBe(false);
+    const fighterEnd = terminalActions.find((command) => command.type === 'end_turn');
+    if (fighterEnd?.type !== 'end_turn') throw new Error('Room D Fighter terminal end-turn was not offered.');
+    const terminal = runCommandBoundaryTransaction(
+      killed.state, fighterEnd, () => 0, ARENA_REACTION_OFFER_POLICY, null,
+    );
+    expect(terminal.state.pendingDecisions).toEqual([]);
+    expect(terminal.state.activeCombatant).toBe(scout1);
+    expect(terminal.state.combatants.find((entry) => entry.profile.id === scout1)?.life).toBe('living');
   });
 
   it('all challenge rooms expose complete bright lighting and D576 terrain profiles', async () => {
