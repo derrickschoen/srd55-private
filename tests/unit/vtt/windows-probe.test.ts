@@ -47,6 +47,11 @@ function interoperableRunner(handoffRoot: string, wrongReadHash = false): Window
   };
 }
 
+function collisionRandom(): (size: number) => Uint8Array {
+  let payload = 0;
+  return (size) => new Uint8Array(size).fill(size === 16 ? 9 : ++payload);
+}
+
 describe('real Windows interop probe classification', () => {
   it('returns NOT_RUN without the explicit opt-in and invokes no runner', () => {
     const run = vi.fn(() => result(1));
@@ -118,5 +123,36 @@ describe('real Windows interop probe classification', () => {
     expect(report).toMatchObject({ status: 'FAILED', reason: 'PROBE_RANDOM_COLLISION' });
     expect(report.checks).toEqual([{ name: 'powershell', passed: true, detail: '7.4.0' }]);
     expect(readdirSync(handoffRoot)).toEqual([]);
+  });
+
+  it('preserves a pre-existing exact Windows-created probe filename collision', () => {
+    const handoffRoot = root();
+    const token = '09'.repeat(16);
+    const collision = join(handoffRoot, `.vtt-interop-${token}.windows.bin`);
+    writeFileSync(collision, 'pre-existing windows bytes\n');
+    const report = windowsInteropProbe({
+      handoffRoot,
+      environment: { VTT_WINDOWS_INTEROP: '1', WSL_DISTRO_NAME: 'Ubuntu' },
+      runner: interoperableRunner(handoffRoot),
+      randomBytes: collisionRandom(),
+    });
+    expect(report.status).toBe('FAILED');
+    expect(readFileSync(collision, 'utf8')).toBe('pre-existing windows bytes\n');
+  });
+
+  it('preserves a pre-existing exact Linux-created probe filename collision', () => {
+    const handoffRoot = root();
+    const token = '09'.repeat(16);
+    const collision = join(handoffRoot, `.vtt-interop-${token}.linux.bin`);
+    writeFileSync(collision, 'pre-existing linux bytes\n');
+    const report = windowsInteropProbe({
+      handoffRoot,
+      environment: { VTT_WINDOWS_INTEROP: '1', WSL_DISTRO_NAME: 'Ubuntu' },
+      runner: interoperableRunner(handoffRoot),
+      randomBytes: collisionRandom(),
+    });
+    expect(report.status).toBe('FAILED');
+    expect(readFileSync(collision, 'utf8')).toBe('pre-existing linux bytes\n');
+    expect(readdirSync(handoffRoot)).toEqual([`.vtt-interop-${token}.linux.bin`]);
   });
 });

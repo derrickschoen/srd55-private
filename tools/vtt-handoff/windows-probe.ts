@@ -1,5 +1,5 @@
 import { createHash, randomBytes as systemRandomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -47,6 +47,33 @@ function configuredRoot(value: string | undefined): string {
   return resolve(value);
 }
 
+interface OwnedProbeFile {
+  readonly path: string;
+  readonly device: bigint;
+  readonly inode: bigint;
+  readonly sha256: string;
+}
+
+function ownedProbe(path: string, expected: Buffer): OwnedProbeFile | null {
+  if (!existsSync(path)) return null;
+  const stat = lstatSync(path, { bigint: true });
+  if (!stat.isFile() || sha256(readFileSync(path)) !== sha256(expected)) return null;
+  return { path, device: stat.dev, inode: stat.ino, sha256: sha256(expected) };
+}
+
+function removeOwnedProbe(owned: OwnedProbeFile | null): boolean {
+  if (owned === null) return true;
+  try {
+    const stat = lstatSync(owned.path, { bigint: true });
+    if (!stat.isFile() || stat.dev !== owned.device || stat.ino !== owned.inode ||
+      sha256(readFileSync(owned.path)) !== owned.sha256) return false;
+    unlinkSync(owned.path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function windowsInteropProbe(options: {
   readonly handoffRoot?: string;
   readonly environment?: NodeJS.ProcessEnv;
@@ -87,12 +114,15 @@ export function windowsInteropProbe(options: {
   }
   let status: WindowsProbeStatus = 'FAILED';
   let reason: string | null = 'WINDOWS_PROBE_FAILED';
+  let windowsOwned: OwnedProbeFile | null = null;
+  let linuxOwned: OwnedProbeFile | null = null;
   try {
     const writeResult = runner.run('powershell.exe', [
       '-NoProfile', '-NonInteractive', '-Command',
       '& { param($p,$b) $bytes=[Convert]::FromBase64String($b); $s=[IO.File]::Open($p,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None); try {$s.Write($bytes,0,$bytes.Length); $s.Flush($true)} finally {$s.Dispose()} }',
       windowsFile, fromWindows.toString('base64'),
     ]);
+    if (writeResult.status === 0) windowsOwned = ownedProbe(windowsLinuxFile, fromWindows);
     const windowsToLinux = writeResult.status === 0 && existsSync(windowsLinuxFile) && sha256(readFileSync(windowsLinuxFile)) === sha256(fromWindows);
     checks.push({ name: 'windows-to-linux', passed: windowsToLinux, detail: windowsToLinux ? sha256(fromWindows) : writeResult.stderr.trim() || 'hash mismatch' });
     if (!windowsToLinux) {
@@ -100,6 +130,7 @@ export function windowsInteropProbe(options: {
     } else {
 
       writeFileSync(linuxFile, fromLinux, { flag: 'wx', mode: 0o600 });
+      linuxOwned = ownedProbe(linuxFile, fromLinux);
       const readResult = runner.run('powershell.exe', [
         '-NoProfile', '-NonInteractive', '-Command',
         '& { param($p) $s=[IO.File]::Open($p,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read); try {$h=[Security.Cryptography.SHA256]::Create(); try {([BitConverter]::ToString($h.ComputeHash($s))).Replace(\'-\',\'\').ToLowerInvariant()} finally {$h.Dispose()}} finally {$s.Dispose()} }',
@@ -114,14 +145,9 @@ export function windowsInteropProbe(options: {
     status = 'FAILED';
     reason = error instanceof Error ? error.message : 'WINDOWS_PROBE_FAILED';
   }
-  let cleanupPassed = true;
-  for (const path of [windowsLinuxFile, linuxFile]) {
-    try {
-      if (existsSync(path)) unlinkSync(path);
-    } catch {
-      cleanupPassed = false;
-    }
-  }
+  const windowsCleanupPassed = removeOwnedProbe(windowsOwned);
+  const linuxCleanupPassed = removeOwnedProbe(linuxOwned);
+  const cleanupPassed = windowsCleanupPassed && linuxCleanupPassed;
   checks.push({ name: 'cleanup', passed: cleanupPassed, detail: cleanupPassed ? 'named probes removed' : 'named probe cleanup failed' });
   if (!cleanupPassed) return { status: 'FAILED', linuxPath, windowsPath, checks, reason: 'PROBE_CLEANUP_FAILED' };
   return { status, linuxPath, windowsPath, checks, reason };

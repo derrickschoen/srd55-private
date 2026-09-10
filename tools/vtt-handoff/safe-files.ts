@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import {
   closeSync, constants, fstatSync, fsyncSync, mkdirSync, openSync, readSync, realpathSync,
-  renameSync, unlinkSync, writeSync,
+  linkSync, unlinkSync, writeSync,
 } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 
@@ -16,6 +16,12 @@ export interface AnchoredFile {
   readonly bytes: Buffer;
   readonly identity: FileIdentity;
   readonly canonicalPath: string;
+}
+
+export interface SafeFileHooks {
+  readonly beforeChildOpen?: (parentRelativePath: string, component: string) => void;
+  readonly afterDirectoryOpen?: (relativePath: string) => void;
+  readonly onFileRead?: (canonicalPath: string) => void;
 }
 
 /*
@@ -73,7 +79,7 @@ function closeParent(parent: OpenParent): void {
   for (const handle of [...parent.handles].reverse()) closeSync(handle);
 }
 
-function openParent(root: string, components: readonly string[]): OpenParent {
+function openParent(root: string, components: readonly string[], hooks?: SafeFileHooks): OpenParent {
   assertProcFdAvailable();
   const absoluteRoot = resolve(root);
   const rootHandle = openSync(absoluteRoot, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
@@ -85,8 +91,11 @@ function openParent(root: string, components: readonly string[]): OpenParent {
     fail('ANCHORED_ROOT_MISMATCH', root);
   }
   let expectedParent = canonicalRoot;
+  let relativePath = '';
+  hooks?.afterDirectoryOpen?.(relativePath);
   try {
     for (const component of components) {
+      hooks?.beforeChildOpen?.(relativePath, component);
       const child = openSync(procChild(handle, component), constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
       const stat = fstatSync(child, { bigint: true });
       const expected = join(expectedParent, component);
@@ -97,6 +106,8 @@ function openParent(root: string, components: readonly string[]): OpenParent {
       handle = child;
       handles.push(child);
       expectedParent = expected;
+      relativePath = relativePath.length === 0 ? component : `${relativePath}/${component}`;
+      hooks?.afterDirectoryOpen?.(relativePath);
     }
     return { handle, handles, canonicalRoot, expectedParent };
   } catch (error) {
@@ -118,15 +129,24 @@ function readBounded(handle: number, size: number): Buffer {
   return bytes;
 }
 
-export function readAnchoredFile(root: string, relativePath: string, maximumBytes: number): AnchoredFile {
+export function readAnchoredFile(
+  root: string,
+  relativePath: string,
+  maximumBytes: number,
+  hooks?: SafeFileHooks,
+): AnchoredFile {
   if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 0) fail('INVALID_FILE_BOUND', String(maximumBytes));
   const components = safeRelativeComponents(relativePath);
   const filename = components.at(-1);
   if (filename === undefined) fail('UNSAFE_RELATIVE_PATH', relativePath);
-  const parent = openParent(root, components.slice(0, -1));
+  const parent = openParent(root, components.slice(0, -1), hooks);
   let handle: number | null = null;
   try {
-    handle = openSync(procChild(parent.handle, filename), constants.O_RDONLY | constants.O_NOFOLLOW);
+    hooks?.beforeChildOpen?.(components.slice(0, -1).join('/'), filename);
+    handle = openSync(
+      procChild(parent.handle, filename),
+      constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW,
+    );
     const before = fstatSync(handle, { bigint: true });
     if (!before.isFile()) fail('REGULAR_FILE_REQUIRED', relativePath);
     if (before.size > BigInt(maximumBytes) || before.size > BigInt(Number.MAX_SAFE_INTEGER)) {
@@ -137,6 +157,7 @@ export function readAnchoredFile(root: string, relativePath: string, maximumByte
     if (canonicalPath !== expected || !canonicalPath.startsWith(`${parent.canonicalRoot}${sep}`)) {
       fail('ANCHORED_FILE_MISMATCH', relativePath);
     }
+    hooks?.onFileRead?.(canonicalPath);
     const bytes = readBounded(handle, Number(before.size));
     const after = fstatSync(handle, { bigint: true });
     if (before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size || before.mtimeNs !== after.mtimeNs) {
@@ -251,7 +272,12 @@ export function createAnchoredFileExclusive(root: string, relativePath: string, 
   }
 }
 
-export function promoteAnchoredPartial(root: string, partialPath: string, destinationPath: string): void {
+export function promoteAnchoredPartial(
+  root: string,
+  partialPath: string,
+  destinationPath: string,
+  beforePromotion?: (destinationPath: string) => void,
+): void {
   const partialComponents = safeRelativeComponents(partialPath);
   const destinationComponents = safeRelativeComponents(destinationPath);
   const partialName = partialComponents.at(-1);
@@ -261,19 +287,13 @@ export function promoteAnchoredPartial(root: string, partialPath: string, destin
     fail('ANCHORED_RENAME_PARENT_MISMATCH', destinationPath);
   }
   const parent = openParent(root, partialComponents.slice(0, -1));
-  let reserved = false;
   try {
-    const reservation = openSync(
-      procChild(parent.handle, destinationName),
-      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
-      0o600,
-    );
-    closeSync(reservation);
-    reserved = true;
-    renameSync(procChild(parent.handle, partialName), procChild(parent.handle, destinationName));
-    reserved = false;
+    beforePromotion?.(destinationPath);
+    linkSync(procChild(parent.handle, partialName), procChild(parent.handle, destinationName));
+    fsyncSync(parent.handle);
+    unlinkSync(procChild(parent.handle, partialName));
+    fsyncSync(parent.handle);
   } catch (error) {
-    if (reserved) unlinkSync(procChild(parent.handle, destinationName));
     if ((error as NodeJS.ErrnoException).code === 'EEXIST') fail('DESTINATION_COLLISION', destinationPath);
     throw error;
   } finally {
@@ -289,6 +309,6 @@ export function unlinkAnchoredFile(root: string, relativePath: string): void {
   try {
     unlinkSync(procChild(parent.handle, filename));
   } finally {
-    closeSync(parent.handle);
+    closeParent(parent);
   }
 }

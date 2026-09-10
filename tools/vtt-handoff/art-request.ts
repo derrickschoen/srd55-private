@@ -1,11 +1,12 @@
 import { randomBytes } from 'node:crypto';
 import {
-  closeSync, constants, existsSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync,
-  unlinkSync, writeSync,
+  closeSync, constants, existsSync, fsyncSync, linkSync, mkdirSync, openSync, readFileSync,
+  readdirSync, unlinkSync, writeSync,
 } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { artRequestSchema, type ArtRequest } from '../../src/vtt/handoff/v1/contracts.ts';
+import { validateJsonSchema } from '../../src/vtt/handoff/v1/validation.ts';
 import { createUuidV7Generator, type UuidV7Generator } from './uuidv7.ts';
 
 const STYLE = 'Clean-room original fantasy tabletop asset; restrained stone, wood, iron and warm-fire palette; crisp readable silhouette; no text, logos, signatures or references to existing works.';
@@ -21,15 +22,15 @@ interface RequestDefinition {
 }
 
 export const ART_REQUEST_DEFINITIONS: readonly RequestDefinition[] = [
-  { assetId: 'tile', footprint: { w: 1, h: 1 }, passes: ['albedo', 'normal'], transparent: false, purpose: 'repeatable dungeon ground tile' },
-  { assetId: 'wall', footprint: { w: 1, h: 1 }, passes: ['albedo', 'normal'], transparent: false, purpose: 'directional dungeon wall segment' },
-  { assetId: 'door', footprint: { w: 1, h: 1 }, passes: ['albedo', 'normal'], transparent: false, purpose: 'directional closed dungeon door' },
-  { assetId: 'barrel', footprint: { w: 1, h: 1 }, passes: ['albedo', 'normal'], transparent: true, purpose: 'freestanding wooden barrel prop' },
-  { assetId: 'table', footprint: { w: 2, h: 1 }, passes: ['albedo', 'normal'], transparent: true, purpose: 'freestanding rectangular wooden table prop' },
-  { assetId: 'pillar', footprint: { w: 1, h: 1 }, passes: ['albedo', 'normal'], transparent: true, purpose: 'freestanding stone pillar prop' },
-  { assetId: 'torch', footprint: { w: 1, h: 1 }, passes: ['albedo', 'normal', 'emissive'], transparent: true, purpose: 'freestanding lit torch prop' },
-  { assetId: 'adventurer', footprint: { w: 1, h: 1 }, passes: ['albedo', 'normal'], transparent: true, purpose: 'readable humanoid adventurer token' },
-  { assetId: 'goblin', footprint: { w: 1, h: 1 }, passes: ['albedo', 'normal'], transparent: true, purpose: 'readable small goblin token' },
+  { assetId: 'tile.stone.floor', footprint: { w: 1, h: 1 }, passes: ['albedo', 'normal'], transparent: false, purpose: 'repeatable dungeon ground tile' },
+  { assetId: 'wall.stone', footprint: { w: 1, h: 1 }, passes: ['albedo', 'normal'], transparent: false, purpose: 'directional dungeon wall segment' },
+  { assetId: 'door.wood', footprint: { w: 1, h: 1 }, passes: ['albedo', 'normal'], transparent: false, purpose: 'directional closed dungeon door' },
+  { assetId: 'prop.barrel', footprint: { w: 1, h: 1 }, passes: ['albedo', 'normal'], transparent: true, purpose: 'freestanding wooden barrel prop' },
+  { assetId: 'prop.table', footprint: { w: 2, h: 1 }, passes: ['albedo', 'normal'], transparent: true, purpose: 'freestanding rectangular wooden table prop' },
+  { assetId: 'prop.pillar', footprint: { w: 1, h: 1 }, passes: ['albedo', 'normal'], transparent: true, purpose: 'freestanding stone pillar prop' },
+  { assetId: 'prop.torch', footprint: { w: 1, h: 1 }, passes: ['albedo', 'normal', 'emissive'], transparent: true, purpose: 'freestanding lit torch prop' },
+  { assetId: 'token.adventurer', footprint: { w: 1, h: 1 }, passes: ['albedo', 'normal'], transparent: true, purpose: 'readable humanoid adventurer token' },
+  { assetId: 'token.goblin', footprint: { w: 1, h: 1 }, passes: ['albedo', 'normal'], transparent: true, purpose: 'readable small goblin token' },
 ] as const;
 
 function requestBrief(definition: RequestDefinition): string {
@@ -57,7 +58,22 @@ function configuredRoot(value = process.env.VTT_HANDOFF_ROOT): string {
   return resolve(value);
 }
 
-function writeExclusiveViaPartial(destination: string, bytes: Buffer, nonce: () => string): void {
+function requirePublishedSchema(request: ArtRequest): void {
+  const schema = JSON.parse(readFileSync(resolve(process.cwd(), 'contracts/vtt-handoff/v1/art.schema.json'), 'utf8')) as object;
+  if (validateJsonSchema(schema, request).length > 0) throw new Error(`ART_REQUEST_JSON_SCHEMA_INVALID: ${request.assetId}`);
+}
+
+function syncDirectory(directory: string): void {
+  const handle = openSync(directory, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+  try { fsyncSync(handle); } finally { closeSync(handle); }
+}
+
+function writeExclusiveViaPartial(
+  destination: string,
+  bytes: Buffer,
+  nonce: () => string,
+  beforePromotion?: (destination: string) => void,
+): void {
   const partial = `${destination}.partial.${nonce()}`;
   let partialHandle: number;
   try {
@@ -66,18 +82,19 @@ function writeExclusiveViaPartial(destination: string, bytes: Buffer, nonce: () 
     if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new Error('ART_REQUEST_PARTIAL_COLLISION');
     throw error;
   }
-  let reserved = false;
   try {
-    writeSync(partialHandle, bytes);
+    let offset = 0;
+    while (offset < bytes.length) offset += writeSync(partialHandle, bytes, offset, bytes.length - offset, offset);
+    fsyncSync(partialHandle);
     closeSync(partialHandle);
     partialHandle = -1;
-    const reservation = openSync(destination, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
-    closeSync(reservation);
-    reserved = true;
-    renameSync(partial, destination);
+    if (!readFileSync(partial).equals(bytes)) throw new Error('ART_REQUEST_PARTIAL_MISMATCH');
+    beforePromotion?.(destination);
+    linkSync(partial, destination);
+    unlinkSync(partial);
+    syncDirectory(resolve(destination, '..'));
   } catch (error) {
     if (partialHandle >= 0) closeSync(partialHandle);
-    if (reserved) unlinkSync(destination);
     if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new Error('ART_REQUEST_COLLISION');
     throw error;
   } finally {
@@ -96,6 +113,7 @@ export function writeArtRequests(options: {
   readonly generator?: UuidV7Generator;
   readonly check?: boolean;
   readonly nonce?: () => string;
+  readonly beforePromotion?: (destination: string) => void;
 } = {}): ArtRequestBatchResult {
   const root = configuredRoot(options.handoffRoot);
   const outbox = join(root, 'art', 'outbox');
@@ -107,6 +125,7 @@ export function writeArtRequests(options: {
     for (const name of names) {
       const parsed: unknown = JSON.parse(readFileSync(join(outbox, name), 'utf8'));
       const request = artRequestSchema.parse(parsed);
+      requirePublishedSchema(request);
       if (!UUID_V7.test(request.requestId)) throw new Error('ART_REQUEST_ID_INVALID');
       if (name !== `${request.requestId}.request.json`) throw new Error('ART_REQUEST_FILENAME_MISMATCH');
       if (assets.has(request.assetId)) throw new Error('ART_REQUEST_ASSET_DUPLICATE');
@@ -128,8 +147,12 @@ export function writeArtRequests(options: {
   const nonce = options.nonce ?? (() => `${String(process.pid)}.${randomBytes(8).toString('hex')}`);
   const requestFiles: string[] = [];
   for (const request of requests) {
+    requirePublishedSchema(request);
     const name = `${request.requestId}.request.json`;
-    writeExclusiveViaPartial(join(outbox, name), Buffer.from(`${JSON.stringify(request, null, 2)}\n`), nonce);
+    writeExclusiveViaPartial(
+      join(outbox, name), Buffer.from(`${JSON.stringify(request, null, 2)}\n`), nonce,
+      options.beforePromotion,
+    );
     requestFiles.push(name);
   }
   return { root, requestFiles, status: 'created' };

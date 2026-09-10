@@ -6,7 +6,10 @@ import { PNG_LIMITS, validatePng } from '../../../tools/vtt-handoff/png-validato
 const signature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 function chunk(type: string, data: Uint8Array): Buffer {
-  const typeBytes = Buffer.from(type, 'ascii');
+  return chunkBytes(Buffer.from(type, 'ascii'), data);
+}
+
+function chunkBytes(typeBytes: Buffer, data: Uint8Array): Buffer {
   const output = Buffer.alloc(12 + data.length);
   output.writeUInt32BE(data.length, 0);
   typeBytes.copy(output, 4);
@@ -44,8 +47,17 @@ describe('bounded complete PNG validation', () => {
   });
 
   it('unfilters every exact PNG filter 0 through 4 and rejects filter 5', () => {
+    const rowsByFilter = new Map<number, Uint8Array>([
+      [0, Uint8Array.of(0, 10, 20, 30, 255, 40, 50, 60, 255, 0, 70, 80, 90, 255, 100, 110, 120, 255)],
+      [1, Uint8Array.of(1, 10, 20, 30, 255, 30, 30, 30, 0, 1, 70, 80, 90, 255, 30, 30, 30, 0)],
+      [2, Uint8Array.of(2, 10, 20, 30, 255, 40, 50, 60, 255, 2, 60, 60, 60, 0, 60, 60, 60, 0)],
+      [3, Uint8Array.of(3, 10, 20, 30, 255, 35, 40, 45, 128, 3, 65, 70, 75, 128, 45, 45, 45, 0)],
+      [4, Uint8Array.of(4, 10, 20, 30, 255, 30, 30, 30, 0, 4, 60, 60, 60, 0, 30, 30, 30, 0)],
+    ]);
     for (const filter of [0, 1, 2, 3, 4]) {
-      expect(validatePng(pngFromRaw(Uint8Array.of(filter, 0, 0, 0, 0))).hasTransparency).toBe(true);
+      const rows = rowsByFilter.get(filter);
+      if (rows === undefined) throw new Error('filter fixture missing');
+      expect(validatePng(pngFromRaw(rows, ihdr(2, 2))).hasTransparency, `filter ${String(filter)}`).toBe(false);
     }
     expect(() => validatePng(pngFromRaw(Uint8Array.of(5, 0, 0, 0, 0)))).toThrow('PNG_FILTER');
   });
@@ -86,6 +98,14 @@ describe('bounded complete PNG validation', () => {
     expect(() => validatePng(Buffer.concat([
       signature, ihdr(), chunk('ABCD', Buffer.alloc(0)), chunk('IDAT', deflateSync(Uint8Array.of(0, 0, 0, 0, 0))), chunk('IEND', Buffer.alloc(0)),
     ]))).toThrow('PNG_UNKNOWN_CRITICAL_CHUNK');
+    expect(() => validatePng(Buffer.concat([
+      signature, chunkBytes(Buffer.from([0xc9, 0xc8, 0xc4, 0xd2]), Buffer.alloc(13)),
+      chunk('IDAT', deflateSync(Uint8Array.of(0, 0, 0, 0, 0))), chunk('IEND', Buffer.alloc(0)),
+    ]))).toThrow('PNG_CHUNK_TYPE');
+    expect(() => validatePng(Buffer.concat([
+      signature, ihdr(), chunkBytes(Buffer.from('abcd'), Buffer.alloc(0)),
+      chunk('IDAT', deflateSync(Uint8Array.of(0, 0, 0, 0, 0))), chunk('IEND', Buffer.alloc(0)),
+    ]))).toThrow('PNG_CHUNK_TYPE');
     expect(() => validatePng(pngFromRaw(Uint8Array.of(0, 0, 0, 0)))).toThrow('PNG_SCANLINE_LENGTH');
     expect(() => validatePng(pngFromCompressed(Buffer.concat([
       deflateSync(Uint8Array.of(0, 0, 0, 0, 0)), Buffer.from([1, 2, 3]),
@@ -101,5 +121,12 @@ describe('bounded complete PNG validation', () => {
     expect(() => validatePng(Buffer.concat([
       signature, ihdr(), chunk('IDAT', compressedBomb), chunk('IEND', Buffer.alloc(0)),
     ]))).toThrow('PNG_COMPRESSED_LIMIT');
+    const expanded = Buffer.alloc(401);
+    expect(() => validatePng(pngFromCompressed(deflateSync(expanded), ihdr(100, 1)), {
+      maximumInflateOutputBytes: 64,
+    })).toThrow('PNG_INFLATE');
+    const validCompressed = deflateSync(Uint8Array.of(0, 0, 0, 0, 255));
+    expect(() => validatePng(pngFromCompressed(validCompressed.subarray(0, validCompressed.length - 1))))
+      .toThrow('PNG_INFLATE');
   });
 });

@@ -17,6 +17,10 @@ export interface ValidatedPng {
   readonly compressedBytes: number;
 }
 
+export interface PngValidationOptions {
+  readonly maximumInflateOutputBytes?: number;
+}
+
 function invalid(code: string): never {
   throw new Error(`PNG_${code}`);
 }
@@ -37,7 +41,7 @@ function paeth(left: number, above: number, upperLeft: number): number {
     : aboveDistance <= upperLeftDistance ? above : upperLeft;
 }
 
-export function validatePng(bytes: Uint8Array): ValidatedPng {
+export function validatePng(bytes: Uint8Array, options: PngValidationOptions = {}): ValidatedPng {
   const png = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   if (png.length < SIGNATURE.length || !png.subarray(0, SIGNATURE.length).equals(SIGNATURE)) invalid('SIGNATURE');
   let offset = SIGNATURE.length;
@@ -60,8 +64,10 @@ export function validatePng(bytes: Uint8Array): ValidatedPng {
     const crcEnd = dataEnd + 4;
     if (!Number.isSafeInteger(crcEnd) || dataEnd < dataStart || crcEnd > png.length) invalid('CHUNK_LENGTH');
     const typeBytes = png.subarray(offset + 4, offset + 8);
+    if (![...typeBytes].every((value) =>
+      (value >= 65 && value <= 90) || (value >= 97 && value <= 122)) ||
+      ((typeBytes[2] ?? 0) & 0x20) !== 0) invalid('CHUNK_TYPE');
     const type = typeBytes.toString('ascii');
-    if (!/^[A-Za-z]{4}$/u.test(type)) invalid('CHUNK_TYPE');
     const expectedCrc = png.readUInt32BE(dataEnd);
     const actualCrc = crc32(png.subarray(offset + 4, dataEnd)) >>> 0;
     if (expectedCrc !== actualCrc) invalid('CRC');
@@ -107,8 +113,11 @@ export function validatePng(bytes: Uint8Array): ValidatedPng {
   let inflated: Buffer;
   let consumed: number;
   try {
+    const maximumInflateOutputBytes = options.maximumInflateOutputBytes ?? PNG_LIMITS.maximumDecodedBytes;
+    if (!Number.isSafeInteger(maximumInflateOutputBytes) || maximumInflateOutputBytes < 1 ||
+      maximumInflateOutputBytes > PNG_LIMITS.maximumDecodedBytes) invalid('INFLATE_BOUND');
     const result: unknown = inflateSync(Buffer.concat(compressedParts), {
-      maxOutputLength: PNG_LIMITS.maximumDecodedBytes,
+      maxOutputLength: maximumInflateOutputBytes,
       info: true,
     });
     if (typeof result !== 'object' || result === null) invalid('INFLATE');
