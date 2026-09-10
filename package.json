@@ -38,12 +38,16 @@
     "schema:engine-mcp": "vite-node tools/generate-engine-mcp-schemas.ts",
     "attribute:round-input": "vite-node tools/attribute-round-input.ts --",
     "rl:extract-sft": "vite-node tools/rl/extract-sft.ts --",
-    "rl:generate-data": "vite-node tools/rl/generate-data.ts --"
+    "rl:generate-data": "vite-node tools/rl/generate-data.ts --",
+    "bootstrap": "node --experimental-strip-types tools/vtt-handoff/bootstrap.ts --",
+    "doctor": "node --experimental-strip-types tools/vtt-handoff/doctor.ts --",
+    "handoff:publish": "node --experimental-strip-types tools/vtt-handoff/publish.ts --"
   },
   "dependencies": {
     "@sqlite.org/sqlite-wasm": "3.53.0-build1",
     "qrcode": "^1.5.4",
     "trystero": "0.25.3",
+    "ws": "8.18.3",
     "yjs": "13.6.32",
     "zod": "4.4.3"
   },
@@ -54,7 +58,9 @@
     "@stryker-mutator/vitest-runner": "9.6.1",
     "@types/node": "^24.0.0",
     "@types/qrcode": "^1.5.6",
+    "@types/ws": "8.18.1",
     "@typescript/native-preview": "7.0.0-dev.20260707.2",
+    "ajv": "8.18.0",
     "drizzle-kit": "^0.31.10",
     "drizzle-orm": "^0.45.2",
     "drizzle-zod": "^0.8.3",

@@ -1,0 +1,465 @@
+{
+  "schemaVersion": 1,
+  "seed": 603020001,
+  "clock": "2026-09-09T12:00:00.000Z",
+  "sceneId": "scene:two-room-v1",
+  "art": {
+    "schemaVersion": 1,
+    "id": "encounter-art:two-room:v1",
+    "room": {
+      "columns": 12,
+      "rows": 8,
+      "floor": "art.map.floor.stone.v1",
+      "wall": "art.map.wall.stone.v1",
+      "door": "art.map.door.wood.v1",
+      "doorCell": {
+        "column": 5,
+        "row": 7
+      }
+    },
+    "terrain": [
+      {
+        "cell": {
+          "column": 2,
+          "row": 2
+        },
+        "asset": "art.terrain.crate.v1"
+      },
+      {
+        "cell": {
+          "column": 8,
+          "row": 2
+        },
+        "asset": "art.terrain.rubble.v1"
+      },
+      {
+        "cell": {
+          "column": 9,
+          "row": 5
+        },
+        "asset": "art.terrain.pillar.v1"
+      },
+      {
+        "cell": {
+          "column": 3,
+          "row": 5
+        },
+        "asset": "art.terrain.hazard.v1"
+      }
+    ],
+    "fog": {
+      "hidden": "art.fog.hidden.v1",
+      "unexplored": "art.fog.unexplored.v1",
+      "revealed": "art.fog.revealed.v1"
+    },
+    "ui": {
+      "activePc": "art.focus.active-pc.v1",
+      "adjudicated": "art.event.adjudicated.v1"
+    },
+    "combatantTokens": {
+      "combatant:two-room-adventurer": "art.token.pc.fighter.v1",
+      "combatant:two-room-goblin": "art.token.monster.goblin-warrior.v1"
+    },
+    "boardGlyphs": "none"
+  },
+  "playerBindings": [
+    {
+      "seatId": "player:adventurer",
+      "combatantId": "combatant:two-room-adventurer"
+    },
+    {
+      "seatId": "player:goblin",
+      "combatantId": "combatant:two-room-goblin"
+    }
+  ],
+  "state": {
+    "config": {
+      "initiativeMode": "shared_enemy"
+    },
+    "phase": {
+      "kind": "active"
+    },
+    "rulesEdition": "2024",
+    "hiddenRolls": [],
+    "revision": 0,
+    "nextEventSequence": 1,
+    "nextDecisionSequence": 1,
+    "nextEffectSequence": 1,
+    "bounds": {
+      "columns": 12,
+      "rows": 8
+    },
+    "blockedCells": [
+      {
+        "column": 5,
+        "row": 0
+      },
+      {
+        "column": 5,
+        "row": 1
+      },
+      {
+        "column": 5,
+        "row": 2
+      },
+      {
+        "column": 5,
+        "row": 3
+      },
+      {
+        "column": 5,
+        "row": 5
+      },
+      {
+        "column": 5,
+        "row": 6
+      },
+      {
+        "column": 5,
+        "row": 7
+      }
+    ],
+    "worldObjects": [
+      {
+        "id": "object:two-room-door",
+        "name": "Oak Door",
+        "kind": "door",
+        "position": {
+          "column": 5,
+          "row": 4
+        },
+        "footprint": [
+          {
+            "column": 5,
+            "row": 4
+          }
+        ],
+        "durability": {
+          "kind": "indestructible"
+        },
+        "armorClass": 10,
+        "damageResponses": [],
+        "blocking": {
+          "movement": true,
+          "lineOfSight": true,
+          "cover": "total"
+        },
+        "createdRevision": 0
+      },
+      {
+        "id": "object:two-room-barrel",
+        "name": "Barrel",
+        "kind": "cover",
+        "position": {
+          "column": 2,
+          "row": 2
+        },
+        "footprint": [
+          {
+            "column": 2,
+            "row": 2
+          }
+        ],
+        "durability": {
+          "kind": "indestructible"
+        },
+        "armorClass": 10,
+        "damageResponses": [],
+        "blocking": {
+          "movement": false,
+          "lineOfSight": false,
+          "cover": "half"
+        },
+        "createdRevision": 0
+      },
+      {
+        "id": "object:two-room-table",
+        "name": "Table",
+        "kind": "cover",
+        "position": {
+          "column": 8,
+          "row": 2
+        },
+        "footprint": [
+          {
+            "column": 8,
+            "row": 2
+          }
+        ],
+        "durability": {
+          "kind": "indestructible"
+        },
+        "armorClass": 10,
+        "damageResponses": [],
+        "blocking": {
+          "movement": false,
+          "lineOfSight": false,
+          "cover": "half"
+        },
+        "createdRevision": 0
+      },
+      {
+        "id": "object:two-room-pillar",
+        "name": "Pillar",
+        "kind": "barrier",
+        "position": {
+          "column": 9,
+          "row": 5
+        },
+        "footprint": [
+          {
+            "column": 9,
+            "row": 5
+          }
+        ],
+        "durability": {
+          "kind": "indestructible"
+        },
+        "armorClass": 10,
+        "damageResponses": [],
+        "blocking": {
+          "movement": true,
+          "lineOfSight": true,
+          "cover": "total"
+        },
+        "createdRevision": 0
+      },
+      {
+        "id": "object:two-room-torch",
+        "name": "Torch",
+        "kind": "light-source",
+        "position": {
+          "column": 3,
+          "row": 5
+        },
+        "footprint": [
+          {
+            "column": 3,
+            "row": 5
+          }
+        ],
+        "durability": {
+          "kind": "indestructible"
+        },
+        "armorClass": 10,
+        "damageResponses": [],
+        "blocking": {
+          "movement": false,
+          "lineOfSight": false,
+          "cover": "none"
+        },
+        "createdRevision": 0
+      }
+    ],
+    "nextWorldObjectSequence": 1,
+    "environment": {
+      "lightRegions": [
+        {
+          "id": "region:two-room-torch-bright",
+          "level": "bright",
+          "cells": [
+            {
+              "column": 2,
+              "row": 4
+            },
+            {
+              "column": 3,
+              "row": 4
+            },
+            {
+              "column": 4,
+              "row": 4
+            },
+            {
+              "column": 2,
+              "row": 5
+            },
+            {
+              "column": 3,
+              "row": 5
+            },
+            {
+              "column": 4,
+              "row": 5
+            }
+          ]
+        }
+      ],
+      "difficultTerrainRegions": [],
+      "obscurementRegions": [],
+      "narrowOpeningRegions": [],
+      "movementRegions": []
+    },
+    "foggedCells": [
+      {
+        "column": 8,
+        "row": 4
+      }
+    ],
+    "dmNotes": [],
+    "combatants": [
+      {
+        "profile": {
+          "id": "combatant:two-room-adventurer",
+          "tokenId": "token:two-room-adventurer",
+          "name": "Adventurer",
+          "rules": {
+            "armorClass": 18,
+            "hitPointMaximum": 67,
+            "speed": 30,
+            "initiativeBonus": 100,
+            "savingThrowBonuses": {
+              "strength": 3,
+              "dexterity": 2,
+              "constitution": 3,
+              "intelligence": 1,
+              "wisdom": 2,
+              "charisma": 0
+            },
+            "attacksPerAction": 2,
+            "reach": 5,
+            "damageResponses": [],
+            "conditionImmunities": [],
+            "usesDeathSaves": true,
+            "senses": [
+              {
+                "kind": "normal_sight"
+              }
+            ],
+            "passivePerception": 12,
+            "detectionTraits": [],
+            "contactMedium": "surface",
+            "sizeCategory": "Medium",
+            "spellSlots": []
+          },
+          "kind": "player_character",
+          "characterId": 60301,
+          "wildShape": null
+        },
+        "hitPoints": 67,
+        "life": "living",
+        "deathSaves": null,
+        "deathAt": null,
+        "turn": {
+          "action": {
+            "kind": "spent"
+          },
+          "bonusActionAvailable": false,
+          "reactionAvailable": false,
+          "movement": {
+            "speed": 0,
+            "spent": 0,
+            "remaining": 0
+          },
+          "disengaging": false,
+          "dodging": false
+        },
+        "temporaryHitPoints": 0,
+        "wildShapeUses": null,
+        "spellSlots": []
+      },
+      {
+        "profile": {
+          "id": "combatant:two-room-goblin",
+          "tokenId": "token:two-room-goblin",
+          "name": "Goblin",
+          "rules": {
+            "armorClass": 12,
+            "hitPointMaximum": 80,
+            "speed": 30,
+            "initiativeBonus": 0,
+            "savingThrowBonuses": {
+              "strength": 3,
+              "dexterity": 2,
+              "constitution": 3,
+              "intelligence": 1,
+              "wisdom": 2,
+              "charisma": 0
+            },
+            "attacksPerAction": 1,
+            "reach": 5,
+            "damageResponses": [],
+            "conditionImmunities": [],
+            "usesDeathSaves": false,
+            "senses": [
+              {
+                "kind": "normal_sight"
+              }
+            ],
+            "passivePerception": 12,
+            "detectionTraits": [],
+            "contactMedium": "surface",
+            "sizeCategory": "Medium",
+            "skillBonuses": {
+              "stealth": 20
+            },
+            "spellSlots": []
+          },
+          "kind": "monster",
+          "statblockId": "statblock:goblin-warrior"
+        },
+        "hitPoints": 80,
+        "life": "living",
+        "deathSaves": null,
+        "deathAt": null,
+        "turn": {
+          "action": {
+            "kind": "spent"
+          },
+          "bonusActionAvailable": false,
+          "reactionAvailable": false,
+          "movement": {
+            "speed": 0,
+            "spent": 0,
+            "remaining": 0
+          },
+          "disengaging": false,
+          "dodging": false
+        },
+        "temporaryHitPoints": 0,
+        "wildShapeUses": null,
+        "spellSlots": []
+      }
+    ],
+    "tokens": [
+      {
+        "id": "token:two-room-adventurer",
+        "combatantId": "combatant:two-room-adventurer",
+        "position": {
+          "column": 2,
+          "row": 4
+        },
+        "placementMode": {
+          "kind": "normal",
+          "actual": "Medium"
+        }
+      },
+      {
+        "id": "token:two-room-goblin",
+        "combatantId": "combatant:two-room-goblin",
+        "position": {
+          "column": 8,
+          "row": 4
+        },
+        "placementMode": {
+          "kind": "normal",
+          "actual": "Medium"
+        }
+      }
+    ],
+    "sharedSpaceRelations": [],
+    "adjudicationPending": [],
+    "initiative": [],
+    "activeCombatant": null,
+    "activeInitiativeIndex": null,
+    "round": 0,
+    "effects": [],
+    "persistentAreas": [],
+    "nextPersistentAreaSequence": 1,
+    "eventLog": [],
+    "hiddenCombatants": [],
+    "observationHistory": [],
+    "pendingDecisions": [],
+    "reactionPolicies": []
+  }
+}

@@ -77,6 +77,8 @@ export interface PlayerBoardProjection {
   readonly bounds: PlayerView['bounds'];
   readonly blockedCells: readonly GridCell[];
   readonly terrainCells: ReturnType<typeof projectEncounterTerrainCells>;
+  /** Existing cells after the canonical per-seat visibility filter. */
+  readonly visibleCells: readonly GridCell[];
   readonly concealedCells: readonly GridCell[];
   readonly activeCombatant: CombatantId | null;
   readonly highlightedCombatant: CombatantId | null;
@@ -279,6 +281,7 @@ export function projectPlayerBoard(
       blockedCells: view.blockedCells,
       worldObjects: view.worldObjects,
     }),
+    visibleCells: view.cells.map((cell) => ({ ...cell })),
     concealedCells: view.concealedCells.map((cell) => ({ ...cell })),
     activeCombatant: view.activeCombatant,
     highlightedCombatant: view.activeCombatant,
