@@ -26,3 +26,5 @@ Machine constraint: the D569 v5 first arm (pid 1201481, port 4530) runs until ~1
 - 2026-09-10 07:47 S0–S2 r1 Astra REJECT (13 significant: contract deviates from the owner agreement, invented token ids, insufficient parity/coverage, incomplete d.ts, art filename semantics, lookalike refusal, doctor honesty, S2a gates, nine-id fixture, test-time regeneration, generator guard, publisher races). Supervisor spot-checked F1/F2/F3/F11; all accepted; lane resumed r2.
 
 - 2026-09-10 08:41 EDT — S0–S2 r2 supervisor verification green (tsc/sg/diffcheck/generator --check 0; vitest 9 files 57/57); committed 5c7f459b (20 paths); Astra review r2 dispatched (resume 01a087f9…, brief review-vtt-handoff-s0s2-r2.md, diff handoff-s0s2-r2.diff).
+
+- 2026-09-10 08:48 EDT — S0–S2 r2 Astra REJECT: F1–F4/F8/F10–F12 resolved; F14–F19 significant (type gate does not detect drift, door companion policy deviates from plan:102, pending-request hash omits visibleState, per-frame pass completeness, paths realpaths absent worktrees, check-mode zero-write regression weak). F15/F18 verified by supervisor. r3 dispatched (resume 01a0891a…, brief resume-vtt-handoff-s0-s2-r3.md).
