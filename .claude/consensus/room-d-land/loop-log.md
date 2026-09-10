@@ -4,3 +4,4 @@
 - 2026-09-09 20:59 EDT r2 lane DONE (hook scoped to report consumers); supervisor verification running
 - 2026-09-09 21:01 r2 verified by supervisor (tsc 0, sg 0, 86/86); committed 6ec0911e; Astra r2 dispatched. A fresh full gate on 6ec0911e follows once the r1 gate releases port 4690.
 - 2026-09-09 21:03 r2 Astra ACCEPT (F1 resolved; 31 test bodies unchanged; diff sha 42f3cc8d…). Step consensus reached at 6ec0911e. Pending: fresh full gate on 6ec0911e (port 4690 busy with the r1 gate's Playwright stage), then merge to main.
+- 2026-09-09 22:17 r1 gate on 0e9f3a98 fully green (tsc/sg/vitest/playwright 0); fresh gate launched on r2 6ec0911e (port 4690).
