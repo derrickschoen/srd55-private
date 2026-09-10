@@ -57,6 +57,7 @@ const bindings = {
 const actualSourceFiles = repositorySourcesUnder('src');
 const emptyImportsPackageSource = '{"imports":{}}';
 const actualViteConfigSource = readFileSync('vite.config.ts', 'utf8');
+const actualVitestConfigSource = readFileSync('vitest.config.ts', 'utf8');
 const actualTreeConfigChange = [{
   path: 'package.json',
   addedText: emptyImportsPackageSource,
@@ -65,6 +66,10 @@ const actualTreeConfigChange = [{
   path: 'vite.config.ts',
   addedText: actualViteConfigSource,
   sourceText: actualViteConfigSource,
+}, {
+  path: 'vitest.config.ts',
+  addedText: actualVitestConfigSource,
+  sourceText: actualVitestConfigSource,
 }] as const;
 const actualTreeReport = inspectHeldoutLeakChanges(actualTreeConfigChange, 'F', bindings, {
   packageJsonFiles: { 'package.json': emptyImportsPackageSource },
@@ -310,15 +315,17 @@ describe('held-out reserve leak wall', () => {
         'Rule N1 permits import.meta and module/worker namespaces only as direct member receivers or exact plain-const aliases',
         'Rule N2 permits browser globals to transfer inertly and validates Worker, SharedWorker, and importScripts members at use by symbol-proven global provenance',
         'a loader-valued expression is allowed only as a direct callee with a constant specifier, a receiver leading to a recognized member call, or the whole initializer of a non-exported plain-identifier const alias',
-        'Rule C interprets Vite aliases only as strict literals in the graph reachable from export default, symbol-proven Vite defineConfig, factory returns, conditional branches, and same-file const object/array composition',
-        'Rule C uses no mutation or transfer analysis: every reference to a reachable const must be its declaration or occur inside the reachable graph',
+        'Rule C interprets Vite and Vitest aliases only as strict literals in the exact-node graph reached from export default, symbol-proven defineConfig or mergeConfig, factory returns, conditional branches, and same-file const object/array composition',
+        'Rule C uses no mutation or transfer analysis: every reference to a reachable const must be its declaration or an exact node visited in the reachable graph',
+        'reachable object spreads require tracked const literals; computed keys, accessors, methods, and nonliteral resolve or alias values fail closed, while unrelated nonliteral values are opaque',
+        'root vite*.config.* and vitest*.config.* entry points are inspected, including symbol-proven defineConfig and mergeConfig imports from Vite or Vitest',
         'resolution configuration changes re-inspect consumers; unresolved configuration makes every encountered consumer edge unresolved',
         'every eligible candidate file receives the full AST and symbol inspection pass without a textual pre-gate',
       ],
       failsClosed: [
         'every other position of a loader-valued expression is loader_reference_escaped from one generic check',
         'every disallowed Rule N1 namespace position and every non-symbol-proven Rule N2 loader-member use is loader_reference_escaped from the same generic check',
-        'a nonliteral Vite alias, unreachable alias/resolve property, or invalid reachable-const reference is unresolved configuration under Rule C',
+        'a nonliteral Vite or Vitest alias, unreachable alias/resolve property, or invalid reachable-const reference is unresolved configuration under Rule C',
         'unresolved targets, options, package conditions, globs, aliases, URL schemes, and data modules are findings',
       ],
       outOfScope: [
@@ -857,6 +864,70 @@ describe('held-out reserve leak wall', () => {
     expect(report.findings).toContainEqual(expect.objectContaining({ kind }));
   });
 
+  it('rejects namespace re-exports and follows their provenance into a local consumer', () => {
+    const bridgeSource = "export * as M from 'node:module';";
+    const consumerSource = [
+      "import { M } from './bridge';",
+      'const load = M.createRequire(import.meta.url);',
+      "load.resolve('../vtt/heldout-evaluation.ts');",
+    ].join('\n');
+    const report = inspectHeldoutLeakChanges([{
+      path: 'src/ui/bridge.ts',
+      addedText: bridgeSource,
+      sourceText: bridgeSource,
+    }, {
+      path: 'src/ui/consumer.ts',
+      addedText: consumerSource,
+      sourceText: consumerSource,
+    }], 'F', bindings);
+
+    expect(report.findings).toContainEqual(expect.objectContaining({
+      path: 'src/ui/bridge.ts',
+      kind: 'loader_reference_escaped',
+    }));
+    expect(report.findings).toContainEqual(expect.objectContaining({
+      path: 'src/ui/consumer.ts',
+      kind: 'protocol_resolution',
+    }));
+  });
+
+  it.each([
+    ['namespace export', "export * as M from 'node:module';", true],
+    ['Module export', "export { Module } from 'node:module';", true],
+    ['default export', "export { default } from 'node:module';", true],
+    ['createRequire export', "export { createRequire } from 'node:module';", true],
+    ['inert builtinModules export', "export { builtinModules } from 'node:module';", false],
+  ] as const)('classifies %s at the re-export site', (_label, addedText, escaped) => {
+    const report = inspectHeldoutLeakChanges([{
+      path: 'src/ui/bridge.ts',
+      addedText,
+    }], 'F', bindings);
+
+    expect(report.findings.some((finding) => finding.kind === 'loader_reference_escaped'))
+      .toBe(escaped);
+  });
+
+  it.each([
+    ['computed browser-global member', [
+      "const key = 'Worker';",
+      "new window[key]('../src/vtt/heldout-evaluation.ts');",
+    ].join('\n')],
+    ['computed import.meta alias member', [
+      'const meta = import.meta;',
+      "const key = 'resolve';",
+      "meta[key]('../src/vtt/heldout-evaluation.ts');",
+    ].join('\n')],
+  ] as const)('fails closed on a non-constant %s', (_label, addedText) => {
+    const report = inspectHeldoutLeakChanges([{
+      path: 'tools/probe.mts',
+      addedText,
+    }], 'F', bindings);
+
+    expect(report.findings).toContainEqual(expect.objectContaining({
+      kind: 'loader_reference_escaped',
+    }));
+  });
+
   it.each(([
     ['import.meta', '', 'import.meta', 'resolver'],
     ['window', '', 'window', 'worker'],
@@ -1011,6 +1082,53 @@ describe('held-out reserve leak wall', () => {
         "const key = 'createRequire';",
         "const { default: { [key]: make } } = await import('node:module');",
       ].join('\n'),
+    }], 'F', bindings);
+
+    expect(report.findings).toContainEqual(expect.objectContaining({
+      kind: 'loader_reference_escaped',
+    }));
+  });
+
+  it.each([
+    ['typed browser-global parameter', [
+      'function spawn(root: typeof window) {',
+      "  const { 'Worker': Spawn } = root;",
+      "  new Spawn('../src/vtt/heldout-evaluation.ts');",
+      '}',
+      'spawn(window);',
+    ].join('\n'), 'protocol_import'],
+    ['non-constant typed-global extraction', [
+      'function spawn(root: Window, key: string) {',
+      '  const { [key]: Spawn } = root;',
+      '  return Spawn;',
+      '}',
+    ].join('\n'), 'loader_reference_escaped'],
+    ['unknown-source loader-key extraction', [
+      'function spawn(root: object) {',
+      "  const { 'Worker': Spawn } = root;",
+      '  return Spawn;',
+      '}',
+    ].join('\n'), 'loader_reference_escaped'],
+  ] as const)('guards %s destructuring', (_label, addedText, kind) => {
+    const report = inspectHeldoutLeakChanges([{
+      path: 'tools/probe.mts',
+      addedText,
+    }], 'F', bindings);
+
+    expect(report.findings).toContainEqual(expect.objectContaining({ kind }));
+  });
+
+  it.each([
+    ['awaited namespace alias', [
+      'const meta = await import.meta;',
+      "meta.resolve('../src/vtt/heldout-evaluation.ts');",
+    ].join('\n')],
+    ['awaited namespace receiver',
+      "(await import.meta).resolve('../src/vtt/heldout-evaluation.ts');"],
+  ] as const)('rejects %s under Rule N1', (_label, addedText) => {
+    const report = inspectHeldoutLeakChanges([{
+      path: 'tools/probe.mts',
+      addedText,
     }], 'F', bindings);
 
     expect(report.findings).toContainEqual(expect.objectContaining({
@@ -1749,6 +1867,39 @@ describe('held-out reserve leak wall', () => {
     }));
   });
 
+  it.each([
+    ['reachable getter', [
+      'export default {',
+      '  get resolve() {',
+      "    return { alias: { '@policy': './src/vtt/heldout-evaluation.ts' } };",
+      '  },',
+      '};',
+    ].join('\n')],
+    ['opaque side-effect reference', [
+      'const shared = { resolve: { alias: {} } };',
+      'export default {',
+      '  ...shared,',
+      "  sideEffect: shared.resolve.alias['@policy'] = './src/vtt/heldout-evaluation.ts',",
+      '};',
+    ].join('\n')],
+    ['named export outside the reachable set', [
+      'const shared = { resolve: { alias: {} } };',
+      'export { shared };',
+      'export default shared;',
+    ].join('\n')],
+  ] as const)('fails exact-node Rule C for %s', (_label, configSource) => {
+    const report = inspectHeldoutLeakChanges([{
+      path: 'vite.config.ts',
+      addedText: configSource,
+      sourceText: configSource,
+    }], 'F', bindings);
+
+    expect(report.findings).toContainEqual(expect.objectContaining({
+      path: 'vite.config.ts',
+      kind: 'unresolved_module_edge',
+    }));
+  });
+
   it('interprets a symbol-proven defineConfig callback, conditional, and const spread', () => {
     const configSource = [
       "import { defineConfig } from 'vite';",
@@ -1768,6 +1919,37 @@ describe('held-out reserve leak wall', () => {
 
     expect(report.findings).not.toContainEqual(expect.objectContaining({
       path: 'vite.config.ts',
+      kind: 'unresolved_module_edge',
+    }));
+    expect(report.findings).toContainEqual(expect.objectContaining({
+      path: 'src/ui/unchanged-policy-consumer.ts',
+      kind: 'unresolved_module_edge',
+    }));
+  });
+
+  it.each([
+    ['direct Vitest defineConfig', [
+      "import { defineConfig } from 'vitest/config';",
+      "export default defineConfig({ resolve: { alias: { '@policy': './src/vtt/heldout-evaluation.ts' } } });",
+    ].join('\n')],
+    ['Vitest mergeConfig union', [
+      "import { defineConfig, mergeConfig } from 'vitest/config';",
+      "const base = { resolve: { alias: { '@policy': './src/vtt/heldout-evaluation.ts' } } };",
+      'export default defineConfig(mergeConfig(base, { test: { globals: true } }));',
+    ].join('\n')],
+  ] as const)('discovers aliases through %s', (_label, configSource) => {
+    const report = inspectHeldoutLeakChanges([{
+      path: 'vitest.config.ts',
+      addedText: configSource,
+      sourceText: configSource,
+    }], 'F', bindings, {
+      candidateSourceFiles: {
+        'src/ui/unchanged-policy-consumer.ts': "import policy from '@policy';",
+      },
+    });
+
+    expect(report.findings).not.toContainEqual(expect.objectContaining({
+      path: 'vitest.config.ts',
       kind: 'unresolved_module_edge',
     }));
     expect(report.findings).toContainEqual(expect.objectContaining({
@@ -1820,16 +2002,16 @@ describe('held-out reserve leak wall', () => {
     expect(report.findings).toEqual([]);
   });
 
-  it('reports zero findings when a configuration change reinspects the actual src tree', () => {
+  it('reports zero findings for the actual Vite and Vitest configs plus the actual src tree', () => {
     expect(Object.keys(actualSourceFiles)).toHaveLength(674);
-    expect(actualTreeReport.checkedFiles).toBe(Object.keys(actualSourceFiles).length + 2);
-    expect(actualTreeReport.astInspectedFiles).toBe(Object.keys(actualSourceFiles).length + 1);
+    expect(actualTreeReport.checkedFiles).toBe(Object.keys(actualSourceFiles).length + 3);
+    expect(actualTreeReport.astInspectedFiles).toBe(Object.keys(actualSourceFiles).length + 2);
     expect(actualTreeReport.findings).toEqual([]);
   });
 
   it('still reports an injected leak in configuration-reinspection mode', () => {
     expect(injectedActualTreeReport.astInspectedFiles)
-      .toBe(Object.keys(injectedActualSourceFiles).length + 1);
+      .toBe(Object.keys(injectedActualSourceFiles).length + 2);
     expect(injectedActualTreeReport.findings).toEqual([expect.objectContaining({
       path: 'src/ui/injected-heldout-leak.ts',
       kind: 'protocol_import',
