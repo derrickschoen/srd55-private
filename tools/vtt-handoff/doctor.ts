@@ -6,6 +6,8 @@ import {
   handoffPaths, inspectNodeModules, type HandoffPaths, type NodeModulesDisposition,
   type RepositoryIdentityPolicy,
 } from './paths.ts';
+import { assertProcFdAvailable } from './safe-files.ts';
+import { windowsInteropProbe, type WindowsProbeResult } from './windows-probe.ts';
 
 export interface DoctorProbe {
   version(command: string): string | null;
@@ -44,6 +46,7 @@ export interface DoctorReport {
   readonly tools: Readonly<Record<'jq' | 'node' | 'npm' | 'python' | 'uv', string | null>>;
   readonly lockfile: boolean;
   readonly nodeModules: NodeModulesDisposition | null;
+  readonly windowsInterop?: WindowsProbeResult;
 }
 
 export function doctorReport(options: {
@@ -71,6 +74,9 @@ export function doctorReport(options: {
     failures.push(error instanceof Error ? error.message : 'PATH_DISCOVERY_FAILED');
   }
   if (platform !== 'linux') failures.push('LINUX_REQUIRED');
+  if (platform === 'linux') {
+    try { assertProcFdAvailable(); } catch { failures.push('PROC_SELF_FD_UNAVAILABLE'); }
+  }
   const toolVersions = {
     jq: probe.version('jq'), node: probe.version('node'), npm: probe.version('npm'),
     python: probe.version('python3'), uv: probe.version('uv'),
@@ -101,7 +107,10 @@ export function doctorReport(options: {
 
 if (process.env.VITEST === undefined && process.argv[1] !== undefined &&
   (fileURLToPath(import.meta.url) === process.argv[1] || process.argv[1].endsWith('/vite-node'))) {
-  const report = doctorReport();
+  const base = doctorReport();
+  const report: DoctorReport = process.argv.includes('--windows-probe')
+    ? { ...base, windowsInterop: windowsInteropProbe() }
+    : base;
   process.stdout.write(`${JSON.stringify(report, null, process.argv.includes('--json') ? 2 : 0)}\n`);
-  if (!report.ready) process.exitCode = 1;
+  if (!report.ready || (report.windowsInterop !== undefined && report.windowsInterop.status !== 'PASSED')) process.exitCode = 1;
 }

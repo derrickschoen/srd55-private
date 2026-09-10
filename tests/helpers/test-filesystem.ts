@@ -8,8 +8,10 @@ export {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  renameSync,
   rmSync,
   symlinkSync,
   statSync,
+  truncateSync,
   writeFileSync,
 } from 'node:fs';
