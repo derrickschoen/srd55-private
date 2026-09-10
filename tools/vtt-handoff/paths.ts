@@ -3,6 +3,7 @@ import { dirname, isAbsolute, join, resolve } from 'node:path';
 
 export const OWNER_CHECKOUT = '/home/vagrant/PhpstormProjects/dnd-multiclass-spells-static';
 export const AUTHORIZED_WORKTREE = '/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff';
+export const AUTHORIZED_ART_WORKTREE = '/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff-s9';
 export const HANDOFF_LAYOUT = [
   'contracts',
   'fixtures',
@@ -20,7 +21,7 @@ export interface RepositoryIdentityPolicy {
 
 export const DEFAULT_REPOSITORY_IDENTITY_POLICY: RepositoryIdentityPolicy = {
   ownerCheckout: OWNER_CHECKOUT,
-  authorizedWorktrees: [AUTHORIZED_WORKTREE],
+  authorizedWorktrees: [AUTHORIZED_WORKTREE, AUTHORIZED_ART_WORKTREE],
 };
 
 export interface HandoffPaths {

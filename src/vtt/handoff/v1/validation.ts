@@ -2,7 +2,7 @@ import Ajv2020, { type AnySchema, type ErrorObject } from 'ajv/dist/2020.js';
 import {
   artRequestSchema, artResultSchema, genericHandoffRequestSchema, handoffRequestSchema,
   sceneSnapshotSchema, type ArtRequest, type ArtResult, type ArtView, type SceneSnapshot,
-} from './contracts';
+} from './contracts.ts';
 
 export interface SemanticIssue {
   readonly code: string;
