@@ -1,3 +1,4 @@
 - 2026-09-09 20:59 EDT r1 candidate sha 213f0b39… frozen; Astra review r1 dispatched
 - 2026-09-09 21:11 r1 Astra REJECT: bottleneck fix VERIFIED (reproduced reachable sets/paths); migration rule rejected on F1 legacy speed-modified states, F2 replay canonical equality, F3 turn-start boundary ordering, F4 Flee exhaustion witness; F5/F6 trivial. All accepted; lane resumed for r2.
 - 2026-09-09 22:17 r2 candidate sha 5acd9b16… (937 lines) frozen; Astra review r2 dispatched (resume 01a088d3…). Round count 2 of 3.
+- 2026-09-09 22:22 r2 Astra REJECT: round-1 items verified fixed; residual F1 replay numeric drift ({40,0,50} vs recomputed {40,0,40}), F2 skip/delay transitions uncovered, F3 outgoing-boundary expiry deadlock. Accepted; lane resumed for r3 (FINAL).
