@@ -50,3 +50,5 @@ Machine constraint: the D569 v5 first arm (pid 1201481, port 4530) runs until ~1
 - 2026-09-10 11:21 EDT — S3 Astra r2 REJECT: F24/F25/F26/F29 resolved; F30–F36 (closure not barrier-independent, failed initial-offer flush strands human wait, auto-refusal/reaction outside boundary, autonomous steps labelled mutation, door revision lost across refresh, graph pins module pairs not call sites, self-reported counters). r3 dispatched (resume 01a08b7b-e666…).
 
 - 2026-09-10 11:26 EDT — FINDING AGAINST OWN WORK: the archived capture.ts under .claude/consensus/vtt-handoff/baseline-capture/ was parsed by the D583 contract-inventory walker (unresolved relative dependency ../../src/commands/canonical-json.ts) and broke 8 tests in tests/unit/tools/d583-contract-inventory.test.ts on main since ddc86645; surfaced by the offers Slice 2 lane cumulative. Renamed to capture.ts.txt (evidence preserved, no longer a TypeScript source).
+
+- 2026-09-10 11:45 EDT — D583 on main: the remaining union test passes in 3.1 s at load 1.6 (earlier 5 s timeouts were load); main green for the inventory after the capture.ts rename and the stale-worktree move.
