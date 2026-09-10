@@ -10,6 +10,7 @@ import { DmEncounterHost } from '../../../src/vtt/dm-encounter-host';
 import {
   projectPlayerBoard,
   serializePlayerBoard,
+  offeredActionId,
 } from '../../../src/vtt/encounter-projections';
 import { decodePlayerDecision } from '../../../src/vtt/local-window-channel';
 import {
@@ -236,24 +237,22 @@ describe('increment 6 projection boundary', () => {
       decision: {
         requestId: request.requestId,
         encounterRevision: request.encounterRevision,
-        action: legal,
+        offeredActionId: offeredActionId(request.requestId, 0),
       },
     };
 
-    expect(decodePlayerDecision(envelope, 'session:test', request).action).toEqual(legal);
+    expect(decodePlayerDecision(envelope, 'session:test', request)).toEqual({
+      requestId: request.requestId,
+      encounterRevision: request.encounterRevision,
+      offeredActionId: offeredActionId(request.requestId, 0),
+    });
     expect(() => decodePlayerDecision({
       ...envelope,
       decision: {
         ...envelope.decision,
-        action: {
-          ...legal,
-          area: {
-            shape: 'sphere',
-            template: { origin: feetPoint(25, 20), radius: feet(10) },
-          },
-        },
+        offeredActionId: 'offer:other-request:0',
       },
-    }, 'session:test', request)).toThrow('not one of the projected legal actions');
+    }, 'session:test', request)).toThrow('not one of the projected offered action IDs');
   });
 
   it('M42-ADJUDICATION-PAUSES cancels the pending request and dispatches nothing until resume', async () => {

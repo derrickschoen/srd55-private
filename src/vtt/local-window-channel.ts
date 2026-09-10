@@ -1,6 +1,5 @@
-import { canonicalJson } from '../commands/canonical-json';
-import type { ControllerDecision, ControllerRequest } from '../combat/controllers';
-import type { EncounterCommand } from '../combat/events';
+import type { ControllerRequest } from '../combat/controllers';
+import { offeredActionId } from './encounter-projections';
 import type { PlayerBoardProjection } from './encounter-projections';
 
 export interface HostWindowMessage {
@@ -15,7 +14,7 @@ export interface PlayerDecisionMessage {
   readonly decision: {
     readonly requestId: string;
     readonly encounterRevision: number;
-    readonly action: unknown;
+    readonly offeredActionId: string;
   };
 }
 
@@ -27,7 +26,7 @@ export function decodePlayerDecision(
   value: unknown,
   sessionId: string,
   pending: ControllerRequest,
-): ControllerDecision {
+): { readonly requestId: string; readonly encounterRevision: number; readonly offeredActionId: string } {
   if (!isRecord(value) || value.kind !== 'human_controller_decision') {
     throw new TypeError('Local window message is not a HumanController decision.');
   }
@@ -41,17 +40,15 @@ export function decodePlayerDecision(
   ) {
     throw new TypeError('HumanController decision is stale.');
   }
-  const encodedAction = canonicalJson(decision.action);
-  const action = pending.legalActions.actions.find(
-    (candidate) => canonicalJson(candidate) === encodedAction,
-  );
-  if (action === undefined) {
-    throw new TypeError('HumanController decision is not one of the projected legal actions.');
+  const offeredActionIds = pending.legalActions.actions.map((_action, index) =>
+    offeredActionId(pending.requestId, index));
+  if (typeof decision.offeredActionId !== 'string' || !offeredActionIds.includes(decision.offeredActionId)) {
+    throw new TypeError('HumanController decision is not one of the projected offered action IDs.');
   }
   return {
     requestId: pending.requestId,
     encounterRevision: pending.encounterRevision,
-    action,
+    offeredActionId: decision.offeredActionId,
   };
 }
 
@@ -61,7 +58,7 @@ export function playerDecisionMessage(
     readonly requestId: string;
     readonly encounterRevision: number;
   },
-  action: EncounterCommand,
+  selectedOfferedActionId: string,
 ): PlayerDecisionMessage {
   return {
     kind: 'human_controller_decision',
@@ -69,7 +66,7 @@ export function playerDecisionMessage(
     decision: {
       requestId: request.requestId,
       encounterRevision: request.encounterRevision,
-      action,
+      offeredActionId: selectedOfferedActionId,
     },
   };
 }

@@ -1,5 +1,6 @@
 import type { CombatantId, EncounterSessionId } from '../combat/values';
 import type {
+  DmEncounterHost,
   DmEncounterHostSnapshot,
   HostCoordinatorTransactionOutcome,
   HostDoorSetOutcome,
@@ -13,6 +14,7 @@ import type {
   RendererProjectionCapture,
   RendererTokenBinding,
 } from './encounter-projections';
+import { offeredActionId } from './encounter-projections';
 
 export interface PlayerSeatRegistration extends PlayerSeatBinding {
   readonly playerId: string;
@@ -625,5 +627,145 @@ export class EncounterSessionService {
         this.#notifyPlayer(playerId, listener, event);
       }
     }
+  }
+}
+
+export interface RichSessionSnapshot {
+  readonly dm: DmBoardProjection;
+  readonly player: PlayerBoardProjection;
+  readonly dmOfferedActionIds: readonly string[];
+}
+
+/** Typed in-process façade for the classic top-down renderer. */
+export class RichEncounterSessionService extends EncounterSessionService {
+  constructor(
+    private readonly richHost: DmEncounterHost,
+    seats: readonly PlayerSeatRegistration[],
+  ) {
+    super(richHost, seats);
+  }
+
+  topDownSnapshot(playerId: string): RichSessionSnapshot | null {
+    const dm = this.dmSnapshot();
+    const player = this.playerSnapshot(playerId);
+    return player === null ? null : {
+      dm,
+      player,
+      dmOfferedActionIds: dm.pendingRequest === null
+        ? []
+        : dm.humanCommandActions.map((_action, index) => offeredActionId(dm.pendingRequest?.requestId ?? '', index)),
+    };
+  }
+
+  subscribeTopDown(playerId: string, listener: (snapshot: RichSessionSnapshot) => void): () => void {
+    const dmEvents = new Map<number, DmBoardProjection>();
+    const playerEvents = new Map<number, PlayerBoardProjection>();
+    const publish = (seq: number): void => {
+      const dm = dmEvents.get(seq);
+      const player = playerEvents.get(seq);
+      if (dm === undefined || player === undefined) return;
+      dmEvents.delete(seq);
+      playerEvents.delete(seq);
+      listener({
+        dm,
+        player,
+        dmOfferedActionIds: dm.pendingRequest === null
+          ? []
+          : dm.humanCommandActions.map((_action, index) => offeredActionId(dm.pendingRequest?.requestId ?? '', index)),
+      });
+    };
+    const unsubscribeDm = this.subscribeDm((event) => {
+      dmEvents.set(event.seq, event.projection);
+      publish(event.seq);
+    });
+    const player = this.subscribePlayer(playerId, (event) => {
+      playerEvents.set(event.seq, event.projection);
+      publish(event.seq);
+    });
+    if (player.kind === 'refused') {
+      unsubscribeDm();
+      throw new TypeError(`Unknown top-down player seat ${playerId}.`);
+    }
+    return () => {
+      unsubscribeDm();
+      player.unsubscribe();
+      dmEvents.clear();
+      playerEvents.clear();
+    };
+  }
+
+  sessionEnded(): ReturnType<DmEncounterHost['sessionEnded']> { return this.richHost.sessionEnded(); }
+  submitTopDownOfferedAction(
+    actorId: CombatantId,
+    requestId: string,
+    encounterRevision: number,
+    selectedOfferedActionId: string,
+  ): ReturnType<DmEncounterHost['submitOfferedActionTransaction']> {
+    return this.richHost.submitOfferedActionTransaction(
+      actorId,
+      requestId,
+      encounterRevision,
+      selectedOfferedActionId,
+    );
+  }
+  resolvePendingPlacement(...args: Parameters<DmEncounterHost['resolvePendingPlacement']>): ReturnType<DmEncounterHost['resolvePendingPlacement']> {
+    return this.richHost.resolvePendingPlacement(...args);
+  }
+  interrupt(...args: Parameters<DmEncounterHost['interrupt']>): ReturnType<DmEncounterHost['interrupt']> {
+    return this.richHost.interrupt(...args);
+  }
+  resume(...args: Parameters<DmEncounterHost['resume']>): ReturnType<DmEncounterHost['resume']> {
+    return this.richHost.resume(...args);
+  }
+  undoLast(...args: Parameters<DmEncounterHost['undoLast']>): ReturnType<DmEncounterHost['undoLast']> {
+    return this.richHost.undoLast(...args);
+  }
+  skipTurn(...args: Parameters<DmEncounterHost['skipTurn']>): ReturnType<DmEncounterHost['skipTurn']> {
+    return this.richHost.skipTurn(...args);
+  }
+  delayTurn(...args: Parameters<DmEncounterHost['delayTurn']>): ReturnType<DmEncounterHost['delayTurn']> {
+    return this.richHost.delayTurn(...args);
+  }
+  finishAdventuringDay(...args: Parameters<DmEncounterHost['finishAdventuringDay']>): ReturnType<DmEncounterHost['finishAdventuringDay']> {
+    return this.richHost.finishAdventuringDay(...args);
+  }
+  resolveRestInterruption(...args: Parameters<DmEncounterHost['resolveRestInterruption']>): ReturnType<DmEncounterHost['resolveRestInterruption']> {
+    return this.richHost.resolveRestInterruption(...args);
+  }
+  finishRoom(...args: Parameters<DmEncounterHost['finishRoom']>): ReturnType<DmEncounterHost['finishRoom']> {
+    return this.richHost.finishRoom(...args);
+  }
+  endSession(...args: Parameters<DmEncounterHost['endSession']>): ReturnType<DmEncounterHost['endSession']> {
+    return this.richHost.endSession(...args);
+  }
+  rewindToRound(...args: Parameters<DmEncounterHost['rewindToRound']>): ReturnType<DmEncounterHost['rewindToRound']> {
+    return this.richHost.rewindToRound(...args);
+  }
+  resolveEngineAdjudication(...args: Parameters<DmEncounterHost['resolveEngineAdjudication']>): ReturnType<DmEncounterHost['resolveEngineAdjudication']> {
+    return this.richHost.resolveEngineAdjudication(...args);
+  }
+  resolveRefusalPrompt(...args: Parameters<DmEncounterHost['resolveRefusalPrompt']>): ReturnType<DmEncounterHost['resolveRefusalPrompt']> {
+    return this.richHost.resolveRefusalPrompt(...args);
+  }
+  resolvePendingDecision(...args: Parameters<DmEncounterHost['resolvePendingDecision']>): ReturnType<DmEncounterHost['resolvePendingDecision']> {
+    return this.richHost.resolvePendingDecision(...args);
+  }
+  setRefusalHandling(...args: Parameters<DmEncounterHost['setRefusalHandling']>): ReturnType<DmEncounterHost['setRefusalHandling']> {
+    return this.richHost.setRefusalHandling(...args);
+  }
+  setReactionPreference(...args: Parameters<DmEncounterHost['setReactionPreference']>): ReturnType<DmEncounterHost['setReactionPreference']> {
+    return this.richHost.setReactionPreference(...args);
+  }
+  setHiddenRollCategory(...args: Parameters<DmEncounterHost['setHiddenRollCategory']>): ReturnType<DmEncounterHost['setHiddenRollCategory']> {
+    return this.richHost.setHiddenRollCategory(...args);
+  }
+  dmUseWorldObject(...args: Parameters<DmEncounterHost['dmUseWorldObject']>): ReturnType<DmEncounterHost['dmUseWorldObject']> {
+    return this.richHost.dmUseWorldObject(...args);
+  }
+  adjudicate(...args: Parameters<DmEncounterHost['adjudicate']>): ReturnType<DmEncounterHost['adjudicate']> {
+    return this.richHost.adjudicate(...args);
+  }
+  replaceController(...args: Parameters<DmEncounterHost['replaceController']>): ReturnType<DmEncounterHost['replaceController']> {
+    return this.richHost.replaceController(...args);
   }
 }

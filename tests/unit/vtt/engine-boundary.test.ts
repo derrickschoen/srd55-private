@@ -298,6 +298,49 @@ function reducerCallSites(graph: ReadonlyMap<string, SourceModule>): readonly st
   return calls.sort();
 }
 
+function memberCallDefinitions(
+  graph: ReadonlyMap<string, SourceModule>,
+  file: string,
+  receiver: string,
+): readonly string[] {
+  const program = ts.createProgram({
+    rootNames: [...graph.keys()],
+    options: {
+      module: ts.ModuleKind.ESNext,
+      moduleResolution: ts.ModuleResolutionKind.Bundler,
+      noLib: true,
+      skipLibCheck: true,
+      target: ts.ScriptTarget.ESNext,
+      types: [],
+    },
+  });
+  const checker = program.getTypeChecker();
+  const sourceFile = program.getSourceFile(resolve(ROOT, file));
+  if (sourceFile === undefined) throw new Error(`TypeScript program omitted ${file}`);
+  const definitions: string[] = [];
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      node.expression.expression.getText(sourceFile) === receiver
+    ) {
+      const symbol = checker.getSymbolAtLocation(node.expression.name);
+      const declaration = symbol?.getDeclarations()?.find(ts.isMethodDeclaration);
+      const owner = declaration?.parent;
+      if (declaration === undefined || owner === undefined || !ts.isClassDeclaration(owner)) {
+        throw new Error(`Could not resolve ${node.expression.getText(sourceFile)}.`);
+      }
+      definitions.push(
+        `${node.expression.name.getText(sourceFile)} -> ` +
+        `${repositoryPath(declaration.getSourceFile().fileName)}#${owner.name?.text ?? '<anonymous>'}`,
+      );
+    }
+    ts.forEachChild(node, visit);
+  };
+  ts.forEachChild(sourceFile, visit);
+  return [...new Set(definitions)].sort();
+}
+
 function selectorAuthorityViolations(file: string): readonly string[] {
   const sourceFile = ts.createSourceFile(
     file,
@@ -454,6 +497,60 @@ describe('renderer-neutral engine boundary graph', () => {
       'src/vtt/vane-warren.ts#reduceVaneWarrenEncounter -> src/combat/encounter.ts#reduceEncounter',
       'src/vtt/vane-warren.ts#reduceVaneWarrenWorldObjectAction -> src/combat/encounter.ts#reduceEncounter',
     ]);
+  });
+
+  it('top-down UI mutations enter the rich session service', () => {
+    const graph = dependencyGraph(['src/vtt/encounter-app.ts']);
+    const serviceCalls = memberCallDefinitions(graph, 'src/vtt/encounter-app.ts', 'this.#session');
+    expect(serviceCalls).toEqual([
+      'adjudicate -> src/vtt/encounter-session-service.ts#RichEncounterSessionService',
+      'close -> src/vtt/encounter-session-service.ts#EncounterSessionService',
+      'delayTurn -> src/vtt/encounter-session-service.ts#RichEncounterSessionService',
+      'dmUseWorldObject -> src/vtt/encounter-session-service.ts#RichEncounterSessionService',
+      'endSession -> src/vtt/encounter-session-service.ts#RichEncounterSessionService',
+      'finishAdventuringDay -> src/vtt/encounter-session-service.ts#RichEncounterSessionService',
+      'finishRoom -> src/vtt/encounter-session-service.ts#RichEncounterSessionService',
+      'interrupt -> src/vtt/encounter-session-service.ts#RichEncounterSessionService',
+      'replaceController -> src/vtt/encounter-session-service.ts#RichEncounterSessionService',
+      'resolveEngineAdjudication -> src/vtt/encounter-session-service.ts#RichEncounterSessionService',
+      'resolvePendingDecision -> src/vtt/encounter-session-service.ts#RichEncounterSessionService',
+      'resolvePendingPlacement -> src/vtt/encounter-session-service.ts#RichEncounterSessionService',
+      'resolveRefusalPrompt -> src/vtt/encounter-session-service.ts#RichEncounterSessionService',
+      'resolveRestInterruption -> src/vtt/encounter-session-service.ts#RichEncounterSessionService',
+      'resume -> src/vtt/encounter-session-service.ts#RichEncounterSessionService',
+      'rewindToRound -> src/vtt/encounter-session-service.ts#RichEncounterSessionService',
+      'sessionEnded -> src/vtt/encounter-session-service.ts#RichEncounterSessionService',
+      'setHiddenRollCategory -> src/vtt/encounter-session-service.ts#RichEncounterSessionService',
+      'setReactionPreference -> src/vtt/encounter-session-service.ts#RichEncounterSessionService',
+      'setRefusalHandling -> src/vtt/encounter-session-service.ts#RichEncounterSessionService',
+      'skipTurn -> src/vtt/encounter-session-service.ts#RichEncounterSessionService',
+      'start -> src/vtt/encounter-session-service.ts#EncounterSessionService',
+      'submitTopDownOfferedAction -> src/vtt/encounter-session-service.ts#RichEncounterSessionService',
+      'subscribeTopDown -> src/vtt/encounter-session-service.ts#RichEncounterSessionService',
+      'topDownSnapshot -> src/vtt/encounter-session-service.ts#RichEncounterSessionService',
+      'undoLast -> src/vtt/encounter-session-service.ts#RichEncounterSessionService',
+    ]);
+    expect(memberCallDefinitions(graph, 'src/vtt/encounter-app.ts', 'this.#lifecycle')).toEqual([
+      'dispatch -> src/vtt/session-lifecycle.ts#IndexedDbSessionLifecycle',
+    ]);
+    expect(readFileSync(resolve(ROOT, 'src/vtt/encounter-app.ts'), 'utf8')).not.toContain('this.#host');
+  });
+
+  it('all runtime entries converge after top-down refactor', () => {
+    const graph = dependencyGraph([...CORE_ENTRYPOINTS, 'src/vtt/encounter-app.ts']);
+    const typeScriptGraph = new Map([...graph].filter(([file]) => /\.tsx?$/u.test(file)));
+    expect(reducerCallSites(typeScriptGraph)).toEqual([
+      'src/vtt/dm-encounter-host.ts#commandReducer -> src/vtt/session-encounter-reducer.ts#reduceSessionEncounter',
+      'src/vtt/session-encounter-reducer.ts#reduceSessionEncounter -> src/vtt/vane-warren.ts#reduceVaneWarrenEncounter',
+      'src/vtt/session-persistence.ts#advanceSkippedTurn -> src/combat/encounter.ts#reduceEncounter',
+      'src/vtt/session-persistence.ts#replaySessionRevisions -> src/vtt/session-encounter-reducer.ts#reduceSessionEncounter',
+      'src/vtt/vane-warren.ts#reduceVaneWarrenEncounter -> src/combat/encounter.ts#reduceEncounter',
+      'src/vtt/vane-warren.ts#reduceVaneWarrenWorldObjectAction -> src/combat/encounter.ts#reduceEncounter',
+    ]);
+    const files = [...graph.keys()].map(repositoryPath);
+    expect(files).toContain('src/vtt/encounter-session-service.ts');
+    expect(files).toContain('src/vtt/session-lifecycle.ts');
+    expect(files).toContain('src/vtt/encounter-selectors.ts');
   });
 
   it('keeps the complete selector value graph projection-only and platform-neutral', () => {

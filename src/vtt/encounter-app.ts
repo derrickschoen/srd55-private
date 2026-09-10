@@ -25,14 +25,21 @@ import {
   type PendingDecision,
 } from '../combat/encounter';
 import { HIDDEN_ROLL_CATEGORIES, type HiddenRollCategory } from '../combat/roll-visibility';
-import { previewAffectedCells } from '../combat/templates';
-import { terrainProfile, terrainWallCells } from '../combat/terrain';
 import { encounterSessionId, type CombatantId } from '../combat/values';
 import {
   ControllerAssignmentError,
   DmEncounterHost,
-  type DmEncounterHostSnapshot,
 } from './dm-encounter-host';
+import {
+  RichEncounterSessionService,
+  type RichSessionSnapshot,
+} from './encounter-session-service';
+import {
+  dmWorldObjectLabel,
+  playerWorldObjectLabel,
+  previewAffectedCellKeys,
+  projectedWorldObjectLabel,
+} from './encounter-selectors';
 import {
   encounterBoardRenderModel,
   encounterBoardTokenRenderModels,
@@ -53,7 +60,7 @@ import {
   isHostWindowMessage,
   playerDecisionMessage,
 } from './local-window-channel';
-import { IndexedDbBrowserSessionStore, importBrowserSessionDurably } from './local-session-store';
+import { IndexedDbBrowserSessionStore } from './local-session-store';
 import {
   IndexedDbDirectoryHandlePersistence,
   SaveFolderRepository,
@@ -74,6 +81,7 @@ import {
   type AccessibleBoardViewMode,
 } from './accessible-board';
 import { decodeSavedSessionFingerprint } from './session-persistence';
+import { IndexedDbSessionLifecycle } from './session-lifecycle';
 import type { EncounterSeed } from './session-seed';
 import type { StoredCharacterEncounter } from './stored-character-encounter';
 import type { StoredCharacterSessionFlow } from './stored-character-encounter';
@@ -91,9 +99,11 @@ import { reconcileStableRenderedChildren, stableRenderKey } from './stable-dom-r
 import type { HumanEngineActorOptions } from './encounter-board-projection';
 import type { EngineActivationChoiceSlot, EngineOptionId } from './turn-proposal';
 import type { OfferedOptionPath } from './offered-option-paths';
+import { REFERENCE_PLAYER_IDS } from './reference-encounter';
 
 const HEARTBEAT_INTERVAL_MS = 250;
 const HEARTBEAT_TIMEOUT_MS = 1_000;
+const LOCAL_PARTY_PLAYER_ID = 'player:local-party';
 
 function element<K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -685,6 +695,7 @@ export function renderBoard(
   boardChromeTilePx?: BoardChromeTilePx,
   offeredPaths: readonly OfferedOptionPath[] | null = null,
   stackSelection: EncounterBoardStackSelection = new Map(),
+  worldObjectLabels?: ReadonlyMap<string, string>,
 ): HTMLDivElement {
   const tilePx = boardChromeTilePx ?? CHROME_TILE_PX;
   const chromeMetrics = boardChromeMetrics(tilePx);
@@ -827,10 +838,14 @@ export function renderBoard(
         model.column === object.position.column &&
         model.row === object.position.row
       ) {
-        const profile = terrainProfile(object.terrainKind);
+        const mechanicalLabel = worldObjectLabels?.get(object.id) ?? projectedWorldObjectLabel(object).text;
+        const namePrefix = `${object.name} — `;
+        const mechanicalDetails = mechanicalLabel.startsWith(namePrefix)
+          ? mechanicalLabel.slice(namePrefix.length)
+          : mechanicalLabel;
         placed.append(element('span', {
           className: 'encounter-world-object-label',
-          text: `${object.name} — ${TERRAIN_LEGEND_LABELS[object.terrainKind]} — movement ${profile.passability}; sight ${profile.blocksSight ? 'blocked' : 'open'}; anchor (${String(object.position.column)},${String(object.position.row)}); footprint ${object.cells.map((cell) => `(${String(cell.column)},${String(cell.row)})`).join(' ')}`,
+          text: `${object.name} — ${TERRAIN_LEGEND_LABELS[object.terrainKind]} — ${mechanicalDetails}`,
         }));
         const label = placed.querySelector<HTMLElement>('.encounter-world-object-label');
         if (label !== null) label.dataset.labelStyle = OBJECT_LABEL_STYLE;
@@ -1129,7 +1144,12 @@ class PlayerEncounterView {
   #submit(action: EncounterCommand): void {
     const request = this.#projection?.pendingRequest;
     if (request === null || request === undefined) return;
-    const message = playerDecisionMessage(this.sessionId, request, action);
+    const actionIndex = request.legalActions.findIndex(
+      (candidate) => actionKey(candidate) === actionKey(action),
+    );
+    const selectedOfferedActionId = request.offeredActionIds[actionIndex];
+    if (selectedOfferedActionId === undefined) return;
+    const message = playerDecisionMessage(this.sessionId, request, selectedOfferedActionId);
     this.#channel.postMessage(message);
     this.#staged = null;
     this.#aimingSpell = false;
@@ -1142,20 +1162,8 @@ class PlayerEncounterView {
     if (projection === null || staged?.type !== 'cast_spell' || staged.area === null) {
       return new Set();
     }
-    return new Set(
-      previewAffectedCells(
-        {
-          bounds: projection.bounds,
-          blockedCells: terrainWallCells({
-            blockedCells: projection.blockedCells,
-            worldObjects: projection.worldObjects.map((object) => ({
-              id: object.id, footprint: object.cells, blocking: object.blocking,
-            })),
-          }),
-        },
-        staged.area,
-      ).map((cell) => `${cell.column},${cell.row}`),
-    );
+    const preview = previewAffectedCellKeys(projection, staged.area);
+    return new Set(preview.kind === 'available' ? preview.cellKeys : []);
   }
 
   #aimAt(event: PointerEvent): void {
@@ -1273,6 +1281,11 @@ class PlayerEncounterView {
         undefined,
         null,
         this.#stackSelection,
+        new Map(projection.worldObjects.map((object) => {
+          const label = playerWorldObjectLabel(projection, String(object.id));
+          if (label === null) throw new Error(`Missing player world-object label for ${String(object.id)}.`);
+          return [label.objectId, label.text] as const;
+        })),
       );
       board.addEventListener('pointermove', (event) => this.#aimAt(event));
       this.#shell.append(board);
@@ -1364,7 +1377,8 @@ class DmEncounterView {
     new IndexedDbDirectoryHandlePersistence(indexedDB),
     window,
   );
-  readonly #host: DmEncounterHost;
+  readonly #session: RichEncounterSessionService;
+  readonly #lifecycle: IndexedDbSessionLifecycle;
   readonly #channel: BroadcastChannel;
   #shell = element('main', { className: 'encounter-shell dm-encounter' });
   #projection: DmBoardProjection | null = null;
@@ -1385,7 +1399,9 @@ class DmEncounterView {
   #boardView: AccessibleBoardViewMode;
   readonly #sessionFlow: StoredCharacterSessionFlow | null;
   #endSessionExported = false;
-  #pendingSnapshot: DmEncounterHostSnapshot | null = null;
+  #pendingSnapshot: RichSessionSnapshot | null = null;
+  #dmOfferedActionIds: readonly string[] = [];
+  #browserSaveEntries: readonly SaveManagerEntry[] = [];
   #acknowledgingSnapshots = false;
   #flushCount = 0;
   #flushTotalMs = 0;
@@ -1394,9 +1410,10 @@ class DmEncounterView {
   #renderTotalMs = 0;
   #renderMaximumMs = 0;
   #coalescedSnapshotCount = 0;
+  #closed = false;
   readonly #heartbeat: number;
   readonly #unsubscribe: () => void;
-  readonly #onBeforeUnload = (): void => this.#host.close();
+  readonly #onBeforeUnload = (): void => this.close();
 
   constructor(
     private readonly root: HTMLElement,
@@ -1412,7 +1429,10 @@ class DmEncounterView {
     this.#boardView = readAccessibleBoardViewMode(localStorage, 'dm');
     this.#store = store;
     this.#sessionFlow = encounter?.sessionFlow ?? null;
-    this.#host = new DmEncounterHost(sessionId, this.#store, encounter === undefined
+    const playerIds = encounter?.playerIds ?? REFERENCE_PLAYER_IDS;
+    const observerCombatantId = playerIds[0];
+    if (observerCombatantId === undefined) throw new TypeError('Top-down player preview requires a player seat.');
+    const host = new DmEncounterHost(sessionId, this.#store, encounter === undefined
       ? (initialSeed === undefined ? {} : { initialSeed })
       : {
           initialState: encounter.state,
@@ -1428,12 +1448,30 @@ class DmEncounterView {
           turnLegalActions: encounter.turnLegalActions,
           reactionLegalActions: () => [],
         });
-    if (encounter?.startPaused === true) this.#host.interrupt();
+    const controlled = new Set(playerIds);
+    this.#session = new RichEncounterSessionService(host, [{
+      playerId: LOCAL_PARTY_PLAYER_ID,
+      seatId: 'seat:local-party',
+      observerCombatantId,
+      ownedCombatantIds: playerIds,
+      controlledTokenIds: host.rendererTokenBindings()
+        .filter((binding) => controlled.has(binding.combatantId))
+        .map((binding) => binding.tokenId),
+    }]);
+    this.#lifecycle = new IndexedDbSessionLifecycle(this.#store, {
+      sessionId: () => encounterSessionId(this.sessionId),
+      close: () => this.#detach(),
+    });
+    if (encounter?.startPaused === true) this.#session.interrupt();
     this.#channel = new BroadcastChannel(`srd55:vtt:${sessionId}`);
     this.#channel.addEventListener('message', this.#onMessage);
-    this.#unsubscribe = this.#host.subscribe((snapshot) => this.#queueSnapshot(snapshot));
+    this.#unsubscribe = this.#session.subscribeTopDown(
+      LOCAL_PARTY_PLAYER_ID,
+      (snapshot) => this.#queueSnapshot(snapshot),
+    );
     this.#heartbeat = window.setInterval(() => {
-      const snapshot = this.#host.snapshot();
+      const snapshot = this.#session.topDownSnapshot(LOCAL_PARTY_PLAYER_ID);
+      if (snapshot === null) return;
       const dmChanged =
         this.#projection === null ||
         canonicalJson(this.#projection) !== canonicalJson(snapshot.dm);
@@ -1467,11 +1505,26 @@ class DmEncounterView {
       boardGlyphs,
       captureTilePx,
     );
-    await store.flush();
+    await view.#initializeLifecycle();
     return view;
   }
 
-  #queueSnapshot(snapshot: DmEncounterHostSnapshot): void {
+  async #initializeLifecycle(): Promise<void> {
+    await this.#lifecycle.dispatch({ kind: 'flush' });
+    await this.#refreshBrowserSaves();
+  }
+
+  async #refreshBrowserSaves(): Promise<void> {
+    const result = await this.#lifecycle.dispatch({ kind: 'list' });
+    if (result.kind !== 'listed') throw new Error('Session lifecycle returned an invalid list result.');
+    this.#browserSaveEntries = result.saves.map((save) => ({
+      ...save,
+      id: `browser:${save.storageId}`,
+      source: 'browser',
+    }));
+  }
+
+  #queueSnapshot(snapshot: RichSessionSnapshot): void {
     this.#pendingSnapshot = snapshot;
     if (this.#acknowledgingSnapshots) return;
     this.#acknowledgingSnapshots = true;
@@ -1484,7 +1537,8 @@ class DmEncounterView {
         const snapshot = this.#pendingSnapshot;
         this.#pendingSnapshot = null;
         const flushStartedAt = performance.now();
-        await this.#store.flush();
+        await this.#lifecycle.dispatch({ kind: 'flush' });
+        await this.#refreshBrowserSaves();
         const flushMs = performance.now() - flushStartedAt;
         this.#flushCount += 1;
         this.#flushTotalMs += flushMs;
@@ -1507,6 +1561,7 @@ class DmEncounterView {
           this.#focusAfterRender = nextKey === null ? 'active_token' : 'recovery';
         }
         this.#projection = snapshot.dm;
+        this.#dmOfferedActionIds = snapshot.dmOfferedActionIds;
         if (!snapshot.dm.movementPreviews.some(
           (preview) => preview.commandKey === this.#movementPreviewKey,
         )) this.#movementPreviewKey = null;
@@ -1560,7 +1615,12 @@ class DmEncounterView {
     if (pending === null || pending === undefined) return;
     try {
       const decision = decodePlayerDecision(value, this.sessionId, pending);
-      this.#host.submitHumanDecision(pending.actorId, decision);
+      void this.#session.submitTopDownOfferedAction(
+        pending.actorId,
+        decision.requestId,
+        decision.encounterRevision,
+        decision.offeredActionId,
+      );
       this.#channelError = null;
     } catch (error: unknown) {
       if (error instanceof TypeError) {
@@ -1575,7 +1635,7 @@ class DmEncounterView {
   mount(): void {
     this.root.replaceChildren(this.#shell);
     this.#render();
-    void this.#host.start().catch((error: unknown) => {
+    void this.#session.start().catch((error: unknown) => {
       this.#saveManagerError = error instanceof Error ? error.message : 'Browser session storage failed.';
       this.#render();
     });
@@ -1589,11 +1649,17 @@ class DmEncounterView {
     );
     if (controller?.kind !== 'human') return;
     this.#movementPreviewKey = null;
-    this.#host.submitHumanDecision(pending.actorId, {
-      requestId: pending.requestId,
-      encounterRevision: pending.encounterRevision,
-      action,
-    });
+    const actionIndex = this.#projection?.humanCommandActions.findIndex(
+      (candidate) => actionKey(candidate) === actionKey(action),
+    ) ?? -1;
+    const selectedOfferedActionId = this.#dmOfferedActionIds[actionIndex];
+    if (selectedOfferedActionId === undefined) return;
+    void this.#session.submitTopDownOfferedAction(
+      pending.actorId,
+      pending.requestId,
+      pending.encounterRevision,
+      selectedOfferedActionId,
+    );
   }
 
   #setMovementPreview(commandKey: string | null): void {
@@ -1603,11 +1669,7 @@ class DmEncounterView {
   }
 
   #browserSaves(): readonly SaveManagerEntry[] {
-    return this.#store.savedSessions().map((save) => ({
-      ...save,
-      id: `browser:${save.storageId}`,
-      source: 'browser',
-    }));
+    return this.#browserSaveEntries;
   }
 
   #controller(entries: readonly SaveManagerEntry[]): SaveManagerController {
@@ -1617,7 +1679,13 @@ class DmEncounterView {
         load: (save) => this.#loadSave(save),
         rename: async (save, name) => {
           if (save.source === 'browser') {
-            await this.#store.renameStored(save.storageId ?? `session:${save.sessionId}`, save.sessionId, name);
+            await this.#lifecycle.dispatch({
+              kind: 'rename',
+              storageId: save.storageId ?? `session:${save.sessionId}`,
+              sessionId: save.sessionId,
+              name,
+            });
+            await this.#refreshBrowserSaves();
           } else {
             await this.#folder.rename(save, name);
             await this.#refreshFolderSaves();
@@ -1626,12 +1694,12 @@ class DmEncounterView {
         },
         delete: async (save) => {
           if (save.source === 'browser') {
-            const deletingActiveSession = save.sessionId === encounterSessionId(this.sessionId);
             const storageId = save.storageId ?? `session:${save.sessionId}`;
-            const deletingLiveSession = deletingActiveSession && storageId.startsWith('session:');
-            if (deletingLiveSession) this.close();
-            await this.#store.removeStored(storageId, save.sessionId);
-            if (deletingLiveSession) {
+            const result = await this.#lifecycle.dispatch({
+              kind: 'delete', storageId, sessionId: save.sessionId,
+            });
+            if (result.kind !== 'deleted') throw new Error('Session lifecycle returned an invalid delete result.');
+            if (result.navigation?.kind === 'open_new_session') {
               const url = new URL(location.href);
               url.searchParams.set('encounter', 'reference');
               url.searchParams.set('view', 'dm');
@@ -1639,32 +1707,42 @@ class DmEncounterView {
               location.assign(url);
               return;
             }
+            await this.#refreshBrowserSaves();
           } else {
             await this.#folder.delete(save);
             await this.#refreshFolderSaves();
           }
           this.#render();
         },
-        exportCopy: (save) => {
-          const bytes = save.source === 'browser'
-            ? this.#store.exportedStored(save.storageId ?? `session:${save.sessionId}`, save.sessionId)
-            : save.bytes;
+        exportCopy: async (save) => {
+          const exported = save.source === 'browser'
+            ? await this.#lifecycle.dispatch({
+                kind: 'export',
+                storageId: save.storageId ?? `session:${save.sessionId}`,
+                sessionId: save.sessionId,
+              })
+            : null;
+          const bytes = exported?.kind === 'exported' ? exported.bytes : save.bytes;
           if (bytes === undefined) throw new Error('Folder save has no file contents.');
           this.#download(save.name, bytes);
         },
         saveNow: async () => {
-          await this.#store.flush();
+          await this.#lifecycle.dispatch({ kind: 'flush' });
           const sessionId = encounterSessionId(this.sessionId);
-          const bytes = this.#store.exported(sessionId);
-          const browser = this.#store.savedSessions().find(
+          const exported = await this.#lifecycle.dispatch({
+            kind: 'export', storageId: `session:${sessionId}`, sessionId,
+          });
+          if (exported.kind !== 'exported') throw new Error('Session lifecycle returned an invalid export result.');
+          await this.#refreshBrowserSaves();
+          const browser = this.#browserSaveEntries.find(
             (save) => save.sessionId === sessionId,
           );
           const name = browser?.name ?? sessionId;
           if (this.#folder.mode().kind === 'folder') {
-            await this.#folder.write(name, bytes);
+            await this.#folder.write(name, exported.bytes);
             await this.#refreshFolderSaves();
           } else {
-            this.#download(name, bytes);
+            this.#download(name, exported.bytes);
           }
         },
         chooseFolder: async () => {
@@ -1678,24 +1756,25 @@ class DmEncounterView {
 
   async #loadSave(save: SaveManagerEntry): Promise<void> {
     if (save.source === 'browser') {
-      await this.#store.restoreStored(save.storageId ?? `session:${save.sessionId}`, save.sessionId);
+      const restored = await this.#lifecycle.dispatch({
+        kind: 'restore',
+        storageId: save.storageId ?? `session:${save.sessionId}`,
+        sessionId: save.sessionId,
+      });
+      if (restored.kind !== 'restored') throw new Error('Session lifecycle returned an invalid restore result.');
     }
     if (save.source === 'folder') {
-      const existing = this.#store.revisions(save.sessionId);
-      if (existing.length === 0) {
-        if (save.bytes === undefined) throw new Error('Folder save has no file contents.');
-        this.#store.import(save.bytes);
-        await this.#store.flush();
-      } else {
-        const browserFingerprint = decodeSavedSessionFingerprint(
-          this.#store.exported(save.sessionId),
-        ).fingerprint;
-        if (browserFingerprint !== save.fingerprint) {
-          throw new Error(
-            'This folder save has the same session ID as a different browser autosave. Rename or export the autosave before deleting it; it will not be overwritten.',
-          );
-        }
+      if (save.bytes === undefined) throw new Error('Folder save has no file contents.');
+      const imported = await this.#lifecycle.dispatch({ kind: 'import', bytes: save.bytes });
+      if (imported.kind === 'conflict') {
+        throw new Error(
+          'This folder save has the same session ID as a different browser autosave. Rename or export the autosave before deleting it; it will not be overwritten.',
+        );
       }
+      if (imported.kind !== 'imported' && imported.kind !== 'duplicate') {
+        throw new Error('Session lifecycle returned an invalid import result.');
+      }
+      await this.#refreshBrowserSaves();
     }
     if (this.boardSnapshotMode) {
       if (this.loadBoardSnapshotSession === undefined) {
@@ -1726,11 +1805,12 @@ class DmEncounterView {
       if (file === undefined) return;
       void this.#runSaveManagerAction(async () => {
         const bytes = await file.text();
-        const decoded = decodeSavedSessionFingerprint(bytes);
-        if (this.#store.revisions(decoded.sessionId).length !== 0) {
+        const result = await this.#lifecycle.dispatch({ kind: 'import', bytes });
+        if (result.kind === 'duplicate' || result.kind === 'conflict') {
           throw new Error('That uploaded session already exists in browser autosaves.');
         }
-        await importBrowserSessionDurably(this.#store, bytes);
+        if (result.kind !== 'imported') throw new Error('Session lifecycle returned an invalid import result.');
+        await this.#refreshBrowserSaves();
         this.#render();
       });
     }, { once: true });
@@ -2068,7 +2148,7 @@ class DmEncounterView {
           };
           break;
       }
-      const result = this.#host.resolvePendingPlacement(command);
+      const result = this.#session.resolvePendingPlacement(command);
       if (result.kind === 'refused') {
         this.#channelError = result.reason;
         this.#focusAfterRender = 'recovery';
@@ -2151,7 +2231,11 @@ class DmEncounterView {
     }, this.boardGlyphs, this.boardSnapshotMode, this.captureTilePx,
     this.boardSnapshotMode || this.#showOfferedOptionPaths
       ? projection.offeredOptionPaths
-      : null, this.#stackSelection));
+      : null, this.#stackSelection, new Map(projection.board.worldObjects.map((object) => {
+        const label = dmWorldObjectLabel(projection, String(object.id));
+        if (label === null) throw new Error(`Missing DM world-object label for ${String(object.id)}.`);
+        return [label.objectId, label.text] as const;
+      }))));
     if (movementPreview !== null) this.#shell.append(renderMovementDangerLegend(movementPreview));
   }
 
@@ -2208,21 +2292,21 @@ class DmEncounterView {
     const interrupt = element('button', { text: 'Interrupt' });
     interrupt.type = 'button';
     interrupt.dataset.renderKey = stableRenderKey('dm', 'controls', 'interrupt');
-    interrupt.addEventListener('click', () => this.#host.interrupt());
+    interrupt.addEventListener('click', () => this.#session.interrupt());
     const resume = element('button', { text: 'Resume' });
     resume.type = 'button';
     resume.dataset.renderKey = stableRenderKey('dm', 'controls', 'resume');
-    resume.addEventListener('click', () => this.#host.resume());
+    resume.addEventListener('click', () => this.#session.resume());
     const undo = element('button', { text: 'Undo last' });
     undo.type = 'button';
     undo.dataset.renderKey = stableRenderKey('dm', 'controls', 'undo-last');
-    undo.addEventListener('click', () => void this.#host.undoLast());
+    undo.addEventListener('click', () => void this.#session.undoLast());
     const skip = element('button', { text: 'Skip turn' });
     skip.type = 'button';
     skip.dataset.renderKey = stableRenderKey('dm', 'controls', 'skip-turn');
     skip.disabled = projection.timeline.currentCombatant === null || projection.timeline.phase.kind === 'concluded';
     skip.addEventListener('click', () => {
-      void this.#host.skipTurn().catch((error: unknown) => {
+      void this.#session.skipTurn().catch((error: unknown) => {
         this.#channelError = error instanceof Error ? error.message : 'Skip turn failed.';
         this.#render();
       });
@@ -2270,7 +2354,7 @@ class DmEncounterView {
         event.preventDefault();
         const selected = later.find((entry) => entry.combatant === target.value);
         if (selected === undefined) return;
-        void this.#host.delayTurn(selected.combatant).catch((error: unknown) => {
+        void this.#session.delayTurn(selected.combatant).catch((error: unknown) => {
           this.#channelError = error instanceof Error ? error.message : 'Delay turn failed.';
           this.#render();
         });
@@ -2282,7 +2366,7 @@ class DmEncounterView {
       longRest.type = 'button';
       longRest.dataset.renderKey = stableRenderKey('dm', 'controls', 'long-rest');
       longRest.addEventListener('click', () => {
-        void this.#host.finishAdventuringDay().catch((error: unknown) => {
+        void this.#session.finishAdventuringDay().catch((error: unknown) => {
           this.#channelError = error instanceof Error ? error.message : 'Long Rest failed.';
           this.#render();
         });
@@ -2344,7 +2428,7 @@ class DmEncounterView {
         } else {
           throw new Error(`Unknown Rest interruption outcome ${selected}.`);
         }
-        void this.#host.resolveRestInterruption(outcome).catch((error: unknown) => {
+        void this.#session.resolveRestInterruption(outcome).catch((error: unknown) => {
           this.#channelError = error instanceof Error ? error.message : 'Rest interruption failed.';
           this.#render();
         });
@@ -2358,7 +2442,7 @@ class DmEncounterView {
       nextRoom.type = 'button';
       nextRoom.dataset.renderKey = stableRenderKey('dm', 'controls', 'next-room');
       nextRoom.addEventListener('click', () => {
-        void this.#host.finishRoom(null).catch((error: unknown) => {
+        void this.#session.finishRoom(null).catch((error: unknown) => {
           this.#channelError = error instanceof Error ? error.message : 'Room transition failed.';
           this.#render();
         });
@@ -2371,21 +2455,24 @@ class DmEncounterView {
       endSession.type = 'button';
       endSession.dataset.renderKey = stableRenderKey('dm', 'controls', 'end-session');
       endSession.dataset.intent = 'end_session';
-      endSession.disabled = this.#endSessionExported || this.#host.sessionEnded();
+      endSession.disabled = this.#endSessionExported || this.#session.sessionEnded();
       endSession.addEventListener('click', () => {
         endSession.disabled = true;
         void this.#runSaveManagerAction(async () => {
-          await this.#host.endSession();
+          await this.#session.endSession();
           const sessionId = encounterSessionId(this.sessionId);
-          const bytes = this.#store.exported(sessionId);
-          decodeSavedSessionFingerprint(bytes);
-          this.#download(sessionId, bytes);
+          const exported = await this.#lifecycle.dispatch({
+            kind: 'export', storageId: `session:${sessionId}`, sessionId,
+          });
+          if (exported.kind !== 'exported') throw new Error('Session lifecycle returned an invalid export result.');
+          decodeSavedSessionFingerprint(exported.bytes);
+          this.#download(sessionId, exported.bytes);
           this.#endSessionExported = true;
           this.#render();
         });
       });
       controls.append(endSession);
-      if (this.#endSessionExported || this.#host.sessionEnded()) {
+      if (this.#endSessionExported || this.#session.sessionEnded()) {
         const routed = element('p', {
           className: 'dm-end-session-export-status',
           text: 'Session finalized. The complete session export is ready in the save manager and was downloaded.',
@@ -2455,7 +2542,7 @@ class DmEncounterView {
       );
       button.dataset.revision = String(boundary.revision);
       button.addEventListener('click', () => {
-        void this.#host.rewindToRound(boundary.round).catch((error: unknown) => {
+        void this.#session.rewindToRound(boundary.round).catch((error: unknown) => {
           this.#channelError = error instanceof Error ? error.message : 'Round rewind failed.';
           this.#render();
         });
@@ -2538,7 +2625,7 @@ class DmEncounterView {
           dice.push({ sides: request.sides, count: Number(request.input.value) });
           byCombatant.set(request.combatantId, dice);
         }
-        void this.#host.finishRoom([...byCombatant].map(([combatantId, dice]) => ({
+        void this.#session.finishRoom([...byCombatant].map(([combatantId, dice]) => ({
           combatantId,
           dice,
         }))).catch((error: unknown) => {
@@ -2642,7 +2729,7 @@ class DmEncounterView {
         apply.addEventListener('click', () => {
           const parsed = Number(amount.value);
           if (!Number.isSafeInteger(parsed) || reasoning.value.trim().length === 0) return;
-          this.#host.resolveEngineAdjudication(
+          this.#session.resolveEngineAdjudication(
             entry.request.adjudicationRequestId,
             { kind: 'hit_point_delta', amount: parsed },
             reasoning.value,
@@ -2683,7 +2770,7 @@ class DmEncounterView {
           button.addEventListener('click', () => {
             const parsed = Number(amount.value);
             if (!Number.isSafeInteger(parsed)) return;
-            this.#host.resolveRefusalPrompt(
+            this.#session.resolveRefusalPrompt(
               entry.decision.id,
               { kind: 'hit_point_delta', amount: parsed },
               'DM manually resolved the refused action.',
@@ -2706,7 +2793,7 @@ class DmEncounterView {
           );
           button.addEventListener('click', () => {
             button.disabled = true;
-            void this.#host.resolvePendingDecision(entry.decision.id, option.id).catch((error: unknown) => {
+            void this.#session.resolvePendingDecision(entry.decision.id, option.id).catch((error: unknown) => {
               this.#channelError = error instanceof Error ? error.message : 'Decision resolution failed.';
               this.#render();
             });
@@ -2751,7 +2838,7 @@ class DmEncounterView {
           const mode = handlingModesForCategory(category).find((candidate) => candidate === select.value);
           if (mode === undefined) return;
           select.disabled = true;
-          void this.#host.setRefusalHandling(category, mode as RefusalHandlingMode).catch((error: unknown) => {
+          void this.#session.setRefusalHandling(category, mode as RefusalHandlingMode).catch((error: unknown) => {
             this.#channelError = error instanceof Error ? error.message : 'Refusal setting update failed.';
             this.#render();
           });
@@ -2792,7 +2879,7 @@ class DmEncounterView {
           select.addEventListener('change', () => {
             if (select.value !== 'ask' && select.value !== 'always' && select.value !== 'never') return;
             select.disabled = true;
-            void this.#host.setReactionPreference(character.combatantId, reactionKind, select.value)
+            void this.#session.setReactionPreference(character.combatantId, reactionKind, select.value)
               .catch((error: unknown) => {
                 this.#channelError = error instanceof Error ? error.message : 'Reaction preference update failed.';
                 this.#render();
@@ -2820,7 +2907,7 @@ class DmEncounterView {
       checkbox.setAttribute('aria-label', `Hide ${HIDDEN_ROLL_LABELS[category].toLowerCase()}`);
       checkbox.addEventListener('change', () => {
         checkbox.disabled = true;
-        void this.#host.setHiddenRollCategory(category, checkbox.checked).catch((error: unknown) => {
+        void this.#session.setHiddenRollCategory(category, checkbox.checked).catch((error: unknown) => {
           this.#channelError = error instanceof Error ? error.message : 'Hidden-roll setting failed.';
           this.#render();
         });
@@ -2856,7 +2943,7 @@ class DmEncounterView {
         text: `${projection.pendingRequest.kind}: ${actor?.name ?? projection.pendingRequest.actorId}`,
       }));
       if (projection.humanCommandActions.length > 0) {
-        for (const action of projection.humanCommandActions) {
+        for (const [actionIndex, action] of projection.humanCommandActions.entries()) {
           const button = element('button', { text: actionLabel(action) });
           button.type = 'button';
           button.dataset.renderKey = stableRenderKey(
@@ -2865,8 +2952,27 @@ class DmEncounterView {
             projection.pendingRequest.requestId,
             actionKey(action),
           );
+          const selectedOfferedActionId = this.#dmOfferedActionIds[actionIndex];
+          if (selectedOfferedActionId !== undefined) {
+            button.dataset.offeredActionId = selectedOfferedActionId;
+            button.dataset.encounterRevision = String(projection.pendingRequest.encounterRevision);
+            button.dataset.actorId = String(projection.pendingRequest.actorId);
+          }
           if (action.type === 'move') {
             const key = actionKey(action);
+            const destination = action.path.at(-1);
+            const actor = projection.board.combatants.find(
+              (combatant) => combatant.id === action.actor,
+            );
+            const actorPosition = actor?.placementStatus === 'placed' ? actor.position : undefined;
+            if (destination !== undefined) {
+              button.dataset.destinationColumn = String(destination.column);
+              button.dataset.destinationRow = String(destination.row);
+            }
+            if (actorPosition !== undefined) {
+              button.dataset.anchorColumn = String(actorPosition.column);
+              button.dataset.anchorRow = String(actorPosition.row);
+            }
             button.addEventListener('pointerenter', () => this.#setMovementPreview(key));
             button.addEventListener('pointerleave', () => this.#setMovementPreview(null));
             button.addEventListener('focus', () => this.#setMovementPreview(key));
@@ -2893,7 +2999,7 @@ class DmEncounterView {
           'dm', 'world-object-controls', control.objectId, actionKey(control.command),
         );
         button.dataset.objectId = control.objectId;
-        button.addEventListener('click', () => this.#host.dmUseWorldObject(control.command));
+        button.addEventListener('click', () => this.#session.dmUseWorldObject(control.command));
         objectControls.append(button);
       }
     }
@@ -2929,7 +3035,7 @@ class DmEncounterView {
     );
     adjudication.addEventListener('submit', (event) => {
       event.preventDefault();
-      this.#host.adjudicate({
+      this.#session.adjudicate({
         type: 'adjudicate',
         target: target.value as CombatantId,
         subject: 'engine:manual-adjudication',
@@ -2971,7 +3077,7 @@ class DmEncounterView {
       select.addEventListener('change', () => {
         if (select.value === 'human' || select.value === 'algorithm') {
           try {
-            this.#host.replaceController(identity.combatantId, select.value);
+            this.#session.replaceController(identity.combatantId, select.value);
             this.#channelError = null;
           } catch (error: unknown) {
             if (!(error instanceof ControllerAssignmentError)) throw error;
@@ -3053,13 +3159,20 @@ class DmEncounterView {
   }
 
   close(): void {
+    if (this.#closed) return;
+    this.#detach();
+    void this.#lifecycle.dispatch({ kind: 'flush' }).finally(() => this.#store.close());
+  }
+
+  #detach(): void {
+    if (this.#closed) return;
+    this.#closed = true;
     window.clearInterval(this.#heartbeat);
     window.removeEventListener('beforeunload', this.#onBeforeUnload);
     this.#unsubscribe();
     this.#channel.removeEventListener('message', this.#onMessage);
-    this.#host.close();
+    this.#session.close();
     this.#channel.close();
-    void this.#store.flush().finally(() => this.#store.close());
   }
 }
 

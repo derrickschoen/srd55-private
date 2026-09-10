@@ -9,17 +9,31 @@ export interface DmWorldObjectLabel {
   readonly text: string;
 }
 
+export function projectedWorldObjectLabel(
+  object: DmBoardProjection['board']['worldObjects'][number] | PlayerBoardProjection['worldObjects'][number],
+): DmWorldObjectLabel {
+  const profile = terrainProfile(object.terrainKind);
+  return {
+    objectId: String(object.id),
+    text: `${object.name} — movement ${profile.passability}; sight ${profile.blocksSight ? 'blocked' : 'open'}; anchor (${String(object.position.column)},${String(object.position.row)}); footprint ${object.cells.map((cell) => `(${String(cell.column)},${String(cell.row)})`).join(' ')}`,
+  };
+}
+
 export function dmWorldObjectLabel(
   projection: DmBoardProjection,
   objectId: string,
 ): DmWorldObjectLabel | null {
   const object = projection.board.worldObjects?.find((candidate) => String(candidate.id) === objectId);
   if (object === undefined) return null;
-  const profile = terrainProfile(object.terrainKind);
-  return {
-    objectId,
-    text: `${object.name} — movement ${profile.passability}; sight ${profile.blocksSight ? 'blocked' : 'open'}; anchor (${String(object.position.column)},${String(object.position.row)}); footprint ${object.cells.map((cell) => `(${String(cell.column)},${String(cell.row)})`).join(' ')}`,
-  };
+  return projectedWorldObjectLabel(object);
+}
+
+export function playerWorldObjectLabel(
+  projection: PlayerBoardProjection,
+  objectId: string,
+): DmWorldObjectLabel | null {
+  const object = projection.worldObjects.find((candidate) => String(candidate.id) === objectId);
+  return object === undefined ? null : projectedWorldObjectLabel(object);
 }
 
 export type PlayerAffectedCellPreview =
