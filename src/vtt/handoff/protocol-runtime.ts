@@ -263,7 +263,7 @@ export class ProtocolRuntime {
       onResponseEstablished?.(response);
       return Promise.resolve({ kind: 'response', response });
     };
-    const token = this.#disposed || this.#closed || this.#session.destroyed
+    const token = this.#isTerminal()
       ? null
       : this.#consumeInvocationToken(invocationToken);
     const decoded = decodedInput(input);
@@ -280,9 +280,6 @@ export class ProtocolRuntime {
       );
       if (result.kind === 'transport_fault') this.#emitFault(result.fault);
       return Promise.resolve(result);
-    }
-    if (token === null) {
-      return respond(failure(id, 'CLOSED', 'The logical transport is closed.'));
     }
     const structural = genericHandoffRequestSchema._zod.run(
       { value: decoded.value, issues: [] },
@@ -303,6 +300,9 @@ export class ProtocolRuntime {
     if (known instanceof Promise) throw new TypeError('The v1 method schema must validate synchronously.');
     if (known.issues.length > 0) {
       return respond(failure(id, 'INVALID_REQUEST', 'The request parameters are invalid.'));
+    }
+    if (token === null || this.#isTerminal()) {
+      return respond(this.#closedResponse(id));
     }
     const dispatched = this.#dispatchKnown(known.value as HandoffRequest, token, signal);
     if (dispatched instanceof Promise) {
@@ -357,33 +357,41 @@ export class ProtocolRuntime {
       case 'session.open':
         return this.#open(request.id, request.params.requestedRole, request.params.playerId);
       case 'scene.snapshot': {
+        if (this.#isTerminal()) return this.#closedResponse(request.id);
         const capture = this.#capture();
         return capture === null
           ? failure(request.id, 'SESSION_NOT_OPEN', 'Open the session before requesting a snapshot.')
           : success(request.id, this.#snapshot(capture));
       }
       case 'token.move':
+        if (this.#isTerminal()) return this.#closedResponse(request.id);
         if (!this.#reserve(request.id)) return failure(request.id, 'DUPLICATE_MUTATION', 'The mutation id was already used.');
         return this.#trackMutation(
+          request.id,
           invocationToken,
           () => this.#move(request.id, request.params.tokenId, request.params.to, invocationToken, signal),
         );
       case 'door.set':
+        if (this.#isTerminal()) return this.#closedResponse(request.id);
         if (!this.#reserve(request.id)) return failure(request.id, 'DUPLICATE_MUTATION', 'The mutation id was already used.');
         return this.#trackMutation(
+          request.id,
           invocationToken,
           () => this.#door(request.id, request.params.doorId, request.params.open, invocationToken),
         );
       case 'light.set':
+        if (this.#isTerminal()) return this.#closedResponse(request.id);
         if (!this.#reserve(request.id)) return failure(request.id, 'DUPLICATE_MUTATION', 'The mutation id was already used.');
         return failure(request.id, 'UNSUPPORTED', 'The encounter engine has no light toggle mechanic.');
     }
   }
 
   #trackMutation(
+    requestId: string,
     invocationToken: SessionInvocationToken,
     operation: () => Promise<HandoffResponse>,
-  ): Promise<HandoffResponse> {
+  ): HandoffResponse | Promise<HandoffResponse> {
+    if (this.#isTerminal()) return this.#closedResponse(requestId);
     this.#activeMutationInvocations.add(invocationToken);
     let response: Promise<HandoffResponse>;
     try {
@@ -408,11 +416,20 @@ export class ProtocolRuntime {
     this.#mintedInvocationTokens.clear();
   }
 
+  #isTerminal(): boolean {
+    return this.#disposed || this.#closed || this.#session.destroyed;
+  }
+
+  #closedResponse(id: string): HandoffFailureResponse {
+    return failure(id, 'CLOSED', 'The logical transport is closed.');
+  }
+
   #reserve(id: string): boolean {
     return this.#session.ledger.reserve(id).reserved;
   }
 
   #open(id: string, role: 'dm' | 'player', playerId?: string): HandoffResponse {
+    if (this.#isTerminal()) return this.#closedResponse(id);
     if (this.#audience !== null) return failure(id, 'ALREADY_OPEN', 'The logical session is already open.');
     const authorization = this.#authorizer.authorizeOpen(this.#principal, role, playerId);
     if (!authorization.authorized) return failure(id, authorization.code, authorization.message);
@@ -453,6 +470,7 @@ export class ProtocolRuntime {
     invocationToken: SessionInvocationToken,
     signal?: AbortSignal,
   ): Promise<HandoffResponse> {
+    if (this.#isTerminal()) return this.#closedResponse(id);
     if (this.#audience === null) return failure(id, 'SESSION_NOT_OPEN', 'Open the session before mutating it.');
     const authorization = this.#authorizer.authorizeToken(this.#principal, tokenId);
     if (!authorization.authorized) return failure(id, authorization.code, authorization.message);
@@ -488,6 +506,7 @@ export class ProtocolRuntime {
     const optionIndex = matchingIndexes[0];
     const offeredActionId = optionIndex === undefined ? undefined : pending.offeredActionIds[optionIndex];
     if (offeredActionId === undefined) return failure(id, 'ILLEGAL_MOVE', 'The matching offer has no option id.');
+    if (this.#isTerminal()) return this.#closedResponse(id);
     const outcome = await this.#service.submitOfferedAction({
       playerId: this.#principal.playerId,
       tokenId,
@@ -506,8 +525,10 @@ export class ProtocolRuntime {
     open: boolean,
     invocationToken: SessionInvocationToken,
   ): Promise<HandoffResponse> {
+    if (this.#isTerminal()) return this.#closedResponse(id);
     if (this.#audience === null) return failure(id, 'SESSION_NOT_OPEN', 'Open the session before mutating it.');
     if (this.#principal.role !== 'dm') return failure(id, 'FORBIDDEN', 'Players cannot change door state.');
+    if (this.#isTerminal()) return this.#closedResponse(id);
     const outcome = await this.#service.setDoor({ invocationToken, principal: { kind: 'dm' }, doorId, open });
     switch (outcome.kind) {
       case 'committed': return success(id, { revision: outcome.revision });

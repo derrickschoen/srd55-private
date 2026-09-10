@@ -331,6 +331,123 @@ describe('in-process scene transport', () => {
   );
 
   it.each([
+    ['id', 'door.set'],
+    ['params', 'door.set'],
+    ['id', 'scene.snapshot'],
+    ['params', 'scene.snapshot'],
+  ] as const)(
+    'blocks real-host %s-getter transport closure before submitting %s',
+    async (accessor, method) => {
+      const state = buildTwoRoomEncounter();
+      const host = new DmEncounterHost(`scene:transport-getter-close:${accessor}:${method}`, new MemoryBrowserSessionStore(), {
+        initialState: state,
+        initialControllers: state.combatants.map((combatant) => ({
+          combatantId: combatant.profile.id,
+          controllerId: `${combatant.profile.id}:transport-getter-close`,
+          kind: 'human' as const,
+          generation: 0,
+        })),
+        playerIds: state.combatants.map((combatant) => combatant.profile.id),
+        turnLegalActions: closingMoveActions,
+      });
+      const seat = closingSeat(host);
+      const service = new EncounterSessionService(host, [seat]);
+      const setDoor = vi.spyOn(service, 'setDoor');
+      const delayed = delayedResponsePort(service);
+      const runtime = new ProtocolRuntime({
+        service: delayed.port,
+        principal: { role: 'dm' },
+        seats: [seat],
+        art: twoRoomArtPackage(),
+      });
+      const transport = new InProcessSceneTransport(runtime);
+      await transport.request({
+        v: 1, id: `open:transport-getter:${accessor}:${method}`,
+        method: 'session.open', params: { requestedRole: 'dm' },
+      });
+      const offerPromise = closingOffer(service, seat.playerId);
+      void service.start();
+      const pendingOffer = await offerPromise;
+      const expectedRevision = pendingOffer.encounterRevision + 1;
+      let blockedOutcome: Promise<
+        | { readonly kind: 'response'; readonly response: HandoffResponse }
+        | { readonly kind: 'error'; readonly error: unknown }
+      > | undefined;
+      transport.subscribe((event) => {
+        if (event.data.revision !== expectedRevision || blockedOutcome !== undefined) return;
+        const request: Record<string, unknown> = { v: 1, method };
+        if (accessor === 'id') {
+          Object.defineProperty(request, 'id', {
+            enumerable: true,
+            get: () => {
+              transport.close();
+              return `blocked:${method}`;
+            },
+          });
+          request.params = method === 'door.set'
+            ? { doorId: 'object:two-room-door', open: false }
+            : {};
+        } else {
+          request.id = `blocked:${method}`;
+          Object.defineProperty(request, 'params', {
+            enumerable: true,
+            get: () => {
+              transport.close();
+              return method === 'door.set'
+                ? { doorId: 'object:two-room-door', open: false }
+                : {};
+            },
+          });
+        }
+        blockedOutcome = transport.request(request).then(
+          (response) => ({ kind: 'response' as const, response }),
+          (error: unknown) => ({ kind: 'error' as const, error }),
+        );
+      });
+
+      let committedSettlements = 0;
+      const committed = transport.request({
+        v: 1, id: `committed-before-getter:${accessor}:${method}`, method: 'door.set',
+        params: { doorId: 'object:two-room-door', open: true },
+      }).then((response) => {
+        committedSettlements += 1;
+        return response;
+      });
+      await expect(committed).resolves.toMatchObject({ ok: true, result: { revision: expectedRevision } });
+      if (blockedOutcome === undefined) throw new Error('Expected the snapshot observer to dispatch the closing request.');
+      const blocked = await blockedOutcome;
+      if (accessor === 'id') {
+        expect(blocked).toEqual({
+          kind: 'response',
+          response: {
+            v: 1,
+            id: `blocked:${method}`,
+            ok: false,
+            error: { code: 'CLOSED', message: 'The logical transport is closed.' },
+          },
+        });
+      } else {
+        expect(blocked.kind).toBe('error');
+        if (blocked.kind === 'error') expect(blocked.error).toBeInstanceOf(SceneTransportClosedError);
+      }
+      expect(setDoor).toHaveBeenCalledTimes(1);
+      expect(host.snapshot().dm.encounter.revision).toBe(expectedRevision);
+      expect(runtime.invocationTrackingCounts()).toEqual({ minted: 0, active: 0 });
+      expect(transport.pendingRequestCount()).toBe(0);
+      expect(delayed.crossed()).toBe(false);
+
+      delayed.release();
+      await delayed.completion;
+      await Promise.resolve();
+      expect(committedSettlements).toBe(1);
+      expect(transport.status()).toBe('closed');
+      expect(runtime.invocationTrackingCounts()).toEqual({ minted: 0, active: 0 });
+      transport.destroySession();
+      host.close();
+    },
+  );
+
+  it.each([
     ['same-id', 'read'],
     ['same-id', 'duplicate'],
     ['', 'read'],

@@ -1,5 +1,5 @@
 import { readFileSync } from '../../helpers/test-filesystem';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { combatantId, type CombatantId } from '../../../src/combat/values';
 import type {
   DmSessionSnapshotEvent,
@@ -582,6 +582,79 @@ describe('v1 protocol dispatcher', () => {
     runtime.destroySession();
     source.closeHost();
   });
+
+  it.each([
+    ['close', 'id', 'door.set'],
+    ['close', 'params', 'door.set'],
+    ['close', 'id', 'scene.snapshot'],
+    ['close', 'params', 'scene.snapshot'],
+    ['dispose', 'id', 'door.set'],
+    ['destroy', 'params', 'door.set'],
+  ] as const)(
+    'does not dispatch %s-triggered lifecycle closure from a %s getter for %s',
+    async (lifecycle, accessor, method) => {
+      const setup = await realOutcomeRuntime(`getter-${lifecycle}-${accessor}-${method}`);
+      setup.runtime.dispose();
+      const runtime = new ProtocolRuntime({
+        service: setup.service,
+        principal: { role: 'dm' },
+        seats: [setup.seat],
+        art: twoRoomArtPackage(),
+      });
+      await runtime.dispatch({
+        v: 1, id: `open:getter-${lifecycle}-${accessor}-${method}`,
+        method: 'session.open', params: { requestedRole: 'dm' },
+      });
+      const setDoor = vi.spyOn(setup.service, 'setDoor');
+      const dmCapture = vi.spyOn(setup.service, 'dmCapture');
+      const beforeRevision = setup.host.snapshot().dm.encounter.revision;
+      const closeRuntime = () => {
+        if (lifecycle === 'close') runtime.close();
+        else if (lifecycle === 'dispose') runtime.dispose();
+        else runtime.destroySession();
+      };
+      const request: Record<string, unknown> = { v: 1, method };
+      if (accessor === 'id') {
+        Object.defineProperty(request, 'id', {
+          enumerable: true,
+          get: () => {
+            closeRuntime();
+            return `getter:${lifecycle}:${method}`;
+          },
+        });
+        request.params = method === 'door.set'
+          ? { doorId: 'object:two-room-door', open: true }
+          : {};
+      } else {
+        request.id = `getter:${lifecycle}:${method}`;
+        Object.defineProperty(request, 'params', {
+          enumerable: true,
+          get: () => {
+            closeRuntime();
+            return method === 'door.set'
+              ? { doorId: 'object:two-room-door', open: true }
+              : {};
+          },
+        });
+      }
+
+      await expect(runtime.dispatch(request)).resolves.toEqual({
+        kind: 'response',
+        response: {
+          v: 1,
+          id: `getter:${lifecycle}:${method}`,
+          ok: false,
+          error: { code: 'CLOSED', message: 'The logical transport is closed.' },
+        },
+      });
+      expect(setDoor).not.toHaveBeenCalled();
+      expect(dmCapture).not.toHaveBeenCalled();
+      expect(setup.host.snapshot().dm.encounter.revision).toBe(beforeRevision);
+      expect(runtime.invocationTrackingCounts()).toEqual({ minted: 0, active: 0 });
+      runtime.destroySession();
+      setup.host.close();
+    },
+  );
 
   it('keeps object-transport validation equivalent to the authoritative v1 Zod contracts', async () => {
     class RequestInstance {
