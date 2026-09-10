@@ -8,7 +8,7 @@ import {
 import { SEMANTIC_BOARD_MAX_BYTES, TURN_CONTEXT_MAX_BYTES } from '../src/vtt/mcp/engine-server';
 import { DEFAULT_RENDERER_PROFILE } from '../src/vtt/renderer-profile';
 import {
-  d569DeliveryHasIntegritySignal,
+  d569PartialEvidenceHasIntegritySignal,
   type EngineCatalogIntegrityView,
   type TurnContextDeliveryIntegrityView,
 } from '../src/vtt/turn-context-delivery';
@@ -783,8 +783,7 @@ export function validateD569ObservedRows(
       'cli_version', `row ${rowKey} omitted the executing CLI version`);
     const diagnosedInfrastructure = row.outcome === 'infrastructure_failed';
     const integrityIndeterminate = row.outcome === 'integrity_indeterminate' ||
-      row.engineCatalogEvidence !== undefined && row.turnContextDelivery !== undefined &&
-        d569DeliveryHasIntegritySignal(row.engineCatalogEvidence, row.turnContextDelivery);
+      d569PartialEvidenceHasIntegritySignal(row.engineCatalogEvidence, row.turnContextDelivery);
     addViolation(violations, !integrityIndeterminate,
       'integrity_indeterminate', `row ${rowKey} has indeterminate integrity evidence`);
     addViolation(violations, diagnosedInfrastructure

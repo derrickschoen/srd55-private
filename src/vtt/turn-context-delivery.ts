@@ -54,13 +54,30 @@ export type EngineCatalogIntegrityView =
         | 'timestamp_only';
     };
 
+export type EngineCatalogInconclusiveReason = Extract<
+  EngineCatalogIntegrityView,
+  { readonly status: 'inconclusive' }
+>['reason'];
+
 export type TurnContextDeliveryIntegrityView =
   | { readonly status: 'delivered' }
   | { readonly status: 'not_requested'; readonly reason: 'catalog_ready_model_did_not_fetch' | 'dispatch_cancelled' }
   | { readonly status: 'timeout_before_delivery' | 'infrastructure_absent' | 'indeterminate' };
 
-export function engineCatalogHasContradiction(evidence: EngineCatalogIntegrityView): boolean {
-  return evidence.status === 'inconclusive' && evidence.reason === 'conflicting_success_and_failure';
+export function engineCatalogReasonIsMissingObservation(reason: EngineCatalogInconclusiveReason): boolean {
+  switch (reason) {
+    case 'no_correlated_catalog':
+    case 'missing_live_timestamp':
+    case 'timestamp_only':
+      return true;
+    case 'invalid_catalog_response':
+    case 'conflicting_success_and_failure':
+      return false;
+  }
+}
+
+export function engineCatalogHasIntegrityFailure(evidence: EngineCatalogIntegrityView): boolean {
+  return evidence.status === 'inconclusive' && !engineCatalogReasonIsMissingObservation(evidence.reason);
 }
 
 /** True when D569 evidence must be persisted and stopped rather than packetized or scored. */
@@ -68,11 +85,20 @@ export function d569DeliveryHasIntegritySignal(
   catalog: EngineCatalogIntegrityView,
   delivery: TurnContextDeliveryIntegrityView,
 ): boolean {
-  if (delivery.status === 'indeterminate' || engineCatalogHasContradiction(catalog)) return true;
+  if (delivery.status === 'indeterminate' || engineCatalogHasIntegrityFailure(catalog)) return true;
   if (delivery.status === 'delivered') return catalog.status !== 'ready';
   if (catalog.status !== 'inconclusive') return false;
   return delivery.status !== 'timeout_before_delivery' &&
     !(delivery.status === 'not_requested' && delivery.reason === 'dispatch_cancelled');
+}
+
+export function d569PartialEvidenceHasIntegritySignal(
+  catalog: EngineCatalogIntegrityView | undefined,
+  delivery: TurnContextDeliveryIntegrityView | undefined,
+): boolean {
+  if (delivery?.status === 'indeterminate') return true;
+  if (catalog !== undefined && engineCatalogHasIntegrityFailure(catalog)) return true;
+  return catalog !== undefined && delivery !== undefined && d569DeliveryHasIntegritySignal(catalog, delivery);
 }
 
 export function classifyTurnContextDelivery(input: {
@@ -84,7 +110,7 @@ export function classifyTurnContextDelivery(input: {
   if (input.delivered !== null) {
     return { status: 'delivered', dispatchId, ...input.delivered };
   }
-  if (engineCatalogHasContradiction(input.catalogEvidence)) {
+  if (engineCatalogHasIntegrityFailure(input.catalogEvidence)) {
     return {
       status: 'indeterminate', dispatchId,
       reason: 'catalog_inconclusive_empty_context_spool', measurement: null,

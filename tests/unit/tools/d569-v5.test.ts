@@ -14,11 +14,16 @@ import {
 import { BlindModelIngressRecorder, type BlindIngressRecord } from '../../../src/vtt/blind-model-ingress';
 import {
   agentSessionIdFromCli,
+  engineDispatchId,
   type AgentInvocation,
   type AgentSessionAdapter,
   type AgentSessionBinding,
   type AgentTurnResult,
 } from '../../../src/vtt/agent-session';
+import {
+  classifyEngineCatalogEvidence,
+  type EngineReadinessRecord,
+} from '../../../src/vtt/engine-dispatch-evidence';
 import {
   analyzeRegisteredPrimaryPair,
   D569_PRIMARY_JUDGES,
@@ -415,6 +420,32 @@ function capturedFailure(action: () => void): string {
   throw new Error('Expected consumer validation to reject contradictory evidence.');
 }
 
+type InvalidCatalogSource = 'malformed' | 'wrong_profile';
+
+function classifiedInvalidCatalogForConsumer(
+  dispatchIdValue: string,
+  source: InvalidCatalogSource,
+) {
+  const dispatchId = engineDispatchId(dispatchIdValue);
+  const readiness: readonly EngineReadinessRecord[] = source === 'wrong_profile' ? [{
+    version: 1, dispatchId, phase: 'primary', profile: 'dm', requestId: 'request:d569-invalid-catalog',
+    event: 'tools_list_stream_write_completed', generatedAtUnixMs: 1, writeCompletedAtUnixMs: 2,
+    responseId: 'wrong-profile-response', responseSha256: 'a'.repeat(64),
+    expectedToolNames: ['engine.get_turn_context'], returnedToolNames: ['engine.get_turn_context'],
+    descriptorSha256: 'b'.repeat(64), validation: { status: 'valid' },
+  }] : [];
+  const evidence = classifyEngineCatalogEvidence({
+    dispatchId, expectedProfile: 'blind', expectedPhase: 'primary',
+    expectedRequestId: 'request:d569-invalid-catalog', expectedToolNames: ['engine.get_turn_context'],
+    events: [], readiness, completed: false, requiredStartupFailed: false,
+    ...(source === 'malformed' ? { malformedReadiness: true } : {}),
+  });
+  if (evidence.status !== 'inconclusive' || evidence.reason !== 'invalid_catalog_response') {
+    throw new Error(`${source} consumer fixture did not classify as invalid catalog evidence.`);
+  }
+  return evidence;
+}
+
 function evaluateRunnerTimeoutConsumers(): {
   readonly packetRows: number;
   readonly registeredRows: number;
@@ -422,6 +453,13 @@ function evaluateRunnerTimeoutConsumers(): {
   readonly contradictoryPacketError: string;
   readonly contradictoryRegisteredError: string;
   readonly contradictoryObservedViolations: readonly string[];
+  readonly invalidCatalogResults: readonly {
+    readonly exit: 'timed_out' | 'cancelled';
+    readonly source: InvalidCatalogSource;
+    readonly packetError: string;
+    readonly registeredError: string;
+    readonly observedViolations: readonly string[];
+  }[];
 } {
   const produced = RUNNER_TIMEOUT_BEFORE_DELIVERY_ROW;
   const packetRows: object[] = CELLS.filter((cell) => cell.basis === 'brutal')
@@ -464,6 +502,58 @@ function evaluateRunnerTimeoutConsumers(): {
   contradictoryPacketRows[0] = contradictory;
   const contradictoryRegisteredRows = [...registeredRows];
   contradictoryRegisteredRows[0] = contradictory;
+  const invalidCatalogResults = (['timed_out', 'cancelled'] as const).flatMap((exit) =>
+    (['malformed', 'wrong_profile'] as const).map((source) => {
+      const invalidCatalog = classifiedInvalidCatalogForConsumer(dispatchId, source);
+      const delivery = exit === 'timed_out'
+        ? produced['turnContextDelivery']
+        : {
+            status: 'not_requested' as const, dispatchId,
+            reason: 'dispatch_cancelled' as const, measurement: null,
+          };
+      const ingress = record(produced['blindIngressAudit']);
+      const invalidRow = {
+        ...produced,
+        ...(exit === 'cancelled'
+          ? {
+              outcome: 'infrastructure_failed', fallbackReason: 'dispatch_cancelled',
+              turnContextDelivery: delivery,
+              blindIngressAudit: { ...ingress, delivery },
+              failingDispatch: {
+                phase: 'primary', exit, dispatchId, engineCatalogEvidence: invalidCatalog,
+                turnContextDelivery: delivery, failureReason: 'operator cancelled before delivery',
+              },
+            }
+          : {}),
+        engineCatalogEvidence: invalidCatalog,
+      };
+      const invalidPacketRows = [...packetRows];
+      invalidPacketRows[0] = invalidRow;
+      const invalidRegisteredRows = [...registeredRows];
+      invalidRegisteredRows[0] = invalidRow;
+      const observedDelivery: D569ObservedRow['turnContextDelivery'] = exit === 'timed_out'
+        ? { status: 'timeout_before_delivery' }
+        : { status: 'not_requested', reason: 'dispatch_cancelled' };
+      const invalidObserved: D569ObservedRow = {
+        ...observed,
+        outcome: exit === 'timed_out' ? 'refused' : 'infrastructure_failed',
+        engineCatalogEvidence: { status: 'inconclusive', reason: invalidCatalog.reason },
+        turnContextDelivery: observedDelivery,
+        ...(exit === 'cancelled' ? {
+          failingDispatch: {
+            dispatchId, exit, engineCatalogEvidence: { status: 'inconclusive' },
+            turnContextDelivery: { status: 'not_requested' },
+          },
+        } : {}),
+      };
+      return {
+        exit, source,
+        packetError: capturedFailure(() => { pairedDocuments(invalidPacketRows); }),
+        registeredError: capturedFailure(() => { validateBrutal(raw(invalidRegisteredRows)); }),
+        observedViolations: validateD569ObservedRows([cell], [invalidObserved])
+          .map((violation) => violation.code),
+      };
+    }));
   return {
     packetRows: packetCount,
     registeredRows: registeredCount,
@@ -474,6 +564,7 @@ function evaluateRunnerTimeoutConsumers(): {
       ...observed,
       engineCatalogEvidence: { status: 'inconclusive', reason: 'conflicting_success_and_failure' },
     }]).map((violation) => violation.code),
+    invalidCatalogResults,
   };
 }
 
@@ -597,12 +688,53 @@ describe('D569 v5 replacement validation and paired analysis tools', () => {
     expect(RUNNER_TIMEOUT_CONSUMERS.contradictoryObservedViolations).toContain('integrity_indeterminate');
   });
 
+  it('rejects malformed and wrong-profile catalog evidence after timeout or cancellation in every consumer', () => {
+    expect(RUNNER_TIMEOUT_CONSUMERS.invalidCatalogResults).toHaveLength(4);
+    expect(RUNNER_TIMEOUT_CONSUMERS.invalidCatalogResults.map(({ exit, source }) => `${exit}:${source}`))
+      .toEqual([
+        'timed_out:malformed', 'timed_out:wrong_profile',
+        'cancelled:malformed', 'cancelled:wrong_profile',
+      ]);
+    for (const result of RUNNER_TIMEOUT_CONSUMERS.invalidCatalogResults) {
+      expect(result.packetError).toContain('integrity evidence');
+      expect(result.registeredError).toContain('integrity-indeterminate');
+      expect(result.observedViolations).toContain('integrity_indeterminate');
+    }
+  });
+
   it('rejects incomplete v3 evidence objects', () => {
     expect(() => validateBrutal(mutateFirst(BRUTAL_SOURCE, (row) => {
       const catalog = record(row['engineCatalogEvidence']);
       return { ...row, engineCatalogEvidence: { status: catalog['status'], dispatchId: catalog['dispatchId'] } };
     }))).toThrow();
   });
+
+  it('rejects an indeterminate delivery when the companion v3 catalog field is absent', () => {
+    expect(() => validateBrutal(mutateFirst(BRUTAL_SOURCE, (row) => {
+      const { engineCatalogEvidence: _omitted, ...withoutCatalog } = row;
+      return {
+        ...withoutCatalog,
+        turnContextDelivery: {
+          status: 'indeterminate', dispatchId: row['dispatchId'],
+          reason: 'catalog_inconclusive_empty_context_spool', measurement: null,
+          integrityAction: 'stop_after_persist',
+        },
+      };
+    }))).toThrow();
+  });
+
+  it.each(['conflicting_success_and_failure', 'invalid_catalog_response'] as const)(
+    'rejects a %s catalog when the companion v3 delivery field is absent',
+    (reason) => {
+      expect(() => validateBrutal(mutateFirst(BRUTAL_SOURCE, (row) => {
+        const { turnContextDelivery: _omitted, ...withoutDelivery } = row;
+        return {
+          ...withoutDelivery,
+          engineCatalogEvidence: { status: 'inconclusive', dispatchId: row['dispatchId'], reason },
+        };
+      }))).toThrow();
+    },
+  );
 
   it('rejects incomplete v3 evidence nested in a failing dispatch', () => {
     const rows = BRUTAL_SOURCE.trimEnd().split('\n').map((line) => JSON.parse(line) as Readonly<Record<string, unknown>>);

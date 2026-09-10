@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { agentSessionId } from '../../../src/combat/values';
 import { engineDispatchId, type AgentTurnResult, type EngineCatalogEvidence } from '../../../src/vtt/agent-session';
-import { classifyTurnContextDelivery } from '../../../src/vtt/turn-context-delivery';
+import {
+  classifyTurnContextDelivery,
+  engineCatalogReasonIsMissingObservation,
+} from '../../../src/vtt/turn-context-delivery';
 
 const dispatchId = engineDispatchId('engine-dispatch:delivery-test-0001');
 const base = {
@@ -25,6 +28,9 @@ const inconclusive: EngineCatalogEvidence = {
 const conflicting: EngineCatalogEvidence = {
   status: 'inconclusive', dispatchId, reason: 'conflicting_success_and_failure',
 };
+const invalid: EngineCatalogEvidence = {
+  status: 'inconclusive', dispatchId, reason: 'invalid_catalog_response',
+};
 
 function turn(exit: AgentTurnResult['exit']): AgentTurnResult {
   switch (exit) {
@@ -42,15 +48,25 @@ describe('turn-context delivery classification', () => {
     expect(classifyTurnContextDelivery({ turn: turn('timed_out'), catalogEvidence: ready, delivered: null })).toEqual({ status: 'timeout_before_delivery', dispatchId, measurement: null });
     expect(classifyTurnContextDelivery({ turn: turn('timed_out'), catalogEvidence: inconclusive, delivered: null })).toEqual({ status: 'timeout_before_delivery', dispatchId, measurement: null });
     for (const exit of ['timed_out', 'cancelled'] as const) {
-      expect(classifyTurnContextDelivery({ turn: turn(exit), catalogEvidence: conflicting, delivered: null }))
-        .toEqual({
-          status: 'indeterminate', dispatchId,
-          reason: 'catalog_inconclusive_empty_context_spool', measurement: null,
-          integrityAction: 'stop_after_persist',
-        });
+      for (const catalogEvidence of [conflicting, invalid]) {
+        expect(classifyTurnContextDelivery({ turn: turn(exit), catalogEvidence, delivered: null }))
+          .toEqual({
+            status: 'indeterminate', dispatchId,
+            reason: 'catalog_inconclusive_empty_context_spool', measurement: null,
+            integrityAction: 'stop_after_persist',
+          });
+      }
     }
     expect(classifyTurnContextDelivery({ turn: turn('infrastructure_failed'), catalogEvidence: absent, delivered: null })).toEqual({ status: 'infrastructure_absent', dispatchId, measurement: null });
     expect(classifyTurnContextDelivery({ turn: turn('completed'), catalogEvidence: inconclusive, delivered: null })).toEqual({ status: 'indeterminate', dispatchId, reason: 'catalog_inconclusive_empty_context_spool', measurement: null, integrityAction: 'stop_after_persist' });
+  });
+
+  it('exhaustively distinguishes missing observations from invalid or contradictory evidence', () => {
+    expect(engineCatalogReasonIsMissingObservation('no_correlated_catalog')).toBe(true);
+    expect(engineCatalogReasonIsMissingObservation('missing_live_timestamp')).toBe(true);
+    expect(engineCatalogReasonIsMissingObservation('timestamp_only')).toBe(true);
+    expect(engineCatalogReasonIsMissingObservation('invalid_catalog_response')).toBe(false);
+    expect(engineCatalogReasonIsMissingObservation('conflicting_success_and_failure')).toBe(false);
   });
 
   it('preserves delivered status when timeout follows retrieval', () => {

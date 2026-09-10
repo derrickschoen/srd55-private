@@ -15,6 +15,8 @@ import {
   type AgentSessionAdapter,
   type AgentSessionBinding,
   type AgentTurnResult,
+  type EngineCatalogEvidence,
+  type EngineDispatchId,
 } from '../../../src/vtt/agent-session';
 import { AgentSessionLifecycle } from '../../../src/vtt/agent-session-lifecycle';
 import {
@@ -79,6 +81,10 @@ import { declareTestInputs } from '../../helpers/test-inputs';
 import { sha256 } from '../../../src/crypto/sha256';
 import { DEFAULT_RENDERER_PROFILE } from '../../../src/vtt/renderer-profile';
 import { traceCombatantLine } from '../../../src/combat/cover';
+import {
+  classifyEngineCatalogEvidence,
+  type EngineReadinessRecord,
+} from '../../../src/vtt/engine-dispatch-evidence';
 
 const kbInputs = declareTestInputs({ fixtures: [
   'tests/fixtures/ai-dm-kb/ai-dm-core.md',
@@ -131,10 +137,14 @@ function objectValue(value: unknown, label: string): Readonly<Record<string, unk
 }
 
 type IncompleteCatalogExit = 'timed_out' | 'cancelled' | 'infrastructure_failed';
+type IncompleteCatalogEvidenceFactory = (
+  dispatchId: EngineDispatchId,
+) => Extract<EngineCatalogEvidence, { readonly status: 'inconclusive' }>;
 
 function incompleteCatalogAdapter(
   exit: IncompleteCatalogExit,
-  reason: Extract<NonNullable<AgentTurnResult['engineCatalogEvidence']>, { status: 'inconclusive' }>['reason'],
+  evidence: Extract<EngineCatalogEvidence, { readonly status: 'inconclusive' }>['reason'] |
+    IncompleteCatalogEvidenceFactory,
   observeLauncher?: (path: string) => void,
 ): AgentSessionAdapter {
   const dispatch = async (invocation: AgentInvocation): Promise<AgentTurnResult> => {
@@ -153,7 +163,9 @@ function incompleteCatalogAdapter(
         status: 'partial' as const, decodedEventCount: 0, finalTextFragment: `partial ${exit} output`,
         observedUsage: null, stagedInvocationIds: [],
       },
-      engineCatalogEvidence: { status: 'inconclusive' as const, dispatchId: invocation.engineDispatchId, reason },
+      engineCatalogEvidence: typeof evidence === 'function'
+        ? evidence(invocation.engineDispatchId)
+        : { status: 'inconclusive' as const, dispatchId: invocation.engineDispatchId, reason: evidence },
     };
     switch (exit) {
       case 'timed_out': return { ...common, exit, timeoutMs: 180_000 };
@@ -172,9 +184,33 @@ function incompleteCatalogAdapter(
   };
 }
 
+function classifiedInvalidCatalog(
+  dispatchId: EngineDispatchId,
+  source: 'malformed' | 'wrong_profile',
+): Extract<EngineCatalogEvidence, { readonly status: 'inconclusive' }> {
+  const readiness: readonly EngineReadinessRecord[] = source === 'wrong_profile' ? [{
+    version: 1, dispatchId, phase: 'primary', profile: 'blind', requestId: 'request:wrong-profile',
+    event: 'tools_list_stream_write_completed', generatedAtUnixMs: 1, writeCompletedAtUnixMs: 2,
+    responseId: 'wrong-profile-response', responseSha256: 'a'.repeat(64),
+    expectedToolNames: ['engine.get_turn_context'], returnedToolNames: ['engine.get_turn_context'],
+    descriptorSha256: 'b'.repeat(64), validation: { status: 'valid' },
+  }] : [];
+  const classified = classifyEngineCatalogEvidence({
+    dispatchId, expectedProfile: 'dm', expectedPhase: 'primary', expectedRequestId: 'request:wrong-profile',
+    expectedToolNames: ['engine.get_turn_context'], events: [], readiness,
+    completed: false, requiredStartupFailed: false,
+    ...(source === 'malformed' ? { malformedReadiness: true } : {}),
+  });
+  if (classified.status !== 'inconclusive' || classified.reason !== 'invalid_catalog_response') {
+    throw new Error(`${source} readiness did not classify as invalid_catalog_response.`);
+  }
+  return classified;
+}
+
 async function runIncompleteCatalogIntegrityStop(
   exit: IncompleteCatalogExit,
-  reason: Extract<NonNullable<AgentTurnResult['engineCatalogEvidence']>, { status: 'inconclusive' }>['reason'],
+  evidence: Extract<EngineCatalogEvidence, { readonly status: 'inconclusive' }>['reason'] |
+    IncompleteCatalogEvidenceFactory,
 ): Promise<{
   readonly row: Readonly<Record<string, unknown>>;
   readonly artifact: Readonly<Record<string, unknown>>;
@@ -189,7 +225,7 @@ async function runIncompleteCatalogIntegrityStop(
       '--rooms', '1', '--rounds', '1', '--out', outPath,
       '--dm-mode', 'advice', '--board-image', 'off', '--dry-run',
     ]), {
-      adapter: incompleteCatalogAdapter(exit, reason, (path) => { launcherPath = path; }),
+      adapter: incompleteCatalogAdapter(exit, evidence, (path) => { launcherPath = path; }),
     });
   } catch (error) {
     stopped = error;
@@ -721,6 +757,40 @@ describe('AI-DM engine MCP conversation runner', () => {
       expect(artifact).toMatchObject({
         kind: 'dispatch_integrity_indeterminate',
         catalogEvidence: { status: 'inconclusive', reason: 'conflicting_success_and_failure' },
+        delivery: { status: 'indeterminate' }, contextSpool: { recordCount: 0 },
+        processEvidence: { stdout: `partial ${exit} output` },
+        partialResultEvidence: { status: 'partial', finalTextFragment: `partial ${exit} output` },
+      });
+      if (launcher.proposalSpoolPath === undefined) throw new Error('Integrity launcher omitted proposal spool.');
+      expect(readFileSync(launcher.proposalSpoolPath, 'utf8')).toBe('');
+    },
+  );
+
+  it.each([
+    ['timed_out', 'malformed'],
+    ['timed_out', 'wrong_profile'],
+    ['cancelled', 'malformed'],
+    ['cancelled', 'wrong_profile'],
+  ] as const)(
+    'persists forensic evidence and STOPs on a %s dispatch with an invalid %s catalog',
+    async (exit, source) => {
+      const { row, artifact, launcher } = await runIncompleteCatalogIntegrityStop(
+        exit,
+        (dispatchId) => classifiedInvalidCatalog(dispatchId, source),
+      );
+      expect(row).toMatchObject({
+        rowContractVersion: 'arena-row-v3', outcome: 'integrity_indeterminate', passed: false,
+        engineCatalogEvidence: { status: 'inconclusive', reason: 'invalid_catalog_response' },
+        turnContextDelivery: {
+          status: 'indeterminate', measurement: null, integrityAction: 'stop_after_persist',
+        },
+        authorizedPlan: null, execution: null,
+      });
+      expect(row).not.toHaveProperty('failingDispatch');
+      expect(row).not.toHaveProperty('planner');
+      expect(artifact).toMatchObject({
+        kind: 'dispatch_integrity_indeterminate',
+        catalogEvidence: { status: 'inconclusive', reason: 'invalid_catalog_response' },
         delivery: { status: 'indeterminate' }, contextSpool: { recordCount: 0 },
         processEvidence: { stdout: `partial ${exit} output` },
         partialResultEvidence: { status: 'partial', finalTextFragment: `partial ${exit} output` },

@@ -679,6 +679,33 @@ describe('D569 preregistered experiment manifest and dry runner', () => {
     }
   });
 
+  it('rejects either decisive integrity field alone while preserving rows with neither field', () => {
+    const cell = dryRunD569Experiment(manifest(), access())[0];
+    if (cell === undefined) throw new Error('D569 registry produced no cells.');
+    const row = observedRows([cell])[0];
+    if (row === undefined) throw new Error('D569 observed fixture produced no row.');
+
+    expect(row).not.toHaveProperty('engineCatalogEvidence');
+    expect(row).not.toHaveProperty('turnContextDelivery');
+    expect(validateD569ObservedRows([cell], [row])).toEqual([]);
+
+    const indeterminateDeliveryOnly: D569ObservedRow = {
+      ...row,
+      turnContextDelivery: { status: 'indeterminate' },
+    };
+    expect(validateD569ObservedRows([cell], [indeterminateDeliveryOnly]).map((violation) => violation.code))
+      .toContain('integrity_indeterminate');
+
+    for (const reason of ['conflicting_success_and_failure', 'invalid_catalog_response'] as const) {
+      const invalidCatalogOnly: D569ObservedRow = {
+        ...row,
+        engineCatalogEvidence: { status: 'inconclusive', reason },
+      };
+      expect(validateD569ObservedRows([cell], [invalidCatalogOnly]).map((violation) => violation.code))
+        .toContain('integrity_indeterminate');
+    }
+  });
+
   it('rejects changed advice baseline settings, primer, and model-default policy', () => {
     const advice = structuredClone(manifest());
     advice.adviceCeiling.rendererProfile = { changed: true };
