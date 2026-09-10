@@ -25,7 +25,11 @@ import {
   twoRoomArtPackage,
 } from '../../../src/vtt/handoff/fixtures/two-room';
 import { InProcessSceneTransport } from '../../../src/vtt/handoff/in-process-transport';
-import { ProtocolRuntime, type ProtocolSessionPort } from '../../../src/vtt/handoff/protocol-runtime';
+import {
+  type HandoffResponse,
+  ProtocolRuntime,
+  type ProtocolSessionPort,
+} from '../../../src/vtt/handoff/protocol-runtime';
 import {
   BrowserSessionWriteError,
   IndexedDbBrowserSessionStore,
@@ -85,9 +89,9 @@ function controlledPort(
         seq: doorCalls,
         projection: dm,
         tokenBindings,
-        ...(input.clientRequestId === undefined
+        ...(input.invocationToken === undefined
           ? {}
-          : { terminalReceipt: { requestId: input.clientRequestId, revision: dm.encounter.revision } }),
+          : { terminalReceipt: { invocationToken: input.invocationToken, revision: dm.encounter.revision } }),
       } satisfies DmSessionSnapshotEvent;
       for (const listener of dmListeners) listener(event);
       return { kind: 'committed', revision: dm.encounter.revision, changed: true, event };
@@ -301,6 +305,96 @@ describe('in-process scene transport', () => {
       delayed.release();
       await delayed.completion;
       expect(delayed.crossed()).toBe(true);
+      dm.destroySession();
+      host.close();
+    },
+  );
+
+  it.each([
+    ['same-id', 'read'],
+    ['same-id', 'duplicate'],
+    ['', 'read'],
+    ['', 'duplicate'],
+  ] as const)(
+    'never applies a DM receipt to a player request with wire id %s and kind %s when closed by its observer',
+    async (wireId, requestKind) => {
+      const state = buildTwoRoomEncounter();
+      const host = new DmEncounterHost(`scene:cross-runtime-receipt:${requestKind}:${wireId || 'empty'}`, new MemoryBrowserSessionStore(), {
+        initialState: state,
+        initialControllers: state.combatants.map((combatant) => ({
+          combatantId: combatant.profile.id,
+          controllerId: `${combatant.profile.id}:cross-runtime-receipt`,
+          kind: 'human' as const,
+          generation: 0,
+        })),
+        playerIds: state.combatants.map((combatant) => combatant.profile.id),
+        turnLegalActions: closingMoveActions,
+      });
+      const seat = closingSeat(host);
+      const service = new EncounterSessionService(host, [seat]);
+      const dm = new InProcessSceneTransport(new ProtocolRuntime({
+        service, principal: { role: 'dm' }, seats: [seat], art: twoRoomArtPackage(),
+      }));
+      const player = new InProcessSceneTransport(new ProtocolRuntime({
+        service,
+        principal: { role: 'player', playerId: seat.playerId },
+        seats: [seat],
+        art: twoRoomArtPackage(),
+      }));
+      await dm.request({
+        v: 1, id: `open:dm:${requestKind}`, method: 'session.open', params: { requestedRole: 'dm' },
+      });
+      await player.request({
+        v: 1, id: `open:player:${requestKind}`, method: 'session.open',
+        params: { requestedRole: 'player', playerId: seat.playerId },
+      });
+      const offerPromise = closingOffer(service, seat.playerId);
+      void service.start();
+      await offerPromise;
+      const expectedRevision = host.snapshot().dm.encounter.revision + 1;
+      let launchPlayerRequest: ((request: Promise<HandoffResponse>) => void) | undefined;
+      const playerResponse = new Promise<HandoffResponse>((resolve) => { launchPlayerRequest = resolve; });
+      let launched = false;
+      dm.subscribe((event) => {
+        if (event.data.revision !== expectedRevision || launched) return;
+        launched = true;
+        launchPlayerRequest?.(player.request(requestKind === 'read'
+          ? { v: 1, id: wireId, method: 'scene.snapshot', params: {} }
+          : { v: 1, id: wireId, method: 'light.set', params: { lightId: 'torch', enabled: false } }));
+      });
+      const closedRevisions: number[] = [];
+      player.subscribe((event) => {
+        if (event.data.revision !== expectedRevision) return;
+        closedRevisions.push(event.data.revision);
+        player.close();
+      });
+      const playerOutcome = playerResponse.then(
+        (response) => ({ kind: 'response' as const, response }),
+        (error: unknown) => ({ kind: 'error' as const, error }),
+      );
+      const dmResponse = await dm.request({
+        v: 1, id: wireId, method: 'door.set',
+        params: { doorId: 'object:two-room-door', open: true },
+      });
+      expect(dmResponse).toMatchObject({ id: wireId, ok: true, result: { revision: expectedRevision } });
+      expect(launched).toBe(true);
+      expect(closedRevisions).toEqual([expectedRevision]);
+      expect(player.status()).toBe('closed');
+      const outcome = await playerOutcome;
+      if (requestKind === 'duplicate') {
+        expect(outcome).toEqual({
+          kind: 'response',
+          response: {
+            v: 1,
+            id: wireId,
+            ok: false,
+            error: { code: 'DUPLICATE_MUTATION', message: 'The mutation id was already used.' },
+          },
+        });
+      } else {
+        expect(outcome.kind).toBe('error');
+        if (outcome.kind === 'error') expect(outcome.error).toBeInstanceOf(SceneTransportClosedError);
+      }
       dm.destroySession();
       host.close();
     },

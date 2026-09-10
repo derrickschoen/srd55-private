@@ -450,6 +450,11 @@ describe('v1 protocol dispatcher', () => {
       readonly params = {};
     }
     class ParamsInstance {}
+    class PointInstance {
+      readonly x = 0;
+      readonly y = 0;
+      readonly z = 0;
+    }
     const symbolRequest = {
       v: 1, id: 'symbol-root', method: 'scene.snapshot', params: {},
       [Symbol('ignored-root')]: true,
@@ -469,6 +474,12 @@ describe('v1 protocol dispatcher', () => {
     const customPrototypeParams: unknown = Object.create({ inherited: true });
     const customPrototypeRoot: unknown = Object.assign(Object.create({ inherited: true }), {
       v: 1, id: 'custom-root', method: 'scene.snapshot', params: {},
+    });
+    const symbolPoint = { x: 0, y: 0, z: 0, [Symbol('ignored-point')]: true };
+    const protoPoint = { x: 0, y: 0, z: 0 };
+    Object.defineProperty(protoPoint, '__proto__', {
+      enumerable: true,
+      value: { polluted: true },
     });
     const corpus: readonly { readonly label: string; readonly value: unknown }[] = [
       { label: 'open-positive', value: { v: 1, id: 'positive-open', method: 'session.open', params: { requestedRole: 'dm' } } },
@@ -493,7 +504,28 @@ describe('v1 protocol dispatcher', () => {
       { label: 'symbol-params', value: symbolParams },
       { label: 'accessor', value: accessorParams },
       { label: 'throwing-accessor', value: throwingAccessor },
+      { label: 'array-as-record', value: { v: 1, id: 'array-record', method: 'scene.snapshot', params: [] } },
+      { label: 'class-point', value: { v: 1, id: 'class-point', method: 'token.move', params: { tokenId: '', to: new PointInstance() } } },
+      { label: 'symbol-point', value: { v: 1, id: 'symbol-point', method: 'token.move', params: { tokenId: '', to: symbolPoint } } },
+      { label: 'nan-point', value: { v: 1, id: 'nan-point', method: 'token.move', params: { tokenId: '', to: { x: Number.NaN, y: 0, z: 0 } } } },
+      { label: 'infinity-point', value: { v: 1, id: 'infinity-point', method: 'token.move', params: { tokenId: '', to: { x: Number.POSITIVE_INFINITY, y: 0, z: 0 } } } },
+      { label: 'negative-zero-point', value: { v: 1, id: 'negative-zero-point', method: 'token.move', params: { tokenId: '', to: { x: -0, y: -0, z: -0 } } } },
+      { label: 'nested-extra-key', value: { v: 1, id: 'nested-extra', method: 'token.move', params: { tokenId: '', to: { x: 0, y: 0, z: 0, extra: true } } } },
+      { label: 'own-proto-key', value: { v: 1, id: 'own-proto', method: 'token.move', params: { tokenId: '', to: protoPoint } } },
     ];
+    const expected = new Map<string, 'accepted' | 'rejected' | 'throws'>([
+      ['open-positive', 'accepted'], ['snapshot-positive', 'accepted'], ['move-positive', 'accepted'],
+      ['door-positive', 'accepted'], ['light-positive', 'accepted'], ['open-negative', 'rejected'],
+      ['snapshot-negative', 'rejected'], ['move-negative', 'rejected'], ['door-negative', 'rejected'],
+      ['light-negative', 'rejected'], ['generic-extension', 'accepted'], ['date-params', 'rejected'],
+      ['map-params', 'rejected'], ['class-root', 'accepted'], ['class-params', 'rejected'],
+      ['custom-root-prototype', 'rejected'], ['custom-params-prototype', 'rejected'],
+      ['null-params-prototype', 'accepted'], ['symbol-root', 'accepted'], ['symbol-params', 'rejected'],
+      ['accessor', 'accepted'], ['throwing-accessor', 'throws'], ['array-as-record', 'rejected'],
+      ['class-point', 'accepted'], ['symbol-point', 'accepted'], ['nan-point', 'rejected'],
+      ['infinity-point', 'rejected'], ['negative-zero-point', 'accepted'], ['nested-extra-key', 'rejected'],
+      ['own-proto-key', 'accepted'],
+    ]);
     const knownMethods = new Set<string>(HANDOFF_METHODS);
     const schemaDisposition = (value: unknown): 'accepted' | 'rejected' | 'throws' => {
       try {
@@ -517,7 +549,9 @@ describe('v1 protocol dispatcher', () => {
       }
     };
     for (const entry of corpus) {
-      expect(await runtimeDisposition(entry.value), entry.label).toBe(schemaDisposition(entry.value));
+      const contractDisposition = schemaDisposition(entry.value);
+      expect(contractDisposition, `${entry.label}:schema`).toBe(expected.get(entry.label));
+      expect(await runtimeDisposition(entry.value), `${entry.label}:protocol`).toBe(contractDisposition);
     }
     expect(schemaDisposition(corpus.find((entry) => entry.label === 'date-params')?.value)).toBe('rejected');
     runtime.destroySession();

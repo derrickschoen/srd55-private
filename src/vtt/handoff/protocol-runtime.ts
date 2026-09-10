@@ -4,6 +4,7 @@ import type {
   PlayerSessionSnapshotEvent,
   PlayerSubscriptionResult,
   DoorSetOutcome,
+  SessionInvocationToken,
   SessionMutationOutcome,
 } from '../encounter-session-service';
 import type { DmBoardProjection, PlayerBoardProjection, RendererTokenBinding } from '../encounter-projections';
@@ -12,6 +13,9 @@ import { groundAnchor, sceneSnapshot, type CanonicalTokenIdentityIndex } from '.
 import { LogicalSessionAuthority } from './mutation-ledger';
 import { SessionAuthorizer, type HandoffPrincipal } from './session-authorizer';
 import {
+  genericHandoffRequestSchema,
+  HANDOFF_METHODS,
+  handoffRequestSchema,
   type HandoffRequest,
   type SceneSnapshot,
 } from './v1/contracts';
@@ -54,8 +58,26 @@ export interface SceneSnapshotEvent {
 }
 
 export interface ProtocolEstablishedReceipt {
-  readonly requestId: string;
+  readonly invocationToken: SessionInvocationToken;
   readonly revision: number;
+}
+
+export type ProtocolResponseEstablished = (response: HandoffResponse) => void;
+
+const knownMethods = new Set<string>(HANDOFF_METHODS);
+// Warm Zod's generated validators before object transport is measured. Dispatch invokes
+// those authoritative schemas through `_zod.run` so invalid input does not materialize a
+// ZodError (whose formatter serializes issues) inside the zero-serialization boundary.
+const validatorWarmups: readonly HandoffRequest[] = [
+  { v: 1, id: '', method: 'session.open', params: { requestedRole: 'dm' } },
+  { v: 1, id: '', method: 'scene.snapshot', params: {} },
+  { v: 1, id: '', method: 'token.move', params: { tokenId: '', to: { x: 0, y: 0, z: 0 } } },
+  { v: 1, id: '', method: 'door.set', params: { doorId: '', open: false } },
+  { v: 1, id: '', method: 'light.set', params: { lightId: '', enabled: false } },
+];
+for (const request of validatorWarmups) {
+  genericHandoffRequestSchema.safeParse(request);
+  handoffRequestSchema.safeParse(request);
 }
 
 export type ProtocolDispatchResult =
@@ -85,13 +107,13 @@ export interface ProtocolSessionPort {
     readonly playerId?: string;
     readonly tokenId: string;
     readonly requestId: string;
-    readonly clientRequestId?: string;
+    readonly invocationToken?: SessionInvocationToken;
     readonly encounterRevision: number;
     readonly offeredActionId: string;
     readonly signal?: AbortSignal;
   }): Promise<SessionMutationOutcome>;
   setDoor(input: {
-    readonly clientRequestId?: string;
+    readonly invocationToken?: SessionInvocationToken;
     readonly principal?: { readonly kind: 'dm' } | { readonly kind: 'player'; readonly playerId: string };
     readonly doorId: string;
     readonly open: boolean;
@@ -153,97 +175,6 @@ function usableId(value: unknown): string | null {
   }
 }
 
-interface GenericWireRequest {
-  readonly v: 1;
-  readonly id: string;
-  readonly method: string;
-  readonly params: Readonly<Record<string, unknown>>;
-}
-
-function requestObject(value: unknown): value is Readonly<Record<string, unknown>> {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
-  for (const key in value) {
-    if (!Object.hasOwn(value, key)) return false;
-  }
-  return true;
-}
-
-function record(value: unknown): value is Readonly<Record<string, unknown>> {
-  if (!requestObject(value)) return false;
-  const prototype = Object.getPrototypeOf(value) as unknown;
-  return prototype === Object.prototype || prototype === null;
-}
-
-function exactKeys(
-  value: Readonly<Record<string, unknown>>,
-  required: readonly string[],
-  optional: readonly string[] = [],
-): boolean {
-  const keys = Reflect.ownKeys(value);
-  return required.every((key) => Object.hasOwn(value, key)) &&
-    keys.every((key) => typeof key === 'string' && (required.includes(key) || optional.includes(key)));
-}
-
-function genericRequest(value: unknown): GenericWireRequest | null {
-  if (
-    !requestObject(value) ||
-    !['v', 'id', 'method', 'params'].every((key) => Object.hasOwn(value, key)) ||
-    !Object.keys(value).every((key) => ['v', 'id', 'method', 'params'].includes(key))
-  ) return null;
-  if (value.v !== 1 || typeof value.id !== 'string' || typeof value.method !== 'string' || !record(value.params)) {
-    return null;
-  }
-  return { v: 1, id: value.id, method: value.method, params: value.params };
-}
-
-function finitePoint3(value: unknown): { readonly x: number; readonly y: number; readonly z: number } | null {
-  if (!record(value) || !exactKeys(value, ['x', 'y', 'z'])) return null;
-  if (
-    typeof value.x !== 'number' || !Number.isFinite(value.x) ||
-    typeof value.y !== 'number' || !Number.isFinite(value.y) ||
-    typeof value.z !== 'number' || !Number.isFinite(value.z)
-  ) return null;
-  return { x: value.x, y: value.y, z: value.z };
-}
-
-function knownRequest(request: GenericWireRequest): HandoffRequest | null {
-  const { id, params } = request;
-  switch (request.method) {
-    case 'session.open': {
-      if (!exactKeys(params, ['requestedRole'], ['playerId'])) return null;
-      const requestedRole = params.requestedRole;
-      const playerId = params.playerId;
-      if (
-        (requestedRole !== 'dm' && requestedRole !== 'player') ||
-        (playerId !== undefined && typeof playerId !== 'string')
-      ) return null;
-      return {
-        v: 1, id, method: 'session.open',
-        params: { requestedRole, ...(playerId === undefined ? {} : { playerId }) },
-      };
-    }
-    case 'scene.snapshot':
-      return exactKeys(params, []) ? { v: 1, id, method: 'scene.snapshot', params: {} } : null;
-    case 'token.move': {
-      if (!exactKeys(params, ['tokenId', 'to']) || typeof params.tokenId !== 'string') return null;
-      const to = finitePoint3(params.to);
-      return to === null ? null : { v: 1, id, method: 'token.move', params: { tokenId: params.tokenId, to } };
-    }
-    case 'door.set':
-      return exactKeys(params, ['doorId', 'open']) &&
-        typeof params.doorId === 'string' && typeof params.open === 'boolean'
-        ? { v: 1, id, method: 'door.set', params: { doorId: params.doorId, open: params.open } }
-        : null;
-    case 'light.set':
-      return exactKeys(params, ['lightId', 'enabled']) &&
-        typeof params.lightId === 'string' && typeof params.enabled === 'boolean'
-        ? { v: 1, id, method: 'light.set', params: { lightId: params.lightId, enabled: params.enabled } }
-        : null;
-    default:
-      return null;
-  }
-}
-
 function identityIndex(bindings: readonly RendererTokenBinding[]): CanonicalTokenIdentityIndex {
   const byCombatantId = new Map<string, string>();
   for (const binding of bindings) {
@@ -277,6 +208,8 @@ export class ProtocolRuntime {
   readonly #authorizer: SessionAuthorizer;
   readonly #art: EncounterArtPackage;
   readonly #session: LogicalSessionAuthority;
+  readonly #runtimeIdentity = Symbol('protocol-runtime');
+  readonly #activeMutationInvocations = new Set<SessionInvocationToken>();
   readonly #eventListeners = new Set<(
     event: SceneSnapshotEvent,
     receipt?: ProtocolEstablishedReceipt,
@@ -307,11 +240,24 @@ export class ProtocolRuntime {
     return () => this.#faultListeners.delete(listener);
   }
 
-  async dispatch(input: unknown, signal?: AbortSignal): Promise<ProtocolDispatchResult> {
+  createInvocationToken(): SessionInvocationToken {
+    return Object.freeze({ runtime: this.#runtimeIdentity, invocation: Symbol('protocol-invocation') });
+  }
+
+  dispatch(
+    input: unknown,
+    signal?: AbortSignal,
+    invocationToken?: SessionInvocationToken,
+    onResponseEstablished?: ProtocolResponseEstablished,
+  ): Promise<ProtocolDispatchResult> {
+    const respond = (response: HandoffResponse): Promise<ProtocolDispatchResult> => {
+      onResponseEstablished?.(response);
+      return Promise.resolve({ kind: 'response', response });
+    };
     const decoded = decodedInput(input);
     if (!('ok' in decoded)) {
       this.#emitFault(decoded.fault);
-      return decoded;
+      return Promise.resolve(decoded);
     }
     const id = usableId(decoded.value);
     if (id === null) {
@@ -321,24 +267,42 @@ export class ProtocolRuntime {
         HANDOFF_WEBSOCKET_CLOSE_CODES.protocolError,
       );
       if (result.kind === 'transport_fault') this.#emitFault(result.fault);
-      return result;
+      return Promise.resolve(result);
     }
     if (this.#disposed || this.#closed || this.#session.destroyed) {
-      return { kind: 'response', response: failure(id, 'CLOSED', 'The logical transport is closed.') };
+      return respond(failure(id, 'CLOSED', 'The logical transport is closed.'));
     }
-    const structural = genericRequest(decoded.value);
-    if (structural === null) {
-      return { kind: 'response', response: failure(id, 'INVALID_REQUEST', 'The request structure is invalid.') };
+    const structural = genericHandoffRequestSchema._zod.run(
+      { value: decoded.value, issues: [] },
+      { async: false },
+    );
+    if (structural instanceof Promise) throw new TypeError('The v1 request schema must validate synchronously.');
+    if (structural.issues.length > 0) {
+      return respond(failure(id, 'INVALID_REQUEST', 'The request structure is invalid.'));
     }
-    const known = knownRequest(structural);
-    if (known === null) {
-      if (!['session.open', 'scene.snapshot', 'token.move', 'door.set', 'light.set'].includes(structural.method)) {
-        return { kind: 'response', response: failure(id, 'UNSUPPORTED', `Unsupported method ${structural.method}.`) };
-      }
-      return { kind: 'response', response: failure(id, 'INVALID_REQUEST', 'The request parameters are invalid.') };
+    const structuralValue = structural.value as typeof genericHandoffRequestSchema['_output'];
+    if (!knownMethods.has(structuralValue.method)) {
+      return respond(failure(id, 'UNSUPPORTED', `Unsupported method ${structuralValue.method}.`));
     }
-    const response = await this.#dispatchKnown(known, signal);
-    return { kind: 'response', response };
+    const known = handoffRequestSchema._zod.run(
+      { value: decoded.value, issues: [] },
+      { async: false },
+    );
+    if (known instanceof Promise) throw new TypeError('The v1 method schema must validate synchronously.');
+    if (known.issues.length > 0) {
+      return respond(failure(id, 'INVALID_REQUEST', 'The request parameters are invalid.'));
+    }
+    const token = invocationToken?.runtime === this.#runtimeIdentity
+      ? invocationToken
+      : this.createInvocationToken();
+    const dispatched = this.#dispatchKnown(known.value as HandoffRequest, token, signal);
+    if (dispatched instanceof Promise) {
+      return dispatched.then((response) => {
+        onResponseEstablished?.(response);
+        return { kind: 'response', response };
+      });
+    }
+    return respond(dispatched);
   }
 
   close(): void {
@@ -369,7 +333,11 @@ export class ProtocolRuntime {
     if (errors.length > 1) throw new AggregateError(errors, 'Runtime and session cleanup both failed.');
   }
 
-  async #dispatchKnown(request: HandoffRequest, signal?: AbortSignal): Promise<HandoffResponse> {
+  #dispatchKnown(
+    request: HandoffRequest,
+    invocationToken: SessionInvocationToken,
+    signal?: AbortSignal,
+  ): HandoffResponse | Promise<HandoffResponse> {
     switch (request.method) {
       case 'session.open':
         return this.#open(request.id, request.params.requestedRole, request.params.playerId);
@@ -381,14 +349,35 @@ export class ProtocolRuntime {
       }
       case 'token.move':
         if (!this.#reserve(request.id)) return failure(request.id, 'DUPLICATE_MUTATION', 'The mutation id was already used.');
-        return this.#move(request.id, request.params.tokenId, request.params.to, signal);
+        return this.#trackMutation(
+          invocationToken,
+          () => this.#move(request.id, request.params.tokenId, request.params.to, invocationToken, signal),
+        );
       case 'door.set':
         if (!this.#reserve(request.id)) return failure(request.id, 'DUPLICATE_MUTATION', 'The mutation id was already used.');
-        return this.#door(request.id, request.params.doorId, request.params.open);
+        return this.#trackMutation(
+          invocationToken,
+          () => this.#door(request.id, request.params.doorId, request.params.open, invocationToken),
+        );
       case 'light.set':
         if (!this.#reserve(request.id)) return failure(request.id, 'DUPLICATE_MUTATION', 'The mutation id was already used.');
         return failure(request.id, 'UNSUPPORTED', 'The encounter engine has no light toggle mechanic.');
     }
+  }
+
+  #trackMutation(
+    invocationToken: SessionInvocationToken,
+    operation: () => Promise<HandoffResponse>,
+  ): Promise<HandoffResponse> {
+    this.#activeMutationInvocations.add(invocationToken);
+    let response: Promise<HandoffResponse>;
+    try {
+      response = operation();
+    } catch (error: unknown) {
+      this.#activeMutationInvocations.delete(invocationToken);
+      throw error;
+    }
+    return response.finally(() => this.#activeMutationInvocations.delete(invocationToken));
   }
 
   #reserve(id: string): boolean {
@@ -433,6 +422,7 @@ export class ProtocolRuntime {
     id: string,
     tokenId: string,
     to: { readonly x: number; readonly y: number; readonly z: number },
+    invocationToken: SessionInvocationToken,
     signal?: AbortSignal,
   ): Promise<HandoffResponse> {
     if (this.#audience === null) return failure(id, 'SESSION_NOT_OPEN', 'Open the session before mutating it.');
@@ -474,7 +464,7 @@ export class ProtocolRuntime {
       playerId: this.#principal.playerId,
       tokenId,
       requestId: pending.requestId,
-      clientRequestId: id,
+      invocationToken,
       encounterRevision: pending.encounterRevision,
       offeredActionId,
       ...(signal === undefined ? {} : { signal }),
@@ -482,10 +472,15 @@ export class ProtocolRuntime {
     return terminalResponse(id, outcome);
   }
 
-  async #door(id: string, doorId: string, open: boolean): Promise<HandoffResponse> {
+  async #door(
+    id: string,
+    doorId: string,
+    open: boolean,
+    invocationToken: SessionInvocationToken,
+  ): Promise<HandoffResponse> {
     if (this.#audience === null) return failure(id, 'SESSION_NOT_OPEN', 'Open the session before mutating it.');
     if (this.#principal.role !== 'dm') return failure(id, 'FORBIDDEN', 'Players cannot change door state.');
-    const outcome = await this.#service.setDoor({ clientRequestId: id, principal: { kind: 'dm' }, doorId, open });
+    const outcome = await this.#service.setDoor({ invocationToken, principal: { kind: 'dm' }, doorId, open });
     switch (outcome.kind) {
       case 'committed': return success(id, { revision: outcome.revision });
       case 'refused': return failure(id, outcome.code, outcome.reason);
@@ -524,12 +519,18 @@ export class ProtocolRuntime {
   #publish(event: DmSessionSnapshotEvent | PlayerSessionSnapshotEvent): void {
     switch (event.kind) {
       case 'mutation':
-      case 'autonomous':
+      case 'autonomous': {
+        const receipt = event.terminalReceipt;
+        const establishedReceipt = receipt !== undefined &&
+          this.#activeMutationInvocations.has(receipt.invocationToken)
+          ? receipt
+          : undefined;
         this.#emitSnapshot(
           { projection: event.projection, tokenBindings: event.tokenBindings },
-          event.terminalReceipt,
+          establishedReceipt,
         );
         return;
+      }
       case 'offer':
       case 'status':
       case 'recovery':

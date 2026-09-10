@@ -29,17 +29,23 @@ type ActiveTerminalReceipt =
   | {
       readonly kind: 'offered_action';
       readonly requestId: string;
-      readonly clientRequestId?: string;
+      readonly invocationToken?: SessionInvocationToken;
       established: boolean;
     }
   | {
       readonly kind: 'door';
-      readonly clientRequestId?: string;
+      readonly invocationToken?: SessionInvocationToken;
       established: boolean;
     };
 
+/** Process-local identity for exactly one protocol invocation. */
+export interface SessionInvocationToken {
+  readonly runtime: symbol;
+  readonly invocation: symbol;
+}
+
 export interface SessionTerminalReceipt {
-  readonly requestId: string;
+  readonly invocationToken: SessionInvocationToken;
   readonly revision: number;
 }
 
@@ -87,7 +93,7 @@ export type PlayerSubscriptionResult =
   | { readonly kind: 'refused'; readonly code: 'UNAUTHORIZED' };
 
 export interface OfferedActionMutation {
-  readonly clientRequestId?: string;
+  readonly invocationToken?: SessionInvocationToken;
   readonly playerId?: string;
   readonly tokenId: string;
   readonly requestId: string;
@@ -322,14 +328,14 @@ export class EncounterSessionService {
       {
         kind: 'offered_action',
         requestId: input.requestId,
-        ...(input.clientRequestId === undefined ? {} : { clientRequestId: input.clientRequestId }),
+        ...(input.invocationToken === undefined ? {} : { invocationToken: input.invocationToken }),
         established: false,
       },
     );
   }
 
   setDoor(input: {
-    readonly clientRequestId?: string;
+    readonly invocationToken?: SessionInvocationToken;
     readonly principal?: SessionPrincipal;
     readonly doorId: string;
     readonly open: boolean;
@@ -353,7 +359,7 @@ export class EncounterSessionService {
       }
       const receipt: ActiveTerminalReceipt = {
         kind: 'door',
-        ...(input.clientRequestId === undefined ? {} : { clientRequestId: input.clientRequestId }),
+        ...(input.invocationToken === undefined ? {} : { invocationToken: input.invocationToken }),
         established: false,
       };
       this.#activeTerminalReceipt = receipt;
@@ -578,13 +584,13 @@ export class EncounterSessionService {
       receipt.requestId === activeReceipt.requestId
     ) {
       activeReceipt.established = true;
-      if (activeReceipt.clientRequestId !== undefined) {
-        terminalReceipt = { requestId: activeReceipt.clientRequestId, revision: receipt.revision };
+      if (activeReceipt.invocationToken !== undefined) {
+        terminalReceipt = { invocationToken: activeReceipt.invocationToken, revision: receipt.revision };
       }
     } else if (receipt?.kind === 'door' && activeReceipt?.kind === 'door') {
       activeReceipt.established = true;
-      if (activeReceipt.clientRequestId !== undefined) {
-        terminalReceipt = { requestId: activeReceipt.clientRequestId, revision: receipt.revision };
+      if (activeReceipt.invocationToken !== undefined) {
+        terminalReceipt = { invocationToken: activeReceipt.invocationToken, revision: receipt.revision };
       }
     }
     const dmEvent = {

@@ -1,5 +1,6 @@
 import {
   type HandoffResponse,
+  type ProtocolEstablishedReceipt,
   ProtocolRuntime,
   type ProtocolTransportFault,
   type SceneSnapshotEvent,
@@ -11,6 +12,7 @@ import {
   type SceneTransportStatus,
 } from './scene-transport';
 import type { SceneSnapshot } from './v1/contracts';
+import type { SessionInvocationToken } from '../encounter-session-service';
 
 interface Deferred<T> {
   readonly promise: Promise<T>;
@@ -20,6 +22,9 @@ interface Deferred<T> {
 
 interface PendingRequest extends Deferred<HandoffResponse> {
   readonly requestId: string | null;
+  readonly method: string | null;
+  readonly invocationToken: SessionInvocationToken;
+  establishedResponse: HandoffResponse | null;
   receiptRevision: number | null;
 }
 
@@ -28,6 +33,16 @@ function requestIdOf(request: unknown): string | null {
   try {
     const id = Reflect.get(request, 'id');
     return typeof id === 'string' ? id : null;
+  } catch {
+    return null;
+  }
+}
+
+function requestMethodOf(request: unknown): string | null {
+  if (typeof request !== 'object' || request === null || Array.isArray(request)) return null;
+  try {
+    const method = Reflect.get(request, 'method');
+    return typeof method === 'string' ? method : null;
   } catch {
     return null;
   }
@@ -68,13 +83,22 @@ export class InProcessSceneTransport implements SceneTransport {
     if (this.#state === 'closed' || this.#state === 'disposed') {
       return Promise.reject(new SceneTransportClosedError());
     }
-    const pending = {
+    const invocationToken = this.runtime.createInvocationToken();
+    const pending: PendingRequest = {
       ...deferred<HandoffResponse>(),
       requestId: requestIdOf(request),
+      method: requestMethodOf(request),
+      invocationToken,
+      establishedResponse: null,
       receiptRevision: null,
-    } satisfies PendingRequest;
+    };
     this.#pending.add(pending);
-    void this.runtime.dispatch(request).then((result) => {
+    void this.runtime.dispatch(request, undefined, invocationToken, (response) => {
+      if (
+        this.#pending.has(pending) &&
+        (pending.method === 'token.move' || pending.method === 'door.set' || pending.method === 'light.set')
+      ) pending.establishedResponse = response;
+    }).then((result) => {
       if (!this.#pending.delete(pending)) return;
       if (result.kind === 'transport_fault') {
         pending.reject(new SceneTransportFaultError(result.fault));
@@ -180,10 +204,12 @@ export class InProcessSceneTransport implements SceneTransport {
     if (destroyError !== undefined) throw destroyError;
   }
 
-  #receiveEvent(event: SceneSnapshotEvent, receipt?: { readonly requestId: string; readonly revision: number }): void {
+  #receiveEvent(event: SceneSnapshotEvent, receipt?: ProtocolEstablishedReceipt): void {
     if (receipt !== undefined) {
       const pending = [...this.#pending].find((candidate) =>
-        candidate.requestId === receipt.requestId && candidate.receiptRevision === null);
+        candidate.invocationToken === receipt.invocationToken &&
+        (candidate.method === 'token.move' || candidate.method === 'door.set') &&
+        candidate.receiptRevision === null);
       if (pending !== undefined) pending.receiptRevision = receipt.revision;
     }
     if (!this.#initialSettled) {
@@ -209,7 +235,13 @@ export class InProcessSceneTransport implements SceneTransport {
       this.#initial.reject(error);
     }
     for (const pending of this.#pending) {
-      if (pending.requestId !== null && pending.receiptRevision !== null) {
+      if (pending.establishedResponse !== null) {
+        pending.resolve(pending.establishedResponse);
+      } else if (
+        pending.requestId !== null &&
+        (pending.method === 'token.move' || pending.method === 'door.set') &&
+        pending.receiptRevision !== null
+      ) {
         pending.resolve({
           v: 1,
           id: pending.requestId,
