@@ -17,3 +17,5 @@
 - 2026-09-10 11:42 EDT — Slice 2 supervisor 172-spec cumulative on writable checkout: tsc/sg/diffcheck 0, vitest 3183/3213, 30 reds in 8 files, mostly genuine assertion failures in the MCP-driven conversation/arena/board-delivery specs (lane had written them off as EROFS). Supervisor materialising a real node_modules in the offers worktree (npm ci) so the lane can run MCP specs; fix-pass brief prepared, dispatch after install.
 
 - 2026-09-10 13:08 EDT — Slice 2 fix pass DONE (legacy default, snapshot env on MCP paths, paired pin move); supervisor cumulative 3209/3213 (load timeouts), serial 2 files green, arena alone 44/44; committed 03bdf1ef; Astra r1 dispatched (fresh session).
+
+- 2026-09-10 13:13 EDT — Slice 2 Astra r1 REJECT (F1 scope/11th file — supervisor-authorized deviation D586.186; F2 launcher infers legacy from missing binding; F3 ledger rows). r2 dispatched (resume 01a08bc1…).
