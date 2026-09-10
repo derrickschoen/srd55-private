@@ -184,6 +184,57 @@ describe('held-out reserve leak wall', () => {
     }));
   });
 
+  it.each([
+    ['require bracket resolver',
+      "const path = require['resolve']('../vtt/heldout-evaluation');"],
+    ['import.meta bracket resolver',
+      "const path = import.meta['resolve']('../vtt/heldout-evaluation');"],
+    ['require constant-concatenation key',
+      "const path = require['re' + 'solve']('../vtt/heldout-evaluation');"],
+    ['import.meta constant-template key',
+      "const path = import.meta[`${'re'}solve`]('../vtt/heldout-evaluation');"],
+  ] as const)('rejects a held-out %s resolution edge', (_label, addedText) => {
+    const report = inspectHeldoutLeakChanges([{
+      path: 'tools/tuning/repair-ranking.ts',
+      addedText,
+    }], 'F', bindings);
+
+    expect(report.findings).toContainEqual(expect.objectContaining({
+      kind: 'protocol_resolution',
+    }));
+    expect(report.findings).not.toContainEqual(expect.objectContaining({
+      kind: 'unresolved_module_edge',
+    }));
+  });
+
+  it.each([
+    ['require bracket resolver target', [
+      "const target = '../vtt/heldout-evaluation';",
+      "const path = require['resolve'](target);",
+    ].join('\n')],
+    ['import.meta bracket resolver target', [
+      "const target = '../vtt/heldout-evaluation';",
+      "const path = import.meta['resolve'](target);",
+    ].join('\n')],
+    ['require bracket key', [
+      "const key = 'resolve';",
+      "const path = require[key]('../vtt/heldout-evaluation');",
+    ].join('\n')],
+    ['import.meta bracket key', [
+      "const key = 'resolve';",
+      "const path = import.meta[key]('../vtt/heldout-evaluation');",
+    ].join('\n')],
+  ] as const)('fails closed on an unresolved %s', (_label, addedText) => {
+    const report = inspectHeldoutLeakChanges([{
+      path: 'tools/tuning/repair-ranking.ts',
+      addedText,
+    }], 'F', bindings);
+
+    expect(report.findings).toContainEqual(expect.objectContaining({
+      kind: 'unresolved_module_edge',
+    }));
+  });
+
   it('documents executable eval and new Function strings as outside AST edge discovery', () => {
     expect(HELDOUT_LEAK_AST_OUT_OF_SCOPE).toEqual([
       'eval executable strings',

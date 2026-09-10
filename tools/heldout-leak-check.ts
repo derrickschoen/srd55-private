@@ -133,17 +133,38 @@ function isRequireCallee(expression: ts.Expression): boolean {
   return ts.isIdentifier(callee) && callee.text === 'require';
 }
 
-function resolutionSyntax(expression: ts.Expression): Extract<
+type ResolutionSyntax = Extract<
   ModuleEdgeSyntax,
   'require_resolve' | 'import_meta_resolve'
-> | null {
-  const callee = unwrapTransparentExpression(expression);
-  if (!ts.isPropertyAccessExpression(callee) || callee.name.text !== 'resolve') return null;
-  const receiver = unwrapTransparentExpression(callee.expression);
+>;
+
+function resolutionReceiverSyntax(expression: ts.Expression): ResolutionSyntax | null {
+  const receiver = unwrapTransparentExpression(expression);
   if (ts.isIdentifier(receiver) && receiver.text === 'require') return 'require_resolve';
   if (ts.isMetaProperty(receiver) &&
     receiver.keywordToken === ts.SyntaxKind.ImportKeyword && receiver.name.text === 'meta') {
     return 'import_meta_resolve';
+  }
+  return null;
+}
+
+function resolutionCallee(expression: ts.Expression): {
+  readonly syntax: ResolutionSyntax;
+  readonly key: 'resolve' | 'unresolved';
+} | null {
+  const callee = unwrapTransparentExpression(expression);
+  if (ts.isPropertyAccessExpression(callee)) {
+    const syntax = resolutionReceiverSyntax(callee.expression);
+    return syntax !== null && callee.name.text === 'resolve'
+      ? { syntax, key: 'resolve' }
+      : null;
+  }
+  if (ts.isElementAccessExpression(callee)) {
+    const syntax = resolutionReceiverSyntax(callee.expression);
+    if (syntax === null) return null;
+    const key = constantString(callee.argumentExpression);
+    if (key === null) return { syntax, key: 'unresolved' };
+    return key === 'resolve' ? { syntax, key: 'resolve' } : null;
   }
   return null;
 }
@@ -189,6 +210,9 @@ function discoverModuleEdges(path: string, source: string): readonly ModuleEdge[
       specifier,
     });
   };
+  const addUnresolved = (syntax: ModuleEdgeSyntax): void => {
+    result.push({ kind: 'unresolved', syntax, specifier: null });
+  };
   const visit = (node: ts.Node): void => {
     if (ts.isImportDeclaration(node)) {
       add('static_import', node.moduleSpecifier);
@@ -209,8 +233,12 @@ function discoverModuleEdges(path: string, source: string): readonly ModuleEdge[
       } else if (isRequireCallee(callee)) {
         add('require', firstArgument);
       } else {
-        const syntax = resolutionSyntax(callee);
-        if (syntax !== null) add(syntax, firstArgument, 'resolution');
+        const resolution = resolutionCallee(callee);
+        if (resolution?.key === 'resolve') {
+          add(resolution.syntax, firstArgument, 'resolution');
+        } else if (resolution?.key === 'unresolved') {
+          addUnresolved(resolution.syntax);
+        }
       }
     }
     ts.forEachChild(node, visit);
