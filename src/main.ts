@@ -45,11 +45,17 @@ import {
 } from './pwa/browser-support-notice';
 
 const launchUrl = new URL(location.href);
+const handoffWorkerLaunch = launchUrl.pathname.replace(/\/+$/, '') === '/vtt-handoff';
 const localEncounterLaunch =
   launchUrl.pathname.replace(/\/+$/, '') === '/vtt' &&
   launchUrl.searchParams.get('encounter') === 'reference';
 
-if (localEncounterLaunch) {
+if (handoffWorkerLaunch) {
+  const handoffRoot = document.querySelector<HTMLElement>('#app');
+  if (handoffRoot === null) throw new Error('Application root #app is missing.');
+  void import('./vtt/handoff/worker-harness').then(({ mountWorkerHarness }) =>
+    mountWorkerHarness(handoffRoot));
+} else if (localEncounterLaunch) {
   const encounterRoot = document.querySelector<HTMLElement>('#app');
   if (encounterRoot === null) throw new Error('Application root #app is missing.');
   const view = launchUrl.searchParams.get('view') === 'dm' ? 'dm' : 'player';

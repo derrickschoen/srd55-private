@@ -112,7 +112,7 @@ function platformViolations(graph: ReadonlyMap<string, SourceModule>): readonly 
   const violations: string[] = [];
   for (const module of graph.values()) {
     for (const edge of module.imports) {
-      if (edge.specifier === 'node:fs' || edge.specifier.startsWith('node:fs/')) {
+      if (edge.specifier.startsWith('node:')) {
         violations.push(`${repositoryPath(module.file)} imports ${edge.specifier}`);
       }
     }
@@ -131,7 +131,7 @@ function platformViolations(graph: ReadonlyMap<string, SourceModule>): readonly 
       }
       if (
         ts.isIdentifier(node) &&
-        /^(?:indexedDB|IDB(?:Database|Factory|ObjectStore)|HTMLCanvasElement|OffscreenCanvas|CanvasRenderingContext(?:2D)?)$/u.test(node.text)
+        /^(?:indexedDB|IDB(?:Database|Factory|ObjectStore)|HTMLCanvasElement|OffscreenCanvas|CanvasRenderingContext(?:2D)?|SharedArrayBuffer|Atomics)$/u.test(node.text)
       ) {
         violations.push(`${repositoryPath(module.file)} names ${node.text}`);
       }
@@ -294,6 +294,8 @@ const CORE_ENTRYPOINTS = [
   'src/vtt/encounter-session-service.ts',
   'src/vtt/handoff/protocol-runtime.ts',
   'src/vtt/handoff/in-process-transport.ts',
+  'src/vtt/handoff/worker-entry.ts',
+  'src/vtt/handoff/worker-transport.ts',
 ] as const;
 
 let cachedCoreGraph: ReadonlyMap<string, SourceModule> | null = null;
