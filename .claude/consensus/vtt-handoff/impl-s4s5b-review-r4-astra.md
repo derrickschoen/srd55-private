@@ -1,0 +1,38 @@
+**F58 — SIGNIFICANT: Invocation tokens are constructible and reusable, rather than bound to exactly one dispatch.**
+
+`createInvocationToken()` exposes the runtime symbol, and dispatch accepts any object containing that symbol. Thus `{runtime: minted.runtime, invocation: Symbol()}` is accepted without having been minted. A genuine token can also be supplied to multiple dispatches ([protocol-runtime.ts:243](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/handoff/protocol-runtime.ts:243), [protocol-runtime.ts:295](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/handoff/protocol-runtime.ts:295)).
+
+With two pending mutations sharing a token, the Set collapses their tracking into one entry; the first completion deletes the second operation’s receipt eligibility ([protocol-runtime.ts:368](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/handoff/protocol-runtime.ts:368), [protocol-runtime.ts:523](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/handoff/protocol-runtime.ts:523)). The four new collision tests use normally minted tokens and do not exercise construction or reuse ([in-process-transport.test.ts:313](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/tests/unit/vtt/in-process-transport.test.ts:313)).
+
+**Required change:** Enforce private mint ownership and single consumption by object identity, or remove caller-supplied tokens from dispatch. Add constructed-token, reused-token and cross-runtime-token regressions. A matching public `runtime` property is insufficient provenance.
+
+**F59 — SIGNIFICANT: Closing a runtime does not clear active invocation tracking.**
+
+Tracking is removed only when the downstream operation settles. `close()` clears listeners but never clears `#activeMutationInvocations`; disposal and destruction inherit this omission ([protocol-runtime.ts:308](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/handoff/protocol-runtime.ts:308), [protocol-runtime.ts:380](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/handoff/protocol-runtime.ts:380)).
+
+Consequently, a detached runtime retains invocation entries indefinitely while an authoritative operation remains blocked. This misses the explicitly requested cleanup before barrier release.
+
+**Required change:** Clear local invocation tracking during terminal cleanup, including throwing cleanup paths, without cancelling or retrying authoritative work. Add a controlled-barrier regression that verifies cleanup while the barrier remains unresolved and preserves already established transport receipts.
+
+**F60 — SIGNIFICANT: Synchronous dispatch exceptions escape the promise-based transport and orphan pending requests.**
+
+`request()` registers its deferred promise before calling dispatch, without catching synchronous exceptions ([in-process-transport.ts:86](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/handoff/in-process-transport.ts:86)). Dispatch is now non-async, and schema execution can throw synchronously ([protocol-runtime.ts:247](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/handoff/protocol-runtime.ts:247)).
+
+The existing throwing-accessor fixture demonstrates the input: its `params` getter throws. Through `transport.request()`, that exception escapes before the pending promise is returned; the pending entry remains registered. Subsequent closure can reject that unreachable promise. The corpus hides this distinction by catching both synchronous throws and rejected promises around direct runtime calls ([protocol-runtime.test.ts:468](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/tests/unit/vtt/protocol-runtime.test.ts:468), [protocol-runtime.test.ts:542](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/tests/unit/vtt/protocol-runtime.test.ts:542)).
+
+**Required change:** Preserve promise-based failure and pending cleanup for synchronous validation/service exceptions. Test the throwing accessor through `InProcessSceneTransport`, including subsequent closure and another valid request. Also add the requested wrong-`v` rejection case, which is absent from the 30-case corpus.
+
+## Verified claims
+
+- **F56’s original cross-seat failure is fixed.** Settlement matches token object identity plus mutation method. The four real-host regressions independently require a committed DM result, duplicate refusal or closed read, including empty IDs ([in-process-transport.ts:207](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/handoff/in-process-transport.ts:207), [in-process-transport.test.ts:375](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/tests/unit/vtt/in-process-transport.test.ts:375)). F58–F59 concern the additional token guarantees.
+- **F57’s duplicated-validator divergence is fixed.** Both validation stages now execute the authoritative schemas. All 30 listed dispositions have handwritten expectations, followed by protocol parity assertions; the replaced assertion lost no strength ([protocol-runtime.ts:275](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/handoff/protocol-runtime.ts:275), [protocol-runtime.test.ts:516](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/tests/unit/vtt/protocol-runtime.test.ts:516)).
+- **Ruling on `_zod.run`: acceptable for this exact-pinned boundary.** Zod is pinned to **4.4.3**, and its installed public `safeParse` calls the same internal parser with the same initial payload/context ([package.json:54](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/package.json:54), [Zod parse.js:31](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/node_modules/zod/v4/core/parse.js:31)). The five warm-ups cover every frozen request variant; compilation is schema-shape based, rather than specific-input based ([protocol-runtime.ts:71](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/handoff/protocol-runtime.ts:71), [Zod schemas.js:987](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/node_modules/zod/v4/core/schemas.js:987)). This dependency must be rechecked on a Zod upgrade. Public `safeParse` with a revised measurement boundary is a reasonable alternative, but is not required merely because this API is internal.
+- Validation failures emit fixed protocol messages; neither issues nor serialized input enter those responses. Unknown valid methods remain `UNSUPPORTED` ([protocol-runtime.ts:280](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/handoff/protocol-runtime.ts:280)).
+- **F54 remains effective:** measurement includes open, invalid known input through the transport, fresh snapshot and mutation publication. The retained assertion requires zero parse/stringify/clone calls ([in-process-transport.test.ts:681](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/tests/unit/vtt/in-process-transport.test.ts:681)).
+- Both door and offered-action paths carry invocation metadata, and service receipt establishment still precedes observers ([encounter-session-service.ts:326](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/encounter-session-service.ts:326), [encounter-session-service.ts:581](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/encounter-session-service.ts:581)). FIFO, persistence and coordinate logic are unchanged.
+- The S3 test file lost no assertion and was unchanged this round. F50 cleanup, F51/F52 capture/fallback and F55 publication implementations remain unchanged. Protected-path diffs are empty; plan, baseline, examples and frozen-contract hashes match. No prohibited additions were found.
+
+Review was read-only; no tests, builds or agents were invoked.
+
+VERDICT: REJECT
+review complete
