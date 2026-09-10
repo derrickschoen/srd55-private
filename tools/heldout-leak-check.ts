@@ -46,6 +46,8 @@ export interface HeldoutLeakInspectionContext {
   readonly packageJsonFiles?: Readonly<Record<string, string>>;
   /** Complete candidate sources used when resolution configuration invalidates unchanged consumers. */
   readonly candidateSourceFiles?: Readonly<Record<string, string>>;
+  /** Candidate source pool from which project `extends` configuration dependencies are loaded. */
+  readonly candidateConfigurationFiles?: Readonly<Record<string, string>>;
   readonly resolutionConfigChanged?: boolean;
   readonly configuredAliasPrefixes?: readonly string[];
   readonly configuredAliasRegexes?: readonly {
@@ -197,7 +199,7 @@ export const HELDOUT_LEAK_FLOW_AUDIT = [
   { position: 'throw', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global transfer', configurationReferences: 'Rule C fails closed for alias-bearing thrown values' },
   { position: 'await or promise resolution', loaderValues: 'Rule N1 permits only await import of a constant built-in namespace and otherwise failed_closed; Rule N2 validates loader use', configurationReferences: 'Rule C fails closed for alias-bearing awaited or promise-resolved values' },
   { position: 'template substitution', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global transfer', configurationReferences: 'Rule C fails closed for alias-bearing template substitutions' },
-  { position: 'spread', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global transfer', configurationReferences: 'Rule C permits visited-graph literal composition and non-alias-bearing subtree reuse; alias-bearing spreads into untracked literals fail closed' },
+  { position: 'spread', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global transfer', configurationReferences: 'Rule C resolves tracked object spreads in source-order last-write order and tracked array spreads by runtime index; untracked spreads fail closed when addressed' },
   { position: 'property value', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global storage', configurationReferences: 'Rule C visits exact literal nodes; alias-bearing values stored in untracked objects fail closed' },
   { position: 'array element', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global storage', configurationReferences: 'Rule C records literal array placements; test.projects elements are nested configuration roots, while non-alias-bearing elements under unrelated keys remain usable' },
   { position: 'call argument', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global transfer', configurationReferences: 'Rule C interprets symbol-proven defineConfig and mergeConfig graph entries and otherwise fails closed for alias-bearing arguments' },
@@ -242,6 +244,8 @@ export const HELDOUT_MODULE_SPECIFIER_POLICY = {
     'Rule C classifies configuration roots, resolve/test/alias bindings, and bindings spread transitively into those containers as alias-capable regardless of current literal contents',
     'Rule C records every configuration placement prefix and unions outer paths with every embedded binding dereferenced, composing each placement with remaining descendant and const-alias paths; any semantic placement makes the reference alias-capable',
     'Rule C visits ordinary shorthand and literal-array composition; installed Vitest 4 test.projects array elements are nested configuration roots, while removed test.workspace is not interpreted',
+    'Rule C resolves tracked literal object and array spreads with JavaScript last-write and runtime-index semantics, including terminal embedded identifiers',
+    'Rule C recursively inspects literal test.projects extends files from the candidate tree; true reuses the root configuration and missing, external, cyclic, or nonliteral targets fail closed',
     'Rule C permits non-exported plain-const aliases to preserve the same addressed subtree and allows non-alias-bearing subtrees in otherwise escaping positions',
     'subtrees strictly below a configuration root at nonsemantic addresses remain non-alias-capable unless their contents or binding position makes them capable',
     'resolve and Vitest test are alias-capable containers whose values must be literal objects or tracked const literals; their alias values are interpreted identically',
@@ -1740,11 +1744,20 @@ export function inspectHeldoutLeakChanges(
     throw new TypeError('Held-out reserve result paths must use the registered result root.');
   }
   const findings: HeldoutLeakFinding[] = [];
+  const configurationSources = {
+    ...(context.candidateConfigurationFiles ?? {}),
+    ...(context.candidateSourceFiles ?? {}),
+    ...Object.fromEntries(changes.map((change) => [
+      change.path,
+      change.sourceText ?? change.addedText,
+    ])),
+  };
   const aliasDiscoveries = changes.flatMap((change) => {
     if (!isRootViteOrVitestConfig(change.path)) return [];
     return [{ path: change.path, discovery: viteAliases(
       change.sourceText ?? change.addedText,
       change.path,
+      configurationSources,
     ) }];
   });
   const discoveredAliases = aliasDiscoveries.flatMap(({ discovery }) => discovery.aliases);
@@ -1766,6 +1779,12 @@ export function inspectHeldoutLeakChanges(
     unresolvedResolutionConfigPaths,
   };
   const effectiveChanges = new Map(changes.map((change) => [change.path, change]));
+  for (const nestedPath of aliasDiscoveries.flatMap(({ discovery }) => discovery.nestedPaths)) {
+    const sourceText = configurationSources[nestedPath];
+    if (sourceText !== undefined && !effectiveChanges.has(nestedPath)) {
+      effectiveChanges.set(nestedPath, { path: nestedPath, addedText: '', sourceText });
+    }
+  }
   const resolutionConfigChanged = inspectionContext.resolutionConfigChanged === true ||
     changes.some((change) => isResolutionConfigPath(change.path));
   if (resolutionConfigChanged) {
@@ -1974,13 +1993,46 @@ interface ViteAliasDiscovery {
     readonly flags: string;
   }[];
   readonly unresolved: boolean;
+  readonly nestedPaths: readonly string[];
 }
 
-function viteAliases(source: string, path: string): ViteAliasDiscovery {
+function viteAliases(
+  source: string,
+  path: string,
+  configurationSources: Readonly<Record<string, string>> = {},
+  configurationStack: ReadonlySet<string> = new Set(),
+): ViteAliasDiscovery {
+  if (configurationStack.has(path)) {
+    return { aliases: [], regexes: [], unresolved: true, nestedPaths: [path] };
+  }
   const sourceFile = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, scriptKind(path));
   const aliases = new Set<string>();
   const regexes = new Map<string, { readonly source: string; readonly flags: string }>();
+  const nestedPaths = new Set<string>();
   let unresolved = false;
+  const inspectExtendedConfiguration = (specifier: string): void => {
+    if (specifier.length === 0 || posix.isAbsolute(specifier)) {
+      unresolved = true;
+      return;
+    }
+    const target = posix.normalize(posix.join(posix.dirname(path), specifier));
+    if (target === '..' || target.startsWith('../')) {
+      unresolved = true;
+      return;
+    }
+    const nestedSource = configurationSources[target];
+    if (nestedSource === undefined) {
+      unresolved = true;
+      return;
+    }
+    nestedPaths.add(target);
+    const nested = viteAliases(nestedSource, target, configurationSources,
+      new Set([...configurationStack, path]));
+    for (const alias of nested.aliases) aliases.add(alias);
+    for (const regex of nested.regexes) regexes.set(`${regex.source}/${regex.flags}`, regex);
+    for (const nestedPath of nested.nestedPaths) nestedPaths.add(nestedPath);
+    if (nested.unresolved) unresolved = true;
+  };
   const compilerOptions: ts.CompilerOptions = {
     allowJs: true,
     checkJs: false,
@@ -2237,6 +2289,18 @@ function viteAliases(source: string, path: string): ViteAliasDiscovery {
       } else unresolved = true;
     }
   };
+  const visitProjectExtends = (expression: ts.Expression): void => {
+    // cli-api.BK8pd4xc.js:11113 maps a string to that config file and true to
+    // the root Vite config before initializeProject creates the server at :11048.
+    const value = unwrapTransparentExpression(expression);
+    reachableNodes.add(value);
+    if (value.kind === ts.SyntaxKind.TrueKeyword) return;
+    if (ts.isStringLiteral(value)) {
+      inspectExtendedConfiguration(value.text);
+      return;
+    }
+    unresolved = true;
+  };
   const visitResolveObject = (expression: ts.Expression, path: readonly string[]): void => {
     const value = unwrapTransparentExpression(expression);
     if (ts.isIdentifier(value)) {
@@ -2276,6 +2340,8 @@ function viteAliases(source: string, path: string): ViteAliasDiscovery {
           visitResolveObject(property.name, [...path, property.name.text]);
         } else if (property.name.text === 'projects' && path.at(-1) === 'test') {
           visitProjectConfigurations(property.name, [...path, 'projects']);
+        } else if (property.name.text === 'extends' && path.at(-2) === 'projects') {
+          unresolved = true;
         } else visitOrdinaryPropertyValue(property.name, [...path, property.name.text]);
         continue;
       }
@@ -2290,6 +2356,8 @@ function viteAliases(source: string, path: string): ViteAliasDiscovery {
         visitResolveObject(property.initializer, [...path, key]);
       } else if (key === 'projects' && path.at(-1) === 'test') {
         visitProjectConfigurations(property.initializer, [...path, key]);
+      } else if (key === 'extends' && path.at(-2) === 'projects') {
+        visitProjectExtends(property.initializer);
       } else if (key !== null) visitOrdinaryPropertyValue(property.initializer, [...path, key]);
     }
   };
@@ -2321,6 +2389,8 @@ function viteAliases(source: string, path: string): ViteAliasDiscovery {
           visitResolveObject(property.name, [...path, property.name.text]);
         } else if (property.name.text === 'alias') {
           visitAliasValue(property.name, [...path, 'alias']);
+        } else if (property.name.text === 'extends' && path.at(-2) === 'projects') {
+          unresolved = true;
         } else {
           visitOrdinaryPropertyValue(property.name, [...path, property.name.text]);
         }
@@ -2335,16 +2405,47 @@ function viteAliases(source: string, path: string): ViteAliasDiscovery {
       if (key === 'resolve' || key === 'test') {
         visitResolveObject(property.initializer, [...path, key]);
       } else if (key === 'alias') visitAliasValue(property.initializer, [...path, key]);
+      else if (key === 'extends' && path.at(-2) === 'projects') {
+        visitProjectExtends(property.initializer);
+      }
       else if (key !== null) visitOrdinaryPropertyValue(property.initializer, [...path, key]);
     }
+  };
+  const reachableArrayLength = (
+    expression: ts.Expression,
+    seen: Set<ts.Symbol> = new Set(),
+  ): number | null => {
+    const value = unwrapTransparentExpression(expression);
+    if (ts.isIdentifier(value)) {
+      const resolved = declarationForReachableIdentifier(value);
+      if (resolved === null || seen.has(resolved.symbol)) return null;
+      return reachableArrayLength(resolved.declaration.initializer as ts.Expression,
+        new Set([...seen, resolved.symbol]));
+    }
+    if (!ts.isArrayLiteralExpression(value)) return null;
+    let length = 0;
+    for (const element of value.elements) {
+      if (!ts.isSpreadElement(element)) {
+        length += 1;
+        continue;
+      }
+      const spreadLength = reachableArrayLength(element.expression, seen);
+      if (spreadLength === null) return null;
+      length += spreadLength;
+    }
+    return length;
   };
   const visitReachableArray = (
     array: ts.ArrayLiteralExpression,
     path: readonly string[],
   ): void => {
     reachableNodes.add(array);
-    for (const [index, element] of array.elements.entries()) {
-      if (ts.isOmittedExpression(element)) continue;
+    let runtimeIndex: number | null = 0;
+    for (const element of array.elements) {
+      if (ts.isOmittedExpression(element)) {
+        if (runtimeIndex !== null) runtimeIndex += 1;
+        continue;
+      }
       reachableNodes.add(element);
       if (ts.isSpreadElement(element)) {
         const spread = unwrapTransparentExpression(element.expression);
@@ -2354,18 +2455,24 @@ function viteAliases(source: string, path: string): ViteAliasDiscovery {
           if (symbol !== null) recordPlacement(symbol, path);
         }
         else unresolved = true;
+        const spreadLength = reachableArrayLength(element.expression);
+        runtimeIndex = runtimeIndex === null || spreadLength === null
+          ? null
+          : runtimeIndex + spreadLength;
         continue;
       }
       const unwrapped = unwrapTransparentExpression(element);
+      const elementPath = runtimeIndex === null ? null : [...path, String(runtimeIndex)];
       if (ts.isIdentifier(unwrapped)) {
-        const elementPath = [...path, String(index)];
         const symbol = visitReachableIdentifier(unwrapped, (initializer) =>
-          visitReachableExpression(initializer, elementPath));
-        if (symbol !== null) recordPlacement(symbol, elementPath);
+          elementPath === null ? undefined : visitReachableExpression(initializer, elementPath));
+        if (symbol !== null && elementPath !== null) recordPlacement(symbol, elementPath);
       }
-      else if (ts.isObjectLiteralExpression(unwrapped) || ts.isArrayLiteralExpression(unwrapped)) {
-        visitReachableExpression(unwrapped, [...path, String(index)]);
+      else if (elementPath !== null &&
+        (ts.isObjectLiteralExpression(unwrapped) || ts.isArrayLiteralExpression(unwrapped))) {
+        visitReachableExpression(unwrapped, elementPath);
       } else unresolved = true;
+      if (runtimeIndex !== null) runtimeIndex += 1;
     }
   };
   function visitOrdinaryArray(
@@ -2373,18 +2480,28 @@ function viteAliases(source: string, path: string): ViteAliasDiscovery {
     path: readonly string[],
   ): void {
     reachableNodes.add(array);
-    for (const [index, element] of array.elements.entries()) {
-      if (ts.isOmittedExpression(element)) continue;
+    let runtimeIndex: number | null = 0;
+    for (const element of array.elements) {
+      if (ts.isOmittedExpression(element)) {
+        if (runtimeIndex !== null) runtimeIndex += 1;
+        continue;
+      }
       reachableNodes.add(element);
-      const elementPath = [...path, String(index)];
       if (ts.isSpreadElement(element)) {
         const spread = unwrapTransparentExpression(element.expression);
         if (ts.isIdentifier(spread)) visitOrdinaryPropertyValue(spread, path);
+        const spreadLength = reachableArrayLength(element.expression);
+        runtimeIndex = runtimeIndex === null || spreadLength === null
+          ? null
+          : runtimeIndex + spreadLength;
         continue;
       }
       const value = unwrapTransparentExpression(element);
-      if (ts.isIdentifier(value) || ts.isObjectLiteralExpression(value) ||
-        ts.isArrayLiteralExpression(value)) visitOrdinaryPropertyValue(value, elementPath);
+      if (runtimeIndex !== null && (ts.isIdentifier(value) ||
+        ts.isObjectLiteralExpression(value) || ts.isArrayLiteralExpression(value))) {
+        visitOrdinaryPropertyValue(value, [...path, String(runtimeIndex)]);
+      }
+      if (runtimeIndex !== null) runtimeIndex += 1;
     }
   }
   const visitReachableFunction = (fn: ts.ArrowFunction | ts.FunctionExpression): void => {
@@ -2635,55 +2752,168 @@ function viteAliases(source: string, path: string): ViteAliasDiscovery {
   }
   const rootDeclaration = (address: ConfigurationAddress): ts.VariableDeclaration | null =>
     reachableSymbols.get(address.root) ?? null;
-  const propertyValue = (
+  type AddressedValue = ts.Expression | 'known_scalar';
+  interface LiteralRoute {
+    readonly expression: ts.Expression;
+    readonly path: readonly string[];
+  }
+  type LiteralRouteResolution =
+    | { readonly kind: 'found'; readonly route: LiteralRoute }
+    | { readonly kind: 'absent' }
+    | { readonly kind: 'unresolved' };
+  function objectPropertyRoute(
     object: ts.ObjectLiteralExpression,
     key: string,
-  ): ts.Expression | null => {
-    const matches = object.properties.filter((property) =>
-      (ts.isPropertyAssignment(property) || ts.isShorthandPropertyAssignment(property)) &&
-      propertyNameText(property.name) === key);
-    if (matches.length !== 1) return null;
-    const property = matches[0];
-    if (property === undefined) return null;
-    if (ts.isPropertyAssignment(property)) return property.initializer;
-    return ts.isShorthandPropertyAssignment(property) ? property.name : null;
-  };
-  type AddressedValue = ts.Expression | 'known_scalar';
-  const addressedValue = (address: ConfigurationAddress): AddressedValue | null => {
+    seen: Set<string>,
+  ): LiteralRouteResolution {
+    let selected: LiteralRouteResolution = { kind: 'absent' };
+    for (const property of object.properties) {
+      if (ts.isSpreadAssignment(property)) {
+        const spreadAddress = addressForExpression(property.expression);
+        const spreadValue = spreadAddress === null ? null : addressedValue(spreadAddress, seen);
+        if (spreadValue === null || spreadValue === 'known_scalar' ||
+          !ts.isObjectLiteralExpression(unwrapTransparentExpression(spreadValue))) {
+          selected = { kind: 'unresolved' };
+          continue;
+        }
+        const contribution = objectPropertyRoute(
+          unwrapTransparentExpression(spreadValue) as ts.ObjectLiteralExpression,
+          key,
+          seen,
+        );
+        if (contribution.kind === 'found') {
+          selected = { kind: 'found', route: { expression: property.expression, path: [key] } };
+        } else if (contribution.kind === 'unresolved') selected = contribution;
+        continue;
+      }
+      if (!ts.isPropertyAssignment(property) && !ts.isShorthandPropertyAssignment(property)) {
+        selected = { kind: 'unresolved' };
+        continue;
+      }
+      const propertyName = propertyNameText(property.name);
+      if (propertyName === null) {
+        selected = { kind: 'unresolved' };
+        continue;
+      }
+      if (propertyName !== key) continue;
+      selected = {
+        kind: 'found',
+        route: {
+          expression: ts.isPropertyAssignment(property) ? property.initializer : property.name,
+          path: [],
+        },
+      };
+    }
+    return selected;
+  }
+  function resolvedArrayLength(
+    array: ts.ArrayLiteralExpression,
+    seen: Set<string>,
+  ): number | null {
+    let length = 0;
+    for (const element of array.elements) {
+      if (ts.isOmittedExpression(element)) {
+        length += 1;
+        continue;
+      }
+      if (!ts.isSpreadElement(element)) {
+        length += 1;
+        continue;
+      }
+      const spreadAddress = addressForExpression(element.expression);
+      const spreadValue = spreadAddress === null ? null : addressedValue(spreadAddress, seen);
+      if (spreadValue === null || spreadValue === 'known_scalar') return null;
+      const literal = unwrapTransparentExpression(spreadValue);
+      if (!ts.isArrayLiteralExpression(literal)) return null;
+      const spreadLength = resolvedArrayLength(literal, seen);
+      if (spreadLength === null) return null;
+      length += spreadLength;
+    }
+    return length;
+  }
+  function arrayElementRoute(
+    array: ts.ArrayLiteralExpression,
+    requestedIndex: number,
+    seen: Set<string>,
+  ): LiteralRouteResolution {
+    let runtimeIndex = 0;
+    for (const element of array.elements) {
+      if (ts.isSpreadElement(element)) {
+        const spreadAddress = addressForExpression(element.expression);
+        const spreadValue = spreadAddress === null ? null : addressedValue(spreadAddress, seen);
+        if (spreadValue === null || spreadValue === 'known_scalar') return { kind: 'unresolved' };
+        const literal = unwrapTransparentExpression(spreadValue);
+        if (!ts.isArrayLiteralExpression(literal)) return { kind: 'unresolved' };
+        const spreadLength = resolvedArrayLength(literal, seen);
+        if (spreadLength === null) return { kind: 'unresolved' };
+        if (requestedIndex < runtimeIndex + spreadLength) {
+          return {
+            kind: 'found',
+            route: {
+              expression: element.expression,
+              path: [String(requestedIndex - runtimeIndex)],
+            },
+          };
+        }
+        runtimeIndex += spreadLength;
+        continue;
+      }
+      if (runtimeIndex === requestedIndex) {
+        return ts.isOmittedExpression(element)
+          ? { kind: 'unresolved' }
+          : { kind: 'found', route: { expression: element, path: [] } };
+      }
+      runtimeIndex += 1;
+    }
+    return { kind: 'absent' };
+  }
+  function resolveExpressionPath(
+    expression: ts.Expression,
+    path: readonly string[],
+    seen: Set<string>,
+  ): AddressedValue | null {
+    const current = unwrapTransparentExpression(expression);
+    const nestedAddress = addressForExpression(current);
+    if (nestedAddress !== null) {
+      return addressedValue({
+        root: nestedAddress.root,
+        path: [...nestedAddress.path, ...path],
+      }, seen);
+    }
+    if (path.length === 0) return current;
+    const [key, ...remaining] = path;
+    if (key === undefined) return null;
+    if (ts.isObjectLiteralExpression(current)) {
+      const resolution = objectPropertyRoute(current, key, seen);
+      return resolution.kind === 'found'
+        ? resolveExpressionPath(resolution.route.expression,
+          [...resolution.route.path, ...remaining], seen)
+        : null;
+    }
+    if (ts.isArrayLiteralExpression(current)) {
+      if (key === 'length' && remaining.length === 0) return 'known_scalar';
+      const index = Number(key);
+      if (!Number.isSafeInteger(index) || index < 0) return null;
+      const resolution = arrayElementRoute(current, index, seen);
+      return resolution.kind === 'found'
+        ? resolveExpressionPath(resolution.route.expression,
+          [...resolution.route.path, ...remaining], seen)
+        : null;
+    }
+    return null;
+  }
+  function addressedValue(
+    address: ConfigurationAddress,
+    seen: Set<string> = new Set(),
+  ): AddressedValue | null {
     const declaration = rootDeclaration(address);
     if (declaration?.initializer === undefined) return null;
-    let value: ts.Expression = declaration.initializer;
-    for (const key of address.path) {
-      const current = unwrapTransparentExpression(value);
-      if (ts.isObjectLiteralExpression(current)) {
-        const next = propertyValue(current, key);
-        if (next === null) return null;
-        value = next;
-        continue;
-      }
-      if (ts.isArrayLiteralExpression(current)) {
-        if (key === 'length') return 'known_scalar';
-        const index = Number(key);
-        if (!Number.isSafeInteger(index) || index < 0) return null;
-        const element = current.elements[index];
-        if (element === undefined || ts.isOmittedExpression(element) || ts.isSpreadElement(element)) {
-          return null;
-        }
-        value = element;
-        continue;
-      }
-      const nested = addressForExpression(current);
-      if (nested === null) return null;
-      const nestedValue = addressedValue(nested);
-      if (nestedValue === null || nestedValue === 'known_scalar') return null;
-      value = nestedValue;
-      const restarted = addressedValue({ root: nested.root, path: [...nested.path, key] });
-      if (restarted === null) return null;
-      if (restarted === 'known_scalar') return restarted;
-      value = restarted;
-    }
-    return unwrapTransparentExpression(value);
-  };
+    const visitKey = `${declaration.pos}:${address.path.join('\u0000')}`;
+    if (seen.has(visitKey)) return null;
+    const nextSeen = new Set(seen);
+    nextSeen.add(visitKey);
+    return resolveExpressionPath(declaration.initializer, address.path, nextSeen);
+  }
   const isPrimitiveLiteral = (expression: ts.Expression): boolean =>
     ts.isLiteralExpression(expression) || expression.kind === ts.SyntaxKind.TrueKeyword ||
     expression.kind === ts.SyntaxKind.FalseKeyword || expression.kind === ts.SyntaxKind.NullKeyword;
@@ -2758,44 +2988,42 @@ function viteAliases(source: string, path: string): ViteAliasDiscovery {
     if (declaration?.initializer === undefined) return [];
     const visitKey = `${declaration.pos}:${address.path.join('\u0000')}`;
     if (seen.has(visitKey)) return [];
-    seen.add(visitKey);
-    let value: ts.Expression = declaration.initializer;
-    for (let index = 0; index <= address.path.length;) {
-      const current = unwrapTransparentExpression(value);
+    const nextSeen = new Set(seen);
+    nextSeen.add(visitKey);
+    const collect = (
+      expression: ts.Expression,
+      remaining: readonly string[],
+    ): readonly (readonly string[])[] => {
+      const current = unwrapTransparentExpression(expression);
       const nestedAddress = addressForExpression(current);
       if (nestedAddress !== null) {
-        const remaining = address.path.slice(index);
         const direct = effectivePathsForExpression(current, remaining);
         const nested = embeddedEffectivePaths({
           root: nestedAddress.root,
           path: [...nestedAddress.path, ...remaining],
-        }, seen);
+        }, nextSeen);
         return uniquePaths([...direct, ...nested]);
       }
-      if (index === address.path.length) return [];
-      const key = address.path[index];
+      if (remaining.length === 0) return [];
+      const [key, ...rest] = remaining;
       if (key === undefined) return [];
       if (ts.isObjectLiteralExpression(current)) {
-        const next = propertyValue(current, key);
-        if (next === null) return [];
-        value = next;
-        index += 1;
-        continue;
+        const resolution = objectPropertyRoute(current, key, new Set());
+        return resolution.kind === 'found'
+          ? collect(resolution.route.expression, [...resolution.route.path, ...rest])
+          : [];
       }
       if (ts.isArrayLiteralExpression(current)) {
-        const elementIndex = Number(key);
-        if (!Number.isSafeInteger(elementIndex) || elementIndex < 0) return [];
-        const element = current.elements[elementIndex];
-        if (element === undefined || ts.isOmittedExpression(element) || ts.isSpreadElement(element)) {
-          return [];
-        }
-        value = element;
-        index += 1;
-        continue;
+        const index = Number(key);
+        if (!Number.isSafeInteger(index) || index < 0) return [];
+        const resolution = arrayElementRoute(current, index, new Set());
+        return resolution.kind === 'found'
+          ? collect(resolution.route.expression, [...resolution.route.path, ...rest])
+          : [];
       }
       return [];
-    }
-    return [];
+    };
+    return collect(declaration.initializer, address.path);
   };
   const addressForReference = (
     identifier: ts.Identifier,
@@ -2874,7 +3102,12 @@ function viteAliases(source: string, path: string): ViteAliasDiscovery {
     ts.forEachChild(node, verifyReachability);
   };
   verifyReachability(sourceFile);
-  return { aliases: [...aliases], regexes: [...regexes.values()], unresolved };
+  return {
+    aliases: [...aliases],
+    regexes: [...regexes.values()],
+    unresolved,
+    nestedPaths: [...nestedPaths],
+  };
 }
 
 function candidateInspectionContext(base: string, candidate: string): HeldoutLeakInspectionContext {
@@ -2901,19 +3134,26 @@ function candidateInspectionContext(base: string, candidate: string): HeldoutLea
     isResolutionConfigPath(change.path) ||
     (change.previousPath !== undefined && isResolutionConfigPath(change.previousPath)));
   const candidateSourceFiles: Record<string, string> = {};
+  const candidateConfigurationFiles: Record<string, string> = {};
   if (resolutionConfigChanged) {
-    for (const path of tree.filter((candidatePath) =>
-      (candidatePath.startsWith('src/') || candidatePath.startsWith('tools/') ||
-        candidatePath.startsWith('tests/')) && isTypeScriptOrJavaScript(candidatePath))) {
-      candidateSourceFiles[path] = execFileSync('git', ['show', `${candidate}:${path}`], {
+    for (const path of tree.filter(isTypeScriptOrJavaScript)) {
+      const source = execFileSync('git', ['show', `${candidate}:${path}`], {
         encoding: 'utf8',
         maxBuffer: 64 * 1024 * 1024,
       });
+      candidateConfigurationFiles[path] = source;
+      if (path.startsWith('src/') || path.startsWith('tools/') || path.startsWith('tests/')) {
+        candidateSourceFiles[path] = source;
+      }
     }
   }
   const viteDiscoveries = Object.entries(configSources).flatMap(([path, source]) =>
     isRootViteOrVitestConfig(path)
-      ? [{ path, discovery: viteAliases(source, path) }]
+      ? [{ path, discovery: viteAliases(source, path, {
+        ...candidateConfigurationFiles,
+        ...candidateSourceFiles,
+        ...configSources,
+      }) }]
       : []);
   const configuredAliasPrefixes = [...new Set([
     ...Object.entries(configSources).flatMap(([path, source]) =>
@@ -2925,6 +3165,7 @@ function candidateInspectionContext(base: string, candidate: string): HeldoutLea
     candidateFiles: tree,
     packageJsonFiles,
     candidateSourceFiles,
+    candidateConfigurationFiles,
     resolutionConfigChanged,
     configuredAliasPrefixes,
     configuredAliasRegexes,

@@ -320,6 +320,8 @@ describe('held-out reserve leak wall', () => {
         'Rule C classifies configuration roots, resolve/test/alias bindings, and bindings spread transitively into those containers as alias-capable regardless of current literal contents',
         'Rule C records every configuration placement prefix and unions outer paths with every embedded binding dereferenced, composing each placement with remaining descendant and const-alias paths; any semantic placement makes the reference alias-capable',
         'Rule C visits ordinary shorthand and literal-array composition; installed Vitest 4 test.projects array elements are nested configuration roots, while removed test.workspace is not interpreted',
+        'Rule C resolves tracked literal object and array spreads with JavaScript last-write and runtime-index semantics, including terminal embedded identifiers',
+        'Rule C recursively inspects literal test.projects extends files from the candidate tree; true reuses the root configuration and missing, external, cyclic, or nonliteral targets fail closed',
         'Rule C permits non-exported plain-const aliases to preserve the same addressed subtree and allows non-alias-bearing subtrees in otherwise escaping positions',
         'subtrees strictly below a configuration root at nonsemantic addresses remain non-alias-capable unless their contents or binding position makes them capable',
         'resolve and Vitest test are alias-capable containers whose values must be literal objects or tracked const literals; their alias values are interpreted identically',
@@ -2451,6 +2453,179 @@ describe('held-out reserve leak wall', () => {
     expect(report.findings).toContainEqual(expect.objectContaining({
       path: 'src/ui/project-alias-consumer.ts',
       kind: 'unresolved_module_edge',
+    }));
+  });
+
+  it.each([
+    ['object spread override', [
+      "const rules = [{ name: 'p', find: '@ordinary', replacement: '/ordinary' }];",
+      'const overlay = { plugins: rules };',
+      "const shared = { plugins: [{ name: 'safe' }], ...overlay };",
+      'install(shared.plugins[0]);',
+      'export default { ...shared, resolve: { alias: rules } };',
+    ].join('\n')],
+    ['array spread runtime index', [
+      "const rules = [{ find: '@a', replacement: '/a' }, { find: '@b', replacement: '/b' }];",
+      "const shared = { plugins: [...rules, { name: 'safe' }] };",
+      'install(shared.plugins[1]);',
+      'export default { ...shared, resolve: { alias: rules } };',
+    ].join('\n')],
+  ] as const)('uses JavaScript spread semantics for %s', (_label, configSource) => {
+    const report = inspectHeldoutLeakChanges([{
+      path: 'vite.config.mjs',
+      addedText: configSource,
+      sourceText: configSource,
+    }], 'F', bindings);
+
+    expect(report.findings).toContainEqual(expect.objectContaining({
+      path: 'vite.config.mjs',
+      kind: 'unresolved_module_edge',
+    }));
+  });
+
+  it.each([
+    ['later explicit object property', [
+      "const rules = [{ find: '@a', replacement: '/a' }];",
+      'const overlay = { plugins: rules };',
+      "const shared = { ...overlay, plugins: [{ name: 'safe' }] };",
+      'install(shared.plugins[0]);',
+      'export default { ...shared, resolve: { alias: rules } };',
+    ].join('\n')],
+    ['entry before array spread', [
+      "const rules = [{ find: '@a', replacement: '/a' }];",
+      "const shared = { plugins: [{ name: 'safe' }, ...rules] };",
+      'install(shared.plugins[0]);',
+      'export default { ...shared, resolve: { alias: rules } };',
+    ].join('\n')],
+  ] as const)('keeps the runtime-safe spread ordering clean for %s', (_label, configSource) => {
+    const report = inspectHeldoutLeakChanges([{
+      path: 'vite.config.mjs',
+      addedText: configSource,
+      sourceText: configSource,
+    }], 'F', bindings);
+
+    expect(report.findings).toEqual([]);
+  });
+
+  it.each([
+    ['terminal plugin array', [
+      'const plugins = [];',
+      'const shared = { plugins };',
+      'install(shared.plugins);',
+      'export default { ...shared };',
+    ].join('\n'), false],
+    ['terminal resolve object', [
+      'const resolve = {};',
+      'const shared = { resolve };',
+      'install(shared.resolve);',
+      'export default { ...shared };',
+    ].join('\n'), true],
+    ['terminal dual-placement plugin array', [
+      "const plugins = [{ find: '@x', replacement: '/lit' }];",
+      'const shared = { plugins };',
+      'export default { ...shared, resolve: { alias: plugins } };',
+      'install(shared.plugins);',
+    ].join('\n'), true],
+  ] as const)('dereferences %s before alias-capability classification',
+  (_label, configSource, unresolved) => {
+    const report = inspectHeldoutLeakChanges([{
+      path: 'vite.config.mjs',
+      addedText: configSource,
+      sourceText: configSource,
+    }], 'F', bindings);
+
+    expect(report.findings.some((finding) => finding.path === 'vite.config.mjs' &&
+      finding.kind === 'unresolved_module_edge')).toBe(unresolved);
+  });
+
+  it('discovers aliases from a literal project extends file', () => {
+    const rootSource = "export default { test: { projects: [{ extends: './tools/project-config.mjs' }] } };";
+    const projectSource =
+      "export default { resolve: { alias: { '@policy': './src/vtt/heldout-evaluation.ts' } } };";
+    const report = inspectHeldoutLeakChanges([{
+      path: 'vitest.config.mjs',
+      addedText: rootSource,
+      sourceText: rootSource,
+    }, {
+      path: 'tools/project-config.mjs',
+      addedText: projectSource,
+      sourceText: projectSource,
+    }], 'F', bindings, {
+      candidateSourceFiles: {
+        'src/ui/project-extends-consumer.ts': "import policy from '@policy';",
+      },
+    });
+
+    expect(report.findings).not.toContainEqual(expect.objectContaining({
+      path: 'vitest.config.mjs',
+      kind: 'unresolved_module_edge',
+    }));
+    expect(report.findings).toContainEqual(expect.objectContaining({
+      path: 'src/ui/project-extends-consumer.ts',
+      kind: 'unresolved_module_edge',
+    }));
+  });
+
+  it.each([
+    ['helper-built extended alias', "export default { test: { projects: [{ extends: './tools/project-config.mjs' }] } };", {
+      'tools/project-config.mjs': "export default makeConfig();",
+    }],
+    ['nonliteral extends', 'const target = \'./tools/project-config.mjs\'; export default { test: { projects: [{ extends: target }] } };', {}],
+    ['missing extends file', "export default { test: { projects: [{ extends: './tools/missing.mjs' }] } };", {}],
+    ['outside-repository extends file', "export default { test: { projects: [{ extends: '../outside.mjs' }] } };", {}],
+    ['cyclic extends files', "export default { test: { projects: [{ extends: './tools/project-config.mjs' }] } };", {
+      'tools/project-config.mjs': "export default { test: { projects: [{ extends: '../vitest.config.mjs' }] } };",
+    }],
+  ] as const)('fails closed for %s', (_label, rootSource, extraSources) => {
+    const changes = [{
+      path: 'vitest.config.mjs',
+      addedText: rootSource,
+      sourceText: rootSource,
+    }, ...Object.entries(extraSources).map(([path, sourceText]) => ({
+      path,
+      addedText: sourceText,
+      sourceText,
+    }))];
+    const report = inspectHeldoutLeakChanges(changes, 'F', bindings);
+
+    expect(report.findings).toContainEqual(expect.objectContaining({
+      path: 'vitest.config.mjs',
+      kind: 'unresolved_module_edge',
+    }));
+  });
+
+  it('treats project extends true as reuse of the clean root configuration', () => {
+    const configSource = 'export default { test: { projects: [{ extends: true }] } };';
+    const report = inspectHeldoutLeakChanges([{
+      path: 'vitest.config.mjs',
+      addedText: configSource,
+      sourceText: configSource,
+    }], 'F', bindings);
+
+    expect(report.findings).toEqual([]);
+  });
+
+  it('applies Rule N to an extended configuration loaded from the candidate source pool', () => {
+    const rootSource =
+      "export default { test: { projects: [{ extends: './tools/project-config.mjs' }] } };";
+    const projectSource = [
+      "import { createRequire } from 'node:module';",
+      'const box = { load: createRequire(import.meta.url) };',
+      'export default {};',
+    ].join('\n');
+    const report = inspectHeldoutLeakChanges([{
+      path: 'vitest.config.mjs',
+      addedText: rootSource,
+      sourceText: rootSource,
+    }], 'F', bindings, {
+      candidateConfigurationFiles: {
+        'tools/project-config.mjs': projectSource,
+      },
+    });
+
+    expect(report.findings).toContainEqual(expect.objectContaining({
+      path: 'tools/project-config.mjs',
+      kind: 'loader_reference_escaped',
     }));
   });
 
