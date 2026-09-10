@@ -1,1 +1,2 @@
 - 2026-09-09 20:59 EDT r1 lane 01a088b4… DONE (merge reconciled + AST wall); supervisor verification running (verify-heldout.log)
+- 2026-09-09 21:02 supervisor verification green (tsc 0, sg 0, diff-check 0, 296/296); merge + wall committed (eed62c54); Astra r1 dispatched; full gate launched (gate-wt-p-heldout.log).
