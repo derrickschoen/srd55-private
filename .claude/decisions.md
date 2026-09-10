@@ -22126,3 +22126,20 @@ Q11 answered 2026-09-09 20:25 EDT: "Reopen: AST leak wall". A fresh bounded unit
 replaces the regex leak wall in tools/heldout-leak-check.ts with TypeScript-AST import discovery (the elevation lane's accepted
 implementation on main, D586.63); everything else in the slice stays as reviewed. Alternatives not chosen: land with the regex
 wall; abandon; defer. This closes the queue of owner questions asked one at a time today (D590–D601).
+
+### D586.171 — D569-CRASH-RCA SHELVED at the round cap: final Astra review REJECT with two narrow residuals (2026-09-09 20:39 EDT)
+
+Round 4 (final) specification (`.claude/consensus/d569-crash-rca/rca-r4-sol.md`, 44 KB, sections 4.1–4.10) reviewed by Astra
+(session 01a08815…, text `rca-review-r3-astra.md`): REJECT. Resolved: F1/F2 (exact advertised-tool membership, dispatch-correlated
+mandatory initialization), F3/F4 (service-null/timeout/cancellation/staged-proposal transitions), F5 (mixed historical/current
+decoding, sidecar reconciliation, nullable infrastructure sessions), F6 (blind host-authorization failure terminates before the
+DM correction branch), F7/F8 (D591 runbook clauses, validator hash); D590's rerun selection confirmed correct. Residual
+SIGNIFICANT: (1) a completed dispatch with inconclusive/invalid catalog evidence and an empty spool has no truthful finalization
+variant (needs an explicit indeterminate-delivery/integrity-stop variant persisted before stopping, with its transition before
+proposal authorization); (2) the replacement `AgentTurnResult` drops `resumeSessionId`/`finalText`/`usage` (the branded reusable
+identity both `coldStart` and `coldStartRound` bind on; Pi returns `sessionId:null` with a reusable `resumeSessionId`) — the full
+response/result types and migration of both cold-start entry points and recovery must be defined. TRIVIAL: two nonexistent test
+paths, wrong Node version in a citation, truncated provenance commit; the builder inventory regressed to a mixed list and must be
+restored. Astra's owner answer, unchanged across three reviews: patch + structural follow-up. Three review rounds are spent; the
+specification is SHELVED under HARD_GATE (b); reopening as a remediation artifact needs the owner's word (asked). Until then: no
+patch implementation, no relaunch; hard rows and crash evidence stay preserved.
