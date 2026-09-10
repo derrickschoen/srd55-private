@@ -42,3 +42,5 @@
 - 2026-09-10 12:24 EDT — r12 Astra REJECT (F43 boxed namespaces, F44 computed-property transfer, F45 for-of assignment heads, F46 new/fill/textual defineConfig). Supervisor structural ruling for r13: RULE C configuration literal-in-place or unresolved (delete reference-following machinery); RULE N namespace roots only as receiver or plain alias. r13 dispatched (resume 01a088b4…).
 
 - 2026-09-10 12:26 EDT — r13 lane BLOCKED correctly: real vite.config.ts is a defineConfig callback + conditional + spread of a same-file const (no alias key). RULE C refined to a reachable-literal set with the "every symbol reference inside the reachable set" guard replacing all mutation/transfer tracking; lane resumed (r13b).
+
+- 2026-09-10 12:43 EDT — r13b BLOCKED correctly: real tree passes `window` to constructors/defaults (encounter-app.ts:1365, router.ts:113). RULE N refined: N1 strict for import.meta + module/worker namespaces; N2 browser globals inert to transfer, loader-member USE sites must resolve to a recognised root by symbol. Lane resumed (r13c).
