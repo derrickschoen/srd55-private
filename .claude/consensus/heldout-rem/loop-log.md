@@ -30,3 +30,5 @@
 - 2026-09-10 11:00 EDT — r9 Astra REJECT: F28–F33 all resolved; four bounded defects remain (F34 second SourceFile/checker mismatch in data-module path, F35 ambient declare shadows loaders, F36 nested binding patterns skipped, F37 alias mutation via references/push/Object.assign). r10 dispatched (resume 01a088b4…).
 
 - 2026-09-10 11:27 EDT — r10 lane DONE; supervisor verification tsc/sg/diffcheck 0, 9 specs 463/463 (first launch had a relative-path redirect bug and never ran; relaunched); committed ca5e0f01; Astra r10 dispatched (resume 01a088d6…).
+
+- 2026-09-10 11:31 EDT — r10 Astra REJECT: F34–F37 resolved; two bounded defects (F38 namespace member access .Module/.default, F39 config reference transfer through object/array). r11 dispatched (resume 01a088b4…).
