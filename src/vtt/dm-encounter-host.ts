@@ -98,7 +98,7 @@ import {
 import { guidedPendingReactionResolution } from './reaction-guidance';
 import { canonicalEngineQueryPort } from './engine-query-port';
 import {
-  createRevisionBoundEngineOptionEnvironment,
+  createLegacyEngineOptionEnvironment,
   type EngineOptionEnvironment,
 } from './offers/offer-environment';
 
@@ -293,7 +293,7 @@ export class DmEncounterHost {
     this.#composeRoom = options.composeRoom ?? composeStoredCharacterEncounter;
     this.#reactionOfferPolicy = options.reactionOfferPolicy ?? DM_ATTENDED_REACTION_OFFER_POLICY;
     this.#offerEnvironment = options.offerEnvironment ??
-      createRevisionBoundEngineOptionEnvironment(canonicalEngineQueryPort);
+      createLegacyEngineOptionEnvironment(canonicalEngineQueryPort);
     if (options.bridge !== undefined) {
       this.#mirror.connect(options.bridge);
       this.#roundPlanSession = new DmRoundPlanSession(

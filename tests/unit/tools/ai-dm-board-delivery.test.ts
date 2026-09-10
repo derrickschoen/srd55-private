@@ -56,7 +56,7 @@ const FOOTPRINTS_RAW_CONTEXT_SHA256 = 'aa841063ad0512d0f6b286318db802526da3efc52
 const FOOTPRINTS_STATE_HANDLE = 'engine-state:c7c7b052bd70a39bf59c83277b7508d8bf52b69100fbde5939c8562ac8686842';
 // The post-merge E1c pin is paired with byte identity across implicit defaults,
 // explicit image-off, and an explicitly semantic-board-off renderer profile.
-const E1C_RAW_CONTEXT_SHA256 = '418b9e16e31c01667a2bea7431e6affe3eccc9f80c353783551872bb6ae16118';
+const E1C_RAW_CONTEXT_SHA256 = '4071943750fc963ceac5a39fcd1baa71e9a3fd2dcc9bc539a1bb0bec4dc18e6d';
 
 function record(value: unknown, label: string): Readonly<Record<string, unknown>> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -483,6 +483,14 @@ describe('arena capture lifecycle and off-arm invariance', () => {
 
     const raw = offResult[0]?.rawTurnContext;
     if (raw === undefined) throw new TypeError('Semantic-board-off row omitted rawTurnContext.');
+    const row = offResult[0];
+    if (row === undefined) throw new TypeError('Semantic-board-off run omitted its row.');
+    const rawContext = record(JSON.parse(raw) as unknown, 'semantic-board-off raw context');
+    expect(record(rawContext['state_ref'], 'semantic-board-off state reference')).toEqual({
+      run_id: 'encounter:ai-dm-conversation',
+      state_handle: `engine-state:${row.stateBinding.capsule.digest}`,
+      expected_revision: row.stateBinding.capsule.revision,
+    });
     expect(Buffer.byteLength(raw)).toBe(31_995);
     expect(createHash('sha256').update(raw).digest('hex')).toBe(E1C_RAW_CONTEXT_SHA256);
   });

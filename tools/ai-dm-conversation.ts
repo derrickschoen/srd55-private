@@ -54,7 +54,7 @@ import {
 } from '../src/vtt/engine-round-session';
 import { canonicalEngineQueryPort } from '../src/vtt/engine-query-port';
 import {
-  createRevisionBoundEngineOptionEnvironment,
+  createLegacyEngineOptionEnvironment,
   engineOptionEnvironmentFromBinding,
 } from '../src/vtt/offers/offer-environment';
 import {
@@ -1953,6 +1953,10 @@ function plannedTurnContext(
   }
   let rendering: CapturedTurnContext['rendering'];
   const runtime = createEngineMcpRuntime(state, {
+    offerEnvironment: engineOptionEnvironmentFromBinding(
+      canonicalEngineQueryPort,
+      snapshot.capsule.offerEnvironment,
+    ),
     runId: capsule.runId,
     branchId: capsule.branchId,
     revision: capsule.revision,
@@ -2769,6 +2773,10 @@ function inProcessDmToolSession(input: {
     throw new Error('Local OpenAI tool session requires an ordinary pending request.');
   }
   const runtime = createEngineMcpRuntime(input.state, {
+    offerEnvironment: engineOptionEnvironmentFromBinding(
+      canonicalEngineQueryPort,
+      input.snapshot.capsule.offerEnvironment,
+    ),
     runId: capsule.runId,
     branchId: capsule.branchId,
     revision: capsule.revision,
@@ -3025,6 +3033,10 @@ function inProcessSpeculativeToolSession(input: {
     throw new Error('Speculative tool session requires a speculative pending request.');
   }
   const runtime = createEngineMcpRuntime(input.state, {
+    offerEnvironment: engineOptionEnvironmentFromBinding(
+      canonicalEngineQueryPort,
+      input.snapshot.capsule.offerEnvironment,
+    ),
     runId: capsule.runId,
     branchId: capsule.branchId,
     revision: capsule.revision,
@@ -3289,7 +3301,7 @@ async function runConversationWithConfiguredIntel(
   const adapter = new ModelCallBookkeepingAdapter(selectedAdapter);
   const rows: ConversationRow[] = [];
   let capsuleRevision = 1;
-  const offerEnvironment = createRevisionBoundEngineOptionEnvironment(canonicalEngineQueryPort);
+  const offerEnvironment = createLegacyEngineOptionEnvironment(canonicalEngineQueryPort);
   const engineSession = new EngineRoundSession(
     states[0]!,
     mulberry32(8_274_113),
