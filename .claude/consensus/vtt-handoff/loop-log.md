@@ -32,3 +32,5 @@ Machine constraint: the D569 v5 first arm (pid 1201481, port 4530) runs until ~1
 - 2026-09-10 09:09 EDT — S0–S2 r3 lane DONE (9 files, no fixture change); supervisor verification tsc/sg/diffcheck/generator 0, vitest 8 files 46/46; committed 1792ebdf; Astra r3 review dispatched (resume 01a087f9…).
 
 - 2026-09-10 09:10 EDT — process defect: the r3 review brief was written with an unquoted heredoc (needed $HEAD3/$F expansion) and a backticked `?: T | undefined` phrase was executed, leaving "(the  widening in contracts.d.ts …)"; a pkill whose pattern also appeared plainly in the same command killed my own shell and the review wrapper but not the codex child. Brief repaired on disk; the live review (pid 1833178) was left to finish on the mangled text since the diff carries the widening; watching process liveness instead of an .exit file.
+
+- 2026-09-10 09:12 EDT — S0–S2 r3 Astra REJECT on one residual (F20: zero-write regression dropped directory-tree comparison); F14–F18 resolved, widening accepted. r4 dispatched (resume 01a0891a…, test-only).
