@@ -1,48 +1,41 @@
 import { z } from 'zod';
 
 const finite = z.number().finite();
-const sequence = finite.refine(Number.isSafeInteger, 'Expected a safe integer');
-const vector3Schema = z.strictObject({ x: finite, y: finite, z: finite });
+const safeInteger = finite.refine(Number.isSafeInteger, 'Expected a safe integer');
+const objectValue = z.record(z.string(), z.unknown());
+const point2Schema = z.strictObject({ x: finite, y: finite });
+const point3Schema = z.strictObject({ x: finite, y: finite, z: finite });
 const footprintSchema = z.strictObject({ w: finite, h: finite });
+const cellSchema = z.tuple([finite, finite]);
 
 export const sceneTileSchema = z.strictObject({
   id: z.string(), assetId: z.string(), x: finite, y: finite, z: finite,
 });
-export const scenePropSchema = z.strictObject({
-  id: z.string(), assetId: z.string(), x: finite, y: finite, z: finite,
-});
+export const scenePropSchema = sceneTileSchema;
 export const sceneTokenSchema = z.strictObject({
-  id: z.string(), name: z.string(), assetId: z.string(),
+  id: z.string(), label: z.string(), assetId: z.string(),
   x: finite, y: finite, z: finite, facing: finite, footprint: footprintSchema,
 });
 export const sceneWallSchema = z.strictObject({
-  id: z.string(), from: vector3Schema, to: vector3Schema,
-  baseZ: finite, height: finite, blocksMovement: z.boolean(), blocksVision: z.boolean(),
+  id: z.string(), a: point2Schema, b: point2Schema, baseZ: finite, height: finite,
+  blocksMovement: z.boolean(), blocksVision: z.boolean(), assetId: z.string().optional(),
 });
 export const sceneDoorSchema = z.strictObject({
-  id: z.string(), wallId: z.string(), assetId: z.string(), open: z.boolean(),
+  id: z.string(), wallId: z.string(), open: z.boolean(), assetId: z.string().optional(),
 });
 export const sceneLightSchema = z.strictObject({
-  id: z.string(), x: finite, y: finite, z: finite,
-  color: z.string(), intensity: finite, radius: finite, enabled: z.boolean(),
+  id: z.string(), x: finite, y: finite, z: finite, radius: finite,
+  color: z.string().regex(/^#[0-9A-Fa-f]{6}$/u), intensity: finite, enabled: z.boolean(),
 });
 export const sceneVisionSchema = z.strictObject({
-  mode: z.enum(['all', 'cells']),
-  visible: z.array(z.strictObject({ x: finite, y: finite })),
-  explored: z.array(z.strictObject({ x: finite, y: finite })),
+  mode: z.enum(['all', 'cells']), visible: z.array(cellSchema), explored: z.array(cellSchema),
 });
 
 export const sceneSnapshotSchema = z.strictObject({
-  schemaVersion: z.literal(1),
-  sceneId: z.string(),
-  revision: sequence,
+  sceneId: z.string(), revision: safeInteger,
   grid: z.strictObject({ width: finite, height: finite, feetPerCell: finite }),
-  tiles: z.array(sceneTileSchema),
-  props: z.array(scenePropSchema),
-  tokens: z.array(sceneTokenSchema),
-  walls: z.array(sceneWallSchema),
-  doors: z.array(sceneDoorSchema),
-  lights: z.array(sceneLightSchema),
+  tiles: z.array(sceneTileSchema), props: z.array(scenePropSchema), tokens: z.array(sceneTokenSchema),
+  walls: z.array(sceneWallSchema), doors: z.array(sceneDoorSchema), lights: z.array(sceneLightSchema),
   vision: sceneVisionSchema,
 });
 
@@ -51,49 +44,47 @@ export type SceneToken = z.infer<typeof sceneTokenSchema>;
 export type SceneWall = z.infer<typeof sceneWallSchema>;
 
 export const HANDOFF_METHODS = [
-  'scene.open', 'scene.snapshot', 'token.move', 'door.set', 'light.set',
+  'session.open', 'scene.snapshot', 'token.move', 'door.set', 'light.set',
 ] as const;
 export type HandoffMethod = (typeof HANDOFF_METHODS)[number];
 
-const sceneOpenParamsSchema = z.strictObject({
-  requestedRole: z.enum(['dm', 'player']),
-  playerId: z.string().optional(),
+export const sessionOpenParamsSchema = z.strictObject({
+  requestedRole: z.enum(['dm', 'player']), playerId: z.string().optional(),
 });
-const sceneSnapshotParamsSchema = z.strictObject({ sceneId: z.string() });
-const mutationBase = {
-  sceneId: z.string(), revision: sequence, mutationId: z.string(),
-} as const;
-const tokenMoveParamsSchema = z.strictObject({
-  ...mutationBase, tokenId: z.string(), to: vector3Schema,
-});
-const doorSetParamsSchema = z.strictObject({
-  ...mutationBase, doorId: z.string(), open: z.boolean(),
-});
-const lightSetParamsSchema = z.strictObject({
-  ...mutationBase, lightId: z.string(), enabled: z.boolean(),
-});
+export const sceneSnapshotParamsSchema = z.strictObject({});
+export const tokenMoveParamsSchema = z.strictObject({ tokenId: z.string(), to: point3Schema });
+export const doorSetParamsSchema = z.strictObject({ doorId: z.string(), open: z.boolean() });
+export const lightSetParamsSchema = z.strictObject({ lightId: z.string(), enabled: z.boolean() });
 
+const requestBase = { v: z.literal(1), id: z.string() } as const;
 export const genericHandoffRequestSchema = z.strictObject({
-  schemaVersion: z.literal(1), id: z.string(), method: z.string(), params: z.record(z.string(), z.unknown()),
+  ...requestBase, method: z.string(), params: objectValue,
 });
 export const handoffRequestSchema = z.discriminatedUnion('method', [
-  z.strictObject({ schemaVersion: z.literal(1), id: z.string(), method: z.literal('scene.open'), params: sceneOpenParamsSchema }),
-  z.strictObject({ schemaVersion: z.literal(1), id: z.string(), method: z.literal('scene.snapshot'), params: sceneSnapshotParamsSchema }),
-  z.strictObject({ schemaVersion: z.literal(1), id: z.string(), method: z.literal('token.move'), params: tokenMoveParamsSchema }),
-  z.strictObject({ schemaVersion: z.literal(1), id: z.string(), method: z.literal('door.set'), params: doorSetParamsSchema }),
-  z.strictObject({ schemaVersion: z.literal(1), id: z.string(), method: z.literal('light.set'), params: lightSetParamsSchema }),
+  z.strictObject({ ...requestBase, method: z.literal('session.open'), params: sessionOpenParamsSchema }),
+  z.strictObject({ ...requestBase, method: z.literal('scene.snapshot'), params: sceneSnapshotParamsSchema }),
+  z.strictObject({ ...requestBase, method: z.literal('token.move'), params: tokenMoveParamsSchema }),
+  z.strictObject({ ...requestBase, method: z.literal('door.set'), params: doorSetParamsSchema }),
+  z.strictObject({ ...requestBase, method: z.literal('light.set'), params: lightSetParamsSchema }),
 ]);
 export type HandoffRequest = z.infer<typeof handoffRequestSchema>;
 
-export const handoffErrorSchema = z.strictObject({
-  code: z.string(), message: z.string(), details: z.record(z.string(), z.unknown()).optional(),
+export const sessionOpenResultSchema = z.strictObject({
+  sessionId: z.string(), capabilities: z.array(z.string()),
 });
-export const handoffResponseSchema = z.union([
-  z.strictObject({ schemaVersion: z.literal(1), id: z.string(), ok: z.literal(true), result: z.unknown() }),
-  z.strictObject({ schemaVersion: z.literal(1), id: z.string(), ok: z.literal(false), error: handoffErrorSchema }),
-]);
+export const mutationResultSchema = z.strictObject({ revision: safeInteger });
+export const sceneSnapshotResultSchema = sceneSnapshotSchema;
+
+export const handoffErrorSchema = z.strictObject({ code: z.string(), message: z.string() });
+export const handoffSuccessSchema = z.strictObject({
+  v: z.literal(1), id: z.string(), ok: z.literal(true), result: objectValue,
+});
+export const handoffFailureSchema = z.strictObject({
+  v: z.literal(1), id: z.string(), ok: z.literal(false), error: handoffErrorSchema,
+});
+export const handoffResponseSchema = z.union([handoffSuccessSchema, handoffFailureSchema]);
 export const handoffEventSchema = z.strictObject({
-  schemaVersion: z.literal(1), seq: sequence, event: z.literal('scene.snapshot'), snapshot: sceneSnapshotSchema,
+  v: z.literal(1), event: z.literal('scene.snapshot'), seq: safeInteger, data: sceneSnapshotSchema,
 });
 
 export const artViewSchema = z.enum(['top-down', 'isometric']);

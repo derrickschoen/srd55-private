@@ -1,33 +1,12 @@
+import { randomBytes } from 'node:crypto';
 import {
-  closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, statSync, writeSync,
+  closeSync, constants, existsSync, fsyncSync, linkSync, mkdirSync, openSync,
+  readFileSync, unlinkSync, writeSync,
 } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { handoffPaths } from './paths.ts';
-
-const CONTRACT_DECLARATIONS = `export interface SceneSnapshot {
-  readonly schemaVersion: 1;
-  readonly sceneId: string;
-  readonly revision: number;
-  readonly grid: { readonly width: number; readonly height: number; readonly feetPerCell: number };
-  readonly tiles: readonly PlacedAsset[];
-  readonly props: readonly PlacedAsset[];
-  readonly tokens: readonly SceneToken[];
-  readonly walls: readonly SceneWall[];
-  readonly doors: readonly SceneDoor[];
-  readonly lights: readonly SceneLight[];
-  readonly vision: { readonly mode: 'all' | 'cells'; readonly visible: readonly Cell[]; readonly explored: readonly Cell[] };
-}
-export interface Cell { readonly x: number; readonly y: number }
-export interface Point3 { readonly x: number; readonly y: number; readonly z: number }
-export interface PlacedAsset extends Point3 { readonly id: string; readonly assetId: string }
-export interface SceneToken extends PlacedAsset { readonly name: string; readonly facing: number; readonly footprint: { readonly w: number; readonly h: number } }
-export interface SceneWall { readonly id: string; readonly from: Point3; readonly to: Point3; readonly baseZ: number; readonly height: number; readonly blocksMovement: boolean; readonly blocksVision: boolean }
-export interface SceneDoor { readonly id: string; readonly wallId: string; readonly assetId: string; readonly open: boolean }
-export interface SceneLight extends Point3 { readonly id: string; readonly color: string; readonly intensity: number; readonly radius: number; readonly enabled: boolean }
-export type HandoffMethod = 'scene.open' | 'scene.snapshot' | 'token.move' | 'door.set' | 'light.set';
-`;
+import { handoffPaths, type RepositoryIdentityPolicy } from './paths.ts';
 
 interface PublicationEntry {
   readonly path: string;
@@ -42,41 +21,91 @@ function json(value: unknown): Buffer {
   return Buffer.from(`${JSON.stringify(value, null, 2)}\n`);
 }
 
-function coreEntries(repositoryRoot: string): readonly PublicationEntry[] {
+function corePayloads(repositoryRoot: string): readonly PublicationEntry[] {
   const source = (relative: string): Buffer => readFileSync(join(repositoryRoot, relative));
   return [
     { path: 'contracts/v1/protocol.schema.json', bytes: source('contracts/vtt-handoff/v1/protocol.schema.json') },
     { path: 'contracts/v1/art.schema.json', bytes: source('contracts/vtt-handoff/v1/art.schema.json') },
-    { path: 'contracts/v1/contracts.d.ts', bytes: Buffer.from(CONTRACT_DECLARATIONS) },
+    { path: 'contracts/v1/contracts.d.ts', bytes: source('contracts/vtt-handoff/v1/contracts.d.ts') },
     { path: 'fixtures/scenes/two-room.v1.json', bytes: source('fixtures/scenes/two-room.v1.json') },
     { path: 'fixtures/scenes/two-room.snapshots.v1.json', bytes: source('fixtures/scenes/two-room.snapshots.v1.json') },
   ];
 }
 
-function atomicCreate(destination: string, bytes: Buffer): void {
+function publicationEntries(repositoryRoot: string): readonly PublicationEntry[] {
+  const payloads = corePayloads(repositoryRoot);
+  const readmeBytes = Buffer.from(
+    '# VTT handoff contracts/v1\n\nCore schemas, types, and scene fixtures are ready. Transcript examples are pending and are not published.\n',
+  );
+  const manifestBytes = json({
+    schemaVersion: 1,
+    bundle: 'contracts/v1',
+    entries: payloads.map((entry) => ({
+      path: entry.path, sha256: sha256(entry.bytes), length: entry.bytes.length,
+    })),
+  });
+  return [
+    ...payloads,
+    { path: 'contracts/v1/README.md', bytes: readmeBytes },
+    { path: 'contracts/v1/manifest.json', bytes: manifestBytes },
+    { path: 'contracts/v1/READY.json', bytes: json({ core: 'ready', examples: 'pending' }) },
+  ];
+}
+
+function syncDirectory(directory: string): void {
+  const handle = openSync(directory, 'r');
+  try { fsyncSync(handle); } finally { closeSync(handle); }
+}
+
+function createNoReplace(
+  destination: string,
+  bytes: Buffer,
+  nonce: () => string,
+  beforeFinalPlacement?: (destination: string) => void,
+): void {
   mkdirSync(dirname(destination), { recursive: true });
-  const partial = `${destination}.partial`;
-  const handle = openSync(partial, 'w', 0o644);
+  const partial = `${destination}.partial.${nonce()}`;
+  const flags = constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW;
+  let handle: number;
+  try {
+    handle = openSync(partial, flags, 0o644);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+      throw new Error(`PARTIAL_PUBLICATION_COLLISION: ${destination}`);
+    }
+    throw error;
+  }
   try {
     writeSync(handle, bytes);
     fsyncSync(handle);
   } finally {
     closeSync(handle);
   }
-  renameSync(partial, destination);
-  const directory = openSync(dirname(destination), 'r');
-  try { fsyncSync(directory); } finally { closeSync(directory); }
+  try {
+    beforeFinalPlacement?.(destination);
+    linkSync(partial, destination);
+    syncDirectory(dirname(destination));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+      throw new Error(`IMMUTABLE_BUNDLE_CONFLICT: ${destination}`);
+    }
+    throw error;
+  } finally {
+    unlinkSync(partial);
+  }
 }
 
-function assertCompatible(root: string, entries: readonly PublicationEntry[], check: boolean): void {
-  for (const entry of entries) {
-    const destination = join(root, entry.path);
-    if (!existsSync(destination)) {
-      if (check) throw new Error(`IMMUTABLE_BUNDLE_MISSING: ${entry.path}`);
-      continue;
-    }
-    if (!readFileSync(destination).equals(entry.bytes)) throw new Error(`IMMUTABLE_BUNDLE_CONFLICT: ${entry.path}`);
+function assertEntry(entry: PublicationEntry, root: string, sealed: boolean): 'present' | 'missing' {
+  const destination = join(root, entry.path);
+  if (!existsSync(destination)) {
+    if (sealed) throw new Error(`INCONSISTENT_SEALED_BUNDLE: missing ${entry.path}`);
+    return 'missing';
   }
+  if (!readFileSync(destination).equals(entry.bytes)) {
+    if (sealed) throw new Error(`INCONSISTENT_SEALED_BUNDLE: conflict ${entry.path}`);
+    throw new Error(`IMMUTABLE_BUNDLE_CONFLICT: ${entry.path}`);
+  }
+  return 'present';
 }
 
 export interface PublishResult {
@@ -85,40 +114,75 @@ export interface PublishResult {
   readonly files: number;
 }
 
+export interface PublishHooks {
+  readonly afterCreate?: (relativePath: string) => void;
+  readonly beforeFinalPlacement?: (destination: string) => void;
+  readonly nonce?: () => string;
+}
+
 export function publishCore(options: {
   readonly repositoryRoot?: string;
   readonly handoffRoot?: string;
   readonly check?: boolean;
+  readonly identityPolicy?: RepositoryIdentityPolicy;
+  readonly hooks?: PublishHooks;
 } = {}): PublishResult {
   const paths = handoffPaths({
     ...(options.repositoryRoot === undefined ? {} : { repositoryRoot: options.repositoryRoot }),
     ...(options.handoffRoot === undefined ? {} : { handoffRoot: options.handoffRoot }),
+    ...(options.identityPolicy === undefined ? {} : { identityPolicy: options.identityPolicy }),
   });
-  const payloads = coreEntries(paths.repositoryRoot);
-  const manifestBytes = json({
-    schemaVersion: 1,
-    bundle: 'contracts/v1',
-    entries: payloads.map((entry) => ({ path: entry.path, sha256: sha256(entry.bytes), length: entry.bytes.length })),
-  });
-  const readyBytes = json({ core: 'ready', examples: 'pending' });
-  const all = [
-    ...payloads,
-    { path: 'contracts/v1/manifest.json', bytes: manifestBytes },
-    { path: 'contracts/v1/READY.json', bytes: readyBytes },
-  ];
-  assertCompatible(paths.handoffRoot, all, options.check ?? false);
-  if (options.check) return { root: paths.handoffRoot, status: 'verified', files: all.length };
-  const absent = all.filter((entry) => !existsSync(join(paths.handoffRoot, entry.path)));
-  mkdirSync(join(paths.handoffRoot, 'contracts/v1/manifest.entries'), { recursive: true });
-  for (const entry of absent.filter((candidate) => !candidate.path.endsWith('/READY.json'))) {
-    atomicCreate(join(paths.handoffRoot, entry.path), entry.bytes);
+  const entries = publicationEntries(paths.repositoryRoot);
+  const readyPath = join(paths.handoffRoot, 'contracts/v1/READY.json');
+  const check = options.check ?? false;
+  if (check) {
+    const sealed = existsSync(readyPath);
+    for (const entry of entries) {
+      if (assertEntry(entry, paths.handoffRoot, sealed) === 'missing') {
+        throw new Error(`IMMUTABLE_BUNDLE_MISSING: ${entry.path}`);
+      }
+    }
+    return { root: paths.handoffRoot, status: 'verified', files: entries.length };
   }
-  const ready = absent.find((entry) => entry.path.endsWith('/READY.json'));
-  if (ready !== undefined) atomicCreate(join(paths.handoffRoot, ready.path), ready.bytes);
-  return { root: paths.handoffRoot, status: absent.length === 0 ? 'unchanged' : 'published', files: all.length };
+
+  mkdirSync(paths.handoffRoot, { recursive: true });
+  const lockPath = join(paths.handoffRoot, '.contracts-v1.publish.lock');
+  let lock: number;
+  try {
+    lock = openSync(lockPath, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new Error('PUBLICATION_IN_PROGRESS');
+    throw error;
+  }
+  try {
+    closeSync(lock);
+    const sealed = existsSync(readyPath);
+    const states = entries.map((entry) => assertEntry(entry, paths.handoffRoot, sealed));
+    if (sealed) return { root: paths.handoffRoot, status: 'unchanged', files: entries.length };
+    const nonce = options.hooks?.nonce ?? (() => `${String(process.pid)}.${randomBytes(12).toString('hex')}`);
+    let created = 0;
+    for (const [index, entry] of entries.entries()) {
+      if (states[index] === 'present') continue;
+      createNoReplace(
+        join(paths.handoffRoot, entry.path),
+        entry.bytes,
+        nonce,
+        options.hooks?.beforeFinalPlacement,
+      );
+      created += 1;
+      options.hooks?.afterCreate?.(entry.path);
+    }
+    return {
+      root: paths.handoffRoot, status: created === 0 ? 'unchanged' : 'published', files: entries.length,
+    };
+  } finally {
+    unlinkSync(lockPath);
+    syncDirectory(paths.handoffRoot);
+  }
 }
 
-if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.argv[1]) {
+if (process.env.VITEST === undefined && process.argv[1] !== undefined &&
+  (fileURLToPath(import.meta.url) === process.argv[1] || process.argv[1].endsWith('/vite-node'))) {
   if (!process.argv.includes('--core')) throw new Error('PUBLISH_MODE_REQUIRED: --core');
   const result = publishCore({ check: process.argv.includes('--check') });
   process.stdout.write(`${JSON.stringify(result)}\n`);

@@ -1,4 +1,5 @@
 import type { GridCell } from '../../combat/grid';
+import type { CombatToken } from '../../combat/combatant';
 import type { EncounterArtPackage } from '../encounter-package';
 import {
   encounterBoardRenderModel, encounterBoardTokenRenderModels,
@@ -32,8 +33,22 @@ function footprintOf(cells: readonly GridCell[]): GroundFootprint {
   return { w, h };
 }
 
-export function rendererTokenId(combatantId: string): string {
-  return `renderer-token:${combatantId}`;
+export interface CanonicalTokenIdentityIndex {
+  readonly byCombatantId: ReadonlyMap<string, string>;
+}
+
+export function canonicalTokenIdentityIndex(tokens: readonly CombatToken[]): CanonicalTokenIdentityIndex {
+  const byCombatantId = new Map<string, string>();
+  const tokenIds = new Set<string>();
+  for (const token of tokens) {
+    const combatantId = String(token.combatantId);
+    const tokenId = String(token.id);
+    if (byCombatantId.has(combatantId)) throw new Error(`DUPLICATE_CANONICAL_COMBATANT_ID: ${combatantId}`);
+    if (tokenIds.has(tokenId)) throw new Error(`DUPLICATE_CANONICAL_TOKEN_ID: ${tokenId}`);
+    byCombatantId.set(combatantId, tokenId);
+    tokenIds.add(tokenId);
+  }
+  return { byCombatantId };
 }
 
 interface Edge {
@@ -57,15 +72,22 @@ function edgesFor(cell: GridCell): readonly Edge[] {
   ];
 }
 
-function wallFromEdge(id: string, edge: Edge, blocksMovement: boolean, blocksVision: boolean): SceneWall {
+function wallFromEdge(
+  id: string,
+  edge: Edge,
+  blocksMovement: boolean,
+  blocksVision: boolean,
+  assetId: string,
+): SceneWall {
   return {
     id,
-    from: { x: edge.x1, y: edge.y1, z: 0 },
-    to: { x: edge.x2, y: edge.y2, z: 0 },
+    a: { x: edge.x1, y: edge.y1 },
+    b: { x: edge.x2, y: edge.y2 },
     baseZ: 0,
     height: 1,
     blocksMovement,
     blocksVision,
+    assetId,
   };
 }
 
@@ -77,9 +99,10 @@ function allCells(bounds: { readonly columns: number; readonly rows: number }): 
   return cells;
 }
 
-function sortedCells(cells: readonly GridCell[]): { x: number; y: number }[] {
-  return [...new Map(cells.map((cell) => [`${String(cell.column)},${String(cell.row)}`, { x: cell.column, y: cell.row }] as const)).values()]
-    .sort((left, right) => left.y - right.y || left.x - right.x);
+function sortedCells(cells: readonly GridCell[]): [number, number][] {
+  return [...new Map(cells.map((cell) => [
+    `${String(cell.column)},${String(cell.row)}`, [cell.column, cell.row] as [number, number],
+  ] as const)).values()].sort((left, right) => left[1] - right[1] || left[0] - right[0]);
 }
 
 function centroid(cells: readonly GridCell[]): { readonly x: number; readonly y: number; readonly radius: number } {
@@ -119,6 +142,7 @@ export function sceneSnapshot(options: {
   readonly sceneId: string;
   readonly projection: DmBoardProjection | PlayerBoardProjection;
   readonly art: EncounterArtPackage;
+  readonly tokenIdentities: CanonicalTokenIdentityIndex;
 }): SceneSnapshotResult {
   const { projection, art } = options;
   const board = projectedBoard(projection);
@@ -136,9 +160,10 @@ export function sceneSnapshot(options: {
     object.kind !== 'door' && object.terrainKind !== 'wall').map((object) => {
     const cell = cells.find((candidate) => candidate.column === object.position.column && candidate.row === object.position.row);
     const source = cell?.layers.find((layer) => layer.role === 'terrain')?.assetId;
+    const mappingSource = `${object.name.toLowerCase()} ${source === undefined ? '' : String(source)}`.trim();
     return {
       id: String(object.id),
-      assetId: mapAsset(source === undefined ? object.name.toLowerCase() : String(source), 'prop', String(object.id), fallbacks),
+      assetId: mapAsset(mappingSource, 'prop', String(object.id), fallbacks),
       x: object.position.column, y: object.position.row, z: 0,
     };
   }).sort((left, right) => left.id.localeCompare(right.id));
@@ -146,36 +171,18 @@ export function sceneSnapshot(options: {
   const tokens = tokenModels.map((token) => {
     const footprint = footprintOf(token.footprint);
     const center = groundCenter(token.position, footprint);
-    const id = rendererTokenId(String(token.id));
+    const id = options.tokenIdentities.byCombatantId.get(String(token.id));
+    if (id === undefined) throw new Error(`MISSING_CANONICAL_TOKEN_IDENTITY: ${String(token.id)}`);
     const role = token.kind === 'player_character' ? 'player-token' : 'monster-token';
     return {
       id,
-      name: token.name,
+      label: token.name,
       assetId: mapAsset(String(token.assetId), role, id, fallbacks),
       ...center,
       facing: 0,
       footprint,
     };
   }).sort((left, right) => left.id.localeCompare(right.id));
-
-  const doors = (board.worldObjects ?? []).filter((object) => object.kind === 'door')
-    .sort((left, right) => String(left.id).localeCompare(String(right.id)));
-  const doorEdges = new Map<string, EncounterBoardWorldObject>();
-  const doorWalls: SceneWall[] = [];
-  const doorRows = doors.map((door) => {
-    const edge = edgesFor(door.position)[0];
-    if (edge === undefined) throw new Error('MISSING_DOOR_EDGE');
-    const key = edgeKey(edge);
-    if (doorEdges.has(key)) throw new Error('AMBIGUOUS_DOOR_GEOMETRY');
-    doorEdges.set(key, door);
-    const wallId = `wall:door:${String(door.id)}`;
-    doorWalls.push(wallFromEdge(wallId, edge, door.blocking.movement, door.blocking.lineOfSight));
-    return {
-      id: String(door.id), wallId,
-      assetId: mapAsset(String(art.room.door), 'door', String(door.id), fallbacks),
-      open: !door.blocking.movement,
-    };
-  });
 
   const wallCells = new Map<string, { readonly cell: GridCell; readonly movement: boolean; readonly vision: boolean }>();
   const mergeWallCell = (cell: GridCell, movement: boolean, vision: boolean): void => {
@@ -192,6 +199,41 @@ export function sceneSnapshot(options: {
     if (object.kind === 'door' || object.terrainKind !== 'wall') continue;
     for (const cell of object.cells) mergeWallCell(cell, object.blocking.movement, object.blocking.lineOfSight);
   }
+
+  const doors = (board.worldObjects ?? []).filter((object) => object.kind === 'door')
+    .sort((left, right) => String(left.id).localeCompare(String(right.id)));
+  const doorEdges = new Map<string, EncounterBoardWorldObject>();
+  const doorWalls: SceneWall[] = [];
+  let cachedWallAssetId: string | null = null;
+  const wallAssetId = (): string => {
+    cachedWallAssetId ??= mapAsset(String(art.room.wall), 'wall', 'wall:logical-asset', fallbacks);
+    return cachedWallAssetId;
+  };
+  const doorRows = doors.map((door) => {
+    let footprint: GroundFootprint;
+    try { footprint = footprintOf(door.cells); } catch { throw new Error('AMBIGUOUS_DOOR_GEOMETRY'); }
+    const left = Math.min(...door.cells.map((cell) => cell.column)) - 0.5;
+    const right = Math.max(...door.cells.map((cell) => cell.column)) + 0.5;
+    const top = Math.min(...door.cells.map((cell) => cell.row)) - 0.5;
+    const bottom = Math.max(...door.cells.map((cell) => cell.row)) + 0.5;
+    const edge: Edge = footprint.w >= footprint.h
+      ? { x1: left, y1: top, x2: right, y2: top }
+      : { x1: left, y1: top, x2: left, y2: bottom };
+    const key = edgeKey(edge);
+    if (doorEdges.has(key)) throw new Error('AMBIGUOUS_DOOR_GEOMETRY');
+    doorEdges.set(key, door);
+    const wallId = `wall:door:${String(door.id)}`;
+    doorWalls.push(wallFromEdge(wallId, edge, door.blocking.movement, door.blocking.lineOfSight, wallAssetId()));
+    return {
+      id: String(door.id), wallId,
+      assetId: mapAsset(String(art.room.door), 'door', String(door.id), fallbacks),
+      open: !door.blocking.movement,
+    };
+  });
+  for (const door of doors) {
+    for (const cell of door.cells) wallCells.delete(`${String(cell.column)},${String(cell.row)}`);
+  }
+
   const perimeter = new Map<string, { readonly edge: Edge; readonly movement: boolean; readonly vision: boolean }>();
   for (const source of wallCells.values()) {
     for (const edge of edgesFor(source.cell)) {
@@ -201,7 +243,7 @@ export function sceneSnapshot(options: {
     }
   }
   const regularWalls = [...perimeter.entries()].filter(([key]) => !doorEdges.has(key)).map(([key, value]) =>
-    wallFromEdge(`wall:${key}`, value.edge, value.movement, value.vision));
+    wallFromEdge(`wall:${key}`, value.edge, value.movement, value.vision, wallAssetId()));
   const walls = [...regularWalls, ...doorWalls].sort((left, right) => left.id.localeCompare(right.id));
 
   const objectLights = (board.worldObjects ?? []).filter((object) => object.lightClass === 'light-source').map((object) => {
@@ -226,7 +268,6 @@ export function sceneSnapshot(options: {
   const revision = projection.audience === 'dm' ? projection.encounter.revision : projection.revision;
   return {
     snapshot: {
-      schemaVersion: 1,
       sceneId: options.sceneId,
       revision,
       grid: { width: board.bounds.columns, height: board.bounds.rows, feetPerCell: 5 },

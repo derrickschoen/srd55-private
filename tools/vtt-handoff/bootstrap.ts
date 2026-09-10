@@ -2,7 +2,10 @@ import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { HANDOFF_LAYOUT, handoffPaths, inspectNodeModules, type NodeModulesDisposition } from './paths.ts';
+import {
+  HANDOFF_LAYOUT, handoffPaths, inspectNodeModules,
+  type NodeModulesDisposition, type RepositoryIdentityPolicy,
+} from './paths.ts';
 
 export interface CommandRunner {
   run(command: string, args: readonly string[]): { readonly status: number | null };
@@ -33,10 +36,12 @@ export function bootstrapHandoff(options: {
   readonly runner?: CommandRunner;
   readonly commandExists?: (command: string) => boolean;
   readonly nodeModulesInspector?: (repositoryRoot: string) => NodeModulesDisposition;
+  readonly identityPolicy?: RepositoryIdentityPolicy;
 } = {}): BootstrapResult {
   const paths = handoffPaths({
     ...(options.repositoryRoot === undefined ? {} : { repositoryRoot: options.repositoryRoot }),
     ...(options.handoffRoot === undefined ? {} : { handoffRoot: options.handoffRoot }),
+    ...(options.identityPolicy === undefined ? {} : { identityPolicy: options.identityPolicy }),
   });
   const runner = options.runner ?? systemRunner(join(paths.repositoryRoot, '.tmp', 'uv-cache'));
   const commandExists = options.commandExists ?? ((command: string) =>
@@ -69,6 +74,7 @@ export function bootstrapHandoff(options: {
   };
 }
 
-if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.argv[1]) {
+if (process.env.VITEST === undefined && process.argv[1] !== undefined &&
+  (fileURLToPath(import.meta.url) === process.argv[1] || process.argv[1].endsWith('/vite-node'))) {
   process.stdout.write(`${JSON.stringify(bootstrapHandoff())}\n`);
 }

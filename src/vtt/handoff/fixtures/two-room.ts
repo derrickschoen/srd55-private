@@ -5,7 +5,9 @@ import { armorClass, combatantId, statblockId, tokenId, worldObjectId } from '..
 import { decodeEncounterArtPackage, type EncounterArtPackage } from '../../encounter-package';
 import { projectDmBoard, projectPlayerBoard } from '../../encounter-projections';
 import { referenceEncounterSetup } from '../../reference-encounter';
-import { sceneSnapshot } from '../scene-snapshot';
+import {
+  canonicalTokenIdentityIndex, sceneSnapshot, type SnapshotAssetFallback,
+} from '../scene-snapshot';
 import type { SceneSnapshot } from '../v1/contracts';
 
 export const TWO_ROOM_SEED = 603_020_001;
@@ -97,7 +99,7 @@ export function buildTwoRoomEncounter(): EncounterState {
       object('object:two-room-door', 'Oak Door', 'door', { column: 5, row: 4 }, { movement: true, lineOfSight: true, cover: 'total' }),
       object('object:two-room-barrel', 'Barrel', 'cover', { column: 2, row: 2 }, { movement: false, lineOfSight: false, cover: 'half' }),
       object('object:two-room-table', 'Table', 'cover', { column: 8, row: 2 }, { movement: false, lineOfSight: false, cover: 'half' }),
-      object('object:two-room-pillar', 'Pillar', 'barrier', { column: 9, row: 5 }, { movement: true, lineOfSight: true, cover: 'total' }),
+      object('object:two-room-pillar', 'Pillar', 'cover', { column: 9, row: 5 }, { movement: false, lineOfSight: false, cover: 'three_quarters' }),
       object('object:two-room-torch', 'Torch', 'light-source', { column: 3, row: 5 }, { movement: false, lineOfSight: false, cover: 'none' }),
     ],
     environment: {
@@ -134,7 +136,12 @@ export interface TwoRoomSnapshotFixture {
   readonly seed: number;
   readonly sourceRevision: number;
   readonly dm: SceneSnapshot;
-  readonly players: readonly { readonly playerId: string; readonly snapshot: SceneSnapshot }[];
+  readonly dmAssetFallbacks: readonly SnapshotAssetFallback[];
+  readonly players: readonly {
+    readonly playerId: string;
+    readonly snapshot: SceneSnapshot;
+    readonly assetFallbacks: readonly SnapshotAssetFallback[];
+  }[];
 }
 
 export function buildTwoRoomFixtures(): {
@@ -143,21 +150,25 @@ export function buildTwoRoomFixtures(): {
 } {
   const state = buildTwoRoomEncounter();
   const art = twoRoomArtPackage();
+  const tokenIdentities = canonicalTokenIdentityIndex(state.tokens);
   const dmProjection = projectDmBoard({ view: projectDmView(state), coordinator: IDLE, controllers: [], history: [] });
-  const dm = sceneSnapshot({ sceneId: TWO_ROOM_SCENE_ID, projection: dmProjection, art }).snapshot;
-  const players = TWO_ROOM_PLAYER_BINDINGS.map((binding) => ({
-    playerId: binding.seatId,
-    snapshot: sceneSnapshot({
+  const dmResult = sceneSnapshot({ sceneId: TWO_ROOM_SCENE_ID, projection: dmProjection, art, tokenIdentities });
+  const players = TWO_ROOM_PLAYER_BINDINGS.map((binding) => {
+    const result = sceneSnapshot({
       sceneId: TWO_ROOM_SCENE_ID,
       projection: projectPlayerBoard(projectPlayerView(state, binding), IDLE),
-      art,
-    }).snapshot,
-  }));
+      art, tokenIdentities,
+    });
+    return { playerId: binding.seatId, snapshot: result.snapshot, assetFallbacks: result.assetFallbacks };
+  });
   return {
     source: {
       schemaVersion: 1, seed: TWO_ROOM_SEED, clock: TWO_ROOM_CLOCK,
       sceneId: TWO_ROOM_SCENE_ID, art, playerBindings: TWO_ROOM_PLAYER_BINDINGS, state,
     },
-    snapshots: { schemaVersion: 1, seed: TWO_ROOM_SEED, sourceRevision: state.revision, dm, players },
+    snapshots: {
+      schemaVersion: 1, seed: TWO_ROOM_SEED, sourceRevision: state.revision,
+      dm: dmResult.snapshot, dmAssetFallbacks: dmResult.assetFallbacks, players,
+    },
   };
 }

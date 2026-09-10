@@ -29,6 +29,13 @@ export function generateTwoRoomFixtureFiles(options: { readonly check: boolean; 
   }
 }
 
-if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.argv[1]) {
-  generateTwoRoomFixtureFiles({ check: process.argv.includes('--check') });
+if (process.env.VITEST === undefined && process.argv[1] !== undefined &&
+  (fileURLToPath(import.meta.url) === process.argv[1] || process.argv[1].endsWith('/vite-node'))) {
+  const rootIndex = process.argv.indexOf('--root');
+  const root = rootIndex < 0 ? undefined : process.argv[rootIndex + 1];
+  if (rootIndex >= 0 && root === undefined) throw new Error('FIXTURE_ROOT_REQUIRED');
+  generateTwoRoomFixtureFiles({
+    check: process.argv.includes('--check'),
+    ...(root === undefined ? {} : { root }),
+  });
 }

@@ -201,7 +201,7 @@
       {
         "id": "object:two-room-pillar",
         "name": "Pillar",
-        "kind": "barrier",
+        "kind": "cover",
         "position": {
           "column": 9,
           "row": 5
@@ -218,9 +218,9 @@
         "armorClass": 10,
         "damageResponses": [],
         "blocking": {
-          "movement": true,
-          "lineOfSight": true,
-          "cover": "total"
+          "movement": false,
+          "lineOfSight": false,
+          "cover": "three_quarters"
         },
         "createdRevision": 0
       },

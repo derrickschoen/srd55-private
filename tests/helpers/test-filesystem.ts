@@ -9,6 +9,7 @@ export {
   readFileSync,
   readdirSync,
   rmSync,
+  symlinkSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
