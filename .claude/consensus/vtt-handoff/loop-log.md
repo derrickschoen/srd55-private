@@ -24,3 +24,5 @@ Machine constraint: the D569 v5 first arm (pid 1201481, port 4530) runs until ~1
 - 2026-09-10 07:37 EDT PLAN ACCEPTED after remediation pass 2 (sha 25816309…); S0–S2 lane DONE (13 paths); node_modules materialized; supervisor verification running.
 - 2026-09-10 07:39 S0–S2 supervisor verification (real node_modules): tsc 0, sg 0, diff-check 0, 8 files / 36 tests; committed 6b6dc3a4; Astra implementation review r1 dispatched (resume 01a087f9…).
 - 2026-09-10 07:47 S0–S2 r1 Astra REJECT (13 significant: contract deviates from the owner agreement, invented token ids, insufficient parity/coverage, incomplete d.ts, art filename semantics, lookalike refusal, doctor honesty, S2a gates, nine-id fixture, test-time regeneration, generator guard, publisher races). Supervisor spot-checked F1/F2/F3/F11; all accepted; lane resumed r2.
+
+- 2026-09-10 08:41 EDT — S0–S2 r2 supervisor verification green (tsc/sg/diffcheck/generator --check 0; vitest 9 files 57/57); committed 5c7f459b (20 paths); Astra review r2 dispatched (resume 01a087f9…, brief review-vtt-handoff-s0s2-r2.md, diff handoff-s0s2-r2.diff).

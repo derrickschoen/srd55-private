@@ -10,3 +10,5 @@
 - 2026-09-10 07:49 NOTE: the r4 review brief lost its backticked example list to heredoc command substitution; the exhaustive-enumeration instruction survived; not redispatched.
 - 2026-09-10 07:57 r4 Astra REJECT with the exhaustive enumeration: F5 percent-encoded file URLs, F6 import.meta.glob, F7 Worker/SharedWorker/importScripts, F8 loader indirection, F9 data: modules, F10 JSDoc imports, F11 rename-only diffs; plus #imports handling. All accepted; lane resumed r5 (D604).
 - 2026-09-10 08:30 r5 verified (serial; two D576 load flakes cleared alone 111/111); committed c0dab908; Astra r5 dispatched.
+
+- 2026-09-10 08:41 EDT — r5 Astra REJECT (F12–F17 High: glob base/extglob/**, #imports ordering, loader escapes, worker aliases, data: whitespace, config-only changes); review saved review-r5-astra.md; r6 dispatched (resume 01a088b4…, brief resume-heldout-rem-r6.md, header restated in full — the r5 brief had omitted it).
