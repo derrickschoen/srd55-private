@@ -9,9 +9,10 @@ import {
 } from './fixtures/two-room';
 import { NamedWorkerMemorySessionStore } from './worker-memory-session-store';
 import {
-  workerClientMessageSchema, type WorkerConnectMessage, type WorkerServerMessage,
+  decodeWorkerClientMessage, type WorkerConnectMessage, type WorkerServerMessage,
 } from './worker-messages';
 import { ProtocolRuntime } from './protocol-runtime';
+import type { HandoffPrincipal } from './session-authorizer';
 
 function post(port: MessagePort, message: WorkerServerMessage): void {
   port.postMessage(message);
@@ -30,13 +31,29 @@ function workerLegalActions(state: EncounterState, actor: CombatantId): LegalAct
   };
 }
 
-export function attachHandoffWorkerPort(
-  port: MessagePort,
-  options: { readonly startAutonomous?: boolean } = {},
-): () => void {
-  const state = buildTwoRoomEncounter();
-  const store = new NamedWorkerMemorySessionStore('vtt-handoff-worker-memory');
-  const host = new DmEncounterHost('scene:vtt-handoff-worker', store, {
+interface WorkerSession {
+  readonly key: string;
+  readonly service: EncounterSessionService;
+  readonly seats: readonly PlayerSeatRegistration[];
+  bindings: number;
+  startPromise: Promise<void> | null;
+}
+
+const workerSessions = new Map<string, WorkerSession>();
+let anonymousSessionSequence = 0;
+
+function createWorkerSession(key: string): WorkerSession {
+  const baseState = buildTwoRoomEncounter();
+  const state: EncounterState = {
+    ...baseState,
+    hiddenCombatants: [{
+      combatant: TWO_ROOM_ADVENTURER_ID,
+      stealthTotal: 99,
+      edition: baseState.rulesEdition,
+    }],
+  };
+  const store = new NamedWorkerMemorySessionStore(`vtt-handoff-worker-memory:${key}`);
+  const host = new DmEncounterHost(`scene:vtt-handoff-worker:${key}`, store, {
     initialState: state,
     initialSeed: encounterSeed(TWO_ROOM_SEED),
     initialControllers: state.combatants.map((combatant, index) => ({
@@ -58,10 +75,56 @@ export function attachHandoffWorkerPort(
       .filter((binding) => binding.combatantId === combatant.profile.id)
       .map((binding) => binding.tokenId),
   }));
-  const service = new EncounterSessionService(host, seats);
-  const runtime = new ProtocolRuntime({ service, principal: { role: 'dm' }, seats, art: twoRoomArtPackage() });
+  return { key, service: new EncounterSessionService(host, seats), seats, bindings: 0, startPromise: null };
+}
+
+function workerSession(key: string): WorkerSession {
+  const existing = workerSessions.get(key);
+  if (existing !== undefined) return existing;
+  const created = createWorkerSession(key);
+  workerSessions.set(key, created);
+  return created;
+}
+
+function startWorkerSession(session: WorkerSession): Promise<void> {
+  session.startPromise ??= new Promise<void>((resolve, reject) => {
+    let unsubscribe = (): void => undefined;
+    unsubscribe = session.service.subscribeDm((event) => {
+      if (event.kind !== 'offer') return;
+      unsubscribe();
+      resolve();
+    });
+    void session.service.start().catch((error: unknown) => {
+      unsubscribe();
+      reject(error);
+    });
+  });
+  return session.startPromise;
+}
+
+export interface AttachHandoffWorkerOptions {
+  readonly startAutonomous?: boolean;
+  readonly sessionKey?: string;
+  readonly principal?: HandoffPrincipal;
+  readonly responseBarrier?: () => Promise<void>;
+}
+
+export function attachHandoffWorkerPort(
+  port: MessagePort,
+  options: AttachHandoffWorkerOptions = {},
+): () => void {
+  const sessionKey = options.sessionKey ?? `anonymous:${String(++anonymousSessionSequence)}`;
+  const session = workerSession(sessionKey);
+  session.bindings += 1;
+  const runtime = new ProtocolRuntime({
+    service: session.service,
+    principal: options.principal ?? { role: 'dm' },
+    seats: session.seats,
+    art: twoRoomArtPackage(),
+  });
   const invocations = new Map<SessionInvocationToken, number>();
-  let started = false;
+  const seenInvocations = new Set<number>();
+  let detached = false;
   const unsubscribeEvent = runtime.subscribe((event, receipt) => {
     const receiptInvocation = receipt === undefined ? undefined : invocations.get(receipt.invocationToken);
     post(port, {
@@ -74,8 +137,8 @@ export function attachHandoffWorkerPort(
   });
   const unsubscribeFault = runtime.subscribeFaults((fault) => post(port, { kind: 'fault', fault }));
   const onMessage = (messageEvent: MessageEvent<unknown>): void => {
-    const decoded = workerClientMessageSchema.safeParse(messageEvent.data);
-    if (!decoded.success) {
+    const message = decodeWorkerClientMessage(messageEvent.data);
+    if (message === null) {
       post(port, {
         kind: 'fault',
         fault: {
@@ -85,32 +148,31 @@ export function attachHandoffWorkerPort(
       });
       return;
     }
-    const message = decoded.data;
     if (message.kind === 'request') {
+      if (seenInvocations.has(message.invocation)) {
+        post(port, {
+          kind: 'fault',
+          fault: {
+            kind: 'transport_fault', code: 'PROTOCOL_ERROR',
+            message: 'Worker request invocation was already consumed.', websocketCloseCode: 1002,
+          },
+        });
+        return;
+      }
+      seenInvocations.add(message.invocation);
       const token = runtime.createInvocationToken();
       invocations.set(token, message.invocation);
       void runtime.dispatch(message.request, undefined, token).then(async (result) => {
         invocations.delete(token);
+        await options.responseBarrier?.();
         if (result.kind === 'transport_fault') {
           post(port, { kind: 'request-fault', invocation: message.invocation, fault: result.fault });
           return;
         }
-        if (options.startAutonomous !== false && !started && result.response.ok && result.response.id !== undefined) {
+        if (options.startAutonomous !== false && result.response.ok && result.response.id !== undefined) {
           const request = message.request;
           if (typeof request === 'object' && request !== null && Reflect.get(request, 'method') === 'session.open') {
-            started = true;
-            await new Promise<void>((resolve, reject) => {
-              let unsubscribe = (): void => undefined;
-              unsubscribe = service.subscribeDm((event) => {
-                if (event.kind !== 'offer') return;
-                unsubscribe();
-                resolve();
-              });
-              void service.start().catch((error: unknown) => {
-                unsubscribe();
-                reject(error);
-              });
-            });
+            await startWorkerSession(session);
           }
         }
         post(port, { kind: 'response', invocation: message.invocation, response: result.response });
@@ -123,39 +185,48 @@ export function attachHandoffWorkerPort(
       });
       return;
     }
+    release(message.kind, true);
+  };
+  const release = (kind: 'close' | 'dispose' | 'destroy', notifyPeer: boolean): void => {
+    if (detached) return;
+    detached = true;
+    let cleanupFailed = false;
     try {
-      if (message.kind === 'close') runtime.close();
-      else if (message.kind === 'dispose') runtime.dispose();
+      if (kind === 'close') runtime.close();
+      else if (kind === 'dispose') runtime.dispose();
       else runtime.destroySession();
     } catch {
-      post(port, {
-        kind: 'fault',
-        fault: {
-          kind: 'transport_fault', code: 'PROTOCOL_ERROR',
-          message: 'Worker session cleanup failed.', websocketCloseCode: 1002,
-        },
-      });
+      cleanupFailed = true;
     } finally {
+      port.removeEventListener('message', onMessage);
       unsubscribeEvent();
       unsubscribeFault();
       invocations.clear();
-      post(port, { kind: 'closed' });
+      seenInvocations.clear();
+      session.bindings -= 1;
+      if (kind === 'destroy') workerSessions.delete(session.key);
+      if (session.bindings === 0 && kind !== 'destroy') {
+        workerSessions.delete(session.key);
+        try { runtime.destroySession(); } catch { cleanupFailed = true; }
+      }
+      if (notifyPeer) {
+        if (cleanupFailed) {
+          post(port, {
+            kind: 'fault',
+            fault: {
+              kind: 'transport_fault', code: 'PROTOCOL_ERROR',
+              message: 'Worker session cleanup failed.', websocketCloseCode: 1002,
+            },
+          });
+        }
+        post(port, { kind: 'closed' });
+      }
       port.close();
     }
   };
   port.addEventListener('message', onMessage);
   port.start();
-  return () => {
-    port.removeEventListener('message', onMessage);
-    unsubscribeEvent();
-    unsubscribeFault();
-    try {
-      runtime.destroySession();
-    } finally {
-      invocations.clear();
-      port.close();
-    }
-  };
+  return () => release('dispose', false);
 }
 
 interface WorkerScope {
@@ -167,6 +238,12 @@ scope.addEventListener?.('message', (event) => {
   const data: unknown = event.data;
   if (
     typeof data === 'object' && data !== null &&
-    Reflect.get(data, 'kind') === 'vtt-handoff.connect' && Reflect.get(data, 'port') instanceof MessagePort
-  ) attachHandoffWorkerPort(Reflect.get(data, 'port') as MessagePort);
+    Reflect.get(data, 'kind') === 'vtt-handoff.connect' &&
+    Reflect.get(data, 'port') instanceof MessagePort &&
+    typeof Reflect.get(data, 'sessionKey') === 'string' &&
+    typeof Reflect.get(data, 'principal') === 'object' && Reflect.get(data, 'principal') !== null
+  ) attachHandoffWorkerPort(Reflect.get(data, 'port') as MessagePort, {
+    sessionKey: Reflect.get(data, 'sessionKey') as string,
+    principal: Reflect.get(data, 'principal') as HandoffPrincipal,
+  });
 });

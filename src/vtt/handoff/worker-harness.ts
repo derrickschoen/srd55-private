@@ -1,7 +1,9 @@
 import type { HandoffResponse } from './protocol-runtime';
 import { SceneTransportFaultError } from './scene-transport';
-import { createHandoffWorkerTransport, type WorkerSceneTransport } from './worker-transport';
+import { createHandoffWorkerHost, type HandoffWorkerHost, type WorkerSceneTransport } from './worker-transport';
 import type { SceneSnapshot } from './v1/contracts';
+
+const WORKER_GOBLIN_PLAYER_ID = 'combatant:two-room-goblin';
 
 interface ArtifactMarker {
   readonly artifact: 'dev' | 'dist';
@@ -16,6 +18,7 @@ export interface WorkerHarnessState {
   readonly eventSequences: readonly number[];
   readonly eventRevisions: readonly number[];
   readonly snapshot: SceneSnapshot | null;
+  readonly playerSnapshot: SceneSnapshot | null;
   readonly lastResponse: HandoffResponse | null;
   readonly lastFault: string | null;
 }
@@ -23,8 +26,11 @@ export interface WorkerHarnessState {
 export interface WorkerHarnessApi {
   state(): WorkerHarnessState;
   request(request: unknown): Promise<HandoffResponse>;
+  playerRequest(request: unknown): Promise<HandoffResponse>;
   malformed(): Promise<string>;
   reconnect(): Promise<WorkerHarnessState>;
+  close(): void;
+  destroySession(): void;
   dispose(): void;
 }
 
@@ -123,7 +129,10 @@ export async function mountWorkerHarness(root: HTMLElement): Promise<WorkerHarne
   const marker = await artifactMarker();
   let generation = 0;
   let transport: WorkerSceneTransport | null = null;
+  let playerTransport: WorkerSceneTransport | null = null;
+  let workerHost: HandoffWorkerHost | null = null;
   let snapshot: SceneSnapshot | null = null;
+  let playerSnapshot: SceneSnapshot | null = null;
   let lastResponse: HandoffResponse | null = null;
   let lastFault: string | null = null;
   let eventSequences: number[] = [];
@@ -137,6 +146,7 @@ export async function mountWorkerHarness(root: HTMLElement): Promise<WorkerHarne
     eventSequences: [...eventSequences],
     eventRevisions: [...eventRevisions],
     snapshot,
+    playerSnapshot,
     lastResponse,
     lastFault,
   });
@@ -144,12 +154,20 @@ export async function mountWorkerHarness(root: HTMLElement): Promise<WorkerHarne
   const connect = async (): Promise<void> => {
     generation += 1;
     snapshot = null;
+    playerSnapshot = null;
     lastResponse = null;
     lastFault = null;
     eventSequences = [];
     eventRevisions = [];
-    const nextTransport = createHandoffWorkerTransport();
+    const sessionKey = `harness:${String(generation)}`;
+    const nextHost = createHandoffWorkerHost();
+    workerHost = nextHost;
+    const nextTransport = nextHost.connect({ sessionKey, principal: { role: 'dm' } });
+    const nextPlayerTransport = nextHost.connect({
+      sessionKey, principal: { role: 'player', playerId: WORKER_GOBLIN_PLAYER_ID },
+    });
     transport = nextTransport;
+    playerTransport = nextPlayerTransport;
     nextTransport.subscribe((event) => {
       snapshot = event.data;
       eventSequences.push(event.seq);
@@ -161,9 +179,17 @@ export async function mountWorkerHarness(root: HTMLElement): Promise<WorkerHarne
       lastFault = error.code;
       update();
     });
+    nextPlayerTransport.subscribe((event) => {
+      playerSnapshot = event.data;
+      update();
+    });
     const initialSnapshot = nextTransport.initialSnapshot();
     lastResponse = await nextTransport.request({
       v: 1, id: '', method: 'session.open', params: { requestedRole: 'dm' },
+    });
+    await nextPlayerTransport.request({
+      v: 1, id: '', method: 'session.open',
+      params: { requestedRole: 'player', playerId: WORKER_GOBLIN_PLAYER_ID },
     });
     await initialSnapshot;
     update();
@@ -174,12 +200,21 @@ export async function mountWorkerHarness(root: HTMLElement): Promise<WorkerHarne
     if (transport === null) throw new Error('The VTT handoff Worker is not connected.');
     return transport;
   };
+  const activePlayerTransport = (): WorkerSceneTransport => {
+    if (playerTransport === null) throw new Error('The player VTT handoff Worker is not connected.');
+    return playerTransport;
+  };
   api = {
     state,
     async request(request) {
       lastResponse = await activeTransport().request(request);
       update();
       return lastResponse;
+    },
+    async playerRequest(request) {
+      const response = await activePlayerTransport().request(request);
+      update();
+      return response;
     },
     async malformed() {
       try {
@@ -193,17 +228,33 @@ export async function mountWorkerHarness(root: HTMLElement): Promise<WorkerHarne
       }
     },
     async reconnect() {
-      activeTransport().destroySession();
+      activeTransport().dispose();
+      activePlayerTransport().dispose();
+      workerHost?.terminate();
       await connect();
       return state();
     },
+    close() {
+      activeTransport().close();
+      update();
+    },
+    destroySession() {
+      activeTransport().destroySession();
+      update();
+    },
     dispose() {
       activeTransport().dispose();
+      activePlayerTransport().dispose();
+      workerHost?.terminate();
       update();
     },
   };
   window.__VTT_HANDOFF_HARNESS__ = api;
   update();
-  window.addEventListener('pagehide', () => activeTransport().dispose(), { once: true });
+  window.addEventListener('pagehide', () => {
+    activeTransport().dispose();
+    activePlayerTransport().dispose();
+    workerHost?.terminate();
+  }, { once: true });
   return api;
 }

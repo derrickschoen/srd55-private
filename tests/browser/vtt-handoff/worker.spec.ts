@@ -4,10 +4,15 @@ import type {} from '../../../src/vtt/handoff/worker-harness';
 
 test('drives the v1 handoff across an actual module Worker', async ({ page }, testInfo) => {
   const workerUrls: string[] = [];
+  const pageErrors: string[] = [];
+  page.on('pageerror', (error) => pageErrors.push(error.message));
   page.on('request', (request) => {
     if (request.resourceType() === 'script' && /worker-entry/u.test(request.url())) workerUrls.push(request.url());
   });
   await page.goto('/vtt-handoff');
+  await page.waitForLoadState('domcontentloaded');
+  await page.waitForFunction(() => window.__VTT_HANDOFF_HARNESS__ !== undefined);
+  expect(pageErrors).toEqual([]);
   const state = page.getByTestId('handoff-state');
   await expect(state).toHaveAttribute('data-status', 'open');
 
@@ -22,7 +27,29 @@ test('drives the v1 handoff across an actual module Worker', async ({ page }, te
   expect(initial.eventRevisions[0]).toBe(0);
   expect(initial.eventRevisions.at(-1)).toBeGreaterThan(0);
   expect(initial.snapshot?.revision).toBe(initial.eventRevisions.at(-1));
+  expect(initial.playerSnapshot?.tokens.map((token) => token.id)).toEqual(['token:two-room-goblin']);
   expect(workerUrls).toHaveLength(1);
+
+  const playerBoundary = await page.evaluate(async () => {
+    const api = window.__VTT_HANDOFF_HARNESS__;
+    if (api === undefined) throw new Error('The VTT handoff harness is not mounted.');
+    const forbidden = await api.playerRequest({
+      v: 1, id: 'player-cross-seat', method: 'token.move',
+      params: { tokenId: 'token:two-room-adventurer', to: { x: 3, y: 4, z: 0 } },
+    });
+    const moved = await api.playerRequest({
+      v: 1, id: 'player-move', method: 'token.move',
+      params: { tokenId: 'token:two-room-goblin', to: { x: 7, y: 4, z: 0 } },
+    });
+    return { forbidden, moved, playerSnapshot: api.state().playerSnapshot };
+  });
+  expect(playerBoundary.forbidden).toMatchObject({
+    id: 'player-cross-seat', ok: false, error: { code: 'FORBIDDEN' },
+  });
+  expect(playerBoundary.moved).toMatchObject({ id: 'player-move', ok: true });
+  expect(playerBoundary.playerSnapshot?.tokens).toEqual([
+    expect.objectContaining({ id: 'token:two-room-goblin', x: 7, y: 4, z: 0 }),
+  ]);
 
   const correlated = await page.evaluate(async () => {
     const api = window.__VTT_HANDOFF_HARNESS__;
@@ -98,6 +125,41 @@ test('drives the v1 handoff across an actual module Worker', async ({ page }, te
   expect(reconnected.eventRevisions.at(-1)).toBeGreaterThan(0);
   expect(reconnected.snapshot?.doors.find((door) => door.id === 'object:two-room-door')?.open).toBe(false);
   expect(workerUrls).toHaveLength(2);
+
+  for (const lifecycle of ['close', 'dispose', 'destroySession'] as const) {
+    const outcome = await page.evaluate(async (kind) => {
+      const api = window.__VTT_HANDOFF_HARNESS__;
+      if (api === undefined) throw new Error('The VTT handoff harness is not mounted.');
+      const request = {
+        v: 1,
+        get id(): string {
+          if (kind === 'close') api.close();
+          else if (kind === 'dispose') api.dispose();
+          else api.destroySession();
+          return `getter-${kind}`;
+        },
+        method: 'scene.snapshot', params: {},
+      };
+      try {
+        await api.request(request);
+        return 'unexpected-success';
+      } catch (error: unknown) {
+        return error instanceof Error ? `${error.name}:${Reflect.get(error, 'code') as string}` : 'non-error';
+      }
+    }, lifecycle);
+    expect(outcome).toBe('SceneTransportClosedError:TRANSPORT_CLOSED');
+    const lifecycleState = await page.evaluate(() => {
+      const api = window.__VTT_HANDOFF_HARNESS__;
+      if (api === undefined) throw new Error('The VTT handoff harness is not mounted.');
+      return api.state();
+    });
+    expect(lifecycleState.lastResponse?.id).not.toBe(`getter-${lifecycle}`);
+    await page.evaluate(async () => {
+      const api = window.__VTT_HANDOFF_HARNESS__;
+      if (api === undefined) throw new Error('The VTT handoff harness is not mounted.');
+      await api.reconnect();
+    });
+  }
 
   await page.evaluate(() => {
     const api = window.__VTT_HANDOFF_HARNESS__;

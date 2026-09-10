@@ -1,9 +1,10 @@
-import { handoffEventSchema, handoffResponseSchema, type SceneSnapshot } from './v1/contracts';
+import type { SceneSnapshot } from './v1/contracts';
 import type { HandoffResponse, ProtocolTransportFault, SceneSnapshotEvent } from './protocol-runtime';
 import { SceneTransportClosedError, SceneTransportFaultError, type SceneTransport, type SceneTransportStatus } from './scene-transport';
 import {
-  workerServerMessageSchema, type WorkerClientMessage, type WorkerConnectMessage,
+  decodeWorkerServerMessage, type WorkerClientMessage, type WorkerConnectMessage,
 } from './worker-messages';
+import type { HandoffPrincipal } from './session-authorizer';
 
 interface Pending {
   readonly id: string | null;
@@ -18,6 +19,11 @@ function property(input: unknown, key: string): unknown {
   try { return Reflect.get(input, key); } catch { return undefined; }
 }
 
+type InstallWorkerFailureHandlers = (
+  onError: () => void,
+  onMessageError: () => void,
+) => () => void;
+
 export class WorkerSceneTransport implements SceneTransport {
   readonly #pending = new Map<number, Pending>();
   readonly #events = new Set<(event: SceneSnapshotEvent) => void>();
@@ -28,23 +34,45 @@ export class WorkerSceneTransport implements SceneTransport {
   #initial: Promise<SceneSnapshot>;
   #resolveInitial: ((snapshot: SceneSnapshot) => void) | null = null;
   #rejectInitial: ((error: Error) => void) | null = null;
+  #removeWorkerFailureHandlers: () => void;
+  #finished = false;
 
-  constructor(readonly port: MessagePort, readonly terminate: () => void = () => port.close()) {
+  constructor(
+    readonly port: MessagePort,
+    readonly terminate: (terminalFault: boolean) => void = () => port.close(),
+    installWorkerFailureHandlers?: InstallWorkerFailureHandlers,
+  ) {
     this.#initial = new Promise((resolve, reject) => {
       this.#resolveInitial = resolve;
       this.#rejectInitial = reject;
     });
     void this.#initial.catch(() => undefined);
     port.addEventListener('message', this.#onMessage);
+    port.addEventListener('messageerror', this.#onPortMessageError);
+    this.#removeWorkerFailureHandlers = installWorkerFailureHandlers?.(
+      this.#onWorkerError,
+      this.#onWorkerMessageError,
+    ) ?? (() => undefined);
     port.start();
   }
 
   request(request: unknown): Promise<HandoffResponse> {
-    if (this.#status === 'closed' || this.#status === 'disposed') return Promise.reject(new SceneTransportClosedError());
+    if (this.#terminal()) return Promise.reject(new SceneTransportClosedError());
+    if (this.#invocation === Number.MAX_SAFE_INTEGER) {
+      const fault = this.#fault('PROTOCOL_ERROR', 'Worker request invocation space was exhausted.');
+      this.#terminalFault(fault);
+      return Promise.reject(new SceneTransportFaultError(fault));
+    }
     this.#invocation += 1;
     const invocation = this.#invocation;
     const idValue = property(request, 'id');
     const methodValue = property(request, 'method');
+    const versionValue = property(request, 'v');
+    const paramsValue = property(request, 'params');
+    if (this.#terminal()) return Promise.reject(new SceneTransportClosedError());
+    const outbound = typeof request === 'object' && request !== null
+      ? { v: versionValue, id: idValue, method: methodValue, params: paramsValue }
+      : request;
     let rejectRequest: ((error: Error) => void) | undefined;
     const promise = new Promise<HandoffResponse>((resolve, reject) => {
       rejectRequest = reject;
@@ -55,9 +83,14 @@ export class WorkerSceneTransport implements SceneTransport {
       });
     });
     try {
-      this.#post({ kind: 'request', invocation, request });
+      if (this.#terminal()) throw new SceneTransportClosedError();
+      this.#post({ kind: 'request', invocation, request: outbound });
     } catch {
       this.#pending.delete(invocation);
+      if (this.#terminal()) {
+        rejectRequest?.(new SceneTransportClosedError());
+        return promise;
+      }
       const fault: ProtocolTransportFault = {
         kind: 'transport_fault', code: 'PROTOCOL_ERROR',
         message: 'Worker request could not cross the message boundary.', websocketCloseCode: 1002,
@@ -67,6 +100,12 @@ export class WorkerSceneTransport implements SceneTransport {
       return promise;
     }
     return promise;
+  }
+
+  pendingRequestCount(): number { return this.#pending.size; }
+
+  hostTerminated(): void {
+    this.#terminalFault(this.#fault('PROTOCOL_ERROR', 'Worker host terminated the shared connection.'));
   }
 
   initialSnapshot(): Promise<SceneSnapshot> { return this.#initial; }
@@ -83,46 +122,64 @@ export class WorkerSceneTransport implements SceneTransport {
   destroySession(): void { this.#shutdown('disposed', 'destroy'); }
 
   readonly #onMessage = (messageEvent: MessageEvent<unknown>): void => {
-    const decoded = workerServerMessageSchema.safeParse(messageEvent.data);
-    if (!decoded.success) { this.#protocolFault('Worker emitted an invalid message envelope.'); return; }
-    const message = decoded.data;
+    const message = decodeWorkerServerMessage(messageEvent.data);
+    if (message === null) {
+      this.#terminalFault(this.#fault('PROTOCOL_ERROR', 'Worker emitted an invalid message envelope.'));
+      return;
+    }
     if (message.kind === 'event') {
-      const parsed = handoffEventSchema.safeParse(message.event);
-      if (!parsed.success) { this.#protocolFault('Worker emitted an invalid event.'); return; }
       if (message.receiptInvocation !== undefined) {
         const pending = this.#pending.get(message.receiptInvocation);
-        if (pending !== undefined && (pending.method === 'token.move' || pending.method === 'door.set')) {
-          pending.receiptRevision = message.receiptRevision ?? null;
+        if (pending === undefined || (pending.method !== 'token.move' && pending.method !== 'door.set')) {
+          this.#terminalFault(this.#fault('PROTOCOL_ERROR', 'Worker emitted an uncorrelated mutation receipt.'));
+          return;
         }
+        pending.receiptRevision = message.receiptRevision ?? null;
       }
-      this.#resolveInitial?.(parsed.data.data);
+      this.#resolveInitial?.(message.event.data);
       this.#resolveInitial = null;
       this.#rejectInitial = null;
-      for (const listener of this.#events) { try { listener(parsed.data); } catch { /* Isolated observer. */ } }
+      for (const listener of this.#events) { try { listener(message.event); } catch { /* Isolated observer. */ } }
       return;
     }
     if (message.kind === 'fault') { this.#emitFault(message.fault); return; }
     if (message.kind === 'request-fault') {
       const pending = this.#pending.get(message.invocation);
-      if (pending !== undefined) { this.#pending.delete(message.invocation); pending.reject(new SceneTransportFaultError(message.fault)); }
+      if (pending === undefined) {
+        this.#terminalFault(this.#fault('PROTOCOL_ERROR', 'Worker emitted an uncorrelated request fault.'));
+        return;
+      }
+      this.#pending.delete(message.invocation);
+      pending.reject(new SceneTransportFaultError(message.fault));
       return;
     }
     if (message.kind === 'response') {
       const pending = this.#pending.get(message.invocation);
-      if (pending === undefined) return;
-      const parsed = handoffResponseSchema.safeParse(message.response);
-      if (!parsed.success || pending.id !== null && parsed.data.id !== pending.id) { this.#protocolFault('Worker response correlation failed.'); return; }
+      if (pending === undefined || pending.id !== null && message.response.id !== pending.id) {
+        this.#terminalFault(this.#fault('PROTOCOL_ERROR', 'Worker response correlation failed.'));
+        return;
+      }
       this.#pending.delete(message.invocation);
-      if (pending.method === 'session.open' && parsed.data.ok) this.#setStatus('open');
-      pending.resolve(parsed.data);
+      if (pending.method === 'session.open' && message.response.ok) this.#setStatus('open');
+      pending.resolve(message.response);
       return;
     }
-    this.#finishShutdown();
+    this.#terminalFault(this.#fault('PROTOCOL_ERROR', 'Worker peer closed the transport.'));
+  };
+
+  readonly #onPortMessageError = (): void => {
+    this.#terminalFault(this.#fault('PROTOCOL_ERROR', 'Worker port could not decode a message.'));
+  };
+  readonly #onWorkerError = (): void => {
+    this.#terminalFault(this.#fault('PROTOCOL_ERROR', 'Worker execution failed.'));
+  };
+  readonly #onWorkerMessageError = (): void => {
+    this.#terminalFault(this.#fault('PROTOCOL_ERROR', 'Worker could not decode a host message.'));
   };
 
   #post(message: WorkerClientMessage): void { this.port.postMessage(message); }
-  #protocolFault(message: string): void {
-    this.#emitFault({ kind: 'transport_fault', code: 'PROTOCOL_ERROR', message, websocketCloseCode: 1002 });
+  #fault(code: ProtocolTransportFault['code'], message: string): ProtocolTransportFault {
+    return { kind: 'transport_fault', code, message, websocketCloseCode: code === 'PROTOCOL_ERROR' ? 1002 : 1007 };
   }
   #emitFault(fault: ProtocolTransportFault): void {
     const error = new SceneTransportFaultError(fault);
@@ -134,13 +191,22 @@ export class WorkerSceneTransport implements SceneTransport {
     try {
       this.#post({ kind });
     } catch {
-      this.#protocolFault('Worker cleanup message could not cross the message boundary.');
+      this.#emitFault(this.#fault('PROTOCOL_ERROR', 'Worker cleanup message could not cross the message boundary.'));
     } finally {
-      this.#finishShutdown();
+      this.#finishShutdown(new SceneTransportClosedError(), false);
     }
   }
-  #finishShutdown(): void {
-    const error = new SceneTransportClosedError();
+  #terminal(): boolean { return this.#status === 'closed' || this.#status === 'disposed'; }
+  #terminalFault(fault: ProtocolTransportFault): void {
+    if (this.#terminal()) return;
+    const error = new SceneTransportFaultError(fault);
+    this.#setStatus('closed');
+    this.#emitFault(fault);
+    this.#finishShutdown(error, true);
+  }
+  #finishShutdown(error: Error, terminalFault: boolean): void {
+    if (this.#finished) return;
+    this.#finished = true;
     this.#rejectInitial?.(error);
     this.#resolveInitial = null;
     this.#rejectInitial = null;
@@ -151,10 +217,12 @@ export class WorkerSceneTransport implements SceneTransport {
       this.#pending.delete(invocation);
     }
     this.port.removeEventListener('message', this.#onMessage);
+    this.port.removeEventListener('messageerror', this.#onPortMessageError);
+    this.#removeWorkerFailureHandlers();
     this.#events.clear();
     this.#errors.clear();
     this.#statuses.clear();
-    this.terminate();
+    try { this.port.close(); } finally { this.terminate(terminalFault); }
   }
   #setStatus(status: SceneTransportStatus): void {
     if (this.#status === status) return;
@@ -163,13 +231,93 @@ export class WorkerSceneTransport implements SceneTransport {
   }
 }
 
-export function createHandoffWorkerTransport(): WorkerSceneTransport {
+export interface HandoffWorkerConnection {
+  readonly sessionKey: string;
+  readonly principal: HandoffPrincipal;
+}
+
+let defaultSessionSequence = 0;
+
+export function createHandoffWorkerTransport(
+  connection: HandoffWorkerConnection = {
+    sessionKey: `transport:${String(++defaultSessionSequence)}`,
+    principal: { role: 'dm' },
+  },
+): WorkerSceneTransport {
   const worker = new Worker(
     new URL('./worker-entry.ts', import.meta.url),
     { type: 'module', name: 'vtt-handoff-worker' },
   );
   const channel = new MessageChannel();
-  const connect: WorkerConnectMessage = { kind: 'vtt-handoff.connect', port: channel.port2 };
+  const connect: WorkerConnectMessage = {
+    kind: 'vtt-handoff.connect', port: channel.port2,
+    sessionKey: connection.sessionKey, principal: connection.principal,
+  };
   worker.postMessage(connect, [channel.port2]);
-  return new WorkerSceneTransport(channel.port1, () => worker.terminate());
+  return new WorkerSceneTransport(
+    channel.port1,
+    () => worker.terminate(),
+    (onError, onMessageError) => {
+      worker.addEventListener('error', onError);
+      worker.addEventListener('messageerror', onMessageError);
+      return () => {
+        worker.removeEventListener('error', onError);
+        worker.removeEventListener('messageerror', onMessageError);
+      };
+    },
+  );
+}
+
+export interface HandoffWorkerHost {
+  connect(connection: HandoffWorkerConnection): WorkerSceneTransport;
+  terminate(): void;
+}
+
+export function createHandoffWorkerHost(): HandoffWorkerHost {
+  const worker = new Worker(
+    new URL('./worker-entry.ts', import.meta.url),
+    { type: 'module', name: 'vtt-handoff-worker' },
+  );
+  const transports = new Set<WorkerSceneTransport>();
+  let terminated = false;
+  const terminate = (notifyConnections: boolean): void => {
+    if (terminated) return;
+    terminated = true;
+    worker.terminate();
+    if (notifyConnections) {
+      for (const transport of [...transports]) transport.hostTerminated();
+      transports.clear();
+    }
+  };
+  return {
+    connect(connection) {
+      if (terminated) throw new SceneTransportClosedError();
+      const channel = new MessageChannel();
+      const connect: WorkerConnectMessage = {
+        kind: 'vtt-handoff.connect', port: channel.port2,
+        sessionKey: connection.sessionKey, principal: connection.principal,
+      };
+      worker.postMessage(connect, [channel.port2]);
+      let transport: WorkerSceneTransport;
+      transport = new WorkerSceneTransport(
+        channel.port1,
+        (terminalFault) => {
+          transports.delete(transport);
+          if (terminalFault) terminate(true);
+          else if (transports.size === 0) terminate(false);
+        },
+        (onError, onMessageError) => {
+          worker.addEventListener('error', onError);
+          worker.addEventListener('messageerror', onMessageError);
+          return () => {
+            worker.removeEventListener('error', onError);
+            worker.removeEventListener('messageerror', onMessageError);
+          };
+        },
+      );
+      transports.add(transport);
+      return transport;
+    },
+    terminate: () => terminate(true),
+  };
 }

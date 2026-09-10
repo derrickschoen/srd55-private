@@ -1,7 +1,11 @@
 import { dirname, relative, resolve } from 'node:path';
+import { builtinModules } from 'node:module';
+import { tmpdir } from 'node:os';
 import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
-import { existsSync, readFileSync } from '../../helpers/test-filesystem';
+import {
+  existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync,
+} from '../../helpers/test-filesystem';
 
 const ROOT = process.cwd();
 const REDUCERS = new Set([
@@ -108,36 +112,96 @@ function dependencyGraph(entrypoints: readonly string[]): ReadonlyMap<string, So
   return graph;
 }
 
+const NODE_BUILTINS = new Set(builtinModules.flatMap((name) => [name, `node:${name}`]));
+const FORBIDDEN_GLOBALS = new Set([
+  'document', 'window', 'indexedDB', 'IDBDatabase', 'IDBFactory', 'IDBObjectStore',
+  'HTMLCanvasElement', 'OffscreenCanvas', 'CanvasRenderingContext', 'CanvasRenderingContext2D',
+  'SharedArrayBuffer', 'Atomics', 'importScripts',
+]);
+
 function platformViolations(graph: ReadonlyMap<string, SourceModule>): readonly string[] {
   const violations: string[] = [];
+  const program = ts.createProgram({
+    rootNames: [...graph.keys()],
+    options: {
+      module: ts.ModuleKind.ESNext,
+      moduleResolution: ts.ModuleResolutionKind.Bundler,
+      noLib: true,
+      skipLibCheck: true,
+      target: ts.ScriptTarget.ESNext,
+      types: [],
+    },
+  });
+  const checker = program.getTypeChecker();
+  const provenance = (node: ts.Expression, seen = new Set<ts.Symbol>()): string | null => {
+    if (ts.isPropertyAccessExpression(node)) {
+      const owner = provenance(node.expression, seen);
+      if (owner === 'globalThis' && FORBIDDEN_GLOBALS.has(node.name.text)) return node.name.text;
+      return owner !== null && FORBIDDEN_GLOBALS.has(owner) ? owner : null;
+    }
+    if (ts.isElementAccessExpression(node)) {
+      const owner = provenance(node.expression, seen);
+      const key = node.argumentExpression;
+      if (owner === 'globalThis' && key !== undefined && ts.isStringLiteralLike(key) && FORBIDDEN_GLOBALS.has(key.text)) return key.text;
+      return owner !== null && FORBIDDEN_GLOBALS.has(owner) ? owner : null;
+    }
+    if (!ts.isIdentifier(node)) return null;
+    if (node.text === 'globalThis') return 'globalThis';
+    let symbol = checker.getSymbolAtLocation(node);
+    if (FORBIDDEN_GLOBALS.has(node.text)) {
+      if (symbol === undefined) return node.text;
+      const declarations = symbol.getDeclarations() ?? [];
+      if (
+        declarations.length > 0 &&
+        declarations.every((declaration) => declaration.getSourceFile().isDeclarationFile)
+      ) return node.text;
+    }
+    if (symbol === undefined || seen.has(symbol)) return null;
+    seen.add(symbol);
+    if ((symbol.flags & ts.SymbolFlags.Alias) !== 0) symbol = checker.getAliasedSymbol(symbol);
+    for (const declaration of symbol.getDeclarations() ?? []) {
+      if (ts.isVariableDeclaration(declaration) && declaration.initializer !== undefined) {
+        const source = provenance(declaration.initializer, seen);
+        if (source !== null) return source;
+      }
+      if (ts.isBindingElement(declaration)) {
+        const key = declaration.propertyName ?? declaration.name;
+        const variable = declaration.parent.parent;
+        if (
+          ts.isIdentifier(key) && FORBIDDEN_GLOBALS.has(key.text) &&
+          ts.isVariableDeclaration(variable) && variable.initializer !== undefined &&
+          provenance(variable.initializer, seen) === 'globalThis'
+        ) return key.text;
+      }
+    }
+    return null;
+  };
   for (const module of graph.values()) {
     for (const edge of module.imports) {
-      if (edge.specifier.startsWith('node:')) {
+      if (NODE_BUILTINS.has(edge.specifier)) {
         violations.push(`${repositoryPath(module.file)} imports ${edge.specifier}`);
       }
     }
+    const sourceFile = program.getSourceFile(module.file);
+    if (sourceFile === undefined) throw new Error(`TypeScript program omitted ${module.file}`);
     const visit = (node: ts.Node): void => {
-      if (ts.isPropertyAccessExpression(node)) {
-        const expression = node.expression.getText(module.sourceFile);
-        if (
-          expression === 'document' ||
-          expression === 'indexedDB' ||
-          expression === 'globalThis.document' ||
-          expression === 'globalThis.window' ||
-          expression === 'globalThis.indexedDB'
-        ) {
-          violations.push(`${repositoryPath(module.file)} uses ${node.getText(module.sourceFile)}`);
-        }
-      }
+      const isPropertyLabel = ts.isIdentifier(node) && (
+        ts.isPropertyAccessExpression(node.parent) && node.parent.name === node ||
+        ts.isPropertyAssignment(node.parent) && node.parent.name === node ||
+        ts.isBindingElement(node.parent) && node.parent.propertyName === node
+      );
       if (
-        ts.isIdentifier(node) &&
-        /^(?:indexedDB|IDB(?:Database|Factory|ObjectStore)|HTMLCanvasElement|OffscreenCanvas|CanvasRenderingContext(?:2D)?|SharedArrayBuffer|Atomics)$/u.test(node.text)
+        (ts.isIdentifier(node) || ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) &&
+        !insideImport(node) && !isPropertyLabel
       ) {
-        violations.push(`${repositoryPath(module.file)} names ${node.text}`);
+        const forbidden = provenance(node);
+        if (forbidden !== null && forbidden !== 'globalThis') {
+          violations.push(`${repositoryPath(module.file)} resolves ${node.getText(sourceFile)} to ${forbidden}`);
+        }
       }
       ts.forEachChild(node, visit);
     };
-    ts.forEachChild(module.sourceFile, visit);
+    ts.forEachChild(sourceFile, visit);
   }
   return [...new Set(violations)].sort();
 }
@@ -333,6 +397,29 @@ describe('renderer-neutral engine boundary graph', () => {
     const graph = coreDependencyGraph();
     expect(graph.size).toBeGreaterThan(20);
     expect(platformViolations(graph)).toEqual([]);
+  });
+
+  it('catches aliased, destructured, computed and bare-builtin Worker platform controls', () => {
+    const directory = mkdtempSync(resolve(tmpdir(), 'vtt-worker-boundary-'));
+    try {
+      const controls = resolve(directory, 'controls.ts');
+      writeFileSync(controls, `
+        const d = document;
+        d.createElement('div');
+        const { document: doc } = globalThis;
+        doc.createElement('span');
+        globalThis['SharedArrayBuffer'];
+        import fs from 'fs';
+        void fs;
+      `);
+      const violations = platformViolations(dependencyGraph([controls]));
+      expect(violations.some((violation) => violation.endsWith('imports fs'))).toBe(true);
+      expect(violations.some((violation) => violation.endsWith('to document'))).toBe(true);
+      expect(violations.some((violation) => violation.endsWith('to SharedArrayBuffer'))).toBe(true);
+      expect(violations.filter((violation) => violation.endsWith('to document')).length).toBeGreaterThanOrEqual(2);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   it('all runtime entries converge on the pinned session reducer edges', () => {
