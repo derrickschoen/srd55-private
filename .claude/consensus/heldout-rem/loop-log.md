@@ -6,3 +6,4 @@
 - 2026-09-09 22:23 r2 Astra REJECT: F1/F2/policy resolved; new F3 bracket-notation resolver calls bypass the policy. Accepted; lane resumed r3 (FINAL).
 - 2026-09-09 22:31 r3 supervisor serial verification: tsc 0, sg 0, diff-check 0, 321/321; committed a9595454; Astra r3 (FINAL) dispatched.
 - 2026-09-09 22:33 r3 Astra REJECT at the round cap: F3 resolved; NEW F4 query/fragment-suffixed specifiers (`../vtt/heldout-evaluation.ts?raw`) bypass the exact-suffix protocol matcher (pre-existing, in scope). SHELVED under HARD_GATE (b) at a9595454; owner ruling needed to reopen.
+- 2026-09-10 07:48 r4 verified (serial) 331/331; committed 9b6d7783; Astra r4 dispatched with an exhaustive-enumeration request.

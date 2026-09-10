@@ -1,2 +1,3 @@
 - 2026-09-09 21:17 EDT unit opened; spec accepted (rca-rem-sol.md); worktree dnd-wt-d569-patch @ 90484d45; lane r1 dispatched (impl-d569-patch.md); port 4820
 - 2026-09-10 07:37 EDT lane r1 DONE (39 files); supervisor cumulative running (verify-d569-patch).
+- 2026-09-10 07:48 supervisor cumulative (writable): tsc/sg/diff 0; vitest 353/359 — 6 reds (5 regressions of existing conversation tests + byte-equality test timeout); lane resumed for a fix pass before review.
