@@ -22072,3 +22072,18 @@ Q8 answered 2026-09-09 19:21 EDT: "Get the answer, skip slice 2". Merge slices 0
 main-shaped gate; run the bounded enumeration end to end (slice 3, fresh-process CLI) to learn whether Dodge beats Spear by
 >= 3/20; then start the sol-high → luna-medium loop on Room D per D597. Slice 2 (candidate 212f1acb) stays shelved and its four
 residuals are recorded as open hygiene, not blockers. Alternatives not chosen: reopen slice 2 first; drop Room D; defer.
+
+## D599 — OWNER: promo180 Slice H — reopen as a remediation unit (2026-09-09)
+
+Q9 answered 2026-09-09 20:14 EDT: "Reopen as a remediation unit". A fresh three-round unit scoped to the three escalation/expiry defects
+(empty structured correction still escalates; a refusal during correction no longer escalates; expiry after adoption validation
+persists `authorized` with executed segments instead of a refused row) plus the speculation test that times out with a real MCP
+child, on candidate 0f292f91 (claude/p-promo180); the approved plan (sha 699254a4…) stays binding. It sits on the direct path to
+the sol→luna steering loop (D597). Alternatives not chosen: re-plan first; abandon; defer.
+
+Supervisor (2026-09-09 20:14 EDT): Room D slices 0+1 landing (D598) is NOT a mechanical merge — merging main (trial-core reconciliation, which
+rewrote tests/unit/vtt/challenge-feasibility.test.ts) into 9781b93f leaves semantic conflicts (main's block references
+`runChallengeReducerFeasibility`, `report`, `fixture` and reassigns `migrationEvidence`, which the slice made a const); a union
+resolution fails typecheck with 5 errors and one D584.4 accounting test. Attempt aborted; worktree dnd-wt-room-d-s01 (branch
+claude/room-d-s01 @ 9781b93f) is clean; a codex reconciliation lane will do the merge under review, as the trial-core
+reconciliation was done.
