@@ -34,3 +34,5 @@
 - 2026-09-10 11:31 EDT — r10 Astra REJECT: F34–F37 resolved; two bounded defects (F38 namespace member access .Module/.default, F39 config reference transfer through object/array). r11 dispatched (resume 01a088b4…).
 
 - 2026-09-10 11:41 EDT — r11 lane DONE; supervisor verification tsc/sg/diffcheck 0, 9 specs 471/471; committed e9cf5d84; Astra r11 dispatched (resume 01a088d6…).
+
+- 2026-09-10 11:44 EDT — r11 Astra REJECT: F38/F39 resolved; three bounded defects (F40 plain namespace aliases drop provenance, F41 destructuring assignments, F42 returned config references). r12 dispatched with a mandatory flow-position self-audit table.
