@@ -446,8 +446,9 @@ function discoverModuleEdges(
   dataDepth = 0,
   prepared?: PreparedModuleAnalysis,
 ): readonly ModuleEdge[] {
-  const sourceFile = prepared?.sourceFile ?? ts.createSourceFile(
-    path, source, ts.ScriptTarget.Latest, true, scriptKind(path));
+  const analysis = prepared ?? prepareModuleAnalyses(new Map([[path, source]])).get(path);
+  if (analysis === undefined) throw new TypeError(`Held-out leak inspection lost ${path}.`);
+  const { sourceFile, checker } = analysis;
   const parseDiagnostics = (sourceFile as ts.SourceFile & {
     readonly parseDiagnostics?: readonly ts.Diagnostic[];
   }).parseDiagnostics ?? [];
@@ -470,9 +471,6 @@ function discoverModuleEdges(
     | 'worker'
     | 'shared_worker'
     | 'script_loader';
-  const checker = prepared?.checker ??
-    prepareModuleAnalyses(new Map([[path, source]])).get(path)?.checker;
-  if (checker === undefined) throw new TypeError(`Held-out leak inspection lost ${path}.`);
   const trackedSymbols = new Map<ts.Symbol, Set<TrackedLoaderKind>>();
   const trackedNames = new Set<string>();
   const symbolAt = (identifier: ts.Identifier): ts.Symbol | undefined => {
@@ -510,6 +508,18 @@ function discoverModuleEdges(
     if (name === 'importScripts') return 'script_loader';
     return null;
   };
+  const isAmbientDeclaration = (declaration: ts.Declaration): boolean => {
+    let current: ts.Node = declaration;
+    while (!ts.isSourceFile(current)) {
+      if (ts.canHaveModifiers(current) && ts.getModifiers(current)?.some((modifier) =>
+        modifier.kind === ts.SyntaxKind.DeclareKeyword) === true) return true;
+      current = current.parent;
+    }
+    return false;
+  };
+  const hasRuntimeDeclarationInSource = (symbol: ts.Symbol): boolean =>
+    symbol.declarations?.some((declaration) =>
+      declaration.getSourceFile() === sourceFile && !isAmbientDeclaration(declaration)) === true;
   const isUnshadowedAmbientIdentifier = (
     expression: ts.Expression,
     names: readonly string[],
@@ -517,8 +527,7 @@ function discoverModuleEdges(
     const unwrapped = unwrapTransparentExpression(expression);
     if (!ts.isIdentifier(unwrapped) || !names.includes(identifierText(unwrapped))) return false;
     const symbol = symbolAt(unwrapped);
-    return symbol === undefined ||
-      symbol.declarations?.some((declaration) => declaration.getSourceFile() === sourceFile) !== true;
+    return symbol === undefined || !hasRuntimeDeclarationInSource(symbol);
   };
   const isGlobalNamespace = (expression: ts.Expression): boolean =>
     isUnshadowedAmbientIdentifier(expression, ['self', 'globalThis', 'window']);
@@ -529,7 +538,7 @@ function discoverModuleEdges(
     if (symbol !== undefined) {
       const tracked = trackedSymbols.get(symbol);
       if (tracked !== undefined) return tracked;
-      if (symbol.declarations?.some((declaration) => declaration.getSourceFile() === sourceFile) === true) {
+      if (hasRuntimeDeclarationInSource(symbol)) {
         return new Set();
       }
     }
@@ -622,6 +631,75 @@ function discoverModuleEdges(
     ts.forEachChild(node, seedImports);
   };
   seedImports(sourceFile);
+  interface BindingSource {
+    readonly kinds: ReadonlySet<TrackedLoaderKind>;
+    readonly importMeta: boolean;
+    readonly globalNamespace: boolean;
+  }
+  const bindingMemberKind = (
+    sourceBinding: BindingSource,
+    key: string,
+  ): TrackedLoaderKind | null => {
+    if (sourceBinding.kinds.has('loader') && key === 'resolve') return 'resolver';
+    if (sourceBinding.kinds.has('module_namespace') && key === 'createRequire') return 'factory';
+    if (sourceBinding.kinds.has('module_namespace') && key === 'require') return 'loader';
+    if (sourceBinding.kinds.has('module_namespace') && (key === 'default' || key === 'Module')) {
+      return 'module_namespace';
+    }
+    if (sourceBinding.importMeta && key === 'resolve') return 'resolver';
+    if (sourceBinding.importMeta && key === 'glob') return 'glob';
+    if ((sourceBinding.kinds.has('worker_namespace') || sourceBinding.globalNamespace) &&
+      key === 'Worker') return 'worker';
+    if (sourceBinding.kinds.has('worker_namespace') && key === 'default') {
+      return 'worker_namespace';
+    }
+    if (sourceBinding.globalNamespace && key === 'SharedWorker') return 'shared_worker';
+    if (sourceBinding.globalNamespace && key === 'importScripts') return 'script_loader';
+    return null;
+  };
+  const propagateBinding = (
+    name: ts.BindingName,
+    sourceBinding: BindingSource,
+  ): { readonly changed: boolean; readonly complete: boolean } => {
+    if (ts.isIdentifier(name)) {
+      return {
+        changed: sourceBinding.kinds.size > 0 && addTrackedSymbol(name, sourceBinding.kinds),
+        complete: true,
+      };
+    }
+    if (ts.isArrayBindingPattern(name)) return { changed: false, complete: false };
+    let changed = false;
+    let complete = true;
+    for (const element of name.elements) {
+      const key = element.propertyName === undefined && ts.isIdentifier(element.name)
+        ? identifierText(element.name)
+        : element.propertyName === undefined
+          ? null
+          : propertyNameText(element.propertyName);
+      if (element.dotDotDotToken !== undefined || key === null) {
+        complete = false;
+        continue;
+      }
+      const kind = bindingMemberKind(sourceBinding, key);
+      if (kind === null) {
+        if (!ts.isIdentifier(element.name)) complete = false;
+        continue;
+      }
+      if (element.initializer !== undefined) {
+        complete = false;
+        continue;
+      }
+      const nested = propagateBinding(element.name, {
+        kinds: singletonKind(kind),
+        importMeta: false,
+        globalNamespace: false,
+      });
+      changed = nested.changed || changed;
+      complete = nested.complete && complete;
+    }
+    return { changed, complete };
+  };
+  const unresolvedNamespaceBindings = new Set<ts.VariableDeclaration>();
   let propagated = true;
   while (propagated) {
     propagated = false;
@@ -629,32 +707,15 @@ function discoverModuleEdges(
       const initializer = node.initializer;
       if (initializer === undefined) continue;
       const sourceKinds = expressionKinds(initializer);
-      if (ts.isIdentifier(node.name) && sourceKinds.size > 0) {
-        propagated = addTrackedSymbol(node.name, sourceKinds) || propagated;
-      } else if (ts.isObjectBindingPattern(node.name) &&
-        (sourceKinds.size > 0 || isImportMeta(initializer) || isGlobalNamespace(initializer))) {
-        for (const element of node.name.elements) {
-          if (!ts.isIdentifier(element.name)) continue;
-          const key = element.propertyName === undefined
-            ? identifierText(element.name)
-            : propertyNameText(element.propertyName);
-          let kind: TrackedLoaderKind | null = null;
-          if (sourceKinds.has('loader') && key === 'resolve') kind = 'resolver';
-          if (sourceKinds.has('module_namespace') && key === 'createRequire') kind = 'factory';
-          if (sourceKinds.has('module_namespace') && key === 'require') kind = 'loader';
-          if (sourceKinds.has('module_namespace') && (key === 'default' || key === 'Module')) {
-            kind = 'module_namespace';
-          }
-          if (isImportMeta(initializer) && key === 'resolve') kind = 'resolver';
-          if (isImportMeta(initializer) && key === 'glob') kind = 'glob';
-          if ((sourceKinds.has('worker_namespace') || isGlobalNamespace(initializer)) &&
-            key === 'Worker') kind = 'worker';
-          if (sourceKinds.has('worker_namespace') && key === 'default') kind = 'worker_namespace';
-          if (isGlobalNamespace(initializer) && key === 'SharedWorker') kind = 'shared_worker';
-          if (isGlobalNamespace(initializer) && key === 'importScripts') kind = 'script_loader';
-          if (kind !== null) propagated = addTrackedSymbol(element.name, singletonKind(kind)) || propagated;
-        }
-      }
+      const sourceBinding = {
+        kinds: sourceKinds,
+        importMeta: isImportMeta(initializer),
+        globalNamespace: isGlobalNamespace(initializer),
+      };
+      if (sourceKinds.size === 0 && !sourceBinding.importMeta && !sourceBinding.globalNamespace) continue;
+      const propagation = propagateBinding(node.name, sourceBinding);
+      propagated = propagation.changed || propagated;
+      if (!propagation.complete) unresolvedNamespaceBindings.add(node);
     }
   }
   const loaderReference = (expression: ts.Expression): boolean =>
@@ -831,22 +892,12 @@ function discoverModuleEdges(
     }
     return false;
   };
-  const destructuresUnknownNamespaceMember = (node: ts.Node): boolean => {
-    if (!ts.isVariableDeclaration(node) || node.initializer === undefined ||
-      !ts.isObjectBindingPattern(node.name)) return false;
-    const sourceKinds = expressionKinds(node.initializer);
-    const namespaceSource = sourceKinds.has('module_namespace') ||
-      sourceKinds.has('worker_namespace') || isImportMeta(node.initializer) ||
-      isGlobalNamespace(node.initializer);
-    return namespaceSource && node.name.elements.some((element) =>
-      element.dotDotDotToken !== undefined ||
-      (element.propertyName !== undefined && propertyNameText(element.propertyName) === null));
-  };
   const visited = new Set<ts.Node>();
   const visit = (node: ts.Node): void => {
     if (visited.has(node)) return;
     visited.add(node);
-    if (isTrackedModuleReExport(node) || destructuresUnknownNamespaceMember(node)) {
+    if (isTrackedModuleReExport(node) ||
+      (ts.isVariableDeclaration(node) && unresolvedNamespaceBindings.has(node))) {
       recordLoaderEscape();
     } else {
       const loaderValue = loaderValuedExpression(node);
@@ -1487,7 +1538,8 @@ function viteAliases(source: string, path: string): ViteAliasDiscovery {
     return checker.getSymbolAtLocation(identifier);
   };
   const localExpressions = new Map<ts.Symbol, ts.Expression>();
-  const writtenSymbols = new Set<ts.Symbol>();
+  const mutatedSymbols = new Set<ts.Symbol>();
+  const aliasLinks = new Map<ts.Symbol, Set<ts.Symbol>>();
   const assignedRootIdentifier = (expression: ts.Expression): ts.Identifier | null => {
     const unwrapped = unwrapTransparentExpression(expression);
     if (ts.isIdentifier(unwrapped)) return unwrapped;
@@ -1496,21 +1548,68 @@ function viteAliases(source: string, path: string): ViteAliasDiscovery {
     }
     return null;
   };
+  const addAliasLink = (left: ts.Symbol, right: ts.Symbol): void => {
+    const leftLinks = aliasLinks.get(left) ?? new Set<ts.Symbol>();
+    leftLinks.add(right);
+    aliasLinks.set(left, leftLinks);
+    const rightLinks = aliasLinks.get(right) ?? new Set<ts.Symbol>();
+    rightLinks.add(left);
+    aliasLinks.set(right, rightLinks);
+  };
+  const linkTransferredReferences = (target: ts.Symbol, expression: ts.Expression): void => {
+    const unwrapped = unwrapTransparentExpression(expression);
+    if (ts.isIdentifier(unwrapped)) {
+      const sourceSymbol = symbolAt(unwrapped);
+      if (sourceSymbol !== undefined) addAliasLink(target, sourceSymbol);
+      return;
+    }
+    if (ts.isObjectLiteralExpression(unwrapped)) {
+      for (const property of unwrapped.properties) {
+        if (ts.isSpreadAssignment(property)) linkTransferredReferences(target, property.expression);
+      }
+    } else if (ts.isArrayLiteralExpression(unwrapped)) {
+      for (const element of unwrapped.elements) {
+        if (ts.isSpreadElement(element)) linkTransferredReferences(target, element.expression);
+      }
+    }
+  };
+  const markExpressionMutation = (expression: ts.Expression): void => {
+    const root = assignedRootIdentifier(expression);
+    const symbol = root === null ? undefined : symbolAt(root);
+    if (symbol !== undefined) mutatedSymbols.add(symbol);
+  };
   const collectLocals = (node: ts.Node): void => {
     if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer !== undefined) {
       const symbol = symbolAt(node.name);
-      if (symbol !== undefined) localExpressions.set(symbol, node.initializer);
+      if (symbol !== undefined) {
+        localExpressions.set(symbol, node.initializer);
+        linkTransferredReferences(symbol, node.initializer);
+      }
     }
     if (ts.isBinaryExpression(node) &&
       node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
       node.operatorToken.kind <= ts.SyntaxKind.LastAssignment) {
-      const root = assignedRootIdentifier(node.left);
-      const symbol = root === null ? undefined : symbolAt(root);
-      if (symbol !== undefined) writtenSymbols.add(symbol);
+      markExpressionMutation(node.left);
+    }
+    if (ts.isCallExpression(node)) {
+      const callee = unwrapTransparentExpression(node.expression);
+      if ((ts.isPropertyAccessExpression(callee) || ts.isElementAccessExpression(callee)) &&
+        ['push', 'splice', 'unshift'].includes(propertyKey(callee) ?? '')) {
+        markExpressionMutation(callee.expression);
+      }
+      for (const argument of node.arguments) {
+        markExpressionMutation(ts.isSpreadElement(argument) ? argument.expression : argument);
+      }
     }
     ts.forEachChild(node, collectLocals);
   };
   collectLocals(sourceFile);
+  const symbolIsMutated = (symbol: ts.Symbol, seen: ReadonlySet<ts.Symbol>): boolean => {
+    if (mutatedSymbols.has(symbol)) return true;
+    if (seen.has(symbol)) return false;
+    const nextSeen = new Set([...seen, symbol]);
+    return [...(aliasLinks.get(symbol) ?? [])].some((linked) => symbolIsMutated(linked, nextSeen));
+  };
   const resolveLocal = (
     expression: ts.Expression,
     seen: ReadonlySet<ts.Symbol>,
@@ -1518,7 +1617,7 @@ function viteAliases(source: string, path: string): ViteAliasDiscovery {
     const unwrapped = unwrapTransparentExpression(expression);
     if (!ts.isIdentifier(unwrapped)) return unwrapped;
     const symbol = symbolAt(unwrapped);
-    if (symbol === undefined || seen.has(symbol) || writtenSymbols.has(symbol)) return null;
+    if (symbol === undefined || seen.has(symbol) || symbolIsMutated(symbol, new Set())) return null;
     const local = localExpressions.get(symbol);
     return local === undefined
       ? null
