@@ -32,6 +32,9 @@ function options(argv: readonly string[], environment: NodeJS.ProcessEnv): MainO
 }
 
 async function main(): Promise<void> {
+  if (process.env.VTT_RUNTIME_INJECT_STARTUP_FAILURE === '1') {
+    throw new Error('Injected VTT runtime startup failure.');
+  }
   const parsed = options(process.argv.slice(2), process.env);
   const tokensFile = process.env.VTT_RUNTIME_TOKENS_FILE;
   if (tokensFile === undefined || tokensFile.length === 0) throw new Error('VTT_RUNTIME_TOKENS_FILE is required.');
@@ -41,6 +44,7 @@ async function main(): Promise<void> {
     allowOriginless: parsed.allowOriginless,
   });
   const address = await runtime.listen(parsed.port);
+  process.stdout.write(`vtt-runtime: process pid ${String(process.pid)}\n`);
   process.stdout.write(`vtt-runtime: listening ${address.websocketUrl}\n`);
   let closing = false;
   const close = (): void => {

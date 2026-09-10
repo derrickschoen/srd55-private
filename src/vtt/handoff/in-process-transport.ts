@@ -12,7 +12,11 @@ import {
   type SceneTransportStatus,
 } from './scene-transport';
 import type { SceneSnapshot } from './v1/contracts';
-import type { SessionInvocationToken } from '../encounter-session-service';
+import type {
+  EncounterSessionService, PlayerSeatRegistration, SessionInvocationToken,
+} from '../encounter-session-service';
+import type { EncounterArtPackage } from '../encounter-package';
+import type { HandoffPrincipal } from './session-authorizer';
 
 interface Deferred<T> {
   readonly promise: Promise<T>;
@@ -274,4 +278,13 @@ export class InProcessSceneTransport implements SceneTransport {
       try { listener(status); } catch { /* Observer failure is isolated. */ }
     }
   }
+}
+
+export function createEncounterSessionServiceTransport(options: {
+  readonly service: EncounterSessionService;
+  readonly principal: HandoffPrincipal;
+  readonly seats: readonly PlayerSeatRegistration[];
+  readonly art: EncounterArtPackage;
+}): InProcessSceneTransport {
+  return new InProcessSceneTransport(new ProtocolRuntime(options));
 }

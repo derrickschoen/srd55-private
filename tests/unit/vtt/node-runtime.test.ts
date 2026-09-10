@@ -1,11 +1,17 @@
 import { createHash } from 'node:crypto';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from '../../helpers/test-filesystem';
+import {
+  chmodSync, mkdirSync, mkdtempSync, renameSync, rmSync, symlinkSync, writeFileSync,
+} from '../../helpers/test-filesystem';
 import { resolve } from 'node:path';
+import { createConnection, type Socket } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
 import { WebSocket, type RawData } from 'ws';
+import type { DmSessionSnapshotEvent } from '../../../src/vtt/encounter-session-service';
+import type { ProtocolSessionPort } from '../../../src/vtt/handoff/protocol-runtime';
+import { WebSocketSceneTransport } from '../../../src/vtt/handoff/websocket-transport';
 import {
-  createVttNodeRuntime, VTT_RUNTIME_MAX_PAYLOAD, VTT_RUNTIME_OPEN_DEADLINE_MS,
-  type VttNodeRuntime,
+  createDefaultNodeRuntimeSession, createVttNodeRuntime, VTT_RUNTIME_MAX_PAYLOAD,
+  VTT_RUNTIME_OPEN_DEADLINE_MS, type NodeRuntimeSession, type VttNodeRuntime,
 } from '../../../tools/vtt-handoff/node-runtime';
 
 const ORIGIN = 'http://127.0.0.1:4430';
@@ -73,8 +79,102 @@ function nextMessages(socket: WebSocket, count: number): Promise<readonly unknow
 
 async function nextMessage(socket: WebSocket): Promise<unknown> { return (await nextMessages(socket, 1))[0]; }
 
+function bounded<T>(operation: Promise<T>, label: string): Promise<T> {
+  return Promise.race([
+    operation,
+    new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error(`${label} exceeded one second.`)), 1_000)),
+  ]);
+}
+
+function nextMessagesBounded(socket: WebSocket, count: number, label: string): Promise<readonly unknown[]> {
+  return new Promise((resolveMessages, reject) => {
+    const messages: unknown[] = [];
+    const deadline = setTimeout(() => {
+      socket.off('message', receive);
+      reject(new Error(`${label} received ${String(messages.length)} of ${String(count)} messages: ${JSON.stringify(messages)}`));
+    }, 1_000);
+    const receive = (data: RawData, isBinary: boolean): void => {
+      if (isBinary) { clearTimeout(deadline); reject(new Error(`${label} received binary data.`)); return; }
+      messages.push(JSON.parse(data.toString()) as unknown);
+      if (messages.length !== count) return;
+      clearTimeout(deadline);
+      socket.off('message', receive);
+      resolveMessages(messages);
+    };
+    socket.on('message', receive);
+  });
+}
+
 function closeCode(socket: WebSocket): Promise<number> {
   return new Promise((resolveCode) => socket.once('close', (code) => resolveCode(code)));
+}
+
+function rawUpgradePeer(url: string, token: string): Promise<Socket> {
+  const endpoint = new URL(url);
+  return new Promise((resolveSocket, reject) => {
+    const socket = createConnection({ host: '127.0.0.1', port: Number(endpoint.port) });
+    let headers = '';
+    socket.once('error', reject);
+    socket.on('data', (chunk: Buffer) => {
+      headers += chunk.toString('latin1');
+      if (!headers.includes('\r\n\r\n')) return;
+      try {
+        expect(headers).toMatch(/^HTTP\/1\.1 101 /u);
+        socket.removeAllListeners('data');
+        socket.pause();
+        resolveSocket(socket);
+      } catch (error: unknown) { reject(error); }
+    });
+    socket.once('connect', () => socket.write([
+      `GET ${endpoint.pathname} HTTP/1.1`,
+      `Host: 127.0.0.1:${endpoint.port}`,
+      'Upgrade: websocket',
+      'Connection: Upgrade',
+      'Sec-WebSocket-Key: MDEyMzQ1Njc4OWFiY2RlZg==',
+      'Sec-WebSocket-Version: 13',
+      `Origin: ${ORIGIN}`,
+      `Sec-WebSocket-Protocol: vtt.v1, bearer.${token}`,
+      '', '',
+    ].join('\r\n')));
+  });
+}
+
+interface RawHandshakeOverrides {
+  readonly host?: string;
+  readonly key?: string;
+  readonly version?: string;
+  readonly origin?: string | null;
+  readonly protocols?: string;
+}
+
+function rawUpgradeStatus(url: string, overrides: RawHandshakeOverrides): Promise<number> {
+  const endpoint = new URL(url);
+  const originLine = overrides.origin === null ? [] : [`Origin: ${overrides.origin ?? ORIGIN}`];
+  return new Promise((resolveStatus, reject) => {
+    const socket = createConnection({ host: '127.0.0.1', port: Number(endpoint.port) });
+    let response = '';
+    socket.setTimeout(1_000, () => { socket.destroy(); reject(new Error('Handshake response timed out.')); });
+    socket.once('error', reject);
+    socket.on('data', (chunk: Buffer) => {
+      response += chunk.toString('latin1');
+      if (!response.includes('\r\n\r\n')) return;
+      const status = /^HTTP\/1\.1 (\d{3}) /u.exec(response)?.[1];
+      socket.destroy();
+      if (status === undefined) reject(new Error('Handshake response had no HTTP status.'));
+      else resolveStatus(Number(status));
+    });
+    socket.once('connect', () => socket.write([
+      `GET ${endpoint.pathname} HTTP/1.1`,
+      `Host: ${overrides.host ?? `127.0.0.1:${endpoint.port}`}`,
+      'Upgrade: websocket',
+      'Connection: Upgrade',
+      `Sec-WebSocket-Key: ${overrides.key ?? 'MDEyMzQ1Njc4OWFiY2RlZg=='}`,
+      `Sec-WebSocket-Version: ${overrides.version ?? '13'}`,
+      ...originLine,
+      `Sec-WebSocket-Protocol: ${overrides.protocols ?? 'vtt.v1, bearer.dm-secret'}`,
+      '', '',
+    ].join('\r\n')));
+  });
 }
 
 async function open(socket: WebSocket, id = ''): Promise<readonly [unknown, unknown]> {
@@ -82,6 +182,53 @@ async function open(socket: WebSocket, id = ''): Promise<readonly [unknown, unkn
   socket.send(JSON.stringify({ v: 1, id, method: 'session.open', params: { requestedRole: 'dm' } }));
   const [response, snapshot] = await messages;
   return [response, snapshot];
+}
+
+function receiptThenAutonomousSession(): NodeRuntimeSession {
+  const base = createDefaultNodeRuntimeSession({ role: 'dm' });
+  const listeners = new Set<(event: DmSessionSnapshotEvent) => void>();
+  let lastSequence = 0;
+  const service: ProtocolSessionPort = {
+    sessionId: base.service.sessionId,
+    dmSnapshot: () => base.service.dmSnapshot(),
+    dmCapture: () => base.service.dmCapture(),
+    playerSnapshot: (playerId) => base.service.playerSnapshot(playerId),
+    playerCapture: (playerId) => base.service.playerCapture(playerId),
+    subscribeDm: (listener) => {
+      listeners.add(listener);
+      const unsubscribe = base.service.subscribeDm((event) => {
+        lastSequence = event.seq;
+        listener(event);
+      });
+      return () => { listeners.delete(listener); unsubscribe(); };
+    },
+    subscribePlayer: (playerId, listener) => base.service.subscribePlayer(playerId, listener),
+    submitOfferedAction: (input) => base.service.submitOfferedAction(input),
+    setDoor: async (input) => {
+      const capture = base.service.dmCapture();
+      const revision = capture.projection.encounter.revision + 1;
+      const projection = {
+        ...capture.projection,
+        encounter: { ...capture.projection.encounter, revision },
+      };
+      lastSequence += 1;
+      const receipt: DmSessionSnapshotEvent = {
+        kind: 'mutation', seq: lastSequence, projection, tokenBindings: capture.tokenBindings,
+        ...(input.invocationToken === undefined ? {} : {
+          terminalReceipt: { invocationToken: input.invocationToken, revision },
+        }),
+      };
+      for (const listener of listeners) listener(receipt);
+      lastSequence += 1;
+      const reaction: DmSessionSnapshotEvent = {
+        kind: 'autonomous', seq: lastSequence, projection, tokenBindings: capture.tokenBindings,
+      };
+      for (const listener of listeners) listener(reaction);
+      return { kind: 'committed', revision, changed: true, event: receipt };
+    },
+    close: () => base.service.close(),
+  };
+  return { service, seats: base.seats, art: base.art };
 }
 
 afterEach(async () => {
@@ -114,6 +261,37 @@ describe('VTT Node WebSocket runtime', () => {
     expect(() => createVttNodeRuntime({ tokensFile: valid, allowedOrigins: new Set([ORIGIN]) })).toThrow('invalid claims');
   });
 
+  it('validates token-file identity, permissions, and size on the opened descriptor', () => {
+    const permissionPath = claimsFile([{ tokenSha256: hash('permission-race'), role: 'dm' }]);
+    expect(() => createVttNodeRuntime({
+      tokensFile: permissionPath,
+      allowedOrigins: new Set([ORIGIN]),
+      tokenFileHooks: { afterOpenInspection: () => chmodSync(permissionPath, 0o644) },
+    })).toThrow('mode 0600');
+
+    const growingPath = claimsFile([{ tokenSha256: hash('growing-race'), role: 'dm' }]);
+    expect(() => createVttNodeRuntime({
+      tokensFile: growingPath,
+      allowedOrigins: new Set([ORIGIN]),
+      tokenFileHooks: {
+        afterOpenInspection: () => writeFileSync(growingPath, 'x'.repeat(65_536), { flag: 'a' }),
+      },
+    })).toThrow('exceeds 65536 bytes');
+
+    const swappedPath = claimsFile([{ tokenSha256: hash('symlink-race'), role: 'dm' }]);
+    const movedPath = resolve(swappedPath, '..', 'moved-tokens.json');
+    expect(() => createVttNodeRuntime({
+      tokensFile: swappedPath,
+      allowedOrigins: new Set([ORIGIN]),
+      tokenFileHooks: {
+        afterOpenInspection: () => {
+          renameSync(swappedPath, movedPath);
+          symlinkSync(movedPath, swappedPath);
+        },
+      },
+    })).toThrow('changed while it was opened');
+  });
+
   it('authenticates before upgrade, echoes only vtt.v1, and binds claims to session.open', async () => {
     const setup = await runtime([
       { tokenSha256: hash('dm-secret'), role: 'dm' },
@@ -133,6 +311,15 @@ describe('VTT Node WebSocket runtime', () => {
     })));
     expect(setup.runtime.sessionCounts()).toEqual({ created: 0, active: 0 });
 
+    await expect(rawUpgradeStatus(setup.url, { host: 'localhost' })).resolves.toBe(401);
+    await expect(rawUpgradeStatus(setup.url, { key: 'not-a-websocket-key' })).resolves.toBe(401);
+    await expect(rawUpgradeStatus(setup.url, { version: '12' })).resolves.toBe(401);
+    await expect(rawUpgradeStatus(setup.url, { origin: null })).resolves.toBe(401);
+    await expect(rawUpgradeStatus(setup.url, {
+      protocols: 'vtt.v1, bearer.dm-secret, bearer.player-a-secret',
+    })).resolves.toBe(401);
+    expect(setup.runtime.sessionCounts()).toEqual({ created: 0, active: 0 });
+
     const dm = await connect(setup.url, 'dm-secret');
     expect(dm.protocol).toBe('vtt.v1');
     const [openResponse, snapshot] = await open(dm);
@@ -145,6 +332,17 @@ describe('VTT Node WebSocket runtime', () => {
     player.send(JSON.stringify({ v: 1, id: 'wrong-role', method: 'session.open', params: { requestedRole: 'dm' } }));
     await expect(refused).resolves.toMatchObject({ id: 'wrong-role', ok: false, error: { code: 'UNAUTHORIZED' } });
     await expect(closing).resolves.toBe(1008);
+    const playerIdMismatch = await connect(setup.url, 'player-a-secret');
+    const mismatchResponse = nextMessage(playerIdMismatch);
+    const mismatchClosing = closeCode(playerIdMismatch);
+    playerIdMismatch.send(JSON.stringify({
+      v: 1, id: 'wrong-player', method: 'session.open',
+      params: { requestedRole: 'player', playerId: PLAYER_B },
+    }));
+    await expect(mismatchResponse).resolves.toMatchObject({
+      id: 'wrong-player', ok: false, error: { code: 'UNAUTHORIZED' },
+    });
+    await expect(mismatchClosing).resolves.toBe(1008);
     dm.close();
   });
 
@@ -183,6 +381,20 @@ describe('VTT Node WebSocket runtime', () => {
     await expect(closeCode(late)).resolves.toBe(1008);
   });
 
+  it('terminates a physical peer that withholds its close response during factory shutdown', async () => {
+    const setup = await runtime([{ tokenSha256: hash('dm-secret'), role: 'dm' }], { openDeadlineMs: 20 });
+    const peer = await rawUpgradePeer(setup.url, 'dm-secret');
+    const peerClosed = new Promise<void>((resolveClosed) => peer.once('close', () => resolveClosed()));
+    await new Promise<void>((resolveWait) => setTimeout(resolveWait, 40));
+    await expect(Promise.race([
+      setup.runtime.close(),
+      new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error('Factory shutdown exceeded one second.')), 1_000)),
+    ])).resolves.toBeUndefined();
+    peer.resume();
+    await expect(peerClosed).resolves.toBeUndefined();
+    expect(setup.runtime.sessionCounts().active).toBe(0);
+  });
+
   it('uses fresh logical sessions and refuses reused wire ids before dispatch', async () => {
     const setup = await runtime([{ tokenSha256: hash('dm-secret'), role: 'dm' }]);
     const first = await connect(setup.url, 'dm-secret');
@@ -205,6 +417,42 @@ describe('VTT Node WebSocket runtime', () => {
     expect(setup.runtime.sessionCounts()).toEqual({ created: 2, active: 2 });
     first.close();
     second.close();
+  });
+
+  it('sends a receipt response before its event and queues a synchronous autonomous reaction in sequence', async () => {
+    const token = 'ordered-secret';
+    const instance = createVttNodeRuntime({
+      tokensFile: claimsFile([{ tokenSha256: hash(token), role: 'dm' }]),
+      allowedOrigins: new Set([ORIGIN]), allowOriginless: true,
+      createSession: () => receiptThenAutonomousSession(),
+    });
+    runtimes.push(instance);
+    const address = await instance.listen(0);
+    const socket = await connect(address.websocketUrl, token);
+    await bounded(open(socket, 'open'), 'ordered open');
+    const publication = nextMessagesBounded(socket, 3, 'ordered publication');
+    socket.send(JSON.stringify({
+      v: 1, id: 'door', method: 'door.set',
+      params: { doorId: 'object:two-room-door', open: true },
+    }));
+    const [response, receipt, reaction] = await publication;
+    expect(response).toMatchObject({ id: 'door', ok: true });
+    expect(receipt).toMatchObject({ event: 'scene.snapshot', seq: 2 });
+    expect(reaction).toMatchObject({ event: 'scene.snapshot', seq: 3 });
+    socket.close();
+
+    const observerTransport = new WebSocketSceneTransport(address.websocketUrl, token);
+    await bounded(observerTransport.request({
+      v: 1, id: 'observer-open', method: 'session.open', params: { requestedRole: 'dm' },
+    }), 'observer open');
+    await bounded(observerTransport.initialSnapshot(), 'observer initial snapshot');
+    observerTransport.subscribe((event) => { if (event.seq > 1) observerTransport.close(); });
+    await expect(bounded(observerTransport.request({
+      v: 1, id: 'observer-door', method: 'door.set',
+      params: { doorId: 'object:two-room-door', open: true },
+    }), 'observer receipt')).resolves.toMatchObject({ id: 'observer-door', ok: true });
+    expect(observerTransport.status()).toBe('closed');
+    expect(observerTransport.pendingRequestCount()).toBe(0);
   });
 
   it('binds two player claims independently and refuses cross-seat token authority', async () => {

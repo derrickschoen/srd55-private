@@ -10,14 +10,10 @@ interface PendingRequest {
   readonly reject: (error: Error) => void;
 }
 
-export interface WebSocketWireCodec {
-  readonly parse: (text: string) => unknown;
-  readonly stringify: (value: unknown) => string;
-}
-
-function property(input: unknown, key: string): unknown {
-  if (typeof input !== 'object' || input === null) return undefined;
-  try { return Reflect.get(input, key); } catch { return undefined; }
+function objectEnvelope(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
 }
 
 export class WebSocketSceneTransport implements SceneTransport {
@@ -33,18 +29,13 @@ export class WebSocketSceneTransport implements SceneTransport {
   #rejectInitial: ((error: Error) => void) | null = null;
   #latestEvent: SceneSnapshotEvent | null = null;
   #uncorrelatedSequence = 0;
-  readonly #wireCodec: WebSocketWireCodec;
 
-  constructor(url: string | URL, token: string, wireCodec?: WebSocketWireCodec) {
+  constructor(url: string | URL, token: string) {
     this.#initial = new Promise((resolve, reject) => {
       this.#resolveInitial = resolve;
       this.#rejectInitial = reject;
     });
     void this.#initial.catch(() => undefined);
-    this.#wireCodec = wireCodec ?? {
-      parse: (text: string): unknown => JSON.parse(text) as unknown,
-      stringify: (value: unknown): string => JSON.stringify(value),
-    };
     this.#socket = new WebSocket(url, ['vtt.v1', `bearer.${token}`]);
     this.#socket.addEventListener('message', this.#onMessage);
     this.#socket.addEventListener('close', this.#onClose);
@@ -53,22 +44,69 @@ export class WebSocketSceneTransport implements SceneTransport {
 
   request(request: unknown): Promise<HandoffResponse> {
     if (this.#terminal()) return Promise.reject(new SceneTransportClosedError());
-    const idValue = property(request, 'id');
-    const methodValue = property(request, 'method');
-    const id = typeof idValue === 'string' ? idValue : null;
-    if (id !== null && this.#pending.has(id)) {
-      return Promise.reject(this.#fault('PROTOCOL_ERROR', 'A request with this id is already pending.', 1002));
-    }
-    let wire: string;
-    try { wire = this.#wireCodec.stringify(request); }
-    catch { return Promise.reject(this.#fault('PROTOCOL_ERROR', 'The request is not JSON serializable.', 1002)); }
-    if (this.#terminal()) return Promise.reject(new SceneTransportClosedError());
     return new Promise<HandoffResponse>((resolve, reject) => {
-      this.#uncorrelatedSequence += 1;
-      const pendingKey = id ?? `\u0000uncorrelated:${String(this.#uncorrelatedSequence)}`;
-      this.#pending.set(pendingKey, {
-        method: typeof methodValue === 'string' ? methodValue : null, resolve, reject,
-      });
+      const reservation: { key: string | null } = { key: null };
+      let duplicate: SceneTransportFaultError | null = null;
+      let rootVisited = false;
+
+      const reserve = (value: unknown): void => {
+        if (reservation.key !== null) return;
+        const envelope = objectEnvelope(value);
+        const id = typeof envelope?.id === 'string' ? envelope.id : null;
+        const method = typeof envelope?.method === 'string' ? envelope.method : null;
+        if (id !== null && this.#pending.has(id)) {
+          duplicate = this.#fault('PROTOCOL_ERROR', 'A request with this id is already pending.', 1002);
+          throw duplicate;
+        }
+        this.#uncorrelatedSequence += 1;
+        const key = id ?? `\u0000uncorrelated:${String(this.#uncorrelatedSequence)}`;
+        this.#pending.set(key, { method, resolve, reject });
+        reservation.key = key;
+      };
+
+      let wire: string | undefined;
+      try {
+        wire = JSON.stringify(request, (key, value: unknown): unknown => {
+          if (key !== '' || rootVisited) return value;
+          rootVisited = true;
+          const envelope = objectEnvelope(value);
+          if (envelope === null) {
+            reserve(value);
+            return value;
+          }
+
+          const keys = Object.keys(envelope);
+          const id = keys.includes('id') ? Reflect.get(envelope, 'id') : undefined;
+          const method = keys.includes('method') ? Reflect.get(envelope, 'method') : undefined;
+          const snapshot: Record<string, unknown> = {};
+          if (keys.includes('id')) snapshot.id = id;
+          if (keys.includes('method')) snapshot.method = method;
+          reserve(snapshot);
+          for (const field of keys) {
+            if (field !== 'id' && field !== 'method') snapshot[field] = Reflect.get(envelope, field);
+          }
+          const ordered: Record<string, unknown> = {};
+          for (const field of keys) ordered[field] = snapshot[field];
+          return ordered;
+        });
+      } catch {
+        if (reservation.key !== null) this.#pending.delete(reservation.key);
+        reject(duplicate ?? this.#fault('PROTOCOL_ERROR', 'The request is not JSON serializable.', 1002));
+        return;
+      }
+
+      if (wire === undefined || reservation.key === null) {
+        if (reservation.key !== null) this.#pending.delete(reservation.key);
+        reject(this.#fault('PROTOCOL_ERROR', 'The request is not JSON serializable.', 1002));
+        return;
+      }
+      if (this.#terminal()) {
+        this.#pending.delete(reservation.key);
+        reject(new SceneTransportClosedError());
+        return;
+      }
+
+      const pendingKey = reservation.key;
       const send = (): void => {
         this.#waitingForOpen.delete(send);
         if (this.#terminal() || this.#socket.readyState !== WebSocket.OPEN) {
@@ -118,18 +156,22 @@ export class WebSocketSceneTransport implements SceneTransport {
     this.#errors.add(listener);
     return () => this.#errors.delete(listener);
   }
-  close(): void { this.#shutdown('closed'); }
-  dispose(): void { this.#shutdown('disposed'); }
-  destroySession(): void { this.#shutdown('disposed'); }
+  close(): void { this.#terminate('closed', new SceneTransportClosedError(), 1000, 'Client closed.'); }
+  dispose(): void { this.#terminate('disposed', new SceneTransportClosedError(), 1000, 'Client disposed.'); }
+  destroySession(): void { this.dispose(); }
   pendingRequestCount(): number { return this.#pending.size; }
+  negotiatedProtocol(): string { return this.#socket.protocol; }
+  endpointUrl(): string { return this.#socket.url; }
 
   readonly #onMessage = (message: MessageEvent<unknown>): void => {
     if (typeof message.data !== 'string') { this.#protocolFault('The socket emitted a non-text message.'); return; }
     let value: unknown;
-    try { value = this.#wireCodec.parse(message.data); }
+    try { value = JSON.parse(message.data) as unknown; }
     catch { this.#protocolFault('The socket emitted invalid JSON.'); return; }
-    const event = handoffEventSchema.safeParse(value);
-    if (event.success) {
+    const envelope = objectEnvelope(value);
+    if (envelope?.event === 'scene.snapshot') {
+      const event = handoffEventSchema.safeParse(value);
+      if (!event.success) { this.#protocolFault('The socket emitted an invalid event.'); return; }
       const snapshotEvent = event.data as SceneSnapshotEvent;
       this.#latestEvent = snapshotEvent;
       if (this.#resolveInitial !== null) {
@@ -142,8 +184,12 @@ export class WebSocketSceneTransport implements SceneTransport {
       }
       return;
     }
+    if (typeof envelope?.ok !== 'boolean' || typeof envelope.id !== 'string') {
+      this.#protocolFault('The socket emitted an invalid protocol message.');
+      return;
+    }
     const response = handoffResponseSchema.safeParse(value);
-    if (!response.success) { this.#protocolFault('The socket emitted an invalid protocol message.'); return; }
+    if (!response.success) { this.#protocolFault('The socket emitted an invalid response.'); return; }
     const pending = this.#pending.get(response.data.id);
     if (pending === undefined) { this.#protocolFault('The socket emitted an uncorrelated response.'); return; }
     this.#pending.delete(response.data.id);
@@ -159,62 +205,44 @@ export class WebSocketSceneTransport implements SceneTransport {
         event.reason.length > 0 ? event.reason : 'The WebSocket protocol closed with a transport fault.',
         event.code,
       );
-      for (const listener of this.#errors) {
-        try { listener(error); } catch { /* Observer failures are isolated. */ }
-      }
-      this.#terminalCleanup('closed', error);
+      this.#terminate('closed', error, null);
       return;
     }
-    this.#terminalCleanup('closed');
+    this.#terminate('closed', new SceneTransportClosedError(), null);
   };
   readonly #onError = (): void => {
     const error = this.#fault('PROTOCOL_ERROR', 'The WebSocket transport failed.', 1002);
-    for (const listener of this.#errors) {
-      try { listener(error); } catch { /* Observer failures are isolated. */ }
-    }
-    this.#shutdown('closed', 1002, error.message, error);
+    this.#terminate('closed', error, 4001, 'Transport failed.');
   };
 
   #fault(code: ProtocolTransportFault['code'], message: string, websocketCloseCode: 1002 | 1007): SceneTransportFaultError {
     return new SceneTransportFaultError({ kind: 'transport_fault', code, message, websocketCloseCode });
   }
   #protocolFault(message: string): void {
-    const error = this.#fault('PROTOCOL_ERROR', message, 1002);
-    for (const listener of this.#errors) {
-      try { listener(error); } catch { /* Observer failures are isolated. */ }
-    }
-    this.#shutdown('closed', 1002, message, error);
+    this.#terminate('closed', this.#fault('PROTOCOL_ERROR', message, 1002), 4000, 'Invalid server message.');
   }
   #terminal(): boolean { return this.#state === 'closed' || this.#state === 'disposed'; }
   #setState(state: SceneTransportStatus): void {
     if (this.#state === state) return;
     this.#state = state;
-    for (const listener of this.#statuses) {
+    for (const listener of [...this.#statuses]) {
       try { listener(state); } catch { /* Observer failures are isolated. */ }
     }
   }
-  #shutdown(
+  #terminate(
     state: 'closed' | 'disposed',
-    code = 1000,
-    reason = 'Client closed.',
-    error: Error = new SceneTransportClosedError(),
+    error: Error,
+    closeCode: 1000 | 4000 | 4001 | null,
+    closeReason = '',
   ): void {
     if (this.#terminal()) return;
-    try {
-      this.#socket.removeEventListener('message', this.#onMessage);
-      this.#socket.removeEventListener('close', this.#onClose);
-      this.#socket.removeEventListener('error', this.#onError);
-      if (this.#socket.readyState === WebSocket.OPEN || this.#socket.readyState === WebSocket.CONNECTING) this.#socket.close(code, reason);
-    } finally { this.#terminalCleanup(state, error); }
-  }
-  #terminalCleanup(state: 'closed' | 'disposed', error: Error = new SceneTransportClosedError()): void {
-    if (this.#terminal()) return;
+    this.#setState(state);
+    const errorListeners = error instanceof SceneTransportFaultError ? [...this.#errors] : [];
     this.#socket.removeEventListener('message', this.#onMessage);
     this.#socket.removeEventListener('close', this.#onClose);
     this.#socket.removeEventListener('error', this.#onError);
     for (const listener of this.#waitingForOpen) this.#socket.removeEventListener('open', listener);
     this.#waitingForOpen.clear();
-    this.#setState(state);
     if (this.#rejectInitial !== null) this.#rejectInitial(error);
     this.#resolveInitial = null;
     this.#rejectInitial = null;
@@ -223,13 +251,15 @@ export class WebSocketSceneTransport implements SceneTransport {
     this.#events.clear();
     this.#errors.clear();
     this.#statuses.clear();
+    for (const listener of errorListeners) {
+      try { listener(error as SceneTransportFaultError); } catch { /* Observer failures are isolated. */ }
+    }
+    if (closeCode !== null && (this.#socket.readyState === WebSocket.OPEN || this.#socket.readyState === WebSocket.CONNECTING)) {
+      try { this.#socket.close(closeCode, closeReason); } catch { /* Local cleanup is already complete. */ }
+    }
   }
 }
 
-export function createWebSocketSceneTransport(
-  url: string | URL,
-  token: string,
-  wireCodec?: WebSocketWireCodec,
-): WebSocketSceneTransport {
-  return new WebSocketSceneTransport(url, token, wireCodec);
+export function createWebSocketSceneTransport(url: string | URL, token: string): WebSocketSceneTransport {
+  return new WebSocketSceneTransport(url, token);
 }

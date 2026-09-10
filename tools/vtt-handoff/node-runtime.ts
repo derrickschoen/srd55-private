@@ -1,5 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
-import { lstatSync, openSync, closeSync, readFileSync, fstatSync } from 'node:fs';
+import { closeSync, constants as fsConstants, fstatSync, lstatSync, openSync, readSync } from 'node:fs';
 import { createServer, type IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { WebSocket, WebSocketServer, type RawData } from 'ws';
@@ -8,7 +8,9 @@ import type { CombatantId } from '../../src/combat/values';
 import type { EncounterState } from '../../src/combat/encounter';
 import type { LegalActionSummary } from '../../src/combat/controllers';
 import { DmEncounterHost } from '../../src/vtt/dm-encounter-host';
-import { EncounterSessionService, type PlayerSeatRegistration } from '../../src/vtt/encounter-session-service';
+import {
+  EncounterSessionService, type PlayerSeatRegistration, type SessionInvocationToken,
+} from '../../src/vtt/encounter-session-service';
 import type { EncounterArtPackage } from '../../src/vtt/encounter-package';
 import { encounterSeed } from '../../src/vtt/session-seed';
 import { MemoryBrowserSessionStore } from '../../src/vtt/session-persistence';
@@ -58,6 +60,10 @@ export interface VttNodeRuntimeOptions {
   readonly allowOriginless?: boolean;
   readonly openDeadlineMs?: number;
   readonly createSession?: (principal: HandoffPrincipal) => NodeRuntimeSession;
+  readonly tokenFileHooks?: {
+    readonly afterOpenInspection?: () => void;
+    readonly afterBoundedRead?: () => void;
+  };
   readonly wireCodec?: {
     readonly parse: (text: string) => unknown;
     readonly stringify: (value: HandoffResponse | SceneSnapshotEvent) => string;
@@ -77,21 +83,42 @@ export interface VttNodeRuntime {
   sessionCounts(): { readonly created: number; readonly active: number };
 }
 
-function readTokenClaims(path: string): readonly TokenClaim[] {
-  const before = lstatSync(path);
-  if (!before.isFile() || before.isSymbolicLink()) throw new Error('VTT_RUNTIME_TOKENS_FILE must be a regular nonsymlink file.');
-  if ((before.mode & 0o777) !== 0o600) throw new Error('VTT_RUNTIME_TOKENS_FILE must have mode 0600.');
-  if (before.size > MAX_TOKEN_FILE_BYTES) throw new Error('VTT_RUNTIME_TOKENS_FILE exceeds 65536 bytes.');
-  const descriptor = openSync(path, 'r');
+function readTokenClaims(path: string, hooks: VttNodeRuntimeOptions['tokenFileHooks']): readonly TokenClaim[] {
+  let descriptor: number;
+  try { descriptor = openSync(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW); }
+  catch { throw new Error('VTT_RUNTIME_TOKENS_FILE must be an openable regular nonsymlink file.'); }
   try {
     const opened = fstatSync(descriptor);
-    if (!opened.isFile() || opened.dev !== before.dev || opened.ino !== before.ino) {
+    if (!opened.isFile()) throw new Error('VTT_RUNTIME_TOKENS_FILE must be a regular nonsymlink file.');
+    if ((opened.mode & 0o777) !== 0o600) throw new Error('VTT_RUNTIME_TOKENS_FILE must have mode 0600.');
+    if (opened.size > MAX_TOKEN_FILE_BYTES) throw new Error('VTT_RUNTIME_TOKENS_FILE exceeds 65536 bytes.');
+    hooks?.afterOpenInspection?.();
+    const named = lstatSync(path);
+    if (!named.isFile() || named.isSymbolicLink() || named.dev !== opened.dev || named.ino !== opened.ino) {
       throw new Error('VTT_RUNTIME_TOKENS_FILE changed while it was opened.');
     }
-    const bytes = readFileSync(descriptor);
-    if (bytes.byteLength > MAX_TOKEN_FILE_BYTES) throw new Error('VTT_RUNTIME_TOKENS_FILE exceeds 65536 bytes.');
+
+    const bytes = Buffer.alloc(MAX_TOKEN_FILE_BYTES + 1);
+    let used = 0;
+    while (used < bytes.byteLength) {
+      const count = readSync(descriptor, bytes, used, bytes.byteLength - used, null);
+      if (count === 0) break;
+      used += count;
+    }
+    hooks?.afterBoundedRead?.();
+    const after = fstatSync(descriptor);
+    const namedAfter = lstatSync(path);
+    if (!after.isFile() || after.dev !== opened.dev || after.ino !== opened.ino
+      || !namedAfter.isFile() || namedAfter.isSymbolicLink()
+      || namedAfter.dev !== opened.dev || namedAfter.ino !== opened.ino) {
+      throw new Error('VTT_RUNTIME_TOKENS_FILE changed while it was read.');
+    }
+    if ((after.mode & 0o777) !== 0o600) throw new Error('VTT_RUNTIME_TOKENS_FILE must have mode 0600.');
+    if (used > MAX_TOKEN_FILE_BYTES || after.size > MAX_TOKEN_FILE_BYTES) {
+      throw new Error('VTT_RUNTIME_TOKENS_FILE exceeds 65536 bytes.');
+    }
     let source: unknown;
-    try { source = JSON.parse(bytes.toString('utf8')) as unknown; }
+    try { source = JSON.parse(bytes.subarray(0, used).toString('utf8')) as unknown; }
     catch { throw new Error('VTT_RUNTIME_TOKENS_FILE is not valid JSON.'); }
     const parsed = tokenClaimsSchema.safeParse(source);
     if (!parsed.success) throw new Error('VTT_RUNTIME_TOKENS_FILE has invalid claims.');
@@ -126,7 +153,9 @@ function legalActions(state: EncounterState, actor: CombatantId): LegalActionSum
 }
 
 let sessionSequence = 0;
-export function createDefaultNodeRuntimeSession(_principal: HandoffPrincipal): NodeRuntimeSession {
+export function createDefaultNodeRuntimeSession(
+  _principal: HandoffPrincipal,
+): NodeRuntimeSession & { readonly service: EncounterSessionService } {
   sessionSequence += 1;
   const state = buildTwoRoomEncounter();
   const host = new DmEncounterHost(`scene:vtt-node:${String(sessionSequence)}:${randomBytes(8).toString('hex')}`, new MemoryBrowserSessionStore(), {
@@ -224,7 +253,7 @@ function requestFields(value: unknown): { readonly id: string | null; readonly m
 }
 
 export function createVttNodeRuntime(options: VttNodeRuntimeOptions): VttNodeRuntime {
-  const claims = readTokenClaims(options.tokensFile);
+  const claims = readTokenClaims(options.tokensFile, options.tokenFileHooks);
   const openDeadlineMs = options.openDeadlineMs ?? VTT_RUNTIME_OPEN_DEADLINE_MS;
   if (!Number.isSafeInteger(openDeadlineMs) || openDeadlineMs < 1) throw new RangeError('openDeadlineMs must be a positive integer.');
   const createSession = options.createSession ?? createDefaultNodeRuntimeSession;
@@ -236,7 +265,7 @@ export function createVttNodeRuntime(options: VttNodeRuntimeOptions): VttNodeRun
     response.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
     response.end('Not found\n');
   });
-  const sockets = new Set<WebSocket>();
+  const physicalSockets = new Set<WebSocket>();
   const wss = new WebSocketServer({
     noServer: true,
     maxPayload: VTT_RUNTIME_MAX_PAYLOAD,
@@ -260,20 +289,24 @@ export function createVttNodeRuntime(options: VttNodeRuntimeOptions): VttNodeRun
   });
 
   wss.on('connection', (websocket: WebSocket, _request: IncomingMessage, principal: HandoffPrincipal) => {
+    physicalSockets.add(websocket);
+    const forgetPhysicalSocket = (): void => { physicalSockets.delete(websocket); };
+    websocket.once('close', forgetPhysicalSocket);
     let session: NodeRuntimeSession;
     try { session = createSession(principal); }
     catch { websocket.close(1011, 'Session creation failed.'); return; }
     created += 1;
     active += 1;
-    sockets.add(websocket);
     const runtime = new ProtocolRuntime({ service: session.service, principal, seats: session.seats, art: session.art });
     const usedIds = new Set<string>();
     const aborters = new Set<AbortController>();
     let opened = false;
     let terminal = false;
-    let dispatchingOpen = false;
-    let bufferedOpenEvent: SceneSnapshotEvent | null = null;
-    const bufferedReceiptEvents = new Map<object, SceneSnapshotEvent>();
+    const outboundEvents: Array<{
+      readonly event: SceneSnapshotEvent;
+      readonly invocationToken: SessionInvocationToken | null;
+    }> = [];
+    const establishedResponses = new Set<SessionInvocationToken>();
 
     const send = (value: HandoffResponse | SceneSnapshotEvent): boolean => {
       if (terminal || websocket.readyState !== WebSocket.OPEN) return false;
@@ -285,10 +318,19 @@ export function createVttNodeRuntime(options: VttNodeRuntimeOptions): VttNodeRun
       catch { cleanup(1011, 'Socket send failed.'); return false; }
       return !terminal && websocket.readyState === WebSocket.OPEN;
     };
+    const flushEvents = (): void => {
+      if (!opened || terminal) return;
+      while (outboundEvents.length > 0) {
+        const next = outboundEvents[0];
+        if (next === undefined) return;
+        if (next.invocationToken !== null && !establishedResponses.has(next.invocationToken)) return;
+        outboundEvents.shift();
+        if (!send(next.event)) return;
+      }
+    };
     const unsubscribeEvent = runtime.subscribe((event, receipt) => {
-      if (dispatchingOpen && !opened) { bufferedOpenEvent = event; return; }
-      if (receipt !== undefined) { bufferedReceiptEvents.set(receipt.invocationToken, event); return; }
-      send(event);
+      outboundEvents.push({ event, invocationToken: receipt?.invocationToken ?? null });
+      flushEvents();
     });
     const unsubscribeFault = runtime.subscribeFaults((fault) => cleanup(fault.websocketCloseCode, fault.message));
     const deadline = setTimeout(() => cleanup(1008, 'session.open deadline expired.'), openDeadlineMs);
@@ -298,18 +340,22 @@ export function createVttNodeRuntime(options: VttNodeRuntimeOptions): VttNodeRun
       terminal = true;
       clearTimeout(deadline);
       active -= 1;
-      sockets.delete(websocket);
       for (const aborter of aborters) aborter.abort();
       aborters.clear();
+      websocket.off('message', onMessage);
+      websocket.off('close', onApplicationClose);
+      websocket.off('error', onApplicationError);
       unsubscribeEvent();
       unsubscribeFault();
+      outboundEvents.length = 0;
+      establishedResponses.clear();
       try { runtime.destroySession(); } catch { /* Socket cleanup remains terminal. */ }
       if (websocket.readyState === WebSocket.OPEN || websocket.readyState === WebSocket.CONNECTING) {
         try { websocket.close(code ?? 1000, reason?.slice(0, 123)); } catch { websocket.terminate(); }
       }
     };
 
-    websocket.on('message', (data, isBinary) => {
+    const onMessage = (data: RawData, isBinary: boolean): void => {
       if (terminal) return;
       if (isBinary) { cleanup(HANDOFF_WEBSOCKET_CLOSE_CODES.protocolError, 'Binary frames are unsupported.'); return; }
       const text = rawText(data);
@@ -328,7 +374,6 @@ export function createVttNodeRuntime(options: VttNodeRuntimeOptions): VttNodeRun
       const token = runtime.createInvocationToken();
       const aborter = new AbortController();
       aborters.add(aborter);
-      if (!opened) dispatchingOpen = true;
       let dispatched: ReturnType<ProtocolRuntime['dispatch']>;
       try { dispatched = runtime.dispatch(value, aborter.signal, token); }
       catch { aborters.delete(aborter); cleanup(1011, 'Session dispatch failed.'); return; }
@@ -336,7 +381,6 @@ export function createVttNodeRuntime(options: VttNodeRuntimeOptions): VttNodeRun
         if (terminal) return;
         if (result.kind === 'transport_fault') { cleanup(result.fault.websocketCloseCode, result.fault.message); return; }
         if (!opened && fields.method === 'session.open') {
-          dispatchingOpen = false;
           if (!result.response.ok) {
             send(result.response);
             cleanup(1008, 'session.open was refused.');
@@ -345,26 +389,26 @@ export function createVttNodeRuntime(options: VttNodeRuntimeOptions): VttNodeRun
           opened = true;
           clearTimeout(deadline);
           if (!send(result.response)) return;
-          const initial = bufferedOpenEvent;
-          bufferedOpenEvent = null;
-          if (initial !== null) send(initial);
+          flushEvents();
           if (session.start !== undefined) await session.start();
           return;
         }
         if (!send(result.response)) return;
-        const receiptEvent = bufferedReceiptEvents.get(token);
-        bufferedReceiptEvents.delete(token);
-        if (receiptEvent !== undefined) send(receiptEvent);
+        establishedResponses.add(token);
+        flushEvents();
       }).catch(() => cleanup(1011, 'Session dispatch failed.')).finally(() => {
         aborters.delete(aborter);
-        bufferedReceiptEvents.delete(token);
+        establishedResponses.delete(token);
       });
-    });
-    websocket.on('close', () => cleanup());
-    websocket.on('error', (error) => {
+    };
+    const onApplicationClose = (): void => cleanup();
+    const onApplicationError = (error: Error): void => {
       const errorCode = typeof error === 'object' && error !== null ? Reflect.get(error, 'code') : undefined;
       cleanup(errorCode === 'WS_ERR_UNSUPPORTED_MESSAGE_LENGTH' ? 1009 : 1011, 'Socket error.');
-    });
+    };
+    websocket.on('message', onMessage);
+    websocket.on('close', onApplicationClose);
+    websocket.on('error', onApplicationError);
   });
 
   return {
@@ -381,7 +425,7 @@ export function createVttNodeRuntime(options: VttNodeRuntimeOptions): VttNodeRun
     }),
     close: () => {
       closePromise ??= (async () => {
-        for (const socket of [...sockets]) socket.terminate();
+        for (const socket of new Set([...physicalSockets, ...wss.clients])) socket.terminate();
         await new Promise<void>((resolve, reject) => wss.close((error) => error === undefined ? resolve() : reject(error)));
         if (!server.listening) return;
         await new Promise<void>((resolve, reject) => server.close((error) => error === undefined ? resolve() : reject(error)));

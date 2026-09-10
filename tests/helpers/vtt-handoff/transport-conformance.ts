@@ -2,11 +2,15 @@ import { expect } from 'vitest';
 import type { HandoffResponse, SceneSnapshotEvent } from '../../../src/vtt/handoff/protocol-runtime';
 import { SceneTransportClosedError, SceneTransportFaultError, type SceneTransport } from '../../../src/vtt/handoff/scene-transport';
 import { TWO_ROOM_CLOCK, TWO_ROOM_SEED } from '../../../src/vtt/handoff/fixtures/two-room';
-import { InProcessSceneTransport } from '../../../src/vtt/handoff/in-process-transport';
-import { ProtocolRuntime } from '../../../src/vtt/handoff/protocol-runtime';
+import {
+  createEncounterSessionServiceTransport, InProcessSceneTransport,
+} from '../../../src/vtt/handoff/in-process-transport';
 import { createDefaultNodeRuntimeSession } from '../../../tools/vtt-handoff/node-runtime';
+import type { HandoffPrincipal } from '../../../src/vtt/handoff/session-authorizer';
 
-export const TRANSPORT_CONFORMANCE_SCENARIOS = [
+export const TWO_ROOM_MOVING_PLAYER = 'combatant:two-room-goblin';
+
+const TRANSPORT_CONFORMANCE_SCENARIO_NAMES = [
   'correlation ids',
   'lawful structural values',
   'structural validation failures',
@@ -25,6 +29,28 @@ export const TRANSPORT_CONFORMANCE_SCENARIOS = [
   'no retry after unknown mutation outcome',
 ] as const;
 
+export type TransportConformanceScenarioName = typeof TRANSPORT_CONFORMANCE_SCENARIO_NAMES[number];
+
+export interface TransportConformanceScenario {
+  readonly name: TransportConformanceScenarioName;
+  run(exercise: () => void | Promise<void>): Promise<void>;
+}
+
+export const TRANSPORT_CONFORMANCE_SCENARIOS: readonly TransportConformanceScenario[] =
+  TRANSPORT_CONFORMANCE_SCENARIO_NAMES.map((name) => ({
+    name,
+    run: async (exercise): Promise<void> => { await exercise(); },
+  }));
+
+export async function executeTransportConformanceScenario(
+  name: TransportConformanceScenarioName,
+  exercise: () => void | Promise<void>,
+): Promise<void> {
+  const scenario = TRANSPORT_CONFORMANCE_SCENARIOS.find((candidate) => candidate.name === name);
+  if (scenario === undefined) throw new Error(`Unknown transport conformance scenario: ${name}`);
+  await scenario.run(exercise);
+}
+
 export interface ConformanceResult {
   readonly seed: number;
   readonly clock: string;
@@ -32,20 +58,74 @@ export interface ConformanceResult {
   readonly canonical: readonly HandoffResponse[];
 }
 
-export function createInProcessConformanceTransport(): {
+export function createInProcessConformanceTransport(
+  principal: HandoffPrincipal = { role: 'dm' },
+): {
   readonly transport: InProcessSceneTransport;
   readonly start: () => Promise<void>;
 } {
-  const session = createDefaultNodeRuntimeSession({ role: 'dm' });
+  const session = createDefaultNodeRuntimeSession(principal);
   return {
-    transport: new InProcessSceneTransport(new ProtocolRuntime({
+    transport: createEncounterSessionServiceTransport({
       service: session.service,
-      principal: { role: 'dm' },
+      principal,
       seats: session.seats,
       art: session.art,
-    })),
+    }),
     start: session.start ?? (() => Promise.resolve()),
   };
+}
+
+export async function runPlayerMovementConformance(
+  transport: SceneTransport,
+  start: () => Promise<void>,
+): Promise<void> {
+  await executeTransportConformanceScenario('token move result and snapshot', async () => {
+  const events: SceneSnapshotEvent[] = [];
+  transport.subscribe((event) => events.push(event));
+  await expect(transport.request({
+    v: 1, id: 'player:open', method: 'session.open',
+    params: { requestedRole: 'player', playerId: TWO_ROOM_MOVING_PLAYER },
+  })).resolves.toMatchObject({ id: 'player:open', ok: true });
+  const initial = await transport.initialSnapshot();
+  expect(initial.tokens.find((token) => token.id === 'token:two-room-goblin')).toMatchObject({ x: 8, y: 4, z: 0 });
+  void start();
+  if (!events.some((event) => event.data.revision >= 2)) {
+    await new Promise<void>((resolveReady, reject) => {
+      const deadline = setTimeout(() => { stop(); reject(new Error('Timed out waiting for the player offer.')); }, 2_000);
+      const stop = transport.subscribe((event) => {
+        if (event.data.revision < 2) return;
+        clearTimeout(deadline);
+        stop();
+        resolveReady();
+      });
+    });
+  }
+  const before = events.length;
+  const moved = await transport.request({
+    v: 1, id: 'player:move', method: 'token.move',
+    params: { tokenId: 'token:two-room-goblin', to: { x: 7, y: 4, z: 0 } },
+  });
+  expect(moved).toMatchObject({ id: 'player:move', ok: true });
+  expect(events.length).toBe(before + 1);
+  expect(events.at(-1)?.data.tokens.find((token) => token.id === 'token:two-room-goblin'))
+    .toMatchObject({ x: 7, y: 4, z: 0 });
+  expect(events.at(-1)?.data.tokens.find((token) => token.id === 'token:two-room-adventurer'))
+    .not.toMatchObject({ x: 7, y: 4, z: 0 });
+  transport.dispose();
+  });
+}
+
+export async function runPlayerMismatchConformance(transport: SceneTransport): Promise<void> {
+  await executeTransportConformanceScenario('authoritative role mismatch', async () => {
+  const response = await transport.request({
+    v: 1, id: 'player:mismatch', method: 'session.open',
+    params: { requestedRole: 'player', playerId: 'combatant:two-room-adventurer' },
+  });
+  expect(response).toMatchObject({ id: 'player:mismatch', ok: false, error: { code: 'UNAUTHORIZED' } });
+  expect(response.ok).toBe(false);
+  transport.dispose();
+  });
 }
 
 export async function runDmTransportConformance(transport: SceneTransport): Promise<ConformanceResult> {
@@ -126,7 +206,7 @@ export async function runDmTransportConformance(transport: SceneTransport): Prom
     error instanceof SceneTransportFaultError || error instanceof SceneTransportClosedError);
   transport.dispose();
   expect(['closed', 'disposed']).toContain(transport.status());
-  return {
+  const result = {
     seed: TWO_ROOM_SEED,
     clock: TWO_ROOM_CLOCK,
     outcomes: {
@@ -136,4 +216,46 @@ export async function runDmTransportConformance(transport: SceneTransport): Prom
     },
     canonical: [open, ...correlated, invalid, unsupported, door, sameState],
   };
+  await executeTransportConformanceScenario('correlation ids', () => {
+    expect(correlated.map((response) => response.id)).toEqual(['snapshot:a', 'snapshot:b']);
+    expect(new Set(correlated.map((response) => response.id)).size).toBe(2);
+  });
+  await executeTransportConformanceScenario('lawful structural values', () => {
+    expect(initial.tokens[0]).toMatchObject({ x: 2, y: 4, z: 0 });
+    expect(initial.tokens[0]).not.toMatchObject({ x: 2.5, y: 4, z: 0 });
+  });
+  await executeTransportConformanceScenario('structural validation failures', () => {
+    expect(invalid).toMatchObject({ ok: false, error: { code: 'INVALID_REQUEST' } });
+    expect(invalid.ok).not.toBe(true);
+  });
+  await executeTransportConformanceScenario('initial snapshot', () => {
+    expect(events[0]).toMatchObject({ seq: 1, data: { revision: 0 } });
+    expect(events[0]?.seq).not.toBe(0);
+  });
+  await executeTransportConformanceScenario('canonical door change and same-state no-op', () => {
+    expect(door).toMatchObject({ ok: true, result: { revision: committedRevision } });
+    expect(sameState).toMatchObject({ ok: true, result: { revision: committedRevision } });
+  });
+  await executeTransportConformanceScenario('unsupported light mutation', () => {
+    expect(unsupported).toMatchObject({ ok: false, error: { code: 'UNSUPPORTED' } });
+    expect(unsupported.ok).not.toBe(true);
+  });
+  await executeTransportConformanceScenario('late subscription', () => {
+    expect(lateInitial.revision).toBe(initial.revision);
+    expect(lateInitial.revision).not.toBe(-1);
+  });
+  await executeTransportConformanceScenario('duplicate mutation id', () => {
+    expect(duplicate.ok).toBe(false);
+    expect(events.length).toBe(beforeDoorEvents + 1);
+  });
+  await executeTransportConformanceScenario('malformed transport beside empty id', () => {
+    expect(open.id).toBe('');
+    expect(result.outcomes.malformed).toBe('typed-fault');
+  });
+  await executeTransportConformanceScenario('subscription and disposal cleanup', async () => {
+    expect(['closed', 'disposed']).toContain(transport.status());
+    await expect(transport.request({ v: 1, id: 'after-dispose', method: 'scene.snapshot', params: {} }))
+      .rejects.toBeInstanceOf(SceneTransportClosedError);
+  });
+  return result;
 }

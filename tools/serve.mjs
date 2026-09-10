@@ -198,6 +198,8 @@ function launchVttRuntime(originPort, server) {
     env: process.env,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
+  process.stdout.write(`serve: process pid ${String(process.pid)}\n`);
+  if (child.pid !== undefined) process.stdout.write(`serve: vtt runtime child pid ${String(child.pid)}\n`);
   child.stdout.pipe(process.stdout);
   child.stderr.pipe(process.stderr);
   let stopping = false;

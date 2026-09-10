@@ -1,4 +1,5 @@
 import { dirname, relative, resolve } from 'node:path';
+import { builtinModules } from 'node:module';
 import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 import { existsSync, readFileSync } from '../../helpers/test-filesystem';
@@ -9,6 +10,14 @@ const REDUCERS = new Set([
   'reduceSessionEncounter',
   'reduceVaneWarrenEncounter',
 ]);
+const PERMITTED_REDUCER_EDGES = [
+  'src/vtt/dm-encounter-host.ts#commandReducer -> src/vtt/session-encounter-reducer.ts#reduceSessionEncounter',
+  'src/vtt/session-encounter-reducer.ts#reduceSessionEncounter -> src/vtt/vane-warren.ts#reduceVaneWarrenEncounter',
+  'src/vtt/session-persistence.ts#advanceSkippedTurn -> src/combat/encounter.ts#reduceEncounter',
+  'src/vtt/session-persistence.ts#replaySessionRevisions -> src/vtt/session-encounter-reducer.ts#reduceSessionEncounter',
+  'src/vtt/vane-warren.ts#reduceVaneWarrenEncounter -> src/combat/encounter.ts#reduceEncounter',
+  'src/vtt/vane-warren.ts#reduceVaneWarrenWorldObjectAction -> src/combat/encounter.ts#reduceEncounter',
+] as const;
 
 interface ImportEdge {
   readonly specifier: string;
@@ -78,7 +87,18 @@ function valueImportSpecifiers(sourceFile: ts.SourceFile): readonly string[] {
   return [...new Set(specifiers)];
 }
 
-function parseModule(file: string): SourceModule {
+function allImportSpecifiers(sourceFile: ts.SourceFile): readonly string[] {
+  const specifiers = [...valueImportSpecifiers(sourceFile)];
+  for (const statement of sourceFile.statements) {
+    if (
+      (ts.isImportDeclaration(statement) || ts.isExportDeclaration(statement)) &&
+      statement.moduleSpecifier !== undefined && ts.isStringLiteral(statement.moduleSpecifier)
+    ) specifiers.push(statement.moduleSpecifier.text);
+  }
+  return [...new Set(specifiers)];
+}
+
+function parseModule(file: string, includeTypes: boolean): SourceModule {
   const sourceFile = ts.createSourceFile(
     file,
     readFileSync(file, 'utf8'),
@@ -86,20 +106,21 @@ function parseModule(file: string): SourceModule {
     true,
     file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
   );
-  const imports = valueImportSpecifiers(sourceFile).map((specifier) => ({
+  const imports = (includeTypes ? allImportSpecifiers(sourceFile) : valueImportSpecifiers(sourceFile)).map((specifier) => ({
     specifier,
     resolved: resolveImport(file, specifier),
   }));
   return { file, sourceFile, imports };
 }
 
-function dependencyGraph(entrypoints: readonly string[]): ReadonlyMap<string, SourceModule> {
+function dependencyGraph(entrypoints: readonly string[], includeTypes = false): ReadonlyMap<string, SourceModule> {
   const graph = new Map<string, SourceModule>();
   const pending = entrypoints.map((entrypoint) => resolve(ROOT, entrypoint));
+  const roots = new Set(pending);
   while (pending.length > 0) {
     const file = pending.pop();
     if (file === undefined || graph.has(file)) continue;
-    const module = parseModule(file);
+    const module = parseModule(file, includeTypes && roots.has(file));
     graph.set(file, module);
     for (const edge of module.imports) {
       if (edge.resolved !== null && !graph.has(edge.resolved)) pending.push(edge.resolved);
@@ -110,25 +131,49 @@ function dependencyGraph(entrypoints: readonly string[]): ReadonlyMap<string, So
 
 function platformViolations(graph: ReadonlyMap<string, SourceModule>): readonly string[] {
   const violations: string[] = [];
+  const nodeBuiltins = new Set(builtinModules.flatMap((name) => [name, name.replace(/^node:/u, '')]));
+  const browserMembers = new Set([
+    'document', 'window', 'indexedDB', 'SharedArrayBuffer', 'Atomics', 'OffscreenCanvas',
+  ]);
   for (const module of graph.values()) {
     for (const edge of module.imports) {
-      if (edge.specifier.startsWith('node:')) {
+      if (edge.specifier.startsWith('node:') || nodeBuiltins.has(edge.specifier.split('/')[0] ?? edge.specifier)) {
         violations.push(`${repositoryPath(module.file)} imports ${edge.specifier}`);
+      }
+    }
+    const browserRoots = new Set(['globalThis', 'window', 'document', 'indexedDB']);
+    for (const statement of module.sourceFile.statements) {
+      if (!ts.isVariableStatement(statement)) continue;
+      for (const declaration of statement.declarationList.declarations) {
+        const initializer = declaration.initializer;
+        if (initializer === undefined) continue;
+        const rootName = ts.isIdentifier(initializer) ? initializer.text : null;
+        if (ts.isIdentifier(declaration.name) && rootName !== null && browserRoots.has(rootName)) {
+          browserRoots.add(declaration.name.text);
+        }
+        if (ts.isObjectBindingPattern(declaration.name) && rootName !== null && browserRoots.has(rootName)) {
+          for (const element of declaration.name.elements) {
+            const property = element.propertyName?.getText(module.sourceFile) ?? element.name.getText(module.sourceFile);
+            if (browserMembers.has(property) && ts.isIdentifier(element.name)) {
+              browserRoots.add(element.name.text);
+              violations.push(`${repositoryPath(module.file)} destructures ${property} from ${rootName}`);
+            }
+          }
+        }
       }
     }
     const visit = (node: ts.Node): void => {
       if (ts.isPropertyAccessExpression(node)) {
-        const expression = node.expression.getText(module.sourceFile);
-        if (
-          expression === 'document' ||
-          expression === 'indexedDB' ||
-          expression === 'globalThis.document' ||
-          expression === 'globalThis.window' ||
-          expression === 'globalThis.indexedDB'
-        ) {
+        const expression = ts.isIdentifier(node.expression) ? node.expression.text : node.expression.getText(module.sourceFile);
+        if (browserRoots.has(expression) && browserMembers.has(node.name.text)) {
           violations.push(`${repositoryPath(module.file)} uses ${node.getText(module.sourceFile)}`);
         }
       }
+      if (
+        ts.isElementAccessExpression(node) &&
+        ts.isIdentifier(node.expression) && browserRoots.has(node.expression.text) &&
+        ts.isStringLiteral(node.argumentExpression) && browserMembers.has(node.argumentExpression.text)
+      ) violations.push(`${repositoryPath(module.file)} uses ${node.getText(module.sourceFile)}`);
       if (
         ts.isIdentifier(node) &&
         /^(?:indexedDB|IDB(?:Database|Factory|ObjectStore)|HTMLCanvasElement|OffscreenCanvas|CanvasRenderingContext(?:2D)?|SharedArrayBuffer|Atomics)$/u.test(node.text)
@@ -217,8 +262,21 @@ function reducerCallSites(graph: ReadonlyMap<string, SourceModule>): readonly st
   for (const module of graph.values()) {
     const sourceFile = program.getSourceFile(module.file);
     if (sourceFile === undefined) throw new Error(`TypeScript program omitted ${module.file}`);
+    const candidateNames = new Set(REDUCERS);
+    for (const statement of sourceFile.statements) {
+      const bindings = ts.isImportDeclaration(statement) ? statement.importClause?.namedBindings : undefined;
+      if (bindings === undefined || !ts.isNamedImports(bindings)) continue;
+      for (const element of bindings.elements) {
+        if (definingReducer(checker, element.name) !== null) candidateNames.add(element.name.text);
+      }
+    }
     const visit = (node: ts.Node): void => {
-      if (ts.isCallExpression(node) && !insideImport(node)) {
+      const callName = ts.isCallExpression(node)
+        ? ts.isIdentifier(node.expression) ? node.expression.text
+          : ts.isPropertyAccessExpression(node.expression) ? node.expression.name.text
+            : null
+        : null;
+      if (ts.isCallExpression(node) && callName !== null && candidateNames.has(callName) && !insideImport(node)) {
         const definition = definingReducer(checker, node.expression);
         if (definition !== null) {
           calls.push(
@@ -234,11 +292,14 @@ function reducerCallSites(graph: ReadonlyMap<string, SourceModule>): readonly st
   return calls.sort();
 }
 
-function runtimeConvergenceEvidence(graph: ReadonlyMap<string, SourceModule>): {
+function runtimeConvergenceEvidence(
+  graph: ReadonlyMap<string, SourceModule>,
+  suppliedProgram?: ts.Program,
+): {
   readonly constructedClasses: ReadonlySet<string>;
   readonly reducerCalls: readonly string[];
 } {
-  const program = ts.createProgram({
+  const program = suppliedProgram ?? ts.createProgram({
     rootNames: [...graph.keys()],
     options: {
       module: ts.ModuleKind.ESNext,
@@ -256,20 +317,8 @@ function runtimeConvergenceEvidence(graph: ReadonlyMap<string, SourceModule>): {
     const sourceFile = program.getSourceFile(module.file);
     if (sourceFile === undefined) throw new Error(`TypeScript program omitted ${module.file}`);
     const visit = (node: ts.Node): void => {
-      if (ts.isNewExpression(node)) {
-        let symbol = checker.getSymbolAtLocation(node.expression);
-        const visited = new Set<ts.Symbol>();
-        while (symbol !== undefined && (symbol.flags & ts.SymbolFlags.Alias) !== 0 && !visited.has(symbol)) {
-          visited.add(symbol);
-          symbol = checker.getAliasedSymbol(symbol);
-        }
-        const declaration = symbol?.getDeclarations()?.find((candidate) => {
-          const file = candidate.getSourceFile().fileName;
-          return file.startsWith(`${ROOT}/`) && !file.includes('/node_modules/');
-        });
-        if (symbol !== undefined && declaration !== undefined) {
-          definitions.add(`${symbol.getName()}@${repositoryPath(declaration.getSourceFile().fileName)}`);
-        }
+      if (ts.isClassDeclaration(node) && node.name !== undefined) {
+        definitions.add(`${node.name.text}@${repositoryPath(sourceFile.fileName)}`);
       }
       if (ts.isCallExpression(node) && !insideImport(node)) {
         const definition = definingReducer(checker, node.expression);
@@ -285,6 +334,26 @@ function runtimeConvergenceEvidence(graph: ReadonlyMap<string, SourceModule>): {
     ts.forEachChild(sourceFile, visit);
   }
   return { constructedClasses: definitions, reducerCalls: reducerCalls.sort() };
+}
+
+function assertRuntimeConvergence(
+  evidence: ReturnType<typeof runtimeConvergenceEvidence>,
+  adapter: string,
+): void {
+  const definitions = [...evidence.constructedClasses];
+  if (!definitions.includes('EncounterSessionService@src/vtt/encounter-session-service.ts')) {
+    throw new Error('Runtime entry bypasses EncounterSessionService.');
+  }
+  if (!definitions.includes('ProtocolRuntime@src/vtt/handoff/protocol-runtime.ts')) {
+    throw new Error('Runtime entry bypasses ProtocolRuntime.');
+  }
+  if (!definitions.includes(adapter)) throw new Error(`Runtime entry omits ${adapter}.`);
+}
+
+function assertPermittedReducerEdges(reducerCalls: readonly string[]): void {
+  if (JSON.stringify(reducerCalls) !== JSON.stringify(PERMITTED_REDUCER_EDGES)) {
+    throw new Error(`Runtime entries have an unexpected reducer edge: ${JSON.stringify(reducerCalls)}`);
+  }
 }
 
 function selectorAuthorityViolations(file: string): readonly string[] {
@@ -350,12 +419,45 @@ const CORE_ENTRYPOINTS = [
   'src/vtt/handoff/worker-entry.ts',
   'src/vtt/handoff/worker-transport.ts',
 ] as const;
+const RUNTIME_ENTRYPOINTS = [
+  'src/vtt/handoff/in-process-transport.ts',
+  'src/vtt/handoff/worker-entry.ts',
+  'src/vtt/handoff/worker-transport.ts',
+  'tools/vtt-handoff/node-runtime.ts',
+  'src/vtt/handoff/websocket-transport.ts',
+] as const;
 
 let cachedCoreGraph: ReadonlyMap<string, SourceModule> | null = null;
+let cachedRuntimeGraph: ReadonlyMap<string, SourceModule> | null = null;
+let cachedRuntimeReducerCalls: readonly string[] | null = null;
 
 function coreDependencyGraph(): ReadonlyMap<string, SourceModule> {
   cachedCoreGraph ??= dependencyGraph(CORE_ENTRYPOINTS);
   return cachedCoreGraph;
+}
+
+function runtimeDependencyGraph(): ReadonlyMap<string, SourceModule> {
+  cachedRuntimeGraph ??= dependencyGraph(RUNTIME_ENTRYPOINTS);
+  return cachedRuntimeGraph;
+}
+
+function runtimeReducerCalls(): readonly string[] {
+  cachedRuntimeReducerCalls ??= reducerCallSites(runtimeDependencyGraph());
+  return cachedRuntimeReducerCalls;
+}
+
+function classDefinitions(graph: ReadonlyMap<string, SourceModule>): ReadonlySet<string> {
+  const definitions = new Set<string>();
+  for (const module of graph.values()) {
+    const visit = (node: ts.Node): void => {
+      if (ts.isClassDeclaration(node) && node.name !== undefined) {
+        definitions.add(`${node.name.text}@${repositoryPath(module.file)}`);
+      }
+      ts.forEachChild(node, visit);
+    };
+    ts.forEachChild(module.sourceFile, visit);
+  }
+  return definitions;
 }
 
 describe('renderer-neutral engine boundary graph', () => {
@@ -388,41 +490,74 @@ describe('renderer-neutral engine boundary graph', () => {
     expect(platformViolations(graph)).toEqual([]);
   });
 
-  it('all runtime entries converge on the pinned session reducer edges', () => {
-    expect(reducerCallSites(coreDependencyGraph())).toEqual([
-      'src/vtt/dm-encounter-host.ts#commandReducer -> src/vtt/session-encounter-reducer.ts#reduceSessionEncounter',
-      'src/vtt/session-encounter-reducer.ts#reduceSessionEncounter -> src/vtt/vane-warren.ts#reduceVaneWarrenEncounter',
-      'src/vtt/session-persistence.ts#advanceSkippedTurn -> src/combat/encounter.ts#reduceEncounter',
-      'src/vtt/session-persistence.ts#replaySessionRevisions -> src/vtt/session-encounter-reducer.ts#reduceSessionEncounter',
-      'src/vtt/vane-warren.ts#reduceVaneWarrenEncounter -> src/combat/encounter.ts#reduceEncounter',
-      'src/vtt/vane-warren.ts#reduceVaneWarrenWorldObjectAction -> src/combat/encounter.ts#reduceEncounter',
+  it('rejects bare Node builtins plus aliased, destructured, and computed browser globals', () => {
+    const file = resolve(ROOT, '.tmp/platform-gate-mutant.ts');
+    const sourceFile = ts.createSourceFile(file, `
+      import filesystem from 'fs';
+      const browser = globalThis;
+      const { document: pageDocument } = browser;
+      void browser['indexedDB'];
+      void pageDocument.body;
+      void filesystem;
+    `, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+    const module: SourceModule = {
+      file,
+      sourceFile,
+      imports: valueImportSpecifiers(sourceFile).map((specifier) => ({ specifier, resolved: null })),
+    };
+    expect(platformViolations(new Map([[file, module]]))).toEqual([
+      '.tmp/platform-gate-mutant.ts destructures document from browser',
+      '.tmp/platform-gate-mutant.ts imports fs',
+      ".tmp/platform-gate-mutant.ts uses browser['indexedDB']",
     ]);
   });
 
+  it('all runtime entries converge on the pinned session reducer edges', () => {
+    expect(runtimeReducerCalls()).toEqual(PERMITTED_REDUCER_EDGES);
+  });
+
   it('all renderer adapters converge on the session service', () => {
-    const graph = dependencyGraph([
-      'tests/helpers/vtt-handoff/transport-conformance.ts',
-      'src/vtt/handoff/worker-entry.ts',
-      'src/vtt/handoff/worker-transport.ts',
-      'tools/vtt-handoff/node-runtime.ts',
-      'src/vtt/handoff/websocket-transport.ts',
-    ]);
-    const evidence = runtimeConvergenceEvidence(graph);
-    expect([...evidence.constructedClasses]).toEqual(expect.arrayContaining([
-      'EncounterSessionService@src/vtt/encounter-session-service.ts',
-      'ProtocolRuntime@src/vtt/handoff/protocol-runtime.ts',
-      'InProcessSceneTransport@src/vtt/handoff/in-process-transport.ts',
-      'WorkerSceneTransport@src/vtt/handoff/worker-transport.ts',
-      'WebSocketSceneTransport@src/vtt/handoff/websocket-transport.ts',
-    ]));
-    expect(evidence.reducerCalls).toContain(
-      'src/vtt/dm-encounter-host.ts#commandReducer -> src/vtt/session-encounter-reducer.ts#reduceSessionEncounter',
-    );
+    const entries = [
+      {
+        files: ['src/vtt/handoff/in-process-transport.ts'],
+        adapter: 'InProcessSceneTransport@src/vtt/handoff/in-process-transport.ts',
+      },
+      {
+        files: ['src/vtt/handoff/worker-entry.ts', 'src/vtt/handoff/worker-transport.ts'],
+        adapter: 'WorkerSceneTransport@src/vtt/handoff/worker-transport.ts',
+      },
+      {
+        files: ['tools/vtt-handoff/node-runtime.ts', 'src/vtt/handoff/websocket-transport.ts'],
+        adapter: 'WebSocketSceneTransport@src/vtt/handoff/websocket-transport.ts',
+      },
+    ] as const;
+    const entryGraphs = entries.map((entry) => dependencyGraph(entry.files, true));
+    const productionGraph = runtimeDependencyGraph();
+    const valid = { constructedClasses: classDefinitions(productionGraph), reducerCalls: runtimeReducerCalls() };
+    for (const [index, entry] of entries.entries()) {
+      const graph = entryGraphs[index];
+      if (graph === undefined) throw new Error('Runtime entry graph is unavailable.');
+      expect([...graph.keys()].map(repositoryPath).some((file) => file.startsWith('tests/helpers/'))).toBe(false);
+      expect([...graph.keys()].map(repositoryPath)).not.toContain('src/vtt/encounter-app.ts');
+      assertRuntimeConvergence({
+        constructedClasses: classDefinitions(graph),
+        reducerCalls: [],
+      }, entry.adapter);
+    }
+    assertPermittedReducerEdges(valid.reducerCalls);
+    expect(() => assertPermittedReducerEdges([
+      ...valid.reducerCalls,
+      'tools/vtt-handoff/node-runtime.ts#injected -> src/combat/encounter.ts#reduceEncounter',
+    ])).toThrow('unexpected reducer edge');
+    expect(() => assertRuntimeConvergence({
+      ...valid,
+      constructedClasses: new Set([...valid.constructedClasses].filter((value) =>
+        value !== 'EncounterSessionService@src/vtt/encounter-session-service.ts')),
+    }, entries[2].adapter)).toThrow('bypasses EncounterSessionService');
     expect(platformViolations(dependencyGraph([
       'src/vtt/handoff/websocket-transport.ts',
       'src/vtt/handoff/worker-transport.ts',
     ]))).toEqual([]);
-    expect([...graph.keys()].map(repositoryPath)).not.toContain('src/vtt/encounter-app.ts');
   });
 
   it('keeps the complete selector value graph projection-only and platform-neutral', () => {
