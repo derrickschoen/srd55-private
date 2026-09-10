@@ -22119,3 +22119,10 @@ Q10 answered 2026-09-09 20:21 EDT: "Reopen the plan as a fresh unit". One new pl
 `.tmp-plans/2026-09-08-offers-roadmap.md` on claude/p-offer-help, scoped to the two D586.74 blockers (bottleneck fixture admits
 the diagonal bypass through the vacated alcove; legacy migration assigns `grants:[]` and loses an earned Dash), with its own
 three review rounds; implementation slices follow approval. Alternatives not chosen: straight to implementation; abandon; defer.
+
+## D601 — OWNER: held-out basis slice 1 — reopen with an AST leak wall (2026-09-09)
+
+Q11 answered 2026-09-09 20:25 EDT: "Reopen: AST leak wall". A fresh bounded unit (HELDOUT-S1-REM-01) on candidate 1d6af854 (claude/p-heldout)
+replaces the regex leak wall in tools/heldout-leak-check.ts with TypeScript-AST import discovery (the elevation lane's accepted
+implementation on main, D586.63); everything else in the slice stays as reviewed. Alternatives not chosen: land with the regex
+wall; abandon; defer. This closes the queue of owner questions asked one at a time today (D590–D601).
