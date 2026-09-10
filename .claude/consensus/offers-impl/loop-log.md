@@ -5,3 +5,5 @@
 - 2026-09-10 09:04 EDT — Slice 1 Astra r1 REJECT: F1 self-certifying legacy-preservation oracle (verified at test:36-49); all else verified clean. r2 dispatched (resume 01a08b2b…, independent parent-revision literals + 3 mutants).
 
 - 2026-09-10 09:24 EDT — Slice 1 r2 lane DONE; supervisor: tsc/sg/diffcheck 0, focused 13/13, parent oracle reproduced (6/6 ids literal); committed f6f43bb5; Astra r2 dispatched (resume 01a08b67…).
+
+- 2026-09-10 09:26 EDT — Slice 1 Astra r2 ACCEPT (f6f43bb5). Landing: merged main (8a81d20e-era) into claude/p-offer-help → c3b3d9b0 (clean); full gate launched on wt-p-offer-help (port 4360).
