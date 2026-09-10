@@ -1,10 +1,13 @@
 import { execFileSync } from 'node:child_process';
 import { canonicalJson } from '../src/commands/canonical-json';
 import type { HeldoutSlice } from '../src/vtt/heldout-evaluation';
+import ts from 'typescript';
 
 export interface HeldoutChangedText {
   readonly path: string;
   readonly addedText: string;
+  /** Complete candidate source, when available, so imports are parsed as a file rather than a diff fragment. */
+  readonly sourceText?: string;
 }
 
 export interface HeldoutLeakFinding {
@@ -46,11 +49,89 @@ function normalizedDigits(text: string): readonly number[] {
 }
 
 const RESERVE_RESULT_PATH = /(?:\/home\/vagrant\/dnd-slim-runs\/)?heldout-[a-f]-(?:encounters|rounds|packet|key|judge|report)[a-z0-9._/-]*/iu;
-const HELDOUT_PROTOCOL_IMPORT = new RegExp(
-  "(?:\\bfrom\\s*|\\bimport\\s*(?:\\(\\s*)?|\\brequire\\s*\\(\\s*)['\"`]" +
-  "[^'\"`]*heldout-evaluation(?:\\.(?:js|ts))?['\"`]",
-  'u',
-);
+
+function scriptKind(path: string): ts.ScriptKind {
+  if (path.endsWith('.tsx')) return ts.ScriptKind.TSX;
+  if (path.endsWith('.jsx')) return ts.ScriptKind.JSX;
+  if (path.endsWith('.js') || path.endsWith('.mjs') || path.endsWith('.cjs')) {
+    return ts.ScriptKind.JS;
+  }
+  return ts.ScriptKind.TS;
+}
+
+function isTypeScriptOrJavaScript(path: string): boolean {
+  return ['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs']
+    .some((extension) => path.endsWith(extension));
+}
+
+function literalModuleSpecifier(expression: ts.Expression | undefined): string | null {
+  if (expression === undefined) return null;
+  return ts.isStringLiteral(expression) || ts.isNoSubstitutionTemplateLiteral(expression)
+    ? expression.text
+    : null;
+}
+
+/**
+ * Enumerates statically named module edges from TypeScript syntax. Comments and
+ * whitespace are trivia, so they cannot split a token sequence past this wall.
+ */
+export function moduleSpecifiers(path: string, source: string): readonly string[] {
+  const transpiled = ts.transpileModule(source, {
+    compilerOptions: {
+      target: ts.ScriptTarget.Latest,
+      jsx: ts.JsxEmit.Preserve,
+    },
+    fileName: path,
+    reportDiagnostics: true,
+  });
+  const parseErrors = (transpiled.diagnostics ?? []).filter((diagnostic) =>
+    diagnostic.category === ts.DiagnosticCategory.Error);
+  if (parseErrors.length > 0) {
+    const detail = parseErrors.map((diagnostic) =>
+      ts.flattenDiagnosticMessageText(diagnostic.messageText, ' ')).join('; ');
+    throw new TypeError(`Held-out leak inspection could not parse ${path}: ${detail}`);
+  }
+
+  const sourceFile = ts.createSourceFile(
+    path,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    scriptKind(path),
+  );
+  const result = new Set<string>();
+  const add = (specifier: string | null): void => {
+    if (specifier !== null) result.add(specifier);
+  };
+  const visit = (node: ts.Node): void => {
+    if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
+      add(literalModuleSpecifier(node.moduleSpecifier));
+    } else if (
+      ts.isImportEqualsDeclaration(node) &&
+      ts.isExternalModuleReference(node.moduleReference)
+    ) {
+      add(literalModuleSpecifier(node.moduleReference.expression));
+    } else if (ts.isImportTypeNode(node)) {
+      add(ts.isLiteralTypeNode(node.argument)
+        ? literalModuleSpecifier(node.argument.literal)
+        : null);
+    } else if (ts.isCallExpression(node) && node.arguments.length === 1) {
+      const argument = literalModuleSpecifier(node.arguments[0]);
+      if (node.expression.kind === ts.SyntaxKind.ImportKeyword) add(argument);
+      if (ts.isIdentifier(node.expression) && node.expression.text === 'require') add(argument);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return [...result].sort();
+}
+
+function isHeldoutProtocolSpecifier(specifier: string): boolean {
+  return specifier === 'heldout-evaluation' ||
+    specifier.endsWith('/heldout-evaluation') ||
+    specifier.endsWith('/heldout-evaluation.js') ||
+    specifier.endsWith('/heldout-evaluation.ts');
+}
 
 function reserveReference(text: string, bindings: HeldoutLeakBindings): string | null {
   if (text.includes('heldout-ordinary-v1') || text.includes('heldout-ordinary-v1-basis')) {
@@ -107,7 +188,10 @@ export function inspectHeldoutLeakChanges(
     )) {
       findings.push({ path: change.path, kind: 'reserve_reference', detail: reference });
     }
-    if (HELDOUT_PROTOCOL_IMPORT.test(change.addedText) &&
+    const imports = isTypeScriptOrJavaScript(change.path)
+      ? moduleSpecifiers(change.path, change.sourceText ?? change.addedText)
+      : [];
+    if (imports.some(isHeldoutProtocolSpecifier) &&
       !EVALUATION_FILES.has(change.path) && !isTestOrFixture(change.path)) {
       findings.push({
         path: change.path,
@@ -137,6 +221,7 @@ function addedChanges(base: string, candidate: string): readonly HeldoutChangedT
   for (const line of diff.split('\n')) {
     if (line.startsWith('+++ b/')) {
       path = line.slice('+++ b/'.length);
+      if (!byPath.has(path)) byPath.set(path, []);
       continue;
     }
     if (path !== null && line.startsWith('+') && !line.startsWith('+++')) {
@@ -148,6 +233,10 @@ function addedChanges(base: string, candidate: string): readonly HeldoutChangedT
   return [...byPath].map(([changedPath, lines]) => ({
     path: changedPath,
     addedText: lines.join('\n'),
+    sourceText: execFileSync('git', ['show', `${candidate}:${changedPath}`], {
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024,
+    }),
   }));
 }
 
