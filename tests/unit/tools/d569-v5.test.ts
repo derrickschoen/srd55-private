@@ -26,7 +26,7 @@ import {
   type D569ExperimentManifest,
 } from '../../../tools/d569-blind-experiment';
 import { canonicalD569SecondFamilyRegeneration } from '../../../tools/d569-second-family-manifest';
-import { packetOutcome } from '../../../tools/ai-dm-rerun-packet';
+import { BRUTAL_10_PROTOCOL, buildRerunPacket } from '../../../tools/ai-dm-rerun-packet';
 import { readFileSync } from '../../helpers/test-filesystem';
 
 const PATCHED_COMMIT = 'd60a0571a4588879c65992a17ab95023911d17c1';
@@ -45,12 +45,12 @@ function historical(room: number, rep: number, sessionId: string | null) {
   return { room, round: rep, outcome: 'authorized', sessionId };
 }
 
-function current(cell: D569DryRunCell, outcome: 'authorized' | 'service_null' | 'infrastructure_failed') {
+function current(cell: D569DryRunCell, outcome: 'authorized' | 'refused' | 'service_null' | 'infrastructure_failed') {
   const room = cell.seed - (cell.basis === 'hard' ? 5_117_000 : 6_203_000);
   const scheduledCellKey = `${String(room)}:${String(cell.rep)}`;
   const dispatchId = `engine-dispatch:grid-${String(room)}-${String(cell.rep)}-0001`;
   const infrastructure = outcome === 'infrastructure_failed';
-  const delivered = outcome === 'authorized';
+  const delivered = outcome === 'authorized' || outcome === 'refused';
   const boardSha = sha256(`board:${cell.basis}:${scheduledCellKey}`);
   const catalog = infrastructure
     ? { status: 'absent' as const, basis: 'required_engine_initialization_failed' as const, dispatchId, corroboration: ['startup failed'] }
@@ -69,9 +69,27 @@ function current(cell: D569DryRunCell, outcome: 'authorized' | 'service_null' | 
     dmMode: 'blind', blindRepairArm: 'code_only', blindMaxAttempts: 3, blindFacts: false,
     decisionTransport: 'mcp_minimal', instructionSource: 'kb', escalated: false,
     escalationModel: null, escalationEffort: null, midRoundAdjustmentsEnabled: false, fallbackReason: null, planner: 'model',
+    combatModel: 'initiative_segments_v1', initiativeOrder: [], plannedBy: { model: cell.model, effort: cell.effort },
+    roundNarrative: null,
+    authorizedPlan: outcome === 'authorized' ? [{
+      actorId: 'monster:test', resolutionSummary: { actionSlots: [{ kind: 'wait', targetIds: [] }], movementFeet: 0 },
+    }] : null,
+    firstDecisionAccepted: outcome === 'authorized', decisionAttempts: 1,
+    decisionRejectionCodes: [], normalizationCodes: [], skillName: null, skillHash: null,
+    rationale: null, overridePolicy: 'strict',
+    blindContextVersion: 'blind-turn-context-v1', blindIntentVersion: 'blind-round-intent-v1',
+    blindIntentText: null, blindIntents: null, blindResolverOutcome: [], blindRejectionCodes: [],
+    blindAttempts: [], blindResolverLatencyMs: 0, semanticBoardEvidence: null,
+    creatureFactsEvidence: { sha256: 'c'.repeat(64), utf8Bytes: 1 },
+    legalMovementEvidence: { sha256: 'd'.repeat(64), utf8Bytes: 1 },
+    blindPrivateAnswerKey: {},
     startingRoomDigest: sha256(canonicalJson(state)), kbHash: cell.sharedKbHash,
     sharedKbComponentHashes: MANIFEST.sharedKb.componentHashes,
-    boardImage: { mode: 'png', sha256: boardSha },
+    boardImage: {
+      mode: 'png', sha256: boardSha, bytes: 24, width: 1, height: 1, captureMs: 0,
+      relativePath: `board-images/${boardSha}.png`,
+    },
+    uiFeedback: null,
     visualProfile: {
       primerVersion: MANIFEST.visualPins.blind.primerVersion,
       images: [{ role: MANIFEST.visualPins.blind.imageRole, sha256: boardSha, ordinal: 1 }],
@@ -106,6 +124,13 @@ function current(cell: D569DryRunCell, outcome: 'authorized' | 'service_null' | 
 
 function raw(lines: readonly Readonly<Record<string, unknown>>[]): string {
   return `${lines.map((line) => JSON.stringify(line)).join('\n')}\n`;
+}
+
+function record(value: unknown): Readonly<Record<string, unknown>> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new TypeError('Expected a record.');
+  }
+  return value as Readonly<Record<string, unknown>>;
 }
 
 function reconciliation(source: string): D569ReconciliationSidecar {
@@ -150,20 +175,16 @@ function retainedHistorical(cell: D569DryRunCell, lineNumber: number): Readonly<
 }
 
 function pairedDocuments(rows: readonly ReturnType<typeof current>[]): D569PairedAnalysisDocuments {
-  const packet: Readonly<Record<string, unknown>>[] = [];
-  const answerKey: Readonly<Record<string, unknown>>[] = [];
+  const rawRows = rows.flatMap((row) => ['gpt-5.6-luna-blind', 'gpt-5.6-luna-advice'].map((arm) => ({ ...row, arm })));
+  const constructed = buildRerunPacket(rawRows, 569_575, BRUTAL_10_PROTOCOL);
+  const packet = constructed.packet.entries.map((entry) => ({ ...entry }));
+  const answerKey = constructed.answerKey.entries.map((entry) => ({ ...entry }));
   const scores = Object.fromEntries(D569_PRIMARY_JUDGES.map(({ seat }) => [seat, [] as Readonly<Record<string, unknown>>[]])) as {
     [Seat in (typeof D569_PRIMARY_JUDGES)[number]['seat']]: Readonly<Record<string, unknown>>[];
   };
-  for (const row of rows) {
-    for (const arm of ['gpt-5.6-luna-blind', 'gpt-5.6-luna-advice'] as const) {
-      const blindId = `${arm}:${row.scheduledCellKey}`;
-      const outcome = arm.endsWith('-blind') ? packetOutcome(row.outcome) : 'authorized';
-      packet.push({ blindId, caseId: `case-${String(row.room)}-${String(row.round)}`, outcome });
-      answerKey.push({ blindId, arm });
-      for (const { seat } of D569_PRIMARY_JUDGES) {
-        scores[seat].push({ blindId, targetPriority: 2, actionEconomy: 2, coherence: 1, positioning: 1, total: 6 });
-      }
+  for (const entry of packet) {
+    for (const { seat } of D569_PRIMARY_JUDGES) {
+      scores[seat].push({ blindId: entry.blindId, targetPriority: 2, actionEconomy: 2, coherence: 1, positioning: 1, total: 6 });
     }
   }
   return { packet, answerKey, scoresBySeat: scores };
@@ -217,10 +238,87 @@ describe('D569 v5 replacement validation and paired analysis tools', () => {
       return current(cell, 'authorized');
     }));
     const merged = mergeRepairedHard(original, replacements);
-    expect(validateD569RegisteredFirstArm({
+    const observations = validateD569RegisteredFirstArm({
       rawText: merged, basis: 'hard', cliVersion: 'codex-cli 0.153.4',
       patchedCommit: PATCHED_COMMIT, sidecar,
-    })).toHaveLength(30);
+    });
+    expect(observations).toHaveLength(30);
+    expect(observations.filter((entry) => entry.row['sessionId'] === null)
+      .map((entry) => entry.effectiveSessionId)).toEqual([
+        'recovered-session-6', 'recovered-session-19', 'recovered-session-20',
+      ]);
+  });
+
+  it('accepts a registered host-authorization refusal without treating attribution as a default', () => {
+    const refused = mutateFirst(BRUTAL_SOURCE, (_row) => ({
+      ...current(CELLS.find((cell) => cell.basis === 'brutal')!, 'refused'),
+      fallbackReason: 'host_authorization_failed', planner: 'model',
+    }));
+    expect(validateBrutal(refused)).toHaveLength(30);
+  });
+
+  it('rejects a row that actually executed a model default', () => {
+    expect(() => validateBrutal(mutateFirst(BRUTAL_SOURCE, (row) => ({
+      ...row, planner: 'engine_default', fallbackReason: 'no_proposal',
+    })))).toThrow('model_default_fallback');
+  });
+
+  it('accepts cancellation after delivered context in registered validation', () => {
+    const cancelled = mutateFirst(BRUTAL_SOURCE, (row) => {
+      const dispatchId = String(row['dispatchId']);
+      return {
+        ...row, outcome: 'infrastructure_failed', fallbackReason: 'dispatch_cancelled',
+        failingDispatch: {
+          phase: 'primary', exit: 'cancelled', dispatchId,
+          engineCatalogEvidence: row['engineCatalogEvidence'],
+          turnContextDelivery: row['turnContextDelivery'],
+          failureReason: 'operator cancelled after delivery',
+        },
+      };
+    });
+    expect(validateBrutal(cancelled)).toHaveLength(30);
+  });
+
+  it('rejects incomplete v3 evidence objects', () => {
+    expect(() => validateBrutal(mutateFirst(BRUTAL_SOURCE, (row) => {
+      const catalog = record(row['engineCatalogEvidence']);
+      return { ...row, engineCatalogEvidence: { status: catalog['status'], dispatchId: catalog['dispatchId'] } };
+    }))).toThrow();
+  });
+
+  it('rejects incomplete v3 evidence nested in a failing dispatch', () => {
+    const rows = BRUTAL_SOURCE.trimEnd().split('\n').map((line) => JSON.parse(line) as Readonly<Record<string, unknown>>);
+    const index = rows.findIndex((row) => row['outcome'] === 'infrastructure_failed');
+    if (index < 0) throw new Error('Registered fixture lacks an infrastructure row.');
+    const row = rows[index]!;
+    const failure = record(row['failingDispatch']);
+    const catalog = record(failure['engineCatalogEvidence']);
+    rows[index] = {
+      ...row,
+      failingDispatch: {
+        ...failure,
+        engineCatalogEvidence: { status: catalog['status'], dispatchId: catalog['dispatchId'] },
+      },
+    };
+    expect(() => validateBrutal(raw(rows))).toThrow();
+  });
+
+  it('rejects a missing v3 host diagnostic', () => {
+    expect(() => validateBrutal(mutateFirst(BRUTAL_SOURCE, (row) => {
+      const { hostContextDiagnostic: _hostContextDiagnostic, ...withoutHostDiagnostic } = row;
+      return withoutHostDiagnostic;
+    }))).toThrow();
+  });
+
+  it('rejects partial v3 hybrids and integrity-indeterminate rows before analysis', () => {
+    const historicalRows = Array.from({ length: 10 }, (_, roomIndex) => [1, 2, 3].map((rep) =>
+      historical(roomIndex + 1, rep, `historical-${String(roomIndex + 1)}-${String(rep)}`))).flat();
+    expect(() => validateD569FirstArm(raw(historicalRows.map((row, index) => index === 0
+      ? { ...row, dispatchId: 'engine-dispatch:hybrid-0001' }
+      : row)))).toThrow('partial arena-row-v3 hybrid');
+    expect(() => validateD569FirstArm(mutateFirst(BRUTAL_SOURCE, (row) => ({
+      ...row, outcome: 'integrity_indeterminate',
+    })))).toThrow('integrity-indeterminate');
   });
 
   it('rejects registered seed mutations', () => {

@@ -21,20 +21,46 @@ import {
 } from './reconciliation';
 
 const recordSchema = z.record(z.string(), z.unknown());
+const safeIntegerSchema = z.number().int().min(Number.MIN_SAFE_INTEGER).max(Number.MAX_SAFE_INTEGER);
 const catalogSchema = z.discriminatedUnion('status', [
-  z.object({ status: z.literal('ready'), dispatchId: z.string().min(16) }).passthrough(),
-  z.object({ status: z.literal('absent'), dispatchId: z.string().min(16) }).passthrough(),
-  z.object({ status: z.literal('inconclusive'), dispatchId: z.string().min(16) }).passthrough(),
+  z.object({
+    status: z.literal('ready'),
+    basis: z.enum(['advertised_tool_invoked', 'required_cli_completed_with_valid_catalog']),
+    dispatchId: z.string().min(16), advertisedInvocationCount: safeIntegerSchema.nonnegative(),
+    resourceOperationCount: safeIntegerSchema.nonnegative(),
+  }).strict(),
+  z.object({
+    status: z.literal('absent'), basis: z.literal('required_engine_initialization_failed'),
+    dispatchId: z.string().min(16), corroboration: z.array(z.string()),
+  }).strict(),
+  z.object({
+    status: z.literal('inconclusive'), dispatchId: z.string().min(16),
+    reason: z.enum(['no_correlated_catalog', 'invalid_catalog_response', 'missing_live_timestamp',
+      'conflicting_success_and_failure', 'timestamp_only']),
+  }).strict(),
 ]);
 const deliverySchema = z.discriminatedUnion('status', [
-  z.object({ status: z.literal('delivered'), dispatchId: z.string().min(16), measurement: z.object({ baseBytes: z.number().nonnegative(), semanticBytes: z.number().nonnegative() }) }).passthrough(),
+  z.object({
+    status: z.literal('delivered'), dispatchId: z.string().min(16),
+    contextSha256: z.string().regex(/^[a-f0-9]{64}$/u),
+    measurement: z.object({ baseBytes: z.number().nonnegative(), semanticBytes: z.number().nonnegative() }).strict(),
+  }).strict(),
   z.object({
     status: z.literal('not_requested'), dispatchId: z.string().min(16),
     reason: z.enum(['catalog_ready_model_did_not_fetch', 'dispatch_cancelled']), measurement: z.null(),
-  }).passthrough(),
-  z.object({ status: z.literal('timeout_before_delivery'), dispatchId: z.string().min(16), measurement: z.null() }).passthrough(),
-  z.object({ status: z.literal('infrastructure_absent'), dispatchId: z.string().min(16), measurement: z.null() }).passthrough(),
-  z.object({ status: z.literal('indeterminate'), dispatchId: z.string().min(16), measurement: z.null() }).passthrough(),
+  }).strict(),
+  z.object({ status: z.literal('timeout_before_delivery'), dispatchId: z.string().min(16), measurement: z.null() }).strict(),
+  z.object({ status: z.literal('infrastructure_absent'), dispatchId: z.string().min(16), measurement: z.null() }).strict(),
+  z.object({
+    status: z.literal('indeterminate'), dispatchId: z.string().min(16),
+    reason: z.literal('catalog_inconclusive_empty_context_spool'), measurement: z.null(),
+    integrityAction: z.literal('stop_after_persist'),
+  }).strict(),
+]);
+const hostContextDiagnosticSchema = z.union([
+  z.object({ status: z.literal('rendered'), contextSha256: z.string().regex(/^[a-f0-9]{64}$/u) }).strict(),
+  z.object({ status: z.literal('unavailable'), errorClass: z.string().min(1) }).strict(),
+  z.null(),
 ]);
 const failingDispatchSchema = z.object({
   phase: z.enum(['primary', 'correction', 'adjustment', 'speculative', 'speculation_recalculation']),
@@ -86,6 +112,7 @@ function validateV3(row: Readonly<Record<string, unknown>>): void {
   const delivery = deliverySchema.parse(row['turnContextDelivery']);
   z.object({ baseBytes: z.number().nonnegative(), semanticBytes: z.number().nonnegative() })
     .parse(row['turnContextConfiguredCaps']);
+  hostContextDiagnosticSchema.parse(row['hostContextDiagnostic']);
   if (catalog.dispatchId !== dispatchId || delivery.dispatchId !== dispatchId) {
     throw new TypeError(`D569 v3 dispatch correlation failed for ${scheduledCellKey}.`);
   }
@@ -106,8 +133,9 @@ function validateV3(row: Readonly<Record<string, unknown>>): void {
     const failure = failingDispatchSchema.parse(row['failingDispatch']);
     if (failure.dispatchId !== failure.engineCatalogEvidence.dispatchId ||
       failure.dispatchId !== failure.turnContextDelivery.dispatchId ||
-      failure.exit === 'cancelled' && (failure.turnContextDelivery.status !== 'not_requested' ||
-        failure.turnContextDelivery.reason !== 'dispatch_cancelled') ||
+      failure.exit === 'cancelled' && failure.turnContextDelivery.status !== 'delivered' &&
+        (failure.turnContextDelivery.status !== 'not_requested' ||
+          failure.turnContextDelivery.reason !== 'dispatch_cancelled') ||
       failure.exit === 'infrastructure_failed' && (failure.engineCatalogEvidence.status !== 'absent' ||
         failure.turnContextDelivery.status !== 'infrastructure_absent')) {
       throw new TypeError(`Diagnosed infrastructure row ${scheduledCellKey} has inconsistent evidence.`);
@@ -371,9 +399,7 @@ export function validateD569RegisteredFirstArm(
       } : {}),
       timeoutMs: cell.timeoutMs,
       escalationModel: row['escalationModel'] === null ? null : requiredString(row['escalationModel'], 'escalationModel'),
-      modelDefaultFallback: observation.infrastructure
-        ? false
-        : row['fallbackReason'] !== null || row['planner'] !== 'model',
+      modelDefaultFallback: observation.infrastructure ? false : row['planner'] === 'engine_default',
       stateHash: cell.stateHash,
       sharedKbHash: requiredString(row['kbHash'], 'kbHash'),
       visualSourceHash: cell.visualSourceHash,

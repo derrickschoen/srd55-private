@@ -51,6 +51,13 @@ export function classifyTurnContextDelivery(input: {
   if (input.delivered !== null) {
     return { status: 'delivered', dispatchId, ...input.delivered };
   }
+  if (input.catalogEvidence.status === 'inconclusive') {
+    return {
+      status: 'indeterminate', dispatchId,
+      reason: 'catalog_inconclusive_empty_context_spool', measurement: null,
+      integrityAction: 'stop_after_persist',
+    };
+  }
   switch (input.turn.exit) {
     case 'cancelled':
       return { status: 'not_requested', dispatchId, reason: 'dispatch_cancelled', measurement: null };
@@ -67,12 +74,6 @@ export function classifyTurnContextDelivery(input: {
           };
         case 'absent':
           return { status: 'infrastructure_absent', dispatchId, measurement: null };
-        case 'inconclusive':
-          return {
-            status: 'indeterminate', dispatchId,
-            reason: 'catalog_inconclusive_empty_context_spool', measurement: null,
-            integrityAction: 'stop_after_persist',
-          };
       }
   }
 }

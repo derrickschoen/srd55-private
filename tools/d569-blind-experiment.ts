@@ -787,7 +787,8 @@ export function validateD569ObservedRows(
         typeof row.dispatchId === 'string' && row.dispatchId.length >= 16 &&
         row.failingDispatch !== undefined && row.failingDispatch.dispatchId.length >= 16 &&
         (row.failingDispatch.exit === 'cancelled'
-          ? row.failingDispatch.turnContextDelivery.status === 'not_requested'
+          ? row.failingDispatch.turnContextDelivery.status === 'delivered' ||
+            row.failingDispatch.turnContextDelivery.status === 'not_requested'
           : row.failingDispatch.engineCatalogEvidence.status === 'absent' &&
             row.failingDispatch.turnContextDelivery.status === 'infrastructure_absent')
       : row.sessionId !== null && !sessionIds.has(row.sessionId),

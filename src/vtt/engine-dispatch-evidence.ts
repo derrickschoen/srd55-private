@@ -115,6 +115,7 @@ export function classifyEngineCatalogEvidence(input: {
   if ((valid || advertisedObserved) && input.requiredStartupFailed) {
     return { status: 'inconclusive', dispatchId: input.dispatchId, reason: 'conflicting_success_and_failure' };
   }
+  if (invalid) return { status: 'inconclusive', dispatchId: input.dispatchId, reason: 'invalid_catalog_response' };
   if (invocationIds.size > 0) {
     return {
       status: 'ready', basis: 'advertised_tool_invoked', dispatchId: input.dispatchId,
@@ -127,7 +128,6 @@ export function classifyEngineCatalogEvidence(input: {
       advertisedInvocationCount: 0, resourceOperationCount: resourceInvocationIds.size,
     };
   }
-  if (invalid) return { status: 'inconclusive', dispatchId: input.dispatchId, reason: 'invalid_catalog_response' };
   if (input.requiredStartupFailed && !valid) {
     return {
       status: 'absent', basis: 'required_engine_initialization_failed', dispatchId: input.dispatchId,

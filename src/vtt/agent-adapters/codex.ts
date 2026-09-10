@@ -16,7 +16,6 @@ import {
   type EngineObservedEvent,
   type EngineReadinessRecord,
 } from '../engine-dispatch-evidence';
-import { D569IntegrityStop } from '../d569-integrity';
 import {
   AgentAdapterError,
   agentProcessEvidence,
@@ -231,7 +230,19 @@ export class CodexAgentSessionAdapter extends ProcessAgentSessionAdapter {
     }
     if (output.exitCode !== 0 && requiredEngineStartupFailed(output)) {
       if (catalog?.status === 'inconclusive') {
-        throw new D569IntegrityStop('Required engine startup text conflicts with correlated catalog evidence.');
+        const forensicTurn: AgentTurnResult = {
+          exit: 'infrastructure_failed', resumeSessionId: observedResumeSessionId,
+          sessionId: partial.sessionId, finalText: partial.finalText, usage: observedUsage, processEvidence,
+          partialResultEvidence: {
+            status: 'partial', decodedEventCount: decodedEvents.length,
+            finalTextFragment: partial.finalText, observedUsage,
+            stagedInvocationIds: stagedInvocationIds(decodedEvents),
+          },
+          engineCatalogEvidence: catalog,
+          component: 'engine_mcp_startup',
+          failureReason: output.stderr.length === 0 ? 'Required engine MCP initialization failed.' : output.stderr,
+        };
+        return forensicTurn;
       }
       if (catalog?.status !== 'absent') completedOutput(output, sessionId !== null);
       return {

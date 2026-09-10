@@ -389,6 +389,12 @@ const arenaRowV3Schema = z.discriminatedUnion('decisionTransport', [
   if (row.dmMode === 'blind' && row.blindIngressAudit === undefined) {
     context.addIssue({ code: 'custom', path: ['blindIngressAudit'], message: 'is required on a blind v3 row' });
   }
+  if (row.dmMode === 'blind' && row.blindIngressAudit?.version === 'blind-model-ingress-v1') {
+    context.addIssue({
+      code: 'custom', path: ['blindIngressAudit'],
+      message: 'blind arena-row-v3 requires the outcome-aware v2 ingress audit',
+    });
+  }
   if (row.blindIngressAudit?.version === 2 &&
     (row.blindIngressAudit.delivery.status !== row.turnContextDelivery.status ||
       row.blindIngressAudit.delivery.dispatchId !== row.turnContextDelivery.dispatchId)) {
@@ -427,8 +433,9 @@ const arenaRowV3Schema = z.discriminatedUnion('decisionTransport', [
     const failure = row.failingDispatch;
     if (failure === undefined || failure.dispatchId !== failure.engineCatalogEvidence.dispatchId ||
       failure.dispatchId !== failure.turnContextDelivery.dispatchId ||
-      failure.exit === 'cancelled' && (failure.turnContextDelivery.status !== 'not_requested' ||
-        failure.turnContextDelivery.reason !== 'dispatch_cancelled') ||
+      failure.exit === 'cancelled' && failure.turnContextDelivery.status !== 'delivered' &&
+        (failure.turnContextDelivery.status !== 'not_requested' ||
+          failure.turnContextDelivery.reason !== 'dispatch_cancelled') ||
       failure.exit === 'infrastructure_failed' && (failure.engineCatalogEvidence.status !== 'absent' ||
         failure.turnContextDelivery.status !== 'infrastructure_absent')) {
       context.addIssue({ code: 'custom', path: ['failingDispatch'], message: 'must identify the correlated failing dispatch' });

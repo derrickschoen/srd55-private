@@ -43,7 +43,6 @@ import {
   type AgentProcessSpec,
 } from '../../../src/vtt/agent-adapters/process';
 import { readdir } from '../../helpers/test-filesystem-promises';
-import { D569IntegrityStop } from '../../../src/vtt/d569-integrity';
 
 const cwd = '/workspace/dnd-wt-vtt';
 const engineCommand = '/workspace/node';
@@ -386,8 +385,15 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
       const adapter = new CodexAgentSessionAdapter(options(new SIMULATEDChildProcessRunner([
         output('', 'Required MCP server engine failed to initialize', 1),
       ])));
-      await expect(adapter.start({ ...invocation, launcherToken }, new AbortController().signal))
-        .rejects.toBeInstanceOf(D569IntegrityStop);
+      const forensicTurn = await adapter.start({ ...invocation, launcherToken }, new AbortController().signal);
+      expect(forensicTurn).toMatchObject({
+        exit: 'infrastructure_failed',
+        processEvidence: { exitCode: 1, stderr: 'Required MCP server engine failed to initialize' },
+        partialResultEvidence: {
+          status: 'partial', decodedEventCount: 0, finalTextFragment: '', stagedInvocationIds: [],
+        },
+        engineCatalogEvidence: { status: 'inconclusive', dispatchId },
+      });
     },
   );
 

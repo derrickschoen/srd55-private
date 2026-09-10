@@ -135,6 +135,15 @@ describe('engine dispatch catalog evidence', () => {
     });
   });
 
+  it('keeps mixed valid and malformed or wrong-profile readiness evidence inconclusive', () => {
+    expect(classify({ records: [readiness()], malformedReadiness: true })).toEqual({
+      status: 'inconclusive', dispatchId: dispatch, reason: 'invalid_catalog_response',
+    });
+    expect(classify({ records: [readiness(), readiness(dispatch, { profile: 'dm' })] })).toEqual({
+      status: 'inconclusive', dispatchId: dispatch, reason: 'invalid_catalog_response',
+    });
+  });
+
   it('does not correlate an earlier successful list to a failed retry', () => {
     expect(classify({ records: [readiness(earlierDispatch)], completed: false, failed: true })).toEqual({
       status: 'absent', basis: 'required_engine_initialization_failed', dispatchId: dispatch,

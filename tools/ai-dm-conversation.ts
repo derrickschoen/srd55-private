@@ -496,6 +496,7 @@ interface SpeculativeDispatchCompletion {
 }
 
 interface InFlightSpeculation {
+  readonly dispatchId: import('../src/vtt/agent-session').EngineDispatchId;
   readonly sourceSnapshot: EngineRoundSnapshot;
   readonly sourceTurnContext: TurnContextDeltaBase;
   readonly targetActorIds: readonly CombatantId[];
@@ -898,6 +899,12 @@ export interface ConversationRunOptions {
   readonly stagedSpeculationTimeout?: boolean;
   /** SIMULATED-only recalculation dispatch that stages evidence before engine startup failure. */
   readonly failSpeculationRecalculation?: boolean;
+  /** SIMULATED-only speculative dispatch classified as required-engine infrastructure failure. */
+  readonly failSpeculationInfrastructure?: boolean;
+  /** Test-only join controls for end-of-round and exception-cleanup transition coverage. */
+  readonly endRoundAfterSpeculationStartForTest?: boolean;
+  readonly failAfterSpeculationStartForTest?: boolean;
+  readonly onInitiativeIterationForTest?: () => void;
   /** Test-only forensic ingress appended immediately before the final blind audit. */
   readonly blindIngressAuditProbeText?: string;
   readonly failCorrection?: readonly string[];
@@ -2305,16 +2312,21 @@ export function persistD569IntegrityStop(input: {
   readonly delivery: Extract<TurnContextDelivery, { readonly status: 'indeterminate' }>;
   readonly turn: AgentTurnResult;
 }): never {
+  if (input.turn.processEvidence === null) {
+    throw new Error('Indeterminate integrity STOP requires complete process evidence.');
+  }
   const contextSpool = spoolEvidence(input.contextSpoolPath);
   if (contextSpool.recordCount !== 0) throw new Error('Indeterminate integrity STOP requires an empty correlated context spool.');
   const proposalSpool = spoolEvidence(input.proposalSpoolPath);
-  const artifact: D569DispatchIntegrityArtifact = {
+  const artifact: D569DispatchIntegrityArtifact & Pick<AgentTurnResult, 'processEvidence' | 'partialResultEvidence'> = {
     version: 1,
     kind: 'dispatch_integrity_indeterminate',
     scheduledCellKey: input.scheduledCellKey,
     dispatchId: input.catalogEvidence.dispatchId,
     launcherSha256: sha256(readFileSync(input.launcherPath, 'utf8')),
     processEvidenceSha256: sha256(canonicalJson(input.turn.processEvidence)),
+    processEvidence: input.turn.processEvidence,
+    partialResultEvidence: input.turn.partialResultEvidence,
     catalogEvidence: input.catalogEvidence,
     delivery: input.delivery,
     contextSpool: { recordCount: 0, sha256: contextSpool.sha256 },
@@ -2802,7 +2814,10 @@ class SimulatedConversationAdapter implements AgentSessionAdapter {
     const manifest = JSON.parse(await readFile(invocation.launcherToken, 'utf8')) as EngineMcpLauncherManifest;
     const key = manifest.requestId.replace(/^request:/u, '');
     if (invocation.callPhase === 'speculation_recalculation' && this.#failSpeculationRecalculation) {
-      await writeFile(manifest.proposalSpoolPath, '{"staged":"must-not-be-consumed"}\n', 'utf8');
+      await driveScriptedMcp(
+        this.cwd, invocation.launcherToken, this.intelMode, true, false, null,
+        'legacy', 'keep', signal, 0, invocation.toolSession,
+      );
       await abortableDelay(this.#inProcessDispatchDelayMs ?? 0, signal);
       if (manifest.dispatchId === undefined) throw new Error('Recalculation launcher omitted dispatch id.');
       return {
@@ -2825,18 +2840,27 @@ class SimulatedConversationAdapter implements AgentSessionAdapter {
     }
     if (manifest.requestKind === 'plan_adjustment' && manifest.phase === 'initial' &&
       this.#stagedAdjustmentTimeout.has(key)) {
-      await writeFile(manifest.proposalSpoolPath, '{"staged":"must-not-be-consumed"}\n', 'utf8');
+      await driveScriptedMcp(
+        this.cwd, invocation.launcherToken, this.intelMode, true, false, null,
+        'legacy', this.#adjustmentResponseByRequest[key] ?? 'keep', signal, 0, invocation.toolSession,
+      );
       await abortableDelay(this.#inProcessDispatchDelayMs ?? 0, signal);
       return timedOutSimulated(sessionId, manifest);
     }
     if (manifest.requestKind === 'plan_adjustment' && manifest.phase === 'correction' &&
       this.#stagedAdjustmentCorrectionTimeout.has(key)) {
-      await writeFile(manifest.proposalSpoolPath, '{"staged":"must-not-be-consumed"}\n', 'utf8');
+      await driveScriptedMcp(
+        this.cwd, invocation.launcherToken, this.intelMode, true, false, null,
+        'legacy', 'change', signal, 0, invocation.toolSession,
+      );
       await abortableDelay(this.#inProcessDispatchDelayMs ?? 0, signal);
       return timedOutSimulated(sessionId, manifest);
     }
     if (manifest.phase === 'speculative' && this.#stagedSpeculationTimeout) {
-      await writeFile(manifest.proposalSpoolPath, '{"staged":"must-not-be-consumed"}\n', 'utf8');
+      await driveScriptedMcp(
+        this.cwd, invocation.launcherToken, this.intelMode, true, false, null,
+        'legacy', 'keep', signal, 0, invocation.toolSession,
+      );
       return timedOutSimulated(sessionId, manifest);
     }
     if (invocation.output.kind === 'structured_final') {
@@ -3168,6 +3192,7 @@ async function writeLauncher(input: {
   readonly blindFacts?: boolean;
   readonly blindVisuals?: readonly BlindVisualDescriptor[];
   readonly semanticBoardMaximumBytes?: number;
+  readonly dispatchPhase?: import('../src/vtt/agent-session').EngineDispatchPhase;
 }): Promise<{
   readonly manifestPath: string;
   readonly recoveryManifestPath: string;
@@ -3227,11 +3252,11 @@ async function writeLauncher(input: {
   const capsule = input.snapshot.capsule;
   const request = capsule.request;
   if (request === null) throw new Error('Conversation launcher requires a pending request.');
-  const dispatchPhase = request.phase === 'speculative'
+  const dispatchPhase = input.dispatchPhase ?? (request.phase === 'speculative'
     ? 'speculative' as const
     : request.phase === 'correction'
       ? 'correction' as const
-      : request.kind === 'plan_adjustment' ? 'adjustment' as const : 'primary' as const;
+      : request.kind === 'plan_adjustment' ? 'adjustment' as const : 'primary' as const);
   const dispatchId = engineDispatchId(`engine-dispatch:${randomUUID()}`);
   const manifest: EngineMcpLauncherManifest = {
     format: 'engine-mcp-launcher-v1', fixturePath, proposalSpoolPath: spoolPath,
@@ -3355,7 +3380,7 @@ function enforceCompletedDispatchIntegrity(input: {
   readonly scheduledCellKey: string;
 }): void {
   const catalogEvidence = input.turn.engineCatalogEvidence;
-  if (input.turn.exit !== 'completed' || catalogEvidence?.status !== 'inconclusive') return;
+  if (catalogEvidence?.status !== 'inconclusive') return;
   const correlatedContext = takeCorrelatedTurnContext(
     input.spools.context,
     input.maximumBytes,
@@ -3423,6 +3448,10 @@ function classifyFailedDispatch(input: {
 
 class CellInfrastructureAbort extends Error {
   override readonly name = 'CellInfrastructureAbort' as const;
+}
+
+class CellSpeculationDispatchAbort extends Error {
+  override readonly name = 'CellSpeculationDispatchAbort' as const;
 }
 
 function fullTurnContextBase(
@@ -4391,6 +4420,32 @@ async function runConversationWithConfiguredIntel(
       };
       const speculations: ConversationSpeculation[] = [];
       const inFlightSpeculation: { current: InFlightSpeculation | null } = { current: null };
+      const applyJoinedSpeculativeInfrastructure = (
+        completed: SpeculativeDispatchCompletion,
+        dispatchId: import('../src/vtt/agent-session').EngineDispatchId,
+      ): boolean => {
+        if (options.failSpeculationInfrastructure === true && completed.turn?.exit !== 'infrastructure_failed') {
+          outcome = 'infrastructure_failed';
+          serviceNull = true;
+          refusals.push('SIMULATED speculative engine startup failure');
+          failingDispatch = {
+            phase: 'speculative', exit: 'infrastructure_failed', dispatchId,
+            engineCatalogEvidence: {
+              status: 'absent', basis: 'required_engine_initialization_failed', dispatchId,
+              corroboration: ['SIMULATED speculative engine startup failure'],
+            },
+            turnContextDelivery: { status: 'infrastructure_absent', dispatchId, measurement: null },
+            failureReason: 'SIMULATED speculative engine startup failure',
+          };
+          return true;
+        }
+        if (completed.turn?.exit !== 'infrastructure_failed') return false;
+        outcome = 'infrastructure_failed';
+        serviceNull = true;
+        refusals.push(completed.turn.failureReason);
+        failingDispatch = completed.failingDispatch;
+        return true;
+      };
       const adjustmentTransitions: AdjustmentExhaustionTransition[] = [];
       const adjustmentPersistence = {
         transitions: (): readonly AdjustmentExhaustionTransition[] => adjustmentTransitions,
@@ -4524,7 +4579,23 @@ async function runConversationWithConfiguredIntel(
               { engineDispatchId: launcher.dispatchId, recoveryEngineDispatchId: launcher.recoveryDispatchId },
             );
             options.onAgentInvocation?.(speculativeInvocation);
-            const turn = await adapter.start(speculativeInvocation, controller.signal);
+            const observedTurn = await adapter.start(speculativeInvocation, controller.signal);
+            const turn: AgentTurnResult = options.failSpeculationInfrastructure === true ? {
+              resumeSessionId: observedTurn.resumeSessionId, sessionId: observedTurn.sessionId,
+              finalText: observedTurn.finalText, usage: observedTurn.usage,
+              exit: 'infrastructure_failed', failureReason: 'SIMULATED speculative engine startup failure',
+              component: 'engine_mcp_startup', processEvidence: observedTurn.processEvidence,
+              engineCatalogEvidence: {
+                status: 'absent', basis: 'required_engine_initialization_failed',
+                dispatchId: launcher.dispatchId,
+                corroboration: ['SIMULATED speculative engine startup failure'],
+              },
+              partialResultEvidence: {
+                status: 'partial', decodedEventCount: observedTurn.partialResultEvidence.decodedEventCount,
+                finalTextFragment: observedTurn.finalText, observedUsage: observedTurn.usage,
+                stagedInvocationIds: [],
+              },
+            } : observedTurn;
             const planningWallMs = clock() - dispatchStarted;
             const spools = dispatchSpools(launcher, turn);
             enforceCompletedDispatchIntegrity({
@@ -4564,6 +4635,7 @@ async function runConversationWithConfiguredIntel(
           }
         })();
         inFlightSpeculation.current = {
+          dispatchId: launcher.dispatchId,
           sourceSnapshot,
           sourceTurnContext: {
             revision: ordinaryContextSnapshot.capsule.revision,
@@ -5012,6 +5084,11 @@ async function runConversationWithConfiguredIntel(
                 adjustmentCorrectionContext =
                   takeTurnContext(correctionSpools.context, config.turnContextMaximumBytes) ??
                   adjustmentCorrectionContext;
+                if (turn.exit !== 'completed') {
+                  localCorrection = null;
+                  adjustmentCorrectionProposal = null;
+                  return turn;
+                }
                 if (adjustmentCorrectionDecisionCatalog !== null) {
                   const structured = queueStructuredFinalDecision({
                     finalText: turn.finalText,
@@ -5311,7 +5388,7 @@ async function runConversationWithConfiguredIntel(
                   },
                 },
               });
-              if (turn.exit === 'completed' && primaryCatalogEvidence.status === 'inconclusive' &&
+              if (primaryCatalogEvidence.status === 'inconclusive' &&
                 primaryDelivery.status === 'indeterminate') {
                 persistD569IntegrityStop({
                   artifactPath: join(artifacts, `${key}-dispatch-integrity.json`),
@@ -6063,6 +6140,7 @@ async function runConversationWithConfiguredIntel(
           const acted = new Set<CombatantId>();
           let pcTurnOrdinal = 0;
           while (true) {
+            options.onInitiativeIterationForTest?.();
             let state = engineSession.currentState();
             const activeActorId = state.activeCombatant;
             if (activeActorId === null) break;
@@ -6082,6 +6160,10 @@ async function runConversationWithConfiguredIntel(
             }
             if (active.profile.kind === 'player_character') {
               await startSpeculation(state, playerWindowBeforeNextMonster(state));
+              if (inFlightSpeculation.current !== null && options.failAfterSpeculationStartForTest === true) {
+                throw new Error('SIMULATED failure after speculation start.');
+              }
+              if (inFlightSpeculation.current !== null && options.endRoundAfterSpeculationStartForTest === true) break;
               pcTurnOrdinal += 1;
               const beforeState = state;
               const beforeOpenActorIds = [...openMonsters]
@@ -6175,11 +6257,7 @@ async function runConversationWithConfiguredIntel(
               const boundaryStarted = clock();
               const completed = await pending.completion;
               if (completed.turn !== null) captureCallUsage(completed.turn, 'speculation');
-              if (completed.turn?.exit === 'infrastructure_failed') {
-                outcome = 'infrastructure_failed';
-                serviceNull = true;
-                refusals.push(completed.turn.failureReason);
-                failingDispatch = completed.failingDispatch;
+              if (applyJoinedSpeculativeInfrastructure(completed, pending.dispatchId)) {
                 inFlightSpeculation.current = null;
                 throw new CellInfrastructureAbort('Speculative engine MCP infrastructure failed.');
               }
@@ -6252,6 +6330,7 @@ async function runConversationWithConfiguredIntel(
                       room,
                       historyKind: 'speculative_plan_recalculated',
                       turnContextDeltaBase: pending.sourceTurnContext,
+                      dispatchPhase: 'speculative',
                     });
                     let localRecalculationProposal: RoundTurnProposalEnvelope | null = null;
                     const recalculationToolSession = config.cli === 'local-openai' ||
@@ -6275,7 +6354,36 @@ async function runConversationWithConfiguredIntel(
                           },
                         })
                       : undefined;
-                    if (completed.turn.exit !== 'completed') continue;
+                    if (completed.turn.exit !== 'completed') {
+                      speculation = {
+                        status: 'discarded', proposed: true, adopted: false, discarded: true,
+                        discardReason: completed.turn.exit === 'timed_out' ? 'budget_expired' : 'dispatch_failed',
+                        targetMonsterRound: pending.targetMonsterRound,
+                        targetActorIds: pending.targetActorIds,
+                        branchCount: pending.branchCount,
+                        budgetMs: pending.budgetMs,
+                        planningWallMs: completed.planningWallMs,
+                        boundaryWaitMs: clock() - boundaryStarted,
+                        plannedBy: pending.planner,
+                        source: {
+                          revision: pending.sourceSnapshot.capsule.revision,
+                          digest: pending.sourceSnapshot.capsule.digest,
+                        },
+                        decision: {
+                          revision: decisionSnapshot.capsule.revision,
+                          digest: decisionSnapshot.capsule.digest,
+                        },
+                      };
+                      speculations.push(speculation);
+                      inFlightSpeculation.current = null;
+                      outcome = 'refused';
+                      serviceNull = true;
+                      fallbackReason = completed.turn.exit === 'cancelled' ? 'dispatch_cancelled' : 'timeout';
+                      initiativeExecutionPending = false;
+                      throw new CellSpeculationDispatchAbort(
+                        'Incomplete speculative dispatch could not be rebased; no default was executed.',
+                      );
+                    }
                     const binding: AgentSessionBinding = {
                       cli: adapter.kind,
                       sessionId: completed.turn.resumeSessionId,
@@ -6430,6 +6538,7 @@ async function runConversationWithConfiguredIntel(
             const pending = inFlightSpeculation.current;
             pending.controller.abort();
             const completed = await pending.completion;
+            const joinedInfrastructureFailure = applyJoinedSpeculativeInfrastructure(completed, pending.dispatchId);
             speculation = {
               status: 'discarded', proposed: true, adopted: false, discarded: true,
               discardReason: 'target_disappeared',
@@ -6448,6 +6557,9 @@ async function runConversationWithConfiguredIntel(
             };
             speculations.push(speculation);
             inFlightSpeculation.current = null;
+            if (joinedInfrastructureFailure) {
+              throw new CellInfrastructureAbort('End-of-round speculative engine MCP infrastructure failed.');
+            }
           }
           }
           outcome = 'authorized';
@@ -6459,6 +6571,7 @@ async function runConversationWithConfiguredIntel(
           const pending = inFlightSpeculation.current;
           pending.controller.abort();
           const completed = await pending.completion;
+          const joinedInfrastructureFailure = applyJoinedSpeculativeInfrastructure(completed, pending.dispatchId);
           speculation = {
             status: 'discarded', proposed: true, adopted: false, discarded: true,
             discardReason: 'target_disappeared',
@@ -6477,9 +6590,15 @@ async function runConversationWithConfiguredIntel(
           };
           speculations.push(speculation);
           inFlightSpeculation.current = null;
+          if (joinedInfrastructureFailure) {
+            outcome = 'infrastructure_failed';
+            initiativeExecutionPending = false;
+          }
         }
-        if (error instanceof CellInfrastructureAbort) {
+        if (outcome === 'infrastructure_failed' || error instanceof CellInfrastructureAbort) {
           outcome = 'infrastructure_failed';
+          initiativeExecutionPending = false;
+        } else if (error instanceof CellSpeculationDispatchAbort) {
           initiativeExecutionPending = false;
         } else if (initiativeExecutionPending) {
           executionError = executionErrorClass(error);

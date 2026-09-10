@@ -44,4 +44,14 @@ describe('turn-context delivery classification', () => {
   it('preserves delivered status when timeout follows retrieval', () => {
     expect(classifyTurnContextDelivery({ turn: turn('timed_out'), catalogEvidence: ready, delivered: { contextSha256: 'b'.repeat(64), measurement: { baseBytes: 8, semanticBytes: 0 } } }).status).toBe('delivered');
   });
+
+  it('preserves delivered evidence when cancellation follows retrieval', () => {
+    expect(classifyTurnContextDelivery({
+      turn: turn('cancelled'), catalogEvidence: ready,
+      delivered: { contextSha256: 'c'.repeat(64), measurement: { baseBytes: 12, semanticBytes: 3 } },
+    })).toEqual({
+      status: 'delivered', dispatchId, contextSha256: 'c'.repeat(64),
+      measurement: { baseBytes: 12, semanticBytes: 3 },
+    });
+  });
 });

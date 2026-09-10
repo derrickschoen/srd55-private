@@ -53,6 +53,7 @@ import {
   MemoryMirrorSink,
 } from '../../../src/vtt/session-persistence';
 import { codexArgv } from '../../../src/vtt/agent-adapters/codex';
+import { D569IntegrityStop } from '../../../src/vtt/d569-integrity';
 import {
   applyRevisionDelta,
   type RevisionDeltaOperation,
@@ -544,6 +545,8 @@ describe('AI-DM engine MCP conversation runner', () => {
     expect(stopped).toMatchObject({ name: 'D569IntegrityStop' });
     expect(JSON.parse(readFileSync(artifactPath, 'utf8'))).toEqual(expect.objectContaining({
       kind: 'dispatch_integrity_indeterminate', scheduledCellKey: '9:3', dispatchId,
+      processEvidence: expect.objectContaining({ stdout: 'partial evidence', exitCode: 0 }),
+      partialResultEvidence: { status: 'complete', decodedEventCount: 0 },
       proposalSpool: expect.objectContaining({ recordCount: 1, stagedUnconsumed: true }),
       contextSpool: expect.objectContaining({ recordCount: 0 }),
     }));
@@ -555,6 +558,48 @@ describe('AI-DM engine MCP conversation runner', () => {
     }));
     expect(readFileSync(proposalSpoolPath, 'utf8')).toBe('{"staged":"unconsumed"}\n');
   });
+
+  it('persists a runner forensic row before propagating conflicting startup evidence', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'd569-runner-startup-integrity-'));
+    const outPath = join(directory, 'rows.jsonl');
+    const adapter: AgentSessionAdapter = {
+      kind: 'codex',
+      probe: async () => ({ present: true, version: 'SIMULATED' }),
+      start: async (invocation) => {
+        const manifest = JSON.parse(readFileSync(invocation.launcherToken, 'utf8')) as EngineMcpLauncherManifest;
+        if (manifest.dispatchId === undefined) throw new Error('Integrity fixture launcher lacks dispatch identity.');
+        return {
+          exit: 'infrastructure_failed', resumeSessionId: null, sessionId: 'partial-session',
+          finalText: 'partial startup output', usage: null,
+          processEvidence: {
+            startedAtUnixMs: 10, endedAtUnixMs: 20, exitCode: 1, signal: null,
+            stdout: 'partial startup output', stderr: 'required engine startup failed', decodedEvents: [],
+          },
+          partialResultEvidence: {
+            status: 'partial', decodedEventCount: 0, finalTextFragment: 'partial startup output',
+            observedUsage: null, stagedInvocationIds: [],
+          },
+          engineCatalogEvidence: {
+            status: 'inconclusive', dispatchId: manifest.dispatchId,
+            reason: 'conflicting_success_and_failure',
+          },
+          component: 'engine_mcp_startup', failureReason: 'required engine startup failed',
+        };
+      },
+      resume: async () => { throw new Error('Integrity fixture unexpectedly resumed.'); },
+      classifyFailure: () => 'unknown',
+    };
+    await expect(runConversation(parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', outPath,
+      '--dm-mode', 'advice', '--board-image', 'off', '--dry-run',
+    ]), { adapter })).rejects.toBeInstanceOf(D569IntegrityStop);
+    expect(JSON.parse(readFileSync(outPath, 'utf8'))).toMatchObject({
+      rowContractVersion: 'arena-row-v3', outcome: 'integrity_indeterminate',
+      engineCatalogEvidence: { status: 'inconclusive', reason: 'conflicting_success_and_failure' },
+      turnContextDelivery: { status: 'indeterminate' },
+    });
+  });
+
   it('rejects a request after the MCP child closes stdin without an unhandled EPIPE', async () => {
     const child = spawn(process.execPath, ['-e', [
       "process.on('SIGTERM', () => {});",
@@ -2745,6 +2790,55 @@ describe('AI-DM engine MCP conversation runner', () => {
     expect(result.rows[0]?.monsterSegments).toEqual([]);
   });
 
+  it.each([
+    ['end-of-round', { endRoundAfterSpeculationStartForTest: true }],
+    ['exception-cleanup', { failAfterSpeculationStartForTest: true }],
+  ] as const)('retains diagnosed speculative infrastructure at the %s join', async (_join, seam) => {
+    const directory = mkdtempSync(join(tmpdir(), `d569-speculation-${_join}-join-`));
+    const result = await runConversation(parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      '--combat-model', 'initiative_segments_v1', '--dry-run',
+    ]), {
+      roomStates: [await alternatingInitiativeRoom()],
+      failSpeculationInfrastructure: true,
+      simulatedInProcessDispatchDelayMs: 1,
+      ...seam,
+    });
+    expect(result.rows[0]).toMatchObject({
+      outcome: 'infrastructure_failed',
+      failingDispatch: {
+        phase: 'speculative', exit: 'infrastructure_failed',
+        engineCatalogEvidence: { status: 'absent' },
+        turnContextDelivery: { status: 'infrastructure_absent' },
+      },
+    });
+  });
+
+  it('terminates incomplete speculation with a failed rebase without repeating the initiative loop', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'd569-speculation-failed-rebase-terminal-'));
+    let iterations = 0;
+    const result = await runConversation(parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      '--combat-model', 'initiative_segments_v1', '--dry-run',
+    ]), {
+      roomStates: [await alternatingInitiativeRoom()],
+      stagedSpeculationTimeout: true,
+      forceSpeculationRecalculationForTest: true,
+      simulatedInProcessDispatchDelayMs: 1,
+      onInitiativeIterationForTest: () => {
+        iterations += 1;
+        if (iterations > 20) throw new Error('Initiative loop repeated after terminal speculation transition.');
+      },
+    });
+    expect(iterations).toBeLessThanOrEqual(20);
+    expect(result.rows[0]).toMatchObject({
+      outcome: 'refused', fallbackReason: 'timeout', planner: 'model', monsterSegments: [],
+    });
+    expect(result.rows[0]?.speculations).toContainEqual(expect.objectContaining({
+      status: 'discarded', discarded: true, discardReason: 'budget_expired',
+    }));
+  });
+
   it('aborts speculative planning at the D407 pacing deadline', { timeout: 30_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-speculation-budget-'));
     const config = parseConversationArgs([
@@ -2780,6 +2874,7 @@ describe('AI-DM engine MCP conversation runner', () => {
       roomStates: [await alternatingInitiativeRoom()],
       suggestionResponseByRequest: { 'room-1-round-1': 'ignored' },
       stagedSpeculationTimeout: true,
+      simulatedInProcessDispatchDelayMs: 1,
     });
     expect(result.rows[0]?.speculations).toContainEqual(expect.objectContaining({
       status: 'discarded', adopted: false, discarded: true, discardReason: 'budget_expired',
@@ -2890,6 +2985,31 @@ describe('AI-DM engine MCP conversation runner', () => {
       });
       expect(manifest.dispatchPhase).toBe(engineDispatchPhaseForCallPhase(invocation.callPhase));
     }
+  });
+
+  it('stamps speculation recalculation launchers with the speculative dispatch phase', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'd569-speculation-recalc-phase-'));
+    const invocations: AgentInvocation[] = [];
+    let mutated = false;
+    await runConversation(parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      '--combat-model', 'initiative_segments_v1', '--dry-run',
+    ]), {
+      roomStates: [await alternatingInitiativeRoom()],
+      mutateBeforeSpeculationBoundary: (state) => {
+        if (mutated) return state;
+        mutated = true;
+        return { ...state, revision: state.revision + 1 };
+      },
+      forceSpeculationRecalculationForTest: true,
+      simulatedInProcessDispatchDelayMs: 1,
+      onAgentInvocation: (invocation) => { invocations.push(invocation); },
+    });
+    const recalculation = invocations.find((invocation) => invocation.callPhase === 'speculation_recalculation');
+    if (recalculation === undefined) throw new Error('Speculation recalculation was not dispatched.');
+    const manifest = JSON.parse(readFileSync(recalculation.launcherToken, 'utf8')) as EngineMcpLauncherManifest;
+    expect(manifest.dispatchPhase).toBe('speculative');
+    expect(manifest.dispatchPhase).toBe(engineDispatchPhaseForCallPhase(recalculation.callPhase));
   });
 
   it('keeps the baseline after three adjustment service nulls and continues the round', { timeout: 30_000 }, async () => {

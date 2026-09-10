@@ -224,7 +224,7 @@ describe('AI-DM R1-10 rerun packet', () => {
       integrityAction: 'stop_after_persist' as const,
     };
     expect(() => buildRerunPacket(withFirst(record({
-      ...valid,
+      ...valid, ...blindRowFields(),
       engineCatalogEvidence: {
         status: 'inconclusive', dispatchId: valid['dispatchId'], reason: 'invalid_catalog_response',
       },
@@ -234,7 +234,7 @@ describe('AI-DM R1-10 rerun packet', () => {
       },
     })), 771, R1_10_PROTOCOL)).toThrow('inconclusive');
     expect(() => buildRerunPacket(withFirst(record({
-      ...valid,
+      ...valid, ...blindRowFields(),
       blindIngressAudit: {
         ...record(valid['blindIngressAudit']), forbiddenContentPassed: false,
       },
@@ -242,6 +242,13 @@ describe('AI-DM R1-10 rerun packet', () => {
     expect(() => buildRerunPacket(withFirst(record({
       ...valid, outcome: 'infrastructure_failed',
     })), 771, R1_10_PROTOCOL)).toThrow('correlated failing dispatch');
+    expect(() => buildRerunPacket(withFirst(record({
+      ...valid, ...blindRowFields(),
+      blindIngressAudit: {
+        version: 'blind-model-ingress-v1', stringCount: 1, utf8Bytes: 1,
+        sha256: 'b'.repeat(64), passed: true,
+      },
+    })), 771, R1_10_PROTOCOL)).toThrow('outcome-aware v2 ingress audit');
   });
 
   it('accepts a correlated primary dispatch cancellation as unscored infrastructure', () => {
@@ -271,6 +278,39 @@ describe('AI-DM R1-10 rerun packet', () => {
     expect(packet.entries.find((entry) => entry.scheduledCellKey === '1:1')).toMatchObject({
       outcome: 'infrastructure_failed',
       rubric: { total: null },
+    });
+  });
+
+  it('preserves delivered evidence when cancellation happens after context delivery', () => {
+    const rows = registeredRows();
+    const dispatchId = 'engine-dispatch:packet-cancelled-delivered-0001';
+    const base = v3MissingDeliveryRow({ ...rows[0]!, ...blindRowFields() }, dispatchId);
+    const delivery = {
+      status: 'delivered' as const, dispatchId, contextSha256: 'a'.repeat(64),
+      measurement: { baseBytes: 100, semanticBytes: 10 },
+    };
+    rows[0] = record({
+      ...base, outcome: 'infrastructure_failed', authorizedPlan: null,
+      fallbackReason: 'dispatch_cancelled', turnContextDelivery: delivery,
+      baseContextBytes: 100, semanticBoardBytes: 10, rawTurnContext: '{}',
+      preTrimBytes: 100, postTrimBytes: 100, turnContextGranularity: 'full',
+      roundTotals: { contextBytes: 2 },
+      turnContextBudget: {
+        configuredBaseBytes: 65_536, configuredSemanticBytes: 8_192,
+        actualBaseBytes: 100, actualSemanticBytes: 10, truncatedBlocks: [],
+      },
+      blindIngressAudit: {
+        version: 2, status: 'complete', passed: true, forbiddenContentPassed: true, delivery,
+      },
+      failingDispatch: {
+        phase: 'primary', exit: 'cancelled', dispatchId,
+        engineCatalogEvidence: base['engineCatalogEvidence'], turnContextDelivery: delivery,
+        failureReason: 'operator cancelled after delivery',
+      },
+    });
+    const { packet } = buildRerunPacket(rows, 771, R1_10_PROTOCOL);
+    expect(packet.entries.find((entry) => entry.scheduledCellKey === '1:1')).toMatchObject({
+      outcome: 'infrastructure_failed', rubric: { total: null },
     });
   });
   it('carries UI feedback beside its board image into the judge packet', () => {
