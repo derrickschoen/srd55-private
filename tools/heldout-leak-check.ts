@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { posix } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { canonicalJson } from '../src/commands/canonical-json';
 import type { HeldoutSlice } from '../src/vtt/heldout-evaluation';
 import ts from 'typescript';
@@ -17,7 +18,8 @@ export interface HeldoutLeakFinding {
     | 'reserve_reference'
     | 'protocol_import'
     | 'protocol_resolution'
-    | 'unresolved_module_edge';
+    | 'unresolved_module_edge'
+    | 'loader_reference_escaped';
   readonly detail: string;
 }
 
@@ -33,6 +35,13 @@ export interface HeldoutLeakReport {
 export interface HeldoutLeakBindings {
   readonly reserveDigests: readonly string[];
   readonly resultPaths: readonly string[];
+}
+
+export interface HeldoutLeakInspectionContext {
+  /** Candidate-revision paths, used to expand Vite import.meta.glob calls. */
+  readonly candidateFiles?: readonly string[];
+  /** Candidate-revision package.json contents keyed by repository-relative path. */
+  readonly packageJsonFiles?: Readonly<Record<string, string>>;
 }
 
 const EVALUATION_FILES = new Set([
@@ -77,7 +86,13 @@ type ModuleEdgeSyntax =
   | 'dynamic_import'
   | 'require'
   | 'require_resolve'
-  | 'import_meta_resolve';
+  | 'import_meta_resolve'
+  | 'import_meta_glob'
+  | 'worker'
+  | 'shared_worker'
+  | 'import_scripts'
+  | 'jsdoc_import'
+  | 'loader_reference';
 
 interface ModuleEdge {
   readonly kind: 'import' | 'resolution' | 'unresolved';
@@ -89,6 +104,8 @@ interface ModuleEdge {
 export const HELDOUT_LEAK_AST_OUT_OF_SCOPE = [
   'eval executable strings',
   'new Function executable strings',
+  'custom loader implementations',
+  'runtime-generated code',
 ] as const;
 
 export const HELDOUT_MODULE_SPECIFIER_POLICY = {
@@ -98,6 +115,9 @@ export const HELDOUT_MODULE_SPECIFIER_POLICY = {
     'dot and parent path segments are resolved lexically',
     'a trailing index, index.js, or index.ts resolves to its containing module path',
     'a trailing .js or .ts extension resolves to the extensionless module identity',
+    'file URLs use fileURLToPath semantics, including percent-decoding, before identity comparison',
+    'package #imports use the nearest candidate package.json imports map',
+    'literal Vite globs expand against candidate-revision paths with negative patterns applied',
   ],
   meaningChangingQueries: [
     'raw', 'url', 'inline', 'worker', 'sharedworker', 'init', 'import', 'no-inline',
@@ -106,6 +126,8 @@ export const HELDOUT_MODULE_SPECIFIER_POLICY = {
     'a normalized held-out import is a protocol_import',
     'a normalized held-out resolver call is a protocol_resolution',
     'a recognized non-constant module edge is an unresolved_module_edge',
+    'an undecodable or unknown-scheme edge and an unresolved package #import fail closed',
+    'a known loader reference escaping recognized call syntax is loader_reference_escaped',
   ],
 } as const;
 
@@ -147,52 +169,143 @@ function constantString(expression: ts.Expression | undefined): string | null {
   return null;
 }
 
-function isRequireCallee(expression: ts.Expression): boolean {
-  const callee = unwrapTransparentExpression(expression);
-  return ts.isIdentifier(callee) && callee.text === 'require';
-}
-
 type ResolutionSyntax = Extract<
   ModuleEdgeSyntax,
   'require_resolve' | 'import_meta_resolve'
 >;
 
-function resolutionReceiverSyntax(expression: ts.Expression): ResolutionSyntax | null {
-  const receiver = unwrapTransparentExpression(expression);
-  if (ts.isIdentifier(receiver) && receiver.text === 'require') return 'require_resolve';
-  if (ts.isMetaProperty(receiver) &&
-    receiver.keywordToken === ts.SyntaxKind.ImportKeyword && receiver.name.text === 'meta') {
-    return 'import_meta_resolve';
+function isImportMeta(expression: ts.Expression): boolean {
+  const unwrapped = unwrapTransparentExpression(expression);
+  return ts.isMetaProperty(unwrapped) &&
+    unwrapped.keywordToken === ts.SyntaxKind.ImportKeyword && unwrapped.name.text === 'meta';
+}
+
+function propertyKey(expression: ts.Expression): string | null {
+  const unwrapped = unwrapTransparentExpression(expression);
+  if (ts.isPropertyAccessExpression(unwrapped)) return unwrapped.name.text;
+  if (ts.isElementAccessExpression(unwrapped)) return constantString(unwrapped.argumentExpression);
+  return null;
+}
+
+function propertyReceiver(expression: ts.Expression): ts.Expression | null {
+  const unwrapped = unwrapTransparentExpression(expression);
+  if (ts.isPropertyAccessExpression(unwrapped) || ts.isElementAccessExpression(unwrapped)) {
+    return unwrapped.expression;
   }
   return null;
 }
 
-function resolutionCallee(expression: ts.Expression): {
-  readonly syntax: ResolutionSyntax;
-  readonly key: 'resolve' | 'unresolved';
-} | null {
-  const callee = unwrapTransparentExpression(expression);
-  if (ts.isPropertyAccessExpression(callee)) {
-    const syntax = resolutionReceiverSyntax(callee.expression);
-    return syntax !== null && callee.name.text === 'resolve'
-      ? { syntax, key: 'resolve' }
+function importMetaProperty(expression: ts.Expression, name: string): boolean {
+  const receiver = propertyReceiver(expression);
+  return receiver !== null && isImportMeta(receiver) && propertyKey(expression) === name;
+}
+
+function globPatternExpression(expression: ts.Expression | undefined): readonly string[] | null {
+  if (expression === undefined) return null;
+  const unwrapped = unwrapTransparentExpression(expression);
+  if (ts.isArrayLiteralExpression(unwrapped)) {
+    const patterns = unwrapped.elements.map((element) =>
+      ts.isSpreadElement(element) ? null : constantString(element));
+    return patterns.some((pattern) => pattern === null)
+      ? null
+      : patterns.filter((pattern): pattern is string => pattern !== null);
+  }
+  const pattern = constantString(unwrapped);
+  return pattern === null ? null : [pattern];
+}
+
+function globRegex(pattern: string): RegExp | null {
+  if (/[{}[\]]/u.test(pattern)) return null;
+  let source = '^';
+  for (let index = 0; index < pattern.length; index += 1) {
+    const character = pattern[index];
+    if (character === '*') {
+      if (pattern[index + 1] === '*') {
+        if (pattern[index + 2] === '/') {
+          source += '(?:.*/)?';
+          index += 2;
+        } else {
+          source += '.*';
+          index += 1;
+        }
+      } else {
+        source += '[^/]*';
+      }
+    } else if (character === '?') {
+      source += '[^/]';
+    } else {
+      source += character?.replace(/[\\^$.*+?()[\]{}|]/gu, '\\$&') ?? '';
+    }
+  }
+  return new RegExp(`${source}$`, 'u');
+}
+
+function repositoryGlobPattern(importer: string, pattern: string): string {
+  const absolute = pattern.startsWith('/')
+    ? pattern.slice(1)
+    : posix.join(posix.dirname(importer), pattern);
+  return posix.normalize(absolute).replace(/^\.\//u, '');
+}
+
+function globQuery(expression: ts.Expression | undefined): string | null {
+  if (expression === undefined) return '';
+  const unwrapped = unwrapTransparentExpression(expression);
+  if (!ts.isObjectLiteralExpression(unwrapped)) return null;
+  const queryProperty = unwrapped.properties.find((property) =>
+    ts.isPropertyAssignment(property) && property.name.getText().replaceAll(/["']/gu, '') === 'query');
+  if (queryProperty === undefined) return '';
+  if (!ts.isPropertyAssignment(queryProperty)) return null;
+  const initializer = unwrapTransparentExpression(queryProperty.initializer);
+  const value = constantString(initializer);
+  if (value !== null) return value.length === 0 || value.startsWith('?') ? value : `?${value}`;
+  if (!ts.isObjectLiteralExpression(initializer)) return null;
+  const parameters: string[] = [];
+  for (const property of initializer.properties) {
+    if (!ts.isPropertyAssignment(property)) return null;
+    const key = property.name.getText().replaceAll(/["']/gu, '');
+    const queryValue = constantString(property.initializer) ??
+      (ts.isNumericLiteral(property.initializer) ? property.initializer.text : null) ??
+      (property.initializer.kind === ts.SyntaxKind.TrueKeyword ? 'true' : null) ??
+      (property.initializer.kind === ts.SyntaxKind.FalseKeyword ? 'false' : null);
+    if (queryValue === null) return null;
+    parameters.push(`${encodeURIComponent(key)}=${encodeURIComponent(queryValue)}`);
+  }
+  return parameters.length === 0 ? '' : `?${parameters.join('&')}`;
+}
+
+function expandGlobEdges(
+  importer: string,
+  patterns: readonly string[],
+  query: string,
+  candidateFiles: readonly string[] | undefined,
+): readonly string[] | null {
+  const positive = patterns.filter((pattern) => !pattern.startsWith('!'));
+  const negative = patterns.filter((pattern) => pattern.startsWith('!')).map((pattern) => pattern.slice(1));
+  if (positive.length === 0) return null;
+  const positiveRegexes = positive.map((pattern) => globRegex(repositoryGlobPattern(importer, pattern)));
+  const negativeRegexes = negative.map((pattern) => globRegex(repositoryGlobPattern(importer, pattern)));
+  if ([...positiveRegexes, ...negativeRegexes].some((regex) => regex === null)) return null;
+  if (candidateFiles === undefined) {
+    return positive.every((pattern) => !/[*?{}[\]]/u.test(pattern))
+      ? positive.map((pattern) => `${repositoryGlobPattern(importer, pattern)}${query}`)
       : null;
   }
-  if (ts.isElementAccessExpression(callee)) {
-    const syntax = resolutionReceiverSyntax(callee.expression);
-    if (syntax === null) return null;
-    const key = constantString(callee.argumentExpression);
-    if (key === null) return { syntax, key: 'unresolved' };
-    return key === 'resolve' ? { syntax, key: 'resolve' } : null;
-  }
-  return null;
+  return candidateFiles.filter((candidatePath) =>
+    positiveRegexes.some((regex) => regex?.test(candidatePath) === true) &&
+    !negativeRegexes.some((regex) => regex?.test(candidatePath) === true))
+    .map((candidatePath) => `${candidatePath}${query}`);
 }
 
 /**
  * Enumerates statically named module edges from TypeScript syntax. Comments and
  * whitespace are trivia, so they cannot split a token sequence past this wall.
  */
-function discoverModuleEdges(path: string, source: string): readonly ModuleEdge[] {
+function discoverModuleEdges(
+  path: string,
+  source: string,
+  context: HeldoutLeakInspectionContext = {},
+  dataDepth = 0,
+): readonly ModuleEdge[] {
   const transpiled = ts.transpileModule(source, {
     compilerOptions: {
       target: ts.ScriptTarget.Latest,
@@ -217,6 +330,85 @@ function discoverModuleEdges(path: string, source: string): readonly ModuleEdge[
     scriptKind(path),
   );
   const result: ModuleEdge[] = [];
+  const loaderNames = new Set(['require']);
+  const resolverNames = new Set<string>();
+  const createRequireNames = new Set<string>();
+
+  const moduleRequire = (expression: ts.Expression): boolean => {
+    const unwrapped = unwrapTransparentExpression(expression);
+    const receiver = propertyReceiver(unwrapped);
+    return receiver !== null && ts.isIdentifier(unwrapTransparentExpression(receiver)) &&
+      unwrapTransparentExpression(receiver).getText() === 'module' && propertyKey(unwrapped) === 'require';
+  };
+  const loaderReference = (expression: ts.Expression): boolean => {
+    const unwrapped = unwrapTransparentExpression(expression);
+    if (ts.isIdentifier(unwrapped)) return loaderNames.has(unwrapped.text);
+    if (ts.isBinaryExpression(unwrapped) &&
+      unwrapped.operatorToken.kind === ts.SyntaxKind.CommaToken) {
+      return loaderReference(unwrapped.right);
+    }
+    if (moduleRequire(unwrapped)) return true;
+    return ts.isCallExpression(unwrapped) &&
+      ts.isIdentifier(unwrapTransparentExpression(unwrapped.expression)) &&
+      createRequireNames.has(unwrapTransparentExpression(unwrapped.expression).getText());
+  };
+  const resolverReference = (expression: ts.Expression): ResolutionSyntax | null => {
+    const unwrapped = unwrapTransparentExpression(expression);
+    if (ts.isIdentifier(unwrapped) && resolverNames.has(unwrapped.text)) return 'require_resolve';
+    if (ts.isBinaryExpression(unwrapped) &&
+      unwrapped.operatorToken.kind === ts.SyntaxKind.CommaToken) {
+      return resolverReference(unwrapped.right);
+    }
+    const receiver = propertyReceiver(unwrapped);
+    if (receiver === null || propertyKey(unwrapped) !== 'resolve') return null;
+    if (isImportMeta(receiver)) return 'import_meta_resolve';
+    return loaderReference(receiver) ? 'require_resolve' : null;
+  };
+
+  const collectAliases = (node: ts.Node): void => {
+    if (ts.isImportDeclaration(node) && constantString(node.moduleSpecifier) === 'node:module') {
+      const named = node.importClause?.namedBindings;
+      if (named !== undefined && ts.isNamedImports(named)) {
+        for (const element of named.elements) {
+          if ((element.propertyName?.text ?? element.name.text) === 'createRequire') {
+            createRequireNames.add(element.name.text);
+          }
+        }
+      }
+    }
+    ts.forEachChild(node, collectAliases);
+  };
+  collectAliases(sourceFile);
+  for (let pass = 0; pass < 4; pass += 1) {
+    const collectVariables = (node: ts.Node): void => {
+      if (ts.isVariableDeclaration(node) && node.initializer !== undefined) {
+        const initializer = unwrapTransparentExpression(node.initializer);
+        if (ts.isIdentifier(node.name)) {
+          if (loaderReference(initializer)) loaderNames.add(node.name.text);
+          if (resolverReference(initializer) !== null) resolverNames.add(node.name.text);
+          if (ts.isIdentifier(initializer) && createRequireNames.has(initializer.text)) {
+            createRequireNames.add(node.name.text);
+          }
+        } else if (ts.isObjectBindingPattern(node.name)) {
+          for (const element of node.name.elements) {
+            if (!ts.isIdentifier(element.name)) continue;
+            const key = element.propertyName?.getText().replaceAll(/["']/gu, '') ?? element.name.text;
+            if (key === 'resolve' && loaderReference(initializer)) resolverNames.add(element.name.text);
+            if (key === 'require' && ts.isIdentifier(initializer) && initializer.text === 'module') {
+              loaderNames.add(element.name.text);
+            }
+            if (key === 'createRequire' && ts.isCallExpression(initializer) &&
+              loaderReference(initializer.expression) &&
+              constantString(initializer.arguments[0]) === 'node:module') {
+              createRequireNames.add(element.name.text);
+            }
+          }
+        }
+      }
+      ts.forEachChild(node, collectVariables);
+    };
+    collectVariables(sourceFile);
+  }
   const add = (
     syntax: ModuleEdgeSyntax,
     expression: ts.Expression | undefined,
@@ -232,7 +424,27 @@ function discoverModuleEdges(path: string, source: string): readonly ModuleEdge[
   const addUnresolved = (syntax: ModuleEdgeSyntax): void => {
     result.push({ kind: 'unresolved', syntax, specifier: null });
   };
+  const addArgumentArray = (
+    syntax: ModuleEdgeSyntax,
+    expression: ts.Expression | undefined,
+    resolvedKind: 'import' | 'resolution',
+  ): void => {
+    if (expression === undefined) {
+      addUnresolved(syntax);
+      return;
+    }
+    const unwrapped = unwrapTransparentExpression(expression);
+    const first = ts.isArrayLiteralExpression(unwrapped) ? unwrapped.elements[0] : undefined;
+    if (first === undefined || ts.isSpreadElement(first)) {
+      addUnresolved(syntax);
+      return;
+    }
+    add(syntax, first, resolvedKind);
+  };
+  const visited = new Set<ts.Node>();
   const visit = (node: ts.Node): void => {
+    if (visited.has(node)) return;
+    visited.add(node);
     if (ts.isImportDeclaration(node)) {
       add('static_import', node.moduleSpecifier);
     } else if (ts.isExportDeclaration(node) && node.moduleSpecifier !== undefined) {
@@ -244,26 +456,154 @@ function discoverModuleEdges(path: string, source: string): readonly ModuleEdge[
       add('import_equals', node.moduleReference.expression);
     } else if (ts.isImportTypeNode(node)) {
       add('import_type', ts.isLiteralTypeNode(node.argument) ? node.argument.literal : undefined);
+    } else if (ts.isJSDocImportTag(node)) {
+      add('jsdoc_import', node.moduleSpecifier);
+    } else if (ts.isNewExpression(node)) {
+      const constructor = unwrapTransparentExpression(node.expression);
+      if (ts.isIdentifier(constructor) && ['Worker', 'SharedWorker'].includes(constructor.text)) {
+        const syntax = constructor.text === 'Worker' ? 'worker' : 'shared_worker';
+        const first = node.arguments?.[0];
+        const url = first === undefined ? undefined : unwrapTransparentExpression(first);
+        if (url !== undefined && ts.isNewExpression(url) &&
+          ts.isIdentifier(unwrapTransparentExpression(url.expression)) &&
+          unwrapTransparentExpression(url.expression).getText() === 'URL' &&
+          url.arguments?.[1] !== undefined && importMetaProperty(url.arguments[1], 'url')) {
+          add(syntax, url.arguments[0]);
+        } else {
+          addUnresolved(syntax);
+        }
+      } else if (node.arguments?.some((argument) =>
+        loaderReference(argument) || resolverReference(argument) !== null) === true) {
+        addUnresolved('loader_reference');
+      }
+    } else if (ts.isReturnStatement(node) && node.expression !== undefined &&
+      (loaderReference(node.expression) || resolverReference(node.expression) !== null)) {
+      addUnresolved('loader_reference');
+    } else if (ts.isPropertyAssignment(node) &&
+      (loaderReference(node.initializer) || resolverReference(node.initializer) !== null)) {
+      addUnresolved('loader_reference');
+    } else if (ts.isShorthandPropertyAssignment(node) &&
+      (loaderReference(node.name) || resolverReference(node.name) !== null)) {
+      addUnresolved('loader_reference');
+    } else if (ts.isArrayLiteralExpression(node) && node.elements.some((element) =>
+      !ts.isSpreadElement(element) &&
+      (loaderReference(element) || resolverReference(element) !== null))) {
+      addUnresolved('loader_reference');
+    } else if (ts.isArrowFunction(node) && ts.isExpression(node.body) &&
+      (loaderReference(node.body) || resolverReference(node.body) !== null)) {
+      addUnresolved('loader_reference');
+    } else if (ts.isExportAssignment(node) &&
+      (loaderReference(node.expression) || resolverReference(node.expression) !== null)) {
+      addUnresolved('loader_reference');
+    } else if (ts.isTaggedTemplateExpression(node) &&
+      (loaderReference(node.tag) || resolverReference(node.tag) !== null)) {
+      addUnresolved('loader_reference');
+    } else if (ts.isBinaryExpression(node) &&
+      node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
+      node.operatorToken.kind <= ts.SyntaxKind.LastAssignment &&
+      (loaderReference(node.right) || resolverReference(node.right) !== null)) {
+      addUnresolved('loader_reference');
     } else if (ts.isCallExpression(node)) {
       const callee = unwrapTransparentExpression(node.expression);
       const firstArgument = node.arguments[0];
       if (callee.kind === ts.SyntaxKind.ImportKeyword) {
         add('dynamic_import', firstArgument);
-      } else if (isRequireCallee(callee)) {
+      } else if (importMetaProperty(callee, 'glob')) {
+        const patterns = globPatternExpression(firstArgument);
+        const query = globQuery(node.arguments[1]);
+        const matches = patterns === null || query === null
+          ? null
+          : expandGlobEdges(path, patterns, query, context.candidateFiles);
+        if (matches === null) addUnresolved('import_meta_glob');
+        else for (const match of matches) {
+          result.push({ kind: 'import', syntax: 'import_meta_glob', specifier: match });
+        }
+      } else if (ts.isIdentifier(callee) && callee.text === 'importScripts') {
+        if (node.arguments.length === 0) addUnresolved('import_scripts');
+        for (const argument of node.arguments) add('import_scripts', argument);
+      } else if (loaderReference(callee)) {
         add('require', firstArgument);
       } else {
-        const resolution = resolutionCallee(callee);
-        if (resolution?.key === 'resolve') {
-          add(resolution.syntax, firstArgument, 'resolution');
-        } else if (resolution?.key === 'unresolved') {
-          addUnresolved(resolution.syntax);
+        const resolution = resolverReference(callee);
+        if (resolution !== null) {
+          add(resolution, firstArgument, 'resolution');
+        } else {
+          const receiver = propertyReceiver(callee);
+          const method = propertyKey(callee);
+          const receiverResolution = receiver === null ? null : resolverReference(receiver);
+          const receiverLoader = receiver !== null && loaderReference(receiver);
+          if ((receiverResolution !== null || receiverLoader) && method === 'call') {
+            add(receiverResolution ?? 'require', node.arguments[1],
+              receiverResolution === null ? 'import' : 'resolution');
+          } else if ((receiverResolution !== null || receiverLoader) && method === 'apply') {
+            addArgumentArray(receiverResolution ?? 'require', node.arguments[1],
+              receiverResolution === null ? 'import' : 'resolution');
+          } else if ((receiverResolution !== null || receiverLoader) && method === 'bind') {
+            addUnresolved('loader_reference');
+          } else if (ts.isPropertyAccessExpression(callee) &&
+            ts.isIdentifier(callee.expression) && callee.expression.text === 'Reflect' &&
+            callee.name.text === 'apply') {
+            const target = node.arguments[0];
+            const targetResolution = target === undefined ? null : resolverReference(target);
+            const targetLoader = target !== undefined && loaderReference(target);
+            if (targetResolution !== null || targetLoader) {
+              addArgumentArray(targetResolution ?? 'require', node.arguments[2],
+                targetResolution === null ? 'import' : 'resolution');
+            }
+          } else if (ts.isElementAccessExpression(callee)) {
+            const elementReceiver = callee.expression;
+            if ((loaderReference(elementReceiver) || isImportMeta(elementReceiver)) &&
+              constantString(callee.argumentExpression) === null) {
+              addUnresolved(loaderReference(elementReceiver)
+                ? 'require_resolve'
+                : 'import_meta_resolve');
+            }
+          } else if (node.arguments.some((argument) =>
+            loaderReference(argument) || resolverReference(argument) !== null)) {
+            addUnresolved('loader_reference');
+          }
         }
       }
     }
     ts.forEachChild(node, visit);
+    for (const jsDocNode of ts.getJSDocCommentsAndTags(node)) visit(jsDocNode);
   };
   visit(sourceFile);
+
+  if (dataDepth < 4) {
+    const nested: ModuleEdge[] = [];
+    for (const edge of result) {
+      if (edge.specifier === null || !edge.specifier.startsWith('data:')) continue;
+      const decoded = decodeDataModule(edge.specifier);
+      if (decoded === null) {
+        nested.push({ kind: 'unresolved', syntax: edge.syntax, specifier: null });
+      } else {
+        nested.push(...discoverModuleEdges(`${path}.data-${String(dataDepth)}.ts`, decoded, context, dataDepth + 1));
+      }
+    }
+    result.push(...nested);
+  } else if (result.some((edge) => edge.specifier?.startsWith('data:') === true)) {
+    addUnresolved('dynamic_import');
+  }
   return result;
+}
+
+function decodeDataModule(specifier: string): string | null {
+  const match = /^data:([^,]*),(.*)$/isu.exec(specifier);
+  if (match === null) return null;
+  const metadata = match[1] ?? '';
+  const payload = match[2] ?? '';
+  const mediaType = metadata.split(';', 1)[0]?.toLowerCase() ?? '';
+  if (!['text/javascript', 'application/javascript'].includes(mediaType)) return null;
+  try {
+    if (/(?:^|;)base64(?:;|$)/iu.test(metadata)) {
+      if (!/^[a-z0-9+/]*={0,2}$/iu.test(payload) || payload.length % 4 !== 0) return null;
+      return new TextDecoder('utf-8', { fatal: true }).decode(Buffer.from(payload, 'base64'));
+    }
+    return decodeURIComponent(payload);
+  } catch {
+    return null;
+  }
 }
 
 export function moduleSpecifiers(path: string, source: string): readonly string[] {
@@ -277,6 +617,60 @@ interface NormalizedModuleSpecifier {
   readonly meaningChangingQuery: boolean;
 }
 
+function importsTarget(value: unknown): string | null {
+  if (typeof value === 'string') return value;
+  if (value === null || typeof value !== 'object') return null;
+  const candidates = (Array.isArray(value) ? value : Object.values(value))
+    .map((candidate) => importsTarget(candidate))
+    .filter((candidate): candidate is string => candidate !== null);
+  const distinct = [...new Set(candidates)];
+  return distinct.length === 1 ? distinct[0] ?? null : null;
+}
+
+function resolvePackageImport(
+  importer: string,
+  specifier: string,
+  packageJsonFiles: Readonly<Record<string, string>> | undefined,
+): string | null {
+  if (packageJsonFiles === undefined) return null;
+  let directory = posix.dirname(importer);
+  while (true) {
+    const packagePath = directory === '.' ? 'package.json' : `${directory}/package.json`;
+    const source = packageJsonFiles[packagePath];
+    if (source !== undefined) {
+      try {
+        const parsed: unknown = JSON.parse(source);
+        if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+        const imports = Reflect.get(parsed, 'imports');
+        if (imports === null || typeof imports !== 'object' || Array.isArray(imports)) return null;
+        const entries = Object.entries(imports);
+        for (const [key, value] of entries) {
+          let target = importsTarget(value);
+          if (target === null) continue;
+          if (key === specifier) {
+            return target.startsWith('./') ? posix.join(directory, target) : target;
+          }
+          const star = key.indexOf('*');
+          if (star >= 0 && specifier.startsWith(key.slice(0, star)) &&
+            specifier.endsWith(key.slice(star + 1))) {
+            const prefix = key.slice(0, star);
+            const suffix = key.slice(star + 1);
+            const substitution = specifier.slice(prefix.length, specifier.length - suffix.length);
+            target = target.replaceAll('*', substitution);
+            return target.startsWith('./') ? posix.join(directory, target) : target;
+          }
+        }
+      } catch {
+        return null;
+      }
+      return null;
+    }
+    if (directory === '.') break;
+    directory = posix.dirname(directory);
+  }
+  return null;
+}
+
 function stripKnownModuleSuffix(path: string): string {
   for (const suffix of ['/index.js', '/index.ts', '/index']) {
     if (path.endsWith(suffix)) return path.slice(0, -suffix.length);
@@ -287,9 +681,29 @@ function stripKnownModuleSuffix(path: string): string {
   return path;
 }
 
-function normalizeModuleSpecifier(specifier: string): NormalizedModuleSpecifier {
+function normalizeModuleSpecifier(
+  originalSpecifier: string,
+  importer: string,
+  context: HeldoutLeakInspectionContext,
+): NormalizedModuleSpecifier | null {
+  let specifier = originalSpecifier;
+  if (specifier.startsWith('#')) {
+    const resolved = resolvePackageImport(importer, specifier, context.packageJsonFiles);
+    if (resolved === null) return null;
+    specifier = resolved;
+  }
+  if (specifier.startsWith('file:')) {
+    try {
+      const url = new URL(specifier);
+      specifier = `${fileURLToPath(url)}${url.search}${url.hash}`;
+    } catch {
+      return null;
+    }
+  }
+  if (/^[a-z][a-z0-9+.-]*:/iu.test(specifier) &&
+    !specifier.startsWith('node:') && !specifier.startsWith('data:')) return null;
   const queryIndex = specifier.indexOf('?');
-  const fragmentIndex = specifier.indexOf('#');
+  const fragmentIndex = specifier.startsWith('#') ? -1 : specifier.indexOf('#');
   const suffixIndexes = [queryIndex, fragmentIndex].filter((index) => index >= 0);
   const suffixIndex = suffixIndexes.length === 0 ? specifier.length : Math.min(...suffixIndexes);
   const suffix = specifier.slice(suffixIndex);
@@ -309,8 +723,13 @@ function normalizeModuleSpecifier(specifier: string): NormalizedModuleSpecifier 
   return { path, suffix, meaningChangingQuery };
 }
 
-function heldoutProtocolSpecifier(specifier: string): NormalizedModuleSpecifier | null {
-  const normalized = normalizeModuleSpecifier(specifier);
+function heldoutProtocolSpecifier(
+  specifier: string,
+  importer: string,
+  context: HeldoutLeakInspectionContext,
+): NormalizedModuleSpecifier | null {
+  const normalized = normalizeModuleSpecifier(specifier, importer, context);
+  if (normalized === null) return null;
   return normalized.path === 'heldout-evaluation' ||
     normalized.path.endsWith('/heldout-evaluation')
     ? normalized
@@ -320,13 +739,24 @@ function heldoutProtocolSpecifier(specifier: string): NormalizedModuleSpecifier 
 function firstHeldoutEdge(
   edges: readonly ModuleEdge[],
   kind: Extract<ModuleEdge['kind'], 'import' | 'resolution'>,
+  importer: string,
+  context: HeldoutLeakInspectionContext,
 ): NormalizedModuleSpecifier | null {
   for (const edge of edges) {
     if (edge.kind !== kind || edge.specifier === null) continue;
-    const normalized = heldoutProtocolSpecifier(edge.specifier);
+    const normalized = heldoutProtocolSpecifier(edge.specifier, importer, context);
     if (normalized !== null) return normalized;
   }
   return null;
+}
+
+function firstInvalidSpecifier(
+  edges: readonly ModuleEdge[],
+  importer: string,
+  context: HeldoutLeakInspectionContext,
+): ModuleEdge | undefined {
+  return edges.find((edge) => edge.specifier !== null &&
+    normalizeModuleSpecifier(edge.specifier, importer, context) === null);
 }
 
 function specifierSuffixDetail(specifier: NormalizedModuleSpecifier): string {
@@ -372,6 +802,7 @@ export function inspectHeldoutLeakChanges(
   changes: readonly HeldoutChangedText[],
   slice: HeldoutSlice,
   bindings: HeldoutLeakBindings,
+  context: HeldoutLeakInspectionContext = {},
 ): HeldoutLeakReport {
   if (bindings.reserveDigests.length === 0 || bindings.resultPaths.length === 0) {
     throw new TypeError('Held-out leak inspection requires reserve digest and result path bindings.');
@@ -393,10 +824,10 @@ export function inspectHeldoutLeakChanges(
       findings.push({ path: change.path, kind: 'reserve_reference', detail: reference });
     }
     const edges = isTypeScriptOrJavaScript(change.path)
-      ? discoverModuleEdges(change.path, change.sourceText ?? change.addedText)
+      ? discoverModuleEdges(change.path, change.sourceText ?? change.addedText, context)
       : [];
     const restrictedPath = !EVALUATION_FILES.has(change.path) && !isTestOrFixture(change.path);
-    const heldoutImport = firstHeldoutEdge(edges, 'import');
+    const heldoutImport = firstHeldoutEdge(edges, 'import', change.path, context);
     if (restrictedPath && heldoutImport !== null) {
       findings.push({
         path: change.path,
@@ -404,7 +835,7 @@ export function inspectHeldoutLeakChanges(
         detail: `held-out protocol imported outside evaluation tooling${specifierSuffixDetail(heldoutImport)}`,
       });
     }
-    const heldoutResolution = firstHeldoutEdge(edges, 'resolution');
+    const heldoutResolution = firstHeldoutEdge(edges, 'resolution', change.path, context);
     if (restrictedPath && heldoutResolution !== null) {
       findings.push({
         path: change.path,
@@ -412,12 +843,17 @@ export function inspectHeldoutLeakChanges(
         detail: `held-out protocol resolved outside evaluation tooling${specifierSuffixDetail(heldoutResolution)}`,
       });
     }
-    const unresolved = edges.find((edge) => edge.kind === 'unresolved');
+    const unresolved = edges.find((edge) => edge.kind === 'unresolved') ??
+      firstInvalidSpecifier(edges, change.path, context);
     if (restrictedPath && unresolved !== undefined) {
       findings.push({
         path: change.path,
-        kind: 'unresolved_module_edge',
-        detail: `unresolved ${unresolved.syntax} edge outside evaluation tooling`,
+        kind: unresolved.syntax === 'loader_reference'
+          ? 'loader_reference_escaped'
+          : 'unresolved_module_edge',
+        detail: unresolved.syntax === 'loader_reference'
+          ? 'known loader reference escaped recognized syntax outside evaluation tooling'
+          : `unresolved ${unresolved.syntax} edge outside evaluation tooling`,
       });
     }
   }
@@ -431,34 +867,96 @@ export function inspectHeldoutLeakChanges(
   };
 }
 
-function addedChanges(base: string, candidate: string): readonly HeldoutChangedText[] {
-  const diff = execFileSync(
-    'git',
-    ['diff', '--no-ext-diff', '--unified=0', base, candidate, '--', 'src', 'tools', 'tests'],
-    { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
-  );
-  const byPath = new Map<string, string[]>();
-  let path: string | null = null;
-  for (const line of diff.split('\n')) {
-    if (line.startsWith('+++ b/')) {
-      path = line.slice('+++ b/'.length);
-      if (!byPath.has(path)) byPath.set(path, []);
-      continue;
+export interface GitCandidatePath {
+  readonly status: string;
+  readonly path: string;
+  readonly previousPath?: string;
+}
+
+/** Parses Git's stable NUL protocol; path quoting and embedded newlines are data, not syntax. */
+export function parseGitNameStatusZ(output: string): readonly GitCandidatePath[] {
+  const fields = output.split('\0');
+  if (fields.at(-1) === '') fields.pop();
+  const changes: GitCandidatePath[] = [];
+  for (let index = 0; index < fields.length;) {
+    const status = fields[index];
+    if (status === undefined || !/^[A-Z][0-9]*$/u.test(status)) {
+      throw new TypeError('Malformed NUL-delimited Git name-status output.');
     }
-    if (path !== null && line.startsWith('+') && !line.startsWith('+++')) {
-      const lines = byPath.get(path) ?? [];
-      lines.push(line.slice(1));
-      byPath.set(path, lines);
+    index += 1;
+    if (status.startsWith('R') || status.startsWith('C')) {
+      const previousPath = fields[index];
+      const path = fields[index + 1];
+      if (previousPath === undefined || path === undefined) {
+        throw new TypeError('Truncated Git rename/copy record.');
+      }
+      changes.push({ status, previousPath, path });
+      index += 2;
+    } else {
+      const path = fields[index];
+      if (path === undefined) throw new TypeError('Truncated Git name-status record.');
+      if (status !== 'D') changes.push({ status, path });
+      index += 1;
     }
   }
-  return [...byPath].map(([changedPath, lines]) => ({
-    path: changedPath,
-    addedText: lines.join('\n'),
-    sourceText: execFileSync('git', ['show', `${candidate}:${changedPath}`], {
+  return changes;
+}
+
+export function changesFromGitNameStatus(
+  output: string,
+  sourceForPath: (path: string) => string,
+  addedTextForPath: (path: string) => string,
+): readonly HeldoutChangedText[] {
+  return parseGitNameStatusZ(output).map((change) => ({
+    path: change.path,
+    addedText: addedTextForPath(change.path),
+    sourceText: sourceForPath(change.path),
+  }));
+}
+
+function addedLines(base: string, candidate: string, path: string): string {
+  const patch = execFileSync(
+    'git',
+    ['diff', '--no-ext-diff', '--unified=0', base, candidate, '--', path],
+    { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
+  );
+  return patch.split('\n')
+    .filter((line) => line.startsWith('+') && !line.startsWith('+++'))
+    .map((line) => line.slice(1))
+    .join('\n');
+}
+
+function addedChanges(base: string, candidate: string): readonly HeldoutChangedText[] {
+  const nameStatus = execFileSync(
+    'git',
+    ['diff', '--name-status', '-z', '--diff-filter=ACMRTUXB', base, candidate,
+      '--', 'src', 'tools', 'tests'],
+    { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
+  );
+  return changesFromGitNameStatus(
+    nameStatus,
+    (path) => execFileSync('git', ['show', `${candidate}:${path}`], {
       encoding: 'utf8',
       maxBuffer: 64 * 1024 * 1024,
     }),
-  }));
+    (path) => addedLines(base, candidate, path),
+  );
+}
+
+function candidateInspectionContext(candidate: string): HeldoutLeakInspectionContext {
+  const tree = execFileSync('git', ['ls-tree', '-r', '-z', '--name-only', candidate], {
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+  }).split('\0').filter((path) => path.length > 0);
+  const packageJsonFiles: Record<string, string> = {};
+  for (const path of tree.filter((candidatePath) =>
+    candidatePath === 'package.json' || candidatePath.endsWith('/package.json'))) {
+    packageJsonFiles[path] = execFileSync('git', ['show', `${candidate}:${path}`], {
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024,
+    });
+  }
+  return { candidateFiles: tree, packageJsonFiles };
 }
 
 function parseArgs(argv: readonly string[]): {
@@ -511,6 +1009,7 @@ function main(argv: readonly string[]): void {
     addedChanges(config.base, config.candidate),
     config.slice,
     config.bindings,
+    candidateInspectionContext(config.candidate),
   );
   process.stdout.write(`${canonicalJson(report)}\n`);
   if (report.findings.length > 0) process.exitCode = 1;
