@@ -5,3 +5,5 @@
 - 2026-09-10 08:20 r1 Astra REJECT: 11 significant (validator/analyzer migrations incomplete, adjustment/speculation/recalculation transitions, text-regex attribution, contract disagreement, placeholder telemetry, ingress integrity, non-Codex adapters, vacuous byte test, host_authorization_failed misattribution) + 1 trivial. All accepted; lane resumed r2.
 
 - 2026-09-10 10:40 EDT — D569 patch r2 lane DONE after ~3 h (25 files + new pre-patch byte fixture tests/fixtures/d569-prepatch-primary-bytes.json sha 000b375c…; 2116+/261−; 3 validator tests restructured into 8, 31 tests added); lane focused 7 specs 109/109, 17-spec cumulative inadmissible (EROFS, 4 MCP-spawning files). Supervisor 17-spec cumulative launched on the writable worktree.
+
+- 2026-09-10 11:01 EDT — supervisor 17-spec cumulative 386/392; serial rerun: engine-mcp-server load flake cleared, but 4 ai-dm-conversation tests fail deterministically (speculative/speculation literal mismatch + three 5 s timeouts in new adjustment/speculation tests). Fix pass dispatched (resume 01a088e3…): deterministic tests via injection seams, no timeout raises.
