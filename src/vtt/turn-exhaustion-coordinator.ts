@@ -1,5 +1,5 @@
 import type { CombatantId } from '../combat/values';
-import type { AgentInvocation } from './agent-session';
+import type { AgentInvocation, AgentTurnResult } from './agent-session';
 import type { AgentDispatchDeadline, AgentSessionLifecycle } from './agent-session-lifecycle';
 import type { RoundTurnProposalEnvelope } from './engine-envelopes';
 import type { EngineStateCapsule } from './engine-state-capsule';
@@ -92,13 +92,14 @@ export interface TurnExhaustionCorrectionRuntime {
 export type ProposalEscalationTrigger = 'refusal' | 'validation_failures';
 
 export interface TurnExhaustionEscalationRuntime {
-  readonly trigger: ProposalEscalationTrigger;
+  /** Trigger already observed before correction; correction can independently refuse. */
+  readonly trigger: ProposalEscalationTrigger | null;
   readonly capsule: EngineStateCapsule;
   readonly rules: AllowlistedRulesSource;
   readonly turnContext: unknown;
   readonly lifecycle: Pick<AgentSessionLifecycle, 'startEscalation'>;
   readonly invocation: AgentInvocation;
-  activateCapsule(): void;
+  activateCapsule(trigger: ProposalEscalationTrigger): void;
   takeProposal(): RoundTurnProposalEnvelope | null;
 }
 
@@ -115,6 +116,13 @@ export interface TurnExhaustionHost {
     readonly actorId: CombatantId;
     readonly reason: string;
   }): void;
+}
+
+function explicitlyRefusedTurn(turn: AgentTurnResult): boolean {
+  if (turn.exit !== 'completed') return false;
+  const text = turn.finalText.trim();
+  return /^(?:(?:i|we)\s+)?(?:(?:must|have to)\s+)?(?:refuse|decline)\b/iu.test(text) ||
+    /^(?:(?:i|we)\s+)?(?:cannot|can't|am unable to|are unable to)\b/iu.test(text);
 }
 
 export type InitialProposalAttempt =
@@ -296,6 +304,7 @@ export class TurnExhaustionCoordinator {
 
     let correctionResult: ProposalCorrectionResult = 'no_response';
     let correctionValidationFailed = false;
+    let correctionExplicitRefusal = false;
     let correctedProposal: RoundTurnProposalEnvelope | null = null;
     if (prior === null) {
       this.persistence.record({
@@ -312,13 +321,14 @@ export class TurnExhaustionCoordinator {
         if (directEscalation === null) {
           input.correction.activateCapsule();
           const prompt = correctionPrompt(input.correction);
-          await input.correction.lifecycle.resumeCorrection(
+          const correctionTurn = await input.correction.lifecycle.resumeCorrection(
             { ...input.correction.invocation, prompt },
             input.deadline,
           );
+          correctionExplicitRefusal = explicitlyRefusedTurn(correctionTurn);
           if (input.deadline.acceptsCompletion()) correctedProposal = input.correction.takeProposal();
         } else {
-          directEscalation.activateCapsule();
+          directEscalation.activateCapsule('refusal');
           const prompt = correctionPrompt(directEscalation);
           await directEscalation.lifecycle.startEscalation(
             { ...directEscalation.invocation, prompt },
@@ -363,9 +373,14 @@ export class TurnExhaustionCoordinator {
       }
     }
 
-    if (input.escalation?.trigger === 'validation_failures' && correctionValidationFailed &&
+    const correctionEscalationTrigger: ProposalEscalationTrigger | null = correctionExplicitRefusal
+      ? 'refusal'
+      : input.escalation?.trigger === 'validation_failures' && correctionValidationFailed
+        ? 'validation_failures'
+        : null;
+    if (input.escalation !== null && correctionEscalationTrigger !== null &&
       input.deadline.acceptsCompletion()) {
-      input.escalation.activateCapsule();
+      input.escalation.activateCapsule(correctionEscalationTrigger);
       const prompt = correctionPrompt(input.escalation);
       await input.escalation.lifecycle.startEscalation(
         { ...input.escalation.invocation, prompt },

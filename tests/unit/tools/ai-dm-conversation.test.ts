@@ -27,13 +27,12 @@ import {
   McpChildExited,
   mcpRequest,
   stopMcpClient,
-  acceptSpeculationRecalculationBeforeDeadline,
   type ConversationRunOptions,
 } from '../../../tools/ai-dm-conversation';
 import { buildRerunPacket } from '../../../tools/ai-dm-rerun-packet';
 import { mkdtempSync, readFileSync, writeFileSync } from '../../helpers/test-filesystem';
 import { createEncounter, reduceEncounter, type EncounterState } from '../../../src/combat/encounter';
-import { armorClass, encounterSessionId, feet, type CombatantId } from '../../../src/combat/values';
+import { armorClass, combatantId, encounterSessionId, feet, type CombatantId } from '../../../src/combat/values';
 import type { EncounterCommand } from '../../../src/combat/events';
 import { mulberry32 } from '../../../src/combat/random';
 import { generateRoom } from '../../../src/vtt/room-generator';
@@ -95,6 +94,20 @@ async function runConversationWithPartyPolicy(
   return runConversation(config, { ...options, partyPolicyOverride: decisionPolicy });
 }
 
+async function minimalAlternatingInitiativeRoom(): Promise<EncounterState> {
+  const state = await alternatingInitiativeRoom();
+  const actorIds = new Set<CombatantId>([
+    combatantId('combatant:fighter'),
+    combatantId('combatant:generated-3943001-monster-1'),
+    combatantId('combatant:generated-3943001-monster-2'),
+  ]);
+  return {
+    ...state,
+    combatants: state.combatants.filter((combatant) => actorIds.has(combatant.profile.id)),
+    tokens: state.tokens.filter((token) => actorIds.has(token.combatantId)),
+  };
+}
+
 class RecordingConversationAdapter implements AgentSessionAdapter {
   readonly kind = 'codex' as const;
   readonly startInvocations: AgentInvocation[] = [];
@@ -131,13 +144,19 @@ class BoilerplateThenValidStructuredFinalAdapter implements AgentSessionAdapter 
   decisionAttempts = 0;
   readonly startInvocations: AgentInvocation[] = [];
   readonly resumeInvocations: AgentInvocation[] = [];
+  #startCount = 0;
+
+  constructor(
+    private readonly correctionResponse: 'valid' | 'empty' | 'refusal' = 'valid',
+  ) {}
 
   async probe() { return { present: true, version: 'STRUCTURED-REASON-TEST' }; }
 
   async start(invocation: AgentInvocation): Promise<AgentTurnResult> {
     this.startInvocations.push(invocation);
+    this.#startCount += 1;
     return this.dispatch(
-      agentSessionIdFromCli(`codex:structured-reason:${invocation.runId}`),
+      agentSessionIdFromCli(`codex:structured-reason:${invocation.runId}:${String(this.#startCount)}`),
       invocation,
     );
   }
@@ -160,6 +179,18 @@ class BoilerplateThenValidStructuredFinalAdapter implements AgentSessionAdapter 
       throw new TypeError('Structured reason adapter received a tool-driven invocation.');
     }
     this.decisionAttempts += 1;
+    if (this.decisionAttempts > 1 && this.correctionResponse !== 'valid' &&
+      invocation.bootstrap?.kind !== 'escalation') {
+      return {
+        resumeSessionId: sessionId,
+        sessionId,
+        finalText: this.correctionResponse === 'empty'
+          ? ''
+          : 'I cannot submit this round proposal.',
+        usage: null,
+        exit: 'completed',
+      };
+    }
     const manifest = JSON.parse(readFileSync(invocation.launcherToken, 'utf8')) as EngineMcpLauncherManifest;
     const marker = '[DECISION_CATALOG]\n';
     const markerIndex = invocation.prompt.lastIndexOf(marker);
@@ -867,16 +898,17 @@ describe('AI-DM engine MCP conversation runner', () => {
     type SpeculationSelector = NonNullable<ConversationRunOptions['selectSpeculationPlanner']>;
     const armBaseSelector: SpeculationSelector = (base) => base;
     const escalationBaseSelector: SpeculationSelector = (base, escalation) => escalation ?? base;
+    const roomState = await minimalAlternatingInitiativeRoom();
     const produce = async (selectSpeculationPlanner: SpeculationSelector) => {
       const speculationDirectory = mkdtempSync(join(tmpdir(), 'dnd-conversation-speculation-base-'));
-      const speculationAdapter = new SerializedRoundTripAdapter('first_shown');
+      const speculationAdapter = new SerializedRoundTripAdapter('attack');
       const speculative = await runConversation(parseConversationArgs([
         '--rooms', '1', '--rounds', '1', '--out', join(speculationDirectory, 'rows.jsonl'),
         '--combat-model', 'initiative_segments_v1', '--model', 'gpt-5.6-luna', '--effort', 'low',
         '--escalation-model', 'gpt-5.6-luna', '--escalation-effort', 'high', '--dry-run',
       ]), {
         adapter: speculationAdapter,
-        roomStates: [await alternatingInitiativeRoom()],
+        roomStates: [roomState],
         selectSpeculationPlanner,
       });
       const speculativeRow = speculative.rows[0];
@@ -996,11 +1028,12 @@ describe('AI-DM engine MCP conversation runner', () => {
 
   it('expired speculative adoption validation cannot adopt or execute that branch', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-adoption-deadline-'));
+    const outPath = join(directory, 'rows.jsonl');
     const adapter = new SerializedRoundTripAdapter('first_shown');
     let policyMs = 0;
     let validated = false;
     const result = await runConversation(parseConversationArgs([
-      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      '--rooms', '1', '--rounds', '1', '--out', outPath,
       '--combat-model', 'initiative_segments_v1', '--dry-run',
     ]), {
       adapter,
@@ -1018,26 +1051,51 @@ describe('AI-DM engine MCP conversation runner', () => {
       adopted: false,
       discardReason: 'budget_expired',
     }));
-    expect(result.rows[0]).toEqual(expect.objectContaining({
+    const persisted = objectValue(
+      JSON.parse(readFileSync(outPath, 'utf8').trim()) as unknown,
+      'persisted adoption-expiry row',
+    );
+    const expiryEvidence = expect.objectContaining({
+      outcome: 'refused',
       roundWallTimedOut: true,
       policyElapsedMs: 180_000,
-    }));
+      refusals: ['The conversation round dispatch deadline is exhausted.'],
+      monsterSegments: [],
+    });
+    expect(result.rows[0]).toEqual(expiryEvidence);
+    expect(persisted).toEqual(expiryEvidence);
   });
 
-  it('expired recalculation authorization cannot retain recalculated entries', () => {
+  it('expired recalculation authorization cannot retain or execute recalculated entries on the real path', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-recalculation-deadline-'));
+    const adapter = new SerializedRoundTripAdapter('first_shown');
     let policyMs = 0;
-    const deadline = createConversationRoundDeadline(180_000, 0, () => policyMs);
-    let authorizations = 0;
-
-    const accepted = acceptSpeculationRecalculationBeforeDeadline(deadline, () => {
-      authorizations += 1;
-      policyMs = 180_000;
-      return [{ actorId: 'combatant:SIMULATED-recalculation' }] as const;
+    let recalculationValidated = false;
+    const result = await runConversation(parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      '--combat-model', 'initiative_segments_v1', '--dry-run',
+    ]), {
+      adapter,
+      roomStates: [await alternatingInitiativeRoom()],
+      policyNow: () => policyMs,
+      forceSpeculationRecalculation: true,
+      onSpeculationRecalculationValidated: () => {
+        recalculationValidated = true;
+        policyMs = 180_000;
+      },
     });
 
-    expect(authorizations).toBe(1);
-    expect(accepted).toBeNull();
-    expect(deadline.acceptsCompletion()).toBe(false);
+    expect(adapter.resumeInvocations).toContainEqual(expect.objectContaining({
+      callPhase: 'speculation_recalculation',
+    }));
+    expect(recalculationValidated).toBe(true);
+    expect(result.rows[0]).toEqual(expect.objectContaining({
+      outcome: 'refused',
+      roundWallTimedOut: true,
+      policyElapsedMs: 180_000,
+      refusals: ['The conversation round dispatch deadline is exhausted.'],
+      monsterSegments: [],
+    }));
   });
 
   it('one rejected submission uses arm-base correction before D474 escalation', async () => {
@@ -1064,6 +1122,59 @@ describe('AI-DM engine MCP conversation runner', () => {
       escalated: false,
       escalationTrigger: null,
       plannedBy: { model: 'gpt-5.6-luna', effort: 'low' },
+    }));
+  });
+
+  it('empty structured correction is not D474 validation evidence on the real path', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-empty-structured-correction-'));
+    const adapter = new BoilerplateThenValidStructuredFinalAdapter('empty');
+    const result = await runConversation(parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      '--model', 'gpt-5.6-luna', '--effort', 'low',
+      '--escalation-model', 'gpt-5.6-luna', '--escalation-effort', 'high',
+      '--transport', 'final_indices',
+      ...LEGACY_BLOCK_ARGS,
+    ]), {
+      adapter,
+      roomStates: [generateRoom(3_943_006).encounter.state],
+    });
+
+    expect(adapter.startInvocations).toHaveLength(1);
+    expect(adapter.resumeInvocations).toHaveLength(1);
+    expect(result.rows[0]).toEqual(expect.objectContaining({
+      outcome: 'authorized',
+      escalated: false,
+      escalationTrigger: null,
+      planner: expect.stringMatching(/^(?:engine_default|sim_controller)$/u),
+      decisionRejectionCodes: ['REASON_REQUIRED', 'decision_missing'],
+    }));
+  });
+
+  it('correction refusal triggers a fresh D474 escalation on the real path', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-correction-refusal-'));
+    const adapter = new BoilerplateThenValidStructuredFinalAdapter('refusal');
+    const result = await runConversation(parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      '--model', 'gpt-5.6-luna', '--effort', 'low',
+      '--escalation-model', 'gpt-5.6-luna', '--escalation-effort', 'high',
+      '--transport', 'final_indices',
+      ...LEGACY_BLOCK_ARGS,
+    ]), {
+      adapter,
+      roomStates: [generateRoom(3_943_006).encounter.state],
+    });
+
+    expect(adapter.resumeInvocations).toHaveLength(1);
+    expect(adapter.startInvocations).toHaveLength(2);
+    expect(adapter.startInvocations[1]).toEqual(expect.objectContaining({
+      model: 'gpt-5.6-luna', reasoningEffort: 'high', callPhase: 'correction',
+      bootstrap: expect.objectContaining({ kind: 'escalation' }),
+    }));
+    expect(result.rows[0]).toEqual(expect.objectContaining({
+      outcome: 'authorized',
+      escalated: true,
+      escalationTrigger: 'refusal',
+      plannedBy: { model: 'gpt-5.6-luna', effort: 'high' },
     }));
   });
 

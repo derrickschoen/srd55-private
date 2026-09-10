@@ -115,7 +115,7 @@ import {
 } from '../src/vtt/session-persistence';
 import {
   TurnExhaustionCoordinator, type DeterministicProposalResolution,
-  type InitialProposalAttempt, type TurnExhaustionHost,
+  type InitialProposalAttempt, type ProposalEscalationTrigger, type TurnExhaustionHost,
 } from '../src/vtt/turn-exhaustion-coordinator';
 import type { UnattendedReactionAskDefault } from '../src/vtt/reaction-offer-host-policy';
 import { captureDmIntel, type DmIntelCapture } from '../src/vtt/dm-tactical-intel';
@@ -720,6 +720,8 @@ export interface ConversationRunOptions {
   readonly speculationDispatchDelayMs?: number;
   /** SIMULATED-only immutable state replacement immediately before speculative boundary validation. */
   readonly mutateBeforeSpeculationBoundary?: (state: EncounterState) => EncounterState;
+  /** Test-only branch control that exercises the full speculative recalculation dispatch. */
+  readonly forceSpeculationRecalculation?: boolean;
   /** Test-only immutable state replacement immediately before adjustment legality preflight. */
   readonly mutateBeforeAdjustmentPreflight?: (state: EncounterState) => EncounterState;
   /** Test-only context mutation proving speculative actor binding is checked before dispatch. */
@@ -768,6 +770,8 @@ export interface ConversationRunOptions {
   ) => ConversationPlannerAttribution;
   /** Test-only boundary immediately after speculative branch validation. */
   readonly onSpeculationAdoptionValidated?: () => void;
+  /** Test-only boundary inside speculative recalculation validation. */
+  readonly onSpeculationRecalculationValidated?: () => void;
   /** Test-only work injected inside deterministic fallback computation. */
   readonly onDeterministicFallback?: () => void;
 }
@@ -2491,6 +2495,10 @@ function explicitlyRefusedTurn(turn: AgentTurnResult): boolean {
   const text = turn.finalText.trim();
   return /^(?:(?:i|we)\s+)?(?:(?:must|have to)\s+)?(?:refuse|decline)\b/iu.test(text) ||
     /^(?:(?:i|we)\s+)?(?:cannot|can't|am unable to|are unable to)\b/iu.test(text);
+}
+
+function structuredRejectionIsValidationEvidence(code: StructuredFinalRejectionCode): boolean {
+  return code !== 'decision_missing' && code !== 'decision_timeout';
 }
 
 export function acceptSpeculationRecalculationBeforeDeadline<Value>(
@@ -4788,7 +4796,7 @@ async function runConversationWithConfiguredIntel(
           pauseForDmAdjudication: ({ actorId, reason }) => { refusals.push(`${actorId}: ${reason}`); },
         };
         const initialValidationEvidence = proposed !== null || engineRejections.length > 0 ||
-          decisionRejectionCodes.some((code) => code !== 'decision_timeout');
+          decisionRejectionCodes.some(structuredRejectionIsValidationEvidence);
         const plannedEscalationTrigger = escalationPlanner === null ||
           primaryDispatchTimedOut || serviceNull
           ? null
@@ -4797,8 +4805,9 @@ async function runConversationWithConfiguredIntel(
             : initialValidationEvidence
               ? 'validation_failures' as const
               : null;
+        let requestedEscalationTrigger: ProposalEscalationTrigger | null = null;
         const escalationRuntime = escalationPlanner === null || escalationLauncher === null ||
-          plannedEscalationTrigger === null
+          primaryDispatchTimedOut || serviceNull
           ? null
           : {
               trigger: plannedEscalationTrigger,
@@ -4813,7 +4822,10 @@ async function runConversationWithConfiguredIntel(
               lifecycle: {
                 startEscalation: async (escalationInvocation: AgentInvocation, deadline: AgentDispatchDeadline) => {
                   correctionDispatchPlanner = plannerAttribution(escalationInvocation);
-                  escalationTrigger = plannedEscalationTrigger;
+                  escalationTrigger = requestedEscalationTrigger;
+                  if (escalationTrigger === null) {
+                    throw new Error('Escalation dispatch has no D474 trigger.');
+                  }
                   escalated = true;
                   firedEscalationModel = correctionDispatchPlanner.model;
                   correctionCalls += 1;
@@ -4893,7 +4905,7 @@ async function runConversationWithConfiguredIntel(
                 freshSessionContext,
                 correctionInvocationOutput,
               ),
-              activateCapsule: () => undefined,
+              activateCapsule: (trigger: ProposalEscalationTrigger) => { requestedEscalationTrigger = trigger; },
               takeProposal: () => localEscalationProposal ?? takeRoundProposal(escalationLauncher.spoolPath),
             };
         const coordinated = await new TurnExhaustionCoordinator(journal.turnExhaustionPersistence()).coordinate({
@@ -4940,6 +4952,11 @@ async function runConversationWithConfiguredIntel(
                 }
                 rolloutSessionId = correctionTurn.sessionId;
                 captureCallUsage(correctionTurn, 'correction');
+                const correctionExplicitRefusal = explicitlyRefusedTurn(correctionTurn);
+                if (correctionDecisionCatalog === null && !correctionExplicitRefusal &&
+                  correctionTurn.finalText.trim().length > 0) {
+                  correctionValidationFailureObserved = true;
+                }
                 decisionAttempts += 1;
                 recordedCorrectionTurnContext =
                   takeTurnContext(correctionLauncher.turnContextSpoolPath, config.turnContextMaximumBytes) ??
@@ -4968,7 +4985,7 @@ async function runConversationWithConfiguredIntel(
                     localCorrectionProposal = structured.proposal;
                     pendingStructuredDecision = structured.decision;
                   } else {
-                    correctionValidationFailureObserved = true;
+                    correctionValidationFailureObserved ||= structuredRejectionIsValidationEvidence(structured.code);
                     decisionRejectionCodes.push(structured.code);
                     if (structured.normalizationCode !== null) normalizationCodes.push(structured.normalizationCode);
                     if (structured.engineResult !== null) {
@@ -5301,6 +5318,9 @@ async function runConversationWithConfiguredIntel(
               if (!roundDeadline.acceptsCompletion()) discardReason = 'budget_expired';
               else if (completed.timedOut) discardReason = 'budget_expired';
               else if (completed.error !== null || completed.plan === null) discardReason = 'dispatch_failed';
+              else if (options.forceSpeculationRecalculation === true) {
+                discardReason = 'proposal_validation_failed';
+              }
               else if (!sameCombatantSet(segmentActors, pending.targetActorIds)) {
                 discardReason = 'target_disappeared';
               } else if (monsterPlanHash(segmentMonsterPlan) !== pending.baselinePlanHash) {
@@ -5330,7 +5350,8 @@ async function runConversationWithConfiguredIntel(
               } else {
                 const currentEntries = segmentActors.map((actorId) => segmentMonsterPlan.get(actorId))
                   .filter((entry): entry is SegmentMonsterPlanEntry => entry !== undefined);
-                const rebound = currentEntries.length === segmentActors.length
+                const rebound = options.forceSpeculationRecalculation !== true &&
+                  currentEntries.length === segmentActors.length
                   ? rebaseStoredPlanEntries({ state, actualRevision: capsuleRevision, entries: currentEntries })
                   : null;
                 if (rebound === null) {
@@ -5426,6 +5447,7 @@ async function runConversationWithConfiguredIntel(
                         recalculated = acceptSpeculationRecalculationBeforeDeadline(
                           roundDeadline,
                           () => {
+                            options.onSpeculationRecalculationValidated?.();
                             const checked = authorizedMechanics(state, proposal);
                             if (checked.entries === null || !sameCombatantSet(
                               checked.entries.map((entry) => entry.proposal.actorId),
@@ -5482,6 +5504,13 @@ async function runConversationWithConfiguredIntel(
               speculations.push(speculation);
               inFlightSpeculation.current = null;
             }
+            if (!roundDeadline.acceptsCompletion()) {
+              classifyPolicy();
+              outcome = 'refused';
+              refusals.push(new AgentDispatchDeadlineExceededError().message);
+              initiativeExecutionPending = false;
+              break;
+            }
             const applications = segmentActors.map((actorId) => {
               if (!openMonsters.has(actorId)) {
                 throw new Error(`Monster ${actorId} began a second turn in one initiative-segment round.`);
@@ -5537,7 +5566,7 @@ async function runConversationWithConfiguredIntel(
             inFlightSpeculation.current = null;
           }
           }
-          outcome = 'authorized';
+          outcome = roundWallTimedOut ? 'refused' : 'authorized';
           initiativeExecutionPending = false;
         }
       } catch (error) {
