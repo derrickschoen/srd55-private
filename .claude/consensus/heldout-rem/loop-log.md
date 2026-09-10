@@ -50,3 +50,5 @@
 - 2026-09-10 13:12 EDT — r13 Astra REJECT: rules C/N1/N2 accepted as design, F43–F46 caught, machinery gone; seven implementation holes F47–F53 (ancestor-based reachability + accessors, export specifiers, namespace re-exports, non-constant keys, quoted destructuring, await, vitest config entry point). r14 dispatched (resume 01a088b4…).
 
 - 2026-09-10 13:14 EDT — r14 BLOCKED correctly on the real vitest.config.ts (non-literal cacheDir/include/setupFiles). F47 refined: literal-only applies to resolve/alias positions, object spreads, computed keys, accessors; other non-literal values are opaque-harmless. Lane resumed (r14b).
+
+- 2026-09-10 13:55 EDT — r14 lane DONE; supervisor verification tsc/sg/diffcheck 0, 9 specs 530/530; committed 1cecccc3; Astra r14 dispatched (resume 01a088d6…).
