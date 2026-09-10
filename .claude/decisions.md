@@ -22222,3 +22222,21 @@ fully green; fresh gate on r2 running; then merge to main. HELDOUT-S1-REM-01: r3
 calls recognised, 85/85 wall tests, 321/321 cumulative lane-claimed; supervisor serial verification running; then Astra final.
 OFFERS-PLAN-02: r3 (final) lane running on the replay/recovery contract. VTT-HANDOFF: plan remediation lane and S0–S2
 implementation lane running in parallel (D603). D569-PATCH-01: implementation lane running.
+
+## D604 — OWNER: "Do as many intermediate rounds as you need to fix non-trivial problems" (recorded 2026-09-10 07:36 EDT)
+
+Answering the held-out leak-wall question (a fresh in-scope bypass found at every round), the owner ruled: run as many
+intermediate rounds as needed to fix non-trivial problems. Binding reading: the three-round cap no longer shelves an artifact
+whose residuals are real, bounded defects; the supervisor continues rounds until the reviewer finds no significant residual and
+records each round; the cap still applies to disagreements of design (a REJECT that reopens scope goes to the owner). Applies to
+HELDOUT-S1-REM-01 (resumed r4 for query/fragment-suffixed specifiers), OFFERS-PLAN-02, VTT-HANDOFF-01 and future units.
+
+### D586.176 — Room D slices 0+1 LANDED on main (2026-09-10 07:36 EDT)
+
+Merge 939a6d05: claude/room-d-s01 (6ec0911e = 9781b93f + main reconciliation + hook scoping) into main. ROOM-D-LAND-01: Astra r1
+REJECT (hook scope) → r2 ACCEPT; supervisor verification tsc 0 / sg 0 / 86/86 on both rounds; full gates green on the r1 state
+(0e9f3a98) and on r2 (6ec0911e: tsc 0, sg 0, vitest-gate 0, playwright-gate 0 on port 4690). Main-shaped landing rule (D586.131):
+the landing worktree was main + slice; between the merge-base and main only `.claude/**` changed, and the merged tree's code is
+byte-identical to the gated 6ec0911e (`git diff 6ec0911e HEAD -- . ':!.claude'` empty), so the r2 gate is the gate on the
+integrated revision. Slice 2 (212f1acb) stays shelved (D598). Next for Room D: slice 3 (fresh-process CLI run of the bounded
+enumeration) to obtain the Spear-vs-Dodge answer, then the sol→luna loop (D597).
