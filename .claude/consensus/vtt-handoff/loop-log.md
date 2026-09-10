@@ -38,3 +38,5 @@ Machine constraint: the D569 v5 first arm (pid 1201481, port 4530) runs until ~1
 - 2026-09-10 09:18 EDT — S0–S2 r4 lane DONE (test-only); supervisor verification tsc/sg/diffcheck 0, 8 files 46/46; committed a791d5da; Astra r4 review dispatched (resume 01a087f9…).
 
 - 2026-09-10 09:23 EDT — S0–S2 r4 Astra ACCEPT (a791d5da). S2c supervisor verification in temp root (publish/check/unchanged/conflict) then owner-root publication: 8 files, verified. S3a–S3e lane + 0f84e09f baseline capture lane dispatched.
+
+- 2026-09-10 09:35 EDT — baseline capture lane DONE (session 01a08b7b-e64b…): fixture 8e2e2f0e… from 0f84e09f, store revision 3, checksum 56c3c2b1…; lane ran twice, supervisor reran once, all identical; structure hand-checked (coordinatorState: continuation/pause=null/pendingCommand=null/pendingRequest kind=turn with visibleState + legalActions/requestSequence=2). Placed + committed in the handoff worktree as tests/fixtures/vtt/pending-request-baseline.v1.{json,sha256}; capture script/log/VERIFICATION archived under .claude/consensus/vtt-handoff/baseline-capture/.
