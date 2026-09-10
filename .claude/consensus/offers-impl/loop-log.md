@@ -13,3 +13,5 @@
 - 2026-09-10 10:38 EDT — Slice 2 lane dispatched (fresh session; worktree at main d2350c57).
 
 - 2026-09-10 11:28 EDT — Slice 2 lane DONE (10 files; 2 schema-3 tests removed per plan "no compatibility arm", 3 added; lane focused 17/17, three mutants red→green, six digests independently reproduced; lane cumulative inadmissible EROFS + surfaced the D583 inventory break from the archived capture.ts on main). Committed 7403f498; merged main fix a18bb30e → 528d1146; supervisor 172-spec cumulative launched.
+
+- 2026-09-10 11:42 EDT — Slice 2 supervisor 172-spec cumulative on writable checkout: tsc/sg/diffcheck 0, vitest 3183/3213, 30 reds in 8 files, mostly genuine assertion failures in the MCP-driven conversation/arena/board-delivery specs (lane had written them off as EROFS). Supervisor materialising a real node_modules in the offers worktree (npm ci) so the lane can run MCP specs; fix-pass brief prepared, dispatch after install.
