@@ -22,3 +22,5 @@
 - 2026-09-10 09:55 EDT — r7 Astra REJECT (F23 binding-pattern aliases, F24 factory results escape, F25 import-equals seeding, F26 scope-unaware config locals/spread overrides, F27 default-deny flags ordinary window/import.meta.env uses + regex alias → reject-all). Rule refined: track loader-VALUED expressions, not namespace roots; real-repository zero-findings regression required. r8 dispatched (resume 01a088b4…).
 
 - 2026-09-10 10:23 EDT — r8 lane DONE; supervisor verification tsc/sg/diffcheck 0, 9 specs 440/440; committed 74839d5c; Astra r8 review dispatched (resume 01a088d6…).
+
+- 2026-09-10 10:29 EDT — r8 Astra REJECT (F28 regex pre-gate disables tracking, F29 class-heritage exempted as type node, F30 computed destructuring from inert namespace, F31 alias reassignment stale initializer, F32 builtinModules false positive, F33 injected control not in real sweep). r9 dispatched (resume 01a088b4…) with a binding no-pre-gate rule; owner asked (non-blocking) whether to cap the unit.
