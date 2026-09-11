@@ -57,7 +57,7 @@ import type {
   TopDownPendingPlacementRecovery,
 } from './encounter-projections';
 import {
-  decodePlayerDecision,
+  handleTopDownPlayerDecision,
   handleTopDownSubmission,
   isHostWindowMessage,
   isPlayerSubmissionFeedbackMessage,
@@ -1633,27 +1633,22 @@ class DmEncounterView {
   };
 
   #acceptDecision(value: unknown): void {
-    const pending = this.#projection?.pendingRequest;
-    if (pending === null || pending === undefined) return;
-    try {
-      const decision = decodePlayerDecision(value, this.sessionId, pending);
-      this.#submitTopDown(
-        () => this.#session.submitTopDownOfferedAction(
-          pending.actorId,
-          decision.requestId,
-          decision.encounterRevision,
-          decision.offeredActionId,
-        ),
+    void handleTopDownPlayerDecision(
+      value,
+      this.sessionId,
+      this.#projection?.pendingRequest ?? null,
+      (pending, decision) => this.#session.submitTopDownOfferedAction(
+        pending.actorId,
         decision.requestId,
-      );
-    } catch (error: unknown) {
-      if (error instanceof TypeError) {
-        this.#channelError = error.message;
+        decision.encounterRevision,
+        decision.offeredActionId,
+      ),
+      (message) => {
+        this.#channelError = message.feedback.kind === 'error' ? message.feedback.message : null;
+        this.#channel.postMessage(message);
         this.#render();
-        return;
-      }
-      throw error;
-    }
+      },
+    );
   }
 
   mount(): void {

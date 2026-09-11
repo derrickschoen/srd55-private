@@ -1,10 +1,23 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { EncounterCommand } from '../../../src/combat/events';
-import { createEncounter, reduceEncounter, REACTION_KINDS, type EncounterState } from '../../../src/combat/encounter';
+import {
+  createEncounter,
+  reduceEncounter,
+  REACTION_KINDS,
+  type EncounterState,
+  type MigrationAdjudicationPending,
+} from '../../../src/combat/encounter';
 import { mulberry32 } from '../../../src/combat/random';
-import { damageType, dieSides, type CombatantId } from '../../../src/combat/values';
+import {
+  armorClass,
+  damageType,
+  dieSides,
+  worldObjectId,
+  type CombatantId,
+} from '../../../src/combat/values';
 import {
   EncounterSessionService,
+  RichEncounterSessionService,
   type EncounterSessionHostPort,
   type PlayerSeatRegistration,
   type SessionMutationOutcome,
@@ -216,6 +229,116 @@ function registrations(host: DmEncounterHost): readonly PlayerSeatRegistration[]
   });
 }
 
+type RichTopDownOperation = 'placement' | 'world_object' | 'adjudication';
+let richOperationSequence = 0;
+
+function richTopDownOperation(
+  operation: RichTopDownOperation,
+  store: ControlledFlushStore,
+  onReducerInvocation: (command: EncounterCommand) => void,
+): {
+  readonly service: RichEncounterSessionService;
+  readonly initialRevision: number;
+  readonly submit: () => Promise<HostCoordinatorTransactionOutcome>;
+} {
+  const base = createEncounter(referenceEncounterSetup());
+  let initialState: EncounterState = base;
+  if (operation === 'placement') {
+    const original = base.tokens.find((token) => token.combatantId === REFERENCE_FIGHTER_ID);
+    if (original === undefined) throw new Error('Placement fixture is missing the fighter token.');
+    const record: MigrationAdjudicationPending = {
+      kind: 'legacy_size_required',
+      combatant: REFERENCE_FIGHTER_ID,
+      sourceSizeText: null,
+      suggestedAnchor: { ...original.position },
+      originatingToken: {
+        id: original.id,
+        combatantId: original.combatantId,
+        position: { ...original.position },
+      },
+    };
+    initialState = {
+      ...base,
+      tokens: base.tokens.filter((token) => token.combatantId !== REFERENCE_FIGHTER_ID),
+      adjudicationPending: [record],
+      phase: {
+        kind: 'awaiting_placement',
+        combatantId: REFERENCE_FIGHTER_ID,
+        reason: 'legacy_size_required',
+        originatingRecord: record,
+        resumePhase: { kind: 'active' },
+      },
+    };
+  } else if (operation === 'world_object') {
+    initialState = {
+      ...base,
+      worldObjects: [...base.worldObjects, {
+        id: worldObjectId('world-object:rich-service-control'),
+        name: 'Rich service control',
+        kind: 'generic',
+        position: { column: 4, row: 4 },
+        footprint: [{ column: 4, row: 4 }],
+        durability: { kind: 'indestructible' },
+        armorClass: armorClass(12),
+        damageResponses: [],
+        blocking: { movement: false, lineOfSight: false, cover: 'none' },
+        classActions: [{
+          id: 'exercise-rich-control',
+          label: 'Exercise rich control',
+          cost: 'action',
+          reach: 'adjacent',
+          uses: 'once',
+          eligibleActor: 'monster',
+          dmOverride: {
+            actor: REFERENCE_MONSTER_ID,
+            reasoning: 'Exercise the durability-backed rich-service control.',
+          },
+        }],
+        createdRevision: base.revision,
+      }],
+    };
+  }
+  richOperationSequence += 1;
+  const host = new DmEncounterHost(`session:rich-${operation}-${String(richOperationSequence)}`, store, {
+    initialState,
+    onReducerInvocation,
+  });
+  if (operation === 'placement') host.interrupt();
+  const binding = host.rendererTokenBindings()[0];
+  if (binding === undefined) throw new Error('Rich service fixture has no renderer binding.');
+  const seat: PlayerSeatRegistration = {
+    playerId: `player:${binding.combatantId}`,
+    seatId: `seat:${binding.combatantId}`,
+    observerCombatantId: binding.combatantId,
+    ownedCombatantIds: [binding.combatantId],
+    controlledTokenIds: [binding.tokenId],
+  };
+  const service = new RichEncounterSessionService(host, [seat]);
+  const projection = service.topDownSnapshot(seat.playerId);
+  if (projection === null) throw new Error('Rich service fixture has no top-down projection.');
+  const submit = (): Promise<HostCoordinatorTransactionOutcome> => {
+    switch (operation) {
+      case 'placement': {
+        const offered = projection.dm.pendingPlacementRecovery?.sizeOptions[0]?.legalAnchors[0];
+        if (offered === undefined) throw new Error('Placement fixture has no offered recovery anchor.');
+        return service.submitTopDownPlacement(offered.offeredActionId);
+      }
+      case 'world_object': {
+        const offered = projection.dm.worldObjectControls[0];
+        if (offered === undefined) throw new Error('World-object fixture has no offered control.');
+        return service.submitTopDownWorldObject(offered.offeredActionId);
+      }
+      case 'adjudication':
+        return service.applyTopDownAdjudication({
+          target: REFERENCE_MONSTER_ID,
+          hitPointDelta: -1,
+          reasoning: 'Exercise durability-backed manual adjudication.',
+        });
+    }
+  };
+  return { service, initialRevision: initialState.revision, submit };
+}
+
 function waitForOffer(
   service: EncounterSessionService,
   playerIds: readonly string[],
@@ -239,6 +362,109 @@ function waitForOffer(
 }
 
 describe('encounter session service', () => {
+  it.each(['placement', 'world_object', 'adjudication'] as const)(
+    'does not commit the rich %s operation before its durability barrier',
+    async (operation) => {
+      const store = new ControlledFlushStore();
+      const commandType = operation === 'placement'
+        ? 'resolve_pending_placement'
+        : operation === 'world_object'
+          ? 'dm_use_world_object'
+          : 'adjudicate';
+      let operationReducerCalls = 0;
+      const fixture = richTopDownOperation(operation, store, (command) => {
+        if (command.type === commandType) operationReducerCalls += 1;
+      });
+      const mutationRevisions: number[] = [];
+      fixture.service.subscribeDm((event) => {
+        if (event.kind === 'mutation') mutationRevisions.push(event.projection.encounter.revision);
+      });
+      const barrier = store.blockFlushIn(1);
+      let settled = false;
+      const outcome = fixture.submit();
+      void outcome.then(() => { settled = true; });
+      await barrier.reached;
+      await Promise.resolve();
+
+      expect({ settled, operationReducerCalls, mutationRevisions }).toEqual({
+        settled: false,
+        operationReducerCalls: 1,
+        mutationRevisions: [],
+      });
+      barrier.release();
+      const committed = await outcome;
+      expect(committed).toEqual({ kind: 'committed', revision: fixture.initialRevision + 1 });
+      expect(mutationRevisions).toEqual([fixture.initialRevision + 1]);
+      expect(operationReducerCalls).toBe(1);
+      fixture.service.close();
+    },
+  );
+
+  it.each(['placement', 'world_object', 'adjudication'] as const)(
+    'reports a rejected rich %s write as post-apply failure without retrying',
+    async (operation) => {
+      const store = new ControlledFlushStore();
+      const commandType = operation === 'placement'
+        ? 'resolve_pending_placement'
+        : operation === 'world_object'
+          ? 'dm_use_world_object'
+          : 'adjudicate';
+      let operationReducerCalls = 0;
+      const fixture = richTopDownOperation(operation, store, (command) => {
+        if (command.type === commandType) operationReducerCalls += 1;
+      });
+      const mutationRevisions: number[] = [];
+      fixture.service.subscribeDm((event) => {
+        if (event.kind === 'mutation') mutationRevisions.push(event.projection.encounter.revision);
+      });
+      store.failNextFlush(new Error(`controlled ${operation} write failure`));
+
+      await expect(fixture.submit()).resolves.toMatchObject({
+        kind: 'failed',
+        phase: 'post_apply',
+        error: expect.objectContaining({ message: `controlled ${operation} write failure` }),
+        currentRevision: fixture.initialRevision + 1,
+      });
+      await expect(fixture.submit()).resolves.toEqual({ kind: 'closed' });
+      expect({ operationReducerCalls, mutationRevisions }).toEqual({
+        operationReducerCalls: 1,
+        mutationRevisions: [],
+      });
+      fixture.service.close();
+    },
+  );
+
+  it.each(['placement', 'world_object', 'adjudication'] as const)(
+    'settles a rich %s operation as closed during its unresolved write without retrying',
+    async (operation) => {
+      const store = new ControlledFlushStore();
+      const commandType = operation === 'placement'
+        ? 'resolve_pending_placement'
+        : operation === 'world_object'
+          ? 'dm_use_world_object'
+          : 'adjudicate';
+      let operationReducerCalls = 0;
+      const fixture = richTopDownOperation(operation, store, (command) => {
+        if (command.type === commandType) operationReducerCalls += 1;
+      });
+      const mutationRevisions: number[] = [];
+      fixture.service.subscribeDm((event) => {
+        if (event.kind === 'mutation') mutationRevisions.push(event.projection.encounter.revision);
+      });
+      const barrier = store.blockFlushIn(1);
+      const outcome = fixture.submit();
+      await barrier.reached;
+      fixture.service.close();
+      barrier.release();
+
+      await expect(outcome).resolves.toEqual({ kind: 'closed' });
+      expect({ operationReducerCalls, mutationRevisions }).toEqual({
+        operationReducerCalls: 1,
+        mutationRevisions: [],
+      });
+    },
+  );
+
   it('publishes an autonomous snapshot only after its durability barrier', async () => {
     const store = new ControlledFlushStore();
     const host = new DmEncounterHost('session:service-autonomous-durable', store);

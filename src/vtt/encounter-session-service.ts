@@ -766,17 +766,13 @@ export class RichEncounterSessionService extends EncounterSessionService {
   async submitTopDownPlacement(selectedOfferedActionId: string): Promise<HostCoordinatorTransactionOutcome> {
     const command = this.#placementOffers.get(selectedOfferedActionId);
     if (command === undefined) return { kind: 'refused', reason: 'The offered placement is stale or unknown.' };
-    const result = this.richHost.resolvePendingPlacement(command);
-    return result.kind === 'refused'
-      ? { kind: 'refused', reason: result.reason }
-      : { kind: 'committed', revision: result.state.revision };
+    return this.richHost.resolvePendingPlacementTransaction(command);
   }
 
   async submitTopDownWorldObject(selectedOfferedActionId: string): Promise<HostCoordinatorTransactionOutcome> {
     const command = this.#worldObjectOffers.get(selectedOfferedActionId);
     if (command === undefined) return { kind: 'refused', reason: 'The offered world-object action is stale or unknown.' };
-    this.richHost.dmUseWorldObject(command);
-    return { kind: 'committed', revision: this.richHost.snapshot().dm.encounter.revision };
+    return this.richHost.dmUseWorldObjectTransaction(command);
   }
 
   async applyTopDownAdjudication(intent: {
@@ -787,14 +783,13 @@ export class RichEncounterSessionService extends EncounterSessionService {
     if (!Number.isSafeInteger(intent.hitPointDelta)) {
       return { kind: 'refused', reason: 'The adjudication hit-point delta must be a safe integer.' };
     }
-    this.richHost.adjudicate({
+    return this.richHost.adjudicateTransaction({
       type: 'adjudicate',
       target: intent.target,
       subject: 'engine:manual-adjudication',
       reasoning: intent.reasoning,
       consequence: { kind: 'hit_point_delta', amount: intent.hitPointDelta },
     });
-    return { kind: 'committed', revision: this.richHost.snapshot().dm.encounter.revision };
   }
   interrupt(...args: Parameters<DmEncounterHost['interrupt']>): ReturnType<DmEncounterHost['interrupt']> {
     return this.richHost.interrupt(...args);

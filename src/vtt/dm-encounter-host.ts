@@ -327,6 +327,7 @@ export class DmEncounterHost {
   #coordinator: TurnCoordinator;
   #rng: SerializableRng;
   #pump: Promise<void> | null = null;
+  #topDownMutationTail: Promise<void> = Promise.resolve();
   #repumpRequested = false;
   #repumpBlocked = false;
   #closed = false;
@@ -1479,6 +1480,12 @@ export class DmEncounterHost {
     this.#publish();
   }
 
+  adjudicateTransaction(
+    command: Extract<EncounterCommand, { readonly type: 'adjudicate' }>,
+  ): Promise<HostCoordinatorTransactionOutcome> {
+    return this.#enqueueTopDownMutation(() => this.#coordinator.adjudicate(command));
+  }
+
   resolvePendingPlacement(
     command: Extract<EncounterCommand, { readonly type: 'resolve_pending_placement' }>,
   ): ReturnType<TurnCoordinator['resolvePendingPlacement']> {
@@ -1492,9 +1499,97 @@ export class DmEncounterHost {
     return result;
   }
 
+  resolvePendingPlacementTransaction(
+    command: Extract<EncounterCommand, { readonly type: 'resolve_pending_placement' }>,
+  ): Promise<HostCoordinatorTransactionOutcome> {
+    return this.#enqueueTopDownMutation(
+      () => {
+        const result = this.#coordinator.resolvePendingPlacement(command);
+        this.#actionRefusal = null;
+        this.#boundaryRefusal = null;
+        return result;
+      },
+      () => {
+        if (this.#coordinator.state().phase.kind !== 'awaiting_placement') {
+          void this.#pumpCoordinator();
+        }
+      },
+    );
+  }
+
   dmUseWorldObject(command: Extract<EncounterCommand, { readonly type: 'dm_use_world_object' }>): void {
     this.#coordinator.dmUseWorldObject(command);
     this.#publish();
+  }
+
+  dmUseWorldObjectTransaction(
+    command: Extract<EncounterCommand, { readonly type: 'dm_use_world_object' }>,
+  ): Promise<HostCoordinatorTransactionOutcome> {
+    return this.#enqueueTopDownMutation(() => this.#coordinator.dmUseWorldObject(command));
+  }
+
+  #enqueueTopDownMutation(
+    apply: () => CoordinatorStep,
+    afterCommit?: () => void,
+  ): Promise<HostCoordinatorTransactionOutcome> {
+    const outcome = this.#topDownMutationTail.then(() => this.#settleTopDownMutation(
+      apply,
+      afterCommit,
+    ));
+    this.#topDownMutationTail = outcome.then(() => undefined, () => undefined);
+    return outcome;
+  }
+
+  async #settleTopDownMutation(
+    apply: () => CoordinatorStep,
+    afterCommit?: () => void,
+  ): Promise<HostCoordinatorTransactionOutcome> {
+    if (this.#closed) return { kind: 'closed' };
+    const initialRevision = this.#coordinator.state().revision;
+    let result: CoordinatorStep;
+    try {
+      result = apply();
+    } catch (error: unknown) {
+      const currentRevision = this.#coordinator.state().revision;
+      const phase = error instanceof CoordinatorPostApplicationError ||
+        error instanceof HostPostApplicationError ||
+        currentRevision !== initialRevision
+        ? 'post_apply'
+        : 'pre_apply';
+      if (phase === 'post_apply' && !this.#closed) this.#degradeAfterApplicationFailure();
+      return { kind: 'failed', phase, error, currentRevision };
+    }
+    if (result.kind === 'refused') return { kind: 'refused', reason: result.reason };
+    try {
+      await this.#store.flush();
+    } catch (error: unknown) {
+      if (this.#closed) return { kind: 'closed' };
+      this.#degradeAfterApplicationFailure();
+      return {
+        kind: 'failed',
+        phase: 'post_apply',
+        error,
+        currentRevision: this.#coordinator.state().revision,
+      };
+    }
+    if (this.#closed) return { kind: 'closed' };
+    const committed = {
+      kind: 'committed' as const,
+      revision: result.state.revision,
+    };
+    try {
+      this.#publish('mutation');
+      afterCommit?.();
+    } catch (error: unknown) {
+      if (!this.#closed) this.#degradeAfterApplicationFailure();
+      return {
+        kind: 'failed',
+        phase: 'post_apply',
+        error,
+        currentRevision: this.#coordinator.state().revision,
+      };
+    }
+    return committed;
   }
 
   async undoLast(): Promise<void> {

@@ -14,9 +14,11 @@ import {
 } from '../../../src/vtt/encounter-projections';
 import {
   decodePlayerDecision,
+  handleTopDownPlayerDecision,
   handleTopDownSubmission,
   isPlayerSubmissionFeedbackMessage,
-  playerSubmissionFeedbackMessage,
+  playerDecisionMessage,
+  type PlayerSubmissionFeedbackMessage,
   type TopDownSubmissionFeedback,
 } from '../../../src/vtt/local-window-channel';
 import {
@@ -261,20 +263,65 @@ describe('increment 6 projection boundary', () => {
     }, 'session:test', request)).toThrow('not one of the projected offered action IDs');
   });
 
-  it('surfaces a stale offered-action refusal once without retrying', async () => {
-    let submissions = 0;
-    let surfaced: TopDownSubmissionFeedback | null = null;
-    await handleTopDownSubmission(async () => {
-      submissions += 1;
-      return { kind: 'refused', reason: 'The offered controller request is stale.' };
-    }, (feedback) => { surfaced = feedback; });
+  it('returns one correlated player error when the actual receiver rejects a stale decision', async () => {
+    const actor = REFERENCE_FIGHTER_ID;
+    const current: ControllerRequest = {
+      kind: 'turn',
+      requestId: 'request:current',
+      encounterRevision: 8,
+      actorId: actor,
+      visibleState: projectPlayerView(createEncounter(referenceEncounterSetup()), {
+        seatId: 'seat:receiver', combatantId: actor,
+      }),
+      legalActions: { actions: [{ type: 'end_turn', actor }] },
+    };
+    const stale = playerDecisionMessage(
+      'session:test',
+      { requestId: 'request:stale', encounterRevision: 7 },
+      offeredActionId('request:stale', 0),
+    );
+    const feedback: PlayerSubmissionFeedbackMessage[] = [];
+    let executions = 0;
+    await handleTopDownPlayerDecision(stale, 'session:test', current, async () => {
+      executions += 1;
+      return { kind: 'committed', revision: 9 };
+    }, (message) => { feedback.push(message); });
 
-    expect(submissions).toBe(1);
-    expect(surfaced).toEqual({ kind: 'error', message: 'The offered controller request is stale.' });
-    if (surfaced === null) throw new Error('The stale refusal was not surfaced.');
-    const message = playerSubmissionFeedbackMessage('session:test', 'request:stale', surfaced);
-    expect(isPlayerSubmissionFeedbackMessage(message, 'session:test')).toBe(true);
-    expect(isPlayerSubmissionFeedbackMessage(message, 'session:other')).toBe(false);
+    expect(executions).toBe(0);
+    expect(feedback).toEqual([{
+      kind: 'human_controller_decision_result',
+      sessionId: 'session:test',
+      requestId: 'request:stale',
+      feedback: { kind: 'error', message: 'HumanController decision is stale.' },
+    }]);
+    expect(isPlayerSubmissionFeedbackMessage(feedback[0], 'session:test')).toBe(true);
+    expect(isPlayerSubmissionFeedbackMessage(feedback[0], 'session:other')).toBe(false);
+  });
+
+  it('returns one correlated player error when the actual receiver has no pending request', async () => {
+    const decision = playerDecisionMessage(
+      'session:test',
+      { requestId: 'request:orphaned', encounterRevision: 8 },
+      offeredActionId('request:orphaned', 0),
+    );
+    const feedback: PlayerSubmissionFeedbackMessage[] = [];
+    let executions = 0;
+    await handleTopDownPlayerDecision(decision, 'session:test', null, async () => {
+      executions += 1;
+      return { kind: 'committed', revision: 9 };
+    }, (message) => { feedback.push(message); });
+
+    expect(executions).toBe(0);
+    expect(feedback).toEqual([{
+      kind: 'human_controller_decision_result',
+      sessionId: 'session:test',
+      requestId: 'request:orphaned',
+      feedback: {
+        kind: 'error',
+        message: 'HumanController decision is stale because no request is pending.',
+      },
+    }]);
+    expect(isPlayerSubmissionFeedbackMessage(feedback[0], 'session:test')).toBe(true);
   });
 
   it('surfaces pre-apply failure and promise rejection without retrying either submission', async () => {

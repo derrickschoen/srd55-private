@@ -30,6 +30,12 @@ export interface PlayerSubmissionFeedbackMessage {
   readonly feedback: TopDownSubmissionFeedback;
 }
 
+export interface DecodedPlayerDecision {
+  readonly requestId: string;
+  readonly encounterRevision: number;
+  readonly offeredActionId: string;
+}
+
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -38,7 +44,7 @@ export function decodePlayerDecision(
   value: unknown,
   sessionId: string,
   pending: ControllerRequest,
-): { readonly requestId: string; readonly encounterRevision: number; readonly offeredActionId: string } {
+): DecodedPlayerDecision {
   if (!isRecord(value) || value.kind !== 'human_controller_decision') {
     throw new TypeError('Local window message is not a HumanController decision.');
   }
@@ -60,6 +66,30 @@ export function decodePlayerDecision(
   return {
     requestId: pending.requestId,
     encounterRevision: pending.encounterRevision,
+    offeredActionId: decision.offeredActionId,
+  };
+}
+
+function correlatedPlayerDecision(
+  value: unknown,
+  sessionId: string,
+): DecodedPlayerDecision | null {
+  if (!isRecord(value) || value.kind !== 'human_controller_decision' || value.sessionId !== sessionId) {
+    return null;
+  }
+  const decision = value.decision;
+  if (
+    !isRecord(decision) ||
+    typeof decision.requestId !== 'string' ||
+    typeof decision.encounterRevision !== 'number' ||
+    !Number.isSafeInteger(decision.encounterRevision) ||
+    typeof decision.offeredActionId !== 'string'
+  ) {
+    return null;
+  }
+  return {
+    requestId: decision.requestId,
+    encounterRevision: decision.encounterRevision,
     offeredActionId: decision.offeredActionId,
   };
 }
@@ -114,6 +144,45 @@ export async function handleTopDownSubmission(
   } catch (error: unknown) {
     surface({ kind: 'error', message: errorMessage(error) });
   }
+}
+
+export async function handleTopDownPlayerDecision(
+  value: unknown,
+  sessionId: string,
+  pending: ControllerRequest | null,
+  submit: (
+    request: ControllerRequest,
+    decision: DecodedPlayerDecision,
+  ) => Promise<HostCoordinatorTransactionOutcome>,
+  surface: (message: PlayerSubmissionFeedbackMessage) => void,
+): Promise<void> {
+  const correlated = correlatedPlayerDecision(value, sessionId);
+  if (correlated === null) return;
+  if (pending === null) {
+    surface(playerSubmissionFeedbackMessage(sessionId, correlated.requestId, {
+      kind: 'error',
+      message: 'HumanController decision is stale because no request is pending.',
+    }));
+    return;
+  }
+  let decision: DecodedPlayerDecision;
+  try {
+    decision = decodePlayerDecision(value, sessionId, pending);
+  } catch (error: unknown) {
+    surface(playerSubmissionFeedbackMessage(sessionId, correlated.requestId, {
+      kind: 'error',
+      message: errorMessage(error),
+    }));
+    return;
+  }
+  await handleTopDownSubmission(
+    () => submit(pending, decision),
+    (feedback) => surface(playerSubmissionFeedbackMessage(
+      sessionId,
+      decision.requestId,
+      feedback,
+    )),
+  );
 }
 
 export function playerSubmissionFeedbackMessage(
