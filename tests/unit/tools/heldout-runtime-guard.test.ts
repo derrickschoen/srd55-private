@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from '../../helpers/test-filesystem';
 import {
+  canonicalHeldoutRuntimeReport,
   discoverHeldoutRuntimeValueEdges,
   heldoutRuntimeNprocLimit,
   parseHeldoutWorkerReport,
@@ -41,6 +42,7 @@ function validWorkerReport(): unknown {
       specifier: './ordinary',
       importer: '<candidate>/src/main.ts',
       resolvedId: '<candidate>/src/ordinary.ts',
+      loaderKind: 'static_import',
       source: 'graph',
       status: 'clean',
     }],
@@ -50,6 +52,7 @@ function validWorkerReport(): unknown {
       project: null,
       environment: 'client',
     }],
+    loadedConfigurationFiles: ['vite.config.mjs'],
     findings: [],
   };
 }
@@ -68,6 +71,7 @@ describe('held-out runtime guard pure contracts', () => {
     ['constant concatenation', "import('#'+'policy')", 'dynamic_import', '#policy'],
     ['import-meta resolver', "import.meta.resolve('#policy')", 'import_meta_resolve', '#policy'],
     ['resolver alias', "const locate=import.meta.resolve;locate('#policy')", 'import_meta_resolve', '#policy'],
+    ['createRequire result', "import {createRequire} from 'node:module';const load=createRequire(import.meta.url);load('#policy')", 'require', '#policy'],
   ] as const)('retains the %s runtime value edge', (_label, source, kind, specifier) => {
     expect(discoverHeldoutRuntimeValueEdges('src/consumer.ts', source)).toContainEqual({ kind, specifier });
   });
@@ -77,6 +81,42 @@ describe('held-out runtime guard pure contracts', () => {
       'src/consumer.ts',
       "const glob=import.meta.glob;glob('./ordinary.ts')",
     )).toContainEqual({ kind: 'aliased_import_meta_glob', specifier: './ordinary.ts' });
+  });
+
+  it('tracks same-spelled aliases by symbol and terminates monotonically', () => {
+    expect(discoverHeldoutRuntimeValueEdges('src/consumer.ts', [
+      'const load=require;',
+      "function inner(){const load=import.meta.resolve;load('#ordinary')}",
+      "load('#policy');void inner;",
+    ].join('\n'))).toEqual(expect.arrayContaining([
+      { kind: 'import_meta_resolve', specifier: '#ordinary' },
+      { kind: 'require', specifier: '#policy' },
+    ]));
+  });
+
+  it('canonicalizes only operational preflight fields while retaining provenance', () => {
+    const parsed = parseHeldoutWorkerReport(validWorkerReport(), 'F');
+    const report = {
+      ...parsed,
+      preflight: {
+        status: 'passed' as const,
+        bubblewrapVersion: 'bubblewrap 0.6.1',
+        runtimeRoot: '/host/runtime',
+        runtimeVersion: 'v24.13.0',
+        uidTaskCount: 777,
+        nprocLimit: 2048,
+        attempts: [{ profile: '--nproc=2048', status: 'passed' as const, errorClass: null }],
+        checks: ['network'],
+      },
+    };
+    const canonical = canonicalHeldoutRuntimeReport(report);
+
+    expect(canonical.preflight).not.toHaveProperty('runtimeRoot');
+    expect(canonical.preflight).not.toHaveProperty('uidTaskCount');
+    expect(canonical.preflight).not.toHaveProperty('nprocLimit');
+    expect(canonical.preflight.attempts[0]).not.toHaveProperty('profile');
+    expect(canonical.resolution).toEqual(report.resolution);
+    expect(canonical.findings).toEqual(report.findings);
   });
 
   it('keeps erased type-only edges out of runtime traversal', () => {
@@ -120,17 +160,17 @@ describe('held-out runtime guard pure contracts', () => {
     try {
       mkdirSync(join(root, 'tools'));
       writeFileSync(join(root, 'vitest.config.mjs'),
-        "export default {test:{projects:[{extends:'./tools/project.config.mjs'}]}};");
-      writeFileSync(join(root, 'tools/project.config.mjs'), [
+        "export default {test:{projects:[{extends:'./project.config.mjs'}]}};");
+      writeFileSync(join(root, 'project.config.mjs'), [
         "import {createRequire} from 'node:module';",
         'const box={load:createRequire(import.meta.url)};',
         'export default {};',
       ].join('\n'));
-      const report = inspectHeldoutCandidateTree(root, 'F', bindings);
+      const report = inspectHeldoutCandidateTree(root, 'F', bindings, ['project.config.mjs']);
 
       expect(report.astInspectedFiles).toBe(2);
       expect(report.findings).toContainEqual(expect.objectContaining({
-        path: 'tools/project.config.mjs',
+        path: 'project.config.mjs',
         kind: 'loader_reference_escaped',
       }));
     } finally {

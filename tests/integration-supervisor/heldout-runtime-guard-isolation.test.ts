@@ -1,5 +1,7 @@
+import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { beforeAll, describe, expect, it } from 'vitest';
 import {
   mkdirSync,
@@ -15,6 +17,7 @@ import {
   runHeldoutRuntimeGuard,
   type HeldoutRuntimeGuardReport,
 } from '../../tools/heldout-runtime-guard';
+import { inspectHeldoutCandidateTree } from '../../tools/heldout-leak-check';
 
 const reserveDigest = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 const bindings = {
@@ -74,6 +77,7 @@ interface RuntimeFixture {
   readonly expectedSpecifier?: string;
   readonly aggregateTimeoutMs?: number;
   readonly lockFile?: string;
+  readonly symlinks?: Readonly<Record<string, string>>;
 }
 
 interface MigratedRuntimeCase extends RuntimeFixture {
@@ -294,7 +298,9 @@ const migratedRuntimeCases: readonly MigratedRuntimeCase[] = [
   },
   {
     finding: 'activated-dependency-plugin',
-    config: `import {automockPlugin} from '@vitest/mocker/node';export default {plugins:[automockPlugin()],resolve:{alias:{'@policy':'${protectedTarget}'}}};`,
+    config: `import {dynamicImportPlugin} from '@vitest/mocker/node';export default {plugins:[dynamicImportPlugin({globalThisAccessor:"(await import('/src/vtt/heldout-evaluation.ts'))"})]};`,
+    consumer: "void import('./ordinary');",
+    expectedSpecifier: '/src/vtt/heldout-evaluation.ts',
   },
   {
     finding: 'plugin-configResolved',
@@ -379,6 +385,22 @@ const migratedRuntimeCases: readonly MigratedRuntimeCase[] = [
     expectedSpecifier: '#policy',
     packageJson: JSON.stringify({ name: 'heldout-runtime-fixture', type: 'module',
       imports: { '#policy': protectedPackageTarget } }),
+  },
+  {
+    finding: 'RG-F4-createRequire-result',
+    config: 'export default {};',
+    consumer: "import {createRequire} from 'node:module';const load=createRequire(import.meta.url);load('#policy');",
+    expectedSpecifier: '#policy',
+    packageJson: JSON.stringify({ name: 'heldout-runtime-fixture', type: 'module',
+      imports: { '#policy': { require: protectedPackageTarget, import: './src/ordinary.ts' } } }),
+  },
+  {
+    finding: 'RG-F4-require-condition',
+    config: 'export default {};',
+    consumer: "require('#policy');",
+    expectedSpecifier: '#policy',
+    packageJson: JSON.stringify({ name: 'heldout-runtime-fixture', type: 'module',
+      imports: { '#policy': { require: protectedPackageTarget, import: './src/ordinary.ts' } } }),
   },
   {
     finding: 'package-exact-before-wildcard',
@@ -513,6 +535,10 @@ const migratedRuntimeCases: readonly MigratedRuntimeCase[] = [
     configFile: 'vitest.config.mjs',
     config: `const project={};const projects=[project];function install(value){value.resolve={alias:{'@policy':'${protectedTarget}'}}}install(project);export default {test:{projects:projects}};`,
   },
+  {
+    finding: 'opaque-array-helper-receives-shared',
+    config: `const shared={resolve:{alias:{}}};function helper(value){value.resolve.alias['@policy']='${protectedTarget}';return false}export default {...shared,plugins:[helper(shared)]};`,
+  },
 ] as const;
 
 const cleanRuntimeControls: readonly MigratedRuntimeCase[] = [
@@ -529,6 +555,11 @@ const cleanRuntimeControls: readonly MigratedRuntimeCase[] = [
   {
     finding: 'F54-array-spread-read',
     config: `const shared={plugins:[]};export default {...shared,plugins:[...shared.plugins]};`,
+    consumer: "import value from './ordinary'; void value;",
+  },
+  {
+    finding: 'opaque-array-const-subtree-alias',
+    config: `const shared={plugins:[]};const p=shared.plugins;export default {...shared,plugins:[...p]};`,
     consumer: "import value from './ordinary'; void value;",
   },
   {
@@ -586,8 +617,8 @@ const cleanRuntimeControls: readonly MigratedRuntimeCase[] = [
   },
   {
     finding: 'dormant-dependency-plugin',
-    config: "import {automockPlugin} from '@vitest/mocker/node';const dormant=automockPlugin();void dormant;export default {};",
-    consumer: "import value from './ordinary';void value;",
+    config: "import {dynamicImportPlugin} from '@vitest/mocker/node';const dormant=dynamicImportPlugin({globalThisAccessor:\"(await import('/src/vtt/heldout-evaluation.ts'))\"});void dormant;export default {};",
+    consumer: "void import('./ordinary');",
   },
   {
     finding: 'spread-transfer-does-not-mutate-config',
@@ -638,22 +669,30 @@ function copyRepositoryPath(source: string, target: string): void {
   writeFileSync(target, readFileSync(source));
 }
 
-async function inspectFixture(fixture: RuntimeFixture): Promise<HeldoutRuntimeGuardReport> {
+function prepareFixtureRoot(fixture: RuntimeFixture): string {
   const root = mkdtempSync(join(tmpdir(), 'heldout-runtime-fixture-'));
   lastFixtureRoot = root;
+  writeFixtureFile(root, 'package.json', fixture.packageJson ??
+    JSON.stringify({ name: 'heldout-runtime-fixture', type: 'module' }));
+  if (fixture.lockFile === undefined) copyRepositoryPath('package-lock.json', join(root, 'package-lock.json'));
+  else writeFixtureFile(root, 'package-lock.json', fixture.lockFile);
+  mkdirSync(join(root, 'node_modules'));
+  writeFixtureFile(root, fixture.configFile ?? 'vite.config.mjs', fixture.config);
+  writeFixtureFile(root, 'src/consumer.ts', fixture.consumer ?? "import value from '@policy'; export { value };");
+  writeFixtureFile(root, 'src/ordinary.ts', 'export default 1;');
+  writeFixtureFile(root, 'src/vtt/heldout-evaluation.ts', 'export default 2;');
+  for (const [path, source] of Object.entries(fixture.files ?? {})) writeFixtureFile(root, path, source);
+  for (const [path, target] of Object.entries(fixture.symlinks ?? {})) {
+    mkdirSync(dirname(join(root, path)), { recursive: true });
+    const linked = spawnSync('/bin/ln', ['-s', target, join(root, path)], { encoding: 'utf8' });
+    if (linked.status !== 0) throw new TypeError(`Unable to create fixture symlink: ${linked.stderr}`);
+  }
+  return root;
+}
+
+async function inspectFixture(fixture: RuntimeFixture): Promise<HeldoutRuntimeGuardReport> {
+  const root = prepareFixtureRoot(fixture);
   try {
-    writeFixtureFile(root, 'package.json', fixture.packageJson ??
-      JSON.stringify({ name: 'heldout-runtime-fixture', type: 'module' }));
-    if (fixture.lockFile === undefined) copyRepositoryPath('package-lock.json', join(root, 'package-lock.json'));
-    else writeFixtureFile(root, 'package-lock.json', fixture.lockFile);
-    mkdirSync(join(root, 'node_modules'));
-    writeFixtureFile(root, fixture.configFile ?? 'vite.config.mjs', fixture.config);
-    writeFixtureFile(root, 'src/consumer.ts', fixture.consumer ?? "import value from '@policy'; export { value };");
-    writeFixtureFile(root, 'src/ordinary.ts', 'export default 1;');
-    writeFixtureFile(root, 'src/vtt/heldout-evaluation.ts', 'export default 2;');
-    for (const [path, source] of Object.entries(fixture.files ?? {})) {
-      writeFixtureFile(root, path, source);
-    }
     return await runHeldoutRuntimeGuard({
       root,
       slice: 'F',
@@ -751,6 +790,42 @@ describe('held-out runtime resolution guard', () => {
     ]));
   });
 
+  it('canonicalizes a candidate-local symlink before protected identity classification', async () => {
+    const leak = await inspectFixture({
+      config: "export default {resolve:{preserveSymlinks:true,alias:{'@policy':'/work/src/policy-link.ts'}}};",
+      symlinks: { 'src/policy-link.ts': 'vtt/heldout-evaluation.ts' },
+    });
+    const clean = await inspectFixture({
+      config: "export default {resolve:{preserveSymlinks:true,alias:{'@policy':'/work/src/policy-link.ts'}}};",
+      symlinks: { 'src/policy-link.ts': 'ordinary.ts' },
+    });
+
+    expect(leak.resolution).toContainEqual(expect.objectContaining({
+      specifier: '@policy',
+      resolvedId: '<candidate>/src/vtt/heldout-evaluation.ts',
+      status: 'protected',
+    }));
+    expect(leak.findings).toContainEqual(expect.objectContaining({ kind: 'runtime_protocol_resolution' }));
+    expect(clean.findings).toEqual([]);
+  });
+
+  it('preserves require provenance and selects the require package condition', async () => {
+    const report = await inspectFixture({
+      config: 'export default {};',
+      consumer: "import {createRequire} from 'node:module';const load=createRequire(import.meta.url);load('#policy');",
+      packageJson: JSON.stringify({ name: 'heldout-runtime-fixture', type: 'module', imports: {
+        '#policy': { require: protectedPackageTarget, import: './src/ordinary.ts' },
+      } }),
+    });
+
+    expect(report.resolution).toContainEqual(expect.objectContaining({
+      specifier: '#policy',
+      loaderKind: 'require',
+      resolvedId: '<candidate>/src/vtt/heldout-evaluation.ts',
+      status: 'protected',
+    }));
+  });
+
   it.each([
     ['opaque external', "export default {plugins:[{name:'opaque',resolveId(id){if(id==='@policy')return {id:'opaque-policy',external:true}}}]};"],
     ['unloadable virtual result', "export default {plugins:[{name:'unloadable',resolveId(id){if(id==='@policy')return '\\0virtual:missing'} }]};"],
@@ -827,7 +902,8 @@ describe('held-out runtime resolution guard', () => {
     ]));
     const report = await inspectFixture({
       ...runtimeCase,
-      config: runtimeCase.config.replaceAll(protectedTarget, '/work/src/ordinary.ts'),
+      config: runtimeCase.config.replaceAll(protectedTarget, '/work/src/ordinary.ts')
+        .replaceAll('/src/vtt/heldout-evaluation.ts', '/src/ordinary.ts'),
       files: redirectedFiles,
       ...(runtimeCase.packageJson === undefined ? {} : {
         packageJson: runtimeCase.packageJson
@@ -840,7 +916,8 @@ describe('held-out runtime resolution guard', () => {
     expect(report.findings).toEqual([]);
     expect(report.resolution).toContainEqual(expect.objectContaining({
       configuration: runtimeCase.configFile ?? 'vite.config.mjs',
-      specifier: runtimeCase.expectedSpecifier ?? '@policy',
+      specifier: (runtimeCase.expectedSpecifier ?? '@policy')
+        .replaceAll('/src/vtt/heldout-evaluation.ts', '/src/ordinary.ts'),
       resolvedId: '<candidate>/src/ordinary.ts',
       phase: 'resolve',
       status: 'resolved',
@@ -928,6 +1005,38 @@ describe('held-out runtime resolution guard', () => {
       }),
     ]));
     expect(report.findings).toContainEqual(expect.objectContaining({ kind: 'runtime_protocol_resolution' }));
+  });
+
+  it('traverses tools-only SSR dynamicDeps generated by import.meta.glob', async () => {
+    const report = await inspectFixture({
+      config: 'export default {};',
+      consumer: "import value from './ordinary';void value;",
+      files: {
+        'tools/runtime-glob.ts': "export const modules=import.meta.glob('../src/vtt/heldout-*.ts');",
+      },
+    });
+
+    expect(report.resolution).toContainEqual(expect.objectContaining({
+      seed: 'tools/runtime-glob.ts',
+      source: 'transformed',
+      loaderKind: 'dynamic_import',
+      status: 'protected',
+    }));
+  });
+
+  it('traverses tools-only SSR dynamicDeps generated by an activated plugin', async () => {
+    const report = await inspectFixture({
+      config: `export default {plugins:[{name:'runtime-generated-import',transform(code,id){return id.endsWith('/tools/runtime-plugin.ts')?code+"\\nvoid import('/src/vtt/heldout-evaluation.ts')":null}}]};`,
+      consumer: "import value from './ordinary';void value;",
+      files: { 'tools/runtime-plugin.ts': 'export const value=1;' },
+    });
+
+    expect(report.resolution).toContainEqual(expect.objectContaining({
+      seed: 'tools/runtime-plugin.ts',
+      source: 'transformed',
+      loaderKind: 'dynamic_import',
+      status: 'protected',
+    }));
   });
 
   const runtimeGlobCases = [
@@ -1092,12 +1201,40 @@ describe('held-out runtime resolution guard', () => {
     expect(toolAssignments.every((row) => row.environment !== 'client')).toBe(true);
   });
 
-  it('emits byte-identical canonical reports for identical inputs', async () => {
-    const fixture = { config: `export default {resolve:{alias:{'@policy':'${protectedTarget}'}}};` };
-    const first = await inspectFixture(fixture);
-    const second = await inspectFixture(fixture);
+  it('emits byte-identical canonical reports from separate processes', () => {
+    const root = prepareFixtureRoot({
+      config: `export default {resolve:{alias:{'@policy':'${protectedTarget}'}}};`,
+    });
+    try {
+      const moduleUrl = pathToFileURL(join(process.cwd(), 'tools/heldout-runtime-guard.ts')).href;
+      const script = [
+        `import {canonicalHeldoutRuntimeReport,runHeldoutRuntimeGuard} from ${JSON.stringify(moduleUrl)};`,
+        `const report=await runHeldoutRuntimeGuard({root:process.argv[1],slice:'F',bindings:${JSON.stringify(bindings)}});`,
+        'process.stdout.write(JSON.stringify(canonicalHeldoutRuntimeReport(report)));',
+      ].join('');
+      const run = () => spawnSync(process.execPath, [
+        '--no-warnings', '--experimental-strip-types', '--input-type=module', '-e', script, root,
+      ], { encoding: 'utf8', timeout: 120_000 });
+      const first = run();
+      const second = run();
 
-    expect(JSON.stringify(first)).toBe(JSON.stringify(second));
+      expect(first.status).toBe(0);
+      expect(second.status).toBe(0);
+      expect(first.stderr).toBe('');
+      expect(second.stderr).toBe('');
+      expect(first.stdout).toBe(second.stdout);
+      const canonical: unknown = JSON.parse(first.stdout);
+      expect(canonical).toEqual(expect.objectContaining({
+        resolution: expect.arrayContaining([expect.objectContaining({
+          specifier: '@policy',
+          loaderKind: 'static_import',
+          status: 'protected',
+        })]),
+        findings: expect.arrayContaining([expect.objectContaining({ kind: 'runtime_protocol_resolution' })]),
+      }));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('fails closed when configuration execution throws', async () => {
@@ -1118,8 +1255,6 @@ describe('held-out runtime resolution guard', () => {
     ['throwing project extends file', "export default {test:{projects:[{name:'throwing',extends:'./project.config.mjs'}]}};",
       { 'project.config.mjs': "throw new TypeError('extended-config-failure');" }],
     ['outside-repository project extends file', "export default {test:{projects:[{name:'outside',extends:'../outside.config.mjs'}]}};", {}],
-    ['cyclic project extends files', "export default {test:{projects:[{name:'cycle',extends:'./project.config.mjs'}]}};",
-      { 'project.config.mjs': "export default {test:{projects:[{extends:'./vitest.config.mjs'}]}};" }],
   ] as const)('fails closed for a %s', async (_label, config, files) => {
     const report = await inspectFixture({
       configFile: 'vitest.config.mjs',
@@ -1127,13 +1262,51 @@ describe('held-out runtime resolution guard', () => {
       files,
     });
 
-    expect(report.findings).toContainEqual(expect.objectContaining(
-      _label === 'cyclic project extends files'
-        ? { kind: 'unresolved_module_edge' }
-        : { kind: 'configuration_load_failed' },
-    ));
-    if (_label !== 'cyclic project extends files') {
-      expect(report.configurationLoad).toContainEqual(expect.objectContaining({ status: 'failed' }));
+    expect(report.findings).toContainEqual(expect.objectContaining({ kind: 'configuration_load_failed' }));
+    expect(report.configurationLoad).toContainEqual(expect.objectContaining({ status: 'failed' }));
+  });
+
+  it('documents that installed Vitest does not recursively consume project lists from an extended project config', async () => {
+    const report = await inspectFixture({
+      configFile: 'vitest.config.mjs',
+      config: "export default {test:{projects:[{name:'cycle',extends:'./project.config.mjs'}]}};",
+      files: {
+        'project.config.mjs': "export default {test:{projects:[{name:'back',extends:'./vitest.config.mjs'}]}};",
+      },
+      consumer: "import value from './ordinary';void value;",
+    });
+
+    expect(report.findings).toEqual([]);
+    expect(new Set(report.configurationLoad.filter((row) => row.kind === 'vitest-project')
+      .map((row) => row.project))).toEqual(new Set(['0']));
+    expect(report.loadedConfigurationFiles).toContain('project.config.mjs');
+  });
+
+  it('routes every actually loaded root-level extended configuration through retained Rule N', async () => {
+    const fixture: RuntimeFixture = {
+      configFile: 'vitest.config.mjs',
+      config: "export default {test:{projects:[{name:'extended',extends:'./project.config.mjs'}]}};",
+      files: {
+        'project.config.mjs': [
+          "import {createRequire} from 'node:module';",
+          'const box={load:createRequire(import.meta.url)};',
+          'export default {};',
+        ].join('\n'),
+      },
+      consumer: "import value from './ordinary';void value;",
+    };
+    const root = prepareFixtureRoot(fixture);
+    try {
+      const runtime = await runHeldoutRuntimeGuard({ root, slice: 'F', bindings });
+      const staticReport = inspectHeldoutCandidateTree(root, 'F', bindings, runtime.loadedConfigurationFiles);
+
+      expect(runtime.loadedConfigurationFiles).toContain('project.config.mjs');
+      expect(staticReport.findings).toContainEqual(expect.objectContaining({
+        path: 'project.config.mjs',
+        kind: 'loader_reference_escaped',
+      }));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
     }
   });
 
@@ -1206,8 +1379,8 @@ describe('real-tree failure sensitivity', () => {
   }, 120_000);
 
   it.each([
-    ['alias', 'alias', 'vite.config.mjs', 5],
-    ['resolveId hook', 'resolver', 'vite.config.mjs', 3],
+    ['alias', 'alias', 'vite.config.mjs', 6],
+    ['resolveId hook', 'resolver', 'vite.config.mjs', 4],
   ] as const)('reports the injected %s and keeps its canonical configuration identity',
     (_label, reportKind, configuration, expectedFindingCount) => {
       const report = reportKind === 'alias' ? injectedAliasRealTreeReport : injectedResolverRealTreeReport;
@@ -1222,6 +1395,12 @@ describe('real-tree failure sensitivity', () => {
         configuration,
         specifier: '@policy',
         resolvedId: '<candidate>/src/vtt/heldout-evaluation.ts',
+        status: 'protected',
+      }));
+      expect(report.resolution).toContainEqual(expect.objectContaining({
+        seed: 'src/injected-runtime-consumer.ts',
+        source: 'transformed',
+        loaderKind: 'static_import',
         status: 'protected',
       }));
   });
@@ -1269,4 +1448,3 @@ describe('configuration-free held-out CLI', () => {
     }));
   }, 120_000);
 });
-import { spawnSync } from 'node:child_process';

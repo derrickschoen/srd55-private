@@ -48,6 +48,7 @@ export interface HeldoutLeakReport {
   readonly configurationLoad?: readonly HeldoutConfigurationLoad[];
   readonly resolution?: readonly HeldoutRuntimeResolution[];
   readonly seedAssignments?: readonly HeldoutSeedAssignment[];
+  readonly loadedConfigurationFiles?: readonly string[];
   readonly findings: readonly HeldoutLeakFinding[];
 }
 
@@ -1572,8 +1573,10 @@ export function inspectHeldoutCandidateTree(
   root: string,
   slice: HeldoutSlice,
   bindings: HeldoutLeakBindings,
+  loadedConfigurationFiles: readonly string[] = [],
 ): HeldoutLeakReport {
   const candidateSources: HeldoutChangedText[] = [];
+  const collectedPaths = new Set<string>();
   const collect = (directory: string, prefix = ''): void => {
     for (const entry of readdirSync(directory, { withFileTypes: true }).sort((left, right) =>
       left.name.localeCompare(right.name))) {
@@ -1587,10 +1590,19 @@ export function inspectHeldoutCandidateTree(
       )) {
         const sourceText = readFileSync(absolute, 'utf8');
         candidateSources.push({ path: relative, addedText: sourceText, sourceText });
+        collectedPaths.add(relative);
       }
     }
   };
   collect(root);
+  for (const relative of [...loadedConfigurationFiles].sort()) {
+    if (collectedPaths.has(relative) || relative.startsWith('/') || relative.split('/').includes('..') ||
+      !isTypeScriptOrJavaScript(relative)) continue;
+    const absolute = posix.join(root, relative);
+    const sourceText = readFileSync(absolute, 'utf8');
+    candidateSources.push({ path: relative, addedText: sourceText, sourceText });
+    collectedPaths.add(relative);
+  }
   return inspectHeldoutLeakChanges(candidateSources, slice, bindings);
 }
 
@@ -1788,6 +1800,7 @@ export async function runHeldoutLeakCli(argv: readonly string[]): Promise<void> 
       }],
       resolution: [],
       seedAssignments: [],
+      loadedConfigurationFiles: [],
       findings: [{
         path: '<preflight>',
         kind: 'configuration_load_failed',
@@ -1809,18 +1822,23 @@ export async function runHeldoutLeakCli(argv: readonly string[]): Promise<void> 
   mkdirSync(posix.join(candidateRoot, 'node_modules'));
   try {
     await extractCandidateArchive(config.candidate, candidateRoot);
-    const candidateStaticReport = inspectHeldoutCandidateTree(candidateRoot, config.slice, config.bindings);
+    const runtimeReport = await runHeldoutRuntimeGuard({
+      root: candidateRoot,
+      slice: config.slice,
+      bindings: config.bindings,
+    });
+    const candidateStaticReport = inspectHeldoutCandidateTree(
+      candidateRoot,
+      config.slice,
+      config.bindings,
+      runtimeReport.loadedConfigurationFiles,
+    );
     const staticFindingKeys = new Set<string>();
     const staticFindings = [...changedStaticReport.findings, ...candidateStaticReport.findings].filter((finding) => {
       const key = JSON.stringify(finding);
       if (staticFindingKeys.has(key)) return false;
       staticFindingKeys.add(key);
       return true;
-    });
-    const runtimeReport = await runHeldoutRuntimeGuard({
-      root: candidateRoot,
-      slice: config.slice,
-      bindings: config.bindings,
     });
     const report: HeldoutLeakReport = {
       ...candidateStaticReport,
@@ -1830,6 +1848,7 @@ export async function runHeldoutLeakCli(argv: readonly string[]): Promise<void> 
       configurationLoad: runtimeReport.configurationLoad,
       resolution: runtimeReport.resolution,
       seedAssignments: runtimeReport.seedAssignments,
+      loadedConfigurationFiles: runtimeReport.loadedConfigurationFiles,
     };
     process.stdout.write(`${JSON.stringify(report)}\n`);
     if (report.findings.length > 0) process.exitCode = 1;

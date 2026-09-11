@@ -10,7 +10,8 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, extname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { Worker } from 'node:worker_threads';
 import ts from 'typescript';
 
 export const HELDOUT_RUNTIME_PROTOCOL = 'heldout-runtime-v1' as const;
@@ -91,6 +92,7 @@ export interface HeldoutRuntimeResolution {
   readonly specifier: string;
   readonly importer: string | null;
   readonly resolvedId: string | null;
+  readonly loaderKind: HeldoutRuntimeValueEdgeKind | null;
   readonly source: 'graph' | 'transformed' | 'alias_key' | 'protected_control';
   readonly status:
     | 'clean'
@@ -128,7 +130,57 @@ export interface HeldoutRuntimeGuardReport {
   readonly configurationLoad: readonly HeldoutConfigurationLoad[];
   readonly resolution: readonly HeldoutRuntimeResolution[];
   readonly seedAssignments: readonly HeldoutSeedAssignment[];
+  /** Candidate-relative configuration files proven to have been loaded by Vite/Vitest. */
+  readonly loadedConfigurationFiles: readonly string[];
   readonly findings: readonly HeldoutRuntimeFinding[];
+}
+
+export interface HeldoutRuntimeCanonicalReport {
+  readonly protocol: typeof HELDOUT_RUNTIME_PROTOCOL;
+  readonly slice: HeldoutRuntimeGuardRequest['slice'];
+  readonly completed: boolean;
+  readonly eligibleFiles: number;
+  readonly astInspectedFiles: number;
+  readonly preflight: {
+    readonly status: HeldoutRuntimePreflight['status'];
+    readonly bubblewrapVersion: string;
+    readonly runtimeVersion: string;
+    readonly attempts: readonly Omit<HeldoutPreflightAttempt, 'profile'>[];
+    readonly checks: readonly string[];
+    readonly detail?: string;
+  };
+  readonly configurationLoad: readonly HeldoutConfigurationLoad[];
+  readonly resolution: readonly HeldoutRuntimeResolution[];
+  readonly seedAssignments: readonly HeldoutSeedAssignment[];
+  readonly loadedConfigurationFiles: readonly string[];
+  readonly findings: readonly HeldoutRuntimeFinding[];
+}
+
+/**
+ * Deterministic evidence projection. UID-wide task counts, the derived process
+ * cap, host runtime path, and attempt profile strings are operational evidence,
+ * not canonical results. Every finding and every resolution/provenance field is
+ * retained verbatim.
+ */
+export function canonicalHeldoutRuntimeReport(report: HeldoutRuntimeGuardReport): HeldoutRuntimeCanonicalReport {
+  const { uidTaskCount: _uidTaskCount, nprocLimit: _nprocLimit, runtimeRoot: _runtimeRoot,
+    attempts, ...stablePreflight } = report.preflight;
+  return {
+    protocol: report.protocol,
+    slice: report.slice,
+    completed: report.completed,
+    eligibleFiles: report.eligibleFiles,
+    astInspectedFiles: report.astInspectedFiles,
+    preflight: {
+      ...stablePreflight,
+      attempts: attempts.map(({ profile: _profile, ...attempt }) => attempt),
+    },
+    configurationLoad: report.configurationLoad,
+    resolution: report.resolution,
+    seedAssignments: report.seedAssignments,
+    loadedConfigurationFiles: report.loadedConfigurationFiles,
+    findings: report.findings,
+  };
 }
 
 interface WorkerRequest {
@@ -245,25 +297,50 @@ function runtimeConstantString(expression: ts.Expression | undefined): string | 
 }
 
 type RuntimeLoaderRole = 'require' | 'require_resolve' | 'import_meta_resolve' |
-  'import_meta_glob' | 'worker' | 'shared_worker' | 'import_scripts';
+  'import_meta_glob' | 'worker' | 'shared_worker' | 'import_scripts' |
+  'module_namespace' | 'create_require_factory';
 
-function directRuntimeRole(expression: ts.Expression): RuntimeLoaderRole | null {
-  const current = unwrapRuntimeExpression(expression);
-  if (ts.isIdentifier(current)) {
-    if (current.text === 'require') return 'require';
-    if (current.text === 'Worker') return 'worker';
-    if (current.text === 'SharedWorker') return 'shared_worker';
-    if (current.text === 'importScripts') return 'import_scripts';
-  }
-  if (!ts.isPropertyAccessExpression(current)) return null;
-  if (ts.isIdentifier(current.expression) && current.expression.text === 'require' &&
-    current.name.text === 'resolve') return 'require_resolve';
-  if (ts.isMetaProperty(current.expression) && current.expression.keywordToken === ts.SyntaxKind.ImportKeyword &&
-    current.expression.name.text === 'meta') {
-    if (current.name.text === 'resolve') return 'import_meta_resolve';
-    if (current.name.text === 'glob') return 'import_meta_glob';
-  }
-  return null;
+function preparedRuntimeSource(
+  path: string,
+  source: string,
+): { readonly sourceFile: ts.SourceFile; readonly checker: ts.TypeChecker } {
+  const virtualPath = resolve('/', path);
+  const options: ts.CompilerOptions = {
+    allowJs: true,
+    checkJs: false,
+    module: ts.ModuleKind.ESNext,
+    moduleResolution: ts.ModuleResolutionKind.Bundler,
+    noLib: true,
+    target: ts.ScriptTarget.Latest,
+  };
+  const host = ts.createCompilerHost(options, true);
+  host.fileExists = (candidate) => candidate === virtualPath;
+  host.readFile = (candidate) => candidate === virtualPath ? source : undefined;
+  host.getSourceFile = (candidate, languageVersion) => candidate === virtualPath
+    ? ts.createSourceFile(candidate, source, languageVersion, true, runtimeScriptKind(path))
+    : undefined;
+  host.writeFile = () => undefined;
+  const program = ts.createProgram([virtualPath], options, host);
+  const sourceFile = program.getSourceFile(virtualPath);
+  if (sourceFile === undefined) throw new TypeError(`Unable to prepare runtime source ${path}.`);
+  return { sourceFile, checker: program.getTypeChecker() };
+}
+
+function ambientRuntimeIdentifier(identifier: ts.Identifier, checker: ts.TypeChecker): RuntimeLoaderRole | null {
+  const direct = new Map<string, RuntimeLoaderRole>([
+    ['require', 'require'],
+    ['Worker', 'worker'],
+    ['SharedWorker', 'shared_worker'],
+    ['importScripts', 'import_scripts'],
+  ]).get(identifier.text) ?? null;
+  if (direct === null) return null;
+  const symbol = checker.getSymbolAtLocation(identifier);
+  if (symbol === undefined) return direct;
+  const declarations = symbol.declarations ?? [];
+  return declarations.length === 0 || declarations.every((declaration) =>
+    ts.isSourceFile(declaration) ||
+    (ts.canHaveModifiers(declaration) && ts.getModifiers(declaration)?.some((modifier) =>
+      modifier.kind === ts.SyntaxKind.DeclareKeyword) === true)) ? direct : null;
 }
 
 /** Runtime-value edges handed to the isolated real resolver. Type-only syntax is deliberately absent. */
@@ -271,32 +348,89 @@ export function discoverHeldoutRuntimeValueEdges(
   path: string,
   source: string,
 ): readonly HeldoutRuntimeValueEdge[] {
-  const sourceFile = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, runtimeScriptKind(path));
-  const roles = new Map<string, RuntimeLoaderRole>();
-  const runtimeDeclarations = new Set<string>();
-  const visitDeclarations = (node: ts.Node): void => {
-    if ((ts.isVariableDeclaration(node) || ts.isParameter(node) || ts.isFunctionDeclaration(node) ||
-      ts.isClassDeclaration(node)) && node.name !== undefined && ts.isIdentifier(node.name) &&
-      !(ts.canHaveModifiers(node) && ts.getModifiers(node)?.some((modifier) =>
-        modifier.kind === ts.SyntaxKind.DeclareKeyword))) runtimeDeclarations.add(node.name.text);
-    ts.forEachChild(node, visitDeclarations);
+  const { sourceFile, checker } = preparedRuntimeSource(path, source);
+  const roles = new Map<ts.Symbol, Set<RuntimeLoaderRole>>();
+  const addRole = (symbol: ts.Symbol | undefined, role: RuntimeLoaderRole): boolean => {
+    if (symbol === undefined) return false;
+    const current = roles.get(symbol) ?? new Set<RuntimeLoaderRole>();
+    if (current.has(role)) return false;
+    current.add(role);
+    roles.set(symbol, current);
+    return true;
   };
-  visitDeclarations(sourceFile);
-  for (const [name, role] of [
-    ['require', 'require'], ['Worker', 'worker'], ['SharedWorker', 'shared_worker'],
-    ['importScripts', 'import_scripts'],
-  ] as const) if (!runtimeDeclarations.has(name)) roles.set(name, role);
+  const symbolRoles = (identifier: ts.Identifier): ReadonlySet<RuntimeLoaderRole> => {
+    const symbol = checker.getSymbolAtLocation(identifier);
+    const tracked = symbol === undefined ? undefined : roles.get(symbol);
+    if (tracked !== undefined) return tracked;
+    const ambient = ambientRuntimeIdentifier(identifier, checker);
+    return ambient === null ? new Set<RuntimeLoaderRole>() : new Set([ambient]);
+  };
+  const expressionRoles = (expression: ts.Expression): ReadonlySet<RuntimeLoaderRole> => {
+    const current = unwrapRuntimeExpression(expression);
+    if (ts.isIdentifier(current)) return symbolRoles(current);
+    if (ts.isMetaProperty(current) && current.keywordToken === ts.SyntaxKind.ImportKeyword &&
+      current.name.text === 'meta') return new Set<RuntimeLoaderRole>();
+    if (ts.isPropertyAccessExpression(current) || ts.isElementAccessExpression(current)) {
+      const member = ts.isPropertyAccessExpression(current)
+        ? current.name.text
+        : runtimeConstantString(current.argumentExpression);
+      const receiverRoles = expressionRoles(current.expression);
+      const found = new Set<RuntimeLoaderRole>();
+      if (receiverRoles.has('require') && member === 'resolve') found.add('require_resolve');
+      if (receiverRoles.has('module_namespace')) {
+        if (member === 'createRequire') found.add('create_require_factory');
+        if (member === 'default' || member === 'Module') found.add('module_namespace');
+      }
+      if (ts.isMetaProperty(current.expression) && current.expression.keywordToken === ts.SyntaxKind.ImportKeyword &&
+        current.expression.name.text === 'meta') {
+        if (member === 'resolve') found.add('import_meta_resolve');
+        if (member === 'glob') found.add('import_meta_glob');
+      }
+      return found;
+    }
+    if (ts.isCallExpression(current)) {
+      const calleeRoles = expressionRoles(current.expression);
+      if (calleeRoles.has('create_require_factory')) return new Set<RuntimeLoaderRole>(['require']);
+      if (current.expression.kind === ts.SyntaxKind.ImportKeyword &&
+        ['node:module', 'module'].includes(runtimeConstantString(current.arguments[0]) ?? '')) {
+        return new Set<RuntimeLoaderRole>(['module_namespace']);
+      }
+    }
+    if (ts.isAwaitExpression(current)) return expressionRoles(current.expression);
+    return new Set<RuntimeLoaderRole>();
+  };
+  const seedImports = (node: ts.Node): void => {
+    if (ts.isImportDeclaration(node) && ['node:module', 'module'].includes(
+      runtimeConstantString(node.moduleSpecifier) ?? '') && node.importClause !== undefined &&
+      !node.importClause.isTypeOnly) {
+      if (node.importClause.name !== undefined) {
+        addRole(checker.getSymbolAtLocation(node.importClause.name), 'module_namespace');
+      }
+      const bindings = node.importClause.namedBindings;
+      if (bindings !== undefined && ts.isNamespaceImport(bindings)) {
+        addRole(checker.getSymbolAtLocation(bindings.name), 'module_namespace');
+      } else if (bindings !== undefined) {
+        for (const element of bindings.elements) {
+          if (!element.isTypeOnly && (element.propertyName ?? element.name).text === 'createRequire') {
+            addRole(checker.getSymbolAtLocation(element.name), 'create_require_factory');
+          }
+        }
+      }
+    } else if (ts.isImportEqualsDeclaration(node) && !node.isTypeOnly &&
+      ts.isExternalModuleReference(node.moduleReference) &&
+      ['node:module', 'module'].includes(runtimeConstantString(node.moduleReference.expression) ?? '')) {
+      addRole(checker.getSymbolAtLocation(node.name), 'module_namespace');
+    }
+    ts.forEachChild(node, seedImports);
+  };
+  seedImports(sourceFile);
   let changed = true;
   while (changed) {
     changed = false;
     const visitAliases = (node: ts.Node): void => {
       if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer !== undefined) {
-        const initializer = unwrapRuntimeExpression(node.initializer);
-        const role = ts.isIdentifier(initializer) ? roles.get(initializer.text) ?? null : directRuntimeRole(initializer);
-        if (role !== null && roles.get(node.name.text) !== role) {
-          roles.set(node.name.text, role);
-          changed = true;
-        }
+        const symbol = checker.getSymbolAtLocation(node.name);
+        for (const role of expressionRoles(node.initializer)) changed = addRole(symbol, role) || changed;
       }
       ts.forEachChild(node, visitAliases);
     };
@@ -323,21 +457,23 @@ export function discoverHeldoutRuntimeValueEdges(
     } else if (ts.isCallExpression(node)) {
       if (node.expression.kind === ts.SyntaxKind.ImportKeyword) add('dynamic_import', node.arguments[0]);
       else {
-        const direct = directRuntimeRole(node.expression);
-        const role = direct ?? (ts.isIdentifier(node.expression) ? roles.get(node.expression.text) ?? null : null);
-        if (role === 'require') add('require', node.arguments[0]);
-        else if (role === 'require_resolve') add('require_resolve', node.arguments[0]);
-        else if (role === 'import_meta_resolve') add('import_meta_resolve', node.arguments[0]);
-        else if (role === 'import_meta_glob') {
-          add(direct === null ? 'aliased_import_meta_glob' : 'import_meta_glob', node.arguments[0]);
-        } else if (role === 'import_scripts') {
+        const callRoles = expressionRoles(node.expression);
+        if (callRoles.has('require')) add('require', node.arguments[0]);
+        else if (callRoles.has('require_resolve')) add('require_resolve', node.arguments[0]);
+        else if (callRoles.has('import_meta_resolve')) add('import_meta_resolve', node.arguments[0]);
+        else if (callRoles.has('import_meta_glob')) {
+          const callee = unwrapRuntimeExpression(node.expression);
+          const direct = ts.isPropertyAccessExpression(callee) && ts.isMetaProperty(callee.expression);
+          add(direct ? 'import_meta_glob' : 'aliased_import_meta_glob', node.arguments[0]);
+        } else if (callRoles.has('import_scripts')) {
           for (const argument of node.arguments) add('import_scripts', argument);
         }
       }
     } else if (ts.isNewExpression(node)) {
-      const direct = directRuntimeRole(node.expression);
-      const role = direct ?? (ts.isIdentifier(node.expression) ? roles.get(node.expression.text) ?? null : null);
-      if (role === 'worker' || role === 'shared_worker') {
+      const constructorRoles = expressionRoles(node.expression);
+      const role = constructorRoles.has('worker') ? 'worker' :
+        constructorRoles.has('shared_worker') ? 'shared_worker' : null;
+      if (role !== null) {
         const first = node.arguments?.[0];
         if (first !== undefined && ts.isNewExpression(first) && ts.isIdentifier(first.expression) &&
           first.expression.text === 'URL') add(role, first.arguments?.[0]);
@@ -350,7 +486,7 @@ export function discoverHeldoutRuntimeValueEdges(
   return edges;
 }
 
-function candidateValueEdges(root: string): Readonly<Record<string, readonly HeldoutRuntimeValueEdge[]>> {
+export function candidateValueEdges(root: string): Readonly<Record<string, readonly HeldoutRuntimeValueEdge[]>> {
   const result: Record<string, readonly HeldoutRuntimeValueEdge[]> = {};
   const walk = (directory: string, prefix = ''): void => {
     for (const entry of readdirSync(directory, { withFileTypes: true }).sort((left, right) =>
@@ -368,6 +504,46 @@ function candidateValueEdges(root: string): Readonly<Record<string, readonly Hel
   };
   walk(root);
   return result;
+}
+
+async function candidateValueEdgesWithin(
+  root: string,
+  timeoutMs: number,
+): Promise<Readonly<Record<string, readonly HeldoutRuntimeValueEdge[]>>> {
+  const moduleUrl = pathToFileURL(fileURLToPath(import.meta.url)).href;
+  const source = [
+    "import { parentPort, workerData } from 'node:worker_threads';",
+    'try {',
+    '  const implementation = await import(workerData.moduleUrl);',
+    '  parentPort.postMessage({ ok: true, value: implementation.candidateValueEdges(workerData.root) });',
+    '} catch (error) {',
+    "  parentPort.postMessage({ ok: false, errorClass: error instanceof Error ? error.name : 'UnknownError' });",
+    '}',
+  ].join('\n');
+  const worker = new Worker(new URL(`data:text/javascript,${encodeURIComponent(source)}`), {
+    execArgv: ['--experimental-strip-types'],
+    workerData: { moduleUrl, root },
+  });
+  return await new Promise((resolveEdges, rejectEdges) => {
+    const timer = setTimeout(() => {
+      void worker.terminate();
+      rejectEdges(new TypeError(`configuration_load_failed: aggregate timeout during runtime edge discovery after ${String(timeoutMs)}ms.`));
+    }, timeoutMs);
+    worker.once('error', (error) => {
+      clearTimeout(timer);
+      rejectEdges(error);
+    });
+    worker.once('message', (message: unknown) => {
+      clearTimeout(timer);
+      void worker.terminate();
+      const record = recordValue(message);
+      if (record === null || record.ok !== true || recordValue(record.value) === null) {
+        rejectEdges(new TypeError(`configuration_load_failed: runtime edge discovery failed (${String(record?.errorClass ?? 'MalformedResponse')}).`));
+        return;
+      }
+      resolveEdges(record.value as Readonly<Record<string, readonly HeldoutRuntimeValueEdge[]>>);
+    });
+  });
 }
 
 function sharedBwrapArguments(
@@ -618,13 +794,16 @@ function parseConfigurationLoad(value: unknown): HeldoutConfigurationLoad {
 
 function parseResolution(value: unknown): HeldoutRuntimeResolution {
   const row = recordValue(value);
-  const keys = ['conditions', 'configuration', 'environment', 'importer', 'phase', 'project', 'resolvedId',
-    'seed', 'source', 'specifier', 'status'];
+  const keys = ['conditions', 'configuration', 'environment', 'importer', 'loaderKind', 'phase', 'project',
+    'resolvedId', 'seed', 'source', 'specifier', 'status'];
   if (row === null || !exactKeys(row, keys) || typeof row.configuration !== 'string' ||
     !nullableString(row.project) || typeof row.environment !== 'string' ||
     !oneOf(row.phase, ['resolve', 'transform']) || !Array.isArray(row.conditions) ||
     !row.conditions.every((item) => typeof item === 'string') || typeof row.seed !== 'string' ||
     typeof row.specifier !== 'string' || !nullableString(row.importer) || !nullableString(row.resolvedId) ||
+    !(row.loaderKind === null || oneOf(row.loaderKind, ['static_import', 're_export', 'import_equals',
+      'dynamic_import', 'require', 'require_resolve', 'import_meta_resolve', 'import_meta_glob',
+      'aliased_import_meta_glob', 'worker', 'shared_worker', 'import_scripts'])) ||
     !oneOf(row.source, ['graph', 'transformed', 'alias_key', 'protected_control']) ||
     !oneOf(row.status, ['clean', 'resolved', 'protected', 'unresolved', 'control', 'external_builtin',
       'external_dependency'])) throw new TypeError('Malformed resolution row.');
@@ -638,6 +817,7 @@ function parseResolution(value: unknown): HeldoutRuntimeResolution {
     specifier: row.specifier,
     importer: row.importer,
     resolvedId: row.resolvedId,
+    loaderKind: row.loaderKind,
     source: row.source,
     status: row.status,
   };
@@ -673,16 +853,20 @@ export function parseHeldoutWorkerReport(
   const configurationLoad = Reflect.get(value, 'configurationLoad');
   const resolutionRows = Reflect.get(value, 'resolution');
   const seedAssignments = Reflect.get(value, 'seedAssignments');
+  const loadedConfigurationFiles = Reflect.get(value, 'loadedConfigurationFiles');
   const findings = Reflect.get(value, 'findings');
   const record = recordValue(value);
   if (record === null || !exactKeys(record,
-    ['astInspectedFiles', 'completed', 'configurationLoad', 'eligibleFiles', 'findings', 'protocol', 'resolution',
-      'seedAssignments', 'slice']) ||
+    ['astInspectedFiles', 'completed', 'configurationLoad', 'eligibleFiles', 'findings',
+      'loadedConfigurationFiles', 'protocol', 'resolution', 'seedAssignments', 'slice']) ||
     slice !== expectedSlice || record.completed !== true ||
     typeof record.eligibleFiles !== 'number' || !Number.isSafeInteger(record.eligibleFiles) ||
     typeof record.astInspectedFiles !== 'number' || !Number.isSafeInteger(record.astInspectedFiles) ||
     record.eligibleFiles < 0 || record.astInspectedFiles !== record.eligibleFiles ||
     !Array.isArray(configurationLoad) || !Array.isArray(resolutionRows) ||
+    !Array.isArray(loadedConfigurationFiles) ||
+    !loadedConfigurationFiles.every((path) => typeof path === 'string' && !path.startsWith('/') &&
+      !path.split('/').includes('..')) ||
     !Array.isArray(seedAssignments) || !Array.isArray(findings)) {
     throw new TypeError('Runtime guard emitted malformed report fields.');
   }
@@ -699,6 +883,7 @@ export function parseHeldoutWorkerReport(
     configurationLoad: parsedLoads,
     resolution: resolutionRows.map(parseResolution),
     seedAssignments: seedAssignments.map(parseSeedAssignment),
+    loadedConfigurationFiles: [...loadedConfigurationFiles],
     findings: findings.map(parseFinding),
   };
 }
@@ -748,6 +933,7 @@ export async function runHeldoutRuntimeGuard(
       }],
       resolution: [],
       seedAssignments: [],
+      loadedConfigurationFiles: [],
       findings: [{ path: '<preflight>', kind: 'configuration_load_failed', detail }],
     };
   }
@@ -770,13 +956,27 @@ export async function runHeldoutRuntimeGuard(
     rmSync(scratchRoot, { recursive: true, force: true });
     throw new TypeError('configuration_load_failed: candidate node_modules mount point is missing.');
   }
+  const aggregateTimeout = request.aggregateTimeoutMs ?? HELDOUT_RUNTIME_AGGREGATE_TIMEOUT_MS;
+  const aggregateStartedAt = Date.now();
+  let valueEdges: Readonly<Record<string, readonly HeldoutRuntimeValueEdge[]>>;
+  try {
+    valueEdges = await candidateValueEdgesWithin(root, aggregateTimeout);
+  } catch (error: unknown) {
+    rmSync(scratchRoot, { recursive: true, force: true });
+    throw error;
+  }
+  const remainingTimeout = aggregateTimeout - (Date.now() - aggregateStartedAt);
+  if (remainingTimeout < 1) {
+    rmSync(scratchRoot, { recursive: true, force: true });
+    throw new TypeError(`configuration_load_failed: aggregate timeout after ${String(aggregateTimeout)}ms during runtime edge discovery.`);
+  }
   const workerRequest: WorkerRequest = {
     protocol: HELDOUT_RUNTIME_PROTOCOL,
     slice: request.slice,
     bindings: request.bindings,
     phaseTimeoutMs: request.phaseTimeoutMs ?? HELDOUT_RUNTIME_PHASE_TIMEOUT_MS,
     trustedLockDigest: sha256(trustedLock),
-    valueEdges: candidateValueEdges(root),
+    valueEdges,
   };
   const args = [
     `--nproc=${String(preflight.nprocLimit)}`, '--nofile=1024', '--fsize=16777216', '--cpu=300', '--',
@@ -803,7 +1003,6 @@ export async function runHeldoutRuntimeGuard(
     const diagnosticsPromise = collectPipe(runningChild.stdout, 4 * 1024 * 1024);
     const errorsPromise = collectPipe(runningChild.stderr, 4 * 1024 * 1024);
     runningChild.stdin.end(JSON.stringify(workerRequest));
-    const aggregateTimeout = request.aggregateTimeoutMs ?? HELDOUT_RUNTIME_AGGREGATE_TIMEOUT_MS;
     const exitPromise = new Promise<{ readonly code: number | null; readonly signal: NodeJS.Signals | null }>((resolveExit, rejectExit) => {
       let timedOut = false;
       const timer = setTimeout(() => {
@@ -813,7 +1012,7 @@ export async function runHeldoutRuntimeGuard(
         } catch {
           runningChild.kill('SIGKILL');
         }
-      }, aggregateTimeout);
+      }, remainingTimeout);
       runningChild.once('error', (error) => {
         clearTimeout(timer);
         rejectExit(error);

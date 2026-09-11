@@ -250,6 +250,25 @@ function canonicalId(id) {
   return value.replaceAll('/work/', '<candidate>/').replace(/^\/work$/u, '<candidate>');
 }
 
+function canonicalFilesystemIdentity(id) {
+  const bare = withoutQuery(id);
+  const suffix = id.slice(bare.length);
+  let path = bare;
+  if (path.startsWith('file:')) {
+    try {
+      path = fileURLToPath(path);
+    } catch {
+      return id;
+    }
+  }
+  if (!path.startsWith('/')) return id;
+  try {
+    return `${realpathSync(path)}${suffix}`;
+  } catch {
+    return id;
+  }
+}
+
 function decodedViteInternalId(id) {
   if (id.startsWith('/@id/__x00__')) return `\0${id.slice('/@id/__x00__'.length)}`;
   if (id.startsWith('/@id/')) return id.slice('/@id/'.length);
@@ -311,7 +330,8 @@ function builtinSpecifier(specifier) {
     specifier.startsWith(browserExternalPrefix) && BUILTINS.has(specifier.slice(browserExternalPrefix.length));
 }
 
-function externalBoundary(specifier, id, external) {
+function externalBoundary(specifier, canonicalIdentity, external) {
+  const id = canonicalIdentity;
   if (builtinSpecifier(id) || (id === specifier && builtinSpecifier(specifier))) {
     return { status: 'external_builtin', canonical: id };
   }
@@ -412,6 +432,7 @@ async function main() {
   const configurationLoad = [];
   const resolution = [];
   const seedAssignments = [];
+  const loadedConfigurationFiles = new Set();
   const findings = [];
   const closedContainers = new WeakSet();
   const seeds = sourceSeeds();
@@ -433,18 +454,19 @@ async function main() {
   recordLoad('<preflight>', 'preflight', null, 'isolation', 'loaded', null);
 
   const addResolution = (row) => {
-    resolution.push(row);
-    if (row.status === 'protected' && row.source !== 'protected_control') {
+    const completeRow = { loaderKind: null, ...row };
+    resolution.push(completeRow);
+    if (completeRow.status === 'protected' && completeRow.source !== 'protected_control') {
       findings.push({
-        path: row.importer ?? row.configuration,
+        path: completeRow.importer ?? completeRow.configuration,
         kind: 'runtime_protocol_resolution',
-        detail: `${row.specifier} resolved to ${row.resolvedId ?? '<unresolved>'} in ${row.environment}`,
+        detail: `${completeRow.specifier} resolved to ${completeRow.resolvedId ?? '<unresolved>'} in ${completeRow.environment}`,
       });
-    } else if (row.status === 'unresolved' && row.source !== 'protected_control') {
+    } else if (completeRow.status === 'unresolved' && completeRow.source !== 'protected_control') {
       findings.push({
-        path: row.importer ?? row.configuration,
+        path: completeRow.importer ?? completeRow.configuration,
         kind: 'unresolved_module_edge',
-        detail: `${row.specifier} was unresolved in ${row.environment}`,
+        detail: `${completeRow.specifier} was unresolved in ${completeRow.environment}`,
       });
     }
   };
@@ -486,6 +508,7 @@ async function main() {
     const assigned = includeSeeds
       ? seeds.filter((seed) => seed.startsWith('src/') || serverStyle)
       : [];
+    const assignedIdentities = new Set(assigned.map((seed) => `/work/${seed}`));
     const conditions = conditionsFor(environment);
     for (const seed of assigned) {
       seedAssignments.push({ seed, configuration, project, environment: name });
@@ -495,17 +518,20 @@ async function main() {
       id: `/work/${seed}`,
       seed,
       source: 'graph',
+      loaderKind: null,
     }));
     const importerForAliases = assigned[0] === undefined ? '/work/src/main.ts' : `/work/${assigned[0]}`;
     for (const alias of aliasEntries) {
       if (typeof alias.find !== 'string') continue;
-      queue.push({ id: importerForAliases, seed: '<alias-key>', source: 'alias_key', specifier: alias.find });
+      queue.push({ id: importerForAliases, seed: '<alias-key>', source: 'alias_key', specifier: alias.find,
+        loaderKind: 'static_import' });
     }
     queue.push({
       id: importerForAliases,
       seed: '<protected-control>',
       source: 'protected_control',
       specifier: '/src/vtt/heldout-evaluation.ts',
+      loaderKind: 'static_import',
     });
     const addUnresolvedEdge = (current, specifier, source = current.source) => {
       addResolution({
@@ -519,6 +545,7 @@ async function main() {
         importer: canonicalId(current.id),
         resolvedId: null,
         source,
+        loaderKind: current.loaderKind,
         status: 'unresolved',
       });
     };
@@ -529,17 +556,22 @@ async function main() {
       if (current.specifier !== undefined) {
         let resolvedResult;
         try {
-          resolvedResult = await environment.pluginContainer.resolveId(current.specifier, current.id);
+          const isRequire = current.loaderKind === 'require' || current.loaderKind === 'require_resolve' ||
+            current.loaderKind === 'import_equals';
+          resolvedResult = await environment.pluginContainer.resolveId(current.specifier, current.id, isRequire
+            ? { custom: { 'node-resolve': { isRequire: true } } }
+            : undefined);
         } catch {
           resolvedResult = null;
         }
         const resolvedId = resolvedResult?.id ?? null;
-        const boundary = resolvedId === null ? null : externalBoundary(
+        const canonicalIdentity = resolvedId === null ? null : canonicalFilesystemIdentity(resolvedId);
+        const boundary = canonicalIdentity === null ? null : externalBoundary(
           current.specifier,
-          resolvedId,
+          canonicalIdentity,
           resolvedResult?.external === true,
         );
-        const identity = boundary?.canonical ?? resolvedId;
+        const identity = boundary?.canonical ?? canonicalIdentity;
         let status;
         if (identity !== null && protectedIdentity(identity, request.bindings)) {
           status = current.source === 'protected_control' ? 'control' : 'protected';
@@ -561,14 +593,22 @@ async function main() {
           importer: canonicalId(current.id),
           resolvedId: canonicalId(identity),
           source: current.source,
+          loaderKind: current.loaderKind,
           status,
         });
         if (status === 'unresolved' || status === 'protected' || status === 'control' ||
           status === 'external_builtin' || status === 'external_dependency' || resolvedId === null) continue;
+        if (withoutQuery(resolvedId) === resolvedId && assignedIdentities.has(withoutQuery(canonicalIdentity ?? resolvedId))) {
+          // Every eligible candidate source is an explicit environment seed. Its
+          // own deterministic seed visit supplies transform evidence without
+          // recursively multiplying provenance through the whole source graph.
+          continue;
+        }
         queue.push({
           id: resolvedId,
           seed: current.seed,
           source: current.source,
+          loaderKind: current.loaderKind,
           requested: { specifier: current.specifier, importer: current.id },
         });
         continue;
@@ -593,10 +633,11 @@ async function main() {
           } else {
             const internalId = decodedViteInternalId(edge.specifier);
             if (internalId === null) {
-              queue.push({ id: current.id, seed: current.seed, source: current.source, specifier: edge.specifier });
+              queue.push({ id: current.id, seed: current.seed, source: current.source, specifier: edge.specifier,
+                loaderKind: edge.kind });
             } else {
               queue.push({ id: internalId, seed: current.seed, source: current.source,
-                requested: { specifier: edge.specifier, importer: current.id } });
+                loaderKind: edge.kind, requested: { specifier: edge.specifier, importer: current.id } });
             }
           }
         }
@@ -614,6 +655,7 @@ async function main() {
               importer: canonicalId(current.id),
               resolvedId: null,
               source: 'transformed',
+              loaderKind: 'import_meta_glob',
               status: 'unresolved',
             });
           }
@@ -653,6 +695,7 @@ async function main() {
           importer: canonicalId(current.requested?.importer ?? current.id),
           resolvedId: null,
           source: current.source === 'graph' ? 'transformed' : current.source,
+          loaderKind: current.loaderKind,
           status: 'unresolved',
         });
         continue;
@@ -668,13 +711,25 @@ async function main() {
         importer: canonicalId(current.requested?.importer ?? current.id),
         resolvedId: canonicalId(current.id),
         source: current.source === 'graph' ? 'transformed' : current.source,
+        loaderKind: current.loaderKind,
         status: protectedIdentity(current.id, request.bindings) ||
           textContainsReserveDigest(transformed.code, request.bindings.reserveDigests)
           ? current.source === 'protected_control' ? 'control' : 'protected'
           : 'clean',
       });
       for (const edge of runtimeEdges(ts, current.id, transformed.code)) {
-        queue.push({ id: current.id, seed: current.seed, source: 'transformed', specifier: edge.specifier });
+        queue.push({ id: current.id, seed: current.seed, source: 'transformed', specifier: edge.specifier,
+          loaderKind: edge.kind });
+      }
+      for (const [kind, dependencies] of [
+        ['static_import', transformed.deps],
+        ['dynamic_import', transformed.dynamicDeps],
+      ]) {
+        if (!Array.isArray(dependencies)) continue;
+        for (const dependency of [...dependencies].filter((value) => typeof value === 'string').sort()) {
+          queue.push({ id: current.id, seed: current.seed, source: 'transformed', specifier: dependency,
+            loaderKind: kind });
+        }
       }
     }
   };
@@ -683,6 +738,8 @@ async function main() {
     if (server.httpServer !== null) throw new TypeError('guard_server_listening');
     if (!optimizerIsDisabled(server)) throw new TypeError('optimizer_not_disabled');
     const aliases = Array.isArray(server.config.resolve.alias) ? server.config.resolve.alias : [];
+    const loadedConfig = typeof server.config.configFile === 'string' ? realpathSync(server.config.configFile) : null;
+    if (loadedConfig?.startsWith('/work/') === true) loadedConfigurationFiles.add(loadedConfig.slice('/work/'.length));
     for (const [name, environment] of Object.entries(server.environments).sort(([left], [right]) => left.localeCompare(right))) {
       await inspectEnvironment(configuration, project, name, environment, aliases, includeSeeds);
       recordLoad(configuration, kind, project, name, 'loaded', null);
@@ -789,6 +846,7 @@ async function main() {
     configurationLoad: configurationLoad.sort((left, right) => rowKey(left).localeCompare(rowKey(right))),
     resolution: sortedResolution,
     seedAssignments: sortedAssignments,
+    loadedConfigurationFiles: [...loadedConfigurationFiles].sort(),
     findings: [...new Map(findings.sort((left, right) => rowKey(left).localeCompare(rowKey(right)))
       .map((row) => [rowKey(row), row])).values()],
   };
