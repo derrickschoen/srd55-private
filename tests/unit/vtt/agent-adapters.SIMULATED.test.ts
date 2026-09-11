@@ -371,7 +371,7 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
       const launcherToken = resolve(directory, 'launcher.json');
       const dispatchId = `engine-dispatch:${kind}-readiness-0001`;
       writeFileSync(launcherToken, JSON.stringify({
-        dispatchId, readinessSpoolPath, toolProfile: 'blind', dispatchPhase: 'primary',
+        dispatchId, readinessSpoolPath: 'readiness.jsonl', toolProfile: 'blind', dispatchPhase: 'primary',
         requestId: 'request:readiness-conflict',
       }), 'utf8');
       writeFileSync(readinessSpoolPath, kind === 'malformed' ? '{"version":\n' : `${JSON.stringify({

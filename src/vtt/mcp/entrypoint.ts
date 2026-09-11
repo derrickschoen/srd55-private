@@ -2,7 +2,7 @@ import { createInterface } from 'node:readline';
 import { createHash } from 'node:crypto';
 import { appendFileSync, readFileSync } from 'node:fs';
 import { readFile, realpath } from 'node:fs/promises';
-import { isAbsolute, relative, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { canonicalJson } from '../../commands/canonical-json';
 import type { EncounterState } from '../../combat/encounter';
 import {
@@ -1068,13 +1068,20 @@ export function reconstructLauncherOfferEnvironment(
 }
 
 async function launcherManifest(path: string): Promise<DecodedEngineMcpLauncherManifest | null> {
+  const absoluteLauncherPath = resolve(path);
   let decoded: unknown;
   try {
-    decoded = JSON.parse(await readFile(resolve(path), 'utf8')) as unknown;
+    decoded = JSON.parse(await readFile(absoluteLauncherPath, 'utf8')) as unknown;
   } catch {
     return null;
   }
-  return decodeEngineMcpEntrypointDocument(decoded, decodeArenaFixture);
+  const manifest = decodeEngineMcpEntrypointDocument(decoded, decodeArenaFixture);
+  return manifest?.readinessSpoolPath === undefined || isAbsolute(manifest.readinessSpoolPath)
+    ? manifest
+    : {
+        ...manifest,
+        readinessSpoolPath: resolve(dirname(absoluteLauncherPath), manifest.readinessSpoolPath),
+      };
 }
 
 function kbReadRecords(path: string): readonly KbReadRecord[] {

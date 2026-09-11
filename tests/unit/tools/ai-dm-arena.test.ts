@@ -1,4 +1,4 @@
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
@@ -300,12 +300,13 @@ async function prepareActualPrimaryByteEvidence(): Promise<{
     throw new Error('Actual primary launcher omitted readiness instrumentation.');
   }
   if (manifest.dispatchId !== invocation.engineDispatchId) throw new Error('Primary launcher dispatch identity diverged.');
+  const readinessSpoolPath = resolve(dirname(invocation.launcherToken), manifest.readinessSpoolPath);
   const runtime = createEngineMcpRuntime(PREPATCH_BYTE_STATE, {
     runId: manifest.runId, branchId: manifest.branchId, revision: manifest.revision,
     requestId: manifest.requestId, phase: manifest.phase, correctionNumber: manifest.correctionNumber,
     room: manifest.room, historyKind: manifest.historyKind, toolProfile: 'blind', dmMode: 'blind',
     readinessEvidence: {
-      spoolPath: manifest.readinessSpoolPath, dispatchId: manifest.dispatchId,
+      spoolPath: readinessSpoolPath, dispatchId: manifest.dispatchId,
       phase: manifest.dispatchPhase, profile: 'blind', requestId: manifest.requestId,
     },
   });
@@ -321,13 +322,13 @@ async function prepareActualPrimaryByteEvidence(): Promise<{
     requestId: manifest.requestId, phase: manifest.phase, correctionNumber: manifest.correctionNumber,
     room: manifest.room, historyKind: manifest.historyKind, toolProfile: 'blind', dmMode: 'blind',
     readinessEvidence: {
-      spoolPath: manifest.readinessSpoolPath, dispatchId: manifest.dispatchId,
+      spoolPath: readinessSpoolPath, dispatchId: manifest.dispatchId,
       phase: manifest.dispatchPhase, profile: 'blind', requestId: manifest.requestId,
     },
   }, async (response) => { responses.push(response); });
   const toolsResponse = objectValue(responses[0], 'tools/list response');
   const result = objectValue(toolsResponse['result'], 'tools/list result');
-  const readinessEvents = readFileSync(manifest.readinessSpoolPath, 'utf8').trim().split('\n')
+  const readinessEvents = readFileSync(readinessSpoolPath, 'utf8').trim().split('\n')
     .map((line) => String(objectValue(JSON.parse(line) as unknown, 'readiness event')['event']));
   return {
     prompt: invocation.prompt,

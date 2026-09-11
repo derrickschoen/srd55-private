@@ -1,6 +1,6 @@
 import { open, readFile, readdir, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { basename, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, resolve } from 'node:path';
 import { agentSessionIdFromCli, contextTokenCount, engineDispatchId, turnInputTotal } from '../agent-session';
 import type {
   AgentInvocation,
@@ -464,8 +464,11 @@ async function codexCatalogEvidence(
   const readiness: EngineReadinessRecord[] = [];
   let malformedReadiness = false;
   if (typeof readinessPath === 'string') {
+    const resolvedReadinessPath = isAbsolute(readinessPath)
+      ? readinessPath
+      : resolve(dirname(resolve(launcherPath)), readinessPath);
     try {
-      const source = await readFile(readinessPath, 'utf8');
+      const source = await readFile(resolvedReadinessPath, 'utf8');
       for (const line of source.split('\n')) {
         if (line.trim().length === 0) continue;
         try {

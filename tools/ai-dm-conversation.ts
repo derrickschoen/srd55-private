@@ -3213,6 +3213,29 @@ function isPlanAdjustmentProposal(value: unknown): value is PlanAdjustmentPropos
     typeof input['baseline_plan_hash'] === 'string' && Array.isArray(input['updates']);
 }
 
+export function authorizedRoundProposalHashInput(proposal: RoundTurnProposalEnvelope): string {
+  const input: RoundTurnProposalEnvelope = {
+    kind: proposal.kind,
+    proposalId: proposal.proposalId,
+    runId: proposal.runId,
+    branchId: proposal.branchId,
+    requestId: proposal.requestId,
+    expectedRevision: proposal.expectedRevision,
+    stateDigest: proposal.stateDigest,
+    stateHandle: proposal.stateHandle,
+    phase: proposal.phase,
+    idempotencyKey: proposal.idempotencyKey,
+    resolutions: proposal.resolutions,
+    rationale: proposal.rationale,
+    reactionGuidance: proposal.reactionGuidance,
+    ...(proposal.submittedArguments === undefined ? {} : {
+      submittedArguments: proposal.submittedArguments,
+    }),
+    ...(proposal.intelCapture === undefined ? {} : { intelCapture: proposal.intelCapture }),
+  };
+  return canonicalJson(input);
+}
+
 function isSpeculativePlan(value: unknown): value is QueuedSpeculativePlanEnvelope {
   const input = asRecord(value);
   return input?.['kind'] === 'speculative_round_plan' &&
@@ -3382,7 +3405,7 @@ async function writeLauncher(input: {
   const dispatchId = engineDispatchId(`engine-dispatch:${randomUUID()}`);
   const manifest: EngineMcpLauncherManifest = {
     format: 'engine-mcp-launcher-v1', fixturePath, proposalSpoolPath: spoolPath,
-    readinessSpoolPath, dispatchId, dispatchPhase,
+    readinessSpoolPath: relative(input.directory, readinessSpoolPath), dispatchId, dispatchPhase,
     turnContextSpoolPath,
     ...(input.kbRead === undefined ? {} : {
       kbReadSpoolPath: input.kbRead.spoolPath,
@@ -3443,7 +3466,7 @@ async function writeLauncher(input: {
     ...baseFullManifest,
     proposalSpoolPath: recoverySpoolPath,
     turnContextSpoolPath: recoveryTurnContextSpoolPath,
-    readinessSpoolPath: recoveryReadinessSpoolPath,
+    readinessSpoolPath: relative(input.directory, recoveryReadinessSpoolPath),
     dispatchId: engineDispatchId(`engine-dispatch:${randomUUID()}`),
     ...(recoveryBlindIntentSpoolPath === null ? {} : { blindIntentSpoolPath: recoveryBlindIntentSpoolPath }),
     ...(recoveryBlindIngressSpoolPath === null ? {} : { blindIngressSpoolPath: recoveryBlindIngressSpoolPath }),
@@ -5939,7 +5962,7 @@ async function runConversationWithConfiguredIntel(
               return 'invalid';
             }
             proposalId = proposal.proposalId;
-            authorizedMonsterProposalHash = sha256(canonicalJson(proposal));
+            authorizedMonsterProposalHash = sha256(authorizedRoundProposalHashInput(proposal));
             acceptedSubmission = proposal.resolutions.map((entry) => structuredClone(entry.proposal));
             acceptedIntelCapture = proposal.intelCapture === undefined
               ? null : structuredClone(proposal.intelCapture);
