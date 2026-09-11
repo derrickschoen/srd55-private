@@ -1,0 +1,20 @@
+No new findings. S6-F73–F75 are resolved. This ACCEPT closes S6a/S6b/S6c.
+
+### Verified claims
+
+- **S6-F73 resolved:** caller getter values are no longer retained for correlation or duplicate checking. Pending requests use single-use invocations; IDs come from Worker-established responses or receipts. Receipt metadata is recorded before observers run. The changing-getter regression covers both a read response and a committed mutation whose observer closes the transport. [worker-transport.ts:67](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/handoff/worker-transport.ts:67), [worker-transport.ts:127](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/handoff/worker-transport.ts:127), [worker-boundary.test.ts:292](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/tests/unit/vtt/worker-boundary.test.ts:292)
+
+- **S6-F74 resolved:** successful-open recognition uses the authoritative response. Failed responses cannot trigger it; current v1 snapshot and mutation results do not have the session-open result shape, and client parameters are not echoed into that shape. JSON and byte regressions require unauthorized-open refusal, `open` status after authorization, revision-zero initial state, autonomous progression and successful offered movement. [worker-messages.ts:47](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/handoff/worker-messages.ts:47), [protocol-runtime.ts:431](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/handoff/protocol-runtime.ts:431), [worker-entry.ts:211](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/handoff/worker-entry.ts:211), [worker-boundary.test.ts:334](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/tests/unit/vtt/worker-boundary.test.ts:334)
+
+- **S6-F75 resolved:** expected peer closure now performs transport-local cleanup; Worker failures retain Worker-wide cleanup. Shutdown preserves established receipts and rejects requests lacking one. The new regression exercises the production host factory with real port/service adapters, preserving K’s receipt, keeping L usable, recreating K and checking last-binding termination. [worker-transport.ts:201](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/handoff/worker-transport.ts:201), [worker-transport.ts:222](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/handoff/worker-transport.ts:222), [worker-boundary.test.ts:572](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/tests/unit/vtt/worker-boundary.test.ts:572)
+
+- **Last-binding lifecycle is coherent:** removal, emptiness checking and termination are synchronous. A connection established before cleanup is counted; once termination begins, subsequent connections are refused. No asynchronous gap separates the emptiness check from termination. [worker-transport.ts:292](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/handoff/worker-transport.ts:292), [worker-transport.ts:313](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/handoff/worker-transport.ts:313)
+
+- **Test replacement is justified:** equality with a pre-clone caller ID is no longer a valid invariant. The replacement checks rejection of an unknown invocation, while malformed-envelope rejection remains separately covered. No required malformed-message coverage was lost. [worker-boundary.test.ts:171](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/tests/unit/vtt/worker-boundary.test.ts:171), [worker-boundary.test.ts:191](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/tests/unit/vtt/worker-boundary.test.ts:191)
+
+- **The wait change preserves the assertion:** `vi.waitFor` retains exact equality with `['closed']`; no timeout override was added. [worker-boundary.test.ts:747](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/tests/unit/vtt/worker-boundary.test.ts:747)
+
+The four-file diff introduces no identified regression of the previously verified behavior. S8 surfaces remain untouched; frozen-contract and example hashes match. No prohibited additions were found. I ran no tests or builds.
+
+VERDICT: ACCEPT
+review complete

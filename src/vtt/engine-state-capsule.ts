@@ -35,6 +35,11 @@ import type {
 import type { PlanMaterialityReasonCode } from './plan-materiality';
 import type { EngineOfferableOption } from './turn-proposal';
 import type { EncounterTimelineProjection } from './session-timeline';
+import {
+  createLegacyEngineOptionEnvironmentBinding,
+  decodeEngineOptionEnvironmentBinding,
+  type EngineOptionEnvironmentBinding,
+} from './offers/offer-environment';
 export const ENGINE_INITIATIVE_PROJECTION_POLICY = 'initiative-intel-v1' as const;
 
 export interface EngineInitiativeProjection {
@@ -190,12 +195,13 @@ export interface RuleReference {
 
 export interface EngineStateCapsule {
   readonly format: 'engine-mcp-state-capsule';
-  readonly schemaVersion: 3;
+  readonly schemaVersion: 4;
   readonly runId: EncounterSessionId;
   readonly branchId: EncounterBranchId;
   readonly revision: number;
   readonly digest: string;
   readonly generatedAt: string;
+  readonly offerEnvironment: EngineOptionEnvironmentBinding;
   readonly request: EngineCapsuleRequest | null;
   readonly projection: EngineDmProjection;
   readonly historyDelta: readonly EngineHistoryEntry[];
@@ -585,15 +591,15 @@ function decodeEngineProjection(value: unknown): EngineDmProjection {
   return structuredClone(record) as unknown as EngineDmProjection;
 }
 
-/** Strict schema-3 decoder. Digest verification happens only after shape and semantics. */
+/** Strict schema-4 decoder. Digest verification happens only after shape and semantics. */
 export function decodeEngineStateCapsule(value: unknown): EngineStateCapsule {
   const record = capsuleRecord(value, 'engine state capsule');
-  if (record['schemaVersion'] !== 3) {
-    throw new EngineStateCapsuleDecodeError('unsupported_version', 'Only engine state capsule schema 3 is accepted.');
+  if (record['schemaVersion'] !== 4) {
+    throw new EngineStateCapsuleDecodeError('unsupported_version', 'Only engine state capsule schema 4 is accepted.');
   }
   exactCapsuleKeys(record, [
     'format', 'schemaVersion', 'runId', 'branchId', 'revision', 'digest', 'generatedAt',
-    'request', 'projection', 'historyDelta', 'rulesIndex',
+    'offerEnvironment', 'request', 'projection', 'historyDelta', 'rulesIndex',
   ], 'engine state capsule');
   if (record['format'] !== 'engine-mcp-state-capsule') {
     throw new EngineStateCapsuleDecodeError('invalid_schema', 'Engine state capsule format is invalid.');
@@ -608,6 +614,14 @@ export function decodeEngineStateCapsule(value: unknown): EngineStateCapsule {
   const generatedAt = capsuleText(record['generatedAt'], 'generatedAt', 100);
   if (Number.isNaN(Date.parse(generatedAt)) || new Date(generatedAt).toISOString() !== generatedAt) {
     throw new EngineStateCapsuleDecodeError('invalid_schema', 'Capsule generatedAt must be canonical ISO date-time text.');
+  }
+  try {
+    decodeEngineOptionEnvironmentBinding(record['offerEnvironment']);
+  } catch (error) {
+    throw new EngineStateCapsuleDecodeError(
+      'invalid_schema',
+      error instanceof Error ? error.message : 'Capsule offer environment is invalid.',
+    );
   }
   decodeCapsuleRequest(record['request']);
   decodeEngineProjection(record['projection']);
@@ -882,7 +896,7 @@ function assertPlanAdjustmentRequest(
   }
 }
 
-export function createEngineStateCapsule(input: {
+interface EngineStateCapsuleInput {
   readonly runId: EncounterSessionId;
   readonly branchId: EncounterBranchId;
   readonly revision: number;
@@ -891,7 +905,11 @@ export function createEngineStateCapsule(input: {
   readonly projection: EngineDmProjection;
   readonly historyDelta?: readonly EngineHistoryEntry[];
   readonly rulesIndex?: readonly RuleReference[];
-}): EngineStateCapsule {
+}
+
+export function createEngineStateCapsuleForEnvironment(
+  input: EngineStateCapsuleInput & { readonly offerEnvironment: EngineOptionEnvironmentBinding },
+): EngineStateCapsule {
   if (!Number.isSafeInteger(input.revision) || input.revision < 1) {
     throw new TypeError('Capsule revision must be a positive safe integer.');
   }
@@ -905,10 +923,11 @@ export function createEngineStateCapsule(input: {
   }
   const body: CapsuleDigestInput = {
     format: 'engine-mcp-state-capsule',
-    schemaVersion: 3,
+    schemaVersion: 4,
     runId: input.runId,
     branchId: input.branchId,
     revision: input.revision,
+    offerEnvironment: decodeEngineOptionEnvironmentBinding(input.offerEnvironment),
     request: input.request === null ? null : structuredClone(input.request),
     projection: structuredClone(input.projection),
     historyDelta: structuredClone(input.historyDelta ?? []),
@@ -918,6 +937,14 @@ export function createEngineStateCapsule(input: {
     ...body,
     digest: digestFor(body),
     generatedAt: new Date(input.generatedAt).toISOString(),
+  });
+}
+
+/** Transitional Slice-2 legacy constructor; the emitted schema-4 binding is never absent. */
+export function createEngineStateCapsule(input: EngineStateCapsuleInput): EngineStateCapsule {
+  return createEngineStateCapsuleForEnvironment({
+    ...input,
+    offerEnvironment: createLegacyEngineOptionEnvironmentBinding(),
   });
 }
 

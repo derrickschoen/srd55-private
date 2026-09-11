@@ -1,0 +1,32 @@
+**F80 — SIGNIFICANT — F73 remains partially resolved: staged hashes are not checked against result provenance.**  
+**Fixable in the second (final) round? yes.**
+
+`verifyReview()` compares provenance **paths** with manifest paths, then compares payload hashes only with the review manifest. It never compares them with `result.provenance.files[].sha256`. Changing a staged payload and updating its manifest hash, size and total therefore passes while the copied result still declares different bytes. Validating the original inbox separately does not establish this missing relationship. Evidence: [art-stage.ts:178](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff-s9/tools/vtt-handoff/art-stage.ts:178), [art-stage.ts:184](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff-s9/tools/vtt-handoff/art-stage.ts:184), [art-stage.ts:201](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff-s9/tools/vtt-handoff/art-stage.ts:201).
+
+Require each staged payload’s computed hash to match its result provenance entry as well as its manifest entry. Add a regression that changes payload bytes and consistently updates the review manifest, leaving the result and inbox unchanged. The existing control changes only the manifest hash and therefore misses this case: [art-stage.test.ts:249](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff-s9/tests/unit/vtt/art-stage.test.ts:249).
+
+**F81 — SIGNIFICANT — F74’s production fix is present, but its regression is not bounded.**  
+**Fixable in the second (final) round? yes.**
+
+The FIFO test calls synchronous staging in the test process and checks elapsed time only after it returns. If `O_NONBLOCK` disappears, opening the unwritten FIFO blocks before either assertion can complete; an ordinary asynchronous test timeout cannot interrupt that synchronous operation. Evidence: [art-stage.test.ts:257](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff-s9/tests/unit/vtt/art-stage.test.ts:257). Production currently correctly opens nonblocking before checking the file type: [safe-files.ts:146](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff-s9/tools/vtt-handoff/safe-files.ts:146).
+
+Run the staging attempt in a child process with an enforced termination deadline and no FIFO writer. Assert prompt regular-file refusal and no completion manifest. Removing `O_NONBLOCK` must produce a bounded test failure, not hang the runner.
+
+### Verified claims
+
+- **F69 resolved:** independent nine-ID and transparency literals replace implementation-derived expectations; generated requests are checked against the published JSON Schema. [art-request.test.ts:24](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff-s9/tests/unit/vtt/art-request.test.ts:24)
+- **F70 resolved:** manifests must occupy `art/inbox/<uuid>.result.json`; payload reads are anchored beneath that request’s directory. [art-validator.ts:113](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff-s9/tools/vtt-handoff/art-validator.ts:113)
+- **F71 resolved:** facing coverage no longer imposes global frame-index uniqueness; independently authored tests accept index-zero reuse and multiple animation frames while rejecting duplicate composite identities. [art-validator.ts:96](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff-s9/tools/vtt-handoff/art-validator.ts:96), [art-validator.test.ts:230](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff-s9/tests/unit/vtt/art-validator.test.ts:230)
+- **F72 resolved:** promotion uses atomic no-replace linking followed by directory fsync; interruption and destination-substitution controls check absence or surviving bytes. [safe-files.ts:289](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff-s9/tools/vtt-handoff/safe-files.ts:289), [art-request.test.ts:73](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff-s9/tests/unit/vtt/art-request.test.ts:73), [art-stage.test.ts:205](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff-s9/tests/unit/vtt/art-stage.test.ts:205)
+- **F73 partially resolved:** request/result copies and payloads are rechecked before manifest publication; malformed, missing and simple hash-tampered review controls are present. F80 identifies the remaining provenance gap. [art-stage.ts:133](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff-s9/tools/vtt-handoff/art-stage.ts:133)
+- **F74 partially resolved:** nonblocking regular-file validation is correct; F81 concerns the regression’s ability to fail safely.
+- **F75 resolved:** the swap occurs before the child open after parent retention. Anchored traversal rejects before an outside read; ordinary pathname traversal demonstrates the outside read. [art-stage.test.ts:269](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff-s9/tests/unit/vtt/art-stage.test.ts:269)
+- **F76 resolved:** raw chunk-type bytes are checked before ASCII decoding, with the requested CRC-correct high-bit control. [png-validator.ts:66](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff-s9/tools/vtt-handoff/png-validator.ts:66), [png-validator.test.ts:101](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff-s9/tests/unit/vtt/png-validator.test.ts:101)
+- **F77 resolved:** multirow predictor fixtures fail when filters 1–4 become filter zero; the compressed input exceeds an enforced inflate-output bound, and truncated deflate is separately rejected. [png-validator.test.ts:49](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff-s9/tests/unit/vtt/png-validator.test.ts:49), [png-validator.test.ts:124](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff-s9/tests/unit/vtt/png-validator.test.ts:124)
+- **F78 resolved:** cleanup tracks successful creation and checks identity/content; both exact-name collision regressions preserve existing bytes. [windows-probe.ts:57](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff-s9/tools/vtt-handoff/windows-probe.ts:57), [windows-probe.test.ts:128](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff-s9/tests/unit/vtt/windows-probe.test.ts:128)
+- **F79 resolved:** listings expose path, request ID, asset ID and status; partial/blocked results are not labelled completed. [art-validator.ts:181](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff-s9/tools/vtt-handoff/art-validator.ts:181), [art-validator.test.ts:260](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff-s9/tests/unit/vtt/art-validator.test.ts:260)
+
+The diff stays within the twelve reported paths. Protected hashes remain unchanged; no prohibited additions were found. I ran no tests or builds.
+
+VERDICT: REJECT
+review complete

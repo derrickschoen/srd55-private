@@ -1,6 +1,6 @@
 import type { CombatantId } from '../combat/values';
-import type { AgentInvocation } from './agent-session';
-import type { AgentSessionLifecycle } from './agent-session-lifecycle';
+import type { AgentInvocation, AgentTurnResult } from './agent-session';
+import type { AgentDispatchDeadline, AgentSessionLifecycle } from './agent-session-lifecycle';
 import type { RoundTurnProposalEnvelope } from './engine-envelopes';
 import type { EngineStateCapsule } from './engine-state-capsule';
 import {
@@ -81,10 +81,25 @@ export interface TurnExhaustionCorrectionRuntime {
   readonly turnContext: unknown;
   readonly lifecycle: Pick<AgentSessionLifecycle, 'resumeCorrection'>;
   readonly invocation: AgentInvocation;
-  readonly signal: AbortSignal;
   /** Makes the correction capsule authoritative before the resume is dispatched. */
   activateCapsule(): void;
   /** Removes at most one proposal from the host-owned spool for this request. */
+  takeProposal(): RoundTurnProposalEnvelope | null;
+  /** True only when this correction produced explicit engine/structured validation evidence. */
+  validationFailureObserved(): boolean;
+}
+
+export type ProposalEscalationTrigger = 'refusal' | 'validation_failures';
+
+export interface TurnExhaustionEscalationRuntime {
+  /** Trigger already observed before correction; correction can independently refuse. */
+  readonly trigger: ProposalEscalationTrigger | null;
+  readonly capsule: EngineStateCapsule;
+  readonly rules: AllowlistedRulesSource;
+  readonly turnContext: unknown;
+  readonly lifecycle: Pick<AgentSessionLifecycle, 'startEscalation'>;
+  readonly invocation: AgentInvocation;
+  activateCapsule(trigger: ProposalEscalationTrigger): void;
   takeProposal(): RoundTurnProposalEnvelope | null;
 }
 
@@ -101,6 +116,13 @@ export interface TurnExhaustionHost {
     readonly actorId: CombatantId;
     readonly reason: string;
   }): void;
+}
+
+function explicitlyRefusedTurn(turn: AgentTurnResult): boolean {
+  if (turn.exit !== 'completed') return false;
+  const text = turn.finalText.trim();
+  return /^(?:(?:i|we)\s+)?(?:(?:must|have to)\s+)?(?:refuse|decline)\b/iu.test(text) ||
+    /^(?:(?:i|we)\s+)?(?:cannot|can't|am unable to|are unable to)\b/iu.test(text);
 }
 
 export type InitialProposalAttempt =
@@ -194,6 +216,8 @@ export class TurnExhaustionCoordinator {
   async coordinate(input: {
     readonly initial: InitialProposalAttempt;
     readonly correction: TurnExhaustionCorrectionRuntime;
+    readonly escalation: TurnExhaustionEscalationRuntime | null;
+    readonly deadline: AgentDispatchDeadline;
     readonly host: TurnExhaustionHost;
   }): Promise<TurnExhaustionOutcome> {
     if (input.initial.kind === 'proposal') {
@@ -202,7 +226,9 @@ export class TurnExhaustionCoordinator {
       if (!exactProposalActors(proposal, actors, 'initial')) {
         throw new RangeError('Initial round proposal actors are malformed.');
       }
-      const authorization = await input.host.authorize(proposal);
+      const authorization = input.deadline.acceptsCompletion()
+        ? await input.host.authorize(proposal)
+        : 'invalidated';
       if (authorization === 'authorized') {
         for (const resolution of proposal.resolutions) {
           if (resolution.selectedBranch !== 'fallback') continue;
@@ -224,12 +250,16 @@ export class TurnExhaustionCoordinator {
           fallbackResult: authorization === 'invalidated' ? 'invalidated' : 'invalid',
         })),
         correction: input.correction,
+        escalation: input.escalation,
+        deadline: input.deadline,
         host: input.host,
       });
     }
     return this.#correctAndResolve({
       ...input.initial,
       correction: input.correction,
+      escalation: input.escalation,
+      deadline: input.deadline,
       host: input.host,
     });
   }
@@ -239,6 +269,8 @@ export class TurnExhaustionCoordinator {
     readonly initialProposalId: string;
     readonly actorFailures: readonly ProposalActorFailure[];
     readonly correction: TurnExhaustionCorrectionRuntime;
+    readonly escalation: TurnExhaustionEscalationRuntime | null;
+    readonly deadline: AgentDispatchDeadline;
     readonly host: TurnExhaustionHost;
   }): Promise<TurnExhaustionOutcome> {
     const failures = exactActorFailures(input.actorFailures);
@@ -270,6 +302,10 @@ export class TurnExhaustionCoordinator {
       return { kind: 'awaiting_dm_adjudication', actorId: failed.actorId };
     }
 
+    let correctionResult: ProposalCorrectionResult = 'no_response';
+    let correctionValidationFailed = false;
+    let correctionExplicitRefusal = false;
+    let correctedProposal: RoundTurnProposalEnvelope | null = null;
     if (prior === null) {
       this.persistence.record({
         kind: 'proposal_correction_requested',
@@ -278,33 +314,51 @@ export class TurnExhaustionCoordinator {
         correctionNumber: MAX_PROPOSAL_CORRECTIONS,
         actorFailures: failures,
       });
-      input.correction.activateCapsule();
-      const prompt = input.correction.invocation.output.kind === 'structured_final'
-        ? input.correction.invocation.prompt
-        : renderEnginePrompt(
-            'correct_proposal',
-            input.correction.capsule,
-            input.correction.rules,
-            undefined,
-            input.correction.turnContext,
+      const directEscalation = input.escalation?.trigger === 'refusal'
+        ? input.escalation
+        : null;
+      if (input.deadline.acceptsCompletion()) {
+        if (directEscalation === null) {
+          input.correction.activateCapsule();
+          const prompt = correctionPrompt(input.correction);
+          const correctionTurn = await input.correction.lifecycle.resumeCorrection(
+            { ...input.correction.invocation, prompt },
+            input.deadline,
           );
-      await input.correction.lifecycle.resumeCorrection(
-        { ...input.correction.invocation, prompt },
-        input.correction.signal,
-      );
+          correctionExplicitRefusal = explicitlyRefusedTurn(correctionTurn);
+          if (input.deadline.acceptsCompletion()) correctedProposal = input.correction.takeProposal();
+        } else {
+          directEscalation.activateCapsule('refusal');
+          const prompt = correctionPrompt(directEscalation);
+          await directEscalation.lifecycle.startEscalation(
+            { ...directEscalation.invocation, prompt },
+            input.deadline,
+          );
+          if (input.deadline.acceptsCompletion()) correctedProposal = directEscalation.takeProposal();
+        }
+      }
     } else if (prior.stage !== 'correction_requested') {
       throw new Error(`Proposal exhaustion chain cannot resume from ${prior.stage}.`);
+    } else if (input.deadline.acceptsCompletion()) {
+      correctedProposal = input.correction.takeProposal();
     }
 
-    const proposal = input.correction.takeProposal();
-    let correctionResult: ProposalCorrectionResult;
-    if (proposal === null) correctionResult = 'no_response';
+    let proposal = correctedProposal;
+    if (proposal === null) {
+      correctionResult = 'no_response';
+      correctionValidationFailed = input.correction.validationFailureObserved();
+    }
     else if (
       proposal.requestId !== input.requestId ||
       !exactProposalActors(proposal, actorIds, 'correction')
-    ) correctionResult = 'invalid';
+    ) {
+      correctionResult = 'invalid';
+      correctionValidationFailed = true;
+    }
     else {
-      const authorization = await input.host.authorize(proposal);
+      const authorization = input.deadline.acceptsCompletion()
+        ? await input.host.authorize(proposal)
+        : 'invalidated';
       if (authorization === 'authorized') {
         this.persistence.record({
           kind: 'proposal_correction_resolved',
@@ -313,8 +367,42 @@ export class TurnExhaustionCoordinator {
           actorIds,
         });
         return { kind: 'authorized', proposalId: proposal.proposalId, phase: 'correction' };
+      } else {
+        correctionResult = authorization;
+        correctionValidationFailed = true;
       }
-      correctionResult = authorization;
+    }
+
+    const correctionEscalationTrigger: ProposalEscalationTrigger | null = correctionExplicitRefusal
+      ? 'refusal'
+      : input.escalation?.trigger === 'validation_failures' && correctionValidationFailed
+        ? 'validation_failures'
+        : null;
+    if (input.escalation !== null && correctionEscalationTrigger !== null &&
+      input.deadline.acceptsCompletion()) {
+      input.escalation.activateCapsule(correctionEscalationTrigger);
+      const prompt = correctionPrompt(input.escalation);
+      await input.escalation.lifecycle.startEscalation(
+        { ...input.escalation.invocation, prompt },
+        input.deadline,
+      );
+      proposal = input.deadline.acceptsCompletion() ? input.escalation.takeProposal() : null;
+      if (proposal !== null && proposal.requestId === input.requestId &&
+        exactProposalActors(proposal, actorIds, 'correction') && input.deadline.acceptsCompletion()) {
+        const authorization = await input.host.authorize(proposal);
+        if (authorization === 'authorized') {
+          this.persistence.record({
+            kind: 'proposal_correction_resolved',
+            requestId: input.requestId,
+            proposalId: proposal.proposalId,
+            actorIds,
+          });
+          return { kind: 'authorized', proposalId: proposal.proposalId, phase: 'correction' };
+        }
+        correctionResult = authorization;
+      } else {
+        correctionResult = proposal === null ? 'no_response' : 'invalid';
+      }
     }
     if (prior?.stage !== 'auto_resolving') {
       this.persistence.record({ kind: 'proposal_correction_failed', requestId: input.requestId, result: correctionResult });
@@ -358,4 +446,18 @@ export class TurnExhaustionCoordinator {
     }
     return { kind: 'auto_resolved', actorIds };
   }
+}
+
+function correctionPrompt(
+  runtime: Pick<TurnExhaustionCorrectionRuntime, 'invocation' | 'capsule' | 'rules' | 'turnContext'>,
+): string {
+  return runtime.invocation.output.kind === 'structured_final'
+    ? runtime.invocation.prompt
+    : renderEnginePrompt(
+        'correct_proposal',
+        runtime.capsule,
+        runtime.rules,
+        undefined,
+        runtime.turnContext,
+      );
 }

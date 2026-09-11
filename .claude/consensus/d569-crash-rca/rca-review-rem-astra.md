@@ -1,0 +1,21 @@
+F1 — **TRIVIAL: The new `packetOutcome` example omits three historical outcomes.**
+
+The switch lacks `auto_resolved`, `awaiting_dm_adjudication`, and `local_error`, although the preserved historical schema accepts all three. Currently they map to `refused`. Consequently, the example is not exhaustive. [Specification:561](/home/vagrant/PhpstormProjects/dnd-multiclass-spells-static/.claude/consensus/d569-crash-rca/rca-rem-sol.md:561), [historical schema:148](/home/vagrant/PhpstormProjects/dnd-wt-blind-dm/tools/ai-dm-rerun-packet.ts:148), [existing mapping:962](/home/vagrant/PhpstormProjects/dnd-wt-blind-dm/tools/ai-dm-rerun-packet.ts:962).
+
+**Required change:** Add explicit cases returning `refused` for these three historical outcomes and cover them in the historical-decoding regression. This mechanically preserves existing behavior; it requires no further design decision.
+
+**Verified claims**
+
+- **Previous significant F1 is resolved.** The new `indeterminate` delivery variant preserves uncertainty. The specification requires durable artifact and forensic-row persistence, followed by a typed STOP **before authorization**, with no infrastructure attribution or packet conversion. Its regression explicitly checks persistence ordering and absence of authorization, reducer execution, correction, and scoring. [Delivery:392](/home/vagrant/PhpstormProjects/dnd-multiclass-spells-static/.claude/consensus/d569-crash-rca/rca-rem-sol.md:392), [persistence:448](/home/vagrant/PhpstormProjects/dnd-multiclass-spells-static/.claude/consensus/d569-crash-rca/rca-rem-sol.md:448), [transition:490](/home/vagrant/PhpstormProjects/dnd-multiclass-spells-static/.claude/consensus/d569-crash-rca/rca-rem-sol.md:490).
+
+- **Previous significant F2 is resolved.** Complete result types retain branded reusable identity, nullable rollout identity, text, usage, partial evidence, and `contractEvidence`. Both cold-start entry points, recovery, rollover, and escalation receive completed-only binding rules. The Pi/null-rollout regression directly addresses the source distinction. [Types:208](/home/vagrant/PhpstormProjects/dnd-multiclass-spells-static/.claude/consensus/d569-crash-rca/rca-rem-sol.md:208), [lifecycle migration:290](/home/vagrant/PhpstormProjects/dnd-multiclass-spells-static/.claude/consensus/d569-crash-rca/rca-rem-sol.md:290), [pi.ts:109](/home/vagrant/PhpstormProjects/dnd-wt-blind-dm/src/vtt/agent-adapters/pi.ts:109).
+
+- The fourteen argument-builder locations and separate caller classifications are restored. The test paths, Node installation reference, and original commit identity are corrected. All four stated forensic hashes match the files. [Inventory:30](/home/vagrant/PhpstormProjects/dnd-multiclass-spells-static/.claude/consensus/d569-crash-rca/rca-rem-sol.md:30), [suite paths:662](/home/vagrant/PhpstormProjects/dnd-multiclass-spells-static/.claude/consensus/d569-crash-rca/rca-rem-sol.md:662), [provenance:691](/home/vagrant/PhpstormProjects/dnd-multiclass-spells-static/.claude/consensus/d569-crash-rca/rca-rem-sol.md:691).
+
+- Mandatory readiness, resource-operation separation, timeout proposal guards, and blind host-authorization refusal remain intact. Historical/current row separation, literal infrastructure exclusion, D590’s three hard replacements plus full brutal relaunch, and D591’s distinction between infrastructure continuation and integrity STOP are preserved. [Transitions:490](/home/vagrant/PhpstormProjects/dnd-multiclass-spells-static/.claude/consensus/d569-crash-rca/rca-rem-sol.md:490), [migration:550](/home/vagrant/PhpstormProjects/dnd-multiclass-spells-static/.claude/consensus/d569-crash-rca/rca-rem-sol.md:550), [runbook:606](/home/vagrant/PhpstormProjects/dnd-multiclass-spells-static/.claude/consensus/d569-crash-rca/rca-rem-sol.md:606).
+
+No significant residual remains. Implementation may start, carrying the mechanical correction above. Healthy prompt/descriptor byte equality remains a required implementation check—not an already-tested result. This review made no edits and ran no tests or builds.
+
+VERDICT: ACCEPT
+OWNER ANSWER: patch + structural follow-up — the blocking evidence and lifecycle contracts are now specified, while profile-indexed typing remains the appropriate follow-up.
+review complete

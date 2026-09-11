@@ -81,6 +81,16 @@ interface ArenaArmBase {
 
 export type ArenaArm = ArenaArmBase & AgentInstructionSource;
 
+export interface ArenaExperimentPolicy {
+  readonly roundWallMs: 180000;
+  readonly basisDirectory: string | null;
+}
+
+export interface ArenaArmInstruction {
+  readonly label: string;
+  readonly source: AgentInstructionSource;
+}
+
 interface ArenaConfigBase {
   readonly intelMode: IntelMode;
   readonly overridePolicy: OverridePolicy;
@@ -111,6 +121,8 @@ interface ArenaConfigBase {
   readonly generateMissingRooms: boolean;
   readonly localOpenAi: LocalOpenAiConfig | null;
   readonly boardImageMode: BoardImageMode;
+  readonly experimentPolicy: ArenaExperimentPolicy;
+  readonly armInstructions: readonly ArenaArmInstruction[];
 }
 
 export type ArenaConfig = ArenaConfigBase & AgentInstructionSource;
@@ -286,6 +298,8 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
   const rawArms: string[] = [];
   const rawArmCombatModels: string[] = [];
   const rawArmOverridePolicies: string[] = [];
+  const rawArmInstructionSources: string[] = [];
+  const rawArmKbs: string[] = [];
   for (let index = 0; index < argumentsValue.length; index += 1) {
     const option = argumentsValue[index];
     if (option === '--dry-run') { dryRun = true; continue; }
@@ -306,12 +320,15 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
       '--renderer-profile',
       '--turn-context-max-bytes',
       '--board-image',
+      '--round-wall-ms', '--basis-dir', '--arm-instruction-source', '--arm-kb',
       '--basis', '--arm', '--local-base-url', '--local-model', '--local-api-key', '--local-think',
     ].includes(option ?? '')) throw new TypeError(`Unknown arena option ${option ?? '<missing>'}.`);
     const value = requiredValue(argumentsValue, index, option ?? '<missing>');
     if (option === '--arm') rawArms.push(value);
     else if (option === '--arm-combat-model') rawArmCombatModels.push(value);
     else if (option === '--arm-override-policy') rawArmOverridePolicies.push(value);
+    else if (option === '--arm-instruction-source') rawArmInstructionSources.push(value);
+    else if (option === '--arm-kb') rawArmKbs.push(value);
     else values.set(option ?? '', value);
     index += 1;
   }
@@ -368,6 +385,16 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
       }
     : null;
   const instructionSource = parsedInstructionSource(values, cwd, selectedCli);
+  const roundWallMs = positiveInteger(
+    values.get('--round-wall-ms') ?? '180000',
+    '--round-wall-ms',
+  );
+  if (roundWallMs !== 180_000) {
+    throw new TypeError('--round-wall-ms must be exactly 180000.');
+  }
+  const basisDirectory = values.has('--basis-dir')
+    ? resolve(cwd, values.get('--basis-dir') ?? '')
+    : null;
   const reactionAskDefault = values.get('--reaction-ask-default') ?? 'decline';
   if (reactionAskDefault !== 'decline' && reactionAskDefault !== 'take') {
     throw new TypeError('--reaction-ask-default must be decline or take.');
@@ -435,6 +462,53 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
     }
     armOverridePolicies.set(label, policy as OverridePolicy);
   }
+  const armInstructionKinds = new Map<string, 'none' | 'kb'>();
+  for (const raw of rawArmInstructionSources) {
+    const [label, source, extra] = raw.split(':');
+    if (label === undefined || !/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/u.test(label) ||
+      (source !== 'none' && source !== 'kb') || extra !== undefined) {
+      throw new TypeError('--arm-instruction-source must use LABEL:none|kb syntax.');
+    }
+    if (armInstructionKinds.has(label)) {
+      throw new TypeError(`Duplicate --arm-instruction-source for ${label}.`);
+    }
+    armInstructionKinds.set(label, source);
+  }
+  const armKbPaths = new Map<string, string>();
+  for (const raw of rawArmKbs) {
+    const separator = raw.indexOf(':');
+    const label = separator < 0 ? '' : raw.slice(0, separator);
+    const path = separator < 0 ? '' : raw.slice(separator + 1);
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/u.test(label) || path.length === 0) {
+      throw new TypeError('--arm-kb must use LABEL:PATH syntax.');
+    }
+    if (armKbPaths.has(label)) throw new TypeError(`Duplicate --arm-kb for ${label}.`);
+    armKbPaths.set(label, resolve(cwd, path));
+  }
+  const armInstructions = [...armInstructionKinds].map(([label, source]): ArenaArmInstruction => {
+    const kbPath = armKbPaths.get(label);
+    if (source === 'kb' && kbPath === undefined) {
+      throw new TypeError(`--arm-instruction-source ${label}:kb requires --arm-kb ${label}:PATH.`);
+    }
+    if (source === 'none' && kbPath !== undefined) {
+      throw new TypeError(`--arm-kb ${label}:PATH requires --arm-instruction-source ${label}:kb.`);
+    }
+    return {
+      label,
+      source: source === 'kb'
+        ? { instructionSource: 'kb', skill: null, kbPath: kbPath ?? '' }
+        : { instructionSource: 'none', skill: null },
+    };
+  });
+  const orphanArmKb = [...armKbPaths.keys()].find((label) => !armInstructionKinds.has(label));
+  if (orphanArmKb !== undefined) {
+    throw new TypeError(`--arm-kb ${orphanArmKb}:PATH requires --arm-instruction-source ${orphanArmKb}:kb.`);
+  }
+  const knowledgeBundlePaths = armInstructions.flatMap((entry) =>
+    entry.source.instructionSource === 'kb' ? [entry.source.kbPath] : []);
+  if (new Set(knowledgeBundlePaths).size > 1) {
+    throw new TypeError('All KB-steered arms must use the same frozen knowledge bundle.');
+  }
   const arms = rawArms.map((raw): ArenaArm => {
     const [label, armModel, armEffort, armEscalationModel, armEscalationEffort, extra] = raw.split(':');
     if (label === undefined || !/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/u.test(label) ||
@@ -450,8 +524,9 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
       !CONVERSATION_EFFORTS.includes(armEscalationEffort as ConversationEffort)) {
       throw new TypeError('--arm escalation effort must be low, medium, high, or xhigh.');
     }
+    const armInstruction = armInstructions.find((entry) => entry.label === label)?.source ?? instructionSource;
     return {
-      ...instructionSource,
+      ...armInstruction,
       label,
       model: armModel,
       effort: armEffort as ConversationEffort,
@@ -473,6 +548,19 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
     throw new TypeError('--arm is only valid with --interleave.');
   }
   const armLabels = new Set(arms.map((arm) => arm.label));
+  const unknownInstructionArm = armInstructions.find((entry) => !armLabels.has(entry.label));
+  if (unknownInstructionArm !== undefined) {
+    throw new TypeError(`--arm-instruction-source names unknown arm ${unknownInstructionArm.label}.`);
+  }
+  for (const arm of arms) {
+    if ((arm.label.includes('baseline') || arm.label === 'sol-high') &&
+      arm.instructionSource !== 'none') {
+      throw new TypeError(`Arena arm ${arm.label} must use instruction source none.`);
+    }
+  }
+  if (!interleave && armInstructions.length > 0) {
+    throw new TypeError('--arm-instruction-source is only valid with --interleave.');
+  }
   const unknownArmModel = [...armCombatModels.keys()].find((label) => !armLabels.has(label));
   if (unknownArmModel !== undefined) {
     throw new TypeError(`--arm-combat-model names unknown arm ${unknownArmModel}.`);
@@ -524,6 +612,8 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
     generateMissingRooms,
     localOpenAi,
     boardImageMode: boardImageMode as BoardImageMode,
+    experimentPolicy: { roundWallMs: 180_000, basisDirectory },
+    armInstructions,
   };
 }
 
@@ -540,7 +630,10 @@ function stdoutHeartbeat(line: string): void {
   process.stdout.write(`[arena] ${line}\n`);
 }
 
-export function basisFixturesPath(config: Pick<ArenaConfig, 'cwd' | 'basis'>): string {
+export function basisFixturesPath(config: Pick<ArenaConfig, 'cwd' | 'basis' | 'experimentPolicy'>): string {
+  if (config.experimentPolicy.basisDirectory !== null) {
+    return config.experimentPolicy.basisDirectory;
+  }
   const basis = config.basis;
   switch (basis) {
     case 'standard': return resolve(config.cwd, 'tests/fixtures/arena-basis');
@@ -633,13 +726,20 @@ export function arenaRows(
   seeds: readonly number[],
 ): readonly ArenaRow[] {
   return rows.map((row): ArenaRow => {
+    const restrictedWall = row.roundWallTimedOut
+      ? config.experimentPolicy.roundWallMs
+      : row.policyElapsedMs;
+    if (!Number.isFinite(restrictedWall) || restrictedWall < 0 ||
+      restrictedWall > config.experimentPolicy.roundWallMs) {
+      throw new RangeError('Arena restricted wall must be within the registered round wall.');
+    }
     const arenaRow: ArenaRow = {
     ...conversationPart(row),
     seed: seeds[row.room - 1]!,
     basis: config.basis,
     probeVerdict: extractArenaProbeVerdict(config.basis, row.authorizedPlan),
     arm,
-    wall: row.wallPerCreature,
+    wall: restrictedWall,
     };
     decodeArenaRowEvidence(arenaRow, 'increment_2');
     return arenaRow;
@@ -685,6 +785,7 @@ function conversationConfig(
     cwd: config.cwd,
     cliBin: config.cliBin,
     timeoutMs: config.timeoutMs,
+    roundWallMs: config.experimentPolicy.roundWallMs,
     reactionAskDefault: config.reactionAskDefault,
     captureRlData: config.captureRlData,
     localOpenAi: config.localOpenAi === null ? null : {

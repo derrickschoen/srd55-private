@@ -1,0 +1,25 @@
+1. **Q-F1 — RESOLVED.** [authored-envelope-ledger.test.ts:169](/home/vagrant/PhpstormProjects/dnd-wt-quietstone/tests/unit/assets/authored-envelope-ledger.test.ts:169) restores family ceilings, restricts exceptions to token rows, and uses the production evaluators in negative controls. The plan edit also changes **A2**, beyond §5/A3; that change correctly implements Q-F1.
+
+2. **Q-F2 — RESOLVED.** [authored-envelope-ledger.test.ts:106](/home/vagrant/PhpstormProjects/dnd-wt-quietstone/tests/unit/assets/authored-envelope-ledger.test.ts:106) rejects other alpha values, confines half-alpha to neutral-1 inside token/terrain shadow ellipses, requires sufficient shadow pixels, and enforces binary alpha for other families. Requested controls are present.
+
+3. **Q-F3 — RESOLVED.** [authored-envelope-ledger.test.ts:129](/home/vagrant/PhpstormProjects/dnd-wt-quietstone/tests/unit/assets/authored-envelope-ledger.test.ts:129) derives badge and HP rectangles from board-chrome constants and uses them for clearance checks.
+
+4. **Q-F4 — RESOLVED.** [import-authored-art.ts:86](/home/vagrant/PhpstormProjects/dnd-wt-quietstone/tools/assets/import-authored-art.ts:86) validates both documents before asset-byte reads. Metadata serialization uses escaped JSON literals; invalid UUID/hash/traversal controls assert zero reads/writes/mkdirs. I independently ran importer `--check`: **58 verified**.
+
+5. **Q-F5 — RESOLVED.** [starter-art.test.ts:56](/home/vagrant/PhpstormProjects/dnd-wt-quietstone/tests/unit/assets/starter-art.test.ts:56) derives ordered coverage from the frozen inventory and independently frames the digest. Byte-change, omission, and registry-remapping mutations are checked.
+
+6. **Q-F6 — RESOLVED.** [pixel-art.test.ts:98](/home/vagrant/PhpstormProjects/dnd-wt-quietstone/tests/unit/assets/pixel-art.test.ts:98) checks both boundaries for every door orientation/state, plus the broken-door boundary control.
+
+7. **Q-F7 — REMAINS, High, plan-conformance/correctness.** Image roots, shared baseline harness, and blocked/null comparison handling are fixed. However, [plan:268](/home/vagrant/PhpstormProjects/dnd-wt-quietstone/.tmp-plans/2026-09-10-quietstone-classic-art-integration-plan.md:268) still specifies **Luna-low/Sol-high/Fable-high**, omitting D611’s Astra seat. Additionally, [ai-dm-screenshot-probe.ts:2077](/home/vagrant/PhpstormProjects/dnd-wt-quietstone/tools/ai-dm-screenshot-probe.ts:2077) ignores Claude’s requested effort while rows record it as `high`. Replace Luna with `gpt-6-astra:high` in both commands; pass and test Claude’s `--effort high` explicitly. The installed CLI exposes that flag.
+
+8. **Q-F8 — RESOLVED.** [encounter-board-art.test.ts:49](/home/vagrant/PhpstormProjects/dnd-wt-quietstone/tests/unit/assets/encounter-board-art.test.ts:49) exercises the shared scene through board-model selection, checks all 27 distinct portraits and the 13 named entries against the inventory. All 20 matrix files exist; I inspected the distinct-portrait 32px area image.
+
+9. **Q-F9 — RESOLVED.** [art.ts:97](/home/vagrant/PhpstormProjects/dnd-wt-quietstone/src/assets/authored/art.ts:97) keeps decoded pixels in a private WeakMap and copies them when rendering. The test mutates a rendered bitmap, checks a fresh render against the oracle, and checks that `art.data` is absent.
+
+10. **Q-F10 — NEW, High, correctness: Claude never receives the required answer schema.** [ai-dm-screenshot-probe.ts:2077](/home/vagrant/PhpstormProjects/dnd-wt-quietstone/tools/ai-dm-screenshot-probe.ts:2077) passes neither schema contents nor `schemaPath`. The prompt requests the “supplied strict schema,” but does not contain it. Resulting format failures become `schema_rejected` with score zero, potentially misleading the art evaluation. Supply the actual question schema through Claude’s structured-output interface and decode its corresponding result format. Test that contract; the current routing stub returns a preconstructed correct answer regardless of inputs.
+
+11. **Q-F11 — NEW, High, gap: Claude’s screenshot-only input is unverified.** [ai-dm-screenshot-probe.ts:2079](/home/vagrant/PhpstormProjects/dnd-wt-quietstone/tools/ai-dm-screenshot-probe.ts:2079) launches Claude in the repository with inherited configuration and ordinary project context. The image is only a pathname instruction; successful image access is never checked. Repository `CLAUDE.md` itself directs additional file reading. Isolate the judge from project instructions/hooks/MCP and deliver the PNG directly, or restrict and verify the required PNG read. Classify image-access failures as blocked. Add transport-contract controls proving these conditions before treating Fable’s scores as screenshot evidence.
+
+Plan SHA matches `f7f6712c…`; `git diff --check` passed. The 272-test result is supervisor evidence, not a suite I reran.
+
+**REJECT — blocking Q-F7, Q-F10, Q-F11.**
