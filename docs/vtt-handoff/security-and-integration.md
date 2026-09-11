@@ -16,7 +16,7 @@ The shared location is the absolute `VTT_HANDOFF_ROOT`, normally displayed to Wi
 
 Before declaring integration ready, run the explicit bidirectional Windows probe in `tools/vtt-handoff/windows-probe.ts`. A Windows result of `NOT_RUN`, `UNAVAILABLE`, or `FAILED` makes the overall report `PARTIAL`; only `PASSED`, together with all required gate results, permits `READY`.
 
-`npm run handoff:publish` reads supervisor evidence from the absolute or relative file named by `VTT_HANDOFF_REPORT_INPUT` or `--report-input`. That JSON has `schemaVersion:1`, nonempty `tools` entries (`name`, actual `version`, actual `command`), nonempty `gates` entries (`name`, command, required flag, status, summary, and pre-existing failures), and one `windowsProbe` result. Missing or invalid evidence produces a truthful `PARTIAL` report. `--check` compares the expected report bytes and writes nothing.
+`npm run handoff:publish` reads supervisor evidence from the absolute or relative file named by `VTT_HANDOFF_REPORT_INPUT` or `--report-input`. That JSON has `schemaVersion:1`, nonempty `tools` entries (`name`, actual `version`, actual `command`), gate results (`name`, command, status, summary, and pre-existing failures), actual UUIDv7 `artRequests` with matching outbox/result paths, and one `windowsProbe` result. The required gate inventory is fixed in `tools/vtt-handoff/report.ts`; an input cannot make a gate optional, and every omitted inventory result is named in the `PARTIAL` reasons. Missing or invalid evidence also produces `PARTIAL`. `--check` compares the expected report bytes and writes nothing.
 
 ## Future deployment work
 

@@ -11,15 +11,63 @@ import { ART_REQUEST_DEFINITIONS } from './art-request.ts';
 import { handoffPaths, type RepositoryIdentityPolicy } from './paths.ts';
 
 const resultStatusSchema = z.enum(['PASSED', 'FAILED', 'UNAVAILABLE', 'NOT_RUN']);
+const uuidV7Schema = z.string().regex(
+  /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
+);
+
+export const REQUIRED_HANDOFF_GATES = [
+  { name: 'full-typecheck', command: 'npx tsc -b --force' },
+  { name: 'structural-scan', command: 'sg scan' },
+  { name: 'unit-gate', command: 'npm run test:gate' },
+  { name: 'production-build', command: 'npm run build' },
+  {
+    name: 'node-runtime-launch',
+    command: 'npx vitest run --configLoader runner --config tests/integration-supervisor/vitest.config.ts tests/integration-supervisor/vtt/node-runtime-launch.launch-test.ts',
+  },
+  {
+    name: 'worker-dist-playwright',
+    command: 'PLAYWRIGHT_PORT=4410 PLAYWRIGHT_WORKERS=1 VTT_HANDOFF_ARTIFACT=dist npx playwright test --config=tests/browser/vtt-handoff/playwright.config.ts worker.spec.ts',
+  },
+  {
+    name: 'browser-gate',
+    command: 'PLAYWRIGHT_PORT=4410 PLAYWRIGHT_WORKERS=1 npm run test:gate:browser',
+  },
+  { name: 'cumulative-targeted-vitest', command: 'npx vitest run --configLoader runner <S0-S10 targeted specs>' },
+  {
+    name: 'worker-dev-playwright',
+    command: 'PLAYWRIGHT_PORT=4410 PLAYWRIGHT_WORKERS=1 VTT_HANDOFF_ARTIFACT=dev npx playwright test --config=tests/browser/vtt-handoff/playwright.config.ts worker.spec.ts',
+  },
+  {
+    name: 'runtime-parity-playwright',
+    command: 'PLAYWRIGHT_PORT=4410 PLAYWRIGHT_WORKERS=1 npx playwright test --config=tests/browser/vtt-handoff/playwright.config.ts runtime-parity.spec.ts',
+  },
+  {
+    name: 'top-down-smoke-playwright',
+    command: 'PLAYWRIGHT_PORT=4410 PLAYWRIGHT_WORKERS=1 npx playwright test --config=tests/browser/vtt-handoff/playwright.config.ts top-down-smoke.spec.ts',
+  },
+] as const;
+
 const supervisorReportInputSchema = z.strictObject({
   schemaVersion: z.literal(1),
   tools: z.array(z.strictObject({
     name: z.string().min(1), version: z.string().min(1), command: z.string().min(1),
   })).min(1),
   gates: z.array(z.strictObject({
-    name: z.string().min(1), command: z.string().min(1), required: z.boolean(),
+    name: z.string().min(1), command: z.string().min(1),
     status: resultStatusSchema, summary: z.string(),
     preExistingFailures: z.array(z.string()),
+  })).min(1),
+  artRequests: z.array(z.strictObject({
+    requestId: uuidV7Schema,
+    requestPath: z.string().min(1),
+    resultPath: z.string().min(1).nullable(),
+  }).superRefine((request, context) => {
+    if (request.requestPath !== `art/outbox/${request.requestId}.request.json`) {
+      context.addIssue({ code: 'custom', message: 'Art request path does not match requestId.' });
+    }
+    if (request.resultPath !== null && request.resultPath !== `art/inbox/${request.requestId}.result.json`) {
+      context.addIssue({ code: 'custom', message: 'Art result path does not match requestId.' });
+    }
   })).min(1),
   windowsProbe: z.strictObject({
     status: resultStatusSchema, command: z.string().min(1), reason: z.string().nullable(),
@@ -46,6 +94,7 @@ export interface HandoffReport {
     readonly changedFiles: readonly string[];
   };
   readonly evidence: SupervisorReportInput | null;
+  readonly requiredGates: typeof REQUIRED_HANDOFF_GATES;
   readonly digests: readonly DigestRecord[];
   readonly adapters: readonly { readonly name: string; readonly path: string }[];
   readonly methods: readonly string[];
@@ -54,6 +103,7 @@ export interface HandoffReport {
     readonly inbox: 'art/inbox';
     readonly review: 'art/review';
     readonly sampleAssetIds: readonly string[];
+    readonly requests: SupervisorReportInput['artRequests'];
   };
   readonly limitations: readonly string[];
   readonly connectionPoints: readonly string[];
@@ -70,6 +120,10 @@ export interface ReportPublishResult {
 export interface ReportPublishHooks {
   readonly nonce?: () => string;
   readonly afterRename?: (relativePath: string) => void;
+}
+
+export interface ReportGitReader {
+  read(repositoryRoot: string, args: readonly string[]): string;
 }
 
 const DIGEST_PATHS = [
@@ -107,20 +161,25 @@ function sha256(bytes: Uint8Array): string {
   return createHash('sha256').update(bytes).digest('hex');
 }
 
-function git(repositoryRoot: string, args: readonly string[]): string {
-  const result = spawnSync('git', ['-C', repositoryRoot, ...args], { encoding: 'utf8' });
-  if (result.status !== 0) throw new Error(`REPORT_GIT_FAILED: ${result.stderr.trim()}`);
-  return result.stdout.trim();
-}
+const systemGitReader: ReportGitReader = {
+  read(repositoryRoot, args) {
+    const result = spawnSync('git', ['-C', repositoryRoot, ...args], { encoding: 'utf8' });
+    if (result.status !== 0) throw new Error(`REPORT_GIT_FAILED: ${result.stderr.trim()}`);
+    return result.stdout.trim();
+  },
+};
 
-function repositoryEvidence(repositoryRoot: string): HandoffReport['repository'] {
+function repositoryEvidence(
+  repositoryRoot: string,
+  gitReader: ReportGitReader,
+): HandoffReport['repository'] {
   const changed = [
-    ...git(repositoryRoot, ['diff', '--name-only', 'HEAD', '--']).split('\n'),
-    ...git(repositoryRoot, ['ls-files', '--others', '--exclude-standard']).split('\n'),
+    ...gitReader.read(repositoryRoot, ['diff', '--name-only', 'HEAD', '--']).split('\n'),
+    ...gitReader.read(repositoryRoot, ['ls-files', '--others', '--exclude-standard']).split('\n'),
   ].filter((path) => path.length > 0);
   return {
     name: 'srd-55', root: repositoryRoot,
-    commit: git(repositoryRoot, ['rev-parse', 'HEAD']),
+    commit: gitReader.read(repositoryRoot, ['rev-parse', 'HEAD']),
     changedFiles: [...new Set(changed)].sort(),
   };
 }
@@ -149,10 +208,10 @@ function readiness(input: SupervisorReportInput | null, inputReason: string | nu
   if (input === null) {
     reasons.push(inputReason ?? 'SUPERVISOR_RESULTS_MISSING');
   } else {
-    const required = input.gates.filter((gate) => gate.required);
-    if (required.length === 0) reasons.push('REQUIRED_GATES_MISSING');
-    for (const gate of required) {
-      if (gate.status !== 'PASSED') reasons.push(`REQUIRED_GATE_${gate.status}: ${gate.name}`);
+    for (const required of REQUIRED_HANDOFF_GATES) {
+      const gate = input.gates.find((candidate) => candidate.name === required.name);
+      if (gate === undefined) reasons.push(`REQUIRED_GATE_MISSING: ${required.name}`);
+      else if (gate.status !== 'PASSED') reasons.push(`REQUIRED_GATE_${gate.status}: ${gate.name}`);
     }
     if (input.windowsProbe.status !== 'PASSED') {
       reasons.push(`WINDOWS_PROBE_${input.windowsProbe.status}`);
@@ -164,6 +223,7 @@ function readiness(input: SupervisorReportInput | null, inputReason: string | nu
 export function buildHandoffReport(options: {
   readonly repositoryRoot: string;
   readonly inputPath?: string;
+  readonly gitReader?: ReportGitReader;
 }): HandoffReport {
   const supplied = readSupervisorInput(options.inputPath);
   const status = readiness(supplied.input, supplied.reason);
@@ -175,14 +235,16 @@ export function buildHandoffReport(options: {
     schemaVersion: 1,
     readiness: status.value,
     reasons: status.reasons,
-    repository: repositoryEvidence(options.repositoryRoot),
+    repository: repositoryEvidence(options.repositoryRoot, options.gitReader ?? systemGitReader),
     evidence: supplied.input,
+    requiredGates: REQUIRED_HANDOFF_GATES,
     digests,
     adapters: ADAPTERS,
     methods: [...HANDOFF_METHODS],
     art: {
       outbox: 'art/outbox', inbox: 'art/inbox', review: 'art/review',
       sampleAssetIds: ART_REQUEST_DEFINITIONS.map((entry) => entry.assetId),
+      requests: supplied.input?.artRequests ?? [],
     },
     limitations: HANDOFF_LIMITATIONS,
     connectionPoints: CONNECTION_POINTS,
@@ -217,8 +279,12 @@ function markdown(report: HandoffReport): Buffer {
     ...(evidence?.gates.map((gate) => {
       const existing = gate.preExistingFailures.length === 0
         ? 'none' : gate.preExistingFailures.join('; ');
-      return `- ${gate.name}: ${gate.status}; required=${String(gate.required)}; command=${gate.command}; summary=${gate.summary}; pre-existing failures=${existing}`;
+      return `- ${gate.name}: ${gate.status}; command=${gate.command}; summary=${gate.summary}; pre-existing failures=${existing}`;
     }) ?? ['- No supervisor results supplied.']),
+    '',
+    '## Required gate inventory',
+    '',
+    ...report.requiredGates.map((gate) => `- ${gate.name}: ${gate.command}`),
     '',
     '## Windows probe',
     '',
@@ -239,6 +305,10 @@ function markdown(report: HandoffReport): Buffer {
     '',
     `- Paths: ${report.art.outbox}, ${report.art.inbox}, ${report.art.review}`,
     `- Sample asset IDs: ${report.art.sampleAssetIds.join(', ')}`,
+    ...(report.art.requests.length === 0
+      ? ['- Request bundles: none supplied.']
+      : report.art.requests.map((request) =>
+        `- Request ${request.requestId}: ${request.requestPath}; result=${request.resultPath ?? 'not supplied'}`)),
     '',
     '## Known limitations',
     '',
@@ -290,6 +360,7 @@ export function publishHandoffReport(options: {
   readonly check?: boolean;
   readonly identityPolicy?: RepositoryIdentityPolicy;
   readonly hooks?: ReportPublishHooks;
+  readonly gitReader?: ReportGitReader;
 } = {}): ReportPublishResult {
   const paths = handoffPaths({
     ...(options.repositoryRoot === undefined ? {} : { repositoryRoot: options.repositoryRoot }),
@@ -299,6 +370,7 @@ export function publishHandoffReport(options: {
   const report = buildHandoffReport({
     repositoryRoot: paths.repositoryRoot,
     ...(options.inputPath === undefined ? {} : { inputPath: options.inputPath }),
+    ...(options.gitReader === undefined ? {} : { gitReader: options.gitReader }),
   });
   const entries = [
     { path: 'reports/claude/handoff.json', bytes: json(report) },
