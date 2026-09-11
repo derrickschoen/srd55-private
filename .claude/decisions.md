@@ -22369,3 +22369,19 @@ Supervisor facts: package integrity verified independently (Pillow decode of eve
 ## D610 — OWNER: Quietstone art is evaluated on the branch under PROVISIONAL relaxations (2026-09-10 20:35)
 
 Question put to the owner (one of three options, after Astra's plan review r1 rejected R5/R6/R8/R9 as requirement changes): the delivered package fails four D516 art invariants (token colours 31–49 vs 20; floors/walls/doors native detail 0.002–0.031 vs 0.04; 37 assets use palette pairs closer than 8 RGB, seven such pairs exist in the generated palette itself; props lack the top-left light bias; cleric/undead 0.01128 and cleric/beast 0.01184 silhouettes vs 0.012). Owner chose: "Evaluate on the branch (Recommended)" — build the pipeline and the authored class with the relaxations recorded as PROVISIONAL and branch-only, run the full gate and a same-revision old-vs-new screenshot probe, then the owner decides on the numbers; nothing lands on main until the owner rules. Astra reviews the plan r2 and the implementation under this ruling: the provisional authored-class thresholds are an owner-authorised evaluation envelope, not a weakening of the procedural invariants, and every procedural assertion stays intact.
+
+## D611 — OWNER: Quietstone probe answered by the full judge panel (2026-09-11 08:21)
+
+Asked (one of three): which models answer the same-revision old-vs-new screenshot comprehension probe (baseline build at 85168bc5 with the shipped art vs the Quietstone build, 24 states, same seed). Owner: "Full judge panel (fable, astra, sol high)". Plan §5/A3 model list becomes the D587.1 judge panel at high effort for BOTH runs; the per model×class decision rule and the strict ≥ 0.9 report apply per model.
+
+## D612 — OWNER: F88 (NODE_ENV leaks into the production build) is fixed in a small standalone lane on main now (2026-09-11 08:22)
+
+Asked (one of three): where to fix the S7 ledger residual F88 — serve.mjs and tools/dist-build-cache.mjs forward the caller's NODE_ENV into the production build, so a caller with NODE_ENV=test (vitest) gets the dev-only capability seam in dist and assert-dist-clean rejects it; the owner's live 4173 serve works only because that shell has NODE_ENV unset. Owner: "Small standalone lane on main now (Recommended)": one lane off main, dist-build-cache forces NODE_ENV=production for its build child, one regression, no other changes, normal gate; unblocks the S7 launch proof for S10 without waiting for the handoff branch.
+
+## D613 — OWNER: raise the marginal tests' walls now; the cost-cutting lane runs after the handoff and D569 land (2026-09-11 08:33)
+
+Asked: the marginal-test family (two other ai-dm-arena cases at 30 s, rl-generate-data "generates an unfrozen seed…" at 30 s, engine-mcp-server "bounds one-to-three blind attempts…" at 5 s — 5099 ms in the D569 lane, timed out again in the supervisor's 21-spec run at load ~3, then 14/14 on a quiet serial rerun) costs a serial rerun on almost every verification. Owner (verbatim): "Raise the timeout for now and dispatch the cost cutting lane after the handoff and d569 land". Supervisor action: walls raised on main in the D606 manner (30 s → 60 s for the two arena cases and rl-generate-data; 5 s → 15 s for the engine-mcp-server case), the four tests re-run, committed with explicit paths; these four join the D544/D606 named list. The D606 cost-cutting lane is queued behind the handoff and D569 landings.
+
+## D614 — OWNER: S8 gets at most one more lane round after r3, then merges regardless with residuals in the ledger (2026-09-11 09:03)
+
+Asked: S8 findings per round went 2 → 2 (r3 review pending), so D607.1's falling-findings rule was not met while D604 allows unlimited rounds. Owner: "One more S8 round, then merge regardless" — a fourth lane round only if the r3 review's findings are correctness (not coverage gaps); anything left after that goes to .claude/consensus/vtt-handoff/ledger.md and S8 merges into claude/vtt-handoff.
