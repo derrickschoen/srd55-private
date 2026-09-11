@@ -47,18 +47,24 @@ class ControlledFlushStore extends MemoryBrowserSessionStore {
   #release: (() => void) | null = null;
   #blockCountdown: number | null = null;
   #markReached: (() => void) | null = null;
+  #markCompleted: (() => void) | null = null;
   #nextFailure: Error | null = null;
 
   blockNextFlush(): () => void {
     return this.blockFlushIn(1).release;
   }
 
-  blockFlushIn(count: number): { readonly reached: Promise<void>; readonly release: () => void } {
+  blockFlushIn(count: number): {
+    readonly reached: Promise<void>;
+    readonly completed: Promise<void>;
+    readonly release: () => void;
+  } {
     if (count < 1 || !Number.isSafeInteger(count)) throw new RangeError('Flush count must be positive.');
     this.#blockCountdown = count;
     this.#blocked = new Promise((resolve) => { this.#release = resolve; });
     const reached = new Promise<void>((resolve) => { this.#markReached = resolve; });
-    return { reached, release: () => this.#release?.() };
+    const completed = new Promise<void>((resolve) => { this.#markCompleted = resolve; });
+    return { reached, completed, release: () => this.#release?.() };
   }
 
   failNextFlush(error: Error): void {
@@ -75,6 +81,8 @@ class ControlledFlushStore extends MemoryBrowserSessionStore {
         this.#markReached?.();
         this.#markReached = null;
         if (blocked !== null) await blocked;
+        this.#markCompleted?.();
+        this.#markCompleted = null;
       }
     }
     const failure = this.#nextFailure;
@@ -435,7 +443,7 @@ describe('encounter session service', () => {
   );
 
   it.each(['placement', 'world_object', 'adjudication'] as const)(
-    'settles a rich %s operation as closed during its unresolved write without retrying',
+    'settles active and queued rich %s operations before the unresolved write completes',
     async (operation) => {
       const store = new ControlledFlushStore();
       const commandType = operation === 'placement'
@@ -448,22 +456,71 @@ describe('encounter session service', () => {
         if (command.type === commandType) operationReducerCalls += 1;
       });
       const mutationRevisions: number[] = [];
+      const publishedKinds: string[] = [];
       fixture.service.subscribeDm((event) => {
+        publishedKinds.push(event.kind);
         if (event.kind === 'mutation') mutationRevisions.push(event.projection.encounter.revision);
       });
       const barrier = store.blockFlushIn(1);
-      const outcome = fixture.submit();
+      const settlements = [0, 0];
+      const active = fixture.submit();
+      const queued = fixture.submit();
+      void active.then(() => { settlements[0] = (settlements[0] ?? 0) + 1; });
+      void queued.then(() => { settlements[1] = (settlements[1] ?? 0) + 1; });
       await barrier.reached;
       fixture.service.close();
-      barrier.release();
+      const publicationsAtClosure = publishedKinds.length;
 
-      await expect(outcome).resolves.toEqual({ kind: 'closed' });
-      expect({ operationReducerCalls, mutationRevisions }).toEqual({
+      await expect(Promise.all([active, queued])).resolves.toEqual([
+        { kind: 'closed' },
+        { kind: 'closed' },
+      ]);
+      expect({ operationReducerCalls, mutationRevisions, settlements, publicationsAtClosure }).toEqual({
         operationReducerCalls: 1,
         mutationRevisions: [],
+        settlements: [1, 1],
+        publicationsAtClosure: 2,
+      });
+      barrier.release();
+      await barrier.completed;
+      await Promise.resolve();
+      await Promise.resolve();
+      expect({ operationReducerCalls, mutationRevisions, settlements, publications: publishedKinds.length }).toEqual({
+        operationReducerCalls: 1,
+        mutationRevisions: [],
+        settlements: [1, 1],
+        publications: publicationsAtClosure,
       });
     },
   );
+
+  it('delivers the captured durable adjudication revision after later UI state advances', async () => {
+    const store = new ControlledFlushStore();
+    let adjudicationCalls = 0;
+    const fixture = richTopDownOperation('adjudication', store, (command) => {
+      if (command.type === 'adjudicate') adjudicationCalls += 1;
+    });
+    const mutationRevisions: number[] = [];
+    fixture.service.subscribeDm((event) => {
+      if (event.kind === 'mutation') mutationRevisions.push(event.projection.encounter.revision);
+    });
+    const barrier = store.blockFlushIn(1);
+    const outcome = fixture.submit();
+    await barrier.reached;
+    await fixture.service.setHiddenRollCategory('death_saves', true);
+    const advancedRevision = fixture.service.dmSnapshot().encounter.revision;
+    expect(advancedRevision).toBe(fixture.initialRevision + 2);
+    expect(mutationRevisions).toEqual([]);
+
+    barrier.release();
+    const committed = await outcome;
+    expect(committed).toEqual({ kind: 'committed', revision: fixture.initialRevision + 1 });
+    if (committed.kind !== 'committed') throw new Error(`Expected committed, received ${committed.kind}.`);
+    expect(mutationRevisions).toEqual([committed.revision]);
+    expect(fixture.service.dmSnapshot().encounter.revision).toBe(advancedRevision);
+    expect(adjudicationCalls).toBe(1);
+    fixture.service.close();
+  });
 
   it('publishes an autonomous snapshot only after its durability barrier', async () => {
     const store = new ControlledFlushStore();

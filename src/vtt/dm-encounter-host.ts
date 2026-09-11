@@ -263,6 +263,11 @@ interface HostTransactionWaiter {
   readonly resolve: (outcome: HostCoordinatorTransactionOutcome) => void;
 }
 
+interface HostTopDownTransactionWaiter {
+  settled: boolean;
+  readonly resolve: (outcome: HostCoordinatorTransactionOutcome) => void;
+}
+
 type FreshOfferOutcome =
   | { readonly kind: 'fresh' }
   | { readonly kind: 'closed' }
@@ -319,6 +324,7 @@ export class DmEncounterHost {
   readonly #notificationListeners = new Set<(notification: HostSnapshotNotification) => void>();
   readonly #subscriberErrors: HostSubscriberError[] = [];
   readonly #transactionWaiters = new Map<string, HostTransactionWaiter>();
+  readonly #topDownTransactionWaiters = new Set<HostTopDownTransactionWaiter>();
   readonly #freshOfferWaiters = new Set<FreshOfferWaiter>();
   #activeTransactionRequestId: string | null = null;
   #journal: EncounterSessionJournal;
@@ -1532,12 +1538,39 @@ export class DmEncounterHost {
     apply: () => CoordinatorStep,
     afterCommit?: () => void,
   ): Promise<HostCoordinatorTransactionOutcome> {
-    const outcome = this.#topDownMutationTail.then(() => this.#settleTopDownMutation(
-      apply,
-      afterCommit,
-    ));
-    this.#topDownMutationTail = outcome.then(() => undefined, () => undefined);
+    let resolveOutcome: ((outcome: HostCoordinatorTransactionOutcome) => void) | undefined;
+    const outcome = new Promise<HostCoordinatorTransactionOutcome>((resolve) => {
+      resolveOutcome = resolve;
+    });
+    if (resolveOutcome === undefined) throw new Error('Top-down transaction waiter was not initialized.');
+    const waiter: HostTopDownTransactionWaiter = { settled: false, resolve: resolveOutcome };
+    this.#topDownTransactionWaiters.add(waiter);
+    const run = this.#topDownMutationTail.then(async () => {
+      if (waiter.settled || this.#closed) {
+        this.#settleTopDownTransaction(waiter, { kind: 'closed' });
+        return;
+      }
+      const terminal = await this.#settleTopDownMutation(apply, afterCommit);
+      this.#settleTopDownTransaction(waiter, terminal);
+    });
+    this.#topDownMutationTail = run.catch(() => undefined);
     return outcome;
+  }
+
+  #settleTopDownTransaction(
+    waiter: HostTopDownTransactionWaiter,
+    outcome: HostCoordinatorTransactionOutcome,
+  ): void {
+    if (waiter.settled) return;
+    waiter.settled = true;
+    this.#topDownTransactionWaiters.delete(waiter);
+    waiter.resolve(outcome);
+  }
+
+  #settleAllTopDownTransactions(outcome: HostCoordinatorTransactionOutcome): void {
+    for (const waiter of [...this.#topDownTransactionWaiters]) {
+      this.#settleTopDownTransaction(waiter, outcome);
+    }
   }
 
   async #settleTopDownMutation(
@@ -1560,6 +1593,18 @@ export class DmEncounterHost {
       return { kind: 'failed', phase, error, currentRevision };
     }
     if (result.kind === 'refused') return { kind: 'refused', reason: result.reason };
+    let mutationNotification: HostSnapshotNotification;
+    try {
+      mutationNotification = this.#captureNotification('mutation');
+    } catch (error: unknown) {
+      if (!this.#closed) this.#degradeAfterApplicationFailure();
+      return {
+        kind: 'failed',
+        phase: 'post_apply',
+        error,
+        currentRevision: this.#coordinator.state().revision,
+      };
+    }
     try {
       await this.#store.flush();
     } catch (error: unknown) {
@@ -1578,7 +1623,7 @@ export class DmEncounterHost {
       revision: result.state.revision,
     };
     try {
-      this.#publish('mutation');
+      this.#deliverNotification(mutationNotification);
       afterCommit?.();
     } catch (error: unknown) {
       if (!this.#closed) this.#degradeAfterApplicationFailure();
@@ -1858,6 +1903,7 @@ export class DmEncounterHost {
     }
     this.#closed = true;
     this.#repumpBlocked = false;
+    this.#settleAllTopDownTransactions({ kind: 'closed' });
     this.#publish('status');
     this.#settleAllTransactions({ kind: 'closed' });
     this.#settleFreshOfferWaiters({ kind: 'closed' });
