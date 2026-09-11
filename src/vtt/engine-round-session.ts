@@ -565,10 +565,10 @@ export class EngineRoundSession {
         commands.apply(command);
       for (const entry of entries) {
         state = advanceToActor(state, entry.proposal.actorId, reduce);
-        const primary = resolveEngineActorOption(state, entry.primaryOption, this.offerEnvironment.queries);
+        const primary = resolveEngineActorOption(state, entry.primaryOption, this.offerEnvironment);
         const fallback = primary.valid || entry.fallbackOption === null
           ? null
-          : resolveEngineActorOption(state, entry.fallbackOption, this.offerEnvironment.queries);
+          : resolveEngineActorOption(state, entry.fallbackOption, this.offerEnvironment);
         let mechanics: ResolvedTurnMechanics;
         let appliedBranch: EngineAppliedProposalBranch;
         let refusalCodes: string[];
@@ -585,11 +585,11 @@ export class EngineRoundSession {
           const dodgeOption = availableEngineActorOptions(
             state,
             entry.proposal.actorId,
-            this.offerEnvironment.queries,
+            this.offerEnvironment,
           ).find((option) =>
             option.actionSlots.some((slot) => slot.slot === 'main' && slot.use.kind === 'dodge')) ?? null;
           if (dodgeOption === null) throw new Error(`Could not apply deterministic Dodge for ${entry.proposal.actorId}.`);
-          const dodge = resolveEngineActorOption(state, dodgeOption, this.offerEnvironment.queries);
+          const dodge = resolveEngineActorOption(state, dodgeOption, this.offerEnvironment);
           if (!dodge.valid) throw new Error(`Could not apply deterministic Dodge for ${entry.proposal.actorId}.`);
           mechanics = dodge.mechanics;
           appliedBranch = 'dodge';

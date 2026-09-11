@@ -30,6 +30,7 @@ import {
   type RuleReference,
 } from '../engine-state-capsule';
 import type { EngineQueryPort, EngineTargetSelector } from '../engine-query-port';
+import type { EngineOptionEnvironment } from '../offers/offer-environment';
 import { resolveEngineActorOption, type EngineMovementPreference, type EngineTurnProposal, type PureTurnProposalResolver } from '../intent-resolver';
 import { decisionReasonProblem } from '../decision-reason';
 import {
@@ -262,7 +263,7 @@ interface CapsuleIntelReports {
 interface EngineMcpDependencies {
   readonly state: EncounterState;
   readonly stateSource: EngineCapsuleFeed;
-  readonly queries: EngineQueryPort;
+  readonly offerEnvironment: EngineOptionEnvironment;
   readonly turnProposals: PureTurnProposalResolver;
   readonly proposals: ProposalSink;
   readonly speculativePlans: SpeculativePlanSink;
@@ -806,7 +807,14 @@ function externalOptionSlot(
             'actionId' in use && rider.sourceActionId === use.actionId),
   };
 }
-function tacticalOptions(state: EncounterState, queries: EngineQueryPort, capsule: EngineStateCapsule, actorId: CombatantId, includeExpectations: boolean): readonly Readonly<Record<string, unknown>>[] {
+function tacticalOptions(
+  state: EncounterState,
+  offerEnvironment: EngineOptionEnvironment,
+  capsule: EngineStateCapsule,
+  actorId: CombatantId,
+  includeExpectations: boolean,
+): readonly Readonly<Record<string, unknown>>[] {
+  const queries = offerEnvironment.queries;
   const projected = capsule.projection.combatants.find((candidate) => candidate.id === actorId);
   if (projected === undefined) return [];
   // The byte-cap pruner removes from the tail. Keep immediately usable,
@@ -849,7 +857,7 @@ function tacticalOptions(state: EncounterState, queries: EngineQueryPort, capsul
           ? firstUse.targets[0] ?? null
           : null;
     const targetId = firstTarget === null ? null : queries.resolveTarget(state, actorId, firstTarget);
-    const resolution = resolveEngineActorOption(state, option, queries);
+    const resolution = resolveEngineActorOption(state, option, offerEnvironment);
     const movementFeet = resolution.valid ? resolution.mechanics.movementCostFeet : null;
     const attacks = firstUse.kind === 'attack'
       ? targetId === null ? [] : [{ actionId: String(firstUse.actionId), targetId }]
@@ -1320,8 +1328,12 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
     throw new RangeError('maximumResourceBytes cannot exceed the 128 KiB hard limit.');
   }
   const { state, stateSource: feed, proposals, speculativePlans, narration, adjudications, rules } = dependencies;
-  const { queries, turnProposals } = dependencies;
+  const { offerEnvironment, turnProposals } = dependencies;
+  const queries = offerEnvironment.queries;
   const launchCapsule = feed.current();
+  if (launchCapsule.offerEnvironment.digest !== offerEnvironment.digest) {
+    throw new TypeError('Engine MCP application offer environment does not match its launch capsule.');
+  }
   const launchRequest = launchCapsule.request;
   const launcherRoundBinding: LauncherRoundSubmissionBinding | null =
     launchRequest !== null && launchRequest.phase !== 'speculative' && launchRequest.kind !== 'plan_adjustment'
@@ -1383,7 +1395,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
     const key = `${capsule.digest}:${actorId}`;
     const prior = opportunityReports.get(key);
     if (prior !== undefined) return prior;
-    const report = actorOpportunityReport(state, actorId, queries, capsule.revision);
+    const report = actorOpportunityReport(state, actorId, offerEnvironment, capsule.revision);
     opportunityReports.set(key, report);
     return report;
   }
@@ -1399,7 +1411,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       candidateId: play.name,
       label: play.description,
       proposals: SNIPPET_REGISTRY.expand(play.name, capsule).proposals,
-    })), queries);
+    })), offerEnvironment);
     teamPlanReports.set(key, report);
     return report;
   }
@@ -1607,7 +1619,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       const actors = [...required].sort().map((actorId) => {
         const actor = capsule.projection.combatants.find((candidate) => candidate.id === actorId);
         if (actor === undefined) throw new RangeError(`ACTOR_ABSENT:${actorId}`);
-        const all = tacticalOptions(state, queries, capsule, actorId, false);
+        const all = tacticalOptions(state, offerEnvironment, capsule, actorId, false);
         return {
           actor_id: actorId,
           status: actorStatus(actor),
@@ -1766,7 +1778,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
     const actors = [...required].sort().map((actorId) => {
       const actor = capsule.projection.combatants.find((candidate) => candidate.id === actorId);
       if (actor === undefined) throw new RangeError(`ACTOR_ABSENT:${actorId}`);
-      const all = tacticalOptions(state, queries, capsule, actorId, includeExpectations);
+      const all = tacticalOptions(state, offerEnvironment, capsule, actorId, includeExpectations);
       const intelRows = topDmActorIntelRows(exactIntel, actorId);
       const unresolvedFindings = exactIntel.filter((row) =>
         row.actorId === actorId && !isInformativeDmIntelRow(row)).map((row) => ({
@@ -2722,7 +2734,9 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
             effective_size: actor.effectiveSize,
             placement_mode: actor.placementMode,
             footprint: actor.footprint,
-            options: granularity === 'combatant_detail' ? tacticalOptions(state, queries, capsule, actor.id, true) : [],
+            options: granularity === 'combatant_detail'
+              ? tacticalOptions(state, offerEnvironment, capsule, actor.id, true)
+              : [],
             threats: granularity === 'turn_minimal' || granularity === 'combatant_detail' ? threats(state, queries, actor.id) : [],
           }
         : {
@@ -2744,7 +2758,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       const actorId = combatantId(stringField(input, 'actor_id'));
       const actor = capsule.projection.combatants.find((candidate) => candidate.id === actorId);
       if (actor === undefined) throw new RangeError('ACTOR_ABSENT');
-      const all = tacticalOptions(state, queries, capsule, actorId, true);
+      const all = tacticalOptions(state, offerEnvironment, capsule, actorId, true);
       const paged = applicationPage(capsule, canonicalJson({ actorId }), all, input['page']);
       return { state_ref: externalStateRef(capsule), actor_id: actorId, status: actorStatus(actor), options: paged.values, truncated: paged.truncated, next_cursor: paged.next };
     }

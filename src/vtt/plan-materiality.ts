@@ -6,6 +6,7 @@ import { sha256 } from '../crypto/sha256';
 import { enginePlanningCombatantFacts, enginePlanningSemanticZones } from './engine-query-port';
 import { resolveEngineActorOption, type EngineOfferableOption } from './intent-resolver';
 import { projectFutureMonsterTurns } from './monster-planning-state';
+import type { EngineOptionEnvironment } from './offers/offer-environment';
 import type { GuardConditionIdentity } from './speculative-plan-types';
 
 export const PLAN_RELEVANCE_POLICY_VERSION = 'plan-relevance-v2-composite' as const;
@@ -31,6 +32,8 @@ export type PlanRelevanceTurnEvent =
 
 export interface PlanRelevanceContext {
   readonly state: EncounterState;
+  /** Transitional optionality remains until every caller is migrated in Slice 3C. */
+  readonly offerEnvironment?: EngineOptionEnvironment;
   readonly openMonsterActorIds: readonly CombatantId[];
   readonly remainingOptions: readonly EngineOfferableOption[];
   readonly explicitEngagementAnchors?: readonly PlanRelevanceAnchor[];
@@ -95,8 +98,14 @@ function canonicalConditions(conditions: readonly GuardConditionIdentity[]): rea
   return [...conditions].sort((left, right) => canonicalJson(left).localeCompare(canonicalJson(right)));
 }
 
-function proposalRecord(state: EncounterState, option: EngineOfferableOption): PlanRelevanceProposalRecord {
-  const resolution = resolveEngineActorOption(state, option);
+function proposalRecord(
+  state: EncounterState,
+  option: EngineOfferableOption,
+  offerEnvironment: EngineOptionEnvironment | undefined,
+): PlanRelevanceProposalRecord {
+  const resolution = offerEnvironment === undefined
+    ? resolveEngineActorOption(state, option)
+    : resolveEngineActorOption(state, option, offerEnvironment);
   return resolution.valid
     ? {
         actorId: option.actorId,
@@ -134,7 +143,8 @@ export function createPlanRelevanceRecord(context: PlanRelevanceContext): PlanRe
   const open = new Set(openMonsterActorIds);
   const remaining = context.remainingOptions.filter((option) => open.has(option.actorId))
     .sort((left, right) => left.actorId.localeCompare(right.actorId));
-  const proposals = remaining.map((option) => proposalRecord(planningState, option));
+  const proposals = remaining.map((option) =>
+    proposalRecord(planningState, option, context.offerEnvironment));
   const configuredAnchors = context.explicitEngagementAnchors ?? [];
   const relevantIds = uniqueSorted([
     ...openMonsterActorIds,

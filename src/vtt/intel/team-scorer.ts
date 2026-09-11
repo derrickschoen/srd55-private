@@ -2,6 +2,7 @@ import type { EncounterState } from '../../combat/encounter';
 import type { CombatantId } from '../../combat/values';
 import type { EngineQueryPort, TacticalAllocationChoice } from '../engine-query-port';
 import { availableEngineActorOptions, resolveEngineActorOption } from '../intent-resolver';
+import type { EngineOptionEnvironment } from '../offers/offer-environment';
 import type {
   EngineOfferableOption,
   EngineOptionId,
@@ -202,12 +203,17 @@ interface ResolvedChoice {
 function resolvedChoice(
   state: EncounterState,
   proposal: EngineTurnProposal,
-  queries: EngineQueryPort,
+  environment: EngineOptionEnvironment | EngineQueryPort,
 ): ResolvedChoice | TeamPlanUnresolvedReason {
-  const offered = availableEngineActorOptions(state, proposal.actorId, queries, proposal.expectedRevision);
+  const offered = availableEngineActorOptions(
+    state,
+    proposal.actorId,
+    environment,
+    proposal.expectedRevision,
+  );
   const primary = offered.find((option) => option.optionId === proposal.primaryOptionId);
   if (primary === undefined) return 'option_not_offered';
-  const primaryResolution = resolveEngineActorOption(state, primary, queries);
+  const primaryResolution = resolveEngineActorOption(state, primary, environment);
   if (primaryResolution.valid) {
     return { option: primary, mechanics: primaryResolution.mechanics };
   }
@@ -215,7 +221,7 @@ function resolvedChoice(
     ? undefined
     : offered.find((option) => option.optionId === proposal.fallbackOptionId);
   if (fallback === undefined) return 'option_illegal';
-  const fallbackResolution = resolveEngineActorOption(state, fallback, queries);
+  const fallbackResolution = resolveEngineActorOption(state, fallback, environment);
   return fallbackResolution.valid
     ? { option: fallback, mechanics: fallbackResolution.mechanics }
     : 'option_illegal';
@@ -270,6 +276,7 @@ export function classifyWastedTurn(
 function wastedTurnMarker(
   state: EncounterState,
   choice: ResolvedChoice,
+  environment: EngineOptionEnvironment | EngineQueryPort,
   queries: EngineQueryPort,
 ): WastedTurnMarker | null {
   const reason = intrinsicWastedReason(choice.option, choice.mechanics.movementCostFeet);
@@ -277,11 +284,11 @@ function wastedTurnMarker(
   const hasAlternative = availableEngineActorOptions(
     state,
     choice.option.actorId,
-    queries,
+    environment,
     choice.option.revision,
   ).some((alternative) => {
     if (alternative.optionId === choice.option.optionId) return false;
-    const resolution = resolveEngineActorOption(state, alternative, queries);
+    const resolution = resolveEngineActorOption(state, alternative, environment);
     return resolution.valid && hasConcreteEffect({ option: alternative, mechanics: resolution.mechanics });
   });
   return classifyWastedTurn(choice.option, choice.mechanics.movementCostFeet, hasAlternative);
@@ -312,6 +319,7 @@ function millionths(value: number): number {
 function evaluateTeamPlan(
   state: EncounterState,
   candidate: TeamPlanCandidate,
+  environment: EngineOptionEnvironment | EngineQueryPort,
   queries: EngineQueryPort,
 ): TeamPlanEvaluation {
   const actorIds = candidate.proposals.map((proposal) => proposal.actorId);
@@ -322,7 +330,7 @@ function evaluateTeamPlan(
       reasons: ['duplicate_actor'],
     };
   }
-  const results = candidate.proposals.map((proposal) => resolvedChoice(state, proposal, queries));
+  const results = candidate.proposals.map((proposal) => resolvedChoice(state, proposal, environment));
   const resolutionReasons = results.filter(
     (result): result is TeamPlanUnresolvedReason => typeof result === 'string',
   );
@@ -400,7 +408,7 @@ function evaluateTeamPlan(
   }
 
   const markers = choices.flatMap((choice) => {
-    const marker = wastedTurnMarker(state, choice, queries);
+    const marker = wastedTurnMarker(state, choice, environment, queries);
     return marker === null ? [] : [marker];
   });
   const lethality = allocations.reduce((sum, allocation) =>
@@ -458,10 +466,11 @@ function evaluateTeamPlan(
 export function scoreTeamPlans(
   state: EncounterState,
   candidates: readonly TeamPlanCandidate[],
-  queries: EngineQueryPort,
+  environment: EngineOptionEnvironment | EngineQueryPort,
 ): TeamPlanFrontierReport {
+  const queries = 'binding' in environment ? environment.queries : environment;
   return scoreTeamPlanEvaluations(candidates.map((candidate) =>
-    evaluateTeamPlan(state, candidate, queries)));
+    evaluateTeamPlan(state, candidate, environment, queries)));
 }
 
 function renderVector(vector: TeamPlanVector): Readonly<Record<TeamPlanMetric, unknown>> {

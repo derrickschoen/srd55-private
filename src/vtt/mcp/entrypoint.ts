@@ -417,8 +417,8 @@ export function createEngineMcpRuntime(
   const application = createEngineMcpApplication({
     state: planningState,
     stateSource: feed,
-    queries: offerEnvironment.queries,
-    turnProposals: createPureTurnProposalResolver(offerEnvironment.queries),
+    offerEnvironment,
+    turnProposals: createPureTurnProposalResolver(offerEnvironment),
     proposals: {
       append: (envelope) => {
         proposals.push(envelope);

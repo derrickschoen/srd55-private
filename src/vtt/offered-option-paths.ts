@@ -6,7 +6,12 @@ import {
 import type { GridCell } from '../combat/grid';
 import { feet, type CombatantId } from '../combat/values';
 import { availableEngineActorOptions, resolveEngineActorOption } from './intent-resolver';
+import { canonicalEngineQueryPort } from './engine-query-port';
 import { projectFutureMonsterTurns } from './monster-planning-state';
+import {
+  createLegacyEngineOptionEnvironment,
+  type EngineOptionEnvironment,
+} from './offers/offer-environment';
 import type { EngineMainActionUse, EngineOfferableOption, EngineOptionId } from './turn-proposal';
 
 declare const offeredOptionOrdinalBrand: unique symbol;
@@ -112,11 +117,14 @@ export function actingMonsterIds(state: EncounterState): readonly CombatantId[] 
 export function offeredOptionActorsForState(
   state: EncounterState,
   actorIds: readonly CombatantId[] = actingMonsterIds(state),
+  offerEnvironment: EngineOptionEnvironment = createLegacyEngineOptionEnvironment(canonicalEngineQueryPort),
 ): readonly OfferedOptionActor[] {
   const planningState = projectFutureMonsterTurns(state, actorIds);
   return actorIds.map((actorId) => ({
     actorId,
-    options: orderOptionsAsTurnContext(availableEngineActorOptions(planningState, actorId)),
+    options: orderOptionsAsTurnContext(
+      availableEngineActorOptions(planningState, actorId, offerEnvironment),
+    ),
   }));
 }
 
@@ -128,6 +136,7 @@ export function offeredOptionActorsForState(
 export function offeredOptionPaths(
   state: EncounterState,
   actors: readonly OfferedOptionActor[],
+  offerEnvironment: EngineOptionEnvironment = createLegacyEngineOptionEnvironment(canonicalEngineQueryPort),
 ): readonly OfferedOptionPath[] {
   const actorIds = actors.map((actor) => actor.actorId);
   const planningState = projectFutureMonsterTurns(state, actorIds);
@@ -140,7 +149,7 @@ export function offeredOptionPaths(
       if (option.actorId !== actor.actorId) {
         throw new TypeError(`Option ${option.optionId} belongs to a different actor.`);
       }
-      const resolution = resolveEngineActorOption(planningState, option);
+      const resolution = resolveEngineActorOption(planningState, option, offerEnvironment);
       if (!resolution.valid || resolution.mechanics.path.length === 0) return [];
       const command = {
         type: 'move' as const,

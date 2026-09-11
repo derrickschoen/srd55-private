@@ -21,6 +21,7 @@ import {
 } from './engine-query-port';
 import { availableEngineActorOptions, type EngineOfferableOption, type EngineTurnProposal } from './intent-resolver';
 import { projectFutureMonsterTurns } from './monster-planning-state';
+import type { EngineOptionEnvironment } from './offers/offer-environment';
 import type {
   EngineSelectorRef,
   GuardConditionIdentity,
@@ -278,8 +279,12 @@ export interface HostBaselineProposalPlanner {
   plan(
     state: EncounterState,
     actors: readonly CombatantId[],
-    queries?: EngineQueryPort,
+    environment?: EngineOptionEnvironment | EngineQueryPort,
   ): readonly EngineTurnProposal[];
+}
+
+function offerQueries(environment: EngineOptionEnvironment | EngineQueryPort): EngineQueryPort {
+  return 'binding' in environment ? environment.queries : environment;
 }
 
 function optionIsOffensive(option: EngineOfferableOption): boolean {
@@ -291,11 +296,12 @@ export const hostBaselineProposalPlanner: HostBaselineProposalPlanner = Object.f
   plan(
     state: EncounterState,
     actors: readonly CombatantId[],
-    queries: EngineQueryPort = canonicalEngineQueryPort,
+    environment: EngineOptionEnvironment | EngineQueryPort = canonicalEngineQueryPort,
   ): readonly EngineTurnProposal[] {
+    const queries = offerQueries(environment);
     const planningState = projectFutureMonsterTurns(state, actors);
     return actors.flatMap((actorId) => {
-      const options = availableEngineActorOptions(planningState, actorId, queries);
+      const options = availableEngineActorOptions(planningState, actorId, environment);
       const primary = options.find(optionIsOffensive) ?? options[0];
       if (primary === undefined) return [];
       const fallback = options.find((option) => option.actionSlots.some((slot) =>
@@ -672,16 +678,17 @@ export function buildHostScenarioMenu(
   state: EncounterState,
   actors: readonly CombatantId[],
   unactedPlayerIds: readonly CombatantId[],
-  queries: EngineQueryPort = canonicalEngineQueryPort,
+  environment: EngineOptionEnvironment | EngineQueryPort = canonicalEngineQueryPort,
 ): {
   readonly baselineProposals: readonly EngineTurnProposal[];
   readonly scenarioMenu: readonly HostSplitCandidate[];
   readonly scenarios: readonly HostScenario[];
 } {
+  const queries = offerQueries(environment);
   const planningState = projectFutureMonsterTurns(state, actors);
-  const baselineProposals = hostBaselineProposalPlanner.plan(planningState, actors, queries);
+  const baselineProposals = hostBaselineProposalPlanner.plan(planningState, actors, environment);
   const baselineOptions = baselineProposals.flatMap((proposal) =>
-    availableEngineActorOptions(planningState, proposal.actorId, queries).filter((option) =>
+    availableEngineActorOptions(planningState, proposal.actorId, environment).filter((option) =>
       option.optionId === proposal.primaryOptionId));
   const scenarioMenu = computeHostSplitCandidates(
     state,
