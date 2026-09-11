@@ -65,6 +65,10 @@ import {
 } from '../src/vtt/engine-round-session';
 import { canonicalEngineQueryPort } from '../src/vtt/engine-query-port';
 import {
+  createLegacyEngineOptionEnvironment,
+  engineOptionEnvironmentFromBinding,
+} from '../src/vtt/offers/offer-environment';
+import {
   availableEngineActorOptions, pureTurnProposalResolver,
   type EngineOfferableOption, type EngineTurnProposal, type ResolvedTurnMechanics,
 } from '../src/vtt/intent-resolver';
@@ -545,6 +549,7 @@ export type ConversationFallbackReason =
   | 'auto_submit_blocked'
   | 'timeout'
   | 'host_authorization_failed'
+  | 'round_deadline_expired'
   | 'resolver_rejected'
   | 'correction_cancelled'
   | 'correction_timeout'
@@ -953,6 +958,14 @@ export interface ConversationRunOptions {
   ) => ConversationPlannerAttribution;
   /** Test-only boundary immediately after speculative branch validation. */
   readonly onSpeculationAdoptionValidated?: () => void;
+  /** Test-only boundary after the primary adapter result is observed. */
+  readonly onPrimaryResultObservedForTest?: (turn: AgentTurnResult) => void;
+  /** Test-only boundary after the adjustment adapter result is observed. */
+  readonly onAdjustmentResultObservedForTest?: (turn: AgentTurnResult) => void;
+  /** Test-only boundary after the speculative adapter result is observed. */
+  readonly onSpeculationResultObservedForTest?: (turn: AgentTurnResult) => void;
+  /** Test-only boundary after the recalculation adapter result is observed. */
+  readonly onSpeculationRecalculationResultObservedForTest?: (turn: AgentTurnResult) => void;
   /** Test-only boundary after speculative recalculation mechanics and actor-set validation. */
   readonly onSpeculationRecalculationValidated?: (
     entries: readonly SegmentMonsterPlanEntry[],
@@ -2267,6 +2280,10 @@ function plannedTurnContext(
   }
   let rendering: CapturedTurnContext['rendering'];
   const runtime = createEngineMcpRuntime(state, {
+    offerEnvironment: engineOptionEnvironmentFromBinding(
+      canonicalEngineQueryPort,
+      snapshot.capsule.offerEnvironment,
+    ),
     runId: capsule.runId,
     branchId: capsule.branchId,
     revision: capsule.revision,
@@ -3374,6 +3391,7 @@ async function writeLauncher(input: {
     runId: capsule.runId, branchId: capsule.branchId,
     revision: capsule.revision, requestId: request.requestId,
     phase: request.phase, correctionNumber: request.correctionNumber,
+    offerEnvironment: capsule.offerEnvironment,
     overridePolicy: input.overridePolicy,
     room: input.room, historyKind: input.historyKind,
     toolProfile: input.dmMode === 'blind' ? 'blind' : 'dm',
@@ -3569,6 +3587,10 @@ function fullTurnContextBase(
     throw new Error('Turn-context base requires an ordinary pending request.');
   }
   const runtime = createEngineMcpRuntime(state, {
+    offerEnvironment: engineOptionEnvironmentFromBinding(
+      canonicalEngineQueryPort,
+      snapshot.capsule.offerEnvironment,
+    ),
     runId: capsule.runId,
     branchId: capsule.branchId,
     revision: capsule.revision,
@@ -3638,6 +3660,10 @@ function inProcessDmToolSession(input: {
     throw new Error('Local OpenAI tool session requires an ordinary pending request.');
   }
   const runtime = createEngineMcpRuntime(input.state, {
+    offerEnvironment: engineOptionEnvironmentFromBinding(
+      canonicalEngineQueryPort,
+      input.snapshot.capsule.offerEnvironment,
+    ),
     runId: capsule.runId,
     branchId: capsule.branchId,
     revision: capsule.revision,
@@ -3898,6 +3924,10 @@ function inProcessSpeculativeToolSession(input: {
     throw new Error('Speculative tool session requires a speculative pending request.');
   }
   const runtime = createEngineMcpRuntime(input.state, {
+    offerEnvironment: engineOptionEnvironmentFromBinding(
+      canonicalEngineQueryPort,
+      input.snapshot.capsule.offerEnvironment,
+    ),
     runId: capsule.runId,
     branchId: capsule.branchId,
     revision: capsule.revision,
@@ -4196,10 +4226,12 @@ async function runConversationWithConfiguredIntel(
   const adapter = new ModelCallBookkeepingAdapter(selectedAdapter);
   const rows: ConversationRow[] = [];
   let capsuleRevision = 1;
+  const offerEnvironment = createLegacyEngineOptionEnvironment(canonicalEngineQueryPort);
   const engineSession = new EngineRoundSession(
     states[0]!,
     mulberry32(8_274_113),
     { kind: 'unattended', askDefault: config.reactionAskDefault },
+    offerEnvironment,
   );
   let completedRounds = 0;
   let restoredMidRun = false;
@@ -4697,6 +4729,7 @@ async function runConversationWithConfiguredIntel(
               dispatch.invocation,
               AbortSignal.any([roundDeadline.signal, controller.signal]),
             );
+            options.onSpeculationResultObservedForTest?.(turn);
             const planningWallMs = clock() - dispatchStarted;
             const spools = dispatchSpools(launcher, turn);
             enforceCompletedDispatchIntegrity({
@@ -4713,11 +4746,11 @@ async function runConversationWithConfiguredIntel(
               plan: acceptedInTime && turn.exit === 'completed'
                 ? localPlan ?? takeSpeculativePlan(spools.proposal)
                 : null,
-              turn: acceptedInTime ? turn : null,
+              turn,
               planningWallMs,
               timedOut: !acceptedInTime || turn.exit === 'timed_out' || controller.signal.aborted || planningWallMs > budgetMs,
-              error: acceptedInTime && turn.exit === 'infrastructure_failed' ? turn.failureReason : null,
-              failingDispatch: acceptedInTime && turn.exit === 'infrastructure_failed'
+              error: turn.exit === 'infrastructure_failed' ? turn.failureReason : null,
+              failingDispatch: turn.exit === 'infrastructure_failed'
                 ? classifyFailedDispatch({
                     phase: 'speculative', turn, contextSpoolPath: spools.context,
                     maximumBytes: config.turnContextMaximumBytes,
@@ -4956,7 +4989,7 @@ async function runConversationWithConfiguredIntel(
             adjustmentInvocation,
             roundDeadline,
           );
-          if (!roundDeadline.acceptsCompletion()) throw new AgentDispatchDeadlineExceededError();
+          options.onAdjustmentResultObservedForTest?.(turn);
           adjustmentSessionId = turn.sessionId;
           captureCallUsage(turn, 'adjustment');
           decisionAttempts += 1;
@@ -4986,6 +5019,7 @@ async function runConversationWithConfiguredIntel(
             }
             break;
           }
+          if (!roundDeadline.acceptsCompletion()) throw new AgentDispatchDeadlineExceededError();
           adjustmentTurnContext = takeTurnContext(
             adjustmentSpools.context,
             config.turnContextMaximumBytes,
@@ -5485,7 +5519,7 @@ async function runConversationWithConfiguredIntel(
               } else {
                 turn = await lifecycle.resumeRound(primaryInvocation, roundDeadline);
               }
-              if (!roundDeadline.acceptsCompletion()) throw new AgentDispatchDeadlineExceededError();
+              options.onPrimaryResultObservedForTest?.(turn);
             } catch (error) {
               if (!agentDispatchWasCancelled(error)) throw error;
               primaryDispatchTimedOut = true;
@@ -5580,6 +5614,7 @@ async function runConversationWithConfiguredIntel(
               }
               break;
             }
+            if (!roundDeadline.acceptsCompletion()) throw new AgentDispatchDeadlineExceededError();
             if (initialDecisionCatalog === null) {
               rowTurnContext = correlatedContext ?? rowTurnContext;
               proposed = localInitialProposal ?? takeRoundProposal(activeInitialSpools.proposal);
@@ -6770,9 +6805,7 @@ async function runConversationWithConfiguredIntel(
                         recalculationDispatch.invocation,
                         roundDeadline.signal,
                       );
-                      if (!roundDeadline.acceptsCompletion()) {
-                        throw new AgentDispatchDeadlineExceededError();
-                      }
+                      options.onSpeculationRecalculationResultObservedForTest?.(recalculationTurn);
                       captureCallUsage(recalculationTurn, 'speculation_recalculation');
                       const recalculationSpools = dispatchSpools(recalculationLauncher, recalculationTurn);
                       enforceCompletedDispatchIntegrity({
@@ -6794,6 +6827,9 @@ async function runConversationWithConfiguredIntel(
                           maximumBytes: config.turnContextMaximumBytes,
                         });
                         throw new CellInfrastructureAbort('Speculation recalculation engine MCP infrastructure failed.');
+                      }
+                      if (!roundDeadline.acceptsCompletion()) {
+                        throw new AgentDispatchDeadlineExceededError();
                       }
                       const proposal = recalculationTurn.exit === 'completed'
                         ? localRecalculationProposal ?? takeRoundProposal(recalculationSpools.proposal)

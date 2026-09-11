@@ -259,6 +259,7 @@ export type AgentTurnResult =
 
 export type AgentColdStartOutcome =
   | { readonly kind: 'bound'; readonly binding: AgentSessionBinding; readonly turn: AgentTurnCompletedResult }
+  | { readonly kind: 'expired'; readonly turn: AgentTurnCompletedResult }
   | {
       readonly kind: 'unbound';
       readonly turn: AgentTurnCancelledResult | AgentTurnTimedOutResult | AgentTurnInfrastructureFailedResult;

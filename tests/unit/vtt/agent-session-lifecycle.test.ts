@@ -193,6 +193,43 @@ describe('SIMULATED agent session lifecycle', () => {
     },
   );
 
+  it.each(['coldStart', 'coldStartRound'] as const)(
+    'returns late completed evidence from %s without binding it',
+    async (method) => {
+      let acceptsCompletion = true;
+      const result: AgentTurnResult = {
+        resumeSessionId: agentSessionId('agent-session:late-completed-evidence'),
+        sessionId: 'rollout:late-completed-evidence',
+        finalText: 'late completed evidence',
+        usage: null,
+        exit: 'completed',
+        ...COMPLETED_EVIDENCE,
+      };
+      const adapter: AgentSessionAdapter = {
+        kind: 'codex',
+        probe: async () => ({ present: true, version: 'SIMULATED' }),
+        start: async () => {
+          acceptsCompletion = false;
+          return result;
+        },
+        resume: async () => { throw new Error('Late cold-start fixture unexpectedly resumed.'); },
+        classifyFailure: () => 'unknown',
+      };
+      const { lifecycle, journal, sessionId, store } = setup(adapter);
+      const deadline: AgentDispatchDeadline = {
+        signal: new AbortController().signal,
+        dispatch: (candidate) => ({ kind: 'open', timeoutMs: 100, invocation: candidate }),
+        acceptsCompletion: () => acceptsCompletion,
+      };
+
+      await expect(lifecycle[method](invocation(sessionId, 'late completion'), deadline))
+        .resolves.toEqual({ kind: 'expired', turn: result });
+      expect(journal.agentSession()).toBeNull();
+      expect(store.revisions(sessionId).map((revision) => revision.transition.kind))
+        .toEqual(['session_started']);
+    },
+  );
+
   it('fractional remainder floors and below one does not spawn', async () => {
     const prove = async (factory: DeadlineFactory): Promise<void> => {
       let now = 98.2;

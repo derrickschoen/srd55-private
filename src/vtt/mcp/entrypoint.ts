@@ -18,7 +18,7 @@ import type {
   QueuedSpeculativePlanEnvelope,
 } from '../speculative-plan-types';
 import {
-  createEngineStateCapsule,
+  createEngineStateCapsuleForEnvironment,
   projectEngineEncounterState,
   type EngineCapsuleRequest,
   type EngineInitiativeProjection,
@@ -26,8 +26,15 @@ import {
   type EnginePlanAdjustmentMetadata,
   type RuleReference,
 } from '../engine-state-capsule';
-import { canonicalEngineQueryPort, engineActionRegistry } from '../engine-query-port';
-import { pureTurnProposalResolver } from '../intent-resolver';
+import { canonicalEngineQueryPort, engineActionRegistryForEnvironment } from '../engine-query-port';
+import { createPureTurnProposalResolver } from '../intent-resolver';
+import {
+  createLegacyEngineOptionEnvironment,
+  decodeEngineOptionEnvironmentBinding,
+  engineOptionEnvironmentFromBinding,
+  type EngineOptionEnvironment,
+  type EngineOptionEnvironmentBinding,
+} from '../offers/offer-environment';
 import { freshMonsterPlanningState, projectFutureMonsterTurns } from '../monster-planning-state';
 import {
   rendererProfileSchema,
@@ -308,8 +315,10 @@ export interface EngineMcpBoardImageBinding {
   readonly primaryDispatchStartedAtUnixMs: number;
 }
 
+export const ENGINE_MCP_LAUNCHER_FORMAT = 'engine-mcp-launcher-v1' as const;
+
 export interface EngineMcpLauncherManifest {
-  readonly format: 'engine-mcp-launcher-v1';
+  readonly format: typeof ENGINE_MCP_LAUNCHER_FORMAT;
   readonly fixturePath: string;
   readonly proposalSpoolPath: string;
   readonly readinessSpoolPath?: string;
@@ -324,6 +333,8 @@ export interface EngineMcpLauncherManifest {
   readonly requestId: string;
   readonly phase: 'initial' | 'correction' | 'speculative';
   readonly correctionNumber: 0 | 1;
+  /** Required by the strict launcher decoder; optional only on the transitional construction type. */
+  readonly offerEnvironment?: EngineOptionEnvironmentBinding;
   readonly overridePolicy?: OverridePolicy;
   readonly room: number;
   readonly historyKind: string;
@@ -422,6 +433,8 @@ export function createEngineMcpRuntime(
     readonly onUiFeedback?: (feedback: EngineUiFeedback) => void;
     readonly roundDecisionAlreadyAccepted?: boolean;
     readonly uiFeedbackAlreadySubmitted?: boolean;
+    /** Transitional Slice-2 surface; every runtime immediately materializes an explicit binding. */
+    readonly offerEnvironment?: EngineOptionEnvironment;
   } = {},
 ): EngineMcpRuntime {
   if (options.boardImageContent !== undefined && options.boardImageContents !== undefined) {
@@ -437,6 +450,7 @@ export function createEngineMcpRuntime(
     options.turnContextMaximumBytes !== BLIND_TURN_CONTEXT_MAX_BYTES) {
     throw new RangeError(`Blind context base cap must be ${String(BLIND_TURN_CONTEXT_MAX_BYTES)} bytes.`);
   }
+  const offerEnvironment = options.offerEnvironment ?? createLegacyEngineOptionEnvironment(canonicalEngineQueryPort);
   const candidates = state.combatants
     .filter((candidate) => candidate.profile.kind === 'monster' && candidate.life !== 'dead')
     .map((candidate) => candidate.profile.id)
@@ -494,15 +508,16 @@ export function createEngineMcpRuntime(
       actors,
     };
   }
-  const capsule = createEngineStateCapsule({
+  const capsule = createEngineStateCapsuleForEnvironment({
     runId: options.runId ?? encounterSessionId('encounter:engine-mcp'),
     branchId: options.branchId ?? encounterBranchId('branch:engine-mcp'),
     revision,
     generatedAt: '2026-08-27T12:00:00.000Z',
+    offerEnvironment: offerEnvironment.binding,
     request,
     projection: projectEngineEncounterState(
       planningState,
-      engineActionRegistry(planningState, revision),
+      engineActionRegistryForEnvironment(planningState, offerEnvironment, revision),
       options.initiativeProjection ?? {
         policy: 'initiative-intel-v1',
         timeline: {
@@ -538,8 +553,8 @@ export function createEngineMcpRuntime(
   const application = createEngineMcpApplication({
     state: planningState,
     stateSource: feed,
-    queries: canonicalEngineQueryPort,
-    turnProposals: pureTurnProposalResolver,
+    queries: offerEnvironment.queries,
+    turnProposals: createPureTurnProposalResolver(offerEnvironment.queries),
     proposals: {
       append: (envelope) => {
         proposals.push(envelope);
@@ -928,7 +943,7 @@ export async function validatedLauncherBoardHtmlReference(
 function isLauncherManifest(value: unknown): value is EngineMcpLauncherManifest {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
   const input = value as Readonly<Record<string, unknown>>;
-  return input['format'] === 'engine-mcp-launcher-v1' &&
+  return input['format'] === ENGINE_MCP_LAUNCHER_FORMAT &&
     typeof input['fixturePath'] === 'string' && input['fixturePath'].length > 0 &&
     typeof input['proposalSpoolPath'] === 'string' && input['proposalSpoolPath'].length > 0 &&
     ((input['readinessSpoolPath'] === undefined && input['dispatchId'] === undefined &&
@@ -1012,18 +1027,44 @@ function isLauncherManifest(value: unknown): value is EngineMcpLauncherManifest 
     (input['boardImage'] === undefined || isEngineMcpBoardImageBinding(input['boardImage']));
 }
 
-export type DecodedEngineMcpLauncherManifest = EngineMcpLauncherManifest & {
+export type DecodedEngineMcpLauncherManifest = Omit<EngineMcpLauncherManifest, 'offerEnvironment'> & {
+  readonly offerEnvironment: EngineOptionEnvironmentBinding;
   readonly requestKind: EngineOrdinaryRequestKind;
   readonly overridePolicy: OverridePolicy;
 };
 
 export function decodeEngineMcpLauncherManifest(value: unknown): DecodedEngineMcpLauncherManifest | null {
-  if (!isLauncherManifest(value)) return null;
+  if (typeof value !== 'object' || value === null || Array.isArray(value) ||
+    (value as Readonly<Record<string, unknown>>)['format'] !== ENGINE_MCP_LAUNCHER_FORMAT) return null;
+  const claimedLauncher = value as Readonly<Record<string, unknown>>;
+  if (!Object.hasOwn(claimedLauncher, 'offerEnvironment') || claimedLauncher['offerEnvironment'] === undefined) {
+    throw new TypeError('Engine MCP launcher requires an explicit offer environment binding.');
+  }
+  if (!isLauncherManifest(value)) {
+    throw new TypeError('Engine MCP launcher manifest structure is invalid.');
+  }
+  const offerEnvironment = decodeEngineOptionEnvironmentBinding(value.offerEnvironment);
   return {
     ...value,
+    offerEnvironment,
     requestKind: value.requestKind ?? 'round_plan',
     overridePolicy: value.overridePolicy ?? DEFAULT_OVERRIDE_POLICY,
   };
+}
+
+export function decodeEngineMcpEntrypointDocument(
+  value: unknown,
+  decodeFixture: (fixture: unknown) => EncounterState,
+): DecodedEngineMcpLauncherManifest | null {
+  const manifest = decodeEngineMcpLauncherManifest(value);
+  if (manifest === null) decodeFixture(value);
+  return manifest;
+}
+
+export function reconstructLauncherOfferEnvironment(
+  manifest: DecodedEngineMcpLauncherManifest,
+): EngineOptionEnvironment {
+  return engineOptionEnvironmentFromBinding(canonicalEngineQueryPort, manifest.offerEnvironment);
 }
 
 async function launcherManifest(path: string): Promise<DecodedEngineMcpLauncherManifest | null> {
@@ -1033,7 +1074,7 @@ async function launcherManifest(path: string): Promise<DecodedEngineMcpLauncherM
   } catch {
     return null;
   }
-  return decodeEngineMcpLauncherManifest(decoded);
+  return decodeEngineMcpEntrypointDocument(decoded, decodeArenaFixture);
 }
 
 function kbReadRecords(path: string): readonly KbReadRecord[] {
@@ -1067,6 +1108,7 @@ export async function runEngineMcpEntrypoint(argv: readonly string[] = process.a
   const selectedProfile = profileValue as EngineMcpToolProfile | undefined;
   const manifest = await launcherManifest(launcherPath);
   if (manifest !== null) {
+    const offerEnvironment = reconstructLauncherOfferEnvironment(manifest);
     const kbReadBudget = createLauncherKbReadBudget(manifest);
     const state = await loadArenaFixture(manifest.fixturePath);
     const [boardImageContent, boardHtmlContent] = await Promise.all([
@@ -1104,6 +1146,7 @@ export async function runEngineMcpEntrypoint(argv: readonly string[] = process.a
       overridePolicy: manifest.overridePolicy,
       room: manifest.room,
       historyKind: manifest.historyKind,
+      offerEnvironment,
       ...(manifest.requestKind === 'plan_adjustment' ? {
         requestKind: manifest.requestKind,
         requestedActorIds: manifest.requestedActorIds,

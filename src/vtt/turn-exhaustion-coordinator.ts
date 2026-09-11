@@ -158,7 +158,7 @@ export type TurnExhaustionOutcome =
   | { readonly kind: 'awaiting_dm_adjudication'; readonly actorId: CombatantId }
   | {
       readonly kind: 'refused';
-      readonly reason: 'host_authorization_failed' | 'no_proposal' | 'resolver_rejected' | 'correction_cancelled' | 'correction_timeout';
+      readonly reason: 'host_authorization_failed' | 'round_deadline_expired' | 'no_proposal' | 'resolver_rejected' | 'correction_cancelled' | 'correction_timeout';
       readonly attemptConsumed: true;
     }
   | { readonly kind: 'infrastructure_failed'; readonly component: 'engine_mcp_startup' };
@@ -257,9 +257,10 @@ export class TurnExhaustionCoordinator {
       if (!exactProposalActors(proposal, actors, 'initial')) {
         throw new RangeError('Initial round proposal actors are malformed.');
       }
-      const authorization = input.deadline?.acceptsCompletion() !== false
-        ? await input.host.authorize(proposal)
-        : 'invalidated';
+      if (input.deadline?.acceptsCompletion() === false) {
+        return { kind: 'refused', reason: 'round_deadline_expired', attemptConsumed: true };
+      }
+      const authorization = await input.host.authorize(proposal);
       if (authorization === 'authorized') {
         for (const resolution of proposal.resolutions) {
           if (resolution.selectedBranch !== 'fallback') continue;

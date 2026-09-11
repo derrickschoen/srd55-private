@@ -102,10 +102,6 @@ function openDispatch(
   return budget;
 }
 
-function requireAcceptedCompletion(deadline: AgentDispatchDeadline): void {
-  if (!deadline.acceptsCompletion()) throw new AgentDispatchDeadlineExceededError();
-}
-
 export class AgentSessionLifecycle {
   constructor(
     private readonly journal: EncounterSessionJournal,
@@ -121,7 +117,7 @@ export class AgentSessionLifecycle {
   async coldStart(invocation: AgentInvocation, deadline: AgentDispatchDeadline): Promise<AgentColdStartOutcome> {
     const result = await this.#coldStart(invocation, deadline);
     if (result.exit !== 'completed') return { kind: 'unbound', turn: result };
-    requireAcceptedCompletion(deadline);
+    if (!deadline.acceptsCompletion()) return { kind: 'expired', turn: result };
     const binding = this.journal.startAgentSession({
       cli: this.adapter.kind,
       sessionId: result.resumeSessionId,
@@ -135,7 +131,7 @@ export class AgentSessionLifecycle {
   async coldStartRound(invocation: AgentInvocation, deadline: AgentDispatchDeadline): Promise<AgentColdStartOutcome> {
     const result = await this.#coldStart(invocation, deadline);
     if (result.exit !== 'completed') return { kind: 'unbound', turn: result };
-    requireAcceptedCompletion(deadline);
+    if (!deadline.acceptsCompletion()) return { kind: 'expired', turn: result };
     const binding = this.journal.startAgentSession({
       cli: this.adapter.kind,
       sessionId: result.resumeSessionId,
@@ -163,7 +159,6 @@ export class AgentSessionLifecycle {
       bootstrap: invocation.bootstrap ?? { kind: 'cold_start' },
     });
     const result = await this.adapter.start(dispatch.invocation, deadline.signal);
-    if (result.exit === 'completed') requireAcceptedCompletion(deadline);
     return result;
   }
 
@@ -208,7 +203,7 @@ export class AgentSessionLifecycle {
         'Agent resume',
       );
       if (result.exit !== 'completed') return result;
-      requireAcceptedCompletion(deadline);
+      if (!deadline.acceptsCompletion()) return result;
       this.#recordUsage(result, dispatch.invocation);
       return result;
     } catch (error) {
@@ -245,7 +240,7 @@ export class AgentSessionLifecycle {
         });
         return bootstrapResult;
       }
-      requireAcceptedCompletion(deadline);
+      if (!deadline.acceptsCompletion()) return bootstrapResult;
       if (bootstrapResult.resumeSessionId === dispatched.sessionId) {
         throw new Error('Agent recovery cold start did not create a successor session.');
       }
@@ -284,7 +279,6 @@ export class AgentSessionLifecycle {
       launcherToken: requireFullContextLauncher(invocation, 'escalation'),
     });
     const result = await this.adapter.start(dispatch.invocation, deadline.signal);
-    if (result.exit === 'completed') requireAcceptedCompletion(deadline);
     return result;
   }
 
@@ -313,7 +307,7 @@ export class AgentSessionLifecycle {
     });
     const result = await this.adapter.start(dispatch.invocation, deadline.signal);
     if (result.exit !== 'completed') return result;
-    requireAcceptedCompletion(deadline);
+    if (!deadline.acceptsCompletion()) return result;
     if (result.resumeSessionId === persisted.sessionId) {
       throw new Error('Agent context rollover did not create a successor session.');
     }

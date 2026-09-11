@@ -175,6 +175,35 @@ function objectValue(value: unknown, label: string): Readonly<Record<string, unk
   return value as Readonly<Record<string, unknown>>;
 }
 
+function d569BoardSnapshotService(directory: string): ConversationBoardSnapshotService {
+  return {
+    outputDirectory: directory,
+    capture: async (input) => {
+      const png = Buffer.alloc(24);
+      Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).copy(png);
+      png.writeUInt32BE(1, 16);
+      png.writeUInt32BE(1, 20);
+      const digest = createHash('sha256').update(png).digest('hex');
+      const relativePath = `board-images/${digest}.png` as const;
+      mkdirSync(join(directory, 'board-images'), { recursive: true });
+      writeFileSync(join(directory, relativePath), png);
+      const html = Buffer.from('<!doctype html><main>D569 evidence</main>\n');
+      const htmlDigest = createHash('sha256').update(html).digest('hex');
+      const htmlRelativePath = `board-html/${htmlDigest}/board.html` as const;
+      mkdirSync(join(directory, 'board-html', htmlDigest), { recursive: true });
+      writeFileSync(join(directory, htmlRelativePath), html);
+      return {
+        version: 'arena-board-image-v1', audience: 'dm', mimeType: 'image/png',
+        relativePath, sha256: digest, bytes: png.byteLength, width: 1, height: 1,
+        capturedAtUnixMs: 1, captureMs: 0, source: { ...input.source },
+        chromiumVersion: 'SIMULATED Chromium',
+        html: { relativePath: htmlRelativePath, sha256: htmlDigest, bytes: html.byteLength },
+      };
+    },
+    close: async () => undefined,
+  };
+}
+
 type IncompleteCatalogExit = 'timed_out' | 'cancelled' | 'infrastructure_failed';
 type IncompleteCatalogEvidenceFactory = (
   dispatchId: EngineDispatchId,
@@ -250,6 +279,7 @@ async function runIncompleteCatalogIntegrityStop(
   exit: IncompleteCatalogExit,
   evidence: Extract<EngineCatalogEvidence, { readonly status: 'inconclusive' }>['reason'] |
     IncompleteCatalogEvidenceFactory,
+  expireRoundDeadline = false,
 ): Promise<{
   readonly row: Readonly<Record<string, unknown>>;
   readonly artifact: Readonly<Record<string, unknown>>;
@@ -258,6 +288,7 @@ async function runIncompleteCatalogIntegrityStop(
   const directory = mkdtempSync(join(tmpdir(), `d569-${exit}-catalog-integrity-`));
   const outPath = join(directory, 'rows.jsonl');
   let launcherPath: string | null = null;
+  let policyMs = 0;
   let stopped: unknown;
   try {
     await runConversation(parseConversationArgs([
@@ -265,6 +296,10 @@ async function runIncompleteCatalogIntegrityStop(
       '--dm-mode', 'advice', '--board-image', 'off', '--dry-run',
     ]), {
       adapter: incompleteCatalogAdapter(exit, evidence, (path) => { launcherPath = path; }),
+      policyNow: () => policyMs,
+      onPrimaryResultObservedForTest: () => {
+        if (expireRoundDeadline) policyMs = 180_000;
+      },
     });
   } catch (error) {
     stopped = error;
@@ -904,12 +939,47 @@ describe('AI-DM engine MCP conversation runner', () => {
     });
   });
 
+  it('persists primary D569 timeout evidence before applying the expired round deadline', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'd569-primary-expired-evidence-'));
+    const outPath = join(directory, 'rows.jsonl');
+    let policyMs = 0;
+    let observedExit: AgentTurnResult['exit'] | null = null;
+    const result = await runConversation(parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', outPath,
+      '--dm-mode', 'advice', '--dry-run',
+    ]), {
+      adapter: incompleteCatalogAdapter('timed_out', 'no_correlated_catalog'),
+      boardSnapshotService: d569BoardSnapshotService(directory),
+      policyNow: () => policyMs,
+      onPrimaryResultObservedForTest: (turn) => {
+        observedExit = turn.exit;
+        policyMs = 180_000;
+      },
+    });
+
+    expect(observedExit).toBe('timed_out');
+    expect(result.rows[0]).toMatchObject({
+      rowContractVersion: 'arena-row-v3',
+      outcome: 'refused', fallbackReason: 'timeout', roundWallTimedOut: true,
+      engineCatalogEvidence: { status: 'inconclusive', reason: 'no_correlated_catalog' },
+      turnContextDelivery: { status: 'timeout_before_delivery', measurement: null },
+      authorizedPlan: null,
+    });
+    expect(JSON.parse(readFileSync(outPath, 'utf8'))).toMatchObject({
+      rowContractVersion: 'arena-row-v3',
+      outcome: 'refused', fallbackReason: 'timeout',
+      engineCatalogEvidence: { status: 'inconclusive', reason: 'no_correlated_catalog' },
+      turnContextDelivery: { status: 'timeout_before_delivery', measurement: null },
+    });
+  });
+
   it.each(['timed_out', 'cancelled'] as const)(
     'persists forensic evidence and STOPs on a %s dispatch with a contradictory catalog',
     async (exit) => {
       const { row, artifact, launcher } = await runIncompleteCatalogIntegrityStop(
         exit,
         'conflicting_success_and_failure',
+        true,
       );
       expect(row).toMatchObject({
         rowContractVersion: 'arena-row-v3', outcome: 'integrity_indeterminate', passed: false,
@@ -944,6 +1014,7 @@ describe('AI-DM engine MCP conversation runner', () => {
       const { row, artifact, launcher } = await runIncompleteCatalogIntegrityStop(
         exit,
         (dispatchId) => classifiedInvalidCatalog(dispatchId, source),
+        true,
       );
       expect(row).toMatchObject({
         rowContractVersion: 'arena-row-v3', outcome: 'integrity_indeterminate', passed: false,
@@ -3593,6 +3664,8 @@ describe('AI-DM engine MCP conversation runner', () => {
   it('aborts the cell when speculation recalculation infrastructure fails after staging output', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'd569-speculation-recalc-infrastructure-'));
     let mutated = false;
+    let policyMs = 0;
+    let observedRecalculationExit: AgentTurnResult['exit'] | null = null;
     const result = await runConversation(parseConversationArgs([
       '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
       '--combat-model', 'initiative_segments_v1', '--dry-run',
@@ -3612,7 +3685,13 @@ describe('AI-DM engine MCP conversation runner', () => {
       failSpeculationRecalculation: true,
       simulatedInProcessDispatchDelayMs: 10,
       forceSpeculationRecalculationForTest: true,
+      policyNow: () => policyMs,
+      onSpeculationRecalculationResultObservedForTest: (turn) => {
+        observedRecalculationExit = turn.exit;
+        policyMs = 180_000;
+      },
     });
+    expect(observedRecalculationExit).toBe('infrastructure_failed');
     expect(result.rows[0]).toMatchObject({
       outcome: 'infrastructure_failed',
       failingDispatch: {
@@ -3629,6 +3708,8 @@ describe('AI-DM engine MCP conversation runner', () => {
     ['exception-cleanup', { failAfterSpeculationStartForTest: true }],
   ] as const)('retains diagnosed speculative infrastructure at the %s join', async (_join, seam) => {
     const directory = mkdtempSync(join(tmpdir(), `d569-speculation-${_join}-join-`));
+    let policyMs = 0;
+    let observedSpeculationExit: AgentTurnResult['exit'] | null = null;
     const result = await runConversation(parseConversationArgs([
       '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
       '--combat-model', 'initiative_segments_v1', '--dry-run',
@@ -3636,8 +3717,14 @@ describe('AI-DM engine MCP conversation runner', () => {
       roomStates: [await alternatingInitiativeRoom()],
       failSpeculationInfrastructure: true,
       simulatedInProcessDispatchDelayMs: 1,
+      policyNow: () => policyMs,
+      onSpeculationResultObservedForTest: (turn) => {
+        observedSpeculationExit = turn.exit;
+        policyMs = 180_000;
+      },
       ...seam,
     });
+    expect(observedSpeculationExit).toBe('infrastructure_failed');
     expect(result.rows[0]).toMatchObject({
       outcome: 'infrastructure_failed',
       failingDispatch: {
@@ -3891,6 +3978,40 @@ describe('AI-DM engine MCP conversation runner', () => {
     });
     expect(adjustment.resultPlanHash).toBe(adjustment.baselinePlanHash);
     expect(result.rows[0]?.monsterSegments.flatMap((segment) => segment.actors).length).toBeGreaterThan(0);
+  });
+
+  it('records adjustment timeout evidence before applying the expired round deadline', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'd569-adjustment-expired-evidence-'));
+    let policyMs = 0;
+    let observedAdjustmentExit: AgentTurnResult['exit'] | null = null;
+    const result = await runConversationWithPartyPolicy('heuristic_v0', parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      '--combat-model', 'initiative_segments_v1', '--dry-run',
+      ...ALL_OPTIONS_TEST_RENDERER_ARGS,
+    ]), {
+      roomStates: [await alternatingInitiativeRoom({ fragileMonsterCount: 1 })],
+      suggestionResponseByRequest: { 'room-1-round-1': 'ignored' },
+      stagedAdjustmentTimeout: ['room-1-round-1-pc-turn-1'],
+      simulatedInProcessDispatchDelayMs: 1,
+      speculationDispatchDelayMs: 1,
+      policyNow: () => policyMs,
+      onAdjustmentResultObservedForTest: (turn) => {
+        observedAdjustmentExit = turn.exit;
+        policyMs = 180_000;
+      },
+    });
+    const adjustment = result.rows[0]?.adjustments?.[0];
+    if (adjustment === undefined || adjustment.skipped !== null) {
+      throw new Error('Expired adjustment timeout was not recorded.');
+    }
+    expect(observedAdjustmentExit).toBe('timed_out');
+    expect(adjustment).toMatchObject({
+      outcome: 'service_null', proposalId: null, changedActors: [], flapRetries: 0,
+    });
+    expect(adjustment.resultPlanHash).toBe(adjustment.baselinePlanHash);
+    expect(result.rows[0]).toMatchObject({
+      outcome: 'refused', roundWallTimedOut: true, monsterSegments: [],
+    });
   });
 
   it('ignores an adjustment correction proposal staged before timeout and retains the authorized baseline', async () => {

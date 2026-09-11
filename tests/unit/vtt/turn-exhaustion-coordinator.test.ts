@@ -235,7 +235,7 @@ describe('host turn exhaustion coordinator', () => {
     expect(fallbackApplications).toBe(0);
   });
 
-  it('late completion cannot reach acceptance', async () => {
+  it('attributes deadline expiry without invoking host authorization', async () => {
     let acceptsCompletion = false;
     const originalHash = sha256(JSON.stringify({ acceptsCompletion }));
     const prove = async (): Promise<void> => {
@@ -253,6 +253,7 @@ describe('host turn exhaustion coordinator', () => {
         correction: runtime(f, new SIMULATEDAgentSessionAdapter({ startIds: [] }), [], { value: 0 }),
         escalation: null,
         deadline: lateDeadline,
+        authorizationFailurePolicy: { kind: 'refuse_blind' },
         host: {
           ...host(),
           authorize: async () => {
@@ -262,7 +263,9 @@ describe('host turn exhaustion coordinator', () => {
         },
       });
       expect(authorizations).toBe(0);
-      expect(outcome).toEqual({ kind: 'auto_resolved', actorIds: [f.actor] });
+      expect(outcome).toEqual({
+        kind: 'refused', reason: 'round_deadline_expired', attemptConsumed: true,
+      });
     };
 
     try {

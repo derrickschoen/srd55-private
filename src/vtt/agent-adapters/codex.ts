@@ -15,7 +15,7 @@ import {
   decodeEngineReadinessRecord,
   type EngineObservedEvent,
   type EngineReadinessRecord,
-} from '../engine-dispatch-evidence';
+} from './engine-catalog-evidence';
 import {
   AgentAdapterError,
   agentProcessEvidence,
