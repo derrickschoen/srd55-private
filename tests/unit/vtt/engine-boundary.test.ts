@@ -193,6 +193,7 @@ function resolvedSymbol(checker: ts.TypeChecker, node: ts.Node): ts.Symbol | nul
 const NODE_BUILTINS = new Set(builtinModules.flatMap((name) => [name, `node:${name}`]));
 const FORBIDDEN_GLOBALS = new Set([
   'document', 'window', 'indexedDB', 'IDBDatabase', 'IDBFactory', 'IDBObjectStore',
+  'Document', 'HTMLElement',
   'HTMLCanvasElement', 'OffscreenCanvas', 'CanvasRenderingContext', 'CanvasRenderingContext2D',
   'SharedArrayBuffer', 'Atomics', 'importScripts',
 ]);
@@ -772,6 +773,18 @@ describe('renderer-neutral engine boundary graph', () => {
   it('catches the bare-builtin platform control at its exact import site', () => {
     const violations = platformControlViolations('builtin', `import fs from 'fs'; void fs;`);
     expect(violations.some((violation) => /\/builtin\.ts imports fs$/u.test(violation))).toBe(true);
+  });
+
+  it('catches the Document platform control at its exact use site', () => {
+    const violations = platformControlViolations('document-constructor', 'void new Document();');
+    expect(violations.some((violation) =>
+      /\/document-constructor\.ts resolves Document to Document$/u.test(violation))).toBe(true);
+  });
+
+  it('catches the HTMLElement platform control at its exact use site', () => {
+    const violations = platformControlViolations('html-element-prototype', 'void HTMLElement.prototype;');
+    expect(violations.some((violation) =>
+      /\/html-element-prototype\.ts resolves HTMLElement\.prototype to HTMLElement$/u.test(violation))).toBe(true);
   });
 
   it('all runtime entries converge on the pinned session reducer edges', () => {
