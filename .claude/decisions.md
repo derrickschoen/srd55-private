@@ -22385,3 +22385,7 @@ Asked: the marginal-test family (two other ai-dm-arena cases at 30 s, rl-generat
 ## D614 — OWNER: S8 gets at most one more lane round after r3, then merges regardless with residuals in the ledger (2026-09-11 09:03)
 
 Asked: S8 findings per round went 2 → 2 (r3 review pending), so D607.1's falling-findings rule was not met while D604 allows unlimited rounds. Owner: "One more S8 round, then merge regardless" — a fourth lane round only if the r3 review's findings are correctness (not coverage gaps); anything left after that goes to .claude/consensus/vtt-handoff/ledger.md and S8 merges into claude/vtt-handoff.
+
+## D586.188 — Offers Slice 3A scope deviation: eleventh source file authorized to close S3A-F1 (supervisor, 2026-09-11 10:18)
+
+Astra's 3A review found the production board sequence (encounter-projections.ts generate → project) minting two environments so every moving option lost its path (S3A-F1, high). The only correct fix threads one environment through that file, which is not on the roadmap's ten-file 3A list. The supervisor's fix-round brief required exactly that, so the cumulative 3A diff has eleven source files plus two authorized specs. Ruling: the deviation is authorized and recorded; the roadmap's per-subslice cap is a review-unit boundary, not a licence to leave a reviewer-confirmed production regression in place. 3B's file budget is unchanged; encounter-projections.ts is now listed among 3A's consumers. Astra re-reads under this ruling.
