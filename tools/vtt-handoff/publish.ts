@@ -7,6 +7,7 @@ import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { handoffPaths, type RepositoryIdentityPolicy } from './paths.ts';
+import { publishHandoffReport } from './report.ts';
 
 interface PublicationEntry {
   readonly path: string;
@@ -271,14 +272,21 @@ if (process.env.VITEST === undefined && process.argv[1] !== undefined &&
   (fileURLToPath(import.meta.url) === process.argv[1] || process.argv[1].endsWith('/vite-node'))) {
   const coreOnly = process.argv.includes('--core') && !process.argv.includes('--examples');
   const examplesOnly = process.argv.includes('--examples') && !process.argv.includes('--core');
+  const reportOnly = process.argv.includes('--report');
   const check = process.argv.includes('--check');
-  if (coreOnly) {
+  const inputFlag = process.argv.indexOf('--report-input');
+  const inputPath = inputFlag < 0 ? process.env.VTT_HANDOFF_REPORT_INPUT : process.argv[inputFlag + 1];
+  if (inputFlag >= 0 && inputPath === undefined) throw new Error('--report-input requires a path.');
+  if (reportOnly) {
+    process.stdout.write(`${JSON.stringify(publishHandoffReport({ check, ...(inputPath === undefined ? {} : { inputPath }) }))}\n`);
+  } else if (coreOnly) {
     process.stdout.write(`${JSON.stringify(publishCore({ check }))}\n`);
   } else if (examplesOnly) {
     process.stdout.write(`${JSON.stringify(publishExamples({ check }))}\n`);
   } else {
     const core = publishCore({ check });
     const examples = publishExamples({ check });
-    process.stdout.write(`${JSON.stringify({ core, examples })}\n`);
+    const report = publishHandoffReport({ check, ...(inputPath === undefined ? {} : { inputPath }) });
+    process.stdout.write(`${JSON.stringify({ core, examples, report })}\n`);
   }
 }
