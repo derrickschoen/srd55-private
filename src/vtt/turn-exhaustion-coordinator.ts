@@ -426,6 +426,7 @@ export class TurnExhaustionCoordinator {
       if (!input.deadline.acceptsCompletion()) return roundDeadlineRefusal();
       correctedProposal = input.correction.takeProposal();
     }
+    if (!input.deadline.acceptsCompletion()) return roundDeadlineRefusal();
 
     let proposal = correctedProposal;
     if (proposal === null) {
