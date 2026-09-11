@@ -1,0 +1,17 @@
+**F92 RESOLVED for active and already-queued calls.**  
+Explicit waiters are settled independently by `close()` at [dm-encounter-host.ts:1906](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/dm-encounter-host.ts:1906); settled queued calls skip execution at [:1549](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/dm-encounter-host.ts:1549). The regression now asserts both outcomes before releasing the barrier, then checks execution/publication counts after release: [encounter-session-service.test.ts:474](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/tests/unit/vtt/encounter-session-service.test.ts:474).
+
+**F93 RESOLVED.**  
+The notification is captured before the durability wait and delivered afterward: [dm-encounter-host.ts:1598](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/dm-encounter-host.ts:1598), [:1626](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/dm-encounter-host.ts:1626). The regression independently asserts live revision N+1 while acknowledgement and mutation event retain N, with one adjudication execution: [encounter-session-service.test.ts:510](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/tests/unit/vtt/encounter-session-service.test.ts:510).
+
+1. **F94 — SIGNIFICANT — correctness: observer-triggered closure replaces a committed outcome with `closed`.**  
+   The new waiter is settled only after `#settleTopDownMutation()` returns at [dm-encounter-host.ts:1553](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/dm-encounter-host.ts:1553). That method delivers the durable mutation notification before returning at [:1626](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/dm-encounter-host.ts:1626). If a mutation subscriber calls `service.close()`, host closure resolves the still-active waiter as `closed`; subsequent settlement with `committed` is ignored at [:1564](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/dm-encounter-host.ts:1564). The caller therefore receives `closed` despite an applied, durable, published mutation.
+
+   **Closes with:** establish the irrevocable committed outcome before notifying observers. Add real-host regressions for all three operations where a mutation subscriber closes the service; the active result remains committed, queued work closes, and nothing executes twice.
+
+2. **F95 — SIGNIFICANT — correctness: submissions made after closure can still hang behind the outstanding flush.**  
+   [dm-encounter-host.ts:1541](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/dm-encounter-host.ts:1541) registers a new waiter without checking closure. The check occurs only inside the promise-tail callback at [:1549](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/dm-encounter-host.ts:1549). After closing during an unresolved flush, a subsequent adjudication submission joins that blocked tail and remains unresolved; the earlier closure sweep cannot settle a waiter created afterward.
+
+   **Closes with:** reject new submissions immediately with `closed` before registering or queueing them. Extend the unresolved-barrier regression with a submission after `close()`; assert its outcome before release, zero additional execution, and unchanged results afterward.
+
+S8 MERGES WITH RESIDUALS: F94, F95
