@@ -56,7 +56,18 @@ const supervisorReportInputSchema = z.strictObject({
     name: z.string().min(1), command: z.string().min(1),
     status: resultStatusSchema, summary: z.string(),
     preExistingFailures: z.array(z.string()),
-  })).min(1),
+  })).min(1).superRefine((gates, context) => {
+    const names = new Set<string>();
+    for (const [index, gate] of gates.entries()) {
+      if (names.has(gate.name)) {
+        context.addIssue({
+          code: 'custom', path: [index, 'name'],
+          message: `Duplicate gate result: ${gate.name}`,
+        });
+      }
+      names.add(gate.name);
+    }
+  }),
   artRequests: z.array(z.strictObject({
     requestId: uuidV7Schema,
     requestPath: z.string().min(1),

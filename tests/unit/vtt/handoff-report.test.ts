@@ -179,6 +179,30 @@ describe('VTT handoff readiness report', () => {
     ]);
   });
 
+  it.each(['passed-then-failed', 'failed-then-passed'] as const)(
+    'rejects conflicting duplicate gate results ordered %s',
+    (order) => {
+      const handoffRoot = root();
+      const candidate = input();
+      const passed = candidate.gates.find((gate) => gate.name === 'unit-gate');
+      if (passed === undefined) throw new Error('The unit-gate fixture is unavailable.');
+      const failed = {
+        ...passed, status: 'FAILED' as const, summary: 'conflicting duplicate failure',
+      };
+      const gates = order === 'passed-then-failed'
+        ? [...candidate.gates, failed]
+        : [failed, ...candidate.gates];
+      const evidence = inputFile(handoffRoot, { ...candidate, gates });
+      const report = buildHandoffReport({
+        repositoryRoot: process.cwd(), inputPath: evidence, gitReader: gitReader(),
+      });
+      expect(report).toMatchObject({
+        readiness: 'PARTIAL', reasons: ['SUPERVISOR_RESULTS_INVALID'], evidence: null,
+      });
+      expect(report.readiness).not.toBe('READY');
+    },
+  );
+
   it('reports PARTIAL with failed or not-run required gates instead of planned success', () => {
     const handoffRoot = root();
     const evidence = inputFile(handoffRoot, input('FAILED'));
