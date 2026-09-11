@@ -55,6 +55,8 @@ import {
   projectHumanEngineOptions,
   type HumanEngineActorOptions,
 } from './encounter-board-projection';
+import { canonicalEngineQueryPort } from './engine-query-port';
+import { createLegacyEngineOptionEnvironment } from './offers/offer-environment';
 import {
   offeredOptionActorsForState,
   offeredOptionPaths as projectOfferedOptionPaths,
@@ -394,7 +396,8 @@ export function projectDmBoard(input: {
       combatantName: names.get(request.actorId as CombatantId) ?? request.actorId,
       interactive: true as const,
     }));
-  const offeredActors = offeredOptionActorsForState(input.view.state);
+  const offerEnvironment = createLegacyEngineOptionEnvironment(canonicalEngineQueryPort);
+  const offeredActors = offeredOptionActorsForState(input.view.state, undefined, offerEnvironment);
   return {
     audience: 'dm',
     stateDigest: sha256(canonicalJson(input.view.state)),
@@ -403,12 +406,12 @@ export function projectDmBoard(input: {
     coordinator: input.coordinator,
     pendingRequest: input.coordinator.pendingRequest,
     humanCommandActions,
-    humanEngineOptions: projectHumanEngineOptions(input.view.state),
+    humanEngineOptions: projectHumanEngineOptions(input.view.state, undefined, undefined, offerEnvironment),
     movementPreviews: humanCommandActions.flatMap((action): readonly DmMovementPathPreview[] =>
       action.type === 'move'
         ? [{ commandKey: canonicalJson(action), ...previewMovementPathDangers(input.view.state, action) }]
         : []),
-    offeredOptionPaths: projectOfferedOptionPaths(input.view.state, offeredActors),
+    offeredOptionPaths: projectOfferedOptionPaths(input.view.state, offeredActors, offerEnvironment),
     controllers: input.controllers,
     history: input.history,
     adjudicatedTargets: targets,

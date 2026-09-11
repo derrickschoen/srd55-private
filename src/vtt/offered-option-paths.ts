@@ -51,6 +51,17 @@ export interface BoardPathSummary {
   }[];
 }
 
+export class OfferedOptionEnvironmentMismatchError extends TypeError {
+  readonly code = 'OFFER_ENVIRONMENT_MISMATCH' as const;
+
+  constructor(summary: string) {
+    super(summary);
+    this.name = 'OfferedOptionEnvironmentMismatchError';
+  }
+}
+
+const transitionalLegacyOfferEnvironment = createLegacyEngineOptionEnvironment(canonicalEngineQueryPort);
+
 function optionOrdinal(value: number): OfferedOptionOrdinal {
   if (!Number.isSafeInteger(value) || value < 0) {
     throw new RangeError('An offered-option ordinal must be a non-negative safe integer.');
@@ -117,7 +128,7 @@ export function actingMonsterIds(state: EncounterState): readonly CombatantId[] 
 export function offeredOptionActorsForState(
   state: EncounterState,
   actorIds: readonly CombatantId[] = actingMonsterIds(state),
-  offerEnvironment: EngineOptionEnvironment = createLegacyEngineOptionEnvironment(canonicalEngineQueryPort),
+  offerEnvironment: EngineOptionEnvironment = transitionalLegacyOfferEnvironment,
 ): readonly OfferedOptionActor[] {
   const planningState = projectFutureMonsterTurns(state, actorIds);
   return actorIds.map((actorId) => ({
@@ -136,7 +147,7 @@ export function offeredOptionActorsForState(
 export function offeredOptionPaths(
   state: EncounterState,
   actors: readonly OfferedOptionActor[],
-  offerEnvironment: EngineOptionEnvironment = createLegacyEngineOptionEnvironment(canonicalEngineQueryPort),
+  offerEnvironment: EngineOptionEnvironment = transitionalLegacyOfferEnvironment,
 ): readonly OfferedOptionPath[] {
   const actorIds = actors.map((actor) => actor.actorId);
   const planningState = projectFutureMonsterTurns(state, actorIds);
@@ -150,7 +161,13 @@ export function offeredOptionPaths(
         throw new TypeError(`Option ${option.optionId} belongs to a different actor.`);
       }
       const resolution = resolveEngineActorOption(planningState, option, offerEnvironment);
-      if (!resolution.valid || resolution.mechanics.path.length === 0) return [];
+      if (!resolution.valid) {
+        if (resolution.code === 'OFFER_ENVIRONMENT_MISMATCH') {
+          throw new OfferedOptionEnvironmentMismatchError(resolution.summary);
+        }
+        return [];
+      }
+      if (resolution.mechanics.path.length === 0) return [];
       const command = {
         type: 'move' as const,
         actor: actor.actorId,
