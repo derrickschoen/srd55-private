@@ -16,6 +16,19 @@ export {
   type NoModeledEffect,
 } from './option-modeling';
 
+export type {
+  EngineOfferBinding,
+  EngineOfferCapability,
+  EngineOfferEnvelope,
+  EngineStandardOfferBinding,
+  OfferEvaluationContext,
+  OfferExecutionContext,
+  OfferGenerationContext,
+  OfferResolution,
+  OfferResolutionContext,
+  ResolvedOfferMechanics,
+} from './offers/offer-envelope';
+
 export type { CombatantId } from '../combat/values';
 
 /** Stable passthrough ids remain distinct even when supplied by homebrew content. */

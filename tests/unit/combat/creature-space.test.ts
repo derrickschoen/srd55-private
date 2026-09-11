@@ -406,7 +406,8 @@ describe('hand-authored serialized-surface change register', () => {
       dmCapture: 'dm-intel-capture-v2-creature-space',
       renderer: 'turn-context-renderer-v4-creature-space',
       engineActorKnowledge: 'actor-knowledge-v3-last-seen',
-      engineCapsuleSchema: '3',
+      // Offers Slice 2 capsule schema 4 (D586.186).
+      engineCapsuleSchema: '4',
     });
   });
 

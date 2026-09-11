@@ -29,6 +29,7 @@ import {
 } from '../../../src/vtt/turn-proposal';
 import { placedToken, playerProfile } from '../combat/fixtures';
 import { engineActorOptions } from '../../../src/vtt/turn-option-registry';
+import { generateStandardOfferDeclarations } from '../../../src/vtt/offers/offer-declarations';
 
 function monsterProfile(
   statblock: typeof SCOUT | typeof SPY | typeof PRIEST,
@@ -92,6 +93,29 @@ function mainMultiattack(option: EngineOfferableOption, actionId: string, count:
 }
 
 describe('complete action economy and composite turn proposals', () => {
+  it('declaration extraction preserves End Turn plus bonus ordering', () => {
+    const spy = monsterProfile(SPY, 'declaration-order-spy');
+    const state = encounter([{ profile: spy, column: 0, row: 2 }], 10);
+    const declarations = generateStandardOfferDeclarations(state, spy.id);
+    const endTurn = declarations.filter((declaration) => declaration.label.startsWith('End Turn'));
+
+    expect(endTurn.map((declaration) => declaration.label)).toEqual([
+      'End Turn',
+      'End Turn + Cunning Action/Dash',
+      'End Turn + Cunning Action/Disengage',
+      'End Turn + Cunning Action/Hide',
+    ]);
+    expect(endTurn.map((declaration) => declaration.actionSlots.map((slot) => ({
+      slot: slot.slot,
+      kind: slot.use.kind,
+    })))).toEqual([
+      [{ slot: 'main', kind: 'end_turn' }],
+      [{ slot: 'main', kind: 'end_turn' }, { slot: 'bonus', kind: 'dash' }],
+      [{ slot: 'main', kind: 'end_turn' }, { slot: 'bonus', kind: 'disengage' }],
+      [{ slot: 'main', kind: 'end_turn' }, { slot: 'bonus', kind: 'hide' }],
+    ]);
+  });
+
   it('keeps hidden ids out of primary and fallback lookup and rejects a forged offerable brand', () => {
     const scout = monsterProfile(SCOUT, 'hidden-id-scout');
     const state = encounter([{ profile: scout, column: 0, row: 2 }], 20);

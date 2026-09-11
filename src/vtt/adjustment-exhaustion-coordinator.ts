@@ -1,6 +1,6 @@
 import type { CombatantId } from '../combat/values';
 import type { AgentInvocation } from './agent-session';
-import type { AgentSessionLifecycle } from './agent-session-lifecycle';
+import type { AgentDispatchDeadline, AgentSessionLifecycle } from './agent-session-lifecycle';
 import type {
   PlanAdjustmentProposalEnvelope,
   ProposedTurnResolution,
@@ -62,7 +62,6 @@ export interface AdjustmentCorrectionRuntime {
   readonly turnContext: unknown;
   readonly lifecycle: Pick<AgentSessionLifecycle, 'resumeCorrection'>;
   readonly invocation: AgentInvocation;
-  readonly signal: AbortSignal;
   activateCapsule(): void;
   takeProposal(): PlanAdjustmentProposalEnvelope | null;
 }
@@ -134,6 +133,7 @@ export class AdjustmentExhaustionCoordinator {
   async coordinate(input: {
     readonly initial: InitialAdjustmentAttempt;
     readonly correction: AdjustmentCorrectionRuntime | null;
+    readonly deadline: AgentDispatchDeadline;
   }): Promise<AdjustmentCompletion> {
     const openActors = exactActors(input.initial.openActorIds, 'Open adjustment');
     const refusedActors = exactActors(input.initial.refusedActorIds, 'Refused adjustment', true);
@@ -144,8 +144,11 @@ export class AdjustmentExhaustionCoordinator {
     if (!/^[0-9a-f]{64}$/u.test(input.initial.baselinePlanHash)) {
       throw new TypeError('Adjustment baseline plan hash must be canonical.');
     }
-    const staged = input.initial.stagedProposal?.updates ?? [];
-    if (input.initial.stagedProposal !== null && !exactProposal(input.initial.stagedProposal, {
+    const stagedProposal = input.deadline.acceptsCompletion()
+      ? input.initial.stagedProposal
+      : null;
+    const staged = stagedProposal?.updates ?? [];
+    if (stagedProposal !== null && !exactProposal(stagedProposal, {
       requestId: input.initial.requestId,
       baselinePlanHash: input.initial.baselinePlanHash,
       phase: 'initial',
@@ -164,7 +167,7 @@ export class AdjustmentExhaustionCoordinator {
     if (refusedActors.length === 0) {
       const outcome = completion({
         initial: input.initial,
-        staged,
+        staged: input.deadline.acceptsCompletion() ? staged : [],
         corrected: [],
         correctionResult: 'not_required',
       });
@@ -174,7 +177,7 @@ export class AdjustmentExhaustionCoordinator {
     if (input.correction === null) {
       const outcome = completion({
         initial: input.initial,
-        staged,
+        staged: input.deadline.acceptsCompletion() ? staged : [],
         corrected: [],
         correctionResult: 'no_response',
       });
@@ -219,24 +222,39 @@ export class AdjustmentExhaustionCoordinator {
             undefined,
             input.correction.turnContext,
           );
+      if (!input.deadline.acceptsCompletion()) {
+        const outcome = completion({
+          initial: input.initial,
+          staged: [],
+          corrected: [],
+          correctionResult: 'no_response',
+        });
+        this.persistence.record({ kind: 'adjustment_completed', requestId: outcome.requestId, outcome });
+        return outcome;
+      }
       await input.correction.lifecycle.resumeCorrection({
         ...input.correction.invocation,
         prompt,
-      }, input.correction.signal);
+      }, input.deadline);
     }
 
-    const proposal = input.correction.takeProposal();
+    const proposal = input.deadline.acceptsCompletion()
+      ? input.correction.takeProposal()
+      : null;
     const accepted = proposal !== null && staged.length + proposal.updates.length <= adjustmentBudget && exactProposal(proposal, {
       requestId: input.initial.requestId,
       baselinePlanHash: input.initial.baselinePlanHash,
       phase: 'correction',
       allowedActorIds: refusedActors,
     });
+    const completedInTime = input.deadline.acceptsCompletion();
     const outcome = completion({
       initial: input.initial,
-      staged,
-      corrected: accepted ? proposal.updates : [],
-      correctionResult: proposal === null ? 'no_response' : accepted ? 'accepted' : 'invalid',
+      staged: completedInTime ? staged : [],
+      corrected: completedInTime && accepted ? proposal.updates : [],
+      correctionResult: !completedInTime || proposal === null
+        ? 'no_response'
+        : accepted ? 'accepted' : 'invalid',
     });
     this.persistence.record({ kind: 'adjustment_completed', requestId: outcome.requestId, outcome });
     return outcome;

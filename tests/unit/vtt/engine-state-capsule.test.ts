@@ -13,6 +13,7 @@ import {
 } from '../../../src/vtt/engine-envelopes';
 import {
   createEngineStateCapsule,
+  createEngineStateCapsuleForEnvironment,
   decodeEngineStateCapsule,
   EngineStateCapsuleDecodeError,
   engineCapsuleRequestKind,
@@ -22,12 +23,16 @@ import {
   projectEngineEncounterState,
   verifyEngineStateCapsule,
 } from '../../../src/vtt/engine-state-capsule';
-import { engineActionRegistry } from '../../../src/vtt/engine-query-port';
+import { canonicalEngineQueryPort, engineActionRegistry } from '../../../src/vtt/engine-query-port';
 import { projectDmBoard } from '../../../src/vtt/encounter-projections';
 import { availableEngineActorOptions, pureTurnProposalResolver } from '../../../src/vtt/intent-resolver';
 import { freshMonsterPlanningState } from '../../../src/vtt/mcp/entrypoint';
 import { generateRoom } from '../../../src/vtt/room-generator';
 import { HAND_AUTHORED_CAPSULE_V3_BODY } from '../../fixtures/vtt/creature-space-migration-fixtures';
+import {
+  createLegacyEngineOptionEnvironmentBinding,
+  createRevisionBoundEngineOptionEnvironment,
+} from '../../../src/vtt/offers/offer-environment';
 
 const repoRoot = fileURLToPath(new URL('../../../', import.meta.url));
 const authorityBoundaryEntries = [
@@ -143,11 +148,13 @@ function capsuleFixture() {
   const runId = encounterSessionId('encounter:mcp-migration');
   const branchId = encounterBranchId('branch:mcp-migration');
   const requestId = 'request:mcp-migration';
-  const capsule = createEngineStateCapsule({
+  const environment = createRevisionBoundEngineOptionEnvironment(canonicalEngineQueryPort);
+  const capsule = createEngineStateCapsuleForEnvironment({
     runId,
     branchId,
     revision: 1,
     generatedAt: '2026-08-27T12:00:00.000Z',
+    offerEnvironment: environment.binding,
     request: {
       requestId,
       phase: 'initial',
@@ -181,8 +188,21 @@ function rehash(value: unknown): Record<string, unknown> {
 }
 
 describe('read-only engine state capsule', () => {
-  it('exercises the strict capsule corpus from a hand-authored schema-3 fixture', () => {
-    const body = structuredClone(HAND_AUTHORED_CAPSULE_V3_BODY);
+  it('rejects schema 3 and exercises its hand-authored corpus only after an explicit schema-4 binding', () => {
+    const schemaThreeBody = structuredClone(HAND_AUTHORED_CAPSULE_V3_BODY);
+    const schemaThreeFixture = {
+      ...schemaThreeBody,
+      digest: sha256(canonicalJson(schemaThreeBody)),
+      generatedAt: '2026-09-05T12:00:00.000Z',
+    };
+    expect(() => decodeEngineStateCapsule(schemaThreeFixture)).toThrowError(
+      expect.objectContaining<Partial<EngineStateCapsuleDecodeError>>({ code: 'unsupported_version' }),
+    );
+    const body = {
+      ...schemaThreeBody,
+      schemaVersion: 4,
+      offerEnvironment: createLegacyEngineOptionEnvironmentBinding(),
+    };
     const fixture = {
       ...body,
       digest: sha256(canonicalJson(body)),
@@ -244,7 +264,7 @@ describe('read-only engine state capsule', () => {
     );
   });
 
-  it('strictly decodes schema 3 only after exact shape and spatial semantics validate', () => {
+  it('strictly decodes schema 4 only after exact shape and spatial semantics validate', () => {
     const { capsule } = capsuleFixture();
     expect(decodeEngineStateCapsule(capsule)).toEqual(capsule);
 
@@ -297,6 +317,27 @@ describe('read-only engine state capsule', () => {
     const digestMismatch = structuredClone(capsule);
     const changed = { ...digestMismatch, revision: digestMismatch.revision + 1 };
     expect(() => decodeEngineStateCapsule(changed)).toThrowError(
+      expect.objectContaining<Partial<EngineStateCapsuleDecodeError>>({ code: 'digest_mismatch' }),
+    );
+  });
+
+  it('capsule and launcher bind the exact offer environment digest', () => {
+    const { capsule } = capsuleFixture();
+    expect(capsule.offerEnvironment.digest).toBe(
+      '0c2e08e26bd2bbfd3b9fe0a239f316e4b61a9c9680174605f12435f6c4f14afb',
+    );
+
+    const changedPolicy = rehash(capsule);
+    const environment = mutableRecord(changedPolicy['offerEnvironment'], 'offer environment');
+    const familyPolicy = mutableRecord(environment['familyPolicy'], 'family policy');
+    familyPolicy['helpAttack'] = 'enabled';
+    expect(() => decodeEngineStateCapsule(rehash(changedPolicy))).toThrowError(
+      expect.objectContaining<Partial<EngineStateCapsuleDecodeError>>({ code: 'invalid_schema' }),
+    );
+
+    const changedBinding = rehash(capsule);
+    changedBinding['offerEnvironment'] = createLegacyEngineOptionEnvironmentBinding();
+    expect(() => decodeEngineStateCapsule(changedBinding)).toThrowError(
       expect.objectContaining<Partial<EngineStateCapsuleDecodeError>>({ code: 'digest_mismatch' }),
     );
   });

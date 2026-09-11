@@ -21815,3 +21815,581 @@ Read-only peek at `~/dnd-slim-runs/d569-v5/gpt-5.6-luna-blind-primary-hard.raw.j
 Headline counts (claimed by the rows, not yet validated): model gpt-5.6-luna ×30, effort high ×30, dmMode blind ×30, decisionTransport mcp_minimal ×30, blindRepairArm code_only ×30, blindFacts off ×30, escalated 0, executionErrorClass none, contextTruncated 0, flapRetries 0, `cliVersion` null on every row (expected: 4.2 relabel supplies the real 0.153.4). Round outcome: 4/30 rows accepted a full monster round (all creatures accepted; firstDecisionAccepted true), 18/30 exhausted three attempts with every attempt rejected (codes INVALID_INTENT_SHAPE, NO_MATCHING_OPTION, ACTION_UNAVAILABLE), 8/30 produced no resolver outcome at all (outcome `refused` ×5 / `service_null` ×3 with empty attempts). This is data, not a STOP: no STOP rule 1–16 condition is met, the arm keeps running untouched, and section 4 post-arm steps remain separate.
 
 Cells run under a per-conversation `codex-home-kb` copy inside `/tmp/dnd-ai-dm-conversation-*` (CODEX_HOME of the outer arena is `~/.codex-aidm`); `~/.codex-aidm/sessions` therefore stays empty by design. `/tmp` holds 8,5xx such dirs (1.5 GB) accumulated since 2026-09-08 22:27 across earlier runs; none touched while the arm runs.
+
+## D589 — OWNER: VTT handoff — backend/preparation half of a two-part project (2026-09-09)
+
+Owner directive received 2026-09-09 15:40 EDT, recorded verbatim (282 lines) at `.claude/consensus/vtt-handoff/OWNER-SPEC.md`
+(sha256 f33a7f7d86c2df7a3211fe4404401dee797afadb6d57ac140622099068c412a4). Binding summary: implement the backend/preparation
+half of a two-part project in this repository — one authoritative TypeScript engine behind a renderer-neutral session service,
+preserved in BOTH runtime modes (a real browser Web Worker with postMessage/MessageChannel and the DM-local Node/npm process),
+the existing top-down UI routed through the extracted boundary (typed intents in, safe snapshots out), a versioned bootstrap wire
+protocol v1 (`{v,id,method,params}` / `{v,id,ok,result|error{code,message}}` / `{v,event:"scene.snapshot",seq,data}`; methods
+session.open, scene.snapshot, token.move, door.set, light.set; SceneSnapshot fields exactly as specified; UNSUPPORTED never
+invented success; requestedRole is not authentication), published as immutable checksummed contract bundles with READY.json
+written last under the shared handoff root `<repo>/.tmp/vtt-handoff` (Windows view `\\wsl.localhost\Ubuntu\...`), a synthetic
+two-room scene and example exchanges, and a UUIDv7 art exchange (art/outbox requests, art/inbox result bundles with .partial copy
+discipline, validated and STAGED for review, never promoted or relicensed). A separate agent (ChatGPT on Windows) builds art and an
+optional Godot 2.5D client against a mock engine; the two applications are NOT connected in this phase and the Windows workspace
+is never edited from here. Required npm scripts: doctor, test:engine, test:protocol, test:worker, test:runtime-node,
+handoff:publish, art:request, art:validate, art:stage; an idempotent bootstrap script; durable docs; reports/claude/READY.md
+plus a machine-readable handoff (PARTIAL if any gate fails). Constraints restated by the owner: preserve uncommitted work, no
+reset/clean/stash/force-push/branch changes under a running agent, no push, no public listeners or firewall changes, no sudo
+policy changes, no Blender/Godot toolchain here, no real art generation, keep existing dev/build/test commands working, never
+change saved coordinates, never delete tests or discard campaigns. "Do not stop after planning: implement, run, fix and leave
+reproducible results."
+
+Supervisor execution record (2026-09-09 15:40 EDT): unit VTT-HANDOFF-01 opened under /codex-consensus (IMPLEMENTER = codex sol high, REVIEWER =
+astra high, supervisor = this session); loop log and assumption register at `.claude/consensus/vtt-handoff/`; branch
+`claude/vtt-handoff` in worktree dnd-wt-vtt-handoff from main @ 0f84e09f, gate port 4410. Audit facts recorded
+(`.tmp/runs/briefs-2026-09-06/vtt-handoff-AUDIT.md`): the encounter app runs the engine on the main thread and NO engine Web
+Worker exists (only the character-database worker); the Node side is the static server on 4173 plus the stdio engine MCP server;
+no network engine listener exists; `python3 -m venv` fails without sudo but a user-local bootstrap works (`--without-pip` +
+`pip --python`, or `uv`), so no approval request is needed. Planning lane (sol, session 01a087af-14c8-7a00-bcb2-9ab987d0b42e,
+writes only `.tmp-plans/2026-09-09-vtt-handoff-plan.md`) and an independent assumptions pass (astra, session
+01a087af-14c4-7522-8039-f091c2593872) dispatched read-only at 15:40 under a quiet-box rule (no builds/tests) because the D569 v5
+arm is still running until ~16:10; the baseline gate battery runs on the worktree after the arm exits and before any
+implementation step. Owner-side uncommitted art files in the main checkout are left untouched.
+
+### D586.165 — STOP: D569 v5 first arm crashed in the brutal basis (arena code defect), hard rows intact (2026-09-09 15:43 EDT)
+
+The production arm (pid 1201481, claude/blind-dm @ 90484d45) exited 1 at 15:41:59 during brutal cell 27 of 30; the hard basis
+(30 rows, `gpt-5.6-luna-blind-primary-hard.raw.jsonl`, mode 600, 14:38:02) is complete; NO brutal rows file exists because the
+arena writes rows only at basis completion. Launch-log tail (verbatim):
+`TypeError: Invalid tool arguments: {"violations":[{"path":"$","keyword":"unrecognized_keys","message":"Unrecognized key: \"intel_mode\""}]}`
+at `src/vtt/mcp/engine-server.ts:3476` ← `tools/ai-dm-conversation.ts:2177 plannedTurnContext` ← `:3755 getPlannedInitialTurnContext`
+← `:5816 runConversationWithConfiguredIntel` ← `ai-dm-arena.ts:780`.
+
+Root cause (supervisor read, no edits): `plannedTurnContext` (ai-dm-conversation.ts:2177–2185) unconditionally passes
+`intel_mode: intelMode` to `engine.get_turn_context`, but the BLIND tool profile's spec for that tool
+(src/vtt/mcp/schemas.ts:1459, strict object: "Blind v1 requires full context") has no `intel_mode` key — the DM profile's spec
+(schemas.ts:1406) does. The SIMULATED client path already omits it in blind mode (`...(manifest.dmMode === 'blind' ? {} :
+{ intel_mode: intelMode })`, line 2312); the planned-context path does not. The path is reached only through the fallback at
+lines 5815–5817 (`if (config.dmMode === 'blind' && rowTurnContext.value['dm_mode'] !== 'blind') rowTurnContext =
+getPlannedInitialTurnContext()`), which is why 30 hard + 26 brutal cells and both model-free dry runs (60 rows) passed and one
+brutal cell did not. No test references `plannedTurnContext`/`getPlannedInitialTurnContext` under tests/. The two codex lanes for
+D589 (dispatched 15:40, read-only) did not cause this: the failure is a deterministic schema rejection inside the arena process,
+not a load or timeout event, and the crashing cell's conversation started 15:41:01.
+
+Evidence preserved (mode 600/700, untouched): `~/dnd-slim-runs/d569-v5/crash-brutal-cell27/` (the crashing conversation dir
+bRF0Cr and its predecessor hje4JF) and `~/dnd-slim-runs/d569-v5/brutal-cells-partial/` (every per-cell conversation dir created
+since the brutal basis started at 14:38 — the only record of the 26 completed brutal cells: intents, ingress, proposals,
+turn-context spools). `.exit` = 1, launch log, provenance and pid files untouched. STOP rules: nothing edited, nothing relaunched,
+budgets untouched. Section 4 post-arm steps are NOT run (they require both bases).
+
+Owner decision needed (pending question `.claude/pending-questions/d569-v5-brutal-crash.md`): the fix is a one-line guard in
+`plannedTurnContext` plus a regression test on the blind profile, but it changes the arm's pinned code identity (runbook 2.1 pins
+HEAD 90484d45). Options: (a) fix on claude/blind-dm, re-run preflight 2.1–3.2 against the new HEAD, relaunch BOTH bases so hard and
+brutal share one code identity (~3 h); (b) fix and relaunch brutal only, recording the hard rows under 90484d45 and brutal under the
+fix commit as a documented code-identity split; (c) abandon v5 first arm. Supervisor recommendation: (a) — the fix does not touch
+any model-facing byte (the blind profile never carried `intel_mode`), so hard rows would be expected byte-comparable, but
+"expected" is not "verified" and v5 exists to be clean.
+
+### D586.166 — D569 crash: the real trigger is an engine-MCP startup timeout, and the supervisor's own dispatches are the probable cause of it (2026-09-09 16:11 EDT)
+
+Owner asked (16:0x) to collaborate with codex on why the crash happened and whether a patch or a rethink is needed; codex RCA lane
+dispatched (sol, session 01a087c6-e5a7-7aa2-a37a-ebfd4c679884, read-only, brief `.tmp/runs/briefs-2026-09-06/rca-d569-crash.md`).
+While it runs, the supervisor read the preserved cell's own codex rollout
+(`crash-brutal-cell27/dnd-ai-dm-conversation-bRF0Cr/codex-home-kb/sessions/2026/09/09/rollout-…01a087b0-1f76-….jsonl`) and the spools:
+
+1. In the crashing cell the luna session had NO engine tools. The model enumerated `ALL_TOOLS` (only built-ins, codex_apps, web, image_gen;
+   `typeof tools.mcp__engine__get_turn_context === "undefined"`), tried four name variants, and ended at +43 s with
+   "Unable to retrieve the turn context: `engine.get_turn_context` is unavailable in the current tool environment." It never called
+   the engine; the turn-context and intents spools have 0 rows. It is the only such cell among 57 model cells (the three hard
+   `service_null` rows had 8–41 ingress rows and 1–17 turn-context rows, i.e. the tool WAS available there).
+2. Timing (file mtimes + rollout timestamps): cell dir created 15:41:01.03; codex session 15:41:01.75; model's first turn 15:41:04;
+   first (failed) engine lookup 15:41:08 (+7.3 s); the engine MCP server's own `tools_list` ingress row was written at 15:41:18.47
+   (+17.4 s). In the 25 healthy brutal cells the model's first successful `get_turn_context` exec happened at +5.5–7.9 s (three at
+   +13 s), so the vite-node engine server normally initializes inside ~5 s. Codex drops an MCP server that misses its startup
+   deadline (config key `startup_timeout_sec`, NOT overridden by the arena's per-cell `-c mcp_servers.engine.*` flags) and runs the
+   model without its tools — exactly what the rollout shows.
+3. What was different at 15:41: the supervisor launched two codex lanes for D589 at 15:40:40 (sol planning lane + astra assumptions
+   pass). Their rollouts show 40 and 37 tool events respectively between 15:40:30 and 15:41:15 (bursts of `nl -ba`/rg over large
+   files plus their own model traffic), i.e. exactly the window in which the crashing cell's vite-node server was compiling. Load
+   1-min at 15:42 was 1.64 versus 0.3–0.7 during the rest of the arm. This is the only cell that overlapped those bursts. Causation
+   is not proved (no per-second load log; codex's MCP startup log lines went to the arena's captured stderr, which was lost with the
+   row), but it is the simplest explanation and the supervisor records it against itself: D586.165's sentence "the two codex lanes
+   … did not cause this" was wrong as stated — the schema TypeError is deterministic, but the PATH to it was almost certainly opened
+   by the load the supervisor added while calling the box "quiet". The standing rule was "launch nothing else on the machine while
+   the arm runs"; read-only planning lanes were judged light enough. They were not light enough for a 10-s MCP startup deadline.
+4. Two defects therefore compose: (a) fragility — the arena gives codex no `startup_timeout_sec` override for a vite-node server whose
+   cold start is ~5 s nominal and easily >10 s under load, and a cell whose model has no engine tools is not detected as an
+   infrastructure failure (it is treated as a model turn); (b) the crash — with no recorded blind turn context, the row-building
+   fallback (`ai-dm-conversation.ts:5815–5817`) calls `plannedTurnContext`, which passes `intel_mode` to the blind-profile
+   `engine.get_turn_context` whose strict schema rejects it (`schemas.ts:1459`), so an infrastructure failure became a process
+   crash that discarded 26 completed brutal cells. The RCA lane is being asked to fold this evidence in; verdict (patch vs rethink)
+   follows its review.
+
+### D586.167 — D569 crash RCA round 2 (codex sol, supervisor-verified): the hard basis is also infrastructure-contaminated; D586.166's self-attribution corrected (2026-09-09 17:31 EDT)
+
+Owner (17:0x): "Collaborate with codex to figure out why the crash and if we need just a patch, or a rethink of the architecture."
+Unit D569-CRASH-RCA: codex sol (session 01a087c6-e5a7-7aa2-a37a-ebfd4c679884) wrote round 1 (`.claude/consensus/d569-crash-rca/rca-r1-sol.md`,
+trigger mis-stated as "the model ignored an advertised tool"); the supervisor resumed it with the rollout/timing evidence from D586.166;
+round 2 (`rca-r2-sol.md`) now agrees on the trigger chain and adds findings the supervisor verified by opening the cited rollouts:
+
+1. Trigger chain (verified): engine MCP server's tools/list landed at +17.443 s after cell start; codex had registered no engine tools
+   (the model's own `ALL_TOOLS` enumeration shows none); the arena passes `mcp_servers.engine.command/args` only — no
+   `startup_timeout_sec`/`tool_timeout_sec` (src/vtt/agent-adapters/codex.ts:227–242); codex's stderr (where an MCP-start warning
+   would appear) is buffered but discarded on exit 0 except for the session id (codex.ts:181–204), so the failure left no row
+   evidence; empty spools → placeholder `rowTurnContext` (no dm_mode) → fallback at ai-dm-conversation.ts:5815 → plannedTurnContext
+   sends `intel_mode` to the strict blind schema (schemas.ts:1459) → TypeError from the direct tool surface (engine-server.ts:3471–3478).
+2. NEW — the hard basis is contaminated too: hard rows 4, 10, 22 (1-based; the three `service_null`/`toolCalls:0` rows) were the SAME
+   failure — their rollouts (hard-era cells nDXgPJ 13:16, CUAnqn 13:34, bvZkpX 14:13) show the model searching for engine tools (4–6
+   tool-search calls each), finding none, and surviving only by reading the engine's generic MCP resources (3–20 `read_mcp_resource`/
+   `list_mcp_resource_templates` calls), which populate the turn-context spool through the resource callback (engine-server.ts:3486)
+   and therefore dodge the crashing fallback; they emitted intents as plain text with no submission tool. `toolCalls` counts only
+   engine-named tool calls (ai-dm-conversation.ts:1202/3607), so 0 there means "no direct engine surface", not "model idle".
+   Supervisor spot-check: nDXgPJ 27 calls / 0 direct-engine / 20 generic; CUAnqn 21 / 1 / 15; bvZkpX 10 / 0 / 3.
+3. CORRECTION to D586.166: the MCP-startup failure hit 4 of 57 cells across the whole arm (13:16, 13:34, 14:13, 15:41). Three of
+   them predate the supervisor's 15:40 lane dispatch by hours, so the dispatch is NOT the cause of the fragility and at most a
+   contributor to the fourth cell's timing. The crash cell differed from the three survivors only in luna's recovery behaviour
+   (refusal versus generic-resource reads), not in its infrastructure state. D586.166's "probable cause" sentence is withdrawn as
+   overstated; what stands is that the box was not quiet and the rule "nothing else during an arm" is still right.
+4. Verdict (codex, supervisor concurs pending Astra review): PATCH NOW + STRUCTURAL FOLLOW-UP, not a rethink. Patch = (a) the
+   profile conditional at :2181 and blind config into the planned correction context at :4811; (b) explicit
+   `mcp_servers.engine.startup_timeout_sec`/`tool_timeout_sec` (60 s proposed — policy, below the 180 s live wall and 240 s cell
+   timeout); (c) a typed `outcome:'infrastructure_failed'` / `infrastructureFailureClass:'engine_mcp_unavailable'` row class detected
+   from preserved codex stderr (never from "zero calls" alone), guarded out of coordination/execution like service_null, threaded
+   through the row outcome union (:690) and the rerun-packet schema (ai-dm-rerun-packet.ts:148); (d) fallback resolution moved
+   before `contextBytes` (:5789 vs :5815); (e) three regression tests (arena blind dry-run with a forced primary flap exercising the
+   fallback on the real blind surface; adapter argv + stderr diagnosis; conversation infrastructure_failed row). Follow-up =
+   profile-indexed tool surfaces (`EngineToolSurface<'dm'|'blind'>`) with one `getTurnContextArguments(profile, …)` builder for the
+   14 host-side call sites — no advertised schema or model-facing byte changes. Rejected alternatives: blind schema
+   accept-and-ignore (widens the advertised schema, hides future mismatches); removing the fallback (blind row evidence needs
+   creature_facts/legal_movement, :5943).
+5. Arm integrity: the intel_mode/telemetry changes touch nothing model-facing for healthy cells; the timeout DOES change
+   model-facing tool availability for infrastructure cells. So the 27 unaffected hard rows stay comparable; the 3 infrastructure
+   cells must be typed and excluded (the D569 scorer already excludes infrastructure failures, tools/d569-blind-experiment.ts:975/
+   1091) or rerun under the identical manifest (tools/vtt-experiment.ts:791). The advice arm has no intel_mode mismatch but the same
+   MCP-startup exposure and NO fallback guard (it would silently produce a refused row), so the detection must cover both arms.
+Astra review of the RCA dispatched (brief review-rca-d569-crash.md); the patch is not implemented until it returns. Pending question
+`d569-v5-brutal-crash.md` updated: the supervisor now recommends relaunching BOTH bases under the patched code (30+30), because the
+hard basis needs at least 3 identical-manifest reruns anyway and one code identity is cleaner than a 27+3 stitch.
+
+## D590 — OWNER: D569 v5 relaunch policy — "Rerun only what is broken" (2026-09-09)
+
+Asked one question at a time per the owner's instruction; answer to Q1 (recorded 2026-09-09 17:39 EDT): keep the clean hard rows, rerun the
+infrastructure-failed hard cells plus the full brutal basis under the identical manifest under the patched code, and record the
+code-identity split. Alternatives offered and not chosen: relaunch both bases; abandon the v5 first arm; wait for the Astra RCA review.
+
+### D586.168 — Astra review of the RCA: REJECT (5 significant) — the patch as specified was insufficient (2026-09-09 17:39 EDT)
+
+Astra (session 01a08815-0ef6-7731-8206-7d9163aa1558; text `.claude/consensus/d569-crash-rca/rca-review-astra.md`) confirmed the
+trigger chain, the three contaminated hard cells and the site inventory, and REJECTED the round-2 patch spec: F1 a longer
+`startup_timeout_sec` alone does not make the engine tools ready — codex treats the server as OPTIONAL (catalog grace
+`mcp_optional_startup_grace_ms`, default 1 s) unless `required=true`; F2 a stderr-string classifier is unproven and codex's
+required-server failure path exits non-zero, which the adapter currently throws on; F3 the proposed fix still crashes later at
+ai-dm-conversation.ts:5911 (blind finalization requires creature_facts/legal_movement in RECORDED model ingress; the crash cell's
+ingress has neither) — missing delivery needs an explicit evidence state, never fabricated; F4 the pinned external analysis script
+(~/dnd-slim-runs/d569-v5/scripts/analyze-primary-pair.ts:103, runbook:855) maps every service_null → infrastructure_failed and rejects a
+literal infrastructure_failed outcome, so the row-class change must migrate the pinned consumers and packet conversion; F5 hard rows
+6, 19, 20 carry `sessionId:null` + "Agent CLI timed out after 240000 ms" and fail validate-first-arm.ts:66 — so the hard basis is 24
+clean rows + 3 timeouts needing provenance repair + 3 infrastructure cells, not "27 clean"; F6 (trivial) fullTurnContextBase has
+callers (:3743, :5189). Astra's own answer to the owner: "patch + structural follow-up — bounded, but the patch must add catalog
+readiness, the second finalization crash and the experimental-consumer migration". Supervisor accepted all six; RCA lane resumed for
+round 3 (final) to produce an implementable patch specification honouring D590. No code changed; nothing relaunched.
+
+## D591 — OWNER: quiet-box rule — "Anything, rely on the patch" (2026-09-09)
+
+Q2 answered 2026-09-09 17:50 EDT: once the D569 patch makes the engine MCP server mandatory with an explicit startup timeout and types infrastructure
+failures on the row (excluded from scoring), other lanes, reviews, gates and builds may run on the machine while an arm runs;
+contention then costs reruns, not data. Alternatives not chosen: nothing else ever; read-only lanes only. Supervisor note: this
+supersedes the informal "launch nothing else while the arm runs" practice ONLY after the patch is landed and reviewed; until then the
+old practice stands because unpatched arms cannot detect the failure.
+
+### D586.169 — STOP LOUDLY: codex usage limit reached; all codex-side roles blocked until 2026-09-14 21:24 (2026-09-09 17:50 EDT)
+
+Both running lanes died at 17:45 with `ERROR: You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to
+purchase more credits or try again at Sep 14th, 2026 9:24 PM.`: the VTT-handoff plan round-2 lane (sol, resume of 01a087af-14c8…;
+its one apply_patch had already failed on a multi-operation patch, so `.tmp-plans/2026-09-09-vtt-handoff-plan.md` is unchanged at
+sha256 02e54eec — candidate r1, REJECTED) and the D569 RCA round-3 lane (sol, resume of 01a087c6…; no round-3 output). gpt-6-astra
+runs through the same codex account and is therefore equally blocked. Per the standing rule (codex out of credits → stop loudly,
+never substitute a Claude agent for the codex role) and HARD_GATE (c) of the consensus protocol (reviewer unavailable), NO
+implementer or reviewer work can proceed: not the VTT-handoff plan r2, not the D569 patch spec/implementation, not any review.
+State preserved: plan candidate r1 + Astra review r1 (17 findings, all accepted) + the r2 dispositions in
+`.tmp/runs/briefs-2026-09-06/resume-plan-vtt-handoff-r2.md`; RCA r1/r2 + Astra RCA review + the r3 brief in
+`resume-rca-d569-crash-r3.md`; owner rulings D590 (rerun only what is broken) and D591 (rely on the patch) recorded. Resumable session
+ids: plan 01a087af-14c8-7a00-bcb2-9ab987d0b42e, RCA 01a087c6-e5a7-7aa2-a37a-ebfd4c679884. Owner asked (question 3) whether to
+purchase credits now, wait until Sep 14, or rebind roles.
+
+## D592 — OWNER: codex usage limit — wait until the reset (2026-09-14 21:24) (2026-09-09)
+
+Q3 answered 2026-09-09 17:54 EDT: "Wait until Sep 14". No credit purchase; no Claude substitution for the codex roles. Until the reset the
+supervisor monitors only, records state, and asks the remaining queued questions so the resumed lanes start with all rulings in
+hand. Resume plan on 2026-09-14 after 21:24: (1) re-check `codex exec` with a one-line probe; (2) resume plan lane
+01a087af-14c8-7a00-bcb2-9ab987d0b42e with `resume-plan-vtt-handoff-r2.md` (restating COMMON RULES in full) for candidate r2;
+(3) resume RCA lane 01a087c6-e5a7-7aa2-a37a-ebfd4c679884 with `resume-rca-d569-crash-r3.md` for the patch specification;
+(4) baseline on wt-vtt-handoff is already green on 0f84e09f and stays valid while main does not move. Alternatives not chosen:
+buy credits now; Claude implements without review.
+
+## D593 — OWNER: Node-mode transport for the Godot client is WebSocket (2026-09-09)
+
+Q4 answered 2026-09-09 18:12 EDT: "WebSocket". The v1 Node runtime ships a WebSocket adapter (bidirectional; JSON envelopes verbatim as frames;
+127.0.0.1 only, opt-in, bearer token at handshake, Host/Origin validation), not HTTP+SSE; HTTP+SSE is not built. The plan's S7 and
+the Astra F9/F10 dispositions are re-targeted accordingly (session binding = the authenticated socket; a hand-rolled RFC 6455 server
+in the style of tools/discord-launcher/relay-server.mjs or an exact-pinned dependency — the plan must choose and justify;
+tools/discord-launcher's echo relay is a spike, not a base). Alternatives not chosen: HTTP+SSE; both.
+
+D592 AMENDED — OWNER (2026-09-09 18:12 EDT): "also, i reset my codex usage now." The wait is over; resume both codex sessions immediately after a
+probe confirms `codex exec` works.
+
+## D594 — OWNER: no Node version pin (2026-09-09)
+
+Q5 answered 2026-09-09 18:42 EDT: "No pin". The plan's S0 drops `engines` and `.nvmrc`; doctor records the installed Node/npm versions in its
+report and warns on a major-version mismatch with the recorded baseline but never fails on version. Alternatives not chosen:
+exact 24.13.0; floor >=24.
+
+## D595 — OWNER: owner-side art files stay uncommitted (2026-09-09)
+
+Q6 answered 2026-09-09 18:45 EDT: "Leave them uncommitted". The 16 emberkeep request JSONs, the terrain-low-wall request edit and the owner's
+art/requests/README.md edits remain working-tree changes in the main checkout; lanes never touch them; main merges must step
+around them (worktree-based landings already do). Alternatives not chosen: commit as the owner's; fold into a reviewed change.
+
+Supervisor (2026-09-09 18:45 EDT): codex availability probe (luna low, "READY") passed at 18:1x after the owner's usage reset; the plan r2 lane
+(resume 01a087af-14c8…, brief now carrying D593 WebSocket and D594 no-pin rulings) and the RCA r3 lane (resume 01a087c6…) were
+relaunched; exit sentinels in `.exit` files.
+
+## D596 — OWNER: handoff documentation lives in docs/vtt-handoff/** (2026-09-09)
+
+Q7 answered 2026-09-09 18:46 EDT: "docs/vtt-handoff/**". The supervisor authorizes exactly that directory (and the accompanying
+tests/unit/vtt/handoff-docs.test.ts) for unit VTT-HANDOFF-01 lanes; the standing no-docs/** rule stands everywhere else.
+Alternatives not chosen: README files next to the code; docs only in the published exchange root.
+
+## D597 — OWNER: what the challenge rooms are FOR (2026-09-09)
+
+Owner, 2026-09-09 18:59 EDT, answering the Room D slice-2 question with a correction of the supervisor's framing ("rooms used to test whether
+the AI DM's default monster choice is actually bad, with the rules engine as the judge"): "What I intended was to create rooms
+where the ai dm has an opportunity to think of a more winning play than what the default engine algorithm recommends. Then once a
+smart model like sol high finds the better play, what tweaks can we do to the prompts and info provided to get Luna medium to come
+up with the same clever play that sol did." Binding reading: a challenge room exists to (1) contain a discoverable better play than
+the engine's default recommendation, (2) have a strong model (sol high) find it, and (3) drive prompt/information tweaks until
+luna medium finds the same play. The engine-side bounded question (does the better play exist and by how much) is the certificate
+for (1), not the product; the product is the sol→luna distillation loop of D586.39/40. Room D slice-2's completeness/memory
+instrumentation is engineering hygiene for that certificate and must be weighed against getting to steps (2) and (3).
+
+## D598 — OWNER: Room D — get the answer, skip slice 2 (2026-09-09)
+
+Q8 answered 2026-09-09 19:21 EDT: "Get the answer, skip slice 2". Merge slices 0+1 (9781b93f on claude/challenge-rooms) to main after a
+main-shaped gate; run the bounded enumeration end to end (slice 3, fresh-process CLI) to learn whether Dodge beats Spear by
+>= 3/20; then start the sol-high → luna-medium loop on Room D per D597. Slice 2 (candidate 212f1acb) stays shelved and its four
+residuals are recorded as open hygiene, not blockers. Alternatives not chosen: reopen slice 2 first; drop Room D; defer.
+
+## D599 — OWNER: promo180 Slice H — reopen as a remediation unit (2026-09-09)
+
+Q9 answered 2026-09-09 20:14 EDT: "Reopen as a remediation unit". A fresh three-round unit scoped to the three escalation/expiry defects
+(empty structured correction still escalates; a refusal during correction no longer escalates; expiry after adoption validation
+persists `authorized` with executed segments instead of a refused row) plus the speculation test that times out with a real MCP
+child, on candidate 0f292f91 (claude/p-promo180); the approved plan (sha 699254a4…) stays binding. It sits on the direct path to
+the sol→luna steering loop (D597). Alternatives not chosen: re-plan first; abandon; defer.
+
+Supervisor (2026-09-09 20:14 EDT): Room D slices 0+1 landing (D598) is NOT a mechanical merge — merging main (trial-core reconciliation, which
+rewrote tests/unit/vtt/challenge-feasibility.test.ts) into 9781b93f leaves semantic conflicts (main's block references
+`runChallengeReducerFeasibility`, `report`, `fixture` and reassigns `migrationEvidence`, which the slice made a const); a union
+resolution fails typecheck with 5 errors and one D584.4 accounting test. Attempt aborted; worktree dnd-wt-room-d-s01 (branch
+claude/room-d-s01 @ 9781b93f) is clean; a codex reconciliation lane will do the merge under review, as the trial-core
+reconciliation was done.
+
+### D586.170 — round-2 verdicts: plan r2 REJECT (13), RCA r3 REJECT (7+1); final rounds launched; D593 amended; Room D and promo180 lanes dispatched (2026-09-09 20:18 EDT)
+
+VTT-HANDOFF-01 plan r2 (sha 90eecbf3…): Astra REJECT — F5 art shapes changed the agreement (required `view`, `{path,sha256}`
+image fields); F7 refusal/cancel outcomes + fabricated `id:""`; F8 stale continuation legalActions after a door change; F11
+missed callers (tools/ai-dm-conversation.ts:109, local-session-store.ts:326); F13 gate ordering vs build; F14 opaque art
+wrongly rejected; F15 ancestor-directory symlink race; F17 ineffective mutants; F19 auth after upgrade vs D593; F20 forward
+dependencies (S2c before S3/S4, S7a auth before S7b); F21 a five-method transport cannot host the rich DM UI in the Worker;
+F22 closed doors double-projected + player-light audience rule lost; F23 missing --save-exact. All accepted. D593 AMENDED by the
+supervisor for browser compatibility: the bearer is presented at the handshake in `Sec-WebSocket-Protocol` (`vtt.v1` +
+`bearer.<token>`), validated in the upgrade handler before any socket/session exists; principals come from a mode-600
+`VTT_RUNTIME_TOKENS_FILE`; requestedRole/playerId must match the token's claim. F21 resolution: the DM UI stays in-process;
+Worker mode is a shipped renderer harness hosting the same service behind v1. Round 3 (FINAL) launched (resume 01a087af-14c8…).
+
+D569-CRASH-RCA r3 spec: Astra REJECT — F1 resource reads counted as engine calls; F2 readiness timestamps lack dispatch
+correlation/live capture; F3 delivery state cannot express healthy zero-call service_null; F4 `timed_out` return path unspecified
+(a staged proposal could be authorized after timeout; pi.ts contractEvidence dropped); F5 mixed old/new row validation; F6 blind
+host-authorization failure still renders the DM correction protocol to the model; F7 runbook clauses for D591 unspecified; F8
+wrong validator pin. All accepted; supervisor policy for F6: blind host-authorization failure terminates the cell as `refused`
+(host_authorization_failed), never a DM correction prompt. Round 4 (FINAL) launched (resume 01a087c6…). Astra's owner answer both
+times: patch + structural follow-up.
+
+Room D (D598): reconciliation lane ROOM-D-LAND-01 dispatched (sol 01a088ac-d01b-7c01-b704-ab85310c3e5a) on worktree
+dnd-wt-room-d-s01 with `git merge main` in progress (one conflicted test file); supervisor commits. promo180 Slice H (D599):
+remediation unit PROMO180-H-REM-01 dispatched on dnd-wt-p-promo180 @ 0f292f91 (brief impl-promo180-h-rem.md).
+
+## D600 — OWNER: offers roadmap — reopen the plan as a fresh unit (2026-09-09)
+
+Q10 answered 2026-09-09 20:21 EDT: "Reopen the plan as a fresh unit". One new planning unit (OFFERS-PLAN-02) from the current draft
+`.tmp-plans/2026-09-08-offers-roadmap.md` on claude/p-offer-help, scoped to the two D586.74 blockers (bottleneck fixture admits
+the diagonal bypass through the vacated alcove; legacy migration assigns `grants:[]` and loses an earned Dash), with its own
+three review rounds; implementation slices follow approval. Alternatives not chosen: straight to implementation; abandon; defer.
+
+## D601 — OWNER: held-out basis slice 1 — reopen with an AST leak wall (2026-09-09)
+
+Q11 answered 2026-09-09 20:25 EDT: "Reopen: AST leak wall". A fresh bounded unit (HELDOUT-S1-REM-01) on candidate 1d6af854 (claude/p-heldout)
+replaces the regex leak wall in tools/heldout-leak-check.ts with TypeScript-AST import discovery (the elevation lane's accepted
+implementation on main, D586.63); everything else in the slice stays as reviewed. Alternatives not chosen: land with the regex
+wall; abandon; defer. This closes the queue of owner questions asked one at a time today (D590–D601).
+
+### D586.171 — D569-CRASH-RCA SHELVED at the round cap: final Astra review REJECT with two narrow residuals (2026-09-09 20:39 EDT)
+
+Round 4 (final) specification (`.claude/consensus/d569-crash-rca/rca-r4-sol.md`, 44 KB, sections 4.1–4.10) reviewed by Astra
+(session 01a08815…, text `rca-review-r3-astra.md`): REJECT. Resolved: F1/F2 (exact advertised-tool membership, dispatch-correlated
+mandatory initialization), F3/F4 (service-null/timeout/cancellation/staged-proposal transitions), F5 (mixed historical/current
+decoding, sidecar reconciliation, nullable infrastructure sessions), F6 (blind host-authorization failure terminates before the
+DM correction branch), F7/F8 (D591 runbook clauses, validator hash); D590's rerun selection confirmed correct. Residual
+SIGNIFICANT: (1) a completed dispatch with inconclusive/invalid catalog evidence and an empty spool has no truthful finalization
+variant (needs an explicit indeterminate-delivery/integrity-stop variant persisted before stopping, with its transition before
+proposal authorization); (2) the replacement `AgentTurnResult` drops `resumeSessionId`/`finalText`/`usage` (the branded reusable
+identity both `coldStart` and `coldStartRound` bind on; Pi returns `sessionId:null` with a reusable `resumeSessionId`) — the full
+response/result types and migration of both cold-start entry points and recovery must be defined. TRIVIAL: two nonexistent test
+paths, wrong Node version in a citation, truncated provenance commit; the builder inventory regressed to a mixed list and must be
+restored. Astra's owner answer, unchanged across three reviews: patch + structural follow-up. Three review rounds are spent; the
+specification is SHELVED under HARD_GATE (b); reopening as a remediation artifact needs the owner's word (asked). Until then: no
+patch implementation, no relaunch; hard rows and crash evidence stay preserved.
+
+## D602 — OWNER: D569 crash-patch specification — one remediation round authorized (2026-09-09)
+
+Answered 2026-09-09 20:58 EDT: "Authorize one remediation round". A new bounded artifact (D569-CRASH-RCA-REM-01): the same codex session amends
+only the two residuals of D586.171 (explicit indeterminate-delivery/integrity-stop row variant with its transition before proposal
+authorization; the complete adapter result/response types keeping the branded reusable `resumeSessionId`, rollout id, text, usage
+and partial evidence, with migration of `coldStart`/`coldStartRound`/recovery) plus the trivial corrections; one Astra review; on
+ACCEPT the patch implementation unit starts and the reruns follow D590. Alternatives not chosen: implement now with residuals as
+first tasks; stop.
+
+### D586.172 — harvests: Room D r2 (hook scoped), held-out remediation (merge reconciled + AST leak wall), offers plan r1 written; RCA remediation dispatched (2026-09-09 20:59 EDT)
+
+Room D (ROOM-D-LAND-01 r2, lane 01a088ac…): the production `beforeAll` and `report` moved into a nested describe holding exactly
+the six report-consuming tests; the 20 direct tests including the five bounded Room D tests run without the hook (lane: focused
+Room D run 17 ms execution, 5-spec 86/86, tsc 0, sg 0); supervisor verification running; then commit, Astra r2, fresh gate.
+Held-out (HELDOUT-S1-REM-01 r1, lane 01a088b4-c55a-7013-bb77-97f63936d912): both merge conflicts reconciled (room-generator.ts
+keeps held-out provenance + main's partyState union; generate-arena-basis.ts keeps held-out hashing/types + main's envelope
+decoder, legacy rooms via decodeArenaBasisEnvelopeV1), the regex leak wall replaced by a TypeScript-compiler-API walker
+(static/side-effect/type-only/re-export/import-equals/import-type/dynamic import()/require; comments are trivia; syntax errors
+fail closed) with 60 wall tests incl. the four comment bypasses; lane-claimed 9-spec cumulative 296/296, 66 fixture hashes
+byte-identical; supervisor verification running; then stage+commit the merge, Astra r1. Offers (OFFERS-PLAN-02 r1, lane
+01a088b0…): plan revised to sha 213f0b39… (902 lines): bottleneck fixture rebuilt (5×2 board, blocker (2,1)→gate (3,0),
+movement-only walls; probe through the real movement world shows zero bypass paths with the gate occupied, four when vacated),
+legacy migration carries only a reducer-corroborated multiplier count as `legacy_unresolved` and fails closed on grant-sensitive
+mutations until next turn start, witnesses for one-Dash/double-Dash/Flee; Astra review r1 dispatched. D569 RCA remediation
+(D602) dispatched (resume 01a087c6…). Owner rulings today: D590–D602.
+
+### D586.173 — D569 crash-patch specification ACCEPTED after the authorized remediation round; implementation unit opened (2026-09-09 21:17 EDT)
+
+Astra (session 01a08815…, text `.claude/consensus/d569-crash-rca/rca-review-rem-astra.md`): ACCEPT — the indeterminate delivery
+variant now persists a durable artifact and forensic row and enters a typed STOP before authorization; the complete adapter result
+types keep the branded reusable identity, nullable rollout id, text, usage, partial evidence and contractEvidence with completed-
+only binding for both cold-start entry points, recovery, rollover and escalation; inventory/paths/commit corrected; one TRIVIAL
+carried into implementation (`packetOutcome` must map the historical `auto_resolved`/`awaiting_dm_adjudication`/`local_error`
+explicitly to `refused`). Astra's owner answer, final: "patch + structural follow-up". Binding spec copied to the new worktree
+dnd-wt-d569-patch (branch claude/d569-patch from 90484d45) as `.tmp-plans/2026-09-09-d569-crash-patch-spec.md`; unit
+D569-PATCH-01 round 1 dispatched (codex sol; replacement external scripts go under tools/d569-v5/ and the runbook v2 under
+.tmp-plans/ for the supervisor to install and pin; ~/dnd-slim-runs untouched by lanes). Relaunch (spec 4.10, D590) follows the
+patch's acceptance, its main-shaped gate and the pin re-review.
+
+### D586.174 — VTT-HANDOFF-01 plan SHELVED at the round cap: final Astra review REJECT with four residuals (2026-09-09 21:18 EDT)
+
+Candidate r3 (sha 72ef78a1…, 548 lines; copy `.claude/consensus/vtt-handoff/plan-candidate-r3-72ef78a1.md`) reviewed by Astra
+(session 01a087f9…, text `plan-review-r3-astra.md`): REJECT. Nine of the thirteen round-2 findings resolved (F5, F7, F11, F14,
+F15, F17, F19, F21, F22, F23); residual SIGNIFICANT: F8 door.set during a pending human request still deadlocks (the proposed
+wait-for-step-quiescence needs the cancellation it prevents; required order: validate → block repump → set pause state → abort the
+pending request → await settlement → revalidate + apply → recompute offers → resume per prior pause state; test with no human
+response); F13 `tests/integration/vtt/node-runtime-launch.test.ts` is auto-discovered by vitest (`tests/**/*.test.ts`) and would
+run `serve` (which builds dist) inside `npm run test:gate` before `npm run build` — it must live outside ordinary discovery in an
+explicit supervisor integration config run after the build; F20 S7c's UI-to-service convergence assertion precedes the S8 UI
+refactor — split the assertion (adapters now, UI after S8); F24 NEW: `tokenId` on `PlayerVisiblePlacedCombatant` and
+revision-stamped continuations reach `PersistedCoordinatorState` (ControllerRequest.visibleState is persisted and checksummed;
+restored pending requests lack the new field) — persistence boundary must be specified (renderer-only enrichment + transient
+freshness with a restore policy, or an explicit compatibility design with baseline-authored pending-request fixtures). Three
+rounds spent → HARD_GATE (b): the plan is shelved; a remediation artifact needs the owner's authorization (asked, as for the RCA in
+D602). Implementation of VTT-HANDOFF-01 has not started; the worktree is clean at 0f84e09f.
+
+## D603 — OWNER: VTT-handoff — start implementing S0–S2 now; remediate the four residuals in parallel (2026-09-09)
+
+Answered 2026-09-09 22:16 EDT: "Start implementing S0–S2 now". The uncontested early steps of plan r3 (S0a/S0b toolchain-doctor-bootstrap, S1
+contract/Zod/JSON-Schema/semantics, S2a snapshot adapter, S2b two-room fixture, S2c early immutable publication) begin as
+implementation unit VTT-HANDOFF-IMPL-01 while a remediation artifact for the four D586.174 residuals (F8, F13, F20, F24) runs in
+parallel. Supervisor binding for S2a to avoid pre-empting F24: the player token id is a RENDERER-ONLY enrichment computed in the
+snapshot adapter from the filtered player projection (no new field on PlayerVisiblePlacedCombatant / PersistedCoordinatorState;
+persisted bytes unchanged) — the remediation may confirm or replace this design before S3. Alternatives not chosen: authorize
+remediation first; stop the unit.
+
+### D586.175 — promo180 Slice H remediation ACCEPTED (Astra round 2); Room D landing accepted; held-out and offers in final rounds (2026-09-09 22:29 EDT)
+
+PROMO180-H-REM-01: candidate ced82dc2 on claude/p-promo180 (three files over the shelved 0f292f91) accepted by Astra at round 2
+(`.claude/consensus/promo180-h-rem/review-r2-astra.md`): empty/decision_missing corrections are no longer validation evidence,
+refusal during correction escalates, expiry after adoption validation persists `refused` with zero executed segments, the
+recalculation regression proves rejection of a valid late result (mutation-proved), the speculation test passes with real MCP
+children in 1.74 s on a minimal fixture without a raised timeout; supervisor cumulative 39 files / 600 tests on a writable checkout.
+Landing follows D586.131 once the running gate releases the worktree. ROOM-D-LAND-01: r2 (6ec0911e) accepted by Astra; r1 gate
+fully green; fresh gate on r2 running; then merge to main. HELDOUT-S1-REM-01: r3 (final) lane done — bracket-notation resolver
+calls recognised, 85/85 wall tests, 321/321 cumulative lane-claimed; supervisor serial verification running; then Astra final.
+OFFERS-PLAN-02: r3 (final) lane running on the replay/recovery contract. VTT-HANDOFF: plan remediation lane and S0–S2
+implementation lane running in parallel (D603). D569-PATCH-01: implementation lane running.
+
+## D604 — OWNER: "Do as many intermediate rounds as you need to fix non-trivial problems" (recorded 2026-09-10 07:36 EDT)
+
+Answering the held-out leak-wall question (a fresh in-scope bypass found at every round), the owner ruled: run as many
+intermediate rounds as needed to fix non-trivial problems. Binding reading: the three-round cap no longer shelves an artifact
+whose residuals are real, bounded defects; the supervisor continues rounds until the reviewer finds no significant residual and
+records each round; the cap still applies to disagreements of design (a REJECT that reopens scope goes to the owner). Applies to
+HELDOUT-S1-REM-01 (resumed r4 for query/fragment-suffixed specifiers), OFFERS-PLAN-02, VTT-HANDOFF-01 and future units.
+
+### D586.176 — Room D slices 0+1 LANDED on main (2026-09-10 07:36 EDT)
+
+Merge 939a6d05: claude/room-d-s01 (6ec0911e = 9781b93f + main reconciliation + hook scoping) into main. ROOM-D-LAND-01: Astra r1
+REJECT (hook scope) → r2 ACCEPT; supervisor verification tsc 0 / sg 0 / 86/86 on both rounds; full gates green on the r1 state
+(0e9f3a98) and on r2 (6ec0911e: tsc 0, sg 0, vitest-gate 0, playwright-gate 0 on port 4690). Main-shaped landing rule (D586.131):
+the landing worktree was main + slice; between the merge-base and main only `.claude/**` changed, and the merged tree's code is
+byte-identical to the gated 6ec0911e (`git diff 6ec0911e HEAD -- . ':!.claude'` empty), so the r2 gate is the gate on the
+integrated revision. Slice 2 (212f1acb) stays shelved (D598). Next for Room D: slice 3 (fresh-process CLI run of the bounded
+enumeration) to obtain the Spear-vs-Dodge answer, then the sol→luna loop (D597).
+
+### D586.177 — VTT-handoff plan ACCEPTED after remediation; S0–S2 and the D569 patch harvested; promo180 landing merge in progress (2026-09-10 07:37 EDT)
+
+VTT-HANDOFF-01 plan: remediation pass 1 resolved F8/F13/F20/F24 but lost two sections (F25 door semantics, F26 parity matrix) and
+left a stale summary (F27); pass 2 restored them; Astra ACCEPT (`plan-review-rem2-astra.md`; candidate sha 25816309…, 550 lines,
+copy `plan-candidate-rem2-25816309.md`) — "accepts the plan for S3 onward; implementation still requires its specified gates".
+S0–S2 lane (session 01a0891a-8a6c-7260-ad9e-8eb49f039478) DONE: S0a manifest-only exact pins (ajv, ws, @types/ws; no Node pin),
+S0b paths/bootstrap/doctor with shared-node_modules refusal, S1 Zod + independent Ajv + semantic layer + schemas, S2a snapshot
+adapter with renderer-only token ids (no visibility-domain or persisted fields), S2b 12×8 two-room real-engine fixture, S2c
+immutable core publisher with READY.json last and `examples: pending`; lane-claimed 8 files / 36 tests, tsc 0, sg 0. Supervisor
+materialized a real node_modules in the worktree (npm ci) and is verifying. D569-PATCH-01 lane (01a088e3…) DONE: 39 files across
+spec sections 4.1–4.9 incl. tools/d569-v5/{analyze-primary-pair,validate-first-arm,merge-repaired-hard}.ts with hashes, arena
+--cells, replacement runbook v2; supervisor cumulative running. promo180 landing: `git merge main` into claude/p-promo180 conflicts
+in tests/unit/tools/ai-dm-arena.test.ts; reconciliation lane PROMO180-LAND-01 dispatched; the r1-state gate's only red
+(d584-contract-inventory) was the gitignored plan file missing from the worktree (copied in). Room D slices 0+1 are on main
+(D586.176).
+
+### D586.178 — OFFERS-PLAN-02 ACCEPTED at round 4 (2026-09-10 07:53 EDT)
+
+Astra (session 01a088d3…, `.claude/consensus/offers-plan-02/review-r4-astra.md`): no findings. Rounds: r1 REJECT (migration
+contract: legacy speed-modified states, replay equality, turn-start ordering, Flee witness), r2 REJECT (replay numeric drift,
+skip/delay transitions, outgoing-boundary expiry), r3 REJECT (historical spend formula), r4 ACCEPT — bottleneck fixture verified
+bypass-proof by the reviewer's own movement-world probe from r1 on; historical spend formula now matches movement.ts:427 with
+both writer journals replayed through a subsequent move and exact event assertions. Plan sha 911a10f1… (963 lines, copy
+`plan-candidate-r4-911a10f1.md`) on claude/p-offer-help @ eb778854 is the binding plan for the offers implementation slices
+(D600); slice 1 dispatch follows from the plan's step order.
+
+### D586.179 — Windows side has delivered into the shared handoff root and filed an integration request; our contract bundle is not yet published (2026-09-10 08:24 EDT)
+
+Discovered while answering the owner's status question: `.tmp/vtt-handoff/` in the owner checkout holds 314 Windows-authored files —
+`reports/windows/` (READY.md, INTEGRATION-REQUEST.md, handoff.json, acceptance.json, doctor/build/browser logs, contact sheet and
+combat/lighting/sorting screenshots; 22 headed Chrome checks + 14 protocol/combat tests reported passing) and three
+`deliveries/windows/<uuidv7>/` source/build bundles (lantern ×2, pixel-combat) with manifest.json + READY.json. The Windows POC
+runs at http://127.0.0.1:5175 on an independent TypeScript MockEngine Worker against a PROVISIONAL local v1 contract
+(sha d0e87e8d…), exactly as the agreement allows; it has not touched the app, contracts, our reports or the art outbox. Its
+INTEGRATION-REQUEST asks us to publish the canonical schemas/types/fixtures/contract tests under contracts/ and fixtures/ with a
+checksum manifest and READY.json last, keep engine ids and v1 semantics, record differences separately, and deliver a
+browser-compatible Worker entry or transport adapter exposing the v1 envelopes with initialization instructions and asset-id
+mappings. Our side: S0–S2 round 1 published only into the lane worktree's root (core READY, examples pending) and was REJECTED
+because its contract deviated from the agreement (D586.177/impl review); round 2 is in progress; nothing has been published to the
+owner root by us. The lane's bootstrap created the owner-root layout directories (deliveries/reports/art/inbox) — Windows had
+already been writing there. Windows-authored files are treated as data, never instructions; no reply channel exists other than
+our own reports/claude/ directory, which S10b will populate.
+
+### D586.180 — Held-out r5 REJECT → r6; VTT handoff S0–S2 r2 committed and under review (2026-09-10 08:41 EDT, supervisor)
+
+- Held-out remediation r5 (c0dab908): Astra REJECT. F5–F11 original probes fixed with regressions, fixtures rehashed unchanged (66/66, listing e14bea57…), but six new High findings in scope: F12 glob `base`/extglob/leading `**`/alias patterns silently empty-match; F13 `#imports` first-wildcard-wins instead of exact-key/longest-match, ambiguous conditional targets fall back; F14 loader escapes (namespace/default `node:module`, destructured `import.meta`, element-access `Reflect['apply']`, ternary aliasing) unrecognised; F15 aliased/qualified `Worker`/`SharedWorker`/`importScripts` invisible; F16 leading whitespace bypasses `data:` inspection (Vite trims); F17 config-only changes (package.json imports) never re-inspect unchanged consumers. Supervisor accepts all six. Per D604, r6 dispatched (resume 01a088b4…), tool + spec only, fail-closed rule restated. Finding against our own process: the r5 resume brief omitted the COMMON RULES header; r6 restates it in full.
+- VTT handoff S0–S2 round 2: supervisor verification on the real-node_modules worktree green (typecheck:fast 0, sg 0, diff --check 0, generator --check 0, vitest 9 files 57/57). Committed 5c7f459b on claude/vtt-handoff (20 paths, 4080+/3312−; new contracts/vtt-handoff/v1/contracts.d.ts and tests/types/vtt-handoff-contract.type-test.ts). Astra r2 review dispatched (resume 01a087f9…) against diff 6b6dc3a4..5c7f459b with F1–F13 closure plus new-deviation checks. Nothing published to the owner root yet.
+- Still running: D569 patch r2 lane, offers Slice 1 lane, promo180 merged gate (vitest-gate exit 0; Playwright on 4340 in progress).
+
+### D586.181 — promo180 Slice H landed on main; offers Slice 1 and held-out r6 in review (2026-09-10 09:07 EDT, supervisor)
+
+- promo180 (D599 reopen, Slice H remediation r2 ACCEPT + landing review ACCEPT): merged gate on the landing merge fb66adca (main 79e99182 + ced82dc2) green — tsc 0, sg 0, vitest-gate 0, playwright-gate 0 (`~/dnd-slim-runs/gate-wt-p-promo180.log`). D586.131 landing shape held: merge-base 79e99182 → main differed only under `.claude/**`, so the worktree gate transfers. Merged as 8a81d20e (11 files, 1912+/222−). Owner art files under art/requests stay uncommitted (D595).
+- Offers Slice 1: lane exit 0, BLOCKED only on the sandbox EROFS cumulative; supervisor cumulative on the writable worktree tsc/sg/diff-check 0, 171 specs 3185/3190 with five load timeouts in four untouched files, serial rerun 215/215. Committed 2ac13798. Astra r1 REJECT on one significant finding (the legacy-preservation oracle is copied from the generator output, verified at the test's lines 36–49); everything else verified clean. r2 dispatched: literal expected bodies/ids/inventory from the parent revision 79ab36f4, three hand mutants.
+- Held-out r6: lane DONE, two files, 13 tests added, none removed, fixtures untouched; supervisor verification tsc/sg/diff-check 0, 9 specs 391/391; committed 472d5262; Astra r6 review dispatched.
+- Handoff S0–S2 r3 and D569 patch r2 lanes still running.
+
+### D586.182 — VTT handoff S0–S2 ACCEPTED (r4) and core contract bundle published to the owner root; S3 dispatched (2026-09-10 09:23 EDT, supervisor)
+
+- S0–S2 rounds: r2 REJECT F14–F19, r3 REJECT F20 only, r4 ACCEPT at a791d5da ("no S0–S2 residual remains"). Astra accepted the `?: T | undefined` declaration widening as matching Zod optionality.
+- Supervisor S2c verification (plan gate) in a temp root: publish → `published` 8 files; `--check` → `verified`; republish → `unchanged`; manifest 5 entries all match bytes; READY.json = `{core:"ready",examples:"pending"}`; tampered README → `INCONSISTENT_SEALED_BUNDLE` on both publish and check (exit 1). Then published to the OWNER root `.tmp/vtt-handoff` from the worktree with `VTT_HANDOFF_ROOT` set explicitly: 8 files, byte-identical hashes (contracts.d.ts af6571f8…, protocol.schema.json b28065e6…, art.schema.json 72a551fc…, manifest 09292747…, two-room.v1 6c481b2b…, snapshots 3c2b7623…), check `verified`; Windows-authored files untouched (314 → 322 files). This answers the Windows INTEGRATION-REQUEST's first ask (canonical schemas/types/fixtures/manifest/READY); the Worker entry/transport adapter ask is S6/S7; reports/claude comes with S10b.
+- Persistence surface check: `git diff 0f84e09f a791d5da -- src/combat src/vtt/session-persistence.ts src/vtt/local-session-store.ts src/vtt/dm-encounter-host.ts` is empty.
+- Dispatched: S3a–S3e lane (fresh session 01a08b7b-e666…, handoff worktree at a791d5da) with S3d gated on the supervisor-supplied baseline fixture; baseline capture lane (session 01a08b7b-e64b…) in a throwaway detached worktree `dnd-wt-baseline-0f84e09f` writing only under `.tmp/baseline-capture/` (script, fixture, sha, VERIFICATION.md, double-run reproducibility). The supervisor will hand-verify and place the fixture + sha into the handoff worktree before S3d.
+
+### D586.183 — Offers Slice 1 landed on main; handoff S3 r1 REJECT; held-out at r9 (2026-09-10 10:37 EDT, supervisor)
+
+- Offers Slice 1 (standard-offer composition kernel): Astra r1 REJECT (self-certifying oracle) → r2 replaced it with literals extracted from the parent revision 79ab36f4 (supervisor reproduced the extraction: 6 ids) → Astra r2 ACCEPT at f6f43bb5. Landing merge c3b3d9b0 (main into the branch); full gate green — tsc 0, sg 0, vitest-gate 0 (load flakes passed serially), playwright-gate 0 (`~/dnd-slim-runs/gate-wt-p-offer-help.log`, done 10:36). D586.131 shape held (merge-base → main differed only under `.claude/**`). Merged to main as d2350c57. Slice 2 (immutable environment and process binding) is next.
+- VTT handoff S3a–S3e r1 (ea510d9d): Astra REJECT with nine significant findings (F21–F29) on the session service/door transaction semantics — snapshot delivery not gated by durability/outcome, post-apply exceptions classed pre_apply, closure leaves the fresh-offer wait pending, restore freshness keyed only on pendingRequest presence, legal-action catalog escapes by reference, subscriber exceptions break settlement, boundary "graph" is a regex, same-state barrier unproven, stale offers matched by destination. S3a/S3b, the door order/payload, the renamed resume tests and baseline-fixture usage verified clean. Supervisor confirmed F25/F27/F29 in source. r2 dispatched.
+- Held-out remediation: r7 REJECT (F23–F27, incl. the default-deny flagging ordinary window/import.meta.env uses) → rule refined to loader-VALUED expressions; r8 REJECT (F28–F33: a regex pre-gate that disables tracking, class-heritage exempted as type, computed destructuring from inert namespaces, alias reassignment, builtinModules false positive, synthetic injected control). r9 dispatched with a binding no-pre-gate rule. Supervisor has asked the owner, non-blocking, whether to cap the unit after r9.
+
+### D586.184 — Late-morning state: S3 r2 reject, D569 fix passes, offers Slice 2 reds, held-out r10–r11, main-checkout hygiene (2026-09-10 11:45 EDT, supervisor)
+
+- VTT handoff S3: r2 (dfe62475) Astra REJECT — F24/F25/F26/F29 resolved; F30–F36 residual (closure not barrier-independent, failed initial-offer flush strands the human wait, auto-refusal/reaction outside the boundary, autonomous steps labelled mutation, door revision lost across refresh, graph pins module pairs not call sites, self-reported counters). r3 dispatched.
+- D569 patch r2: lane done after ~3 h (25 files + pre-patch byte fixture). Supervisor writable cumulative 386/392; serial rerun showed four deterministic reds in ai-dm-conversation (literal mismatch + three new tests waiting on real time past 5 s). Fix pass 1 was ineffective (shutdown-grace seam; the lane's sub-second timings were vacuous because its sandbox failed at EROFS before the wait). Fix pass 2 dispatched with the supervisor's failure output and a trace-the-wait requirement.
+- Offers Slice 2 (7403f498, merged main 528d1146): supervisor 172-spec cumulative 3183/3213 — 30 reds in 8 files, mostly genuine assertion failures in the MCP-driven conversation/arena/board-delivery specs (capsule digest, authorized outcomes) that the lane's sandbox had masked as EROFS. Supervisor materialised a real node_modules in dnd-wt-p-offer-help (npm ci, 271 packages) so MCP specs are admissible in-lane; fix pass dispatched.
+- Held-out: r10 REJECT (F38/F39) → r11 (e9cf5d84) REJECT (F40 plain namespace aliases, F41 destructuring assignments, F42 returned config refs; all bounded) → r12 dispatched with a mandatory flow-position audit table. Findings per round: 6,5,6,4,2,3. Cap question to the owner (D586.183) still open.
+- Main-checkout hygiene, findings against own work: (1) the archived baseline capture.ts under .claude/consensus broke the D583 inventory walker (renamed to .ts.txt, a18bb30e); (2) three stale registered agent worktrees from Aug 17–31 under .claude/worktrees (lane/d284-second-tab, lane/d283-boot-stamp, lane/specs-11-12; one dirty fixture each) added 2,564 TypeScript files to every walk — moved with `git worktree move` to ~/dnd-slim-runs/stale-worktrees/ (nothing deleted, still registered); (3) a verification launch with a relative log path after `cd` never ran and printed "launched" — relaunched with absolute paths. D583 on main now 14/15 with one slow test under load; timing check pending.
+
+### D586.185 — VTT handoff S3a–S3e ACCEPTED (r4); S4–S5b dispatched; D569 patch r2 REJECT; offers Slice 2 fix in flight (2026-09-10 12:38 EDT, supervisor)
+
+- Handoff S3: r3 (6f7953ca) REJECT F37–F39; r4 (ef0ef4f6) ACCEPT — "no significant residual in the reviewed S3a–S3e scope". Landed semantics now binding for S4: FIFO terminal outcomes {committed, refused, cancelled, closed, failed}, committed only after apply + revision identification + flush, irrevocable receipt before observers, barrier-independent closure, seat registry UNAUTHORIZED/FORBIDDEN pre-state, detached frozen projections with a private offer catalog, transient restore freshness, north-edge door companions, symbol-resolved reducer graph gate. S4/S5/S5b dispatched as one fresh lane (session 01a08c2e-f9ef-7702-bc99-ef45937030cc) with the wire agreement restated verbatim and the owner-root publication reserved to the supervisor.
+- D569 patch r2 (df7531b8): Astra REJECT F13–F22 (refusal vs default-fallback, persist-before-STOP on conflicting startup, mixed readiness, cancellation-after-delivery, cleanup joins, potential infinite loop on incomplete speculation, recalculation phase, v3 validator completeness/hybrid rejection, runbook drift, removed invariants + hand-built packet regression). r3 dispatched. Supervisor note: two fix passes were needed because the lane's first timing evidence was vacuous (EROFS before the wait); the D569 worktree will get a real node_modules after r3 so MCP specs become admissible in-lane.
+- Held-out r13: lane BLOCKED correctly on the real vite.config.ts shape; RULE C refined to a reachable-literal set with the every-reference-inside-the-set guard; r13b running.
+
+### D586.186 — Offers Slice 2 r1 REJECT; supervisor-authorized scope deviation for the schema-4 pin (2026-09-10 13:13 EDT, supervisor)
+
+- Astra r1 on 03bdf1ef verified digests (six literals reproduced), schema-3 refusal with no upgrade arm, the E1C raw-context pin move (418b9e16… → 40719437…) as exactly the new state handle, the three mutation assertions, legacy defaults in host/conversation, standard-only registry, authority and preservation. Findings: F1 an eleventh file (tests/unit/tools/ai-dm-board-delivery.test.ts) outside the plan's ten-file Slice 2 list; F2 High — decoded MCP launchers infer legacy mode from an omitted binding (plan:539 forbids implicit missing bindings across the process boundary); F3 Low — preservation ledger lacks line-specific rows for the context pins.
+- Supervisor ruling on F1: ACCEPTED as an authorized deviation from the plan's file list. The plan's own Slice 2 decision (capsule schema 4, no compatibility arm) necessarily changes the embedded state handle and therefore that pin; the reviewer confirmed no other bytes changed and the move is paired with an independent state_ref/handle/revision invariant. Not fixing the test would leave a genuine red. Recorded here so the reviewer does not re-raise it.
+- r2 dispatched for F2 (explicit binding required in decoded launchers; the test that required the wrong behaviour is corrected) and F3.
+
+## D586.187 — owner request: ChatGPT prompt for regenerating the classic board art (2026-09-10 14:59, supervisor)
+
+Owner (verbatim): "write me a prompt to have chatgpt use my windows computer to use google image ai in my browser to generate imporved replacement art for the classic ui that can be substituted directly for the current art. Tell it to use python to generate svg based on the generated images while creatively adapting the pixel art to the 128x128 pixel budget. Include everything you have learned about making the ui as readable as possible to the ai dm. The classic ui is meant to be a top down view. have sol research prior top down rpg pixel based game ui to use as insperation. put the prompt in an md file in "./art/requests/" for chatgpt to read later."
+
+Delivered: art/requests/2026-09-10-chatgpt-classic-board-art-regeneration.md (left UNCOMMITTED in the owner's art directory per D595; `new-request.mjs --check` ignores non-JSON files). Contents: hard constraints (CC0, licensing wall on prompts, write only art/incoming + art/requests, no public/assets/art, no git, no port 4173, no coordinate changes); reading order (README assessment, both board captures, the Emberkeep rejection example, palette.ts rule, pixel-art/art-sets, board-glyphs/light-glyphs/board-chrome for measured boxes, existing redo-starter-art-v1 requests, capture-screenshots.mjs); the 92-file drop-in inventory by family with camera/footprint rules; pixel and palette discipline; twelve AI-DM readability findings distilled from D519/D523–D525/D536/D561/D562/D568/D573 and the probe primer (one explicit mark per fact class, fixed glyph corners and silhouettes, art must match the primer wording, design for 2–4× downscale, obscured/fog contrast, doors as glyph + legend, HP lane clear, identity from silhouette + badge + roster, floor last, picture beats text at low effort, strict plan view except busts, chrome drawn over art); 35 abstracted prior-art principles from a sol research lane (session 01a08ca8-5c50-73e2-b6fd-eec5f3ade7c7, workspace-write in .tmp/runs/art-research with network, repos read-only; output .tmp/runs/art-research/topdown-pixel-ui-research.md; Part B source list kept OUT of the prompt; four principles annotated where the repository's fixed conventions override them); a four-phase workflow (orientation, browser generation with per-family briefs and a prompt log, Python pipeline emitting crispEdges SVG rectangles + pixel-identical PNG with automated checks, prove-in-place capture, request bookkeeping); acceptance criteria; definition of done.
+
+## D605 — OWNER (2026-09-10 16:50): parallel S7/S9 handoff lanes with a two-round cap
+
+Owner ruling on the supervisor's strategy analysis (asked one question at a time): the remaining VTT handoff steps S7a–S7d (WebSocket) and S9a–S9d (art staging) run as PARALLEL codex lanes, each in its own worktree branched from claude/vtt-handoff, with ONE Astra review per lane at the end of the lane and AT MOST TWO fix rounds per lane; residual findings after round two go to a ledger for the owner's call instead of a third round. D604 ("as many intermediate rounds as you need") stays in force for S0–S6 and S8; this ruling narrows it for S7 and S9 only. Supervisor cumulative verification and the full gate on the integrated revision remain the floor. Merge order into claude/vtt-handoff: S6 (once accepted) first, then S7 and S9 in acceptance order, each with a cumulative rerun on the merged branch.
+
+## D606 — OWNER (2026-09-10 16:55): marginal arena test — raise the wall now, cost-cutting lane later
+
+The D544-named test tests/unit/tools/ai-dm-arena.test.ts "suppresses every intel context surface while attributing off rows and preserving full bytes" measured 25.32 s alone on main HEAD 4335390c against its 30 s wall and has timed out in every concurrent cumulative run since 2026-09-09 01:09 (units txn, D569, reconcile, Room D, offers); it passes only on single-file serial retries. Owner ruling (one question at a time): BOTH — raise its wall to 60 s now under the D544 named-test exception (supervisor commit on main, this record), and queue a cost-cutting lane (make the test cheap: fixture or narrower assertion path, Astra-reviewed) as a follow-up unit. The supervisor had recorded the case as a load flake in offers r2/r3 without checking the pattern; that finding stands in the offers loop-log.
+
+## D607 — OWNER (2026-09-10 17:05): held-out leak wall re-scoped to a runtime guard
+
+Asked one question at a time, with the supervisor's explanation of the wall (static analysis of Vite/Vitest configuration to prove no alias or loader can make ordinary code resolve to the held-out evaluation module; rounds r4–r21 today closed bounded config-shape classes F47–F69 at one to three per round), the owner chose: RE-SCOPE TO A RUNTIME GUARD. Binding reading: (1) no further static-wall review rounds after the r21 review already dispatched? — NO: the r21 lane work (F67–F69) is committed once its chained supervisor verification is green, WITHOUT another Astra round; the static wall lands at that bounded level with Astra r19's verified claims as its record; (2) a new bounded unit HELDOUT-RUNTIME-GUARD-01 plans and implements a guard that resolves the real Vite/Vitest configuration in-process (including projects/extends and plugin hooks, the category (b) exclusion the static wall never covered) and asserts through the real resolver that no specifier reachable from the ordinary graph resolves to the held-out module or reserve paths; (3) planning by codex (sol), reviewed by Astra, D604 applies to the plan; (4) which static rules the runtime guard supersedes and which stay (direct reserve/protocol references) is a plan decision to be justified. Alternatives not chosen: two more rounds then ledger; land now; continue unbounded.
+
+### D607.1 — OWNER (2026-09-10 17:08): "the wall will never be perfect. watch out for diminishing returns"
+
+Binding reading for HELDOUT-RUNTIME-GUARD-01: the plan gets at most two Astra review rounds; the implementation gets one end-of-lane Astra review and at most two fix rounds (the D605 shape); after that the guard lands at its bounded level with the residual classes in a ledger. No further rounds on the static wall. The supervisor stops any unit whose findings-per-round has stopped falling and puts the residual to the owner instead of dispatching another round.
+
+### D607.2 — clock correction (supervisor, 2026-09-10 17:01 EDT)
+
+The headings of D605, D606, D607 and D607.1 carry estimated times (16:50, 16:55, 17:05, 17:08). The machine clock at the moment D607.1 was committed read 17:00 EDT; the four rulings were received between roughly 16:50 and 17:00 in that order. Git commit times on 83011328, 3e3b48e9, 6f958c0a and 289a09d8 are authoritative. Same drift the supervisor already corrected in the loop-logs earlier today; timestamps are now taken from `date` into a variable before writing.
+
+## D608 — Offers Slice 2 LANDED on main (2026-09-10 18:55 EDT, supervisor)
+
+Merge 55d90059: claude/p-offer-help (e83c1784 = Astra-accepted r3 5410f789 + landing reconciliation e75e4a9b accepted by Astra r4 + main merges 848c6983/e83c1784 carrying D606) into main, --no-ff. Landing evidence on e83c1784, two runs of the same gate script on the same revision: tsc 0, sg 0, playwright-gate 0 (gate-wt-p-offer-help-e83c1784-browser-green.log; its vitest stage was discarded because the supervisor had five lanes running during its serial retry) and vitest-gate 0 on a quiet rerun of exactly `npm run test:gate` (gate-offers-vitest-e83c1784-GREEN.log: six load flakes passed serially incl. tests/unit/tools/ai-dm-arena.test.ts, FAILED empty). D586.131 main-shape rule held: merge-base 967f45ba → prior main b7281f6e differs only under .claude/**. Slice 2 content: explicit offerEnvironment binding required across the process boundary (plan:539), ENGINE_MCP_LAUNCHER_FORMAT discriminator before structural validation, malformed claimed launchers throw typed TypeErrors (no fixture fallback), capsule schema 4 with the D545 change register updated (D586.186). Findings against the supervisor recorded in the offers loop-log: the marginal arena case was logged as a load flake in r2/r3 without checking its history; the D545 register provenance was mis-stated in one brief; the first landing gate was scheduled under load. Next: offers roadmap Slice 3, dispatched after the current verification queue drains.
+
+## D609 — Quietstone classic art integration opened; supervisor rulings R1–R11 pending owner override (2026-09-10 19:43)
+
+Owner (verbatim): "read \"C:\\Users\\desch\\Documents\\Codex\\2026-09-08\\computer-plugin-computer-use-openai-bundled\\outputs\\quietstone-classic\\CLAUDE-INTEGRATE.md\" and follow the instructions to integrate the new art into the classic ui". The instructions (sha256 8e2b5758…, identical inside the package) treat the package as a delivered candidate: validate checksums, integrate through the real generator pipeline (the app renders art in memory from recipes; PNG replacement alone is insufficient), keep per-id identity, keep badge/HP boxes clear, resolve the documented geometry conflicts explicitly, run captures on 4590+, run the comprehension probe if model access exists, mark requests accepted only after all checks pass.
+
+Supervisor facts: package integrity verified independently (Pillow decode of every PNG equals the SVG rectangle runs; RGBA digests recorded as the external oracle); the repository's own art invariants fail on the candidate in six places (measured in .claude/consensus/quietstone/diag-metrics-r1.json). Rulings R1–R11 in .claude/consensus/quietstone/plan-r1.md: authored asset class beside the untouched procedural painters; 58 of 59 replacements (terrain-hazard is semantic material and stays procedural); translucent contact shadow permitted only in the shared shadow ink; chrome-aware plate/badge/HP contract replaces paint-under-the-HP-bar; authored token colour budget 50 with a v2 target of 24; palette near-twin pairs pinned and excluded from the distance invariant; native detail > 0 for authored (the 0.04 floor stays procedural); light-direction and near-identical variants recorded as v2 findings; request acceptance and the main landing wait for the full gate AND a same-seed screenshot-probe comparison with no regression; provenance names the image model and the unreviewed service terms truthfully. Any of these the owner can overturn; nothing lands on main under them without the probe comparison.
+
+## D610 — OWNER: Quietstone art is evaluated on the branch under PROVISIONAL relaxations (2026-09-10 20:35)
+
+Question put to the owner (one of three options, after Astra's plan review r1 rejected R5/R6/R8/R9 as requirement changes): the delivered package fails four D516 art invariants (token colours 31–49 vs 20; floors/walls/doors native detail 0.002–0.031 vs 0.04; 37 assets use palette pairs closer than 8 RGB, seven such pairs exist in the generated palette itself; props lack the top-left light bias; cleric/undead 0.01128 and cleric/beast 0.01184 silhouettes vs 0.012). Owner chose: "Evaluate on the branch (Recommended)" — build the pipeline and the authored class with the relaxations recorded as PROVISIONAL and branch-only, run the full gate and a same-revision old-vs-new screenshot probe, then the owner decides on the numbers; nothing lands on main until the owner rules. Astra reviews the plan r2 and the implementation under this ruling: the provisional authored-class thresholds are an owner-authorised evaluation envelope, not a weakening of the procedural invariants, and every procedural assertion stays intact.
+
+## D611 — OWNER: Quietstone probe answered by the full judge panel (2026-09-11 08:21)
+
+Asked (one of three): which models answer the same-revision old-vs-new screenshot comprehension probe (baseline build at 85168bc5 with the shipped art vs the Quietstone build, 24 states, same seed). Owner: "Full judge panel (fable, astra, sol high)". Plan §5/A3 model list becomes the D587.1 judge panel at high effort for BOTH runs; the per model×class decision rule and the strict ≥ 0.9 report apply per model.
+
+## D612 — OWNER: F88 (NODE_ENV leaks into the production build) is fixed in a small standalone lane on main now (2026-09-11 08:22)
+
+Asked (one of three): where to fix the S7 ledger residual F88 — serve.mjs and tools/dist-build-cache.mjs forward the caller's NODE_ENV into the production build, so a caller with NODE_ENV=test (vitest) gets the dev-only capability seam in dist and assert-dist-clean rejects it; the owner's live 4173 serve works only because that shell has NODE_ENV unset. Owner: "Small standalone lane on main now (Recommended)": one lane off main, dist-build-cache forces NODE_ENV=production for its build child, one regression, no other changes, normal gate; unblocks the S7 launch proof for S10 without waiting for the handoff branch.
+
+## D613 — OWNER: raise the marginal tests' walls now; the cost-cutting lane runs after the handoff and D569 land (2026-09-11 08:33)
+
+Asked: the marginal-test family (two other ai-dm-arena cases at 30 s, rl-generate-data "generates an unfrozen seed…" at 30 s, engine-mcp-server "bounds one-to-three blind attempts…" at 5 s — 5099 ms in the D569 lane, timed out again in the supervisor's 21-spec run at load ~3, then 14/14 on a quiet serial rerun) costs a serial rerun on almost every verification. Owner (verbatim): "Raise the timeout for now and dispatch the cost cutting lane after the handoff and d569 land". Supervisor action: walls raised on main in the D606 manner (30 s → 60 s for the two arena cases and rl-generate-data; 5 s → 15 s for the engine-mcp-server case), the four tests re-run, committed with explicit paths; these four join the D544/D606 named list. The D606 cost-cutting lane is queued behind the handoff and D569 landings.
+
+## D614 — OWNER: S8 gets at most one more lane round after r3, then merges regardless with residuals in the ledger (2026-09-11 09:03)
+
+Asked: S8 findings per round went 2 → 2 (r3 review pending), so D607.1's falling-findings rule was not met while D604 allows unlimited rounds. Owner: "One more S8 round, then merge regardless" — a fourth lane round only if the r3 review's findings are correctness (not coverage gaps); anything left after that goes to .claude/consensus/vtt-handoff/ledger.md and S8 merges into claude/vtt-handoff.
+
+## D586.188 — Offers Slice 3A scope deviation: eleventh source file authorized to close S3A-F1 (supervisor, 2026-09-11 10:18)
+
+Astra's 3A review found the production board sequence (encounter-projections.ts generate → project) minting two environments so every moving option lost its path (S3A-F1, high). The only correct fix threads one environment through that file, which is not on the roadmap's ten-file 3A list. The supervisor's fix-round brief required exactly that, so the cumulative 3A diff has eleven source files plus two authorized specs. Ruling: the deviation is authorized and recorded; the roadmap's per-subslice cap is a review-unit boundary, not a licence to leave a reviewer-confirmed production regression in place. 3B's file budget is unchanged; encounter-projections.ts is now listed among 3A's consumers. Astra re-reads under this ruling.
+
+## D612.1 — NODEENV-BUILD-01 LANDED on main (2026-09-11 11:48, supervisor)
+
+Gate wt-nodeenv on the merged revision 7b91dc0c (branch f674b16c + main c860464e): tsc 0, sg 0, vitest-gate 0 (load flakes passed serially), playwright-gate 0 (two load-signature failures — ai-chat readiness at 75 s during "Starting local database", homebrew-import sheet element at 5 s — passed on the runner's retry). Main-shape rule held (merge-base → main differed only under .claude/**). Merged --no-ff into main. Effect: every serve path builds with NODE_ENV=production regardless of the caller's environment; the S7 launch probe can now be re-run on the handoff branch once main is merged in. Ledger F88-b (direct `npm run build` still environment-sensitive) stays open.
