@@ -341,6 +341,55 @@ function memberCallDefinitions(
   return [...new Set(definitions)].sort();
 }
 
+function encounterCommandLiteralSites(
+  graph: ReadonlyMap<string, SourceModule>,
+  file: string,
+): readonly string[] {
+  const program = ts.createProgram({
+    rootNames: [...graph.keys()],
+    options: {
+      module: ts.ModuleKind.ESNext,
+      moduleResolution: ts.ModuleResolutionKind.Bundler,
+      noLib: true,
+      skipLibCheck: true,
+      target: ts.ScriptTarget.ESNext,
+      types: [],
+    },
+  });
+  const checker = program.getTypeChecker();
+  const events = program.getSourceFile(resolve(ROOT, 'src/combat/events.ts'));
+  const sourceFile = program.getSourceFile(resolve(ROOT, file));
+  if (events === undefined || sourceFile === undefined) throw new Error('Command-literal graph is incomplete.');
+  const commandDeclaration = events.statements.find((statement): statement is ts.TypeAliasDeclaration =>
+    ts.isTypeAliasDeclaration(statement) && statement.name.text === 'EncounterCommand');
+  if (commandDeclaration === undefined) throw new Error('EncounterCommand type alias is unavailable.');
+  const symbol = checker.getSymbolAtLocation(commandDeclaration.name);
+  if (symbol === undefined) throw new Error('EncounterCommand symbol is unavailable.');
+  const commandType = checker.getDeclaredTypeOfSymbol(symbol);
+  const commandKinds = new Set<string>();
+  for (const member of commandType.isUnion() ? commandType.types : [commandType]) {
+    const discriminator = member.getProperty('type');
+    if (discriminator === undefined) continue;
+    const discriminatorType = checker.getTypeOfSymbolAtLocation(discriminator, commandDeclaration);
+    if (discriminatorType.isStringLiteral()) commandKinds.add(discriminatorType.value);
+  }
+  const sites: string[] = [];
+  const visit = (node: ts.Node): void => {
+    if (ts.isObjectLiteralExpression(node)) {
+      const discriminator = node.properties.find((property): property is ts.PropertyAssignment =>
+        ts.isPropertyAssignment(property) && property.name.getText(sourceFile) === 'type');
+      if (discriminator !== undefined && ts.isStringLiteralLike(discriminator.initializer) &&
+        commandKinds.has(discriminator.initializer.text)) {
+        const line = sourceFile.getLineAndCharacterOfPosition(discriminator.getStart(sourceFile)).line + 1;
+        sites.push(`${repositoryPath(sourceFile.fileName)}:${String(line)} type=${discriminator.initializer.text}`);
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  ts.forEachChild(sourceFile, visit);
+  return sites;
+}
+
 function selectorAuthorityViolations(file: string): readonly string[] {
   const sourceFile = ts.createSourceFile(
     file,
@@ -503,10 +552,9 @@ describe('renderer-neutral engine boundary graph', () => {
     const graph = dependencyGraph(['src/vtt/encounter-app.ts']);
     const serviceCalls = memberCallDefinitions(graph, 'src/vtt/encounter-app.ts', 'this.#session');
     expect(serviceCalls).toEqual([
-      'adjudicate -> src/vtt/encounter-session-service.ts#RichEncounterSessionService',
+      'applyTopDownAdjudication -> src/vtt/encounter-session-service.ts#RichEncounterSessionService',
       'close -> src/vtt/encounter-session-service.ts#EncounterSessionService',
       'delayTurn -> src/vtt/encounter-session-service.ts#RichEncounterSessionService',
-      'dmUseWorldObject -> src/vtt/encounter-session-service.ts#RichEncounterSessionService',
       'endSession -> src/vtt/encounter-session-service.ts#RichEncounterSessionService',
       'finishAdventuringDay -> src/vtt/encounter-session-service.ts#RichEncounterSessionService',
       'finishRoom -> src/vtt/encounter-session-service.ts#RichEncounterSessionService',
@@ -514,7 +562,6 @@ describe('renderer-neutral engine boundary graph', () => {
       'replaceController -> src/vtt/encounter-session-service.ts#RichEncounterSessionService',
       'resolveEngineAdjudication -> src/vtt/encounter-session-service.ts#RichEncounterSessionService',
       'resolvePendingDecision -> src/vtt/encounter-session-service.ts#RichEncounterSessionService',
-      'resolvePendingPlacement -> src/vtt/encounter-session-service.ts#RichEncounterSessionService',
       'resolveRefusalPrompt -> src/vtt/encounter-session-service.ts#RichEncounterSessionService',
       'resolveRestInterruption -> src/vtt/encounter-session-service.ts#RichEncounterSessionService',
       'resume -> src/vtt/encounter-session-service.ts#RichEncounterSessionService',
@@ -526,6 +573,8 @@ describe('renderer-neutral engine boundary graph', () => {
       'skipTurn -> src/vtt/encounter-session-service.ts#RichEncounterSessionService',
       'start -> src/vtt/encounter-session-service.ts#EncounterSessionService',
       'submitTopDownOfferedAction -> src/vtt/encounter-session-service.ts#RichEncounterSessionService',
+      'submitTopDownPlacement -> src/vtt/encounter-session-service.ts#RichEncounterSessionService',
+      'submitTopDownWorldObject -> src/vtt/encounter-session-service.ts#RichEncounterSessionService',
       'subscribeTopDown -> src/vtt/encounter-session-service.ts#RichEncounterSessionService',
       'topDownSnapshot -> src/vtt/encounter-session-service.ts#RichEncounterSessionService',
       'undoLast -> src/vtt/encounter-session-service.ts#RichEncounterSessionService',
@@ -534,6 +583,16 @@ describe('renderer-neutral engine boundary graph', () => {
       'dispatch -> src/vtt/session-lifecycle.ts#IndexedDbSessionLifecycle',
     ]);
     expect(readFileSync(resolve(ROOT, 'src/vtt/encounter-app.ts'), 'utf8')).not.toContain('this.#host');
+  });
+
+  it('top-down UI constructs no reducer command literals', () => {
+    const graph = dependencyGraph(['src/vtt/encounter-app.ts']);
+    expect(encounterCommandLiteralSites(graph, 'src/vtt/encounter-app.ts')).toEqual([]);
+    expect(encounterCommandLiteralSites(graph, 'src/vtt/encounter-session-service.ts')).toEqual([
+      expect.stringMatching(/encounter-session-service\.ts:\d+ type=resolve_pending_placement$/u),
+      expect.stringMatching(/encounter-session-service\.ts:\d+ type=resolve_pending_placement$/u),
+      expect.stringMatching(/encounter-session-service\.ts:\d+ type=adjudicate$/u),
+    ]);
   });
 
   it('all runtime entries converge after top-down refactor', () => {

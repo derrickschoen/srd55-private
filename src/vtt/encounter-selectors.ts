@@ -20,7 +20,7 @@ export function projectedWorldObjectLabel(
 }
 
 export function dmWorldObjectLabel(
-  projection: DmBoardProjection,
+  projection: Pick<DmBoardProjection, 'board'>,
   objectId: string,
 ): DmWorldObjectLabel | null {
   const object = projection.board.worldObjects?.find((candidate) => String(candidate.id) === objectId);

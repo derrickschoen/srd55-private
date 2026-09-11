@@ -49,16 +49,21 @@ import {
 } from './encounter-board';
 import { encounterArtForBoard } from './encounter-art-selection';
 import type {
-  DmBoardProjection,
   DmMovementPathPreview,
   DmPendingPlacementRecovery,
   PlayerBoardProjection,
   ProjectedControllerRequest,
+  TopDownDmBoardProjection,
+  TopDownPendingPlacementRecovery,
 } from './encounter-projections';
 import {
   decodePlayerDecision,
+  handleTopDownSubmission,
   isHostWindowMessage,
+  isPlayerSubmissionFeedbackMessage,
   playerDecisionMessage,
+  playerSubmissionFeedbackMessage,
+  type TopDownSubmissionFeedback,
 } from './local-window-channel';
 import { IndexedDbBrowserSessionStore } from './local-session-store';
 import {
@@ -1085,6 +1090,8 @@ class PlayerEncounterView {
   #staged: EncounterCommand | null = null;
   #aimingSpell = false;
   #lastHeartbeat = 0;
+  #submissionError: string | null = null;
+  #pendingSubmissionRequestId: string | null = null;
   readonly #stackSelection: EncounterBoardStackSelection = new Map();
   readonly #heartbeatCheck: number;
   #boardView: AccessibleBoardViewMode;
@@ -1107,6 +1114,13 @@ class PlayerEncounterView {
   };
 
   #acceptHostMessage(value: unknown): void {
+    if (isPlayerSubmissionFeedbackMessage(value, this.sessionId)) {
+      if (value.requestId !== this.#pendingSubmissionRequestId) return;
+      this.#pendingSubmissionRequestId = null;
+      this.#submissionError = value.feedback.kind === 'error' ? value.feedback.message : null;
+      this.#render();
+      return;
+    }
     if (!isHostWindowMessage(value, this.sessionId)) return;
     this.#lastHeartbeat = Date.now();
     const unchanged =
@@ -1150,6 +1164,8 @@ class PlayerEncounterView {
     const selectedOfferedActionId = request.offeredActionIds[actionIndex];
     if (selectedOfferedActionId === undefined) return;
     const message = playerDecisionMessage(this.sessionId, request, selectedOfferedActionId);
+    this.#pendingSubmissionRequestId = request.requestId;
+    this.#submissionError = null;
     this.#channel.postMessage(message);
     this.#staged = null;
     this.#aimingSpell = false;
@@ -1235,6 +1251,12 @@ class PlayerEncounterView {
     });
     authority.dataset.state = connected ? 'connected' : 'hard-paused';
     this.#shell.append(authority);
+    if (this.#submissionError !== null) {
+      const error = element('p', { text: this.#submissionError });
+      error.dataset.submissionError = 'true';
+      error.setAttribute('role', 'alert');
+      this.#shell.append(error);
+    }
     const active = projection.combatants.find(
       (combatant) => combatant.id === projection.activeCombatant,
     );
@@ -1381,7 +1403,7 @@ class DmEncounterView {
   readonly #lifecycle: IndexedDbSessionLifecycle;
   readonly #channel: BroadcastChannel;
   #shell = element('main', { className: 'encounter-shell dm-encounter' });
-  #projection: DmBoardProjection | null = null;
+  #projection: TopDownDmBoardProjection | null = null;
   #channelError: string | null = null;
   #saveManagerError: string | null = null;
   #folderSaves: readonly SaveManagerEntry[] = [];
@@ -1615,13 +1637,15 @@ class DmEncounterView {
     if (pending === null || pending === undefined) return;
     try {
       const decision = decodePlayerDecision(value, this.sessionId, pending);
-      void this.#session.submitTopDownOfferedAction(
-        pending.actorId,
+      this.#submitTopDown(
+        () => this.#session.submitTopDownOfferedAction(
+          pending.actorId,
+          decision.requestId,
+          decision.encounterRevision,
+          decision.offeredActionId,
+        ),
         decision.requestId,
-        decision.encounterRevision,
-        decision.offeredActionId,
       );
-      this.#channelError = null;
     } catch (error: unknown) {
       if (error instanceof TypeError) {
         this.#channelError = error.message;
@@ -1654,12 +1678,31 @@ class DmEncounterView {
     ) ?? -1;
     const selectedOfferedActionId = this.#dmOfferedActionIds[actionIndex];
     if (selectedOfferedActionId === undefined) return;
-    void this.#session.submitTopDownOfferedAction(
+    this.#submitTopDown(() => this.#session.submitTopDownOfferedAction(
       pending.actorId,
       pending.requestId,
       pending.encounterRevision,
       selectedOfferedActionId,
-    );
+    ));
+  }
+
+  #submitTopDown(
+    submit: () => ReturnType<RichEncounterSessionService['submitTopDownOfferedAction']>,
+    playerRequestId?: string,
+    onError?: () => void,
+  ): void {
+    void handleTopDownSubmission(submit, (feedback: TopDownSubmissionFeedback) => {
+      this.#channelError = feedback.kind === 'error' ? feedback.message : null;
+      if (feedback.kind === 'error') onError?.();
+      if (playerRequestId !== undefined) {
+        this.#channel.postMessage(playerSubmissionFeedbackMessage(
+          this.sessionId,
+          playerRequestId,
+          feedback,
+        ));
+      }
+      this.#render();
+    });
   }
 
   #setMovementPreview(commandKey: string | null): void {
@@ -2027,7 +2070,7 @@ class DmEncounterView {
     this.#focusAfterRender = null;
   }
 
-  #renderPendingPlacementRecovery(recovery: DmPendingPlacementRecovery): HTMLElement {
+  #renderPendingPlacementRecovery(recovery: TopDownPendingPlacementRecovery): HTMLElement {
     const panel = renderPendingPlacementRecoveryHeading(recovery);
 
     const key = `${recovery.combatantId}:${recovery.reason}`;
@@ -2127,39 +2170,17 @@ class DmEncounterView {
       const selectedAnchor = selectedSize?.legalAnchors.find((entry) =>
         `${String(entry.anchor.column)},${String(entry.anchor.row)}:${entry.placementMode}` === anchor.value);
       if (selectedSize === undefined || selectedAnchor === undefined) return;
-      let command: Extract<EncounterCommand, { readonly type: 'resolve_pending_placement' }>;
-      switch (recovery.reason) {
-        case 'legacy_size_required':
-        case 'effect_adjudication_pending':
-          command = {
-            type: 'resolve_pending_placement',
-            combatant: recovery.combatantId,
-            anchor: selectedAnchor.anchor,
-            reason: recovery.reason,
-            size: selectedSize.size,
-          };
-          break;
-        case 'overlap_adjudication_pending':
-          command = {
-            type: 'resolve_pending_placement',
-            combatant: recovery.combatantId,
-            anchor: selectedAnchor.anchor,
-            reason: recovery.reason,
-          };
-          break;
-      }
-      const result = this.#session.resolvePendingPlacement(command);
-      if (result.kind === 'refused') {
-        this.#channelError = result.reason;
-        this.#focusAfterRender = 'recovery';
-        this.#render();
-      }
+      this.#submitTopDown(
+        () => this.#session.submitTopDownPlacement(selectedAnchor.offeredActionId),
+        undefined,
+        () => { this.#focusAfterRender = 'recovery'; },
+      );
     });
     panel.append(form);
     return panel;
   }
 
-  #renderDmBoard(projection: DmBoardProjection): void {
+  #renderDmBoard(projection: TopDownDmBoardProjection): void {
     const boardFog = new Set(projection.board.foggedCells.map(
       (cell) => `${String(cell.column)},${String(cell.row)}`,
     ));
@@ -2996,10 +3017,12 @@ class DmEncounterView {
         const button = element('button', { text: `${control.label} — ${control.objectName}` });
         button.type = 'button';
         button.dataset.renderKey = stableRenderKey(
-          'dm', 'world-object-controls', control.objectId, actionKey(control.command),
+          'dm', 'world-object-controls', control.objectId, control.offeredActionId,
         );
         button.dataset.objectId = control.objectId;
-        button.addEventListener('click', () => this.#session.dmUseWorldObject(control.command));
+        button.addEventListener('click', () => {
+          this.#submitTopDown(() => this.#session.submitTopDownWorldObject(control.offeredActionId));
+        });
         objectControls.append(button);
       }
     }
@@ -3035,13 +3058,11 @@ class DmEncounterView {
     );
     adjudication.addEventListener('submit', (event) => {
       event.preventDefault();
-      this.#session.adjudicate({
-        type: 'adjudicate',
+      this.#submitTopDown(() => this.#session.applyTopDownAdjudication({
         target: target.value as CombatantId,
-        subject: 'engine:manual-adjudication',
+        hitPointDelta: Number(delta.value),
         reasoning: reasoning.value,
-        consequence: { kind: 'hit_point_delta', amount: Number(delta.value) },
-      });
+      }));
     });
     this.#shell.append(adjudication);
 

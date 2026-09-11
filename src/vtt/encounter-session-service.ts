@@ -1,4 +1,5 @@
 import type { CombatantId, EncounterSessionId } from '../combat/values';
+import type { EncounterCommand } from '../combat/events';
 import type {
   DmEncounterHost,
   DmEncounterHostSnapshot,
@@ -13,6 +14,7 @@ import type {
   PlayerSeatBinding,
   RendererProjectionCapture,
   RendererTokenBinding,
+  TopDownDmBoardProjection,
 } from './encounter-projections';
 import { offeredActionId } from './encounter-projections';
 
@@ -631,13 +633,16 @@ export class EncounterSessionService {
 }
 
 export interface RichSessionSnapshot {
-  readonly dm: DmBoardProjection;
+  readonly dm: TopDownDmBoardProjection;
   readonly player: PlayerBoardProjection;
   readonly dmOfferedActionIds: readonly string[];
 }
 
 /** Typed in-process façade for the classic top-down renderer. */
 export class RichEncounterSessionService extends EncounterSessionService {
+  readonly #placementOffers = new Map<string, Extract<EncounterCommand, { readonly type: 'resolve_pending_placement' }>>();
+  readonly #worldObjectOffers = new Map<string, Extract<EncounterCommand, { readonly type: 'dm_use_world_object' }>>();
+
   constructor(
     private readonly richHost: DmEncounterHost,
     seats: readonly PlayerSeatRegistration[],
@@ -646,7 +651,7 @@ export class RichEncounterSessionService extends EncounterSessionService {
   }
 
   topDownSnapshot(playerId: string): RichSessionSnapshot | null {
-    const dm = this.dmSnapshot();
+    const dm = this.#topDownProjection(this.dmSnapshot());
     const player = this.playerSnapshot(playerId);
     return player === null ? null : {
       dm,
@@ -658,7 +663,7 @@ export class RichEncounterSessionService extends EncounterSessionService {
   }
 
   subscribeTopDown(playerId: string, listener: (snapshot: RichSessionSnapshot) => void): () => void {
-    const dmEvents = new Map<number, DmBoardProjection>();
+    const dmEvents = new Map<number, TopDownDmBoardProjection>();
     const playerEvents = new Map<number, PlayerBoardProjection>();
     const publish = (seq: number): void => {
       const dm = dmEvents.get(seq);
@@ -675,7 +680,7 @@ export class RichEncounterSessionService extends EncounterSessionService {
       });
     };
     const unsubscribeDm = this.subscribeDm((event) => {
-      dmEvents.set(event.seq, event.projection);
+      dmEvents.set(event.seq, this.#topDownProjection(event.projection));
       publish(event.seq);
     });
     const player = this.subscribePlayer(playerId, (event) => {
@@ -695,6 +700,55 @@ export class RichEncounterSessionService extends EncounterSessionService {
   }
 
   sessionEnded(): ReturnType<DmEncounterHost['sessionEnded']> { return this.richHost.sessionEnded(); }
+
+  #topDownProjection(dm: DmBoardProjection): TopDownDmBoardProjection {
+    this.#placementOffers.clear();
+    this.#worldObjectOffers.clear();
+    const revision = dm.encounter.revision;
+    const worldObjectControls = dm.worldObjectControls.map((control, index) => {
+      const selectedOfferedActionId = `top-down:${String(revision)}:world-object:${String(index)}`;
+      this.#worldObjectOffers.set(selectedOfferedActionId, control.command);
+      return {
+        objectId: control.objectId,
+        objectName: control.objectName,
+        label: control.label,
+        offeredActionId: selectedOfferedActionId,
+      };
+    });
+    const recovery = dm.pendingPlacementRecovery;
+    const pendingPlacementRecovery = recovery === null
+      ? null
+      : {
+          ...recovery,
+          sizeOptions: recovery.sizeOptions.map((sizeOption, sizeIndex) => ({
+            size: sizeOption.size,
+            legalAnchors: sizeOption.legalAnchors.map((anchor, anchorIndex) => {
+              const selectedOfferedActionId =
+                `top-down:${String(revision)}:placement:${String(sizeIndex)}:${String(anchorIndex)}`;
+              const command: Extract<EncounterCommand, { readonly type: 'resolve_pending_placement' }> =
+                recovery.reason === 'overlap_adjudication_pending'
+                  ? {
+                      type: 'resolve_pending_placement',
+                      combatant: recovery.combatantId,
+                      anchor: anchor.anchor,
+                      reason: recovery.reason,
+                    }
+                  : {
+                      type: 'resolve_pending_placement',
+                      combatant: recovery.combatantId,
+                      anchor: anchor.anchor,
+                      reason: recovery.reason,
+                      size: sizeOption.size,
+                    };
+              this.#placementOffers.set(selectedOfferedActionId, command);
+              return { ...anchor, offeredActionId: selectedOfferedActionId };
+            }),
+          })),
+        };
+    const { worldObjectControls: _commands, pendingPlacementRecovery: _placement, ...projection } = dm;
+    return { ...projection, worldObjectControls, pendingPlacementRecovery };
+  }
+
   submitTopDownOfferedAction(
     actorId: CombatantId,
     requestId: string,
@@ -708,8 +762,39 @@ export class RichEncounterSessionService extends EncounterSessionService {
       selectedOfferedActionId,
     );
   }
-  resolvePendingPlacement(...args: Parameters<DmEncounterHost['resolvePendingPlacement']>): ReturnType<DmEncounterHost['resolvePendingPlacement']> {
-    return this.richHost.resolvePendingPlacement(...args);
+
+  async submitTopDownPlacement(selectedOfferedActionId: string): Promise<HostCoordinatorTransactionOutcome> {
+    const command = this.#placementOffers.get(selectedOfferedActionId);
+    if (command === undefined) return { kind: 'refused', reason: 'The offered placement is stale or unknown.' };
+    const result = this.richHost.resolvePendingPlacement(command);
+    return result.kind === 'refused'
+      ? { kind: 'refused', reason: result.reason }
+      : { kind: 'committed', revision: result.state.revision };
+  }
+
+  async submitTopDownWorldObject(selectedOfferedActionId: string): Promise<HostCoordinatorTransactionOutcome> {
+    const command = this.#worldObjectOffers.get(selectedOfferedActionId);
+    if (command === undefined) return { kind: 'refused', reason: 'The offered world-object action is stale or unknown.' };
+    this.richHost.dmUseWorldObject(command);
+    return { kind: 'committed', revision: this.richHost.snapshot().dm.encounter.revision };
+  }
+
+  async applyTopDownAdjudication(intent: {
+    readonly target: CombatantId;
+    readonly hitPointDelta: number;
+    readonly reasoning: string;
+  }): Promise<HostCoordinatorTransactionOutcome> {
+    if (!Number.isSafeInteger(intent.hitPointDelta)) {
+      return { kind: 'refused', reason: 'The adjudication hit-point delta must be a safe integer.' };
+    }
+    this.richHost.adjudicate({
+      type: 'adjudicate',
+      target: intent.target,
+      subject: 'engine:manual-adjudication',
+      reasoning: intent.reasoning,
+      consequence: { kind: 'hit_point_delta', amount: intent.hitPointDelta },
+    });
+    return { kind: 'committed', revision: this.richHost.snapshot().dm.encounter.revision };
   }
   interrupt(...args: Parameters<DmEncounterHost['interrupt']>): ReturnType<DmEncounterHost['interrupt']> {
     return this.richHost.interrupt(...args);
@@ -758,12 +843,6 @@ export class RichEncounterSessionService extends EncounterSessionService {
   }
   setHiddenRollCategory(...args: Parameters<DmEncounterHost['setHiddenRollCategory']>): ReturnType<DmEncounterHost['setHiddenRollCategory']> {
     return this.richHost.setHiddenRollCategory(...args);
-  }
-  dmUseWorldObject(...args: Parameters<DmEncounterHost['dmUseWorldObject']>): ReturnType<DmEncounterHost['dmUseWorldObject']> {
-    return this.richHost.dmUseWorldObject(...args);
-  }
-  adjudicate(...args: Parameters<DmEncounterHost['adjudicate']>): ReturnType<DmEncounterHost['adjudicate']> {
-    return this.richHost.adjudicate(...args);
   }
   replaceController(...args: Parameters<DmEncounterHost['replaceController']>): ReturnType<DmEncounterHost['replaceController']> {
     return this.richHost.replaceController(...args);

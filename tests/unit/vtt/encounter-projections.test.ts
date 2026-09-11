@@ -12,7 +12,13 @@ import {
   serializePlayerBoard,
   offeredActionId,
 } from '../../../src/vtt/encounter-projections';
-import { decodePlayerDecision } from '../../../src/vtt/local-window-channel';
+import {
+  decodePlayerDecision,
+  handleTopDownSubmission,
+  isPlayerSubmissionFeedbackMessage,
+  playerSubmissionFeedbackMessage,
+  type TopDownSubmissionFeedback,
+} from '../../../src/vtt/local-window-channel';
 import {
   REFERENCE_CLERIC_ID,
   REFERENCE_FIGHTER_ID,
@@ -253,6 +259,50 @@ describe('increment 6 projection boundary', () => {
         offeredActionId: 'offer:other-request:0',
       },
     }, 'session:test', request)).toThrow('not one of the projected offered action IDs');
+  });
+
+  it('surfaces a stale offered-action refusal once without retrying', async () => {
+    let submissions = 0;
+    let surfaced: TopDownSubmissionFeedback | null = null;
+    await handleTopDownSubmission(async () => {
+      submissions += 1;
+      return { kind: 'refused', reason: 'The offered controller request is stale.' };
+    }, (feedback) => { surfaced = feedback; });
+
+    expect(submissions).toBe(1);
+    expect(surfaced).toEqual({ kind: 'error', message: 'The offered controller request is stale.' });
+    if (surfaced === null) throw new Error('The stale refusal was not surfaced.');
+    const message = playerSubmissionFeedbackMessage('session:test', 'request:stale', surfaced);
+    expect(isPlayerSubmissionFeedbackMessage(message, 'session:test')).toBe(true);
+    expect(isPlayerSubmissionFeedbackMessage(message, 'session:other')).toBe(false);
+  });
+
+  it('surfaces pre-apply failure and promise rejection without retrying either submission', async () => {
+    const surfaced: TopDownSubmissionFeedback[] = [];
+    let failedSubmissions = 0;
+    await handleTopDownSubmission(async () => {
+      failedSubmissions += 1;
+      return {
+        kind: 'failed',
+        phase: 'pre_apply',
+        error: new Error('controlled append failure'),
+        currentRevision: 4,
+      };
+    }, (feedback) => { surfaced.push(feedback); });
+    let rejectedSubmissions = 0;
+    await handleTopDownSubmission(async () => {
+      rejectedSubmissions += 1;
+      throw new Error('controlled stale-request rejection');
+    }, (feedback) => { surfaced.push(feedback); });
+
+    expect({ failedSubmissions, rejectedSubmissions }).toEqual({
+      failedSubmissions: 1,
+      rejectedSubmissions: 1,
+    });
+    expect(surfaced).toEqual([
+      { kind: 'error', message: 'Before applying: controlled append failure' },
+      { kind: 'error', message: 'controlled stale-request rejection' },
+    ]);
   });
 
   it('M42-ADJUDICATION-PAUSES cancels the pending request and dispatches nothing until resume', async () => {

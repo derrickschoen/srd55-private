@@ -181,6 +181,30 @@ export interface DmPendingPlacementRecovery {
   }[];
 }
 
+export interface TopDownWorldObjectControl {
+  readonly objectId: string;
+  readonly objectName: string;
+  readonly label: string;
+  readonly offeredActionId: string;
+}
+
+export interface TopDownPendingPlacementRecovery extends Omit<DmPendingPlacementRecovery, 'sizeOptions'> {
+  readonly sizeOptions: readonly {
+    readonly size: KnownCreatureSize;
+    readonly legalAnchors: readonly (PendingPlacementLegalAnchor & {
+      readonly offeredActionId: string;
+    })[];
+  }[];
+}
+
+export type TopDownDmBoardProjection = Omit<
+  DmBoardProjection,
+  'worldObjectControls' | 'pendingPlacementRecovery'
+> & {
+  readonly worldObjectControls: readonly TopDownWorldObjectControl[];
+  readonly pendingPlacementRecovery: TopDownPendingPlacementRecovery | null;
+};
+
 export interface DmMovementPathPreview extends MovementPathDangerPreview {
   readonly commandKey: string;
 }
