@@ -1,9 +1,19 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { posix } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { canonicalJson } from '../src/commands/canonical-json';
-import type { HeldoutSlice } from '../src/vtt/heldout-evaluation';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import ts from 'typescript';
+import {
+  runHeldoutRuntimeGuard,
+  runHeldoutIsolationPreflight,
+  type HeldoutConfigurationLoad,
+  type HeldoutRuntimePreflight,
+  type HeldoutRuntimeResolution,
+  type HeldoutSeedAssignment,
+} from './heldout-runtime-guard.ts';
+
+export type HeldoutSlice = 'A' | 'B' | 'C' | 'D' | 'E' | 'F';
 
 export interface HeldoutChangedText {
   readonly path: string;
@@ -19,7 +29,9 @@ export interface HeldoutLeakFinding {
     | 'protocol_import'
     | 'protocol_resolution'
     | 'unresolved_module_edge'
-    | 'loader_reference_escaped';
+    | 'loader_reference_escaped'
+    | 'runtime_protocol_resolution'
+    | 'configuration_load_failed';
   readonly detail: string;
 }
 
@@ -31,30 +43,17 @@ export interface HeldoutLeakReport {
   readonly checkedFiles: number;
   /** Files which completed the full TypeScript AST and symbol inspection pass. */
   readonly astInspectedFiles: number;
+  readonly runtimeCompleted?: boolean;
+  readonly preflight?: HeldoutRuntimePreflight;
+  readonly configurationLoad?: readonly HeldoutConfigurationLoad[];
+  readonly resolution?: readonly HeldoutRuntimeResolution[];
+  readonly seedAssignments?: readonly HeldoutSeedAssignment[];
   readonly findings: readonly HeldoutLeakFinding[];
 }
 
 export interface HeldoutLeakBindings {
   readonly reserveDigests: readonly string[];
   readonly resultPaths: readonly string[];
-}
-
-export interface HeldoutLeakInspectionContext {
-  /** Candidate-revision paths, used to expand Vite import.meta.glob calls. */
-  readonly candidateFiles?: readonly string[];
-  /** Candidate-revision package.json contents keyed by repository-relative path. */
-  readonly packageJsonFiles?: Readonly<Record<string, string>>;
-  /** Complete candidate sources used when resolution configuration invalidates unchanged consumers. */
-  readonly candidateSourceFiles?: Readonly<Record<string, string>>;
-  /** Candidate source pool from which project `extends` configuration dependencies are loaded. */
-  readonly candidateConfigurationFiles?: Readonly<Record<string, string>>;
-  readonly resolutionConfigChanged?: boolean;
-  readonly configuredAliasPrefixes?: readonly string[];
-  readonly configuredAliasRegexes?: readonly {
-    readonly source: string;
-    readonly flags: string;
-  }[];
-  readonly unresolvedResolutionConfigPaths?: readonly string[];
 }
 
 const EVALUATION_FILES = new Set([
@@ -66,6 +65,8 @@ const EVALUATION_FILES = new Set([
   'tools/ai-dm-heldout-report.ts',
   'tools/ai-dm-heldout-judge-prompt.ts',
   'tools/heldout-leak-check.ts',
+  'tools/heldout-runtime-guard.ts',
+  'tools/heldout-runtime-guard-worker.mjs',
   'tools/ai-dm-rerun-packet.ts',
 ]);
 
@@ -182,35 +183,34 @@ export const HELDOUT_LEAK_AST_OUT_OF_SCOPE = [
   'eval executable strings',
   'new Function executable strings',
   'custom loader implementations',
-  'Vite plugin config hooks',
   'runtime-generated code',
 ] as const;
 
-/** Rule N/Rule C audit: every expression-flow position is interpreted or fails closed. */
+/** Rule N audit; executable configuration references are delegated to the isolated runtime guard. */
 export const HELDOUT_LEAK_FLOW_AUDIT = [
-  { position: 'declaration initializer', loaderValues: 'Rule N1 permits only a plain const namespace alias; Rule N2 permits inert browser-global transfer', configurationReferences: 'Rule C permits exact non-exported const aliases of statically addressed subtrees and fails closed for alias-bearing let, var, destructuring, or exported initializers' },
-  { position: 'member receiver', loaderValues: 'Rule N1 permits direct namespace receipt; Rule N2 validates browser loader members by symbol at use', configurationReferences: 'Rule C unions outer and embedded-binding placement prefixes through constant property and element reads; any effective path crossing resolve, test, or alias is alias-bearing and nonconstant addresses fail closed' },
-  { position: 'assignment', loaderValues: 'Rule N1 failed_closed; Rule N2 browser globals remain inert until loader-member use', configurationReferences: 'Rule C always fails closed on mutation targets and fails closed on alias-bearing assignment values' },
-  { position: 'destructuring declaration', loaderValues: 'Rule N1 and Rule N2 track recognized loader keys and fail_closed for any loader key extracted from an unknown source', configurationReferences: 'Rule C fails closed when an alias-bearing subtree enters a binding pattern' },
-  { position: 'destructuring assignment', loaderValues: 'Rule N1 and Rule N2 track recognized loader keys and fail_closed for any loader key extracted from an unknown source', configurationReferences: 'Rule C fails closed on assignment-pattern targets and alias-bearing assignment values' },
-  { position: 'parameter default', loaderValues: 'Rule N1 failed_closed; Rule N2 permits browser-global transfer but not loader use through the parameter', configurationReferences: 'Rule C fails closed for alias-bearing defaults' },
-  { position: 'return', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global transfer', configurationReferences: 'Rule C interprets exported configuration-factory returns and otherwise fails closed for alias-bearing subtrees' },
-  { position: 'yield', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global transfer', configurationReferences: 'Rule C fails closed for alias-bearing yielded values' },
-  { position: 'throw', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global transfer', configurationReferences: 'Rule C fails closed for alias-bearing thrown values' },
-  { position: 'await or promise resolution', loaderValues: 'Rule N1 permits only await import of a constant built-in namespace and otherwise failed_closed; Rule N2 validates loader use', configurationReferences: 'Rule C fails closed for alias-bearing awaited or promise-resolved values' },
-  { position: 'template substitution', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global transfer', configurationReferences: 'Rule C fails closed for alias-bearing template substitutions' },
-  { position: 'spread', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global transfer', configurationReferences: 'Rule C resolves tracked object spreads in source-order last-write order and tracked array spreads by runtime index; untracked spreads fail closed when addressed' },
-  { position: 'property value', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global storage', configurationReferences: 'Rule C visits exact literal nodes; alias-bearing values stored in untracked objects fail closed' },
-  { position: 'array element', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global storage', configurationReferences: 'Rule C records literal array placements; test.projects elements are nested configuration roots, while non-alias-bearing elements under unrelated keys remain usable' },
-  { position: 'call argument', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global transfer', configurationReferences: 'Rule C interprets symbol-proven defineConfig and mergeConfig graph entries and otherwise fails closed for alias-bearing arguments' },
-  { position: 'constructor argument', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global transfer', configurationReferences: 'Rule C fails closed for alias-bearing constructor arguments' },
-  { position: 'call receiver', loaderValues: 'Rule N1 permits only direct namespace member derivation; Rule N2 validates loader members by symbol', configurationReferences: 'Rule C always fails closed when a tracked chain is the receiver of a method call' },
-  { position: 'conditional, logical, or comma expression', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global transfer', configurationReferences: 'Rule C permits condition tests and strict equality, unions exported configuration branches, and otherwise fails closed for alias-bearing result values' },
-  { position: 'class field or heritage', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global storage', configurationReferences: 'Rule C fails closed for alias-bearing class storage or heritage values' },
-  { position: 'export', loaderValues: 'Rule N1 failed_closed except its exact alias initializer; Rule N2 permits inert global transfer', configurationReferences: 'Rule C starts at the single export-default graph and fails closed for other alias-bearing exports' },
-  { position: 'for-of head', loaderValues: 'Rule N1 failed_closed; Rule N2 validates later loader use', configurationReferences: 'Rule C always fails closed on tracked loop assignment heads' },
-  { position: 'for-in head', loaderValues: 'Rule N1 failed_closed; Rule N2 validates later loader use', configurationReferences: 'Rule C always fails closed on tracked loop assignment heads' },
-  { position: 'tagged template', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global transfer', configurationReferences: 'Rule C fails closed for alias-bearing tagged-template use' },
+  { position: 'declaration initializer', loaderValues: 'Rule N1 permits only a plain const namespace alias; Rule N2 permits inert browser-global transfer' },
+  { position: 'member receiver', loaderValues: 'Rule N1 permits direct namespace receipt; Rule N2 validates browser loader members by symbol at use' },
+  { position: 'assignment', loaderValues: 'Rule N1 failed_closed; Rule N2 browser globals remain inert until loader-member use' },
+  { position: 'destructuring declaration', loaderValues: 'Rule N1 and Rule N2 track recognized loader keys and fail_closed for every loader key extracted from an unknown source' },
+  { position: 'destructuring assignment', loaderValues: 'Rule N1 and Rule N2 track recognized loader keys and fail_closed for every loader key extracted from an unknown source' },
+  { position: 'parameter default', loaderValues: 'Rule N1 failed_closed; Rule N2 permits browser-global transfer but not loader use through the parameter' },
+  { position: 'return', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global transfer' },
+  { position: 'yield', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global transfer' },
+  { position: 'throw', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global transfer' },
+  { position: 'await or promise resolution', loaderValues: 'Rule N1 permits only await import of a constant built-in namespace and otherwise failed_closed; Rule N2 validates loader use' },
+  { position: 'template substitution', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global transfer' },
+  { position: 'spread', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global transfer' },
+  { position: 'property value', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global storage' },
+  { position: 'array element', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global storage' },
+  { position: 'call argument', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global transfer' },
+  { position: 'constructor argument', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global transfer' },
+  { position: 'call receiver', loaderValues: 'Rule N1 permits only direct namespace member derivation; Rule N2 validates loader members by symbol' },
+  { position: 'conditional, logical, or comma expression', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global transfer' },
+  { position: 'class field or heritage', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global storage' },
+  { position: 'export', loaderValues: 'Rule N1 failed_closed except its exact alias initializer; Rule N2 permits inert global transfer' },
+  { position: 'for-of head', loaderValues: 'Rule N1 failed_closed; Rule N2 validates later loader use' },
+  { position: 'for-in head', loaderValues: 'Rule N1 failed_closed; Rule N2 validates later loader use' },
+  { position: 'tagged template', loaderValues: 'Rule N1 failed_closed; Rule N2 permits inert browser-global transfer' },
 ] as const;
 
 export const HELDOUT_MODULE_SPECIFIER_POLICY = {
@@ -221,8 +221,7 @@ export const HELDOUT_MODULE_SPECIFIER_POLICY = {
     'a trailing index, index.js, or index.ts resolves to its containing module path',
     'a trailing .js or .ts extension resolves to the extensionless module identity',
     'file URLs use fileURLToPath semantics, including percent-decoding, before identity comparison',
-    'package #imports use exact-first Node pattern ordering in the nearest candidate package.json',
-    'literal filesystem Vite globs support base, leading **, *, **, ?, arrays, exclusions, and query options',
+    'package #imports and Vite glob matching are delegated to the installed runtime resolver and transform',
   ],
   meaningChangingQueries: [
     'raw', 'url', 'inline', 'worker', 'sharedworker', 'init', 'import', 'no-inline',
@@ -231,7 +230,7 @@ export const HELDOUT_MODULE_SPECIFIER_POLICY = {
     'a normalized held-out import is a protocol_import',
     'a normalized held-out resolver call is a protocol_resolution',
     'a recognized non-constant module edge is an unresolved_module_edge',
-    'an undecodable or unknown-scheme edge and an unresolved package #import fail closed',
+    'an undecodable or unknown-scheme direct edge fails closed',
     'a known loader reference escaping recognized call syntax is loader_reference_escaped',
   ],
   interpreted: [
@@ -239,27 +238,15 @@ export const HELDOUT_MODULE_SPECIFIER_POLICY = {
     'Rule N1 permits import.meta and module/worker namespaces only as direct member receivers or exact plain-const aliases',
     'Rule N2 permits browser globals to transfer inertly and validates Worker, SharedWorker, and importScripts members at use by symbol-proven global provenance',
     'a loader-valued expression is allowed only as a direct callee with a constant specifier, a receiver leading to a recognized member call, or the whole initializer of a non-exported plain-identifier const alias',
-    'Rule C interprets Vite and Vitest aliases only as strict literals in the exact-node graph reached from export default, symbol-proven defineConfig or mergeConfig, factory returns, conditional branches, and same-file const object/array composition',
-    'Rule C uses no flow tracking: each tracked-const reference is classified by its maximal constant-key address, including whether its path crosses resolve, test, or alias, the addressed subtree, and its immediate syntactic position',
-    'Rule C classifies configuration roots, resolve/test/alias bindings, and bindings spread transitively into those containers as alias-capable regardless of current literal contents',
-    'Rule C records every configuration placement prefix and unions outer paths with every embedded binding dereferenced, composing each placement with remaining descendant and const-alias paths; any semantic placement makes the reference alias-capable',
-    'Rule C visits ordinary shorthand and literal-array composition; installed Vitest 4 test.projects array elements are nested configuration roots, while removed test.workspace is not interpreted',
-    'Rule C resolves tracked literal object and array spreads with JavaScript last-write and runtime-index semantics, including terminal embedded identifiers',
-    'Rule C recursively inspects literal test.projects extends files from the candidate tree; true reuses the root configuration and missing, external, cyclic, or nonliteral targets fail closed',
-    'Rule C permits non-exported plain-const aliases to preserve the same addressed subtree and allows non-alias-bearing subtrees in otherwise escaping positions',
-    'subtrees strictly below a configuration root at nonsemantic addresses remain non-alias-capable unless their contents or binding position makes them capable',
-    'resolve and Vitest test are alias-capable containers whose values must be literal objects or tracked const literals; their alias values are interpreted identically',
-    'reachable object spreads require tracked const literals; computed keys, accessors, methods, and nonliteral resolve, test, or alias values fail closed, while unrelated nonliteral values are opaque',
-    'root vite*.config.* and vitest*.config.* entry points are inspected, including symbol-proven defineConfig and mergeConfig imports from Vite or Vitest',
-    'resolution configuration changes re-inspect consumers; unresolved configuration makes every encountered consumer edge unresolved',
+    'runtime Vite serve and Vitest root/project resolver and transform evidence governs configuration semantics, aliases, plugin hooks, projects, and extends',
+    'runtime graph traversal follows value edges; erased type-only edges remain static findings',
     'every eligible candidate file receives the full AST and symbol inspection pass without a textual pre-gate',
   ],
   failsClosed: [
     'every other position of a loader-valued expression is loader_reference_escaped from one generic check',
     'every disallowed Rule N1 namespace position and every non-symbol-proven Rule N2 loader-member use is loader_reference_escaped from the same generic check',
-    'a nonliteral Vite or Vitest alias, unreachable alias/resolve/test property, or invalid reachable-const reference is unresolved configuration under Rule C',
-    'tracked configuration references with nonconstant addresses or mutation targets fail closed; alias-bearing subtrees also fail closed when returned, stored outside the visited graph, passed, exported, templated, awaited, yielded, or otherwise escaped',
-    'unresolved targets, options, package conditions, globs, aliases, URL schemes, and data modules are findings',
+    'runtime configuration load, resolver, transform, project, or ordinary-edge failures are findings in the isolated runtime guard',
+    'unresolved direct targets, URL schemes, and data modules are static findings',
   ],
   outOfScope: HELDOUT_LEAK_AST_OUT_OF_SCOPE,
 } as const;
@@ -357,159 +344,29 @@ function globPatternExpression(expression: ts.Expression | undefined): readonly 
   return pattern === null ? null : [pattern];
 }
 
-function globRegex(pattern: string): RegExp | null {
-  if (/[{}[\]\\]/u.test(pattern) || /(?:@|\+|\?|\*|!)\(/u.test(pattern)) return null;
-  let source = '^';
-  for (let index = 0; index < pattern.length; index += 1) {
-    const character = pattern[index];
-    if (character === '*') {
-      if (pattern[index + 1] === '*') {
-        if (pattern[index + 2] === '/') {
-          source += '(?:.*/)?';
-          index += 2;
-        } else {
-          source += '.*';
-          index += 1;
-        }
-      } else {
-        source += '[^/]*';
-      }
-    } else if (character === '?') {
-      source += '[^/]';
-    } else {
-      source += character?.replace(/[\\^$.*+?()[\]{}|]/gu, '\\$&') ?? '';
-    }
-  }
-  return new RegExp(`${source}$`, 'u');
-}
-
-function repositoryGlobPattern(
-  importer: string,
-  pattern: string,
-  base: string | null,
-): string | null {
-  const bareOrAlias = !pattern.startsWith('./') && !pattern.startsWith('../') &&
-    !pattern.startsWith('/') && !pattern.startsWith('**');
-  if (pattern.startsWith('#') || bareOrAlias) return null;
-  if (base !== null && (base.startsWith('#') || (
-    !base.startsWith('./') && !base.startsWith('../') && !base.startsWith('/')
-  ))) return null;
-  const baseDirectory = base === null
-    ? posix.dirname(importer)
-    : base.startsWith('/')
-      ? base.slice(1)
-      : posix.join(posix.dirname(importer), base);
-  const absolute = pattern.startsWith('/')
-    ? pattern.slice(1)
-    : pattern.startsWith('**')
-      ? pattern
-      : posix.join(baseDirectory, pattern);
-  return posix.normalize(absolute).replace(/^\.\//u, '');
-}
-
-interface GlobOptions {
-  readonly query: string;
-  readonly base: string | null;
-}
-
-function literalObjectProperties(
-  expression: ts.Expression,
-): ReadonlyMap<string, ts.Expression> | null {
-  const unwrapped = unwrapTransparentExpression(expression);
-  if (!ts.isObjectLiteralExpression(unwrapped)) return null;
-  const properties = new Map<string, ts.Expression>();
-  for (const property of unwrapped.properties) {
-    if (ts.isSpreadAssignment(property)) {
-      const spread = literalObjectProperties(property.expression);
-      if (spread === null) return null;
-      for (const [key, value] of spread) properties.set(key, value);
-      continue;
-    }
-    if (!ts.isPropertyAssignment(property) || ts.isComputedPropertyName(property.name)) return null;
-    const key = propertyNameText(property.name);
-    if (key === null) return null;
-    properties.set(key, property.initializer);
-  }
-  return properties;
-}
-
-function literalOptionValue(expression: ts.Expression): boolean {
+function isLiteralGlobOption(expression: ts.Expression): boolean {
   const unwrapped = unwrapTransparentExpression(expression);
   if (constantString(unwrapped) !== null || ts.isNumericLiteral(unwrapped) ||
     unwrapped.kind === ts.SyntaxKind.TrueKeyword || unwrapped.kind === ts.SyntaxKind.FalseKeyword ||
     unwrapped.kind === ts.SyntaxKind.NullKeyword) return true;
   if (ts.isArrayLiteralExpression(unwrapped)) {
     return unwrapped.elements.every((element) =>
-      !ts.isSpreadElement(element) && literalOptionValue(element));
+      !ts.isSpreadElement(element) && isLiteralGlobOption(element));
   }
-  const properties = literalObjectProperties(unwrapped);
-  return properties !== null && [...properties.values()].every((value) => literalOptionValue(value));
-}
-
-function globOptions(expression: ts.Expression | undefined): GlobOptions | null {
-  if (expression === undefined) return { query: '', base: null };
-  const properties = literalObjectProperties(expression);
-  if (properties === null || [...properties.values()].some((value) => !literalOptionValue(value))) return null;
-  const queryInitializer = properties.get('query');
-  let query = '';
-  if (queryInitializer !== undefined) {
-    const initializer = unwrapTransparentExpression(queryInitializer);
-    const value = constantString(initializer);
-    if (value !== null) {
-      query = value.length === 0 || value.startsWith('?') ? value : `?${value}`;
-    } else {
-      if (!ts.isObjectLiteralExpression(initializer)) return null;
-      const parameters: string[] = [];
-      for (const property of initializer.properties) {
-        if (!ts.isPropertyAssignment(property)) return null;
-        const key = propertyNameText(property.name);
-        if (key === null) return null;
-        const queryValue = constantString(property.initializer) ??
-          (ts.isNumericLiteral(property.initializer) ? property.initializer.text : null) ??
-          (property.initializer.kind === ts.SyntaxKind.TrueKeyword ? 'true' : null) ??
-          (property.initializer.kind === ts.SyntaxKind.FalseKeyword ? 'false' : null);
-        if (queryValue === null) return null;
-        parameters.push(`${encodeURIComponent(key)}=${encodeURIComponent(queryValue)}`);
-      }
-      query = parameters.length === 0 ? '' : `?${parameters.join('&')}`;
+  if (!ts.isObjectLiteralExpression(unwrapped)) return false;
+  return unwrapped.properties.every((property) => {
+    if (ts.isSpreadAssignment(property)) {
+      return ts.isObjectLiteralExpression(unwrapTransparentExpression(property.expression)) &&
+        isLiteralGlobOption(property.expression);
     }
-  }
-  const baseInitializer = properties.get('base');
-  const base = baseInitializer === undefined
-    ? null
-    : constantString(baseInitializer);
-  if (baseInitializer !== undefined && base === null) return null;
-  return { query, base };
+    return ts.isPropertyAssignment(property) && !ts.isComputedPropertyName(property.name) &&
+      propertyNameText(property.name) !== null && isLiteralGlobOption(property.initializer);
+  });
 }
 
-function expandGlobEdges(
-  importer: string,
-  patterns: readonly string[],
-  options: GlobOptions,
-  candidateFiles: readonly string[] | undefined,
-): readonly string[] | null {
-  const positive = patterns.filter((pattern) => !pattern.startsWith('!'));
-  const negative = patterns.filter((pattern) => pattern.startsWith('!')).map((pattern) => pattern.slice(1));
-  if (positive.length === 0) return null;
-  const normalizedPositive = positive.map((pattern) =>
-    repositoryGlobPattern(importer, pattern, options.base));
-  const normalizedNegative = negative.map((pattern) =>
-    repositoryGlobPattern(importer, pattern, options.base));
-  if ([...normalizedPositive, ...normalizedNegative].some((pattern) => pattern === null)) return null;
-  const positiveRegexes = normalizedPositive.map((pattern) =>
-    pattern === null ? null : globRegex(pattern));
-  const negativeRegexes = normalizedNegative.map((pattern) =>
-    pattern === null ? null : globRegex(pattern));
-  if ([...positiveRegexes, ...negativeRegexes].some((regex) => regex === null)) return null;
-  if (candidateFiles === undefined) {
-    return positive.every((pattern) => !/[*?{}[\]]/u.test(pattern))
-      ? normalizedPositive.map((pattern) => `${pattern ?? ''}${options.query}`)
-      : null;
-  }
-  return candidateFiles.filter((candidatePath) =>
-    positiveRegexes.some((regex) => regex?.test(candidatePath) === true) &&
-    !negativeRegexes.some((regex) => regex?.test(candidatePath) === true))
-    .map((candidatePath) => `${candidatePath}${options.query}`);
+function hasLiteralLoaderOptions(expression: ts.Expression | undefined): boolean {
+  return expression === undefined ||
+    (ts.isObjectLiteralExpression(unwrapTransparentExpression(expression)) && isLiteralGlobOption(expression));
 }
 
 /**
@@ -519,7 +376,6 @@ function expandGlobEdges(
 function discoverModuleEdges(
   path: string,
   source: string,
-  context: HeldoutLeakInspectionContext = {},
   dataDepth = 0,
   prepared?: PreparedModuleAnalysis,
 ): readonly ModuleEdge[] {
@@ -1235,7 +1091,7 @@ function discoverModuleEdges(
         if (kinds.has('factory')) return true;
         if (kinds.has('glob')) {
           return globPatternExpression(parent.arguments[0]) !== null &&
-            globOptions(parent.arguments[1]) !== null;
+            hasLiteralLoaderOptions(parent.arguments[1]);
         }
         if (kinds.has('script_loader')) {
           return parent.arguments.length > 0 &&
@@ -1411,14 +1267,7 @@ function discoverModuleEdges(
         add('dynamic_import', firstArgument);
       } else if (expressionKinds(callee).has('glob')) {
         const patterns = globPatternExpression(firstArgument);
-        const options = globOptions(node.arguments[1]);
-        const matches = patterns === null || options === null
-          ? null
-          : expandGlobEdges(path, patterns, options, context.candidateFiles);
-        if (matches === null) addUnresolved('import_meta_glob');
-        else for (const match of matches) {
-          result.push({ kind: 'import', syntax: 'import_meta_glob', specifier: match });
-        }
+        if (patterns === null || !hasLiteralLoaderOptions(node.arguments[1])) addUnresolved('import_meta_glob');
       } else if (scriptLoaderReference(callee)) {
         if (node.arguments.length === 0) addUnresolved('import_scripts');
         for (const argument of node.arguments) add('import_scripts', argument);
@@ -1477,7 +1326,7 @@ function discoverModuleEdges(
       if (decoded === null) {
         nested.push({ kind: 'unresolved', syntax: edge.syntax, specifier: null });
       } else {
-        nested.push(...discoverModuleEdges(`${path}.data-${String(dataDepth)}.ts`, decoded, context, dataDepth + 1));
+        nested.push(...discoverModuleEdges(`${path}.data-${String(dataDepth)}.ts`, decoded, dataDepth + 1));
       }
     }
     result.push(...nested);
@@ -1516,72 +1365,6 @@ interface NormalizedModuleSpecifier {
   readonly meaningChangingQuery: boolean;
 }
 
-function importsTarget(value: unknown): string | null {
-  if (typeof value === 'string') return value;
-  if (value === null || typeof value !== 'object') return null;
-  const candidates = (Array.isArray(value) ? value : Object.values(value))
-    .map((candidate) => importsTarget(candidate));
-  if (candidates.length === 0 || candidates.some((candidate) => candidate === null)) return null;
-  const distinct = [...new Set(candidates)];
-  return distinct.length === 1 ? distinct[0] ?? null : null;
-}
-
-function resolvePackageImport(
-  importer: string,
-  specifier: string,
-  packageJsonFiles: Readonly<Record<string, string>> | undefined,
-): string | null {
-  if (packageJsonFiles === undefined) return null;
-  let directory = posix.dirname(importer);
-  while (true) {
-    const packagePath = directory === '.' ? 'package.json' : `${directory}/package.json`;
-    const source = packageJsonFiles[packagePath];
-    if (source !== undefined) {
-      try {
-        const parsed: unknown = JSON.parse(source);
-        if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
-        const imports = Reflect.get(parsed, 'imports');
-        if (imports === null || typeof imports !== 'object' || Array.isArray(imports)) return null;
-        const entries = Object.entries(imports);
-        const exact = entries.find(([key]) => key === specifier);
-        if (exact !== undefined) {
-          const target = importsTarget(exact[1]);
-          if (target === null) return null;
-          return target.startsWith('./') ? posix.join(directory, target) : target;
-        }
-        const patterns = entries.flatMap(([key, value]) => {
-          const star = key.indexOf('*');
-          if (star < 0 || star !== key.lastIndexOf('*')) return [];
-          const prefix = key.slice(0, star);
-          const suffix = key.slice(star + 1);
-          return specifier.startsWith(prefix) && specifier.endsWith(suffix)
-            ? [{ key, value, prefix, suffix }]
-            : [];
-        }).sort((left, right) =>
-          right.prefix.length - left.prefix.length ||
-          right.suffix.length - left.suffix.length ||
-          right.key.length - left.key.length);
-        const selected = patterns[0];
-        if (selected === undefined) return null;
-        let target = importsTarget(selected.value);
-        if (target === null) return null;
-        const substitution = specifier.slice(
-          selected.prefix.length,
-          specifier.length - selected.suffix.length,
-        );
-        target = target.replaceAll('*', substitution);
-        return target.startsWith('./') ? posix.join(directory, target) : target;
-      } catch {
-        return null;
-      }
-      return null;
-    }
-    if (directory === '.') break;
-    directory = posix.dirname(directory);
-  }
-  return null;
-}
-
 function stripKnownModuleSuffix(path: string): string {
   for (const suffix of ['/index.js', '/index.ts', '/index']) {
     if (path.endsWith(suffix)) return path.slice(0, -suffix.length);
@@ -1595,29 +1378,11 @@ function stripKnownModuleSuffix(path: string): string {
 function normalizeModuleSpecifier(
   originalSpecifier: string,
   importer: string,
-  context: HeldoutLeakInspectionContext,
 ): NormalizedModuleSpecifier | null {
   const schemeCandidate = originalSpecifier.trimStart();
   let specifier = /^[a-z][a-z0-9+.-]*:/iu.test(schemeCandidate)
     ? schemeCandidate
     : originalSpecifier;
-  if (specifier.startsWith('#')) {
-    const resolved = resolvePackageImport(importer, specifier, context.packageJsonFiles);
-    if (resolved === null) return null;
-    specifier = resolved;
-  }
-  if (context.configuredAliasPrefixes?.some((alias) =>
-    alias === '*' || specifier === alias ||
-    specifier.startsWith(alias.endsWith('/') ? alias : `${alias}/`)) === true) {
-    return null;
-  }
-  if (context.configuredAliasRegexes?.some(({ source, flags }) => {
-    try {
-      return new RegExp(source, flags).test(specifier);
-    } catch {
-      return true;
-    }
-  }) === true) return null;
   if (specifier.startsWith('file:')) {
     try {
       const url = new URL(specifier);
@@ -1652,9 +1417,8 @@ function normalizeModuleSpecifier(
 function heldoutProtocolSpecifier(
   specifier: string,
   importer: string,
-  context: HeldoutLeakInspectionContext,
 ): NormalizedModuleSpecifier | null {
-  const normalized = normalizeModuleSpecifier(specifier, importer, context);
+  const normalized = normalizeModuleSpecifier(specifier, importer);
   if (normalized === null) return null;
   return normalized.path === 'heldout-evaluation' ||
     normalized.path.endsWith('/heldout-evaluation')
@@ -1666,11 +1430,10 @@ function firstHeldoutEdge(
   edges: readonly ModuleEdge[],
   kind: Extract<ModuleEdge['kind'], 'import' | 'resolution'>,
   importer: string,
-  context: HeldoutLeakInspectionContext,
 ): NormalizedModuleSpecifier | null {
   for (const edge of edges) {
     if (edge.kind !== kind || edge.specifier === null) continue;
-    const normalized = heldoutProtocolSpecifier(edge.specifier, importer, context);
+    const normalized = heldoutProtocolSpecifier(edge.specifier, importer);
     if (normalized !== null) return normalized;
   }
   return null;
@@ -1679,13 +1442,9 @@ function firstHeldoutEdge(
 function firstInvalidSpecifier(
   edges: readonly ModuleEdge[],
   importer: string,
-  context: HeldoutLeakInspectionContext,
 ): ModuleEdge | undefined {
-  if ((context.unresolvedResolutionConfigPaths?.length ?? 0) > 0) {
-    return edges.find((edge) => edge.kind === 'import' || edge.kind === 'resolution');
-  }
   return edges.find((edge) => edge.specifier !== null &&
-    normalizeModuleSpecifier(edge.specifier, importer, context) === null);
+    normalizeModuleSpecifier(edge.specifier, importer) === null);
 }
 
 function specifierSuffixDetail(specifier: NormalizedModuleSpecifier): string {
@@ -1731,7 +1490,6 @@ export function inspectHeldoutLeakChanges(
   changes: readonly HeldoutChangedText[],
   slice: HeldoutSlice,
   bindings: HeldoutLeakBindings,
-  context: HeldoutLeakInspectionContext = {},
 ): HeldoutLeakReport {
   if (bindings.reserveDigests.length === 0 || bindings.resultPaths.length === 0) {
     throw new TypeError('Held-out leak inspection requires reserve digest and result path bindings.');
@@ -1744,65 +1502,11 @@ export function inspectHeldoutLeakChanges(
     throw new TypeError('Held-out reserve result paths must use the registered result root.');
   }
   const findings: HeldoutLeakFinding[] = [];
-  const configurationSources = {
-    ...(context.candidateConfigurationFiles ?? {}),
-    ...(context.candidateSourceFiles ?? {}),
-    ...Object.fromEntries(changes.map((change) => [
-      change.path,
-      change.sourceText ?? change.addedText,
-    ])),
-  };
-  const aliasDiscoveries = changes.flatMap((change) => {
-    if (!isRootViteOrVitestConfig(change.path)) return [];
-    return [{ path: change.path, discovery: viteAliases(
-      change.sourceText ?? change.addedText,
-      change.path,
-      configurationSources,
-    ) }];
-  });
-  const discoveredAliases = aliasDiscoveries.flatMap(({ discovery }) => discovery.aliases);
-  const discoveredAliasRegexes = aliasDiscoveries.flatMap(({ discovery }) => discovery.regexes);
-  const unresolvedResolutionConfigPaths = [...new Set([
-    ...(context.unresolvedResolutionConfigPaths ?? []),
-    ...aliasDiscoveries.filter(({ discovery }) => discovery.unresolved).map(({ path }) => path),
-  ])];
-  const inspectionContext: HeldoutLeakInspectionContext = {
-    ...context,
-    configuredAliasPrefixes: [...new Set([
-      ...(context.configuredAliasPrefixes ?? []),
-      ...discoveredAliases,
-    ])],
-    configuredAliasRegexes: [
-      ...(context.configuredAliasRegexes ?? []),
-      ...discoveredAliasRegexes,
-    ],
-    unresolvedResolutionConfigPaths,
-  };
   const effectiveChanges = new Map(changes.map((change) => [change.path, change]));
-  for (const nestedPath of aliasDiscoveries.flatMap(({ discovery }) => discovery.nestedPaths)) {
-    const sourceText = configurationSources[nestedPath];
-    if (sourceText !== undefined && !effectiveChanges.has(nestedPath)) {
-      effectiveChanges.set(nestedPath, { path: nestedPath, addedText: '', sourceText });
-    }
-  }
-  const resolutionConfigChanged = inspectionContext.resolutionConfigChanged === true ||
-    changes.some((change) => isResolutionConfigPath(change.path));
-  if (resolutionConfigChanged) {
-    for (const [path, sourceText] of Object.entries(inspectionContext.candidateSourceFiles ?? {})) {
-      if (!effectiveChanges.has(path)) effectiveChanges.set(path, { path, addedText: '', sourceText });
-    }
-  }
   const astSources = new Map([...effectiveChanges.values()]
     .filter((change) => isTypeScriptOrJavaScript(change.path))
     .map((change) => [change.path, change.sourceText ?? change.addedText]));
   const preparedAnalyses = prepareModuleAnalyses(astSources);
-  for (const configPath of unresolvedResolutionConfigPaths) {
-    findings.push({
-      path: configPath,
-      kind: 'unresolved_module_edge',
-      detail: 'Vite alias configuration is not statically resolvable',
-    });
-  }
   let astInspectedFiles = 0;
   for (const change of effectiveChanges.values()) {
     const reference = reserveReference(change.addedText, bindings);
@@ -1817,14 +1521,13 @@ export function inspectHeldoutLeakChanges(
       ? discoverModuleEdges(
         change.path,
         change.sourceText ?? change.addedText,
-        inspectionContext,
         0,
         preparedAnalyses.get(change.path),
       )
       : [];
     if (eligibleForAstInspection) astInspectedFiles += 1;
     const restrictedPath = !EVALUATION_FILES.has(change.path) && !isTestOrFixture(change.path);
-    const heldoutImport = firstHeldoutEdge(edges, 'import', change.path, inspectionContext);
+    const heldoutImport = firstHeldoutEdge(edges, 'import', change.path);
     if (restrictedPath && heldoutImport !== null) {
       findings.push({
         path: change.path,
@@ -1832,7 +1535,7 @@ export function inspectHeldoutLeakChanges(
         detail: `held-out protocol imported outside evaluation tooling${specifierSuffixDetail(heldoutImport)}`,
       });
     }
-    const heldoutResolution = firstHeldoutEdge(edges, 'resolution', change.path, inspectionContext);
+    const heldoutResolution = firstHeldoutEdge(edges, 'resolution', change.path);
     if (restrictedPath && heldoutResolution !== null) {
       findings.push({
         path: change.path,
@@ -1841,7 +1544,7 @@ export function inspectHeldoutLeakChanges(
       });
     }
     const unresolved = edges.find((edge) => edge.kind === 'unresolved') ??
-      firstInvalidSpecifier(edges, change.path, inspectionContext);
+      firstInvalidSpecifier(edges, change.path);
     if (restrictedPath && unresolved !== undefined) {
       findings.push({
         path: change.path,
@@ -1863,6 +1566,32 @@ export function inspectHeldoutLeakChanges(
     astInspectedFiles,
     findings,
   };
+}
+
+export function inspectHeldoutCandidateTree(
+  root: string,
+  slice: HeldoutSlice,
+  bindings: HeldoutLeakBindings,
+): HeldoutLeakReport {
+  const candidateSources: HeldoutChangedText[] = [];
+  const collect = (directory: string, prefix = ''): void => {
+    for (const entry of readdirSync(directory, { withFileTypes: true }).sort((left, right) =>
+      left.name.localeCompare(right.name))) {
+      if (entry.name === 'node_modules' || entry.name === '.git' || entry.name.startsWith('.tmp')) continue;
+      const relative = prefix.length === 0 ? entry.name : `${prefix}/${entry.name}`;
+      const absolute = posix.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        if (prefix.length > 0 || relative === 'src' || relative === 'tools') collect(absolute, relative);
+      } else if (isTypeScriptOrJavaScript(relative) && (
+        relative.startsWith('src/') || relative.startsWith('tools/') || isRootViteOrVitestConfig(relative)
+      )) {
+        const sourceText = readFileSync(absolute, 'utf8');
+        candidateSources.push({ path: relative, addedText: sourceText, sourceText });
+      }
+    }
+  };
+  collect(root);
+  return inspectHeldoutLeakChanges(candidateSources, slice, bindings);
 }
 
 export interface GitCandidatePath {
@@ -1959,1223 +1688,7 @@ function isRootViteOrVitestConfig(path: string): boolean {
     /^(?:vite|vitest)(?:\.[^.]+)*\.config\.(?:ts|mts|cts|js|mjs|cjs)$/u.test(path);
 }
 
-function jsonAliases(source: string, path: string): readonly string[] {
-  try {
-    const parsed = ts.parseConfigFileTextToJson(path, source);
-    if (parsed.error !== undefined || parsed.config === undefined) return [];
-    const config: unknown = parsed.config;
-    if (config === null || typeof config !== 'object' || Array.isArray(config)) return [];
-    const compilerOptions = Reflect.get(config, 'compilerOptions');
-    const paths = compilerOptions !== null && typeof compilerOptions === 'object'
-      ? Reflect.get(compilerOptions, 'paths')
-      : undefined;
-    const aliases = paths !== null && typeof paths === 'object' && !Array.isArray(paths)
-      ? Object.keys(paths).map((key) => key === '*'
-        ? '*'
-        : key.slice(0, key.indexOf('*') < 0 ? key.length : key.indexOf('*')))
-      : [];
-    const exportsValue = Reflect.get(config, 'exports');
-    const packageName = typeof Reflect.get(config, 'name') === 'string'
-      ? Reflect.get(config, 'name')
-      : null;
-    return exportsValue === undefined || typeof packageName !== 'string'
-      ? aliases
-      : [...aliases, packageName];
-  } catch {
-    return [];
-  }
-}
-
-interface ViteAliasDiscovery {
-  readonly aliases: readonly string[];
-  readonly regexes: readonly {
-    readonly source: string;
-    readonly flags: string;
-  }[];
-  readonly unresolved: boolean;
-  readonly nestedPaths: readonly string[];
-}
-
-function viteAliases(
-  source: string,
-  path: string,
-  configurationSources: Readonly<Record<string, string>> = {},
-  configurationStack: ReadonlySet<string> = new Set(),
-): ViteAliasDiscovery {
-  if (configurationStack.has(path)) {
-    return { aliases: [], regexes: [], unresolved: true, nestedPaths: [path] };
-  }
-  const sourceFile = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, scriptKind(path));
-  const aliases = new Set<string>();
-  const regexes = new Map<string, { readonly source: string; readonly flags: string }>();
-  const nestedPaths = new Set<string>();
-  let unresolved = false;
-  const inspectExtendedConfiguration = (specifier: string): void => {
-    if (specifier.length === 0 || posix.isAbsolute(specifier)) {
-      unresolved = true;
-      return;
-    }
-    const target = posix.normalize(posix.join(posix.dirname(path), specifier));
-    if (target === '..' || target.startsWith('../')) {
-      unresolved = true;
-      return;
-    }
-    const nestedSource = configurationSources[target];
-    if (nestedSource === undefined) {
-      unresolved = true;
-      return;
-    }
-    nestedPaths.add(target);
-    const nested = viteAliases(nestedSource, target, configurationSources,
-      new Set([...configurationStack, path]));
-    for (const alias of nested.aliases) aliases.add(alias);
-    for (const regex of nested.regexes) regexes.set(`${regex.source}/${regex.flags}`, regex);
-    for (const nestedPath of nested.nestedPaths) nestedPaths.add(nestedPath);
-    if (nested.unresolved) unresolved = true;
-  };
-  const compilerOptions: ts.CompilerOptions = {
-    allowJs: true,
-    checkJs: false,
-    noLib: true,
-    noResolve: true,
-    target: ts.ScriptTarget.Latest,
-  };
-  const compilerHost: ts.CompilerHost = {
-    fileExists: (fileName) => fileName === path,
-    getCanonicalFileName: (fileName) => fileName,
-    getCurrentDirectory: () => '',
-    getDefaultLibFileName: () => '',
-    getDirectories: () => [],
-    getNewLine: () => '\n',
-    getSourceFile: (fileName) => fileName === path ? sourceFile : undefined,
-    readFile: (fileName) => fileName === path ? source : undefined,
-    useCaseSensitiveFileNames: () => true,
-    writeFile: () => undefined,
-  };
-  const checker = ts.createProgram([path], compilerOptions, compilerHost).getTypeChecker();
-  const symbolAt = (identifier: ts.Identifier): ts.Symbol | undefined => {
-    if (ts.isExportSpecifier(identifier.parent)) {
-      return checker.getExportSpecifierLocalTargetSymbol(identifier.parent) ??
-        checker.getSymbolAtLocation(identifier);
-    }
-    if (ts.isShorthandPropertyAssignment(identifier.parent)) {
-      return checker.getShorthandAssignmentValueSymbol(identifier.parent) ??
-        checker.getSymbolAtLocation(identifier);
-    }
-    return checker.getSymbolAtLocation(identifier);
-  };
-  const reachableNodes = new Set<ts.Node>();
-  const reachableSymbols = new Map<ts.Symbol, ts.VariableDeclaration>();
-  const aliasCapableSymbols = new Set<ts.Symbol>();
-  const rootConfigurationSymbols = new Set<ts.Symbol>();
-  const placementPrefixes = new Map<ts.Symbol, string[][]>();
-  const visitingSymbols = new Set<ts.Symbol>();
-  const semanticConfigurationKey = (key: string): boolean =>
-    key === 'resolve' || key === 'test' || key === 'alias';
-  const recordPlacement = (symbol: ts.Symbol, path: readonly string[]): boolean => {
-    const placements = placementPrefixes.get(symbol) ?? [];
-    if (placements.some((candidate) => candidate.length === path.length &&
-      candidate.every((key, index) => key === path[index]))) return false;
-    placements.push([...path]);
-    placementPrefixes.set(symbol, placements);
-    return true;
-  };
-  const regexAlias = (
-    expression: ts.Expression,
-  ): { readonly source: string; readonly flags: string } | null => {
-    const unwrapped = unwrapTransparentExpression(expression);
-    if (!ts.isRegularExpressionLiteral(unwrapped)) return null;
-    const text = unwrapped.getText(sourceFile);
-    const closingSlash = text.lastIndexOf('/');
-    if (!text.startsWith('/') || closingSlash <= 0) return null;
-    const pattern = { source: text.slice(1, closingSlash), flags: text.slice(closingSlash + 1) };
-    try {
-      new RegExp(pattern.source, pattern.flags);
-      return pattern;
-    } catch {
-      return null;
-    }
-  };
-  const collectAliasEntry = (expression: ts.Expression): void => {
-    const entry = unwrapTransparentExpression(expression);
-    if (!ts.isObjectLiteralExpression(entry)) {
-      unresolved = true;
-      return;
-    }
-    const properties = new Map<string, ts.Expression>();
-    for (const property of entry.properties) {
-      if (!ts.isPropertyAssignment(property) || ts.isComputedPropertyName(property.name)) {
-        unresolved = true;
-        return;
-      }
-      const key = propertyNameText(property.name);
-      if (key === null) {
-        unresolved = true;
-        return;
-      }
-      properties.set(key, property.initializer);
-    }
-    const find = properties.get('find');
-    const replacement = properties.get('replacement');
-    if (find === undefined || replacement === undefined || !ts.isStringLiteral(replacement)) {
-      unresolved = true;
-      return;
-    }
-    if (ts.isStringLiteral(find)) {
-      aliases.add(find.text);
-      return;
-    }
-    const regex = regexAlias(find);
-    if (regex === null) {
-      unresolved = true;
-      return;
-    }
-    regexes.set(`${regex.source}/${regex.flags}`, regex);
-  };
-  const collectAliasInitializer = (initializer: ts.Expression): void => {
-    const literal = unwrapTransparentExpression(initializer);
-    if (ts.isObjectLiteralExpression(literal)) {
-      for (const property of literal.properties) {
-        if (!ts.isPropertyAssignment(property) || ts.isComputedPropertyName(property.name) ||
-          !ts.isStringLiteral(property.initializer)) {
-          unresolved = true;
-          return;
-        }
-        const key = propertyNameText(property.name);
-        if (key === null) {
-          unresolved = true;
-          return;
-        }
-        aliases.add(key);
-      }
-    } else if (ts.isArrayLiteralExpression(literal)) {
-      for (const element of literal.elements) {
-        if (ts.isSpreadElement(element) || ts.isOmittedExpression(element)) unresolved = true;
-        else collectAliasEntry(element);
-      }
-    } else {
-      unresolved = true;
-    }
-  };
-  const declarationForReachableIdentifier = (
-    identifier: ts.Identifier,
-  ): { readonly symbol: ts.Symbol; readonly declaration: ts.VariableDeclaration } | null => {
-    const symbol = symbolAt(identifier);
-    if (symbol === undefined) return null;
-    const declarations = symbol.declarations?.filter((declaration): declaration is ts.VariableDeclaration =>
-      ts.isVariableDeclaration(declaration) && declaration.getSourceFile() === sourceFile &&
-      ts.isIdentifier(declaration.name) && declaration.initializer !== undefined &&
-      ts.isVariableDeclarationList(declaration.parent) &&
-      (declaration.parent.flags & ts.NodeFlags.Const) !== 0) ?? [];
-    if (declarations.length !== 1) return null;
-    const declaration = declarations[0];
-    const initializer = declaration?.initializer === undefined
-      ? undefined
-      : unwrapTransparentExpression(declaration.initializer);
-    return declaration === undefined || initializer === undefined ||
-      (!ts.isObjectLiteralExpression(initializer) && !ts.isArrayLiteralExpression(initializer))
-      ? null
-      : { symbol, declaration };
-  };
-  const configurationHelper = (expression: ts.Expression): 'defineConfig' | 'mergeConfig' | null => {
-    const callee = unwrapTransparentExpression(expression);
-    if (!ts.isIdentifier(callee)) return null;
-    const symbol = symbolAt(callee);
-    for (const declaration of symbol?.declarations ?? []) {
-      if (!ts.isImportSpecifier(declaration)) continue;
-      const importedName = declaration.propertyName?.text ?? declaration.name.text;
-      const importClause = declaration.parent.parent;
-      const importDeclaration = importClause.parent;
-      if (!ts.isImportDeclaration(importDeclaration)) continue;
-      const moduleSpecifier = constantString(importDeclaration.moduleSpecifier);
-      if (!['vite', 'vitest', 'vitest/config'].includes(moduleSpecifier ?? '')) continue;
-      if (importedName === 'defineConfig' || importedName === 'mergeConfig') return importedName;
-    }
-    return null;
-  };
-  const returnedExpressions = (body: ts.ConciseBody): readonly ts.Expression[] => {
-    if (!ts.isBlock(body)) return [body];
-    const returned: ts.Expression[] = [];
-    const visitReturn = (node: ts.Node): void => {
-      if (node !== body && ts.isFunctionLike(node)) return;
-      if (ts.isReturnStatement(node) && node.expression !== undefined) {
-        returned.push(node.expression);
-        return;
-      }
-      ts.forEachChild(node, visitReturn);
-    };
-    visitReturn(body);
-    return returned;
-  };
-  const visitAliasValue = (expression: ts.Expression, path: readonly string[]): void => {
-    const value = unwrapTransparentExpression(expression);
-    if (ts.isIdentifier(value)) {
-      const symbol = visitReachableIdentifier(value, (initializer) =>
-        visitAliasValue(initializer, path));
-      if (symbol !== null) {
-        aliasCapableSymbols.add(symbol);
-        recordPlacement(symbol, path);
-      }
-      return;
-    }
-    reachableNodes.add(value);
-    collectAliasInitializer(value);
-  };
-  const visitOrdinaryPropertyValue = (
-    expression: ts.Expression,
-    path: readonly string[],
-  ): void => {
-    const value = unwrapTransparentExpression(expression);
-    if (ts.isObjectLiteralExpression(value)) visitReachableObject(value, path);
-    else if (ts.isArrayLiteralExpression(value)) visitOrdinaryArray(value, path);
-    else if (ts.isIdentifier(value)) {
-      const resolved = declarationForReachableIdentifier(value);
-      if (resolved !== null) {
-        reachableNodes.add(value);
-        reachableSymbols.set(resolved.symbol, resolved.declaration);
-        recordPlacement(resolved.symbol, path);
-        if (visitingSymbols.has(resolved.symbol)) {
-          unresolved = true;
-          return;
-        }
-        visitingSymbols.add(resolved.symbol);
-        visitOrdinaryPropertyValue(resolved.declaration.initializer as ts.Expression, path);
-        visitingSymbols.delete(resolved.symbol);
-      }
-    }
-  };
-  const visitProjectConfigurations = (
-    expression: ts.Expression,
-    path: readonly string[],
-  ): void => {
-    // Vitest 4 consumes test.projects at cli-api.BK8pd4xc.js:13298, forwards each
-    // object into initializeProject at :11117, and creates its Vite server at
-    // :11048. The former test.workspace option is rejected at :13299.
-    const value = unwrapTransparentExpression(expression);
-    if (ts.isIdentifier(value)) {
-      const symbol = visitReachableIdentifier(value, (initializer) =>
-        visitProjectConfigurations(initializer, path));
-      if (symbol !== null) {
-        aliasCapableSymbols.add(symbol);
-        recordPlacement(symbol, path);
-      }
-      return;
-    }
-    if (!ts.isArrayLiteralExpression(value)) {
-      unresolved = true;
-      return;
-    }
-    reachableNodes.add(value);
-    for (const [index, element] of value.elements.entries()) {
-      if (ts.isOmittedExpression(element) || ts.isSpreadElement(element)) {
-        unresolved = true;
-        continue;
-      }
-      reachableNodes.add(element);
-      const project = unwrapTransparentExpression(element);
-      const projectPath = [...path, String(index)];
-      if (ts.isObjectLiteralExpression(project)) {
-        visitReachableObject(project, projectPath);
-      } else if (ts.isIdentifier(project)) {
-        const symbol = visitReachableIdentifier(project, (initializer) => {
-          const literal = unwrapTransparentExpression(initializer);
-          if (ts.isObjectLiteralExpression(literal)) visitReachableObject(literal, projectPath);
-          else unresolved = true;
-        });
-        if (symbol !== null) {
-          aliasCapableSymbols.add(symbol);
-          recordPlacement(symbol, projectPath);
-        }
-      } else unresolved = true;
-    }
-  };
-  const visitProjectExtends = (expression: ts.Expression): void => {
-    // cli-api.BK8pd4xc.js:11113 maps a string to that config file and true to
-    // the root Vite config before initializeProject creates the server at :11048.
-    const value = unwrapTransparentExpression(expression);
-    reachableNodes.add(value);
-    if (value.kind === ts.SyntaxKind.TrueKeyword) return;
-    if (ts.isStringLiteral(value)) {
-      inspectExtendedConfiguration(value.text);
-      return;
-    }
-    unresolved = true;
-  };
-  const visitResolveObject = (expression: ts.Expression, path: readonly string[]): void => {
-    const value = unwrapTransparentExpression(expression);
-    if (ts.isIdentifier(value)) {
-      const symbol = visitReachableIdentifier(value, (initializer) =>
-        visitResolveObject(initializer, path));
-      if (symbol !== null) {
-        aliasCapableSymbols.add(symbol);
-        recordPlacement(symbol, path);
-      }
-      return;
-    }
-    if (!ts.isObjectLiteralExpression(value)) {
-      unresolved = true;
-      return;
-    }
-    reachableNodes.add(value);
-    for (const property of value.properties) {
-      if (ts.isSpreadAssignment(property)) {
-        reachableNodes.add(property);
-        const spread = unwrapTransparentExpression(property.expression);
-        if (ts.isIdentifier(spread)) {
-          const symbol = visitReachableIdentifier(spread, (initializer) =>
-            visitResolveObject(initializer, path));
-          if (symbol !== null) {
-            aliasCapableSymbols.add(symbol);
-            recordPlacement(symbol, path);
-          }
-        }
-        else unresolved = true;
-        continue;
-      }
-      if (ts.isShorthandPropertyAssignment(property)) {
-        reachableNodes.add(property);
-        if (property.name.text === 'alias') {
-          visitAliasValue(property.name, [...path, 'alias']);
-        } else if (property.name.text === 'resolve' || property.name.text === 'test') {
-          visitResolveObject(property.name, [...path, property.name.text]);
-        } else if (property.name.text === 'projects' && path.at(-1) === 'test') {
-          visitProjectConfigurations(property.name, [...path, 'projects']);
-        } else if (property.name.text === 'extends' && path.at(-2) === 'projects') {
-          unresolved = true;
-        } else visitOrdinaryPropertyValue(property.name, [...path, property.name.text]);
-        continue;
-      }
-      if (!ts.isPropertyAssignment(property) || ts.isComputedPropertyName(property.name)) {
-        unresolved = true;
-        continue;
-      }
-      reachableNodes.add(property);
-      const key = propertyNameText(property.name);
-      if (key === 'alias') visitAliasValue(property.initializer, [...path, key]);
-      else if (key === 'resolve' || key === 'test') {
-        visitResolveObject(property.initializer, [...path, key]);
-      } else if (key === 'projects' && path.at(-1) === 'test') {
-        visitProjectConfigurations(property.initializer, [...path, key]);
-      } else if (key === 'extends' && path.at(-2) === 'projects') {
-        visitProjectExtends(property.initializer);
-      } else if (key !== null) visitOrdinaryPropertyValue(property.initializer, [...path, key]);
-    }
-  };
-  const visitReachableObject = (
-    object: ts.ObjectLiteralExpression,
-    path: readonly string[],
-  ): void => {
-    reachableNodes.add(object);
-    for (const property of object.properties) {
-      if (ts.isSpreadAssignment(property)) {
-        reachableNodes.add(property);
-        const spread = unwrapTransparentExpression(property.expression);
-        if (ts.isIdentifier(spread)) {
-          const symbol = visitReachableIdentifier(spread, (initializer) =>
-            visitReachableExpression(initializer, path));
-          if (symbol !== null) {
-            recordPlacement(symbol, path);
-            if (path.length === 0 || path.some(semanticConfigurationKey)) {
-              aliasCapableSymbols.add(symbol);
-            }
-          }
-        }
-        else unresolved = true;
-        continue;
-      }
-      if (ts.isShorthandPropertyAssignment(property)) {
-        reachableNodes.add(property);
-        if (property.name.text === 'resolve' || property.name.text === 'test') {
-          visitResolveObject(property.name, [...path, property.name.text]);
-        } else if (property.name.text === 'alias') {
-          visitAliasValue(property.name, [...path, 'alias']);
-        } else if (property.name.text === 'extends' && path.at(-2) === 'projects') {
-          unresolved = true;
-        } else {
-          visitOrdinaryPropertyValue(property.name, [...path, property.name.text]);
-        }
-        continue;
-      }
-      if (!ts.isPropertyAssignment(property) || ts.isComputedPropertyName(property.name)) {
-        unresolved = true;
-        continue;
-      }
-      reachableNodes.add(property);
-      const key = propertyNameText(property.name);
-      if (key === 'resolve' || key === 'test') {
-        visitResolveObject(property.initializer, [...path, key]);
-      } else if (key === 'alias') visitAliasValue(property.initializer, [...path, key]);
-      else if (key === 'extends' && path.at(-2) === 'projects') {
-        visitProjectExtends(property.initializer);
-      }
-      else if (key !== null) visitOrdinaryPropertyValue(property.initializer, [...path, key]);
-    }
-  };
-  const reachableArrayLength = (
-    expression: ts.Expression,
-    seen: Set<ts.Symbol> = new Set(),
-  ): number | null => {
-    const value = unwrapTransparentExpression(expression);
-    if (ts.isIdentifier(value)) {
-      const resolved = declarationForReachableIdentifier(value);
-      if (resolved === null || seen.has(resolved.symbol)) return null;
-      return reachableArrayLength(resolved.declaration.initializer as ts.Expression,
-        new Set([...seen, resolved.symbol]));
-    }
-    if (!ts.isArrayLiteralExpression(value)) return null;
-    let length = 0;
-    for (const element of value.elements) {
-      if (!ts.isSpreadElement(element)) {
-        length += 1;
-        continue;
-      }
-      const spreadLength = reachableArrayLength(element.expression, seen);
-      if (spreadLength === null) return null;
-      length += spreadLength;
-    }
-    return length;
-  };
-  const visitReachableArray = (
-    array: ts.ArrayLiteralExpression,
-    path: readonly string[],
-  ): void => {
-    reachableNodes.add(array);
-    let runtimeIndex: number | null = 0;
-    for (const element of array.elements) {
-      if (ts.isOmittedExpression(element)) {
-        if (runtimeIndex !== null) runtimeIndex += 1;
-        continue;
-      }
-      reachableNodes.add(element);
-      if (ts.isSpreadElement(element)) {
-        const spread = unwrapTransparentExpression(element.expression);
-        if (ts.isIdentifier(spread)) {
-          const symbol = visitReachableIdentifier(spread, (initializer) =>
-            visitReachableExpression(initializer, path));
-          if (symbol !== null) recordPlacement(symbol, path);
-        }
-        else unresolved = true;
-        const spreadLength = reachableArrayLength(element.expression);
-        runtimeIndex = runtimeIndex === null || spreadLength === null
-          ? null
-          : runtimeIndex + spreadLength;
-        continue;
-      }
-      const unwrapped = unwrapTransparentExpression(element);
-      const elementPath = runtimeIndex === null ? null : [...path, String(runtimeIndex)];
-      if (ts.isIdentifier(unwrapped)) {
-        const symbol = visitReachableIdentifier(unwrapped, (initializer) =>
-          elementPath === null ? undefined : visitReachableExpression(initializer, elementPath));
-        if (symbol !== null && elementPath !== null) recordPlacement(symbol, elementPath);
-      }
-      else if (elementPath !== null &&
-        (ts.isObjectLiteralExpression(unwrapped) || ts.isArrayLiteralExpression(unwrapped))) {
-        visitReachableExpression(unwrapped, elementPath);
-      } else unresolved = true;
-      if (runtimeIndex !== null) runtimeIndex += 1;
-    }
-  };
-  function visitOrdinaryArray(
-    array: ts.ArrayLiteralExpression,
-    path: readonly string[],
-  ): void {
-    reachableNodes.add(array);
-    let runtimeIndex: number | null = 0;
-    for (const element of array.elements) {
-      if (ts.isOmittedExpression(element)) {
-        if (runtimeIndex !== null) runtimeIndex += 1;
-        continue;
-      }
-      reachableNodes.add(element);
-      if (ts.isSpreadElement(element)) {
-        const spread = unwrapTransparentExpression(element.expression);
-        if (ts.isIdentifier(spread)) visitOrdinaryPropertyValue(spread, path);
-        const spreadLength = reachableArrayLength(element.expression);
-        runtimeIndex = runtimeIndex === null || spreadLength === null
-          ? null
-          : runtimeIndex + spreadLength;
-        continue;
-      }
-      const value = unwrapTransparentExpression(element);
-      if (runtimeIndex !== null && (ts.isIdentifier(value) ||
-        ts.isObjectLiteralExpression(value) || ts.isArrayLiteralExpression(value))) {
-        visitOrdinaryPropertyValue(value, [...path, String(runtimeIndex)]);
-      }
-      if (runtimeIndex !== null) runtimeIndex += 1;
-    }
-  }
-  const visitReachableFunction = (fn: ts.ArrowFunction | ts.FunctionExpression): void => {
-    for (const expression of returnedExpressions(fn.body)) visitReachableExpression(expression, []);
-  };
-  function visitReachableIdentifier(
-    identifier: ts.Identifier,
-    visitor: (expression: ts.Expression) => void,
-  ): ts.Symbol | null {
-    reachableNodes.add(identifier);
-    const resolved = declarationForReachableIdentifier(identifier);
-    if (resolved === null) {
-      unresolved = true;
-      return null;
-    }
-    reachableSymbols.set(resolved.symbol, resolved.declaration);
-    if (visitingSymbols.has(resolved.symbol)) {
-      unresolved = true;
-      return null;
-    }
-    visitingSymbols.add(resolved.symbol);
-    visitor(resolved.declaration.initializer as ts.Expression);
-    visitingSymbols.delete(resolved.symbol);
-    return resolved.symbol;
-  }
-  function visitReachableExpression(
-    expression: ts.Expression,
-    path: readonly string[],
-  ): void {
-    const value = unwrapTransparentExpression(expression);
-    if (ts.isObjectLiteralExpression(value)) {
-      visitReachableObject(value, path);
-    } else if (ts.isArrayLiteralExpression(value)) {
-      visitReachableArray(value, path);
-    } else if (ts.isIdentifier(value)) {
-      const symbol = visitReachableIdentifier(value, (initializer) =>
-        visitReachableExpression(initializer, path));
-      if (symbol !== null) {
-        recordPlacement(symbol, path);
-        if (path.length === 0) rootConfigurationSymbols.add(symbol);
-      }
-    } else if (ts.isConditionalExpression(value)) {
-      visitReachableExpression(value.whenTrue, path);
-      visitReachableExpression(value.whenFalse, path);
-    } else if (ts.isArrowFunction(value) || ts.isFunctionExpression(value)) {
-      visitReachableFunction(value);
-    } else if (ts.isCallExpression(value)) {
-      const helper = configurationHelper(value.expression);
-      if (helper === 'defineConfig' && value.arguments.length === 1) {
-        const argument = value.arguments[0];
-        if (argument === undefined || ts.isSpreadElement(argument)) unresolved = true;
-        else visitReachableExpression(argument, []);
-      } else if (helper === 'mergeConfig' && value.arguments.length === 2) {
-        for (const argument of value.arguments) {
-          if (ts.isSpreadElement(argument)) unresolved = true;
-          else visitReachableExpression(argument, []);
-        }
-      } else unresolved = true;
-    } else {
-      unresolved = true;
-    }
-  }
-  const exportAssignments = sourceFile.statements.filter((statement): statement is ts.ExportAssignment =>
-    ts.isExportAssignment(statement) && !statement.isExportEquals);
-  const exported = exportAssignments[0];
-  if (exportAssignments.length !== 1 || exported === undefined) unresolved = true;
-  else visitReachableExpression(exported.expression, []);
-  const isAssignmentOperator = (kind: ts.SyntaxKind): boolean =>
-    kind >= ts.SyntaxKind.FirstAssignment && kind <= ts.SyntaxKind.LastAssignment;
-  const isUpdateOperator = (kind: ts.SyntaxKind): boolean =>
-    kind === ts.SyntaxKind.PlusPlusToken || kind === ts.SyntaxKind.MinusMinusToken;
-  interface ConfigurationAddress {
-    readonly root: ts.Symbol;
-    readonly path: readonly string[];
-  }
-  interface ConfigurationReferenceAddress extends ConfigurationAddress {
-    readonly binding: ts.Symbol;
-    readonly relativePath: readonly string[];
-    readonly effectivePaths: readonly (readonly string[])[];
-  }
-  const referenceChain = (
-    identifier: ts.Identifier,
-  ): {
-    readonly expression: ts.Expression;
-    readonly constantElements: boolean;
-    readonly path: readonly string[];
-  } => {
-    let expression: ts.Expression = identifier;
-    let constantElements = true;
-    const path: string[] = [];
-    while (true) {
-      const parent = expression.parent;
-      if ((ts.isParenthesizedExpression(parent) || ts.isAsExpression(parent) ||
-        ts.isSatisfiesExpression(parent) || ts.isNonNullExpression(parent) ||
-        ts.isTypeAssertionExpression(parent)) && parent.expression === expression) {
-        expression = parent;
-        continue;
-      }
-      if (ts.isPropertyAccessExpression(parent) && parent.expression === expression) {
-        path.push(parent.name.text);
-        expression = parent;
-        continue;
-      }
-      if (ts.isElementAccessExpression(parent) && parent.expression === expression) {
-        const key = propertyKey(parent);
-        if (key === null) constantElements = false;
-        else path.push(key);
-        expression = parent;
-        continue;
-      }
-      return { expression, constantElements, path };
-    }
-  };
-  const isAssignmentPatternContainer = (node: ts.Node): boolean =>
-    ts.isParenthesizedExpression(node) || ts.isObjectLiteralExpression(node) ||
-    ts.isArrayLiteralExpression(node) || ts.isPropertyAssignment(node) ||
-    ts.isShorthandPropertyAssignment(node) || ts.isSpreadAssignment(node) ||
-    ts.isSpreadElement(node);
-  const isMutationTarget = (expression: ts.Expression): boolean => {
-    let current: ts.Node = expression;
-    while (true) {
-      const parent = current.parent;
-      if (ts.isBinaryExpression(parent) && isAssignmentOperator(parent.operatorToken.kind)) {
-        return parent.left === current;
-      }
-      if ((ts.isPrefixUnaryExpression(parent) || ts.isPostfixUnaryExpression(parent)) &&
-        isUpdateOperator(parent.operator) && parent.operand === current) return true;
-      if (ts.isDeleteExpression(parent) && parent.expression === current) return true;
-      if ((ts.isForInStatement(parent) || ts.isForOfStatement(parent)) &&
-        parent.initializer === current) return true;
-      if (!isAssignmentPatternContainer(parent)) return false;
-      current = parent;
-    }
-  };
-  const isNonExportedPlainConst = (declaration: ts.VariableDeclaration): boolean => {
-    if (!ts.isIdentifier(declaration.name) || !ts.isVariableDeclarationList(declaration.parent) ||
-      (declaration.parent.flags & ts.NodeFlags.Const) === 0) return false;
-    const statement = declaration.parent.parent;
-    return !ts.isVariableStatement(statement) || ts.getModifiers(statement)?.some((modifier) =>
-      modifier.kind === ts.SyntaxKind.ExportKeyword) !== true;
-  };
-  const configurationAddresses = new Map<ts.Symbol, ConfigurationAddress>();
-  for (const symbol of reachableSymbols.keys()) {
-    configurationAddresses.set(symbol, { root: symbol, path: [] });
-  }
-  const addressForExpression = (expression: ts.Expression): ConfigurationAddress | null => {
-    const value = unwrapTransparentExpression(expression);
-    if (ts.isIdentifier(value)) {
-      const symbol = symbolAt(value);
-      return symbol === undefined ? null : configurationAddresses.get(symbol) ?? null;
-    }
-    if (!ts.isPropertyAccessExpression(value) && !ts.isElementAccessExpression(value)) return null;
-    const receiver = addressForExpression(value.expression);
-    const key = propertyKey(value);
-    return receiver === null || key === null
-      ? null
-      : { root: receiver.root, path: [...receiver.path, key] };
-  };
-  const baseSymbolForExpression = (expression: ts.Expression): ts.Symbol | null => {
-    const value = unwrapTransparentExpression(expression);
-    if (ts.isIdentifier(value)) return symbolAt(value) ?? null;
-    return ts.isPropertyAccessExpression(value) || ts.isElementAccessExpression(value)
-      ? baseSymbolForExpression(value.expression)
-      : null;
-  };
-  let aliasesChanged = true;
-  while (aliasesChanged) {
-    aliasesChanged = false;
-    const collectConstAliases = (node: ts.Node): void => {
-      if (ts.isVariableDeclaration(node) && node.initializer !== undefined &&
-        isNonExportedPlainConst(node)) {
-        const address = addressForExpression(node.initializer);
-        const symbol = ts.isIdentifier(node.name) ? symbolAt(node.name) : undefined;
-        if (address !== null && symbol !== undefined && !configurationAddresses.has(symbol)) {
-          configurationAddresses.set(symbol, address);
-          aliasesChanged = true;
-        }
-      }
-      ts.forEachChild(node, collectConstAliases);
-    };
-    collectConstAliases(sourceFile);
-  }
-  let placementsChanged = true;
-  while (placementsChanged) {
-    placementsChanged = false;
-    const propagateConstPlacements = (node: ts.Node): void => {
-      if (ts.isVariableDeclaration(node) && node.initializer !== undefined &&
-        isNonExportedPlainConst(node) && ts.isIdentifier(node.name)) {
-        const targetSymbol = symbolAt(node.name);
-        const targetAddress = targetSymbol === undefined
-          ? undefined
-          : configurationAddresses.get(targetSymbol);
-        const sourceSymbol = baseSymbolForExpression(node.initializer);
-        const sourceAddress = sourceSymbol === null
-          ? undefined
-          : configurationAddresses.get(sourceSymbol);
-        if (targetSymbol !== undefined && targetAddress !== undefined &&
-          sourceSymbol !== null && sourceAddress !== undefined &&
-          targetAddress.root === sourceAddress.root &&
-          targetAddress.path.length >= sourceAddress.path.length &&
-          sourceAddress.path.every((key, index) => key === targetAddress.path[index])) {
-          const relativePath = targetAddress.path.slice(sourceAddress.path.length);
-          for (const placement of placementPrefixes.get(sourceSymbol) ?? []) {
-            placementsChanged = recordPlacement(
-              targetSymbol,
-              [...placement, ...relativePath],
-            ) || placementsChanged;
-          }
-        }
-      }
-      ts.forEachChild(node, propagateConstPlacements);
-    };
-    propagateConstPlacements(sourceFile);
-  }
-  const semanticAddressKey = (key: string): boolean =>
-    key === 'resolve' || key === 'test' || key === 'alias';
-  let capabilitiesChanged = true;
-  while (capabilitiesChanged) {
-    capabilitiesChanged = false;
-    const propagateConstCapabilities = (node: ts.Node): void => {
-      if (ts.isVariableDeclaration(node) && node.initializer !== undefined &&
-        isNonExportedPlainConst(node) && ts.isIdentifier(node.name)) {
-        const targetSymbol = symbolAt(node.name);
-        const targetAddress = targetSymbol === undefined
-          ? undefined
-          : configurationAddresses.get(targetSymbol);
-        const sourceSymbol = baseSymbolForExpression(node.initializer);
-        const sourceAddress = sourceSymbol === null
-          ? undefined
-          : configurationAddresses.get(sourceSymbol);
-        const sameAddress = targetAddress !== undefined && sourceAddress !== undefined &&
-          targetAddress.root === sourceAddress.root &&
-          targetAddress.path.length === sourceAddress.path.length &&
-          targetAddress.path.every((key, index) => key === sourceAddress.path[index]);
-        const capable = targetAddress !== undefined && (
-          targetAddress.path.some(semanticAddressKey) ||
-          (rootConfigurationSymbols.has(targetAddress.root) && targetAddress.path.length === 0) ||
-          (sameAddress && sourceSymbol !== null && aliasCapableSymbols.has(sourceSymbol))
-        );
-        if (capable && targetSymbol !== undefined && !aliasCapableSymbols.has(targetSymbol)) {
-          aliasCapableSymbols.add(targetSymbol);
-          capabilitiesChanged = true;
-        }
-      }
-      ts.forEachChild(node, propagateConstCapabilities);
-    };
-    propagateConstCapabilities(sourceFile);
-  }
-  const rootDeclaration = (address: ConfigurationAddress): ts.VariableDeclaration | null =>
-    reachableSymbols.get(address.root) ?? null;
-  type AddressedValue = ts.Expression | 'known_scalar';
-  interface LiteralRoute {
-    readonly expression: ts.Expression;
-    readonly path: readonly string[];
-  }
-  type LiteralRouteResolution =
-    | { readonly kind: 'found'; readonly route: LiteralRoute }
-    | { readonly kind: 'absent' }
-    | { readonly kind: 'unresolved' };
-  function objectPropertyRoute(
-    object: ts.ObjectLiteralExpression,
-    key: string,
-    seen: Set<string>,
-  ): LiteralRouteResolution {
-    let selected: LiteralRouteResolution = { kind: 'absent' };
-    for (const property of object.properties) {
-      if (ts.isSpreadAssignment(property)) {
-        const spreadAddress = addressForExpression(property.expression);
-        const spreadValue = spreadAddress === null ? null : addressedValue(spreadAddress, seen);
-        if (spreadValue === null || spreadValue === 'known_scalar' ||
-          !ts.isObjectLiteralExpression(unwrapTransparentExpression(spreadValue))) {
-          selected = { kind: 'unresolved' };
-          continue;
-        }
-        const contribution = objectPropertyRoute(
-          unwrapTransparentExpression(spreadValue) as ts.ObjectLiteralExpression,
-          key,
-          seen,
-        );
-        if (contribution.kind === 'found') {
-          selected = { kind: 'found', route: { expression: property.expression, path: [key] } };
-        } else if (contribution.kind === 'unresolved') selected = contribution;
-        continue;
-      }
-      if (!ts.isPropertyAssignment(property) && !ts.isShorthandPropertyAssignment(property)) {
-        selected = { kind: 'unresolved' };
-        continue;
-      }
-      const propertyName = propertyNameText(property.name);
-      if (propertyName === null) {
-        selected = { kind: 'unresolved' };
-        continue;
-      }
-      if (propertyName !== key) continue;
-      selected = {
-        kind: 'found',
-        route: {
-          expression: ts.isPropertyAssignment(property) ? property.initializer : property.name,
-          path: [],
-        },
-      };
-    }
-    return selected;
-  }
-  function resolvedArrayLength(
-    array: ts.ArrayLiteralExpression,
-    seen: Set<string>,
-  ): number | null {
-    let length = 0;
-    for (const element of array.elements) {
-      if (ts.isOmittedExpression(element)) {
-        length += 1;
-        continue;
-      }
-      if (!ts.isSpreadElement(element)) {
-        length += 1;
-        continue;
-      }
-      const spreadAddress = addressForExpression(element.expression);
-      const spreadValue = spreadAddress === null ? null : addressedValue(spreadAddress, seen);
-      if (spreadValue === null || spreadValue === 'known_scalar') return null;
-      const literal = unwrapTransparentExpression(spreadValue);
-      if (!ts.isArrayLiteralExpression(literal)) return null;
-      const spreadLength = resolvedArrayLength(literal, seen);
-      if (spreadLength === null) return null;
-      length += spreadLength;
-    }
-    return length;
-  }
-  function arrayElementRoute(
-    array: ts.ArrayLiteralExpression,
-    requestedIndex: number,
-    seen: Set<string>,
-  ): LiteralRouteResolution {
-    let runtimeIndex = 0;
-    for (const element of array.elements) {
-      if (ts.isSpreadElement(element)) {
-        const spreadAddress = addressForExpression(element.expression);
-        const spreadValue = spreadAddress === null ? null : addressedValue(spreadAddress, seen);
-        if (spreadValue === null || spreadValue === 'known_scalar') return { kind: 'unresolved' };
-        const literal = unwrapTransparentExpression(spreadValue);
-        if (!ts.isArrayLiteralExpression(literal)) return { kind: 'unresolved' };
-        const spreadLength = resolvedArrayLength(literal, seen);
-        if (spreadLength === null) return { kind: 'unresolved' };
-        if (requestedIndex < runtimeIndex + spreadLength) {
-          return {
-            kind: 'found',
-            route: {
-              expression: element.expression,
-              path: [String(requestedIndex - runtimeIndex)],
-            },
-          };
-        }
-        runtimeIndex += spreadLength;
-        continue;
-      }
-      if (runtimeIndex === requestedIndex) {
-        return ts.isOmittedExpression(element)
-          ? { kind: 'unresolved' }
-          : { kind: 'found', route: { expression: element, path: [] } };
-      }
-      runtimeIndex += 1;
-    }
-    return { kind: 'absent' };
-  }
-  function resolveExpressionPath(
-    expression: ts.Expression,
-    path: readonly string[],
-    seen: Set<string>,
-  ): AddressedValue | null {
-    const current = unwrapTransparentExpression(expression);
-    const nestedAddress = addressForExpression(current);
-    if (nestedAddress !== null) {
-      return addressedValue({
-        root: nestedAddress.root,
-        path: [...nestedAddress.path, ...path],
-      }, seen);
-    }
-    if (path.length === 0) return current;
-    const [key, ...remaining] = path;
-    if (key === undefined) return null;
-    if (ts.isObjectLiteralExpression(current)) {
-      const resolution = objectPropertyRoute(current, key, seen);
-      return resolution.kind === 'found'
-        ? resolveExpressionPath(resolution.route.expression,
-          [...resolution.route.path, ...remaining], seen)
-        : null;
-    }
-    if (ts.isArrayLiteralExpression(current)) {
-      if (key === 'length' && remaining.length === 0) return 'known_scalar';
-      const index = Number(key);
-      if (!Number.isSafeInteger(index) || index < 0) return null;
-      const resolution = arrayElementRoute(current, index, seen);
-      return resolution.kind === 'found'
-        ? resolveExpressionPath(resolution.route.expression,
-          [...resolution.route.path, ...remaining], seen)
-        : null;
-    }
-    return null;
-  }
-  function addressedValue(
-    address: ConfigurationAddress,
-    seen: Set<string> = new Set(),
-  ): AddressedValue | null {
-    const declaration = rootDeclaration(address);
-    if (declaration?.initializer === undefined) return null;
-    const visitKey = `${declaration.pos}:${address.path.join('\u0000')}`;
-    if (seen.has(visitKey)) return null;
-    const nextSeen = new Set(seen);
-    nextSeen.add(visitKey);
-    return resolveExpressionPath(declaration.initializer, address.path, nextSeen);
-  }
-  const isPrimitiveLiteral = (expression: ts.Expression): boolean =>
-    ts.isLiteralExpression(expression) || expression.kind === ts.SyntaxKind.TrueKeyword ||
-    expression.kind === ts.SyntaxKind.FalseKeyword || expression.kind === ts.SyntaxKind.NullKeyword;
-  const subtreeContainsAliasKey = (
-    expression: ts.Expression,
-    seen: Set<ts.Node> = new Set(),
-  ): boolean => {
-    const value = unwrapTransparentExpression(expression);
-    if (seen.has(value)) return true;
-    seen.add(value);
-    if (ts.isObjectLiteralExpression(value)) {
-      for (const property of value.properties) {
-        if (ts.isSpreadAssignment(property)) {
-          const address = addressForExpression(property.expression);
-          const spreadValue = address === null ? null : addressedValue(address);
-          if (spreadValue === null || spreadValue === 'known_scalar' ||
-            subtreeContainsAliasKey(spreadValue, seen)) return true;
-          continue;
-        }
-        if (!ts.isPropertyAssignment(property) && !ts.isShorthandPropertyAssignment(property)) {
-          return true;
-        }
-        const key = propertyNameText(property.name);
-        if (key === null || key === 'resolve' || key === 'test' || key === 'alias') return true;
-        const child = ts.isPropertyAssignment(property) ? property.initializer : property.name;
-        const unwrappedChild = unwrapTransparentExpression(child);
-        if ((ts.isObjectLiteralExpression(unwrappedChild) ||
-          ts.isArrayLiteralExpression(unwrappedChild)) && subtreeContainsAliasKey(child, seen)) {
-          return true;
-        }
-      }
-      return false;
-    }
-    if (ts.isArrayLiteralExpression(value)) {
-      return value.elements.some((element) => !ts.isOmittedExpression(element) &&
-        !ts.isSpreadElement(element) &&
-        (ts.isObjectLiteralExpression(unwrapTransparentExpression(element)) ||
-          ts.isArrayLiteralExpression(unwrapTransparentExpression(element))) &&
-        subtreeContainsAliasKey(element, seen));
-    }
-    return !isPrimitiveLiteral(value);
-  };
-  const samePath = (left: readonly string[], right: readonly string[]): boolean =>
-    left.length === right.length && left.every((key, index) => key === right[index]);
-  const uniquePaths = (paths: readonly (readonly string[])[]): readonly (readonly string[])[] => {
-    const unique: string[][] = [];
-    for (const path of paths) {
-      if (!unique.some((candidate) => samePath(candidate, path))) unique.push([...path]);
-    }
-    return unique;
-  };
-  const effectivePathsForExpression = (
-    expression: ts.Expression,
-    suffix: readonly string[],
-  ): readonly (readonly string[])[] => {
-    const symbol = baseSymbolForExpression(expression);
-    if (symbol === null) return [];
-    const base = configurationAddresses.get(symbol);
-    const expressionAddress = addressForExpression(expression);
-    if (base === undefined || expressionAddress === null || base.root !== expressionAddress.root ||
-      expressionAddress.path.length < base.path.length ||
-      !base.path.every((key, index) => key === expressionAddress.path[index])) return [];
-    const relativePath = expressionAddress.path.slice(base.path.length);
-    const placements = placementPrefixes.get(symbol) ?? [base.path];
-    return placements.map((placement) => [...placement, ...relativePath, ...suffix]);
-  };
-  const embeddedEffectivePaths = (
-    address: ConfigurationAddress,
-    seen: Set<string> = new Set(),
-  ): readonly (readonly string[])[] => {
-    const declaration = rootDeclaration(address);
-    if (declaration?.initializer === undefined) return [];
-    const visitKey = `${declaration.pos}:${address.path.join('\u0000')}`;
-    if (seen.has(visitKey)) return [];
-    const nextSeen = new Set(seen);
-    nextSeen.add(visitKey);
-    const collect = (
-      expression: ts.Expression,
-      remaining: readonly string[],
-    ): readonly (readonly string[])[] => {
-      const current = unwrapTransparentExpression(expression);
-      const nestedAddress = addressForExpression(current);
-      if (nestedAddress !== null) {
-        const direct = effectivePathsForExpression(current, remaining);
-        const nested = embeddedEffectivePaths({
-          root: nestedAddress.root,
-          path: [...nestedAddress.path, ...remaining],
-        }, nextSeen);
-        return uniquePaths([...direct, ...nested]);
-      }
-      if (remaining.length === 0) return [];
-      const [key, ...rest] = remaining;
-      if (key === undefined) return [];
-      if (ts.isObjectLiteralExpression(current)) {
-        const resolution = objectPropertyRoute(current, key, new Set());
-        return resolution.kind === 'found'
-          ? collect(resolution.route.expression, [...resolution.route.path, ...rest])
-          : [];
-      }
-      if (ts.isArrayLiteralExpression(current)) {
-        const index = Number(key);
-        if (!Number.isSafeInteger(index) || index < 0) return [];
-        const resolution = arrayElementRoute(current, index, new Set());
-        return resolution.kind === 'found'
-          ? collect(resolution.route.expression, [...resolution.route.path, ...rest])
-          : [];
-      }
-      return [];
-    };
-    return collect(declaration.initializer, address.path);
-  };
-  const addressForReference = (
-    identifier: ts.Identifier,
-    chain: ReturnType<typeof referenceChain>,
-  ): ConfigurationReferenceAddress | null => {
-    const symbol = symbolAt(identifier);
-    if (symbol === undefined || !chain.constantElements) return null;
-    const base = configurationAddresses.get(symbol);
-    if (base === undefined) return null;
-    const placements = placementPrefixes.get(symbol);
-    const localAddress = { root: base.root, path: [...base.path, ...chain.path] };
-    return {
-      ...localAddress,
-      binding: symbol,
-      relativePath: chain.path,
-      effectivePaths: uniquePaths([...(placements === undefined || placements.length === 0
-        ? [base.path]
-        : placements).map((placement) => [...placement, ...chain.path]),
-      ...embeddedEffectivePaths(localAddress)]),
-    };
-  };
-  const isAliasBearing = (address: ConfigurationReferenceAddress): boolean => {
-    if ((address.relativePath.length === 0 && aliasCapableSymbols.has(address.binding)) ||
-      (rootConfigurationSymbols.has(address.root) && address.path.length === 0) ||
-      address.path.some(semanticAddressKey) || address.effectivePaths.some((path) =>
-        path.length === 0 || path.some(semanticAddressKey))) return true;
-    const value = addressedValue(address);
-    return value === null || value !== 'known_scalar' && subtreeContainsAliasKey(value);
-  };
-  const isExactConstAliasInitializer = (expression: ts.Expression): boolean => {
-    const parent = expression.parent;
-    return ts.isVariableDeclaration(parent) && parent.initializer === expression &&
-      isNonExportedPlainConst(parent);
-  };
-  const isStrictEqualityOperator = (kind: ts.SyntaxKind): boolean => [
-    ts.SyntaxKind.EqualsEqualsEqualsToken,
-    ts.SyntaxKind.ExclamationEqualsEqualsToken,
-  ].includes(kind);
-  const configurationReferenceEscapes = (identifier: ts.Identifier): boolean => {
-    const chain = referenceChain(identifier);
-    const address = addressForReference(identifier, chain);
-    if (address === null || addressedValue(address) === null ||
-      isMutationTarget(chain.expression)) return true;
-    const parent = chain.expression.parent;
-    if ((ts.isCallExpression(parent) || ts.isNewExpression(parent)) &&
-      parent.expression === chain.expression) return true;
-    if (reachableNodes.has(identifier) || isExactConstAliasInitializer(chain.expression)) return false;
-    if ((ts.isTypeOfExpression(parent) || ts.isVoidExpression(parent)) &&
-      parent.expression === chain.expression) return false;
-    if (ts.isPrefixUnaryExpression(parent) &&
-      parent.operator === ts.SyntaxKind.ExclamationToken && parent.operand === chain.expression) return false;
-    if (ts.isBinaryExpression(parent) && isStrictEqualityOperator(parent.operatorToken.kind)) return false;
-    if ((ts.isIfStatement(parent) || ts.isWhileStatement(parent) || ts.isDoStatement(parent)) &&
-      parent.expression === chain.expression) return false;
-    if (ts.isConditionalExpression(parent) && parent.condition === chain.expression) return false;
-    return isAliasBearing(address);
-  };
-  const verifyReachability = (node: ts.Node): void => {
-    if (ts.isIdentifier(node)) {
-      const symbol = symbolAt(node);
-      const address = symbol === undefined ? undefined : configurationAddresses.get(symbol);
-      const declaration = address === undefined ? undefined : rootDeclaration(address);
-      const trackedDeclarationName = symbol?.declarations?.some((candidate) =>
-        ts.isVariableDeclaration(candidate) && candidate.name === node &&
-        isNonExportedPlainConst(candidate)) === true;
-      if (declaration !== null && declaration !== undefined && !trackedDeclarationName &&
-        configurationReferenceEscapes(node)) {
-        unresolved = true;
-      }
-    }
-    if ((ts.isPropertyAssignment(node) || ts.isShorthandPropertyAssignment(node) ||
-      ts.isMethodDeclaration(node) || ts.isGetAccessorDeclaration(node) ||
-      ts.isSetAccessorDeclaration(node)) && ts.isObjectLiteralExpression(node.parent) &&
-      ['alias', 'resolve', 'test'].includes(propertyNameText(node.name) ?? '') &&
-      !reachableNodes.has(node)) unresolved = true;
-    ts.forEachChild(node, verifyReachability);
-  };
-  verifyReachability(sourceFile);
-  return {
-    aliases: [...aliases],
-    regexes: [...regexes.values()],
-    unresolved,
-    nestedPaths: [...nestedPaths],
-  };
-}
-
-function candidateInspectionContext(base: string, candidate: string): HeldoutLeakInspectionContext {
-  const tree = execFileSync('git', ['ls-tree', '-r', '-z', '--name-only', candidate], {
-    encoding: 'utf8',
-    maxBuffer: 64 * 1024 * 1024,
-  }).split('\0').filter((path) => path.length > 0);
-  const packageJsonFiles: Record<string, string> = {};
-  const configSources: Record<string, string> = {};
-  for (const path of tree.filter((candidatePath) =>
-    isResolutionConfigPath(candidatePath))) {
-    const source = execFileSync('git', ['show', `${candidate}:${path}`], {
-      encoding: 'utf8',
-      maxBuffer: 64 * 1024 * 1024,
-    });
-    configSources[path] = source;
-    if (posix.basename(path) === 'package.json') packageJsonFiles[path] = source;
-  }
-  const changedPaths = parseGitNameStatusZ(execFileSync(
-    'git', ['diff', '--name-status', '-z', base, candidate],
-    { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
-  ));
-  const resolutionConfigChanged = changedPaths.some((change) =>
-    isResolutionConfigPath(change.path) ||
-    (change.previousPath !== undefined && isResolutionConfigPath(change.previousPath)));
-  const candidateSourceFiles: Record<string, string> = {};
-  const candidateConfigurationFiles: Record<string, string> = {};
-  if (resolutionConfigChanged) {
-    for (const path of tree.filter(isTypeScriptOrJavaScript)) {
-      const source = execFileSync('git', ['show', `${candidate}:${path}`], {
-        encoding: 'utf8',
-        maxBuffer: 64 * 1024 * 1024,
-      });
-      candidateConfigurationFiles[path] = source;
-      if (path.startsWith('src/') || path.startsWith('tools/') || path.startsWith('tests/')) {
-        candidateSourceFiles[path] = source;
-      }
-    }
-  }
-  const viteDiscoveries = Object.entries(configSources).flatMap(([path, source]) =>
-    isRootViteOrVitestConfig(path)
-      ? [{ path, discovery: viteAliases(source, path, {
-        ...candidateConfigurationFiles,
-        ...candidateSourceFiles,
-        ...configSources,
-      }) }]
-      : []);
-  const configuredAliasPrefixes = [...new Set([
-    ...Object.entries(configSources).flatMap(([path, source]) =>
-      isRootViteOrVitestConfig(path) ? [] : jsonAliases(source, path)),
-    ...viteDiscoveries.flatMap(({ discovery }) => discovery.aliases),
-  ])].filter((alias) => alias.length > 0);
-  const configuredAliasRegexes = viteDiscoveries.flatMap(({ discovery }) => discovery.regexes);
-  return {
-    candidateFiles: tree,
-    packageJsonFiles,
-    candidateSourceFiles,
-    candidateConfigurationFiles,
-    resolutionConfigChanged,
-    configuredAliasPrefixes,
-    configuredAliasRegexes,
-    unresolvedResolutionConfigPaths: viteDiscoveries
-      .filter(({ discovery }) => discovery.unresolved)
-      .map(({ path }) => path),
-  };
-}
-
-function parseArgs(argv: readonly string[]): {
+export function parseHeldoutLeakArgs(argv: readonly string[]): {
   readonly base: string;
   readonly candidate: string;
   readonly slice: HeldoutSlice;
@@ -3219,19 +1732,116 @@ function parseArgs(argv: readonly string[]): {
   };
 }
 
-function main(argv: readonly string[]): void {
-  const config = parseArgs(argv);
-  const report = inspectHeldoutLeakChanges(
+function childExit(child: ReturnType<typeof spawn>): Promise<number | null> {
+  return new Promise((resolveExit, rejectExit) => {
+    child.once('error', rejectExit);
+    child.once('exit', (code) => resolveExit(code));
+  });
+}
+
+async function extractCandidateArchive(revision: string, destination: string): Promise<void> {
+  const archive = spawn('git', ['archive', '--format=tar', revision], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  const extraction = spawn('tar', ['-xf', '-', '-C', destination], {
+    stdio: ['pipe', 'ignore', 'pipe'],
+  });
+  if (archive.stdout === null || archive.stderr === null || extraction.stdin === null ||
+    extraction.stderr === null) throw new TypeError('Candidate archive pipes were not created.');
+  let archiveError = '';
+  let extractionError = '';
+  archive.stderr.setEncoding('utf8');
+  extraction.stderr.setEncoding('utf8');
+  archive.stderr.on('data', (chunk: string) => { archiveError += chunk; });
+  extraction.stderr.on('data', (chunk: string) => { extractionError += chunk; });
+  extraction.stdin.on('error', () => undefined);
+  archive.stdout.pipe(extraction.stdin);
+  const [archiveCode, extractionCode] = await Promise.all([childExit(archive), childExit(extraction)]);
+  if (archiveCode !== 0 || extractionCode !== 0) {
+    throw new TypeError(`Candidate archive extraction failed: ${archiveError || extractionError ||
+      `git=${String(archiveCode)} tar=${String(extractionCode)}`}`);
+  }
+}
+
+export async function runHeldoutLeakCli(argv: readonly string[]): Promise<void> {
+  const config = parseHeldoutLeakArgs(argv);
+  const preflight = runHeldoutIsolationPreflight();
+  if (preflight.status === 'isolation_failed') {
+    const report: HeldoutLeakReport = {
+      protocol: 'heldout-ordinary-v1',
+      slice: config.slice,
+      reserveDigests: [...config.bindings.reserveDigests],
+      resultPaths: [...config.bindings.resultPaths],
+      checkedFiles: 0,
+      astInspectedFiles: 0,
+      runtimeCompleted: false,
+      preflight,
+      configurationLoad: [{
+        file: '<preflight>',
+        kind: 'preflight',
+        project: null,
+        environment: 'isolation',
+        status: 'isolation_failed',
+        errorClass: 'IsolationError',
+        runtimeRoot: preflight.runtimeRoot,
+        runtimeVersion: preflight.runtimeVersion,
+      }],
+      resolution: [],
+      seedAssignments: [],
+      findings: [{
+        path: '<preflight>',
+        kind: 'configuration_load_failed',
+        detail: preflight.detail ?? 'Isolation preflight failed.',
+      }],
+    };
+    process.stdout.write(`${JSON.stringify(report)}\n`);
+    process.exitCode = 1;
+    return;
+  }
+  const changedStaticReport = inspectHeldoutLeakChanges(
     addedChanges(config.base, config.candidate),
     config.slice,
     config.bindings,
-    candidateInspectionContext(config.base, config.candidate),
   );
-  process.stdout.write(`${canonicalJson(report)}\n`);
-  if (report.findings.length > 0) process.exitCode = 1;
+  const scratchRoot = mkdtempSync(`${tmpdir()}/heldout-runtime-candidate-`);
+  const candidateRoot = posix.join(scratchRoot, 'candidate');
+  mkdirSync(candidateRoot);
+  mkdirSync(posix.join(candidateRoot, 'node_modules'));
+  try {
+    await extractCandidateArchive(config.candidate, candidateRoot);
+    const candidateStaticReport = inspectHeldoutCandidateTree(candidateRoot, config.slice, config.bindings);
+    const staticFindingKeys = new Set<string>();
+    const staticFindings = [...changedStaticReport.findings, ...candidateStaticReport.findings].filter((finding) => {
+      const key = JSON.stringify(finding);
+      if (staticFindingKeys.has(key)) return false;
+      staticFindingKeys.add(key);
+      return true;
+    });
+    const runtimeReport = await runHeldoutRuntimeGuard({
+      root: candidateRoot,
+      slice: config.slice,
+      bindings: config.bindings,
+    });
+    const report: HeldoutLeakReport = {
+      ...candidateStaticReport,
+      findings: [...staticFindings, ...runtimeReport.findings],
+      runtimeCompleted: runtimeReport.completed,
+      preflight: runtimeReport.preflight,
+      configurationLoad: runtimeReport.configurationLoad,
+      resolution: runtimeReport.resolution,
+      seedAssignments: runtimeReport.seedAssignments,
+    };
+    process.stdout.write(`${JSON.stringify(report)}\n`);
+    if (report.findings.length > 0) process.exitCode = 1;
+  } finally {
+    rmSync(scratchRoot, { recursive: true, force: true });
+  }
 }
 
-const scriptIndex = process.argv.findIndex((argument) =>
-  argument.endsWith('/heldout-leak-check.ts') || argument.endsWith('\\heldout-leak-check.ts'));
-if (scriptIndex >= 0) main(process.argv.slice(scriptIndex + 1));
-else if (process.argv.includes('--base') && process.argv.includes('--candidate')) main(process.argv.slice(2));
+const invokedPath = process.argv[1];
+if (invokedPath !== undefined && import.meta.url === pathToFileURL(invokedPath).href) {
+  void runHeldoutLeakCli(process.argv.slice(2)).catch((error: unknown) => {
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+    process.exitCode = 1;
+  });
+}

@@ -1,6 +1,4 @@
-import { posix } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { readdirSync, readFileSync } from '../../helpers/test-filesystem';
 import {
   HELDOUT_LEAK_AST_OUT_OF_SCOPE,
   HELDOUT_LEAK_FLOW_AUDIT,
@@ -34,57 +32,11 @@ const PLAIN_IMPORT_VARIANTS = PLAIN_IMPORT_FACTORIES.flatMap((factory, factoryIn
     factory(suffix),
   ] as const));
 
-function repositorySourcesUnder(directory: string): Readonly<Record<string, string>> {
-  const sources: Record<string, string> = {};
-  const visit = (current: string): void => {
-    for (const entry of readdirSync(current, { withFileTypes: true })) {
-      const path = posix.join(current, entry.name);
-      if (entry.isDirectory()) visit(path);
-      else if (/\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/u.test(path) &&
-        !/\.d\.(?:ts|mts|cts)$/u.test(path)) sources[path] = readFileSync(path, 'utf8');
-    }
-  };
-  visit(directory);
-  return sources;
-}
-
 const reserveDigest = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 const bindings = {
   reserveDigests: [reserveDigest],
   resultPaths: ['/home/vagrant/dnd-slim-runs/heldout-a-'],
 } as const;
-
-const actualSourceFiles = repositorySourcesUnder('src');
-const emptyImportsPackageSource = '{"imports":{}}';
-const actualViteConfigSource = readFileSync('vite.config.ts', 'utf8');
-const actualVitestConfigSource = readFileSync('vitest.config.ts', 'utf8');
-const actualTreeConfigChange = [{
-  path: 'package.json',
-  addedText: emptyImportsPackageSource,
-  sourceText: emptyImportsPackageSource,
-}, {
-  path: 'vite.config.ts',
-  addedText: actualViteConfigSource,
-  sourceText: actualViteConfigSource,
-}, {
-  path: 'vitest.config.ts',
-  addedText: actualVitestConfigSource,
-  sourceText: actualVitestConfigSource,
-}] as const;
-const actualTreeReport = inspectHeldoutLeakChanges(actualTreeConfigChange, 'F', bindings, {
-  packageJsonFiles: { 'package.json': emptyImportsPackageSource },
-  candidateFiles: Object.keys(actualSourceFiles),
-  candidateSourceFiles: actualSourceFiles,
-});
-const injectedActualSourceFiles = {
-  ...actualSourceFiles,
-  'src/ui/injected-heldout-leak.ts': "export * from '../vtt/heldout-evaluation';",
-};
-const injectedActualTreeReport = inspectHeldoutLeakChanges(actualTreeConfigChange, 'F', bindings, {
-  packageJsonFiles: { 'package.json': emptyImportsPackageSource },
-  candidateFiles: Object.keys(injectedActualSourceFiles),
-  candidateSourceFiles: injectedActualSourceFiles,
-});
 
 describe('held-out reserve leak wall', () => {
 
@@ -297,8 +249,7 @@ describe('held-out reserve leak wall', () => {
         'a trailing index, index.js, or index.ts resolves to its containing module path',
         'a trailing .js or .ts extension resolves to the extensionless module identity',
         'file URLs use fileURLToPath semantics, including percent-decoding, before identity comparison',
-        'package #imports use exact-first Node pattern ordering in the nearest candidate package.json',
-        'literal filesystem Vite globs support base, leading **, *, **, ?, arrays, exclusions, and query options',
+        'package #imports and Vite glob matching are delegated to the installed runtime resolver and transform',
       ],
       meaningChangingQueries: [
         'raw', 'url', 'inline', 'worker', 'sharedworker', 'init', 'import', 'no-inline',
@@ -307,7 +258,7 @@ describe('held-out reserve leak wall', () => {
         'a normalized held-out import is a protocol_import',
         'a normalized held-out resolver call is a protocol_resolution',
         'a recognized non-constant module edge is an unresolved_module_edge',
-        'an undecodable or unknown-scheme edge and an unresolved package #import fail closed',
+        'an undecodable or unknown-scheme direct edge fails closed',
         'a known loader reference escaping recognized call syntax is loader_reference_escaped',
       ],
       interpreted: [
@@ -315,33 +266,20 @@ describe('held-out reserve leak wall', () => {
         'Rule N1 permits import.meta and module/worker namespaces only as direct member receivers or exact plain-const aliases',
         'Rule N2 permits browser globals to transfer inertly and validates Worker, SharedWorker, and importScripts members at use by symbol-proven global provenance',
         'a loader-valued expression is allowed only as a direct callee with a constant specifier, a receiver leading to a recognized member call, or the whole initializer of a non-exported plain-identifier const alias',
-        'Rule C interprets Vite and Vitest aliases only as strict literals in the exact-node graph reached from export default, symbol-proven defineConfig or mergeConfig, factory returns, conditional branches, and same-file const object/array composition',
-        'Rule C uses no flow tracking: each tracked-const reference is classified by its maximal constant-key address, including whether its path crosses resolve, test, or alias, the addressed subtree, and its immediate syntactic position',
-        'Rule C classifies configuration roots, resolve/test/alias bindings, and bindings spread transitively into those containers as alias-capable regardless of current literal contents',
-        'Rule C records every configuration placement prefix and unions outer paths with every embedded binding dereferenced, composing each placement with remaining descendant and const-alias paths; any semantic placement makes the reference alias-capable',
-        'Rule C visits ordinary shorthand and literal-array composition; installed Vitest 4 test.projects array elements are nested configuration roots, while removed test.workspace is not interpreted',
-        'Rule C resolves tracked literal object and array spreads with JavaScript last-write and runtime-index semantics, including terminal embedded identifiers',
-        'Rule C recursively inspects literal test.projects extends files from the candidate tree; true reuses the root configuration and missing, external, cyclic, or nonliteral targets fail closed',
-        'Rule C permits non-exported plain-const aliases to preserve the same addressed subtree and allows non-alias-bearing subtrees in otherwise escaping positions',
-        'subtrees strictly below a configuration root at nonsemantic addresses remain non-alias-capable unless their contents or binding position makes them capable',
-        'resolve and Vitest test are alias-capable containers whose values must be literal objects or tracked const literals; their alias values are interpreted identically',
-        'reachable object spreads require tracked const literals; computed keys, accessors, methods, and nonliteral resolve, test, or alias values fail closed, while unrelated nonliteral values are opaque',
-        'root vite*.config.* and vitest*.config.* entry points are inspected, including symbol-proven defineConfig and mergeConfig imports from Vite or Vitest',
-        'resolution configuration changes re-inspect consumers; unresolved configuration makes every encountered consumer edge unresolved',
+        'runtime Vite serve and Vitest root/project resolver and transform evidence governs configuration semantics, aliases, plugin hooks, projects, and extends',
+        'runtime graph traversal follows value edges; erased type-only edges remain static findings',
         'every eligible candidate file receives the full AST and symbol inspection pass without a textual pre-gate',
       ],
       failsClosed: [
         'every other position of a loader-valued expression is loader_reference_escaped from one generic check',
         'every disallowed Rule N1 namespace position and every non-symbol-proven Rule N2 loader-member use is loader_reference_escaped from the same generic check',
-        'a nonliteral Vite or Vitest alias, unreachable alias/resolve/test property, or invalid reachable-const reference is unresolved configuration under Rule C',
-        'tracked configuration references with nonconstant addresses or mutation targets fail closed; alias-bearing subtrees also fail closed when returned, stored outside the visited graph, passed, exported, templated, awaited, yielded, or otherwise escaped',
-        'unresolved targets, options, package conditions, globs, aliases, URL schemes, and data modules are findings',
+        'runtime configuration load, resolver, transform, project, or ordinary-edge failures are findings in the isolated runtime guard',
+        'unresolved direct targets, URL schemes, and data modules are static findings',
       ],
       outOfScope: [
         'eval executable strings',
         'new Function executable strings',
         'custom loader implementations',
-        'Vite plugin config hooks',
         'runtime-generated code',
       ],
     });
@@ -375,8 +313,7 @@ describe('held-out reserve leak wall', () => {
     ]);
     for (const entry of HELDOUT_LEAK_FLOW_AUDIT) {
       expect(entry.loaderValues).toContain('Rule N');
-      expect(entry.configurationReferences).toContain('Rule C');
-      expect(`${entry.loaderValues} ${entry.configurationReferences}`).not.toContain('unhandled');
+      expect(entry.loaderValues).not.toContain('unhandled');
     }
   });
 
@@ -429,114 +366,29 @@ describe('held-out reserve leak wall', () => {
     expect(report.findings).toContainEqual(expect.objectContaining({ kind: 'protocol_import' }));
   });
 
-  it.each([
-    ['exact lazy glob', "const modules = import.meta.glob('../vtt/heldout-evaluation.ts');"],
-    ['wildcard eager glob',
-      "const modules = import.meta.glob('../vtt/heldout-*.ts', { eager: true });"],
-    ['array glob with query', [
-      "const modules = import.meta.glob(['../vtt/public.ts', '../vtt/heldout-*.ts'], {",
-      "  query: '?raw',",
-      '});',
-    ].join('\n')],
-    ['glob with object query options', [
-      "const modules = import.meta.glob('../vtt/heldout-*.ts', {",
-      "  query: { raw: 'true', worker: false },",
-      '  eager: false,',
-      '});',
-    ].join('\n')],
-  ] as const)('rejects a held-out module matched by %s', (_label, addedText) => {
-    const report = inspectHeldoutLeakChanges([{
-      path: 'src/ui/repair-ranking.ts',
-      addedText,
-    }], 'F', bindings, {
-      candidateFiles: ['src/vtt/public.ts', 'src/vtt/heldout-evaluation.ts'],
-    });
-
-    expect(report.findings).toContainEqual(expect.objectContaining({ kind: 'protocol_import' }));
-  });
-
-  it('applies negative Vite glob patterns before recording edges', () => {
-    const report = inspectHeldoutLeakChanges([{
-      path: 'src/ui/repair-ranking.ts',
-      addedText: [
-        "const modules = import.meta.glob(['../vtt/*.ts', '!../vtt/heldout-*.ts']);",
-      ].join('\n'),
-    }], 'F', bindings, {
-      candidateFiles: ['src/vtt/public.ts', 'src/vtt/heldout-evaluation.ts'],
-    });
-
-    expect(report.findings).toEqual([]);
-  });
-
-  it('records a Vite glob query option on the matched held-out edge', () => {
-    const report = inspectHeldoutLeakChanges([{
-      path: 'src/ui/repair-ranking.ts',
-      addedText: [
-        "const modules = import.meta.glob('../vtt/heldout-*.ts', { query: '?raw' });",
-      ].join('\n'),
-    }], 'F', bindings, { candidateFiles: ['src/vtt/heldout-evaluation.ts'] });
-
-    expect(report.findings).toContainEqual(expect.objectContaining({
-      kind: 'protocol_import',
-      detail: expect.stringContaining('?raw'),
-    }));
-  });
-
   it('fails closed on a non-constant Vite glob pattern', () => {
     const report = inspectHeldoutLeakChanges([{
       path: 'src/ui/repair-ranking.ts',
       addedText: "const modules = import.meta.glob(patterns, { eager: false });",
-    }], 'F', bindings, { candidateFiles: ['src/vtt/heldout-evaluation.ts'] });
+    }], 'F', bindings);
 
     expect(report.findings).toContainEqual(expect.objectContaining({
       kind: 'unresolved_module_edge',
     }));
   });
 
-  it('honours a literal Vite glob base relative to the importer', () => {
+  it('tracks an exact import.meta.glob alias without statically interpreting Vite matching', () => {
     const report = inspectHeldoutLeakChanges([{
       path: 'src/ui/repair-ranking.ts',
       addedText: [
-        "import.meta.glob('./heldout-evaluation.ts', { base: '../vtt', eager: true });",
+        'const loadModules = import.meta.glob;',
+        "loadModules('../vtt/heldout-evaluation.ts');",
       ].join('\n'),
-    }], 'F', bindings, { candidateFiles: ['src/vtt/heldout-evaluation.ts'] });
+    }], 'F', bindings);
 
-    expect(report.findings).toContainEqual(expect.objectContaining({ kind: 'protocol_import' }));
+    expect(report.findings).toEqual([]);
   });
 
-  it('keeps a leading ** Vite glob candidate-rooted even when base is present', () => {
-    const report = inspectHeldoutLeakChanges([{
-      path: 'src/ui/repair-ranking.ts',
-      addedText: "import.meta.glob('**/heldout-evaluation.ts', { base: './', eager: true });",
-    }], 'F', bindings, { candidateFiles: ['src/vtt/heldout-evaluation.ts'] });
-
-    expect(report.findings).toContainEqual(expect.objectContaining({ kind: 'protocol_import' }));
-  });
-
-  it('evaluates literal object spreads in Vite glob options', () => {
-    const report = inspectHeldoutLeakChanges([{
-      path: 'src/ui/repair-ranking.ts',
-      addedText: [
-        "import.meta.glob('./heldout-evaluation.ts', {",
-        "  ...{ base: '../vtt' }, eager: true,",
-        '});',
-      ].join('\n'),
-    }], 'F', bindings, { candidateFiles: ['src/vtt/heldout-evaluation.ts'] });
-
-    expect(report.findings).toContainEqual(expect.objectContaining({ kind: 'protocol_import' }));
-  });
-
-  it('tracks an exact import.meta.glob alias into a recognized glob call', () => {
-    const report = inspectHeldoutLeakChanges([{
-      path: 'src/ui/repair-ranking.ts',
-      addedText: [
-        'const discover = import.meta.glob;',
-        "discover('../vtt/heldout-*.ts', { eager: true });",
-      ].join('\n'),
-    }], 'F', bindings, { candidateFiles: ['src/vtt/heldout-evaluation.ts'] });
-
-    expect(report.findings).toContainEqual(expect.objectContaining({ kind: 'protocol_import' }));
-  });
 
   it.each([
     ['identifier spread', "const options = { base: '../vtt' }; import.meta.glob('./x.ts', { ...options });"],
@@ -546,31 +398,7 @@ describe('held-out reserve leak wall', () => {
     const report = inspectHeldoutLeakChanges([{
       path: 'src/ui/repair-ranking.ts',
       addedText,
-    }], 'F', bindings, { candidateFiles: ['src/vtt/heldout-evaluation.ts'] });
-
-    expect(report.findings).toContainEqual(expect.objectContaining({
-      kind: 'unresolved_module_edge',
-    }));
-  });
-
-  it('treats a leading ** Vite glob as candidate-rooted', () => {
-    const report = inspectHeldoutLeakChanges([{
-      path: 'src/ui/repair-ranking.ts',
-      addedText: "import.meta.glob('**/heldout-evaluation.ts');",
-    }], 'F', bindings, { candidateFiles: ['src/vtt/heldout-evaluation.ts'] });
-
-    expect(report.findings).toContainEqual(expect.objectContaining({ kind: 'protocol_import' }));
-  });
-
-  it.each([
-    ['extglob', "import.meta.glob('../vtt/@(heldout-evaluation).ts');"],
-    ['package-import glob', "import.meta.glob('#policy/*.ts');"],
-    ['alias glob', "import.meta.glob('@policy/*.ts');"],
-  ] as const)('fails closed instead of silently missing an unsupported %s', (_label, addedText) => {
-    const report = inspectHeldoutLeakChanges([{
-      path: 'src/ui/repair-ranking.ts',
-      addedText,
-    }], 'F', bindings, { candidateFiles: ['src/vtt/heldout-evaluation.ts'] });
+    }], 'F', bindings);
 
     expect(report.findings).toContainEqual(expect.objectContaining({
       kind: 'unresolved_module_edge',
@@ -1172,6 +1000,49 @@ describe('held-out reserve leak wall', () => {
   });
 
   it.each([
+    ['boxed import.meta namespace', [
+      'const box = { meta: import.meta };',
+      "box.meta.resolve('../src/vtt/heldout-evaluation.ts');",
+    ].join('\n')],
+    ['smuggled browser-global loader member', [
+      'const box = { w: window };',
+      "new box.w.Worker('../src/vtt/heldout-evaluation.ts');",
+    ].join('\n')],
+  ] as const)('applies Rule N to %s', (_label, addedText) => {
+    const report = inspectHeldoutLeakChanges([{
+      path: 'tools/probe.mts',
+      addedText,
+    }], 'F', bindings);
+
+    expect(report.findings).toContainEqual(expect.objectContaining({
+      kind: 'loader_reference_escaped',
+    }));
+  });
+
+  it.each([
+    ['constructor injection', [
+      'class UsesWindow { constructor(readonly root = window) {} }',
+      'const use = new UsesWindow(window);',
+      'use.root.addEventListener;',
+    ].join('\n')],
+    ['parameter default', [
+      'function locationOf(root = window) { return root.location.href; }',
+      'locationOf();',
+    ].join('\n')],
+    ['conditional storage', [
+      'const root = Math.random() > 0.5 ? window : self;',
+      'root.addEventListener;',
+    ].join('\n')],
+  ] as const)('keeps Rule N2 %s inert for non-loader members', (_label, addedText) => {
+    const report = inspectHeldoutLeakChanges([{
+      path: 'src/ui/global-injection-control.ts',
+      addedText,
+    }], 'F', bindings);
+
+    expect(report.findings).toEqual([]);
+  });
+
+  it.each([
     ['awaited namespace alias', [
       'const meta = await import.meta;',
       "meta.resolve('../src/vtt/heldout-evaluation.ts');",
@@ -1457,1311 +1328,11 @@ describe('held-out reserve leak wall', () => {
     expect(report.findings).toContainEqual(expect.objectContaining({ kind: 'protocol_import' }));
   });
 
-  it('resolves a leading package #import through the nearest candidate package map', () => {
-    const report = inspectHeldoutLeakChanges([{
-      path: 'src/ui/repair-ranking.ts',
-      addedText: "void import('#heldout');",
-    }], 'F', bindings, {
-      packageJsonFiles: {
-        'package.json': JSON.stringify({
-          imports: { '#heldout': './src/vtt/heldout-evaluation.ts' },
-        }),
-      },
-    });
-
-    expect(report.findings).toContainEqual(expect.objectContaining({ kind: 'protocol_import' }));
+  it('delegates executable Vite and Vitest configuration semantics to the runtime guard', () => {
+    expect(HELDOUT_MODULE_SPECIFIER_POLICY.interpreted).toContain(
+      'runtime Vite serve and Vitest root/project resolver and transform evidence governs configuration semantics, aliases, plugin hooks, projects, and extends',
+    );
   });
-
-  it('fails closed when a leading package #import cannot be resolved', () => {
-    const report = inspectHeldoutLeakChanges([{
-      path: 'src/ui/repair-ranking.ts',
-      addedText: "void import('#not-mapped');",
-    }], 'F', bindings, { packageJsonFiles: { 'package.json': '{"imports":{}}' } });
-
-    expect(report.findings).toContainEqual(expect.objectContaining({
-      kind: 'unresolved_module_edge',
-    }));
-  });
-
-  it('selects an exact package import before an earlier wildcard', () => {
-    const report = inspectHeldoutLeakChanges([{
-      path: 'src/ui/repair-ranking.ts',
-      addedText: "void import('#heldout');",
-    }], 'F', bindings, {
-      packageJsonFiles: {
-        'package.json': JSON.stringify({
-          imports: {
-            '#*': './src/vtt/party-pack.ts',
-            '#heldout': './src/vtt/heldout-evaluation.ts',
-          },
-        }),
-      },
-    });
-
-    expect(report.findings).toContainEqual(expect.objectContaining({ kind: 'protocol_import' }));
-  });
-
-  it('orders overlapping package patterns by longest prefix and then suffix', () => {
-    const report = inspectHeldoutLeakChanges([{
-      path: 'src/ui/repair-ranking.ts',
-      addedText: "void import('#policy/heldout-evaluation');",
-    }], 'F', bindings, {
-      packageJsonFiles: {
-        'package.json': JSON.stringify({
-          imports: {
-            '#policy/*': './src/vtt/party-pack.ts',
-            '#policy/heldout-*': './src/vtt/heldout-*.ts',
-          },
-        }),
-      },
-    });
-
-    expect(report.findings).toContainEqual(expect.objectContaining({ kind: 'protocol_import' }));
-  });
-
-  it('fails closed on an ambiguous exact package target without falling back to a wildcard', () => {
-    const report = inspectHeldoutLeakChanges([{
-      path: 'src/ui/repair-ranking.ts',
-      addedText: "void import('#policy');",
-    }], 'F', bindings, {
-      packageJsonFiles: {
-        'package.json': JSON.stringify({
-          imports: {
-            '#*': './src/vtt/party-pack.ts',
-            '#policy': {
-              import: './src/vtt/heldout-evaluation.ts',
-              default: './src/vtt/party-pack.ts',
-            },
-          },
-        }),
-      },
-    });
-
-    expect(report.findings).toContainEqual(expect.objectContaining({
-      kind: 'unresolved_module_edge',
-    }));
-  });
-
-  it('fails closed when ambiguity occurs inside a nested package condition', () => {
-    const report = inspectHeldoutLeakChanges([{
-      path: 'src/ui/repair-ranking.ts',
-      addedText: "void import('#policy');",
-    }], 'F', bindings, {
-      packageJsonFiles: {
-        'package.json': JSON.stringify({
-          imports: {
-            '#policy': {
-              import: {
-                browser: './src/vtt/heldout-evaluation.ts',
-                default: './src/vtt/party-pack.ts',
-              },
-              default: './src/vtt/party-pack.ts',
-            },
-          },
-        }),
-      },
-    });
-
-    expect(report.findings).toContainEqual(expect.objectContaining({
-      kind: 'unresolved_module_edge',
-    }));
-  });
-
-  it('re-inspects an unchanged #imports consumer after a package-only configuration change', () => {
-    const packageSource = JSON.stringify({
-      imports: { '#policy': './src/vtt/heldout-evaluation.ts' },
-    });
-    const report = inspectHeldoutLeakChanges([{
-      path: 'package.json',
-      addedText: packageSource,
-      sourceText: packageSource,
-    }], 'F', bindings, {
-      packageJsonFiles: { 'package.json': packageSource },
-      candidateSourceFiles: {
-        'src/ui/unchanged-policy-consumer.ts': "import policy from '#policy';",
-      },
-    });
-
-    expect(report).toMatchObject({ checkedFiles: 2 });
-    expect(report.findings).toContainEqual(expect.objectContaining({
-      path: 'src/ui/unchanged-policy-consumer.ts',
-      kind: 'protocol_import',
-    }));
-  });
-
-  it('fails closed on an unchanged configured-alias consumer after resolution config changes', () => {
-    const report = inspectHeldoutLeakChanges([{
-      path: 'vite.config.ts',
-      addedText: "export default { resolve: { alias: { '@policy': './src/vtt/heldout-evaluation.ts' } } };",
-    }], 'F', bindings, {
-      candidateSourceFiles: {
-        'src/ui/unchanged-policy-consumer.ts': "import policy from '@policy';",
-      },
-    });
-
-    expect(report.findings).toContainEqual(expect.objectContaining({
-      path: 'src/ui/unchanged-policy-consumer.ts',
-      kind: 'unresolved_module_edge',
-    }));
-  });
-
-  it.each([
-    ['shorthand literal object', [
-      "const alias = { '@policy': './src/vtt/heldout-evaluation.ts' };",
-      'export default { resolve: { alias } };',
-    ].join('\n'), "import policy from '@policy';", 'src/ui/unchanged-policy-consumer.ts'],
-    ['identifier array with find/replacement', [
-      "const alias = [{ find: '@policy', replacement: './src/vtt/heldout-evaluation.ts' }];",
-      'export default { resolve: { alias } };',
-    ].join('\n'), "import policy from '@policy';", 'src/ui/unchanged-policy-consumer.ts'],
-    ['spread literal alias array', [
-      "const baseAliases = [{ find: '@policy', replacement: './src/vtt/heldout-evaluation.ts' }];",
-      'export default { resolve: { alias: [...baseAliases] } };',
-    ].join('\n'), "import policy from '@policy';", 'src/ui/unchanged-policy-consumer.ts'],
-    ['non-literal alias source', [
-      'const alias = loadAliases();',
-      'export default { resolve: { alias } };',
-    ].join('\n'), "import policy from './public-policy';", 'vite.config.ts'],
-    ['regex alias applied to a relative specifier', [
-      "const alias = [{ find: /^\\.\\/public-policy$/, replacement: './src/vtt/heldout-evaluation.ts' }];",
-      'export default { resolve: { alias } };',
-    ].join('\n'), "import policy from './public-policy';", 'src/ui/unchanged-policy-consumer.ts'],
-  ] as const)('discovers and fails closed for Vite alias configuration using %s',
-  (_label, configSource, consumerSource, expectedPath) => {
-    const report = inspectHeldoutLeakChanges([{
-      path: 'vite.config.ts',
-      addedText: configSource,
-      sourceText: configSource,
-    }], 'F', bindings, {
-      candidateSourceFiles: {
-        'src/ui/unchanged-policy-consumer.ts': consumerSource,
-      },
-    });
-
-    expect(report.findings).toContainEqual(expect.objectContaining({
-      path: expectedPath,
-      kind: 'unresolved_module_edge',
-    }));
-  });
-
-  it('fails the Vite config itself when its alias source is non-literal', () => {
-    const configSource = [
-      'const alias = loadAliases();',
-      'export default { resolve: { alias } };',
-    ].join('\n');
-    const report = inspectHeldoutLeakChanges([{
-      path: 'vite.config.ts',
-      addedText: configSource,
-      sourceText: configSource,
-    }], 'F', bindings);
-
-    expect(report.findings).toContainEqual(expect.objectContaining({
-      path: 'vite.config.ts',
-      kind: 'unresolved_module_edge',
-    }));
-  });
-
-  it('resolves Vite alias identifiers by symbol when another scope shadows the spelling', () => {
-    const configSource = [
-      "const alias = { '@policy': './src/vtt/heldout-evaluation.ts' };",
-      'function shadow() { const alias = {}; return alias; }',
-      'export default { resolve: { alias } };',
-    ].join('\n');
-    const report = inspectHeldoutLeakChanges([{
-      path: 'vite.config.ts',
-      addedText: configSource,
-      sourceText: configSource,
-    }], 'F', bindings, {
-      candidateSourceFiles: {
-        'src/ui/unchanged-policy-consumer.ts': "import policy from '@policy';",
-      },
-    });
-
-    expect(report.findings).toContainEqual(expect.objectContaining({
-      path: 'src/ui/unchanged-policy-consumer.ts',
-      kind: 'unresolved_module_edge',
-    }));
-  });
-
-  it('honours literal spread overrides inside a Vite alias entry', () => {
-    const configSource = [
-      'const alias = [{',
-      "  find: '@safe', replacement: '/safe.ts',",
-      "  ...{ find: '@policy', replacement: './src/vtt/heldout-evaluation.ts' },",
-      '}];',
-      'export default { resolve: { alias } };',
-    ].join('\n');
-    const report = inspectHeldoutLeakChanges([{
-      path: 'vite.config.ts',
-      addedText: configSource,
-      sourceText: configSource,
-    }], 'F', bindings, {
-      candidateSourceFiles: {
-        'src/ui/unchanged-policy-consumer.ts': "import policy from '@policy';",
-      },
-    });
-
-    expect(report.findings).toContainEqual(expect.objectContaining({
-      path: 'src/ui/unchanged-policy-consumer.ts',
-      kind: 'unresolved_module_edge',
-    }));
-  });
-
-  it('fails the Vite config on a non-literal spread inside an alias entry', () => {
-    const configSource = [
-      'const overrides = loadOverrides();',
-      "const alias = [{ find: '@safe', replacement: '/safe.ts', ...overrides }];",
-      'export default { resolve: { alias } };',
-    ].join('\n');
-    const report = inspectHeldoutLeakChanges([{
-      path: 'vite.config.ts',
-      addedText: configSource,
-      sourceText: configSource,
-    }], 'F', bindings);
-
-    expect(report.findings).toContainEqual(expect.objectContaining({
-      path: 'vite.config.ts',
-      kind: 'unresolved_module_edge',
-    }));
-  });
-
-  it.each([
-    ['whole-variable reassignment', [
-      'let alias = {};',
-      "alias = { '@policy': './src/vtt/heldout-evaluation.ts' };",
-      'export default { resolve: { alias } };',
-    ].join('\n')],
-    ['property assignment', [
-      'const alias = {};',
-      "alias['@policy'] = './src/vtt/heldout-evaluation.ts';",
-      'export default { resolve: { alias } };',
-    ].join('\n')],
-  ] as const)('fails closed on Vite alias %s', (_label, configSource) => {
-    const report = inspectHeldoutLeakChanges([{
-      path: 'vite.config.ts',
-      addedText: configSource,
-      sourceText: configSource,
-    }], 'F', bindings, {
-      candidateSourceFiles: {
-        'src/ui/unchanged-policy-consumer.ts': "import policy from '@policy';",
-      },
-    });
-
-    expect(report.findings).toContainEqual(expect.objectContaining({
-      path: 'vite.config.ts',
-      kind: 'unresolved_module_edge',
-    }));
-  });
-
-  it.each([
-    ['write through an exact reference', [
-      'const alias = {};',
-      'const edit = alias;',
-      "edit['@policy'] = './src/vtt/heldout-evaluation.ts';",
-      'export default { resolve: { alias } };',
-    ].join('\n')],
-    ['array push', [
-      'const alias = [];',
-      "alias.push({ find: '@policy', replacement: './src/vtt/heldout-evaluation.ts' });",
-      'export default { resolve: { alias } };',
-    ].join('\n')],
-    ['Object.assign', [
-      'const alias = {};',
-      "Object.assign(alias, { '@policy': './src/vtt/heldout-evaluation.ts' });",
-      'export default { resolve: { alias } };',
-    ].join('\n')],
-    ['call-argument escape', [
-      'const alias = {};',
-      'mutateAliases(alias);',
-      'export default { resolve: { alias } };',
-    ].join('\n')],
-    ['mutation after object-spread transfer', [
-      'const alias = {};',
-      'const edit = { ...alias };',
-      "edit['@policy'] = './src/vtt/heldout-evaluation.ts';",
-      'export default { resolve: { alias } };',
-    ].join('\n')],
-  ] as const)('invalidates Vite alias discovery after %s', (_label, configSource) => {
-    const report = inspectHeldoutLeakChanges([{
-      path: 'vite.config.ts',
-      addedText: configSource,
-      sourceText: configSource,
-    }], 'F', bindings);
-
-    expect(report.findings).toContainEqual(expect.objectContaining({
-      path: 'vite.config.ts',
-      kind: 'unresolved_module_edge',
-    }));
-  });
-
-  it.each([
-    ['returned reference', [
-      'const alias = {};',
-      'function exposeAlias() { return alias; }',
-      'export default { resolve: { alias } };',
-    ].join('\n')],
-    ['called closure write', [
-      'const alias = {};',
-      "const writeAlias = () => { alias['@policy'] = './src/vtt/heldout-evaluation.ts'; };",
-      'writeAlias();',
-      'export default { resolve: { alias } };',
-    ].join('\n')],
-    ['class-field storage', [
-      'const alias = {};',
-      'class AliasBox { value = alias; }',
-      'export default { resolve: { alias } };',
-    ].join('\n')],
-    ['call-expression receiver write', [
-      'const alias = {};',
-      'function getAlias() { return alias; }',
-      "getAlias()['@policy'] = './src/vtt/heldout-evaluation.ts';",
-      'export default { resolve: { alias } };',
-    ].join('\n')],
-  ] as const)('fails Vite alias discovery for a configuration reference in %s',
-  (_label, configSource) => {
-    const report = inspectHeldoutLeakChanges([{
-      path: 'vite.config.ts',
-      addedText: configSource,
-      sourceText: configSource,
-    }], 'F', bindings);
-
-    expect(report.findings).toContainEqual(expect.objectContaining({
-      path: 'vite.config.ts',
-      kind: 'unresolved_module_edge',
-    }));
-  });
-
-  it.each([
-    ['object-property transfer', [
-      'const alias = {};',
-      'const box = { value: alias };',
-      "box.value['@policy'] = './src/vtt/heldout-evaluation.ts';",
-      'export default { resolve: { alias } };',
-    ].join('\n')],
-    ['array-element transfer', [
-      'const alias = [];',
-      'const box = [alias];',
-      "box[0].push({ find: '@policy', replacement: './src/vtt/heldout-evaluation.ts' });",
-      'export default { resolve: { alias } };',
-    ].join('\n')],
-    ['nested literal transfer', [
-      'const alias = {};',
-      'const box = { nested: [{ value: alias }] };',
-      "box.nested[0].value['@policy'] = './src/vtt/heldout-evaluation.ts';",
-      'export default { resolve: { alias } };',
-    ].join('\n')],
-    ['untrackable call-result transfer', [
-      'const alias = { nested: { value: loadAliases() } };',
-      'export default { resolve: { alias } };',
-    ].join('\n')],
-  ] as const)('invalidates Vite alias discovery after %s', (_label, configSource) => {
-    const report = inspectHeldoutLeakChanges([{
-      path: 'vite.config.ts',
-      addedText: configSource,
-      sourceText: configSource,
-    }], 'F', bindings);
-
-    expect(report.findings).toContainEqual(expect.objectContaining({
-      path: 'vite.config.ts',
-      kind: 'unresolved_module_edge',
-    }));
-  });
-
-  it.each([
-    ['boxed import.meta namespace', [
-      'const box = { meta: import.meta };',
-      "box.meta.resolve('../src/vtt/heldout-evaluation.ts');",
-    ].join('\n')],
-    ['smuggled browser-global loader member', [
-      'const box = { w: window };',
-      "new box.w.Worker('../src/vtt/heldout-evaluation.ts');",
-    ].join('\n')],
-  ] as const)('applies Rule N to %s', (_label, addedText) => {
-    const report = inspectHeldoutLeakChanges([{
-      path: 'tools/probe.mts',
-      addedText,
-    }], 'F', bindings);
-
-    expect(report.findings).toContainEqual(expect.objectContaining({
-      kind: 'loader_reference_escaped',
-    }));
-  });
-
-  it.each([
-    ['constructor injection', [
-      'class UsesWindow { constructor(readonly root = window) {} }',
-      'const use = new UsesWindow(window);',
-      'use.root.addEventListener;',
-    ].join('\n')],
-    ['parameter default', [
-      'function locationOf(root = window) { return root.location.href; }',
-      'locationOf();',
-    ].join('\n')],
-    ['conditional storage', [
-      'const root = Math.random() > 0.5 ? window : self;',
-      'root.addEventListener;',
-    ].join('\n')],
-  ] as const)('keeps Rule N2 %s inert for non-loader members', (_label, addedText) => {
-    const report = inspectHeldoutLeakChanges([{
-      path: 'src/ui/global-injection-control.ts',
-      addedText,
-    }], 'F', bindings);
-
-    expect(report.findings).toEqual([]);
-  });
-
-  it.each([
-    ['computed-property transfer', [
-      'const alias: Record<string, string> = {};',
-      "const box = { ['value']: alias };",
-      "box.value['@policy'] = './src/vtt/heldout-evaluation.ts';",
-      'export default { resolve: { alias } };',
-    ].join('\n')],
-    ['for-of assignment head', [
-      'const alias: Record<string, string> = {};',
-      "for (alias['@policy'] of ['./src/vtt/heldout-evaluation.ts']) {}",
-      'export default { resolve: { alias } };',
-    ].join('\n')],
-    ['for-in assignment head', [
-      'const alias: Record<string, string> = {};',
-      "for (alias['@policy'] in { './src/vtt/heldout-evaluation.ts': true }) {}",
-      'export default { resolve: { alias } };',
-    ].join('\n')],
-    ['constructor argument', [
-      'const alias = {};',
-      'new Update(alias);',
-      'export default { resolve: { alias } };',
-    ].join('\n')],
-    ['fill-style receiver mutation', [
-      "const alias = [{ find: '@safe', replacement: './safe.ts' }];",
-      "alias.fill({ find: '@policy', replacement: './src/vtt/heldout-evaluation.ts' });",
-      'export default { resolve: { alias } };',
-    ].join('\n')],
-    ['locally shadowed defineConfig', [
-      "const alias = { '@safe': './safe.ts' };",
-      "function defineConfig(value) { value.resolve.alias['@policy'] = './src/vtt/heldout-evaluation.ts'; return value; }",
-      'export default defineConfig({ resolve: { alias } });',
-    ].join('\n')],
-  ] as const)('applies Rule C to %s', (_label, configSource) => {
-    const report = inspectHeldoutLeakChanges([{
-      path: 'vite.config.ts',
-      addedText: configSource,
-      sourceText: configSource,
-    }], 'F', bindings, {
-      candidateSourceFiles: {
-        'src/ui/unchanged-policy-consumer.ts': "import policy from '@policy';",
-      },
-    });
-
-    expect(report.findings).toContainEqual(expect.objectContaining({
-      path: 'vite.config.ts',
-      kind: 'unresolved_module_edge',
-    }));
-  });
-
-  it.each([
-    ['reachable getter', [
-      'export default {',
-      '  get resolve() {',
-      "    return { alias: { '@policy': './src/vtt/heldout-evaluation.ts' } };",
-      '  },',
-      '};',
-    ].join('\n')],
-    ['opaque side-effect reference', [
-      'const shared = { resolve: { alias: {} } };',
-      'export default {',
-      '  ...shared,',
-      "  sideEffect: shared.resolve.alias['@policy'] = './src/vtt/heldout-evaluation.ts',",
-      '};',
-    ].join('\n')],
-    ['named export outside the reachable set', [
-      'const shared = { resolve: { alias: {} } };',
-      'export { shared };',
-      'export default shared;',
-    ].join('\n')],
-  ] as const)('fails exact-node Rule C for %s', (_label, configSource) => {
-    const report = inspectHeldoutLeakChanges([{
-      path: 'vite.config.ts',
-      addedText: configSource,
-      sourceText: configSource,
-    }], 'F', bindings);
-
-    expect(report.findings).toContainEqual(expect.objectContaining({
-      path: 'vite.config.ts',
-      kind: 'unresolved_module_edge',
-    }));
-  });
-
-  it.each([
-    ['assignment inside an opaque plugin array', [
-      'const shared = { resolve: { alias: {} } };',
-      'export default {',
-      '  ...shared,',
-      "  plugins: [(shared.resolve.alias['@policy'] = './src/vtt/heldout-evaluation.ts', false)],",
-      '};',
-    ].join('\n'), true],
-    ['tracked const passed to a helper inside an opaque plugin array', [
-      'const shared = { resolve: { alias: {} } };',
-      'export default { ...shared, plugins: [helper(shared)] };',
-    ].join('\n'), true],
-    ['property read inside an opaque plugin array', [
-      'const shared = { resolve: { alias: {} }, plugins: [] };',
-      'export default { ...shared, plugins: [shared.plugins.length] };',
-    ].join('\n'), false],
-    ['array spread read inside an opaque plugin array', [
-      'const shared = { resolve: { alias: {} }, plugins: [] };',
-      'export default { ...shared, plugins: [...shared.plugins] };',
-    ].join('\n'), false],
-    ['plain calls inside an opaque plugin array', [
-      'export default { plugins: [foo(), bar({ x: 1 })] };',
-    ].join('\n'), false],
-    ['plain-const alias of a non-alias-bearing subtree', [
-      'const shared = { resolve: { alias: {} }, plugins: [] };',
-      'const p = shared.plugins;',
-      'export default { ...shared, plugins: [...p] };',
-    ].join('\n'), false],
-    ['let alias of an alias-bearing subtree', [
-      'const shared = { resolve: { alias: {} }, plugins: [] };',
-      'let p = shared;',
-      'export default shared;',
-      'void p;',
-    ].join('\n'), true],
-    ['plain-const alias escaped through a call', [
-      'const shared = { resolve: { alias: {} }, plugins: [] };',
-      'const q = shared.resolve;',
-      'use(q);',
-      'export default shared;',
-    ].join('\n'), true],
-  ] as const)('classifies %s with the Rule C addressed-subtree guard',
-  (_label, configSource, unresolved) => {
-    const report = inspectHeldoutLeakChanges([{
-      path: 'vite.config.ts',
-      addedText: configSource,
-      sourceText: configSource,
-    }], 'F', bindings);
-
-    expect(report.findings.some((finding) => finding.path === 'vite.config.ts' &&
-      finding.kind === 'unresolved_module_edge')).toBe(unresolved);
-  });
-
-  it.each([
-    ['resolve.alias address', 'vite.config.ts', [
-      'const shared = { resolve: { alias: {} } };',
-      'const p = shared.resolve.alias;',
-      "Object.assign(p, { '@policy': './src/vtt/heldout-evaluation.ts' });",
-      'export default shared;',
-    ].join('\n')],
-    ['test.alias address', 'vitest.config.ts', [
-      'const shared = { test: { alias: {} } };',
-      'const p = shared.test.alias;',
-      "Object.assign(p, { '@policy': './src/vtt/heldout-evaluation.ts' });",
-      'export default shared;',
-    ].join('\n')],
-    ['identifier bound at resolve', 'vite.config.ts', [
-      'const r = {};',
-      'export default { resolve: r };',
-      'use(r);',
-    ].join('\n')],
-    ['identifier bound at test', 'vitest.config.ts', [
-      'const t = {};',
-      'export default { test: t };',
-      'use(t);',
-    ].join('\n')],
-  ] as const)('fails closed when %s escapes', (_label, path, configSource) => {
-    const report = inspectHeldoutLeakChanges([{
-      path,
-      addedText: configSource,
-      sourceText: configSource,
-    }], 'F', bindings);
-
-    expect(report.findings).toContainEqual(expect.objectContaining({
-      path,
-      kind: 'unresolved_module_edge',
-    }));
-  });
-
-  it('fails closed for a nonliteral Vitest test container', () => {
-    const configSource = [
-      'function makeTestConfig() {',
-      '  const t = Object.create(null);',
-      "  t.alias = { '@policy': './src/vtt/heldout-evaluation.ts' };",
-      '  return t;',
-      '}',
-      'export default { test: makeTestConfig() };',
-    ].join('\n');
-    const report = inspectHeldoutLeakChanges([{
-      path: 'vitest.config.ts',
-      addedText: configSource,
-      sourceText: configSource,
-    }], 'F', bindings);
-
-    expect(report.findings).toContainEqual(expect.objectContaining({
-      path: 'vitest.config.ts',
-      kind: 'unresolved_module_edge',
-    }));
-  });
-
-  it('discovers a literal alias inside a Vitest test container', () => {
-    const configSource = [
-      "export default { test: { alias: { '@policy': './src/vtt/heldout-evaluation.ts' } } };",
-    ].join('\n');
-    const report = inspectHeldoutLeakChanges([{
-      path: 'vitest.config.ts',
-      addedText: configSource,
-      sourceText: configSource,
-    }], 'F', bindings, {
-      candidateSourceFiles: {
-        'src/ui/unchanged-policy-consumer.ts': "import policy from '@policy';",
-      },
-    });
-
-    expect(report.findings).not.toContainEqual(expect.objectContaining({
-      path: 'vitest.config.ts',
-      kind: 'unresolved_module_edge',
-    }));
-    expect(report.findings).toContainEqual(expect.objectContaining({
-      path: 'src/ui/unchanged-policy-consumer.ts',
-      kind: 'unresolved_module_edge',
-    }));
-  });
-
-  it.each([
-    ['instanceof on an alias-bearing root', [
-      'const shared = { resolve: { alias: {} } };',
-      'shared instanceof receiver;',
-      'export default shared;',
-    ].join('\n'), true],
-    ['strict equality on an alias-bearing root', [
-      'const shared = { resolve: { alias: {} } };',
-      'shared === other;',
-      'export default shared;',
-    ].join('\n'), false],
-    ['instanceof on a non-alias-bearing subtree', [
-      'const shared = { resolve: { alias: {} }, plugins: [] };',
-      'shared.plugins instanceof Array;',
-      'export default shared;',
-    ].join('\n'), false],
-  ] as const)('classifies %s by comparison semantics', (_label, configSource, unresolved) => {
-    const report = inspectHeldoutLeakChanges([{
-      path: 'vite.config.ts',
-      addedText: configSource,
-      sourceText: configSource,
-    }], 'F', bindings);
-
-    expect(report.findings.some((finding) => finding.path === 'vite.config.ts' &&
-      finding.kind === 'unresolved_module_edge')).toBe(unresolved);
-  });
-
-  it.each([
-    ['void-only use', 'void p;', false],
-    ['call-argument use', 'use(p);', true],
-  ] as const)('classifies a permitted const alias with %s', (_label, use, unresolved) => {
-    const configSource = [
-      'const shared = { resolve: { alias: {} } };',
-      'const p = shared;',
-      use,
-      'export default shared;',
-    ].join('\n');
-    const report = inspectHeldoutLeakChanges([{
-      path: 'vite.config.ts',
-      addedText: configSource,
-      sourceText: configSource,
-    }], 'F', bindings);
-
-    expect(report.findings.some((finding) => finding.path === 'vite.config.ts' &&
-      finding.kind === 'unresolved_module_edge')).toBe(unresolved);
-  });
-
-  it.each([
-    ['shorthand resolve', 'vite.config.mjs', [
-      'const resolve = {};',
-      'install(resolve);',
-      'export default { resolve };',
-    ].join('\n')],
-    ['shorthand test', 'vitest.config.mjs', [
-      'const test = {};',
-      'install(test);',
-      'export default { test };',
-    ].join('\n')],
-    ['spread inside test', 'vitest.config.mjs', [
-      'const parts = {};',
-      'install(parts);',
-      'export default { test: { ...parts } };',
-    ].join('\n')],
-    ['spread inside resolve', 'vite.config.mjs', [
-      'const parts = {};',
-      'install(parts);',
-      'export default { resolve: { ...parts } };',
-    ].join('\n')],
-  ] as const)('treats %s as an alias-capable binding position', (_label, path, configSource) => {
-    const report = inspectHeldoutLeakChanges([{
-      path,
-      addedText: configSource,
-      sourceText: configSource,
-    }], 'F', bindings);
-
-    expect(report.findings).toContainEqual(expect.objectContaining({
-      path,
-      kind: 'unresolved_module_edge',
-    }));
-  });
-
-  it('discovers a shorthand resolve binding without treating its declaration as an escape', () => {
-    const configSource = [
-      "const resolve = { alias: { '@x': '/lit' } };",
-      'export default { resolve };',
-    ].join('\n');
-    const report = inspectHeldoutLeakChanges([{
-      path: 'vite.config.mjs',
-      addedText: configSource,
-      sourceText: configSource,
-    }], 'F', bindings, {
-      candidateSourceFiles: {
-        'src/ui/alias-capability-control.ts': "import value from '@x';",
-      },
-    });
-
-    expect(report.findings).not.toContainEqual(expect.objectContaining({
-      path: 'vite.config.mjs',
-      kind: 'unresolved_module_edge',
-    }));
-    expect(report.findings).toContainEqual(expect.objectContaining({
-      path: 'src/ui/alias-capability-control.ts',
-      kind: 'unresolved_module_edge',
-    }));
-  });
-
-  it.each([
-    ['direct root', [
-      'const shared = {};',
-      'install(shared);',
-      'export default shared;',
-    ].join('\n'), true],
-    ['root spread', [
-      'const shared = {};',
-      'install(shared);',
-      'export default { ...shared };',
-    ].join('\n'), true],
-    ['defineConfig callback root spread', [
-      "import { defineConfig } from 'vite';",
-      'const shared = {};',
-      'install(shared);',
-      'export default defineConfig(() => ({ ...shared }));',
-    ].join('\n'), true],
-    ['plugins value', [
-      'const plugins = [];',
-      'install(plugins);',
-      'export default { plugins };',
-    ].join('\n'), false],
-    ['build value', [
-      'const build = {};',
-      'install(build);',
-      'export default { build };',
-    ].join('\n'), false],
-  ] as const)('classifies %s by positional root capability', (_label, configSource, unresolved) => {
-    const report = inspectHeldoutLeakChanges([{
-      path: 'vite.config.ts',
-      addedText: configSource,
-      sourceText: configSource,
-    }], 'F', bindings);
-
-    expect(report.findings.some((finding) => finding.path === 'vite.config.ts' &&
-      finding.kind === 'unresolved_module_edge')).toBe(unresolved);
-  });
-
-  it.each([
-    ['resolve alias-array entry', 'vite.config.mjs', [
-      "const rules = [{ find: '@ordinary', replacement: '/ordinary' }];",
-      "install(rules['0']);",
-      'export default { resolve: { alias: rules } };',
-    ].join('\n')],
-    ['const alias of a resolve alias-array entry', 'vite.config.mjs', [
-      "const rules = [{ find: '@ordinary', replacement: '/ordinary' }];",
-      "const entry = rules['0'];",
-      'install(entry);',
-      'export default { resolve: { alias: rules } };',
-    ].join('\n')],
-    ['test alias-array entry', 'vitest.config.mjs', [
-      "const rules = [{ find: '@ordinary', replacement: '/ordinary' }];",
-      'install(rules[0]);',
-      'export default { test: { alias: rules } };',
-    ].join('\n')],
-    ['spread alias-array entry source', 'vite.config.mjs', [
-      "const entries = [{ find: '@a', replacement: '/lit' }];",
-      'export default { resolve: { alias: [...entries] } };',
-      'install(entries[0]);',
-    ].join('\n')],
-    ['entry from a multiply placed alias array', 'vite.config.mjs', [
-      "const rules = [{ find: '@ordinary', replacement: '/ordinary' }];",
-      'install(rules[0]);',
-      'export default { plugins: rules, resolve: { alias: rules } };',
-    ].join('\n')],
-  ] as const)('fails closed for %s using its semantic placement prefix',
-  (_label, path, configSource) => {
-    const report = inspectHeldoutLeakChanges([{
-      path,
-      addedText: configSource,
-      sourceText: configSource,
-    }], 'F', bindings);
-
-    expect(report.findings).toContainEqual(expect.objectContaining({
-      path,
-      kind: 'unresolved_module_edge',
-    }));
-  });
-
-  it('discovers an unescaped alias-array binding at its semantic placement', () => {
-    const configSource = [
-      "const rules = [{ find: '@x', replacement: '/lit' }];",
-      'export default { resolve: { alias: rules } };',
-    ].join('\n');
-    const report = inspectHeldoutLeakChanges([{
-      path: 'vite.config.mjs',
-      addedText: configSource,
-      sourceText: configSource,
-    }], 'F', bindings, {
-      candidateSourceFiles: {
-        'src/ui/placement-prefix-control.ts': "import value from '@x';",
-      },
-    });
-
-    expect(report.findings).not.toContainEqual(expect.objectContaining({
-      path: 'vite.config.mjs',
-      kind: 'unresolved_module_edge',
-    }));
-    expect(report.findings).toContainEqual(expect.objectContaining({
-      path: 'src/ui/placement-prefix-control.ts',
-      kind: 'unresolved_module_edge',
-    }));
-  });
-
-  it('keeps an escaped plugin-list entry non-alias-capable', () => {
-    const configSource = [
-      "const list = [{ name: 'p' }];",
-      'install(list[0]);',
-      'export default { plugins: list };',
-    ].join('\n');
-    const report = inspectHeldoutLeakChanges([{
-      path: 'vite.config.mjs',
-      addedText: configSource,
-      sourceText: configSource,
-    }], 'F', bindings);
-
-    expect(report.findings).toEqual([]);
-  });
-
-  it.each([
-    ['indirect multiply placed entry', [
-      "const rules = [{ name: 'p', find: '@ordinary', replacement: '/ordinary' }];",
-      'const shared = { plugins: rules };',
-      'install(shared.plugins[0]);',
-      'export default { ...shared, resolve: { alias: rules } };',
-    ].join('\n')],
-    ['const alias of an indirect multiply placed entry', [
-      "const rules = [{ name: 'p', find: '@ordinary', replacement: '/ordinary' }];",
-      'const shared = { plugins: rules };',
-      'const entry = shared.plugins[0];',
-      'install(entry);',
-      'export default { ...shared, resolve: { alias: rules } };',
-    ].join('\n')],
-    ['two-level indirect multiply placed entry', [
-      "const rules = [{ name: 'p', find: '@ordinary', replacement: '/ordinary' }];",
-      'const shared = { plugins: rules };',
-      'const outer = { inner: shared };',
-      'install(outer.inner.plugins[0]);',
-      'export default { ...outer, resolve: { alias: rules } };',
-    ].join('\n')],
-  ] as const)('unions embedded placements for %s', (_label, configSource) => {
-    const report = inspectHeldoutLeakChanges([{
-      path: 'vite.config.mjs',
-      addedText: configSource,
-      sourceText: configSource,
-    }], 'F', bindings);
-
-    expect(report.findings).toContainEqual(expect.objectContaining({
-      path: 'vite.config.mjs',
-      kind: 'unresolved_module_edge',
-    }));
-  });
-
-  it('keeps an indirectly accessed entry clean when it is placed only under plugins', () => {
-    const configSource = [
-      "const rules = [{ name: 'p' }];",
-      'const shared = { plugins: rules };',
-      'install(shared.plugins[0]);',
-      'export default { ...shared };',
-    ].join('\n');
-    const report = inspectHeldoutLeakChanges([{
-      path: 'vite.config.mjs',
-      addedText: configSource,
-      sourceText: configSource,
-    }], 'F', bindings);
-
-    expect(report.findings).toEqual([]);
-  });
-
-  it.each([
-    ['shorthand projects array', [
-      'const projects = [{}];',
-      'install(projects[0]);',
-      'export default { test: { projects } };',
-    ].join('\n')],
-    ['inline projects array', [
-      'const project = {};',
-      'install(project);',
-      'export default { test: { projects: [project] } };',
-    ].join('\n')],
-    ['referenced projects array contents', [
-      'const project = {};',
-      'const projects = [project];',
-      'install(project);',
-      'export default { test: { projects: projects } };',
-    ].join('\n')],
-  ] as const)('treats each test.projects element as a nested configuration root: %s',
-  (_label, configSource) => {
-    const report = inspectHeldoutLeakChanges([{
-      path: 'vitest.config.mjs',
-      addedText: configSource,
-      sourceText: configSource,
-    }], 'F', bindings);
-
-    expect(report.findings).toContainEqual(expect.objectContaining({
-      path: 'vitest.config.mjs',
-      kind: 'unresolved_module_edge',
-    }));
-  });
-
-  it('discovers a literal alias in a test.projects element', () => {
-    const configSource = [
-      "const project = { resolve: { alias: { '@project': './src/vtt/heldout-evaluation.ts' } } };",
-      'export default { test: { projects: [project] } };',
-    ].join('\n');
-    const report = inspectHeldoutLeakChanges([{
-      path: 'vitest.config.mjs',
-      addedText: configSource,
-      sourceText: configSource,
-    }], 'F', bindings, {
-      candidateSourceFiles: {
-        'src/ui/project-alias-consumer.ts': "import policy from '@project';",
-      },
-    });
-
-    expect(report.findings).not.toContainEqual(expect.objectContaining({
-      path: 'vitest.config.mjs',
-      kind: 'unresolved_module_edge',
-    }));
-    expect(report.findings).toContainEqual(expect.objectContaining({
-      path: 'src/ui/project-alias-consumer.ts',
-      kind: 'unresolved_module_edge',
-    }));
-  });
-
-  it.each([
-    ['object spread override', [
-      "const rules = [{ name: 'p', find: '@ordinary', replacement: '/ordinary' }];",
-      'const overlay = { plugins: rules };',
-      "const shared = { plugins: [{ name: 'safe' }], ...overlay };",
-      'install(shared.plugins[0]);',
-      'export default { ...shared, resolve: { alias: rules } };',
-    ].join('\n')],
-    ['array spread runtime index', [
-      "const rules = [{ find: '@a', replacement: '/a' }, { find: '@b', replacement: '/b' }];",
-      "const shared = { plugins: [...rules, { name: 'safe' }] };",
-      'install(shared.plugins[1]);',
-      'export default { ...shared, resolve: { alias: rules } };',
-    ].join('\n')],
-  ] as const)('uses JavaScript spread semantics for %s', (_label, configSource) => {
-    const report = inspectHeldoutLeakChanges([{
-      path: 'vite.config.mjs',
-      addedText: configSource,
-      sourceText: configSource,
-    }], 'F', bindings);
-
-    expect(report.findings).toContainEqual(expect.objectContaining({
-      path: 'vite.config.mjs',
-      kind: 'unresolved_module_edge',
-    }));
-  });
-
-  it.each([
-    ['later explicit object property', [
-      "const rules = [{ find: '@a', replacement: '/a' }];",
-      'const overlay = { plugins: rules };',
-      "const shared = { ...overlay, plugins: [{ name: 'safe' }] };",
-      'install(shared.plugins[0]);',
-      'export default { ...shared, resolve: { alias: rules } };',
-    ].join('\n')],
-    ['entry before array spread', [
-      "const rules = [{ find: '@a', replacement: '/a' }];",
-      "const shared = { plugins: [{ name: 'safe' }, ...rules] };",
-      'install(shared.plugins[0]);',
-      'export default { ...shared, resolve: { alias: rules } };',
-    ].join('\n')],
-  ] as const)('keeps the runtime-safe spread ordering clean for %s', (_label, configSource) => {
-    const report = inspectHeldoutLeakChanges([{
-      path: 'vite.config.mjs',
-      addedText: configSource,
-      sourceText: configSource,
-    }], 'F', bindings);
-
-    expect(report.findings).toEqual([]);
-  });
-
-  it.each([
-    ['terminal plugin array', [
-      'const plugins = [];',
-      'const shared = { plugins };',
-      'install(shared.plugins);',
-      'export default { ...shared };',
-    ].join('\n'), false],
-    ['terminal resolve object', [
-      'const resolve = {};',
-      'const shared = { resolve };',
-      'install(shared.resolve);',
-      'export default { ...shared };',
-    ].join('\n'), true],
-    ['terminal dual-placement plugin array', [
-      "const plugins = [{ find: '@x', replacement: '/lit' }];",
-      'const shared = { plugins };',
-      'export default { ...shared, resolve: { alias: plugins } };',
-      'install(shared.plugins);',
-    ].join('\n'), true],
-  ] as const)('dereferences %s before alias-capability classification',
-  (_label, configSource, unresolved) => {
-    const report = inspectHeldoutLeakChanges([{
-      path: 'vite.config.mjs',
-      addedText: configSource,
-      sourceText: configSource,
-    }], 'F', bindings);
-
-    expect(report.findings.some((finding) => finding.path === 'vite.config.mjs' &&
-      finding.kind === 'unresolved_module_edge')).toBe(unresolved);
-  });
-
-  it('discovers aliases from a literal project extends file', () => {
-    const rootSource = "export default { test: { projects: [{ extends: './tools/project-config.mjs' }] } };";
-    const projectSource =
-      "export default { resolve: { alias: { '@policy': './src/vtt/heldout-evaluation.ts' } } };";
-    const report = inspectHeldoutLeakChanges([{
-      path: 'vitest.config.mjs',
-      addedText: rootSource,
-      sourceText: rootSource,
-    }, {
-      path: 'tools/project-config.mjs',
-      addedText: projectSource,
-      sourceText: projectSource,
-    }], 'F', bindings, {
-      candidateSourceFiles: {
-        'src/ui/project-extends-consumer.ts': "import policy from '@policy';",
-      },
-    });
-
-    expect(report.findings).not.toContainEqual(expect.objectContaining({
-      path: 'vitest.config.mjs',
-      kind: 'unresolved_module_edge',
-    }));
-    expect(report.findings).toContainEqual(expect.objectContaining({
-      path: 'src/ui/project-extends-consumer.ts',
-      kind: 'unresolved_module_edge',
-    }));
-  });
-
-  it.each([
-    ['helper-built extended alias', "export default { test: { projects: [{ extends: './tools/project-config.mjs' }] } };", {
-      'tools/project-config.mjs': "export default makeConfig();",
-    }],
-    ['nonliteral extends', 'const target = \'./tools/project-config.mjs\'; export default { test: { projects: [{ extends: target }] } };', {}],
-    ['missing extends file', "export default { test: { projects: [{ extends: './tools/missing.mjs' }] } };", {}],
-    ['outside-repository extends file', "export default { test: { projects: [{ extends: '../outside.mjs' }] } };", {}],
-    ['cyclic extends files', "export default { test: { projects: [{ extends: './tools/project-config.mjs' }] } };", {
-      'tools/project-config.mjs': "export default { test: { projects: [{ extends: '../vitest.config.mjs' }] } };",
-    }],
-  ] as const)('fails closed for %s', (_label, rootSource, extraSources) => {
-    const changes = [{
-      path: 'vitest.config.mjs',
-      addedText: rootSource,
-      sourceText: rootSource,
-    }, ...Object.entries(extraSources).map(([path, sourceText]) => ({
-      path,
-      addedText: sourceText,
-      sourceText,
-    }))];
-    const report = inspectHeldoutLeakChanges(changes, 'F', bindings);
-
-    expect(report.findings).toContainEqual(expect.objectContaining({
-      path: 'vitest.config.mjs',
-      kind: 'unresolved_module_edge',
-    }));
-  });
-
-  it('treats project extends true as reuse of the clean root configuration', () => {
-    const configSource = 'export default { test: { projects: [{ extends: true }] } };';
-    const report = inspectHeldoutLeakChanges([{
-      path: 'vitest.config.mjs',
-      addedText: configSource,
-      sourceText: configSource,
-    }], 'F', bindings);
-
-    expect(report.findings).toEqual([]);
-  });
-
-  it('applies Rule N to an extended configuration loaded from the candidate source pool', () => {
-    const rootSource =
-      "export default { test: { projects: [{ extends: './tools/project-config.mjs' }] } };";
-    const projectSource = [
-      "import { createRequire } from 'node:module';",
-      'const box = { load: createRequire(import.meta.url) };',
-      'export default {};',
-    ].join('\n');
-    const report = inspectHeldoutLeakChanges([{
-      path: 'vitest.config.mjs',
-      addedText: rootSource,
-      sourceText: rootSource,
-    }], 'F', bindings, {
-      candidateConfigurationFiles: {
-        'tools/project-config.mjs': projectSource,
-      },
-    });
-
-    expect(report.findings).toContainEqual(expect.objectContaining({
-      path: 'tools/project-config.mjs',
-      kind: 'loader_reference_escaped',
-    }));
-  });
-
-  it('interprets a symbol-proven defineConfig callback, conditional, and const spread', () => {
-    const configSource = [
-      "import { defineConfig } from 'vite';",
-      "const core = { base: '/' };",
-      "const shared = { ...core, resolve: { alias: { '@policy': './src/vtt/heldout-evaluation.ts' } } };",
-      "export default defineConfig(({ command }) => command === 'serve' ? { ...shared } : shared);",
-    ].join('\n');
-    const report = inspectHeldoutLeakChanges([{
-      path: 'vite.config.ts',
-      addedText: configSource,
-      sourceText: configSource,
-    }], 'F', bindings, {
-      candidateSourceFiles: {
-        'src/ui/unchanged-policy-consumer.ts': "import policy from '@policy';",
-      },
-    });
-
-    expect(report.findings).not.toContainEqual(expect.objectContaining({
-      path: 'vite.config.ts',
-      kind: 'unresolved_module_edge',
-    }));
-    expect(report.findings).toContainEqual(expect.objectContaining({
-      path: 'src/ui/unchanged-policy-consumer.ts',
-      kind: 'unresolved_module_edge',
-    }));
-  });
-
-  it.each([
-    ['direct Vitest defineConfig', [
-      "import { defineConfig } from 'vitest/config';",
-      "export default defineConfig({ resolve: { alias: { '@policy': './src/vtt/heldout-evaluation.ts' } } });",
-    ].join('\n')],
-    ['Vitest mergeConfig union', [
-      "import { defineConfig, mergeConfig } from 'vitest/config';",
-      "const base = { resolve: { alias: { '@policy': './src/vtt/heldout-evaluation.ts' } } };",
-      'export default defineConfig(mergeConfig(base, { test: { globals: true } }));',
-    ].join('\n')],
-  ] as const)('discovers aliases through %s', (_label, configSource) => {
-    const report = inspectHeldoutLeakChanges([{
-      path: 'vitest.config.ts',
-      addedText: configSource,
-      sourceText: configSource,
-    }], 'F', bindings, {
-      candidateSourceFiles: {
-        'src/ui/unchanged-policy-consumer.ts': "import policy from '@policy';",
-      },
-    });
-
-    expect(report.findings).not.toContainEqual(expect.objectContaining({
-      path: 'vitest.config.ts',
-      kind: 'unresolved_module_edge',
-    }));
-    expect(report.findings).toContainEqual(expect.objectContaining({
-      path: 'src/ui/unchanged-policy-consumer.ts',
-      kind: 'unresolved_module_edge',
-    }));
-  });
-
-  it.each([
-    ['reachable const referenced elsewhere', [
-      'const shared = { resolve: { alias: {} } };',
-      'consume(shared);',
-      'export default shared;',
-    ].join('\n')],
-    ['reachable identifier initialized by a call', [
-      'const shared = makeConfig();',
-      'export default shared;',
-    ].join('\n')],
-    ['alias property outside the reachable set', [
-      'const stray = { alias: {} };',
-      'export default {};',
-    ].join('\n')],
-  ] as const)('fails Rule C for %s', (_label, configSource) => {
-    const report = inspectHeldoutLeakChanges([{
-      path: 'vite.config.ts',
-      addedText: configSource,
-      sourceText: configSource,
-    }], 'F', bindings);
-
-    expect(report.findings).toContainEqual(expect.objectContaining({
-      path: 'vite.config.ts',
-      kind: 'unresolved_module_edge',
-    }));
-  });
-
-  it('applies a regex alias only to matching specifiers', () => {
-    const configSource = [
-      "export default { resolve: { alias: [{ find: /^@policy$/, replacement: './src/vtt/heldout-evaluation.ts' }] } };",
-    ].join('\n');
-    const report = inspectHeldoutLeakChanges([{
-      path: 'vite.config.ts',
-      addedText: configSource,
-      sourceText: configSource,
-    }], 'F', bindings, {
-      candidateSourceFiles: {
-        'src/ui/ordinary-consumer.ts': "import ordinary from './ordinary-module';",
-      },
-    });
-
-    expect(report.findings).toEqual([]);
-  });
-
-  it('reports zero findings for the actual Vite and Vitest configs plus the actual src tree', () => {
-    expect(Object.keys(actualSourceFiles)).toHaveLength(674);
-    expect(actualTreeReport.checkedFiles).toBe(Object.keys(actualSourceFiles).length + 3);
-    expect(actualTreeReport.astInspectedFiles).toBe(Object.keys(actualSourceFiles).length + 2);
-    expect(actualTreeReport.findings).toEqual([]);
-  });
-
-  it('still reports an injected leak in configuration-reinspection mode', () => {
-    expect(injectedActualTreeReport.astInspectedFiles)
-      .toBe(Object.keys(injectedActualSourceFiles).length + 2);
-    expect(injectedActualTreeReport.findings).toEqual([expect.objectContaining({
-      path: 'src/ui/injected-heldout-leak.ts',
-      kind: 'protocol_import',
-    })]);
-  });
-
-  it('skips declaration-only files during configuration-wide inspection', () => {
-    const report = inspectHeldoutLeakChanges([{
-      path: 'package.json',
-      addedText: '{"imports":{}}',
-    }], 'F', bindings, {
-      packageJsonFiles: { 'package.json': '{"imports":{}}' },
-      candidateSourceFiles: {
-        'src/vite-env.d.ts': 'declare module "*.svg" { const source: string; export default source; }',
-        'src/ui/clean.ts': 'export const clean = true;',
-      },
-    });
-
-    expect(report).toMatchObject({ checkedFiles: 3, findings: [] });
-  });
-
   it('uses NUL-delimited Git records so rename-only and quoted paths are inspected', () => {
     const nameStatus = [
       'R100', 'tests/fixture.ts', 'src/quoted "fixture".ts',
@@ -2795,7 +1366,6 @@ describe('held-out reserve leak wall', () => {
       'eval executable strings',
       'new Function executable strings',
       'custom loader implementations',
-      'Vite plugin config hooks',
       'runtime-generated code',
     ]);
     expect(moduleSpecifiers('tools/tuning/repair-ranking.ts', [
