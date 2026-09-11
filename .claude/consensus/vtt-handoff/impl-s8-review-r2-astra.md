@@ -1,0 +1,17 @@
+1. **F90 — SIGNIFICANT, correctness: F89 remains incomplete for stale player-window submissions.**  
+   [encounter-app.ts:1635](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/encounter-app.ts:1635) silently returns when no request is pending. When decoding rejects a stale request, the catch updates only the DM’s error; it sends no correlated player feedback. The player clears its pending submission only upon receiving that feedback at [encounter-app.ts:1117](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/encounter-app.ts:1117). Thus a delayed player decision can still receive no error or terminal acknowledgement.
+
+   The regression at [encounter-projections.test.ts:264](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/tests/unit/vtt/encounter-projections.test.ts:264) supplies a synthetic refusal directly to the helper, bypassing this failing path.
+
+   **Required:** return correlated error feedback for structurally valid, same-session decisions rejected as stale or received without a pending request. Exercise the actual receiver and player feedback path; assert one error, zero execution and zero retries.
+
+2. **F91 — SIGNIFICANT, correctness/plan-conformance: the new wrappers report commitment before durability.**  
+   [encounter-session-service.ts:766](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/encounter-session-service.ts:766), [:775](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/encounter-session-service.ts:775) and [:782](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/encounter-session-service.ts:782) immediately manufacture `committed` outcomes after synchronous placement, world-object and adjudication calls. Those host methods apply/publish without awaiting persistence at [dm-encounter-host.ts:1477](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/dm-encounter-host.ts:1477). IndexedDB failure is detected asynchronously by [local-session-store.ts:362](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/local-session-store.ts:362).
+
+   Consequently, the shared handler can clear the submission error and report commitment while the write remains unresolved or subsequently fails. This contradicts the binding commitment definition at [plan:227](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/.tmp-plans/2026-09-09-vtt-handoff-plan.md:227). The separate browser snapshot flush does not delay these returned outcomes.
+
+   **Required:** give these operations authoritative terminal settlement, including the applied revision and durability barrier. Add real-host, controllable-store regressions proving no premature commitment and correct failure/closure handling without retries.
+
+Verified: F88’s payload relocation is implemented: private catalogs construct placement commands and retain world-object commands; UI submissions carry offered IDs, and manual adjudication uses an application intent. The facade is 209 lines. Existing test expectations were retained apart from the justified service-edge replacements. The new boundary check derives command discriminators symbolically and catches ordinary command literals regardless of variable name, though its use-site detection remains syntactic. No coordinate formulas, fixture pins or frozen contract bytes changed.
+
+**REJECT S8 — blocking findings F90, F91.**

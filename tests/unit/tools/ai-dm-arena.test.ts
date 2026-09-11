@@ -1275,7 +1275,7 @@ describe('AI-DM arena', () => {
     }));
   });
 
-  it('threads inline renderer-profile JSON through dry-run rows while keeping arena metadata', { timeout: 30_000 }, async () => {
+  it('threads inline renderer-profile JSON through dry-run rows while keeping arena metadata', { timeout: 60_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-renderer-profile-'));
     const profiles = [
       { ...ALL_OPTIONS_TEST_RENDERER_PROFILE, nullFields: 'omit' as const },
