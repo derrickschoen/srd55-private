@@ -129,6 +129,13 @@ function nonce() {
   return `${String(process.pid)}.${randomBytes(8).toString('hex')}`;
 }
 
+export function productionBuildEnv(parentEnv) {
+  return {
+    ...parentEnv,
+    NODE_ENV: 'production',
+  };
+}
+
 function cachePointer(inputDigest) {
   return join(CACHE_ROOT, `${inputDigest}.json`);
 }
@@ -185,7 +192,7 @@ function runRealBuild(root) {
   process.stdout.write('dist cache miss: running npm run build\n');
   const result = spawnSync('npm', ['run', 'build'], {
     cwd: root,
-    env: process.env,
+    env: productionBuildEnv(process.env),
     stdio: 'inherit',
   });
   if (result.error !== undefined) throw result.error;
