@@ -76,6 +76,7 @@ export class InProcessSceneTransport implements SceneTransport {
   readonly #unsubscribeRuntimeFault: () => void;
   #state: SceneTransportStatus = 'connecting';
   #initialSettled = false;
+  #latestEvent: SceneSnapshotEvent | null = null;
 
   constructor(private readonly runtime: ProtocolRuntime) {
     void this.#initial.promise.catch(() => undefined);
@@ -140,6 +141,9 @@ export class InProcessSceneTransport implements SceneTransport {
   subscribe(listener: (event: SceneSnapshotEvent) => void): () => void {
     if (this.#state === 'closed' || this.#state === 'disposed') return () => undefined;
     this.#eventListeners.add(listener);
+    if (this.#latestEvent !== null) {
+      try { listener(this.#latestEvent); } catch { /* Observer failure is isolated. */ }
+    }
     return () => this.#eventListeners.delete(listener);
   }
 
@@ -221,6 +225,7 @@ export class InProcessSceneTransport implements SceneTransport {
   }
 
   #receiveEvent(event: SceneSnapshotEvent, receipt?: ProtocolEstablishedReceipt): void {
+    this.#latestEvent = event;
     if (receipt !== undefined) {
       const pending = [...this.#pending].find((candidate) =>
         candidate.invocationToken === receipt.invocationToken &&

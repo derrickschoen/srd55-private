@@ -7,13 +7,22 @@ import {
   createVttNodeRuntime, type VttNodeRuntime,
 } from '../../../tools/vtt-handoff/node-runtime';
 import {
-  createInProcessConformanceTransport, runDmTransportConformance, TRANSPORT_CONFORMANCE_SCENARIOS,
+  createCountedConformanceSession, createInProcessConformanceTransport, createVisibilityConformanceSession,
+  createVisibilityInProcessTransport,
+  runDmTransportConformance, TRANSPORT_CONFORMANCE_SCENARIOS,
   executeTransportConformanceScenario, runPlayerMismatchConformance, runPlayerMovementConformance,
-  TWO_ROOM_MOVING_PLAYER,
+  runTerminalOutcomeConformance, runVisibilityRemovalConformance, TWO_ROOM_MOVING_PLAYER,
 } from '../../helpers/vtt-handoff/transport-conformance';
 
 const roots: string[] = [];
 const runtimes: VttNodeRuntime[] = [];
+const TERMINAL_CASES = [
+  { expected: 'committed' as const, forced: undefined },
+  { expected: 'refused' as const, forced: { kind: 'refused' as const, code: 'ENGINE_REFUSED' as const, reason: 'controlled refusal' } },
+  { expected: 'cancelled' as const, forced: { kind: 'cancelled' as const, reason: 'controlled cancellation' } },
+  { expected: 'closed' as const, forced: { kind: 'closed' as const } },
+  { expected: 'failed' as const, forced: { kind: 'failed' as const, phase: 'pre_apply' as const, error: new Error('controlled failure') } },
+] as const;
 
 function tokenFile(token: string, playerToken: string): string {
   mkdirSync(resolve('.tmp'), { recursive: true });
@@ -58,18 +67,27 @@ describe('fixed two-room runtime parity', () => {
   it('runs the shared independent conformance assertions through in-process and WebSocket adapters', async () => {
     expect(TRANSPORT_CONFORMANCE_SCENARIOS).toHaveLength(16);
     const inProcess = createInProcessConformanceTransport();
-    const inProcessResultPromise = runDmTransportConformance(inProcess.transport);
+    const inProcessResultPromise = runDmTransportConformance(inProcess.transport, inProcess.reducerExecutions);
     await inProcess.start();
     const inProcessResult = await inProcessResultPromise;
 
     const token = 'runtime-parity-secret';
     const playerToken = 'runtime-parity-player-secret';
+    const nodeCounters: Array<() => number> = [];
     const nodeRuntime = createVttNodeRuntime({
       tokensFile: tokenFile(token, playerToken), allowedOrigins: new Set(), allowOriginless: true,
+      createSession: (principal) => {
+        const counted = createCountedConformanceSession(principal);
+        nodeCounters.push(counted.reducerExecutions);
+        return counted.session;
+      },
     });
     runtimes.push(nodeRuntime);
     const address = await nodeRuntime.listen(0);
-    const websocketResult = await runDmTransportConformance(new WebSocketSceneTransport(address.websocketUrl, token));
+    const websocketResult = await runDmTransportConformance(
+      new WebSocketSceneTransport(address.websocketUrl, token),
+      () => nodeCounters.reduce((total, count) => total + count(), 0),
+    );
     expect(websocketResult.seed).toBe(603_020_001);
     expect(websocketResult.clock).toBe('2026-09-09T12:00:00.000Z');
     expect(websocketResult.canonical.map((response) => ({
@@ -111,7 +129,110 @@ describe('fixed two-room runtime parity', () => {
     expect(nodeRuntime.sessionCounts()).toEqual({ created: 2, active: 0 });
   });
 
+  it('maps all five terminal intent outcomes through the in-process adapter', async () => {
+    const inProcessOutcomes: string[] = [];
+    for (const entry of TERMINAL_CASES) {
+      const adapter = createInProcessConformanceTransport(
+        { role: 'player', playerId: TWO_ROOM_MOVING_PLAYER }, entry.forced,
+      );
+      inProcessOutcomes.push(await runTerminalOutcomeConformance(adapter.transport, adapter.start));
+    }
+    const expected = TERMINAL_CASES.map((entry) => entry.expected);
+    await executeTransportConformanceScenario('five terminal intent outcomes', () => {
+      expect(inProcessOutcomes).toEqual(expected);
+      expect(new Set(inProcessOutcomes)).toEqual(new Set(['committed', 'refused', 'cancelled', 'closed', 'failed']));
+      expect(new Set(inProcessOutcomes.slice(1))).not.toEqual(new Set(expected));
+    });
+  });
+
+  it('maps all five terminal intent outcomes through the WebSocket adapter', async () => {
+    const token = 'terminal-dm-secret';
+    const playerToken = 'terminal-player-secret';
+    const pendingCases = [...TERMINAL_CASES];
+    const nodeRuntime = createVttNodeRuntime({
+      tokensFile: tokenFile(token, playerToken), allowedOrigins: new Set(), allowOriginless: true,
+      createSession: (principal) => {
+        const entry = pendingCases.shift();
+        if (entry === undefined) throw new Error('Terminal-outcome session queue was exhausted.');
+        return createCountedConformanceSession(principal, entry.forced).session;
+      },
+    });
+    runtimes.push(nodeRuntime);
+    const address = await nodeRuntime.listen(0);
+    const websocketOutcomes: string[] = [];
+    for (const _entry of TERMINAL_CASES) {
+      websocketOutcomes.push(await runTerminalOutcomeConformance(
+        new WebSocketSceneTransport(address.websocketUrl, playerToken), () => Promise.resolve(),
+      ));
+    }
+    const expected = TERMINAL_CASES.map((entry) => entry.expected);
+    await executeTransportConformanceScenario('five terminal intent outcomes', () => {
+      expect(websocketOutcomes).toEqual(expected);
+      expect(new Set(websocketOutcomes)).toEqual(new Set(['committed', 'refused', 'cancelled', 'closed', 'failed']));
+      expect(new Set(websocketOutcomes.slice(1))).not.toEqual(new Set(expected));
+    });
+  });
+
+  it('removes newly hidden entities through in-process and WebSocket snapshots', async () => {
+    const principal = { role: 'player' as const, playerId: TWO_ROOM_MOVING_PLAYER };
+    const inProcessSession = createVisibilityInProcessTransport(principal);
+    await runVisibilityRemovalConformance(
+      inProcessSession.transport,
+      inProcessSession.hideVisibleEntities,
+    );
+
+    const controls: Array<() => void> = [];
+    const token = 'visibility-dm-secret';
+    const playerToken = 'visibility-player-secret';
+    const nodeRuntime = createVttNodeRuntime({
+      tokensFile: tokenFile(token, playerToken), allowedOrigins: new Set(), allowOriginless: true,
+      createSession: (authenticatedPrincipal) => {
+        const controlled = createVisibilityConformanceSession(authenticatedPrincipal);
+        controls.push(controlled.hideVisibleEntities);
+        return controlled.session;
+      },
+    });
+    runtimes.push(nodeRuntime);
+    const address = await nodeRuntime.listen(0);
+    const websocket = new WebSocketSceneTransport(address.websocketUrl, playerToken);
+    const websocketExercise = runVisibilityRemovalConformance(websocket, () => {
+      const hide = controls[0];
+      if (hide === undefined) throw new Error('WebSocket visibility control is unavailable.');
+      hide();
+    });
+    await websocketExercise;
+    await executeTransportConformanceScenario('visible-to-hidden entity removal', () => {
+      expect(controls).toHaveLength(1);
+      expect(websocket.pendingRequestCount()).toBe(0);
+    });
+  });
+
   it('reconnects to a fresh session, full snapshot, and correlation ledger', async () => {
+    const firstInProcess = createInProcessConformanceTransport();
+    const firstInProcessOpen = await firstInProcess.transport.request({
+      v: 1, id: '', method: 'session.open', params: { requestedRole: 'dm' },
+    });
+    await firstInProcess.transport.initialSnapshot();
+    await expect(firstInProcess.transport.request({ v: 1, id: 'reused', method: 'scene.snapshot', params: {} }))
+      .resolves.toMatchObject({ id: 'reused', ok: true });
+    firstInProcess.transport.dispose();
+    const secondInProcess = createInProcessConformanceTransport();
+    const secondInProcessOpen = await secondInProcess.transport.request({
+      v: 1, id: '', method: 'session.open', params: { requestedRole: 'dm' },
+    });
+    await expect(secondInProcess.transport.initialSnapshot()).resolves.toMatchObject({
+      revision: 0,
+      tokens: [
+        { id: 'token:two-room-adventurer', x: 2, y: 4, z: 0 },
+        { id: 'token:two-room-goblin', x: 8, y: 4, z: 0 },
+      ],
+    });
+    await expect(secondInProcess.transport.request({ v: 1, id: 'reused', method: 'scene.snapshot', params: {} }))
+      .resolves.toMatchObject({ id: 'reused', ok: true });
+    expect(firstInProcessOpen.ok && secondInProcessOpen.ok ? firstInProcessOpen.result.sessionId : null)
+      .not.toBe(secondInProcessOpen.ok ? secondInProcessOpen.result.sessionId : null);
+    secondInProcess.transport.dispose();
+
     const token = 'reconnect-dm-secret';
     const nodeRuntime = createVttNodeRuntime({
       tokensFile: tokenFile(token, 'unused-player-secret'), allowedOrigins: new Set(), allowOriginless: true,

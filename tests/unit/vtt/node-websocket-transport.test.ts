@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from '../../helpers/test-filesystem';
 import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { WebSocketServer } from 'ws';
 import {
   createDefaultNodeRuntimeSession, createVttNodeRuntime, type VttNodeRuntime,
 } from '../../../tools/vtt-handoff/node-runtime';
@@ -11,6 +12,7 @@ import { executeTransportConformanceScenario } from '../../helpers/vtt-handoff/t
 
 const roots: string[] = [];
 const runtimes: VttNodeRuntime[] = [];
+const scriptedServers: WebSocketServer[] = [];
 
 function tokenFile(token: string): string {
   mkdirSync(resolve('.tmp'), { recursive: true });
@@ -23,6 +25,10 @@ function tokenFile(token: string): string {
 }
 
 afterEach(async () => {
+  await Promise.all(scriptedServers.splice(0).map(async (server) => {
+    for (const socket of server.clients) socket.terminate();
+    await new Promise<void>((resolveClosed) => server.close(() => resolveClosed()));
+  }));
   await Promise.all(runtimes.splice(0).map((runtime) => runtime.close()));
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
@@ -41,23 +47,59 @@ describe('browser-safe WebSocket scene transport', () => {
     const address = await runtime.listen(0);
     const warm = new WebSocketSceneTransport(address.websocketUrl, token);
     await warm.request({ v: 1, id: 'warm-open', method: 'session.open', params: { requestedRole: 'dm' } });
-    await warm.initialSnapshot();
+    const cannedSnapshot = await warm.initialSnapshot();
     warm.close();
+    await runtime.close();
+    runtimes.splice(runtimes.indexOf(runtime), 1);
     const originalParse = JSON.parse;
     const originalStringify = JSON.stringify;
+    const eventWire = originalStringify({ v: 1, event: 'scene.snapshot', seq: 1, data: cannedSnapshot });
+    const receivedProbeWires: string[] = [];
+    const scriptedServer = new WebSocketServer({
+      host: '127.0.0.1', port: 0, perMessageDeflate: false,
+      handleProtocols: (protocols) => protocols.has('vtt.v1') ? 'vtt.v1' : false,
+    });
+    scriptedServers.push(scriptedServer);
+    await new Promise<void>((resolveListening, reject) => {
+      scriptedServer.once('listening', resolveListening);
+      scriptedServer.once('error', reject);
+    });
+    const scriptedAddress = scriptedServer.address();
+    if (scriptedAddress === null || typeof scriptedAddress === 'string') throw new Error('Scripted server has no address.');
+    const scriptedUrl = `ws://127.0.0.1:${String(scriptedAddress.port)}`;
+    scriptedServer.on('connection', (socket) => socket.on('message', (data) => {
+      const wire = data.toString();
+      const request = originalParse(wire) as unknown;
+      const envelope = typeof request === 'object' && request !== null ? request : {};
+      const id = Reflect.get(envelope, 'id');
+      if (id === 'invalid-schema') {
+        socket.send(originalStringify({
+          v: 1, id, ok: false, error: { code: 'INVALID_REQUEST', message: 'The request parameters are invalid.' },
+        }));
+        return;
+      }
+      if (id === 'malformed-event') {
+        socket.send('{"v":1,"event":"scene.snapshot","seq":2,"data":{}}');
+        return;
+      }
+      if (id === 'probe-open') receivedProbeWires.push(wire);
+      socket.send(originalStringify({
+        v: 1, id, ok: true,
+        result: { sessionId: `session:${String(id)}`, capabilities: ['scene.snapshot', 'token.move', 'door.set'] },
+      }));
+      socket.send(eventWire);
+    }));
     let measuring = false;
+    let injectMutantSerialization = false;
+    let injectingMutantSerialization = false;
     let parseCount = 0;
     let stringifyCount = 0;
-    const isMeasuredJsonCall = (stack: string | undefined, zodClientError: boolean): boolean => {
+    const isMeasuredJsonCall = (stack: string | undefined): boolean => {
       const frames = stack?.split('\n') ?? [];
-      const directCaller = frames[3] ?? '';
-      if (/src\/vtt\/handoff\/websocket-transport\.ts|tools\/vtt-handoff\/node-runtime\.ts/u.test(directCaller)) return true;
-      return zodClientError
-        && /node_modules\/zod\/v4\/core\/errors\.js/u.test(directCaller)
-        && frames.some((frame) => /src\/vtt\/handoff\/websocket-transport\.ts/u.test(frame));
+      return frames.some((frame) => /src\/vtt\/handoff\//u.test(frame));
     };
     const parse = vi.spyOn(JSON, 'parse').mockImplementation((text: string, reviver?: (this: unknown, key: string, value: unknown) => unknown) => {
-      if (measuring && isMeasuredJsonCall(new Error().stack, false)) parseCount += 1;
+      if (measuring && isMeasuredJsonCall(new Error().stack)) parseCount += 1;
       return originalParse(text, reviver);
     });
     const stringify = vi.spyOn(JSON, 'stringify').mockImplementation((
@@ -65,12 +107,20 @@ describe('browser-safe WebSocket scene transport', () => {
       replacer?: ((this: unknown, key: string, value: unknown) => unknown) | (number | string)[] | null,
       space?: number | string,
     ) => {
-      if (measuring && isMeasuredJsonCall(new Error().stack, true)) stringifyCount += 1;
+      const measured = measuring && isMeasuredJsonCall(new Error().stack);
+      if (measured) {
+        stringifyCount += 1;
+      }
+      if (measured && injectMutantSerialization && !injectingMutantSerialization) {
+        injectingMutantSerialization = true;
+        JSON.stringify({ mutant: 'extra-adapter-serialization' });
+        injectingMutantSerialization = false;
+      }
       return typeof replacer === 'function'
         ? originalStringify(value, replacer, space)
         : originalStringify(value, replacer, space);
     });
-    const transport = new WebSocketSceneTransport(address.websocketUrl, token);
+    const transport = new WebSocketSceneTransport(scriptedUrl, token);
     const statuses: string[] = [];
     transport.subscribeStatus((status) => statuses.push(status));
     const events: number[] = [];
@@ -81,22 +131,51 @@ describe('browser-safe WebSocket scene transport', () => {
     await expect(transport.initialSnapshot()).resolves.toMatchObject({ revision: 0 });
     expect(statuses).toEqual(['connecting', 'open']);
     expect(events[0]).toBe(1);
-    const first = await transport.request({
-      v: 1, id: 'budget-id', method: 'scene.snapshot', params: {},
+    const invalid = new WebSocketSceneTransport(scriptedUrl, token);
+    const rejected = await invalid.request({
+      v: 1, id: 'invalid-schema', method: 'scene.snapshot', params: { unexpected: true },
     });
-    expect(first).toMatchObject({ id: 'budget-id', ok: true });
-    const rejected = await transport.request({
-      v: 1, id: 'budget-id', method: 'scene.snapshot', params: {},
+    invalid.close();
+    const malformed = new WebSocketSceneTransport(scriptedUrl, token);
+    const malformedFault = malformed.request({
+      v: 1, id: 'malformed-event', method: 'session.open', params: { requestedRole: 'dm' },
     });
+    await expect(malformedFault).rejects.toBeInstanceOf(SceneTransportFaultError);
     measuring = false;
-    expect(rejected).toMatchObject({ id: 'budget-id', ok: false, error: { code: 'DUPLICATE_REQUEST_ID' } });
-    const totalWireEnvelopes = 7;
-    const assertBudget = (extraSerializations: number): void => {
-      expect(stringifyCount + extraSerializations).toBe(totalWireEnvelopes);
-      expect(parseCount).toBe(totalWireEnvelopes);
+    expect(rejected).toMatchObject({ id: 'invalid-schema', ok: false, error: { code: 'INVALID_REQUEST' } });
+    const assertBudget = (expectedStringify: number, expectedParse: number): void => {
+      expect({ stringifyCount, parseCount }).toEqual({ stringifyCount: expectedStringify, parseCount: expectedParse });
     };
-    assertBudget(0);
-    expect(() => assertBudget(1)).toThrow();
+    assertBudget(3, 4);
+
+    parseCount = 0;
+    stringifyCount = 0;
+    injectMutantSerialization = true;
+    measuring = true;
+    const mutant = new WebSocketSceneTransport(scriptedUrl, token);
+    await mutant.request({ v: 1, id: 'probe-open', method: 'session.open', params: { requestedRole: 'dm' } });
+    await mutant.initialSnapshot();
+    mutant.close();
+    measuring = false;
+    expect(() => assertBudget(1, 2)).toThrow();
+    const mutantCounts = { stringifyCount, parseCount };
+    expect(mutantCounts).toEqual({ stringifyCount: 2, parseCount: 2 });
+
+    parseCount = 0;
+    stringifyCount = 0;
+    injectMutantSerialization = false;
+    measuring = true;
+    const restored = new WebSocketSceneTransport(scriptedUrl, token);
+    await restored.request({ v: 1, id: 'probe-open', method: 'session.open', params: { requestedRole: 'dm' } });
+    await restored.initialSnapshot();
+    restored.close();
+    measuring = false;
+    assertBudget(1, 2);
+    expect(receivedProbeWires).toHaveLength(2);
+    expect(receivedProbeWires[0]).toBe(receivedProbeWires[1]);
+    console.info(
+      `vtt-json-budget baseline=3/4 mutant=${String(mutantCounts.stringifyCount)}/${String(mutantCounts.parseCount)} restored=1/2`,
+    );
     parse.mockRestore();
     stringify.mockRestore();
 
@@ -147,6 +226,43 @@ describe('browser-safe WebSocket scene transport', () => {
     expect(response).toMatchObject({ id: 'captured-id', ok: true });
     expect(reads).toBe(1);
     expect(transport.pendingRequestCount()).toBe(0);
+    transport.close();
+  });
+
+  it('correlates an id by its serialized scalar value', async () => {
+    const token = 'serialized-id-secret';
+    const runtime = createVttNodeRuntime({ tokensFile: tokenFile(token), allowedOrigins: new Set(), allowOriginless: true });
+    runtimes.push(runtime);
+    const address = await runtime.listen(0);
+    const transport = new WebSocketSceneTransport(address.websocketUrl, token);
+    const response = await transport.request({
+      v: 1,
+      id: { toJSON: (): string => 'wire-id' },
+      method: 'session.open',
+      params: { requestedRole: 'dm' },
+    });
+    expect(response).toMatchObject({ id: 'wire-id', ok: true });
+    expect(transport.pendingRequestCount()).toBe(0);
+    transport.close();
+  });
+
+  it('preserves an enumerable own __proto__ field so the server refuses the invalid request', async () => {
+    const token = 'own-proto-secret';
+    const runtime = createVttNodeRuntime({ tokensFile: tokenFile(token), allowedOrigins: new Set(), allowOriginless: true });
+    runtimes.push(runtime);
+    const address = await runtime.listen(0);
+    const transport = new WebSocketSceneTransport(address.websocketUrl, token);
+    await transport.request({ v: 1, id: 'open', method: 'session.open', params: { requestedRole: 'dm' } });
+    const request: Record<string, unknown> = {
+      v: 1, id: 'own-proto', method: 'scene.snapshot', params: {},
+    };
+    Object.defineProperty(request, '__proto__', {
+      configurable: true, enumerable: true, value: { polluted: true }, writable: true,
+    });
+    await expect(transport.request(request)).resolves.toMatchObject({
+      id: 'own-proto', ok: false, error: { code: 'INVALID_REQUEST' },
+    });
+    expect(Object.getPrototypeOf(request)).toBe(Object.prototype);
     transport.close();
   });
 

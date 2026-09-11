@@ -45,68 +45,41 @@ export class WebSocketSceneTransport implements SceneTransport {
   request(request: unknown): Promise<HandoffResponse> {
     if (this.#terminal()) return Promise.reject(new SceneTransportClosedError());
     return new Promise<HandoffResponse>((resolve, reject) => {
-      const reservation: { key: string | null } = { key: null };
-      let duplicate: SceneTransportFaultError | null = null;
-      let rootVisited = false;
-
-      const reserve = (value: unknown): void => {
-        if (reservation.key !== null) return;
-        const envelope = objectEnvelope(value);
-        const id = typeof envelope?.id === 'string' ? envelope.id : null;
-        const method = typeof envelope?.method === 'string' ? envelope.method : null;
-        if (id !== null && this.#pending.has(id)) {
-          duplicate = this.#fault('PROTOCOL_ERROR', 'A request with this id is already pending.', 1002);
-          throw duplicate;
-        }
-        this.#uncorrelatedSequence += 1;
-        const key = id ?? `\u0000uncorrelated:${String(this.#uncorrelatedSequence)}`;
-        this.#pending.set(key, { method, resolve, reject });
-        reservation.key = key;
-      };
-
       let wire: string | undefined;
+      let rootSerializedValue: unknown;
+      let id: string | null = null;
+      let method: string | null = null;
       try {
-        wire = JSON.stringify(request, (key, value: unknown): unknown => {
-          if (key !== '' || rootVisited) return value;
-          rootVisited = true;
-          const envelope = objectEnvelope(value);
-          if (envelope === null) {
-            reserve(value);
-            return value;
-          }
-
-          const keys = Object.keys(envelope);
-          const id = keys.includes('id') ? Reflect.get(envelope, 'id') : undefined;
-          const method = keys.includes('method') ? Reflect.get(envelope, 'method') : undefined;
-          const snapshot: Record<string, unknown> = {};
-          if (keys.includes('id')) snapshot.id = id;
-          if (keys.includes('method')) snapshot.method = method;
-          reserve(snapshot);
-          for (const field of keys) {
-            if (field !== 'id' && field !== 'method') snapshot[field] = Reflect.get(envelope, field);
-          }
-          const ordered: Record<string, unknown> = {};
-          for (const field of keys) ordered[field] = snapshot[field];
-          return ordered;
+        wire = JSON.stringify(request, function captureWireIdentity(
+          this: unknown, key: string, value: unknown,
+        ): unknown {
+          if (key === '') rootSerializedValue = value;
+          else if (this === rootSerializedValue && key === 'id') id = typeof value === 'string' ? value : null;
+          else if (this === rootSerializedValue && key === 'method') method = typeof value === 'string' ? value : null;
+          return value;
         });
       } catch {
-        if (reservation.key !== null) this.#pending.delete(reservation.key);
-        reject(duplicate ?? this.#fault('PROTOCOL_ERROR', 'The request is not JSON serializable.', 1002));
-        return;
-      }
-
-      if (wire === undefined || reservation.key === null) {
-        if (reservation.key !== null) this.#pending.delete(reservation.key);
         reject(this.#fault('PROTOCOL_ERROR', 'The request is not JSON serializable.', 1002));
         return;
       }
+
+      if (wire === undefined) {
+        reject(this.#fault('PROTOCOL_ERROR', 'The request is not JSON serializable.', 1002));
+        return;
+      }
+      if (id !== null && this.#pending.has(id)) {
+        reject(this.#fault('PROTOCOL_ERROR', 'A request with this id is already pending.', 1002));
+        return;
+      }
+      this.#uncorrelatedSequence += 1;
+      const pendingKey = id ?? `\u0000uncorrelated:${String(this.#uncorrelatedSequence)}`;
+      this.#pending.set(pendingKey, { method, resolve, reject });
       if (this.#terminal()) {
-        this.#pending.delete(reservation.key);
+        this.#pending.delete(pendingKey);
         reject(new SceneTransportClosedError());
         return;
       }
 
-      const pendingKey = reservation.key;
       const send = (): void => {
         this.#waitingForOpen.delete(send);
         if (this.#terminal() || this.#socket.readyState !== WebSocket.OPEN) {
@@ -170,9 +143,12 @@ export class WebSocketSceneTransport implements SceneTransport {
     catch { this.#protocolFault('The socket emitted invalid JSON.'); return; }
     const envelope = objectEnvelope(value);
     if (envelope?.event === 'scene.snapshot') {
-      const event = handoffEventSchema.safeParse(value);
-      if (!event.success) { this.#protocolFault('The socket emitted an invalid event.'); return; }
-      const snapshotEvent = event.data as SceneSnapshotEvent;
+      const event = handoffEventSchema._zod.run({ value, issues: [] }, { async: false, jitless: true });
+      if (event instanceof Promise || event.issues.length > 0) {
+        this.#protocolFault('The socket emitted an invalid event.');
+        return;
+      }
+      const snapshotEvent = event.value as SceneSnapshotEvent;
       this.#latestEvent = snapshotEvent;
       if (this.#resolveInitial !== null) {
         this.#resolveInitial(snapshotEvent.data);
@@ -188,13 +164,17 @@ export class WebSocketSceneTransport implements SceneTransport {
       this.#protocolFault('The socket emitted an invalid protocol message.');
       return;
     }
-    const response = handoffResponseSchema.safeParse(value);
-    if (!response.success) { this.#protocolFault('The socket emitted an invalid response.'); return; }
-    const pending = this.#pending.get(response.data.id);
+    const response = handoffResponseSchema._zod.run({ value, issues: [] }, { async: false, jitless: true });
+    if (response instanceof Promise || response.issues.length > 0) {
+      this.#protocolFault('The socket emitted an invalid response.');
+      return;
+    }
+    const parsedResponse = response.value as HandoffResponse;
+    const pending = this.#pending.get(parsedResponse.id);
     if (pending === undefined) { this.#protocolFault('The socket emitted an uncorrelated response.'); return; }
-    this.#pending.delete(response.data.id);
-    if (pending.method === 'session.open' && response.data.ok) this.#setState('open');
-    pending.resolve(response.data as HandoffResponse);
+    this.#pending.delete(parsedResponse.id);
+    if (pending.method === 'session.open' && parsedResponse.ok) this.#setState('open');
+    pending.resolve(parsedResponse);
   };
 
   readonly #onClose = (event: CloseEvent): void => {

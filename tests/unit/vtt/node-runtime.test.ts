@@ -1,3 +1,4 @@
+import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
   chmodSync, mkdirSync, mkdtempSync, renameSync, rmSync, symlinkSync, writeFileSync,
@@ -109,7 +110,7 @@ function closeCode(socket: WebSocket): Promise<number> {
   return new Promise((resolveCode) => socket.once('close', (code) => resolveCode(code)));
 }
 
-function rawUpgradePeer(url: string, token: string): Promise<Socket> {
+function rawUpgradePeer(url: string, token: string, pauseAfterUpgrade = true): Promise<Socket> {
   const endpoint = new URL(url);
   return new Promise((resolveSocket, reject) => {
     const socket = createConnection({ host: '127.0.0.1', port: Number(endpoint.port) });
@@ -121,7 +122,7 @@ function rawUpgradePeer(url: string, token: string): Promise<Socket> {
       try {
         expect(headers).toMatch(/^HTTP\/1\.1 101 /u);
         socket.removeAllListeners('data');
-        socket.pause();
+        if (pauseAfterUpgrade) socket.pause();
         resolveSocket(socket);
       } catch (error: unknown) { reject(error); }
     });
@@ -137,6 +138,23 @@ function rawUpgradePeer(url: string, token: string): Promise<Socket> {
       '', '',
     ].join('\r\n')));
   });
+}
+
+function maskedTextFrame(text: string): Buffer {
+  const payload = Buffer.from(text);
+  if (payload.byteLength >= 126) throw new Error('The raw test frame must use the short length form.');
+  const mask = Buffer.from([0x11, 0x22, 0x33, 0x44]);
+  const frame = Buffer.alloc(2 + mask.byteLength + payload.byteLength);
+  frame[0] = 0x81;
+  frame[1] = 0x80 | payload.byteLength;
+  mask.copy(frame, 2);
+  for (let index = 0; index < payload.byteLength; index += 1) {
+    const maskByte = mask[index % mask.byteLength];
+    const payloadByte = payload[index];
+    if (maskByte === undefined || payloadByte === undefined) throw new Error('Raw frame indexing failed.');
+    frame[6 + index] = payloadByte ^ maskByte;
+  }
+  return frame;
 }
 
 interface RawHandshakeOverrides {
@@ -292,6 +310,41 @@ describe('VTT Node WebSocket runtime', () => {
     })).toThrow('changed while it was opened');
   });
 
+  it('refuses a FIFO without blocking and proves removing O_NONBLOCK exceeds the bounded deadline', () => {
+    const root = temporaryRoot();
+    const fifo = resolve(root, 'tokens.fifo');
+    execFileSync('mkfifo', [fifo]);
+    const childSource = resolve(root, 'fifo-runtime-child.ts');
+    const runtimeSource = resolve('tools/vtt-handoff/token-claims.ts');
+    writeFileSync(childSource, [
+      `import { readTokenClaims } from ${JSON.stringify(runtimeSource)};`,
+      'try {',
+      `  readTokenClaims(${JSON.stringify(fifo)});`,
+      "  process.stderr.write('runtime unexpectedly accepted FIFO\\n');",
+      '  process.exitCode = 2;',
+      '} catch (error: unknown) {',
+      "  process.stdout.write(error instanceof Error ? error.message + '\\n' : 'non-error rejection\\n');",
+      '}',
+      '',
+    ].join('\n'), { mode: 0o600 });
+    const tsx = resolve('node_modules/.bin/tsx');
+    const actual = spawnSync(tsx, [childSource], {
+      cwd: process.cwd(), encoding: 'utf8', timeout: 2_000,
+    });
+    expect({ status: actual.status, signal: actual.signal, stderr: actual.stderr }).toEqual({
+      status: 0, signal: null, stderr: '',
+    });
+    expect(actual.stdout).toBe('VTT_RUNTIME_TOKENS_FILE must be a regular nonsymlink file.\n');
+
+    const mutant = spawnSync(process.execPath, ['-e', [
+      "const { constants, openSync } = require('node:fs');",
+      `openSync(${JSON.stringify(fifo)}, constants.O_RDONLY | constants.O_NOFOLLOW);`,
+    ].join('\n')], { encoding: 'utf8', timeout: 250 });
+    expect(mutant.status).toBeNull();
+    expect(mutant.signal).toBe('SIGTERM');
+    expect(mutant.error === undefined ? undefined : Reflect.get(mutant.error, 'code')).toBe('ETIMEDOUT');
+  });
+
   it('authenticates before upgrade, echoes only vtt.v1, and binds claims to session.open', async () => {
     const setup = await runtime([
       { tokenSha256: hash('dm-secret'), role: 'dm' },
@@ -393,6 +446,22 @@ describe('VTT Node WebSocket runtime', () => {
     peer.resume();
     await expect(peerClosed).resolves.toBeUndefined();
     expect(setup.runtime.sessionCounts().active).toBe(0);
+  });
+
+  it('contains a malformed frame received while a policy-closing peer is still physical', async () => {
+    const setup = await runtime([{ tokenSha256: hash('dm-secret'), role: 'dm' }]);
+    const peer = await rawUpgradePeer(setup.url, 'dm-secret', false);
+    const peerClosed = new Promise<void>((resolveClosed) => peer.once('close', () => resolveClosed()));
+    peer.write(maskedTextFrame(JSON.stringify({
+      v: 1, id: 'before-open', method: 'scene.snapshot', params: {},
+    })));
+    await new Promise<void>((resolveTurn) => setTimeout(resolveTurn, 20));
+    peer.write(Buffer.from([0x83, 0x00]));
+    await new Promise<void>((resolveTurn) => setTimeout(resolveTurn, 20));
+    await expect(bounded(setup.runtime.close(), 'closing-frame factory shutdown')).resolves.toBeUndefined();
+    await expect(bounded(peerClosed, 'closing-frame physical close')).resolves.toBeUndefined();
+    expect(peer.destroyed).toBe(true);
+    expect(setup.runtime.sessionCounts()).toEqual({ created: 1, active: 0 });
   });
 
   it('uses fresh logical sessions and refuses reused wire ids before dispatch', async () => {

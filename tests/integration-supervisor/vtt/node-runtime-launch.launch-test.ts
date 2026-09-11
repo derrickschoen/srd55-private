@@ -24,31 +24,46 @@ function exited(child: ChildProcess): Promise<{ readonly code: number | null; re
   return new Promise((resolveExit) => child.once('exit', (code, signal) => resolveExit({ code, signal })));
 }
 
-async function stopProcessGroup(child: ChildProcess): Promise<void> {
-  const pid = child.pid;
-  if (pid === undefined) return;
-  if (child.exitCode === null && child.signalCode === null) {
-    try { process.kill(-pid, 'SIGTERM'); } catch { /* It may already have exited. */ }
-  }
-  try {
-    await deadline(exited(child), EXIT_DEADLINE_MS, 'serve process-group termination');
-  } catch {
-    try { process.kill(-pid, 'SIGKILL'); } catch { /* The group may already be gone. */ }
-    await deadline(exited(child), EXIT_DEADLINE_MS, 'forced serve process-group termination');
-  }
-  try { process.kill(-pid, 'SIGKILL'); } catch { /* Prove no surviving descendants by PID below. */ }
+interface LaunchOutput {
+  readonly output: () => string;
+  readonly errors: () => string;
+  readonly drained: Promise<void>;
+  readonly staticPort: () => number | null;
+  readonly websocketUrl: () => string | null;
+  readonly descendantPids: () => readonly number[];
 }
 
-function unusedPort(): Promise<number> {
-  return new Promise((resolvePort, reject) => {
-    const server = createServer();
-    server.once('error', reject);
-    server.listen(0, '127.0.0.1', () => {
-      const address = server.address();
-      if (address === null || typeof address === 'string') { reject(new Error('No ephemeral port was assigned.')); return; }
-      server.close((error) => error === undefined ? resolvePort(address.port) : reject(error));
-    });
-  });
+function diagnostics(label: string, observation: LaunchOutput): string {
+  return [label, '--- stdout ---', observation.output(), '--- stderr ---', observation.errors()].join('\n');
+}
+
+async function stopProcessGroup(child: ChildProcess, observation: LaunchOutput): Promise<void> {
+  const pid = child.pid;
+  try {
+    if (pid !== undefined && child.exitCode === null && child.signalCode === null) {
+      try { process.kill(-pid, 'SIGTERM'); } catch { /* It may already have exited. */ }
+    }
+    try {
+      await deadline(exited(child), EXIT_DEADLINE_MS, 'serve process-group termination');
+    } catch {
+      if (pid !== undefined) {
+        try { process.kill(-pid, 'SIGKILL'); } catch { /* The group may already be gone. */ }
+      }
+      await deadline(exited(child), EXIT_DEADLINE_MS, 'forced serve process-group termination');
+    }
+    if (pid !== undefined) {
+      try { process.kill(-pid, 'SIGKILL'); } catch { /* Prove no surviving descendants by PID below. */ }
+    }
+    await deadline(observation.drained, EXIT_DEADLINE_MS, 'serve output drainage');
+  } catch (error: unknown) {
+    await Promise.race([
+      observation.drained,
+      new Promise<void>((resolveDrain) => setTimeout(resolveDrain, EXIT_DEADLINE_MS)),
+    ]);
+    throw new Error(diagnostics(
+      'Process cleanup failed: ' + (error instanceof Error ? error.message : String(error)), observation,
+    ));
+  }
 }
 
 function provePortFree(port: number): Promise<void> {
@@ -60,15 +75,7 @@ function provePortFree(port: number): Promise<void> {
   });
 }
 
-interface LaunchOutput {
-  readonly output: () => string;
-  readonly errors: () => string;
-  readonly staticPort: () => number | null;
-  readonly runtimePort: number;
-  readonly descendantPids: () => readonly number[];
-}
-
-function launch(tokensFile: string, runtimePort: number, injectFailure: boolean): {
+function launch(tokensFile: string, injectFailure: boolean): {
   readonly child: ChildProcess;
   readonly observation: LaunchOutput;
 } {
@@ -78,13 +85,17 @@ function launch(tokensFile: string, runtimePort: number, injectFailure: boolean)
     env: {
       ...process.env,
       VTT_RUNTIME_TOKENS_FILE: tokensFile,
-      VTT_RUNTIME_PORT: String(runtimePort),
+      VTT_RUNTIME_PORT: '0',
       ...(injectFailure ? { VTT_RUNTIME_INJECT_STARTUP_FAILURE: '1' } : {}),
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let output = '';
   let errors = '';
+  const drained = Promise.all([
+    child.stdout === null ? Promise.resolve() : new Promise<void>((resolveDrain) => child.stdout?.once('close', resolveDrain)),
+    child.stderr === null ? Promise.resolve() : new Promise<void>((resolveDrain) => child.stderr?.once('close', resolveDrain)),
+  ]).then(() => undefined);
   child.stdout?.on('data', (chunk: Buffer) => { output += chunk.toString(); });
   child.stderr?.on('data', (chunk: Buffer) => { errors += chunk.toString(); });
   return {
@@ -92,11 +103,12 @@ function launch(tokensFile: string, runtimePort: number, injectFailure: boolean)
     observation: {
       output: () => output,
       errors: () => errors,
+      drained,
       staticPort: () => {
         const value = /serve: fresh dist\/ available at http:\/\/127\.0\.0\.1:(\d+)/u.exec(output)?.[1];
         return value === undefined ? null : Number(value);
       },
-      runtimePort,
+      websocketUrl: () => /vtt-runtime: listening (ws:\/\/127\.0\.0\.1:\d+\/vtt\/v1)/u.exec(output)?.[1] ?? null,
       descendantPids: () => [
         /serve: process pid (\d+)/u.exec(output)?.[1],
         /serve: vtt runtime child pid (\d+)/u.exec(output)?.[1],
@@ -112,17 +124,33 @@ function waitForOutput(
   predicate: () => boolean,
   label: string,
 ): Promise<void> {
-  return deadline(new Promise<void>((resolveReady, reject) => {
+  const ready = new Promise<void>((resolveReady, reject) => {
     const inspect = (): void => { if (predicate()) resolveReady(); };
     child.stdout?.on('data', inspect);
     child.stderr?.on('data', inspect);
-    child.once('exit', (code) => {
-      inspect();
-      if (!predicate()) reject(new Error(label + ' exited ' + String(code) + ': ' + observation.errors()));
+    child.once('exit', (code, signal) => {
+      void observation.drained.then(() => {
+        inspect();
+        if (!predicate()) reject(new Error(diagnostics(
+          label + ' exited ' + String(code) + ' (' + String(signal) + ') before readiness.', observation,
+        )));
+      });
     });
-    child.once('error', reject);
+    child.once('error', (error) => {
+      void observation.drained.then(() => reject(new Error(diagnostics(
+        label + ' failed to spawn: ' + error.message, observation,
+      ))));
+    });
     inspect();
-  }), STARTUP_DEADLINE_MS, label);
+  });
+  return deadline(ready, STARTUP_DEADLINE_MS, label).catch(async (error: unknown) => {
+    await stopProcessGroup(child, observation);
+    await observation.drained;
+    if (error instanceof Error && error.message.includes('--- stdout ---')) throw error;
+    throw new Error(diagnostics(
+      error instanceof Error ? error.message : String(error), observation,
+    ));
+  });
 }
 
 test('launches a fresh runtime and contains both successful and failed process trees', async () => {
@@ -136,21 +164,22 @@ test('launches a fresh runtime and contains both successful and failed process t
   chmodSync(tokensFile, 0o600);
 
   try {
-  const successfulPort = await unusedPort();
-  const successful = launch(tokensFile, successfulPort, false);
+  const successful = launch(tokensFile, false);
   let successfulPids: readonly number[] = [];
   let successfulStaticPort: number | null = null;
+  let successfulRuntimePort: number | null = null;
   try {
     await waitForOutput(successful.child, successful.observation, () =>
       /serve: fresh dist\/ available at http:\/\/127\.0\.0\.1:\d+/u.test(successful.observation.output())
-      && new RegExp('vtt-runtime: listening ws://127\\.0\\.0\\.1:' + String(successfulPort) + '/vtt/v1', 'u')
-        .test(successful.observation.output()), 'successful launch');
+      && successful.observation.websocketUrl() !== null, 'successful launch');
     successfulStaticPort = successful.observation.staticPort();
     if (successfulStaticPort === null) throw new Error('The static listening line was absent.');
     successfulPids = successful.observation.descendantPids();
     expect(successfulPids).toHaveLength(3);
     const staticOrigin = 'http://127.0.0.1:' + String(successfulStaticPort);
-    const websocketUrl = 'ws://127.0.0.1:' + String(successfulPort) + '/vtt/v1';
+    const websocketUrl = successful.observation.websocketUrl();
+    if (websocketUrl === null) throw new Error('The runtime listening line was absent.');
+    successfulRuntimePort = Number(new URL(websocketUrl).port);
     const stampResponse = await deadline(fetch(staticOrigin + '/vtt-handoff-artifact.json', { cache: 'no-store' }), 5_000, 'artifact fetch');
     expect(stampResponse.ok).toBe(true);
     const stamp = await stampResponse.json() as unknown;
@@ -187,15 +216,15 @@ test('launches a fresh runtime and contains both successful and failed process t
     expect(successful.observation.output() + '\n' + successful.observation.errors()).not.toContain(token);
     socket.close();
   } finally {
-    await stopProcessGroup(successful.child);
+    await stopProcessGroup(successful.child, successful.observation);
   }
   if (successfulStaticPort === null) throw new Error('The successful static port was not recorded.');
+  if (successfulRuntimePort === null) throw new Error('The successful runtime port was not recorded.');
   await provePortFree(successfulStaticPort);
-  await provePortFree(successfulPort);
+  await provePortFree(successfulRuntimePort);
   expect(successfulPids.every((pid) => !existsSync('/proc/' + String(pid)))).toBe(true);
 
-  const failedPort = await unusedPort();
-  const failed = launch(tokensFile, failedPort, true);
+  const failed = launch(tokensFile, true);
   let failedStaticPort: number | null = null;
   let failedPids: readonly number[] = [];
   try {
@@ -208,11 +237,10 @@ test('launches a fresh runtime and contains both successful and failed process t
     const result = await deadline(exited(failed.child), EXIT_DEADLINE_MS, 'failed launch exit');
     expect(result.code).not.toBe(0);
   } finally {
-    await stopProcessGroup(failed.child);
+    await stopProcessGroup(failed.child, failed.observation);
   }
   if (failedStaticPort === null) throw new Error('The failed static port was not recorded.');
   await provePortFree(failedStaticPort);
-  await provePortFree(failedPort);
   expect(failedPids.every((pid) => !existsSync('/proc/' + String(pid)))).toBe(true);
   } finally {
     rmSync(root, { recursive: true, force: true });

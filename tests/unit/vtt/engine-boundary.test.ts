@@ -129,60 +129,102 @@ function dependencyGraph(entrypoints: readonly string[], includeTypes = false): 
   return graph;
 }
 
+function reachableSubgraph(
+  graph: ReadonlyMap<string, SourceModule>, entrypoints: readonly string[],
+): ReadonlyMap<string, SourceModule> {
+  const reachable = new Map<string, SourceModule>();
+  const pending = entrypoints.map((entrypoint) => resolve(ROOT, entrypoint));
+  while (pending.length > 0) {
+    const file = pending.pop();
+    if (file === undefined || reachable.has(file)) continue;
+    const module = graph.get(file);
+    if (module === undefined) throw new Error(`Production graph omitted ${repositoryPath(file)}`);
+    reachable.set(file, module);
+    for (const edge of module.imports) if (edge.resolved !== null) pending.push(edge.resolved);
+  }
+  return reachable;
+}
+
+function graphProgram(
+  graph: ReadonlyMap<string, SourceModule>,
+  overrides: ReadonlyMap<string, string> = new Map(),
+  includeLibraries = false,
+): ts.Program {
+  const options: ts.CompilerOptions = {
+    module: ts.ModuleKind.ESNext,
+    moduleResolution: ts.ModuleResolutionKind.Bundler,
+    noLib: !includeLibraries,
+    noResolve: includeLibraries,
+    skipLibCheck: true,
+    target: ts.ScriptTarget.ESNext,
+    types: [],
+  };
+  const host = ts.createCompilerHost(options);
+  const defaultSourceFile = host.getSourceFile.bind(host);
+  host.getSourceFile = (fileName, languageVersion, onError, shouldCreateNewSourceFile) => {
+    const absolute = resolve(fileName);
+    const override = overrides.get(absolute);
+    const module = graph.get(absolute);
+    if (override !== undefined || module !== undefined) {
+      const source = override ?? module?.sourceFile.text;
+      if (source === undefined) throw new Error(`Graph source is unavailable for ${absolute}`);
+      return ts.createSourceFile(
+        absolute, source, languageVersion, true,
+        absolute.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+      );
+    }
+    return defaultSourceFile(fileName, languageVersion, onError, shouldCreateNewSourceFile);
+  };
+  return ts.createProgram({ rootNames: [...graph.keys()], options, host });
+}
+
+function resolvedSymbol(checker: ts.TypeChecker, node: ts.Node): ts.Symbol | null {
+  let symbol = checker.getSymbolAtLocation(node);
+  if (symbol === undefined) return null;
+  const visited = new Set<ts.Symbol>();
+  while ((symbol.flags & ts.SymbolFlags.Alias) !== 0 && !visited.has(symbol)) {
+    visited.add(symbol);
+    symbol = checker.getAliasedSymbol(symbol);
+  }
+  return symbol;
+}
+
 function platformViolations(graph: ReadonlyMap<string, SourceModule>): readonly string[] {
   const violations: string[] = [];
   const nodeBuiltins = new Set(builtinModules.flatMap((name) => [name, name.replace(/^node:/u, '')]));
-  const browserMembers = new Set([
-    'document', 'window', 'indexedDB', 'SharedArrayBuffer', 'Atomics', 'OffscreenCanvas',
-  ]);
+  const forbiddenNames = /^(?:document|window|indexedDB|IDB(?:Database|Factory|ObjectStore)|Document|HTMLElement|HTMLCanvasElement|OffscreenCanvas|CanvasRenderingContext(?:2D)?|SharedArrayBuffer|Atomics)$/u;
+  const program = graphProgram(graph, new Map(), true);
+  const checker = program.getTypeChecker();
+  const isPlatformSymbol = (symbol: ts.Symbol | null): boolean => {
+    if (symbol === null || !forbiddenNames.test(symbol.getName())) return false;
+    return symbol.getDeclarations()?.some((declaration) => {
+      const file = declaration.getSourceFile().fileName.replaceAll('\\', '/');
+      return /\/typescript\/lib\/lib\.(?:dom|webworker|es\d+\.sharedmemory)\.d\.ts$/u.test(file);
+    }) === true;
+  };
   for (const module of graph.values()) {
     for (const edge of module.imports) {
       if (edge.specifier.startsWith('node:') || nodeBuiltins.has(edge.specifier.split('/')[0] ?? edge.specifier)) {
         violations.push(`${repositoryPath(module.file)} imports ${edge.specifier}`);
       }
     }
-    const browserRoots = new Set(['globalThis', 'window', 'document', 'indexedDB']);
-    for (const statement of module.sourceFile.statements) {
-      if (!ts.isVariableStatement(statement)) continue;
-      for (const declaration of statement.declarationList.declarations) {
-        const initializer = declaration.initializer;
-        if (initializer === undefined) continue;
-        const rootName = ts.isIdentifier(initializer) ? initializer.text : null;
-        if (ts.isIdentifier(declaration.name) && rootName !== null && browserRoots.has(rootName)) {
-          browserRoots.add(declaration.name.text);
-        }
-        if (ts.isObjectBindingPattern(declaration.name) && rootName !== null && browserRoots.has(rootName)) {
-          for (const element of declaration.name.elements) {
-            const property = element.propertyName?.getText(module.sourceFile) ?? element.name.getText(module.sourceFile);
-            if (browserMembers.has(property) && ts.isIdentifier(element.name)) {
-              browserRoots.add(element.name.text);
-              violations.push(`${repositoryPath(module.file)} destructures ${property} from ${rootName}`);
-            }
-          }
-        }
-      }
-    }
+    const sourceFile = program.getSourceFile(module.file);
+    if (sourceFile === undefined) throw new Error(`TypeScript program omitted ${module.file}`);
     const visit = (node: ts.Node): void => {
-      if (ts.isPropertyAccessExpression(node)) {
-        const expression = ts.isIdentifier(node.expression) ? node.expression.text : node.expression.getText(module.sourceFile);
-        if (browserRoots.has(expression) && browserMembers.has(node.name.text)) {
-          violations.push(`${repositoryPath(module.file)} uses ${node.getText(module.sourceFile)}`);
-        }
+      if (ts.isIdentifier(node) && isPlatformSymbol(resolvedSymbol(checker, node))) {
+        violations.push(`${repositoryPath(module.file)} resolves ${node.getText(sourceFile)} to ${resolvedSymbol(checker, node)?.getName() ?? '<unknown>'}`);
       }
       if (
-        ts.isElementAccessExpression(node) &&
-        ts.isIdentifier(node.expression) && browserRoots.has(node.expression.text) &&
-        ts.isStringLiteral(node.argumentExpression) && browserMembers.has(node.argumentExpression.text)
-      ) violations.push(`${repositoryPath(module.file)} uses ${node.getText(module.sourceFile)}`);
-      if (
-        ts.isIdentifier(node) &&
-        /^(?:indexedDB|IDB(?:Database|Factory|ObjectStore)|HTMLCanvasElement|OffscreenCanvas|CanvasRenderingContext(?:2D)?|SharedArrayBuffer|Atomics)$/u.test(node.text)
+        ts.isElementAccessExpression(node) && ts.isStringLiteral(node.argumentExpression)
       ) {
-        violations.push(`${repositoryPath(module.file)} names ${node.text}`);
+        const property = checker.getTypeAtLocation(node.expression).getProperty(node.argumentExpression.text);
+        if (isPlatformSymbol(property ?? null)) {
+          violations.push(`${repositoryPath(module.file)} resolves ${node.getText(sourceFile)} to ${property?.getName() ?? '<unknown>'}`);
+        }
       }
       ts.forEachChild(node, visit);
     };
-    ts.forEachChild(module.sourceFile, visit);
+    ts.forEachChild(sourceFile, visit);
   }
   return [...new Set(violations)].sort();
 }
@@ -245,18 +287,11 @@ function enclosingOperation(node: ts.Node, sourceFile: ts.SourceFile): string {
   return '<module>';
 }
 
-function reducerCallSites(graph: ReadonlyMap<string, SourceModule>): readonly string[] {
-  const program = ts.createProgram({
-    rootNames: [...graph.keys()],
-    options: {
-      module: ts.ModuleKind.ESNext,
-      moduleResolution: ts.ModuleResolutionKind.Bundler,
-      noLib: true,
-      skipLibCheck: true,
-      target: ts.ScriptTarget.ESNext,
-      types: [],
-    },
-  });
+function reducerCallSites(
+  graph: ReadonlyMap<string, SourceModule>,
+  suppliedProgram?: ts.Program,
+): readonly string[] {
+  const program = suppliedProgram ?? graphProgram(graph);
   const checker = program.getTypeChecker();
   const calls: string[] = [];
   for (const module of graph.values()) {
@@ -297,28 +332,70 @@ function runtimeConvergenceEvidence(
   suppliedProgram?: ts.Program,
 ): {
   readonly constructedClasses: ReadonlySet<string>;
+  readonly serviceValues: ReadonlySet<string>;
   readonly reducerCalls: readonly string[];
 } {
-  const program = suppliedProgram ?? ts.createProgram({
-    rootNames: [...graph.keys()],
-    options: {
-      module: ts.ModuleKind.ESNext,
-      moduleResolution: ts.ModuleResolutionKind.Bundler,
-      noLib: true,
-      skipLibCheck: true,
-      target: ts.ScriptTarget.ESNext,
-      types: [],
-    },
-  });
+  const program = suppliedProgram ?? graphProgram(graph);
   const checker = program.getTypeChecker();
-  const definitions = new Set<string>();
+  const constructions = new Set<string>();
+  const serviceValues = new Set<string>();
   const reducerCalls: string[] = [];
+  const definitionIdentity = (node: ts.Node): string | null => {
+    const symbol = resolvedSymbol(checker, node);
+    const declaration = symbol?.getDeclarations()?.find((candidate) => {
+      const file = candidate.getSourceFile().fileName;
+      return file.startsWith(`${ROOT}/`) && !file.includes('/node_modules/');
+    });
+    return symbol === null || declaration === undefined
+      ? null
+      : `${symbol.getName()}@${repositoryPath(declaration.getSourceFile().fileName)}`;
+  };
+  const typeIdentity = (node: ts.Node): string | null => {
+    const type = checker.getTypeAtLocation(node);
+    const symbol = type.aliasSymbol ?? type.getSymbol();
+    const declaration = symbol?.getDeclarations()?.find((candidate) =>
+      candidate.getSourceFile().fileName.startsWith(`${ROOT}/`));
+    return symbol === undefined || declaration === undefined
+      ? null
+      : `${symbol.getName()}@${repositoryPath(declaration.getSourceFile().fileName)}`;
+  };
   for (const module of graph.values()) {
     const sourceFile = program.getSourceFile(module.file);
     if (sourceFile === undefined) throw new Error(`TypeScript program omitted ${module.file}`);
     const visit = (node: ts.Node): void => {
-      if (ts.isClassDeclaration(node) && node.name !== undefined) {
-        definitions.add(`${node.name.text}@${repositoryPath(sourceFile.fileName)}`);
+      if (ts.isNewExpression(node)) {
+        const identity = definitionIdentity(node.expression);
+        if (identity !== null) constructions.add(identity);
+        if (identity === 'ProtocolRuntime@src/vtt/handoff/protocol-runtime.ts') {
+          const argument = node.arguments?.[0];
+          if (argument !== undefined) {
+            if (ts.isObjectLiteralExpression(argument)) {
+              for (const property of argument.properties) {
+                if (ts.isShorthandPropertyAssignment(property) && property.name.text === 'service') {
+                  const serviceIdentity = typeIdentity(property.name);
+                  if (serviceIdentity !== null) serviceValues.add(serviceIdentity);
+                } else if (
+                  ts.isPropertyAssignment(property) && property.name.getText(sourceFile) === 'service'
+                ) {
+                  const serviceIdentity = typeIdentity(property.initializer);
+                  if (serviceIdentity !== null) serviceValues.add(serviceIdentity);
+                }
+              }
+            } else {
+              const serviceProperty = checker.getTypeAtLocation(argument).getProperty('service');
+              const declaration = serviceProperty?.valueDeclaration ?? serviceProperty?.declarations?.[0];
+              if (serviceProperty !== undefined && declaration !== undefined) {
+                const serviceType = checker.getTypeOfSymbolAtLocation(serviceProperty, declaration);
+                const serviceSymbol = serviceType.aliasSymbol ?? serviceType.getSymbol();
+                const serviceDeclaration = serviceSymbol?.getDeclarations()?.find((candidate) =>
+                  candidate.getSourceFile().fileName.startsWith(`${ROOT}/`));
+                if (serviceSymbol !== undefined && serviceDeclaration !== undefined) {
+                  serviceValues.add(`${serviceSymbol.getName()}@${repositoryPath(serviceDeclaration.getSourceFile().fileName)}`);
+                }
+              }
+            }
+          }
+        }
       }
       if (ts.isCallExpression(node) && !insideImport(node)) {
         const definition = definingReducer(checker, node.expression);
@@ -333,7 +410,7 @@ function runtimeConvergenceEvidence(
     };
     ts.forEachChild(sourceFile, visit);
   }
-  return { constructedClasses: definitions, reducerCalls: reducerCalls.sort() };
+  return { constructedClasses: constructions, serviceValues, reducerCalls: reducerCalls.sort() };
 }
 
 function assertRuntimeConvergence(
@@ -341,7 +418,8 @@ function assertRuntimeConvergence(
   adapter: string,
 ): void {
   const definitions = [...evidence.constructedClasses];
-  if (!definitions.includes('EncounterSessionService@src/vtt/encounter-session-service.ts')) {
+  if (!definitions.includes('EncounterSessionService@src/vtt/encounter-session-service.ts')
+    && !evidence.serviceValues.has('EncounterSessionService@src/vtt/encounter-session-service.ts')) {
     throw new Error('Runtime entry bypasses EncounterSessionService.');
   }
   if (!definitions.includes('ProtocolRuntime@src/vtt/handoff/protocol-runtime.ts')) {
@@ -426,10 +504,25 @@ const RUNTIME_ENTRYPOINTS = [
   'tools/vtt-handoff/node-runtime.ts',
   'src/vtt/handoff/websocket-transport.ts',
 ] as const;
+const RUNTIME_ADAPTER_ENTRIES = [
+  {
+    files: ['src/vtt/handoff/in-process-transport.ts'],
+    adapter: 'InProcessSceneTransport@src/vtt/handoff/in-process-transport.ts',
+  },
+  {
+    files: ['src/vtt/handoff/worker-entry.ts', 'src/vtt/handoff/worker-transport.ts'],
+    adapter: 'WorkerSceneTransport@src/vtt/handoff/worker-transport.ts',
+  },
+  {
+    files: ['tools/vtt-handoff/node-runtime.ts', 'src/vtt/handoff/websocket-transport.ts'],
+    adapter: 'WebSocketSceneTransport@src/vtt/handoff/websocket-transport.ts',
+  },
+] as const;
 
 let cachedCoreGraph: ReadonlyMap<string, SourceModule> | null = null;
 let cachedRuntimeGraph: ReadonlyMap<string, SourceModule> | null = null;
 let cachedRuntimeReducerCalls: readonly string[] | null = null;
+let cachedRuntimeProgram: ts.Program | null = null;
 
 function coreDependencyGraph(): ReadonlyMap<string, SourceModule> {
   cachedCoreGraph ??= dependencyGraph(CORE_ENTRYPOINTS);
@@ -437,27 +530,18 @@ function coreDependencyGraph(): ReadonlyMap<string, SourceModule> {
 }
 
 function runtimeDependencyGraph(): ReadonlyMap<string, SourceModule> {
-  cachedRuntimeGraph ??= dependencyGraph(RUNTIME_ENTRYPOINTS);
+  cachedRuntimeGraph ??= dependencyGraph(RUNTIME_ENTRYPOINTS, true);
   return cachedRuntimeGraph;
 }
 
-function runtimeReducerCalls(): readonly string[] {
-  cachedRuntimeReducerCalls ??= reducerCallSites(runtimeDependencyGraph());
-  return cachedRuntimeReducerCalls;
+function runtimeProgram(): ts.Program {
+  cachedRuntimeProgram ??= graphProgram(runtimeDependencyGraph());
+  return cachedRuntimeProgram;
 }
 
-function classDefinitions(graph: ReadonlyMap<string, SourceModule>): ReadonlySet<string> {
-  const definitions = new Set<string>();
-  for (const module of graph.values()) {
-    const visit = (node: ts.Node): void => {
-      if (ts.isClassDeclaration(node) && node.name !== undefined) {
-        definitions.add(`${node.name.text}@${repositoryPath(module.file)}`);
-      }
-      ts.forEachChild(node, visit);
-    };
-    ts.forEachChild(module.sourceFile, visit);
-  }
-  return definitions;
+function runtimeReducerCalls(): readonly string[] {
+  cachedRuntimeReducerCalls ??= reducerCallSites(runtimeDependencyGraph(), runtimeProgram());
+  return cachedRuntimeReducerCalls;
 }
 
 describe('renderer-neutral engine boundary graph', () => {
@@ -492,24 +576,31 @@ describe('renderer-neutral engine boundary graph', () => {
 
   it('rejects bare Node builtins plus aliased, destructured, and computed browser globals', () => {
     const file = resolve(ROOT, '.tmp/platform-gate-mutant.ts');
-    const sourceFile = ts.createSourceFile(file, `
-      import filesystem from 'fs';
-      const browser = globalThis;
-      const { document: pageDocument } = browser;
-      void browser['indexedDB'];
-      void pageDocument.body;
-      void filesystem;
-    `, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
-    const module: SourceModule = {
-      file,
-      sourceFile,
-      imports: valueImportSpecifiers(sourceFile).map((specifier) => ({ specifier, resolved: null })),
+    const violations = (source: string): readonly string[] => {
+      const sourceFile = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+      const module: SourceModule = {
+        file,
+        sourceFile,
+        imports: valueImportSpecifiers(sourceFile).map((specifier) => ({ specifier, resolved: null })),
+      };
+      return platformViolations(new Map([[file, module]]));
     };
-    expect(platformViolations(new Map([[file, module]]))).toEqual([
-      '.tmp/platform-gate-mutant.ts destructures document from browser',
+    expect(violations("import filesystem from 'fs'; void filesystem;")).toEqual([
       '.tmp/platform-gate-mutant.ts imports fs',
-      ".tmp/platform-gate-mutant.ts uses browser['indexedDB']",
     ]);
+    expect(violations(`function render(): void {
+      const browser = globalThis;
+      browser.document.createElement('div');
+    }`)).toEqual([
+      '.tmp/platform-gate-mutant.ts resolves document to document',
+    ]);
+    expect(violations('const { document: pageDocument } = globalThis; void pageDocument.body;')).toEqual([
+      '.tmp/platform-gate-mutant.ts resolves document to document',
+    ]);
+    expect(violations("const browser = globalThis; void browser['indexedDB'];")).toEqual([
+      ".tmp/platform-gate-mutant.ts resolves browser['indexedDB'] to indexedDB",
+    ]);
+    expect(violations("export {}; const document = { createElement: () => 'local' }; document.createElement();")).toEqual([]);
   });
 
   it('all runtime entries converge on the pinned session reducer edges', () => {
@@ -517,47 +608,48 @@ describe('renderer-neutral engine boundary graph', () => {
   });
 
   it('all renderer adapters converge on the session service', () => {
-    const entries = [
-      {
-        files: ['src/vtt/handoff/in-process-transport.ts'],
-        adapter: 'InProcessSceneTransport@src/vtt/handoff/in-process-transport.ts',
-      },
-      {
-        files: ['src/vtt/handoff/worker-entry.ts', 'src/vtt/handoff/worker-transport.ts'],
-        adapter: 'WorkerSceneTransport@src/vtt/handoff/worker-transport.ts',
-      },
-      {
-        files: ['tools/vtt-handoff/node-runtime.ts', 'src/vtt/handoff/websocket-transport.ts'],
-        adapter: 'WebSocketSceneTransport@src/vtt/handoff/websocket-transport.ts',
-      },
-    ] as const;
-    const entryGraphs = entries.map((entry) => dependencyGraph(entry.files, true));
     const productionGraph = runtimeDependencyGraph();
-    const valid = { constructedClasses: classDefinitions(productionGraph), reducerCalls: runtimeReducerCalls() };
-    for (const [index, entry] of entries.entries()) {
+    const entryGraphs = RUNTIME_ADAPTER_ENTRIES.map((entry) => reachableSubgraph(productionGraph, entry.files));
+    const valid = runtimeConvergenceEvidence(productionGraph, runtimeProgram());
+    for (const [index, entry] of RUNTIME_ADAPTER_ENTRIES.entries()) {
       const graph = entryGraphs[index];
       if (graph === undefined) throw new Error('Runtime entry graph is unavailable.');
       expect([...graph.keys()].map(repositoryPath).some((file) => file.startsWith('tests/helpers/'))).toBe(false);
       expect([...graph.keys()].map(repositoryPath)).not.toContain('src/vtt/encounter-app.ts');
-      assertRuntimeConvergence({
-        constructedClasses: classDefinitions(graph),
-        reducerCalls: [],
-      }, entry.adapter);
+      assertRuntimeConvergence(runtimeConvergenceEvidence(graph, runtimeProgram()), entry.adapter);
     }
     assertPermittedReducerEdges(valid.reducerCalls);
-    expect(() => assertPermittedReducerEdges([
-      ...valid.reducerCalls,
-      'tools/vtt-handoff/node-runtime.ts#injected -> src/combat/encounter.ts#reduceEncounter',
-    ])).toThrow('unexpected reducer edge');
-    expect(() => assertRuntimeConvergence({
-      ...valid,
-      constructedClasses: new Set([...valid.constructedClasses].filter((value) =>
-        value !== 'EncounterSessionService@src/vtt/encounter-session-service.ts')),
-    }, entries[2].adapter)).toThrow('bypasses EncounterSessionService');
-    expect(platformViolations(dependencyGraph([
-      'src/vtt/handoff/websocket-transport.ts',
-      'src/vtt/handoff/worker-transport.ts',
-    ]))).toEqual([]);
+  });
+
+  it('rejects source-mutated reducer and service bypasses', () => {
+    const productionGraph = runtimeDependencyGraph();
+    const inProcessGraph = reachableSubgraph(productionGraph, RUNTIME_ADAPTER_ENTRIES[0].files);
+    const nodeFile = resolve(ROOT, 'tools/vtt-handoff/node-runtime.ts');
+    const inProcessFile = resolve(ROOT, 'src/vtt/handoff/in-process-transport.ts');
+    const bypassSource = readFileSync(inProcessFile, 'utf8')
+      .replace('type ProtocolTransportFault,', 'type ProtocolSessionPort, type ProtocolTransportFault,')
+      .replace('readonly service: EncounterSessionService;', 'readonly service: ProtocolSessionPort;');
+    const sourceMutants = new Map([
+      [nodeFile, [
+      "import { reduceEncounter } from '../../src/combat/encounter';",
+      readFileSync(nodeFile, 'utf8'),
+      'reduceEncounter({} as never, {} as never);',
+      ].join('\n')],
+      [inProcessFile, bypassSource],
+    ]);
+    const mutantProgram = graphProgram(productionGraph, sourceMutants);
+    const reducerMutantEvidence = runtimeConvergenceEvidence(
+      productionGraph, mutantProgram,
+    );
+    expect(() => assertPermittedReducerEdges(reducerMutantEvidence.reducerCalls))
+      .toThrow('unexpected reducer edge');
+
+    const bypassEvidence = runtimeConvergenceEvidence(
+      inProcessGraph,
+      mutantProgram,
+    );
+    expect(() => assertRuntimeConvergence(bypassEvidence, RUNTIME_ADAPTER_ENTRIES[0].adapter))
+      .toThrow('bypasses EncounterSessionService');
   });
 
   it('keeps the complete selector value graph projection-only and platform-neutral', () => {
