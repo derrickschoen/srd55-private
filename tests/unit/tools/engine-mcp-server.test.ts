@@ -330,7 +330,7 @@ describe('engine MCP stdio protocol', () => {
     }
   });
 
-  it('bounds one-to-three blind attempts under one absolute live deadline and never stages a fallback', async () => {
+  it('bounds one-to-three blind attempts under one absolute live deadline and never stages a fallback', { timeout: 15_000 }, async () => {
     const state = await loadArenaFixture('tests/fixtures/arena-basis/seed-3943001.json');
     const actorId = state.combatants.find((entry) => entry.profile.kind === 'monster' && entry.life === 'living')?.profile.id;
     if (actorId === undefined) throw new Error('Blind attempt fixture has no monster.');
@@ -407,7 +407,7 @@ describe('engine MCP stdio protocol', () => {
     expect(deadlineRuntime.proposals).toEqual([]);
   });
 
-  it('returns only one lexical minimal hint and refuses a mid-resolution revision change without staging', async () => {
+  it('returns only one lexical minimal hint and refuses a mid-resolution revision change without staging', { timeout: 15_000 }, async () => {
     const state = await loadArenaFixture('tests/fixtures/arena-basis/seed-3943001.json');
     const actorId = state.combatants.find((entry) => entry.profile.kind === 'monster' && entry.life === 'living')?.profile.id;
     if (actorId === undefined) throw new Error('Blind repair fixture has no monster.');

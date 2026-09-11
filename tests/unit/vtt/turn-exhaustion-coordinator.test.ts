@@ -396,6 +396,62 @@ describe('host turn exhaustion coordinator', () => {
     ]));
   });
 
+  it('attributes expiry after retrieving a correction without authorization or validation-failure persistence', async () => {
+    const f = fixture();
+    const queued: RoundTurnProposalEnvelope[] = [];
+    let acceptsCompletion = true;
+    let authorizations = 0;
+    let deterministicResolutions = 0;
+    const adapter = new SIMULATEDAgentSessionAdapter({
+      startIds: [],
+      onResume: () => { queued.push(proposal(f, 'correction', 'primary')); },
+    });
+    const correction = runtime(f, adapter, queued, { value: 0 });
+    const takeProposal = correction.takeProposal;
+    const expiringCorrection: TurnExhaustionCorrectionRuntime = {
+      ...correction,
+      takeProposal: () => {
+        const retrieved = takeProposal();
+        acceptsCompletion = false;
+        return retrieved;
+      },
+    };
+    const expiringDeadline: AgentDispatchDeadline = {
+      signal: new AbortController().signal,
+      dispatch: (invocation) => ({ kind: 'open', timeoutMs: 60_000, invocation }),
+      acceptsCompletion: () => acceptsCompletion,
+    };
+
+    const outcome = await new TurnExhaustionCoordinator(
+      f.journal.turnExhaustionPersistence(),
+    ).coordinate({
+      initial: exhausted(f),
+      correction: expiringCorrection,
+      escalation: null,
+      deadline: expiringDeadline,
+      host: {
+        ...host(),
+        authorize: async () => {
+          authorizations += 1;
+          return 'authorized';
+        },
+        resolveDeterministically: async (actorId) => {
+          deterministicResolutions += 1;
+          return { actorId, expectedRevision: 3, resolutionDigest: 'b'.repeat(64) };
+        },
+      },
+    });
+
+    expect(outcome).toEqual({
+      kind: 'refused', reason: 'round_deadline_expired', attemptConsumed: true,
+    });
+    expect(authorizations).toBe(0);
+    expect(deterministicResolutions).toBe(0);
+    expect(adapter.resumeInvocations).toHaveLength(1);
+    expect(f.journal.history().map((entry) => entry.transition.kind)).toContain('proposal_correction_requested');
+    expect(f.journal.history().map((entry) => entry.transition.kind)).not.toContain('proposal_correction_failed');
+  });
+
   it('marks deterministic controller output auto-resolved after the correction returns no proposal', async () => {
     const f = fixture();
     const adapter = new SIMULATEDAgentSessionAdapter({ startIds: [] });

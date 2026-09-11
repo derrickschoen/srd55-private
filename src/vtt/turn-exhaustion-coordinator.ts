@@ -163,6 +163,10 @@ export type TurnExhaustionOutcome =
     }
   | { readonly kind: 'infrastructure_failed'; readonly component: 'engine_mcp_startup' };
 
+function roundDeadlineRefusal(): Extract<TurnExhaustionOutcome, { readonly kind: 'refused' }> {
+  return { kind: 'refused', reason: 'round_deadline_expired', attemptConsumed: true };
+}
+
 export type AuthorizationFailurePolicy =
   | { readonly kind: 'correct_with_dm_protocol' }
   | { readonly kind: 'refuse_blind' };
@@ -258,7 +262,7 @@ export class TurnExhaustionCoordinator {
         throw new RangeError('Initial round proposal actors are malformed.');
       }
       if (input.deadline?.acceptsCompletion() === false) {
-        return { kind: 'refused', reason: 'round_deadline_expired', attemptConsumed: true };
+        return roundDeadlineRefusal();
       }
       const authorization = await input.host.authorize(proposal);
       if (authorization === 'authorized') {
@@ -367,57 +371,59 @@ export class TurnExhaustionCoordinator {
       const directEscalation = input.escalation?.trigger === 'refusal'
         ? input.escalation
         : null;
-      if (input.deadline.acceptsCompletion()) {
-        if (directEscalation === null) {
-          input.correction.activateCapsule();
-          const prompt = input.correction.invocation.output.kind === 'structured_final'
-            ? input.correction.invocation.prompt
-            : this.renderCorrection(
-                'correct_proposal',
-                input.correction.capsule,
-                input.correction.rules,
-                undefined,
-                input.correction.turnContext,
-              );
-          const correctionTurn = await input.correction.lifecycle.resumeCorrection(
-            { ...input.correction.invocation, prompt },
-            input.deadline,
-          );
-          switch (correctionTurn.exit) {
-            case 'completed':
-              correctionExplicitRefusal = explicitlyRefusedTurn(correctionTurn);
-              if (input.deadline.acceptsCompletion()) correctedProposal = input.correction.takeProposal();
-              break;
-            case 'cancelled':
-              return { kind: 'refused', reason: 'correction_cancelled', attemptConsumed: true };
-            case 'timed_out':
-              return { kind: 'refused', reason: 'correction_timeout', attemptConsumed: true };
-            case 'infrastructure_failed':
-              return { kind: 'infrastructure_failed', component: correctionTurn.component };
-          }
-        } else {
-          directEscalation.activateCapsule('refusal');
-          const prompt = correctionPrompt(directEscalation);
-          const escalationTurn = await directEscalation.lifecycle.startEscalation(
-            { ...directEscalation.invocation, prompt },
-            input.deadline,
-          );
-          switch (escalationTurn.exit) {
-            case 'completed':
-              if (input.deadline.acceptsCompletion()) correctedProposal = directEscalation.takeProposal();
-              break;
-            case 'cancelled':
-              return { kind: 'refused', reason: 'correction_cancelled', attemptConsumed: true };
-            case 'timed_out':
-              return { kind: 'refused', reason: 'correction_timeout', attemptConsumed: true };
-            case 'infrastructure_failed':
-              return { kind: 'infrastructure_failed', component: escalationTurn.component };
-          }
+      if (!input.deadline.acceptsCompletion()) return roundDeadlineRefusal();
+      if (directEscalation === null) {
+        input.correction.activateCapsule();
+        const prompt = input.correction.invocation.output.kind === 'structured_final'
+          ? input.correction.invocation.prompt
+          : this.renderCorrection(
+              'correct_proposal',
+              input.correction.capsule,
+              input.correction.rules,
+              undefined,
+              input.correction.turnContext,
+            );
+        const correctionTurn = await input.correction.lifecycle.resumeCorrection(
+          { ...input.correction.invocation, prompt },
+          input.deadline,
+        );
+        switch (correctionTurn.exit) {
+          case 'completed':
+            correctionExplicitRefusal = explicitlyRefusedTurn(correctionTurn);
+            if (!input.deadline.acceptsCompletion()) return roundDeadlineRefusal();
+            correctedProposal = input.correction.takeProposal();
+            break;
+          case 'cancelled':
+            return { kind: 'refused', reason: 'correction_cancelled', attemptConsumed: true };
+          case 'timed_out':
+            return { kind: 'refused', reason: 'correction_timeout', attemptConsumed: true };
+          case 'infrastructure_failed':
+            return { kind: 'infrastructure_failed', component: correctionTurn.component };
+        }
+      } else {
+        directEscalation.activateCapsule('refusal');
+        const prompt = correctionPrompt(directEscalation);
+        const escalationTurn = await directEscalation.lifecycle.startEscalation(
+          { ...directEscalation.invocation, prompt },
+          input.deadline,
+        );
+        switch (escalationTurn.exit) {
+          case 'completed':
+            if (!input.deadline.acceptsCompletion()) return roundDeadlineRefusal();
+            correctedProposal = directEscalation.takeProposal();
+            break;
+          case 'cancelled':
+            return { kind: 'refused', reason: 'correction_cancelled', attemptConsumed: true };
+          case 'timed_out':
+            return { kind: 'refused', reason: 'correction_timeout', attemptConsumed: true };
+          case 'infrastructure_failed':
+            return { kind: 'infrastructure_failed', component: escalationTurn.component };
         }
       }
     } else if (prior.stage !== 'correction_requested') {
       throw new Error(`Proposal exhaustion chain cannot resume from ${prior.stage}.`);
-    } else if (input.deadline.acceptsCompletion()) {
+    } else {
+      if (!input.deadline.acceptsCompletion()) return roundDeadlineRefusal();
       correctedProposal = input.correction.takeProposal();
     }
 
@@ -434,9 +440,8 @@ export class TurnExhaustionCoordinator {
       correctionValidationFailed = true;
     }
     else {
-      const authorization = input.deadline.acceptsCompletion()
-        ? await input.host.authorize(proposal)
-        : 'invalidated';
+      if (!input.deadline.acceptsCompletion()) return roundDeadlineRefusal();
+      const authorization = await input.host.authorize(proposal);
       if (authorization === 'authorized') {
         this.persistence.record({
           kind: 'proposal_correction_resolved',
@@ -456,8 +461,8 @@ export class TurnExhaustionCoordinator {
       : input.escalation?.trigger === 'validation_failures' && correctionValidationFailed
         ? 'validation_failures'
         : null;
-    if (input.escalation !== undefined && input.escalation !== null && correctionEscalationTrigger !== null &&
-      input.deadline.acceptsCompletion()) {
+    if (input.escalation !== undefined && input.escalation !== null && correctionEscalationTrigger !== null) {
+      if (!input.deadline.acceptsCompletion()) return roundDeadlineRefusal();
       input.escalation.activateCapsule(correctionEscalationTrigger);
       const prompt = correctionPrompt(input.escalation);
       const escalationTurn = await input.escalation.lifecycle.startEscalation(
@@ -473,9 +478,11 @@ export class TurnExhaustionCoordinator {
         case 'infrastructure_failed':
           return { kind: 'infrastructure_failed', component: escalationTurn.component };
       }
-      proposal = input.deadline.acceptsCompletion() ? input.escalation.takeProposal() : null;
+      if (!input.deadline.acceptsCompletion()) return roundDeadlineRefusal();
+      proposal = input.escalation.takeProposal();
+      if (!input.deadline.acceptsCompletion()) return roundDeadlineRefusal();
       if (proposal !== null && proposal.requestId === input.requestId &&
-        exactProposalActors(proposal, actorIds, 'correction') && input.deadline.acceptsCompletion()) {
+        exactProposalActors(proposal, actorIds, 'correction')) {
         const authorization = await input.host.authorize(proposal);
         if (authorization === 'authorized') {
           this.persistence.record({
