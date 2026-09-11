@@ -11,6 +11,7 @@ const port = Number(rawPort);
 if (!Number.isSafeInteger(port) || port < 1 || port > 65_535 || port === 4_173) {
   throw new Error(`PLAYWRIGHT_PORT must be a valid non-4173 port; received "${rawPort}".`);
 }
+export const vttHandoffBrowserOrigin = `http://127.0.0.1:${String(port)}`;
 if (process.env.PLAYWRIGHT_WORKERS !== undefined && process.env.PLAYWRIGHT_WORKERS !== '1') {
   throw new Error('The VTT handoff Worker spec requires PLAYWRIGHT_WORKERS=1.');
 }
@@ -26,7 +27,7 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   use: {
-    baseURL: `http://127.0.0.1:${rawPort}`,
+    baseURL: vttHandoffBrowserOrigin,
     headless: true,
     trace: 'on-first-retry',
   },

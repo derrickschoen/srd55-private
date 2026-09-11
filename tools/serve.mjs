@@ -1,7 +1,8 @@
-import { spawnSync } from 'node:child_process';
-import { createReadStream, realpathSync, statSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
+import { createReadStream, mkdtempSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
-import { extname, resolve, sep } from 'node:path';
+import { tmpdir } from 'node:os';
+import { extname, join, resolve, sep } from 'node:path';
 
 const HOST = '127.0.0.1';
 const DEFAULT_PORT = 4173;
@@ -25,8 +26,9 @@ function fail(message) {
   process.exit(1);
 }
 
-function readPort(argv, environment) {
+function readOptions(argv, environment) {
   let rawPort = environment.SERVE_PORT;
+  let vttRuntime = false;
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === '--port') {
@@ -41,13 +43,17 @@ function readPort(argv, environment) {
       rawPort = argument.slice('--port='.length);
       continue;
     }
+    if (argument === '--vtt-runtime') {
+      vttRuntime = true;
+      continue;
+    }
     fail(`unknown argument ${JSON.stringify(argument)}.`);
   }
   const port = rawPort === undefined ? DEFAULT_PORT : Number(rawPort);
   if (!Number.isSafeInteger(port) || port < 0 || port > 65_535) {
     fail(`port must be an integer from 0 to 65535; received ${JSON.stringify(rawPort)}.`);
   }
-  return port;
+  return { port, vttRuntime };
 }
 
 function build() {
@@ -132,7 +138,7 @@ function setHeaders(response, path) {
   }
 }
 
-function serve(port) {
+function serve(port, vttRuntime) {
   const root = realpathSync(resolve('dist'));
   const server = createServer((request, response) => {
     if (request.method !== 'GET' && request.method !== 'HEAD') {
@@ -173,9 +179,46 @@ function serve(port) {
     process.stdout.write(
       `serve: fresh dist/ available at http://${HOST}:${String(address.port)}\n`,
     );
+    if (vttRuntime) launchVttRuntime(address.port, server);
   });
 }
 
-const port = readPort(process.argv.slice(2), process.env);
+function launchVttRuntime(originPort, server) {
+  const configRoot = mkdtempSync(join(tmpdir(), 'vtt-runtime-vite-'));
+  const configPath = join(configRoot, 'vite.config.mjs');
+  writeFileSync(configPath, 'export default {};\n', { mode: 0o600 });
+  const child = spawn(process.execPath, [
+    resolve('node_modules/vite-node/vite-node.mjs'),
+    '--config', configPath,
+    'tools/vtt-handoff/node-runtime-main.ts',
+    '--port', process.env.VTT_RUNTIME_PORT ?? '0',
+    '--origin', `http://${HOST}:${String(originPort)}`,
+  ], {
+    cwd: process.cwd(),
+    env: process.env,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  process.stdout.write(`serve: process pid ${String(process.pid)}\n`);
+  if (child.pid !== undefined) process.stdout.write(`serve: vtt runtime child pid ${String(child.pid)}\n`);
+  child.stdout.pipe(process.stdout);
+  child.stderr.pipe(process.stderr);
+  let stopping = false;
+  child.once('error', (error) => fail(`could not launch VTT runtime: ${error.message}`));
+  child.once('exit', (code, signal) => {
+    rmSync(configRoot, { recursive: true, force: true });
+    if (!stopping) fail(`VTT runtime exited unexpectedly (${signal ?? `code ${String(code)}`}).`);
+  });
+  const stop = () => {
+    if (stopping) return;
+    stopping = true;
+    child.kill('SIGTERM');
+    server.close();
+  };
+  process.once('SIGINT', stop);
+  process.once('SIGTERM', stop);
+  process.once('exit', () => { if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM'); });
+}
+
+const { port, vttRuntime } = readOptions(process.argv.slice(2), process.env);
 build();
-serve(port);
+serve(port, vttRuntime);

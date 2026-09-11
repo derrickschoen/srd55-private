@@ -12,7 +12,11 @@ import {
   type SceneTransportStatus,
 } from './scene-transport';
 import type { SceneSnapshot } from './v1/contracts';
-import type { SessionInvocationToken } from '../encounter-session-service';
+import type {
+  EncounterSessionService, PlayerSeatRegistration, SessionInvocationToken,
+} from '../encounter-session-service';
+import type { EncounterArtPackage } from '../encounter-package';
+import type { HandoffPrincipal } from './session-authorizer';
 
 interface Deferred<T> {
   readonly promise: Promise<T>;
@@ -72,6 +76,7 @@ export class InProcessSceneTransport implements SceneTransport {
   readonly #unsubscribeRuntimeFault: () => void;
   #state: SceneTransportStatus = 'connecting';
   #initialSettled = false;
+  #latestEvent: SceneSnapshotEvent | null = null;
 
   constructor(private readonly runtime: ProtocolRuntime) {
     void this.#initial.promise.catch(() => undefined);
@@ -136,6 +141,9 @@ export class InProcessSceneTransport implements SceneTransport {
   subscribe(listener: (event: SceneSnapshotEvent) => void): () => void {
     if (this.#state === 'closed' || this.#state === 'disposed') return () => undefined;
     this.#eventListeners.add(listener);
+    if (this.#latestEvent !== null) {
+      try { listener(this.#latestEvent); } catch { /* Observer failure is isolated. */ }
+    }
     return () => this.#eventListeners.delete(listener);
   }
 
@@ -217,6 +225,7 @@ export class InProcessSceneTransport implements SceneTransport {
   }
 
   #receiveEvent(event: SceneSnapshotEvent, receipt?: ProtocolEstablishedReceipt): void {
+    this.#latestEvent = event;
     if (receipt !== undefined) {
       const pending = [...this.#pending].find((candidate) =>
         candidate.invocationToken === receipt.invocationToken &&
@@ -274,4 +283,13 @@ export class InProcessSceneTransport implements SceneTransport {
       try { listener(status); } catch { /* Observer failure is isolated. */ }
     }
   }
+}
+
+export function createEncounterSessionServiceTransport(options: {
+  readonly service: EncounterSessionService;
+  readonly principal: HandoffPrincipal;
+  readonly seats: readonly PlayerSeatRegistration[];
+  readonly art: EncounterArtPackage;
+}): InProcessSceneTransport {
+  return new InProcessSceneTransport(new ProtocolRuntime(options));
 }

@@ -537,7 +537,7 @@ describe('in-process scene transport', () => {
     },
   );
 
-  it('delivers the initial snapshot once and only future events to late subscribers', async () => {
+  it('delivers the buffered latest snapshot and then future events to late subscribers', async () => {
     const { host, port, runtime } = fixture();
     const transport = new InProcessSceneTransport(runtime);
     const early: number[] = [];
@@ -553,7 +553,7 @@ describe('in-process scene transport', () => {
     transport.subscribe((event) => late.push(event.seq));
     port.emitDm({ kind: 'autonomous', seq: 90, projection: port.dmSnapshot() });
     expect(early).toEqual([1, 2]);
-    expect(late).toEqual([2]);
+    expect(late).toEqual([1, 2]);
     transport.destroySession();
     host.close();
   });

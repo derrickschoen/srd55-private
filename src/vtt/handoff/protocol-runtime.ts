@@ -281,6 +281,9 @@ export class ProtocolRuntime {
       if (result.kind === 'transport_fault') this.#emitFault(result.fault);
       return Promise.resolve(result);
     }
+    if (Object.prototype.hasOwnProperty.call(decoded.value, '__proto__')) {
+      return respond(failure(id, 'INVALID_REQUEST', 'The request structure is invalid.'));
+    }
     const structural = genericHandoffRequestSchema._zod.run(
       { value: decoded.value, issues: [] },
       { async: false },
