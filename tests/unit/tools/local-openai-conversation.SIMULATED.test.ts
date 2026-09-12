@@ -13,6 +13,10 @@ import {
 import { parseArenaArgs, runArena } from '../../../tools/ai-dm-arena';
 import { DEFAULT_RENDERER_PROFILE } from '../../../src/vtt/renderer-profile';
 import { mkdtempSync, readFileSync } from '../../helpers/test-filesystem';
+import { generateRoom } from '../../../src/vtt/room-generator';
+import { createEngineMcpRuntime } from '../../../src/vtt/mcp/entrypoint';
+import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
+import { createRevisionBoundEngineOptionEnvironment } from '../../../src/vtt/offers/offer-environment';
 
 interface FakeRequest {
   readonly path: string;
@@ -45,6 +49,7 @@ const ALL_OPTIONS_TEST_RENDERER_PROFILE = {
   misc: 'merged',
   optionDetail: 'top2_stubs',
 } as const;
+const BOUND_OFFER_ENVIRONMENT = createRevisionBoundEngineOptionEnvironment(canonicalEngineQueryPort);
 
 async function fakeServer(
   respond: (request: FakeRequest, index: number) => { readonly status?: number; readonly body: unknown },
@@ -104,6 +109,13 @@ function assistantToolCall(id: string, name: string, argumentsValue: unknown, us
 }
 
 describe('SIMULATED local OpenAI conversation adapter', () => {
+  it('binds the SIMULATED arena runtime to its explicit offer environment', () => {
+    const state = generateRoom(3_943_001).encounter.state;
+    const runtime = createEngineMcpRuntime(state, { offerEnvironment: BOUND_OFFER_ENVIRONMENT });
+
+    expect(runtime.feed.current().offerEnvironment).toEqual(BOUND_OFFER_ENVIRONMENT.binding);
+  });
+
   it('terminates the tool loop immediately after an accepted plan adjustment', async () => {
     const endpoint = await fakeServer(() => ({
       body: assistantToolCall('call-adjustment', 'engine__submit_plan_adjustment', {

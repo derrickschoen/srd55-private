@@ -4,7 +4,7 @@ import type { McpHandler } from '../../../src/vtt/mcp/handler';
 import { EngineMcpStdioClient } from '../../../tools/engine-mcp-dry-client';
 import { collectEngineMcpRuntimeGraph, engineMcpImportBoundaryFailures, scanEngineMcpArtifacts } from '../../../tools/engine-mcp-proof';
 import {
-  createEngineMcpRuntime,
+  createEngineMcpRuntime as createDefaultEngineMcpRuntime,
   decodeArenaFixture,
   decodeEngineMcpEntrypointDocument,
   decodeEngineMcpLauncherManifest,
@@ -12,10 +12,27 @@ import {
   freshMonsterPlanningState,
   loadArenaFixture,
 } from '../../../src/vtt/mcp/entrypoint';
-import { createLegacyEngineOptionEnvironmentBinding } from '../../../src/vtt/offers/offer-environment';
+import {
+  createLegacyEngineOptionEnvironment,
+  createRevisionBoundEngineOptionEnvironment,
+  createLegacyEngineOptionEnvironmentBinding,
+} from '../../../src/vtt/offers/offer-environment';
+import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
 
 const FIXTURE = 'tests/fixtures/arena-basis/seed-3943006.json';
 const META = mcpRequestMeta({ name: 'SUBSTITUTED_LOCAL', version: '1.0.0' });
+const BOUND_OFFER_ENVIRONMENT = createRevisionBoundEngineOptionEnvironment(canonicalEngineQueryPort);
+const TRANSITIONAL_STDIO_OFFER_ENVIRONMENT = createLegacyEngineOptionEnvironment(canonicalEngineQueryPort);
+
+function createEngineMcpRuntime(
+  state: Parameters<typeof createDefaultEngineMcpRuntime>[0],
+  options: NonNullable<Parameters<typeof createDefaultEngineMcpRuntime>[1]> = {},
+): ReturnType<typeof createDefaultEngineMcpRuntime> {
+  const offerEnvironment = options.offerEnvironment ?? BOUND_OFFER_ENVIRONMENT;
+  const runtime = createDefaultEngineMcpRuntime(state, { ...options, offerEnvironment });
+  expect(runtime.feed.current().offerEnvironment).toEqual(offerEnvironment.binding);
+  return runtime;
+}
 
 function record(value: unknown, label: string): Readonly<Record<string, unknown>> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new TypeError(`${label} must be an object.`);
@@ -231,7 +248,10 @@ describe('SUBSTITUTED_LOCAL MCP conformance and artifacts', () => {
 
   it('proves transport-neutral request parity through the test-only adapter', { timeout: 20_000 }, async () => {
     const state = freshMonsterPlanningState(await loadArenaFixture(FIXTURE));
-    const runtime = createEngineMcpRuntime(state);
+    const runtime = createDefaultEngineMcpRuntime(state, {
+      offerEnvironment: TRANSITIONAL_STDIO_OFFER_ENVIRONMENT,
+    });
+    expect(runtime.feed.current().offerEnvironment).toEqual(TRANSITIONAL_STDIO_OFFER_ENVIRONMENT.binding);
     const adapter = new SUBSTITUTED_LOCALAdapter(runtime.handler);
     expect(adapter.request('server/discover', {})).toHaveProperty('result');
     expect(adapter.request('tools/list', {})).toHaveProperty('result');

@@ -11,7 +11,9 @@ import {
   importSavedSession,
   EncounterSessionJournal,
 } from '../../../src/vtt/session-persistence';
-import { loadArenaFixture } from '../../../src/vtt/mcp/entrypoint';
+import { createEngineMcpRuntime, loadArenaFixture } from '../../../src/vtt/mcp/entrypoint';
+import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
+import { createRevisionBoundEngineOptionEnvironment } from '../../../src/vtt/offers/offer-environment';
 import {
   assertBoardImageFresh,
   boardSnapshotCaptureGeometry,
@@ -26,6 +28,7 @@ const CONTROL_FIXTURES = Array.from(
   { length: 10 },
   (_unused, index) => `tests/fixtures/arena-basis-brutal/seed-${String(6_203_001 + index)}.json`,
 );
+const BOUND_OFFER_ENVIRONMENT = createRevisionBoundEngineOptionEnvironment(canonicalEngineQueryPort);
 
 function sourceFor(state: EncounterState, room = 1): BoardImageSource {
   return {
@@ -54,6 +57,13 @@ function movedState(state: EncounterState): EncounterState {
 }
 
 describe('AI DM board snapshot contracts', () => {
+  it('binds the snapshot fixture runtime to its explicit offer environment', async () => {
+    const state = await loadArenaFixture(CONTROL_FIXTURES[0]!);
+    const runtime = createEngineMcpRuntime(state, { offerEnvironment: BOUND_OFFER_ENVIRONMENT });
+
+    expect(runtime.feed.current().offerEnvironment).toEqual(BOUND_OFFER_ENVIRONMENT.binding);
+  });
+
   it('isolates its preview port from the Playwright worker pool', () => {
     expect(configuredPreviewPort({ PLAYWRIGHT_PORT: '4650' })).toBe(0);
     expect(configuredPreviewPort({

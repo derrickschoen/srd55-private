@@ -15,7 +15,9 @@ import {
   replaySessionRevisions,
 } from '../../../src/vtt/session-persistence';
 import { createConversationRoundDeadline } from '../../../src/vtt/agent-session-lifecycle';
-import { createEngineMcpRuntime } from '../../../src/vtt/mcp/entrypoint';
+import { createEngineMcpRuntime as createDefaultEngineMcpRuntime } from '../../../src/vtt/mcp/entrypoint';
+import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
+import { createRevisionBoundEngineOptionEnvironment } from '../../../src/vtt/offers/offer-environment';
 import { MAX_PROPOSAL_CORRECTIONS } from '../../../src/vtt/turn-exhaustion-coordinator';
 import { agentSessionIdFromCli } from '../../../src/vtt/agent-session';
 import {
@@ -24,6 +26,18 @@ import {
   vaneWarrenDmWarDrumControl,
 } from '../../../src/vtt/vane-warren';
 import { monsterProfile, placedToken, playerProfile } from '../../unit/combat/fixtures';
+
+const BOUND_OFFER_ENVIRONMENT = createRevisionBoundEngineOptionEnvironment(canonicalEngineQueryPort);
+
+function createEngineMcpRuntime(
+  state: Parameters<typeof createDefaultEngineMcpRuntime>[0],
+  options: NonNullable<Parameters<typeof createDefaultEngineMcpRuntime>[1]> = {},
+): ReturnType<typeof createDefaultEngineMcpRuntime> {
+  const offerEnvironment = options.offerEnvironment ?? BOUND_OFFER_ENVIRONMENT;
+  const runtime = createDefaultEngineMcpRuntime(state, { ...options, offerEnvironment });
+  expect(runtime.feed.current().offerEnvironment).toEqual(offerEnvironment.binding);
+  return runtime;
+}
 
 function position(state: EncounterState, id: CombatantId): GridCell {
   const token = state.tokens.find((candidate) => candidate.combatantId === id);

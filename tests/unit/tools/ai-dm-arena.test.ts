@@ -18,11 +18,13 @@ import { decodeCodexTurn } from '../../../src/vtt/agent-adapters/codex';
 import type { RoundPlan } from '../../../src/vtt/dm-bridge/round-plan-contract';
 import { generateRoom } from '../../../src/vtt/room-generator';
 import {
-  createEngineMcpRuntime,
+  createEngineMcpRuntime as createDefaultEngineMcpRuntime,
   freshMonsterPlanningState,
   type EngineMcpLauncherManifest,
 } from '../../../src/vtt/mcp/entrypoint';
 import { availableEngineActorOptions, resolveEngineActorOption } from '../../../src/vtt/intent-resolver';
+import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
+import { createRevisionBoundEngineOptionEnvironment } from '../../../src/vtt/offers/offer-environment';
 import { validateArenaPlan } from '../../../src/vtt/arena-legality';
 import { SNIPPET_REGISTRY } from '../../../src/vtt/snippet-registry-runtime';
 import { engineActionId, engineSpellId } from '../../../src/vtt/turn-proposal';
@@ -52,6 +54,17 @@ import { decodeChallengeRoomProvenanceV1 } from '../../../src/vtt/challenge-room
 import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
 
 const DEFAULT_KB_HASH = '00776f3f2d4cd7468a1eb2a63028e9c3f846b43b14a4e5787d3e9c94e02633c0';
+const BOUND_OFFER_ENVIRONMENT = createRevisionBoundEngineOptionEnvironment(canonicalEngineQueryPort);
+
+function createEngineMcpRuntime(
+  state: Parameters<typeof createDefaultEngineMcpRuntime>[0],
+  options: NonNullable<Parameters<typeof createDefaultEngineMcpRuntime>[1]> = {},
+): ReturnType<typeof createDefaultEngineMcpRuntime> {
+  const offerEnvironment = options.offerEnvironment ?? BOUND_OFFER_ENVIRONMENT;
+  const runtime = createDefaultEngineMcpRuntime(state, { ...options, offerEnvironment });
+  expect(runtime.feed.current().offerEnvironment).toEqual(offerEnvironment.binding);
+  return runtime;
+}
 
 function objectValue(value: unknown, label: string): Readonly<Record<string, unknown>> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -1293,12 +1306,12 @@ describe('AI-DM arena', () => {
       const options = availableEngineActorOptions(
         planningState,
         entry.actorId,
-        undefined,
+        BOUND_OFFER_ENVIRONMENT,
         expectedRevision,
       );
       const option = options.find((candidate) => candidate.optionId === entry.resolutionSummary.optionId);
       if (option === undefined) throw new Error(`Frozen room-two option is absent for ${entry.actorId}.`);
-      const resolution = resolveEngineActorOption(planningState, option);
+      const resolution = resolveEngineActorOption(planningState, option, BOUND_OFFER_ENVIRONMENT);
       if (!resolution.valid) throw new Error(`Frozen room-two option is illegal for ${entry.actorId}.`);
       return {
         actorId: entry.actorId,

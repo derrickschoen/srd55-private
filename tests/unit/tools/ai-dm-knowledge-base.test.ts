@@ -18,10 +18,12 @@ import {
 import { declareTestInputs } from '../../helpers/test-inputs';
 import { tmpdir } from 'node:os';
 import {
-  createEngineMcpRuntime,
+  createEngineMcpRuntime as createDefaultEngineMcpRuntime,
   createLauncherKbReadBudget,
   loadArenaFixture,
 } from '../../../src/vtt/mcp/entrypoint';
+import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
+import { createRevisionBoundEngineOptionEnvironment } from '../../../src/vtt/offers/offer-environment';
 import {
   kbSubjectSources,
   KbReadBudget,
@@ -45,6 +47,17 @@ const fixturePaths = [
 ] as const;
 
 const arenaFixture = 'tests/fixtures/arena-basis/seed-3943001.json' as const;
+const BOUND_OFFER_ENVIRONMENT = createRevisionBoundEngineOptionEnvironment(canonicalEngineQueryPort);
+
+function createEngineMcpRuntime(
+  state: Parameters<typeof createDefaultEngineMcpRuntime>[0],
+  options: NonNullable<Parameters<typeof createDefaultEngineMcpRuntime>[1]> = {},
+): ReturnType<typeof createDefaultEngineMcpRuntime> {
+  const offerEnvironment = options.offerEnvironment ?? BOUND_OFFER_ENVIRONMENT;
+  const runtime = createDefaultEngineMcpRuntime(state, { ...options, offerEnvironment });
+  expect(runtime.feed.current().offerEnvironment).toEqual(offerEnvironment.binding);
+  return runtime;
+}
 const inputs = declareTestInputs({ fixtures: [...fixturePaths, arenaFixture] });
 const fixtureText = (path: (typeof fixturePaths)[number]): string => inputs.fixtures.readText(path);
 const rootText = fixtureText(DEFAULT_AI_DM_KB_ROOT);

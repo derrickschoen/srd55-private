@@ -13,10 +13,15 @@ import { encounterBranchId, encounterSessionId } from '../../../src/combat/value
 import { canonicalJson } from '../../../src/commands/canonical-json';
 import { sha256 } from '../../../src/crypto/sha256';
 import { mcpRequestMeta, createMcpHandler } from '../../../src/vtt/mcp/handler';
-import { createLegacyEngineOptionEnvironmentBinding } from '../../../src/vtt/offers/offer-environment';
+import {
+  createRevisionBoundEngineOptionEnvironment,
+  createLegacyEngineOptionEnvironmentBinding,
+  engineOptionEnvironmentFromBinding,
+} from '../../../src/vtt/offers/offer-environment';
+import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
 import {
   decodeEngineMcpLauncherManifest,
-  createEngineMcpRuntime,
+  createEngineMcpRuntime as createDefaultEngineMcpRuntime,
   loadArenaFixture,
   validatedLauncherBoardHtmlReference,
   validatedLauncherBoardImage,
@@ -50,6 +55,22 @@ import {
 } from '../../helpers/test-filesystem';
 
 const META = mcpRequestMeta({ name: 'board-delivery-test', version: '1.0.0' });
+const BOUND_OFFER_ENVIRONMENT = createRevisionBoundEngineOptionEnvironment(canonicalEngineQueryPort);
+
+function createEngineMcpRuntime(
+  state: Parameters<typeof createDefaultEngineMcpRuntime>[0],
+  options: NonNullable<Parameters<typeof createDefaultEngineMcpRuntime>[1]> = {},
+): ReturnType<typeof createDefaultEngineMcpRuntime> {
+  const offerEnvironment = options.offerEnvironment ?? BOUND_OFFER_ENVIRONMENT;
+  const runtime = createDefaultEngineMcpRuntime(state, { ...options, offerEnvironment });
+  expect(runtime.feed.current().offerEnvironment).toEqual(offerEnvironment.binding);
+  return runtime;
+}
+
+function launcherOfferEnvironment(manifest: EngineMcpLauncherManifest) {
+  if (manifest.offerEnvironment === undefined) throw new TypeError('Launcher offer environment is absent.');
+  return engineOptionEnvironmentFromBinding(canonicalEngineQueryPort, manifest.offerEnvironment);
+}
 // Pin = the intel-leak lane context (04fd8420: shown-option boundary, size-omission
 // declarations) BEFORE the last-seen (D545) merge; the last-seen policy string and
 // state handle are normalised back below so the pin stays independent of that merge.
@@ -136,6 +157,7 @@ class FastProposalAdapter implements AgentSessionAdapter {
     const manifest = JSON.parse(readFileSync(invocation.launcherToken, 'utf8')) as EngineMcpLauncherManifest;
     const state = await loadArenaFixture(manifest.fixturePath);
     const runtime = createEngineMcpRuntime(state, {
+      offerEnvironment: launcherOfferEnvironment(manifest),
       runId: manifest.runId, branchId: manifest.branchId, revision: manifest.revision,
       requestId: manifest.requestId, phase: manifest.phase,
       correctionNumber: manifest.correctionNumber, room: manifest.room,
@@ -564,6 +586,7 @@ describe('arena capture lifecycle and off-arm invariance', () => {
       const state = await loadArenaFixture(manifest.fixturePath);
       const boardImageContent = await validatedLauncherBoardImage(manifest, state);
       const runtime = createEngineMcpRuntime(state, {
+        offerEnvironment: launcherOfferEnvironment(manifest),
         runId: manifest.runId, branchId: manifest.branchId, revision: manifest.revision,
         requestId: manifest.requestId, phase: manifest.phase,
         correctionNumber: manifest.correctionNumber, room: manifest.room,

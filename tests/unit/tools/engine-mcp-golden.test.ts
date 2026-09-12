@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { runEngineMcpDryClient } from '../../../tools/engine-mcp-dry-client';
 import type { DryTranscriptEntry } from '../../../tools/engine-mcp-dry-client';
-import { loadArenaFixture } from '../../../src/vtt/mcp/entrypoint';
+import { createEngineMcpRuntime, loadArenaFixture } from '../../../src/vtt/mcp/entrypoint';
+import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
+import { createRevisionBoundEngineOptionEnvironment } from '../../../src/vtt/offers/offer-environment';
 
 const FIXTURE = 'tests/fixtures/arena-basis/seed-3943006.json';
+const BOUND_OFFER_ENVIRONMENT = createRevisionBoundEngineOptionEnvironment(canonicalEngineQueryPort);
 
 function record(value: unknown, label: string): Readonly<Record<string, unknown>> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new TypeError(`${label} must be an object.`);
@@ -58,6 +61,8 @@ describe('real-stdio engine MCP golden dungeon run', () => {
     expect(actorId).toBe('combatant:generated-3943006-monster-1');
     expect(record(queryArguments['objective'], 'query objective')['action_id']).toBe('web');
     const state = await loadArenaFixture(FIXTURE);
+    const boundRuntime = createEngineMcpRuntime(state, { offerEnvironment: BOUND_OFFER_ENVIRONMENT });
+    expect(boundRuntime.feed.current().offerEnvironment).toEqual(BOUND_OFFER_ENVIRONMENT.binding);
     const actor = state.combatants.find((candidate) => candidate.profile.id === actorId);
     const actorToken = state.tokens.find((token) => token.combatantId === actorId);
     const targets = state.combatants.filter((candidate) => candidate.profile.kind === 'player_character');

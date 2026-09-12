@@ -23,7 +23,13 @@ import {
   ENGINE_DM_TOOL_NAMES,
   ENGINE_SPECULATIVE_DM_TOOL_NAMES,
 } from '../../../src/vtt/mcp/engine-server';
-import { createEngineMcpRuntime, loadArenaFixture, type EngineMcpRuntime } from '../../../src/vtt/mcp/entrypoint';
+import {
+  createEngineMcpRuntime as createDefaultEngineMcpRuntime,
+  loadArenaFixture,
+  type EngineMcpRuntime,
+} from '../../../src/vtt/mcp/entrypoint';
+import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
+import { createRevisionBoundEngineOptionEnvironment } from '../../../src/vtt/offers/offer-environment';
 import { canonicalJson } from '../../../src/commands/canonical-json';
 import {
   applyRevisionDelta,
@@ -46,6 +52,17 @@ import {
 } from '../../../src/vtt/mcp/schemas';
 
 const CLIENT_INFO = Object.freeze({ name: 'vitest', version: '1.0.0' });
+const BOUND_OFFER_ENVIRONMENT = createRevisionBoundEngineOptionEnvironment(canonicalEngineQueryPort);
+
+function createEngineMcpRuntime(
+  state: Parameters<typeof createDefaultEngineMcpRuntime>[0],
+  options: NonNullable<Parameters<typeof createDefaultEngineMcpRuntime>[1]> = {},
+): ReturnType<typeof createDefaultEngineMcpRuntime> {
+  const offerEnvironment = options.offerEnvironment ?? BOUND_OFFER_ENVIRONMENT;
+  const runtime = createDefaultEngineMcpRuntime(state, { ...options, offerEnvironment });
+  expect(runtime.feed.current().offerEnvironment).toEqual(offerEnvironment.binding);
+  return runtime;
+}
 const TOOL_NAMES = [
   'engine.get_turn_context',
   'engine.query_tactical_intel',

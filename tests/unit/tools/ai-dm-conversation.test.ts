@@ -36,9 +36,13 @@ import { armorClass, combatantId, encounterSessionId, feet, type CombatantId } f
 import type { EncounterCommand } from '../../../src/combat/events';
 import { mulberry32 } from '../../../src/combat/random';
 import { generateRoom } from '../../../src/vtt/room-generator';
-import { availableEngineActorOptions, pureTurnProposalResolver } from '../../../src/vtt/intent-resolver';
 import {
-  createEngineMcpRuntime,
+  availableEngineActorOptions,
+  createPureTurnProposalResolver,
+  engineActorOptionsForEnvironment,
+} from '../../../src/vtt/intent-resolver';
+import {
+  createEngineMcpRuntime as createDefaultEngineMcpRuntime,
   freshMonsterPlanningState,
   loadArenaFixture,
   parseEngineMcpJsonLine,
@@ -63,8 +67,11 @@ import {
 import { projectActorKnowledge } from '../../../src/vtt/intel/actor-knowledge';
 import { actorOpportunityReport } from '../../../src/vtt/intel/opportunity-cost';
 import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
+import {
+  createRevisionBoundEngineOptionEnvironment,
+  engineOptionEnvironmentFromBinding,
+} from '../../../src/vtt/offers/offer-environment';
 import { engineStateHandle } from '../../../src/vtt/engine-state-capsule';
-import { engineActorOptions } from '../../../src/vtt/turn-option-registry';
 import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
 import { alternatingInitiativeRoom } from '../../fixtures/initiative-segments/alternating-room';
 import {
@@ -87,6 +94,23 @@ const kbInputs = declareTestInputs({ fixtures: [
   'tests/fixtures/ai-dm-skills/engine-submission/SKILL.md',
 ] });
 const DEFAULT_KB_HASH = '00776f3f2d4cd7468a1eb2a63028e9c3f846b43b14a4e5787d3e9c94e02633c0';
+const BOUND_OFFER_ENVIRONMENT = createRevisionBoundEngineOptionEnvironment(canonicalEngineQueryPort);
+const boundTurnProposalResolver = createPureTurnProposalResolver(BOUND_OFFER_ENVIRONMENT);
+
+function createEngineMcpRuntime(
+  state: Parameters<typeof createDefaultEngineMcpRuntime>[0],
+  options: NonNullable<Parameters<typeof createDefaultEngineMcpRuntime>[1]> = {},
+): ReturnType<typeof createDefaultEngineMcpRuntime> {
+  const offerEnvironment = options.offerEnvironment ?? BOUND_OFFER_ENVIRONMENT;
+  const runtime = createDefaultEngineMcpRuntime(state, { ...options, offerEnvironment });
+  expect(runtime.feed.current().offerEnvironment).toEqual(offerEnvironment.binding);
+  return runtime;
+}
+
+function launcherOfferEnvironment(manifest: EngineMcpLauncherManifest) {
+  if (manifest.offerEnvironment === undefined) throw new TypeError('Launcher offer environment is absent.');
+  return engineOptionEnvironmentFromBinding(canonicalEngineQueryPort, manifest.offerEnvironment);
+}
 
 async function runConversationWithPartyPolicy(
   decisionPolicy: ScriptedPartyDecisionPolicy,
@@ -325,6 +349,7 @@ class SerializedRoundTripAdapter implements AgentSessionAdapter {
       this.sessionSnapshotValidations += 1;
     }
     const runtime = createEngineMcpRuntime(state, {
+      offerEnvironment: launcherOfferEnvironment(manifest),
       runId: manifest.runId,
       branchId: manifest.branchId,
       revision: manifest.revision,
@@ -1540,14 +1565,14 @@ describe('AI-DM engine MCP conversation runner', () => {
     const actor = state.combatants.find((combatant) =>
       combatant.profile.kind === 'monster' && combatant.life !== 'dead');
     if (actor === undefined) throw new Error('Generated room 3943006 has no living monster.');
-    const option = availableEngineActorOptions(state, actor.profile.id)
+    const option = availableEngineActorOptions(state, actor.profile.id, BOUND_OFFER_ENVIRONMENT)
       .find((candidate) => candidate.actionSlots.some((slot) => slot.use.kind === 'dodge'));
     if (option === undefined) throw new Error('Room 3943006 Dodge option is absent.');
     const proposal = {
       actorId: actor.profile.id, expectedRevision: state.revision, primaryOptionId: option.optionId,
       fallbackOptionId: null, reason: 'Exercise the fixture proposal path.', overrideJustification: null,
     };
-    const proposalTime = pureTurnProposalResolver.resolve(state, proposal);
+    const proposalTime = boundTurnProposalResolver.resolve(state, proposal);
     if (!proposalTime.valid) throw new Error('Room 3943006 Dodge proposal did not resolve.');
 
     expect(proposalResolutionDivergence(state, {
@@ -1960,11 +1985,15 @@ describe('AI-DM engine MCP conversation runner', () => {
     const actorIds = state.combatants.flatMap((combatant) =>
       combatant.profile.kind === 'monster' ? [combatant.profile.id] : []);
     const resolutions = () => actorIds.map((actorId) =>
-      actorOpportunityReport(state, actorId, canonicalEngineQueryPort, state.revision).frontierResolution);
+      actorOpportunityReport(state, actorId, BOUND_OFFER_ENVIRONMENT, state.revision).frontierResolution);
     const beforeRender = resolutions();
     const firstActorId = actorIds[0];
     if (firstActorId === undefined) throw new Error('Brutal fixture has no first monster actor.');
-    const firstActorOptions = engineActorOptions(state, firstActorId);
+    const firstActorOptions = engineActorOptionsForEnvironment(
+      state,
+      firstActorId,
+      BOUND_OFFER_ENVIRONMENT,
+    );
     expect(firstActorOptions.humanOnly).toContainEqual(expect.objectContaining({
       label: 'spellcasting/detect-evil-and-good',
       declaredOption: {
