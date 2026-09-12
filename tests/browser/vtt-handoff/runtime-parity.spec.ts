@@ -7,9 +7,10 @@ import { resolve } from 'node:path';
 import { WebSocketServer } from 'ws';
 import type {} from '../../../src/vtt/handoff/worker-harness';
 import { TRANSPORT_CONFORMANCE_SCENARIO_NAMES } from '../../helpers/vtt-handoff/transport-conformance-manifest';
-import { vttHandoffBrowserOrigin } from './playwright.config';
+import { vttHandoffBrowserOrigin } from './browser-origin';
 
 test('pairs the real Worker and browser WebSocket transport on the fixed two-room scene', async ({ page }, testInfo) => {
+  const browserOrigin = vttHandoffBrowserOrigin(Number(process.env.PLAYWRIGHT_PORT));
   mkdirSync(resolve('.tmp'), { recursive: true });
   const root = mkdtempSync(resolve('.tmp/vtt-browser-runtime-parity-'));
   const token = 'browser-runtime-parity-secret';
@@ -27,7 +28,7 @@ test('pairs the real Worker and browser WebSocket transport on the fixed two-roo
   writeFileSync(viteConfig, 'export default {};\n', { mode: 0o600 });
   const runtime = spawn(process.execPath, [
     resolve('node_modules/vite-node/vite-node.mjs'),
-    '--config', viteConfig, 'tools/vtt-handoff/node-runtime-main.ts', '--port', '0', '--origin', vttHandoffBrowserOrigin,
+    '--config', viteConfig, 'tools/vtt-handoff/node-runtime-main.ts', '--port', '0', '--origin', browserOrigin,
   ], {
     cwd: process.cwd(), env: { ...process.env, VTT_RUNTIME_TOKENS_FILE: tokensFile }, stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -354,7 +355,7 @@ test('pairs the real Worker and browser WebSocket transport on the fixed two-roo
     await testInfo.attach('vtt-runtime-parity', {
       body: JSON.stringify({
         artifact: 'dev', seed: 603_020_001, clock: '2026-09-09T12:00:00.000Z',
-        nodePort, browserOrigin: vttHandoffBrowserOrigin,
+        nodePort, browserOrigin,
         scenarios: TRANSPORT_CONFORMANCE_SCENARIO_NAMES.length,
       }),
       contentType: 'application/json',

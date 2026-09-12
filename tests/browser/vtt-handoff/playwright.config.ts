@@ -2,6 +2,7 @@ import { defineConfig } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
+import { vttHandoffBrowserOrigin } from './browser-origin';
 
 const rawPort = process.env.PLAYWRIGHT_PORT;
 if (rawPort === undefined || !/^\d+$/u.test(rawPort)) {
@@ -11,7 +12,7 @@ const port = Number(rawPort);
 if (!Number.isSafeInteger(port) || port < 1 || port > 65_535 || port === 4_173) {
   throw new Error(`PLAYWRIGHT_PORT must be a valid non-4173 port; received "${rawPort}".`);
 }
-export const vttHandoffBrowserOrigin = `http://127.0.0.1:${String(port)}`;
+const browserOrigin = vttHandoffBrowserOrigin(port);
 if (process.env.PLAYWRIGHT_WORKERS !== undefined && process.env.PLAYWRIGHT_WORKERS !== '1') {
   throw new Error('The VTT handoff Worker spec requires PLAYWRIGHT_WORKERS=1.');
 }
@@ -27,7 +28,7 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   use: {
-    baseURL: vttHandoffBrowserOrigin,
+    baseURL: browserOrigin,
     headless: true,
     trace: 'on-first-retry',
   },
@@ -36,7 +37,7 @@ export default defineConfig({
     command: artifact === 'dev'
       ? `npm run dev -- --host 127.0.0.1 --port ${rawPort} --strictPort`
       : `node tools/vtt-handoff/serve-existing-dist.mjs --port ${rawPort}`,
-    url: `http://127.0.0.1:${rawPort}/vtt-handoff`,
+    url: `${browserOrigin}/vtt-handoff`,
     reuseExistingServer: false,
     env: {
       AI_BRIDGE_FAKE: '1',
