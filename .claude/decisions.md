@@ -22430,3 +22430,15 @@ Unrelated working-tree state noted, NOT touched and NOT committed: the main repo
 ## D618 — OWNER: the handoff branch is repaired through all six triage families, sequentially (2026-09-11 22:51)
 
 Asked after the §F battery came back red (vitest-gate 1, playwright-gate 1, launch probe 1) and astra's read-only triage classified 16 of the 17 failing cases as stale expectations or a checker gap with one undiagnosed. Owner: "All six families, sequentially" — one codex lane per family in the triage's order, each verified before the next is dispatched, then a full re-gate of the branch. The handoff report is not written until that gate is green; READY remains conditional on it, and anything still open at the end goes to the ledger as a residual. Rationale recorded with the ruling: the branch was declared code-complete S0–S10 on targeted per-step verification that never ran the whole suite, so the repair is the cost of that gap rather than new scope.
+
+## D569.LANDED — the D569 legacy-invariance oracle is on main (2026-09-11 22:55, supervisor)
+
+Gate on the MERGED revision 3050496e (branch 98a41457 + main, reconciled): tsc 0, sg 0, vitest-gate 0 with zero failures, playwright-gate 0 with 187 passed in 51.9 m and zero flakes. Main-shape rule re-checked immediately before merging: `git diff --name-only $(git merge-base main HEAD) main` is entirely under .claude/**. Merged --no-ff into main as 1c8eeb3f. Remaining D569 follow-ups, unchanged by this landing: install tools/d569-v5 and runbook v2 into ~/dnd-slim-runs, and relaunch the broken cells (D590).
+
+## D586.189 — Offers Slice 3B verified; the four post-commit failures were load, proven by a quiet serial rerun (2026-09-11 22:55, supervisor)
+
+The 3B work was committed as 6bd0e757 (ten consumer test files, 176+/20−, no production change). The post-commit rerun on the clean tree showed four failures — two arena cases and two conversation-runner cases — but it ran at load average 13.75 while the §F battery was building and driving a browser suite. The supervisor did NOT report that as a result. A serial rerun (maxWorkers=1) of exactly those two files at load 2.38 passes 129/129. Combined with the quiet verification on the same content (typecheck 0, sg 0, diff-check 0, 326/326 targeted, 174-spec cumulative serial 3222/3222, frozen contract digest unchanged), Slice 3B is verified and the astra review can be dispatched. Recorded because the first rerun would have been a false regression report against the lane.
+
+## D618.1 — the handoff failures are proven to be the branch's, not main's (2026-09-11 22:55, supervisor)
+
+Control run of all SEVEN failing spec files on main at load 1.17, serial: 7 files, 109 tests, all pass, exit 0. The same seven fail on claude/vtt-handoff, where every one of those files is byte-identical to main. This closes the question the triage left implicit: main is healthy and the branch's own source changes are the cause.
