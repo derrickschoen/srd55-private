@@ -4,7 +4,7 @@ import type { NonBoundaryRefusalClass } from '../../../src/combat/encounter-rule
 import type { EncounterCommand } from '../../../src/combat/events';
 import { mulberry32 } from '../../../src/combat/random';
 import { damageType, dieSides } from '../../../src/combat/values';
-import { DmEncounterHost } from '../../../src/vtt/dm-encounter-host';
+import { DmEncounterHost, type DmEncounterHostSnapshot } from '../../../src/vtt/dm-encounter-host';
 import type { PartySessionState } from '../../../src/vtt/party-session-state';
 import {
   DEFAULT_REFUSAL_HANDLING_SETTINGS,
@@ -84,19 +84,22 @@ function unknownSpell(): Extract<EncounterCommand, { readonly type: 'cast_spell'
 }
 
 async function submitOnlyAction(host: DmEncounterHost, action: EncounterCommand): Promise<void> {
-  host.start();
-  await Promise.resolve();
-  await Promise.resolve();
-  const request = host.snapshot().dm.pendingRequest;
-  if (request === null) throw new Error('Expected a pending human request.');
-  host.submitHumanDecision(request.actorId, {
+  const offered = new Promise<NonNullable<DmEncounterHostSnapshot['dm']['pendingRequest']>>((resolve) => {
+    let unsubscribe = (): void => {};
+    unsubscribe = host.subscribe((snapshot) => {
+      const request = snapshot.dm.pendingRequest;
+      if (request === null) return;
+      unsubscribe();
+      resolve(request);
+    });
+  });
+  void host.start();
+  const request = await offered;
+  await host.submitHumanDecisionTransaction(request.actorId, {
     requestId: request.requestId,
     encounterRevision: request.encounterRevision,
     action,
   });
-  await Promise.resolve();
-  await Promise.resolve();
-  await Promise.resolve();
 }
 
 function initiativeState(): EncounterState {
@@ -141,24 +144,27 @@ describe('D377.10 refusal handling', () => {
       initialPartyState: party({ ...DEFAULT_REFUSAL_HANDLING_SETTINGS, rule_gap: 'tray_fiat_prompt' }),
       turnLegalActions: () => ({ actions: [action] }),
     });
-    await submitOnlyAction(host, action);
-    const entry = host.snapshot().dm.decisionTray.entries.find(
-      (candidate) => candidate.kind === 'pending' && candidate.decision.kind === 'adjudication_prompt',
-    );
-    if (entry?.kind !== 'pending' || entry.decision.kind !== 'adjudication_prompt') {
-      throw new Error('Expected an adjudication prompt.');
+    try {
+      await submitOnlyAction(host, action);
+      const entry = host.snapshot().dm.decisionTray.entries.find(
+        (candidate) => candidate.kind === 'pending' && candidate.decision.kind === 'adjudication_prompt',
+      );
+      if (entry?.kind !== 'pending' || entry.decision.kind !== 'adjudication_prompt') {
+        throw new Error('Expected an adjudication prompt.');
+      }
+      host.resolveRefusalPrompt(entry.decision.id, { kind: 'no_effect' }, 'The DM rules that nothing changes.');
+      const after = host.snapshot();
+      expect(after.dm.decisionTray.entries.some(
+        (candidate) => candidate.kind === 'pending' && candidate.decision.kind === 'adjudication_prompt',
+      )).toBe(false);
+      expect(after.dm.encounter.recentEvents.at(-1)).toEqual(expect.objectContaining({
+        type: 'adjudicated',
+        subject: 'dm-override:refusal:rule_gap',
+        consequence: { kind: 'no_effect' },
+      }));
+    } finally {
+      host.close();
     }
-    host.resolveRefusalPrompt(entry.decision.id, { kind: 'no_effect' }, 'The DM rules that nothing changes.');
-    const after = host.snapshot();
-    expect(after.dm.decisionTray.entries.some(
-      (candidate) => candidate.kind === 'pending' && candidate.decision.kind === 'adjudication_prompt',
-    )).toBe(false);
-    expect(after.dm.encounter.recentEvents.at(-1)).toEqual(expect.objectContaining({
-      type: 'adjudicated',
-      subject: 'dm-override:refusal:rule_gap',
-      consequence: { kind: 'no_effect' },
-    }));
-    host.close();
   });
 
   it('untouched_settings_hard_refuse: a rule gap keeps its citation out of the tray', async () => {
@@ -168,16 +174,19 @@ describe('D377.10 refusal handling', () => {
       initialPartyState: party(),
       turnLegalActions: () => ({ actions: [action] }),
     });
-    await submitOnlyAction(host, action);
-    const after = host.snapshot();
-    expect(after.dm.decisionTray.actionRefusal).toEqual(expect.objectContaining({
-      category: 'rule_gap',
-      citation: 'engine:rule_gap',
-    }));
-    expect(after.dm.decisionTray.entries.some(
-      (candidate) => candidate.kind === 'pending' && candidate.decision.kind === 'adjudication_prompt',
-    )).toBe(false);
-    host.close();
+    try {
+      await submitOnlyAction(host, action);
+      const after = host.snapshot();
+      expect(after.dm.decisionTray.actionRefusal).toEqual(expect.objectContaining({
+        category: 'rule_gap',
+        citation: 'engine:rule_gap',
+      }));
+      expect(after.dm.decisionTray.entries.some(
+        (candidate) => candidate.kind === 'pending' && candidate.decision.kind === 'adjudication_prompt',
+      )).toBe(false);
+    } finally {
+      host.close();
+    }
   });
 
   it('default_unlogged: default_and_log emits the visible assumed-X ruling entry', async () => {
@@ -187,13 +196,16 @@ describe('D377.10 refusal handling', () => {
       initialPartyState: party({ ...DEFAULT_REFUSAL_HANDLING_SETTINGS, rule_gap: 'default_and_log' }),
       turnLegalActions: () => ({ actions: [action] }),
     });
-    await submitOnlyAction(host, action);
-    expect(host.snapshot().dm.encounter.recentEvents.at(-1)).toEqual(expect.objectContaining({
-      type: 'adjudicated',
-      reasoning: expect.stringContaining('Assumed the action has no mechanical effect'),
-      consequence: { kind: 'no_effect' },
-    }));
-    host.close();
+    try {
+      await submitOnlyAction(host, action);
+      expect(host.snapshot().dm.encounter.recentEvents.at(-1)).toEqual(expect.objectContaining({
+        type: 'adjudicated',
+        reasoning: expect.stringContaining('Assumed the action has no mechanical effect'),
+        consequence: { kind: 'no_effect' },
+      }));
+    } finally {
+      host.close();
+    }
   });
 
   it('setting_not_persisted: per-category settings survive host resume', async () => {
@@ -258,11 +270,14 @@ describe('D377.10 refusal handling', () => {
       initialPartyState: party(allTray),
       turnLegalActions: () => ({ actions: [action] }),
     });
-    await submitOnlyAction(host, action);
-    expect(host.snapshot().dm.decisionTray.boundaryRefusal?.code).toBe('turn_boundary_blocked');
-    expect(host.snapshot().dm.decisionTray.entries.some(
-      (candidate) => candidate.kind === 'pending' && candidate.decision.kind === 'adjudication_prompt',
-    )).toBe(false);
-    host.close();
+    try {
+      await submitOnlyAction(host, action);
+      expect(host.snapshot().dm.decisionTray.boundaryRefusal?.code).toBe('turn_boundary_blocked');
+      expect(host.snapshot().dm.decisionTray.entries.some(
+        (candidate) => candidate.kind === 'pending' && candidate.decision.kind === 'adjudication_prompt',
+      )).toBe(false);
+    } finally {
+      host.close();
+    }
   });
 });
