@@ -1,12 +1,30 @@
 import { readFileSync } from '../../helpers/test-filesystem';
 import { describe, expect, it } from 'vitest';
 
-interface LedgerEntry {
+interface KillingTestReference {
+  readonly contract: string;
+  readonly testFile: string;
+  readonly testName: string;
+}
+
+interface ActiveLedgerEntry {
   readonly mutation: number | string;
   readonly name: string;
   readonly testFile: string;
   readonly testName: string;
+  readonly status?: never;
 }
+
+interface SupersededLedgerEntry {
+  readonly mutation: number | string;
+  readonly name: string;
+  readonly status: 'superseded';
+  readonly supersededBy: string;
+  readonly reason: string;
+  readonly successorTests: readonly KillingTestReference[];
+}
+
+type LedgerEntry = ActiveLedgerEntry | SupersededLedgerEntry;
 
 interface MutationLedger {
   readonly schemaVersion: number;
@@ -483,8 +501,41 @@ describe('phase-2 mutation ledger manifest', () => {
     expect(new Set(manifest.entries.map((entry) => entry.name)).size).toBe(
       manifest.entries.length,
     );
+    const superseded = numeric.filter(
+      (entry): entry is SupersededLedgerEntry & { readonly mutation: number } =>
+        entry.status === 'superseded',
+    );
+    expect(superseded).toHaveLength(1);
+    expect(superseded[0]).toMatchObject({
+      mutation: 36,
+      name: 'resume_reissues_request_id',
+      supersededBy: 'S3d (accepted in D586.185)',
+      reason: 'S3d intentionally treats restored offers as transiently stale: the old request id must be rejected and a fresh request id reissued before the persisted continuation resumes.',
+    });
+    expect(superseded[0]?.successorTests.map((successor) => successor.contract)).toEqual([
+      'the persisted request and continuation survive a resume',
+      'a stale id is rejected',
+      'a fresh id is issued',
+      'a completed movement stays completed',
+    ]);
     for (const entry of numeric) {
       expect(plan).toContain(`${entry.mutation}. \`${entry.name}\``);
+      if (entry.status === 'superseded') {
+        expect(entry.supersededBy, `${entry.mutation} ${entry.name} superseding decision`)
+          .not.toHaveLength(0);
+        expect(entry.reason, `${entry.mutation} ${entry.name} superseding reason`)
+          .not.toHaveLength(0);
+        expect(entry.successorTests, `${entry.mutation} ${entry.name} successor contracts`)
+          .not.toHaveLength(0);
+        for (const successor of entry.successorTests) {
+          expect(successor.contract, `${entry.mutation} ${entry.name} successor contract`)
+            .not.toHaveLength(0);
+          const source = readFileSync(successor.testFile, 'utf8');
+          expect(source, `${entry.mutation} ${entry.name}: ${successor.contract}`)
+            .toContain(successor.testName);
+        }
+        continue;
+      }
       const source = readFileSync(entry.testFile, 'utf8');
       expect(source, `${entry.mutation} ${entry.name}`).toContain(entry.testName);
     }

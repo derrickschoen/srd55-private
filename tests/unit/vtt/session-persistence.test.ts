@@ -870,6 +870,8 @@ describe('event-sourced encounter persistence', () => {
       reloadedStore,
       new MemoryMirrorSink(),
     );
+    expect(resumed.coordinatorState.pendingRequest).toEqual(originalRequest);
+    expect(resumed.coordinatorState.continuation.kind).toBe('movement');
     const resumedHuman = new HumanController();
     const resumedRegistry = new ControllerRegistry([
       { combatantId: mover.id, controller: new AlgorithmController() },
@@ -891,6 +893,11 @@ describe('event-sourced encounter persistence', () => {
     await Promise.resolve();
     const recoveredRequest = resumedHuman.pendingRequest();
     if (recoveredRequest === null) throw new Error('Expected the resumed prompt.');
+    expect(() => resumedHuman.submit({
+      requestId: originalRequest.requestId,
+      encounterRevision: originalRequest.encounterRevision,
+      action: { type: 'decline_reaction', actor: reactor.id, mover: mover.id },
+    })).toThrow(StaleControllerResponseError);
     expect(recoveredRequest.requestId).not.toBe(originalRequest.requestId);
     expect(recoveredRequest.encounterRevision).toBe(originalRequest.encounterRevision);
     expect(recoveredRequest.legalActions).toEqual(originalRequest.legalActions);
