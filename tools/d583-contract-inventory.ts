@@ -165,12 +165,21 @@ function sourceFiles(directory: string): readonly string[] {
   return result.sort();
 }
 
-function resolveLocal(importer: string, specifier: string): string | null {
+export function resolveLocal(importer: string, specifier: string): string | null {
   if (!specifier.startsWith('.')) return null;
   const pathSpecifier = specifier.split('?')[0];
   if (pathSpecifier === undefined) return null;
   const base = resolve(ROOT, dirname(importer), pathSpecifier);
-  for (const candidate of [base, `${base}.ts`, `${base}.tsx`, `${base}.mts`, `${base}.cts`, resolve(base, 'index.ts')]) {
+  for (const candidate of [
+    base,
+    `${base}.ts`,
+    `${base}.tsx`,
+    `${base}.d.ts`,
+    `${base}.mts`,
+    `${base}.cts`,
+    resolve(base, 'index.ts'),
+    resolve(base, 'index.d.ts'),
+  ]) {
     if (existsSync(candidate) && statSync(candidate).isFile()) {
       return ['.ts', '.tsx', '.mts', '.cts'].includes(extname(candidate)) ? relative(ROOT, candidate) : null;
     }
