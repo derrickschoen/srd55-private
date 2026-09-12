@@ -8,10 +8,13 @@ import { projectPlayerView } from '../../../src/combat/visibility';
 import { combatantId, feet } from '../../../src/combat/values';
 import { DmEncounterHost } from '../../../src/vtt/dm-encounter-host';
 import {
+  projectStateOnlyDmBoard,
   projectPlayerBoard,
   serializePlayerBoard,
   offeredActionId,
+  type TopDownDmBoardProjection,
 } from '../../../src/vtt/encounter-projections';
+import { projectStateOnlyTopDownDmBoard } from '../../../src/vtt/encounter-app';
 import {
   decodePlayerDecision,
   handleTopDownPlayerDecision,
@@ -111,6 +114,38 @@ function hostBoundaryHiddenState() {
 }
 
 describe('increment 6 projection boundary', () => {
+  it('STATE-ONLY-PROJECTION-PARITY strips the same top-level field set from both DM board shapes', () => {
+    const host = new DmEncounterHost(
+      'session:state-only-projection-parity',
+      new MemoryBrowserSessionStore(),
+    );
+    const dmProjection = host.snapshot().dm;
+    const topDownProjection: TopDownDmBoardProjection = {
+      ...dmProjection,
+      worldObjectControls: dmProjection.worldObjectControls.map((control, index) => ({
+        objectId: control.objectId,
+        objectName: control.objectName,
+        label: control.label,
+        offeredActionId: `test:world-object:${String(index)}`,
+      })),
+      pendingPlacementRecovery: null,
+    };
+    const stateOnlyDm = projectStateOnlyDmBoard(dmProjection);
+    const stateOnlyTopDown = projectStateOnlyTopDownDmBoard(topDownProjection);
+    const replacedFields = (before: object, after: object): readonly string[] =>
+      Object.keys(before)
+        .filter((field) => !Object.is(Reflect.get(before, field), Reflect.get(after, field)))
+        .sort();
+    const dmStrippedFields = replacedFields(dmProjection, stateOnlyDm);
+    const topDownStrippedFields = replacedFields(topDownProjection, stateOnlyTopDown);
+
+    expect(dmStrippedFields).not.toEqual([]);
+    expect(topDownStrippedFields).toEqual(dmStrippedFields);
+    expect(stateOnlyDm.offeredOptionPaths).toEqual([]);
+    expect(stateOnlyTopDown.offeredOptionPaths).toEqual([]);
+    host.close();
+  });
+
   it('HOST-WIRING-PLAYER-SECRECY serializes only the filtered player half of a DM host snapshot', () => {
     const host = new DmEncounterHost(
       'session:host-wiring-secrecy',

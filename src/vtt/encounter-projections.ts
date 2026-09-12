@@ -169,14 +169,24 @@ export interface DmBoardProjection {
   readonly pendingPlacementRecovery: DmPendingPlacementRecovery | null;
 }
 
-/** Remove engine-authored movement offers before a state-only board is rendered. */
-export function projectStateOnlyDmBoard(
-  projection: DmBoardProjection,
-): DmBoardProjection {
+interface StateOnlyBoardProjection {
+  readonly offeredOptionPaths: readonly OfferedOptionPath[];
+}
+
+/** The single authority-bearing field strip for every state-only DM board shape. */
+export function projectStateOnlyBoard<TProjection extends StateOnlyBoardProjection>(
+  projection: TProjection,
+): TProjection {
   return {
     ...projection,
     offeredOptionPaths: [],
   };
+}
+
+export function projectStateOnlyDmBoard(
+  projection: DmBoardProjection,
+): DmBoardProjection {
+  return projectStateOnlyBoard(projection);
 }
 
 export interface DmPendingPlacementRecovery {

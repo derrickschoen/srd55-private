@@ -48,13 +48,14 @@ import {
   type EncounterBoardTokenModel,
 } from './encounter-board';
 import { encounterArtForBoard } from './encounter-art-selection';
-import type {
-  DmMovementPathPreview,
-  DmPendingPlacementRecovery,
-  PlayerBoardProjection,
-  ProjectedControllerRequest,
-  TopDownDmBoardProjection,
-  TopDownPendingPlacementRecovery,
+import {
+  projectStateOnlyBoard,
+  type DmMovementPathPreview,
+  type DmPendingPlacementRecovery,
+  type PlayerBoardProjection,
+  type ProjectedControllerRequest,
+  type TopDownDmBoardProjection,
+  type TopDownPendingPlacementRecovery,
 } from './encounter-projections';
 import {
   handleTopDownPlayerDecision,
@@ -113,13 +114,10 @@ const LOCAL_PARTY_PLAYER_ID = 'player:local-party';
 export type BoardSnapshotInformationMode = 'advice' | 'blind_state';
 export type BoardSnapshotRole = 'dm_board' | 'accessible_board_raster' | 'player_board';
 
-function projectStateOnlyTopDownDmBoard(
+export function projectStateOnlyTopDownDmBoard(
   projection: TopDownDmBoardProjection,
 ): TopDownDmBoardProjection {
-  return {
-    ...projection,
-    offeredOptionPaths: [],
-  };
+  return projectStateOnlyBoard(projection);
 }
 
 function element<K extends keyof HTMLElementTagNameMap>(
