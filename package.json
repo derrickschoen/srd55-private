@@ -17,6 +17,7 @@
     "test:gate": "node tools/gate-vitest.mjs",
     "test:gate:browser": "node tools/gate-playwright.mjs",
     "test:affected": "node scripts/test-affected.mjs",
+    "heldout:guard": "node --experimental-strip-types tools/heldout-leak-check.ts",
     "census:modules": "node scripts/module-state-census.mjs",
     "test:shuffled": "vitest run --configLoader runner --sequence.shuffle --sequence.seed=20260825",
     "test:unit": "vitest run --configLoader runner tests/unit",

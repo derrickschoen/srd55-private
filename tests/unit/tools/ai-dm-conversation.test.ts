@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { join, resolve } from 'node:path';
+import { createHash } from 'node:crypto';
+import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it, vi } from 'vitest';
 import {
@@ -8,10 +9,14 @@ import {
   contextTokenCount,
   turnInputTotal,
   measuredContextRolloverThreshold,
+  engineDispatchId,
+  engineDispatchPhaseForCallPhase,
   type AgentInvocation,
   type AgentSessionAdapter,
   type AgentSessionBinding,
   type AgentTurnResult,
+  type EngineCatalogEvidence,
+  type EngineDispatchId,
 } from '../../../src/vtt/agent-session';
 import {
   AgentSessionLifecycle,
@@ -27,10 +32,13 @@ import {
   McpChildExited,
   mcpRequest,
   stopMcpClient,
+  profiledTurnContextArguments,
+  persistD569IntegrityStop,
+  type ConversationBoardSnapshotService,
   type ConversationRunOptions,
 } from '../../../tools/ai-dm-conversation';
 import { buildRerunPacket } from '../../../tools/ai-dm-rerun-packet';
-import { mkdtempSync, readFileSync, writeFileSync } from '../../helpers/test-filesystem';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from '../../helpers/test-filesystem';
 import { createEncounter, reduceEncounter, type EncounterState } from '../../../src/combat/encounter';
 import { armorClass, combatantId, encounterSessionId, feet, type CombatantId } from '../../../src/combat/values';
 import type { EncounterCommand } from '../../../src/combat/events';
@@ -54,6 +62,7 @@ import {
   MemoryMirrorSink,
 } from '../../../src/vtt/session-persistence';
 import { codexArgv } from '../../../src/vtt/agent-adapters/codex';
+import { D569IntegrityStop } from '../../../src/vtt/d569-integrity';
 import { decodeSessionSnapshotV1 } from '../../../src/vtt/arena-fixture';
 import { canonicalJson } from '../../../src/commands/canonical-json';
 import {
@@ -80,6 +89,10 @@ import { declareTestInputs } from '../../helpers/test-inputs';
 import { sha256 } from '../../../src/crypto/sha256';
 import { DEFAULT_RENDERER_PROFILE } from '../../../src/vtt/renderer-profile';
 import { traceCombatantLine } from '../../../src/combat/cover';
+import {
+  classifyEngineCatalogEvidence,
+  type EngineReadinessRecord,
+} from '../../../src/vtt/engine-dispatch-evidence';
 
 const kbInputs = declareTestInputs({ fixtures: [
   'tests/fixtures/ai-dm-kb/ai-dm-core.md',
@@ -146,8 +159,12 @@ class RecordingConversationAdapter implements AgentSessionAdapter {
 
   classifyFailure(): 'unknown' { return 'unknown'; }
 
-  private completed(sessionId: AgentTurnResult['resumeSessionId']): AgentTurnResult {
-    return { resumeSessionId: sessionId, sessionId: null, finalText: 'SIMULATED', usage: null, exit: 'completed' };
+  private completed(sessionId: NonNullable<AgentTurnResult['resumeSessionId']>): AgentTurnResult {
+    return {
+      resumeSessionId: sessionId, sessionId: null, finalText: 'SIMULATED', usage: null, exit: 'completed',
+      processEvidence: null, engineCatalogEvidence: null,
+      partialResultEvidence: { status: 'complete', decodedEventCount: 0 },
+    };
   }
 }
 
@@ -156,6 +173,146 @@ function objectValue(value: unknown, label: string): Readonly<Record<string, unk
     throw new TypeError(`${label} must be an object.`);
   }
   return value as Readonly<Record<string, unknown>>;
+}
+
+function d569BoardSnapshotService(directory: string): ConversationBoardSnapshotService {
+  return {
+    outputDirectory: directory,
+    capture: async (input) => {
+      const png = Buffer.alloc(24);
+      Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).copy(png);
+      png.writeUInt32BE(1, 16);
+      png.writeUInt32BE(1, 20);
+      const digest = createHash('sha256').update(png).digest('hex');
+      const relativePath = `board-images/${digest}.png` as const;
+      mkdirSync(join(directory, 'board-images'), { recursive: true });
+      writeFileSync(join(directory, relativePath), png);
+      const html = Buffer.from('<!doctype html><main>D569 evidence</main>\n');
+      const htmlDigest = createHash('sha256').update(html).digest('hex');
+      const htmlRelativePath = `board-html/${htmlDigest}/board.html` as const;
+      mkdirSync(join(directory, 'board-html', htmlDigest), { recursive: true });
+      writeFileSync(join(directory, htmlRelativePath), html);
+      return {
+        version: 'arena-board-image-v1', audience: 'dm', mimeType: 'image/png',
+        relativePath, sha256: digest, bytes: png.byteLength, width: 1, height: 1,
+        capturedAtUnixMs: 1, captureMs: 0, source: { ...input.source },
+        chromiumVersion: 'SIMULATED Chromium',
+        html: { relativePath: htmlRelativePath, sha256: htmlDigest, bytes: html.byteLength },
+      };
+    },
+    close: async () => undefined,
+  };
+}
+
+type IncompleteCatalogExit = 'timed_out' | 'cancelled' | 'infrastructure_failed';
+type IncompleteCatalogEvidenceFactory = (
+  dispatchId: EngineDispatchId,
+) => Extract<EngineCatalogEvidence, { readonly status: 'inconclusive' }>;
+
+function incompleteCatalogAdapter(
+  exit: IncompleteCatalogExit,
+  evidence: Extract<EngineCatalogEvidence, { readonly status: 'inconclusive' }>['reason'] |
+    IncompleteCatalogEvidenceFactory,
+  observeLauncher?: (path: string) => void,
+): AgentSessionAdapter {
+  const dispatch = async (invocation: AgentInvocation): Promise<AgentTurnResult> => {
+    if (invocation.engineDispatchId === undefined) throw new Error('Incomplete fixture lacks dispatch identity.');
+    observeLauncher?.(invocation.launcherToken);
+    const common = {
+      resumeSessionId: null, sessionId: `partial-${exit}-session`,
+      finalText: `partial ${exit} output`, usage: null,
+      processEvidence: {
+        startedAtUnixMs: 10, endedAtUnixMs: 20, exitCode: exit === 'infrastructure_failed' ? 1 : null,
+        signal: exit === 'infrastructure_failed' ? null : 'SIGTERM',
+        stdout: `partial ${exit} output`, stderr: exit === 'infrastructure_failed' ? 'startup failed' : '',
+        decodedEvents: [],
+      },
+      partialResultEvidence: {
+        status: 'partial' as const, decodedEventCount: 0, finalTextFragment: `partial ${exit} output`,
+        observedUsage: null, stagedInvocationIds: [],
+      },
+      engineCatalogEvidence: typeof evidence === 'function'
+        ? evidence(invocation.engineDispatchId)
+        : { status: 'inconclusive' as const, dispatchId: invocation.engineDispatchId, reason: evidence },
+    };
+    switch (exit) {
+      case 'timed_out': return { ...common, exit, timeoutMs: 180_000 };
+      case 'cancelled': return { ...common, exit, cancellationReason: 'operator_cancelled' };
+      case 'infrastructure_failed': return {
+        ...common, exit, component: 'engine_mcp_startup', failureReason: 'required engine startup failed',
+      };
+    }
+  };
+  return {
+    kind: 'codex',
+    probe: async () => ({ present: true, version: 'SIMULATED' }),
+    start: dispatch,
+    resume: async () => { throw new Error('Incomplete fixture unexpectedly resumed.'); },
+    classifyFailure: () => 'unknown',
+  };
+}
+
+function classifiedInvalidCatalog(
+  dispatchId: EngineDispatchId,
+  source: 'malformed' | 'wrong_profile',
+): Extract<EngineCatalogEvidence, { readonly status: 'inconclusive' }> {
+  const readiness: readonly EngineReadinessRecord[] = source === 'wrong_profile' ? [{
+    version: 1, dispatchId, phase: 'primary', profile: 'blind', requestId: 'request:wrong-profile',
+    event: 'tools_list_stream_write_completed', generatedAtUnixMs: 1, writeCompletedAtUnixMs: 2,
+    responseId: 'wrong-profile-response', responseSha256: 'a'.repeat(64),
+    expectedToolNames: ['engine.get_turn_context'], returnedToolNames: ['engine.get_turn_context'],
+    descriptorSha256: 'b'.repeat(64), validation: { status: 'valid' },
+  }] : [];
+  const classified = classifyEngineCatalogEvidence({
+    dispatchId, expectedProfile: 'dm', expectedPhase: 'primary', expectedRequestId: 'request:wrong-profile',
+    expectedToolNames: ['engine.get_turn_context'], events: [], readiness,
+    completed: false, requiredStartupFailed: false,
+    ...(source === 'malformed' ? { malformedReadiness: true } : {}),
+  });
+  if (classified.status !== 'inconclusive' || classified.reason !== 'invalid_catalog_response') {
+    throw new Error(`${source} readiness did not classify as invalid_catalog_response.`);
+  }
+  return classified;
+}
+
+async function runIncompleteCatalogIntegrityStop(
+  exit: IncompleteCatalogExit,
+  evidence: Extract<EngineCatalogEvidence, { readonly status: 'inconclusive' }>['reason'] |
+    IncompleteCatalogEvidenceFactory,
+  expireRoundDeadline = false,
+): Promise<{
+  readonly row: Readonly<Record<string, unknown>>;
+  readonly artifact: Readonly<Record<string, unknown>>;
+  readonly launcher: EngineMcpLauncherManifest;
+}> {
+  const directory = mkdtempSync(join(tmpdir(), `d569-${exit}-catalog-integrity-`));
+  const outPath = join(directory, 'rows.jsonl');
+  let launcherPath: string | null = null;
+  let policyMs = 0;
+  let stopped: unknown;
+  try {
+    await runConversation(parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', outPath,
+      '--dm-mode', 'advice', '--board-image', 'off', '--dry-run',
+    ]), {
+      adapter: incompleteCatalogAdapter(exit, evidence, (path) => { launcherPath = path; }),
+      policyNow: () => policyMs,
+      onPrimaryResultObservedForTest: () => {
+        if (expireRoundDeadline) policyMs = 180_000;
+      },
+    });
+  } catch (error) {
+    stopped = error;
+  }
+  if (!(stopped instanceof D569IntegrityStop)) {
+    throw new Error(`Expected ${exit} catalog evidence to raise D569IntegrityStop.`, { cause: stopped });
+  }
+  if (launcherPath === null) throw new Error('Integrity fixture did not observe its launcher.');
+  const launcher = JSON.parse(readFileSync(launcherPath, 'utf8')) as EngineMcpLauncherManifest;
+  const row = JSON.parse(readFileSync(outPath, 'utf8')) as Readonly<Record<string, unknown>>;
+  const artifactPath = join(dirname(launcherPath), 'room-1-round-1-dispatch-integrity.json');
+  const artifact = JSON.parse(readFileSync(artifactPath, 'utf8')) as Readonly<Record<string, unknown>>;
+  return { row, artifact, launcher };
 }
 
 class BoilerplateThenValidStructuredFinalAdapter implements AgentSessionAdapter {
@@ -191,7 +348,7 @@ class BoilerplateThenValidStructuredFinalAdapter implements AgentSessionAdapter 
   classifyFailure(): 'unknown' { return 'unknown'; }
 
   private dispatch(
-    sessionId: AgentTurnResult['resumeSessionId'],
+    sessionId: NonNullable<AgentTurnResult['resumeSessionId']>,
     invocation: AgentInvocation,
   ): AgentTurnResult {
     if (invocation.output.kind !== 'structured_final') {
@@ -208,6 +365,9 @@ class BoilerplateThenValidStructuredFinalAdapter implements AgentSessionAdapter 
           : 'I cannot submit this round proposal.',
         usage: null,
         exit: 'completed',
+        processEvidence: null,
+        engineCatalogEvidence: null,
+        partialResultEvidence: { status: 'complete', decodedEventCount: 0 },
       };
     }
     const manifest = JSON.parse(readFileSync(invocation.launcherToken, 'utf8')) as EngineMcpLauncherManifest;
@@ -248,6 +408,9 @@ class BoilerplateThenValidStructuredFinalAdapter implements AgentSessionAdapter 
       }),
       usage: null,
       exit: 'completed',
+      processEvidence: null,
+      engineCatalogEvidence: null,
+      partialResultEvidence: { status: 'complete', decodedEventCount: 0 },
     };
   }
 }
@@ -309,7 +472,7 @@ class SerializedRoundTripAdapter implements AgentSessionAdapter {
   }
 
   private async dispatch(
-    sessionId: AgentTurnResult['resumeSessionId'],
+    sessionId: NonNullable<AgentTurnResult['resumeSessionId']>,
     invocation: AgentInvocation,
   ): Promise<AgentTurnResult> {
     const manifest = JSON.parse(readFileSync(invocation.launcherToken, 'utf8')) as EngineMcpLauncherManifest;
@@ -496,7 +659,7 @@ class SerializedRoundTripAdapter implements AgentSessionAdapter {
   classifyFailure(): 'unknown' { return 'unknown'; }
 
   private completed(
-    sessionId: AgentTurnResult['resumeSessionId'],
+    sessionId: NonNullable<AgentTurnResult['resumeSessionId']>,
     finalText = 'SERIALIZED-TEST',
   ): AgentTurnResult {
     return {
@@ -512,6 +675,9 @@ class SerializedRoundTripAdapter implements AgentSessionAdapter {
         reasoningTokens: 0,
       },
       exit: 'completed',
+      processEvidence: null,
+      engineCatalogEvidence: null,
+      partialResultEvidence: { status: 'complete', decodedEventCount: 0 },
     };
   }
 }
@@ -642,6 +808,317 @@ async function producerMutationReceipt<Dependency, Result>(
 }
 
 describe('AI-DM engine MCP conversation runner', () => {
+  it('omits DM-only intel_mode from blind planned context arguments', () => {
+    const common = { runId: 'encounter:profiled-context', expectedRevision: 7, intelMode: 'full' as const };
+    expect(profiledTurnContextArguments({ ...common, blind: true })).toEqual({
+      run_id: common.runId, expected_revision: 7, scope: 'round', granularity: 'full',
+    });
+    expect(profiledTurnContextArguments({ ...common, blind: false })).toEqual({
+      run_id: common.runId, expected_revision: 7, scope: 'round', intel_mode: 'full', granularity: 'full',
+    });
+  });
+
+  it('persists indeterminate artifact and forensic row before raising the typed integrity STOP', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'd569-integrity-stop-'));
+    const launcherPath = join(directory, 'launcher.json');
+    const proposalSpoolPath = join(directory, 'proposal.jsonl');
+    const contextSpoolPath = join(directory, 'context.jsonl');
+    const artifactPath = join(directory, 'integrity.json');
+    const rowPath = join(directory, 'rows.jsonl');
+    writeFileSync(launcherPath, '{"immutable":true}', 'utf8');
+    writeFileSync(proposalSpoolPath, '{"staged":"unconsumed"}\n', 'utf8');
+    writeFileSync(contextSpoolPath, '', 'utf8');
+    writeFileSync(rowPath, '', 'utf8');
+    const dispatchId = engineDispatchId('engine-dispatch:indeterminate-test-0001');
+    let stopped: unknown;
+    try {
+      persistD569IntegrityStop({
+        artifactPath,
+        rowPath,
+        scheduledCellKey: '9:3',
+        launcherPath,
+        proposalSpoolPath,
+        contextSpoolPath,
+        catalogEvidence: { status: 'inconclusive', dispatchId, reason: 'no_correlated_catalog' },
+        delivery: {
+          status: 'indeterminate', dispatchId, reason: 'catalog_inconclusive_empty_context_spool',
+          measurement: null, integrityAction: 'stop_after_persist',
+        },
+        turn: {
+          exit: 'completed', resumeSessionId: agentSessionIdFromCli('agent-session:indeterminate'),
+          sessionId: null, finalText: 'model reported no engine interface', usage: null,
+          processEvidence: {
+            startedAtUnixMs: 1, endedAtUnixMs: 2, exitCode: 0, signal: null,
+            stdout: 'partial evidence', stderr: '', decodedEvents: [],
+          },
+          partialResultEvidence: { status: 'complete', decodedEventCount: 0 },
+          engineCatalogEvidence: { status: 'inconclusive', dispatchId, reason: 'no_correlated_catalog' },
+        },
+      });
+    } catch (error) { stopped = error; }
+
+    expect(stopped).toMatchObject({ name: 'D569IntegrityStop' });
+    expect(JSON.parse(readFileSync(artifactPath, 'utf8'))).toEqual(expect.objectContaining({
+      kind: 'dispatch_integrity_indeterminate', scheduledCellKey: '9:3', dispatchId,
+      processEvidence: expect.objectContaining({ stdout: 'partial evidence', exitCode: 0 }),
+      partialResultEvidence: { status: 'complete', decodedEventCount: 0 },
+      proposalSpool: expect.objectContaining({ recordCount: 1, stagedUnconsumed: true }),
+      contextSpool: expect.objectContaining({ recordCount: 0 }),
+    }));
+    expect(JSON.parse(readFileSync(rowPath, 'utf8'))).toEqual(expect.objectContaining({
+      rowContractVersion: 'arena-row-v3', outcome: 'integrity_indeterminate', passed: false,
+      authorizedPlan: null, execution: null,
+      engineCatalogEvidence: { status: 'inconclusive', dispatchId, reason: 'no_correlated_catalog' },
+      turnContextDelivery: expect.objectContaining({ status: 'indeterminate', dispatchId }),
+    }));
+    expect(readFileSync(proposalSpoolPath, 'utf8')).toBe('{"staged":"unconsumed"}\n');
+  });
+
+  it('classifies a timeout after catalog observation but before a tool call without an integrity STOP', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'd569-runner-catalog-timeout-'));
+    const outPath = join(directory, 'rows.jsonl');
+    const boardSnapshotService: ConversationBoardSnapshotService = {
+      outputDirectory: directory,
+      capture: async (input) => {
+        const png = Buffer.alloc(24);
+        Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).copy(png);
+        png.writeUInt32BE(1, 16);
+        png.writeUInt32BE(1, 20);
+        const digest = createHash('sha256').update(png).digest('hex');
+        const relativePath = `board-images/${digest}.png` as const;
+        mkdirSync(join(directory, 'board-images'), { recursive: true });
+        writeFileSync(join(directory, relativePath), png);
+        const html = Buffer.from('<!doctype html><main>timeout evidence</main>\n');
+        const htmlDigest = createHash('sha256').update(html).digest('hex');
+        const htmlRelativePath = `board-html/${htmlDigest}/board.html` as const;
+        mkdirSync(join(directory, 'board-html', htmlDigest), { recursive: true });
+        writeFileSync(join(directory, htmlRelativePath), html);
+        return {
+          version: 'arena-board-image-v1', audience: 'dm', mimeType: 'image/png',
+          relativePath, sha256: digest, bytes: png.byteLength, width: 1, height: 1,
+          capturedAtUnixMs: 1, captureMs: 0, source: { ...input.source },
+          chromiumVersion: 'SIMULATED Chromium',
+          html: { relativePath: htmlRelativePath, sha256: htmlDigest, bytes: html.byteLength },
+        };
+      },
+      close: async () => undefined,
+    };
+    const adapter: AgentSessionAdapter = {
+      kind: 'codex',
+      probe: async () => ({ present: true, version: 'SIMULATED' }),
+      start: async (invocation) => {
+        if (invocation.engineDispatchId === undefined) throw new Error('Timeout fixture lacks dispatch identity.');
+        return {
+          exit: 'timed_out', resumeSessionId: null, sessionId: 'partial-timeout-session',
+          finalText: 'catalog observed before timeout', usage: null, timeoutMs: 180_000,
+          processEvidence: {
+            startedAtUnixMs: 10, endedAtUnixMs: 20, exitCode: null, signal: 'SIGTERM',
+            stdout: 'catalog observed before timeout', stderr: '', decodedEvents: [],
+          },
+          partialResultEvidence: {
+            status: 'partial', decodedEventCount: 1, finalTextFragment: 'catalog observed before timeout',
+            observedUsage: null, stagedInvocationIds: [],
+          },
+          engineCatalogEvidence: {
+            status: 'inconclusive', dispatchId: invocation.engineDispatchId,
+            reason: 'no_correlated_catalog',
+          },
+        };
+      },
+      resume: async () => { throw new Error('Timeout fixture unexpectedly resumed.'); },
+      classifyFailure: () => 'unknown',
+    };
+    const result = await runConversation(parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', outPath,
+      '--dm-mode', 'advice', '--dry-run',
+    ]), { adapter, boardSnapshotService });
+    expect(result.rows[0]).toMatchObject({
+      outcome: 'refused', fallbackReason: 'timeout',
+      engineCatalogEvidence: { status: 'inconclusive', reason: 'no_correlated_catalog' },
+      turnContextDelivery: { status: 'timeout_before_delivery', measurement: null },
+    });
+  });
+
+  it('persists primary D569 timeout evidence before applying the expired round deadline', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'd569-primary-expired-evidence-'));
+    const outPath = join(directory, 'rows.jsonl');
+    let policyMs = 0;
+    let observedExit: AgentTurnResult['exit'] | null = null;
+    const result = await runConversation(parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', outPath,
+      '--dm-mode', 'advice', '--dry-run',
+    ]), {
+      adapter: incompleteCatalogAdapter('timed_out', 'no_correlated_catalog'),
+      boardSnapshotService: d569BoardSnapshotService(directory),
+      policyNow: () => policyMs,
+      onPrimaryResultObservedForTest: (turn) => {
+        observedExit = turn.exit;
+        policyMs = 180_000;
+      },
+    });
+
+    expect(observedExit).toBe('timed_out');
+    expect(result.rows[0]).toMatchObject({
+      rowContractVersion: 'arena-row-v3',
+      outcome: 'refused', fallbackReason: 'timeout', roundWallTimedOut: true,
+      engineCatalogEvidence: { status: 'inconclusive', reason: 'no_correlated_catalog' },
+      turnContextDelivery: { status: 'timeout_before_delivery', measurement: null },
+      authorizedPlan: null,
+    });
+    expect(JSON.parse(readFileSync(outPath, 'utf8'))).toMatchObject({
+      rowContractVersion: 'arena-row-v3',
+      outcome: 'refused', fallbackReason: 'timeout',
+      engineCatalogEvidence: { status: 'inconclusive', reason: 'no_correlated_catalog' },
+      turnContextDelivery: { status: 'timeout_before_delivery', measurement: null },
+    });
+  });
+
+  it.each(['timed_out', 'cancelled'] as const)(
+    'persists forensic evidence and STOPs on a %s dispatch with a contradictory catalog',
+    async (exit) => {
+      const { row, artifact, launcher } = await runIncompleteCatalogIntegrityStop(
+        exit,
+        'conflicting_success_and_failure',
+        true,
+      );
+      expect(row).toMatchObject({
+        rowContractVersion: 'arena-row-v3', outcome: 'integrity_indeterminate', passed: false,
+        engineCatalogEvidence: { status: 'inconclusive', reason: 'conflicting_success_and_failure' },
+        turnContextDelivery: {
+          status: 'indeterminate', measurement: null, integrityAction: 'stop_after_persist',
+        },
+        authorizedPlan: null, execution: null,
+      });
+      expect(row).not.toHaveProperty('failingDispatch');
+      expect(row).not.toHaveProperty('planner');
+      expect(artifact).toMatchObject({
+        kind: 'dispatch_integrity_indeterminate',
+        catalogEvidence: { status: 'inconclusive', reason: 'conflicting_success_and_failure' },
+        delivery: { status: 'indeterminate' }, contextSpool: { recordCount: 0 },
+        processEvidence: { stdout: `partial ${exit} output` },
+        partialResultEvidence: { status: 'partial', finalTextFragment: `partial ${exit} output` },
+      });
+      if (launcher.proposalSpoolPath === undefined) throw new Error('Integrity launcher omitted proposal spool.');
+      expect(readFileSync(launcher.proposalSpoolPath, 'utf8')).toBe('');
+    },
+  );
+
+  it.each([
+    ['timed_out', 'malformed'],
+    ['timed_out', 'wrong_profile'],
+    ['cancelled', 'malformed'],
+    ['cancelled', 'wrong_profile'],
+  ] as const)(
+    'persists forensic evidence and STOPs on a %s dispatch with an invalid %s catalog',
+    async (exit, source) => {
+      const { row, artifact, launcher } = await runIncompleteCatalogIntegrityStop(
+        exit,
+        (dispatchId) => classifiedInvalidCatalog(dispatchId, source),
+        true,
+      );
+      expect(row).toMatchObject({
+        rowContractVersion: 'arena-row-v3', outcome: 'integrity_indeterminate', passed: false,
+        engineCatalogEvidence: { status: 'inconclusive', reason: 'invalid_catalog_response' },
+        turnContextDelivery: {
+          status: 'indeterminate', measurement: null, integrityAction: 'stop_after_persist',
+        },
+        authorizedPlan: null, execution: null,
+      });
+      expect(row).not.toHaveProperty('failingDispatch');
+      expect(row).not.toHaveProperty('planner');
+      expect(artifact).toMatchObject({
+        kind: 'dispatch_integrity_indeterminate',
+        catalogEvidence: { status: 'inconclusive', reason: 'invalid_catalog_response' },
+        delivery: { status: 'indeterminate' }, contextSpool: { recordCount: 0 },
+        processEvidence: { stdout: `partial ${exit} output` },
+        partialResultEvidence: { status: 'partial', finalTextFragment: `partial ${exit} output` },
+      });
+      if (launcher.proposalSpoolPath === undefined) throw new Error('Integrity launcher omitted proposal spool.');
+      expect(readFileSync(launcher.proposalSpoolPath, 'utf8')).toBe('');
+    },
+  );
+
+  it('persists a runner forensic row before propagating conflicting startup evidence', async () => {
+    const { row, artifact, launcher } = await runIncompleteCatalogIntegrityStop(
+      'infrastructure_failed',
+      'no_correlated_catalog',
+    );
+    expect(row).toMatchObject({
+      rowContractVersion: 'arena-row-v3', outcome: 'integrity_indeterminate', passed: false,
+      engineCatalogEvidence: { status: 'inconclusive', reason: 'no_correlated_catalog' },
+      turnContextDelivery: {
+        status: 'indeterminate', measurement: null, integrityAction: 'stop_after_persist',
+      },
+      authorizedPlan: null, execution: null,
+    });
+    expect(row).not.toHaveProperty('failingDispatch');
+    expect(artifact).toMatchObject({
+      kind: 'dispatch_integrity_indeterminate',
+      delivery: { status: 'indeterminate' }, contextSpool: { recordCount: 0 },
+      processEvidence: { stdout: 'partial infrastructure_failed output', stderr: 'startup failed' },
+      partialResultEvidence: { status: 'partial', finalTextFragment: 'partial infrastructure_failed output' },
+    });
+    if (launcher.turnContextSpoolPath === undefined) throw new Error('Integrity launcher omitted context spool.');
+    expect(readFileSync(launcher.turnContextSpoolPath, 'utf8')).toBe('');
+  });
+
+  it('persists delivered context and process evidence before propagating conflicting startup evidence', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'd569-runner-startup-integrity-'));
+    const outPath = join(directory, 'rows.jsonl');
+    let launcherToken: string | null = null;
+    const adapter: AgentSessionAdapter = {
+      kind: 'codex',
+      probe: async () => ({ present: true, version: 'SIMULATED' }),
+      start: async (invocation) => {
+        launcherToken = invocation.launcherToken;
+        const manifest = JSON.parse(readFileSync(invocation.launcherToken, 'utf8')) as EngineMcpLauncherManifest;
+        if (manifest.dispatchId === undefined) throw new Error('Integrity fixture launcher lacks dispatch identity.');
+        if (manifest.turnContextSpoolPath === undefined || manifest.dispatchPhase === undefined) {
+          throw new Error('Integrity fixture launcher lacks a context spool.');
+        }
+        writeFileSync(manifest.turnContextSpoolPath, `${JSON.stringify({
+          granularity: 'full', semantic_board: { provenance: { format: 'test-semantic-board-v1' } },
+          dispatchId: manifest.dispatchId, dispatchProfile: 'dm', dispatchPhase: manifest.dispatchPhase,
+        })}\n`, 'utf8');
+        return {
+          exit: 'infrastructure_failed', resumeSessionId: null, sessionId: 'partial-session',
+          finalText: 'partial startup output', usage: null,
+          processEvidence: {
+            startedAtUnixMs: 10, endedAtUnixMs: 20, exitCode: 1, signal: null,
+            stdout: 'partial startup output', stderr: 'required engine startup failed', decodedEvents: [],
+          },
+          partialResultEvidence: {
+            status: 'partial', decodedEventCount: 0, finalTextFragment: 'partial startup output',
+            observedUsage: null, stagedInvocationIds: [],
+          },
+          engineCatalogEvidence: {
+            status: 'inconclusive', dispatchId: manifest.dispatchId,
+            reason: 'conflicting_success_and_failure',
+          },
+          component: 'engine_mcp_startup', failureReason: 'required engine startup failed',
+        };
+      },
+      resume: async () => { throw new Error('Integrity fixture unexpectedly resumed.'); },
+      classifyFailure: () => 'unknown',
+    };
+    await expect(runConversation(parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', outPath,
+      '--dm-mode', 'advice', '--board-image', 'off', '--dry-run',
+    ]), { adapter })).rejects.toBeInstanceOf(D569IntegrityStop);
+    expect(JSON.parse(readFileSync(outPath, 'utf8'))).toMatchObject({
+      rowContractVersion: 'arena-row-v3', outcome: 'integrity_indeterminate',
+      engineCatalogEvidence: { status: 'inconclusive', reason: 'conflicting_success_and_failure' },
+      turnContextDelivery: { status: 'delivered', measurement: { semanticBytes: expect.any(Number) } },
+    });
+    if (launcherToken === null) throw new Error('Integrity fixture did not observe its launcher.');
+    const artifactPath = join(dirname(launcherToken), 'room-1-round-1-dispatch-integrity.json');
+    expect(JSON.parse(readFileSync(artifactPath, 'utf8'))).toMatchObject({
+      delivery: { status: 'delivered' }, contextSpool: { recordCount: 1 },
+      processEvidence: { stdout: 'partial startup output', stderr: 'required engine startup failed' },
+      partialResultEvidence: { status: 'partial', finalTextFragment: 'partial startup output' },
+    });
+  });
+
   it('rejects a request after the MCP child closes stdin without an unhandled EPIPE', async () => {
     const child = spawn(process.execPath, ['-e', [
       "process.on('SIGTERM', () => {});",
@@ -2195,7 +2672,7 @@ describe('AI-DM engine MCP conversation runner', () => {
 
     expect(result.rows[0]).toEqual(expect.objectContaining({ contextTruncated: true }));
     const rawTurnContext = result.rows[0]?.rawTurnContext;
-    if (rawTurnContext === undefined) throw new Error('Trimmed row omitted its raw turn context.');
+    if (rawTurnContext === undefined || rawTurnContext === null) throw new Error('Trimmed row omitted its raw turn context.');
     const turnContext = objectValue(JSON.parse(rawTurnContext) as unknown, 'trimmed turn context');
     expect(new TextEncoder().encode(rawTurnContext).byteLength)
       .toBeLessThanOrEqual(config.turnContextMaximumBytes);
@@ -2721,12 +3198,49 @@ describe('AI-DM engine MCP conversation runner', () => {
     ])).toThrow('--kb cannot use content/cc-by-sa');
   });
 
+  it('parses the D569 mode, repair, attempt, fact, cap, timeout, and judge-model combinations', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-blind-parse-'));
+    const outPath = join(directory, 'rows.jsonl');
+    const common = ['--rooms', '1', '--out', outPath, '--dm-mode', 'blind'] as const;
+
+    expect(parseConversationArgs(common)).toEqual(expect.objectContaining({
+      dmMode: 'blind', dmModeExplicit: true, blindRepairArm: 'code_only',
+      blindMaxAttempts: 3, blindFacts: false, midRoundAdjustmentsEnabled: false,
+      turnContextMaximumBytes: 65_536, timeoutMs: 240_000,
+      instructionSource: 'kb', boardImageMode: 'png',
+    }));
+    expect(parseConversationArgs([
+      ...common, '--cli', 'claude-code', '--model', 'claude-opus-5',
+      '--blind-repair-arm', 'minimal_legal_alternative', '--blind-max-attempts', '2',
+      '--blind-facts', 'on',
+    ])).toEqual(expect.objectContaining({
+      cli: 'claude-code', model: 'claude-opus-5',
+      blindRepairArm: 'minimal_legal_alternative', blindMaxAttempts: 2, blindFacts: true,
+    }));
+    expect(parseConversationArgs([
+      ...common, '--cli', 'codex', '--model', 'gpt-5.6-sol', '--effort', 'high',
+    ])).toEqual(expect.objectContaining({ cli: 'codex', model: 'gpt-5.6-sol', effort: 'high' }));
+    expect(() => parseConversationArgs([...common, '--transport', 'final_indices']))
+      .toThrow('--board-image png requires --transport mcp_minimal');
+    expect(() => parseConversationArgs([...common, '--board-image', 'off']))
+      .toThrow('Blind mode requires MCP-minimal');
+    expect(() => parseConversationArgs([...common, '--turn-context-max-bytes', '65535']))
+      .toThrow('Blind mode requires MCP-minimal');
+    expect(() => parseConversationArgs([...common, '--blind-max-attempts', '4'])).toThrow();
+    expect(() => parseConversationArgs([
+      '--rooms', '1', '--out', outPath, '--blind-facts', 'on',
+    ])).toThrow('require --dm-mode blind');
+  });
+
   it('derives per-combatant initiative for standalone fixtures and rejects an explicit legacy profile', { timeout: 30_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-segments-fixture-constraint-'));
     const result = await runConversation(parseConversationArgs([
       '--rooms', '1', '--rounds', '1', '--out', join(directory, 'derived.jsonl'), '--dry-run',
     ]));
     expect(result.rows[0]?.combatModel).toBe('initiative_segments_v1');
+    expect(result.rows[0]).not.toHaveProperty('dmMode');
+    expect(result.rows[0]).not.toHaveProperty('blindIntentText');
+    expect(result.rows[0]).not.toHaveProperty('blindIngressAudit');
 
     const incompatible = parseConversationArgs([
       '--rooms', '1', '--rounds', '1', '--out', join(directory, 'legacy.jsonl'),
@@ -3147,6 +3661,105 @@ describe('AI-DM engine MCP conversation runner', () => {
     expect(result.rows[0]?.refusals).not.toContainEqual(expect.stringContaining('SPECULATION_RECALC_REQUIRED'));
   });
 
+  it('aborts the cell when speculation recalculation infrastructure fails after staging output', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'd569-speculation-recalc-infrastructure-'));
+    let mutated = false;
+    let policyMs = 0;
+    let observedRecalculationExit: AgentTurnResult['exit'] | null = null;
+    const result = await runConversation(parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      '--combat-model', 'initiative_segments_v1', '--dry-run',
+    ]), {
+      roomStates: [await alternatingInitiativeRoom()],
+      mutateBeforeSpeculationBoundary: (state) => {
+        if (mutated) return state;
+        mutated = true;
+        return {
+          ...state,
+          revision: state.revision + 1,
+          combatants: state.combatants.map((combatant) => combatant.profile.kind === 'player_character'
+            ? { ...combatant, hitPoints: 0, life: 'dead' as const }
+            : combatant),
+        };
+      },
+      failSpeculationRecalculation: true,
+      simulatedInProcessDispatchDelayMs: 10,
+      forceSpeculationRecalculationForTest: true,
+      policyNow: () => policyMs,
+      onSpeculationRecalculationResultObservedForTest: (turn) => {
+        observedRecalculationExit = turn.exit;
+        policyMs = 180_000;
+      },
+    });
+    expect(observedRecalculationExit).toBe('infrastructure_failed');
+    expect(result.rows[0]).toMatchObject({
+      outcome: 'infrastructure_failed',
+      failingDispatch: {
+        phase: 'speculation_recalculation', exit: 'infrastructure_failed',
+        engineCatalogEvidence: { status: 'absent' },
+        turnContextDelivery: { status: 'infrastructure_absent' },
+      },
+    });
+    expect(result.rows[0]?.monsterSegments).toEqual([]);
+  });
+
+  it.each([
+    ['end-of-round', { endRoundAfterSpeculationStartForTest: true }],
+    ['exception-cleanup', { failAfterSpeculationStartForTest: true }],
+  ] as const)('retains diagnosed speculative infrastructure at the %s join', async (_join, seam) => {
+    const directory = mkdtempSync(join(tmpdir(), `d569-speculation-${_join}-join-`));
+    let policyMs = 0;
+    let observedSpeculationExit: AgentTurnResult['exit'] | null = null;
+    const result = await runConversation(parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      '--combat-model', 'initiative_segments_v1', '--dry-run',
+    ]), {
+      roomStates: [await alternatingInitiativeRoom()],
+      failSpeculationInfrastructure: true,
+      simulatedInProcessDispatchDelayMs: 1,
+      policyNow: () => policyMs,
+      onSpeculationResultObservedForTest: (turn) => {
+        observedSpeculationExit = turn.exit;
+        policyMs = 180_000;
+      },
+      ...seam,
+    });
+    expect(observedSpeculationExit).toBe('infrastructure_failed');
+    expect(result.rows[0]).toMatchObject({
+      outcome: 'infrastructure_failed',
+      failingDispatch: {
+        phase: 'speculative', exit: 'infrastructure_failed',
+        engineCatalogEvidence: { status: 'absent' },
+        turnContextDelivery: { status: 'infrastructure_absent' },
+      },
+    });
+  });
+
+  it('terminates incomplete speculation with a failed rebase without repeating the initiative loop', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'd569-speculation-failed-rebase-terminal-'));
+    let iterations = 0;
+    const result = await runConversation(parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      '--combat-model', 'initiative_segments_v1', '--dry-run',
+    ]), {
+      roomStates: [await alternatingInitiativeRoom()],
+      stagedSpeculationTimeout: true,
+      forceSpeculationRecalculationForTest: true,
+      simulatedInProcessDispatchDelayMs: 1,
+      onInitiativeIterationForTest: () => {
+        iterations += 1;
+        if (iterations > 20) throw new Error('Initiative loop repeated after terminal speculation transition.');
+      },
+    });
+    expect(iterations).toBeLessThanOrEqual(20);
+    expect(result.rows[0]).toMatchObject({
+      outcome: 'refused', fallbackReason: 'timeout', planner: 'model', monsterSegments: [],
+    });
+    expect(result.rows[0]?.speculations).toContainEqual(expect.objectContaining({
+      status: 'discarded', discarded: true, discardReason: 'budget_expired',
+    }));
+  });
+
   it('aborts speculative planning at the D407 pacing deadline', { timeout: 30_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-speculation-budget-'));
     const config = parseConversationArgs([
@@ -3170,6 +3783,25 @@ describe('AI-DM engine MCP conversation runner', () => {
     }));
     expect(expired?.status === 'discarded' ? expired.planningWallMs : Number.POSITIVE_INFINITY)
       .toBeLessThan(1_000);
+  });
+
+  it('discards a speculative proposal staged before timeout without authorizing it', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'd569-speculation-staged-timeout-'));
+    const result = await runConversation(parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      '--combat-model', 'initiative_segments_v1', '--dry-run',
+      ...ALL_OPTIONS_TEST_RENDERER_ARGS,
+    ]), {
+      roomStates: [await alternatingInitiativeRoom()],
+      suggestionResponseByRequest: { 'room-1-round-1': 'ignored' },
+      stagedSpeculationTimeout: true,
+      simulatedInProcessDispatchDelayMs: 1,
+    });
+    expect(result.rows[0]?.speculations).toContainEqual(expect.objectContaining({
+      status: 'discarded', adopted: false, discarded: true, discardReason: 'budget_expired',
+    }));
+    expect(result.rows[0]?.outcome).not.toBe('infrastructure_failed');
+    expect(result.rows[0]?.monsterSegments.flatMap((segment) => segment.actors).length).toBeGreaterThan(0);
   });
 
   it('does not spend a second adjustment flap budget when preflight finds no material plan change', { timeout: 30_000 }, async () => {
@@ -3239,6 +3871,7 @@ describe('AI-DM engine MCP conversation runner', () => {
 
   it('runs one adjustment correction and retains the corrected replacement', { timeout: 30_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-segments-correction-'));
+    const phaseInvocations: AgentInvocation[] = [];
     const config = parseConversationArgs([
       '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
       '--combat-model', 'initiative_segments_v1', '--dry-run',
@@ -3249,6 +3882,9 @@ describe('AI-DM engine MCP conversation runner', () => {
       roomStates: [await alternatingInitiativeRoom({ fragileMonsterCount: 1 })],
       suggestionResponseByRequest: { 'room-1-round-1': 'ignored' },
       adjustmentResponseByRequest: { 'room-1-round-1-pc-turn-1': 'invalid' },
+      simulatedInProcessDispatchDelayMs: 10,
+      speculationDispatchDelayMs: 50,
+      onAgentInvocation: (invocation) => { phaseInvocations.push(invocation); },
     });
 
     expect(result.rows[0]?.adjustments?.[0]).toEqual(expect.objectContaining({
@@ -3256,6 +3892,45 @@ describe('AI-DM engine MCP conversation runner', () => {
       flapRetries: 0,
     }));
     expect(result.rows[0]?.callsPerRound).toBeGreaterThanOrEqual(3);
+    expect(new Set(phaseInvocations.map((invocation) => invocation.callPhase))).toEqual(new Set([
+      'initial', 'speculation', 'adjustment', 'correction',
+    ]));
+    const dispatchIds = phaseInvocations.map((invocation) => invocation.engineDispatchId);
+    expect(dispatchIds.every((dispatchId) => dispatchId !== undefined)).toBe(true);
+    expect(new Set(dispatchIds).size).toBe(dispatchIds.length);
+    for (const invocation of phaseInvocations) {
+      const manifest = JSON.parse(readFileSync(invocation.launcherToken, 'utf8')) as EngineMcpLauncherManifest;
+      expect(manifest).toMatchObject({
+        readinessSpoolPath: expect.stringMatching(/-engine-readiness\.jsonl$/u),
+        dispatchId: invocation.engineDispatchId,
+      });
+      expect(manifest.dispatchPhase).toBe(engineDispatchPhaseForCallPhase(invocation.callPhase));
+    }
+  });
+
+  it('stamps speculation recalculation launchers with the speculative dispatch phase', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'd569-speculation-recalc-phase-'));
+    const invocations: AgentInvocation[] = [];
+    let mutated = false;
+    await runConversation(parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      '--combat-model', 'initiative_segments_v1', '--dry-run',
+    ]), {
+      roomStates: [await alternatingInitiativeRoom()],
+      mutateBeforeSpeculationBoundary: (state) => {
+        if (mutated) return state;
+        mutated = true;
+        return { ...state, revision: state.revision + 1 };
+      },
+      forceSpeculationRecalculationForTest: true,
+      simulatedInProcessDispatchDelayMs: 1,
+      onAgentInvocation: (invocation) => { invocations.push(invocation); },
+    });
+    const recalculation = invocations.find((invocation) => invocation.callPhase === 'speculation_recalculation');
+    if (recalculation === undefined) throw new Error('Speculation recalculation was not dispatched.');
+    const manifest = JSON.parse(readFileSync(recalculation.launcherToken, 'utf8')) as EngineMcpLauncherManifest;
+    expect(manifest.dispatchPhase).toBe('speculative');
+    expect(manifest.dispatchPhase).toBe(engineDispatchPhaseForCallPhase(recalculation.callPhase));
   });
 
   it('keeps the baseline after three adjustment service nulls and continues the round', { timeout: 30_000 }, async () => {
@@ -3279,6 +3954,90 @@ describe('AI-DM engine MCP conversation runner', () => {
     expect(result.rows[0]?.pcTurns).toHaveLength(3);
     expect(result.rows[0]?.monsterSegments?.flatMap((segment) => segment.actors).length)
       .toBeGreaterThan(0);
+  });
+
+  it('ignores a staged adjustment proposal after timeout and retains the authorized baseline', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'd569-adjustment-staged-timeout-'));
+    const result = await runConversationWithPartyPolicy('heuristic_v0', parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      '--combat-model', 'initiative_segments_v1', '--dry-run',
+      ...ALL_OPTIONS_TEST_RENDERER_ARGS,
+    ]), {
+      roomStates: [await alternatingInitiativeRoom({ fragileMonsterCount: 1 })],
+      suggestionResponseByRequest: { 'room-1-round-1': 'ignored' },
+      stagedAdjustmentTimeout: ['room-1-round-1-pc-turn-1'],
+      simulatedInProcessDispatchDelayMs: 10,
+      speculationDispatchDelayMs: 50,
+    });
+    const adjustment = result.rows[0]?.adjustments?.[0];
+    if (adjustment === undefined || adjustment.skipped !== null) {
+      throw new Error('Timed-out adjustment was not recorded.');
+    }
+    expect(adjustment).toMatchObject({
+      outcome: 'service_null', proposalId: null, changedActors: [], flapRetries: 0,
+    });
+    expect(adjustment.resultPlanHash).toBe(adjustment.baselinePlanHash);
+    expect(result.rows[0]?.monsterSegments.flatMap((segment) => segment.actors).length).toBeGreaterThan(0);
+  });
+
+  it('records adjustment timeout evidence before applying the expired round deadline', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'd569-adjustment-expired-evidence-'));
+    let policyMs = 0;
+    let observedAdjustmentExit: AgentTurnResult['exit'] | null = null;
+    const result = await runConversationWithPartyPolicy('heuristic_v0', parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      '--combat-model', 'initiative_segments_v1', '--dry-run',
+      ...ALL_OPTIONS_TEST_RENDERER_ARGS,
+    ]), {
+      roomStates: [await alternatingInitiativeRoom({ fragileMonsterCount: 1 })],
+      suggestionResponseByRequest: { 'room-1-round-1': 'ignored' },
+      stagedAdjustmentTimeout: ['room-1-round-1-pc-turn-1'],
+      simulatedInProcessDispatchDelayMs: 1,
+      speculationDispatchDelayMs: 1,
+      policyNow: () => policyMs,
+      onAdjustmentResultObservedForTest: (turn) => {
+        observedAdjustmentExit = turn.exit;
+        policyMs = 180_000;
+      },
+    });
+    const adjustment = result.rows[0]?.adjustments?.[0];
+    if (adjustment === undefined || adjustment.skipped !== null) {
+      throw new Error('Expired adjustment timeout was not recorded.');
+    }
+    expect(observedAdjustmentExit).toBe('timed_out');
+    expect(adjustment).toMatchObject({
+      outcome: 'service_null', proposalId: null, changedActors: [], flapRetries: 0,
+    });
+    expect(adjustment.resultPlanHash).toBe(adjustment.baselinePlanHash);
+    expect(result.rows[0]).toMatchObject({
+      outcome: 'refused', roundWallTimedOut: true, monsterSegments: [],
+    });
+  });
+
+  it('ignores an adjustment correction proposal staged before timeout and retains the authorized baseline', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'd569-adjustment-correction-staged-timeout-'));
+    const result = await runConversationWithPartyPolicy('heuristic_v0', parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      '--combat-model', 'initiative_segments_v1', '--dry-run',
+      ...ALL_OPTIONS_TEST_RENDERER_ARGS,
+    ]), {
+      roomStates: [await alternatingInitiativeRoom({ fragileMonsterCount: 1 })],
+      suggestionResponseByRequest: { 'room-1-round-1': 'ignored' },
+      adjustmentResponseByRequest: { 'room-1-round-1-pc-turn-1': 'invalid' },
+      stagedAdjustmentCorrectionTimeout: ['room-1-round-1-pc-turn-1'],
+      simulatedInProcessDispatchDelayMs: 10,
+      speculationDispatchDelayMs: 50,
+    });
+    const adjustment = result.rows[0]?.adjustments?.[0];
+    if (adjustment === undefined || adjustment.skipped !== null) {
+      throw new Error('Timed-out adjustment correction was not recorded.');
+    }
+    expect(adjustment).toMatchObject({
+      outcome: 'baseline_kept', proposalId: null, changedActors: [], flapRetries: 0,
+      correctionChain: expect.objectContaining({ result: 'timed_out', proposalId: null }),
+    });
+    expect(adjustment.resultPlanHash).toBe(adjustment.baselinePlanHash);
+    expect(result.rows[0]?.monsterSegments.flatMap((segment) => segment.actors).length).toBeGreaterThan(0);
   });
 
   it('treats adjustment correction no-response as protocol exhaustion, not a flap', { timeout: 30_000 }, async () => {

@@ -1,9 +1,8 @@
 import { createInterface } from 'node:readline';
-import { once } from 'node:events';
 import { createHash } from 'node:crypto';
 import { appendFileSync, readFileSync } from 'node:fs';
 import { readFile, realpath } from 'node:fs/promises';
-import { isAbsolute, relative, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { canonicalJson } from '../../commands/canonical-json';
 import type { EncounterState } from '../../combat/encounter';
 import {
@@ -53,6 +52,7 @@ import {
   type EngineToolSurface,
   type OverridePolicy,
   type TurnContextDeltaBase,
+  type BlindIntentSubmissionRecord,
 } from './engine-server';
 import { jsonRpcParseError, type JsonRpcResponse, type McpHandler } from './handler';
 import type { McpImageContentBlock, McpTextContentBlock } from './handler';
@@ -69,6 +69,24 @@ import {
   type KbReadRecord,
   type KbSubjectSources,
 } from './knowledge-base';
+import type {
+  BlindMaxAttempts,
+  BlindRepairArm,
+  DmMode,
+} from '../blind-dm-contract';
+import { engineDispatchId, type EngineDispatchId, type EngineDispatchPhase } from '../agent-session';
+import { descriptorSha256, type EngineReadinessRecord } from '../engine-dispatch-evidence';
+import {
+  BLIND_TURN_CONTEXT_MAX_BYTES,
+  projectEngineBlindTurn,
+  type BlindTurnContextBudgetEvidence,
+  type BlindVisualDescriptor,
+} from '../blind-turn-context';
+import {
+  BlindModelIngressRecorder,
+  type BlindIngressChannel,
+  type BlindIngressRecord,
+} from '../blind-model-ingress';
 import { decodeEngineFixtureV1 } from '../arena-fixture';
 
 function record(value: unknown, label: string): Readonly<Record<string, unknown>> {
@@ -149,8 +167,12 @@ export function parseEngineMcpJsonLine(line: string): unknown {
 }
 
 async function writeJsonLine(value: unknown): Promise<void> {
-  if (process.stdout.write(`${JSON.stringify(value)}\n`)) return;
-  await once(process.stdout, 'drain');
+  await new Promise<void>((resolveWrite, rejectWrite) => {
+    process.stdout.write(`${JSON.stringify(value)}\n`, (error) => {
+      if (error === null || error === undefined) resolveWrite();
+      else rejectWrite(error);
+    });
+  });
 }
 
 export interface EngineMcpRuntime {
@@ -162,6 +184,7 @@ export interface EngineMcpRuntime {
   readonly narrations: readonly NarrationEnvelope[];
   readonly adjudications: readonly AdjudicationEnvelope[];
   readonly uiFeedback: readonly EngineUiFeedback[];
+  readonly blindIntentSubmissions: readonly BlindIntentSubmissionRecord[];
 }
 
 export function engineMcpUiFeedbackSpoolPath(proposalSpoolPath: string): string {
@@ -175,6 +198,27 @@ function nonemptySpoolLines(path: string): readonly string[] {
     if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT') return [];
     throw error;
   }
+}
+
+function decodeBlindIngressRecords(lines: readonly string[]): readonly BlindIngressRecord[] {
+  const channels: readonly BlindIngressChannel[] = [
+    'startup', 'initial_prompt', 'retry_prompt', 'turn_context', 'tools_list', 'tool_result',
+    'resources_list', 'resource_templates', 'resource_read', 'prompts_list', 'prompt_get',
+    'kb_read', 'replay_history', 'image_metadata',
+  ];
+  return lines.map((line, index) => {
+    const value: unknown = JSON.parse(line);
+    const candidate = record(value, `blind ingress record ${String(index + 1)}`);
+    if (candidate['ordinal'] !== index + 1 || typeof candidate['channel'] !== 'string' ||
+      !channels.includes(candidate['channel'] as BlindIngressChannel) ||
+      typeof candidate['text'] !== 'string' || typeof candidate['utf8Bytes'] !== 'number' ||
+      candidate['utf8Bytes'] !== new TextEncoder().encode(candidate['text']).byteLength ||
+      typeof candidate['sha256'] !== 'string' ||
+      candidate['sha256'] !== createHash('sha256').update(candidate['text'], 'utf8').digest('hex')) {
+      throw new TypeError(`Blind ingress record ${String(index + 1)} is invalid.`);
+    }
+    return candidate as unknown as BlindIngressRecord;
+  });
 }
 
 function launcherHasAcceptedRoundDecision(manifest: EngineMcpLauncherManifest): boolean {
@@ -196,6 +240,41 @@ function launcherHasUiFeedback(manifest: EngineMcpLauncherManifest): boolean {
   return lines.length === 1;
 }
 
+function dispatchStamped(
+  manifest: EngineMcpLauncherManifest,
+  value: Readonly<Record<string, unknown>>,
+): Readonly<Record<string, unknown>> {
+  return manifest.dispatchId === undefined || manifest.dispatchPhase === undefined
+    ? value
+    : {
+        ...value,
+        dispatchId: manifest.dispatchId,
+        dispatchProfile: manifest.toolProfile === 'blind' ? 'blind' : 'dm',
+        dispatchPhase: manifest.dispatchPhase,
+      };
+}
+
+export interface EngineMcpBoardDomEvidence {
+  readonly optionSurfaceAbsent: true;
+  readonly nextEventPreviewAbsent: true;
+  readonly coordinateLabels: number;
+  readonly creatureBadges: number;
+  readonly rosterEntries: number;
+  readonly hpBars: number;
+  readonly legendEntries: number;
+  readonly wallCells: number;
+  readonly halfCoverCells: number;
+  readonly threeQuartersCoverCells: number;
+  readonly difficultCells: number;
+  readonly obscuredCells: number;
+  readonly illuminatedCells: number;
+  readonly fogMarks: number;
+  readonly doors: number;
+  readonly objects: number;
+  readonly hiddenMarks: number;
+  readonly multiCellFootprints: number;
+}
+
 export interface EngineMcpBoardImageArtifact {
   readonly version: 'arena-board-image-v1';
   readonly audience: 'dm';
@@ -214,6 +293,15 @@ export interface EngineMcpBoardImageArtifact {
     readonly stateDigest: string;
   };
   readonly chromiumVersion: string;
+  readonly blindState?: {
+    readonly informationMode: 'blind_state';
+    readonly role: 'dm_board' | 'accessible_board_raster' | 'player_board';
+    readonly ordinal: number;
+    readonly primerVersion: string;
+    readonly glyphMode: 'none' | 'light' | 'full';
+    readonly captureTilePx: 64 | 128;
+    readonly domEvidence: EngineMcpBoardDomEvidence;
+  };
   readonly html?: {
     readonly relativePath: `board-html/${string}/board.html`;
     readonly sha256: string;
@@ -233,6 +321,9 @@ export interface EngineMcpLauncherManifest {
   readonly format: typeof ENGINE_MCP_LAUNCHER_FORMAT;
   readonly fixturePath: string;
   readonly proposalSpoolPath: string;
+  readonly readinessSpoolPath?: string;
+  readonly dispatchId?: EngineDispatchId;
+  readonly dispatchPhase?: EngineDispatchPhase;
   readonly turnContextSpoolPath?: string;
   readonly kbReadSpoolPath?: string;
   readonly kbSubjectSources?: KbSubjectSources;
@@ -259,9 +350,18 @@ export interface EngineMcpLauncherManifest {
     readonly scenarios: readonly HostScenario[];
   };
   readonly toolProfile?: EngineMcpToolProfile;
+  readonly dmMode?: DmMode;
+  readonly blindRepairArm?: BlindRepairArm;
+  readonly blindMaxAttempts?: BlindMaxAttempts;
+  readonly blindDeadlineUnixMs?: number;
+  readonly blindVisuals?: readonly BlindVisualDescriptor[];
+  readonly blindFacts?: boolean;
+  readonly blindIntentSpoolPath?: string;
+  readonly blindIngressSpoolPath?: string;
   readonly turnContextDeltaBase?: TurnContextDeltaBase;
   readonly rendererProfile?: RendererProfile;
   readonly turnContextMaximumBytes?: number;
+  readonly semanticBoardMaximumBytes?: number;
   readonly initiativeProjection?: EngineInitiativeProjection;
   readonly boardImage?: EngineMcpBoardImageBinding;
 }
@@ -288,8 +388,26 @@ export function createEngineMcpRuntime(
     readonly planAdjustment?: EnginePlanAdjustmentMetadata;
     readonly speculativeRequest?: EngineMcpLauncherManifest['speculativeRequest'];
     readonly onProposal?: (proposal: EngineProposalEnvelope) => void;
+    readonly readinessEvidence?: {
+      readonly spoolPath: string;
+      readonly dispatchId: EngineDispatchId;
+      readonly phase: EngineDispatchPhase;
+      readonly profile: 'dm' | 'blind';
+      readonly requestId: string;
+    };
     readonly onSpeculativePlan?: (plan: QueuedSpeculativePlanEnvelope) => void;
     readonly toolProfile?: EngineMcpToolProfile;
+    readonly dmMode?: DmMode;
+    readonly blindRepairArm?: BlindRepairArm;
+    readonly blindMaxAttempts?: BlindMaxAttempts;
+    readonly blindDeadlineUnixMs?: number;
+    readonly clock?: () => number;
+    readonly beforeBlindIntentStage?: () => void;
+    readonly blindVisuals?: readonly BlindVisualDescriptor[];
+    readonly blindFacts?: boolean;
+    readonly blindIngressRecorder?: BlindModelIngressRecorder;
+    readonly onBlindTurnContextRendered?: (evidence: BlindTurnContextBudgetEvidence) => void;
+    readonly onBlindIntentSubmission?: (submission: BlindIntentSubmissionRecord) => void;
     readonly turnContextDeltaBase?: TurnContextDeltaBase;
     readonly rendererProfile?: RendererProfile;
     readonly turnContextMaximumBytes?: number;
@@ -310,6 +428,7 @@ export function createEngineMcpRuntime(
     readonly kbReadCallPhase?: KbReadCallPhase;
     readonly overridePolicy?: OverridePolicy;
     readonly boardImageContent?: McpImageContentBlock;
+    readonly boardImageContents?: readonly McpImageContentBlock[];
     readonly boardHtmlContent?: McpTextContentBlock;
     readonly onUiFeedback?: (feedback: EngineUiFeedback) => void;
     readonly roundDecisionAlreadyAccepted?: boolean;
@@ -318,6 +437,19 @@ export function createEngineMcpRuntime(
     readonly offerEnvironment?: EngineOptionEnvironment;
   } = {},
 ): EngineMcpRuntime {
+  if (options.boardImageContent !== undefined && options.boardImageContents !== undefined) {
+    throw new TypeError('Use either boardImageContent or boardImageContents, not both.');
+  }
+  const boardImageContents = options.boardImageContents ??
+    (options.boardImageContent === undefined ? [] : [options.boardImageContent]);
+  if ((options.dmMode === 'blind' || options.toolProfile === 'blind') && options.boardHtmlContent !== undefined) {
+    throw new TypeError('Blind MCP delivery prohibits accessible-board HTML attachment.');
+  }
+  if ((options.dmMode === 'blind' || options.toolProfile === 'blind') &&
+    options.turnContextMaximumBytes !== undefined &&
+    options.turnContextMaximumBytes !== BLIND_TURN_CONTEXT_MAX_BYTES) {
+    throw new RangeError(`Blind context base cap must be ${String(BLIND_TURN_CONTEXT_MAX_BYTES)} bytes.`);
+  }
   const offerEnvironment = options.offerEnvironment ?? createLegacyEngineOptionEnvironment(canonicalEngineQueryPort);
   const candidates = state.combatants
     .filter((candidate) => candidate.profile.kind === 'monster' && candidate.life !== 'dead')
@@ -334,7 +466,7 @@ export function createEngineMcpRuntime(
   const revision = options.revision ?? 1;
   const phase = options.phase ?? 'initial';
   const correctionNumber = options.correctionNumber ?? (phase === 'correction' ? 1 : 0);
-  if ((options.boardImageContent !== undefined || options.boardHtmlContent !== undefined) &&
+  if ((boardImageContents.length > 0 || options.boardHtmlContent !== undefined) &&
     (phase === 'speculative' || options.requestKind === 'plan_adjustment')) {
     throw new TypeError('Board artifacts may bind only to ordinary round-plan MCP launchers.');
   }
@@ -409,11 +541,15 @@ export function createEngineMcpRuntime(
     ...(options.rulesIndex === undefined ? {} : { rulesIndex: options.rulesIndex }),
   });
   const feed = new MutableEngineCapsuleFeed(capsule);
+  const blindTurnProjection = options.dmMode === 'blind' || options.toolProfile === 'blind'
+    ? projectEngineBlindTurn(planningState, capsule, canonicalEngineQueryPort)
+    : null;
   const proposals: EngineProposalEnvelope[] = [];
   const speculativePlans: QueuedSpeculativePlanEnvelope[] = [];
   const narrations: NarrationEnvelope[] = [];
   const adjudications: AdjudicationEnvelope[] = [];
   const uiFeedback: EngineUiFeedback[] = [];
+  const blindIntentSubmissions: BlindIntentSubmissionRecord[] = [];
   const application = createEngineMcpApplication({
     state: planningState,
     stateSource: feed,
@@ -431,7 +567,7 @@ export function createEngineMcpRuntime(
     } },
     narration: { append: (envelope) => { narrations.push(envelope); } },
     adjudications: { append: (envelope) => { adjudications.push(envelope); } },
-    ...(options.boardImageContent === undefined ? {} : {
+    ...(boardImageContents.length === 0 ? {} : {
       uiFeedback: {
         append: (feedback: EngineUiFeedback) => {
           uiFeedback.push(structuredClone(feedback));
@@ -442,13 +578,40 @@ export function createEngineMcpRuntime(
       uiFeedbackAlreadySubmitted: options.uiFeedbackAlreadySubmitted ?? false,
     }),
     rules: options.rules ?? { get: () => null },
-    ...(options.rendererProfile?.semanticBoard === true ? {
+    ...(options.rendererProfile?.semanticBoard === true ||
+      (options.dmMode === 'blind' || options.toolProfile === 'blind') && options.blindFacts === true ? {
       semanticBoardProjection: projectEngineSemanticBoard(planningState, revision),
     } : {}),
+    ...(blindTurnProjection === null ? {} : { blindTurnProjection }),
     ...(options.maximumToolResultBytes === undefined ? {} : { maximumToolResultBytes: options.maximumToolResultBytes }),
     ...(options.maximumResourceBytes === undefined ? {} : { maximumResourceBytes: options.maximumResourceBytes }),
     ...(options.listPageSize === undefined ? {} : { listPageSize: options.listPageSize }),
     ...(options.toolProfile === undefined ? {} : { toolProfile: options.toolProfile }),
+    ...(options.dmMode === undefined ? {} : { dmMode: options.dmMode }),
+    ...(options.blindRepairArm === undefined ? {} : { blindRepairArm: options.blindRepairArm }),
+    ...(options.blindMaxAttempts === undefined ? {} : { blindMaxAttempts: options.blindMaxAttempts }),
+    ...(options.blindDeadlineUnixMs === undefined ? {} : {
+      blindDeadlineUnixMs: options.blindDeadlineUnixMs,
+    }),
+    ...(options.clock === undefined ? {} : { clock: options.clock }),
+    ...(options.beforeBlindIntentStage === undefined ? {} : {
+      beforeBlindIntentStage: options.beforeBlindIntentStage,
+    }),
+    ...(options.blindVisuals === undefined ? {} : { blindVisuals: options.blindVisuals }),
+    ...(options.blindIngressRecorder === undefined ? {} : {
+      blindIngressRecorder: options.blindIngressRecorder,
+    }),
+    ...(options.onBlindTurnContextRendered === undefined ? {} : {
+      onBlindTurnContextRendered: options.onBlindTurnContextRendered,
+    }),
+    ...(options.dmMode === 'blind' || options.toolProfile === 'blind' ? {
+      blindIntents: {
+        append: (submission: BlindIntentSubmissionRecord) => {
+          blindIntentSubmissions.push(structuredClone(submission));
+          options.onBlindIntentSubmission?.(structuredClone(submission));
+        },
+      },
+    } : {}),
     ...(options.turnContextDeltaBase === undefined ? {} : {
       turnContextDeltaBase: structuredClone(options.turnContextDeltaBase),
     }),
@@ -466,11 +629,11 @@ export function createEngineMcpRuntime(
     ...(options.kbReadBudget === undefined ? {} : { kbReadBudget: options.kbReadBudget }),
     ...(options.kbReadCallPhase === undefined ? {} : { kbReadCallPhase: options.kbReadCallPhase }),
     ...(options.overridePolicy === undefined ? {} : { overridePolicy: options.overridePolicy }),
-    ...(options.boardImageContent === undefined && options.boardHtmlContent === undefined ? {} : {
+    ...(boardImageContents.length === 0 && options.boardHtmlContent === undefined ? {} : {
       toolResultContent: ({ name }) => name === 'engine.get_turn_context'
         ? [
             ...(options.boardHtmlContent === undefined ? [] : [options.boardHtmlContent]),
-            ...(options.boardImageContent === undefined ? [] : [options.boardImageContent]),
+            ...boardImageContents,
           ]
         : [],
     }),
@@ -484,6 +647,7 @@ export function createEngineMcpRuntime(
     narrations,
     adjudications,
     uiFeedback,
+    blindIntentSubmissions,
   };
 }
 
@@ -516,21 +680,124 @@ export async function runEngineMcpServer(
 ): Promise<void> {
   const loaded = await loadArenaFixture(resolve(fixturePath));
   const state = directFixturePlanning ? freshMonsterPlanningState(loaded) : loaded;
-  const handler = createEngineMcpRuntime(state, options).handler;
+  const runtime = createEngineMcpRuntime(state, options);
   const lines = createInterface({ input: process.stdin, crlfDelay: Number.POSITIVE_INFINITY });
+  await runEngineMcpLines(runtime, lines, options);
+}
+
+/** The request loop shared by real stdio and cheap in-process protocol regressions. */
+export async function runEngineMcpLines(
+  runtime: EngineMcpRuntime,
+  lines: AsyncIterable<string>,
+  options: Parameters<typeof createEngineMcpRuntime>[1] = {},
+  writeResponse: (value: unknown) => Promise<void> = writeJsonLine,
+): Promise<void> {
+  const handler = runtime.handler;
   for await (const line of lines) {
     if (line.trim().length === 0) continue;
     let decoded: unknown;
     try { decoded = parseEngineMcpJsonLine(line); }
-    catch { await writeJsonLine(jsonRpcParseError()); continue; }
+    catch { await writeResponse(jsonRpcParseError()); continue; }
     const response = handler.handle(decoded);
-    if (response !== null) await writeJsonLine(response);
-    for (const notification of handler.drainNotifications()) await writeJsonLine(notification);
+    const request = typeof decoded === 'object' && decoded !== null && !Array.isArray(decoded)
+      ? decoded as Readonly<Record<string, unknown>>
+      : null;
+    const readiness = response === null || request?.['method'] !== 'tools/list'
+      ? null
+      : readinessRecord(options.readinessEvidence, request, response, runtime.toolSurface.tools);
+    if (readiness !== null) appendFileSync(readiness.spoolPath, `${JSON.stringify(readiness.generated)}\n`, 'utf8');
+    if (response !== null) await writeResponse(response);
+    if (readiness !== null) {
+      const completed: EngineReadinessRecord = {
+        ...readiness.generated,
+        event: 'tools_list_stream_write_completed',
+        writeCompletedAtUnixMs: Date.now(),
+      };
+      appendFileSync(readiness.spoolPath, `${JSON.stringify(completed)}\n`, 'utf8');
+    }
+    for (const notification of handler.drainNotifications()) await writeResponse(notification);
   }
+}
+
+function readinessRecord(
+  evidence: NonNullable<Parameters<typeof createEngineMcpRuntime>[1]>['readinessEvidence'],
+  request: Readonly<Record<string, unknown>>,
+  response: JsonRpcResponse,
+  expectedDescriptors: readonly import('./handler').McpToolDescriptor[],
+): { readonly spoolPath: string; readonly generated: EngineReadinessRecord } | null {
+  if (evidence === undefined) return null;
+  const result = typeof response.result === 'object' && response.result !== null && !Array.isArray(response.result)
+    ? response.result as Readonly<Record<string, unknown>>
+    : null;
+  const tools = result?.['tools'];
+  const returnedDescriptors = Array.isArray(tools)
+    ? tools.filter((tool): tool is Readonly<Record<string, unknown>> =>
+        typeof tool === 'object' && tool !== null && !Array.isArray(tool))
+    : [];
+  const expectedToolNames = expectedDescriptors.map((descriptor) => descriptor.name);
+  const returnedToolNames = returnedDescriptors.flatMap((descriptor) =>
+    typeof descriptor['name'] === 'string' ? [descriptor['name']] : []);
+  const expectedDescriptorSha256 = descriptorSha256(expectedDescriptors);
+  const returnedDescriptorSha256 = returnedDescriptors.length === 0
+    ? null
+    : descriptorSha256(returnedDescriptors);
+  const violations: string[] = [];
+  if (response.error !== undefined || result === null) violations.push('response_not_successful');
+  if (String(response.id) !== String(request['id'])) violations.push('response_id_mismatch');
+  if (returnedDescriptors.length !== (Array.isArray(tools) ? tools.length : -1)) violations.push('malformed_descriptors');
+  if (canonicalJson(returnedToolNames) !== canonicalJson(expectedToolNames)) violations.push('tool_names_mismatch');
+  if (returnedDescriptorSha256 !== expectedDescriptorSha256) violations.push('tool_descriptors_mismatch');
+  const generatedAtUnixMs = Date.now();
+  return {
+    spoolPath: evidence.spoolPath,
+    generated: {
+      version: 1,
+      dispatchId: evidence.dispatchId,
+      phase: evidence.phase,
+      profile: evidence.profile,
+      requestId: evidence.requestId,
+      event: 'tools_list_response_generated',
+      generatedAtUnixMs,
+      writeCompletedAtUnixMs: null,
+      responseId: String(response.id),
+      responseSha256: createHash('sha256').update(canonicalJson(response), 'utf8').digest('hex'),
+      expectedToolNames,
+      returnedToolNames,
+      descriptorSha256: returnedDescriptorSha256,
+      validation: violations.length === 0 ? { status: 'valid' } : { status: 'invalid', violations },
+    },
+  };
 }
 
 function isPositiveSafeInteger(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1;
+}
+
+function isBoardSnapshotDomEvidence(value: unknown): value is EngineMcpBoardDomEvidence {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const evidence = value as Readonly<Record<string, unknown>>;
+  const countKeys = [
+    'coordinateLabels', 'creatureBadges', 'rosterEntries', 'hpBars', 'legendEntries',
+    'wallCells', 'halfCoverCells', 'threeQuartersCoverCells',
+    'difficultCells', 'obscuredCells', 'illuminatedCells', 'fogMarks',
+    'doors', 'objects', 'hiddenMarks', 'multiCellFootprints',
+  ] as const;
+  return Object.keys(evidence).length === countKeys.length + 2 &&
+    evidence['optionSurfaceAbsent'] === true && evidence['nextEventPreviewAbsent'] === true &&
+    countKeys.every((key) => typeof evidence[key] === 'number' &&
+      Number.isSafeInteger(evidence[key]) && evidence[key] >= 0);
+}
+
+function isBlindVisualDescriptor(value: unknown): value is BlindVisualDescriptor {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const descriptor = value as Readonly<Record<string, unknown>>;
+  return Object.keys(descriptor).length === 5 &&
+    (descriptor['kind'] === 'dm_board' || descriptor['kind'] === 'accessible_board_raster' ||
+      descriptor['kind'] === 'player_board') &&
+    isPositiveSafeInteger(descriptor['ordinal']) &&
+    typeof descriptor['primer_version'] === 'string' && descriptor['primer_version'].length > 0 &&
+    typeof descriptor['glyph_mode'] === 'string' && descriptor['glyph_mode'].length > 0 &&
+    isPositiveSafeInteger(descriptor['capture_tile_px']);
 }
 
 function isEngineMcpBoardImageBinding(value: unknown): value is EngineMcpBoardImageBinding {
@@ -550,6 +817,7 @@ function isEngineMcpBoardImageBinding(value: unknown): value is EngineMcpBoardIm
     Object.keys(artifact).every((key) => [
       'version', 'audience', 'mimeType', 'relativePath', 'sha256', 'bytes', 'width', 'height',
       'capturedAtUnixMs', 'captureMs', 'source', 'chromiumVersion', 'html',
+      'blindState',
     ].includes(key)) &&
     artifact['version'] === 'arena-board-image-v1' && artifact['audience'] === 'dm' &&
     artifact['mimeType'] === 'image/png' && typeof sha === 'string' && /^[a-f0-9]{64}$/u.test(sha) &&
@@ -560,6 +828,21 @@ function isEngineMcpBoardImageBinding(value: unknown): value is EngineMcpBoardIm
     typeof artifact['captureMs'] === 'number' && Number.isFinite(artifact['captureMs']) &&
     artifact['captureMs'] >= 0 && typeof artifact['chromiumVersion'] === 'string' &&
     artifact['chromiumVersion'].length > 0 &&
+    (artifact['blindState'] === undefined || (() => {
+      const value = artifact['blindState'];
+      if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+      const blind = value as Readonly<Record<string, unknown>>;
+      return Object.keys(blind).every((key) => [
+        'informationMode', 'role', 'ordinal', 'primerVersion', 'glyphMode', 'captureTilePx',
+        'domEvidence',
+      ].includes(key)) && blind['informationMode'] === 'blind_state' &&
+        (blind['role'] === 'dm_board' || blind['role'] === 'accessible_board_raster' ||
+          blind['role'] === 'player_board') && isPositiveSafeInteger(blind['ordinal']) &&
+        typeof blind['primerVersion'] === 'string' && blind['primerVersion'].length > 0 &&
+        (blind['glyphMode'] === 'none' || blind['glyphMode'] === 'light' || blind['glyphMode'] === 'full') &&
+        (blind['captureTilePx'] === 64 || blind['captureTilePx'] === 128) &&
+        isBoardSnapshotDomEvidence(blind['domEvidence']);
+    })()) &&
     (artifact['html'] === undefined || (() => {
       const value = artifact['html'];
       if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
@@ -621,6 +904,7 @@ export async function validatedLauncherBoardHtmlReference(
   manifest: EngineMcpLauncherManifest,
   state: EncounterState,
 ): Promise<McpTextContentBlock | undefined> {
+  if (manifest.dmMode === 'blind' || manifest.toolProfile === 'blind') return undefined;
   const binding = manifest.boardImage;
   const html = binding?.artifact.html;
   if (binding === undefined || html === undefined) return undefined;
@@ -662,6 +946,13 @@ function isLauncherManifest(value: unknown): value is EngineMcpLauncherManifest 
   return input['format'] === ENGINE_MCP_LAUNCHER_FORMAT &&
     typeof input['fixturePath'] === 'string' && input['fixturePath'].length > 0 &&
     typeof input['proposalSpoolPath'] === 'string' && input['proposalSpoolPath'].length > 0 &&
+    ((input['readinessSpoolPath'] === undefined && input['dispatchId'] === undefined &&
+      input['dispatchPhase'] === undefined) ||
+      typeof input['readinessSpoolPath'] === 'string' && input['readinessSpoolPath'].length > 0 &&
+      typeof input['dispatchId'] === 'string' && (() => {
+        try { engineDispatchId(input['dispatchId']); return true; } catch { return false; }
+      })() && (input['dispatchPhase'] === 'primary' || input['dispatchPhase'] === 'correction' ||
+        input['dispatchPhase'] === 'adjustment' || input['dispatchPhase'] === 'speculative')) &&
     (input['turnContextSpoolPath'] === undefined ||
       typeof input['turnContextSpoolPath'] === 'string' && input['turnContextSpoolPath'].length > 0) &&
     ((input['kbReadSpoolPath'] === undefined && input['kbSubjectSources'] === undefined) ||
@@ -710,11 +1001,29 @@ function isLauncherManifest(value: unknown): value is EngineMcpLauncherManifest 
         candidate['context'] !== null && !Array.isArray(candidate['context']) &&
         (candidate['context'] as Readonly<Record<string, unknown>>)['granularity'] === 'full';
     })()) &&
-    (input['toolProfile'] === undefined || input['toolProfile'] === 'full' || input['toolProfile'] === 'dm') &&
+    (input['toolProfile'] === undefined || input['toolProfile'] === 'full' || input['toolProfile'] === 'dm' || input['toolProfile'] === 'blind') &&
+    (input['dmMode'] === undefined || input['dmMode'] === 'advice' || input['dmMode'] === 'blind') &&
+    (input['blindRepairArm'] === undefined || input['blindRepairArm'] === 'code_only' ||
+      input['blindRepairArm'] === 'minimal_legal_alternative') &&
+    (input['blindMaxAttempts'] === undefined || typeof input['blindMaxAttempts'] === 'number' &&
+      Number.isSafeInteger(input['blindMaxAttempts']) && input['blindMaxAttempts'] >= 1 &&
+      input['blindMaxAttempts'] <= 3) &&
+    (input['blindDeadlineUnixMs'] === undefined || typeof input['blindDeadlineUnixMs'] === 'number' &&
+      Number.isSafeInteger(input['blindDeadlineUnixMs']) && input['blindDeadlineUnixMs'] >= 1) &&
+    (input['blindVisuals'] === undefined || Array.isArray(input['blindVisuals']) &&
+      input['blindVisuals'].every(isBlindVisualDescriptor)) &&
+    (input['blindFacts'] === undefined || typeof input['blindFacts'] === 'boolean') &&
+    (input['blindIntentSpoolPath'] === undefined || typeof input['blindIntentSpoolPath'] === 'string' &&
+      input['blindIntentSpoolPath'].length > 0) &&
+    (input['blindIngressSpoolPath'] === undefined || typeof input['blindIngressSpoolPath'] === 'string' &&
+      input['blindIngressSpoolPath'].length > 0) &&
     (input['rendererProfile'] === undefined || rendererProfileSchema.safeParse(input['rendererProfile']).success) &&
     (input['turnContextMaximumBytes'] === undefined ||
       Number.isSafeInteger(input['turnContextMaximumBytes']) &&
       typeof input['turnContextMaximumBytes'] === 'number' && input['turnContextMaximumBytes'] >= 1) &&
+    (input['semanticBoardMaximumBytes'] === undefined ||
+      Number.isSafeInteger(input['semanticBoardMaximumBytes']) &&
+      typeof input['semanticBoardMaximumBytes'] === 'number' && input['semanticBoardMaximumBytes'] >= 1) &&
     (input['boardImage'] === undefined || isEngineMcpBoardImageBinding(input['boardImage']));
 }
 
@@ -759,13 +1068,20 @@ export function reconstructLauncherOfferEnvironment(
 }
 
 async function launcherManifest(path: string): Promise<DecodedEngineMcpLauncherManifest | null> {
+  const absoluteLauncherPath = resolve(path);
   let decoded: unknown;
   try {
-    decoded = JSON.parse(await readFile(resolve(path), 'utf8')) as unknown;
+    decoded = JSON.parse(await readFile(absoluteLauncherPath, 'utf8')) as unknown;
   } catch {
     return null;
   }
-  return decodeEngineMcpEntrypointDocument(decoded, decodeArenaFixture);
+  const manifest = decodeEngineMcpEntrypointDocument(decoded, decodeArenaFixture);
+  return manifest?.readinessSpoolPath === undefined || isAbsolute(manifest.readinessSpoolPath)
+    ? manifest
+    : {
+        ...manifest,
+        readinessSpoolPath: resolve(dirname(absoluteLauncherPath), manifest.readinessSpoolPath),
+      };
 }
 
 function kbReadRecords(path: string): readonly KbReadRecord[] {
@@ -790,12 +1106,12 @@ export async function runEngineMcpEntrypoint(argv: readonly string[] = process.a
   const profileArguments = argv.slice(2).filter((argument) => argument.startsWith('--agent-profile='));
   if (profileArguments.length > 1) throw new TypeError('Engine MCP accepts at most one agent profile flag.');
   const profileValue = profileArguments[0]?.slice('--agent-profile='.length);
-  if (profileValue !== undefined && profileValue !== 'dm' && profileValue !== 'full') {
+  if (profileValue !== undefined && profileValue !== 'dm' && profileValue !== 'full' && profileValue !== 'blind') {
     throw new TypeError(`Unknown engine MCP agent profile ${profileValue}.`);
   }
   const positional = argv.slice(2).filter((argument) => !argument.startsWith('--agent-profile='));
   const launcherPath = positional[0];
-  if (launcherPath === undefined) throw new TypeError('Usage: engine-mcp-server.ts [--agent-profile=full|dm] <arena-fixture-or-launcher.json>');
+  if (launcherPath === undefined) throw new TypeError('Usage: engine-mcp-server.ts [--agent-profile=full|dm|blind] <arena-fixture-or-launcher.json>');
   const selectedProfile = profileValue as EngineMcpToolProfile | undefined;
   const manifest = await launcherManifest(launcherPath);
   if (manifest !== null) {
@@ -806,11 +1122,32 @@ export async function runEngineMcpEntrypoint(argv: readonly string[] = process.a
       validatedLauncherBoardImage(manifest, state),
       validatedLauncherBoardHtmlReference(manifest, state),
     ]);
+    const ingressRecords = manifest.blindIngressSpoolPath === undefined
+      ? []
+      : decodeBlindIngressRecords(nonemptySpoolLines(manifest.blindIngressSpoolPath));
+    const blindIngressRecorder = manifest.dmMode !== 'blind' || manifest.blindIngressSpoolPath === undefined
+      ? undefined
+      : new BlindModelIngressRecorder(ingressRecords, (record) => {
+          appendFileSync(manifest.blindIngressSpoolPath ?? '', `${JSON.stringify(dispatchStamped(
+            manifest,
+            record as unknown as Readonly<Record<string, unknown>>,
+          ))}\n`, 'utf8');
+        });
     await runEngineMcpServer(manifest.fixturePath, {
       runId: manifest.runId,
       branchId: manifest.branchId,
       revision: manifest.revision,
       requestId: manifest.requestId,
+      ...(manifest.readinessSpoolPath === undefined || manifest.dispatchId === undefined ||
+        manifest.dispatchPhase === undefined ? {} : {
+          readinessEvidence: {
+            spoolPath: manifest.readinessSpoolPath,
+            dispatchId: manifest.dispatchId,
+            phase: manifest.dispatchPhase,
+            profile: (selectedProfile ?? manifest.toolProfile) === 'blind' ? 'blind' as const : 'dm' as const,
+            requestId: manifest.requestId,
+          },
+        }),
       phase: manifest.phase,
       correctionNumber: manifest.correctionNumber,
       overridePolicy: manifest.overridePolicy,
@@ -835,12 +1172,24 @@ export async function runEngineMcpEntrypoint(argv: readonly string[] = process.a
       ...(manifest.turnContextMaximumBytes === undefined ? {} : {
         turnContextMaximumBytes: manifest.turnContextMaximumBytes,
       }),
+      ...(manifest.semanticBoardMaximumBytes === undefined ? {} : {
+        semanticBoardMaximumBytes: manifest.semanticBoardMaximumBytes,
+      }),
       ...(manifest.initiativeProjection === undefined ? {} : {
         initiativeProjection: manifest.initiativeProjection,
       }),
       ...((selectedProfile ?? manifest.toolProfile) === undefined
         ? {}
         : { toolProfile: selectedProfile ?? manifest.toolProfile }),
+      ...(manifest.dmMode === undefined ? {} : { dmMode: manifest.dmMode }),
+      ...(manifest.blindRepairArm === undefined ? {} : { blindRepairArm: manifest.blindRepairArm }),
+      ...(manifest.blindMaxAttempts === undefined ? {} : { blindMaxAttempts: manifest.blindMaxAttempts }),
+      ...(manifest.blindDeadlineUnixMs === undefined ? {} : {
+        blindDeadlineUnixMs: manifest.blindDeadlineUnixMs,
+      }),
+      ...(manifest.blindVisuals === undefined ? {} : { blindVisuals: manifest.blindVisuals }),
+      ...(manifest.blindFacts === undefined ? {} : { blindFacts: manifest.blindFacts }),
+      ...(blindIngressRecorder === undefined ? {} : { blindIngressRecorder }),
       ...(kbReadBudget === undefined ? {} : {
         kbReadBudget,
         kbReadCallPhase: manifest.requestKind === 'plan_adjustment'
@@ -863,14 +1212,28 @@ export async function runEngineMcpEntrypoint(argv: readonly string[] = process.a
         },
       }),
       onProposal: (proposal) => {
-        appendFileSync(manifest.proposalSpoolPath, `${JSON.stringify(proposal)}\n`, 'utf8');
+        appendFileSync(manifest.proposalSpoolPath, `${JSON.stringify(dispatchStamped(
+          manifest,
+          proposal as unknown as Readonly<Record<string, unknown>>,
+        ))}\n`, 'utf8');
       },
       onSpeculativePlan: (plan) => {
-        appendFileSync(manifest.proposalSpoolPath, `${JSON.stringify(plan)}\n`, 'utf8');
+        appendFileSync(manifest.proposalSpoolPath, `${JSON.stringify(dispatchStamped(
+          manifest,
+          plan as unknown as Readonly<Record<string, unknown>>,
+        ))}\n`, 'utf8');
       },
+      ...(manifest.blindIntentSpoolPath === undefined ? {} : {
+        onBlindIntentSubmission: (submission: BlindIntentSubmissionRecord) => {
+          appendFileSync(manifest.blindIntentSpoolPath ?? '', `${JSON.stringify(dispatchStamped(
+            manifest,
+            submission as unknown as Readonly<Record<string, unknown>>,
+          ))}\n`, 'utf8');
+        },
+      }),
       ...(manifest.turnContextSpoolPath === undefined ? {} : {
         onTurnContext: (context: Readonly<Record<string, unknown>>) => {
-          appendFileSync(manifest.turnContextSpoolPath ?? '', `${JSON.stringify(context)}\n`, 'utf8');
+          appendFileSync(manifest.turnContextSpoolPath ?? '', `${JSON.stringify(dispatchStamped(manifest, context))}\n`, 'utf8');
         },
       }),
     });

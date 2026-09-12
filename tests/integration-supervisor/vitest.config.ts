@@ -12,7 +12,10 @@ export default defineConfig({
     testTimeout: 5 * 60_000,
     hookTimeout: 2 * 60_000,
     environment: 'node',
-    include: ['tests/integration-supervisor/vtt/node-runtime-launch.launch-test.ts'],
+    include: [
+      'tests/integration-supervisor/heldout-runtime-guard-isolation.test.ts',
+      'tests/integration-supervisor/vtt/node-runtime-launch.launch-test.ts',
+    ],
     isolate: true,
     maxWorkers: 1,
   },

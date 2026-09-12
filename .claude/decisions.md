@@ -22393,3 +22393,52 @@ Astra's 3A review found the production board sequence (encounter-projections.ts 
 ## D612.1 — NODEENV-BUILD-01 LANDED on main (2026-09-11 11:48, supervisor)
 
 Gate wt-nodeenv on the merged revision 7b91dc0c (branch f674b16c + main c860464e): tsc 0, sg 0, vitest-gate 0 (load flakes passed serially), playwright-gate 0 (two load-signature failures — ai-chat readiness at 75 s during "Starting local database", homebrew-import sheet element at 5 s — passed on the runner's retry). Main-shape rule held (merge-base → main differed only under .claude/**). Merged --no-ff into main. Effect: every serve path builds with NODE_ENV=production regardless of the caller's environment; the S7 launch probe can now be re-run on the handoff branch once main is merged in. Ledger F88-b (direct `npm run build` still environment-sensitive) stays open.
+
+## D615 — OWNER: Fable limit reached; the supervisor runs as Opus 5, and the Quietstone probe's Fable seat is unavailable (2026-09-11 14:28)
+
+Owner (verbatim): "fable limit was reached. you will be operating in opus mode until I way otherwise". Supervisor identity is now Claude Opus 5 (commit trailer updated accordingly); codex lanes and the gpt-6-astra reviewer are unaffected.
+
+Consequence for D611: the Quietstone judge panel's Fable seat cannot answer. Verified directly at 2026-09-11 14:28: `claude --model claude-fable-5-1 --effort high -p 'ping'` returns "You've reached your Fable limit." The probe run that started 11:48 keeps the seat in its command line; its Fable calls fail fast and symmetrically on BOTH revisions (baseline 85168bc5 and candidate dc217f23), so the astra-high and sol-high seats still give a valid same-revision comparison. Ruling: let the running probe finish rather than discard ~2 h of baseline capture; at harvest, classify every Fable row (blocked vs a scored zero — Astra's Q-F11 residual warns the harness can classify a missing structured_output as schema_rejected with score 0 BEFORE the image check) and EXCLUDE the Fable seat from the owner's D610 decision, reporting it as unavailable rather than as a score. If the owner restores Fable credits later, the Fable seat can be re-run alone against both revisions with the same seed and merged into the table.
+
+## D611.1 — Quietstone probe harvested; the supervisor computed the comparison because the harness refused to (2026-09-11 16:59, supervisor)
+
+Both probe revisions wrote all 1008 rows (24 states × 14 classes × 3 seats). Baseline 85168bc5 exit 0 at 14:41:15, jsonl sha 460e9537…; candidate dc217f23 exit 1 at 16:51:40 with `TypeError: Blocked transport rows cannot be compared.` from renderProbeSummary — the harness behaving exactly as designed under D615, because the candidate's Fable seat is 336/336 blocked (the baseline seat answered 140 before the limit hit, then blocked 196). The supervisor therefore computed the per model × class comparison directly from the two jsonl files (.claude/consensus/quietstone/analyse-probe.py, output probe-comparison.txt), pairing rows on stateId after verifying the 24 stateIds AND their stateDigests are identical across runs.
+
+Numbers, 24 paired boards per model × class, Fable excluded per D615:
+- gpt-6-astra high overall 0.7913 → 0.8126 (+0.0213)
+- gpt-5.6-sol high overall 0.7217 → 0.7324 (+0.0107)
+- Strict ≥ 0.9 gate: no class that met it at baseline lost it.
+- Predeclared rule (candidate ≥ baseline − 0.05 per model × class): exactly one breach, gpt-5.6-sol Q9 0.239 → 0.127 (−0.112). Astra's Q9 is flat (0.284 → 0.272, −0.012).
+- Largest gains: astra Q10 +0.187, sol Q12 +0.167, astra Q12 +0.083, sol Q7 +0.050.
+
+Q9 is "List fogged cells and obscured cells separately" and is scored per cell with its fogged/obscured classification. Its truth comes from the board's fog and obscurement REGIONS, which the Quietstone change does not touch — the overlays are unchanged and only the ground under them is new. The class is weak on both revisions: sol's baseline has 11 zeros of 24 boards, and per board the candidate is worse on 11, better on 6, unchanged on 7. Carried to the owner as the one flagged regression in the D610 decision.
+
+## D611.2 — Gate queue was deadlocked for 6.5 h by a circular wait; chain rebuilt (2026-09-11 16:59, supervisor finding against the supervisor's own work)
+
+The quiet-window scripts used two different mechanisms at once: an exit-file dependency AND a `pgrep -f "[v]erify-.*\.sh"` busy check. verify-offers-s3b.sh was queued behind gate-heldout.exit and, while merely sleeping in that wait loop, matched the busy pattern used by gate-quietstone-quiet.sh — which the heldout gate waits on. Circular: quietstone ← offers-waiter ← heldout ← quietstone. Load sat at ~0.9 with nothing running from 12:05 to 16:58 and no gate fired; the three gate monitors reported "waiting" correctly and the supervisor read that as a busy machine rather than checking the condition. Fix: killed the five waiters by PID and relaunched them as a strict linear chain with no pgrep condition — quietstone → heldout → d569b → offers 3B verify → handoff battery, each waiting only on its predecessor's exit file, with the real exit code recorded instead of a hardcoded 0. Quietstone gate started 16:58:39 at load 1.05. Rule: a queue may use exit-file ordering or a process-presence check, never both; a sleeping queued waiter is not a busy machine.
+
+## D616 — OWNER: Quietstone is accepted, but the fog/obscurement contrast is fixed before the merge (2026-09-11 18:59)
+
+Asked with the D611.1 numbers in hand (astra 0.7913 → 0.8126, sol 0.7217 → 0.7324, no class losing the strict ≥ 0.9 bar, one breach at sol Q9 0.239 → 0.127 with astra Q9 flat at −0.012). Owner: "Accept, but fix fog contrast first". Ruling: the art is accepted in principle; claude/quietstone-art does NOT merge yet. A follow-up lane raises the fog and obscurement overlay contrast against the new quieter floor, and the Q9 class is re-run on both revisions with the same seed before the merge. Merge condition: the vitest re-gate green AND the re-run showing sol Q9 back within the predeclared candidate ≥ baseline − 0.05 band (or the owner accepting the residual explicitly). The D516 art invariants and the envelope ledger bind the overlay change exactly as they bind the assets; the overlays are chrome, not authored assets, so any pin they move needs an independent invariant in the same change.
+
+## D617 — HELD-OUT RUNTIME GUARD LANDED on main (2026-09-11 19:05, supervisor)
+
+Gate wt-p-heldout on 726e61ce (branch + main 6b08d6eb): tsc 0, sg 0, vitest-gate 0 (one load flake, ai-dm-screenshot-probe.test.ts, passed on the serial retry), playwright-gate 0. GATES DONE 19:01:58. Main-shape rule verified before merging: `git diff --name-only $(git merge-base main HEAD) main` is entirely under .claude/**, zero source files. Merged --no-ff into main as 41a8ab74. The three recorded residuals stay in .claude/consensus/heldout-rem/ledger.md.
+
+Unrelated working-tree state noted, NOT touched and NOT committed: the main repo has 61 modified and 17 untracked files under art/requests/ with mtimes of 2026-09-09 and 2026-09-10 (status open → delivered plus reformatting, and new emberkeep-* requests). They predate this window, belong to the art-request bookkeeping rather than to any lane, and the merge neither included nor disturbed them.
+
+## D618 — OWNER: the handoff branch is repaired through all six triage families, sequentially (2026-09-11 22:51)
+
+Asked after the §F battery came back red (vitest-gate 1, playwright-gate 1, launch probe 1) and astra's read-only triage classified 16 of the 17 failing cases as stale expectations or a checker gap with one undiagnosed. Owner: "All six families, sequentially" — one codex lane per family in the triage's order, each verified before the next is dispatched, then a full re-gate of the branch. The handoff report is not written until that gate is green; READY remains conditional on it, and anything still open at the end goes to the ledger as a residual. Rationale recorded with the ruling: the branch was declared code-complete S0–S10 on targeted per-step verification that never ran the whole suite, so the repair is the cost of that gap rather than new scope.
+
+## D569.LANDED — the D569 legacy-invariance oracle is on main (2026-09-11 22:55, supervisor)
+
+Gate on the MERGED revision 3050496e (branch 98a41457 + main, reconciled): tsc 0, sg 0, vitest-gate 0 with zero failures, playwright-gate 0 with 187 passed in 51.9 m and zero flakes. Main-shape rule re-checked immediately before merging: `git diff --name-only $(git merge-base main HEAD) main` is entirely under .claude/**. Merged --no-ff into main as 1c8eeb3f. Remaining D569 follow-ups, unchanged by this landing: install tools/d569-v5 and runbook v2 into ~/dnd-slim-runs, and relaunch the broken cells (D590).
+
+## D586.189 — Offers Slice 3B verified; the four post-commit failures were load, proven by a quiet serial rerun (2026-09-11 22:55, supervisor)
+
+The 3B work was committed as 6bd0e757 (ten consumer test files, 176+/20−, no production change). The post-commit rerun on the clean tree showed four failures — two arena cases and two conversation-runner cases — but it ran at load average 13.75 while the §F battery was building and driving a browser suite. The supervisor did NOT report that as a result. A serial rerun (maxWorkers=1) of exactly those two files at load 2.38 passes 129/129. Combined with the quiet verification on the same content (typecheck 0, sg 0, diff-check 0, 326/326 targeted, 174-spec cumulative serial 3222/3222, frozen contract digest unchanged), Slice 3B is verified and the astra review can be dispatched. Recorded because the first rerun would have been a false regression report against the lane.
+
+## D618.1 — the handoff failures are proven to be the branch's, not main's (2026-09-11 22:55, supervisor)
+
+Control run of all SEVEN failing spec files on main at load 1.17, serial: 7 files, 109 tests, all pass, exit 0. The same seven fail on claude/vtt-handoff, where every one of those files is byte-identical to main. This closes the question the triage left implicit: main is healthy and the branch's own source changes are the cause.

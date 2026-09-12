@@ -10,6 +10,7 @@ export {
   mkdtempSync,
   openSync,
   readFileSync,
+  realpathSync,
   readdirSync,
   renameSync,
   rmSync,

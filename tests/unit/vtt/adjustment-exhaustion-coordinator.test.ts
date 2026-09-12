@@ -143,6 +143,9 @@ function correction(
           finalText: '',
           usage: null,
           exit: 'completed' as const,
+          processEvidence: null,
+          engineCatalogEvidence: null,
+          partialResultEvidence: { status: 'complete' as const, decodedEventCount: 0 },
         });
       },
     },
@@ -290,6 +293,39 @@ describe('plan adjustment correction and exhaustion coordinator', () => {
     });
     expect(outcome.updates).toHaveLength(1);
     expect(outcome.updates[0]?.proposal.actorId).toBe(f.first);
+  });
+
+  it('does not consume a correction proposal staged before timeout and retains the authorized baseline', async () => {
+    const f = await fixture();
+    const queued = [proposal({
+      capsule: f.correctionRuntime.feed.current(), phase: 'correction', actorId: f.second,
+      id: 'proposal:staged-before-timeout',
+    })];
+    const runtime = correction(f.correctionRuntime.feed.current(), queued, [], { value: 0 });
+    let proposalReads = 0;
+    const outcome = await new AdjustmentExhaustionCoordinator(journal()).coordinate({
+      initial: f.initial,
+      correction: {
+        ...runtime,
+        lifecycle: { resumeCorrection: () => Promise.resolve({
+          resumeSessionId: agentSessionIdFromCli('SIMULATED-adjustment-timeout'),
+          sessionId: null, finalText: 'partial', usage: null, exit: 'timed_out' as const,
+          timeoutMs: 1_000, processEvidence: null, engineCatalogEvidence: null,
+          partialResultEvidence: {
+            status: 'partial' as const, decodedEventCount: 1, finalTextFragment: 'partial',
+            observedUsage: null, stagedInvocationIds: ['staged-adjustment'],
+          },
+        }) },
+        takeProposal: () => { proposalReads += 1; return queued.shift() ?? null; },
+      },
+    });
+
+    expect(outcome).toMatchObject({
+      kind: 'adjusted', correctionResult: 'timed_out',
+      stagedActorIds: [f.first], correctedActorIds: [], baselineActorIds: [f.second],
+    });
+    expect(proposalReads).toBe(0);
+    expect(queued).toHaveLength(1);
   });
 
   it('leaves the complete baseline plan standing when no usable update survives', async () => {

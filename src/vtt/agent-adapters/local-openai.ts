@@ -281,7 +281,7 @@ export class LocalOpenAiAgentSessionAdapter {
       finalText = completion.message.content ?? finalText;
       const toolCalls = completion.message.tool_calls ?? [];
       if (toolCalls.length === 0) {
-        return { resumeSessionId: sessionId, sessionId: null, finalText, usage, exit: 'completed' };
+        return completedLocalTurn(sessionId, finalText, usage);
       }
       for (const call of toolCalls) {
         const engineName = engineNamesByFunction.get(call.function.name);
@@ -301,17 +301,15 @@ export class LocalOpenAiAgentSessionAdapter {
         const status = record(result)?.['status'];
         if ((engineName === 'engine.submit_round_proposals' && status === 'proposed') ||
           (engineName === 'engine.submit_plan_adjustment' && (status === 'proposed' || status === 'rejected'))) {
-          return { resumeSessionId: sessionId, sessionId: null, finalText, usage, exit: 'completed' };
+          return completedLocalTurn(sessionId, finalText, usage);
         }
       }
     }
-    return {
-      resumeSessionId: sessionId,
-      sessionId: null,
-      finalText: finalText.length > 0 ? finalText : 'LOCAL_OPENAI_TOOL_ROUND_LIMIT',
+    return completedLocalTurn(
+      sessionId,
+      finalText.length > 0 ? finalText : 'LOCAL_OPENAI_TOOL_ROUND_LIMIT',
       usage,
-      exit: 'completed',
-    };
+    );
   }
 
   async #completion(
@@ -377,4 +375,16 @@ export class LocalOpenAiAgentSessionAdapter {
       signal.removeEventListener('abort', abort);
     }
   }
+}
+
+function completedLocalTurn(
+  resumeSessionId: import('../../combat/values').AgentSessionId,
+  finalText: string,
+  usage: AgentUsage | null,
+): AgentTurnResult {
+  return {
+    exit: 'completed', resumeSessionId, sessionId: null, finalText, usage,
+    processEvidence: null, engineCatalogEvidence: null,
+    partialResultEvidence: { status: 'complete', decodedEventCount: 0 },
+  };
 }

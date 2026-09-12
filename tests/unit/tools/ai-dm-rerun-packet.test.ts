@@ -6,10 +6,12 @@ import {
   R1_10_PROTOCOL,
   R1_10_SEEDS,
   assertBlindedPacket,
+  buildD575PairwiseRerunPackets,
   buildMultiArmRerunPacket,
   buildReasonVisibilityIsolationPacket,
   buildRerunPacket,
   parseRerunPacketArgs,
+  packetOutcome,
   validateRerunRows,
 } from '../../../tools/ai-dm-rerun-packet';
 import { conversationRowCodec } from '../../../tools/ai-dm-conversation-row-codec';
@@ -76,7 +78,242 @@ function registeredRows(): JsonRecord[] {
   )));
 }
 
+function blindRowFields(): Readonly<Record<string, unknown>> {
+  return {
+    dmMode: 'blind', blindFacts: false, midRoundAdjustmentsEnabled: false,
+    blindContextVersion: 'blind-turn-context-v1', blindIntentVersion: 'blind-round-intent-v1',
+    blindRepairArm: 'code_only', blindMaxAttempts: 3,
+    blindIntentText: '{"intent_version":"blind-round-intent-v1","intents":[]}',
+    blindIntents: [], blindResolverOutcome: [], blindRejectionCodes: [], blindAttempts: [],
+    blindResolverLatencyMs: 0,
+    blindIngressAudit: {
+      version: 'blind-model-ingress-v1', stringCount: 1, utf8Bytes: 1,
+      sha256: 'b'.repeat(64), passed: true,
+    },
+    visualProfile: { primerVersion: 'primer-v1', images: [] },
+    sharedKbComponentHashes: { root: 'c'.repeat(64) },
+    semanticBoardEvidence: null,
+    creatureFactsEvidence: { sha256: 'd'.repeat(64), utf8Bytes: 10 },
+    legalMovementEvidence: { sha256: 'e'.repeat(64), utf8Bytes: 10 },
+    turnContextBudget: {
+      configuredBaseBytes: 65_536, configuredSemanticBytes: 8_192,
+      actualBaseBytes: 100, actualSemanticBytes: 0, truncatedBlocks: [],
+    },
+    blindPrivateAnswerKey: {
+      selectedOfferedIds: ['option:private'], semanticDigests: ['f'.repeat(64)],
+      catalogDigest: '1'.repeat(64), engineTopRecommendationIds: ['option:top'],
+      engineTopPolicyVersion: 'top-v1', blindDiffersFromEngineTop: true,
+    },
+  };
+}
+
+function v3MissingDeliveryRow(base: Readonly<Record<string, unknown>>, dispatchId: string) {
+  const delivery = {
+    status: 'not_requested' as const, dispatchId,
+    reason: 'catalog_ready_model_did_not_fetch' as const, measurement: null,
+  };
+  return record({
+    ...base, rowContractVersion: 'arena-row-v3', scheduledCellKey: `${String(base['room'])}:${String(base['round'])}`,
+    dispatchId, outcome: 'service_null',
+    engineCatalogEvidence: {
+      status: 'ready', basis: 'required_cli_completed_with_valid_catalog', dispatchId,
+      advertisedInvocationCount: 0, resourceOperationCount: 0,
+    },
+    turnContextDelivery: delivery,
+    turnContextConfiguredCaps: { baseBytes: 65_536, semanticBytes: 8_192 },
+    hostContextDiagnostic: null,
+    baseContextBytes: null, semanticBoardBytes: null, rawTurnContext: null,
+    preTrimBytes: null, postTrimBytes: null, turnContextGranularity: null,
+    optionsOmittedForSize: 0, optionsOmittedForSizeByActor: [],
+    roundTotals: { contextBytes: 0 },
+    turnContextBudget: undefined,
+    blindIngressAudit: {
+      version: 2, status: 'incomplete', passed: false, forbiddenContentPassed: true,
+      delivery, missingRequiredFields: ['turn_context'],
+    },
+  });
+}
+
 describe('AI-DM R1-10 rerun packet', () => {
+  it('maps every historical terminal outcome explicitly without relabeling infrastructure', () => {
+    expect([
+      packetOutcome('auto_resolved'),
+      packetOutcome('awaiting_dm_adjudication'),
+      packetOutcome('local_error'),
+    ]).toEqual(['refused', 'refused', 'refused']);
+    expect(packetOutcome('infrastructure_failed')).toBe('infrastructure_failed');
+    expect(() => packetOutcome('integrity_indeterminate')).toThrow(
+      'An integrity-indeterminate row cannot become a rerun packet.',
+    );
+  });
+
+  it('retains v3 scheduled identity and gives only service-null a scored zero while infrastructure is unscored', () => {
+    const rows = registeredRows();
+    const dispatchId = 'engine-dispatch:packet-v3-0001';
+    rows[0] = record({
+      ...rows[0],
+      rowContractVersion: 'arena-row-v3',
+      scheduledCellKey: '1:1',
+      dispatchId,
+      outcome: 'infrastructure_failed',
+      engineCatalogEvidence: {
+        status: 'absent', basis: 'required_engine_initialization_failed', dispatchId,
+        corroboration: ['required MCP server failed'],
+      },
+      turnContextDelivery: { status: 'infrastructure_absent', dispatchId, measurement: null },
+      turnContextConfiguredCaps: { baseBytes: 65_536, semanticBytes: 8_192 },
+      hostContextDiagnostic: null,
+      failingDispatch: {
+        phase: 'primary', exit: 'infrastructure_failed', dispatchId,
+        engineCatalogEvidence: {
+          status: 'absent', basis: 'required_engine_initialization_failed', dispatchId,
+          corroboration: ['required MCP server failed'],
+        },
+        turnContextDelivery: { status: 'infrastructure_absent', dispatchId, measurement: null },
+        failureReason: 'required MCP server failed',
+      },
+      baseContextBytes: null, semanticBoardBytes: null, rawTurnContext: null,
+      preTrimBytes: null, postTrimBytes: null, turnContextGranularity: null,
+      optionsOmittedForSize: 0, optionsOmittedForSizeByActor: [],
+      roundTotals: { contextBytes: 0 },
+      turnContextBudget: undefined,
+    });
+    const serviceDispatchId = 'engine-dispatch:packet-v3-0002';
+    rows[2] = record({
+      ...rows[2],
+      rowContractVersion: 'arena-row-v3',
+      scheduledCellKey: '1:2',
+      dispatchId: serviceDispatchId,
+      outcome: 'service_null',
+      engineCatalogEvidence: {
+        status: 'ready', basis: 'required_cli_completed_with_valid_catalog',
+        dispatchId: serviceDispatchId, advertisedInvocationCount: 0, resourceOperationCount: 0,
+      },
+      turnContextDelivery: {
+        status: 'not_requested', dispatchId: serviceDispatchId,
+        reason: 'catalog_ready_model_did_not_fetch', measurement: null,
+      },
+      turnContextConfiguredCaps: { baseBytes: 65_536, semanticBytes: 8_192 },
+      hostContextDiagnostic: { status: 'unavailable', errorClass: 'TypeError' },
+      baseContextBytes: null, semanticBoardBytes: null, rawTurnContext: null,
+      preTrimBytes: null, postTrimBytes: null, turnContextGranularity: null,
+      optionsOmittedForSize: 0, optionsOmittedForSizeByActor: [],
+      roundTotals: { contextBytes: 0 },
+      turnContextBudget: undefined,
+    });
+
+    const { packet } = buildRerunPacket(rows, 771, R1_10_PROTOCOL);
+    const infrastructure = packet.entries.find((entry) => entry.scheduledCellKey === '1:1');
+    const service = packet.entries.find((entry) => entry.outcome === 'service_null');
+    expect(infrastructure).toEqual(expect.objectContaining({
+      scheduledCellKey: '1:1', outcome: 'infrastructure_failed',
+      rubric: { targetPriority: null, actionEconomy: null, positioning: null, coherence: null, total: null },
+    }));
+    expect(service).toEqual(expect.objectContaining({
+      outcome: 'service_null',
+      rubric: { targetPriority: 0, actionEconomy: 0, positioning: 0, coherence: 0, total: 0 },
+    }));
+  });
+
+  it('rejects inconclusive, forbidden, and cross-field inconsistent v3 packet evidence', () => {
+    const baseRows = registeredRows();
+    const valid = v3MissingDeliveryRow(baseRows[0]!, 'engine-dispatch:packet-integrity-0001');
+    const withFirst = (first: Readonly<Record<string, unknown>>) => [first, ...baseRows.slice(1)];
+    const indeterminateDelivery = {
+      status: 'indeterminate' as const, dispatchId: valid['dispatchId'],
+      reason: 'catalog_inconclusive_empty_context_spool' as const, measurement: null,
+      integrityAction: 'stop_after_persist' as const,
+    };
+    expect(() => buildRerunPacket(withFirst(record({
+      ...valid, ...blindRowFields(),
+      engineCatalogEvidence: {
+        status: 'inconclusive', dispatchId: valid['dispatchId'], reason: 'invalid_catalog_response',
+      },
+      turnContextDelivery: indeterminateDelivery,
+      blindIngressAudit: {
+        ...record(valid['blindIngressAudit']), delivery: indeterminateDelivery,
+      },
+    })), 771, R1_10_PROTOCOL)).toThrow('inconclusive');
+    expect(() => buildRerunPacket(withFirst(record({
+      ...valid, ...blindRowFields(),
+      blindIngressAudit: {
+        ...record(valid['blindIngressAudit']), forbiddenContentPassed: false,
+      },
+    })), 771, R1_10_PROTOCOL)).toThrow('forbidden-content');
+    expect(() => buildRerunPacket(withFirst(record({
+      ...valid, outcome: 'infrastructure_failed',
+    })), 771, R1_10_PROTOCOL)).toThrow('correlated failing dispatch');
+    expect(() => buildRerunPacket(withFirst(record({
+      ...valid, ...blindRowFields(),
+      blindIngressAudit: {
+        version: 'blind-model-ingress-v1', stringCount: 1, utf8Bytes: 1,
+        sha256: 'b'.repeat(64), passed: true,
+      },
+    })), 771, R1_10_PROTOCOL)).toThrow('outcome-aware v2 ingress audit');
+  });
+
+  it('accepts a correlated primary dispatch cancellation as unscored infrastructure', () => {
+    const rows = registeredRows();
+    const dispatchId = 'engine-dispatch:packet-cancelled-0001';
+    const base = v3MissingDeliveryRow(rows[0]!, dispatchId);
+    const delivery = {
+      status: 'not_requested' as const, dispatchId,
+      reason: 'dispatch_cancelled' as const, measurement: null,
+    };
+    rows[0] = record({
+      ...base,
+      outcome: 'infrastructure_failed',
+      fallbackReason: 'dispatch_cancelled',
+      turnContextDelivery: delivery,
+      blindIngressAudit: {
+        ...record(base['blindIngressAudit']), delivery,
+      },
+      failingDispatch: {
+        phase: 'primary', exit: 'cancelled', dispatchId,
+        engineCatalogEvidence: base['engineCatalogEvidence'],
+        turnContextDelivery: delivery,
+        failureReason: 'operator cancelled dispatch',
+      },
+    });
+    const { packet } = buildRerunPacket(rows, 771, R1_10_PROTOCOL);
+    expect(packet.entries.find((entry) => entry.scheduledCellKey === '1:1')).toMatchObject({
+      outcome: 'infrastructure_failed',
+      rubric: { total: null },
+    });
+  });
+
+  it('preserves delivered evidence when cancellation happens after context delivery', () => {
+    const rows = registeredRows();
+    const dispatchId = 'engine-dispatch:packet-cancelled-delivered-0001';
+    const base = v3MissingDeliveryRow({ ...rows[0]!, ...blindRowFields() }, dispatchId);
+    const delivery = {
+      status: 'delivered' as const, dispatchId, contextSha256: 'a'.repeat(64),
+      measurement: { baseBytes: 100, semanticBytes: 10 },
+    };
+    rows[0] = record({
+      ...base, outcome: 'infrastructure_failed', authorizedPlan: null,
+      fallbackReason: 'dispatch_cancelled', turnContextDelivery: delivery,
+      baseContextBytes: 100, semanticBoardBytes: 10, rawTurnContext: '{}',
+      preTrimBytes: 100, postTrimBytes: 100, turnContextGranularity: 'full',
+      roundTotals: { contextBytes: 2 },
+      turnContextBudget: {
+        configuredBaseBytes: 65_536, configuredSemanticBytes: 8_192,
+        actualBaseBytes: 100, actualSemanticBytes: 10, truncatedBlocks: [],
+      },
+      blindIngressAudit: {
+        version: 2, status: 'complete', passed: true, forbiddenContentPassed: true, delivery,
+      },
+      failingDispatch: {
+        phase: 'primary', exit: 'cancelled', dispatchId,
+        engineCatalogEvidence: base['engineCatalogEvidence'], turnContextDelivery: delivery,
+        failureReason: 'operator cancelled after delivery',
+      },
+    });
+    const { packet } = buildRerunPacket(rows, 771, R1_10_PROTOCOL);
+    expect(packet.entries.find((entry) => entry.scheduledCellKey === '1:1')).toMatchObject({
+      outcome: 'infrastructure_failed', rubric: { total: null },
+    });
+  });
   it('carries UI feedback beside its board image into the judge packet', () => {
     const feedback = {
       readability: 3,
@@ -799,6 +1036,77 @@ describe('AI-DM R1-10 rerun packet', () => {
       .toThrow('.instructionSource is invalid');
     expect(() => buildRerunPacket([first, withoutSkillHash], 1, tinyProtocol))
       .toThrow('.skillHash is invalid');
+  });
+
+  it('blind_row_hides_refused_as_authorized: normalizes accepted blind mechanics and keeps refused rounds zero', () => {
+    const source = rowsFromFixture('tests/fixtures/ai-dm-rerun/paired-tiny.SIMULATED.jsonl');
+    const accepted = { ...source[0]!, ...blindRowFields(), arm: 'blind-accepted' };
+    const refused = {
+      ...source[1]!, ...blindRowFields(), arm: 'blind-refused', outcome: 'refused',
+      authorizedPlan: null, plannedBy: null,
+    };
+    const built = buildRerunPacket([accepted, refused], 71, tinyProtocol);
+    const acceptedPacket = built.packet.entries.find((entry) => entry.outcome === 'authorized');
+    const refusedPacket = built.packet.entries.find((entry) => entry.outcome === 'refused');
+    expect(acceptedPacket?.executedPlan).not.toBeNull();
+    expect(JSON.stringify(acceptedPacket?.executedPlan)).not.toContain('acceptedProposal');
+    expect(JSON.stringify(built.answerKey)).toContain('creatureFactsEvidence');
+    expect(JSON.stringify(built.answerKey)).toContain('legalMovementEvidence');
+    expect(JSON.stringify(built.answerKey)).toContain('sharedKbComponentHashes');
+    expect(refusedPacket).toEqual(expect.objectContaining({
+      executedPlan: null,
+      rubric: { targetPriority: 0, actionEconomy: 0, positioning: 0, coherence: 0, total: 0 },
+    }));
+    expect(() => buildRerunPacket([
+      accepted,
+      { ...refused, authorizedPlan: [] },
+    ], 71, tinyProtocol)).toThrow('must be null unless the round outcome is authorized');
+  });
+
+  it('blind_identity_leaks_into_packet and blind_row_exposes_option_order: rejects every nested D569 identity field', () => {
+    const fields = [
+      'dmMode', 'blindFacts', 'midRoundAdjustmentsEnabled',
+      'blindContextVersion', 'blindIntentVersion', 'blindRepairArm', 'blindMaxAttempts',
+      'blindIntentText', 'blindIntents', 'blindResolverOutcome', 'blindRejectionCodes',
+      'blindAttempts', 'blindResolverLatencyMs', 'blindIngressAudit', 'visualProfile',
+      'turnContextBudget', 'blindPrivateAnswerKey',
+      'selectedOfferedIds', 'semanticDigests', 'catalogDigest', 'engineTopRecommendationIds',
+      'engineTopPolicyVersion', 'blindDiffersFromEngineTop', 'option_order',
+    ] as const;
+    for (const field of fields) {
+      expect(() => assertBlindedPacket({ entries: [{ nested: { [field]: 'leak' } }] }), field)
+        .toThrow('leaks a model-identifying field');
+    }
+  });
+
+  it('builds every D575 model/mode pair with an independent recorded shuffle seed', () => {
+    const source = rowsFromFixture('tests/fixtures/ai-dm-rerun/paired-tiny.SIMULATED.jsonl')[0];
+    if (source === undefined) throw new Error('paired fixture is incomplete');
+    const models = ['gpt-5.6-luna', 'claude-opus-5', 'claude-fable-5', 'gpt-5.6-sol'] as const;
+    const rows = models.flatMap((model) => (['blind', 'advice'] as const).map((dmMode) => ({
+      ...source,
+      ...(dmMode === 'blind' ? blindRowFields() : {
+        dmMode: 'advice', blindFacts: false, midRoundAdjustmentsEnabled: false,
+      }),
+      arm: `${model}-${dmMode}`,
+      model,
+      dmMode,
+    })));
+    const pairNames = [
+      ...models.map((model) => `${model}-blind-vs-advice`),
+      ...(['blind', 'advice'] as const).flatMap((mode) =>
+        models.slice(1).map((model) => `gpt-5.6-luna-vs-${model}-${mode}`)),
+    ];
+    const seeds = Object.fromEntries(pairNames.map((name, index) => [name, 10_000 + index]));
+    const packets = buildD575PairwiseRerunPackets(rows, seeds, tinyProtocol);
+
+    expect(Object.keys(packets).sort()).toEqual([...pairNames].sort());
+    expect(Object.values(packets)).toHaveLength(10);
+    for (const packet of Object.values(packets)) {
+      expect(packet.packet.entries).toHaveLength(2);
+      expect(new Set(packet.answerKey.entries.map((entry) => entry.arm)))
+        .toEqual(new Set([packet.leftArm, packet.rightArm]));
+    }
   });
 
   it('requires explicit, separate CLI paths and a deterministic shuffle seed', () => {

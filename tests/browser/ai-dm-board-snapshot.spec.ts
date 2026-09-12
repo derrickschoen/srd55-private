@@ -1,5 +1,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import type { Browser } from '@playwright/test';
 import {
   boardChromeDimensions,
   type BoardChromeTilePx,
@@ -36,6 +38,28 @@ if (productionBuild.status !== 0) {
   );
 }
 
+const snapshotRuntimePath = resolve(
+  `dnd-slim-runs/blind-board-snapshot-runtime-${String(process.pid)}.mjs`,
+);
+const snapshotRuntimeBuild = spawnSync('node_modules/esbuild/bin/esbuild', [
+  'tools/ai-dm-blind-board-snapshot-check.ts',
+  '--bundle',
+  '--platform=node',
+  '--format=esm',
+  '--packages=external',
+  '--loader:.txt=text',
+  '--define:import.meta.env={"MODE":"test","DEV":false,"PROD":false,"BASE_URL":"/"}',
+  `--outfile=${snapshotRuntimePath}`,
+  '--log-level=warning',
+], { cwd: process.cwd(), encoding: 'utf8' });
+if (snapshotRuntimeBuild.status !== 0) {
+  throw new Error(
+    `Snapshot in-process runtime build failed (${String(
+      snapshotRuntimeBuild.status ?? snapshotRuntimeBuild.signal
+    )}).\n${snapshotRuntimeBuild.stdout}${snapshotRuntimeBuild.stderr}`,
+  );
+}
+
 interface BrowserCheckResult {
   readonly chromiumVersion: string;
   readonly playwrightVersion: string;
@@ -49,6 +73,80 @@ interface BrowserCheckResult {
   readonly identityRejected: boolean;
   readonly movedDigestChanged: boolean;
   readonly manifestCarriesHtml: boolean;
+}
+
+interface BlindBrowserCheckResult {
+  readonly primerVersion: string;
+  readonly captureTilePx: number;
+  readonly results: readonly {
+    readonly difficulty: 'hard' | 'brutal';
+    readonly seed: number;
+    readonly revision: number;
+    readonly stateDigest: string;
+    readonly images: readonly {
+      readonly role: 'dm_board' | 'accessible_board_raster' | 'player_board';
+      readonly ordinal: number;
+      readonly sha256: string;
+      readonly bytes: number;
+      readonly width: number;
+      readonly height: number;
+      readonly path: string;
+    }[];
+  }[];
+}
+
+interface BlindFixture {
+  readonly difficulty: 'hard' | 'brutal';
+  readonly seed: number;
+  readonly path: string;
+}
+
+interface BlindService {
+  close(): Promise<void>;
+}
+
+type CapturedBlindFamily = object;
+type PreparedBlindFixture = object;
+type BlindArtifact = object;
+
+interface BlindSnapshotRuntime {
+  readonly BLIND_BOARD_SNAPSHOT_FIXTURES: readonly [BlindFixture, BlindFixture];
+  readonly startInProcessBlindBoardSnapshotService: (
+    outputDirectory: string,
+    browser: Browser,
+  ) => Promise<BlindService>;
+  readonly captureBlindBoardSnapshotFixture: (
+    service: BlindService,
+    fixture: BlindFixture,
+  ) => Promise<CapturedBlindFamily>;
+  readonly prepareBlindBoardSnapshotFixture: (
+    fixture: BlindFixture,
+  ) => Promise<PreparedBlindFixture>;
+  readonly capturePreparedBlindBoardSnapshotRoles: (
+    service: BlindService,
+    prepared: PreparedBlindFixture,
+    roles: readonly ('dm_board' | 'accessible_board_raster' | 'player_board')[],
+    firstOrdinal: number,
+  ) => Promise<readonly BlindArtifact[]>;
+  readonly warmPreparedBlindBoardSnapshot: (
+    service: BlindService,
+    prepared: PreparedBlindFixture,
+  ) => Promise<void>;
+  readonly captureWarmedPreparedBlindBoardSnapshot: (
+    service: BlindService,
+    prepared: PreparedBlindFixture,
+    role: 'dm_board' | 'accessible_board_raster' | 'player_board',
+    visualOrdinal: number,
+  ) => Promise<readonly BlindArtifact[]>;
+  readonly completeBlindBoardSnapshotFamily: (
+    prepared: PreparedBlindFixture,
+    artifacts: readonly BlindArtifact[],
+  ) => CapturedBlindFamily;
+  readonly inspectCapturedBlindBoardSnapshotFamily: (family: CapturedBlindFamily) => void;
+  readonly blindBoardSnapshotResult: (
+    outputDirectory: string,
+    families: readonly CapturedBlindFamily[],
+  ) => BlindBrowserCheckResult;
 }
 
 async function runBrowserCheck(outputDirectory: string): Promise<BrowserCheckResult> {
@@ -77,6 +175,86 @@ async function runBrowserCheck(outputDirectory: string): Promise<BrowserCheckRes
   return JSON.parse(line.slice('BOARD_SNAPSHOT_RESULT '.length)) as BrowserCheckResult;
 }
 
+let blindRuntime: BlindSnapshotRuntime | undefined;
+let blindService: BlindService | undefined;
+let preparedHardBlindFixture: PreparedBlindFixture | undefined;
+let hardDmArtifacts: readonly BlindArtifact[] | undefined;
+let hardRemainingArtifacts: readonly BlindArtifact[] | undefined;
+let brutalBlindFamily: CapturedBlindFamily | undefined;
+let blindOutputDirectory = '';
+
+test.beforeAll(async ({ browser }) => {
+  const loaded: unknown = await import(pathToFileURL(snapshotRuntimePath).href);
+  if (typeof loaded !== 'object' || loaded === null ||
+    typeof Reflect.get(loaded, 'startInProcessBlindBoardSnapshotService') !== 'function' ||
+    typeof Reflect.get(loaded, 'captureBlindBoardSnapshotFixture') !== 'function' ||
+    typeof Reflect.get(loaded, 'prepareBlindBoardSnapshotFixture') !== 'function' ||
+    typeof Reflect.get(loaded, 'capturePreparedBlindBoardSnapshotRoles') !== 'function' ||
+    typeof Reflect.get(loaded, 'warmPreparedBlindBoardSnapshot') !== 'function' ||
+    typeof Reflect.get(loaded, 'captureWarmedPreparedBlindBoardSnapshot') !== 'function' ||
+    typeof Reflect.get(loaded, 'completeBlindBoardSnapshotFamily') !== 'function' ||
+    typeof Reflect.get(loaded, 'inspectCapturedBlindBoardSnapshotFamily') !== 'function' ||
+    typeof Reflect.get(loaded, 'blindBoardSnapshotResult') !== 'function' ||
+    !Array.isArray(Reflect.get(loaded, 'BLIND_BOARD_SNAPSHOT_FIXTURES'))) {
+    throw new TypeError('Blind board snapshot runtime exports are malformed.');
+  }
+  blindRuntime = loaded as BlindSnapshotRuntime;
+  blindOutputDirectory = resolve(
+    `dnd-slim-runs/blind-board-snapshot-browser-${String(process.pid)}-images`,
+  );
+  blindService = await blindRuntime.startInProcessBlindBoardSnapshotService(
+    blindOutputDirectory,
+    browser,
+  );
+  preparedHardBlindFixture = await blindRuntime.prepareBlindBoardSnapshotFixture(
+    blindRuntime.BLIND_BOARD_SNAPSHOT_FIXTURES[0],
+  );
+  await blindRuntime.warmPreparedBlindBoardSnapshot(
+    blindService,
+    preparedHardBlindFixture,
+  );
+});
+
+test.beforeAll(async () => {
+  if (blindRuntime === undefined || blindService === undefined ||
+    preparedHardBlindFixture === undefined) {
+    throw new Error('Blind board snapshot warmup did not complete.');
+  }
+  hardDmArtifacts = await blindRuntime.captureWarmedPreparedBlindBoardSnapshot(
+    blindService,
+    preparedHardBlindFixture,
+    'dm_board',
+    1,
+  );
+});
+
+test.beforeAll(async () => {
+  if (blindRuntime === undefined || blindService === undefined ||
+    preparedHardBlindFixture === undefined) {
+    throw new Error('Blind board snapshot DM capture did not complete.');
+  }
+  hardRemainingArtifacts = await blindRuntime.capturePreparedBlindBoardSnapshotRoles(
+    blindService,
+    preparedHardBlindFixture,
+    ['accessible_board_raster', 'player_board'],
+    2,
+  );
+});
+
+test.beforeAll(async () => {
+  if (blindRuntime === undefined || blindService === undefined) {
+    throw new Error('Blind board snapshot hard-family capture did not complete.');
+  }
+  brutalBlindFamily = await blindRuntime.captureBlindBoardSnapshotFixture(
+    blindService,
+    blindRuntime.BLIND_BOARD_SNAPSHOT_FIXTURES[1],
+  );
+});
+
+test.afterAll(async () => {
+  await blindService?.close();
+});
+
 test('captures the full production DM board deterministically through durable save upload/load', async () => {
   expect(expectedBoardDimensions({ columns: 17, rows: 13 }, { combatants: 0, objects: 0 }, 64))
     .toBe('1140x1012');
@@ -101,4 +279,39 @@ test('captures the full production DM board deterministically through durable sa
   expect(result.manifestCarriesHtml).toBe(true);
   expect(result.chromiumVersion).not.toBe('');
   expect(result.playwrightVersion).toBe('1.61.1');
+});
+
+test('captures synchronized state-only DM, accessible-raster, and player evidence', async () => {
+  if (blindRuntime === undefined || preparedHardBlindFixture === undefined ||
+    hardDmArtifacts === undefined || hardRemainingArtifacts === undefined ||
+    brutalBlindFamily === undefined) {
+    throw new Error('Blind board snapshot file setup did not complete.');
+  }
+  const hardBlindFamily = blindRuntime.completeBlindBoardSnapshotFamily(
+    preparedHardBlindFixture,
+    [...hardDmArtifacts, ...hardRemainingArtifacts],
+  );
+  const families = [hardBlindFamily, brutalBlindFamily] as const;
+  for (const family of families) {
+    blindRuntime.inspectCapturedBlindBoardSnapshotFamily(family);
+  }
+  const result = blindRuntime.blindBoardSnapshotResult(blindOutputDirectory, families);
+  expect(result.primerVersion).toBe('d562-general-board-primer-v10');
+  expect(result.captureTilePx).toBe(128);
+  expect(result.results.map(({ difficulty, seed }) => ({ difficulty, seed }))).toEqual([
+    { difficulty: 'hard', seed: 5_117_001 },
+    { difficulty: 'brutal', seed: 6_203_001 },
+  ]);
+  for (const family of result.results) {
+    expect(family.stateDigest).toMatch(/^[a-f0-9]{64}$/u);
+    expect(family.images.map(({ role, ordinal }) => ({ role, ordinal }))).toEqual([
+      { role: 'dm_board', ordinal: 1 },
+      { role: 'accessible_board_raster', ordinal: 2 },
+      { role: 'player_board', ordinal: 3 },
+    ]);
+    expect(new Set(family.images.map(({ sha256 }) => sha256)).size).toBe(3);
+    expect(family.images.every((image) =>
+      image.bytes > 0 && image.bytes <= 1_000_000 && image.width > 0 && image.height > 0 &&
+      image.path.endsWith(`${image.sha256}.png`))).toBe(true);
+  }
 });

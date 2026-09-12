@@ -56,6 +56,17 @@ import {
   type RendererProfile,
 } from '../src/vtt/renderer-profile';
 import { DEFAULT_AI_DM_KB_ROOT } from '../src/vtt/knowledge-base-contract';
+import { D569_AI_DM_KB_ROOT } from '../src/vtt/knowledge-base-contract';
+import {
+  BLIND_MAX_ATTEMPTS_DEFAULT,
+  BLIND_REPAIR_ARMS,
+  blindMaxAttemptsSchema,
+  type BlindMaxAttempts,
+  type BlindRepairArm,
+  type DmMode,
+} from '../src/vtt/blind-dm-contract';
+import { BLIND_TURN_CONTEXT_MAX_BYTES } from '../src/vtt/blind-turn-context';
+import { BLIND_STATE_PRIMER_VERSION } from './ai-dm-board-snapshot';
 
 export const ARENA_BASES = ['standard', 'hard', 'brutal', 'brutal-b', 'scenario', 'challenge'] as const;
 export type ArenaBasis = (typeof ARENA_BASES)[number];
@@ -92,6 +103,12 @@ export interface ArenaArmInstruction {
 }
 
 interface ArenaConfigBase {
+  readonly dmMode: DmMode;
+  readonly dmModeExplicit: boolean;
+  readonly blindRepairArm: BlindRepairArm;
+  readonly blindMaxAttempts: BlindMaxAttempts;
+  readonly blindFacts: boolean;
+  readonly midRoundAdjustmentsEnabled: boolean;
   readonly intelMode: IntelMode;
   readonly overridePolicy: OverridePolicy;
   readonly rendererProfile: RendererProfile;
@@ -101,6 +118,7 @@ interface ArenaConfigBase {
   readonly partyPolicy: ScriptedPartyDecisionPolicy;
   readonly rooms: number;
   readonly reps: number;
+  readonly cells: readonly { readonly room: number; readonly rep: number }[] | null;
   readonly seed: number;
   readonly cli: ConversationCli;
   readonly decisionTransport: ConversationTransport;
@@ -307,7 +325,7 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
     if (option === '--capture-rl-data') { captureRlData = true; continue; }
     if (option === '--generate-missing-rooms') { generateMissingRooms = true; continue; }
     if (![
-      '--rooms', '--reps', '--seed', '--cli', '--model', '--effort', '--out',
+      '--rooms', '--reps', '--cells', '--seed', '--cli', '--model', '--effort', '--out',
       '--escalation-model', '--escalation-effort',
       '--cli-bin', '--timeout-ms', '--kb',
       '--instruction-source', '--skill',
@@ -320,6 +338,7 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
       '--renderer-profile',
       '--turn-context-max-bytes',
       '--board-image',
+      '--dm-mode', '--blind-repair-arm', '--blind-max-attempts', '--blind-facts',
       '--round-wall-ms', '--basis-dir', '--arm-instruction-source', '--arm-kb',
       '--basis', '--arm', '--local-base-url', '--local-model', '--local-api-key', '--local-think',
     ].includes(option ?? '')) throw new TypeError(`Unknown arena option ${option ?? '<missing>'}.`);
@@ -334,9 +353,23 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
   }
   const seed = Number(values.get('--seed'));
   if (!Number.isSafeInteger(seed)) throw new TypeError('--seed must be a safe integer.');
+  const rooms = positiveInteger(values.get('--rooms') ?? '', '--rooms');
+  const reps = positiveInteger(values.get('--reps') ?? '', '--reps');
+  const cells = values.has('--cells')
+    ? parseArenaCells(values.get('--cells') ?? '', rooms, reps)
+    : null;
   const outPath = resolve(values.get('--out') ?? '');
   if ((values.get('--out') ?? '').length === 0) throw new TypeError('--out is required.');
   if (pathIsInside(cwd, outPath)) throw new TypeError('--out must be outside the repository working tree.');
+  const dmModeExplicit = values.has('--dm-mode');
+  const dmMode = values.get('--dm-mode') ?? 'advice';
+  if (dmMode !== 'advice' && dmMode !== 'blind') {
+    throw new TypeError('--dm-mode must be advice or blind.');
+  }
+  if (dmModeExplicit && !values.has('--instruction-source') && !values.has('--kb')) {
+    values.set('--instruction-source', 'kb');
+    values.set('--kb', D569_AI_DM_KB_ROOT);
+  }
   const cli = values.get('--cli') ?? 'codex';
   if (!CONVERSATION_CLIS.includes(cli as ConversationCli)) {
     throw new TypeError('--cli must be codex, claude-code, or local-openai.');
@@ -427,10 +460,12 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
     ? rendererProfileSchema.parse(JSON.parse(values.get('--renderer-profile') ?? ''))
     : DEFAULT_RENDERER_PROFILE;
   const turnContextMaximumBytes = positiveInteger(
-    values.get('--turn-context-max-bytes') ?? String(TURN_CONTEXT_MAX_BYTES),
+    values.get('--turn-context-max-bytes') ?? String(dmMode === 'blind'
+      ? BLIND_TURN_CONTEXT_MAX_BYTES
+      : TURN_CONTEXT_MAX_BYTES),
     '--turn-context-max-bytes',
   );
-  const boardImageMode = values.get('--board-image') ?? 'off';
+  const boardImageMode = values.get('--board-image') ?? (dmModeExplicit ? 'png' : 'off');
   if (!BOARD_IMAGE_MODES.includes(boardImageMode as BoardImageMode)) {
     throw new TypeError('--board-image must be off, png, or capture_only.');
   }
@@ -439,6 +474,32 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
   }
   if (boardImageMode === 'png' && transport !== 'mcp_minimal') {
     throw new TypeError('--board-image png requires --transport mcp_minimal.');
+  }
+  const blindRepairArm = values.get('--blind-repair-arm') ?? 'code_only';
+  if (!BLIND_REPAIR_ARMS.includes(blindRepairArm as BlindRepairArm)) {
+    throw new TypeError('--blind-repair-arm must be code_only or minimal_legal_alternative.');
+  }
+  const blindMaxAttempts = blindMaxAttemptsSchema.parse(values.has('--blind-max-attempts')
+    ? positiveInteger(values.get('--blind-max-attempts') ?? '', '--blind-max-attempts')
+    : BLIND_MAX_ATTEMPTS_DEFAULT);
+  const blindFactsValue = values.get('--blind-facts') ?? 'off';
+  if (blindFactsValue !== 'on' && blindFactsValue !== 'off') {
+    throw new TypeError('--blind-facts must be on or off.');
+  }
+  if (dmMode !== 'blind' && (values.has('--blind-repair-arm') ||
+    values.has('--blind-max-attempts') || values.has('--blind-facts'))) {
+    throw new TypeError('Blind repair, attempt, and fact options require --dm-mode blind.');
+  }
+  if (dmMode === 'blind' && (transport !== 'mcp_minimal' || boardImageMode !== 'png' ||
+    turnContextMaximumBytes !== BLIND_TURN_CONTEXT_MAX_BYTES)) {
+    throw new TypeError('Blind mode requires MCP-minimal, PNG delivery, and a 65536-byte base cap.');
+  }
+  if (dmModeExplicit && (escalationModel !== null || escalationEffort !== null || captureRlData)) {
+    throw new TypeError('D569 experiment modes prohibit escalation and RL capture.');
+  }
+  if (dmModeExplicit && (instructionSource.instructionSource !== 'kb' ||
+    instructionSource.kbPath !== resolve(cwd, D569_AI_DM_KB_ROOT))) {
+    throw new TypeError('Explicit D569 DM modes require the shared D570 knowledge bundle.');
   }
   const armCombatModels = new Map<string, CombatModel>();
   for (const raw of rawArmCombatModels) {
@@ -575,13 +636,18 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
   if (!interleave && armOverridePolicies.size > 0) {
     throw new TypeError('--arm-override-policy is only valid with --interleave.');
   }
-  const rooms = positiveInteger(values.get('--rooms') ?? '', '--rooms');
   if (basis === 'challenge') {
     if (seed !== 5_831_001) throw new TypeError('The challenge basis requires --seed 5831001.');
     if (rooms > 4) throw new RangeError('The challenge basis contains exactly four consecutive rooms.');
     if (generateMissingRooms) throw new TypeError('--generate-missing-rooms is unavailable for the closed challenge basis.');
   }
   return {
+    dmMode: dmMode as DmMode,
+    dmModeExplicit,
+    blindRepairArm: blindRepairArm as BlindRepairArm,
+    blindMaxAttempts,
+    blindFacts: blindFactsValue === 'on',
+    midRoundAdjustmentsEnabled: !dmModeExplicit,
     intelMode,
     overridePolicy: overridePolicy as OverridePolicy,
     rendererProfile,
@@ -590,7 +656,8 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
     initiativeProfile: initiativeProfile as RoomInitiativeProfile,
     partyPolicy: partyPolicy as ScriptedPartyDecisionPolicy,
     rooms,
-    reps: positiveInteger(values.get('--reps') ?? '', '--reps'),
+    reps,
+    cells,
     seed,
     cli: selectedCli,
     decisionTransport: transport as ConversationTransport,
@@ -602,7 +669,7 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
     dryRun,
     cwd: resolve(cwd),
     cliBin: values.get('--cli-bin') ?? (selectedCli === 'codex' ? 'codex' : selectedCli === 'claude-code' ? 'claude' : ''),
-    timeoutMs: positiveInteger(values.get('--timeout-ms') ?? '120000', '--timeout-ms'),
+    timeoutMs: positiveInteger(values.get('--timeout-ms') ?? (dmModeExplicit ? '240000' : '120000'), '--timeout-ms'),
     ...instructionSource,
     reactionAskDefault,
     basis: basis as ArenaBasis,
@@ -615,6 +682,28 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
     experimentPolicy: { roundWallMs: 180_000, basisDirectory },
     armInstructions,
   };
+}
+
+export function parseArenaCells(
+  source: string,
+  rooms: number,
+  reps: number,
+): readonly { readonly room: number; readonly rep: number }[] {
+  if (source.length === 0) throw new TypeError('--cells requires a comma-separated room:rep list.');
+  const cells = source.split(',').map((entry) => {
+    const match = /^(\d+):(\d+)$/u.exec(entry);
+    if (match === null) throw new TypeError(`Invalid --cells entry ${entry}.`);
+    const room = Number(match[1]);
+    const rep = Number(match[2]);
+    if (!Number.isSafeInteger(room) || room < 1 || room > rooms ||
+      !Number.isSafeInteger(rep) || rep < 1 || rep > reps) {
+      throw new RangeError(`--cells entry ${entry} is outside rooms 1..${String(rooms)} and reps 1..${String(reps)}.`);
+    }
+    return { room, rep };
+  });
+  const keys = cells.map((cell) => `${String(cell.room)}:${String(cell.rep)}`);
+  if (new Set(keys).size !== keys.length) throw new TypeError('--cells entries must be unique.');
+  return cells;
 }
 
 export interface ArenaRunOptions extends Omit<
@@ -759,11 +848,18 @@ function conversationConfig(
     readonly combatModel?: CombatModel;
     readonly overridePolicy?: OverridePolicy;
     readonly instruction?: AgentInstructionSource;
+    readonly scheduledCellKey?: string;
   },
 ): import('./ai-dm-conversation').ConversationConfig {
   const instructionSource: AgentInstructionSource = overrides.instruction ?? config;
   return {
     ...instructionSource,
+    dmMode: config.dmMode,
+    dmModeExplicit: config.dmModeExplicit,
+    blindRepairArm: config.blindRepairArm,
+    blindMaxAttempts: config.blindMaxAttempts,
+    blindFacts: config.blindFacts,
+    midRoundAdjustmentsEnabled: config.midRoundAdjustmentsEnabled,
     intelMode: config.intelMode,
     overridePolicy: overrides.overridePolicy ?? config.overridePolicy,
     rendererProfile: config.rendererProfile,
@@ -793,6 +889,7 @@ function conversationConfig(
       model: overrides.model,
     },
     boardImageMode: config.boardImageMode,
+    ...(overrides.scheduledCellKey === undefined ? {} : { scheduledCellKey: overrides.scheduledCellKey }),
   };
 }
 
@@ -818,7 +915,15 @@ export async function runArena(
     if (config.boardImageMode !== 'off') {
       const outputDirectory = boardImageOutputDirectory(config);
       snapshotService = boardSnapshotServiceFactory === undefined
-        ? await BoardSnapshotService.start({ outputDirectory })
+        ? await BoardSnapshotService.start({
+            outputDirectory,
+            ...(config.dmMode === 'blind' ? {
+              informationMode: 'blind_state' as const,
+              boardGlyphs: 'full' as const,
+              captureTilePx: 128 as const,
+              primerVersion: BLIND_STATE_PRIMER_VERSION,
+            } : {}),
+          })
         : await boardSnapshotServiceFactory(outputDirectory);
     }
     let rows: readonly ArenaRow[];
@@ -827,6 +932,7 @@ export async function runArena(
     const independent: ArenaRow[] = [];
     for (let room = 1; room <= config.rooms; room += 1) {
       for (let rep = 1; rep <= config.reps; rep += 1) {
+        if (config.cells !== null && !config.cells.some((cell) => cell.room === room && cell.rep === rep)) continue;
         const result = await runConversation(conversationConfig(config, {
           rooms: 1,
           rounds: 1,
@@ -835,6 +941,7 @@ export async function runArena(
           escalationModel: config.escalationModel,
           escalationEffort: config.escalationEffort,
           outPath: resolve(temporaryDirectory, `${String(room)}-${String(rep)}-single.jsonl`),
+          scheduledCellKey: `${String(room)}:${String(rep)}`,
         }), {
           ...conversationOptions,
           ...(snapshotService === null ? {} : { boardSnapshotService: snapshotService }),
@@ -856,6 +963,7 @@ export async function runArena(
     );
     for (let room = 1; room <= config.rooms; room += 1) {
       for (let rep = 1; rep <= config.reps; rep += 1) {
+        if (config.cells !== null && !config.cells.some((cell) => cell.room === room && cell.rep === rep)) continue;
         const pendingResults: Promise<import('./ai-dm-conversation').ConversationRunResult>[] = [];
         for (const arm of config.arms) {
           let markDispatchStarted = (): void => {
@@ -873,6 +981,7 @@ export async function runArena(
             escalationModel: arm.escalationModel ?? config.escalationModel,
             escalationEffort: arm.escalationEffort ?? config.escalationEffort,
             outPath: resolve(temporaryDirectory, `${String(room)}-${String(rep)}-${arm.label}.jsonl`),
+            scheduledCellKey: `${String(room)}:${String(rep)}`,
             combatModel: arm.combatModel,
             overridePolicy: arm.overridePolicy,
             instruction: arm,

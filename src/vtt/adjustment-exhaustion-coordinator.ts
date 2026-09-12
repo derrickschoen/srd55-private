@@ -1,6 +1,6 @@
 import type { CombatantId } from '../combat/values';
-import type { AgentInvocation } from './agent-session';
-import type { AgentDispatchDeadline, AgentSessionLifecycle } from './agent-session-lifecycle';
+import type { AgentInvocation, AgentTurnResult } from './agent-session';
+import type { AgentDispatchDeadline } from './agent-session-lifecycle';
 import type {
   PlanAdjustmentProposalEnvelope,
   ProposedTurnResolution,
@@ -13,7 +13,14 @@ import {
 
 export const MAX_ADJUSTMENT_CORRECTIONS = 1 as const;
 
-export type AdjustmentCorrectionResult = 'accepted' | 'invalid' | 'no_response' | 'not_required';
+export type AdjustmentCorrectionResult =
+  | 'accepted'
+  | 'invalid'
+  | 'no_response'
+  | 'not_required'
+  | 'cancelled'
+  | 'timed_out'
+  | 'infrastructure_failed';
 
 export interface AdjustmentCompletion {
   readonly kind: 'adjusted' | 'baseline_kept';
@@ -60,7 +67,12 @@ export interface AdjustmentCorrectionRuntime {
   readonly capsule: EngineStateCapsule;
   readonly rules: AllowlistedRulesSource;
   readonly turnContext: unknown;
-  readonly lifecycle: Pick<AgentSessionLifecycle, 'resumeCorrection'>;
+  readonly lifecycle: {
+    resumeCorrection(
+      invocation: AgentInvocation,
+      deadline: AgentDispatchDeadline,
+    ): Promise<{ readonly exit: AgentTurnResult['exit'] }>;
+  };
   readonly invocation: AgentInvocation;
   activateCapsule(): void;
   takeProposal(): PlanAdjustmentProposalEnvelope | null;
@@ -133,8 +145,17 @@ export class AdjustmentExhaustionCoordinator {
   async coordinate(input: {
     readonly initial: InitialAdjustmentAttempt;
     readonly correction: AdjustmentCorrectionRuntime | null;
-    readonly deadline: AgentDispatchDeadline;
+    readonly deadline?: AgentDispatchDeadline;
   }): Promise<AdjustmentCompletion> {
+    const deadline = input.deadline ?? {
+      signal: new AbortController().signal,
+      dispatch: (invocation: AgentInvocation) => ({
+        kind: 'open' as const,
+        timeoutMs: invocation.timeoutMs ?? Number.MAX_SAFE_INTEGER,
+        invocation,
+      }),
+      acceptsCompletion: () => true,
+    };
     const openActors = exactActors(input.initial.openActorIds, 'Open adjustment');
     const refusedActors = exactActors(input.initial.refusedActorIds, 'Refused adjustment', true);
     const adjustmentBudget = Math.min(openActors.length, 2);
@@ -144,7 +165,7 @@ export class AdjustmentExhaustionCoordinator {
     if (!/^[0-9a-f]{64}$/u.test(input.initial.baselinePlanHash)) {
       throw new TypeError('Adjustment baseline plan hash must be canonical.');
     }
-    const stagedProposal = input.deadline.acceptsCompletion()
+    const stagedProposal = deadline.acceptsCompletion()
       ? input.initial.stagedProposal
       : null;
     const staged = stagedProposal?.updates ?? [];
@@ -167,7 +188,7 @@ export class AdjustmentExhaustionCoordinator {
     if (refusedActors.length === 0) {
       const outcome = completion({
         initial: input.initial,
-        staged: input.deadline.acceptsCompletion() ? staged : [],
+        staged: deadline.acceptsCompletion() ? staged : [],
         corrected: [],
         correctionResult: 'not_required',
       });
@@ -177,7 +198,7 @@ export class AdjustmentExhaustionCoordinator {
     if (input.correction === null) {
       const outcome = completion({
         initial: input.initial,
-        staged: input.deadline.acceptsCompletion() ? staged : [],
+        staged: deadline.acceptsCompletion() ? staged : [],
         corrected: [],
         correctionResult: 'no_response',
       });
@@ -222,7 +243,7 @@ export class AdjustmentExhaustionCoordinator {
             undefined,
             input.correction.turnContext,
           );
-      if (!input.deadline.acceptsCompletion()) {
+      if (!deadline.acceptsCompletion()) {
         const outcome = completion({
           initial: input.initial,
           staged: [],
@@ -232,13 +253,23 @@ export class AdjustmentExhaustionCoordinator {
         this.persistence.record({ kind: 'adjustment_completed', requestId: outcome.requestId, outcome });
         return outcome;
       }
-      await input.correction.lifecycle.resumeCorrection({
+      const correctionTurn = await input.correction.lifecycle.resumeCorrection({
         ...input.correction.invocation,
         prompt,
-      }, input.deadline);
+      }, deadline);
+      if (correctionTurn.exit !== 'completed') {
+        const outcome = completion({
+          initial: input.initial,
+          staged: correctionTurn.exit === 'infrastructure_failed' ? [] : staged,
+          corrected: [],
+          correctionResult: correctionTurn.exit,
+        });
+        this.persistence.record({ kind: 'adjustment_completed', requestId: outcome.requestId, outcome });
+        return outcome;
+      }
     }
 
-    const proposal = input.deadline.acceptsCompletion()
+    const proposal = deadline.acceptsCompletion()
       ? input.correction.takeProposal()
       : null;
     const accepted = proposal !== null && staged.length + proposal.updates.length <= adjustmentBudget && exactProposal(proposal, {
@@ -247,7 +278,7 @@ export class AdjustmentExhaustionCoordinator {
       phase: 'correction',
       allowedActorIds: refusedActors,
     });
-    const completedInTime = input.deadline.acceptsCompletion();
+    const completedInTime = deadline.acceptsCompletion();
     const outcome = completion({
       initial: input.initial,
       staged: completedInTime ? staged : [],

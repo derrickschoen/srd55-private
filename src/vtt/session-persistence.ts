@@ -77,6 +77,7 @@ import {
   isAgentSessionBinding,
   isAgentCallUsage,
   type AgentCallUsage,
+  type EngineDispatchId,
   type AgentFailureClassification,
   type AgentSessionBinding,
 } from './agent-session';
@@ -150,6 +151,12 @@ export type SessionTransition =
       readonly failure: Extract<AgentFailureClassification, 'resume_not_found' | 'resume_corrupt'>;
     }
   | {
+      readonly kind: 'agent_session_recovery_failed';
+      readonly predecessorSessionHash: string;
+      readonly dispatchId: EngineDispatchId;
+      readonly exit: 'cancelled' | 'timed_out' | 'infrastructure_failed';
+    }
+  | {
       readonly kind: 'agent_session_rolled_over';
       readonly supersededBinding: AgentSessionBinding;
       readonly binding: AgentSessionBinding;
@@ -219,6 +226,7 @@ export const SESSION_TRANSITION_KINDS = [
   'agent_session_dispatched',
   'agent_call_usage_recorded',
   'agent_session_recovered',
+  'agent_session_recovery_failed',
   'agent_session_rolled_over',
   'session_ended',
   'proposal_fallback_resolved',
@@ -679,6 +687,14 @@ function decodeTransition(value: unknown): SessionTransition {
           failure: value.failure,
         };
       }
+      break;
+    case 'agent_session_recovery_failed':
+      if (
+        hasExactlyKeys(value, ['kind', 'predecessorSessionHash', 'dispatchId', 'exit']) &&
+        typeof value.predecessorSessionHash === 'string' && /^[a-f0-9]{64}$/u.test(value.predecessorSessionHash) &&
+        typeof value.dispatchId === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9:._-]{15,199}$/u.test(value.dispatchId) &&
+        (value.exit === 'cancelled' || value.exit === 'timed_out' || value.exit === 'infrastructure_failed')
+      ) return value as Extract<SessionTransition, { readonly kind: 'agent_session_recovery_failed' }>;
       break;
     case 'agent_session_rolled_over':
       if (
@@ -1354,6 +1370,15 @@ export function replaySessionRevisions(
         requireCanonicalEqual(revision.partyState, parent.partyState, 'agent-recovery party state');
         requireCanonicalEqual(revision.rngState, parent.rngState, 'agent-recovery RNG state');
         break;
+      case 'agent_session_recovery_failed':
+        if (parent === null || parent === undefined || parent.agentSession === null) {
+          throw new Error('agent_session_recovery_failed requires an active predecessor binding.');
+        }
+        requireCanonicalEqual(revision.encounterState, parent.encounterState, 'failed agent-recovery encounter state');
+        requireCanonicalEqual(revision.coordinatorState, parent.coordinatorState, 'failed agent-recovery coordinator state');
+        requireCanonicalEqual(revision.partyState, parent.partyState, 'failed agent-recovery party state');
+        requireCanonicalEqual(revision.rngState, parent.rngState, 'failed agent-recovery RNG state');
+        break;
       case 'agent_session_rolled_over':
         if (parent === null || parent === undefined || parent.agentSession === null ||
           parent.agentSession.currentContextTokens === null) {
@@ -1885,6 +1910,27 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
       agentSession: binding,
     });
     return binding;
+  }
+
+  recordAgentSessionRecoveryFailure(input: {
+    readonly predecessorSessionHash: string;
+    readonly dispatchId: EngineDispatchId;
+    readonly exit: 'cancelled' | 'timed_out' | 'infrastructure_failed';
+  }): void {
+    const latest = this.#latest();
+    if (latest.agentSession === null || latest.agentSession.status !== 'active') {
+      throw new Error('Encounter run has no active predecessor for a failed recovery dispatch.');
+    }
+    this.#append({
+      parentRevision: latest.revision,
+      branchId: latest.branchId,
+      transition: { kind: 'agent_session_recovery_failed', ...input },
+      encounterState: latest.encounterState,
+      partyState: latest.partyState,
+      coordinatorState: latest.coordinatorState,
+      controllers: latest.controllers,
+      agentSession: latest.agentSession,
+    });
   }
 
   rollOverAgentSession(input: {

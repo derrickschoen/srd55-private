@@ -16,7 +16,13 @@ import {
 } from '../../../src/vtt/scripted-party-round';
 import { loadArenaFixture } from '../../../src/vtt/mcp/entrypoint';
 import { generateRoom } from '../../../src/vtt/room-generator';
+import { loadExternalPartyPackBytes } from '../../../src/vtt/party-pack';
 import { alternatingInitiativeRoom } from '../../fixtures/initiative-segments/alternating-room';
+import { declareTestInputs } from '../../helpers/test-inputs';
+
+const heldoutInputs = declareTestInputs({
+  fixtures: ['tests/fixtures/heldout-party/level-3.json'],
+});
 
 class FixedProgramController extends AlgorithmController {
   constructor(private readonly fixed: DecisionProgram) { super(); }
@@ -43,6 +49,26 @@ function livingPlayerId(state: Awaited<ReturnType<typeof fixture>>): CombatantId
 }
 
 describe('scripted party round planning and adherence', () => {
+  it('plans for the solo PC and all three companions in a held-out room', () => {
+    const loaded = loadExternalPartyPackBytes(heldoutInputs.fixtures.readText(
+      'tests/fixtures/heldout-party/level-3.json',
+    ));
+    if (loaded.status !== 'loaded') throw new Error('Held-out level-3 party did not load.');
+    const state = generateRoom(7_850_003, {
+      heldoutOrdinary: {
+        protocol: 'heldout-development-v1',
+        party: loaded.party,
+        partyLevel: 3,
+        targetXp: 900,
+      },
+    }).encounter.state;
+
+    expect(createScriptedPartyPlan(state).programs.map((program) => program.actorId)).toEqual(
+      state.combatants.filter((subject) =>
+        subject.profile.kind === 'player_character').map((subject) => subject.profile.id).sort(),
+    );
+  });
+
   it('uses a typed Dodge default in round three when a one-round plan omitted a then-unavailable PC', async () => {
     const initial = await fixture();
     const actorId = initial.combatants.find((combatant) =>

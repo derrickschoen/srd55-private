@@ -1,0 +1,59 @@
+--- baseline 85168bc5 (shipped art): 1008 rows
+    claude-fable-5-1: {'answered': 140, 'blocked': 196} scored=140 mean=0.7431
+    gpt-5.6-sol: {'answered': 336} scored=336 mean=0.7217
+    gpt-6-astra: {'answered': 336} scored=336 mean=0.7913
+--- candidate dc217f23 (Quietstone): 1008 rows
+    claude-fable-5-1: {'blocked': 336} scored=0 mean=None
+    gpt-5.6-sol: {'answered': 336} scored=336 mean=0.7324
+    gpt-6-astra: {'answered': 336} scored=336 mean=0.8126
+
+=== per model x question class (answered on BOTH sides, same board) ===
+model           class      n  baseline  candidate   delta  decision
+claude-fable-5-1Q1         0         -          -       -  no paired rows
+claude-fable-5-1Q2         0         -          -       -  no paired rows
+claude-fable-5-1Q3         0         -          -       -  no paired rows
+claude-fable-5-1Q4         0         -          -       -  no paired rows
+claude-fable-5-1Q5         0         -          -       -  no paired rows
+claude-fable-5-1Q6         0         -          -       -  no paired rows
+claude-fable-5-1Q7         0         -          -       -  no paired rows
+claude-fable-5-1Q8         0         -          -       -  no paired rows
+claude-fable-5-1Q9         0         -          -       -  no paired rows
+claude-fable-5-1Q10        0         -          -       -  no paired rows
+claude-fable-5-1Q11        0         -          -       -  no paired rows
+claude-fable-5-1Q12        0         -          -       -  no paired rows
+claude-fable-5-1Q13        0         -          -       -  no paired rows
+claude-fable-5-1Q14        0         -          -       -  no paired rows
+gpt-5.6-sol     Q1        24     0.958      0.958  -0.000  pass (baseline>=0.9 kept)
+gpt-5.6-sol     Q2        24     0.958      0.925  -0.033  pass (baseline>=0.9 kept)
+gpt-5.6-sol     Q3        24     0.967      0.967  +0.000  pass (baseline>=0.9 kept)
+gpt-5.6-sol     Q4        24     0.809      0.843  +0.034  pass (n/a)
+gpt-5.6-sol     Q5        24     0.889      0.933  +0.044  pass (n/a)
+gpt-5.6-sol     Q6        24     1.000      1.000  +0.000  pass (baseline>=0.9 kept)
+gpt-5.6-sol     Q7        24     0.779      0.829  +0.050  pass (n/a)
+gpt-5.6-sol     Q8        24     0.792      0.792  +0.000  pass (n/a)
+gpt-5.6-sol     Q9        24     0.239      0.127  -0.112  REGRESSION (n/a)
+gpt-5.6-sol     Q10       24     0.045      0.047  +0.002  pass (n/a)
+gpt-5.6-sol     Q11       24     0.750      0.708  -0.042  pass (n/a)
+gpt-5.6-sol     Q12       24     0.458      0.625  +0.167  pass (n/a)
+gpt-5.6-sol     Q13       24     0.792      0.792  +0.000  pass (n/a)
+gpt-5.6-sol     Q14       24     0.667      0.708  +0.042  pass (n/a)
+gpt-6-astra     Q1        24     1.000      1.000  +0.000  pass (baseline>=0.9 kept)
+gpt-6-astra     Q2        24     1.000      1.000  +0.000  pass (baseline>=0.9 kept)
+gpt-6-astra     Q3        24     1.000      1.000  +0.000  pass (baseline>=0.9 kept)
+gpt-6-astra     Q4        24     1.000      0.998  -0.002  pass (baseline>=0.9 kept)
+gpt-6-astra     Q5        24     0.950      0.957  +0.007  pass (baseline>=0.9 kept)
+gpt-6-astra     Q6        24     1.000      1.000  +0.000  pass (baseline>=0.9 kept)
+gpt-6-astra     Q7        24     0.481      0.515  +0.035  pass (n/a)
+gpt-6-astra     Q8        24     1.000      1.000  +0.000  pass (baseline>=0.9 kept)
+gpt-6-astra     Q9        24     0.284      0.272  -0.012  pass (n/a)
+gpt-6-astra     Q10       24     0.071      0.259  +0.187  pass (n/a)
+gpt-6-astra     Q11       24     0.875      0.917  +0.042  pass (n/a)
+gpt-6-astra     Q12       24     0.833      0.917  +0.083  pass (n/a)
+gpt-6-astra     Q13       24     0.917      0.917  +0.000  pass (baseline>=0.9 kept)
+gpt-6-astra     Q14       24     0.667      0.625  -0.042  pass (n/a)
+
+=== decision ===
+classes breaching candidate >= baseline - 0.05: [('gpt-5.6-sol', 'Q9', -0.112)]
+classes that met the strict >=0.9 gate at baseline and lost it: none
+  gpt-5.6-sol: overall baseline 0.722 -> candidate 0.732 (+0.011) over 14 classes
+  gpt-6-astra: overall baseline 0.791 -> candidate 0.813 (+0.021) over 14 classes

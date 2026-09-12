@@ -1,6 +1,10 @@
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
+import { canonicalJson } from '../../../src/commands/canonical-json';
+import { encounterBranchId, encounterSessionId } from '../../../src/combat/values';
+import type { RoundTurnProposalEnvelope } from '../../../src/vtt/engine-envelopes';
+import { authorizedRoundProposalHashInput } from '../../../tools/ai-dm-conversation';
 import { parseArenaArgs, runArena, type ArenaRow } from '../../../tools/ai-dm-arena';
 import { mkdtempSync } from '../../helpers/test-filesystem';
 
@@ -38,6 +42,45 @@ async function comparison(outPath: string): Promise<readonly ArenaRow[]> {
 }
 
 describe('AI-DM same-room combat-model comparison', () => {
+  it('pins the authorized proposal hash to domain fields and excludes dispatch correlation evidence', () => {
+    const proposal: RoundTurnProposalEnvelope = {
+      kind: 'round_turn_proposal',
+      proposalId: 'round:stable-proposal',
+      runId: encounterSessionId('encounter:stable-run'),
+      branchId: encounterBranchId('branch:stable-branch'),
+      requestId: 'request:stable-request',
+      expectedRevision: 4,
+      stateDigest: 'state-digest',
+      stateHandle: 'state-handle',
+      phase: 'correction',
+      idempotencyKey: 'round-submit:stable-key',
+      resolutions: [],
+      rationale: null,
+      reactionGuidance: null,
+      submittedArguments: { proposals: [] },
+    };
+    const stamped = {
+      ...proposal,
+      dispatchId: 'engine-dispatch:first-runtime-correlation',
+      dispatchProfile: 'dm',
+      dispatchPhase: 'correction',
+    } as const;
+    const input = authorizedRoundProposalHashInput(stamped);
+
+    expect(input).toBe(canonicalJson(proposal));
+    expect(Object.keys(JSON.parse(input) as Readonly<Record<string, unknown>>).sort()).toEqual([
+      'branchId', 'expectedRevision', 'idempotencyKey', 'kind', 'phase', 'proposalId', 'rationale',
+      'reactionGuidance', 'requestId', 'resolutions', 'runId', 'stateDigest', 'stateHandle',
+      'submittedArguments',
+    ]);
+    const restamped = {
+      ...stamped,
+      dispatchId: 'engine-dispatch:second-runtime-correlation',
+    } as const;
+    expect(authorizedRoundProposalHashInput(restamped)).toBe(input);
+    expect(authorizedRoundProposalHashInput({ ...proposal, rationale: 'material change' })).not.toBe(input);
+  });
+
   it('uses one cloned derived-initiative room for a deterministic block/segments A/B', { timeout: 60_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'd416-ai-dm-combat-model-'));
     const first = await comparison(join(directory, 'first.jsonl'));

@@ -2,10 +2,14 @@ import { agentSessionIdFromCli, contextTokenCount, turnInputTotal } from '../age
 import type { AgentInvocation, AgentSessionBinding, AgentTurnResult, AgentUsage } from '../agent-session';
 import {
   AgentAdapterError,
+  agentProcessEvidence,
   completedOutput,
   jsonEventLines,
+  observedInvocationIds,
+  processEventInvocationId,
   ProcessAgentSessionAdapter,
   record,
+  tolerantObservedJsonEvents,
   type AgentAdapterOptions,
   type AgentProcessSpec,
 } from './process';
@@ -44,6 +48,11 @@ const ROUND_PLAN_DM_ENGINE_TOOL_NAMES = DM_ENGINE_TOOL_NAMES.filter((name) =>
   name !== 'engine.submit_plan_adjustment');
 const PLAN_ADJUSTMENT_DM_ENGINE_TOOL_NAMES = DM_ENGINE_TOOL_NAMES.filter((name) =>
   name !== 'engine.propose_from_play' && name !== 'engine.submit_round_proposals');
+const BLIND_ENGINE_TOOL_NAMES = [
+  'engine.get_turn_context',
+  'engine.read_kb_subject',
+  'engine.submit_blind_round_intents',
+] as const;
 
 export function claudeCodeEngineToolName(toolName: string): string {
   return `mcp__engine__${toolName.replaceAll('.', '_')}`;
@@ -51,6 +60,13 @@ export function claudeCodeEngineToolName(toolName: string): string {
 
 export const CLAUDE_ENGINE_TOOLS = Object.freeze(ENGINE_TOOL_NAMES.map(claudeCodeEngineToolName));
 export const CLAUDE_DM_ENGINE_TOOLS = Object.freeze(DM_ENGINE_TOOL_NAMES.map(claudeCodeEngineToolName));
+export const CLAUDE_BLIND_ENGINE_TOOLS = Object.freeze(BLIND_ENGINE_TOOL_NAMES.map(claudeCodeEngineToolName));
+
+function configuredClaudeTools(profile: AgentAdapterOptions['engineToolProfile']): readonly string[] {
+  return profile === 'blind'
+    ? CLAUDE_BLIND_ENGINE_TOOLS
+    : profile === 'dm' ? CLAUDE_DM_ENGINE_TOOLS : CLAUDE_ENGINE_TOOLS;
+}
 
 interface ClaudeDecodedTurn {
   readonly sessionId: string;
@@ -85,7 +101,7 @@ export class ClaudeCodeAgentSessionAdapter extends ProcessAgentSessionAdapter {
       engineArgs: this.engineArgs(invocation.launcherToken),
       instructions: invocation.instructions ?? null,
       sessionId,
-      engineTools: this.options.engineToolProfile === 'dm' ? CLAUDE_DM_ENGINE_TOOLS : CLAUDE_ENGINE_TOOLS,
+      engineTools: configuredClaudeTools(this.options.engineToolProfile),
     }));
   }
 
@@ -100,33 +116,90 @@ export class ClaudeCodeAgentSessionAdapter extends ProcessAgentSessionAdapter {
       signal,
       invocation.timeoutMs,
     );
+    const observedEvents = tolerantObservedJsonEvents(output);
+    const processEvidence = agentProcessEvidence(output, observedEvents.map((entry) => ({
+      invocationId: processEventInvocationId(entry.event),
+      kind: typeof entry.event['type'] === 'string' ? entry.event['type'] : 'unknown',
+      observedAtUnixMs: entry.observedAtUnixMs,
+    })));
+    const partial = decodeClaudeCodeObserved(observedEvents.map((entry) => entry.event), sessionId);
+    const partialResumeSessionId = partial.sessionId === null
+      ? null
+      : agentSessionIdFromCli(partial.sessionId);
     completedOutput(output, sessionId !== null);
-    if (output.cancelled && sessionId !== null) {
+    if (output.timedOut) {
       return {
-        resumeSessionId: agentSessionIdFromCli(sessionId), sessionId: null,
-        finalText: '', usage: null, exit: 'cancelled',
+        resumeSessionId: partialResumeSessionId, sessionId: null,
+        finalText: partial.finalText, usage: partial.usage, exit: 'timed_out', timeoutMs: invocation.timeoutMs ?? 1,
+        processEvidence, engineCatalogEvidence: null,
+        partialResultEvidence: {
+          status: 'partial', decodedEventCount: observedEvents.length,
+          finalTextFragment: partial.finalText, observedUsage: partial.usage,
+          stagedInvocationIds: observedInvocationIds(observedEvents),
+        },
       };
     }
+    if (output.cancelled) return {
+      resumeSessionId: partialResumeSessionId, sessionId: null,
+      finalText: partial.finalText, usage: partial.usage, exit: 'cancelled', cancellationReason: String(signal.reason ?? 'abort_signal'),
+      processEvidence, engineCatalogEvidence: null,
+      partialResultEvidence: {
+        status: 'partial', decodedEventCount: observedEvents.length,
+        finalTextFragment: partial.finalText, observedUsage: partial.usage,
+        stagedInvocationIds: observedInvocationIds(observedEvents),
+      },
+    };
     const decoded = decodeClaudeCodeTurn(
       output.stdout,
       sessionId,
       (event) => this.observe(event),
-      this.options.engineToolProfile === 'dm' ? CLAUDE_DM_ENGINE_TOOLS : CLAUDE_ENGINE_TOOLS,
+      configuredClaudeTools(this.options.engineToolProfile),
       this.options.engineToolProfile === 'dm'
         ? [
             ROUND_PLAN_DM_ENGINE_TOOL_NAMES.map(claudeCodeEngineToolName),
             PLAN_ADJUSTMENT_DM_ENGINE_TOOL_NAMES.map(claudeCodeEngineToolName),
           ]
-        : undefined,
+        : this.options.engineToolProfile === 'blind'
+          ? [BLIND_ENGINE_TOOL_NAMES.map(claudeCodeEngineToolName)]
+          : undefined,
     );
     return {
       resumeSessionId: agentSessionIdFromCli(decoded.sessionId),
       sessionId: null,
       finalText: decoded.finalText,
       usage: decoded.usage,
-      exit: output.cancelled ? 'cancelled' : 'completed',
+      exit: 'completed', processEvidence, engineCatalogEvidence: null,
+      partialResultEvidence: { status: 'complete', decodedEventCount: output.stdoutLines.length },
     };
   }
+}
+
+function decodeClaudeCodeObserved(
+  events: readonly Readonly<Record<string, unknown>>[],
+  priorSessionId: string | null,
+): { readonly sessionId: string | null; readonly finalText: string; readonly usage: AgentUsage | null } {
+  let sessionId = priorSessionId;
+  let finalText = '';
+  let usage: AgentUsage | null = null;
+  for (const event of events) {
+    if (typeof event['session_id'] === 'string' && event['session_id'].length > 0) {
+      sessionId = event['session_id'];
+    }
+    if (event['type'] === 'result' && typeof event['result'] === 'string') finalText = event['result'];
+    const message = record(event['message']);
+    const content = message?.['content'];
+    if (Array.isArray(content)) {
+      const fragments = content.flatMap((part) => {
+        const candidate = record(part);
+        return candidate?.['type'] === 'text' && typeof candidate['text'] === 'string'
+          ? [candidate['text']] : [];
+      });
+      if (fragments.length > 0) finalText = fragments.join('');
+    }
+    const candidate = record(event['usage']);
+    if (candidate !== null) usage = decodeUsage(candidate) ?? usage;
+  }
+  return { sessionId, finalText, usage };
 }
 
 interface ClaudeArgvInput {

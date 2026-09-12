@@ -1,6 +1,6 @@
 import type { CombatantId } from '../combat/values';
-import type { AgentInvocation, AgentTurnResult } from './agent-session';
-import type { AgentDispatchDeadline, AgentSessionLifecycle } from './agent-session-lifecycle';
+import type { AgentInvocation } from './agent-session';
+import type { AgentDispatchDeadline } from './agent-session-lifecycle';
 import type { RoundTurnProposalEnvelope } from './engine-envelopes';
 import type { EngineStateCapsule } from './engine-state-capsule';
 import {
@@ -79,7 +79,12 @@ export interface TurnExhaustionCorrectionRuntime {
   readonly capsule: EngineStateCapsule;
   readonly rules: AllowlistedRulesSource;
   readonly turnContext: unknown;
-  readonly lifecycle: Pick<AgentSessionLifecycle, 'resumeCorrection'>;
+  readonly lifecycle: {
+    resumeCorrection(
+      invocation: AgentInvocation,
+      deadline: AgentDispatchDeadline,
+    ): Promise<CorrectionTurnObservation>;
+  };
   readonly invocation: AgentInvocation;
   /** Makes the correction capsule authoritative before the resume is dispatched. */
   activateCapsule(): void;
@@ -97,7 +102,12 @@ export interface TurnExhaustionEscalationRuntime {
   readonly capsule: EngineStateCapsule;
   readonly rules: AllowlistedRulesSource;
   readonly turnContext: unknown;
-  readonly lifecycle: Pick<AgentSessionLifecycle, 'startEscalation'>;
+  readonly lifecycle: {
+    startEscalation(
+      invocation: AgentInvocation,
+      deadline: AgentDispatchDeadline,
+    ): Promise<CorrectionTurnObservation>;
+  };
   readonly invocation: AgentInvocation;
   activateCapsule(trigger: ProposalEscalationTrigger): void;
   takeProposal(): RoundTurnProposalEnvelope | null;
@@ -118,7 +128,12 @@ export interface TurnExhaustionHost {
   }): void;
 }
 
-function explicitlyRefusedTurn(turn: AgentTurnResult): boolean {
+type CorrectionTurnObservation =
+  | { readonly exit: 'completed'; readonly finalText: string }
+  | { readonly exit: 'cancelled' | 'timed_out' }
+  | { readonly exit: 'infrastructure_failed'; readonly component: 'engine_mcp_startup' };
+
+function explicitlyRefusedTurn(turn: CorrectionTurnObservation): boolean {
   if (turn.exit !== 'completed') return false;
   const text = turn.finalText.trim();
   return /^(?:(?:i|we)\s+)?(?:(?:must|have to)\s+)?(?:refuse|decline)\b/iu.test(text) ||
@@ -140,7 +155,23 @@ export type InitialProposalAttempt =
 export type TurnExhaustionOutcome =
   | { readonly kind: 'authorized'; readonly proposalId: string; readonly phase: 'initial' | 'correction' }
   | { readonly kind: 'auto_resolved'; readonly actorIds: readonly CombatantId[] }
-  | { readonly kind: 'awaiting_dm_adjudication'; readonly actorId: CombatantId };
+  | { readonly kind: 'awaiting_dm_adjudication'; readonly actorId: CombatantId }
+  | {
+      readonly kind: 'refused';
+      readonly reason: 'host_authorization_failed' | 'round_deadline_expired' | 'no_proposal' | 'resolver_rejected' | 'correction_cancelled' | 'correction_timeout';
+      readonly attemptConsumed: true;
+    }
+  | { readonly kind: 'infrastructure_failed'; readonly component: 'engine_mcp_startup' };
+
+function roundDeadlineRefusal(): Extract<TurnExhaustionOutcome, { readonly kind: 'refused' }> {
+  return { kind: 'refused', reason: 'round_deadline_expired', attemptConsumed: true };
+}
+
+export type AuthorizationFailurePolicy =
+  | { readonly kind: 'correct_with_dm_protocol' }
+  | { readonly kind: 'refuse_blind' };
+
+export type CorrectionPromptRenderer = typeof renderEnginePrompt;
 
 export interface ReconstructedTurnExhaustionState {
   readonly requestId: string;
@@ -183,7 +214,10 @@ function validResolutionDigest(digest: string): boolean {
 }
 
 export class TurnExhaustionCoordinator {
-  constructor(private readonly persistence: TurnExhaustionPersistence) {}
+  constructor(
+    private readonly persistence: TurnExhaustionPersistence,
+    private readonly renderCorrection: CorrectionPromptRenderer = renderEnginePrompt,
+  ) {}
 
   reconstruct(requestId: string): ReconstructedTurnExhaustionState | null {
     const transitions = this.persistence.transitions().filter((entry) => entry.requestId === requestId);
@@ -216,9 +250,10 @@ export class TurnExhaustionCoordinator {
   async coordinate(input: {
     readonly initial: InitialProposalAttempt;
     readonly correction: TurnExhaustionCorrectionRuntime;
-    readonly escalation: TurnExhaustionEscalationRuntime | null;
-    readonly deadline: AgentDispatchDeadline;
+    readonly escalation?: TurnExhaustionEscalationRuntime | null;
+    readonly deadline?: AgentDispatchDeadline;
     readonly host: TurnExhaustionHost;
+    readonly authorizationFailurePolicy?: AuthorizationFailurePolicy;
   }): Promise<TurnExhaustionOutcome> {
     if (input.initial.kind === 'proposal') {
       const proposal = input.initial.proposal;
@@ -226,9 +261,10 @@ export class TurnExhaustionCoordinator {
       if (!exactProposalActors(proposal, actors, 'initial')) {
         throw new RangeError('Initial round proposal actors are malformed.');
       }
-      const authorization = input.deadline.acceptsCompletion()
-        ? await input.host.authorize(proposal)
-        : 'invalidated';
+      if (input.deadline?.acceptsCompletion() === false) {
+        return roundDeadlineRefusal();
+      }
+      const authorization = await input.host.authorize(proposal);
       if (authorization === 'authorized') {
         for (const resolution of proposal.resolutions) {
           if (resolution.selectedBranch !== 'fallback') continue;
@@ -242,6 +278,12 @@ export class TurnExhaustionCoordinator {
         }
         return { kind: 'authorized', proposalId: proposal.proposalId, phase: 'initial' };
       }
+      if (input.authorizationFailurePolicy?.kind === 'refuse_blind') {
+        return { kind: 'refused', reason: 'host_authorization_failed', attemptConsumed: true };
+      }
+      if (input.deadline === undefined) {
+        throw new Error('Proposal correction requires a conversation round deadline.');
+      }
       return this.#correctAndResolve({
         requestId: proposal.requestId,
         initialProposalId: proposal.proposalId,
@@ -250,15 +292,27 @@ export class TurnExhaustionCoordinator {
           fallbackResult: authorization === 'invalidated' ? 'invalidated' : 'invalid',
         })),
         correction: input.correction,
-        escalation: input.escalation,
+        escalation: input.escalation ?? null,
         deadline: input.deadline,
         host: input.host,
       });
     }
+    if (input.authorizationFailurePolicy?.kind === 'refuse_blind') {
+      return {
+        kind: 'refused',
+        reason: input.initial.actorFailures.some((failure) => failure.fallbackResult !== 'absent')
+          ? 'resolver_rejected'
+          : 'no_proposal',
+        attemptConsumed: true,
+      };
+    }
+    if (input.deadline === undefined) {
+      throw new Error('Proposal correction requires a conversation round deadline.');
+    }
     return this.#correctAndResolve({
       ...input.initial,
       correction: input.correction,
-      escalation: input.escalation,
+      escalation: input.escalation ?? null,
       deadline: input.deadline,
       host: input.host,
     });
@@ -317,31 +371,62 @@ export class TurnExhaustionCoordinator {
       const directEscalation = input.escalation?.trigger === 'refusal'
         ? input.escalation
         : null;
-      if (input.deadline.acceptsCompletion()) {
-        if (directEscalation === null) {
-          input.correction.activateCapsule();
-          const prompt = correctionPrompt(input.correction);
-          const correctionTurn = await input.correction.lifecycle.resumeCorrection(
-            { ...input.correction.invocation, prompt },
-            input.deadline,
-          );
-          correctionExplicitRefusal = explicitlyRefusedTurn(correctionTurn);
-          if (input.deadline.acceptsCompletion()) correctedProposal = input.correction.takeProposal();
-        } else {
-          directEscalation.activateCapsule('refusal');
-          const prompt = correctionPrompt(directEscalation);
-          await directEscalation.lifecycle.startEscalation(
-            { ...directEscalation.invocation, prompt },
-            input.deadline,
-          );
-          if (input.deadline.acceptsCompletion()) correctedProposal = directEscalation.takeProposal();
+      if (!input.deadline.acceptsCompletion()) return roundDeadlineRefusal();
+      if (directEscalation === null) {
+        input.correction.activateCapsule();
+        const prompt = input.correction.invocation.output.kind === 'structured_final'
+          ? input.correction.invocation.prompt
+          : this.renderCorrection(
+              'correct_proposal',
+              input.correction.capsule,
+              input.correction.rules,
+              undefined,
+              input.correction.turnContext,
+            );
+        const correctionTurn = await input.correction.lifecycle.resumeCorrection(
+          { ...input.correction.invocation, prompt },
+          input.deadline,
+        );
+        switch (correctionTurn.exit) {
+          case 'completed':
+            correctionExplicitRefusal = explicitlyRefusedTurn(correctionTurn);
+            if (!input.deadline.acceptsCompletion()) return roundDeadlineRefusal();
+            correctedProposal = input.correction.takeProposal();
+            break;
+          case 'cancelled':
+            return { kind: 'refused', reason: 'correction_cancelled', attemptConsumed: true };
+          case 'timed_out':
+            return { kind: 'refused', reason: 'correction_timeout', attemptConsumed: true };
+          case 'infrastructure_failed':
+            return { kind: 'infrastructure_failed', component: correctionTurn.component };
+        }
+      } else {
+        directEscalation.activateCapsule('refusal');
+        const prompt = correctionPrompt(directEscalation);
+        const escalationTurn = await directEscalation.lifecycle.startEscalation(
+          { ...directEscalation.invocation, prompt },
+          input.deadline,
+        );
+        switch (escalationTurn.exit) {
+          case 'completed':
+            if (!input.deadline.acceptsCompletion()) return roundDeadlineRefusal();
+            correctedProposal = directEscalation.takeProposal();
+            break;
+          case 'cancelled':
+            return { kind: 'refused', reason: 'correction_cancelled', attemptConsumed: true };
+          case 'timed_out':
+            return { kind: 'refused', reason: 'correction_timeout', attemptConsumed: true };
+          case 'infrastructure_failed':
+            return { kind: 'infrastructure_failed', component: escalationTurn.component };
         }
       }
     } else if (prior.stage !== 'correction_requested') {
       throw new Error(`Proposal exhaustion chain cannot resume from ${prior.stage}.`);
-    } else if (input.deadline.acceptsCompletion()) {
+    } else {
+      if (!input.deadline.acceptsCompletion()) return roundDeadlineRefusal();
       correctedProposal = input.correction.takeProposal();
     }
+    if (!input.deadline.acceptsCompletion()) return roundDeadlineRefusal();
 
     let proposal = correctedProposal;
     if (proposal === null) {
@@ -356,9 +441,8 @@ export class TurnExhaustionCoordinator {
       correctionValidationFailed = true;
     }
     else {
-      const authorization = input.deadline.acceptsCompletion()
-        ? await input.host.authorize(proposal)
-        : 'invalidated';
+      if (!input.deadline.acceptsCompletion()) return roundDeadlineRefusal();
+      const authorization = await input.host.authorize(proposal);
       if (authorization === 'authorized') {
         this.persistence.record({
           kind: 'proposal_correction_resolved',
@@ -378,17 +462,28 @@ export class TurnExhaustionCoordinator {
       : input.escalation?.trigger === 'validation_failures' && correctionValidationFailed
         ? 'validation_failures'
         : null;
-    if (input.escalation !== null && correctionEscalationTrigger !== null &&
-      input.deadline.acceptsCompletion()) {
+    if (input.escalation !== undefined && input.escalation !== null && correctionEscalationTrigger !== null) {
+      if (!input.deadline.acceptsCompletion()) return roundDeadlineRefusal();
       input.escalation.activateCapsule(correctionEscalationTrigger);
       const prompt = correctionPrompt(input.escalation);
-      await input.escalation.lifecycle.startEscalation(
+      const escalationTurn = await input.escalation.lifecycle.startEscalation(
         { ...input.escalation.invocation, prompt },
         input.deadline,
       );
-      proposal = input.deadline.acceptsCompletion() ? input.escalation.takeProposal() : null;
+      switch (escalationTurn.exit) {
+        case 'completed': break;
+        case 'cancelled':
+          return { kind: 'refused', reason: 'correction_cancelled', attemptConsumed: true };
+        case 'timed_out':
+          return { kind: 'refused', reason: 'correction_timeout', attemptConsumed: true };
+        case 'infrastructure_failed':
+          return { kind: 'infrastructure_failed', component: escalationTurn.component };
+      }
+      if (!input.deadline.acceptsCompletion()) return roundDeadlineRefusal();
+      proposal = input.escalation.takeProposal();
+      if (!input.deadline.acceptsCompletion()) return roundDeadlineRefusal();
       if (proposal !== null && proposal.requestId === input.requestId &&
-        exactProposalActors(proposal, actorIds, 'correction') && input.deadline.acceptsCompletion()) {
+        exactProposalActors(proposal, actorIds, 'correction')) {
         const authorization = await input.host.authorize(proposal);
         if (authorization === 'authorized') {
           this.persistence.record({

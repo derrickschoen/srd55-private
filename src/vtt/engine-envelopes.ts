@@ -36,6 +36,8 @@ export interface ProposedTurnResolution {
   readonly selectedBranch: 'primary' | 'fallback';
   readonly resolutionDigest: string;
   readonly summary: string;
+  /** Blind intent resolutions must fail closed if their exact primary offer becomes unavailable. */
+  readonly strictNoFallback?: true;
 }
 
 export interface TurnProposalEnvelope extends EngineProposalBinding {
