@@ -37,6 +37,7 @@ import {
   DeferredMirrorSink,
   EncounterSessionJournal,
   type SessionStore,
+  type SessionHistoryEntry,
   type MirrorSink,
   type SessionResume,
 } from './session-persistence';
@@ -365,6 +366,8 @@ export class DmEncounterHost {
   readonly #reactionOfferPolicy: ReactionOfferHostPolicy;
   readonly #onReducerInvocation: (command: EncounterCommand) => void;
   readonly #offerEnvironment: EngineOptionEnvironment;
+  #detachedHistorySource: readonly SessionHistoryEntry[] | null = null;
+  #detachedHistory: readonly SessionHistoryEntry[] = Object.freeze([]);
 
   constructor(
     sessionKey: string,
@@ -560,20 +563,51 @@ export class DmEncounterHost {
       coordinator,
       this.#journal.partyState(),
     );
-    return detachedImmutable({
-      dm: projectDmBoard({
-        view: projectDmView(state),
-        coordinator,
-        controllers: this.#registry.identities(),
-        history,
-        partyState: this.#journal.partyState(),
-        boundaryRefusal: this.#boundaryRefusal,
-        actionRefusal: this.#actionRefusal,
-        adjudicationPrompts: this.#adjudicationPrompts,
-        engineAdjudications: this.#engineAdjudications,
-      }),
-      player: this.#closed ? { ...player, authorityStatus: 'hard_paused' } : player,
+    const projectedDm = projectDmBoard({
+      view: projectDmView(state),
+      coordinator,
+      controllers: this.#registry.identities(),
+      history,
+      partyState: this.#journal.partyState(),
+      boundaryRefusal: this.#boundaryRefusal,
+      actionRefusal: this.#actionRefusal,
+      adjudicationPrompts: this.#adjudicationPrompts,
+      engineAdjudications: this.#engineAdjudications,
     });
+    const { history: _authorityHistory, ...dmWithoutHistory } = projectedDm;
+    const dm = Object.freeze({
+      ...detachedImmutable(dmWithoutHistory),
+      history: this.#detachedHistoryProjection(history),
+    });
+    const projectedPlayer: PlayerBoardProjection = this.#closed
+      ? { ...player, authorityStatus: 'hard_paused' }
+      : player;
+    return Object.freeze({
+      dm,
+      player: detachedImmutable(projectedPlayer),
+    });
+  }
+
+  #detachedHistoryProjection(history: readonly SessionHistoryEntry[]): readonly SessionHistoryEntry[] {
+    if (history === this.#detachedHistorySource) return this.#detachedHistory;
+    const suffix = history.slice(this.#detachedHistory.length);
+    let expectedParent = this.#detachedHistory.at(-1)?.revision ?? null;
+    const isLinearAppend = suffix.length > 0 && suffix.every((entry) => {
+      const matches = entry.parentRevision === expectedParent;
+      expectedParent = entry.revision;
+      return matches;
+    });
+    if (!isLinearAppend) {
+      this.#detachedHistory = detachedImmutable(history);
+      this.#detachedHistorySource = history;
+      return this.#detachedHistory;
+    }
+    this.#detachedHistory = Object.freeze([
+      ...this.#detachedHistory,
+      ...detachedImmutable(suffix),
+    ]);
+    this.#detachedHistorySource = history;
+    return this.#detachedHistory;
   }
 
   playerSnapshot(binding: PlayerSeatBinding): PlayerBoardProjection {
