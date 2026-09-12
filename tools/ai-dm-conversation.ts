@@ -1,5 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { appendFileSync, readFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { appendFileSync, closeSync, fsyncSync, openSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { appendFile, copyFile, mkdir, mkdtemp, readdir, readFile, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative, resolve } from 'node:path';
@@ -16,13 +17,23 @@ import {
 } from '../src/combat/values';
 import { sha256 } from '../src/crypto/sha256';
 import {
-  agentCallUsage, turnInputTotal,
+  agentCallUsage, engineDispatchId, turnInputTotal,
   AGENT_SKILL_NAMES,
   type AgentCallPhase, type AgentCallUsage,
   type AgentAdapterKind, type AgentCliKind, type AgentFailureClassification, type AgentInvocation, type AgentSessionAdapter,
   type AgentInvocationOutput, type AgentSessionBinding, type AgentToolSession, type AgentTurnResult, type AgentUsage,
   type AgentInstructionSource, type AgentSkillName, type ContextRolloverPolicy, type FreshSessionContext,
+  type EngineCatalogEvidence,
 } from '../src/vtt/agent-session';
+import { D569IntegrityStop, type D569DispatchIntegrityArtifact } from '../src/vtt/d569-integrity';
+import {
+  classifyTurnContextDelivery,
+  d569DeliveryHasIntegritySignal,
+  type HostContextDiagnostic,
+  type TurnContextConfiguredCaps,
+  type TurnContextDelivery,
+  type TurnContextMeasurement,
+} from '../src/vtt/turn-context-delivery';
 import {
   AgentDispatchDeadlineExceededError,
   AgentSessionLifecycle,
@@ -105,6 +116,7 @@ import type {
 import {
   DEFAULT_OVERRIDE_POLICY,
   OVERRIDE_POLICIES,
+  renderBlindEnginePrompt,
   renderEnginePrompt,
   SEMANTIC_BOARD_MAX_BYTES,
   TURN_CONTEXT_MAX_BYTES,
@@ -182,6 +194,7 @@ import { readRepoCommit } from './rl/repo-commit';
 import {
   DEFAULT_RENDERER_PROFILE,
   RENDERER_POLICY_VERSION,
+  extractCircumstanceFeatures,
   rendererProfileSchema,
   type CircumstanceFeatureVector,
   type RendererProfile,
@@ -190,6 +203,7 @@ import {
 import type { SemanticBoardTruncationClass } from '../src/vtt/semantic-board-payload';
 import {
   DEFAULT_AI_DM_KB_ROOT,
+  D569_AI_DM_KB_ROOT,
   loadAiDmKnowledgeBase,
   type LoadedAiDmKnowledgeBase,
 } from '../src/vtt/knowledge-base-contract';
@@ -201,6 +215,38 @@ import {
   type KbReadRecord,
   type KbSubjectSources,
 } from '../src/vtt/mcp/knowledge-base';
+import {
+  BLIND_INTENT_VERSION,
+  BLIND_MAX_ATTEMPTS_DEFAULT,
+  BLIND_REPAIR_ARMS,
+  blindMaxAttemptsSchema,
+  blindRoundIntentEnvelopeSchema,
+  type BlindIntent,
+  type BlindIntentRejectionCode,
+  type BlindMaxAttempts,
+  type BlindRepairArm,
+  type DmMode,
+} from '../src/vtt/blind-dm-contract';
+import {
+  BLIND_SEMANTIC_BOARD_MAX_BYTES,
+  BLIND_TURN_CONTEXT_MAX_BYTES,
+  type BlindTurnContextBudgetEvidence,
+  type BlindVisualDescriptor,
+} from '../src/vtt/blind-turn-context';
+import {
+  BlindModelIngressRecorder,
+  auditBlindIngress,
+  type BlindIngressAudit,
+  type BlindIngressRecord,
+} from '../src/vtt/blind-model-ingress';
+import type { BlindIntentSubmissionRecord } from '../src/vtt/mcp/engine-server';
+import {
+  BLIND_STATE_PRIMER_VERSION,
+} from './ai-dm-board-snapshot';
+import {
+  BOARD_GLYPH_PRIMER,
+  GENERAL_PRIMER,
+} from './ai-dm-screenshot-probe';
 
 export const CONVERSATION_CLIS = ['codex', 'claude-code', 'local-openai'] as const;
 export type ConversationCli = (typeof CONVERSATION_CLIS)[number];
@@ -233,6 +279,12 @@ export interface ConversationBoardSnapshotService {
 }
 
 interface ConversationConfigBase {
+  readonly dmMode: DmMode;
+  readonly dmModeExplicit: boolean;
+  readonly blindRepairArm: BlindRepairArm;
+  readonly blindMaxAttempts: BlindMaxAttempts;
+  readonly blindFacts: boolean;
+  readonly midRoundAdjustmentsEnabled: boolean;
   readonly intelMode: IntelMode;
   readonly overridePolicy: OverridePolicy;
   readonly rendererProfile: RendererProfile;
@@ -259,6 +311,7 @@ interface ConversationConfigBase {
   readonly captureRlData: boolean;
   readonly localOpenAi: LocalOpenAiConfig | null;
   readonly boardImageMode: BoardImageMode;
+  readonly scheduledCellKey?: string;
 }
 
 export type ConversationConfig = ConversationConfigBase & AgentInstructionSource;
@@ -451,9 +504,11 @@ interface SpeculativeDispatchCompletion {
   readonly planningWallMs: number;
   readonly timedOut: boolean;
   readonly error: string | null;
+  readonly failingDispatch: NonNullable<ConversationRowBase['failingDispatch']> | null;
 }
 
 interface InFlightSpeculation {
+  readonly dispatchId: import('../src/vtt/agent-session').EngineDispatchId;
   readonly sourceSnapshot: EngineRoundSnapshot;
   readonly sourceTurnContext: TurnContextDeltaBase;
   readonly targetActorIds: readonly CombatantId[];
@@ -492,7 +547,13 @@ export type ConversationFallbackReason =
   | 'no_proposal'
   | 'validation_exhausted'
   | 'auto_submit_blocked'
-  | 'timeout';
+  | 'timeout'
+  | 'host_authorization_failed'
+  | 'round_deadline_expired'
+  | 'resolver_rejected'
+  | 'correction_cancelled'
+  | 'correction_timeout'
+  | 'dispatch_cancelled';
 
 export type ConversationTerminalOutcome = {
   readonly kind: 'encounter_over';
@@ -530,7 +591,100 @@ export interface ConversationBoardImageEvidence {
   readonly chromiumVersion: string;
 }
 
+export interface ConversationBlindAttempt {
+  readonly number: number;
+  readonly intentText: string;
+  readonly parsedIntents: readonly BlindIntent[] | null;
+  readonly startedAtOffsetMs: number;
+  readonly endedAtOffsetMs: number;
+  readonly modelWallMs: number;
+  readonly modelFirstTokenMs: number | null;
+  readonly resolverLatencyMs: number;
+  readonly resolverOutcome: 'accepted' | 'rejected';
+  readonly codes: readonly BlindIntentRejectionCode[];
+  readonly hintExposed: boolean;
+}
+
+export interface ConversationVisualProfile {
+  readonly primerVersion: string;
+  readonly images: readonly {
+    readonly role: 'dm_board' | 'accessible_board_raster' | 'player_board';
+    readonly sha256: string;
+    readonly ordinal: number;
+  }[];
+  readonly glyphMode: string;
+  readonly captureTilePx: number;
+  readonly perImageCaptureLatencyMs: readonly number[];
+  readonly totalImageCaptureLatencyMs: number;
+}
+
+export interface ConversationProjectionEvidence {
+  readonly projectionVersion: string;
+  readonly sha256: string;
+  readonly utf8Bytes: number;
+}
+
+export interface ConversationBlindRowEvidence {
+  readonly dmMode: DmMode;
+  readonly blindFacts: boolean;
+  readonly midRoundAdjustmentsEnabled: false;
+  readonly blindContextVersion: 'blind-turn-context-v1';
+  readonly blindIntentVersion: typeof BLIND_INTENT_VERSION;
+  readonly blindRepairArm: BlindRepairArm;
+  readonly blindMaxAttempts: BlindMaxAttempts;
+  readonly blindIntentText: string | null;
+  readonly blindIntents: readonly BlindIntent[] | null;
+  readonly blindResolverOutcome: readonly {
+    readonly actor: { readonly name: string; readonly badge: number };
+    readonly status: 'accepted' | 'rejected';
+    readonly semanticDigest: string | null;
+  }[];
+  readonly blindRejectionCodes: readonly BlindIntentRejectionCode[];
+  readonly blindAttempts: readonly ConversationBlindAttempt[];
+  readonly blindResolverLatencyMs: number;
+  readonly blindIngressAudit: BlindIngressAudit;
+  readonly visualProfile: ConversationVisualProfile;
+  readonly sharedKbComponentHashes: Readonly<Record<string, string>>;
+  readonly semanticBoardEvidence: null | {
+    readonly format: string;
+    readonly sha256: string;
+    readonly utf8Bytes: number;
+    readonly omittedBlocks: readonly ['reach_range_summaries'];
+  };
+  readonly creatureFactsEvidence: ConversationProjectionEvidence & {
+    readonly sourceIds: readonly string[];
+  };
+  readonly legalMovementEvidence: ConversationProjectionEvidence & {
+    readonly stateDigest: string;
+    readonly actorCellCounts: readonly { readonly name: string; readonly badge: number; readonly cells: number }[];
+  };
+  readonly turnContextBudget: BlindTurnContextBudgetEvidence;
+  readonly blindPrivateAnswerKey: {
+    readonly selectedOfferedIds: readonly string[];
+    readonly semanticDigests: readonly string[];
+    readonly catalogDigest: string;
+    readonly engineTopRecommendationIds: readonly string[];
+    readonly engineTopPolicyVersion: string;
+    readonly blindDiffersFromEngineTop: boolean | null;
+  };
+}
+
 interface ConversationRowBase {
+  readonly rowContractVersion?: 'arena-row-v3';
+  readonly scheduledCellKey?: string;
+  readonly dispatchId?: string;
+  readonly engineCatalogEvidence?: EngineCatalogEvidence;
+  readonly turnContextDelivery?: TurnContextDelivery;
+  readonly turnContextConfiguredCaps?: TurnContextConfiguredCaps;
+  readonly hostContextDiagnostic?: HostContextDiagnostic;
+  readonly failingDispatch?: {
+    readonly phase: 'primary' | 'correction' | 'adjustment' | 'speculative' | 'speculation_recalculation';
+    readonly exit: 'cancelled' | 'infrastructure_failed';
+    readonly dispatchId: string;
+    readonly engineCatalogEvidence: EngineCatalogEvidence;
+    readonly turnContextDelivery: TurnContextDelivery;
+    readonly failureReason: string;
+  };
   readonly knowledgeModel: 'engine_state';
   readonly hiddenOptions: readonly HiddenOptionRecord[];
   readonly intelMode: IntelMode;
@@ -540,8 +694,8 @@ interface ConversationRowBase {
     readonly policyVersion: typeof RENDERER_POLICY_VERSION;
     readonly profile: RendererProfile;
   };
-  readonly baseContextBytes: number;
-  readonly semanticBoardBytes: number;
+  readonly baseContextBytes: number | null;
+  readonly semanticBoardBytes: number | null;
   readonly semanticBoardTruncated: readonly SemanticBoardTruncationClass[];
   readonly circumstanceFeatures: CircumstanceFeatureVector;
   readonly combatModel: CombatModel;
@@ -567,18 +721,18 @@ interface ConversationRowBase {
   readonly skillHash: string | null;
   readonly kbReads: readonly KbReadRecord[];
   readonly repoCommit: string;
-  readonly rawTurnContext: string;
+  readonly rawTurnContext: string | null;
   readonly turnContextMaximumBytes: number;
-  readonly preTrimBytes: number;
-  readonly postTrimBytes: number;
+  readonly preTrimBytes: number | null;
+  readonly postTrimBytes: number | null;
   readonly optionsOmittedForSize: number;
   readonly optionsOmittedForSizeByActor: readonly TurnContextSizeOmission[];
-  readonly turnContextGranularity: 'full' | 'turn_delta';
+  readonly turnContextGranularity: 'full' | 'turn_delta' | null;
   readonly snippetHash: string;
   readonly snippetSetHash: string;
   readonly suggestedPlay: ConversationSuggestedPlay | null;
   readonly suggestionAdopted: ConversationSuggestionAdoption | null;
-  readonly outcome: 'authorized' | 'auto_resolved' | 'awaiting_dm_adjudication' | 'refused' | 'service_null' | 'local_error' | 'execution_failed' | 'partial_execution';
+  readonly outcome: 'authorized' | 'auto_resolved' | 'awaiting_dm_adjudication' | 'refused' | 'service_null' | 'local_error' | 'execution_failed' | 'partial_execution' | 'infrastructure_failed' | 'integrity_indeterminate';
   readonly executionErrorClass: ConversationExecutionErrorClass | null;
   readonly proposalId: string | null;
   readonly timeToFirstAction: number;
@@ -665,10 +819,16 @@ export type ConversationBoardImageFields =
       readonly boardImageEvidence: ConversationBoardImageEvidence;
     };
 
-export type ConversationRow = ConversationRowBase & ConversationBoardImageFields;
+export type ConversationRow = ConversationRowBase & ConversationBoardImageFields &
+  Partial<ConversationBlindRowEvidence>;
 
 /** The complete row shape written by the conversation runner. */
 export type ConversationRowPersisted = ConversationRow;
+
+/** Exact JSONL payload for one persisted conversation row. */
+export function serializeConversationRow(row: ConversationRowPersisted): string {
+  return JSON.stringify(row);
+}
 
 export interface ConversationPlannerAttribution {
   readonly model: string;
@@ -707,6 +867,8 @@ export interface TurnContextRenderEvidence {
 }
 
 export interface ConversationRunOptions {
+  readonly repoCommit?: string;
+  readonly clock?: () => number;
   readonly roomStates?: readonly EncounterState[];
   readonly store?: BrowserSessionStore;
   readonly adapter?: AgentSessionAdapter;
@@ -717,11 +879,17 @@ export interface ConversationRunOptions {
   readonly onPrimaryDispatchStart?: () => void;
   /** Test evidence seam for exact model-facing primary invocation bytes. */
   readonly onPrimaryInvocation?: (invocation: AgentInvocation) => void;
+  /** Test evidence seam for the immutable invocation emitted at every runner phase. */
+  readonly onAgentInvocation?: (invocation: AgentInvocation) => void;
   readonly onSpeculationDispatchStart?: () => void;
   /** Test-only lower pacing cap; production derives 60 seconds per eligible PC, capped at five minutes. */
   readonly speculationBudgetMs?: number;
   /** SIMULATED-only delay injected before speculative dispatch. */
   readonly speculationDispatchDelayMs?: number;
+  /** Test-only delay for deterministic in-process SIMULATED dispatches; omitted keeps real MCP children. */
+  readonly simulatedInProcessDispatchDelayMs?: number;
+  /** Test-only seam that deterministically exercises the post-speculation recalculation transition. */
+  readonly forceSpeculationRecalculationForTest?: boolean;
   /** SIMULATED-only immutable state replacement immediately before speculative boundary validation. */
   readonly mutateBeforeSpeculationBoundary?: (state: EncounterState) => EncounterState;
   /** Test-only branch control that exercises the full speculative recalculation dispatch. */
@@ -743,6 +911,22 @@ export interface ConversationRunOptions {
   readonly invalidInitial?: readonly string[];
   /** SIMULATED-only cancelled initial dispatches, encoded as `room-N-round-N`. */
   readonly timeoutInitial?: readonly string[];
+  /** SIMULATED-only adjustment dispatch that stages evidence before timing out. */
+  readonly stagedAdjustmentTimeout?: readonly string[];
+  /** SIMULATED-only adjustment correction that stages evidence before timing out. */
+  readonly stagedAdjustmentCorrectionTimeout?: readonly string[];
+  /** SIMULATED-only speculative dispatch that stages evidence before timing out. */
+  readonly stagedSpeculationTimeout?: boolean;
+  /** SIMULATED-only recalculation dispatch that stages evidence before engine startup failure. */
+  readonly failSpeculationRecalculation?: boolean;
+  /** SIMULATED-adapter injection of a returned required-engine infrastructure failure. */
+  readonly failSpeculationInfrastructure?: boolean;
+  /** Test-only join controls for end-of-round and exception-cleanup transition coverage. */
+  readonly endRoundAfterSpeculationStartForTest?: boolean;
+  readonly failAfterSpeculationStartForTest?: boolean;
+  readonly onInitiativeIterationForTest?: () => void;
+  /** Test-only forensic ingress appended immediately before the final blind audit. */
+  readonly blindIngressAuditProbeText?: string;
   readonly failCorrection?: readonly string[];
   /** SIMULATED-only count of consecutive service-null primary turns by request key. */
   readonly flapPrimaryByRequest?: Readonly<Record<string, number>>;
@@ -774,6 +958,14 @@ export interface ConversationRunOptions {
   ) => ConversationPlannerAttribution;
   /** Test-only boundary immediately after speculative branch validation. */
   readonly onSpeculationAdoptionValidated?: () => void;
+  /** Test-only boundary after the primary adapter result is observed. */
+  readonly onPrimaryResultObservedForTest?: (turn: AgentTurnResult) => void;
+  /** Test-only boundary after the adjustment adapter result is observed. */
+  readonly onAdjustmentResultObservedForTest?: (turn: AgentTurnResult) => void;
+  /** Test-only boundary after the speculative adapter result is observed. */
+  readonly onSpeculationResultObservedForTest?: (turn: AgentTurnResult) => void;
+  /** Test-only boundary after the recalculation adapter result is observed. */
+  readonly onSpeculationRecalculationResultObservedForTest?: (turn: AgentTurnResult) => void;
   /** Test-only boundary after speculative recalculation mechanics and actor-set validation. */
   readonly onSpeculationRecalculationValidated?: (
     entries: readonly SegmentMonsterPlanEntry[],
@@ -791,6 +983,17 @@ export function boardImageOutputDirectory(
 ): string {
   const identity = sha256(resolve(config.outPath)).slice(0, 20);
   return resolve(config.cwd, 'dnd-slim-runs', `board-capture-${identity}-images`);
+}
+
+function blindVisualDescriptors(artifact: BoardImageArtifact | null): readonly BlindVisualDescriptor[] {
+  const blind = artifact?.blindState;
+  return blind === undefined ? [] : [{
+    kind: blind.role,
+    ordinal: blind.ordinal,
+    primer_version: blind.primerVersion,
+    glyph_mode: blind.glyphMode,
+    capture_tile_px: blind.captureTilePx,
+  }];
 }
 
 function requiredValue(argv: readonly string[], index: number, option: string): string {
@@ -868,6 +1071,7 @@ export function parseConversationArgs(argv: readonly string[], cwd = process.cwd
       '--renderer-profile',
       '--turn-context-max-bytes',
       '--board-image',
+      '--dm-mode', '--blind-repair-arm', '--blind-max-attempts', '--blind-facts',
       '--local-base-url', '--local-model', '--local-api-key', '--local-think',
     ].includes(option ?? '')) throw new TypeError(`Unknown conversation option ${option ?? '<missing>'}.`);
     values.set(option ?? '', requiredValue(argv, index, option ?? '<missing>'));
@@ -876,6 +1080,15 @@ export function parseConversationArgs(argv: readonly string[], cwd = process.cwd
   const outPath = resolve(values.get('--out') ?? '');
   if ((values.get('--out') ?? '').length === 0) throw new TypeError('--out is required.');
   if (pathIsInside(cwd, outPath)) throw new TypeError('--out must be outside the repository working tree.');
+  const dmModeExplicit = values.has('--dm-mode');
+  const dmMode = values.get('--dm-mode') ?? 'advice';
+  if (dmMode !== 'advice' && dmMode !== 'blind') {
+    throw new TypeError('--dm-mode must be advice or blind.');
+  }
+  if (dmModeExplicit && !values.has('--instruction-source') && !values.has('--kb')) {
+    values.set('--instruction-source', 'kb');
+    values.set('--kb', D569_AI_DM_KB_ROOT);
+  }
   const effort = values.get('--effort') ?? 'medium';
   if (!CONVERSATION_EFFORTS.includes(effort as ConversationEffort)) {
     throw new TypeError('--effort must be low, medium, high, or xhigh.');
@@ -948,10 +1161,12 @@ export function parseConversationArgs(argv: readonly string[], cwd = process.cwd
     ? rendererProfileSchema.parse(JSON.parse(values.get('--renderer-profile') ?? ''))
     : DEFAULT_RENDERER_PROFILE;
   const turnContextMaximumBytes = positiveInteger(
-    values.get('--turn-context-max-bytes') ?? String(TURN_CONTEXT_MAX_BYTES),
+    values.get('--turn-context-max-bytes') ?? String(dmMode === 'blind'
+      ? BLIND_TURN_CONTEXT_MAX_BYTES
+      : TURN_CONTEXT_MAX_BYTES),
     '--turn-context-max-bytes',
   );
-  const boardImageMode = values.get('--board-image') ?? 'off';
+  const boardImageMode = values.get('--board-image') ?? (dmModeExplicit ? 'png' : 'off');
   if (!BOARD_IMAGE_MODES.includes(boardImageMode as BoardImageMode)) {
     throw new TypeError('--board-image must be off, png, or capture_only.');
   }
@@ -961,7 +1176,41 @@ export function parseConversationArgs(argv: readonly string[], cwd = process.cwd
   if (boardImageMode === 'png' && transport !== 'mcp_minimal') {
     throw new TypeError('--board-image png requires --transport mcp_minimal.');
   }
+  const blindRepairArm = values.get('--blind-repair-arm') ?? 'code_only';
+  if (!BLIND_REPAIR_ARMS.includes(blindRepairArm as BlindRepairArm)) {
+    throw new TypeError('--blind-repair-arm must be code_only or minimal_legal_alternative.');
+  }
+  const blindMaxAttempts = blindMaxAttemptsSchema.parse(
+    values.has('--blind-max-attempts')
+      ? positiveInteger(values.get('--blind-max-attempts') ?? '', '--blind-max-attempts')
+      : undefined,
+  );
+  const blindFactsValue = values.get('--blind-facts') ?? 'off';
+  if (blindFactsValue !== 'on' && blindFactsValue !== 'off') {
+    throw new TypeError('--blind-facts must be on or off.');
+  }
+  if (dmMode !== 'blind' && (values.has('--blind-repair-arm') ||
+    values.has('--blind-max-attempts') || values.has('--blind-facts'))) {
+    throw new TypeError('Blind repair, attempt, and fact options require --dm-mode blind.');
+  }
+  if (dmMode === 'blind' && (transport !== 'mcp_minimal' || boardImageMode !== 'png' ||
+    turnContextMaximumBytes !== BLIND_TURN_CONTEXT_MAX_BYTES)) {
+    throw new TypeError('Blind mode requires MCP-minimal, PNG delivery, and a 65536-byte base cap.');
+  }
+  if (dmModeExplicit && (escalationModel !== null || escalationEffort !== null || captureRlData)) {
+    throw new TypeError('D569 experiment modes prohibit escalation and RL capture.');
+  }
+  if (dmModeExplicit && (instructionSource.instructionSource !== 'kb' ||
+    instructionSource.kbPath !== resolve(cwd, D569_AI_DM_KB_ROOT))) {
+    throw new TypeError('Explicit D569 DM modes require the shared D570 knowledge bundle.');
+  }
   return {
+    dmMode: dmMode as DmMode,
+    dmModeExplicit,
+    blindRepairArm: blindRepairArm as BlindRepairArm,
+    blindMaxAttempts,
+    blindFacts: blindFactsValue === 'on',
+    midRoundAdjustmentsEnabled: !dmModeExplicit,
     intelMode,
     overridePolicy: overridePolicy as OverridePolicy,
     rendererProfile,
@@ -982,7 +1231,7 @@ export function parseConversationArgs(argv: readonly string[], cwd = process.cwd
     dryRun,
     cwd: resolve(cwd),
     cliBin: values.get('--cli-bin') ?? (selectedCli === 'codex' ? 'codex' : selectedCli === 'claude-code' ? 'claude' : ''),
-    timeoutMs: positiveInteger(values.get('--timeout-ms') ?? '120000', '--timeout-ms'),
+    timeoutMs: positiveInteger(values.get('--timeout-ms') ?? (dmModeExplicit ? '240000' : '120000'), '--timeout-ms'),
     roundWallMs: 180_000,
     ...instructionSource,
     reactionAskDefault,
@@ -1157,6 +1406,7 @@ interface SegmentMonsterPlanEntry {
   readonly fallbackOption: EngineOfferableOption | null;
   readonly mechanics: ResolvedTurnMechanics;
   readonly selectedBranch: 'primary' | 'fallback';
+  readonly strictNoFallback?: true;
 }
 
 type ExhaustionPlannerLabel = 'engine_default' | 'sim_controller';
@@ -1931,11 +2181,82 @@ function capturedTurnContext(raw: string, maximumBytes: number): CapturedTurnCon
   return { raw: modelVisibleRaw, granularity, value };
 }
 
+function deliveredTurnContextMeasurement(context: CapturedTurnContext): TurnContextMeasurement {
+  const proseDocument =
+    (context.value['format'] === 'caveman_prose' || context.value['format'] === 'regular_prose') &&
+    typeof context.value['document'] === 'string';
+  if (proseDocument) {
+    return {
+      baseBytes: new TextEncoder().encode(context.raw).byteLength,
+      semanticBytes: 0,
+    };
+  }
+  const base = structuredClone(context.value) as Record<string, unknown>;
+  const semantic = base['semantic_board'];
+  delete base['semantic_board'];
+  delete base['semantic_board_truncated'];
+  return {
+    baseBytes: new TextEncoder().encode(JSON.stringify(base)).byteLength,
+    semanticBytes: semantic === undefined
+      ? 0
+      : new TextEncoder().encode(JSON.stringify(semantic)).byteLength,
+  };
+}
+
+function blindRendererEvidence(
+  state: EncounterState,
+  capsule: EngineStateCapsule,
+  context: CapturedTurnContext,
+): TurnContextRenderEvidence {
+  const base = structuredClone(context.value) as Record<string, unknown>;
+  const semantic = base['semantic_board'];
+  delete base['semantic_board'];
+  const baseContextBytes = new TextEncoder().encode(JSON.stringify(base)).byteLength;
+  const semanticBoardBytes = semantic === undefined
+    ? 0
+    : new TextEncoder().encode(JSON.stringify(semantic)).byteLength;
+  return {
+    preTrimBytes: baseContextBytes,
+    postTrimBytes: baseContextBytes,
+    baseContextBytes,
+    features: extractCircumstanceFeatures({
+      state,
+      capsule,
+      renderedContext: context.value,
+      granularity: 'full',
+      preTrimBytes: baseContextBytes,
+      postTrimBytes: baseContextBytes,
+    }),
+    removals: { rows: 0, options: 0, threats: 0, movement: 0, rare: 0, adverts: 0, topLevel: 0 },
+    optionsOmittedForSizeByActor: [],
+    semanticBoardBytes,
+    semanticBoardTruncated: [],
+  };
+}
+
 function unrequestedTurnContext(maximumBytes: number): CapturedTurnContext {
   return capturedTurnContext(JSON.stringify({
     granularity: 'full',
     context_not_requested: true,
   }), maximumBytes);
+}
+
+export function profiledTurnContextArguments(input: {
+  readonly runId: string;
+  readonly expectedRevision: number;
+  readonly intelMode: IntelMode;
+  readonly blind: boolean;
+  readonly baseRevision?: number;
+}): Readonly<Record<string, unknown>> {
+  return {
+    run_id: input.runId,
+    expected_revision: input.expectedRevision,
+    scope: 'round',
+    ...(input.blind ? {} : { intel_mode: input.intelMode }),
+    ...(input.baseRevision === undefined
+      ? { granularity: 'full' }
+      : { granularity: 'turn_delta', since_revision: input.baseRevision }),
+  };
 }
 
 function plannedTurnContext(
@@ -1945,6 +2266,12 @@ function plannedTurnContext(
   intelMode: IntelMode,
   rendererProfile: RendererProfile,
   turnContextMaximumBytes: number,
+  blind?: {
+    readonly repairArm: BlindRepairArm;
+    readonly maxAttempts: BlindMaxAttempts;
+    readonly facts: boolean;
+    readonly visuals: readonly BlindVisualDescriptor[];
+  },
 ): CapturedTurnContext {
   const capsule = snapshot.capsule;
   const request = capsule.request;
@@ -1981,22 +2308,27 @@ function plannedTurnContext(
       adjustmentBudget: request.adjustmentBudget,
       },
     } : { requestedActorIds: request.actors }),
-    toolProfile: 'dm',
+    toolProfile: blind === undefined ? 'dm' : 'blind',
+    ...(blind === undefined ? {} : {
+      dmMode: 'blind' as const,
+      blindRepairArm: blind.repairArm,
+      blindMaxAttempts: blind.maxAttempts,
+      blindFacts: blind.facts,
+      blindVisuals: blind.visuals,
+    }),
     rendererProfile,
     turnContextMaximumBytes,
     onTurnContextRendered: (value) => { rendering = value; },
     initiativeProjection: capsule.projection.initiative,
-    ...(base === undefined ? {} : { turnContextDeltaBase: base }),
+    ...(base === undefined || blind !== undefined ? {} : { turnContextDeltaBase: base }),
   });
-  const value = runtime.toolSurface.execute('engine.get_turn_context', {
-    run_id: capsule.runId,
-    expected_revision: capsule.revision,
-    scope: 'round',
-    intel_mode: intelMode,
-    ...(base === undefined
-      ? { granularity: 'full' }
-      : { granularity: 'turn_delta', since_revision: base.revision }),
-  });
+  const value = runtime.toolSurface.execute('engine.get_turn_context', profiledTurnContextArguments({
+    runId: capsule.runId,
+    expectedRevision: capsule.revision,
+    intelMode,
+    blind: blind !== undefined,
+    ...(base === undefined || blind !== undefined ? {} : { baseRevision: base.revision }),
+  }));
   return {
     ...capturedTurnContext(JSON.stringify(value), turnContextMaximumBytes),
     ...(rendering === undefined ? {} : { rendering }),
@@ -2007,7 +2339,101 @@ function takeTurnContext(path: string, maximumBytes: number): CapturedTurnContex
   let source: string;
   try { source = readFileSync(path, 'utf8'); } catch { return null; }
   const raw = source.split('\n').filter((line) => line.trim().length > 0).at(-1);
-  return raw === undefined ? null : capturedTurnContext(raw, maximumBytes);
+  return raw === undefined ? null : capturedTurnContext(contextPayload(raw), maximumBytes);
+}
+
+function contextPayload(raw: string): string {
+  const value: unknown = JSON.parse(raw);
+  const record = requiredRecord(value, 'turn-context spool record');
+  const {
+    dispatchId: _dispatchId,
+    dispatchProfile: _dispatchProfile,
+    dispatchPhase: _dispatchPhase,
+    ...context
+  } = record;
+  return JSON.stringify(context);
+}
+
+function takeCorrelatedTurnContext(
+  path: string,
+  maximumBytes: number,
+  dispatchId: string,
+): CapturedTurnContext | null {
+  let source: string;
+  try { source = readFileSync(path, 'utf8'); } catch { return null; }
+  const raw = source.split('\n').filter((line) => line.trim().length > 0).findLast((line) => {
+    const value: unknown = JSON.parse(line);
+    return asRecord(value)?.['dispatchId'] === dispatchId;
+  });
+  return raw === undefined ? null : capturedTurnContext(contextPayload(raw), maximumBytes);
+}
+
+function spoolEvidence(path: string): { readonly recordCount: number; readonly sha256: string } {
+  let source = '';
+  try { source = readFileSync(path, 'utf8'); } catch { /* an absent spool is the empty spool */ }
+  return {
+    recordCount: source.split('\n').filter((line) => line.trim().length > 0).length,
+    sha256: sha256(source),
+  };
+}
+
+export function persistD569IntegrityStop(input: {
+  readonly artifactPath: string;
+  readonly rowPath: string;
+  readonly scheduledCellKey: string;
+  readonly launcherPath: string;
+  readonly proposalSpoolPath: string;
+  readonly contextSpoolPath: string;
+  readonly catalogEvidence: EngineCatalogEvidence;
+  readonly delivery: Extract<TurnContextDelivery, { readonly status: 'delivered' | 'indeterminate' }>;
+  readonly turn: AgentTurnResult;
+}): never {
+  if (input.turn.processEvidence === null) {
+    throw new Error('Indeterminate integrity STOP requires complete process evidence.');
+  }
+  const contextSpool = spoolEvidence(input.contextSpoolPath);
+  if (input.delivery.status === 'indeterminate' && contextSpool.recordCount !== 0) {
+    throw new Error('Indeterminate delivery requires an empty correlated context spool.');
+  }
+  if (input.delivery.status === 'delivered' && contextSpool.recordCount === 0) {
+    throw new Error('Delivered contradictory evidence requires a correlated context spool record.');
+  }
+  const proposalSpool = spoolEvidence(input.proposalSpoolPath);
+  const artifact: D569DispatchIntegrityArtifact & Pick<AgentTurnResult, 'processEvidence' | 'partialResultEvidence'> = {
+    version: 1,
+    kind: 'dispatch_integrity_indeterminate',
+    scheduledCellKey: input.scheduledCellKey,
+    dispatchId: input.catalogEvidence.dispatchId,
+    launcherSha256: sha256(readFileSync(input.launcherPath, 'utf8')),
+    processEvidenceSha256: sha256(canonicalJson(input.turn.processEvidence)),
+    processEvidence: input.turn.processEvidence,
+    partialResultEvidence: input.turn.partialResultEvidence,
+    catalogEvidence: input.catalogEvidence,
+    delivery: input.delivery,
+    contextSpool,
+    proposalSpool: { ...proposalSpool, stagedUnconsumed: true },
+    recordedAtUnixMs: Date.now(),
+  };
+  const temporaryPath = `${input.artifactPath}.tmp`;
+  writeFileSync(temporaryPath, `${canonicalJson(artifact)}\n`, { encoding: 'utf8', mode: 0o600 });
+  renameSync(temporaryPath, input.artifactPath);
+  const artifactDescriptor = openSync(input.artifactPath, 'r');
+  try { fsyncSync(artifactDescriptor); } finally { closeSync(artifactDescriptor); }
+  const row = {
+    rowContractVersion: 'arena-row-v3',
+    outcome: 'integrity_indeterminate',
+    passed: false,
+    scheduledCellKey: input.scheduledCellKey,
+    dispatchId: input.catalogEvidence.dispatchId,
+    engineCatalogEvidence: input.catalogEvidence,
+    turnContextDelivery: input.delivery,
+    authorizedPlan: null,
+    execution: null,
+  } as const;
+  appendFileSync(input.rowPath, `${JSON.stringify(row)}\n`, 'utf8');
+  const descriptor = openSync(input.rowPath, 'r');
+  try { fsyncSync(descriptor); } finally { closeSync(descriptor); }
+  throw new D569IntegrityStop(`Dispatch integrity is indeterminate for ${input.scheduledCellKey}.`);
 }
 
 function takeUiFeedback(path: string | null): EngineUiFeedback | null {
@@ -2032,25 +2458,79 @@ async function driveScriptedMcp(
   adjustmentResponse: 'keep' | 'change' | 'invalid',
   signal?: AbortSignal,
   speculativeDelayMs = 0,
+  inProcessToolSession?: AgentToolSession,
 ): Promise<{
   readonly calls: number;
   readonly rejections: readonly ConversationChainAttemptEvidence[];
   readonly contextTruncated: boolean;
 }> {
   const manifest = JSON.parse(await readFile(launcherPath, 'utf8')) as EngineMcpLauncherManifest;
-  const state = await loadArenaFixture(manifest.fixturePath);
-  const client = startMcpClient(cwd, launcherPath);
-  const abortClient = (): void => { client.child.kill('SIGTERM'); };
-  if (signal?.aborted === true) abortClient();
-  else signal?.addEventListener('abort', abortClient, { once: true });
+  const state = inProcessToolSession !== undefined &&
+    'simulatedEncounterState' in inProcessToolSession
+    ? structuredClone(inProcessToolSession.simulatedEncounterState as EncounterState)
+    : await loadArenaFixture(manifest.fixturePath);
+  const client = inProcessToolSession === undefined ? startMcpClient(cwd, launcherPath) : null;
+  const abortClient = (): void => { client?.child.kill('SIGTERM'); };
+  if (client !== null && signal?.aborted === true) abortClient();
+  else if (client !== null) signal?.addEventListener('abort', abortClient, { once: true });
+  const requestMcp = (method: string, params: unknown): Promise<unknown> => {
+    if (client !== null) return mcpRequest(client, method, params);
+    if (inProcessToolSession === undefined) throw new Error('In-process MCP dispatch omitted its tool session.');
+    if (method === 'server/discover') return Promise.resolve({});
+    if (method === 'tools/list') return Promise.resolve({ tools: inProcessToolSession.tools });
+    if (method === 'resources/read' && manifest.phase === 'speculative') {
+      const stateRef = 'stateRef' in inProcessToolSession
+        ? asRecord(inProcessToolSession.stateRef)
+        : null;
+      if (stateRef === null) throw new Error('In-process speculative dispatch omitted its state_ref.');
+      return Promise.resolve({ contents: [{ text: JSON.stringify({ state_ref: stateRef }) }] });
+    }
+    if (method === 'tools/call') {
+      const call = requiredRecord(params, 'in-process tools/call parameters');
+      const name = call['name'];
+      if (typeof name !== 'string') throw new TypeError('In-process tools/call omitted its name.');
+      return Promise.resolve({
+        isError: false,
+        structuredContent: inProcessToolSession.execute(name, call['arguments']),
+      });
+    }
+    throw new Error(`In-process SIMULATED MCP does not implement ${method}.`);
+  };
   let calls = 0;
   try {
-    await mcpRequest(client, 'server/discover', {});
-    const listedTools = asRecord(await mcpRequest(client, 'tools/list', {}))?.['tools'];
+    await requestMcp('server/discover', {});
+    const listedTools = asRecord(await requestMcp('tools/list', {}))?.['tools'];
     if (manifest.kbReadSpoolPath !== undefined &&
       (!Array.isArray(listedTools) || !listedTools.some((tool) =>
         asRecord(tool)?.['name'] === 'engine.read_kb_subject'))) {
       throw new Error('Launcher-owned KB subject tool is not advertised.');
+    }
+    if (manifest.dmMode === 'blind') {
+      const resources = asRecord(await requestMcp('resources/list', {}));
+      await requestMcp('resources/templates/list', {});
+      const prompts = asRecord(await requestMcp('prompts/list', {}));
+      for (const resource of Array.isArray(resources?.['resources']) ? resources['resources'] : []) {
+        const uri = asRecord(resource)?.['uri'];
+        if (typeof uri === 'string') await requestMcp('resources/read', { uri });
+      }
+      for (const prompt of Array.isArray(prompts?.['prompts']) ? prompts['prompts'] : []) {
+        const name = asRecord(prompt)?.['name'];
+        if (name === 'engine.plan_blind_round') {
+          await requestMcp('prompts/get', {
+            name,
+            arguments: { run_id: manifest.runId, expected_revision: manifest.revision },
+          });
+        } else if (name === 'engine.repair_blind_intents' && manifest.phase === 'correction') {
+          await requestMcp('prompts/get', {
+            name,
+            arguments: {
+              run_id: manifest.runId,
+              expected_revision: manifest.revision,
+              request_id: manifest.requestId,
+            },
+          });
+        }
+      }
     }
     if (manifest.phase === 'speculative') {
       await abortableDelay(speculativeDelayMs, signal ?? new AbortController().signal);
@@ -2059,7 +2539,7 @@ async function driveScriptedMcp(
       if (speculative === undefined || actors === undefined) {
         throw new Error('SIMULATED speculative launcher omitted its bounded request.');
       }
-      const resource = asRecord(await mcpRequest(client, 'resources/read', {
+      const resource = asRecord(await requestMcp('resources/read', {
         uri: `engine://run/${encodeURIComponent(manifest.runId)}/revision/${String(manifest.revision)}/turn`,
       }));
       const contents = resource?.['contents'];
@@ -2071,7 +2551,7 @@ async function driveScriptedMcp(
       if (stateRef === null) throw new Error('Speculative revision resource omitted state_ref.');
       const proposals = actors.map((actorId) =>
         externalProposal(engineDefaultPlanEntry(state, actorId, manifest.revision).proposal));
-      const result = asRecord(await mcpRequest(client, 'tools/call', {
+      const result = asRecord(await requestMcp('tools/call', {
         name: 'engine.submit_speculative_round_plan',
         arguments: {
           state_ref: stateRef,
@@ -2092,15 +2572,16 @@ async function driveScriptedMcp(
       }
       return { calls, rejections: rejectionEvidence(result), contextTruncated: false };
     }
-    const contextResult = asRecord(await mcpRequest(client, 'tools/call', {
+    const contextResult = asRecord(await requestMcp('tools/call', {
       name: 'engine.get_turn_context',
-      arguments: {
-        run_id: manifest.runId, expected_revision: manifest.revision, scope: 'round',
-        intel_mode: intelMode,
-        ...(manifest.turnContextDeltaBase === undefined ? { granularity: 'full' } : {
-          granularity: 'turn_delta', since_revision: manifest.turnContextDeltaBase.revision,
-        }),
-      },
+      arguments: profiledTurnContextArguments({
+        runId: manifest.runId,
+        expectedRevision: manifest.revision,
+        intelMode,
+        blind: manifest.dmMode === 'blind',
+        ...(manifest.turnContextDeltaBase === undefined
+          ? {} : { baseRevision: manifest.turnContextDeltaBase.revision }),
+      }),
     }));
     calls += 1;
     if (contextResult === null || contextResult['isError'] !== false || !submit) {
@@ -2124,6 +2605,52 @@ async function driveScriptedMcp(
     if (context === null) throw new Error('engine.get_turn_context delta could not be reconstructed.');
     const stateRef = asRecord(context['state_ref']);
     if (stateRef === null) throw new Error('engine.get_turn_context omitted state_ref.');
+    if (manifest.dmMode === 'blind') {
+      if (!submit) {
+        return {
+          calls,
+          rejections: [],
+          contextTruncated: false,
+        };
+      }
+      const request = asRecord(context['request']);
+      const requiredActors = request?.['required_actors'];
+      if (!Array.isArray(requiredActors)) {
+        throw new Error('Blind context omitted required actor display identities.');
+      }
+      const envelope = {
+        intent_version: BLIND_INTENT_VERSION,
+        intents: requiredActors.map((actor) => ({
+          actor: requiredRecord(actor, 'blind required actor'),
+          action: { kind: 'dodge' as const },
+          destination: { kind: 'relative' as const, relation: 'hold' as const },
+          reason: 'Maintain a defensive posture.',
+        })),
+      };
+      const attempts: unknown[] = invalid ? [{
+        intent_version: BLIND_INTENT_VERSION,
+        intents: requiredActors.map((actor) => ({
+          actor: requiredRecord(actor, 'blind required actor'),
+          action: { kind: 'help' as const },
+          reason: 'Support an ally.',
+        })),
+      }, envelope] : [envelope];
+      let finalResult: Readonly<Record<string, unknown>> | null = null;
+      for (const attempted of attempts.slice(0, manifest.blindMaxAttempts ?? BLIND_MAX_ATTEMPTS_DEFAULT)) {
+        const result = asRecord(await requestMcp('tools/call', {
+          name: 'engine.submit_blind_round_intents',
+          arguments: attempted,
+        }));
+        calls += 1;
+        finalResult = asRecord(result?.['structuredContent']);
+        if (finalResult?.['status'] === 'accepted') break;
+      }
+      return {
+        calls,
+        rejections: [],
+        contextTruncated: false,
+      };
+    }
     if (manifest.requestKind === 'plan_adjustment') {
       const actorId = manifest.requestedActorIds?.[0];
       const invalidAdjustment = manifest.phase === 'initial' && adjustmentResponse === 'invalid';
@@ -2154,7 +2681,7 @@ async function driveScriptedMcp(
                 } : {}),
               })];
             })();
-      const submitResult = asRecord(await mcpRequest(client, 'tools/call', {
+      const submitResult = asRecord(await requestMcp('tools/call', {
         name: 'engine.submit_plan_adjustment',
         arguments: {
           state_ref: stateRef,
@@ -2189,7 +2716,7 @@ async function driveScriptedMcp(
       const firstPlay = Array.isArray(advertised) ? asRecord(advertised[0]) : null;
       const playName = firstPlay?.['name'];
       if (typeof playName === 'string') {
-        const expansionResult = asRecord(await mcpRequest(client, 'tools/call', {
+        const expansionResult = asRecord(await requestMcp('tools/call', {
           name: 'engine.propose_from_play',
           arguments: { play_name: playName },
         }));
@@ -2234,7 +2761,7 @@ async function driveScriptedMcp(
       primary_option_id: 'SIMULATED-unavailable-option',
       fallback_option_id: manifest.phase === 'correction' ? null : 'SIMULATED-unavailable-fallback',
     })) : responseProposals;
-    const submitResult = asRecord(await mcpRequest(client, 'tools/call', {
+    const submitResult = asRecord(await requestMcp('tools/call', {
       name: 'engine.submit_round_proposals',
       arguments: {
         proposals: submittedProposals,
@@ -2247,7 +2774,7 @@ async function driveScriptedMcp(
     }
     const submitted = asRecord(submitResult['structuredContent']);
     if (manifest.boardImage !== undefined && submitted?.['status'] === 'proposed') {
-      const feedbackResult = asRecord(await mcpRequest(client, 'tools/call', {
+      const feedbackResult = asRecord(await requestMcp('tools/call', {
         name: 'engine.submit_ui_feedback',
         arguments: {
           readability: 4,
@@ -2269,8 +2796,10 @@ async function driveScriptedMcp(
       contextTruncated: eventContextTrimmed(contextResult),
     };
   } finally {
-    signal?.removeEventListener('abort', abortClient);
-    await stopMcpClient(client, signal?.aborted === true);
+    if (client !== null) {
+      signal?.removeEventListener('abort', abortClient);
+      await stopMcpClient(client, signal?.aborted === true);
+    }
   }
 }
 
@@ -2283,12 +2812,18 @@ class SimulatedConversationAdapter implements AgentSessionAdapter {
   readonly #exhaustInitial: ReadonlySet<string>;
   readonly #invalidInitial: ReadonlySet<string>;
   readonly #timeoutInitial: ReadonlySet<string>;
+  readonly #stagedAdjustmentTimeout: ReadonlySet<string>;
+  readonly #stagedAdjustmentCorrectionTimeout: ReadonlySet<string>;
+  readonly #stagedSpeculationTimeout: boolean;
+  readonly #failSpeculationRecalculation: boolean;
+  readonly #failSpeculationInfrastructure: boolean;
   readonly #failCorrection: ReadonlySet<string>;
   readonly #remainingPrimaryFlaps: Map<string, number>;
   readonly #reactionGuidanceByRequest: Readonly<Record<string, ReactionGuidanceDeclaration>>;
   readonly #suggestionResponseByRequest: Readonly<Record<string, ConversationSuggestionAdoption>>;
   readonly #adjustmentResponseByRequest: Readonly<Record<string, 'keep' | 'change' | 'invalid'>>;
   readonly #speculativeDelayMs: number;
+  readonly #inProcessDispatchDelayMs: number | null;
   #starts = 0;
 
   constructor(
@@ -2298,33 +2833,46 @@ class SimulatedConversationAdapter implements AgentSessionAdapter {
     exhaust: readonly string[],
     invalid: readonly string[],
     timeout: readonly string[],
+    stagedAdjustmentTimeout: readonly string[],
+    stagedAdjustmentCorrectionTimeout: readonly string[],
+    stagedSpeculationTimeout: boolean,
+    failSpeculationRecalculation: boolean,
+    failSpeculationInfrastructure: boolean,
     fail: readonly string[],
     primaryFlaps: Readonly<Record<string, number>>,
     reactionGuidanceByRequest: Readonly<Record<string, ReactionGuidanceDeclaration>>,
     suggestionResponseByRequest: Readonly<Record<string, ConversationSuggestionAdoption>>,
     adjustmentResponseByRequest: Readonly<Record<string, 'keep' | 'change' | 'invalid'>>,
     speculativeDelayMs: number,
+    inProcessDispatchDelayMs: number | null,
   ) {
     this.kind = kind;
     this.#exhaustInitial = new Set(exhaust);
     this.#invalidInitial = new Set(invalid);
     this.#timeoutInitial = new Set(timeout);
+    this.#stagedAdjustmentTimeout = new Set(stagedAdjustmentTimeout);
+    this.#stagedAdjustmentCorrectionTimeout = new Set(stagedAdjustmentCorrectionTimeout);
+    this.#stagedSpeculationTimeout = stagedSpeculationTimeout;
+    this.#failSpeculationRecalculation = failSpeculationRecalculation;
+    this.#failSpeculationInfrastructure = failSpeculationInfrastructure;
     this.#failCorrection = new Set(fail);
     this.#remainingPrimaryFlaps = new Map(Object.entries(primaryFlaps));
     this.#reactionGuidanceByRequest = reactionGuidanceByRequest;
     this.#suggestionResponseByRequest = suggestionResponseByRequest;
     this.#adjustmentResponseByRequest = adjustmentResponseByRequest;
     this.#speculativeDelayMs = speculativeDelayMs;
+    this.#inProcessDispatchDelayMs = inProcessDispatchDelayMs;
   }
 
   async probe() { return { present: true, version: 'SIMULATED' }; }
 
   async start(invocation: AgentInvocation, signal: AbortSignal): Promise<AgentTurnResult> {
     this.#starts += 1;
-    const sessionId = this.#starts === 1
-      ? `agent-session:SIMULATED:${invocation.runId}`
-      : `agent-session:SIMULATED:${invocation.runId}:fresh-${String(this.#starts)}`;
     const manifest = JSON.parse(await readFile(invocation.launcherToken, 'utf8')) as EngineMcpLauncherManifest;
+    const modeSuffix = manifest.dmMode === undefined ? '' : `:${manifest.dmMode}`;
+    const sessionId = this.#starts === 1
+      ? `agent-session:SIMULATED:${invocation.runId}${modeSuffix}`
+      : `agent-session:SIMULATED:${invocation.runId}${modeSuffix}:fresh-${String(this.#starts)}`;
     return this.#dispatch(sessionId, invocation, false, signal);
   }
 
@@ -2349,8 +2897,72 @@ class SimulatedConversationAdapter implements AgentSessionAdapter {
   ): Promise<AgentTurnResult> {
     const manifest = JSON.parse(await readFile(invocation.launcherToken, 'utf8')) as EngineMcpLauncherManifest;
     const key = manifest.requestId.replace(/^request:/u, '');
+    if (invocation.callPhase === 'speculation' && this.#failSpeculationInfrastructure) {
+      await Promise.resolve();
+      if (manifest.dispatchId === undefined) throw new Error('Speculation launcher omitted dispatch id.');
+      return {
+        resumeSessionId: null, sessionId: null, finalText: '', usage: null,
+        exit: 'infrastructure_failed', failureReason: 'SIMULATED speculative engine startup failure',
+        component: 'engine_mcp_startup', processEvidence: null,
+        engineCatalogEvidence: {
+          status: 'absent', basis: 'required_engine_initialization_failed', dispatchId: manifest.dispatchId,
+          corroboration: ['SIMULATED speculative engine startup failure'],
+        },
+        partialResultEvidence: {
+          status: 'partial', decodedEventCount: 0, finalTextFragment: '', observedUsage: null,
+          stagedInvocationIds: [],
+        },
+      };
+    }
+    if (invocation.callPhase === 'speculation_recalculation' && this.#failSpeculationRecalculation) {
+      await driveScriptedMcp(
+        this.cwd, invocation.launcherToken, this.intelMode, true, false, null,
+        'legacy', 'keep', signal, 0, invocation.toolSession,
+      );
+      await abortableDelay(this.#inProcessDispatchDelayMs ?? 0, signal);
+      if (manifest.dispatchId === undefined) throw new Error('Recalculation launcher omitted dispatch id.');
+      return {
+        resumeSessionId: agentSessionId(sessionId), sessionId: null, finalText: '', usage: null,
+        exit: 'infrastructure_failed', failureReason: 'SIMULATED recalculation engine startup failure',
+        component: 'engine_mcp_startup',
+        processEvidence: null,
+        engineCatalogEvidence: {
+          status: 'absent', basis: 'required_engine_initialization_failed', dispatchId: manifest.dispatchId,
+          corroboration: ['SIMULATED recalculation engine startup failure'],
+        },
+        partialResultEvidence: {
+          status: 'partial', decodedEventCount: 0, finalTextFragment: '', observedUsage: null,
+          stagedInvocationIds: ['SIMULATED-recalculation-staged-before-failure'],
+        },
+      };
+    }
     if (!roomTransition && manifest.phase === 'initial' && this.#timeoutInitial.has(key)) {
-      return cancelledSimulated(sessionId);
+      return cancelledSimulated(sessionId, manifest);
+    }
+    if (manifest.requestKind === 'plan_adjustment' && manifest.phase === 'initial' &&
+      this.#stagedAdjustmentTimeout.has(key)) {
+      await driveScriptedMcp(
+        this.cwd, invocation.launcherToken, this.intelMode, true, false, null,
+        'legacy', this.#adjustmentResponseByRequest[key] ?? 'keep', signal, 0, invocation.toolSession,
+      );
+      await abortableDelay(this.#inProcessDispatchDelayMs ?? 0, signal);
+      return timedOutSimulated(sessionId, manifest);
+    }
+    if (manifest.requestKind === 'plan_adjustment' && manifest.phase === 'correction' &&
+      this.#stagedAdjustmentCorrectionTimeout.has(key)) {
+      await driveScriptedMcp(
+        this.cwd, invocation.launcherToken, this.intelMode, true, false, null,
+        'legacy', 'change', signal, 0, invocation.toolSession,
+      );
+      await abortableDelay(this.#inProcessDispatchDelayMs ?? 0, signal);
+      return timedOutSimulated(sessionId, manifest);
+    }
+    if (manifest.phase === 'speculative' && this.#stagedSpeculationTimeout) {
+      await driveScriptedMcp(
+        this.cwd, invocation.launcherToken, this.intelMode, true, false, null,
+        'legacy', 'keep', signal, 0, invocation.toolSession,
+      );
+      return timedOutSimulated(sessionId, manifest);
     }
     if (invocation.output.kind === 'structured_final') {
       const finalText = !roomTransition && manifest.phase === 'initial' && this.#exhaustInitial.has(key)
@@ -2361,15 +2973,16 @@ class SimulatedConversationAdapter implements AgentSessionAdapter {
               invocation.prompt,
               structuredFinalDecisionPhase(manifest.phase),
             );
-      return completedSimulated(sessionId, finalText);
+      return completedSimulated(sessionId, finalText, manifest);
     }
     const remainingFlaps = this.#remainingPrimaryFlaps.get(key) ?? 0;
     if (!roomTransition && manifest.phase === 'initial' && remainingFlaps > 0) {
       this.#remainingPrimaryFlaps.set(key, remainingFlaps - 1);
-      return completedSimulated(sessionId);
+      return completedSimulated(sessionId, undefined, manifest);
     }
     const submit = !roomTransition && !(manifest.phase === 'initial'
       ? this.#exhaustInitial.has(key) : this.#failCorrection.has(key));
+    await abortableDelay(this.#inProcessDispatchDelayMs ?? 0, signal);
     const driven = await driveScriptedMcp(
       this.cwd,
       invocation.launcherToken,
@@ -2381,6 +2994,7 @@ class SimulatedConversationAdapter implements AgentSessionAdapter {
       this.#adjustmentResponseByRequest[key] ?? 'keep',
       signal,
       manifest.phase === 'speculative' ? this.#speculativeDelayMs : 0,
+      this.#inProcessDispatchDelayMs === null ? undefined : invocation.toolSession,
     );
     this.callsByRequest.set(manifest.requestId, (this.callsByRequest.get(manifest.requestId) ?? 0) + driven.calls);
     this.contextCallsByRequest.set(
@@ -2391,7 +3005,7 @@ class SimulatedConversationAdapter implements AgentSessionAdapter {
       this.rejectionsByRequest.set(manifest.requestId, driven.rejections);
     }
     if (driven.contextTruncated) this.contextTruncatedByRequest.set(manifest.requestId, true);
-    return completedSimulated(sessionId);
+    return completedSimulated(sessionId, undefined, manifest);
   }
 
   classifyFailure(): 'unknown' { return 'unknown'; }
@@ -2478,23 +3092,58 @@ export function structuredFinalDecisionPhase(
   throw new Error('Unknown structured-final decision phase.');
 }
 
-function completedSimulated(value: string, finalText = 'SIMULATED — proposal delivered through engine MCP spool'): AgentTurnResult {
+function completedSimulated(
+  value: string,
+  finalText = 'SIMULATED — proposal delivered through engine MCP spool',
+  manifest?: EngineMcpLauncherManifest,
+): AgentTurnResult {
   return {
     resumeSessionId: agentSessionId(value),
     sessionId: null,
     finalText,
     usage: null,
     exit: 'completed',
+    processEvidence: null,
+    engineCatalogEvidence: manifest?.dispatchId === undefined ? null : {
+      status: 'ready', basis: 'required_cli_completed_with_valid_catalog',
+      dispatchId: manifest.dispatchId, advertisedInvocationCount: 0, resourceOperationCount: 0,
+    },
+    partialResultEvidence: { status: 'complete', decodedEventCount: 0 },
   };
 }
 
-function cancelledSimulated(value: string): AgentTurnResult {
+function cancelledSimulated(value: string, manifest?: EngineMcpLauncherManifest): AgentTurnResult {
   return {
     resumeSessionId: agentSessionId(value),
     sessionId: null,
     finalText: '',
     usage: null,
     exit: 'cancelled',
+    cancellationReason: 'SIMULATED cancellation',
+    processEvidence: null,
+    engineCatalogEvidence: manifest?.dispatchId === undefined ? null : {
+      status: 'ready', basis: 'required_cli_completed_with_valid_catalog',
+      dispatchId: manifest.dispatchId, advertisedInvocationCount: 0, resourceOperationCount: 0,
+    },
+    partialResultEvidence: {
+      status: 'partial', decodedEventCount: 0, finalTextFragment: '', observedUsage: null,
+      stagedInvocationIds: [],
+    },
+  };
+}
+
+function timedOutSimulated(value: string, manifest: EngineMcpLauncherManifest): AgentTurnResult {
+  return {
+    resumeSessionId: agentSessionId(value), sessionId: null, finalText: '', usage: null,
+    exit: 'timed_out', timeoutMs: 1, processEvidence: null,
+    engineCatalogEvidence: manifest.dispatchId === undefined ? null : {
+      status: 'ready', basis: 'required_cli_completed_with_valid_catalog',
+      dispatchId: manifest.dispatchId, advertisedInvocationCount: 0, resourceOperationCount: 0,
+    },
+    partialResultEvidence: {
+      status: 'partial', decodedEventCount: 0, finalTextFragment: '', observedUsage: null,
+      stagedInvocationIds: ['SIMULATED-staged-before-timeout'],
+    },
   };
 }
 
@@ -2564,6 +3213,29 @@ function isPlanAdjustmentProposal(value: unknown): value is PlanAdjustmentPropos
     typeof input['baseline_plan_hash'] === 'string' && Array.isArray(input['updates']);
 }
 
+export function authorizedRoundProposalHashInput(proposal: RoundTurnProposalEnvelope): string {
+  const input: RoundTurnProposalEnvelope = {
+    kind: proposal.kind,
+    proposalId: proposal.proposalId,
+    runId: proposal.runId,
+    branchId: proposal.branchId,
+    requestId: proposal.requestId,
+    expectedRevision: proposal.expectedRevision,
+    stateDigest: proposal.stateDigest,
+    stateHandle: proposal.stateHandle,
+    phase: proposal.phase,
+    idempotencyKey: proposal.idempotencyKey,
+    resolutions: proposal.resolutions,
+    rationale: proposal.rationale,
+    reactionGuidance: proposal.reactionGuidance,
+    ...(proposal.submittedArguments === undefined ? {} : {
+      submittedArguments: proposal.submittedArguments,
+    }),
+    ...(proposal.intelCapture === undefined ? {} : { intelCapture: proposal.intelCapture }),
+  };
+  return canonicalJson(input);
+}
+
 function isSpeculativePlan(value: unknown): value is QueuedSpeculativePlanEnvelope {
   const input = asRecord(value);
   return input?.['kind'] === 'speculative_round_plan' &&
@@ -2600,6 +3272,49 @@ function takeSpeculativePlan(path: string): QueuedSpeculativePlanEnvelope | null
   return plan === null ? null : structuredClone(plan);
 }
 
+function takeBlindIntentSubmissions(path: string | null): readonly BlindIntentSubmissionRecord[] {
+  if (path === null) return [];
+  let source: string;
+  try { source = readFileSync(path, 'utf8'); } catch { return []; }
+  return source.split('\n').filter((line) => line.trim().length > 0).map((line) => {
+    const value: unknown = JSON.parse(line);
+    const candidate = requiredRecord(value, 'blind intent submission');
+    if (!Number.isSafeInteger(candidate['attempt']) || typeof candidate['startedAtUnixMs'] !== 'number' ||
+      typeof candidate['endedAtUnixMs'] !== 'number' || typeof candidate['resolverLatencyMs'] !== 'number') {
+      throw new TypeError('Blind intent submission timing evidence is invalid.');
+    }
+    return candidate as unknown as BlindIntentSubmissionRecord;
+  });
+}
+
+function takeBlindIngressRecords(path: string | null): readonly BlindIngressRecord[] {
+  if (path === null) return [];
+  let source: string;
+  try { source = readFileSync(path, 'utf8'); } catch { return []; }
+  return source.split('\n').filter((line) => line.trim().length > 0).map((line, index) => {
+    const value: unknown = JSON.parse(line);
+    const candidate = requiredRecord(value, 'blind ingress record');
+    if (candidate['ordinal'] !== index + 1 || typeof candidate['channel'] !== 'string' ||
+      typeof candidate['text'] !== 'string' || typeof candidate['utf8Bytes'] !== 'number' ||
+      typeof candidate['sha256'] !== 'string') {
+      throw new TypeError('Blind ingress spool contains invalid evidence.');
+    }
+    return candidate as unknown as BlindIngressRecord;
+  });
+}
+
+function appendBlindIngress(
+  path: string | null,
+  records: readonly { readonly channel: 'startup' | 'initial_prompt' | 'retry_prompt' | 'replay_history' | 'image_metadata'; readonly text: string }[],
+): void {
+  if (path === null || records.length === 0) return;
+  const existing = takeBlindIngressRecords(path);
+  const recorder = new BlindModelIngressRecorder(existing, (record) => {
+    appendFileSync(path, `${JSON.stringify(record)}\n`, 'utf8');
+  });
+  for (const record of records) recorder.record(record.channel, record.text);
+}
+
 async function writeLauncher(input: {
   readonly directory: string;
   readonly name: string;
@@ -2615,30 +3330,82 @@ async function writeLauncher(input: {
     readonly subjectSources: KbSubjectSources;
   };
   readonly boardImage?: EngineMcpBoardImageBinding;
+  readonly dmMode?: DmMode;
+  readonly blindRepairArm?: BlindRepairArm;
+  readonly blindMaxAttempts?: BlindMaxAttempts;
+  readonly blindDeadlineUnixMs?: number;
+  readonly blindFacts?: boolean;
+  readonly blindVisuals?: readonly BlindVisualDescriptor[];
+  readonly semanticBoardMaximumBytes?: number;
+  readonly dispatchPhase?: import('../src/vtt/agent-session').EngineDispatchPhase;
 }): Promise<{
   readonly manifestPath: string;
   readonly recoveryManifestPath: string;
   readonly spoolPath: string;
+  readonly recoverySpoolPath: string;
   readonly turnContextSpoolPath: string;
+  readonly recoveryTurnContextSpoolPath: string;
   readonly uiFeedbackSpoolPath: string | null;
+  readonly recoveryUiFeedbackSpoolPath: string | null;
+  readonly blindIntentSpoolPath: string | null;
+  readonly recoveryBlindIntentSpoolPath: string | null;
+  readonly blindIngressSpoolPath: string | null;
+  readonly recoveryBlindIngressSpoolPath: string | null;
+  readonly dispatchId: import('../src/vtt/agent-session').EngineDispatchId;
+  readonly recoveryDispatchId: import('../src/vtt/agent-session').EngineDispatchId;
 }> {
   const fixturePath = join(input.directory, `${input.name}-fixture.json`);
   const spoolPath = join(input.directory, `${input.name}-proposals.jsonl`);
+  const recoverySpoolPath = join(input.directory, `${input.name}-recovery-proposals.jsonl`);
   const turnContextSpoolPath = join(input.directory, `${input.name}-turn-context.jsonl`);
+  const recoveryTurnContextSpoolPath = join(input.directory, `${input.name}-recovery-turn-context.jsonl`);
   const manifestPath = join(input.directory, `${input.name}-launcher.json`);
   const recoveryManifestPath = join(input.directory, `${input.name}-launcher-full.json`);
+  const blindIntentSpoolPath = input.dmMode === 'blind'
+    ? join(input.directory, `${input.name}-blind-intents.jsonl`)
+    : null;
+  const recoveryBlindIntentSpoolPath = input.dmMode === 'blind'
+    ? join(input.directory, `${input.name}-recovery-blind-intents.jsonl`)
+    : null;
+  const blindIngressSpoolPath = input.dmMode === 'blind'
+    ? join(input.directory, `${input.name}-blind-ingress.jsonl`)
+    : null;
+  const recoveryBlindIngressSpoolPath = input.dmMode === 'blind'
+    ? join(input.directory, `${input.name}-recovery-blind-ingress.jsonl`)
+    : null;
   const uiFeedbackSpoolPath = input.boardImage === undefined
     ? null
     : engineMcpUiFeedbackSpoolPath(spoolPath);
+  const recoveryUiFeedbackSpoolPath = input.boardImage === undefined
+    ? null
+    : engineMcpUiFeedbackSpoolPath(recoverySpoolPath);
+  const readinessSpoolPath = join(input.directory, `${input.name}-engine-readiness.jsonl`);
+  const recoveryReadinessSpoolPath = join(input.directory, `${input.name}-recovery-engine-readiness.jsonl`);
   await writeFile(fixturePath, input.snapshot.fixtureJson, 'utf8');
   await writeFile(spoolPath, '', 'utf8');
+  await writeFile(recoverySpoolPath, '', 'utf8');
   await writeFile(turnContextSpoolPath, '', 'utf8');
+  await writeFile(recoveryTurnContextSpoolPath, '', 'utf8');
+  await writeFile(readinessSpoolPath, '', 'utf8');
+  await writeFile(recoveryReadinessSpoolPath, '', 'utf8');
+  if (blindIntentSpoolPath !== null) await writeFile(blindIntentSpoolPath, '', 'utf8');
+  if (recoveryBlindIntentSpoolPath !== null) await writeFile(recoveryBlindIntentSpoolPath, '', 'utf8');
+  if (blindIngressSpoolPath !== null) await writeFile(blindIngressSpoolPath, '', 'utf8');
+  if (recoveryBlindIngressSpoolPath !== null) await writeFile(recoveryBlindIngressSpoolPath, '', 'utf8');
   if (uiFeedbackSpoolPath !== null) await writeFile(uiFeedbackSpoolPath, '', 'utf8');
+  if (recoveryUiFeedbackSpoolPath !== null) await writeFile(recoveryUiFeedbackSpoolPath, '', 'utf8');
   const capsule = input.snapshot.capsule;
   const request = capsule.request;
   if (request === null) throw new Error('Conversation launcher requires a pending request.');
+  const dispatchPhase = input.dispatchPhase ?? (request.phase === 'speculative'
+    ? 'speculative' as const
+    : request.phase === 'correction'
+      ? 'correction' as const
+      : request.kind === 'plan_adjustment' ? 'adjustment' as const : 'primary' as const);
+  const dispatchId = engineDispatchId(`engine-dispatch:${randomUUID()}`);
   const manifest: EngineMcpLauncherManifest = {
     format: 'engine-mcp-launcher-v1', fixturePath, proposalSpoolPath: spoolPath,
+    readinessSpoolPath: relative(input.directory, readinessSpoolPath), dispatchId, dispatchPhase,
     turnContextSpoolPath,
     ...(input.kbRead === undefined ? {} : {
       kbReadSpoolPath: input.kbRead.spoolPath,
@@ -2649,9 +3416,21 @@ async function writeLauncher(input: {
     phase: request.phase, correctionNumber: request.correctionNumber,
     offerEnvironment: capsule.offerEnvironment,
     overridePolicy: input.overridePolicy,
-    room: input.room, historyKind: input.historyKind, toolProfile: 'dm',
+    room: input.room, historyKind: input.historyKind,
+    toolProfile: input.dmMode === 'blind' ? 'blind' : 'dm',
+    ...(input.dmMode === undefined ? {} : { dmMode: input.dmMode }),
+    ...(input.blindRepairArm === undefined ? {} : { blindRepairArm: input.blindRepairArm }),
+    ...(input.blindMaxAttempts === undefined ? {} : { blindMaxAttempts: input.blindMaxAttempts }),
+    ...(input.blindDeadlineUnixMs === undefined ? {} : { blindDeadlineUnixMs: input.blindDeadlineUnixMs }),
+    ...(input.blindFacts === undefined ? {} : { blindFacts: input.blindFacts }),
+    ...(input.blindVisuals === undefined ? {} : { blindVisuals: input.blindVisuals }),
+    ...(blindIntentSpoolPath === null ? {} : { blindIntentSpoolPath }),
+    ...(blindIngressSpoolPath === null ? {} : { blindIngressSpoolPath }),
     rendererProfile: input.rendererProfile,
     turnContextMaximumBytes: input.turnContextMaximumBytes,
+    ...(input.semanticBoardMaximumBytes === undefined ? {} : {
+      semanticBoardMaximumBytes: input.semanticBoardMaximumBytes,
+    }),
     initiativeProjection: capsule.projection.initiative,
     ...(input.boardImage === undefined ? {} : { boardImage: input.boardImage }),
     ...(request.phase === 'speculative' ? {
@@ -2682,9 +3461,140 @@ async function writeLauncher(input: {
     }),
   };
   await writeFile(manifestPath, canonicalJson(manifest), 'utf8');
-  const { turnContextDeltaBase: _turnContextDeltaBase, ...fullManifest } = manifest;
+  const { turnContextDeltaBase: _turnContextDeltaBase, ...baseFullManifest } = manifest;
+  const fullManifest: EngineMcpLauncherManifest = {
+    ...baseFullManifest,
+    proposalSpoolPath: recoverySpoolPath,
+    turnContextSpoolPath: recoveryTurnContextSpoolPath,
+    readinessSpoolPath: relative(input.directory, recoveryReadinessSpoolPath),
+    dispatchId: engineDispatchId(`engine-dispatch:${randomUUID()}`),
+    ...(recoveryBlindIntentSpoolPath === null ? {} : { blindIntentSpoolPath: recoveryBlindIntentSpoolPath }),
+    ...(recoveryBlindIngressSpoolPath === null ? {} : { blindIngressSpoolPath: recoveryBlindIngressSpoolPath }),
+  };
   await writeFile(recoveryManifestPath, canonicalJson(fullManifest), 'utf8');
-  return { manifestPath, recoveryManifestPath, spoolPath, turnContextSpoolPath, uiFeedbackSpoolPath };
+  return {
+    manifestPath, recoveryManifestPath, spoolPath, recoverySpoolPath,
+    turnContextSpoolPath, recoveryTurnContextSpoolPath,
+    uiFeedbackSpoolPath, recoveryUiFeedbackSpoolPath,
+    blindIntentSpoolPath, recoveryBlindIntentSpoolPath,
+    blindIngressSpoolPath, recoveryBlindIngressSpoolPath,
+    dispatchId,
+    recoveryDispatchId: fullManifest.dispatchId ?? (() => { throw new Error('Recovery dispatch ID is absent.'); })(),
+  };
+}
+
+function dispatchSpools(
+  launcher: Awaited<ReturnType<typeof writeLauncher>>,
+  turn: AgentTurnResult,
+) {
+  const primaryHasRecords = spoolContainsRecords(launcher.spoolPath) ||
+    spoolContainsRecords(launcher.turnContextSpoolPath);
+  const recoveryHasRecords = spoolContainsRecords(launcher.recoverySpoolPath) ||
+    spoolContainsRecords(launcher.recoveryTurnContextSpoolPath);
+  const recovery = turn.engineCatalogEvidence?.dispatchId === launcher.recoveryDispatchId ||
+    turn.engineCatalogEvidence === null && recoveryHasRecords && !primaryHasRecords;
+  return recovery ? {
+    proposal: launcher.recoverySpoolPath,
+    context: launcher.recoveryTurnContextSpoolPath,
+    uiFeedback: launcher.recoveryUiFeedbackSpoolPath,
+    blindIntent: launcher.recoveryBlindIntentSpoolPath,
+    blindIngress: launcher.recoveryBlindIngressSpoolPath,
+  } : {
+    proposal: launcher.spoolPath,
+    context: launcher.turnContextSpoolPath,
+    uiFeedback: launcher.uiFeedbackSpoolPath,
+    blindIntent: launcher.blindIntentSpoolPath,
+    blindIngress: launcher.blindIngressSpoolPath,
+  };
+}
+
+function spoolContainsRecords(path: string): boolean {
+  try {
+    return readFileSync(path, 'utf8').split('\n').some((line) => line.trim().length > 0);
+  } catch {
+    return false;
+  }
+}
+
+function enforceCompletedDispatchIntegrity(input: {
+  readonly turn: AgentTurnResult;
+  readonly launcher: Awaited<ReturnType<typeof writeLauncher>>;
+  readonly spools: ReturnType<typeof dispatchSpools>;
+  readonly maximumBytes: number;
+  readonly artifactPath: string;
+  readonly rowPath: string;
+  readonly scheduledCellKey: string;
+}): void {
+  const catalogEvidence = input.turn.engineCatalogEvidence;
+  if (catalogEvidence === null) return;
+  const correlatedContext = takeCorrelatedTurnContext(
+    input.spools.context,
+    input.maximumBytes,
+    catalogEvidence.dispatchId,
+  );
+  const delivery = classifyTurnContextDelivery({
+    turn: input.turn,
+    catalogEvidence,
+    delivered: correlatedContext === null ? null : {
+      contextSha256: sha256(correlatedContext.raw),
+      measurement: deliveredTurnContextMeasurement(correlatedContext),
+    },
+  });
+  if (!d569DeliveryHasIntegritySignal(catalogEvidence, delivery)) return;
+  if (delivery.status !== 'indeterminate' && delivery.status !== 'delivered') {
+    throw new Error('Contradictory startup evidence produced an unsupported delivery state.');
+  }
+  persistD569IntegrityStop({
+    artifactPath: input.artifactPath,
+    rowPath: input.rowPath,
+    scheduledCellKey: input.scheduledCellKey,
+    launcherPath: catalogEvidence.dispatchId === input.launcher.recoveryDispatchId
+      ? input.launcher.recoveryManifestPath
+      : input.launcher.manifestPath,
+    proposalSpoolPath: input.spools.proposal,
+    contextSpoolPath: input.spools.context,
+    catalogEvidence,
+    delivery,
+    turn: input.turn,
+  });
+}
+
+function classifyFailedDispatch(input: {
+  readonly phase: NonNullable<ConversationRowBase['failingDispatch']>['phase'];
+  readonly turn: AgentTurnResult;
+  readonly contextSpoolPath: string;
+  readonly maximumBytes: number;
+}): NonNullable<ConversationRowBase['failingDispatch']> | null {
+  if (input.turn.exit !== 'cancelled' && input.turn.exit !== 'infrastructure_failed') return null;
+  const catalog = input.turn.engineCatalogEvidence;
+  if (catalog === null) return null;
+  const context = takeCorrelatedTurnContext(input.contextSpoolPath, input.maximumBytes, catalog.dispatchId);
+  const delivery = classifyTurnContextDelivery({
+    turn: input.turn,
+    catalogEvidence: catalog,
+    delivered: context === null ? null : {
+      contextSha256: sha256(context.raw),
+      measurement: deliveredTurnContextMeasurement(context),
+    },
+  });
+  return {
+    phase: input.phase,
+    exit: input.turn.exit,
+    dispatchId: catalog.dispatchId,
+    engineCatalogEvidence: catalog,
+    turnContextDelivery: delivery,
+    failureReason: input.turn.exit === 'cancelled'
+      ? input.turn.cancellationReason
+      : input.turn.failureReason,
+  };
+}
+
+class CellInfrastructureAbort extends Error {
+  override readonly name = 'CellInfrastructureAbort' as const;
+}
+
+class CellSpeculationDispatchAbort extends Error {
+  override readonly name = 'CellSpeculationDispatchAbort' as const;
 }
 
 function fullTurnContextBase(
@@ -2766,7 +3676,7 @@ function inProcessDmToolSession(input: {
   readonly onTurnContextRendered?: (evidence: NonNullable<CapturedTurnContext['rendering']>) => void;
   readonly kbReadBudget?: KbReadBudget;
   readonly kbReadCallPhase?: KbReadCallPhase;
-}): AgentToolSession {
+}): AgentToolSession & { readonly simulatedEncounterState: EncounterState } {
   const capsule = input.snapshot.capsule;
   const request = capsule.request;
   if (request === null || request.phase === 'speculative') {
@@ -2821,6 +3731,7 @@ function inProcessDmToolSession(input: {
     },
   });
   return {
+    simulatedEncounterState: structuredClone(input.state),
     tools: runtime.toolSurface.tools,
     execute(name, argumentsValue) {
       try {
@@ -3026,7 +3937,10 @@ function inProcessSpeculativeToolSession(input: {
   readonly state: EncounterState;
   readonly snapshot: EngineRoundSnapshot;
   readonly onPlan: (plan: QueuedSpeculativePlanEnvelope) => void;
-}): AgentToolSession {
+}): AgentToolSession & {
+  readonly stateRef: Readonly<Record<string, unknown>>;
+  readonly simulatedEncounterState: EncounterState;
+} {
   const capsule = input.snapshot.capsule;
   const request = capsule.request;
   if (request?.phase !== 'speculative') {
@@ -3059,6 +3973,12 @@ function inProcessSpeculativeToolSession(input: {
     onSpeculativePlan: (plan) => input.onPlan(structuredClone(plan)),
   });
   return {
+    simulatedEncounterState: structuredClone(input.state),
+    stateRef: {
+      run_id: capsule.runId,
+      state_handle: engineStateHandle(capsule),
+      expected_revision: capsule.revision,
+    },
     tools: runtime.toolSurface.tools,
     execute(name, argumentsValue) {
       return runtime.toolSurface.execute(name, argumentsValue);
@@ -3111,6 +4031,7 @@ function authorizedMechanics(state: EncounterState, proposal: RoundTurnProposalE
     readonly primaryDeclaredProposal: Readonly<Record<string, unknown>>;
     readonly selectedDeclaredProposal: Readonly<Record<string, unknown>>;
     readonly primaryRejectionReasons: readonly string[];
+    readonly strictNoFallback?: true;
   }[] | null;
   readonly divergences: readonly ConversationChainAttemptEvidence[];
 } {
@@ -3143,6 +4064,7 @@ function authorizedMechanics(state: EncounterState, proposal: RoundTurnProposalE
       primaryDeclaredProposal: externalProposal(entry.proposal),
       selectedDeclaredProposal: externalProposal(entry.proposal),
       primaryRejectionReasons: checked.refusals.map((refusal) => refusal.summary),
+      ...(entry.strictNoFallback === true ? { strictNoFallback: true as const } : {}),
     };
   });
   return {
@@ -3158,9 +4080,21 @@ function authorizedMechanics(state: EncounterState, proposal: RoundTurnProposalE
       readonly primaryDeclaredProposal: Readonly<Record<string, unknown>>;
       readonly selectedDeclaredProposal: Readonly<Record<string, unknown>>;
       readonly primaryRejectionReasons: readonly string[];
+      readonly strictNoFallback?: true;
     }[],
     divergences,
   };
+}
+
+function agentInstructionSource(config: ConversationConfig): AgentInstructionSource {
+  switch (config.instructionSource) {
+    case 'none':
+      return { instructionSource: 'none', skill: null };
+    case 'kb':
+      return { instructionSource: 'kb', skill: null, kbPath: config.kbPath };
+    case 'skill':
+      return { instructionSource: 'skill', skill: config.skill, kbPath: null };
+  }
 }
 
 function invocation(
@@ -3175,15 +4109,19 @@ function invocation(
   toolSession?: AgentToolSession,
   freshSessionContext?: FreshSessionContext,
   output: AgentInvocationOutput = { kind: 'tool_driven' },
+  dispatchIdentity?: {
+    readonly engineDispatchId: import('../src/vtt/agent-session').EngineDispatchId;
+    readonly recoveryEngineDispatchId: import('../src/vtt/agent-session').EngineDispatchId;
+  },
 ): AgentInvocation {
-  const instructionSource: AgentInstructionSource = config;
   return {
-    ...instructionSource,
+    ...agentInstructionSource(config),
     runId, prompt, instructions, model: planner.model, reasoningEffort: planner.effort,
     sessionProfile: 'arena',
     callPhase, output,
     launcherToken, timeoutMs: config.timeoutMs,
     ...(recoveryLauncherToken === undefined ? {} : { recoveryLauncherToken }),
+    ...(dispatchIdentity === undefined ? {} : dispatchIdentity),
     ...(toolSession === undefined ? {} : { toolSession }),
     ...(freshSessionContext === undefined ? {} : { freshSessionContext }),
   };
@@ -3228,15 +4166,19 @@ async function runConversationWithConfiguredIntel(
   options: ConversationRunOptions,
 ): Promise<ConversationRunResult> {
   const partyPolicy = options.partyPolicyOverride ?? config.partyPolicy;
+  const clock = options.clock ?? (() => performance.now());
   const knowledgeBase = await loadKnowledgeBase(config);
-  const startupInstructions = config.boardImageMode === 'png'
+  const blindPrimer = [GENERAL_PRIMER, ...BOARD_GLYPH_PRIMER.full].join(' ');
+  const startupInstructions = config.dmMode === 'blind'
+    ? `${knowledgeBase.startupInstructions}\n\nGeneral primer ${BLIND_STATE_PRIMER_VERSION}: ${blindPrimer}`
+    : config.boardImageMode === 'png'
     ? `${knowledgeBase.startupInstructions}\n\n${BOARD_IMAGE_SCALE_STARTUP_INSTRUCTION}\n${UI_FEEDBACK_STARTUP_INSTRUCTION}`
     : knowledgeBase.startupInstructions;
   const freshSessionContext: FreshSessionContext = {
     knowledgeBaseBundleHash: knowledgeBase.combinedStartupHash,
     startupInstructions,
   };
-  const repoCommit = await readRepoCommit(config.cwd);
+  const repoCommit = options.repoCommit ?? await readRepoCommit(config.cwd);
   await writeFile(config.outPath, '', 'utf8');
   const artifacts = await mkdtemp(join(tmpdir(), 'dnd-ai-dm-conversation-'));
   const instructionEnvironment = config.cli === 'codex'
@@ -3265,12 +4207,18 @@ async function runConversationWithConfiguredIntel(
   const simulated = config.dryRun ? new SimulatedConversationAdapter(
     config.cli, config.cwd, config.intelMode, options.exhaustInitial ?? [], options.invalidInitial ?? [],
     options.timeoutInitial ?? [],
+    options.stagedAdjustmentTimeout ?? [],
+    options.stagedAdjustmentCorrectionTimeout ?? [],
+    options.stagedSpeculationTimeout ?? false,
+    options.failSpeculationRecalculation ?? false,
+    options.failSpeculationInfrastructure ?? false,
     options.failCorrection ?? [],
     options.flapPrimaryByRequest ?? {},
     options.reactionGuidanceByRequest ?? {},
     options.suggestionResponseByRequest ?? {},
     options.adjustmentResponseByRequest ?? {},
     options.speculationDispatchDelayMs ?? 0,
+    options.simulatedInProcessDispatchDelayMs ?? null,
   ) : null;
   const selectedAdapter = options.adapter ?? simulated ?? (config.cli === 'local-openai'
     ? new LocalOpenAiAgentSessionAdapter({
@@ -3281,7 +4229,7 @@ async function runConversationWithConfiguredIntel(
     : resolveAgentAdapter(config.cli as AgentCliKind, {
         binary: config.cliBin, cwd: config.cwd, engineCommand: process.execPath,
         ...(instructionEnvironment.codexHome === null ? {} : { codexHome: instructionEnvironment.codexHome }),
-        engineToolProfile: 'dm',
+        engineToolProfile: config.dmMode === 'blind' ? 'blind' : 'dm',
         engineArgs: [
           resolve(config.cwd, 'node_modules/vite-node/vite-node.mjs'),
           resolve(config.cwd, 'tools/engine-mcp-server.ts'),
@@ -3363,7 +4311,7 @@ async function runConversationWithConfiguredIntel(
 
     for (let round = 1; round <= config.rounds; round += 1) {
       const generationBeforeRound = journal.agentSession()?.generation ?? 0;
-      const endToEndStarted = performance.now();
+      const endToEndStarted = clock();
       const modelCallsBeforeRound = adapter.modelCalls;
       observedToolCalls = 0;
       observedTurnContextCalls = 0;
@@ -3372,7 +4320,8 @@ async function runConversationWithConfiguredIntel(
       const requestId = `request:room-${String(room)}-round-${String(round)}`;
       const key = `room-${String(room)}-round-${String(round)}`;
       const kbReadSpoolPath = join(artifacts, `${key}-kb-reads.jsonl`);
-      const rowKbSubjectSources = knowledgeBase.kind === 'bundle'
+      const rowKbSubjectSources = knowledgeBase.kind === 'bundle' &&
+        knowledgeBase.subjectReadPolicy === 'two_per_round'
         ? kbSubjectSources(knowledgeBase)
         : undefined;
       if (rowKbSubjectSources !== undefined) await writeFile(kbReadSpoolPath, '', 'utf8');
@@ -3429,6 +4378,9 @@ async function runConversationWithConfiguredIntel(
         );
         return currentTurnContext;
       };
+      let boardImageArtifact: BoardImageArtifact | null = null;
+      let boardImagePrimaryDispatchStartedAtUnixMs: number | null = null;
+      let boardImageBinding: EngineMcpBoardImageBinding | undefined;
       let plannedInitialTurnContext: CapturedTurnContext | undefined;
       let initialRendererEvidence: CapturedTurnContext['rendering'];
       const getPlannedInitialTurnContext = (): CapturedTurnContext => {
@@ -3439,6 +4391,12 @@ async function runConversationWithConfiguredIntel(
           config.intelMode,
           config.rendererProfile,
           config.turnContextMaximumBytes,
+          config.dmMode === 'blind' ? {
+            repairArm: config.blindRepairArm,
+            maxAttempts: config.blindMaxAttempts,
+            facts: config.blindFacts,
+            visuals: blindVisualDescriptors(boardImageArtifact),
+          } : undefined,
         );
         return plannedInitialTurnContext;
       };
@@ -3450,9 +4408,6 @@ async function runConversationWithConfiguredIntel(
       const initialInvocationOutput = initialDecisionCatalog === null
         ? { kind: 'tool_driven' } as const
         : await structuredFinalOutput(config.decisionTransport, artifacts, `${key}-initial`, initialDecisionCatalog);
-      let boardImageArtifact: BoardImageArtifact | null = null;
-      let boardImagePrimaryDispatchStartedAtUnixMs: number | null = null;
-      let boardImageBinding: EngineMcpBoardImageBinding | undefined;
       if (config.boardImageMode !== 'off') {
         const snapshotService = options.boardSnapshotService;
         if (snapshotService === undefined) {
@@ -3465,6 +4420,9 @@ async function runConversationWithConfiguredIntel(
           stateDigest: boardStateDigest(rendererState),
         };
         boardImageArtifact = await snapshotService.capture({ state: rendererState, source });
+        if (config.dmMode === 'blind' && boardImageArtifact.blindState === undefined) {
+          throw new Error('Blind DM mode requires a state-only board image; advice captures cannot be reused.');
+        }
         boardImagePrimaryDispatchStartedAtUnixMs = Date.now();
         await readValidatedBoardImage({
           artifact: boardImageArtifact,
@@ -3481,21 +4439,40 @@ async function runConversationWithConfiguredIntel(
           };
         }
       }
-      const initialLauncher = await writeLauncher({
+      const blindDeadlineUnixMs = Date.now() + config.timeoutMs;
+      const writeInitialLauncher = (name: string) => writeLauncher({
         rendererProfile: config.rendererProfile,
         turnContextMaximumBytes: config.turnContextMaximumBytes,
         overridePolicy: config.overridePolicy,
-        directory: artifacts, name: `${key}-initial`, snapshot: initialSnapshot, room,
+        directory: artifacts, name, snapshot: initialSnapshot, room,
         historyKind: round === 1 ? 'room_ready' : 'proposal_applied',
+        ...(config.dmModeExplicit ? { dmMode: config.dmMode } : {}),
+        ...(config.dmMode === 'blind' ? {
+          blindRepairArm: config.blindRepairArm,
+          blindMaxAttempts: config.blindMaxAttempts,
+          blindDeadlineUnixMs,
+          blindFacts: config.blindFacts,
+          blindVisuals: blindVisualDescriptors(boardImageArtifact),
+          semanticBoardMaximumBytes: BLIND_SEMANTIC_BOARD_MAX_BYTES,
+        } : {}),
         ...(launcherKbRead === undefined ? {} : { kbRead: launcherKbRead }),
-        ...(lastSeenTurnContext === undefined ? {} : {
+        ...(lastSeenTurnContext === undefined || config.dmMode === 'blind' ? {} : {
           turnContextDeltaBase: lastSeenTurnContext,
         }),
         ...(boardImageBinding === undefined ? {} : { boardImage: boardImageBinding }),
       });
-      const started = performance.now();
+      const initialLauncher = await writeInitialLauncher(`${key}-initial`);
+      let activeInitialSpools = {
+        proposal: initialLauncher.spoolPath,
+        context: initialLauncher.turnContextSpoolPath,
+        uiFeedback: initialLauncher.uiFeedbackSpoolPath,
+        blindIntent: initialLauncher.blindIntentSpoolPath,
+        blindIngress: initialLauncher.blindIngressSpoolPath,
+      };
+      const started = clock();
       let localInitialProposal: RoundTurnProposalEnvelope | null = null;
-      const initialToolSession = config.cli === 'local-openai'
+      const initialToolSession = config.cli === 'local-openai' ||
+        options.simulatedInProcessDispatchDelayMs !== undefined
         ? inProcessDmToolSession({
             state: engineSession.currentState(),
             snapshot: initialSnapshot,
@@ -3579,6 +4556,10 @@ async function runConversationWithConfiguredIntel(
       let escalated = false;
       let firedEscalationModel: string | null = null;
       let rolloutSessionId: string | null = null;
+      let primaryTurn: AgentTurnResult | null = null;
+      let primaryCatalogEvidence: EngineCatalogEvidence | null = null;
+      let primaryDelivery: TurnContextDelivery | null = null;
+      let failingDispatch: NonNullable<ConversationRowBase['failingDispatch']> | null = null;
       let escalationSessionId: string | null = null;
       let capturedRlData: ConversationRlData | undefined;
       let correctionTurnContextSpoolPath: string | null = null;
@@ -3609,6 +4590,16 @@ async function runConversationWithConfiguredIntel(
       };
       const speculations: ConversationSpeculation[] = [];
       const inFlightSpeculation: { current: InFlightSpeculation | null } = { current: null };
+      const applyJoinedSpeculativeInfrastructure = (
+        completed: SpeculativeDispatchCompletion,
+      ): boolean => {
+        if (completed.turn?.exit !== 'infrastructure_failed') return false;
+        outcome = 'infrastructure_failed';
+        serviceNull = true;
+        refusals.push(completed.turn.failureReason);
+        failingDispatch = completed.failingDispatch;
+        return true;
+      };
       const adjustmentTransitions: AdjustmentExhaustionTransition[] = [];
       const adjustmentPersistence = {
         transitions: (): readonly AdjustmentExhaustionTransition[] => adjustmentTransitions,
@@ -3620,6 +4611,7 @@ async function runConversationWithConfiguredIntel(
         sourceState: EncounterState,
         window: ReturnType<typeof playerWindowBeforeNextMonster>,
       ): Promise<void> => {
+        if (config.dmModeExplicit) return;
         if (inFlightSpeculation.current !== null || window.players.length === 0 || window.monsters.length === 0) return;
         const derivedBudget = Math.min(
           window.players.length * SPECULATION_MS_PER_PLAYER_TURN,
@@ -3710,7 +4702,8 @@ async function runConversationWithConfiguredIntel(
           historyKind: 'speculative_plan_requested',
         });
         let localPlan: QueuedSpeculativePlanEnvelope | null = null;
-        const toolSession = config.cli === 'local-openai'
+        const toolSession = config.cli === 'local-openai' ||
+          options.simulatedInProcessDispatchDelayMs !== undefined
           ? inProcessSpeculativeToolSession({
               state: sourceState,
               snapshot: sourceSnapshot,
@@ -3718,7 +4711,7 @@ async function runConversationWithConfiguredIntel(
             })
           : undefined;
         const controller = new AbortController();
-        const dispatchStarted = performance.now();
+        const dispatchStarted = clock();
         const timeout = setTimeout(() => controller.abort(), budgetMs);
         const completion = (async (): Promise<SpeculativeDispatchCompletion> => {
           try {
@@ -3735,6 +4728,8 @@ async function runConversationWithConfiguredIntel(
               launcher.recoveryManifestPath,
               toolSession,
               freshSessionContext,
+              { kind: 'tool_driven' },
+              { engineDispatchId: launcher.dispatchId, recoveryEngineDispatchId: launcher.recoveryDispatchId },
             );
             const dispatch = roundDeadline.dispatch({
               ...speculativeInvocation,
@@ -3744,41 +4739,63 @@ async function runConversationWithConfiguredIntel(
               return {
                 plan: null,
                 turn: null,
-                planningWallMs: performance.now() - dispatchStarted,
+                planningWallMs: clock() - dispatchStarted,
                 timedOut: true,
                 error: 'The conversation round dispatch deadline is exhausted.',
+                failingDispatch: null,
               };
             }
             speculationPlanner = planner;
             options.onSpeculationDispatchStart?.();
+            options.onAgentInvocation?.(speculativeInvocation);
             const turn = await adapter.start(
               dispatch.invocation,
               AbortSignal.any([roundDeadline.signal, controller.signal]),
             );
-            const planningWallMs = performance.now() - dispatchStarted;
+            options.onSpeculationResultObservedForTest?.(turn);
+            const planningWallMs = clock() - dispatchStarted;
+            const spools = dispatchSpools(launcher, turn);
+            enforceCompletedDispatchIntegrity({
+              turn,
+              launcher,
+              spools,
+              maximumBytes: config.turnContextMaximumBytes,
+              artifactPath: join(artifacts, `${key}-speculative-${String(window.monsters[0])}-dispatch-integrity.json`),
+              rowPath: config.outPath,
+              scheduledCellKey: config.scheduledCellKey ?? `${String(room)}:${String(round)}`,
+            });
             const acceptedInTime = roundDeadline.acceptsCompletion();
             return {
-              plan: acceptedInTime
-                ? localPlan ?? takeSpeculativePlan(launcher.spoolPath)
+              plan: acceptedInTime && turn.exit === 'completed'
+                ? localPlan ?? takeSpeculativePlan(spools.proposal)
                 : null,
-              turn: acceptedInTime ? turn : null,
+              turn,
               planningWallMs,
-              timedOut: !acceptedInTime || controller.signal.aborted || planningWallMs > budgetMs,
-              error: null,
+              timedOut: !acceptedInTime || turn.exit === 'timed_out' || controller.signal.aborted || planningWallMs > budgetMs,
+              error: turn.exit === 'infrastructure_failed' ? turn.failureReason : null,
+              failingDispatch: turn.exit === 'infrastructure_failed'
+                ? classifyFailedDispatch({
+                    phase: 'speculative', turn, contextSpoolPath: spools.context,
+                    maximumBytes: config.turnContextMaximumBytes,
+                  })
+                : null,
             };
           } catch (error) {
+            if (error instanceof D569IntegrityStop) throw error;
             return {
               plan: null,
               turn: null,
-              planningWallMs: performance.now() - dispatchStarted,
+              planningWallMs: clock() - dispatchStarted,
               timedOut: !roundDeadline.acceptsCompletion() || controller.signal.aborted,
               error: error instanceof Error ? error.message : String(error),
+              failingDispatch: null,
             };
           } finally {
             clearTimeout(timeout);
           }
         })();
         inFlightSpeculation.current = {
+          dispatchId: launcher.dispatchId,
           sourceSnapshot,
           sourceTurnContext: {
             revision: ordinaryContextSnapshot.capsule.revision,
@@ -3818,6 +4835,7 @@ async function runConversationWithConfiguredIntel(
         readonly reasons: readonly PlanMaterialityReasonCode[];
         readonly openActorIds: readonly CombatantId[];
       }): Promise<void> => {
+        if (!config.midRoundAdjustmentsEnabled) return;
         if (segmentPlanId === null) throw new Error('Material PC turn has no authorized monster plan to adjust.');
         if (options.mutateBeforeAdjustmentPreflight !== undefined) {
           classifyPolicy();
@@ -3901,20 +4919,22 @@ async function runConversationWithConfiguredIntel(
               `${adjustmentKey}-initial`,
               adjustmentDecisionCatalog,
             );
-        const adjustmentLauncher = await writeLauncher({
+        const writeAdjustmentLauncher = (name: string) => writeLauncher({
           rendererProfile: config.rendererProfile,
           turnContextMaximumBytes: config.turnContextMaximumBytes,
           overridePolicy: config.overridePolicy,
           directory: artifacts,
-          name: `${adjustmentKey}-initial`,
+          name,
           snapshot: adjustmentSnapshot,
           room,
           historyKind: 'plan_adjustment_requested',
           ...(launcherKbRead === undefined ? {} : { kbRead: launcherKbRead }),
           ...(lastSeenTurnContext === undefined ? {} : { turnContextDeltaBase: lastSeenTurnContext }),
         });
+        const adjustmentLauncher = await writeAdjustmentLauncher(`${adjustmentKey}-initial`);
         let localAdjustmentProposal: PlanAdjustmentProposalEnvelope | null = null;
-        const adjustmentToolSession = config.cli === 'local-openai'
+        const adjustmentToolSession = config.cli === 'local-openai' ||
+          options.simulatedInProcessDispatchDelayMs !== undefined
           ? inProcessDmToolSession({
               state: engineSession.currentState(),
               snapshot: adjustmentSnapshot,
@@ -3960,6 +4980,9 @@ async function runConversationWithConfiguredIntel(
         const toolCallsBeforeAdjustment = adjustmentToolCalls();
         const adjustmentRlData: ConversationRlDataV2[] = [];
         for (let attempt = 0; attempt < 3; attempt += 1) {
+          const dispatchAdjustmentLauncher = attempt === 0
+            ? adjustmentLauncher
+            : await writeAdjustmentLauncher(`${adjustmentKey}-initial-retry-${String(attempt + 1)}`);
           const callsBefore = adjustmentToolCalls();
           const rejectionsBefore = adjustmentRejections().length;
           const retryNote = attempt === 0 ? '' :
@@ -3971,32 +4994,63 @@ async function runConversationWithConfiguredIntel(
             adjustmentDecisionCatalog === null
               ? `${retryNote}${turnContextPrompt(lastSeenTurnContext, config.intelMode)}\n\n${renderEnginePrompt('plan_round', adjustmentSnapshot.capsule, RULES_SOURCE)}`
               : structuredFinalPrompt(adjustmentTurnContext, adjustmentDecisionCatalog),
-            adjustmentLauncher.manifestPath,
+            dispatchAdjustmentLauncher.manifestPath,
             null,
             basePlanner,
-            adjustmentLauncher.recoveryManifestPath,
+            dispatchAdjustmentLauncher.recoveryManifestPath,
             adjustmentToolSession,
             freshSessionContext,
             adjustmentInvocationOutput,
+            {
+              engineDispatchId: dispatchAdjustmentLauncher.dispatchId,
+              recoveryEngineDispatchId: dispatchAdjustmentLauncher.recoveryDispatchId,
+            },
           );
+          options.onAgentInvocation?.(adjustmentInvocation);
           adjustmentCalls += 1;
           const turn = await lifecycle.resumeRound(
             adjustmentInvocation,
             roundDeadline,
           );
-          if (!roundDeadline.acceptsCompletion()) throw new AgentDispatchDeadlineExceededError();
+          options.onAdjustmentResultObservedForTest?.(turn);
           adjustmentSessionId = turn.sessionId;
           captureCallUsage(turn, 'adjustment');
           decisionAttempts += 1;
           adjustmentUsage = addAgentUsage(adjustmentUsage, turn.usage);
+          const adjustmentSpools = dispatchSpools(dispatchAdjustmentLauncher, turn);
+          enforceCompletedDispatchIntegrity({
+            turn,
+            launcher: dispatchAdjustmentLauncher,
+            spools: adjustmentSpools,
+            maximumBytes: config.turnContextMaximumBytes,
+            artifactPath: join(artifacts, `${adjustmentKey}-initial-${String(attempt + 1)}-dispatch-integrity.json`),
+            rowPath: config.outPath,
+            scheduledCellKey: config.scheduledCellKey ?? `${String(room)}:${String(round)}`,
+          });
+          if (turn.exit !== 'completed') {
+            adjustmentServiceNull = true;
+            if (turn.exit === 'infrastructure_failed') {
+              outcome = 'infrastructure_failed';
+              serviceNull = true;
+              refusals.push(turn.failureReason);
+              failingDispatch = classifyFailedDispatch({
+                phase: 'adjustment', turn,
+                contextSpoolPath: adjustmentSpools.context,
+                maximumBytes: config.turnContextMaximumBytes,
+              });
+              throw new CellInfrastructureAbort('Adjustment engine MCP infrastructure failed.');
+            }
+            break;
+          }
+          if (!roundDeadline.acceptsCompletion()) throw new AgentDispatchDeadlineExceededError();
           adjustmentTurnContext = takeTurnContext(
-            adjustmentLauncher.turnContextSpoolPath,
+            adjustmentSpools.context,
             config.turnContextMaximumBytes,
           ) ??
             adjustmentTurnContext;
           if (adjustmentDecisionCatalog === null) {
             adjustmentProposal = localAdjustmentProposal ??
-              takePlanAdjustmentProposal(adjustmentLauncher.spoolPath);
+              takePlanAdjustmentProposal(adjustmentSpools.proposal);
           } else {
             const structured = queueStructuredFinalDecision({
               finalText: turn.finalText,
@@ -4128,8 +5182,15 @@ async function runConversationWithConfiguredIntel(
             ...(launcherKbRead === undefined ? {} : { kbRead: launcherKbRead }),
             ...(lastSeenTurnContext === undefined ? {} : { turnContextDeltaBase: lastSeenTurnContext }),
           });
+          let correctionSpools = dispatchSpools(correctionLauncher, {
+            exit: 'completed', resumeSessionId: agentSessionId('agent-session:spool-placeholder'),
+            sessionId: null, finalText: '', usage: null, processEvidence: null,
+            partialResultEvidence: { status: 'complete', decodedEventCount: 0 },
+            engineCatalogEvidence: null,
+          });
           let localCorrection: PlanAdjustmentProposalEnvelope | null = null;
-          const correctionToolSession = config.cli === 'local-openai'
+          const correctionToolSession = config.cli === 'local-openai' ||
+            options.simulatedInProcessDispatchDelayMs !== undefined
             ? inProcessDmToolSession({
                 state: engineSession.currentState(),
                 snapshot: correctionSnapshot,
@@ -4162,15 +5223,38 @@ async function runConversationWithConfiguredIntel(
             turnContext: correctionContext.value,
             lifecycle: {
               resumeCorrection: async (correctionInvocation, deadline) => {
+                options.onAgentInvocation?.(correctionInvocation);
                 correctionCalls += 1;
                 const turn = await lifecycle.resumeCorrection(correctionInvocation, deadline);
+                correctionSpools = dispatchSpools(correctionLauncher, turn);
+                enforceCompletedDispatchIntegrity({
+                  turn,
+                  launcher: correctionLauncher,
+                  spools: correctionSpools,
+                  maximumBytes: config.turnContextMaximumBytes,
+                  artifactPath: join(artifacts, `${adjustmentKey}-correction-dispatch-integrity.json`),
+                  rowPath: config.outPath,
+                  scheduledCellKey: config.scheduledCellKey ?? `${String(room)}:${String(round)}`,
+                });
+                if (turn.exit === 'infrastructure_failed') {
+                  failingDispatch = classifyFailedDispatch({
+                    phase: 'correction', turn,
+                    contextSpoolPath: correctionSpools.context,
+                    maximumBytes: config.turnContextMaximumBytes,
+                  });
+                }
                 adjustmentCorrectionSessionId = turn.sessionId;
                 captureCallUsage(turn, 'correction');
                 decisionAttempts += 1;
                 adjustmentUsage = addAgentUsage(adjustmentUsage, turn.usage);
                 adjustmentCorrectionContext =
-                  takeTurnContext(correctionLauncher.turnContextSpoolPath, config.turnContextMaximumBytes) ??
+                  takeTurnContext(correctionSpools.context, config.turnContextMaximumBytes) ??
                   adjustmentCorrectionContext;
+                if (turn.exit !== 'completed') {
+                  localCorrection = null;
+                  adjustmentCorrectionProposal = null;
+                  return turn;
+                }
                 if (adjustmentCorrectionDecisionCatalog !== null) {
                   const structured = queueStructuredFinalDecision({
                     finalText: turn.finalText,
@@ -4219,10 +5303,14 @@ async function runConversationWithConfiguredIntel(
               correctionToolSession,
               freshSessionContext,
               correctionInvocationOutput,
+              {
+                engineDispatchId: correctionLauncher.dispatchId,
+                recoveryEngineDispatchId: correctionLauncher.recoveryDispatchId,
+              },
             ),
             activateCapsule: () => undefined,
             takeProposal: () => {
-              const proposal = localCorrection ?? takePlanAdjustmentProposal(correctionLauncher.spoolPath);
+              const proposal = localCorrection ?? takePlanAdjustmentProposal(correctionSpools.proposal);
               adjustmentCorrectionProposal = proposal;
               return proposal;
             },
@@ -4239,6 +5327,11 @@ async function runConversationWithConfiguredIntel(
           correction: correctionRuntime,
           deadline: roundDeadline,
         });
+        if (completion.correctionResult === 'infrastructure_failed') {
+          outcome = 'infrastructure_failed';
+          serviceNull = true;
+          throw new CellInfrastructureAbort('Adjustment correction engine MCP infrastructure failed.');
+        }
         const completedCorrectionProposal = recordedAdjustmentCorrectionProposal();
         if (config.captureRlData && adjustmentProposal?.submittedArguments !== undefined) {
           adjustmentRlData.push(rlCapture(
@@ -4372,10 +5465,18 @@ async function runConversationWithConfiguredIntel(
         const rejectionsObserved = (): readonly ConversationChainAttemptEvidence[] =>
           simulated?.rejectionsByRequest.get(requestId) ?? observedRejections;
         const primaryPrompt = initialDecisionCatalog === null
-          ? renderEnginePrompt('plan_round', capsule, RULES_SOURCE)
+          ? config.dmMode === 'blind'
+            ? renderBlindEnginePrompt('plan_blind_round', capsule, RULES_SOURCE)
+            : renderEnginePrompt('plan_round', capsule, RULES_SOURCE)
           : structuredFinalPrompt(rowTurnContext, initialDecisionCatalog);
         try {
-          for (let attempt = 0; attempt < 3; attempt += 1) {
+          const dispatchAttempts = config.dmMode === 'blind' ? 1 : 3;
+          for (let attempt = 0; attempt < dispatchAttempts; attempt += 1) {
+            const dispatchLauncher = attempt === 0
+              ? initialLauncher
+              : await writeInitialLauncher(
+                  `${key}-retry-${String(attempt + 1)}-initial`,
+                );
             const callsBefore = toolCallsObserved();
             const contextCallsBefore = contextCallsObserved();
             const rejectionsBefore = rejectionsObserved().length;
@@ -4385,26 +5486,63 @@ async function runConversationWithConfiguredIntel(
               config, runId,
               'initial',
               initialDecisionCatalog === null
-                ? `${retryNote}${turnContextPrompt(lastSeenTurnContext, config.intelMode)}\n\n${primaryPrompt}`
+                ? config.dmMode === 'blind'
+                  ? `${retryNote}Call engine.get_turn_context with granularity "full", then call engine.submit_blind_round_intents.\n\n${primaryPrompt}`
+                  : `${retryNote}${turnContextPrompt(lastSeenTurnContext, config.intelMode)}\n\n${primaryPrompt}`
                 : primaryPrompt,
-              initialLauncher.manifestPath,
+              dispatchLauncher.manifestPath,
               journal.agentSession() === null ? startupInstructions : null,
               basePlanner,
-              initialLauncher.recoveryManifestPath,
+              dispatchLauncher.recoveryManifestPath,
               initialToolSession,
               freshSessionContext,
               initialInvocationOutput,
+              {
+                engineDispatchId: dispatchLauncher.dispatchId,
+                recoveryEngineDispatchId: dispatchLauncher.recoveryDispatchId,
+              },
             );
             initialDispatchPlanner = plannerAttribution(primaryInvocation);
+            if (config.dmMode === 'blind') {
+              const priorPrompts = takeBlindIngressRecords(dispatchLauncher.blindIngressSpoolPath)
+                .filter((record) => record.channel === 'initial_prompt' || record.channel === 'retry_prompt')
+                .map((record) => record.text);
+              const ingress = [
+                ...(attempt === 0 ? [{ channel: 'startup' as const, text: startupInstructions }] : []),
+                ...(priorPrompts.length === 0 ? [] : [{
+                  channel: 'replay_history' as const,
+                  text: canonicalJson(priorPrompts),
+                }]),
+                {
+                  channel: attempt === 0 ? 'initial_prompt' as const : 'retry_prompt' as const,
+                  text: primaryInvocation.prompt,
+                },
+                ...(boardImageArtifact?.blindState === undefined ? [] : [{
+                  channel: 'image_metadata' as const,
+                  text: canonicalJson({
+                    role: boardImageArtifact.blindState.role,
+                    ordinal: boardImageArtifact.blindState.ordinal,
+                    sha256: boardImageArtifact.sha256,
+                    primerVersion: boardImageArtifact.blindState.primerVersion,
+                  }),
+                }]),
+              ];
+              appendBlindIngress(dispatchLauncher.blindIngressSpoolPath, ingress);
+              appendBlindIngress(dispatchLauncher.recoveryBlindIngressSpoolPath, ingress);
+            }
             options.onPrimaryInvocation?.(primaryInvocation);
+            options.onAgentInvocation?.(primaryInvocation);
             options.onPrimaryDispatchStart?.();
             initialCalls += 1;
             let turn: AgentTurnResult;
             try {
-              turn = journal.agentSession() === null
-                ? await lifecycle.coldStartRound(primaryInvocation, roundDeadline)
-                : await lifecycle.resumeRound(primaryInvocation, roundDeadline);
-              if (!roundDeadline.acceptsCompletion()) throw new AgentDispatchDeadlineExceededError();
+              if (journal.agentSession() === null) {
+                const cold = await lifecycle.coldStartRound(primaryInvocation, roundDeadline);
+                turn = cold.turn;
+              } else {
+                turn = await lifecycle.resumeRound(primaryInvocation, roundDeadline);
+              }
+              options.onPrimaryResultObservedForTest?.(turn);
             } catch (error) {
               if (!agentDispatchWasCancelled(error)) throw error;
               primaryDispatchTimedOut = true;
@@ -4414,16 +5552,95 @@ async function runConversationWithConfiguredIntel(
               }
               break;
             }
+            primaryTurn = turn;
+            primaryCatalogEvidence = turn.engineCatalogEvidence ?? (config.dmModeExplicit ? {
+              status: 'inconclusive', dispatchId: dispatchLauncher.dispatchId,
+              reason: 'no_correlated_catalog',
+            } : null);
+            activeInitialSpools = dispatchSpools(dispatchLauncher, turn);
+            const recoveryDispatch = activeInitialSpools.proposal === dispatchLauncher.recoverySpoolPath;
+            const correlatedContext = takeCorrelatedTurnContext(
+              activeInitialSpools.context,
+              config.turnContextMaximumBytes,
+              primaryCatalogEvidence?.dispatchId ?? dispatchLauncher.dispatchId,
+            );
+            if (primaryCatalogEvidence !== null) {
+              primaryDelivery = classifyTurnContextDelivery({
+                turn,
+                catalogEvidence: primaryCatalogEvidence,
+                delivered: correlatedContext === null ? null : {
+                  contextSha256: sha256(correlatedContext.raw),
+                  measurement: deliveredTurnContextMeasurement(correlatedContext),
+                },
+              });
+              if (d569DeliveryHasIntegritySignal(primaryCatalogEvidence, primaryDelivery)) {
+                if (primaryDelivery.status !== 'indeterminate' && primaryDelivery.status !== 'delivered') {
+                  throw new Error('Contradictory primary startup evidence produced an unsupported delivery state.');
+                }
+                persistD569IntegrityStop({
+                  artifactPath: join(artifacts, `${key}-dispatch-integrity.json`),
+                  rowPath: config.outPath,
+                  scheduledCellKey: config.scheduledCellKey ?? `${String(room)}:${String(round)}`,
+                  launcherPath: recoveryDispatch
+                    ? dispatchLauncher.recoveryManifestPath
+                    : dispatchLauncher.manifestPath,
+                  proposalSpoolPath: activeInitialSpools.proposal,
+                  contextSpoolPath: activeInitialSpools.context,
+                  catalogEvidence: primaryCatalogEvidence,
+                  delivery: primaryDelivery,
+                  turn,
+                });
+              }
+            }
             rolloutSessionId = turn.sessionId;
             captureCallUsage(turn, 'initial');
             primaryExplicitRefusal ||= explicitlyRefusedTurn(turn);
             decisionAttempts += 1;
+            if (turn.exit !== 'completed') {
+              serviceNull = true;
+              if (initialDecisionCatalog !== null) {
+                decisionRejectionCodes.push('decision_timeout');
+              }
+              if (turn.exit === 'cancelled' && config.dmModeExplicit && initialDecisionCatalog === null) {
+                primaryDispatchTimedOut = false;
+                outcome = 'infrastructure_failed';
+                fallbackReason = 'dispatch_cancelled';
+                if (primaryCatalogEvidence === null || primaryDelivery === null) {
+                  throw new D569IntegrityStop('Cancelled D569 dispatch lacks correlated catalog or delivery evidence.');
+                }
+                failingDispatch = {
+                  phase: 'primary', exit: 'cancelled',
+                  dispatchId: primaryCatalogEvidence.dispatchId,
+                  engineCatalogEvidence: primaryCatalogEvidence,
+                  turnContextDelivery: primaryDelivery,
+                  failureReason: turn.cancellationReason,
+                };
+              } else if (turn.exit === 'timed_out' || turn.exit === 'cancelled') {
+                primaryDispatchTimedOut = true;
+                outcome = 'refused';
+                fallbackReason = 'timeout';
+              } else if (turn.exit === 'infrastructure_failed') {
+                outcome = 'infrastructure_failed';
+                refusals.push(turn.failureReason);
+                if (config.dmModeExplicit && (primaryCatalogEvidence === null || primaryDelivery === null)) {
+                  throw new D569IntegrityStop('Failed D569 dispatch lacks correlated catalog or delivery evidence.');
+                }
+                if (primaryCatalogEvidence !== null && primaryDelivery !== null) failingDispatch = {
+                  phase: 'primary', exit: 'infrastructure_failed',
+                  dispatchId: primaryCatalogEvidence.dispatchId,
+                  engineCatalogEvidence: primaryCatalogEvidence,
+                  turnContextDelivery: primaryDelivery,
+                  failureReason: turn.failureReason,
+                };
+              } else {
+                outcome = 'refused';
+              }
+              break;
+            }
+            if (!roundDeadline.acceptsCompletion()) throw new AgentDispatchDeadlineExceededError();
             if (initialDecisionCatalog === null) {
-              rowTurnContext = takeTurnContext(
-                initialLauncher.turnContextSpoolPath,
-                config.turnContextMaximumBytes,
-              ) ?? rowTurnContext;
-              proposed = localInitialProposal ?? takeRoundProposal(initialLauncher.spoolPath);
+              rowTurnContext = correlatedContext ?? rowTurnContext;
+              proposed = localInitialProposal ?? takeRoundProposal(activeInitialSpools.proposal);
               if (decisionAttempts === 1) firstDecisionAccepted = proposed !== null;
             } else {
               const structured = queueStructuredFinalDecision({
@@ -4458,12 +5675,12 @@ async function runConversationWithConfiguredIntel(
             const flapped = initialDecisionCatalog === null && turn.exit === 'completed' && proposed === null &&
               !primaryExplicitRefusal &&
               toolCallsObserved() === callsBefore && rejectionsObserved().length === rejectionsBefore;
-            if (contextCallsObserved() > contextCallsBefore || proposed !== null) {
+            if (config.dmMode !== 'blind' && (contextCallsObserved() > contextCallsBefore || proposed !== null)) {
               lastSeenTurnContext = getCurrentTurnContext();
             }
             if (!flapped) break;
             if (initialDecisionCatalog !== null) break;
-            if (attempt === 2) {
+            if (attempt === dispatchAttempts - 1) {
               serviceNull = true;
               outcome = 'service_null';
               classifyPolicy();
@@ -4487,7 +5704,7 @@ async function runConversationWithConfiguredIntel(
               { attempt: 'primary', actorId, declaredProposal: null, rejectionReasons: ['No engine rejection was returned because the agent submitted no initial proposal.'] },
               { attempt: 'fallback', actorId, declaredProposal: null, rejectionReasons: ['No engine rejection was returned because the agent submitted no fallback proposal.'] },
             );
-            return { actorId, fallbackResult: 'absent' };
+            return { actorId, fallbackResult: actorRejections.length > 0 ? 'invalid' : 'absent' };
           }),
         } : { kind: 'proposal', proposal: proposed };
         const correctionRequest: EngineOrdinaryRoundCapsuleRequest = {
@@ -4531,16 +5748,33 @@ async function runConversationWithConfiguredIntel(
           overridePolicy: config.overridePolicy,
           directory: artifacts, name: `${key}-correction`, snapshot: correctionSnapshot,
           room, historyKind: 'proposal_correction_requested',
+          ...(config.dmModeExplicit ? { dmMode: config.dmMode } : {}),
+          ...(config.dmMode === 'blind' ? {
+            blindRepairArm: config.blindRepairArm,
+            blindMaxAttempts: config.blindMaxAttempts,
+            blindDeadlineUnixMs,
+            blindFacts: config.blindFacts,
+            blindVisuals: blindVisualDescriptors(boardImageArtifact),
+            semanticBoardMaximumBytes: BLIND_SEMANTIC_BOARD_MAX_BYTES,
+          } : {}),
           ...(launcherKbRead === undefined ? {} : { kbRead: launcherKbRead }),
-          ...(correctionTurnContextBase === undefined ? {} : {
+          ...(correctionTurnContextBase === undefined || config.dmMode === 'blind' ? {} : {
             turnContextDeltaBase: correctionTurnContextBase,
           }),
           ...(boardImageBinding === undefined ? {} : { boardImage: boardImageBinding }),
         });
+        let mainCorrectionSpools = {
+          proposal: correctionLauncher.spoolPath,
+          context: correctionLauncher.turnContextSpoolPath,
+          uiFeedback: correctionLauncher.uiFeedbackSpoolPath,
+          blindIntent: correctionLauncher.blindIntentSpoolPath,
+          blindIngress: correctionLauncher.blindIngressSpoolPath,
+        };
         correctionTurnContextSpoolPath = correctionLauncher.turnContextSpoolPath;
         correctionUiFeedbackSpoolPath = correctionLauncher.uiFeedbackSpoolPath;
         let localCorrectionProposal: RoundTurnProposalEnvelope | null = null;
-        const correctionToolSession = config.cli === 'local-openai'
+        const correctionToolSession = config.cli === 'local-openai' ||
+          options.simulatedInProcessDispatchDelayMs !== undefined
           ? inProcessDmToolSession({
               state: engineSession.currentState(),
               snapshot: correctionSnapshot,
@@ -4587,6 +5821,13 @@ async function runConversationWithConfiguredIntel(
           ...(launcherKbRead === undefined ? {} : { kbRead: launcherKbRead }),
           ...(boardImageBinding === undefined ? {} : { boardImage: boardImageBinding }),
         });
+        let escalationSpools = escalationLauncher === null ? null : {
+          proposal: escalationLauncher.spoolPath,
+          context: escalationLauncher.turnContextSpoolPath,
+          uiFeedback: escalationLauncher.uiFeedbackSpoolPath,
+          blindIntent: escalationLauncher.blindIntentSpoolPath,
+          blindIngress: escalationLauncher.blindIngressSpoolPath,
+        };
         const escalationToolSession = config.cli !== 'local-openai' || escalationLauncher === null
           ? undefined
           : inProcessDmToolSession({
@@ -4640,10 +5881,10 @@ async function runConversationWithConfiguredIntel(
               : correctionDispatchPlanner;
             const correctionContextPath = escalationTrigger === null || escalationLauncher === null
               ? correctionLauncher.turnContextSpoolPath
-              : escalationLauncher.turnContextSpoolPath;
+              : escalationSpools?.context ?? escalationLauncher.turnContextSpoolPath;
             const proposalTurnContext = config.captureRlData
               ? proposal.phase === 'initial'
-                ? takeTurnContext(initialLauncher.turnContextSpoolPath, config.turnContextMaximumBytes) ??
+                ? takeTurnContext(activeInitialSpools.context, config.turnContextMaximumBytes) ??
                   getPlannedInitialTurnContext()
                 : takeTurnContext(correctionContextPath, config.turnContextMaximumBytes) ??
                   getPlannedCorrectionTurnContext()
@@ -4706,6 +5947,7 @@ async function runConversationWithConfiguredIntel(
                     fallbackOption: structuredClone(entry.fallbackOption),
                     mechanics: entry.mechanics,
                     selectedBranch: entry.selectedBranch,
+                    ...(entry.strictNoFallback === true ? { strictNoFallback: true as const } : {}),
                   });
                 }
                 segmentPlanId = proposal.proposalId;
@@ -4720,7 +5962,7 @@ async function runConversationWithConfiguredIntel(
               return 'invalid';
             }
             proposalId = proposal.proposalId;
-            authorizedMonsterProposalHash = sha256(canonicalJson(proposal));
+            authorizedMonsterProposalHash = sha256(authorizedRoundProposalHashInput(proposal));
             acceptedSubmission = proposal.resolutions.map((entry) => structuredClone(entry.proposal));
             acceptedIntelCapture = proposal.intelCapture === undefined
               ? null : structuredClone(proposal.intelCapture);
@@ -4859,6 +6101,7 @@ async function runConversationWithConfiguredIntel(
                   firedEscalationModel = correctionDispatchPlanner.model;
                   correctionCalls += 1;
                   recordedCorrectionTurnContext = getPlannedCorrectionTurnContext();
+                  options.onAgentInvocation?.(escalationInvocation);
                   let turn: AgentTurnResult;
                   try {
                     turn = await lifecycle.startEscalation({
@@ -4878,7 +6121,29 @@ async function runConversationWithConfiguredIntel(
                       finalText: '',
                       usage: null,
                       exit: 'completed',
+                      processEvidence: null,
+                      engineCatalogEvidence: null,
+                      partialResultEvidence: { status: 'complete', decodedEventCount: 0 },
                     };
+                  }
+                  escalationSpools = dispatchSpools(escalationLauncher, turn);
+                  enforceCompletedDispatchIntegrity({
+                    turn,
+                    launcher: escalationLauncher,
+                    spools: escalationSpools,
+                    maximumBytes: config.turnContextMaximumBytes,
+                    artifactPath: join(artifacts, `${key}-escalation-dispatch-integrity.json`),
+                    rowPath: config.outPath,
+                    scheduledCellKey: config.scheduledCellKey ?? `${String(room)}:${String(round)}`,
+                  });
+                  correctionTurnContextSpoolPath = escalationSpools.context;
+                  correctionUiFeedbackSpoolPath = escalationSpools.uiFeedback;
+                  if (turn.exit === 'infrastructure_failed') {
+                    failingDispatch = classifyFailedDispatch({
+                      phase: 'correction', turn,
+                      contextSpoolPath: escalationSpools.context,
+                      maximumBytes: config.turnContextMaximumBytes,
+                    });
                   }
                   if (!correctionDispatchTimedOut &&
                     turn.resumeSessionId === journal.agentSession()?.sessionId) {
@@ -4933,12 +6198,21 @@ async function runConversationWithConfiguredIntel(
                 escalationToolSession,
                 freshSessionContext,
                 correctionInvocationOutput,
+                {
+                  engineDispatchId: escalationLauncher.dispatchId,
+                  recoveryEngineDispatchId: escalationLauncher.recoveryDispatchId,
+                },
               ),
               activateCapsule: (trigger: ProposalEscalationTrigger) => { requestedEscalationTrigger = trigger; },
-              takeProposal: () => localEscalationProposal ?? takeRoundProposal(escalationLauncher.spoolPath),
+              takeProposal: () => localEscalationProposal ?? takeRoundProposal(
+                escalationSpools?.proposal ?? escalationLauncher.spoolPath,
+              ),
             };
         const coordinated = await new TurnExhaustionCoordinator(journal.turnExhaustionPersistence()).coordinate({
           initial,
+          authorizationFailurePolicy: config.dmMode === 'blind'
+            ? { kind: 'refuse_blind' }
+            : { kind: 'correct_with_dm_protocol' },
           correction: {
             capsule: correctionCapsule, rules: RULES_SOURCE,
             turnContext: {
@@ -4952,6 +6226,7 @@ async function runConversationWithConfiguredIntel(
             },
             lifecycle: {
               resumeCorrection: async (correctionInvocation: AgentInvocation, deadline: AgentDispatchDeadline) => {
+                options.onAgentInvocation?.(correctionInvocation);
                 correctionDispatchPlanner = plannerAttribution(correctionInvocation);
                 const correctionRejectionsBefore = canonicalJson(rejectionsObserved());
                 const contextCallsBeforeCorrection = simulated?.contextCallsByRequest.get(requestId) ??
@@ -4973,11 +6248,40 @@ async function runConversationWithConfiguredIntel(
                     sessionId: null,
                     finalText: '',
                     usage: null,
-                    exit: 'completed',
+                    exit: 'cancelled',
+                    cancellationReason: 'legacy_adapter_cancellation',
+                    processEvidence: null,
+                    engineCatalogEvidence: null,
+                    partialResultEvidence: {
+                      status: 'partial', decodedEventCount: 0, finalTextFragment: '',
+                      observedUsage: null, stagedInvocationIds: [],
+                    },
                   };
                 }
+                mainCorrectionSpools = dispatchSpools(correctionLauncher, correctionTurn);
+                enforceCompletedDispatchIntegrity({
+                  turn: correctionTurn,
+                  launcher: correctionLauncher,
+                  spools: mainCorrectionSpools,
+                  maximumBytes: config.turnContextMaximumBytes,
+                  artifactPath: join(artifacts, `${key}-correction-dispatch-integrity.json`),
+                  rowPath: config.outPath,
+                  scheduledCellKey: config.scheduledCellKey ?? `${String(room)}:${String(round)}`,
+                });
+                correctionTurnContextSpoolPath = mainCorrectionSpools.context;
+                correctionUiFeedbackSpoolPath = mainCorrectionSpools.uiFeedback;
+                if (correctionTurn.exit === 'infrastructure_failed') {
+                  failingDispatch = classifyFailedDispatch({
+                    phase: 'correction', turn: correctionTurn,
+                    contextSpoolPath: mainCorrectionSpools.context,
+                    maximumBytes: config.turnContextMaximumBytes,
+                  });
+                }
                 if (correctionTurn.exit !== 'completed') {
-                  throw new Error('Agent correction dispatch was cancelled.');
+                  correctionDispatchTimedOut = correctionTurn.exit === 'timed_out';
+                  captureCallUsage(correctionTurn, 'correction');
+                  correctionFinalText = correctionTurn.finalText;
+                  return correctionTurn;
                 }
                 rolloutSessionId = correctionTurn.sessionId;
                 captureCallUsage(correctionTurn, 'correction');
@@ -4988,7 +6292,7 @@ async function runConversationWithConfiguredIntel(
                 }
                 decisionAttempts += 1;
                 recordedCorrectionTurnContext =
-                  takeTurnContext(correctionLauncher.turnContextSpoolPath, config.turnContextMaximumBytes) ??
+                  takeTurnContext(mainCorrectionSpools.context, config.turnContextMaximumBytes) ??
                   recordedCorrectionTurnContext;
                 if (correctionDecisionCatalog !== null && deadline.acceptsCompletion()) {
                   const structured = queueStructuredFinalDecision({
@@ -5055,9 +6359,13 @@ async function runConversationWithConfiguredIntel(
               correctionToolSession,
               freshSessionContext,
               correctionInvocationOutput,
+              {
+                engineDispatchId: correctionLauncher.dispatchId,
+                recoveryEngineDispatchId: correctionLauncher.recoveryDispatchId,
+              },
             ),
             activateCapsule: () => undefined,
-            takeProposal: () => localCorrectionProposal ?? takeRoundProposal(correctionLauncher.spoolPath),
+            takeProposal: () => localCorrectionProposal ?? takeRoundProposal(mainCorrectionSpools.proposal),
             validationFailureObserved: () => correctionValidationFailureObserved,
           },
           escalation: escalationRuntime,
@@ -5065,6 +6373,8 @@ async function runConversationWithConfiguredIntel(
           host,
         });
         outcome = coordinated.kind;
+        if (coordinated.kind === 'refused') fallbackReason = coordinated.reason;
+        if (coordinated.kind === 'infrastructure_failed') serviceNull = true;
         if (coordinated.kind === 'authorized') proposalId = coordinated.proposalId;
         if (coordinated.kind === 'auto_resolved') {
           const correctionRejections = simulated?.rejectionsByRequest.get(requestId) ?? observedRejections;
@@ -5219,6 +6529,7 @@ async function runConversationWithConfiguredIntel(
           const acted = new Set<CombatantId>();
           let pcTurnOrdinal = 0;
           while (true) {
+            options.onInitiativeIterationForTest?.();
             let state = engineSession.currentState();
             const activeActorId = state.activeCombatant;
             if (activeActorId === null) break;
@@ -5238,6 +6549,10 @@ async function runConversationWithConfiguredIntel(
             }
             if (active.profile.kind === 'player_character') {
               await startSpeculation(state, playerWindowBeforeNextMonster(state));
+              if (inFlightSpeculation.current !== null && options.failAfterSpeculationStartForTest === true) {
+                throw new Error('SIMULATED failure after speculation start.');
+              }
+              if (inFlightSpeculation.current !== null && options.endRoundAfterSpeculationStartForTest === true) break;
               pcTurnOrdinal += 1;
               const beforeState = state;
               const beforeOpenActorIds = [...openMonsters]
@@ -5332,9 +6647,13 @@ async function runConversationWithConfiguredIntel(
                 capsuleRevision = Math.max(capsuleRevision, state.revision);
               }
               const pending = inFlightSpeculation.current;
-              const boundaryStarted = performance.now();
+              const boundaryStarted = clock();
               const completed = await pending.completion;
               if (completed.turn !== null) captureCallUsage(completed.turn, 'speculation');
+              if (applyJoinedSpeculativeInfrastructure(completed)) {
+                inFlightSpeculation.current = null;
+                throw new CellInfrastructureAbort('Speculative engine MCP infrastructure failed.');
+              }
               const decisionSnapshot = engineSession.snapshot({
                 runId, branchId, revision: capsuleRevision,
                 requestId: `${requestId}:speculation-decision`,
@@ -5371,6 +6690,10 @@ async function runConversationWithConfiguredIntel(
                   else adoptedEntries = adoption.entries;
                 }
               }
+              if (options.forceSpeculationRecalculationForTest === true) {
+                discardReason = 'proposal_validation_failed';
+                adoptedEntries = null;
+              }
               if (adoptedEntries !== null) {
                 for (const entry of adoptedEntries) {
                   segmentMonsterPlan.set(entry.proposal.actorId, entry);
@@ -5379,7 +6702,8 @@ async function runConversationWithConfiguredIntel(
               } else {
                 const currentEntries = segmentActors.map((actorId) => segmentMonsterPlan.get(actorId))
                   .filter((entry): entry is SegmentMonsterPlanEntry => entry !== undefined);
-                const rebound = options.forceSpeculationRecalculation !== true &&
+                const rebound = options.forceSpeculationRecalculationForTest !== true &&
+                  options.forceSpeculationRecalculation !== true &&
                   currentEntries.length === segmentActors.length
                   ? rebaseStoredPlanEntries({ state, actualRevision: capsuleRevision, entries: currentEntries })
                   : null;
@@ -5407,9 +6731,11 @@ async function runConversationWithConfiguredIntel(
                       room,
                       historyKind: 'speculative_plan_recalculated',
                       turnContextDeltaBase: pending.sourceTurnContext,
+                      dispatchPhase: 'speculative',
                     });
                     let localRecalculationProposal: RoundTurnProposalEnvelope | null = null;
-                    const recalculationToolSession = config.cli === 'local-openai'
+                    const recalculationToolSession = config.cli === 'local-openai' ||
+                      options.simulatedInProcessDispatchDelayMs !== undefined
                       ? inProcessDmToolSession({
                           state,
                           snapshot: recalculationSnapshot,
@@ -5429,6 +6755,36 @@ async function runConversationWithConfiguredIntel(
                           },
                         })
                       : undefined;
+                    if (completed.turn.exit !== 'completed') {
+                      speculation = {
+                        status: 'discarded', proposed: true, adopted: false, discarded: true,
+                        discardReason: completed.turn.exit === 'timed_out' ? 'budget_expired' : 'dispatch_failed',
+                        targetMonsterRound: pending.targetMonsterRound,
+                        targetActorIds: pending.targetActorIds,
+                        branchCount: pending.branchCount,
+                        budgetMs: pending.budgetMs,
+                        planningWallMs: completed.planningWallMs,
+                        boundaryWaitMs: clock() - boundaryStarted,
+                        plannedBy: pending.planner,
+                        source: {
+                          revision: pending.sourceSnapshot.capsule.revision,
+                          digest: pending.sourceSnapshot.capsule.digest,
+                        },
+                        decision: {
+                          revision: decisionSnapshot.capsule.revision,
+                          digest: decisionSnapshot.capsule.digest,
+                        },
+                      };
+                      speculations.push(speculation);
+                      inFlightSpeculation.current = null;
+                      outcome = 'refused';
+                      serviceNull = true;
+                      fallbackReason = completed.turn.exit === 'cancelled' ? 'dispatch_cancelled' : 'timeout';
+                      initiativeExecutionPending = false;
+                      throw new CellSpeculationDispatchAbort(
+                        'Incomplete speculative dispatch could not be rebased; no default was executed.',
+                      );
+                    }
                     const binding: AgentSessionBinding = {
                       cli: adapter.kind,
                       sessionId: completed.turn.resumeSessionId,
@@ -5446,32 +6802,61 @@ async function runConversationWithConfiguredIntel(
                     };
                     try {
                       const recalculationInvocation = invocation(
-                          config,
-                          runId,
-                          'speculation_recalculation',
-                          `${turnContextPrompt(pending.sourceTurnContext, config.intelMode)}\n\n${renderEnginePrompt('plan_round', recalculationSnapshot.capsule, RULES_SOURCE)}`,
-                          recalculationLauncher.manifestPath,
-                          null,
-                          pending.planner,
-                          recalculationLauncher.recoveryManifestPath,
-                          recalculationToolSession,
-                          freshSessionContext,
-                        );
+                        config,
+                        runId,
+                        'speculation_recalculation',
+                        `${turnContextPrompt(pending.sourceTurnContext, config.intelMode)}\n\n${renderEnginePrompt('plan_round', recalculationSnapshot.capsule, RULES_SOURCE)}`,
+                        recalculationLauncher.manifestPath,
+                        null,
+                        pending.planner,
+                        recalculationLauncher.recoveryManifestPath,
+                        recalculationToolSession,
+                        freshSessionContext,
+                        { kind: 'tool_driven' },
+                        {
+                          engineDispatchId: recalculationLauncher.dispatchId,
+                          recoveryEngineDispatchId: recalculationLauncher.recoveryDispatchId,
+                        },
+                      );
                       const recalculationDispatch = roundDeadline.dispatch(recalculationInvocation);
                       if (recalculationDispatch.kind === 'exhausted') {
                         throw new AgentDispatchDeadlineExceededError();
                       }
+                      options.onAgentInvocation?.(recalculationInvocation);
                       const recalculationTurn = await adapter.resume(
                         binding,
                         recalculationDispatch.invocation,
                         roundDeadline.signal,
                       );
+                      options.onSpeculationRecalculationResultObservedForTest?.(recalculationTurn);
+                      captureCallUsage(recalculationTurn, 'speculation_recalculation');
+                      const recalculationSpools = dispatchSpools(recalculationLauncher, recalculationTurn);
+                      enforceCompletedDispatchIntegrity({
+                        turn: recalculationTurn,
+                        launcher: recalculationLauncher,
+                        spools: recalculationSpools,
+                        maximumBytes: config.turnContextMaximumBytes,
+                        artifactPath: join(artifacts, `${key}-speculation-recalc-${String(segmentActors[0])}-dispatch-integrity.json`),
+                        rowPath: config.outPath,
+                        scheduledCellKey: config.scheduledCellKey ?? `${String(room)}:${String(round)}`,
+                      });
+                      if (recalculationTurn.exit === 'infrastructure_failed') {
+                        outcome = 'infrastructure_failed';
+                        serviceNull = true;
+                        refusals.push(recalculationTurn.failureReason);
+                        failingDispatch = classifyFailedDispatch({
+                          phase: 'speculation_recalculation', turn: recalculationTurn,
+                          contextSpoolPath: recalculationSpools.context,
+                          maximumBytes: config.turnContextMaximumBytes,
+                        });
+                        throw new CellInfrastructureAbort('Speculation recalculation engine MCP infrastructure failed.');
+                      }
                       if (!roundDeadline.acceptsCompletion()) {
                         throw new AgentDispatchDeadlineExceededError();
                       }
-                      captureCallUsage(recalculationTurn, 'speculation_recalculation');
-                      const proposal = localRecalculationProposal ??
-                        takeRoundProposal(recalculationLauncher.spoolPath);
+                      const proposal = recalculationTurn.exit === 'completed'
+                        ? localRecalculationProposal ?? takeRoundProposal(recalculationSpools.proposal)
+                        : null;
                       if (proposal !== null && roundDeadline.acceptsCompletion()) {
                         recalculated = acceptSpeculationRecalculationBeforeDeadline(
                           roundDeadline,
@@ -5495,7 +6880,8 @@ async function runConversationWithConfiguredIntel(
                         );
                         options.onSpeculationRecalculationResolved?.(recalculated);
                       }
-                    } catch {
+                    } catch (error) {
+                      if (error instanceof D569IntegrityStop || error instanceof CellInfrastructureAbort) throw error;
                       recalculated = null;
                     }
                   }
@@ -5509,7 +6895,7 @@ async function runConversationWithConfiguredIntel(
                   for (const entry of rebound) segmentMonsterPlan.set(entry.proposal.actorId, entry);
                 }
               }
-              const boundaryWaitMs = performance.now() - boundaryStarted;
+              const boundaryWaitMs = clock() - boundaryStarted;
               speculation = {
                 status: adoptedEntries === null ? 'discarded' : 'adopted',
                 proposed: true,
@@ -5577,6 +6963,7 @@ async function runConversationWithConfiguredIntel(
             classifyPolicy();
             pending.controller.abort();
             const completed = await pending.completion;
+            const joinedInfrastructureFailure = applyJoinedSpeculativeInfrastructure(completed);
             speculation = {
               status: 'discarded', proposed: true, adopted: false, discarded: true,
               discardReason: 'target_disappeared',
@@ -5595,17 +6982,22 @@ async function runConversationWithConfiguredIntel(
             };
             speculations.push(speculation);
             inFlightSpeculation.current = null;
+            if (joinedInfrastructureFailure) {
+              throw new CellInfrastructureAbort('End-of-round speculative engine MCP infrastructure failed.');
+            }
           }
           }
           outcome = roundWallTimedOut ? 'refused' : 'authorized';
           initiativeExecutionPending = false;
         }
       } catch (error) {
+        if (error instanceof D569IntegrityStop) throw error;
         classifyPolicy();
         if (inFlightSpeculation.current !== null) {
           const pending = inFlightSpeculation.current;
           pending.controller.abort();
           const completed = await pending.completion;
+          const joinedInfrastructureFailure = applyJoinedSpeculativeInfrastructure(completed);
           speculation = {
             status: 'discarded', proposed: true, adopted: false, discarded: true,
             discardReason: 'target_disappeared',
@@ -5624,25 +7016,36 @@ async function runConversationWithConfiguredIntel(
           };
           speculations.push(speculation);
           inFlightSpeculation.current = null;
+          if (joinedInfrastructureFailure) {
+            outcome = 'infrastructure_failed';
+            initiativeExecutionPending = false;
+          }
         }
-        if (initiativeExecutionPending) {
+        if (outcome === 'infrastructure_failed' || error instanceof CellInfrastructureAbort) {
+          outcome = 'infrastructure_failed';
+          initiativeExecutionPending = false;
+        } else if (error instanceof CellSpeculationDispatchAbort) {
+          initiativeExecutionPending = false;
+        } else if (initiativeExecutionPending) {
           executionError = executionErrorClass(error);
         } else if (config.cli === 'local-openai' && selectedAdapter.classifyFailure(error) !== 'unknown') {
           outcome = 'local_error';
           serviceNull = false;
           flapRetries = 0;
         }
-        refusals.push(error instanceof Error ? error.message : String(error));
+        if (!(error instanceof CellInfrastructureAbort)) {
+          refusals.push(error instanceof Error ? error.message : String(error));
+        }
       }
       if (policyClassifiedAtMs === null) classifyPolicy();
-      const wall = performance.now() - started;
-      const endToEndWall = performance.now() - endToEndStarted;
+      const wall = clock() - started;
+      const endToEndWall = clock() - endToEndStarted;
       const policyElapsedMs = roundWallTimedOut
         ? config.roundWallMs
         : Math.min(config.roundWallMs, Math.max(0, (policyClassifiedAtMs ?? roundStarted) - roundStarted));
       const binding = journal.agentSession();
       rowTurnContext = takeTurnContext(
-        initialLauncher.turnContextSpoolPath,
+        activeInitialSpools.context,
         config.turnContextMaximumBytes,
       ) ?? rowTurnContext;
       if (correctionTurnContextSpoolPath !== null) {
@@ -5653,7 +7056,7 @@ async function runConversationWithConfiguredIntel(
           recordedCorrectionTurnContext;
       }
       uiFeedback = takeUiFeedback(correctionUiFeedbackSpoolPath) ??
-        takeUiFeedback(initialLauncher.uiFeedbackSpoolPath);
+        takeUiFeedback(activeInitialSpools.uiFeedback);
       const recordedMonsterProposals = acceptedSubmission ??
         (segmentMonsterPlan.size === 0
           ? null
@@ -5673,15 +7076,18 @@ async function runConversationWithConfiguredIntel(
         },
       };
       const totalsTokens = tokenCounts(roundUsage);
-      const contextBytes = [
-        rowTurnContext.raw,
-        ...(recordedCorrectionTurnContext === null ? [] : [recordedCorrectionTurnContext.raw]),
-        ...adjustments.flatMap((entry) => entry.skipped === 'no_material_change' ? [] : [
-          entry.rawContext,
-          ...(entry.correctionChain === null ? [] : [entry.correctionChain.rawContext]),
-        ]),
-      ]
-        .reduce((total, context) => total + new TextEncoder().encode(context).byteLength, 0);
+      const contextBytes = config.dmModeExplicit
+        ? primaryDelivery?.status === 'delivered'
+          ? new TextEncoder().encode(rowTurnContext.raw).byteLength
+          : 0
+        : [
+            rowTurnContext.raw,
+            ...(recordedCorrectionTurnContext === null ? [] : [recordedCorrectionTurnContext.raw]),
+            ...adjustments.flatMap((entry) => entry.skipped === 'no_material_change' ? [] : [
+              entry.rawContext,
+              ...(entry.correctionChain === null ? [] : [entry.correctionChain.rawContext]),
+            ]),
+          ].reduce((total, context) => total + new TextEncoder().encode(context).byteLength, 0);
       const rendererEvidenceCacheKey = canonicalJson({
         startingRoomDigest,
         revision: initialSnapshot.capsule.revision,
@@ -5692,24 +7098,42 @@ async function runConversationWithConfiguredIntel(
             ? initialSnapshot.capsule.request.kind ?? 'round_plan'
             : 'speculative',
         combatModel: config.combatModel,
+        dmMode: config.dmMode,
+        blindFacts: config.blindFacts,
         intelMode: config.intelMode,
         rendererProfile: config.rendererProfile,
         turnContextMaximumBytes: config.turnContextMaximumBytes,
         deltaBaseRevision: rendererDeltaBase?.revision ?? null,
       });
-      const rendererEvidence = initialRendererEvidence ?? plannedInitialTurnContext?.rendering ??
-        options.rendererEvidenceCache?.get(rendererEvidenceCacheKey) ?? plannedTurnContext(
-          rendererState,
-          initialSnapshot,
-          rendererDeltaBase,
-          config.intelMode,
-          config.rendererProfile,
-          config.turnContextMaximumBytes,
-        ).rendering;
+      let hostContextDiagnostic: HostContextDiagnostic = null;
+      let diagnosticTurnContext: CapturedTurnContext | null = null;
+      if (config.dmMode === 'blind' && rowTurnContext.value['dm_mode'] !== 'blind') {
+        try {
+          diagnosticTurnContext = getPlannedInitialTurnContext();
+          hostContextDiagnostic = { status: 'rendered', contextSha256: sha256(diagnosticTurnContext.raw) };
+        } catch (error) {
+          hostContextDiagnostic = {
+            status: 'unavailable',
+            errorClass: error instanceof Error ? error.name : 'UnknownError',
+          };
+        }
+      }
+      const rendererEvidence = config.dmMode === 'blind'
+        ? blindRendererEvidence(rendererState, capsule, diagnosticTurnContext ?? rowTurnContext)
+        : initialRendererEvidence ?? plannedInitialTurnContext?.rendering ??
+          options.rendererEvidenceCache?.get(rendererEvidenceCacheKey) ?? plannedTurnContext(
+            rendererState,
+            initialSnapshot,
+            rendererDeltaBase,
+            config.intelMode,
+            config.rendererProfile,
+            config.turnContextMaximumBytes,
+          ).rendering;
       if (rendererEvidence === undefined) throw new Error('Turn-context renderer emitted no attribution evidence.');
       options.rendererEvidenceCache?.set(rendererEvidenceCacheKey, rendererEvidence);
       const optionsOmittedForSize = rendererEvidence.optionsOmittedForSizeByActor
         .reduce((total, actor) => total + actor.count, 0);
+      const deliveredPrimaryContext = !config.dmModeExplicit || primaryDelivery?.status === 'delivered';
       const kbReads = rowKbSubjectSources === undefined
         ? []
         : decodeKbReadRecords(readFileSync(kbReadSpoolPath, 'utf8'));
@@ -5744,7 +7168,228 @@ async function runConversationWithConfiguredIntel(
                 chromiumVersion: boardImageArtifact.chromiumVersion,
               },
             };
+      const sharedKbComponentHashes = knowledgeBase.kind === 'bundle'
+        ? {
+            root: knowledgeBase.componentSha256.root,
+            tactics: knowledgeBase.componentSha256.tactics,
+            ...Object.fromEntries(Object.entries(knowledgeBase.componentSha256.subjects)
+              .map(([subject, hash]) => [subject, hash])),
+          }
+        : {};
+      const d569AdviceFields = config.dmModeExplicit && config.dmMode === 'advice'
+        ? (() => {
+            if (boardImageArtifact === null) {
+              throw new Error('Explicit D569 advice row lacks its independently captured board image.');
+            }
+            return {
+            dmMode: 'advice' as const,
+            blindFacts: false,
+            midRoundAdjustmentsEnabled: false as const,
+            blindRepairArm: config.blindRepairArm,
+            blindMaxAttempts: config.blindMaxAttempts,
+            blindIntentText: null,
+            blindIntents: null,
+            blindResolverOutcome: [],
+            blindRejectionCodes: [],
+            blindAttempts: [],
+            blindResolverLatencyMs: 0,
+            visualProfile: {
+              primerVersion: 'standing-advice-board-image-v1',
+              images: [{ role: 'dm_board' as const, sha256: boardImageArtifact.sha256, ordinal: 1 }],
+              glyphMode: 'standing_default',
+              captureTilePx: 128,
+              perImageCaptureLatencyMs: [boardImageArtifact.captureMs],
+              totalImageCaptureLatencyMs: boardImageArtifact.captureMs,
+            },
+            sharedKbComponentHashes,
+            };
+          })()
+        : {};
+      let d569BlindFields: Partial<ConversationBlindRowEvidence> = {};
+      if (config.dmMode === 'blind') {
+        const submissions = takeBlindIntentSubmissions(activeInitialSpools.blindIntent);
+        const observedIngressRecords = takeBlindIngressRecords(activeInitialSpools.blindIngress);
+        const ingressRecords = options.blindIngressAuditProbeText === undefined
+          ? observedIngressRecords
+          : [...observedIngressRecords, {
+              ordinal: observedIngressRecords.length + 1,
+              channel: 'initial_prompt' as const,
+              text: options.blindIngressAuditProbeText,
+              utf8Bytes: new TextEncoder().encode(options.blindIngressAuditProbeText).byteLength,
+              sha256: sha256(options.blindIngressAuditProbeText),
+            }];
+        const offeredOptions = (capsule.request?.actors ?? []).flatMap((actorId) =>
+          availableEngineActorOptions(optionProjectionState, actorId, canonicalEngineQueryPort, capsule.revision));
+        const offeredOptionIds = offeredOptions.map((option) => String(option.optionId));
+        if (primaryDelivery === null) throw new Error('Blind row lacks typed turn-context delivery evidence.');
+        const ingressAudit = auditBlindIngress(ingressRecords, primaryDelivery, {
+          offeredOptionIds,
+          requiredText: [BLIND_INTENT_VERSION, 'creature_facts', 'legal_movement', BLIND_STATE_PRIMER_VERSION],
+        });
+        const finalSubmission = submissions.at(-1) ?? null;
+        const finalParsed = finalSubmission === null
+          ? null
+          : blindRoundIntentEnvelopeSchema.safeParse(finalSubmission.envelope);
+        const parsedIntents = finalParsed?.success === true ? finalParsed.data.intents : null;
+        const attemptBaseline = blindDeadlineUnixMs - config.timeoutMs;
+        let priorAttemptEnd = attemptBaseline;
+        const blindAttempts = submissions.map((submission): ConversationBlindAttempt => {
+          const parsed = blindRoundIntentEnvelopeSchema.safeParse(submission.envelope);
+          const resolution = submission.resolution;
+          const startedAtOffsetMs = Math.max(0, priorAttemptEnd - attemptBaseline);
+          const entry: ConversationBlindAttempt = {
+            number: submission.attempt,
+            intentText: JSON.stringify(submission.envelope),
+            parsedIntents: parsed.success ? parsed.data.intents : null,
+            startedAtOffsetMs,
+            endedAtOffsetMs: Math.max(startedAtOffsetMs, submission.endedAtUnixMs - attemptBaseline),
+            modelWallMs: Math.max(0, submission.startedAtUnixMs - priorAttemptEnd),
+            modelFirstTokenMs: null,
+            resolverLatencyMs: submission.resolverLatencyMs,
+            resolverOutcome: resolution.status,
+            codes: resolution.status === 'rejected' ? resolution.codes : [],
+            hintExposed: config.blindRepairArm === 'minimal_legal_alternative' &&
+              resolution.status === 'rejected' && resolution.legalAlternative !== undefined,
+          };
+          priorAttemptEnd = submission.endedAtUnixMs;
+          return entry;
+        });
+        const contextRecord = rowTurnContext.value;
+        const deliveredContext = primaryDelivery.status === 'delivered';
+        const deliveredMeasurement = primaryDelivery.status === 'delivered'
+          ? primaryDelivery.measurement
+          : null;
+        const creatureFacts = !deliveredContext ? null
+          : requiredRecord(contextRecord['creature_facts'], 'blind creature_facts');
+        const legalMovement = !deliveredContext ? null
+          : requiredRecord(contextRecord['legal_movement'], 'blind legal_movement');
+        const semanticBoard = !deliveredContext || contextRecord['semantic_board'] === undefined
+          ? null
+          : requiredRecord(contextRecord['semantic_board'], 'blind semantic_board');
+        const encodedEvidence = (value: unknown): { readonly sha256: string; readonly utf8Bytes: number } => {
+          const bytes = canonicalJson(value);
+          return { sha256: sha256(bytes), utf8Bytes: new TextEncoder().encode(bytes).byteLength };
+        };
+        const creatureEncoded = creatureFacts === null ? null : encodedEvidence(creatureFacts);
+        const movementEncoded = legalMovement === null ? null : encodedEvidence(legalMovement);
+        const creatureProvenance = creatureFacts === null ? null
+          : requiredRecord(creatureFacts['provenance'], 'blind creature provenance');
+        const rulesSources = creatureProvenance?.['rules_sources'];
+        const movementProvenance = legalMovement === null ? null
+          : requiredRecord(legalMovement['provenance'], 'blind movement provenance');
+        const movementActors = legalMovement?.['actors'];
+        const selectedOfferedIds = finalSubmission?.resolution.status === 'accepted'
+          ? finalSubmission.resolution.actors.map((actor) => actor.selectedOptionId)
+          : [];
+        const engineTopRecommendationIds = (capsule.request?.actors ?? []).map((actorId) =>
+          String(actorOpportunityReport(optionProjectionState, actorId, canonicalEngineQueryPort).defaultOption.optionId));
+        const visual = boardImageArtifact?.blindState;
+        if (visual === undefined || boardImageArtifact === null) {
+          throw new Error('Blind row lacks state-only visual evidence.');
+        }
+        d569BlindFields = {
+          dmMode: 'blind',
+          blindFacts: config.blindFacts,
+          midRoundAdjustmentsEnabled: false,
+          blindContextVersion: 'blind-turn-context-v1',
+          blindIntentVersion: BLIND_INTENT_VERSION,
+          blindRepairArm: config.blindRepairArm,
+          blindMaxAttempts: config.blindMaxAttempts,
+          blindIntentText: finalSubmission === null ? null : JSON.stringify(finalSubmission.envelope),
+          blindIntents: parsedIntents,
+          blindResolverOutcome: finalSubmission?.resolution.status === 'accepted'
+            ? finalSubmission.resolution.actors.map((actor) => ({
+                actor: actor.actor,
+                status: 'accepted' as const,
+                semanticDigest: actor.semanticDigest,
+              }))
+            : finalSubmission?.resolution.actor === undefined ? [] : [{
+                actor: finalSubmission.resolution.actor,
+                status: 'rejected' as const,
+                semanticDigest: null,
+              }],
+          blindRejectionCodes: submissions.flatMap((submission) =>
+            submission.resolution.status === 'rejected' ? submission.resolution.codes : []),
+          blindAttempts,
+          blindResolverLatencyMs: blindAttempts.reduce((total, attempt) => total + attempt.resolverLatencyMs, 0),
+          blindIngressAudit: ingressAudit,
+          visualProfile: {
+            primerVersion: visual.primerVersion,
+            images: [{ role: visual.role, sha256: boardImageArtifact.sha256, ordinal: visual.ordinal }],
+            glyphMode: visual.glyphMode,
+            captureTilePx: visual.captureTilePx,
+            perImageCaptureLatencyMs: [boardImageArtifact.captureMs],
+            totalImageCaptureLatencyMs: boardImageArtifact.captureMs,
+          },
+          sharedKbComponentHashes,
+          semanticBoardEvidence: semanticBoard === null ? null : {
+            format: String(requiredRecord(semanticBoard['provenance'], 'blind semantic provenance')['format']),
+            ...encodedEvidence(semanticBoard),
+            omittedBlocks: ['reach_range_summaries'],
+          },
+          ...(creatureEncoded === null ? {} : { creatureFactsEvidence: {
+            projectionVersion: 'blind-creature-facts-v1',
+            ...creatureEncoded,
+            sourceIds: Array.isArray(rulesSources) ? rulesSources.flatMap((source) => {
+              const sourceId = asRecord(source)?.['source_id'];
+              return typeof sourceId === 'string' ? [sourceId] : [];
+            }) : [],
+          } }),
+          ...(movementEncoded === null || movementProvenance === null ? {} : { legalMovementEvidence: {
+            projectionVersion: String(movementProvenance['query']),
+            stateDigest: String(movementProvenance['state_digest']),
+            ...movementEncoded,
+            actorCellCounts: Array.isArray(movementActors) ? movementActors.map((actor) => {
+              const entry = requiredRecord(actor, 'blind legal movement actor');
+              return {
+                name: String(entry['name']),
+                badge: Number(entry['badge']),
+                cells: Array.isArray(entry['cells']) ? entry['cells'].length : 0,
+              };
+            }) : [],
+          } }),
+          ...(deliveredMeasurement === null ? {} : { turnContextBudget: {
+            configuredBaseBytes: BLIND_TURN_CONTEXT_MAX_BYTES,
+            configuredSemanticBytes: BLIND_SEMANTIC_BOARD_MAX_BYTES,
+            actualBaseBytes: deliveredMeasurement.baseBytes,
+            actualSemanticBytes: deliveredMeasurement.semanticBytes,
+            truncatedBlocks: [],
+          } }),
+          blindPrivateAnswerKey: {
+            selectedOfferedIds,
+            semanticDigests: finalSubmission?.resolution.status === 'accepted'
+              ? finalSubmission.resolution.actors.map((actor) => actor.semanticDigest)
+              : [],
+            catalogDigest: sha256(canonicalJson(offeredOptions.map((option) => option.optionId).sort())),
+            engineTopRecommendationIds,
+            engineTopPolicyVersion: OPPORTUNITY_COST_POLICY,
+            blindDiffersFromEngineTop: selectedOfferedIds.length === 0 ? null :
+              selectedOfferedIds.some((id, index) => id !== engineTopRecommendationIds[index]),
+          },
+        };
+      }
       const row: ConversationRow = {
+        ...(config.dmModeExplicit ? (() => {
+          if (primaryTurn === null || primaryCatalogEvidence === null || primaryDelivery === null) {
+            throw new Error('D569 row lacks primary dispatch evidence.');
+          }
+          if (outcome === 'infrastructure_failed' && failingDispatch === null) {
+            throw new D569IntegrityStop('D569 infrastructure outcome lacks failing-dispatch evidence.');
+          }
+          return {
+            rowContractVersion: 'arena-row-v3' as const,
+            scheduledCellKey: config.scheduledCellKey ?? `${String(room)}:${String(round)}`,
+            dispatchId: primaryCatalogEvidence.dispatchId,
+            engineCatalogEvidence: primaryCatalogEvidence,
+            turnContextDelivery: primaryDelivery,
+            turnContextConfiguredCaps: {
+              baseBytes: config.turnContextMaximumBytes,
+              semanticBytes: config.dmMode === 'blind' ? BLIND_SEMANTIC_BOARD_MAX_BYTES : SEMANTIC_BOARD_MAX_BYTES,
+            },
+            hostContextDiagnostic,
+          };
+        })() : {}),
+        ...(failingDispatch === null ? {} : { failingDispatch }),
         knowledgeModel: 'engine_state',
         hiddenOptions,
         intelMode: config.intelMode,
@@ -5753,10 +7398,19 @@ async function runConversationWithConfiguredIntel(
           policyVersion: RENDERER_POLICY_VERSION,
           profile: config.rendererProfile,
         },
-        semanticBoardBytes: rendererEvidence.semanticBoardBytes,
-        baseContextBytes: rendererEvidence.baseContextBytes,
-        semanticBoardTruncated: rendererEvidence.semanticBoardTruncated,
-        circumstanceFeatures: rendererEvidence.features,
+        semanticBoardBytes: primaryDelivery?.status === 'delivered'
+          ? primaryDelivery.measurement.semanticBytes
+          : deliveredPrimaryContext ? rendererEvidence.semanticBoardBytes : null,
+        baseContextBytes: primaryDelivery?.status === 'delivered'
+          ? primaryDelivery.measurement.baseBytes
+          : deliveredPrimaryContext ? rendererEvidence.baseContextBytes : null,
+        semanticBoardTruncated: deliveredPrimaryContext ? rendererEvidence.semanticBoardTruncated : [],
+        circumstanceFeatures: deliveredPrimaryContext ? rendererEvidence.features : {
+          ...rendererEvidence.features,
+          pre_trim_bytes: 0,
+          trim_bytes_removed: 0,
+          trim_engaged: false,
+        },
         combatModel: config.combatModel,
         roundProtocolVersion: ROUND_PROTOCOL_VERSION,
         startingRoomDigest,
@@ -5779,13 +7433,15 @@ async function runConversationWithConfiguredIntel(
         skillHash: instructionEnvironment.skillHash,
         kbReads,
         repoCommit,
-        rawTurnContext: rowTurnContext.raw,
+        rawTurnContext: deliveredPrimaryContext ? rowTurnContext.raw : null,
         turnContextMaximumBytes: config.turnContextMaximumBytes,
-        preTrimBytes: rendererEvidence.preTrimBytes,
-        postTrimBytes: rendererEvidence.postTrimBytes,
-        optionsOmittedForSize,
-        optionsOmittedForSizeByActor: structuredClone(rendererEvidence.optionsOmittedForSizeByActor),
-        turnContextGranularity: rowTurnContext.granularity,
+        preTrimBytes: deliveredPrimaryContext ? rendererEvidence.preTrimBytes : null,
+        postTrimBytes: deliveredPrimaryContext ? rendererEvidence.postTrimBytes : null,
+        optionsOmittedForSize: deliveredPrimaryContext ? optionsOmittedForSize : 0,
+        optionsOmittedForSizeByActor: deliveredPrimaryContext
+          ? structuredClone(rendererEvidence.optionsOmittedForSizeByActor)
+          : [],
+        turnContextGranularity: deliveredPrimaryContext ? rowTurnContext.granularity : null,
         snippetHash: SNIPPET_REGISTRY.snippetHash,
         snippetSetHash: SNIPPET_REGISTRY.snippetSetHash,
         suggestedPlay: suggestedPlan?.play ?? null,
@@ -5816,7 +7472,8 @@ async function runConversationWithConfiguredIntel(
         ...(config.decisionTransport === 'final_indices' ? {
           chosenOptionIndices: authorizedChosenOptionIndices,
         } : {}),
-        contextTruncated: simulated?.contextTruncatedByRequest.get(requestId) ?? observedContextTruncated,
+        contextTruncated: deliveredPrimaryContext &&
+          (simulated?.contextTruncatedByRequest.get(requestId) ?? observedContextTruncated),
         plannedBy,
         speculationPlanner,
         escalationTrigger,
@@ -5843,7 +7500,7 @@ async function runConversationWithConfiguredIntel(
           ? PLAN_MATERIALITY_POLICY_HASH
           : null,
         engineIntel: acceptedIntelCapture,
-        adjustmentBudget: config.combatModel === 'initiative_segments_v1' ? 2 : 0,
+        adjustmentBudget: config.midRoundAdjustmentsEnabled && config.combatModel === 'initiative_segments_v1' ? 2 : 0,
         teamPlans,
         pcTurns,
         adjustments,
@@ -5859,9 +7516,15 @@ async function runConversationWithConfiguredIntel(
           tokens: totalsTokens,
         },
         ...(capturedRlData === undefined ? {} : { rlData: capturedRlData }),
+        ...d569AdviceFields,
+        ...d569BlindFields,
       };
       rows.push(row);
-      await appendFile(config.outPath, `${JSON.stringify(row)}\n`, 'utf8');
+      await appendFile(config.outPath, `${serializeConversationRow(row)}\n`, 'utf8');
+      const persistedBlindAudit = d569BlindFields.blindIngressAudit;
+      if (persistedBlindAudit?.version === 2 && !persistedBlindAudit.forbiddenContentPassed) {
+        throw new D569IntegrityStop('Blind ingress contained forbidden content after the forensic row was persisted.');
+      }
       completedRounds += 1;
       if (!restoredMidRun && options.restoreAfterRound === completedRounds) {
         const saved = journal.export();
@@ -5896,7 +7559,15 @@ export async function runConversation(
     if (config.boardImageMode !== 'off' && options.boardSnapshotService === undefined) {
       const outputDirectory = boardImageOutputDirectory(config);
       ownedSnapshotService = options.boardSnapshotServiceFactory === undefined
-        ? await BoardSnapshotService.start({ outputDirectory })
+        ? await BoardSnapshotService.start({
+            outputDirectory,
+            ...(config.dmMode === 'blind' ? {
+              informationMode: 'blind_state' as const,
+              boardGlyphs: 'full' as const,
+              captureTilePx: 128 as const,
+              primerVersion: BLIND_STATE_PRIMER_VERSION,
+            } : {}),
+          })
         : await options.boardSnapshotServiceFactory(outputDirectory);
     }
     return await runConversationWithConfiguredIntel(config, {

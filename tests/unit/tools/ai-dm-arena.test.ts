@@ -1,8 +1,11 @@
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
+import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
-import { encounterSessionId } from '../../../src/combat/values';
+import { canonicalJson } from '../../../src/commands/canonical-json';
+import { sha256 } from '../../../src/crypto/sha256';
+import { encounterSessionId, type AgentSessionId } from '../../../src/combat/values';
 import { createEncounter } from '../../../src/combat/encounter';
 import {
   agentSessionIdFromCli,
@@ -16,12 +19,15 @@ import {
 } from '../../../src/vtt/agent-session';
 import { decodeCodexTurn } from '../../../src/vtt/agent-adapters/codex';
 import type { RoundPlan } from '../../../src/vtt/dm-bridge/round-plan-contract';
-import { generateRoom } from '../../../src/vtt/room-generator';
+import { applyRoomInitiativeProfile, generateRoom } from '../../../src/vtt/room-generator';
 import {
   createEngineMcpRuntime,
   freshMonsterPlanningState,
+  loadArenaFixture,
+  runEngineMcpLines,
   type EngineMcpLauncherManifest,
 } from '../../../src/vtt/mcp/entrypoint';
+import { mcpRequestMeta } from '../../../src/vtt/mcp/handler';
 import { availableEngineActorOptions, resolveEngineActorOption } from '../../../src/vtt/intent-resolver';
 import { validateArenaPlan } from '../../../src/vtt/arena-legality';
 import { SNIPPET_REGISTRY } from '../../../src/vtt/snippet-registry-runtime';
@@ -36,13 +42,31 @@ import {
   extractArenaProbeVerdict,
   mapConversationKbReads,
   parseArenaArgs,
+  parseArenaCells,
   runArena,
+  type ArenaRow,
 } from '../../../tools/ai-dm-arena';
 import { validateRerunRows } from '../../../tools/ai-dm-rerun-packet';
 import {
   mkdtempSync,
+  mkdirSync,
   readFileSync,
+  writeFileSync,
 } from '../../helpers/test-filesystem';
+import type {
+  BoardImageArtifact,
+  BoardSnapshotCapture,
+} from '../../../tools/ai-dm-board-snapshot';
+import {
+  parseConversationArgs,
+  runConversation,
+  type ConversationBoardSnapshotService,
+} from '../../../tools/ai-dm-conversation';
+import {
+  BlindModelIngressRecorder,
+  assertNoForbiddenBlindStructure,
+} from '../../../src/vtt/blind-model-ingress';
+import { D569IntegrityStop } from '../../../src/vtt/d569-integrity';
 import {
   DEFAULT_AI_DM_KB_ROOT,
   type RepoRelativeKbPath,
@@ -52,6 +76,335 @@ import { decodeChallengeRoomProvenanceV1 } from '../../../src/vtt/challenge-room
 import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
 
 const DEFAULT_KB_HASH = '00776f3f2d4cd7468a1eb2a63028e9c3f846b43b14a4e5787d3e9c94e02633c0';
+const PREPATCH_BYTE_STATE = applyRoomInitiativeProfile(
+  await loadArenaFixture('tests/fixtures/arena-basis-hard/seed-5117002.json'),
+  'derived_v1',
+);
+const SELECTED_CELL_STATES = await Promise.all(Array.from({ length: 8 }, async (_unused, index) =>
+  applyRoomInitiativeProfile(await loadArenaFixture(
+    `tests/fixtures/arena-basis-brutal/seed-${String(6_203_001 + index)}.json`,
+  ), 'derived_v1')));
+
+class BlindArenaSnapshotService implements ConversationBoardSnapshotService {
+  readonly outputDirectory = mkdtempSync(join(tmpdir(), 'dnd-arena-blind-snapshot-'));
+  readonly captures: BoardSnapshotCapture[] = [];
+
+  constructor(private readonly identity = 'blind') {}
+
+  async capture(input: BoardSnapshotCapture): Promise<BoardImageArtifact> {
+    this.captures.push(structuredClone(input));
+    const png = Buffer.alloc(96);
+    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).copy(png);
+    png.writeUInt32BE(1, 16);
+    png.writeUInt32BE(1, 20);
+    Buffer.from(`${this.identity}:${input.source.stateDigest}`, 'utf8').copy(png, 24, 0, 64);
+    const digest = createHash('sha256').update(png).digest('hex');
+    const relativePath = `board-images/${digest}.png` as const;
+    mkdirSync(join(this.outputDirectory, 'board-images'), { recursive: true });
+    writeFileSync(join(this.outputDirectory, relativePath), png);
+    const html = Buffer.from('<!doctype html><main>independent blind test image</main>\n');
+    const htmlDigest = createHash('sha256').update(html).digest('hex');
+    const htmlRelativePath = `board-html/${htmlDigest}/board.html` as const;
+    mkdirSync(join(this.outputDirectory, 'board-html', htmlDigest), { recursive: true });
+    writeFileSync(join(this.outputDirectory, htmlRelativePath), html);
+    return {
+      version: 'arena-board-image-v1', audience: 'dm', mimeType: 'image/png',
+      relativePath, sha256: digest, bytes: png.byteLength, width: 1, height: 1,
+      capturedAtUnixMs: Date.now(), captureMs: 7, source: { ...input.source },
+      chromiumVersion: 'SIMULATED Chromium',
+      html: { relativePath: htmlRelativePath, sha256: htmlDigest, bytes: html.byteLength },
+      blindState: {
+        informationMode: 'blind_state', role: 'dm_board', ordinal: 1,
+        primerVersion: 'd562-general-board-primer-v10', glyphMode: 'full', captureTilePx: 128,
+        domEvidence: {
+          optionSurfaceAbsent: true, nextEventPreviewAbsent: true,
+          coordinateLabels: 1, creatureBadges: 1, rosterEntries: 1, hpBars: 1,
+          legendEntries: 1, wallCells: 0, halfCoverCells: 0, threeQuartersCoverCells: 0,
+          difficultCells: 0, obscuredCells: 0,
+          illuminatedCells: 0, fogMarks: 0, doors: 0, objects: 0,
+          hiddenMarks: 0, multiCellFootprints: 0,
+        },
+      },
+    };
+  }
+
+  async close(): Promise<void> { return undefined; }
+}
+
+class PrimaryInfrastructureCaptureAdapter implements AgentSessionAdapter {
+  readonly kind = 'codex' as const;
+  readonly invocations: AgentInvocation[] = [];
+
+  async probe() { return { present: true, version: 'PREPATCH-BYTE-COMPARISON' }; }
+
+  async start(invocation: AgentInvocation): Promise<AgentTurnResult> {
+    this.invocations.push(invocation);
+    return this.infrastructureFailure(invocation);
+  }
+
+  async resume(_binding: AgentSessionBinding, invocation: AgentInvocation): Promise<AgentTurnResult> {
+    this.invocations.push(invocation);
+    return this.infrastructureFailure(invocation);
+  }
+
+  classifyFailure(): 'unknown' { return 'unknown'; }
+
+  private infrastructureFailure(invocation: AgentInvocation): AgentTurnResult {
+    if (invocation.engineDispatchId === undefined) throw new Error('Instrumented invocation omitted dispatch id.');
+    return {
+      resumeSessionId: null, sessionId: null,
+      finalText: '', usage: null, exit: 'infrastructure_failed', failureReason: 'SIMULATED engine startup failure',
+      component: 'engine_mcp_startup',
+      processEvidence: null,
+      engineCatalogEvidence: {
+        status: 'absent', basis: 'required_engine_initialization_failed',
+        dispatchId: invocation.engineDispatchId, corroboration: ['SIMULATED engine startup failure'],
+      },
+      partialResultEvidence: {
+        status: 'partial', decodedEventCount: 0, finalTextFragment: '', observedUsage: null,
+        stagedInvocationIds: [],
+      },
+    };
+  }
+}
+
+class CatalogReadyNoContextAdapter implements AgentSessionAdapter {
+  readonly kind = 'codex' as const;
+
+  async probe() { return { present: true, version: 'CATALOG-ONLY' }; }
+
+  async start(invocation: AgentInvocation): Promise<AgentTurnResult> {
+    if (invocation.engineDispatchId === undefined) throw new Error('Catalog-only invocation omitted dispatch id.');
+    return {
+      resumeSessionId: agentSessionIdFromCli('catalog-only-session'), sessionId: null,
+      finalText: 'No context requested.', usage: null, exit: 'completed', processEvidence: null,
+      engineCatalogEvidence: {
+        status: 'ready', basis: 'required_cli_completed_with_valid_catalog',
+        dispatchId: invocation.engineDispatchId, advertisedInvocationCount: 0, resourceOperationCount: 0,
+      },
+      partialResultEvidence: { status: 'complete', decodedEventCount: 1 },
+    };
+  }
+
+  async resume(_binding: AgentSessionBinding, invocation: AgentInvocation): Promise<AgentTurnResult> {
+    return this.start(invocation);
+  }
+
+  classifyFailure(): 'unknown' { return 'unknown'; }
+}
+
+class CatalogReadyDeliveredContextAdapter implements AgentSessionAdapter {
+  readonly kind = 'codex' as const;
+
+  async probe() { return { present: true, version: 'CATALOG-AND-CONTEXT' }; }
+
+  async start(invocation: AgentInvocation): Promise<AgentTurnResult> {
+    if (invocation.engineDispatchId === undefined) throw new Error('Delivered-context invocation omitted dispatch id.');
+    const manifest = JSON.parse(readFileSync(invocation.launcherToken, 'utf8')) as EngineMcpLauncherManifest;
+    if (manifest.turnContextSpoolPath === undefined || manifest.dispatchPhase === undefined) {
+      throw new Error('Delivered-context launcher omitted its correlated context spool.');
+    }
+    const state = await loadArenaFixture(manifest.fixturePath);
+    const runtime = createEngineMcpRuntime(state, {
+      runId: manifest.runId, branchId: manifest.branchId, revision: manifest.revision,
+      requestId: manifest.requestId, phase: manifest.phase, correctionNumber: manifest.correctionNumber,
+      room: manifest.room, historyKind: manifest.historyKind, toolProfile: 'blind', dmMode: 'blind',
+    });
+    const context = objectValue(runtime.toolSurface.execute('engine.get_turn_context', {
+      run_id: manifest.runId, expected_revision: manifest.revision, scope: 'round', granularity: 'full',
+    }), 'delivered context');
+    writeFileSync(manifest.turnContextSpoolPath, `${JSON.stringify({
+      ...context, dispatchId: invocation.engineDispatchId,
+      dispatchProfile: 'blind', dispatchPhase: manifest.dispatchPhase,
+    })}\n`, 'utf8');
+    return {
+      resumeSessionId: agentSessionIdFromCli('catalog-delivered-session'), sessionId: null,
+      finalText: 'Context observed.', usage: null, exit: 'completed', processEvidence: null,
+      engineCatalogEvidence: {
+        status: 'ready', basis: 'advertised_tool_invoked', dispatchId: invocation.engineDispatchId,
+        advertisedInvocationCount: 1, resourceOperationCount: 0,
+      },
+      partialResultEvidence: { status: 'complete', decodedEventCount: 1 },
+    };
+  }
+
+  async resume(_binding: AgentSessionBinding, invocation: AgentInvocation): Promise<AgentTurnResult> {
+    return this.start(invocation);
+  }
+
+  classifyFailure(): 'unknown' { return 'unknown'; }
+}
+
+class InconclusiveCatalogAdapter implements AgentSessionAdapter {
+  readonly kind = 'codex' as const;
+  invocation: AgentInvocation | null = null;
+
+  async probe() { return { present: true, version: 'INCONCLUSIVE-CATALOG' }; }
+
+  async start(invocation: AgentInvocation): Promise<AgentTurnResult> {
+    this.invocation = invocation;
+    if (invocation.engineDispatchId === undefined) throw new Error('Inconclusive invocation omitted dispatch id.');
+    return {
+      resumeSessionId: agentSessionIdFromCli('inconclusive-session'), sessionId: null,
+      finalText: 'Observed conflicting engine readiness.', usage: null, exit: 'completed',
+      processEvidence: {
+        startedAtUnixMs: 1, endedAtUnixMs: 2, exitCode: 0, signal: null,
+        stdout: 'conflicting readiness', stderr: '', decodedEvents: [],
+      },
+      engineCatalogEvidence: {
+        status: 'inconclusive', dispatchId: invocation.engineDispatchId,
+        reason: 'conflicting_success_and_failure',
+      },
+      partialResultEvidence: { status: 'complete', decodedEventCount: 1 },
+    };
+  }
+
+  async resume(_binding: AgentSessionBinding, invocation: AgentInvocation): Promise<AgentTurnResult> {
+    return this.start(invocation);
+  }
+
+  classifyFailure(): 'unknown' { return 'unknown'; }
+}
+
+async function prepareActualPrimaryByteEvidence(): Promise<{
+  readonly prompt: string;
+  readonly descriptorBytes: string;
+  readonly dispatchId: string;
+  readonly readinessEvents: readonly string[];
+}> {
+  const directory = mkdtempSync(join(tmpdir(), 'd569-primary-byte-runner-'));
+  const service = new BlindArenaSnapshotService('prepatch-byte-comparison');
+  const adapter = new PrimaryInfrastructureCaptureAdapter();
+  let failure: unknown;
+  try {
+    await runArena(parseArenaArgs([
+      '--rooms', '1', '--reps', '1', '--seed', '5117002', '--basis', 'hard',
+      '--out', join(directory, 'rows.jsonl'), '--dm-mode', 'blind',
+      '--cli', 'codex', '--model', 'gpt-5.6-luna', '--effort', 'high',
+    ]), {
+      adapter, heartbeat: () => undefined,
+      fixtureStates: [PREPATCH_BYTE_STATE],
+      boardSnapshotServiceFactory: async () => service,
+    });
+  } catch (error) { failure = error; }
+  if (failure !== undefined && (!(failure instanceof Error) || !failure.message.includes('engine infrastructure'))) {
+    throw new Error(`Primary byte capture did not terminate at the simulated infrastructure boundary: ${String(failure)}`, { cause: failure });
+  }
+  if (adapter.invocations.length !== 1) throw new Error('Primary byte capture did not record exactly one invocation.');
+  const invocation = adapter.invocations[0];
+  if (invocation === undefined || invocation.engineDispatchId === undefined) {
+    throw new Error('Actual primary invocation omitted its dispatch identity.');
+  }
+  const manifest = JSON.parse(readFileSync(invocation.launcherToken, 'utf8')) as EngineMcpLauncherManifest;
+  if (manifest.readinessSpoolPath === undefined || manifest.dispatchPhase === undefined || manifest.dispatchId === undefined) {
+    throw new Error('Actual primary launcher omitted readiness instrumentation.');
+  }
+  if (manifest.dispatchId !== invocation.engineDispatchId) throw new Error('Primary launcher dispatch identity diverged.');
+  const readinessSpoolPath = resolve(dirname(invocation.launcherToken), manifest.readinessSpoolPath);
+  const runtime = createEngineMcpRuntime(PREPATCH_BYTE_STATE, {
+    runId: manifest.runId, branchId: manifest.branchId, revision: manifest.revision,
+    requestId: manifest.requestId, phase: manifest.phase, correctionNumber: manifest.correctionNumber,
+    room: manifest.room, historyKind: manifest.historyKind, toolProfile: 'blind', dmMode: 'blind',
+    readinessEvidence: {
+      spoolPath: readinessSpoolPath, dispatchId: manifest.dispatchId,
+      phase: manifest.dispatchPhase, profile: 'blind', requestId: manifest.requestId,
+    },
+  });
+  const responses: unknown[] = [];
+  async function* toolsListRequest(): AsyncIterable<string> {
+    yield JSON.stringify({
+      jsonrpc: '2.0', id: 1, method: 'tools/list',
+      params: { _meta: mcpRequestMeta({ name: 'd569-byte-regression', version: '1' }) },
+    });
+  }
+  await runEngineMcpLines(runtime, toolsListRequest(), {
+    runId: manifest.runId, branchId: manifest.branchId, revision: manifest.revision,
+    requestId: manifest.requestId, phase: manifest.phase, correctionNumber: manifest.correctionNumber,
+    room: manifest.room, historyKind: manifest.historyKind, toolProfile: 'blind', dmMode: 'blind',
+    readinessEvidence: {
+      spoolPath: readinessSpoolPath, dispatchId: manifest.dispatchId,
+      phase: manifest.dispatchPhase, profile: 'blind', requestId: manifest.requestId,
+    },
+  }, async (response) => { responses.push(response); });
+  const toolsResponse = objectValue(responses[0], 'tools/list response');
+  const result = objectValue(toolsResponse['result'], 'tools/list result');
+  const readinessEvents = readFileSync(readinessSpoolPath, 'utf8').trim().split('\n')
+    .map((line) => String(objectValue(JSON.parse(line) as unknown, 'readiness event')['event']));
+  return {
+    prompt: invocation.prompt,
+    descriptorBytes: JSON.stringify(result['tools']),
+    dispatchId: invocation.engineDispatchId,
+    readinessEvents,
+  };
+}
+
+const ACTUAL_PRIMARY_BYTE_EVIDENCE = await prepareActualPrimaryByteEvidence();
+
+async function runBlindArenaCase(input: {
+  readonly label: string;
+  readonly repair?: 'code_only' | 'minimal_legal_alternative';
+  readonly facts?: 'on' | 'off';
+  readonly invalid?: boolean;
+}): Promise<{ readonly row: ArenaRow; readonly service: BlindArenaSnapshotService }> {
+  const directory = mkdtempSync(join(tmpdir(), `dnd-arena-d569-${input.label}-`));
+  const service = new BlindArenaSnapshotService(input.label);
+  const [row] = await runArena(parseArenaArgs([
+    '--rooms', '1', '--reps', '1', '--seed', '3943001', '--basis', 'standard',
+    '--out', join(directory, 'row.jsonl'), '--dry-run', '--dm-mode', 'blind',
+    '--blind-repair-arm', input.repair ?? 'code_only', '--blind-facts', input.facts ?? 'off',
+    '--cli', 'codex', '--model', 'gpt-5.6-sol', '--effort', 'high',
+  ]), {
+    boardSnapshotServiceFactory: async () => service,
+    ...(input.invalid === true ? { invalidInitial: ['room-1-round-1'] } : {}),
+  });
+  if (row === undefined) throw new Error(`${input.label} emitted no arena row.`);
+  return { row, service };
+}
+
+function expectAcceptedBlindEvidence(row: ArenaRow, service: BlindArenaSnapshotService): void {
+  expect(row).toEqual(expect.objectContaining({
+    dmMode: 'blind', midRoundAdjustmentsEnabled: false, adjustmentBudget: 0,
+    blindMaxAttempts: 3, outcome: 'authorized', planner: 'model',
+    turnContextMaximumBytes: 65_536, turnContextGranularity: 'full',
+  }));
+  expect(row.adjustments).toEqual([]);
+  expect(row.authorizedPlan?.length).toBeGreaterThan(0);
+  expect(row.authorizedPlan?.every((entry) => entry.resolutionSummary.actionSlots.length > 0))
+    .toBe(true);
+  expect(row.blindIngressAudit).toEqual(expect.objectContaining({ passed: true }));
+  expect(row.turnContextBudget).toEqual(expect.objectContaining({
+    configuredBaseBytes: 65_536, configuredSemanticBytes: 8_192, truncatedBlocks: [],
+  }));
+  expect(row.turnContextBudget?.actualBaseBytes).toBeLessThanOrEqual(65_536);
+  expect(row.visualProfile).toEqual(expect.objectContaining({
+    primerVersion: 'd562-general-board-primer-v10', glyphMode: 'full',
+    captureTilePx: 128, perImageCaptureLatencyMs: [7], totalImageCaptureLatencyMs: 7,
+  }));
+  expect(service.captures).toHaveLength(1);
+  for (const attempt of row.blindAttempts ?? []) {
+    expect(attempt.modelFirstTokenMs).toBeNull();
+    expect(attempt.endedAtOffsetMs - attempt.startedAtOffsetMs)
+      .toBe(attempt.modelWallMs + attempt.resolverLatencyMs);
+  }
+}
+
+const BLIND_ARENA_ROW_EVIDENCE: readonly {
+  readonly row: ArenaRow;
+  readonly service: BlindArenaSnapshotService;
+}[] | Error = await Promise.all([
+  runBlindArenaCase({ label: 'screenshot-first' }),
+  runBlindArenaCase({ label: 'semantic', facts: 'on' }),
+  runBlindArenaCase({ label: 'code-repair', repair: 'code_only', invalid: true }),
+  runBlindArenaCase({ label: 'hint-repair', repair: 'minimal_legal_alternative', invalid: true }),
+]).catch((error: unknown) => error instanceof Error ? error : new Error(String(error)));
+
+function blindArenaRowEvidence(): readonly {
+  readonly row: ArenaRow;
+  readonly service: BlindArenaSnapshotService;
+}[] {
+  if (BLIND_ARENA_ROW_EVIDENCE instanceof Error) throw BLIND_ARENA_ROW_EVIDENCE;
+  return BLIND_ARENA_ROW_EVIDENCE;
+}
 
 function objectValue(value: unknown, label: string): Readonly<Record<string, unknown>> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -76,7 +429,7 @@ class FakeCodexUsageAdapter implements AgentSessionAdapter {
   }
 
   private completed(
-    sessionId: AgentTurnResult['resumeSessionId'],
+    sessionId: AgentSessionId,
     invocation: AgentInvocation,
   ): AgentTurnResult {
     const usages = [
@@ -104,6 +457,9 @@ class FakeCodexUsageAdapter implements AgentSessionAdapter {
         modelContextWindow: contextTokenCount(258_400),
       },
       exit: 'completed',
+      processEvidence: null,
+      engineCatalogEvidence: null,
+      partialResultEvidence: { status: 'complete', decodedEventCount: 1 },
     };
   }
 
@@ -143,7 +499,7 @@ class ArenaRolloverFixtureAdapter implements AgentSessionAdapter {
 
   classifyFailure(): 'unknown' { return 'unknown'; }
 
-  #completed(sessionId: AgentTurnResult['resumeSessionId']): AgentTurnResult {
+  #completed(sessionId: AgentSessionId): AgentTurnResult {
     const usage = this.#usages.shift();
     if (usage === undefined) throw new Error('Arena rollover usage fixture was exhausted.');
     this.modelCalls += 1;
@@ -160,6 +516,9 @@ class ArenaRolloverFixtureAdapter implements AgentSessionAdapter {
         reasoningTokens: 0,
       },
       exit: 'completed',
+      processEvidence: null,
+      engineCatalogEvidence: null,
+      partialResultEvidence: { status: 'complete', decodedEventCount: 0 },
     };
   }
 }
@@ -193,6 +552,9 @@ class OrderingNullAdapter implements AgentSessionAdapter {
       finalText: '',
       usage: null,
       exit: 'completed',
+      processEvidence: null,
+      engineCatalogEvidence: null,
+      partialResultEvidence: { status: 'complete', decodedEventCount: 0 },
     };
   }
 
@@ -200,6 +562,8 @@ class OrderingNullAdapter implements AgentSessionAdapter {
     return {
       resumeSessionId: binding.sessionId, sessionId: null,
       finalText: '', usage: null, exit: 'completed',
+      processEvidence: null, engineCatalogEvidence: null,
+      partialResultEvidence: { status: 'complete', decodedEventCount: 0 },
     };
   }
 
@@ -233,7 +597,7 @@ class InProcessArenaAdapter implements AgentSessionAdapter {
   classifyFailure(): 'unknown' { return 'unknown'; }
 
   #dispatch(
-    sessionId: AgentTurnResult['resumeSessionId'],
+    sessionId: AgentSessionId,
     invocation: AgentInvocation,
   ): AgentTurnResult {
     const manifest = JSON.parse(readFileSync(invocation.launcherToken, 'utf8')) as EngineMcpLauncherManifest;
@@ -276,13 +640,16 @@ class InProcessArenaAdapter implements AgentSessionAdapter {
     return this.#completed(sessionId);
   }
 
-  #completed(sessionId: AgentTurnResult['resumeSessionId']): AgentTurnResult {
+  #completed(sessionId: AgentSessionId): AgentTurnResult {
     return {
       resumeSessionId: sessionId,
       sessionId: null,
       finalText: 'SIMULATED in-process arena proposal',
       usage: null,
       exit: 'completed',
+      processEvidence: null,
+      engineCatalogEvidence: null,
+      partialResultEvidence: { status: 'complete', decodedEventCount: 0 },
     };
   }
 }
@@ -309,6 +676,161 @@ const ALL_OPTIONS_TEST_RENDERER_ARGS = [
 ] as const;
 
 describe('AI-DM arena', () => {
+  it('filters explicit room:rep cells without renumbering or accepting duplicates', () => {
+    expect(parseArenaCells('2:1,4:1,8:1', 10, 3)).toEqual([
+      { room: 2, rep: 1 }, { room: 4, rep: 1 }, { room: 8, rep: 1 },
+    ]);
+    expect(() => parseArenaCells('2:1,2:1', 10, 3)).toThrow('--cells entries must be unique.');
+    expect(() => parseArenaCells('11:1', 10, 3)).toThrow('outside rooms 1..10 and reps 1..3');
+  });
+
+  it('preserves selected-cell seed and frozen fixture identity through a real arena dry run', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'd569-selected-cells-runner-'));
+    const rows = await runArena(parseArenaArgs([
+      '--rooms', '8', '--reps', '1', '--cells', '2:1,4:1,8:1',
+      '--seed', '6203001', '--basis', 'brutal', '--dry-run',
+      '--out', join(directory, 'rows.jsonl'),
+    ]), {
+      adapter: new PrimaryInfrastructureCaptureAdapter(), fixtureStates: SELECTED_CELL_STATES,
+      heartbeat: () => undefined,
+    });
+    expect(rows.map((row) => ({ room: row.room, round: row.round, seed: row.seed }))).toEqual([
+      { room: 2, round: 1, seed: 6_203_002 },
+      { room: 4, round: 1, seed: 6_203_004 },
+      { room: 8, round: 1, seed: 6_203_008 },
+    ]);
+    const expectedDigests = await Promise.all([2, 4, 8].map(async (room) => {
+      const fixture = await loadArenaFixture(
+        `tests/fixtures/arena-basis-brutal/seed-${String(6_203_000 + room)}.json`,
+      );
+      return sha256(canonicalJson(applyRoomInitiativeProfile(fixture, 'derived_v1')));
+    }));
+    expect(rows.map((row) => row.startingRoomDigest)).toEqual(expectedDigests);
+  });
+
+  it('matches actual primary invocation and readiness-enabled descriptor bytes to independent 90484d45 evidence', async () => {
+    const evidence = JSON.parse(readFileSync('tests/fixtures/d569-prepatch-primary-bytes.json', 'utf8')) as {
+      readonly version: number;
+      readonly sourceCommit: string;
+      readonly fixture: string;
+      readonly prompt: string;
+      readonly descriptorBytes: string;
+      readonly promptSha256: string;
+      readonly descriptorSha256: string;
+    };
+    expect(evidence).toMatchObject({
+      version: 1,
+      sourceCommit: '90484d453b7b6d1fe63ed28c0a53570a80e158e6',
+      fixture: 'tests/fixtures/arena-basis-hard/seed-5117002.json',
+    });
+    expect(sha256(evidence.prompt)).toBe(evidence.promptSha256);
+    expect(sha256(evidence.descriptorBytes)).toBe(evidence.descriptorSha256);
+
+    expect(ACTUAL_PRIMARY_BYTE_EVIDENCE.dispatchId).toMatch(/^engine-dispatch:/u);
+    expect(ACTUAL_PRIMARY_BYTE_EVIDENCE.readinessEvents).toEqual([
+      'tools_list_response_generated', 'tools_list_stream_write_completed',
+    ]);
+    expect(ACTUAL_PRIMARY_BYTE_EVIDENCE.prompt).toBe(evidence.prompt);
+    expect(ACTUAL_PRIMARY_BYTE_EVIDENCE.descriptorBytes).toBe(evidence.descriptorBytes);
+  });
+
+  it('derives zero delivered bytes and null context telemetry from a real catalog-only runner completion', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'd569-no-context-runner-'));
+    const service = new BlindArenaSnapshotService('catalog-only');
+    const state = applyRoomInitiativeProfile(generateRoom(3_943_001).encounter.state, 'derived_v1');
+    const [row] = await runArena(parseArenaArgs([
+      '--rooms', '1', '--reps', '1', '--seed', '3943001', '--basis', 'standard',
+      '--out', join(directory, 'rows.jsonl'), '--dm-mode', 'blind',
+      '--cli', 'codex', '--model', 'gpt-5.6-luna', '--effort', 'high',
+    ]), {
+      adapter: new CatalogReadyNoContextAdapter(), fixtureStates: [state], heartbeat: () => undefined,
+      boardSnapshotServiceFactory: async () => service,
+    });
+    expect(row).toMatchObject({
+      engineCatalogEvidence: { status: 'ready' },
+      turnContextDelivery: { status: 'not_requested', measurement: null },
+      baseContextBytes: null, semanticBoardBytes: null, rawTurnContext: null,
+      preTrimBytes: null, postTrimBytes: null, turnContextGranularity: null,
+      optionsOmittedForSize: 0, optionsOmittedForSizeByActor: [],
+      semanticBoardTruncated: [],
+      circumstanceFeatures: { pre_trim_bytes: 0, trim_bytes_removed: 0, trim_engaged: false },
+      roundTotals: { contextBytes: 0 },
+    });
+    expect(row?.hostContextDiagnostic).not.toBeNull();
+  });
+
+  it('persists an explicit blind primary cancellation as dispatch_cancelled infrastructure', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'd569-primary-cancelled-runner-'));
+    const service = new BlindArenaSnapshotService('primary-cancelled');
+    const state = applyRoomInitiativeProfile(generateRoom(3_943_001).encounter.state, 'derived_v1');
+    const [row] = await runArena(parseArenaArgs([
+      '--rooms', '1', '--reps', '1', '--seed', '3943001', '--basis', 'standard',
+      '--out', join(directory, 'rows.jsonl'), '--dm-mode', 'blind', '--dry-run',
+      '--cli', 'codex', '--model', 'gpt-5.6-luna', '--effort', 'high',
+    ]), {
+      fixtureStates: [state], heartbeat: () => undefined,
+      timeoutInitial: ['room-1-round-1'],
+      boardSnapshotServiceFactory: async () => service,
+    });
+    expect(row).toMatchObject({
+      outcome: 'infrastructure_failed', fallbackReason: 'dispatch_cancelled',
+      turnContextDelivery: { status: 'not_requested', reason: 'dispatch_cancelled' },
+      failingDispatch: {
+        phase: 'primary', exit: 'cancelled',
+        turnContextDelivery: { status: 'not_requested', reason: 'dispatch_cancelled' },
+      },
+    });
+    expect(row?.sessionId).toBeNull();
+    expect(row?.authorizedPlan).toBeNull();
+  });
+
+  it('persists real runner integrity evidence before propagating an inconclusive catalog STOP', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'd569-integrity-runner-'));
+    const service = new BlindArenaSnapshotService('integrity-stop');
+    const adapter = new InconclusiveCatalogAdapter();
+    const state = applyRoomInitiativeProfile(generateRoom(3_943_001).encounter.state, 'derived_v1');
+    await expect(runArena(parseArenaArgs([
+      '--rooms', '1', '--reps', '1', '--seed', '3943001', '--basis', 'standard',
+      '--out', join(directory, 'rows.jsonl'), '--dm-mode', 'blind',
+      '--cli', 'codex', '--model', 'gpt-5.6-luna', '--effort', 'high',
+    ]), {
+      adapter, fixtureStates: [state], heartbeat: () => undefined,
+      boardSnapshotServiceFactory: async () => service,
+    })).rejects.toBeInstanceOf(D569IntegrityStop);
+    if (adapter.invocation === null) throw new Error('Integrity runner never reached primary dispatch.');
+    const artifact = JSON.parse(readFileSync(
+      join(dirname(adapter.invocation.launcherToken), 'room-1-round-1-dispatch-integrity.json'),
+      'utf8',
+    )) as Readonly<Record<string, unknown>>;
+    expect(artifact).toMatchObject({
+      kind: 'dispatch_integrity_indeterminate', scheduledCellKey: '1:1',
+      catalogEvidence: { status: 'inconclusive' },
+      delivery: { status: 'indeterminate', integrityAction: 'stop_after_persist' },
+      proposalSpool: { stagedUnconsumed: true },
+    });
+  });
+
+  it('persists a forbidden-content audit row before the real runner raises its integrity STOP', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'd569-forbidden-ingress-runner-'));
+    const outPath = join(directory, 'rows.jsonl');
+    const service = new BlindArenaSnapshotService('forbidden-ingress');
+    const state = applyRoomInitiativeProfile(generateRoom(3_943_001).encounter.state, 'derived_v1');
+    await expect(runConversation(parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', outPath, '--dm-mode', 'blind',
+      '--cli', 'codex', '--model', 'gpt-5.6-luna', '--effort', 'high',
+    ]), {
+      adapter: new CatalogReadyDeliveredContextAdapter(), roomStates: [state], boardSnapshotService: service,
+      blindIngressAuditProbeText: 'engine default option',
+    })).rejects.toBeInstanceOf(D569IntegrityStop);
+    const persisted = JSON.parse(readFileSync(outPath, 'utf8').trim()) as Readonly<Record<string, unknown>>;
+    expect(persisted).toMatchObject({
+      rowContractVersion: 'arena-row-v3',
+      blindIngressAudit: {
+        version: 2, status: 'incomplete', passed: false, forbiddenContentPassed: false,
+        delivery: { status: 'delivered' },
+      },
+    });
+  });
   it('maps rows with zero, one, and two KB reads without losing hashes or order (mutation: omit arena kbReads)', () => {
     const records: readonly KbReadRecord[] = [
       {
@@ -494,6 +1016,107 @@ describe('AI-DM arena', () => {
       .toThrow('--party-policy must be heuristic_v0 or symmetric_evaluator_v1.');
   });
 
+  it('composes D569 blind/advice modes with Claude and Codex judge-player identities', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-d569-parse-'));
+    const common = [
+      '--rooms', '1', '--reps', '1', '--seed', '5117001',
+      '--out', join(directory, 'arena.jsonl'), '--dry-run',
+    ] as const;
+    for (const [cli, model, effort] of [
+      ['claude-code', 'claude-opus-5', 'high'],
+      ['claude-code', 'claude-fable-5', 'high'],
+      ['codex', 'gpt-5.6-sol', 'high'],
+    ] as const) {
+      for (const mode of ['blind', 'advice'] as const) {
+        expect(parseArenaArgs([
+          ...common, '--dm-mode', mode, '--cli', cli, '--model', model, '--effort', effort,
+        ])).toEqual(expect.objectContaining({
+          dmMode: mode, dmModeExplicit: true, cli, model, effort,
+          midRoundAdjustmentsEnabled: false, timeoutMs: 240_000, boardImageMode: 'png',
+        }));
+      }
+    }
+    expect(parseArenaArgs([...common, '--dm-mode', 'blind'])).toEqual(expect.objectContaining({
+      blindRepairArm: 'code_only', blindMaxAttempts: 3, blindFacts: false,
+      turnContextMaximumBytes: 65_536,
+    }));
+    expect(() => parseArenaArgs([
+      ...common, '--dm-mode', 'blind', '--capture-rl-data',
+    ])).toThrow('prohibit escalation and RL capture');
+  });
+
+  it('blind_scanner_flags_all_numbers: allows mechanics and neutral reach but rejects recommendation evidence', () => {
+    const allowed = new BlindModelIngressRecorder();
+    allowed.recordJson('turn_context', {
+      statblock: { armorClass: 18, hitPoints: 41, attack: '+7', damage: '2d8+4', saveDc: 15 },
+      resources: { spellSlots: 3 },
+      legal_movement: { cells: [{ label: '12,7', cost_feet: 25 }] },
+    });
+    expect(allowed.assertSafe({ requiredText: ['2d8+4', 'saveDc', '12,7', 'cost_feet'] }))
+      .toEqual(expect.objectContaining({ passed: true }));
+
+    for (const key of [
+      'option_id', 'option_count', 'option_order', 'rank', 'score', 'suggested_plan',
+      'intel', 'adverts', 'threats', 'movement_candidates', 'path_cells',
+    ]) {
+      if (key === 'path_cells') {
+        const bytes = new BlindModelIngressRecorder();
+        bytes.record('retry_prompt', 'path_cells are 1,1 then 1,2');
+        expect(() => bytes.assertSafe(), key).toThrow('forbidden recommendation bytes');
+      } else {
+        expect(() => assertNoForbiddenBlindStructure({ wrapper: { [key]: 'private' } }), key)
+          .toThrow('recommendation fields');
+      }
+    }
+    const exactId = new BlindModelIngressRecorder();
+    exactId.record('tool_result', 'option:2:private-current-offer');
+    expect(() => exactId.assertSafe({ offeredOptionIds: ['option:2:private-current-offer'] }))
+      .toThrow('forbidden recommendation bytes');
+  });
+
+  it('adjustment_runs_in_blind_arm and blind_arm_reuses_semantic_board_by_default: keeps screenshot-first parity', () => {
+    const { row, service } = blindArenaRowEvidence()[0]!;
+    expectAcceptedBlindEvidence(row, service);
+    expect(row.rawTurnContext).not.toContain('"semantic_board"');
+    expect(row.semanticBoardEvidence).toBeNull();
+    expect(row.turnContextBudget?.actualSemanticBytes).toBe(0);
+  });
+
+  it('blind_row_omits_context_cap_evidence: records the separately capped semantic diagnostic', () => {
+    const { row, service } = blindArenaRowEvidence()[1]!;
+    expectAcceptedBlindEvidence(row, service);
+    expect(row.rawTurnContext).toContain('"semantic_board"');
+    expect(row.semanticBoardEvidence).toEqual(expect.objectContaining({
+      omittedBlocks: ['reach_range_summaries'],
+    }));
+    expect(row.turnContextBudget?.actualSemanticBytes).toBeGreaterThan(0);
+    expect(row.turnContextBudget?.actualSemanticBytes).toBeLessThanOrEqual(8_192);
+  });
+
+  it('resolver_latency_included_as_model_wall and first_token_uses_first_stdout_line: separates code-only retries', () => {
+    const { row, service } = blindArenaRowEvidence()[2]!;
+    expectAcceptedBlindEvidence(row, service);
+    expect(row.blindAttempts).toHaveLength(2);
+    expect(row.blindAttempts?.[0]).toEqual(expect.objectContaining({
+      resolverOutcome: 'rejected', codes: expect.arrayContaining(['ACTION_UNAVAILABLE']),
+      hintExposed: false, modelFirstTokenMs: null,
+    }));
+    expect(row.blindAttempts?.[1]).toEqual(expect.objectContaining({
+      resolverOutcome: 'accepted', modelFirstTokenMs: null,
+    }));
+  });
+
+  it('blind_row_exposes_option_order: audits retries in the separately labelled minimal-hint arm', () => {
+    const { row, service } = blindArenaRowEvidence()[3]!;
+    expectAcceptedBlindEvidence(row, service);
+    expect(row.blindAttempts).toHaveLength(2);
+    expect(row.blindAttempts?.[0]).toEqual(expect.objectContaining({
+      resolverOutcome: 'rejected', codes: expect.arrayContaining(['ACTION_UNAVAILABLE']),
+      hintExposed: true,
+    }));
+    expect(JSON.stringify(row.blindAttempts?.[0])).not.toMatch(/option:|path|rank|score/iu);
+  });
+
   it('plumbs the cap into real hard-fixture context construction and arena evidence', { timeout: 60_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-turn-context-cap-'));
     const run = async (cap: number, name: string) => {
@@ -512,6 +1135,9 @@ describe('AI-DM arena', () => {
 
     expect(small.turnContextMaximumBytes).toBe(16 * 1024);
     expect(large.turnContextMaximumBytes).toBe(64 * 1024);
+    if (small.rawTurnContext === null || large.rawTurnContext === null) {
+      throw new Error('Cap rows omitted delivered context.');
+    }
     expect(Buffer.byteLength(small.rawTurnContext)).toBeLessThanOrEqual(16 * 1024);
     expect(small.postTrimBytes).toBeLessThanOrEqual(16 * 1024);
     expect(large.postTrimBytes).toBeLessThanOrEqual(64 * 1024);
@@ -605,6 +1231,7 @@ describe('AI-DM arena', () => {
     expect(second.startingRoomDigest).toBe(first.startingRoomDigest);
     expect(second.rawTurnContext).toBe(first.rawTurnContext);
 
+    if (first.rawTurnContext === null) throw new Error('Scenario row omitted delivered context.');
     const context = objectValue(JSON.parse(first.rawTurnContext) as unknown, 'scenario turn context');
     const actors = context['actors'];
     if (!Array.isArray(actors)) throw new TypeError('Scenario turn context omitted actors.');
@@ -674,8 +1301,10 @@ describe('AI-DM arena', () => {
         profile,
       });
       expect(circumstanceFeatureVectorSchema.safeParse(row.circumstanceFeatures).success).toBe(true);
+      if (row.rawTurnContext === null) throw new Error('Renderer row omitted delivered context.');
+      const rawTurnContext = row.rawTurnContext;
       if (profile.format === 'structured') {
-        const modelVisibleContext = objectValue(JSON.parse(row.rawTurnContext), 'raw turn context');
+        const modelVisibleContext = objectValue(JSON.parse(rawTurnContext), 'raw turn context');
         if (profile.attribution === 'off') {
           expect(modelVisibleContext).not.toHaveProperty('renderer_attribution');
         } else {
@@ -684,11 +1313,11 @@ describe('AI-DM arena', () => {
           });
         }
       } else {
-        expect(row.rawTurnContext).toMatch(/[Rr]evision \d+/u);
-        expect(row.rawTurnContext).toMatch(/\[option:\d+:[0-9a-f]+\]/u);
-        expect(() => JSON.parse(row.rawTurnContext)).toThrow();
+        expect(rawTurnContext).toMatch(/[Rr]evision \d+/u);
+        expect(rawTurnContext).toMatch(/\[option:\d+:[0-9a-f]+\]/u);
+        expect(() => JSON.parse(rawTurnContext)).toThrow();
         expect(row.circumstanceFeatures.pre_trim_bytes)
-          .toBeGreaterThanOrEqual(new TextEncoder().encode(row.rawTurnContext).byteLength);
+          .toBeGreaterThanOrEqual(new TextEncoder().encode(rawTurnContext).byteLength);
       }
     }
   });
@@ -740,6 +1369,7 @@ describe('AI-DM arena', () => {
       rlData: expect.objectContaining({ intelPolicyVersions: { intel_mode: 'off' } }),
     }));
 
+    if (offRow.rawTurnContext === null) throw new Error('Intel-off row omitted delivered context.');
     const context = JSON.parse(offRow.rawTurnContext) as unknown;
     const keys = new Set<string>();
     const visit = (value: unknown): void => {
@@ -1052,9 +1682,9 @@ describe('AI-DM arena', () => {
       granularity: 'full',
       state_ref: { expected_revision: rows[1]?.contextRevision },
     });
-    expect(new TextEncoder().encode(rows[0]?.rawTurnContext).byteLength)
+    expect(new TextEncoder().encode(rows[0]?.rawTurnContext ?? '').byteLength)
       .toBeLessThanOrEqual(rows[0]?.turnContextMaximumBytes ?? 0);
-    expect(new TextEncoder().encode(rows[1]?.rawTurnContext).byteLength)
+    expect(new TextEncoder().encode(rows[1]?.rawTurnContext ?? '').byteLength)
       .toBeLessThanOrEqual(rows[1]?.turnContextMaximumBytes ?? 0);
     expect(rows.every((row) =>
       row.snippetHash === SNIPPET_REGISTRY.snippetHash &&

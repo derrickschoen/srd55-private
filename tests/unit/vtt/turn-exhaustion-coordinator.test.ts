@@ -235,7 +235,7 @@ describe('host turn exhaustion coordinator', () => {
     expect(fallbackApplications).toBe(0);
   });
 
-  it('late completion cannot reach acceptance', async () => {
+  it('attributes deadline expiry without invoking host authorization', async () => {
     let acceptsCompletion = false;
     const originalHash = sha256(JSON.stringify({ acceptsCompletion }));
     const prove = async (): Promise<void> => {
@@ -253,6 +253,7 @@ describe('host turn exhaustion coordinator', () => {
         correction: runtime(f, new SIMULATEDAgentSessionAdapter({ startIds: [] }), [], { value: 0 }),
         escalation: null,
         deadline: lateDeadline,
+        authorizationFailurePolicy: { kind: 'refuse_blind' },
         host: {
           ...host(),
           authorize: async () => {
@@ -262,7 +263,9 @@ describe('host turn exhaustion coordinator', () => {
         },
       });
       expect(authorizations).toBe(0);
-      expect(outcome).toEqual({ kind: 'auto_resolved', actorIds: [f.actor] });
+      expect(outcome).toEqual({
+        kind: 'refused', reason: 'round_deadline_expired', attemptConsumed: true,
+      });
     };
 
     try {
@@ -304,6 +307,65 @@ describe('host turn exhaustion coordinator', () => {
     expect(f.journal.history().map((entry) => entry.transition.kind)).toContain('proposal_fallback_resolved');
   });
 
+  it('refuses blind host-authorization failure without rendering or dispatching DM correction', async () => {
+    const f = fixture();
+    const adapter = new SIMULATEDAgentSessionAdapter({ startIds: [] });
+    const activated = { value: 0 };
+    const renderedMethods: string[] = [];
+    const coordinator = new TurnExhaustionCoordinator(
+      f.journal.turnExhaustionPersistence(),
+      (method, capsule, rules, context) => {
+        renderedMethods.push(method);
+        return JSON.stringify({ capsule, rules: rules.get('irrelevant'), context });
+      },
+    );
+
+    await expect(coordinator.coordinate({
+      initial: { kind: 'proposal', proposal: proposal(f, 'initial', 'primary') },
+      correction: runtime(f, adapter, [], activated),
+      host: host({ authorization: 'invalid' }),
+      authorizationFailurePolicy: { kind: 'refuse_blind' },
+    })).resolves.toEqual({
+      kind: 'refused', reason: 'host_authorization_failed', attemptConsumed: true,
+    });
+
+    expect(renderedMethods.filter((method) => method === 'correct_proposal')).toHaveLength(0);
+    expect(adapter.resumeInvocations).toHaveLength(0);
+    expect(activated.value).toBe(0);
+    expect(f.journal.history().map((entry) => entry.transition.kind))
+      .not.toContain('proposal_correction_requested');
+  });
+
+  it('does not label a missing proposal as host authorization failure under blind policy', async () => {
+    const f = fixture();
+    const adapter = new SIMULATEDAgentSessionAdapter({ startIds: [] });
+    const coordinator = new TurnExhaustionCoordinator(f.journal.turnExhaustionPersistence());
+
+    await expect(coordinator.coordinate({
+      initial: exhausted(f, 'absent'),
+      correction: runtime(f, adapter, [], { value: 0 }),
+      host: host(),
+      authorizationFailurePolicy: { kind: 'refuse_blind' },
+    })).resolves.toEqual({ kind: 'refused', reason: 'no_proposal', attemptConsumed: true });
+
+    expect(adapter.resumeInvocations).toHaveLength(0);
+  });
+
+  it('retains resolver-rejection attribution without claiming host authorization ran', async () => {
+    const f = fixture();
+    const adapter = new SIMULATEDAgentSessionAdapter({ startIds: [] });
+    const coordinator = new TurnExhaustionCoordinator(f.journal.turnExhaustionPersistence());
+
+    await expect(coordinator.coordinate({
+      initial: exhausted(f, 'invalid'),
+      correction: runtime(f, adapter, [], { value: 0 }),
+      host: host(),
+      authorizationFailurePolicy: { kind: 'refuse_blind' },
+    })).resolves.toEqual({ kind: 'refused', reason: 'resolver_rejected', attemptConsumed: true });
+
+    expect(adapter.resumeInvocations).toHaveLength(0);
+  });
+
   it('dispatches exactly one proposal correction and accepts its complete proposal', async () => {
     const f = fixture();
     const queued: RoundTurnProposalEnvelope[] = [];
@@ -333,6 +395,122 @@ describe('host turn exhaustion coordinator', () => {
       'proposal_correction_resolved',
     ]));
   });
+
+  it('attributes expiry after retrieving a correction without authorization or validation-failure persistence', async () => {
+    const f = fixture();
+    const queued: RoundTurnProposalEnvelope[] = [];
+    let acceptsCompletion = true;
+    let authorizations = 0;
+    let deterministicResolutions = 0;
+    const adapter = new SIMULATEDAgentSessionAdapter({
+      startIds: [],
+      onResume: () => { queued.push(proposal(f, 'correction', 'primary')); },
+    });
+    const correction = runtime(f, adapter, queued, { value: 0 });
+    const takeProposal = correction.takeProposal;
+    const expiringCorrection: TurnExhaustionCorrectionRuntime = {
+      ...correction,
+      takeProposal: () => {
+        const retrieved = takeProposal();
+        acceptsCompletion = false;
+        return retrieved;
+      },
+    };
+    const expiringDeadline: AgentDispatchDeadline = {
+      signal: new AbortController().signal,
+      dispatch: (invocation) => ({ kind: 'open', timeoutMs: 60_000, invocation }),
+      acceptsCompletion: () => acceptsCompletion,
+    };
+
+    const outcome = await new TurnExhaustionCoordinator(
+      f.journal.turnExhaustionPersistence(),
+    ).coordinate({
+      initial: exhausted(f),
+      correction: expiringCorrection,
+      escalation: null,
+      deadline: expiringDeadline,
+      host: {
+        ...host(),
+        authorize: async () => {
+          authorizations += 1;
+          return 'authorized';
+        },
+        resolveDeterministically: async (actorId) => {
+          deterministicResolutions += 1;
+          return { actorId, expectedRevision: 3, resolutionDigest: 'b'.repeat(64) };
+        },
+      },
+    });
+
+    expect(outcome).toEqual({
+      kind: 'refused', reason: 'round_deadline_expired', attemptConsumed: true,
+    });
+    expect(authorizations).toBe(0);
+    expect(deterministicResolutions).toBe(0);
+    expect(adapter.resumeInvocations).toHaveLength(1);
+    expect(f.journal.history().map((entry) => entry.transition.kind)).toContain('proposal_correction_requested');
+    expect(f.journal.history().map((entry) => entry.transition.kind)).not.toContain('proposal_correction_failed');
+  });
+
+  it.each([
+    ['null', () => null],
+    ['structurally invalid', (f: ReturnType<typeof fixture>) => ({
+      ...proposal(f, 'correction', 'primary'),
+      resolutions: [],
+    })],
+  ] as const)(
+    'attributes expiry after retrieving a %s correction without failure persistence',
+    async (_kind, retrievedProposal) => {
+      const f = fixture();
+      let acceptsCompletion = true;
+      let authorizations = 0;
+      let deterministicResolutions = 0;
+      const adapter = new SIMULATEDAgentSessionAdapter({ startIds: [] });
+      const correction = runtime(f, adapter, [], { value: 0 });
+      const expiringCorrection: TurnExhaustionCorrectionRuntime = {
+        ...correction,
+        takeProposal: () => {
+          const retrieved = retrievedProposal(f);
+          acceptsCompletion = false;
+          return retrieved;
+        },
+      };
+      const expiringDeadline: AgentDispatchDeadline = {
+        signal: new AbortController().signal,
+        dispatch: (invocation) => ({ kind: 'open', timeoutMs: 60_000, invocation }),
+        acceptsCompletion: () => acceptsCompletion,
+      };
+
+      const outcome = await new TurnExhaustionCoordinator(
+        f.journal.turnExhaustionPersistence(),
+      ).coordinate({
+        initial: exhausted(f),
+        correction: expiringCorrection,
+        escalation: null,
+        deadline: expiringDeadline,
+        host: {
+          ...host(),
+          authorize: async () => {
+            authorizations += 1;
+            return 'authorized';
+          },
+          resolveDeterministically: async (actorId) => {
+            deterministicResolutions += 1;
+            return { actorId, expectedRevision: 3, resolutionDigest: 'b'.repeat(64) };
+          },
+        },
+      });
+
+      expect(outcome).toEqual({
+        kind: 'refused', reason: 'round_deadline_expired', attemptConsumed: true,
+      });
+      expect(authorizations).toBe(0);
+      expect(deterministicResolutions).toBe(0);
+      expect(adapter.resumeInvocations).toHaveLength(1);
+      expect(f.journal.history().map((entry) => entry.transition.kind)).toContain('proposal_correction_requested');
+      expect(f.journal.history().map((entry) => entry.transition.kind)).not.toContain('proposal_correction_failed');
+    },
+  );
 
   it('marks deterministic controller output auto-resolved after the correction returns no proposal', async () => {
     const f = fixture();

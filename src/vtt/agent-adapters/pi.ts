@@ -6,10 +6,14 @@ import { agentSessionIdFromCli, contextTokenCount, turnInputTotal } from '../age
 import type { AgentInvocation, AgentSessionBinding, AgentTurnResult, AgentUsage } from '../agent-session';
 import {
   AgentAdapterError,
+  agentProcessEvidence,
   completedOutput,
   jsonEventLines,
+  observedInvocationIds,
+  processEventInvocationId,
   ProcessAgentSessionAdapter,
   record,
+  tolerantObservedJsonEvents,
   type AgentAdapterOptions,
   type AgentProcessSpec,
 } from './process';
@@ -93,15 +97,42 @@ export class PiAgentSessionAdapter extends ProcessAgentSessionAdapter {
       signal,
       invocation.timeoutMs,
     );
+    const observedEvents = tolerantObservedJsonEvents(output);
+    const processEvidence = agentProcessEvidence(output, observedEvents.map((entry) => ({
+      invocationId: processEventInvocationId(entry.event),
+      kind: typeof entry.event['type'] === 'string' ? entry.event['type'] : 'unknown',
+      observedAtUnixMs: entry.observedAtUnixMs,
+    })));
+    const partial = decodePiObserved(observedEvents.map((entry) => entry.event), sessionId);
     completedOutput(output, resuming);
+    if (output.timedOut) {
+      return {
+        resumeSessionId: agentSessionIdFromCli(sessionId), sessionId: null,
+        finalText: partial.finalText, usage: partial.usage, exit: 'timed_out', timeoutMs: invocation.timeoutMs ?? 1,
+        contractEvidence: piContractEvidence(this.options.piMcpExtensionPath),
+        processEvidence, engineCatalogEvidence: null,
+        partialResultEvidence: {
+          status: 'partial', decodedEventCount: observedEvents.length,
+          finalTextFragment: partial.finalText, observedUsage: partial.usage,
+          stagedInvocationIds: observedInvocationIds(observedEvents),
+        },
+      };
+    }
     if (output.cancelled) {
       return {
         resumeSessionId: agentSessionIdFromCli(sessionId),
         sessionId: null,
-        finalText: '',
-        usage: null,
+        finalText: partial.finalText,
+        usage: partial.usage,
         exit: 'cancelled',
+        cancellationReason: String(signal.reason ?? 'abort_signal'),
         contractEvidence: piContractEvidence(this.options.piMcpExtensionPath),
+        processEvidence, engineCatalogEvidence: null,
+        partialResultEvidence: {
+          status: 'partial', decodedEventCount: observedEvents.length,
+          finalTextFragment: partial.finalText, observedUsage: partial.usage,
+          stagedInvocationIds: observedInvocationIds(observedEvents),
+        },
       };
     }
     const decoded = decodePiTurn(output.stdout, sessionId, (event) => this.observe(event));
@@ -112,8 +143,32 @@ export class PiAgentSessionAdapter extends ProcessAgentSessionAdapter {
       usage: decoded.usage,
       exit: 'completed',
       contractEvidence: piContractEvidence(this.options.piMcpExtensionPath),
+      processEvidence, engineCatalogEvidence: null,
+      partialResultEvidence: { status: 'complete', decodedEventCount: output.stdoutLines.length },
     };
   }
+}
+
+function decodePiObserved(
+  events: readonly Readonly<Record<string, unknown>>[],
+  sessionFilePath: string,
+): PiDecodedTurn {
+  let finalText = '';
+  let usage: AgentUsage | null = null;
+  for (const event of events) {
+    const emittedSessionId = sessionIdFromEvent(event);
+    if (emittedSessionId !== null && emittedSessionId !== sessionFilePath) continue;
+    for (const message of messagesFromEvent(event)) {
+      if (message['role'] !== 'assistant') continue;
+      const text = textFromContent(message['content']);
+      if (text !== null) finalText = text;
+      const candidate = record(message['usage']);
+      if (candidate !== null) usage = decodeUsage(candidate) ?? usage;
+    }
+    const eventUsage = record(event['usage']);
+    if (eventUsage !== null) usage = decodeUsage(eventUsage) ?? usage;
+  }
+  return { sessionId: sessionFilePath, finalText, usage };
 }
 
 export function piMcpConfig(command: string, args: readonly string[]): Readonly<Record<string, unknown>> {

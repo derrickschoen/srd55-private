@@ -103,6 +103,7 @@ function eventsOf(revision: SessionRevision): readonly EncounterEvent[] {
     case 'agent_session_dispatched':
     case 'agent_call_usage_recorded':
     case 'agent_session_recovered':
+    case 'agent_session_recovery_failed':
     case 'agent_session_rolled_over':
     case 'session_ended':
     case 'proposal_fallback_resolved':

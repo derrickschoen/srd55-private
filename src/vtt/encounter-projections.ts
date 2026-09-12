@@ -132,6 +132,16 @@ export interface DmBoardProjection {
   readonly pendingPlacementRecovery: DmPendingPlacementRecovery | null;
 }
 
+/** Remove engine-authored movement offers before a state-only board is rendered. */
+export function projectStateOnlyDmBoard(
+  projection: DmBoardProjection,
+): DmBoardProjection {
+  return {
+    ...projection,
+    offeredOptionPaths: [],
+  };
+}
+
 export interface DmPendingPlacementRecovery {
   readonly combatantId: CombatantId;
   readonly combatantName: string;

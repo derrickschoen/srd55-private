@@ -190,7 +190,6 @@ function toolResult(
   const images = additionalContent.filter(
     (block): block is McpImageContentBlock => block.type === 'image',
   );
-  if (images.length > 1) throw new RangeError('MCP tool result may contain at most one image block.');
   const proseDocument = isRecord(value) &&
     (value['format'] === 'caveman_prose' || value['format'] === 'regular_prose') &&
     typeof value['document'] === 'string'

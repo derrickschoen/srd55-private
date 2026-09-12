@@ -4,7 +4,6 @@ import { monsterCombatantProfile } from '../../../src/combat/combatant';
 import { reduceEncounter } from '../../../src/combat/encounter';
 import { mulberry32 } from '../../../src/combat/random';
 import { BUNDLED_MONSTER_ROSTER, STARTER_MONSTER_ROSTER } from '../../../src/combat/statblocks/roster';
-import { spellDefinition } from '../../../src/combat/spells/definitions';
 import { sha256 } from '../../../src/crypto/sha256';
 import { creatureSizes, type KnownCreatureSize } from '../../../src/domain/enums';
 import {
@@ -12,17 +11,17 @@ import {
   d466CreatureReplacement,
   d466ReplacementStatblock,
 } from '../../../src/vtt/d466-room-overrides';
-import { availableEngineActorOptions, resolveEngineActorOption } from '../../../src/vtt/intent-resolver';
-import { freshMonsterPlanningState } from '../../../src/vtt/monster-planning-state';
 import {
-  BRUTAL_CHALLENGE_BUDGET_SCALE,
-  BRUTAL_TERRAIN_FEATURE_COUNT_BAND,
   generateRoom,
   heldoutMaximizingMonsterRosters,
   HELDOUT_STARTER_MONSTER_FAMILIES,
   ROOM_GRID_DIMENSIONS,
   type GeneratedRoom,
 } from '../../../src/vtt/room-generator';
+import {
+  brutalRoomMembershipViolations,
+  hardRoomMembershipViolations,
+} from '../../../tools/d569-second-family-manifest';
 import { loadExternalPartyPackBytes } from '../../../src/vtt/party-pack';
 import { declareTestInputs } from '../../helpers/test-inputs';
 
@@ -479,45 +478,7 @@ describe('seeded room generator', () => {
     const path = `tests/fixtures/arena-basis-hard/seed-${String(seed)}.json` as
       `tests/fixtures/arena-basis-hard/seed-${typeof seed}.json`;
     const room = JSON.parse(inputs.fixtures.readText(path)) as GeneratedRoom;
-    const rows = room.spec.monsterRoster.map((entry) => {
-      const row = STARTER_MONSTER_ROSTER.find((candidate) => candidate.id === entry.statblockId);
-      if (row === undefined) throw new Error(`Frozen hard room references unknown ${entry.statblockId}.`);
-      return row;
-    });
-    const casterRows = rows.filter((row) =>
-      row.statblock.sourceDetails.actions.kind === 'present' &&
-      row.statblock.sourceDetails.actions.value.some((action) => action.kind === 'spellcasting'));
-    const controlCasterRows = casterRows.filter((row) =>
-      row.statblock.sourceDetails.actions.kind === 'present' &&
-      row.statblock.sourceDetails.actions.value.some((action) =>
-        action.kind === 'spellcasting' && action.spells.some((spell) => {
-          const definition = spellDefinition(spell.id);
-          return definition?.operation.kind === 'persistent_area' &&
-            definition.operation.hooks.some((hook) => hook.effect.kind === 'save_gated') &&
-            definition.operation.hooks.some((hook) =>
-              hook.effect.kind === 'automatic' && hook.effect.payload.kind === 'effect' &&
-              hook.effect.payload.payload.kind === 'movement_modifier');
-        })));
-    expect(casterRows.length).toBeGreaterThanOrEqual(1);
-    expect(controlCasterRows.length).toBeGreaterThanOrEqual(1);
-    expect(rows.length).toBeGreaterThanOrEqual(4);
-    expect(rows.length).toBeLessThanOrEqual(7);
-    expect(rows.some((row) => row.id === 'statblock:guard')).toBe(true);
-    expect(rows.some((row) => row.id === 'statblock:scout')).toBe(true);
-
-    const difficultRegions = room.spec.terrain.filter((feature) =>
-      feature.kind === 'difficult-terrain-patch');
-    const features = room.spec.hardFeatures;
-    expect(features?.shape).toBe('single-gate');
-    expect(difficultRegions.length).toBeGreaterThanOrEqual(1);
-    expect(features?.likelyApproachTerrainRegionIds.every((id) =>
-      difficultRegions.some((region) => region.id === id && region.cells.length > 0))).toBe(true);
-    expect(features?.chokepointCells).toHaveLength(1);
-    const [gate] = features?.chokepointCells ?? [];
-    if (gate === undefined) throw new Error('Hard room has no declared chokepoint cell.');
-    const barrier = room.spec.blockedCells.filter((cell) => cell.column === gate.column);
-    expect(barrier).toHaveLength(room.spec.dimensions.rows - 1);
-    expect(barrier.some((cell) => cell.row === gate.row)).toBe(false);
+    expect(hardRoomMembershipViolations(room)).toEqual([]);
   });
 
   it.each(BRUTAL_BASIS_SEEDS)('pins frozen brutal arena basis seed %s byte-for-byte', (seed) => {
@@ -600,62 +561,8 @@ describe('seeded room generator', () => {
   it.each(BRUTAL_PRODUCTIVITY_SEEDS)(
     'generates brutal seed %s with executable casters, dense terrain, scaled pressure, and productive monsters',
     (seed) => {
-      const hard = generateRoom(seed, { difficulty: 'hard' });
       const brutal = generateRoom(seed, { difficulty: 'brutal' });
-      expect(brutal.spec.challengeBudgetEighths).toBe(
-        hard.spec.challengeBudgetEighths * BRUTAL_CHALLENGE_BUDGET_SCALE,
-      );
-      expect(brutal.spec.challengeSpentEighths).toBeGreaterThanOrEqual(
-        brutal.spec.challengeBudgetEighths * 0.9,
-      );
-      expect(brutal.spec.challengeSpentEighths).toBeLessThanOrEqual(
-        brutal.spec.challengeBudgetEighths,
-      );
-
-      const rosterRows = brutal.spec.monsterRoster.map((entry) => {
-        const row = BUNDLED_MONSTER_ROSTER.find((candidate) => candidate.id === entry.statblockId);
-        if (row === undefined) throw new Error(`Brutal room references unknown ${entry.statblockId}.`);
-        return row;
-      });
-      expect(rosterRows.some((row) => {
-        const actions = row.statblock.sourceDetails.actions;
-        return actions.kind === 'present' && actions.value.some((action) =>
-          action.kind === 'spellcasting' && action.execution?.kind !== 'absent' &&
-          action.spells.some((spell) => spell.manifestStatus === 'implemented'));
-      })).toBe(true);
-
-      const terrainCounts = {
-        difficult: brutal.spec.terrain.filter((feature) =>
-          feature.kind === 'difficult-terrain-patch').length,
-        hazards: brutal.spec.terrain.filter((feature) => feature.kind === 'hazard-object').length,
-        lights: brutal.spec.terrain.filter((feature) => feature.kind === 'light-source').length,
-        obscurement: brutal.spec.terrain.filter((feature) =>
-          feature.kind === 'obscurement-patch').length,
-      };
-      expect(terrainCounts.difficult).toBeGreaterThanOrEqual(3);
-      expect(terrainCounts.hazards).toBeGreaterThanOrEqual(3);
-      expect(terrainCounts.lights).toBeGreaterThanOrEqual(2);
-      expect(terrainCounts.obscurement).toBeGreaterThanOrEqual(2);
-      expect(brutal.spec.terrain.length).toBeGreaterThan(hard.spec.terrain.length);
-      expect(Object.values(terrainCounts).reduce((total, count) => total + count, 0))
-        .toBeGreaterThanOrEqual(BRUTAL_TERRAIN_FEATURE_COUNT_BAND.minimum);
-      expect(Object.values(terrainCounts).reduce((total, count) => total + count, 0))
-        .toBeLessThanOrEqual(BRUTAL_TERRAIN_FEATURE_COUNT_BAND.maximum);
-
-      const planningState = freshMonsterPlanningState(brutal.encounter.state);
-      const monsters = planningState.combatants.filter((combatant) =>
-        combatant.profile.kind === 'monster');
-      for (const monster of monsters) {
-        const productive = availableEngineActorOptions(planningState, monster.profile.id)
-          .some((option) => {
-            const resolution = resolveEngineActorOption(planningState, option);
-            return resolution.valid && (resolution.mechanics.movementCostFeet > 0 ||
-              resolution.mechanics.actionSlots.some((slot) =>
-                slot.kind === 'attack' || slot.kind === 'saving_throw' || slot.kind === 'cast_spell' ||
-                slot.kind === 'use_world_object'));
-          });
-        expect(productive, `${monster.profile.id} has no productive first-turn option`).toBe(true);
-      }
+      expect(brutalRoomMembershipViolations(brutal)).toEqual([]);
     },
   );
 

@@ -50,6 +50,9 @@ class SIMULATEDCli implements AgentSessionAdapter {
       finalText: 'BOOT',
       usage: null,
       exit: 'completed',
+      processEvidence: null,
+      engineCatalogEvidence: null,
+      partialResultEvidence: { status: 'complete', decodedEventCount: 0 },
       ...(this.mode === 'skipped_mcp' ? { contractEvidence: [PI_MCP_SKIPPED_NO_EXTENSION] } : {}),
     });
   }
@@ -73,6 +76,9 @@ class SIMULATEDCli implements AgentSessionAdapter {
       finalText: proof && proofSucceeded ? SIMULATED_PROOF_TOKEN : proof ? SIMULATED_DIGEST : 'RESUME',
       usage: null,
       exit: 'completed',
+      processEvidence: null,
+      engineCatalogEvidence: null,
+      partialResultEvidence: { status: 'complete', decodedEventCount: 0 },
     });
   }
   classifyFailure(error: unknown): AgentFailureClassification {

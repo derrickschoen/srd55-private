@@ -4,6 +4,7 @@ import type {
   AgentInvocation,
   AgentSessionBinding,
   AgentSessionAdapter,
+  AgentProcessEvidence,
   AgentTurnResult,
   CliProbe,
 } from '../agent-session';
@@ -26,7 +27,21 @@ export interface AgentProcessOutput {
   readonly stdout: string;
   readonly stderr: string;
   readonly exitCode: number | null;
+  readonly signal: string | null;
   readonly cancelled: boolean;
+  readonly timedOut: boolean;
+  readonly startedAtUnixMs: number;
+  readonly endedAtUnixMs: number;
+  readonly stdoutLines: readonly {
+    readonly line: string;
+    readonly observedAtUnixMs: number;
+  }[];
+}
+
+export interface ObservedJsonEvent {
+  readonly event: Readonly<Record<string, unknown>>;
+  readonly observedAtUnixMs: number;
+  readonly invocationId: string | null;
 }
 
 export interface AgentProcessRunner {
@@ -48,7 +63,7 @@ export interface AgentAdapterOptions {
   readonly onStdoutLine?: (line: string) => void;
   readonly piMcpExtensionPath?: string;
   readonly codexHome?: string;
-  readonly engineToolProfile?: 'full' | 'dm';
+  readonly engineToolProfile?: 'full' | 'dm' | 'blind';
 }
 
 export type AgentAdapterErrorCode =
@@ -85,9 +100,14 @@ export const realAgentProcessRunner: AgentProcessRunner = {
       return Promise.reject(new RangeError('Agent invocation timeout must be null or a positive integer.'));
     }
     if (signal.aborted) {
-      return Promise.resolve({ stdout: '', stderr: '', exitCode: null, cancelled: true });
+      const now = Date.now();
+      return Promise.resolve({
+        stdout: '', stderr: '', exitCode: null, signal: null, cancelled: true, timedOut: false,
+        startedAtUnixMs: now, endedAtUnixMs: now, stdoutLines: [],
+      });
     }
     return new Promise<AgentProcessOutput>((resolvePromise, reject) => {
+      const startedAtUnixMs = Date.now();
       let child;
       try {
         child = spawn(spec.binary, [...spec.argv], {
@@ -104,8 +124,12 @@ export const realAgentProcessRunner: AgentProcessRunner = {
       let stdoutLineBuffer = '';
       let stderr = '';
       let cancelled = false;
+      let timedOut = false;
+      let exitSignal: string | null = null;
+      const stdoutLines: { line: string; observedAtUnixMs: number }[] = [];
       let settled = false;
       let timer: ReturnType<typeof setTimeout> | null = null;
+      let forceKillTimer: ReturnType<typeof setTimeout> | null = null;
       const cancel = (): void => {
         cancelled = true;
         child.kill('SIGTERM');
@@ -115,19 +139,15 @@ export const realAgentProcessRunner: AgentProcessRunner = {
         settled = true;
         signal.removeEventListener('abort', cancel);
         if (timer !== null) clearTimeout(timer);
+        if (forceKillTimer !== null) clearTimeout(forceKillTimer);
         resolvePromise(result);
       };
       const timeOut = (): void => {
         if (settled) return;
-        settled = true;
-        cancelled = true;
+        timedOut = true;
         signal.removeEventListener('abort', cancel);
         child.kill('SIGTERM');
-        reject(new AgentAdapterError(
-          'timeout',
-          `Agent CLI timed out after ${String(timeoutMs)} ms.`,
-          { stderr },
-        ));
+        forceKillTimer = setTimeout(() => { child.kill('SIGKILL'); }, 1_000);
       };
       signal.addEventListener('abort', cancel, { once: true });
       if (timeoutMs !== null) {
@@ -140,20 +160,35 @@ export const realAgentProcessRunner: AgentProcessRunner = {
         stdoutLineBuffer += chunk;
         const lines = stdoutLineBuffer.split('\n');
         stdoutLineBuffer = lines.pop() ?? '';
-        for (const line of lines) spec.onStdoutLine?.(line);
+        for (const line of lines) {
+          const observedAtUnixMs = Date.now();
+          stdoutLines.push({ line, observedAtUnixMs });
+          spec.onStdoutLine?.(line);
+        }
       });
-      child.stderr.on('data', (chunk: string) => { stderr = capStderr(`${stderr}${chunk}`); });
+      // Preserve the complete stream for forensic evidence. User-facing errors
+      // are still bounded by capStderr at the point where they are rendered.
+      child.stderr.on('data', (chunk: string) => { stderr += chunk; });
       child.stdin.on('error', () => undefined);
       child.once('error', (error) => {
         if (settled) return;
         settled = true;
         signal.removeEventListener('abort', cancel);
         if (timer !== null) clearTimeout(timer);
+        if (forceKillTimer !== null) clearTimeout(forceKillTimer);
         reject(spawnError(error));
       });
-      child.once('close', (exitCode) => {
-        if (stdoutLineBuffer.length > 0) spec.onStdoutLine?.(stdoutLineBuffer);
-        finish({ stdout, stderr, exitCode, cancelled });
+      child.once('close', (exitCode, signalName) => {
+        exitSignal = signalName;
+        if (stdoutLineBuffer.length > 0) {
+          const observedAtUnixMs = Date.now();
+          stdoutLines.push({ line: stdoutLineBuffer, observedAtUnixMs });
+          spec.onStdoutLine?.(stdoutLineBuffer);
+        }
+        finish({
+          stdout, stderr, exitCode, signal: exitSignal, cancelled, timedOut,
+          startedAtUnixMs, endedAtUnixMs: Date.now(), stdoutLines,
+        });
       });
       child.stdin.end(stdin);
     });
@@ -237,10 +272,52 @@ export function jsonEventLines(stdout: string): readonly Readonly<Record<string,
   });
 }
 
+/** Decodes every complete observed JSON object without letting a truncated tail erase prior evidence. */
+export function tolerantObservedJsonEvents(output: AgentProcessOutput): readonly ObservedJsonEvent[] {
+  return output.stdoutLines.flatMap((line): readonly ObservedJsonEvent[] => {
+    let event: Readonly<Record<string, unknown>> | null = null;
+    try { event = record(JSON.parse(line.line) as unknown); } catch { return []; }
+    if (event === null) return [];
+    const item = record(event['item']);
+    const part = record(event['part']);
+    const invocationId = [
+      item?.['id'], item?.['call_id'], item?.['tool_call_id'],
+      part?.['id'], part?.['callID'], part?.['callId'], part?.['toolCallId'],
+      event['invocationId'], event['call_id'], event['tool_call_id'],
+    ].find((candidate): candidate is string => typeof candidate === 'string' && candidate.length > 0) ?? null;
+    return [{ event, observedAtUnixMs: line.observedAtUnixMs, invocationId }];
+  });
+}
+
+export function observedInvocationIds(events: readonly ObservedJsonEvent[]): readonly string[] {
+  return [...new Set(events.flatMap((entry) => entry.invocationId === null ? [] : [entry.invocationId]))].sort();
+}
+
+/** Retains the established process-event identity contract while partial-result evidence records broader CLI ids. */
+export function processEventInvocationId(event: Readonly<Record<string, unknown>>): string | null {
+  const item = record(event['item']);
+  return typeof item?.['id'] === 'string' ? item['id'] : null;
+}
+
 export function completedOutput(output: AgentProcessOutput, resuming: boolean): void {
-  if (output.cancelled) return;
+  if (output.cancelled || output.timedOut) return;
   if (output.exitCode === 0) return;
   throw classifyExit(output, resuming);
+}
+
+export function agentProcessEvidence(
+  output: AgentProcessOutput,
+  decodedEvents: AgentProcessEvidence['decodedEvents'] = [],
+): AgentProcessEvidence {
+  return {
+    startedAtUnixMs: output.startedAtUnixMs,
+    endedAtUnixMs: output.endedAtUnixMs,
+    exitCode: output.exitCode,
+    signal: output.signal,
+    stdout: output.stdout,
+    stderr: output.stderr,
+    decodedEvents,
+  };
 }
 
 export function classifyAgentFailure(error: unknown): AgentFailureClassification {

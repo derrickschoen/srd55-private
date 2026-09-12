@@ -1,7 +1,10 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { z } from 'zod';
+import { D569IntegrityStop } from '../src/vtt/d569-integrity';
 import { canonicalJson } from '../src/commands/canonical-json';
+import { engineUiFeedbackSchema } from '../src/vtt/mcp/schemas';
+import { d569DeliveryHasIntegritySignal } from '../src/vtt/turn-context-delivery';
 import {
   ArenaRowDecodeError,
   conversationRowCodec,
@@ -33,6 +36,7 @@ export const BRUTAL_10_B_SEEDS = [
 export const R1_10_REPS = 3 as const;
 export const BRUTAL_10_REPS = 3 as const;
 export const RERUN_PACKET_VERSION = 'ai-dm-rerun-packet-v1' as const;
+const STANDARD_INITIATIVE_POLICY = 'initiative-intel-v1';
 
 const jsonRecordSchema = z.record(z.string(), z.unknown());
 type JsonRecord = z.infer<typeof jsonRecordSchema>;
@@ -44,6 +48,87 @@ type OverrideKind = NonNullable<ArenaRow['overrideKinds']>[number];
 type OverrideRejection = NonNullable<ArenaRow['overrideRejections']>[number];
 type BoardImage = NonNullable<ArenaRow['boardImage']>;
 type UiFeedback = Exclude<ArenaRow['uiFeedback'], undefined>;
+
+const safeIntegerSchema = z.number().int()
+  .min(Number.MIN_SAFE_INTEGER)
+  .max(Number.MAX_SAFE_INTEGER);
+
+const engineIntelSchema = z.object({
+  policy: z.enum(['dm-intel-capture-v1', 'dm-intel-capture-v2-creature-space']),
+  policyVersions: z.object({
+    initiative: z.literal(STANDARD_INITIATIVE_POLICY),
+  }).passthrough(),
+  actors: z.array(z.unknown()),
+}).passthrough();
+
+const baselineChoiceSchema = z.object({
+  kind: z.string(),
+  action_id: z.string().optional(),
+  spell_id: z.string().optional(),
+  target: z.object({ kind: z.string(), combatant_id: z.string().optional() }).passthrough().nullable().optional(),
+}).passthrough();
+
+const currentActionSlotSchema = z.object({
+  kind: z.string(),
+  actionId: z.string().nullable().optional(),
+  spellId: z.string().nullable().optional(),
+  objectId: z.string().nullable().optional(),
+  targetIds: z.array(z.string()).optional(),
+}).passthrough();
+
+const currentResolutionSummarySchema = z.object({
+  actionSlots: z.array(currentActionSlotSchema),
+  movementFeet: z.number().optional(),
+}).passthrough();
+
+const baselineResolutionSummarySchema = z.object({
+  actionId: z.string().nullable(),
+  targetId: z.string().nullable(),
+  movementFeet: z.number().optional(),
+}).passthrough();
+
+const authorizedPlanEntrySchema = z.object({
+  actorId: z.unknown(),
+  reason: z.string().max(240).optional(),
+  acceptedIntent: z.object({ choice: baselineChoiceSchema }).passthrough().optional(),
+  resolutionSummary: z.union([currentResolutionSummarySchema, baselineResolutionSummarySchema]).optional(),
+}).passthrough();
+
+const plannerSchema = z.union([
+  z.literal('sim_controller'),
+  z.object({ model: z.string(), effort: z.string() }).passthrough(),
+  z.null(),
+]);
+const primaryPlannerSchema = z.enum(['model', 'engine_default', 'sim_controller']);
+const overrideKindSchema = z.enum([
+  'objective', 'morale', 'roleplay', 'resource_conservation', 'unknown_engine_gap',
+  'engine_play', 'missing_metric',
+]);
+const overrideRejectionSchema = z.object({
+  actorId: z.string().nullable(),
+  code: z.literal('OVERRIDE_UNJUSTIFIED'),
+}).strict();
+const boardImageSchema = z.discriminatedUnion('mode', [
+  z.object({ mode: z.literal('off') }).strict(),
+  z.object({
+    mode: z.literal('png'),
+    sha256: z.string().regex(/^[a-f0-9]{64}$/u),
+    bytes: safeIntegerSchema.min(24).max(1_000_000),
+    width: safeIntegerSchema.min(1),
+    height: safeIntegerSchema.min(1),
+    captureMs: z.number().finite().nonnegative(),
+    relativePath: z.string().regex(/^board-images\/[a-f0-9]{64}\.png$/u),
+  }).strict(),
+  z.object({
+    mode: z.literal('capture_only'),
+    sha256: z.string().regex(/^[a-f0-9]{64}$/u),
+    bytes: safeIntegerSchema.min(24).max(1_000_000),
+    width: safeIntegerSchema.min(1),
+    height: safeIntegerSchema.min(1),
+    captureMs: z.number().finite().nonnegative(),
+    relativePath: z.string().regex(/^board-images\/[a-f0-9]{64}\.png$/u),
+  }).strict(),
+]);
 
 export interface NeutralAction {
   readonly kind: string;
@@ -61,6 +146,378 @@ export interface NeutralPlanEntry {
   readonly movementFeet: number | null;
 }
 
+const commonArenaRowSchema = z.object({
+  seed: safeIntegerSchema,
+  arm: z.string().min(1),
+  room: safeIntegerSchema,
+  round: safeIntegerSchema,
+  startingRoomDigest: z.string().min(1),
+  combatModel: z.literal('initiative_segments_v1'),
+  initiativeOrder: z.array(z.unknown()),
+  outcome: z.enum([
+    'authorized', 'auto_resolved', 'awaiting_dm_adjudication',
+    'refused', 'service_null', 'local_error', 'execution_failed', 'partial_execution',
+  ]),
+  plannedBy: plannerSchema,
+  roundNarrative: z.string().nullable(),
+  authorizedPlan: z.array(authorizedPlanEntrySchema).nullable(),
+  // Optional/nullable: pre-intel-era arms have no engineIntel, and the current
+  // producer writes null on failed rows. It must never reach the blinded
+  // packet — its mere presence identifies the arm.
+  engineIntel: engineIntelSchema.nullable().optional(),
+  // Post-intel rows label the planner ('model' | 'engine_default'); pre-intel
+  // rows have no such field. Attribution uses it when present.
+  plannerLabel: z.string().nullable().optional(),
+  planner: primaryPlannerSchema.optional(),
+  overrideKinds: z.array(overrideKindSchema).optional(),
+  overrideRejections: z.array(overrideRejectionSchema).optional(),
+  boardImage: boardImageSchema.optional(),
+  uiFeedback: engineUiFeedbackSchema.nullable().optional(),
+  // Required in cross-era mode, where it is the arm partition key.
+  repoCommit: z.string().min(1).optional(),
+});
+
+const postShiftOnlyFieldNames = [
+  'decisionTransport', 'firstDecisionAccepted', 'decisionAttempts',
+  'decisionRejectionCodes', 'normalizationCodes', 'chosenOptionIndices',
+  'instructionSource', 'skillName', 'skillHash', 'rationale', 'overridePolicy',
+] as const;
+
+const chosenOptionIndicesSchema = z.array(z.object({
+  actorId: z.unknown(),
+  primaryOptionIndex: safeIntegerSchema.min(0),
+  fallbackOptionIndex: safeIntegerSchema.min(0).nullable(),
+}));
+
+const postShiftCommonArenaRowSchema = commonArenaRowSchema.extend({
+  overridePolicy: z.enum(['strict', 'typed_reason']).default('typed_reason'),
+  firstDecisionAccepted: z.boolean(),
+  decisionAttempts: safeIntegerSchema.min(0),
+  decisionRejectionCodes: z.array(z.string()),
+  normalizationCodes: z.array(z.string()),
+  instructionSource: z.enum(['none', 'kb', 'skill']),
+  skillName: z.enum(['engine-submission', 'dm-round']).nullable(),
+  skillHash: z.string().regex(/^[0-9a-f]{64}$/u).nullable(),
+  rationale: z.string().max(600).nullable(),
+  dmMode: z.enum(['advice', 'blind']).optional(),
+  blindFacts: z.boolean().optional(),
+  midRoundAdjustmentsEnabled: z.boolean().optional(),
+  blindContextVersion: z.string().optional(),
+  blindIntentVersion: z.string().optional(),
+  blindRepairArm: z.enum(['code_only', 'minimal_legal_alternative']).optional(),
+  blindMaxAttempts: safeIntegerSchema.min(1).max(3).optional(),
+  blindIntentText: z.string().nullable().optional(),
+  blindIntents: z.array(z.unknown()).nullable().optional(),
+  blindResolverOutcome: z.array(z.unknown()).optional(),
+  blindRejectionCodes: z.array(z.string()).optional(),
+  blindAttempts: z.array(z.object({
+    number: safeIntegerSchema.min(1).max(3),
+    intentText: z.string(),
+    parsedIntents: z.array(z.unknown()).nullable(),
+    startedAtOffsetMs: z.number().finite().nonnegative(),
+    endedAtOffsetMs: z.number().finite().nonnegative(),
+    modelWallMs: z.number().finite().nonnegative(),
+    modelFirstTokenMs: z.number().finite().nonnegative().nullable(),
+    resolverLatencyMs: z.number().finite().nonnegative(),
+    resolverOutcome: z.enum(['accepted', 'rejected']),
+    codes: z.array(z.string()),
+    hintExposed: z.boolean(),
+  }).strict()).optional(),
+  blindResolverLatencyMs: z.number().finite().nonnegative().optional(),
+  blindIngressAudit: z.object({
+    version: z.string(), stringCount: safeIntegerSchema.min(1), utf8Bytes: safeIntegerSchema.min(1),
+    sha256: z.string().regex(/^[a-f0-9]{64}$/u), passed: z.literal(true),
+  }).strict().optional(),
+  visualProfile: z.unknown().optional(),
+  sharedKbComponentHashes: z.record(z.string(), z.string().regex(/^[a-f0-9]{64}$/u)).optional(),
+  semanticBoardEvidence: z.unknown().nullable().optional(),
+  creatureFactsEvidence: z.unknown().optional(),
+  legalMovementEvidence: z.unknown().optional(),
+  turnContextBudget: z.object({
+    configuredBaseBytes: z.literal(65_536),
+    configuredSemanticBytes: z.literal(8_192),
+    actualBaseBytes: safeIntegerSchema.min(1).max(65_536),
+    actualSemanticBytes: safeIntegerSchema.min(0).max(8_192),
+    truncatedBlocks: z.tuple([]),
+  }).strict().optional(),
+  blindPrivateAnswerKey: z.unknown().optional(),
+});
+
+const mcpMinimalPostShiftArenaRowSchema = postShiftCommonArenaRowSchema.extend({
+  decisionTransport: z.literal('mcp_minimal'),
+}).passthrough();
+
+const finalIndicesPostShiftArenaRowSchema = postShiftCommonArenaRowSchema.extend({
+  decisionTransport: z.literal('final_indices'),
+  chosenOptionIndices: chosenOptionIndicesSchema,
+}).passthrough();
+
+const postShiftArenaRowSchema = z.discriminatedUnion('decisionTransport', [
+  mcpMinimalPostShiftArenaRowSchema,
+  finalIndicesPostShiftArenaRowSchema,
+]).superRefine((row, context) => {
+  if (row.decisionTransport === 'mcp_minimal' && Object.prototype.hasOwnProperty.call(row, 'chosenOptionIndices')) {
+    context.addIssue({
+      code: 'custom',
+      path: ['chosenOptionIndices'],
+      message: 'must be absent when decisionTransport is mcp_minimal',
+    });
+  }
+  if (row.dmMode !== undefined && row.midRoundAdjustmentsEnabled !== false) {
+    context.addIssue({
+      code: 'custom',
+      path: ['midRoundAdjustmentsEnabled'],
+      message: 'must be false in D569 arms',
+    });
+  }
+  if (row.dmMode !== undefined && row.outcome === 'authorized') {
+    if (row.authorizedPlan === null || row.authorizedPlan.length === 0) {
+      context.addIssue({
+        code: 'custom',
+        path: ['authorizedPlan'],
+        message: 'must contain the authoritative resolved plan for an authorized round',
+      });
+    }
+  } else if (row.dmMode !== undefined && row.authorizedPlan !== null) {
+    context.addIssue({
+      code: 'custom',
+      path: ['authorizedPlan'],
+      message: 'must be null unless the round outcome is authorized',
+    });
+  }
+  if (row.dmMode === 'blind') {
+    const required = [
+      'blindContextVersion', 'blindIntentVersion', 'blindRepairArm', 'blindMaxAttempts',
+      'blindIntentText', 'blindIntents', 'blindResolverOutcome', 'blindRejectionCodes',
+      'blindAttempts', 'blindResolverLatencyMs', 'blindIngressAudit', 'visualProfile',
+      'sharedKbComponentHashes', 'semanticBoardEvidence', 'creatureFactsEvidence',
+      'legalMovementEvidence', 'turnContextBudget', 'blindPrivateAnswerKey',
+    ] as const;
+    for (const field of required) {
+      if (!Object.prototype.hasOwnProperty.call(row, field)) {
+        context.addIssue({ code: 'custom', path: [field], message: 'is required on a blind row' });
+      }
+    }
+  }
+});
+
+const catalogEvidenceSchema = z.discriminatedUnion('status', [
+  z.object({
+    status: z.literal('ready'), basis: z.enum(['advertised_tool_invoked', 'required_cli_completed_with_valid_catalog']),
+    dispatchId: z.string().min(16), advertisedInvocationCount: safeIntegerSchema.min(0),
+    resourceOperationCount: safeIntegerSchema.min(0),
+  }).strict(),
+  z.object({
+    status: z.literal('absent'), basis: z.literal('required_engine_initialization_failed'),
+    dispatchId: z.string().min(16), corroboration: z.array(z.string()),
+  }).strict(),
+  z.object({
+    status: z.literal('inconclusive'), dispatchId: z.string().min(16),
+    reason: z.enum(['no_correlated_catalog', 'invalid_catalog_response', 'missing_live_timestamp',
+      'conflicting_success_and_failure', 'timestamp_only']),
+  }).strict(),
+]);
+
+const deliveredContextSchema = z.object({
+  status: z.literal('delivered'), dispatchId: z.string().min(16),
+  contextSha256: z.string().regex(/^[a-f0-9]{64}$/u),
+  measurement: z.object({ baseBytes: safeIntegerSchema.min(0), semanticBytes: safeIntegerSchema.min(0) }).strict(),
+}).strict();
+const turnContextDeliverySchema = z.discriminatedUnion('status', [
+  deliveredContextSchema,
+  z.object({ status: z.literal('not_requested'), dispatchId: z.string().min(16), reason: z.enum(['catalog_ready_model_did_not_fetch', 'dispatch_cancelled']), measurement: z.null() }).strict(),
+  z.object({ status: z.literal('timeout_before_delivery'), dispatchId: z.string().min(16), measurement: z.null() }).strict(),
+  z.object({ status: z.literal('infrastructure_absent'), dispatchId: z.string().min(16), measurement: z.null() }).strict(),
+  z.object({ status: z.literal('indeterminate'), dispatchId: z.string().min(16), reason: z.literal('catalog_inconclusive_empty_context_spool'), measurement: z.null(), integrityAction: z.literal('stop_after_persist') }).strict(),
+]);
+
+const arenaRowV3BaseSchema = postShiftCommonArenaRowSchema.extend({
+  rowContractVersion: z.literal('arena-row-v3'),
+  outcome: z.enum([
+    'authorized', 'auto_resolved', 'awaiting_dm_adjudication', 'refused', 'service_null',
+    'local_error', 'execution_failed', 'partial_execution', 'infrastructure_failed',
+    'integrity_indeterminate',
+  ]),
+  engineCatalogEvidence: catalogEvidenceSchema,
+  turnContextDelivery: turnContextDeliverySchema,
+  turnContextConfiguredCaps: z.object({ baseBytes: safeIntegerSchema.min(1), semanticBytes: safeIntegerSchema.min(0) }).strict(),
+  scheduledCellKey: z.string().min(1),
+  dispatchId: z.string().min(16),
+  hostContextDiagnostic: z.union([
+    z.object({ status: z.literal('rendered'), contextSha256: z.string().regex(/^[a-f0-9]{64}$/u) }).strict(),
+    z.object({ status: z.literal('unavailable'), errorClass: z.string().min(1) }).strict(),
+    z.null(),
+  ]),
+  baseContextBytes: safeIntegerSchema.min(0).nullable(),
+  semanticBoardBytes: safeIntegerSchema.min(0).nullable(),
+  rawTurnContext: z.string().nullable(),
+  preTrimBytes: safeIntegerSchema.min(0).nullable(),
+  postTrimBytes: safeIntegerSchema.min(0).nullable(),
+  turnContextGranularity: z.enum(['full', 'turn_delta']).nullable(),
+  optionsOmittedForSize: safeIntegerSchema.min(0),
+  optionsOmittedForSizeByActor: z.array(z.unknown()),
+  roundTotals: z.object({ contextBytes: safeIntegerSchema.min(0) }).passthrough(),
+  failingDispatch: z.object({
+    phase: z.enum(['primary', 'correction', 'adjustment', 'speculative', 'speculation_recalculation']),
+    exit: z.enum(['cancelled', 'infrastructure_failed']),
+    dispatchId: z.string().min(16),
+    engineCatalogEvidence: catalogEvidenceSchema,
+    turnContextDelivery: turnContextDeliverySchema,
+    failureReason: z.string(),
+  }).strict().optional(),
+  blindIngressAudit: z.union([
+    z.object({
+      version: z.literal('blind-model-ingress-v1'), stringCount: safeIntegerSchema.min(1),
+      utf8Bytes: safeIntegerSchema.min(1), sha256: z.string().regex(/^[a-f0-9]{64}$/u),
+      passed: z.literal(true),
+    }).strict(),
+    z.object({
+      version: z.literal(2), status: z.literal('complete'), passed: z.literal(true),
+      forbiddenContentPassed: z.literal(true), delivery: deliveredContextSchema,
+    }).strict(),
+    z.object({
+      version: z.literal(2), status: z.literal('incomplete'), passed: z.literal(false),
+      forbiddenContentPassed: z.boolean(), delivery: turnContextDeliverySchema,
+      missingRequiredFields: z.array(z.string()),
+    }).strict(),
+  ]).optional(),
+});
+const mcpMinimalArenaRowV3Schema = arenaRowV3BaseSchema.extend({ decisionTransport: z.literal('mcp_minimal') }).passthrough();
+const finalIndicesArenaRowV3Schema = arenaRowV3BaseSchema.extend({
+  decisionTransport: z.literal('final_indices'), chosenOptionIndices: chosenOptionIndicesSchema,
+}).passthrough();
+const arenaRowV3Schema = z.discriminatedUnion('decisionTransport', [
+  mcpMinimalArenaRowV3Schema,
+  finalIndicesArenaRowV3Schema,
+]).superRefine((row, context) => {
+  if (row.engineCatalogEvidence.dispatchId !== row.dispatchId ||
+    row.turnContextDelivery.dispatchId !== row.dispatchId) {
+    context.addIssue({ code: 'custom', path: ['dispatchId'], message: 'must correlate catalog and delivery evidence' });
+  }
+  if (row.dmMode === 'blind' && row.blindIngressAudit === undefined) {
+    context.addIssue({ code: 'custom', path: ['blindIngressAudit'], message: 'is required on a blind v3 row' });
+  }
+  if (row.dmMode === 'blind' && row.blindIngressAudit?.version === 'blind-model-ingress-v1') {
+    context.addIssue({
+      code: 'custom', path: ['blindIngressAudit'],
+      message: 'blind arena-row-v3 requires the outcome-aware v2 ingress audit',
+    });
+  }
+  if (row.blindIngressAudit?.version === 2 &&
+    (row.blindIngressAudit.delivery.status !== row.turnContextDelivery.status ||
+      row.blindIngressAudit.delivery.dispatchId !== row.turnContextDelivery.dispatchId)) {
+    context.addIssue({ code: 'custom', path: ['blindIngressAudit', 'delivery'], message: 'must match row delivery' });
+  }
+  if (row.outcome === 'integrity_indeterminate' ||
+    d569DeliveryHasIntegritySignal(row.engineCatalogEvidence, row.turnContextDelivery)) {
+    context.addIssue({
+      code: 'custom', path: ['outcome'],
+      message: 'inconclusive or indeterminate integrity evidence cannot become a rerun packet',
+    });
+  }
+  if (row.blindIngressAudit?.version === 2 && !row.blindIngressAudit.forbiddenContentPassed) {
+    context.addIssue({ code: 'custom', path: ['blindIngressAudit'], message: 'forbidden-content failure cannot become a rerun packet' });
+  }
+  if (row.blindIngressAudit?.version === 2 && row.blindIngressAudit.status === 'incomplete' &&
+    row.blindIngressAudit.delivery.status === 'delivered' && row.blindIngressAudit.forbiddenContentPassed) {
+    context.addIssue({ code: 'custom', path: ['blindIngressAudit'], message: 'incomplete delivered audit requires a forbidden-content violation' });
+  }
+  const delivered = row.turnContextDelivery.status === 'delivered';
+  if (delivered !== (row.rawTurnContext !== null && row.baseContextBytes !== null &&
+    row.semanticBoardBytes !== null && row.preTrimBytes !== null && row.postTrimBytes !== null &&
+    row.turnContextGranularity !== null) || !delivered && (row.roundTotals.contextBytes !== 0 ||
+      row.optionsOmittedForSize !== 0 || row.optionsOmittedForSizeByActor.length !== 0)) {
+    context.addIssue({ code: 'custom', path: ['turnContextDelivery'], message: 'delivered telemetry must derive exclusively from delivered evidence' });
+  }
+  if ((row.engineCatalogEvidence.status === 'absent') !==
+    (row.turnContextDelivery.status === 'infrastructure_absent')) {
+    context.addIssue({ code: 'custom', path: ['turnContextDelivery'], message: 'absent catalog and delivery evidence must agree' });
+  }
+  if (row.turnContextDelivery.status === 'not_requested' &&
+    row.turnContextDelivery.reason === 'dispatch_cancelled' && row.outcome !== 'infrastructure_failed') {
+    context.addIssue({ code: 'custom', path: ['outcome'], message: 'dispatch cancellation must remain infrastructure' });
+  }
+  if (row.outcome === 'infrastructure_failed') {
+    const failure = row.failingDispatch;
+    if (failure === undefined || failure.dispatchId !== failure.engineCatalogEvidence.dispatchId ||
+      failure.dispatchId !== failure.turnContextDelivery.dispatchId ||
+      failure.exit === 'cancelled' && failure.turnContextDelivery.status !== 'delivered' &&
+        (failure.turnContextDelivery.status !== 'not_requested' ||
+          failure.turnContextDelivery.reason !== 'dispatch_cancelled') ||
+      failure.exit === 'infrastructure_failed' && (failure.engineCatalogEvidence.status !== 'absent' ||
+        failure.turnContextDelivery.status !== 'infrastructure_absent')) {
+      context.addIssue({ code: 'custom', path: ['failingDispatch'], message: 'must identify the correlated failing dispatch' });
+    } else if (failure.phase === 'primary' && (failure.dispatchId !== row.dispatchId ||
+      canonicalJson(failure.engineCatalogEvidence) !== canonicalJson(row.engineCatalogEvidence) ||
+      canonicalJson(failure.turnContextDelivery) !== canonicalJson(row.turnContextDelivery))) {
+      context.addIssue({ code: 'custom', path: ['failingDispatch'], message: 'primary failure must match primary dispatch evidence' });
+    } else if (failure.phase !== 'primary' && failure.dispatchId === row.dispatchId) {
+      context.addIssue({ code: 'custom', path: ['failingDispatch'], message: 'later failure must use a distinct dispatch identity' });
+    } else if (failure.exit === 'cancelled' && row['fallbackReason'] !== 'dispatch_cancelled') {
+      context.addIssue({ code: 'custom', path: ['fallbackReason'], message: 'cancelled dispatch requires dispatch_cancelled attribution' });
+    }
+  } else if (row.failingDispatch !== undefined) {
+    context.addIssue({ code: 'custom', path: ['failingDispatch'], message: 'is only valid for an infrastructure outcome' });
+  }
+  if (row.outcome === 'authorized' &&
+    (row.engineCatalogEvidence.status !== 'ready' || row.turnContextDelivery.status !== 'delivered')) {
+    context.addIssue({ code: 'custom', path: ['outcome'], message: 'authorized outcome requires ready delivered primary evidence' });
+  }
+  if (row.outcome === 'service_null' &&
+    (row.engineCatalogEvidence.status !== 'ready' || row.turnContextDelivery.status !== 'not_requested' ||
+      row.turnContextDelivery.reason !== 'catalog_ready_model_did_not_fetch')) {
+    context.addIssue({ code: 'custom', path: ['outcome'], message: 'service-null outcome requires ready not-requested evidence' });
+  }
+});
+
+const preShiftArenaRowSchema = commonArenaRowSchema.passthrough().superRefine((row, context) => {
+  for (const field of postShiftOnlyFieldNames) {
+    if (Object.prototype.hasOwnProperty.call(row, field)) {
+      context.addIssue({
+        code: 'custom',
+        path: [field],
+        message: 'must be absent on a pre-shift row',
+      });
+    }
+  }
+});
+
+type PreShiftArenaRow = z.infer<typeof preShiftArenaRowSchema>;
+type CommonArenaRow = z.infer<typeof commonArenaRowSchema>;
+type ChosenOptionIndices = z.infer<typeof chosenOptionIndicesSchema>;
+type McpMinimalPostShiftArenaRow = CommonArenaRow & {
+  readonly decisionTransport: 'mcp_minimal';
+  readonly overridePolicy: 'strict' | 'typed_reason';
+  readonly firstDecisionAccepted: boolean;
+  readonly decisionAttempts: number;
+  readonly decisionRejectionCodes: readonly string[];
+  readonly normalizationCodes: readonly string[];
+  readonly instructionSource: 'none' | 'kb' | 'skill';
+  readonly skillName: 'engine-submission' | 'dm-round' | null;
+  readonly skillHash: string | null;
+  readonly rationale: string | null;
+};
+type FinalIndicesPostShiftArenaRow = CommonArenaRow & {
+  readonly decisionTransport: 'final_indices';
+  readonly overridePolicy: 'strict' | 'typed_reason';
+  readonly firstDecisionAccepted: boolean;
+  readonly decisionAttempts: number;
+  readonly decisionRejectionCodes: readonly string[];
+  readonly normalizationCodes: readonly string[];
+  readonly chosenOptionIndices: ChosenOptionIndices;
+  readonly instructionSource: 'none' | 'kb' | 'skill';
+  readonly skillName: 'engine-submission' | 'dm-round' | null;
+  readonly skillHash: string | null;
+  readonly rationale: string | null;
+};
+type PostShiftArenaRow = McpMinimalPostShiftArenaRow | FinalIndicesPostShiftArenaRow;
+
+type ParsedArenaRow =
+  | { readonly rowEra: 'pre_shift'; readonly row: PreShiftArenaRow }
+  | { readonly rowEra: 'post_shift'; readonly row: PostShiftArenaRow | z.infer<typeof arenaRowV3Schema> };
+type ValidatableArenaRow = KnownArenaRow | (ParsedArenaRow & {
+  readonly planSummaries: readonly DecodedPlanSummary[] | null;
+});
 export interface RerunProtocol {
   readonly name?: RerunProtocolName;
   readonly seeds: readonly number[];
@@ -119,7 +576,7 @@ interface CommonValidatedArenaRow {
   readonly room: number;
   readonly rep: number;
   readonly startingRoomDigest: string;
-  readonly outcome: string;
+  readonly outcome: z.infer<typeof arenaRowV3BaseSchema>['outcome'];
   readonly plannedBy: Planner;
   readonly plannerLabel: string | null | undefined;
   readonly planner: PrimaryPlanner;
@@ -127,6 +584,7 @@ interface CommonValidatedArenaRow {
   readonly overrideRejections: readonly OverrideRejection[];
   readonly roundNarrative: string | null;
   readonly authorizedPlan: readonly AuthorizedPlanEntry[] | null;
+  readonly scheduledCellKey?: string;
   readonly planSummaries: readonly DecodedPlanSummary[] | null;
   readonly boardImage?: BoardImage;
   readonly uiFeedback?: UiFeedback;
@@ -147,6 +605,7 @@ interface CommonPostShiftValidatedArenaRow extends CommonValidatedArenaRow {
   readonly decisionRejectionCodes: readonly string[];
   readonly normalizationCodes: readonly string[];
   readonly rationale: string | null;
+  readonly d569AnswerKey: Readonly<Record<string, unknown>>;
 }
 
 interface McpMinimalPostShiftValidatedArenaRow extends CommonPostShiftValidatedArenaRow {
@@ -204,6 +663,7 @@ export interface BlindRubric {
 export interface JudgePacketEntry {
   readonly blindId: string;
   readonly caseId: string;
+  readonly scheduledCellKey?: string;
   readonly outcome: string;
   readonly attribution: 'model_authorized' | 'engine_default' | 'not_model_authorized';
   readonly executedPlan: readonly NeutralPlanEntry[] | null;
@@ -250,6 +710,7 @@ interface CommonPostShiftAnswerKeyEntry extends CommonAnswerKeyEntry {
   readonly instructionSource: 'none' | 'kb' | 'skill';
   readonly skillName: 'engine-submission' | 'dm-round' | null;
   readonly skillHash: string | null;
+  readonly [field: string]: unknown;
 }
 
 interface McpMinimalPostShiftAnswerKeyEntry extends CommonPostShiftAnswerKeyEntry {
@@ -289,6 +750,8 @@ const MODEL_IDENTITY_FIELDS = new Set([
   'acceptedIntent', 'acceptedProposal', 'resolutionSummary', 'actionSlots',
   'selectedBranch', 'optionId', 'plannerLabel', 'planner', 'overrideKinds', 'overrideRejections',
   'rowEra',
+  'rowContractVersion', 'engineCatalogEvidence', 'turnContextDelivery',
+  'turnContextConfiguredCaps', 'dispatchId', 'hostContextDiagnostic',
   'decisionTransport', 'firstDecisionAccepted', 'decisionAttempts',
   'overridePolicy',
   'decisionRejectionCodes', 'normalizationCodes',
@@ -299,7 +762,28 @@ const MODEL_IDENTITY_FIELDS = new Set([
   // beyond the neutral plan + movementFeet, so it is banned from the packet.
   'roundNarrative',
   'reason', 'rationale',
+  'dmMode', 'blindFacts', 'midRoundAdjustmentsEnabled',
+  'blindContextVersion', 'blindIntentVersion', 'blindRepairArm', 'blindMaxAttempts',
+  'blindIntentText', 'blindIntents', 'blindResolverOutcome', 'blindRejectionCodes',
+  'blindAttempts', 'blindResolverLatencyMs', 'blindIngressAudit', 'visualProfile',
+  'turnContextBudget', 'blindPrivateAnswerKey',
+  'selectedOfferedIds', 'semanticDigests', 'catalogDigest', 'engineTopRecommendationIds',
+  'engineTopPolicyVersion', 'blindDiffersFromEngineTop', 'option_order',
 ]);
+
+const D569_ANSWER_KEY_FIELDS = [
+  'dmMode', 'blindFacts', 'midRoundAdjustmentsEnabled',
+  'blindContextVersion', 'blindIntentVersion', 'blindRepairArm', 'blindMaxAttempts',
+  'blindIntentText', 'blindIntents', 'blindResolverOutcome', 'blindRejectionCodes',
+  'blindAttempts', 'blindResolverLatencyMs', 'blindIngressAudit', 'visualProfile',
+  'sharedKbComponentHashes', 'semanticBoardEvidence', 'creatureFactsEvidence',
+  'legalMovementEvidence', 'turnContextBudget', 'blindPrivateAnswerKey',
+] as const;
+
+function d569AnswerKeyFields(row: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
+  return Object.fromEntries(D569_ANSWER_KEY_FIELDS.flatMap((field) =>
+    Object.prototype.hasOwnProperty.call(row, field) ? [[field, structuredClone(row[field])]] : []));
+}
 
 function requiredValue(argv: readonly string[], index: number, option: string): string {
   const value = argv[index + 1];
@@ -377,8 +861,53 @@ function parseJsonl(text: string, source: string): readonly JsonRecord[] {
   });
 }
 
+function isMcpMinimalPostShiftArenaRow(value: unknown): value is McpMinimalPostShiftArenaRow {
+  return mcpMinimalPostShiftArenaRowSchema.safeParse(value).success;
+}
+
+function isFinalIndicesPostShiftArenaRow(value: unknown): value is FinalIndicesPostShiftArenaRow {
+  return finalIndicesPostShiftArenaRowSchema.safeParse(value).success;
+}
+
+function parseArenaRow(source: JsonRecord, sourceLabel: string): ParsedArenaRow {
+  if (Object.prototype.hasOwnProperty.call(source, 'rowContractVersion')) {
+    const parsed = arenaRowV3Schema.safeParse(source);
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0];
+      const property = issue === undefined || issue.path.length === 0 ? '' : `.${issue.path.join('.')}`;
+      throw new TypeError(`${sourceLabel}${property} is invalid: ${issue?.message ?? 'unknown schema failure'}.`);
+    }
+    return { rowEra: 'post_shift', row: parsed.data };
+  }
+  for (const field of ['engineCatalogEvidence', 'turnContextDelivery', 'turnContextConfiguredCaps',
+    'scheduledCellKey', 'dispatchId', 'hostContextDiagnostic']) {
+    if (Object.prototype.hasOwnProperty.call(source, field)) {
+      throw new TypeError(`${sourceLabel}.${field} is invalid without rowContractVersion.`);
+    }
+  }
+  const isPostShift = Object.prototype.hasOwnProperty.call(source, 'decisionTransport');
+  if (isPostShift) {
+    const parsed = postShiftArenaRowSchema.safeParse(source);
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0];
+      const property = issue === undefined || issue.path.length === 0 ? '' : `.${issue.path.join('.')}`;
+      throw new TypeError(`${sourceLabel}${property} is invalid: ${issue?.message ?? 'unknown schema failure'}.`);
+    }
+    if (isMcpMinimalPostShiftArenaRow(parsed.data) || isFinalIndicesPostShiftArenaRow(parsed.data)) {
+      return { rowEra: 'post_shift', row: parsed.data };
+    }
+    throw new TypeError(`${sourceLabel} did not match a post-shift decision transport shape.`);
+  }
+  const parsed = preShiftArenaRowSchema.safeParse(source);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    const property = issue === undefined || issue.path.length === 0 ? '' : `.${issue.path.join('.')}`;
+    throw new TypeError(`${sourceLabel}${property} is invalid: ${issue?.message ?? 'unknown schema failure'}.`);
+  }
+  return { rowEra: 'pre_shift', row: parsed.data };
+}
 function validateRow(
-  parsedRow: KnownArenaRow,
+  parsedRow: ValidatableArenaRow,
   sourceLabel: string,
   protocol: RerunProtocol,
   crossEra: boolean,
@@ -418,6 +947,9 @@ function validateRow(
     overrideRejections: sourceRow.overrideRejections ?? [],
     roundNarrative: sourceRow.roundNarrative,
     authorizedPlan: sourceRow.authorizedPlan,
+    ...('scheduledCellKey' in sourceRow && typeof sourceRow.scheduledCellKey === 'string'
+      ? { scheduledCellKey: sourceRow.scheduledCellKey }
+      : {}),
     planSummaries: parsedRow.planSummaries,
     ...(sourceRow.boardImage === undefined ? {} : {
       boardImage: sourceRow.boardImage,
@@ -438,6 +970,7 @@ function validateRow(
     decisionRejectionCodes: postShiftRow.decisionRejectionCodes,
     normalizationCodes: postShiftRow.normalizationCodes,
     rationale: postShiftRow.rationale,
+    d569AnswerKey: d569AnswerKeyFields(postShiftRow),
   };
   if (postShiftRow.decisionTransport === 'mcp_minimal') {
     return { ...postShiftCommon, decisionTransport: 'mcp_minimal' };
@@ -445,7 +978,7 @@ function validateRow(
   return {
     ...postShiftCommon,
     decisionTransport: 'final_indices',
-    chosenOptionIndices: postShiftRow.chosenOptionIndices,
+    chosenOptionIndices: chosenOptionIndicesSchema.parse(postShiftRow.chosenOptionIndices),
   };
 }
 
@@ -462,7 +995,15 @@ function validateRows(
       throw new TypeError(`${sourceLabel} contains rlData; ${protocolLabel(protocol)} is a permanent holdout and cannot contain training data.`);
     }
     try {
-      return { sourceLabel, parsedRow: decoder(row) };
+      const strict = parseArenaRow(row, sourceLabel);
+      const shared = decoder({
+        ...row,
+        outcome: strict.row.outcome === 'infrastructure_failed' ? 'service_null' : strict.row.outcome,
+      });
+      if (!Object.prototype.hasOwnProperty.call(row, 'rowContractVersion')) {
+        return { sourceLabel, parsedRow: shared };
+      }
+      return { sourceLabel, parsedRow: { ...strict, planSummaries: shared.planSummaries } };
     } catch (error) {
       if (error instanceof ArenaRowDecodeError) {
         throw new TypeError(`${sourceLabel}${error.sourceSuffix}`);
@@ -624,15 +1165,28 @@ function executedPlan(
   });
 }
 
-function packetOutcome(outcome: string): 'authorized' | 'refused' | 'service_null' | 'execution_failed' {
-  if (outcome === 'authorized') return 'authorized';
-  if (outcome === 'service_null') return 'service_null';
-  if (outcome === 'execution_failed' || outcome === 'partial_execution') return 'execution_failed';
-  return 'refused';
+export type PacketOutcome = 'authorized' | 'refused' | 'service_null' | 'execution_failed' | 'infrastructure_failed';
+
+export function packetOutcome(outcome: ValidatedArenaRow['outcome']): PacketOutcome {
+  switch (outcome) {
+    case 'authorized': return 'authorized';
+    case 'refused':
+    case 'auto_resolved':
+    case 'awaiting_dm_adjudication':
+    case 'local_error':
+      return 'refused';
+    case 'service_null': return 'service_null';
+    case 'execution_failed':
+    case 'partial_execution':
+      return 'execution_failed';
+    case 'infrastructure_failed': return 'infrastructure_failed';
+    case 'integrity_indeterminate':
+      throw new D569IntegrityStop('An integrity-indeterminate row cannot become a rerun packet.');
+  }
 }
 
 function rubric(outcome: ReturnType<typeof packetOutcome>): BlindRubric {
-  return outcome === 'refused' || outcome === 'execution_failed'
+  return outcome === 'refused' || outcome === 'execution_failed' || outcome === 'service_null'
     ? { targetPriority: 0, actionEconomy: 0, positioning: 0, coherence: 0, total: 0 }
     : { targetPriority: null, actionEconomy: null, positioning: null, coherence: null, total: null };
 }
@@ -719,6 +1273,8 @@ function buildPacket(
       return {
         blindId,
         caseId: `case-${String(row.room).padStart(2, '0')}-${String(row.rep)}`,
+        ...(outcome !== 'infrastructure_failed' || row.scheduledCellKey === undefined
+          ? {} : { scheduledCellKey: row.scheduledCellKey }),
         outcome,
         attribution: engineAttribution(row),
         executedPlan: outcome === 'authorized'
@@ -763,6 +1319,7 @@ function buildPacket(
         instructionSource: row.instructionSource,
         skillName: row.skillName,
         skillHash: row.skillHash,
+        ...row.d569AnswerKey,
       };
       if (row.decisionTransport === 'mcp_minimal') {
         return {
@@ -809,6 +1366,87 @@ export function buildMultiArmRerunPacket(
   const selectedOptions = typeof crossEraOrOptions === 'boolean' ? options : crossEraOrOptions;
   const decoder = selectedOptions.rowCodec?.decodeArenaRow ?? conversationRowCodec.decodeArenaRow;
   return buildPacket(rows, shuffleSeed, protocol, crossEra, 'two_or_more', selectedOptions, decoder);
+}
+
+export interface D575PairwisePacket {
+  readonly leftArm: string;
+  readonly rightArm: string;
+  readonly shuffleSeed: number;
+  readonly packet: JudgePacket;
+  readonly answerKey: RerunAnswerKey;
+}
+
+export interface D575PairwiseComparisonIdentity {
+  readonly name: string;
+  readonly left: { readonly model: string; readonly dmMode: 'blind' | 'advice' };
+  readonly right: { readonly model: string; readonly dmMode: 'blind' | 'advice' };
+}
+
+const D575_LUNA_MODEL = 'gpt-5.6-luna' as const;
+const D575_JUDGE_PLAYER_MODELS = Object.freeze([
+  'claude-opus-5', 'claude-fable-5', 'gpt-5.6-sol',
+] as const);
+
+/** Historical D575-only identities; preserve recorded models and never use this registry for D569 v5 or a new experiment. */
+export const D575_PAIRWISE_COMPARISON_IDENTITIES = Object.freeze([
+  ...[D575_LUNA_MODEL, ...D575_JUDGE_PLAYER_MODELS].map((model) => ({
+    name: `${model}-blind-vs-advice`,
+    left: { model, dmMode: 'blind' as const },
+    right: { model, dmMode: 'advice' as const },
+  })),
+  ...(['blind', 'advice'] as const).flatMap((dmMode) =>
+    D575_JUDGE_PLAYER_MODELS.map((model) => ({
+      name: `gpt-5.6-luna-vs-${model}-${dmMode}`,
+      left: { model: D575_LUNA_MODEL, dmMode },
+      right: { model, dmMode },
+    }))),
+] satisfies readonly D575PairwiseComparisonIdentity[]);
+
+/** Rebuilds archived D575 comparisons only; it is not a current player-arm registry. */
+export function buildD575PairwiseRerunPackets(
+  rows: readonly JsonRecord[],
+  shuffleSeeds: Readonly<Record<string, number>>,
+  protocol: RerunProtocol = R1_10_PROTOCOL,
+): Readonly<Record<string, D575PairwisePacket>> {
+  const arms = new Map<string, { readonly model: string; readonly dmMode: 'blind' | 'advice' }>();
+  for (const row of rows) {
+    const arm = row['arm'];
+    const model = row['model'];
+    const dmMode = row['dmMode'];
+    if (typeof arm !== 'string' || typeof model !== 'string' ||
+      (dmMode !== 'blind' && dmMode !== 'advice')) {
+      throw new TypeError('D575 pairwise rows require arm, model, and explicit dmMode fields.');
+    }
+    const prior = arms.get(arm);
+    if (prior !== undefined && (prior.model !== model || prior.dmMode !== dmMode)) {
+      throw new TypeError(`D575 arm ${arm} mixes model or DM-mode identity.`);
+    }
+    arms.set(arm, { model, dmMode });
+  }
+  const findArm = (model: string, dmMode: 'blind' | 'advice'): string => {
+    const matching = [...arms].filter(([, identity]) => identity.model === model && identity.dmMode === dmMode);
+    if (matching.length !== 1) {
+      throw new TypeError(`D575 requires exactly one ${model} ${dmMode} arm; found ${String(matching.length)}.`);
+    }
+    return matching[0]?.[0] ?? '';
+  };
+  const pairs = D575_PAIRWISE_COMPARISON_IDENTITIES.map((comparison) => ({
+    name: comparison.name,
+    leftArm: findArm(comparison.left.model, comparison.left.dmMode),
+    rightArm: findArm(comparison.right.model, comparison.right.dmMode),
+  }));
+  const seeds = pairs.map((pair) => shuffleSeeds[pair.name]);
+  if (seeds.some((seed) => seed === undefined || !Number.isSafeInteger(seed)) ||
+    new Set(seeds).size !== pairs.length) {
+    throw new TypeError('D575 pairwise packets require one distinct recorded safe-integer shuffle seed per comparison.');
+  }
+  return Object.fromEntries(pairs.map((pair) => {
+    const shuffleSeed = shuffleSeeds[pair.name];
+    if (shuffleSeed === undefined) throw new Error('Validated D575 shuffle seed disappeared.');
+    const selected = rows.filter((row) => row['arm'] === pair.leftArm || row['arm'] === pair.rightArm);
+    const built = buildRerunPacket(selected, shuffleSeed, protocol);
+    return [pair.name, { ...pair, shuffleSeed, ...built }];
+  }));
 }
 
 /**

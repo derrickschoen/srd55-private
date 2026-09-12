@@ -3,10 +3,25 @@ import { isAbsolute, join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   AI_DM_KB_FIXTURE_DIRECTORY,
+  D569_AI_DM_KB_COMPONENT_PATHS,
+  D569_AI_DM_KB_PROVENANCE,
+  D569_AI_DM_KB_ROOT,
+  D569_KB_COMPONENT_MAX_BYTES,
+  D569_KB_ROOT_MAX_BYTES,
+  D569_KB_STARTUP_MAX_BYTES,
   DEFAULT_AI_DM_KB_ROOT,
   KB_SUBJECTS,
+  loadD569AiDmKnowledgeBase,
+  loadD569KbProvenanceManifest,
   loadAiDmKnowledgeBase,
+  scanD569KnowledgeBaseBytes,
 } from '../../../src/vtt/knowledge-base-contract';
+import { CELL_GLYPH_KINDS, CELL_GLYPHS } from '../../../src/assets/board-glyphs';
+import { legendEntriesFor, TERRAIN_LEGEND_LABELS } from '../../../src/vtt/board-chrome';
+import { traceCombatantLine, traceTerrainLine, type TerrainLineTrace } from '../../../src/combat/cover';
+import { TERRAIN_KINDS, terrainBlocking, type TerrainKind } from '../../../src/combat/terrain';
+import { armorClass, worldObjectId } from '../../../src/combat/values';
+import type { WorldObject } from '../../../src/combat/world-objects';
 import { SRD_ATTRIBUTION_NOTICE } from '../../../src/rules/srd-attribution';
 import {
   existsSync,
@@ -28,6 +43,9 @@ import {
   type KbReadRecord,
 } from '../../../src/vtt/mcp/knowledge-base';
 import { ENGINE_TOOL_SPECS } from '../../../src/vtt/mcp/schemas';
+import { createEncounter } from '../../../src/combat/encounter';
+import { hitPointKnowledge } from '../../../src/vtt/intel/actor-knowledge';
+import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
 
 const fixturePaths = [
   'tests/fixtures/ai-dm-kb/ai-dm-core.md',
@@ -44,8 +62,17 @@ const fixturePaths = [
   'tests/fixtures/ai-dm-kb/k7-close.txt',
 ] as const;
 
+const d569FixturePaths = [
+  ...D569_AI_DM_KB_COMPONENT_PATHS,
+  D569_AI_DM_KB_PROVENANCE,
+] as const;
+
 const arenaFixture = 'tests/fixtures/arena-basis/seed-3943001.json' as const;
-const inputs = declareTestInputs({ fixtures: [...fixturePaths, arenaFixture] });
+const srdFixture = 'docs/srd/full/srd-5.2.1.txt' as const;
+const inputs = declareTestInputs({
+  fixtures: [...fixturePaths, ...d569FixturePaths, arenaFixture],
+  srdText: [srdFixture],
+});
 const fixtureText = (path: (typeof fixturePaths)[number]): string => inputs.fixtures.readText(path);
 const rootText = fixtureText(DEFAULT_AI_DM_KB_ROOT);
 const tacticsText = fixtureText('tests/fixtures/ai-dm-kb/tactics.md');
@@ -54,6 +81,51 @@ const subjectPaths = KB_SUBJECTS.map((subject) =>
 
 function sha256(text: string): string {
   return createHash('sha256').update(Buffer.from(text, 'utf8')).digest('hex');
+}
+
+function guideTerrainObject(
+  id: string,
+  cells: readonly { readonly column: number; readonly row: number }[],
+  kind: Exclude<TerrainKind, 'open'>,
+): WorldObject {
+  const position = cells[0];
+  if (position === undefined) throw new Error('A guide trace object needs a footprint.');
+  return {
+    id: worldObjectId(`world-object:${id}`),
+    name: id,
+    kind: 'cover',
+    position,
+    footprint: cells,
+    durability: { kind: 'indestructible' },
+    armorClass: armorClass(15),
+    damageResponses: [],
+    blocking: terrainBlocking(kind),
+    createdRevision: 0,
+  };
+}
+
+function guideTraceSummary(label: string, trace: TerrainLineTrace): string {
+  const cell = (value: { readonly column: number; readonly row: number }): string =>
+    `${String(value.column)},${String(value.row)}`;
+  const tier = (value: TerrainLineTrace['tier']): string => value === 'none'
+    ? 'NO COVER'
+    : value === 'half'
+      ? 'HALF COVER'
+      : value === 'three_quarters'
+        ? 'THREE-QUARTERS COVER'
+        : 'TOTAL COVER';
+  return `${label}: source cell ${cell(trace.sourceCell)}, target cell ${cell(trace.targetCell)}, ` +
+    `chosen source corner ${cell(trace.sourceCorner)}, corner-line tiers ` +
+    `${trace.lines.map((line) => line.tier).join(' / ')}; result ${tier(trace.tier)}; ` +
+    `line of sight ${trace.blocksSight ? 'NO' : 'YES'}.`;
+}
+
+function d569ComponentEntries(bundle: Awaited<ReturnType<typeof loadD569AiDmKnowledgeBase>>) {
+  return [
+    bundle.root,
+    bundle.tactics,
+    ...KB_SUBJECTS.map((subject) => bundle.subjects[subject]),
+  ] as const;
 }
 
 function copyFixturePackage(destinationRoot: string): void {
@@ -268,5 +340,245 @@ describe('D466 AI DM knowledge-base fixture package', () => {
     expect(budget.records()).toEqual([
       expect.objectContaining({ subject: 'protocol', ordinal: 1 }),
     ]);
+  });
+});
+
+describe('D569 shared blind/advice knowledge-base fixture package', () => {
+  it('loads the complete byte-identical primer at startup for both DM modes', async () => {
+    const [advice, blind] = await Promise.all([
+      loadD569AiDmKnowledgeBase(process.cwd(), 'advice'),
+      loadD569AiDmKnowledgeBase(process.cwd(), 'blind'),
+    ]);
+    const adviceComponents = d569ComponentEntries(advice);
+    const blindComponents = d569ComponentEntries(blind);
+    const relocatedRoot = KB_SUBJECTS.reduce((text, subject) => text.replaceAll(
+      `${AI_DM_KB_FIXTURE_DIRECTORY}/d569/${subject}.md`,
+      resolve(process.cwd(), AI_DM_KB_FIXTURE_DIRECTORY, 'd569', `${subject}.md`),
+    ), String(inputs.fixtures.readText(D569_AI_DM_KB_ROOT)));
+    const expectedStartup = [
+      relocatedRoot,
+      ...D569_AI_DM_KB_COMPONENT_PATHS.slice(1).map((path) => inputs.fixtures.readText(path)),
+    ].join('\n\n');
+
+    expect(advice.root.repoRelativePath).toBe(D569_AI_DM_KB_ROOT);
+    expect(advice.subjectReadPolicy).toBe('startup_only');
+    expect(blind.subjectReadPolicy).toBe('startup_only');
+    expect(advice.startupInstructions).toBe(expectedStartup);
+    expect(advice.startupInstructions).toBe(blind.startupInstructions);
+    expect(advice.combinedStartupHash).toBe(blind.combinedStartupHash);
+    expect(advice.componentSha256).toEqual(blind.componentSha256);
+    expect(adviceComponents.map((component) => Buffer.from(component.text, 'utf8')))
+      .toEqual(blindComponents.map((component) => Buffer.from(component.text, 'utf8')));
+    expect(adviceComponents.map((component) => component.sha256)).toEqual(
+      D569_AI_DM_KB_COMPONENT_PATHS.map((path) =>
+        sha256(inputs.fixtures.readText(path))),
+    );
+    expect(advice.root.byteCount).toBeLessThanOrEqual(D569_KB_ROOT_MAX_BYTES);
+    expect(adviceComponents.every((component) =>
+      component.byteCount <= D569_KB_COMPONENT_MAX_BYTES)).toBe(true);
+    expect(Buffer.byteLength(advice.startupInstructions, 'utf8'))
+      .toBeLessThanOrEqual(D569_KB_STARTUP_MAX_BYTES);
+  });
+
+  it('keeps the guide HP claims aligned with actor-knowledge boundary classifications', () => {
+    const maximum = 20;
+    const profile = monsterProfile('kb-hp-boundaries', { hitPoints: maximum });
+    const initial = createEncounter({
+      bounds: { columns: 2, rows: 1 },
+      combatants: [profile],
+      tokens: [placedToken(profile, 0)],
+    });
+    const classify = (hitPoints: number) => {
+      const target = { ...initial.combatants[0]!, hitPoints };
+      const state = { ...initial, combatants: [target] };
+      const knowledge = hitPointKnowledge(state, target);
+      if (knowledge.kind !== 'perceived_band') throw new Error('Positive maximum lost its HP band.');
+      return knowledge.band;
+    };
+    expect([
+      classify(maximum),
+      classify(maximum - 1),
+      classify(maximum / 4),
+      classify(maximum / 4 + 1),
+    ]).toEqual(['uninjured', 'bloodied', 'near_death', 'bloodied']);
+
+    const guide = inputs.fixtures.readText(`${AI_DM_KB_FIXTURE_DIRECTORY}/d569/protocol.md`);
+    const hpSection = guide.split('## Hit-point bars, life glyphs, and corpses\n')[1]
+      ?.split('\n## ')[0];
+    if (hpSection === undefined) throw new Error('HP guide section is missing.');
+    const claims = new Map([...hpSection.matchAll(
+      /<!-- board-feature:hp-(uninjured|bloodied|near-death|unknown) -->\s*([\s\S]*?)(?=<!-- board-feature:hp-|$)/gu,
+    )].map((match) => [match[1], match[2] ?? ''] as const));
+
+    expect([...claims.keys()]).toEqual(['uninjured', 'bloodied', 'near-death', 'unknown']);
+    expect(claims.get('uninjured')).toMatch(/undamaged[\s\S]*full hit points/iu);
+    expect(claims.get('bloodied')).toMatch(/damaged[\s\S]*above (?:a|one) quarter/iu);
+    expect(claims.get('bloodied')).toMatch(/wide range[\s\S]*weak evidence/iu);
+    expect(claims.get('bloodied')).toMatch(/not[\s\S]*half/iu);
+    expect(claims.get('bloodied')).not.toMatch(/(?:at|below|under)\s+(?:or\s+below\s+)?half/iu);
+    expect(claims.get('bloodied')).not.toMatch(/\b(?:means?|indicates?|represents?)\b[^.;]{0,40}\bhalf\b/iu);
+    expect(claims.get('near-death')).toMatch(/at or below (?:a|one) quarter/iu);
+    expect(claims.get('unknown')).toMatch(/withholds the band/iu);
+    expect(hpSection).toMatch(/fixed per-band glyph[\s\S]*not a proportional measure/iu);
+  });
+
+  it('byte-scans startup, tactics, every subject, and provenance for the complete forbidden vocabulary', async () => {
+    const bundle = await loadD569AiDmKnowledgeBase(process.cwd(), 'blind');
+    const realComponents = [
+      { name: 'startupInstructions', bytes: Buffer.from(bundle.startupInstructions, 'utf8') },
+      ...d569ComponentEntries(bundle).map((component) => ({
+        name: component.repoRelativePath,
+        bytes: Buffer.from(component.text, 'utf8'),
+      })),
+      { name: D569_AI_DM_KB_PROVENANCE, bytes: inputs.fixtures.readBytes(D569_AI_DM_KB_PROVENANCE) },
+    ];
+    expect(scanD569KnowledgeBaseBytes(realComponents)).toEqual([]);
+
+    const scannerSentinels = [
+      'option_id', 'OPTION_REF', 'option id', 'option ref', 'offered option',
+      'primary_option', 'fallback_option', 'options_omitted_for_size', 'option count',
+      'option_index', 'option score', 'ranked option', 'top recommendation',
+      'current legal move', 'engine.', 'proposal',
+      'suggested_plan', 'suggested plan', 'team_plan_frontier', 'tactical_intel',
+      'tactical intel', 'intel_mode', 'engine advert', 'adverts', 'consequence_card',
+      'consequence card', 'opportunity_cost', 'opportunity cost', 'movement_options',
+      'applicable_play', 'play_id', 'snippet',
+      'engine rank',
+    ] as const;
+    const seeded = scannerSentinels.map((token, index) => ({
+      name: `seeded-${String(index)}`,
+      bytes: Buffer.from(token, 'utf8'),
+    }));
+    expect(scanD569KnowledgeBaseBytes(seeded).map((finding) => finding.component))
+      .toEqual(seeded.map((component) => component.name));
+  });
+
+  it('records complete allowlisted provenance with no restricted-source claim', async () => {
+    const manifest = await loadD569KbProvenanceManifest(process.cwd());
+    const rawManifest = inputs.fixtures.readText(D569_AI_DM_KB_PROVENANCE);
+    const componentPaths = manifest.components.map((component) => component.path);
+
+    expect(componentPaths).toEqual(D569_AI_DM_KB_COMPONENT_PATHS);
+    expect(new Set(componentPaths).size).toBe(D569_AI_DM_KB_COMPONENT_PATHS.length);
+    expect(manifest.version).toBe('d570-kb-provenance-v2');
+    expect(manifest.components.every((component) =>
+      component.revision.startsWith('d569-') && component.sources.length > 0)).toBe(true);
+    expect(manifest.components.map((component) => component.sha256)).toEqual(
+      D569_AI_DM_KB_COMPONENT_PATHS.map((path) => sha256(inputs.fixtures.readText(path))),
+    );
+    expect(manifest.components.flatMap((component) => component.sources)
+      .every((source) => source.kind === 'cc_by_srd' || source.kind === 'project_experience'))
+      .toBe(true);
+    expect(manifest.components.flatMap((component) => component.sources)
+      .filter((source) => source.kind === 'cc_by_srd')
+      .every((source) => source.locator.startsWith('docs/srd/'))).toBe(true);
+    expect(inputs.fixtures.readText(D569_AI_DM_KB_ROOT).replace(/\s+/gu, ' ').trim())
+      .toContain(SRD_ATTRIBUTION_NOTICE);
+    expect(rawManifest).not.toMatch(/\b(?:BG3|Baldur(?:'s)? Gate|Nimble|private[-_ ]research)\b/iu);
+  });
+
+  it('resolves every rules-section SRD locator to its recorded heading and real line range', async () => {
+    const manifest = await loadD569KbProvenanceManifest(process.cwd());
+    const srdLines = inputs.srdText.readText(srdFixture).split('\n');
+    const rulesComponents = new Set([
+      `${AI_DM_KB_FIXTURE_DIRECTORY}/d569/actions.md`,
+      `${AI_DM_KB_FIXTURE_DIRECTORY}/d569/movement.md`,
+      `${AI_DM_KB_FIXTURE_DIRECTORY}/d569/targeting.md`,
+      `${AI_DM_KB_FIXTURE_DIRECTORY}/d569/spells.md`,
+      `${AI_DM_KB_FIXTURE_DIRECTORY}/d569/conditions.md`,
+      `${AI_DM_KB_FIXTURE_DIRECTORY}/d569/reactions.md`,
+    ]);
+
+    for (const component of manifest.components) {
+      if (!rulesComponents.has(component.path)) continue;
+      const recordedSections = new Set(component.sources.map((source) => source.section));
+      const markdownSections = [...inputs.fixtures.readText(component.path)
+        .matchAll(/^## (.+)$/gmu)].map((match) => match[1] ?? '');
+      expect(markdownSections.filter((section) => !recordedSections.has(section)), component.path)
+        .toEqual([]);
+    }
+
+    for (const source of manifest.components.flatMap((component) => component.sources)) {
+      if (source.kind !== 'cc_by_srd') continue;
+      const match = /^docs\/srd\/full\/srd-5\.2\.1\.txt:(\d+)-(\d+)$/u.exec(source.locator);
+      expect(match, source.locator).not.toBeNull();
+      const firstLine = Number(match?.[1]);
+      const lastLine = Number(match?.[2]);
+      expect(Number.isSafeInteger(firstLine) && firstLine >= 1, source.locator).toBe(true);
+      expect(Number.isSafeInteger(lastLine) && lastLine >= firstLine, source.locator).toBe(true);
+      expect(lastLine, source.locator).toBeLessThanOrEqual(srdLines.length);
+      expect(srdLines.slice(firstLine - 1, lastLine).join('\n'), source.locator)
+        .toContain(source.heading);
+    }
+  });
+
+  it('documents every renderer legend entry in the map guide', () => {
+    const presence = { cells: CELL_GLYPH_KINDS, hidden: true, terrainKinds: TERRAIN_KINDS } as const;
+    const rendererKeys = new Set([
+      ...CELL_GLYPH_KINDS,
+      ...[
+        ...legendEntriesFor('none', 'bright', presence),
+        ...legendEntriesFor('light', 'dim', presence),
+        ...legendEntriesFor('full', 'darkness', presence),
+      ].map((entry) => entry.key),
+    ]);
+    const guide = inputs.fixtures.readText(`${AI_DM_KB_FIXTURE_DIRECTORY}/d569/protocol.md`);
+    const documentedKeys = new Set([...guide.matchAll(/<!-- board-feature:([a-z_-]+) -->/gu)]
+      .map((match) => match[1] ?? ''));
+
+    expect([...rendererKeys].filter((key) => !documentedKeys.has(key))).toEqual([]);
+  });
+
+  it('copies the D576 terrain legend exactly and binds the three worked examples to the production corner trace', () => {
+    const guide = inputs.fixtures.readText(`${AI_DM_KB_FIXTURE_DIRECTORY}/d569/protocol.md`);
+    for (const kind of TERRAIN_KINDS) expect(guide).toContain(TERRAIN_LEGEND_LABELS[kind]);
+    expect(guide).toContain(CELL_GLYPHS['terrain-half'].label);
+    expect(guide).toContain(CELL_GLYPHS['terrain-three-quarters'].label);
+    expect(guide).toContain(CELL_GLYPHS['terrain-wall'].label);
+
+    const tracer = playerProfile('guide-feature-tracer');
+    const featureState = createEncounter({
+      bounds: { columns: 6, rows: 4 },
+      combatants: [tracer],
+      tokens: [placedToken(tracer, 5, 3)],
+      worldObjects: [guideTerrainObject('guide-arrow-slit', [
+        { column: 2, row: 0 },
+        { column: 1, row: 1 },
+      ], 'three_quarters_cover')],
+    });
+
+    const source = playerProfile('guide-source');
+    const screen = playerProfile('guide-screen');
+    const target = playerProfile('guide-target');
+    const creatureState = createEncounter({
+      bounds: { columns: 6, rows: 3 },
+      combatants: [source, screen, target],
+      tokens: [placedToken(source, 0, 1), placedToken(screen, 2, 1), placedToken(target, 4, 1)],
+    });
+
+    const largeBase = playerProfile('guide-large-source');
+    const large = { ...largeBase, rules: { ...largeBase.rules, sizeCategory: 'Large' as const } };
+    const largeTarget = playerProfile('guide-large-target');
+    const largeState = createEncounter({
+      bounds: { columns: 7, rows: 6 },
+      combatants: [large, largeTarget],
+      tokens: [placedToken(large, 0, 0), placedToken(largeTarget, 6, 0)],
+      worldObjects: [guideTerrainObject(
+        'guide-low-barricade',
+        [{ column: 2, row: 0 }],
+        'half_cover',
+      )],
+    });
+
+    const productionExamples = [
+      guideTraceSummary('Feature trace', traceTerrainLine(
+        featureState,
+        { column: 0, row: 0 },
+        { column: 4, row: 2 },
+      )),
+      guideTraceSummary('Creature trace', traceCombatantLine(creatureState, source.id, target.id)),
+      guideTraceSummary('Large-source trace', traceCombatantLine(largeState, large.id, largeTarget.id)),
+    ];
+    for (const example of productionExamples) expect(guide).toContain(example);
   });
 });

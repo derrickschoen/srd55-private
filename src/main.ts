@@ -55,6 +55,27 @@ if (localEncounterLaunch) {
   const view = launchUrl.searchParams.get('view') === 'dm' ? 'dm' : 'player';
   const sessionId = launchUrl.searchParams.get('session') ?? 'reference-encounter';
   const boardSnapshotMode = launchUrl.searchParams.get('boardSnapshot') === '1';
+  const boardSnapshotInformation = launchUrl.searchParams.get('boardSnapshotInformation');
+  if (
+    boardSnapshotInformation !== null &&
+    boardSnapshotInformation !== 'advice' &&
+    boardSnapshotInformation !== 'blind_state'
+  ) {
+    throw new Error(
+      `Unknown boardSnapshotInformation ${boardSnapshotInformation}; expected advice or blind_state.`,
+    );
+  }
+  const boardSnapshotRole = launchUrl.searchParams.get('boardSnapshotRole');
+  if (
+    boardSnapshotRole !== null &&
+    boardSnapshotRole !== 'dm_board' &&
+    boardSnapshotRole !== 'accessible_board_raster' &&
+    boardSnapshotRole !== 'player_board'
+  ) {
+    throw new Error(
+      `Unknown boardSnapshotRole ${boardSnapshotRole}; expected dm_board, accessible_board_raster, or player_board.`,
+    );
+  }
   const boardGlyphsParameter = launchUrl.searchParams.get('boardGlyphs');
   const captureTilePxParameter = launchUrl.searchParams.get('captureTilePx');
   let captureTilePx: 64 | 128 | undefined;
@@ -74,6 +95,8 @@ if (localEncounterLaunch) {
         view,
         sessionId,
         boardSnapshotMode,
+        ...(boardSnapshotInformation === null ? {} : { boardSnapshotInformation }),
+        ...(boardSnapshotRole === null ? {} : { boardSnapshotRole }),
         ...(boardGlyphsParameter === null ? {} : { boardGlyphs: boardGlyphsParameter }),
         ...(captureTilePx === undefined ? {} : { captureTilePx }),
       });
