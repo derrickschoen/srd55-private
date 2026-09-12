@@ -37,24 +37,45 @@ function diagnostics(label: string, observation: LaunchOutput): string {
   return [label, '--- stdout ---', observation.output(), '--- stderr ---', observation.errors()].join('\n');
 }
 
+function descendantsExited(observation: LaunchOutput, milliseconds: number): Promise<void> {
+  const expiresAt = Date.now() + milliseconds;
+  return new Promise((resolveExit, reject) => {
+    const inspect = (): void => {
+      const live = observation.descendantPids().some((pid) => existsSync('/proc/' + String(pid)));
+      if (!live) { resolveExit(); return; }
+      if (Date.now() >= expiresAt) {
+        reject(new Error('serve descendant termination exceeded ' + String(milliseconds) + 'ms.'));
+        return;
+      }
+      setImmediate(inspect);
+    };
+    inspect();
+  });
+}
+
 async function stopProcessGroup(child: ChildProcess, observation: LaunchOutput): Promise<void> {
   const pid = child.pid;
+  const childExit = exited(child);
   try {
     if (pid !== undefined && child.exitCode === null && child.signalCode === null) {
       try { process.kill(-pid, 'SIGTERM'); } catch { /* It may already have exited. */ }
     }
     try {
-      await deadline(exited(child), EXIT_DEADLINE_MS, 'serve process-group termination');
+      await Promise.all([
+        deadline(childExit, EXIT_DEADLINE_MS, 'serve process-group termination'),
+        deadline(observation.drained, EXIT_DEADLINE_MS, 'serve output drainage'),
+        descendantsExited(observation, EXIT_DEADLINE_MS),
+      ]);
     } catch {
       if (pid !== undefined) {
         try { process.kill(-pid, 'SIGKILL'); } catch { /* The group may already be gone. */ }
       }
-      await deadline(exited(child), EXIT_DEADLINE_MS, 'forced serve process-group termination');
+      await Promise.all([
+        deadline(childExit, EXIT_DEADLINE_MS, 'forced serve process-group termination'),
+        deadline(observation.drained, EXIT_DEADLINE_MS, 'forced serve output drainage'),
+        descendantsExited(observation, EXIT_DEADLINE_MS),
+      ]);
     }
-    if (pid !== undefined) {
-      try { process.kill(-pid, 'SIGKILL'); } catch { /* Prove no surviving descendants by PID below. */ }
-    }
-    await deadline(observation.drained, EXIT_DEADLINE_MS, 'serve output drainage');
   } catch (error: unknown) {
     await Promise.race([
       observation.drained,
@@ -66,10 +87,10 @@ async function stopProcessGroup(child: ChildProcess, observation: LaunchOutput):
   }
 }
 
-function provePortFree(port: number): Promise<void> {
+function provePortFree(port: number, label: string): Promise<void> {
   return new Promise((resolveFree, reject) => {
     const server = createServer();
-    server.once('error', reject);
+    server.once('error', (error) => reject(new Error(`${label} remained bound: ${error.message}`)));
     server.listen(port, '127.0.0.1', () => server.close((error) =>
       error === undefined ? resolveFree() : reject(error)));
   });
@@ -220,9 +241,9 @@ test('launches a fresh runtime and contains both successful and failed process t
   }
   if (successfulStaticPort === null) throw new Error('The successful static port was not recorded.');
   if (successfulRuntimePort === null) throw new Error('The successful runtime port was not recorded.');
-  await provePortFree(successfulStaticPort);
-  await provePortFree(successfulRuntimePort);
-  expect(successfulPids.every((pid) => !existsSync('/proc/' + String(pid)))).toBe(true);
+  expect(successfulPids.filter((pid) => existsSync('/proc/' + String(pid)))).toEqual([]);
+  await provePortFree(successfulStaticPort, 'successful static port');
+  await provePortFree(successfulRuntimePort, 'successful runtime port');
 
   const failed = launch(tokensFile, true);
   let failedStaticPort: number | null = null;
@@ -240,8 +261,8 @@ test('launches a fresh runtime and contains both successful and failed process t
     await stopProcessGroup(failed.child, failed.observation);
   }
   if (failedStaticPort === null) throw new Error('The failed static port was not recorded.');
-  await provePortFree(failedStaticPort);
-  expect(failedPids.every((pid) => !existsSync('/proc/' + String(pid)))).toBe(true);
+  expect(failedPids.filter((pid) => existsSync('/proc/' + String(pid)))).toEqual([]);
+  await provePortFree(failedStaticPort, 'failed static port');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
