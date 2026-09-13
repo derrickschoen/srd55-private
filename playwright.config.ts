@@ -40,6 +40,7 @@ const webServers = Array.from(
 
 export default defineConfig({
   testDir: './tests/browser',
+  testIgnore: '**/vtt-handoff/**',
   // Files share a slot's OPFS origin sequentially; only files run in parallel.
   fullyParallel: false,
   workers: playwrightWorkers,

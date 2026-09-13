@@ -33,11 +33,23 @@
     { "mutation": 29, "name": "preview_confirm_cell_mismatch", "testFile": "tests/unit/combat/templates.test.ts", "testName": "mutation 29: preview and confirmed resolution expose the identical affected-cells function" },
     { "mutation": 30, "name": "total_cover_location_included", "testFile": "tests/unit/combat/templates.test.ts", "testName": "mutation 30: Total Cover excludes every geometrically covered location behind the wall" },
     { "mutation": 31, "name": "autosave_coalesces_revisions", "testFile": "tests/unit/vtt/session-persistence.test.ts", "testName": "CRASH-PROBE-EVERY-REVISION restores canonical state, RNG, ids, and history byte-for-byte" },
-    { "mutation": 32, "name": "pending_request_not_persisted", "testFile": "tests/unit/vtt/session-persistence.test.ts", "testName": "REACTION-PROMPT-RESUME keeps the unresolved request id and finishes the movement continuation" },
+    { "mutation": 32, "name": "pending_request_not_persisted", "testFile": "tests/unit/vtt/session-persistence.test.ts", "testName": "REACTION-PROMPT-RESUME refreshes the unresolved request and finishes the movement continuation" },
     { "mutation": 33, "name": "rng_resumes_from_seed", "testFile": "tests/unit/vtt/session-persistence.test.ts", "testName": "CRASH-PROBE-EVERY-REVISION restores canonical state, RNG, ids, and history byte-for-byte" },
     { "mutation": 34, "name": "codex_session_id_regenerated", "testFile": "tests/unit/vtt/session-persistence.test.ts", "testName": "CRASH-PROBE-EVERY-REVISION restores canonical state, RNG, ids, and history byte-for-byte" },
     { "mutation": 35, "name": "undo_deletes_branch", "testFile": "tests/unit/vtt/session-persistence.test.ts", "testName": "UNDO-REDO-RETAINS-VOID-BRANCH appends head moves and never deletes revisions" },
-    { "mutation": 36, "name": "resume_reissues_request_id", "testFile": "tests/unit/vtt/session-persistence.test.ts", "testName": "REACTION-PROMPT-RESUME keeps the unresolved request id and finishes the movement continuation" },
+    {
+      "mutation": 36,
+      "name": "resume_reissues_request_id",
+      "status": "superseded",
+      "supersededBy": "S3d (accepted in D586.185)",
+      "reason": "S3d intentionally treats restored offers as transiently stale: the old request id must be rejected and a fresh request id reissued before the persisted continuation resumes.",
+      "successorTests": [
+        { "contract": "the persisted request and continuation survive a resume", "testFile": "tests/unit/vtt/session-persistence.test.ts", "testName": "REACTION-PROMPT-RESUME refreshes the unresolved request and finishes the movement continuation" },
+        { "contract": "a stale id is rejected", "testFile": "tests/unit/vtt/session-persistence.test.ts", "testName": "REACTION-PROMPT-RESUME refreshes the unresolved request and finishes the movement continuation" },
+        { "contract": "a fresh id is issued", "testFile": "tests/unit/vtt/session-persistence.test.ts", "testName": "REACTION-PROMPT-RESUME refreshes the unresolved request and finishes the movement continuation" },
+        { "contract": "a completed movement stays completed", "testFile": "tests/unit/vtt/session-persistence.test.ts", "testName": "REACTION-PROMPT-RESUME refreshes the unresolved request and finishes the movement continuation" }
+      ]
+    },
     { "mutation": 37, "name": "player_projection_contains_hidden_roll", "testFile": "tests/unit/vtt/encounter-projections.test.ts", "testName": "M37-HIDDEN-ROLL-ABSENT serializes no hidden death-save result or DM facts" },
     { "mutation": 38, "name": "player_window_contains_dm_control", "testFile": "tests/browser/vtt-encounter.spec.ts", "testName": "M38-PLAYER-NO-DM-CONTROLS and two local windows complete the resumable reference flow" },
     { "mutation": 39, "name": "wrong_pc_highlighted", "testFile": "tests/unit/vtt/encounter-projections.test.ts", "testName": "M39-ACTIVE-PC-HIGHLIGHT uses the actual active combatant" },

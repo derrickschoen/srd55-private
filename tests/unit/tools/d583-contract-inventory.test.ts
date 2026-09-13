@@ -9,6 +9,7 @@ import {
   gitOutput,
   healingPotionUsesComponentIngress,
   inventoryDigest,
+  resolveLocal,
   reverseConsumerClosure,
   SESSION_TRANSACTION_BASELINE_SHA256,
   SESSION_TRANSACTION_BASELINE_SPECS,
@@ -196,6 +197,27 @@ describe('D583 cumulative contract inventory', () => {
       { specifier: './runtime', typeOnly: false, syntax: 'import_equals' },
       { specifier: './types', typeOnly: true, syntax: 'import_equals' },
     ]);
+  });
+
+  it('resolves declaration files beside a specifier and at a directory index', () => {
+    expect(resolveLocal(
+      'tests/types/vtt-handoff-contract.type-test.ts',
+      '../../contracts/vtt-handoff/v1/contracts',
+    )).toBe('contracts/vtt-handoff/v1/contracts.d.ts');
+    expect(resolveLocal(
+      'tests/unit/tools/d583-contract-inventory.test.ts',
+      '../../fixtures/d583-declaration-index',
+    )).toBe('tests/fixtures/d583-declaration-index/index.d.ts');
+  });
+
+  it('continues to reject genuinely missing relative imports', () => {
+    expect(() => resolveLocal(
+      'tests/unit/tools/d583-contract-inventory.test.ts',
+      '../../fixtures/d583-declaration-does-not-exist',
+    )).toThrow(
+      'Unresolved relative dependency ../../fixtures/d583-declaration-does-not-exist ' +
+      'from tests/unit/tools/d583-contract-inventory.test.ts.',
+    );
   });
 
   it('executable import-equals rejection control fails unresolved and external forms', () => {

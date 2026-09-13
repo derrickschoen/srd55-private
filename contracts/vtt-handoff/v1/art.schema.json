@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dnd.local/vtt-handoff/v1/art.schema.json",
+  "$defs": {
+    "finiteNumber": { "type": "number" },
+    "view": { "enum": ["top-down", "isometric"] },
+    "pass": { "enum": ["albedo", "normal", "emissive"] },
+    "footprint": { "type": "object", "additionalProperties": false, "required": ["w", "h"], "properties": { "w": { "$ref": "#/$defs/finiteNumber" }, "h": { "$ref": "#/$defs/finiteNumber" } } },
+    "request": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schemaVersion", "requestId", "assetId", "brief", "views", "passes", "pixelsPerCell", "footprint"],
+      "properties": { "schemaVersion": { "const": 1 }, "requestId": { "type": "string" }, "assetId": { "type": "string" }, "brief": { "type": "string" }, "views": { "type": "array", "items": { "$ref": "#/$defs/view" } }, "passes": { "type": "array", "items": { "$ref": "#/$defs/pass" } }, "pixelsPerCell": { "$ref": "#/$defs/finiteNumber" }, "footprint": { "$ref": "#/$defs/footprint" } }
+    },
+    "frame": {
+      "type": "object", "additionalProperties": false,
+      "required": ["facing", "frameIndex", "width", "height", "pivotPx", "albedo"],
+      "properties": { "facing": { "$ref": "#/$defs/finiteNumber" }, "frameIndex": { "$ref": "#/$defs/finiteNumber" }, "view": { "$ref": "#/$defs/view" }, "width": { "$ref": "#/$defs/finiteNumber" }, "height": { "$ref": "#/$defs/finiteNumber" }, "pivotPx": { "type": "array", "prefixItems": [{ "$ref": "#/$defs/finiteNumber" }, { "$ref": "#/$defs/finiteNumber" }], "items": false, "minItems": 2 }, "albedo": { "type": "string" }, "normal": { "type": "string" }, "emissive": { "type": "string" } }
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "requestId", "status", "assets", "provenance", "errors"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "requestId": { "type": "string" },
+        "status": { "enum": ["complete", "partial", "blocked"] },
+        "assets": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["assetId", "footprint", "heightCells", "pixelsPerCell", "frames"],
+            "properties": {
+              "assetId": { "type": "string" },
+              "footprint": { "$ref": "#/$defs/footprint" },
+              "heightCells": { "$ref": "#/$defs/finiteNumber" },
+              "pixelsPerCell": { "$ref": "#/$defs/finiteNumber" },
+              "frames": { "type": "array", "items": { "$ref": "#/$defs/frame" } }
+            }
+          }
+        },
+        "provenance": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["sourceFiles", "files", "normalMapConvention", "tool", "notes"],
+          "properties": {
+            "sourceFiles": { "type": "array", "items": { "type": "string" } },
+            "files": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["path", "sha256"],
+                "properties": { "path": { "type": "string" }, "sha256": { "type": "string" } }
+              }
+            },
+            "frameViews": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["path", "view"],
+                "properties": { "path": { "type": "string" }, "view": { "$ref": "#/$defs/view" } }
+              }
+            },
+            "normalMapConvention": { "enum": ["opengl-positive-y", "directx-negative-y", "none"] },
+            "tool": { "type": "string" },
+            "notes": { "type": "string" }
+          }
+        },
+        "errors": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  },
+  "oneOf": [{ "$ref": "#/$defs/request" }, { "$ref": "#/$defs/result" }]
+}

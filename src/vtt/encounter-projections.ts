@@ -68,6 +68,41 @@ export interface ProjectedControllerRequest {
   readonly actorId: CombatantId;
   readonly moverId?: CombatantId;
   readonly legalActions: readonly EncounterCommand[];
+  readonly offeredActionIds: readonly string[];
+}
+
+export function offeredActionId(requestId: string, index: number): string {
+  return `${requestId}:option:${String(index)}`;
+}
+
+function freezeRecursively(value: unknown): void {
+  if (typeof value !== 'object' || value === null || Object.isFrozen(value)) return;
+  Object.freeze(value);
+  for (const nested of Object.values(value)) freezeRecursively(nested);
+}
+
+export function detachedImmutable<T>(value: T): T {
+  const detached = structuredClone(value);
+  freezeRecursively(detached);
+  return detached;
+}
+
+/** Authority-owned seat data used only as input to the canonical visibility filter. */
+export interface PlayerSeatBinding {
+  readonly seatId: string;
+  readonly observerCombatantId: CombatantId;
+  readonly ownedCombatantIds: readonly CombatantId[];
+}
+
+export interface RendererTokenBinding {
+  readonly tokenId: string;
+  readonly combatantId: CombatantId;
+}
+
+/** Renderer-only identity enrichment captured alongside a detached board projection. */
+export interface RendererProjectionCapture<TProjection extends DmBoardProjection | PlayerBoardProjection> {
+  readonly projection: TProjection;
+  readonly tokenBindings: readonly RendererTokenBinding[];
 }
 
 export interface PlayerBoardProjection {
@@ -77,6 +112,8 @@ export interface PlayerBoardProjection {
   readonly bounds: PlayerView['bounds'];
   readonly blockedCells: readonly GridCell[];
   readonly terrainCells: ReturnType<typeof projectEncounterTerrainCells>;
+  /** Existing cells after the canonical per-seat visibility filter. */
+  readonly visibleCells: readonly GridCell[];
   readonly concealedCells: readonly GridCell[];
   readonly activeCombatant: CombatantId | null;
   readonly highlightedCombatant: CombatantId | null;
@@ -132,14 +169,24 @@ export interface DmBoardProjection {
   readonly pendingPlacementRecovery: DmPendingPlacementRecovery | null;
 }
 
-/** Remove engine-authored movement offers before a state-only board is rendered. */
-export function projectStateOnlyDmBoard(
-  projection: DmBoardProjection,
-): DmBoardProjection {
+interface StateOnlyBoardProjection {
+  readonly offeredOptionPaths: readonly OfferedOptionPath[];
+}
+
+/** The single authority-bearing field strip for every state-only DM board shape. */
+export function projectStateOnlyBoard<TProjection extends StateOnlyBoardProjection>(
+  projection: TProjection,
+): TProjection {
   return {
     ...projection,
     offeredOptionPaths: [],
   };
+}
+
+export function projectStateOnlyDmBoard(
+  projection: DmBoardProjection,
+): DmBoardProjection {
+  return projectStateOnlyBoard(projection);
 }
 
 export interface DmPendingPlacementRecovery {
@@ -153,6 +200,30 @@ export interface DmPendingPlacementRecovery {
     readonly legalAnchors: readonly PendingPlacementLegalAnchor[];
   }[];
 }
+
+export interface TopDownWorldObjectControl {
+  readonly objectId: string;
+  readonly objectName: string;
+  readonly label: string;
+  readonly offeredActionId: string;
+}
+
+export interface TopDownPendingPlacementRecovery extends Omit<DmPendingPlacementRecovery, 'sizeOptions'> {
+  readonly sizeOptions: readonly {
+    readonly size: KnownCreatureSize;
+    readonly legalAnchors: readonly (PendingPlacementLegalAnchor & {
+      readonly offeredActionId: string;
+    })[];
+  }[];
+}
+
+export type TopDownDmBoardProjection = Omit<
+  DmBoardProjection,
+  'worldObjectControls' | 'pendingPlacementRecovery'
+> & {
+  readonly worldObjectControls: readonly TopDownWorldObjectControl[];
+  readonly pendingPlacementRecovery: TopDownPendingPlacementRecovery | null;
+};
 
 export interface DmMovementPathPreview extends MovementPathDangerPreview {
   readonly commandKey: string;
@@ -228,7 +299,9 @@ function projectedRequest(
     encounterRevision: request.encounterRevision,
     actorId: request.actorId,
     ...(request.kind === 'reaction' ? { moverId: request.moverId } : {}),
-    legalActions: request.legalActions.actions,
+    legalActions: detachedImmutable(request.legalActions.actions),
+    offeredActionIds: request.legalActions.actions.map((_action, index) =>
+      offeredActionId(request.requestId, index)),
   };
 }
 
@@ -289,6 +362,7 @@ export function projectPlayerBoard(
       blockedCells: view.blockedCells,
       worldObjects: view.worldObjects,
     }),
+    visibleCells: view.cells.map((cell) => ({ ...cell })),
     concealedCells: view.concealedCells.map((cell) => ({ ...cell })),
     activeCombatant: view.activeCombatant,
     highlightedCombatant: view.activeCombatant,

@@ -1,5 +1,6 @@
 import { defineConfig, type Plugin } from 'vite';
 import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import {
   readFileSync,
   readdirSync,
@@ -83,6 +84,45 @@ function bundledLicenseTexts(): Plugin {
           source: asset.source,
         });
       }
+    },
+  };
+}
+
+export function selectVttHandoffWorkerAsset(assets: readonly BuildAsset[]): BuildAsset {
+  const workers = assets.filter((asset) => /(?:^|\/)worker-entry-[^/]+\.js$/u.test(asset.fileName));
+  if (workers.length !== 1) {
+    throw new Error(
+      workers.length === 0
+        ? 'The built VTT handoff Worker asset is unavailable.'
+        : 'The built VTT handoff Worker asset is ambiguous.',
+    );
+  }
+  return workers[0]!;
+}
+
+function vttHandoffArtifactStamp(): Plugin {
+  let outputDirectory: string | undefined;
+  return {
+    name: 'vtt-handoff-artifact-stamp',
+    apply: 'build',
+    configResolved(config) {
+      outputDirectory = resolve(config.root, config.build.outDir);
+    },
+    writeBundle() {
+      if (outputDirectory === undefined) throw new Error('VTT handoff output directory is unavailable.');
+      const worker = selectVttHandoffWorkerAsset(deployableAssets(outputDirectory));
+      const commit = execFileSync('git', ['rev-parse', 'HEAD'], {
+        cwd: process.cwd(), encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'],
+      }).trim();
+      if (!/^[0-9a-f]{40}$/u.test(commit)) throw new Error('The build commit is invalid.');
+      writeFileSync(join(outputDirectory, 'vtt-handoff-artifact.json'), `${JSON.stringify({
+        artifact: 'dist',
+        commit,
+        worker: {
+          url: `/${worker.fileName.replaceAll('\\', '/')}`,
+          sha256: createHash('sha256').update(worker.source).digest('hex'),
+        },
+      })}\n`);
     },
   };
 }
@@ -276,7 +316,7 @@ const core = {
 
 const shared = {
   ...core,
-  plugins: [...core.plugins, bundledLicenseTexts(), appShellServiceWorker()],
+  plugins: [...core.plugins, bundledLicenseTexts(), vttHandoffArtifactStamp(), appShellServiceWorker()],
 };
 
 /**

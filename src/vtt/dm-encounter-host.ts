@@ -6,7 +6,10 @@ import {
   type ControllerKind,
 } from '../combat/controllers';
 import {
+  CoordinatorExternalPauseError,
+  CoordinatorPostApplicationError,
   TurnCoordinator,
+  type CoordinatorStep,
   type PersistedCoordinatorState,
   type ReactionLegalActions,
   type TurnLegalActions,
@@ -14,6 +17,7 @@ import {
 import {
   createEncounter,
   type EncounterState,
+  type EncounterCommandReducer,
   type PendingDecision,
   type ReactionKind,
   type ReactionPolicy,
@@ -32,7 +36,8 @@ import type { AgentSessionBinding } from './agent-session';
 import {
   DeferredMirrorSink,
   EncounterSessionJournal,
-  type BrowserSessionStore,
+  type SessionStore,
+  type SessionHistoryEntry,
   type MirrorSink,
   type SessionResume,
 } from './session-persistence';
@@ -73,8 +78,12 @@ import {
 import {
   projectDmBoard,
   projectPlayerBoard,
+  detachedImmutable,
+  offeredActionId,
   type DmBoardProjection,
   type PlayerBoardProjection,
+  type PlayerSeatBinding,
+  type RendererTokenBinding,
 } from './encounter-projections';
 import {
   REFERENCE_PLAYER_IDS,
@@ -202,6 +211,89 @@ export interface DmEncounterHostSnapshot {
   readonly player: PlayerBoardProjection;
 }
 
+export type HostSnapshotNotificationKind =
+  | 'offer'
+  | 'status'
+  | 'mutation'
+  | 'autonomous'
+  | 'recovery';
+
+export type HostTerminalReceipt =
+  | {
+      readonly kind: 'offered_action';
+      readonly requestId: string;
+      readonly revision: number;
+    }
+  | {
+      readonly kind: 'door';
+      readonly revision: number;
+    };
+
+export interface HostSnapshotNotification {
+  readonly kind: HostSnapshotNotificationKind;
+  readonly snapshot: DmEncounterHostSnapshot;
+  readonly playerSnapshot: (binding: PlayerSeatBinding) => PlayerBoardProjection;
+  readonly rendererTokenBindings: readonly RendererTokenBinding[];
+  readonly terminalReceipt?: HostTerminalReceipt;
+}
+
+export interface HostSubscriberError {
+  readonly channel: 'snapshot' | 'notification';
+  readonly error: unknown;
+}
+
+export type HostCoordinatorTransactionOutcome =
+  | { readonly kind: 'committed'; readonly revision: number }
+  | { readonly kind: 'refused'; readonly reason: string }
+  | { readonly kind: 'cancelled'; readonly reason: string }
+  | { readonly kind: 'closed' }
+  | {
+      readonly kind: 'failed';
+      readonly phase: 'pre_apply' | 'post_apply';
+      readonly error: unknown;
+      readonly currentRevision: number;
+    };
+
+export type HostDoorSetOutcome =
+  | { readonly kind: 'committed'; readonly revision: number; readonly changed: boolean }
+  | { readonly kind: 'unsupported'; readonly reason: string }
+  | { readonly kind: 'closed' }
+  | {
+      readonly kind: 'failed';
+      readonly phase: 'pre_apply' | 'post_apply';
+      readonly error: unknown;
+      readonly currentRevision: number;
+    };
+
+interface HostTransactionWaiter {
+  readonly resolve: (outcome: HostCoordinatorTransactionOutcome) => void;
+}
+
+interface HostTopDownTransactionWaiter {
+  settled: boolean;
+  readonly resolve: (outcome: HostCoordinatorTransactionOutcome) => void;
+}
+
+type FreshOfferOutcome =
+  | { readonly kind: 'fresh' }
+  | { readonly kind: 'closed' }
+  | { readonly kind: 'refused'; readonly reason: string }
+  | { readonly kind: 'failed'; readonly error: unknown };
+
+interface FreshOfferWaiter {
+  readonly previousRequestId: string | null;
+  readonly minimumRevision: number;
+  readonly resolve: (outcome: FreshOfferOutcome) => void;
+}
+
+class HostPostApplicationError extends Error {
+  override readonly name = 'HostPostApplicationError' as const;
+
+  constructor(cause: unknown) {
+    super('Host bookkeeping failed after an encounter command was applied.', { cause });
+  }
+}
+
 export class ControllerAssignmentError extends Error {
   override readonly name = 'ControllerAssignmentError' as const;
 
@@ -216,24 +308,40 @@ export class ControllerAssignmentError extends Error {
 
 export interface DmBridgeConnection extends DmBridgeExchange, MirrorSink {}
 
-function hasDurableFlush(
-  store: BrowserSessionStore,
-): store is BrowserSessionStore & { flush(): Promise<void> } {
-  return typeof Reflect.get(store, 'flush') === 'function';
+type DoorBlocking = EncounterState['worldObjects'][number]['blocking'];
+
+function canonicalDoorState(blocking: DoorBlocking): boolean | null {
+  if (!blocking.movement && !blocking.lineOfSight && blocking.cover === 'none') return true;
+  if (blocking.movement && blocking.lineOfSight && blocking.cover === 'total') return false;
+  return null;
+}
+
+function doorBlockingFor(open: boolean): DoorBlocking {
+  return open
+    ? { movement: false, lineOfSight: false, cover: 'none' }
+    : { movement: true, lineOfSight: true, cover: 'total' };
 }
 
 export class DmEncounterHost {
   readonly sessionId: EncounterSessionId;
-  readonly #store: BrowserSessionStore;
+  readonly #store: SessionStore;
   readonly #mirror = new DeferredMirrorSink();
   readonly #listeners = new Set<(snapshot: DmEncounterHostSnapshot) => void>();
+  readonly #notificationListeners = new Set<(notification: HostSnapshotNotification) => void>();
+  readonly #subscriberErrors: HostSubscriberError[] = [];
+  readonly #transactionWaiters = new Map<string, HostTransactionWaiter>();
+  readonly #topDownTransactionWaiters = new Set<HostTopDownTransactionWaiter>();
+  readonly #freshOfferWaiters = new Set<FreshOfferWaiter>();
+  #activeTransactionRequestId: string | null = null;
   #journal: EncounterSessionJournal;
   #registry: ControllerRegistry;
   #humans: ReadonlyMap<CombatantId, HumanController>;
   #coordinator: TurnCoordinator;
   #rng: SerializableRng;
   #pump: Promise<void> | null = null;
+  #topDownMutationTail: Promise<void> = Promise.resolve();
   #repumpRequested = false;
+  #repumpBlocked = false;
   #closed = false;
   #bridgeFailureGuard: BridgeFailureGuard | null = null;
   #roundPlanSession: DmRoundPlanSession | null = null;
@@ -256,11 +364,14 @@ export class DmEncounterHost {
   readonly #partyDisplayNames: ReadonlyMap<number, string>;
   readonly #composeRoom: StoredCharacterRoomComposer;
   readonly #reactionOfferPolicy: ReactionOfferHostPolicy;
+  readonly #onReducerInvocation: (command: EncounterCommand) => void;
   readonly #offerEnvironment: EngineOptionEnvironment;
+  #detachedHistorySource: readonly SessionHistoryEntry[] | null = null;
+  #detachedHistory: readonly SessionHistoryEntry[] = Object.freeze([]);
 
   constructor(
     sessionKey: string,
-    store: BrowserSessionStore,
+    store: SessionStore,
     options: {
       readonly initialState?: EncounterState;
       readonly initialSeed?: EncounterSeed;
@@ -278,6 +389,7 @@ export class DmEncounterHost {
       readonly steeringMode?: SteeringCoordinatorMode;
       readonly onSteeringTelemetry?: (telemetry: SteeringTelemetry) => void;
       readonly reactionOfferPolicy?: ReactionOfferHostPolicy;
+      readonly onReducerInvocation?: (command: EncounterCommand) => void;
       readonly offerEnvironment?: EngineOptionEnvironment;
     } = {},
   ) {
@@ -292,6 +404,7 @@ export class DmEncounterHost {
     this.#partyDisplayNames = options.partyDisplayNames ?? new Map();
     this.#composeRoom = options.composeRoom ?? composeStoredCharacterEncounter;
     this.#reactionOfferPolicy = options.reactionOfferPolicy ?? DM_ATTENDED_REACTION_OFFER_POLICY;
+    this.#onReducerInvocation = options.onReducerInvocation ?? (() => undefined);
     this.#offerEnvironment = options.offerEnvironment ??
       createLegacyEngineOptionEnvironment(canonicalEngineQueryPort);
     if (options.bridge !== undefined) {
@@ -396,6 +509,10 @@ export class DmEncounterHost {
   }
 
   #coordinatorFor(resume: SessionResume): TurnCoordinator {
+    const commandReducer: EncounterCommandReducer = (state, command, rng, options) => {
+      this.#onReducerInvocation(command);
+      return reduceSessionEncounter(state, command, rng, options);
+    };
     return new TurnCoordinator(resume.encounterState, this.#registry, resume.rng, {
       persistence: resume.journal,
       resume: resume.coordinatorState,
@@ -403,7 +520,7 @@ export class DmEncounterHost {
       turnLegalActions: this.#turnLegalActions,
       reactionLegalActions: this.#reactionLegalActions,
       pendingDecisionTray: true,
-      commandReducer: reduceSessionEncounter,
+      commandReducer,
     });
   }
 
@@ -446,20 +563,71 @@ export class DmEncounterHost {
       coordinator,
       this.#journal.partyState(),
     );
-    return {
-      dm: projectDmBoard({
-        view: projectDmView(state),
-        coordinator,
-        controllers: this.#registry.identities(),
-        history,
-        partyState: this.#journal.partyState(),
-        boundaryRefusal: this.#boundaryRefusal,
-        actionRefusal: this.#actionRefusal,
-        adjudicationPrompts: this.#adjudicationPrompts,
-        engineAdjudications: this.#engineAdjudications,
+    const projectedDm = projectDmBoard({
+      view: projectDmView(state),
+      coordinator,
+      controllers: this.#registry.identities(),
+      history,
+      partyState: this.#journal.partyState(),
+      boundaryRefusal: this.#boundaryRefusal,
+      actionRefusal: this.#actionRefusal,
+      adjudicationPrompts: this.#adjudicationPrompts,
+      engineAdjudications: this.#engineAdjudications,
+    });
+    const { history: _authorityHistory, ...dmWithoutHistory } = projectedDm;
+    const dm = Object.freeze({
+      ...detachedImmutable(dmWithoutHistory),
+      history: this.#detachedHistoryProjection(history),
+    });
+    const projectedPlayer: PlayerBoardProjection = this.#closed
+      ? { ...player, authorityStatus: 'hard_paused' }
+      : player;
+    return Object.freeze({
+      dm,
+      player: detachedImmutable(projectedPlayer),
+    });
+  }
+
+  #detachedHistoryProjection(history: readonly SessionHistoryEntry[]): readonly SessionHistoryEntry[] {
+    if (history === this.#detachedHistorySource) return this.#detachedHistory;
+    const suffix = history.slice(this.#detachedHistory.length);
+    let expectedParent = this.#detachedHistory.at(-1)?.revision ?? null;
+    const isLinearAppend = suffix.length > 0 && suffix.every((entry) => {
+      const matches = entry.parentRevision === expectedParent;
+      expectedParent = entry.revision;
+      return matches;
+    });
+    if (!isLinearAppend) {
+      this.#detachedHistory = detachedImmutable(history);
+      this.#detachedHistorySource = history;
+      return this.#detachedHistory;
+    }
+    this.#detachedHistory = Object.freeze([
+      ...this.#detachedHistory,
+      ...detachedImmutable(suffix),
+    ]);
+    this.#detachedHistorySource = history;
+    return this.#detachedHistory;
+  }
+
+  playerSnapshot(binding: PlayerSeatBinding): PlayerBoardProjection {
+    const player = projectPlayerBoard(
+      projectPlayerView(this.#coordinator.state(), {
+        seatId: binding.seatId,
+        combatantId: binding.observerCombatantId,
+        ownedCombatantIds: binding.ownedCombatantIds,
       }),
-      player: this.#closed ? { ...player, authorityStatus: 'hard_paused' } : player,
-    };
+      this.#coordinator.coordinatorState(),
+      this.#journal.partyState(),
+    );
+    return detachedImmutable(this.#closed ? { ...player, authorityStatus: 'hard_paused' } : player);
+  }
+
+  rendererTokenBindings(): readonly RendererTokenBinding[] {
+    return detachedImmutable(this.#coordinator.state().tokens.map((token) => ({
+      tokenId: String(token.id),
+      combatantId: token.combatantId,
+    })));
   }
 
   sessionEnded(): boolean {
@@ -468,13 +636,82 @@ export class DmEncounterHost {
 
   subscribe(listener: (snapshot: DmEncounterHostSnapshot) => void): () => void {
     this.#listeners.add(listener);
-    listener(this.snapshot());
+    this.#notifySnapshotListener(listener, this.snapshot());
     return () => this.#listeners.delete(listener);
   }
 
-  #publish(): void {
-    const snapshot = this.snapshot();
-    for (const listener of this.#listeners) listener(snapshot);
+  subscribeNotifications(listener: (notification: HostSnapshotNotification) => void): () => void {
+    this.#notificationListeners.add(listener);
+    this.#notifyNotificationListener(listener, this.#captureNotification('status'));
+    return () => this.#notificationListeners.delete(listener);
+  }
+
+  subscriberErrors(): readonly HostSubscriberError[] {
+    return [...this.#subscriberErrors];
+  }
+
+  #notifySnapshotListener(
+    listener: (snapshot: DmEncounterHostSnapshot) => void,
+    snapshot: DmEncounterHostSnapshot,
+  ): void {
+    try {
+      listener(snapshot);
+    } catch (error: unknown) {
+      this.#subscriberErrors.push({ channel: 'snapshot', error });
+    }
+  }
+
+  #notifyNotificationListener(
+    listener: (notification: HostSnapshotNotification) => void,
+    notification: HostSnapshotNotification,
+  ): void {
+    try {
+      listener(notification);
+    } catch (error: unknown) {
+      this.#subscriberErrors.push({ channel: 'notification', error });
+    }
+  }
+
+  #captureNotification(
+    kind: HostSnapshotNotificationKind,
+    terminalReceipt?: HostTerminalReceipt,
+  ): HostSnapshotNotification {
+    const state = structuredClone(this.#coordinator.state());
+    const coordinator = structuredClone(this.#coordinator.coordinatorState());
+    const partyState = this.#journal.partyState();
+    const closed = this.#closed;
+    const rendererTokenBindings = detachedImmutable(state.tokens.map((token) => ({
+      tokenId: String(token.id),
+      combatantId: token.combatantId,
+    })));
+    return {
+      kind,
+      snapshot: this.snapshot(),
+      rendererTokenBindings,
+      ...(terminalReceipt === undefined ? {} : { terminalReceipt }),
+      playerSnapshot: (binding) => {
+        const player = projectPlayerBoard(projectPlayerView(state, {
+          seatId: binding.seatId,
+          combatantId: binding.observerCombatantId,
+          ownedCombatantIds: binding.ownedCombatantIds,
+        }), coordinator, partyState);
+        return detachedImmutable(closed ? { ...player, authorityStatus: 'hard_paused' } : player);
+      },
+    };
+  }
+
+  #deliverNotification(notification: HostSnapshotNotification): void {
+    this.#settleFreshOffers(notification.snapshot);
+    for (const listener of this.#notificationListeners) {
+      this.#notifyNotificationListener(listener, notification);
+    }
+    for (const listener of this.#listeners) {
+      this.#notifySnapshotListener(listener, notification.snapshot);
+    }
+  }
+
+  #publish(kind: HostSnapshotNotificationKind = 'status'): void {
+    this.#deliverNotification(this.#captureNotification(kind));
   }
 
   start(): Promise<void> {
@@ -529,51 +766,164 @@ export class DmEncounterHost {
   }
 
   async #pumpCoordinator(): Promise<void> {
-    if (this.#closed) return;
+    if (this.#closed || this.#repumpBlocked) return;
     if (this.#pump !== null) {
       if (this.#coordinator.pauseState() === null) this.#repumpRequested = true;
       return this.#pump;
     }
     this.#pump = (async () => {
       for (;;) {
-        if (this.#closed || this.#coordinator.pauseState() !== null) return;
+        if (this.#closed || this.#repumpBlocked || this.#coordinator.pauseState() !== null) return;
         const step = this.#coordinator.step();
-        await Promise.resolve();
         const pendingRequest = this.#coordinator.coordinatorState().pendingRequest;
-        if (
-          pendingRequest !== null &&
-          this.#registry.kindFor(pendingRequest.actorId) !== 'algorithm'
-        ) {
-          const preStepFlush = this.#flushStore();
-          if (preStepFlush !== null) await preStepFlush;
+        const controllerRequestId = pendingRequest?.requestId ?? null;
+        const acceptedTransactionId = (): string | null => {
+          const active = this.#activeTransactionRequestId;
+          return active !== null && active === controllerRequestId ? active : null;
+        };
+        try {
+          if (
+            pendingRequest !== null &&
+            this.#registry.kindFor(pendingRequest.actorId) !== 'algorithm'
+          ) {
+            await this.#store.flush();
+          }
+        } catch (error: unknown) {
+          if (pendingRequest !== null && acceptedTransactionId() === null) {
+            await this.#closeAfterInitialOfferFailure(step);
+            throw error;
+          }
+          const transactionRequestId = acceptedTransactionId();
+          const handled = this.#handlePumpFailure(error, 'pre_apply', transactionRequestId);
+          if (handled) return;
+          throw error;
         }
-        this.#publish();
-        let result;
+        if (this.#closed) return;
+        if (pendingRequest !== null) this.#publish('offer');
+        let result: CoordinatorStep;
         try {
           result = await step;
         } catch (error: unknown) {
-          if (this.#bridgeFailureGuard?.report() !== null) return;
+          if (this.#bridgeFailureGuard !== null && this.#bridgeFailureGuard.report() !== null) return;
+          const phase = error instanceof CoordinatorPostApplicationError ? 'post_apply' : 'pre_apply';
+          const transactionRequestId = acceptedTransactionId();
+          const handled = this.#handlePumpFailure(error, phase, transactionRequestId);
+          if (handled) return;
           throw error;
         }
-        const autoResolvedReactions = this.#autoResolveUnattendedReactionOffers();
-        const postStepFlush = this.#flushStore();
-        if (postStepFlush !== null) await postStepFlush;
-        this.#completeHandbacksAtTransactionBoundary();
-        this.#publish();
+        if (this.#closed) return;
+        try {
+          this.#completeHandbacksAtTransactionBoundary();
+          await this.#store.flush();
+        } catch (error: unknown) {
+          const phase = result.kind === 'applied' ? 'post_apply' : 'pre_apply';
+          const transactionRequestId = acceptedTransactionId();
+          const handled = this.#handlePumpFailure(error, phase, transactionRequestId);
+          if (handled) return;
+          throw error;
+        }
+        if (this.#closed) return;
+        const transactionRequestId = acceptedTransactionId();
+        let primaryNotification: HostSnapshotNotification | null = null;
+        let autonomousReactionNotifications: readonly HostSnapshotNotification[] = [];
+        try {
+          if (result.kind === 'applied') {
+            primaryNotification = this.#captureNotification(
+              transactionRequestId === null ? 'autonomous' : 'mutation',
+              transactionRequestId === null
+                ? undefined
+                : {
+                    kind: 'offered_action',
+                    requestId: transactionRequestId,
+                    revision: result.state.revision,
+                  },
+            );
+          }
+          if (this.#coordinator.state().pendingDecisions.some((decision) => decision.kind === 'reaction_offer')) {
+            autonomousReactionNotifications = await this.#autoResolveUnattendedReactionOffers();
+          }
+        } catch (error: unknown) {
+          const phase = result.kind === 'applied' ||
+            error instanceof CoordinatorPostApplicationError ||
+            error instanceof HostPostApplicationError ||
+            autonomousReactionNotifications.length > 0
+            ? 'post_apply'
+            : 'pre_apply';
+          if (result.kind === 'refused' && transactionRequestId !== null) {
+            this.#settleTransaction(transactionRequestId, {
+              kind: 'refused', reason: result.reason,
+            });
+          }
+          const handled = this.#handlePumpFailure(error, phase, transactionRequestId);
+          if (handled) return;
+          throw error;
+        }
+        if (this.#closed) return;
+        if (result.kind === 'applied' && transactionRequestId !== null) {
+          this.#settleTransaction(transactionRequestId, {
+            kind: 'committed',
+            revision: result.state.revision,
+          });
+        }
+        if (primaryNotification !== null) this.#deliverNotification(primaryNotification);
+        if (this.#closed) return;
+        for (const notification of autonomousReactionNotifications) {
+          this.#deliverNotification(notification);
+          if (this.#closed) return;
+        }
+        if (result.kind === 'applied') {
+          this.#boundaryRefusal = null;
+          continue;
+        }
         if (
-          autoResolvedReactions > 0 &&
+          autonomousReactionNotifications.length > 0 &&
           result.kind === 'refused' &&
           result.pendingDecisionCode === 'turn_boundary_blocked'
         ) {
           this.#boundaryRefusal = null;
+          if (transactionRequestId !== null) {
+            this.#settleTransaction(transactionRequestId, {
+              kind: 'refused', reason: result.reason,
+            });
+          }
           continue;
         }
         if (result.kind === 'refused') {
           this.#boundaryRefusal = result.pendingDecisionCode === 'turn_boundary_blocked'
             ? { code: result.pendingDecisionCode, message: result.reason }
             : null;
-          if (result.actionRefusal !== undefined) this.#routeActionRefusal(result.actionRefusal);
-          this.#publish();
+          let automaticConsequenceApplied = false;
+          try {
+            const notificationKind = result.actionRefusal === undefined
+              ? 'status'
+              : this.#routeActionRefusal(result.actionRefusal);
+            if (notificationKind === 'autonomous') {
+              automaticConsequenceApplied = true;
+              await this.#store.flush();
+              if (this.#closed) return;
+            }
+            this.#publish(notificationKind);
+          } catch (error: unknown) {
+            if (transactionRequestId !== null) {
+              this.#settleTransaction(transactionRequestId, result.reason === 'Coordinator is paused.'
+                ? { kind: 'cancelled', reason: result.reason }
+                : { kind: 'refused', reason: result.reason });
+            }
+            const phase = error instanceof CoordinatorPostApplicationError ||
+              error instanceof HostPostApplicationError ||
+              automaticConsequenceApplied
+              ? 'post_apply'
+              : 'pre_apply';
+            const handled = this.#handlePumpFailure(error, phase, null);
+            if (transactionRequestId !== null || handled) return;
+            throw error;
+          }
+          if (transactionRequestId !== null) {
+            this.#settleTransaction(transactionRequestId, result.reason === 'Coordinator is paused.'
+              ? { kind: 'cancelled', reason: result.reason }
+              : { kind: 'refused', reason: result.reason });
+          }
+          this.#settleFreshOfferWaiters({ kind: 'refused', reason: result.reason });
           return;
         }
         this.#boundaryRefusal = null;
@@ -585,6 +935,7 @@ export class DmEncounterHost {
       if (
         repump &&
         !this.#closed &&
+        !this.#repumpBlocked &&
         this.#coordinator.pauseState() === null
       ) {
         void this.#pumpCoordinator();
@@ -593,8 +944,92 @@ export class DmEncounterHost {
     return this.#pump;
   }
 
-  #autoResolveUnattendedReactionOffers(): number {
-    let resolved = 0;
+  async #closeAfterInitialOfferFailure(step: Promise<CoordinatorStep>): Promise<void> {
+    try {
+      this.#coordinator.interrupt();
+    } catch {
+      // Controller cleanup is unconditional even when its journal writes fail.
+    }
+    this.#closed = true;
+    this.#repumpRequested = false;
+    try {
+      await step;
+    } catch {
+      // The host is closing; the cancelled offer cannot be resumed.
+    }
+    this.#publish('recovery');
+    this.#settleAllTransactions({ kind: 'closed' });
+    this.#settleFreshOfferWaiters({ kind: 'closed' });
+  }
+
+  #handlePumpFailure(
+    error: unknown,
+    phase: 'pre_apply' | 'post_apply',
+    transactionRequestId: string | null,
+  ): boolean {
+    const handled = transactionRequestId !== null || this.#freshOfferWaiters.size > 0;
+    if (transactionRequestId !== null) {
+      this.#settleTransaction(transactionRequestId, {
+        kind: 'failed',
+        phase,
+        error,
+        currentRevision: this.#coordinator.state().revision,
+      });
+    }
+    this.#settleFreshOfferWaiters({ kind: 'failed', error });
+    if (phase === 'post_apply') {
+      this.#degradeAfterApplicationFailure();
+    } else if (!this.#closed && this.#coordinator.pauseState() === null) {
+      this.#repumpRequested = true;
+    }
+    return handled;
+  }
+
+  #degradeAfterApplicationFailure(): void {
+    this.#closed = true;
+    this.#repumpBlocked = false;
+    this.#publish('recovery');
+    this.#settleAllTransactions({ kind: 'closed' });
+    this.#settleFreshOfferWaiters({ kind: 'closed' });
+  }
+
+  #settleTransaction(requestId: string, outcome: HostCoordinatorTransactionOutcome): void {
+    const waiter = this.#transactionWaiters.get(requestId);
+    if (waiter === undefined) return;
+    this.#transactionWaiters.delete(requestId);
+    if (this.#activeTransactionRequestId === requestId) this.#activeTransactionRequestId = null;
+    waiter.resolve(outcome);
+  }
+
+  #settleAllTransactions(outcome: HostCoordinatorTransactionOutcome): void {
+    for (const requestId of [...this.#transactionWaiters.keys()]) {
+      this.#settleTransaction(requestId, outcome);
+    }
+  }
+
+  #settleFreshOffers(snapshot: DmEncounterHostSnapshot): void {
+    const pending = snapshot.dm.pendingRequest;
+    if (pending === null) return;
+    for (const waiter of [...this.#freshOfferWaiters]) {
+      if (
+        pending.requestId !== waiter.previousRequestId &&
+        pending.encounterRevision >= waiter.minimumRevision
+      ) {
+        this.#freshOfferWaiters.delete(waiter);
+        waiter.resolve({ kind: 'fresh' });
+      }
+    }
+  }
+
+  #settleFreshOfferWaiters(outcome: FreshOfferOutcome): void {
+    for (const waiter of [...this.#freshOfferWaiters]) {
+      this.#freshOfferWaiters.delete(waiter);
+      waiter.resolve(outcome);
+    }
+  }
+
+  async #autoResolveUnattendedReactionOffers(): Promise<readonly HostSnapshotNotification[]> {
+    const notifications: HostSnapshotNotification[] = [];
     for (;;) {
       const state = this.#coordinator.state();
       let selected:
@@ -625,7 +1060,7 @@ export class DmEncounterHost {
           break;
         }
       }
-      if (selected === undefined) return resolved;
+      if (selected === undefined) return notifications;
       const result = this.#coordinator.resolvePendingDecision({
         type: 'resolve_pending_decision',
         decisionId: selected.resolution.decisionId,
@@ -634,25 +1069,28 @@ export class DmEncounterHost {
       if (result.kind === 'refused') {
         throw new Error(`Unattended Reaction resolution was refused: ${result.reason}`);
       }
-      this.#journal.recordHostTransition(selected.kind === 'guidance'
-        ? { kind: 'reaction_guidance_auto_resolved', ...selected.resolution }
-        : { kind: 'unattended_reaction_auto_resolved', ...selected.resolution });
-      resolved += 1;
+      try {
+        this.#journal.recordHostTransition(selected.kind === 'guidance'
+          ? { kind: 'reaction_guidance_auto_resolved', ...selected.resolution }
+          : { kind: 'unattended_reaction_auto_resolved', ...selected.resolution });
+        await this.#store.flush();
+        if (this.#closed) return notifications;
+        notifications.push(this.#captureNotification('autonomous'));
+      } catch (error: unknown) {
+        if (error instanceof HostPostApplicationError) throw error;
+        throw new HostPostApplicationError(error);
+      }
     }
   }
 
-  #flushStore(): Promise<void> | null {
-    return hasDurableFlush(this.#store) ? this.#store.flush() : null;
-  }
-
-  #routeActionRefusal(refusal: NonBoundaryActionRefusal): void {
+  #routeActionRefusal(refusal: NonBoundaryActionRefusal): 'status' | 'autonomous' {
     const settings = this.#journal.partyState()?.refusalHandling
       ?? DEFAULT_REFUSAL_HANDLING_SETTINGS;
     const route = routeActionRefusal(settings, refusal);
     this.#actionRefusal = null;
     if (route.kind === 'hard_refusal') {
       this.#actionRefusal = structuredClone(refusal);
-      return;
+      return 'status';
     }
     this.#coordinator.settleActionRefusal();
     if (route.kind === 'fiat_prompt') {
@@ -668,7 +1106,7 @@ export class DmEncounterHost {
         options: [{ id: 'rule_manually', label: 'Rule manually' }],
         refusal: structuredClone(refusal),
       });
-      return;
+      return 'status';
     }
     this.#coordinator.adjudicate({
       type: 'adjudicate',
@@ -677,6 +1115,7 @@ export class DmEncounterHost {
       reasoning: `${route.documentation} Refusal: ${refusal.reason} (${refusal.citation}).`,
       consequence: route.outcome,
     });
+    return 'autonomous';
   }
 
   resolveRefusalPrompt(
@@ -767,6 +1206,246 @@ export class DmEncounterHost {
     human.submit(decision);
   }
 
+  submitHumanDecisionTransaction(
+    actor: CombatantId,
+    decision: Parameters<HumanController['submit']>[0],
+  ): Promise<HostCoordinatorTransactionOutcome> {
+    if (this.#closed) return Promise.resolve({ kind: 'closed' });
+    const pending = this.#coordinator.coordinatorState().pendingRequest;
+    if (
+      pending === null ||
+      pending.actorId !== actor ||
+      pending.requestId !== decision.requestId ||
+      pending.encounterRevision !== decision.encounterRevision
+    ) {
+      return Promise.resolve({ kind: 'refused', reason: 'The offered controller request is stale.' });
+    }
+    if (this.#activeTransactionRequestId !== null || this.#transactionWaiters.has(decision.requestId)) {
+      return Promise.resolve({ kind: 'refused', reason: 'The offered controller request is already settling.' });
+    }
+    return new Promise((resolve, reject) => {
+      this.#transactionWaiters.set(decision.requestId, { resolve });
+      this.#activeTransactionRequestId = decision.requestId;
+      try {
+        this.submitHumanDecision(actor, decision);
+      } catch (error: unknown) {
+        this.#transactionWaiters.delete(decision.requestId);
+        this.#activeTransactionRequestId = null;
+        reject(error);
+      }
+    });
+  }
+
+  submitOfferedActionTransaction(
+    actor: CombatantId,
+    requestId: string,
+    encounterRevision: number,
+    selectedOfferedActionId: string,
+  ): Promise<HostCoordinatorTransactionOutcome> {
+    const pending = this.#coordinator.coordinatorState().pendingRequest;
+    if (
+      pending === null ||
+      pending.actorId !== actor ||
+      pending.requestId !== requestId ||
+      pending.encounterRevision !== encounterRevision
+    ) {
+      return Promise.resolve({ kind: 'refused', reason: 'The offered controller request is stale.' });
+    }
+    const index = pending.legalActions.actions.findIndex(
+      (_action, actionIndex) => offeredActionId(pending.requestId, actionIndex) === selectedOfferedActionId,
+    );
+    const action = pending.legalActions.actions[index];
+    if (index < 0 || action === undefined) {
+      return Promise.resolve({ kind: 'refused', reason: 'The selected offered action id is unknown.' });
+    }
+    return this.submitHumanDecisionTransaction(actor, {
+      requestId,
+      encounterRevision,
+      action,
+    });
+  }
+
+  async setDoorOpen(doorId: string, open: boolean): Promise<HostDoorSetOutcome> {
+    if (this.#closed) return { kind: 'closed' };
+    const initialState = this.#coordinator.state();
+    const initialRevision = initialState.revision;
+    const activeCombatant = initialState.activeCombatant;
+    if (activeCombatant === null) {
+      return { kind: 'unsupported', reason: 'Door changes require an active combatant.' };
+    }
+    const door = initialState.worldObjects.find((object) => String(object.id) === doorId);
+    if (door === undefined || door.kind !== 'door') {
+      return { kind: 'unsupported', reason: 'The requested world object is not a door.' };
+    }
+    const canonicalState = canonicalDoorState(door.blocking);
+    if (canonicalState === null) {
+      return { kind: 'unsupported', reason: 'The door has a noncanonical blocking state.' };
+    }
+    if (canonicalState === open) {
+      try {
+        await this.#store.flush();
+        if (this.#closed) return { kind: 'closed' };
+        return { kind: 'committed', revision: initialRevision, changed: false };
+      } catch (error: unknown) {
+        if (this.#closed) return { kind: 'closed' };
+        return {
+          kind: 'failed', phase: 'pre_apply', error,
+          currentRevision: this.#coordinator.state().revision,
+        };
+      }
+    }
+
+    const previousRequestId = this.#coordinator.coordinatorState().pendingRequest?.requestId ?? null;
+    this.#repumpBlocked = true;
+    const pendingPump = this.#pump;
+    void pendingPump?.catch(() => undefined);
+    let previousPause: ReturnType<TurnCoordinator['pauseState']>;
+    try {
+      previousPause = this.#coordinator.pauseForExternalMutation();
+    } catch (error: unknown) {
+      if (error instanceof CoordinatorExternalPauseError && error.pendingStepCancelled) {
+        try {
+          await pendingPump;
+        } catch {
+          // The typed failure confirms that the pending controller step was cancelled.
+        }
+      }
+      this.#repumpBlocked = false;
+      if (this.#closed) return { kind: 'closed' };
+      if (this.#coordinator.pauseState() === null) void this.#pumpCoordinator();
+      return {
+        kind: 'failed', phase: 'pre_apply', error,
+        currentRevision: this.#coordinator.state().revision,
+      };
+    }
+    try {
+      await pendingPump;
+    } catch (error: unknown) {
+      this.#repumpBlocked = false;
+      if (this.#closed) return { kind: 'closed' };
+      return {
+        kind: 'failed', phase: 'pre_apply', error,
+        currentRevision: this.#coordinator.state().revision,
+      };
+    }
+    if (this.#closed) {
+      this.#repumpBlocked = false;
+      return { kind: 'closed' };
+    }
+    const currentState = this.#coordinator.state();
+    const currentDoor = currentState.worldObjects.find((object) => String(object.id) === doorId);
+    if (
+      currentState.revision !== initialRevision ||
+      currentState.activeCombatant !== activeCombatant ||
+      currentDoor === undefined ||
+      currentDoor.kind !== 'door' ||
+      canonicalDoorState(currentDoor.blocking) !== canonicalState
+    ) {
+      this.#repumpBlocked = false;
+      if (previousPause === null && !this.#closed) this.#coordinator.resume();
+      return { kind: 'unsupported', reason: 'The door offer became stale before apply.' };
+    }
+
+    let result: CoordinatorStep;
+    try {
+      result = this.#coordinator.applyExternalWorldOperation({
+        type: 'world_operation',
+        actor: activeCombatant,
+        cost: 'none',
+        operation: {
+          kind: 'modify_object',
+          objectId: currentDoor.id,
+          changes: { blocking: doorBlockingFor(open) },
+        },
+      });
+    } catch (error: unknown) {
+      this.#repumpBlocked = false;
+      const phase = error instanceof CoordinatorPostApplicationError ? 'post_apply' : 'pre_apply';
+      if (phase === 'post_apply') {
+        this.#degradeAfterApplicationFailure();
+      } else if (previousPause === null && !this.#closed) {
+        this.#coordinator.resume();
+      }
+      return {
+        kind: 'failed', phase, error,
+        currentRevision: this.#coordinator.state().revision,
+      };
+    }
+    if (result.kind !== 'applied') {
+      this.#repumpBlocked = false;
+      if (previousPause === null) this.#coordinator.resume();
+      return { kind: 'unsupported', reason: result.reason };
+    }
+    try {
+      await this.#store.flush();
+    } catch (error: unknown) {
+      if (this.#closed) {
+        this.#repumpBlocked = false;
+        return { kind: 'closed' };
+      }
+      this.#degradeAfterApplicationFailure();
+      return {
+        kind: 'failed', phase: 'post_apply', error,
+        currentRevision: this.#coordinator.state().revision,
+      };
+    }
+    if (this.#closed) {
+      this.#repumpBlocked = false;
+      return { kind: 'closed' };
+    }
+    const doorNotification = this.#captureNotification('mutation', {
+      kind: 'door',
+      revision: result.state.revision,
+    });
+    if (previousPause === null) {
+      const freshOffer = this.#waitForFreshOffer(previousRequestId, result.state.revision);
+      try {
+        this.#coordinator.resume();
+      } catch (error: unknown) {
+        this.#repumpBlocked = false;
+        this.#degradeAfterApplicationFailure();
+        return {
+          kind: 'failed', phase: 'post_apply', error,
+          currentRevision: this.#coordinator.state().revision,
+        };
+      }
+      if (this.#closed) {
+        this.#repumpBlocked = false;
+        return { kind: 'closed' };
+      }
+      this.#repumpBlocked = false;
+      void this.#pumpCoordinator();
+      const freshOutcome = await freshOffer;
+      if (freshOutcome.kind === 'closed' || this.#closed) return { kind: 'closed' };
+      if (freshOutcome.kind !== 'fresh') {
+        const error = freshOutcome.kind === 'failed'
+          ? freshOutcome.error
+          : new Error(freshOutcome.reason);
+        this.#degradeAfterApplicationFailure();
+        return {
+          kind: 'failed', phase: 'post_apply', error,
+          currentRevision: this.#coordinator.state().revision,
+        };
+      }
+    } else {
+      this.#repumpBlocked = false;
+    }
+    if (this.#closed) return { kind: 'closed' };
+    this.#deliverNotification(doorNotification);
+    return { kind: 'committed', revision: result.state.revision, changed: true };
+  }
+
+  #waitForFreshOffer(previousRequestId: string | null, revision: number): Promise<FreshOfferOutcome> {
+    if (this.#closed) return Promise.resolve({ kind: 'closed' });
+    const current = this.#coordinator.coordinatorState().pendingRequest;
+    if (current !== null && current.requestId !== previousRequestId && current.encounterRevision >= revision) {
+      return Promise.resolve({ kind: 'fresh' });
+    }
+    return new Promise((resolve) => {
+      this.#freshOfferWaiters.add({ previousRequestId, minimumRevision: revision, resolve });
+    });
+  }
+
   async resolvePendingDecision(
     decisionId: string,
     optionId: string,
@@ -854,6 +1533,12 @@ export class DmEncounterHost {
     this.#publish();
   }
 
+  adjudicateTransaction(
+    command: Extract<EncounterCommand, { readonly type: 'adjudicate' }>,
+  ): Promise<HostCoordinatorTransactionOutcome> {
+    return this.#enqueueTopDownMutation(() => this.#coordinator.adjudicate(command));
+  }
+
   resolvePendingPlacement(
     command: Extract<EncounterCommand, { readonly type: 'resolve_pending_placement' }>,
   ): ReturnType<TurnCoordinator['resolvePendingPlacement']> {
@@ -867,9 +1552,136 @@ export class DmEncounterHost {
     return result;
   }
 
+  resolvePendingPlacementTransaction(
+    command: Extract<EncounterCommand, { readonly type: 'resolve_pending_placement' }>,
+  ): Promise<HostCoordinatorTransactionOutcome> {
+    return this.#enqueueTopDownMutation(
+      () => {
+        const result = this.#coordinator.resolvePendingPlacement(command);
+        this.#actionRefusal = null;
+        this.#boundaryRefusal = null;
+        return result;
+      },
+      () => {
+        if (this.#coordinator.state().phase.kind !== 'awaiting_placement') {
+          void this.#pumpCoordinator();
+        }
+      },
+    );
+  }
+
   dmUseWorldObject(command: Extract<EncounterCommand, { readonly type: 'dm_use_world_object' }>): void {
     this.#coordinator.dmUseWorldObject(command);
     this.#publish();
+  }
+
+  dmUseWorldObjectTransaction(
+    command: Extract<EncounterCommand, { readonly type: 'dm_use_world_object' }>,
+  ): Promise<HostCoordinatorTransactionOutcome> {
+    return this.#enqueueTopDownMutation(() => this.#coordinator.dmUseWorldObject(command));
+  }
+
+  #enqueueTopDownMutation(
+    apply: () => CoordinatorStep,
+    afterCommit?: () => void,
+  ): Promise<HostCoordinatorTransactionOutcome> {
+    let resolveOutcome: ((outcome: HostCoordinatorTransactionOutcome) => void) | undefined;
+    const outcome = new Promise<HostCoordinatorTransactionOutcome>((resolve) => {
+      resolveOutcome = resolve;
+    });
+    if (resolveOutcome === undefined) throw new Error('Top-down transaction waiter was not initialized.');
+    const waiter: HostTopDownTransactionWaiter = { settled: false, resolve: resolveOutcome };
+    this.#topDownTransactionWaiters.add(waiter);
+    const run = this.#topDownMutationTail.then(async () => {
+      if (waiter.settled || this.#closed) {
+        this.#settleTopDownTransaction(waiter, { kind: 'closed' });
+        return;
+      }
+      const terminal = await this.#settleTopDownMutation(apply, afterCommit);
+      this.#settleTopDownTransaction(waiter, terminal);
+    });
+    this.#topDownMutationTail = run.catch(() => undefined);
+    return outcome;
+  }
+
+  #settleTopDownTransaction(
+    waiter: HostTopDownTransactionWaiter,
+    outcome: HostCoordinatorTransactionOutcome,
+  ): void {
+    if (waiter.settled) return;
+    waiter.settled = true;
+    this.#topDownTransactionWaiters.delete(waiter);
+    waiter.resolve(outcome);
+  }
+
+  #settleAllTopDownTransactions(outcome: HostCoordinatorTransactionOutcome): void {
+    for (const waiter of [...this.#topDownTransactionWaiters]) {
+      this.#settleTopDownTransaction(waiter, outcome);
+    }
+  }
+
+  async #settleTopDownMutation(
+    apply: () => CoordinatorStep,
+    afterCommit?: () => void,
+  ): Promise<HostCoordinatorTransactionOutcome> {
+    if (this.#closed) return { kind: 'closed' };
+    const initialRevision = this.#coordinator.state().revision;
+    let result: CoordinatorStep;
+    try {
+      result = apply();
+    } catch (error: unknown) {
+      const currentRevision = this.#coordinator.state().revision;
+      const phase = error instanceof CoordinatorPostApplicationError ||
+        error instanceof HostPostApplicationError ||
+        currentRevision !== initialRevision
+        ? 'post_apply'
+        : 'pre_apply';
+      if (phase === 'post_apply' && !this.#closed) this.#degradeAfterApplicationFailure();
+      return { kind: 'failed', phase, error, currentRevision };
+    }
+    if (result.kind === 'refused') return { kind: 'refused', reason: result.reason };
+    let mutationNotification: HostSnapshotNotification;
+    try {
+      mutationNotification = this.#captureNotification('mutation');
+    } catch (error: unknown) {
+      if (!this.#closed) this.#degradeAfterApplicationFailure();
+      return {
+        kind: 'failed',
+        phase: 'post_apply',
+        error,
+        currentRevision: this.#coordinator.state().revision,
+      };
+    }
+    try {
+      await this.#store.flush();
+    } catch (error: unknown) {
+      if (this.#closed) return { kind: 'closed' };
+      this.#degradeAfterApplicationFailure();
+      return {
+        kind: 'failed',
+        phase: 'post_apply',
+        error,
+        currentRevision: this.#coordinator.state().revision,
+      };
+    }
+    if (this.#closed) return { kind: 'closed' };
+    const committed = {
+      kind: 'committed' as const,
+      revision: result.state.revision,
+    };
+    try {
+      this.#deliverNotification(mutationNotification);
+      afterCommit?.();
+    } catch (error: unknown) {
+      if (!this.#closed) this.#degradeAfterApplicationFailure();
+      return {
+        kind: 'failed',
+        phase: 'post_apply',
+        error,
+        currentRevision: this.#coordinator.state().revision,
+      };
+    }
+    return committed;
   }
 
   async undoLast(): Promise<void> {
@@ -1126,10 +1938,24 @@ export class DmEncounterHost {
   }
 
   close(): void {
-    if (this.#closed) return;
-    this.#coordinator.interrupt();
+    let interruptionFailed = false;
+    let interruptionError: unknown;
+    if (!this.#closed) {
+      try {
+        this.#coordinator.interrupt();
+      } catch (error: unknown) {
+        interruptionFailed = true;
+        interruptionError = error;
+      }
+    }
     this.#closed = true;
-    this.#publish();
+    this.#repumpBlocked = false;
+    this.#settleAllTopDownTransactions({ kind: 'closed' });
+    this.#publish('status');
+    this.#settleAllTransactions({ kind: 'closed' });
+    this.#settleFreshOfferWaiters({ kind: 'closed' });
     this.#listeners.clear();
+    this.#notificationListeners.clear();
+    if (interruptionFailed) throw interruptionError;
   }
 }

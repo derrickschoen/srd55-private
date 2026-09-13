@@ -77,6 +77,23 @@ function journalFixture(key: string, state = pacedState()) {
   return { store, sessionId, journal };
 }
 
+class SameLengthHistoryStore extends MemoryBrowserSessionStore {
+  #replacementBranch: ReturnType<typeof encounterBranchId> | null = null;
+
+  replaceFirstBranch(branchId: ReturnType<typeof encounterBranchId>): void {
+    this.#replacementBranch = branchId;
+  }
+
+  override revisions(sessionId: ReturnType<typeof encounterSessionId>) {
+    const revisions = super.revisions(sessionId);
+    const replacementBranch = this.#replacementBranch;
+    if (replacementBranch === null) return revisions;
+    return revisions.map((revision, index) => index === 0
+      ? { ...revision, branchId: replacementBranch }
+      : revision);
+  }
+}
+
 function humanIdentities(state: EncounterState): readonly ControllerIdentity[] {
   return state.combatants.map((subject): ControllerIdentity => ({
     combatantId: subject.profile.id,
@@ -323,9 +340,21 @@ describe('D377.3 session timeline and pacing controls', () => {
     }
     await waitForHostSnapshot(host, (snapshot) => snapshot.dm.timeline.round === 3);
     const revisionsBeforeRewind = store.revisions(host.sessionId).length;
+    const beforeRewind = host.snapshot();
     await host.rewindToRound(2);
     await waitForHostSnapshot(host, (snapshot) =>
       snapshot.dm.timeline.round === 2 && snapshot.dm.pendingRequest !== null);
+    const afterRewind = host.snapshot();
+    expect(Object.isFrozen(afterRewind.dm.history)).toBe(true);
+    expect(afterRewind.dm.history.every(Object.isFrozen)).toBe(true);
+    expect(beforeRewind.dm.history.every((entry) => !entry.void)).toBe(true);
+    const headMove = [...afterRewind.dm.history].reverse().find(
+      (entry) => entry.transition.kind === 'head_moved',
+    )?.transition;
+    if (headMove?.kind !== 'head_moved') throw new Error('Rewind snapshot has no head move.');
+    expect(afterRewind.dm.history.some((entry) =>
+      entry.revision > headMove.targetRevision &&
+      entry.revision <= revisionsBeforeRewind && entry.void)).toBe(true);
     for (let turn = 0; turn < state.initiative.length; turn += 1) {
       await endCurrentHumanTurn(host);
     }
@@ -341,6 +370,21 @@ describe('D377.3 session timeline and pacing controls', () => {
       revision.transition.command.type === 'end_turn',
     )).toHaveLength(state.initiative.length);
 
+    host.close();
+  });
+
+  it('equal_length_history_replaced: projects changed content instead of a same-length cached history', () => {
+    const store = new SameLengthHistoryStore();
+    const host = new DmEncounterHost('session:equal-length-history', store);
+    const beforeReplacement = host.snapshot();
+    const replacementBranch = encounterBranchId('branch:equal-length-replacement');
+
+    store.replaceFirstBranch(replacementBranch);
+    const afterReplacement = host.snapshot();
+
+    expect(afterReplacement.dm.history).toHaveLength(beforeReplacement.dm.history.length);
+    expect(beforeReplacement.dm.history[0]?.branchId).not.toBe(replacementBranch);
+    expect(afterReplacement.dm.history[0]?.branchId).toBe(replacementBranch);
     host.close();
   });
 
