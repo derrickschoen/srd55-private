@@ -22442,3 +22442,11 @@ The 3B work was committed as 6bd0e757 (ten consumer test files, 176+/20−, no p
 ## D618.1 — the handoff failures are proven to be the branch's, not main's (2026-09-11 22:55, supervisor)
 
 Control run of all SEVEN failing spec files on main at load 1.17, serial: 7 files, 109 tests, all pass, exit 0. The same seven fail on claude/vtt-handoff, where every one of those files is byte-identical to main. This closes the question the triage left implicit: main is healthy and the branch's own source changes are the cause.
+
+## D619 — 2026-09-13 13:53:15 — Token backing: revisit after fog lands
+
+Owner ruling: the baked 2-px outline and flat-bottom silhouette on the Quietstone tokens are not addressed now. Ship the fog fix and the Q9 re-run (D616) first, then judge the tokens against legible fog. No art request is opened. The item stays in the Quietstone ledger as deferred, not closed.
+
+## D620 — VTT HANDOFF LANDED on main (2026-09-13 16:51:54, owner ruling "Merge now, residual in ledger")
+
+claude/vtt-handoff (c3223d15, nine repair families under D618) merged into main at 45f0bc33 with --no-ff. Landing gate on c3223d15, read by the supervisor: tsc 0, ast-grep 0, vitest-gate 0 failed (5 load flakes passed serially; load 8+ was the supervisor's own serve.mjs builds), Playwright initial 185 passed / 2 unexpected, serial retry 2/2 (187 total, equal to main's count), runner verdict failed = none. Main-shape check 0 non-.claude files at merge time. The two Playwright first failures (homebrew-consumer-cutover, homebrew-subclass-authoring) happened at load ~2, so the runner's "load flake" label is not a proven cause; the owner chose to merge on the gate rule and carry them as a residual (ledger). The gate ran twice today because a host reboot killed the 02:09 run mid-Playwright and wiped ~/.cache/ms-playwright; Chromium was reinstalled and only the browser phase rerun on the same SHA. Next per D618: the handoff report (READY, conditional on the owner's Windows probe from the owner checkout) with residuals from the ledger.
