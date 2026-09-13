@@ -1,3 +1,5 @@
 # APP-ANALYSIS-01 loop log
 
 - 2026-09-13 16:57:13 — unit opened under D621. Astra r1 dispatched read-only on main 45f0bc33 (brief .tmp/runs/analysis/analysis-astra-r1.md; log fanout/analysis-astra-r1.log). Supervisor independent pass starts in parallel; findings recorded in supervisor-pass-r1.md before reading astra's output.
+- 2026-09-13 17:22:37 — astra r1 harvested (astra-r1.md, 11 findings, 362k tokens). Supervisor verified: A-F1, A-F2, A-F3, A-F4 (by execution), A-F7 (partial), A-F8, A-F9, A-F11 CONFIRMED; A-F5/A-F6 plausible, not probed; A-F10 consistent with today's duration table. Critique written (supervisor-critique-r1.md). Round 2 dispatched to astra: critique the supervisor's pass by measurement, answer contests, produce the merged ranked list and execution waves.
+- 2026-09-13 17:36:48 — astra r2 harvested (astra-r2.md, 14 merged findings, six waves). Supervisor re-verified the refutations of its own pass (runtime SCCs 4/18 files; error-code census; D583 path keying; resolver fix unmerged) and ACCEPTS them. Consensus at round 2. joint-report.md written; D621.1 recorded. Waiting on the owner for wave 1.
