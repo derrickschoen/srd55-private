@@ -226,6 +226,7 @@ function runCache(fixture: Fixture, extra: NodeJS.ProcessEnv = {}): CacheRun {
       ...extra,
     },
   });
+  if (result.error !== undefined) throw new Error(result.error.message);
   return {
     status: result.status,
     stdout: result.stdout,
@@ -248,6 +249,7 @@ function runPublicBuild(fixture: Fixture, extra: NodeJS.ProcessEnv = {}): CacheR
   const command = existsSync(npmCliCandidate) ? process.execPath : 'npm';
   const args = existsSync(npmCliCandidate) ? [npmCliCandidate, 'run', 'build'] : ['run', 'build'];
   const result = spawnSync(command, args, { cwd: fixture.root, encoding: 'utf8', env });
+  if (result.error !== undefined) throw new Error(result.error.message);
   return { status: result.status, stdout: result.stdout, stderr: result.stderr };
 }
 
@@ -260,6 +262,10 @@ function withGitMutation(fixture: Fixture, mutation: string): CacheVerdict {
     'const args = process.argv.slice(2);',
     "const input = readFileSync(0);",
     `const result = spawnSync(${JSON.stringify(realGit)}, args, { input, cwd: process.cwd() });`,
+    'if (result.error !== undefined) {',
+    '  process.stderr.write(`${result.error.message}\\n`);',
+    '  process.exit(1);',
+    '}',
     'let output = Buffer.from(result.stdout);',
     "const selected = process.env.M2_FAKE_GIT;",
     "if (selected === 'index-mode' && args[0] === 'ls-files' && args.includes('-s')) {",
