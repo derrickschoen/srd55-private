@@ -1,7 +1,7 @@
 import {
   mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync,
 } from '../../helpers/test-filesystem';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import type { LegalActionSummary } from '../../../src/combat/controllers';
 import type { EncounterState } from '../../../src/combat/encounter';
 import type { CombatantId } from '../../../src/combat/values';
@@ -51,8 +51,21 @@ interface RepositoryFixture {
   readonly policy: RepositoryIdentityPolicy;
 }
 
+const TEMP_ROOTS = new Set<string>();
+
+function temporaryRoot(prefix: string): string {
+  const path = mkdtempSync(join(tmpdir(), prefix));
+  TEMP_ROOTS.add(path);
+  return path;
+}
+
+afterEach(() => {
+  for (const path of TEMP_ROOTS) rmSync(path, { recursive: true, force: true });
+  TEMP_ROOTS.clear();
+});
+
 function repository(): RepositoryFixture {
-  const root = mkdtempSync(join(tmpdir(), 'vtt-handoff-examples-repository-'));
+  const root = temporaryRoot('vtt-handoff-examples-repository-');
   mkdirSync(join(root, '.git'));
   writeFileSync(join(root, 'package.json'), '{"name":"srd-55"}\n');
   for (const path of PUBLICATION_INPUT_PATHS) {
@@ -443,7 +456,12 @@ describe('real executable VTT handoff examples', () => {
 
   it('publishes the append-only examples entry after core and seals examples READY last', () => {
     const repositoryFixture = repository();
-    const handoffRoot = mkdtempSync(join(tmpdir(), 'vtt-handoff-examples-publish-'));
+    expect(repositoryFixture.policy).toEqual({
+      ownerCheckout: repositoryFixture.root,
+      authorizedWorktrees: [],
+    });
+    expect(repositoryFixture.root).not.toBe(process.cwd());
+    const handoffRoot = temporaryRoot('vtt-handoff-examples-publish-');
     publishFixtureCore(repositoryFixture, { handoffRoot });
     const coreBefore = fileBytes(handoffRoot, S2C_PATHS);
     const order: string[] = [];
@@ -483,7 +501,7 @@ describe('real executable VTT handoff examples', () => {
 
   it('keeps the complete tree and every core byte unchanged on missing examples checks', () => {
     const repositoryFixture = repository();
-    const handoffRoot = mkdtempSync(join(tmpdir(), 'vtt-handoff-examples-missing-'));
+    const handoffRoot = temporaryRoot('vtt-handoff-examples-missing-');
     publishFixtureCore(repositoryFixture, { handoffRoot });
     const coreBefore = fileBytes(handoffRoot, S2C_PATHS);
     const beforeCheck = completeTree(handoffRoot);
@@ -495,7 +513,7 @@ describe('real executable VTT handoff examples', () => {
 
   it('refuses normal examples publication when the immutable core is missing without creating anything', () => {
     const repositoryFixture = repository();
-    const handoffRoot = mkdtempSync(join(tmpdir(), 'vtt-handoff-examples-write-missing-core-'));
+    const handoffRoot = temporaryRoot('vtt-handoff-examples-write-missing-core-');
     const beforePublish = completeTree(handoffRoot);
     expect(() => publishFixtureExamples(repositoryFixture, { handoffRoot }))
       .toThrow('IMMUTABLE_BUNDLE_MISSING');
@@ -504,7 +522,7 @@ describe('real executable VTT handoff examples', () => {
 
   it('keeps the complete tree and every core byte unchanged on conflicting examples checks', () => {
     const repositoryFixture = repository();
-    const handoffRoot = mkdtempSync(join(tmpdir(), 'vtt-handoff-examples-conflict-'));
+    const handoffRoot = temporaryRoot('vtt-handoff-examples-conflict-');
     publishFixtureCore(repositoryFixture, { handoffRoot });
     publishFixtureExamples(repositoryFixture, { handoffRoot });
     const coreBefore = fileBytes(handoffRoot, S2C_PATHS);
@@ -522,7 +540,7 @@ describe('real executable VTT handoff examples', () => {
 
   it('proves complete-tree controls detect directory creation and payload writes', () => {
     const repositoryFixture = repository();
-    const handoffRoot = mkdtempSync(join(tmpdir(), 'vtt-handoff-examples-controls-'));
+    const handoffRoot = temporaryRoot('vtt-handoff-examples-controls-');
     publishFixtureCore(repositoryFixture, { handoffRoot });
     publishFixtureExamples(repositoryFixture, { handoffRoot });
     const baseline = completeTree(handoffRoot);

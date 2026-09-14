@@ -215,7 +215,7 @@ function reconcileGates(
     if (failedPrerequisite === undefined) return outcome;
     return {
       ...outcome,
-      state: 'failed',
+      state: outcome.state === 'not-run' ? 'not-run' : 'failed',
       reasons: [...outcome.reasons, `REQUIRED_GATE_PREREQUISITE_FAILED: ${failedPrerequisite}`],
     };
   });
@@ -281,6 +281,34 @@ export function buildHandoffReport(options: {
 
 function markdown(report: HandoffReport): Buffer {
   const evidence = report.evidence;
+  const gateLines = report.gateOutcomes.flatMap((outcome) => [
+    `- ${outcome.id}: ${outcome.state}; required=${String(outcome.required)}; ` +
+      `receipt=${outcome.receiptPath ?? 'none'}; invocation=${outcome.invocationId ?? 'none'}; ` +
+      `report=${outcome.reportPath ?? 'none'}`,
+    `  prerequisites=${outcome.prerequisites.join(',') || 'none'}; ` +
+      `phaseInvocationIds=${outcome.phaseInvocationIds.join(',') || 'none'}`,
+    `  files required/discovered/executed/failed/skipped=${String(outcome.requiredFiles.length)}/` +
+      `${String(outcome.discoveredFiles.length)}/${String(outcome.executedFiles.length)}/` +
+      `${String(outcome.failedFiles.length)}/${String(outcome.skippedFiles.length)}`,
+    `  requiredFiles=${outcome.requiredFiles.join(',') || 'none'}`,
+    `  discoveredFiles=${outcome.discoveredFiles.join(',') || 'none'}`,
+    `  executedFiles=${outcome.executedFiles.join(',') || 'none'}`,
+    `  failedFiles=${outcome.failedFiles.join(',') || 'none'}`,
+    `  skippedFiles=${outcome.skippedFiles.join(',') || 'none'}`,
+    `  tests required/executed/failed/skipped/approved=${String(outcome.requiredTestIdentities.length)}/` +
+      `${String(outcome.executedTestIdentities.length)}/${String(outcome.failedTestIdentities.length)}/` +
+      `${String(outcome.skippedTestIdentities.length)}/` +
+      `${String(outcome.approvedSkippedTestIdentities.length)}`,
+    `  requiredTests=${outcome.requiredTestIdentities.join(',') || 'none'}`,
+    `  executedTests=${outcome.executedTestIdentities.join(',') || 'none'}`,
+    `  failedTests=${outcome.failedTestIdentities.join(',') || 'none'}`,
+    `  skippedTests=${outcome.skippedTestIdentities.join(',') || 'none'}`,
+    `  approvedSkippedTests=${outcome.approvedSkippedTestIdentities.join(',') || 'none'}`,
+    `  passedOnRetry=${outcome.passedOnRetry.join(',') || 'none'}`,
+    `  phaseFailures=${JSON.stringify(outcome.phaseFailures)}`,
+    `  phaseAccounting=${JSON.stringify(outcome.phaseAccounting)}`,
+    `  reasons=${outcome.reasons.join('; ') || 'none'}`,
+  ]);
   const lines = [
     `# VTT handoff: ${report.readiness}`,
     '',
@@ -304,14 +332,7 @@ function markdown(report: HandoffReport): Buffer {
     '',
     '## Gate outcomes',
     '',
-    ...report.gateOutcomes.map((outcome) =>
-      `- ${outcome.id}: ${outcome.state}; required=${String(outcome.required)}; ` +
-      `receipt=${outcome.receiptPath ?? 'none'}; invocation=${outcome.invocationId ?? 'none'}; ` +
-      `report=${outcome.reportPath ?? 'none'}; required/discovered/executed/failed/skipped=` +
-      `${String(outcome.requiredFiles.length)}/${String(outcome.discoveredFiles.length)}/` +
-      `${String(outcome.executedFiles.length)}/${String(outcome.failedFiles.length)}/` +
-      `${String(outcome.skippedFiles.length)}; passedOnRetry=${outcome.passedOnRetry.join(',') || 'none'}; ` +
-      `reasons=${outcome.reasons.join('; ') || 'none'}`),
+    ...gateLines,
     '',
     '## Required gate inventory',
     '',

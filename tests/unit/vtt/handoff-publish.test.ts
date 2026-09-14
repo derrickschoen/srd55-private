@@ -1,11 +1,11 @@
 import {
-  existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, symlinkSync, writeFileSync,
+  existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync,
 } from '../../helpers/test-filesystem';
 import { dirname, join, relative } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import ts from 'typescript';
 import { publishCore } from '../../../tools/vtt-handoff/publish';
 import {
@@ -55,28 +55,54 @@ function publish(
   });
 }
 
-function inMemoryDefaultPolicyValidator(): typeof validateRepositoryRoot {
+function inMemoryDefaultPolicyValidator(removeGuard: boolean): typeof validateRepositoryRoot {
   const path = join(process.cwd(), 'tools/vtt-handoff/paths.ts');
   const source = readFileSync(path, 'utf8');
-  const selected = process.env.M3_DEFAULT_GUARD_MUTANT === '1'
+  const selected = removeGuard
     ? source.replace(
       "if (!allowed) throw new Error('UNAUTHORIZED_REPOSITORY_ROOT');",
       "if (false) throw new Error('UNAUTHORIZED_REPOSITORY_ROOT');",
     )
     : source;
+  if (removeGuard && selected === source) throw new Error('DEFAULT_GUARD_MUTANT_NOT_APPLIED');
   const compiled = ts.transpileModule(selected, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2023 },
   }).outputText;
   const module: { exports: unknown } = { exports: {} };
-  const require = createRequire(import.meta.url);
+  const realRequire = createRequire(import.meta.url);
+  const candidate = '/virtual/unlisted-worktree';
+  const owner = '/virtual/owner-checkout';
+  const sharedGitDirectory = '/virtual/shared.git';
+  const filesystem = {
+    existsSync: () => true,
+    lstatSync: (pathValue: string) => {
+      if (pathValue.endsWith('/.git')) {
+        return { isDirectory: () => true, isFile: () => false };
+      }
+      throw Object.assign(new Error(`ENOENT: ${pathValue}`), { code: 'ENOENT' });
+    },
+    readFileSync: (pathValue: string) => {
+      if (pathValue.endsWith('/package.json')) return '{"name":"srd-55"}\n';
+      throw Object.assign(new Error(`ENOENT: ${pathValue}`), { code: 'ENOENT' });
+    },
+    realpathSync: (pathValue: string) => {
+      if (pathValue === candidate) return candidate;
+      if (pathValue === DEFAULT_REPOSITORY_IDENTITY_POLICY.ownerCheckout) return owner;
+      if (pathValue.endsWith('/.git')) return sharedGitDirectory;
+      throw Object.assign(new Error(`ENOENT: ${pathValue}`), { code: 'ENOENT' });
+    },
+  };
+  const requireFunction = (specifier: string): unknown => specifier === 'node:fs'
+    ? filesystem
+    : realRequire(specifier);
   const evaluate = new Function('exports', 'require', 'module', '__filename', '__dirname', compiled) as (
     exports: unknown,
-    requireFunction: NodeJS.Require,
+    requireModule: (specifier: string) => unknown,
     commonJsModule: { exports: unknown },
     filename: string,
     directory: string,
   ) => void;
-  evaluate(module.exports, require, module, path, dirname(path));
+  evaluate(module.exports, requireFunction, module, path, dirname(path));
   const exported = module.exports;
   if (typeof exported !== 'object' || exported === null ||
     !('validateRepositoryRoot' in exported) || typeof exported.validateRepositoryRoot !== 'function') {
@@ -85,9 +111,18 @@ function inMemoryDefaultPolicyValidator(): typeof validateRepositoryRoot {
   return exported.validateRepositoryRoot as typeof validateRepositoryRoot;
 }
 
+const TEMP_ROOTS = new Set<string>();
+
 function root(): string {
-  return mkdtempSync(join(tmpdir(), 'vtt-handoff-publish-'));
+  const path = mkdtempSync(join(tmpdir(), 'vtt-handoff-publish-'));
+  TEMP_ROOTS.add(path);
+  return path;
 }
+
+afterEach(() => {
+  for (const path of TEMP_ROOTS) rmSync(path, { recursive: true, force: true });
+  TEMP_ROOTS.clear();
+});
 
 function tree(directory: string): readonly string[] {
   return readdirSync(directory, { recursive: true, encoding: 'utf8' }).sort();
@@ -145,6 +180,8 @@ function assertCheckMadeNoFilesystemMutation(
 describe('immutable VTT core publication', () => {
   it('kills M3-SPEC-POLICY-OMIT while publishing contracts and READY strictly last', () => {
     const fixture = repository();
+    expect(fixture.policy).toEqual({ ownerCheckout: fixture.root, authorizedWorktrees: [] });
+    expect(fixture.root).not.toBe(process.cwd());
     const handoffRoot = root();
     const order: string[] = [];
     const result = publish(fixture, {
@@ -291,9 +328,9 @@ describe('immutable VTT core publication', () => {
   });
 
   it('kills M3-DEFAULT-GUARD-REMOVE and M3-SPEC-POLICY-BROAD', () => {
-    const fixture = repository();
-    expect(() => inMemoryDefaultPolicyValidator()(fixture.root, DEFAULT_REPOSITORY_IDENTITY_POLICY))
+    const candidate = '/virtual/unlisted-worktree';
+    expect(() => inMemoryDefaultPolicyValidator(false)(candidate, DEFAULT_REPOSITORY_IDENTITY_POLICY))
       .toThrow('UNAUTHORIZED_REPOSITORY_ROOT');
-    expect(fixture.policy).toEqual({ ownerCheckout: fixture.root, authorizedWorktrees: [] });
+    expect(inMemoryDefaultPolicyValidator(true)(candidate, DEFAULT_REPOSITORY_IDENTITY_POLICY)).toBe(candidate);
   });
 });

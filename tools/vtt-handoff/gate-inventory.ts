@@ -4,12 +4,12 @@ import {
   closeSync,
   constants,
   existsSync,
-  lstatSync,
   mkdirSync,
   openSync,
   readFileSync,
   readdirSync,
   realpathSync,
+  statSync,
   writeSync,
 } from 'node:fs';
 import { delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
@@ -28,12 +28,14 @@ export type GateDiscovery =
   | {
     readonly kind: 'vitest';
     readonly configPath: string;
+    readonly rootDir: string;
     readonly selectors: readonly string[];
     readonly expectedFiles: 'from-config' | readonly string[];
   }
   | {
     readonly kind: 'playwright';
     readonly configPath: string;
+    readonly rootDir: string;
     readonly selectors: readonly string[];
     readonly expectedFiles: 'from-config' | readonly string[];
     readonly expectedTestCount?: number;
@@ -157,6 +159,7 @@ export const REQUIRED_HANDOFF_GATES = [
     discovery: {
       kind: 'vitest',
       configPath: 'vitest.config.ts',
+      rootDir: '.',
       selectors: [],
       expectedFiles: 'from-config',
     },
@@ -192,6 +195,7 @@ export const REQUIRED_HANDOFF_GATES = [
     discovery: {
       kind: 'vitest',
       configPath: 'tests/integration-supervisor/vitest.config.ts',
+      rootDir: '.',
       selectors: ['tests/integration-supervisor/vtt/node-runtime-launch.launch-test.ts'],
       expectedFiles: ['tests/integration-supervisor/vtt/node-runtime-launch.launch-test.ts'],
     },
@@ -209,6 +213,7 @@ export const REQUIRED_HANDOFF_GATES = [
     discovery: {
       kind: 'playwright',
       configPath: HANDOFF_CONFIG,
+      rootDir: 'tests/browser/vtt-handoff',
       selectors: ['worker.spec.ts'],
       expectedFiles: ['tests/browser/vtt-handoff/worker.spec.ts'],
       expectedTestCount: 1,
@@ -230,6 +235,7 @@ export const REQUIRED_HANDOFF_GATES = [
     discovery: {
       kind: 'playwright',
       configPath: 'playwright.config.ts',
+      rootDir: 'tests/browser',
       selectors: [],
       expectedFiles: 'from-config',
     },
@@ -247,6 +253,7 @@ export const REQUIRED_HANDOFF_GATES = [
     discovery: {
       kind: 'vitest',
       configPath: 'vitest.config.ts',
+      rootDir: '.',
       selectors: CUMULATIVE_VITEST_FILES,
       expectedFiles: CUMULATIVE_VITEST_FILES,
     },
@@ -264,6 +271,7 @@ export const REQUIRED_HANDOFF_GATES = [
     discovery: {
       kind: 'playwright',
       configPath: HANDOFF_CONFIG,
+      rootDir: 'tests/browser/vtt-handoff',
       selectors: ['worker.spec.ts'],
       expectedFiles: ['tests/browser/vtt-handoff/worker.spec.ts'],
       expectedTestCount: 1,
@@ -282,6 +290,7 @@ export const REQUIRED_HANDOFF_GATES = [
     discovery: {
       kind: 'playwright',
       configPath: HANDOFF_CONFIG,
+      rootDir: 'tests/browser/vtt-handoff',
       selectors: ['runtime-parity.spec.ts'],
       expectedFiles: ['tests/browser/vtt-handoff/runtime-parity.spec.ts'],
       expectedTestCount: 1,
@@ -300,6 +309,7 @@ export const REQUIRED_HANDOFF_GATES = [
     discovery: {
       kind: 'playwright',
       configPath: HANDOFF_CONFIG,
+      rootDir: 'tests/browser/vtt-handoff',
       selectors: ['top-down-smoke.spec.ts'],
       expectedFiles: ['tests/browser/vtt-handoff/top-down-smoke.spec.ts'],
       expectedTestCount: 1,
@@ -324,6 +334,16 @@ const EXPECTED_GATE_IDS = [
   'runtime-parity-playwright',
   'top-down-smoke-playwright',
 ] as const;
+const EXPECTED_TEST_GATE_KINDS: Readonly<Record<string, GateReportKind>> = {
+  'unit-gate': 'vitest',
+  'node-runtime-launch': 'vitest',
+  'worker-dist-playwright': 'playwright',
+  'browser-gate': 'playwright',
+  'cumulative-targeted-vitest': 'vitest',
+  'worker-dev-playwright': 'playwright',
+  'runtime-parity-playwright': 'playwright',
+  'top-down-smoke-playwright': 'playwright',
+};
 const FORBIDDEN_MODULE_OVERRIDES = [
   'DND_GATE_VITEST_MODULE',
   'DND_GATE_PLAYWRIGHT_MODULE',
@@ -428,7 +448,7 @@ function systemResolution(repositoryRoot: string): InventoryResolution {
   return {
     fileExists: (path) => {
       try {
-        return !lstatSync(path).isDirectory();
+        return statSync(path).isFile();
       } catch {
         return false;
       }
@@ -500,6 +520,18 @@ function validateLauncher(
   }
 }
 
+function declaredRunnerTarget(
+  gate: RequiredHandoffGate,
+  resolution: InventoryResolution,
+): string | null {
+  if (gate.argv[0] === 'node') return gate.argv[1] ?? null;
+  if (gate.argv[0] !== 'npm' || gate.argv[1] !== 'run') return null;
+  const scriptName = gate.argv[2];
+  const script = scriptName === undefined ? undefined : resolution.packageScripts[scriptName];
+  if (script === undefined) return null;
+  return npmScriptTargets(script)?.find((target) => target.includes('tools/gate-')) ?? null;
+}
+
 function insideRepository(repositoryRoot: string, path: string): boolean {
   const relation = relative(resolve(repositoryRoot), resolve(path));
   return relation === '' || (relation !== '..' && !relation.startsWith(`..${sep}`) && !isAbsolute(relation));
@@ -530,7 +562,7 @@ export function validateGateInventory(
       errors.push(`GATE_CWD_INVALID: ${gate.id}`);
     }
     if (gate.argv.length === 0 || gate.argv.some((token) =>
-      token.length === 0 || /<[^>]*>|TODO|[;&|`]/u.test(token))) {
+      token.length === 0 || /<[^>]*>|TODO|\$\(|[;&|`]/u.test(token))) {
       errors.push(`GATE_ARGV_INVALID: ${gate.id}`);
     }
     validateLauncher(gate, repositoryRoot, resolution, errors);
@@ -539,6 +571,9 @@ export function validateGateInventory(
     }
     for (const name of PLAYWRIGHT_DISCOVERY_REDIRECTS) {
       if (gate.env[name] !== undefined) errors.push(`GATE_ENV_FORBIDDEN: ${gate.id}: ${name}`);
+    }
+    for (const [name, value] of Object.entries(gate.env)) {
+      if (/\$\(|[;|`]/u.test(value)) errors.push(`GATE_ENV_INVALID: ${gate.id}: ${name}`);
     }
     for (const configPath of gate.configPaths) {
       const absolute = resolve(repositoryRoot, configPath);
@@ -571,6 +606,12 @@ export function validateGateInventory(
         errors.push(`GATE_EXPECTED_FILE_DUPLICATE: ${gate.id}: ${file}`);
       }
     }
+    if (gate.discovery.kind !== 'none') {
+      const discoveryRoot = resolve(repositoryRoot, gate.discovery.rootDir);
+      if (gate.discovery.rootDir.length === 0 || !insideRepository(repositoryRoot, discoveryRoot)) {
+        errors.push(`GATE_DISCOVERY_ROOT_INVALID: ${gate.id}`);
+      }
+    }
     if (gate.discovery.kind === 'none' && gate.report.gateVerdict !== null) {
       errors.push(`GATE_REPORT_KIND_MISMATCH: ${gate.id}`);
     }
@@ -578,6 +619,20 @@ export function validateGateInventory(
       (gate.report.gateVerdict?.kind !== gate.discovery.kind ||
         !gate.configPaths.includes(gate.discovery.configPath))) {
       errors.push(`GATE_REPORT_KIND_MISMATCH: ${gate.id}`);
+    }
+    const expectedKind = EXPECTED_TEST_GATE_KINDS[gate.id];
+    if (expectedKind !== undefined) {
+      if (gate.discovery.kind === 'none' || gate.report.gateVerdict === null) {
+        errors.push(`GATE_TEST_REQUIREMENT_MISSING: ${gate.id}`);
+      }
+      const expectedRunner = `tools/gate-${expectedKind}.mjs`;
+      if (declaredRunnerTarget(gate, resolution) !== expectedRunner) {
+        errors.push(`GATE_RUNNER_KIND_MISMATCH: ${gate.id}`);
+      }
+    }
+    if (gate.tier === 'supervisor-only' && gate.discovery.kind !== 'none' &&
+      gate.discovery.selectors.some((selector) => !selector.startsWith('tests/integration-supervisor/'))) {
+      errors.push(`GATE_SUPERVISOR_SELECTOR_INVALID: ${gate.id}`);
     }
     for (const prerequisite of gate.prerequisites) {
       if (!ids.includes(prerequisite) || prerequisite === gate.id) {
@@ -742,6 +797,9 @@ export function resolveGateDiscovery(
   const discovered = gate.discovery.kind === 'vitest'
     ? parseVitestList(parseStdoutJson(result.stdout, 'vitest'), repositoryRoot)
     : parsePlaywrightList(parseStdoutJson(result.stdout, 'playwright'), repositoryRoot);
+  if (discovered.rootDir !== resolve(repositoryRoot, gate.discovery.rootDir)) {
+    throw new Error(`DISCOVERY_ROOT_MISMATCH: ${gate.id}`);
+  }
   if (gate.discovery.expectedFiles !== 'from-config') {
     const expected = [...gate.discovery.expectedFiles].sort();
     if (JSON.stringify(discovered.files) !== JSON.stringify(expected)) {
@@ -783,7 +841,16 @@ interface M1Discovery {
 
 interface M1FileOutcome {
   readonly file: string;
-  readonly status: string;
+  readonly status: 'passed' | 'failed' | 'skipped' | 'unfinished';
+  readonly executionIds: readonly string[];
+  readonly reasons: readonly string[];
+}
+
+export interface M1ExecutionOutcome {
+  readonly executionId: string;
+  readonly file: string;
+  readonly status: 'passed' | 'failed' | 'skipped' | 'unfinished';
+  readonly approvedSkip: boolean;
 }
 
 interface M1Phase {
@@ -792,6 +859,7 @@ interface M1Phase {
   readonly command: M1Command;
   readonly discovery: M1Discovery;
   readonly fileOutcomes: readonly M1FileOutcome[];
+  readonly executionOutcomes: readonly M1ExecutionOutcome[];
 }
 
 export interface M1Verdict {
@@ -806,6 +874,22 @@ export interface M1GateReport {
   readonly kind: GateReportKind;
   readonly phases: { readonly initial: M1Phase; readonly retry: M1Phase | null };
   readonly verdict: M1Verdict;
+}
+
+export interface GatePhaseExecutionAccounting {
+  readonly phase: 'initial' | 'retry';
+  readonly phaseInvocationId: string;
+  readonly requiredTestIdentities: readonly string[];
+  readonly executedTestIdentities: readonly string[];
+  readonly failedTestIdentities: readonly string[];
+  readonly skippedTestIdentities: readonly string[];
+  readonly approvedSkippedTestIdentities: readonly string[];
+}
+
+export interface GateExecutionAccounting {
+  readonly requiredFiles: readonly string[];
+  readonly requiredTestIdentities: readonly string[];
+  readonly phases: readonly GatePhaseExecutionAccounting[];
 }
 
 function stringArray(value: unknown): readonly string[] | null {
@@ -835,7 +919,76 @@ function parseM1Discovery(value: unknown): M1Discovery | null {
   return { requestedExecutionIds, reportedExecutionIds, requestedFiles, reportedFiles };
 }
 
-function parseM1Phase(value: unknown, expectedPhase: M1Phase['phase']): M1Phase | null {
+function executionStatus(value: unknown): M1ExecutionOutcome['status'] | null {
+  return value === 'passed' || value === 'failed' || value === 'skipped' || value === 'unfinished'
+    ? value
+    : null;
+}
+
+function parseExecutionOutcomes(value: unknown): readonly M1ExecutionOutcome[] | null {
+  if (!Array.isArray(value)) return null;
+  const outcomes: M1ExecutionOutcome[] = [];
+  for (const outcome of value) {
+    if (!isRecord(outcome) || typeof outcome.executionId !== 'string' || typeof outcome.file !== 'string' ||
+      typeof outcome.approvedSkip !== 'boolean') return null;
+    const status = executionStatus(outcome.status);
+    if (status === null) return null;
+    outcomes.push({
+      executionId: outcome.executionId,
+      file: outcome.file,
+      status,
+      approvedSkip: outcome.approvedSkip,
+    });
+  }
+  return outcomes;
+}
+
+function playwrightEvidenceOutcomes(evidence: Record<string, unknown>): readonly M1ExecutionOutcome[] | null {
+  if (!Array.isArray(evidence.tests)) return null;
+  const outcomes: M1ExecutionOutcome[] = [];
+  for (const test of evidence.tests) {
+    if (!isRecord(test) || typeof test.executionId !== 'string' || typeof test.file !== 'string') return null;
+    const approvedSkip = test.status === 'skipped' && test.expectedStatus === 'skipped';
+    let status: M1ExecutionOutcome['status'];
+    if (test.onTestEndObserved === false || test.status === 'interrupted') status = 'unfinished';
+    else if (approvedSkip) status = 'skipped';
+    else if (test.status === 'skipped') status = 'unfinished';
+    else if (test.outcome === 'flaky' || test.status === test.expectedStatus) status = 'passed';
+    else status = 'failed';
+    outcomes.push({ executionId: test.executionId, file: test.file, status, approvedSkip });
+  }
+  return outcomes;
+}
+
+function vitestEvidenceOutcomes(evidence: Record<string, unknown>): readonly M1ExecutionOutcome[] | null {
+  if (!Array.isArray(evidence.modules)) return null;
+  const outcomes: M1ExecutionOutcome[] = [];
+  for (const module of evidence.modules) {
+    if (!isRecord(module) || typeof module.executionId !== 'string' || typeof module.file !== 'string') return null;
+    const status = executionStatus(module.state);
+    if (status === null) return null;
+    outcomes.push({
+      executionId: module.executionId,
+      file: module.file,
+      status,
+      approvedSkip: status === 'skipped',
+    });
+  }
+  return outcomes;
+}
+
+function phaseExecutionOutcomes(value: Record<string, unknown>, kind: GateReportKind): readonly M1ExecutionOutcome[] {
+  const direct = parseExecutionOutcomes(value.executionOutcomes);
+  if (direct !== null) return direct;
+  if (!isRecord(value.evidence)) throw new Error('M1_EXECUTION_EVIDENCE_INVALID');
+  const outcomes = kind === 'playwright'
+    ? playwrightEvidenceOutcomes(value.evidence)
+    : vitestEvidenceOutcomes(value.evidence);
+  if (outcomes === null) throw new Error('M1_EXECUTION_EVIDENCE_INVALID');
+  return outcomes;
+}
+
+function parseM1Phase(value: unknown, expectedPhase: M1Phase['phase'], kind: GateReportKind): M1Phase | null {
   if (!isRecord(value) || value.phase !== expectedPhase || typeof value.phaseInvocationId !== 'string' ||
     !Array.isArray(value.fileOutcomes)) return null;
   const command = parseM1Command(value.command);
@@ -843,15 +996,21 @@ function parseM1Phase(value: unknown, expectedPhase: M1Phase['phase']): M1Phase 
   if (command === null || discovery === null) return null;
   const fileOutcomes: M1FileOutcome[] = [];
   for (const outcome of value.fileOutcomes) {
-    if (!isRecord(outcome) || typeof outcome.file !== 'string' || typeof outcome.status !== 'string') return null;
-    fileOutcomes.push({ file: outcome.file, status: outcome.status });
+    if (!isRecord(outcome) || typeof outcome.file !== 'string') return null;
+    const status = executionStatus(outcome.status);
+    const executionIds = outcome.executionIds === undefined ? [] : stringArray(outcome.executionIds);
+    const reasons = outcome.reasons === undefined ? [] : stringArray(outcome.reasons);
+    if (status === null || executionIds === null || reasons === null) return null;
+    fileOutcomes.push({ file: outcome.file, status, executionIds, reasons });
   }
+  const executionOutcomes = phaseExecutionOutcomes(value, kind);
   return {
     phase: expectedPhase,
     phaseInvocationId: value.phaseInvocationId,
     command,
     discovery,
     fileOutcomes,
+    executionOutcomes,
   };
 }
 
@@ -861,8 +1020,8 @@ export function parseM1GateReport(value: unknown): M1GateReport {
     (value.verdict.status !== 'passed' && value.verdict.status !== 'failed')) {
     throw new Error('M1_REPORT_INVALID');
   }
-  const initial = parseM1Phase(value.phases.initial, 'initial');
-  const retry = value.phases.retry === null ? null : parseM1Phase(value.phases.retry, 'retry');
+  const initial = parseM1Phase(value.phases.initial, 'initial', value.kind);
+  const retry = value.phases.retry === null ? null : parseM1Phase(value.phases.retry, 'retry', value.kind);
   const passedOnRetry = stringArray(value.verdict.passedOnRetry);
   const failedFiles = stringArray(value.verdict.failedFiles);
   if (initial === null || (value.phases.retry !== null && retry === null) || passedOnRetry === null ||
@@ -877,6 +1036,43 @@ export function parseM1GateReport(value: unknown): M1GateReport {
       failedFiles,
       phaseFailures: value.verdict.phaseFailures,
     },
+  };
+}
+
+function phaseAccounting(phase: M1Phase): GatePhaseExecutionAccounting {
+  return {
+    phase: phase.phase,
+    phaseInvocationId: phase.phaseInvocationId,
+    requiredTestIdentities: sorted(phase.discovery.requestedExecutionIds),
+    executedTestIdentities: sorted(phase.executionOutcomes
+      .filter((outcome) => outcome.status === 'passed' || outcome.status === 'failed')
+      .map((outcome) => outcome.executionId)),
+    failedTestIdentities: sorted(phase.executionOutcomes
+      .filter((outcome) => outcome.status === 'failed')
+      .map((outcome) => outcome.executionId)),
+    skippedTestIdentities: sorted(phase.executionOutcomes
+      .filter((outcome) => outcome.status === 'skipped')
+      .map((outcome) => outcome.executionId)),
+    approvedSkippedTestIdentities: sorted(phase.executionOutcomes
+      .filter((outcome) => outcome.status === 'skipped' && outcome.approvedSkip)
+      .map((outcome) => outcome.executionId)),
+  };
+}
+
+export function executionAccounting(
+  report: M1GateReport,
+  discovery: DiscoveryResult,
+): GateExecutionAccounting {
+  const requiredTestIdentities = report.kind === 'playwright'
+    ? discovery.testIdentities
+    : report.phases.initial.discovery.requestedExecutionIds;
+  return {
+    requiredFiles: discovery.files,
+    requiredTestIdentities: sorted(requiredTestIdentities),
+    phases: [
+      phaseAccounting(report.phases.initial),
+      ...(report.phases.retry === null ? [] : [phaseAccounting(report.phases.retry)]),
+    ],
   };
 }
 
@@ -999,6 +1195,7 @@ export interface GateExecutionReceipt {
   };
   readonly m1Verdict: M1Verdict | null;
   readonly launcherAuthenticated: boolean | null;
+  readonly executionAccounting: GateExecutionAccounting | null;
   readonly finalStatus: 'passed' | 'failed';
   readonly failureReasons: readonly string[];
 }
@@ -1014,6 +1211,36 @@ function gitHead(repositoryRoot: string): string {
   if (result.status !== 0) throw new Error(`GATE_RECEIPT_GIT_FAILED: ${result.stderr.trim()}`);
   return result.stdout.trim();
 }
+
+export interface InventoryProcessResult {
+  readonly status: number | null;
+  readonly signal: NodeJS.Signals | null;
+  readonly error?: Error;
+}
+
+export interface InventoryRunnerAdapter {
+  readonly revision: (repositoryRoot: string) => string;
+  readonly discover: (gate: RequiredHandoffGate, repositoryRoot: string) => DiscoveryResult;
+  readonly execute: (
+    gate: RequiredHandoffGate,
+    repositoryRoot: string,
+    environment: NodeJS.ProcessEnv,
+  ) => InventoryProcessResult;
+  readonly invocationId: () => string;
+  readonly timestamp: () => string;
+}
+
+const systemInventoryRunner: InventoryRunnerAdapter = {
+  revision: gitHead,
+  discover: resolveGateDiscovery,
+  execute: (gate, repositoryRoot, environment) => spawnSync(gate.argv[0], gate.argv.slice(1), {
+    cwd: resolve(repositoryRoot, gate.cwd),
+    env: environment,
+    stdio: 'inherit',
+  }),
+  invocationId: randomUUID,
+  timestamp: () => new Date().toISOString(),
+};
 
 function readM1Report(reportDirectory: string, kind: GateReportKind): {
   readonly path: string;
@@ -1051,11 +1278,12 @@ export function runInventoryGate(
   reportDirectory: string,
   repositoryRoot = process.cwd(),
   prerequisiteReceiptPaths: readonly string[] = [],
+  runner: InventoryRunnerAdapter = systemInventoryRunner,
 ): { readonly receipt: GateExecutionReceipt; readonly path: string } {
   if (!isAbsolute(reportDirectory)) throw new Error('GATE_REPORT_DIRECTORY_NOT_ABSOLUTE');
   const validation = validateGateInventory(REQUIRED_HANDOFF_GATES, repositoryRoot);
   if (!validation.valid) throw new Error(`GATE_INVENTORY_INVALID: ${validation.errors.join('; ')}`);
-  const revisionBefore = gitHead(repositoryRoot);
+  const revisionBefore = runner.revision(repositoryRoot);
   if (prerequisiteReceiptPaths.length !== gate.prerequisites.length) {
     throw new Error(`GATE_PREREQUISITE_RECEIPT_COUNT_INVALID: ${gate.id}`);
   }
@@ -1070,36 +1298,35 @@ export function runInventoryGate(
       throw new Error(`GATE_PREREQUISITE_NOT_PASSED: ${prerequisiteId}`);
     }
   }
-  const invocationDirectory = join(reportDirectory, `${gate.id}-${randomUUID()}`);
+  const invocationDirectory = join(reportDirectory, `${gate.id}-${runner.invocationId()}`);
   const environment = prepareExecutionEnvironment(process.env, gate, invocationDirectory);
   mkdirSync(reportDirectory, { recursive: true });
   mkdirSync(invocationDirectory, { recursive: false });
-  const discovery = resolveGateDiscovery(gate, repositoryRoot);
-  const invocationId = randomUUID();
-  const startedAt = new Date().toISOString();
-  const result = spawnSync(gate.argv[0], gate.argv.slice(1), {
-    cwd: resolve(repositoryRoot, gate.cwd),
-    env: environment,
-    stdio: 'inherit',
-  });
-  const finishedAt = new Date().toISOString();
-  const revisionAfter = gitHead(repositoryRoot);
+  const discovery = runner.discover(gate, repositoryRoot);
+  const invocationId = runner.invocationId();
+  const startedAt = runner.timestamp();
+  const result = runner.execute(gate, repositoryRoot, environment);
+  const finishedAt = runner.timestamp();
+  const revisionAfter = runner.revision(repositoryRoot);
   const failureReasons: string[] = [];
   const spawnError = structuredError(result.error);
   if (spawnError !== null) failureReasons.push('OUTER_SPAWN_ERROR');
   if (result.signal !== null) failureReasons.push(`OUTER_SIGNAL: ${result.signal}`);
-  if (result.status !== null && result.status !== 0) {
+  if (result.status === null) failureReasons.push('OUTER_EXIT_MISSING');
+  else if (result.status !== 0) {
     failureReasons.push(`OUTER_EXIT_NONZERO: ${String(result.status)}`);
   }
   if (revisionBefore !== revisionAfter) failureReasons.push('OUTER_REVISION_CHANGED');
   let m1Report: GateExecutionReceipt['m1Report'] = null;
   let m1Verdict: M1Verdict | null = null;
   let launcherAuthenticated: boolean | null = null;
+  let accounting: GateExecutionAccounting | null = null;
   if (gate.report.gateVerdict !== null) {
     try {
       const evidence = readM1Report(invocationDirectory, gate.report.gateVerdict.kind);
       m1Verdict = evidence.report.verdict;
       launcherAuthenticated = authenticateM1PhaseCommands(evidence.report, repositoryRoot);
+      accounting = executionAccounting(evidence.report, discovery);
       m1Report = {
         path: evidence.path,
         sha256: evidence.sha256,
@@ -1135,6 +1362,7 @@ export function runInventoryGate(
     m1Report,
     m1Verdict,
     launcherAuthenticated,
+    executionAccounting: accounting,
     finalStatus: failureReasons.length === 0 ? 'passed' : 'failed',
     failureReasons,
   };
@@ -1153,11 +1381,18 @@ export interface GateReconciliation {
   readonly invocationId: string | null;
   readonly reportPath: string | null;
   readonly phaseInvocationIds: readonly string[];
+  readonly prerequisites: readonly string[];
   readonly requiredFiles: readonly string[];
   readonly discoveredFiles: readonly string[];
   readonly executedFiles: readonly string[];
   readonly failedFiles: readonly string[];
   readonly skippedFiles: readonly string[];
+  readonly requiredTestIdentities: readonly string[];
+  readonly executedTestIdentities: readonly string[];
+  readonly failedTestIdentities: readonly string[];
+  readonly skippedTestIdentities: readonly string[];
+  readonly approvedSkippedTestIdentities: readonly string[];
+  readonly phaseAccounting: readonly GatePhaseExecutionAccounting[];
   readonly passedOnRetry: readonly string[];
   readonly phaseFailures: readonly unknown[];
   readonly m1Verdict: M1Verdict | null;
@@ -1183,15 +1418,56 @@ function emptyReconciliation(
     invocationId: null,
     reportPath: null,
     phaseInvocationIds: [],
+    prerequisites: gate.prerequisites,
     requiredFiles,
     discoveredFiles: [],
     executedFiles: [],
     failedFiles: [],
     skippedFiles: [],
+    requiredTestIdentities: [],
+    executedTestIdentities: [],
+    failedTestIdentities: [],
+    skippedTestIdentities: [],
+    approvedSkippedTestIdentities: [],
+    phaseAccounting: [],
     passedOnRetry: [],
     phaseFailures: [],
     m1Verdict: null,
     reasons,
+  };
+}
+
+function parsePhaseAccounting(value: unknown): GatePhaseExecutionAccounting | null {
+  if (!isRecord(value) || (value.phase !== 'initial' && value.phase !== 'retry') ||
+    typeof value.phaseInvocationId !== 'string') return null;
+  const requiredTestIdentities = stringArray(value.requiredTestIdentities);
+  const executedTestIdentities = stringArray(value.executedTestIdentities);
+  const failedTestIdentities = stringArray(value.failedTestIdentities);
+  const skippedTestIdentities = stringArray(value.skippedTestIdentities);
+  const approvedSkippedTestIdentities = stringArray(value.approvedSkippedTestIdentities);
+  if (requiredTestIdentities === null || executedTestIdentities === null || failedTestIdentities === null ||
+    skippedTestIdentities === null || approvedSkippedTestIdentities === null) return null;
+  return {
+    phase: value.phase,
+    phaseInvocationId: value.phaseInvocationId,
+    requiredTestIdentities,
+    executedTestIdentities,
+    failedTestIdentities,
+    skippedTestIdentities,
+    approvedSkippedTestIdentities,
+  };
+}
+
+function parseExecutionAccounting(value: unknown): GateExecutionAccounting | null {
+  if (!isRecord(value) || !Array.isArray(value.phases)) return null;
+  const requiredFiles = stringArray(value.requiredFiles);
+  const requiredTestIdentities = stringArray(value.requiredTestIdentities);
+  const phases = value.phases.map(parsePhaseAccounting);
+  if (requiredFiles === null || requiredTestIdentities === null || phases.some((phase) => phase === null)) return null;
+  return {
+    requiredFiles,
+    requiredTestIdentities,
+    phases: phases.filter((phase): phase is GatePhaseExecutionAccounting => phase !== null),
   };
 }
 
@@ -1236,6 +1512,9 @@ function parseReceipt(value: unknown): GateExecutionReceipt {
   if (!(value.launcherAuthenticated === null || typeof value.launcherAuthenticated === 'boolean')) {
     throw new Error('GATE_RECEIPT_INVALID');
   }
+  if (value.executionAccounting !== null && parseExecutionAccounting(value.executionAccounting) === null) {
+    throw new Error('GATE_RECEIPT_INVALID');
+  }
   return value as unknown as GateExecutionReceipt;
 }
 
@@ -1245,6 +1524,122 @@ function sameRealPath(left: string, right: string): boolean {
   } catch {
     return false;
   }
+}
+
+function isCanonicalStringSet(values: readonly string[]): boolean {
+  return values.length === new Set(values).size && JSON.stringify(values) === JSON.stringify([...values].sort());
+}
+
+function validateReceiptDiscovery(
+  gate: RequiredHandoffGate,
+  discovery: DiscoveryResult,
+  repositoryRoot: string,
+): readonly string[] {
+  const reasons: string[] = [];
+  if (discovery.kind !== gate.discovery.kind) return ['RECEIPT_DISCOVERY_KIND_MISMATCH'];
+  if (!isCanonicalStringSet(discovery.files) || !isCanonicalStringSet(discovery.testIdentities)) {
+    reasons.push('RECEIPT_DISCOVERY_NOT_CANONICAL');
+  }
+  if (gate.discovery.kind === 'none') {
+    if (discovery.rootDir !== null || discovery.files.length > 0 || discovery.testIdentities.length > 0) {
+      reasons.push('RECEIPT_DISCOVERY_UNEXPECTED');
+    }
+    return reasons;
+  }
+  if (discovery.files.length === 0) reasons.push('RECEIPT_DISCOVERY_EMPTY');
+  for (const file of discovery.files) {
+    try {
+      if (normalizedRepositoryFile(repositoryRoot, resolve(repositoryRoot, file)) !== file) {
+        reasons.push('RECEIPT_DISCOVERY_FILE_INVALID');
+      }
+    } catch {
+      reasons.push('RECEIPT_DISCOVERY_FILE_INVALID');
+    }
+  }
+  if (discovery.rootDir === null || !isAbsolute(discovery.rootDir) ||
+    !insideRepository(repositoryRoot, discovery.rootDir)) {
+    reasons.push('RECEIPT_DISCOVERY_ROOT_INVALID');
+  }
+  if (discovery.rootDir !== resolve(repositoryRoot, gate.discovery.rootDir)) {
+    reasons.push('RECEIPT_DISCOVERY_ROOT_MISMATCH');
+  }
+  if (gate.discovery.kind === 'vitest') {
+    if (discovery.rootDir === null || !sameRealPath(discovery.rootDir, repositoryRoot)) {
+      reasons.push('RECEIPT_DISCOVERY_ROOT_INVALID');
+    }
+    if (discovery.testIdentities.length > 0) reasons.push('RECEIPT_DISCOVERY_IDENTITY_UNEXPECTED');
+  } else {
+    if (discovery.testIdentities.length === 0) reasons.push('RECEIPT_DISCOVERY_TESTS_EMPTY');
+    for (const identity of discovery.testIdentities) {
+      const normalizedIdentity = identity.replaceAll('\\', '/');
+      if (!discovery.files.some((file) => normalizedIdentity.endsWith(`/${file}`))) {
+        reasons.push('RECEIPT_DISCOVERY_IDENTITY_INVALID');
+      }
+    }
+    if (gate.discovery.expectedTestCount !== undefined &&
+      discovery.testIdentities.length !== gate.discovery.expectedTestCount) {
+      reasons.push('RECEIPT_DISCOVERY_TEST_COUNT_MISMATCH');
+    }
+  }
+  if (gate.discovery.expectedFiles !== 'from-config' &&
+    JSON.stringify(discovery.files) !== JSON.stringify([...gate.discovery.expectedFiles].sort())) {
+    reasons.push('RECEIPT_DISCOVERY_EXPECTED_FILES_MISMATCH');
+  }
+  return [...new Set(reasons)];
+}
+
+function validateM1ExecutionAccounting(
+  discovery: DiscoveryResult,
+  report: M1GateReport,
+  repositoryRoot: string,
+): readonly string[] {
+  const reasons: string[] = [];
+  const initial = report.phases.initial;
+  const requestedIds = sorted(initial.discovery.requestedExecutionIds);
+  const reportedIds = sorted(initial.discovery.reportedExecutionIds);
+  const outcomeIds = sorted(initial.executionOutcomes.map((outcome) => outcome.executionId));
+  if (requestedIds.length === 0 || reportedIds.length === 0 || outcomeIds.length === 0) {
+    reasons.push('M1_EXECUTION_ACCOUNTING_EMPTY');
+  }
+  if (JSON.stringify(requestedIds) !== JSON.stringify(reportedIds) ||
+    JSON.stringify(reportedIds) !== JSON.stringify(outcomeIds)) {
+    reasons.push('M1_EXECUTION_ACCOUNTING_MISMATCH');
+  }
+  if (JSON.stringify(sorted(initial.fileOutcomes.map((outcome) => outcome.file))) !==
+    JSON.stringify(discovery.files)) {
+    reasons.push('M1_FILE_ACCOUNTING_MISMATCH');
+  }
+  if (initial.executionOutcomes.some((outcome) => outcome.status === 'unfinished' ||
+    (outcome.status === 'skipped' && !outcome.approvedSkip))) {
+    reasons.push('M1_EXECUTION_ACCOUNTING_INCOMPLETE');
+  }
+  for (const phase of [initial, report.phases.retry].filter((entry): entry is M1Phase => entry !== null)) {
+    const identitySets = [
+      phase.discovery.requestedExecutionIds,
+      phase.discovery.reportedExecutionIds,
+      phase.executionOutcomes.map((outcome) => outcome.executionId),
+      phase.fileOutcomes.map((outcome) => outcome.file),
+    ];
+    if (identitySets.some((values) => !isCanonicalStringSet(values))) {
+      reasons.push('M1_EXECUTION_ACCOUNTING_NOT_CANONICAL');
+    }
+    const phaseFiles = sorted(phase.fileOutcomes.map((outcome) => outcome.file));
+    for (const outcome of phase.executionOutcomes) {
+      let normalizedFile: string;
+      try {
+        normalizedFile = normalizedRepositoryFile(repositoryRoot, outcome.file);
+      } catch {
+        reasons.push('M1_EXECUTION_FILE_INVALID');
+        continue;
+      }
+      const fileOutcome = phase.fileOutcomes.find((candidate) => candidate.file === normalizedFile);
+      if (fileOutcome === undefined || !fileOutcome.executionIds.includes(outcome.executionId) ||
+        !phaseFiles.includes(normalizedFile)) {
+        reasons.push('M1_EXECUTION_FILE_MISMATCH');
+      }
+    }
+  }
+  return reasons;
 }
 
 export function reconcileGateReceipt(
@@ -1294,6 +1689,7 @@ export function reconcileGateReceipt(
     return { ...base, state: 'not-run', reasons: [`REQUIRED_GATE_RECEIPT_MISMATCH: ${gate.id}`] };
   }
   const reasons = [...receipt.failureReasons];
+  reasons.push(...validateReceiptDiscovery(gate, receipt.discovery, repositoryRoot));
   const outerSuccess = receipt.outer.spawnError === null && receipt.outer.signal === null &&
     receipt.outer.exitCode === 0;
   if (receipt.outer.spawnError !== null) reasons.push('OUTER_SPAWN_ERROR');
@@ -1301,9 +1697,13 @@ export function reconcileGateReceipt(
   if (receipt.outer.exitCode !== null && receipt.outer.exitCode !== 0) {
     reasons.push(`OUTER_EXIT_NONZERO: ${String(receipt.outer.exitCode)}`);
   }
+  if (receipt.outer.exitCode === null && receipt.outer.signal === null && receipt.outer.spawnError === null) {
+    reasons.push('OUTER_EXIT_MISSING');
+  }
   if (!outerSuccess && reasons.length === 0) reasons.push('OUTER_PROCESS_FAILED');
   let report: M1GateReport | null = null;
   if (gate.report.gateVerdict !== null) {
+    if (receipt.executionAccounting === null) reasons.push('RECEIPT_EXECUTION_ACCOUNTING_MISSING');
     if (receipt.m1Report === null || !existsSync(receipt.m1Report.path)) {
       reasons.push('M1_REPORT_MISSING');
     } else {
@@ -1323,6 +1723,11 @@ export function reconcileGateReceipt(
         }
         if (!authenticateM1PhaseCommands(report, repositoryRoot)) reasons.push('M1_LAUNCHER_UNAUTHENTICATED');
         reasons.push(...reconcileM1Discovery(gate, receipt.discovery, report));
+        reasons.push(...validateM1ExecutionAccounting(receipt.discovery, report, repositoryRoot));
+        if (JSON.stringify(receipt.executionAccounting) !==
+          JSON.stringify(executionAccounting(report, receipt.discovery))) {
+          reasons.push('RECEIPT_EXECUTION_ACCOUNTING_MISMATCH');
+        }
         if (JSON.stringify(receipt.m1Verdict) !== JSON.stringify(report.verdict)) {
           reasons.push('M1_VERDICT_RECEIPT_MISMATCH');
         }
@@ -1331,6 +1736,8 @@ export function reconcileGateReceipt(
         reasons.push(`M1_REPORT_INVALID: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
+  } else if (receipt.executionAccounting !== null) {
+    reasons.push('RECEIPT_EXECUTION_ACCOUNTING_UNEXPECTED');
   }
   const initialOutcomes = report?.phases.initial.fileOutcomes ?? [];
   const retryOutcomes = report?.phases.retry?.fileOutcomes ?? [];
@@ -1342,6 +1749,13 @@ export function reconcileGateReceipt(
     .filter((outcome) => outcome.status === 'skipped')
     .map((outcome) => outcome.file));
   const verdict = report?.verdict ?? receipt.m1Verdict;
+  const accounting = report === null ? receipt.executionAccounting : executionAccounting(report, receipt.discovery);
+  const phases = accounting?.phases ?? [];
+  const executedTestIdentities = sorted(phases.flatMap((phase) => phase.executedTestIdentities));
+  const failedTestIdentities = sorted(phases.flatMap((phase) => phase.failedTestIdentities));
+  const skippedTestIdentities = sorted(phases.flatMap((phase) => phase.skippedTestIdentities));
+  const approvedSkippedTestIdentities = sorted(phases.flatMap((phase) =>
+    phase.approvedSkippedTestIdentities));
   const state = reasons.length > 0
     ? 'failed'
     : (verdict?.passedOnRetry.length ?? 0) > 0
@@ -1356,6 +1770,12 @@ export function reconcileGateReceipt(
     passedOnRetry: verdict?.passedOnRetry ?? [],
     phaseFailures: verdict?.phaseFailures ?? [],
     m1Verdict: verdict,
+    requiredTestIdentities: accounting?.requiredTestIdentities ?? [],
+    executedTestIdentities,
+    failedTestIdentities,
+    skippedTestIdentities,
+    approvedSkippedTestIdentities,
+    phaseAccounting: phases,
     reasons: [...new Set(reasons)],
   };
 }
