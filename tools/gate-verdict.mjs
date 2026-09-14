@@ -373,6 +373,7 @@ export function classifyPhase(input) {
     .map((item) => item.file));
   const missingExecutionIds = scheduledExecutionIds.filter((id) => !reportedExecutionIds.includes(id));
   const unexpectedExecutionIds = reportedExecutionIds.filter((id) => !scheduledExecutionIds.includes(id));
+  // Repeated terminal IDs are invalid because gate-playwright strips caller retries and forces --retries=0.
   const duplicateExecutionIds = duplicates(rawReportedExecutionIds);
   const scheduledById = new Map((native?.scheduled ?? []).map((item) => [item.executionId, item.file]));
   const mismatchedExecutionIds = unique((native?.executions ?? [])

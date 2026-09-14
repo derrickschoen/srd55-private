@@ -5,9 +5,8 @@ import { describe, expect, it, vi } from 'vitest';
 import type { Reporter as VitestReporter } from 'vitest/reporters';
 import type {
   FullConfig,
+  FullProject,
   FullResult,
-  Reporter as PlaywrightReporter,
-  Suite,
   TestCase,
   TestError,
   TestResult,
@@ -59,21 +58,55 @@ interface PlaywrightEvidence {
   readonly lifecycle: { readonly onBegin: boolean; readonly onEnd: boolean; readonly onExit: boolean };
 }
 
-interface VitestReporterModule {
-  readonly default: new () => VitestReporter;
-}
-
-interface PlaywrightReporterModule {
-  readonly default: new () => PlaywrightReporter;
-}
-
 type VitestContext = Parameters<NonNullable<VitestReporter['onInit']>>[0];
 type VitestSpecifications = Parameters<NonNullable<VitestReporter['onTestRunStart']>>[0];
 type VitestSpecification = VitestSpecifications[number];
 type VitestModules = Parameters<NonNullable<VitestReporter['onTestRunEnd']>>[0];
 type VitestModule = VitestModules[number];
 type VitestRunErrors = Parameters<NonNullable<VitestReporter['onTestRunEnd']>>[1];
+type VitestRunError = VitestRunErrors[number];
 type VitestRunReason = Parameters<NonNullable<VitestReporter['onTestRunEnd']>>[2];
+type VitestProjectFixture = Pick<VitestSpecification['project'], 'hash' | 'name'>;
+type VitestContextFixture = { readonly config: Pick<VitestContext['config'], 'passWithNoTests'> };
+type VitestSpecificationFixture = Pick<VitestSpecification, 'taskId' | 'moduleId'> & {
+  readonly project: VitestProjectFixture;
+};
+type VitestModuleFixture = Pick<VitestModule, 'id' | 'moduleId' | 'state' | 'errors'> & {
+  readonly project: VitestProjectFixture;
+};
+
+interface VitestReporterFixture {
+  onInit?(value: VitestContextFixture): void | Promise<void>;
+  onTestRunStart?(value: readonly VitestSpecificationFixture[]): void | Promise<void>;
+  onTestRunEnd?(modules: readonly VitestModuleFixture[], errors: VitestRunErrors, reason: VitestRunReason): void | Promise<void>;
+  onProcessTimeout?(): void | Promise<void>;
+}
+
+interface VitestReporterModule {
+  readonly default: new () => VitestReporterFixture;
+}
+
+type PlaywrightProjectFixture = Pick<FullProject, 'name'>;
+type PlaywrightTestFixture = Pick<TestCase, 'id' | 'location' | 'expectedStatus' | 'outcome'> & {
+  readonly parent: { project(): PlaywrightProjectFixture };
+};
+type PlaywrightConfigFixture = Pick<FullConfig, never>;
+type PlaywrightSuiteFixture = { allTests(): PlaywrightTestFixture[] };
+type PlaywrightResultFixture = Pick<TestResult, 'status' | 'errors'>;
+type PlaywrightFullResultFixture = Pick<FullResult, 'status'>;
+
+interface PlaywrightReporterFixture {
+  onBegin?(config: PlaywrightConfigFixture, suite: PlaywrightSuiteFixture): void | Promise<void>;
+  onTestBegin?(test: PlaywrightTestFixture, result: PlaywrightResultFixture): void | Promise<void>;
+  onTestEnd?(test: PlaywrightTestFixture, result: PlaywrightResultFixture): void | Promise<void>;
+  onError?(error: TestError): void | Promise<void>;
+  onEnd?(result: PlaywrightFullResultFixture): void | Promise<void>;
+  onExit?(): void | Promise<void>;
+}
+
+interface PlaywrightReporterModule {
+  readonly default: new () => PlaywrightReporterFixture;
+}
 
 interface ArtifactRead {
   readonly status: 'readable';
@@ -113,9 +146,25 @@ interface VerdictModule {
 
 const readable: ArtifactRead = { status: 'readable', error: null };
 
+function hasReporterConstructor<T>(value: unknown): value is { readonly default: new () => T } {
+  return value !== null && typeof value === 'object' && 'default' in value && typeof value.default === 'function';
+}
+
+function isVerdictModule(value: unknown): value is VerdictModule {
+  return value !== null && typeof value === 'object' &&
+    'classifyPhase' in value && typeof value.classifyPhase === 'function' &&
+    'reduceGateVerdict' in value && typeof value.reduceGateVerdict === 'function';
+}
+
+function parseFixtureJson<T>(path: string): T {
+  return JSON.parse(readFileSync(path, 'utf8')) as T;
+}
+
 async function verdictModule(): Promise<VerdictModule> {
   const modulePath = new URL('../../../tools/gate-verdict.mjs', import.meta.url).href;
-  return await import(modulePath) as unknown as VerdictModule;
+  const imported: unknown = await import(modulePath);
+  if (!isVerdictModule(imported)) throw new Error('Gate verdict module does not expose its required API.');
+  return imported;
 }
 
 interface VitestCase {
@@ -175,8 +224,36 @@ function realVitestEvidence(mode: RealVitestMode): { readonly status: number | n
       DND_GATE_FIXTURE_PASS_WITH_NO_TESTS: mode === 'empty-true' ? '1' : '0',
     },
   });
-  const evidence = JSON.parse(readFileSync(evidencePath, 'utf8')) as VitestEvidence;
+  const evidence = parseFixtureJson<VitestEvidence>(evidencePath);
   return { status: result.status, evidence };
+}
+
+function vitestSpecification(
+  taskId: string,
+  moduleId: string,
+  hash: string,
+  name: string,
+): VitestSpecificationFixture {
+  return { taskId, moduleId, project: { hash, name } };
+}
+
+function vitestModuleFixture(
+  specification: VitestSpecificationFixture,
+  state: NonNullable<VitestCase['state']>,
+  errors: readonly Error[],
+): VitestModuleFixture {
+  const serializedErrors: VitestRunError[] = errors.map((error) => ({
+    name: error.name,
+    message: error.message,
+    ...(error.stack === undefined ? {} : { stack: error.stack }),
+  }));
+  return {
+    id: specification.taskId,
+    moduleId: specification.moduleId,
+    project: specification.project,
+    state: () => state,
+    errors: () => serializedErrors,
+  };
 }
 
 async function vitestEvidence(input: VitestCase = {}): Promise<VitestEvidence> {
@@ -187,24 +264,23 @@ async function vitestEvidence(input: VitestCase = {}): Promise<VitestEvidence> {
   vi.stubEnv('DND_GATE_PHASE', 'initial');
   vi.stubEnv('DND_GATE_PHASE_INVOCATION_ID', 'vitest-unit-id');
   const modulePath = new URL('../../../tools/gate-vitest-evidence-reporter.mjs', import.meta.url).href;
-  const imported = await import(modulePath) as unknown as VitestReporterModule;
-  const reporter: VitestReporter = new imported.default();
-  await reporter.onInit?.({ config: { passWithNoTests: input.passWithNoTests ?? false } } as VitestContext);
+  const imported: unknown = await import(modulePath);
+  if (!hasReporterConstructor<VitestReporterFixture>(imported)) {
+    throw new Error('Vitest evidence reporter does not export a constructor.');
+  }
+  const reporter = new imported.default();
+  const context: VitestContextFixture = { config: { passWithNoTests: input.passWithNoTests ?? false } };
+  await reporter.onInit?.(context);
   const files = input.empty ? [] : [resolve('tests/example.test.ts')];
-  const specs = files.flatMap((file) => {
-    const base = [{ taskId: 'task-a', moduleId: file, project: { hash: 'project-a', name: 'unit' } }];
+  const specs: VitestSpecificationFixture[] = files.flatMap((file) => {
+    const base: VitestSpecificationFixture[] = [vitestSpecification('task-a', file, 'project-a', 'unit')];
     return input.duplicate
-      ? [...base, { taskId: 'task-b', moduleId: file, project: { hash: 'project-b', name: 'other' } }]
+      ? [...base, vitestSpecification('task-b', file, 'project-b', 'other')]
       : base;
-  }) as VitestSpecification[];
+  });
   await reporter.onTestRunStart?.(specs);
-  const modules = specs.map((specification) => ({
-    id: specification.taskId,
-    moduleId: specification.moduleId,
-    project: specification.project,
-    state: () => input.state ?? 'passed',
-    errors: () => [...(input.moduleErrors ?? [])],
-  })) as VitestModule[];
+  const modules: VitestModuleFixture[] = specs.map((specification) =>
+    vitestModuleFixture(specification, input.state ?? 'passed', input.moduleErrors ?? []));
   const globalErrors: VitestRunErrors = (input.globalErrors ?? []).map((error) => ({
     name: error.name,
     message: error.message,
@@ -213,10 +289,10 @@ async function vitestEvidence(input: VitestCase = {}): Promise<VitestEvidence> {
   await reporter.onTestRunEnd?.(
     modules,
     globalErrors,
-    (input.reason ?? 'passed') as VitestRunReason,
+    input.reason ?? 'passed',
   );
   if (input.timeout) await reporter.onProcessTimeout?.();
-  return JSON.parse(readFileSync(path, 'utf8')) as VitestEvidence;
+  return parseFixtureJson<VitestEvidence>(path);
 }
 
 interface PlaywrightCase {
@@ -239,19 +315,24 @@ async function playwrightEvidence(input: PlaywrightCase = {}): Promise<Playwrigh
   vi.stubEnv('DND_GATE_PHASE', 'initial');
   vi.stubEnv('DND_GATE_PHASE_INVOCATION_ID', 'playwright-unit-id');
   const modulePath = new URL('../../../tools/gate-playwright-evidence-reporter.mjs', import.meta.url).href;
-  const imported = await import(modulePath) as unknown as PlaywrightReporterModule;
-  const reporter: PlaywrightReporter = new imported.default();
+  const imported: unknown = await import(modulePath);
+  if (!hasReporterConstructor<PlaywrightReporterFixture>(imported)) {
+    throw new Error('Playwright evidence reporter does not export a constructor.');
+  }
+  const reporter = new imported.default();
   const file = resolve('tests/example.spec.ts');
-  const makeTest = (id: string, projectName: string) => ({
+  const makeTest = (id: string, projectName: string): PlaywrightTestFixture => ({
     id,
     location: { file, line: 1, column: 1 },
     expectedStatus: input.expectedStatus ?? 'passed',
-    parent: { project: () => ({ name: projectName }) },
+    parent: { project: (): PlaywrightProjectFixture => ({ name: projectName }) },
     outcome: () => input.outcome ?? 'expected',
-  }) as TestCase;
-  const tests: TestCase[] = [makeTest('test-a', 'unit')];
+  });
+  const tests: PlaywrightTestFixture[] = [makeTest('test-a', 'unit')];
   if (input.duplicateUnfinished) tests.push(makeTest('test-b', 'other'));
-  reporter.onBegin?.({} as FullConfig, { allTests: () => tests } as Suite);
+  const config: PlaywrightConfigFixture = {};
+  const suite: PlaywrightSuiteFixture = { allTests: () => tests };
+  await reporter.onBegin?.(config, suite);
   const first = tests[0];
   if (first === undefined) throw new Error('Fixture test missing.');
   const result: TestResult = {
@@ -283,7 +364,7 @@ async function playwrightEvidence(input: PlaywrightCase = {}): Promise<Playwrigh
   const fullResult: FullResult = { status: input.fullStatus ?? 'passed', startTime: new Date(0), duration: 0 };
   await reporter.onEnd?.(fullResult);
   await reporter.onExit?.();
-  return JSON.parse(readFileSync(path, 'utf8')) as PlaywrightEvidence;
+  return parseFixtureJson<PlaywrightEvidence>(path);
 }
 
 async function classifyVitest(evidence: VitestEvidence): Promise<ClassifiedPhase> {
@@ -351,6 +432,20 @@ async function classifyPlaywright(evidence: PlaywrightEvidence): Promise<Classif
 }
 
 describe('Vitest gate evidence reporter', () => {
+  it('uses checked installed-API fixtures without shape-hiding casts', () => {
+    const source = readFileSync(new URL(import.meta.url), 'utf8');
+    const forbidden = [
+      ['as Vitest', 'Context'],
+      ['as Vitest', 'Specification'],
+      ['as Vitest', 'Module'],
+      ['as Test', 'Case'],
+      ['as Full', 'Config'],
+      ['as Sui', 'te'],
+      ['as unknown', ' as'],
+    ].map((parts) => parts.join(''));
+    for (const token of forbidden) expect(source).not.toContain(token);
+  });
+
   it('records a passing module with complete lifecycle provenance', async () => {
     const evidence = await vitestEvidence();
     expect(evidence.phaseInvocationId).toBe('vitest-unit-id');

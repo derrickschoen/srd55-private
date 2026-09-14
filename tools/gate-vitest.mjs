@@ -42,21 +42,33 @@ function splitTail(argumentsList) {
     : { head: argumentsList.slice(0, delimiter), tail: argumentsList.slice(delimiter) };
 }
 
+function normalizedOptionName(argument) {
+  const name = optionName(argument);
+  if (!name.startsWith('--')) return name;
+  return `--${name.slice(2).replace(/-([a-z])/g, (_match, letter) => letter.toUpperCase())}`;
+}
+
+function isNegatedOption(argument) {
+  return optionName(argument).startsWith('--no-');
+}
+
+function isValueOption(argument) {
+  return VALUE_OPTIONS.has(normalizedOptionName(argument));
+}
+
 function gateOwnedOption(argument) {
-  return argument === '--reporter' || argument.startsWith('--reporter=') ||
-    argument === '--outputFile' || argument.startsWith('--outputFile=') || argument.startsWith('--outputFile.') ||
-    argument === '--configLoader' || argument.startsWith('--configLoader=');
+  const name = normalizedOptionName(argument);
+  return name === '--reporter' || name === '--outputFile' || name.startsWith('--outputFile.') ||
+    name === '--configLoader';
 }
 
 function retryControlledOption(argument) {
-  return gateOwnedOption(argument) ||
-    argument === '--fileParallelism' || argument.startsWith('--fileParallelism=') ||
-    argument === '--no-file-parallelism' ||
-    argument === '--maxWorkers' || argument.startsWith('--maxWorkers=');
+  const name = normalizedOptionName(argument);
+  return gateOwnedOption(argument) || name === '--fileParallelism' || name === '--noFileParallelism' || name === '--maxWorkers';
 }
 
 function optionTakesValue(argument) {
-  const name = optionName(argument);
+  const name = normalizedOptionName(argument);
   return name === '--reporter' || name === '--outputFile' || name.startsWith('--outputFile.') ||
     name === '--configLoader' || name === '--maxWorkers';
 }
@@ -88,15 +100,16 @@ export function retainedVitestRetryTokens(argumentsList) {
     const argument = head[index];
     if (retryControlledOption(argument)) {
       const next = head[index + 1];
-      const consumesBoolean = optionName(argument) === '--fileParallelism' && (next === 'true' || next === 'false');
-      if (!argument.includes('=') && (optionTakesValue(argument) || consumesBoolean) &&
+      const consumesBoolean = normalizedOptionName(argument) === '--fileParallelism' &&
+        !isNegatedOption(argument) && (next === 'true' || next === 'false');
+      if (!argument.includes('=') && !isNegatedOption(argument) && (optionTakesValue(argument) || consumesBoolean) &&
         next !== undefined && !next.startsWith('-')) index += 1;
       continue;
     }
     if (!argument.startsWith('-')) continue;
     retained.push(argument);
-    const name = optionName(argument);
-    if (!argument.includes('=') && VALUE_OPTIONS.has(name)) {
+    if (!argument.includes('=') && isNegatedOption(argument)) continue;
+    if (!argument.includes('=') && isValueOption(argument)) {
       const value = head[index + 1];
       if (value !== undefined && !value.startsWith('-')) {
         retained.push(value);

@@ -269,6 +269,9 @@ describe('gate phase classifier', () => {
     const phase = await classify({ ...input('vitest'), evidence: duplicated });
     expect(phase.discovery.status).toBe('failed');
     expect(phase.discovery.duplicateExecutionIds).toEqual([first.executionId]);
+    expect(phase.discovery.mismatchedExecutionIds).toEqual([]);
+    expect(phase.discovery.fileSetMismatch).toBe(false);
+    // This case kills the duplicateExecutionIds rejection independently.
   });
 
   it('rejects a scheduled execution id reported for a substituted file', async () => {
@@ -288,6 +291,8 @@ describe('gate phase classifier', () => {
     const phase = await classify({ ...input('vitest'), reporter, evidence: substituted });
     expect(phase.discovery.status).toBe('failed');
     expect(phase.discovery.mismatchedExecutionIds).toEqual([module.executionId]);
+    expect(phase.discovery.fileSetMismatch).toBe(true);
+    // This substitution exercises the combined association and file-set diagnostics.
   });
 
   it('rejects a reported file set different from the scheduled file set', async () => {
@@ -311,6 +316,69 @@ describe('gate phase classifier', () => {
     const phase = await classify({ ...input('vitest'), reporter, evidence: unlistedEvidence });
     expect(phase.discovery.status).toBe('failed');
     expect(phase.discovery.fileSetMismatch).toBe(true);
+  });
+
+  it('rejects a two-file identity swap independently in initial and retry phases', async () => {
+    const module = await verdictModule();
+    const files = [resolve('tests/unit/alpha.test.ts'), resolve('tests/unit/beta.test.ts')];
+    const ids = [`unit:alpha:${files[0]}`, `unit:beta:${files[1]}`];
+    const makeEvidence = (phase: Phase, status: 'passed' | 'failed', swap: boolean) => ({
+      version: 1,
+      kind: 'vitest',
+      phase,
+      phaseInvocationId: 'phase-id',
+      lifecycle: { onInit: true, onTestRunStart: true, onTestRunEnd: true },
+      passWithNoTests: false,
+      specifications: ids.map((executionId, index) => ({
+        executionId,
+        file: files[index],
+        projectName: 'unit',
+        taskId: `task-${index}`,
+      })),
+      modules: ids.map((executionId, index) => ({
+        executionId,
+        file: files[swap ? 1 - index : index],
+        projectName: 'unit',
+        state: status,
+        errors: [],
+      })),
+      globalErrors: [],
+      terminalReason: status === 'failed' ? 'failed' : 'passed',
+      processTimeoutObserved: false,
+      fatalReasons: [],
+    });
+    const makeStock = (status: 'passed' | 'failed') => ({
+      success: status === 'passed',
+      numFailedTestSuites: status === 'failed' ? 2 : 0,
+      numFailedTests: status === 'failed' ? 2 : 0,
+      testResults: files.map((name) => ({ name, status, assertionResults: [{ status }] })),
+    });
+    const initialSwap = await classify({
+      ...input('vitest'),
+      reporter: makeStock('passed'),
+      evidence: makeEvidence('initial', 'passed', true),
+    });
+    expect(initialSwap.discovery.status).toBe('failed');
+    expect(initialSwap.discovery.mismatchedExecutionIds).toEqual(ids.sort());
+    expect(initialSwap.discovery.fileSetMismatch).toBe(false);
+    expect(module.reduceGateVerdict(initialSwap, null).status).toBe('failed');
+
+    const validInitial = await classify({
+      ...input('vitest', 'initial', 'failed'),
+      reporter: makeStock('failed'),
+      evidence: makeEvidence('initial', 'failed', false),
+    });
+    const retrySwap = await classify({
+      ...input('vitest', 'retry'),
+      reporter: makeStock('passed'),
+      evidence: makeEvidence('retry', 'passed', true),
+      requestedFiles: files,
+    });
+    expect(retrySwap.discovery.status).toBe('failed');
+    expect(retrySwap.discovery.mismatchedExecutionIds).toEqual(ids.sort());
+    expect(retrySwap.discovery.fileSetMismatch).toBe(false);
+    expect(module.reduceGateVerdict(validInitial, retrySwap).status).toBe('failed');
+    // Preserved file sets make this case kill the mismatchedExecutionIds rejection independently.
   });
 
   it('aggregates duplicate Vitest stock paths with failure dominance in either order and permits exact retry', async () => {

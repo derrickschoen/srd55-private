@@ -19,7 +19,10 @@ type VitestArgvProbe =
   | 'initial-serial'
   | 'retry-isolate-false'
   | 'retry-coverage-false'
-  | 'retry-config-loader';
+  | 'retry-config-loader'
+  | 'retry-test-name-kebab'
+  | 'retry-no-watch'
+  | 'playwright-complex';
 type Scenario =
   | 'clean'
   | 'flaky'
@@ -145,9 +148,16 @@ function runGate(kind: RunnerKind, scenario: Scenario, argvProbe: VitestArgvProb
               ? ['--coverage', 'false']
               : argvProbe === 'retry-config-loader'
                 ? ['--configLoader', 'runner']
+                : argvProbe === 'retry-test-name-kebab'
+                  ? ['--test-name-pattern', 'abc']
+                  : argvProbe === 'retry-no-watch'
+                    ? ['--no-watch', 'false']
                 : ['--config', 'tests/fixtures/gate-vitest-proof.config.mts', '--project=unit']
-    : ['--project=chromium'];
-  const selectedFiles = argvProbe === 'complex' ? [failedFile, unrelatedFile] : [failedFile];
+    : argvProbe === 'playwright-complex'
+      ? ['--config', 'tests/fixtures/gate-evidence/playwright.config.mts', '--project', 'chromium', '--grep', 'probe', '--retries=7', '--workers=8', '--reporter=line']
+      : ['--project=chromium'];
+  const singleFileProbe = argvProbe !== 'default' && argvProbe !== 'complex' && argvProbe !== 'playwright-complex';
+  const selectedFiles = singleFileProbe ? [failedFile] : [failedFile, unrelatedFile];
   const tail = argvProbe === 'complex' ? ['--', '--node-tail', 'tail-value'] : [];
   const result = spawnSync(
     process.execPath,
@@ -189,9 +199,14 @@ describe.each(['vitest', 'playwright'] as const)('%s gate retained behavior', (k
     expect(retried.status).toBe(0);
     expect(retried.report.verdict.passedOnRetry).toEqual([retried.failedFile]);
     expect(retried.logs.filter((entry) => entry.type === 'command').map((entry) => entry.phase)).toEqual(['initial', 'retry']);
+    const initialCommand = retried.logs.filter((entry) => entry.type === 'command')[0];
     const retryCommand = retried.logs.filter((entry) => entry.type === 'command')[1];
-    expect(retryCommand?.arguments).toContain(retried.failedFile);
-    expect(retryCommand?.arguments).not.toContain(retried.unrelatedFile);
+    const initialFilters = initialCommand?.arguments.filter((argument) =>
+      argument === retried.failedFile || argument === retried.unrelatedFile);
+    const retryFilters = retryCommand?.arguments.filter((argument) =>
+      argument === retried.failedFile || argument === retried.unrelatedFile);
+    expect(initialFilters).toEqual([retried.failedFile, retried.unrelatedFile]);
+    expect(retryFilters).toEqual([retried.failedFile]);
     expect(retryCommand?.arguments).toContain(kind === 'vitest' ? '--no-file-parallelism' : '--workers=1');
     expect(retried.logs.filter((entry) => entry.type === 'flock')[1]?.arguments.slice(0, 3))
       .toEqual(['-w', '7200', '/tmp/dnd-gate.lock']);
@@ -301,6 +316,74 @@ describe('Vitest retained retry report completeness and option parsing', () => {
     const parsed = parseCLI(['vitest', ...args!.slice(1)]);
     expect(parsed.filter).toEqual([run.failedFile]);
     expect(parsed.options.configLoader).toBe('runner');
+  });
+
+  it('preserves kebab-case value options on retry', () => {
+    const run = runGate('vitest', 'ordinary_retry', 'retry-test-name-kebab');
+    const args = run.logs.find((entry) => entry.type === 'command' && entry.phase === 'retry')?.arguments;
+    expect(args).toBeDefined();
+    const parsed = parseCLI(['vitest', ...args!.slice(1)]);
+    expect(parsed.filter).toEqual([run.failedFile]);
+    expect(parsed.options.testNamePattern).toBe('abc');
+  });
+
+  it('does not retain a positional false after a negated flag on retry', () => {
+    const run = runGate('vitest', 'ordinary_retry', 'retry-no-watch');
+    const initialArgs = run.logs.find((entry) => entry.type === 'command' && entry.phase === 'initial')?.arguments;
+    const retryArgs = run.logs.find((entry) => entry.type === 'command' && entry.phase === 'retry')?.arguments;
+    expect(initialArgs).toBeDefined();
+    expect(retryArgs).toBeDefined();
+    expect(parseCLI(['vitest', ...initialArgs!.slice(1)]).filter).toEqual(['false', run.failedFile]);
+    const retryParsed = parseCLI(['vitest', ...retryArgs!.slice(1)]);
+    expect(retryParsed.filter).toEqual([run.failedFile]);
+    expect(retryParsed.options.watch).toBe(false);
+  });
+
+  it('recognizes every value option in camelCase and mechanically derived kebab-case', () => {
+    const source = readFileSync(resolve('tools/gate-vitest.mjs'), 'utf8');
+    const start = source.indexOf('const VALUE_OPTIONS');
+    const end = source.indexOf('\nconst vitestModule');
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    const body = source.slice(start, end).replace('export function retainedVitestRetryTokens', 'function retainedVitestRetryTokens');
+    const factory = new Function(`${body}\nreturn { VALUE_OPTIONS, isValueOption };`) as () => unknown;
+    const internals = factory();
+    expect(internals).toBeTypeOf('object');
+    if (internals === null || typeof internals !== 'object' ||
+      !('VALUE_OPTIONS' in internals) || !(internals.VALUE_OPTIONS instanceof Set) ||
+      !('isValueOption' in internals) || typeof internals.isValueOption !== 'function') {
+      throw new Error('Vitest argument internals are not inspectable.');
+    }
+    const kebab = (option: string): string => option.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`);
+    for (const value of internals.VALUE_OPTIONS) {
+      expect(typeof value).toBe('string');
+      if (typeof value !== 'string') throw new Error('VALUE_OPTIONS contains a non-string entry.');
+      expect(internals.isValueOption(value), value).toBe(true);
+      expect(internals.isValueOption(kebab(value)), kebab(value)).toBe(true);
+    }
+  });
+});
+
+describe('Playwright controlled retry options', () => {
+  it('strips caller retries/reporters and forces retry zero plus one worker with exact filters', () => {
+    const run = runGate('playwright', 'ordinary_retry', 'playwright-complex');
+    const initial = run.logs.find((entry) => entry.type === 'command' && entry.phase === 'initial')?.arguments;
+    const retry = run.logs.find((entry) => entry.type === 'command' && entry.phase === 'retry')?.arguments;
+    expect(initial).toBeDefined();
+    expect(retry).toBeDefined();
+    expect(initial?.filter((argument) => argument.startsWith('--retries'))).toEqual(['--retries=0']);
+    expect(initial?.filter((argument) => argument.startsWith('--reporter'))).toHaveLength(1);
+    expect(initial?.filter((argument) => argument === run.failedFile || argument === run.unrelatedFile))
+      .toEqual([run.failedFile, run.unrelatedFile]);
+    expect(retry?.filter((argument) => argument.startsWith('--retries'))).toEqual(['--retries=0']);
+    expect(retry?.filter((argument) => argument.startsWith('--workers'))).toEqual(['--workers=1']);
+    expect(retry?.filter((argument) => argument.startsWith('--reporter'))).toHaveLength(1);
+    expect(retry?.filter((argument) => argument === run.failedFile || argument === run.unrelatedFile))
+      .toEqual([run.failedFile]);
+    expect(retry).toEqual(expect.arrayContaining([
+      '--config', 'tests/fixtures/gate-evidence/playwright.config.mts',
+      '--project', 'chromium', '--grep', 'probe',
+    ]));
   });
 });
 
