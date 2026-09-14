@@ -17,6 +17,20 @@ import { fileURLToPath } from 'node:url';
 
 const repoRoot = fileURLToPath(new URL('../../../', import.meta.url));
 
+interface CacheDescriptors {
+  readonly HIT_GUARD_DESCRIPTOR: { readonly script: string };
+  readonly VALIDATED_BUILD_DESCRIPTORS: readonly { readonly script: string }[];
+}
+
+function exposesCacheDescriptors(value: unknown): value is CacheDescriptors {
+  return typeof value === 'object' && value !== null &&
+    'HIT_GUARD_DESCRIPTOR' in value && 'VALIDATED_BUILD_DESCRIPTORS' in value;
+}
+
+const cacheModule: unknown = await import(new URL('../../../tools/dist-build-cache.mjs', import.meta.url).href);
+if (!exposesCacheDescriptors(cacheModule)) throw new TypeError('Invalid dist cache descriptors.');
+const { HIT_GUARD_DESCRIPTOR, VALIDATED_BUILD_DESCRIPTORS } = cacheModule;
+
 function read(relative: string): Promise<string> {
   return readFile(join(repoRoot, relative), 'utf8');
 }
@@ -106,7 +120,10 @@ describe('gate 4: the dist scan is chained onto the build and can actually fire'
     const pkg = JSON.parse(await read('package.json')) as {
       scripts: Record<string, string>;
     };
-    expect(pkg.scripts['build']).toContain('node tools/assert-dist-clean.mjs');
+    expect(pkg.scripts['build']).toContain('node tools/dist-build-cache.mjs');
+    expect(HIT_GUARD_DESCRIPTOR.script).toBe('tools/assert-dist-clean.mjs');
+    expect(VALIDATED_BUILD_DESCRIPTORS.at(-1)?.script).toBe('tools/assert-dist-clean.mjs');
+    expect(pkg.scripts['build:dist:validated']).toContain('node tools/assert-dist-clean.mjs');
   });
 
   it('BROWSER-PROBE-SEAM-DEV-ONLY: looks for literals that really occur behind their source gates', async () => {
