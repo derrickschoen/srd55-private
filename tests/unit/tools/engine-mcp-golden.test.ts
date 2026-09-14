@@ -1,15 +1,19 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { runEngineMcpDryClient } from '../../../tools/engine-mcp-dry-client';
 import type { DryTranscriptEntry } from '../../../tools/engine-mcp-dry-client';
 import { freshMonsterPlanningState, loadArenaFixture } from '../../../src/vtt/mcp/entrypoint';
+import * as engineMcpEntrypoint from '../../../src/vtt/mcp/entrypoint';
 import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
 import {
   createLegacyEngineOptionEnvironment,
+  createRevisionBoundEngineOptionEnvironment,
   engineOptionEnvironmentFromBinding,
 } from '../../../src/vtt/offers/offer-environment';
+import * as offerEnvironmentModule from '../../../src/vtt/offers/offer-environment';
 import { availableEngineActorOptions, resolveEngineActorOption } from '../../../src/vtt/intent-resolver';
 
 const FIXTURE = 'tests/fixtures/arena-basis/seed-3943006.json';
+const BOUND_OFFER_ENVIRONMENT = createRevisionBoundEngineOptionEnvironment(canonicalEngineQueryPort);
 
 function record(value: unknown, label: string): Readonly<Record<string, unknown>> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new TypeError(`${label} must be an object.`);
@@ -68,6 +72,10 @@ function expectOfferEnvironmentIdentity(
 describe('real-stdio engine MCP golden dungeon run', () => {
   it('rejects an equal-binding replacement for a stdio-shaped option', async () => {
     const planningState = freshMonsterPlanningState(await loadArenaFixture(FIXTURE));
+    const boundRuntime = engineMcpEntrypoint.createEngineMcpRuntime(planningState, {
+      offerEnvironment: BOUND_OFFER_ENVIRONMENT,
+    });
+    expect(boundRuntime.feed.current().offerEnvironment).toEqual(BOUND_OFFER_ENVIRONMENT.binding);
     const actorId = planningState.combatants.find(
       (candidate) => candidate.profile.kind === 'monster' && candidate.life === 'living',
     )?.profile.id;
@@ -76,7 +84,19 @@ describe('real-stdio engine MCP golden dungeon run', () => {
   });
 
   it('covers discovery, proposal correction, adjudication, narration, and restart shapes', { timeout: 30_000 }, async () => {
-    const report = await runEngineMcpDryClient(FIXTURE);
+    const environmentConstructor = vi.spyOn(offerEnvironmentModule, 'createLegacyEngineOptionEnvironment');
+    const runtimeConstructor = vi.spyOn(engineMcpEntrypoint, 'createEngineMcpRuntime');
+    let report: Awaited<ReturnType<typeof runEngineMcpDryClient>>;
+    try {
+      report = await runEngineMcpDryClient(FIXTURE);
+      expect(environmentConstructor).not.toHaveBeenCalled();
+      expect(runtimeConstructor).not.toHaveBeenCalled();
+    } finally {
+      runtimeConstructor.mockRestore();
+      environmentConstructor.mockRestore();
+      expect(vi.isMockFunction(engineMcpEntrypoint.createEngineMcpRuntime)).toBe(false);
+      expect(vi.isMockFunction(offerEnvironmentModule.createLegacyEngineOptionEnvironment)).toBe(false);
+    }
     expect(report).toMatchObject({ status: 'VERIFIED', protocolConformance: 'SUBSTITUTED_LOCAL' });
     const methods = report.initial.map((entry) => decoded(entry.request)['method']);
     expect(methods).toEqual(expect.arrayContaining(['server/discover', 'tools/list', 'resources/list', 'prompts/list']));

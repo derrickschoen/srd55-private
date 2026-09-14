@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { ControllerIdentity, LegalActionSummary } from '../../../src/combat/controllers';
 import { monsterCombatantProfile } from '../../../src/combat/combatant';
 import { createEncounter, reduceEncounter, type EncounterState } from '../../../src/combat/encounter';
@@ -16,9 +16,9 @@ import {
 } from '../../../src/vtt/session-persistence';
 import { createConversationRoundDeadline } from '../../../src/vtt/agent-session-lifecycle';
 import {
-  createEngineMcpRuntime as createDefaultEngineMcpRuntime,
   freshMonsterPlanningState,
 } from '../../../src/vtt/mcp/entrypoint';
+import * as engineMcpEntrypoint from '../../../src/vtt/mcp/entrypoint';
 import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
 import {
   createRevisionBoundEngineOptionEnvironment,
@@ -37,21 +37,8 @@ import { monsterProfile, placedToken, playerProfile } from '../../unit/combat/fi
 const BOUND_OFFER_ENVIRONMENT = createRevisionBoundEngineOptionEnvironment(canonicalEngineQueryPort);
 let offerEnvironmentIdentityChecked = false;
 
-function observeOfferEnvironment(offerEnvironment: typeof BOUND_OFFER_ENVIRONMENT) {
-  let bindingReads = 0;
-  return {
-    environment: new Proxy(offerEnvironment, {
-      get(target, property, receiver) {
-        if (property === 'binding') bindingReads += 1;
-        return Reflect.get(target, property, receiver) as unknown;
-      },
-    }),
-    bindingReads: () => bindingReads,
-  };
-}
-
 function expectOfferEnvironmentIdentity(
-  state: Parameters<typeof createDefaultEngineMcpRuntime>[0],
+  state: Parameters<typeof engineMcpEntrypoint.createEngineMcpRuntime>[0],
   offerEnvironment: typeof BOUND_OFFER_ENVIRONMENT,
 ): void {
   const planningState = freshMonsterPlanningState(state);
@@ -75,18 +62,24 @@ function expectOfferEnvironmentIdentity(
 }
 
 function createEngineMcpRuntime(
-  state: Parameters<typeof createDefaultEngineMcpRuntime>[0],
-  options: NonNullable<Parameters<typeof createDefaultEngineMcpRuntime>[1]> = {},
-): ReturnType<typeof createDefaultEngineMcpRuntime> {
+  state: Parameters<typeof engineMcpEntrypoint.createEngineMcpRuntime>[0],
+  options: NonNullable<Parameters<typeof engineMcpEntrypoint.createEngineMcpRuntime>[1]> = {},
+): ReturnType<typeof engineMcpEntrypoint.createEngineMcpRuntime> {
   const offerEnvironment = options.offerEnvironment ?? BOUND_OFFER_ENVIRONMENT;
-  const observed = observeOfferEnvironment(offerEnvironment);
-  const runtime = createDefaultEngineMcpRuntime(state, { ...options, offerEnvironment: observed.environment });
-  expect(observed.bindingReads()).toBeGreaterThan(0);
-  if (!offerEnvironmentIdentityChecked) {
-    expectOfferEnvironmentIdentity(state, observed.environment);
-    offerEnvironmentIdentityChecked = true;
+  const runtimeConstructor = vi.spyOn(engineMcpEntrypoint, 'createEngineMcpRuntime');
+  try {
+    const runtime = engineMcpEntrypoint.createEngineMcpRuntime(state, { ...options, offerEnvironment });
+    expect(runtimeConstructor.mock.calls.at(-1)?.[1]?.offerEnvironment).toBe(offerEnvironment);
+    expect(runtime.feed.current().offerEnvironment).toEqual(offerEnvironment.binding);
+    if (!offerEnvironmentIdentityChecked) {
+      expectOfferEnvironmentIdentity(state, offerEnvironment);
+      offerEnvironmentIdentityChecked = true;
+    }
+    return runtime;
+  } finally {
+    runtimeConstructor.mockRestore();
+    expect(vi.isMockFunction(engineMcpEntrypoint.createEngineMcpRuntime)).toBe(false);
   }
-  return runtime;
 }
 
 function position(state: EncounterState, id: CombatantId): GridCell {

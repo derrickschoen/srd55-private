@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { readFile } from '../../helpers/test-filesystem-promises';
 import { canonicalJson } from '../../../src/commands/canonical-json';
 import type { EncounterState } from '../../../src/combat/encounter';
@@ -12,10 +12,10 @@ import {
   EncounterSessionJournal,
 } from '../../../src/vtt/session-persistence';
 import {
-  createEngineMcpRuntime,
   freshMonsterPlanningState,
   loadArenaFixture,
 } from '../../../src/vtt/mcp/entrypoint';
+import * as engineMcpEntrypoint from '../../../src/vtt/mcp/entrypoint';
 import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
 import {
   createRevisionBoundEngineOptionEnvironment,
@@ -37,19 +37,6 @@ const CONTROL_FIXTURES = Array.from(
   (_unused, index) => `tests/fixtures/arena-basis-brutal/seed-${String(6_203_001 + index)}.json`,
 );
 const BOUND_OFFER_ENVIRONMENT = createRevisionBoundEngineOptionEnvironment(canonicalEngineQueryPort);
-
-function observeOfferEnvironment() {
-  let bindingReads = 0;
-  return {
-    environment: new Proxy(BOUND_OFFER_ENVIRONMENT, {
-      get(target, property, receiver) {
-        if (property === 'binding') bindingReads += 1;
-        return Reflect.get(target, property, receiver) as unknown;
-      },
-    }),
-    bindingReads: () => bindingReads,
-  };
-}
 
 function expectOfferEnvironmentIdentity(
   state: EncounterState,
@@ -176,12 +163,19 @@ describe('AI DM board snapshot contracts', () => {
 
     expect(importSavedSession(store, bundle.bytes)).toBe(bundle.sessionId);
     const resumed = EncounterSessionJournal.resume(bundle.sessionId, store, new MemoryMirrorSink());
-    const observed = observeOfferEnvironment();
-    const runtime = createEngineMcpRuntime(resumed.encounterState, {
-      offerEnvironment: observed.environment,
-    });
-    expect(observed.bindingReads()).toBeGreaterThan(0);
-    expectOfferEnvironmentIdentity(resumed.encounterState, observed.environment);
+    const runtimeConstructor = vi.spyOn(engineMcpEntrypoint, 'createEngineMcpRuntime');
+    let runtime: ReturnType<typeof engineMcpEntrypoint.createEngineMcpRuntime>;
+    try {
+      runtime = engineMcpEntrypoint.createEngineMcpRuntime(resumed.encounterState, {
+        offerEnvironment: BOUND_OFFER_ENVIRONMENT,
+      });
+      expect(runtimeConstructor.mock.calls.at(-1)?.[1]?.offerEnvironment).toBe(BOUND_OFFER_ENVIRONMENT);
+      expect(runtime.feed.current().offerEnvironment).toEqual(BOUND_OFFER_ENVIRONMENT.binding);
+      expectOfferEnvironmentIdentity(resumed.encounterState, BOUND_OFFER_ENVIRONMENT);
+    } finally {
+      runtimeConstructor.mockRestore();
+      expect(vi.isMockFunction(engineMcpEntrypoint.createEngineMcpRuntime)).toBe(false);
+    }
     expect(canonicalJson(resumed.encounterState)).toBe(stateBytes);
     expect(runtime.feed.current().projection.combatants.map((combatant) => combatant.id).sort()).toEqual(
       resumed.encounterState.combatants

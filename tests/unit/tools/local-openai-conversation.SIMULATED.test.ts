@@ -2,7 +2,7 @@ import { createServer, type IncomingHttpHeaders, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { combatantId, encounterSessionId } from '../../../src/combat/values';
 import { ENGINE_DM_TOOL_NAMES } from '../../../src/vtt/mcp/engine-server';
 import { ENGINE_TOOL_SPECS } from '../../../src/vtt/mcp/schemas';
@@ -18,8 +18,10 @@ import {
   createLegacyEngineOptionEnvironment,
   engineOptionEnvironmentFromBinding,
 } from '../../../src/vtt/offers/offer-environment';
+import * as offerEnvironmentModule from '../../../src/vtt/offers/offer-environment';
 import { availableEngineActorOptions, resolveEngineActorOption } from '../../../src/vtt/intent-resolver';
 import { loadArenaFixture, projectFutureMonsterTurns } from '../../../src/vtt/mcp/entrypoint';
+import * as engineMcpEntrypoint from '../../../src/vtt/mcp/entrypoint';
 
 interface FakeRequest {
   readonly path: string;
@@ -223,7 +225,43 @@ describe('SIMULATED local OpenAI conversation adapter', () => {
         '--combat-model', 'monster_block_v1', '--initiative-profile', 'legacy',
         '--renderer-profile', JSON.stringify(ALL_OPTIONS_TEST_RENDERER_PROFILE),
       ]);
-      const rows = await runArena(config);
+      const legacyEnvironmentConstructor = vi.spyOn(
+        offerEnvironmentModule,
+        'createLegacyEngineOptionEnvironment',
+      );
+      const reconstructedEnvironmentConstructor = vi.spyOn(
+        offerEnvironmentModule,
+        'engineOptionEnvironmentFromBinding',
+      );
+      const runtimeConstructor = vi.spyOn(engineMcpEntrypoint, 'createEngineMcpRuntime');
+      let rows: Awaited<ReturnType<typeof runArena>>;
+      try {
+        rows = await runArena(config);
+        const constructedEnvironments = [
+          ...legacyEnvironmentConstructor.mock.results,
+          ...reconstructedEnvironmentConstructor.mock.results,
+        ].flatMap((result) => result.type === 'return' ? [result.value] : []);
+        const consumedEnvironments = runtimeConstructor.mock.calls.flatMap((call) =>
+          call[1]?.offerEnvironment === undefined ? [] : [call[1].offerEnvironment]);
+        expect(constructedEnvironments.length).toBeGreaterThan(0);
+        expect(consumedEnvironments.length).toBeGreaterThan(0);
+        expect(constructedEnvironments.every((environment) => consumedEnvironments.includes(environment))).toBe(true);
+        expect(consumedEnvironments.every((environment) => constructedEnvironments.includes(environment))).toBe(true);
+        for (const [index, call] of runtimeConstructor.mock.calls.entries()) {
+          const environment = call[1]?.offerEnvironment;
+          const result = runtimeConstructor.mock.results[index];
+          if (environment !== undefined && result?.type === 'return') {
+            expect(result.value.feed.current().offerEnvironment).toEqual(environment.binding);
+          }
+        }
+      } finally {
+        runtimeConstructor.mockRestore();
+        reconstructedEnvironmentConstructor.mockRestore();
+        legacyEnvironmentConstructor.mockRestore();
+        expect(vi.isMockFunction(engineMcpEntrypoint.createEngineMcpRuntime)).toBe(false);
+        expect(vi.isMockFunction(offerEnvironmentModule.engineOptionEnvironmentFromBinding)).toBe(false);
+        expect(vi.isMockFunction(offerEnvironmentModule.createLegacyEngineOptionEnvironment)).toBe(false);
+      }
 
       expect(rows).toEqual([expect.objectContaining({
         cli: 'local-openai', model: 'quantized-SIMULATED', thinkMode: 'on', outcome: 'authorized',

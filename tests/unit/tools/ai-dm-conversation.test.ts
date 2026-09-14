@@ -43,13 +43,14 @@ import {
   pureTurnProposalResolver,
   resolveEngineActorOption,
 } from '../../../src/vtt/intent-resolver';
+import * as intentResolverModule from '../../../src/vtt/intent-resolver';
 import {
-  createEngineMcpRuntime as createDefaultEngineMcpRuntime,
   freshMonsterPlanningState,
   loadArenaFixture,
   parseEngineMcpJsonLine,
   type EngineMcpLauncherManifest,
 } from '../../../src/vtt/mcp/entrypoint';
+import * as engineMcpEntrypoint from '../../../src/vtt/mcp/entrypoint';
 import { mcpRequestMeta, type McpHandler } from '../../../src/vtt/mcp/handler';
 import { reduceSessionEncounter } from '../../../src/vtt/session-encounter-reducer';
 import {
@@ -97,24 +98,11 @@ const kbInputs = declareTestInputs({ fixtures: [
 ] });
 const DEFAULT_KB_HASH = '00776f3f2d4cd7468a1eb2a63028e9c3f846b43b14a4e5787d3e9c94e02633c0';
 const BOUND_OFFER_ENVIRONMENT = createRevisionBoundEngineOptionEnvironment(canonicalEngineQueryPort);
-const DIVERGENCE_OFFER_ENVIRONMENT = canonicalEngineQueryPort;
+const DIVERGENCE_OFFER_ENVIRONMENT = createRevisionBoundEngineOptionEnvironment(canonicalEngineQueryPort);
 let offerEnvironmentIdentityChecked = false;
 
-function observeOfferEnvironment(offerEnvironment: typeof BOUND_OFFER_ENVIRONMENT) {
-  let bindingReads = 0;
-  return {
-    environment: new Proxy(offerEnvironment, {
-      get(target, property, receiver) {
-        if (property === 'binding') bindingReads += 1;
-        return Reflect.get(target, property, receiver) as unknown;
-      },
-    }),
-    bindingReads: () => bindingReads,
-  };
-}
-
 function expectOfferEnvironmentIdentity(
-  state: Parameters<typeof createDefaultEngineMcpRuntime>[0],
+  state: Parameters<typeof engineMcpEntrypoint.createEngineMcpRuntime>[0],
   offerEnvironment: typeof BOUND_OFFER_ENVIRONMENT,
 ): void {
   const planningState = freshMonsterPlanningState(state);
@@ -138,18 +126,24 @@ function expectOfferEnvironmentIdentity(
 }
 
 function createEngineMcpRuntime(
-  state: Parameters<typeof createDefaultEngineMcpRuntime>[0],
-  options: NonNullable<Parameters<typeof createDefaultEngineMcpRuntime>[1]> = {},
-): ReturnType<typeof createDefaultEngineMcpRuntime> {
+  state: Parameters<typeof engineMcpEntrypoint.createEngineMcpRuntime>[0],
+  options: NonNullable<Parameters<typeof engineMcpEntrypoint.createEngineMcpRuntime>[1]> = {},
+): ReturnType<typeof engineMcpEntrypoint.createEngineMcpRuntime> {
   const offerEnvironment = options.offerEnvironment ?? BOUND_OFFER_ENVIRONMENT;
-  const observed = observeOfferEnvironment(offerEnvironment);
-  const runtime = createDefaultEngineMcpRuntime(state, { ...options, offerEnvironment: observed.environment });
-  expect(observed.bindingReads()).toBeGreaterThan(0);
-  if (!offerEnvironmentIdentityChecked) {
-    expectOfferEnvironmentIdentity(state, observed.environment);
-    offerEnvironmentIdentityChecked = true;
+  const runtimeConstructor = vi.spyOn(engineMcpEntrypoint, 'createEngineMcpRuntime');
+  try {
+    const runtime = engineMcpEntrypoint.createEngineMcpRuntime(state, { ...options, offerEnvironment });
+    expect(runtimeConstructor.mock.calls.at(-1)?.[1]?.offerEnvironment).toBe(offerEnvironment);
+    expect(runtime.feed.current().offerEnvironment).toEqual(offerEnvironment.binding);
+    if (!offerEnvironmentIdentityChecked) {
+      expectOfferEnvironmentIdentity(state, offerEnvironment);
+      offerEnvironmentIdentityChecked = true;
+    }
+    return runtime;
+  } finally {
+    runtimeConstructor.mockRestore();
+    expect(vi.isMockFunction(engineMcpEntrypoint.createEngineMcpRuntime)).toBe(false);
   }
-  return runtime;
 }
 
 function launcherOfferEnvironment(manifest: EngineMcpLauncherManifest) {
@@ -1622,22 +1616,36 @@ describe('AI-DM engine MCP conversation runner', () => {
       actorId: actor.profile.id, expectedRevision: state.revision, primaryOptionId: option.optionId,
       fallbackOptionId: null, reason: 'Exercise the fixture proposal path.', overrideJustification: null,
     };
-    const proposalTime = createPureTurnProposalResolver(DIVERGENCE_OFFER_ENVIRONMENT).resolve(state, proposal);
+    const divergenceResolver = createPureTurnProposalResolver(DIVERGENCE_OFFER_ENVIRONMENT);
+    const proposalTime = divergenceResolver.resolve(state, proposal);
     if (!proposalTime.valid) throw new Error('Room 3943006 Dodge proposal did not resolve.');
-    expect(proposalTime).toEqual(pureTurnProposalResolver.resolve(state, proposal));
+    expect(proposalTime).toEqual(divergenceResolver.resolve(state, proposal));
+    const equalQueryPort = { ...canonicalEngineQueryPort };
+    expect(equalQueryPort).not.toBe(canonicalEngineQueryPort);
+    expect(resolveEngineActorOption(state, option, equalQueryPort)).toMatchObject({
+      valid: false,
+      code: 'OFFER_ENVIRONMENT_MISMATCH',
+    });
 
-    expect(proposalResolutionDivergence(state, {
-      proposal,
-      option: proposalTime.option,
-      primaryOption: proposalTime.primaryOption,
-      fallbackOption: proposalTime.fallbackOption,
-      mechanics: proposalTime.mechanics,
-      selectedBranch: proposalTime.selectedBranch,
-      resolutionDigest: '0'.repeat(64),
-      summary: proposalTime.summary,
-    })).toEqual([
-      `${actor.profile.id}: path or final-position geometry diverged while action sequence, targets, and movement cost remained ${proposalTime.summary}.`,
-    ]);
+    const defaultResolver = vi.spyOn(intentResolverModule, 'pureTurnProposalResolver', 'get')
+      .mockReturnValue(divergenceResolver);
+    try {
+      expect(proposalResolutionDivergence(state, {
+        proposal,
+        option: proposalTime.option,
+        primaryOption: proposalTime.primaryOption,
+        fallbackOption: proposalTime.fallbackOption,
+        mechanics: proposalTime.mechanics,
+        selectedBranch: proposalTime.selectedBranch,
+        resolutionDigest: '0'.repeat(64),
+        summary: proposalTime.summary,
+      })).toEqual([
+        `${actor.profile.id}: path or final-position geometry diverged while action sequence, targets, and movement cost remained ${proposalTime.summary}.`,
+      ]);
+    } finally {
+      defaultResolver.mockRestore();
+      expect(vi.isMockFunction(intentResolverModule.pureTurnProposalResolver)).toBe(false);
+    }
   });
 
   it.each([3_943_004, 3_943_007])(
