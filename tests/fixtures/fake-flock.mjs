@@ -17,4 +17,5 @@ const result = spawnSync(executable, argumentsList.slice(4), {
   stdio: 'inherit',
 });
 if (result.error !== undefined) throw result.error;
-process.exitCode = result.status ?? 1;
+if (result.signal !== null) process.kill(process.pid, result.signal);
+else process.exitCode = result.status ?? 1;
