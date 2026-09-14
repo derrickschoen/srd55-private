@@ -16,21 +16,66 @@ import {
   createLegacyEngineOptionEnvironment,
   createRevisionBoundEngineOptionEnvironment,
   createLegacyEngineOptionEnvironmentBinding,
+  engineOptionEnvironmentFromBinding,
 } from '../../../src/vtt/offers/offer-environment';
 import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
+import { availableEngineActorOptions, resolveEngineActorOption } from '../../../src/vtt/intent-resolver';
 
 const FIXTURE = 'tests/fixtures/arena-basis/seed-3943006.json';
 const META = mcpRequestMeta({ name: 'SUBSTITUTED_LOCAL', version: '1.0.0' });
 const BOUND_OFFER_ENVIRONMENT = createRevisionBoundEngineOptionEnvironment(canonicalEngineQueryPort);
 const TRANSITIONAL_STDIO_OFFER_ENVIRONMENT = createLegacyEngineOptionEnvironment(canonicalEngineQueryPort);
+let offerEnvironmentIdentityChecked = false;
+
+function observeOfferEnvironment(offerEnvironment: typeof BOUND_OFFER_ENVIRONMENT) {
+  let bindingReads = 0;
+  return {
+    environment: new Proxy(offerEnvironment, {
+      get(target, property, receiver) {
+        if (property === 'binding') bindingReads += 1;
+        return Reflect.get(target, property, receiver) as unknown;
+      },
+    }),
+    bindingReads: () => bindingReads,
+  };
+}
+
+function expectOfferEnvironmentIdentity(
+  state: Parameters<typeof createDefaultEngineMcpRuntime>[0],
+  offerEnvironment: typeof BOUND_OFFER_ENVIRONMENT,
+): void {
+  const planningState = freshMonsterPlanningState(state);
+  const actorId = planningState.combatants.find(
+    (candidate) => candidate.profile.kind === 'monster' && candidate.life === 'living',
+  )?.profile.id;
+  if (actorId === undefined) throw new Error('Offer-environment probe has no living monster.');
+  const option = availableEngineActorOptions(planningState, actorId, offerEnvironment)[0];
+  if (option === undefined) throw new Error(`Offer-environment probe has no option for ${actorId}.`);
+  expect(resolveEngineActorOption(planningState, option, offerEnvironment).valid).toBe(true);
+  const equalBindingEnvironment = engineOptionEnvironmentFromBinding(
+    offerEnvironment.queries,
+    offerEnvironment.binding,
+  );
+  expect(equalBindingEnvironment).not.toBe(offerEnvironment);
+  expect(equalBindingEnvironment.binding).toEqual(offerEnvironment.binding);
+  expect(resolveEngineActorOption(planningState, option, equalBindingEnvironment)).toMatchObject({
+    valid: false,
+    code: 'OFFER_ENVIRONMENT_MISMATCH',
+  });
+}
 
 function createEngineMcpRuntime(
   state: Parameters<typeof createDefaultEngineMcpRuntime>[0],
   options: NonNullable<Parameters<typeof createDefaultEngineMcpRuntime>[1]> = {},
 ): ReturnType<typeof createDefaultEngineMcpRuntime> {
   const offerEnvironment = options.offerEnvironment ?? BOUND_OFFER_ENVIRONMENT;
-  const runtime = createDefaultEngineMcpRuntime(state, { ...options, offerEnvironment });
-  expect(runtime.feed.current().offerEnvironment).toEqual(offerEnvironment.binding);
+  const observed = observeOfferEnvironment(offerEnvironment);
+  const runtime = createDefaultEngineMcpRuntime(state, { ...options, offerEnvironment: observed.environment });
+  expect(observed.bindingReads()).toBeGreaterThan(0);
+  if (!offerEnvironmentIdentityChecked) {
+    expectOfferEnvironmentIdentity(state, observed.environment);
+    offerEnvironmentIdentityChecked = true;
+  }
   return runtime;
 }
 
@@ -87,6 +132,11 @@ class SUBSTITUTED_LOCALAdapter {
   }
 }
 describe('engine MCP process mutation boundary', () => {
+  it('rejects an equal-binding replacement at its runtime consumer', async () => {
+    createEngineMcpRuntime(await loadArenaFixture(FIXTURE));
+    expect(offerEnvironmentIdentityChecked).toBe(true);
+  });
+
   it('never routes a malformed claimed launcher through fixture fallback', async () => {
     const state = await loadArenaFixture(FIXTURE);
     const counterexample = {
@@ -248,10 +298,9 @@ describe('SUBSTITUTED_LOCAL MCP conformance and artifacts', () => {
 
   it('proves transport-neutral request parity through the test-only adapter', { timeout: 20_000 }, async () => {
     const state = freshMonsterPlanningState(await loadArenaFixture(FIXTURE));
-    const runtime = createDefaultEngineMcpRuntime(state, {
+    const runtime = createEngineMcpRuntime(state, {
       offerEnvironment: TRANSITIONAL_STDIO_OFFER_ENVIRONMENT,
     });
-    expect(runtime.feed.current().offerEnvironment).toEqual(TRANSITIONAL_STDIO_OFFER_ENVIRONMENT.binding);
     const adapter = new SUBSTITUTED_LOCALAdapter(runtime.handler);
     expect(adapter.request('server/discover', {})).toHaveProperty('result');
     expect(adapter.request('tools/list', {})).toHaveProperty('result');

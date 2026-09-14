@@ -40,6 +40,8 @@ import {
   availableEngineActorOptions,
   createPureTurnProposalResolver,
   engineActorOptionsForEnvironment,
+  pureTurnProposalResolver,
+  resolveEngineActorOption,
 } from '../../../src/vtt/intent-resolver';
 import {
   createEngineMcpRuntime as createDefaultEngineMcpRuntime,
@@ -95,15 +97,58 @@ const kbInputs = declareTestInputs({ fixtures: [
 ] });
 const DEFAULT_KB_HASH = '00776f3f2d4cd7468a1eb2a63028e9c3f846b43b14a4e5787d3e9c94e02633c0';
 const BOUND_OFFER_ENVIRONMENT = createRevisionBoundEngineOptionEnvironment(canonicalEngineQueryPort);
-const boundTurnProposalResolver = createPureTurnProposalResolver(BOUND_OFFER_ENVIRONMENT);
+const DIVERGENCE_OFFER_ENVIRONMENT = canonicalEngineQueryPort;
+let offerEnvironmentIdentityChecked = false;
+
+function observeOfferEnvironment(offerEnvironment: typeof BOUND_OFFER_ENVIRONMENT) {
+  let bindingReads = 0;
+  return {
+    environment: new Proxy(offerEnvironment, {
+      get(target, property, receiver) {
+        if (property === 'binding') bindingReads += 1;
+        return Reflect.get(target, property, receiver) as unknown;
+      },
+    }),
+    bindingReads: () => bindingReads,
+  };
+}
+
+function expectOfferEnvironmentIdentity(
+  state: Parameters<typeof createDefaultEngineMcpRuntime>[0],
+  offerEnvironment: typeof BOUND_OFFER_ENVIRONMENT,
+): void {
+  const planningState = freshMonsterPlanningState(state);
+  const actorId = planningState.combatants.find(
+    (candidate) => candidate.profile.kind === 'monster' && candidate.life === 'living',
+  )?.profile.id;
+  if (actorId === undefined) throw new Error('Offer-environment probe has no living monster.');
+  const option = availableEngineActorOptions(planningState, actorId, offerEnvironment)[0];
+  if (option === undefined) throw new Error(`Offer-environment probe has no option for ${actorId}.`);
+  expect(resolveEngineActorOption(planningState, option, offerEnvironment).valid).toBe(true);
+  const equalBindingEnvironment = engineOptionEnvironmentFromBinding(
+    offerEnvironment.queries,
+    offerEnvironment.binding,
+  );
+  expect(equalBindingEnvironment).not.toBe(offerEnvironment);
+  expect(equalBindingEnvironment.binding).toEqual(offerEnvironment.binding);
+  expect(resolveEngineActorOption(planningState, option, equalBindingEnvironment)).toMatchObject({
+    valid: false,
+    code: 'OFFER_ENVIRONMENT_MISMATCH',
+  });
+}
 
 function createEngineMcpRuntime(
   state: Parameters<typeof createDefaultEngineMcpRuntime>[0],
   options: NonNullable<Parameters<typeof createDefaultEngineMcpRuntime>[1]> = {},
 ): ReturnType<typeof createDefaultEngineMcpRuntime> {
   const offerEnvironment = options.offerEnvironment ?? BOUND_OFFER_ENVIRONMENT;
-  const runtime = createDefaultEngineMcpRuntime(state, { ...options, offerEnvironment });
-  expect(runtime.feed.current().offerEnvironment).toEqual(offerEnvironment.binding);
+  const observed = observeOfferEnvironment(offerEnvironment);
+  const runtime = createDefaultEngineMcpRuntime(state, { ...options, offerEnvironment: observed.environment });
+  expect(observed.bindingReads()).toBeGreaterThan(0);
+  if (!offerEnvironmentIdentityChecked) {
+    expectOfferEnvironmentIdentity(state, observed.environment);
+    offerEnvironmentIdentityChecked = true;
+  }
   return runtime;
 }
 
@@ -667,6 +712,11 @@ async function producerMutationReceipt<Dependency, Result>(
 }
 
 describe('AI-DM engine MCP conversation runner', () => {
+  it('rejects an equal-binding replacement at its runtime consumer', () => {
+    createEngineMcpRuntime(generateRoom(3_943_001).encounter.state);
+    expect(offerEnvironmentIdentityChecked).toBe(true);
+  });
+
   it('rejects a request after the MCP child closes stdin without an unhandled EPIPE', async () => {
     const child = spawn(process.execPath, ['-e', [
       "process.on('SIGTERM', () => {});",
@@ -1565,15 +1615,16 @@ describe('AI-DM engine MCP conversation runner', () => {
     const actor = state.combatants.find((combatant) =>
       combatant.profile.kind === 'monster' && combatant.life !== 'dead');
     if (actor === undefined) throw new Error('Generated room 3943006 has no living monster.');
-    const option = availableEngineActorOptions(state, actor.profile.id, BOUND_OFFER_ENVIRONMENT)
+    const option = availableEngineActorOptions(state, actor.profile.id, DIVERGENCE_OFFER_ENVIRONMENT)
       .find((candidate) => candidate.actionSlots.some((slot) => slot.use.kind === 'dodge'));
     if (option === undefined) throw new Error('Room 3943006 Dodge option is absent.');
     const proposal = {
       actorId: actor.profile.id, expectedRevision: state.revision, primaryOptionId: option.optionId,
       fallbackOptionId: null, reason: 'Exercise the fixture proposal path.', overrideJustification: null,
     };
-    const proposalTime = boundTurnProposalResolver.resolve(state, proposal);
+    const proposalTime = createPureTurnProposalResolver(DIVERGENCE_OFFER_ENVIRONMENT).resolve(state, proposal);
     if (!proposalTime.valid) throw new Error('Room 3943006 Dodge proposal did not resolve.');
+    expect(proposalTime).toEqual(pureTurnProposalResolver.resolve(state, proposal));
 
     expect(proposalResolutionDivergence(state, {
       proposal,

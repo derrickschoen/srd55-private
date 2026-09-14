@@ -11,9 +11,17 @@ import {
   importSavedSession,
   EncounterSessionJournal,
 } from '../../../src/vtt/session-persistence';
-import { createEngineMcpRuntime, loadArenaFixture } from '../../../src/vtt/mcp/entrypoint';
+import {
+  createEngineMcpRuntime,
+  freshMonsterPlanningState,
+  loadArenaFixture,
+} from '../../../src/vtt/mcp/entrypoint';
 import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
-import { createRevisionBoundEngineOptionEnvironment } from '../../../src/vtt/offers/offer-environment';
+import {
+  createRevisionBoundEngineOptionEnvironment,
+  engineOptionEnvironmentFromBinding,
+} from '../../../src/vtt/offers/offer-environment';
+import { availableEngineActorOptions, resolveEngineActorOption } from '../../../src/vtt/intent-resolver';
 import {
   assertBoardImageFresh,
   boardSnapshotCaptureGeometry,
@@ -29,6 +37,43 @@ const CONTROL_FIXTURES = Array.from(
   (_unused, index) => `tests/fixtures/arena-basis-brutal/seed-${String(6_203_001 + index)}.json`,
 );
 const BOUND_OFFER_ENVIRONMENT = createRevisionBoundEngineOptionEnvironment(canonicalEngineQueryPort);
+
+function observeOfferEnvironment() {
+  let bindingReads = 0;
+  return {
+    environment: new Proxy(BOUND_OFFER_ENVIRONMENT, {
+      get(target, property, receiver) {
+        if (property === 'binding') bindingReads += 1;
+        return Reflect.get(target, property, receiver) as unknown;
+      },
+    }),
+    bindingReads: () => bindingReads,
+  };
+}
+
+function expectOfferEnvironmentIdentity(
+  state: EncounterState,
+  offerEnvironment: typeof BOUND_OFFER_ENVIRONMENT,
+): void {
+  const planningState = freshMonsterPlanningState(state);
+  const actorId = planningState.combatants.find(
+    (candidate) => candidate.profile.kind === 'monster' && candidate.life === 'living',
+  )?.profile.id;
+  if (actorId === undefined) throw new Error('Snapshot offer-environment probe has no living monster.');
+  const option = availableEngineActorOptions(planningState, actorId, offerEnvironment)[0];
+  if (option === undefined) throw new Error(`Snapshot offer-environment probe has no option for ${actorId}.`);
+  expect(resolveEngineActorOption(planningState, option, offerEnvironment).valid).toBe(true);
+  const equalBindingEnvironment = engineOptionEnvironmentFromBinding(
+    offerEnvironment.queries,
+    offerEnvironment.binding,
+  );
+  expect(equalBindingEnvironment).not.toBe(offerEnvironment);
+  expect(equalBindingEnvironment.binding).toEqual(offerEnvironment.binding);
+  expect(resolveEngineActorOption(planningState, option, equalBindingEnvironment)).toMatchObject({
+    valid: false,
+    code: 'OFFER_ENVIRONMENT_MISMATCH',
+  });
+}
 
 function sourceFor(state: EncounterState, room = 1): BoardImageSource {
   return {
@@ -57,13 +102,6 @@ function movedState(state: EncounterState): EncounterState {
 }
 
 describe('AI DM board snapshot contracts', () => {
-  it('binds the snapshot fixture runtime to its explicit offer environment', async () => {
-    const state = await loadArenaFixture(CONTROL_FIXTURES[0]!);
-    const runtime = createEngineMcpRuntime(state, { offerEnvironment: BOUND_OFFER_ENVIRONMENT });
-
-    expect(runtime.feed.current().offerEnvironment).toEqual(BOUND_OFFER_ENVIRONMENT.binding);
-  });
-
   it('isolates its preview port from the Playwright worker pool', () => {
     expect(configuredPreviewPort({ PLAYWRIGHT_PORT: '4650' })).toBe(0);
     expect(configuredPreviewPort({
@@ -138,7 +176,19 @@ describe('AI DM board snapshot contracts', () => {
 
     expect(importSavedSession(store, bundle.bytes)).toBe(bundle.sessionId);
     const resumed = EncounterSessionJournal.resume(bundle.sessionId, store, new MemoryMirrorSink());
+    const observed = observeOfferEnvironment();
+    const runtime = createEngineMcpRuntime(resumed.encounterState, {
+      offerEnvironment: observed.environment,
+    });
+    expect(observed.bindingReads()).toBeGreaterThan(0);
+    expectOfferEnvironmentIdentity(resumed.encounterState, observed.environment);
     expect(canonicalJson(resumed.encounterState)).toBe(stateBytes);
+    expect(runtime.feed.current().projection.combatants.map((combatant) => combatant.id).sort()).toEqual(
+      resumed.encounterState.combatants
+        .filter((combatant) => combatant.life !== 'dead')
+        .map((combatant) => combatant.profile.id)
+        .sort(),
+    );
     expect(resumed.coordinatorState.pause).toEqual({ kind: 'interrupted' });
     expect(resumed.controllers).toHaveLength(state.combatants.length);
     expect(resumed.controllers.every((controller) => controller.kind === 'human')).toBe(true);

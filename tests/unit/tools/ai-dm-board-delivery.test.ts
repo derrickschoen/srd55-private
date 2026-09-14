@@ -19,9 +19,11 @@ import {
   engineOptionEnvironmentFromBinding,
 } from '../../../src/vtt/offers/offer-environment';
 import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
+import { availableEngineActorOptions, resolveEngineActorOption } from '../../../src/vtt/intent-resolver';
 import {
   decodeEngineMcpLauncherManifest,
   createEngineMcpRuntime as createDefaultEngineMcpRuntime,
+  freshMonsterPlanningState,
   loadArenaFixture,
   validatedLauncherBoardHtmlReference,
   validatedLauncherBoardImage,
@@ -56,14 +58,58 @@ import {
 
 const META = mcpRequestMeta({ name: 'board-delivery-test', version: '1.0.0' });
 const BOUND_OFFER_ENVIRONMENT = createRevisionBoundEngineOptionEnvironment(canonicalEngineQueryPort);
+let offerEnvironmentIdentityChecked = false;
+let launcherOfferEnvironmentIdentityChecked = false;
+
+function observeOfferEnvironment(offerEnvironment: typeof BOUND_OFFER_ENVIRONMENT) {
+  let bindingReads = 0;
+  return {
+    environment: new Proxy(offerEnvironment, {
+      get(target, property, receiver) {
+        if (property === 'binding') bindingReads += 1;
+        return Reflect.get(target, property, receiver) as unknown;
+      },
+    }),
+    bindingReads: () => bindingReads,
+  };
+}
+
+function expectOfferEnvironmentIdentity(
+  state: Parameters<typeof createDefaultEngineMcpRuntime>[0],
+  offerEnvironment: typeof BOUND_OFFER_ENVIRONMENT,
+): void {
+  const planningState = freshMonsterPlanningState(state);
+  const actorId = planningState.combatants.find(
+    (candidate) => candidate.profile.kind === 'monster' && candidate.life === 'living',
+  )?.profile.id;
+  if (actorId === undefined) throw new Error('Offer-environment probe has no living monster.');
+  const option = availableEngineActorOptions(planningState, actorId, offerEnvironment)[0];
+  if (option === undefined) throw new Error(`Offer-environment probe has no option for ${actorId}.`);
+  expect(resolveEngineActorOption(planningState, option, offerEnvironment).valid).toBe(true);
+  const equalBindingEnvironment = engineOptionEnvironmentFromBinding(
+    offerEnvironment.queries,
+    offerEnvironment.binding,
+  );
+  expect(equalBindingEnvironment).not.toBe(offerEnvironment);
+  expect(equalBindingEnvironment.binding).toEqual(offerEnvironment.binding);
+  expect(resolveEngineActorOption(planningState, option, equalBindingEnvironment)).toMatchObject({
+    valid: false,
+    code: 'OFFER_ENVIRONMENT_MISMATCH',
+  });
+}
 
 function createEngineMcpRuntime(
   state: Parameters<typeof createDefaultEngineMcpRuntime>[0],
   options: NonNullable<Parameters<typeof createDefaultEngineMcpRuntime>[1]> = {},
 ): ReturnType<typeof createDefaultEngineMcpRuntime> {
   const offerEnvironment = options.offerEnvironment ?? BOUND_OFFER_ENVIRONMENT;
-  const runtime = createDefaultEngineMcpRuntime(state, { ...options, offerEnvironment });
-  expect(runtime.feed.current().offerEnvironment).toEqual(offerEnvironment.binding);
+  const observed = observeOfferEnvironment(offerEnvironment);
+  const runtime = createDefaultEngineMcpRuntime(state, { ...options, offerEnvironment: observed.environment });
+  expect(observed.bindingReads()).toBeGreaterThan(0);
+  if (!offerEnvironmentIdentityChecked) {
+    expectOfferEnvironmentIdentity(state, observed.environment);
+    offerEnvironmentIdentityChecked = true;
+  }
   return runtime;
 }
 
@@ -156,8 +202,13 @@ class FastProposalAdapter implements AgentSessionAdapter {
   ): Promise<AgentTurnResult> {
     const manifest = JSON.parse(readFileSync(invocation.launcherToken, 'utf8')) as EngineMcpLauncherManifest;
     const state = await loadArenaFixture(manifest.fixturePath);
+    const offerEnvironment = launcherOfferEnvironment(manifest);
+    if (!launcherOfferEnvironmentIdentityChecked) {
+      expectOfferEnvironmentIdentity(state, offerEnvironment);
+      launcherOfferEnvironmentIdentityChecked = true;
+    }
     const runtime = createEngineMcpRuntime(state, {
-      offerEnvironment: launcherOfferEnvironment(manifest),
+      offerEnvironment,
       runId: manifest.runId, branchId: manifest.branchId, revision: manifest.revision,
       requestId: manifest.requestId, phase: manifest.phase,
       correctionNumber: manifest.correctionNumber, room: manifest.room,
@@ -211,6 +262,11 @@ function conversationArgs(outPath: string, boardImage?: BoardImageMode): readonl
 }
 
 describe('board image parsing and row evidence', () => {
+  it('rejects an equal-binding replacement at its runtime consumer', async () => {
+    createEngineMcpRuntime(await loadArenaFixture('tests/fixtures/arena-basis/seed-3943001.json'));
+    expect(offerEnvironmentIdentityChecked).toBe(true);
+  });
+
   it('parses default/off/png/capture_only as a closed mode in conversation and arena', () => {
     const directory = mkdtempSync(join(tmpdir(), 'board-image-parser-'));
     const conversationBase = ['--rooms', '1', '--rounds', '1', '--out', join(directory, 'c.jsonl')];

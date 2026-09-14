@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { runEngineMcpDryClient } from '../../../tools/engine-mcp-dry-client';
 import type { DryTranscriptEntry } from '../../../tools/engine-mcp-dry-client';
-import { createEngineMcpRuntime, loadArenaFixture } from '../../../src/vtt/mcp/entrypoint';
+import { freshMonsterPlanningState, loadArenaFixture } from '../../../src/vtt/mcp/entrypoint';
 import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
-import { createRevisionBoundEngineOptionEnvironment } from '../../../src/vtt/offers/offer-environment';
+import {
+  createLegacyEngineOptionEnvironment,
+  engineOptionEnvironmentFromBinding,
+} from '../../../src/vtt/offers/offer-environment';
+import { availableEngineActorOptions, resolveEngineActorOption } from '../../../src/vtt/intent-resolver';
 
 const FIXTURE = 'tests/fixtures/arena-basis/seed-3943006.json';
-const BOUND_OFFER_ENVIRONMENT = createRevisionBoundEngineOptionEnvironment(canonicalEngineQueryPort);
 
 function record(value: unknown, label: string): Readonly<Record<string, unknown>> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new TypeError(`${label} must be an object.`);
@@ -40,7 +43,38 @@ function stateHandle(context: Readonly<Record<string, unknown>>): string {
   return value;
 }
 
+function expectOfferEnvironmentIdentity(
+  planningState: Parameters<typeof availableEngineActorOptions>[0],
+  actorId: Parameters<typeof availableEngineActorOptions>[1],
+  optionId?: string,
+): void {
+  const offerEnvironment = createLegacyEngineOptionEnvironment(canonicalEngineQueryPort);
+  const option = availableEngineActorOptions(planningState, actorId, offerEnvironment, 1)
+    .find((candidate) => optionId === undefined || candidate.optionId === optionId);
+  if (option === undefined) throw new Error('Golden offer-environment probe did not find its option.');
+  expect(resolveEngineActorOption(planningState, option, offerEnvironment).valid).toBe(true);
+  const equalBindingEnvironment = engineOptionEnvironmentFromBinding(
+    offerEnvironment.queries,
+    offerEnvironment.binding,
+  );
+  expect(equalBindingEnvironment).not.toBe(offerEnvironment);
+  expect(equalBindingEnvironment.binding).toEqual(offerEnvironment.binding);
+  expect(resolveEngineActorOption(planningState, option, equalBindingEnvironment)).toMatchObject({
+    valid: false,
+    code: 'OFFER_ENVIRONMENT_MISMATCH',
+  });
+}
+
 describe('real-stdio engine MCP golden dungeon run', () => {
+  it('rejects an equal-binding replacement for a stdio-shaped option', async () => {
+    const planningState = freshMonsterPlanningState(await loadArenaFixture(FIXTURE));
+    const actorId = planningState.combatants.find(
+      (candidate) => candidate.profile.kind === 'monster' && candidate.life === 'living',
+    )?.profile.id;
+    if (actorId === undefined) throw new Error('Golden identity probe has no living monster.');
+    expectOfferEnvironmentIdentity(planningState, actorId);
+  });
+
   it('covers discovery, proposal correction, adjudication, narration, and restart shapes', { timeout: 30_000 }, async () => {
     const report = await runEngineMcpDryClient(FIXTURE);
     expect(report).toMatchObject({ status: 'VERIFIED', protocolConformance: 'SUBSTITUTED_LOCAL' });
@@ -61,8 +95,20 @@ describe('real-stdio engine MCP golden dungeon run', () => {
     expect(actorId).toBe('combatant:generated-3943006-monster-1');
     expect(record(queryArguments['objective'], 'query objective')['action_id']).toBe('web');
     const state = await loadArenaFixture(FIXTURE);
-    const boundRuntime = createEngineMcpRuntime(state, { offerEnvironment: BOUND_OFFER_ENVIRONMENT });
-    expect(boundRuntime.feed.current().offerEnvironment).toEqual(BOUND_OFFER_ENVIRONMENT.binding);
+    const planningState = freshMonsterPlanningState(state);
+    const submittedRequest = decoded(toolEntry(report.initial, 'engine.submit_round_proposals').request);
+    const submittedArguments = record(record(submittedRequest['params'], 'submission params')['arguments'], 'submission arguments');
+    const submittedProposals = submittedArguments['proposals'];
+    if (!Array.isArray(submittedProposals)) throw new TypeError('Golden submission omitted proposals.');
+    const submittedProposal = submittedProposals.map((value) => record(value, 'submitted proposal'))
+      .find((value) => value['actor_id'] === actorId);
+    const submittedOptionId = submittedProposal?.['primary_option_id'];
+    if (typeof submittedOptionId !== 'string') throw new TypeError('Golden submission omitted its primary option id.');
+    expectOfferEnvironmentIdentity(
+      planningState,
+      actorId as Parameters<typeof availableEngineActorOptions>[1],
+      submittedOptionId,
+    );
     const actor = state.combatants.find((candidate) => candidate.profile.id === actorId);
     const actorToken = state.tokens.find((token) => token.combatantId === actorId);
     const targets = state.combatants.filter((candidate) => candidate.profile.kind === 'player_character');

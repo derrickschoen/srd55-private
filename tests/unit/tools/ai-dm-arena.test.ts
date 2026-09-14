@@ -24,7 +24,10 @@ import {
 } from '../../../src/vtt/mcp/entrypoint';
 import { availableEngineActorOptions, resolveEngineActorOption } from '../../../src/vtt/intent-resolver';
 import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
-import { createRevisionBoundEngineOptionEnvironment } from '../../../src/vtt/offers/offer-environment';
+import {
+  createRevisionBoundEngineOptionEnvironment,
+  engineOptionEnvironmentFromBinding,
+} from '../../../src/vtt/offers/offer-environment';
 import { validateArenaPlan } from '../../../src/vtt/arena-legality';
 import { SNIPPET_REGISTRY } from '../../../src/vtt/snippet-registry-runtime';
 import { engineActionId, engineSpellId } from '../../../src/vtt/turn-proposal';
@@ -55,14 +58,57 @@ import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
 
 const DEFAULT_KB_HASH = '00776f3f2d4cd7468a1eb2a63028e9c3f846b43b14a4e5787d3e9c94e02633c0';
 const BOUND_OFFER_ENVIRONMENT = createRevisionBoundEngineOptionEnvironment(canonicalEngineQueryPort);
+let offerEnvironmentIdentityChecked = false;
+
+function observeOfferEnvironment(offerEnvironment: typeof BOUND_OFFER_ENVIRONMENT) {
+  let bindingReads = 0;
+  return {
+    environment: new Proxy(offerEnvironment, {
+      get(target, property, receiver) {
+        if (property === 'binding') bindingReads += 1;
+        return Reflect.get(target, property, receiver) as unknown;
+      },
+    }),
+    bindingReads: () => bindingReads,
+  };
+}
+
+function expectOfferEnvironmentIdentity(
+  state: Parameters<typeof createDefaultEngineMcpRuntime>[0],
+  offerEnvironment: typeof BOUND_OFFER_ENVIRONMENT,
+): void {
+  const planningState = freshMonsterPlanningState(state);
+  const actorId = planningState.combatants.find(
+    (candidate) => candidate.profile.kind === 'monster' && candidate.life === 'living',
+  )?.profile.id;
+  if (actorId === undefined) throw new Error('Offer-environment probe has no living monster.');
+  const option = availableEngineActorOptions(planningState, actorId, offerEnvironment)[0];
+  if (option === undefined) throw new Error(`Offer-environment probe has no option for ${actorId}.`);
+  expect(resolveEngineActorOption(planningState, option, offerEnvironment).valid).toBe(true);
+  const equalBindingEnvironment = engineOptionEnvironmentFromBinding(
+    offerEnvironment.queries,
+    offerEnvironment.binding,
+  );
+  expect(equalBindingEnvironment).not.toBe(offerEnvironment);
+  expect(equalBindingEnvironment.binding).toEqual(offerEnvironment.binding);
+  expect(resolveEngineActorOption(planningState, option, equalBindingEnvironment)).toMatchObject({
+    valid: false,
+    code: 'OFFER_ENVIRONMENT_MISMATCH',
+  });
+}
 
 function createEngineMcpRuntime(
   state: Parameters<typeof createDefaultEngineMcpRuntime>[0],
   options: NonNullable<Parameters<typeof createDefaultEngineMcpRuntime>[1]> = {},
 ): ReturnType<typeof createDefaultEngineMcpRuntime> {
   const offerEnvironment = options.offerEnvironment ?? BOUND_OFFER_ENVIRONMENT;
-  const runtime = createDefaultEngineMcpRuntime(state, { ...options, offerEnvironment });
-  expect(runtime.feed.current().offerEnvironment).toEqual(offerEnvironment.binding);
+  const observed = observeOfferEnvironment(offerEnvironment);
+  const runtime = createDefaultEngineMcpRuntime(state, { ...options, offerEnvironment: observed.environment });
+  expect(observed.bindingReads()).toBeGreaterThan(0);
+  if (!offerEnvironmentIdentityChecked) {
+    expectOfferEnvironmentIdentity(state, observed.environment);
+    offerEnvironmentIdentityChecked = true;
+  }
   return runtime;
 }
 
@@ -322,6 +368,11 @@ const ALL_OPTIONS_TEST_RENDERER_ARGS = [
 ] as const;
 
 describe('AI-DM arena', () => {
+  it('rejects an equal-binding replacement at its runtime consumer', () => {
+    createEngineMcpRuntime(generateRoom(3_943_001).encounter.state);
+    expect(offerEnvironmentIdentityChecked).toBe(true);
+  });
+
   it('maps rows with zero, one, and two KB reads without losing hashes or order (mutation: omit arena kbReads)', () => {
     const records: readonly KbReadRecord[] = [
       {
