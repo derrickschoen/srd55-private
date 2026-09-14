@@ -6,6 +6,20 @@ import { SCRAPE_SENTINEL } from '../../../tools/scrape/provenance';
 
 const repoRoot = fileURLToPath(new URL('../../../', import.meta.url));
 
+interface CacheDescriptors {
+  readonly HIT_GUARD_DESCRIPTOR: { readonly script: string };
+  readonly VALIDATED_BUILD_DESCRIPTORS: readonly { readonly script: string }[];
+}
+
+function exposesCacheDescriptors(value: unknown): value is CacheDescriptors {
+  return typeof value === 'object' && value !== null &&
+    'HIT_GUARD_DESCRIPTOR' in value && 'VALIDATED_BUILD_DESCRIPTORS' in value;
+}
+
+const cacheModule: unknown = await import(new URL('../../../tools/dist-build-cache.mjs', import.meta.url).href);
+if (!exposesCacheDescriptors(cacheModule)) throw new TypeError('Invalid dist cache descriptors.');
+const { HIT_GUARD_DESCRIPTOR, VALIDATED_BUILD_DESCRIPTORS } = cacheModule;
+
 async function typeScriptFilesUnder(directory: string): Promise<string[]> {
   const entries = await readdir(directory, { withFileTypes: true });
   const files: string[] = [];
@@ -74,10 +88,12 @@ describe('the scraper is never in the bundle', () => {
       `these npm scripts invoke the scraper:\n${offenders.join('\n')}`,
     ).toEqual([]);
 
-    // The positive half: `build` still chains the byte scan that would catch a
-    // leak. Asserting only the absence would pass just as happily if the guard
-    // had been removed from the build.
-    expect(manifest.scripts.build).toContain('tools/assert-dist-clean.mjs');
+    // The positive half follows the cache route and proves both cache paths
+    // still reach the byte scan that would catch a scraper leak.
+    expect(manifest.scripts.build).toContain('node tools/dist-build-cache.mjs');
+    expect(HIT_GUARD_DESCRIPTOR.script).toBe('tools/assert-dist-clean.mjs');
+    expect(VALIDATED_BUILD_DESCRIPTORS.at(-1)?.script).toBe('tools/assert-dist-clean.mjs');
+    expect(manifest.scripts['build:dist:validated']).toContain('node tools/assert-dist-clean.mjs');
   });
 
   it('has its sentinel in the dist byte scan, with the two copies in step', async () => {
