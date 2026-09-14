@@ -42,18 +42,23 @@ function splitTail(argumentsList) {
     : { head: argumentsList.slice(0, delimiter), tail: argumentsList.slice(delimiter) };
 }
 
-function controlledOption(argument) {
+function gateOwnedOption(argument) {
   return argument === '--reporter' || argument.startsWith('--reporter=') ||
     argument === '--outputFile' || argument.startsWith('--outputFile=') || argument.startsWith('--outputFile.') ||
+    argument === '--configLoader' || argument.startsWith('--configLoader=');
+}
+
+function retryControlledOption(argument) {
+  return gateOwnedOption(argument) ||
     argument === '--fileParallelism' || argument.startsWith('--fileParallelism=') ||
     argument === '--no-file-parallelism' ||
     argument === '--maxWorkers' || argument.startsWith('--maxWorkers=');
 }
 
-function controlledOptionTakesValue(argument) {
+function optionTakesValue(argument) {
   const name = optionName(argument);
   return name === '--reporter' || name === '--outputFile' || name.startsWith('--outputFile.') ||
-    name === '--maxWorkers' || name === '--fileParallelism';
+    name === '--configLoader' || name === '--maxWorkers';
 }
 
 function optionName(argument) {
@@ -66,11 +71,11 @@ function initialArgumentsFrom(argumentsList) {
   const retained = [];
   for (let index = 0; index < head.length; index += 1) {
     const argument = head[index];
-    if (!controlledOption(argument)) {
+    if (!gateOwnedOption(argument)) {
       retained.push(argument);
       continue;
     }
-    if (!argument.includes('=') && controlledOptionTakesValue(argument) &&
+    if (!argument.includes('=') && optionTakesValue(argument) &&
       head[index + 1] !== undefined && !head[index + 1].startsWith('-')) index += 1;
   }
   return [...retained, ...tail];
@@ -81,9 +86,11 @@ export function retainedVitestRetryTokens(argumentsList) {
   const retained = [];
   for (let index = 0; index < head.length; index += 1) {
     const argument = head[index];
-    if (controlledOption(argument)) {
-      if (!argument.includes('=') && controlledOptionTakesValue(argument) &&
-        head[index + 1] !== undefined && !head[index + 1].startsWith('-')) index += 1;
+    if (retryControlledOption(argument)) {
+      const next = head[index + 1];
+      const consumesBoolean = optionName(argument) === '--fileParallelism' && (next === 'true' || next === 'false');
+      if (!argument.includes('=') && (optionTakesValue(argument) || consumesBoolean) &&
+        next !== undefined && !next.startsWith('-')) index += 1;
       continue;
     }
     if (!argument.startsWith('-')) continue;
@@ -92,6 +99,12 @@ export function retainedVitestRetryTokens(argumentsList) {
     if (!argument.includes('=') && VALUE_OPTIONS.has(name)) {
       const value = head[index + 1];
       if (value !== undefined && !value.startsWith('-')) {
+        retained.push(value);
+        index += 1;
+      }
+    } else if (!argument.includes('=')) {
+      const value = head[index + 1];
+      if (value === 'true' || value === 'false') {
         retained.push(value);
         index += 1;
       }

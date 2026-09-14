@@ -40,6 +40,7 @@ export default class GatePlaywrightEvidenceReporter {
   constructor() {
     this.path = requiredEnvironment('DND_GATE_EVIDENCE_PATH');
     this.testEvidence = new Map();
+    this.terminalEvidence = [];
     this.document = {
       version: 1,
       kind: requiredEnvironment('DND_GATE_KIND'),
@@ -90,6 +91,7 @@ export default class GatePlaywrightEvidenceReporter {
     record.outcome = typeof test.outcome === 'function' ? test.outcome() : record.outcome;
     record.expectedStatus = typeof test.expectedStatus === 'string' ? test.expectedStatus : record.expectedStatus;
     record.errors = Array.isArray(result?.errors) ? result.errors.map(normalizeError) : [];
+    this.terminalEvidence.push({ ...record, errors: [...record.errors] });
   }
 
   onError(error) {
@@ -103,7 +105,10 @@ export default class GatePlaywrightEvidenceReporter {
 
   onExit() {
     this.document.lifecycle.onExit = true;
-    this.document.tests = [...this.testEvidence.values()]
+    this.document.tests = [
+      ...this.terminalEvidence,
+      ...[...this.testEvidence.values()].filter((test) => test.onTestEndObserved !== true),
+    ]
       .sort((left, right) => left.executionId.localeCompare(right.executionId));
     this.write();
   }

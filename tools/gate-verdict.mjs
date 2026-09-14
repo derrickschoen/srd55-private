@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { isAbsolute, relative, resolve, sep } from 'node:path';
 
 function isRecord(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -7,6 +7,21 @@ function isRecord(value) {
 
 function unique(values) {
   return [...new Set(values)].sort();
+}
+
+function duplicates(values) {
+  const seen = new Set();
+  const repeated = new Set();
+  for (const value of values) {
+    if (seen.has(value)) repeated.add(value);
+    seen.add(value);
+  }
+  return [...repeated].sort();
+}
+
+function isInsideCwd(path) {
+  const relation = relative(resolve(process.cwd()), resolve(path));
+  return relation === '' || (relation !== '..' && !relation.startsWith(`..${sep}`) && !isAbsolute(relation));
 }
 
 function normalizeFile(path) {
@@ -91,20 +106,24 @@ function aggregateFileOutcomes(executions) {
 
 function vitestStock(reporter) {
   if (!isRecord(reporter) || typeof reporter.success !== 'boolean' || !Array.isArray(reporter.testResults)) return null;
-  const files = [];
+  const byFile = new Map();
   for (const result of reporter.testResults) {
     if (!isRecord(result) || typeof result.name !== 'string' || typeof result.status !== 'string' || !Array.isArray(result.assertionResults)) return null;
     const assertionFailed = result.assertionResults.some((assertion) => isRecord(assertion) && assertion.status === 'failed');
-    files.push({
-      file: normalizeFile(result.name),
-      status: result.status === 'passed' && !assertionFailed ? 'passed' : 'failed',
-    });
+    const file = normalizeFile(result.name);
+    const status = result.status === 'passed' && !assertionFailed ? 'passed' : 'failed';
+    if (status === 'failed' || byFile.get(file) === undefined) byFile.set(file, status);
   }
+  const files = [...byFile].map(([file, status]) => ({ file, status }))
+    .sort((left, right) => left.file.localeCompare(right.file));
   return { success: reporter.success, files };
 }
 
 function playwrightStock(reporter) {
-  if (!isRecord(reporter) || !Array.isArray(reporter.suites) || !Array.isArray(reporter.errors) || !isRecord(reporter.stats)) return null;
+  if (!isRecord(reporter) || !isRecord(reporter.config) || typeof reporter.config.rootDir !== 'string' ||
+    !isAbsolute(reporter.config.rootDir) || !isInsideCwd(reporter.config.rootDir) ||
+    !Array.isArray(reporter.suites) || !Array.isArray(reporter.errors) || !isRecord(reporter.stats)) return null;
+  const rootDir = resolve(reporter.config.rootDir);
   const byFile = new Map();
   const visit = (suite, inheritedFile) => {
     if (!isRecord(suite)) return false;
@@ -114,7 +133,9 @@ function playwrightStock(reporter) {
         if (!isRecord(spec) || typeof spec.ok !== 'boolean') return false;
         const file = typeof spec.file === 'string' ? spec.file : suiteFile;
         if (typeof file !== 'string') return false;
-        const normalized = normalizeFile(file);
+        const absolute = isAbsolute(file) ? resolve(file) : resolve(rootDir, file);
+        if (!isInsideCwd(absolute)) return false;
+        const normalized = normalizeFile(absolute);
         const status = spec.ok ? 'passed' : 'failed';
         if (status === 'failed' || byFile.get(normalized) === undefined) byFile.set(normalized, status);
       }
@@ -338,8 +359,10 @@ export function classifyPhase(input) {
   if (input.kind === 'playwright' && stock?.errors?.length > 0) reporterReasons.push('runner-global-error');
   crossCheck(stock, native, reporterReasons);
 
-  const scheduledExecutionIds = unique(native?.scheduled.map((item) => item.executionId) ?? []);
-  const reportedExecutionIds = unique(native?.terminalIds ?? []);
+  const rawScheduledExecutionIds = native?.scheduled.map((item) => item.executionId) ?? [];
+  const rawReportedExecutionIds = native?.terminalIds ?? [];
+  const scheduledExecutionIds = unique(rawScheduledExecutionIds);
+  const reportedExecutionIds = unique(rawReportedExecutionIds);
   const scheduledFiles = unique(native?.scheduled.map((item) => item.file) ?? []);
   const evidenceRequestedFiles = scheduledFiles;
   const requestedFiles = input.requestedFiles === null || input.requestedFiles === undefined
@@ -350,9 +373,17 @@ export function classifyPhase(input) {
     .map((item) => item.file));
   const missingExecutionIds = scheduledExecutionIds.filter((id) => !reportedExecutionIds.includes(id));
   const unexpectedExecutionIds = reportedExecutionIds.filter((id) => !scheduledExecutionIds.includes(id));
+  const duplicateExecutionIds = duplicates(rawReportedExecutionIds);
+  const scheduledById = new Map((native?.scheduled ?? []).map((item) => [item.executionId, item.file]));
+  const mismatchedExecutionIds = unique((native?.executions ?? [])
+    .filter((item) => rawReportedExecutionIds.includes(item.executionId) &&
+      scheduledById.has(item.executionId) && scheduledById.get(item.executionId) !== item.file)
+    .map((item) => item.executionId));
+  const fileSetMismatch = JSON.stringify(scheduledFiles) !== JSON.stringify(reportedFiles);
   let discoveryStatus = 'complete';
   if (native === null) discoveryStatus = 'uncertified';
   else if (missingExecutionIds.length > 0 || unexpectedExecutionIds.length > 0 ||
+    duplicateExecutionIds.length > 0 || mismatchedExecutionIds.length > 0 || fileSetMismatch ||
     JSON.stringify(requestedFiles) !== JSON.stringify(scheduledFiles)) discoveryStatus = 'failed';
 
   const executions = native?.executions ?? [];
@@ -406,6 +437,9 @@ export function classifyPhase(input) {
       reportedFiles,
       missingExecutionIds,
       unexpectedExecutionIds,
+      duplicateExecutionIds,
+      mismatchedExecutionIds,
+      fileSetMismatch,
     },
     fileOutcomes,
   };

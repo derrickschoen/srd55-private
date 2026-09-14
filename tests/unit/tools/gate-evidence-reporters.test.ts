@@ -1,7 +1,17 @@
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join, relative, resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
+import type { Reporter as VitestReporter } from 'vitest/reporters';
+import type {
+  FullConfig,
+  FullResult,
+  Reporter as PlaywrightReporter,
+  Suite,
+  TestCase,
+  TestError,
+  TestResult,
+} from '@playwright/test/reporter';
 import { mkdtempSync, readFileSync } from '../../helpers/test-filesystem';
 
 interface NormalizedError {
@@ -10,6 +20,9 @@ interface NormalizedError {
 }
 
 interface VitestEvidence {
+  readonly version: 1;
+  readonly kind: 'vitest';
+  readonly phase: 'initial' | 'retry';
   readonly phaseInvocationId: string;
   readonly passWithNoTests: boolean;
   readonly terminalReason: string | null;
@@ -27,15 +40,19 @@ interface VitestEvidence {
 }
 
 interface PlaywrightEvidence {
+  readonly version: 1;
+  readonly kind: 'playwright';
+  readonly phase: 'initial' | 'retry';
   readonly phaseInvocationId: string;
   readonly fullResultStatus: string | null;
   readonly globalErrors: readonly NormalizedError[];
   readonly discovered: readonly { readonly executionId: string; readonly file: string }[];
   readonly tests: readonly {
     readonly executionId: string;
-    readonly status: string;
-    readonly outcome: string;
-    readonly expectedStatus: string;
+    readonly file: string;
+    readonly status: string | null;
+    readonly outcome: string | null;
+    readonly expectedStatus: string | null;
     readonly onTestBeginObserved: boolean;
     readonly onTestEndObserved: boolean;
   }[];
@@ -43,23 +60,62 @@ interface PlaywrightEvidence {
 }
 
 interface VitestReporterModule {
-  readonly default: new () => {
-    onInit(value: unknown): void;
-    onTestRunStart(value: readonly unknown[]): void;
-    onTestRunEnd(modules: readonly unknown[], errors: readonly unknown[], reason: string): void;
-    onProcessTimeout(): void;
-  };
+  readonly default: new () => VitestReporter;
 }
 
 interface PlaywrightReporterModule {
-  readonly default: new () => {
-    onBegin(config: unknown, suite: unknown): void;
-    onTestBegin(test: unknown, result: unknown): void;
-    onTestEnd(test: unknown, result: unknown): void;
-    onError(error: unknown): void;
-    onEnd(result: unknown): void;
-    onExit(): void;
+  readonly default: new () => PlaywrightReporter;
+}
+
+type VitestContext = Parameters<NonNullable<VitestReporter['onInit']>>[0];
+type VitestSpecifications = Parameters<NonNullable<VitestReporter['onTestRunStart']>>[0];
+type VitestSpecification = VitestSpecifications[number];
+type VitestModules = Parameters<NonNullable<VitestReporter['onTestRunEnd']>>[0];
+type VitestModule = VitestModules[number];
+type VitestRunErrors = Parameters<NonNullable<VitestReporter['onTestRunEnd']>>[1];
+type VitestRunReason = Parameters<NonNullable<VitestReporter['onTestRunEnd']>>[2];
+
+interface ArtifactRead {
+  readonly status: 'readable';
+  readonly error: null;
+}
+
+interface PhaseInput {
+  readonly kind: 'vitest' | 'playwright';
+  readonly phase: 'initial' | 'retry';
+  readonly phaseInvocationId: string;
+  readonly reporterPath: string;
+  readonly evidencePath: string;
+  readonly reporter: unknown;
+  readonly evidence: unknown;
+  readonly stockRead: ArtifactRead;
+  readonly evidenceRead: ArtifactRead;
+  readonly exitCode: number;
+  readonly signal: null;
+  readonly spawnError: null;
+  readonly requestedFiles: readonly string[] | null;
+}
+
+interface ClassifiedPhase {
+  readonly process: { readonly status: string };
+  readonly reporterOutcome: { readonly status: string; readonly reasons: readonly string[] };
+  readonly discovery: { readonly status: string };
+  readonly fileOutcomes: readonly { readonly file: string; readonly status: string }[];
+}
+
+interface VerdictModule {
+  classifyPhase(value: PhaseInput): ClassifiedPhase;
+  reduceGateVerdict(initial: ClassifiedPhase, retry: ClassifiedPhase | null): {
+    readonly status: string;
+    readonly passedOnRetry: readonly string[];
   };
+}
+
+const readable: ArtifactRead = { status: 'readable', error: null };
+
+async function verdictModule(): Promise<VerdictModule> {
+  const modulePath = new URL('../../../tools/gate-verdict.mjs', import.meta.url).href;
+  return await import(modulePath) as unknown as VerdictModule;
 }
 
 interface VitestCase {
@@ -132,25 +188,34 @@ async function vitestEvidence(input: VitestCase = {}): Promise<VitestEvidence> {
   vi.stubEnv('DND_GATE_PHASE_INVOCATION_ID', 'vitest-unit-id');
   const modulePath = new URL('../../../tools/gate-vitest-evidence-reporter.mjs', import.meta.url).href;
   const imported = await import(modulePath) as unknown as VitestReporterModule;
-  const reporter = new imported.default();
-  reporter.onInit({ config: { passWithNoTests: input.passWithNoTests ?? false } });
+  const reporter: VitestReporter = new imported.default();
+  await reporter.onInit?.({ config: { passWithNoTests: input.passWithNoTests ?? false } } as VitestContext);
   const files = input.empty ? [] : [resolve('tests/example.test.ts')];
   const specs = files.flatMap((file) => {
     const base = [{ taskId: 'task-a', moduleId: file, project: { hash: 'project-a', name: 'unit' } }];
     return input.duplicate
       ? [...base, { taskId: 'task-b', moduleId: file, project: { hash: 'project-b', name: 'other' } }]
       : base;
-  });
-  reporter.onTestRunStart(specs);
+  }) as VitestSpecification[];
+  await reporter.onTestRunStart?.(specs);
   const modules = specs.map((specification) => ({
     id: specification.taskId,
     moduleId: specification.moduleId,
     project: specification.project,
     state: () => input.state ?? 'passed',
     errors: () => [...(input.moduleErrors ?? [])],
+  })) as VitestModule[];
+  const globalErrors: VitestRunErrors = (input.globalErrors ?? []).map((error) => ({
+    name: error.name,
+    message: error.message,
+    ...(error.stack === undefined ? {} : { stack: error.stack }),
   }));
-  reporter.onTestRunEnd(modules, [...(input.globalErrors ?? [])], input.reason ?? 'passed');
-  if (input.timeout) reporter.onProcessTimeout();
+  await reporter.onTestRunEnd?.(
+    modules,
+    globalErrors,
+    (input.reason ?? 'passed') as VitestRunReason,
+  );
+  if (input.timeout) await reporter.onProcessTimeout?.();
   return JSON.parse(readFileSync(path, 'utf8')) as VitestEvidence;
 }
 
@@ -163,6 +228,7 @@ interface PlaywrightCase {
   readonly fullStatus?: 'passed' | 'failed' | 'timedout' | 'interrupted';
   readonly globalError?: Error;
   readonly duplicateUnfinished?: boolean;
+  readonly repeatEnd?: boolean;
 }
 
 async function playwrightEvidence(input: PlaywrightCase = {}): Promise<PlaywrightEvidence> {
@@ -174,7 +240,7 @@ async function playwrightEvidence(input: PlaywrightCase = {}): Promise<Playwrigh
   vi.stubEnv('DND_GATE_PHASE_INVOCATION_ID', 'playwright-unit-id');
   const modulePath = new URL('../../../tools/gate-playwright-evidence-reporter.mjs', import.meta.url).href;
   const imported = await import(modulePath) as unknown as PlaywrightReporterModule;
-  const reporter = new imported.default();
+  const reporter: PlaywrightReporter = new imported.default();
   const file = resolve('tests/example.spec.ts');
   const makeTest = (id: string, projectName: string) => ({
     id,
@@ -182,18 +248,106 @@ async function playwrightEvidence(input: PlaywrightCase = {}): Promise<Playwrigh
     expectedStatus: input.expectedStatus ?? 'passed',
     parent: { project: () => ({ name: projectName }) },
     outcome: () => input.outcome ?? 'expected',
-  });
-  const tests = [makeTest('test-a', 'unit')];
+  }) as TestCase;
+  const tests: TestCase[] = [makeTest('test-a', 'unit')];
   if (input.duplicateUnfinished) tests.push(makeTest('test-b', 'other'));
-  reporter.onBegin({}, { allTests: () => tests });
+  reporter.onBegin?.({} as FullConfig, { allTests: () => tests } as Suite);
   const first = tests[0];
   if (first === undefined) throw new Error('Fixture test missing.');
-  if (input.begin ?? true) reporter.onTestBegin(first, {});
-  if (input.end ?? true) reporter.onTestEnd(first, { status: input.status ?? 'passed', errors: [] });
-  if (input.globalError !== undefined) reporter.onError(input.globalError);
-  reporter.onEnd({ status: input.fullStatus ?? 'passed' });
-  reporter.onExit();
+  const result: TestResult = {
+    annotations: [],
+    attachments: [],
+    duration: 0,
+    errors: [],
+    parallelIndex: 0,
+    retry: 0,
+    startTime: new Date(0),
+    status: input.status ?? 'passed',
+    stderr: [],
+    stdout: [],
+    steps: [],
+    workerIndex: 0,
+  };
+  if (input.begin ?? true) reporter.onTestBegin?.(first, result);
+  if (input.end ?? true) {
+    reporter.onTestEnd?.(first, result);
+    if (input.repeatEnd) reporter.onTestEnd?.(first, result);
+  }
+  if (input.globalError !== undefined) {
+    const error: TestError = {
+      message: input.globalError.message,
+      ...(input.globalError.stack === undefined ? {} : { stack: input.globalError.stack }),
+    };
+    reporter.onError?.(error);
+  }
+  const fullResult: FullResult = { status: input.fullStatus ?? 'passed', startTime: new Date(0), duration: 0 };
+  await reporter.onEnd?.(fullResult);
+  await reporter.onExit?.();
   return JSON.parse(readFileSync(path, 'utf8')) as PlaywrightEvidence;
+}
+
+async function classifyVitest(evidence: VitestEvidence): Promise<ClassifiedPhase> {
+  const fileOutcomes = evidence.modules.map((module) => ({
+    name: module.file,
+    status: module.state === 'passed' || module.state === 'skipped' ? 'passed' : 'failed',
+    assertionResults: [{ status: module.state === 'failed' ? 'failed' : 'passed' }],
+  }));
+  const reporter = {
+    success: evidence.terminalReason === 'passed' && evidence.globalErrors.length === 0 &&
+      evidence.modules.every((module) => module.state === 'passed' || module.state === 'skipped'),
+    numFailedTestSuites: fileOutcomes.filter((result) => result.status === 'failed').length,
+    numFailedTests: fileOutcomes.filter((result) => result.status === 'failed').length,
+    testResults: fileOutcomes,
+  };
+  const module = await verdictModule();
+  return module.classifyPhase({
+    kind: 'vitest',
+    phase: evidence.phase,
+    phaseInvocationId: evidence.phaseInvocationId,
+    reporterPath: '/tmp/stock.json',
+    evidencePath: '/tmp/evidence.json',
+    reporter,
+    evidence,
+    stockRead: readable,
+    evidenceRead: readable,
+    exitCode: reporter.success ? 0 : 1,
+    signal: null,
+    spawnError: null,
+    requestedFiles: evidence.phase === 'retry' ? evidence.specifications.map((specification) => specification.file) : null,
+  });
+}
+
+async function classifyPlaywright(evidence: PlaywrightEvidence): Promise<ClassifiedPhase> {
+  const files = [...new Set(evidence.tests.map((test) => test.file))];
+  const specs = files.map((file) => {
+    const matching = evidence.tests.filter((test) => test.file === file);
+    const ok = matching.every((test) => test.status === 'passed' ||
+      (test.status === 'skipped' && test.expectedStatus === 'skipped') ||
+      (test.status === 'failed' && test.outcome === 'expected'));
+    return { file: relative(resolve('tests'), file), ok, tests: matching.map((test) => ({ results: [{ status: test.status }] })) };
+  });
+  const reporter = {
+    config: { rootDir: resolve('tests') },
+    suites: [{ specs }],
+    errors: evidence.globalErrors,
+    stats: { expected: specs.filter((spec) => spec.ok).length, unexpected: specs.filter((spec) => !spec.ok).length, flaky: 0, skipped: 0 },
+  };
+  const module = await verdictModule();
+  return module.classifyPhase({
+    kind: 'playwright',
+    phase: evidence.phase,
+    phaseInvocationId: evidence.phaseInvocationId,
+    reporterPath: '/tmp/stock.json',
+    evidencePath: '/tmp/evidence.json',
+    reporter,
+    evidence,
+    stockRead: readable,
+    evidenceRead: readable,
+    exitCode: reporter.stats.unexpected === 0 && reporter.errors.length === 0 ? 0 : 1,
+    signal: null,
+    spawnError: null,
+    requestedFiles: evidence.phase === 'retry' ? files : null,
+  });
 }
 
 describe('Vitest gate evidence reporter', () => {
@@ -206,6 +360,9 @@ describe('Vitest gate evidence reporter', () => {
     expect(actual.status).toBe(0);
     expect(actual.evidence.modules).toHaveLength(1);
     expect(actual.evidence.lifecycle.onTestRunEnd).toBe(true);
+    const phase = await classifyVitest(evidence);
+    expect(phase.reporterOutcome).toEqual(expect.objectContaining({ status: 'passed', reasons: [] }));
+    expect(phase.discovery.status).toBe('complete');
   });
 
   it('records collection/module failure details', async () => {
@@ -214,18 +371,31 @@ describe('Vitest gate evidence reporter', () => {
     const actual = realVitestEvidence('collection');
     expect(actual.status).toBe(1);
     expect(actual.evidence.modules[0]?.errors.length).toBeGreaterThan(0);
+    expect((await classifyVitest(evidence)).fileOutcomes).toContainEqual(expect.objectContaining({ status: 'failed' }));
   });
 
   it('records an intentional skipped module', async () => {
-    expect((await vitestEvidence({ state: 'skipped' })).modules[0]?.state).toBe('skipped');
+    const evidence = await vitestEvidence({ state: 'skipped' });
+    expect(evidence.modules[0]?.state).toBe('skipped');
+    const phase = await classifyVitest(evidence);
+    expect(phase.reporterOutcome.status).toBe('passed');
+    expect(phase.discovery.status).toBe('complete');
   });
 
   it('retains pending as unfinished native evidence', async () => {
-    expect((await vitestEvidence({ state: 'pending' })).modules[0]?.state).toBe('pending');
+    const evidence = await vitestEvidence({ state: 'pending' });
+    expect(evidence.modules[0]?.state).toBe('pending');
+    const phase = await classifyVitest(evidence);
+    expect(phase.reporterOutcome.reasons).toContain('execution-unfinished');
+    expect(phase.discovery.status).toBe('failed');
   });
 
   it('retains queued as unfinished native evidence', async () => {
-    expect((await vitestEvidence({ state: 'queued' })).modules[0]?.state).toBe('queued');
+    const evidence = await vitestEvidence({ state: 'queued' });
+    expect(evidence.modules[0]?.state).toBe('queued');
+    const phase = await classifyVitest(evidence);
+    expect(phase.reporterOutcome.reasons).toContain('execution-unfinished');
+    expect(phase.discovery.status).toBe('failed');
   });
 
   it('records global-only errors separately from modules', async () => {
@@ -235,10 +405,13 @@ describe('Vitest gate evidence reporter', () => {
     const actual = realVitestEvidence('global');
     expect(actual.status).toBe(1);
     expect(actual.evidence.globalErrors[0]?.message).toContain('intentional global error');
+    expect((await classifyVitest(evidence)).reporterOutcome.reasons).toContain('runner-global-error');
   });
 
   it('records terminal interruption', async () => {
-    expect((await vitestEvidence({ reason: 'interrupted' })).terminalReason).toBe('interrupted');
+    const evidence = await vitestEvidence({ reason: 'interrupted' });
+    expect(evidence.terminalReason).toBe('interrupted');
+    expect((await classifyVitest(evidence)).reporterOutcome.reasons).toContain('runner-interrupted');
   });
 
   it('atomically rewrites evidence on process timeout', async () => {
@@ -248,6 +421,19 @@ describe('Vitest gate evidence reporter', () => {
     const actual = realVitestEvidence('process-timeout');
     expect(actual.evidence.processTimeoutObserved).toBe(true);
     expect(actual.evidence.fatalReasons).toEqual(['vitest-process-timeout']);
+    const initial = await classifyVitest(evidence);
+    expect(initial.reporterOutcome.reasons).toContain('vitest-process-timeout');
+    const passing = await vitestEvidence();
+    const retryEvidence: VitestEvidence = {
+      ...passing,
+      phase: 'retry',
+      phaseInvocationId: 'vitest-retry-id',
+    };
+    const retry = await classifyVitest(retryEvidence);
+    const module = await verdictModule();
+    const verdict = module.reduceGateVerdict(initial, retry);
+    expect(verdict.status).toBe('failed');
+    expect(verdict.passedOnRetry).toEqual(['tests/example.test.ts']);
   });
 
   it('keeps project-aware identities for a duplicate path', async () => {
@@ -257,6 +443,7 @@ describe('Vitest gate evidence reporter', () => {
     const actual = realVitestEvidence('duplicate');
     expect(actual.status).toBe(0);
     expect(new Set(actual.evidence.modules.map((module) => module.executionId)).size).toBe(2);
+    expect((await classifyVitest(evidence)).discovery.status).toBe('complete');
   });
 
   it('records root passWithNoTests true for an empty run', async () => {
@@ -267,6 +454,9 @@ describe('Vitest gate evidence reporter', () => {
     expect(actual.status).toBe(0);
     expect(actual.evidence.passWithNoTests).toBe(true);
     expect(actual.evidence.specifications).toEqual([]);
+    const phase = await classifyVitest(evidence);
+    expect(phase.reporterOutcome.status).toBe('passed');
+    expect(phase.discovery.status).toBe('complete');
   });
 
   it('records root passWithNoTests false for an empty run', async () => {
@@ -277,55 +467,85 @@ describe('Vitest gate evidence reporter', () => {
     expect(actual.status).toBe(1);
     expect(actual.evidence.passWithNoTests).toBe(false);
     expect(actual.evidence.specifications).toEqual([]);
+    expect((await classifyVitest(evidence)).reporterOutcome.reasons).toContain('empty-run-not-allowed');
   });
 });
 
 describe('Playwright gate evidence reporter', () => {
   it('records an expected pass', async () => {
-    expect((await playwrightEvidence()).tests[0]).toMatchObject({ status: 'passed', outcome: 'expected' });
+    const evidence = await playwrightEvidence();
+    expect(evidence.tests[0]).toMatchObject({ status: 'passed', outcome: 'expected' });
+    const phase = await classifyPlaywright(evidence);
+    expect(phase.reporterOutcome).toEqual(expect.objectContaining({ status: 'passed', reasons: [] }));
+    expect(phase.discovery.status).toBe('complete');
   });
 
   it('records an unexpected assertion failure', async () => {
-    expect((await playwrightEvidence({ status: 'failed', outcome: 'unexpected', fullStatus: 'failed' })).tests[0])
-      .toMatchObject({ status: 'failed', outcome: 'unexpected' });
+    const evidence = await playwrightEvidence({ status: 'failed', outcome: 'unexpected', fullStatus: 'failed' });
+    expect(evidence.tests[0]).toMatchObject({ status: 'failed', outcome: 'unexpected' });
+    expect((await classifyPlaywright(evidence)).fileOutcomes).toContainEqual(expect.objectContaining({ status: 'failed' }));
   });
 
   it('records an individual timed-out result distinctly', async () => {
-    expect((await playwrightEvidence({ status: 'timedOut', outcome: 'unexpected', fullStatus: 'failed' })).tests[0]?.status)
-      .toBe('timedOut');
+    const evidence = await playwrightEvidence({ status: 'timedOut', outcome: 'unexpected', fullStatus: 'failed' });
+    expect(evidence.tests[0]?.status).toBe('timedOut');
+    expect((await classifyPlaywright(evidence)).fileOutcomes).toContainEqual(expect.objectContaining({ status: 'failed' }));
   });
 
   it('records intentional skip with callback and expected status', async () => {
-    expect((await playwrightEvidence({ status: 'skipped', outcome: 'skipped', expectedStatus: 'skipped' })).tests[0])
-      .toMatchObject({ status: 'skipped', expectedStatus: 'skipped', onTestEndObserved: true });
+    const evidence = await playwrightEvidence({ status: 'skipped', outcome: 'skipped', expectedStatus: 'skipped' });
+    expect(evidence.tests[0]).toMatchObject({ status: 'skipped', expectedStatus: 'skipped', onTestEndObserved: true });
+    const phase = await classifyPlaywright(evidence);
+    expect(phase.reporterOutcome.status).toBe('passed');
+    expect(phase.discovery.status).toBe('complete');
   });
 
   it('records started without terminal callback', async () => {
-    expect((await playwrightEvidence({ end: false })).tests[0])
-      .toMatchObject({ onTestBeginObserved: true, onTestEndObserved: false });
+    const evidence = await playwrightEvidence({ end: false });
+    expect(evidence.tests[0]).toMatchObject({ onTestBeginObserved: true, onTestEndObserved: false });
+    const phase = await classifyPlaywright(evidence);
+    expect(phase.reporterOutcome.reasons).toContain('execution-unfinished');
+    expect(phase.discovery.status).toBe('failed');
   });
 
   it('records synthesized skipped nonexecution', async () => {
-    expect((await playwrightEvidence({ status: 'skipped', outcome: 'skipped', expectedStatus: 'passed', begin: false })).tests[0])
-      .toMatchObject({ status: 'skipped', expectedStatus: 'passed', onTestBeginObserved: false, onTestEndObserved: true });
+    const evidence = await playwrightEvidence({ status: 'skipped', outcome: 'skipped', expectedStatus: 'passed', begin: false });
+    expect(evidence.tests[0]).toMatchObject({ status: 'skipped', expectedStatus: 'passed', onTestBeginObserved: false, onTestEndObserved: true });
+    const phase = await classifyPlaywright(evidence);
+    expect(phase.reporterOutcome.reasons).toContain('execution-unfinished');
+    expect(phase.discovery.status).toBe('failed');
   });
 
   it('records global FullResult timedout', async () => {
-    expect((await playwrightEvidence({ fullStatus: 'timedout' })).fullResultStatus).toBe('timedout');
+    const evidence = await playwrightEvidence({ fullStatus: 'timedout' });
+    expect(evidence.fullResultStatus).toBe('timedout');
+    expect((await classifyPlaywright(evidence)).reporterOutcome.reasons).toContain('runner-global-timeout');
   });
 
   it('records global FullResult interrupted', async () => {
-    expect((await playwrightEvidence({ fullStatus: 'interrupted' })).fullResultStatus).toBe('interrupted');
+    const evidence = await playwrightEvidence({ fullStatus: 'interrupted' });
+    expect(evidence.fullResultStatus).toBe('interrupted');
+    expect((await classifyPlaywright(evidence)).reporterOutcome.reasons).toContain('runner-interrupted');
   });
 
   it('records global-only onError', async () => {
-    expect((await playwrightEvidence({ globalError: new Error('global boom'), fullStatus: 'failed' })).globalErrors[0]?.message)
-      .toBe('global boom');
+    const evidence = await playwrightEvidence({ globalError: new Error('global boom'), fullStatus: 'failed' });
+    expect(evidence.globalErrors[0]?.message).toBe('global boom');
+    expect((await classifyPlaywright(evidence)).reporterOutcome.reasons).toContain('runner-global-error');
   });
 
   it('keeps an independent unfinished duplicate-project execution', async () => {
     const evidence = await playwrightEvidence({ status: 'failed', outcome: 'unexpected', fullStatus: 'failed', duplicateUnfinished: true });
     expect(evidence.discovered.map((test) => test.executionId)).toHaveLength(2);
     expect(evidence.tests.find((test) => test.executionId.includes('test-b'))?.onTestEndObserved).toBe(false);
+    const phase = await classifyPlaywright(evidence);
+    expect(phase.reporterOutcome.reasons).toContain('execution-unfinished');
+    expect(phase.discovery.status).toBe('failed');
+  });
+
+  it('preserves repeated terminal callbacks for classifier rejection', async () => {
+    const evidence = await playwrightEvidence({ repeatEnd: true });
+    expect(evidence.tests.map((test) => test.executionId)).toHaveLength(2);
+    expect((await classifyPlaywright(evidence)).discovery.status).toBe('failed');
   });
 });

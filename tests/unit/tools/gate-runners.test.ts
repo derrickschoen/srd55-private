@@ -12,6 +12,14 @@ import {
 } from '../../helpers/test-filesystem';
 
 type RunnerKind = 'vitest' | 'playwright';
+type VitestArgvProbe =
+  | 'default'
+  | 'complex'
+  | 'initial-file-parallelism'
+  | 'initial-serial'
+  | 'retry-isolate-false'
+  | 'retry-coverage-false'
+  | 'retry-config-loader';
 type Scenario =
   | 'clean'
   | 'flaky'
@@ -89,7 +97,7 @@ interface GateRun {
   readonly unrelatedFile: string;
 }
 
-function runGate(kind: RunnerKind, scenario: Scenario, parserProbe = false): GateRun {
+function runGate(kind: RunnerKind, scenario: Scenario, argvProbe: VitestArgvProbe = 'default'): GateRun {
   const directory = mkdtempSync(join(tmpdir(), `dnd-${kind}-gate-test-`));
   const logPath = join(directory, 'stub.jsonl');
   const emptyPath = join(directory, 'empty-path');
@@ -120,19 +128,30 @@ function runGate(kind: RunnerKind, scenario: Scenario, parserProbe = false): Gat
     environment.DND_GATE_FLOCK_MODULE = resolve('tests/fixtures/fake-flock.mjs');
   }
   const selectors = kind === 'vitest'
-    ? parserProbe
+    ? argvProbe === 'complex'
       ? [
         '-c', 'tests/fixtures/gate-vitest-proof.config.mts',
         '--project', 'unit', '--project=other',
         '-t', 'probe name', '--environment=node', '--pool', 'forks',
         '--passWithNoTests', '--shard=1/2', '--changed=false',
       ]
-      : ['--config', 'tests/fixtures/gate-vitest-proof.config.mts', '--project=unit']
+      : argvProbe === 'initial-file-parallelism'
+        ? ['--fileParallelism']
+        : argvProbe === 'initial-serial'
+          ? ['--no-file-parallelism', '--maxWorkers=1']
+          : argvProbe === 'retry-isolate-false'
+            ? ['--isolate', 'false']
+            : argvProbe === 'retry-coverage-false'
+              ? ['--coverage', 'false']
+              : argvProbe === 'retry-config-loader'
+                ? ['--configLoader', 'runner']
+                : ['--config', 'tests/fixtures/gate-vitest-proof.config.mts', '--project=unit']
     : ['--project=chromium'];
-  const tail = parserProbe ? ['--', '--node-tail', 'tail-value'] : [];
+  const selectedFiles = argvProbe === 'complex' ? [failedFile, unrelatedFile] : [failedFile];
+  const tail = argvProbe === 'complex' ? ['--', '--node-tail', 'tail-value'] : [];
   const result = spawnSync(
     process.execPath,
-    [runner, ...selectors, failedFile, unrelatedFile, ...tail],
+    [runner, ...selectors, ...selectedFiles, ...tail],
     { cwd: process.cwd(), encoding: 'utf8', env: environment },
   );
   const finalReport = readdirSync(directory).find((name) => name.includes('-gate-') && name.endsWith('.json'));
@@ -196,7 +215,7 @@ describe('Vitest retained retry report completeness and option parsing', () => {
     expect(omitted.report.verdict.failedFiles).toEqual([omitted.failedFile]);
     expect(omitted.report.phases.retry?.discovery.status).toBe('failed');
 
-    const retried = runGate('vitest', 'ordinary_retry', true);
+    const retried = runGate('vitest', 'ordinary_retry', 'complex');
     const args = retried.report.phases.retry?.command.arguments;
     expect(args).toBeDefined();
     const parsed = parseCLI(['vitest', ...args!.slice(1)]);
@@ -235,6 +254,53 @@ describe('Vitest retained retry report completeness and option parsing', () => {
     expect(reporterIndex).toBeGreaterThan(args?.indexOf('--changed=false') ?? -1);
     expect(failedFileIndex).toBeGreaterThan(reporterIndex);
     expect(delimiterIndex).toBeGreaterThan(failedFileIndex);
+  });
+
+  it('preserves a bare initial --fileParallelism without swallowing its file filter', () => {
+    const run = runGate('vitest', 'clean', 'initial-file-parallelism');
+    const args = run.logs.find((entry) => entry.type === 'command' && entry.phase === 'initial')?.arguments;
+    expect(args).toBeDefined();
+    const parsed = parseCLI(['vitest', ...args!.slice(1)]);
+    expect(parsed.filter).toEqual([run.failedFile]);
+    expect(parsed.options.fileParallelism).toBe(true);
+  });
+
+  it('preserves initial serial scheduling constraints and the file filter', () => {
+    const run = runGate('vitest', 'clean', 'initial-serial');
+    const args = run.logs.find((entry) => entry.type === 'command' && entry.phase === 'initial')?.arguments;
+    expect(args).toBeDefined();
+    const parsed = parseCLI(['vitest', ...args!.slice(1)]);
+    expect(parsed.filter).toEqual([run.failedFile]);
+    expect(parsed.options.fileParallelism).toBe(false);
+    expect(parsed.options.maxWorkers).toBe(1);
+  });
+
+  it('preserves separate false for --isolate on retry', () => {
+    const run = runGate('vitest', 'ordinary_retry', 'retry-isolate-false');
+    const args = run.logs.find((entry) => entry.type === 'command' && entry.phase === 'retry')?.arguments;
+    expect(args).toBeDefined();
+    const parsed = parseCLI(['vitest', ...args!.slice(1)]);
+    expect(parsed.filter).toEqual([run.failedFile]);
+    expect(parsed.options.isolate).toBe(false);
+  });
+
+  it('preserves separate false for --coverage on retry', () => {
+    const run = runGate('vitest', 'ordinary_retry', 'retry-coverage-false');
+    const args = run.logs.find((entry) => entry.type === 'command' && entry.phase === 'retry')?.arguments;
+    expect(args).toBeDefined();
+    const parsed = parseCLI(['vitest', ...args!.slice(1)]);
+    expect(parsed.filter).toEqual([run.failedFile]);
+    expect(parsed.options.coverage).toEqual({ enabled: false });
+  });
+
+  it('emits gate-owned --configLoader runner exactly once on retry', () => {
+    const run = runGate('vitest', 'ordinary_retry', 'retry-config-loader');
+    const args = run.logs.find((entry) => entry.type === 'command' && entry.phase === 'retry')?.arguments;
+    expect(args).toBeDefined();
+    expect(args?.filter((argument) => argument === '--configLoader')).toHaveLength(1);
+    const parsed = parseCLI(['vitest', ...args!.slice(1)]);
+    expect(parsed.filter).toEqual([run.failedFile]);
+    expect(parsed.options.configLoader).toBe('runner');
   });
 });
 
@@ -282,6 +348,7 @@ describe.each(['vitest', 'playwright'] as const)('%s four-domain counterexamples
     const run = runGate(kind, 'stock_missing');
     expect(run.report.version).toBe(2);
     expect(run.status).toBe(1);
+    expect(run.report.phases.initial.process).toMatchObject({ status: 'passed', exitCode: 0 });
     expect(run.report.phases.initial.reporterOutcome.reasons).toContain('stock-report-missing');
     expect(run.report.phases.initial.fileOutcomes).toContainEqual(expect.objectContaining({ file: run.failedFile, status: 'failed' }));
     expect(run.report.phases.retry).not.toBeNull();

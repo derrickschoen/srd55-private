@@ -1,5 +1,5 @@
 import { appendFileSync, writeFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { relative, resolve } from 'node:path';
 
 const phase = process.env.DND_GATE_PHASE;
 const kind = process.env.DND_GATE_KIND;
@@ -93,11 +93,12 @@ if (kind === 'vitest') {
   const outputPath = process.env.PLAYWRIGHT_JSON_OUTPUT_FILE;
   if (outputPath === undefined) throw new Error('Fake Playwright command received no JSON output path.');
   if (scenario !== 'stock_missing') {
+    const rootDir = resolve('tests/browser');
     const specs = selectedFiles.map((file) => {
       const status = resultFor(file);
       return {
         title: `stub ${file}`,
-        file: resolve(file),
+        file: relative(rootDir, resolve(file)),
         ok: status === 'passed',
         tests: [{
           projectName: 'unit',
@@ -109,6 +110,7 @@ if (kind === 'vitest') {
     });
     const failures = specs.filter((spec) => !spec.ok).length;
     writeFileSync(outputPath, JSON.stringify({
+      config: { rootDir },
       suites: [{ title: 'stub suite', specs }],
       errors: globalErrors,
       stats: {
@@ -163,5 +165,6 @@ if (kind === 'vitest') {
 if (scenario === 'signal' && phase === 'initial') process.kill(process.pid, 'SIGTERM');
 if (scenario === 'exit2' && phase === 'initial') process.exitCode = 2;
 else if (scenario === 'late_exit1' && phase === 'initial') process.exitCode = 1;
+else if (scenario === 'stock_missing' && phase === 'initial') process.exitCode = 0;
 else if (scenario === 'sidecar_missing') process.exitCode = 0;
 else process.exitCode = selectedFiles.some((file) => resultFor(file) === 'failed') ? 1 : 0;

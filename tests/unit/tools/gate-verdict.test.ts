@@ -31,7 +31,13 @@ interface ClassifiedPhase {
   readonly phase: Phase;
   readonly process: { readonly status: string; readonly reasons: readonly string[] };
   readonly reporterOutcome: { readonly status: string; readonly reasons: readonly string[] };
-  readonly discovery: { readonly status: string; readonly missingExecutionIds: readonly string[] };
+  readonly discovery: {
+    readonly status: string;
+    readonly missingExecutionIds: readonly string[];
+    readonly duplicateExecutionIds: readonly string[];
+    readonly mismatchedExecutionIds: readonly string[];
+    readonly fileSetMismatch: boolean;
+  };
   readonly fileOutcomes: readonly { readonly file: string; readonly status: string; readonly executionIds: readonly string[] }[];
 }
 
@@ -39,6 +45,8 @@ interface VerdictModule {
   classifyPhase(value: PhaseInput): unknown;
   readJsonArtifact(path: string): { readonly read: ArtifactRead };
   reduceGateVerdict(initial: ClassifiedPhase, retry: ClassifiedPhase | null): {
+    readonly status: 'passed' | 'failed';
+    readonly passedOnRetry: readonly string[];
     readonly phaseFailures: readonly { readonly phase: Phase; readonly domain: string }[];
   };
 }
@@ -105,7 +113,8 @@ function stock(kind: Kind, status: 'passed' | 'failed' = 'passed'): unknown {
     };
   }
   return {
-    suites: [{ specs: [{ file, ok: status === 'passed', tests: [{ results: [{ status }] }] }] }],
+    config: { rootDir: resolve('tests/browser') },
+    suites: [{ specs: [{ file: 'example.spec.ts', ok: status === 'passed', tests: [{ results: [{ status }] }] }] }],
     errors: [],
     stats: { expected: status === 'passed' ? 1 : 0, unexpected: status === 'failed' ? 1 : 0, flaky: 0, skipped: 0 },
   };
@@ -143,6 +152,30 @@ describe('gate phase classifier', () => {
 
   it('classifies Playwright exit 1 with an attributable file as ordinary failure', async () => {
     expect((await classify(input('playwright', 'initial', 'failed'))).process.status).toBe('ordinary-file-failure');
+  });
+
+  it('resolves native Playwright stock paths from a validated rootDir', async () => {
+    const rootDir = resolve('tests/browser');
+    const nativeStock = {
+      config: { rootDir },
+      suites: [{ specs: [{ file: 'example.spec.ts', ok: true, tests: [{ results: [{ status: 'passed' }] }] }] }],
+      errors: [],
+      stats: { expected: 1, unexpected: 0, flaky: 0, skipped: 0 },
+    };
+    const phase = await classify({ ...input('playwright'), reporter: nativeStock });
+    expect(phase.reporterOutcome).toEqual(expect.objectContaining({ status: 'passed', reasons: [] }));
+    expect(phase.discovery.status).toBe('complete');
+
+    const relativeRoot = await classify({
+      ...input('playwright'),
+      reporter: { ...nativeStock, config: { rootDir: 'tests/browser' } },
+    });
+    expect(relativeRoot.reporterOutcome.reasons).toContain('stock-report-malformed');
+    const outsideRoot = await classify({
+      ...input('playwright'),
+      reporter: { ...nativeStock, config: { rootDir: resolve('..') } },
+    });
+    expect(outsideRoot.reporterOutcome.reasons).toContain('stock-report-malformed');
   });
 
   it('classifies late exit 1 after successful reports as process failure', async () => {
@@ -198,10 +231,16 @@ describe('gate phase classifier', () => {
   });
 
   it('does not let a retry reporter/global failure authorize green', async () => {
+    const module = await verdictModule();
+    const initial = await classify(input('vitest', 'initial', 'failed'));
     const badEvidence = evidence('vitest', 'retry', 'phase-id') as { globalErrors: unknown[] };
     badEvidence.globalErrors = [{ name: 'Error', message: 'global' }];
     const retry = await classify({ ...input('vitest', 'retry'), evidence: badEvidence });
     expect(retry.reporterOutcome.reasons).toContain('runner-global-error');
+    const verdict = module.reduceGateVerdict(initial, retry);
+    expect(verdict.status).toBe('failed');
+    expect(verdict.passedOnRetry).toEqual(['tests/unit/example.test.ts']);
+    expect(verdict.phaseFailures).toContainEqual(expect.objectContaining({ phase: 'retry', domain: 'reporter' }));
     const unexplainedEvidence = evidence('vitest', 'retry', 'phase-id') as { terminalReason: string };
     unexplainedEvidence.terminalReason = 'failed';
     const unexplained = await classify({ ...input('vitest', 'retry'), reporter: stock('vitest'), evidence: unexplainedEvidence });
@@ -218,6 +257,88 @@ describe('gate phase classifier', () => {
     omitted.tests = [];
     const retry = await classify({ ...retryInput, evidence: omitted });
     expect(retry.discovery.status).toBe('failed');
+  });
+
+  it('rejects duplicate terminal execution ids before deduplication', async () => {
+    const duplicated = evidence('vitest', 'initial', 'phase-id') as {
+      modules: Array<Record<string, unknown>>;
+    };
+    const first = duplicated.modules[0];
+    if (first === undefined) throw new Error('Expected one module fixture.');
+    duplicated.modules.push({ ...first });
+    const phase = await classify({ ...input('vitest'), evidence: duplicated });
+    expect(phase.discovery.status).toBe('failed');
+    expect(phase.discovery.duplicateExecutionIds).toEqual([first.executionId]);
+  });
+
+  it('rejects a scheduled execution id reported for a substituted file', async () => {
+    const substituted = evidence('vitest', 'initial', 'phase-id') as {
+      modules: Array<Record<string, unknown>>;
+    };
+    const module = substituted.modules[0];
+    if (module === undefined) throw new Error('Expected one module fixture.');
+    const unlisted = resolve('tests/unit/unlisted.test.ts');
+    module.file = unlisted;
+    const reporter = {
+      success: true,
+      numFailedTestSuites: 0,
+      numFailedTests: 0,
+      testResults: [{ name: unlisted, status: 'passed', assertionResults: [{ status: 'passed' }] }],
+    };
+    const phase = await classify({ ...input('vitest'), reporter, evidence: substituted });
+    expect(phase.discovery.status).toBe('failed');
+    expect(phase.discovery.mismatchedExecutionIds).toEqual([module.executionId]);
+  });
+
+  it('rejects a reported file set different from the scheduled file set', async () => {
+    const unlistedEvidence = evidence('vitest', 'initial', 'phase-id') as {
+      modules: Array<Record<string, unknown>>;
+    };
+    const unlisted = resolve('tests/unit/unlisted.test.ts');
+    unlistedEvidence.modules = [{
+      executionId: `unit:unlisted:${unlisted}`,
+      file: unlisted,
+      projectName: 'unit',
+      state: 'passed',
+      errors: [],
+    }];
+    const reporter = {
+      success: true,
+      numFailedTestSuites: 0,
+      numFailedTests: 0,
+      testResults: [{ name: unlisted, status: 'passed', assertionResults: [{ status: 'passed' }] }],
+    };
+    const phase = await classify({ ...input('vitest'), reporter, evidence: unlistedEvidence });
+    expect(phase.discovery.status).toBe('failed');
+    expect(phase.discovery.fileSetMismatch).toBe(true);
+  });
+
+  it('aggregates duplicate Vitest stock paths with failure dominance in either order and permits exact retry', async () => {
+    const module = await verdictModule();
+    const file = resolve('tests/unit/example.test.ts');
+    const mixedEvidence = evidence('vitest', 'initial', 'phase-id', 'failed') as {
+      specifications: Array<Record<string, unknown>>;
+      modules: Array<Record<string, unknown>>;
+    };
+    const secondId = `other:test-b:${file}`;
+    mixedEvidence.specifications.push({ executionId: secondId, file, projectName: 'other', taskId: 'test-b' });
+    mixedEvidence.modules.push({ executionId: secondId, file, projectName: 'other', state: 'passed', errors: [] });
+    const failedResult = { name: file, status: 'failed', assertionResults: [{ status: 'failed' }] };
+    const passedResult = { name: file, status: 'passed', assertionResults: [{ status: 'passed' }] };
+    const phases = await Promise.all([
+      [failedResult, passedResult],
+      [passedResult, failedResult],
+    ].map((testResults) => classify({
+      ...input('vitest', 'initial', 'failed'),
+      reporter: { success: false, numFailedTestSuites: 1, numFailedTests: 1, testResults },
+      evidence: mixedEvidence,
+    })));
+    expect(phases.map((phase) => phase.reporterOutcome)).toEqual([
+      expect.objectContaining({ status: 'passed', reasons: [] }),
+      expect.objectContaining({ status: 'passed', reasons: [] }),
+    ]);
+    const retry = await classify(input('vitest', 'retry', 'passed'));
+    expect(phases.map((phase) => module.reduceGateVerdict(phase, retry).status)).toEqual(['passed', 'passed']);
   });
 
   it('rejects sidecar invocation UUID mismatch', async () => {
