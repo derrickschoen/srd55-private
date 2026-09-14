@@ -1,171 +1,157 @@
-# M-2 implementation review r1 (astra 01a09ee5-6200-7f60-a1eb-7edea3abbbb8) on 5fbf00a6, harvested 2026-09-14 04:04
+# M-2 implementation review r1 — gpt-6-astra (read-only)
 
-**REJECT IMPL M2.** Validation/publication ordering is sound, but discovery still permits stale cache hits.
+Reviewed d6468048 on claude/build-cache (dnd-wt-build-cache). Session 01a0a1ae-5b33-7971-b5c1-8b01ab356292. Log .tmp/runs/fanout/review-impl-m2-r1.log. Supervisor verification of the four findings follows in loop-log.md.
 
-Review was read-only: no edits, git writes, other agents, full suite, or builds. I read both modules end to end, compared the baseline, and ran in-memory Node probes using the production functions with a virtual filesystem. Syntax checks and diff-check passed; production, lockfile, and frozen-contract hashes match the supplied values. The reported 66/66 and discovery census remain supervisor evidence.
+**REJECT IMPL M2 — blocking findings: IM1-F1 and IM1-F2.**
 
-**IB1-F1 — P1 blocks; blocks: yes — Glob expansion is incomplete.**  
-[dist-build-inputs.mjs:119](/home/vagrant/PhpstormProjects/dnd-wt-build-cache/tools/dist-build-inputs.mjs:119), [134](/home/vagrant/PhpstormProjects/dnd-wt-build-cache/tools/dist-build-inputs.mjs:134), [383](/home/vagrant/PhpstormProjects/dnd-wt-build-cache/tools/dist-build-inputs.mjs:383).
+Reviewed `d6468048c08f07a4bcad779f576a05a805997ae8`, parent `40f04e2cad4d5d5e170d6caf0adb033e14252990`. The worktree remained clean. Both the frozen plan and contract SHA-256 values match the supplied pins.
 
-`**/` becomes `.*/`, requiring at least one directory. For:
+**IM1-F1 — P1 — Required environment integration proofs are missing.**  
+[dist-build-cache.test.ts:179](/home/vagrant/PhpstormProjects/dnd-wt-build-cache/tests/unit/tools/dist-build-cache.test.ts:179)
 
-```js
-import.meta.glob('../extras/**/*.txt', { eager: true, query: '?raw' })
+`runCache()` launches Node directly. Consequently:
+
+- `FIXED_LOCALE_OUTPUT` never runs the required public `npm run build`.
+- `HOST_NPM_CONFIG_IS_INERT` explicitly supplies `NODE_OPTIONS`; its single preload PID proves that Node loaded the supplied option, not that npm reconstructed it from `.npmrc`.
+- No `vite.config.mjs` fixture exists. `UNDECLARED_ENV_IS_HERMETIC` observes variables inside the stand-in Vite executable at lines 137–159.
+
+**Probe/output:** `rg -n 'vite\.config\.mjs|npm.*run|steps\.log|guard\.log|childEnv\)\.not|parentEnv\.NODE_ENV' tests/unit/tools/dist-build-cache.test.ts` finds no config fixture or executable npm invocation. The in-memory `SPAWN_NPM` replay makes the named test fail at `expect(run.status).toBe(0)` with **`1 !== 0`** because the fixture package has no build scripts. That is not the claimed injection-isolation failure.
+
+**Minimal change:** add the planned fixture scripts and config; exercise the public npm path for locale and `.npmrc` cases; distinguish outer-process preload execution from the direct Vite child. Retain the existing environment assertions.
+
+**IM1-F2 — P1 — The complete key/verdict computation exceeds its hard cap.**  
+[dist-build-cache.mjs:22](/home/vagrant/PhpstormProjects/dnd-wt-build-cache/tools/dist-build-cache.mjs:22)
+
+The marker encloses lines 23–172: exactly **150** lines. It excludes `productionBuildEnv`, lines 16–22, even though verdict computation calls it at line 151 to construct hashed inputs.
+
+**Probe/output:** read-only TypeScript AST/source counting returned:
+
+```text
+markerInterior=150
+environmentExtra=7
+constantsExtra=3
+completeKeyVerdictLines=160
 ```
 
-the enumerator omits `extras/a.txt`. My probe returned `cacheable:true` and an **unchanged digest after editing that file**. Vite’s installed matcher includes it.
+The computation is **at least 157 lines**, or **160** including its three supporting constants. The whole module honestly meets **250** lines; the complete key/verdict portion does not meet **150**.
 
-Additional contract discrepancies:
+**Minimal change:** reduce the complete computation to the authorized cap and count its dependencies consistently. Moving markers does not resolve it.
 
-- Negations execute in array order rather than after the positive union.
-- Relative/root-relative syntax and repository escape are not enforced.
-- Every glob recursively walks the entire repository, including outputs and `node_modules`; broad patterns can select prohibited input classes.
-- That walk follows symlinks without the containment checks used by ordinary imports.
+**IM1-F3 — P2 — Required machine-output validation is incomplete.**  
+[dist-build-cache.mjs:140](/home/vagrant/PhpstormProjects/dnd-wt-build-cache/tools/dist-build-cache.mjs:140)
 
-**Minimal change:** implement the stated glob grammar accurately, including zero-directory globstars and final negation filtering; constrain traversal and reject escapes/special entries. Add independent membership/edit and unsupported-pattern bypass fixtures.
+Attribute parsing checks the total field count and values, but never verifies the returned paths or attribute names. Index parsing at line 129 likewise does not validate mode/stage grammar, and the `-v` stream lacks record-shape validation.
 
-**IB1-F2 — P1 blocks; blocks: yes — HTML detection misses supported resources and unsupported forms.**  
-[dist-build-inputs.mjs:232](/home/vagrant/PhpstormProjects/dnd-wt-build-cache/tools/dist-build-inputs.mjs:232).
+**Probe/output:** the unchanged production module received virtual `check-attr` triples containing `wrong-path`, `not-an-attribute`, and `unspecified`, with the expected field count. It returned **`cacheable: true`**, with the same baseline key.
 
-These probes all returned `cacheable:true`, omitted the indicated dependency, and retained the same key after its edit:
+**Minimal change:** validate the required record grammar, including five correctly identified attribute triples per tracked path; return `git-failure` for malformed output. This reproduces a contract deviation, not an observed failure of ordinary Git.
 
-| HTML | Omitted input |
+**IM1-F4 — P2 — Ignored-public assertions do not verify production ordering or content-ID consumption.**  
+[dist-build-cache.test.ts:357](/home/vagrant/PhpstormProjects/dnd-wt-build-cache/tests/unit/tools/dist-build-cache.test.ts:357)
+
+The test checks Git’s independently obtained ordering and hashes. Adding paths changes the production key even if their content IDs are discarded.
+
+**Probe/output:** two additional in-memory mutants both survived `IGNORED_PUBLIC_FILE_MISS`:
+
+```text
+DROP_PUBLIC_SORT         passed=true
+DROP_PUBLIC_CONTENT_IDS  passed=true
+```
+
+**Minimal change:** reverse the enumeration supplied to the production computation, assert key invariance, then edit each already-present ignored file independently and require distinct keys. The current production implementation does sort and hash them correctly.
+
+| Dimension | Verdict and evidence |
 |---|---|
-| `<img src=./extras/a.png>` | `extras/a.png` |
-| `<video src="./extras/a.mp4" poster="./extras/a.png">` | The second attribute’s image |
-| `<script type="module">if (1 < 2) import("./extras/mod.js");</script>` | Inline module dependency |
+| **1. Plan fidelity** | **FAIL**, principally F1/F2; detailed mapping below. |
+| **2. Stale-hit probes** | **PASS within virtual-fixture limits:** all ten produced the required outcomes. Native integration remains unverified here. |
+| **3. Mutant ledger** | **PARTIAL:** six requested behaviors killed their named assertions in memory; npm failure does not prove isolation. Two additional public-input mutants survived. |
+| **4. Expectation audit** | **PASS:** only the three authorized behavioral rewrites; original environment assertions strengthened, with both retained identity/nonmutation assertions present. |
+| **5. Callers** | **PASS:** CLI invocation and failure propagation preserved; no removed-export callers found. |
+| **6. Formatting/size** | **FAIL:** whole module 250; complete key/verdict ≥157. Four reviewed code files meet 120 columns. |
+| **7. Four-build proof** | **Expected to pass as written under the supervisor’s writable environment**, assuming successful builds and stable inputs. Not executed here. |
 
-The attribute regex consumes the whole element after its first resource attribute. The inline-script regex cannot match a body containing `<`. Unquoted attributes receive neither traversal nor rejection.
+The production-plan mapping is:
 
-**Minimal change:** scan complete tags and all relevant attributes; detect script bodies independently of their JavaScript contents. Route unquoted/malformed/ambiguous forms to BYPASS and test repeated calls with zero cache access.
+| Requirement | Implementation evidence |
+|---|---|
+| **§3.2 verdicts** | `invalid-head` at [124](/home/vagrant/PhpstormProjects/dnd-wt-build-cache/tools/dist-build-cache.mjs:124); Git failures at 29–46; submodule/symlink/special-index at 131–134; dirty/public symlinks at 73; unsupported paths at 63; normalization at 135–141; stale installation at 91–110 and 142–144. F3 qualifies malformed-output handling. |
+| **§3.4 key order** | [155–169](/home/vagrant/PhpstormProjects/dnd-wt-build-cache/tools/dist-build-cache.mjs:155): format, HEAD, runtime/platform/architecture, indexed lock ID, hidden-lock digest, sorted environment, terminal-NUL index records, canonical overlay, sorted ignored public content, four fixed-order env probes. |
+| **§3.5 Git/parsing** | [29–85](/home/vagrant/PhpstormProjects/dnd-wt-build-cache/tools/dist-build-cache.mjs:29): 64 MiB, optional locks disabled, NUL parsing, fixed status offsets, rename old-path consumption, Buffer ordering, validation before `lstat`, raw batch hashing. Line 63 checks **both first byte and basename first byte**. Attribute stdin is reconstructed from index paths rather than obtained through a separate `git ls-files -z`; ordinary path contents are equivalent. |
+| **§3.6 lifecycle** | [195–246](/home/vagrant/PhpstormProjects/dnd-wt-build-cache/tools/dist-build-cache.mjs:195): verdict before lookup; pointer format/key/HEAD and generation-name containment; source/copy digests; artifact HEAD; restored-hit guard; validated miss/bypass steps; post-build artifact check; complete recheck before publication. Bypass performs no pointer lookup/store. Generation publication precedes atomic pointer replacement. |
+| **§3.7 printing** | HIT 208, STORED 226, BYPASS 233, MISS 238, unstable-inputs 243. HIT prints only after its guard succeeds. |
+| **§4 environment** | [16–21](/home/vagrant/PhpstormProjects/dnd-wt-build-cache/tools/dist-build-cache.mjs:16): starts with `{}`; only PATH/HOME/TMPDIR/TZ pass unhashed; forced production/fixed locale and optional STATIC_APP_CACHE_DIR are hashed at 152–156. [190](/home/vagrant/PhpstormProjects/dnd-wt-build-cache/tools/dist-build-cache.mjs:190) directly spawns `process.execPath`; descriptors at 11–15 match the three planned steps. |
+| **§6 scripts/assertions** | All three package script strings match exactly. Guard-route rewrites are at [scraper:93](/home/vagrant/PhpstormProjects/dnd-wt-build-cache/tests/unit/tools/scraper-is-never-in-the-bundle.test.ts:93) and [boundary:123](/home/vagrant/PhpstormProjects/dnd-wt-build-cache/tests/unit/ai-bridge/build-boundary.test.ts:123). |
 
-**IB1-F3 — P1 blocks; blocks: yes — CSS scanning is not the specified lexer.**  
-[dist-build-inputs.mjs:201](/home/vagrant/PhpstormProjects/dnd-wt-build-cache/tools/dist-build-inputs.mjs:201), [385](/home/vagrant/PhpstormProjects/dnd-wt-build-cache/tools/dist-build-inputs.mjs:385).
+The descriptor equivalence test is **not tautological**: it reads the real `package.json` and imports the actual production descriptors. It checks them against separately written equivalent expectations, although it does not mechanically expand the parsed scripts into descriptors.
 
-For valid CSS:
+The ten probes used the production exports with filesystem/Git/process boundaries virtualized entirely in memory. Each began with a stored generation:
 
-```css
-@import/**/ "../extras/nested.css";
+| Probe | Observed result |
+|---|---|
+| Add ignored public file | Different key; MISS → STORED |
+| Symlink beneath public | BYPASS `symlink` |
+| Whole-line-quoted path | BYPASS `unsupported-path` |
+| CRLF plus configured `core.attributesFile` | BYPASS `normalization` |
+| Hidden package version drift | BYPASS `stale-install` |
+| Undeclared environment variable | Same key; HIT; identical observed bytes |
+| Ambient `LANG/LC_ALL=da_DK.UTF-8` | Same key; HIT; identical observed bytes; guard receives fixed locale |
+| Edit during build | MISS → `unstable-inputs`; no publication |
+| Delete tracked file | Different key; MISS → STORED |
+| Assume-unchanged entry | BYPASS `special-index` |
+
+These establish computation/control-flow behavior. They do **not** replace native Git-attribute resolution, npm execution, or separate-process ICU-locale integration.
+
+For mutation replay, I transpiled the existing named test callbacks and production module in memory; each baseline passed:
+
+| Mutant | Named assertion that failed |
+|---|---|
+| `DROP_HEAD` | `HEAD_ONLY_CHANGE_MISS`: before/after keys became equal |
+| `PASS_PARENT_LOCALE` | Allowlist test: da-DK values replaced expected C.UTF-8 |
+| `DROP_QUOTE_BYPASS` | Whole-path quote case: cacheable instead of bypass |
+| `SPAWN_NPM` | `HOST_NPM_CONFIG_IS_INERT`: status 1 instead of 0; F1 applies |
+| `SKIP_POST_BUILD_RECHECK` | Race case: STORED instead of unstable-inputs |
+| `DROP_HIT_GUARD` | Locale case: HIT without `dist clean` |
+
+The HEAD, quote, and recheck mutant hashes exactly matched the ledger. The other three were independent implementations of the same runtime mutations. The pristine and final disk SHA remained:
+
+```text
+b46de8391e31c1cd1b85ed6d8d3334c8498fa6eab8d3975821885064f2fa5162
 ```
 
-installed PostCSS recognizes the import, but discovery ignores it. Editing `nested.css` retained a cacheable, unchanged key in my probe.
+The expectation diff retains:
 
-Glob-discovered `.scss` also bypasses the unsupported-stylesheet check: `import.meta.glob('../extras/a.scss')` hashes that file while ignoring its imported partials. An unterminated quoted CSS URL also returned `cacheable:true`.
+```text
+dist-build-cache.test.ts:274  expect(childEnv).not.toBe(parentEnv)
+dist-build-cache.test.ts:275  expect(parentEnv.NODE_ENV).toBe('development')
+```
 
-**Minimal change:** implement comment/string-aware token handling with explicit rejection of unsupported/malformed tokens. Apply stylesheet classification to every discovered edge, including glob matches.
+[serve.mjs:63](/home/vagrant/PhpstormProjects/dnd-wt-build-cache/tools/serve.mjs:63) still rejects spawn errors and nonzero status. [ai-dm-board-snapshot.ts:306](/home/vagrant/PhpstormProjects/dnd-wt-build-cache/tools/ai-dm-board-snapshot.ts:306) still rejects errors, signals and nonzero exits. The module catches build failures and sets exit code **1** at line 250. A failed restored-hit guard becomes a validated rebuild attempt; persistent failure therefore reaches both callers.
 
-**IB1-F4 — P1 blocks; blocks: yes — Environment/configuration rejection is incomplete.**  
-[dist-build-inputs.mjs:149](/home/vagrant/PhpstormProjects/dnd-wt-build-cache/tools/dist-build-inputs.mjs:149), [317](/home/vagrant/PhpstormProjects/dnd-wt-build-cache/tools/dist-build-inputs.mjs:317).
+The removed-export search was:
 
-My probes accepted all these forms:
+```sh
+rg -n 'DIST_BUILD_INPUT_CLASSES|distBuildInputFiles|distBuildInputDigest|dist-build-cache' src tools tests scripts
+```
 
-- `process['env']['BUILD_BASE']`
-- `Object.values(process.env)`
-- A Vite config re-exporting `extras/config.ts`, which reads `process.env.BUILD_BASE`
-- `cfg.root = './app'`
-- An imported/spread configuration containing `css.postcss`
-- `const leaked = { cacheDir: process.env.STATIC_APP_CACHE_DIR }; export default { base: leaked.cacheDir };`
+It found **zero references to the three removed exports**.
 
-The environment scan only runs for root-config and `tools/` paths; configuration-property rejection only runs for root-config paths. The allowlist accepts any enclosing `cacheDir` property, rather than the specified `core.cacheDir` context. External package plugin factories also encounter no dedicated rejection.
+Independent verification commands included:
 
-An imported PostCSS redirection produced **an unchanged key after editing its untracked configuration file**. These violate §3.5 and PB3-F1.
+```sh
+git show --stat --oneline HEAD
+git diff --numstat HEAD~1 HEAD
+git diff --check HEAD~1 HEAD
+node --check tools/dist-build-cache.mjs
+npx vitest run --configLoader runner tests/unit/tools/dist-build-cache.test.ts tests/unit/tools/scraper-is-never-in-the-bundle.test.ts tests/unit/ai-bridge/build-boundary.test.ts
+npx vitest list --configLoader runner --filesOnly --json
+```
 
-**Minimal change:** track config/plugin reachability independently of directory names, recognize process/environment access structurally, enforce the exact two allowlist contexts, and bypass configuration composition or mutation that cannot be proven within the supported grammar.
+Results: syntax and whitespace checks **0**; discovery **641 unique files, 0 fixture paths**. Focused Vitest exited **1 before loading tests**: three failed suites, **0 executed tests**, with `ENOENT` creating `/tmp/PVIOtWr9N9-mMAfLGsaG3/ssr`. A separate Node Git probe returned `spawnSync git EPERM`. Thus **61/61 remains supervisor evidence**, not independently reproduced native evidence.
 
-**IB1-F5 — P1 blocks; blocks: yes — Workspace-root computation does not match Vite.**  
-[dist-build-inputs.mjs:84](/home/vagrant/PhpstormProjects/dnd-wt-build-cache/tools/dist-build-inputs.mjs:84).
+Read-only `node --input-type=module` stdin probes supplied the virtual replays and AST counts. Line maxima were **119/116/112/113**, with **0** overlong lines and no same-block statements sharing a start line. `package-lock.json` is unchanged; `tools/dist-build-inputs.mjs` is absent.
 
-Comparison against the actual Vite 7.3.6 workspace-search functions yielded:
+For the four-build prediction, native read-only checks found **11,505 index records**, **0** indexed symlinks/submodules/special entries, **57,525 attribute triples with 0 specified values**, and matching lock version **3**, **273 eligible/273 installed packages**, **0 mismatches**. All four root env files are absent; autocrlf is unset. The proof’s document is still imported with `?raw`. Its fresh TMPDIR, retained document edit, subsequent identical input state, and undeclared `FOO` therefore support the expected **MISS/STORE K1 → MISS/STORE K2 → HIT K2 → HIT K2** sequence. Actual build success and emitted-marker presence remain for the supervisor to establish.
 
-| Virtual filesystem | Vite root | Implementation |
-|---|---|---|
-| Workspace marker at `/` | `/` | No bypass |
-| Repository has its own marker; ancestor also has one | Repository | Bypass |
-
-The implementation skips both the repository itself and the filesystem root. It also treats malformed ancestor manifests differently and omits Vite’s package-root fallback.
-
-**Minimal change:** reproduce Vite’s nearest-marker/package-root algorithm and compare its result with the repository root on every lookup. Add both boundary fixtures, retaining the repeated-build/zero-access assertions.
-
-**IB1-F6 — P2 should fix; blocks: no — Cache/discovery failures now fail otherwise available builds.**  
-[dist-build-cache.mjs:190](/home/vagrant/PhpstormProjects/dnd-wt-build-cache/tools/dist-build-cache.mjs:190), [202](/home/vagrant/PhpstormProjects/dnd-wt-build-cache/tools/dist-build-cache.mjs:202), [207](/home/vagrant/PhpstormProjects/dnd-wt-build-cache/tools/dist-build-cache.mjs:207).
-
-Discovery exceptions and cache-directory creation errors escape before the validated build. Store errors escape after successful validation. The committed baseline distinguished these from build failures and retained the real artifact after store failure. This is an unplanned availability regression.
-
-Restore cache-specific fallback handling while keeping malformed HEAD, validation failures, and wrong provenance fatal.
-
-**IB1-F7 — P2 should fix; blocks: no — The mutant ledger does not establish every named independent kill.**  
-[dist-build-cache.test.ts:257](/home/vagrant/PhpstormProjects/dnd-wt-build-cache/tests/unit/tools/dist-build-cache.test.ts:257), [334](/home/vagrant/PhpstormProjects/dnd-wt-build-cache/tests/unit/tools/dist-build-cache.test.ts:334), [434](/home/vagrant/PhpstormProjects/dnd-wt-build-cache/tests/unit/tools/dist-build-cache.test.ts:434).
-
-I independently removed only ambient `VITE_*` collection in memory. **Every assertion in the environment test still passed:** the supposed ambient-change assertion compares against the digest from before the `.env.production` edit.
-
-Other absent controls include unsupported glob options, exact allowlist contexts, independent spawn/nonzero failures, all four env-file add/edit/remove cases, and independent tsc/Vite/guard/digest failures on both MISS and BYPASS. The dirty-state reader returns a constant rather than observing fixture bytes as specified.
-
-Shared mutation hashes across several labels do not establish that each narrowly scoped defect is killed.
-
-**IB1-F8 — P3 note; blocks: no — Small literal-contract and readability deviations remain.**  
-[dist-build-inputs.mjs:302](/home/vagrant/PhpstormProjects/dnd-wt-build-cache/tools/dist-build-inputs.mjs:302), [385](/home/vagrant/PhpstormProjects/dnd-wt-build-cache/tools/dist-build-inputs.mjs:385), [dist-build-cache.mjs:83](/home/vagrant/PhpstormProjects/dnd-wt-build-cache/tools/dist-build-cache.mjs:83).
-
-The config regex excludes names such as `tsconfig.build.web.json`, despite the declared `tsconfig*.json` class. Environment framing uses `environment`, without the specified `vite.environment`/explicit empty-map marker. Type-only exports are traversed despite the stated exclusion.
-
-Formatting is substantially improved and generally comparable with neighbouring tools. The remaining `else {for (...)` / `}}` block should be expanded; unused path imports should be removed.
-
-**Conformance table**
-
-| File / contract | Status | Assessment |
-|---|---|---|
-| `dist-build-inputs.mjs:36` — declared classes/current omissions | **PARTIAL** | Existing classes, implementation files and explicit licence reads included; supervisor recount supports 939 inputs. Broader closure defects remain. |
-| `dist-build-inputs.mjs:101,305` — recursive executable closure/resolution | **PARTIAL** | Ordinary static/dynamic imports recurse outside `src`; unsupported/configuration boundaries are incomplete. |
-| `dist-build-inputs.mjs:119,362` — glob contract | **NOT RESOLVED** | IB1-F1. |
-| `dist-build-inputs.mjs:201,232` — CSS/HTML contract | **NOT RESOLVED** | IB1-F2/F3. |
-| `dist-build-inputs.mjs:149,287` — environment contract | **PARTIAL** | Four env-file presence/bytes, dollar rejection, sorted ambient values work; build-time reads remain unmodelled. |
-| `dist-build-inputs.mjs:84,159,277` — PB3-F1/PostCSS | **PARTIAL** | Root filename/version checks and direct literal overrides work; workspace and composed-config cases fail. |
-| `dist-build-cache.mjs:72` — key construction | **PARTIAL** | v2, eight-byte frames, paths/bytes and labelled validated HEAD implemented; IB1-F8 literal deviations. |
-| `dist-build-cache.mjs:110` — hit validation | **RESOLVED** | Pointer identity, contained generation, cached/copied digests and copied artifact commit checked before replacement. |
-| `dist-build-cache.mjs:171,195,204` — fresh validation | **RESOLVED** | Validated subprocess completes before commit check and store/return. Recognized BYPASS performs no cache access. |
-| `dist-build-cache.mjs:139` — atomic store | **RESOLVED** | Partial generation → complete generation → temporary pointer → atomic pointer rename preserved. Error availability differs: IB1-F6. |
-| `package.json:10` — public build/F88-b | **RESOLVED** | Exact planned scripts; outer tsc and guard remain unconditional; inner production environment normalized. No dependency addition. |
-| `dist-build-cache.test.ts:111` — retained tests | **RESOLVED** | All three normalization tests are verbatim. |
-| `dist-build-cache.test.ts:141` — §5 matrix/mutants | **PARTIAL** | Useful controls, but several independent acceptance cases are absent or confounded. |
-| `scraper-is-never-in-the-bundle.test.ts:80` | **RESOLVED** | Original guard assertion retained and strengthened. |
-| `build-boundary.test.ts:109` | **RESOLVED** | Original assertion retained; exact scripts and four consumer propagation checks added. |
-| §6 allowed files / M-3 boundary | **RESOLVED** | Exactly six allowed files; no gate-inventory work, dependency change, Node pin or frozen-contract change. |
-
-The enumerator **rescans on every lookup**; it has no retained discovery cache. Returned inventories and reasons are sorted, paths are repository-relative, and keys omit creation metadata. The internal traversal itself is not consistently sorted or bounded. Those deterministic-output properties do not cure the omitted dependencies above.
-
-For recognized MISS/BYPASS, the production order is **tsc → Vite → guard/bundled digest → artifact commit check → store on MISS only**. Guard rejection publishes nothing and propagates failure. Serve at `serve.mjs:63`, snapshot at `ai-dm-board-snapshot.ts:306`, deep-link config at `:27`, and browser spec at `:29` all propagate cache failure. Their orchestration is correct; stale-hit discovery remains the limitation.
-
-HEAD is validated lowercase 40-hex, labelled in the key, and never restamped on restore. Relevant dirty bytes affect the key; unrelated dirty bytes do not. This matches the selected dirty-tree decision.
-
-**Mutant spot-check table**
-
-“Kills” below assesses the committed assertion against the narrow mutation; it does not claim I reran filesystem-mutating Vitest tests.
-
-| Mutant | Killing assertion / location | Assessment |
-|---|---|---|
-| `IGNORE_STATIC_ASSET` | External icon membership, test `:182` | **Kills.** Moving the asset outside declared `src` removes the prior confound. |
-| `TRUST_DIRECTORY_DIGEST_ONLY` | Rebuild count and HEAD after forged valid digest, `:417` | **Kills.** Independently forged digest isolates commit validation; not tautological. |
-| `HEAD_FALLBACK_EMPTY` | Specific error plus zero build callbacks, `:455` | **Kills.** Later provenance failure cannot satisfy the zero-build control. |
-| `UNSORTED_TRAVERSAL` | Inventory equals its sorted copy, `:230` | **Kills.** A meaningful output invariant, despite similar filesystem iteration orders. |
-| `HASH_BYTES_WITHOUT_PATHS` | Equal-byte rename changes digest, `:197` | **Kills.** Importer remains unchanged. |
-| `ALWAYS_REBUILD` | Second-call build count remains one, `:394` | **Kills.** Independent warm-hit control. |
-| `OMIT_AMBIENT_VITE` | Ambient assertion, `:267` | **Survives my in-memory replay.** Earlier env-file edit changes the key. |
-| `IGNORE_GLOB_OPTIONS` | Glob test, `:186` | **No narrow kill.** Only supported options are exercised. |
-| `BROAD_ENV_ALLOWLIST` | Environment rejection test, `:334` | **No narrow kill.** Neither exact exception nor moved/broadened exception is tested. |
-| `IGNORE_BUILD_EXIT` | Injected rejection test, `:434` | **No narrow kill.** Removing the real subprocess-status check leaves the injected throwing callback intact. |
-
-**Removed prior assertion lines: none.** The normalization block is byte-for-byte present. Fixtures are runtime-only, use unique `tmpdir()` descendants, and are removed in `afterEach` at test `:107`. No new shared environment mutation or order/worker-state dependence was found under `isolate:false`.
-
-**The §7 three-build proof remains correctly specified for the repaired implementation.** Its exact output matches are:
-
-- Cache `:204`: ``output.write(`dist cache miss: ${digest}\n`);``
-- Cache `:127`: ``output.write(`dist cache hit: ${digest}\n`);``
-- Guard `:435`: `` `dist clean: ${files.length} files scanned, ` ``
-- Cache `:158`: ``output.write(`dist cache stored: ${digest}\n`);``
-
-Thus MISS/MISS/HIT, guard-before-store, immediate stamp checks, restoration, first-build `NODE_ENV=test`, and duration collection remain appropriate. The proof is still pending and cannot substitute for the missing discovery fixtures.
-
-No separate contradiction with D589/D594/D612/D612.1 or M-3 creep was found. Public validation and production normalization preserve those decisions.
-
-**REJECT IMPL M2**
+**REJECT IMPL M2: resolve IM1-F1 and IM1-F2 before acceptance.**
 
 M2 IMPL REVIEW R1 DONE
