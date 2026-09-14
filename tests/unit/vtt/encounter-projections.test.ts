@@ -8,10 +8,22 @@ import { projectPlayerView } from '../../../src/combat/visibility';
 import { combatantId, feet } from '../../../src/combat/values';
 import { DmEncounterHost } from '../../../src/vtt/dm-encounter-host';
 import {
+  projectStateOnlyDmBoard,
   projectPlayerBoard,
   serializePlayerBoard,
+  offeredActionId,
+  type TopDownDmBoardProjection,
 } from '../../../src/vtt/encounter-projections';
-import { decodePlayerDecision } from '../../../src/vtt/local-window-channel';
+import { projectStateOnlyTopDownDmBoard } from '../../../src/vtt/encounter-app';
+import {
+  decodePlayerDecision,
+  handleTopDownPlayerDecision,
+  handleTopDownSubmission,
+  isPlayerSubmissionFeedbackMessage,
+  playerDecisionMessage,
+  type PlayerSubmissionFeedbackMessage,
+  type TopDownSubmissionFeedback,
+} from '../../../src/vtt/local-window-channel';
 import {
   REFERENCE_CLERIC_ID,
   REFERENCE_FIGHTER_ID,
@@ -102,6 +114,38 @@ function hostBoundaryHiddenState() {
 }
 
 describe('increment 6 projection boundary', () => {
+  it('STATE-ONLY-PROJECTION-PARITY strips the same top-level field set from both DM board shapes', () => {
+    const host = new DmEncounterHost(
+      'session:state-only-projection-parity',
+      new MemoryBrowserSessionStore(),
+    );
+    const dmProjection = host.snapshot().dm;
+    const topDownProjection: TopDownDmBoardProjection = {
+      ...dmProjection,
+      worldObjectControls: dmProjection.worldObjectControls.map((control, index) => ({
+        objectId: control.objectId,
+        objectName: control.objectName,
+        label: control.label,
+        offeredActionId: `test:world-object:${String(index)}`,
+      })),
+      pendingPlacementRecovery: null,
+    };
+    const stateOnlyDm = projectStateOnlyDmBoard(dmProjection);
+    const stateOnlyTopDown = projectStateOnlyTopDownDmBoard(topDownProjection);
+    const replacedFields = (before: object, after: object): readonly string[] =>
+      Object.keys(before)
+        .filter((field) => !Object.is(Reflect.get(before, field), Reflect.get(after, field)))
+        .sort();
+    const dmStrippedFields = replacedFields(dmProjection, stateOnlyDm);
+    const topDownStrippedFields = replacedFields(topDownProjection, stateOnlyTopDown);
+
+    expect(dmStrippedFields).not.toEqual([]);
+    expect(topDownStrippedFields).toEqual(dmStrippedFields);
+    expect(stateOnlyDm.offeredOptionPaths).toEqual([]);
+    expect(stateOnlyTopDown.offeredOptionPaths).toEqual([]);
+    host.close();
+  });
+
   it('HOST-WIRING-PLAYER-SECRECY serializes only the filtered player half of a DM host snapshot', () => {
     const host = new DmEncounterHost(
       'session:host-wiring-secrecy',
@@ -236,24 +280,111 @@ describe('increment 6 projection boundary', () => {
       decision: {
         requestId: request.requestId,
         encounterRevision: request.encounterRevision,
-        action: legal,
+        offeredActionId: offeredActionId(request.requestId, 0),
       },
     };
 
-    expect(decodePlayerDecision(envelope, 'session:test', request).action).toEqual(legal);
+    expect(decodePlayerDecision(envelope, 'session:test', request)).toEqual({
+      requestId: request.requestId,
+      encounterRevision: request.encounterRevision,
+      offeredActionId: offeredActionId(request.requestId, 0),
+    });
     expect(() => decodePlayerDecision({
       ...envelope,
       decision: {
         ...envelope.decision,
-        action: {
-          ...legal,
-          area: {
-            shape: 'sphere',
-            template: { origin: feetPoint(25, 20), radius: feet(10) },
-          },
-        },
+        offeredActionId: 'offer:other-request:0',
       },
-    }, 'session:test', request)).toThrow('not one of the projected legal actions');
+    }, 'session:test', request)).toThrow('not one of the projected offered action IDs');
+  });
+
+  it('returns one correlated player error when the actual receiver rejects a stale decision', async () => {
+    const actor = REFERENCE_FIGHTER_ID;
+    const current: ControllerRequest = {
+      kind: 'turn',
+      requestId: 'request:current',
+      encounterRevision: 8,
+      actorId: actor,
+      visibleState: projectPlayerView(createEncounter(referenceEncounterSetup()), {
+        seatId: 'seat:receiver', combatantId: actor,
+      }),
+      legalActions: { actions: [{ type: 'end_turn', actor }] },
+    };
+    const stale = playerDecisionMessage(
+      'session:test',
+      { requestId: 'request:stale', encounterRevision: 7 },
+      offeredActionId('request:stale', 0),
+    );
+    const feedback: PlayerSubmissionFeedbackMessage[] = [];
+    let executions = 0;
+    await handleTopDownPlayerDecision(stale, 'session:test', current, async () => {
+      executions += 1;
+      return { kind: 'committed', revision: 9 };
+    }, (message) => { feedback.push(message); });
+
+    expect(executions).toBe(0);
+    expect(feedback).toEqual([{
+      kind: 'human_controller_decision_result',
+      sessionId: 'session:test',
+      requestId: 'request:stale',
+      feedback: { kind: 'error', message: 'HumanController decision is stale.' },
+    }]);
+    expect(isPlayerSubmissionFeedbackMessage(feedback[0], 'session:test')).toBe(true);
+    expect(isPlayerSubmissionFeedbackMessage(feedback[0], 'session:other')).toBe(false);
+  });
+
+  it('returns one correlated player error when the actual receiver has no pending request', async () => {
+    const decision = playerDecisionMessage(
+      'session:test',
+      { requestId: 'request:orphaned', encounterRevision: 8 },
+      offeredActionId('request:orphaned', 0),
+    );
+    const feedback: PlayerSubmissionFeedbackMessage[] = [];
+    let executions = 0;
+    await handleTopDownPlayerDecision(decision, 'session:test', null, async () => {
+      executions += 1;
+      return { kind: 'committed', revision: 9 };
+    }, (message) => { feedback.push(message); });
+
+    expect(executions).toBe(0);
+    expect(feedback).toEqual([{
+      kind: 'human_controller_decision_result',
+      sessionId: 'session:test',
+      requestId: 'request:orphaned',
+      feedback: {
+        kind: 'error',
+        message: 'HumanController decision is stale because no request is pending.',
+      },
+    }]);
+    expect(isPlayerSubmissionFeedbackMessage(feedback[0], 'session:test')).toBe(true);
+  });
+
+  it('surfaces pre-apply failure and promise rejection without retrying either submission', async () => {
+    const surfaced: TopDownSubmissionFeedback[] = [];
+    let failedSubmissions = 0;
+    await handleTopDownSubmission(async () => {
+      failedSubmissions += 1;
+      return {
+        kind: 'failed',
+        phase: 'pre_apply',
+        error: new Error('controlled append failure'),
+        currentRevision: 4,
+      };
+    }, (feedback) => { surfaced.push(feedback); });
+    let rejectedSubmissions = 0;
+    await handleTopDownSubmission(async () => {
+      rejectedSubmissions += 1;
+      throw new Error('controlled stale-request rejection');
+    }, (feedback) => { surfaced.push(feedback); });
+
+    expect({ failedSubmissions, rejectedSubmissions }).toEqual({
+      failedSubmissions: 1,
+      rejectedSubmissions: 1,
+    });
+    expect(surfaced).toEqual([
+      { kind: 'error', message: 'Before applying: controlled append failure' },
+      { kind: 'error', message: 'controlled stale-request rejection' },
+    ]);
   });
 
   it('M42-ADJUDICATION-PAUSES cancels the pending request and dispatches nothing until resume', async () => {

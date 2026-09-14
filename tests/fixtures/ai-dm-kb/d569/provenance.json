@@ -1,0 +1,130 @@
+{
+  "version": "d570-kb-provenance-v2",
+  "components": [
+    {
+      "path": "tests/fixtures/ai-dm-kb/d569/ai-dm-core.md",
+      "revision": "d569-d570-shared-root-v2",
+      "sha256": "19f66c81a0a1c8641a7cc4a3844e5cdd0b49ce72cd056ad72b8932d37085f260",
+      "sources": [
+        { "kind": "project_experience", "section": "Role", "locator": "src/vtt/blind-dm-contract.ts:1-16" },
+        { "kind": "project_experience", "section": "Authority boundary", "locator": "src/vtt/blind-dm-contract.ts:44-175" },
+        { "kind": "project_experience", "section": "Running a round", "locator": "src/vtt/blind-dm-contract.ts:85-175" },
+        { "kind": "project_experience", "section": "Subject index", "locator": "src/vtt/knowledge-base-subjects.ts:1-20" },
+        { "kind": "cc_by_srd", "section": "License attribution", "locator": "docs/srd/full/srd-5.2.1.txt:20-31", "heading": "Legal Information" }
+      ]
+    },
+    {
+      "path": "tests/fixtures/ai-dm-kb/d569/tactics.md",
+      "revision": "d569-d570-general-tactics-v2",
+      "sha256": "4b78bdf95f86bc1a8f7078e96bfb2b2485d0cd35babe1871adbfdfcb8d34f2f7",
+      "sources": [
+        { "kind": "project_experience", "section": "Tactical ins and outs", "locator": "clean-room reasoning from this repository's encounter, movement, visibility, and board systems" }
+      ]
+    },
+    {
+      "path": "tests/fixtures/ai-dm-kb/d569/actions.md",
+      "revision": "d569-d570-actions-v2",
+      "sha256": "551561024a73750fb250d88d7b64c2a357bb6de5bb2f6dcb99755511a859bbd6",
+      "sources": [
+        { "kind": "cc_by_srd", "section": "Turn structure and action economy", "locator": "docs/srd/full/srd-5.2.1.txt:568-645", "heading": "Actions" },
+        { "kind": "cc_by_srd", "section": "Turn structure and action economy", "locator": "docs/srd/full/srd-5.2.1.txt:711-728", "heading": "Time-Limited Object Interactions" },
+        { "kind": "cc_by_srd", "section": "Turn structure and action economy", "locator": "docs/srd/full/srd-5.2.1.txt:779-808", "heading": "Your Turn" },
+        { "kind": "cc_by_srd", "section": "Initiative, surprise, and delaying", "locator": "docs/srd/full/srd-5.2.1.txt:810-847", "heading": "Initiative" },
+        { "kind": "cc_by_srd", "section": "Monster turns, Multiattack, and Legendary Actions", "locator": "docs/srd/full/srd-5.2.1.txt:16568-16584", "heading": "Running a Monster" },
+        { "kind": "cc_by_srd", "section": "Monster turns, Multiattack, and Legendary Actions", "locator": "docs/srd/full/srd-5.2.1.txt:16695-16716", "heading": "Multiattack" }
+      ]
+    },
+    {
+      "path": "tests/fixtures/ai-dm-kb/d569/movement.md",
+      "revision": "d569-d570-movement-v2",
+      "sha256": "549fc7e27d73ea4250b00c94b4c17067c440c2cdf905e003b4c11e153a0e6c3d",
+      "sources": [
+        { "kind": "cc_by_srd", "section": "Movement, Speed, and Difficult Terrain", "locator": "docs/srd/full/srd-5.2.1.txt:809-890", "heading": "Movement and Position" },
+        { "kind": "cc_by_srd", "section": "Climbing, crawling, Prone, and standing", "locator": "docs/srd/full/srd-5.2.1.txt:11472-11506", "heading": "Climbing" },
+        { "kind": "cc_by_srd", "section": "Climbing, crawling, Prone, and standing", "locator": "docs/srd/full/srd-5.2.1.txt:11970-11981", "heading": "Prone [Condition]" },
+        { "kind": "cc_by_srd", "section": "Creature size, space, and narrow passages", "locator": "docs/srd/full/srd-5.2.1.txt:837-883", "heading": "Creature Size" },
+        { "kind": "cc_by_srd", "section": "Creature size, space, and narrow passages", "locator": "docs/srd/full/srd-5.2.1.txt:11656-11688", "heading": "Difficult Terrain" },
+        { "kind": "project_experience", "section": "Creature size, space, and narrow passages", "locator": "src/combat/creature-space.ts:19-24,126-144,300-381,390-447; src/combat/encounter-movement-world.ts:73-87,105-139" }
+      ]
+    },
+    {
+      "path": "tests/fixtures/ai-dm-kb/d569/targeting.md",
+      "revision": "d569-d570-targeting-v2",
+      "sha256": "da6c04dacb471ef9a8b1bd60f5229418ab25a692b0a86d8a41e10248ac5b98e3",
+      "sources": [
+        { "kind": "cc_by_srd", "section": "Cover and line of sight", "locator": "docs/srd/full/srd-5.2.1.txt:901-956", "heading": "Cover" },
+        { "kind": "cc_by_srd", "section": "Opportunity Attacks and Disengage", "locator": "docs/srd/full/srd-5.2.1.txt:921-956", "heading": "Opportunity Attacks" },
+        { "kind": "cc_by_srd", "section": "Ranged attacks in melee and at long range", "locator": "docs/srd/full/srd-5.2.1.txt:901-966", "heading": "Ranged Attacks in Close Combat" },
+        { "kind": "cc_by_srd", "section": "Hide and the Hidden and Invisible states", "locator": "docs/srd/full/srd-5.2.1.txt:11774-11789", "heading": "Hide [Action]" },
+        { "kind": "cc_by_srd", "section": "Hide and the Hidden and Invisible states", "locator": "docs/srd/full/srd-5.2.1.txt:11826-11850", "heading": "Invisible [Condition]" },
+        { "kind": "cc_by_srd", "section": "Light, obscurement, and Darkvision", "locator": "docs/srd/full/srd-5.2.1.txt:649-700", "heading": "Vision and Light" },
+        { "kind": "project_experience", "section": "Light, obscurement, and Darkvision", "locator": "src/combat/world-objects.ts:233-255; src/combat/encounter.ts:2028-2177; src/assets/board-glyphs.ts:89-190; src/assets/light-encoding.ts:1-100" }
+      ]
+    },
+    {
+      "path": "tests/fixtures/ai-dm-kb/d569/spells.md",
+      "revision": "d569-d570-spells-v2",
+      "sha256": "a8e618a972ce98ca4fb5a025229f1d3c08a6bf0bdf297f637d2e68a3d472a13f",
+      "sources": [
+        { "kind": "cc_by_srd", "section": "Concentration", "locator": "docs/srd/full/srd-5.2.1.txt:11498-11524", "heading": "Concentration" },
+        { "kind": "cc_by_srd", "section": "Spell targeting and range", "locator": "docs/srd/full/srd-5.2.1.txt:6361-6380", "heading": "Range" },
+        { "kind": "cc_by_srd", "section": "Spell targeting and range", "locator": "docs/srd/full/srd-5.2.1.txt:6463-6481", "heading": "Targets" },
+        { "kind": "cc_by_srd", "section": "Areas of effect and points of origin", "locator": "docs/srd/full/srd-5.2.1.txt:11331-11350", "heading": "Area of Effect" },
+        { "kind": "cc_by_srd", "section": "Areas of effect and points of origin", "locator": "docs/srd/full/srd-5.2.1.txt:11543-11561", "heading": "Cone [Area of Effect]" },
+        { "kind": "cc_by_srd", "section": "Areas of effect and points of origin", "locator": "docs/srd/full/srd-5.2.1.txt:11565-11573", "heading": "Cylinder [Area of Effect]" },
+        { "kind": "cc_by_srd", "section": "Areas of effect and points of origin", "locator": "docs/srd/full/srd-5.2.1.txt:11647-11658", "heading": "Emanation [Area of Effect]" },
+        { "kind": "cc_by_srd", "section": "Areas of effect and points of origin", "locator": "docs/srd/full/srd-5.2.1.txt:11873-11879", "heading": "Line [Area of Effect]" },
+        { "kind": "cc_by_srd", "section": "Areas of effect and points of origin", "locator": "docs/srd/full/srd-5.2.1.txt:12082-12088", "heading": "Sphere [Area of Effect]" },
+        { "kind": "cc_by_srd", "section": "Saving throws and difficulty", "locator": "docs/srd/full/srd-5.2.1.txt:6443-6461", "heading": "Saving Throws" },
+        { "kind": "cc_by_srd", "section": "Saving throws and difficulty", "locator": "docs/srd/full/srd-5.2.1.txt:11679-11687", "heading": "Difficulty Class" }
+      ]
+    },
+    {
+      "path": "tests/fixtures/ai-dm-kb/d569/conditions.md",
+      "revision": "d569-d570-conditions-v2",
+      "sha256": "f57bd5ab6c9626cb9182316f5fb10f8ad2b998758c1dd1ad44c37ce4ded80ae9",
+      "sources": [
+        { "kind": "cc_by_srd", "section": "Every SRD condition", "locator": "docs/srd/full/srd-5.2.1.txt:11331-11470", "heading": "Blinded [Condition]" },
+        { "kind": "cc_by_srd", "section": "Every SRD condition", "locator": "docs/srd/full/srd-5.2.1.txt:11526-11544", "heading": "Condition" },
+        { "kind": "cc_by_srd", "section": "Every SRD condition", "locator": "docs/srd/full/srd-5.2.1.txt:11627-11747", "heading": "Deafened [Condition]" },
+        { "kind": "cc_by_srd", "section": "Every SRD condition", "locator": "docs/srd/full/srd-5.2.1.txt:11826-11850", "heading": "Incapacitated [Condition]" },
+        { "kind": "cc_by_srd", "section": "Every SRD condition", "locator": "docs/srd/full/srd-5.2.1.txt:11952-12039", "heading": "Paralyzed [Condition]" },
+        { "kind": "cc_by_srd", "section": "Every SRD condition", "locator": "docs/srd/full/srd-5.2.1.txt:12167-12310", "heading": "Stunned [Condition]" },
+        { "kind": "cc_by_srd", "section": "Death, dying, and unconsciousness", "locator": "docs/srd/full/srd-5.2.1.txt:1049-1120", "heading": "Dropping to 0 Hit Points" },
+        { "kind": "cc_by_srd", "section": "Death, dying, and unconsciousness", "locator": "docs/srd/full/srd-5.2.1.txt:12296-12310", "heading": "Unconscious [Condition]" }
+      ]
+    },
+    {
+      "path": "tests/fixtures/ai-dm-kb/d569/reactions.md",
+      "revision": "d569-d570-reactions-v2",
+      "sha256": "7c775e9710d57648dd2dbfa6a99159e1e5dc1d0eaa6a89ecb80493579ecd6918",
+      "sources": [
+        { "kind": "cc_by_srd", "section": "Reaction timing and monster reactions", "locator": "docs/srd/full/srd-5.2.1.txt:599-617", "heading": "Reactions" },
+        { "kind": "cc_by_srd", "section": "Reaction timing and monster reactions", "locator": "docs/srd/full/srd-5.2.1.txt:16695-16716", "heading": "Reactions" },
+        { "kind": "cc_by_srd", "section": "Opportunity Attacks", "locator": "docs/srd/full/srd-5.2.1.txt:933-956", "heading": "Opportunity Attacks" },
+        { "kind": "cc_by_srd", "section": "Ready", "locator": "docs/srd/full/srd-5.2.1.txt:11984-12024", "heading": "Ready [Action]" }
+      ]
+    },
+    {
+      "path": "tests/fixtures/ai-dm-kb/d569/protocol.md",
+      "revision": "d569-d570-d576-board-primer-v4",
+      "sha256": "549aa50b115b07293cdd86e2370be1eb99d09d59cb76dcc0d103356be8631ea6",
+      "sources": [
+        { "kind": "project_experience", "section": "Grid, scale, and coordinate gutter", "locator": "src/vtt/board-chrome.ts:1-14,690-829; src/vtt/board-chrome-layout.ts:13-14; tools/ai-dm-screenshot-probe.ts:63-104" },
+        { "kind": "project_experience", "section": "Creature identities, sides, rings, and footprints", "locator": "src/vtt/board-chrome.ts:230-318,830-928,1260-1355; src/vtt/encounter-board.ts:257-320" },
+        { "kind": "project_experience", "section": "Hit-point bars, life glyphs, and corpses", "locator": "src/vtt/intel/actor-knowledge.ts:194-209; src/vtt/blind-turn-context.ts:95-99; src/vtt/board-chrome.ts:321-380,947-1040; src/assets/pixel-font.ts:75-82; src/vtt/encounter-board.ts:760-783" },
+        { "kind": "project_experience", "section": "Hidden creatures", "locator": "src/assets/board-glyphs.ts:205-240; src/vtt/board-chrome.ts:445-450,947-992,1338-1354" },
+        { "kind": "project_experience", "section": "Terrain, cover, and difficult cells", "locator": "src/combat/terrain.ts:1-68; src/assets/pixel-art.ts:919-970; src/assets/board-glyphs.ts:151-205; src/vtt/board-chrome.ts:470-475,582-655" },
+        { "kind": "project_experience", "section": "Corner-rule line and cover traces", "locator": "src/combat/cover.ts:42-480" },
+        { "kind": "project_experience", "section": "Obscurement and fog", "locator": "src/assets/board-glyphs.ts:89-190; tools/ai-dm-screenshot-probe.ts:105-130" },
+        { "kind": "project_experience", "section": "Bright, dim, and dark cells", "locator": "src/assets/light-encoding.ts:1-100; src/vtt/board-chrome.ts:518-562" },
+        { "kind": "project_experience", "section": "Doors and the door rail", "locator": "src/assets/board-glyphs.ts:89-130,245-260; src/vtt/board-chrome.ts:1124-1224" },
+        { "kind": "project_experience", "section": "World objects and the object rail", "locator": "src/combat/world-objects.ts:1-34; src/vtt/encounter-app.ts:797-840; src/vtt/board-chrome.ts:1124-1224" },
+        { "kind": "project_experience", "section": "Persistent areas and other outlined regions", "locator": "src/vtt/encounter-board.ts:406-439; src/vtt/encounter-app.ts:750-776" },
+        { "kind": "project_experience", "section": "Roster box and legend panel", "locator": "src/vtt/board-chrome.ts:405-650,1260-1405" },
+        { "kind": "project_experience", "section": "What the board does not draw", "locator": "src/vtt/blind-dm-contract.ts:44-175; src/vtt/board-chrome.ts:321-380" },
+        { "kind": "project_experience", "section": "Relative round-intent protocol", "locator": "src/vtt/blind-dm-contract.ts:85-175" }
+      ]
+    }
+  ]
+}

@@ -1,7 +1,7 @@
-import { open, readdir, stat } from 'node:fs/promises';
+import { open, readFile, readdir, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { basename, resolve } from 'node:path';
-import { agentSessionIdFromCli, contextTokenCount, turnInputTotal } from '../agent-session';
+import { basename, dirname, isAbsolute, resolve } from 'node:path';
+import { agentSessionIdFromCli, contextTokenCount, engineDispatchId, turnInputTotal } from '../agent-session';
 import type {
   AgentInvocation,
   AgentSessionBinding,
@@ -11,12 +11,20 @@ import type {
   TurnInputTotal,
 } from '../agent-session';
 import {
+  classifyEngineCatalogEvidence,
+  decodeEngineReadinessRecord,
+  type EngineObservedEvent,
+  type EngineReadinessRecord,
+} from './engine-catalog-evidence';
+import {
   AgentAdapterError,
+  agentProcessEvidence,
   completedOutput,
   jsonEventLines,
   ProcessAgentSessionAdapter,
   record,
   type AgentAdapterOptions,
+  type AgentProcessOutput,
   type AgentProcessSpec,
 } from './process';
 
@@ -178,16 +186,79 @@ export class CodexAgentSessionAdapter extends ProcessAgentSessionAdapter {
       signal,
       invocation.timeoutMs,
     );
-    completedOutput(output, sessionId !== null);
-    if (output.cancelled && sessionId !== null) {
+    const decodedEvents = decodeLiveProcessEvents(output.stdoutLines);
+    const processEvidence = agentProcessEvidence(output, decodedEvents.map((event) => ({
+      invocationId: event.invocationId,
+      kind: event.kind,
+      observedAtUnixMs: event.observedAtUnixMs ?? output.endedAtUnixMs,
+    })));
+    const catalog = invocation.output.kind === 'structured_final'
+      ? null
+      : await codexCatalogEvidence(invocation.launcherToken, decodedEvents, output);
+    const partial = decodeCodexPartial(output.stdout, sessionId, stderrSessionId(output.stderr));
+    const observedResumeSessionId = partial.sessionId === null
+      ? null
+      : agentSessionIdFromCli(partial.sessionId);
+    const observedUsage = partial.turnUsage === null || partial.sessionId === null
+      ? null
+      : await this.#partialUsage(partial.turnUsage, partial.sessionId);
+    if (output.timedOut) {
       return {
-        resumeSessionId: agentSessionIdFromCli(sessionId),
-        sessionId,
-        finalText: '',
-        usage: null,
-        exit: 'cancelled',
+        exit: 'timed_out', resumeSessionId: observedResumeSessionId, sessionId: partial.sessionId,
+        finalText: partial.finalText, usage: observedUsage, processEvidence,
+        partialResultEvidence: {
+          status: 'partial', decodedEventCount: decodedEvents.length,
+          finalTextFragment: partial.finalText, observedUsage,
+          stagedInvocationIds: stagedInvocationIds(decodedEvents),
+        },
+        engineCatalogEvidence: catalog,
+        timeoutMs: invocation.timeoutMs ?? Math.max(1, output.endedAtUnixMs - output.startedAtUnixMs),
       };
     }
+    if (output.cancelled) {
+      return {
+        exit: 'cancelled', resumeSessionId: observedResumeSessionId, sessionId: partial.sessionId,
+        finalText: partial.finalText, usage: observedUsage, processEvidence,
+        partialResultEvidence: {
+          status: 'partial', decodedEventCount: decodedEvents.length,
+          finalTextFragment: partial.finalText, observedUsage,
+          stagedInvocationIds: stagedInvocationIds(decodedEvents),
+        },
+        engineCatalogEvidence: catalog,
+        cancellationReason: signal.reason === undefined ? 'abort_signal' : String(signal.reason),
+      };
+    }
+    if (output.exitCode !== 0 && requiredEngineStartupFailed(output)) {
+      if (catalog?.status === 'inconclusive') {
+        const forensicTurn: AgentTurnResult = {
+          exit: 'infrastructure_failed', resumeSessionId: observedResumeSessionId,
+          sessionId: partial.sessionId, finalText: partial.finalText, usage: observedUsage, processEvidence,
+          partialResultEvidence: {
+            status: 'partial', decodedEventCount: decodedEvents.length,
+            finalTextFragment: partial.finalText, observedUsage,
+            stagedInvocationIds: stagedInvocationIds(decodedEvents),
+          },
+          engineCatalogEvidence: catalog,
+          component: 'engine_mcp_startup',
+          failureReason: output.stderr.length === 0 ? 'Required engine MCP initialization failed.' : output.stderr,
+        };
+        return forensicTurn;
+      }
+      if (catalog?.status !== 'absent') completedOutput(output, sessionId !== null);
+      return {
+        exit: 'infrastructure_failed', resumeSessionId: observedResumeSessionId,
+        sessionId: partial.sessionId, finalText: partial.finalText, usage: observedUsage, processEvidence,
+        partialResultEvidence: {
+          status: 'partial', decodedEventCount: decodedEvents.length,
+          finalTextFragment: partial.finalText, observedUsage,
+          stagedInvocationIds: stagedInvocationIds(decodedEvents),
+        },
+        engineCatalogEvidence: catalog,
+        component: 'engine_mcp_startup',
+        failureReason: output.stderr.length === 0 ? 'Required engine MCP initialization failed.' : output.stderr,
+      };
+    }
+    completedOutput(output, sessionId !== null);
     const announcedSessionId = stderrSessionId(output.stderr);
     const decoded = decodeCodexTurn(
       output.stdout,
@@ -206,8 +277,19 @@ export class CodexAgentSessionAdapter extends ProcessAgentSessionAdapter {
       sessionId: decoded.sessionId,
       finalText: decoded.finalText,
       usage,
-      exit: output.cancelled ? 'cancelled' : 'completed',
+      exit: 'completed',
+      processEvidence,
+      partialResultEvidence: { status: 'complete', decodedEventCount: decodedEvents.length },
+      engineCatalogEvidence: catalog,
     };
+  }
+
+  async #partialUsage(turnUsage: CodexTurnUsage, sessionId: string): Promise<AgentUsage | null> {
+    try {
+      return await codexAgentUsage(turnUsage, await this.#contextReader.read(sessionId));
+    } catch {
+      return null;
+    }
   }
 }
 
@@ -242,6 +324,9 @@ export function codexArgv(input: CodexArgvInput): readonly string[] {
     ...(input.engineCommand === null ? [] : [
       '-c', `mcp_servers.engine.command=${JSON.stringify(input.engineCommand)}`,
       '-c', `mcp_servers.engine.args=${JSON.stringify(input.engineArgs)}`,
+      '-c', 'mcp_servers.engine.required=true',
+      '-c', 'mcp_servers.engine.startup_timeout_sec=60',
+      '-c', 'mcp_servers.engine.tool_timeout_sec=60',
     ]),
     ...(input.sessionId === null && input.instructions !== null && input.instructions !== undefined
       ? ['-c', `developer_instructions=${JSON.stringify(input.instructions)}`]
@@ -291,6 +376,134 @@ export function decodeCodexTurn(
     throw new AgentAdapterError('resume_not_found', 'Codex resume returned a different thread ID.');
   }
   return { sessionId, finalText, turnUsage };
+}
+
+function decodeCodexPartial(
+  stdout: string,
+  priorSessionId: string | null,
+  announcedSessionId: string | null,
+): { readonly sessionId: string | null; readonly finalText: string; readonly turnUsage: CodexTurnUsage | null } {
+  let sessionId = priorSessionId ?? announcedSessionId;
+  let finalText = '';
+  let turnUsage: CodexTurnUsage | null = null;
+  for (const line of stdout.split('\n')) {
+    if (line.trim().length === 0) continue;
+    const announced = /^session id:\s*(\S+)$/iu.exec(line.trim());
+    if (announced !== null) {
+      sessionId = announced[1] ?? sessionId;
+      continue;
+    }
+    let event: Readonly<Record<string, unknown>> | null = null;
+    try { event = record(JSON.parse(line) as unknown); } catch { continue; }
+    if (event?.['type'] === 'thread.started' && typeof event['thread_id'] === 'string') {
+      sessionId = event['thread_id'];
+    }
+    if (event?.['type'] === 'item.completed') {
+      const item = record(event['item']);
+      if (item?.['type'] === 'agent_message' && typeof item['text'] === 'string') finalText = item['text'];
+    }
+    if (event?.['type'] === 'turn.completed') {
+      const candidate = record(event['usage']);
+      if (candidate !== null) turnUsage = decodeTurnUsage(candidate);
+    }
+  }
+  return { sessionId, finalText, turnUsage };
+}
+
+function decodeLiveProcessEvents(
+  lines: AgentProcessOutput['stdoutLines'],
+): readonly EngineObservedEvent[] {
+  return lines.flatMap((line): readonly EngineObservedEvent[] => {
+    let event: Readonly<Record<string, unknown>> | null;
+    try { event = record(JSON.parse(line.line) as unknown); } catch { return []; }
+    if (event === null) return [];
+    const item = record(event['item']);
+    const invocationId = typeof item?.['id'] === 'string'
+      ? item['id']
+      : typeof event['id'] === 'string' ? event['id'] : null;
+    const server = typeof item?.['server'] === 'string'
+      ? item['server']
+      : typeof item?.['server_name'] === 'string' ? item['server_name'] : null;
+    const toolName = typeof item?.['tool'] === 'string'
+      ? item['tool']
+      : typeof item?.['name'] === 'string' ? item['name'] : null;
+    return [{
+      invocationId,
+      kind: typeof event['type'] === 'string' ? event['type'] : 'unknown',
+      server,
+      toolName,
+      observedAtUnixMs: line.observedAtUnixMs,
+    }];
+  });
+}
+
+function stagedInvocationIds(events: readonly EngineObservedEvent[]): readonly string[] {
+  return [...new Set(events.flatMap((event) =>
+    event.invocationId === null ? [] : [event.invocationId]))].sort();
+}
+
+function requiredEngineStartupFailed(output: AgentProcessOutput): boolean {
+  const detail = `${output.stderr}\n${output.stdout}`;
+  return /required MCP server[^\n]*\bengine\b[^\n]*(?:failed|timed out)|MCP server[^\n]*\bengine\b[^\n]*(?:failed|timed out)|\bengine\b[^\n]*(?:initialization|startup)[^\n]*(?:failed|timed out)/iu.test(detail);
+}
+
+async function codexCatalogEvidence(
+  launcherPath: string,
+  events: readonly EngineObservedEvent[],
+  output: AgentProcessOutput,
+) {
+  let launcher: Readonly<Record<string, unknown>>;
+  try {
+    launcher = record(JSON.parse(await readFile(launcherPath, 'utf8')) as unknown) ?? {};
+  } catch {
+    return null;
+  }
+  if (typeof launcher['dispatchId'] !== 'string') return null;
+  const dispatchId = engineDispatchId(launcher['dispatchId']);
+  const readinessPath = launcher['readinessSpoolPath'];
+  const readiness: EngineReadinessRecord[] = [];
+  let malformedReadiness = false;
+  if (typeof readinessPath === 'string') {
+    const resolvedReadinessPath = isAbsolute(readinessPath)
+      ? readinessPath
+      : resolve(dirname(resolve(launcherPath)), readinessPath);
+    try {
+      const source = await readFile(resolvedReadinessPath, 'utf8');
+      for (const line of source.split('\n')) {
+        if (line.trim().length === 0) continue;
+        try {
+          readiness.push(decodeEngineReadinessRecord(JSON.parse(line) as unknown));
+        } catch {
+          malformedReadiness = true;
+        }
+      }
+    } catch (error) {
+      const code = typeof error === 'object' && error !== null && 'code' in error ? error.code : null;
+      if (code !== 'ENOENT') malformedReadiness = true;
+    }
+  }
+  const profile = launcher['toolProfile'] === 'blind' ? 'blind' as const : 'dm' as const;
+  const dispatchPhase = launcher['dispatchPhase'];
+  const phase = dispatchPhase === 'primary' || dispatchPhase === 'correction' ||
+    dispatchPhase === 'adjustment' || dispatchPhase === 'speculative'
+    ? dispatchPhase : undefined;
+  const requestId = typeof launcher['requestId'] === 'string' ? launcher['requestId'] : undefined;
+  const expectedToolNames = readiness.find((entry) => entry.dispatchId === dispatchId &&
+    entry.profile === profile && (phase === undefined || entry.phase === phase) &&
+    (requestId === undefined || entry.requestId === requestId))?.expectedToolNames ?? [];
+  return classifyEngineCatalogEvidence({
+    dispatchId,
+    expectedProfile: profile,
+    ...(phase === undefined ? {} : { expectedPhase: phase }),
+    ...(requestId === undefined ? {} : { expectedRequestId: requestId }),
+    expectedToolNames,
+    events,
+    readiness,
+    completed: output.exitCode === 0 && !output.cancelled && !output.timedOut,
+    requiredStartupFailed: output.exitCode !== 0 && requiredEngineStartupFailed(output),
+    malformedReadiness,
+    corroboration: output.stderr.length === 0 ? [] : [output.stderr],
+  });
 }
 
 function decodeTurnUsage(value: Readonly<Record<string, unknown>>): CodexTurnUsage | null {

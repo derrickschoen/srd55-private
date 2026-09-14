@@ -1,0 +1,50 @@
+{
+  "version": "d569-second-family-manifest-v1",
+  "generator": {
+    "tool": "tools/generate-arena-basis.ts",
+    "canonicalFormat": "canonical-json-with-trailing-newline",
+    "independentRegenerations": 2
+  },
+  "ledgerEntry": "seed ranges 5118001-5118010 and 6207001-6207010 have no occurrence in .claude/decisions.md, tests/fixtures or tools as of 2026-09-07 (supervisor grep); ranges 5117xxx, 6203xxx, 6204xxx, 6206xxx and 6208xxx are used (primary hard, primary brutal, D466 override/protocol, D572 brutal-b, D572 pool)",
+  "usedSeedNamespaces": [
+    { "label": "5117xxx", "start": 5117000, "end": 5117999 },
+    { "label": "6203xxx", "start": 6203000, "end": 6203999 },
+    { "label": "6204xxx", "start": 6204000, "end": 6204999 },
+    { "label": "6206xxx", "start": 6206000, "end": 6206999 },
+    { "label": "6208xxx", "start": 6208000, "end": 6208999 }
+  ],
+  "cohorts": [
+    {
+      "difficulty": "hard",
+      "directory": "tests/fixtures/arena-basis-hard-2",
+      "fixtures": [
+        { "seed": 5118001, "path": "tests/fixtures/arena-basis-hard-2/seed-5118001.json", "sha256": "b388d2348e54d780a312028b942e0a0cb4ea10185894c39e65d02b92ce10584d" },
+        { "seed": 5118002, "path": "tests/fixtures/arena-basis-hard-2/seed-5118002.json", "sha256": "b02a15f3e9366f909491116084bf91021b2c0827008c34fe72d57487e946628b" },
+        { "seed": 5118003, "path": "tests/fixtures/arena-basis-hard-2/seed-5118003.json", "sha256": "1f8859dcb3321afdaf6b515bd09283889255ce72c9da7f78e6ec3a049dde6bec" },
+        { "seed": 5118004, "path": "tests/fixtures/arena-basis-hard-2/seed-5118004.json", "sha256": "cfe99888b82182968f2ce3ac0a49bacc863e2fc51f1ddc87b1bc31cfee57e63f" },
+        { "seed": 5118005, "path": "tests/fixtures/arena-basis-hard-2/seed-5118005.json", "sha256": "c3aae77d8adf652f22788476554a2201fc13a6f9b84100a8277cf6259a95eb9b" },
+        { "seed": 5118006, "path": "tests/fixtures/arena-basis-hard-2/seed-5118006.json", "sha256": "e036cfa7930e7b56c7a2b853e0a03740a3d93afd4bd754130be498a607cca311" },
+        { "seed": 5118007, "path": "tests/fixtures/arena-basis-hard-2/seed-5118007.json", "sha256": "0524149cdb6bf854de2e517bfb08c763e324d0eb7cb7818c51e37ae5c52036ec" },
+        { "seed": 5118008, "path": "tests/fixtures/arena-basis-hard-2/seed-5118008.json", "sha256": "f11cc75d7820f490691b98e30169192f82a8363ba44d7a00ff22932e72d992c4" },
+        { "seed": 5118009, "path": "tests/fixtures/arena-basis-hard-2/seed-5118009.json", "sha256": "94ae5203c6c5842326be8bcd6c5cb38a938b32d6506e9a3b462bcc8ad0076032" },
+        { "seed": 5118010, "path": "tests/fixtures/arena-basis-hard-2/seed-5118010.json", "sha256": "18e920644b366d83feffc40c1e791e466f970d156e3833b8d5fb69140062ba0a" }
+      ]
+    },
+    {
+      "difficulty": "brutal",
+      "directory": "tests/fixtures/arena-basis-brutal-2",
+      "fixtures": [
+        { "seed": 6207001, "path": "tests/fixtures/arena-basis-brutal-2/seed-6207001.json", "sha256": "6847b5d44b2577aa31a87a2eb83220ca17f54f8a8b160741d61d47019c75e51c" },
+        { "seed": 6207002, "path": "tests/fixtures/arena-basis-brutal-2/seed-6207002.json", "sha256": "9b1b9be44245659fb1a95922c685bbb1f9082b3f0fa591bd822553573a9d5c66" },
+        { "seed": 6207003, "path": "tests/fixtures/arena-basis-brutal-2/seed-6207003.json", "sha256": "afe31b4cb79f606bd56f29d37267814319de161db745747dae1a70a528617d6f" },
+        { "seed": 6207004, "path": "tests/fixtures/arena-basis-brutal-2/seed-6207004.json", "sha256": "96701e3136318b9f4dd8859311e30bb85586d129c8ef4424fcea398f3bbc813e" },
+        { "seed": 6207005, "path": "tests/fixtures/arena-basis-brutal-2/seed-6207005.json", "sha256": "a3a6774081b01b743091115b29ccfbb81d109e2f26867ce74a1c431b9a56a63a" },
+        { "seed": 6207006, "path": "tests/fixtures/arena-basis-brutal-2/seed-6207006.json", "sha256": "28800721eac25312561d04c49389f95a05ae24e81ff13b1ed6191951a7b34082" },
+        { "seed": 6207007, "path": "tests/fixtures/arena-basis-brutal-2/seed-6207007.json", "sha256": "eb9a566eab8c314fd754d85402e280e5f75ee30e114451b9405007a536375f8f" },
+        { "seed": 6207008, "path": "tests/fixtures/arena-basis-brutal-2/seed-6207008.json", "sha256": "5926d642f77ca2cdbf8cbed29408cfbf4165d6a05b453c2203a0aace93827a2b" },
+        { "seed": 6207009, "path": "tests/fixtures/arena-basis-brutal-2/seed-6207009.json", "sha256": "d398b3ad8a24ecae7d3989a1d47be1bedf69b1b989b17d967278be2b2ca7a50c" },
+        { "seed": 6207010, "path": "tests/fixtures/arena-basis-brutal-2/seed-6207010.json", "sha256": "b7efa3c2df793fcbbdba1d453358577a1d4eb7c6b2fe8c9b575d7fe85c3adf04" }
+      ]
+    }
+  ]
+}

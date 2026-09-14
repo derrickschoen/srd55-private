@@ -13,7 +13,7 @@ import {
 import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { chromium, type BrowserContext, type Page } from '@playwright/test';
+import { chromium, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { preview, type PreviewServer } from 'vite';
 import { canonicalJson } from '../src/commands/canonical-json';
 import type { ControllerIdentity } from '../src/combat/controllers';
@@ -21,7 +21,7 @@ import type { PersistedCoordinatorState } from '../src/combat/coordinator';
 import type { EncounterState } from '../src/combat/encounter';
 import { projectDmView } from '../src/combat/visibility';
 import { mulberry32 } from '../src/combat/random';
-import type { BoardGlyphMode } from '../src/assets/board-glyphs';
+import { isBoardGlyphMode, type BoardGlyphMode } from '../src/assets/board-glyphs';
 import {
   encounterBranchId,
   encounterSessionId,
@@ -58,6 +58,20 @@ export function configuredPreviewPort(
 }
 
 export type CaptureTilePx = 64 | 128;
+export type BoardSnapshotInformationMode = 'advice' | 'blind_state';
+export type BoardSnapshotImageRole = 'dm_board' | 'accessible_board_raster' | 'player_board';
+export const BLIND_STATE_PRIMER_VERSION = 'd562-general-board-primer-v10' as const;
+export const BOARD_SNAPSHOT_IMAGE_ROLES = Object.freeze([
+  'dm_board',
+  'accessible_board_raster',
+  'player_board',
+] as const satisfies readonly BoardSnapshotImageRole[]);
+
+export function boardSnapshotInformationMode(
+  mode?: BoardSnapshotInformationMode,
+): BoardSnapshotInformationMode {
+  return mode ?? 'advice';
+}
 
 export function boardSnapshotCaptureGeometry(
   captureTilePx: CaptureTilePx = 128,
@@ -92,7 +106,48 @@ export interface BoardImageArtifact {
   readonly source: BoardImageSource;
   readonly chromiumVersion: string;
   readonly html: BoardHtmlArtifact;
+  /** Present only for the D569 state-only family; omitted advice artifacts keep legacy bytes. */
+  readonly blindState?: {
+    readonly informationMode: 'blind_state';
+    readonly role: BoardSnapshotImageRole;
+    readonly ordinal: number;
+    readonly primerVersion: string;
+    readonly glyphMode: BoardGlyphMode;
+    readonly captureTilePx: CaptureTilePx;
+    readonly domEvidence: BoardSnapshotDomEvidence;
+  };
 }
+
+export interface BoardSnapshotDomEvidence {
+  readonly optionSurfaceAbsent: true;
+  readonly nextEventPreviewAbsent: true;
+  readonly coordinateLabels: number;
+  readonly creatureBadges: number;
+  readonly rosterEntries: number;
+  readonly hpBars: number;
+  readonly legendEntries: number;
+  readonly wallCells: number;
+  readonly halfCoverCells: number;
+  readonly threeQuartersCoverCells: number;
+  readonly difficultCells: number;
+  readonly obscuredCells: number;
+  readonly illuminatedCells: number;
+  readonly fogMarks: number;
+  readonly doors: number;
+  readonly objects: number;
+  readonly hiddenMarks: number;
+  readonly multiCellFootprints: number;
+}
+
+export const BOARD_SNAPSHOT_TERRAIN_SELECTORS = Object.freeze({
+  wallCells: '.encounter-mechanical-terrain[data-terrain-kind="wall"]',
+  halfCoverCells: '.encounter-mechanical-terrain[data-terrain-kind="half_cover"]',
+  threeQuartersCoverCells:
+    '.encounter-mechanical-terrain[data-terrain-kind="three_quarters_cover"]',
+} as const satisfies Readonly<Record<
+  'wallCells' | 'halfCoverCells' | 'threeQuartersCoverCells',
+  string
+>>);
 
 export interface BoardHtmlArtifact {
   readonly relativePath: `board-html/${string}/board.html`;
@@ -124,6 +179,7 @@ export interface BoardSnapshotManifest {
 export interface BoardSnapshotCapture {
   readonly state: EncounterState;
   readonly source: BoardImageSource;
+  readonly role?: BoardSnapshotImageRole;
 }
 
 export interface BoardSnapshotServiceOptions {
@@ -133,6 +189,9 @@ export interface BoardSnapshotServiceOptions {
   readonly boardGlyphs?: BoardGlyphMode;
   /** D561: CSS raster scale for the diagnostic capture; native art remains unchanged. */
   readonly captureTilePx?: CaptureTilePx;
+  /** D569: advice is deliberately implicit so old capture URLs and artifacts are byte-identical. */
+  readonly informationMode?: BoardSnapshotInformationMode;
+  readonly primerVersion?: string;
 }
 
 function sha256Bytes(value: Uint8Array): string {
@@ -175,6 +234,27 @@ export function assertBoardImageFresh(
     artifact.source.stateDigest !== source.stateDigest
   ) {
     throw new Error('Board image artifact is stale for the current encounter state.');
+  }
+}
+
+export function assertSynchronizedBoardImages(input: {
+  readonly artifacts: readonly BoardImageArtifact[];
+  readonly state: EncounterState;
+  readonly source: BoardImageSource;
+  readonly primaryDispatchStartedAtUnixMs: number;
+}): void {
+  if (input.artifacts.length === 0) throw new TypeError('A visual family must not be empty.');
+  const roles = new Set<BoardSnapshotImageRole>();
+  for (const [index, artifact] of input.artifacts.entries()) {
+    assertBoardImageFresh(artifact, input.state, input.source);
+    const blind = artifact.blindState;
+    if (blind === undefined || blind.ordinal !== index + 1 || roles.has(blind.role)) {
+      throw new Error('Blind visual roles must be unique and use contiguous delivery ordinals.');
+    }
+    if (artifact.capturedAtUnixMs > input.primaryDispatchStartedAtUnixMs) {
+      throw new Error('Every blind visual must be captured before primary model dispatch.');
+    }
+    roles.add(blind.role);
   }
 }
 
@@ -294,6 +374,21 @@ function pngDimensions(png: Buffer): { readonly width: number; readonly height: 
   return { width, height };
 }
 
+export function isBoardSnapshotDomEvidence(value: unknown): value is BoardSnapshotDomEvidence {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const evidence = value as Readonly<Record<string, unknown>>;
+  const domCountKeys = [
+    'coordinateLabels', 'creatureBadges', 'rosterEntries', 'hpBars', 'legendEntries',
+    'wallCells', 'halfCoverCells', 'threeQuartersCoverCells',
+    'difficultCells', 'obscuredCells', 'illuminatedCells', 'fogMarks',
+    'doors', 'objects', 'hiddenMarks', 'multiCellFootprints',
+  ] as const;
+  return Object.keys(evidence).length === domCountKeys.length + 2 &&
+    evidence['optionSurfaceAbsent'] === true && evidence['nextEventPreviewAbsent'] === true &&
+    domCountKeys.every((key) =>
+      typeof evidence[key] === 'number' && Number.isSafeInteger(evidence[key]) && evidence[key] >= 0);
+}
+
 function validateArtifactShape(artifact: BoardImageArtifact): void {
   if (artifact.version !== 'arena-board-image-v1' || artifact.audience !== 'dm' ||
     artifact.mimeType !== 'image/png') {
@@ -324,6 +419,38 @@ function validateArtifactShape(artifact: BoardImageArtifact): void {
     !Number.isSafeInteger(artifact.html.bytes) || artifact.html.bytes < 1) {
     throw new TypeError('Board HTML artifact must be content-addressed with a positive byte count.');
   }
+  const blind = artifact.blindState;
+  if (blind !== undefined && (
+    blind.informationMode !== 'blind_state' ||
+    !BOARD_SNAPSHOT_IMAGE_ROLES.includes(blind.role) ||
+    !Number.isSafeInteger(blind.ordinal) || blind.ordinal < 1 ||
+    blind.primerVersion.length === 0 ||
+    (blind.glyphMode !== 'none' && blind.glyphMode !== 'light' && blind.glyphMode !== 'full') ||
+    (blind.captureTilePx !== 64 && blind.captureTilePx !== 128) ||
+    !isBoardSnapshotDomEvidence(blind.domEvidence)
+  )) {
+    throw new TypeError('Blind state board metadata is malformed.');
+  }
+}
+
+export function boardSnapshotVisualDescriptor(artifact: BoardImageArtifact): {
+  readonly kind: BoardSnapshotImageRole;
+  readonly ordinal: number;
+  readonly primer_version: string;
+  readonly glyph_mode: BoardGlyphMode;
+  readonly capture_tile_px: CaptureTilePx;
+} {
+  const blind = artifact.blindState;
+  if (blind === undefined) {
+    throw new TypeError('Advice artifacts do not have a blind visual descriptor.');
+  }
+  return {
+    kind: blind.role,
+    ordinal: blind.ordinal,
+    primer_version: blind.primerVersion,
+    glyph_mode: blind.glyphMode,
+    capture_tile_px: blind.captureTilePx,
+  };
 }
 
 export async function readValidatedBoardImage(input: {
@@ -445,10 +572,13 @@ export class BoardSnapshotService implements AsyncDisposable {
   readonly #forbiddenBoardStrings: readonly string[];
   readonly #boardGlyphs: BoardGlyphMode | null;
   readonly #captureGeometry: ReturnType<typeof boardSnapshotCaptureGeometry>;
+  readonly #informationMode: BoardSnapshotInformationMode;
+  readonly #primerVersion: string;
+  #loadedRole: BoardSnapshotImageRole = 'dm_board';
   readonly #server: PreviewServer;
   readonly #context: BrowserContext;
   readonly #page: Page;
-  readonly #profileDirectory: string;
+  readonly #profileDirectory: string | null;
   readonly #chromiumVersion: string;
   readonly #playwrightVersion: string;
   readonly #executableSha256: string;
@@ -463,10 +593,12 @@ export class BoardSnapshotService implements AsyncDisposable {
     readonly forbiddenBoardStrings: readonly string[];
     readonly boardGlyphs: BoardGlyphMode | null;
     readonly captureGeometry: ReturnType<typeof boardSnapshotCaptureGeometry>;
+    readonly informationMode: BoardSnapshotInformationMode;
+    readonly primerVersion: string;
     readonly server: PreviewServer;
     readonly context: BrowserContext;
     readonly page: Page;
-    readonly profileDirectory: string;
+    readonly profileDirectory: string | null;
     readonly chromiumVersion: string;
     readonly playwrightVersion: string;
     readonly executableSha256: string;
@@ -476,6 +608,8 @@ export class BoardSnapshotService implements AsyncDisposable {
     this.#forbiddenBoardStrings = input.forbiddenBoardStrings;
     this.#boardGlyphs = input.boardGlyphs;
     this.#captureGeometry = input.captureGeometry;
+    this.#informationMode = input.informationMode;
+    this.#primerVersion = input.primerVersion;
     this.#server = input.server;
     this.#context = input.context;
     this.#page = input.page;
@@ -487,10 +621,31 @@ export class BoardSnapshotService implements AsyncDisposable {
   }
 
   static async start(options: BoardSnapshotServiceOptions): Promise<BoardSnapshotService> {
+    return this.#start(options, null);
+  }
+
+  /**
+   * Starts a snapshot service inside a Playwright test's managed browser.
+   * The caller must have produced the production dist before invoking this entry point.
+   */
+  static async startInProcess(
+    options: BoardSnapshotServiceOptions,
+    browser: Browser,
+  ): Promise<BoardSnapshotService> {
+    if (browser.browserType().name() !== chromium.name()) {
+      throw new TypeError('Board snapshots require Playwright Chromium.');
+    }
+    return this.#start(options, browser);
+  }
+
+  static async #start(
+    options: BoardSnapshotServiceOptions,
+    managedBrowser: Browser | null,
+  ): Promise<BoardSnapshotService> {
     const startedAt = performance.now();
     const outputDirectory = validateOutputDirectory(options.outputDirectory);
     await mkdir(outputDirectory, { recursive: true });
-    await runDistBuildCache();
+    if (managedBrowser === null) await runDistBuildCache();
     const server = await preview({
       root: repositoryRoot,
       configLoader: 'runner',
@@ -501,27 +656,45 @@ export class BoardSnapshotService implements AsyncDisposable {
       await server.close();
       throw new Error('Vite preview selected forbidden port 4173.');
     }
-    const profileDirectory = await mkdtemp(join(tmpdir(), 'dnd-board-snapshot-profile-'));
+    const profileDirectory = managedBrowser === null
+      ? await mkdtemp(join(tmpdir(), 'dnd-board-snapshot-profile-'))
+      : null;
     let context: BrowserContext | null = null;
     try {
-      context = await chromium.launchPersistentContext(profileDirectory, {
-        headless: true,
+      const contextOptions = {
         locale: 'en-US',
         timezoneId: 'UTC',
         colorScheme: 'dark',
         reducedMotion: 'reduce',
         viewport: VIEWPORT,
         deviceScaleFactor: 1,
-      });
+      } as const;
+      if (managedBrowser === null) {
+        if (profileDirectory === null) throw new Error('Snapshot browser profile was not created.');
+        context = await chromium.launchPersistentContext(profileDirectory, {
+          headless: true,
+          ...contextOptions,
+        });
+      } else {
+        context = await managedBrowser.newContext(contextOptions);
+      }
       const page = context.pages()[0] ?? await context.newPage();
       const origin = `http://127.0.0.1:${String(port)}`;
       const boardGlyphs = options.boardGlyphs ?? null;
       const captureGeometry = boardSnapshotCaptureGeometry(options.captureTilePx);
+      const informationMode = boardSnapshotInformationMode(options.informationMode);
+      const primerVersion = options.primerVersion ?? BLIND_STATE_PRIMER_VERSION;
+      if (informationMode === 'blind_state' && primerVersion.length === 0) {
+        throw new TypeError('Blind state snapshots require a non-empty primer version.');
+      }
       const glyphParameter = boardGlyphs === null ? '' : `&boardGlyphs=${boardGlyphs}`;
       const captureTileParameter = captureGeometry.tileSizeCssPx === 128
         ? ''
         : `&captureTilePx=${String(captureGeometry.tileSizeCssPx)}`;
-      await page.goto(`${origin}/vtt?encounter=reference&view=dm&boardSnapshot=1&session=board-snapshot-bootstrap${glyphParameter}${captureTileParameter}`);
+      const informationParameter = informationMode === 'advice'
+        ? ''
+        : '&boardSnapshotInformation=blind_state&boardSnapshotRole=dm_board';
+      await page.goto(`${origin}/vtt?encounter=reference&view=dm&boardSnapshot=1&session=board-snapshot-bootstrap${glyphParameter}${captureTileParameter}${informationParameter}`);
       await page.locator('.dm-save-manager').waitFor({ state: 'visible' });
       const browser = context.browser();
       if (browser === null) throw new Error('Persistent Chromium context has no browser handle.');
@@ -531,6 +704,8 @@ export class BoardSnapshotService implements AsyncDisposable {
         forbiddenBoardStrings: [...(options.forbiddenBoardStrings ?? []), SNAPSHOT_CANARY],
         boardGlyphs,
         captureGeometry,
+        informationMode,
+        primerVersion,
         server,
         context,
         page,
@@ -543,7 +718,9 @@ export class BoardSnapshotService implements AsyncDisposable {
     } catch (error: unknown) {
       if (context !== null) await context.close();
       await server.close();
-      await rm(profileDirectory, { recursive: true, force: true });
+      if (profileDirectory !== null) {
+        await rm(profileDirectory, { recursive: true, force: true });
+      }
       throw error;
     }
   }
@@ -564,12 +741,182 @@ export class BoardSnapshotService implements AsyncDisposable {
     return this.#boardGlyphs;
   }
 
+  get informationMode(): BoardSnapshotInformationMode {
+    return this.#informationMode;
+  }
+
   async capture(input: BoardSnapshotCapture): Promise<BoardImageArtifact> {
-    if (this.#closed) throw new Error('Board snapshot service is closed.');
-    validateSource(input.state, input.source);
+    return this.#capture(input, 1);
+  }
+
+  async warm(input: BoardSnapshotCapture): Promise<void> {
+    const role = this.#captureRole(input);
+    await this.#prepareBoard(input, role, this.#captureOrdinal + 1, false);
+  }
+
+  async captureWarmed(
+    input: BoardSnapshotCapture,
+    visualOrdinal: number,
+  ): Promise<BoardImageArtifact> {
+    if (!Number.isSafeInteger(visualOrdinal) || visualOrdinal < 1) {
+      throw new RangeError('Warmed capture ordinal must be a positive safe integer.');
+    }
+    return this.#capture(input, visualOrdinal, true);
+  }
+
+  async captureSynchronized(input: {
+    readonly state: EncounterState;
+    readonly source: BoardImageSource;
+    readonly roles: readonly BoardSnapshotImageRole[];
+    readonly firstOrdinal?: number;
+  }): Promise<readonly BoardImageArtifact[]> {
+    if (this.#informationMode !== 'blind_state') {
+      throw new TypeError('Synchronized role families require blind_state information mode.');
+    }
+    if (input.roles.length === 0 || new Set(input.roles).size !== input.roles.length) {
+      throw new TypeError('A synchronized image family requires one or more unique roles.');
+    }
+    const firstOrdinal = input.firstOrdinal ?? 1;
+    if (!Number.isSafeInteger(firstOrdinal) || firstOrdinal < 1 ||
+      !Number.isSafeInteger(firstOrdinal + input.roles.length - 1)) {
+      throw new RangeError('Synchronized image ordinals must be positive safe integers.');
+    }
+    const artifacts: BoardImageArtifact[] = [];
+    for (const [index, role] of input.roles.entries()) {
+      artifacts.push(await this.#capture(
+        { state: input.state, source: input.source, role },
+        firstOrdinal + index,
+      ));
+    }
+    if (artifacts.some((artifact) =>
+      artifact.source.revision !== input.source.revision ||
+      artifact.source.stateDigest !== input.source.stateDigest)) {
+      throw new Error('Synchronized image family diverged from its bound state.');
+    }
+    return artifacts;
+  }
+
+  async #selectBlindRole(role: BoardSnapshotImageRole): Promise<void> {
+    if (this.#loadedRole === role) return;
+    const url = new URL(this.#page.url());
+    url.pathname = '/vtt';
+    url.search = '';
+    url.searchParams.set('encounter', 'reference');
+    url.searchParams.set('view', 'dm');
+    url.searchParams.set('boardSnapshot', '1');
+    url.searchParams.set('session', 'board-snapshot-bootstrap');
+    url.searchParams.set('boardSnapshotInformation', 'blind_state');
+    url.searchParams.set('boardSnapshotRole', role);
+    if (this.#boardGlyphs !== null) url.searchParams.set('boardGlyphs', this.#boardGlyphs);
+    if (this.#captureGeometry.tileSizeCssPx !== 128) {
+      url.searchParams.set('captureTilePx', String(this.#captureGeometry.tileSizeCssPx));
+    }
+    await this.#page.goto(url.toString());
+    await this.#page.locator('.dm-save-manager').waitFor({ state: 'visible' });
+    this.#loadedRole = role;
+  }
+
+  async #capture(
+    input: BoardSnapshotCapture,
+    visualOrdinal: number,
+    warmed = false,
+  ): Promise<BoardImageArtifact> {
+    const role = this.#captureRole(input);
     const captureStartedAt = performance.now();
     this.#captureOrdinal += 1;
     const captureOrdinal = this.#captureOrdinal;
+    let board: ReturnType<Page['locator']>;
+    if (warmed) {
+      if (this.#informationMode === 'blind_state' && this.#loadedRole !== role) {
+        throw new Error('Warmed snapshot role no longer matches the prepared page.');
+      }
+      validateSource(input.state, input.source);
+      await this.#addCanary(captureOrdinal);
+      board = this.#boardLocator(role);
+      await this.#waitForBoardVisible(board, input.source, role);
+      await board.evaluate((element) => element.scrollIntoView({ block: 'start', inline: 'start' }));
+      await this.#waitForSettledBoard(board, input.source, role);
+    } else {
+      board = await this.#prepareBoard(input, role, captureOrdinal, true);
+    }
+    const blindDomEvidence = this.#informationMode === 'blind_state'
+      ? await this.#inspectBlindStateDom(board)
+      : null;
+    const png = await board.screenshot({
+      type: 'png',
+      animations: 'disabled',
+      caret: 'hide',
+      scale: 'device',
+    });
+    const captureMs = performance.now() - captureStartedAt;
+    if (png.byteLength > MAX_BOARD_PNG_BYTES) {
+      throw new Error(`Board screenshot is ${String(png.byteLength)} bytes; limit is ${String(MAX_BOARD_PNG_BYTES)}.`);
+    }
+    const dimensions = pngDimensions(png);
+    const digest = sha256Bytes(png);
+    const relativePath = await writeContentAddressedPng(this.#outputDirectory, digest, png);
+    const renderedGlyphMode = await board.evaluate((element) =>
+      (element as HTMLElement).dataset.boardGlyphs ?? null);
+    if (renderedGlyphMode === null || !isBoardGlyphMode(renderedGlyphMode)) {
+      throw new TypeError('State-only snapshot omitted its glyph mode.');
+    }
+    const html = await writeContentAddressedHtml(this.#outputDirectory, serializeAccessibleBoard({
+      encounterName: 'Encounter board',
+      audience: 'dm',
+      round: input.state.round,
+      activeCombatant: input.state.activeCombatant,
+      board: projectEncounterBoard(projectDmView(input.state)),
+    }));
+    const artifact: BoardImageArtifact = Object.freeze({
+      version: 'arena-board-image-v1',
+      audience: 'dm',
+      mimeType: 'image/png',
+      relativePath,
+      sha256: digest,
+      bytes: png.byteLength,
+      ...dimensions,
+      capturedAtUnixMs: Date.now(),
+      captureMs,
+      source: { ...input.source },
+      chromiumVersion: this.#chromiumVersion,
+      html,
+      ...(this.#informationMode === 'blind_state' ? {
+        blindState: {
+          informationMode: 'blind_state' as const,
+          role,
+          ordinal: visualOrdinal,
+          primerVersion: this.#primerVersion,
+          glyphMode: renderedGlyphMode,
+          captureTilePx: this.#captureGeometry.tileSizeCssPx,
+          domEvidence: blindDomEvidence!,
+        },
+      } : {}),
+    });
+    assertBoardImageFresh(artifact, input.state, input.source);
+    await assertContainedArtifact(this.#outputDirectory, artifact.relativePath);
+    await assertContainedArtifact(this.#outputDirectory, artifact.html.relativePath);
+    this.#artifacts.push(artifact);
+    await this.#writeManifest();
+    return artifact;
+  }
+
+  #captureRole(input: BoardSnapshotCapture): BoardSnapshotImageRole {
+    if (this.#closed) throw new Error('Board snapshot service is closed.');
+    const role = input.role ?? 'dm_board';
+    if (this.#informationMode === 'advice' && role !== 'dm_board') {
+      throw new TypeError('Advice snapshots support only the legacy dm_board capture.');
+    }
+    return role;
+  }
+
+  async #prepareBoard(
+    input: BoardSnapshotCapture,
+    role: BoardSnapshotImageRole,
+    captureOrdinal: number,
+    addCanary: boolean,
+  ): Promise<ReturnType<Page['locator']>> {
+    if (this.#informationMode === 'blind_state') await this.#selectBlindRole(role);
+    validateSource(input.state, input.source);
     const bundle = createBoardSnapshotSessionBundle(input.state, input.source, captureOrdinal);
     const sessions = join(this.#outputDirectory, 'snapshot-sessions');
     await mkdir(sessions, { recursive: true });
@@ -610,6 +957,24 @@ export class BoardSnapshotService implements AsyncDisposable {
         user-select: none !important;
       }
     ` });
+    if (addCanary) await this.#addCanary(captureOrdinal);
+
+    const board = this.#boardLocator(role);
+    await this.#waitForBoardVisible(board, input.source, role);
+    await board.evaluate((element) => element.scrollIntoView({ block: 'start', inline: 'start' }));
+    await this.#waitForSettledBoard(board, input.source, role);
+    return board;
+  }
+
+  #boardLocator(role: BoardSnapshotImageRole): ReturnType<Page['locator']> {
+    return this.#page.locator(
+      this.#informationMode === 'blind_state'
+        ? `[data-blind-snapshot-capture=true][data-blind-snapshot-role=${role}]`
+        : '.encounter-board',
+    );
+  }
+
+  async #addCanary(captureOrdinal: number): Promise<void> {
     await this.#page.evaluate(({ ordinal, canary, markerHeightCssPx }) => {
       const marker = document.createElement('p');
       marker.id = 'board-snapshot-outside-canary';
@@ -622,56 +987,12 @@ export class BoardSnapshotService implements AsyncDisposable {
       canary: SNAPSHOT_CANARY,
       markerHeightCssPx: this.#captureGeometry.markerHeightCssPx,
     });
-
-    const board = this.#page.locator('.encounter-board');
-    await this.#waitForBoardVisible(board, input.source);
-    await board.evaluate((element) => element.scrollIntoView({ block: 'start', inline: 'start' }));
-    await this.#waitForSettledBoard(board, input.source);
-    const png = await board.screenshot({
-      type: 'png',
-      animations: 'disabled',
-      caret: 'hide',
-      scale: 'device',
-    });
-    const captureMs = performance.now() - captureStartedAt;
-    if (png.byteLength > MAX_BOARD_PNG_BYTES) {
-      throw new Error(`Board screenshot is ${String(png.byteLength)} bytes; limit is ${String(MAX_BOARD_PNG_BYTES)}.`);
-    }
-    const dimensions = pngDimensions(png);
-    const digest = sha256Bytes(png);
-    const relativePath = await writeContentAddressedPng(this.#outputDirectory, digest, png);
-    const html = await writeContentAddressedHtml(this.#outputDirectory, serializeAccessibleBoard({
-      encounterName: 'Encounter board',
-      audience: 'dm',
-      round: input.state.round,
-      activeCombatant: input.state.activeCombatant,
-      board: projectEncounterBoard(projectDmView(input.state)),
-    }));
-    const artifact: BoardImageArtifact = Object.freeze({
-      version: 'arena-board-image-v1',
-      audience: 'dm',
-      mimeType: 'image/png',
-      relativePath,
-      sha256: digest,
-      bytes: png.byteLength,
-      ...dimensions,
-      capturedAtUnixMs: Date.now(),
-      captureMs,
-      source: { ...input.source },
-      chromiumVersion: this.#chromiumVersion,
-      html,
-    });
-    assertBoardImageFresh(artifact, input.state, input.source);
-    await assertContainedArtifact(this.#outputDirectory, artifact.relativePath);
-    await assertContainedArtifact(this.#outputDirectory, artifact.html.relativePath);
-    this.#artifacts.push(artifact);
-    await this.#writeManifest();
-    return artifact;
   }
 
   async #waitForBoardVisible(
     board: ReturnType<Page['locator']>,
     source: BoardImageSource,
+    role: BoardSnapshotImageRole,
   ): Promise<void> {
     await new Promise<void>((resolveBoard, reject) => {
       const onPageError = (error: Error): void => {
@@ -680,19 +1001,27 @@ export class BoardSnapshotService implements AsyncDisposable {
       };
       this.#page.on('pageerror', onPageError);
       void this.#page.waitForFunction((expected) => {
-        const candidate = document.querySelector<HTMLElement>('.encounter-board');
+        const selector = expected.informationMode === 'blind_state'
+          ? `[data-blind-snapshot-capture=true][data-blind-snapshot-role=${expected.role}]`
+          : '.encounter-board';
+        const candidate = document.querySelector<HTMLElement>(selector);
         if (candidate === null) return false;
         const bounds = candidate.getBoundingClientRect();
         const style = getComputedStyle(candidate);
         return bounds.width > 0 && bounds.height > 0 &&
           style.visibility !== 'hidden' && style.display !== 'none' &&
-          candidate.dataset.boardAudience === 'dm' &&
+          candidate.dataset.boardAudience === (expected.role === 'player_board' ? 'player' : 'dm') &&
           candidate.dataset.sourceRevision === String(expected.revision) &&
           candidate.dataset.sourceRound === String(expected.round) &&
           candidate.dataset.sourceStateDigest === expected.stateDigest &&
           // D525: a board rendered under another glyph mode than requested is never captured.
           (expected.boardGlyphs === null || candidate.dataset.boardGlyphs === expected.boardGlyphs);
-      }, { ...source, boardGlyphs: this.#boardGlyphs }, { polling: 'raf' }).then(() => {
+      }, {
+        ...source,
+        boardGlyphs: this.#boardGlyphs,
+        informationMode: this.#informationMode,
+        role,
+      }, { polling: 'raf' }).then(() => {
         this.#page.off('pageerror', onPageError);
         resolveBoard();
       }, (error: unknown) => {
@@ -706,6 +1035,7 @@ export class BoardSnapshotService implements AsyncDisposable {
   async #waitForSettledBoard(
     board: ReturnType<Page['locator']>,
     source: BoardImageSource,
+    role: BoardSnapshotImageRole,
   ): Promise<void> {
     await board.evaluate(async (element, expected) => {
       const html = element as HTMLElement;
@@ -715,13 +1045,19 @@ export class BoardSnapshotService implements AsyncDisposable {
         html.dataset.sourceRound ?? '',
         html.dataset.sourceStateDigest ?? '',
       ];
-      const wanted = ['dm', String(expected.revision), String(expected.round), expected.stateDigest];
+      const wanted = [
+        expected.role === 'player_board' ? 'player' : 'dm',
+        String(expected.revision),
+        String(expected.round),
+        expected.stateDigest,
+      ];
       if (canonical(attributes()) !== canonical(wanted)) {
         throw new Error(`Board provenance ${canonical(attributes())} does not match ${canonical(wanted)}.`);
       }
       await document.fonts.ready;
-      for (const image of Array.from(html.querySelectorAll('img'))) {
-        await image.decode();
+      const images = Array.from(html.querySelectorAll('img'));
+      await Promise.all(images.map(async (image) => image.decode()));
+      for (const image of images) {
         if (!image.complete || image.naturalWidth === 0 || image.naturalHeight === 0) {
           throw new Error('Board image asset did not decode to nonzero dimensions.');
         }
@@ -750,7 +1086,7 @@ export class BoardSnapshotService implements AsyncDisposable {
       function canonical(value: unknown): string {
         return JSON.stringify(value);
       }
-    }, source);
+    }, { ...source, role });
     const identityLeak = await board.evaluate((element, forbidden) => {
       const root = element as HTMLElement;
       const values: string[] = [root.innerText];
@@ -769,6 +1105,54 @@ export class BoardSnapshotService implements AsyncDisposable {
     if (identityLeak !== null) {
       throw new Error(`Board contains forbidden identity string ${JSON.stringify(identityLeak)}.`);
     }
+  }
+
+  async #inspectBlindStateDom(
+    board: ReturnType<Page['locator']>,
+  ): Promise<BoardSnapshotDomEvidence> {
+    const inspection = await board.evaluate((element, terrainSelectors) => {
+      const root = element as HTMLElement;
+      const forbiddenClass = Array.from(root.querySelectorAll<HTMLElement>('*')).find((node) =>
+        Array.from(node.classList).some((name) => name.startsWith('encounter-option-')));
+      if (forbiddenClass !== undefined) return { violation: `class:${forbiddenClass.className}` };
+      const forbiddenAttribute = [root, ...Array.from(root.querySelectorAll<HTMLElement>('*'))]
+        .flatMap((node) => Array.from(node.attributes))
+        .find((attribute) => attribute.name.startsWith('data-option'));
+      if (forbiddenAttribute !== undefined) return { violation: `attribute:${forbiddenAttribute.name}` };
+      if (/Movement options|Opportunity Attack|beyond movement \(Dash\)|option N/iu.test(root.innerText)) {
+        return { violation: 'legend:text' };
+      }
+      if (root.querySelector('.dm-next-event-preview') !== null) return { violation: 'next-event-preview' };
+      const count = (selector: string): number => root.querySelectorAll(selector).length;
+      return {
+        violation: null,
+        evidence: {
+          optionSurfaceAbsent: true as const,
+          nextEventPreviewAbsent: true as const,
+          coordinateLabels: count('.encounter-coordinate-label'),
+          creatureBadges: count('.encounter-creature-badge'),
+          rosterEntries: count('.encounter-roster-entry'),
+          hpBars: count('.encounter-hp-bar'),
+          legendEntries: count('.encounter-legend-item'),
+          wallCells: count(terrainSelectors.wallCells),
+          halfCoverCells: count(terrainSelectors.halfCoverCells),
+          threeQuartersCoverCells: count(terrainSelectors.threeQuartersCoverCells),
+          difficultCells: count('.encounter-mechanical-difficult_terrain'),
+          obscuredCells: count('.encounter-mechanical-obscurement'),
+          illuminatedCells: count('.encounter-mechanical-illumination'),
+          fogMarks: count('[data-glyph-kind="fog"]'),
+          doors: count('.encounter-world-object[data-kind="door"]'),
+          objects: count('.encounter-world-object'),
+          hiddenMarks: count('.encounter-hidden-ring'),
+          multiCellFootprints: Array.from(root.querySelectorAll<HTMLElement>('.encounter-token-space'))
+            .filter((node) => Number(node.dataset.columnSpan) > 1 || Number(node.dataset.rowSpan) > 1).length,
+        },
+      };
+    }, BOARD_SNAPSHOT_TERRAIN_SELECTORS);
+    if (inspection.violation !== null) {
+      throw new Error(`Blind state board contains an offered-option DOM leak (${inspection.violation}).`);
+    }
+    return inspection.evidence;
   }
 
   async #writeManifest(): Promise<void> {
@@ -810,7 +1194,9 @@ export class BoardSnapshotService implements AsyncDisposable {
     this.#closed = true;
     await this.#context.close();
     await this.#server.close();
-    await rm(this.#profileDirectory, { recursive: true, force: true });
+    if (this.#profileDirectory !== null) {
+      await rm(this.#profileDirectory, { recursive: true, force: true });
+    }
   }
 
   async [Symbol.asyncDispose](): Promise<void> {

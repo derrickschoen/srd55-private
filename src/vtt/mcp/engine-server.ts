@@ -122,6 +122,8 @@ import {
 } from './handler';
 import {
   ENGINE_ACTOR_KNOWLEDGE_POLICY,
+  ENGINE_BLIND_ROUND_INTENT_INPUT_SCHEMA,
+  ENGINE_BLIND_TOOL_SPECS,
   ENGINE_LEGENDARY_WINDOWS_POLICY,
   ENGINE_MINIMAL_SUBMIT_ROUND_PROPOSALS_INPUT_SCHEMA,
   PROPOSAL_CONTRACT_REFUSAL_CODES,
@@ -137,6 +139,34 @@ import {
   type EngineUiFeedback,
 } from './schemas';
 import type { KbReadBudget, KbReadCallPhase } from './knowledge-base';
+import {
+  BLIND_INTENT_VERSION,
+  BLIND_MAX_ATTEMPTS_DEFAULT,
+  type BlindMaxAttempts,
+  type BlindRepairArm,
+  type DmMode,
+} from '../blind-dm-contract';
+import {
+  BLIND_LIVE_WALL_MS,
+  resolveBlindRoundIntents,
+  type BlindResolutionResult,
+} from '../blind-intent-resolver';
+import {
+  BLIND_FULL_CONTEXT_REQUIRED,
+  BLIND_SEMANTIC_BOARD_MAX_BYTES,
+  BLIND_TURN_CONTEXT_MAX_BYTES,
+  renderBlindTurnContext,
+  renderTurnContextForDmMode,
+  type BlindTurnContextBudgetEvidence,
+  type BlindVisualDescriptor,
+  type EngineBlindTurnProjection,
+} from '../blind-turn-context';
+import {
+  assertBlindTurnContextAllowlist,
+  assertNoForbiddenBlindStructure,
+  blindIngressChannelForMcpMethod,
+  type BlindModelIngressRecorder,
+} from '../blind-model-ingress';
 
 export const ENGINE_DM_TOOL_NAMES = Object.freeze([
   'engine.get_turn_context',
@@ -159,7 +189,12 @@ export const ENGINE_SPECULATIVE_DM_TOOL_NAMES = Object.freeze([
   'engine.load_skill',
   'engine.submit_speculative_round_plan',
 ] as const);
-export type EngineMcpToolProfile = 'full' | 'dm';
+export const ENGINE_BLIND_DM_TOOL_NAMES = Object.freeze([
+  'engine.get_turn_context',
+  'engine.read_kb_subject',
+  'engine.submit_blind_round_intents',
+] as const);
+export type EngineMcpToolProfile = 'full' | 'dm' | 'blind';
 export const INTEL_MODES = ['full', 'off'] as const;
 export type IntelMode = (typeof INTEL_MODES)[number];
 export const OVERRIDE_POLICIES = ['strict', 'typed_reason'] as const;
@@ -240,6 +275,22 @@ export interface AdjudicationEnvelope {
 export interface AdjudicationSink { readonly append: (envelope: AdjudicationEnvelope) => void }
 export interface UiFeedbackSink { readonly append: (feedback: EngineUiFeedback) => void }
 
+export interface BlindIntentSubmissionRecord {
+  readonly stateRef: EngineStateReference;
+  readonly requestId: string;
+  readonly phase: 'initial' | 'correction';
+  readonly attempt: number;
+  readonly startedAtUnixMs: number;
+  readonly endedAtUnixMs: number;
+  readonly resolverLatencyMs: number;
+  readonly envelope: unknown;
+  readonly resolution: BlindResolutionResult;
+}
+
+export interface BlindIntentSink {
+  readonly append: (submission: BlindIntentSubmissionRecord) => void;
+}
+
 export interface TurnContextDeltaBase {
   readonly revision: number;
   readonly context: Readonly<Record<string, unknown>>;
@@ -277,10 +328,21 @@ interface EngineMcpDependencies {
   readonly maximumResourceBytes?: number;
   readonly listPageSize?: number;
   readonly toolProfile?: EngineMcpToolProfile;
+  readonly dmMode?: DmMode;
+  readonly blindIntents?: BlindIntentSink;
+  readonly blindRepairArm?: BlindRepairArm;
+  readonly blindMaxAttempts?: BlindMaxAttempts;
+  readonly blindDeadlineUnixMs?: number;
+  readonly clock?: () => number;
+  readonly beforeBlindIntentStage?: () => void;
+  readonly blindVisuals?: readonly BlindVisualDescriptor[];
+  readonly blindIngressRecorder?: BlindModelIngressRecorder;
+  readonly onBlindTurnContextRendered?: (evidence: BlindTurnContextBudgetEvidence) => void;
   readonly turnContextDeltaBase?: TurnContextDeltaBase;
   readonly onTurnContext?: (context: Readonly<Record<string, unknown>>) => void;
   readonly rendererProfile?: RendererProfile;
   readonly semanticBoardProjection?: EngineSemanticBoardProjection;
+  readonly blindTurnProjection?: EngineBlindTurnProjection;
   readonly turnContextMaximumBytes?: number;
   readonly semanticBoardMaximumBytes?: number;
   readonly onTurnContextRendered?: (result: {
@@ -955,6 +1017,56 @@ export function renderEnginePrompt(kind: 'plan_round' | 'correct_proposal' | 'sp
   return [fixed, `Turn resource: ${uriBase}/turn/current`, `Proposal schema: ${uriBase}/schema/turn-proposal-v1`, `<engine-data-json>${canonicalJson({ run_id: capsule.runId, revision: capsule.revision, request: promptRequest(capsule), voice: voice ?? null, recent_changes: recentChanges(capsule), current_context: turnContext ?? null, rules: entries })}</engine-data-json>`].join('\n');
 }
 
+export function renderBlindEnginePrompt(
+  kind: 'plan_blind_round' | 'repair_blind_intents',
+  capsule: EngineStateCapsule,
+  rules: AllowlistedRulesSource,
+  turnContext?: unknown,
+): string {
+  const entries = capsule.rulesIndex.flatMap((reference) => {
+    const entry = allowedRule(rules, {
+      rule_id: reference.ruleId,
+      source_locator: reference.sourceLocator,
+    });
+    return entry === null ? [] : [{
+      rule_id: entry.ruleId,
+      source_locator: entry.sourceLocator,
+      text: entry.text,
+      attribution: entry.attribution,
+    }];
+  });
+  const base = runBase(capsule);
+  const task = kind === 'repair_blind_intents'
+    ? 'Repair the rejected blind intent using only its typed rejection codes and the unchanged full facts.'
+    : 'Choose one intent for every required monster from the supplied rules, state facts, and board-visible names and badges.';
+  const boundary = [
+    'Input mechanics may include dice expressions, attack bonuses, save DCs, damage formulas, exact monster hit points and resources, cell labels, and movement costs.',
+    'Output only the blind-round intent contract. Never output a path, die result, DC, damage value, modifier, engine command, or executable state mutation.',
+    'A destination may be one exact zero-based column,row gutter label or a typed relative relation. Omitted destination means hold position.',
+    'Relative geometry uses the published blind v1 convention: adjacent_to chooses the closest reachable adjacent cell; toward and near minimize distance; away_from maximizes distance; behind chooses an adjacent cell farthest from the named source. Distance ties use least legal movement cost, then lexical column,row.',
+    'The submission is a proposal only. The engine privately validates it later and this call never executes a move.',
+  ];
+  return [
+    task,
+    ...boundary,
+    `Turn resource: ${base}/turn/current`,
+    `Intent schema: ${base}/schema/${BLIND_INTENT_VERSION}`,
+    `<engine-data-json>${canonicalJson({
+      run_id: capsule.runId,
+      revision: capsule.revision,
+      request: capsule.request === null || capsule.request.phase === 'speculative'
+        ? null
+        : {
+            request_id: capsule.request.requestId,
+            phase: capsule.request.phase,
+          },
+      current_context: turnContext ?? null,
+      rules: entries,
+      intent_schema: ENGINE_BLIND_ROUND_INTENT_INPUT_SCHEMA,
+    })}</engine-data-json>`,
+  ].join('\n');
+}
+
 function reactionAttackInput(
   state: EncounterState,
   decision: Extract<EncounterState['pendingDecisions'][number], { readonly kind: 'reaction_offer' }>,
@@ -1318,6 +1430,14 @@ function renderFailureModesWithCoverage(): Readonly<Record<string, unknown>> {
 }
 
 export function createEngineMcpApplication(dependencies: EngineMcpDependencies): EngineMcpApplication {
+  const dmMode: DmMode = dependencies.dmMode ??
+    (dependencies.toolProfile === 'blind' ? 'blind' : 'advice');
+  if (dmMode === 'blind' && dependencies.toolProfile !== undefined && dependencies.toolProfile !== 'blind') {
+    throw new TypeError('Blind DM mode requires the closed blind MCP profile.');
+  }
+  if (dmMode === 'advice' && dependencies.toolProfile === 'blind') {
+    throw new TypeError('The closed blind MCP profile requires blind DM mode.');
+  }
   const selectedOverridePolicy = overridePolicyRule(
     dependencies.overridePolicy ?? DEFAULT_OVERRIDE_POLICY,
   );
@@ -1346,7 +1466,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
   const rendererProfile = rendererProfileSchema.parse(
     dependencies.rendererProfile ?? DEFAULT_RENDERER_PROFILE,
   );
-  const deliveredSemanticBoard = rendererProfile.semanticBoard === true
+  const deliveredSemanticBoard = dmMode === 'advice' && rendererProfile.semanticBoard === true
     ? (() => {
         const projection = dependencies.semanticBoardProjection;
         if (projection === undefined) {
@@ -1355,11 +1475,25 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         return semanticBoardTurnContextBlock(projection);
       })()
     : null;
-  const turnContextMaximumBytes = dependencies.turnContextMaximumBytes ?? TURN_CONTEXT_MAX_BYTES;
+  const blindSemanticBoardProjection = dmMode === 'blind'
+    ? dependencies.semanticBoardProjection ?? null
+    : null;
+  const blindTurnProjection = dmMode === 'blind'
+    ? (() => {
+        const projection = dependencies.blindTurnProjection;
+        if (projection === undefined) {
+          throw new TypeError('Blind DM mode requires the reducer-free blind turn projection.');
+        }
+        return projection;
+      })()
+    : null;
+  const turnContextMaximumBytes = dependencies.turnContextMaximumBytes ??
+    (dmMode === 'blind' ? BLIND_TURN_CONTEXT_MAX_BYTES : TURN_CONTEXT_MAX_BYTES);
   if (!Number.isSafeInteger(turnContextMaximumBytes) || turnContextMaximumBytes < 1) {
     throw new RangeError('turnContextMaximumBytes must be a positive safe integer.');
   }
-  const semanticBoardMaximumBytes = dependencies.semanticBoardMaximumBytes ?? SEMANTIC_BOARD_MAX_BYTES;
+  const semanticBoardMaximumBytes = dependencies.semanticBoardMaximumBytes ??
+    (dmMode === 'blind' ? BLIND_SEMANTIC_BOARD_MAX_BYTES : SEMANTIC_BOARD_MAX_BYTES);
   if (!Number.isSafeInteger(semanticBoardMaximumBytes) || semanticBoardMaximumBytes < 1) {
     throw new RangeError('semanticBoardMaximumBytes must be a positive safe integer.');
   }
@@ -1370,6 +1504,17 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
   const idempotency = new Map<string, { readonly bytes: string; readonly result: unknown }>();
   let acceptedRoundDecision = dependencies.roundDecisionAlreadyAccepted ?? false;
   let submittedUiFeedback = dependencies.uiFeedbackAlreadySubmitted ?? false;
+  let blindIntentAttempt = 0;
+  const blindMaxAttempts = dependencies.blindMaxAttempts ?? BLIND_MAX_ATTEMPTS_DEFAULT;
+  if (!Number.isSafeInteger(blindMaxAttempts) || blindMaxAttempts < 1 || blindMaxAttempts > 3) {
+    throw new RangeError('blindMaxAttempts must be an integer from 1 through 3.');
+  }
+  const clock = dependencies.clock ?? Date.now;
+  const blindDeadlineUnixMs = dependencies.blindDeadlineUnixMs ?? clock() + BLIND_LIVE_WALL_MS;
+  if (!Number.isSafeInteger(blindDeadlineUnixMs) || blindDeadlineUnixMs < 1) {
+    throw new RangeError('blindDeadlineUnixMs must be a positive safe integer.');
+  }
+  const blindRepairArm = dependencies.blindRepairArm ?? 'code_only';
   const applicationCursors = new Map<string, { readonly digest: string; readonly key: string; readonly offset: number }>();
   const opportunityReports = new Map<string, ReturnType<typeof actorOpportunityReport>>();
   const teamPlanReports = new Map<string, TeamPlanFrontierReport>();
@@ -2100,12 +2245,100 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
     });
   };
   function execute(name: string, value: unknown): unknown {
-    const suppliedInput = record(value, `${name} arguments`);
+    const suppliedInput = name === 'engine.submit_blind_round_intents' &&
+      (typeof value !== 'object' || value === null || Array.isArray(value))
+      ? {}
+      : record(value, `${name} arguments`);
     const roundSubmission = name === 'engine.submit_round_proposals'
       ? prepareRoundSubmission(suppliedInput)
       : null;
     if (roundSubmission?.kind === 'rejected') return roundSubmission.result;
     const input = roundSubmission === null ? suppliedInput : roundSubmission.envelope;
+    if (name === 'engine.submit_blind_round_intents') {
+      if (dmMode !== 'blind') throw new RangeError('BLIND_INTENT_SUBMISSION_UNAVAILABLE');
+      if (acceptedRoundDecision) throw new RangeError('BLIND_ROUND_ALREADY_ACCEPTED');
+      if (clock() >= blindDeadlineUnixMs) throw new RangeError('BLIND_INTENT_DEADLINE_EXCEEDED');
+      const capsule = feed.current();
+      const request = capsule.request;
+      if (request === null || request.phase === 'speculative' || request.kind === 'plan_adjustment') {
+        throw new RangeError('BLIND_ROUND_REQUEST_UNAVAILABLE');
+      }
+      const roundRequest = request;
+      blindIntentAttempt += 1;
+      if (blindIntentAttempt > blindMaxAttempts) throw new RangeError('BLIND_MAX_ATTEMPTS_EXCEEDED');
+      const envelope: unknown = structuredClone(value);
+      const resolverStartedAtUnixMs = clock();
+      if (blindTurnProjection === null) throw new TypeError('Blind intent resolution requires the blind turn projection.');
+      const resolution = resolveBlindRoundIntents({
+        state,
+        capsule,
+        blindProjection: blindTurnProjection,
+        envelope,
+        attempt: blindIntentAttempt,
+        repairArm: blindRepairArm,
+        dependencies: { queries, proposalResolver: turnProposals },
+      });
+      const recordResolution = (recorded: BlindResolutionResult): void => {
+        const resolverEndedAtUnixMs = clock();
+        dependencies.blindIntents?.append(structuredClone({
+          stateRef: {
+            runId: capsule.runId,
+            stateHandle: engineStateHandle(capsule),
+            expectedRevision: capsule.revision,
+          },
+          requestId: roundRequest.requestId,
+          phase: roundRequest.phase,
+          attempt: blindIntentAttempt,
+          startedAtUnixMs: resolverStartedAtUnixMs,
+          endedAtUnixMs: resolverEndedAtUnixMs,
+          resolverLatencyMs: Math.max(0, resolverEndedAtUnixMs - resolverStartedAtUnixMs),
+          envelope: recorded.status === 'accepted' ? recorded.envelope : envelope,
+          resolution: recorded,
+        }));
+      };
+      if (resolution.status === 'accepted') {
+        dependencies.beforeBlindIntentStage?.();
+        const current = feed.current();
+        if (current.revision !== capsule.revision || current.digest !== capsule.digest ||
+          engineStateHandle(current) !== engineStateHandle(capsule)) {
+          const staleResolution: BlindResolutionResult = {
+            status: 'rejected' as const,
+            attempt: blindIntentAttempt,
+            codes: ['STALE_REVISION' as const],
+            modelResult: {
+              status: 'rejected' as const,
+              attempt: blindIntentAttempt,
+              codes: ['STALE_REVISION' as const],
+            },
+          };
+          recordResolution(staleResolution);
+          assertNoForbiddenBlindStructure(staleResolution.modelResult);
+          return staleResolution.modelResult;
+        }
+        const key = `blind:${roundRequest.requestId}:${String(blindIntentAttempt)}:${sha256(canonicalJson(resolution.envelope)).slice(0, 32)}`;
+        const proposalId = `round:${sha256(canonicalJson({ digest: capsule.digest, key, resolutions: resolution.actors.map((entry) => entry.resolution) })).slice(0, 48)}`;
+        submitEngineProposal(feed, proposals, {
+          kind: 'round_turn_proposal',
+          proposalId,
+          runId: capsule.runId,
+          branchId: capsule.branchId,
+          requestId: roundRequest.requestId,
+          expectedRevision: capsule.revision,
+          stateDigest: capsule.digest,
+          stateHandle: engineStateHandle(capsule),
+          phase: roundRequest.phase,
+          idempotencyKey: key,
+          resolutions: resolution.actors.map((entry) => entry.resolution),
+          rationale: null,
+          reactionGuidance: null,
+          submittedArguments: structuredClone(resolution.envelope),
+        });
+        acceptedRoundDecision = true;
+      }
+      recordResolution(resolution);
+      assertNoForbiddenBlindStructure(resolution.modelResult);
+      return resolution.modelResult;
+    }
     if (name === 'engine.submit_ui_feedback') {
       if (!acceptedRoundDecision) {
         return { status: 'rule_error', code: 'UI_FEEDBACK_DECISION_NOT_ACCEPTED' };
@@ -2125,10 +2358,12 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       if (budget === undefined || callPhase === undefined) {
         throw new RangeError('KB_SUBJECT_READER_UNAVAILABLE');
       }
-      return budget.read(
+      const result = budget.read(
         stringField(input, 'subject') as import('../knowledge-base-contract').KbSubject,
         callPhase,
       );
+      if (dmMode === 'blind') dependencies.blindIngressRecorder?.recordJson('kb_read', result);
+      return result;
     }
     if (name === 'engine.get_turn_context') {
       const capsule = exactCurrent(feed, stringField(input, 'run_id'), numberField(input, 'expected_revision'));
@@ -2136,6 +2371,38 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       if (capsule.request.phase === 'speculative') throw new RangeError('SPECULATIVE_CONTEXT_USES_CAPSULE_MENU');
       if (deliveredSemanticBoard !== null && deliveredSemanticBoard.revision !== capsule.revision) {
         throw new RangeError('SEMANTIC_BOARD_REVISION_MISMATCH');
+      }
+      if (dmMode === 'blind') {
+        if (input['granularity'] === 'turn_delta') {
+          return { status: 'rejected', code: BLIND_FULL_CONTEXT_REQUIRED };
+        }
+        if (blindTurnProjection === null) {
+          throw new TypeError('Blind turn projection is unavailable.');
+        }
+        const result = renderTurnContextForDmMode({
+          dmMode,
+          advice: () => {
+            throw new Error('Blind context entered the advice renderer.');
+          },
+          blind: () => renderBlindTurnContext({
+            capsule,
+            blindProjection: blindTurnProjection,
+            ...(blindSemanticBoardProjection === null ? {} : {
+              semanticBoardProjection: blindSemanticBoardProjection,
+            }),
+            ...(dependencies.blindVisuals === undefined ? {} : {
+              visuals: dependencies.blindVisuals,
+            }),
+            baseMaximumBytes: turnContextMaximumBytes,
+            semanticMaximumBytes: semanticBoardMaximumBytes,
+          }),
+        });
+        assertBlindTurnContextAllowlist(result.context);
+        assertNoForbiddenBlindStructure(result.context);
+        dependencies.onBlindTurnContextRendered?.(structuredClone(result.budget));
+        dependencies.onTurnContext?.(structuredClone(result.context));
+        dependencies.blindIngressRecorder?.recordJson('turn_context', result.context);
+        return result.context;
       }
       const incumbentContext = fullTurnContext(capsule, input);
       const rendered = renderTurnContextProfile(incumbentContext, rendererProfile);
@@ -3191,16 +3458,19 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         ? ENGINE_ADJUSTMENT_DM_TOOL_NAMES
         : ENGINE_DM_TOOL_NAMES), ...(dependencies.uiFeedback === undefined ? [] : ['engine.submit_ui_feedback'])])
     : null;
-  const bindings: readonly McpToolBinding[] = ENGINE_TOOL_SPECS
+  const toolSpecifications = dmMode === 'blind' ? ENGINE_BLIND_TOOL_SPECS : ENGINE_TOOL_SPECS;
+  const bindings: readonly McpToolBinding[] = toolSpecifications
     .filter((spec) => spec.descriptor.name === 'engine.submit_ui_feedback'
       ? dependencies.uiFeedback !== undefined && profileRequest?.phase !== 'speculative' &&
         profileRequest?.kind !== 'plan_adjustment'
       : spec.descriptor.name === 'engine.read_kb_subject'
       ? dependencies.kbReadBudget !== undefined && profileRequest?.phase !== 'speculative'
-      : advertisedNames === null || advertisedNames.has(spec.descriptor.name))
+      : dmMode === 'blind' || advertisedNames === null || advertisedNames.has(spec.descriptor.name))
     .map((spec) => ({
       descriptor: spec.descriptor,
-      validateArguments: (value) => spec.descriptor.name !== 'engine.submit_round_proposals'
+      validateArguments: (value) => spec.descriptor.name === 'engine.submit_blind_round_intents'
+        ? []
+        : spec.descriptor.name !== 'engine.submit_round_proposals'
         ? schemaViolations(spec.input, value)
         : engineSchemaInternals.minimalSubmitRoundTransportInput.safeParse(value).success ||
           engineSchemaInternals.submitRoundTransportInput.safeParse(value).success
@@ -3236,9 +3506,23 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
     const summary = record(execute('engine.get_state_summary', { state_ref: externalStateRef(capsule), granularity: 'room_tactical' }), 'state summary resource');
     const { proof_token: _proofToken, ...resource } = summary;
     return resource;
-  });
-  const prompts = createPromptProvider(feed, rules, currentTurnContext);
-  const handler = createMcpHandler({ tools: bindings, resources, prompts, ...(dependencies.maximumToolResultBytes === undefined ? {} : { maximumToolResultBytes: dependencies.maximumToolResultBytes }), ...(dependencies.maximumResourceBytes === undefined ? {} : { maximumResourceBytes: dependencies.maximumResourceBytes }), ...(dependencies.listPageSize === undefined ? {} : { listPageSize: dependencies.listPageSize }), ...(dependencies.toolResultContent === undefined ? {} : { toolResultContent: dependencies.toolResultContent }) });
+  }, dmMode);
+  const prompts = createPromptProvider(feed, rules, currentTurnContext, dmMode);
+  const rawHandler = createMcpHandler({ tools: bindings, resources, prompts, ...(dependencies.maximumToolResultBytes === undefined ? {} : { maximumToolResultBytes: dependencies.maximumToolResultBytes }), ...(dependencies.maximumResourceBytes === undefined ? {} : { maximumResourceBytes: dependencies.maximumResourceBytes }), ...(dependencies.listPageSize === undefined ? {} : { listPageSize: dependencies.listPageSize }), ...(dependencies.toolResultContent === undefined ? {} : { toolResultContent: dependencies.toolResultContent }) });
+  const handler: McpHandler = dmMode !== 'blind' || dependencies.blindIngressRecorder === undefined
+    ? rawHandler
+    : {
+        handle(message) {
+          const response = rawHandler.handle(message);
+          if (response !== null && typeof message === 'object' && message !== null && !Array.isArray(message)) {
+            const method = (message as Readonly<Record<string, unknown>>)['method'];
+            const channel = typeof method === 'string' ? blindIngressChannelForMcpMethod(method) : null;
+            if (channel !== null) dependencies.blindIngressRecorder?.recordJson(channel, response);
+          }
+          return response;
+        },
+        drainNotifications: rawHandler.drainNotifications,
+      };
   return Object.freeze({
     handle: handler.handle,
     drainNotifications: handler.drainNotifications,
@@ -3249,7 +3533,13 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
 function runBase(capsule: EngineStateCapsule): string { return `engine://run/${encodeURIComponent(capsule.runId)}`; }
 function journalCursor(capsule: EngineStateCapsule, offset: number): string { return sha256(canonicalJson({ run: capsule.runId, revision: capsule.revision, digest: capsule.digest, offset })).slice(0, 48); }
 function content(uri: string, value: unknown): McpResourceContent { return { uri, mimeType: 'application/json', text: canonicalJson(value) }; }
-function createResourceProvider(feed: EngineCapsuleFeed, rules: AllowlistedRulesSource, currentTurn: () => unknown, currentRoom: () => unknown): McpResourceProvider {
+function createResourceProvider(
+  feed: EngineCapsuleFeed,
+  rules: AllowlistedRulesSource,
+  currentTurn: () => unknown,
+  currentRoom: () => unknown,
+  dmMode: DmMode,
+): McpResourceProvider {
   const subscriptions = new Map<string, Set<(event: { readonly uri: string; readonly listChanged: boolean }) => void>>();
   feed.listen((event) => {
     const base = runBase(event.capsule);
@@ -3257,6 +3547,13 @@ function createResourceProvider(feed: EngineCapsuleFeed, rules: AllowlistedRules
   });
   function listedUris(capsule: EngineStateCapsule): readonly { readonly uri: string; readonly name: string; readonly description: string; readonly mimeType: 'application/json' }[] {
     const base = runBase(capsule);
+    if (dmMode === 'blind') {
+      return [
+        { uri: `${base}/turn/current`, name: 'Current blind turn', description: 'Mutable complete blind turn facts.', mimeType: 'application/json' },
+        ...capsule.rulesIndex.flatMap((reference) => allowedRule(rules, { rule_id: reference.ruleId, source_locator: reference.sourceLocator }) === null ? [] : [{ uri: `${base}/rules/${encodeURIComponent(reference.ruleId)}`, name: `Rule ${reference.ruleId}`, description: 'Allowlisted attributed rule entry.', mimeType: 'application/json' as const }]),
+        { uri: `${base}/schema/${BLIND_INTENT_VERSION}`, name: 'Blind round intent v1', description: 'Strict human-facing round-intent contract.', mimeType: 'application/json' },
+      ];
+    }
     return [
       { uri: `${base}/turn/current`, name: 'Current turn', description: 'Mutable compact turn and request projection.', mimeType: 'application/json' },
       { uri: `${base}/room/current`, name: 'Current room', description: 'Mutable bounded room-tactical projection.', mimeType: 'application/json' },
@@ -3270,6 +3567,11 @@ function createResourceProvider(feed: EngineCapsuleFeed, rules: AllowlistedRules
     list: () => listedUris(feed.current()),
     templates: () => {
       const base = runBase(feed.current());
+      if (dmMode === 'blind') {
+        return [
+          { uriTemplate: `${base}/rules/{ruleId}`, name: 'Rule entry', description: 'One allowlisted attributed rule entry.', mimeType: 'application/json' },
+        ];
+      }
       return [
         { uriTemplate: `${base}/journal/{revision}/{cursor}`, name: 'Journal chunk', description: 'Bounded immutable journal chunk.', mimeType: 'application/json' },
         { uriTemplate: `${base}/rules/{ruleId}`, name: 'Rule entry', description: 'One allowlisted attributed rule entry.', mimeType: 'application/json' },
@@ -3278,7 +3580,9 @@ function createResourceProvider(feed: EngineCapsuleFeed, rules: AllowlistedRules
     subscribe(uri, listener) {
       const capsule = feed.current();
       const base = runBase(capsule);
-      if (uri !== `${base}/turn/current` && uri !== `${base}/room/current`) throw new RangeError('Resource is not subscribable.');
+      if (uri !== `${base}/turn/current` && (dmMode === 'blind' || uri !== `${base}/room/current`)) {
+        throw new RangeError('Resource is not subscribable.');
+      }
       const listeners = subscriptions.get(uri) ?? new Set();
       listeners.add(listener);
       subscriptions.set(uri, listeners);
@@ -3289,6 +3593,27 @@ function createResourceProvider(feed: EngineCapsuleFeed, rules: AllowlistedRules
       const capsule = feed.current();
       const base = runBase(capsule);
       if (uri === `${base}/turn/current`) return content(uri, currentTurn());
+      const rulePrefix = `${base}/rules/`;
+      if (uri.startsWith(rulePrefix)) {
+        const ruleId = decodeURIComponent(uri.slice(rulePrefix.length));
+        const reference = capsule.rulesIndex.find((entry) => entry.ruleId === ruleId);
+        if (reference === undefined) throw new RangeError('Unknown or expired resource URI.');
+        const entry = allowedRule(rules, { rule_id: reference.ruleId, source_locator: reference.sourceLocator });
+        if (entry === null) throw new RangeError('Rule source is not allowlisted.');
+        return content(uri, { rule_id: entry.ruleId, source_locator: entry.sourceLocator, text: entry.text, attribution: entry.attribution });
+      }
+      if (dmMode === 'blind') {
+        if (uri === `${base}/schema/${BLIND_INTENT_VERSION}`) return content(uri, {
+          version: BLIND_INTENT_VERSION,
+          schema: ENGINE_BLIND_ROUND_INTENT_INPUT_SCHEMA,
+          constraints: [
+            'Use board-visible names and badges.',
+            'A cell_label is the only literal coordinate form.',
+            'Never send paths, die results, DCs, damage values, modifiers, or engine commands.',
+          ],
+        });
+        throw new RangeError('Unknown or expired resource URI.');
+      }
       if (uri === `${base}/room/current`) return content(uri, currentRoom());
       const revisionMatch = new RegExp(`^${base.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}/revision/(\\d+)/turn$`, 'u').exec(uri);
       if (revisionMatch !== null) {
@@ -3312,15 +3637,6 @@ function createResourceProvider(feed: EngineCapsuleFeed, rules: AllowlistedRules
           next_cursor: nextOffset < snapshot.historyDelta.length ? journalCursor(snapshot, nextOffset) : null,
         });
       }
-      const rulePrefix = `${base}/rules/`;
-      if (uri.startsWith(rulePrefix)) {
-        const ruleId = decodeURIComponent(uri.slice(rulePrefix.length));
-        const reference = capsule.rulesIndex.find((entry) => entry.ruleId === ruleId);
-        if (reference === undefined) throw new RangeError('Unknown or expired resource URI.');
-        const entry = allowedRule(rules, { rule_id: reference.ruleId, source_locator: reference.sourceLocator });
-        if (entry === null) throw new RangeError('Rule source is not allowlisted.');
-        return content(uri, { rule_id: entry.ruleId, source_locator: entry.sourceLocator, text: entry.text, attribution: entry.attribution });
-      }
       if (uri === `${base}/schema/turn-proposal-v1`) return content(uri, {
         version: 1,
         minimal_submission: ENGINE_MINIMAL_SUBMIT_ROUND_PROPOSALS_INPUT_SCHEMA,
@@ -3339,21 +3655,49 @@ function createResourceProvider(feed: EngineCapsuleFeed, rules: AllowlistedRules
   };
 }
 
-function createPromptProvider(feed: EngineCapsuleFeed, rules: AllowlistedRulesSource, currentTurn: () => unknown): McpPromptProvider {
-  const descriptors = Object.freeze([
+function createPromptProvider(
+  feed: EngineCapsuleFeed,
+  rules: AllowlistedRulesSource,
+  currentTurn: () => unknown,
+  dmMode: DmMode,
+): McpPromptProvider {
+  const adviceDescriptors = Object.freeze([
     { name: 'engine.plan_round', description: 'Render the complete shared-initiative planning constraints and current resource links.', arguments: [{ name: 'run_id', description: 'Selected run identifier.', required: true }, { name: 'expected_revision', description: 'Exact current revision.', required: true }, { name: 'voice', description: 'Requested narration voice.', required: true }] },
     { name: 'engine.correct_proposal', description: 'Render the single bounded correction prompt with no remaining fallback.', arguments: [{ name: 'run_id', description: 'Selected run identifier.', required: true }, { name: 'expected_revision', description: 'Exact current revision.', required: true }, { name: 'request_id', description: 'Pending correction request.', required: true }] },
   ] as const);
+  const blindDescriptors = Object.freeze([
+    { name: 'engine.plan_blind_round', description: 'Render the blind full-state intent prompt.', arguments: [{ name: 'run_id', description: 'Selected run identifier.', required: true }, { name: 'expected_revision', description: 'Exact current revision.', required: true }] },
+    { name: 'engine.repair_blind_intents', description: 'Render the bounded blind intent repair prompt.', arguments: [{ name: 'run_id', description: 'Selected run identifier.', required: true }, { name: 'expected_revision', description: 'Exact current revision.', required: true }, { name: 'request_id', description: 'Pending repair request.', required: true }] },
+  ] as const);
+  const descriptors = dmMode === 'blind' ? blindDescriptors : adviceDescriptors;
   return {
     list: () => descriptors,
     get(name, value) {
       const input = record(value, 'prompt arguments');
-      const allowed = name === 'engine.plan_round' ? ['run_id', 'expected_revision', 'voice'] : name === 'engine.correct_proposal' ? ['run_id', 'expected_revision', 'request_id'] : [];
+      const allowed = dmMode === 'blind'
+        ? name === 'engine.plan_blind_round'
+          ? ['run_id', 'expected_revision']
+          : name === 'engine.repair_blind_intents'
+            ? ['run_id', 'expected_revision', 'request_id']
+            : []
+        : name === 'engine.plan_round'
+          ? ['run_id', 'expected_revision', 'voice']
+          : name === 'engine.correct_proposal'
+            ? ['run_id', 'expected_revision', 'request_id']
+            : [];
       if (allowed.length === 0) throw new RangeError('Unknown prompt.');
       if (!Object.keys(input).every((key) => allowed.includes(key)) || allowed.some((key) => input[key] === undefined)) throw new TypeError('Prompt arguments are missing or contain unknown properties.');
       const capsule = exactCurrent(feed, stringField(input, 'run_id'), numberField(input, 'expected_revision'));
-      if (name === 'engine.correct_proposal' && (capsule.request === null || capsule.request.requestId !== input['request_id'] || capsule.request.phase !== 'correction')) throw new RangeError('REQUEST_MISMATCH');
-      const text = renderEnginePrompt(name === 'engine.plan_round' ? 'plan_round' : 'correct_proposal', capsule, rules, typeof input['voice'] === 'string' ? input['voice'] : undefined, currentTurn());
+      if ((name === 'engine.correct_proposal' || name === 'engine.repair_blind_intents') &&
+        (capsule.request === null || capsule.request.requestId !== input['request_id'] || capsule.request.phase !== 'correction')) throw new RangeError('REQUEST_MISMATCH');
+      const text = dmMode === 'blind'
+        ? renderBlindEnginePrompt(
+            name === 'engine.plan_blind_round' ? 'plan_blind_round' : 'repair_blind_intents',
+            capsule,
+            rules,
+            currentTurn(),
+          )
+        : renderEnginePrompt(name === 'engine.plan_round' ? 'plan_round' : 'correct_proposal', capsule, rules, typeof input['voice'] === 'string' ? input['voice'] : undefined, currentTurn());
       if (text.toLowerCase().includes('content/cc-by-sa')) throw new RangeError('Disallowed prompt source.');
       return { resultType: 'complete', description: descriptors.find((descriptor) => descriptor.name === name)?.description, messages: [{ role: 'user', content: { type: 'text', text } }] };
     },

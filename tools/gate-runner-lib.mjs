@@ -1,34 +1,26 @@
 import { spawnSync } from 'node:child_process';
-import {
-  mkdirSync,
-  readFileSync,
-  writeFileSync,
-} from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { loadavg, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { performance } from 'node:perf_hooks';
-import { randomUUID } from 'node:crypto';
+import { readJsonArtifact } from './gate-verdict.mjs';
 
 export const GATE_LOCK_PATH = '/tmp/dnd-gate.lock';
 export const GATE_LOCK_WAIT_SECONDS = 7_200;
 
 function lockLauncher(environment) {
   const testModule = environment.DND_GATE_FLOCK_MODULE;
-  if (testModule !== undefined) {
-    return { executable: process.execPath, arguments: [resolve(testModule)] };
-  }
+  if (testModule !== undefined) return { executable: process.execPath, arguments: [resolve(testModule)] };
   return { executable: 'flock', arguments: [] };
 }
 
-function readJson(path) {
-  try {
-    return { value: JSON.parse(readFileSync(path, 'utf8')), error: null };
-  } catch (error) {
-    return {
-      value: null,
-      error: error instanceof Error ? error.message : String(error),
-    };
-  }
+function structuredSpawnError(error) {
+  if (error === undefined) return null;
+  return {
+    code: error !== null && typeof error === 'object' && typeof error.code === 'string' ? error.code : null,
+    message: error instanceof Error ? error.message : String(error),
+  };
 }
 
 export function runLockedPhase({
@@ -36,7 +28,7 @@ export function runLockedPhase({
   phase,
   executable,
   arguments: commandArguments,
-  reporterPath,
+  artifacts,
   environment = process.env,
 }) {
   const startedAt = new Date().toISOString();
@@ -53,36 +45,50 @@ export function runLockedPhase({
   ];
   const result = spawnSync(launcher.executable, flockArguments, {
     cwd: process.cwd(),
-    env: { ...environment, DND_GATE_KIND: kind, DND_GATE_PHASE: phase },
+    env: {
+      ...environment,
+      DND_GATE_KIND: kind,
+      DND_GATE_PHASE: phase,
+      DND_GATE_PHASE_INVOCATION_ID: artifacts.phaseInvocationId,
+      DND_GATE_EVIDENCE_PATH: artifacts.evidencePath,
+    },
     stdio: 'inherit',
   });
-  const reporter = readJson(reporterPath);
+  const stock = readJsonArtifact(artifacts.reporterPath);
+  const evidence = readJsonArtifact(artifacts.evidencePath);
   return {
     phase,
     startedAt,
     loadAverage,
     durationMs: Math.round((performance.now() - started) * 100) / 100,
-    exitCode: result.status ?? 1,
+    phaseInvocationId: artifacts.phaseInvocationId,
+    exitCode: result.status,
     signal: result.signal,
     command: {
       executable,
       arguments: commandArguments,
-      lock: {
-        executable: launcher.executable,
-        arguments: flockArguments,
-      },
+      lock: { executable: launcher.executable, arguments: flockArguments },
     },
-    reporterPath,
-    reporter: reporter.value,
-    reporterReadError: reporter.error,
-    spawnError: result.error?.message ?? null,
+    reporterPath: artifacts.reporterPath,
+    evidencePath: artifacts.evidencePath,
+    reporter: stock.value,
+    evidence: evidence.value,
+    stockRead: stock.read,
+    evidenceRead: evidence.read,
+    spawnError: structuredSpawnError(result.error),
   };
 }
 
-export function reportPath(kind, phase) {
+export function phaseArtifactPaths(kind, phase) {
   const directory = process.env.DND_GATE_REPORT_DIR ?? join(tmpdir(), 'dnd-gate-reports');
   mkdirSync(directory, { recursive: true });
-  return join(directory, `${kind}-${phase}-${process.pid}-${randomUUID()}.json`);
+  const phaseInvocationId = randomUUID();
+  const stem = `${kind}-${phase}-${process.pid}-${phaseInvocationId}`;
+  return {
+    phaseInvocationId,
+    reporterPath: join(directory, `${stem}.json`),
+    evidencePath: join(directory, `${stem}.evidence.json`),
+  };
 }
 
 export function writeGateReport(kind, report) {
@@ -99,12 +105,18 @@ export function repositoryPath(path) {
   return absolute.startsWith(root) ? absolute.slice(root.length) : absolute;
 }
 
-export function printVerdict(loadFlakes, failed, path) {
-  console.log('\nLOAD FLAKES (passed serially)');
-  if (loadFlakes.length === 0) console.log('  (none)');
-  else for (const file of loadFlakes) console.log(`  ${file}`);
-  console.log('\nFAILED');
-  if (failed.length === 0) console.log('  (none)');
-  else for (const file of failed) console.log(`  ${file}`);
+function printItems(items) {
+  if (items.length === 0) console.log('  (none)');
+  else for (const item of items) console.log(`  ${item}`);
+}
+
+export function printVerdict(verdict, path) {
+  console.log('\nPASSED ON RETRY (cause not inferred)');
+  printItems(verdict.passedOnRetry);
+  console.log('\nFAILED FILES');
+  printItems(verdict.failedFiles);
+  console.log('\nPHASE FAILURES');
+  printItems(verdict.phaseFailures.map((failure) =>
+    `${failure.phase}/${failure.domain}: ${failure.reasons.join(', ')}`));
   console.log(`\nJSON report: ${path}`);
 }

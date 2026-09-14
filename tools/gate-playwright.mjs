@@ -1,64 +1,13 @@
 #!/usr/bin/env node
 
-/**
- * Load-tolerant Playwright gate.
- *
- * Usage: `npm run test:gate:browser -- <specs/options>`. Both phases acquire
- * `/tmp/dnd-gate.lock`; retries remain disabled, and only failed spec files get
- * one serial (`--workers=1`) second pass. Use `PLAYWRIGHT_PORT` to select a
- * non-4173 port. The final JSON report path is printed.
- */
-
 import { resolve } from 'node:path';
 import {
+  phaseArtifactPaths,
   printVerdict,
-  reportPath,
-  repositoryPath,
   runLockedPhase,
   writeGateReport,
 } from './gate-runner-lib.mjs';
-
-function resultsFromReporter(reporter) {
-  const byFile = new Map();
-  function visitSuite(suite, inheritedFile) {
-    if (suite === null || typeof suite !== 'object') return;
-    const file = typeof suite.file === 'string' ? suite.file : inheritedFile;
-    if (Array.isArray(suite.specs)) {
-      for (const spec of suite.specs) {
-        if (spec === null || typeof spec !== 'object') continue;
-        const specFile = typeof spec.file === 'string' ? spec.file : file;
-        if (specFile === undefined) continue;
-        const normalized = repositoryPath(specFile);
-        const status = spec.ok === true ? 'passed' : 'failed';
-        if (status === 'failed' || byFile.get(normalized) === undefined) byFile.set(normalized, status);
-      }
-    }
-    if (Array.isArray(suite.suites)) {
-      for (const child of suite.suites) visitSuite(child, file);
-    }
-  }
-  if (reporter !== null && typeof reporter === 'object' && Array.isArray(reporter.suites)) {
-    for (const suite of reporter.suites) visitSuite(suite, undefined);
-  }
-  return [...byFile].map(([file, status]) => ({ file, status })).sort((left, right) => left.file.localeCompare(right.file));
-}
-
-function unique(values) {
-  return [...new Set(values)].sort();
-}
-
-function reporterSucceeded(reporter) {
-  return reporter !== null &&
-    typeof reporter === 'object' &&
-    Array.isArray(reporter.errors) &&
-    reporter.errors.length === 0 &&
-    reporter.stats !== null &&
-    typeof reporter.stats === 'object' &&
-    reporter.stats.unexpected === 0;
-}
-
-const playwrightModule = resolve(process.env.DND_GATE_PLAYWRIGHT_MODULE ?? 'node_modules/@playwright/test/cli.js');
-const passthroughArguments = process.argv.slice(2);
+import { classifyPhase, reduceGateVerdict } from './gate-verdict.mjs';
 
 function withoutControlledOptions(argumentsList, controlledNames) {
   const retained = [];
@@ -95,10 +44,7 @@ const PLAYWRIGHT_OPTIONS_WITH_VALUES = new Set([
 ]);
 
 function retryOptionsFrom(argumentsList) {
-  const uncontrolled = withoutControlledOptions(
-    argumentsList,
-    new Set(['--reporter', '--retries', '--workers']),
-  );
+  const uncontrolled = withoutControlledOptions(argumentsList, new Set(['--reporter', '--retries', '--workers']));
   const retained = [];
   for (let index = 0; index < uncontrolled.length; index += 1) {
     const argument = uncontrolled[index];
@@ -115,71 +61,60 @@ function retryOptionsFrom(argumentsList) {
   return retained;
 }
 
-const initialArguments = withoutControlledOptions(
-  passthroughArguments,
-  new Set(['--reporter', '--retries']),
-);
+const playwrightModule = resolve(process.env.DND_GATE_PLAYWRIGHT_MODULE ?? 'node_modules/@playwright/test/cli.js');
+const evidenceReporter = resolve('tools/gate-playwright-evidence-reporter.mjs');
+const passthroughArguments = process.argv.slice(2);
+const initialArguments = withoutControlledOptions(passthroughArguments, new Set(['--reporter', '--retries']));
 const retryOptions = retryOptionsFrom(passthroughArguments);
 
-function playwrightEnvironment(path) {
-  return { ...process.env, PLAYWRIGHT_JSON_OUTPUT_FILE: path };
+function playwrightEnvironment(artifacts) {
+  return { ...process.env, PLAYWRIGHT_JSON_OUTPUT_FILE: artifacts.reporterPath };
 }
 
-const initialReporterPath = reportPath('playwright', 'initial');
-const initial = runLockedPhase({
+const initialArtifacts = phaseArtifactPaths('playwright', 'initial');
+const initialRaw = runLockedPhase({
   kind: 'playwright',
   phase: 'initial',
   executable: process.execPath,
-  arguments: [playwrightModule, 'test', '--reporter=json', '--retries=0', ...initialArguments],
-  reporterPath: initialReporterPath,
-  environment: playwrightEnvironment(initialReporterPath),
+  arguments: [
+    playwrightModule,
+    'test',
+    `--reporter=json,${evidenceReporter}`,
+    '--retries=0',
+    ...initialArguments,
+  ],
+  artifacts: initialArtifacts,
+  environment: playwrightEnvironment(initialArtifacts),
 });
-initial.results = resultsFromReporter(initial.reporter);
-
-const initialFailedFiles = unique(
-  initial.results.filter((result) => result.status === 'failed').map((result) => result.file),
-);
-const initialRunnerFailure = initial.reporterReadError !== null ||
-  (initialFailedFiles.length === 0 && !reporterSucceeded(initial.reporter));
+const initial = classifyPhase({ kind: 'playwright', ...initialRaw, requestedFiles: null });
+const initialFailedFiles = initial.fileOutcomes
+  .filter((outcome) => outcome.status === 'failed')
+  .map((outcome) => outcome.file);
 
 let retry = null;
-let loadFlakes = [];
-let failed = [];
 if (initialFailedFiles.length > 0) {
-  const retryReporterPath = reportPath('playwright', 'retry');
-  retry = runLockedPhase({
+  const retryArtifacts = phaseArtifactPaths('playwright', 'retry');
+  const retryRaw = runLockedPhase({
     kind: 'playwright',
     phase: 'retry',
     executable: process.execPath,
     arguments: [
       playwrightModule,
       'test',
-      '--reporter=json',
+      `--reporter=json,${evidenceReporter}`,
       '--retries=0',
       '--workers=1',
       ...retryOptions,
       ...initialFailedFiles,
     ],
-    reporterPath: retryReporterPath,
-    environment: playwrightEnvironment(retryReporterPath),
+    artifacts: retryArtifacts,
+    environment: playwrightEnvironment(retryArtifacts),
   });
-  retry.results = resultsFromReporter(retry.reporter);
-  const retryStatusByFile = new Map(retry.results.map((result) => [result.file, result.status]));
-  loadFlakes = initialFailedFiles.filter((file) => retryStatusByFile.get(file) === 'passed');
-  failed = initialFailedFiles.filter((file) => retryStatusByFile.get(file) !== 'passed');
-  if (retry.reporterReadError !== null || (failed.length === 0 && !reporterSucceeded(retry.reporter))) {
-    failed.push('<playwright retry runner/report failure>');
-  }
+  retry = classifyPhase({ kind: 'playwright', ...retryRaw, requestedFiles: initialFailedFiles });
 }
-if (initialRunnerFailure) failed.push('<playwright runner/report failure>');
-failed = unique(failed);
 
-const report = {
-  version: 1,
-  kind: 'playwright',
-  phases: { initial, retry },
-  verdict: { loadFlakes, failed },
-};
+const verdict = reduceGateVerdict(initial, retry);
+const report = { version: 2, kind: 'playwright', phases: { initial, retry }, verdict };
 const finalReportPath = writeGateReport('playwright', report);
-printVerdict(loadFlakes, failed, finalReportPath);
-process.exitCode = failed.length === 0 ? 0 : 1;
+printVerdict(verdict, finalReportPath);
+process.exitCode = verdict.status === 'passed' ? 0 : 1;

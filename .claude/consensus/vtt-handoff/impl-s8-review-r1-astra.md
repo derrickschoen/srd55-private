@@ -1,0 +1,27 @@
+1. **F88 — SIGNIFICANT — plan-conformance: several UI paths still submit reducer-shaped commands.**
+
+   Ordinary DM/player turn decisions now submit offered IDs, but placement recovery still constructs a `resolve_pending_placement` command containing an anchor and sends it through a forwarding method. World-object controls likewise submit `control.command`; manual adjudication constructs an `adjudicate` command in the UI. Evidence: [encounter-app.ts:2130](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/encounter-app.ts:2130), [encounter-app.ts:3002](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/encounter-app.ts:3002), [encounter-app.ts:3038](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/encounter-app.ts:3038). The facade forwards those payloads unchanged: [encounter-session-service.ts:711](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/encounter-session-service.ts:711), [encounter-session-service.ts:762](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/encounter-session-service.ts:762).
+
+   **Required:** resolve offered placement/world-object selections inside the service from revision-bound IDs. Preserve explicit DM adjudication through a typed application intent, constructing its reducer command inside the service. The method-routing assertion proves delegation, not the required payload boundary.
+
+2. **F89 — SIGNIFICANT — correctness: offered-action terminal outcomes and promise rejections are discarded.**
+
+   Both submission sites use `void submitTopDownOfferedAction(...)`. The player-window handler immediately clears its error, and its synchronous `try/catch` cannot catch promise rejection. Neither path handles resolved `refused`, `cancelled`, `closed` or `failed` outcomes. Evidence: [encounter-app.ts:1616](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/encounter-app.ts:1616), [encounter-app.ts:1657](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/encounter-app.ts:1657).
+
+   This matters because the host returns stale/settling refusals and converts pump failures into resolved transaction outcomes. Such failures can now disappear from the UI after the host considers them handled. Submission can also reject when the human request no longer matches. Evidence: [dm-encounter-host.ts:1160](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/dm-encounter-host.ts:1160), [dm-encounter-host.ts:1175](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/dm-encounter-host.ts:1175), [dm-encounter-host.ts:911](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/dm-encounter-host.ts:911).
+
+   **Required:** handle terminal outcomes and rejected promises in a shared browser submission handler, expose refusal/failure appropriately, and never retry automatically. Add regressions for stale refusal and a controllable pre-apply failure/rejection.
+
+The remaining supervisor questions resolve as follows:
+
+- **Local-window protocol change is justified.** Its sole production sender now sends an offered ID; its receiver checks request/revision and offer membership, and the host retrieves the actual command from its private current catalog. Replacing coordinate-mutation expectations with offered-ID rejection is appropriate for this boundary. [encounter-app.ts:1144](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/encounter-app.ts:1144), [local-window-channel.ts:25](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/local-window-channel.ts:25), [dm-encounter-host.ts:1185](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/dm-encounter-host.ts:1185)
+
+- **Facade count is correct, but its reported file is wrong:** lines 640–771 are 132 lines in `encounter-session-service.ts`. No browser handles, DOM, navigation, downloads, storage or channel operations were introduced there. [encounter-session-service.ts:640](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/encounter-session-service.ts:640)
+
+- **The requested boundary controls would fail:** literal `this.#host` reintroduction fails the explicit assertion; an additional resolved reducer call changes the exact reducer-call list. These checks do not independently prove safe submission payloads or outcome handling. [engine-boundary.test.ts:536](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/tests/unit/vtt/engine-boundary.test.ts:536), [engine-boundary.test.ts:539](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/tests/unit/vtt/engine-boundary.test.ts:539)
+
+- **Player preview uses the filtered projection.** Its selector limits preview cells to `visibleCells`. [encounter-app.ts:1159](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/encounter-app.ts:1159), [encounter-selectors.ts:43](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/src/vtt/encounter-selectors.ts:43)
+
+- **Dist proof is not an S8 acceptance gate.** The binding plan explicitly requires the dev artifact. The `/` serving failure belongs in S10 integration follow-up; S6’s Worker proof does not substitute for a future built top-down proof. The S8 smoke does check an offered destination, revision advancement and actual token DOM coordinates. [plan:379](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/.tmp-plans/2026-09-09-vtt-handoff-plan.md:379), [top-down-smoke.spec.ts:45](/home/vagrant/PhpstormProjects/dnd-wt-vtt-handoff/tests/browser/vtt-handoff/top-down-smoke.spec.ts:45)
+
+REJECT S8 — blocking findings F88, F89.

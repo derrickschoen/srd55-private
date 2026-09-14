@@ -15,7 +15,7 @@ import {
 } from './party-session-state';
 import {
   EncounterSessionJournal,
-  type BrowserSessionStore,
+  type SessionStore,
   type MirrorSink,
 } from './session-persistence';
 import {
@@ -62,7 +62,7 @@ export class AdventuringDaySession {
     readonly members: readonly LoadedPartyMember[];
     readonly displayNames?: ReadonlyMap<number, string>;
     readonly rng: SerializableRng;
-    readonly store: BrowserSessionStore;
+    readonly store: SessionStore;
     readonly mirror: MirrorSink;
     readonly composeRoom?: DmRoomComposer;
     readonly initialPartyState?: PartySessionState;

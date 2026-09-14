@@ -1,0 +1,335 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "intent_version": {
+      "type": "string",
+      "const": "blind-round-intent-v1"
+    },
+    "intents": {
+      "minItems": 1,
+      "maxItems": 64,
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/__schema0"
+      }
+    }
+  },
+  "required": [
+    "intent_version",
+    "intents"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "__schema0": {
+      "type": "object",
+      "properties": {
+        "actor": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "$ref": "#/$defs/__schema1"
+            },
+            "badge": {
+              "$ref": "#/$defs/__schema2"
+            }
+          },
+          "required": [
+            "name",
+            "badge"
+          ],
+          "additionalProperties": false
+        },
+        "action": {
+          "anyOf": [
+            {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "attack"
+                    },
+                    "name": {
+                      "$ref": "#/$defs/__schema1"
+                    }
+                  },
+                  "required": [
+                    "kind"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "cast"
+                    },
+                    "name": {
+                      "$ref": "#/$defs/__schema1"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "name"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "interact"
+                    },
+                    "name": {
+                      "$ref": "#/$defs/__schema1"
+                    }
+                  },
+                  "required": [
+                    "kind"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "dash",
+                    "dodge",
+                    "disengage",
+                    "hide",
+                    "help",
+                    "ready",
+                    "end"
+                  ]
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "target": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "creature",
+                "object"
+              ]
+            },
+            "name": {
+              "$ref": "#/$defs/__schema1"
+            },
+            "badge": {
+              "$ref": "#/$defs/__schema2"
+            }
+          },
+          "required": [
+            "kind",
+            "name"
+          ],
+          "additionalProperties": false
+        },
+        "destination": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "cell_label"
+                },
+                "label": {
+                  "$ref": "#/$defs/__schema3"
+                }
+              },
+              "required": [
+                "kind",
+                "label"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "relative"
+                },
+                "relation": {
+                  "type": "string",
+                  "const": "hold"
+                }
+              },
+              "required": [
+                "kind",
+                "relation"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "relative"
+                },
+                "relation": {
+                  "type": "string",
+                  "enum": [
+                    "adjacent_to",
+                    "toward",
+                    "away_from",
+                    "near"
+                  ]
+                },
+                "anchor": {
+                  "$ref": "#/$defs/__schema4"
+                }
+              },
+              "required": [
+                "kind",
+                "relation",
+                "anchor"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "relative"
+                },
+                "relation": {
+                  "type": "string",
+                  "const": "behind"
+                },
+                "anchor": {
+                  "$ref": "#/$defs/__schema4"
+                },
+                "from": {
+                  "$ref": "#/$defs/__schema4"
+                }
+              },
+              "required": [
+                "kind",
+                "relation",
+                "anchor",
+                "from"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "area": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "cell_label"
+                },
+                "label": {
+                  "$ref": "#/$defs/__schema3"
+                },
+                "direction": {
+                  "$ref": "#/$defs/__schema5"
+                }
+              },
+              "required": [
+                "kind",
+                "label"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "centered_on"
+                },
+                "target": {
+                  "$ref": "#/$defs/__schema4"
+                },
+                "direction": {
+                  "$ref": "#/$defs/__schema5"
+                }
+              },
+              "required": [
+                "kind",
+                "target"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        }
+      },
+      "required": [
+        "actor",
+        "action"
+      ],
+      "additionalProperties": false
+    },
+    "__schema1": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "__schema2": {
+      "type": "integer",
+      "exclusiveMinimum": 0,
+      "maximum": 1000000
+    },
+    "__schema3": {
+      "type": "string",
+      "pattern": "^(?:0|[1-9]\\d*),(?:0|[1-9]\\d*)$"
+    },
+    "__schema4": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/__schema1"
+        },
+        "badge": {
+          "$ref": "#/$defs/__schema2"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false
+    },
+    "__schema5": {
+      "type": "string",
+      "enum": [
+        "north",
+        "north_east",
+        "east",
+        "south_east",
+        "south",
+        "south_west",
+        "west",
+        "north_west"
+      ]
+    }
+  }
+}

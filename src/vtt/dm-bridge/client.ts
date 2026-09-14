@@ -1,5 +1,5 @@
 import { agentSessionId, type AgentSessionId, type EncounterSessionId } from '../../combat/values';
-import { exportSavedSession, type BrowserSessionStore, type MirrorSink, type SessionRevision } from '../session-persistence';
+import { exportSavedSession, type MirrorSink, type SessionRevision, type SessionStore } from '../session-persistence';
 import {
   DEFAULT_DM_MODEL_CONFIG,
   type DmBridgeExchange,
@@ -44,7 +44,7 @@ export class BridgeFailureGuard {
 
   constructor(
     private readonly sessionId: EncounterSessionId,
-    private readonly store: BrowserSessionStore,
+    private readonly store: SessionStore,
     private readonly abortEncounter: () => void,
   ) {}
 

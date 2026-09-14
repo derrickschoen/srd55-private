@@ -115,6 +115,7 @@ export interface AuthorizedEngineTurnProposal {
   readonly fallbackOption: EngineOfferableOption | null;
   readonly mechanics: ResolvedTurnMechanics;
   readonly selectedBranch: 'primary' | 'fallback';
+  readonly strictNoFallback?: true;
 }
 
 export interface PreparedEngineRound extends EngineBoundaryResolutions {
@@ -582,6 +583,11 @@ export class EngineRoundSession {
           appliedBranch = 'fallback';
           refusalCodes = [primary.code];
         } else {
+          if (entry.strictNoFallback === true) {
+            throw new Error(
+              `Blind proposal became unavailable for ${entry.proposal.actorId}: ${primary.code}.`,
+            );
+          }
           const dodgeOption = availableEngineActorOptions(
             state,
             entry.proposal.actorId,

@@ -1,0 +1,11 @@
+**F35 RESOLVED.** [Session derivation:556](/home/vagrant/PhpstormProjects/dnd-wt-d569-patch/tests/unit/tools/ai-dm-legacy-invariance.test.ts:556) uses the captured store, explicitly specifies the payload, pins the transition inventory, and reproduces the frozen hash by changing only the accepted proposal ID. [Capsule derivation:703](/home/vagrant/PhpstormProjects/dnd-wt-d569-patch/tests/unit/tools/ai-dm-legacy-invariance.test.ts:703) reproduces each frozen digest by removing only `offerEnvironment` and restoring schema 3. Environment bodies are independently specified; proposal hashing [at line 764](/home/vagrant/PhpstormProjects/dnd-wt-d569-patch/tests/unit/tools/ai-dm-legacy-invariance.test.ts:764) includes both optional provenance fields without calling the production hash helper. These checks would catch deterministic production changes.
+
+**F36 RESOLVED.** [Launcher comparison:890](/home/vagrant/PhpstormProjects/dnd-wt-d569-patch/tests/unit/tools/ai-dm-legacy-invariance.test.ts:890) enforces exact recovery destinations, compares `branchPoints` directly with the frozen oracle, and admits only the independently established capsule handle at the named delta-context path. Oracle values are no longer copied into captures.
+
+**F37 RESOLVED.** [Protocol comparison:1146](/home/vagrant/PhpstormProjects/dnd-wt-d569-patch/tests/unit/tools/ai-dm-legacy-invariance.test.ts:1146) requires the complete difference inventory to equal the named, derived handle/cursor changes before comparing remaining bytes, lengths, and hashes. The blanket hexadecimal mapping is gone.
+
+The replacement pins are individually enumerated and supported by derivations. I found no unexplained content difference. One precision note: row/launcher comparisons now enforce parsed content rather than serialization order; protocol remainder and protected invocation comparisons retain byte equality.
+
+Only the stated test file changed. Production and oracle fixtures are untouched; frozen contract and runbook hashes match. No tests run during this review. No new blocking findings.
+
+ACCEPT

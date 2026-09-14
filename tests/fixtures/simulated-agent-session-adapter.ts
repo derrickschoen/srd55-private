@@ -68,5 +68,8 @@ function completed(sessionId: string, finalText: string): AgentTurnResult {
     finalText,
     usage: null,
     exit: 'completed',
+    processEvidence: null,
+    engineCatalogEvidence: null,
+    partialResultEvidence: { status: 'complete', decodedEventCount: 0 },
   };
 }

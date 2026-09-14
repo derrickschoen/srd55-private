@@ -122,7 +122,7 @@ describe('D545 last-seen observation history', () => {
       event.type === 'movement_completed' && event.combatant === setup.monster.id)).toBe(false);
   });
 
-  it('allows hidden-route coordinates only as public terrain cells in canonical player JSON', () => {
+  it('allows hidden-route coordinates only as exhaustive public geometry in canonical player JSON', () => {
     const setup = fixture();
     let hidden = invisible(setup.state, setup.monster);
     hidden = reduceEncounter(hidden, {
@@ -132,16 +132,21 @@ describe('D545 last-seen observation history', () => {
       type: 'move', actor: setup.monster.id, path: [{ column: 4, row: 0 }], cause: 'voluntary',
     }, face(10)).state;
 
-    const serializedBoard: unknown = JSON.parse(canonicalJson(playerBoard(hidden, setup.player.id)));
+    const baselineBoard = playerBoard(setup.state, setup.player.id);
+    const hiddenBoard = playerBoard(hidden, setup.player.id);
+    expect(hiddenBoard.visibleCells).toEqual(baselineBoard.visibleCells);
+    const serializedBoard: unknown = JSON.parse(canonicalJson(hiddenBoard));
 
-    // These exact paths prove the old substring came from exhaustive public terrain.
+    // These exact paths prove the old substring came from exhaustive public geometry.
     // A current/intermediate coordinate added under any other field creates a
     // second path and fails this exhaustive recursive assertion.
     expect(coordinatePaths(serializedBoard, { column: 3, row: 0 }).sort()).toEqual([
       '$.terrainCells[3].cell',
+      '$.visibleCells[3]',
     ]);
     expect(coordinatePaths(serializedBoard, { column: 4, row: 0 }).sort()).toEqual([
       '$.terrainCells[4].cell',
+      '$.visibleCells[4]',
     ]);
   });
 

@@ -1,0 +1,190 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dnd.local/vtt-handoff/v1/protocol.schema.json",
+  "title": "VTT handoff protocol v1",
+  "oneOf": [
+    { "$ref": "#/$defs/request" },
+    { "$ref": "#/$defs/success" },
+    { "$ref": "#/$defs/failure" },
+    { "$ref": "#/$defs/event" },
+    { "$ref": "#/$defs/sceneSnapshot" }
+  ],
+  "$defs": {
+    "finite": { "type": "number" },
+    "safeInteger": { "type": "integer", "minimum": -9007199254740991, "maximum": 9007199254740991 },
+    "point2": {
+      "type": "object", "additionalProperties": false, "required": ["x", "y"],
+      "properties": { "x": { "$ref": "#/$defs/finite" }, "y": { "$ref": "#/$defs/finite" } }
+    },
+    "point3": {
+      "type": "object", "additionalProperties": false, "required": ["x", "y", "z"],
+      "properties": {
+        "x": { "$ref": "#/$defs/finite" }, "y": { "$ref": "#/$defs/finite" }, "z": { "$ref": "#/$defs/finite" }
+      }
+    },
+    "footprint": {
+      "type": "object", "additionalProperties": false, "required": ["w", "h"],
+      "properties": { "w": { "$ref": "#/$defs/finite" }, "h": { "$ref": "#/$defs/finite" } }
+    },
+    "placedAsset": {
+      "type": "object", "additionalProperties": false, "required": ["id", "assetId", "x", "y", "z"],
+      "properties": {
+        "id": { "type": "string" }, "assetId": { "type": "string" },
+        "x": { "$ref": "#/$defs/finite" }, "y": { "$ref": "#/$defs/finite" }, "z": { "$ref": "#/$defs/finite" }
+      }
+    },
+    "token": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "label", "assetId", "x", "y", "z", "facing", "footprint"],
+      "properties": {
+        "id": { "type": "string" }, "label": { "type": "string" }, "assetId": { "type": "string" },
+        "x": { "$ref": "#/$defs/finite" }, "y": { "$ref": "#/$defs/finite" }, "z": { "$ref": "#/$defs/finite" },
+        "facing": { "$ref": "#/$defs/finite" }, "footprint": { "$ref": "#/$defs/footprint" }
+      }
+    },
+    "wall": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "a", "b", "baseZ", "height", "blocksMovement", "blocksVision"],
+      "properties": {
+        "id": { "type": "string" }, "a": { "$ref": "#/$defs/point2" }, "b": { "$ref": "#/$defs/point2" },
+        "baseZ": { "$ref": "#/$defs/finite" }, "height": { "$ref": "#/$defs/finite" },
+        "blocksMovement": { "type": "boolean" }, "blocksVision": { "type": "boolean" },
+        "assetId": { "type": "string" }
+      }
+    },
+    "door": {
+      "type": "object", "additionalProperties": false, "required": ["id", "wallId", "open"],
+      "properties": {
+        "id": { "type": "string" }, "wallId": { "type": "string" }, "open": { "type": "boolean" },
+        "assetId": { "type": "string" }
+      }
+    },
+    "light": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "x", "y", "z", "radius", "color", "intensity", "enabled"],
+      "properties": {
+        "id": { "type": "string" }, "x": { "$ref": "#/$defs/finite" }, "y": { "$ref": "#/$defs/finite" },
+        "z": { "$ref": "#/$defs/finite" }, "radius": { "$ref": "#/$defs/finite" },
+        "color": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$" },
+        "intensity": { "$ref": "#/$defs/finite" }, "enabled": { "type": "boolean" }
+      }
+    },
+    "cell": {
+      "type": "array", "prefixItems": [{ "$ref": "#/$defs/finite" }, { "$ref": "#/$defs/finite" }],
+      "items": false, "minItems": 2, "maxItems": 2
+    },
+    "sceneSnapshot": {
+      "type": "object", "additionalProperties": false,
+      "required": ["sceneId", "revision", "grid", "tiles", "props", "tokens", "walls", "doors", "lights", "vision"],
+      "properties": {
+        "sceneId": { "type": "string" }, "revision": { "$ref": "#/$defs/safeInteger" },
+        "grid": {
+          "type": "object", "additionalProperties": false, "required": ["width", "height", "feetPerCell"],
+          "properties": {
+            "width": { "$ref": "#/$defs/finite" }, "height": { "$ref": "#/$defs/finite" },
+            "feetPerCell": { "$ref": "#/$defs/finite" }
+          }
+        },
+        "tiles": { "type": "array", "items": { "$ref": "#/$defs/placedAsset" } },
+        "props": { "type": "array", "items": { "$ref": "#/$defs/placedAsset" } },
+        "tokens": { "type": "array", "items": { "$ref": "#/$defs/token" } },
+        "walls": { "type": "array", "items": { "$ref": "#/$defs/wall" } },
+        "doors": { "type": "array", "items": { "$ref": "#/$defs/door" } },
+        "lights": { "type": "array", "items": { "$ref": "#/$defs/light" } },
+        "vision": {
+          "type": "object", "additionalProperties": false, "required": ["mode", "visible", "explored"],
+          "properties": {
+            "mode": { "enum": ["all", "cells"] },
+            "visible": { "type": "array", "items": { "$ref": "#/$defs/cell" } },
+            "explored": { "type": "array", "items": { "$ref": "#/$defs/cell" } }
+          }
+        }
+      }
+    },
+    "request": {
+      "type": "object", "additionalProperties": false, "required": ["v", "id", "method", "params"],
+      "properties": {
+        "v": { "const": 1 }, "id": { "type": "string" }, "method": { "type": "string" },
+        "params": { "type": "object" }
+      }
+    },
+    "sessionOpenParams": {
+      "type": "object", "additionalProperties": false, "required": ["requestedRole"],
+      "properties": { "requestedRole": { "enum": ["dm", "player"] }, "playerId": { "type": "string" } }
+    },
+    "sceneSnapshotParams": { "type": "object", "additionalProperties": false },
+    "tokenMoveParams": {
+      "type": "object", "additionalProperties": false, "required": ["tokenId", "to"],
+      "properties": { "tokenId": { "type": "string" }, "to": { "$ref": "#/$defs/point3" } }
+    },
+    "doorSetParams": {
+      "type": "object", "additionalProperties": false, "required": ["doorId", "open"],
+      "properties": { "doorId": { "type": "string" }, "open": { "type": "boolean" } }
+    },
+    "lightSetParams": {
+      "type": "object", "additionalProperties": false, "required": ["lightId", "enabled"],
+      "properties": { "lightId": { "type": "string" }, "enabled": { "type": "boolean" } }
+    },
+    "sessionOpenRequest": {
+      "allOf": [
+        { "$ref": "#/$defs/request" },
+        { "type": "object", "properties": { "method": { "const": "session.open" }, "params": { "$ref": "#/$defs/sessionOpenParams" } } }
+      ]
+    },
+    "sceneSnapshotRequest": {
+      "allOf": [
+        { "$ref": "#/$defs/request" },
+        { "type": "object", "properties": { "method": { "const": "scene.snapshot" }, "params": { "$ref": "#/$defs/sceneSnapshotParams" } } }
+      ]
+    },
+    "tokenMoveRequest": {
+      "allOf": [
+        { "$ref": "#/$defs/request" },
+        { "type": "object", "properties": { "method": { "const": "token.move" }, "params": { "$ref": "#/$defs/tokenMoveParams" } } }
+      ]
+    },
+    "doorSetRequest": {
+      "allOf": [
+        { "$ref": "#/$defs/request" },
+        { "type": "object", "properties": { "method": { "const": "door.set" }, "params": { "$ref": "#/$defs/doorSetParams" } } }
+      ]
+    },
+    "lightSetRequest": {
+      "allOf": [
+        { "$ref": "#/$defs/request" },
+        { "type": "object", "properties": { "method": { "const": "light.set" }, "params": { "$ref": "#/$defs/lightSetParams" } } }
+      ]
+    },
+    "sessionOpenResult": {
+      "type": "object", "additionalProperties": false, "required": ["sessionId", "capabilities"],
+      "properties": { "sessionId": { "type": "string" }, "capabilities": { "type": "array", "items": { "type": "string" } } }
+    },
+    "mutationResult": {
+      "type": "object", "additionalProperties": false, "required": ["revision"],
+      "properties": { "revision": { "$ref": "#/$defs/safeInteger" } }
+    },
+    "success": {
+      "type": "object", "additionalProperties": false, "required": ["v", "id", "ok", "result"],
+      "properties": {
+        "v": { "const": 1 }, "id": { "type": "string" }, "ok": { "const": true }, "result": { "type": "object" }
+      }
+    },
+    "failure": {
+      "type": "object", "additionalProperties": false, "required": ["v", "id", "ok", "error"],
+      "properties": {
+        "v": { "const": 1 }, "id": { "type": "string" }, "ok": { "const": false },
+        "error": {
+          "type": "object", "additionalProperties": false, "required": ["code", "message"],
+          "properties": { "code": { "type": "string" }, "message": { "type": "string" } }
+        }
+      }
+    },
+    "event": {
+      "type": "object", "additionalProperties": false, "required": ["v", "event", "seq", "data"],
+      "properties": {
+        "v": { "const": 1 }, "event": { "const": "scene.snapshot" },
+        "seq": { "$ref": "#/$defs/safeInteger" }, "data": { "$ref": "#/$defs/sceneSnapshot" }
+      }
+    }
+  }
+}

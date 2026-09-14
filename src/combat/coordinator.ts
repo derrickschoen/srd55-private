@@ -81,6 +81,31 @@ export interface PersistedCoordinatorState {
   readonly pause: CoordinatorPause | null;
 }
 
+/** Marks failures after the authoritative reducer state has already been installed. */
+export class CoordinatorPostApplicationError extends Error {
+  override readonly name = 'CoordinatorPostApplicationError' as const;
+
+  constructor(
+    readonly currentRevision: number,
+    cause: unknown,
+  ) {
+    super('Coordinator persistence failed after the command was applied.', { cause });
+  }
+}
+
+/** Reports a failed external-pause journal operation after mandatory controller cleanup. */
+export class CoordinatorExternalPauseError extends Error {
+  override readonly name = 'CoordinatorExternalPauseError' as const;
+
+  constructor(
+    readonly pendingStepCancelled: boolean,
+    cause: unknown,
+    readonly restorationError?: unknown,
+  ) {
+    super('Coordinator external pause persistence failed.', { cause });
+  }
+}
+
 export type CoordinatorPause =
   | { readonly kind: 'interrupted' }
   | { readonly kind: 'adjudicated'; readonly eventSequence: number };
@@ -246,6 +271,7 @@ export class TurnCoordinator {
   #lastAttemptedCommand: EncounterCommand | null = null;
   #continuation: CoordinatorContinuation;
   #pause: CoordinatorPause | null;
+  #restoredOfferStale: boolean;
   readonly #pendingAbort = new Map<CombatantId, AbortController>();
   readonly #policies = new Map<CombatantId, StandingReactionPolicy>();
   readonly #turnLegalActions: TurnLegalActions;
@@ -267,6 +293,13 @@ export class TurnCoordinator {
     this.#pendingCommand = options.resume?.pendingCommand ?? null;
     this.#continuation = options.resume?.continuation ?? IDLE;
     this.#pause = options.resume?.pause ?? null;
+    this.#restoredOfferStale = options.resume !== undefined &&
+      options.resume.pendingCommand === null &&
+      (options.resume.pendingRequest !== null || options.resume.continuation.kind !== 'idle');
+    if (this.#restoredOfferStale) {
+      this.#pendingRequest = null;
+      this.#pendingCommand = null;
+    }
     this.#persistence = options.persistence;
     this.#reactionDecision = options.reactionDecision;
     this.#pendingDecisionTray = options.pendingDecisionTray ?? false;
@@ -334,15 +367,90 @@ export class TurnCoordinator {
     const request = this.#pendingRequest;
     if (request === null) return;
     this.#pendingRequest = null;
-    this.#record({ kind: 'controller_request_cancelled', request });
-    this.#pendingAbort.get(request.actorId)?.abort();
+    try {
+      this.#record({ kind: 'controller_request_cancelled', request });
+    } finally {
+      this.#pendingAbort.get(request.actorId)?.abort();
+    }
   }
 
   interrupt(): void {
-    if (this.#pause !== null) return;
-    this.#cancelPendingRequest();
-    this.#pause = { kind: 'interrupted' };
-    this.#record({ kind: 'coordinator_paused', pause: this.#pause });
+    if (this.#pause !== null) {
+      this.#cancelPendingRequest();
+      return;
+    }
+    const pause = { kind: 'interrupted' } as const;
+    this.#pause = pause;
+    let pauseFailed = false;
+    let pauseError: unknown;
+    try {
+      this.#record({ kind: 'coordinator_paused', pause });
+    } catch (error: unknown) {
+      this.#pause = null;
+      pauseFailed = true;
+      pauseError = error;
+    }
+    let cancellationFailed = false;
+    let cancellationError: unknown;
+    try {
+      this.#cancelPendingRequest();
+    } catch (error: unknown) {
+      cancellationFailed = true;
+      cancellationError = error;
+    }
+    if (pauseFailed) throw pauseError;
+    if (cancellationFailed) throw cancellationError;
+  }
+
+  pauseForExternalMutation(): CoordinatorPause | null {
+    const previous = this.#pause;
+    let establishedPause: CoordinatorPause | null = null;
+    let pauseFailed = false;
+    let pauseError: unknown;
+    if (this.#pause === null) {
+      establishedPause = { kind: 'interrupted' };
+      this.#pause = establishedPause;
+      try {
+        this.#record({ kind: 'coordinator_paused', pause: establishedPause });
+      } catch (error: unknown) {
+        pauseFailed = true;
+        pauseError = error;
+      }
+    }
+    const pendingStepCancelled = this.#pendingRequest !== null;
+    let cancellationFailed = false;
+    let cancellationError: unknown;
+    try {
+      this.#cancelPendingRequest();
+    } catch (error: unknown) {
+      cancellationFailed = true;
+      cancellationError = error;
+    }
+    if (pauseFailed || cancellationFailed) {
+      let restorationError: unknown;
+      if (establishedPause !== null) {
+        this.#pause = previous;
+        try {
+          this.#record({ kind: 'coordinator_resumed', pause: establishedPause });
+        } catch (error: unknown) {
+          restorationError = error;
+        }
+      }
+      throw new CoordinatorExternalPauseError(
+        pendingStepCancelled,
+        pauseFailed ? pauseError : cancellationError,
+        restorationError,
+      );
+    }
+    return previous;
+  }
+
+  applyExternalWorldOperation(
+    command: Extract<EncounterCommand, { readonly type: 'world_operation' }>,
+  ): CoordinatorStep {
+    const reduction = this.#apply(command, this.#continuation);
+    this.#restoredOfferStale = true;
+    return { kind: 'applied', state: this.#state, events: reduction.events };
   }
 
   resume(): void {
@@ -513,7 +621,13 @@ export class TurnCoordinator {
         }
         this.#pendingRequest = null;
         this.#pendingCommand = decision.action;
-        this.#record({ kind: 'controller_response_received', decision });
+        try {
+          this.#record({ kind: 'controller_response_received', decision });
+        } catch (error: unknown) {
+          this.#pendingCommand = null;
+          this.#pendingRequest = request;
+          throw error;
+        }
         return decision;
       } catch (error: unknown) {
         if (generation !== this.registry.generationFor(actor)) continue;
@@ -533,31 +647,35 @@ export class TurnCoordinator {
       ...(this.#reactionDecision === undefined ? {} : { reactionDecision: this.#reactionDecision }),
     });
     this.#state = reduction.state;
-    for (const event of reduction.events) {
-      if (event.type === 'combatant_summoned') {
-        this.registry.assignFrom(event.combatant, event.summoner);
-      } else if (event.type === 'summoned_combatant_despawned') {
-        this.registry.remove(event.combatant);
-      } else if (
-        event.type === 'reinforcement_wave_deployed' ||
-        event.type === 'conditional_joiners_deployed'
-      ) {
-        const source = event.type === 'reinforcement_wave_deployed'
-          ? event.calledBy
-          : event.leader;
-        for (const combatantId of event.combatants) {
-          this.registry.assignFrom(combatantId, source);
+    try {
+      for (const event of reduction.events) {
+        if (event.type === 'combatant_summoned') {
+          this.registry.assignFrom(event.combatant, event.summoner);
+        } else if (event.type === 'summoned_combatant_despawned') {
+          this.registry.remove(event.combatant);
+        } else if (
+          event.type === 'reinforcement_wave_deployed' ||
+          event.type === 'conditional_joiners_deployed'
+        ) {
+          const source = event.type === 'reinforcement_wave_deployed'
+            ? event.calledBy
+            : event.leader;
+          for (const combatantId of event.combatants) {
+            this.registry.assignFrom(combatantId, source);
+          }
         }
       }
+      this.#pendingCommand = null;
+      this.#lastAttemptedCommand = null;
+      this.#continuation = continuation;
+      this.#record({
+        kind: 'reducer_applied',
+        command,
+        events: reduction.events,
+      });
+    } catch (error: unknown) {
+      throw new CoordinatorPostApplicationError(this.#state.revision, error);
     }
-    this.#pendingCommand = null;
-    this.#lastAttemptedCommand = null;
-    this.#continuation = continuation;
-    this.#record({
-      kind: 'reducer_applied',
-      command,
-      events: reduction.events,
-    });
     return reduction;
   }
 
@@ -773,6 +891,22 @@ export class TurnCoordinator {
     try {
       if (this.#pause !== null) {
         return { kind: 'refused', state: this.#state, reason: 'Coordinator is paused.' };
+      }
+      if (this.#restoredOfferStale) {
+        this.#restoredOfferStale = false;
+        this.#pendingRequest = null;
+        this.#pendingCommand = null;
+        if (this.#continuation.kind === 'turn') {
+          this.#continuation = {
+            kind: 'turn',
+            actor: this.#continuation.actor,
+            legalActions: legalizeTurnActions(
+              this.#state,
+              this.#continuation.actor,
+              this.#turnLegalActions(this.#state, this.#continuation.actor),
+            ),
+          };
+        }
       }
       if (this.#state.phase.kind === 'concluded') {
         const error = new EncounterConcludedBoundaryError(

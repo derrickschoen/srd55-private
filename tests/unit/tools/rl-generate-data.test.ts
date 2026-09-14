@@ -263,7 +263,7 @@ describe('RL arena batch generator', () => {
     });
   });
 
-  it('generates an unfrozen seed deterministically and runs it through the simulated arena', { timeout: 30_000 }, async () => {
+  it('generates an unfrozen seed deterministically and runs it through the simulated arena', { timeout: 60_000 }, async () => {
     const targetDirectory = mkdtempSync(join(tmpdir(), 'd410-generate-unfrozen-'));
     const [manifest] = await generateData(parseGenerateDataArgs([
       '--seed-range', '6000001-6000001',

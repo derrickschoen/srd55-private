@@ -10,10 +10,12 @@ import { sha256 } from '../../../src/crypto/sha256';
 import {
   measuredContextRolloverThreshold,
   contextTokenCount,
+  engineDispatchId,
   turnInputTotal,
   type AgentSessionAdapter,
   type AgentSessionBinding,
   type AgentInvocation,
+  type AgentTurnResult,
 } from '../../../src/vtt/agent-session';
 import {
   type AgentDispatchDeadline,
@@ -35,6 +37,12 @@ import {
   SIMULATEDAgentSessionAdapter,
   SIMULATEDResumeFailure,
 } from '../../fixtures/simulated-agent-session-adapter';
+
+const COMPLETED_EVIDENCE = {
+  processEvidence: null,
+  engineCatalogEvidence: null,
+  partialResultEvidence: { status: 'complete', decodedEventCount: 0 },
+} as const;
 
 function invocation(runId: ReturnType<typeof encounterSessionId>, prompt: string): AgentInvocation {
   return {
@@ -155,6 +163,73 @@ function freshBudgetDeadlineFactory(
 }
 
 describe('SIMULATED agent session lifecycle', () => {
+  it.each(['cancelled', 'timed_out', 'infrastructure_failed'] as const)(
+    'keeps an observed reusable identity unbound after a %s cold start',
+    async (exit) => {
+      const observed = agentSessionId(`agent-session:observed-${exit}`);
+      const partial = {
+        status: 'partial' as const, decodedEventCount: 1, finalTextFragment: 'partial',
+        observedUsage: null, stagedInvocationIds: ['staged-1'],
+      };
+      const result: AgentTurnResult = exit === 'cancelled'
+        ? { resumeSessionId: observed, sessionId: null, finalText: 'partial', usage: null, exit, cancellationReason: 'abort_signal', processEvidence: null, engineCatalogEvidence: null, partialResultEvidence: partial }
+        : exit === 'timed_out'
+          ? { resumeSessionId: observed, sessionId: null, finalText: 'partial', usage: null, exit, timeoutMs: 5_000, processEvidence: null, engineCatalogEvidence: null, partialResultEvidence: partial }
+          : { resumeSessionId: observed, sessionId: null, finalText: 'partial', usage: null, exit, component: 'engine_mcp_startup', failureReason: 'required startup failed', processEvidence: null, engineCatalogEvidence: null, partialResultEvidence: partial };
+      const adapter: AgentSessionAdapter = {
+        kind: 'pi', probe: async () => ({ present: true, version: 'SIMULATED' }),
+        start: async () => result, resume: async () => result, classifyFailure: () => 'unknown',
+      };
+      const first = setup(adapter);
+      await expect(first.lifecycle.coldStart(invocation(first.sessionId, 'cold'), openDeadline()))
+        .resolves.toEqual({ kind: 'unbound', turn: result });
+      expect(first.journal.agentSession()).toBeNull();
+      const round = setup(adapter);
+      await expect(round.lifecycle.coldStartRound(invocation(round.sessionId, 'round'), openDeadline()))
+        .resolves.toEqual({ kind: 'unbound', turn: result });
+      expect(round.journal.agentSession()).toBeNull();
+      expect(round.store.revisions(round.sessionId).map((revision) => revision.transition.kind))
+        .toEqual(['session_started']);
+    },
+  );
+
+  it.each(['coldStart', 'coldStartRound'] as const)(
+    'returns late completed evidence from %s without binding it',
+    async (method) => {
+      let acceptsCompletion = true;
+      const result: AgentTurnResult = {
+        resumeSessionId: agentSessionId('agent-session:late-completed-evidence'),
+        sessionId: 'rollout:late-completed-evidence',
+        finalText: 'late completed evidence',
+        usage: null,
+        exit: 'completed',
+        ...COMPLETED_EVIDENCE,
+      };
+      const adapter: AgentSessionAdapter = {
+        kind: 'codex',
+        probe: async () => ({ present: true, version: 'SIMULATED' }),
+        start: async () => {
+          acceptsCompletion = false;
+          return result;
+        },
+        resume: async () => { throw new Error('Late cold-start fixture unexpectedly resumed.'); },
+        classifyFailure: () => 'unknown',
+      };
+      const { lifecycle, journal, sessionId, store } = setup(adapter);
+      const deadline: AgentDispatchDeadline = {
+        signal: new AbortController().signal,
+        dispatch: (candidate) => ({ kind: 'open', timeoutMs: 100, invocation: candidate }),
+        acceptsCompletion: () => acceptsCompletion,
+      };
+
+      await expect(lifecycle[method](invocation(sessionId, 'late completion'), deadline))
+        .resolves.toEqual({ kind: 'expired', turn: result });
+      expect(journal.agentSession()).toBeNull();
+      expect(store.revisions(sessionId).map((revision) => revision.transition.kind))
+        .toEqual(['session_started']);
+    },
+  );
+
   it('fractional remainder floors and below one does not spawn', async () => {
     const prove = async (factory: DeadlineFactory): Promise<void> => {
       let now = 98.2;
@@ -194,6 +269,7 @@ describe('SIMULATED agent session lifecycle', () => {
             finalText: '',
             usage: null,
             exit: 'completed',
+            ...COMPLETED_EVIDENCE,
           };
         },
         resume: async (_binding, candidate) => {
@@ -274,6 +350,7 @@ describe('SIMULATED agent session lifecycle', () => {
             modelContextWindow: contextTokenCount(258_400),
             cachedInputTokens: 0, outputTokens: 0, reasoningTokens: 0,
           },
+          ...COMPLETED_EVIDENCE,
         };
       },
       resume: async function(binding) {
@@ -288,6 +365,7 @@ describe('SIMULATED agent session lifecycle', () => {
             modelContextWindow: contextTokenCount(258_400),
             cachedInputTokens: 0, outputTokens: 0, reasoningTokens: 0,
           },
+          ...COMPLETED_EVIDENCE,
         };
       },
       classifyFailure: () => 'unknown',
@@ -343,6 +421,7 @@ describe('SIMULATED agent session lifecycle', () => {
           };
         })(),
         exit: 'completed',
+        ...COMPLETED_EVIDENCE,
       }),
       resume: async (binding) => ({
         resumeSessionId: binding.sessionId,
@@ -359,6 +438,7 @@ describe('SIMULATED agent session lifecycle', () => {
           };
         })(),
         exit: 'completed',
+        ...COMPLETED_EVIDENCE,
       }),
       classifyFailure: () => 'unknown',
     };
@@ -481,6 +561,44 @@ describe('SIMULATED agent session lifecycle', () => {
       });
     },
   );
+
+  it('journals an incomplete recovery dispatch without replacing the predecessor binding', async () => {
+    const failedRecovery: AgentTurnResult = {
+      exit: 'timed_out', resumeSessionId: agentSessionId('agent-session:observed-recovery'),
+      sessionId: null, finalText: 'partial recovery', usage: null, timeoutMs: 5_000,
+      processEvidence: null, engineCatalogEvidence: null,
+      partialResultEvidence: { status: 'partial', decodedEventCount: 1, finalTextFragment: 'partial recovery', observedUsage: null, stagedInvocationIds: [] },
+    };
+    let starts = 0;
+    const adapter: AgentSessionAdapter = {
+      kind: 'codex',
+      probe: async () => ({ present: true, version: 'SIMULATED' }),
+      start: async () => {
+        starts += 1;
+        return starts === 1 ? {
+          exit: 'completed', resumeSessionId: agentSessionId('agent-session:recovery-predecessor'),
+          sessionId: null, finalText: 'complete', usage: null, ...COMPLETED_EVIDENCE,
+        } : failedRecovery;
+      },
+      resume: async () => { throw new SIMULATEDResumeFailure('resume_not_found'); },
+      classifyFailure: (error) => error instanceof SIMULATEDResumeFailure ? error.classification : 'unknown',
+    };
+    const { lifecycle, journal, sessionId, store } = setup(adapter);
+    await lifecycle.coldStart(invocation(sessionId, 'cold'), openDeadline());
+    const recoveryDispatchId = engineDispatchId('engine-dispatch:recovery-failure-0001');
+    const recovered = await lifecycle.resumeRound({
+      ...invocation(sessionId, 'resume'), recoveryEngineDispatchId: recoveryDispatchId,
+    }, openDeadline());
+
+    expect(recovered).toEqual(failedRecovery);
+    expect(journal.agentSession()?.sessionId).toBe(agentSessionId('agent-session:recovery-predecessor'));
+    expect(store.revisions(sessionId).at(-1)?.transition).toEqual({
+      kind: 'agent_session_recovery_failed',
+      predecessorSessionHash: sha256('agent-session:recovery-predecessor'),
+      dispatchId: recoveryDispatchId,
+      exit: 'timed_out',
+    });
+  });
 
   it('pauses other classified failures without silently creating a successor', async () => {
     const adapter = new SIMULATEDAgentSessionAdapter({

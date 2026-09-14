@@ -254,6 +254,16 @@ export class InteractiveTestElement {
   }
 
   private matches(selector: string): boolean {
+    const classWithAttribute = selector.match(/^\.([^\[]+)\[([^=\]]+)(?:="([^"]*)")?\]$/u);
+    if (classWithAttribute !== null) {
+      const className = classWithAttribute[1];
+      const name = classWithAttribute[2];
+      const expected = classWithAttribute[3];
+      if (className === undefined || name === undefined ||
+        !this.className.split(/\s+/u).includes(className)) return false;
+      const actual = this.getAttribute(name);
+      return actual !== null && (expected === undefined || actual === expected);
+    }
     const attribute = selector.match(/^\[([^=\]]+)(?:="([^"]*)")?\]$/);
     if (attribute !== null) {
       const name = attribute[1];

@@ -9,7 +9,7 @@ import {
   type AgentSessionBinding,
   type AgentTurnResult,
 } from '../../../src/vtt/agent-session';
-import { encounterBranchId, encounterSessionId } from '../../../src/combat/values';
+import { encounterBranchId, encounterSessionId, type AgentSessionId } from '../../../src/combat/values';
 import { canonicalJson } from '../../../src/commands/canonical-json';
 import { sha256 } from '../../../src/crypto/sha256';
 import { mcpRequestMeta, createMcpHandler } from '../../../src/vtt/mcp/handler';
@@ -190,7 +190,7 @@ class FastProposalAdapter implements AgentSessionAdapter {
   }
   classifyFailure(): 'unknown' { return 'unknown'; }
   private async dispatch(
-    sessionId: AgentTurnResult['resumeSessionId'],
+    sessionId: AgentSessionId,
     invocation: AgentInvocation,
   ): Promise<AgentTurnResult> {
     const manifest = JSON.parse(readFileSync(invocation.launcherToken, 'utf8')) as EngineMcpLauncherManifest;
@@ -240,6 +240,8 @@ class FastProposalAdapter implements AgentSessionAdapter {
     return {
       resumeSessionId: sessionId,
       sessionId: null, finalText: 'SIMULATED', usage: null, exit: 'completed',
+      processEvidence: null, engineCatalogEvidence: null,
+      partialResultEvidence: { status: 'complete', decodedEventCount: 0 },
     };
   }
 }
@@ -417,6 +419,62 @@ describe('MCP board image content', () => {
       .toEqual([{ type: 'text', text: '{"exact":"structured"}' }]);
   });
 
+  it('delivers only synchronized PNG blocks in blind mode and rejects accessible HTML', async () => {
+    const state = await loadArenaFixture('tests/fixtures/arena-basis/seed-3943001.json');
+    const pngs = [
+      dimensionedPng('blind-dm'),
+      dimensionedPng('blind-accessible'),
+      dimensionedPng('blind-player'),
+    ];
+    const runtime = createEngineMcpRuntime(state, {
+      dmMode: 'blind',
+      toolProfile: 'blind',
+      boardImageContents: pngs.map((png) => ({
+        type: 'image' as const,
+        mimeType: 'image/png' as const,
+        data: png.toString('base64'),
+      })),
+      blindVisuals: [
+        { kind: 'dm_board', ordinal: 1, primer_version: 'primer-v10', glyph_mode: 'full', capture_tile_px: 128 },
+        { kind: 'accessible_board_raster', ordinal: 2, primer_version: 'primer-v10', glyph_mode: 'full', capture_tile_px: 128 },
+        { kind: 'player_board', ordinal: 3, primer_version: 'primer-v10', glyph_mode: 'full', capture_tile_px: 128 },
+      ],
+    });
+    const capsule = runtime.feed.current();
+    const response = runtime.handler.handle({
+      jsonrpc: '2.0', id: 1, method: 'tools/call',
+      params: {
+        _meta: META,
+        name: 'engine.get_turn_context',
+        arguments: {
+          run_id: capsule.runId,
+          expected_revision: capsule.revision,
+          scope: 'round',
+          granularity: 'full',
+        },
+      },
+    });
+    const result = record(record(response, 'blind image response')['result'], 'blind image result');
+    const content = result['content'];
+    if (!Array.isArray(content)) throw new TypeError('Blind image result omitted content blocks.');
+    expect(content.map((block) => record(block, 'blind content block')['type']))
+      .toEqual(['text', 'image', 'image', 'image']);
+    expect(JSON.stringify(content)).not.toMatch(/Screen-reader board HTML|board-html|text\/html/u);
+    expect(record(result['structuredContent'], 'blind structured context')['visuals']).toEqual([
+      { kind: 'dm_board', ordinal: 1, primer_version: 'primer-v10', glyph_mode: 'full', capture_tile_px: 128 },
+      { kind: 'accessible_board_raster', ordinal: 2, primer_version: 'primer-v10', glyph_mode: 'full', capture_tile_px: 128 },
+      { kind: 'player_board', ordinal: 3, primer_version: 'primer-v10', glyph_mode: 'full', capture_tile_px: 128 },
+    ]);
+    expect(JSON.stringify(result['structuredContent'])).toMatch(/"(?:saveDc|escapeDc)":\d+/u);
+
+    expect(() => createEngineMcpRuntime(state, {
+      dmMode: 'blind',
+      toolProfile: 'blind',
+      boardImageContent: { type: 'image', mimeType: 'image/png', data: pngs[0]!.toString('base64') },
+      boardHtmlContent: { type: 'text', text: 'Screen-reader board HTML: forbidden' },
+    })).toThrow('prohibits accessible-board HTML');
+  });
+
   it('enforces the independent one-megabyte decoded PNG limit', () => {
     const result = callWithImage(dimensionedPng('oversize', 1_000_001));
     expect(result['isError']).toBe(true);
@@ -435,6 +493,7 @@ describe('arena capture lifecycle and off-arm invariance', () => {
       '--initiative-profile', 'derived_v1', '--renderer-profile', JSON.stringify(profile),
     ]));
     if (row === undefined) throw new TypeError('Semantic-board arena omitted its row.');
+    if (row.rawTurnContext === null) throw new Error('Semantic-board row omitted delivered context.');
     const context = record(JSON.parse(row.rawTurnContext) as unknown, 'semantic-board context');
     const board = record(context['semantic_board'], 'semantic-board block');
     const base = structuredClone(context) as Record<string, unknown>;
@@ -474,6 +533,7 @@ describe('arena capture lifecycle and off-arm invariance', () => {
       row.boardImageEvidence.capturedAtUnixMs <= row.boardImageEvidence.primaryDispatchStartedAtUnixMs)).toBe(true);
     for (const row of result.rows) {
       if (row.boardImage.mode === 'off') throw new Error('Capturing lifecycle row lost its board image.');
+      if (row.rawTurnContext === null) throw new Error('Capturing lifecycle row omitted delivered context.');
       expect(row.rawTurnContext).not.toContain(row.boardImage.sha256);
       expect(row.rawTurnContext).not.toContain(row.boardImage.relativePath);
       expect(JSON.stringify(row.rlData ?? null)).not.toContain(row.boardImage.sha256);
@@ -554,7 +614,7 @@ describe('arena capture lifecycle and off-arm invariance', () => {
     }
 
     const raw = offResult[0]?.rawTurnContext;
-    if (raw === undefined) throw new TypeError('Semantic-board-off row omitted rawTurnContext.');
+    if (raw === undefined || raw === null) throw new TypeError('Semantic-board-off row omitted rawTurnContext.');
     const row = offResult[0];
     if (row === undefined) throw new TypeError('Semantic-board-off run omitted its row.');
     const rawContext = record(JSON.parse(raw) as unknown, 'semantic-board-off raw context');
@@ -679,7 +739,7 @@ describe('arena capture lifecycle and off-arm invariance', () => {
     expect(JSON.stringify(captureOnlyMcp.content)).not.toContain('image/png');
 
     const raw = offResult[0]?.rawTurnContext;
-    if (raw === undefined) throw new TypeError('Off-arm row omitted rawTurnContext.');
+    if (raw === undefined || raw === null) throw new TypeError('Off-arm row omitted rawTurnContext.');
     expect(Buffer.byteLength(raw)).toBe(31_995);
     const rawRecord = record(JSON.parse(raw) as unknown, 'off raw context');
     expect(record(rawRecord['actor_knowledge'], 'off actor knowledge')['policy'])
@@ -783,6 +843,21 @@ describe('launcher image containment and binding', () => {
     const htmlReference = await validatedLauncherBoardHtmlReference(manifest, state);
     expect(htmlReference?.text).toContain(htmlRelativePath);
     expect(htmlReference?.text).toContain(htmlDigest);
+
+    const blindManifest: EngineMcpLauncherManifest = {
+      ...manifest,
+      dmMode: 'blind',
+      toolProfile: 'blind',
+      blindVisuals: [{
+        kind: 'dm_board',
+        ordinal: 1,
+        primer_version: 'primer-v10',
+        glyph_mode: 'full',
+        capture_tile_px: 128,
+      }],
+    };
+    expect(decodeEngineMcpLauncherManifest(blindManifest)).not.toBeNull();
+    expect(await validatedLauncherBoardHtmlReference(blindManifest, state)).toBeUndefined();
 
     const escaped = structuredClone(manifest) as unknown as Record<string, unknown>;
     const binding = record(escaped['boardImage'], 'board binding');

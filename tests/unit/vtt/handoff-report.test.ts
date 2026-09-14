@@ -1,0 +1,1732 @@
+import { createHash } from 'node:crypto';
+import { dirname, join, resolve } from 'node:path';
+import { tmpdir } from 'node:os';
+import { afterEach, describe, expect, it } from 'vitest';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from '../../helpers/test-filesystem';
+import {
+  buildHandoffReport,
+  publishHandoffReport,
+  type HandoffReport,
+  type ReportGitReader,
+  type SupervisorReportInput,
+} from '../../../tools/vtt-handoff/report';
+import {
+  REQUIRED_HANDOFF_GATES,
+  executionAccounting,
+  inventoryEntryDigest,
+  parseM1GateReport,
+  parsePlaywrightList,
+  prepareDiscoveryEnvironment,
+  prepareExecutionEnvironment,
+  reconcileGateReceipt,
+  reconcileM1Discovery,
+  renderGateCommand,
+  renderReceiptCommand,
+  runInventoryGate,
+  validateGateInventory,
+  type DiscoveryResult,
+  type GateExecutionReceipt,
+  type InventoryResolution,
+  type InventoryRunnerAdapter,
+  type M1ExecutionOutcome,
+  type M1GateReport,
+  type RequiredHandoffGate,
+} from '../../../tools/vtt-handoff/gate-inventory';
+import { type RepositoryIdentityPolicy } from '../../../tools/vtt-handoff/paths';
+
+const COMMIT = '0123456789abcdef0123456789abcdef01234567';
+const OLD_COMMIT = '1123456789abcdef0123456789abcdef01234567';
+const REQUEST_ID = '018f0f23-7b5d-7a11-8abc-1234567890ab';
+
+const REPORT_INPUT_PATHS = [
+  'contracts/vtt-handoff/v1/protocol.schema.json',
+  'contracts/vtt-handoff/v1/art.schema.json',
+  'contracts/vtt-handoff/v1/contracts.d.ts',
+  'fixtures/scenes/two-room.v1.json',
+  'fixtures/scenes/two-room.snapshots.v1.json',
+  'fixtures/protocol/examples.v1.json',
+] as const;
+
+const EXPECTED_GATE_IDS = [
+  'full-typecheck',
+  'structural-scan',
+  'unit-gate',
+  'production-build',
+  'node-runtime-launch',
+  'worker-dist-playwright',
+  'browser-gate',
+  'cumulative-targeted-vitest',
+  'worker-dev-playwright',
+  'runtime-parity-playwright',
+  'top-down-smoke-playwright',
+] as const;
+
+const EXPECTED_CUMULATIVE_FILES = [
+  'tests/unit/tools/d583-contract-inventory.test.ts',
+  'tests/unit/vtt/art-request.test.ts',
+  'tests/unit/vtt/art-stage.test.ts',
+  'tests/unit/vtt/art-validator.test.ts',
+  'tests/unit/vtt/controller-assignment.test.ts',
+  'tests/unit/vtt/detection-ui.test.ts',
+  'tests/unit/vtt/door-intent.test.ts',
+  'tests/unit/vtt/encounter-board-projection.test.ts',
+  'tests/unit/vtt/encounter-projections.test.ts',
+  'tests/unit/vtt/encounter-selectors.test.ts',
+  'tests/unit/vtt/encounter-session-service.test.ts',
+  'tests/unit/vtt/engine-boundary.test.ts',
+  'tests/unit/vtt/handoff-bootstrap.test.ts',
+  'tests/unit/vtt/handoff-contract.test.ts',
+  'tests/unit/vtt/handoff-examples.test.ts',
+  'tests/unit/vtt/handoff-package-contract.test.ts',
+  'tests/unit/vtt/handoff-publish.test.ts',
+  'tests/unit/vtt/in-process-transport.test.ts',
+  'tests/unit/vtt/local-session-store.test.ts',
+  'tests/unit/vtt/node-runtime.test.ts',
+  'tests/unit/vtt/node-websocket-transport.test.ts',
+  'tests/unit/vtt/png-validator.test.ts',
+  'tests/unit/vtt/preview-hidden-rolls.test.ts',
+  'tests/unit/vtt/protocol-runtime.test.ts',
+  'tests/unit/vtt/runtime-parity.test.ts',
+  'tests/unit/vtt/scene-snapshot.test.ts',
+  'tests/unit/vtt/semantic-board-payload.test.ts',
+  'tests/unit/vtt/serve-existing-dist.test.ts',
+  'tests/unit/vtt/session-lifecycle.test.ts',
+  'tests/unit/vtt/session-persistence.test.ts',
+  'tests/unit/vtt/two-room-fixture.test.ts',
+  'tests/unit/vtt/uuidv7.test.ts',
+  'tests/unit/vtt/windows-probe.test.ts',
+  'tests/unit/vtt/worker-boundary.test.ts',
+] as const;
+
+const EXPECTED_BROWSER_GATES = {
+  'browser-gate': { config: 'playwright.config.ts', selectors: [], artifact: undefined },
+  'worker-dist-playwright': { config: 'tests/browser/vtt-handoff/playwright.config.ts', selectors: [
+    'worker.spec.ts',
+  ], artifact: 'dist' },
+  'worker-dev-playwright': { config: 'tests/browser/vtt-handoff/playwright.config.ts', selectors: [
+    'worker.spec.ts',
+  ], artifact: 'dev' },
+  'runtime-parity-playwright': { config: 'tests/browser/vtt-handoff/playwright.config.ts', selectors: [
+    'runtime-parity.spec.ts',
+  ], artifact: 'dev' },
+  'top-down-smoke-playwright': { config: 'tests/browser/vtt-handoff/playwright.config.ts', selectors: [
+    'top-down-smoke.spec.ts',
+  ], artifact: 'dev' },
+} as const;
+
+interface RepositoryFixture {
+  readonly root: string;
+  readonly policy: RepositoryIdentityPolicy;
+}
+
+interface ReceiptScenario {
+  readonly revisionBefore?: string;
+  readonly revisionAfter?: string;
+  readonly outer?: GateExecutionReceipt['outer'];
+  readonly failureReasons?: readonly string[];
+  readonly transformReport?: (report: M1GateReport) => M1GateReport;
+}
+
+const TEMP_ROOTS = new Set<string>();
+
+function root(): string {
+  const path = mkdtempSync(join(tmpdir(), 'vtt-handoff-report-'));
+  TEMP_ROOTS.add(path);
+  return path;
+}
+
+afterEach(() => {
+  for (const path of TEMP_ROOTS) rmSync(path, { recursive: true, force: true });
+  TEMP_ROOTS.clear();
+});
+
+function repository(): RepositoryFixture {
+  const fixtureRoot = root();
+  mkdirSync(join(fixtureRoot, '.git'));
+  writeFileSync(join(fixtureRoot, 'package.json'), '{"name":"srd-55"}\n');
+  for (const path of REPORT_INPUT_PATHS) {
+    const destination = join(fixtureRoot, path);
+    mkdirSync(dirname(destination), { recursive: true });
+    writeFileSync(destination, readFileSync(join(process.cwd(), path)));
+  }
+  for (const path of ['node_modules/vitest/vitest.mjs', 'node_modules/@playwright/test/cli.js']) {
+    const destination = join(fixtureRoot, path);
+    mkdirSync(dirname(destination), { recursive: true });
+    writeFileSync(destination, 'export {};\n');
+  }
+  return {
+    root: fixtureRoot,
+    policy: { ownerCheckout: fixtureRoot, authorizedWorktrees: [] },
+  };
+}
+
+function gitReader(options: {
+  readonly tracked?: string;
+  readonly untracked?: string;
+  readonly commit?: string;
+} = {}): ReportGitReader {
+  return {
+    read(_repositoryRoot, args) {
+      const operation = args.join(' ');
+      if (operation === 'diff --name-only HEAD --') return options.tracked ?? '';
+      if (operation === 'ls-files --others --exclude-standard') return options.untracked ?? '';
+      if (operation === 'rev-parse HEAD') return options.commit ?? COMMIT;
+      throw new Error(`Unexpected Git operation: ${operation}`);
+    },
+  };
+}
+
+function discoveryFor(gate: RequiredHandoffGate, repositoryRoot: string): DiscoveryResult {
+  if (gate.discovery.kind === 'none') {
+    return { kind: 'none', rootDir: null, files: [], testIdentities: [] };
+  }
+  const files = gate.discovery.expectedFiles === 'from-config'
+    ? [gate.discovery.kind === 'vitest'
+      ? 'tests/unit/vtt/handoff-report.test.ts'
+      : 'tests/browser/acceptance-walkthrough.spec.ts']
+    : [...gate.discovery.expectedFiles];
+  const testIdentities = gate.discovery.kind === 'playwright'
+    ? files.map((file, index) => `chromium:test-${String(index)}:${resolve(repositoryRoot, file)}`)
+    : [];
+  return {
+    kind: gate.discovery.kind,
+    rootDir: resolve(repositoryRoot, gate.discovery.rootDir),
+    files,
+    testIdentities,
+  };
+}
+
+function phaseFor(
+  gate: RequiredHandoffGate,
+  repositoryRoot: string,
+  discovery: DiscoveryResult,
+  phase: 'initial' | 'retry',
+  files = discovery.files,
+  statuses: Readonly<Record<string, M1ExecutionOutcome['status']>> = {},
+): M1GateReport['phases']['initial'] {
+  const kind = gate.report.gateVerdict?.kind;
+  if (kind === undefined) throw new Error(`Gate ${gate.id} has no M-1 report.`);
+  const modulePath = resolve(
+    repositoryRoot,
+    kind === 'vitest' ? 'node_modules/vitest/vitest.mjs' : 'node_modules/@playwright/test/cli.js',
+  );
+  const arguments_ = [modulePath, kind === 'vitest' ? 'run' : 'test', ...files];
+  const executionIds = kind === 'playwright'
+    ? discovery.testIdentities.filter((identity) => files.some((file) =>
+      identity.endsWith(resolve(repositoryRoot, file))))
+    : files.map((file) => `vitest:${resolve(repositoryRoot, file)}`);
+  return {
+    phase,
+    phaseInvocationId: `${phase}-${gate.id}`,
+    command: {
+      executable: process.execPath,
+      arguments: arguments_,
+      lock: {
+        executable: 'flock',
+        arguments: ['-w', '7200', '/tmp/dnd-gate.lock', process.execPath, ...arguments_],
+      },
+    },
+    discovery: {
+      requestedExecutionIds: executionIds,
+      reportedExecutionIds: executionIds,
+      requestedFiles: files,
+      reportedFiles: files,
+    },
+    fileOutcomes: files.map((file) => ({
+      file,
+      status: statuses[file] ?? 'passed',
+      executionIds: executionIds.filter((identity) => identity.endsWith(resolve(repositoryRoot, file))),
+      reasons: [],
+    })),
+    executionAccountingAvailable: true,
+    executionOutcomes: executionIds.map((executionId) => {
+      const file = files.find((candidate) => executionId.endsWith(resolve(repositoryRoot, candidate)));
+      if (file === undefined) throw new Error(`Missing file for execution ${executionId}.`);
+      const status = statuses[file] ?? 'passed';
+      return { executionId, file: resolve(repositoryRoot, file), status, approvedSkip: status === 'skipped' };
+    }),
+  };
+}
+
+function reportFor(gate: RequiredHandoffGate, repositoryRoot: string): M1GateReport {
+  const kind = gate.report.gateVerdict?.kind;
+  if (kind === undefined) throw new Error(`Gate ${gate.id} has no M-1 report.`);
+  const discovery = discoveryFor(gate, repositoryRoot);
+  return {
+    version: 2,
+    kind,
+    phases: { initial: phaseFor(gate, repositoryRoot, discovery, 'initial'), retry: null },
+    verdict: { status: 'passed', passedOnRetry: [], failedFiles: [], phaseFailures: [] },
+  };
+}
+
+function sha256(bytes: Buffer): string {
+  return createHash('sha256').update(bytes).digest('hex');
+}
+
+function assertExactReasons(actual: readonly string[], expected: readonly string[]): void {
+  expect(actual).toEqual(expected);
+}
+
+function writeReceipt(
+  fixture: RepositoryFixture,
+  evidenceRoot: string,
+  gate: RequiredHandoffGate,
+  scenario: ReceiptScenario = {},
+): string {
+  const discovery = discoveryFor(gate, fixture.root);
+  let m1Report: GateExecutionReceipt['m1Report'] = null;
+  let m1Verdict: GateExecutionReceipt['m1Verdict'] = null;
+  let launcherAuthenticated: boolean | null = null;
+  let gateReport: M1GateReport | null = null;
+  if (gate.report.gateVerdict !== null) {
+    const baseReport = reportFor(gate, fixture.root);
+    const report = scenario.transformReport?.(baseReport) ?? baseReport;
+    gateReport = report;
+    const reportPath = join(evidenceRoot, `${gate.id}.m1.json`);
+    const bytes = Buffer.from(`${JSON.stringify(report, null, 2)}\n`);
+    writeFileSync(reportPath, bytes);
+    m1Report = {
+      path: reportPath,
+      sha256: sha256(bytes),
+      kind: report.kind,
+      phaseInvocationIds: [
+        report.phases.initial.phaseInvocationId,
+        ...(report.phases.retry === null ? [] : [report.phases.retry.phaseInvocationId]),
+      ],
+    };
+    m1Verdict = report.verdict;
+    launcherAuthenticated = true;
+  }
+  const failureReasons = scenario.failureReasons ?? [];
+  const receipt: GateExecutionReceipt = {
+    version: 1,
+    gateId: gate.id,
+    tier: gate.tier,
+    inventoryDigest: inventoryEntryDigest(gate),
+    invocationId: `receipt-${gate.id}`,
+    repositoryRoot: fixture.root,
+    revisionBefore: scenario.revisionBefore ?? COMMIT,
+    revisionAfter: scenario.revisionAfter ?? COMMIT,
+    startedAt: '2026-09-14T00:00:00.000Z',
+    finishedAt: '2026-09-14T00:00:01.000Z',
+    argv: gate.argv,
+    env: gate.env,
+    cwd: gate.cwd,
+    discovery,
+    outer: scenario.outer ?? { exitCode: 0, signal: null, spawnError: null },
+    m1Report,
+    m1Verdict,
+    launcherAuthenticated,
+    executionAccounting: gateReport === null ? null : executionAccounting(gateReport, discovery),
+    finalStatus: failureReasons.length === 0 ? 'passed' : 'failed',
+    failureReasons,
+  };
+  const receiptPath = join(evidenceRoot, `${gate.id}.receipt.json`);
+  writeFileSync(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
+  return receiptPath;
+}
+
+function rewriteReceiptDiscovery(receiptPath: string, discovery: DiscoveryResult): void {
+  const receipt = JSON.parse(readFileSync(receiptPath, 'utf8')) as GateExecutionReceipt;
+  const report = receipt.m1Report === null
+    ? null
+    : parseM1GateReport(JSON.parse(readFileSync(receipt.m1Report.path, 'utf8')) as unknown);
+  writeFileSync(receiptPath, `${JSON.stringify({
+    ...receipt,
+    discovery,
+    executionAccounting: report === null ? null : executionAccounting(report, discovery),
+  }, null, 2)}\n`);
+}
+
+function successfulEvidence(
+  fixture: RepositoryFixture,
+  evidenceRoot: string,
+  scenarios: Readonly<Record<string, ReceiptScenario>> = {},
+): SupervisorReportInput {
+  return {
+    schemaVersion: 2,
+    tools: [
+      { name: 'node', version: process.version, command: 'node --version' },
+      { name: 'vitest', version: '4.1.10', command: 'npx vitest run focused.test.ts' },
+    ],
+    gateExecutions: REQUIRED_HANDOFF_GATES.map((gate) => ({
+      gateId: gate.id,
+      receiptPath: writeReceipt(fixture, evidenceRoot, gate, scenarios[gate.id]),
+    })),
+    artRequests: [{
+      requestId: REQUEST_ID,
+      requestPath: `art/outbox/${REQUEST_ID}.request.json`,
+      resultPath: `art/inbox/${REQUEST_ID}.result.json`,
+    }],
+    windowsProbe: {
+      status: 'PASSED',
+      command: 'VTT_WINDOWS_INTEROP=1 npm run windows:probe',
+      reason: null,
+    },
+  };
+}
+
+function inputFile(directory: string, value: unknown): string {
+  const path = join(directory, 'supervisor-results.json');
+  writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);
+  return path;
+}
+
+function buildWith(
+  fixture: RepositoryFixture,
+  handoffRoot: string,
+  input: SupervisorReportInput,
+): HandoffReport {
+  return buildHandoffReport({
+    repositoryRoot: fixture.root,
+    inputPath: inputFile(handoffRoot, input),
+    gitReader: gitReader(),
+  });
+}
+
+function gate(id: string): RequiredHandoffGate {
+  const found = REQUIRED_HANDOFF_GATES.find((candidate) => candidate.id === id);
+  if (found === undefined) throw new Error(`Missing gate ${id}.`);
+  return found;
+}
+
+function assertPublishedReadyReport(report: HandoffReport, fixture: RepositoryFixture): void {
+  if (report.digests.length !== 6) throw new Error('PUBLISHED_DIGEST_COUNT_INVALID');
+  expect(report.readiness).toBe('READY');
+  expect(report.schemaVersion).toBe(2);
+  expect(report.gateOutcomes).toHaveLength(11);
+  expect(report.gateOutcomes.every((outcome) => outcome.state === 'passed')).toBe(true);
+  expect(report.repository).toEqual({
+    name: 'srd-55', root: fixture.root, commit: COMMIT, changedFiles: [],
+  });
+  for (const digest of report.digests) {
+    const bytes = readFileSync(join(fixture.root, digest.path));
+    expect(digest).toEqual({
+      path: digest.path,
+      sha256: createHash('sha256').update(bytes).digest('hex'),
+      length: bytes.length,
+    });
+  }
+  expect(report.methods).toEqual(['session.open', 'scene.snapshot', 'token.move', 'door.set', 'light.set']);
+  expect(report.art.sampleAssetIds).toContain('token.adventurer');
+  expect(report.art.requests).toEqual([{
+    requestId: REQUEST_ID,
+    requestPath: `art/outbox/${REQUEST_ID}.request.json`,
+    resultPath: `art/inbox/${REQUEST_ID}.result.json`,
+  }]);
+  expect(report.limitations.join('\n')).toContain('F94/F95');
+}
+
+describe('VTT handoff readiness report', () => {
+  it('publishes reconciled READY evidence atomically and independently hashes every input', () => {
+    const fixture = repository();
+    expect(fixture.policy).toEqual({ ownerCheckout: fixture.root, authorizedWorktrees: [] });
+    expect(fixture.root).not.toBe(process.cwd());
+    const handoffRoot = root();
+    const input = successfulEvidence(fixture, handoffRoot);
+    const evidence = inputFile(handoffRoot, input);
+    const order: string[] = [];
+    const result = publishHandoffReport({
+      repositoryRoot: fixture.root,
+      handoffRoot,
+      inputPath: evidence,
+      identityPolicy: fixture.policy,
+      gitReader: gitReader(),
+      hooks: { nonce: () => 'fixed', afterRename: (path) => order.push(path) },
+    });
+    expect(result).toMatchObject({ status: 'published', readiness: 'READY', files: 2, reasons: [] });
+    expect(order).toEqual(['reports/claude/handoff.json', 'reports/claude/READY.md']);
+    expect(readdirSync(join(handoffRoot, 'reports/claude')).some((name) => name.includes('.partial.'))).toBe(false);
+    expect(existsSync(join(handoffRoot, 'reports/windows'))).toBe(false);
+    const report = JSON.parse(
+      readFileSync(join(handoffRoot, 'reports/claude/handoff.json'), 'utf8'),
+    ) as HandoffReport;
+    expect(() => assertPublishedReadyReport({ ...report, digests: [] }, fixture))
+      .toThrow('PUBLISHED_DIGEST_COUNT_INVALID');
+    assertPublishedReadyReport(report, fixture);
+    const markdown = readFileSync(join(handoffRoot, 'reports/claude/READY.md'), 'utf8');
+    expect(markdown).toContain('# VTT handoff: READY');
+    expect(markdown).toContain('runtime-parity-playwright');
+    expect(markdown).toContain('receipt=');
+    expect(markdown).toContain('contract-level contracts/v1/READY.json denotes only the atomic core bundle');
+    expect(markdown).toContain(`Request ${REQUEST_ID}: art/outbox/${REQUEST_ID}.request.json`);
+    expect(publishHandoffReport({
+      repositoryRoot: fixture.root,
+      handoffRoot,
+      inputPath: evidence,
+      check: true,
+      identityPolicy: fixture.policy,
+      gitReader: gitReader(),
+    })).toMatchObject({ status: 'verified', readiness: 'READY', files: 2 });
+  });
+
+  it('records clean and dirty repository evidence through the injected Git reader', () => {
+    const fixture = repository();
+    const handoffRoot = root();
+    const input = successfulEvidence(fixture, handoffRoot);
+    const evidence = inputFile(handoffRoot, input);
+    const clean = buildHandoffReport({
+      repositoryRoot: fixture.root,
+      inputPath: evidence,
+      gitReader: gitReader(),
+    });
+    expect(clean.repository).toEqual({
+      name: 'srd-55', root: fixture.root, commit: COMMIT, changedFiles: [],
+    });
+    const dirty = buildHandoffReport({
+      repositoryRoot: fixture.root,
+      inputPath: evidence,
+      gitReader: gitReader({
+        tracked: 'src/changed.ts\ndocs/vtt-handoff/runtime-api.md\n',
+        untracked: 'tools/new-report-input.json\nsrc/changed.ts\n',
+      }),
+    });
+    expect(dirty.repository).toEqual({
+      name: 'srd-55',
+      root: fixture.root,
+      commit: COMMIT,
+      changedFiles: [
+        'docs/vtt-handoff/runtime-api.md',
+        'src/changed.ts',
+        'tools/new-report-input.json',
+      ],
+    });
+  });
+
+  it('kills M3-REPORT-MISSING and M3-AFFECTED-SUBSTITUTION for every omitted receipt', () => {
+    const fixture = repository();
+    for (const omitted of REQUIRED_HANDOFF_GATES) {
+      const handoffRoot = root();
+      const input = successfulEvidence(fixture, handoffRoot);
+      const report = buildWith(fixture, handoffRoot, {
+        ...input,
+        gateExecutions: input.gateExecutions.filter((execution) => execution.gateId !== omitted.id),
+      });
+      expect(report.readiness, omitted.id).toBe('PARTIAL');
+      expect(report.gateOutcomes.find((outcome) => outcome.id === omitted.id)).toMatchObject({
+        state: 'not-run',
+        reasons: [`REQUIRED_GATE_NOT_RUN: ${omitted.id}`],
+      });
+      expect(report.reasons, omitted.id).toContain(`REQUIRED_GATE_NOT_RUN: ${omitted.id}`);
+    }
+  });
+
+  it('preserves absent and stale dependent gates when a prerequisite is missing', () => {
+    const fixture = repository();
+    const absentRoot = root();
+    const absentInput = successfulEvidence(fixture, absentRoot);
+    const absent = buildWith(fixture, absentRoot, {
+      ...absentInput,
+      gateExecutions: absentInput.gateExecutions.filter((execution) =>
+        execution.gateId !== 'production-build' && execution.gateId !== 'worker-dist-playwright'),
+    });
+    expect(absent.gateOutcomes.find((outcome) => outcome.id === 'worker-dist-playwright')).toMatchObject({
+      state: 'not-run',
+      reasons: [
+        'REQUIRED_GATE_NOT_RUN: worker-dist-playwright',
+        'REQUIRED_GATE_PREREQUISITE_FAILED: production-build',
+      ],
+    });
+
+    const staleRoot = root();
+    const staleInput = successfulEvidence(fixture, staleRoot, {
+      'worker-dist-playwright': { revisionBefore: OLD_COMMIT, revisionAfter: OLD_COMMIT },
+    });
+    const stale = buildWith(fixture, staleRoot, {
+      ...staleInput,
+      gateExecutions: staleInput.gateExecutions.filter((execution) => execution.gateId !== 'production-build'),
+    });
+    expect(stale.gateOutcomes.find((outcome) => outcome.id === 'worker-dist-playwright')).toMatchObject({
+      state: 'not-run',
+      reasons: [
+        'REQUIRED_GATE_STALE_REVISION: worker-dist-playwright',
+        'REQUIRED_GATE_PREREQUISITE_FAILED: production-build',
+      ],
+    });
+
+    const presentRoot = root();
+    const presentInput = successfulEvidence(fixture, presentRoot);
+    const present = buildWith(fixture, presentRoot, {
+      ...presentInput,
+      gateExecutions: presentInput.gateExecutions.filter((execution) => execution.gateId !== 'production-build'),
+    });
+    expect(present.gateOutcomes.find((outcome) => outcome.id === 'worker-dist-playwright')).toMatchObject({
+      state: 'failed',
+      reasons: ['REQUIRED_GATE_PREREQUISITE_FAILED: production-build'],
+    });
+  });
+
+  it.each(['first-then-second', 'second-then-first'] as const)(
+    'rejects distinct duplicate receipt references ordered %s',
+    (ordering) => {
+      const fixture = repository();
+      const handoffRoot = root();
+      const valid = successfulEvidence(fixture, handoffRoot);
+      const first = valid.gateExecutions.find((execution) => execution.gateId === 'unit-gate');
+      if (first === undefined) throw new Error('Missing first unit-gate receipt.');
+      const second = {
+        gateId: 'unit-gate',
+        receiptPath: writeReceipt(fixture, root(), gate('unit-gate'), {
+          outer: { exitCode: 2, signal: null, spawnError: null },
+        }),
+      };
+      const gateExecutions = ordering === 'first-then-second'
+        ? [...valid.gateExecutions, second]
+        : [second, ...valid.gateExecutions];
+      const report = buildHandoffReport({
+        repositoryRoot: fixture.root,
+        inputPath: inputFile(handoffRoot, { ...valid, gateExecutions }),
+        gitReader: gitReader(),
+      });
+      expect(first.receiptPath).not.toBe(second.receiptPath);
+      expect(report).toMatchObject({
+        readiness: 'PARTIAL', reasons: ['SUPERVISOR_RESULTS_INVALID'], evidence: null,
+      });
+      expect(report.readiness).not.toBe('READY');
+    },
+  );
+
+  it('kills M3-REPORT-CLAIM and M3-REPORT-STDOUT claim-only input', () => {
+    const fixture = repository();
+    const handoffRoot = root();
+    const valid = successfulEvidence(fixture, handoffRoot);
+    const first = valid.gateExecutions[0];
+    if (first === undefined) throw new Error('Missing first gate execution.');
+    const duplicate = { ...valid, gateExecutions: [...valid.gateExecutions, first] };
+    expect(buildHandoffReport({
+      repositoryRoot: fixture.root,
+      inputPath: inputFile(handoffRoot, duplicate),
+      gitReader: gitReader(),
+    })).toMatchObject({ reasons: ['SUPERVISOR_RESULTS_INVALID'], evidence: null });
+    const unknown = {
+      ...valid,
+      gateExecutions: [{ gateId: 'invented-gate', receiptPath: '/tmp/invented.json' }],
+    };
+    expect(buildHandoffReport({
+      repositoryRoot: fixture.root,
+      inputPath: inputFile(handoffRoot, unknown),
+      gitReader: gitReader(),
+    }).reasons).toEqual(['SUPERVISOR_RESULTS_INVALID']);
+    const legacy = { schemaVersion: 1, gates: [{ name: 'unit-gate', status: 'PASSED' }] };
+    expect(buildHandoffReport({
+      repositoryRoot: fixture.root,
+      inputPath: inputFile(handoffRoot, legacy),
+      gitReader: gitReader(),
+    })).toMatchObject({
+      readiness: 'PARTIAL',
+      evidence: null,
+      reasons: ['SUPERVISOR_RESULTS_INVALID'],
+    });
+  });
+
+  it('publishes PARTIAL for a failed non-test gate without a READY claim', () => {
+    const fixture = repository();
+    const handoffRoot = root();
+    const input = successfulEvidence(fixture, handoffRoot, {
+      'full-typecheck': { outer: { exitCode: 2, signal: null, spawnError: null } },
+    });
+    const result = publishHandoffReport({
+      repositoryRoot: fixture.root,
+      handoffRoot,
+      inputPath: inputFile(handoffRoot, input),
+      identityPolicy: fixture.policy,
+      gitReader: gitReader(),
+    });
+    expect(result.readiness).toBe('PARTIAL');
+    assertExactReasons(result.reasons, ['OUTER_EXIT_NONZERO: 2']);
+    const markdown = readFileSync(join(handoffRoot, 'reports/claude/READY.md'), 'utf8');
+    expect(markdown).toContain('# VTT handoff: PARTIAL');
+    expect(markdown).toContain('full-typecheck: failed');
+    expect(markdown).not.toContain('# VTT handoff: READY\n');
+  });
+
+  it('publishes the exact reason for an isolated not-run gate', () => {
+    const fixture = repository();
+    const handoffRoot = root();
+    const input = successfulEvidence(fixture, handoffRoot);
+    const report = buildWith(fixture, handoffRoot, {
+      ...input,
+      gateExecutions: input.gateExecutions.filter((execution) => execution.gateId !== 'full-typecheck'),
+    });
+    expect(report.readiness).toBe('PARTIAL');
+    assertExactReasons(report.reasons, ['REQUIRED_GATE_NOT_RUN: full-typecheck']);
+  });
+
+  it('proves the exact-reasons assertion rejects an unexpected superset', () => {
+    expect(() => assertExactReasons(['EXPECTED', 'UNEXPECTED'], ['EXPECTED'])).toThrow();
+  });
+
+  it.each([
+    ['nonzero exit', { exitCode: 2, signal: null, spawnError: null }, ['OUTER_EXIT_NONZERO: 2']],
+    ['signal', { exitCode: null, signal: 'SIGTERM', spawnError: null }, ['OUTER_SIGNAL: SIGTERM']],
+    [
+      'spawn error',
+      { exitCode: null, signal: null, spawnError: { code: 'ENOENT', message: 'missing' } },
+      ['OUTER_SPAWN_ERROR'],
+    ],
+    ['missing exit', { exitCode: null, signal: null, spawnError: null }, ['OUTER_EXIT_MISSING']],
+  ] as const)('kills M3-REPORT-OUTER-FAIL for passed M-1 evidence after outer %s', (
+    _label,
+    outer,
+    expectedReasons,
+  ) => {
+    const fixture = repository();
+    const handoffRoot = root();
+    const input = successfulEvidence(fixture, handoffRoot, {
+      'unit-gate': { outer },
+    });
+    const report = buildWith(fixture, handoffRoot, input);
+    const outcome = report.gateOutcomes.find((candidate) => candidate.id === 'unit-gate');
+    expect(outcome).toMatchObject({ state: 'failed', m1Verdict: { status: 'passed' } });
+    expect(outcome?.reasons).toEqual(expectedReasons);
+  });
+
+  it('kills M3-REPORT-OUTER-FAIL revision drift before stale filtering', () => {
+    const fixture = repository();
+    const handoffRoot = root();
+    const input = successfulEvidence(fixture, handoffRoot, {
+      'unit-gate': {
+        revisionBefore: OLD_COMMIT,
+        revisionAfter: COMMIT,
+        failureReasons: ['OUTER_REVISION_CHANGED'],
+      },
+    });
+    const outcome = buildWith(fixture, handoffRoot, input).gateOutcomes
+      .find((candidate) => candidate.id === 'unit-gate');
+    expect(outcome).toMatchObject({
+      state: 'failed',
+      reasons: ['OUTER_REVISION_CHANGED'],
+      m1Verdict: { status: 'passed' },
+    });
+  });
+
+  it('kills M3-REPORT-STALE when equal completed revisions are from another HEAD', () => {
+    const fixture = repository();
+    const handoffRoot = root();
+    const input = successfulEvidence(fixture, handoffRoot, {
+      'unit-gate': { revisionBefore: OLD_COMMIT, revisionAfter: OLD_COMMIT },
+    });
+    const outcome = buildWith(fixture, handoffRoot, input).gateOutcomes
+      .find((candidate) => candidate.id === 'unit-gate');
+    expect(outcome).toMatchObject({
+      state: 'not-run',
+      reasons: ['REQUIRED_GATE_STALE_REVISION: unit-gate'],
+      m1Verdict: null,
+    });
+  });
+
+  it('rejects empty wrong-kind discovery even with an authenticated passed-v2 report', () => {
+    const fixture = repository();
+    const handoffRoot = root();
+    const input = successfulEvidence(fixture, handoffRoot, {
+      'unit-gate': {
+        transformReport: (report) => ({
+          ...report,
+          phases: {
+            initial: {
+              ...report.phases.initial,
+              discovery: {
+                requestedExecutionIds: [],
+                reportedExecutionIds: [],
+                requestedFiles: [],
+                reportedFiles: [],
+              },
+              fileOutcomes: [],
+              executionOutcomes: [],
+            },
+            retry: null,
+          },
+        }),
+      },
+    });
+    const execution = input.gateExecutions.find((candidate) => candidate.gateId === 'unit-gate');
+    if (execution === undefined) throw new Error('Missing unit receipt.');
+    rewriteReceiptDiscovery(execution.receiptPath, {
+      kind: 'none', rootDir: null, files: [], testIdentities: [],
+    });
+    const outcome = buildWith(fixture, handoffRoot, input).gateOutcomes
+      .find((candidate) => candidate.id === 'unit-gate');
+    expect(outcome?.state).not.toBe('passed');
+    expect(outcome?.reasons).toContain('RECEIPT_DISCOVERY_KIND_MISMATCH');
+    expect(outcome?.reasons).toContain('M1_EXECUTION_ACCOUNTING_EMPTY');
+  });
+
+  it.each([
+    ['wrong root', 'unit-gate', 'RECEIPT_DISCOVERY_ROOT_MISMATCH'],
+    ['empty selection', 'unit-gate', 'RECEIPT_DISCOVERY_EMPTY'],
+    ['duplicate selection', 'unit-gate', 'RECEIPT_DISCOVERY_NOT_CANONICAL'],
+    ['wrong expected count', 'worker-dev-playwright', 'RECEIPT_DISCOVERY_TEST_COUNT_MISMATCH'],
+  ] as const)('rejects %s in receipt discovery', (_label, gateId, expectedReason) => {
+    const fixture = repository();
+    const handoffRoot = root();
+    const input = successfulEvidence(fixture, handoffRoot);
+    const selected = gate(gateId);
+    const execution = input.gateExecutions.find((candidate) => candidate.gateId === selected.id);
+    if (execution === undefined) throw new Error(`Missing ${selected.id} receipt.`);
+    const discovery = discoveryFor(selected, fixture.root);
+    if (expectedReason === 'RECEIPT_DISCOVERY_ROOT_MISMATCH') {
+      rewriteReceiptDiscovery(execution.receiptPath, {
+        ...discovery, rootDir: resolve(fixture.root, 'unexpected-discovery-root'),
+      });
+    } else if (expectedReason === 'RECEIPT_DISCOVERY_EMPTY') {
+      rewriteReceiptDiscovery(execution.receiptPath, { ...discovery, files: [] });
+    } else if (expectedReason === 'RECEIPT_DISCOVERY_NOT_CANONICAL') {
+      rewriteReceiptDiscovery(execution.receiptPath, {
+        ...discovery, files: [...discovery.files, ...discovery.files],
+      });
+    } else {
+      const identity = discovery.testIdentities[0];
+      if (identity === undefined) throw new Error('Missing Playwright identity.');
+      rewriteReceiptDiscovery(execution.receiptPath, {
+        ...discovery, testIdentities: [identity, `extra:${identity}`].sort(),
+      });
+    }
+    const outcome = buildWith(fixture, handoffRoot, input).gateOutcomes
+      .find((candidate) => candidate.id === selected.id);
+    expect(outcome?.state).toBe('failed');
+    expect(outcome?.reasons).toContain(expectedReason);
+  });
+
+  it.each(['missing', 'inconsistent'] as const)(
+    'rejects %s receipt execution accounting',
+    (mutation) => {
+      const fixture = repository();
+      const handoffRoot = root();
+      const input = successfulEvidence(fixture, handoffRoot);
+      const execution = input.gateExecutions.find((candidate) => candidate.gateId === 'unit-gate');
+      if (execution === undefined) throw new Error('Missing unit receipt.');
+      const receipt = JSON.parse(readFileSync(execution.receiptPath, 'utf8')) as GateExecutionReceipt;
+      writeFileSync(execution.receiptPath, `${JSON.stringify({
+        ...receipt,
+        executionAccounting: mutation === 'missing' ? null : {
+          ...receipt.executionAccounting,
+          requiredFiles: ['tests/unit/invented.test.ts'],
+        },
+      }, null, 2)}\n`);
+      const outcome = buildWith(fixture, handoffRoot, input).gateOutcomes
+        .find((candidate) => candidate.id === 'unit-gate');
+      expect(outcome?.state).toBe('failed');
+      expect(outcome?.reasons).toContain(mutation === 'missing'
+        ? 'RECEIPT_EXECUTION_ACCOUNTING_MISSING'
+        : 'RECEIPT_EXECUTION_ACCOUNTING_MISMATCH');
+    },
+  );
+
+  it('kills M3-REPORT-RETRY-HIDDEN with phase-aware retry accounting', () => {
+    const fixture = repository();
+    const handoffRoot = root();
+    const a = 'tests/unit/a.test.ts';
+    const b = 'tests/unit/b.test.ts';
+    const input = successfulEvidence(fixture, handoffRoot, {
+      'unit-gate': {
+        transformReport: (report) => ({
+          ...report,
+          phases: {
+            initial: phaseFor(
+              gate('unit-gate'),
+              fixture.root,
+              { kind: 'vitest', rootDir: fixture.root, files: [a, b], testIdentities: [] },
+              'initial',
+              [a, b],
+              { [a]: 'passed', [b]: 'failed' },
+            ),
+            retry: phaseFor(
+              gate('unit-gate'),
+              fixture.root,
+              { kind: 'vitest', rootDir: fixture.root, files: [b], testIdentities: [] },
+              'retry',
+              [b],
+            ),
+          },
+          verdict: { status: 'passed', passedOnRetry: [b], failedFiles: [], phaseFailures: [] },
+        }),
+      },
+    });
+    const execution = input.gateExecutions.find((candidate) => candidate.gateId === 'unit-gate');
+    if (execution === undefined) throw new Error('Missing unit receipt.');
+    rewriteReceiptDiscovery(execution.receiptPath, {
+      kind: 'vitest', rootDir: fixture.root, files: [a, b], testIdentities: [],
+    });
+    const outcome = buildWith(fixture, handoffRoot, input).gateOutcomes
+      .find((candidate) => candidate.id === 'unit-gate');
+    expect(outcome?.reasons).toEqual([]);
+    expect(outcome).toMatchObject({
+      state: 'passed-on-retry',
+      discoveredFiles: [a, b],
+      executedFiles: [a, b],
+      passedOnRetry: [b],
+      failedFiles: [],
+    });
+  });
+
+  it('rejects a retry phase whose discovery claims have no execution outcomes', () => {
+    const fixture = repository();
+    const handoffRoot = root();
+    const a = 'tests/unit/a.test.ts';
+    const b = 'tests/unit/b.test.ts';
+    const input = successfulEvidence(fixture, handoffRoot, {
+      'unit-gate': {
+        transformReport: (report) => {
+          const discovery = { kind: 'vitest' as const, rootDir: fixture.root, files: [a, b], testIdentities: [] };
+          const retry = phaseFor(
+            gate('unit-gate'),
+            fixture.root,
+            { ...discovery, files: [b] },
+            'retry',
+            [b],
+          );
+          return {
+            ...report,
+            phases: {
+              initial: phaseFor(
+                gate('unit-gate'),
+                fixture.root,
+                discovery,
+                'initial',
+                [a, b],
+                { [a]: 'passed', [b]: 'failed' },
+              ),
+              retry: { ...retry, fileOutcomes: [], executionOutcomes: [] },
+            },
+            verdict: { status: 'passed', passedOnRetry: [b], failedFiles: [], phaseFailures: [] },
+          };
+        },
+      },
+    });
+    const execution = input.gateExecutions.find((candidate) => candidate.gateId === 'unit-gate');
+    if (execution === undefined) throw new Error('Missing unit receipt.');
+    rewriteReceiptDiscovery(execution.receiptPath, {
+      kind: 'vitest', rootDir: fixture.root, files: [a, b], testIdentities: [],
+    });
+    const outcome = buildWith(fixture, handoffRoot, input).gateOutcomes
+      .find((candidate) => candidate.id === 'unit-gate');
+    expect(outcome).toMatchObject({
+      state: 'failed',
+      m1Verdict: { status: 'passed', passedOnRetry: [b] },
+    });
+    expect(outcome?.reasons).toContain('M1_EXECUTION_ACCOUNTING_EMPTY');
+  });
+
+  it('kills M3-REPORT-RETRY-SCOPE outside the initially failed files', () => {
+    const fixture = repository();
+    const handoffRoot = root();
+    const input = successfulEvidence(fixture, handoffRoot, {
+      'unit-gate': {
+        transformReport: (report) => {
+          const initial = report.phases.initial;
+          const passed = initial.fileOutcomes[0]?.file;
+          if (passed === undefined) throw new Error('Missing initial file.');
+          return {
+            ...report,
+            phases: {
+              ...report.phases,
+              retry: phaseFor(gate('unit-gate'), fixture.root, {
+                kind: 'vitest', rootDir: fixture.root, files: [passed], testIdentities: [],
+              }, 'retry'),
+            },
+          };
+        },
+      },
+    });
+    const outcome = buildWith(fixture, handoffRoot, input).gateOutcomes
+      .find((candidate) => candidate.id === 'unit-gate');
+    expect(outcome?.state).toBe('failed');
+    expect(outcome?.reasons).toContain('RETRY_DISCOVERY_SCOPE_MISMATCH');
+  });
+
+  it('kills M3-INV-RUNNER-SUBSTITUTE even when its verdict says passed', () => {
+    const fixture = repository();
+    const fakeModule = join(fixture.root, 'fake-vitest.mjs');
+    writeFileSync(fakeModule, 'export {};\n');
+    const handoffRoot = root();
+    const input = successfulEvidence(fixture, handoffRoot, {
+      'unit-gate': {
+        transformReport: (report) => ({
+          ...report,
+          phases: {
+            ...report.phases,
+            initial: {
+              ...report.phases.initial,
+              command: {
+                ...report.phases.initial.command,
+                arguments: [fakeModule, ...report.phases.initial.command.arguments.slice(1)],
+              },
+            },
+          },
+        }),
+      },
+    });
+    const outcome = buildWith(fixture, handoffRoot, input).gateOutcomes
+      .find((candidate) => candidate.id === 'unit-gate');
+    expect(outcome).toMatchObject({ state: 'failed', m1Verdict: { status: 'passed' } });
+    expect(outcome?.reasons).toContain('M1_LAUNCHER_UNAUTHENTICATED');
+  });
+
+  it('kills M3-REPORT-FAILED by preserving failedFiles and phaseFailures', () => {
+    const fixture = repository();
+    const handoffRoot = root();
+    const failedFile = 'tests/unit/vtt/handoff-report.test.ts';
+    const phaseFailure = { phase: 'initial', domain: 'reporter', reasons: ['runner-global-error'] };
+    const input = successfulEvidence(fixture, handoffRoot, {
+      'unit-gate': {
+        transformReport: (report) => ({
+          ...report,
+          phases: {
+            ...report.phases,
+            initial: {
+              ...report.phases.initial,
+              fileOutcomes: report.phases.initial.fileOutcomes.map((outcome) => ({
+                ...outcome,
+                status: 'failed',
+              })),
+              executionOutcomes: report.phases.initial.executionOutcomes.map((outcome) => ({
+                ...outcome,
+                status: 'failed',
+                approvedSkip: false,
+              })),
+            },
+          },
+          verdict: {
+            status: 'failed',
+            passedOnRetry: [],
+            failedFiles: [failedFile],
+            phaseFailures: [phaseFailure],
+          },
+        }),
+      },
+    });
+    const outcome = buildWith(fixture, handoffRoot, input).gateOutcomes
+      .find((candidate) => candidate.id === 'unit-gate');
+    expect(outcome).toMatchObject({
+      state: 'failed',
+      failedFiles: [failedFile],
+      phaseFailures: [phaseFailure],
+      m1Verdict: { status: 'failed' },
+    });
+    expect(outcome?.reasons).toContain('M1_VERDICT_FAILED');
+    publishHandoffReport({
+      repositoryRoot: fixture.root,
+      handoffRoot,
+      inputPath: inputFile(handoffRoot, input),
+      identityPolicy: fixture.policy,
+      gitReader: gitReader(),
+    });
+    const published = JSON.parse(
+      readFileSync(join(handoffRoot, 'reports/claude/handoff.json'), 'utf8'),
+    ) as HandoffReport;
+    const publishedOutcome = published.gateOutcomes.find((candidate) => candidate.id === 'unit-gate');
+    expect(publishedOutcome?.failedTestIdentities.length).toBeGreaterThan(0);
+    expect(publishedOutcome?.phaseFailures).toEqual([phaseFailure]);
+  });
+
+  it.each(['digest', 'phase UUID', 'malformed'] as const)(
+    'kills M3-REPORT-UUID and malformed evidence variants: %s',
+    (mutation) => {
+      const fixture = repository();
+      const handoffRoot = root();
+      const input = successfulEvidence(fixture, handoffRoot);
+      const execution = input.gateExecutions.find((candidate) => candidate.gateId === 'unit-gate');
+      if (execution === undefined) throw new Error('Missing unit receipt.');
+      const receipt = JSON.parse(readFileSync(execution.receiptPath, 'utf8')) as GateExecutionReceipt;
+      if (receipt.m1Report === null) throw new Error('Missing M-1 report reference.');
+      if (mutation === 'digest') {
+        writeFileSync(execution.receiptPath, `${JSON.stringify({
+          ...receipt,
+          m1Report: { ...receipt.m1Report, sha256: '0'.repeat(64) },
+        }, null, 2)}\n`);
+      } else if (mutation === 'phase UUID') {
+        writeFileSync(execution.receiptPath, `${JSON.stringify({
+          ...receipt,
+          m1Report: { ...receipt.m1Report, phaseInvocationIds: ['wrong-phase'] },
+        }, null, 2)}\n`);
+      } else {
+        writeFileSync(receipt.m1Report.path, '{malformed\n');
+      }
+      const outcome = buildWith(fixture, handoffRoot, input).gateOutcomes
+        .find((candidate) => candidate.id === 'unit-gate');
+      expect(outcome?.state).toBe('failed');
+      expect(outcome?.reasons.some((reason) => reason.startsWith('M1_REPORT_'))).toBe(true);
+    },
+  );
+
+  it('kills M3-REPORT-SUPERVISOR-FOLD for ordinary unit evidence', () => {
+    const fixture = repository();
+    const handoffRoot = root();
+    const input = successfulEvidence(fixture, handoffRoot);
+    const unit = input.gateExecutions.find((candidate) => candidate.gateId === 'unit-gate');
+    if (unit === undefined) throw new Error('Missing unit receipt.');
+    const relabeled = {
+      ...input,
+      gateExecutions: input.gateExecutions.map((execution) => execution.gateId === 'node-runtime-launch'
+        ? { ...execution, receiptPath: unit.receiptPath }
+        : execution),
+    };
+    const outcome = buildWith(fixture, handoffRoot, relabeled).gateOutcomes
+      .find((candidate) => candidate.id === 'node-runtime-launch');
+    expect(outcome).toMatchObject({
+      state: 'not-run',
+      reasons: ['REQUIRED_GATE_RECEIPT_MISMATCH: node-runtime-launch'],
+    });
+  });
+
+  it('kills M3-REPORT-SKIP-HIDDEN by keeping skips visible', () => {
+    const fixture = repository();
+    const handoffRoot = root();
+    const input = successfulEvidence(fixture, handoffRoot, {
+      'unit-gate': {
+        transformReport: (report) => ({
+          ...report,
+          phases: {
+            ...report.phases,
+            initial: {
+              ...report.phases.initial,
+              fileOutcomes: report.phases.initial.fileOutcomes.map((outcome) => ({
+                ...outcome, status: 'skipped',
+              })),
+              executionOutcomes: report.phases.initial.executionOutcomes.map((outcome) => ({
+                ...outcome, status: 'skipped', approvedSkip: true,
+              })),
+            },
+          },
+        }),
+      },
+    });
+    const outcome = buildWith(fixture, handoffRoot, input).gateOutcomes
+      .find((candidate) => candidate.id === 'unit-gate');
+    expect(outcome?.state).toBe('passed');
+    expect(outcome?.executedFiles).toEqual([]);
+    expect(outcome?.skippedFiles).toEqual(['tests/unit/vtt/handoff-report.test.ts']);
+  });
+
+  it('publishes mixed Playwright pass and approved-skip test identities', () => {
+    const fixture = repository();
+    const handoffRoot = root();
+    const selected = gate('browser-gate');
+    const file = 'tests/browser/acceptance-walkthrough.spec.ts';
+    const passed = `chromium:passed-id:${resolve(fixture.root, file)}`;
+    const skipped = `chromium:skipped-id:${resolve(fixture.root, file)}`;
+    const input = successfulEvidence(fixture, handoffRoot, {
+      'browser-gate': {
+        transformReport: (report) => {
+          const initial = {
+            ...report.phases.initial,
+            discovery: {
+              ...report.phases.initial.discovery,
+              requestedExecutionIds: [passed, skipped],
+              reportedExecutionIds: [passed, skipped],
+            },
+            fileOutcomes: [{ file, status: 'passed' as const, executionIds: [passed, skipped], reasons: [] }],
+            executionOutcomes: [
+              {
+                executionId: passed,
+                file: resolve(fixture.root, file),
+                status: 'passed' as const,
+                approvedSkip: false,
+              },
+              {
+                executionId: skipped,
+                file: resolve(fixture.root, file),
+                status: 'skipped' as const,
+                approvedSkip: true,
+              },
+            ],
+            evidence: {
+              tests: [
+                { executionId: passed, file: resolve(fixture.root, file), status: 'passed' },
+                {
+                  executionId: skipped,
+                  file: resolve(fixture.root, file),
+                  status: 'skipped',
+                  expectedStatus: 'skipped',
+                },
+              ],
+            },
+          };
+          return { ...report, phases: { initial, retry: null } };
+        },
+      },
+    });
+    const execution = input.gateExecutions.find((candidate) => candidate.gateId === selected.id);
+    if (execution === undefined) throw new Error('Missing Playwright receipt.');
+    rewriteReceiptDiscovery(execution.receiptPath, {
+      kind: 'playwright',
+      rootDir: resolve(fixture.root, 'tests/browser'),
+      files: [file],
+      testIdentities: [passed, skipped],
+    });
+    const report = buildWith(fixture, handoffRoot, input);
+    const outcome = report.gateOutcomes.find((candidate) => candidate.id === selected.id);
+    expect(outcome?.reasons).toEqual([]);
+    expect(outcome).toMatchObject({
+      state: 'passed',
+      requiredTestIdentities: [passed, skipped],
+      executedTestIdentities: [passed],
+      skippedTestIdentities: [skipped],
+      approvedSkippedTestIdentities: [skipped],
+    });
+    expect(outcome?.phaseInvocationIds).toEqual(['initial-browser-gate']);
+    publishHandoffReport({
+      repositoryRoot: fixture.root,
+      handoffRoot,
+      inputPath: inputFile(handoffRoot, input),
+      identityPolicy: fixture.policy,
+      gitReader: gitReader(),
+    });
+    const published = JSON.parse(
+      readFileSync(join(handoffRoot, 'reports/claude/handoff.json'), 'utf8'),
+    ) as HandoffReport;
+    const publishedOutcome = published.gateOutcomes.find((candidate) => candidate.id === selected.id);
+    expect(publishedOutcome).toMatchObject({
+      requiredTestIdentities: [passed, skipped],
+      executedTestIdentities: [passed],
+      failedTestIdentities: [],
+      skippedTestIdentities: [skipped],
+      approvedSkippedTestIdentities: [skipped],
+    });
+    expect(publishedOutcome?.requiredTestIdentities).toHaveLength(2);
+    expect(publishedOutcome?.executedTestIdentities).toHaveLength(1);
+    expect(publishedOutcome?.failedTestIdentities).toHaveLength(0);
+    expect(publishedOutcome?.skippedTestIdentities).toHaveLength(1);
+    expect(publishedOutcome?.approvedSkippedTestIdentities).toHaveLength(1);
+    const markdown = readFileSync(join(handoffRoot, 'reports/claude/READY.md'), 'utf8');
+    expect(markdown).toContain('tests required/executed/failed/skipped/approved=2/1/0/1/1');
+    expect(markdown).toContain(`skippedTests=${skipped}`);
+    expect(markdown).toContain('phaseInvocationIds=initial-browser-gate');
+    expect(markdown).toContain('prerequisites=none');
+  });
+
+  it('extracts pass and approved-skip identities from the unchanged M-1 Playwright evidence shape', () => {
+    const fixture = repository();
+    const selected = gate('browser-gate');
+    const report = reportFor(selected, fixture.root);
+    const file = resolve(fixture.root, 'tests/browser/acceptance-walkthrough.spec.ts');
+    const passed = `chromium:passed-id:${file}`;
+    const skipped = `chromium:skipped-id:${file}`;
+    const parsed = parseM1GateReport({
+      ...report,
+      phases: {
+        initial: {
+          ...report.phases.initial,
+          executionOutcomes: undefined,
+          evidence: {
+            tests: [
+              {
+                executionId: passed,
+                file,
+                status: 'passed',
+                expectedStatus: 'passed',
+                onTestEndObserved: true,
+              },
+              {
+                executionId: skipped,
+                file,
+                status: 'skipped',
+                expectedStatus: 'skipped',
+                onTestEndObserved: true,
+              },
+            ],
+          },
+        },
+        retry: null,
+      },
+    });
+    expect(parsed.phases.initial.executionOutcomes).toEqual([
+      { executionId: passed, file, status: 'passed', approvedSkip: false },
+      { executionId: skipped, file, status: 'skipped', approvedSkip: true },
+    ]);
+  });
+
+  it('makes absent or invalid evidence PARTIAL and check mode performs no repair', () => {
+    const fixture = repository();
+    const absent = buildHandoffReport({ repositoryRoot: fixture.root, gitReader: gitReader() });
+    expect(absent).toMatchObject({
+      readiness: 'PARTIAL', reasons: ['SUPERVISOR_RESULTS_MISSING'], evidence: null,
+    });
+    expect(absent.art.requests).toEqual([]);
+    const handoffRoot = root();
+    const invalid = inputFile(handoffRoot, { schemaVersion: 2, gateExecutions: [] });
+    expect(buildHandoffReport({
+      repositoryRoot: fixture.root,
+      inputPath: invalid,
+      gitReader: gitReader(),
+    })).toMatchObject({
+      readiness: 'PARTIAL', reasons: ['SUPERVISOR_RESULTS_INVALID'], evidence: null,
+      art: { requests: [] },
+    });
+    const valid = successfulEvidence(fixture, handoffRoot);
+    const mismatchedArt = {
+      ...valid,
+      artRequests: [{
+        ...valid.artRequests[0],
+        requestPath: 'art/outbox/invented.request.json',
+      }],
+    };
+    expect(buildHandoffReport({
+      repositoryRoot: fixture.root,
+      inputPath: inputFile(root(), mismatchedArt),
+      gitReader: gitReader(),
+    })).toMatchObject({
+      readiness: 'PARTIAL', reasons: ['SUPERVISOR_RESULTS_INVALID'], evidence: null,
+      art: { requests: [] },
+    });
+    expect(() => publishHandoffReport({
+      repositoryRoot: fixture.root,
+      handoffRoot,
+      inputPath: invalid,
+      check: true,
+      identityPolicy: fixture.policy,
+      gitReader: gitReader(),
+    })).toThrow('HANDOFF_REPORT_MISSING');
+    expect(existsSync(join(handoffRoot, 'reports'))).toBe(false);
+  });
+
+  it('reports Windows unavailability independently of passed gate evidence', () => {
+    const fixture = repository();
+    const handoffRoot = root();
+    const input = successfulEvidence(fixture, handoffRoot);
+    const report = buildWith(fixture, handoffRoot, {
+      ...input,
+      windowsProbe: { ...input.windowsProbe, status: 'UNAVAILABLE', reason: 'POWERSHELL_UNAVAILABLE' },
+    });
+    expect(report.readiness).toBe('PARTIAL');
+    expect(report.reasons).toEqual(['WINDOWS_PROBE_UNAVAILABLE']);
+    expect(report.gateOutcomes.every((outcome) => outcome.state === 'passed')).toBe(true);
+    expect(report.evidence?.windowsProbe).toEqual({
+      status: 'UNAVAILABLE',
+      command: 'VTT_WINDOWS_INTEROP=1 npm run windows:probe',
+      reason: 'POWERSHELL_UNAVAILABLE',
+    });
+  });
+
+  it('detects report drift in check mode without overwriting supplied bytes', () => {
+    const fixture = repository();
+    const handoffRoot = root();
+    const input = inputFile(handoffRoot, successfulEvidence(fixture, handoffRoot));
+    publishHandoffReport({
+      repositoryRoot: fixture.root,
+      handoffRoot,
+      inputPath: input,
+      identityPolicy: fixture.policy,
+      gitReader: gitReader(),
+    });
+    const ready = join(handoffRoot, 'reports/claude/READY.md');
+    writeFileSync(ready, 'pre-existing divergent report\n');
+    expect(() => publishHandoffReport({
+      repositoryRoot: fixture.root,
+      handoffRoot,
+      inputPath: input,
+      check: true,
+      identityPolicy: fixture.policy,
+      gitReader: gitReader(),
+    })).toThrow('HANDOFF_REPORT_MISMATCH');
+    expect(readFileSync(ready, 'utf8')).toBe('pre-existing divergent report\n');
+  });
+});
+
+function parseRendered(command: string): readonly string[] {
+  const tokens: string[] = [];
+  let token = '';
+  let quote: 'single' | 'double' | null = null;
+  let started = false;
+  for (const character of command) {
+    if (quote === 'single' && character === "'") {
+      quote = null;
+    } else if (quote === 'double' && character === '"') {
+      quote = null;
+    } else if (quote === null && character === "'") {
+      quote = 'single';
+      started = true;
+    } else if (quote === null && character === '"') {
+      quote = 'double';
+      started = true;
+    } else if (quote === null && character === ' ') {
+      if (started) tokens.push(token);
+      token = '';
+      started = false;
+    } else {
+      token += character;
+      started = true;
+    }
+  }
+  if (quote !== null) throw new Error('Unclosed quote.');
+  if (started) tokens.push(token);
+  return tokens;
+}
+
+describe('executable handoff gate inventory', () => {
+  it('kills M3-INV-GATE-DROP, M3-INV-CUMULATIVE-DROP, and M3-INV-BROWSER-DROP', () => {
+    expect(REQUIRED_HANDOFF_GATES.map((candidate) => candidate.id)).toEqual(EXPECTED_GATE_IDS);
+    const cumulative = gate('cumulative-targeted-vitest');
+    expect(cumulative.discovery.kind).toBe('vitest');
+    if (cumulative.discovery.kind !== 'vitest' || cumulative.discovery.expectedFiles === 'from-config') {
+      throw new Error('Cumulative discovery is not explicit.');
+    }
+    expect(cumulative.discovery.expectedFiles).toEqual(EXPECTED_CUMULATIVE_FILES);
+    expect(new Set(cumulative.discovery.expectedFiles).size).toBe(34);
+    const browserGates = Object.fromEntries(REQUIRED_HANDOFF_GATES.flatMap((candidate) =>
+      candidate.discovery.kind === 'playwright' ? [[candidate.id, {
+        config: candidate.discovery.configPath,
+        selectors: candidate.discovery.selectors,
+        artifact: Object.entries(candidate.env)
+          .find(([name]) => name === 'VTT_HANDOFF_ARTIFACT')?.[1],
+      }]] : []));
+    expect(browserGates).toEqual(EXPECTED_BROWSER_GATES);
+    expect(REQUIRED_HANDOFF_GATES.map(renderGateCommand).join('\n')).not.toMatch(/<[^>]*>|TODO/u);
+  });
+
+  it('kills M3-INV-HAND-COMMAND and round-trips rendered quoting', () => {
+    const rendered = renderGateCommand({
+      ...gate('full-typecheck'),
+      argv: ['node', 'path with spaces', "apostrophe's", ''],
+      env: { EMPTY: '', LABEL: "player's gate" },
+    });
+    expect(parseRendered(rendered)).toEqual([
+      'EMPTY=',
+      "LABEL=player's gate",
+      'node',
+      'path with spaces',
+      "apostrophe's",
+      '',
+    ]);
+    expect(rendered).not.toContain('full-typecheck:');
+    expect(parseRendered(renderReceiptCommand(
+      gate('worker-dist-playwright'),
+      '/tmp/report directory',
+      ["/tmp/build's receipt.json"],
+    ))).toEqual([
+      'npm', 'run', 'handoff:gate', '--', 'run', 'worker-dist-playwright',
+      '--report-dir', '/tmp/report directory', '--prerequisite-receipt', "/tmp/build's receipt.json",
+    ]);
+  });
+
+  it('kills M3-INV-RUNNER-SUBSTITUTE and M3-INV-DISCOVERY-REDIRECT', () => {
+    const selected = gate('runtime-parity-playwright');
+    for (const name of [
+      'DND_GATE_VITEST_MODULE',
+      'DND_GATE_PLAYWRIGHT_MODULE',
+      'DND_GATE_FLOCK_MODULE',
+    ]) {
+      expect(() => prepareExecutionEnvironment({ [name]: 'fake.mjs' }, selected, root()))
+        .toThrow(`FORBIDDEN_GATE_MODULE_OVERRIDE: ${name}`);
+    }
+    const prepared = prepareDiscoveryEnvironment({
+      DND_GATE_VITEST_MODULE: 'fake-vitest.mjs',
+      DND_GATE_PLAYWRIGHT_MODULE: 'fake-playwright.mjs',
+      DND_GATE_FLOCK_MODULE: 'fake-flock.mjs',
+      PLAYWRIGHT_JSON_OUTPUT_FILE: '/tmp/redirect.json',
+      PLAYWRIGHT_JSON_OUTPUT_NAME: 'redirect.json',
+      PLAYWRIGHT_JSON_OUTPUT_DIR: '/tmp/redirect',
+    }, selected);
+    for (const name of [
+      'DND_GATE_VITEST_MODULE',
+      'DND_GATE_PLAYWRIGHT_MODULE',
+      'DND_GATE_FLOCK_MODULE',
+      'PLAYWRIGHT_JSON_OUTPUT_FILE',
+      'PLAYWRIGHT_JSON_OUTPUT_NAME',
+      'PLAYWRIGHT_JSON_OUTPUT_DIR',
+    ]) expect(prepared).not.toHaveProperty(name);
+    expect(prepared).toMatchObject({ VTT_HANDOFF_ARTIFACT: 'dev', PLAYWRIGHT_PORT: '4410' });
+    const inventoryOverride = {
+      ...selected,
+      env: { ...selected.env, DND_GATE_PLAYWRIGHT_MODULE: 'fake-playwright.mjs' },
+    };
+    expect(() => prepareExecutionEnvironment({}, inventoryOverride, root()))
+      .toThrow('FORBIDDEN_GATE_MODULE_OVERRIDE: DND_GATE_PLAYWRIGHT_MODULE');
+    expect(validateGateInventory(
+      REQUIRED_HANDOFF_GATES.map((candidate) => candidate.id === selected.id ? inventoryOverride : candidate),
+      process.cwd(),
+      { fileExists: () => true, commandPath: () => '/resolved/command', packageScripts: {} },
+    ).errors).toContain(`GATE_ENV_FORBIDDEN: ${selected.id}: DND_GATE_PLAYWRIGHT_MODULE`);
+    const redirectingGate = {
+      ...selected,
+      env: { ...selected.env, PLAYWRIGHT_JSON_OUTPUT_FILE: '/tmp/inventory-redirect.json' },
+    };
+    expect(prepareDiscoveryEnvironment({}, redirectingGate)).not.toHaveProperty('PLAYWRIGHT_JSON_OUTPUT_FILE');
+  });
+
+  // M3-INV-PLACEHOLDER, ENV-DROP, ENV-ILLEGAL, CONFIG-MISSING, ARGV-MISSING, TIER-CHANGE, PREREQ-DROP.
+  it('kills every M3 inventory validator mutant', () => {
+    const packageScripts = {
+      build: 'tsc -b && vite build --configLoader runner && node tools/assert-dist-clean.mjs',
+      'test:gate': 'node tools/gate-vitest.mjs',
+      'test:gate:browser': 'node tools/gate-playwright.mjs',
+    };
+    const resolution = (missing: string | null): InventoryResolution => ({
+      fileExists: (path) => missing === null || !path.endsWith(missing),
+      commandPath: () => '/resolved/command',
+      packageScripts,
+    });
+    const replace = (id: string, transform: (candidate: RequiredHandoffGate) => RequiredHandoffGate) =>
+      REQUIRED_HANDOFF_GATES.map((candidate) => candidate.id === id ? transform(candidate) : candidate);
+    expect(validateGateInventory(REQUIRED_HANDOFF_GATES, process.cwd(), resolution(null)))
+      .toEqual({ valid: true, errors: [] });
+    expect(validateGateInventory(replace('full-typecheck', (candidate) => ({
+      ...candidate, argv: ['npx', 'tsc', '<placeholder>'],
+    })), process.cwd(), resolution(null)).errors).toContain('GATE_ARGV_INVALID: full-typecheck');
+    expect(validateGateInventory(replace('runtime-parity-playwright', (candidate) => ({
+      ...candidate,
+      env: { PLAYWRIGHT_PORT: '4410', PLAYWRIGHT_WORKERS: '1' },
+    })), process.cwd(), resolution(null)).errors)
+      .toContain('GATE_ENV_MISSING: runtime-parity-playwright: VTT_HANDOFF_ARTIFACT');
+    expect(validateGateInventory(REQUIRED_HANDOFF_GATES, process.cwd(), resolution('playwright.config.ts')).errors)
+      .toContain('GATE_CONFIG_MISSING: browser-gate: playwright.config.ts');
+    expect(validateGateInventory(REQUIRED_HANDOFF_GATES, process.cwd(), resolution('tools/gate-vitest.mjs')).errors)
+      .toContain('ARGV_NODE_TARGET_MISSING: node-runtime-launch: tools/gate-vitest.mjs');
+    expect(validateGateInventory(REQUIRED_HANDOFF_GATES, process.cwd(), resolution('node_modules/.bin/tsc')).errors)
+      .toContain('ARGV_LOCAL_EXECUTABLE_MISSING: full-typecheck: tsc');
+    for (const env of [
+      { PLAYWRIGHT_PORT: '4173', PLAYWRIGHT_WORKERS: '1', VTT_HANDOFF_ARTIFACT: 'dev' },
+      { PLAYWRIGHT_PORT: '4410', PLAYWRIGHT_WORKERS: '2', VTT_HANDOFF_ARTIFACT: 'dev' },
+      { PLAYWRIGHT_PORT: '4410', PLAYWRIGHT_WORKERS: '1', VTT_HANDOFF_ARTIFACT: 'prod' },
+    ]) {
+      expect(validateGateInventory(replace('runtime-parity-playwright', (candidate) => ({
+        ...candidate, env,
+      })), process.cwd(), resolution(null)).valid).toBe(false);
+    }
+    expect(validateGateInventory(replace('node-runtime-launch', (candidate) => ({
+      ...candidate, tier: 'landing',
+    })), process.cwd(), resolution(null)).errors).toContain('GATE_SUPERVISOR_TIER_INVALID');
+    expect(validateGateInventory(replace('worker-dist-playwright', (candidate) => ({
+      ...candidate, prerequisites: [],
+    })), process.cwd(), resolution(null)).errors).toContain('GATE_DIST_BUILD_PREREQUISITE_MISSING');
+    expect(Object.hasOwn(gate('unit-gate'), 'command')).toBe(false);
+  });
+
+  it('rejects shell substitution and inconsistent runner/discovery relationships independently', () => {
+    const packageScripts = {
+      build: 'tsc -b && vite build --configLoader runner && node tools/assert-dist-clean.mjs',
+      'test:gate': 'node tools/gate-vitest.mjs',
+      'test:gate:browser': 'node tools/gate-playwright.mjs',
+    };
+    const resolution: InventoryResolution = {
+      fileExists: () => true,
+      commandPath: () => '/resolved/command',
+      packageScripts,
+    };
+    const replace = (id: string, transform: (candidate: RequiredHandoffGate) => RequiredHandoffGate) =>
+      REQUIRED_HANDOFF_GATES.map((candidate) => candidate.id === id ? transform(candidate) : candidate);
+    expect(validateGateInventory(replace('full-typecheck', (candidate) => ({
+      ...candidate, argv: ['npx', 'tsc', '$(touch forbidden)'],
+    })), process.cwd(), resolution).errors).toContain('GATE_ARGV_INVALID: full-typecheck');
+    expect(validateGateInventory(replace('full-typecheck', (candidate) => ({
+      ...candidate, env: { OUTPUT: '$(touch forbidden)' },
+    })), process.cwd(), resolution).errors).toContain('GATE_ENV_INVALID: full-typecheck: OUTPUT');
+    expect(validateGateInventory(replace('unit-gate', (candidate) => ({
+      ...candidate, argv: ['node', 'tools/gate-playwright.mjs'],
+    })), process.cwd(), resolution).errors).toContain('GATE_RUNNER_KIND_MISMATCH: unit-gate');
+    expect(validateGateInventory(replace('worker-dev-playwright', (candidate) => ({
+      ...candidate, argv: ['node', 'tools/gate-vitest.mjs'],
+    })), process.cwd(), resolution).errors).toContain('GATE_RUNNER_KIND_MISMATCH: worker-dev-playwright');
+    expect(validateGateInventory(replace('node-runtime-launch', (candidate) => ({
+      ...candidate,
+      discovery: {
+        ...candidate.discovery,
+        selectors: ['tests/unit/vtt/handoff-report.test.ts'],
+        expectedFiles: ['tests/unit/vtt/handoff-report.test.ts'],
+      },
+    })), process.cwd(), resolution).errors).toContain('GATE_SUPERVISOR_SELECTOR_INVALID: node-runtime-launch');
+    expect(validateGateInventory(replace('unit-gate', (candidate) => ({
+      ...candidate,
+      discovery: { kind: 'none' },
+      report: { receipt: 'gate-execution-v1', gateVerdict: null },
+    })), process.cwd(), resolution).errors).toContain('GATE_TEST_REQUIREMENT_MISSING: unit-gate');
+  });
+
+  it('rejects a dangling local package executable symlink', () => {
+    const repositoryRoot = root();
+    mkdirSync(join(repositoryRoot, 'node_modules/.bin'), { recursive: true });
+    writeFileSync(join(repositoryRoot, 'package.json'), JSON.stringify({ scripts: {} }));
+    symlinkSync('../missing-package/bin.js', join(repositoryRoot, 'node_modules/.bin/m3-missing'));
+    const candidate = REQUIRED_HANDOFF_GATES.map((entry) => entry.id === 'full-typecheck'
+      ? { ...entry, argv: ['npx', 'm3-missing'] as const }
+      : entry);
+    expect(validateGateInventory(candidate, repositoryRoot).errors)
+      .toContain('ARGV_LOCAL_EXECUTABLE_MISSING: full-typecheck: m3-missing');
+  });
+
+  it('runs through an injected adapter and requires an explicit zero outer exit', () => {
+    const reportRoot = root();
+    const selected = gate('full-typecheck');
+    let sequence = 0;
+    const adapter = (status: number | null): InventoryRunnerAdapter => ({
+      revision: () => COMMIT,
+      discover: () => ({ kind: 'none', rootDir: null, files: [], testIdentities: [] }),
+      execute: () => ({ status, signal: null }),
+      invocationId: () => `adapter-${String(sequence += 1)}`,
+      timestamp: () => '2026-09-14T12:00:00.000Z',
+    });
+    const passed = runInventoryGate(selected, join(reportRoot, 'passed'), process.cwd(), [], adapter(0));
+    expect(passed.receipt).toMatchObject({
+      finalStatus: 'passed',
+      outer: { exitCode: 0, signal: null, spawnError: null },
+      failureReasons: [],
+    });
+    expect(existsSync(passed.path)).toBe(true);
+    const missingExit = runInventoryGate(
+      selected,
+      join(reportRoot, 'missing-exit'),
+      process.cwd(),
+      [],
+      adapter(null),
+    );
+    expect(missingExit.receipt).toMatchObject({
+      finalStatus: 'failed',
+      outer: { exitCode: null, signal: null, spawnError: null },
+      failureReasons: ['OUTER_EXIT_MISSING'],
+    });
+  });
+
+  it.each(['missing sidecar', 'pending module'] as const)(
+    'preserves failed M-1 diagnostics when execution accounting has a %s',
+    (variant) => {
+      const selected = gate('unit-gate');
+      const repositoryRoot = process.cwd();
+      const discovery = discoveryFor(selected, repositoryRoot);
+      const base = reportFor(selected, repositoryRoot);
+      const executionId = base.phases.initial.discovery.requestedExecutionIds[0];
+      const file = base.phases.initial.fileOutcomes[0]?.file;
+      if (executionId === undefined || file === undefined) throw new Error('Missing native M-1 fixture identity.');
+      const { executionOutcomes: _executionOutcomes, ...initialWithoutOutcomes } = base.phases.initial;
+      const phaseFailures = variant === 'missing sidecar'
+        ? [
+            { phase: 'initial', domain: 'process', reasons: ['process-exit-nonzero'] },
+            { phase: 'initial', domain: 'reporter', reasons: ['execution-evidence-missing'] },
+            { phase: 'initial', domain: 'discovery', reasons: ['reported-file-missing'] },
+          ]
+        : [
+            { phase: 'initial', domain: 'process', reasons: ['process-exit-1'] },
+            { phase: 'initial', domain: 'reporter', reasons: ['execution-unfinished'] },
+            { phase: 'initial', domain: 'discovery', reasons: ['discovery-mismatch'] },
+          ];
+      const initial = variant === 'missing sidecar'
+        ? initialWithoutOutcomes
+        : {
+            ...initialWithoutOutcomes,
+            discovery: {
+              ...initialWithoutOutcomes.discovery,
+              reportedExecutionIds: [],
+            },
+            fileOutcomes: [{
+              file,
+              status: 'unfinished',
+              executionIds: [executionId],
+              reasons: ['execution-unfinished'],
+            }],
+            evidence: {
+              version: 1,
+              kind: 'vitest',
+              phase: 'initial',
+              phaseInvocationId: initialWithoutOutcomes.phaseInvocationId,
+              lifecycle: { onTestRunEnd: true },
+              specifications: [{ executionId, file: resolve(repositoryRoot, file) }],
+              modules: [{ executionId, file: resolve(repositoryRoot, file), state: 'pending', errors: [] }],
+              globalErrors: [],
+              fatalReasons: [],
+              passWithNoTests: false,
+              terminalReason: 'failed',
+              processTimeoutObserved: false,
+            },
+          };
+      const rawReport = {
+        ...base,
+        phases: { initial, retry: null },
+        verdict: {
+          status: 'failed',
+          passedOnRetry: [],
+          failedFiles: [file],
+          phaseFailures,
+        },
+      };
+      const reportRoot = root();
+      let sequence = 0;
+      const adapter: InventoryRunnerAdapter = {
+        revision: () => COMMIT,
+        discover: () => discovery,
+        execute: (_gate, _root, environment) => {
+          const directory = environment.DND_GATE_REPORT_DIR;
+          if (directory === undefined) throw new Error('Missing M-1 report directory.');
+          writeFileSync(join(directory, 'vitest-gate-native.json'), `${JSON.stringify(rawReport, null, 2)}\n`);
+          return { status: 1, signal: null };
+        },
+        invocationId: () => `native-${String(sequence += 1)}`,
+        timestamp: () => '2026-09-14T12:00:00.000Z',
+      };
+      const run = runInventoryGate(selected, reportRoot, repositoryRoot, [], adapter);
+      expect(run.receipt.m1Report).not.toBeNull();
+      expect(run.receipt.m1Verdict).toEqual(rawReport.verdict);
+      expect(run.receipt.failureReasons.some((reason) => reason.startsWith('M1_REPORT_INVALID'))).toBe(false);
+      if (variant === 'missing sidecar') {
+        expect(run.receipt.executionAccounting).toBeNull();
+        expect(run.receipt.failureReasons).toContain('M1_EXECUTION_ACCOUNTING_UNAVAILABLE');
+      }
+      const outcome = reconcileGateReceipt(selected, run.path, COMMIT, repositoryRoot);
+      expect(outcome.state).toBe('failed');
+      expect(outcome.m1Verdict).toEqual(rawReport.verdict);
+      expect(outcome.phaseFailures).toEqual(phaseFailures);
+      if (variant === 'pending module') {
+        expect(outcome.executedTestIdentities).toEqual([]);
+        expect(outcome.reasons).toContain('M1_EXECUTION_ACCOUNTING_INCOMPLETE');
+      }
+    },
+  );
+
+  it('kills M3-REPORT-PW-IDENTITY with config.rootDir-relative nested locations', () => {
+    const fixture = repository();
+    const rootDir = join(fixture.root, 'tests/browser');
+    const result = parsePlaywrightList({
+      config: { rootDir },
+      errors: [],
+      suites: [{
+        file: 'nested/journey.spec.ts',
+        suites: [{
+          specs: [{ id: 'test-id', tests: [{ projectName: 'chromium' }] }],
+        }],
+      }],
+    }, fixture.root);
+    expect(result.files).toEqual(['tests/browser/nested/journey.spec.ts']);
+    expect(result.testIdentities).toEqual([
+      `chromium:test-id:${join(rootDir, 'nested/journey.spec.ts')}`,
+    ]);
+    const selected = gate('worker-dev-playwright');
+    const file = result.files[0];
+    if (file === undefined) throw new Error('Missing nested Playwright file.');
+    const initial = phaseFor(selected, fixture.root, result, 'initial', [file], { [file]: 'failed' });
+    const retry = phaseFor(selected, fixture.root, result, 'retry', [file]);
+    const report: M1GateReport = {
+      version: 2,
+      kind: 'playwright',
+      phases: { initial, retry },
+      verdict: { status: 'passed', passedOnRetry: [file], failedFiles: [], phaseFailures: [] },
+    };
+    expect(reconcileM1Discovery(selected, result, report))
+      .not.toContain('RETRY_DISCOVERY_IDENTITY_MISMATCH');
+    expect(reconcileM1Discovery(selected, result, {
+      ...report,
+      phases: {
+        initial,
+        retry: {
+          ...retry,
+          discovery: { ...retry.discovery, reportedExecutionIds: [] },
+        },
+      },
+    })).toContain('RETRY_DISCOVERY_IDENTITY_MISMATCH');
+  });
+
+  it('kills M3-REPORT-SUPERVISOR-FOLD in direct reconciliation', () => {
+    const fixture = repository();
+    const evidenceRoot = root();
+    const unitReceipt = writeReceipt(fixture, evidenceRoot, gate('unit-gate'));
+    expect(reconcileGateReceipt(gate('node-runtime-launch'), unitReceipt, COMMIT, fixture.root))
+      .toMatchObject({ state: 'not-run' });
+  });
+});

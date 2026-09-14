@@ -27,6 +27,7 @@ import { applyRevisionDelta, diffTurnContextValues } from '../../../src/vtt/dm-b
 import { EngineRoundSession } from '../../../src/vtt/engine-round-session';
 import { engineSchemaInternals } from '../../../src/vtt/mcp/schemas';
 import { applyRoomInitiativeProfile } from '../../../src/vtt/room-generator';
+import { renderTurnContextForDmMode } from '../../../src/vtt/blind-turn-context';
 
 const actorId = combatantId('combatant:renderer-actor');
 const targetId = combatantId('combatant:renderer-target');
@@ -168,6 +169,21 @@ function actorContext() {
 }
 
 describe('renderer profile', () => {
+  it('selects the blind renderer before the advice renderer can observe the context', () => {
+    let adviceCalls = 0;
+    const rendered = renderTurnContextForDmMode({
+      dmMode: 'blind',
+      advice: () => {
+        adviceCalls += 1;
+        return 'advice';
+      },
+      blind: () => 'blind',
+    });
+
+    expect(rendered).toBe('blind');
+    expect(adviceCalls).toBe(0);
+  });
+
   it.each(HARD_FIXTURE_CAP_CASES)(
     'emits a JSON-serializable schema-valid context for hard fixture %i at %i KiB',
     async (seed, capKib) => {

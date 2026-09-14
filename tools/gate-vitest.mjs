@@ -1,45 +1,136 @@
 #!/usr/bin/env node
 
-/**
- * Load-tolerant Vitest gate.
- *
- * Usage: `npm run test:gate`. The complete first pass and the one permitted
- * serial retry both acquire `/tmp/dnd-gate.lock`. JSON reporters are retained
- * in `/tmp/dnd-gate-reports` (or `DND_GATE_REPORT_DIR`) and the printed final
- * report distinguishes load flakes from files that failed both attempts.
- */
-
 import { resolve } from 'node:path';
 import {
+  phaseArtifactPaths,
   printVerdict,
-  reportPath,
-  repositoryPath,
   runLockedPhase,
   writeGateReport,
 } from './gate-runner-lib.mjs';
+import { classifyPhase, reduceGateVerdict } from './gate-verdict.mjs';
 
-function resultsFromReporter(reporter) {
-  if (reporter === null || typeof reporter !== 'object' || !Array.isArray(reporter.testResults)) return [];
-  return reporter.testResults.flatMap((result) => {
-    if (result === null || typeof result !== 'object' || typeof result.name !== 'string') return [];
-    const assertions = Array.isArray(result.assertionResults) ? result.assertionResults : [];
-    const assertionFailed = assertions.some((assertion) =>
-      assertion !== null && typeof assertion === 'object' && assertion.status === 'failed');
-    return [{
-      file: repositoryPath(result.name),
-      status: result.status === 'passed' && !assertionFailed ? 'passed' : 'failed',
-    }];
-  });
+const VALUE_OPTIONS = new Set([
+  '-r', '--root', '-c', '--config', '-u', '--update', '-t', '--testNamePattern',
+  '--dir', '--api', '--silent', '--mode', '--browser', '--browser.name',
+  '--browser.api', '--browser.api.port', '--browser.api.host', '--browser.connectTimeout',
+  '--browser.trace', '--browser.locators', '--pool', '--execArgv', '--vmMemoryLimit',
+  '--environment', '--shard', '--changed', '--sequence', '--sequence.seed',
+  '--sequence.hooks', '--sequence.setupFiles', '--inspect', '--inspectBrk',
+  '--testTimeout', '--hookTimeout', '--bail', '--retry', '--retry.count',
+  '--retry.delay', '--retry.condition', '--diff', '--exclude', '--project',
+  '--slowTestThreshold', '--teardownTimeout', '--maxConcurrency', '--attachmentsDir',
+  '--configLoader', '--mergeReports', '--listTags', '--tagsFilter', '--experimental',
+  '--coverage.provider', '--coverage.include', '--coverage.exclude',
+  '--coverage.reportsDirectory', '--coverage.reporter', '--coverage.thresholds.autoUpdate',
+  '--coverage.thresholds.lines', '--coverage.thresholds.functions',
+  '--coverage.thresholds.branches', '--coverage.thresholds.statements',
+  '--coverage.ignoreClassMethods', '--coverage.processingConcurrency',
+  '--coverage.customProviderModule', '--coverage.watermarks.statements',
+  '--coverage.watermarks.lines', '--coverage.watermarks.branches',
+  '--coverage.watermarks.functions', '--coverage.changed', '--coverage.htmlDir',
+  '--typecheck.checker', '--typecheck.tsconfig', '--typecheck.spawnTimeout',
+  '--expect', '--expect.poll.interval', '--expect.poll.timeout',
+  '--experimental.importDurations.print', '--experimental.importDurations.limit',
+  '--experimental.importDurations.thresholds.warn', '--experimental.importDurations.thresholds.danger',
+  '--experimental.vcsProvider',
+]);
+
+function splitTail(argumentsList) {
+  const delimiter = argumentsList.indexOf('--');
+  return delimiter === -1
+    ? { head: argumentsList, tail: [] }
+    : { head: argumentsList.slice(0, delimiter), tail: argumentsList.slice(delimiter) };
 }
 
-function unique(values) {
-  return [...new Set(values)].sort();
+function normalizedOptionName(argument) {
+  const name = optionName(argument);
+  if (!name.startsWith('--')) return name;
+  return `--${name.slice(2).replace(/-([a-z])/g, (_match, letter) => letter.toUpperCase())}`;
+}
+
+function isNegatedOption(argument) {
+  return optionName(argument).startsWith('--no-');
+}
+
+function isValueOption(argument) {
+  return VALUE_OPTIONS.has(normalizedOptionName(argument));
+}
+
+function gateOwnedOption(argument) {
+  const name = normalizedOptionName(argument);
+  return name === '--reporter' || name === '--outputFile' || name.startsWith('--outputFile.') ||
+    name === '--configLoader';
+}
+
+function retryControlledOption(argument) {
+  const name = normalizedOptionName(argument);
+  return gateOwnedOption(argument) || name === '--fileParallelism' || name === '--noFileParallelism' || name === '--maxWorkers';
+}
+
+function optionTakesValue(argument) {
+  const name = normalizedOptionName(argument);
+  return name === '--reporter' || name === '--outputFile' || name.startsWith('--outputFile.') ||
+    name === '--configLoader' || name === '--maxWorkers';
+}
+
+function optionName(argument) {
+  const equals = argument.indexOf('=');
+  return equals === -1 ? argument : argument.slice(0, equals);
+}
+
+function initialArgumentsFrom(argumentsList) {
+  const { head, tail } = splitTail(argumentsList);
+  const retained = [];
+  for (let index = 0; index < head.length; index += 1) {
+    const argument = head[index];
+    if (!gateOwnedOption(argument)) {
+      retained.push(argument);
+      continue;
+    }
+    if (!argument.includes('=') && optionTakesValue(argument) &&
+      head[index + 1] !== undefined && !head[index + 1].startsWith('-')) index += 1;
+  }
+  return [...retained, ...tail];
+}
+
+export function retainedVitestRetryTokens(argumentsList) {
+  const { head, tail } = splitTail(argumentsList);
+  const retained = [];
+  for (let index = 0; index < head.length; index += 1) {
+    const argument = head[index];
+    if (retryControlledOption(argument)) {
+      const next = head[index + 1];
+      const consumesBoolean = normalizedOptionName(argument) === '--fileParallelism' &&
+        !isNegatedOption(argument) && (next === 'true' || next === 'false');
+      if (!argument.includes('=') && !isNegatedOption(argument) && (optionTakesValue(argument) || consumesBoolean) &&
+        next !== undefined && !next.startsWith('-')) index += 1;
+      continue;
+    }
+    if (!argument.startsWith('-')) continue;
+    retained.push(argument);
+    if (!argument.includes('=') && isNegatedOption(argument)) continue;
+    if (!argument.includes('=') && isValueOption(argument)) {
+      const value = head[index + 1];
+      if (value !== undefined && !value.startsWith('-')) {
+        retained.push(value);
+        index += 1;
+      }
+    } else if (!argument.includes('=')) {
+      const value = head[index + 1];
+      if (value === 'true' || value === 'false') {
+        retained.push(value);
+        index += 1;
+      }
+    }
+  }
+  return { retained, tail };
 }
 
 const vitestModule = resolve(process.env.DND_GATE_VITEST_MODULE ?? 'node_modules/vitest/vitest.mjs');
+const evidenceReporter = resolve('tools/gate-vitest-evidence-reporter.mjs');
 const passthroughArguments = process.argv.slice(2);
-const initialReporterPath = reportPath('vitest', 'initial');
-const initial = runLockedPhase({
+const initialArtifacts = phaseArtifactPaths('vitest', 'initial');
+const initialRaw = runLockedPhase({
   kind: 'vitest',
   phase: 'initial',
   executable: process.execPath,
@@ -49,58 +140,46 @@ const initial = runLockedPhase({
     '--configLoader',
     'runner',
     '--reporter=json',
-    `--outputFile.json=${initialReporterPath}`,
-    ...passthroughArguments,
+    `--reporter=${evidenceReporter}`,
+    `--outputFile.json=${initialArtifacts.reporterPath}`,
+    ...initialArgumentsFrom(passthroughArguments),
   ],
-  reporterPath: initialReporterPath,
+  artifacts: initialArtifacts,
 });
-initial.results = resultsFromReporter(initial.reporter);
-
-const initialFailedFiles = unique(
-  initial.results.filter((result) => result.status === 'failed').map((result) => result.file),
-);
-const initialRunnerFailure = initial.reporterReadError !== null ||
-  (initialFailedFiles.length === 0 && initial.reporter?.success !== true);
+const initial = classifyPhase({ kind: 'vitest', ...initialRaw, requestedFiles: null });
+const initialFailedFiles = initial.fileOutcomes
+  .filter((outcome) => outcome.status === 'failed')
+  .map((outcome) => outcome.file);
 
 let retry = null;
-let loadFlakes = [];
-let failed = [];
 if (initialFailedFiles.length > 0) {
-  const retryReporterPath = reportPath('vitest', 'retry');
-  retry = runLockedPhase({
+  const retryArtifacts = phaseArtifactPaths('vitest', 'retry');
+  const parsed = retainedVitestRetryTokens(passthroughArguments);
+  const retryRaw = runLockedPhase({
     kind: 'vitest',
     phase: 'retry',
     executable: process.execPath,
     arguments: [
       vitestModule,
       'run',
+      ...parsed.retained,
       '--configLoader',
       'runner',
       '--reporter=json',
-      `--outputFile.json=${retryReporterPath}`,
+      `--reporter=${evidenceReporter}`,
+      `--outputFile.json=${retryArtifacts.reporterPath}`,
       '--no-file-parallelism',
       '--maxWorkers=1',
       ...initialFailedFiles,
+      ...parsed.tail,
     ],
-    reporterPath: retryReporterPath,
+    artifacts: retryArtifacts,
   });
-  retry.results = resultsFromReporter(retry.reporter);
-  const retryStatusByFile = new Map(retry.results.map((result) => [result.file, result.status]));
-  loadFlakes = initialFailedFiles.filter((file) => retryStatusByFile.get(file) === 'passed');
-  failed = initialFailedFiles.filter((file) => retryStatusByFile.get(file) !== 'passed');
-  if (retry.reporterReadError !== null || (failed.length === 0 && retry.reporter?.success !== true)) {
-    failed.push('<vitest retry runner/report failure>');
-  }
+  retry = classifyPhase({ kind: 'vitest', ...retryRaw, requestedFiles: initialFailedFiles });
 }
-if (initialRunnerFailure) failed.push('<vitest runner/report failure>');
-failed = unique(failed);
 
-const report = {
-  version: 1,
-  kind: 'vitest',
-  phases: { initial, retry },
-  verdict: { loadFlakes, failed },
-};
+const verdict = reduceGateVerdict(initial, retry);
+const report = { version: 2, kind: 'vitest', phases: { initial, retry }, verdict };
 const finalReportPath = writeGateReport('vitest', report);
-printVerdict(loadFlakes, failed, finalReportPath);
-process.exitCode = failed.length === 0 ? 0 : 1;
+printVerdict(verdict, finalReportPath);
+process.exitCode = verdict.status === 'passed' ? 0 : 1;

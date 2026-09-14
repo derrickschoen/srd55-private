@@ -77,6 +77,7 @@ import {
   isAgentSessionBinding,
   isAgentCallUsage,
   type AgentCallUsage,
+  type EngineDispatchId,
   type AgentFailureClassification,
   type AgentSessionBinding,
 } from './agent-session';
@@ -150,6 +151,12 @@ export type SessionTransition =
       readonly failure: Extract<AgentFailureClassification, 'resume_not_found' | 'resume_corrupt'>;
     }
   | {
+      readonly kind: 'agent_session_recovery_failed';
+      readonly predecessorSessionHash: string;
+      readonly dispatchId: EngineDispatchId;
+      readonly exit: 'cancelled' | 'timed_out' | 'infrastructure_failed';
+    }
+  | {
       readonly kind: 'agent_session_rolled_over';
       readonly supersededBinding: AgentSessionBinding;
       readonly binding: AgentSessionBinding;
@@ -219,6 +226,7 @@ export const SESSION_TRANSITION_KINDS = [
   'agent_session_dispatched',
   'agent_call_usage_recorded',
   'agent_session_recovered',
+  'agent_session_recovery_failed',
   'agent_session_rolled_over',
   'session_ended',
   'proposal_fallback_resolved',
@@ -300,10 +308,11 @@ export interface SessionRevision extends SessionRevisionBody {
   readonly checksum: string;
 }
 
-export interface BrowserSessionStore {
+export interface SessionStore {
   append(revision: SessionRevision): void;
   appendAll(revisions: readonly SessionRevision[]): void;
   revisions(sessionId: EncounterSessionId): readonly SessionRevision[];
+  flush(): Promise<void>;
 }
 
 export interface MirrorSink {
@@ -373,7 +382,7 @@ function verifyRevisionSequence(
   }
 }
 
-export class MemoryBrowserSessionStore implements BrowserSessionStore {
+export class MemoryBrowserSessionStore implements SessionStore {
   readonly #bySession = new Map<EncounterSessionId, SessionRevision[]>();
 
   append(revision: SessionRevision): void {
@@ -404,9 +413,11 @@ export class MemoryBrowserSessionStore implements BrowserSessionStore {
   revisions(sessionId: EncounterSessionId): readonly SessionRevision[] {
     return [...(this.#bySession.get(sessionId) ?? [])];
   }
+
+  async flush(): Promise<void> {}
 }
 
-export class SqliteBrowserSessionStore implements BrowserSessionStore {
+export class SqliteBrowserSessionStore implements SessionStore {
   constructor(private readonly db: DatabaseContext) {}
 
   append(revision: SessionRevision): void {
@@ -482,6 +493,8 @@ export class SqliteBrowserSessionStore implements BrowserSessionStore {
     });
     return stored.length === 0 ? [] : migrateStoredSessionRevisions(stored);
   }
+
+  async flush(): Promise<void> {}
 }
 
 function revisionChecksum(body: SessionRevisionBody): string {
@@ -674,6 +687,14 @@ function decodeTransition(value: unknown): SessionTransition {
           failure: value.failure,
         };
       }
+      break;
+    case 'agent_session_recovery_failed':
+      if (
+        hasExactlyKeys(value, ['kind', 'predecessorSessionHash', 'dispatchId', 'exit']) &&
+        typeof value.predecessorSessionHash === 'string' && /^[a-f0-9]{64}$/u.test(value.predecessorSessionHash) &&
+        typeof value.dispatchId === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9:._-]{15,199}$/u.test(value.dispatchId) &&
+        (value.exit === 'cancelled' || value.exit === 'timed_out' || value.exit === 'infrastructure_failed')
+      ) return value as Extract<SessionTransition, { readonly kind: 'agent_session_recovery_failed' }>;
       break;
     case 'agent_session_rolled_over':
       if (
@@ -1349,6 +1370,15 @@ export function replaySessionRevisions(
         requireCanonicalEqual(revision.partyState, parent.partyState, 'agent-recovery party state');
         requireCanonicalEqual(revision.rngState, parent.rngState, 'agent-recovery RNG state');
         break;
+      case 'agent_session_recovery_failed':
+        if (parent === null || parent === undefined || parent.agentSession === null) {
+          throw new Error('agent_session_recovery_failed requires an active predecessor binding.');
+        }
+        requireCanonicalEqual(revision.encounterState, parent.encounterState, 'failed agent-recovery encounter state');
+        requireCanonicalEqual(revision.coordinatorState, parent.coordinatorState, 'failed agent-recovery coordinator state');
+        requireCanonicalEqual(revision.partyState, parent.partyState, 'failed agent-recovery party state');
+        requireCanonicalEqual(revision.rngState, parent.rngState, 'failed agent-recovery RNG state');
+        break;
       case 'agent_session_rolled_over':
         if (parent === null || parent === undefined || parent.agentSession === null ||
           parent.agentSession.currentContextTokens === null) {
@@ -1619,7 +1649,7 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
 
   private constructor(
     readonly sessionId: EncounterSessionId,
-    private readonly store: BrowserSessionStore,
+    private readonly store: SessionStore,
     private readonly mirror: MirrorSink,
     rng: SerializableRng,
   ) {
@@ -1634,7 +1664,7 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
     readonly coordinatorState: PersistedCoordinatorState;
     readonly controllers: readonly ControllerIdentity[];
     readonly rng: SerializableRng;
-    readonly store: BrowserSessionStore;
+    readonly store: SessionStore;
     readonly mirror: MirrorSink;
   }): EncounterSessionJournal {
     if (input.store.revisions(input.sessionId).length !== 0) {
@@ -1661,7 +1691,7 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
 
   static resume(
     sessionId: EncounterSessionId,
-    store: BrowserSessionStore,
+    store: SessionStore,
     mirror: MirrorSink,
   ): SessionResume {
     const revisions = store.revisions(sessionId);
@@ -1880,6 +1910,27 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
       agentSession: binding,
     });
     return binding;
+  }
+
+  recordAgentSessionRecoveryFailure(input: {
+    readonly predecessorSessionHash: string;
+    readonly dispatchId: EngineDispatchId;
+    readonly exit: 'cancelled' | 'timed_out' | 'infrastructure_failed';
+  }): void {
+    const latest = this.#latest();
+    if (latest.agentSession === null || latest.agentSession.status !== 'active') {
+      throw new Error('Encounter run has no active predecessor for a failed recovery dispatch.');
+    }
+    this.#append({
+      parentRevision: latest.revision,
+      branchId: latest.branchId,
+      transition: { kind: 'agent_session_recovery_failed', ...input },
+      encounterState: latest.encounterState,
+      partyState: latest.partyState,
+      coordinatorState: latest.coordinatorState,
+      controllers: latest.controllers,
+      agentSession: latest.agentSession,
+    });
   }
 
   rollOverAgentSession(input: {
@@ -3362,7 +3413,7 @@ export function migrateStoredSessionRevisions(
 }
 
 export function exportSavedSession(
-  store: BrowserSessionStore,
+  store: SessionStore,
   sessionId: EncounterSessionId,
 ): string {
   const revisions = store.revisions(sessionId);
@@ -3399,7 +3450,7 @@ export function decodeSavedSessionFingerprint(
 }
 
 export function importSavedSession(
-  store: BrowserSessionStore,
+  store: SessionStore,
   bytes: string,
 ): EncounterSessionId {
   const bundle = migrateSavedBundle(JSON.parse(bytes));
@@ -3412,7 +3463,7 @@ export function importSavedSession(
 }
 
 export function exportSavedSessionV1ForMigrationTest(
-  store: BrowserSessionStore,
+  store: SessionStore,
   sessionId: EncounterSessionId,
 ): string {
   const revisions = store.revisions(sessionId).map((revision) => {
@@ -3445,7 +3496,7 @@ export function exportSavedSessionV1ForMigrationTest(
 }
 
 export function exportSavedSessionV5ForMigrationTest(
-  store: BrowserSessionStore,
+  store: SessionStore,
   sessionId: EncounterSessionId,
 ): string {
   const revisions = store.revisions(sessionId).map((revision) => {
