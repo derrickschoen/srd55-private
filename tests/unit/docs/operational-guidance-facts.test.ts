@@ -103,7 +103,8 @@ describe('operational guidance facts', () => {
       'tools',
     ]);
 
-    const guidance = verificationGuidance(repositoryText('.claude/supervision.md'));
+    const supervision = repositoryText('.claude/supervision.md');
+    const guidance = verificationGuidance(supervision);
     expect(guidance).toMatch(/^- Compile gate is `npx tsc -b --force`\./mu);
     expect(guidance).not.toMatch(
       /^- Compile gate is `npx tsc -p tsconfig\.app\.json --noEmit`/mu,
@@ -120,11 +121,17 @@ describe('operational guidance facts', () => {
     );
     expect(guidance).toContain('Run gates under load and let lanes keep flowing.');
     expect(guidance).toMatch(/one serial\s+rerun under the gate lock/u);
+    expect(guidance).toMatch(
+      /Full Vitest, Playwright, and production builds remain serialized through\s+`\/tmp\/dnd-gate\.lock`/u,
+    );
     expect(guidance).toContain('/tmp/dnd-gate.lock');
     expect(guidance).toContain('run no Vitest while Playwright owns that lock');
     expect(guidance).toContain('D544/D606/D613');
     expect(guidance).toContain('unique port');
-    expect(guidance).not.toContain('One suite-running lane at a time.');
+    expect(supervision).not.toContain('One suite-running lane at a time.');
+    expect(guidance).toMatch(
+      /serialization and the locked retry remain in\s+`\.claude\/RULES\.md:47-50`/u,
+    );
     for (const authority of ['D263', 'D587.3', 'D544', 'D606', 'D613', 'M-3']) {
       expect(guidance).toContain(authority);
     }
@@ -136,6 +143,15 @@ describe('operational guidance facts', () => {
     expect(rows).toHaveLength(25);
     expect(plan).toContain(
       '**Historical plan — completed 2026-07-23.** This file records the original',
+    );
+    expect(plan).toMatch(
+      /Current operating rules are `\.claude\/RULES\.md` under the newest controlling\s+entries in `\.claude\/decisions\.md`/u,
+    );
+    expect(plan).toMatch(
+      /executable compile configuration lives in\s+`package\.json` and `tsconfig\*\.json`/u,
+    );
+    expect(plan).toMatch(
+      /implementation evidence lives in\s+`BUILD-PROGRESS\.md`, `progress\/`, `PARITY-AUDIT\.md`, and the retained tests/u,
     );
     expect(plan).toContain(
       '| # | Status | Increment | Independently verifiable exit criteria | Evidence |',
@@ -163,6 +179,7 @@ describe('operational guidance facts', () => {
       ' * `src/queries/character-spell-section-builder.ts` maps `-1` to the typed',
     );
     expect(ids).toContain('brands only validated integers in 0..9 as');
+    expect(ids).toMatch(/`SheetSpellLevel`\s+unknown arm/u);
     expect(ids).toContain('and rejects every other stored value.');
     expect(ids).not.toContain('Nothing narrows `-1` away today');
 
