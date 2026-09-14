@@ -112,13 +112,49 @@ describe('immutable offer environment', () => {
     );
   });
 
-  it('rejects query injection into configuration input', () => {
+  it('rejects query injection into legacy configuration input', () => {
     const injectedInput = {
       kind: 'configuration',
       mode: 'legacy_standard',
       queries: canonicalEngineQueryPort,
     } as const;
     expect(() => buildOfferEnvironment(injectedInput)).toThrow(
+      new TypeError('Offer environment configuration has an invalid shape.'),
+    );
+  });
+
+  it('rejects a binding mode override with the exact shape error', () => {
+    const input = {
+      kind: 'binding',
+      binding: representedEnvironment().binding,
+      mode: 'legacy_standard',
+    } as const;
+    expect(() => buildOfferEnvironment(input)).toThrow(
+      new TypeError('Offer environment binding input has an invalid shape.'),
+    );
+  });
+
+  it('rejects queries alongside a binding with the exact shape error', () => {
+    const input = {
+      kind: 'binding',
+      binding: representedEnvironment().binding,
+      queries: canonicalEngineQueryPort,
+    } as const;
+    expect(() => buildOfferEnvironment(input)).toThrow(
+      new TypeError('Offer environment binding input has an invalid shape.'),
+    );
+  });
+
+  it('rejects query injection into revision configuration input', () => {
+    const environment = representedEnvironment();
+    const input = {
+      kind: 'configuration',
+      mode: 'revision_bound',
+      familyPolicy: environment.familyPolicy,
+      partyThreatCatalog: environment.partyThreatCatalog,
+      queries: canonicalEngineQueryPort,
+    } as const;
+    expect(() => buildOfferEnvironment(input)).toThrow(
       new TypeError('Offer environment configuration has an invalid shape.'),
     );
   });

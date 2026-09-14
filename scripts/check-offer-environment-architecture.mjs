@@ -376,18 +376,36 @@ function isEnvironmentType(checker, type) {
   return ENVIRONMENT_PROPERTIES.every((name) => checker.getPropertyOfType(type, name) !== undefined);
 }
 
-function environmentReturningExport(checker, symbol, sourceFile) {
+function exportedValueType(checker, symbol, sourceFile) {
   let target = symbol;
   if ((symbol.flags & ts.SymbolFlags.Alias) !== 0) {
     target = checker.getAliasedSymbol(symbol);
   }
   const declaration = target.valueDeclaration ?? target.declarations?.[0] ?? sourceFile;
-  const type = checker.getTypeOfSymbolAtLocation(target, declaration);
+  return checker.getTypeOfSymbolAtLocation(target, declaration);
+}
+
+function typeExposesEnvironmentConstructor(checker, type, seen = new Set()) {
+  if (seen.has(type) || seen.size > 100) return false;
+  seen.add(type);
   const signatures = [
     ...checker.getSignaturesOfType(type, ts.SignatureKind.Call),
     ...checker.getSignaturesOfType(type, ts.SignatureKind.Construct),
   ];
-  return signatures.some((signature) => isEnvironmentType(checker, signature.getReturnType()));
+  if (isEnvironmentType(checker, type) ||
+    signatures.some((signature) => isEnvironmentType(checker, signature.getReturnType()))) {
+    return true;
+  }
+  return checker.getPropertiesOfType(type).some((property) => {
+    const declaration = property.valueDeclaration ?? property.declarations?.[0];
+    if (declaration === undefined) return false;
+    const propertyType = checker.getTypeOfSymbolAtLocation(property, declaration);
+    return typeExposesEnvironmentConstructor(checker, propertyType, seen);
+  });
+}
+
+function environmentReturningExport(checker, symbol, sourceFile) {
+  return typeExposesEnvironmentConstructor(checker, exportedValueType(checker, symbol, sourceFile));
 }
 
 function builderModuleSpecifier(node) {
@@ -424,7 +442,8 @@ function exportedEnvironmentDiagnostics(program, sourceFiles, allowlist) {
   return diagnostics;
 }
 
-function builderContractDiagnostics(sourceFile) {
+function builderContractDiagnostics(program, sourceFile) {
+  const checker = program.getTypeChecker();
   const diagnostics = [];
   const classes = sourceFile.statements.filter((statement) =>
     ts.isClassDeclaration(statement) && statement.name?.text === 'RuntimeOfferEnvironment');
@@ -448,6 +467,19 @@ function builderContractDiagnostics(sourceFile) {
   }
   if (builders.length !== 1) {
     diagnostics.push(`${BUILDER_PATH}: expected exactly one buildOfferEnvironment declaration`);
+  }
+  const moduleSymbol = checker.getSymbolAtLocation(sourceFile);
+  const runtimeExports = moduleSymbol === undefined
+    ? []
+    : checker.getExportsOfModule(moduleSymbol).filter((symbol) => {
+        const target = (symbol.flags & ts.SymbolFlags.Alias) === 0
+          ? symbol
+          : checker.getAliasedSymbol(symbol);
+        return (target.flags & ts.SymbolFlags.Value) !== 0;
+      });
+  if (runtimeExports.length !== 1 || runtimeExports[0]?.getName() !== 'buildOfferEnvironment') {
+    const names = runtimeExports.map((symbol) => symbol.getName()).sort().join(', ');
+    diagnostics.push(`${BUILDER_PATH}: runtime exports must be exactly buildOfferEnvironment; received ${names}`);
   }
   const builder = builders[0];
   if (builder !== undefined) {
@@ -486,41 +518,223 @@ function builderContractDiagnostics(sourceFile) {
   return diagnostics;
 }
 
-function canonicalOriginDiagnostics(sourceFile, enforcePathAllowances = true) {
-  const fileName = relative(sourceFile.fileName);
-  if (enforcePathAllowances && (fileName === BUILDER_PATH || fileName === QUERY_PORT_PATH)) return [];
-  const diagnostics = [];
-  function report(node, message) {
-    const position = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
-    diagnostics.push(`${fileName}:${position.line + 1}: ${message}`);
+function symbolAt(checker, node) {
+  return checker.getSymbolAtLocation(node);
+}
+
+function setOrigin(origins, symbol, origin) {
+  if (symbol === undefined || origins.get(symbol) === origin) return false;
+  origins.set(symbol, origin);
+  return true;
+}
+
+function stringOrigin(value) {
+  return `string:${value}`;
+}
+
+function stringFromOrigin(origin) {
+  return origin?.startsWith('string:') === true ? origin.slice('string:'.length) : undefined;
+}
+
+function resolvesToQueryPort(program, sourceFile, specifier) {
+  const resolved = ts.resolveModuleName(
+    specifier,
+    sourceFile.fileName,
+    program.getCompilerOptions(),
+    ts.sys,
+  ).resolvedModule;
+  return resolved !== undefined && relative(resolved.resolvedFileName) === QUERY_PORT_PATH;
+}
+
+function expressionOrigin(program, checker, sourceFile, origins, expression) {
+  if (ts.isParenthesizedExpression(expression) || ts.isAsExpression(expression) ||
+    ts.isTypeAssertionExpression(expression) || ts.isNonNullExpression(expression)) {
+    return expressionOrigin(program, checker, sourceFile, origins, expression.expression);
   }
-  function visit(node) {
-    if (ts.isImportDeclaration(node) && queryModuleSpecifier(node.moduleSpecifier)) {
-      const clause = node.importClause;
-      const typeOnly = clause?.isTypeOnly ?? false;
-      const bindings = clause?.namedBindings;
-      const onlyPortType = bindings !== undefined && ts.isNamedImports(bindings) &&
-        bindings.elements.every((element) => element.isTypeOnly &&
-          (element.propertyName ?? element.name).text === 'EngineQueryPort');
-      if (!typeOnly && !onlyPortType) report(node, 'canonical query-port import is forbidden here');
+  if (ts.isStringLiteralLike(expression)) return stringOrigin(expression.text);
+  if (ts.isIdentifier(expression)) {
+    if (expression.text === 'require') return 'loader';
+    return origins.get(symbolAt(checker, expression));
+  }
+  if (ts.isCallExpression(expression)) {
+    if (expression.expression.kind === ts.SyntaxKind.ImportKeyword) {
+      const specifier = expression.arguments[0];
+      const origin = specifier === undefined
+        ? undefined
+        : stringFromOrigin(expressionOrigin(program, checker, sourceFile, origins, specifier));
+      return origin !== undefined && resolvesToQueryPort(program, sourceFile, origin) ? 'module' : undefined;
     }
-    if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference) &&
-      node.moduleReference.expression !== undefined && queryModuleSpecifier(node.moduleReference.expression)) {
-      report(node, 'import-equals cannot expose the canonical query port');
-    }
-    if (ts.isExportDeclaration(node) && node.moduleSpecifier !== undefined &&
-      queryModuleSpecifier(node.moduleSpecifier)) {
-      report(node, 'engine-query-port re-export is forbidden');
-    }
-    if (ts.isCallExpression(node) && node.arguments.length > 0) {
-      const first = node.arguments[0];
-      if (first !== undefined && queryModuleSpecifier(first)) {
-        report(node, 'dynamic/CommonJS access to the canonical query port is forbidden');
+    const callee = expressionOrigin(program, checker, sourceFile, origins, expression.expression);
+    if (callee === 'create-require') return 'loader';
+    const first = expression.arguments[0];
+    const specifier = first === undefined
+      ? undefined
+      : stringFromOrigin(expressionOrigin(program, checker, sourceFile, origins, first));
+    return callee === 'loader' && specifier !== undefined && resolvesToQueryPort(program, sourceFile, specifier)
+      ? 'module'
+      : undefined;
+  }
+  if (ts.isPropertyAccessExpression(expression)) {
+    const base = expressionOrigin(program, checker, sourceFile, origins, expression.expression);
+    if (base === 'module' && expression.name.text === 'canonicalEngineQueryPort') return 'canonical';
+    return undefined;
+  }
+  if (ts.isElementAccessExpression(expression) && expression.argumentExpression !== undefined) {
+    const base = expressionOrigin(program, checker, sourceFile, origins, expression.expression);
+    const key = stringFromOrigin(
+      expressionOrigin(program, checker, sourceFile, origins, expression.argumentExpression),
+    );
+    if (base === 'module' && key === 'canonicalEngineQueryPort') return 'canonical';
+  }
+  return undefined;
+}
+
+function collectCanonicalOrigins(program, sourceFile) {
+  const checker = program.getTypeChecker();
+  const origins = new Map();
+  for (const statement of sourceFile.statements) {
+    if (ts.isImportDeclaration(statement) && resolvesToQueryPort(program, sourceFile, statement.moduleSpecifier.text)) {
+      const bindings = statement.importClause?.namedBindings;
+      if (bindings !== undefined && ts.isNamespaceImport(bindings)) {
+        setOrigin(origins, symbolAt(checker, bindings.name), 'module');
+      }
+      if (bindings !== undefined && ts.isNamedImports(bindings)) {
+        for (const element of bindings.elements) {
+          if ((element.propertyName ?? element.name).text === 'canonicalEngineQueryPort') {
+            setOrigin(origins, symbolAt(checker, element.name), 'canonical');
+          }
+        }
       }
     }
-    if (ts.isIdentifier(node) && node.text === 'canonicalEngineQueryPort' &&
-      !identifierIsTypePosition(node)) {
+    if (ts.isImportDeclaration(statement) && statement.moduleSpecifier.text === 'node:module') {
+      const bindings = statement.importClause?.namedBindings;
+      if (bindings !== undefined && ts.isNamedImports(bindings)) {
+        for (const element of bindings.elements) {
+          if ((element.propertyName ?? element.name).text === 'createRequire') {
+            setOrigin(origins, symbolAt(checker, element.name), 'create-require');
+          }
+        }
+      }
+    }
+    if (ts.isImportEqualsDeclaration(statement) && ts.isExternalModuleReference(statement.moduleReference)) {
+      const specifier = statement.moduleReference.expression;
+      if (specifier !== undefined && ts.isStringLiteralLike(specifier) &&
+        resolvesToQueryPort(program, sourceFile, specifier.text)) {
+        setOrigin(origins, symbolAt(checker, statement.name), 'module');
+      }
+    }
+  }
+  for (let pass = 0; pass < 10; pass += 1) {
+    let changed = false;
+    function visit(node) {
+      if (ts.isVariableDeclaration(node) && node.initializer !== undefined) {
+        const origin = expressionOrigin(program, checker, sourceFile, origins, node.initializer);
+        if (origin !== undefined && ts.isIdentifier(node.name)) {
+          changed = setOrigin(origins, symbolAt(checker, node.name), origin) || changed;
+        }
+        if (origin === 'module' && ts.isObjectBindingPattern(node.name)) {
+          for (const element of node.name.elements) {
+            const property = element.propertyName ?? element.name;
+            if (ts.isIdentifier(property) && property.text === 'canonicalEngineQueryPort' &&
+              ts.isIdentifier(element.name)) {
+              changed = setOrigin(origins, symbolAt(checker, element.name), 'canonical') || changed;
+            }
+          }
+        }
+      }
+      ts.forEachChild(node, visit);
+    }
+    visit(sourceFile);
+    if (!changed) break;
+  }
+  return origins;
+}
+
+function canonicalOriginDiagnostics(program, sourceFile, enforcePathAllowances = true) {
+  const fileName = relative(sourceFile.fileName);
+  if (enforcePathAllowances && (fileName === BUILDER_PATH || fileName === QUERY_PORT_PATH)) return [];
+  const checker = program.getTypeChecker();
+  const origins = collectCanonicalOrigins(program, sourceFile);
+  const diagnostics = [];
+  const reported = new Set();
+  function report(node, message) {
+    const position = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
+    const diagnostic = `${fileName}:${position.line + 1}: ${message}`;
+    if (reported.has(diagnostic)) return;
+    reported.add(diagnostic);
+    diagnostics.push(diagnostic);
+  }
+  function visit(node) {
+    if (ts.isImportDeclaration(node) && resolvesToQueryPort(program, sourceFile, node.moduleSpecifier.text)) {
+      const bindings = node.importClause?.namedBindings;
+      if (bindings !== undefined && ts.isNamedImports(bindings)) {
+        for (const element of bindings.elements) {
+          if (origins.get(symbolAt(checker, element.name)) === 'canonical') {
+            report(element, 'canonical query-port import is forbidden here');
+          }
+        }
+      }
+    }
+    if (ts.isExportDeclaration(node)) {
+      if (node.moduleSpecifier !== undefined &&
+        resolvesToQueryPort(program, sourceFile, node.moduleSpecifier.text)) {
+        if (node.exportClause === undefined) {
+          report(node, 'whole engine-query-port re-export is forbidden');
+        } else if (ts.isNamedExports(node.exportClause)) {
+          for (const element of node.exportClause.elements) {
+            if ((element.propertyName ?? element.name).text === 'canonicalEngineQueryPort') {
+              report(element, 'canonical query-port re-export is forbidden');
+            }
+          }
+        }
+      }
+      if (node.moduleSpecifier === undefined && node.exportClause !== undefined &&
+        ts.isNamedExports(node.exportClause)) {
+        for (const element of node.exportClause.elements) {
+          const local = element.propertyName ?? element.name;
+          const origin = ts.isIdentifier(local) ? origins.get(symbolAt(checker, local)) : undefined;
+          if (origin === 'module' || origin === 'canonical') {
+            report(element, 'exported binding exposes the canonical query port');
+          }
+        }
+      }
+    }
+    if (ts.isImportTypeNode(node) && node.isTypeOf && ts.isLiteralTypeNode(node.argument) &&
+      ts.isStringLiteralLike(node.argument.literal) &&
+      resolvesToQueryPort(program, sourceFile, node.argument.literal.text) &&
+      node.qualifier?.getText(sourceFile).endsWith('canonicalEngineQueryPort') === true) {
+      report(node, 'type-of-value alias exposes the canonical query port');
+    }
+    if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
+      const specifier = node.arguments[0];
+      if (specifier !== undefined && ts.isStringLiteralLike(specifier) &&
+        resolvesToQueryPort(program, sourceFile, specifier.text)) {
+        report(node, 'dynamic import exposes the canonical query port');
+      }
+    }
+    if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) {
+      if (expressionOrigin(program, checker, sourceFile, origins, node) === 'canonical') {
+        report(node, 'canonical query-port member access is forbidden here');
+      }
+    }
+    if (ts.isIdentifier(node) && origins.get(symbolAt(checker, node)) === 'canonical' &&
+      !ts.isImportSpecifier(node.parent) && !identifierIsTypePosition(node)) {
       report(node, 'canonical query-port value reference is forbidden here');
+    }
+    if (ts.isExportAssignment(node)) {
+      const origin = expressionOrigin(program, checker, sourceFile, origins, node.expression);
+      if (origin === 'module' || origin === 'canonical') {
+        report(node, 'CommonJS export exposes the canonical query port');
+      }
+    }
+    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+      const left = node.left.getText(sourceFile);
+      const commonJsExport = left === 'module.exports' || left.startsWith('module.exports.') ||
+        left === 'exports' || left.startsWith('exports.');
+      const origin = expressionOrigin(program, checker, sourceFile, origins, node.right);
+      if (commonJsExport && (origin === 'module' || origin === 'canonical')) {
+        report(node, 'CommonJS export exposes the canonical query port');
+      }
     }
     ts.forEachChild(node, visit);
   }
@@ -669,6 +883,10 @@ function alternativeExportSelfTest() {
     'exported-alias.ts': `${importLine}\nexport const secondBuilder = buildOfferEnvironment;\n`,
     'exported-computed.ts': "import * as offers from '../src/vtt/offers/build-offer-environment';\n" +
       "export const secondBuilder = offers['buildOfferEnvironment'];\n",
+    'exported-member.ts': `${importLine}\n` +
+      'export const secondOfferEnvironmentBuilder = { build: buildOfferEnvironment };\n',
+    'exported-namespace-binding.ts':
+      "import * as builders from '../src/vtt/offers/build-offer-environment';\nexport { builders };\n",
     'builder-named-reexport.ts':
       "export { buildOfferEnvironment } from '../src/vtt/offers/build-offer-environment';\n",
     'builder-star-reexport.ts': "export * from '../src/vtt/offers/build-offer-environment';\n",
@@ -691,49 +909,175 @@ function alternativeExportSelfTest() {
   return failures;
 }
 
-function canonicalOriginSelfTest() {
-  const sources = {
-    'canonical-named-import.ts':
-      "import { canonicalEngineQueryPort } from '../src/vtt/engine-query-port';\nvoid canonicalEngineQueryPort;\n",
-    'canonical-aliased-import.ts':
-      "import { canonicalEngineQueryPort as queries } from '../src/vtt/engine-query-port';\nvoid queries;\n",
-    'canonical-namespace-access.ts':
-      "import * as queryPort from '../src/vtt/engine-query-port';\nvoid queryPort.canonicalEngineQueryPort;\n",
-    'canonical-named-reexport.ts':
-      "export { canonicalEngineQueryPort as queries } from '../src/vtt/engine-query-port';\n",
-    'canonical-require-direct.cts':
-      "const queries = require('../src/vtt/engine-query-port').canonicalEngineQueryPort;\nvoid queries;\n",
-    'canonical-require-destructured.cts':
-      "const { canonicalEngineQueryPort: queries } = require('../src/vtt/engine-query-port');\nvoid queries;\n",
-    'canonical-create-require-computed.mts':
-      "import { createRequire as load } from 'node:module';\n" +
-      'const requireModule = load(import.meta.url);\n' +
-      "const moduleValue = requireModule('../src/vtt/engine-query-port');\n" +
-      "const key = 'canonicalEngineQueryPort';\nvoid moduleValue[key];\n",
-    'canonical-require-computed.cts':
-      "const moduleValue = require('../src/vtt/engine-query-port');\n" +
-      "const key = 'canonicalEngineQueryPort';\nvoid moduleValue[key];\n",
-    'canonical-import-equals.cts':
-      "import queryPort = require('../src/vtt/engine-query-port');\nvoid queryPort.canonicalEngineQueryPort;\n",
-    'canonical-commonjs-reexport.cts':
-      "const queryPort = require('../src/vtt/engine-query-port');\nexport = queryPort;\n",
-    'canonical-commonjs-named-reexport.cts':
-      "exports.queries = require('../src/vtt/engine-query-port').canonicalEngineQueryPort;\n",
-    'canonical-dynamic-import.mts':
-      "const queryPort = await import('../src/vtt/engine-query-port');\n" +
-      "const key = 'canonicalEngineQueryPort';\nvoid queryPort[key];\n",
-    'canonical-star-export.mts': "export * from '../src/vtt/engine-query-port';\n",
-  };
-  const failures = [];
+function builderRuntimeInventorySelfTest() {
+  const builderPath = path.join(ROOT, BUILDER_PATH);
+  const pristine = ts.sys.readFile(builderPath);
+  if (pristine === undefined) return [`${BUILDER_PATH}: unable to read builder inventory fixture`];
+  const source = `${pristine}\nexport function unrelatedRuntimeExport(): number { return 1; }\n`;
+  const program = createProgram(
+    [builderPath],
+    compilerOptions('tsconfig.app.json'),
+    new Map([[builderPath, source]]),
+  );
+  const builder = program.getSourceFile(builderPath);
+  if (builder === undefined) return [`${BUILDER_PATH}: builder inventory fixture did not load`];
+  const diagnostics = builderContractDiagnostics(program, builder);
+  if (!diagnostics.some((diagnostic) => diagnostic.includes('runtime exports must be exactly'))) {
+    return ['builder-extra-runtime-export.ts: additional runtime export was not rejected'];
+  }
+  return [];
+}
+
+function originFixtureCompilerOptions(name) {
+  const options = compilerOptions('tsconfig.node.json');
+  if (name.endsWith('.cts') || name.endsWith('.mts')) {
+    return {
+      ...options,
+      module: ts.ModuleKind.NodeNext,
+      moduleResolution: ts.ModuleResolutionKind.NodeNext,
+      verbatimModuleSyntax: false,
+    };
+  }
+  return options;
+}
+
+function originFixtureAnalyses(sources) {
+  const queryPortFile = path.join(ROOT, QUERY_PORT_PATH);
+  const groups = new Map();
   for (const [name, source] of Object.entries(sources)) {
-    const fileName = path.join(ROOT, '.architecture-fixtures', name);
-    const sourceFile = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true);
-    if (canonicalOriginDiagnostics(sourceFile, false).length === 0) {
-      failures.push(`${name}: canonical query-port origin was not rejected`);
+    const extension = name.endsWith('.cts') ? '.cts' : name.endsWith('.mts') ? '.mts' : '.ts';
+    const group = groups.get(extension) ?? [];
+    group.push({ name, source });
+    groups.set(extension, group);
+  }
+  const results = new Map();
+  for (const fixtures of groups.values()) {
+    const virtualSources = new Map(fixtures.map(({ name, source }) => [
+      path.join(ROOT, '.architecture-fixtures', name),
+      source,
+    ]));
+    const program = createProgram(
+      [...virtualSources.keys(), queryPortFile],
+      originFixtureCompilerOptions(fixtures[0]?.name ?? 'fixture.ts'),
+      virtualSources,
+    );
+    for (const { name, source } of fixtures) {
+      const fileName = path.join(ROOT, '.architecture-fixtures', name);
+      const sourceFile = program.getSourceFile(fileName);
+      if (sourceFile === undefined) {
+        results.set(name, { architecture: [], compiler: [], resolved: false });
+        continue;
+      }
+      const specifier = source.match(/['"](\.\.\/src\/vtt\/engine-query-port(?:\.js)?)['"]/u)?.[1];
+      const mentionsQueryPort = source.includes('engine-query-port');
+      const resolvesRealModule = !mentionsQueryPort ||
+        (specifier !== undefined && resolvesToQueryPort(program, sourceFile, specifier));
+      const architecture = resolvesRealModule ? canonicalOriginDiagnostics(program, sourceFile, false) : [];
+      const compiler = [
+        ...program.getSyntacticDiagnostics(sourceFile),
+        ...program.getSemanticDiagnostics(sourceFile),
+      ];
+      results.set(name, { architecture, compiler, resolved: resolvesRealModule });
     }
   }
+  return results;
+}
+
+function canonicalOriginSelfTest() {
+  const invalidSources = {
+    'canonical-named-import.ts': {
+      source: "import { canonicalEngineQueryPort } from '../src/vtt/engine-query-port';\n" +
+        'void canonicalEngineQueryPort;\n',
+      minimum: 1,
+    },
+    'canonical-aliased-import.ts': {
+      source: "import { canonicalEngineQueryPort as queries } from '../src/vtt/engine-query-port';\n" +
+        'void queries;\n',
+      minimum: 1,
+    },
+    'canonical-namespace-access.ts': {
+      source: "import * as queryPort from '../src/vtt/engine-query-port';\n" +
+        'void queryPort.canonicalEngineQueryPort;\n',
+      minimum: 1,
+    },
+    'canonical-namespace-alias-computed.ts': {
+      source: "import * as queryPort from '../src/vtt/engine-query-port';\n" +
+        "const alias = queryPort;\nconst key = 'canonicalEngineQueryPort';\nvoid alias[key];\n",
+      minimum: 1,
+    },
+    'canonical-namespace-destructured.ts': {
+      source: "import * as queryPort from '../src/vtt/engine-query-port';\n" +
+        'const { canonicalEngineQueryPort: queries } = queryPort;\nvoid queries;\n',
+      minimum: 1,
+    },
+    'canonical-named-reexport.ts': {
+      source: "export { canonicalEngineQueryPort as queries } from '../src/vtt/engine-query-port';\n",
+      minimum: 1,
+    },
+    'canonical-require-direct.cts': {
+      source: "const queries = require('../src/vtt/engine-query-port').canonicalEngineQueryPort;\n" +
+        'void queries;\n',
+      minimum: 1,
+    },
+    'canonical-require-destructured.cts': {
+      source: "const { canonicalEngineQueryPort: queries } = require('../src/vtt/engine-query-port');\n" +
+        'void queries;\n',
+      minimum: 1,
+    },
+    'canonical-create-require-computed.mts': {
+      source: "import { createRequire as load } from 'node:module';\n" +
+        'const requireModule = load(import.meta.url);\n' +
+        "const moduleValue = requireModule('../src/vtt/engine-query-port.js');\n" +
+        "const key = 'canonicalEngineQueryPort';\nvoid moduleValue[key];\n",
+      minimum: 1,
+    },
+    'canonical-require-computed.cts': {
+      source: "const moduleValue = require('../src/vtt/engine-query-port');\n" +
+        "const key = 'canonicalEngineQueryPort';\nvoid moduleValue[key];\n",
+      minimum: 1,
+    },
+    'canonical-require-indirect.cts': {
+      source: "const p = '../src/vtt/engine-query-port';\n" +
+        'const load = require;\nconst m = load(p);\n' +
+        "const k = 'canonicalEngineQueryPort';\nvoid m[k];\n",
+      minimum: 1,
+    },
+    'canonical-import-equals.cts': {
+      source: "import m = require('../src/vtt/engine-query-port');\n" +
+        'void m.canonicalEngineQueryPort;\nexport = m;\n',
+      minimum: 2,
+    },
+    'canonical-commonjs-reexport.cts': {
+      source: "module.exports = require('../src/vtt/engine-query-port');\n" +
+        "const moduleAlias = require('../src/vtt/engine-query-port');\n" +
+        'module.exports = moduleAlias;\n',
+      minimum: 2,
+    },
+    'canonical-commonjs-named-reexport.cts': {
+      source: "exports.queries = require('../src/vtt/engine-query-port');\n",
+      minimum: 1,
+    },
+    'canonical-dynamic-import.mts': {
+      source: "const queryPort = await import('../src/vtt/engine-query-port.js');\n" +
+        "const key = 'canonicalEngineQueryPort';\nvoid queryPort[key];\n",
+      minimum: 1,
+    },
+    'canonical-star-export.mts': {
+      source: "export * from '../src/vtt/engine-query-port.js';\n",
+      minimum: 1,
+    },
+    'canonical-type-of-value.ts': {
+      source: "type Q = typeof import('../src/vtt/engine-query-port').canonicalEngineQueryPort;\n" +
+        'declare const queries: Q;\nvoid queries;\n',
+      minimum: 1,
+    },
+  };
   const validSources = {
-    'environment-queries.ts': 'void environment.queries;\n',
+    'allowed-helper-import.ts':
+      "import { compareTacticalAllocations } from '../src/vtt/engine-query-port';\n" +
+      'void compareTacticalAllocations;\n',
+    'environment-queries.ts':
+      'declare const environment: { readonly queries: unknown };\nvoid environment.queries;\n',
     'query-port-type.ts':
       "import type { EngineQueryPort } from '../src/vtt/engine-query-port';\n" +
       'declare const queries: EngineQueryPort;\nvoid queries;\n',
@@ -741,14 +1085,43 @@ function canonicalOriginSelfTest() {
       "import { decodeEngineOptionEnvironmentBinding } from '../src/vtt/offers/offer-environment';\n" +
       'declare const binding: unknown;\nvoid decodeEngineOptionEnvironmentBinding(binding);\n',
   };
-  for (const [name, source] of Object.entries(validSources)) {
-    const fileName = path.join(ROOT, '.architecture-fixtures', name);
-    const sourceFile = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true);
-    if (canonicalOriginDiagnostics(sourceFile, false).length !== 0) {
-      failures.push(`${name}: valid query/binding use was rejected`);
+  const failures = [];
+  const counts = new Map();
+  const allSources = {
+    ...Object.fromEntries(Object.entries(invalidSources).map(([name, fixture]) => [name, fixture.source])),
+    ...validSources,
+  };
+  const results = originFixtureAnalyses(allSources);
+  for (const [name, fixture] of Object.entries(invalidSources)) {
+    const result = results.get(name) ?? { architecture: [], compiler: [], resolved: false };
+    counts.set(name, result.architecture.length);
+    if (!result.resolved) {
+      failures.push(`${name}: fixture did not resolve the real ${QUERY_PORT_PATH}`);
+    }
+    if (result.architecture.length < fixture.minimum) {
+      failures.push(`${name}: expected at least ${String(fixture.minimum)} architecture diagnostic(s), received ` +
+        String(result.architecture.length));
     }
   }
-  return failures;
+  for (const [name, source] of Object.entries(validSources)) {
+    void source;
+    const result = results.get(name) ?? { architecture: [], compiler: [], resolved: false };
+    counts.set(name, result.architecture.length);
+    if (!result.resolved) {
+      failures.push(`${name}: fixture did not resolve the real ${QUERY_PORT_PATH}`);
+    }
+    if (result.architecture.length !== 0) {
+      failures.push(
+        `${name}: valid production-symbol use received ${String(result.architecture.length)} diagnostic(s)`,
+      );
+    }
+    if (result.compiler.length !== 0) {
+      failures.push(
+        `${name}: valid production-symbol use received ${String(result.compiler.length)} compile diagnostic(s)`,
+      );
+    }
+  }
+  return { failures, counts, fixtureCount: Object.keys(invalidSources).length + Object.keys(validSources).length };
 }
 
 function stagedRealSymbolSelfTest(fixtures) {
@@ -775,10 +1148,12 @@ function stagedRealSymbolSelfTest(fixtures) {
 }
 
 function runSelfTest(stage) {
+  const canonical = canonicalOriginSelfTest();
   const diagnostics = [
     ...privateBrandSelfTest(),
     ...alternativeExportSelfTest(),
-    ...canonicalOriginSelfTest(),
+    ...builderRuntimeInventorySelfTest(),
+    ...canonical.failures,
   ];
   if (stage !== undefined) {
     const staged = STAGED_REAL_SYMBOL_FIXTURES[stage];
@@ -793,7 +1168,12 @@ function runSelfTest(stage) {
     process.exitCode = 1;
     return;
   }
-  console.log('offer-environment architecture self-test: 28 active fixtures passed');
+  const activeFixtureCount = 15 + canonical.fixtureCount;
+  console.log(`offer-environment architecture self-test: ${String(activeFixtureCount)} active fixtures passed`);
+  console.log('IB1-F1 probes: ' +
+    `allowed-helper=${String(canonical.counts.get('allowed-helper-import.ts'))}, ` +
+    `indirect-canonical=${String(canonical.counts.get('canonical-require-indirect.cts'))}, ` +
+    `type-of-value=${String(canonical.counts.get('canonical-type-of-value.ts'))}`);
   console.log(`active CommonJS/ESM origin fixtures: ${ACTIVE_CJS_ORIGIN_FIXTURES.join(', ')}`);
   const stagedCounts = Object.entries(STAGED_REAL_SYMBOL_FIXTURES)
     .map(([name, fixtures]) => `${name}:${String(fixtures.length)}`)
@@ -812,7 +1192,7 @@ function runProductionCheck() {
   const builder = sourceFiles.find((sourceFile) => relative(sourceFile.fileName) === BUILDER_PATH);
   const diagnostics = builder === undefined
     ? [`${BUILDER_PATH}: builder module is missing`]
-    : builderContractDiagnostics(builder);
+    : builderContractDiagnostics(program, builder);
   diagnostics.push(...exportedEnvironmentDiagnostics(program, sourceFiles, TRANSITIONAL_RUNTIME_EXPORTS));
   const assertionDiagnostics = privateBrandAssertionLines(program, sourceFiles);
   if (assertionDiagnostics.length > 0) {
