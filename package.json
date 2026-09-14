@@ -47,6 +47,7 @@
     "test:worker": "playwright test --config=tests/browser/vtt-handoff/playwright.config.ts worker.spec.ts",
     "test:runtime-node": "vitest run --configLoader runner tests/unit/vtt/node-runtime.test.ts tests/unit/vtt/node-websocket-transport.test.ts tests/unit/vtt/protocol-runtime.test.ts tests/unit/vtt/engine-boundary.test.ts",
     "handoff:publish": "node --experimental-strip-types tools/vtt-handoff/publish.ts",
+    "handoff:gate": "node --experimental-strip-types tools/vtt-handoff/gate-inventory.ts",
     "art:request": "node --experimental-strip-types tools/vtt-handoff/art-request.ts --",
     "art:validate": "node --experimental-strip-types tools/vtt-handoff/art-validator.ts --",
     "art:stage": "node --experimental-strip-types tools/vtt-handoff/art-stage.ts --",

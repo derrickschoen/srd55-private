@@ -9,63 +9,41 @@ import { z } from 'zod';
 import { HANDOFF_METHODS } from '../../src/vtt/handoff/v1/contracts.ts';
 import { ART_REQUEST_DEFINITIONS } from './art-request.ts';
 import { handoffPaths, type RepositoryIdentityPolicy } from './paths.ts';
+import {
+  REQUIRED_HANDOFF_GATES,
+  reconcileGateReceipt,
+  renderGateCommand,
+  type GateId,
+  type GateReconciliation,
+} from './gate-inventory.ts';
+
+export { REQUIRED_HANDOFF_GATES } from './gate-inventory.ts';
 
 const resultStatusSchema = z.enum(['PASSED', 'FAILED', 'UNAVAILABLE', 'NOT_RUN']);
 const uuidV7Schema = z.string().regex(
   /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
 );
 
-export const REQUIRED_HANDOFF_GATES = [
-  { name: 'full-typecheck', command: 'npx tsc -b --force' },
-  { name: 'structural-scan', command: 'sg scan' },
-  { name: 'unit-gate', command: 'npm run test:gate' },
-  { name: 'production-build', command: 'npm run build' },
-  {
-    name: 'node-runtime-launch',
-    command: 'npx vitest run --configLoader runner --config tests/integration-supervisor/vitest.config.ts tests/integration-supervisor/vtt/node-runtime-launch.launch-test.ts',
-  },
-  {
-    name: 'worker-dist-playwright',
-    command: 'PLAYWRIGHT_PORT=4410 PLAYWRIGHT_WORKERS=1 VTT_HANDOFF_ARTIFACT=dist npx playwright test --config=tests/browser/vtt-handoff/playwright.config.ts worker.spec.ts',
-  },
-  {
-    name: 'browser-gate',
-    command: 'PLAYWRIGHT_PORT=4410 PLAYWRIGHT_WORKERS=1 npm run test:gate:browser',
-  },
-  { name: 'cumulative-targeted-vitest', command: 'npx vitest run --configLoader runner <S0-S10 targeted specs>' },
-  {
-    name: 'worker-dev-playwright',
-    command: 'PLAYWRIGHT_PORT=4410 PLAYWRIGHT_WORKERS=1 VTT_HANDOFF_ARTIFACT=dev npx playwright test --config=tests/browser/vtt-handoff/playwright.config.ts worker.spec.ts',
-  },
-  {
-    name: 'runtime-parity-playwright',
-    command: 'PLAYWRIGHT_PORT=4410 PLAYWRIGHT_WORKERS=1 npx playwright test --config=tests/browser/vtt-handoff/playwright.config.ts runtime-parity.spec.ts',
-  },
-  {
-    name: 'top-down-smoke-playwright',
-    command: 'PLAYWRIGHT_PORT=4410 PLAYWRIGHT_WORKERS=1 npx playwright test --config=tests/browser/vtt-handoff/playwright.config.ts top-down-smoke.spec.ts',
-  },
-] as const;
-
 const supervisorReportInputSchema = z.strictObject({
-  schemaVersion: z.literal(1),
+  schemaVersion: z.literal(2),
   tools: z.array(z.strictObject({
     name: z.string().min(1), version: z.string().min(1), command: z.string().min(1),
   })).min(1),
-  gates: z.array(z.strictObject({
-    name: z.string().min(1), command: z.string().min(1),
-    status: resultStatusSchema, summary: z.string(),
-    preExistingFailures: z.array(z.string()),
-  })).min(1).superRefine((gates, context) => {
+  gateExecutions: z.array(z.strictObject({
+    gateId: z.string().refine((value) => REQUIRED_HANDOFF_GATES.some((gate) => gate.id === value), {
+      message: 'Unknown gate id.',
+    }),
+    receiptPath: z.string().min(1),
+  })).superRefine((executions, context) => {
     const names = new Set<string>();
-    for (const [index, gate] of gates.entries()) {
-      if (names.has(gate.name)) {
+    for (const [index, execution] of executions.entries()) {
+      if (names.has(execution.gateId)) {
         context.addIssue({
-          code: 'custom', path: [index, 'name'],
-          message: `Duplicate gate result: ${gate.name}`,
+          code: 'custom', path: [index, 'gateId'],
+          message: `Duplicate gate execution: ${execution.gateId}`,
         });
       }
-      names.add(gate.name);
+      names.add(execution.gateId);
     }
   }),
   artRequests: z.array(z.strictObject({
@@ -95,7 +73,7 @@ interface DigestRecord {
 }
 
 export interface HandoffReport {
-  readonly schemaVersion: 1;
+  readonly schemaVersion: 2;
   readonly readiness: HandoffReadiness;
   readonly reasons: readonly string[];
   readonly repository: {
@@ -106,6 +84,7 @@ export interface HandoffReport {
   };
   readonly evidence: SupervisorReportInput | null;
   readonly requiredGates: typeof REQUIRED_HANDOFF_GATES;
+  readonly gateOutcomes: readonly GateReconciliation[];
   readonly digests: readonly DigestRecord[];
   readonly adapters: readonly { readonly name: string; readonly path: string }[];
   readonly methods: readonly string[];
@@ -211,7 +190,42 @@ function readSupervisorInput(inputPath: string | undefined): {
     : { input: null, reason: 'SUPERVISOR_RESULTS_INVALID' };
 }
 
-function readiness(input: SupervisorReportInput | null, inputReason: string | null): {
+function reconcileGates(
+  input: SupervisorReportInput | null,
+  repository: HandoffReport['repository'],
+): readonly GateReconciliation[] {
+  const referenced = new Map<GateId, string>();
+  for (const execution of input?.gateExecutions ?? []) {
+    referenced.set(execution.gateId as GateId, execution.receiptPath);
+  }
+  const initial = REQUIRED_HANDOFF_GATES.map((gate) => reconcileGateReceipt(
+    gate,
+    referenced.get(gate.id) ?? null,
+    repository.commit,
+    repository.root,
+  ));
+  const byId = new Map(initial.map((outcome) => [outcome.id, outcome]));
+  return REQUIRED_HANDOFF_GATES.map((gate, index) => {
+    const outcome = initial[index];
+    if (outcome === undefined) throw new Error(`MISSING_RECONCILIATION: ${gate.id}`);
+    const failedPrerequisite = gate.prerequisites.find((id) => {
+      const state = byId.get(id)?.state;
+      return state !== 'passed' && state !== 'passed-on-retry';
+    });
+    if (failedPrerequisite === undefined) return outcome;
+    return {
+      ...outcome,
+      state: outcome.state === 'not-run' ? 'not-run' : 'failed',
+      reasons: [...outcome.reasons, `REQUIRED_GATE_PREREQUISITE_FAILED: ${failedPrerequisite}`],
+    };
+  });
+}
+
+function readiness(
+  input: SupervisorReportInput | null,
+  inputReason: string | null,
+  outcomes: readonly GateReconciliation[],
+): {
   readonly value: HandoffReadiness;
   readonly reasons: readonly string[];
 } {
@@ -219,16 +233,16 @@ function readiness(input: SupervisorReportInput | null, inputReason: string | nu
   if (input === null) {
     reasons.push(inputReason ?? 'SUPERVISOR_RESULTS_MISSING');
   } else {
-    for (const required of REQUIRED_HANDOFF_GATES) {
-      const gate = input.gates.find((candidate) => candidate.name === required.name);
-      if (gate === undefined) reasons.push(`REQUIRED_GATE_MISSING: ${required.name}`);
-      else if (gate.status !== 'PASSED') reasons.push(`REQUIRED_GATE_${gate.status}: ${gate.name}`);
+    for (const outcome of outcomes) {
+      if (outcome.state !== 'passed' && outcome.state !== 'passed-on-retry') {
+        reasons.push(...outcome.reasons);
+      }
     }
     if (input.windowsProbe.status !== 'PASSED') {
       reasons.push(`WINDOWS_PROBE_${input.windowsProbe.status}`);
     }
   }
-  return { value: reasons.length === 0 ? 'READY' : 'PARTIAL', reasons };
+  return { value: reasons.length === 0 ? 'READY' : 'PARTIAL', reasons: [...new Set(reasons)] };
 }
 
 export function buildHandoffReport(options: {
@@ -237,18 +251,21 @@ export function buildHandoffReport(options: {
   readonly gitReader?: ReportGitReader;
 }): HandoffReport {
   const supplied = readSupervisorInput(options.inputPath);
-  const status = readiness(supplied.input, supplied.reason);
+  const repository = repositoryEvidence(options.repositoryRoot, options.gitReader ?? systemGitReader);
+  const gateOutcomes = reconcileGates(supplied.input, repository);
+  const status = readiness(supplied.input, supplied.reason, gateOutcomes);
   const digests = DIGEST_PATHS.map((path): DigestRecord => {
     const bytes = readFileSync(join(options.repositoryRoot, path));
     return { path, sha256: sha256(bytes), length: bytes.length };
   });
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     readiness: status.value,
     reasons: status.reasons,
-    repository: repositoryEvidence(options.repositoryRoot, options.gitReader ?? systemGitReader),
+    repository,
     evidence: supplied.input,
     requiredGates: REQUIRED_HANDOFF_GATES,
+    gateOutcomes,
     digests,
     adapters: ADAPTERS,
     methods: [...HANDOFF_METHODS],
@@ -264,6 +281,34 @@ export function buildHandoffReport(options: {
 
 function markdown(report: HandoffReport): Buffer {
   const evidence = report.evidence;
+  const gateLines = report.gateOutcomes.flatMap((outcome) => [
+    `- ${outcome.id}: ${outcome.state}; required=${String(outcome.required)}; ` +
+      `receipt=${outcome.receiptPath ?? 'none'}; invocation=${outcome.invocationId ?? 'none'}; ` +
+      `report=${outcome.reportPath ?? 'none'}`,
+    `  prerequisites=${outcome.prerequisites.join(',') || 'none'}; ` +
+      `phaseInvocationIds=${outcome.phaseInvocationIds.join(',') || 'none'}`,
+    `  files required/discovered/executed/failed/skipped=${String(outcome.requiredFiles.length)}/` +
+      `${String(outcome.discoveredFiles.length)}/${String(outcome.executedFiles.length)}/` +
+      `${String(outcome.failedFiles.length)}/${String(outcome.skippedFiles.length)}`,
+    `  requiredFiles=${outcome.requiredFiles.join(',') || 'none'}`,
+    `  discoveredFiles=${outcome.discoveredFiles.join(',') || 'none'}`,
+    `  executedFiles=${outcome.executedFiles.join(',') || 'none'}`,
+    `  failedFiles=${outcome.failedFiles.join(',') || 'none'}`,
+    `  skippedFiles=${outcome.skippedFiles.join(',') || 'none'}`,
+    `  tests required/executed/failed/skipped/approved=${String(outcome.requiredTestIdentities.length)}/` +
+      `${String(outcome.executedTestIdentities.length)}/${String(outcome.failedTestIdentities.length)}/` +
+      `${String(outcome.skippedTestIdentities.length)}/` +
+      `${String(outcome.approvedSkippedTestIdentities.length)}`,
+    `  requiredTests=${outcome.requiredTestIdentities.join(',') || 'none'}`,
+    `  executedTests=${outcome.executedTestIdentities.join(',') || 'none'}`,
+    `  failedTests=${outcome.failedTestIdentities.join(',') || 'none'}`,
+    `  skippedTests=${outcome.skippedTestIdentities.join(',') || 'none'}`,
+    `  approvedSkippedTests=${outcome.approvedSkippedTestIdentities.join(',') || 'none'}`,
+    `  passedOnRetry=${outcome.passedOnRetry.join(',') || 'none'}`,
+    `  phaseFailures=${JSON.stringify(outcome.phaseFailures)}`,
+    `  phaseAccounting=${JSON.stringify(outcome.phaseAccounting)}`,
+    `  reasons=${outcome.reasons.join('; ') || 'none'}`,
+  ]);
   const lines = [
     `# VTT handoff: ${report.readiness}`,
     '',
@@ -287,21 +332,19 @@ function markdown(report: HandoffReport): Buffer {
     '',
     '## Gate outcomes',
     '',
-    ...(evidence?.gates.map((gate) => {
-      const existing = gate.preExistingFailures.length === 0
-        ? 'none' : gate.preExistingFailures.join('; ');
-      return `- ${gate.name}: ${gate.status}; command=${gate.command}; summary=${gate.summary}; pre-existing failures=${existing}`;
-    }) ?? ['- No supervisor results supplied.']),
+    ...gateLines,
     '',
     '## Required gate inventory',
     '',
-    ...report.requiredGates.map((gate) => `- ${gate.name}: ${gate.command}`),
+    '- The rendered commands are leaf invocations; the `handoff:gate run` wrapper creates outer receipts.',
+    ...report.requiredGates.flatMap((gate) => [`- ${gate.id} [${gate.tier}]`, `  ${renderGateCommand(gate)}`]),
     '',
     '## Windows probe',
     '',
     evidence === null
       ? '- No supervisor results supplied.'
-      : `- ${evidence.windowsProbe.status}: ${evidence.windowsProbe.command}; reason=${evidence.windowsProbe.reason ?? 'none'}`,
+      : `- ${evidence.windowsProbe.status}: ${evidence.windowsProbe.command}; ` +
+        `reason=${evidence.windowsProbe.reason ?? 'none'}`,
     '',
     '## Contract and fixture digests',
     '',
@@ -329,7 +372,8 @@ function markdown(report: HandoffReport): Buffer {
     '',
     ...report.connectionPoints.map((point) => `- ${point}`),
     '',
-    'The contract-level contracts/v1/READY.json denotes only the atomic core bundle; it does not assert this overall readiness result.',
+    'The contract-level contracts/v1/READY.json denotes only the atomic core bundle; ' +
+      'it does not assert this overall readiness result.',
     '',
   ];
   return Buffer.from(lines.join('\n'));
@@ -393,7 +437,13 @@ export function publishHandoffReport(options: {
       if (!existsSync(destination)) throw new Error(`HANDOFF_REPORT_MISSING: ${entry.path}`);
       if (!readFileSync(destination).equals(entry.bytes)) throw new Error(`HANDOFF_REPORT_MISMATCH: ${entry.path}`);
     }
-    return { root: paths.handoffRoot, status: 'verified', readiness: report.readiness, files: 2, reasons: report.reasons };
+    return {
+      root: paths.handoffRoot,
+      status: 'verified',
+      readiness: report.readiness,
+      files: 2,
+      reasons: report.reasons,
+    };
   }
   const reportDirectory = join(paths.handoffRoot, 'reports/claude');
   mkdirSync(reportDirectory, { recursive: true });
@@ -402,5 +452,11 @@ export function publishHandoffReport(options: {
     writeAtomic(join(paths.handoffRoot, entry.path), entry.bytes, nonce);
     options.hooks?.afterRename?.(entry.path);
   }
-  return { root: paths.handoffRoot, status: 'published', readiness: report.readiness, files: 2, reasons: report.reasons };
+  return {
+    root: paths.handoffRoot,
+    status: 'published',
+    readiness: report.readiness,
+    files: 2,
+    reasons: report.reasons,
+  };
 }

@@ -1,7 +1,7 @@
 import {
   mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync,
 } from '../../helpers/test-filesystem';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import type { LegalActionSummary } from '../../../src/combat/controllers';
 import type { EncounterState } from '../../../src/combat/encounter';
 import type { CombatantId } from '../../../src/combat/values';
@@ -28,13 +28,67 @@ import { MemoryBrowserSessionStore } from '../../../src/vtt/session-persistence'
 import { encounterSeed } from '../../../src/vtt/session-seed';
 import type { ProjectedControllerRequest } from '../../../src/vtt/encounter-projections';
 import { publishCore, publishExamples } from '../../../tools/vtt-handoff/publish';
-import { join, relative } from 'node:path';
+import { type RepositoryIdentityPolicy } from '../../../tools/vtt-handoff/paths';
+import { dirname, join, relative } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 
 const DOOR_ID = 'object:two-room-door';
 const PLAYER_A = 'player:adventurer';
 const PLAYER_B = 'player:goblin';
+
+const PUBLICATION_INPUT_PATHS = [
+  'contracts/vtt-handoff/v1/protocol.schema.json',
+  'contracts/vtt-handoff/v1/art.schema.json',
+  'contracts/vtt-handoff/v1/contracts.d.ts',
+  'fixtures/scenes/two-room.v1.json',
+  'fixtures/scenes/two-room.snapshots.v1.json',
+  'fixtures/protocol/examples.v1.json',
+] as const;
+
+interface RepositoryFixture {
+  readonly root: string;
+  readonly policy: RepositoryIdentityPolicy;
+}
+
+const TEMP_ROOTS = new Set<string>();
+
+function temporaryRoot(prefix: string): string {
+  const path = mkdtempSync(join(tmpdir(), prefix));
+  TEMP_ROOTS.add(path);
+  return path;
+}
+
+afterEach(() => {
+  for (const path of TEMP_ROOTS) rmSync(path, { recursive: true, force: true });
+  TEMP_ROOTS.clear();
+});
+
+function repository(): RepositoryFixture {
+  const root = temporaryRoot('vtt-handoff-examples-repository-');
+  mkdirSync(join(root, '.git'));
+  writeFileSync(join(root, 'package.json'), '{"name":"srd-55"}\n');
+  for (const path of PUBLICATION_INPUT_PATHS) {
+    const destination = join(root, path);
+    mkdirSync(dirname(destination), { recursive: true });
+    writeFileSync(destination, readFileSync(join(process.cwd(), path)));
+  }
+  return { root, policy: { ownerCheckout: root, authorizedWorktrees: [] } };
+}
+
+type CoreOptions = Omit<NonNullable<Parameters<typeof publishCore>[0]>, 'identityPolicy' | 'repositoryRoot'>;
+type ExampleOptions = Omit<NonNullable<Parameters<typeof publishExamples>[0]>, 'identityPolicy' | 'repositoryRoot'>;
+
+function publishFixtureCore(fixture: RepositoryFixture, options: CoreOptions): ReturnType<typeof publishCore> {
+  return publishCore({ ...options, repositoryRoot: fixture.root, identityPolicy: fixture.policy });
+}
+
+function publishFixtureExamples(
+  fixture: RepositoryFixture,
+  options: ExampleOptions,
+): ReturnType<typeof publishExamples> {
+  return publishExamples({ ...options, repositoryRoot: fixture.root, identityPolicy: fixture.policy });
+}
 
 type ExampleChannel = 'dm' | 'player:adventurer' | 'player:goblin' | 'unauthorized';
 
@@ -182,8 +236,9 @@ export async function buildHandoffExamples(): Promise<HandoffExamplesFixture> {
     'player:adventurer': [],
     'player:goblin': [],
   };
-  const runtime = (principal: { readonly role: 'dm' } | { readonly role: 'player'; readonly playerId: string }): ProtocolRuntime =>
-    new ProtocolRuntime({
+  const runtime = (
+    principal: { readonly role: 'dm' } | { readonly role: 'player'; readonly playerId: string },
+  ): ProtocolRuntime => new ProtocolRuntime({
       service,
       principal,
       seats,
@@ -268,7 +323,10 @@ export async function buildHandoffExamples(): Promise<HandoffExamplesFixture> {
     v: 1, id: 'mutation:door-noop', method: 'door.set', params: { doorId: DOOR_ID, open: false },
   });
   await exchange('light.unsupported', 'dm', dm, {
-    v: 1, id: 'mutation:light', method: 'light.set', params: { lightId: 'light:object:object:two-room-torch', enabled: false },
+    v: 1,
+    id: 'mutation:light',
+    method: 'light.set',
+    params: { lightId: 'light:object:object:two-room-torch', enabled: false },
   });
   await exchange('unauthorized.role', 'unauthorized', unauthorized, {
     v: 1, id: 'unauthorized:dm', method: 'session.open', params: { requestedRole: 'dm' },
@@ -320,11 +378,15 @@ describe('real executable VTT handoff examples', () => {
       'dm.snapshot', 'player-a.snapshot', 'player-b.snapshot',
       'token.move', 'door.open', 'door.close', 'door.close-noop',
     ]) expect(exchange(fixture, label).response.ok).toBe(true);
-    expect(exchange(fixture, 'light.unsupported').response).toMatchObject({ ok: false, error: { code: 'UNSUPPORTED' } });
-    expect(exchange(fixture, 'unauthorized.role').response).toMatchObject({ ok: false, error: { code: 'UNAUTHORIZED' } });
-    expect(exchange(fixture, 'forbidden.cross-seat').response).toMatchObject({ ok: false, error: { code: 'FORBIDDEN' } });
+    expect(exchange(fixture, 'light.unsupported').response)
+      .toMatchObject({ ok: false, error: { code: 'UNSUPPORTED' } });
+    expect(exchange(fixture, 'unauthorized.role').response)
+      .toMatchObject({ ok: false, error: { code: 'UNAUTHORIZED' } });
+    expect(exchange(fixture, 'forbidden.cross-seat').response)
+      .toMatchObject({ ok: false, error: { code: 'FORBIDDEN' } });
     expect(exchange(fixture, 'illegal.move').response).toMatchObject({ ok: false, error: { code: 'ILLEGAL_MOVE' } });
-    expect(exchange(fixture, 'duplicate.illegal-id').response).toMatchObject({ ok: false, error: { code: 'DUPLICATE_MUTATION' } });
+    expect(exchange(fixture, 'duplicate.illegal-id').response)
+      .toMatchObject({ ok: false, error: { code: 'DUPLICATE_MUTATION' } });
     const doorOpen = exchange(fixture, 'door.open').response;
     const doorClose = exchange(fixture, 'door.close').response;
     const doorNoop = exchange(fixture, 'door.close-noop').response;
@@ -393,12 +455,18 @@ describe('real executable VTT handoff examples', () => {
   });
 
   it('publishes the append-only examples entry after core and seals examples READY last', () => {
-    const handoffRoot = mkdtempSync(join(tmpdir(), 'vtt-handoff-examples-publish-'));
-    publishCore({ repositoryRoot: process.cwd(), handoffRoot });
+    const repositoryFixture = repository();
+    expect(repositoryFixture.policy).toEqual({
+      ownerCheckout: repositoryFixture.root,
+      authorizedWorktrees: [],
+    });
+    expect(repositoryFixture.root).not.toBe(process.cwd());
+    const handoffRoot = temporaryRoot('vtt-handoff-examples-publish-');
+    publishFixtureCore(repositoryFixture, { handoffRoot });
     const coreBefore = fileBytes(handoffRoot, S2C_PATHS);
     const order: string[] = [];
-    expect(publishExamples({
-      repositoryRoot: process.cwd(), handoffRoot,
+    expect(publishFixtureExamples(repositoryFixture, {
+      handoffRoot,
       hooks: { afterCreate: (path) => order.push(path) },
     })).toMatchObject({ status: 'published', files: 3 });
     expect(order).toEqual([
@@ -408,7 +476,7 @@ describe('real executable VTT handoff examples', () => {
     ]);
     const ready = join(handoffRoot, 'contracts/v1/examples.READY.json');
     const before = statSync(ready).mtimeMs;
-    expect(publishExamples({ repositoryRoot: process.cwd(), handoffRoot }).status).toBe('unchanged');
+    expect(publishFixtureExamples(repositoryFixture, { handoffRoot }).status).toBe('unchanged');
     expect(statSync(ready).mtimeMs).toBe(before);
     expect(fileBytes(handoffRoot, S2C_PATHS)).toEqual(coreBefore);
     const fixturePath = join(handoffRoot, 'fixtures/protocol/examples.v1.json');
@@ -426,51 +494,55 @@ describe('real executable VTT handoff examples', () => {
       }],
     });
     const beforeCheck = completeTree(handoffRoot);
-    expect(publishExamples({ repositoryRoot: process.cwd(), handoffRoot, check: true }).status).toBe('verified');
+    expect(publishFixtureExamples(repositoryFixture, { handoffRoot, check: true }).status).toBe('verified');
     assertTreeUnchanged(beforeCheck, completeTree(handoffRoot));
     expect(fileBytes(handoffRoot, S2C_PATHS)).toEqual(coreBefore);
   });
 
   it('keeps the complete tree and every core byte unchanged on missing examples checks', () => {
-    const handoffRoot = mkdtempSync(join(tmpdir(), 'vtt-handoff-examples-missing-'));
-    publishCore({ repositoryRoot: process.cwd(), handoffRoot });
+    const repositoryFixture = repository();
+    const handoffRoot = temporaryRoot('vtt-handoff-examples-missing-');
+    publishFixtureCore(repositoryFixture, { handoffRoot });
     const coreBefore = fileBytes(handoffRoot, S2C_PATHS);
     const beforeCheck = completeTree(handoffRoot);
-    expect(() => publishExamples({ repositoryRoot: process.cwd(), handoffRoot, check: true }))
+    expect(() => publishFixtureExamples(repositoryFixture, { handoffRoot, check: true }))
       .toThrow('IMMUTABLE_BUNDLE_MISSING');
     assertTreeUnchanged(beforeCheck, completeTree(handoffRoot));
     expect(fileBytes(handoffRoot, S2C_PATHS)).toEqual(coreBefore);
   });
 
   it('refuses normal examples publication when the immutable core is missing without creating anything', () => {
-    const handoffRoot = mkdtempSync(join(tmpdir(), 'vtt-handoff-examples-write-missing-core-'));
+    const repositoryFixture = repository();
+    const handoffRoot = temporaryRoot('vtt-handoff-examples-write-missing-core-');
     const beforePublish = completeTree(handoffRoot);
-    expect(() => publishExamples({ repositoryRoot: process.cwd(), handoffRoot }))
+    expect(() => publishFixtureExamples(repositoryFixture, { handoffRoot }))
       .toThrow('IMMUTABLE_BUNDLE_MISSING');
     assertTreeUnchanged(beforePublish, completeTree(handoffRoot));
   });
 
   it('keeps the complete tree and every core byte unchanged on conflicting examples checks', () => {
-    const handoffRoot = mkdtempSync(join(tmpdir(), 'vtt-handoff-examples-conflict-'));
-    publishCore({ repositoryRoot: process.cwd(), handoffRoot });
-    publishExamples({ repositoryRoot: process.cwd(), handoffRoot });
+    const repositoryFixture = repository();
+    const handoffRoot = temporaryRoot('vtt-handoff-examples-conflict-');
+    publishFixtureCore(repositoryFixture, { handoffRoot });
+    publishFixtureExamples(repositoryFixture, { handoffRoot });
     const coreBefore = fileBytes(handoffRoot, S2C_PATHS);
     writeFileSync(join(handoffRoot, 'fixtures/protocol/examples.v1.json'), '{}\n');
     const beforeCheck = completeTree(handoffRoot);
-    expect(() => publishExamples({ repositoryRoot: process.cwd(), handoffRoot, check: true }))
+    expect(() => publishFixtureExamples(repositoryFixture, { handoffRoot, check: true }))
       .toThrow('INCONSISTENT_SEALED_BUNDLE');
     assertTreeUnchanged(beforeCheck, completeTree(handoffRoot));
     expect(fileBytes(handoffRoot, S2C_PATHS)).toEqual(coreBefore);
-    expect(() => publishExamples({ repositoryRoot: process.cwd(), handoffRoot }))
+    expect(() => publishFixtureExamples(repositoryFixture, { handoffRoot }))
       .toThrow('INCONSISTENT_SEALED_BUNDLE');
     assertTreeUnchanged(beforeCheck, completeTree(handoffRoot));
     expect(fileBytes(handoffRoot, S2C_PATHS)).toEqual(coreBefore);
   });
 
   it('proves complete-tree controls detect directory creation and payload writes', () => {
-    const handoffRoot = mkdtempSync(join(tmpdir(), 'vtt-handoff-examples-controls-'));
-    publishCore({ repositoryRoot: process.cwd(), handoffRoot });
-    publishExamples({ repositoryRoot: process.cwd(), handoffRoot });
+    const repositoryFixture = repository();
+    const handoffRoot = temporaryRoot('vtt-handoff-examples-controls-');
+    publishFixtureCore(repositoryFixture, { handoffRoot });
+    publishFixtureExamples(repositoryFixture, { handoffRoot });
     const baseline = completeTree(handoffRoot);
 
     const unexpected = join(handoffRoot, 'contracts/v1/unexpected-check-directory');
@@ -488,7 +560,7 @@ describe('real executable VTT handoff examples', () => {
     writeFileSync(fixturePath, fixtureBytes);
     expect(readFileSync(fixturePath).equals(fixtureBytes)).toBe(true);
     const restored = completeTree(handoffRoot);
-    expect(publishExamples({ repositoryRoot: process.cwd(), handoffRoot, check: true }).status).toBe('verified');
+    expect(publishFixtureExamples(repositoryFixture, { handoffRoot, check: true }).status).toBe('verified');
     expect(() => assertTreeUnchanged(restored, completeTree(handoffRoot))).not.toThrow();
   });
 });
