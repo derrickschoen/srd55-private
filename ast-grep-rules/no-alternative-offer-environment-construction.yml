@@ -1,0 +1,23 @@
+id: no-alternative-offer-environment-construction
+language: TypeScript
+severity: off
+message: Construct runtime offer environments only through buildOfferEnvironment.
+files:
+  - src/**/*.ts
+  - tools/**/*.ts
+  - tests/**/*.ts
+ignores:
+  - src/vtt/offers/build-offer-environment.ts
+  - src/vtt/engine-query-port.ts
+rule:
+  all:
+    - any:
+        - kind: identifier
+        - kind: property_identifier
+    - any:
+        - regex: ^createEngineOptionEnvironment$
+        - regex: ^createLegacyEngineOptionEnvironment$
+        - regex: ^createRevisionBoundEngineOptionEnvironment$
+        - regex: ^engineOptionEnvironmentFromBinding$
+        - regex: ^reconstructLauncherOfferEnvironment$
+        - regex: ^canonicalEngineQueryPort$

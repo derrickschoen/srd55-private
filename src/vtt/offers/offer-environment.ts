@@ -1,6 +1,7 @@
 import { canonicalJson } from '../../commands/canonical-json';
 import { sha256 } from '../../crypto/sha256';
 import type { EngineQueryPort } from '../engine-query-port';
+import { buildOfferEnvironment } from './build-offer-environment';
 import {
   createUnrepresentedPartyThreatCatalog,
   decodePartyThreatCatalog,
@@ -149,17 +150,10 @@ export function createEngineOptionEnvironmentBinding(
 }
 
 export function engineOptionEnvironmentFromBinding(
-  queries: EngineQueryPort,
+  _queries: EngineQueryPort,
   value: unknown,
 ): EngineOptionEnvironment {
-  const binding = decodeEngineOptionEnvironmentBinding(value);
-  return Object.freeze({
-    queries,
-    familyPolicy: binding.familyPolicy,
-    partyThreatCatalog: binding.partyThreatCatalog,
-    binding,
-    digest: binding.digest,
-  });
+  return buildOfferEnvironment({ kind: 'binding', binding: value });
 }
 
 export function createEngineOptionEnvironment(input: {
@@ -168,16 +162,25 @@ export function createEngineOptionEnvironment(input: {
   readonly familyPolicy: EngineOfferFamilyPolicy;
   readonly partyThreatCatalog: PartyThreatCatalog;
 }): EngineOptionEnvironment {
-  return engineOptionEnvironmentFromBinding(input.queries, createEngineOptionEnvironmentBinding({
-    format: 'engine-option-environment-v1',
-    mode: input.mode,
+  if (input.mode === 'legacy_standard') {
+    const binding = createEngineOptionEnvironmentBinding({
+      format: 'engine-option-environment-v1',
+      mode: 'legacy_standard',
+      familyPolicy: input.familyPolicy,
+      partyThreatCatalog: input.partyThreatCatalog,
+    });
+    return buildOfferEnvironment({ kind: 'binding', binding });
+  }
+  return buildOfferEnvironment({
+    kind: 'configuration',
+    mode: 'revision_bound',
     familyPolicy: input.familyPolicy,
     partyThreatCatalog: input.partyThreatCatalog,
-  }));
+  });
 }
 
-export function createLegacyEngineOptionEnvironment(queries: EngineQueryPort): EngineOptionEnvironment {
-  return engineOptionEnvironmentFromBinding(queries, createLegacyEngineOptionEnvironmentBinding());
+export function createLegacyEngineOptionEnvironment(_queries: EngineQueryPort): EngineOptionEnvironment {
+  return buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
 }
 
 export function createLegacyEngineOptionEnvironmentBinding(): EngineOptionEnvironmentBinding {
@@ -189,9 +192,9 @@ export function createLegacyEngineOptionEnvironmentBinding(): EngineOptionEnviro
   });
 }
 
-export function createRevisionBoundEngineOptionEnvironment(queries: EngineQueryPort): EngineOptionEnvironment {
-  return createEngineOptionEnvironment({
-    queries,
+export function createRevisionBoundEngineOptionEnvironment(_queries: EngineQueryPort): EngineOptionEnvironment {
+  return buildOfferEnvironment({
+    kind: 'configuration',
     mode: 'revision_bound',
     familyPolicy: createDisabledEngineOfferFamilyPolicy(),
     partyThreatCatalog: createUnrepresentedPartyThreatCatalog(),

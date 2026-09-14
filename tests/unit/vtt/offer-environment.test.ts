@@ -7,18 +7,18 @@ import { canonicalEngineQueryPort, engineActionRegistryForEnvironment } from '..
 import { freshMonsterPlanningState } from '../../../src/vtt/monster-planning-state';
 import {
   createDisabledEngineOfferFamilyPolicy,
-  createEngineOptionEnvironment,
-  createLegacyEngineOptionEnvironment,
   decodeEngineOptionEnvironmentBinding,
-  type EngineOptionEnvironment,
 } from '../../../src/vtt/offers/offer-environment';
+import {
+  buildOfferEnvironment,
+  type EngineOptionEnvironment,
+} from '../../../src/vtt/offers/build-offer-environment';
 import { ENGINE_OFFER_CAPABILITIES } from '../../../src/vtt/offers/offer-generator-registry';
 import { createPartyThreatCatalog } from '../../../src/vtt/offers/party-threat-catalog';
 import {
   createEngineMcpRuntime,
   decodeEngineMcpLauncherManifest,
   ENGINE_MCP_LAUNCHER_FORMAT,
-  reconstructLauncherOfferEnvironment,
   type EngineMcpLauncherManifest,
 } from '../../../src/vtt/mcp/entrypoint';
 import { placedToken, playerProfile } from '../combat/fixtures';
@@ -52,8 +52,8 @@ function representedEnvironment() {
       resolution: { kind: 'saving_throw', ability: 'dexterity' },
     }],
   });
-  return createEngineOptionEnvironment({
-    queries: canonicalEngineQueryPort,
+  return buildOfferEnvironment({
+    kind: 'configuration',
     mode: 'revision_bound',
     familyPolicy,
     partyThreatCatalog,
@@ -85,6 +85,65 @@ function mutableRecord(value: unknown, label: string): Record<string, unknown> {
 }
 
 describe('immutable offer environment', () => {
+  it('rejects a missing builder input with the exact contract error', () => {
+    expect(() => Reflect.apply(buildOfferEnvironment, undefined, [])).toThrow(
+      new TypeError('Offer environment input must be an object.'),
+    );
+  });
+
+  it('rejects a missing binding with the exact contract error', () => {
+    expect(() => buildOfferEnvironment({ kind: 'binding', binding: undefined })).toThrow(
+      new TypeError('Offer environment binding is required.'),
+    );
+  });
+
+  it('rejects malformed and mistagged bindings through the binding codec', () => {
+    const binding = structuredClone(representedEnvironment().binding);
+    const truncated = mutableRecord(structuredClone(binding), 'offer environment binding');
+    delete truncated['partyThreatCatalog'];
+    expect(() => buildOfferEnvironment({ kind: 'binding', binding: truncated })).toThrow(
+      new TypeError('engine option environment binding has an invalid shape.'),
+    );
+
+    const mistagged = mutableRecord(structuredClone(binding), 'offer environment binding');
+    mistagged['format'] = 'engine-option-environment-v0';
+    expect(() => buildOfferEnvironment({ kind: 'binding', binding: mistagged })).toThrow(
+      new TypeError('Engine option environment binding header is invalid.'),
+    );
+  });
+
+  it('rejects query injection into configuration input', () => {
+    const injectedInput = {
+      kind: 'configuration',
+      mode: 'legacy_standard',
+      queries: canonicalEngineQueryPort,
+    } as const;
+    expect(() => buildOfferEnvironment(injectedInput)).toThrow(
+      new TypeError('Offer environment configuration has an invalid shape.'),
+    );
+  });
+
+  it('validates revision configuration through the policy and catalog codecs', () => {
+    const environment = representedEnvironment();
+    const invalidPolicy = mutableRecord(structuredClone(environment.familyPolicy), 'family policy');
+    invalidPolicy['helpAttack'] = 'enabled';
+    expect(() => Reflect.apply(buildOfferEnvironment, undefined, [{
+      kind: 'configuration',
+      mode: 'revision_bound',
+      familyPolicy: invalidPolicy,
+      partyThreatCatalog: environment.partyThreatCatalog,
+    }])).toThrow(new TypeError('Engine offer family policy digest is invalid.'));
+
+    const invalidCatalog = mutableRecord(structuredClone(environment.partyThreatCatalog), 'party threat catalog');
+    invalidCatalog['representation'] = 'unrepresented';
+    expect(() => Reflect.apply(buildOfferEnvironment, undefined, [{
+      kind: 'configuration',
+      mode: 'revision_bound',
+      familyPolicy: environment.familyPolicy,
+      partyThreatCatalog: invalidCatalog,
+    }])).toThrow(new TypeError('An unrepresented party threat catalog must be empty.'));
+  });
+
   it('binds strict family-policy catalog and environment digests to independent expected values', () => {
     const environment = representedEnvironment();
     expect(environment.familyPolicy.digest).toBe(EXPECTED_DISABLED_POLICY_DIGEST);
@@ -108,7 +167,10 @@ describe('immutable offer environment', () => {
     const environment = representedEnvironment();
     const decoded = decodeEngineMcpLauncherManifest(launcher(environment));
     if (decoded === null) throw new Error('Valid offer-bound launcher was not decoded.');
-    const reconstructed = reconstructLauncherOfferEnvironment(decoded);
+    const reconstructed = buildOfferEnvironment({
+      kind: 'binding',
+      binding: decoded.offerEnvironment,
+    });
     expect(reconstructed).not.toBe(environment);
     expect(reconstructed.binding.mode).toBe('revision_bound');
     expect(reconstructed.queries).toBe(canonicalEngineQueryPort);
@@ -146,7 +208,7 @@ describe('immutable offer environment', () => {
   });
 
   it('legacy standard ids remain unchanged under explicit legacy environment', () => {
-    const environment = createLegacyEngineOptionEnvironment(canonicalEngineQueryPort);
+    const environment = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
     expect(environment.familyPolicy.digest).toBe(EXPECTED_DISABLED_POLICY_DIGEST);
     expect(environment.partyThreatCatalog.digest).toBe(EXPECTED_UNREPRESENTED_CATALOG_DIGEST);
     expect(environment.digest).toBe(EXPECTED_LEGACY_ENVIRONMENT_DIGEST);
@@ -161,7 +223,10 @@ describe('immutable offer environment', () => {
 
     const decodedLegacyLauncher = decodeEngineMcpLauncherManifest(launcher(environment));
     if (decodedLegacyLauncher === null) throw new Error('Valid legacy launcher was not decoded.');
-    const reconstructedLegacy = reconstructLauncherOfferEnvironment(decodedLegacyLauncher);
+    const reconstructedLegacy = buildOfferEnvironment({
+      kind: 'binding',
+      binding: decodedLegacyLauncher.offerEnvironment,
+    });
     expect(reconstructedLegacy.binding.mode).toBe('legacy_standard');
     expect(reconstructedLegacy.partyThreatCatalog.representation).toBe('unrepresented');
     expect(reconstructedLegacy.digest).toBe(EXPECTED_LEGACY_ENVIRONMENT_DIGEST);

@@ -4,7 +4,6 @@ import { createEncounter } from '../../../src/combat/encounter';
 import { mulberry32 } from '../../../src/combat/random';
 import { BANDIT } from '../../../src/combat/statblocks/mercenary-company';
 import { encounterBranchId, encounterSessionId } from '../../../src/combat/values';
-import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
 import { EngineRoundSession } from '../../../src/vtt/engine-round-session';
 import {
   availableEngineActorOptions,
@@ -12,11 +11,8 @@ import {
 } from '../../../src/vtt/intent-resolver';
 import { scoreTeamPlans } from '../../../src/vtt/intel/team-scorer';
 import { freshMonsterPlanningState } from '../../../src/vtt/monster-planning-state';
-import {
-  createEngineOfferFamilyPolicy,
-  createEngineOptionEnvironment,
-  createRevisionBoundEngineOptionEnvironment,
-} from '../../../src/vtt/offers/offer-environment';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
+import { createEngineOfferFamilyPolicy } from '../../../src/vtt/offers/offer-environment';
 import { createUnrepresentedPartyThreatCatalog } from '../../../src/vtt/offers/party-threat-catalog';
 import {
   OfferedOptionEnvironmentMismatchError,
@@ -40,10 +36,25 @@ function fixture() {
   return { actor, state };
 }
 
+function revisionBoundEnvironment(helpAttack: 'disabled' | 'enabled' = 'disabled') {
+  return buildOfferEnvironment({
+    kind: 'configuration',
+    mode: 'revision_bound',
+    familyPolicy: createEngineOfferFamilyPolicy({
+      format: 'engine-offer-family-policy-v1',
+      helpAttack,
+      readyAttack: 'disabled',
+      unarmedControl: 'disabled',
+      reposition: 'disabled',
+    }),
+    partyThreatCatalog: createUnrepresentedPartyThreatCatalog(),
+  });
+}
+
 describe('Slice 3A bound offer environments', () => {
   it('resolver fallback reuses the primary environment instance', () => {
     const { actor, state } = fixture();
-    const environment = createRevisionBoundEngineOptionEnvironment(canonicalEngineQueryPort);
+    const environment = revisionBoundEnvironment();
     const options = availableEngineActorOptions(state, actor.id, environment);
     const fallback = options.find((option) =>
       option.actionSlots.some((slot) => slot.slot === 'main' && slot.use.kind === 'dodge'));
@@ -62,19 +73,8 @@ describe('Slice 3A bound offer environments', () => {
 
   it('board path and round execution share environment digest', () => {
     const { actor, state } = fixture();
-    const environment = createRevisionBoundEngineOptionEnvironment(canonicalEngineQueryPort);
-    const differentPolicyEnvironment = createEngineOptionEnvironment({
-      queries: canonicalEngineQueryPort,
-      mode: 'revision_bound',
-      familyPolicy: createEngineOfferFamilyPolicy({
-        format: 'engine-offer-family-policy-v1',
-        helpAttack: 'enabled',
-        readyAttack: 'disabled',
-        unarmedControl: 'disabled',
-        reposition: 'disabled',
-      }),
-      partyThreatCatalog: createUnrepresentedPartyThreatCatalog(),
-    });
+    const environment = revisionBoundEnvironment();
+    const differentPolicyEnvironment = revisionBoundEnvironment('enabled');
     const actors = offeredOptionActorsForState(state, [actor.id], environment);
 
     expect(offeredOptionPaths(state, actors, environment).length).toBeGreaterThan(0);
@@ -100,7 +100,7 @@ describe('Slice 3A bound offer environments', () => {
 
   it('all offer API consumers use their bound environment', () => {
     const { actor, state } = fixture();
-    const environment = createRevisionBoundEngineOptionEnvironment(canonicalEngineQueryPort);
+    const environment = revisionBoundEnvironment();
     const primary = availableEngineActorOptions(state, actor.id, environment)
       .find((option) => option.actionSlots.some((slot) =>
         slot.slot === 'main' && slot.use.kind === 'attack'));

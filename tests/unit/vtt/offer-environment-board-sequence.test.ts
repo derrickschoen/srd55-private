@@ -1,9 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { projectDmView } from '../../../src/combat/visibility';
-import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
 import { projectDmBoard } from '../../../src/vtt/encounter-projections';
 import { resolveEngineActorOption } from '../../../src/vtt/intent-resolver';
-import { createLegacyEngineOptionEnvironment } from '../../../src/vtt/offers/offer-environment';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
 import {
   offeredOptionActorsForState,
   offeredOptionPaths,
@@ -21,7 +20,7 @@ const IDLE = {
 describe('Slice 3A production board offer environment', () => {
   it('production board keeps every moving offered-option path and its hazard overlays', () => {
     const state = createOptionPathFixtureEncounter();
-    const environment = createLegacyEngineOptionEnvironment(canonicalEngineQueryPort);
+    const environment = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
     const offeredActors = offeredOptionActorsForState(state, undefined, environment);
     const movingOptionIds = offeredActors.flatMap((actor) => actor.options.flatMap((option) => {
       const resolution = resolveEngineActorOption(state, option, environment);
