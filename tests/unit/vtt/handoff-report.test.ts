@@ -247,6 +247,7 @@ function phaseFor(
       executionIds: executionIds.filter((identity) => identity.endsWith(resolve(repositoryRoot, file))),
       reasons: [],
     })),
+    executionAccountingAvailable: true,
     executionOutcomes: executionIds.map((executionId) => {
       const file = files.find((candidate) => executionId.endsWith(resolve(repositoryRoot, candidate)));
       if (file === undefined) throw new Error(`Missing file for execution ${executionId}.`);
@@ -270,6 +271,10 @@ function reportFor(gate: RequiredHandoffGate, repositoryRoot: string): M1GateRep
 
 function sha256(bytes: Buffer): string {
   return createHash('sha256').update(bytes).digest('hex');
+}
+
+function assertExactReasons(actual: readonly string[], expected: readonly string[]): void {
+  expect(actual).toEqual(expected);
 }
 
 function writeReceipt(
@@ -638,11 +643,27 @@ describe('VTT handoff readiness report', () => {
       gitReader: gitReader(),
     });
     expect(result.readiness).toBe('PARTIAL');
-    expect(result.reasons).toContain('OUTER_EXIT_NONZERO: 2');
+    assertExactReasons(result.reasons, ['OUTER_EXIT_NONZERO: 2']);
     const markdown = readFileSync(join(handoffRoot, 'reports/claude/READY.md'), 'utf8');
     expect(markdown).toContain('# VTT handoff: PARTIAL');
     expect(markdown).toContain('full-typecheck: failed');
     expect(markdown).not.toContain('# VTT handoff: READY\n');
+  });
+
+  it('publishes the exact reason for an isolated not-run gate', () => {
+    const fixture = repository();
+    const handoffRoot = root();
+    const input = successfulEvidence(fixture, handoffRoot);
+    const report = buildWith(fixture, handoffRoot, {
+      ...input,
+      gateExecutions: input.gateExecutions.filter((execution) => execution.gateId !== 'full-typecheck'),
+    });
+    expect(report.readiness).toBe('PARTIAL');
+    assertExactReasons(report.reasons, ['REQUIRED_GATE_NOT_RUN: full-typecheck']);
+  });
+
+  it('proves the exact-reasons assertion rejects an unexpected superset', () => {
+    expect(() => assertExactReasons(['EXPECTED', 'UNEXPECTED'], ['EXPECTED'])).toThrow();
   });
 
   it.each([
@@ -848,6 +869,54 @@ describe('VTT handoff readiness report', () => {
     });
   });
 
+  it('rejects a retry phase whose discovery claims have no execution outcomes', () => {
+    const fixture = repository();
+    const handoffRoot = root();
+    const a = 'tests/unit/a.test.ts';
+    const b = 'tests/unit/b.test.ts';
+    const input = successfulEvidence(fixture, handoffRoot, {
+      'unit-gate': {
+        transformReport: (report) => {
+          const discovery = { kind: 'vitest' as const, rootDir: fixture.root, files: [a, b], testIdentities: [] };
+          const retry = phaseFor(
+            gate('unit-gate'),
+            fixture.root,
+            { ...discovery, files: [b] },
+            'retry',
+            [b],
+          );
+          return {
+            ...report,
+            phases: {
+              initial: phaseFor(
+                gate('unit-gate'),
+                fixture.root,
+                discovery,
+                'initial',
+                [a, b],
+                { [a]: 'passed', [b]: 'failed' },
+              ),
+              retry: { ...retry, fileOutcomes: [], executionOutcomes: [] },
+            },
+            verdict: { status: 'passed', passedOnRetry: [b], failedFiles: [], phaseFailures: [] },
+          };
+        },
+      },
+    });
+    const execution = input.gateExecutions.find((candidate) => candidate.gateId === 'unit-gate');
+    if (execution === undefined) throw new Error('Missing unit receipt.');
+    rewriteReceiptDiscovery(execution.receiptPath, {
+      kind: 'vitest', rootDir: fixture.root, files: [a, b], testIdentities: [],
+    });
+    const outcome = buildWith(fixture, handoffRoot, input).gateOutcomes
+      .find((candidate) => candidate.id === 'unit-gate');
+    expect(outcome).toMatchObject({
+      state: 'failed',
+      m1Verdict: { status: 'passed', passedOnRetry: [b] },
+    });
+    expect(outcome?.reasons).toContain('M1_EXECUTION_ACCOUNTING_EMPTY');
+  });
+
   it('kills M3-REPORT-RETRY-SCOPE outside the initially failed files', () => {
     const fixture = repository();
     const handoffRoot = root();
@@ -912,6 +981,21 @@ describe('VTT handoff readiness report', () => {
       'unit-gate': {
         transformReport: (report) => ({
           ...report,
+          phases: {
+            ...report.phases,
+            initial: {
+              ...report.phases.initial,
+              fileOutcomes: report.phases.initial.fileOutcomes.map((outcome) => ({
+                ...outcome,
+                status: 'failed',
+              })),
+              executionOutcomes: report.phases.initial.executionOutcomes.map((outcome) => ({
+                ...outcome,
+                status: 'failed',
+                approvedSkip: false,
+              })),
+            },
+          },
           verdict: {
             status: 'failed',
             passedOnRetry: [],
@@ -930,6 +1014,19 @@ describe('VTT handoff readiness report', () => {
       m1Verdict: { status: 'failed' },
     });
     expect(outcome?.reasons).toContain('M1_VERDICT_FAILED');
+    publishHandoffReport({
+      repositoryRoot: fixture.root,
+      handoffRoot,
+      inputPath: inputFile(handoffRoot, input),
+      identityPolicy: fixture.policy,
+      gitReader: gitReader(),
+    });
+    const published = JSON.parse(
+      readFileSync(join(handoffRoot, 'reports/claude/handoff.json'), 'utf8'),
+    ) as HandoffReport;
+    const publishedOutcome = published.gateOutcomes.find((candidate) => candidate.id === 'unit-gate');
+    expect(publishedOutcome?.failedTestIdentities.length).toBeGreaterThan(0);
+    expect(publishedOutcome?.phaseFailures).toEqual([phaseFailure]);
   });
 
   it.each(['digest', 'phase UUID', 'malformed'] as const)(
@@ -1085,7 +1182,24 @@ describe('VTT handoff readiness report', () => {
       identityPolicy: fixture.policy,
       gitReader: gitReader(),
     });
+    const published = JSON.parse(
+      readFileSync(join(handoffRoot, 'reports/claude/handoff.json'), 'utf8'),
+    ) as HandoffReport;
+    const publishedOutcome = published.gateOutcomes.find((candidate) => candidate.id === selected.id);
+    expect(publishedOutcome).toMatchObject({
+      requiredTestIdentities: [passed, skipped],
+      executedTestIdentities: [passed],
+      failedTestIdentities: [],
+      skippedTestIdentities: [skipped],
+      approvedSkippedTestIdentities: [skipped],
+    });
+    expect(publishedOutcome?.requiredTestIdentities).toHaveLength(2);
+    expect(publishedOutcome?.executedTestIdentities).toHaveLength(1);
+    expect(publishedOutcome?.failedTestIdentities).toHaveLength(0);
+    expect(publishedOutcome?.skippedTestIdentities).toHaveLength(1);
+    expect(publishedOutcome?.approvedSkippedTestIdentities).toHaveLength(1);
     const markdown = readFileSync(join(handoffRoot, 'reports/claude/READY.md'), 'utf8');
+    expect(markdown).toContain('tests required/executed/failed/skipped/approved=2/1/0/1/1');
     expect(markdown).toContain(`skippedTests=${skipped}`);
     expect(markdown).toContain('phaseInvocationIds=initial-browser-gate');
     expect(markdown).toContain('prerequisites=none');
@@ -1471,6 +1585,100 @@ describe('executable handoff gate inventory', () => {
       failureReasons: ['OUTER_EXIT_MISSING'],
     });
   });
+
+  it.each(['missing sidecar', 'pending module'] as const)(
+    'preserves failed M-1 diagnostics when execution accounting has a %s',
+    (variant) => {
+      const selected = gate('unit-gate');
+      const repositoryRoot = process.cwd();
+      const discovery = discoveryFor(selected, repositoryRoot);
+      const base = reportFor(selected, repositoryRoot);
+      const executionId = base.phases.initial.discovery.requestedExecutionIds[0];
+      const file = base.phases.initial.fileOutcomes[0]?.file;
+      if (executionId === undefined || file === undefined) throw new Error('Missing native M-1 fixture identity.');
+      const { executionOutcomes: _executionOutcomes, ...initialWithoutOutcomes } = base.phases.initial;
+      const phaseFailures = variant === 'missing sidecar'
+        ? [
+            { phase: 'initial', domain: 'process', reasons: ['process-exit-nonzero'] },
+            { phase: 'initial', domain: 'reporter', reasons: ['execution-evidence-missing'] },
+            { phase: 'initial', domain: 'discovery', reasons: ['reported-file-missing'] },
+          ]
+        : [
+            { phase: 'initial', domain: 'process', reasons: ['process-exit-1'] },
+            { phase: 'initial', domain: 'reporter', reasons: ['execution-unfinished'] },
+            { phase: 'initial', domain: 'discovery', reasons: ['discovery-mismatch'] },
+          ];
+      const initial = variant === 'missing sidecar'
+        ? initialWithoutOutcomes
+        : {
+            ...initialWithoutOutcomes,
+            discovery: {
+              ...initialWithoutOutcomes.discovery,
+              reportedExecutionIds: [],
+            },
+            fileOutcomes: [{
+              file,
+              status: 'unfinished',
+              executionIds: [executionId],
+              reasons: ['execution-unfinished'],
+            }],
+            evidence: {
+              version: 1,
+              kind: 'vitest',
+              phase: 'initial',
+              phaseInvocationId: initialWithoutOutcomes.phaseInvocationId,
+              lifecycle: { onTestRunEnd: true },
+              specifications: [{ executionId, file: resolve(repositoryRoot, file) }],
+              modules: [{ executionId, file: resolve(repositoryRoot, file), state: 'pending', errors: [] }],
+              globalErrors: [],
+              fatalReasons: [],
+              passWithNoTests: false,
+              terminalReason: 'failed',
+              processTimeoutObserved: false,
+            },
+          };
+      const rawReport = {
+        ...base,
+        phases: { initial, retry: null },
+        verdict: {
+          status: 'failed',
+          passedOnRetry: [],
+          failedFiles: [file],
+          phaseFailures,
+        },
+      };
+      const reportRoot = root();
+      let sequence = 0;
+      const adapter: InventoryRunnerAdapter = {
+        revision: () => COMMIT,
+        discover: () => discovery,
+        execute: (_gate, _root, environment) => {
+          const directory = environment.DND_GATE_REPORT_DIR;
+          if (directory === undefined) throw new Error('Missing M-1 report directory.');
+          writeFileSync(join(directory, 'vitest-gate-native.json'), `${JSON.stringify(rawReport, null, 2)}\n`);
+          return { status: 1, signal: null };
+        },
+        invocationId: () => `native-${String(sequence += 1)}`,
+        timestamp: () => '2026-09-14T12:00:00.000Z',
+      };
+      const run = runInventoryGate(selected, reportRoot, repositoryRoot, [], adapter);
+      expect(run.receipt.m1Report).not.toBeNull();
+      expect(run.receipt.m1Verdict).toEqual(rawReport.verdict);
+      expect(run.receipt.failureReasons.some((reason) => reason.startsWith('M1_REPORT_INVALID'))).toBe(false);
+      if (variant === 'missing sidecar') {
+        expect(run.receipt.executionAccounting).toBeNull();
+        expect(run.receipt.failureReasons).toContain('M1_EXECUTION_ACCOUNTING_UNAVAILABLE');
+      }
+      const outcome = reconcileGateReceipt(selected, run.path, COMMIT, repositoryRoot);
+      expect(outcome.state).toBe('failed');
+      expect(outcome.m1Verdict).toEqual(rawReport.verdict);
+      expect(outcome.phaseFailures).toEqual(phaseFailures);
+      if (variant === 'pending module') {
+        expect(outcome.executedTestIdentities).toEqual([]);
+        expect(outcome.reasons).toContain('M1_EXECUTION_ACCOUNTING_INCOMPLETE');
+      }
+    },
+  );
 
   it('kills M3-REPORT-PW-IDENTITY with config.rootDir-relative nested locations', () => {
     const fixture = repository();

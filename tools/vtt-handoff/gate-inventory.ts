@@ -859,6 +859,7 @@ interface M1Phase {
   readonly command: M1Command;
   readonly discovery: M1Discovery;
   readonly fileOutcomes: readonly M1FileOutcome[];
+  readonly executionAccountingAvailable: boolean;
   readonly executionOutcomes: readonly M1ExecutionOutcome[];
 }
 
@@ -965,7 +966,9 @@ function vitestEvidenceOutcomes(evidence: Record<string, unknown>): readonly M1E
   const outcomes: M1ExecutionOutcome[] = [];
   for (const module of evidence.modules) {
     if (!isRecord(module) || typeof module.executionId !== 'string' || typeof module.file !== 'string') return null;
-    const status = executionStatus(module.state);
+    const status = module.state === 'pending' || module.state === 'queued'
+      ? 'unfinished'
+      : executionStatus(module.state);
     if (status === null) return null;
     outcomes.push({
       executionId: module.executionId,
@@ -977,15 +980,19 @@ function vitestEvidenceOutcomes(evidence: Record<string, unknown>): readonly M1E
   return outcomes;
 }
 
-function phaseExecutionOutcomes(value: Record<string, unknown>, kind: GateReportKind): readonly M1ExecutionOutcome[] {
+function phaseExecutionOutcomes(
+  value: Record<string, unknown>,
+  kind: GateReportKind,
+): { readonly available: boolean; readonly outcomes: readonly M1ExecutionOutcome[] } {
   const direct = parseExecutionOutcomes(value.executionOutcomes);
-  if (direct !== null) return direct;
-  if (!isRecord(value.evidence)) throw new Error('M1_EXECUTION_EVIDENCE_INVALID');
+  if (direct !== null) return { available: true, outcomes: direct };
+  if (!isRecord(value.evidence)) return { available: false, outcomes: [] };
   const outcomes = kind === 'playwright'
     ? playwrightEvidenceOutcomes(value.evidence)
     : vitestEvidenceOutcomes(value.evidence);
-  if (outcomes === null) throw new Error('M1_EXECUTION_EVIDENCE_INVALID');
-  return outcomes;
+  return outcomes === null
+    ? { available: false, outcomes: [] }
+    : { available: true, outcomes };
 }
 
 function parseM1Phase(value: unknown, expectedPhase: M1Phase['phase'], kind: GateReportKind): M1Phase | null {
@@ -1003,14 +1010,15 @@ function parseM1Phase(value: unknown, expectedPhase: M1Phase['phase'], kind: Gat
     if (status === null || executionIds === null || reasons === null) return null;
     fileOutcomes.push({ file: outcome.file, status, executionIds, reasons });
   }
-  const executionOutcomes = phaseExecutionOutcomes(value, kind);
+  const executionAccounting = phaseExecutionOutcomes(value, kind);
   return {
     phase: expectedPhase,
     phaseInvocationId: value.phaseInvocationId,
     command,
     discovery,
     fileOutcomes,
-    executionOutcomes,
+    executionAccountingAvailable: executionAccounting.available,
+    executionOutcomes: executionAccounting.outcomes,
   };
 }
 
@@ -1062,17 +1070,17 @@ function phaseAccounting(phase: M1Phase): GatePhaseExecutionAccounting {
 export function executionAccounting(
   report: M1GateReport,
   discovery: DiscoveryResult,
-): GateExecutionAccounting {
+): GateExecutionAccounting | null {
+  const phases = [report.phases.initial, report.phases.retry]
+    .filter((phase): phase is M1Phase => phase !== null);
+  if (phases.some((phase) => !phase.executionAccountingAvailable)) return null;
   const requiredTestIdentities = report.kind === 'playwright'
     ? discovery.testIdentities
     : report.phases.initial.discovery.requestedExecutionIds;
   return {
     requiredFiles: discovery.files,
     requiredTestIdentities: sorted(requiredTestIdentities),
-    phases: [
-      phaseAccounting(report.phases.initial),
-      ...(report.phases.retry === null ? [] : [phaseAccounting(report.phases.retry)]),
-    ],
+    phases: phases.map(phaseAccounting),
   };
 }
 
@@ -1325,8 +1333,6 @@ export function runInventoryGate(
     try {
       const evidence = readM1Report(invocationDirectory, gate.report.gateVerdict.kind);
       m1Verdict = evidence.report.verdict;
-      launcherAuthenticated = authenticateM1PhaseCommands(evidence.report, repositoryRoot);
-      accounting = executionAccounting(evidence.report, discovery);
       m1Report = {
         path: evidence.path,
         sha256: evidence.sha256,
@@ -1336,8 +1342,11 @@ export function runInventoryGate(
           ...(evidence.report.phases.retry === null ? [] : [evidence.report.phases.retry.phaseInvocationId]),
         ],
       };
+      launcherAuthenticated = authenticateM1PhaseCommands(evidence.report, repositoryRoot);
+      accounting = executionAccounting(evidence.report, discovery);
       if (!launcherAuthenticated) failureReasons.push('M1_LAUNCHER_UNAUTHENTICATED');
       failureReasons.push(...reconcileM1Discovery(gate, discovery, evidence.report));
+      failureReasons.push(...validateM1ExecutionAccounting(discovery, evidence.report, repositoryRoot));
       if (m1Verdict.status !== 'passed') failureReasons.push('M1_VERDICT_FAILED');
     } catch (error) {
       failureReasons.push(`M1_REPORT_INVALID: ${error instanceof Error ? error.message : String(error)}`);
@@ -1595,25 +1604,31 @@ function validateM1ExecutionAccounting(
 ): readonly string[] {
   const reasons: string[] = [];
   const initial = report.phases.initial;
-  const requestedIds = sorted(initial.discovery.requestedExecutionIds);
-  const reportedIds = sorted(initial.discovery.reportedExecutionIds);
-  const outcomeIds = sorted(initial.executionOutcomes.map((outcome) => outcome.executionId));
-  if (requestedIds.length === 0 || reportedIds.length === 0 || outcomeIds.length === 0) {
-    reasons.push('M1_EXECUTION_ACCOUNTING_EMPTY');
-  }
-  if (JSON.stringify(requestedIds) !== JSON.stringify(reportedIds) ||
-    JSON.stringify(reportedIds) !== JSON.stringify(outcomeIds)) {
-    reasons.push('M1_EXECUTION_ACCOUNTING_MISMATCH');
-  }
-  if (JSON.stringify(sorted(initial.fileOutcomes.map((outcome) => outcome.file))) !==
-    JSON.stringify(discovery.files)) {
-    reasons.push('M1_FILE_ACCOUNTING_MISMATCH');
-  }
-  if (initial.executionOutcomes.some((outcome) => outcome.status === 'unfinished' ||
-    (outcome.status === 'skipped' && !outcome.approvedSkip))) {
-    reasons.push('M1_EXECUTION_ACCOUNTING_INCOMPLETE');
-  }
+  const initiallyFailed = sorted(initial.fileOutcomes
+    .filter((outcome) => outcome.status === 'failed')
+    .map((outcome) => outcome.file));
   for (const phase of [initial, report.phases.retry].filter((entry): entry is M1Phase => entry !== null)) {
+    const expectedFiles = phase.phase === 'initial' ? discovery.files : initiallyFailed;
+    const requestedIds = sorted(phase.discovery.requestedExecutionIds);
+    const reportedIds = sorted(phase.discovery.reportedExecutionIds);
+    const outcomeIds = sorted(phase.executionOutcomes.map((outcome) => outcome.executionId));
+    const outcomeFiles = sorted(phase.fileOutcomes.map((outcome) => outcome.file));
+    if (!phase.executionAccountingAvailable) reasons.push('M1_EXECUTION_ACCOUNTING_UNAVAILABLE');
+    if (expectedFiles.length === 0 || requestedIds.length === 0 || reportedIds.length === 0 ||
+      outcomeIds.length === 0 || outcomeFiles.length === 0) {
+      reasons.push('M1_EXECUTION_ACCOUNTING_EMPTY');
+    }
+    if (JSON.stringify(requestedIds) !== JSON.stringify(reportedIds) ||
+      JSON.stringify(reportedIds) !== JSON.stringify(outcomeIds)) {
+      reasons.push('M1_EXECUTION_ACCOUNTING_MISMATCH');
+    }
+    if (JSON.stringify(outcomeFiles) !== JSON.stringify(expectedFiles)) {
+      reasons.push('M1_FILE_ACCOUNTING_MISMATCH');
+    }
+    if (phase.executionOutcomes.some((outcome) => outcome.status === 'unfinished' ||
+      (outcome.status === 'skipped' && !outcome.approvedSkip))) {
+      reasons.push('M1_EXECUTION_ACCOUNTING_INCOMPLETE');
+    }
     const identitySets = [
       phase.discovery.requestedExecutionIds,
       phase.discovery.reportedExecutionIds,
@@ -1639,7 +1654,7 @@ function validateM1ExecutionAccounting(
       }
     }
   }
-  return reasons;
+  return [...new Set(reasons)];
 }
 
 export function reconcileGateReceipt(
