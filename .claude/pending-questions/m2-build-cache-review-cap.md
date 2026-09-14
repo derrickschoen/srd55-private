@@ -1,0 +1,15 @@
+# M-2 BUILD-CACHE-01: implementation review cap reached with two P1s open (asked 2026-09-14 06:35, supervisor)
+
+State: branch claude/build-cache at 2d659dbc (three implementation rounds; supervisor-verified each time: tsc 0, sg 0, focused 185/185, discovery 640→640, lockfile unchanged). The closure is right: astra independently confirmed the real repository classifies CACHEABLE with an empty reason list, 840 → 939 inputs, all 97 previously omitted raw imports present (67 drizzle / 30 docs), no false bypass, and the three-build supervisor proof's print sites intact. The validation ordering (tsc → Vite → guard/digest → commit check → store), public build, atomic store, cache-failure fallback, HTML/CSS/glob/workspace-root detectors and the mutant ledger all pass astra's final review.
+
+What remains (astra r3, both P1): the CONFIG-ENVIRONMENT recogniser still accepts three forms that produce a silent stale HIT when the environment changes — `core['cacheDir']` element access, destructured `const { cacheDir } = core`, and `const p = (process)` — and a computed property hidden in a local initializer (`const shared = { [key]: './extras/app' }; export default { ...shared }`) is accepted while its selected root is omitted. Three rounds of adding recogniser rules have each left a new hole; astra: "the current implementation's selective rejection rules do not establish the promised exact supported grammar."
+
+Astra's bounded alternative, offered for final-round arbitration: stop recognising config programs at all — permit exactly the REVIEWED current config programs (vite.config.ts and tools/ai-bridge/plugin.ts, plus their local config closure) through checked-in AST fingerprints, and BYPASS on any different program. Config changes are rare; a bypass is an uncached validated build, never a wrong artifact; the fingerprints move only by an explicit, reviewed edit. This closes both P1s with a rule that is provable in one test each (edit the config → bypass; restore → cacheable) and ends the grammar arms race.
+
+Options:
+A. Authorize ONE cap-exceeding fix round implementing astra's fingerprint alternative exactly (remove the env/config grammar recognisers in favour of fingerprints + bypass; keep every other detector), then one final astra check limited to the fingerprint rule, then the three-build proof and landing. (Recommended.)
+B. Land 2d659dbc now with the two P1s recorded as residuals (the affected forms do not occur in this repository today, and only a config edit could introduce them) and open a follow-up unit for the fingerprint rule.
+C. Stop M-2 here; keep the branch; move to M-3 landing.
+Supervisor recommendation: A. It is a scope REDUCTION, the reviewer proposed it, and B would land a cache with a known silent-hit class in the one file (vite.config.ts) most likely to be edited by hand.
+
+Also still open for you: offers 3B at cap (.claude/pending-questions/offers-s3b-runtime-factory-seam.md), the SVG-fog pilot plan at cap (qsfog-svg-pilot-plan-cap.md), and the live checkout's node_modules predating the `ws` dependency (needs `npm install` or `npm ci` in the main checkout when convenient).
