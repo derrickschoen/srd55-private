@@ -96,15 +96,37 @@ Run the gates yourself and paste real numbers. Every load-bearing new assertion
 gets a negative control: apply, **prove applied**, run, revert, **prove
 restoration** by re-running.
 
-- Compile gate is `npx tsc -p tsconfig.app.json --noEmit`. **Never** the root
-  `tsconfig.json` — it is a solution file with `files:[]` and exits 0
-  unconditionally, checking nothing.
+- Compile gate is `npx tsc -b --force`. Root `tsconfig.json` is a solution with
+  references to `tsconfig.app.json` and `tsconfig.node.json`; build mode follows
+  both, so application code plus tests and tooling are checked.
+  `npx tsc -p tsconfig.app.json --noEmit` is app-only and is not the gate.
+  Ordinary project mode (`npx tsc -p tsconfig.json --noEmit`) checks no source
+  files with this root `files: []` solution configuration; use build mode.
 - Never read an exit code through a pipe.
-- One browser suite machine-wide, unique port, never vitest during one.
-- One suite-running lane at a time.
+- Run gates under load and let lanes keep flowing. A timeout red gets one serial
+  rerun under the gate lock before it counts; never re-pin a budget from load.
+  Timeout increases remain limited to tests explicitly named by D544/D606/D613.
+- Full Vitest, Playwright, and production builds remain serialized through
+  `/tmp/dnd-gate.lock`; run no Vitest while Playwright owns that lock. See
+  `.claude/RULES.md:47-50` for the surviving lock boundary.
+- Browser work still uses a unique port; never use reserved port 4173.
 - Fresh worktrees need `npm ci`.
 - `git commit` always `-F msgfile`. Commit by **explicit path**.
 - Python, not shell, for text checks — the shell mangles `**`, backticks and `$`.
+
+### Controlling decisions and executable sources
+
+- Compile scope and command: D263 requires build mode; the 2026-09-03 14:30
+  supervisor finding requires `--force`. Project references are executable in
+  [`../tsconfig.json`](../tsconfig.json); `.claude/RULES.md:44` records the
+  forced compile command and supervisor finding.
+- Gate load, retry, and timeout policy: D587.3, with named exceptions in D544,
+  D606, and D613; serialization and the locked retry remain in
+  `.claude/RULES.md:47-50`. The newest entry in
+  [`decisions.md`](decisions.md) wins on conflict.
+- Required handoff gate inventory (M-3 owner):
+  [`REQUIRED_HANDOFF_GATES`](../tools/vtt-handoff/report.ts). Do not duplicate
+  that generated command list here.
 
 ## Forbidden paths to green
 

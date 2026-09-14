@@ -257,7 +257,9 @@ export type Timestamp = Brand<string, 'Timestamp'>;
  * minted by share import carry the sentinel `-1` in `spell_versions.level`
  * (`character-share.ts`, `ensureSharedSpell`).
  *
- * Declared but not yet applied. Nothing narrows `-1` away today, so the sentinel
- * still flows into the read models as a plain `number`.
+ * The character spell-section read boundary in
+ * `src/queries/character-spell-section-builder.ts` maps `-1` to the typed
+ * `SheetSpellLevel` unknown arm, brands only validated integers in 0..9 as
+ * `SpellLevel`, and rejects every other stored value.
  */
 export type SpellLevel = Brand<number, 'SpellLevel'>;
