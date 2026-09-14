@@ -1,6 +1,7 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -59,6 +60,8 @@ const {
 } = importedCacheModule;
 
 const modulePath = join(process.cwd(), 'tools/dist-build-cache.mjs');
+const npmCliCandidate = join(dirname(process.execPath), '../lib/node_modules/npm/bin/npm-cli.js');
+const realGit = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
 const roots: string[] = [];
 
 interface Fixture {
@@ -76,6 +79,11 @@ function write(root: string, path: string, contents: string): void {
   const target = join(root, path);
   mkdirSync(dirname(target), { recursive: true });
   writeFileSync(target, contents, 'utf8');
+}
+
+function executable(root: string, path: string, contents: string): void {
+  write(root, path, contents);
+  chmodSync(join(root, path), 0o755);
 }
 
 function git(root: string, args: readonly string[]): string {
@@ -100,7 +108,14 @@ function createFixture(): Fixture {
   git(root, ['config', 'user.name', 'Cache Test']);
   git(root, ['config', 'user.email', 'cache@example.invalid']);
   write(root, '.gitignore', ['dist/', 'node_modules/', '.tmp/', 'public/ignored*/'].join('\n') + '\n');
-  write(root, 'package.json', '{"type":"module"}\n');
+  write(root, 'package.json', JSON.stringify({
+    type: 'module',
+    scripts: {
+      build: 'tsc -b && node tools/dist-build-cache.mjs',
+      'build:dist': 'vite build --configLoader runner',
+      'build:dist:validated': 'tsc -b && npm run build:dist && node tools/assert-dist-clean.mjs',
+    },
+  }) + '\n');
   write(root, 'package-lock.json', JSON.stringify({
     lockfileVersion: 3,
     packages: {
@@ -118,6 +133,12 @@ function createFixture(): Fixture {
   write(root, 'docs/guide.md', 'guide\n');
   write(root, 'tests/example.test.ts', 'export const testValue = 1;\n');
   write(root, 'public/base.txt', 'base\n');
+  write(root, 'vite.config.mjs', [
+    'export const undeclared = process.env.CACHE_TEST_SECRET;',
+    'export default { undeclared };',
+  ].join('\n'));
+  // The tracked copy makes the fixture key cover the exact implementation under test.
+  write(root, 'tools/dist-build-cache.mjs', readFileSync(modulePath, 'utf8'));
   commit(root);
   mkdirSync(temporary, { recursive: true });
   write(root, 'node_modules/.package-lock.json', JSON.stringify({
@@ -130,11 +151,13 @@ function createFixture(): Fixture {
       },
     },
   }) + '\n');
-  write(root, 'node_modules/typescript/bin/tsc', [
+  executable(root, 'node_modules/typescript/bin/tsc', [
+    '#!/usr/bin/env node',
     "import { appendFileSync } from 'node:fs';",
     "appendFileSync('node_modules/steps.log', `tsc ${process.argv.slice(2).join(' ')}\\n`);",
   ].join('\n'));
-  write(root, 'node_modules/vite/bin/vite.js', [
+  executable(root, 'node_modules/vite/bin/vite.js', [
+    '#!/usr/bin/env node',
     "import { execFileSync } from 'node:child_process';",
     "import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';",
     "const head = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();",
@@ -145,17 +168,28 @@ function createFixture(): Fixture {
     "if (existsSync('node_modules/mutate-input')) appendFileSync('src/app.ts', '// changed during build\\n');",
     "const commit = existsSync('node_modules/wrong-head') ? '0'.repeat(40) : head;",
     "const assets = ['assets/index-az.js', 'assets/index-aaa.js'].sort((a, b) => a.localeCompare(b));",
+    "const config = (await import(new URL('../../../vite.config.mjs', import.meta.url).href)).default;",
     "rmSync('dist', { recursive: true, force: true });",
     "mkdirSync('dist', { recursive: true });",
     "writeFileSync('dist/vtt-handoff-artifact.json', JSON.stringify({ commit }));",
     "writeFileSync('dist/observed.json', JSON.stringify({",
-    "  secret: process.env.CACHE_TEST_SECRET,",
+    "  secret: config.undeclared,",
     "  sentinel: process.env.NPM_SENTINEL,",
     "  nodeOptions: process.env.NODE_OPTIONS,",
     "  lang: process.env.LANG,",
     "  lcAll: process.env.LC_ALL,",
     "  assets,",
     "}));",
+  ].join('\n'));
+  mkdirSync(join(root, 'node_modules/.bin'), { recursive: true });
+  symlinkSync('../typescript/bin/tsc', join(root, 'node_modules/.bin/tsc'));
+  symlinkSync('../vite/bin/vite.js', join(root, 'node_modules/.bin/vite'));
+  write(root, 'node_modules/npm/bin/npm-cli.js', [
+    "import { spawnSync } from 'node:child_process';",
+    `const result = spawnSync(process.execPath, [${JSON.stringify(npmCliCandidate)}, ...process.argv.slice(2)], {`,
+    "  env: process.env, stdio: 'inherit',",
+    '});',
+    'process.exitCode = result.status ?? 1;',
   ].join('\n'));
   write(root, 'tools/assert-dist-clean.mjs', [
     "import { appendFileSync, readFileSync } from 'node:fs';",
@@ -180,7 +214,7 @@ function key(fixture: Fixture, parent: NodeJS.ProcessEnv = process.env): string 
 function runCache(fixture: Fixture, extra: NodeJS.ProcessEnv = {}): CacheRun {
   const home = join(fixture.root, 'node_modules/home');
   mkdirSync(home, { recursive: true });
-  const result = spawnSync(process.execPath, [modulePath], {
+  const result = spawnSync(process.execPath, [join(fixture.root, 'tools/dist-build-cache.mjs')], {
     cwd: fixture.root,
     encoding: 'utf8',
     env: {
@@ -197,6 +231,72 @@ function runCache(fixture: Fixture, extra: NodeJS.ProcessEnv = {}): CacheRun {
     stdout: result.stdout,
     stderr: result.stderr,
   };
+}
+
+function runPublicBuild(fixture: Fixture, extra: NodeJS.ProcessEnv = {}): CacheRun {
+  const home = extra.HOME ?? join(fixture.root, 'node_modules/home');
+  mkdirSync(home, { recursive: true });
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    GIT_CONFIG_GLOBAL: join(fixture.root, 'node_modules/empty-gitconfig'),
+    GIT_CONFIG_NOSYSTEM: '1',
+    HOME: home,
+    TMPDIR: fixture.temporary,
+    ...extra,
+  };
+  delete env.NODE_OPTIONS;
+  const command = existsSync(npmCliCandidate) ? process.execPath : 'npm';
+  const args = existsSync(npmCliCandidate) ? [npmCliCandidate, 'run', 'build'] : ['run', 'build'];
+  const result = spawnSync(command, args, { cwd: fixture.root, encoding: 'utf8', env });
+  return { status: result.status, stdout: result.stdout, stderr: result.stderr };
+}
+
+function withGitMutation(fixture: Fixture, mutation: string): CacheVerdict {
+  const bin = join(fixture.root, 'node_modules/fake-git');
+  executable(fixture.root, 'node_modules/fake-git/git', [
+    '#!/usr/bin/env node',
+    "import { readFileSync } from 'node:fs';",
+    "import { spawnSync } from 'node:child_process';",
+    'const args = process.argv.slice(2);',
+    "const input = readFileSync(0);",
+    `const result = spawnSync(${JSON.stringify(realGit)}, args, { input, cwd: process.cwd() });`,
+    'let output = Buffer.from(result.stdout);',
+    "const selected = process.env.M2_FAKE_GIT;",
+    "if (selected === 'index-mode' && args[0] === 'ls-files' && args.includes('-s')) {",
+    "  output = Buffer.concat([Buffer.from('10x644'), output.subarray(6)]);",
+    '}',
+    "if (selected === 'index-stage' && args[0] === 'ls-files' && args.includes('-s')) {",
+    "  const marker = output.indexOf(Buffer.from(' 0\\t'));",
+    '  output[marker + 1] = 57;',
+    '}',
+    "if (selected === 'verbose-shape' && args[0] === 'ls-files' && args.includes('-v')) output[1] = 88;",
+    "const replaceField = (bytes, field, value) => {",
+    '  let start = 0;',
+    '  for (let index = 0; index < field; index += 1) start = bytes.indexOf(0, start) + 1;',
+    '  const end = bytes.indexOf(0, start);',
+    '  return Buffer.concat([bytes.subarray(0, start), Buffer.from(value), bytes.subarray(end)]);',
+    '};',
+    "if (selected === 'attr-path' && args[0] === 'check-attr') output = replaceField(output, 0, 'wrong-path');",
+    "if (selected === 'attr-name' && args[0] === 'check-attr') output = replaceField(output, 1, 'wrong-name');",
+    "if (selected === 'reverse-public' && args[0] === 'ls-files' && args.includes('public')) {",
+    '  const records = output.subarray(0, -1).toString().split("\\0").reverse();',
+    '  output = Buffer.from(`${records.join("\\0")}\\0`);',
+    '}',
+    'process.stdout.write(output);',
+    'process.stderr.write(result.stderr);',
+    'process.exitCode = result.status ?? 1;',
+  ].join('\n'));
+  const [oldPath, oldMutation] = [process.env.PATH, process.env.M2_FAKE_GIT];
+  process.env.PATH = `${bin}:${oldPath ?? ''}`;
+  process.env.M2_FAKE_GIT = mutation;
+  try {
+    return verdict(fixture);
+  } finally {
+    if (oldPath === undefined) delete process.env.PATH;
+    else process.env.PATH = oldPath;
+    if (oldMutation === undefined) delete process.env.M2_FAKE_GIT;
+    else process.env.M2_FAKE_GIT = oldMutation;
+  }
 }
 
 function hiddenLock(root: string): Record<string, unknown> {
@@ -356,7 +456,7 @@ describe('Git-key behavior', () => {
 
   it('IGNORED_PUBLIC_FILE_MISS', () => {
     const fixture = createFixture();
-    const before = key(fixture);
+    const withoutPublic = key(fixture);
     write(fixture.root, 'public/ignored-z/z.txt', 'zed\n');
     write(fixture.root, 'public/ignored-a/a.txt', 'aye\n');
     const records = execFileSync('git', [
@@ -368,7 +468,18 @@ describe('Git-key behavior', () => {
       '35b57f48bdd9bd09800c5433eff6d3d758830c27',
       '6c24c44cfa29bde0a5cd71bfb4a28278f32a162c',
     ]);
-    expect(key(fixture)).not.toBe(before); // DROP_IGNORED_PUBLIC
+    const baseline = key(fixture);
+    expect(baseline).not.toBe(withoutPublic); // DROP_IGNORED_PUBLIC
+    const reversed = withGitMutation(fixture, 'reverse-public');
+    expect(reversed).toMatchObject({ cacheable: true, key: baseline }); // DROP_PUBLIC_SORT
+    write(fixture.root, 'public/ignored-a/a.txt', 'aye changed\n');
+    const changedA = key(fixture);
+    write(fixture.root, 'public/ignored-a/a.txt', 'aye\n');
+    write(fixture.root, 'public/ignored-z/z.txt', 'zed changed\n');
+    const changedZ = key(fixture);
+    expect(changedA).not.toBe(baseline); // DROP_PUBLIC_CONTENT_IDS
+    expect(changedZ).not.toBe(baseline); // DROP_PUBLIC_CONTENT_IDS
+    expect(changedZ).not.toBe(changedA); // DROP_PUBLIC_CONTENT_IDS
   });
 
   it('DECLARED_STATIC_CACHE_DIR_MISS', () => {
@@ -528,6 +639,46 @@ describe('Git-key behavior', () => {
     expect(distCacheVerdict(root)).toMatchObject({ cacheable: false, reason: 'git-failure' });
   });
 
+  it('MALFORMED_INDEX_MODE_GIT_FAILURE', () => {
+    const fixture = createFixture();
+    expect(withGitMutation(fixture, 'index-mode')).toMatchObject({
+      cacheable: false,
+      reason: 'git-failure',
+    });
+  });
+
+  it('MALFORMED_INDEX_STAGE_GIT_FAILURE', () => {
+    const fixture = createFixture();
+    expect(withGitMutation(fixture, 'index-stage')).toMatchObject({
+      cacheable: false,
+      reason: 'git-failure',
+    });
+  });
+
+  it('MALFORMED_VERBOSE_RECORD_GIT_FAILURE', () => {
+    const fixture = createFixture();
+    expect(withGitMutation(fixture, 'verbose-shape')).toMatchObject({
+      cacheable: false,
+      reason: 'git-failure',
+    });
+  });
+
+  it('MALFORMED_ATTR_PATH_GIT_FAILURE', () => {
+    const fixture = createFixture();
+    expect(withGitMutation(fixture, 'attr-path')).toMatchObject({
+      cacheable: false,
+      reason: 'git-failure',
+    }); // DROP_ATTR_PATH_CHECK
+  });
+
+  it('MALFORMED_ATTR_NAME_GIT_FAILURE', () => {
+    const fixture = createFixture();
+    expect(withGitMutation(fixture, 'attr-name')).toMatchObject({
+      cacheable: false,
+      reason: 'git-failure',
+    }); // DROP_ATTR_PATH_CHECK
+  });
+
   it('INVALID_HEAD_BYPASS', () => {
     const root = mkdtempSync(join(tmpdir(), 'dnd-dist-cache-sha256-'));
     roots.push(root);
@@ -640,23 +791,27 @@ describe('Git-key behavior', () => {
 
 describe('scrubbed build execution', () => {
   it('FIXED_LOCALE_OUTPUT', () => {
-    const fixture = createFixture();
-    const miss = runCache(fixture, { LANG: 'en_US.UTF-8', LC_ALL: 'en_US.UTF-8' });
-    expect(miss.status).toBe(0);
-    expect(miss.stdout).toContain('dist cache miss:');
-    expect(miss.stdout).toContain('dist cache stored:');
-    expect(miss.stdout).toContain('dist clean: 2 files scanned');
-    const first = readFileSync(join(fixture.root, 'dist/observed.json'), 'utf8');
-    rmSync(join(fixture.root, 'dist'), { recursive: true, force: true });
-    const hit = runCache(fixture, { LANG: 'da_DK.UTF-8', LC_ALL: 'da_DK.UTF-8' });
-    expect(hit.status).toBe(0);
-    expect(hit.stdout).toContain('dist cache hit:');
-    expect(hit.stdout).toContain('dist clean: 2 files scanned'); // DROP_HIT_GUARD
-    expect(readFileSync(join(fixture.root, 'dist/observed.json'), 'utf8')).toBe(first);
-    expect(readFileSync(join(fixture.root, 'node_modules/guard.log'), 'utf8')).toBe(
-      'C.UTF-8|C.UTF-8\nC.UTF-8|C.UTF-8\n',
-    );
-    expect(readFileSync(join(fixture.root, 'node_modules/build-count'), 'utf8')).toBe('1');
+    const outputs: string[] = [];
+    for (const locale of ['en_US.UTF-8', 'da_DK.UTF-8']) {
+      const fixture = createFixture();
+      const miss = runPublicBuild(fixture, { LANG: locale, LC_ALL: locale });
+      expect(miss.status).toBe(0);
+      expect(miss.stdout).toContain('dist cache miss:');
+      expect(miss.stdout).toContain('dist cache stored:');
+      expect(miss.stdout).toContain('dist clean: 2 files scanned');
+      outputs.push(readFileSync(join(fixture.root, 'dist/observed.json'), 'utf8'));
+      rmSync(join(fixture.root, 'dist'), { recursive: true, force: true });
+      const hit = runPublicBuild(fixture, { LANG: locale, LC_ALL: locale });
+      expect(hit.status).toBe(0);
+      expect(hit.stdout).toContain('dist cache hit:');
+      expect(hit.stdout).toContain('dist clean: 2 files scanned'); // DROP_HIT_GUARD
+      outputs.push(readFileSync(join(fixture.root, 'dist/observed.json'), 'utf8'));
+      expect(readFileSync(join(fixture.root, 'node_modules/guard.log'), 'utf8')).toBe(
+        'C.UTF-8|C.UTF-8\nC.UTF-8|C.UTF-8\n',
+      );
+      expect(readFileSync(join(fixture.root, 'node_modules/build-count'), 'utf8')).toBe('1');
+    }
+    expect(new Set(outputs).size).toBe(1); // PASS_PARENT_LOCALE
   });
 
   it('HOST_NPM_CONFIG_IS_INERT', () => {
@@ -664,15 +819,14 @@ describe('scrubbed build execution', () => {
     const preload = join(fixture.root, 'node_modules/preload.mjs');
     writeFileSync(preload, [
       "import { appendFileSync } from 'node:fs';",
-      "appendFileSync('node_modules/preload-pids', `${process.pid}\\n`);",
+      "appendFileSync('node_modules/preload-pids', `${process.pid}|${process.argv[1]}\\n`);",
       "process.env.NPM_SENTINEL = 'injected';",
     ].join('\n'));
     const home = join(fixture.root, 'node_modules/npm-home');
     mkdirSync(home, { recursive: true });
     writeFileSync(join(home, '.npmrc'), `node-options=--import=${preload}\n`);
-    const run = runCache(fixture, {
+    const run = runPublicBuild(fixture, {
       HOME: home,
-      NODE_OPTIONS: `--import=${preload}`,
       npm_config_userconfig: join(home, '.npmrc'),
     });
     expect(run.status).toBe(0);
@@ -680,6 +834,8 @@ describe('scrubbed build execution', () => {
     expect(observed.sentinel).toBeUndefined(); // SPAWN_NPM
     expect(observed.nodeOptions).toBeUndefined();
     const pids = readFileSync(join(fixture.root, 'node_modules/preload-pids'), 'utf8').trim().split('\n');
-    expect(pids).toHaveLength(1);
+    const cachePids = pids.filter((record) => record.includes('tools/dist-build-cache.mjs'));
+    expect(cachePids).toHaveLength(1);
+    expect(pids.some((record) => record.includes('node_modules/vite/bin/vite.js'))).toBe(false); // SPAWN_NPM
   });
 });

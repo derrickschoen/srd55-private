@@ -5,37 +5,33 @@ import { renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-const FORMAT = 'dnd-dist-build-cache-v2';
-const ATTRS = ['text', 'eol', 'filter', 'ident', 'working-tree-encoding'];
-const UNSPECIFIED = Buffer.from('unspecified');
 export const HIT_GUARD_DESCRIPTOR = Object.freeze({ script: 'tools/assert-dist-clean.mjs', args: [] });
 export const VALIDATED_BUILD_DESCRIPTORS = Object.freeze([
   Object.freeze({ script: 'node_modules/typescript/bin/tsc', args: ['-b'] }),
   Object.freeze({ script: 'node_modules/vite/bin/vite.js', args: ['build', '--configLoader', 'runner'] }),
   HIT_GUARD_DESCRIPTOR]);
-export function productionBuildEnv(parent) {
-  const child = {};
+// KEY_VERDICT_START
+const FORMAT = 'dnd-dist-build-cache-v2';
+const ATTRS = ['text', 'eol', 'filter', 'ident', 'working-tree-encoding'];
+export function productionBuildEnv(parent) { const child = {};
   for (const name of ['PATH', 'HOME', 'TMPDIR', 'TZ']) {
     if (parent[name] !== undefined) child[name] = parent[name]; }
   Object.assign(child, { NODE_ENV: 'production', LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8' });
   if (parent.STATIC_APP_CACHE_DIR !== undefined) child.STATIC_APP_CACHE_DIR = parent.STATIC_APP_CACHE_DIR;
-  return child; } // KEY_VERDICT_START
+  return child; }
 function bypass(reason) { throw Object.assign(new Error(reason), { cacheBypass: reason }); }
-function frame(hash, value) {
-  const bytes = Buffer.isBuffer(value) ? value : Buffer.from(value);
+function frame(hash, value) { const bytes = Buffer.isBuffer(value) ? value : Buffer.from(value);
   const length = Buffer.allocUnsafe(8);
   length.writeBigUInt64BE(BigInt(bytes.length));
   hash.update(length).update(bytes); }
-function git(root, args, input, allowOne = false) {
-  const result = spawnSync('git', args, {
+function git(root, args, input, allowOne = false) { const result = spawnSync('git', args, {
     cwd: root, env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' }, input,
     maxBuffer: 64 * 1024 * 1024,
   });
   if (result.error !== undefined || (result.status !== 0 && !(allowOne && result.status === 1))) {
     bypass('git-failure'); }
   return result; }
-function nul(bytes) {
-  if (bytes.length === 0) return [];
+function nul(bytes) { if (bytes.length === 0) return [];
   if (bytes.at(-1) !== 0) bypass('git-failure');
   const output = [];
   let start = 0;
@@ -48,28 +44,22 @@ function overlayCompare(a, b) {
   return Buffer.compare(a.current, b.current) || Buffer.compare(a.old ?? Buffer.alloc(0), b.old ?? Buffer.alloc(0)) ||
     Buffer.compare(a.status, b.status); }
 export function sortOverlayRecords(records) { return [...records].sort(overlayCompare); }
-function parseStatus(bytes) {
-  const [fields, output] = [nul(bytes), []];
-  for (let index = 0; index < fields.length; index += 1) {
-    const field = fields[index];
+function parseStatus(bytes) { const [fields, output] = [nul(bytes), []];
+  for (let index = 0; index < fields.length; index += 1) { const field = fields[index];
     if (field.length < 4 || field[2] !== 32) bypass('git-failure');
-    const status = field.subarray(0, 2);
-    const moved = status.includes(67) || status.includes(82);
+    const status = field.subarray(0, 2), moved = status.includes(67) || status.includes(82);
     const old = moved ? fields[++index] : undefined;
     if (moved && old === undefined) bypass('git-failure');
     output.push({ status, old, current: field.subarray(3) }); }
   return sortOverlayRecords(output); }
-function validatePath(path) {
-  if (path[0] === 34 || path[path.lastIndexOf(47) + 1] === 34 || path.includes(10) || path.includes(13)) {
+function validatePath(path) { if (
+  path[0] === 34 || path[path.lastIndexOf(47) + 1] === 34 || path.includes(10) || path.includes(13)) {
     bypass('unsupported-path'); } }
-function statesFor(root, paths) {
-  const [states, extant] = [new Map(), []];
-  for (const path of paths) {
-    validatePath(path);
+function statesFor(root, paths) { const [states, extant] = [new Map(), []];
+  for (const path of paths) { validatePath(path);
     const key = path.toString('hex');
     if (states.has(key)) continue;
-    try {
-      const stat = lstatSync(Buffer.concat([Buffer.from(`${root}${sep}`), path]));
+    try { const stat = lstatSync(Buffer.concat([Buffer.from(`${root}${sep}`), path]));
       if (stat.isSymbolicLink()) bypass('symlink');
       if (!stat.isFile()) bypass('git-failure');
       states.set(key, { mode: stat.mode & 0o111 ? '100755' : '100644' });
@@ -88,8 +78,7 @@ function statesFor(root, paths) {
 function allowed(values, actual) {
   return values === undefined || (!values.includes(`!${actual}`) &&
     (!values.some((value) => !value.startsWith('!')) || values.includes(actual))); }
-function installation(root, objectId) {
-  try {
+function installation(root, objectId) { try {
     const bytes = readFileSync(resolve(root, 'node_modules/.package-lock.json'));
     const wanted = JSON.parse(readFileSync(resolve(root, 'package-lock.json'), 'utf8'));
     const actual = JSON.parse(bytes.toString('utf8'));
@@ -98,8 +87,7 @@ function installation(root, objectId) {
     const installed = new Map(Object.entries(actual.packages).filter(([path]) => path !== ''));
     if (expected.some(([, pkg]) => pkg.libc !== undefined) ||
       wanted.lockfileVersion !== actual.lockfileVersion || expected.length !== installed.size) bypass('stale-install');
-    for (const [path, pkg] of expected) {
-      const found = installed.get(path);
+    for (const [path, pkg] of expected) { const found = installed.get(path);
       if (found === undefined || found.version !== pkg.version) bypass('stale-install');
       if (pkg.resolved !== undefined && found.resolved !== undefined && pkg.resolved !== found.resolved) {
         bypass('stale-install'); }
@@ -108,8 +96,7 @@ function installation(root, objectId) {
     return [objectId, createHash('sha256').update(bytes).digest('hex')]; } catch (error) {
     if (error?.cacheBypass !== undefined) throw error;
     bypass('stale-install'); } }
-function slot(hash, label, path, states) {
-  frame(hash, label);
+function slot(hash, label, path, states) { frame(hash, label);
   if (path === undefined) return frame(hash, 'none');
   frame(hash, path);
   const state = states.get(path.toString('hex'));
@@ -117,28 +104,30 @@ function slot(hash, label, path, states) {
   frame(hash, 'present');
   frame(hash, state.mode);
   frame(hash, state.objectId); }
-export function distCacheVerdict(root, parent = process.env) {
-  let head;
-  try {
-    head = git(root, ['rev-parse', 'HEAD']).stdout.toString('ascii').trim();
+export function distCacheVerdict(root, parent = process.env) { let head;
+  try { head = git(root, ['rev-parse', 'HEAD']).stdout.toString('ascii').trim();
     if (!/^[0-9a-f]{40}$/u.test(head)) bypass('invalid-head');
     const records = nul(git(root, ['ls-files', '-s', '-z']).stdout);
-    const index = records.map((raw) => {
-      const tab = raw.indexOf(9);
+    const index = records.map((raw) => { const tab = raw.indexOf(9);
       const fields = raw.subarray(0, tab).toString('ascii').split(' ');
-      if (tab < 0 || fields.length !== 3 || !/^[0-9a-f]{40}$/u.test(fields[1])) bypass('git-failure');
+      if (tab < 0 || fields.length !== 3 || !/^[0-7]{6}$/u.test(fields[0]) ||
+        !/^[0-9a-f]{40}$/u.test(fields[1]) || !/^[0-3]$/u.test(fields[2])) bypass('git-failure');
       return { raw, mode: fields[0], objectId: fields[1], stage: fields[2], path: raw.subarray(tab + 1) }; });
     if (index.some(({ mode }) => mode === '160000')) bypass('submodule');
     if (index.some(({ mode }) => mode === '120000')) bypass('symlink');
-    if (nul(git(root, ['ls-files', '-v', '-z']).stdout).some((item) =>
-      item[0] === 83 || (item[0] >= 97 && item[0] <= 122))) bypass('special-index');
+    const flags = nul(git(root, ['ls-files', '-v', '-z']).stdout);
+    if (flags.some((item) => item.length < 3 || item[1] !== 32)) bypass('git-failure');
+    if (flags.some((item) => item[0] === 83 || (item[0] >= 97 && item[0] <= 122))) bypass('special-index');
     const autocrlf = git(root, ['config', '--get', 'core.autocrlf'], undefined, true);
     if (autocrlf.status === 0 && autocrlf.stdout.toString().trim().toLowerCase() !== 'false') bypass('normalization');
     if (git(root, ['ls-files', '--', '.gitattributes', '**/.gitattributes']).stdout.length) bypass('normalization');
     const paths = Buffer.concat(index.map(({ path }) => Buffer.concat([path, Buffer.of(0)])));
     const attrs = nul(git(root, ['check-attr', '-z', '--stdin', ...ATTRS], paths).stdout);
     if (attrs.length !== index.length * ATTRS.length * 3) bypass('git-failure');
-    if (attrs.some((value, offset) => offset % 3 === 2 && !value.equals(UNSPECIFIED))) bypass('normalization');
+    let offset = 0;
+    for (const { path } of index) { for (const name of ATTRS) {
+        if (!attrs[offset++]?.equals(path) || attrs[offset++]?.toString() !== name) bypass('git-failure');
+        if (attrs[offset++]?.toString() !== 'unspecified') bypass('normalization'); } }
     const lock = index.find(({ path, stage }) => stage === '0' && path.equals(Buffer.from('package-lock.json')));
     if (lock === undefined) bypass('stale-install');
     const install = installation(root, lock.objectId);
@@ -165,8 +154,8 @@ export function distCacheVerdict(root, parent = process.env) {
     for (const name of ['.env', '.env.local', '.env.production', '.env.production.local']) {
       frame(hash, name);
       frame(hash, existsSync(resolve(root, name)) ? 'present' : 'absent');
-      if (existsSync(resolve(root, name))) {
-        frame(hash, createHash('sha256').update(readFileSync(resolve(root, name))).digest('hex')); } }
+      if (existsSync(resolve(root, name))) frame(
+        hash, createHash('sha256').update(readFileSync(resolve(root, name))).digest('hex')); }
     return { cacheable: true, head, key: hash.digest('hex') }; } catch (error) {
     if (error?.cacheBypass !== undefined) return { cacheable: false, head, reason: error.cacheBypass };
     throw error; } }
