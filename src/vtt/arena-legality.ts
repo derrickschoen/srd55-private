@@ -8,6 +8,7 @@ import {
   canonicalEngineQueryPort,
   engineActionRangeFeet,
   engineAttackRangeFeet,
+  type EngineQueryPort,
   type EngineTargetSelector,
 } from './engine-query-port';
 import type {
@@ -17,34 +18,49 @@ import type {
   TargetSelector,
 } from './dm-bridge/round-plan-contract';
 
-export function arenaTokenPosition(state: EncounterState, id: CombatantId): GridCell | null {
-  return canonicalEngineQueryPort.tokenPosition(state, id);
+export function arenaTokenPosition(
+  state: EncounterState,
+  id: CombatantId,
+  queries: EngineQueryPort = canonicalEngineQueryPort,
+): GridCell | null {
+  return queries.tokenPosition(state, id);
 }
 
-export function arenaCombatant(state: EncounterState, id: CombatantId) {
-  return canonicalEngineQueryPort.combatant(state, id);
+export function arenaCombatant(
+  state: EncounterState,
+  id: CombatantId,
+  queries: EngineQueryPort = canonicalEngineQueryPort,
+) {
+  return queries.combatant(state, id);
 }
 
-export function arenaSameSide(state: EncounterState, left: CombatantId, right: CombatantId): boolean {
-  return canonicalEngineQueryPort.sameSide(state, left, right);
+export function arenaSameSide(
+  state: EncounterState,
+  left: CombatantId,
+  right: CombatantId,
+  queries: EngineQueryPort = canonicalEngineQueryPort,
+): boolean {
+  return queries.sameSide(state, left, right);
 }
 
 export function resolveArenaTarget(
   state: EncounterState,
   actor: CombatantId,
   selector: TargetSelector,
+  queries: EngineQueryPort = canonicalEngineQueryPort,
 ): CombatantId | null {
   const engineSelector: EngineTargetSelector = selector.kind === 'combatant'
     ? { kind: 'combatant', combatantId: selector.combatantId }
     : { kind: 'nearest_visible_enemy' };
-  return canonicalEngineQueryPort.resolveTarget(state, actor, engineSelector);
+  return queries.resolveTarget(state, actor, engineSelector);
 }
 
 export function arenaMonsterActions(
   state: EncounterState,
   actor: CombatantId,
+  queries: EngineQueryPort = canonicalEngineQueryPort,
 ): readonly MonsterAction[] {
-  return canonicalEngineQueryPort.actions(state, actor);
+  return queries.actions(state, actor);
 }
 
 export function arenaAttackRange(action: MonsterAttackAction): number {
@@ -55,8 +71,9 @@ function arenaMovementCost(
   state: EncounterState,
   actor: CombatantId,
   destination: GridCell,
+  queries: EngineQueryPort,
 ): number | null {
-  const result = canonicalEngineQueryPort.path(state, {
+  const result = queries.path(state, {
     actorId: actor,
     destination,
     movement: 'normal',
@@ -76,16 +93,17 @@ function actionRefusals(
   action: PlanAction,
   actor: CombatantId,
   state: EncounterState,
+  queries: EngineQueryPort,
 ): readonly string[] {
-  const acting = arenaCombatant(state, actor);
-  const origin = arenaTokenPosition(state, actor);
+  const acting = arenaCombatant(state, actor, queries);
+  const origin = arenaTokenPosition(state, actor, queries);
   if (acting?.profile.kind !== 'monster' || origin === null) return [`${actor}: actor is not a placed monster`];
-  const actions = arenaMonsterActions(state, actor);
+  const actions = arenaMonsterActions(state, actor, queries);
   const refusals: string[] = [];
   if (action.kind === 'retreat_toward') {
     const budget = action.maximumFeet ?? acting.profile.rules.speed;
     if (budget > acting.profile.rules.speed) refusals.push(`${actor}: movement exceeds speed`);
-    const cost = arenaMovementCost(state, actor, action.destination);
+    const cost = arenaMovementCost(state, actor, action.destination, queries);
     if (cost === null) refusals.push(`${actor}: destination is blocked, occupied, or unreachable`);
     else if (cost > budget) refusals.push(`${actor}: route costs ${String(cost)} feet including difficult terrain`);
     return refusals;
@@ -101,14 +119,14 @@ function actionRefusals(
     if (!available) refusals.push(`${actor}: Action Surge is absent from the combatant profile`);
   }
   if (!('target' in action) || action.target === null) return refusals;
-  const target = resolveArenaTarget(state, actor, action.target);
-  if (target === null || arenaCombatant(state, target) === null) {
+  const target = resolveArenaTarget(state, actor, action.target, queries);
+  if (target === null || arenaCombatant(state, target, queries) === null) {
     return [...refusals, `${actor}: target is absent`];
   }
-  if (arenaSameSide(state, actor, target)) refusals.push(`${actor}: target is on the actor's side`);
-  const targetPosition = arenaTokenPosition(state, target);
+  if (arenaSameSide(state, actor, target, queries)) refusals.push(`${actor}: target is on the actor's side`);
+  const targetPosition = arenaTokenPosition(state, target, queries);
   if (targetPosition === null) return [...refusals, `${actor}: target has no token`];
-  const distance = canonicalEngineQueryPort.spaceDistance(state, actor, target);
+  const distance = queries.spaceDistance(state, actor, target);
   if (distance === null) return [...refusals, `${actor}: target separation is unavailable`];
   if (action.kind === 'attack' || action.kind === 'bonus_attack') {
     const selected = action.kind === 'attack' && action.attackId !== undefined
@@ -165,7 +183,21 @@ export function validateArenaPlan(
   plan: RoundPlan,
   state: EncounterState,
   envelope?: ArenaPromptEnvelope,
+): readonly string[];
+export function validateArenaPlan(
+  plan: RoundPlan,
+  state: EncounterState,
+  queries: EngineQueryPort,
+  envelope?: ArenaPromptEnvelope,
+): readonly string[];
+export function validateArenaPlan(
+  plan: RoundPlan,
+  state: EncounterState,
+  queriesOrEnvelope: EngineQueryPort | ArenaPromptEnvelope = canonicalEngineQueryPort,
+  suppliedEnvelope?: ArenaPromptEnvelope,
 ): readonly string[] {
+  const queries = 'tokenPosition' in queriesOrEnvelope ? queriesOrEnvelope : canonicalEngineQueryPort;
+  const envelope = 'tokenPosition' in queriesOrEnvelope ? suppliedEnvelope : queriesOrEnvelope;
   const refusals: string[] = [];
   if (envelope !== undefined && (
     plan.encounterId !== envelope.encounterId ||
@@ -184,7 +216,7 @@ export function validateArenaPlan(
     if (!expected.includes(entry.monsterId)) refusals.push(`${entry.monsterId}: actor is not a living monster`);
     if (maximumSlotActions(entry.program) > 1) refusals.push(`${entry.monsterId}: program can spend more than one slot`);
     for (const action of programActions(entry.program)) {
-      refusals.push(...actionRefusals(action, entry.monsterId, state));
+      refusals.push(...actionRefusals(action, entry.monsterId, state, queries));
     }
   }
   return refusals;

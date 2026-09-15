@@ -56,7 +56,10 @@ import {
   type HumanEngineActorOptions,
 } from './encounter-board-projection';
 import { canonicalEngineQueryPort } from './engine-query-port';
-import { createLegacyEngineOptionEnvironment } from './offers/offer-environment';
+import {
+  createLegacyEngineOptionEnvironment,
+  type EngineOptionEnvironment,
+} from './offers/offer-environment';
 import {
   offeredOptionActorsForState,
   offeredOptionPaths as projectOfferedOptionPaths,
@@ -137,6 +140,7 @@ export interface PlayerBoardProjection {
 export interface DmBoardProjection {
   readonly audience: 'dm';
   readonly stateDigest: string;
+  readonly offerEnvironmentDigest: string;
   readonly encounter: DmVisibleEncounterState;
   readonly board: DmEncounterBoardModel;
   readonly coordinator: PersistedCoordinatorState;
@@ -406,6 +410,7 @@ export function projectDmBoard(input: {
   readonly actionRefusal?: NonBoundaryActionRefusal | null;
   readonly adjudicationPrompts?: readonly Extract<PendingDecision, { readonly kind: 'adjudication_prompt' }>[];
   readonly engineAdjudications?: readonly AdjudicationEnvelope[];
+  readonly offerEnvironment?: EngineOptionEnvironment;
 }): DmBoardProjection {
   const targets = adjudicatedTargets(input.view.state.eventLog, input.coordinator.pause);
   const pending = input.coordinator.pendingRequest;
@@ -480,11 +485,12 @@ export function projectDmBoard(input: {
       combatantName: names.get(request.actorId as CombatantId) ?? request.actorId,
       interactive: true as const,
     }));
-  const offerEnvironment = createLegacyEngineOptionEnvironment(canonicalEngineQueryPort);
+  const offerEnvironment = input.offerEnvironment ?? createLegacyEngineOptionEnvironment(canonicalEngineQueryPort);
   const offeredActors = offeredOptionActorsForState(input.view.state, undefined, offerEnvironment);
   return {
     audience: 'dm',
     stateDigest: sha256(canonicalJson(input.view.state)),
+    offerEnvironmentDigest: offerEnvironment.digest,
     encounter: dmVisibleEncounter(input.view),
     board: projectEncounterBoard(input.view, input.coordinator.pendingRequest, targets),
     coordinator: input.coordinator,

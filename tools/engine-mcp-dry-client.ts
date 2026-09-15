@@ -24,6 +24,14 @@ export interface DryTranscriptEntry {
   readonly response: string;
 }
 
+export type EngineMcpStdioLaunchInput =
+  | {
+      readonly kind: 'fixture';
+      readonly fixturePath: string;
+      readonly scenario?: '--correction' | '--room-transition';
+    }
+  | { readonly kind: 'launcher'; readonly launcherPath: string };
+
 export class EngineMcpStdioClient {
   readonly #child: ChildProcessWithoutNullStreams;
   readonly #lines: Interface;
@@ -32,11 +40,19 @@ export class EngineMcpStdioClient {
   #id = 0;
   #stderr = '';
 
-  constructor(fixturePath: string, scenario?: '--correction' | '--room-transition') {
+  constructor(
+    input: EngineMcpStdioLaunchInput | string,
+    legacyScenario?: '--correction' | '--room-transition',
+  ) {
+    const launch = typeof input === 'string'
+      ? { kind: 'fixture' as const, fixturePath: input, scenario: legacyScenario }
+      : input;
+    const targetPath = launch.kind === 'launcher' ? launch.launcherPath : launch.fixturePath;
+    const scenario = launch.kind === 'fixture' ? launch.scenario : undefined;
     this.#child = spawn(process.execPath, [
       resolve('node_modules/vite-node/vite-node.mjs'),
       resolve('tools/engine-mcp-server.ts'),
-      resolve(fixturePath),
+      resolve(targetPath),
       ...(scenario === undefined ? [] : [scenario]),
     ], { cwd: process.cwd(), stdio: ['pipe', 'pipe', 'pipe'] });
     this.#child.stderr.setEncoding('utf8');
@@ -152,7 +168,7 @@ export interface EngineMcpDryRunReport {
 }
 
 export async function runEngineMcpDryClient(fixturePath: string): Promise<EngineMcpDryRunReport> {
-  const initial = new EngineMcpStdioClient(fixturePath);
+  const initial = new EngineMcpStdioClient({ kind: 'fixture', fixturePath });
   await initial.request('server/discover');
   await initial.request('tools/list');
   await initial.request('resources/list');
@@ -225,7 +241,7 @@ export async function runEngineMcpDryClient(fixturePath: string): Promise<Engine
   });
   if (await initial.close() !== 0) throw new Error(`Initial dry server failed: ${initial.stderr}`);
 
-  const correction = new EngineMcpStdioClient(fixturePath, '--correction');
+  const correction = new EngineMcpStdioClient({ kind: 'fixture', fixturePath, scenario: '--correction' });
   const correctionContext = structured(await correction.tool('engine.get_turn_context', {
     run_id: 'encounter:engine-mcp', expected_revision: 2, scope: 'round',
   }));
@@ -242,7 +258,7 @@ export async function runEngineMcpDryClient(fixturePath: string): Promise<Engine
   });
   if (await correction.close() !== 0) throw new Error(`Correction dry server failed: ${correction.stderr}`);
 
-  const room = new EngineMcpStdioClient(fixturePath, '--room-transition');
+  const room = new EngineMcpStdioClient({ kind: 'fixture', fixturePath, scenario: '--room-transition' });
   await room.request('server/discover');
   const roomContext = structured(await room.tool('engine.get_turn_context', {
     run_id: 'encounter:engine-mcp', expected_revision: 3, scope: 'round',

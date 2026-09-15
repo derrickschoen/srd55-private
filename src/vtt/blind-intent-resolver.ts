@@ -31,6 +31,7 @@ import {
   createPureTurnProposalResolver,
   resolveEngineActorOption,
 } from './intent-resolver';
+import type { EngineOptionEnvironment } from './offers/offer-environment';
 import { spellDefinition } from '../combat/spells/definitions';
 import type {
   EngineActionSlotUse,
@@ -74,6 +75,7 @@ export interface BlindResolverInput {
   readonly envelope: unknown;
   readonly attempt: number;
   readonly repairArm: BlindRepairArm;
+  readonly offerEnvironment?: EngineOptionEnvironment;
   readonly dependencies?: BlindResolverDependencies;
 }
 
@@ -773,12 +775,13 @@ export function resolveBlindRoundIntents(input: BlindResolverInput): BlindResolu
   if (actors.length !== expected.size || actors.some((actor) => !expected.has(actor.id))) {
     return rejected(input.attempt, input.repairArm, ['INTENT_SET_INCOMPLETE']);
   }
-  const queries = input.dependencies?.queries ?? canonicalEngineQueryPort;
+  const queries = input.offerEnvironment?.queries ?? input.dependencies?.queries ?? canonicalEngineQueryPort;
   const dependencies = {
     queries,
     availableOptions: input.dependencies?.availableOptions ?? availableEngineActorOptions,
     resolveOption: input.dependencies?.resolveOption ?? resolveEngineActorOption,
-    proposalResolver: input.dependencies?.proposalResolver ?? createPureTurnProposalResolver(queries),
+    proposalResolver: input.dependencies?.proposalResolver ??
+      createPureTurnProposalResolver(input.offerEnvironment ?? queries),
   };
   const resolved: BlindResolvedActorIntent[] = [];
   for (const [index, entry] of bound.entries()) {

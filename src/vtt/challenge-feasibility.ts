@@ -32,6 +32,10 @@ import {
 import { monsterActions, monsterBonusActions } from './engine-query-port';
 import { availableEngineActorOptions, resolveEngineActorOption } from './intent-resolver';
 import type { EngineOptionId } from './intent-resolver';
+import {
+  buildOfferEnvironment,
+  type EngineOptionEnvironment,
+} from './offers/build-offer-environment';
 import { ARENA_REACTION_OFFER_POLICY } from './reaction-offer-host-policy';
 import { regretTurnLegalActions } from './regret/legal-actions';
 
@@ -430,17 +434,18 @@ export function roomDBoundedGuardPolicyCommand(
   offeredRevision: number;
   command: EncounterCommand;
 }> {
+  const offerEnvironment = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
   if (state.activeCombatant !== D_GUARD) {
     throw new Error('Room D bounded policy requires the Guard to be active.');
   }
-  const matches = availableEngineActorOptions(state, D_GUARD, undefined, state.revision)
+  const matches = availableEngineActorOptions(state, D_GUARD, offerEnvironment, state.revision)
     .filter((option) => option.revision === state.revision && optionMatchesRoomDPolicy(option, policy));
   if (matches.length !== 1) {
     throw new Error(`Room D bounded policy ${policy} requires exactly one current offered option.`);
   }
   const option = matches[0];
   if (option === undefined) throw new Error('Room D bounded policy option disappeared.');
-  const resolution = resolveEngineActorOption(state, option);
+  const resolution = resolveEngineActorOption(state, option, offerEnvironment);
   if (!resolution.valid || resolution.mechanics.movementCostFeet !== 0 || resolution.mechanics.path.length !== 0) {
     throw new Error(`Room D bounded policy ${policy} did not resolve as a hold option.`);
   }
@@ -960,7 +965,10 @@ function evidenceTransaction(
   return runCommandBoundaryTransaction(state, command, rng, ARENA_REACTION_OFFER_POLICY, null);
 }
 
-function roomAProvenance(state: EncounterState): Readonly<{
+function roomAProvenance(
+  state: EncounterState,
+  offerEnvironment: EngineOptionEnvironment,
+): Readonly<{
   records: readonly DrawRecord[];
   healing: ChallengeProvenanceMigrationEvidenceV1['healing'];
 }> {
@@ -978,10 +986,10 @@ function roomAProvenance(state: EncounterState): Readonly<{
   );
   records.push(...capped.dieRolls);
 
-  const offer = availableEngineActorOptions(state, A_PRIEST).find((candidate) =>
+  const offer = availableEngineActorOptions(state, A_PRIEST, offerEnvironment).find((candidate) =>
     candidate.label === 'Mace + Mace -> combatant:wizard');
   if (offer === undefined) throw new Error('Room A two-Mace option is absent.');
-  const resolved = resolveEngineActorOption(state, offer);
+  const resolved = resolveEngineActorOption(state, offer, offerEnvironment);
   if (!resolved.valid) throw new Error(`Room A two-Mace option failed re-resolution: ${resolved.code}`);
   let current = state;
   const rng = maximumEvidenceRng();
@@ -1027,7 +1035,8 @@ export function challengeProvenanceMigrationEvidenceV1(
   roomA: EncounterState,
   roomD: EncounterState,
 ): ChallengeProvenanceMigrationEvidenceV1 {
-  const roomAEvidence = roomAProvenance(roomA);
+  const offerEnvironment = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
+  const roomAEvidence = roomAProvenance(roomA, offerEnvironment);
   const provenanceManifest = [...roomAEvidence.records];
   const potionState: EncounterState = {
     ...replaceHitPoints(roomA, A_PRIEST, 6),
@@ -1105,13 +1114,13 @@ export function challengeProvenanceMigrationEvidenceV1(
   };
 }
 
-function greatclubSequence(state: EncounterState): Scenario {
-  const offer = availableEngineActorOptions(state, C_OGRE).find((candidate) =>
+function greatclubSequence(state: EncounterState, offerEnvironment: EngineOptionEnvironment): Scenario {
+  const offer = availableEngineActorOptions(state, C_OGRE, offerEnvironment).find((candidate) =>
     candidate.actionSlots.some((slot) => slot.slot === 'main' && slot.use.kind === 'attack' && slot.use.actionId === 'greatclub'));
   if (offer === undefined) throw new FeasibilityStop({
     kind: 'invariant_failure', counter: 'greatclub_offer', observed: 'absent', limit: 'present',
   });
-  const resolved = resolveEngineActorOption(state, offer);
+  const resolved = resolveEngineActorOption(state, offer, offerEnvironment);
   if (!resolved.valid) throw new FeasibilityStop({
     kind: 'invariant_failure', counter: 'greatclub_reresolution', observed: resolved.code, limit: 'valid',
   });
@@ -1127,13 +1136,16 @@ function greatclubSequence(state: EncounterState): Scenario {
   };
 }
 
-function priestApproach(state: EncounterState): readonly ((state: EncounterState) => EncounterCommand)[] {
-  const offer = availableEngineActorOptions(state, A_PRIEST).find((candidate) =>
+function priestApproach(
+  state: EncounterState,
+  offerEnvironment: EngineOptionEnvironment,
+): readonly ((state: EncounterState) => EncounterCommand)[] {
+  const offer = availableEngineActorOptions(state, A_PRIEST, offerEnvironment).find((candidate) =>
     candidate.label === 'Mace + Mace -> combatant:wizard');
   if (offer === undefined) throw new FeasibilityStop({
     kind: 'invariant_failure', counter: 'priest_mace_offer', observed: 'absent', limit: 'present',
   });
-  const resolved = resolveEngineActorOption(state, offer);
+  const resolved = resolveEngineActorOption(state, offer, offerEnvironment);
   if (!resolved.valid) throw new FeasibilityStop({
     kind: 'invariant_failure', counter: 'priest_mace_reresolution', observed: resolved.code, limit: 'valid',
   });
@@ -1143,7 +1155,11 @@ function priestApproach(state: EncounterState): readonly ((state: EncounterState
   })];
 }
 
-function scenarios(room: 'B' | 'C' | 'A', state: EncounterState): readonly Scenario[] {
+function scenarios(
+  room: 'B' | 'C' | 'A',
+  state: EncounterState,
+  offerEnvironment: EngineOptionEnvironment,
+): readonly Scenario[] {
   switch (room) {
     case 'B': return [
       { name: 'javelin-fighter', commands: [(current) => attack(current, B_OGRE, 'javelin', FIGHTER)] },
@@ -1151,10 +1167,10 @@ function scenarios(room: 'B' | 'C' | 'A', state: EncounterState): readonly Scena
     ];
     case 'C': return [
       { name: 'javelin-hold', commands: [(current) => attack(current, C_OGRE, 'javelin', WIZARD)] },
-      greatclubSequence(state),
+      greatclubSequence(state, offerEnvironment),
     ];
     case 'A': {
-      const approach = priestApproach(state);
+      const approach = priestApproach(state, offerEnvironment);
       return [
       {
         name: 'same-attacks-with-healing-word',
@@ -1270,6 +1286,7 @@ function runVariant(
   counters: MutableCounters,
   runtime: FeasibilityRuntime,
   invocationStarted: number,
+  offerEnvironment: EngineOptionEnvironment,
 ): ChallengeReducerVariantReportV1 {
   const before = copyCounters(counters);
   const scope: VariantScope = {
@@ -1278,7 +1295,7 @@ function runVariant(
   };
   sampleResources(counters, scope, runtime, invocationStarted, 0);
   const finalNodes: WeightedState[] = [];
-  for (const scenario of scenarios(room, state)) {
+  for (const scenario of scenarios(room, state, offerEnvironment)) {
     try {
       const scenarioNodes = runScenario(
         state, scenario, counters, scope, runtime, invocationStarted, finalNodes.length,
@@ -1305,7 +1322,7 @@ function runVariant(
   const mass = finalNodes.reduce<ExactFraction>(
     (sum, node) => addFractions(sum, node.weight), exactWeight(0n, 1n),
   );
-  const expectedScenarioMass = BigInt(scenarios(room, state).length);
+  const expectedScenarioMass = BigInt(scenarios(room, state, offerEnvironment).length);
   if (mass.numerator !== expectedScenarioMass || mass.denominator !== 1n) throw new FeasibilityStop({
     kind: 'invariant_failure', counter: 'probability_mass', observed: `${String(mass.numerator)}/${String(mass.denominator)}`,
     limit: `${String(expectedScenarioMass)}/1`,
@@ -1533,6 +1550,7 @@ export async function runChallengeReducerFeasibility(
   loadFixtureText: (seed: 5831001 | 5831002 | 5831003) => Promise<string>,
   runtime: FeasibilityRuntime = PRODUCTION_RUNTIME,
 ): Promise<ChallengeReducerFeasibilityReportV1> {
+  const offerEnvironment = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
   const started = runtime.now();
   const initialHeapUsed = runtime.heapUsed();
   const counters: MutableCounters = {
@@ -1548,9 +1566,9 @@ export async function runChallengeReducerFeasibility(
       const decoded = decodeArenaBasisEnvelopeV1(JSON.parse(await loadFixtureText(seed)) as unknown, {
         mode: 'challenge',
       }).encounter.state;
-      const base = runVariant('base', true, roomId, decoded, counters, runtime, started);
+      const base = runVariant('base', true, roomId, decoded, counters, runtime, started, offerEnvironment);
       const variantReports = variants(roomId, decoded).map((variant) =>
-        runVariant(variant.id, false, roomId, variant.state, counters, runtime, started));
+        runVariant(variant.id, false, roomId, variant.state, counters, runtime, started, offerEnvironment));
       rooms.push({ roomId, base, variants: variantReports });
     }
     if (rooms.length !== 3 || rooms.some((room) => room.variants.length !== 18)) throw new FeasibilityStop({

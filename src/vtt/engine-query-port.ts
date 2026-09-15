@@ -1709,7 +1709,9 @@ export function compareTacticalAllocations(
   targetId: CombatantId,
   candidates: readonly TacticalAllocationCandidate[],
   initiativeOrder: readonly CombatantId[],
+  environment?: EngineOptionEnvironment,
 ): TacticalAllocationComparison {
+  const offerEnvironment = environment ?? canonicalEngineQueryPort;
   const orderIndex = new Map(initiativeOrder.map((actorId, index) => [actorId, index] as const));
   const target = combatant(state, targetId);
   const allocations = candidates.map((candidate): TacticalAllocationResult => {
@@ -1730,7 +1732,7 @@ export function compareTacticalAllocations(
       };
     }
     const options = ordered.map((choice) => availableEngineActorOptions(
-      state, choice.actorId, canonicalEngineQueryPort,
+      state, choice.actorId, offerEnvironment,
     ).find((option) => option.optionId === choice.optionId));
     if (options.some((option) => option === undefined)) {
       return {
@@ -1785,7 +1787,7 @@ export function compareTacticalAllocations(
         : [];
       const actionIds = optionAttackActionIds(option, targetId);
       if (modifiers.length > 0 && actionIds.length > 0) modifierApplied = true;
-      const resolution = resolveEngineActorOption(state, option, canonicalEngineQueryPort);
+      const resolution = resolveEngineActorOption(state, option, offerEnvironment);
       const attackState = resolution.valid ? {
         ...state,
         tokens: state.tokens.map((token) => token.combatantId === choice.actorId

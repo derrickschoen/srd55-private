@@ -26,15 +26,13 @@ import {
   type EnginePlanAdjustmentMetadata,
   type RuleReference,
 } from '../engine-state-capsule';
-import { canonicalEngineQueryPort, engineActionRegistryForEnvironment } from '../engine-query-port';
-import { createPureTurnProposalResolver } from '../intent-resolver';
+import { engineActionRegistryForEnvironment } from '../engine-query-port';
 import {
-  createLegacyEngineOptionEnvironment,
   decodeEngineOptionEnvironmentBinding,
-  engineOptionEnvironmentFromBinding,
   type EngineOptionEnvironment,
   type EngineOptionEnvironmentBinding,
 } from '../offers/offer-environment';
+import { buildOfferEnvironment } from '../offers/build-offer-environment';
 import { freshMonsterPlanningState, projectFutureMonsterTurns } from '../monster-planning-state';
 import {
   rendererProfileSchema,
@@ -450,7 +448,10 @@ export function createEngineMcpRuntime(
     options.turnContextMaximumBytes !== BLIND_TURN_CONTEXT_MAX_BYTES) {
     throw new RangeError(`Blind context base cap must be ${String(BLIND_TURN_CONTEXT_MAX_BYTES)} bytes.`);
   }
-  const offerEnvironment = options.offerEnvironment ?? createLegacyEngineOptionEnvironment(canonicalEngineQueryPort);
+  const offerEnvironment = options.offerEnvironment ?? buildOfferEnvironment({
+    kind: 'configuration',
+    mode: 'legacy_standard',
+  });
   const candidates = state.combatants
     .filter((candidate) => candidate.profile.kind === 'monster' && candidate.life !== 'dead')
     .map((candidate) => candidate.profile.id)
@@ -542,7 +543,7 @@ export function createEngineMcpRuntime(
   });
   const feed = new MutableEngineCapsuleFeed(capsule);
   const blindTurnProjection = options.dmMode === 'blind' || options.toolProfile === 'blind'
-    ? projectEngineBlindTurn(planningState, capsule, canonicalEngineQueryPort)
+    ? projectEngineBlindTurn(planningState, capsule, offerEnvironment.queries)
     : null;
   const proposals: EngineProposalEnvelope[] = [];
   const speculativePlans: QueuedSpeculativePlanEnvelope[] = [];
@@ -554,7 +555,6 @@ export function createEngineMcpRuntime(
     state: planningState,
     stateSource: feed,
     offerEnvironment,
-    turnProposals: createPureTurnProposalResolver(offerEnvironment),
     proposals: {
       append: (envelope) => {
         proposals.push(envelope);
@@ -651,12 +651,35 @@ export function createEngineMcpRuntime(
   };
 }
 
-export function createEngineMcpHandler(state: EncounterState, maximumToolResultBytes?: number): McpHandler {
-  return createEngineMcpRuntime(state, maximumToolResultBytes === undefined ? {} : { maximumToolResultBytes }).handler;
+export function createEngineMcpHandler(state: EncounterState, maximumToolResultBytes?: number): McpHandler;
+export function createEngineMcpHandler(
+  state: EncounterState,
+  offerEnvironment: EngineOptionEnvironment,
+  maximumToolResultBytes?: number,
+): McpHandler;
+export function createEngineMcpHandler(
+  state: EncounterState,
+  environmentOrMaximum?: EngineOptionEnvironment | number,
+  maximumToolResultBytes?: number,
+): McpHandler {
+  const options = typeof environmentOrMaximum === 'number'
+    ? { maximumToolResultBytes: environmentOrMaximum }
+    : {
+        ...(environmentOrMaximum === undefined ? {} : { offerEnvironment: environmentOrMaximum }),
+        ...(maximumToolResultBytes === undefined ? {} : { maximumToolResultBytes }),
+      };
+  return createEngineMcpRuntime(state, options).handler;
 }
 
-export function handleMcpRequest(state: EncounterState, message: unknown): JsonRpcResponse | null {
-  return createEngineMcpHandler(state).handle(message);
+export function handleMcpRequest(
+  state: EncounterState,
+  message: unknown,
+  offerEnvironment?: EngineOptionEnvironment,
+): JsonRpcResponse | null {
+  const handler = offerEnvironment === undefined
+    ? createEngineMcpHandler(state)
+    : createEngineMcpHandler(state, offerEnvironment);
+  return handler.handle(message);
 }
 
 export function decodeArenaFixture(decoded: unknown): EncounterState {
@@ -1034,9 +1057,14 @@ export type DecodedEngineMcpLauncherManifest = Omit<EngineMcpLauncherManifest, '
 };
 
 export function decodeEngineMcpLauncherManifest(value: unknown): DecodedEngineMcpLauncherManifest | null {
-  if (typeof value !== 'object' || value === null || Array.isArray(value) ||
-    (value as Readonly<Record<string, unknown>>)['format'] !== ENGINE_MCP_LAUNCHER_FORMAT) return null;
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
   const claimedLauncher = value as Readonly<Record<string, unknown>>;
+  if (claimedLauncher['format'] !== ENGINE_MCP_LAUNCHER_FORMAT) {
+    const launcherShaped = ['format', 'fixturePath', 'proposalSpoolPath', 'offerEnvironment']
+      .some((key) => Object.hasOwn(claimedLauncher, key));
+    if (launcherShaped) throw new TypeError('Engine MCP launcher manifest structure is invalid.');
+    return null;
+  }
   if (!Object.hasOwn(claimedLauncher, 'offerEnvironment') || claimedLauncher['offerEnvironment'] === undefined) {
     throw new TypeError('Engine MCP launcher requires an explicit offer environment binding.');
   }
@@ -1064,7 +1092,7 @@ export function decodeEngineMcpEntrypointDocument(
 export function reconstructLauncherOfferEnvironment(
   manifest: DecodedEngineMcpLauncherManifest,
 ): EngineOptionEnvironment {
-  return engineOptionEnvironmentFromBinding(canonicalEngineQueryPort, manifest.offerEnvironment);
+  return buildOfferEnvironment({ kind: 'binding', binding: manifest.offerEnvironment });
 }
 
 async function launcherManifest(path: string): Promise<DecodedEngineMcpLauncherManifest | null> {
@@ -1253,5 +1281,8 @@ export async function runEngineMcpEntrypoint(argv: readonly string[] = process.a
   if (scenario !== undefined && scenario !== '--correction' && scenario !== '--room-transition') {
     throw new TypeError('Unknown engine MCP fixture scenario.');
   }
-  await runEngineMcpServer(fixturePath, options, true);
+  await runEngineMcpServer(fixturePath, {
+    ...options,
+    offerEnvironment: buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' }),
+  }, true);
 }

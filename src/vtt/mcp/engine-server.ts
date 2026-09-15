@@ -31,7 +31,13 @@ import {
 } from '../engine-state-capsule';
 import type { EngineQueryPort, EngineTargetSelector } from '../engine-query-port';
 import type { EngineOptionEnvironment } from '../offers/offer-environment';
-import { resolveEngineActorOption, type EngineMovementPreference, type EngineTurnProposal, type PureTurnProposalResolver } from '../intent-resolver';
+import {
+  createPureTurnProposalResolver,
+  resolveEngineActorOption,
+  type EngineMovementPreference,
+  type EngineTurnProposal,
+  type PureTurnProposalResolver,
+} from '../intent-resolver';
 import { decisionReasonProblem } from '../decision-reason';
 import {
   engineOptionId,
@@ -315,7 +321,6 @@ interface EngineMcpDependencies {
   readonly state: EncounterState;
   readonly stateSource: EngineCapsuleFeed;
   readonly offerEnvironment: EngineOptionEnvironment;
-  readonly turnProposals: PureTurnProposalResolver;
   readonly proposals: ProposalSink;
   readonly speculativePlans: SpeculativePlanSink;
   readonly narration: NarrationSink;
@@ -1448,7 +1453,8 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
     throw new RangeError('maximumResourceBytes cannot exceed the 128 KiB hard limit.');
   }
   const { state, stateSource: feed, proposals, speculativePlans, narration, adjudications, rules } = dependencies;
-  const { offerEnvironment, turnProposals } = dependencies;
+  const { offerEnvironment } = dependencies;
+  const turnProposals = createPureTurnProposalResolver(offerEnvironment);
   const queries = offerEnvironment.queries;
   const launchCapsule = feed.current();
   if (launchCapsule.offerEnvironment.digest !== offerEnvironment.digest) {
@@ -2276,6 +2282,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         envelope,
         attempt: blindIntentAttempt,
         repairArm: blindRepairArm,
+        offerEnvironment,
         dependencies: { queries, proposalResolver: turnProposals },
       });
       const recordResolution = (recorded: BlindResolutionResult): void => {

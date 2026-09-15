@@ -65,11 +65,12 @@ import {
 } from '../src/vtt/engine-round-session';
 import { canonicalEngineQueryPort } from '../src/vtt/engine-query-port';
 import {
-  createLegacyEngineOptionEnvironment,
-  engineOptionEnvironmentFromBinding,
-} from '../src/vtt/offers/offer-environment';
+  buildOfferEnvironment,
+  type EngineOptionEnvironment,
+  type OfferEnvironmentInput,
+} from '../src/vtt/offers/build-offer-environment';
 import {
-  availableEngineActorOptions, pureTurnProposalResolver,
+  availableEngineActorOptions, createPureTurnProposalResolver, pureTurnProposalResolver,
   type EngineOfferableOption, type EngineTurnProposal, type ResolvedTurnMechanics,
 } from '../src/vtt/intent-resolver';
 import {
@@ -279,6 +280,7 @@ export interface ConversationBoardSnapshotService {
 }
 
 interface ConversationConfigBase {
+  readonly offerEnvironment?: OfferEnvironmentInput;
   readonly dmMode: DmMode;
   readonly dmModeExplicit: boolean;
   readonly blindRepairArm: BlindRepairArm;
@@ -1205,6 +1207,7 @@ export function parseConversationArgs(argv: readonly string[], cwd = process.cwd
     throw new TypeError('Explicit D569 DM modes require the shared D570 knowledge bundle.');
   }
   return {
+    offerEnvironment: { kind: 'configuration', mode: 'legacy_standard' },
     dmMode: dmMode as DmMode,
     dmModeExplicit,
     blindRepairArm: blindRepairArm as BlindRepairArm,
@@ -2280,10 +2283,10 @@ function plannedTurnContext(
   }
   let rendering: CapturedTurnContext['rendering'];
   const runtime = createEngineMcpRuntime(state, {
-    offerEnvironment: engineOptionEnvironmentFromBinding(
-      canonicalEngineQueryPort,
-      snapshot.capsule.offerEnvironment,
-    ),
+    offerEnvironment: buildOfferEnvironment({
+      kind: 'binding',
+      binding: snapshot.capsule.offerEnvironment,
+    }),
     runId: capsule.runId,
     branchId: capsule.branchId,
     revision: capsule.revision,
@@ -3610,10 +3613,10 @@ function fullTurnContextBase(
     throw new Error('Turn-context base requires an ordinary pending request.');
   }
   const runtime = createEngineMcpRuntime(state, {
-    offerEnvironment: engineOptionEnvironmentFromBinding(
-      canonicalEngineQueryPort,
-      snapshot.capsule.offerEnvironment,
-    ),
+    offerEnvironment: buildOfferEnvironment({
+      kind: 'binding',
+      binding: snapshot.capsule.offerEnvironment,
+    }),
     runId: capsule.runId,
     branchId: capsule.branchId,
     revision: capsule.revision,
@@ -3683,10 +3686,10 @@ function inProcessDmToolSession(input: {
     throw new Error('Local OpenAI tool session requires an ordinary pending request.');
   }
   const runtime = createEngineMcpRuntime(input.state, {
-    offerEnvironment: engineOptionEnvironmentFromBinding(
-      canonicalEngineQueryPort,
-      input.snapshot.capsule.offerEnvironment,
-    ),
+    offerEnvironment: buildOfferEnvironment({
+      kind: 'binding',
+      binding: input.snapshot.capsule.offerEnvironment,
+    }),
     runId: capsule.runId,
     branchId: capsule.branchId,
     revision: capsule.revision,
@@ -3947,10 +3950,10 @@ function inProcessSpeculativeToolSession(input: {
     throw new Error('Speculative tool session requires a speculative pending request.');
   }
   const runtime = createEngineMcpRuntime(input.state, {
-    offerEnvironment: engineOptionEnvironmentFromBinding(
-      canonicalEngineQueryPort,
-      input.snapshot.capsule.offerEnvironment,
-    ),
+    offerEnvironment: buildOfferEnvironment({
+      kind: 'binding',
+      binding: input.snapshot.capsule.offerEnvironment,
+    }),
     runId: capsule.runId,
     branchId: capsule.branchId,
     revision: capsule.revision,
@@ -4004,8 +4007,12 @@ function recordAutoResolvedReactions(
 export function proposalResolutionDivergence(
   state: EncounterState,
   entry: ProposedTurnResolution,
+  offerEnvironment?: EngineOptionEnvironment,
 ): readonly string[] {
-  const checked = pureTurnProposalResolver.resolve(state, entry.proposal);
+  const resolver = offerEnvironment === undefined
+    ? pureTurnProposalResolver
+    : createPureTurnProposalResolver(offerEnvironment);
+  const checked = resolver.resolve(state, entry.proposal);
   if (!checked.valid) {
     return [`${entry.proposal.actorId}: proposal-time resolution was valid, but authoritative resolution refused it: ${checked.refusals.map((refusal) => refusal.summary).join('; ')}`];
   }
@@ -4018,7 +4025,11 @@ export function proposalResolutionDivergence(
     : [`${entry.proposal.actorId}: resolved action sequence, targets, or movement cost diverged; proposal was "${entry.summary}" and authoritative resolution was "${checked.summary}".`];
 }
 
-function authorizedMechanics(state: EncounterState, proposal: RoundTurnProposalEnvelope): {
+function authorizedMechanics(
+  state: EncounterState,
+  proposal: RoundTurnProposalEnvelope,
+  offerEnvironment: EngineOptionEnvironment,
+): {
   readonly entries: readonly {
     readonly proposal: EngineTurnProposal;
     readonly option: EngineOfferableOption;
@@ -4040,7 +4051,7 @@ function authorizedMechanics(state: EncounterState, proposal: RoundTurnProposalE
     proposal.resolutions.map((entry) => entry.proposal.actorId),
   );
   const divergences = proposal.resolutions.flatMap<ConversationChainAttemptEvidence>((entry) => {
-    const reasons = proposalResolutionDivergence(planningState, entry);
+    const reasons = proposalResolutionDivergence(planningState, entry, offerEnvironment);
     return reasons.length === 0 ? [] : [{
       attempt: proposal.phase === 'correction' ? 'correction' : 'primary',
       actorId: entry.proposal.actorId,
@@ -4050,7 +4061,7 @@ function authorizedMechanics(state: EncounterState, proposal: RoundTurnProposalE
   });
   if (divergences.length > 0) return { entries: null, divergences };
   const resolved = proposal.resolutions.map((entry) => {
-    const checked = pureTurnProposalResolver.resolve(planningState, entry.proposal);
+    const checked = createPureTurnProposalResolver(offerEnvironment).resolve(planningState, entry.proposal);
     if (!checked.valid) return null;
     return {
       proposal: structuredClone(entry.proposal),
@@ -4249,7 +4260,10 @@ async function runConversationWithConfiguredIntel(
   const adapter = new ModelCallBookkeepingAdapter(selectedAdapter);
   const rows: ConversationRow[] = [];
   let capsuleRevision = 1;
-  const offerEnvironment = createLegacyEngineOptionEnvironment(canonicalEngineQueryPort);
+  const offerEnvironment = buildOfferEnvironment(config.offerEnvironment ?? {
+    kind: 'configuration',
+    mode: 'legacy_standard',
+  });
   const engineSession = new EngineRoundSession(
     states[0]!,
     mulberry32(8_274_113),
@@ -5902,7 +5916,7 @@ async function runConversationWithConfiguredIntel(
                     ? PLAN_MATERIALITY_POLICY_HASH
                     : null,
                 });
-            const checkedProposal = authorizedMechanics(engineSession.currentState(), proposal);
+            const checkedProposal = authorizedMechanics(engineSession.currentState(), proposal, offerEnvironment);
             if (checkedProposal.entries === null) {
               failedAttempts.push(...(checkedProposal.divergences.length > 0
                 ? checkedProposal.divergences
@@ -6861,7 +6875,7 @@ async function runConversationWithConfiguredIntel(
                         recalculated = acceptSpeculationRecalculationBeforeDeadline(
                           roundDeadline,
                           () => {
-                            const checked = authorizedMechanics(state, proposal);
+                            const checked = authorizedMechanics(state, proposal, offerEnvironment);
                             if (checked.entries === null || !sameCombatantSet(
                               checked.entries.map((entry) => entry.proposal.actorId),
                               segmentActors,
