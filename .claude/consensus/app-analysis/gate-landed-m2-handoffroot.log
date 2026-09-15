@@ -1,0 +1,17 @@
+== landed M-2 gate start 19:55:06 HEAD 75c2f44a load 1.72 0.94 1.05
+== tsc
+tsc exit:0
+== sg
+sg exit:0
+== vitest (test:gate)
+JSON report written to /tmp/dnd-gate-reports/vitest-initial-1361717-1dde118c-028e-416d-b7d0-d9268c59ae72.json
+JSON report written to /tmp/dnd-gate-reports/vitest-retry-1361717-9d81dec0-d98c-4e41-8553-d46736f8f0fb.json
+PASSED ON RETRY (cause not inferred)
+  tests/unit/tools/d583-contract-inventory.test.ts
+FAILED FILES
+  (none)
+PHASE FAILURES
+  (none)
+JSON report: /tmp/dnd-gate-reports/vitest-gate-2026-09-15T00-07-38.051Z-1361717-e39c68d9-ce12-41a7-84da-07efdad82400.json
+vitest-gate exit:0
+LANDED M2 GATE DONE 20:07:38
