@@ -27,6 +27,7 @@ import type { SceneTransport } from '../../../src/vtt/handoff/scene-transport';
 import { MemoryBrowserSessionStore } from '../../../src/vtt/session-persistence';
 import { encounterSeed } from '../../../src/vtt/session-seed';
 import type { ProjectedControllerRequest } from '../../../src/vtt/encounter-projections';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
 import { publishCore, publishExamples } from '../../../tools/vtt-handoff/publish';
 import { type RepositoryIdentityPolicy } from '../../../tools/vtt-handoff/paths';
 import { dirname, join, relative } from 'node:path';
@@ -36,6 +37,7 @@ import { createHash } from 'node:crypto';
 const DOOR_ID = 'object:two-room-door';
 const PLAYER_A = 'player:adventurer';
 const PLAYER_B = 'player:goblin';
+const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
 
 const PUBLICATION_INPUT_PATHS = [
   'contracts/vtt-handoff/v1/protocol.schema.json',
@@ -228,6 +230,7 @@ export async function buildHandoffExamples(): Promise<HandoffExamplesFixture> {
     })),
     playerIds: state.combatants.map((combatant) => combatant.profile.id),
     turnLegalActions: legalActions,
+    offerEnvironment: OFFER_ENVIRONMENT,
   });
   const seats = registrations(host);
   const service = new EncounterSessionService(host, seats);

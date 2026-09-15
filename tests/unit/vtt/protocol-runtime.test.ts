@@ -39,6 +39,9 @@ import {
   MemoryBrowserSessionStore,
   type SessionRevision,
 } from '../../../src/vtt/session-persistence';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
+
+const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
 import {
   genericHandoffRequestSchema,
   HANDOFF_METHODS,
@@ -218,6 +221,7 @@ async function realOutcomeRuntime(
     })),
     playerIds: state.combatants.map((combatant) => combatant.profile.id),
     turnLegalActions: protocolMoveActions(mode),
+    offerEnvironment: OFFER_ENVIRONMENT,
   });
   const seat = allSeat(host);
   const service = new EncounterSessionService(host, [seat]);
@@ -287,6 +291,7 @@ function projections(): {
       generation: 0,
     })),
     playerIds: state.combatants.map((combatant) => combatant.profile.id),
+    offerEnvironment: OFFER_ENVIRONMENT,
   });
   const seats = [
     {

@@ -40,6 +40,9 @@ import {
   type SceneTransport,
 } from '../../../src/vtt/handoff/scene-transport';
 import { MemoryBrowserSessionStore } from '../../../src/vtt/session-persistence';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
+
+const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
 
 interface ControlledPort extends ProtocolSessionPort {
   emitDm(event: Omit<DmSessionSnapshotEvent, 'tokenBindings'> & {
@@ -140,6 +143,7 @@ function fixture(): {
       generation: 0,
     })),
     playerIds: state.combatants.map((combatant) => combatant.profile.id),
+    offerEnvironment: OFFER_ENVIRONMENT,
   });
   const first = state.combatants[0]?.profile.id;
   if (first === undefined) throw new Error('Expected a two-room player.');
@@ -257,6 +261,7 @@ describe('in-process scene transport', () => {
         })),
         playerIds: state.combatants.map((combatant) => combatant.profile.id),
         turnLegalActions: closingMoveActions,
+        offerEnvironment: OFFER_ENVIRONMENT,
       });
       const seat = closingSeat(host);
       const service = new EncounterSessionService(host, [seat]);
@@ -349,6 +354,7 @@ describe('in-process scene transport', () => {
         })),
         playerIds: state.combatants.map((combatant) => combatant.profile.id),
         turnLegalActions: closingMoveActions,
+        offerEnvironment: OFFER_ENVIRONMENT,
       });
       const seat = closingSeat(host);
       const service = new EncounterSessionService(host, [seat]);
@@ -466,6 +472,7 @@ describe('in-process scene transport', () => {
         })),
         playerIds: state.combatants.map((combatant) => combatant.profile.id),
         turnLegalActions: closingMoveActions,
+        offerEnvironment: OFFER_ENVIRONMENT,
       });
       const seat = closingSeat(host);
       const service = new EncounterSessionService(host, [seat]);
@@ -783,6 +790,7 @@ describe('in-process scene transport', () => {
         generation: 0,
       })),
       playerIds: state.combatants.map((combatant) => combatant.profile.id),
+      offerEnvironment: OFFER_ENVIRONMENT,
     });
     await expect(store.flush()).rejects.toBeInstanceOf(BrowserSessionWriteError);
     put.mockRestore();

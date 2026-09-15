@@ -6,6 +6,9 @@ import {
   type BlindTurnContext,
   type BlindTurnContextBudgetEvidence,
 } from '../src/vtt/blind-turn-context';
+import { buildOfferEnvironment } from '../src/vtt/offers/build-offer-environment';
+
+const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
 
 export interface FixtureCase {
   readonly family: 'hard' | 'brutal' | 'brutal-b';
@@ -56,6 +59,7 @@ export async function serializeBlindFixture(
     dmMode: 'blind',
     toolProfile: 'blind',
     onBlindTurnContextRendered: (value) => { evidence = value; },
+    offerEnvironment: OFFER_ENVIRONMENT,
   });
   const capsule = runtime.feed.current();
   const context = blindTurnContextSchema.parse(runtime.toolSurface.execute('engine.get_turn_context', {

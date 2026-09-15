@@ -20,7 +20,10 @@ import {
   type ProtocolSessionPort, type SceneSnapshotEvent,
 } from '../../src/vtt/handoff/protocol-runtime';
 import type { HandoffPrincipal } from '../../src/vtt/handoff/session-authorizer';
+import { buildOfferEnvironment } from '../../src/vtt/offers/build-offer-environment';
 import { readTokenClaims, type TokenClaim, type TokenFileHooks } from './token-claims';
+
+const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
 
 export const VTT_RUNTIME_PATH = '/vtt/v1';
 export const VTT_RUNTIME_MAX_PAYLOAD = 1_048_576;
@@ -86,6 +89,7 @@ export function createDefaultNodeRuntimeSession(
     })),
     playerIds: state.combatants.map((combatant) => combatant.profile.id),
     turnLegalActions: legalActions,
+    offerEnvironment: OFFER_ENVIRONMENT,
   });
   const bindings = host.rendererTokenBindings();
   const seats: PlayerSeatRegistration[] = state.combatants.map((combatant) => ({

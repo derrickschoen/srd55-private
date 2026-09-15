@@ -39,6 +39,7 @@ import {
   measuredContextRolloverThreshold,
   turnInputTotal,
 } from '../../../src/vtt/agent-session';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
 import {
   DeferredMirrorSink,
   EncounterSessionJournal,
@@ -66,6 +67,8 @@ import {
 } from '../../../src/combat/values';
 import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
 import { DmEncounterHost } from '../../../src/vtt/dm-encounter-host';
+
+const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
 
 const INITIAL_COORDINATOR_STATE: PersistedCoordinatorState = {
   requestSequence: 1,
@@ -239,6 +242,7 @@ describe('event-sourced encounter persistence', () => {
     const host = new DmEncounterHost(baseline.reconstruction.sessionId, store, {
       playerIds: [playerId],
       turnLegalActions: (_state, actor) => ({ actions: [{ type: 'end_turn', actor }] }),
+      offerEnvironment: OFFER_ENVIRONMENT,
     });
 
     expect(host.snapshot().dm.coordinator.pause).toEqual({ kind: 'interrupted' });
