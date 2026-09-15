@@ -5,6 +5,7 @@ import type { EncounterCommand } from '../../../src/combat/events';
 import { projectDmView } from '../../../src/combat/visibility';
 import { damageType, dieSides, agentSessionId, encounterEffectId, encounterSessionId, type CombatantId } from '../../../src/combat/values';
 import { projectDmBoard } from '../../../src/vtt/encounter-projections';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
 import { DmRoundPlanSession } from '../../../src/vtt/dm-bridge/decision-program';
 import {
   DM_BRIDGE_PROTOCOL_VERSION,
@@ -23,6 +24,11 @@ import {
   type SteeringTriggerEvents,
 } from '../../../src/vtt/dm-bridge/steering';
 import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
+
+const OFFER_ENVIRONMENT = buildOfferEnvironment({
+  kind: 'configuration',
+  mode: 'legacy_standard',
+});
 
 const IDLE = {
   requestSequence: 1,
@@ -52,7 +58,13 @@ function fixture(round = 2) {
 }
 
 function board(state: EncounterState) {
-  return projectDmBoard({ view: projectDmView(state), coordinator: IDLE, controllers: [], history: [] });
+  return projectDmBoard({
+    view: projectDmView(state),
+    coordinator: IDLE,
+    controllers: [],
+    history: [],
+    offerEnvironment: OFFER_ENVIRONMENT,
+  });
 }
 
 function context(state: EncounterState) {

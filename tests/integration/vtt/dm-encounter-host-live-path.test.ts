@@ -19,11 +19,11 @@ import {
   freshMonsterPlanningState,
 } from '../../../src/vtt/mcp/entrypoint';
 import * as engineMcpEntrypoint from '../../../src/vtt/mcp/entrypoint';
-import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
 import {
-  createRevisionBoundEngineOptionEnvironment,
-  engineOptionEnvironmentFromBinding,
+  createDisabledEngineOfferFamilyPolicy,
 } from '../../../src/vtt/offers/offer-environment';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
+import { createUnrepresentedPartyThreatCatalog } from '../../../src/vtt/offers/party-threat-catalog';
 import { availableEngineActorOptions, resolveEngineActorOption } from '../../../src/vtt/intent-resolver';
 import { MAX_PROPOSAL_CORRECTIONS } from '../../../src/vtt/turn-exhaustion-coordinator';
 import { agentSessionIdFromCli } from '../../../src/vtt/agent-session';
@@ -34,7 +34,12 @@ import {
 } from '../../../src/vtt/vane-warren';
 import { monsterProfile, placedToken, playerProfile } from '../../unit/combat/fixtures';
 
-const BOUND_OFFER_ENVIRONMENT = createRevisionBoundEngineOptionEnvironment(canonicalEngineQueryPort);
+const BOUND_OFFER_ENVIRONMENT = buildOfferEnvironment({
+  kind: 'configuration',
+  mode: 'revision_bound',
+  familyPolicy: createDisabledEngineOfferFamilyPolicy(),
+  partyThreatCatalog: createUnrepresentedPartyThreatCatalog(),
+});
 let offerEnvironmentIdentityChecked = false;
 
 function expectOfferEnvironmentIdentity(
@@ -49,10 +54,10 @@ function expectOfferEnvironmentIdentity(
   const option = availableEngineActorOptions(planningState, actorId, offerEnvironment)[0];
   if (option === undefined) throw new Error(`Offer-environment probe has no option for ${actorId}.`);
   expect(resolveEngineActorOption(planningState, option, offerEnvironment).valid).toBe(true);
-  const equalBindingEnvironment = engineOptionEnvironmentFromBinding(
-    offerEnvironment.queries,
-    offerEnvironment.binding,
-  );
+  const equalBindingEnvironment = buildOfferEnvironment({
+    kind: 'binding',
+    binding: offerEnvironment.binding,
+  });
   expect(equalBindingEnvironment).not.toBe(offerEnvironment);
   expect(equalBindingEnvironment.binding).toEqual(offerEnvironment.binding);
   expect(resolveEngineActorOption(planningState, option, equalBindingEnvironment)).toMatchObject({
@@ -63,7 +68,8 @@ function expectOfferEnvironmentIdentity(
 
 function createEngineMcpRuntime(
   state: Parameters<typeof engineMcpEntrypoint.createEngineMcpRuntime>[0],
-  options: NonNullable<Parameters<typeof engineMcpEntrypoint.createEngineMcpRuntime>[1]> = {},
+  options: Omit<NonNullable<Parameters<typeof engineMcpEntrypoint.createEngineMcpRuntime>[1]>,
+    'offerEnvironment'> & { readonly offerEnvironment?: typeof BOUND_OFFER_ENVIRONMENT } = {},
 ): ReturnType<typeof engineMcpEntrypoint.createEngineMcpRuntime> {
   const offerEnvironment = options.offerEnvironment ?? BOUND_OFFER_ENVIRONMENT;
   const runtimeConstructor = vi.spyOn(engineMcpEntrypoint, 'createEngineMcpRuntime');
@@ -204,6 +210,7 @@ describe('DmEncounterHost live algorithm path', () => {
         initialState: state,
         initialControllers: algorithmIdentities(state),
         playerIds: [player.id],
+        offerEnvironment: BOUND_OFFER_ENVIRONMENT,
       },
     );
     const runtime = createEngineMcpRuntime(state, {
@@ -298,6 +305,7 @@ describe('DmEncounterHost live algorithm path', () => {
       initialState,
       initialControllers: algorithmIdentities(initialState),
       playerIds: players.map((player) => player.id),
+      offerEnvironment: BOUND_OFFER_ENVIRONMENT,
     });
 
     await host.setHiddenRollCategory('death_saves', true);
@@ -339,6 +347,7 @@ describe('DmEncounterHost live algorithm path', () => {
           actor,
           actor === player.id ? monster.id : player.id,
         ),
+        offerEnvironment: BOUND_OFFER_ENVIRONMENT,
       },
     );
 
@@ -395,6 +404,7 @@ describe('DmEncounterHost live algorithm path', () => {
               ],
             }
           : { actions: [{ type: 'end_turn', actor }] },
+        offerEnvironment: BOUND_OFFER_ENVIRONMENT,
         reactionLegalActions: (_state, reacting, moving) => reacting === reactor.id && moving === mover.id
           ? [{ ...attack(reacting, moving), type: 'opportunity_attack' }]
           : [],
@@ -485,6 +495,7 @@ describe('DmEncounterHost live algorithm path', () => {
                 ],
               }
             : { actions: [{ type: 'end_turn', actor }] },
+          offerEnvironment: BOUND_OFFER_ENVIRONMENT,
           reactionLegalActions: (_state, reacting, moving) => reacting === reactor.id && moving === mover.id
             ? [{ ...attack(reacting, moving), type: 'opportunity_attack' }]
             : [],
@@ -552,6 +563,7 @@ describe('DmEncounterHost live algorithm path', () => {
               ],
             }
           : { actions: [{ type: 'end_turn', actor }] },
+        offerEnvironment: BOUND_OFFER_ENVIRONMENT,
         reactionLegalActions: () => [],
       },
     );

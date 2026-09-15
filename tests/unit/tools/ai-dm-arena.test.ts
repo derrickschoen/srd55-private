@@ -29,11 +29,11 @@ import {
 import * as engineMcpEntrypoint from '../../../src/vtt/mcp/entrypoint';
 import { mcpRequestMeta } from '../../../src/vtt/mcp/handler';
 import { availableEngineActorOptions, resolveEngineActorOption } from '../../../src/vtt/intent-resolver';
-import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
 import {
-  createRevisionBoundEngineOptionEnvironment,
-  engineOptionEnvironmentFromBinding,
+  createDisabledEngineOfferFamilyPolicy,
 } from '../../../src/vtt/offers/offer-environment';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
+import { createUnrepresentedPartyThreatCatalog } from '../../../src/vtt/offers/party-threat-catalog';
 import { validateArenaPlan } from '../../../src/vtt/arena-legality';
 import { SNIPPET_REGISTRY } from '../../../src/vtt/snippet-registry-runtime';
 import { engineActionId, engineSpellId } from '../../../src/vtt/turn-proposal';
@@ -81,7 +81,12 @@ import { decodeChallengeRoomProvenanceV1 } from '../../../src/vtt/challenge-room
 import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
 
 const DEFAULT_KB_HASH = '00776f3f2d4cd7468a1eb2a63028e9c3f846b43b14a4e5787d3e9c94e02633c0';
-const BOUND_OFFER_ENVIRONMENT = createRevisionBoundEngineOptionEnvironment(canonicalEngineQueryPort);
+const BOUND_OFFER_ENVIRONMENT = buildOfferEnvironment({
+  kind: 'configuration',
+  mode: 'revision_bound',
+  familyPolicy: createDisabledEngineOfferFamilyPolicy(),
+  partyThreatCatalog: createUnrepresentedPartyThreatCatalog(),
+});
 let offerEnvironmentIdentityChecked = false;
 
 function expectOfferEnvironmentIdentity(
@@ -96,10 +101,10 @@ function expectOfferEnvironmentIdentity(
   const option = availableEngineActorOptions(planningState, actorId, offerEnvironment)[0];
   if (option === undefined) throw new Error(`Offer-environment probe has no option for ${actorId}.`);
   expect(resolveEngineActorOption(planningState, option, offerEnvironment).valid).toBe(true);
-  const equalBindingEnvironment = engineOptionEnvironmentFromBinding(
-    offerEnvironment.queries,
-    offerEnvironment.binding,
-  );
+  const equalBindingEnvironment = buildOfferEnvironment({
+    kind: 'binding',
+    binding: offerEnvironment.binding,
+  });
   expect(equalBindingEnvironment).not.toBe(offerEnvironment);
   expect(equalBindingEnvironment.binding).toEqual(offerEnvironment.binding);
   expect(resolveEngineActorOption(planningState, option, equalBindingEnvironment)).toMatchObject({
@@ -110,7 +115,8 @@ function expectOfferEnvironmentIdentity(
 
 function createEngineMcpRuntime(
   state: Parameters<typeof engineMcpEntrypoint.createEngineMcpRuntime>[0],
-  options: NonNullable<Parameters<typeof engineMcpEntrypoint.createEngineMcpRuntime>[1]> = {},
+  options: Omit<NonNullable<Parameters<typeof engineMcpEntrypoint.createEngineMcpRuntime>[1]>,
+    'offerEnvironment'> & { readonly offerEnvironment?: typeof BOUND_OFFER_ENVIRONMENT } = {},
 ): ReturnType<typeof engineMcpEntrypoint.createEngineMcpRuntime> {
   const offerEnvironment = options.offerEnvironment ?? BOUND_OFFER_ENVIRONMENT;
   const runtimeConstructor = vi.spyOn(engineMcpEntrypoint, 'createEngineMcpRuntime');
@@ -370,6 +376,7 @@ async function prepareActualPrimaryByteEvidence(): Promise<{
     });
   }
   await runEngineMcpLines(runtime, toolsListRequest(), {
+    offerEnvironment: BOUND_OFFER_ENVIRONMENT,
     runId: manifest.runId, branchId: manifest.branchId, revision: manifest.revision,
     requestId: manifest.requestId, phase: manifest.phase, correctionNumber: manifest.correctionNumber,
     room: manifest.room, historyKind: manifest.historyKind, toolProfile: 'blind', dmMode: 'blind',
@@ -2336,10 +2343,10 @@ describe('AI-DM arena', () => {
       }],
     };
 
-    expect(validateArenaPlan(plan, state)).toContain(
+    expect(validateArenaPlan(plan, state, BOUND_OFFER_ENVIRONMENT.queries)).toContain(
       `${monster.profile.id}: destination is blocked, occupied, or unreachable`,
     );
-    expect(validateArenaPlan(twoSlotPlan, state)).toContain(
+    expect(validateArenaPlan(twoSlotPlan, state, BOUND_OFFER_ENVIRONMENT.queries)).toContain(
       `${monster.profile.id}: program can spend more than one slot`,
     );
   });

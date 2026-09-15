@@ -14,11 +14,11 @@ import { canonicalJson } from '../../../src/commands/canonical-json';
 import { sha256 } from '../../../src/crypto/sha256';
 import { mcpRequestMeta, createMcpHandler } from '../../../src/vtt/mcp/handler';
 import {
-  createRevisionBoundEngineOptionEnvironment,
+  createDisabledEngineOfferFamilyPolicy,
   createLegacyEngineOptionEnvironmentBinding,
-  engineOptionEnvironmentFromBinding,
 } from '../../../src/vtt/offers/offer-environment';
-import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
+import { createUnrepresentedPartyThreatCatalog } from '../../../src/vtt/offers/party-threat-catalog';
 import { availableEngineActorOptions, resolveEngineActorOption } from '../../../src/vtt/intent-resolver';
 import {
   decodeEngineMcpLauncherManifest,
@@ -57,7 +57,12 @@ import {
 } from '../../helpers/test-filesystem';
 
 const META = mcpRequestMeta({ name: 'board-delivery-test', version: '1.0.0' });
-const BOUND_OFFER_ENVIRONMENT = createRevisionBoundEngineOptionEnvironment(canonicalEngineQueryPort);
+const BOUND_OFFER_ENVIRONMENT = buildOfferEnvironment({
+  kind: 'configuration',
+  mode: 'revision_bound',
+  familyPolicy: createDisabledEngineOfferFamilyPolicy(),
+  partyThreatCatalog: createUnrepresentedPartyThreatCatalog(),
+});
 let offerEnvironmentIdentityChecked = false;
 let launcherOfferEnvironmentIdentityChecked = false;
 
@@ -73,10 +78,10 @@ function expectOfferEnvironmentIdentity(
   const option = availableEngineActorOptions(planningState, actorId, offerEnvironment)[0];
   if (option === undefined) throw new Error(`Offer-environment probe has no option for ${actorId}.`);
   expect(resolveEngineActorOption(planningState, option, offerEnvironment).valid).toBe(true);
-  const equalBindingEnvironment = engineOptionEnvironmentFromBinding(
-    offerEnvironment.queries,
-    offerEnvironment.binding,
-  );
+  const equalBindingEnvironment = buildOfferEnvironment({
+    kind: 'binding',
+    binding: offerEnvironment.binding,
+  });
   expect(equalBindingEnvironment).not.toBe(offerEnvironment);
   expect(equalBindingEnvironment.binding).toEqual(offerEnvironment.binding);
   expect(resolveEngineActorOption(planningState, option, equalBindingEnvironment)).toMatchObject({
@@ -87,7 +92,8 @@ function expectOfferEnvironmentIdentity(
 
 function createEngineMcpRuntime(
   state: Parameters<typeof engineMcpEntrypoint.createEngineMcpRuntime>[0],
-  options: NonNullable<Parameters<typeof engineMcpEntrypoint.createEngineMcpRuntime>[1]> = {},
+  options: Omit<NonNullable<Parameters<typeof engineMcpEntrypoint.createEngineMcpRuntime>[1]>,
+    'offerEnvironment'> & { readonly offerEnvironment?: typeof BOUND_OFFER_ENVIRONMENT } = {},
 ): ReturnType<typeof engineMcpEntrypoint.createEngineMcpRuntime> {
   const offerEnvironment = options.offerEnvironment ?? BOUND_OFFER_ENVIRONMENT;
   const runtimeConstructor = vi.spyOn(engineMcpEntrypoint, 'createEngineMcpRuntime');
@@ -108,7 +114,7 @@ function createEngineMcpRuntime(
 
 function launcherOfferEnvironment(manifest: EngineMcpLauncherManifest) {
   if (manifest.offerEnvironment === undefined) throw new TypeError('Launcher offer environment is absent.');
-  return engineOptionEnvironmentFromBinding(canonicalEngineQueryPort, manifest.offerEnvironment);
+  return buildOfferEnvironment({ kind: 'binding', binding: manifest.offerEnvironment });
 }
 // Pin = the intel-leak lane context (04fd8420: shown-option boundary, size-omission
 // declarations) BEFORE the last-seen (D545) merge; the last-seen policy string and

@@ -4,6 +4,7 @@ import { createEncounter, type EncounterState } from '../../../src/combat/encoun
 import { projectDmView } from '../../../src/combat/visibility';
 import { agentSessionId, encounterSessionId } from '../../../src/combat/values';
 import { projectDmBoard } from '../../../src/vtt/encounter-projections';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
 import { LocalhostDmBridgeClient, type BridgeFetch } from '../../../src/vtt/dm-bridge/client';
 import {
   DM_BRIDGE_PROTOCOL_VERSION,
@@ -15,6 +16,11 @@ import {
   ProjectionTransferSender,
 } from '../../../src/vtt/dm-bridge/projection-transport';
 import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
+
+const OFFER_ENVIRONMENT = buildOfferEnvironment({
+  kind: 'configuration',
+  mode: 'legacy_standard',
+});
 
 const IDLE = {
   requestSequence: 1,
@@ -41,6 +47,7 @@ function request(encounterState: EncounterState): RoundPlanRequest {
     coordinator: IDLE,
     controllers: [],
     history: [],
+    offerEnvironment: OFFER_ENVIRONMENT,
   });
   return {
     kind: 'round_plan_request',

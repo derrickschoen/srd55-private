@@ -16,6 +16,7 @@ import type { RpcRequest, RpcResponse } from '../../../src/rpc/protocol';
 import { AdventuringDaySession } from '../../../src/vtt/adventuring-day-session';
 import { DmEncounterHost } from '../../../src/vtt/dm-encounter-host';
 import { encounterBoardRenderModel } from '../../../src/vtt/encounter-board';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
 import { loadD365SampleParty, type D365SamplePartyLoad } from '../../../src/vtt/d365-sample-party';
 import { loadedPartySpellCastCommand } from '../../../src/vtt/party-pack';
 import { createPartySessionState, type PartySessionState } from '../../../src/vtt/party-session-state';
@@ -36,6 +37,11 @@ import {
   createSeededRpcHarness,
   type RpcHarness,
 } from '../../helpers/rpc-harness';
+
+const OFFER_ENVIRONMENT = buildOfferEnvironment({
+  kind: 'configuration',
+  mode: 'legacy_standard',
+});
 
 class RegistryTransport implements RpcTransport {
   readonly #messages = new Set<(event: MessageEvent<RpcResponse>) => void>();
@@ -214,6 +220,7 @@ describe('Vane Warren loader, chaining, seats, and end-session export', () => {
           playerIds: encounter.playerIds,
           turnLegalActions: encounter.turnLegalActions,
           reactionLegalActions: () => [],
+          offerEnvironment: OFFER_ENVIRONMENT,
         },
       );
       const controlsState = host.snapshot().dm;
@@ -253,6 +260,7 @@ describe('Vane Warren loader, chaining, seats, and end-session export', () => {
         playerIds: encounter.playerIds,
         turnLegalActions: encounter.turnLegalActions,
         reactionLegalActions: () => [],
+        offerEnvironment: OFFER_ENVIRONMENT,
       },
     );
     for (const identity of host.snapshot().dm.controllers) {
@@ -305,6 +313,7 @@ describe('Vane Warren loader, chaining, seats, and end-session export', () => {
         playerIds: encounter.playerIds,
         turnLegalActions: encounter.turnLegalActions,
         reactionLegalActions: regretReactionLegalActions,
+        offerEnvironment: OFFER_ENVIRONMENT,
       },
     );
 

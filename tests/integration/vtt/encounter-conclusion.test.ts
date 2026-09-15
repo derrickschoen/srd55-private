@@ -17,6 +17,7 @@ import { composeD365Room } from '../../../src/vtt/d365-sample-dungeon';
 import { loadD365SampleParty } from '../../../src/vtt/d365-sample-party';
 import { DmEncounterHost, type DmEncounterHostSnapshot } from '../../../src/vtt/dm-encounter-host';
 import { renderDmEncounterOutcome } from '../../../src/vtt/encounter-app';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
 import { IndexedDbBrowserSessionStore } from '../../../src/vtt/local-session-store';
 import { createPartySessionState } from '../../../src/vtt/party-session-state';
 import { deriveSessionRecord } from '../../../src/vtt/session-record';
@@ -27,6 +28,11 @@ import type { HandlerContext } from '../../../src/worker/handler';
 import { installInteractiveDocument } from '../../fixtures/interactive-dom';
 import { createSeededRpcHarness } from '../../helpers/rpc-harness';
 import { monsterProfile, placedToken, playerProfile } from '../../unit/combat/fixtures';
+
+const OFFER_ENVIRONMENT = buildOfferEnvironment({
+  kind: 'configuration',
+  mode: 'legacy_standard',
+});
 
 class MemoryStorage implements Storage {
   readonly #values = new Map<string, string>();
@@ -166,6 +172,7 @@ describe('typed encounter conclusion', () => {
       initialControllers: identities,
       playerIds: [fixture.player.id],
       turnLegalActions: legalActions,
+      offerEnvironment: OFFER_ENVIRONMENT,
     });
 
     const concluded = await hostUntilConcluded(host);
@@ -220,6 +227,7 @@ describe('typed encounter conclusion', () => {
         playerIds: encounter.playerIds,
         turnLegalActions: encounter.turnLegalActions,
         reactionLegalActions: () => [],
+        offerEnvironment: OFFER_ENVIRONMENT,
       });
       try {
         const concluded = await hostUntilConcluded(host, 10_000);
