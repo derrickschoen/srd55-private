@@ -8,6 +8,7 @@ import {
 } from '../../../src/combat/statblock';
 import { SCOUT, SPY } from '../../../src/combat/statblocks/mercenary-company';
 import { PRIEST } from '../../../src/combat/statblocks/monsters';
+import { BROWN_BEAR, DIRE_WOLF } from '../../../src/combat/statblocks/wild-beasts';
 import { armorClass, worldObjectId } from '../../../src/combat/values';
 import type { WorldObject } from '../../../src/combat/world-objects';
 import { EngineRoundSession, type AuthorizedEngineTurnProposal } from '../../../src/vtt/engine-round-session';
@@ -19,6 +20,7 @@ import {
 import {
   availableEngineActorOptions,
   createPureTurnProposalResolver,
+  engineActorOptionsForEnvironment,
   resolveEngineActorOption,
 } from '../../../src/vtt/intent-resolver';
 import {
@@ -38,7 +40,7 @@ const OFFER_ENVIRONMENT = buildOfferEnvironment({
 const TURN_PROPOSAL_RESOLVER = createPureTurnProposalResolver(OFFER_ENVIRONMENT);
 
 function monsterProfile(
-  statblock: typeof SCOUT | typeof SPY | typeof PRIEST,
+  statblock: typeof SCOUT | typeof SPY | typeof PRIEST | typeof BROWN_BEAR | typeof DIRE_WOLF,
   key: string,
   initiativeBonus = 100,
 ): CombatantProfile {
@@ -321,23 +323,34 @@ describe('complete action economy and composite turn proposals', () => {
   });
 
   it('rejects a multiattack when even one declared component is illegal', () => {
-    const scout = monsterProfile(SCOUT, 'partial-scout');
-    const state = encounter([{ profile: scout, column: 0, row: 2 }], 8);
-    const option = availableEngineActorOptions(state, scout.id, OFFER_ENVIRONMENT)
-      .find((candidate) => mainMultiattack(candidate, 'longbow', 2));
-    if (option === undefined) throw new Error('Scout Longbow ×2 option is absent.');
-    const priest = monsterProfile(PRIEST, 'partial-priest');
-    if (priest.kind !== 'monster') throw new Error('Priest fixture must be a monster.');
+    const bear = monsterProfile(BROWN_BEAR, 'partial-bear');
+    const state = encounter([{ profile: bear, column: 0, row: 2 }], 3);
+    const options = availableEngineActorOptions(state, bear.id, OFFER_ENVIRONMENT);
+    const option = options.find((candidate) => candidate.actionSlots.some((slot) =>
+      slot.slot === 'main' && slot.use.kind === 'multiattack' &&
+      slot.use.components[0]?.actionId === 'bite' &&
+      slot.use.components[1]?.actionId === 'claw'));
+    if (option === undefined) throw new Error('Brown Bear Bite + Claw option is absent.');
+    const wolf = monsterProfile(DIRE_WOLF, 'partial-wolf');
+    if (wolf.kind !== 'monster') throw new Error('Dire Wolf fixture must be a monster.');
     const illegalState: EncounterState = {
       ...state,
-      combatants: state.combatants.map((combatant) => combatant.profile.id === scout.id
-        ? { ...combatant, profile: { ...combatant.profile, statblockId: priest.statblockId } }
+      combatants: state.combatants.map((combatant) => combatant.profile.id === bear.id
+        ? { ...combatant, profile: { ...combatant.profile, statblockId: wolf.statblockId } }
         : combatant),
     };
+    const bite = engineActorOptionsForEnvironment(
+      illegalState,
+      bear.id,
+      OFFER_ENVIRONMENT,
+    ).offerable.find((candidate) => candidate.actionSlots.some((slot) =>
+      slot.slot === 'main' && slot.use.kind === 'attack' && slot.use.actionId === 'bite'));
+    if (bite === undefined) throw new Error('Dire Wolf standalone Bite option is absent.');
+    expect(resolveEngineActorOption(illegalState, bite, OFFER_ENVIRONMENT).valid).toBe(true);
     expect(resolveEngineActorOption(illegalState, option, OFFER_ENVIRONMENT)).toEqual({
       valid: false,
       code: 'MULTIATTACK_COMBINATION_ILLEGAL',
-      summary: 'combatant:partial-scout: Longbow + Longbow -> combatant:target is unavailable',
+      summary: 'combatant:partial-bear: Bite + Claw -> combatant:target is unavailable',
     });
   });
 
