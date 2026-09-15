@@ -9,13 +9,13 @@ import { BUNDLED_MONSTER_ROSTER } from '../../../src/combat/statblocks/roster';
 import { sha256 } from '../../../src/crypto/sha256';
 import { D466_GENERATED_ROOM_OVERRIDES } from '../../../src/vtt/d466-room-overrides';
 import { EngineRoundSession, type AuthorizedEngineTurnProposal } from '../../../src/vtt/engine-round-session';
-import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
 import {
   availableEngineActorOptions,
-  pureTurnProposalResolver,
+  createPureTurnProposalResolver,
   resolveEngineActorOption,
   type EngineTurnProposal,
 } from '../../../src/vtt/intent-resolver';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
 import { actorOpportunityReport } from '../../../src/vtt/intel/opportunity-cost';
 import { decodeArenaFixture } from '../../../src/vtt/mcp/entrypoint';
 import { freshMonsterPlanningState, projectFutureMonsterTurns } from '../../../src/vtt/monster-planning-state';
@@ -105,6 +105,11 @@ const FIXTURE_DIGESTS = {
 } as const satisfies Readonly<Record<(typeof BRUTAL_10_B_SEEDS)[number], string>>;
 
 const inputs = declareTestInputs({ fixtures: EXECUTION_FIXTURE_PATHS });
+const OFFER_ENVIRONMENT = buildOfferEnvironment({
+  kind: 'configuration',
+  mode: 'legacy_standard',
+});
+const TURN_PROPOSAL_RESOLVER = createPureTurnProposalResolver(OFFER_ENVIRONMENT);
 
 type RoundExecutionResult =
   | { readonly seed: number; readonly outcome: 'executed'; readonly state: EncounterState }
@@ -144,14 +149,14 @@ function dryRunMonsterPlan(state: EncounterState): ReadonlyMap<CombatantId, Auth
     const report = actorOpportunityReport(
       planningState,
       actorId,
-      canonicalEngineQueryPort,
+      OFFER_ENVIRONMENT,
       state.revision,
     );
     const primary = report.defaultOption;
     const fallback = availableEngineActorOptions(
       planningState,
       actorId,
-      canonicalEngineQueryPort,
+      OFFER_ENVIRONMENT,
       state.revision,
     ).find((option) => option.optionId !== primary.optionId);
     if (fallback === undefined) throw new Error(`Dry-run plan has no independent fallback for ${actorId}.`);
@@ -163,7 +168,7 @@ function dryRunMonsterPlan(state: EncounterState): ReadonlyMap<CombatantId, Auth
       reason: 'Use the engine-ranked option to maximize immediate tactical value.',
       overrideJustification: null,
     };
-    const resolution = pureTurnProposalResolver.resolve(planningState, proposal);
+    const resolution = TURN_PROPOSAL_RESOLVER.resolve(planningState, proposal);
     if (!resolution.valid) {
       throw new Error(`Dry-run plan was refused for ${actorId}: ${resolution.refusals.map((entry) => entry.code).join(', ')}.`);
     }
@@ -187,6 +192,7 @@ function executeFrozenRound(
     applyRoomInitiativeProfile(decodeArenaFixture(room), 'derived_v1'),
     mulberry32(8_274_113),
     policy,
+    OFFER_ENVIRONMENT,
   );
   try {
     session.beginRoundWithoutSkipping({
@@ -352,8 +358,12 @@ function assertBrutalMembership(
   const planningState = freshMonsterPlanningState(state);
   for (const monster of planningState.combatants.filter((combatant) =>
     combatant.profile.kind === 'monster')) {
-    const productive = availableEngineActorOptions(planningState, monster.profile.id).some((option) => {
-      const resolution = resolveEngineActorOption(planningState, option);
+    const productive = availableEngineActorOptions(
+      planningState,
+      monster.profile.id,
+      OFFER_ENVIRONMENT,
+    ).some((option) => {
+      const resolution = resolveEngineActorOption(planningState, option, OFFER_ENVIRONMENT);
       return resolution.valid && (resolution.mechanics.movementCostFeet > 0 ||
         resolution.mechanics.actionSlots.some((slot) =>
           slot.kind === 'attack' || slot.kind === 'saving_throw' || slot.kind === 'cast_spell' ||
@@ -459,7 +469,7 @@ describe('second brutal arena basis family', () => {
       event.type === 'turn_ended' && event.combatant === activeMonster.id)).toBe(false);
 
     const planningState = projectFutureMonsterTurns(started, [activeMonster.id]);
-    const dodge = availableEngineActorOptions(planningState, activeMonster.id)
+    const dodge = availableEngineActorOptions(planningState, activeMonster.id, OFFER_ENVIRONMENT)
       .find((option) => option.actionSlots.some((slot) =>
         slot.slot === 'main' && slot.use.kind === 'dodge'));
     if (dodge === undefined) throw new Error('Minimal boundary fixture omitted Dodge.');
@@ -471,12 +481,13 @@ describe('second brutal arena basis family', () => {
       reason: 'Exercise the unattended legendary-window boundary.',
       overrideJustification: null,
     };
-    const resolution = pureTurnProposalResolver.resolve(planningState, proposal);
+    const resolution = TURN_PROPOSAL_RESOLVER.resolve(planningState, proposal);
     if (!resolution.valid) throw new Error('Minimal boundary fixture could not resolve Dodge.');
     const session = new EngineRoundSession(
       started,
       mulberry32(62_060_012),
       { kind: 'unattended', askDefault: 'decline' },
+      OFFER_ENVIRONMENT,
     );
 
     session.applyResolvedMechanics([{

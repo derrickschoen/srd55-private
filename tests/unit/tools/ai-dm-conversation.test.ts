@@ -48,10 +48,8 @@ import {
   availableEngineActorOptions,
   createPureTurnProposalResolver,
   engineActorOptionsForEnvironment,
-  pureTurnProposalResolver,
   resolveEngineActorOption,
 } from '../../../src/vtt/intent-resolver';
-import * as intentResolverModule from '../../../src/vtt/intent-resolver';
 import {
   freshMonsterPlanningState,
   loadArenaFixture,
@@ -78,11 +76,11 @@ import {
 } from '../../../src/vtt/dm-bridge/projection-transport';
 import { projectActorKnowledge } from '../../../src/vtt/intel/actor-knowledge';
 import { actorOpportunityReport } from '../../../src/vtt/intel/opportunity-cost';
-import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
 import {
-  createRevisionBoundEngineOptionEnvironment,
-  engineOptionEnvironmentFromBinding,
+  createDisabledEngineOfferFamilyPolicy,
 } from '../../../src/vtt/offers/offer-environment';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
+import { createUnrepresentedPartyThreatCatalog } from '../../../src/vtt/offers/party-threat-catalog';
 import { engineStateHandle } from '../../../src/vtt/engine-state-capsule';
 import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
 import { alternatingInitiativeRoom } from '../../fixtures/initiative-segments/alternating-room';
@@ -110,8 +108,22 @@ const kbInputs = declareTestInputs({ fixtures: [
   'tests/fixtures/ai-dm-skills/engine-submission/SKILL.md',
 ] });
 const DEFAULT_KB_HASH = '00776f3f2d4cd7468a1eb2a63028e9c3f846b43b14a4e5787d3e9c94e02633c0';
-const BOUND_OFFER_ENVIRONMENT = createRevisionBoundEngineOptionEnvironment(canonicalEngineQueryPort);
-const DIVERGENCE_OFFER_ENVIRONMENT = createRevisionBoundEngineOptionEnvironment(canonicalEngineQueryPort);
+const BOUND_OFFER_ENVIRONMENT = buildOfferEnvironment({
+  kind: 'configuration',
+  mode: 'revision_bound',
+  familyPolicy: createDisabledEngineOfferFamilyPolicy(),
+  partyThreatCatalog: createUnrepresentedPartyThreatCatalog(),
+});
+const DIVERGENCE_OFFER_ENVIRONMENT = buildOfferEnvironment({
+  kind: 'configuration',
+  mode: 'revision_bound',
+  familyPolicy: createDisabledEngineOfferFamilyPolicy(),
+  partyThreatCatalog: createUnrepresentedPartyThreatCatalog(),
+});
+const LEGACY_OFFER_ENVIRONMENT = buildOfferEnvironment({
+  kind: 'configuration',
+  mode: 'legacy_standard',
+});
 let offerEnvironmentIdentityChecked = false;
 
 function expectOfferEnvironmentIdentity(
@@ -126,10 +138,10 @@ function expectOfferEnvironmentIdentity(
   const option = availableEngineActorOptions(planningState, actorId, offerEnvironment)[0];
   if (option === undefined) throw new Error(`Offer-environment probe has no option for ${actorId}.`);
   expect(resolveEngineActorOption(planningState, option, offerEnvironment).valid).toBe(true);
-  const equalBindingEnvironment = engineOptionEnvironmentFromBinding(
-    offerEnvironment.queries,
-    offerEnvironment.binding,
-  );
+  const equalBindingEnvironment = buildOfferEnvironment({
+    kind: 'binding',
+    binding: offerEnvironment.binding,
+  });
   expect(equalBindingEnvironment).not.toBe(offerEnvironment);
   expect(equalBindingEnvironment.binding).toEqual(offerEnvironment.binding);
   expect(resolveEngineActorOption(planningState, option, equalBindingEnvironment)).toMatchObject({
@@ -140,7 +152,8 @@ function expectOfferEnvironmentIdentity(
 
 function createEngineMcpRuntime(
   state: Parameters<typeof engineMcpEntrypoint.createEngineMcpRuntime>[0],
-  options: NonNullable<Parameters<typeof engineMcpEntrypoint.createEngineMcpRuntime>[1]> = {},
+  options: Omit<NonNullable<Parameters<typeof engineMcpEntrypoint.createEngineMcpRuntime>[1]>,
+    'offerEnvironment'> & { readonly offerEnvironment?: typeof BOUND_OFFER_ENVIRONMENT } = {},
 ): ReturnType<typeof engineMcpEntrypoint.createEngineMcpRuntime> {
   const offerEnvironment = options.offerEnvironment ?? BOUND_OFFER_ENVIRONMENT;
   const runtimeConstructor = vi.spyOn(engineMcpEntrypoint, 'createEngineMcpRuntime');
@@ -161,7 +174,7 @@ function createEngineMcpRuntime(
 
 function launcherOfferEnvironment(manifest: EngineMcpLauncherManifest) {
   if (manifest.offerEnvironment === undefined) throw new TypeError('Launcher offer environment is absent.');
-  return engineOptionEnvironmentFromBinding(canonicalEngineQueryPort, manifest.offerEnvironment);
+  return buildOfferEnvironment({ kind: 'binding', binding: manifest.offerEnvironment });
 }
 
 async function runConversationWithPartyPolicy(
@@ -2096,33 +2109,36 @@ describe('AI-DM engine MCP conversation runner', () => {
     const divergenceResolver = createPureTurnProposalResolver(DIVERGENCE_OFFER_ENVIRONMENT);
     const proposalTime = divergenceResolver.resolve(state, proposal);
     if (!proposalTime.valid) throw new Error('Room 3943006 Dodge proposal did not resolve.');
-    expect(proposalTime).toEqual(divergenceResolver.resolve(state, proposal));
-    const equalQueryPort = { ...canonicalEngineQueryPort };
-    expect(equalQueryPort).not.toBe(canonicalEngineQueryPort);
-    expect(resolveEngineActorOption(state, option, equalQueryPort)).toMatchObject({
+    const actorToken = state.tokens.find((token) => token.combatantId === actor.profile.id);
+    if (actorToken === undefined) throw new Error('Room 3943006 Dodge actor has no token.');
+    const expectedSummary = `${actor.profile.id} expands Dodge into 1 ordered use(s) after 0 feet`;
+    expect(proposalTime.summary).toBe(expectedSummary);
+    expect(proposalTime.mechanics).toMatchObject({
+      actorId: actor.profile.id,
+      movementCostFeet: 0,
+      path: [],
+      finalPosition: actorToken.position,
+      actionSlots: [{ slot: 'main', kind: 'dodge', actionId: 'dodge' }],
+    });
+    expect(LEGACY_OFFER_ENVIRONMENT.binding).not.toEqual(DIVERGENCE_OFFER_ENVIRONMENT.binding);
+    expect(resolveEngineActorOption(state, option, LEGACY_OFFER_ENVIRONMENT)).toMatchObject({
       valid: false,
       code: 'OFFER_ENVIRONMENT_MISMATCH',
     });
 
-    const defaultResolver = vi.spyOn(intentResolverModule, 'pureTurnProposalResolver', 'get')
-      .mockReturnValue(divergenceResolver);
-    try {
-      expect(proposalResolutionDivergence(state, {
-        proposal,
-        option: proposalTime.option,
-        primaryOption: proposalTime.primaryOption,
-        fallbackOption: proposalTime.fallbackOption,
-        mechanics: proposalTime.mechanics,
-        selectedBranch: proposalTime.selectedBranch,
-        resolutionDigest: '0'.repeat(64),
-        summary: proposalTime.summary,
-      })).toEqual([
-        `${actor.profile.id}: path or final-position geometry diverged while action sequence, targets, and movement cost remained ${proposalTime.summary}.`,
-      ]);
-    } finally {
-      defaultResolver.mockRestore();
-      expect(vi.isMockFunction(intentResolverModule.pureTurnProposalResolver)).toBe(false);
-    }
+    expect(proposalResolutionDivergence(state, {
+      proposal,
+      option: proposalTime.option,
+      primaryOption: proposalTime.primaryOption,
+      fallbackOption: proposalTime.fallbackOption,
+      mechanics: proposalTime.mechanics,
+      selectedBranch: proposalTime.selectedBranch,
+      resolutionDigest: '0'.repeat(64),
+      summary: expectedSummary,
+    }, DIVERGENCE_OFFER_ENVIRONMENT)).toEqual([
+      `${actor.profile.id}: path or final-position geometry diverged while action sequence, targets, ` +
+        `and movement cost remained ${expectedSummary}.`,
+    ]);
   });
 
   it.each([3_943_004, 3_943_007])(

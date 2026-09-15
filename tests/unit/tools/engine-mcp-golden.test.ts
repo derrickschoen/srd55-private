@@ -1,19 +1,44 @@
 import { describe, expect, it, vi } from 'vitest';
-import { runEngineMcpDryClient } from '../../../tools/engine-mcp-dry-client';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { mkdtempSync, writeFileSync } from '../../helpers/test-filesystem';
+import { EngineMcpStdioClient, runEngineMcpDryClient } from '../../../tools/engine-mcp-dry-client';
 import type { DryTranscriptEntry } from '../../../tools/engine-mcp-dry-client';
-import { freshMonsterPlanningState, loadArenaFixture } from '../../../src/vtt/mcp/entrypoint';
-import * as engineMcpEntrypoint from '../../../src/vtt/mcp/entrypoint';
-import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
 import {
-  createLegacyEngineOptionEnvironment,
-  createRevisionBoundEngineOptionEnvironment,
-  engineOptionEnvironmentFromBinding,
+  freshMonsterPlanningState,
+  loadArenaFixture,
+  projectFutureMonsterTurns,
+} from '../../../src/vtt/mcp/entrypoint';
+import * as engineMcpEntrypoint from '../../../src/vtt/mcp/entrypoint';
+import {
+  engineActionRegistryForEnvironment,
+} from '../../../src/vtt/engine-query-port';
+import {
+  createDisabledEngineOfferFamilyPolicy,
 } from '../../../src/vtt/offers/offer-environment';
-import * as offerEnvironmentModule from '../../../src/vtt/offers/offer-environment';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
+import * as offerEnvironmentBuilder from '../../../src/vtt/offers/build-offer-environment';
+import { createUnrepresentedPartyThreatCatalog } from '../../../src/vtt/offers/party-threat-catalog';
 import { availableEngineActorOptions, resolveEngineActorOption } from '../../../src/vtt/intent-resolver';
+import { canonicalJson } from '../../../src/commands/canonical-json';
+import { encounterBranchId, encounterSessionId } from '../../../src/combat/values';
+import {
+  createEngineStateCapsuleForEnvironment,
+  engineStateHandle,
+  projectEngineEncounterState,
+} from '../../../src/vtt/engine-state-capsule';
 
 const FIXTURE = 'tests/fixtures/arena-basis/seed-3943006.json';
-const BOUND_OFFER_ENVIRONMENT = createRevisionBoundEngineOptionEnvironment(canonicalEngineQueryPort);
+const BOUND_OFFER_ENVIRONMENT = buildOfferEnvironment({
+  kind: 'configuration',
+  mode: 'revision_bound',
+  familyPolicy: createDisabledEngineOfferFamilyPolicy(),
+  partyThreatCatalog: createUnrepresentedPartyThreatCatalog(),
+});
+const LEGACY_OFFER_ENVIRONMENT = buildOfferEnvironment({
+  kind: 'configuration',
+  mode: 'legacy_standard',
+});
 
 function record(value: unknown, label: string): Readonly<Record<string, unknown>> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new TypeError(`${label} must be an object.`);
@@ -47,20 +72,50 @@ function stateHandle(context: Readonly<Record<string, unknown>>): string {
   return value;
 }
 
+function structuredResponse(response: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
+  const result = record(response['result'], 'result');
+  return record(result['structuredContent'], 'structured content');
+}
+
+function advertisedProposal(
+  actorContext: Readonly<Record<string, unknown>>,
+  revision: number,
+): Readonly<Record<string, unknown>> {
+  const actorId = actorContext['actor_id'];
+  const optionValues = actorContext['options'];
+  if (typeof actorId !== 'string' || !Array.isArray(optionValues)) {
+    throw new TypeError('Golden launcher actor context is invalid.');
+  }
+  const options = optionValues.map((value) => record(value, 'advertised option'));
+  const primary = options.find((option) => option['kind'] === 'dodge') ?? options[0];
+  const fallback = options.find((option) => option['option_id'] !== primary?.['option_id']);
+  if (typeof primary?.['option_id'] !== 'string') throw new TypeError(`Actor ${actorId} has no offered option.`);
+  return {
+    actor_id: actorId,
+    expected_revision: revision,
+    primary_option_id: primary['option_id'],
+    fallback_option_id: typeof fallback?.['option_id'] === 'string' ? fallback['option_id'] : null,
+    reason: 'Select an option advertised by the serialized-binding child.',
+    override_justification: primary['kind'] === 'dodge'
+      ? { kind: 'missing_metric', id: 'expected_damage_milli' }
+      : null,
+  };
+}
+
 function expectOfferEnvironmentIdentity(
   planningState: Parameters<typeof availableEngineActorOptions>[0],
   actorId: Parameters<typeof availableEngineActorOptions>[1],
   optionId?: string,
 ): void {
-  const offerEnvironment = createLegacyEngineOptionEnvironment(canonicalEngineQueryPort);
+  const offerEnvironment = LEGACY_OFFER_ENVIRONMENT;
   const option = availableEngineActorOptions(planningState, actorId, offerEnvironment, 1)
     .find((candidate) => optionId === undefined || candidate.optionId === optionId);
   if (option === undefined) throw new Error('Golden offer-environment probe did not find its option.');
   expect(resolveEngineActorOption(planningState, option, offerEnvironment).valid).toBe(true);
-  const equalBindingEnvironment = engineOptionEnvironmentFromBinding(
-    offerEnvironment.queries,
-    offerEnvironment.binding,
-  );
+  const equalBindingEnvironment = buildOfferEnvironment({
+    kind: 'binding',
+    binding: offerEnvironment.binding,
+  });
   expect(equalBindingEnvironment).not.toBe(offerEnvironment);
   expect(equalBindingEnvironment.binding).toEqual(offerEnvironment.binding);
   expect(resolveEngineActorOption(planningState, option, equalBindingEnvironment)).toMatchObject({
@@ -83,8 +138,97 @@ describe('real-stdio engine MCP golden dungeon run', () => {
     expectOfferEnvironmentIdentity(planningState, actorId);
   });
 
+  it('reconstructs the serialized non-legacy binding in the real MCP child', { timeout: 30_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-engine-mcp-bound-launcher-'));
+    const launcherPath = join(directory, 'launcher.json');
+    const proposalSpoolPath = join(directory, 'proposals.jsonl');
+    const runId = encounterSessionId('encounter:golden-bound-child');
+    const branchId = encounterBranchId('branch:golden-bound-child');
+    const requestId = 'request:golden-bound-child';
+    const revision = 1;
+    const state = await loadArenaFixture(FIXTURE);
+    const actors = state.combatants.flatMap((combatant) =>
+      combatant.profile.kind === 'monster' && combatant.life === 'living' ? [combatant.profile.id] : []);
+    const planningState = projectFutureMonsterTurns(state, actors);
+    const referenceCapsule = createEngineStateCapsuleForEnvironment({
+      runId,
+      branchId,
+      revision,
+      generatedAt: '2026-08-27T12:00:00.000Z',
+      offerEnvironment: BOUND_OFFER_ENVIRONMENT.binding,
+      request: {
+        requestId,
+        phase: 'initial',
+        correctionNumber: 0,
+        actors,
+      },
+      projection: projectEngineEncounterState(
+        planningState,
+        engineActionRegistryForEnvironment(planningState, BOUND_OFFER_ENVIRONMENT, revision),
+        {
+          policy: 'initiative-intel-v1',
+          timeline: {
+            phase: structuredClone(planningState.phase),
+            round: planningState.round,
+            currentCombatant: null,
+            initiative: [],
+            upcoming: [],
+            roundBoundaries: [],
+            branchPoints: [],
+          },
+        },
+        1,
+      ),
+      historyDelta: [{
+        revision,
+        kind: 'golden_binding',
+        branchStatus: 'active',
+        encounterRound: planningState.round,
+      }],
+    });
+    writeFileSync(proposalSpoolPath, '');
+    writeFileSync(launcherPath, canonicalJson({
+      format: 'engine-mcp-launcher-v1',
+      fixturePath: FIXTURE,
+      proposalSpoolPath,
+      runId,
+      branchId,
+      revision,
+      requestId,
+      phase: 'initial',
+      correctionNumber: 0,
+      offerEnvironment: BOUND_OFFER_ENVIRONMENT.binding,
+      room: 1,
+      historyKind: 'golden_binding',
+      requestKind: 'round_plan',
+    }));
+    const client = new EngineMcpStdioClient({ kind: 'launcher', launcherPath });
+    try {
+      const context = structuredResponse(await client.tool('engine.get_turn_context', {
+        run_id: runId,
+        expected_revision: revision,
+        scope: 'round',
+      }));
+      const stateRef = record(context['state_ref'], 'state ref');
+      expect(stateRef['state_handle']).toBe(engineStateHandle(referenceCapsule));
+      const actorValues = context['actors'];
+      if (!Array.isArray(actorValues)) throw new TypeError('Golden launcher context omitted actors.');
+      const proposals = actorValues.map((value) => advertisedProposal(record(value, 'actor context'), revision));
+      expect(proposals).toHaveLength(actors.length);
+      expect(structuredResponse(await client.tool('engine.submit_round_proposals', {
+        state_ref: stateRef,
+        request_id: requestId,
+        phase: 'initial',
+        idempotency_key: 'golden-bound-child-submit-0001',
+        proposals,
+      }))).toMatchObject({ status: 'proposed' });
+    } finally {
+      expect(await client.close()).toBe(0);
+    }
+  });
+
   it('covers discovery, proposal correction, adjudication, narration, and restart shapes', { timeout: 30_000 }, async () => {
-    const environmentConstructor = vi.spyOn(offerEnvironmentModule, 'createLegacyEngineOptionEnvironment');
+    const environmentConstructor = vi.spyOn(offerEnvironmentBuilder, 'buildOfferEnvironment');
     const runtimeConstructor = vi.spyOn(engineMcpEntrypoint, 'createEngineMcpRuntime');
     let report: Awaited<ReturnType<typeof runEngineMcpDryClient>>;
     try {
@@ -95,7 +239,7 @@ describe('real-stdio engine MCP golden dungeon run', () => {
       runtimeConstructor.mockRestore();
       environmentConstructor.mockRestore();
       expect(vi.isMockFunction(engineMcpEntrypoint.createEngineMcpRuntime)).toBe(false);
-      expect(vi.isMockFunction(offerEnvironmentModule.createLegacyEngineOptionEnvironment)).toBe(false);
+      expect(vi.isMockFunction(offerEnvironmentBuilder.buildOfferEnvironment)).toBe(false);
     }
     expect(report).toMatchObject({ status: 'VERIFIED', protocolConformance: 'SUBSTITUTED_LOCAL' });
     const methods = report.initial.map((entry) => decoded(entry.request)['method']);

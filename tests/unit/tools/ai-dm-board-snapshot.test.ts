@@ -23,11 +23,11 @@ import {
   loadArenaFixture,
 } from '../../../src/vtt/mcp/entrypoint';
 import * as engineMcpEntrypoint from '../../../src/vtt/mcp/entrypoint';
-import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
 import {
-  createRevisionBoundEngineOptionEnvironment,
-  engineOptionEnvironmentFromBinding,
+  createDisabledEngineOfferFamilyPolicy,
 } from '../../../src/vtt/offers/offer-environment';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
+import { createUnrepresentedPartyThreatCatalog } from '../../../src/vtt/offers/party-threat-catalog';
 import { availableEngineActorOptions, resolveEngineActorOption } from '../../../src/vtt/intent-resolver';
 import {
   assertBoardImageFresh,
@@ -52,7 +52,12 @@ const CONTROL_FIXTURES = Array.from(
   { length: 10 },
   (_unused, index) => `tests/fixtures/arena-basis-brutal/seed-${String(6_203_001 + index)}.json`,
 );
-const BOUND_OFFER_ENVIRONMENT = createRevisionBoundEngineOptionEnvironment(canonicalEngineQueryPort);
+const BOUND_OFFER_ENVIRONMENT = buildOfferEnvironment({
+  kind: 'configuration',
+  mode: 'revision_bound',
+  familyPolicy: createDisabledEngineOfferFamilyPolicy(),
+  partyThreatCatalog: createUnrepresentedPartyThreatCatalog(),
+});
 
 function expectOfferEnvironmentIdentity(
   state: EncounterState,
@@ -66,10 +71,10 @@ function expectOfferEnvironmentIdentity(
   const option = availableEngineActorOptions(planningState, actorId, offerEnvironment)[0];
   if (option === undefined) throw new Error(`Snapshot offer-environment probe has no option for ${actorId}.`);
   expect(resolveEngineActorOption(planningState, option, offerEnvironment).valid).toBe(true);
-  const equalBindingEnvironment = engineOptionEnvironmentFromBinding(
-    offerEnvironment.queries,
-    offerEnvironment.binding,
-  );
+  const equalBindingEnvironment = buildOfferEnvironment({
+    kind: 'binding',
+    binding: offerEnvironment.binding,
+  });
   expect(equalBindingEnvironment).not.toBe(offerEnvironment);
   expect(equalBindingEnvironment.binding).toEqual(offerEnvironment.binding);
   expect(resolveEngineActorOption(planningState, option, equalBindingEnvironment)).toMatchObject({
@@ -225,6 +230,7 @@ describe('AI DM board snapshot contracts', () => {
         generation: 0,
       })),
       history: [],
+      offerEnvironment: BOUND_OFFER_ENVIRONMENT,
     });
     const stateOnly = projectStateOnlyDmBoard(projection);
 

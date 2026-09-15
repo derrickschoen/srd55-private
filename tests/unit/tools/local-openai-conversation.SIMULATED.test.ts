@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it, vi } from 'vitest';
 import { combatantId, encounterSessionId } from '../../../src/combat/values';
+import { encounterBranchId } from '../../../src/combat/values';
 import { ENGINE_DM_TOOL_NAMES } from '../../../src/vtt/mcp/engine-server';
 import { ENGINE_TOOL_SPECS } from '../../../src/vtt/mcp/schemas';
 import {
@@ -13,15 +14,19 @@ import {
 import { parseArenaArgs, runArena } from '../../../tools/ai-dm-arena';
 import { DEFAULT_RENDERER_PROFILE } from '../../../src/vtt/renderer-profile';
 import { mkdtempSync, readFileSync } from '../../helpers/test-filesystem';
-import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
 import {
-  createLegacyEngineOptionEnvironment,
-  engineOptionEnvironmentFromBinding,
+  createDisabledEngineOfferFamilyPolicy,
+  type EngineOptionEnvironment,
 } from '../../../src/vtt/offers/offer-environment';
-import * as offerEnvironmentModule from '../../../src/vtt/offers/offer-environment';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
+import * as offerEnvironmentBuilder from '../../../src/vtt/offers/build-offer-environment';
+import { createUnrepresentedPartyThreatCatalog } from '../../../src/vtt/offers/party-threat-catalog';
 import { availableEngineActorOptions, resolveEngineActorOption } from '../../../src/vtt/intent-resolver';
 import { loadArenaFixture, projectFutureMonsterTurns } from '../../../src/vtt/mcp/entrypoint';
 import * as engineMcpEntrypoint from '../../../src/vtt/mcp/entrypoint';
+import { EngineRoundSession } from '../../../src/vtt/engine-round-session';
+import { mulberry32 } from '../../../src/combat/random';
+import { engineStateHandle } from '../../../src/vtt/engine-state-capsule';
 
 interface FakeRequest {
   readonly path: string;
@@ -59,6 +64,14 @@ const ALL_OPTIONS_TEST_RENDERER_PROFILE = {
   misc: 'merged',
   optionDetail: 'top2_stubs',
 } as const;
+
+const REVISION_BOUND_OFFER_INPUT = {
+  kind: 'configuration',
+  mode: 'revision_bound',
+  familyPolicy: createDisabledEngineOfferFamilyPolicy(),
+  partyThreatCatalog: createUnrepresentedPartyThreatCatalog(),
+} as const;
+const REFERENCE_OFFER_ENVIRONMENT = buildOfferEnvironment(REVISION_BOUND_OFFER_INPUT);
 
 async function fakeServer(
   respond: (request: FakeRequest, index: number) => { readonly status?: number; readonly body: unknown },
@@ -215,32 +228,26 @@ describe('SIMULATED local OpenAI conversation adapter', () => {
     });
     const directory = mkdtempSync(join(tmpdir(), 'dnd-local-openai-round-'));
     try {
-      const config = parseArenaArgs([
-        '--rooms', '1', '--reps', '1', '--seed', '3943001',
-        '--out', join(directory, 'rows.jsonl'),
-        '--cli', 'local-openai', '--local-base-url', endpoint.baseUrl,
-        '--local-model', 'quantized-SIMULATED', '--local-api-key', 'secret-SIMULATED',
-        '--local-think', 'on',
-        '--effort', 'low', '--kb', 'tests/fixtures/ai-dm-kb/k6.txt',
-        '--combat-model', 'monster_block_v1', '--initiative-profile', 'legacy',
-        '--renderer-profile', JSON.stringify(ALL_OPTIONS_TEST_RENDERER_PROFILE),
-      ]);
-      const legacyEnvironmentConstructor = vi.spyOn(
-        offerEnvironmentModule,
-        'createLegacyEngineOptionEnvironment',
-      );
-      const reconstructedEnvironmentConstructor = vi.spyOn(
-        offerEnvironmentModule,
-        'engineOptionEnvironmentFromBinding',
-      );
+      const config = {
+        ...parseArenaArgs([
+          '--rooms', '1', '--reps', '1', '--seed', '3943001',
+          '--out', join(directory, 'rows.jsonl'),
+          '--cli', 'local-openai', '--local-base-url', endpoint.baseUrl,
+          '--local-model', 'quantized-SIMULATED', '--local-api-key', 'secret-SIMULATED',
+          '--local-think', 'on',
+          '--effort', 'low', '--kb', 'tests/fixtures/ai-dm-kb/k6.txt',
+          '--combat-model', 'monster_block_v1', '--initiative-profile', 'legacy',
+          '--renderer-profile', JSON.stringify(ALL_OPTIONS_TEST_RENDERER_PROFILE),
+        ]),
+        offerEnvironment: REVISION_BOUND_OFFER_INPUT,
+      };
+      const environmentConstructor = vi.spyOn(offerEnvironmentBuilder, 'buildOfferEnvironment');
       const runtimeConstructor = vi.spyOn(engineMcpEntrypoint, 'createEngineMcpRuntime');
       let rows: Awaited<ReturnType<typeof runArena>>;
       try {
         rows = await runArena(config);
-        const constructedEnvironments = [
-          ...legacyEnvironmentConstructor.mock.results,
-          ...reconstructedEnvironmentConstructor.mock.results,
-        ].flatMap((result) => result.type === 'return' ? [result.value] : []);
+        const constructedEnvironments: readonly EngineOptionEnvironment[] = environmentConstructor.mock.results
+          .flatMap((result) => result.type === 'return' ? [result.value] : []);
         const consumedEnvironments = runtimeConstructor.mock.calls.flatMap((call) =>
           call[1]?.offerEnvironment === undefined ? [] : [call[1].offerEnvironment]);
         expect(constructedEnvironments.length).toBeGreaterThan(0);
@@ -256,11 +263,9 @@ describe('SIMULATED local OpenAI conversation adapter', () => {
         }
       } finally {
         runtimeConstructor.mockRestore();
-        reconstructedEnvironmentConstructor.mockRestore();
-        legacyEnvironmentConstructor.mockRestore();
+        environmentConstructor.mockRestore();
         expect(vi.isMockFunction(engineMcpEntrypoint.createEngineMcpRuntime)).toBe(false);
-        expect(vi.isMockFunction(offerEnvironmentModule.engineOptionEnvironmentFromBinding)).toBe(false);
-        expect(vi.isMockFunction(offerEnvironmentModule.createLegacyEngineOptionEnvironment)).toBe(false);
+        expect(vi.isMockFunction(offerEnvironmentBuilder.buildOfferEnvironment)).toBe(false);
       }
 
       expect(rows).toEqual([expect.objectContaining({
@@ -286,11 +291,52 @@ describe('SIMULATED local OpenAI conversation adapter', () => {
         return combatantId(actorId);
       });
       const planningState = projectFutureMonsterTurns(fixtureState, submittedActorIds);
-      const testEnvironment = createLegacyEngineOptionEnvironment(canonicalEngineQueryPort);
-      const equalBindingEnvironment = engineOptionEnvironmentFromBinding(
-        canonicalEngineQueryPort,
-        testEnvironment.binding,
+      const runId = encounterSessionId('encounter:ai-dm-conversation');
+      const branchId = encounterBranchId('branch:ai-dm-conversation');
+      const requestId = 'request:room-1-round-1';
+      const referenceSession = new EngineRoundSession(
+        fixtureState,
+        mulberry32(8_274_113),
+        { kind: 'unattended', askDefault: 'decline' },
+        REFERENCE_OFFER_ENVIRONMENT,
       );
+      const preparation = referenceSession.prepareRound({
+        runId,
+        branchId,
+        revision: 1,
+        requestId,
+        phase: 'initial',
+        room: 1,
+        historyKind: 'session_started',
+      }, null);
+      const referenceRequest = {
+        runId,
+        branchId,
+        revision: 1 + preparation.revisionDelta,
+        requestId,
+        phase: 'initial' as const,
+        room: 1,
+        historyKind: 'room_ready',
+      };
+      const referenceCapsule = referenceSession.snapshot(referenceRequest).capsule;
+      const referenceAuthorization = referenceSession.authorizationCapsule(referenceRequest);
+      expect(rows[0]?.stateBinding).toEqual({
+        capsule: {
+          revision: referenceCapsule.revision,
+          digest: referenceCapsule.digest,
+        },
+        authorization: {
+          revision: referenceAuthorization.revision,
+          digest: referenceAuthorization.digest,
+        },
+      });
+      expect(record(exposedContext['state_ref'], 'state ref')['state_handle'])
+        .toBe(engineStateHandle(referenceCapsule));
+      const testEnvironment = REFERENCE_OFFER_ENVIRONMENT;
+      const equalBindingEnvironment = buildOfferEnvironment({
+        kind: 'binding',
+        binding: testEnvironment.binding,
+      });
       expect(equalBindingEnvironment).not.toBe(testEnvironment);
       expect(equalBindingEnvironment.binding).toEqual(testEnvironment.binding);
       for (const proposal of exposedProposals) {
