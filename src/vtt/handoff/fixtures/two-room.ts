@@ -9,12 +9,15 @@ import {
   canonicalTokenIdentityIndex, sceneSnapshot, type SnapshotAssetFallback,
 } from '../scene-snapshot';
 import type { SceneSnapshot } from '../v1/contracts';
+import { buildOfferEnvironment } from '../../offers/build-offer-environment';
 
 export const TWO_ROOM_SEED = 603_020_001;
 export const TWO_ROOM_CLOCK = '2026-09-09T12:00:00.000Z';
 export const TWO_ROOM_SCENE_ID = 'scene:two-room-v1';
 export const TWO_ROOM_ADVENTURER_ID = combatantId('combatant:two-room-adventurer');
 export const TWO_ROOM_GOBLIN_ID = combatantId('combatant:two-room-goblin');
+
+const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
 
 const IDLE = {
   requestSequence: 1,
@@ -151,7 +154,13 @@ export function buildTwoRoomFixtures(): {
   const state = buildTwoRoomEncounter();
   const art = twoRoomArtPackage();
   const tokenIdentities = canonicalTokenIdentityIndex(state.tokens);
-  const dmProjection = projectDmBoard({ view: projectDmView(state), coordinator: IDLE, controllers: [], history: [] });
+  const dmProjection = projectDmBoard({
+    view: projectDmView(state),
+    coordinator: IDLE,
+    controllers: [],
+    history: [],
+    offerEnvironment: OFFER_ENVIRONMENT,
+  });
   const dmResult = sceneSnapshot({ sceneId: TWO_ROOM_SCENE_ID, projection: dmProjection, art, tokenIdentities });
   const players = TWO_ROOM_PLAYER_BINDINGS.map((binding) => {
     const result = sceneSnapshot({

@@ -34,8 +34,8 @@ import {
   decodeEngineMcpLauncherManifest,
   freshMonsterPlanningState,
   loadArenaFixture,
-  reconstructLauncherOfferEnvironment,
 } from '../../../src/vtt/mcp/entrypoint';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
 import type { EngineStateCapsule } from '../../../src/vtt/engine-state-capsule';
 import {
   captureLegacyRunnerComponents,
@@ -750,7 +750,7 @@ async function capsuleFromLauncher(
     correctionNumber: manifest.correctionNumber,
     room: manifest.room,
     historyKind: manifest.historyKind,
-    offerEnvironment: reconstructLauncherOfferEnvironment(manifest),
+    offerEnvironment: buildOfferEnvironment({ kind: 'binding', binding: manifest.offerEnvironment }),
     ...(manifest.requestedActorIds === undefined ? {} : { requestedActorIds: manifest.requestedActorIds }),
     ...(manifest.rendererProfile === undefined ? {} : { rendererProfile: manifest.rendererProfile }),
     ...(manifest.turnContextMaximumBytes === undefined
@@ -1122,6 +1122,7 @@ async function independentlyDerivedAdviceIdentity(): Promise<Readonly<{
     runId,
     toolProfile: 'dm',
     rendererProfile: DEFAULT_RENDERER_PROFILE,
+    offerEnvironment: buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' }),
   }).feed.current();
   expectCapsuleDerivation(
     capsule,

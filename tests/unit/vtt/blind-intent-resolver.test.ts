@@ -26,7 +26,6 @@ import {
   type EngineBlindTurnProjection,
 } from '../../../src/vtt/blind-turn-context';
 import type { EngineStateCapsule } from '../../../src/vtt/engine-state-capsule';
-import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
 import {
   createEngineMcpRuntime,
   freshMonsterPlanningState,
@@ -47,8 +46,10 @@ import { EngineRoundSession } from '../../../src/vtt/engine-round-session';
 import { mulberry32 } from '../../../src/combat/random';
 import { availableEngineActorOptions } from '../../../src/vtt/intent-resolver';
 import { engineSchemaInternals } from '../../../src/vtt/mcp/schemas';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
 
 const FIXTURE = 'tests/fixtures/arena-basis/seed-3943001.json';
+const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
 
 interface Subject {
   readonly state: EncounterState;
@@ -67,11 +68,12 @@ beforeAll(async () => {
   if (first === undefined) throw new Error('Blind resolver fixture has no monster.');
   const runtime = createEngineMcpRuntime(state, {
     dmMode: 'blind', toolProfile: 'blind', requestedActorIds: [first.profile.id],
+    offerEnvironment: OFFER_ENVIRONMENT,
   });
   const capsule = runtime.feed.current();
-  const projection = projectEngineBlindTurn(state, capsule, canonicalEngineQueryPort);
+  const projection = projectEngineBlindTurn(state, capsule, OFFER_ENVIRONMENT.queries);
   const display = projection.displays.find((entry) => entry.id === first.profile.id);
-  const current = canonicalEngineQueryPort.tokenPosition(state, first.profile.id);
+  const current = OFFER_ENVIRONMENT.queries.tokenPosition(state, first.profile.id);
   if (display === undefined || current === null) throw new Error('Blind resolver actor is not displayed.');
   subject = {
     state,
@@ -153,7 +155,6 @@ function dependencies(
 ): BlindResolverDependencies {
   const byId = new Map(catalog.map((entry) => [entry.option.optionId, entry] as const));
   return {
-    queries: canonicalEngineQueryPort,
     availableOptions: () => catalog.map((entry) => entry.option),
     resolveOption: (_state, option) => {
       const entry = byId.get(option.optionId);
@@ -203,6 +204,7 @@ function resolve(
     attempt: 1,
     repairArm: input.repairArm ?? 'code_only',
     dependencies: input.resolverDependencies ?? dependencies(catalog),
+    offerEnvironment: OFFER_ENVIRONMENT,
   });
 }
 
@@ -262,27 +264,32 @@ describe('D569 deterministic blind intent resolver', () => {
       state: subject.state, capsule: subject.capsule, blindProjection: subject.projection,
       envelope: { intent_version: BLIND_INTENT_VERSION, intents: [{ action: { kind: 'dodge' } }] },
       attempt: 1, repairArm: 'code_only',
+      offerEnvironment: OFFER_ENVIRONMENT,
     }));
     observe(resolveBlindRoundIntents({
       state: subject.state, capsule: subject.capsule, blindProjection: subject.projection,
       envelope: { intent_version: 'invalid', intents: [baseIntent()] },
       attempt: 1, repairArm: 'code_only',
+      offerEnvironment: OFFER_ENVIRONMENT,
     }));
 
     const twoRuntime = createEngineMcpRuntime(subject.state, {
       dmMode: 'blind', toolProfile: 'blind', requestedActorCount: 2,
+      offerEnvironment: OFFER_ENVIRONMENT,
     });
     const twoCapsule = twoRuntime.feed.current();
     observe(resolveBlindRoundIntents({
       state: subject.state,
       capsule: twoCapsule,
-      blindProjection: projectEngineBlindTurn(subject.state, twoCapsule, canonicalEngineQueryPort),
+      blindProjection: projectEngineBlindTurn(subject.state, twoCapsule, OFFER_ENVIRONMENT.queries),
       envelope: envelope(baseIntent()), attempt: 1, repairArm: 'code_only',
+      offerEnvironment: OFFER_ENVIRONMENT,
     }));
     observe(resolveBlindRoundIntents({
       state: subject.state, capsule: subject.capsule, blindProjection: subject.projection,
       envelope: { intent_version: BLIND_INTENT_VERSION, intents: [baseIntent(), baseIntent()] },
       attempt: 1, repairArm: 'code_only',
+      offerEnvironment: OFFER_ENVIRONMENT,
     }));
     observe(resolve({ ...baseIntent(), actor: { name: 'Unknown', badge: 999 } }, []));
     observe(resolve(baseIntent(), [], {
@@ -619,7 +626,7 @@ describe('D569 deterministic blind intent resolver', () => {
   });
 
   it('refuses unavailable blind execution atomically instead of applying the engine Dodge fallback', () => {
-    const real = availableEngineActorOptions(subject.state, subject.actorId)
+    const real = availableEngineActorOptions(subject.state, subject.actorId, OFFER_ENVIRONMENT)
       .find((entry) => entry.actionSlots.length === 1 &&
         entry.actionSlots[0]?.slot === 'main' && entry.actionSlots[0].use.kind === 'dodge');
     if (real === undefined) throw new Error('Fixture engine Dodge option missing.');
@@ -644,6 +651,7 @@ describe('D569 deterministic blind intent resolver', () => {
       subject.state,
       mulberry32(123),
       { kind: 'unattended', askDefault: 'decline' },
+      OFFER_ENVIRONMENT,
     );
     const before = session.currentState();
     expect(() => session.applyResolvedMechanics([{

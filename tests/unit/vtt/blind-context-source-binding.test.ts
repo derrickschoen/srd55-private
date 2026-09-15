@@ -24,10 +24,11 @@ import {
   BLIND_STATBLOCK_ESSENTIALS_FORMAT, blindTurnContextSchema, type BlindTurnContext,
 } from '../../../src/vtt/blind-turn-context';
 import {
-  createEngineStateCapsule, engineStateHandle, projectEngineEncounterState,
+  createEngineStateCapsuleForEnvironment, engineStateHandle, projectEngineEncounterState,
   type EngineCapsuleRequest, type EngineStateCapsule,
 } from '../../../src/vtt/engine-state-capsule';
-import { canonicalEngineQueryPort, engineActionRegistry } from '../../../src/vtt/engine-query-port';
+import { engineActionRegistryForEnvironment } from '../../../src/vtt/engine-query-port';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
 import { projectFutureMonsterTurns } from '../../../src/vtt/monster-planning-state';
 import { loadArenaFixture, type EngineMcpLauncherManifest } from '../../../src/vtt/mcp/entrypoint';
 import { projectEngineSemanticBoard, semanticBoardPayload } from '../../../src/vtt/semantic-board-payload';
@@ -219,11 +220,18 @@ function capsuleFor(sourceState: EncounterState, planningState: EncounterState, 
     requestId: manifest.requestId, phase: manifest.phase, correctionNumber: manifest.correctionNumber,
     actors: requiredMonsterIds(sourceState),
   };
-  return createEngineStateCapsule({
+  const offerEnvironment = buildOfferEnvironment({ kind: 'binding', binding: manifest.offerEnvironment });
+  return createEngineStateCapsuleForEnvironment({
     runId: manifest.runId, branchId: manifest.branchId, revision: manifest.revision,
     generatedAt: '2026-08-27T12:00:00.000Z', request,
-    projection: projectEngineEncounterState(planningState, engineActionRegistry(planningState, manifest.revision), manifest.initiativeProjection, manifest.room),
+    projection: projectEngineEncounterState(
+      planningState,
+      engineActionRegistryForEnvironment(planningState, offerEnvironment, manifest.revision),
+      manifest.initiativeProjection,
+      manifest.room,
+    ),
     historyDelta: [{ revision: manifest.revision, kind: manifest.historyKind, branchStatus: 'active', encounterRound: planningState.round }],
+    offerEnvironment: offerEnvironment.binding,
   });
 }
 async function captureDeliveredBlindContexts(input: { readonly sourceState: EncounterState; readonly blindFacts: boolean; readonly sourceLabel: string }): Promise<RecordedBlindContextCase> {
@@ -429,6 +437,7 @@ function expectedContext(evidence: RecordedBlindContextCase): Readonly<Record<st
   const displayById = new Map(displays.map((entry) => [entry.id, entry] as const));
   const delayedById = new Map(manifest.initiativeProjection?.timeline.initiative.map((entry) => [entry.combatant, entry.delayedThisRound] as const) ?? []);
   const semanticProjection = manifest.blindFacts === true ? projectEngineSemanticBoard(evidence.planningState, capsule.revision) : null;
+  const offerEnvironment = buildOfferEnvironment({ kind: 'binding', binding: manifest.offerEnvironment });
   const semantic = semanticProjection === null ? undefined : (() => {
     const payload = semanticBoardPayload(semanticProjection);
     const { reach_range_summaries: _reachRangeSummaries, ...retained } = payload;
@@ -445,7 +454,12 @@ function expectedContext(evidence: RecordedBlindContextCase): Readonly<Record<st
     if (display === undefined || projected === undefined) throw new Error(`Movement actor ${String(actorId)} is unbound.`);
     const cells = Array.from({ length: evidence.planningState.bounds.rows }, (_row, row) =>
       Array.from({ length: evidence.planningState.bounds.columns }, (_column, column) => ({ column, row }))).flat().flatMap((destination) => {
-      const result = canonicalEngineQueryPort.path(evidence.planningState, { actorId, destination, movement: 'normal', maximumFeet: projected.movementRemainingFeet });
+      const result = offerEnvironment.queries.path(evidence.planningState, {
+        actorId,
+        destination,
+        movement: 'normal',
+        maximumFeet: projected.movementRemainingFeet,
+      });
       return result.legal ? [{ label: `${String(destination.column)},${String(destination.row)}`, cost_feet: result.costFeet }] : [];
     });
     return { name: display.name, badge: display.badge, movement_budget_feet: projected.movementRemainingFeet, cells };
