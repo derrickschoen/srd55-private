@@ -3,10 +3,12 @@ import { mulberry32 } from '../src/combat/random';
 import { canonicalJson } from '../src/commands/canonical-json';
 import { EngineRoundSession } from '../src/vtt/engine-round-session';
 import { createEngineMcpRuntime, loadArenaFixture } from '../src/vtt/mcp/entrypoint';
+import { buildOfferEnvironment } from '../src/vtt/offers/build-offer-environment';
 import { applyRoomInitiativeProfile } from '../src/vtt/room-generator';
 
 const CAPS_KIB = [16, 24, 32, 48, 64] as const;
 const SEEDS = Array.from({ length: 10 }, (_unused, index) => 5_117_001 + index);
+const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
 
 interface SweepRenderEvidence {
   readonly preTrimBytes: number;
@@ -100,6 +102,7 @@ async function render(seed: number, maximumBytes: number): Promise<RenderedSweep
     applyRoomInitiativeProfile(loaded, 'derived_v1'),
     mulberry32(seed),
     { kind: 'unattended', askDefault: 'decline' },
+    OFFER_ENVIRONMENT,
   );
   const prepared = session.beginRoundWithoutSkipping({
     runId: encounterSessionId(`encounter:cap-sweep-${String(seed)}`),
@@ -129,6 +132,7 @@ async function render(seed: number, maximumBytes: number): Promise<RenderedSweep
     initiativeProjection: prepared.snapshot.capsule.projection.initiative,
     turnContextMaximumBytes: maximumBytes,
     onTurnContextRendered: (rendered) => { evidence = rendered; },
+    offerEnvironment: OFFER_ENVIRONMENT,
   });
   const capsule = runtime.feed.current();
   const context = record(runtime.toolSurface.execute('engine.get_turn_context', {

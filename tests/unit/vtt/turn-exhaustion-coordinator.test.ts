@@ -15,11 +15,12 @@ import {
 import type { RoundTurnProposalEnvelope } from '../../../src/vtt/engine-envelopes';
 import { engineActionId, engineOptionId } from '../../../src/vtt/turn-proposal';
 import {
-  createEngineStateCapsule,
+  createEngineStateCapsuleForEnvironment,
   projectEngineDmProjection,
 } from '../../../src/vtt/engine-state-capsule';
-import { engineActionRegistry } from '../../../src/vtt/engine-query-port';
+import { engineActionRegistryForEnvironment } from '../../../src/vtt/engine-query-port';
 import { projectDmBoard } from '../../../src/vtt/encounter-projections';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
 import { referenceEncounterSetup } from '../../../src/vtt/reference-encounter';
 import {
   EncounterSessionJournal,
@@ -44,6 +45,8 @@ const INITIAL_COORDINATOR_STATE = {
   continuation: { kind: 'idle' as const },
   pause: null,
 };
+
+const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
 
 function fixture() {
   const state = createEncounter(referenceEncounterSetup());
@@ -72,8 +75,9 @@ function fixture() {
     coordinator: INITIAL_COORDINATOR_STATE,
     controllers: [],
     history: journal.history(),
+    offerEnvironment: OFFER_ENVIRONMENT,
   });
-  const capsule = createEngineStateCapsule({
+  const capsule = createEngineStateCapsuleForEnvironment({
     runId: sessionId,
     branchId,
     revision: 3,
@@ -84,7 +88,13 @@ function fixture() {
       correctionNumber: MAX_PROPOSAL_CORRECTIONS,
       actors: [actor],
     },
-    projection: projectEngineDmProjection(projection, engineActionRegistry(state), state.observationHistory, 1),
+    projection: projectEngineDmProjection(
+      projection,
+      engineActionRegistryForEnvironment(state, OFFER_ENVIRONMENT),
+      state.observationHistory,
+      1,
+    ),
+    offerEnvironment: OFFER_ENVIRONMENT.binding,
   });
   return { actor, branchId, capsule, journal, sessionId, state, store };
 }

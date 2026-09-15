@@ -5,7 +5,7 @@ import { encounterSessionId } from '../src/combat/values';
 import { freshMonsterPlanningState, createEngineMcpRuntime, loadArenaFixture } from '../src/vtt/mcp/entrypoint';
 import { TURN_CONTEXT_MAX_BYTES, type TurnContextDeltaBase } from '../src/vtt/mcp/engine-server';
 import { exactDmIntelMatrix, isInformativeDmIntelRow } from '../src/vtt/dm-tactical-intel';
-import { canonicalEngineQueryPort } from '../src/vtt/engine-query-port';
+import { buildOfferEnvironment } from '../src/vtt/offers/build-offer-environment';
 import {
   DEFAULT_RENDERER_PROFILE,
   PLANNED_COMBINED_RENDERER_PROFILES,
@@ -18,6 +18,7 @@ import {
 
 const BRUTAL_SEEDS = [6203001, 6203002, 6203003, 6203004, 6203005, 6203006, 6203007, 6203008, 6203009, 6203010] as const;
 const UNBOUNDED_BYTES = 10 * 1024 * 1024;
+const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
 
 interface NamedProfile {
   readonly name: string;
@@ -134,6 +135,7 @@ async function render(
   if (selected.deltaRequest && selected.profile.delta !== 'off') {
     const baseRuntime = createEngineMcpRuntime(state, {
       runId, revision: 1, rendererProfile: selected.profile, turnContextMaximumBytes: maximumBytes,
+      offerEnvironment: OFFER_ENVIRONMENT,
     });
     const baseCapsule = baseRuntime.feed.current();
     const baseContext = baseRuntime.toolSurface.execute('engine.get_turn_context', {
@@ -152,6 +154,7 @@ async function render(
     turnContextMaximumBytes: maximumBytes,
     ...(base === undefined ? {} : { turnContextDeltaBase: base }),
     onTurnContextRendered: (value) => { evidence = value; },
+    offerEnvironment: OFFER_ENVIRONMENT,
   });
   const capsule = runtime.feed.current();
   const result = runtime.toolSurface.execute('engine.get_turn_context', {
@@ -228,8 +231,8 @@ async function nullRowAudit() {
     const state = freshMonsterPlanningState(await loadArenaFixture(
       `tests/fixtures/arena-basis-brutal/seed-${String(seed)}.json`,
     ));
-    const capsule = createEngineMcpRuntime(state).feed.current();
-    const rows = exactDmIntelMatrix(state, capsule, canonicalEngineQueryPort);
+    const capsule = createEngineMcpRuntime(state, { offerEnvironment: OFFER_ENVIRONMENT }).feed.current();
+    const rows = exactDmIntelMatrix(state, capsule, OFFER_ENVIRONMENT.queries);
     const omitted = rows.filter((row) => !isInformativeDmIntelRow(row));
     return {
       seed,

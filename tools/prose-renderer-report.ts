@@ -1,11 +1,13 @@
 import { encounterSessionId } from '../src/combat/values';
 import { freshMonsterPlanningState, createEngineMcpRuntime, loadArenaFixture } from '../src/vtt/mcp/entrypoint';
 import { TURN_CONTEXT_MAX_BYTES } from '../src/vtt/mcp/engine-server';
+import { buildOfferEnvironment } from '../src/vtt/offers/build-offer-environment';
 import { DEFAULT_RENDERER_PROFILE, type RendererFormat } from '../src/vtt/renderer-profile';
 
 const SEEDS = [6203001, 6203002, 6203003, 6203004, 6203005, 6203006, 6203007, 6203008, 6203009, 6203010] as const;
 const FORMATS = ['structured', 'caveman_prose', 'regular_prose'] as const satisfies readonly RendererFormat[];
 const encoder = new TextEncoder();
+const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
 
 function object(value: unknown): Readonly<Record<string, unknown>> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -21,6 +23,7 @@ async function render(seed: number, format: RendererFormat): Promise<Readonly<Re
     revision: 1,
     rendererProfile: { ...DEFAULT_RENDERER_PROFILE, format },
     turnContextMaximumBytes: TURN_CONTEXT_MAX_BYTES,
+    offerEnvironment: OFFER_ENVIRONMENT,
   });
   const capsule = runtime.feed.current();
   return object(runtime.toolSurface.execute('engine.get_turn_context', {
