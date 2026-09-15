@@ -16,11 +16,9 @@ import type {
   EnginePlanAdjustmentMetadata,
   EngineStateCapsule,
 } from './engine-state-capsule';
-import { canonicalEngineQueryPort, monsterActions, monsterBonusActions, type EngineQueryPort } from './engine-query-port';
-import {
-  createLegacyEngineOptionEnvironment,
-  type EngineOptionEnvironment,
-} from './offers/offer-environment';
+import { monsterActions, monsterBonusActions, type EngineQueryPort } from './engine-query-port';
+import { buildOfferEnvironment } from './offers/build-offer-environment';
+import type { EngineOptionEnvironment } from './offers/offer-environment';
 import {
   availableEngineActorOptions,
   mechanicsWithChoice,
@@ -355,7 +353,10 @@ export class EngineRoundSession {
     initialState: EncounterState,
     rng: SerializableRng,
     private readonly policy: ReactionOfferHostPolicy,
-    private readonly offerEnvironment: EngineOptionEnvironment = createLegacyEngineOptionEnvironment(canonicalEngineQueryPort),
+    private readonly offerEnvironment: EngineOptionEnvironment = buildOfferEnvironment({
+      kind: 'configuration',
+      mode: 'legacy_standard',
+    }),
   ) {
     this.#state = structuredClone(initialState);
     this.#rng = rng;

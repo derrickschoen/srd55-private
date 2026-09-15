@@ -105,11 +105,8 @@ import {
   type ReactionOfferHostPolicy,
 } from './reaction-offer-host-policy';
 import { guidedPendingReactionResolution } from './reaction-guidance';
-import { canonicalEngineQueryPort } from './engine-query-port';
-import {
-  createLegacyEngineOptionEnvironment,
-  type EngineOptionEnvironment,
-} from './offers/offer-environment';
+import { buildOfferEnvironment } from './offers/build-offer-environment';
+import type { EngineOptionEnvironment } from './offers/offer-environment';
 
 const INITIAL_COORDINATOR_STATE: PersistedCoordinatorState = {
   requestSequence: 1,
@@ -405,8 +402,10 @@ export class DmEncounterHost {
     this.#composeRoom = options.composeRoom ?? composeStoredCharacterEncounter;
     this.#reactionOfferPolicy = options.reactionOfferPolicy ?? DM_ATTENDED_REACTION_OFFER_POLICY;
     this.#onReducerInvocation = options.onReducerInvocation ?? (() => undefined);
-    this.#offerEnvironment = options.offerEnvironment ??
-      createLegacyEngineOptionEnvironment(canonicalEngineQueryPort);
+    this.#offerEnvironment = options.offerEnvironment ?? buildOfferEnvironment({
+      kind: 'configuration',
+      mode: 'legacy_standard',
+    });
     if (options.bridge !== undefined) {
       this.#mirror.connect(options.bridge);
       this.#roundPlanSession = new DmRoundPlanSession(
@@ -573,7 +572,11 @@ export class DmEncounterHost {
       actionRefusal: this.#actionRefusal,
       adjudicationPrompts: this.#adjudicationPrompts,
       engineAdjudications: this.#engineAdjudications,
+      offerEnvironment: this.#offerEnvironment,
     });
+    if (projectedDm.offerEnvironmentDigest !== this.#offerEnvironment.digest) {
+      throw new TypeError('DM board projection offer environment digest does not match the host environment.');
+    }
     const { history: _authorityHistory, ...dmWithoutHistory } = projectedDm;
     const dm = Object.freeze({
       ...detachedImmutable(dmWithoutHistory),

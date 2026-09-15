@@ -6,13 +6,15 @@ import type {
   EngineOptionCandidate,
 } from './option-modeling';
 import { renderNoModeledEffectReason, renderOmittedRider } from './renderer-profile';
-import { canonicalEngineQueryPort } from './engine-query-port';
 import { engineActorOptionsForEnvironment } from './intent-resolver';
 import { projectFutureMonsterTurns } from './monster-planning-state';
-import {
-  createLegacyEngineOptionEnvironment,
-  type EngineOptionEnvironment,
-} from './offers/offer-environment';
+import { buildOfferEnvironment } from './offers/build-offer-environment';
+import type { EngineOptionEnvironment } from './offers/offer-environment';
+
+const transitionalLegacyOfferEnvironment = buildOfferEnvironment({
+  kind: 'configuration',
+  mode: 'legacy_standard',
+});
 
 export type HumanEngineOptionPresentation =
   | {
@@ -56,7 +58,7 @@ export function projectHumanEngineOptions(
   actorIds: readonly CombatantId[] = state.combatants.flatMap((combatant) =>
     combatant.profile.kind === 'monster' && combatant.life !== 'dead' ? [combatant.profile.id] : []),
   revision = state.revision,
-  offerEnvironment: EngineOptionEnvironment = createLegacyEngineOptionEnvironment(canonicalEngineQueryPort),
+  offerEnvironment: EngineOptionEnvironment = transitionalLegacyOfferEnvironment,
 ): readonly HumanEngineActorOptions[] {
   const requested = new Set(actorIds);
   const optionState = projectFutureMonsterTurns(state, [...requested]);

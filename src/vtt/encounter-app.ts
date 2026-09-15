@@ -30,6 +30,7 @@ import {
   ControllerAssignmentError,
   DmEncounterHost,
 } from './dm-encounter-host';
+import { buildOfferEnvironment } from './offers/build-offer-environment';
 import {
   RichEncounterSessionService,
   type RichSessionSnapshot,
@@ -1467,8 +1468,15 @@ class DmEncounterView {
     const playerIds = encounter?.playerIds ?? REFERENCE_PLAYER_IDS;
     const observerCombatantId = playerIds[0];
     if (observerCombatantId === undefined) throw new TypeError('Top-down player preview requires a player seat.');
+    const offerEnvironment = buildOfferEnvironment({
+      kind: 'configuration',
+      mode: 'legacy_standard',
+    });
     const host = new DmEncounterHost(sessionId, this.#store, encounter === undefined
-      ? (initialSeed === undefined ? {} : { initialSeed })
+      ? {
+          ...(initialSeed === undefined ? {} : { initialSeed }),
+          offerEnvironment,
+        }
       : {
           initialState: encounter.state,
           ...(initialSeed === undefined ? {} : { initialSeed }),
@@ -1482,6 +1490,7 @@ class DmEncounterView {
           playerIds: encounter.playerIds,
           turnLegalActions: encounter.turnLegalActions,
           reactionLegalActions: () => [],
+          offerEnvironment,
         });
     const controlled = new Set(playerIds);
     this.#session = new RichEncounterSessionService(host, [{

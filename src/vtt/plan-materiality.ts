@@ -3,7 +3,7 @@ import type { EncounterState } from '../combat/encounter';
 import type { GridCell } from '../combat/grid';
 import type { CombatantId, EngineZoneId } from '../combat/values';
 import { sha256 } from '../crypto/sha256';
-import { enginePlanningCombatantFacts, enginePlanningSemanticZones } from './engine-query-port';
+import { engineActionRegistry, engineActionRegistryForEnvironment } from './engine-query-port';
 import { resolveEngineActorOption, type EngineOfferableOption } from './intent-resolver';
 import { projectFutureMonsterTurns } from './monster-planning-state';
 import type { EngineOptionEnvironment } from './offers/offer-environment';
@@ -140,6 +140,9 @@ function canonicalTurnEvents(events: readonly PlanRelevanceTurnEvent[]): readonl
 export function createPlanRelevanceRecord(context: PlanRelevanceContext): PlanRelevanceRecord {
   const openMonsterActorIds = uniqueSorted(context.openMonsterActorIds);
   const planningState = projectFutureMonsterTurns(context.state, openMonsterActorIds);
+  const registry = context.offerEnvironment === undefined
+    ? engineActionRegistry(context.state)
+    : engineActionRegistryForEnvironment(context.state, context.offerEnvironment);
   const open = new Set(openMonsterActorIds);
   const remaining = context.remainingOptions.filter((option) => open.has(option.actorId))
     .sort((left, right) => left.actorId.localeCompare(right.actorId));
@@ -159,7 +162,7 @@ export function createPlanRelevanceRecord(context: PlanRelevanceContext): PlanRe
     const combatant = byCombatant.get(combatantId);
     if (combatant === undefined) return [];
     const position = positions.get(combatantId);
-    const planning = enginePlanningCombatantFacts(context.state, combatantId);
+    const planning = registry.planningFactsFor(combatantId);
     return [{
       combatantId, life: combatant.life, boardPresent: position !== undefined,
       position: position === undefined ? null : { ...position },
@@ -167,7 +170,7 @@ export function createPlanRelevanceRecord(context: PlanRelevanceContext): PlanRe
     }];
   });
   const zoneIds = uniqueSorted(configuredAnchors.flatMap((anchor) => anchor.kind === 'semantic_zone' ? [anchor.zoneId] : []));
-  const zoneStates = new Map(enginePlanningSemanticZones(context.state).map((zone) => [zone.id, zone.active] as const));
+  const zoneStates = new Map(registry.semanticZones().map((zone) => [zone.id, zone.active] as const));
   return {
     policy: PLAN_RELEVANCE_POLICY_VERSION,
     openMonsterActorIds,

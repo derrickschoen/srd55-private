@@ -277,7 +277,6 @@ function wastedTurnMarker(
   state: EncounterState,
   choice: ResolvedChoice,
   environment: EngineOptionEnvironment | EngineQueryPort,
-  queries: EngineQueryPort,
 ): WastedTurnMarker | null {
   const reason = intrinsicWastedReason(choice.option, choice.mechanics.movementCostFeet);
   if (reason === null) return null;
@@ -320,8 +319,8 @@ function evaluateTeamPlan(
   state: EncounterState,
   candidate: TeamPlanCandidate,
   environment: EngineOptionEnvironment | EngineQueryPort,
-  queries: EngineQueryPort,
 ): TeamPlanEvaluation {
+  const queries = 'binding' in environment ? environment.queries : environment;
   const actorIds = candidate.proposals.map((proposal) => proposal.actorId);
   if (new Set(actorIds).size !== actorIds.length) {
     return {
@@ -386,6 +385,7 @@ function evaluateTeamPlan(
     target.profile.id,
     [{ allocationId: candidate.candidateId, choices: allocationChoices }],
     state.initiative.map((entry) => entry.combatant),
+    'binding' in environment ? environment : undefined,
   ).allocations[0]);
   const allocationUnresolved = allocations.some((allocation) =>
     allocation === undefined || allocation.status === 'unresolved' || allocation.killProbability === null);
@@ -408,7 +408,7 @@ function evaluateTeamPlan(
   }
 
   const markers = choices.flatMap((choice) => {
-    const marker = wastedTurnMarker(state, choice, environment, queries);
+    const marker = wastedTurnMarker(state, choice, environment);
     return marker === null ? [] : [marker];
   });
   const lethality = allocations.reduce((sum, allocation) =>
@@ -468,9 +468,8 @@ export function scoreTeamPlans(
   candidates: readonly TeamPlanCandidate[],
   environment: EngineOptionEnvironment | EngineQueryPort,
 ): TeamPlanFrontierReport {
-  const queries = 'binding' in environment ? environment.queries : environment;
   return scoreTeamPlanEvaluations(candidates.map((candidate) =>
-    evaluateTeamPlan(state, candidate, environment, queries)));
+    evaluateTeamPlan(state, candidate, environment)));
 }
 
 function renderVector(vector: TeamPlanVector): Readonly<Record<TeamPlanMetric, unknown>> {

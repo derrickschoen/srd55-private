@@ -6,12 +6,9 @@ import {
 import type { GridCell } from '../combat/grid';
 import { feet, type CombatantId } from '../combat/values';
 import { availableEngineActorOptions, resolveEngineActorOption } from './intent-resolver';
-import { canonicalEngineQueryPort } from './engine-query-port';
 import { projectFutureMonsterTurns } from './monster-planning-state';
-import {
-  createLegacyEngineOptionEnvironment,
-  type EngineOptionEnvironment,
-} from './offers/offer-environment';
+import { buildOfferEnvironment } from './offers/build-offer-environment';
+import type { EngineOptionEnvironment } from './offers/offer-environment';
 import type { EngineMainActionUse, EngineOfferableOption, EngineOptionId } from './turn-proposal';
 
 declare const offeredOptionOrdinalBrand: unique symbol;
@@ -60,7 +57,10 @@ export class OfferedOptionEnvironmentMismatchError extends TypeError {
   }
 }
 
-const transitionalLegacyOfferEnvironment = createLegacyEngineOptionEnvironment(canonicalEngineQueryPort);
+const transitionalLegacyOfferEnvironment = buildOfferEnvironment({
+  kind: 'configuration',
+  mode: 'legacy_standard',
+});
 
 function optionOrdinal(value: number): OfferedOptionOrdinal {
   if (!Number.isSafeInteger(value) || value < 0) {

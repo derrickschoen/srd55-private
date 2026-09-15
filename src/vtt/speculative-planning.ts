@@ -21,6 +21,7 @@ import {
 } from './engine-query-port';
 import { availableEngineActorOptions, type EngineOfferableOption, type EngineTurnProposal } from './intent-resolver';
 import { projectFutureMonsterTurns } from './monster-planning-state';
+import { buildOfferEnvironment } from './offers/build-offer-environment';
 import type { EngineOptionEnvironment } from './offers/offer-environment';
 import type {
   EngineSelectorRef,
@@ -31,6 +32,11 @@ import type {
   HpThresholdPercent,
   ScenarioFactAtom,
 } from './speculative-plan-types';
+
+const transitionalLegacyOfferEnvironment = buildOfferEnvironment({
+  kind: 'configuration',
+  mode: 'legacy_standard',
+});
 
 export type GuardNoMatchReason =
   | 'FACT_FALSE'
@@ -296,7 +302,7 @@ export const hostBaselineProposalPlanner: HostBaselineProposalPlanner = Object.f
   plan(
     state: EncounterState,
     actors: readonly CombatantId[],
-    environment: EngineOptionEnvironment | EngineQueryPort = canonicalEngineQueryPort,
+    environment: EngineOptionEnvironment | EngineQueryPort = transitionalLegacyOfferEnvironment,
   ): readonly EngineTurnProposal[] {
     const queries = offerQueries(environment);
     const planningState = projectFutureMonsterTurns(state, actors);
@@ -678,7 +684,7 @@ export function buildHostScenarioMenu(
   state: EncounterState,
   actors: readonly CombatantId[],
   unactedPlayerIds: readonly CombatantId[],
-  environment: EngineOptionEnvironment | EngineQueryPort = canonicalEngineQueryPort,
+  environment: EngineOptionEnvironment | EngineQueryPort = transitionalLegacyOfferEnvironment,
 ): {
   readonly baselineProposals: readonly EngineTurnProposal[];
   readonly scenarioMenu: readonly HostSplitCandidate[];

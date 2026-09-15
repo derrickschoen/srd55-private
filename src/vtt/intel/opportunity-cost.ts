@@ -152,8 +152,8 @@ function evaluateOption(
   state: EncounterState,
   option: EngineOfferableOption,
   environment: EngineOptionEnvironment | EngineQueryPort,
-  queries: EngineQueryPort,
 ): OpportunityOptionEvaluation | null {
+  const queries = 'binding' in environment ? environment.queries : environment;
   const resolution = resolveEngineActorOption(state, option, environment);
   if (!resolution.valid) return null;
   const attacks = targetedAttacks(option);
@@ -273,11 +273,10 @@ export function actorOpportunityReport(
   environment: EngineOptionEnvironment | EngineQueryPort,
   revision = state.revision,
 ): ActorOpportunityReport {
-  const queries = 'binding' in environment ? environment.queries : environment;
   const available = availableEngineActorOptions(state, actorId, environment, revision);
   const options = available
     .flatMap((option) => {
-      const evaluated = evaluateOption(state, option, environment, queries);
+      const evaluated = evaluateOption(state, option, environment);
       return evaluated === null ? [] : [evaluated];
     });
   const offensiveOrApproach = options.filter((option) =>
