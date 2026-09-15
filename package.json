@@ -14,7 +14,7 @@
     "check:command-outcomes": "scripts/check-command-outcomes.sh",
     "typecheck:fast": "tsgo -p tsconfig.app.json --noEmit && tsgo -p tsconfig.node.json --noEmit",
     "test": "vitest run --configLoader runner",
-    "test:gate": "scripts/check-command-outcomes.sh && node tools/gate-vitest.mjs",
+    "test:gate": "node scripts/check-command-outcomes.mjs && node tools/gate-vitest.mjs",
     "test:gate:browser": "node tools/gate-playwright.mjs",
     "test:affected": "node scripts/test-affected.mjs",
     "heldout:guard": "node --experimental-strip-types tools/heldout-leak-check.ts",
