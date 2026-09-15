@@ -30,8 +30,22 @@ import { BUNDLED_MONSTER_ROSTER } from '../../../src/combat/statblocks/roster';
 import { blindStatblockFacts } from '../../../src/vtt/blind-turn-context';
 import { createOptionPathFixtureEncounter } from '../../fixtures/vtt-option-path-encounter';
 import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
+import { createEngineOfferFamilyPolicy } from '../../../src/vtt/offers/offer-environment';
+import { createUnrepresentedPartyThreatCatalog } from '../../../src/vtt/offers/party-threat-catalog';
 
 const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
+const POLICY_OFFER_ENVIRONMENT = buildOfferEnvironment({
+  kind: 'configuration',
+  mode: 'revision_bound',
+  familyPolicy: createEngineOfferFamilyPolicy({
+    format: 'engine-offer-family-policy-v1',
+    helpAttack: 'enabled',
+    readyAttack: 'disabled',
+    unarmedControl: 'disabled',
+    reposition: 'disabled',
+  }),
+  partyThreatCatalog: createUnrepresentedPartyThreatCatalog(),
+});
 
 function record(value: unknown): Readonly<Record<string, unknown>> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -152,6 +166,44 @@ describe('engine MCP stdio protocol', () => {
     expect(renderBlindEnginePrompt('plan_blind_round', after.feed.current(), rules))
       .toBe(renderBlindEnginePrompt('plan_blind_round', before.feed.current(), rules));
   });
+
+  it('completes real blind proposal composition under the application policy environment', async () => {
+    const state = await loadArenaFixture('tests/fixtures/arena-basis/seed-3943001.json');
+    const actorId = state.combatants.find((entry) =>
+      entry.profile.kind === 'monster' && entry.life === 'living')?.profile.id;
+    if (actorId === undefined) throw new Error('Policy forwarding fixture has no monster.');
+    const runtime = createEngineMcpRuntime(state, {
+      dmMode: 'blind',
+      toolProfile: 'blind',
+      requestedActorIds: [actorId],
+      offerEnvironment: POLICY_OFFER_ENVIRONMENT,
+    });
+    const capsule = runtime.feed.current();
+    const context = record(runtime.toolSurface.execute('engine.get_turn_context', {
+      run_id: capsule.runId,
+      expected_revision: capsule.revision,
+      scope: 'round',
+    }));
+    const request = record(context['request']);
+    const actors = Array.isArray(request['required_actors'])
+      ? request['required_actors'].map(record)
+      : [];
+    if (actors.length !== 1) throw new Error('Policy forwarding fixture has the wrong actor count.');
+    const result = runtime.toolSurface.execute('engine.submit_blind_round_intents', {
+      intent_version: 'blind-round-intent-v1',
+      intents: actors.map((actor) => ({
+        actor: { name: actor['name'], badge: actor['badge'] },
+        action: { kind: 'end' },
+        reason: 'Hold the line.',
+      })),
+    });
+
+    expect(result).toEqual({ status: 'accepted', attempt: 1 });
+    expect(runtime.blindIntentSubmissions).toHaveLength(1);
+    expect(runtime.blindIntentSubmissions[0]?.resolution.status).toBe('accepted');
+    expect(runtime.proposals).toHaveLength(1);
+  });
+
   it('exposes only the closed blind profile and records every simulated MCP ingress channel', async () => {
     const state = await loadArenaFixture('tests/fixtures/arena-basis/seed-3943001.json');
     const bundle = await loadD569AiDmKnowledgeBase(process.cwd(), 'blind');

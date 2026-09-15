@@ -5,8 +5,10 @@ import {
   type EncounterState,
 } from '../../../src/combat/encounter';
 import { monsterCombatantProfile, type CombatantProfile } from '../../../src/combat/combatant';
-import { damageType, dieSides } from '../../../src/combat/values';
-import { UNICORN } from '../../../src/combat/statblocks/monsters';
+import { damageType, dieSides, encounterSessionId } from '../../../src/combat/values';
+import { GOBLIN_WARRIOR, UNICORN } from '../../../src/combat/statblocks/monsters';
+import { validateArenaPlan } from '../../../src/vtt/arena-legality';
+import type { RoundPlan } from '../../../src/vtt/dm-bridge/round-plan-contract';
 import {
   LEGENDARY_WINDOWS_POLICY,
   provideLegendaryWindows,
@@ -215,6 +217,11 @@ describe('M4 legendary-windows-v2', () => {
     const canonicalNearest = playerProfile('shared-distance-canonical', { initiativeBonus: 20 });
     const controlledNearest = playerProfile('shared-distance-controlled', { initiativeBonus: 10 });
     const unicorn = unicornProfile('shared-distance-unicorn');
+    const arenaMonster = monsterCombatantProfile(GOBLIN_WARRIOR, {
+      combatantId: 'combatant:shared-distance-arena-goblin',
+      tokenId: 'token:shared-distance-arena-goblin',
+    });
+    const arenaPlayer = playerProfile('shared-distance-arena-player');
     const created = createEncounter({
       bounds: { columns: 12, rows: 4 },
       combatants: [canonicalNearest, controlledNearest, unicorn],
@@ -226,12 +233,18 @@ describe('M4 legendary-windows-v2', () => {
     });
     const started = reduceEncounter(created, { type: 'roll_initiative' }, face(10)).state;
     const pending = reduceEncounter(started, { type: 'end_turn', actor: canonicalNearest.id }, face(10)).state;
+    const arenaState = createEncounter({
+      bounds: { columns: 4, rows: 1 },
+      combatants: [arenaMonster, arenaPlayer],
+      tokens: [placedToken(arenaMonster, 0, 0), placedToken(arenaPlayer, 1, 0)],
+    });
     const controlledQueries: EngineQueryPort = Object.freeze({
       ...OFFER_ENVIRONMENT.queries,
       spaceDistance: (...args: Parameters<EngineQueryPort['spaceDistance']>) => {
         const [state, left, right, leftAnchor] = args;
         if (left === unicorn.id && right === canonicalNearest.id) return 30;
         if (left === unicorn.id && right === controlledNearest.id) return 5;
+        if (left === arenaMonster.id && right === arenaPlayer.id) return 30;
         return OFFER_ENVIRONMENT.queries.spaceDistance(state, left, right, leftAnchor);
       },
     });
@@ -243,6 +256,25 @@ describe('M4 legendary-windows-v2', () => {
         selector: { kind: 'combatant', combatantId: controlledNearest.id },
       },
       value: true,
+    };
+    const arenaPlan: RoundPlan = {
+      kind: 'round_plan',
+      protocolVersion: 2,
+      encounterId: encounterSessionId('encounter:shared-distance-arena'),
+      requestId: 'request:shared-distance-arena',
+      expectedRevision: arenaState.revision,
+      round: 1,
+      monsters: [{
+        monsterId: arenaMonster.id,
+        program: {
+          kind: 'action',
+          action: {
+            kind: 'attack',
+            attackId: 'scimitar',
+            target: { kind: 'combatant', combatantId: arenaPlayer.id },
+          },
+        },
+      }],
     };
 
     expect(evaluateScenarioFactWithQueries(pending, adjacency, controlledQueries)).toEqual({
@@ -256,6 +288,12 @@ describe('M4 legendary-windows-v2', () => {
     });
     expect(chargingHornTarget(full(pending, [], undefined, controlledQueries))).toBe(controlledNearest.id);
     expect(chargingHornTarget(full(pending))).toBe(canonicalNearest.id);
+    expect(OFFER_ENVIRONMENT.queries.spaceDistance(arenaState, arenaMonster.id, arenaPlayer.id)).toBe(5);
+    expect(controlledQueries.spaceDistance(arenaState, arenaMonster.id, arenaPlayer.id)).toBe(30);
+    expect(validateArenaPlan(arenaPlan, arenaState, OFFER_ENVIRONMENT.queries)).toEqual([]);
+    expect(validateArenaPlan(arenaPlan, arenaState, controlledQueries)).toEqual([
+      `${arenaMonster.id}: target is outside scimitar reach/range`,
+    ]);
   });
 
   it('exposes pending legendary-resistance save and severity facts without choosing a policy', () => {

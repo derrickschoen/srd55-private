@@ -44,12 +44,32 @@ import {
 } from '../../../src/vtt/turn-proposal';
 import { EngineRoundSession } from '../../../src/vtt/engine-round-session';
 import { mulberry32 } from '../../../src/combat/random';
-import { availableEngineActorOptions } from '../../../src/vtt/intent-resolver';
+import {
+  availableEngineActorOptions,
+  createPureTurnProposalResolver,
+} from '../../../src/vtt/intent-resolver';
 import { engineSchemaInternals } from '../../../src/vtt/mcp/schemas';
-import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
+import {
+  buildOfferEnvironment,
+  type EngineOptionEnvironment,
+} from '../../../src/vtt/offers/build-offer-environment';
+import { createEngineOfferFamilyPolicy } from '../../../src/vtt/offers/offer-environment';
+import { createUnrepresentedPartyThreatCatalog } from '../../../src/vtt/offers/party-threat-catalog';
 
 const FIXTURE = 'tests/fixtures/arena-basis/seed-3943001.json';
 const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
+const POLICY_OFFER_ENVIRONMENT = buildOfferEnvironment({
+  kind: 'configuration',
+  mode: 'revision_bound',
+  familyPolicy: createEngineOfferFamilyPolicy({
+    format: 'engine-offer-family-policy-v1',
+    helpAttack: 'enabled',
+    readyAttack: 'disabled',
+    unarmedControl: 'disabled',
+    reposition: 'disabled',
+  }),
+  partyThreatCatalog: createUnrepresentedPartyThreatCatalog(),
+});
 
 interface Subject {
   readonly state: EncounterState;
@@ -272,6 +292,57 @@ describe('D569 deterministic blind intent resolver', () => {
     expect(result.actors[0]?.resolution.mechanics.actionSlots).toContainEqual(
       expect.objectContaining({ kind: 'dodge' }),
     );
+  });
+
+  it('keeps blind option provenance on the supplied policy environment', () => {
+    const runtime = createEngineMcpRuntime(subject.state, {
+      dmMode: 'blind',
+      toolProfile: 'blind',
+      requestedActorIds: [subject.actorId],
+      offerEnvironment: POLICY_OFFER_ENVIRONMENT,
+    });
+    const capsule = runtime.feed.current();
+    const projection = projectEngineBlindTurn(
+      subject.state,
+      capsule,
+      POLICY_OFFER_ENVIRONMENT.queries,
+    );
+    const display = projection.displays.find((entry) => entry.id === subject.actorId);
+    if (display === undefined) throw new Error('Policy-bound actor is not displayed.');
+    const input = {
+      state: subject.state,
+      capsule,
+      blindProjection: projection,
+      envelope: envelope({
+        actor: { name: display.name, badge: display.badge },
+        action: { kind: 'dodge' },
+        reason: 'Hold the line.',
+      }),
+      attempt: 1,
+      repairArm: 'code_only' as const,
+      dependencies: {
+        availableOptions: (
+          state: EncounterState,
+          actorId: CombatantId,
+          _environment: EngineOptionEnvironment,
+          revision: number,
+        ) =>
+          availableEngineActorOptions(state, actorId, POLICY_OFFER_ENVIRONMENT, revision),
+        proposalResolver: createPureTurnProposalResolver(POLICY_OFFER_ENVIRONMENT),
+      },
+    };
+
+    expect(resolveBlindRoundIntents({
+      ...input,
+      offerEnvironment: POLICY_OFFER_ENVIRONMENT,
+    }).status).toBe('accepted');
+    expect(resolveBlindRoundIntents({
+      ...input,
+      offerEnvironment: OFFER_ENVIRONMENT,
+    })).toMatchObject({
+      status: 'rejected',
+      codes: ['OPTION_RESOLUTION_FAILED'],
+    });
   });
 
   it('covers every closed rejection code through a concrete resolver boundary', async () => {
