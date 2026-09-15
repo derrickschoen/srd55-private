@@ -664,6 +664,14 @@ function canonicalOriginDiagnostics(program, sourceFile, enforcePathAllowances =
     reported.add(diagnostic);
     diagnostics.push(diagnostic);
   }
+  function exportSpecifierOrigin(element) {
+    const target = checker.getExportSpecifierLocalTargetSymbol(element);
+    const targetOrigin = origins.get(target);
+    if (targetOrigin !== undefined || target === undefined || !(target.flags & ts.SymbolFlags.Alias)) {
+      return targetOrigin;
+    }
+    return origins.get(checker.getAliasedSymbol(target));
+  }
   function visit(node) {
     if (ts.isImportDeclaration(node) && resolvesToQueryPort(program, sourceFile, node.moduleSpecifier.text)) {
       const bindings = node.importClause?.namedBindings;
@@ -680,6 +688,8 @@ function canonicalOriginDiagnostics(program, sourceFile, enforcePathAllowances =
         resolvesToQueryPort(program, sourceFile, node.moduleSpecifier.text)) {
         if (node.exportClause === undefined) {
           report(node, 'whole engine-query-port re-export is forbidden');
+        } else if (ts.isNamespaceExport(node.exportClause)) {
+          report(node.exportClause, 'engine-query-port namespace re-export is forbidden');
         } else if (ts.isNamedExports(node.exportClause)) {
           for (const element of node.exportClause.elements) {
             if ((element.propertyName ?? element.name).text === 'canonicalEngineQueryPort') {
@@ -691,8 +701,7 @@ function canonicalOriginDiagnostics(program, sourceFile, enforcePathAllowances =
       if (node.moduleSpecifier === undefined && node.exportClause !== undefined &&
         ts.isNamedExports(node.exportClause)) {
         for (const element of node.exportClause.elements) {
-          const local = element.propertyName ?? element.name;
-          const origin = ts.isIdentifier(local) ? origins.get(symbolAt(checker, local)) : undefined;
+          const origin = exportSpecifierOrigin(element);
           if (origin === 'module' || origin === 'canonical') {
             report(element, 'exported binding exposes the canonical query port');
           }
@@ -1014,6 +1023,14 @@ function canonicalOriginSelfTest() {
       source: "export { canonicalEngineQueryPort as queries } from '../src/vtt/engine-query-port';\n",
       minimum: 1,
     },
+    'canonical-namespace-reexport.ts': {
+      source: "export * as queries from '../src/vtt/engine-query-port';\n",
+      minimum: 1,
+    },
+    'canonical-imported-namespace-reexport.ts': {
+      source: "import * as queries from '../src/vtt/engine-query-port';\nexport { queries };\n",
+      minimum: 1,
+    },
     'canonical-require-direct.cts': {
       source: "const queries = require('../src/vtt/engine-query-port').canonicalEngineQueryPort;\n" +
         'void queries;\n',
@@ -1076,6 +1093,8 @@ function canonicalOriginSelfTest() {
     'allowed-helper-import.ts':
       "import { compareTacticalAllocations } from '../src/vtt/engine-query-port';\n" +
       'void compareTacticalAllocations;\n',
+    'allowed-unrelated-namespace-reexport.ts':
+      "export * as offers from '../src/vtt/offers/build-offer-environment';\n",
     'environment-queries.ts':
       'declare const environment: { readonly queries: unknown };\nvoid environment.queries;\n',
     'query-port-type.ts':
@@ -1174,6 +1193,12 @@ function runSelfTest(stage) {
     `allowed-helper=${String(canonical.counts.get('allowed-helper-import.ts'))}, ` +
     `indirect-canonical=${String(canonical.counts.get('canonical-require-indirect.cts'))}, ` +
     `type-of-value=${String(canonical.counts.get('canonical-type-of-value.ts'))}`);
+  console.log('IB2-F1 probes: ' +
+    `namespace-export=${String(canonical.counts.get('canonical-namespace-reexport.ts'))}, ` +
+    'imported-namespace-export=' +
+    `${String(canonical.counts.get('canonical-imported-namespace-reexport.ts'))}, ` +
+    'unrelated-namespace-export=' +
+    String(canonical.counts.get('allowed-unrelated-namespace-reexport.ts')));
   console.log(`active CommonJS/ESM origin fixtures: ${ACTIVE_CJS_ORIGIN_FIXTURES.join(', ')}`);
   const stagedCounts = Object.entries(STAGED_REAL_SYMBOL_FIXTURES)
     .map(([name, fixtures]) => `${name}:${String(fixtures.length)}`)
