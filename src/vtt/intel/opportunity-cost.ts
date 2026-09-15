@@ -2,9 +2,8 @@ import type { EncounterState } from '../../combat/encounter';
 import type { GridCell } from '../../combat/grid';
 import type { CombatantId } from '../../combat/values';
 import type { PlanMaterialityReasonCode } from '../plan-materiality';
-import type { EngineQueryPort } from '../engine-query-port';
 import { availableEngineActorOptions, resolveEngineActorOption } from '../intent-resolver';
-import type { EngineOptionEnvironment } from '../offers/offer-environment';
+import type { EngineOptionEnvironment } from '../offers/build-offer-environment';
 import type { EngineOfferableOption, EngineOptionId, EngineOptionMetric } from '../turn-proposal';
 import {
   compareDominanceVectors,
@@ -151,9 +150,9 @@ function vector(input: {
 function evaluateOption(
   state: EncounterState,
   option: EngineOfferableOption,
-  environment: EngineOptionEnvironment | EngineQueryPort,
+  environment: EngineOptionEnvironment,
 ): OpportunityOptionEvaluation | null {
-  const queries = 'binding' in environment ? environment.queries : environment;
+  const queries = environment.queries;
   const resolution = resolveEngineActorOption(state, option, environment);
   if (!resolution.valid) return null;
   const attacks = targetedAttacks(option);
@@ -270,7 +269,7 @@ export function legacyDefaultOption(
 export function actorOpportunityReport(
   state: EncounterState,
   actorId: CombatantId,
-  environment: EngineOptionEnvironment | EngineQueryPort,
+  environment: EngineOptionEnvironment,
   revision = state.revision,
 ): ActorOpportunityReport {
   const available = availableEngineActorOptions(state, actorId, environment, revision);

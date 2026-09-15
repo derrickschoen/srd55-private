@@ -17,8 +17,10 @@ import { sha256 } from '../../crypto/sha256';
 import {
   submitEngineNarration,
   submitEngineProposal,
+  type EngineProposalEnvelope,
   type NarrationSink,
   type ProposalSink,
+  type ProposedTurnResolution,
 } from '../engine-envelopes';
 import {
   engineStateHandle,
@@ -30,9 +32,11 @@ import {
   type RuleReference,
 } from '../engine-state-capsule';
 import type { EngineQueryPort, EngineTargetSelector } from '../engine-query-port';
-import type { EngineOptionEnvironment } from '../offers/offer-environment';
+import type { EngineOptionEnvironment } from '../offers/build-offer-environment';
 import {
+  availableEngineActorOptions,
   createPureTurnProposalResolver,
+  engineActorOptionsForEnvironment,
   resolveEngineActorOption,
   type EngineMovementPreference,
   type EngineTurnProposal,
@@ -215,11 +219,13 @@ export interface EngineCapsuleFeed extends ReadonlyStateCapsuleSource {
 
 export class MutableEngineCapsuleFeed implements EngineCapsuleFeed {
   #current: EngineStateCapsule;
+  readonly #offerEnvironmentDigest: string;
   readonly #snapshots = new Map<number, EngineStateCapsule>();
   readonly #listeners = new Set<(event: { readonly capsule: EngineStateCapsule; readonly roomTransition: boolean }) => void>();
 
   constructor(capsule: EngineStateCapsule) {
     if (!verifyEngineStateCapsule(capsule)) throw new TypeError('State capsule digest is invalid.');
+    this.#offerEnvironmentDigest = capsule.offerEnvironment.digest;
     this.#current = structuredClone(capsule);
     this.#snapshots.set(capsule.revision, structuredClone(capsule));
   }
@@ -242,6 +248,9 @@ export class MutableEngineCapsuleFeed implements EngineCapsuleFeed {
   replace(capsule: EngineStateCapsule, roomTransition = false): void {
     if (!verifyEngineStateCapsule(capsule) || capsule.runId !== this.#current.runId || capsule.revision <= this.#current.revision) {
       throw new TypeError('Replacement capsule must be a valid later revision of the selected run.');
+    }
+    if (capsule.offerEnvironment.digest !== this.#offerEnvironmentDigest) {
+      throw new TypeError('Replacement capsule offer environment does not match the selected run.');
     }
     this.#current = structuredClone(capsule);
     this.#snapshots.set(capsule.revision, structuredClone(capsule));
@@ -884,6 +893,12 @@ function tacticalOptions(
   const queries = offerEnvironment.queries;
   const projected = capsule.projection.combatants.find((candidate) => candidate.id === actorId);
   if (projected === undefined) return [];
+  const registeredOptions = new Map(availableEngineActorOptions(
+    state,
+    actorId,
+    offerEnvironment,
+    capsule.revision,
+  ).map((option) => [option.optionId, option] as const));
   // The byte-cap pruner removes from the tail. Keep immediately usable,
   // information-rich offense first; movement/defense follows, with End Turn
   // last. This makes truncation deterministic without promoting an unavailable
@@ -903,7 +918,10 @@ function tacticalOptions(
       case 'end_turn': return 5;
     }
   };
-  return [...projected.options]
+  return projected.options.flatMap((projectedOption) => {
+    const option = registeredOptions.get(projectedOption.optionId);
+    return option === undefined ? [] : [option];
+  })
     .sort((left, right) => informationRank(left) - informationRank(right) || left.label.localeCompare(right.label))
     .map((option) => {
     const first = option.actionSlots[0];
@@ -1452,14 +1470,89 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
   if (dependencies.maximumResourceBytes !== undefined && dependencies.maximumResourceBytes > 128 * 1024) {
     throw new RangeError('maximumResourceBytes cannot exceed the 128 KiB hard limit.');
   }
-  const { state, stateSource: feed, proposals, speculativePlans, narration, adjudications, rules } = dependencies;
+  const {
+    state,
+    stateSource: sourceFeed,
+    proposals: proposalSink,
+    speculativePlans,
+    narration,
+    adjudications,
+    rules,
+  } = dependencies;
   const { offerEnvironment } = dependencies;
   const turnProposals = createPureTurnProposalResolver(offerEnvironment);
   const queries = offerEnvironment.queries;
-  const launchCapsule = feed.current();
+  const checkedCapsule = (capsule: EngineStateCapsule): EngineStateCapsule => {
+    if (capsule.offerEnvironment.digest !== offerEnvironment.digest) {
+      throw new TypeError('Engine MCP application offer environment changed during the selected run.');
+    }
+    return capsule;
+  };
+  const launchCapsule = sourceFeed.current();
   if (launchCapsule.offerEnvironment.digest !== offerEnvironment.digest) {
     throw new TypeError('Engine MCP application offer environment does not match its launch capsule.');
   }
+  const feed: EngineCapsuleFeed = {
+    current: () => checkedCapsule(sourceFeed.current()),
+    snapshot: (revision) => {
+      const capsule = sourceFeed.snapshot(revision);
+      return capsule === null ? null : checkedCapsule(capsule);
+    },
+    read: (reference) => checkedCapsule(sourceFeed.read(reference)),
+    listen: (listener) => sourceFeed.listen((event) => listener({
+      capsule: checkedCapsule(event.capsule),
+      roomTransition: event.roomTransition,
+    })),
+  };
+  const registeredResolution = (
+    resolution: ProposedTurnResolution,
+    revision: number,
+  ): ProposedTurnResolution => {
+    const options = engineActorOptionsForEnvironment(
+      state,
+      resolution.proposal.actorId,
+      offerEnvironment,
+      revision,
+    ).offerable;
+    const registeredOption = (option: EngineOfferableOption): EngineOfferableOption => {
+      const registered = options.find((candidate) => candidate.optionId === option.optionId);
+      if (registered === undefined) {
+        throw new TypeError(`Submitted option ${option.optionId} is absent from the bound offer environment.`);
+      }
+      return registered;
+    };
+    return {
+      ...resolution,
+      option: registeredOption(resolution.option),
+      primaryOption: registeredOption(resolution.primaryOption),
+      fallbackOption: resolution.fallbackOption === null ? null : registeredOption(resolution.fallbackOption),
+    };
+  };
+  const proposals: ProposalSink = {
+    append: (envelope: EngineProposalEnvelope) => {
+      switch (envelope.kind) {
+        case 'turn_proposal':
+          proposalSink.append({
+            ...envelope,
+            resolution: registeredResolution(envelope.resolution, envelope.expectedRevision),
+          });
+          return;
+        case 'round_turn_proposal':
+          proposalSink.append({
+            ...envelope,
+            resolutions: envelope.resolutions.map((resolution) =>
+              registeredResolution(resolution, envelope.expectedRevision)),
+          });
+          return;
+        case 'plan_adjustment_turn_proposal':
+          proposalSink.append({
+            ...envelope,
+            updates: envelope.updates.map((resolution) =>
+              registeredResolution(resolution, envelope.expectedRevision)),
+          });
+      }
+    },
+  };
   const launchRequest = launchCapsule.request;
   const launcherRoundBinding: LauncherRoundSubmissionBinding | null =
     launchRequest !== null && launchRequest.phase !== 'speculative' && launchRequest.kind !== 'plan_adjustment'

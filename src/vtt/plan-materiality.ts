@@ -3,10 +3,10 @@ import type { EncounterState } from '../combat/encounter';
 import type { GridCell } from '../combat/grid';
 import type { CombatantId, EngineZoneId } from '../combat/values';
 import { sha256 } from '../crypto/sha256';
-import { engineActionRegistry, engineActionRegistryForEnvironment } from './engine-query-port';
+import { engineActionRegistryForEnvironment } from './engine-query-port';
 import { resolveEngineActorOption, type EngineOfferableOption } from './intent-resolver';
 import { projectFutureMonsterTurns } from './monster-planning-state';
-import type { EngineOptionEnvironment } from './offers/offer-environment';
+import type { EngineOptionEnvironment } from './offers/build-offer-environment';
 import type { GuardConditionIdentity } from './speculative-plan-types';
 
 export const PLAN_RELEVANCE_POLICY_VERSION = 'plan-relevance-v2-composite' as const;
@@ -32,8 +32,7 @@ export type PlanRelevanceTurnEvent =
 
 export interface PlanRelevanceContext {
   readonly state: EncounterState;
-  /** Transitional optionality remains until every caller is migrated in Slice 3C. */
-  readonly offerEnvironment?: EngineOptionEnvironment;
+  readonly offerEnvironment: EngineOptionEnvironment;
   readonly openMonsterActorIds: readonly CombatantId[];
   readonly remainingOptions: readonly EngineOfferableOption[];
   readonly explicitEngagementAnchors?: readonly PlanRelevanceAnchor[];
@@ -101,11 +100,9 @@ function canonicalConditions(conditions: readonly GuardConditionIdentity[]): rea
 function proposalRecord(
   state: EncounterState,
   option: EngineOfferableOption,
-  offerEnvironment: EngineOptionEnvironment | undefined,
+  offerEnvironment: EngineOptionEnvironment,
 ): PlanRelevanceProposalRecord {
-  const resolution = offerEnvironment === undefined
-    ? resolveEngineActorOption(state, option)
-    : resolveEngineActorOption(state, option, offerEnvironment);
+  const resolution = resolveEngineActorOption(state, option, offerEnvironment);
   return resolution.valid
     ? {
         actorId: option.actorId,
@@ -140,9 +137,7 @@ function canonicalTurnEvents(events: readonly PlanRelevanceTurnEvent[]): readonl
 export function createPlanRelevanceRecord(context: PlanRelevanceContext): PlanRelevanceRecord {
   const openMonsterActorIds = uniqueSorted(context.openMonsterActorIds);
   const planningState = projectFutureMonsterTurns(context.state, openMonsterActorIds);
-  const registry = context.offerEnvironment === undefined
-    ? engineActionRegistry(context.state)
-    : engineActionRegistryForEnvironment(context.state, context.offerEnvironment);
+  const registry = engineActionRegistryForEnvironment(context.state, context.offerEnvironment);
   const open = new Set(openMonsterActorIds);
   const remaining = context.remainingOptions.filter((option) => open.has(option.actorId))
     .sort((left, right) => left.actorId.localeCompare(right.actorId));

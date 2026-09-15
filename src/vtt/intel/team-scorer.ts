@@ -1,8 +1,8 @@
 import type { EncounterState } from '../../combat/encounter';
 import type { CombatantId } from '../../combat/values';
-import type { EngineQueryPort, TacticalAllocationChoice } from '../engine-query-port';
+import type { TacticalAllocationChoice } from '../engine-query-port';
 import { availableEngineActorOptions, resolveEngineActorOption } from '../intent-resolver';
-import type { EngineOptionEnvironment } from '../offers/offer-environment';
+import type { EngineOptionEnvironment } from '../offers/build-offer-environment';
 import type {
   EngineOfferableOption,
   EngineOptionId,
@@ -203,7 +203,7 @@ interface ResolvedChoice {
 function resolvedChoice(
   state: EncounterState,
   proposal: EngineTurnProposal,
-  environment: EngineOptionEnvironment | EngineQueryPort,
+  environment: EngineOptionEnvironment,
 ): ResolvedChoice | TeamPlanUnresolvedReason {
   const offered = availableEngineActorOptions(
     state,
@@ -276,7 +276,7 @@ export function classifyWastedTurn(
 function wastedTurnMarker(
   state: EncounterState,
   choice: ResolvedChoice,
-  environment: EngineOptionEnvironment | EngineQueryPort,
+  environment: EngineOptionEnvironment,
 ): WastedTurnMarker | null {
   const reason = intrinsicWastedReason(choice.option, choice.mechanics.movementCostFeet);
   if (reason === null) return null;
@@ -318,9 +318,9 @@ function millionths(value: number): number {
 function evaluateTeamPlan(
   state: EncounterState,
   candidate: TeamPlanCandidate,
-  environment: EngineOptionEnvironment | EngineQueryPort,
+  environment: EngineOptionEnvironment,
 ): TeamPlanEvaluation {
-  const queries = 'binding' in environment ? environment.queries : environment;
+  const queries = environment.queries;
   const actorIds = candidate.proposals.map((proposal) => proposal.actorId);
   if (new Set(actorIds).size !== actorIds.length) {
     return {
@@ -385,7 +385,7 @@ function evaluateTeamPlan(
     target.profile.id,
     [{ allocationId: candidate.candidateId, choices: allocationChoices }],
     state.initiative.map((entry) => entry.combatant),
-    'binding' in environment ? environment : undefined,
+    environment,
   ).allocations[0]);
   const allocationUnresolved = allocations.some((allocation) =>
     allocation === undefined || allocation.status === 'unresolved' || allocation.killProbability === null);
@@ -466,7 +466,7 @@ function evaluateTeamPlan(
 export function scoreTeamPlans(
   state: EncounterState,
   candidates: readonly TeamPlanCandidate[],
-  environment: EngineOptionEnvironment | EngineQueryPort,
+  environment: EngineOptionEnvironment,
 ): TeamPlanFrontierReport {
   return scoreTeamPlanEvaluations(candidates.map((candidate) =>
     evaluateTeamPlan(state, candidate, environment)));

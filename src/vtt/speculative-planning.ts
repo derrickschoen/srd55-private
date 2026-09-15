@@ -11,7 +11,6 @@ import { persistentAreaTouchesSpace } from '../combat/persistent-areas';
 import type { CombatantId } from '../combat/values';
 import { sha256 } from '../crypto/sha256';
 import {
-  canonicalEngineQueryPort,
   engineConcentrationActive,
   enginePlanningHitPointMaximum,
   enginePlanningHitPoints,
@@ -21,8 +20,7 @@ import {
 } from './engine-query-port';
 import { availableEngineActorOptions, type EngineOfferableOption, type EngineTurnProposal } from './intent-resolver';
 import { projectFutureMonsterTurns } from './monster-planning-state';
-import { buildOfferEnvironment } from './offers/build-offer-environment';
-import type { EngineOptionEnvironment } from './offers/offer-environment';
+import type { EngineOptionEnvironment } from './offers/build-offer-environment';
 import type {
   EngineSelectorRef,
   GuardConditionIdentity,
@@ -32,11 +30,6 @@ import type {
   HpThresholdPercent,
   ScenarioFactAtom,
 } from './speculative-plan-types';
-
-const transitionalLegacyOfferEnvironment = buildOfferEnvironment({
-  kind: 'configuration',
-  mode: 'legacy_standard',
-});
 
 export type GuardNoMatchReason =
   | 'FACT_FALSE'
@@ -108,7 +101,7 @@ function sameCondition(
 export function evaluateScenarioFact(
   state: EncounterState,
   atom: ScenarioFactAtom,
-  queries: EngineQueryPort = canonicalEngineQueryPort,
+  queries: EngineQueryPort,
 ): GuardAtomEvaluation {
   switch (atom.kind) {
     case 'life_state_is': {
@@ -285,12 +278,8 @@ export interface HostBaselineProposalPlanner {
   plan(
     state: EncounterState,
     actors: readonly CombatantId[],
-    environment?: EngineOptionEnvironment | EngineQueryPort,
+    environment: EngineOptionEnvironment,
   ): readonly EngineTurnProposal[];
-}
-
-function offerQueries(environment: EngineOptionEnvironment | EngineQueryPort): EngineQueryPort {
-  return 'binding' in environment ? environment.queries : environment;
 }
 
 function optionIsOffensive(option: EngineOfferableOption): boolean {
@@ -302,9 +291,8 @@ export const hostBaselineProposalPlanner: HostBaselineProposalPlanner = Object.f
   plan(
     state: EncounterState,
     actors: readonly CombatantId[],
-    environment: EngineOptionEnvironment | EngineQueryPort = transitionalLegacyOfferEnvironment,
+    environment: EngineOptionEnvironment,
   ): readonly EngineTurnProposal[] {
-    const queries = offerQueries(environment);
     const planningState = projectFutureMonsterTurns(state, actors);
     return actors.flatMap((actorId) => {
       const options = availableEngineActorOptions(planningState, actorId, environment);
@@ -359,7 +347,7 @@ function optionSelectors(option: EngineOfferableOption): readonly EngineSelector
 export function extractProposalFactDependencies(
   state: EncounterState,
   options: readonly EngineOfferableOption[],
-  queries: EngineQueryPort = canonicalEngineQueryPort,
+  queries: EngineQueryPort,
 ): readonly ProposalFactDependency[] {
   const entries: ProposalFactDependency[] = [];
   for (const option of options) {
@@ -573,7 +561,7 @@ export function canPlayerFlipScenarioFact(
   state: EncounterState,
   playerId: CombatantId,
   flipped: ScenarioFactAtom,
-  queries: EngineQueryPort = canonicalEngineQueryPort,
+  queries: EngineQueryPort,
 ): boolean {
   if (!factCanChangeThroughMovement(flipped)) return false;
   const radius = maximumInfluenceRadiusFeet(state, playerId);
@@ -614,7 +602,7 @@ export function computeHostSplitCandidates(
   state: EncounterState,
   dependencies: readonly ProposalFactDependency[],
   unactedPlayerIds: readonly CombatantId[],
-  queries: EngineQueryPort = canonicalEngineQueryPort,
+  queries: EngineQueryPort,
 ): readonly HostSplitCandidate[] {
   const grouped = new Map<string, {
     readonly baseline: ScenarioFactAtom;
@@ -684,13 +672,13 @@ export function buildHostScenarioMenu(
   state: EncounterState,
   actors: readonly CombatantId[],
   unactedPlayerIds: readonly CombatantId[],
-  environment: EngineOptionEnvironment | EngineQueryPort = transitionalLegacyOfferEnvironment,
+  environment: EngineOptionEnvironment,
 ): {
   readonly baselineProposals: readonly EngineTurnProposal[];
   readonly scenarioMenu: readonly HostSplitCandidate[];
   readonly scenarios: readonly HostScenario[];
 } {
-  const queries = offerQueries(environment);
+  const queries = environment.queries;
   const planningState = projectFutureMonsterTurns(state, actors);
   const baselineProposals = hostBaselineProposalPlanner.plan(planningState, actors, environment);
   const baselineOptions = baselineProposals.flatMap((proposal) =>
@@ -764,7 +752,7 @@ export type HostScenarioSelection =
 export function evaluateHostScenarios(
   state: EncounterState,
   scenarios: readonly HostScenario[],
-  queries: EngineQueryPort = canonicalEngineQueryPort,
+  queries: EngineQueryPort,
 ): HostScenarioSelection {
   const evaluations = scenarios.map((scenario) => ({
     scenario,

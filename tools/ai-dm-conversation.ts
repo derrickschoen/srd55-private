@@ -1631,9 +1631,9 @@ function rebaseStoredPlanEntries(input: {
     if (!resolution.valid) return null;
     rebound.push({
       proposal,
-      option: structuredClone(resolution.option),
-      primaryOption: structuredClone(resolution.primaryOption),
-      fallbackOption: structuredClone(resolution.fallbackOption),
+      option: resolution.option,
+      primaryOption: resolution.primaryOption,
+      fallbackOption: resolution.fallbackOption,
       mechanics: resolution.mechanics,
       selectedBranch: resolution.selectedBranch,
     });
@@ -1746,9 +1746,9 @@ function adoptSpeculativeBranch(input: {
     if (!resolution.valid) return { entries: null, reason: 'proposal_validation_failed' };
     entries.push({
       proposal: rebound,
-      option: structuredClone(resolution.option),
-      primaryOption: structuredClone(resolution.primaryOption),
-      fallbackOption: structuredClone(resolution.fallbackOption),
+      option: resolution.option,
+      primaryOption: resolution.primaryOption,
+      fallbackOption: resolution.fallbackOption,
       mechanics: resolution.mechanics,
       selectedBranch: resolution.selectedBranch,
     });
@@ -4080,9 +4080,9 @@ function authorizedMechanics(
     if (!checked.valid) return null;
     return {
       proposal: structuredClone(entry.proposal),
-      option: structuredClone(checked.option),
-      primaryOption: structuredClone(checked.primaryOption),
-      fallbackOption: structuredClone(checked.fallbackOption),
+      option: checked.option,
+      primaryOption: checked.primaryOption,
+      fallbackOption: checked.fallbackOption,
       mechanics: checked.mechanics,
       acceptedProposal: externalProposal(entry.proposal),
       selectedBranch: entry.selectedBranch,
@@ -5406,9 +5406,9 @@ async function runConversationWithConfiguredIntel(
           }
           segmentMonsterPlan.set(update.proposal.actorId, {
             proposal: structuredClone(update.proposal),
-            option: structuredClone(resolution.option),
-            primaryOption: structuredClone(resolution.primaryOption),
-            fallbackOption: structuredClone(resolution.fallbackOption),
+            option: resolution.option,
+            primaryOption: resolution.primaryOption,
+            fallbackOption: resolution.fallbackOption,
             mechanics: resolution.mechanics,
             selectedBranch: resolution.selectedBranch,
           });
@@ -5969,9 +5969,9 @@ async function runConversationWithConfiguredIntel(
                   }
                   segmentMonsterPlan.set(entry.mechanics.actorId, {
                     proposal: structuredClone(resolution.proposal),
-                    option: structuredClone(entry.option),
-                    primaryOption: structuredClone(entry.primaryOption),
-                    fallbackOption: structuredClone(entry.fallbackOption),
+                    option: entry.option,
+                    primaryOption: entry.primaryOption,
+                    fallbackOption: entry.fallbackOption,
                     mechanics: entry.mechanics,
                     selectedBranch: entry.selectedBranch,
                     ...(entry.strictNoFallback === true ? { strictNoFallback: true as const } : {}),
@@ -6905,9 +6905,9 @@ async function runConversationWithConfiguredIntel(
                             )) return null;
                             const validatedEntries = checked.entries.map((entry) => ({
                               proposal: structuredClone(entry.proposal),
-                              option: structuredClone(entry.option),
-                              primaryOption: structuredClone(entry.primaryOption),
-                              fallbackOption: structuredClone(entry.fallbackOption),
+                              option: entry.option,
+                              primaryOption: entry.primaryOption,
+                              fallbackOption: entry.fallbackOption,
                               mechanics: entry.mechanics,
                               selectedBranch: entry.selectedBranch,
                             }));

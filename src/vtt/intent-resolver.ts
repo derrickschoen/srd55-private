@@ -15,7 +15,6 @@ import type { CombatantId } from '../combat/values';
 import { worldObjectClassAction, worldObjectActionWasUsed } from '../combat/world-object-actions';
 import { sha256 } from '../crypto/sha256';
 import {
-  canonicalEngineQueryPort,
   monsterActions,
   monsterBonusActions,
   type EngineQueryPort,
@@ -42,7 +41,7 @@ import {
 } from './turn-proposal';
 import type { EngineOmittedRider } from './option-modeling';
 import { legalMultiattackCombinations } from './offers/offer-declarations';
-import type { EngineOptionEnvironment } from './offers/offer-environment';
+import type { EngineOptionEnvironment } from './offers/build-offer-environment';
 
 export type {
   EngineActionId,
@@ -70,32 +69,20 @@ function refused(code: string, summary: string): OptionResolution {
   return { valid: false, code, summary };
 }
 
-export type EngineOfferApiEnvironment = EngineOptionEnvironment | EngineQueryPort;
-
-const optionEnvironmentBindings = new WeakMap<EngineOfferableOption, EngineOptionEnvironment>();
-
-function isEngineOptionEnvironment(
-  environment: EngineOfferApiEnvironment,
-): environment is EngineOptionEnvironment {
-  return 'binding' in environment;
-}
-
-export function offerApiQueries(environment: EngineOfferApiEnvironment): EngineQueryPort {
-  return isEngineOptionEnvironment(environment) ? environment.queries : environment;
-}
+const optionEnvironmentDigests = new WeakMap<EngineOfferableOption, string>();
 
 function bindOptionEnvironment(
   option: EngineOfferableOption,
-  environment: EngineOfferApiEnvironment,
+  environment: EngineOptionEnvironment,
 ): EngineOfferableOption {
-  if (isEngineOptionEnvironment(environment)) optionEnvironmentBindings.set(option, environment);
+  optionEnvironmentDigests.set(option, environment.digest);
   return option;
 }
 
 export function engineActorOptionsForEnvironment(
   state: EncounterState,
   actorId: CombatantId,
-  environment: EngineOfferApiEnvironment,
+  environment: EngineOptionEnvironment,
   revision = state.revision,
 ): EngineActorOptionPartition {
   const partition = engineActorOptions(state, actorId, revision);
@@ -545,17 +532,16 @@ function resolvedUses(
 export function resolveEngineActorOption(
   state: EncounterState,
   option: EngineOfferableOption,
-  environment: EngineOfferApiEnvironment = canonicalEngineQueryPort,
+  environment: EngineOptionEnvironment,
 ): OptionResolution {
-  const boundEnvironment = optionEnvironmentBindings.get(option);
-  if (boundEnvironment !== undefined &&
-    (!isEngineOptionEnvironment(environment) || boundEnvironment !== environment)) {
+  const boundDigest = optionEnvironmentDigests.get(option);
+  if (boundDigest === undefined || boundDigest !== environment.digest) {
     return refused(
       'OFFER_ENVIRONMENT_MISMATCH',
       `${option.actorId}: option was not created by the bound offer environment`,
     );
   }
-  const queries = offerApiQueries(environment);
+  const queries = environment.queries;
   const actor = queries.combatant(state, option.actorId);
   if (actor?.profile.kind !== 'monster' || actor.life !== 'living') {
     return refused('ACTOR_NOT_LIVING_MONSTER', `${option.actorId}: actor is not a living monster`);
@@ -649,7 +635,7 @@ export function mechanicsWithChoice(
 export function availableEngineActorOptions(
   state: EncounterState,
   actorId: CombatantId,
-  environment: EngineOfferApiEnvironment = canonicalEngineQueryPort,
+  environment: EngineOptionEnvironment,
   revision = state.revision,
 ): readonly EngineOfferableOption[] {
   return engineActorOptionsForEnvironment(state, actorId, environment, revision).offerable
@@ -679,7 +665,7 @@ function accepted(
 }
 
 export function createPureTurnProposalResolver(
-  environment: EngineOfferApiEnvironment = canonicalEngineQueryPort,
+  environment: EngineOptionEnvironment,
 ): PureTurnProposalResolver {
   return Object.freeze({
     resolve(state: EncounterState, proposal: EngineTurnProposal): EngineProposalResolution {
@@ -725,5 +711,3 @@ export function createPureTurnProposalResolver(
     },
   });
 }
-
-export const pureTurnProposalResolver = createPureTurnProposalResolver();
