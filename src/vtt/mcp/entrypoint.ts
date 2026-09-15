@@ -29,10 +29,12 @@ import {
 import { engineActionRegistryForEnvironment } from '../engine-query-port';
 import {
   decodeEngineOptionEnvironmentBinding,
-  type EngineOptionEnvironment,
   type EngineOptionEnvironmentBinding,
 } from '../offers/offer-environment';
-import { buildOfferEnvironment } from '../offers/build-offer-environment';
+import {
+  buildOfferEnvironment,
+  type EngineOptionEnvironment,
+} from '../offers/build-offer-environment';
 import { freshMonsterPlanningState, projectFutureMonsterTurns } from '../monster-planning-state';
 import {
   rendererProfileSchema,
@@ -331,8 +333,7 @@ export interface EngineMcpLauncherManifest {
   readonly requestId: string;
   readonly phase: 'initial' | 'correction' | 'speculative';
   readonly correctionNumber: 0 | 1;
-  /** Required by the strict launcher decoder; optional only on the transitional construction type. */
-  readonly offerEnvironment?: EngineOptionEnvironmentBinding;
+  readonly offerEnvironment: EngineOptionEnvironmentBinding;
   readonly overridePolicy?: OverridePolicy;
   readonly room: number;
   readonly historyKind: string;
@@ -431,9 +432,8 @@ export function createEngineMcpRuntime(
     readonly onUiFeedback?: (feedback: EngineUiFeedback) => void;
     readonly roundDecisionAlreadyAccepted?: boolean;
     readonly uiFeedbackAlreadySubmitted?: boolean;
-    /** Transitional Slice-2 surface; every runtime immediately materializes an explicit binding. */
-    readonly offerEnvironment?: EngineOptionEnvironment;
-  } = {},
+    readonly offerEnvironment: EngineOptionEnvironment;
+  },
 ): EngineMcpRuntime {
   if (options.boardImageContent !== undefined && options.boardImageContents !== undefined) {
     throw new TypeError('Use either boardImageContent or boardImageContents, not both.');
@@ -448,10 +448,7 @@ export function createEngineMcpRuntime(
     options.turnContextMaximumBytes !== BLIND_TURN_CONTEXT_MAX_BYTES) {
     throw new RangeError(`Blind context base cap must be ${String(BLIND_TURN_CONTEXT_MAX_BYTES)} bytes.`);
   }
-  const offerEnvironment = options.offerEnvironment ?? buildOfferEnvironment({
-    kind: 'configuration',
-    mode: 'legacy_standard',
-  });
+  const offerEnvironment = options.offerEnvironment;
   const candidates = state.combatants
     .filter((candidate) => candidate.profile.kind === 'monster' && candidate.life !== 'dead')
     .map((candidate) => candidate.profile.id)
@@ -651,34 +648,24 @@ export function createEngineMcpRuntime(
   };
 }
 
-export function createEngineMcpHandler(state: EncounterState, maximumToolResultBytes?: number): McpHandler;
 export function createEngineMcpHandler(
   state: EncounterState,
   offerEnvironment: EngineOptionEnvironment,
   maximumToolResultBytes?: number,
-): McpHandler;
-export function createEngineMcpHandler(
-  state: EncounterState,
-  environmentOrMaximum?: EngineOptionEnvironment | number,
-  maximumToolResultBytes?: number,
 ): McpHandler {
-  const options = typeof environmentOrMaximum === 'number'
-    ? { maximumToolResultBytes: environmentOrMaximum }
-    : {
-        ...(environmentOrMaximum === undefined ? {} : { offerEnvironment: environmentOrMaximum }),
-        ...(maximumToolResultBytes === undefined ? {} : { maximumToolResultBytes }),
-      };
+  const options = {
+    offerEnvironment,
+    ...(maximumToolResultBytes === undefined ? {} : { maximumToolResultBytes }),
+  };
   return createEngineMcpRuntime(state, options).handler;
 }
 
 export function handleMcpRequest(
   state: EncounterState,
   message: unknown,
-  offerEnvironment?: EngineOptionEnvironment,
+  offerEnvironment: EngineOptionEnvironment,
 ): JsonRpcResponse | null {
-  const handler = offerEnvironment === undefined
-    ? createEngineMcpHandler(state)
-    : createEngineMcpHandler(state, offerEnvironment);
+  const handler = createEngineMcpHandler(state, offerEnvironment);
   return handler.handle(message);
 }
 
@@ -698,7 +685,7 @@ export { freshMonsterPlanningState, projectFutureMonsterTurns } from '../monster
 
 export async function runEngineMcpServer(
   fixturePath: string,
-  options: Parameters<typeof createEngineMcpRuntime>[1] = {},
+  options: Parameters<typeof createEngineMcpRuntime>[1],
   directFixturePlanning = false,
 ): Promise<void> {
   const loaded = await loadArenaFixture(resolve(fixturePath));
@@ -712,7 +699,7 @@ export async function runEngineMcpServer(
 export async function runEngineMcpLines(
   runtime: EngineMcpRuntime,
   lines: AsyncIterable<string>,
-  options: Parameters<typeof createEngineMcpRuntime>[1] = {},
+  options: Parameters<typeof createEngineMcpRuntime>[1],
   writeResponse: (value: unknown) => Promise<void> = writeJsonLine,
 ): Promise<void> {
   const handler = runtime.handler;
@@ -1273,7 +1260,7 @@ export async function runEngineMcpEntrypoint(argv: readonly string[] = process.a
   if (thirdArgument !== undefined && scenario === undefined && (thirdArgument.length < 16 || thirdArgument.length > 300)) {
     throw new TypeError('Engine MCP launcher token must contain 16 to 300 characters.');
   }
-  const options: Parameters<typeof runEngineMcpServer>[1] = scenario === '--correction'
+  const options: Omit<Parameters<typeof runEngineMcpServer>[1], 'offerEnvironment'> = scenario === '--correction'
     ? { revision: 2, phase: 'correction' as const, correctionNumber: 1, historyKind: 'proposal_correction_requested', ...(selectedProfile === undefined ? {} : { toolProfile: selectedProfile }) }
     : scenario === '--room-transition'
       ? { revision: 3, room: 2, historyKind: 'room_transition', ...(selectedProfile === undefined ? {} : { toolProfile: selectedProfile }) }

@@ -7,8 +7,7 @@ import type { GridCell } from '../combat/grid';
 import { feet, type CombatantId } from '../combat/values';
 import { availableEngineActorOptions, resolveEngineActorOption } from './intent-resolver';
 import { projectFutureMonsterTurns } from './monster-planning-state';
-import { buildOfferEnvironment } from './offers/build-offer-environment';
-import type { EngineOptionEnvironment } from './offers/offer-environment';
+import type { EngineOptionEnvironment } from './offers/build-offer-environment';
 import type { EngineMainActionUse, EngineOfferableOption, EngineOptionId } from './turn-proposal';
 
 declare const offeredOptionOrdinalBrand: unique symbol;
@@ -56,11 +55,6 @@ export class OfferedOptionEnvironmentMismatchError extends TypeError {
     this.name = 'OfferedOptionEnvironmentMismatchError';
   }
 }
-
-const transitionalLegacyOfferEnvironment = buildOfferEnvironment({
-  kind: 'configuration',
-  mode: 'legacy_standard',
-});
 
 function optionOrdinal(value: number): OfferedOptionOrdinal {
   if (!Number.isSafeInteger(value) || value < 0) {
@@ -128,7 +122,7 @@ export function actingMonsterIds(state: EncounterState): readonly CombatantId[] 
 export function offeredOptionActorsForState(
   state: EncounterState,
   actorIds: readonly CombatantId[] = actingMonsterIds(state),
-  offerEnvironment: EngineOptionEnvironment = transitionalLegacyOfferEnvironment,
+  offerEnvironment: EngineOptionEnvironment,
 ): readonly OfferedOptionActor[] {
   const planningState = projectFutureMonsterTurns(state, actorIds);
   return actorIds.map((actorId) => ({
@@ -147,7 +141,7 @@ export function offeredOptionActorsForState(
 export function offeredOptionPaths(
   state: EncounterState,
   actors: readonly OfferedOptionActor[],
-  offerEnvironment: EngineOptionEnvironment = transitionalLegacyOfferEnvironment,
+  offerEnvironment: EngineOptionEnvironment,
 ): readonly OfferedOptionPath[] {
   const actorIds = actors.map((actor) => actor.actorId);
   const planningState = projectFutureMonsterTurns(state, actorIds);

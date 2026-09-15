@@ -104,7 +104,7 @@ export interface ArenaArmInstruction {
 }
 
 interface ArenaConfigBase {
-  readonly offerEnvironment?: OfferEnvironmentInput;
+  readonly offerEnvironment: OfferEnvironmentInput;
   readonly dmMode: DmMode;
   readonly dmModeExplicit: boolean;
   readonly blindRepairArm: BlindRepairArm;
@@ -857,7 +857,7 @@ function conversationConfig(
   const instructionSource: AgentInstructionSource = overrides.instruction ?? config;
   return {
     ...instructionSource,
-    ...(config.offerEnvironment === undefined ? {} : { offerEnvironment: config.offerEnvironment }),
+    offerEnvironment: config.offerEnvironment,
     dmMode: config.dmMode,
     dmModeExplicit: config.dmModeExplicit,
     blindRepairArm: config.blindRepairArm,

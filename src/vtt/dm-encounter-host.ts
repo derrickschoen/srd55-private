@@ -105,8 +105,7 @@ import {
   type ReactionOfferHostPolicy,
 } from './reaction-offer-host-policy';
 import { guidedPendingReactionResolution } from './reaction-guidance';
-import { buildOfferEnvironment } from './offers/build-offer-environment';
-import type { EngineOptionEnvironment } from './offers/offer-environment';
+import type { EngineOptionEnvironment } from './offers/build-offer-environment';
 
 const INITIAL_COORDINATOR_STATE: PersistedCoordinatorState = {
   requestSequence: 1,
@@ -387,8 +386,8 @@ export class DmEncounterHost {
       readonly onSteeringTelemetry?: (telemetry: SteeringTelemetry) => void;
       readonly reactionOfferPolicy?: ReactionOfferHostPolicy;
       readonly onReducerInvocation?: (command: EncounterCommand) => void;
-      readonly offerEnvironment?: EngineOptionEnvironment;
-    } = {},
+      readonly offerEnvironment: EngineOptionEnvironment;
+    },
   ) {
     this.sessionId = encounterSessionId(sessionKey);
     this.#store = store;
@@ -402,10 +401,7 @@ export class DmEncounterHost {
     this.#composeRoom = options.composeRoom ?? composeStoredCharacterEncounter;
     this.#reactionOfferPolicy = options.reactionOfferPolicy ?? DM_ATTENDED_REACTION_OFFER_POLICY;
     this.#onReducerInvocation = options.onReducerInvocation ?? (() => undefined);
-    this.#offerEnvironment = options.offerEnvironment ?? buildOfferEnvironment({
-      kind: 'configuration',
-      mode: 'legacy_standard',
-    });
+    this.#offerEnvironment = options.offerEnvironment;
     if (options.bridge !== undefined) {
       this.#mirror.connect(options.bridge);
       this.#roundPlanSession = new DmRoundPlanSession(
