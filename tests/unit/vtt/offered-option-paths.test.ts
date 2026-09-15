@@ -14,6 +14,7 @@ import {
 import { projectEncounterBoard } from '../../../src/vtt/encounter-board';
 import { renderBoard } from '../../../src/vtt/encounter-app';
 import { availableEngineActorOptions } from '../../../src/vtt/intent-resolver';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
 import {
   boardPathSummary,
   offeredOptionPaths,
@@ -28,6 +29,8 @@ import {
 } from '../../fixtures/interactive-dom';
 import { createOptionPathFixtureEncounter } from '../../fixtures/vtt-option-path-encounter';
 import { placedToken, playerProfile } from '../combat/fixtures';
+
+const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
 
 function face(value: number): () => number {
   return () => (value - 0.5) / 20;
@@ -102,10 +105,10 @@ function pathFixture(): {
     persistentAreas: [damagingArea(actor.id)],
     nextPersistentAreaSequence: 2,
   };
-  const options = orderOptionsAsTurnContext(availableEngineActorOptions(state, actor.id));
+  const options = orderOptionsAsTurnContext(availableEngineActorOptions(state, actor.id, OFFER_ENVIRONMENT));
   return {
     state,
-    paths: offeredOptionPaths(state, [{ actorId: actor.id, options }]),
+    paths: offeredOptionPaths(state, [{ actorId: actor.id, options }], OFFER_ENVIRONMENT),
     actorId: actor.id,
     reactorId: reactor.id,
   };

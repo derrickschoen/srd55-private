@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { combatantId, difficultyClass } from '../../../src/combat/values';
 import { savingThrowOutcomeWeights } from '../../../src/combat/resolution';
-import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
 import { availableEngineActorOptions, resolveEngineActorOption } from '../../../src/vtt/intent-resolver';
 import {
   evaluateOptionOutcome,
@@ -11,9 +10,11 @@ import {
   type DamageOutcomeEvidence,
 } from '../../../src/vtt/intel/option-outcome';
 import { freshMonsterPlanningState, loadArenaFixture } from '../../../src/vtt/mcp/entrypoint';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
 
 const FIXTURE = 'tests/fixtures/arena-scenarios/hypnotic-pattern-cc.json';
 const CASTER = combatantId('combatant:d432-incubus');
+const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
 
 describe('D436 exact option outcome evaluator', () => {
   it('uses canonical normal, advantage, and disadvantage save-face weights', () => {
@@ -68,13 +69,13 @@ describe('D436 exact option outcome evaluator', () => {
 
   it('matches the complete Hypnotic Pattern control oracle exactly', async () => {
     const state = freshMonsterPlanningState(await loadArenaFixture(FIXTURE));
-    const option = availableEngineActorOptions(state, CASTER).find((candidate) =>
+    const option = availableEngineActorOptions(state, CASTER, OFFER_ENVIRONMENT).find((candidate) =>
       candidate.actionSlots.some((slot) => slot.use.kind === 'cast_spell' && slot.use.spellId === 'hypnotic-pattern'));
     if (option === undefined) throw new Error('Hypnotic Pattern option is absent.');
-    const resolution = resolveEngineActorOption(state, option);
+    const resolution = resolveEngineActorOption(state, option, OFFER_ENVIRONMENT);
     if (!resolution.valid) throw new Error(resolution.summary);
 
-    const outcome = evaluateOptionOutcome(state, option, resolution.mechanics, canonicalEngineQueryPort);
+    const outcome = evaluateOptionOutcome(state, option, resolution.mechanics, OFFER_ENVIRONMENT.queries);
 
     expect(outcome).toMatchObject({
       status: 'resolved',
@@ -123,15 +124,15 @@ describe('D436 exact option outcome evaluator', () => {
 
   it('uses the exact full-sequence damage distribution for Restless Touch pressure', async () => {
     const state = freshMonsterPlanningState(await loadArenaFixture(FIXTURE));
-    const option = availableEngineActorOptions(state, CASTER).find((candidate) =>
+    const option = availableEngineActorOptions(state, CASTER, OFFER_ENVIRONMENT).find((candidate) =>
       candidate.actionSlots.some((slot) => slot.use.kind === 'multiattack' &&
         slot.use.components.every((component) => component.actionId === 'restless-touch' &&
           component.target.kind === 'combatant' && component.target.combatantId === 'combatant:d432-wizard')));
     if (option === undefined) throw new Error('Restless Touch option is absent.');
-    const resolution = resolveEngineActorOption(state, option);
+    const resolution = resolveEngineActorOption(state, option, OFFER_ENVIRONMENT);
     if (!resolution.valid) throw new Error(resolution.summary);
 
-    const outcome = evaluateOptionOutcome(state, option, resolution.mechanics, canonicalEngineQueryPort);
+    const outcome = evaluateOptionOutcome(state, option, resolution.mechanics, OFFER_ENVIRONMENT.queries);
 
     expect(outcome).toMatchObject({
       status: 'resolved',

@@ -28,13 +28,22 @@ import { EngineRoundSession } from '../../../src/vtt/engine-round-session';
 import { engineSchemaInternals } from '../../../src/vtt/mcp/schemas';
 import { applyRoomInitiativeProfile } from '../../../src/vtt/room-generator';
 import { renderTurnContextForDmMode } from '../../../src/vtt/blind-turn-context';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
 
 const actorId = combatantId('combatant:renderer-actor');
 const targetId = combatantId('combatant:renderer-target');
 const HARD_FIXTURE_SEEDS = Array.from({ length: 13 }, (_unused, index) => 5_117_001 + index);
 const TURN_CONTEXT_CAPS_KIB = [4, 8, 16, 24, 32, 48, 64] as const;
+const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
 const HARD_FIXTURE_CAP_CASES = HARD_FIXTURE_SEEDS.flatMap((seed) =>
   TURN_CONTEXT_CAPS_KIB.map((capKib) => [seed, capKib] as const));
+
+function createBoundEngineMcpRuntime(
+  state: Parameters<typeof createEngineMcpRuntime>[0],
+  options: Omit<NonNullable<Parameters<typeof createEngineMcpRuntime>[1]>, 'offerEnvironment'> = {},
+): ReturnType<typeof createEngineMcpRuntime> {
+  return createEngineMcpRuntime(state, { ...options, offerEnvironment: OFFER_ENVIRONMENT });
+}
 
 function undefinedValuePaths(value: unknown, path = '$'): readonly string[] {
   if (value === undefined) return [path];
@@ -54,6 +63,7 @@ async function hardFixtureRoundOneContext(seed: number, capKib: number): Promise
     applyRoomInitiativeProfile(loaded, 'derived_v1'),
     mulberry32(seed),
     { kind: 'unattended', askDefault: 'decline' },
+    OFFER_ENVIRONMENT,
   );
   const prepared = session.beginRoundWithoutSkipping({
     runId: encounterSessionId(`encounter:renderer-cap-${String(seed)}`),
@@ -68,7 +78,7 @@ async function hardFixtureRoundOneContext(seed: number, capKib: number): Promise
   if (request === null || request.phase === 'speculative') {
     throw new Error(`Hard fixture seed ${String(seed)} did not produce an ordinary request.`);
   }
-  const runtime = createEngineMcpRuntime(session.currentState(), {
+  const runtime = createBoundEngineMcpRuntime(session.currentState(), {
     toolProfile: 'dm',
     runId: prepared.snapshot.capsule.runId,
     branchId: prepared.snapshot.capsule.branchId,
@@ -410,7 +420,7 @@ describe('renderer profile', () => {
       'tests/fixtures/arena-basis-brutal/seed-6203001.json',
     ));
     const runId = encounterSessionId('encounter:renderer-delta-guard');
-    const baseRuntime = createEngineMcpRuntime(state, {
+    const baseRuntime = createBoundEngineMcpRuntime(state, {
       runId,
       revision: 1,
       rendererProfile: { ...DEFAULT_RENDERER_PROFILE, delta: 'guarded' },
@@ -423,7 +433,7 @@ describe('renderer profile', () => {
       throw new Error('Delta base is not an object.');
     }
     const oversizedBase = { ...baseValue, actors: [] };
-    const guardedRuntime = createEngineMcpRuntime(state, {
+    const guardedRuntime = createBoundEngineMcpRuntime(state, {
       runId: baseCapsule.runId,
       revision: 2,
       rendererProfile: { ...DEFAULT_RENDERER_PROFILE, delta: 'guarded' },
@@ -435,7 +445,7 @@ describe('renderer profile', () => {
     }) as Readonly<Record<string, unknown>>;
     expect(guarded['granularity']).toBe('full');
 
-    const hashBaseRuntime = createEngineMcpRuntime(state, {
+    const hashBaseRuntime = createBoundEngineMcpRuntime(state, {
       runId: baseCapsule.runId,
       revision: 1,
       rendererProfile: { ...DEFAULT_RENDERER_PROFILE, anchor: 'hash_only' },
@@ -444,7 +454,7 @@ describe('renderer profile', () => {
     const hashBase = hashBaseRuntime.toolSurface.execute('engine.get_turn_context', {
       run_id: hashBaseCapsule.runId, expected_revision: 1, scope: 'round', granularity: 'full',
     }) as Readonly<Record<string, unknown>>;
-    const hashRuntime = createEngineMcpRuntime(state, {
+    const hashRuntime = createBoundEngineMcpRuntime(state, {
       runId: hashBaseCapsule.runId,
       revision: 2,
       rendererProfile: { ...DEFAULT_RENDERER_PROFILE, anchor: 'hash_only' },
@@ -457,7 +467,7 @@ describe('renderer profile', () => {
     expect(hashDelta['granularity']).toBe('turn_delta');
     expect(hashDelta['anchor']).not.toHaveProperty('state_ref');
 
-    const offRuntime = createEngineMcpRuntime(state, {
+    const offRuntime = createBoundEngineMcpRuntime(state, {
       runId: hashBaseCapsule.runId,
       revision: 2,
       rendererProfile: { ...DEFAULT_RENDERER_PROFILE, delta: 'off' },
@@ -474,7 +484,7 @@ describe('renderer profile', () => {
     const state = freshMonsterPlanningState(await loadArenaFixture(
       'tests/fixtures/arena-basis-brutal/seed-6203004.json',
     ));
-    const runtime = createEngineMcpRuntime(state, {
+    const runtime = createBoundEngineMcpRuntime(state, {
       rendererProfile: { ...DEFAULT_RENDERER_PROFILE, shortlist: 'k2' },
       turnContextMaximumBytes: 4 * 1024,
     });
@@ -497,7 +507,7 @@ describe('renderer profile', () => {
   it('matches the hand-computed brutal-room circumstance oracle', async () => {
     const loaded = await loadArenaFixture('tests/fixtures/arena-basis-brutal/seed-6203001.json');
     const state = freshMonsterPlanningState(loaded);
-    const runtime = createEngineMcpRuntime(state);
+    const runtime = createBoundEngineMcpRuntime(state);
     const capsule = runtime.feed.current();
     const features = extractCircumstanceFeatures({
       state,
