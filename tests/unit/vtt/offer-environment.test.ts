@@ -383,6 +383,35 @@ describe('immutable offer environment', () => {
     expect(runtime.feed.current().offerEnvironment.digest).toBe(EXPECTED_REPRESENTED_ENVIRONMENT_DIGEST);
   });
 
+  it('LAUNCH_CAPSULE_DIGEST_MISMATCH_REFUSED_AT_CONSTRUCTION', () => {
+    const environment = representedEnvironment();
+    const legacy = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
+    const { actor, state } = optionFixture();
+    const runtime = createEngineMcpRuntime(state, {
+      offerEnvironment: environment,
+      requestedActorIds: [actor.id],
+    });
+    const mismatched = capsuleWithEnvironment(runtime.feed.current(), legacy);
+    const feed: EngineCapsuleFeed = {
+      current: () => structuredClone(mismatched),
+      snapshot: () => structuredClone(mismatched),
+      read: () => structuredClone(mismatched),
+      listen: () => () => undefined,
+    };
+    expect(() => createEngineMcpApplication({
+      state,
+      stateSource: feed,
+      offerEnvironment: environment,
+      proposals: { append: () => undefined },
+      speculativePlans: { append: () => undefined },
+      narration: { append: () => undefined },
+      adjudications: { append: () => undefined },
+      rules: { get: () => null },
+    })).toThrow(
+      new TypeError('Engine MCP application offer environment does not match its launch capsule.'),
+    );
+  });
+
   it('refuses a custom feed that changes offer environment digest after application launch', () => {
     const environment = representedEnvironment();
     const legacy = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
