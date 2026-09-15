@@ -238,6 +238,7 @@ export interface EngineQueryPort {
     targetId: CombatantId,
     candidates: readonly TacticalAllocationCandidate[],
     initiativeOrder: readonly CombatantId[],
+    environment?: EngineOptionEnvironment,
   ): TacticalAllocationComparison;
   cover(state: EncounterState, actorId: CombatantId, targetId: CombatantId): {
     readonly tier: 'none' | 'half' | 'three_quarters' | 'total';
