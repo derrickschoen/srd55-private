@@ -801,7 +801,7 @@ describe('engine MCP dual-handshake full surface conformance', () => {
       combatant.profile.kind === 'monster' ? [combatant.profile.id] : []).slice(0, 1);
     const players = state.combatants.flatMap((combatant) =>
       combatant.profile.kind === 'player_character' ? [combatant.profile.id] : []);
-    const menu = buildHostScenarioMenu(state, actors, players);
+    const menu = buildHostScenarioMenu(state, actors, players, BOUND_OFFER_ENVIRONMENT);
     const runtime = createEngineMcpRuntime(state, {
       toolProfile: 'dm',
       phase: 'speculative',

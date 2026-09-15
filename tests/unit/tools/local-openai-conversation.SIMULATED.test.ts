@@ -16,7 +16,6 @@ import { DEFAULT_RENDERER_PROFILE } from '../../../src/vtt/renderer-profile';
 import { mkdtempSync, readFileSync } from '../../helpers/test-filesystem';
 import {
   createDisabledEngineOfferFamilyPolicy,
-  type EngineOptionEnvironment,
 } from '../../../src/vtt/offers/offer-environment';
 import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
 import * as offerEnvironmentBuilder from '../../../src/vtt/offers/build-offer-environment';
@@ -246,14 +245,16 @@ describe('SIMULATED local OpenAI conversation adapter', () => {
       let rows: Awaited<ReturnType<typeof runArena>>;
       try {
         rows = await runArena(config);
-        const constructedEnvironments: readonly EngineOptionEnvironment[] = environmentConstructor.mock.results
+        const constructedEnvironments:
+          readonly ReturnType<typeof buildOfferEnvironment>[] = environmentConstructor.mock.results
           .flatMap((result) => result.type === 'return' ? [result.value] : []);
         const consumedEnvironments = runtimeConstructor.mock.calls.flatMap((call) =>
           call[1]?.offerEnvironment === undefined ? [] : [call[1].offerEnvironment]);
         expect(constructedEnvironments.length).toBeGreaterThan(0);
         expect(consumedEnvironments.length).toBeGreaterThan(0);
         expect(constructedEnvironments.every((environment) => consumedEnvironments.includes(environment))).toBe(true);
-        expect(consumedEnvironments.every((environment) => constructedEnvironments.includes(environment))).toBe(true);
+        expect(consumedEnvironments.every((environment) =>
+          constructedEnvironments.some((candidate) => candidate === environment))).toBe(true);
         for (const [index, call] of runtimeConstructor.mock.calls.entries()) {
           const environment = call[1]?.offerEnvironment;
           const result = runtimeConstructor.mock.results[index];
