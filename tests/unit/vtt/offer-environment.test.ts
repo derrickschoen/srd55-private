@@ -22,6 +22,7 @@ import {
   buildOfferEnvironment,
   type EngineOptionEnvironment,
 } from '../../../src/vtt/offers/build-offer-environment';
+import { PARTY_THREAT_CATALOG_FORMAT } from '../../../src/vtt/offers/offer-codec-primitives';
 import { ENGINE_OFFER_CAPABILITIES } from '../../../src/vtt/offers/offer-generator-registry';
 import { createPartyThreatCatalog } from '../../../src/vtt/offers/party-threat-catalog';
 import {
@@ -53,7 +54,7 @@ const EXPECTED_PARENT_STANDARD_IDS = [
 function representedEnvironment() {
   const familyPolicy = createDisabledEngineOfferFamilyPolicy();
   const partyThreatCatalog = createPartyThreatCatalog({
-    format: 'party-threat-catalog-v1',
+    format: PARTY_THREAT_CATALOG_FORMAT,
     representation: 'represented',
     entries: [{
       attackerId: combatantId('combatant:catalog-cleric'),

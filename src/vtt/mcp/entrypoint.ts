@@ -1076,12 +1076,6 @@ export function decodeEngineMcpEntrypointDocument(
   return manifest;
 }
 
-export function reconstructLauncherOfferEnvironment(
-  manifest: DecodedEngineMcpLauncherManifest,
-): EngineOptionEnvironment {
-  return buildOfferEnvironment({ kind: 'binding', binding: manifest.offerEnvironment });
-}
-
 async function launcherManifest(path: string): Promise<DecodedEngineMcpLauncherManifest | null> {
   const absoluteLauncherPath = resolve(path);
   let decoded: unknown;
@@ -1130,7 +1124,7 @@ export async function runEngineMcpEntrypoint(argv: readonly string[] = process.a
   const selectedProfile = profileValue as EngineMcpToolProfile | undefined;
   const manifest = await launcherManifest(launcherPath);
   if (manifest !== null) {
-    const offerEnvironment = reconstructLauncherOfferEnvironment(manifest);
+    const offerEnvironment = buildOfferEnvironment({ kind: 'binding', binding: manifest.offerEnvironment });
     const kbReadBudget = createLauncherKbReadBudget(manifest);
     const state = await loadArenaFixture(manifest.fixturePath);
     const [boardImageContent, boardHtmlContent] = await Promise.all([

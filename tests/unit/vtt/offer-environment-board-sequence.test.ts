@@ -3,6 +3,7 @@ import { projectDmView } from '../../../src/combat/visibility';
 import { projectDmBoard } from '../../../src/vtt/encounter-projections';
 import { resolveEngineActorOption } from '../../../src/vtt/intent-resolver';
 import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
+import { ENGINE_OFFER_FAMILY_POLICY_FORMAT } from '../../../src/vtt/offers/offer-codec-primitives';
 import { createEngineOfferFamilyPolicy } from '../../../src/vtt/offers/offer-environment';
 import { createUnrepresentedPartyThreatCatalog } from '../../../src/vtt/offers/party-threat-catalog';
 import {
@@ -43,7 +44,7 @@ describe('Slice 3A production board offer environment', () => {
       kind: 'configuration',
       mode: 'revision_bound',
       familyPolicy: createEngineOfferFamilyPolicy({
-        format: 'engine-offer-family-policy-v1',
+        format: ENGINE_OFFER_FAMILY_POLICY_FORMAT,
         helpAttack: 'enabled',
         readyAttack: 'disabled',
         unarmedControl: 'disabled',

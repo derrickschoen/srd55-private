@@ -36,6 +36,11 @@ import {
   loadArenaFixture,
 } from '../../../src/vtt/mcp/entrypoint';
 import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
+import {
+  ENGINE_OFFER_FAMILY_POLICY_FORMAT,
+  ENGINE_OPTION_ENVIRONMENT_FORMAT,
+  PARTY_THREAT_CATALOG_FORMAT,
+} from '../../../src/vtt/offers/offer-codec-primitives';
 import type { EngineStateCapsule } from '../../../src/vtt/engine-state-capsule';
 import {
   captureLegacyRunnerComponents,
@@ -663,14 +668,14 @@ function expectOfferEnvironmentDerivation(value: unknown, label: string): void {
   const familyPolicy = record(environment['familyPolicy'], `${label}.familyPolicy`);
   const partyThreatCatalog = record(environment['partyThreatCatalog'], `${label}.partyThreatCatalog`);
   const familyBody = {
-    format: 'engine-offer-family-policy-v1',
+    format: ENGINE_OFFER_FAMILY_POLICY_FORMAT,
     helpAttack: 'disabled',
     readyAttack: 'disabled',
     unarmedControl: 'disabled',
     reposition: 'disabled',
   };
   const catalogBody = {
-    format: 'party-threat-catalog-v1',
+    format: PARTY_THREAT_CATALOG_FORMAT,
     representation: 'unrepresented',
     entries: [],
   };
@@ -687,7 +692,7 @@ function expectOfferEnvironmentDerivation(value: unknown, label: string): void {
   expect(partyThreatCatalog['digest'], `${label} party-threat catalog replacement pin`)
     .toBe(ACCEPTED_IDENTITY_PINS.partyThreatCatalogDigest);
   const environmentBody = {
-    format: 'engine-option-environment-v1',
+    format: ENGINE_OPTION_ENVIRONMENT_FORMAT,
     mode: 'legacy_standard',
     familyPolicy,
     partyThreatCatalog,

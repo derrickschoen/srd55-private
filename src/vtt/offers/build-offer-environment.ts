@@ -1,5 +1,9 @@
 import { canonicalEngineQueryPort } from '../engine-query-port';
 import {
+  ENGINE_OPTION_ENVIRONMENT_FORMAT,
+  exactKeys,
+} from './offer-codec-primitives';
+import {
   createDisabledEngineOfferFamilyPolicy,
   createEngineOptionEnvironmentBinding,
   createLegacyEngineOptionEnvironmentBinding,
@@ -40,13 +44,6 @@ class RuntimeOfferEnvironment {
 
 export type EngineOptionEnvironment = RuntimeOfferEnvironment;
 
-function hasExactKeys(value: object, expected: readonly string[]): boolean {
-  const actual = Object.keys(value).sort();
-  const sortedExpected = [...expected].sort();
-  return actual.length === sortedExpected.length &&
-    actual.every((key, index) => key === sortedExpected[index]);
-}
-
 export function buildOfferEnvironment(input: OfferEnvironmentInput): EngineOptionEnvironment {
   if (typeof input !== 'object' || input === null || Array.isArray(input)) {
     throw new TypeError('Offer environment input must be an object.');
@@ -55,28 +52,28 @@ export function buildOfferEnvironment(input: OfferEnvironmentInput): EngineOptio
     if (input.binding === undefined) {
       throw new TypeError('Offer environment binding is required.');
     }
-    if (!hasExactKeys(input, ['kind', 'binding'])) {
-      throw new TypeError('Offer environment binding input has an invalid shape.');
-    }
+    exactKeys(input, ['kind', 'binding'], 'Offer environment binding input');
     return new RuntimeOfferEnvironment(decodeEngineOptionEnvironmentBinding(input.binding));
   }
   if (input.kind !== 'configuration') {
     throw new TypeError('Offer environment input has an invalid shape.');
   }
   if (input.mode === 'legacy_standard') {
-    if (!hasExactKeys(input, ['kind', 'mode'])) {
-      throw new TypeError('Offer environment configuration has an invalid shape.');
-    }
+    exactKeys(input, ['kind', 'mode'], 'Offer environment configuration');
     return new RuntimeOfferEnvironment(createLegacyEngineOptionEnvironmentBinding());
   }
-  if (input.mode !== 'revision_bound' ||
-    !hasExactKeys(input, ['kind', 'mode', 'familyPolicy', 'partyThreatCatalog'])) {
+  if (input.mode !== 'revision_bound') {
     throw new TypeError('Offer environment configuration has an invalid shape.');
   }
+  exactKeys(
+    input,
+    ['kind', 'mode', 'familyPolicy', 'partyThreatCatalog'],
+    'Offer environment configuration',
+  );
   const familyPolicy = decodeEngineOfferFamilyPolicy(input.familyPolicy);
   const partyThreatCatalog = decodePartyThreatCatalog(input.partyThreatCatalog);
   const binding = createEngineOptionEnvironmentBinding({
-    format: 'engine-option-environment-v1',
+    format: ENGINE_OPTION_ENVIRONMENT_FORMAT,
     mode: 'revision_bound',
     familyPolicy,
     partyThreatCatalog,

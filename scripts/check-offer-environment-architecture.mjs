@@ -6,6 +6,7 @@ import ts from 'typescript';
 
 const ROOT = process.cwd();
 const BUILDER_PATH = 'src/vtt/offers/build-offer-environment.ts';
+const CODEC_PRIMITIVES_PATH = 'src/vtt/offers/offer-codec-primitives.ts';
 const QUERY_PORT_PATH = 'src/vtt/engine-query-port.ts';
 const ENVIRONMENT_PROPERTIES = [
   'queries',
@@ -14,13 +15,13 @@ const ENVIRONMENT_PROPERTIES = [
   'binding',
   'digest',
 ];
-const TRANSITIONAL_RUNTIME_EXPORTS = new Set([
+const ALLOWED_RUNTIME_EXPORTS = new Set([
   `${BUILDER_PATH}:buildOfferEnvironment`,
-  'src/vtt/offers/offer-environment.ts:createEngineOptionEnvironment',
-  'src/vtt/offers/offer-environment.ts:createLegacyEngineOptionEnvironment',
-  'src/vtt/offers/offer-environment.ts:createRevisionBoundEngineOptionEnvironment',
-  'src/vtt/offers/offer-environment.ts:engineOptionEnvironmentFromBinding',
-  'src/vtt/mcp/entrypoint.ts:reconstructLauncherOfferEnvironment',
+]);
+const OFFER_FORMAT_CONSTANTS = new Map([
+  ['engine-option-environment-v1', 'ENGINE_OPTION_ENVIRONMENT_FORMAT'],
+  ['engine-offer-family-policy-v1', 'ENGINE_OFFER_FAMILY_POLICY_FORMAT'],
+  ['party-threat-catalog-v1', 'PARTY_THREAT_CATALOG_FORMAT'],
 ]);
 const ACTIVE_CJS_ORIGIN_FIXTURES = [
   'canonical-require-direct.cts',
@@ -323,6 +324,34 @@ function methodFixture(name, modulePath, symbol, method, omittedArguments) {
 
 function relative(fileName) {
   return path.relative(ROOT, fileName).split(path.sep).join('/');
+}
+
+function offerFormatLiteralDiagnostics(sourceFiles) {
+  const diagnostics = [];
+  for (const sourceFile of sourceFiles) {
+    const fileName = relative(sourceFile.fileName);
+    function visit(node) {
+      if (ts.isStringLiteralLike(node)) {
+        const constantName = OFFER_FORMAT_CONSTANTS.get(node.text);
+        const declaration = node.parent;
+        const soleInitializer = fileName === CODEC_PRIMITIVES_PATH &&
+          constantName !== undefined &&
+          ts.isVariableDeclaration(declaration) &&
+          declaration.initializer === node &&
+          ts.isIdentifier(declaration.name) &&
+          declaration.name.text === constantName;
+        if (constantName !== undefined && !soleInitializer) {
+          const position = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
+          diagnostics.push(
+            `${fileName}:${String(position.line + 1)}: raw offer format tag ${node.text} is forbidden`,
+          );
+        }
+      }
+      ts.forEachChild(node, visit);
+    }
+    visit(sourceFile);
+  }
+  return diagnostics;
 }
 
 function compilerOptions(configName) {
@@ -1145,8 +1174,20 @@ function canonicalOriginSelfTest() {
 
 function stagedRealSymbolSelfTest(fixtures) {
   const failures = [];
+  const virtualSources = new Map(fixtures.map((fixture) => [
+    path.join(ROOT, '.architecture-fixtures', fixture.name),
+    fixture.source,
+  ]));
+  const program = createProgram(
+    [...virtualSources.keys()],
+    compilerOptions('tsconfig.app.json'),
+    virtualSources,
+  );
+  const allDiagnostics = ts.getPreEmitDiagnostics(program);
   for (const fixture of fixtures) {
-    const diagnostics = compileFixture(fixture.name, fixture.source);
+    const fileName = path.join(ROOT, '.architecture-fixtures', fixture.name);
+    const diagnostics = allDiagnostics.filter((diagnostic) => diagnostic.file !== undefined &&
+      path.resolve(diagnostic.file.fileName) === path.resolve(fileName));
     const omittedLine = markerLine(fixture.source, 'OMITTED');
     const suppliedLine = markerLine(fixture.source, 'SUPPLIED');
     if (!diagnostics.some((diagnostic) => diagnosticLine(diagnostic) === omittedLine)) {
@@ -1166,28 +1207,61 @@ function stagedRealSymbolSelfTest(fixtures) {
   return failures;
 }
 
+function stagedFormatSelfTest() {
+  const failures = [];
+  const counts = new Map();
+  for (const [name, source] of Object.entries(STAGED_FORMAT_FIXTURES)) {
+    const sourceFile = ts.createSourceFile(
+      path.join(ROOT, '.architecture-fixtures', name),
+      source,
+      ts.ScriptTarget.Latest,
+      true,
+    );
+    const diagnostics = offerFormatLiteralDiagnostics([sourceFile]);
+    counts.set(name, diagnostics.length);
+    if (name === 'offers-format-imported.ts') {
+      if (diagnostics.length !== 0) {
+        failures.push(`${name}: imported format constants were rejected`);
+      }
+      if (compileFixture(name, source).length !== 0) {
+        failures.push(`${name}: imported format constants did not compile`);
+      }
+    } else if (diagnostics.length !== 1) {
+      failures.push(`${name}: expected one raw format diagnostic, received ${String(diagnostics.length)}`);
+    }
+  }
+  return { failures, counts };
+}
+
 function runSelfTest(stage) {
   const canonical = canonicalOriginSelfTest();
+  const formats = stage === undefined
+    ? stagedFormatSelfTest()
+    : { failures: [], counts: new Map() };
+  const stagedFixtures = stage === undefined
+    ? Object.values(STAGED_REAL_SYMBOL_FIXTURES).flat()
+    : STAGED_REAL_SYMBOL_FIXTURES[stage];
   const diagnostics = [
     ...privateBrandSelfTest(),
     ...alternativeExportSelfTest(),
     ...builderRuntimeInventorySelfTest(),
     ...canonical.failures,
   ];
-  if (stage !== undefined) {
-    const staged = STAGED_REAL_SYMBOL_FIXTURES[stage];
-    if (staged === undefined) {
-      diagnostics.push(`Unknown architecture fixture stage: ${stage}`);
-    } else {
-      diagnostics.push(...stagedRealSymbolSelfTest(staged));
-    }
+  if (stagedFixtures === undefined) {
+    diagnostics.push(`Unknown architecture fixture stage: ${stage}`);
+  } else {
+    diagnostics.push(...stagedRealSymbolSelfTest(stagedFixtures));
+  }
+  if (stage === undefined) {
+    diagnostics.push(...formats.failures);
   }
   if (diagnostics.length > 0) {
     for (const diagnostic of diagnostics) console.error(diagnostic);
     process.exitCode = 1;
     return;
   }
-  const activeFixtureCount = 15 + canonical.fixtureCount;
+  const activeFixtureCount = 15 + canonical.fixtureCount + (stagedFixtures?.length ?? 0) +
+    (stage === undefined ? Object.keys(STAGED_FORMAT_FIXTURES).length : 0);
   console.log(`offer-environment architecture self-test: ${String(activeFixtureCount)} active fixtures passed`);
   console.log('IB1-F1 probes: ' +
     `allowed-helper=${String(canonical.counts.get('allowed-helper-import.ts'))}, ` +
@@ -1205,6 +1279,11 @@ function runSelfTest(stage) {
     .join(', ');
   console.log(`staged real-symbol fixture groups: ${stagedCounts}`);
   console.log(`staged format fixtures: ${Object.keys(STAGED_FORMAT_FIXTURES).join(', ')}`);
+  if (stage === undefined) {
+    console.log('offers format probes: ' + Object.keys(STAGED_FORMAT_FIXTURES)
+      .map((name) => `${name}=${String(formats.counts.get(name))}`)
+      .join(', '));
+  }
 }
 
 function runProductionCheck() {
@@ -1218,7 +1297,11 @@ function runProductionCheck() {
   const diagnostics = builder === undefined
     ? [`${BUILDER_PATH}: builder module is missing`]
     : builderContractDiagnostics(program, builder);
-  diagnostics.push(...exportedEnvironmentDiagnostics(program, sourceFiles, TRANSITIONAL_RUNTIME_EXPORTS));
+  diagnostics.push(...exportedEnvironmentDiagnostics(program, sourceFiles, ALLOWED_RUNTIME_EXPORTS));
+  diagnostics.push(...offerFormatLiteralDiagnostics(sourceFiles));
+  for (const sourceFile of sourceFiles) {
+    diagnostics.push(...canonicalOriginDiagnostics(program, sourceFile));
+  }
   const assertionDiagnostics = privateBrandAssertionLines(program, sourceFiles);
   if (assertionDiagnostics.length > 0) {
     diagnostics.push(`forbidden assertions to EngineOptionEnvironment at ${assertionDiagnostics.join(', ')}`);
@@ -1229,7 +1312,7 @@ function runProductionCheck() {
     return;
   }
   console.log(`offer-environment architecture: ${sourceFiles.length} TypeScript files checked`);
-  console.log('runtime export allowlist: builder plus exactly five transitional factories/wrappers');
+  console.log('runtime export allowlist: buildOfferEnvironment only');
 }
 
 const args = process.argv.slice(2);

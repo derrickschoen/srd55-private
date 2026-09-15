@@ -30,6 +30,7 @@ import { BUNDLED_MONSTER_ROSTER } from '../../../src/combat/statblocks/roster';
 import { blindStatblockFacts } from '../../../src/vtt/blind-turn-context';
 import { createOptionPathFixtureEncounter } from '../../fixtures/vtt-option-path-encounter';
 import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
+import { ENGINE_OFFER_FAMILY_POLICY_FORMAT } from '../../../src/vtt/offers/offer-codec-primitives';
 import { createEngineOfferFamilyPolicy } from '../../../src/vtt/offers/offer-environment';
 import { createUnrepresentedPartyThreatCatalog } from '../../../src/vtt/offers/party-threat-catalog';
 
@@ -38,7 +39,7 @@ const POLICY_OFFER_ENVIRONMENT = buildOfferEnvironment({
   kind: 'configuration',
   mode: 'revision_bound',
   familyPolicy: createEngineOfferFamilyPolicy({
-    format: 'engine-offer-family-policy-v1',
+    format: ENGINE_OFFER_FAMILY_POLICY_FORMAT,
     helpAttack: 'enabled',
     readyAttack: 'disabled',
     unarmedControl: 'disabled',

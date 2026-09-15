@@ -13,6 +13,7 @@ import {
 import { scoreTeamPlans } from '../../../src/vtt/intel/team-scorer';
 import { freshMonsterPlanningState } from '../../../src/vtt/monster-planning-state';
 import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
+import { ENGINE_OFFER_FAMILY_POLICY_FORMAT } from '../../../src/vtt/offers/offer-codec-primitives';
 import { createEngineOfferFamilyPolicy } from '../../../src/vtt/offers/offer-environment';
 import { createUnrepresentedPartyThreatCatalog } from '../../../src/vtt/offers/party-threat-catalog';
 import {
@@ -42,7 +43,7 @@ function revisionBoundEnvironment(helpAttack: 'disabled' | 'enabled' = 'disabled
     kind: 'configuration',
     mode: 'revision_bound',
     familyPolicy: createEngineOfferFamilyPolicy({
-      format: 'engine-offer-family-policy-v1',
+      format: ENGINE_OFFER_FAMILY_POLICY_FORMAT,
       helpAttack,
       readyAttack: 'disabled',
       unarmedControl: 'disabled',

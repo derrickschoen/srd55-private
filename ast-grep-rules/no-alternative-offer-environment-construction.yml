@@ -1,6 +1,6 @@
 id: no-alternative-offer-environment-construction
 language: TypeScript
-severity: off
+severity: error
 message: Construct runtime offer environments only through buildOfferEnvironment.
 files:
   - src/**/*.ts
