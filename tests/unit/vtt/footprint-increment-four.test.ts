@@ -37,6 +37,7 @@ import {
 import { projectDmBoard } from '../../../src/vtt/encounter-projections';
 import { REFERENCE_ENCOUNTER_ART } from '../../../src/vtt/reference-encounter-art';
 import { generateRoom } from '../../../src/vtt/room-generator';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
 import {
   installInteractiveDocument,
   interactiveElement,
@@ -44,6 +45,7 @@ import {
 
 const FIGHTER = combatantId('combatant:fighter');
 const CLERIC = combatantId('combatant:cleric');
+const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
 
 const PENDING_PLACEMENT_BLOCKED_COMMAND_TYPES = [
   'roll_initiative',
@@ -444,6 +446,7 @@ describe('footprint Increment 4 board and migration placement recovery', () => {
       },
       controllers: [],
       history: [],
+      offerEnvironment: OFFER_ENVIRONMENT,
     });
     expect(dm.pendingPlacementRecovery).toEqual(expect.objectContaining({
       combatantId: FIGHTER,

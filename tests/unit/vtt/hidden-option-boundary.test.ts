@@ -5,8 +5,10 @@ import {
   freshMonsterPlanningState,
   loadArenaFixture,
 } from '../../../src/vtt/mcp/entrypoint';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
 
 const ROOM_FIVE_ARCHER = combatantId('combatant:generated-6203005-monster-4');
+const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
 
 function record(value: unknown, label: string): Readonly<Record<string, unknown>> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -22,6 +24,7 @@ async function roomFiveBoundary(turnContextMaximumBytes?: number) {
   const runtime = createEngineMcpRuntime(state, {
     revision: 2,
     room: 5,
+    offerEnvironment: OFFER_ENVIRONMENT,
     ...(turnContextMaximumBytes === undefined ? {} : { turnContextMaximumBytes }),
   });
   const capsule = runtime.feed.current();
@@ -92,6 +95,7 @@ describe('shown-option boundary', () => {
       room: 8,
       requestedActorIds: actorIds,
       turnContextMaximumBytes: 8_000,
+      offerEnvironment: OFFER_ENVIRONMENT,
     });
     const capsule = runtime.feed.current();
     for (const actorId of actorIds) {

@@ -19,6 +19,9 @@ import {
   type LoadedPartyMember,
 } from '../../../src/vtt/party-pack';
 import { composeStoredCharacterEncounter } from '../../../src/vtt/stored-character-encounter';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
+
+const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
 
 it('upload import acknowledgement waits for the durable flush before resolving', async () => {
   const events: string[] = [];
@@ -78,7 +81,7 @@ function legacySession(session: string): {
 } {
   const id = encounterSessionId(session);
   const memory = new MemoryBrowserSessionStore();
-  const host = new DmEncounterHost(session, memory);
+  const host = new DmEncounterHost(session, memory, { offerEnvironment: OFFER_ENVIRONMENT });
   host.interrupt();
   host.close();
   return { id, bytes: exportSavedSession(memory, id) };
@@ -499,7 +502,11 @@ describe('IndexedDB durable VTT session adapter', () => {
       'Browser autosave does not exist.',
     );
 
-    const host = new DmEncounterHost('session:snapshot-save-operations', store);
+    const host = new DmEncounterHost(
+      'session:snapshot-save-operations',
+      store,
+      { offerEnvironment: OFFER_ENVIRONMENT },
+    );
     host.adjudicate({
       type: 'adjudicate',
       target: REFERENCE_MONSTER_ID,
@@ -875,7 +882,11 @@ describe('IndexedDB durable VTT session adapter', () => {
     });
     const snapshot = store.savedSessions()[0];
     if (snapshot === undefined) throw new Error('Expected snapshot prefix fixture.');
-    const host = new DmEncounterHost('session:snapshot-prefix', store);
+    const host = new DmEncounterHost(
+      'session:snapshot-prefix',
+      store,
+      { offerEnvironment: OFFER_ENVIRONMENT },
+    );
     host.adjudicate({
       type: 'adjudicate',
       target: REFERENCE_MONSTER_ID,
@@ -954,6 +965,7 @@ describe('IndexedDB durable VTT session adapter', () => {
       initialControllers: encounter.controllers,
       playerIds: encounter.playerIds,
       turnLegalActions: encounter.turnLegalActions,
+      offerEnvironment: OFFER_ENVIRONMENT,
     });
     await store.flush();
     expect(store.savedSessions().map((save) => save.name)).toEqual([
@@ -994,6 +1006,7 @@ describe('IndexedDB durable VTT session adapter', () => {
       initialControllers: encounter.controllers,
       playerIds: encounter.playerIds,
       turnLegalActions: encounter.turnLegalActions,
+      offerEnvironment: OFFER_ENVIRONMENT,
     });
     const combatantCount = started.initiative.length;
     for (let index = 0; index <= combatantCount; index += 1) await host.skipTurn();
@@ -1050,7 +1063,11 @@ describe('IndexedDB durable VTT session adapter', () => {
     const indexedDb = new IDBFactory();
     const storage = new MemoryStorage();
     const firstStore = await IndexedDbBrowserSessionStore.open(indexedDb, storage);
-    const first = new DmEncounterHost('session:reload', firstStore);
+    const first = new DmEncounterHost(
+      'session:reload',
+      firstStore,
+      { offerEnvironment: OFFER_ENVIRONMENT },
+    );
     first.interrupt();
     const before = first.snapshot();
     await firstStore.flush();
@@ -1058,7 +1075,11 @@ describe('IndexedDB durable VTT session adapter', () => {
     firstStore.close();
 
     const reopenedStore = await IndexedDbBrowserSessionStore.open(indexedDb, storage);
-    const reopened = new DmEncounterHost('session:reload', reopenedStore);
+    const reopened = new DmEncounterHost(
+      'session:reload',
+      reopenedStore,
+      { offerEnvironment: OFFER_ENVIRONMENT },
+    );
     const after = reopened.snapshot();
 
     expect(after.dm.encounter).toEqual(before.dm.encounter);
@@ -1071,7 +1092,11 @@ describe('IndexedDB durable VTT session adapter', () => {
   it('batches synchronous journal appends into one IndexedDB transaction before flush acknowledgement', async () => {
     const store = await IndexedDbBrowserSessionStore.open(new IDBFactory(), new MemoryStorage());
     const transactions = vi.spyOn(IDBDatabase.prototype, 'transaction');
-    const host = new DmEncounterHost('session:batched-writes', store);
+    const host = new DmEncounterHost(
+      'session:batched-writes',
+      store,
+      { offerEnvironment: OFFER_ENVIRONMENT },
+    );
     for (let index = 0; index < 5; index += 1) {
       host.adjudicate({
         type: 'adjudicate',
@@ -1119,7 +1144,11 @@ describe('IndexedDB durable VTT session adapter', () => {
       }
       return request;
     });
-    host = new DmEncounterHost('session:reentrant-write-scheduling', store);
+    host = new DmEncounterHost(
+      'session:reentrant-write-scheduling',
+      store,
+      { offerEnvironment: OFFER_ENVIRONMENT },
+    );
 
     await store.flush();
     await store.flush();
@@ -1137,7 +1166,11 @@ describe('IndexedDB durable VTT session adapter', () => {
     const store = await IndexedDbBrowserSessionStore.open(indexedDb, storage);
     const transactions = vi.spyOn(IDBDatabase.prototype, 'transaction');
     const puts = vi.spyOn(IDBObjectStore.prototype, 'put');
-    const host = new DmEncounterHost('session:bounded-write-batches', store);
+    const host = new DmEncounterHost(
+      'session:bounded-write-batches',
+      store,
+      { offerEnvironment: OFFER_ENVIRONMENT },
+    );
     for (let index = 0; index < 65; index += 1) {
       host.adjudicate({
         type: 'adjudicate',
@@ -1167,7 +1200,11 @@ describe('IndexedDB durable VTT session adapter', () => {
     const indexedDb = new IDBFactory();
     const storage = new MemoryStorage();
     const store = await IndexedDbBrowserSessionStore.open(indexedDb, storage);
-    const host = new DmEncounterHost('session:large', store);
+    const host = new DmEncounterHost(
+      'session:large',
+      store,
+      { offerEnvironment: OFFER_ENVIRONMENT },
+    );
     const payload = 'large-revision-sentinel-'.repeat(6_000);
     for (let index = 0; index < 14; index += 1) {
       host.adjudicate({
@@ -1308,7 +1345,11 @@ describe('IndexedDB durable VTT session adapter', () => {
     const put = vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementationOnce(() => {
       throw new DOMException('simulated quota', 'QuotaExceededError');
     });
-    const host = new DmEncounterHost('session:write-fails', store);
+    const host = new DmEncounterHost(
+      'session:write-fails',
+      store,
+      { offerEnvironment: OFFER_ENVIRONMENT },
+    );
 
     let failure: unknown;
     try {
@@ -1341,6 +1382,7 @@ describe('IndexedDB durable VTT session adapter', () => {
       initialControllers: encounter.controllers,
       playerIds: encounter.playerIds,
       turnLegalActions: encounter.turnLegalActions,
+      offerEnvironment: OFFER_ENVIRONMENT,
     });
     host.interrupt();
 

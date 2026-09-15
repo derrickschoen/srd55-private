@@ -4,7 +4,6 @@ import { createEncounter, type EncounterState } from '../../../src/combat/encoun
 import { combatantId, type CombatantId } from '../../../src/combat/values';
 import { exactDmIntelMatrix } from '../../../src/vtt/dm-tactical-intel';
 import { engineStateHandle } from '../../../src/vtt/engine-state-capsule';
-import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
 import { projectActorKnowledge } from '../../../src/vtt/intel/actor-knowledge';
 import { createEngineMcpRuntime } from '../../../src/vtt/mcp/entrypoint';
 import { freshMonsterPlanningState } from '../../../src/vtt/monster-planning-state';
@@ -14,11 +13,13 @@ import {
   extractCircumstanceFeatures,
 } from '../../../src/vtt/renderer-profile';
 import { generateRoom } from '../../../src/vtt/room-generator';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
 
 const SEED = 3_943_001;
 const SCOUT = combatantId('combatant:generated-3943001-monster-3');
 const FIGHTER = combatantId('combatant:fighter');
 const CLERIC = combatantId('combatant:cleric');
+const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
 
 function requiredProfile(state: EncounterState, id: CombatantId): CombatantProfile {
   const profile = state.combatants.find((candidate) => candidate.profile.id === id)?.profile;
@@ -82,12 +83,12 @@ describe('footprint Increment 3 AI-DM semantics', () => {
   it('reports hand-computed nearest-cell separation', () => {
     const state = separatedState();
     // Gargantuan target occupies columns 0..3; Scout at column 8: five intervals = 25 feet.
-    expect(canonicalEngineQueryPort.spaceDistance(state, SCOUT, FIGHTER)).toBe(25);
+    expect(OFFER_ENVIRONMENT.queries.spaceDistance(state, SCOUT, FIGHTER)).toBe(25);
   });
 
   it('keeps path cost as travel cost rather than creature separation', () => {
     const state = separatedState();
-    expect(canonicalEngineQueryPort.path(state, {
+    expect(OFFER_ENVIRONMENT.queries.path(state, {
       actorId: SCOUT,
       destination: { column: 7, row: 0 },
       movement: 'normal',
@@ -98,12 +99,15 @@ describe('footprint Increment 3 AI-DM semantics', () => {
     const state = selectorState();
     // Both are 15 feet from the Scout by occupied cells; the branded-id tie break chooses Cleric.
     // Anchor distance would incorrectly prefer Fighter (15 feet versus Cleric's 20).
-    expect(canonicalEngineQueryPort.resolveTarget(state, SCOUT, { kind: 'nearest_visible_enemy' })).toBe(CLERIC);
+    expect(OFFER_ENVIRONMENT.queries.resolveTarget(state, SCOUT, { kind: 'nearest_visible_enemy' })).toBe(CLERIC);
   });
 
   it('publishes footprint-aware public MCP summaries and nearest-cell threat bands', () => {
     const state = separatedState();
-    const runtime = createEngineMcpRuntime(state, { requestedActorIds: [SCOUT] });
+    const runtime = createEngineMcpRuntime(state, {
+      requestedActorIds: [SCOUT],
+      offerEnvironment: OFFER_ENVIRONMENT,
+    });
     const capsule = runtime.feed.current();
     const result = record(runtime.toolSurface.execute('engine.get_state_summary', {
       state_ref: {
@@ -140,7 +144,10 @@ describe('footprint Increment 3 AI-DM semantics', () => {
         originatingToken: null,
       }],
     };
-    const runtime = createEngineMcpRuntime(state, { requestedActorIds: [SCOUT] });
+    const runtime = createEngineMcpRuntime(state, {
+      requestedActorIds: [SCOUT],
+      offerEnvironment: OFFER_ENVIRONMENT,
+    });
     const capsule = runtime.feed.current();
     const result = record(runtime.toolSurface.execute('engine.get_state_summary', {
       state_ref: {
@@ -190,9 +197,12 @@ describe('footprint Increment 3 AI-DM semantics', () => {
 
   it('uses nearest-cell separation in DM intel', () => {
     const state = separatedState();
-    const structuredRuntime = createEngineMcpRuntime(state, { requestedActorIds: [SCOUT] });
+    const structuredRuntime = createEngineMcpRuntime(state, {
+      requestedActorIds: [SCOUT],
+      offerEnvironment: OFFER_ENVIRONMENT,
+    });
     const capsule = structuredRuntime.feed.current();
-    const row = exactDmIntelMatrix(state, capsule, canonicalEngineQueryPort, [SCOUT])
+    const row = exactDmIntelMatrix(state, capsule, OFFER_ENVIRONMENT.queries, [SCOUT])
       .find((candidate) => candidate.targetId === FIGHTER);
     expect(row).toMatchObject({
       policy: 'dm-turn-intel-v2-creature-space',
@@ -206,6 +216,7 @@ describe('footprint Increment 3 AI-DM semantics', () => {
     const proseRuntime = createEngineMcpRuntime(state, {
       requestedActorIds: [SCOUT],
       rendererProfile: { ...DEFAULT_RENDERER_PROFILE, format: 'regular_prose' },
+      offerEnvironment: OFFER_ENVIRONMENT,
     });
     const prose = turnContext(proseRuntime);
     expect(RENDERER_POLICY_VERSION).toBe('turn-context-renderer-v4-creature-space');
@@ -214,7 +225,10 @@ describe('footprint Increment 3 AI-DM semantics', () => {
 
   it('uses nearest-cell separation in renderer circumstance metrics', () => {
     const state = separatedState();
-    const runtime = createEngineMcpRuntime(state, { requestedActorIds: [SCOUT] });
+    const runtime = createEngineMcpRuntime(state, {
+      requestedActorIds: [SCOUT],
+      offerEnvironment: OFFER_ENVIRONMENT,
+    });
     const capsule = runtime.feed.current();
     const context = turnContext(runtime);
     expect(extractCircumstanceFeatures({

@@ -6,11 +6,15 @@ import type { MonsterAction, MonsterStatblock } from '../../../src/combat/statbl
 import { WIGHT } from '../../../src/combat/statblocks/undead-crypt';
 import { LION } from '../../../src/combat/statblocks/wild-beasts';
 import { EngineRoundSession, type AuthorizedEngineTurnProposal } from '../../../src/vtt/engine-round-session';
-import { availableEngineActorOptions, pureTurnProposalResolver } from '../../../src/vtt/intent-resolver';
+import { availableEngineActorOptions, createPureTurnProposalResolver } from '../../../src/vtt/intent-resolver';
 import { freshMonsterPlanningState } from '../../../src/vtt/monster-planning-state';
 import { legalMultiattackCombinations } from '../../../src/vtt/turn-option-registry';
 import type { EngineOfferableOption, EngineTurnProposal } from '../../../src/vtt/turn-proposal';
 import { placedToken, playerProfile } from '../combat/fixtures';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
+
+const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
+const TURN_PROPOSAL_RESOLVER = createPureTurnProposalResolver(OFFER_ENVIRONMENT);
 
 function actions(statblock: MonsterStatblock): readonly MonsterAction[] {
   return statblock.sourceDetails.actions.kind === 'present' ? statblock.sourceDetails.actions.value : [];
@@ -38,7 +42,7 @@ function encounter(statblock: MonsterStatblock, key: string): EncounterState {
 function mixedOption(state: EncounterState, expectedLabel: string): EngineOfferableOption {
   const actorId = state.combatants.find((candidate) => candidate.profile.kind === 'monster')?.profile.id;
   if (actorId === undefined) throw new Error('Mixed-kind fixture omitted its monster.');
-  const option = availableEngineActorOptions(state, actorId).find((candidate) =>
+  const option = availableEngineActorOptions(state, actorId, OFFER_ENVIRONMENT).find((candidate) =>
     candidate.label.startsWith(expectedLabel));
   if (option === undefined) throw new Error(`Mixed-kind fixture omitted ${expectedLabel}.`);
   return option;
@@ -53,7 +57,7 @@ function authorize(state: EncounterState, option: EngineOfferableOption): Author
     reason: 'Exercise the mixed-kind multiattack fixture.',
     overrideJustification: null,
   };
-  const resolution = pureTurnProposalResolver.resolve(state, proposal);
+  const resolution = TURN_PROPOSAL_RESOLVER.resolve(state, proposal);
   if (!resolution.valid) throw new Error(resolution.refusals.map((entry) => entry.code).join(', '));
   return {
     proposal,
@@ -92,7 +96,7 @@ describe('mixed-kind monster multiattack', () => {
       const state = encounter(statblock, String(statblock.id));
       const actorId = state.combatants.find((candidate) => candidate.profile.kind === 'monster')?.profile.id;
       if (actorId === undefined) throw new Error('Mixed-kind fixture omitted its actor.');
-      const options = availableEngineActorOptions(state, actorId);
+      const options = availableEngineActorOptions(state, actorId, OFFER_ENVIRONMENT);
       expect(options.some((option) => option.actionSlots.some((slot) =>
         slot.use.kind === 'attack' && slot.use.actionId === forbidden))).toBe(false);
       expect(options.some((option) => option.actionSlots.some((slot) =>
@@ -112,7 +116,7 @@ describe('mixed-kind monster multiattack', () => {
 
     const session = new EngineRoundSession(state, mulberry32(46_600_001), {
       kind: 'unattended', askDefault: 'decline',
-    });
+    }, OFFER_ENVIRONMENT);
     session.applyResolvedMechanics([authorized], null);
     const events = session.currentState().eventLog.filter((event) =>
       (event.type === 'attack_resolved' && event.actor === option.actorId) ||
