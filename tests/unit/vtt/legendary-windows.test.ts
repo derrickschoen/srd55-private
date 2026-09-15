@@ -14,6 +14,8 @@ import {
 } from '../../../src/vtt/intel/legendary-windows';
 import type { EngineQueryPort } from '../../../src/vtt/engine-query-port';
 import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
+import { evaluateScenarioFact as evaluateScenarioFactWithQueries } from '../../../src/vtt/speculative-planning';
+import type { ScenarioFactAtom } from '../../../src/vtt/speculative-plan-types';
 import {
   projectEncounterTimeline,
   type EncounterTimelineProjection,
@@ -68,6 +70,18 @@ function full(
 function requireDetails(intel: LegendaryWindowsIntel) {
   if (intel.status !== 'resolved' || intel.details === null) throw new Error('Expected resolved full legendary intel.');
   return intel.details;
+}
+
+function chargingHornTarget(intel: LegendaryWindowsIntel): CombatantProfile['id'] {
+  const actor = requireDetails(intel).actors[0];
+  if (actor?.status !== 'resolved') throw new Error('Expected resolved legendary actor facts.');
+  const horn = actor.pendingWindow?.options.find(
+    (option) => option.option.id === 'legendary_action:charging-horn',
+  );
+  if (horn?.status !== 'resolved' || horn.assessment.kind !== 'attack') {
+    throw new Error('Expected a resolved Charging Horn assessment.');
+  }
+  return horn.assessment.target;
 }
 
 describe('M4 legendary-windows-v2', () => {
@@ -149,9 +163,58 @@ describe('M4 legendary-windows-v2', () => {
   });
 
   it('uses the supplied distance policy to select the nearest legendary-action enemy', () => {
-    const canonicalNearest = playerProfile('legendary-distance-canonical', { initiativeBonus: 20 });
-    const controlledNearest = playerProfile('legendary-distance-controlled', { initiativeBonus: 10 });
+    const alpha = playerProfile('legendary-distance-alpha', { initiativeBonus: 30 });
+    const beta = playerProfile('legendary-distance-beta', { initiativeBonus: 20 });
+    const gamma = playerProfile('legendary-distance-gamma', { initiativeBonus: 10 });
     const unicorn = unicornProfile('legendary-distance-unicorn');
+    const pendingState = (combatants: readonly CombatantProfile[]): EncounterState => {
+      const created = createEncounter({
+        bounds: { columns: 8, rows: 6 },
+        combatants: [...combatants, unicorn],
+        tokens: [
+          placedToken(alpha, 1, 1),
+          placedToken(beta, 5, 1),
+          placedToken(gamma, 2, 4),
+          placedToken(unicorn, 2, 1),
+        ],
+      });
+      const started = reduceEncounter(created, { type: 'roll_initiative' }, face(10)).state;
+      return reduceEncounter(started, { type: 'end_turn', actor: alpha.id }, face(10)).state;
+    };
+    const forward = pendingState([alpha, beta, gamma]);
+    const reversed = pendingState([gamma, beta, alpha]);
+    const controlledQueries: EngineQueryPort = Object.freeze({
+      ...OFFER_ENVIRONMENT.queries,
+      spaceDistance: (...args: Parameters<EngineQueryPort['spaceDistance']>) => {
+        const [state, left, right, leftAnchor] = args;
+        if (left === unicorn.id && right === alpha.id) return 10;
+        if (left === unicorn.id && right === beta.id) return 5;
+        if (left === unicorn.id && right === gamma.id) return 10;
+        return OFFER_ENVIRONMENT.queries.spaceDistance(state, left, right, leftAnchor);
+      },
+    });
+
+    // The Large Unicorn occupies columns 2-3 and rows 1-2: canonical distances are alpha=5, beta=10, gamma=10.
+    expect([
+      OFFER_ENVIRONMENT.queries.spaceDistance(forward, unicorn.id, alpha.id),
+      OFFER_ENVIRONMENT.queries.spaceDistance(forward, unicorn.id, beta.id),
+      OFFER_ENVIRONMENT.queries.spaceDistance(forward, unicorn.id, gamma.id),
+    ]).toEqual([5, 10, 10]);
+    expect([
+      controlledQueries.spaceDistance(forward, unicorn.id, alpha.id),
+      controlledQueries.spaceDistance(forward, unicorn.id, beta.id),
+      controlledQueries.spaceDistance(forward, unicorn.id, gamma.id),
+    ]).toEqual([10, 5, 10]);
+    expect(chargingHornTarget(full(forward, [], undefined, controlledQueries))).toBe(beta.id);
+    expect(chargingHornTarget(full(reversed, [], undefined, controlledQueries))).toBe(beta.id);
+    expect(chargingHornTarget(full(forward))).toBe(alpha.id);
+    expect(chargingHornTarget(full(reversed))).toBe(alpha.id);
+  });
+
+  it('forwards one supplied distance policy to legendary and speculative consumers', () => {
+    const canonicalNearest = playerProfile('shared-distance-canonical', { initiativeBonus: 20 });
+    const controlledNearest = playerProfile('shared-distance-controlled', { initiativeBonus: 10 });
+    const unicorn = unicornProfile('shared-distance-unicorn');
     const created = createEncounter({
       bounds: { columns: 12, rows: 4 },
       combatants: [canonicalNearest, controlledNearest, unicorn],
@@ -172,23 +235,27 @@ describe('M4 legendary-windows-v2', () => {
         return OFFER_ENVIRONMENT.queries.spaceDistance(state, left, right, leftAnchor);
       },
     });
-    const controlledActor = requireDetails(full(pending, [], undefined, controlledQueries)).actors[0];
-    const canonicalActor = requireDetails(full(pending)).actors[0];
-    if (controlledActor?.status !== 'resolved' || canonicalActor?.status !== 'resolved') {
-      throw new Error('Expected resolved controlled-distance legendary facts.');
-    }
-    const controlledHorn = controlledActor.pendingWindow?.options.find(
-      (option) => option.option.id === 'legendary_action:charging-horn',
-    );
-    const canonicalHorn = canonicalActor.pendingWindow?.options.find(
-      (option) => option.option.id === 'legendary_action:charging-horn',
-    );
-    if (controlledHorn?.status !== 'resolved' || controlledHorn.assessment.kind !== 'attack' ||
-      canonicalHorn?.status !== 'resolved' || canonicalHorn.assessment.kind !== 'attack') {
-      throw new Error('Expected resolved Charging Horn assessments.');
-    }
-    expect(controlledHorn.assessment.target).toBe(controlledNearest.id);
-    expect(canonicalHorn.assessment.target).toBe(canonicalNearest.id);
+    const adjacency: ScenarioFactAtom = {
+      kind: 'adjacency_is',
+      left: { actorId: unicorn.id, selector: { kind: 'combatant', combatantId: unicorn.id } },
+      right: {
+        actorId: controlledNearest.id,
+        selector: { kind: 'combatant', combatantId: controlledNearest.id },
+      },
+      value: true,
+    };
+
+    expect(evaluateScenarioFactWithQueries(pending, adjacency, controlledQueries)).toEqual({
+      matches: true,
+      actual: true,
+    });
+    expect(evaluateScenarioFactWithQueries(pending, adjacency, OFFER_ENVIRONMENT.queries)).toEqual({
+      matches: false,
+      actual: false,
+      failure: 'FACT_FALSE',
+    });
+    expect(chargingHornTarget(full(pending, [], undefined, controlledQueries))).toBe(controlledNearest.id);
+    expect(chargingHornTarget(full(pending))).toBe(canonicalNearest.id);
   });
 
   it('exposes pending legendary-resistance save and severity facts without choosing a policy', () => {
