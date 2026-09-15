@@ -17,14 +17,14 @@ import {
   persistentAreaId,
 } from '../../../src/combat/values';
 import {
-  createEngineStateCapsule,
+  createEngineStateCapsuleForEnvironment,
   engineStateHandle,
   FixedReadonlyStateCapsuleSource,
   projectEngineEncounterState,
 } from '../../../src/vtt/engine-state-capsule';
 import { projectEngineInitiativeIntel } from '../../../src/vtt/engine-initiative-intel';
 import {
-  engineActionRegistry,
+  engineActionRegistryForEnvironment,
   engineConcentrationActive,
   enginePlanningHitPointMaximum,
   enginePlanningHitPoints,
@@ -35,8 +35,8 @@ import {
   buildHostScenarioMenu,
   compileHostScenarios,
   complementScenarioFact,
-  evaluateHostScenarios,
-  evaluateScenarioFact,
+  evaluateHostScenarios as evaluateHostScenariosWithEnvironment,
+  evaluateScenarioFact as evaluateScenarioFactWithQueries,
   maximumInfluenceRadiusFeet,
   scenarioFactKey,
 } from '../../../src/vtt/speculative-planning';
@@ -52,6 +52,23 @@ import { decodeArenaFixtureText } from '../../../src/vtt/mcp/entrypoint';
 import { freshMonsterPlanningState, projectFutureMonsterTurns } from '../../../src/vtt/monster-planning-state';
 import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
 import { declareTestInputs } from '../../helpers/test-inputs';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
+
+const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
+
+function evaluateScenarioFact(
+  state: Parameters<typeof evaluateScenarioFactWithQueries>[0],
+  fact: Parameters<typeof evaluateScenarioFactWithQueries>[1],
+): ReturnType<typeof evaluateScenarioFactWithQueries> {
+  return evaluateScenarioFactWithQueries(state, fact, OFFER_ENVIRONMENT.queries);
+}
+
+function evaluateHostScenarios(
+  state: Parameters<typeof evaluateHostScenariosWithEnvironment>[0],
+  scenarios: Parameters<typeof evaluateHostScenariosWithEnvironment>[1],
+): ReturnType<typeof evaluateHostScenariosWithEnvironment> {
+  return evaluateHostScenariosWithEnvironment(state, scenarios, OFFER_ENVIRONMENT.queries);
+}
 
 const HARD_BASIS_SEEDS = [
   5_117_001, 5_117_002, 5_117_003, 5_117_004, 5_117_005, 5_117_006,
@@ -248,10 +265,12 @@ describe('speculative host fact system', () => {
     const hard = freshMonsterPlanningState(generateRoom(5_117_002, { difficulty: 'hard' }).encounter.state);
     const actor = hard.combatants.find((entry) =>
       entry.profile.kind === 'monster' && entry.life === 'living' &&
-      engineActionRegistry(hard).actionsFor(entry.profile.id).length > 0);
+      engineActionRegistryForEnvironment(hard, OFFER_ENVIRONMENT).actionsFor(entry.profile.id).length > 0);
     const target = actor === undefined ? undefined : hard.combatants.find((entry) =>
       entry.profile.kind === 'player_character' && entry.life === 'living');
-    const action = actor === undefined ? undefined : engineActionRegistry(hard).actionsFor(actor.profile.id)[0];
+    const action = actor === undefined
+      ? undefined
+      : engineActionRegistryForEnvironment(hard, OFFER_ENVIRONMENT).actionsFor(actor.profile.id)[0];
     if (actor === undefined || target === undefined || action === undefined) {
       throw new Error('Hard-basis reach fixture is incomplete.');
     }
@@ -324,7 +343,12 @@ describe('speculative host fact system', () => {
       kind: 'zone_occupancy_is', subject: targetRef, zoneId: authoredZoneId, value: 'inside',
     }).matches).toBe(true);
     expect(engineConcentrationActive(zoned, actor.profile.id)).toBe(true);
-    expect(projectEngineEncounterState(zoned, engineActionRegistry(zoned), projectEngineInitiativeIntel(zoned, []), 1).semanticZones)
+    expect(projectEngineEncounterState(
+      zoned,
+      engineActionRegistryForEnvironment(zoned, OFFER_ENVIRONMENT),
+      projectEngineInitiativeIntel(zoned, []),
+      1,
+    ).semanticZones)
       .toEqual([
         {
           id: authoredZoneId,
@@ -360,7 +384,12 @@ describe('speculative host fact system', () => {
           }
         : entry),
     };
-    const projection = projectEngineEncounterState(state, engineActionRegistry(state), projectEngineInitiativeIntel(state, []), 1);
+    const projection = projectEngineEncounterState(
+      state,
+      engineActionRegistryForEnvironment(state, OFFER_ENVIRONMENT),
+      projectEngineInitiativeIntel(state, []),
+      1,
+    );
     expect(projection.combatants.find((entry) => entry.id === fixture.target.id)?.planning)
       .toMatchObject({
         temporaryHitPoints: 9,
@@ -450,7 +479,7 @@ describe('speculative host fact system', () => {
         }),
       ];
       const scenarios = compileHostScenarios(menu);
-      const capsule = createEngineStateCapsule({
+      const capsule = createEngineStateCapsuleForEnvironment({
         runId: encounterSessionId(`encounter:hard-${String(seed)}`),
         branchId: encounterBranchId(`branch:hard-${String(seed)}`),
         revision: 1,
@@ -466,7 +495,13 @@ describe('speculative host fact system', () => {
           scenarioMenu: menu,
           scenarios,
         },
-        projection: projectEngineEncounterState(state, engineActionRegistry(state), projectEngineInitiativeIntel(state, []), 1),
+        projection: projectEngineEncounterState(
+          state,
+          engineActionRegistryForEnvironment(state, OFFER_ENVIRONMENT),
+          projectEngineInitiativeIntel(state, []),
+          1,
+        ),
+        offerEnvironment: OFFER_ENVIRONMENT.binding,
       });
       if (capsule.request?.phase !== 'speculative') throw new Error('Speculative capsule was not retained.');
       expect(evaluateHostScenarios(state, capsule.request.scenarios)).toMatchObject({
@@ -484,7 +519,7 @@ describe('speculative host fact system', () => {
     const players = state.combatants
       .filter((entry) => entry.profile.kind === 'player_character' && entry.life === 'living')
       .map((entry) => entry.profile.id);
-    const result = buildHostScenarioMenu(state, actors, players);
+    const result = buildHostScenarioMenu(state, actors, players, OFFER_ENVIRONMENT);
     expect(result.baselineProposals.map((entry) => entry.actorId)).toEqual(actors);
     expect(result.scenarioMenu.length).toBeGreaterThan(0);
     expect(result.scenarioMenu.length).toBeLessThanOrEqual(8);
@@ -507,7 +542,7 @@ describe('speculative host fact system', () => {
     })];
     const scenarios = compileHostScenarios(menu);
     const planningState = projectFutureMonsterTurns(fixture.state, [fixture.target.id]);
-    const capsule = createEngineStateCapsule({
+    const capsule = createEngineStateCapsuleForEnvironment({
       runId: encounterSessionId('encounter:spec-submit'),
       branchId: encounterBranchId('branch:spec-submit'),
       revision: 7,
@@ -523,7 +558,13 @@ describe('speculative host fact system', () => {
         scenarioMenu: menu,
         scenarios,
       },
-      projection: projectEngineEncounterState(planningState, engineActionRegistry(planningState), projectEngineInitiativeIntel(planningState, []), 2),
+      projection: projectEngineEncounterState(
+        planningState,
+        engineActionRegistryForEnvironment(planningState, OFFER_ENVIRONMENT),
+        projectEngineInitiativeIntel(planningState, []),
+        2,
+      ),
+      offerEnvironment: OFFER_ENVIRONMENT.binding,
     });
     const source = new FixedReadonlyStateCapsuleSource(capsule);
     const accepted: Array<ReturnType<typeof submitSpeculativeRoundPlan>> = [];

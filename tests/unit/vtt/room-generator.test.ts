@@ -23,7 +23,12 @@ import {
   hardRoomMembershipViolations,
 } from '../../../tools/d569-second-family-manifest';
 import { loadExternalPartyPackBytes } from '../../../src/vtt/party-pack';
+import { availableEngineActorOptions, resolveEngineActorOption } from '../../../src/vtt/intent-resolver';
+import { freshMonsterPlanningState } from '../../../src/vtt/monster-planning-state';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
 import { declareTestInputs } from '../../helpers/test-inputs';
+
+const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
 
 const BASIS_SEEDS = [
   3_943_001,
@@ -563,6 +568,13 @@ describe('seeded room generator', () => {
     (seed) => {
       const brutal = generateRoom(seed, { difficulty: 'brutal' });
       expect(brutalRoomMembershipViolations(brutal)).toEqual([]);
+      const state = freshMonsterPlanningState(brutal.encounter.state);
+      const monsters = state.combatants.filter((candidate) => candidate.profile.kind === 'monster');
+      for (const monster of monsters) {
+        const productive = availableEngineActorOptions(state, monster.profile.id, OFFER_ENVIRONMENT)
+          .some((option) => resolveEngineActorOption(state, option, OFFER_ENVIRONMENT).valid);
+        expect(productive, monster.profile.id).toBe(true);
+      }
     },
   );
 
