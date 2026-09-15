@@ -22,7 +22,6 @@ import {
 import type { ProposedTurnResolution } from './engine-envelopes';
 import type { EngineStateCapsule } from './engine-state-capsule';
 import {
-  canonicalEngineQueryPort,
   monsterBonusActions,
   type EngineQueryPort,
 } from './engine-query-port';
@@ -31,10 +30,7 @@ import {
   createPureTurnProposalResolver,
   resolveEngineActorOption,
 } from './intent-resolver';
-import {
-  buildOfferEnvironment,
-  type EngineOptionEnvironment,
-} from './offers/build-offer-environment';
+import type { EngineOptionEnvironment } from './offers/build-offer-environment';
 import { spellDefinition } from '../combat/spells/definitions';
 import type {
   EngineActionSlotUse,
@@ -56,7 +52,6 @@ export const BLIND_LIVE_WALL_MS = 180_000 as const;
 type PreliminaryOptionResolution = ReturnType<typeof resolveEngineActorOption>;
 
 export interface BlindResolverDependencies {
-  readonly queries?: EngineQueryPort;
   readonly availableOptions?: (
     state: EncounterState,
     actorId: CombatantId,
@@ -78,7 +73,7 @@ export interface BlindResolverInput {
   readonly envelope: unknown;
   readonly attempt: number;
   readonly repairArm: BlindRepairArm;
-  readonly offerEnvironment?: EngineOptionEnvironment;
+  readonly offerEnvironment: EngineOptionEnvironment;
   readonly dependencies?: BlindResolverDependencies;
 }
 
@@ -366,7 +361,7 @@ function candidatesForActor(
   actorId: CombatantId,
   revision: number,
   offerEnvironment: EngineOptionEnvironment,
-  dependencies: Required<Pick<BlindResolverDependencies, 'queries' | 'availableOptions' | 'resolveOption'>>,
+  dependencies: Required<Pick<BlindResolverDependencies, 'availableOptions' | 'resolveOption'>>,
 ): { readonly candidates: readonly SemanticCandidate[]; readonly resolutionFailures: number } {
   const options = dependencies.availableOptions(state, actorId, offerEnvironment, revision);
   let resolutionFailures = 0;
@@ -378,7 +373,7 @@ function candidatesForActor(
     }
     const actions = option.actionSlots.map((slot): SemanticAction => ({
       kind: actionKind(slot),
-      name: actionDisplayName(state, actorId, slot, dependencies.queries),
+      name: actionDisplayName(state, actorId, slot, offerEnvironment.queries),
     }));
     const fingerprint = semanticFingerprint(option, resolution.mechanics, actions);
     return [{
@@ -667,7 +662,7 @@ function resolveActorIntent(
   intent: BlindIntent,
   actor: BoundCreature,
   offerEnvironment: EngineOptionEnvironment,
-  dependencies: Required<Pick<BlindResolverDependencies, 'queries' | 'availableOptions' | 'resolveOption' | 'proposalResolver'>>,
+  dependencies: Required<Pick<BlindResolverDependencies, 'availableOptions' | 'resolveOption' | 'proposalResolver'>>,
 ): BlindResolvedActorIntent | CandidateFailure & { readonly alternative?: BlindLegalAlternative } {
   const failed = (
     codes: readonly BlindIntentRejectionCode[],
@@ -710,7 +705,7 @@ function resolveActorIntent(
   }
   const destinationMatches = candidates.filter((candidate) => sameCell(candidate.mechanics.finalPosition, destination));
   if (destinationMatches.length === 0) {
-    const current = dependencies.queries.tokenPosition(input.state, actor.id);
+    const current = offerEnvironment.queries.tokenPosition(input.state, actor.id);
     const omittedOrHold = intent.destination === undefined ||
       intent.destination.kind === 'relative' && intent.destination.relation === 'hold';
     const actionCanMove = candidates.some((candidate) => candidate.option.movement.preference.willingness !== 'none');
@@ -781,13 +776,8 @@ export function resolveBlindRoundIntents(input: BlindResolverInput): BlindResolu
   if (actors.length !== expected.size || actors.some((actor) => !expected.has(actor.id))) {
     return rejected(input.attempt, input.repairArm, ['INTENT_SET_INCOMPLETE']);
   }
-  const offerEnvironment = input.offerEnvironment ?? buildOfferEnvironment({
-    kind: 'configuration',
-    mode: 'legacy_standard',
-  });
-  const queries = input.offerEnvironment?.queries ?? input.dependencies?.queries ?? canonicalEngineQueryPort;
+  const offerEnvironment = input.offerEnvironment;
   const dependencies = {
-    queries,
     availableOptions: input.dependencies?.availableOptions ?? availableEngineActorOptions,
     resolveOption: input.dependencies?.resolveOption ?? resolveEngineActorOption,
     proposalResolver: input.dependencies?.proposalResolver ??

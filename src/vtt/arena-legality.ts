@@ -5,7 +5,6 @@ import { SPELL_MANIFEST } from '../combat/spells/manifest';
 import type { CombatantId } from '../combat/values';
 import type { ArenaPromptEnvelope } from './arena-prompt';
 import {
-  canonicalEngineQueryPort,
   engineActionRangeFeet,
   engineAttackRangeFeet,
   type EngineQueryPort,
@@ -21,7 +20,7 @@ import type {
 export function arenaTokenPosition(
   state: EncounterState,
   id: CombatantId,
-  queries: EngineQueryPort = canonicalEngineQueryPort,
+  queries: EngineQueryPort,
 ): GridCell | null {
   return queries.tokenPosition(state, id);
 }
@@ -29,7 +28,7 @@ export function arenaTokenPosition(
 export function arenaCombatant(
   state: EncounterState,
   id: CombatantId,
-  queries: EngineQueryPort = canonicalEngineQueryPort,
+  queries: EngineQueryPort,
 ) {
   return queries.combatant(state, id);
 }
@@ -38,7 +37,7 @@ export function arenaSameSide(
   state: EncounterState,
   left: CombatantId,
   right: CombatantId,
-  queries: EngineQueryPort = canonicalEngineQueryPort,
+  queries: EngineQueryPort,
 ): boolean {
   return queries.sameSide(state, left, right);
 }
@@ -47,7 +46,7 @@ export function resolveArenaTarget(
   state: EncounterState,
   actor: CombatantId,
   selector: TargetSelector,
-  queries: EngineQueryPort = canonicalEngineQueryPort,
+  queries: EngineQueryPort,
 ): CombatantId | null {
   const engineSelector: EngineTargetSelector = selector.kind === 'combatant'
     ? { kind: 'combatant', combatantId: selector.combatantId }
@@ -58,7 +57,7 @@ export function resolveArenaTarget(
 export function arenaMonsterActions(
   state: EncounterState,
   actor: CombatantId,
-  queries: EngineQueryPort = canonicalEngineQueryPort,
+  queries: EngineQueryPort,
 ): readonly MonsterAction[] {
   return queries.actions(state, actor);
 }
@@ -182,22 +181,9 @@ function programActions(program: DecisionProgram): readonly PlanAction[] {
 export function validateArenaPlan(
   plan: RoundPlan,
   state: EncounterState,
-  envelope?: ArenaPromptEnvelope,
-): readonly string[];
-export function validateArenaPlan(
-  plan: RoundPlan,
-  state: EncounterState,
   queries: EngineQueryPort,
   envelope?: ArenaPromptEnvelope,
-): readonly string[];
-export function validateArenaPlan(
-  plan: RoundPlan,
-  state: EncounterState,
-  queriesOrEnvelope: EngineQueryPort | ArenaPromptEnvelope = canonicalEngineQueryPort,
-  suppliedEnvelope?: ArenaPromptEnvelope,
 ): readonly string[] {
-  const queries = 'tokenPosition' in queriesOrEnvelope ? queriesOrEnvelope : canonicalEngineQueryPort;
-  const envelope = 'tokenPosition' in queriesOrEnvelope ? suppliedEnvelope : queriesOrEnvelope;
   const refusals: string[] = [];
   if (envelope !== undefined && (
     plan.encounterId !== envelope.encounterId ||

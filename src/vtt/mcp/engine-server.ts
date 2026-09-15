@@ -2376,7 +2376,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         attempt: blindIntentAttempt,
         repairArm: blindRepairArm,
         offerEnvironment,
-        dependencies: { queries, proposalResolver: turnProposals },
+        dependencies: { proposalResolver: turnProposals },
       });
       const recordResolution = (recorded: BlindResolutionResult): void => {
         const resolverEndedAtUnixMs = clock();

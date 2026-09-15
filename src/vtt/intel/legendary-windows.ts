@@ -8,7 +8,6 @@ import type { MonsterLegendaryAction } from '../../combat/statblock';
 import type { EncounterState } from '../../combat/encounter';
 import type { CombatantId } from '../../combat/values';
 import {
-  canonicalEngineQueryPort,
   engineTacticalAttackInput,
   type EngineQueryPort,
 } from '../engine-query-port';
@@ -128,7 +127,7 @@ export interface LegendaryWindowsRequest {
   /** Null records that the caller did not have the session timeline projection. */
   readonly timeline: EncounterTimelineProjection | null;
   readonly detail: 'compact' | 'full';
-  readonly queries?: EngineQueryPort;
+  readonly queries: EngineQueryPort;
   readonly resistanceSeverityInputs?: readonly LegendaryResistanceSeverityInput[];
 }
 
@@ -316,7 +315,7 @@ function compactSummary(
 export function provideLegendaryWindows(
   request: LegendaryWindowsRequest,
 ): LegendaryWindowsIntel {
-  const queries = request.queries ?? canonicalEngineQueryPort;
+  const queries = request.queries;
   const candidates = request.state.combatants.filter((subject) =>
     subject.legendary !== undefined || subject.profile.rules.legendary !== undefined,
   );

@@ -8,6 +8,7 @@ import { EngineRoundSession } from '../../../src/vtt/engine-round-session';
 import {
   availableEngineActorOptions,
   createPureTurnProposalResolver,
+  resolveEngineActorOption,
 } from '../../../src/vtt/intent-resolver';
 import { scoreTeamPlans } from '../../../src/vtt/intel/team-scorer';
 import { freshMonsterPlanningState } from '../../../src/vtt/monster-planning-state';
@@ -52,14 +53,19 @@ function revisionBoundEnvironment(helpAttack: 'disabled' | 'enabled' = 'disabled
 }
 
 describe('Slice 3A bound offer environments', () => {
-  it('resolver fallback reuses the primary environment instance', () => {
+  it('resolver fallback accepts an equal binding while a different digest is refused', () => {
     const { actor, state } = fixture();
     const environment = revisionBoundEnvironment();
+    const equalBindingEnvironment = buildOfferEnvironment({
+      kind: 'binding',
+      binding: environment.binding,
+    });
+    const differentPolicyEnvironment = revisionBoundEnvironment('enabled');
     const options = availableEngineActorOptions(state, actor.id, environment);
     const fallback = options.find((option) =>
       option.actionSlots.some((slot) => slot.slot === 'main' && slot.use.kind === 'dodge'));
     if (fallback === undefined) throw new Error('Dodge fallback fixture is absent.');
-    const result = createPureTurnProposalResolver(environment).resolve(state, {
+    const result = createPureTurnProposalResolver(equalBindingEnvironment).resolve(state, {
       actorId: actor.id,
       expectedRevision: state.revision,
       primaryOptionId: engineOptionId('option:not-offered'),
@@ -68,7 +74,13 @@ describe('Slice 3A bound offer environments', () => {
       overrideJustification: null,
     });
 
+    expect(equalBindingEnvironment).not.toBe(environment);
+    expect(equalBindingEnvironment.binding).toEqual(environment.binding);
     expect(result).toMatchObject({ valid: true, selectedBranch: 'fallback' });
+    expect(resolveEngineActorOption(state, fallback, differentPolicyEnvironment)).toMatchObject({
+      valid: false,
+      code: 'OFFER_ENVIRONMENT_MISMATCH',
+    });
   });
 
   it('board path and round execution share environment digest', () => {
