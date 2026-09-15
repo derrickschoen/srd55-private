@@ -12,11 +12,15 @@ import {
   provideLegendaryWindows,
   type LegendaryWindowsIntel,
 } from '../../../src/vtt/intel/legendary-windows';
+import type { EngineQueryPort } from '../../../src/vtt/engine-query-port';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
 import {
   projectEncounterTimeline,
   type EncounterTimelineProjection,
 } from '../../../src/vtt/session-timeline';
 import { placedToken, playerProfile } from '../combat/fixtures';
+
+const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
 
 function face(value: number): () => number {
   return () => (value - 0.5) / 20;
@@ -50,12 +54,14 @@ function full(
   state: EncounterState,
   severityInputs: Parameters<typeof provideLegendaryWindows>[0]['resistanceSeverityInputs'] = [],
   timeline: EncounterTimelineProjection | null = projectEncounterTimeline(state, []),
+  queries: EngineQueryPort = OFFER_ENVIRONMENT.queries,
 ): LegendaryWindowsIntel {
   return provideLegendaryWindows({
     state,
     timeline,
     detail: 'full',
     resistanceSeverityInputs: severityInputs,
+    queries,
   });
 }
 
@@ -142,6 +148,49 @@ describe('M4 legendary-windows-v2', () => {
     expect(unicorn.actionUses).toEqual({ remaining: 2, maximum: 3 });
   });
 
+  it('uses the supplied distance policy to select the nearest legendary-action enemy', () => {
+    const canonicalNearest = playerProfile('legendary-distance-canonical', { initiativeBonus: 20 });
+    const controlledNearest = playerProfile('legendary-distance-controlled', { initiativeBonus: 10 });
+    const unicorn = unicornProfile('legendary-distance-unicorn');
+    const created = createEncounter({
+      bounds: { columns: 12, rows: 4 },
+      combatants: [canonicalNearest, controlledNearest, unicorn],
+      tokens: [
+        placedToken(canonicalNearest, 0, 1),
+        placedToken(controlledNearest, 7, 1),
+        placedToken(unicorn, 1, 1),
+      ],
+    });
+    const started = reduceEncounter(created, { type: 'roll_initiative' }, face(10)).state;
+    const pending = reduceEncounter(started, { type: 'end_turn', actor: canonicalNearest.id }, face(10)).state;
+    const controlledQueries: EngineQueryPort = Object.freeze({
+      ...OFFER_ENVIRONMENT.queries,
+      spaceDistance: (...args: Parameters<EngineQueryPort['spaceDistance']>) => {
+        const [state, left, right, leftAnchor] = args;
+        if (left === unicorn.id && right === canonicalNearest.id) return 30;
+        if (left === unicorn.id && right === controlledNearest.id) return 5;
+        return OFFER_ENVIRONMENT.queries.spaceDistance(state, left, right, leftAnchor);
+      },
+    });
+    const controlledActor = requireDetails(full(pending, [], undefined, controlledQueries)).actors[0];
+    const canonicalActor = requireDetails(full(pending)).actors[0];
+    if (controlledActor?.status !== 'resolved' || canonicalActor?.status !== 'resolved') {
+      throw new Error('Expected resolved controlled-distance legendary facts.');
+    }
+    const controlledHorn = controlledActor.pendingWindow?.options.find(
+      (option) => option.option.id === 'legendary_action:charging-horn',
+    );
+    const canonicalHorn = canonicalActor.pendingWindow?.options.find(
+      (option) => option.option.id === 'legendary_action:charging-horn',
+    );
+    if (controlledHorn?.status !== 'resolved' || controlledHorn.assessment.kind !== 'attack' ||
+      canonicalHorn?.status !== 'resolved' || canonicalHorn.assessment.kind !== 'attack') {
+      throw new Error('Expected resolved Charging Horn assessments.');
+    }
+    expect(controlledHorn.assessment.target).toBe(controlledNearest.id);
+    expect(canonicalHorn.assessment.target).toBe(canonicalNearest.id);
+  });
+
   it('exposes pending legendary-resistance save and severity facts without choosing a policy', () => {
     const player = playerProfile('legendary-resistance-player', { initiativeBonus: 20 });
     const setup = startedEncounter(player);
@@ -176,12 +225,22 @@ describe('M4 legendary-windows-v2', () => {
     const ordinary = createEncounter({
       bounds: { columns: 4, rows: 4 }, combatants: [player], tokens: [placedToken(player, 0, 0)],
     });
-    expect(provideLegendaryWindows({ state: ordinary, timeline: null, detail: 'compact' })).toMatchObject({
+    expect(provideLegendaryWindows({
+      state: ordinary,
+      timeline: null,
+      detail: 'compact',
+      queries: OFFER_ENVIRONMENT.queries,
+    })).toMatchObject({
       policy: LEGENDARY_WINDOWS_POLICY, status: 'unresolved', reason: 'no_legendary_actor',
     });
 
     const setup = startedEncounter(playerProfile('timeline-missing-player', { initiativeBonus: 20 }));
-    const intel = provideLegendaryWindows({ state: setup.state, timeline: null, detail: 'full' });
+    const intel = provideLegendaryWindows({
+      state: setup.state,
+      timeline: null,
+      detail: 'full',
+      queries: OFFER_ENVIRONMENT.queries,
+    });
     const unicorn = requireDetails(intel).actors[0];
     if (unicorn === undefined || unicorn.status !== 'resolved') throw new Error('Expected Unicorn facts.');
     expect(unicorn.nextWindow).toEqual({ status: 'unresolved', reason: 'timeline_unavailable' });

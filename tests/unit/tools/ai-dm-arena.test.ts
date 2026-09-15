@@ -7,6 +7,8 @@ import { canonicalJson } from '../../../src/commands/canonical-json';
 import { sha256 } from '../../../src/crypto/sha256';
 import { encounterSessionId, type AgentSessionId } from '../../../src/combat/values';
 import { createEncounter } from '../../../src/combat/encounter';
+import { monsterCombatantProfile } from '../../../src/combat/combatant';
+import { GOBLIN_WARRIOR } from '../../../src/combat/statblocks/monsters';
 import {
   agentSessionIdFromCli,
   contextTokenCount,
@@ -35,6 +37,7 @@ import {
 import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
 import { createUnrepresentedPartyThreatCatalog } from '../../../src/vtt/offers/party-threat-catalog';
 import { validateArenaPlan } from '../../../src/vtt/arena-legality';
+import type { EngineQueryPort } from '../../../src/vtt/engine-query-port';
 import { SNIPPET_REGISTRY } from '../../../src/vtt/snippet-registry-runtime';
 import { engineActionId, engineSpellId } from '../../../src/vtt/turn-proposal';
 import {
@@ -735,6 +738,52 @@ const ALL_OPTIONS_TEST_RENDERER_ARGS = [
 ] as const;
 
 describe('AI-DM arena', () => {
+  it('uses the supplied distance policy for attack-range legality', () => {
+    const monster = monsterCombatantProfile(GOBLIN_WARRIOR, {
+      combatantId: 'combatant:arena-distance-goblin',
+      tokenId: 'token:arena-distance-goblin',
+    });
+    const player = playerProfile('arena-distance-player');
+    const state = createEncounter({
+      bounds: { columns: 4, rows: 1 },
+      combatants: [monster, player],
+      tokens: [placedToken(monster, 0), placedToken(player, 1)],
+    });
+    const plan: RoundPlan = {
+      kind: 'round_plan',
+      protocolVersion: 2,
+      encounterId: encounterSessionId('encounter:arena-distance'),
+      requestId: 'request:arena-distance',
+      expectedRevision: state.revision,
+      round: 1,
+      monsters: [{
+        monsterId: monster.id,
+        program: {
+          kind: 'action',
+          action: {
+            kind: 'attack',
+            attackId: 'scimitar',
+            target: { kind: 'combatant', combatantId: player.id },
+          },
+        },
+      }],
+    };
+    const controlledQueries: EngineQueryPort = Object.freeze({
+      ...BOUND_OFFER_ENVIRONMENT.queries,
+      spaceDistance: (...args: Parameters<EngineQueryPort['spaceDistance']>) => {
+        const [queryState, left, right, leftAnchor] = args;
+        return left === monster.id && right === player.id
+          ? 30
+          : BOUND_OFFER_ENVIRONMENT.queries.spaceDistance(queryState, left, right, leftAnchor);
+      },
+    });
+
+    expect(validateArenaPlan(plan, state, BOUND_OFFER_ENVIRONMENT.queries)).toEqual([]);
+    expect(validateArenaPlan(plan, state, controlledQueries)).toEqual([
+      `${monster.id}: target is outside scimitar reach/range`,
+    ]);
+  });
+
   it('rejects an equal-binding replacement at its runtime consumer', () => {
     createEngineMcpRuntime(generateRoom(3_943_001).encounter.state);
     expect(offerEnvironmentIdentityChecked).toBe(true);

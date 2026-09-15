@@ -255,6 +255,25 @@ function areaCandidate(
 }
 
 describe('D569 deterministic blind intent resolver', () => {
+  it('resolves the real public option catalog through the explicit environment', () => {
+    const result = resolveBlindRoundIntents({
+      state: subject.state,
+      capsule: subject.capsule,
+      blindProjection: subject.projection,
+      envelope: envelope(baseIntent({ kind: 'dodge' })),
+      attempt: 1,
+      repairArm: 'code_only',
+      offerEnvironment: OFFER_ENVIRONMENT,
+    });
+
+    expect(result.status).toBe('accepted');
+    if (result.status === 'rejected') throw new Error('The real environment-bound Dodge was refused.');
+    expect(result.actors).toHaveLength(1);
+    expect(result.actors[0]?.resolution.mechanics.actionSlots).toContainEqual(
+      expect.objectContaining({ kind: 'dodge' }),
+    );
+  });
+
   it('covers every closed rejection code through a concrete resolver boundary', async () => {
     const observed = new Set<BlindIntentRejectionCode>();
     const observe = (result: BlindResolutionResult): void => {

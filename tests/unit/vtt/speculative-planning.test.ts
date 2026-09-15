@@ -30,6 +30,7 @@ import {
   enginePlanningHitPoints,
   enginePlanningConditions,
   enginePlanningSpeedFeet,
+  type EngineQueryPort,
 } from '../../../src/vtt/engine-query-port';
 import {
   buildHostScenarioMenu,
@@ -143,6 +144,35 @@ function candidate(
 }
 
 describe('speculative host fact system', () => {
+  it('uses the supplied distance policy for adjacency facts', () => {
+    const fixture = compactState();
+    const controlledQueries: EngineQueryPort = Object.freeze({
+      ...OFFER_ENVIRONMENT.queries,
+      spaceDistance: (...args: Parameters<EngineQueryPort['spaceDistance']>) => {
+        const [state, left, right, leftAnchor] = args;
+        return left === fixture.source.id && right === fixture.target.id
+          ? 5
+          : OFFER_ENVIRONMENT.queries.spaceDistance(state, left, right, leftAnchor);
+      },
+    });
+    const adjacency: ScenarioFactAtom = {
+      kind: 'adjacency_is',
+      left: direct(fixture.source.id),
+      right: direct(fixture.target.id),
+      value: true,
+    };
+
+    expect(evaluateScenarioFactWithQueries(fixture.state, adjacency, controlledQueries)).toEqual({
+      matches: true,
+      actual: true,
+    });
+    expect(evaluateScenarioFactWithQueries(fixture.state, adjacency, OFFER_ENVIRONMENT.queries)).toEqual({
+      matches: false,
+      actual: false,
+      failure: 'FACT_FALSE',
+    });
+  });
+
   it('uses one active HP lens and excludes temporary HP from exact integer bands', () => {
     const fixture = compactState();
     const targetId = fixture.target.id;
