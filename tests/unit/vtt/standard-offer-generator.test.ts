@@ -239,8 +239,19 @@ describe('standard offer composition capability', () => {
     const offer = standardOfferGenerator.generate({ state, actorId: actor.id, revision: state.revision })
       .find((candidate) => candidate.label === 'End Turn');
     if (offer === undefined) throw new Error('Standard generator fixture omitted End Turn.');
+    const registered = engineActorOptionsForEnvironment(
+      state,
+      actor.id,
+      OFFER_ENVIRONMENT,
+      state.revision,
+    ).offerable.find((candidate) => candidate.label === 'End Turn');
+    if (registered === undefined) throw new Error('Environment-bound generator omitted End Turn.');
     const resolved = standardOfferGenerator.resolve({
-      resolveStandard: (candidate) => resolveEngineActorOption(state, candidate, OFFER_ENVIRONMENT),
+      resolveStandard: (candidate) => {
+        expect(candidate.optionId).toBe(registered.optionId);
+        expect(candidate.actionSlots).toEqual(registered.actionSlots);
+        return resolveEngineActorOption(state, registered, OFFER_ENVIRONMENT);
+      },
     }, offer);
     if (!resolved.valid) throw new Error(`Standard End Turn refused: ${resolved.code}`);
 
