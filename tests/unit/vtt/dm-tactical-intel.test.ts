@@ -9,13 +9,21 @@ import {
   renderDmIntelRow,
   salientInitiativeWindow,
 } from '../../../src/vtt/dm-tactical-intel';
-import { createEngineStateCapsule, type EngineStateCapsule } from '../../../src/vtt/engine-state-capsule';
-import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
+import {
+  createEngineStateCapsuleForEnvironment,
+  type EngineStateCapsule,
+} from '../../../src/vtt/engine-state-capsule';
 import { ENGINE_FAILURE_MODES_POLICY } from '../../../src/vtt/engine-failure-modes';
 import { freshMonsterPlanningState, createEngineMcpRuntime, loadArenaFixture } from '../../../src/vtt/mcp/entrypoint';
 import { TURN_CONTEXT_MAX_BYTES } from '../../../src/vtt/mcp/engine-server';
 import { engineOptionId } from '../../../src/vtt/turn-proposal';
 import { traceCombatantLine } from '../../../src/combat/cover';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
+
+const OFFER_ENVIRONMENT = buildOfferEnvironment({
+  kind: 'configuration',
+  mode: 'legacy_standard',
+});
 
 const FIGHTER = combatantId('combatant:fighter');
 const SCOUT = combatantId('combatant:generated-5117009-monster-3');
@@ -32,6 +40,7 @@ async function r02Runtime(profile: 'dm' | 'full' = 'dm', turnContextMaximumBytes
   const state = freshMonsterPlanningState(loaded);
   const runtime = createEngineMcpRuntime(state, {
     toolProfile: profile,
+    offerEnvironment: OFFER_ENVIRONMENT,
     ...(turnContextMaximumBytes === undefined ? {} : { turnContextMaximumBytes }),
   });
   return { state, runtime, capsule: runtime.feed.current() };
@@ -121,7 +130,7 @@ describe('versioned DM tactical intel', () => {
 
   it('keeps exact probability internally while both context and query render coarse values', async () => {
     const { state, runtime, capsule } = await r02Runtime();
-    const exact = exactDmIntelMatrix(state, capsule, canonicalEngineQueryPort)
+    const exact = exactDmIntelMatrix(state, capsule, OFFER_ENVIRONMENT.queries)
       .find((row) => row.actorId === SCOUT && row.targetId === FIGHTER);
     if (exact === undefined) throw new Error('Exact Scout-to-Fighter row is absent.');
     // Half Cover makes each +4 Longbow shot hit AC 20 on 16-20: 5/20.
@@ -179,7 +188,7 @@ describe('versioned DM tactical intel', () => {
 
   it('emits a short neutral death-save window only when the top actor precedes the target', async () => {
     const { state, capsule } = await r02Runtime();
-    const row = exactDmIntelMatrix(state, capsule, canonicalEngineQueryPort)
+    const row = exactDmIntelMatrix(state, capsule, OFFER_ENVIRONMENT.queries)
       .find((candidate) => candidate.actorId === SCOUT && candidate.targetId === FIGHTER);
     if (row === undefined) throw new Error('Salience row is absent.');
     const orderedCapsule = (order: readonly [typeof SCOUT, typeof FIGHTER] | readonly [typeof FIGHTER, typeof SCOUT]): EngineStateCapsule => ({
@@ -212,7 +221,7 @@ describe('versioned DM tactical intel', () => {
   it('renders the failure manifest only in the DM profile and retains the 32 KiB trim', async () => {
     const dm = await r02Runtime('dm');
     const original = dm.capsule;
-    const bloated = createEngineStateCapsule({
+    const bloated = createEngineStateCapsuleForEnvironment({
       runId: original.runId,
       branchId: original.branchId,
       revision: original.revision + 1,
@@ -241,6 +250,7 @@ describe('versioned DM tactical intel', () => {
         encounterRound: 999_999,
       })),
       rulesIndex: original.rulesIndex,
+      offerEnvironment: OFFER_ENVIRONMENT.binding,
     });
     dm.runtime.feed.replace(bloated);
     const trimmed = fullContext(dm.runtime, bloated);

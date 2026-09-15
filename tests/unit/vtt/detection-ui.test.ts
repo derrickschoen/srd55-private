@@ -6,7 +6,13 @@ import { projectDmView, projectPlayerView } from '../../../src/combat/visibility
 import { encounterBoardRenderModel, projectEncounterBoard } from '../../../src/vtt/encounter-board';
 import { projectDmBoard, projectPlayerBoard } from '../../../src/vtt/encounter-projections';
 import { REFERENCE_ENCOUNTER_ART } from '../../../src/vtt/reference-encounter-art';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
 import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
+
+const OFFER_ENVIRONMENT = buildOfferEnvironment({
+  kind: 'configuration',
+  mode: 'legacy_standard',
+});
 
 const IDLE = {
   requestSequence: 1,
@@ -60,6 +66,7 @@ describe('D373 detection UI projections', () => {
       coordinator: IDLE,
       controllers: identities(moved),
       history: [],
+      offerEnvironment: OFFER_ENVIRONMENT,
     });
 
     expect(projection.decisionTray.entries).toContainEqual(expect.objectContaining({
@@ -83,6 +90,7 @@ describe('D373 detection UI projections', () => {
       coordinator: IDLE,
       controllers: identities(moved),
       history: [],
+      offerEnvironment: OFFER_ENVIRONMENT,
       boundaryRefusal: {
         code: 'turn_boundary_blocked',
         message: 'The turn cannot advance while a pending decision for this boundary is unresolved.',

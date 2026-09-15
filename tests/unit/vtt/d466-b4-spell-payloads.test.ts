@@ -20,8 +20,14 @@ import { renderHumanEngineOptionCatalog } from '../../../src/vtt/encounter-app';
 import { reconcileStableRenderedChildren } from '../../../src/vtt/stable-dom-render';
 import { engineActorOptions } from '../../../src/vtt/turn-option-registry';
 import type { EngineActivationChoice } from '../../../src/vtt/turn-proposal';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
 import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
 import { elementText, installInteractiveDocument, interactiveElement } from '../../fixtures/interactive-dom';
+
+const OFFER_ENVIRONMENT = buildOfferEnvironment({
+  kind: 'configuration',
+  mode: 'legacy_standard',
+});
 
 type OutsideCommandWordIsAccepted = {
   readonly kind: 'command_word';
@@ -246,7 +252,7 @@ describe('D466 B4 spell payloads', () => {
         },
       }, () => 0.5).state;
       state = freshMonsterPlanningState(state);
-      const projected = projectHumanEngineOptions(state, [unicorn.id]);
+      const projected = projectHumanEngineOptions(state, [unicorn.id], state.revision, OFFER_ENVIRONMENT);
       const optionCount = projected[0]?.options.filter((entry) =>
         entry.availability === 'offerable' && entry.option.activationChoice?.kind === 'unicorns_blessing_spell').length;
       const catalog = renderHumanEngineOptionCatalog(projected);

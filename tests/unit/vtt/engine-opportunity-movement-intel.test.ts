@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { EncounterState } from '../../../src/combat/encounter';
 import { combatantId } from '../../../src/combat/values';
-import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
 import { availableEngineActorOptions, resolveEngineActorOption } from '../../../src/vtt/intent-resolver';
 import {
   actorOpportunityReport,
@@ -17,6 +16,12 @@ import { freshMonsterPlanningState } from '../../../src/vtt/monster-planning-sta
 import { engineSchemaInternals, schemaViolations } from '../../../src/vtt/mcp/schemas';
 import { createEngineMcpRuntime, decodeArenaFixtureText } from '../../../src/vtt/mcp/entrypoint';
 import { declareTestInputs } from '../../helpers/test-inputs';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
+
+const OFFER_ENVIRONMENT = buildOfferEnvironment({
+  kind: 'configuration',
+  mode: 'legacy_standard',
+});
 
 const inputs = declareTestInputs({
   fixtures: [
@@ -78,6 +83,7 @@ describe('engine movement and opportunity-cost intel', () => {
       requestedActorIds: dashZeroActorIds,
       revision: 203,
       room: 8,
+      offerEnvironment: OFFER_ENVIRONMENT,
     });
     const capsule = runtime.feed.current();
     const context = record(runtime.toolSurface.execute('engine.get_turn_context', {
@@ -102,7 +108,7 @@ describe('engine movement and opportunity-cost intel', () => {
     if (!Array.isArray(proposals)) throw new TypeError('Room-8 play proposals are absent.');
 
     for (const actorId of dashZeroActorIds) {
-      const options = availableEngineActorOptions(state, actorId, canonicalEngineQueryPort, 203);
+      const options = availableEngineActorOptions(state, actorId, OFFER_ENVIRONMENT, 203);
       expect(options.some((option) => option.actionSlots.some((slot) =>
         slot.use.kind === 'attack' || slot.use.kind === 'multiattack'))).toBe(false);
     }
@@ -112,7 +118,7 @@ describe('engine movement and opportunity-cost intel', () => {
       [combatantId('combatant:generated-5117008-monster-5'), 40],
     ] as const;
     for (const [actorId, expectedMovementFeet] of guardAttackArrival) {
-      const movement = canonicalEngineQueryPort.movementOptions(state, actorId, CLERIC, 'spear');
+      const movement = OFFER_ENVIRONMENT.queries.movementOptions(state, actorId, CLERIC, 'spear');
       expect(movement?.earliestAttackTurn).toMatchObject({
         status: 'resolved', movementCost: expectedMovementFeet, turns: 1,
       });
@@ -122,10 +128,10 @@ describe('engine movement and opportunity-cost intel', () => {
       const proposal = record(value);
       const actorId = combatantId(String(proposal['actor_id']));
       const optionId = String(proposal['primary_option_id']);
-      const option = availableEngineActorOptions(state, actorId, canonicalEngineQueryPort, 203)
+      const option = availableEngineActorOptions(state, actorId, OFFER_ENVIRONMENT, 203)
         .find((candidate) => candidate.optionId === optionId);
       if (option === undefined) throw new Error(`Room-8 proposal option is absent for ${actorId}.`);
-      const resolution = resolveEngineActorOption(state, option, canonicalEngineQueryPort);
+      const resolution = resolveEngineActorOption(state, option, OFFER_ENVIRONMENT);
       if (!resolution.valid) throw new Error(`Room-8 proposal option is illegal for ${actorId}.`);
       return {
         actorId,
@@ -158,7 +164,7 @@ describe('engine movement and opportunity-cost intel', () => {
 
   it('renders the hand-computed R02 one-square Bandit upgrade and Guard attack ETA', () => {
     const state = frozenState();
-    const bandit = canonicalEngineQueryPort.movementOptions(
+    const bandit = OFFER_ENVIRONMENT.queries.movementOptions(
       state,
       BANDIT,
       WIZARD,
@@ -190,7 +196,7 @@ describe('engine movement and opportunity-cost intel', () => {
     expect(upgrade.deltas.expectedDamage.after).toBeCloseTo(2.425, 12);
     expect(upgrade.deltas.expectedDamage.delta).toBeCloseTo(1.53375, 12);
 
-    const guard = canonicalEngineQueryPort.movementOptions(state, GUARD, FIGHTER, 'spear');
+    const guard = OFFER_ENVIRONMENT.queries.movementOptions(state, GUARD, FIGHTER, 'spear');
     if (guard?.earliestAttackTurn.status !== 'resolved') {
       throw new Error('Frozen Guard ETA is unresolved.');
     }
@@ -221,7 +227,10 @@ describe('engine movement and opportunity-cost intel', () => {
     // Mutation check: treating Spear as melee-only yields a plausible but wrong P100/T+2.
     expect(rendered['attack_eta']).not.toBe('P100/T+2');
 
-    const runtime = createEngineMcpRuntime(state, { requestedActorIds: [BANDIT, GUARD] });
+    const runtime = createEngineMcpRuntime(state, {
+      requestedActorIds: [BANDIT, GUARD],
+      offerEnvironment: OFFER_ENVIRONMENT,
+    });
     const capsule = runtime.feed.current();
     const context = record(runtime.toolSurface.execute('engine.get_turn_context', {
       run_id: capsule.runId,
@@ -257,7 +266,7 @@ describe('engine movement and opportunity-cost intel', () => {
     const monsters = state.combatants.filter((combatant) => combatant.profile.kind === 'monster');
     expect(monsters).toHaveLength(6);
     for (const monster of monsters) {
-      const report = actorOpportunityReport(state, monster.profile.id, canonicalEngineQueryPort, 1);
+      const report = actorOpportunityReport(state, monster.profile.id, OFFER_ENVIRONMENT, 1);
       const selectedDefault = report.options.find((option) =>
         option.option.optionId === report.defaultOption.optionId);
       expect(selectedDefault?.kind === 'offense' || selectedDefault?.kind === 'approach').toBe(true);
@@ -271,14 +280,14 @@ describe('engine movement and opportunity-cost intel', () => {
       combatants: state.combatants.filter((combatant) => combatant.profile.id === GUARD),
       tokens: state.tokens.filter((token) => token.combatantId === GUARD),
     };
-    const report = actorOpportunityReport(loneGuard, GUARD, canonicalEngineQueryPort, 1);
+    const report = actorOpportunityReport(loneGuard, GUARD, OFFER_ENVIRONMENT, 1);
     const selected = report.options.find((option) => option.option.optionId === report.defaultOption.optionId);
     expect(selected?.kind).toBe('dodge');
     expect(submissionDominance(report, report.defaultOption.optionId).status).toBe('not_dominated');
 
-    expect(actorOpportunityReport(state, BANDIT, canonicalEngineQueryPort, 1).frontierResolution)
+    expect(actorOpportunityReport(state, BANDIT, OFFER_ENVIRONMENT, 1).frontierResolution)
       .toBe('fully_resolved');
-    expect(actorOpportunityReport(state, PRIEST, canonicalEngineQueryPort, 1).frontierResolution)
+    expect(actorOpportunityReport(state, PRIEST, OFFER_ENVIRONMENT, 1).frontierResolution)
       .toBe('contains_unresolved');
   });
 
@@ -286,7 +295,7 @@ describe('engine movement and opportunity-cost intel', () => {
     const state = frozenState();
     const monsters = state.combatants.filter((combatant) => combatant.profile.kind === 'monster');
     for (const monster of monsters) {
-      const report = actorOpportunityReport(state, monster.profile.id, canonicalEngineQueryPort, 1);
+      const report = actorOpportunityReport(state, monster.profile.id, OFFER_ENVIRONMENT, 1);
       const legacy = report.options.filter((option): option is ResolvedOpportunityOption =>
         option.status === 'resolved' && option.family === 'legacy');
       if (legacy.length === 0) throw new Error(`${monster.profile.id} has no resolved legacy option.`);
@@ -301,7 +310,7 @@ describe('engine movement and opportunity-cost intel', () => {
 
   it('blocks M5 refusal when the selected option has an unresolved declared metric', () => {
     const state = frozenState();
-    const report = actorOpportunityReport(state, BANDIT, canonicalEngineQueryPort, 1);
+    const report = actorOpportunityReport(state, BANDIT, OFFER_ENVIRONMENT, 1);
     const resolved = report.options.find((option) => option.status === 'resolved' && option.kind === 'offense');
     if (resolved === undefined) throw new Error('Frozen Bandit has no resolved offense option.');
     const unresolvedReport: ActorOpportunityReport = {
