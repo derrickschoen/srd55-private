@@ -1760,6 +1760,15 @@ describe('engine MCP dual-handshake full surface conformance', () => {
       kind: 'plan_adjustment_turn_proposal',
       updates: [{ proposal: { actorId: first, fallbackOptionId } }],
     });
+    const storedPartial = runtime.proposals[1];
+    if (storedPartial?.kind !== 'plan_adjustment_turn_proposal') {
+      throw new Error('Staged plan adjustment was not stored.');
+    }
+    expect(storedPartial.updates).not.toHaveLength(0);
+    for (const update of storedPartial.updates) {
+      expect(update.offerEnvironmentDigest).toBe(BOUND_OFFER_ENVIRONMENT.digest);
+      expect(update.offerEnvironmentDigest).not.toBe(update.resolutionDigest);
+    }
 
     const closedResult = structured(toolCall(runtime.handler, 'engine.submit_plan_adjustment', {
       ...base,
@@ -1863,6 +1872,15 @@ describe('engine MCP dual-handshake full surface conformance', () => {
       idempotency_key: 'adjustment-correction-0001',
       updates: [dodgeUpdate(correctionRuntime, second)],
     }))).toMatchObject({ status: 'proposed', actor_resolutions: [{ actor_id: second }] });
+    const storedCorrection = correctionRuntime.proposals[0];
+    if (storedCorrection?.kind !== 'plan_adjustment_turn_proposal') {
+      throw new Error('Corrected plan adjustment was not stored.');
+    }
+    expect(storedCorrection.updates).not.toHaveLength(0);
+    for (const update of storedCorrection.updates) {
+      expect(update.offerEnvironmentDigest).toBe(BOUND_OFFER_ENVIRONMENT.digest);
+      expect(update.offerEnvironmentDigest).not.toBe(update.resolutionDigest);
+    }
     const fallbackCorrection = structured(toolCall(correctionRuntime.handler, 'engine.submit_plan_adjustment', {
       state_ref: correctionContext['state_ref'],
       request_id: correctionRuntime.feed.current().request?.requestId,

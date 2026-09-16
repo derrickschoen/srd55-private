@@ -3227,6 +3227,10 @@ export function isRoundProposal(value: unknown): value is RoundTurnProposalEnvel
     (input['reactionGuidance'] === null || asRecord(input['reactionGuidance']) !== null);
 }
 
+function isSha256Hex(value: unknown): value is string {
+  return typeof value === 'string' && /^[0-9a-f]{64}$/u.test(value);
+}
+
 function isStoredProposalResolution(value: unknown): value is ProposedTurnResolution {
   const input = asRecord(value);
   if (input === null) return false;
@@ -3240,8 +3244,8 @@ function isStoredProposalResolution(value: unknown): value is ProposedTurnResolu
   } catch {
     return false;
   }
-  return /^[0-9a-f]{64}$/u.test(String(input['offerEnvironmentDigest'])) &&
-    /^[0-9a-f]{64}$/u.test(String(input['resolutionDigest'])) &&
+  return isSha256Hex(input['offerEnvironmentDigest']) &&
+    isSha256Hex(input['resolutionDigest']) &&
     (input['selectedBranch'] === 'primary' || input['selectedBranch'] === 'fallback') &&
     typeof input['summary'] === 'string' && asRecord(input['proposal']) !== null &&
     asRecord(input['option']) !== null && asRecord(input['primaryOption']) !== null &&
@@ -3249,7 +3253,7 @@ function isStoredProposalResolution(value: unknown): value is ProposedTurnResolu
     asRecord(input['mechanics']) !== null;
 }
 
-function isPlanAdjustmentProposal(value: unknown): value is PlanAdjustmentProposalEnvelope {
+export function isPlanAdjustmentProposal(value: unknown): value is PlanAdjustmentProposalEnvelope {
   const input = asRecord(value);
   return input?.['kind'] === 'plan_adjustment_turn_proposal' &&
     typeof input['proposalId'] === 'string' && typeof input['runId'] === 'string' &&

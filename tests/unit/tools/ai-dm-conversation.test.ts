@@ -26,6 +26,7 @@ import {
 import {
   parseConversationArgs,
   proposalResolutionDivergence,
+  isPlanAdjustmentProposal,
   isRoundProposal,
   runConversation,
   structuredFinalDecisionPhase,
@@ -2197,6 +2198,92 @@ describe('AI-DM engine MCP conversation runner', () => {
     expect(isRoundProposal({
       ...envelope,
       resolutions: [{ ...storedResolution, offerEnvironmentDigest: 'A'.repeat(64) }],
+    })).toBe(false);
+    const nonStringDigests: readonly unknown[] = [
+      [BOUND_OFFER_ENVIRONMENT.digest],
+      64,
+      null,
+      { digest: BOUND_OFFER_ENVIRONMENT.digest },
+    ];
+    for (const nonStringDigest of nonStringDigests) {
+      expect(isRoundProposal({
+        ...envelope,
+        resolutions: [{ ...storedResolution, offerEnvironmentDigest: nonStringDigest }],
+      })).toBe(false);
+      expect(isRoundProposal({
+        ...envelope,
+        resolutions: [{ ...storedResolution, resolutionDigest: nonStringDigest }],
+      })).toBe(false);
+    }
+  });
+
+  it('rejects plan adjustment envelopes whose stored updates carry malformed digests', () => {
+    const state = freshMonsterPlanningState(generateRoom(3_943_006).encounter.state);
+    const actor = state.combatants.find((combatant) =>
+      combatant.profile.kind === 'monster' && combatant.life !== 'dead');
+    if (actor === undefined) throw new Error('Generated room 3943006 has no living monster.');
+    const option = availableEngineActorOptions(state, actor.profile.id, BOUND_OFFER_ENVIRONMENT)
+      .find((candidate) => candidate.actionSlots.some((slot) => slot.use.kind === 'dodge'));
+    if (option === undefined) throw new Error('Room 3943006 Dodge option is absent.');
+    const proposal = {
+      actorId: actor.profile.id, expectedRevision: state.revision, primaryOptionId: option.optionId,
+      fallbackOptionId: null, reason: 'Exercise stored adjustment decoding.', overrideJustification: null,
+    };
+    const resolution = createPureTurnProposalResolver(BOUND_OFFER_ENVIRONMENT).resolve(state, proposal);
+    if (!resolution.valid) throw new Error('Stored adjustment decoder fixture did not resolve.');
+    const storedResolution = {
+      proposal,
+      option: resolution.option,
+      primaryOption: resolution.primaryOption,
+      fallbackOption: resolution.fallbackOption,
+      mechanics: resolution.mechanics,
+      selectedBranch: resolution.selectedBranch,
+      offerEnvironmentDigest: BOUND_OFFER_ENVIRONMENT.digest,
+      resolutionDigest: resolution.resolutionDigest,
+      summary: resolution.summary,
+    };
+    const envelope = {
+      kind: 'plan_adjustment_turn_proposal',
+      proposalId: 'proposal:adjustment-codec',
+      runId: 'encounter:adjustment-codec',
+      branchId: 'branch:adjustment-codec',
+      requestId: 'request:adjustment-codec',
+      expectedRevision: 1,
+      stateDigest: 'state',
+      stateHandle: 'handle',
+      phase: 'initial',
+      idempotencyKey: 'adjustment-codec-0001',
+      baseline_plan_hash: 'a'.repeat(64),
+      updates: [storedResolution],
+    };
+    const { offerEnvironmentDigest: _missingEnvironmentDigest, ...missingEnvironmentDigest } = storedResolution;
+    const { resolutionDigest: _missingResolutionDigest, ...missingResolutionDigest } = storedResolution;
+    expect(isPlanAdjustmentProposal(envelope)).toBe(true);
+    expect(isPlanAdjustmentProposal({ ...envelope, updates: [missingEnvironmentDigest] })).toBe(false);
+    expect(isPlanAdjustmentProposal({
+      ...envelope,
+      updates: [{ ...storedResolution, offerEnvironmentDigest: 'a'.repeat(63) }],
+    })).toBe(false);
+    expect(isPlanAdjustmentProposal({
+      ...envelope,
+      updates: [{ ...storedResolution, offerEnvironmentDigest: 'A'.repeat(64) }],
+    })).toBe(false);
+    expect(isPlanAdjustmentProposal({
+      ...envelope,
+      updates: [{ ...storedResolution, offerEnvironmentDigest: [BOUND_OFFER_ENVIRONMENT.digest] }],
+    })).toBe(false);
+    expect(isPlanAdjustmentProposal({ ...envelope, updates: [missingResolutionDigest] })).toBe(false);
+    expect(isPlanAdjustmentProposal({
+      ...envelope,
+      updates: [{ ...storedResolution, resolutionDigest: 'a'.repeat(63) }],
+    })).toBe(false);
+    expect(isPlanAdjustmentProposal({
+      ...envelope,
+      updates: [{ ...storedResolution, resolutionDigest: 'A'.repeat(64) }],
+    })).toBe(false);
+    expect(isPlanAdjustmentProposal({
+      ...envelope,
+      updates: [{ ...storedResolution, resolutionDigest: [resolution.resolutionDigest] }],
     })).toBe(false);
   });
 
