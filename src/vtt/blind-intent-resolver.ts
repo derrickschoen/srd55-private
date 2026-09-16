@@ -629,6 +629,7 @@ function proposedResolution(
   intent: BlindIntent,
   selected: SemanticCandidate,
   revision: number,
+  offerEnvironmentDigest: string,
   proposalResolver: PureTurnProposalResolver,
   state: EncounterState,
 ): ProposedTurnResolution | null {
@@ -650,6 +651,7 @@ function proposedResolution(
     fallbackOption: null,
     mechanics: resolution.mechanics,
     selectedBranch: 'primary',
+    offerEnvironmentDigest,
     resolutionDigest: resolution.resolutionDigest,
     summary: resolution.summary,
     strictNoFallback: true,
@@ -729,6 +731,7 @@ function resolveActorIntent(
     intent,
     selected,
     input.capsule.revision,
+    offerEnvironment.digest,
     dependencies.proposalResolver,
     input.state,
   );

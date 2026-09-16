@@ -87,14 +87,19 @@ const LEGACY_TIMING_FIELDS = [
 const ACCEPTED_IDENTITY_PINS = {
   runnerCapsuleDigest: '74a5d218447cc2fce84db6d0a462822c1f7cc1e43adf10260a86d46f24d3f553',
   runnerAuthorizationDigest: '35ff5bd10a5d083af3c9889a71363c6c9a43bd531de1820b5ee5667f453e80b4',
-  primaryProposalId: 'round:7b4c62cbfd6c10f561d936bc874fb194cbe990cf48b53977',
-  primaryProposalHash: 'ef06523ae111d9b9120138eea8a179b64e54917ab267544be0458286d4499e52',
-  primaryAgentSessionDigest: '01f3d6e008c69f0e30af64c45fdd2b6a21aac16e4d68e17bbea325cd569e7988',
+  primaryProposalId: 'round:b5cd275486dc8cbd44ae88d978b35e63b11e3d3e94125ec8',
+  primaryProposalHash: '3170b38053d7e0be8b96d2ee886f80e32bd2fad84d153d858c9a7c571677944e',
+  primaryAgentSessionDigest: 'dd37aa41b78945f2eeddc98b7c46b3bbe20b0445897dc4975c61841851862425',
   adviceCapsuleDigest: '1fd383e6eb87763d28a10415f1c56c03fcd417461f7cbc517c59b0b471415f46',
   adviceJournalCursor: 'b9136f395423f15e37df9ad387db8adfe7b6719873fc230e',
   offerEnvironmentDigest: 'fb1c39f00b4caeea7c5ad92af428132e1f3cb6c44a61a59ba6551d22c90c275b',
   familyPolicyDigest: 'a1572528052c75afbc8578372ed8307b1a982afc77a1d71b5c908a1b8a5ee28a',
   partyThreatCatalogDigest: '0a892f9afb0bb2c0a6017de582b6756b1c604e57c816c91682feee1835d12d57',
+} as const;
+const PRE_B19_IDENTITY_PINS = {
+  primaryProposalId: 'round:7b4c62cbfd6c10f561d936bc874fb194cbe990cf48b53977',
+  primaryProposalHash: 'ef06523ae111d9b9120138eea8a179b64e54917ab267544be0458286d4499e52',
+  primaryAgentSessionDigest: '01f3d6e008c69f0e30af64c45fdd2b6a21aac16e4d68e17bbea325cd569e7988',
 } as const;
 const FROZEN_IDENTITY_PINS = {
   runnerCapsuleDigest: '531ab81515152741951fd3ff78f398bf32e8941c4fc4fbdb9cb3eb5c4732e69e',
@@ -616,6 +621,17 @@ function independentlyDerivedPrimarySessionDigest(store: MemoryBrowserSessionSto
   expect(digest, 'independently specified primary session-digest payload pin')
     .toBe(ACCEPTED_IDENTITY_PINS.primaryAgentSessionDigest);
   const decision = record(value.recentAcceptedEngineDecisions[0]?.decision, 'primary accepted digest decision');
+  const preB19ProposalIdentityValue = {
+    ...value,
+    recentAcceptedEngineDecisions: [{
+      revision: accepted[0].revision,
+      decision: { ...decision, proposalId: PRE_B19_IDENTITY_PINS.primaryProposalId },
+    }],
+  };
+  expect(
+    sha256(canonicalJson(preB19ProposalIdentityValue)),
+    'B19 changes the prior session digest only through the proposal id derived from environment provenance',
+  ).toBe(PRE_B19_IDENTITY_PINS.primaryAgentSessionDigest);
   const frozenProposalIdentityValue = {
     ...value,
     recentAcceptedEngineDecisions: [{
@@ -869,6 +885,18 @@ function expectIndependentCurrentRowInvariants(input: {
     valid: submitted.resolutions,
     reactionGuidance: submitted.reactionGuidance,
   })).slice(0, 48)}`;
+  const preB19Resolutions = submitted.resolutions.map((resolution) => {
+    const { offerEnvironmentDigest: _offerEnvironmentDigest, ...preB19Resolution } = resolution;
+    return preB19Resolution;
+  });
+  const preB19ProposalId = `round:${sha256(canonicalJson({
+    digest: submitted.stateDigest,
+    key: submitted.idempotencyKey,
+    valid: preB19Resolutions,
+    reactionGuidance: submitted.reactionGuidance,
+  })).slice(0, 48)}`;
+  expect(preB19ProposalId, `${input.label} prior proposal id differs only by B19 environment provenance`)
+    .toBe(PRE_B19_IDENTITY_PINS.primaryProposalId);
   expect(proposalId, `${input.label} proposal id recomputed from submitted engine evidence`)
     .toBe(recomputedProposalId);
   expect(proposalId, `${input.label} reviewed proposal-id replacement pin`)
@@ -877,6 +905,26 @@ function expectIndependentCurrentRowInvariants(input: {
     .toBe(independentlySpecifiedRoundProposalHash(submitted));
   expect(monsters['initialProposalHash'], `${input.label} reviewed proposal-hash replacement pin`)
     .toBe(ACCEPTED_IDENTITY_PINS.primaryProposalHash);
+  expect(sha256(canonicalJson({
+    kind: submitted.kind,
+    proposalId: PRE_B19_IDENTITY_PINS.primaryProposalId,
+    runId: submitted.runId,
+    branchId: submitted.branchId,
+    requestId: submitted.requestId,
+    expectedRevision: submitted.expectedRevision,
+    stateDigest: submitted.stateDigest,
+    stateHandle: submitted.stateHandle,
+    phase: submitted.phase,
+    idempotencyKey: submitted.idempotencyKey,
+    resolutions: preB19Resolutions,
+    rationale: submitted.rationale,
+    reactionGuidance: submitted.reactionGuidance,
+    ...(submitted.submittedArguments === undefined ? {} : {
+      submittedArguments: submitted.submittedArguments,
+    }),
+    ...(submitted.intelCapture === undefined ? {} : { intelCapture: submitted.intelCapture }),
+  })), `${input.label} prior proposal hash differs only by B19 environment provenance`)
+    .toBe(PRE_B19_IDENTITY_PINS.primaryProposalHash);
   expect(authorizedProposals, `${input.label} team proposals preserve submitted resolutions`).toEqual(
     submitted.resolutions.map((resolution) => resolution.proposal),
   );

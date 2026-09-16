@@ -176,6 +176,7 @@ describe('SIMULATED local OpenAI conversation adapter', () => {
   it('drives a full authorized round through context, frontier expansion, and submission', { timeout: 30_000 }, async () => {
     let contextForSubmission: Readonly<Record<string, unknown>> | null = null;
     let submittedProposals: readonly Readonly<Record<string, unknown>>[] | null = null;
+    const storedOfferEnvironmentDigests: string[] = [];
     const endpoint = await fakeServer((request, index) => {
       const requestMessages = messages(request.body['messages']);
       if (index === 0) {
@@ -210,7 +211,9 @@ describe('SIMULATED local OpenAI conversation adapter', () => {
       }
       const expansion = record(JSON.parse(toolMessage['content']) as unknown, 'frontier expansion');
       if (contextForSubmission === null) throw new Error('Frontier expansion arrived without its turn context.');
-      if (!Array.isArray(expansion['proposals'])) throw new Error('Frontier expansion omitted proposals.');
+      if (!Array.isArray(expansion['proposals'])) {
+        throw new Error(`Frontier expansion omitted proposals: ${toolMessage['content']}`);
+      }
       submittedProposals = expansion['proposals'].map((proposal) => record(proposal, 'frontier proposal'));
       const requestValue = record(contextForSubmission['request'], 'turn request');
       return { body: assistantToolCall('call-submit', 'engine__submit_round_proposals', {
@@ -238,8 +241,18 @@ describe('SIMULATED local OpenAI conversation adapter', () => {
         ]),
         offerEnvironment: REVISION_BOUND_OFFER_INPUT,
       };
-      const rows = await runArena(config);
+      const rows = await runArena(config, {
+        onStoredRoundProposalForTest: (proposal) => {
+          storedOfferEnvironmentDigests.push(...proposal.resolutions.map((entry) =>
+            entry.offerEnvironmentDigest));
+        },
+      });
 
+      const exposedContext = record(contextForSubmission, 'exposed turn context');
+      const exposedProposals = records(submittedProposals, 'submitted proposals');
+      expect(storedOfferEnvironmentDigests).toEqual(
+        exposedProposals.map(() => REFERENCE_OFFER_ENVIRONMENT.digest),
+      );
       expect(rows).toEqual([expect.objectContaining({
         cli: 'local-openai', model: 'quantized-SIMULATED', thinkMode: 'on', outcome: 'authorized',
         toolCalls: 3, callsPerRound: 1, flapRetries: 0, serviceNull: false,
@@ -247,8 +260,6 @@ describe('SIMULATED local OpenAI conversation adapter', () => {
         refusals: [],
         tokens: { input: 35, cachedInput: 3, output: 7, reasoning: 1 },
       })]);
-      const exposedContext = record(contextForSubmission, 'exposed turn context');
-      const exposedProposals = records(submittedProposals, 'submitted proposals');
       const contextActors = records(exposedContext['actors'], 'turn-context actors');
       const advertisedOptionIds = new Set(contextActors.flatMap((actor) => {
         const options = record(actor, 'turn-context actor')['options'];

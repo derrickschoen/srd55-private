@@ -527,6 +527,7 @@ describe('read-only engine state capsule', () => {
         fallbackOption: resolution.fallbackOption,
         mechanics: resolution.mechanics,
         selectedBranch: resolution.selectedBranch,
+        offerEnvironmentDigest: REVISION_BOUND_OFFER_ENVIRONMENT.digest,
         resolutionDigest: resolution.resolutionDigest,
         summary: resolution.summary,
       };
@@ -621,6 +622,7 @@ describe('read-only engine state capsule', () => {
         fallbackOption: resolution.fallbackOption,
         mechanics: resolution.mechanics,
         selectedBranch: resolution.selectedBranch,
+        offerEnvironmentDigest: REVISION_BOUND_OFFER_ENVIRONMENT.digest,
         resolutionDigest: resolution.resolutionDigest,
         summary: resolution.summary,
       }],

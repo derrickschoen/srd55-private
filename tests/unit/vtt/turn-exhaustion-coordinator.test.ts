@@ -145,6 +145,7 @@ function proposal(
         omittedRiders: [],
       },
       selectedBranch,
+      offerEnvironmentDigest: OFFER_ENVIRONMENT.digest,
       resolutionDigest: 'a'.repeat(64),
       summary: 'The monster dodges.',
     }],

@@ -203,6 +203,10 @@ describe('engine MCP stdio protocol', () => {
     expect(runtime.blindIntentSubmissions).toHaveLength(1);
     expect(runtime.blindIntentSubmissions[0]?.resolution.status).toBe('accepted');
     expect(runtime.proposals).toHaveLength(1);
+    const stored = runtime.proposals[0];
+    if (stored?.kind !== 'round_turn_proposal') throw new Error('Blind proposal was not stored as a round.');
+    expect(stored.resolutions.map((entry) => entry.offerEnvironmentDigest))
+      .toEqual([POLICY_OFFER_ENVIRONMENT.digest]);
   });
 
   it('exposes only the closed blind profile and records every simulated MCP ingress channel', async () => {
@@ -369,7 +373,10 @@ describe('engine MCP stdio protocol', () => {
     expect(runtime.proposals).toEqual([
       expect.objectContaining({
         kind: 'round_turn_proposal',
-        resolutions: requiredActors.map(() => expect.objectContaining({ selectedBranch: 'primary' })),
+        resolutions: requiredActors.map(() => expect.objectContaining({
+          selectedBranch: 'primary',
+          offerEnvironmentDigest: OFFER_ENVIRONMENT.digest,
+        })),
       }),
     ]);
 

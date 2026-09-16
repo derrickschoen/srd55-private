@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { mkdtempSync, writeFileSync } from '../../helpers/test-filesystem';
+import { mkdtempSync, readFileSync, writeFileSync } from '../../helpers/test-filesystem';
 import { EngineMcpStdioClient, runEngineMcpDryClient } from '../../../tools/engine-mcp-dry-client';
 import type { DryTranscriptEntry } from '../../../tools/engine-mcp-dry-client';
 import {
@@ -182,6 +182,11 @@ describe('real-stdio engine MCP golden dungeon run', () => {
     } finally {
       expect(await client.close()).toBe(0);
     }
+    const stored = record(JSON.parse(readFileSync(proposalSpoolPath, 'utf8').trim()) as unknown, 'stored proposal');
+    const resolutions = stored['resolutions'];
+    if (!Array.isArray(resolutions)) throw new TypeError('Stored golden proposal omitted resolutions.');
+    expect(resolutions.map((value) => record(value, 'stored resolution')['offerEnvironmentDigest']))
+      .toEqual(actors.map(() => BOUND_OFFER_ENVIRONMENT.digest));
   });
 
   it('covers discovery, proposal correction, adjudication, narration, and restart shapes', { timeout: 30_000 }, async () => {

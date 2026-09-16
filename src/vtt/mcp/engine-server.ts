@@ -3334,7 +3334,18 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       const reactionGuidance = input['reaction_guidance'] === undefined
         ? null : decodeReactionGuidance(input['reaction_guidance']);
       return idempotent(key, input, () => {
-        const valid = evaluated.flatMap(({ proposal, contractRefusals, resolution }) => contractRefusals.length === 0 && resolution?.valid === true ? [{ proposal, option: resolution.option, primaryOption: resolution.primaryOption, fallbackOption: resolution.fallbackOption, mechanics: resolution.mechanics, selectedBranch: resolution.selectedBranch, resolutionDigest: resolution.resolutionDigest, summary: resolution.summary }] : []);
+        const valid = evaluated.flatMap(({ proposal, contractRefusals, resolution }) =>
+          contractRefusals.length === 0 && resolution?.valid === true ? [{
+            proposal,
+            option: resolution.option,
+            primaryOption: resolution.primaryOption,
+            fallbackOption: resolution.fallbackOption,
+            mechanics: resolution.mechanics,
+            selectedBranch: resolution.selectedBranch,
+            offerEnvironmentDigest: offerEnvironment.digest,
+            resolutionDigest: resolution.resolutionDigest,
+            summary: resolution.summary,
+          }] : []);
         const proposalId = `round:${sha256(canonicalJson({ digest: capsule.digest, key, valid, reactionGuidance })).slice(0, 48)}`;
         submitEngineProposal(feed, proposals, { kind: 'round_turn_proposal', proposalId, runId: capsule.runId, branchId: capsule.branchId, requestId: request.requestId, expectedRevision: capsule.revision, stateDigest: capsule.digest, stateHandle: engineStateHandle(capsule), phase: request.phase, idempotencyKey: key, resolutions: valid, rationale: typeof input['rationale'] === 'string' ? input['rationale'] : null, reactionGuidance, submittedArguments: structuredClone(roundSubmission?.submittedArguments ?? suppliedInput), ...(activeIntelMode === 'off' ? {} : { intelCapture: captureDmIntel(state, capsule, queries) }) });
         acceptedRoundDecision = true;
@@ -3382,6 +3393,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         fallbackOption: entry.resolution.fallbackOption,
         mechanics: entry.resolution.mechanics,
         selectedBranch: entry.resolution.selectedBranch,
+        offerEnvironmentDigest: offerEnvironment.digest,
         resolutionDigest: entry.resolution.resolutionDigest,
         summary: entry.resolution.summary,
       }] : []);
@@ -3516,7 +3528,30 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         ? null : decodeReactionGuidance(input['reaction_guidance']);
       return idempotent(key, input, () => {
         const proposalId = `turn:${sha256(canonicalJson({ digest: capsule.digest, key, proposal, reactionGuidance })).slice(0, 48)}`;
-        submitEngineProposal(feed, proposals, { kind: 'turn_proposal', proposalId, runId: capsule.runId, branchId: capsule.branchId, requestId: request.requestId, expectedRevision: capsule.revision, stateDigest: capsule.digest, stateHandle: engineStateHandle(capsule), phase: request.phase, idempotencyKey: key, resolution: { proposal, option: resolution.option, primaryOption: resolution.primaryOption, fallbackOption: resolution.fallbackOption, mechanics: resolution.mechanics, selectedBranch: resolution.selectedBranch, resolutionDigest: resolution.resolutionDigest, summary: resolution.summary }, reactionGuidance });
+        submitEngineProposal(feed, proposals, {
+          kind: 'turn_proposal',
+          proposalId,
+          runId: capsule.runId,
+          branchId: capsule.branchId,
+          requestId: request.requestId,
+          expectedRevision: capsule.revision,
+          stateDigest: capsule.digest,
+          stateHandle: engineStateHandle(capsule),
+          phase: request.phase,
+          idempotencyKey: key,
+          resolution: {
+            proposal,
+            option: resolution.option,
+            primaryOption: resolution.primaryOption,
+            fallbackOption: resolution.fallbackOption,
+            mechanics: resolution.mechanics,
+            selectedBranch: resolution.selectedBranch,
+            offerEnvironmentDigest: offerEnvironment.digest,
+            resolutionDigest: resolution.resolutionDigest,
+            summary: resolution.summary,
+          },
+          reactionGuidance,
+        });
         return { status: 'proposed', proposal_id: proposalId, state_ref: externalStateRef(capsule), selected_branch: resolution.selectedBranch, resolution_summary: resolutionPreview(resolution) };
       });
     }

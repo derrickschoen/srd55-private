@@ -68,6 +68,7 @@ import {
   type EngineOptionEnvironment,
   type OfferEnvironmentInput,
 } from '../src/vtt/offers/build-offer-environment';
+import { exactKeys } from '../src/vtt/offers/offer-codec-primitives';
 import {
   availableEngineActorOptions, createPureTurnProposalResolver,
   type EngineOfferableOption, type EngineTurnProposal, type ResolvedTurnMechanics,
@@ -878,6 +879,8 @@ export interface ConversationRunOptions {
     outputDirectory: string,
   ) => Promise<ConversationBoardSnapshotService>;
   readonly onPrimaryDispatchStart?: () => void;
+  /** Test-only observation of the exact stored round proposal before authoritative authorization. */
+  readonly onStoredRoundProposalForTest?: (proposal: RoundTurnProposalEnvelope) => void;
   /** Test evidence seam for exact model-facing primary invocation bytes. */
   readonly onPrimaryInvocation?: (invocation: AgentInvocation) => void;
   /** Test evidence seam for the immutable invocation emitted at every runner phase. */
@@ -1420,6 +1423,7 @@ export interface ConversationAutoSubmitBlock {
 }
 
 interface ExhaustionPlanEntry extends SegmentMonsterPlanEntry {
+  readonly offerEnvironmentDigest: string;
   readonly resolutionDigest: string;
   readonly summary: string;
   readonly plannerLabel: ExhaustionPlannerLabel;
@@ -1483,6 +1487,7 @@ function engineDefaultPlanEntry(
     fallbackOption: resolution.fallbackOption,
     mechanics: resolution.mechanics,
     selectedBranch: resolution.selectedBranch,
+    offerEnvironmentDigest: offerEnvironment.digest,
     resolutionDigest: resolution.resolutionDigest,
     summary: resolution.summary,
     plannerLabel: 'engine_default',
@@ -1520,6 +1525,7 @@ function simControllerPlanEntry(
     fallbackOption: resolution.fallbackOption,
     mechanics: resolution.mechanics,
     selectedBranch: resolution.selectedBranch,
+    offerEnvironmentDigest: offerEnvironment.digest,
     resolutionDigest: resolution.resolutionDigest,
     summary: resolution.summary,
     plannerLabel: 'sim_controller',
@@ -3208,7 +3214,7 @@ async function abortableDelay(milliseconds: number, signal: AbortSignal): Promis
   });
 }
 
-function isRoundProposal(value: unknown): value is RoundTurnProposalEnvelope {
+export function isRoundProposal(value: unknown): value is RoundTurnProposalEnvelope {
   const input = asRecord(value);
   return input?.['kind'] === 'round_turn_proposal' &&
     typeof input['proposalId'] === 'string' && typeof input['runId'] === 'string' &&
@@ -3217,7 +3223,30 @@ function isRoundProposal(value: unknown): value is RoundTurnProposalEnvelope {
     typeof input['stateHandle'] === 'string' &&
     (input['phase'] === 'initial' || input['phase'] === 'correction') &&
     typeof input['idempotencyKey'] === 'string' && Array.isArray(input['resolutions']) &&
+    input['resolutions'].every(isStoredProposalResolution) &&
     (input['reactionGuidance'] === null || asRecord(input['reactionGuidance']) !== null);
+}
+
+function isStoredProposalResolution(value: unknown): value is ProposedTurnResolution {
+  const input = asRecord(value);
+  if (input === null) return false;
+  const strictNoFallback = input['strictNoFallback'] === true;
+  try {
+    exactKeys(input, [
+      'proposal', 'option', 'primaryOption', 'fallbackOption', 'mechanics', 'selectedBranch',
+      'offerEnvironmentDigest', 'resolutionDigest', 'summary',
+      ...(strictNoFallback ? ['strictNoFallback'] : []),
+    ], 'stored proposal resolution');
+  } catch {
+    return false;
+  }
+  return /^[0-9a-f]{64}$/u.test(String(input['offerEnvironmentDigest'])) &&
+    /^[0-9a-f]{64}$/u.test(String(input['resolutionDigest'])) &&
+    (input['selectedBranch'] === 'primary' || input['selectedBranch'] === 'fallback') &&
+    typeof input['summary'] === 'string' && asRecord(input['proposal']) !== null &&
+    asRecord(input['option']) !== null && asRecord(input['primaryOption']) !== null &&
+    (input['fallbackOption'] === null || asRecord(input['fallbackOption']) !== null) &&
+    asRecord(input['mechanics']) !== null;
 }
 
 function isPlanAdjustmentProposal(value: unknown): value is PlanAdjustmentProposalEnvelope {
@@ -3229,7 +3258,8 @@ function isPlanAdjustmentProposal(value: unknown): value is PlanAdjustmentPropos
     typeof input['stateHandle'] === 'string' &&
     (input['phase'] === 'initial' || input['phase'] === 'correction') &&
     typeof input['idempotencyKey'] === 'string' &&
-    typeof input['baseline_plan_hash'] === 'string' && Array.isArray(input['updates']);
+    typeof input['baseline_plan_hash'] === 'string' && Array.isArray(input['updates']) &&
+    input['updates'].every(isStoredProposalResolution);
 }
 
 export function authorizedRoundProposalHashInput(proposal: RoundTurnProposalEnvelope): string {
@@ -4026,7 +4056,14 @@ export function proposalResolutionDivergence(
   entry: ProposedTurnResolution,
   offerEnvironment: EngineOptionEnvironment,
 ): readonly string[] {
-  const resolver = createPureTurnProposalResolver(offerEnvironment);
+  const authoritativeEnvironment = offerEnvironment;
+  if (entry.offerEnvironmentDigest !== authoritativeEnvironment.digest) {
+    return [
+      `${entry.proposal.actorId}: stored resolution was produced under offer environment ` +
+        `${entry.offerEnvironmentDigest}, authoritative environment is ${authoritativeEnvironment.digest}.`,
+    ];
+  }
+  const resolver = createPureTurnProposalResolver(authoritativeEnvironment);
   const checked = resolver.resolve(state, entry.proposal);
   if (!checked.valid) {
     return [`${entry.proposal.actorId}: proposal-time resolution was valid, but authoritative resolution refused it: ${checked.refusals.map((refusal) => refusal.summary).join('; ')}`];
@@ -5929,6 +5966,7 @@ async function runConversationWithConfiguredIntel(
                     ? PLAN_MATERIALITY_POLICY_HASH
                     : null,
                 });
+            options.onStoredRoundProposalForTest?.(structuredClone(proposal));
             const checkedProposal = authorizedMechanics(engineSession.currentState(), proposal, offerEnvironment);
             if (checkedProposal.entries === null) {
               failedAttempts.push(...(checkedProposal.divergences.length > 0
@@ -6507,6 +6545,7 @@ async function runConversationWithConfiguredIntel(
                 fallbackOption: entry.fallbackOption,
                 mechanics: entry.mechanics,
                 selectedBranch: entry.selectedBranch,
+                offerEnvironmentDigest: entry.offerEnvironmentDigest,
                 resolutionDigest: entry.resolutionDigest,
                 summary: entry.summary,
               })),

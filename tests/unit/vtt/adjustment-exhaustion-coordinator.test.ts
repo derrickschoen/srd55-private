@@ -67,6 +67,7 @@ function resolution(state: EncounterState, actorId: CombatantId, fallback = fals
     fallbackOption: resolved.fallbackOption,
     mechanics: resolved.mechanics,
     selectedBranch: resolved.selectedBranch,
+    offerEnvironmentDigest: OFFER_ENVIRONMENT.digest,
     resolutionDigest: resolved.resolutionDigest,
     summary: resolved.summary,
   };
