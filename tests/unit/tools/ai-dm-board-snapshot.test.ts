@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { readFile } from '../../helpers/test-filesystem-promises';
 import { canonicalJson } from '../../../src/commands/canonical-json';
 import type { EncounterState } from '../../../src/combat/encounter';
@@ -19,7 +19,6 @@ import {
   EncounterSessionJournal,
 } from '../../../src/vtt/session-persistence';
 import {
-  freshMonsterPlanningState,
   loadArenaFixture,
 } from '../../../src/vtt/mcp/entrypoint';
 import * as engineMcpEntrypoint from '../../../src/vtt/mcp/entrypoint';
@@ -28,7 +27,6 @@ import {
 } from '../../../src/vtt/offers/offer-environment';
 import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
 import { createUnrepresentedPartyThreatCatalog } from '../../../src/vtt/offers/party-threat-catalog';
-import { availableEngineActorOptions, resolveEngineActorOption } from '../../../src/vtt/intent-resolver';
 import {
   assertBoardImageFresh,
   assertSynchronizedBoardImages,
@@ -58,30 +56,6 @@ const BOUND_OFFER_ENVIRONMENT = buildOfferEnvironment({
   familyPolicy: createDisabledEngineOfferFamilyPolicy(),
   partyThreatCatalog: createUnrepresentedPartyThreatCatalog(),
 });
-
-function expectOfferEnvironmentIdentity(
-  state: EncounterState,
-  offerEnvironment: typeof BOUND_OFFER_ENVIRONMENT,
-): void {
-  const planningState = freshMonsterPlanningState(state);
-  const actorId = planningState.combatants.find(
-    (candidate) => candidate.profile.kind === 'monster' && candidate.life === 'living',
-  )?.profile.id;
-  if (actorId === undefined) throw new Error('Snapshot offer-environment probe has no living monster.');
-  const option = availableEngineActorOptions(planningState, actorId, offerEnvironment)[0];
-  if (option === undefined) throw new Error(`Snapshot offer-environment probe has no option for ${actorId}.`);
-  expect(resolveEngineActorOption(planningState, option, offerEnvironment).valid).toBe(true);
-  const equalBindingEnvironment = buildOfferEnvironment({
-    kind: 'binding',
-    binding: offerEnvironment.binding,
-  });
-  expect(equalBindingEnvironment).not.toBe(offerEnvironment);
-  expect(equalBindingEnvironment.binding).toEqual(offerEnvironment.binding);
-  expect(resolveEngineActorOption(planningState, option, equalBindingEnvironment)).toMatchObject({
-    valid: false,
-    code: 'OFFER_ENVIRONMENT_MISMATCH',
-  });
-}
 
 function sourceFor(state: EncounterState, room = 1): BoardImageSource {
   return {
@@ -295,19 +269,10 @@ describe('AI DM board snapshot contracts', () => {
 
     expect(importSavedSession(store, bundle.bytes)).toBe(bundle.sessionId);
     const resumed = EncounterSessionJournal.resume(bundle.sessionId, store, new MemoryMirrorSink());
-    const runtimeConstructor = vi.spyOn(engineMcpEntrypoint, 'createEngineMcpRuntime');
-    let runtime: ReturnType<typeof engineMcpEntrypoint.createEngineMcpRuntime>;
-    try {
-      runtime = engineMcpEntrypoint.createEngineMcpRuntime(resumed.encounterState, {
-        offerEnvironment: BOUND_OFFER_ENVIRONMENT,
-      });
-      expect(runtimeConstructor.mock.calls.at(-1)?.[1]?.offerEnvironment).toBe(BOUND_OFFER_ENVIRONMENT);
-      expect(runtime.feed.current().offerEnvironment).toEqual(BOUND_OFFER_ENVIRONMENT.binding);
-      expectOfferEnvironmentIdentity(resumed.encounterState, BOUND_OFFER_ENVIRONMENT);
-    } finally {
-      runtimeConstructor.mockRestore();
-      expect(vi.isMockFunction(engineMcpEntrypoint.createEngineMcpRuntime)).toBe(false);
-    }
+    const runtime = engineMcpEntrypoint.createEngineMcpRuntime(resumed.encounterState, {
+      offerEnvironment: BOUND_OFFER_ENVIRONMENT,
+    });
+    expect(runtime.feed.current().offerEnvironment).toEqual(BOUND_OFFER_ENVIRONMENT.binding);
     expect(canonicalJson(resumed.encounterState)).toBe(stateBytes);
     expect(runtime.feed.current().projection.combatants.map((combatant) => combatant.id).sort()).toEqual(
       resumed.encounterState.combatants

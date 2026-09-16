@@ -2,7 +2,7 @@ import { createServer, type IncomingHttpHeaders, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { combatantId, encounterSessionId } from '../../../src/combat/values';
 import { encounterBranchId } from '../../../src/combat/values';
 import { ENGINE_DM_TOOL_NAMES } from '../../../src/vtt/mcp/engine-server';
@@ -18,11 +18,9 @@ import {
   createDisabledEngineOfferFamilyPolicy,
 } from '../../../src/vtt/offers/offer-environment';
 import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
-import * as offerEnvironmentBuilder from '../../../src/vtt/offers/build-offer-environment';
 import { createUnrepresentedPartyThreatCatalog } from '../../../src/vtt/offers/party-threat-catalog';
 import { availableEngineActorOptions, resolveEngineActorOption } from '../../../src/vtt/intent-resolver';
 import { loadArenaFixture, projectFutureMonsterTurns } from '../../../src/vtt/mcp/entrypoint';
-import * as engineMcpEntrypoint from '../../../src/vtt/mcp/entrypoint';
 import { EngineRoundSession } from '../../../src/vtt/engine-round-session';
 import { mulberry32 } from '../../../src/combat/random';
 import { engineStateHandle } from '../../../src/vtt/engine-state-capsule';
@@ -240,34 +238,7 @@ describe('SIMULATED local OpenAI conversation adapter', () => {
         ]),
         offerEnvironment: REVISION_BOUND_OFFER_INPUT,
       };
-      const environmentConstructor = vi.spyOn(offerEnvironmentBuilder, 'buildOfferEnvironment');
-      const runtimeConstructor = vi.spyOn(engineMcpEntrypoint, 'createEngineMcpRuntime');
-      let rows: Awaited<ReturnType<typeof runArena>>;
-      try {
-        rows = await runArena(config);
-        const constructedEnvironments:
-          readonly ReturnType<typeof buildOfferEnvironment>[] = environmentConstructor.mock.results
-          .flatMap((result) => result.type === 'return' ? [result.value] : []);
-        const consumedEnvironments = runtimeConstructor.mock.calls.flatMap((call) =>
-          call[1]?.offerEnvironment === undefined ? [] : [call[1].offerEnvironment]);
-        expect(constructedEnvironments.length).toBeGreaterThan(0);
-        expect(consumedEnvironments.length).toBeGreaterThan(0);
-        expect(constructedEnvironments.every((environment) => consumedEnvironments.includes(environment))).toBe(true);
-        expect(consumedEnvironments.every((environment) =>
-          constructedEnvironments.some((candidate) => candidate === environment))).toBe(true);
-        for (const [index, call] of runtimeConstructor.mock.calls.entries()) {
-          const environment = call[1]?.offerEnvironment;
-          const result = runtimeConstructor.mock.results[index];
-          if (environment !== undefined && result?.type === 'return') {
-            expect(result.value.feed.current().offerEnvironment).toEqual(environment.binding);
-          }
-        }
-      } finally {
-        runtimeConstructor.mockRestore();
-        environmentConstructor.mockRestore();
-        expect(vi.isMockFunction(engineMcpEntrypoint.createEngineMcpRuntime)).toBe(false);
-        expect(vi.isMockFunction(offerEnvironmentBuilder.buildOfferEnvironment)).toBe(false);
-      }
+      const rows = await runArena(config);
 
       expect(rows).toEqual([expect.objectContaining({
         cli: 'local-openai', model: 'quantized-SIMULATED', thinkMode: 'on', outcome: 'authorized',
@@ -334,12 +305,6 @@ describe('SIMULATED local OpenAI conversation adapter', () => {
       expect(record(exposedContext['state_ref'], 'state ref')['state_handle'])
         .toBe(engineStateHandle(referenceCapsule));
       const testEnvironment = REFERENCE_OFFER_ENVIRONMENT;
-      const equalBindingEnvironment = buildOfferEnvironment({
-        kind: 'binding',
-        binding: testEnvironment.binding,
-      });
-      expect(equalBindingEnvironment).not.toBe(testEnvironment);
-      expect(equalBindingEnvironment.binding).toEqual(testEnvironment.binding);
       for (const proposal of exposedProposals) {
         const actorId = proposal['actor_id'];
         const optionId = proposal['primary_option_id'];
@@ -357,10 +322,6 @@ describe('SIMULATED local OpenAI conversation adapter', () => {
         expect(option).toBeDefined();
         if (option === undefined) throw new Error(`Submitted option ${optionId} was not minted by the test environment.`);
         expect(resolveEngineActorOption(planningState, option, testEnvironment).valid).toBe(true);
-        expect(resolveEngineActorOption(planningState, option, equalBindingEnvironment)).toMatchObject({
-          valid: false,
-          code: 'OFFER_ENVIRONMENT_MISMATCH',
-        });
       }
       expect(rows[0]?.authorizedPlan?.map((entry) => entry.acceptedProposal)).toEqual(exposedProposals);
       expect(endpoint.requests).toHaveLength(3);

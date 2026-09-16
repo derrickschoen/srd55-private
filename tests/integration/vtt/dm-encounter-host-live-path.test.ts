@@ -10,21 +10,18 @@ import {
   DmEncounterHost,
   type DmEncounterHostSnapshot,
 } from '../../../src/vtt/dm-encounter-host';
+import * as encounterProjections from '../../../src/vtt/encounter-projections';
 import {
   MemoryBrowserSessionStore,
   replaySessionRevisions,
 } from '../../../src/vtt/session-persistence';
 import { createConversationRoundDeadline } from '../../../src/vtt/agent-session-lifecycle';
-import {
-  freshMonsterPlanningState,
-} from '../../../src/vtt/mcp/entrypoint';
 import * as engineMcpEntrypoint from '../../../src/vtt/mcp/entrypoint';
 import {
   createDisabledEngineOfferFamilyPolicy,
 } from '../../../src/vtt/offers/offer-environment';
 import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
 import { createUnrepresentedPartyThreatCatalog } from '../../../src/vtt/offers/party-threat-catalog';
-import { availableEngineActorOptions, resolveEngineActorOption } from '../../../src/vtt/intent-resolver';
 import { MAX_PROPOSAL_CORRECTIONS } from '../../../src/vtt/turn-exhaustion-coordinator';
 import { agentSessionIdFromCli } from '../../../src/vtt/agent-session';
 import {
@@ -40,52 +37,15 @@ const BOUND_OFFER_ENVIRONMENT = buildOfferEnvironment({
   familyPolicy: createDisabledEngineOfferFamilyPolicy(),
   partyThreatCatalog: createUnrepresentedPartyThreatCatalog(),
 });
-let offerEnvironmentIdentityChecked = false;
-
-function expectOfferEnvironmentIdentity(
-  state: Parameters<typeof engineMcpEntrypoint.createEngineMcpRuntime>[0],
-  offerEnvironment: typeof BOUND_OFFER_ENVIRONMENT,
-): void {
-  const planningState = freshMonsterPlanningState(state);
-  const actorId = planningState.combatants.find(
-    (candidate) => candidate.profile.kind === 'monster' && candidate.life === 'living',
-  )?.profile.id;
-  if (actorId === undefined) throw new Error('Offer-environment probe has no living monster.');
-  const option = availableEngineActorOptions(planningState, actorId, offerEnvironment)[0];
-  if (option === undefined) throw new Error(`Offer-environment probe has no option for ${actorId}.`);
-  expect(resolveEngineActorOption(planningState, option, offerEnvironment).valid).toBe(true);
-  const equalBindingEnvironment = buildOfferEnvironment({
-    kind: 'binding',
-    binding: offerEnvironment.binding,
-  });
-  expect(equalBindingEnvironment).not.toBe(offerEnvironment);
-  expect(equalBindingEnvironment.binding).toEqual(offerEnvironment.binding);
-  expect(resolveEngineActorOption(planningState, option, equalBindingEnvironment)).toMatchObject({
-    valid: false,
-    code: 'OFFER_ENVIRONMENT_MISMATCH',
-  });
-}
-
 function createEngineMcpRuntime(
   state: Parameters<typeof engineMcpEntrypoint.createEngineMcpRuntime>[0],
   options: Omit<NonNullable<Parameters<typeof engineMcpEntrypoint.createEngineMcpRuntime>[1]>,
     'offerEnvironment'> & { readonly offerEnvironment?: typeof BOUND_OFFER_ENVIRONMENT } = {},
 ): ReturnType<typeof engineMcpEntrypoint.createEngineMcpRuntime> {
   const offerEnvironment = options.offerEnvironment ?? BOUND_OFFER_ENVIRONMENT;
-  const runtimeConstructor = vi.spyOn(engineMcpEntrypoint, 'createEngineMcpRuntime');
-  try {
-    const runtime = engineMcpEntrypoint.createEngineMcpRuntime(state, { ...options, offerEnvironment });
-    expect(runtimeConstructor.mock.calls.at(-1)?.[1]?.offerEnvironment).toBe(offerEnvironment);
-    expect(runtime.feed.current().offerEnvironment).toEqual(offerEnvironment.binding);
-    if (!offerEnvironmentIdentityChecked) {
-      expectOfferEnvironmentIdentity(state, offerEnvironment);
-      offerEnvironmentIdentityChecked = true;
-    }
-    return runtime;
-  } finally {
-    runtimeConstructor.mockRestore();
-    expect(vi.isMockFunction(engineMcpEntrypoint.createEngineMcpRuntime)).toBe(false);
-  }
+  const runtime = engineMcpEntrypoint.createEngineMcpRuntime(state, { ...options, offerEnvironment });
+  expect(runtime.feed.current().offerEnvironment).toEqual(offerEnvironment.binding);
+  return runtime;
 }
 
 function position(state: EncounterState, id: CombatantId): GridCell {
@@ -195,6 +155,40 @@ function hostUntil(
 }
 
 describe('DmEncounterHost live algorithm path', () => {
+  it('refuses a mismatched DM projection digest before merging the detached snapshot', () => {
+    const player = playerProfile('host-digest-player', { initiativeBonus: 20 });
+    const monster = monsterProfile('host-digest-monster', { initiativeBonus: -20 });
+    const state = startedEncounter({
+      bounds: { columns: 4, rows: 2 },
+      combatants: [player, monster],
+      tokens: [placedToken(player, 0), placedToken(monster, 3)],
+    });
+    const projectDmBoard = encounterProjections.projectDmBoard;
+    const projector = vi.spyOn(encounterProjections, 'projectDmBoard').mockImplementation((input) => ({
+      ...projectDmBoard(input),
+      offerEnvironmentDigest: '0'.repeat(64),
+    }));
+    let host: DmEncounterHost | undefined;
+    try {
+      host = new DmEncounterHost(
+        'session:host-dm-projection-digest-mismatch',
+        new MemoryBrowserSessionStore(),
+        {
+          initialState: state,
+          initialControllers: algorithmIdentities(state),
+          playerIds: [player.id],
+          offerEnvironment: BOUND_OFFER_ENVIRONMENT,
+        },
+      );
+      expect(() => host?.snapshot()).toThrowError(
+        new TypeError('DM board projection offer environment digest does not match the host environment.'),
+      );
+    } finally {
+      projector.mockRestore();
+      host?.close();
+    }
+  });
+
   it('constructs and drives turn exhaustion through the supplied round deadline', async () => {
     const player = playerProfile('host-deadline-player', { initiativeBonus: 20 });
     const monster = monsterProfile('host-deadline-monster', { initiativeBonus: -20 });

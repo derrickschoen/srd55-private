@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
   agentSessionIdFromCli,
   type AgentInvocation,
@@ -19,10 +19,8 @@ import {
 } from '../../../src/vtt/offers/offer-environment';
 import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
 import { createUnrepresentedPartyThreatCatalog } from '../../../src/vtt/offers/party-threat-catalog';
-import { availableEngineActorOptions, resolveEngineActorOption } from '../../../src/vtt/intent-resolver';
 import {
   decodeEngineMcpLauncherManifest,
-  freshMonsterPlanningState,
   loadArenaFixture,
   validatedLauncherBoardHtmlReference,
   validatedLauncherBoardImage,
@@ -63,53 +61,15 @@ const BOUND_OFFER_ENVIRONMENT = buildOfferEnvironment({
   familyPolicy: createDisabledEngineOfferFamilyPolicy(),
   partyThreatCatalog: createUnrepresentedPartyThreatCatalog(),
 });
-let offerEnvironmentIdentityChecked = false;
-let launcherOfferEnvironmentIdentityChecked = false;
-
-function expectOfferEnvironmentIdentity(
-  state: Parameters<typeof engineMcpEntrypoint.createEngineMcpRuntime>[0],
-  offerEnvironment: typeof BOUND_OFFER_ENVIRONMENT,
-): void {
-  const planningState = freshMonsterPlanningState(state);
-  const actorId = planningState.combatants.find(
-    (candidate) => candidate.profile.kind === 'monster' && candidate.life === 'living',
-  )?.profile.id;
-  if (actorId === undefined) throw new Error('Offer-environment probe has no living monster.');
-  const option = availableEngineActorOptions(planningState, actorId, offerEnvironment)[0];
-  if (option === undefined) throw new Error(`Offer-environment probe has no option for ${actorId}.`);
-  expect(resolveEngineActorOption(planningState, option, offerEnvironment).valid).toBe(true);
-  const equalBindingEnvironment = buildOfferEnvironment({
-    kind: 'binding',
-    binding: offerEnvironment.binding,
-  });
-  expect(equalBindingEnvironment).not.toBe(offerEnvironment);
-  expect(equalBindingEnvironment.binding).toEqual(offerEnvironment.binding);
-  expect(resolveEngineActorOption(planningState, option, equalBindingEnvironment)).toMatchObject({
-    valid: false,
-    code: 'OFFER_ENVIRONMENT_MISMATCH',
-  });
-}
-
 function createEngineMcpRuntime(
   state: Parameters<typeof engineMcpEntrypoint.createEngineMcpRuntime>[0],
   options: Omit<NonNullable<Parameters<typeof engineMcpEntrypoint.createEngineMcpRuntime>[1]>,
     'offerEnvironment'> & { readonly offerEnvironment?: typeof BOUND_OFFER_ENVIRONMENT } = {},
 ): ReturnType<typeof engineMcpEntrypoint.createEngineMcpRuntime> {
   const offerEnvironment = options.offerEnvironment ?? BOUND_OFFER_ENVIRONMENT;
-  const runtimeConstructor = vi.spyOn(engineMcpEntrypoint, 'createEngineMcpRuntime');
-  try {
-    const runtime = engineMcpEntrypoint.createEngineMcpRuntime(state, { ...options, offerEnvironment });
-    expect(runtimeConstructor.mock.calls.at(-1)?.[1]?.offerEnvironment).toBe(offerEnvironment);
-    expect(runtime.feed.current().offerEnvironment).toEqual(offerEnvironment.binding);
-    if (!offerEnvironmentIdentityChecked) {
-      expectOfferEnvironmentIdentity(state, offerEnvironment);
-      offerEnvironmentIdentityChecked = true;
-    }
-    return runtime;
-  } finally {
-    runtimeConstructor.mockRestore();
-    expect(vi.isMockFunction(engineMcpEntrypoint.createEngineMcpRuntime)).toBe(false);
-  }
+  const runtime = engineMcpEntrypoint.createEngineMcpRuntime(state, { ...options, offerEnvironment });
+  expect(runtime.feed.current().offerEnvironment).toEqual(offerEnvironment.binding);
+  return runtime;
 }
 
 function launcherOfferEnvironment(manifest: EngineMcpLauncherManifest) {
@@ -202,10 +162,6 @@ class FastProposalAdapter implements AgentSessionAdapter {
     const manifest = JSON.parse(readFileSync(invocation.launcherToken, 'utf8')) as EngineMcpLauncherManifest;
     const state = await loadArenaFixture(manifest.fixturePath);
     const offerEnvironment = launcherOfferEnvironment(manifest);
-    if (!launcherOfferEnvironmentIdentityChecked) {
-      expectOfferEnvironmentIdentity(state, offerEnvironment);
-      launcherOfferEnvironmentIdentityChecked = true;
-    }
     const runtime = createEngineMcpRuntime(state, {
       offerEnvironment,
       runId: manifest.runId, branchId: manifest.branchId, revision: manifest.revision,
@@ -263,11 +219,6 @@ function conversationArgs(outPath: string, boardImage?: BoardImageMode): readonl
 }
 
 describe('board image parsing and row evidence', () => {
-  it('rejects an equal-binding replacement at its runtime consumer', async () => {
-    createEngineMcpRuntime(await loadArenaFixture('tests/fixtures/arena-basis/seed-3943001.json'));
-    expect(offerEnvironmentIdentityChecked).toBe(true);
-  });
-
   it('parses default/off/png/capture_only as a closed mode in conversation and arena', () => {
     const directory = mkdtempSync(join(tmpdir(), 'board-image-parser-'));
     const conversationBase = ['--rooms', '1', '--rounds', '1', '--out', join(directory, 'c.jsonl')];

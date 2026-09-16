@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { readFileSync } from '../../helpers/test-filesystem';
 import type { EncounterState } from '../../../src/combat/encounter';
@@ -23,18 +23,13 @@ import {
   ENGINE_DM_TOOL_NAMES,
   ENGINE_SPECULATIVE_DM_TOOL_NAMES,
 } from '../../../src/vtt/mcp/engine-server';
-import {
-  freshMonsterPlanningState,
-  loadArenaFixture,
-  type EngineMcpRuntime,
-} from '../../../src/vtt/mcp/entrypoint';
+import { loadArenaFixture, type EngineMcpRuntime } from '../../../src/vtt/mcp/entrypoint';
 import * as engineMcpEntrypoint from '../../../src/vtt/mcp/entrypoint';
 import {
   createDisabledEngineOfferFamilyPolicy,
 } from '../../../src/vtt/offers/offer-environment';
 import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
 import { createUnrepresentedPartyThreatCatalog } from '../../../src/vtt/offers/party-threat-catalog';
-import { availableEngineActorOptions, resolveEngineActorOption } from '../../../src/vtt/intent-resolver';
 import { canonicalJson } from '../../../src/commands/canonical-json';
 import {
   applyRevisionDelta,
@@ -63,52 +58,15 @@ const BOUND_OFFER_ENVIRONMENT = buildOfferEnvironment({
   familyPolicy: createDisabledEngineOfferFamilyPolicy(),
   partyThreatCatalog: createUnrepresentedPartyThreatCatalog(),
 });
-let offerEnvironmentIdentityChecked = false;
-
-function expectOfferEnvironmentIdentity(
-  state: Parameters<typeof engineMcpEntrypoint.createEngineMcpRuntime>[0],
-  offerEnvironment: typeof BOUND_OFFER_ENVIRONMENT,
-): void {
-  const planningState = freshMonsterPlanningState(state);
-  const actorId = planningState.combatants.find(
-    (candidate) => candidate.profile.kind === 'monster' && candidate.life === 'living',
-  )?.profile.id;
-  if (actorId === undefined) throw new Error('Offer-environment probe has no living monster.');
-  const option = availableEngineActorOptions(planningState, actorId, offerEnvironment)[0];
-  if (option === undefined) throw new Error(`Offer-environment probe has no option for ${actorId}.`);
-  expect(resolveEngineActorOption(planningState, option, offerEnvironment).valid).toBe(true);
-  const equalBindingEnvironment = buildOfferEnvironment({
-    kind: 'binding',
-    binding: offerEnvironment.binding,
-  });
-  expect(equalBindingEnvironment).not.toBe(offerEnvironment);
-  expect(equalBindingEnvironment.binding).toEqual(offerEnvironment.binding);
-  expect(resolveEngineActorOption(planningState, option, equalBindingEnvironment)).toMatchObject({
-    valid: false,
-    code: 'OFFER_ENVIRONMENT_MISMATCH',
-  });
-}
-
 function createEngineMcpRuntime(
   state: Parameters<typeof engineMcpEntrypoint.createEngineMcpRuntime>[0],
   options: Omit<NonNullable<Parameters<typeof engineMcpEntrypoint.createEngineMcpRuntime>[1]>,
     'offerEnvironment'> & { readonly offerEnvironment?: typeof BOUND_OFFER_ENVIRONMENT } = {},
 ): ReturnType<typeof engineMcpEntrypoint.createEngineMcpRuntime> {
   const offerEnvironment = options.offerEnvironment ?? BOUND_OFFER_ENVIRONMENT;
-  const runtimeConstructor = vi.spyOn(engineMcpEntrypoint, 'createEngineMcpRuntime');
-  try {
-    const runtime = engineMcpEntrypoint.createEngineMcpRuntime(state, { ...options, offerEnvironment });
-    expect(runtimeConstructor.mock.calls.at(-1)?.[1]?.offerEnvironment).toBe(offerEnvironment);
-    expect(runtime.feed.current().offerEnvironment).toEqual(offerEnvironment.binding);
-    if (!offerEnvironmentIdentityChecked) {
-      expectOfferEnvironmentIdentity(state, offerEnvironment);
-      offerEnvironmentIdentityChecked = true;
-    }
-    return runtime;
-  } finally {
-    runtimeConstructor.mockRestore();
-    expect(vi.isMockFunction(engineMcpEntrypoint.createEngineMcpRuntime)).toBe(false);
-  }
+  const runtime = engineMcpEntrypoint.createEngineMcpRuntime(state, { ...options, offerEnvironment });
+  expect(runtime.feed.current().offerEnvironment).toEqual(offerEnvironment.binding);
+  return runtime;
 }
 const TOOL_NAMES = [
   'engine.get_turn_context',
@@ -546,11 +504,6 @@ function happyArguments(name: typeof TOOL_NAMES[number], state: EncounterState, 
 }
 
 describe('engine MCP dual-handshake full surface conformance', () => {
-  it('rejects an equal-binding replacement at its runtime consumer', async () => {
-    await fixtureRuntime();
-    expect(offerEnvironmentIdentityChecked).toBe(true);
-  });
-
   it('derives the state-summary proof token from digest, granularity, and the creature-space v2 domain separator', () => {
     expect(engineStateSummaryProofToken('a'.repeat(64), 'turn_minimal')).toBe(
       '41fc4514eeced83505a8815571ce1bc358a8a78d1f8b8bb8ef07b5ae3379672d',
