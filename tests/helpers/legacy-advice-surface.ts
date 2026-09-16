@@ -12,6 +12,9 @@ import {
   loadAiDmKnowledgeBase,
 } from '../../src/vtt/knowledge-base-contract';
 import { DEFAULT_RENDERER_PROFILE } from '../../src/vtt/renderer-profile';
+import { buildOfferEnvironment } from '../../src/vtt/offers/build-offer-environment';
+
+const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
 
 export const LEGACY_ADVICE_ARENA_FIXTURE = 'tests/fixtures/arena-basis/seed-3943001.json' as const;
 
@@ -66,6 +69,7 @@ export async function captureLegacyAdviceProtocolSurface(
     runId,
     toolProfile: 'dm',
     rendererProfile: DEFAULT_RENDERER_PROFILE,
+    offerEnvironment: OFFER_ENVIRONMENT,
   });
   const capsule = runtime.feed.current();
   const contextResponse = request(runtime.handler, 'tools/call', {

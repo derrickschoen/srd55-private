@@ -26,15 +26,15 @@ import {
   type EnginePlanAdjustmentMetadata,
   type RuleReference,
 } from '../engine-state-capsule';
-import { canonicalEngineQueryPort, engineActionRegistryForEnvironment } from '../engine-query-port';
-import { createPureTurnProposalResolver } from '../intent-resolver';
+import { engineActionRegistryForEnvironment } from '../engine-query-port';
 import {
-  createLegacyEngineOptionEnvironment,
   decodeEngineOptionEnvironmentBinding,
-  engineOptionEnvironmentFromBinding,
-  type EngineOptionEnvironment,
   type EngineOptionEnvironmentBinding,
 } from '../offers/offer-environment';
+import {
+  buildOfferEnvironment,
+  type EngineOptionEnvironment,
+} from '../offers/build-offer-environment';
 import { freshMonsterPlanningState, projectFutureMonsterTurns } from '../monster-planning-state';
 import {
   rendererProfileSchema,
@@ -333,8 +333,7 @@ export interface EngineMcpLauncherManifest {
   readonly requestId: string;
   readonly phase: 'initial' | 'correction' | 'speculative';
   readonly correctionNumber: 0 | 1;
-  /** Required by the strict launcher decoder; optional only on the transitional construction type. */
-  readonly offerEnvironment?: EngineOptionEnvironmentBinding;
+  readonly offerEnvironment: EngineOptionEnvironmentBinding;
   readonly overridePolicy?: OverridePolicy;
   readonly room: number;
   readonly historyKind: string;
@@ -433,9 +432,8 @@ export function createEngineMcpRuntime(
     readonly onUiFeedback?: (feedback: EngineUiFeedback) => void;
     readonly roundDecisionAlreadyAccepted?: boolean;
     readonly uiFeedbackAlreadySubmitted?: boolean;
-    /** Transitional Slice-2 surface; every runtime immediately materializes an explicit binding. */
-    readonly offerEnvironment?: EngineOptionEnvironment;
-  } = {},
+    readonly offerEnvironment: EngineOptionEnvironment;
+  },
 ): EngineMcpRuntime {
   if (options.boardImageContent !== undefined && options.boardImageContents !== undefined) {
     throw new TypeError('Use either boardImageContent or boardImageContents, not both.');
@@ -450,7 +448,7 @@ export function createEngineMcpRuntime(
     options.turnContextMaximumBytes !== BLIND_TURN_CONTEXT_MAX_BYTES) {
     throw new RangeError(`Blind context base cap must be ${String(BLIND_TURN_CONTEXT_MAX_BYTES)} bytes.`);
   }
-  const offerEnvironment = options.offerEnvironment ?? createLegacyEngineOptionEnvironment(canonicalEngineQueryPort);
+  const offerEnvironment = options.offerEnvironment;
   const candidates = state.combatants
     .filter((candidate) => candidate.profile.kind === 'monster' && candidate.life !== 'dead')
     .map((candidate) => candidate.profile.id)
@@ -542,7 +540,7 @@ export function createEngineMcpRuntime(
   });
   const feed = new MutableEngineCapsuleFeed(capsule);
   const blindTurnProjection = options.dmMode === 'blind' || options.toolProfile === 'blind'
-    ? projectEngineBlindTurn(planningState, capsule, canonicalEngineQueryPort)
+    ? projectEngineBlindTurn(planningState, capsule, offerEnvironment.queries)
     : null;
   const proposals: EngineProposalEnvelope[] = [];
   const speculativePlans: QueuedSpeculativePlanEnvelope[] = [];
@@ -553,8 +551,7 @@ export function createEngineMcpRuntime(
   const application = createEngineMcpApplication({
     state: planningState,
     stateSource: feed,
-    queries: offerEnvironment.queries,
-    turnProposals: createPureTurnProposalResolver(offerEnvironment.queries),
+    offerEnvironment,
     proposals: {
       append: (envelope) => {
         proposals.push(envelope);
@@ -651,12 +648,25 @@ export function createEngineMcpRuntime(
   };
 }
 
-export function createEngineMcpHandler(state: EncounterState, maximumToolResultBytes?: number): McpHandler {
-  return createEngineMcpRuntime(state, maximumToolResultBytes === undefined ? {} : { maximumToolResultBytes }).handler;
+export function createEngineMcpHandler(
+  state: EncounterState,
+  offerEnvironment: EngineOptionEnvironment,
+  maximumToolResultBytes?: number,
+): McpHandler {
+  const options = {
+    offerEnvironment,
+    ...(maximumToolResultBytes === undefined ? {} : { maximumToolResultBytes }),
+  };
+  return createEngineMcpRuntime(state, options).handler;
 }
 
-export function handleMcpRequest(state: EncounterState, message: unknown): JsonRpcResponse | null {
-  return createEngineMcpHandler(state).handle(message);
+export function handleMcpRequest(
+  state: EncounterState,
+  message: unknown,
+  offerEnvironment: EngineOptionEnvironment,
+): JsonRpcResponse | null {
+  const handler = createEngineMcpHandler(state, offerEnvironment);
+  return handler.handle(message);
 }
 
 export function decodeArenaFixture(decoded: unknown): EncounterState {
@@ -675,7 +685,7 @@ export { freshMonsterPlanningState, projectFutureMonsterTurns } from '../monster
 
 export async function runEngineMcpServer(
   fixturePath: string,
-  options: Parameters<typeof createEngineMcpRuntime>[1] = {},
+  options: Parameters<typeof createEngineMcpRuntime>[1],
   directFixturePlanning = false,
 ): Promise<void> {
   const loaded = await loadArenaFixture(resolve(fixturePath));
@@ -689,7 +699,7 @@ export async function runEngineMcpServer(
 export async function runEngineMcpLines(
   runtime: EngineMcpRuntime,
   lines: AsyncIterable<string>,
-  options: Parameters<typeof createEngineMcpRuntime>[1] = {},
+  options: Parameters<typeof createEngineMcpRuntime>[1],
   writeResponse: (value: unknown) => Promise<void> = writeJsonLine,
 ): Promise<void> {
   const handler = runtime.handler;
@@ -1034,9 +1044,14 @@ export type DecodedEngineMcpLauncherManifest = Omit<EngineMcpLauncherManifest, '
 };
 
 export function decodeEngineMcpLauncherManifest(value: unknown): DecodedEngineMcpLauncherManifest | null {
-  if (typeof value !== 'object' || value === null || Array.isArray(value) ||
-    (value as Readonly<Record<string, unknown>>)['format'] !== ENGINE_MCP_LAUNCHER_FORMAT) return null;
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
   const claimedLauncher = value as Readonly<Record<string, unknown>>;
+  if (claimedLauncher['format'] !== ENGINE_MCP_LAUNCHER_FORMAT) {
+    const launcherShaped = ['format', 'fixturePath', 'proposalSpoolPath', 'offerEnvironment']
+      .some((key) => Object.hasOwn(claimedLauncher, key));
+    if (launcherShaped) throw new TypeError('Engine MCP launcher manifest structure is invalid.');
+    return null;
+  }
   if (!Object.hasOwn(claimedLauncher, 'offerEnvironment') || claimedLauncher['offerEnvironment'] === undefined) {
     throw new TypeError('Engine MCP launcher requires an explicit offer environment binding.');
   }
@@ -1059,12 +1074,6 @@ export function decodeEngineMcpEntrypointDocument(
   const manifest = decodeEngineMcpLauncherManifest(value);
   if (manifest === null) decodeFixture(value);
   return manifest;
-}
-
-export function reconstructLauncherOfferEnvironment(
-  manifest: DecodedEngineMcpLauncherManifest,
-): EngineOptionEnvironment {
-  return engineOptionEnvironmentFromBinding(canonicalEngineQueryPort, manifest.offerEnvironment);
 }
 
 async function launcherManifest(path: string): Promise<DecodedEngineMcpLauncherManifest | null> {
@@ -1115,7 +1124,7 @@ export async function runEngineMcpEntrypoint(argv: readonly string[] = process.a
   const selectedProfile = profileValue as EngineMcpToolProfile | undefined;
   const manifest = await launcherManifest(launcherPath);
   if (manifest !== null) {
-    const offerEnvironment = reconstructLauncherOfferEnvironment(manifest);
+    const offerEnvironment = buildOfferEnvironment({ kind: 'binding', binding: manifest.offerEnvironment });
     const kbReadBudget = createLauncherKbReadBudget(manifest);
     const state = await loadArenaFixture(manifest.fixturePath);
     const [boardImageContent, boardHtmlContent] = await Promise.all([
@@ -1245,7 +1254,7 @@ export async function runEngineMcpEntrypoint(argv: readonly string[] = process.a
   if (thirdArgument !== undefined && scenario === undefined && (thirdArgument.length < 16 || thirdArgument.length > 300)) {
     throw new TypeError('Engine MCP launcher token must contain 16 to 300 characters.');
   }
-  const options: Parameters<typeof runEngineMcpServer>[1] = scenario === '--correction'
+  const options: Omit<Parameters<typeof runEngineMcpServer>[1], 'offerEnvironment'> = scenario === '--correction'
     ? { revision: 2, phase: 'correction' as const, correctionNumber: 1, historyKind: 'proposal_correction_requested', ...(selectedProfile === undefined ? {} : { toolProfile: selectedProfile }) }
     : scenario === '--room-transition'
       ? { revision: 3, room: 2, historyKind: 'room_transition', ...(selectedProfile === undefined ? {} : { toolProfile: selectedProfile }) }
@@ -1253,5 +1262,8 @@ export async function runEngineMcpEntrypoint(argv: readonly string[] = process.a
   if (scenario !== undefined && scenario !== '--correction' && scenario !== '--room-transition') {
     throw new TypeError('Unknown engine MCP fixture scenario.');
   }
-  await runEngineMcpServer(fixturePath, options, true);
+  await runEngineMcpServer(fixturePath, {
+    ...options,
+    offerEnvironment: buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' }),
+  }, true);
 }

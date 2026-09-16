@@ -40,6 +40,9 @@ import {
   importSavedSession,
 } from '../../../src/vtt/session-persistence';
 import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
+
+const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
 
 const IDLE = {
   requestSequence: 1,
@@ -213,6 +216,7 @@ describe('D377.3 session timeline and pacing controls', () => {
       coordinator: IDLE,
       controllers: [],
       history: [],
+      offerEnvironment: OFFER_ENVIRONMENT,
     }).timeline;
     expect(initial.upcoming).toContainEqual(expect.objectContaining({
       kind: 'legendary_action_window',
@@ -333,6 +337,7 @@ describe('D377.3 session timeline and pacing controls', () => {
       initialControllers: humanIdentities(state),
       playerIds,
       turnLegalActions: (_current, actor) => ({ actions: [{ type: 'end_turn', actor }] }),
+      offerEnvironment: OFFER_ENVIRONMENT,
     });
     host.start();
     for (let turn = 0; turn < state.initiative.length * 2; turn += 1) {
@@ -375,7 +380,9 @@ describe('D377.3 session timeline and pacing controls', () => {
 
   it('equal_length_history_replaced: projects changed content instead of a same-length cached history', () => {
     const store = new SameLengthHistoryStore();
-    const host = new DmEncounterHost('session:equal-length-history', store);
+    const host = new DmEncounterHost('session:equal-length-history', store, {
+      offerEnvironment: OFFER_ENVIRONMENT,
+    });
     const beforeReplacement = host.snapshot();
     const replacementBranch = encounterBranchId('branch:equal-length-replacement');
 
@@ -393,6 +400,7 @@ describe('D377.3 session timeline and pacing controls', () => {
     const store = new MemoryBrowserSessionStore();
     const host = new DmEncounterHost('session:chosen-seed', store, {
       initialSeed: chosenSeed,
+      offerEnvironment: OFFER_ENVIRONMENT,
     });
     const first = store.revisions(host.sessionId)[0];
     expect(first?.rngState.initialSeed).toBe(chosenSeed);

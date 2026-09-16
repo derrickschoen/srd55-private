@@ -16,12 +16,15 @@ import { availableEngineActorOptions, resolveEngineActorOption } from '../../../
 import { freshMonsterPlanningState } from '../../../src/vtt/monster-planning-state';
 import { decodeArenaFixtureText } from '../../../src/vtt/mcp/entrypoint';
 import { decodeArenaBasisEnvelopeV1 } from '../../../src/vtt/arena-fixture';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
 import {
   generateRoom,
   type GeneratedRoom,
   type RoomDifficultyProfile,
 } from '../../../src/vtt/room-generator';
 import { declareTestInputs } from '../../helpers/test-inputs';
+
+const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
 
 const FIXTURE_CASES = [
   { difficulty: 'standard', seed: 5_762_001, path: 'tests/fixtures/arena-basis-los-cover-v1/seed-5762001.json' },
@@ -236,8 +239,8 @@ function expectProductiveMonsters(room: GeneratedRoom): void {
   const monsters = planning.combatants.filter((combatant) =>
     combatant.profile.kind === 'monster' && combatant.life === 'living');
   for (const monster of monsters) {
-    const productive = availableEngineActorOptions(planning, monster.profile.id).some((option) => {
-      const resolution = resolveEngineActorOption(planning, option);
+    const productive = availableEngineActorOptions(planning, monster.profile.id, OFFER_ENVIRONMENT).some((option) => {
+      const resolution = resolveEngineActorOption(planning, option, OFFER_ENVIRONMENT);
       return resolution.valid && (resolution.mechanics.movementCostFeet > 0 ||
         resolution.mechanics.actionSlots.some((slot) =>
           slot.kind === 'attack' || slot.kind === 'saving_throw' ||

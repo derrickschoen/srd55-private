@@ -41,6 +41,9 @@ import {
   REFERENCE_PLAYER_IDS,
   referenceEncounterSetup,
 } from '../../../src/vtt/reference-encounter';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
+
+const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
 
 class ControlledFlushStore extends MemoryBrowserSessionStore {
   #blocked: Promise<void> | null = null;
@@ -310,6 +313,7 @@ function richTopDownOperation(
   const host = new DmEncounterHost(`session:rich-${operation}-${String(richOperationSequence)}`, store, {
     initialState,
     onReducerInvocation,
+    offerEnvironment: OFFER_ENVIRONMENT,
   });
   if (operation === 'placement') host.interrupt();
   const binding = host.rendererTokenBindings()[0];
@@ -524,7 +528,9 @@ describe('encounter session service', () => {
 
   it('publishes an autonomous snapshot only after its durability barrier', async () => {
     const store = new ControlledFlushStore();
-    const host = new DmEncounterHost('session:service-autonomous-durable', store);
+    const host = new DmEncounterHost('session:service-autonomous-durable', store, {
+      offerEnvironment: OFFER_ENVIRONMENT,
+    });
     const seats = registrations(host);
     const service = new EncounterSessionService(host, seats);
     const delivered: string[] = [];
@@ -558,6 +564,7 @@ describe('encounter session service', () => {
           kind: combatant.profile.id === algorithmId ? 'algorithm' as const : 'human' as const,
           generation: 0,
         })).sort((left, right) => left.combatantId.localeCompare(right.combatantId)),
+        offerEnvironment: OFFER_ENVIRONMENT,
       },
     );
     const seats = registrations(host);
@@ -595,7 +602,9 @@ describe('encounter session service', () => {
 
   it('closes cleanly when durability fails before the initial human offer is delivered', async () => {
     const store = new ControlledFlushStore();
-    const host = new DmEncounterHost('session:service-initial-offer-failure', store);
+    const host = new DmEncounterHost('session:service-initial-offer-failure', store, {
+      offerEnvironment: OFFER_ENVIRONMENT,
+    });
     const seats = registrations(host);
     const service = new EncounterSessionService(host, seats);
     const notifications: string[] = [];
@@ -626,7 +635,9 @@ describe('encounter session service', () => {
   it('settles initial-offer cleanup with no human wait when every later store operation fails', async () => {
     const store = new PersistentlyFailingStore();
     const abort = vi.spyOn(AbortController.prototype, 'abort');
-    const host = new DmEncounterHost('session:service-persistent-initial-offer-failure', store);
+    const host = new DmEncounterHost('session:service-persistent-initial-offer-failure', store, {
+      offerEnvironment: OFFER_ENVIRONMENT,
+    });
     const seats = registrations(host);
     const service = new EncounterSessionService(host, seats);
     const notifications: string[] = [];
@@ -662,7 +673,9 @@ describe('encounter session service', () => {
 
   it('acknowledges the exact consuming revision only after durable flush', async () => {
     const store = new ControlledFlushStore();
-    const host = new DmEncounterHost('session:service-durable-commit', store);
+    const host = new DmEncounterHost('session:service-durable-commit', store, {
+      offerEnvironment: OFFER_ENVIRONMENT,
+    });
     const seats = registrations(host);
     const service = new EncounterSessionService(host, seats);
     const offerPromise = waitForOffer(service, seats.map((seat) => seat.playerId));
@@ -713,6 +726,7 @@ describe('encounter session service', () => {
       const host = new DmEncounterHost(
         `session:service-receipt-close-${audience}`,
         new MemoryBrowserSessionStore(),
+        { offerEnvironment: OFFER_ENVIRONMENT },
       );
       const seats = registrations(host);
       const service = new EncounterSessionService(host, seats);
@@ -768,6 +782,7 @@ describe('encounter session service', () => {
         if (other === undefined) throw new Error('Expected a second combatant for refusal control.');
         return { actions: [{ type: 'end_turn', actor: other }] };
       },
+      offerEnvironment: OFFER_ENVIRONMENT,
     });
     const seats = registrations(host);
     const service = new EncounterSessionService(host, seats);
@@ -820,6 +835,7 @@ describe('encounter session service', () => {
     const host = new DmEncounterHost('session:service-automatic-refusal', store, {
       initialPartyState: refusalPartyState(),
       turnLegalActions: () => ({ actions: [action] }),
+      offerEnvironment: OFFER_ENVIRONMENT,
     });
     const seats = registrations(host);
     const service = new EncounterSessionService(host, seats);
@@ -877,6 +893,7 @@ describe('encounter session service', () => {
       })).sort((left, right) => left.combatantId.localeCompare(right.combatantId)),
       reactionOfferPolicy: { kind: 'unattended', askDefault: 'decline' },
       turnLegalActions: () => ({ actions: [{ type: 'end_turn', actor: REFERENCE_FIGHTER_ID }] }),
+      offerEnvironment: OFFER_ENVIRONMENT,
     });
     host.connectBridgeMirror(mirror);
     const seats = registrations(host);
@@ -927,6 +944,7 @@ describe('encounter session service', () => {
         })).sort((left, right) => left.combatantId.localeCompare(right.combatantId)),
         reactionOfferPolicy: { kind: 'unattended', askDefault: 'decline' },
         turnLegalActions: () => ({ actions: [{ type: 'end_turn', actor: REFERENCE_FIGHTER_ID }] }),
+        offerEnvironment: OFFER_ENVIRONMENT,
       },
     );
     const seats = registrations(host);
@@ -965,7 +983,9 @@ describe('encounter session service', () => {
     async (failureMode) => {
       const store = new FaultInjectingStore();
       const mirror = new FaultInjectingMirror();
-      const host = new DmEncounterHost(`session:service-post-${failureMode}`, store);
+      const host = new DmEncounterHost(`session:service-post-${failureMode}`, store, {
+        offerEnvironment: OFFER_ENVIRONMENT,
+      });
       host.connectBridgeMirror(mirror);
       const seats = registrations(host);
       const service = new EncounterSessionService(host, seats);
@@ -1005,7 +1025,9 @@ describe('encounter session service', () => {
 
   it('settles active and queued mutations closed before an ordinary post-step barrier is released', async () => {
     const store = new ControlledFlushStore();
-    const host = new DmEncounterHost('session:service-close-during-step-flush', store);
+    const host = new DmEncounterHost('session:service-close-during-step-flush', store, {
+      offerEnvironment: OFFER_ENVIRONMENT,
+    });
     const seats = registrations(host);
     const service = new EncounterSessionService(host, seats);
     const offerPromise = waitForOffer(service, seats.map((seat) => seat.playerId));
@@ -1046,7 +1068,9 @@ describe('encounter session service', () => {
 
   it('keeps the FIFO usable after a real pre-application append failure', async () => {
     const store = new FaultInjectingStore();
-    const host = new DmEncounterHost('session:service-pre-apply-continues', store);
+    const host = new DmEncounterHost('session:service-pre-apply-continues', store, {
+      offerEnvironment: OFFER_ENVIRONMENT,
+    });
     const seats = registrations(host);
     const service = new EncounterSessionService(host, seats);
     const offerPromise = waitForOffer(service, seats.map((seat) => seat.playerId));
@@ -1084,7 +1108,9 @@ describe('encounter session service', () => {
 
   it('refuses missing identity and cross-seat token before reading state or emitting an event', async () => {
     const memory = new MemoryBrowserSessionStore();
-    const real = new DmEncounterHost('session:service-auth-boundary', memory);
+    const real = new DmEncounterHost('session:service-auth-boundary', memory, {
+      offerEnvironment: OFFER_ENVIRONMENT,
+    });
     const [first, second] = registrations(real);
     if (first === undefined || second === undefined) throw new Error('Expected two authority seats.');
     let playerReads = 0;
@@ -1129,7 +1155,9 @@ describe('encounter session service', () => {
 
   it('serializes FIFO and gives every noncommitted path a terminal outcome without a mutation event', async () => {
     const memory = new MemoryBrowserSessionStore();
-    const real = new DmEncounterHost('session:service-terminal-outcomes', memory);
+    const real = new DmEncounterHost('session:service-terminal-outcomes', memory, {
+      offerEnvironment: OFFER_ENVIRONMENT,
+    });
     const seat = registrations(real)[0];
     if (seat === undefined) throw new Error('Expected an authority seat.');
     const base = real.playerSnapshot(seat);
@@ -1216,7 +1244,9 @@ describe('encounter session service', () => {
 
   it('settles queued work as closed when the service closes', async () => {
     const memory = new MemoryBrowserSessionStore();
-    const host = new DmEncounterHost('session:service-close', memory);
+    const host = new DmEncounterHost('session:service-close', memory, {
+      offerEnvironment: OFFER_ENVIRONMENT,
+    });
     const seat = registrations(host)[0];
     if (seat === undefined) throw new Error('Expected an authority seat.');
     const service = new EncounterSessionService(host, [seat]);
@@ -1230,7 +1260,9 @@ describe('encounter session service', () => {
 
   it('delivers immutable detached offers and dispatches only the internal authoritative command', async () => {
     const store = new MemoryBrowserSessionStore();
-    const host = new DmEncounterHost('session:service-detached-offers', store);
+    const host = new DmEncounterHost('session:service-detached-offers', store, {
+      offerEnvironment: OFFER_ENVIRONMENT,
+    });
     const seats = registrations(host);
     const service = new EncounterSessionService(host, seats);
     const offerPromise = waitForOffer(service, seats.map((seat) => seat.playerId));
@@ -1271,7 +1303,9 @@ describe('encounter session service', () => {
 
   it('isolates throwing DM and player subscribers after capturing all seats and settles queued work', async () => {
     const store = new MemoryBrowserSessionStore();
-    const host = new DmEncounterHost('session:service-subscriber-isolation', store);
+    const host = new DmEncounterHost('session:service-subscriber-isolation', store, {
+      offerEnvironment: OFFER_ENVIRONMENT,
+    });
     const seats = registrations(host);
     const service = new EncounterSessionService(host, seats);
     const offerPromise = waitForOffer(service, seats.map((seat) => seat.playerId));
@@ -1321,7 +1355,9 @@ describe('encounter session service', () => {
 
   it('rejects overlapping authoritative seat ownership at construction', () => {
     const memory = new MemoryBrowserSessionStore();
-    const host = new DmEncounterHost('session:service-overlapping-seats', memory);
+    const host = new DmEncounterHost('session:service-overlapping-seats', memory, {
+      offerEnvironment: OFFER_ENVIRONMENT,
+    });
     const seat = registrations(host)[0];
     if (seat === undefined) throw new Error('Expected an authority seat.');
 

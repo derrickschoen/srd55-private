@@ -12,6 +12,9 @@ import {
   MemoryBrowserSessionStore,
   type SessionRevision,
 } from '../../../src/vtt/session-persistence';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
+
+const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
 
 const DOOR_ID = 'object:two-room-door';
 
@@ -172,6 +175,7 @@ function runningDoorService(
     })),
     playerIds: initialState.combatants.map((combatant) => combatant.profile.id),
     turnLegalActions: legalActions,
+    offerEnvironment: OFFER_ENVIRONMENT,
     ...(onReducerInvocation === undefined ? {} : { onReducerInvocation }),
   });
   const seat = allSeat(host);
@@ -188,6 +192,7 @@ function reopenDoorService(store: MemoryBrowserSessionStore): {
   const host = new DmEncounterHost('session:door-intent', store, {
     playerIds,
     turnLegalActions: legalActions,
+    offerEnvironment: OFFER_ENVIRONMENT,
   });
   const seat = allSeat(host);
   return { host, service: new EncounterSessionService(host, [seat]), seat };

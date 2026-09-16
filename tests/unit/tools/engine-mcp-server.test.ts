@@ -26,10 +26,27 @@ import {
   kbSubjectSources,
   KbReadBudget,
 } from '../../../src/vtt/mcp/knowledge-base';
-import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
 import { BUNDLED_MONSTER_ROSTER } from '../../../src/combat/statblocks/roster';
 import { blindStatblockFacts } from '../../../src/vtt/blind-turn-context';
 import { createOptionPathFixtureEncounter } from '../../fixtures/vtt-option-path-encounter';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
+import { ENGINE_OFFER_FAMILY_POLICY_FORMAT } from '../../../src/vtt/offers/offer-codec-primitives';
+import { createEngineOfferFamilyPolicy } from '../../../src/vtt/offers/offer-environment';
+import { createUnrepresentedPartyThreatCatalog } from '../../../src/vtt/offers/party-threat-catalog';
+
+const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
+const POLICY_OFFER_ENVIRONMENT = buildOfferEnvironment({
+  kind: 'configuration',
+  mode: 'revision_bound',
+  familyPolicy: createEngineOfferFamilyPolicy({
+    format: ENGINE_OFFER_FAMILY_POLICY_FORMAT,
+    helpAttack: 'enabled',
+    readyAttack: 'disabled',
+    unarmedControl: 'disabled',
+    reposition: 'disabled',
+  }),
+  partyThreatCatalog: createUnrepresentedPartyThreatCatalog(),
+});
 
 function record(value: unknown): Readonly<Record<string, unknown>> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -40,7 +57,11 @@ function record(value: unknown): Readonly<Record<string, unknown>> {
 
 async function prepareMovementParityEvidence() {
   const state = await loadArenaFixture('tests/fixtures/arena-basis/seed-3943001.json');
-  const runtime = createEngineMcpRuntime(state, { dmMode: 'blind', toolProfile: 'blind' });
+  const runtime = createEngineMcpRuntime(state, {
+    dmMode: 'blind',
+    toolProfile: 'blind',
+    offerEnvironment: OFFER_ENVIRONMENT,
+  });
   const capsule = runtime.feed.current();
   const context = record(runtime.toolSurface.execute('engine.get_turn_context', {
     run_id: capsule.runId,
@@ -65,7 +86,7 @@ async function prepareMovementParityEvidence() {
     const expected = new Map<string, number>();
     for (let row = 0; row < state.bounds.rows; row += 1) {
       for (let column = 0; column < state.bounds.columns; column += 1) {
-        const path = canonicalEngineQueryPort.path(state, {
+        const path = OFFER_ENVIRONMENT.queries.path(state, {
           actorId,
           destination: { column, row },
           movement: 'normal',
@@ -82,7 +103,11 @@ const MOVEMENT_PARITY_EVIDENCE = await prepareMovementParityEvidence().catch((er
 
 async function prepareHardCapEvidence() {
   const state = await loadArenaFixture('tests/fixtures/arena-basis-hard/seed-5117002.json');
-  const runtime = createEngineMcpRuntime(state, { dmMode: 'blind', toolProfile: 'blind' });
+  const runtime = createEngineMcpRuntime(state, {
+    dmMode: 'blind',
+    toolProfile: 'blind',
+    offerEnvironment: OFFER_ENVIRONMENT,
+  });
   const capsule = runtime.feed.current();
   const context = record(runtime.toolSurface.execute('engine.get_turn_context', {
     run_id: capsule.runId,
@@ -124,6 +149,7 @@ describe('engine MCP stdio protocol', () => {
       phase: 'initial' as const,
       toolProfile: 'blind' as const,
       dmMode: 'blind' as const,
+      offerEnvironment: OFFER_ENVIRONMENT,
     };
     const before = createEngineMcpRuntime(state, common);
     const after = createEngineMcpRuntime(state, {
@@ -141,6 +167,48 @@ describe('engine MCP stdio protocol', () => {
     expect(renderBlindEnginePrompt('plan_blind_round', after.feed.current(), rules))
       .toBe(renderBlindEnginePrompt('plan_blind_round', before.feed.current(), rules));
   });
+
+  it('completes real blind proposal composition under the application policy environment', async () => {
+    const state = await loadArenaFixture('tests/fixtures/arena-basis/seed-3943001.json');
+    const actorId = state.combatants.find((entry) =>
+      entry.profile.kind === 'monster' && entry.life === 'living')?.profile.id;
+    if (actorId === undefined) throw new Error('Policy forwarding fixture has no monster.');
+    const runtime = createEngineMcpRuntime(state, {
+      dmMode: 'blind',
+      toolProfile: 'blind',
+      requestedActorIds: [actorId],
+      offerEnvironment: POLICY_OFFER_ENVIRONMENT,
+    });
+    const capsule = runtime.feed.current();
+    const context = record(runtime.toolSurface.execute('engine.get_turn_context', {
+      run_id: capsule.runId,
+      expected_revision: capsule.revision,
+      scope: 'round',
+    }));
+    const request = record(context['request']);
+    const actors = Array.isArray(request['required_actors'])
+      ? request['required_actors'].map(record)
+      : [];
+    if (actors.length !== 1) throw new Error('Policy forwarding fixture has the wrong actor count.');
+    const result = runtime.toolSurface.execute('engine.submit_blind_round_intents', {
+      intent_version: 'blind-round-intent-v1',
+      intents: actors.map((actor) => ({
+        actor: { name: actor['name'], badge: actor['badge'] },
+        action: { kind: 'end' },
+        reason: 'Hold the line.',
+      })),
+    });
+
+    expect(result).toEqual({ status: 'accepted', attempt: 1 });
+    expect(runtime.blindIntentSubmissions).toHaveLength(1);
+    expect(runtime.blindIntentSubmissions[0]?.resolution.status).toBe('accepted');
+    expect(runtime.proposals).toHaveLength(1);
+    const stored = runtime.proposals[0];
+    if (stored?.kind !== 'round_turn_proposal') throw new Error('Blind proposal was not stored as a round.');
+    expect(stored.resolutions.map((entry) => entry.offerEnvironmentDigest))
+      .toEqual([POLICY_OFFER_ENVIRONMENT.digest]);
+  });
+
   it('exposes only the closed blind profile and records every simulated MCP ingress channel', async () => {
     const state = await loadArenaFixture('tests/fixtures/arena-basis/seed-3943001.json');
     const bundle = await loadD569AiDmKnowledgeBase(process.cwd(), 'blind');
@@ -160,6 +228,7 @@ describe('engine MCP stdio protocol', () => {
         revision: 1,
         context: { granularity: 'full', actors: [{ options: ['private-advice-base'] }] },
       },
+      offerEnvironment: OFFER_ENVIRONMENT,
     });
     const capsule = runtime.feed.current();
     let id = 0;
@@ -304,7 +373,10 @@ describe('engine MCP stdio protocol', () => {
     expect(runtime.proposals).toEqual([
       expect.objectContaining({
         kind: 'round_turn_proposal',
-        resolutions: requiredActors.map(() => expect.objectContaining({ selectedBranch: 'primary' })),
+        resolutions: requiredActors.map(() => expect.objectContaining({
+          selectedBranch: 'primary',
+          offerEnvironmentDigest: OFFER_ENVIRONMENT.digest,
+        })),
       }),
     ]);
 
@@ -340,6 +412,7 @@ describe('engine MCP stdio protocol', () => {
         dmMode: 'blind', toolProfile: 'blind', blindMaxAttempts: maximum,
         blindDeadlineUnixMs: 20_000, clock: () => now,
         requestedActorIds: [actorId],
+        offerEnvironment: OFFER_ENVIRONMENT,
       });
       const capsule = runtime.feed.current();
       const context = record(runtime.toolSurface.execute('engine.get_turn_context', {
@@ -373,6 +446,7 @@ describe('engine MCP stdio protocol', () => {
       dmMode: 'blind', toolProfile: 'blind', blindMaxAttempts: 3,
       blindDeadlineUnixMs: 30_002, clock: () => now,
       requestedActorIds: [actorId],
+      offerEnvironment: OFFER_ENVIRONMENT,
     });
     const capsule = deadlineRuntime.feed.current();
     const context = record(deadlineRuntime.toolSurface.execute('engine.get_turn_context', {
@@ -414,6 +488,7 @@ describe('engine MCP stdio protocol', () => {
     const hinted = createEngineMcpRuntime(state, {
       dmMode: 'blind', toolProfile: 'blind', blindRepairArm: 'minimal_legal_alternative',
       requestedActorIds: [actorId],
+      offerEnvironment: OFFER_ENVIRONMENT,
     });
     const hintedCapsule = hinted.feed.current();
     const hintedContext = record(hinted.toolSurface.execute('engine.get_turn_context', {
@@ -444,9 +519,11 @@ describe('engine MCP stdio protocol', () => {
     const changing = createEngineMcpRuntime(state, {
       dmMode: 'blind', toolProfile: 'blind',
       requestedActorIds: [actorId],
+      offerEnvironment: OFFER_ENVIRONMENT,
       beforeBlindIntentStage: () => {
         const replacement = createEngineMcpRuntime(state, {
           dmMode: 'blind', toolProfile: 'blind', revision: 2, requestedActorIds: [actorId],
+          offerEnvironment: OFFER_ENVIRONMENT,
         }).feed.current();
         changedRuntime?.feed.replace(replacement);
       },

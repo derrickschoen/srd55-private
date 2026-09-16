@@ -12,7 +12,6 @@ import {
   type ProposalSink,
 } from '../../../src/vtt/engine-envelopes';
 import {
-  createEngineStateCapsule,
   createEngineStateCapsuleForEnvironment,
   decodeEngineStateCapsule,
   EngineStateCapsuleDecodeError,
@@ -23,16 +22,24 @@ import {
   projectEngineEncounterState,
   verifyEngineStateCapsule,
 } from '../../../src/vtt/engine-state-capsule';
-import { canonicalEngineQueryPort, engineActionRegistry } from '../../../src/vtt/engine-query-port';
+import { engineActionRegistryForEnvironment } from '../../../src/vtt/engine-query-port';
 import { projectDmBoard } from '../../../src/vtt/encounter-projections';
-import { availableEngineActorOptions, pureTurnProposalResolver } from '../../../src/vtt/intent-resolver';
+import { availableEngineActorOptions, createPureTurnProposalResolver } from '../../../src/vtt/intent-resolver';
 import { freshMonsterPlanningState } from '../../../src/vtt/mcp/entrypoint';
 import { generateRoom } from '../../../src/vtt/room-generator';
 import { HAND_AUTHORED_CAPSULE_V3_BODY } from '../../fixtures/vtt/creature-space-migration-fixtures';
-import {
-  createLegacyEngineOptionEnvironmentBinding,
-  createRevisionBoundEngineOptionEnvironment,
-} from '../../../src/vtt/offers/offer-environment';
+import { createDisabledEngineOfferFamilyPolicy } from '../../../src/vtt/offers/offer-environment';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
+import { createUnrepresentedPartyThreatCatalog } from '../../../src/vtt/offers/party-threat-catalog';
+
+const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
+const REVISION_BOUND_OFFER_ENVIRONMENT = buildOfferEnvironment({
+  kind: 'configuration',
+  mode: 'revision_bound',
+  familyPolicy: createDisabledEngineOfferFamilyPolicy(),
+  partyThreatCatalog: createUnrepresentedPartyThreatCatalog(),
+});
+const TURN_PROPOSAL_RESOLVER = createPureTurnProposalResolver(REVISION_BOUND_OFFER_ENVIRONMENT);
 
 const repoRoot = fileURLToPath(new URL('../../../', import.meta.url));
 const authorityBoundaryEntries = [
@@ -144,24 +151,29 @@ function capsuleFixture() {
     },
     controllers: [],
     history: [],
+    offerEnvironment: REVISION_BOUND_OFFER_ENVIRONMENT,
   });
   const runId = encounterSessionId('encounter:mcp-migration');
   const branchId = encounterBranchId('branch:mcp-migration');
   const requestId = 'request:mcp-migration';
-  const environment = createRevisionBoundEngineOptionEnvironment(canonicalEngineQueryPort);
   const capsule = createEngineStateCapsuleForEnvironment({
     runId,
     branchId,
     revision: 1,
     generatedAt: '2026-08-27T12:00:00.000Z',
-    offerEnvironment: environment.binding,
+    offerEnvironment: REVISION_BOUND_OFFER_ENVIRONMENT.binding,
     request: {
       requestId,
       phase: 'initial',
       correctionNumber: 0,
       actors: [actor.profile.id],
     },
-    projection: projectEngineDmProjection(board, engineActionRegistry(state), state.observationHistory, 1),
+    projection: projectEngineDmProjection(
+      board,
+      engineActionRegistryForEnvironment(state, REVISION_BOUND_OFFER_ENVIRONMENT),
+      state.observationHistory,
+      1,
+    ),
   });
   return { state, actor: actor.profile.id, target: target.profile.id, requestId, capsule };
 }
@@ -201,7 +213,7 @@ describe('read-only engine state capsule', () => {
     const body = {
       ...schemaThreeBody,
       schemaVersion: 4,
-      offerEnvironment: createLegacyEngineOptionEnvironmentBinding(),
+      offerEnvironment: OFFER_ENVIRONMENT.binding,
     };
     const fixture = {
       ...body,
@@ -336,7 +348,7 @@ describe('read-only engine state capsule', () => {
     );
 
     const changedBinding = rehash(capsule);
-    changedBinding['offerEnvironment'] = createLegacyEngineOptionEnvironmentBinding();
+    changedBinding['offerEnvironment'] = OFFER_ENVIRONMENT.binding;
     expect(() => decodeEngineStateCapsule(changedBinding)).toThrowError(
       expect.objectContaining<Partial<EngineStateCapsuleDecodeError>>({ code: 'digest_mismatch' }),
     );
@@ -344,7 +356,7 @@ describe('read-only engine state capsule', () => {
 
   it('gives board-derived and direct projection paths identical placed and pending semantics', () => {
     const fixture = capsuleFixture();
-    const registry = engineActionRegistry(fixture.state);
+    const registry = engineActionRegistryForEnvironment(fixture.state, REVISION_BOUND_OFFER_ENVIRONMENT);
     const direct = projectEngineEncounterState(fixture.state, registry, fixture.capsule.projection.initiative, 1);
     expect(direct).toEqual(fixture.capsule.projection);
 
@@ -371,8 +383,9 @@ describe('read-only engine state capsule', () => {
       },
       controllers: [],
       history: [],
+      offerEnvironment: REVISION_BOUND_OFFER_ENVIRONMENT,
     });
-    const pendingRegistry = engineActionRegistry(pendingState);
+    const pendingRegistry = engineActionRegistryForEnvironment(pendingState, REVISION_BOUND_OFFER_ENVIRONMENT);
     const fromBoard = projectEngineDmProjection(pendingBoard, pendingRegistry, pendingState.observationHistory, 1);
     const fromState = projectEngineEncounterState(pendingState, pendingRegistry, fromBoard.initiative, 1);
     expect(fromState).toEqual(fromBoard);
@@ -416,25 +429,27 @@ describe('read-only engine state capsule', () => {
       })),
       adjustmentBudget: 2 as const,
     };
-    const capsule = createEngineStateCapsule({
+    const capsule = createEngineStateCapsuleForEnvironment({
       runId: fixture.capsule.runId,
       branchId: fixture.capsule.branchId,
       revision: 12,
       generatedAt: '2026-08-29T12:00:00.000Z',
       request,
       projection: fixture.capsule.projection,
+      offerEnvironment: fixture.capsule.offerEnvironment,
     });
 
     expect(engineCapsuleRequestKind(request)).toBe('plan_adjustment');
     expect(capsule.request).toEqual(request);
     expect(verifyEngineStateCapsule(capsule)).toBe(true);
-    expect(() => createEngineStateCapsule({
+    expect(() => createEngineStateCapsuleForEnvironment({
       runId: fixture.capsule.runId,
       branchId: fixture.capsule.branchId,
       revision: 12,
       generatedAt: '2026-08-29T12:00:00.000Z',
       request: { ...request, adjustmentBudget: 1 },
       projection: fixture.capsule.projection,
+      offerEnvironment: fixture.capsule.offerEnvironment,
     })).toThrow('Plan adjustment actors, baseline proposal digests, and budget must match exactly.');
   });
 
@@ -442,7 +457,7 @@ describe('read-only engine state capsule', () => {
     const fixture = capsuleFixture();
     const actors = fixture.state.combatants.flatMap((combatant) =>
       combatant.profile.kind === 'monster' && combatant.life !== 'dead' ? [combatant.profile.id] : []);
-    const capsule = createEngineStateCapsule({
+    const capsule = createEngineStateCapsuleForEnvironment({
       runId: fixture.capsule.runId,
       branchId: fixture.capsule.branchId,
       revision: 8,
@@ -466,6 +481,7 @@ describe('read-only engine state capsule', () => {
         adjustmentBudget: 2,
       },
       projection: fixture.capsule.projection,
+      offerEnvironment: fixture.capsule.offerEnvironment,
     });
     const source = new FixedReadonlyStateCapsuleSource(capsule);
     const accepted: EngineProposalEnvelope[] = [];
@@ -494,7 +510,7 @@ describe('read-only engine state capsule', () => {
       baseline_plan_hash: 'c'.repeat(64),
     })).toThrow('Plan adjustment proposal does not match the baseline plan hash.');
     const updates = actors.map((actorId) => {
-      const option = availableEngineActorOptions(fixture.state, actorId)
+      const option = availableEngineActorOptions(fixture.state, actorId, REVISION_BOUND_OFFER_ENVIRONMENT)
         .find((candidate) => candidate.actionSlots.some((slot) => slot.use.kind === 'dodge'));
       if (option === undefined) throw new Error(`Fixture omitted Dodge for ${actorId}.`);
       const proposal = {
@@ -502,7 +518,7 @@ describe('read-only engine state capsule', () => {
         fallbackOptionId: null,
         reason: 'Exercise the state capsule fixture.', overrideJustification: null,
       };
-      const resolution = pureTurnProposalResolver.resolve(fixture.state, proposal);
+      const resolution = TURN_PROPOSAL_RESOLVER.resolve(fixture.state, proposal);
       if (!resolution.valid) throw new Error(resolution.refusals.map((entry) => entry.summary).join('\n'));
       return {
         proposal,
@@ -511,6 +527,7 @@ describe('read-only engine state capsule', () => {
         fallbackOption: resolution.fallbackOption,
         mechanics: resolution.mechanics,
         selectedBranch: resolution.selectedBranch,
+        offerEnvironmentDigest: REVISION_BOUND_OFFER_ENVIRONMENT.digest,
         resolutionDigest: resolution.resolutionDigest,
         summary: resolution.summary,
       };
@@ -571,7 +588,11 @@ describe('read-only engine state capsule', () => {
     const fixture = capsuleFixture();
     const source = new FixedReadonlyStateCapsuleSource(fixture.capsule);
     const stateHandle = engineStateHandle(fixture.capsule);
-    const option = availableEngineActorOptions(fixture.state, fixture.actor)
+    const option = availableEngineActorOptions(
+      fixture.state,
+      fixture.actor,
+      REVISION_BOUND_OFFER_ENVIRONMENT,
+    )
       .find((candidate) => candidate.actionSlots.some((slot) => slot.use.kind === 'dodge'));
     if (option === undefined) throw new Error('Fixture omitted Dodge.');
     const proposal = {
@@ -579,7 +600,7 @@ describe('read-only engine state capsule', () => {
       fallbackOptionId: null,
       reason: 'Exercise the restored capsule fixture.', overrideJustification: null,
     };
-    const resolution = pureTurnProposalResolver.resolve(fixture.state, proposal);
+    const resolution = TURN_PROPOSAL_RESOLVER.resolve(fixture.state, proposal);
     if (!resolution.valid) throw new Error(resolution.refusals.map((entry) => entry.summary).join('\n'));
     const envelope: EngineProposalEnvelope = {
       kind: 'round_turn_proposal',
@@ -601,6 +622,7 @@ describe('read-only engine state capsule', () => {
         fallbackOption: resolution.fallbackOption,
         mechanics: resolution.mechanics,
         selectedBranch: resolution.selectedBranch,
+        offerEnvironmentDigest: REVISION_BOUND_OFFER_ENVIRONMENT.digest,
         resolutionDigest: resolution.resolutionDigest,
         summary: resolution.summary,
       }],

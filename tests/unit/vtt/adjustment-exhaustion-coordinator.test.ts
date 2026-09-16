@@ -6,9 +6,18 @@ import type {
   PlanAdjustmentProposalEnvelope,
   ProposedTurnResolution,
 } from '../../../src/vtt/engine-envelopes';
-import { engineActionId, engineOptionId } from '../../../src/vtt/turn-proposal';
 import type { EngineStateCapsule } from '../../../src/vtt/engine-state-capsule';
-import { createEngineMcpRuntime, loadArenaFixture } from '../../../src/vtt/mcp/entrypoint';
+import {
+  createEngineMcpRuntime,
+  freshMonsterPlanningState,
+  loadArenaFixture,
+} from '../../../src/vtt/mcp/entrypoint';
+import type { EncounterState } from '../../../src/combat/encounter';
+import {
+  availableEngineActorOptions,
+  createPureTurnProposalResolver,
+} from '../../../src/vtt/intent-resolver';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
 import {
   AdjustmentExhaustionCoordinator,
   type AdjustmentCorrectionRuntime,
@@ -24,40 +33,49 @@ function journal(initial: readonly AdjustmentExhaustionTransition[] = []) {
   };
 }
 
-function resolution(actorId: CombatantId, fallback = false): ProposedTurnResolution {
-  const option = {
-    optionId: engineOptionId(`option:${actorId}:dodge`), actorId, revision: 1, label: 'Dodge',
-    movement: {
-      preference: { willingness: 'none' as const, maximumFeet: 0, opportunityRisk: 'avoid' as const },
-      engagement: { stance: 'hold_position' as const },
-    },
-    actionSlots: [{ slot: 'main' as const, use: { kind: 'dodge' as const } }],
-    resourceCostLabels: [],
-    omittedRiders: [],
+const OFFER_ENVIRONMENT = buildOfferEnvironment({
+  kind: 'configuration',
+  mode: 'legacy_standard',
+});
+const TURN_PROPOSAL_RESOLVER = createPureTurnProposalResolver(OFFER_ENVIRONMENT);
+
+function resolution(state: EncounterState, actorId: CombatantId, fallback = false): ProposedTurnResolution {
+  const planningState = freshMonsterPlanningState(state);
+  const options = availableEngineActorOptions(planningState, actorId, OFFER_ENVIRONMENT, 1);
+  const option = options.find((candidate) => candidate.actionSlots.some((slot) => slot.use.kind === 'dodge'));
+  if (option === undefined) throw new Error(`Adjustment exhaustion fixture has no Dodge option for ${actorId}.`);
+  const fallbackOption = fallback
+    ? options.find((candidate) => candidate.optionId !== option.optionId) ?? null
+    : null;
+  if (fallback && fallbackOption === null) {
+    throw new Error(`Adjustment exhaustion fixture has no fallback option for ${actorId}.`);
+  }
+  const proposal = {
+    actorId,
+    expectedRevision: 1,
+    primaryOptionId: option.optionId,
+    fallbackOptionId: fallbackOption?.optionId ?? null,
+    reason: 'Exercise the adjustment exhaustion fixture.',
+    overrideJustification: null,
   };
+  const resolved = TURN_PROPOSAL_RESOLVER.resolve(planningState, proposal);
+  if (!resolved.valid) throw new Error(`Adjustment exhaustion option was refused for ${actorId}.`);
   return {
-    proposal: {
-      actorId, expectedRevision: 1, primaryOptionId: option.optionId,
-      fallbackOptionId: fallback ? engineOptionId(`option:${actorId}:fallback`) : null,
-      reason: 'Exercise the adjustment exhaustion fixture.',
-      overrideJustification: null,
-    },
-    option,
-    primaryOption: option,
-    fallbackOption: fallback ? { ...option, optionId: engineOptionId(`option:${actorId}:fallback`) } : null,
-    mechanics: {
-      actorId, optionId: option.optionId, movementCostFeet: 0, path: [], finalPosition: { column: 0, row: 0 },
-      actionSlots: [{ slot: 'main', kind: 'dodge', actionId: engineActionId('dodge'), spellId: null, targetIds: [], objectId: null, omittedRiders: [] }],
-      omittedRiders: [],
-    },
-    selectedBranch: 'primary',
-    resolutionDigest: 'c'.repeat(64),
-    summary: 'The actor holds its position.',
+    proposal,
+    option: resolved.option,
+    primaryOption: resolved.primaryOption,
+    fallbackOption: resolved.fallbackOption,
+    mechanics: resolved.mechanics,
+    selectedBranch: resolved.selectedBranch,
+    offerEnvironmentDigest: OFFER_ENVIRONMENT.digest,
+    resolutionDigest: resolved.resolutionDigest,
+    summary: resolved.summary,
   };
 }
 
 function proposal(input: {
   readonly capsule: EngineStateCapsule;
+  readonly state: EncounterState;
   readonly phase: 'initial' | 'correction';
   readonly actorId: CombatantId;
   readonly fallback?: boolean;
@@ -79,7 +97,7 @@ function proposal(input: {
     phase: input.phase,
     idempotencyKey: `idempotency:${input.id}`,
     baseline_plan_hash: capsule.request.baselinePlanHash,
-    updates: [resolution(input.actorId, input.fallback)],
+    updates: [resolution(input.state, input.actorId, input.fallback)],
   };
 }
 
@@ -103,11 +121,13 @@ async function fixture() {
     adjustmentBudget: Math.min(selected.length, 2) as 1 | 2,
   });
   const initialRuntime = createEngineMcpRuntime(state, {
+    offerEnvironment: OFFER_ENVIRONMENT,
     requestKind: 'plan_adjustment',
     requestedActorIds: [first, second],
     planAdjustment: metadata([first, second]),
   });
   const correctionRuntime = createEngineMcpRuntime(state, {
+    offerEnvironment: OFFER_ENVIRONMENT,
     requestKind: 'plan_adjustment',
     requestedActorIds: [second],
     planAdjustment: metadata([second]),
@@ -118,10 +138,17 @@ async function fixture() {
     requestId: 'request:engine-mcp',
     baselinePlanHash: 'a'.repeat(64),
     openActorIds: [first, second],
-    stagedProposal: proposal({ capsule: initialRuntime.feed.current(), phase: 'initial', actorId: first, fallback: true, id: 'proposal:staged' }),
+    stagedProposal: proposal({
+      capsule: initialRuntime.feed.current(),
+      state,
+      phase: 'initial',
+      actorId: first,
+      fallback: true,
+      id: 'proposal:staged',
+    }),
     refusedActorIds: [second],
   };
-  return { first, second, initial, initialRuntime, correctionRuntime };
+  return { state, first, second, initial, initialRuntime, correctionRuntime };
 }
 
 function correction(
@@ -218,6 +245,7 @@ describe('plan adjustment correction and exhaustion coordinator', () => {
     const activations = { value: 0 };
     const queued = [proposal({
       capsule: f.correctionRuntime.feed.current(),
+      state: f.state,
       phase: 'correction',
       actorId: f.second,
       id: 'proposal:corrected',
@@ -247,6 +275,7 @@ describe('plan adjustment correction and exhaustion coordinator', () => {
     const dispatches: string[] = [];
     const queued = [proposal({
       capsule: f.correctionRuntime.feed.current(),
+      state: f.state,
       phase: 'correction',
       actorId: f.second,
       id: 'proposal:structured-correction',
@@ -298,7 +327,10 @@ describe('plan adjustment correction and exhaustion coordinator', () => {
   it('does not consume a correction proposal staged before timeout and retains the authorized baseline', async () => {
     const f = await fixture();
     const queued = [proposal({
-      capsule: f.correctionRuntime.feed.current(), phase: 'correction', actorId: f.second,
+      capsule: f.correctionRuntime.feed.current(),
+      state: f.state,
+      phase: 'correction',
+      actorId: f.second,
       id: 'proposal:staged-before-timeout',
     })];
     const runtime = correction(f.correctionRuntime.feed.current(), queued, [], { value: 0 });
@@ -353,6 +385,7 @@ describe('plan adjustment correction and exhaustion coordinator', () => {
     const f = await fixture();
     const malformed = proposal({
       capsule: f.correctionRuntime.feed.current(),
+      state: f.state,
       phase: 'correction',
       actorId: f.second,
       fallback: true,
@@ -384,6 +417,7 @@ describe('plan adjustment correction and exhaustion coordinator', () => {
     }]);
     const queued = [proposal({
       capsule: f.correctionRuntime.feed.current(),
+      state: f.state,
       phase: 'correction',
       actorId: f.second,
       id: 'proposal:resumed-correction',

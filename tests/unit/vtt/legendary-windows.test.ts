@@ -5,18 +5,26 @@ import {
   type EncounterState,
 } from '../../../src/combat/encounter';
 import { monsterCombatantProfile, type CombatantProfile } from '../../../src/combat/combatant';
-import { damageType, dieSides } from '../../../src/combat/values';
-import { UNICORN } from '../../../src/combat/statblocks/monsters';
+import { damageType, dieSides, encounterSessionId } from '../../../src/combat/values';
+import { GOBLIN_WARRIOR, UNICORN } from '../../../src/combat/statblocks/monsters';
+import { validateArenaPlan } from '../../../src/vtt/arena-legality';
+import type { RoundPlan } from '../../../src/vtt/dm-bridge/round-plan-contract';
 import {
   LEGENDARY_WINDOWS_POLICY,
   provideLegendaryWindows,
   type LegendaryWindowsIntel,
 } from '../../../src/vtt/intel/legendary-windows';
+import type { EngineQueryPort } from '../../../src/vtt/engine-query-port';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
+import { evaluateScenarioFact as evaluateScenarioFactWithQueries } from '../../../src/vtt/speculative-planning';
+import type { ScenarioFactAtom } from '../../../src/vtt/speculative-plan-types';
 import {
   projectEncounterTimeline,
   type EncounterTimelineProjection,
 } from '../../../src/vtt/session-timeline';
 import { placedToken, playerProfile } from '../combat/fixtures';
+
+const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
 
 function face(value: number): () => number {
   return () => (value - 0.5) / 20;
@@ -50,18 +58,32 @@ function full(
   state: EncounterState,
   severityInputs: Parameters<typeof provideLegendaryWindows>[0]['resistanceSeverityInputs'] = [],
   timeline: EncounterTimelineProjection | null = projectEncounterTimeline(state, []),
+  queries: EngineQueryPort = OFFER_ENVIRONMENT.queries,
 ): LegendaryWindowsIntel {
   return provideLegendaryWindows({
     state,
     timeline,
     detail: 'full',
     resistanceSeverityInputs: severityInputs,
+    queries,
   });
 }
 
 function requireDetails(intel: LegendaryWindowsIntel) {
   if (intel.status !== 'resolved' || intel.details === null) throw new Error('Expected resolved full legendary intel.');
   return intel.details;
+}
+
+function chargingHornTarget(intel: LegendaryWindowsIntel): CombatantProfile['id'] {
+  const actor = requireDetails(intel).actors[0];
+  if (actor?.status !== 'resolved') throw new Error('Expected resolved legendary actor facts.');
+  const horn = actor.pendingWindow?.options.find(
+    (option) => option.option.id === 'legendary_action:charging-horn',
+  );
+  if (horn?.status !== 'resolved' || horn.assessment.kind !== 'attack') {
+    throw new Error('Expected a resolved Charging Horn assessment.');
+  }
+  return horn.assessment.target;
 }
 
 describe('M4 legendary-windows-v2', () => {
@@ -142,6 +164,138 @@ describe('M4 legendary-windows-v2', () => {
     expect(unicorn.actionUses).toEqual({ remaining: 2, maximum: 3 });
   });
 
+  it('uses the supplied distance policy to select the nearest legendary-action enemy', () => {
+    const alpha = playerProfile('legendary-distance-alpha', { initiativeBonus: 30 });
+    const beta = playerProfile('legendary-distance-beta', { initiativeBonus: 20 });
+    const gamma = playerProfile('legendary-distance-gamma', { initiativeBonus: 10 });
+    const unicorn = unicornProfile('legendary-distance-unicorn');
+    const pendingState = (combatants: readonly CombatantProfile[]): EncounterState => {
+      const created = createEncounter({
+        bounds: { columns: 8, rows: 6 },
+        combatants: [...combatants, unicorn],
+        tokens: [
+          placedToken(alpha, 1, 1),
+          placedToken(beta, 5, 1),
+          placedToken(gamma, 2, 4),
+          placedToken(unicorn, 2, 1),
+        ],
+      });
+      const started = reduceEncounter(created, { type: 'roll_initiative' }, face(10)).state;
+      return reduceEncounter(started, { type: 'end_turn', actor: alpha.id }, face(10)).state;
+    };
+    const forward = pendingState([alpha, beta, gamma]);
+    const reversed = pendingState([gamma, beta, alpha]);
+    const controlledQueries: EngineQueryPort = Object.freeze({
+      ...OFFER_ENVIRONMENT.queries,
+      spaceDistance: (...args: Parameters<EngineQueryPort['spaceDistance']>) => {
+        const [state, left, right, leftAnchor] = args;
+        if (left === unicorn.id && right === alpha.id) return 10;
+        if (left === unicorn.id && right === beta.id) return 5;
+        if (left === unicorn.id && right === gamma.id) return 10;
+        return OFFER_ENVIRONMENT.queries.spaceDistance(state, left, right, leftAnchor);
+      },
+    });
+
+    // The Large Unicorn occupies columns 2-3 and rows 1-2: canonical distances are alpha=5, beta=10, gamma=10.
+    expect([
+      OFFER_ENVIRONMENT.queries.spaceDistance(forward, unicorn.id, alpha.id),
+      OFFER_ENVIRONMENT.queries.spaceDistance(forward, unicorn.id, beta.id),
+      OFFER_ENVIRONMENT.queries.spaceDistance(forward, unicorn.id, gamma.id),
+    ]).toEqual([5, 10, 10]);
+    expect([
+      controlledQueries.spaceDistance(forward, unicorn.id, alpha.id),
+      controlledQueries.spaceDistance(forward, unicorn.id, beta.id),
+      controlledQueries.spaceDistance(forward, unicorn.id, gamma.id),
+    ]).toEqual([10, 5, 10]);
+    expect(chargingHornTarget(full(forward, [], undefined, controlledQueries))).toBe(beta.id);
+    expect(chargingHornTarget(full(reversed, [], undefined, controlledQueries))).toBe(beta.id);
+    expect(chargingHornTarget(full(forward))).toBe(alpha.id);
+    expect(chargingHornTarget(full(reversed))).toBe(alpha.id);
+  });
+
+  it('forwards one supplied distance policy to legendary and speculative consumers', () => {
+    const canonicalNearest = playerProfile('shared-distance-canonical', { initiativeBonus: 20 });
+    const controlledNearest = playerProfile('shared-distance-controlled', { initiativeBonus: 10 });
+    const unicorn = unicornProfile('shared-distance-unicorn');
+    const arenaMonster = monsterCombatantProfile(GOBLIN_WARRIOR, {
+      combatantId: 'combatant:shared-distance-arena-goblin',
+      tokenId: 'token:shared-distance-arena-goblin',
+    });
+    const arenaPlayer = playerProfile('shared-distance-arena-player');
+    const created = createEncounter({
+      bounds: { columns: 12, rows: 4 },
+      combatants: [canonicalNearest, controlledNearest, unicorn],
+      tokens: [
+        placedToken(canonicalNearest, 0, 1),
+        placedToken(controlledNearest, 7, 1),
+        placedToken(unicorn, 1, 1),
+      ],
+    });
+    const started = reduceEncounter(created, { type: 'roll_initiative' }, face(10)).state;
+    const pending = reduceEncounter(started, { type: 'end_turn', actor: canonicalNearest.id }, face(10)).state;
+    const arenaState = createEncounter({
+      bounds: { columns: 4, rows: 1 },
+      combatants: [arenaMonster, arenaPlayer],
+      tokens: [placedToken(arenaMonster, 0, 0), placedToken(arenaPlayer, 1, 0)],
+    });
+    const controlledQueries: EngineQueryPort = Object.freeze({
+      ...OFFER_ENVIRONMENT.queries,
+      spaceDistance: (...args: Parameters<EngineQueryPort['spaceDistance']>) => {
+        const [state, left, right, leftAnchor] = args;
+        if (left === unicorn.id && right === canonicalNearest.id) return 30;
+        if (left === unicorn.id && right === controlledNearest.id) return 5;
+        if (left === arenaMonster.id && right === arenaPlayer.id) return 30;
+        return OFFER_ENVIRONMENT.queries.spaceDistance(state, left, right, leftAnchor);
+      },
+    });
+    const adjacency: ScenarioFactAtom = {
+      kind: 'adjacency_is',
+      left: { actorId: unicorn.id, selector: { kind: 'combatant', combatantId: unicorn.id } },
+      right: {
+        actorId: controlledNearest.id,
+        selector: { kind: 'combatant', combatantId: controlledNearest.id },
+      },
+      value: true,
+    };
+    const arenaPlan: RoundPlan = {
+      kind: 'round_plan',
+      protocolVersion: 2,
+      encounterId: encounterSessionId('encounter:shared-distance-arena'),
+      requestId: 'request:shared-distance-arena',
+      expectedRevision: arenaState.revision,
+      round: 1,
+      monsters: [{
+        monsterId: arenaMonster.id,
+        program: {
+          kind: 'action',
+          action: {
+            kind: 'attack',
+            attackId: 'scimitar',
+            target: { kind: 'combatant', combatantId: arenaPlayer.id },
+          },
+        },
+      }],
+    };
+
+    expect(evaluateScenarioFactWithQueries(pending, adjacency, controlledQueries)).toEqual({
+      matches: true,
+      actual: true,
+    });
+    expect(evaluateScenarioFactWithQueries(pending, adjacency, OFFER_ENVIRONMENT.queries)).toEqual({
+      matches: false,
+      actual: false,
+      failure: 'FACT_FALSE',
+    });
+    expect(chargingHornTarget(full(pending, [], undefined, controlledQueries))).toBe(controlledNearest.id);
+    expect(chargingHornTarget(full(pending))).toBe(canonicalNearest.id);
+    expect(OFFER_ENVIRONMENT.queries.spaceDistance(arenaState, arenaMonster.id, arenaPlayer.id)).toBe(5);
+    expect(controlledQueries.spaceDistance(arenaState, arenaMonster.id, arenaPlayer.id)).toBe(30);
+    expect(validateArenaPlan(arenaPlan, arenaState, OFFER_ENVIRONMENT.queries)).toEqual([]);
+    expect(validateArenaPlan(arenaPlan, arenaState, controlledQueries)).toEqual([
+      `${arenaMonster.id}: target is outside scimitar reach/range`,
+    ]);
+  });
+
   it('exposes pending legendary-resistance save and severity facts without choosing a policy', () => {
     const player = playerProfile('legendary-resistance-player', { initiativeBonus: 20 });
     const setup = startedEncounter(player);
@@ -176,12 +330,22 @@ describe('M4 legendary-windows-v2', () => {
     const ordinary = createEncounter({
       bounds: { columns: 4, rows: 4 }, combatants: [player], tokens: [placedToken(player, 0, 0)],
     });
-    expect(provideLegendaryWindows({ state: ordinary, timeline: null, detail: 'compact' })).toMatchObject({
+    expect(provideLegendaryWindows({
+      state: ordinary,
+      timeline: null,
+      detail: 'compact',
+      queries: OFFER_ENVIRONMENT.queries,
+    })).toMatchObject({
       policy: LEGENDARY_WINDOWS_POLICY, status: 'unresolved', reason: 'no_legendary_actor',
     });
 
     const setup = startedEncounter(playerProfile('timeline-missing-player', { initiativeBonus: 20 }));
-    const intel = provideLegendaryWindows({ state: setup.state, timeline: null, detail: 'full' });
+    const intel = provideLegendaryWindows({
+      state: setup.state,
+      timeline: null,
+      detail: 'full',
+      queries: OFFER_ENVIRONMENT.queries,
+    });
     const unicorn = requireDetails(intel).actors[0];
     if (unicorn === undefined || unicorn.status !== 'resolved') throw new Error('Expected Unicorn facts.');
     expect(unicorn.nextWindow).toEqual({ status: 'unresolved', reason: 'timeline_unavailable' });

@@ -34,6 +34,7 @@ export interface ProposedTurnResolution {
   readonly fallbackOption: EngineOfferableOption | null;
   readonly mechanics: ResolvedTurnMechanics;
   readonly selectedBranch: 'primary' | 'fallback';
+  readonly offerEnvironmentDigest: string;
   readonly resolutionDigest: string;
   readonly summary: string;
   /** Blind intent resolutions must fail closed if their exact primary offer becomes unavailable. */

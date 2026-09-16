@@ -34,6 +34,7 @@ import {
   type EncounterBoardPlacedCombatant,
 } from '../src/vtt/encounter-board';
 import { projectDmBoard } from '../src/vtt/encounter-projections';
+import { buildOfferEnvironment } from '../src/vtt/offers/build-offer-environment';
 import { semanticBoardJson } from '../src/vtt/semantic-board-payload';
 import {
   assignCreatureBadges,
@@ -51,6 +52,7 @@ import {
 } from './ai-dm-board-snapshot';
 
 const repositoryRoot = resolve(new URL('../', import.meta.url).pathname);
+const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
 const PREVIOUS_PROBE_VERSION = 'd519-screenshot-comprehension-v1' as const;
 const PROBE_VERSION = 'd576-screenshot-comprehension-v2' as const;
 const LEGACY_ROW_VERSION = 'd525-screenshot-comprehension-row-v5' as const;
@@ -2646,6 +2648,7 @@ export function semanticBoardJsonForProbeState(state: EncounterState): string {
     coordinator: SEMANTIC_BOARD_COORDINATOR,
     controllers: [],
     history: [],
+    offerEnvironment: OFFER_ENVIRONMENT,
   }));
 }
 

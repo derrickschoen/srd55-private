@@ -2,11 +2,13 @@ import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { canonicalJson } from '../../../src/commands/canonical-json';
 import { sha256 } from '../../../src/crypto/sha256';
 import { encounterSessionId, type AgentSessionId } from '../../../src/combat/values';
 import { createEncounter } from '../../../src/combat/encounter';
+import { monsterCombatantProfile } from '../../../src/combat/combatant';
+import { GOBLIN_WARRIOR } from '../../../src/combat/statblocks/monsters';
 import {
   agentSessionIdFromCli,
   contextTokenCount,
@@ -21,15 +23,21 @@ import { decodeCodexTurn } from '../../../src/vtt/agent-adapters/codex';
 import type { RoundPlan } from '../../../src/vtt/dm-bridge/round-plan-contract';
 import { applyRoomInitiativeProfile, generateRoom } from '../../../src/vtt/room-generator';
 import {
-  createEngineMcpRuntime,
   freshMonsterPlanningState,
   loadArenaFixture,
   runEngineMcpLines,
   type EngineMcpLauncherManifest,
 } from '../../../src/vtt/mcp/entrypoint';
+import * as engineMcpEntrypoint from '../../../src/vtt/mcp/entrypoint';
 import { mcpRequestMeta } from '../../../src/vtt/mcp/handler';
 import { availableEngineActorOptions, resolveEngineActorOption } from '../../../src/vtt/intent-resolver';
+import {
+  createDisabledEngineOfferFamilyPolicy,
+} from '../../../src/vtt/offers/offer-environment';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
+import { createUnrepresentedPartyThreatCatalog } from '../../../src/vtt/offers/party-threat-catalog';
 import { validateArenaPlan } from '../../../src/vtt/arena-legality';
+import type { EngineQueryPort } from '../../../src/vtt/engine-query-port';
 import { SNIPPET_REGISTRY } from '../../../src/vtt/snippet-registry-runtime';
 import { engineActionId, engineSpellId } from '../../../src/vtt/turn-proposal';
 import {
@@ -76,6 +84,22 @@ import { decodeChallengeRoomProvenanceV1 } from '../../../src/vtt/challenge-room
 import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
 
 const DEFAULT_KB_HASH = '00776f3f2d4cd7468a1eb2a63028e9c3f846b43b14a4e5787d3e9c94e02633c0';
+const BOUND_OFFER_ENVIRONMENT = buildOfferEnvironment({
+  kind: 'configuration',
+  mode: 'revision_bound',
+  familyPolicy: createDisabledEngineOfferFamilyPolicy(),
+  partyThreatCatalog: createUnrepresentedPartyThreatCatalog(),
+});
+function createEngineMcpRuntime(
+  state: Parameters<typeof engineMcpEntrypoint.createEngineMcpRuntime>[0],
+  options: Omit<NonNullable<Parameters<typeof engineMcpEntrypoint.createEngineMcpRuntime>[1]>,
+    'offerEnvironment'> & { readonly offerEnvironment?: typeof BOUND_OFFER_ENVIRONMENT } = {},
+): ReturnType<typeof engineMcpEntrypoint.createEngineMcpRuntime> {
+  const offerEnvironment = options.offerEnvironment ?? BOUND_OFFER_ENVIRONMENT;
+  const runtime = engineMcpEntrypoint.createEngineMcpRuntime(state, { ...options, offerEnvironment });
+  expect(runtime.feed.current().offerEnvironment).toEqual(offerEnvironment.binding);
+  return runtime;
+}
 const PREPATCH_BYTE_STATE = applyRoomInitiativeProfile(
   await loadArenaFixture('tests/fixtures/arena-basis-hard/seed-5117002.json'),
   'derived_v1',
@@ -318,6 +342,7 @@ async function prepareActualPrimaryByteEvidence(): Promise<{
     });
   }
   await runEngineMcpLines(runtime, toolsListRequest(), {
+    offerEnvironment: BOUND_OFFER_ENVIRONMENT,
     runId: manifest.runId, branchId: manifest.branchId, revision: manifest.revision,
     requestId: manifest.requestId, phase: manifest.phase, correctionNumber: manifest.correctionNumber,
     room: manifest.room, historyKind: manifest.historyKind, toolProfile: 'blind', dmMode: 'blind',
@@ -676,6 +701,52 @@ const ALL_OPTIONS_TEST_RENDERER_ARGS = [
 ] as const;
 
 describe('AI-DM arena', () => {
+  it('uses the supplied distance policy for attack-range legality', () => {
+    const monster = monsterCombatantProfile(GOBLIN_WARRIOR, {
+      combatantId: 'combatant:arena-distance-goblin',
+      tokenId: 'token:arena-distance-goblin',
+    });
+    const player = playerProfile('arena-distance-player');
+    const state = createEncounter({
+      bounds: { columns: 4, rows: 1 },
+      combatants: [monster, player],
+      tokens: [placedToken(monster, 0), placedToken(player, 1)],
+    });
+    const plan: RoundPlan = {
+      kind: 'round_plan',
+      protocolVersion: 2,
+      encounterId: encounterSessionId('encounter:arena-distance'),
+      requestId: 'request:arena-distance',
+      expectedRevision: state.revision,
+      round: 1,
+      monsters: [{
+        monsterId: monster.id,
+        program: {
+          kind: 'action',
+          action: {
+            kind: 'attack',
+            attackId: 'scimitar',
+            target: { kind: 'combatant', combatantId: player.id },
+          },
+        },
+      }],
+    };
+    const controlledQueries: EngineQueryPort = Object.freeze({
+      ...BOUND_OFFER_ENVIRONMENT.queries,
+      spaceDistance: (...args: Parameters<EngineQueryPort['spaceDistance']>) => {
+        const [queryState, left, right, leftAnchor] = args;
+        return left === monster.id && right === player.id
+          ? 30
+          : BOUND_OFFER_ENVIRONMENT.queries.spaceDistance(queryState, left, right, leftAnchor);
+      },
+    });
+
+    expect(validateArenaPlan(plan, state, BOUND_OFFER_ENVIRONMENT.queries)).toEqual([]);
+    expect(validateArenaPlan(plan, state, controlledQueries)).toEqual([
+      `${monster.id}: target is outside scimitar reach/range`,
+    ]);
+  });
+
   it('filters explicit room:rep cells without renumbering or accepting duplicates', () => {
     expect(parseArenaCells('2:1,4:1,8:1', 10, 3)).toEqual([
       { room: 2, rep: 1 }, { room: 4, rep: 1 }, { room: 8, rep: 1 },
@@ -1923,12 +1994,12 @@ describe('AI-DM arena', () => {
       const options = availableEngineActorOptions(
         planningState,
         entry.actorId,
-        undefined,
+        BOUND_OFFER_ENVIRONMENT,
         expectedRevision,
       );
       const option = options.find((candidate) => candidate.optionId === entry.resolutionSummary.optionId);
       if (option === undefined) throw new Error(`Frozen room-two option is absent for ${entry.actorId}.`);
-      const resolution = resolveEngineActorOption(planningState, option);
+      const resolution = resolveEngineActorOption(planningState, option, BOUND_OFFER_ENVIRONMENT);
       if (!resolution.valid) throw new Error(`Frozen room-two option is illegal for ${entry.actorId}.`);
       return {
         actorId: entry.actorId,
@@ -2279,10 +2350,10 @@ describe('AI-DM arena', () => {
       }],
     };
 
-    expect(validateArenaPlan(plan, state)).toContain(
+    expect(validateArenaPlan(plan, state, BOUND_OFFER_ENVIRONMENT.queries)).toContain(
       `${monster.profile.id}: destination is blocked, occupied, or unreachable`,
     );
-    expect(validateArenaPlan(twoSlotPlan, state)).toContain(
+    expect(validateArenaPlan(twoSlotPlan, state, BOUND_OFFER_ENVIRONMENT.queries)).toContain(
       `${monster.profile.id}: program can spend more than one slot`,
     );
   });

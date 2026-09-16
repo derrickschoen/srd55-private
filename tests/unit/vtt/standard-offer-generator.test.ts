@@ -3,13 +3,18 @@ import { monsterCombatantProfile } from '../../../src/combat/combatant';
 import { createEncounter } from '../../../src/combat/encounter';
 import { BANDIT, SPY } from '../../../src/combat/statblocks/mercenary-company';
 import { freshMonsterPlanningState } from '../../../src/vtt/monster-planning-state';
-import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
-import { resolveEngineActorOption } from '../../../src/vtt/intent-resolver';
+import {
+  engineActorOptionsForEnvironment,
+  resolveEngineActorOption,
+} from '../../../src/vtt/intent-resolver';
 import { evaluateOptionOutcome } from '../../../src/vtt/intel/option-outcome';
 import { engineOfferableOption } from '../../../src/vtt/option-modeling';
 import { ENGINE_OFFER_CAPABILITIES } from '../../../src/vtt/offers/offer-generator-registry';
 import { standardOfferGenerator } from '../../../src/vtt/offers/standard-offer-generator';
 import { placedToken, playerProfile } from '../combat/fixtures';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
+
+const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
 
 const PARENT_LEGACY_OPTION_COUNT = 6;
 const PARENT_LEGACY_ORDERED_OPTION_IDS = [
@@ -201,10 +206,17 @@ describe('standard offer composition capability', () => {
     const { actor, state } = legacyOracleFixture();
     const offers = standardOfferGenerator.generate({ state, actorId: actor.id, revision: 41 });
     const actualOptions = offers.map(engineOfferableOption);
+    const environmentBound = engineActorOptionsForEnvironment(state, actor.id, OFFER_ENVIRONMENT, 41).offerable;
 
     expect(actualOptions).toHaveLength(PARENT_LEGACY_OPTION_COUNT);
     expect(actualOptions.map((option) => option.optionId)).toEqual(PARENT_LEGACY_ORDERED_OPTION_IDS);
     expect(actualOptions).toEqual(PARENT_LEGACY_OPTIONS_IN_GENERATION_ORDER);
+    expect(environmentBound.map((option) => option.optionId).sort()).toEqual(
+      PARENT_LEGACY_OPTIONS_IN_GENERATION_ORDER
+        .filter((option) => option.label !== 'Disengage')
+        .map((option) => option.optionId)
+        .sort(),
+    );
 
     expect(JSON.stringify(actualOptions)).not.toContain('"binding"');
   });
@@ -227,8 +239,19 @@ describe('standard offer composition capability', () => {
     const offer = standardOfferGenerator.generate({ state, actorId: actor.id, revision: state.revision })
       .find((candidate) => candidate.label === 'End Turn');
     if (offer === undefined) throw new Error('Standard generator fixture omitted End Turn.');
+    const registered = engineActorOptionsForEnvironment(
+      state,
+      actor.id,
+      OFFER_ENVIRONMENT,
+      state.revision,
+    ).offerable.find((candidate) => candidate.label === 'End Turn');
+    if (registered === undefined) throw new Error('Environment-bound generator omitted End Turn.');
     const resolved = standardOfferGenerator.resolve({
-      resolveStandard: (option) => resolveEngineActorOption(state, option, canonicalEngineQueryPort),
+      resolveStandard: (candidate) => {
+        expect(candidate.optionId).toBe(registered.optionId);
+        expect(candidate.actionSlots).toEqual(registered.actionSlots);
+        return resolveEngineActorOption(state, registered, OFFER_ENVIRONMENT);
+      },
     }, offer);
     if (!resolved.valid) throw new Error(`Standard End Turn refused: ${resolved.code}`);
 
@@ -240,7 +263,7 @@ describe('standard offer composition capability', () => {
     }, resolved.mechanics);
     const evaluation = standardOfferGenerator.evaluate({
       evaluateStandard: (option, mechanics) =>
-        evaluateOptionOutcome(state, option, mechanics, canonicalEngineQueryPort),
+        evaluateOptionOutcome(state, option, mechanics, OFFER_ENVIRONMENT.queries),
     }, resolved.mechanics);
 
     expect(executedOptionId).toBe(resolved.mechanics.mechanics.optionId);

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { encounterSessionId } from '../../../src/combat/values';
 import { freshMonsterPlanningState, createEngineMcpRuntime, loadArenaFixture } from '../../../src/vtt/mcp/entrypoint';
 import { ENGINE_TOOL_SPECS, schemaViolations } from '../../../src/vtt/mcp/schemas';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
 import {
   DEFAULT_RENDERER_PROFILE,
   PLANNED_COMBINED_RENDERER_PROFILES,
@@ -12,6 +13,14 @@ import {
 
 const FIXTURE = 'tests/fixtures/arena-basis-brutal/seed-6203001.json';
 const PROSE_FORMATS = ['caveman_prose', 'regular_prose'] as const;
+const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
+
+function createBoundEngineMcpRuntime(
+  state: Parameters<typeof createEngineMcpRuntime>[0],
+  options: Omit<NonNullable<Parameters<typeof createEngineMcpRuntime>[1]>, 'offerEnvironment'> = {},
+): ReturnType<typeof createEngineMcpRuntime> {
+  return createEngineMcpRuntime(state, { ...options, offerEnvironment: OFFER_ENVIRONMENT });
+}
 
 function object(value: unknown, label = 'value'): Readonly<Record<string, unknown>> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -145,8 +154,8 @@ describe('turn-context prose formats', () => {
     const loaded = await loadArenaFixture(FIXTURE);
     const state = freshMonsterPlanningState(loaded);
     const runId = encounterSessionId('encounter:prose-default-proof');
-    const incumbent = turnContext(createEngineMcpRuntime(state, { runId, revision: 1 }));
-    const explicit = turnContext(createEngineMcpRuntime(state, {
+    const incumbent = turnContext(createBoundEngineMcpRuntime(state, { runId, revision: 1 }));
+    const explicit = turnContext(createBoundEngineMcpRuntime(state, {
       runId, revision: 1, rendererProfile: { ...DEFAULT_RENDERER_PROFILE, format: 'structured' },
     }));
     expect(JSON.stringify(explicit)).toBe(JSON.stringify(incumbent));
@@ -159,11 +168,11 @@ describe('turn-context prose formats', () => {
     const loaded = await loadArenaFixture(FIXTURE);
     const state = freshMonsterPlanningState(loaded);
     const runId = encounterSessionId(`encounter:prose-round-trip:${format}`);
-    const structured = turnContext(createEngineMcpRuntime(state, {
+    const structured = turnContext(createBoundEngineMcpRuntime(state, {
       runId, revision: 1,
       rendererProfile: { ...DEFAULT_RENDERER_PROFILE, format: 'structured' },
     }));
-    const proseRuntime = createEngineMcpRuntime(state, {
+    const proseRuntime = createBoundEngineMcpRuntime(state, {
       runId, revision: 1,
       rendererProfile: { ...DEFAULT_RENDERER_PROFILE, format },
     });
@@ -226,7 +235,7 @@ describe('turn-context prose formats', () => {
     const loaded = await loadArenaFixture(FIXTURE);
     const state = freshMonsterPlanningState(loaded);
     const runId = encounterSessionId(`encounter:prose-completeness:${format}`);
-    const structured = turnContext(createEngineMcpRuntime(state, {
+    const structured = turnContext(createBoundEngineMcpRuntime(state, {
       runId, revision: 1,
       rendererProfile: { ...DEFAULT_RENDERER_PROFILE, format: 'structured' },
       turnContextMaximumBytes: 10 * 1024 * 1024,
@@ -246,7 +255,7 @@ describe('turn-context prose formats', () => {
     const state = freshMonsterPlanningState(loaded);
     const runId = encounterSessionId(`encounter:prose-compose:${format}`);
     const filtered = renderTurnContextProfile(
-      turnContext(createEngineMcpRuntime(state, { runId, revision: 1 })),
+      turnContext(createBoundEngineMcpRuntime(state, { runId, revision: 1 })),
       { ...PLANNED_COMBINED_RENDERER_PROFILES.compact, format: 'structured' },
     );
     const expectedIds = new Set(filtered.optionRefs.values());
@@ -262,7 +271,7 @@ describe('turn-context prose formats', () => {
 
   it('renders resolved last-seen knowledge as one plain sentence', async () => {
     const loaded = await loadArenaFixture(FIXTURE);
-    const structured = turnContext(createEngineMcpRuntime(freshMonsterPlanningState(loaded), {
+    const structured = turnContext(createBoundEngineMcpRuntime(freshMonsterPlanningState(loaded), {
       runId: encounterSessionId('encounter:prose-last-seen'), revision: 1,
     }));
     const filtered = renderTurnContextProfile(structured, {
@@ -291,7 +300,7 @@ describe('turn-context prose formats', () => {
   it.each(PROSE_FORMATS)('%s trims by relevance, preserves the K-set floor, and remains schema-valid', async (format) => {
     const loaded = await loadArenaFixture(FIXTURE);
     let evidence: { readonly preTrimBytes: number; readonly postTrimBytes: number } | undefined;
-    const runtime = createEngineMcpRuntime(freshMonsterPlanningState(loaded), {
+    const runtime = createBoundEngineMcpRuntime(freshMonsterPlanningState(loaded), {
       rendererProfile: { ...DEFAULT_RENDERER_PROFILE, format },
       turnContextMaximumBytes: 4 * 1024,
       onTurnContextRendered: (value) => { evidence = value; },
@@ -302,7 +311,7 @@ describe('turn-context prose formats', () => {
     expect(context['context_trimmed']).toBe(true);
     expect(context['truncated']).toBe(true);
     expect(evidence?.preTrimBytes).toBeGreaterThan(evidence?.postTrimBytes ?? 0);
-    const fullRuntime = createEngineMcpRuntime(freshMonsterPlanningState(loaded), {
+    const fullRuntime = createBoundEngineMcpRuntime(freshMonsterPlanningState(loaded), {
       rendererProfile: { ...DEFAULT_RENDERER_PROFILE, format: 'structured' },
     });
     const full = turnContext(fullRuntime);
@@ -331,11 +340,11 @@ describe('turn-context prose formats', () => {
       rendererProfile: { ...DEFAULT_RENDERER_PROFILE, format },
       turnContextMaximumBytes: 32 * 1024,
     } as const;
-    const first = turnContext(createEngineMcpRuntime(state, {
+    const first = turnContext(createBoundEngineMcpRuntime(state, {
       ...options,
       onTurnContextRendered: (value) => { firstEvidence = value; },
     }));
-    const second = turnContext(createEngineMcpRuntime(state, options));
+    const second = turnContext(createBoundEngineMcpRuntime(state, options));
     expect(JSON.stringify(second)).toBe(JSON.stringify(first));
     const documentBytes = new TextEncoder().encode(String(first['document'])).byteLength;
     expect(firstEvidence?.preTrimBytes).toBeGreaterThanOrEqual(documentBytes);
@@ -345,7 +354,7 @@ describe('turn-context prose formats', () => {
   it('keeps both prose registers distinct while using the same content pipeline', async () => {
     const loaded = await loadArenaFixture(FIXTURE);
     const state = freshMonsterPlanningState(loaded);
-    const render = (format: ProseRendererFormat) => turnContext(createEngineMcpRuntime(state, {
+    const render = (format: ProseRendererFormat) => turnContext(createBoundEngineMcpRuntime(state, {
       runId: encounterSessionId('encounter:prose-registers'), revision: 1,
       rendererProfile: { ...DEFAULT_RENDERER_PROFILE, format },
       turnContextMaximumBytes: 32 * 1024,
@@ -359,7 +368,7 @@ describe('turn-context prose formats', () => {
 
   it.each(PROSE_FORMATS)('%s opens tactically, keeps bookkeeping in the footer, and has clean sentences', async (format) => {
     const loaded = await loadArenaFixture(FIXTURE);
-    const context = turnContext(createEngineMcpRuntime(freshMonsterPlanningState(loaded), {
+    const context = turnContext(createBoundEngineMcpRuntime(freshMonsterPlanningState(loaded), {
       runId: encounterSessionId(`encounter:prose-style:${format}`),
       revision: 1,
       rendererProfile: { ...DEFAULT_RENDERER_PROFILE, format },

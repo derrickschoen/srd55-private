@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { createEngineStateCapsule, type EngineStateCapsule } from '../../../src/vtt/engine-state-capsule';
-import { pureTurnProposalResolver } from '../../../src/vtt/intent-resolver';
+import {
+  createEngineStateCapsuleForEnvironment,
+  type EngineStateCapsule,
+} from '../../../src/vtt/engine-state-capsule';
+import { createPureTurnProposalResolver } from '../../../src/vtt/intent-resolver';
 import {
   createEngineMcpRuntime,
   freshMonsterPlanningState,
@@ -11,8 +14,18 @@ import { engineSchemaInternals, schemaViolations } from '../../../src/vtt/mcp/sc
 import { SUGGESTED_PLAN_MAX_BYTES } from '../../../src/vtt/mcp/engine-server';
 import { SNIPPET_REGISTRY } from '../../../src/vtt/snippet-registry-runtime';
 import type { EngineOfferableOption, EngineTurnProposal } from '../../../src/vtt/turn-proposal';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
 
 const CLIENT = Object.freeze({ name: 'snippet-test', version: '1.0.0' });
+const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
+const TURN_PROPOSAL_RESOLVER = createPureTurnProposalResolver(OFFER_ENVIRONMENT);
+
+function createBoundEngineMcpRuntime(
+  state: Parameters<typeof createEngineMcpRuntime>[0],
+  options: Omit<NonNullable<Parameters<typeof createEngineMcpRuntime>[1]>, 'offerEnvironment'> = {},
+): ReturnType<typeof createEngineMcpRuntime> {
+  return createEngineMcpRuntime(state, { ...options, offerEnvironment: OFFER_ENVIRONMENT });
+}
 
 function record(value: unknown, label: string): Readonly<Record<string, unknown>> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -112,7 +125,7 @@ function isOffensive(option: EngineOfferableOption): boolean {
 async function registryFixture(seed: number) {
   const loaded = await loadArenaFixture(`tests/fixtures/arena-basis/seed-${String(seed)}.json`);
   const state = freshMonsterPlanningState(loaded);
-  const runtime = createEngineMcpRuntime(state);
+  const runtime = createBoundEngineMcpRuntime(state);
   return { state, runtime, capsule: runtime.feed.current() };
 }
 
@@ -125,13 +138,13 @@ async function controlRegistryFixture() {
       ? { ...token, position: { column: 3, row: 6 } }
       : token),
   });
-  const runtime = createEngineMcpRuntime(state);
+  const runtime = createBoundEngineMcpRuntime(state);
   return { state, runtime, capsule: runtime.feed.current() };
 }
 
 function withProjection(capsule: EngineStateCapsule, projection: EngineStateCapsule['projection']) {
   if (capsule.request === null) throw new TypeError('Fixture request is absent.');
-  return createEngineStateCapsule({
+  return createEngineStateCapsuleForEnvironment({
     runId: capsule.runId,
     branchId: capsule.branchId,
     revision: capsule.revision + 1,
@@ -140,6 +153,7 @@ function withProjection(capsule: EngineStateCapsule, projection: EngineStateCaps
     projection,
     historyDelta: capsule.historyDelta,
     rulesIndex: capsule.rulesIndex,
+    offerEnvironment: capsule.offerEnvironment,
   });
 }
 
@@ -230,7 +244,7 @@ describe('composite play registry', () => {
     const { runtime, capsule } = await registryFixture(3_943_003);
     if (capsule.request === null) throw new TypeError('Fixture request is absent.');
     const requested = new Set(capsule.request.actors);
-    runtime.feed.replace(createEngineStateCapsule({
+    runtime.feed.replace(createEngineStateCapsuleForEnvironment({
       runId: capsule.runId,
       branchId: capsule.branchId,
       revision: capsule.revision + 1,
@@ -243,6 +257,7 @@ describe('composite play registry', () => {
       },
       historyDelta: capsule.historyDelta,
       rulesIndex: capsule.rulesIndex,
+      offerEnvironment: capsule.offerEnvironment,
     }));
     const context = tool(runtime, 'engine.get_turn_context', {
       run_id: capsule.runId,
@@ -260,7 +275,7 @@ describe('composite play registry', () => {
       .filter((candidate) => candidate.profile.kind === 'monster' && candidate.life !== 'dead')
       .map((candidate) => candidate.profile.id)
       .sort();
-    const runtime = createEngineMcpRuntime(state, {
+    const runtime = createBoundEngineMcpRuntime(state, {
       requestKind: 'plan_adjustment',
       requestedActorIds: actors,
       planAdjustment: {
@@ -336,7 +351,7 @@ describe('composite play registry', () => {
           slot.slot === 'main' && slot.use.kind === 'dash');
       })).toBe(true);
       for (const proposal of proposals) {
-        expect(pureTurnProposalResolver.resolve(state, proposal).valid).toBe(true);
+        expect(TURN_PROPOSAL_RESOLVER.resolve(state, proposal).valid).toBe(true);
       }
     },
   );
@@ -370,7 +385,7 @@ describe('composite play registry', () => {
     async (seed) => {
       const { state, capsule } = await registryFixture(seed);
       for (const proposal of SNIPPET_REGISTRY.expand('basic_advance', capsule).proposals) {
-        const resolution = pureTurnProposalResolver.resolve(state, proposal);
+        const resolution = TURN_PROPOSAL_RESOLVER.resolve(state, proposal);
         expect(resolution.valid).toBe(true);
         if (!resolution.valid) throw new Error('Frozen-room proposal unexpectedly refused.');
         expect(resolution.mechanics.actionSlots.length).toBeGreaterThan(0);
@@ -396,7 +411,7 @@ describe('composite play registry', () => {
     const proposal = SNIPPET_REGISTRY.expand('focus_fire', capsule).proposals
       .find((entry) => entry.actorId === 'combatant:generated-3943001-monster-3');
     if (proposal === undefined) throw new Error('Longbow proposal is absent.');
-    const resolved = pureTurnProposalResolver.resolve(state, proposal);
+    const resolved = TURN_PROPOSAL_RESOLVER.resolve(state, proposal);
     expect(resolved.valid).toBe(true);
     if (!resolved.valid) throw new Error('Longbow proposal was refused.');
     expect(resolved.mechanics.movementCostFeet).toBe(0);
@@ -418,7 +433,7 @@ describe('composite play registry', () => {
     const { state, capsule } = await registryFixture(3_943_001);
     const proposal = SNIPPET_REGISTRY.expand('focus_fire', capsule).proposals[0];
     if (proposal === undefined || proposal.fallbackOptionId === null) throw new Error('Fallback proposal is absent.');
-    const resolved = pureTurnProposalResolver.resolve(state, {
+    const resolved = TURN_PROPOSAL_RESOLVER.resolve(state, {
       ...proposal,
       primaryOptionId: 'option:unavailable-primary' as EngineTurnProposal['primaryOptionId'],
     });
@@ -503,7 +518,7 @@ describe('composite play registry', () => {
   it('does not offer fallback-bearing plays during a correction request', async () => {
     const { capsule } = await registryFixture(3_943_001);
     if (capsule.request === null) throw new TypeError('Fixture request is absent.');
-    const correction = createEngineStateCapsule({
+    const correction = createEngineStateCapsuleForEnvironment({
       runId: capsule.runId,
       branchId: capsule.branchId,
       revision: capsule.revision + 1,
@@ -512,6 +527,7 @@ describe('composite play registry', () => {
       projection: capsule.projection,
       historyDelta: capsule.historyDelta,
       rulesIndex: capsule.rulesIndex,
+      offerEnvironment: capsule.offerEnvironment,
     });
     expect(SNIPPET_REGISTRY.applicable(correction)).toEqual([]);
   });
@@ -528,7 +544,7 @@ describe('composite play registry', () => {
             primaryOptionId: proposal.fallbackOptionId,
             fallbackOptionId: null,
           };
-          expect(pureTurnProposalResolver.resolve(state, fallbackProposal).valid).toBe(true);
+          expect(TURN_PROPOSAL_RESOLVER.resolve(state, fallbackProposal).valid).toBe(true);
         }
       }
     }

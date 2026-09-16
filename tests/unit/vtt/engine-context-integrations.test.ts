@@ -5,7 +5,7 @@ import { damageType, dieSides, effectStackingIdentity } from '../../../src/comba
 import { encounterBranchId, encounterSessionId } from '../../../src/combat/values';
 import { mulberry32 } from '../../../src/combat/random';
 import { UNICORN } from '../../../src/combat/statblocks/monsters';
-import { createEngineStateCapsule } from '../../../src/vtt/engine-state-capsule';
+import { createEngineStateCapsuleForEnvironment } from '../../../src/vtt/engine-state-capsule';
 import { createEngineMcpRuntime, loadArenaFixture } from '../../../src/vtt/mcp/entrypoint';
 import {
   TURN_CONTEXT_MAX_BYTES,
@@ -19,6 +19,12 @@ import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
 import { freshMonsterPlanningState } from '../../../src/vtt/monster-planning-state';
 import { engineActorOptions } from '../../../src/vtt/turn-option-registry';
 import { projectHumanEngineOptions } from '../../../src/vtt/encounter-board-projection';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
+
+const OFFER_ENVIRONMENT = buildOfferEnvironment({
+  kind: 'configuration',
+  mode: 'legacy_standard',
+});
 
 const fixedD20 = (face: number) => () => (face - 0.5) / 20;
 
@@ -115,6 +121,7 @@ function contextFor(setup: ReturnType<typeof integratedState>) {
     toolProfile: 'dm',
     requestedActorIds: [setup.unicorn.id],
     initiativeProjection: { policy: 'initiative-intel-v1', timeline },
+    offerEnvironment: OFFER_ENVIRONMENT,
   });
   const capsule = runtime.feed.current();
   const context = record(runtime.toolSurface.execute('engine.get_turn_context', {
@@ -139,6 +146,7 @@ async function brutalTurnContext(
     applyRoomInitiativeProfile(state, 'derived_v1'),
     mulberry32(seed),
     { kind: 'unattended', askDefault: 'decline' },
+    OFFER_ENVIRONMENT,
   );
   const prepared = session.beginRoundWithoutSkipping({
     runId: encounterSessionId('encounter:brutal-context'),
@@ -163,6 +171,7 @@ async function brutalTurnContext(
     historyKind: 'room_ready',
     requestedActorCount: requestedActorCount ?? request.actors.length,
     initiativeProjection: prepared.snapshot.capsule.projection.initiative,
+    offerEnvironment: OFFER_ENVIRONMENT,
     ...(base === undefined ? {} : { turnContextDeltaBase: base }),
   });
   const capsule = runtime.feed.current();
@@ -190,6 +199,7 @@ describe('M-core and D420 turn-context rendering', () => {
     if (hidden === undefined) throw new Error('Brutal context fixture has no hidden spell.');
     const runtime = createEngineMcpRuntime(state, {
       toolProfile: 'dm', requestedActorIds: [actor.profile.id],
+      offerEnvironment: OFFER_ENVIRONMENT,
     });
     const capsule = runtime.feed.current();
     const context = runtime.toolSurface.execute('engine.get_turn_context', {
@@ -199,7 +209,12 @@ describe('M-core and D420 turn-context rendering', () => {
       granularity: 'full',
       intel_mode: 'full',
     });
-    const human = projectHumanEngineOptions(state, [actor.profile.id])[0];
+    const human = projectHumanEngineOptions(
+      state,
+      [actor.profile.id],
+      state.revision,
+      OFFER_ENVIRONMENT,
+    )[0];
     if (human === undefined) throw new Error('Human projection omitted the brutal actor.');
     const firstHumanOnly = human.options.findIndex((option) => option.availability === 'human_only');
 
@@ -375,7 +390,7 @@ describe('M-core and D420 turn-context rendering', () => {
     const { runtime, capsule } = contextFor(setup);
     const firstActor = capsule.projection.combatants.find((actor) => actor.id === setup.unicorn.id);
     if (firstActor?.options[0] === undefined) throw new Error('Unicorn context has no option to bloat.');
-    const bloated = createEngineStateCapsule({
+    const bloated = createEngineStateCapsuleForEnvironment({
       runId: capsule.runId,
       branchId: capsule.branchId,
       revision: capsule.revision + 1,
@@ -406,6 +421,7 @@ describe('M-core and D420 turn-context rendering', () => {
         encounterRound: 999_999,
       })),
       rulesIndex: capsule.rulesIndex,
+      offerEnvironment: OFFER_ENVIRONMENT.binding,
     });
     runtime.feed.replace(bloated);
     const context = record(runtime.toolSurface.execute('engine.get_turn_context', {

@@ -9,6 +9,7 @@ import { d466GeneratedRoomOverride } from '../src/vtt/d466-room-overrides';
 import { availableEngineActorOptions, resolveEngineActorOption } from '../src/vtt/intent-resolver';
 import { decodeArenaFixtureText } from '../src/vtt/mcp/entrypoint';
 import { freshMonsterPlanningState } from '../src/vtt/monster-planning-state';
+import { buildOfferEnvironment } from '../src/vtt/offers/build-offer-environment';
 import {
   BRUTAL_CHALLENGE_BUDGET_SCALE,
   BRUTAL_TERRAIN_FEATURE_COUNT_BAND,
@@ -17,6 +18,8 @@ import {
   type RoomDifficultyProfile,
 } from '../src/vtt/room-generator';
 import { z } from 'zod';
+
+const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
 
 export const D569_SECOND_FAMILY_LEDGER_ENTRY =
   'seed ranges 5118001-5118010 and 6207001-6207010 have no occurrence in .claude/decisions.md, tests/fixtures or tools as of 2026-09-07 (supervisor grep); ranges 5117xxx, 6203xxx, 6204xxx, 6206xxx and 6208xxx are used (primary hard, primary brutal, D466 override/protocol, D572 brutal-b, D572 pool)' as const;
@@ -270,9 +273,9 @@ function everyMonsterProductive(room: GeneratedRoom): boolean {
   const planningState = freshMonsterPlanningState(room.encounter.state);
   return planningState.combatants
     .filter((combatant) => combatant.profile.kind === 'monster')
-    .every((monster) => availableEngineActorOptions(planningState, monster.profile.id)
+    .every((monster) => availableEngineActorOptions(planningState, monster.profile.id, OFFER_ENVIRONMENT)
       .some((option) => {
-        const resolution = resolveEngineActorOption(planningState, option);
+        const resolution = resolveEngineActorOption(planningState, option, OFFER_ENVIRONMENT);
         return resolution.valid && (resolution.mechanics.movementCostFeet > 0 ||
           resolution.mechanics.actionSlots.some((slot) =>
             slot.kind === 'attack' || slot.kind === 'saving_throw' || slot.kind === 'cast_spell' ||

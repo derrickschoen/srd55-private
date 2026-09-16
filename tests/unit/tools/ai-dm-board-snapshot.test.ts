@@ -18,7 +18,15 @@ import {
   importSavedSession,
   EncounterSessionJournal,
 } from '../../../src/vtt/session-persistence';
-import { loadArenaFixture } from '../../../src/vtt/mcp/entrypoint';
+import {
+  loadArenaFixture,
+} from '../../../src/vtt/mcp/entrypoint';
+import * as engineMcpEntrypoint from '../../../src/vtt/mcp/entrypoint';
+import {
+  createDisabledEngineOfferFamilyPolicy,
+} from '../../../src/vtt/offers/offer-environment';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
+import { createUnrepresentedPartyThreatCatalog } from '../../../src/vtt/offers/party-threat-catalog';
 import {
   assertBoardImageFresh,
   assertSynchronizedBoardImages,
@@ -42,6 +50,12 @@ const CONTROL_FIXTURES = Array.from(
   { length: 10 },
   (_unused, index) => `tests/fixtures/arena-basis-brutal/seed-${String(6_203_001 + index)}.json`,
 );
+const BOUND_OFFER_ENVIRONMENT = buildOfferEnvironment({
+  kind: 'configuration',
+  mode: 'revision_bound',
+  familyPolicy: createDisabledEngineOfferFamilyPolicy(),
+  partyThreatCatalog: createUnrepresentedPartyThreatCatalog(),
+});
 
 function sourceFor(state: EncounterState, room = 1): BoardImageSource {
   return {
@@ -190,6 +204,7 @@ describe('AI DM board snapshot contracts', () => {
         generation: 0,
       })),
       history: [],
+      offerEnvironment: BOUND_OFFER_ENVIRONMENT,
     });
     const stateOnly = projectStateOnlyDmBoard(projection);
 
@@ -254,7 +269,17 @@ describe('AI DM board snapshot contracts', () => {
 
     expect(importSavedSession(store, bundle.bytes)).toBe(bundle.sessionId);
     const resumed = EncounterSessionJournal.resume(bundle.sessionId, store, new MemoryMirrorSink());
+    const runtime = engineMcpEntrypoint.createEngineMcpRuntime(resumed.encounterState, {
+      offerEnvironment: BOUND_OFFER_ENVIRONMENT,
+    });
+    expect(runtime.feed.current().offerEnvironment).toEqual(BOUND_OFFER_ENVIRONMENT.binding);
     expect(canonicalJson(resumed.encounterState)).toBe(stateBytes);
+    expect(runtime.feed.current().projection.combatants.map((combatant) => combatant.id).sort()).toEqual(
+      resumed.encounterState.combatants
+        .filter((combatant) => combatant.life !== 'dead')
+        .map((combatant) => combatant.profile.id)
+        .sort(),
+    );
     expect(resumed.coordinatorState.pause).toEqual({ kind: 'interrupted' });
     expect(resumed.controllers).toHaveLength(state.combatants.length);
     expect(resumed.controllers.every((controller) => controller.kind === 'human')).toBe(true);

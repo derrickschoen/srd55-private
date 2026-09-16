@@ -6,8 +6,9 @@ import type {
   EngineOptionCandidate,
 } from './option-modeling';
 import { renderNoModeledEffectReason, renderOmittedRider } from './renderer-profile';
-import { engineActorOptions } from './turn-option-registry';
+import { engineActorOptionsForEnvironment } from './intent-resolver';
 import { projectFutureMonsterTurns } from './monster-planning-state';
+import type { EngineOptionEnvironment } from './offers/build-offer-environment';
 
 export type HumanEngineOptionPresentation =
   | {
@@ -51,6 +52,7 @@ export function projectHumanEngineOptions(
   actorIds: readonly CombatantId[] = state.combatants.flatMap((combatant) =>
     combatant.profile.kind === 'monster' && combatant.life !== 'dead' ? [combatant.profile.id] : []),
   revision = state.revision,
+  offerEnvironment: EngineOptionEnvironment,
 ): readonly HumanEngineActorOptions[] {
   const requested = new Set(actorIds);
   const optionState = projectFutureMonsterTurns(state, [...requested]);
@@ -58,7 +60,12 @@ export function projectHumanEngineOptions(
     .filter((combatant) => requested.has(combatant.profile.id) && combatant.profile.kind === 'monster')
     .sort((left, right) => left.profile.id.localeCompare(right.profile.id))
     .map((combatant) => {
-      const candidates = engineActorOptions(optionState, combatant.profile.id, revision).candidates;
+      const candidates = engineActorOptionsForEnvironment(
+        optionState,
+        combatant.profile.id,
+        offerEnvironment,
+        revision,
+      ).candidates;
       const presented = candidates.map((candidate, existingOrder) => ({
         existingOrder,
         presentation: presentOption(candidate),

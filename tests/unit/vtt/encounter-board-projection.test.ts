@@ -39,6 +39,12 @@ import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
 import { generateRoom } from '../../../src/vtt/room-generator';
 import { freshMonsterPlanningState } from '../../../src/vtt/monster-planning-state';
 import { engineActorOptions } from '../../../src/vtt/turn-option-registry';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
+
+const OFFER_ENVIRONMENT = buildOfferEnvironment({
+  kind: 'configuration',
+  mode: 'legacy_standard',
+});
 
 interface SpellRecord {
   readonly id: string;
@@ -298,6 +304,7 @@ describe('D344.3 DM encounter board projection', () => {
     const expected = engineActorOptions(state, monster.profile.id);
     const projection = projectDmBoard({
       view: projectDmView(state), coordinator: IDLE, controllers: [], history: [],
+      offerEnvironment: OFFER_ENVIRONMENT,
     });
     const actor = projection.humanEngineOptions.find((candidate) => candidate.actorId === monster.profile.id);
     if (actor === undefined) throw new Error('Human engine option projection omitted the monster.');
@@ -698,6 +705,7 @@ describe('D344.3 DM encounter board projection', () => {
         combatantId: actor.id, controllerId: 'controller:human-board', kind: 'human', generation: 0,
       }],
       history: [],
+      offerEnvironment: OFFER_ENVIRONMENT,
     });
     expect(human.humanCommandActions.map((command) => command.type)).toEqual([
       'move', 'attack', 'cast_spell', 'activate_sustained_effect',
@@ -714,6 +722,7 @@ describe('D344.3 DM encounter board projection', () => {
         combatantId: actor.id, controllerId: 'controller:algorithm-board', kind: 'algorithm', generation: 0,
       }],
       history: [],
+      offerEnvironment: OFFER_ENVIRONMENT,
     });
     expect(algorithm.humanCommandActions).toEqual([]);
   });

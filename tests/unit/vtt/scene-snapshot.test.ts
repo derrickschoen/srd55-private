@@ -21,6 +21,9 @@ import { logicalAssetId } from '../../../src/vtt/handoff/asset-id-map';
 import {
   EncounterSessionJournal, MemoryBrowserSessionStore, MemoryMirrorSink,
 } from '../../../src/vtt/session-persistence';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
+
+const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
 
 const IDLE = {
   requestSequence: 1,
@@ -75,7 +78,13 @@ function sizedSnapshot(size: 'Large' | 'Huge' | 'Gargantuan', squeezed = false) 
         })),
       }
     : created;
-  const projection = projectDmBoard({ view: projectDmView(state), coordinator: IDLE, controllers: [], history: [] });
+  const projection = projectDmBoard({
+    view: projectDmView(state),
+    coordinator: IDLE,
+    controllers: [],
+    history: [],
+    offerEnvironment: OFFER_ENVIRONMENT,
+  });
   return sceneSnapshot({
     sceneId: 'scene:sizes', projection, art: REFERENCE_ENCOUNTER_ART,
     tokenIdentities: canonicalTokenIdentityIndex(state.tokens),
@@ -261,7 +270,13 @@ describe('renderer-neutral scene snapshot', () => {
 
   it('emits DM environment lights, exclusive door companions and no door cell wall union', () => {
     const state = fixtureState();
-    const projection = projectDmBoard({ view: projectDmView(state), coordinator: IDLE, controllers: [], history: [] });
+    const projection = projectDmBoard({
+      view: projectDmView(state),
+      coordinator: IDLE,
+      controllers: [],
+      history: [],
+      offerEnvironment: OFFER_ENVIRONMENT,
+    });
     const { snapshot } = sceneSnapshot({
       sceneId: 'scene:two-room', projection, art: REFERENCE_ENCOUNTER_ART,
       tokenIdentities: canonicalTokenIdentityIndex(state.tokens),
@@ -277,7 +292,13 @@ describe('renderer-neutral scene snapshot', () => {
   it('uses the object-position north edge for adjacent and multicell doors, open and closed', () => {
     const snapshotFor = (state: ReturnType<typeof fixtureState>) => sceneSnapshot({
       sceneId: 'scene:doors',
-      projection: projectDmBoard({ view: projectDmView(state), coordinator: IDLE, controllers: [], history: [] }),
+      projection: projectDmBoard({
+        view: projectDmView(state),
+        coordinator: IDLE,
+        controllers: [],
+        history: [],
+        offerEnvironment: OFFER_ENVIRONMENT,
+      }),
       art: REFERENCE_ENCOUNTER_ART,
       tokenIdentities: canonicalTokenIdentityIndex(state.tokens),
     }).snapshot;

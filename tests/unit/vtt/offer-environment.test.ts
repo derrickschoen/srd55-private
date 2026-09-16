@@ -3,24 +3,39 @@ import { monsterCombatantProfile } from '../../../src/combat/combatant';
 import { createEncounter } from '../../../src/combat/encounter';
 import { BANDIT } from '../../../src/combat/statblocks/mercenary-company';
 import { combatantId, encounterBranchId, encounterSessionId } from '../../../src/combat/values';
-import { canonicalEngineQueryPort, engineActionRegistryForEnvironment } from '../../../src/vtt/engine-query-port';
+import { engineActionRegistryForEnvironment } from '../../../src/vtt/engine-query-port';
+import {
+  createEngineStateCapsuleForEnvironment,
+  engineStateHandle,
+  type EngineStateCapsule,
+} from '../../../src/vtt/engine-state-capsule';
+import {
+  availableEngineActorOptions,
+  resolveEngineActorOption,
+} from '../../../src/vtt/intent-resolver';
 import { freshMonsterPlanningState } from '../../../src/vtt/monster-planning-state';
 import {
   createDisabledEngineOfferFamilyPolicy,
-  createEngineOptionEnvironment,
-  createLegacyEngineOptionEnvironment,
   decodeEngineOptionEnvironmentBinding,
-  type EngineOptionEnvironment,
 } from '../../../src/vtt/offers/offer-environment';
+import {
+  buildOfferEnvironment,
+  type EngineOptionEnvironment,
+} from '../../../src/vtt/offers/build-offer-environment';
+import { PARTY_THREAT_CATALOG_FORMAT } from '../../../src/vtt/offers/offer-codec-primitives';
 import { ENGINE_OFFER_CAPABILITIES } from '../../../src/vtt/offers/offer-generator-registry';
 import { createPartyThreatCatalog } from '../../../src/vtt/offers/party-threat-catalog';
 import {
   createEngineMcpRuntime,
   decodeEngineMcpLauncherManifest,
   ENGINE_MCP_LAUNCHER_FORMAT,
-  reconstructLauncherOfferEnvironment,
   type EngineMcpLauncherManifest,
 } from '../../../src/vtt/mcp/entrypoint';
+import {
+  createEngineMcpApplication,
+  type EngineCapsuleFeed,
+} from '../../../src/vtt/mcp/engine-server';
+import { engineActorOptions } from '../../../src/vtt/turn-option-registry';
 import { placedToken, playerProfile } from '../combat/fixtures';
 
 const EXPECTED_DISABLED_POLICY_DIGEST = 'a1572528052c75afbc8578372ed8307b1a982afc77a1d71b5c908a1b8a5ee28a';
@@ -39,7 +54,7 @@ const EXPECTED_PARENT_STANDARD_IDS = [
 function representedEnvironment() {
   const familyPolicy = createDisabledEngineOfferFamilyPolicy();
   const partyThreatCatalog = createPartyThreatCatalog({
-    format: 'party-threat-catalog-v1',
+    format: PARTY_THREAT_CATALOG_FORMAT,
     representation: 'represented',
     entries: [{
       attackerId: combatantId('combatant:catalog-cleric'),
@@ -52,8 +67,8 @@ function representedEnvironment() {
       resolution: { kind: 'saving_throw', ability: 'dexterity' },
     }],
   });
-  return createEngineOptionEnvironment({
-    queries: canonicalEngineQueryPort,
+  return buildOfferEnvironment({
+    kind: 'configuration',
     mode: 'revision_bound',
     familyPolicy,
     partyThreatCatalog,
@@ -84,7 +99,133 @@ function mutableRecord(value: unknown, label: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
+function optionFixture() {
+  const actor = monsterCombatantProfile(BANDIT, {
+    combatantId: 'combatant:environment-provenance-bandit',
+    tokenId: 'token:environment-provenance-bandit',
+  });
+  const target = playerProfile('environment-provenance-target', { hitPoints: 30 });
+  const state = freshMonsterPlanningState(createEncounter({
+    bounds: { columns: 8, rows: 3 },
+    combatants: [actor, target],
+    tokens: [placedToken(actor, 0, 1), placedToken(target, 4, 1)],
+  }));
+  return { actor, state };
+}
+
+function capsuleWithEnvironment(
+  capsule: EngineStateCapsule,
+  environment: EngineOptionEnvironment,
+): EngineStateCapsule {
+  return createEngineStateCapsuleForEnvironment({
+    runId: capsule.runId,
+    branchId: capsule.branchId,
+    revision: capsule.revision + 1,
+    generatedAt: capsule.generatedAt,
+    request: capsule.request,
+    projection: capsule.projection,
+    historyDelta: capsule.historyDelta,
+    rulesIndex: capsule.rulesIndex,
+    offerEnvironment: environment.binding,
+  });
+}
+
 describe('immutable offer environment', () => {
+  it('rejects a missing builder input with the exact contract error', () => {
+    expect(() => Reflect.apply(buildOfferEnvironment, undefined, [])).toThrow(
+      new TypeError('Offer environment input must be an object.'),
+    );
+  });
+
+  it('rejects a missing binding with the exact contract error', () => {
+    expect(() => buildOfferEnvironment({ kind: 'binding', binding: undefined })).toThrow(
+      new TypeError('Offer environment binding is required.'),
+    );
+  });
+
+  it('rejects malformed and mistagged bindings through the binding codec', () => {
+    const binding = structuredClone(representedEnvironment().binding);
+    const truncated = mutableRecord(structuredClone(binding), 'offer environment binding');
+    delete truncated['partyThreatCatalog'];
+    expect(() => buildOfferEnvironment({ kind: 'binding', binding: truncated })).toThrow(
+      new TypeError('engine option environment binding has an invalid shape.'),
+    );
+
+    const mistagged = mutableRecord(structuredClone(binding), 'offer environment binding');
+    mistagged['format'] = 'engine-option-environment-v0';
+    expect(() => buildOfferEnvironment({ kind: 'binding', binding: mistagged })).toThrow(
+      new TypeError('Engine option environment binding header is invalid.'),
+    );
+  });
+
+  it('rejects query injection into legacy configuration input', () => {
+    const injectedInput = {
+      kind: 'configuration',
+      mode: 'legacy_standard',
+      queries: representedEnvironment().queries,
+    } as const;
+    expect(() => buildOfferEnvironment(injectedInput)).toThrow(
+      new TypeError('Offer environment configuration has an invalid shape.'),
+    );
+  });
+
+  it('rejects a binding mode override with the exact shape error', () => {
+    const input = {
+      kind: 'binding',
+      binding: representedEnvironment().binding,
+      mode: 'legacy_standard',
+    } as const;
+    expect(() => buildOfferEnvironment(input)).toThrow(
+      new TypeError('Offer environment binding input has an invalid shape.'),
+    );
+  });
+
+  it('rejects queries alongside a binding with the exact shape error', () => {
+    const input = {
+      kind: 'binding',
+      binding: representedEnvironment().binding,
+      queries: representedEnvironment().queries,
+    } as const;
+    expect(() => buildOfferEnvironment(input)).toThrow(
+      new TypeError('Offer environment binding input has an invalid shape.'),
+    );
+  });
+
+  it('rejects query injection into revision configuration input', () => {
+    const environment = representedEnvironment();
+    const input = {
+      kind: 'configuration',
+      mode: 'revision_bound',
+      familyPolicy: environment.familyPolicy,
+      partyThreatCatalog: environment.partyThreatCatalog,
+      queries: environment.queries,
+    } as const;
+    expect(() => buildOfferEnvironment(input)).toThrow(
+      new TypeError('Offer environment configuration has an invalid shape.'),
+    );
+  });
+
+  it('validates revision configuration through the policy and catalog codecs', () => {
+    const environment = representedEnvironment();
+    const invalidPolicy = mutableRecord(structuredClone(environment.familyPolicy), 'family policy');
+    invalidPolicy['helpAttack'] = 'enabled';
+    expect(() => Reflect.apply(buildOfferEnvironment, undefined, [{
+      kind: 'configuration',
+      mode: 'revision_bound',
+      familyPolicy: invalidPolicy,
+      partyThreatCatalog: environment.partyThreatCatalog,
+    }])).toThrow(new TypeError('Engine offer family policy digest is invalid.'));
+
+    const invalidCatalog = mutableRecord(structuredClone(environment.partyThreatCatalog), 'party threat catalog');
+    invalidCatalog['representation'] = 'unrepresented';
+    expect(() => Reflect.apply(buildOfferEnvironment, undefined, [{
+      kind: 'configuration',
+      mode: 'revision_bound',
+      familyPolicy: environment.familyPolicy,
+      partyThreatCatalog: invalidCatalog,
+    }])).toThrow(new TypeError('An unrepresented party threat catalog must be empty.'));
+  });
+
   it('binds strict family-policy catalog and environment digests to independent expected values', () => {
     const environment = representedEnvironment();
     expect(environment.familyPolicy.digest).toBe(EXPECTED_DISABLED_POLICY_DIGEST);
@@ -108,10 +249,13 @@ describe('immutable offer environment', () => {
     const environment = representedEnvironment();
     const decoded = decodeEngineMcpLauncherManifest(launcher(environment));
     if (decoded === null) throw new Error('Valid offer-bound launcher was not decoded.');
-    const reconstructed = reconstructLauncherOfferEnvironment(decoded);
+    const reconstructed = buildOfferEnvironment({
+      kind: 'binding',
+      binding: decoded.offerEnvironment,
+    });
     expect(reconstructed).not.toBe(environment);
     expect(reconstructed.binding.mode).toBe('revision_bound');
-    expect(reconstructed.queries).toBe(canonicalEngineQueryPort);
+    expect(reconstructed.queries).toBe(environment.queries);
     expect(reconstructed.binding).toEqual(environment.binding);
     expect(reconstructed.digest).toBe(EXPECTED_REPRESENTED_ENVIRONMENT_DIGEST);
 
@@ -146,7 +290,7 @@ describe('immutable offer environment', () => {
   });
 
   it('legacy standard ids remain unchanged under explicit legacy environment', () => {
-    const environment = createLegacyEngineOptionEnvironment(canonicalEngineQueryPort);
+    const environment = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
     expect(environment.familyPolicy.digest).toBe(EXPECTED_DISABLED_POLICY_DIGEST);
     expect(environment.partyThreatCatalog.digest).toBe(EXPECTED_UNREPRESENTED_CATALOG_DIGEST);
     expect(environment.digest).toBe(EXPECTED_LEGACY_ENVIRONMENT_DIGEST);
@@ -161,7 +305,10 @@ describe('immutable offer environment', () => {
 
     const decodedLegacyLauncher = decodeEngineMcpLauncherManifest(launcher(environment));
     if (decodedLegacyLauncher === null) throw new Error('Valid legacy launcher was not decoded.');
-    const reconstructedLegacy = reconstructLauncherOfferEnvironment(decodedLegacyLauncher);
+    const reconstructedLegacy = buildOfferEnvironment({
+      kind: 'binding',
+      binding: decodedLegacyLauncher.offerEnvironment,
+    });
     expect(reconstructedLegacy.binding.mode).toBe('legacy_standard');
     expect(reconstructedLegacy.partyThreatCatalog.representation).toBe('unrepresented');
     expect(reconstructedLegacy.digest).toBe(EXPECTED_LEGACY_ENVIRONMENT_DIGEST);
@@ -182,5 +329,122 @@ describe('immutable offer environment', () => {
     expect(JSON.stringify(options)).not.toContain('offerEnvironment');
     expect(JSON.stringify(options)).not.toContain('binding');
     expect(ENGINE_OFFER_CAPABILITIES.map((capability) => capability.kind)).toEqual(['standard']);
+  });
+
+  it('accepts registered option provenance from an independently reconstructed equal digest', () => {
+    const environment = representedEnvironment();
+    const reconstructed = buildOfferEnvironment({ kind: 'binding', binding: environment.binding });
+    const { actor, state } = optionFixture();
+    const option = availableEngineActorOptions(state, actor.id, environment)[0];
+    if (option === undefined) throw new Error('Expected a registered environment option.');
+    expect(reconstructed).not.toBe(environment);
+    expect(reconstructed.digest).toBe(EXPECTED_REPRESENTED_ENVIRONMENT_DIGEST);
+    expect(resolveEngineActorOption(state, option, reconstructed).valid).toBe(true);
+  });
+
+  it('refuses an otherwise legal option whose provenance is absent', () => {
+    const environment = representedEnvironment();
+    const { actor, state } = optionFixture();
+    const option = engineActorOptions(state, actor.id).offerable[0];
+    if (option === undefined) throw new Error('Expected an unregistered engine option.');
+    expect(resolveEngineActorOption(state, option, environment)).toEqual({
+      valid: false,
+      code: 'OFFER_ENVIRONMENT_MISMATCH',
+      summary: 'combatant:environment-provenance-bandit: option was not created by the bound offer environment',
+    });
+  });
+
+  it('refuses registered option provenance from a different environment digest', () => {
+    const represented = representedEnvironment();
+    const legacy = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
+    const { actor, state } = optionFixture();
+    const option = availableEngineActorOptions(state, actor.id, represented)[0];
+    if (option === undefined) throw new Error('Expected a registered represented-environment option.');
+    expect(resolveEngineActorOption(state, option, legacy)).toEqual({
+      valid: false,
+      code: 'OFFER_ENVIRONMENT_MISMATCH',
+      summary: 'combatant:environment-provenance-bandit: option was not created by the bound offer environment',
+    });
+  });
+
+  it('refuses a mid-run feed replacement with a different offer environment digest', () => {
+    const environment = representedEnvironment();
+    const legacy = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
+    const { actor, state } = optionFixture();
+    const runtime = createEngineMcpRuntime(state, {
+      offerEnvironment: environment,
+      requestedActorIds: [actor.id],
+    });
+    const initial = runtime.feed.current();
+    const replacement = capsuleWithEnvironment(initial, legacy);
+    expect(() => runtime.feed.replace(replacement)).toThrow(
+      new TypeError('Replacement capsule offer environment does not match the selected run.'),
+    );
+    expect(runtime.feed.current().revision).toBe(initial.revision);
+    expect(runtime.feed.current().offerEnvironment.digest).toBe(EXPECTED_REPRESENTED_ENVIRONMENT_DIGEST);
+  });
+
+  it('LAUNCH_CAPSULE_DIGEST_MISMATCH_REFUSED_AT_CONSTRUCTION', () => {
+    const environment = representedEnvironment();
+    const legacy = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
+    const { actor, state } = optionFixture();
+    const runtime = createEngineMcpRuntime(state, {
+      offerEnvironment: environment,
+      requestedActorIds: [actor.id],
+    });
+    const mismatched = capsuleWithEnvironment(runtime.feed.current(), legacy);
+    const feed: EngineCapsuleFeed = {
+      current: () => structuredClone(mismatched),
+      snapshot: () => structuredClone(mismatched),
+      read: () => structuredClone(mismatched),
+      listen: () => () => undefined,
+    };
+    expect(() => createEngineMcpApplication({
+      state,
+      stateSource: feed,
+      offerEnvironment: environment,
+      proposals: { append: () => undefined },
+      speculativePlans: { append: () => undefined },
+      narration: { append: () => undefined },
+      adjudications: { append: () => undefined },
+      rules: { get: () => null },
+    })).toThrow(
+      new TypeError('Engine MCP application offer environment does not match its launch capsule.'),
+    );
+  });
+
+  it('refuses a custom feed that changes offer environment digest after application launch', () => {
+    const environment = representedEnvironment();
+    const legacy = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
+    const { actor, state } = optionFixture();
+    const runtime = createEngineMcpRuntime(state, {
+      offerEnvironment: environment,
+      requestedActorIds: [actor.id],
+    });
+    const initial = runtime.feed.current();
+    let current = initial;
+    const feed: EngineCapsuleFeed = {
+      current: () => structuredClone(current),
+      snapshot: () => structuredClone(current),
+      read: () => structuredClone(current),
+      listen: () => () => undefined,
+    };
+    const application = createEngineMcpApplication({
+      state,
+      stateSource: feed,
+      offerEnvironment: environment,
+      proposals: { append: () => undefined },
+      speculativePlans: { append: () => undefined },
+      narration: { append: () => undefined },
+      adjudications: { append: () => undefined },
+      rules: { get: () => null },
+    });
+    current = capsuleWithEnvironment(initial, legacy);
+    expect(() => application.toolSurface.execute('engine.get_turn_context', {
+      run_id: initial.runId,
+      expected_revision: current.revision,
+      scope: 'round',
+    })).toThrow(new TypeError('Engine MCP application offer environment changed during the selected run.'));
+    expect(engineStateHandle(initial)).not.toBe(engineStateHandle(current));
   });
 });

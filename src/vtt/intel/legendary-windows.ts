@@ -7,7 +7,10 @@ import {
 import type { MonsterLegendaryAction } from '../../combat/statblock';
 import type { EncounterState } from '../../combat/encounter';
 import type { CombatantId } from '../../combat/values';
-import { canonicalEngineQueryPort, engineTacticalAttackInput } from '../engine-query-port';
+import {
+  engineTacticalAttackInput,
+  type EngineQueryPort,
+} from '../engine-query-port';
 import type { EncounterTimelineProjection } from '../session-timeline';
 import {
   intelPolicyVersion,
@@ -124,6 +127,7 @@ export interface LegendaryWindowsRequest {
   /** Null records that the caller did not have the session timeline projection. */
   readonly timeline: EncounterTimelineProjection | null;
   readonly detail: 'compact' | 'full';
+  readonly queries: EngineQueryPort;
   readonly resistanceSeverityInputs?: readonly LegendaryResistanceSeverityInput[];
 }
 
@@ -183,7 +187,11 @@ function nextLegendaryWindow(
       };
 }
 
-function nearestLivingEnemy(state: EncounterState, actor: CombatantId): CombatantId | null {
+function nearestLivingEnemy(
+  state: EncounterState,
+  actor: CombatantId,
+  queries: EngineQueryPort,
+): CombatantId | null {
   const origin = state.tokens.find((token) => token.combatantId === actor)?.position;
   if (origin === undefined) return null;
   return state.combatants
@@ -196,8 +204,8 @@ function nearestLivingEnemy(state: EncounterState, actor: CombatantId): Combatan
       const leftPosition = state.tokens.find((token) => token.combatantId === left.profile.id)?.position;
       const rightPosition = state.tokens.find((token) => token.combatantId === right.profile.id)?.position;
       if (leftPosition === undefined || rightPosition === undefined) return 0;
-      return (canonicalEngineQueryPort.spaceDistance(state, actor, left.profile.id) ?? Number.POSITIVE_INFINITY) -
-        (canonicalEngineQueryPort.spaceDistance(state, actor, right.profile.id) ?? Number.POSITIVE_INFINITY) ||
+      return (queries.spaceDistance(state, actor, left.profile.id) ?? Number.POSITIVE_INFINITY) -
+        (queries.spaceDistance(state, actor, right.profile.id) ?? Number.POSITIVE_INFINITY) ||
         String(left.profile.id).localeCompare(String(right.profile.id));
     })[0]?.profile.id ?? null;
 }
@@ -216,6 +224,7 @@ function assessLegendaryOption(
   actor: CombatantId,
   option: LegendaryActionPendingDecision['options'][number],
   actions: readonly MonsterLegendaryAction[],
+  queries: EngineQueryPort,
 ): LegendaryActionOptionAssessment {
   if (option.id === 'pass') {
     return { status: 'resolved', option, assessment: { kind: 'pass' } };
@@ -234,7 +243,7 @@ function assessLegendaryOption(
       },
     };
   }
-  const target = nearestLivingEnemy(state, actor);
+  const target = nearestLivingEnemy(state, actor, queries);
   if (target === null) return { status: 'unresolved', option, reason: 'attack_target_unavailable' };
   const input = engineTacticalAttackInput(state, actor, target, action.attackId);
   if (input === null) return { status: 'unresolved', option, reason: 'attack_evaluation_unavailable' };
@@ -249,13 +258,14 @@ function pendingWindowDetails(
   actor: CombatantId,
   actions: readonly MonsterLegendaryAction[],
   pending: LegendaryActionPendingDecision | null,
+  queries: EngineQueryPort,
 ): LegendaryActionWindowDetails | null {
   if (pending === null) return null;
   return {
     decisionId: pending.id,
     afterCombatant: pending.boundary.activeCombatant,
     round: pending.boundary.round,
-    options: pending.options.map((option) => assessLegendaryOption(state, actor, option, actions)),
+    options: pending.options.map((option) => assessLegendaryOption(state, actor, option, actions, queries)),
   };
 }
 
@@ -305,6 +315,7 @@ function compactSummary(
 export function provideLegendaryWindows(
   request: LegendaryWindowsRequest,
 ): LegendaryWindowsIntel {
+  const queries = request.queries;
   const candidates = request.state.combatants.filter((subject) =>
     subject.legendary !== undefined || subject.profile.rules.legendary !== undefined,
   );
@@ -331,7 +342,7 @@ export function provideLegendaryWindows(
       resistanceUses: usePool(pool.resistanceUsesRemaining, pool.resistanceUsesMaximum),
       nextWindow: nextLegendaryWindow(request.timeline, pending, subject.profile.id),
       pendingWindow: request.detail === 'full'
-        ? pendingWindowDetails(request.state, subject.profile.id, actions, pending)
+        ? pendingWindowDetails(request.state, subject.profile.id, actions, pending, queries)
         : null,
     };
   });

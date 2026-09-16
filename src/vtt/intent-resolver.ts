@@ -15,13 +15,13 @@ import type { CombatantId } from '../combat/values';
 import { worldObjectClassAction, worldObjectActionWasUsed } from '../combat/world-object-actions';
 import { sha256 } from '../crypto/sha256';
 import {
-  canonicalEngineQueryPort,
   monsterActions,
   monsterBonusActions,
   type EngineQueryPort,
   type EngineTargetSelector,
 } from './engine-query-port';
 import { engineActorOptions } from './turn-option-registry';
+import type { EngineActorOptionPartition } from './turn-option-registry';
 import {
   engineActionId,
   engineSpellId,
@@ -41,6 +41,7 @@ import {
 } from './turn-proposal';
 import type { EngineOmittedRider } from './option-modeling';
 import { legalMultiattackCombinations } from './offers/offer-declarations';
+import type { EngineOptionEnvironment } from './offers/build-offer-environment';
 
 export type {
   EngineActionId,
@@ -66,6 +67,27 @@ type OptionResolution =
 
 function refused(code: string, summary: string): OptionResolution {
   return { valid: false, code, summary };
+}
+
+const optionEnvironmentDigests = new WeakMap<EngineOfferableOption, string>();
+
+function bindOptionEnvironment(
+  option: EngineOfferableOption,
+  environment: EngineOptionEnvironment,
+): EngineOfferableOption {
+  optionEnvironmentDigests.set(option, environment.digest);
+  return option;
+}
+
+export function engineActorOptionsForEnvironment(
+  state: EncounterState,
+  actorId: CombatantId,
+  environment: EngineOptionEnvironment,
+  revision = state.revision,
+): EngineActorOptionPartition {
+  const partition = engineActorOptions(state, actorId, revision);
+  for (const option of partition.offerable) bindOptionEnvironment(option, environment);
+  return partition;
 }
 
 function resolveSelector(
@@ -510,8 +532,16 @@ function resolvedUses(
 export function resolveEngineActorOption(
   state: EncounterState,
   option: EngineOfferableOption,
-  queries: EngineQueryPort = canonicalEngineQueryPort,
+  environment: EngineOptionEnvironment,
 ): OptionResolution {
+  const boundDigest = optionEnvironmentDigests.get(option);
+  if (boundDigest === undefined || boundDigest !== environment.digest) {
+    return refused(
+      'OFFER_ENVIRONMENT_MISMATCH',
+      `${option.actorId}: option was not created by the bound offer environment`,
+    );
+  }
+  const queries = environment.queries;
   const actor = queries.combatant(state, option.actorId);
   if (actor?.profile.kind !== 'monster' || actor.life !== 'living') {
     return refused('ACTOR_NOT_LIVING_MONSTER', `${option.actorId}: actor is not a living monster`);
@@ -605,11 +635,11 @@ export function mechanicsWithChoice(
 export function availableEngineActorOptions(
   state: EncounterState,
   actorId: CombatantId,
-  queries: EngineQueryPort = canonicalEngineQueryPort,
+  environment: EngineOptionEnvironment,
   revision = state.revision,
 ): readonly EngineOfferableOption[] {
-  return engineActorOptions(state, actorId, revision).offerable
-    .filter((option) => resolveEngineActorOption(state, option, queries).valid);
+  return engineActorOptionsForEnvironment(state, actorId, environment, revision).offerable
+    .filter((option) => resolveEngineActorOption(state, option, environment).valid);
 }
 
 function accepted(
@@ -635,14 +665,19 @@ function accepted(
 }
 
 export function createPureTurnProposalResolver(
-  queries: EngineQueryPort = canonicalEngineQueryPort,
+  environment: EngineOptionEnvironment,
 ): PureTurnProposalResolver {
   return Object.freeze({
     resolve(state: EncounterState, proposal: EngineTurnProposal): EngineProposalResolution {
-      const options = availableEngineActorOptions(state, proposal.actorId, queries, proposal.expectedRevision);
+      const options = availableEngineActorOptions(
+        state,
+        proposal.actorId,
+        environment,
+        proposal.expectedRevision,
+      );
       const primary = options.find((option) => option.optionId === proposal.primaryOptionId);
       if (primary !== undefined) {
-        const resolution = resolveEngineActorOption(state, primary, queries);
+        const resolution = resolveEngineActorOption(state, primary, environment);
         if (resolution.valid) {
           const fallback = proposal.fallbackOptionId === null
             ? null
@@ -667,7 +702,7 @@ export function createPureTurnProposalResolver(
           refusals: [primaryRefusal, { branch: 'fallback', code: 'OPTION_NOT_OFFERED', summary: `${proposal.actorId}: fallback option was not offered at revision ${String(proposal.expectedRevision)}` }],
         };
       }
-      const resolution = resolveEngineActorOption(state, fallback, queries);
+      const resolution = resolveEngineActorOption(state, fallback, environment);
       return resolution.valid
         ? choiceFitsOption(fallback, proposal.activationChoice)
           ? accepted('fallback', fallback, mechanicsWithChoice(resolution.mechanics, proposal.activationChoice, fallback), primary ?? fallback, fallback, [primaryRefusal])
@@ -676,5 +711,3 @@ export function createPureTurnProposalResolver(
     },
   });
 }
-
-export const pureTurnProposalResolver = createPureTurnProposalResolver();

@@ -13,6 +13,9 @@ import {
   MemoryBrowserSessionStore,
   exportSavedSession,
 } from '../../../src/vtt/session-persistence';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
+
+const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
 
 class MemoryStorage implements Storage {
   readonly #values = new Map<string, string>();
@@ -30,7 +33,10 @@ function savedSession(sessionKey: string, seed = 1): {
 } {
   const sessionId = encounterSessionId(sessionKey);
   const store = new MemoryBrowserSessionStore();
-  const host = new DmEncounterHost(sessionKey, store, { initialSeed: encounterSeed(seed) });
+  const host = new DmEncounterHost(sessionKey, store, {
+    initialSeed: encounterSeed(seed),
+    offerEnvironment: OFFER_ENVIRONMENT,
+  });
   host.interrupt();
   host.close();
   return { sessionId, bytes: exportSavedSession(store, sessionId) };

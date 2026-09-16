@@ -1,0 +1,35 @@
+id: no-alternative-offer-environment-construction
+valid:
+  - >-
+    buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
+  - >-
+    environment.queries.spaceDistance(state, first, second);
+  - >-
+    import type { EngineQueryPort } from './engine-query-port';
+  - >-
+    decodeEngineOptionEnvironmentBinding(binding);
+  - >-
+    createEngineOptionEnvironmentBinding(body);
+invalid:
+  - >-
+    createEngineOptionEnvironment(input);
+  - >-
+    createLegacyEngineOptionEnvironment(queries);
+  - >-
+    createRevisionBoundEngineOptionEnvironment(queries);
+  - >-
+    engineOptionEnvironmentFromBinding(queries, binding);
+  - >-
+    reconstructLauncherOfferEnvironment(manifest);
+  - >-
+    import { canonicalEngineQueryPort } from './engine-query-port';
+  - >-
+    import { canonicalEngineQueryPort as queries } from './engine-query-port';
+  - >-
+    import * as engineQueries from './engine-query-port'; engineQueries.canonicalEngineQueryPort;
+  - >-
+    canonicalEngineQueryPort.spaceDistance(state, first, second);
+  - >-
+    export { canonicalEngineQueryPort } from './engine-query-port';
+  - >-
+    export { canonicalEngineQueryPort as queries } from './engine-query-port';

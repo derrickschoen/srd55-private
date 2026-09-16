@@ -11,6 +11,7 @@ import {
   decodeArenaFixtureText,
   type EngineMcpLauncherManifest,
 } from '../../../src/vtt/mcp/entrypoint';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
 import { BlindModelIngressRecorder, type BlindIngressRecord } from '../../../src/vtt/blind-model-ingress';
 import {
   agentSessionIdFromCli,
@@ -293,6 +294,7 @@ class D569CancellationAfterDeliveryAdapter implements AgentSessionAdapter {
       runId: manifest.runId, branchId: manifest.branchId, revision: manifest.revision,
       requestId: manifest.requestId, phase: manifest.phase, correctionNumber: manifest.correctionNumber,
       room: manifest.room, historyKind: manifest.historyKind, toolProfile: 'blind', dmMode: 'blind',
+      offerEnvironment: buildOfferEnvironment({ kind: 'binding', binding: manifest.offerEnvironment }),
     });
     const context = record(runtime.toolSurface.execute('engine.get_turn_context', {
       run_id: manifest.runId, expected_revision: manifest.revision, scope: 'round', granularity: 'full',

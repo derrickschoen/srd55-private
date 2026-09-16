@@ -23,6 +23,9 @@ import {
   referenceEncounterSetup,
 } from '../../../src/vtt/reference-encounter';
 import { MemoryBrowserSessionStore } from '../../../src/vtt/session-persistence';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
+
+const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
 
 function party(settings: RefusalHandlingSettings = DEFAULT_REFUSAL_HANDLING_SETTINGS): PartySessionState {
   const hitPoints = [67, 52, 38] as const;
@@ -143,6 +146,7 @@ describe('D377.10 refusal handling', () => {
       initialState: initiativeState(),
       initialPartyState: party({ ...DEFAULT_REFUSAL_HANDLING_SETTINGS, rule_gap: 'tray_fiat_prompt' }),
       turnLegalActions: () => ({ actions: [action] }),
+      offerEnvironment: OFFER_ENVIRONMENT,
     });
     try {
       await submitOnlyAction(host, action);
@@ -173,6 +177,7 @@ describe('D377.10 refusal handling', () => {
       initialState: initiativeState(),
       initialPartyState: party(),
       turnLegalActions: () => ({ actions: [action] }),
+      offerEnvironment: OFFER_ENVIRONMENT,
     });
     try {
       await submitOnlyAction(host, action);
@@ -195,6 +200,7 @@ describe('D377.10 refusal handling', () => {
       initialState: initiativeState(),
       initialPartyState: party({ ...DEFAULT_REFUSAL_HANDLING_SETTINGS, rule_gap: 'default_and_log' }),
       turnLegalActions: () => ({ actions: [action] }),
+      offerEnvironment: OFFER_ENVIRONMENT,
     });
     try {
       await submitOnlyAction(host, action);
@@ -210,11 +216,16 @@ describe('D377.10 refusal handling', () => {
 
   it('setting_not_persisted: per-category settings survive host resume', async () => {
     const store = new MemoryBrowserSessionStore();
-    const first = new DmEncounterHost('session:refusal-persist', store, { initialPartyState: party() });
+    const first = new DmEncounterHost('session:refusal-persist', store, {
+      initialPartyState: party(),
+      offerEnvironment: OFFER_ENVIRONMENT,
+    });
     await first.setRefusalHandling('rule_gap', 'tray_fiat_prompt');
     await first.setRefusalHandling('unmodeled_interaction', 'default_and_log');
     first.close();
-    const resumed = new DmEncounterHost('session:refusal-persist', store);
+    const resumed = new DmEncounterHost('session:refusal-persist', store, {
+      offerEnvironment: OFFER_ENVIRONMENT,
+    });
     expect(resumed.snapshot().dm.partySession?.state.refusalHandling).toEqual({
       rule_gap: 'tray_fiat_prompt',
       unmodeled_interaction: 'default_and_log',
@@ -269,6 +280,7 @@ describe('D377.10 refusal handling', () => {
       initialState: blocked,
       initialPartyState: party(allTray),
       turnLegalActions: () => ({ actions: [action] }),
+      offerEnvironment: OFFER_ENVIRONMENT,
     });
     try {
       await submitOnlyAction(host, action);

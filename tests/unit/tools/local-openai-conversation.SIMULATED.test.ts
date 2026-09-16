@@ -3,7 +3,8 @@ import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
-import { encounterSessionId } from '../../../src/combat/values';
+import { combatantId, encounterSessionId } from '../../../src/combat/values';
+import { encounterBranchId } from '../../../src/combat/values';
 import { ENGINE_DM_TOOL_NAMES } from '../../../src/vtt/mcp/engine-server';
 import { ENGINE_TOOL_SPECS } from '../../../src/vtt/mcp/schemas';
 import {
@@ -13,6 +14,16 @@ import {
 import { parseArenaArgs, runArena } from '../../../tools/ai-dm-arena';
 import { DEFAULT_RENDERER_PROFILE } from '../../../src/vtt/renderer-profile';
 import { mkdtempSync, readFileSync } from '../../helpers/test-filesystem';
+import {
+  createDisabledEngineOfferFamilyPolicy,
+} from '../../../src/vtt/offers/offer-environment';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
+import { createUnrepresentedPartyThreatCatalog } from '../../../src/vtt/offers/party-threat-catalog';
+import { availableEngineActorOptions, resolveEngineActorOption } from '../../../src/vtt/intent-resolver';
+import { loadArenaFixture, projectFutureMonsterTurns } from '../../../src/vtt/mcp/entrypoint';
+import { EngineRoundSession } from '../../../src/vtt/engine-round-session';
+import { mulberry32 } from '../../../src/combat/random';
+import { engineStateHandle } from '../../../src/vtt/engine-state-capsule';
 
 interface FakeRequest {
   readonly path: string;
@@ -32,6 +43,11 @@ function messages(value: unknown): readonly Readonly<Record<string, unknown>>[] 
   return value.map((entry) => record(entry, 'message'));
 }
 
+function records(value: unknown, label: string): readonly Readonly<Record<string, unknown>>[] {
+  if (!Array.isArray(value)) throw new TypeError(`${label} must be an array.`);
+  return value.map((entry) => record(entry, label));
+}
+
 const ALL_OPTIONS_TEST_RENDERER_PROFILE = {
   ...DEFAULT_RENDERER_PROFILE,
   rows: 'off',
@@ -45,6 +61,14 @@ const ALL_OPTIONS_TEST_RENDERER_PROFILE = {
   misc: 'merged',
   optionDetail: 'top2_stubs',
 } as const;
+
+const REVISION_BOUND_OFFER_INPUT = {
+  kind: 'configuration',
+  mode: 'revision_bound',
+  familyPolicy: createDisabledEngineOfferFamilyPolicy(),
+  partyThreatCatalog: createUnrepresentedPartyThreatCatalog(),
+} as const;
+const REFERENCE_OFFER_ENVIRONMENT = buildOfferEnvironment(REVISION_BOUND_OFFER_INPUT);
 
 async function fakeServer(
   respond: (request: FakeRequest, index: number) => { readonly status?: number; readonly body: unknown },
@@ -151,6 +175,8 @@ describe('SIMULATED local OpenAI conversation adapter', () => {
 
   it('drives a full authorized round through context, frontier expansion, and submission', { timeout: 30_000 }, async () => {
     let contextForSubmission: Readonly<Record<string, unknown>> | null = null;
+    let submittedProposals: readonly Readonly<Record<string, unknown>>[] | null = null;
+    const storedOfferEnvironmentDigests: string[] = [];
     const endpoint = await fakeServer((request, index) => {
       const requestMessages = messages(request.body['messages']);
       if (index === 0) {
@@ -185,31 +211,48 @@ describe('SIMULATED local OpenAI conversation adapter', () => {
       }
       const expansion = record(JSON.parse(toolMessage['content']) as unknown, 'frontier expansion');
       if (contextForSubmission === null) throw new Error('Frontier expansion arrived without its turn context.');
+      if (!Array.isArray(expansion['proposals'])) {
+        throw new Error(`Frontier expansion omitted proposals: ${toolMessage['content']}`);
+      }
+      submittedProposals = expansion['proposals'].map((proposal) => record(proposal, 'frontier proposal'));
       const requestValue = record(contextForSubmission['request'], 'turn request');
       return { body: assistantToolCall('call-submit', 'engine__submit_round_proposals', {
         state_ref: contextForSubmission['state_ref'],
         request_id: requestValue['request_id'],
         phase: requestValue['phase'],
         idempotency_key: 'SIMULATED-local-openai-round-submit',
-        proposals: expansion['proposals'],
+        proposals: submittedProposals,
       }, {
         prompt_tokens: 7, completion_tokens: 2,
       }) };
     });
     const directory = mkdtempSync(join(tmpdir(), 'dnd-local-openai-round-'));
     try {
-      const config = parseArenaArgs([
-        '--rooms', '1', '--reps', '1', '--seed', '3943001',
-        '--out', join(directory, 'rows.jsonl'),
-        '--cli', 'local-openai', '--local-base-url', endpoint.baseUrl,
-        '--local-model', 'quantized-SIMULATED', '--local-api-key', 'secret-SIMULATED',
-        '--local-think', 'on',
-        '--effort', 'low', '--kb', 'tests/fixtures/ai-dm-kb/k6.txt',
-        '--combat-model', 'monster_block_v1', '--initiative-profile', 'legacy',
-        '--renderer-profile', JSON.stringify(ALL_OPTIONS_TEST_RENDERER_PROFILE),
-      ]);
-      const rows = await runArena(config);
+      const config = {
+        ...parseArenaArgs([
+          '--rooms', '1', '--reps', '1', '--seed', '3943001',
+          '--out', join(directory, 'rows.jsonl'),
+          '--cli', 'local-openai', '--local-base-url', endpoint.baseUrl,
+          '--local-model', 'quantized-SIMULATED', '--local-api-key', 'secret-SIMULATED',
+          '--local-think', 'on',
+          '--effort', 'low', '--kb', 'tests/fixtures/ai-dm-kb/k6.txt',
+          '--combat-model', 'monster_block_v1', '--initiative-profile', 'legacy',
+          '--renderer-profile', JSON.stringify(ALL_OPTIONS_TEST_RENDERER_PROFILE),
+        ]),
+        offerEnvironment: REVISION_BOUND_OFFER_INPUT,
+      };
+      const rows = await runArena(config, {
+        onStoredRoundProposalForTest: (proposal) => {
+          storedOfferEnvironmentDigests.push(...proposal.resolutions.map((entry) =>
+            entry.offerEnvironmentDigest));
+        },
+      });
 
+      const exposedContext = record(contextForSubmission, 'exposed turn context');
+      const exposedProposals = records(submittedProposals, 'submitted proposals');
+      expect(storedOfferEnvironmentDigests).toEqual(
+        exposedProposals.map(() => REFERENCE_OFFER_ENVIRONMENT.digest),
+      );
       expect(rows).toEqual([expect.objectContaining({
         cli: 'local-openai', model: 'quantized-SIMULATED', thinkMode: 'on', outcome: 'authorized',
         toolCalls: 3, callsPerRound: 1, flapRetries: 0, serviceNull: false,
@@ -217,6 +260,81 @@ describe('SIMULATED local OpenAI conversation adapter', () => {
         refusals: [],
         tokens: { input: 35, cachedInput: 3, output: 7, reasoning: 1 },
       })]);
+      const contextActors = records(exposedContext['actors'], 'turn-context actors');
+      const advertisedOptionIds = new Set(contextActors.flatMap((actor) => {
+        const options = record(actor, 'turn-context actor')['options'];
+        if (!Array.isArray(options)) throw new Error('Turn-context actor omitted options.');
+        return options.map((option) => record(option, 'turn-context option')['option_id'])
+          .filter((optionId): optionId is string => typeof optionId === 'string');
+      }));
+      const fixtureState = await loadArenaFixture('tests/fixtures/arena-basis/seed-3943001.json');
+      const submittedActorIds = exposedProposals.map((proposal) => {
+        const actorId = proposal['actor_id'];
+        if (typeof actorId !== 'string') throw new Error('Submitted proposal omitted its actor.');
+        return combatantId(actorId);
+      });
+      const planningState = projectFutureMonsterTurns(fixtureState, submittedActorIds);
+      const runId = encounterSessionId('encounter:ai-dm-conversation');
+      const branchId = encounterBranchId('branch:ai-dm-conversation');
+      const requestId = 'request:room-1-round-1';
+      const referenceSession = new EngineRoundSession(
+        fixtureState,
+        mulberry32(8_274_113),
+        { kind: 'unattended', askDefault: 'decline' },
+        REFERENCE_OFFER_ENVIRONMENT,
+      );
+      const preparation = referenceSession.prepareRound({
+        runId,
+        branchId,
+        revision: 1,
+        requestId,
+        phase: 'initial',
+        room: 1,
+        historyKind: 'session_started',
+      }, null);
+      const referenceRequest = {
+        runId,
+        branchId,
+        revision: 1 + preparation.revisionDelta,
+        requestId,
+        phase: 'initial' as const,
+        room: 1,
+        historyKind: 'room_ready',
+      };
+      const referenceCapsule = referenceSession.snapshot(referenceRequest).capsule;
+      const referenceAuthorization = referenceSession.authorizationCapsule(referenceRequest);
+      expect(rows[0]?.stateBinding).toEqual({
+        capsule: {
+          revision: referenceCapsule.revision,
+          digest: referenceCapsule.digest,
+        },
+        authorization: {
+          revision: referenceAuthorization.revision,
+          digest: referenceAuthorization.digest,
+        },
+      });
+      expect(record(exposedContext['state_ref'], 'state ref')['state_handle'])
+        .toBe(engineStateHandle(referenceCapsule));
+      const testEnvironment = REFERENCE_OFFER_ENVIRONMENT;
+      for (const proposal of exposedProposals) {
+        const actorId = proposal['actor_id'];
+        const optionId = proposal['primary_option_id'];
+        const revision = proposal['expected_revision'];
+        if (typeof actorId !== 'string' || typeof optionId !== 'string' || typeof revision !== 'number') {
+          throw new Error('Submitted proposal omitted its actor, option, or revision.');
+        }
+        expect(advertisedOptionIds).toContain(optionId);
+        const option = availableEngineActorOptions(
+          planningState,
+          combatantId(actorId),
+          testEnvironment,
+          revision,
+        ).find((candidate) => candidate.optionId === optionId);
+        expect(option).toBeDefined();
+        if (option === undefined) throw new Error(`Submitted option ${optionId} was not minted by the test environment.`);
+        expect(resolveEngineActorOption(planningState, option, testEnvironment).valid).toBe(true);
+      }
+      expect(rows[0]?.authorizedPlan?.map((entry) => entry.acceptedProposal)).toEqual(exposedProposals);
       expect(endpoint.requests).toHaveLength(3);
       expect(endpoint.requests.map((request) => request.path)).toEqual([
         '/v1/chat/completions', '/v1/chat/completions', '/v1/chat/completions',
@@ -252,6 +370,13 @@ describe('SIMULATED local OpenAI conversation adapter', () => {
 
       expect(endpoint.requests).toHaveLength(1);
       expect(endpoint.requests[0]?.body['reasoning_effort']).toBe('none');
+      const initialMessages = messages(endpoint.requests[0]?.body['messages']);
+      const initialUser = initialMessages.findLast((message) => message['role'] === 'user');
+      if (typeof initialUser?.['content'] !== 'string') throw new Error('Initial error-path request omitted its user prompt.');
+      expect(enginePromptData(initialUser['content'])).toMatchObject({
+        run_id: 'encounter:ai-dm-conversation',
+        revision: expect.any(Number),
+      });
       expect(rows).toEqual([expect.objectContaining({
         model: 'quantized-SIMULATED', thinkMode: 'off', outcome: 'local_error',
         callsPerRound: 1, agentDispatched: true,

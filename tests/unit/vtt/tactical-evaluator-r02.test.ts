@@ -3,13 +3,15 @@ import { evaluateMonsterTacticalAttack, type EncounterState } from '../../../src
 import { traceCombatantLine } from '../../../src/combat/cover';
 import type { MonsterAttackAction } from '../../../src/combat/statblock';
 import { combatantId } from '../../../src/combat/values';
-import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
 import type { TacticalAllocationCandidate } from '../../../src/vtt/engine-query-port';
 import { freshMonsterPlanningState } from '../../../src/vtt/monster-planning-state';
 import { availableEngineActorOptions } from '../../../src/vtt/intent-resolver';
 import type { EngineOfferableOption } from '../../../src/vtt/turn-proposal';
 import { loadArenaFixture } from '../../../src/vtt/mcp/entrypoint';
 import { declareTestInputs } from '../../helpers/test-inputs';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
+
+const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
 
 const inputs = declareTestInputs({
   fixtures: ['tests/fixtures/arena-basis-hard/seed-5117009.json'],
@@ -94,16 +96,16 @@ describe('R02-like canonical tactical query', () => {
     ] as const;
     const rows = handGeometry.map((geometry) => {
       const scoutId = geometry.scoutId;
-      const action = canonicalEngineQueryPort.actions(state, scoutId)
+      const action = OFFER_ENVIRONMENT.queries.actions(state, scoutId)
         .find((candidate): candidate is MonsterAttackAction =>
           candidate.kind === 'attack' && candidate.id === 'longbow');
       if (action === undefined) throw new Error(`${scoutId} has no Longbow.`);
-      const reach = canonicalEngineQueryPort.reach(state, {
+      const reach = OFFER_ENVIRONMENT.queries.reach(state, {
         actorId: scoutId,
         targetId: FIGHTER,
         actionId: action.id,
       });
-      const evaluation = canonicalEngineQueryPort.tacticalAttack(
+      const evaluation = OFFER_ENVIRONMENT.queries.tacticalAttack(
         state,
         scoutId,
         FIGHTER,
@@ -173,7 +175,7 @@ describe('R02-like canonical tactical query', () => {
       actorId: typeof PRIEST,
       predicate: (option: EngineOfferableOption) => boolean,
     ): EngineOfferableOption => {
-      const option = availableEngineActorOptions(state, actorId).find(predicate);
+      const option = availableEngineActorOptions(state, actorId, OFFER_ENVIRONMENT).find(predicate);
       if (option === undefined) throw new Error(`Required option is absent for ${actorId}.`);
       return option;
     };
@@ -221,13 +223,13 @@ describe('R02-like canonical tactical query', () => {
     });
     const scoutScoutPriest = [PRIEST, ...SCOUTS] as const;
     const scoutScoutBandit = [...SCOUTS, BANDITS[0]] as const;
-    const comparison = canonicalEngineQueryPort.compareAllocations(state, FIGHTER, [
+    const comparison = OFFER_ENVIRONMENT.queries.compareAllocations(state, FIGHTER, [
       candidate('no-bless', priestAttack),
       candidate('bless-scout-scout-priest', priestBless, scoutScoutPriest),
       candidate('bless-scout-scout-bandit', priestBless, scoutScoutBandit),
       candidate('no-priest-attacks', priestEnds),
       candidate('bless-only-priest-no-attacks', priestBlessOnly, scoutScoutBandit),
-    ], initiativeOrder);
+    ], initiativeOrder, OFFER_ENVIRONMENT);
 
     expect(comparison.policy).toBe('tactical-evaluator-v3');
     const probability = (allocationId: string) => {
@@ -286,12 +288,12 @@ describe('R02-like canonical tactical query', () => {
       firstScoutOption === undefined || secondScoutOption === undefined ||
       firstBanditOption === undefined || secondBanditOption === undefined
     ) throw new Error('Frozen R02 attack option cardinality changed.');
-    const delayed = canonicalEngineQueryPort.compareAllocations(state, FIGHTER, [{
+    const delayed = OFFER_ENVIRONMENT.queries.compareAllocations(state, FIGHTER, [{
       allocationId: 'bless-after-first-scout',
       choices: [firstScoutOption, delayedBlessOption, secondScoutOption, firstBanditOption, secondBanditOption]
         .map((option) => ({ actorId: option.actorId, optionId: option.optionId })),
       modifierGrants: [{ sourceActorId: PRIEST, kind: 'bless', targetIds: scoutScoutPriest }],
-    }], delayedOrder).allocations[0];
+    }], delayedOrder, OFFER_ENVIRONMENT).allocations[0];
     if (delayed?.killProbability === null || delayed?.killProbability === undefined) {
       throw new Error('Delayed-Bless allocation is unresolved.');
     }

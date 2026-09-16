@@ -8,7 +8,6 @@ import {
   exactDmIntelMatrix,
   renderDmIntelRow,
 } from '../../../src/vtt/dm-tactical-intel';
-import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
 import {
   monsterTraitSupportRows,
   monsterTraitSupportDisposition,
@@ -21,7 +20,10 @@ import {
   loadArenaFixture,
 } from '../../../src/vtt/mcp/entrypoint';
 import { generateRoom } from '../../../src/vtt/room-generator';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
 import { placedToken, playerProfile } from '../combat/fixtures';
+
+const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
 
 const DISPOSITIONS = [
   'modeled',
@@ -67,11 +69,14 @@ describe('monster feature support dispositions', () => {
       disposition: { kind: 'encounter_not_applicable', reason: 'no_sunlight_state' },
     });
 
-    const runtime = createEngineMcpRuntime(state, { requestedActorIds: [wight.id] });
+    const runtime = createEngineMcpRuntime(state, {
+      requestedActorIds: [wight.id],
+      offerEnvironment: OFFER_ENVIRONMENT,
+    });
     const intel = exactDmIntelMatrix(
       state,
       runtime.feed.current(),
-      canonicalEngineQueryPort,
+      OFFER_ENVIRONMENT.queries,
       [wight.id],
     );
     expect(intel.length).toBeGreaterThan(0);

@@ -10,6 +10,7 @@ import {
   type CombatantId,
 } from '../../../src/combat/values';
 import { projectDmBoard } from '../../../src/vtt/encounter-projections';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
 import {
   DmRoundPlanSession,
   RoundPlanDryError,
@@ -47,6 +48,11 @@ import {
 import { recordScriptedReferenceSkirmish } from '../../../src/vtt/scripted-skirmish';
 import { TEST_APPROVED_FIRST_SKIRMISH_FIXTURE } from '../../../src/vtt/test-approved-first-skirmish';
 import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
+
+const OFFER_ENVIRONMENT = buildOfferEnvironment({
+  kind: 'configuration',
+  mode: 'legacy_standard',
+});
 
 const IDLE = {
   requestSequence: 1,
@@ -119,7 +125,13 @@ function context(state: EncounterState) {
   return {
     encounterId: encounterSessionId('encounter:js-integration'),
     agentSessionId: agentSessionId('codex:fake-js-exchange'),
-    projection: projectDmBoard({ view: projectDmView(state), coordinator: IDLE, controllers: [], history: [] }),
+    projection: projectDmBoard({
+      view: projectDmView(state),
+      coordinator: IDLE,
+      controllers: [],
+      history: [],
+      offerEnvironment: OFFER_ENVIRONMENT,
+    }),
     history: [],
     initiativeMode: state.config.initiativeMode,
   };
@@ -151,6 +163,7 @@ function decisionProjection(
     coordinator: { ...IDLE, pendingRequest },
     controllers: [],
     history: [],
+    offerEnvironment: OFFER_ENVIRONMENT,
   });
 }
 

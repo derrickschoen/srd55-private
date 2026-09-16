@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { ControllerIdentity, LegalActionSummary } from '../../../src/combat/controllers';
 import { monsterCombatantProfile } from '../../../src/combat/combatant';
 import { createEncounter, reduceEncounter, type EncounterState } from '../../../src/combat/encounter';
@@ -10,12 +10,18 @@ import {
   DmEncounterHost,
   type DmEncounterHostSnapshot,
 } from '../../../src/vtt/dm-encounter-host';
+import * as encounterProjections from '../../../src/vtt/encounter-projections';
 import {
   MemoryBrowserSessionStore,
   replaySessionRevisions,
 } from '../../../src/vtt/session-persistence';
 import { createConversationRoundDeadline } from '../../../src/vtt/agent-session-lifecycle';
-import { createEngineMcpRuntime } from '../../../src/vtt/mcp/entrypoint';
+import * as engineMcpEntrypoint from '../../../src/vtt/mcp/entrypoint';
+import {
+  createDisabledEngineOfferFamilyPolicy,
+} from '../../../src/vtt/offers/offer-environment';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
+import { createUnrepresentedPartyThreatCatalog } from '../../../src/vtt/offers/party-threat-catalog';
 import { MAX_PROPOSAL_CORRECTIONS } from '../../../src/vtt/turn-exhaustion-coordinator';
 import { agentSessionIdFromCli } from '../../../src/vtt/agent-session';
 import {
@@ -24,6 +30,23 @@ import {
   vaneWarrenDmWarDrumControl,
 } from '../../../src/vtt/vane-warren';
 import { monsterProfile, placedToken, playerProfile } from '../../unit/combat/fixtures';
+
+const BOUND_OFFER_ENVIRONMENT = buildOfferEnvironment({
+  kind: 'configuration',
+  mode: 'revision_bound',
+  familyPolicy: createDisabledEngineOfferFamilyPolicy(),
+  partyThreatCatalog: createUnrepresentedPartyThreatCatalog(),
+});
+function createEngineMcpRuntime(
+  state: Parameters<typeof engineMcpEntrypoint.createEngineMcpRuntime>[0],
+  options: Omit<NonNullable<Parameters<typeof engineMcpEntrypoint.createEngineMcpRuntime>[1]>,
+    'offerEnvironment'> & { readonly offerEnvironment?: typeof BOUND_OFFER_ENVIRONMENT } = {},
+): ReturnType<typeof engineMcpEntrypoint.createEngineMcpRuntime> {
+  const offerEnvironment = options.offerEnvironment ?? BOUND_OFFER_ENVIRONMENT;
+  const runtime = engineMcpEntrypoint.createEngineMcpRuntime(state, { ...options, offerEnvironment });
+  expect(runtime.feed.current().offerEnvironment).toEqual(offerEnvironment.binding);
+  return runtime;
+}
 
 function position(state: EncounterState, id: CombatantId): GridCell {
   const token = state.tokens.find((candidate) => candidate.combatantId === id);
@@ -132,6 +155,40 @@ function hostUntil(
 }
 
 describe('DmEncounterHost live algorithm path', () => {
+  it('refuses a mismatched DM projection digest before merging the detached snapshot', () => {
+    const player = playerProfile('host-digest-player', { initiativeBonus: 20 });
+    const monster = monsterProfile('host-digest-monster', { initiativeBonus: -20 });
+    const state = startedEncounter({
+      bounds: { columns: 4, rows: 2 },
+      combatants: [player, monster],
+      tokens: [placedToken(player, 0), placedToken(monster, 3)],
+    });
+    const projectDmBoard = encounterProjections.projectDmBoard;
+    const projector = vi.spyOn(encounterProjections, 'projectDmBoard').mockImplementation((input) => ({
+      ...projectDmBoard(input),
+      offerEnvironmentDigest: '0'.repeat(64),
+    }));
+    let host: DmEncounterHost | undefined;
+    try {
+      host = new DmEncounterHost(
+        'session:host-dm-projection-digest-mismatch',
+        new MemoryBrowserSessionStore(),
+        {
+          initialState: state,
+          initialControllers: algorithmIdentities(state),
+          playerIds: [player.id],
+          offerEnvironment: BOUND_OFFER_ENVIRONMENT,
+        },
+      );
+      expect(() => host?.snapshot()).toThrowError(
+        new TypeError('DM board projection offer environment digest does not match the host environment.'),
+      );
+    } finally {
+      projector.mockRestore();
+      host?.close();
+    }
+  });
+
   it('constructs and drives turn exhaustion through the supplied round deadline', async () => {
     const player = playerProfile('host-deadline-player', { initiativeBonus: 20 });
     const monster = monsterProfile('host-deadline-monster', { initiativeBonus: -20 });
@@ -147,6 +204,7 @@ describe('DmEncounterHost live algorithm path', () => {
         initialState: state,
         initialControllers: algorithmIdentities(state),
         playerIds: [player.id],
+        offerEnvironment: BOUND_OFFER_ENVIRONMENT,
       },
     );
     const runtime = createEngineMcpRuntime(state, {
@@ -241,6 +299,7 @@ describe('DmEncounterHost live algorithm path', () => {
       initialState,
       initialControllers: algorithmIdentities(initialState),
       playerIds: players.map((player) => player.id),
+      offerEnvironment: BOUND_OFFER_ENVIRONMENT,
     });
 
     await host.setHiddenRollCategory('death_saves', true);
@@ -282,6 +341,7 @@ describe('DmEncounterHost live algorithm path', () => {
           actor,
           actor === player.id ? monster.id : player.id,
         ),
+        offerEnvironment: BOUND_OFFER_ENVIRONMENT,
       },
     );
 
@@ -338,6 +398,7 @@ describe('DmEncounterHost live algorithm path', () => {
               ],
             }
           : { actions: [{ type: 'end_turn', actor }] },
+        offerEnvironment: BOUND_OFFER_ENVIRONMENT,
         reactionLegalActions: (_state, reacting, moving) => reacting === reactor.id && moving === mover.id
           ? [{ ...attack(reacting, moving), type: 'opportunity_attack' }]
           : [],
@@ -428,6 +489,7 @@ describe('DmEncounterHost live algorithm path', () => {
                 ],
               }
             : { actions: [{ type: 'end_turn', actor }] },
+          offerEnvironment: BOUND_OFFER_ENVIRONMENT,
           reactionLegalActions: (_state, reacting, moving) => reacting === reactor.id && moving === mover.id
             ? [{ ...attack(reacting, moving), type: 'opportunity_attack' }]
             : [],
@@ -495,6 +557,7 @@ describe('DmEncounterHost live algorithm path', () => {
               ],
             }
           : { actions: [{ type: 'end_turn', actor }] },
+        offerEnvironment: BOUND_OFFER_ENVIRONMENT,
         reactionLegalActions: () => [],
       },
     );

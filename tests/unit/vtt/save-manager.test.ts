@@ -17,6 +17,9 @@ import {
 } from '../../../src/vtt/save-manager';
 import type { PartySessionState } from '../../../src/vtt/party-session-state';
 import { DEFAULT_REFUSAL_HANDLING_SETTINGS } from '../../../src/vtt/refusal-handling';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
+
+const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
 
 const PARTY_COMBATANTS = [1, 2, 3].map((index) => combatantId(`combatant:save-${String(index)}`));
 const PARTY_STATE: PartySessionState = {
@@ -54,7 +57,10 @@ function browserFixture(): {
     ['session:browser-old', 'Browser old', '2042-08-24T10:00:00.000Z'],
     ['session:browser-new', 'Browser new', '2042-08-24T12:00:00.000Z'],
   ] as const) {
-    const host = new DmEncounterHost(session, store, { initialPartyState: PARTY_STATE });
+    const host = new DmEncounterHost(session, store, {
+      initialPartyState: PARTY_STATE,
+      offerEnvironment: OFFER_ENVIRONMENT,
+    });
     host.close();
     const sessionId = encounterSessionId(session);
     const bytes = exportSavedSession(store, sessionId);

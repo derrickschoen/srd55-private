@@ -33,6 +33,7 @@ import {
   DmRoundPlanSession,
 } from '../src/vtt/dm-bridge/decision-program';
 import { projectDmBoard } from '../src/vtt/encounter-projections';
+import { buildOfferEnvironment } from '../src/vtt/offers/build-offer-environment';
 import type { FleetTelemetry } from '../src/vtt/fleet-telemetry';
 import {
   loadPartySource,
@@ -52,6 +53,7 @@ import type { GapReport } from '../src/vtt/srd-gap-report';
 import { referenceEncounterSetup } from '../src/vtt/reference-encounter';
 
 export type SoakPartySource = 'reference' | { readonly packFile: string };
+const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
 export type SoakBridgeConfig =
   | { readonly mode: 'fake' }
   | { readonly mode: 'real' };
@@ -192,6 +194,7 @@ function tableCoordinator(
           coordinator: coordinator.coordinatorState(),
           controllers: registry.identities(),
           history: [],
+          offerEnvironment: OFFER_ENVIRONMENT,
         }),
         history: [],
         initiativeMode: coordinator.state().config.initiativeMode,

@@ -7,6 +7,7 @@ import type { GridCell } from '../combat/grid';
 import { feet, type CombatantId } from '../combat/values';
 import { availableEngineActorOptions, resolveEngineActorOption } from './intent-resolver';
 import { projectFutureMonsterTurns } from './monster-planning-state';
+import type { EngineOptionEnvironment } from './offers/build-offer-environment';
 import type { EngineMainActionUse, EngineOfferableOption, EngineOptionId } from './turn-proposal';
 
 declare const offeredOptionOrdinalBrand: unique symbol;
@@ -44,6 +45,15 @@ export interface BoardPathSummary {
       readonly dangers: OfferedOptionPath['annotations'][number]['dangers'];
     }[];
   }[];
+}
+
+export class OfferedOptionEnvironmentMismatchError extends TypeError {
+  readonly code = 'OFFER_ENVIRONMENT_MISMATCH' as const;
+
+  constructor(summary: string) {
+    super(summary);
+    this.name = 'OfferedOptionEnvironmentMismatchError';
+  }
 }
 
 function optionOrdinal(value: number): OfferedOptionOrdinal {
@@ -112,11 +122,14 @@ export function actingMonsterIds(state: EncounterState): readonly CombatantId[] 
 export function offeredOptionActorsForState(
   state: EncounterState,
   actorIds: readonly CombatantId[] = actingMonsterIds(state),
+  offerEnvironment: EngineOptionEnvironment,
 ): readonly OfferedOptionActor[] {
   const planningState = projectFutureMonsterTurns(state, actorIds);
   return actorIds.map((actorId) => ({
     actorId,
-    options: orderOptionsAsTurnContext(availableEngineActorOptions(planningState, actorId)),
+    options: orderOptionsAsTurnContext(
+      availableEngineActorOptions(planningState, actorId, offerEnvironment),
+    ),
   }));
 }
 
@@ -128,6 +141,7 @@ export function offeredOptionActorsForState(
 export function offeredOptionPaths(
   state: EncounterState,
   actors: readonly OfferedOptionActor[],
+  offerEnvironment: EngineOptionEnvironment,
 ): readonly OfferedOptionPath[] {
   const actorIds = actors.map((actor) => actor.actorId);
   const planningState = projectFutureMonsterTurns(state, actorIds);
@@ -140,8 +154,14 @@ export function offeredOptionPaths(
       if (option.actorId !== actor.actorId) {
         throw new TypeError(`Option ${option.optionId} belongs to a different actor.`);
       }
-      const resolution = resolveEngineActorOption(planningState, option);
-      if (!resolution.valid || resolution.mechanics.path.length === 0) return [];
+      const resolution = resolveEngineActorOption(planningState, option, offerEnvironment);
+      if (!resolution.valid) {
+        if (resolution.code === 'OFFER_ENVIRONMENT_MISMATCH') {
+          throw new OfferedOptionEnvironmentMismatchError(resolution.summary);
+        }
+        return [];
+      }
+      if (resolution.mechanics.path.length === 0) return [];
       const command = {
         type: 'move' as const,
         actor: actor.actorId,

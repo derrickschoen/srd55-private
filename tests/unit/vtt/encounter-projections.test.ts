@@ -32,6 +32,12 @@ import {
   referenceEncounterSetup,
 } from '../../../src/vtt/reference-encounter';
 import { MemoryBrowserSessionStore } from '../../../src/vtt/session-persistence';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
+
+const OFFER_ENVIRONMENT = buildOfferEnvironment({
+  kind: 'configuration',
+  mode: 'legacy_standard',
+});
 
 const IDLE = {
   requestSequence: 1,
@@ -118,6 +124,7 @@ describe('increment 6 projection boundary', () => {
     const host = new DmEncounterHost(
       'session:state-only-projection-parity',
       new MemoryBrowserSessionStore(),
+      { offerEnvironment: OFFER_ENVIRONMENT },
     );
     const dmProjection = host.snapshot().dm;
     const topDownProjection: TopDownDmBoardProjection = {
@@ -150,7 +157,7 @@ describe('increment 6 projection boundary', () => {
     const host = new DmEncounterHost(
       'session:host-wiring-secrecy',
       new MemoryBrowserSessionStore(),
-      { initialState: hostBoundaryHiddenState() },
+      { initialState: hostBoundaryHiddenState(), offerEnvironment: OFFER_ENVIRONMENT },
     );
     const player = host.snapshot().player;
     const serialized = serializePlayerBoard(player);
@@ -388,7 +395,11 @@ describe('increment 6 projection boundary', () => {
   });
 
   it('M42-ADJUDICATION-PAUSES cancels the pending request and dispatches nothing until resume', async () => {
-    const host = new DmEncounterHost('session:adjudication-pause', new MemoryBrowserSessionStore());
+    const host = new DmEncounterHost(
+      'session:adjudication-pause',
+      new MemoryBrowserSessionStore(),
+      { offerEnvironment: OFFER_ENVIRONMENT },
+    );
     host.start();
     await Promise.resolve();
     await Promise.resolve();

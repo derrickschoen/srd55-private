@@ -35,6 +35,9 @@ import {
   MemoryBrowserSessionStore,
   MemoryMirrorSink,
 } from '../../../src/vtt/session-persistence';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
+
+const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
 
 const IDLE: PersistedCoordinatorState = {
   requestSequence: 1,
@@ -198,6 +201,7 @@ describe('D377.12 movement path-danger preview', () => {
         generation: 0,
       }],
       history: [],
+      offerEnvironment: OFFER_ENVIRONMENT,
     });
     const player = projectPlayerBoard(projectPlayerView(fixture.state, {
       seatId: 'seat:movement-danger',
@@ -262,6 +266,7 @@ describe('D377.12 hidden monster rolls', () => {
       coordinator: IDLE,
       controllers: [],
       history: [],
+      offerEnvironment: OFFER_ENVIRONMENT,
     });
     const playerAttack = player.events.find((event) => event.type === 'attack_resolved');
     const dmAttack = dm.encounter.recentEvents.find((event) => event.type === 'attack_resolved');

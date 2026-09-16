@@ -22,7 +22,6 @@ import {
 import type { ProposedTurnResolution } from './engine-envelopes';
 import type { EngineStateCapsule } from './engine-state-capsule';
 import {
-  canonicalEngineQueryPort,
   monsterBonusActions,
   type EngineQueryPort,
 } from './engine-query-port';
@@ -31,6 +30,7 @@ import {
   createPureTurnProposalResolver,
   resolveEngineActorOption,
 } from './intent-resolver';
+import type { EngineOptionEnvironment } from './offers/build-offer-environment';
 import { spellDefinition } from '../combat/spells/definitions';
 import type {
   EngineActionSlotUse,
@@ -52,17 +52,16 @@ export const BLIND_LIVE_WALL_MS = 180_000 as const;
 type PreliminaryOptionResolution = ReturnType<typeof resolveEngineActorOption>;
 
 export interface BlindResolverDependencies {
-  readonly queries?: EngineQueryPort;
   readonly availableOptions?: (
     state: EncounterState,
     actorId: CombatantId,
-    queries: EngineQueryPort,
+    environment: EngineOptionEnvironment,
     revision: number,
   ) => readonly EngineOfferableOption[];
   readonly resolveOption?: (
     state: EncounterState,
     option: EngineOfferableOption,
-    queries: EngineQueryPort,
+    environment: EngineOptionEnvironment,
   ) => PreliminaryOptionResolution;
   readonly proposalResolver?: PureTurnProposalResolver;
 }
@@ -74,6 +73,7 @@ export interface BlindResolverInput {
   readonly envelope: unknown;
   readonly attempt: number;
   readonly repairArm: BlindRepairArm;
+  readonly offerEnvironment: EngineOptionEnvironment;
   readonly dependencies?: BlindResolverDependencies;
 }
 
@@ -360,19 +360,20 @@ function candidatesForActor(
   state: EncounterState,
   actorId: CombatantId,
   revision: number,
-  dependencies: Required<Pick<BlindResolverDependencies, 'queries' | 'availableOptions' | 'resolveOption'>>,
+  offerEnvironment: EngineOptionEnvironment,
+  dependencies: Required<Pick<BlindResolverDependencies, 'availableOptions' | 'resolveOption'>>,
 ): { readonly candidates: readonly SemanticCandidate[]; readonly resolutionFailures: number } {
-  const options = dependencies.availableOptions(state, actorId, dependencies.queries, revision);
+  const options = dependencies.availableOptions(state, actorId, offerEnvironment, revision);
   let resolutionFailures = 0;
   const candidates = options.flatMap((option): readonly SemanticCandidate[] => {
-    const resolution = dependencies.resolveOption(state, option, dependencies.queries);
+    const resolution = dependencies.resolveOption(state, option, offerEnvironment);
     if (!resolution.valid) {
       resolutionFailures += 1;
       return [];
     }
     const actions = option.actionSlots.map((slot): SemanticAction => ({
       kind: actionKind(slot),
-      name: actionDisplayName(state, actorId, slot, dependencies.queries),
+      name: actionDisplayName(state, actorId, slot, offerEnvironment.queries),
     }));
     const fingerprint = semanticFingerprint(option, resolution.mechanics, actions);
     return [{
@@ -628,6 +629,7 @@ function proposedResolution(
   intent: BlindIntent,
   selected: SemanticCandidate,
   revision: number,
+  offerEnvironmentDigest: string,
   proposalResolver: PureTurnProposalResolver,
   state: EncounterState,
 ): ProposedTurnResolution | null {
@@ -649,6 +651,7 @@ function proposedResolution(
     fallbackOption: null,
     mechanics: resolution.mechanics,
     selectedBranch: 'primary',
+    offerEnvironmentDigest,
     resolutionDigest: resolution.resolutionDigest,
     summary: resolution.summary,
     strictNoFallback: true,
@@ -660,7 +663,8 @@ function resolveActorIntent(
   envelope: BlindRoundIntentEnvelope,
   intent: BlindIntent,
   actor: BoundCreature,
-  dependencies: Required<Pick<BlindResolverDependencies, 'queries' | 'availableOptions' | 'resolveOption' | 'proposalResolver'>>,
+  offerEnvironment: EngineOptionEnvironment,
+  dependencies: Required<Pick<BlindResolverDependencies, 'availableOptions' | 'resolveOption' | 'proposalResolver'>>,
 ): BlindResolvedActorIntent | CandidateFailure & { readonly alternative?: BlindLegalAlternative } {
   const failed = (
     codes: readonly BlindIntentRejectionCode[],
@@ -673,6 +677,7 @@ function resolveActorIntent(
     input.state,
     actor.id,
     input.capsule.revision,
+    offerEnvironment,
     dependencies,
   );
   if (built.candidates.length === 0) {
@@ -702,7 +707,7 @@ function resolveActorIntent(
   }
   const destinationMatches = candidates.filter((candidate) => sameCell(candidate.mechanics.finalPosition, destination));
   if (destinationMatches.length === 0) {
-    const current = dependencies.queries.tokenPosition(input.state, actor.id);
+    const current = offerEnvironment.queries.tokenPosition(input.state, actor.id);
     const omittedOrHold = intent.destination === undefined ||
       intent.destination.kind === 'relative' && intent.destination.relation === 'hold';
     const actionCanMove = candidates.some((candidate) => candidate.option.movement.preference.willingness !== 'none');
@@ -726,6 +731,7 @@ function resolveActorIntent(
     intent,
     selected,
     input.capsule.revision,
+    offerEnvironment.digest,
     dependencies.proposalResolver,
     input.state,
   );
@@ -773,18 +779,18 @@ export function resolveBlindRoundIntents(input: BlindResolverInput): BlindResolu
   if (actors.length !== expected.size || actors.some((actor) => !expected.has(actor.id))) {
     return rejected(input.attempt, input.repairArm, ['INTENT_SET_INCOMPLETE']);
   }
-  const queries = input.dependencies?.queries ?? canonicalEngineQueryPort;
+  const offerEnvironment = input.offerEnvironment;
   const dependencies = {
-    queries,
     availableOptions: input.dependencies?.availableOptions ?? availableEngineActorOptions,
     resolveOption: input.dependencies?.resolveOption ?? resolveEngineActorOption,
-    proposalResolver: input.dependencies?.proposalResolver ?? createPureTurnProposalResolver(queries),
+    proposalResolver: input.dependencies?.proposalResolver ??
+      createPureTurnProposalResolver(offerEnvironment),
   };
   const resolved: BlindResolvedActorIntent[] = [];
   for (const [index, entry] of bound.entries()) {
     const actor = actors[index];
     if (actor === undefined) return rejected(input.attempt, input.repairArm, ['MISSING_ACTOR']);
-    const result = resolveActorIntent(input, envelope, entry.intent, actor, dependencies);
+    const result = resolveActorIntent(input, envelope, entry.intent, actor, offerEnvironment, dependencies);
     if ('codes' in result) {
       return rejected(
         input.attempt,

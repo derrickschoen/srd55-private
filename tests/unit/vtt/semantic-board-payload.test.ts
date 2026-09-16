@@ -18,6 +18,9 @@ import {
   truthAnswer,
 } from '../../../tools/ai-dm-screenshot-probe';
 import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
+
+const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
 
 const IDLE: PersistedCoordinatorState = {
   requestSequence: 1,
@@ -100,6 +103,7 @@ function fixtureProjection() {
       coordinator: IDLE,
       controllers: [],
       history: [],
+      offerEnvironment: OFFER_ENVIRONMENT,
     }),
   };
 }
@@ -199,6 +203,7 @@ describe('semantic board payload', () => {
       coordinator: IDLE,
       controllers: [],
       history: [],
+      offerEnvironment: OFFER_ENVIRONMENT,
     }));
     expect(empty.creatures.items).toHaveLength(1);
     expect(empty.cells.blocked.items).toEqual([]);
@@ -251,6 +256,7 @@ describe('semantic board payload', () => {
       coordinator: IDLE,
       controllers: [],
       history: [],
+      offerEnvironment: OFFER_ENVIRONMENT,
     }));
 
     expect(payload.cells.light.bright.encoding).toBe(

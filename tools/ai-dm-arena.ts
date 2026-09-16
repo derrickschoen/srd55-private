@@ -67,6 +67,7 @@ import {
 } from '../src/vtt/blind-dm-contract';
 import { BLIND_TURN_CONTEXT_MAX_BYTES } from '../src/vtt/blind-turn-context';
 import { BLIND_STATE_PRIMER_VERSION } from './ai-dm-board-snapshot';
+import type { OfferEnvironmentInput } from '../src/vtt/offers/build-offer-environment';
 
 export const ARENA_BASES = ['standard', 'hard', 'brutal', 'brutal-b', 'scenario', 'challenge'] as const;
 export type ArenaBasis = (typeof ARENA_BASES)[number];
@@ -103,6 +104,7 @@ export interface ArenaArmInstruction {
 }
 
 interface ArenaConfigBase {
+  readonly offerEnvironment: OfferEnvironmentInput;
   readonly dmMode: DmMode;
   readonly dmModeExplicit: boolean;
   readonly blindRepairArm: BlindRepairArm;
@@ -642,6 +644,7 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
     if (generateMissingRooms) throw new TypeError('--generate-missing-rooms is unavailable for the closed challenge basis.');
   }
   return {
+    offerEnvironment: { kind: 'configuration', mode: 'legacy_standard' },
     dmMode: dmMode as DmMode,
     dmModeExplicit,
     blindRepairArm: blindRepairArm as BlindRepairArm,
@@ -854,6 +857,7 @@ function conversationConfig(
   const instructionSource: AgentInstructionSource = overrides.instruction ?? config;
   return {
     ...instructionSource,
+    offerEnvironment: config.offerEnvironment,
     dmMode: config.dmMode,
     dmModeExplicit: config.dmModeExplicit,
     blindRepairArm: config.blindRepairArm,

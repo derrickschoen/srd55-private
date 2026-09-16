@@ -45,6 +45,7 @@ import {
   generateTurnProgramDeclarations,
 } from '../src/vtt/dm-bridge/turn-program-types';
 import { projectDmBoard } from '../src/vtt/encounter-projections';
+import { buildOfferEnvironment } from '../src/vtt/offers/build-offer-environment';
 import { MAX_PROPOSAL_CORRECTIONS } from '../src/vtt/turn-exhaustion-coordinator';
 import {
   aggregateExperimentRecords,
@@ -66,6 +67,7 @@ import {
 import { TEST_APPROVED_FIRST_SKIRMISH_FIXTURE } from '../src/vtt/test-approved-first-skirmish';
 
 export type ExperimentId = 'E01' | 'E02' | 'E03' | 'E04' | 'E05' | 'E05B';
+const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
 export type E04ProjectionArmId =
   | 'full-projection-history'
   | 'compact-lossless-decision-view'
@@ -1477,6 +1479,7 @@ export async function runE01Table(
             coordinator: coordinator.coordinatorState(),
             controllers: registry.identities(),
             history: [],
+            offerEnvironment: OFFER_ENVIRONMENT,
           });
           return {
             encounterId,

@@ -67,7 +67,7 @@ import type {
   PerceivedTargetKnowledge,
 } from './intel/actor-knowledge';
 import type { EngineOfferableOption, EngineOptionId } from './turn-proposal';
-import type { EngineOptionEnvironment } from './offers/offer-environment';
+import type { EngineOptionEnvironment } from './offers/build-offer-environment';
 
 export interface TacticalAllocationChoice {
   readonly actorId: CombatantId;
@@ -238,6 +238,7 @@ export interface EngineQueryPort {
     targetId: CombatantId,
     candidates: readonly TacticalAllocationCandidate[],
     initiativeOrder: readonly CombatantId[],
+    environment: EngineOptionEnvironment,
   ): TacticalAllocationComparison;
   cover(state: EncounterState, actorId: CombatantId, targetId: CombatantId): {
     readonly tier: 'none' | 'half' | 'three_quarters' | 'total';
@@ -900,10 +901,10 @@ export function engineActionRangeFeet(
 }
 
 /** Canonical registry lens used while minting a read-only state capsule. */
-export function engineActionRegistry(
+export function engineActionRegistryForEnvironment(
   state: EncounterState,
+  environment: EngineOptionEnvironment,
   revision = state.revision,
-  queries: EngineQueryPort = canonicalEngineQueryPort,
 ): {
   actionsFor(combatantId: CombatantId): readonly {
     readonly actionId: string;
@@ -1023,7 +1024,7 @@ export function engineActionRegistry(
       }));
     },
     optionsFor(combatantId) {
-      return availableEngineActorOptions(state, combatantId, queries, revision);
+      return availableEngineActorOptions(state, combatantId, environment, revision);
     },
     planningFactsFor(combatantId) {
       return enginePlanningCombatantFacts(state, combatantId);
@@ -1038,14 +1039,6 @@ export function engineActionRegistry(
       return enginePlanningSemanticZones(state);
     },
   };
-}
-
-export function engineActionRegistryForEnvironment(
-  state: EncounterState,
-  environment: EngineOptionEnvironment,
-  revision = state.revision,
-) {
-  return engineActionRegistry(state, revision, environment.queries);
 }
 
 function positionedCandidates(
@@ -1709,6 +1702,7 @@ export function compareTacticalAllocations(
   targetId: CombatantId,
   candidates: readonly TacticalAllocationCandidate[],
   initiativeOrder: readonly CombatantId[],
+  environment: EngineOptionEnvironment,
 ): TacticalAllocationComparison {
   const orderIndex = new Map(initiativeOrder.map((actorId, index) => [actorId, index] as const));
   const target = combatant(state, targetId);
@@ -1730,7 +1724,7 @@ export function compareTacticalAllocations(
       };
     }
     const options = ordered.map((choice) => availableEngineActorOptions(
-      state, choice.actorId, canonicalEngineQueryPort,
+      state, choice.actorId, environment,
     ).find((option) => option.optionId === choice.optionId));
     if (options.some((option) => option === undefined)) {
       return {
@@ -1785,7 +1779,7 @@ export function compareTacticalAllocations(
         : [];
       const actionIds = optionAttackActionIds(option, targetId);
       if (modifiers.length > 0 && actionIds.length > 0) modifierApplied = true;
-      const resolution = resolveEngineActorOption(state, option, canonicalEngineQueryPort);
+      const resolution = resolveEngineActorOption(state, option, environment);
       const attackState = resolution.valid ? {
         ...state,
         tokens: state.tokens.map((token) => token.combatantId === choice.actorId

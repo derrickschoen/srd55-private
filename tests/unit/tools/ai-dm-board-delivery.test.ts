@@ -13,15 +13,20 @@ import { encounterBranchId, encounterSessionId, type AgentSessionId } from '../.
 import { canonicalJson } from '../../../src/commands/canonical-json';
 import { sha256 } from '../../../src/crypto/sha256';
 import { mcpRequestMeta, createMcpHandler } from '../../../src/vtt/mcp/handler';
-import { createLegacyEngineOptionEnvironmentBinding } from '../../../src/vtt/offers/offer-environment';
+import {
+  createDisabledEngineOfferFamilyPolicy,
+  createLegacyEngineOptionEnvironmentBinding,
+} from '../../../src/vtt/offers/offer-environment';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
+import { createUnrepresentedPartyThreatCatalog } from '../../../src/vtt/offers/party-threat-catalog';
 import {
   decodeEngineMcpLauncherManifest,
-  createEngineMcpRuntime,
   loadArenaFixture,
   validatedLauncherBoardHtmlReference,
   validatedLauncherBoardImage,
   type EngineMcpLauncherManifest,
 } from '../../../src/vtt/mcp/entrypoint';
+import * as engineMcpEntrypoint from '../../../src/vtt/mcp/entrypoint';
 import { generateRoom } from '../../../src/vtt/room-generator';
 import { DEFAULT_RENDERER_PROFILE } from '../../../src/vtt/renderer-profile';
 import {
@@ -50,6 +55,27 @@ import {
 } from '../../helpers/test-filesystem';
 
 const META = mcpRequestMeta({ name: 'board-delivery-test', version: '1.0.0' });
+const BOUND_OFFER_ENVIRONMENT = buildOfferEnvironment({
+  kind: 'configuration',
+  mode: 'revision_bound',
+  familyPolicy: createDisabledEngineOfferFamilyPolicy(),
+  partyThreatCatalog: createUnrepresentedPartyThreatCatalog(),
+});
+function createEngineMcpRuntime(
+  state: Parameters<typeof engineMcpEntrypoint.createEngineMcpRuntime>[0],
+  options: Omit<NonNullable<Parameters<typeof engineMcpEntrypoint.createEngineMcpRuntime>[1]>,
+    'offerEnvironment'> & { readonly offerEnvironment?: typeof BOUND_OFFER_ENVIRONMENT } = {},
+): ReturnType<typeof engineMcpEntrypoint.createEngineMcpRuntime> {
+  const offerEnvironment = options.offerEnvironment ?? BOUND_OFFER_ENVIRONMENT;
+  const runtime = engineMcpEntrypoint.createEngineMcpRuntime(state, { ...options, offerEnvironment });
+  expect(runtime.feed.current().offerEnvironment).toEqual(offerEnvironment.binding);
+  return runtime;
+}
+
+function launcherOfferEnvironment(manifest: EngineMcpLauncherManifest) {
+  if (manifest.offerEnvironment === undefined) throw new TypeError('Launcher offer environment is absent.');
+  return buildOfferEnvironment({ kind: 'binding', binding: manifest.offerEnvironment });
+}
 // Pin = the intel-leak lane context (04fd8420: shown-option boundary, size-omission
 // declarations) BEFORE the last-seen (D545) merge; the last-seen policy string and
 // state handle are normalised back below so the pin stays independent of that merge.
@@ -135,7 +161,9 @@ class FastProposalAdapter implements AgentSessionAdapter {
   ): Promise<AgentTurnResult> {
     const manifest = JSON.parse(readFileSync(invocation.launcherToken, 'utf8')) as EngineMcpLauncherManifest;
     const state = await loadArenaFixture(manifest.fixturePath);
+    const offerEnvironment = launcherOfferEnvironment(manifest);
     const runtime = createEngineMcpRuntime(state, {
+      offerEnvironment,
       runId: manifest.runId, branchId: manifest.branchId, revision: manifest.revision,
       requestId: manifest.requestId, phase: manifest.phase,
       correctionNumber: manifest.correctionNumber, room: manifest.room,
@@ -624,6 +652,7 @@ describe('arena capture lifecycle and off-arm invariance', () => {
       const state = await loadArenaFixture(manifest.fixturePath);
       const boardImageContent = await validatedLauncherBoardImage(manifest, state);
       const runtime = createEngineMcpRuntime(state, {
+        offerEnvironment: launcherOfferEnvironment(manifest),
         runId: manifest.runId, branchId: manifest.branchId, revision: manifest.revision,
         requestId: manifest.requestId, phase: manifest.phase,
         correctionNumber: manifest.correctionNumber, room: manifest.room,

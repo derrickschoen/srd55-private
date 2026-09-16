@@ -8,7 +8,7 @@ import {
   type CombatantId,
 } from '../../../src/combat/values';
 import {
-  createEngineStateCapsule,
+  createEngineStateCapsuleForEnvironment,
   type EngineDmProjection,
   type EngineProjectionCombatant,
   type EngineStateCapsule,
@@ -25,6 +25,9 @@ import {
   type EngineOfferableOption,
   type EngineTurnProposal,
 } from '../../../src/vtt/turn-proposal';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
+
+const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
 
 const BRUTE = combatantId('combatant:brute');
 const ARCHER = combatantId('combatant:archer');
@@ -142,7 +145,7 @@ function handBuiltCapsule(): EngineStateCapsule {
     ],
     semanticZones: [],
   };
-  return createEngineStateCapsule({
+  return createEngineStateCapsuleForEnvironment({
     runId: encounterSessionId('session:plays-v1'),
     branchId: encounterBranchId('branch:plays-v1'),
     revision: 7,
@@ -155,6 +158,7 @@ function handBuiltCapsule(): EngineStateCapsule {
       actors: [BRUTE, ARCHER],
     },
     projection,
+    offerEnvironment: OFFER_ENVIRONMENT.binding,
   });
 }
 
@@ -241,13 +245,14 @@ describe('plays v1', () => {
   it('keeps the core skill always on and rejects situation skills when their plays do not apply', () => {
     const capsule = handBuiltCapsule();
     if (capsule.request === null) throw new TypeError('Hand-built request is absent.');
-    const correction = createEngineStateCapsule({
+    const correction = createEngineStateCapsuleForEnvironment({
       runId: capsule.runId,
       branchId: capsule.branchId,
       revision: capsule.revision + 1,
       generatedAt: capsule.generatedAt,
       request: { ...capsule.request, phase: 'correction', correctionNumber: 1 },
       projection: capsule.projection,
+      offerEnvironment: capsule.offerEnvironment,
     });
     expect(SNIPPET_REGISTRY.applicableSkills(correction).map((skill) => skill.name))
       .toEqual(['core_tactics']);

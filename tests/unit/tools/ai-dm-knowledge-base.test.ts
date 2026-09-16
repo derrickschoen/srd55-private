@@ -33,10 +33,15 @@ import {
 import { declareTestInputs } from '../../helpers/test-inputs';
 import { tmpdir } from 'node:os';
 import {
-  createEngineMcpRuntime,
   createLauncherKbReadBudget,
   loadArenaFixture,
 } from '../../../src/vtt/mcp/entrypoint';
+import * as engineMcpEntrypoint from '../../../src/vtt/mcp/entrypoint';
+import {
+  createDisabledEngineOfferFamilyPolicy,
+} from '../../../src/vtt/offers/offer-environment';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
+import { createUnrepresentedPartyThreatCatalog } from '../../../src/vtt/offers/party-threat-catalog';
 import {
   kbSubjectSources,
   KbReadBudget,
@@ -68,6 +73,22 @@ const d569FixturePaths = [
 ] as const;
 
 const arenaFixture = 'tests/fixtures/arena-basis/seed-3943001.json' as const;
+const BOUND_OFFER_ENVIRONMENT = buildOfferEnvironment({
+  kind: 'configuration',
+  mode: 'revision_bound',
+  familyPolicy: createDisabledEngineOfferFamilyPolicy(),
+  partyThreatCatalog: createUnrepresentedPartyThreatCatalog(),
+});
+function createEngineMcpRuntime(
+  state: Parameters<typeof engineMcpEntrypoint.createEngineMcpRuntime>[0],
+  options: Omit<NonNullable<Parameters<typeof engineMcpEntrypoint.createEngineMcpRuntime>[1]>,
+    'offerEnvironment'> & { readonly offerEnvironment?: typeof BOUND_OFFER_ENVIRONMENT } = {},
+): ReturnType<typeof engineMcpEntrypoint.createEngineMcpRuntime> {
+  const offerEnvironment = options.offerEnvironment ?? BOUND_OFFER_ENVIRONMENT;
+  const runtime = engineMcpEntrypoint.createEngineMcpRuntime(state, { ...options, offerEnvironment });
+  expect(runtime.feed.current().offerEnvironment).toEqual(offerEnvironment.binding);
+  return runtime;
+}
 const srdFixture = 'docs/srd/full/srd-5.2.1.txt' as const;
 const inputs = declareTestInputs({
   fixtures: [...fixturePaths, ...d569FixturePaths, arenaFixture],

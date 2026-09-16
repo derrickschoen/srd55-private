@@ -9,6 +9,7 @@ import { EngineRoundSession } from '../../../src/vtt/engine-round-session';
 import { mechanicsWithChoice } from '../../../src/vtt/intent-resolver';
 import { createEngineMcpRuntime } from '../../../src/vtt/mcp/entrypoint';
 import { freshMonsterPlanningState } from '../../../src/vtt/monster-planning-state';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
 import {
   engineActionId,
   engineOptionId,
@@ -21,6 +22,7 @@ import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
 
 const UNICORN_ID = combatantId('combatant:unicorn-consistency');
 const ALLY_ID = combatantId('combatant:ally-consistency');
+const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
 
 function fixture(conditioned: boolean): EncounterState {
   const unicornBase = monsterCombatantProfile(UNICORN, {
@@ -75,6 +77,7 @@ function executeCureWounds(state: EncounterState): void {
   const runtime = createEngineMcpRuntime(state, {
     requestedActorIds: [UNICORN_ID],
     revision: 1,
+    offerEnvironment: OFFER_ENVIRONMENT,
   });
   const capsule = runtime.feed.current();
   const context = runtime.toolSurface.execute('engine.get_turn_context', {
@@ -130,7 +133,7 @@ function executeCureWounds(state: EncounterState): void {
   ]);
   const session = new EngineRoundSession(state, mulberry32(6_208_005), {
     kind: 'unattended', askDefault: 'decline',
-  });
+  }, OFFER_ENVIRONMENT);
   session.applyResolvedMechanics([accepted], null);
   const after = session.currentState();
   expect(after.combatants.find((entry) => entry.profile.id === ALLY_ID)?.hitPoints).toBeGreaterThan(1);
@@ -219,6 +222,7 @@ describe('Unicorn’s Blessing offer/acceptance/execution consistency', () => {
     const runtime = createEngineMcpRuntime(state, {
       requestedActorIds: [UNICORN_ID],
       revision: 1,
+      offerEnvironment: OFFER_ENVIRONMENT,
     });
     const capsule = runtime.feed.current();
     const context = runtime.toolSurface.execute('engine.get_turn_context', {
@@ -274,7 +278,7 @@ describe('Unicorn’s Blessing offer/acceptance/execution consistency', () => {
     });
     const session = new EngineRoundSession(state, mulberry32(6_208_011), {
       kind: 'unattended', askDefault: 'decline',
-    });
+    }, OFFER_ENVIRONMENT);
     session.applyResolvedMechanics([accepted], null);
     expect(combatantConditions(session.currentState(), ALLY_ID).map((condition) => condition.name))
       .not.toContain('Poisoned');
@@ -285,6 +289,7 @@ describe('Unicorn’s Blessing offer/acceptance/execution consistency', () => {
     const runtime = createEngineMcpRuntime(state, {
       requestedActorIds: [UNICORN_ID],
       revision: 1,
+      offerEnvironment: OFFER_ENVIRONMENT,
     });
     const actor = runtime.feed.current().projection.combatants.find((entry) => entry.id === UNICORN_ID);
     const blessingOptions = actor?.options.filter((option) => option.actionSlots.some((slot) =>

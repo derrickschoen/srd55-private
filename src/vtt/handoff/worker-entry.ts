@@ -15,6 +15,9 @@ import {
 import { ProtocolRuntime } from './protocol-runtime';
 import type { HandoffPrincipal } from './session-authorizer';
 import { postWorkerMessage } from './worker-message-post';
+import { buildOfferEnvironment } from '../offers/build-offer-environment';
+
+const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
 
 function post(port: MessagePort, message: WorkerServerMessage): void {
   postWorkerMessage(port, message);
@@ -76,6 +79,7 @@ function createWorkerSession(key: string): WorkerSession {
     })),
     playerIds: state.combatants.map((combatant) => combatant.profile.id),
     turnLegalActions: workerLegalActions,
+    offerEnvironment: OFFER_ENVIRONMENT,
   });
   const bindings = host.rendererTokenBindings();
   const seats: PlayerSeatRegistration[] = state.combatants.map((combatant) => ({

@@ -9,17 +9,22 @@ import { terrainBlocking, terrainKindOfWireBlocking } from '../../../src/combat/
 import { armorClass, combatantId, statblockId, worldObjectId, type CombatantId } from '../../../src/combat/values';
 import { projectDmView } from '../../../src/combat/visibility';
 import { projectEncounterBoard } from '../../../src/vtt/encounter-board';
-import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
-import { availableEngineActorOptions, pureTurnProposalResolver } from '../../../src/vtt/intent-resolver';
+import {
+  availableEngineActorOptions,
+  createPureTurnProposalResolver,
+  engineActorOptionsForEnvironment,
+} from '../../../src/vtt/intent-resolver';
 import { engineOptionId } from '../../../src/vtt/turn-proposal';
 import { generateRoom } from '../../../src/vtt/room-generator';
 import { freshMonsterPlanningState } from '../../../src/vtt/monster-planning-state';
-import { engineActorOptions } from '../../../src/vtt/turn-option-registry';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
 import { placedToken, playerProfile } from '../combat/fixtures';
 
 const SEED = 3_943_001;
 const ACTOR_ID = combatantId('combatant:generated-3943001-monster-2');
 const TARGET_ID = combatantId('combatant:fighter');
+const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
+const TURN_PROPOSAL_RESOLVER = createPureTurnProposalResolver(OFFER_ENVIRONMENT);
 
 function placedState(
   seed: number,
@@ -61,9 +66,9 @@ describe('canonical engine query port', () => {
         : combatant),
     };
 
-    expect(canonicalEngineQueryPort.actions(state, ACTOR_ID).map((action) => action.id))
+    expect(OFFER_ENVIRONMENT.queries.actions(state, ACTOR_ID).map((action) => action.id))
       .toEqual(['dissolving-pseudopod']);
-    const options = availableEngineActorOptions(state, ACTOR_ID);
+    const options = availableEngineActorOptions(state, ACTOR_ID, OFFER_ENVIRONMENT);
     expect(options.map(({ label }) => label)).toEqual([
       'Dash',
       'Dissolving Pseudopod -> combatant:fighter',
@@ -73,7 +78,8 @@ describe('canonical engine query port', () => {
     expect(options.flatMap(({ actionSlots }) => actionSlots.map(({ use }) => use.kind))).toEqual([
       'dash', 'attack', 'dodge', 'end_turn',
     ]);
-    expect(engineActorOptions(state, ACTOR_ID).humanOnly).toContainEqual(expect.objectContaining({
+    expect(engineActorOptionsForEnvironment(state, ACTOR_ID, OFFER_ENVIRONMENT).humanOnly)
+      .toContainEqual(expect.objectContaining({
       label: 'Disengage',
       noModeledEffect: { kind: 'disengage_without_movement', action: 'disengage' },
     }));
@@ -96,7 +102,7 @@ describe('canonical engine query port', () => {
         call.difficultCells,
         call.case === 'difficult_terrain' ? 1 : undefined,
       );
-      const canonical = canonicalEngineQueryPort.path(state, {
+      const canonical = OFFER_ENVIRONMENT.queries.path(state, {
         actorId: ACTOR_ID,
         destination: call.destination,
         movement: call.movement,
@@ -134,15 +140,16 @@ describe('canonical engine query port', () => {
       blockedCells: [{ column: 1, row: 0 }],
     };
 
-    expect(canonicalEngineQueryPort.approach(state, {
+    expect(OFFER_ENVIRONMENT.queries.approach(state, {
       actorId: ACTOR_ID,
       target: { column: 20, row: 0 },
       movement: 'dash',
       maximumFeet: 60,
     })).toEqual({ legal: false, code: 'destination_unreachable' });
-    expect(availableEngineActorOptions(state, ACTOR_ID).map(({ label }) => label))
+    expect(availableEngineActorOptions(state, ACTOR_ID, OFFER_ENVIRONMENT).map(({ label }) => label))
       .toEqual(['Dodge', 'End Turn']);
-    expect(engineActorOptions(state, ACTOR_ID).humanOnly).toContainEqual(expect.objectContaining({
+    expect(engineActorOptionsForEnvironment(state, ACTOR_ID, OFFER_ENVIRONMENT).humanOnly)
+      .toContainEqual(expect.objectContaining({
       label: 'Disengage',
       noModeledEffect: { kind: 'disengage_without_movement', action: 'disengage' },
     }));
@@ -168,15 +175,17 @@ describe('canonical engine query port', () => {
     const partialTrace = traceCombatantLine(partial, actor.id, target.id);
     expect(partialTrace).toMatchObject({ tier: 'half', blocksSight: false });
     expect(canCombatantSee(partial, actor.id, target.id)).toBe(true);
-    expect(canonicalEngineQueryPort.cover(partial, actor.id, target.id)).toEqual({
+    expect(OFFER_ENVIRONMENT.queries.cover(partial, actor.id, target.id)).toEqual({
       tier: 'half', sourceIds: [`object:${lowCover.id}`],
     });
-    expect(canonicalEngineQueryPort.visibility(partial, actor.id, target.id)).toMatchObject({ visible: true });
-    expect(availableEngineActorOptions(partial, actor.id).some((option) => option.actionSlots.some((slot) =>
+    expect(OFFER_ENVIRONMENT.queries.visibility(partial, actor.id, target.id)).toMatchObject({ visible: true });
+    expect(availableEngineActorOptions(partial, actor.id, OFFER_ENVIRONMENT).some((option) =>
+      option.actionSlots.some((slot) =>
       slot.use.kind === 'attack' && slot.use.target.kind === 'combatant' && slot.use.target.combatantId === target.id))).toBe(true);
     const boardObject = projectEncounterBoard(projectDmView(partial)).worldObjects.find((object) => object.id === lowCover.id);
     expect(boardObject === undefined ? null : terrainKindOfWireBlocking(boardObject.blocking)).toBe('half_cover');
-    const attack = canonicalEngineQueryPort.actions(partial, actor.id).find((action) => action.kind === 'attack' && action.id === 'shortbow');
+    const attack = OFFER_ENVIRONMENT.queries.actions(partial, actor.id)
+      .find((action) => action.kind === 'attack' && action.id === 'shortbow');
     if (attack === undefined || attack.kind !== 'attack') throw new Error('Parity fixture omitted Shortbow.');
     expect(() => reduceEncounter(partial, monsterAttackCommand(attack, actor.id, target.id), () => 0.5)).not.toThrow();
 
@@ -188,11 +197,12 @@ describe('canonical engine query port', () => {
     const walled = setup([], walledCells);
     expect(traceCombatantLine(walled, actor.id, target.id)).toMatchObject({ tier: 'total', blocksSight: true });
     expect(canCombatantSee(walled, actor.id, target.id)).toBe(false);
-    expect(canonicalEngineQueryPort.cover(walled, actor.id, target.id)).toMatchObject({ tier: 'total' });
-    expect(canonicalEngineQueryPort.visibility(walled, actor.id, target.id)).toMatchObject({
+    expect(OFFER_ENVIRONMENT.queries.cover(walled, actor.id, target.id)).toMatchObject({ tier: 'total' });
+    expect(OFFER_ENVIRONMENT.queries.visibility(walled, actor.id, target.id)).toMatchObject({
       visible: false, reason: 'blocked',
     });
-    expect(availableEngineActorOptions(walled, actor.id).some((option) => option.actionSlots.some((slot) =>
+    expect(availableEngineActorOptions(walled, actor.id, OFFER_ENVIRONMENT).some((option) =>
+      option.actionSlots.some((slot) =>
       slot.use.kind === 'attack' && slot.use.target.kind === 'combatant' && slot.use.target.combatantId === target.id))).toBe(false);
     expect(() => reduceEncounter(walled, monsterAttackCommand(attack, actor.id, target.id), () => 0.5))
       .toThrow('Total Cover or is outside line of sight');
@@ -209,7 +219,7 @@ describe('canonical engine query port', () => {
         [ACTOR_ID, call.actor],
         [TARGET_ID, call.target],
       ]));
-      const canonical = canonicalEngineQueryPort.reach(state, {
+      const canonical = OFFER_ENVIRONMENT.queries.reach(state, {
         actorId: ACTOR_ID,
         targetId: TARGET_ID,
         actionId: call.actionId,
@@ -244,7 +254,7 @@ describe('canonical engine query port', () => {
       [TARGET_ID, { column: 5, row: 0 }],
     ]));
     // Five grid intervals are 25 feet: beyond 20 normal, within 60 long.
-    expect(canonicalEngineQueryPort.reach(state, {
+    expect(OFFER_ENVIRONMENT.queries.reach(state, {
       actorId: ACTOR_ID,
       targetId: TARGET_ID,
       actionId: 'light-hammer',
@@ -264,10 +274,10 @@ describe('canonical engine query port', () => {
       [TARGET_ID, { column: 4, row: 0 }],
     ]));
 
-    const fallback = availableEngineActorOptions(state, ACTOR_ID).find((option) =>
+    const fallback = availableEngineActorOptions(state, ACTOR_ID, OFFER_ENVIRONMENT).find((option) =>
       option.actionSlots.some((slot) => slot.use.kind === 'attack' && slot.use.actionId === 'light-hammer'));
     if (fallback === undefined) throw new Error('Fixture omitted the Light Hammer option.');
-    const resolved = pureTurnProposalResolver.resolve(state, {
+    const resolved = TURN_PROPOSAL_RESOLVER.resolve(state, {
       actorId: ACTOR_ID, expectedRevision: state.revision,
       primaryOptionId: engineOptionId('option:missing-grab'), fallbackOptionId: fallback.optionId,
       reason: 'Exercise the engine query proposal fixture.',
@@ -288,10 +298,10 @@ describe('canonical engine query port', () => {
       [TARGET_ID, { column: 4, row: 0 }],
     ]));
 
-    const grab = availableEngineActorOptions(state, ACTOR_ID).find((option) =>
+    const grab = availableEngineActorOptions(state, ACTOR_ID, OFFER_ENVIRONMENT).find((option) =>
       option.actionSlots.some((slot) => slot.use.kind === 'attack' && slot.use.actionId === 'grab'));
     if (grab === undefined) throw new Error('Fixture omitted the Grab option.');
-    const resolved = pureTurnProposalResolver.resolve(state, {
+    const resolved = TURN_PROPOSAL_RESOLVER.resolve(state, {
       actorId: ACTOR_ID, expectedRevision: state.revision,
       primaryOptionId: grab.optionId, fallbackOptionId: null,
       reason: 'Exercise the engine query grab fixture.', overrideJustification: null,
@@ -316,7 +326,7 @@ describe('canonical engine query port', () => {
         : candidate),
     };
 
-    expect(pureTurnProposalResolver.resolve(state, {
+    expect(TURN_PROPOSAL_RESOLVER.resolve(state, {
       actorId: ACTOR_ID, expectedRevision: state.revision,
       primaryOptionId: engineOptionId('option:dead-target-grab'), fallbackOptionId: null,
       reason: 'Exercise the engine query resolution fixture.',

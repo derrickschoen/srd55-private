@@ -4,7 +4,6 @@ import type { McpHandler } from '../../../src/vtt/mcp/handler';
 import { EngineMcpStdioClient } from '../../../tools/engine-mcp-dry-client';
 import { collectEngineMcpRuntimeGraph, engineMcpImportBoundaryFailures, scanEngineMcpArtifacts } from '../../../tools/engine-mcp-proof';
 import {
-  createEngineMcpRuntime,
   decodeArenaFixture,
   decodeEngineMcpEntrypointDocument,
   decodeEngineMcpLauncherManifest,
@@ -12,10 +11,36 @@ import {
   freshMonsterPlanningState,
   loadArenaFixture,
 } from '../../../src/vtt/mcp/entrypoint';
-import { createLegacyEngineOptionEnvironmentBinding } from '../../../src/vtt/offers/offer-environment';
+import * as engineMcpEntrypoint from '../../../src/vtt/mcp/entrypoint';
+import {
+  createDisabledEngineOfferFamilyPolicy,
+  createLegacyEngineOptionEnvironmentBinding,
+} from '../../../src/vtt/offers/offer-environment';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
+import { createUnrepresentedPartyThreatCatalog } from '../../../src/vtt/offers/party-threat-catalog';
 
 const FIXTURE = 'tests/fixtures/arena-basis/seed-3943006.json';
 const META = mcpRequestMeta({ name: 'SUBSTITUTED_LOCAL', version: '1.0.0' });
+const BOUND_OFFER_ENVIRONMENT = buildOfferEnvironment({
+  kind: 'configuration',
+  mode: 'revision_bound',
+  familyPolicy: createDisabledEngineOfferFamilyPolicy(),
+  partyThreatCatalog: createUnrepresentedPartyThreatCatalog(),
+});
+const TRANSITIONAL_STDIO_OFFER_ENVIRONMENT = buildOfferEnvironment({
+  kind: 'configuration',
+  mode: 'legacy_standard',
+});
+function createEngineMcpRuntime(
+  state: Parameters<typeof engineMcpEntrypoint.createEngineMcpRuntime>[0],
+  options: Omit<NonNullable<Parameters<typeof engineMcpEntrypoint.createEngineMcpRuntime>[1]>,
+    'offerEnvironment'> & { readonly offerEnvironment?: typeof BOUND_OFFER_ENVIRONMENT } = {},
+): ReturnType<typeof engineMcpEntrypoint.createEngineMcpRuntime> {
+  const offerEnvironment = options.offerEnvironment ?? BOUND_OFFER_ENVIRONMENT;
+  const runtime = engineMcpEntrypoint.createEngineMcpRuntime(state, { ...options, offerEnvironment });
+  expect(runtime.feed.current().offerEnvironment).toEqual(offerEnvironment.binding);
+  return runtime;
+}
 
 function record(value: unknown, label: string): Readonly<Record<string, unknown>> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new TypeError(`${label} must be an object.`);
@@ -183,7 +208,7 @@ describe('engine MCP process mutation boundary', () => {
   });
 
   it('keeps the projection digest immutable and rejects every stale write shape', { timeout: 20_000 }, async () => {
-    const client = new EngineMcpStdioClient(FIXTURE);
+    const client = new EngineMcpStdioClient({ kind: 'fixture', fixturePath: FIXTURE });
     const context = structured(await client.tool('engine.get_turn_context', { run_id: 'encounter:engine-mcp', expected_revision: 1, scope: 'round' }));
     const fresh = record(context['state_ref'], 'state ref');
     const request = record(context['request'], 'request');
@@ -231,7 +256,9 @@ describe('SUBSTITUTED_LOCAL MCP conformance and artifacts', () => {
 
   it('proves transport-neutral request parity through the test-only adapter', { timeout: 20_000 }, async () => {
     const state = freshMonsterPlanningState(await loadArenaFixture(FIXTURE));
-    const runtime = createEngineMcpRuntime(state);
+    const runtime = createEngineMcpRuntime(state, {
+      offerEnvironment: TRANSITIONAL_STDIO_OFFER_ENVIRONMENT,
+    });
     const adapter = new SUBSTITUTED_LOCALAdapter(runtime.handler);
     expect(adapter.request('server/discover', {})).toHaveProperty('result');
     expect(adapter.request('tools/list', {})).toHaveProperty('result');
@@ -241,7 +268,7 @@ describe('SUBSTITUTED_LOCAL MCP conformance and artifacts', () => {
 
     const argumentsValue = { run_id: 'encounter:engine-mcp', expected_revision: 1, scope: 'round' };
     const direct = directTool(runtime.handler, 'engine.get_turn_context', argumentsValue);
-    const child = new EngineMcpStdioClient(FIXTURE);
+    const child = new EngineMcpStdioClient({ kind: 'fixture', fixturePath: FIXTURE });
     const stdio = result(await child.tool('engine.get_turn_context', argumentsValue));
     expect(stdio).toEqual(direct);
     const content = stdio['content'];

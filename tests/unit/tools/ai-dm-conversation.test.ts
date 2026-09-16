@@ -26,6 +26,8 @@ import {
 import {
   parseConversationArgs,
   proposalResolutionDivergence,
+  isPlanAdjustmentProposal,
+  isRoundProposal,
   runConversation,
   structuredFinalDecisionPhase,
   createMcpClient,
@@ -44,14 +46,18 @@ import { armorClass, combatantId, encounterSessionId, feet, type CombatantId } f
 import type { EncounterCommand } from '../../../src/combat/events';
 import { mulberry32 } from '../../../src/combat/random';
 import { generateRoom } from '../../../src/vtt/room-generator';
-import { availableEngineActorOptions, pureTurnProposalResolver } from '../../../src/vtt/intent-resolver';
 import {
-  createEngineMcpRuntime,
+  availableEngineActorOptions,
+  createPureTurnProposalResolver,
+  engineActorOptionsForEnvironment,
+} from '../../../src/vtt/intent-resolver';
+import {
   freshMonsterPlanningState,
   loadArenaFixture,
   parseEngineMcpJsonLine,
   type EngineMcpLauncherManifest,
 } from '../../../src/vtt/mcp/entrypoint';
+import * as engineMcpEntrypoint from '../../../src/vtt/mcp/entrypoint';
 import { mcpRequestMeta, type McpHandler } from '../../../src/vtt/mcp/handler';
 import { reduceSessionEncounter } from '../../../src/vtt/session-encounter-reducer';
 import {
@@ -71,9 +77,13 @@ import {
 } from '../../../src/vtt/dm-bridge/projection-transport';
 import { projectActorKnowledge } from '../../../src/vtt/intel/actor-knowledge';
 import { actorOpportunityReport } from '../../../src/vtt/intel/opportunity-cost';
-import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
+import {
+  createDisabledEngineOfferFamilyPolicy,
+} from '../../../src/vtt/offers/offer-environment';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
+import { createUnrepresentedPartyThreatCatalog } from '../../../src/vtt/offers/party-threat-catalog';
 import { engineStateHandle } from '../../../src/vtt/engine-state-capsule';
-import { engineActorOptions } from '../../../src/vtt/turn-option-registry';
+import { engineActionId } from '../../../src/vtt/turn-proposal';
 import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
 import { alternatingInitiativeRoom } from '../../fixtures/initiative-segments/alternating-room';
 import {
@@ -100,6 +110,33 @@ const kbInputs = declareTestInputs({ fixtures: [
   'tests/fixtures/ai-dm-skills/engine-submission/SKILL.md',
 ] });
 const DEFAULT_KB_HASH = '00776f3f2d4cd7468a1eb2a63028e9c3f846b43b14a4e5787d3e9c94e02633c0';
+const BOUND_OFFER_ENVIRONMENT = buildOfferEnvironment({
+  kind: 'configuration',
+  mode: 'revision_bound',
+  familyPolicy: createDisabledEngineOfferFamilyPolicy(),
+  partyThreatCatalog: createUnrepresentedPartyThreatCatalog(),
+});
+const DIVERGENCE_OFFER_ENVIRONMENT = buildOfferEnvironment({
+  kind: 'configuration',
+  mode: 'revision_bound',
+  familyPolicy: createDisabledEngineOfferFamilyPolicy(),
+  partyThreatCatalog: createUnrepresentedPartyThreatCatalog(),
+});
+function createEngineMcpRuntime(
+  state: Parameters<typeof engineMcpEntrypoint.createEngineMcpRuntime>[0],
+  options: Omit<NonNullable<Parameters<typeof engineMcpEntrypoint.createEngineMcpRuntime>[1]>,
+    'offerEnvironment'> & { readonly offerEnvironment?: typeof BOUND_OFFER_ENVIRONMENT } = {},
+): ReturnType<typeof engineMcpEntrypoint.createEngineMcpRuntime> {
+  const offerEnvironment = options.offerEnvironment ?? BOUND_OFFER_ENVIRONMENT;
+  const runtime = engineMcpEntrypoint.createEngineMcpRuntime(state, { ...options, offerEnvironment });
+  expect(runtime.feed.current().offerEnvironment).toEqual(offerEnvironment.binding);
+  return runtime;
+}
+
+function launcherOfferEnvironment(manifest: EngineMcpLauncherManifest) {
+  if (manifest.offerEnvironment === undefined) throw new TypeError('Launcher offer environment is absent.');
+  return buildOfferEnvironment({ kind: 'binding', binding: manifest.offerEnvironment });
+}
 
 async function runConversationWithPartyPolicy(
   decisionPolicy: ScriptedPartyDecisionPolicy,
@@ -488,6 +525,7 @@ class SerializedRoundTripAdapter implements AgentSessionAdapter {
       this.sessionSnapshotValidations += 1;
     }
     const runtime = createEngineMcpRuntime(state, {
+      offerEnvironment: launcherOfferEnvironment(manifest),
       runId: manifest.runId,
       branchId: manifest.branchId,
       revision: manifest.revision,
@@ -2012,33 +2050,241 @@ describe('AI-DM engine MCP conversation runner', () => {
     }));
   });
 
-  it('identifies the divergent mechanic when room 3943006 cannot be re-resolved', () => {
+  it('re-resolves independently specified stored mechanics before reporting divergence', () => {
     const state = freshMonsterPlanningState(generateRoom(3_943_006).encounter.state);
     const actor = state.combatants.find((combatant) =>
       combatant.profile.kind === 'monster' && combatant.life !== 'dead');
     if (actor === undefined) throw new Error('Generated room 3943006 has no living monster.');
-    const option = availableEngineActorOptions(state, actor.profile.id)
+    const option = availableEngineActorOptions(state, actor.profile.id, DIVERGENCE_OFFER_ENVIRONMENT)
       .find((candidate) => candidate.actionSlots.some((slot) => slot.use.kind === 'dodge'));
     if (option === undefined) throw new Error('Room 3943006 Dodge option is absent.');
     const proposal = {
       actorId: actor.profile.id, expectedRevision: state.revision, primaryOptionId: option.optionId,
       fallbackOptionId: null, reason: 'Exercise the fixture proposal path.', overrideJustification: null,
     };
-    const proposalTime = pureTurnProposalResolver.resolve(state, proposal);
-    if (!proposalTime.valid) throw new Error('Room 3943006 Dodge proposal did not resolve.');
+    const actorToken = state.tokens.find((token) => token.combatantId === actor.profile.id);
+    if (actorToken === undefined) throw new Error('Room 3943006 Dodge actor has no token.');
+    const storedFinalPosition = {
+      column: actorToken.position.column === 0 ? 1 : actorToken.position.column - 1,
+      row: actorToken.position.row,
+    };
+    const storedSummary = `${actor.profile.id} expands Dodge into 1 ordered use(s) after 5 feet`;
+    const authoritativeSummary = `${actor.profile.id} expands Dodge into 1 ordered use(s) after 0 feet`;
 
     expect(proposalResolutionDivergence(state, {
       proposal,
-      option: proposalTime.option,
-      primaryOption: proposalTime.primaryOption,
-      fallbackOption: proposalTime.fallbackOption,
-      mechanics: proposalTime.mechanics,
-      selectedBranch: proposalTime.selectedBranch,
+      option,
+      primaryOption: option,
+      fallbackOption: null,
+      mechanics: {
+        actorId: actor.profile.id,
+        optionId: option.optionId,
+        movementCostFeet: 5,
+        path: [storedFinalPosition],
+        finalPosition: storedFinalPosition,
+        actionSlots: [{
+          slot: 'main',
+          kind: 'dodge',
+          actionId: engineActionId('dodge'),
+          spellId: null,
+          targetIds: [],
+          objectId: null,
+          omittedRiders: [],
+        }],
+        omittedRiders: [],
+      },
+      selectedBranch: 'primary',
+      offerEnvironmentDigest: DIVERGENCE_OFFER_ENVIRONMENT.digest,
       resolutionDigest: '0'.repeat(64),
-      summary: proposalTime.summary,
-    })).toEqual([
-      `${actor.profile.id}: path or final-position geometry diverged while action sequence, targets, and movement cost remained ${proposalTime.summary}.`,
+      summary: storedSummary,
+    }, DIVERGENCE_OFFER_ENVIRONMENT)).toEqual([
+      `${actor.profile.id}: resolved action sequence, targets, or movement cost diverged; ` +
+        `proposal was "${storedSummary}" and authoritative resolution was "${authoritativeSummary}".`,
     ]);
+  });
+
+  it('divergence refuses a stored resolution produced under a different offer environment', () => {
+    const state = freshMonsterPlanningState(generateRoom(3_943_006).encounter.state);
+    const actor = state.combatants.find((combatant) =>
+      combatant.profile.kind === 'monster' && combatant.life !== 'dead');
+    if (actor === undefined) throw new Error('Generated room 3943006 has no living monster.');
+    const option = availableEngineActorOptions(state, actor.profile.id, BOUND_OFFER_ENVIRONMENT)
+      .find((candidate) => candidate.actionSlots.some((slot) => slot.use.kind === 'dodge'));
+    if (option === undefined) throw new Error('Room 3943006 Dodge option is absent.');
+    const proposal = {
+      actorId: actor.profile.id, expectedRevision: state.revision, primaryOptionId: option.optionId,
+      fallbackOptionId: null, reason: 'Exercise environment provenance.', overrideJustification: null,
+    };
+    const resolution = createPureTurnProposalResolver(BOUND_OFFER_ENVIRONMENT).resolve(state, proposal);
+    if (!resolution.valid) throw new Error('Environment provenance fixture did not resolve.');
+    const legacyEnvironment = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
+
+    const storedResolution = {
+      proposal,
+      option: resolution.option,
+      primaryOption: resolution.primaryOption,
+      fallbackOption: resolution.fallbackOption,
+      mechanics: resolution.mechanics,
+      selectedBranch: resolution.selectedBranch,
+      offerEnvironmentDigest: BOUND_OFFER_ENVIRONMENT.digest,
+      resolutionDigest: resolution.resolutionDigest,
+      summary: resolution.summary,
+    };
+    expect(proposalResolutionDivergence(state, storedResolution, BOUND_OFFER_ENVIRONMENT)).toEqual([]);
+    expect(proposalResolutionDivergence(state, storedResolution, legacyEnvironment)).toEqual([
+      `${actor.profile.id}: stored resolution was produced under offer environment ` +
+        `${BOUND_OFFER_ENVIRONMENT.digest}, authoritative environment is ${legacyEnvironment.digest}.`,
+    ]);
+  });
+
+  it('rejects stored proposal resolutions with missing or non-64-hex environment digests', () => {
+    const state = freshMonsterPlanningState(generateRoom(3_943_006).encounter.state);
+    const actor = state.combatants.find((combatant) =>
+      combatant.profile.kind === 'monster' && combatant.life !== 'dead');
+    if (actor === undefined) throw new Error('Generated room 3943006 has no living monster.');
+    const option = availableEngineActorOptions(state, actor.profile.id, BOUND_OFFER_ENVIRONMENT)
+      .find((candidate) => candidate.actionSlots.some((slot) => slot.use.kind === 'dodge'));
+    if (option === undefined) throw new Error('Room 3943006 Dodge option is absent.');
+    const proposal = {
+      actorId: actor.profile.id, expectedRevision: state.revision, primaryOptionId: option.optionId,
+      fallbackOptionId: null, reason: 'Exercise stored proposal decoding.', overrideJustification: null,
+    };
+    const resolution = createPureTurnProposalResolver(BOUND_OFFER_ENVIRONMENT).resolve(state, proposal);
+    if (!resolution.valid) throw new Error('Stored proposal decoder fixture did not resolve.');
+    const storedResolution = {
+      proposal,
+      option: resolution.option,
+      primaryOption: resolution.primaryOption,
+      fallbackOption: resolution.fallbackOption,
+      mechanics: resolution.mechanics,
+      selectedBranch: resolution.selectedBranch,
+      offerEnvironmentDigest: BOUND_OFFER_ENVIRONMENT.digest,
+      resolutionDigest: resolution.resolutionDigest,
+      summary: resolution.summary,
+    };
+    const { offerEnvironmentDigest: _omittedDigest, ...missingDigest } = storedResolution;
+    const envelope = {
+      kind: 'round_turn_proposal',
+      proposalId: 'proposal:codec',
+      runId: 'encounter:codec',
+      branchId: 'branch:codec',
+      requestId: 'request:codec',
+      expectedRevision: 1,
+      stateDigest: 'state',
+      stateHandle: 'handle',
+      phase: 'initial',
+      idempotencyKey: 'codec-0001',
+      resolutions: [storedResolution],
+      rationale: null,
+      reactionGuidance: null,
+    };
+    expect(isRoundProposal(envelope)).toBe(true);
+    expect(isRoundProposal({
+      ...envelope,
+      resolutions: [missingDigest],
+    })).toBe(false);
+    expect(isRoundProposal({
+      ...envelope,
+      resolutions: [{ ...storedResolution, offerEnvironmentDigest: 'not-a-digest' }],
+    })).toBe(false);
+    expect(isRoundProposal({
+      ...envelope,
+      resolutions: [{ ...storedResolution, offerEnvironmentDigest: 'a'.repeat(63) }],
+    })).toBe(false);
+    expect(isRoundProposal({
+      ...envelope,
+      resolutions: [{ ...storedResolution, offerEnvironmentDigest: 'a'.repeat(65) }],
+    })).toBe(false);
+    expect(isRoundProposal({
+      ...envelope,
+      resolutions: [{ ...storedResolution, offerEnvironmentDigest: 'A'.repeat(64) }],
+    })).toBe(false);
+    const nonStringDigests: readonly unknown[] = [
+      [BOUND_OFFER_ENVIRONMENT.digest],
+      64,
+      null,
+      { digest: BOUND_OFFER_ENVIRONMENT.digest },
+    ];
+    for (const nonStringDigest of nonStringDigests) {
+      expect(isRoundProposal({
+        ...envelope,
+        resolutions: [{ ...storedResolution, offerEnvironmentDigest: nonStringDigest }],
+      })).toBe(false);
+      expect(isRoundProposal({
+        ...envelope,
+        resolutions: [{ ...storedResolution, resolutionDigest: nonStringDigest }],
+      })).toBe(false);
+    }
+  });
+
+  it('rejects plan adjustment envelopes whose stored updates carry malformed digests', () => {
+    const state = freshMonsterPlanningState(generateRoom(3_943_006).encounter.state);
+    const actor = state.combatants.find((combatant) =>
+      combatant.profile.kind === 'monster' && combatant.life !== 'dead');
+    if (actor === undefined) throw new Error('Generated room 3943006 has no living monster.');
+    const option = availableEngineActorOptions(state, actor.profile.id, BOUND_OFFER_ENVIRONMENT)
+      .find((candidate) => candidate.actionSlots.some((slot) => slot.use.kind === 'dodge'));
+    if (option === undefined) throw new Error('Room 3943006 Dodge option is absent.');
+    const proposal = {
+      actorId: actor.profile.id, expectedRevision: state.revision, primaryOptionId: option.optionId,
+      fallbackOptionId: null, reason: 'Exercise stored adjustment decoding.', overrideJustification: null,
+    };
+    const resolution = createPureTurnProposalResolver(BOUND_OFFER_ENVIRONMENT).resolve(state, proposal);
+    if (!resolution.valid) throw new Error('Stored adjustment decoder fixture did not resolve.');
+    const storedResolution = {
+      proposal,
+      option: resolution.option,
+      primaryOption: resolution.primaryOption,
+      fallbackOption: resolution.fallbackOption,
+      mechanics: resolution.mechanics,
+      selectedBranch: resolution.selectedBranch,
+      offerEnvironmentDigest: BOUND_OFFER_ENVIRONMENT.digest,
+      resolutionDigest: resolution.resolutionDigest,
+      summary: resolution.summary,
+    };
+    const envelope = {
+      kind: 'plan_adjustment_turn_proposal',
+      proposalId: 'proposal:adjustment-codec',
+      runId: 'encounter:adjustment-codec',
+      branchId: 'branch:adjustment-codec',
+      requestId: 'request:adjustment-codec',
+      expectedRevision: 1,
+      stateDigest: 'state',
+      stateHandle: 'handle',
+      phase: 'initial',
+      idempotencyKey: 'adjustment-codec-0001',
+      baseline_plan_hash: 'a'.repeat(64),
+      updates: [storedResolution],
+    };
+    const { offerEnvironmentDigest: _missingEnvironmentDigest, ...missingEnvironmentDigest } = storedResolution;
+    const { resolutionDigest: _missingResolutionDigest, ...missingResolutionDigest } = storedResolution;
+    expect(isPlanAdjustmentProposal(envelope)).toBe(true);
+    expect(isPlanAdjustmentProposal({ ...envelope, updates: [missingEnvironmentDigest] })).toBe(false);
+    expect(isPlanAdjustmentProposal({
+      ...envelope,
+      updates: [{ ...storedResolution, offerEnvironmentDigest: 'a'.repeat(63) }],
+    })).toBe(false);
+    expect(isPlanAdjustmentProposal({
+      ...envelope,
+      updates: [{ ...storedResolution, offerEnvironmentDigest: 'A'.repeat(64) }],
+    })).toBe(false);
+    expect(isPlanAdjustmentProposal({
+      ...envelope,
+      updates: [{ ...storedResolution, offerEnvironmentDigest: [BOUND_OFFER_ENVIRONMENT.digest] }],
+    })).toBe(false);
+    expect(isPlanAdjustmentProposal({ ...envelope, updates: [missingResolutionDigest] })).toBe(false);
+    expect(isPlanAdjustmentProposal({
+      ...envelope,
+      updates: [{ ...storedResolution, resolutionDigest: 'a'.repeat(63) }],
+    })).toBe(false);
+    expect(isPlanAdjustmentProposal({
+      ...envelope,
+      updates: [{ ...storedResolution, resolutionDigest: 'A'.repeat(64) }],
+    })).toBe(false);
+    expect(isPlanAdjustmentProposal({
+      ...envelope,
+      updates: [{ ...storedResolution, resolutionDigest: [resolution.resolutionDigest] }],
+    })).toBe(false);
   });
 
   it.each([3_943_004, 3_943_007])(
@@ -2437,11 +2683,15 @@ describe('AI-DM engine MCP conversation runner', () => {
     const actorIds = state.combatants.flatMap((combatant) =>
       combatant.profile.kind === 'monster' ? [combatant.profile.id] : []);
     const resolutions = () => actorIds.map((actorId) =>
-      actorOpportunityReport(state, actorId, canonicalEngineQueryPort, state.revision).frontierResolution);
+      actorOpportunityReport(state, actorId, BOUND_OFFER_ENVIRONMENT, state.revision).frontierResolution);
     const beforeRender = resolutions();
     const firstActorId = actorIds[0];
     if (firstActorId === undefined) throw new Error('Brutal fixture has no first monster actor.');
-    const firstActorOptions = engineActorOptions(state, firstActorId);
+    const firstActorOptions = engineActorOptionsForEnvironment(
+      state,
+      firstActorId,
+      BOUND_OFFER_ENVIRONMENT,
+    );
     expect(firstActorOptions.humanOnly).toContainEqual(expect.objectContaining({
       label: 'spellcasting/detect-evil-and-good',
       declaredOption: {

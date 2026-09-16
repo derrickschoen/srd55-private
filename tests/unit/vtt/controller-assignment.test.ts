@@ -6,6 +6,12 @@ import {
 } from '../../../src/vtt/dm-encounter-host';
 import { REFERENCE_FIGHTER_ID } from '../../../src/vtt/reference-encounter';
 import { MemoryBrowserSessionStore } from '../../../src/vtt/session-persistence';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
+
+const OFFER_ENVIRONMENT = buildOfferEnvironment({
+  kind: 'configuration',
+  mode: 'legacy_standard',
+});
 
 async function settle(): Promise<void> {
   await Promise.resolve();
@@ -35,6 +41,7 @@ describe('DM controller assignment', () => {
     const host = new DmEncounterHost(
       'session:controller-assignment-algorithm',
       new MemoryBrowserSessionStore(),
+      { offerEnvironment: OFFER_ENVIRONMENT },
     );
 
     void host.start();

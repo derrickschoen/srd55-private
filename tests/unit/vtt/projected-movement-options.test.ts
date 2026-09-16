@@ -5,15 +5,17 @@ import type { MovementEvaluation } from '../../../src/combat/movement-evaluator'
 import { GOBLIN_WARRIOR } from '../../../src/combat/statblocks/monsters';
 import { armorClass, feet, worldObjectId } from '../../../src/combat/values';
 import {
-  canonicalEngineQueryPort,
   projectedMovementOptions,
   type EngineProjectedMovementRequest,
 } from '../../../src/vtt/engine-query-port';
 import { projectActorKnowledge } from '../../../src/vtt/intel/actor-knowledge';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
 import { declareTestInputs } from '../../helpers/test-inputs';
 import { placedToken, playerProfile } from '../combat/fixtures';
 
 declareTestInputs({});
+
+const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
 
 function encounter(reaction: 'observed_spent' | 'unknown'): {
   readonly state: EncounterState;
@@ -122,7 +124,7 @@ describe('projected movement options', () => {
       tokens: [placedToken(actor, 1, 1), placedToken(target, 0, 1)],
     };
     const blocked = createEncounter({ ...common, blockedCells: [{ column: 3, row: 2 }] });
-    const blockedEvaluation = canonicalEngineQueryPort.movementOptions(
+    const blockedEvaluation = OFFER_ENVIRONMENT.queries.movementOptions(
       blocked,
       actor.id,
       target.id,
@@ -154,7 +156,7 @@ describe('projected movement options', () => {
           ? { ...combatant, turn: { ...combatant.turn, reactionAvailable: true } }
           : combatant),
     };
-    const exposedEvaluation = canonicalEngineQueryPort.movementOptions(
+    const exposedEvaluation = OFFER_ENVIRONMENT.queries.movementOptions(
       exposed,
       actor.id,
       target.id,
@@ -186,7 +188,7 @@ describe('projected movement options', () => {
       projection,
       request(setup.actorId, setup.targetId),
     );
-    const full = canonicalEngineQueryPort.movementOptions(
+    const full = OFFER_ENVIRONMENT.queries.movementOptions(
       setup.state,
       setup.actorId,
       setup.targetId,
@@ -215,7 +217,7 @@ describe('projected movement options', () => {
       projection,
       request(setup.actorId, setup.targetId),
     );
-    const full = canonicalEngineQueryPort.movementOptions(
+    const full = OFFER_ENVIRONMENT.queries.movementOptions(
       setup.state,
       setup.actorId,
       setup.targetId,

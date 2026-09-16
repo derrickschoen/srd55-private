@@ -5,11 +5,10 @@ import { affectedCells } from '../../../src/combat/templates';
 import { combatantId } from '../../../src/combat/values';
 import { loadContentPack } from '../../../src/content/content-pack';
 import { engineConcentrationActive } from '../../../src/vtt/engine-query-port';
-import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
 import { EngineRoundSession, type AuthorizedEngineTurnProposal } from '../../../src/vtt/engine-round-session';
 import {
   availableEngineActorOptions,
-  pureTurnProposalResolver,
+  createPureTurnProposalResolver,
   resolveEngineActorOption,
 } from '../../../src/vtt/intent-resolver';
 import { createEngineMcpRuntime, freshMonsterPlanningState, loadArenaFixture } from '../../../src/vtt/mcp/entrypoint';
@@ -22,6 +21,7 @@ import {
   renderTurnContextProfile,
 } from '../../../src/vtt/renderer-profile';
 import { readFileSync } from '../../helpers/test-filesystem';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
 
 const FIXTURE = 'tests/fixtures/arena-scenarios/hypnotic-pattern-cc.json';
 const CASTER = combatantId('combatant:d432-incubus');
@@ -31,6 +31,8 @@ const PC_IDS = [
   'combatant:d432-rogue',
   'combatant:d432-wizard',
 ] as const;
+const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
+const TURN_PROPOSAL_RESOLVER = createPureTurnProposalResolver(OFFER_ENVIRONMENT);
 
 function record(value: unknown, label: string): Readonly<Record<string, unknown>> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -111,7 +113,7 @@ describe('D432 Hypnotic Pattern control probe', () => {
 
   it('advertises a legal friendly-safe 30-foot cube covering all four separated PCs and legal damage', async () => {
     const state = freshMonsterPlanningState(await loadArenaFixture(FIXTURE));
-    const options = availableEngineActorOptions(state, CASTER);
+    const options = availableEngineActorOptions(state, CASTER, OFFER_ENVIRONMENT);
     const control = hypnoticOption(options);
     const damage = damageOption(options);
     const use = mainUse(control);
@@ -134,8 +136,8 @@ describe('D432 Hypnotic Pattern control probe', () => {
     expect(affected).toEqual(PC_IDS);
     expect(affected).not.toContain(CASTER);
 
-    const controlResolution = resolveEngineActorOption(state, control);
-    const damageResolution = resolveEngineActorOption(state, damage);
+    const controlResolution = resolveEngineActorOption(state, control, OFFER_ENVIRONMENT);
+    const damageResolution = resolveEngineActorOption(state, damage, OFFER_ENVIRONMENT);
     expect(controlResolution.valid).toBe(true);
     expect(damageResolution.valid).toBe(true);
     if (!damageResolution.valid) throw new Error(damageResolution.summary);
@@ -158,7 +160,7 @@ describe('D432 Hypnotic Pattern control probe', () => {
 
   it('renders both candidate actions in a no-model turn context', async () => {
     const state = freshMonsterPlanningState(await loadArenaFixture(FIXTURE));
-    const runtime = createEngineMcpRuntime(state);
+    const runtime = createEngineMcpRuntime(state, { offerEnvironment: OFFER_ENVIRONMENT });
     const capsule = runtime.feed.current();
     const context = record(runtime.toolSurface.execute('engine.get_turn_context', {
       run_id: capsule.runId,
@@ -230,9 +232,9 @@ describe('D432 Hypnotic Pattern control probe', () => {
       }),
     });
 
-    const opportunity = actorOpportunityReport(state, CASTER, canonicalEngineQueryPort, state.revision);
-    const controlOption = hypnoticOption(availableEngineActorOptions(state, CASTER));
-    const damageEngineOption = damageOption(availableEngineActorOptions(state, CASTER));
+    const opportunity = actorOpportunityReport(state, CASTER, OFFER_ENVIRONMENT, state.revision);
+    const controlOption = hypnoticOption(availableEngineActorOptions(state, CASTER, OFFER_ENVIRONMENT));
+    const damageEngineOption = damageOption(availableEngineActorOptions(state, CASTER, OFFER_ENVIRONMENT));
     expect(opportunity.defaultOption.optionId).toBe(controlOption.optionId);
     expect(opportunity.frontierResolution).toBe('fully_resolved');
     expect(opportunity.options.flatMap((entry) => entry.status === 'unresolved' ? entry.reasons : []))
@@ -246,7 +248,7 @@ describe('D432 Hypnotic Pattern control probe', () => {
     const team = scoreTeamPlans(state, [
       { candidateId: 'control', label: 'Control', proposals: [proposal(state.revision, controlOption)] },
       { candidateId: 'damage', label: 'Damage', proposals: [proposal(state.revision, damageEngineOption)] },
-    ], canonicalEngineQueryPort);
+    ], OFFER_ENVIRONMENT);
     expect(team.frontierResolution).toBe('fully_resolved');
     expect(team.frontier.map((entry) => entry.candidate.candidateId)).toEqual(['control']);
     expect(team.removed).toEqual([
@@ -285,7 +287,7 @@ describe('D432 Hypnotic Pattern control probe', () => {
         position: { column: index, row: index },
       })),
     };
-    const option = hypnoticOption(availableEngineActorOptions(crowded, CASTER));
+    const option = hypnoticOption(availableEngineActorOptions(crowded, CASTER, OFFER_ENVIRONMENT));
     const cast = option.actionSlots.find((slot) => slot.use.kind === 'cast_spell')?.use;
     if (cast?.kind !== 'cast_spell') throw new Error('Crowded control option has no spell use.');
     expect(cast.targets).toContainEqual({ kind: 'combatant', combatantId: CASTER });
@@ -294,9 +296,9 @@ describe('D432 Hypnotic Pattern control probe', () => {
 
   it('resolves the advertised cube into Charmed plus Incapacitated effects and concentration', async () => {
     const state = freshMonsterPlanningState(await loadArenaFixture(FIXTURE));
-    const option = hypnoticOption(availableEngineActorOptions(state, CASTER));
+    const option = hypnoticOption(availableEngineActorOptions(state, CASTER, OFFER_ENVIRONMENT));
     const declared = proposal(state.revision, option);
-    const resolution = pureTurnProposalResolver.resolve(state, declared);
+    const resolution = TURN_PROPOSAL_RESOLVER.resolve(state, declared);
     if (!resolution.valid) {
       throw new Error(`Hypnotic Pattern was not authorizable: ${resolution.refusals.map((entry) => entry.code).join(', ')}`);
     }
@@ -308,7 +310,12 @@ describe('D432 Hypnotic Pattern control probe', () => {
       mechanics: resolution.mechanics,
       selectedBranch: resolution.selectedBranch,
     };
-    const session = new EngineRoundSession(state, mulberry32(2), { kind: 'unattended', askDefault: 'decline' });
+    const session = new EngineRoundSession(
+      state,
+      mulberry32(2),
+      { kind: 'unattended', askDefault: 'decline' },
+      OFFER_ENVIRONMENT,
+    );
     session.applyResolvedMechanics([authorized], null);
     const after = session.currentState();
 
@@ -328,10 +335,12 @@ describe('D432 Hypnotic Pattern control probe', () => {
     const first = availableEngineActorOptions(
       freshMonsterPlanningState(await loadArenaFixture(FIXTURE)),
       CASTER,
+      OFFER_ENVIRONMENT,
     );
     const second = availableEngineActorOptions(
       freshMonsterPlanningState(await loadArenaFixture(FIXTURE)),
       CASTER,
+      OFFER_ENVIRONMENT,
     );
     expect(second).toEqual(first);
     expect(hypnoticOption(second).optionId).toBe(hypnoticOption(first).optionId);

@@ -2,9 +2,13 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, relative, resolve } from 'node:path';
 import { encounterBranchId, encounterSessionId } from '../src/combat/values';
 import { sha256 } from '../src/crypto/sha256';
-import { createEngineStateCapsule, engineStateHandle, projectEngineEncounterState } from '../src/vtt/engine-state-capsule';
+import {
+  createEngineStateCapsuleForEnvironment,
+  engineStateHandle,
+  projectEngineEncounterState,
+} from '../src/vtt/engine-state-capsule';
 import type { EngineStateReference } from '../src/vtt/engine-state-capsule';
-import { engineActionRegistry } from '../src/vtt/engine-query-port';
+import { engineActionRegistryForEnvironment } from '../src/vtt/engine-query-port';
 import { projectEngineInitiativeIntel } from '../src/vtt/engine-initiative-intel';
 import { resolveAgentAdapter } from '../src/vtt/agent-adapters';
 import { UNVERIFIED_CONTRACT_CLAUDE_CODE } from '../src/vtt/agent-adapters/claude-code';
@@ -15,6 +19,9 @@ import { AgentAdapterError, AGENT_ADAPTER_VERSION } from '../src/vtt/agent-adapt
 import { agentSessionIdFromCli, isAgentCliKind } from '../src/vtt/agent-session';
 import type { AgentCliKind, AgentFailureClassification, AgentInvocation, AgentSessionAdapter, AgentSessionBinding } from '../src/vtt/agent-session';
 import { loadArenaFixture } from '../src/vtt/mcp/entrypoint';
+import { buildOfferEnvironment } from '../src/vtt/offers/build-offer-environment';
+
+const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
 
 export const AGENT_CLI_KINDS = ['codex', 'opencode', 'pi', 'claude-code'] as const;
 export type ConformanceStatus = 'VERIFIED' | 'FAILED' | 'UNVERIFIED';
@@ -344,7 +351,7 @@ async function recomputeFixtureCapsuleProof(
     .map((candidate) => candidate.profile.id)
     .sort();
   if (actors.length === 0) throw new TypeError('Agent conformance fixture has no living monster actors.');
-  const capsule = createEngineStateCapsule({
+  const capsule = createEngineStateCapsuleForEnvironment({
     runId: encounterSessionId('encounter:engine-mcp'),
     branchId: encounterBranchId('branch:engine-mcp'),
     revision: 1,
@@ -357,10 +364,11 @@ async function recomputeFixtureCapsuleProof(
     },
     projection: projectEngineEncounterState(
       state,
-      engineActionRegistry(state),
+      engineActionRegistryForEnvironment(state, OFFER_ENVIRONMENT),
       projectEngineInitiativeIntel(state, []),
       1,
     ),
+    offerEnvironment: OFFER_ENVIRONMENT.binding,
   });
   return {
     proofToken: sha256(`${capsule.digest}|turn_minimal|state_summary_proof_v1`),

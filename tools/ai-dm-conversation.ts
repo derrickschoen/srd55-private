@@ -63,13 +63,14 @@ import {
   type EngineProposalDeviation,
   type EngineRoundSnapshot,
 } from '../src/vtt/engine-round-session';
-import { canonicalEngineQueryPort } from '../src/vtt/engine-query-port';
 import {
-  createLegacyEngineOptionEnvironment,
-  engineOptionEnvironmentFromBinding,
-} from '../src/vtt/offers/offer-environment';
+  buildOfferEnvironment,
+  type EngineOptionEnvironment,
+  type OfferEnvironmentInput,
+} from '../src/vtt/offers/build-offer-environment';
+import { exactKeys } from '../src/vtt/offers/offer-codec-primitives';
 import {
-  availableEngineActorOptions, pureTurnProposalResolver,
+  availableEngineActorOptions, createPureTurnProposalResolver,
   type EngineOfferableOption, type EngineTurnProposal, type ResolvedTurnMechanics,
 } from '../src/vtt/intent-resolver';
 import {
@@ -279,6 +280,7 @@ export interface ConversationBoardSnapshotService {
 }
 
 interface ConversationConfigBase {
+  readonly offerEnvironment: OfferEnvironmentInput;
   readonly dmMode: DmMode;
   readonly dmModeExplicit: boolean;
   readonly blindRepairArm: BlindRepairArm;
@@ -877,6 +879,8 @@ export interface ConversationRunOptions {
     outputDirectory: string,
   ) => Promise<ConversationBoardSnapshotService>;
   readonly onPrimaryDispatchStart?: () => void;
+  /** Test-only observation of the exact stored round proposal before authoritative authorization. */
+  readonly onStoredRoundProposalForTest?: (proposal: RoundTurnProposalEnvelope) => void;
   /** Test evidence seam for exact model-facing primary invocation bytes. */
   readonly onPrimaryInvocation?: (invocation: AgentInvocation) => void;
   /** Test evidence seam for the immutable invocation emitted at every runner phase. */
@@ -1205,6 +1209,7 @@ export function parseConversationArgs(argv: readonly string[], cwd = process.cwd
     throw new TypeError('Explicit D569 DM modes require the shared D570 knowledge bundle.');
   }
   return {
+    offerEnvironment: { kind: 'configuration', mode: 'legacy_standard' },
     dmMode: dmMode as DmMode,
     dmModeExplicit,
     blindRepairArm: blindRepairArm as BlindRepairArm,
@@ -1418,6 +1423,7 @@ export interface ConversationAutoSubmitBlock {
 }
 
 interface ExhaustionPlanEntry extends SegmentMonsterPlanEntry {
+  readonly offerEnvironmentDigest: string;
   readonly resolutionDigest: string;
   readonly summary: string;
   readonly plannerLabel: ExhaustionPlannerLabel;
@@ -1449,6 +1455,7 @@ function firstActivationChoice(slot: EngineActivationChoiceSlot | null | undefin
 function engineDefaultPlanEntry(
   state: EncounterState,
   actorId: CombatantId,
+  offerEnvironment: EngineOptionEnvironment,
   revision = state.revision,
 ): ExhaustionPlanEntry & {
   readonly frontierResolution: 'fully_resolved' | 'contains_unresolved';
@@ -1457,7 +1464,7 @@ function engineDefaultPlanEntry(
   const report = actorOpportunityReport(
     planningState,
     actorId,
-    canonicalEngineQueryPort,
+    offerEnvironment,
     revision,
   );
   const option = report.defaultOption;
@@ -1468,7 +1475,7 @@ function engineDefaultPlanEntry(
     activationChoice: firstActivationChoice(option.activationChoice),
     overrideJustification: null,
   };
-  const resolution = pureTurnProposalResolver.resolve(planningState, proposal);
+  const resolution = createPureTurnProposalResolver(offerEnvironment).resolve(planningState, proposal);
   if (!resolution.valid) {
     const details = resolution.refusals.map((refusal) => `${refusal.code}: ${refusal.summary}`).join('; ');
     throw new Error(`Could not stage engine default for ${actorId}: ${details}`);
@@ -1480,6 +1487,7 @@ function engineDefaultPlanEntry(
     fallbackOption: resolution.fallbackOption,
     mechanics: resolution.mechanics,
     selectedBranch: resolution.selectedBranch,
+    offerEnvironmentDigest: offerEnvironment.digest,
     resolutionDigest: resolution.resolutionDigest,
     summary: resolution.summary,
     plannerLabel: 'engine_default',
@@ -1490,13 +1498,14 @@ function engineDefaultPlanEntry(
 function simControllerPlanEntry(
   state: EncounterState,
   actorId: CombatantId,
+  offerEnvironment: EngineOptionEnvironment,
   revision = state.revision,
 ): ExhaustionPlanEntry {
   const planningState = projectFutureMonsterTurns(state, [actorId]);
   const option = availableEngineActorOptions(
     planningState,
     actorId,
-    canonicalEngineQueryPort,
+    offerEnvironment,
     revision,
   ).find((candidate) => candidate.actionSlots.some((slot) =>
     slot.slot === 'main' && slot.use.kind === 'dodge'));
@@ -1507,7 +1516,7 @@ function simControllerPlanEntry(
     reason: 'The deterministic controller chose Dodge after model planning was exhausted.',
     overrideJustification: null,
   };
-  const resolution = pureTurnProposalResolver.resolve(planningState, proposal);
+  const resolution = createPureTurnProposalResolver(offerEnvironment).resolve(planningState, proposal);
   if (!resolution.valid) throw new Error(`Could not resolve deterministic-controller Dodge for ${actorId}.`);
   return {
     proposal,
@@ -1516,6 +1525,7 @@ function simControllerPlanEntry(
     fallbackOption: resolution.fallbackOption,
     mechanics: resolution.mechanics,
     selectedBranch: resolution.selectedBranch,
+    offerEnvironmentDigest: offerEnvironment.digest,
     resolutionDigest: resolution.resolutionDigest,
     summary: resolution.summary,
     plannerLabel: 'sim_controller',
@@ -1601,6 +1611,7 @@ function rebaseStoredPlanEntries(input: {
   readonly state: EncounterState;
   readonly actualRevision: number;
   readonly entries: readonly SegmentMonsterPlanEntry[];
+  readonly offerEnvironment: EngineOptionEnvironment;
 }): readonly SegmentMonsterPlanEntry[] | null {
   const actors = input.entries.map((entry) => entry.proposal.actorId);
   const planningState = projectFutureMonsterTurns(input.state, actors);
@@ -1609,7 +1620,7 @@ function rebaseStoredPlanEntries(input: {
     const options = availableEngineActorOptions(
       planningState,
       entry.proposal.actorId,
-      canonicalEngineQueryPort,
+      input.offerEnvironment,
       input.actualRevision,
     );
     const primary = options.filter((option) => optionStructure(option) === optionStructure(entry.primaryOption));
@@ -1622,13 +1633,13 @@ function rebaseStoredPlanEntries(input: {
       primaryOptionId: primary[0]!.optionId,
       fallbackOptionId: entry.fallbackOption === null ? null : fallback[0]!.optionId,
     };
-    const resolution = pureTurnProposalResolver.resolve(planningState, proposal);
+    const resolution = createPureTurnProposalResolver(input.offerEnvironment).resolve(planningState, proposal);
     if (!resolution.valid) return null;
     rebound.push({
       proposal,
-      option: structuredClone(resolution.option),
-      primaryOption: structuredClone(resolution.primaryOption),
-      fallbackOption: structuredClone(resolution.fallbackOption),
+      option: resolution.option,
+      primaryOption: resolution.primaryOption,
+      fallbackOption: resolution.fallbackOption,
       mechanics: resolution.mechanics,
       selectedBranch: resolution.selectedBranch,
     });
@@ -1640,6 +1651,7 @@ function adjustmentPreflight(input: {
   readonly state: EncounterState;
   readonly actualRevision: number;
   readonly entries: readonly SegmentMonsterPlanEntry[];
+  readonly offerEnvironment: EngineOptionEnvironment;
 }): { readonly dispatch: true; readonly reason: 'retained_plan_illegal' | 'superior_option_appeared' } | {
   readonly dispatch: false;
   readonly rebound: readonly SegmentMonsterPlanEntry[];
@@ -1654,7 +1666,7 @@ function adjustmentPreflight(input: {
     actorOpportunityReport(
       planningState,
       entry.proposal.actorId,
-      canonicalEngineQueryPort,
+      input.offerEnvironment,
       input.actualRevision,
     ),
     entry.option.optionId,
@@ -1672,6 +1684,7 @@ function adoptSpeculativeBranch(input: {
   readonly targetActorIds: readonly CombatantId[];
   readonly plan: QueuedSpeculativePlanEnvelope;
   readonly sourceCapsule: EngineStateCapsule;
+  readonly offerEnvironment: EngineOptionEnvironment;
 }): { readonly entries: readonly SegmentMonsterPlanEntry[]; readonly scenarioId: string } | {
   readonly entries: null;
   readonly reason: Exclude<ConversationSpeculationDiscardReason, 'empty_scenario_menu' | 'budget_expired' | 'dispatch_failed'>;
@@ -1685,7 +1698,7 @@ function adoptSpeculativeBranch(input: {
   if (!sameCombatantSet(input.plan.actorIds, livingTargets)) {
     return { entries: null, reason: 'actor_set_changed' };
   }
-  const selection = evaluateHostScenarios(input.state, input.plan.scenarios, canonicalEngineQueryPort);
+  const selection = evaluateHostScenarios(input.state, input.plan.scenarios, input.offerEnvironment.queries);
   if (selection.kind === 'no_match') {
     return {
       entries: null,
@@ -1705,7 +1718,7 @@ function adoptSpeculativeBranch(input: {
     const actorOptions = availableEngineActorOptions(
       planningState,
       proposed.actorId,
-      canonicalEngineQueryPort,
+      input.offerEnvironment,
       input.actualRevision,
     );
     const sourceOptions = input.sourceCapsule.projection.combatants
@@ -1735,13 +1748,13 @@ function adoptSpeculativeBranch(input: {
       primaryOptionId: primary.optionId,
       fallbackOptionId: fallback?.optionId ?? null,
     };
-    const resolution = pureTurnProposalResolver.resolve(planningState, rebound);
+    const resolution = createPureTurnProposalResolver(input.offerEnvironment).resolve(planningState, rebound);
     if (!resolution.valid) return { entries: null, reason: 'proposal_validation_failed' };
     entries.push({
       proposal: rebound,
-      option: structuredClone(resolution.option),
-      primaryOption: structuredClone(resolution.primaryOption),
-      fallbackOption: structuredClone(resolution.fallbackOption),
+      option: resolution.option,
+      primaryOption: resolution.primaryOption,
+      fallbackOption: resolution.fallbackOption,
       mechanics: resolution.mechanics,
       selectedBranch: resolution.selectedBranch,
     });
@@ -1804,6 +1817,7 @@ export function classifySuggestionAdoption(
 function scriptedProposals(
   state: EncounterState,
   phase: 'initial' | 'correction',
+  offerEnvironment: EngineOptionEnvironment,
   revision = state.revision,
 ): readonly EngineTurnProposal[] {
   const actors = livingMonsterIds(state);
@@ -1812,12 +1826,12 @@ function scriptedProposals(
     const report = actorOpportunityReport(
       planningState,
       actorId,
-      canonicalEngineQueryPort,
+      offerEnvironment,
       revision,
     );
     const primary = report.defaultOption;
     const fallback = availableEngineActorOptions(
-      planningState, actorId, canonicalEngineQueryPort, revision,
+      planningState, actorId, offerEnvironment, revision,
     ).find((option) => option.optionId !== primary.optionId);
     if (phase === 'initial' && fallback === undefined) {
       throw new Error(`Could not stage an independent fallback for ${actorId}.`);
@@ -1835,6 +1849,7 @@ function intentionallyIgnoredProposals(
   state: EncounterState,
   phase: 'initial' | 'correction',
   playToken: EnginePlayToken,
+  offerEnvironment: EngineOptionEnvironment,
   revision = state.revision,
 ): readonly EngineTurnProposal[] {
   const actors = livingMonsterIds(state);
@@ -1843,13 +1858,13 @@ function intentionallyIgnoredProposals(
     const option = availableEngineActorOptions(
       planningState,
       actorId,
-      canonicalEngineQueryPort,
+      offerEnvironment,
       revision,
     ).find((candidate) => candidate.actionSlots.some((slot) =>
       slot.slot === 'main' && slot.use.kind === 'end_turn'));
     if (option === undefined) throw new Error(`Could not stage intentionally ignored response for ${actorId}.`);
     const fallback = availableEngineActorOptions(
-      planningState, actorId, canonicalEngineQueryPort, revision,
+      planningState, actorId, offerEnvironment, revision,
     ).find((candidate) => candidate.optionId !== option.optionId);
     if (phase === 'initial' && fallback === undefined) {
       throw new Error(`Could not stage an independent ignored-response fallback for ${actorId}.`);
@@ -2280,10 +2295,10 @@ function plannedTurnContext(
   }
   let rendering: CapturedTurnContext['rendering'];
   const runtime = createEngineMcpRuntime(state, {
-    offerEnvironment: engineOptionEnvironmentFromBinding(
-      canonicalEngineQueryPort,
-      snapshot.capsule.offerEnvironment,
-    ),
+    offerEnvironment: buildOfferEnvironment({
+      kind: 'binding',
+      binding: snapshot.capsule.offerEnvironment,
+    }),
     runId: capsule.runId,
     branchId: capsule.branchId,
     revision: capsule.revision,
@@ -2465,6 +2480,10 @@ async function driveScriptedMcp(
   readonly contextTruncated: boolean;
 }> {
   const manifest = JSON.parse(await readFile(launcherPath, 'utf8')) as EngineMcpLauncherManifest;
+  const offerEnvironment = buildOfferEnvironment({
+    kind: 'binding',
+    binding: manifest.offerEnvironment,
+  });
   const state = inProcessToolSession !== undefined &&
     'simulatedEncounterState' in inProcessToolSession
     ? structuredClone(inProcessToolSession.simulatedEncounterState as EncounterState)
@@ -2550,7 +2569,7 @@ async function driveScriptedMcp(
       const stateRef = asRecord(revision?.['state_ref']);
       if (stateRef === null) throw new Error('Speculative revision resource omitted state_ref.');
       const proposals = actors.map((actorId) =>
-        externalProposal(engineDefaultPlanEntry(state, actorId, manifest.revision).proposal));
+        externalProposal(engineDefaultPlanEntry(state, actorId, offerEnvironment, manifest.revision).proposal));
       const result = asRecord(await requestMcp('tools/call', {
         name: 'engine.submit_speculative_round_plan',
         arguments: {
@@ -2659,11 +2678,16 @@ async function driveScriptedMcp(
         : actorId === undefined
           ? []
           : (() => {
-              const proposal = engineDefaultPlanEntry(state, actorId, manifest.revision).proposal;
+              const proposal = engineDefaultPlanEntry(
+                state,
+                actorId,
+                offerEnvironment,
+                manifest.revision,
+              ).proposal;
               const fallback = availableEngineActorOptions(
                 projectFutureMonsterTurns(state, [actorId]),
                 actorId,
-                canonicalEngineQueryPort,
+                offerEnvironment,
                 manifest.revision,
               ).find((option) => option.optionId !== proposal.primaryOptionId);
               if (manifest.phase === 'initial' && fallback === undefined) {
@@ -2742,9 +2766,10 @@ async function driveScriptedMcp(
             typeof contextualPlayToken === 'string'
               ? enginePlayToken(contextualPlayToken)
               : enginePlayToken('SIMULATED-unissued-play-token'),
+            offerEnvironment,
             manifest.revision,
           ).map(externalProposal)
-        : scriptedProposals(state, manifest.phase, manifest.revision).map(externalProposal);
+        : scriptedProposals(state, manifest.phase, offerEnvironment, manifest.revision).map(externalProposal);
     const responseProposals = suggestionResponse !== 'edited' || !useEnginePlan
       ? proposals
       : proposals.map((proposal, index) => index !== 0 ? proposal : {
@@ -3189,7 +3214,7 @@ async function abortableDelay(milliseconds: number, signal: AbortSignal): Promis
   });
 }
 
-function isRoundProposal(value: unknown): value is RoundTurnProposalEnvelope {
+export function isRoundProposal(value: unknown): value is RoundTurnProposalEnvelope {
   const input = asRecord(value);
   return input?.['kind'] === 'round_turn_proposal' &&
     typeof input['proposalId'] === 'string' && typeof input['runId'] === 'string' &&
@@ -3198,10 +3223,37 @@ function isRoundProposal(value: unknown): value is RoundTurnProposalEnvelope {
     typeof input['stateHandle'] === 'string' &&
     (input['phase'] === 'initial' || input['phase'] === 'correction') &&
     typeof input['idempotencyKey'] === 'string' && Array.isArray(input['resolutions']) &&
+    input['resolutions'].every(isStoredProposalResolution) &&
     (input['reactionGuidance'] === null || asRecord(input['reactionGuidance']) !== null);
 }
 
-function isPlanAdjustmentProposal(value: unknown): value is PlanAdjustmentProposalEnvelope {
+function isSha256Hex(value: unknown): value is string {
+  return typeof value === 'string' && /^[0-9a-f]{64}$/u.test(value);
+}
+
+function isStoredProposalResolution(value: unknown): value is ProposedTurnResolution {
+  const input = asRecord(value);
+  if (input === null) return false;
+  const strictNoFallback = input['strictNoFallback'] === true;
+  try {
+    exactKeys(input, [
+      'proposal', 'option', 'primaryOption', 'fallbackOption', 'mechanics', 'selectedBranch',
+      'offerEnvironmentDigest', 'resolutionDigest', 'summary',
+      ...(strictNoFallback ? ['strictNoFallback'] : []),
+    ], 'stored proposal resolution');
+  } catch {
+    return false;
+  }
+  return isSha256Hex(input['offerEnvironmentDigest']) &&
+    isSha256Hex(input['resolutionDigest']) &&
+    (input['selectedBranch'] === 'primary' || input['selectedBranch'] === 'fallback') &&
+    typeof input['summary'] === 'string' && asRecord(input['proposal']) !== null &&
+    asRecord(input['option']) !== null && asRecord(input['primaryOption']) !== null &&
+    (input['fallbackOption'] === null || asRecord(input['fallbackOption']) !== null) &&
+    asRecord(input['mechanics']) !== null;
+}
+
+export function isPlanAdjustmentProposal(value: unknown): value is PlanAdjustmentProposalEnvelope {
   const input = asRecord(value);
   return input?.['kind'] === 'plan_adjustment_turn_proposal' &&
     typeof input['proposalId'] === 'string' && typeof input['runId'] === 'string' &&
@@ -3210,7 +3262,8 @@ function isPlanAdjustmentProposal(value: unknown): value is PlanAdjustmentPropos
     typeof input['stateHandle'] === 'string' &&
     (input['phase'] === 'initial' || input['phase'] === 'correction') &&
     typeof input['idempotencyKey'] === 'string' &&
-    typeof input['baseline_plan_hash'] === 'string' && Array.isArray(input['updates']);
+    typeof input['baseline_plan_hash'] === 'string' && Array.isArray(input['updates']) &&
+    input['updates'].every(isStoredProposalResolution);
 }
 
 export function authorizedRoundProposalHashInput(proposal: RoundTurnProposalEnvelope): string {
@@ -3610,10 +3663,10 @@ function fullTurnContextBase(
     throw new Error('Turn-context base requires an ordinary pending request.');
   }
   const runtime = createEngineMcpRuntime(state, {
-    offerEnvironment: engineOptionEnvironmentFromBinding(
-      canonicalEngineQueryPort,
-      snapshot.capsule.offerEnvironment,
-    ),
+    offerEnvironment: buildOfferEnvironment({
+      kind: 'binding',
+      binding: snapshot.capsule.offerEnvironment,
+    }),
     runId: capsule.runId,
     branchId: capsule.branchId,
     revision: capsule.revision,
@@ -3683,10 +3736,10 @@ function inProcessDmToolSession(input: {
     throw new Error('Local OpenAI tool session requires an ordinary pending request.');
   }
   const runtime = createEngineMcpRuntime(input.state, {
-    offerEnvironment: engineOptionEnvironmentFromBinding(
-      canonicalEngineQueryPort,
-      input.snapshot.capsule.offerEnvironment,
-    ),
+    offerEnvironment: buildOfferEnvironment({
+      kind: 'binding',
+      binding: input.snapshot.capsule.offerEnvironment,
+    }),
     runId: capsule.runId,
     branchId: capsule.branchId,
     revision: capsule.revision,
@@ -3751,6 +3804,7 @@ function inProcessDmToolSession(input: {
 function decisionCatalogForSnapshot(
   state: EncounterState,
   snapshot: EngineRoundSnapshot,
+  offerEnvironment: EngineOptionEnvironment,
 ): DecisionCatalog {
   const request = snapshot.capsule.request;
   if (request === null || request.phase === 'speculative') {
@@ -3764,10 +3818,10 @@ function decisionCatalogForSnapshot(
     stateDigest: snapshot.capsule.digest,
     actors: request.actors.map((actorId) => {
       const registry = availableEngineActorOptions(
-        planningState, actorId, canonicalEngineQueryPort, snapshot.capsule.revision,
+        planningState, actorId, offerEnvironment, snapshot.capsule.revision,
       );
       const report = actorOpportunityReport(
-        planningState, actorId, canonicalEngineQueryPort, snapshot.capsule.revision,
+        planningState, actorId, offerEnvironment, snapshot.capsule.revision,
       );
       const defaultOption = report.defaultOption;
       const frontierIds = new Set(registry.filter((option) => {
@@ -3947,10 +4001,10 @@ function inProcessSpeculativeToolSession(input: {
     throw new Error('Speculative tool session requires a speculative pending request.');
   }
   const runtime = createEngineMcpRuntime(input.state, {
-    offerEnvironment: engineOptionEnvironmentFromBinding(
-      canonicalEngineQueryPort,
-      input.snapshot.capsule.offerEnvironment,
-    ),
+    offerEnvironment: buildOfferEnvironment({
+      kind: 'binding',
+      binding: input.snapshot.capsule.offerEnvironment,
+    }),
     runId: capsule.runId,
     branchId: capsule.branchId,
     revision: capsule.revision,
@@ -4004,8 +4058,17 @@ function recordAutoResolvedReactions(
 export function proposalResolutionDivergence(
   state: EncounterState,
   entry: ProposedTurnResolution,
+  offerEnvironment: EngineOptionEnvironment,
 ): readonly string[] {
-  const checked = pureTurnProposalResolver.resolve(state, entry.proposal);
+  const authoritativeEnvironment = offerEnvironment;
+  if (entry.offerEnvironmentDigest !== authoritativeEnvironment.digest) {
+    return [
+      `${entry.proposal.actorId}: stored resolution was produced under offer environment ` +
+        `${entry.offerEnvironmentDigest}, authoritative environment is ${authoritativeEnvironment.digest}.`,
+    ];
+  }
+  const resolver = createPureTurnProposalResolver(authoritativeEnvironment);
+  const checked = resolver.resolve(state, entry.proposal);
   if (!checked.valid) {
     return [`${entry.proposal.actorId}: proposal-time resolution was valid, but authoritative resolution refused it: ${checked.refusals.map((refusal) => refusal.summary).join('; ')}`];
   }
@@ -4018,7 +4081,11 @@ export function proposalResolutionDivergence(
     : [`${entry.proposal.actorId}: resolved action sequence, targets, or movement cost diverged; proposal was "${entry.summary}" and authoritative resolution was "${checked.summary}".`];
 }
 
-function authorizedMechanics(state: EncounterState, proposal: RoundTurnProposalEnvelope): {
+function authorizedMechanics(
+  state: EncounterState,
+  proposal: RoundTurnProposalEnvelope,
+  offerEnvironment: EngineOptionEnvironment,
+): {
   readonly entries: readonly {
     readonly proposal: EngineTurnProposal;
     readonly option: EngineOfferableOption;
@@ -4040,7 +4107,7 @@ function authorizedMechanics(state: EncounterState, proposal: RoundTurnProposalE
     proposal.resolutions.map((entry) => entry.proposal.actorId),
   );
   const divergences = proposal.resolutions.flatMap<ConversationChainAttemptEvidence>((entry) => {
-    const reasons = proposalResolutionDivergence(planningState, entry);
+    const reasons = proposalResolutionDivergence(planningState, entry, offerEnvironment);
     return reasons.length === 0 ? [] : [{
       attempt: proposal.phase === 'correction' ? 'correction' : 'primary',
       actorId: entry.proposal.actorId,
@@ -4050,13 +4117,13 @@ function authorizedMechanics(state: EncounterState, proposal: RoundTurnProposalE
   });
   if (divergences.length > 0) return { entries: null, divergences };
   const resolved = proposal.resolutions.map((entry) => {
-    const checked = pureTurnProposalResolver.resolve(planningState, entry.proposal);
+    const checked = createPureTurnProposalResolver(offerEnvironment).resolve(planningState, entry.proposal);
     if (!checked.valid) return null;
     return {
       proposal: structuredClone(entry.proposal),
-      option: structuredClone(checked.option),
-      primaryOption: structuredClone(checked.primaryOption),
-      fallbackOption: structuredClone(checked.fallbackOption),
+      option: checked.option,
+      primaryOption: checked.primaryOption,
+      fallbackOption: checked.fallbackOption,
       mechanics: checked.mechanics,
       acceptedProposal: externalProposal(entry.proposal),
       selectedBranch: entry.selectedBranch,
@@ -4249,7 +4316,7 @@ async function runConversationWithConfiguredIntel(
   const adapter = new ModelCallBookkeepingAdapter(selectedAdapter);
   const rows: ConversationRow[] = [];
   let capsuleRevision = 1;
-  const offerEnvironment = createLegacyEngineOptionEnvironment(canonicalEngineQueryPort);
+  const offerEnvironment = buildOfferEnvironment(config.offerEnvironment);
   const engineSession = new EngineRoundSession(
     states[0]!,
     mulberry32(8_274_113),
@@ -4402,7 +4469,7 @@ async function runConversationWithConfiguredIntel(
       };
       let rowTurnContext = unrequestedTurnContext(config.turnContextMaximumBytes);
       const initialDecisionCatalog = config.decisionTransport === 'final_indices'
-        ? decisionCatalogForSnapshot(engineSession.currentState(), initialSnapshot)
+        ? decisionCatalogForSnapshot(engineSession.currentState(), initialSnapshot, offerEnvironment)
         : null;
       if (initialDecisionCatalog !== null) rowTurnContext = getPlannedInitialTurnContext();
       const initialInvocationOutput = initialDecisionCatalog === null
@@ -4622,7 +4689,7 @@ async function runConversationWithConfiguredIntel(
           sourceState,
           window.monsters,
           window.players,
-          canonicalEngineQueryPort,
+          offerEnvironment,
         );
         if (menu.scenarios.length === 0) {
           if (speculations.length === 0) {
@@ -4856,6 +4923,7 @@ async function runConversationWithConfiguredIntel(
           state: engineSession.currentState(),
           actualRevision: capsuleRevision,
           entries: baselineEntries,
+          offerEnvironment,
         });
         if (!preflight.dispatch) {
           for (const entry of preflight.rebound) {
@@ -4909,7 +4977,7 @@ async function runConversationWithConfiguredIntel(
         );
         let adjustmentTurnContext = plannedAdjustmentContext;
         const adjustmentDecisionCatalog = config.decisionTransport === 'final_indices'
-          ? decisionCatalogForSnapshot(engineSession.currentState(), adjustmentSnapshot)
+          ? decisionCatalogForSnapshot(engineSession.currentState(), adjustmentSnapshot, offerEnvironment)
           : null;
         const adjustmentInvocationOutput = adjustmentDecisionCatalog === null
           ? { kind: 'tool_driven' } as const
@@ -5160,7 +5228,7 @@ async function runConversationWithConfiguredIntel(
           );
           adjustmentCorrectionContext = correctionContext;
           const adjustmentCorrectionDecisionCatalog = config.decisionTransport === 'final_indices'
-            ? decisionCatalogForSnapshot(engineSession.currentState(), correctionSnapshot)
+            ? decisionCatalogForSnapshot(engineSession.currentState(), correctionSnapshot, offerEnvironment)
             : null;
           const correctionInvocationOutput = adjustmentCorrectionDecisionCatalog === null
             ? { kind: 'tool_driven' } as const
@@ -5370,7 +5438,7 @@ async function runConversationWithConfiguredIntel(
           ));
         }
         for (const update of completion.updates) {
-          const resolution = pureTurnProposalResolver.resolve(
+          const resolution = createPureTurnProposalResolver(offerEnvironment).resolve(
             projectFutureMonsterTurns(engineSession.currentState(), [update.proposal.actorId]),
             update.proposal,
           );
@@ -5379,9 +5447,9 @@ async function runConversationWithConfiguredIntel(
           }
           segmentMonsterPlan.set(update.proposal.actorId, {
             proposal: structuredClone(update.proposal),
-            option: structuredClone(resolution.option),
-            primaryOption: structuredClone(resolution.primaryOption),
-            fallbackOption: structuredClone(resolution.fallbackOption),
+            option: resolution.option,
+            primaryOption: resolution.primaryOption,
+            fallbackOption: resolution.fallbackOption,
             mechanics: resolution.mechanics,
             selectedBranch: resolution.selectedBranch,
           });
@@ -5729,7 +5797,7 @@ async function runConversationWithConfiguredIntel(
             return plannedCorrectionTurnContext;
           };
         const correctionDecisionCatalog = config.decisionTransport === 'final_indices'
-          ? decisionCatalogForSnapshot(engineSession.currentState(), correctionSnapshot)
+          ? decisionCatalogForSnapshot(engineSession.currentState(), correctionSnapshot, offerEnvironment)
           : null;
         if (correctionDecisionCatalog !== null) {
           recordedCorrectionTurnContext = getPlannedCorrectionTurnContext();
@@ -5902,7 +5970,8 @@ async function runConversationWithConfiguredIntel(
                     ? PLAN_MATERIALITY_POLICY_HASH
                     : null,
                 });
-            const checkedProposal = authorizedMechanics(engineSession.currentState(), proposal);
+            options.onStoredRoundProposalForTest?.(structuredClone(proposal));
+            const checkedProposal = authorizedMechanics(engineSession.currentState(), proposal, offerEnvironment);
             if (checkedProposal.entries === null) {
               failedAttempts.push(...(checkedProposal.divergences.length > 0
                 ? checkedProposal.divergences
@@ -5942,9 +6011,9 @@ async function runConversationWithConfiguredIntel(
                   }
                   segmentMonsterPlan.set(entry.mechanics.actorId, {
                     proposal: structuredClone(resolution.proposal),
-                    option: structuredClone(entry.option),
-                    primaryOption: structuredClone(entry.primaryOption),
-                    fallbackOption: structuredClone(entry.fallbackOption),
+                    option: entry.option,
+                    primaryOption: entry.primaryOption,
+                    fallbackOption: entry.fallbackOption,
                     mechanics: entry.mechanics,
                     selectedBranch: entry.selectedBranch,
                     ...(entry.strictNoFallback === true ? { strictNoFallback: true as const } : {}),
@@ -6014,6 +6083,7 @@ async function runConversationWithConfiguredIntel(
               const defaultEntry = engineDefaultPlanEntry(
                 engineSession.currentState(),
                 actorId,
+                offerEnvironment,
                 capsuleRevision,
               );
               const exhaustionEntry = defaultEntry.frontierResolution === 'fully_resolved'
@@ -6021,6 +6091,7 @@ async function runConversationWithConfiguredIntel(
                 : simControllerPlanEntry(
                     engineSession.currentState(),
                     actorId,
+                    offerEnvironment,
                     capsuleRevision,
                   );
               if (defaultEntry.frontierResolution === 'contains_unresolved') {
@@ -6034,7 +6105,7 @@ async function runConversationWithConfiguredIntel(
                 exhaustionIntelCapture ??= captureDmIntel(
                   engineSession.currentState(),
                   correctionCapsule,
-                  canonicalEngineQueryPort,
+                  offerEnvironment.queries,
                 );
               }
               return {
@@ -6478,6 +6549,7 @@ async function runConversationWithConfiguredIntel(
                 fallbackOption: entry.fallbackOption,
                 mechanics: entry.mechanics,
                 selectedBranch: entry.selectedBranch,
+                offerEnvironmentDigest: entry.offerEnvironmentDigest,
                 resolutionDigest: entry.resolutionDigest,
                 summary: entry.summary,
               })),
@@ -6591,10 +6663,12 @@ async function runConversationWithConfiguredIntel(
                   state: beforeState,
                   openMonsterActorIds: beforeOpenActorIds,
                   remainingOptions: beforeOptions,
+                  offerEnvironment,
                 },
                 after: {
                   state: afterState,
                   openMonsterActorIds: afterOpenActorIds,
+                  offerEnvironment,
                   remainingOptions: afterOpenActorIds.map((actorId) => {
                     const entry = segmentMonsterPlan.get(actorId);
                     if (entry === undefined) throw new Error(`Open monster ${actorId} has no stored plan.`);
@@ -6682,6 +6756,7 @@ async function runConversationWithConfiguredIntel(
                   targetActorIds: segmentActors,
                   plan: completed.plan,
                   sourceCapsule: pending.sourceSnapshot.capsule,
+                  offerEnvironment,
                 });
                 if (adoption.entries === null) discardReason = adoption.reason;
                 else {
@@ -6705,7 +6780,12 @@ async function runConversationWithConfiguredIntel(
                 const rebound = options.forceSpeculationRecalculationForTest !== true &&
                   options.forceSpeculationRecalculation !== true &&
                   currentEntries.length === segmentActors.length
-                  ? rebaseStoredPlanEntries({ state, actualRevision: capsuleRevision, entries: currentEntries })
+                  ? rebaseStoredPlanEntries({
+                      state,
+                      actualRevision: capsuleRevision,
+                      entries: currentEntries,
+                      offerEnvironment,
+                    })
                   : null;
                 if (rebound === null) {
                   let recalculated: readonly SegmentMonsterPlanEntry[] | null = null;
@@ -6861,16 +6941,16 @@ async function runConversationWithConfiguredIntel(
                         recalculated = acceptSpeculationRecalculationBeforeDeadline(
                           roundDeadline,
                           () => {
-                            const checked = authorizedMechanics(state, proposal);
+                            const checked = authorizedMechanics(state, proposal, offerEnvironment);
                             if (checked.entries === null || !sameCombatantSet(
                               checked.entries.map((entry) => entry.proposal.actorId),
                               segmentActors,
                             )) return null;
                             const validatedEntries = checked.entries.map((entry) => ({
                               proposal: structuredClone(entry.proposal),
-                              option: structuredClone(entry.option),
-                              primaryOption: structuredClone(entry.primaryOption),
-                              fallbackOption: structuredClone(entry.fallbackOption),
+                              option: entry.option,
+                              primaryOption: entry.primaryOption,
+                              fallbackOption: entry.fallbackOption,
                               mechanics: entry.mechanics,
                               selectedBranch: entry.selectedBranch,
                             }));
@@ -6886,7 +6966,7 @@ async function runConversationWithConfiguredIntel(
                     }
                   }
                   recalculated ??= segmentActors.map((actorId) =>
-                    engineDefaultPlanEntry(state, actorId, capsuleRevision));
+                    engineDefaultPlanEntry(state, actorId, offerEnvironment, capsuleRevision));
                   for (const entry of recalculated) {
                     segmentMonsterPlan.set(entry.proposal.actorId, entry);
                   }
@@ -7219,7 +7299,7 @@ async function runConversationWithConfiguredIntel(
               sha256: sha256(options.blindIngressAuditProbeText),
             }];
         const offeredOptions = (capsule.request?.actors ?? []).flatMap((actorId) =>
-          availableEngineActorOptions(optionProjectionState, actorId, canonicalEngineQueryPort, capsule.revision));
+          availableEngineActorOptions(optionProjectionState, actorId, offerEnvironment, capsule.revision));
         const offeredOptionIds = offeredOptions.map((option) => String(option.optionId));
         if (primaryDelivery === null) throw new Error('Blind row lacks typed turn-context delivery evidence.');
         const ingressAudit = auditBlindIngress(ingressRecords, primaryDelivery, {
@@ -7282,7 +7362,7 @@ async function runConversationWithConfiguredIntel(
           ? finalSubmission.resolution.actors.map((actor) => actor.selectedOptionId)
           : [];
         const engineTopRecommendationIds = (capsule.request?.actors ?? []).map((actorId) =>
-          String(actorOpportunityReport(optionProjectionState, actorId, canonicalEngineQueryPort).defaultOption.optionId));
+          String(actorOpportunityReport(optionProjectionState, actorId, offerEnvironment).defaultOption.optionId));
         const visual = boardImageArtifact?.blindState;
         if (visual === undefined || boardImageArtifact === null) {
           throw new Error('Blind row lacks state-only visual evidence.');

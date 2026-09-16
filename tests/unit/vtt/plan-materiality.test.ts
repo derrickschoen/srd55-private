@@ -3,6 +3,7 @@ import type { EncounterState } from '../../../src/combat/encounter';
 import { combatantId, engineZoneId } from '../../../src/combat/values';
 import { availableEngineActorOptions } from '../../../src/vtt/intent-resolver';
 import { freshMonsterPlanningState, loadArenaFixture } from '../../../src/vtt/mcp/entrypoint';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
 import {
   comparePlanRelevanceSnapshots,
   createPlanRelevanceRecord,
@@ -17,6 +18,7 @@ const monster = combatantId('combatant:materiality-monster');
 const player = combatantId('combatant:materiality-player');
 const other = combatantId('combatant:materiality-other');
 const zone = engineZoneId('zone:materiality-anchor');
+const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
 
 function record(): PlanRelevanceRecord {
   return {
@@ -172,7 +174,7 @@ describe('composite plan relevance materiality policy', () => {
     const actor = beforeState.combatants.find((candidate) => candidate.profile.kind === 'monster');
     const target = beforeState.combatants.find((candidate) => candidate.profile.kind === 'player_character');
     if (actor === undefined || target === undefined) throw new Error('Fixture lacks materiality actors.');
-    const option = availableEngineActorOptions(beforeState, actor.profile.id)
+    const option = availableEngineActorOptions(beforeState, actor.profile.id, OFFER_ENVIRONMENT)
       .find((candidate) => candidate.actionSlots.some((slot) => slot.use.kind === 'dodge'));
     if (option === undefined) throw new Error('Fixture lacks a Dodge option.');
     const afterState: EncounterState = {
@@ -183,6 +185,7 @@ describe('composite plan relevance materiality policy', () => {
           : combatant),
     };
     const context = {
+      offerEnvironment: OFFER_ENVIRONMENT,
       openMonsterActorIds: [actor.profile.id],
       remainingOptions: [option],
       explicitEngagementAnchors: [{ kind: 'combatant', combatantId: target.profile.id }],
@@ -215,17 +218,19 @@ describe('composite plan relevance materiality policy', () => {
     const state = freshMonsterPlanningState(await loadArenaFixture('tests/fixtures/arena-basis/seed-3943001.json'));
     const actor = state.combatants.find((candidate) => candidate.profile.kind === 'monster');
     if (actor === undefined) throw new Error('Fixture lacks a monster.');
-    const option = availableEngineActorOptions(state, actor.profile.id)
+    const option = availableEngineActorOptions(state, actor.profile.id, OFFER_ENVIRONMENT)
       .find((candidate) => candidate.actionSlots.some((slot) => slot.use.kind === 'dodge'));
     if (option === undefined) throw new Error('Fixture lacks a Dodge option.');
 
     const first = createPlanRelevanceRecord({
       state,
+      offerEnvironment: OFFER_ENVIRONMENT,
       openMonsterActorIds: [actor.profile.id, actor.profile.id],
       remainingOptions: [option],
     });
     const second = createPlanRelevanceRecord({
       state,
+      offerEnvironment: OFFER_ENVIRONMENT,
       openMonsterActorIds: [actor.profile.id],
       remainingOptions: [option],
     });

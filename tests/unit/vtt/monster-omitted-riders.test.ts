@@ -11,8 +11,11 @@ import { projectHumanEngineOptions } from '../../../src/vtt/encounter-board-proj
 import { availableEngineActorOptions, resolveEngineActorOption } from '../../../src/vtt/intent-resolver';
 import { createEngineMcpRuntime } from '../../../src/vtt/mcp/entrypoint';
 import { freshMonsterPlanningState } from '../../../src/vtt/monster-planning-state';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
 import type { EngineOfferableOption } from '../../../src/vtt/turn-proposal';
 import { placedToken, playerProfile } from '../combat/fixtures';
+
+const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
 
 function record(value: unknown): Readonly<Record<string, unknown>> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -40,7 +43,7 @@ function encounter(statblock: MonsterStatblock): EncounterState {
 function optionUsing(state: EncounterState, actionId: string): EngineOfferableOption {
   const actorId = state.combatants.find((candidate) => candidate.profile.kind === 'monster')?.profile.id;
   if (actorId === undefined) throw new Error('Rider fixture omitted its monster.');
-  const option = availableEngineActorOptions(state, actorId).find((candidate) =>
+  const option = availableEngineActorOptions(state, actorId, OFFER_ENVIRONMENT).find((candidate) =>
     candidate.actionSlots.some((slot) => slot.use.kind === 'attack'
       ? slot.use.actionId === actionId
       : slot.use.kind === 'saving_throw'
@@ -61,7 +64,7 @@ describe('engine omitted rider pipeline', () => {
       componentActionId: 'scimitar',
       trigger: 'attack_roll_advantage',
     }]);
-    expect(resolveEngineActorOption(state, option).valid).toBe(true);
+    expect(resolveEngineActorOption(state, option, OFFER_ENVIRONMENT).valid).toBe(true);
   });
 
   it.each([
@@ -72,7 +75,7 @@ describe('engine omitted rider pipeline', () => {
     const state = encounter(statblock);
     const option = optionUsing(state, actionId);
     expect(new Set(option.omittedRiders.map((rider) => rider.kind))).toEqual(new Set(requiredKinds));
-    expect(resolveEngineActorOption(state, option).valid).toBe(true);
+    expect(resolveEngineActorOption(state, option, OFFER_ENVIRONMENT).valid).toBe(true);
   });
 
   it('flags homebrew crest and raking charge riders from their typed declarations', () => {
@@ -101,7 +104,7 @@ describe('engine omitted rider pipeline', () => {
         relatedActionId: 'unsettling-visage',
       }),
     ]));
-    expect(resolveEngineActorOption(state, option).valid).toBe(true);
+    expect(resolveEngineActorOption(state, option, OFFER_ENVIRONMENT).valid).toBe(true);
   });
 
   it('omits delayed Zombie creation while preserving Life Drain damage and maximum-HP reduction', () => {
@@ -113,7 +116,7 @@ describe('engine omitted rider pipeline', () => {
       targetKind: 'Humanoid',
       delayHours: 24,
     }));
-    const resolution = resolveEngineActorOption(state, option);
+    const resolution = resolveEngineActorOption(state, option, OFFER_ENVIRONMENT);
     expect(resolution.valid).toBe(true);
     if (!resolution.valid) throw new Error('Life Drain base effect did not resolve.');
     expect(resolution.mechanics.omittedRiders).toEqual(option.omittedRiders);
@@ -123,7 +126,10 @@ describe('engine omitted rider pipeline', () => {
     const state = encounter(GOBLIN_WARRIOR);
     const actorId = state.combatants.find((candidate) => candidate.profile.kind === 'monster')?.profile.id;
     if (actorId === undefined) throw new Error('Rider surface fixture omitted its actor.');
-    const runtime = createEngineMcpRuntime(state, { requestedActorIds: [actorId] });
+    const runtime = createEngineMcpRuntime(state, {
+      requestedActorIds: [actorId],
+      offerEnvironment: OFFER_ENVIRONMENT,
+    });
     const capsule = runtime.feed.current();
     const context = record(runtime.toolSurface.execute('engine.get_turn_context', {
       run_id: capsule.runId,
@@ -144,6 +150,7 @@ describe('engine omitted rider pipeline', () => {
         rare: 'always', misc: 'separate', shortlist: 'all', optionDetail: 'full', nullFields: 'explicit',
         attribution: 'off',
       },
+      offerEnvironment: OFFER_ENVIRONMENT,
     });
     const proseCapsule = proseRuntime.feed.current();
     const prose = record(proseRuntime.toolSurface.execute('engine.get_turn_context', {
@@ -154,7 +161,7 @@ describe('engine omitted rider pipeline', () => {
     }));
     expect(String(prose['document'])).toContain('Omitted rider beside scimitar: conditional damage trigger');
 
-    const human = projectHumanEngineOptions(state, [actorId])[0];
+    const human = projectHumanEngineOptions(state, [actorId], state.revision, OFFER_ENVIRONMENT)[0];
     expect(human?.options.find((entry) => entry.option.label.startsWith('Scimitar'))?.label)
       .toContain('scimitar: conditional attack roll advantage damage is not executed');
   });

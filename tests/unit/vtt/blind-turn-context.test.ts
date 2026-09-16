@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import { BUNDLED_MONSTER_ROSTER } from '../../../src/combat/statblocks/roster';
 import type { PersistedCoordinatorState } from '../../../src/combat/coordinator';
 import { projectDmView, projectPlayerView } from '../../../src/combat/visibility';
-import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
 import { projectEncounterBoard } from '../../../src/vtt/encounter-board';
 import { projectPlayerBoard } from '../../../src/vtt/encounter-projections';
 import {
@@ -38,6 +37,9 @@ import {
   blindFixtureCases,
   serializeBlindFixture,
 } from '../../../tools/blind-context-fixture-report';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
+
+const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
 
 function record(value: unknown, label: string): Readonly<Record<string, unknown>> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -116,6 +118,7 @@ async function hardContext(seed = 5_117_001) {
     dmMode: 'blind',
     toolProfile: 'blind',
     blindFacts: true,
+    offerEnvironment: OFFER_ENVIRONMENT,
     onBlindTurnContextRendered: (value) => { budget = value; },
   });
   const capsule = runtime.feed.current();
@@ -159,7 +162,7 @@ const CANONICAL_MOVEMENT_BY_ACTOR = movementParityRequest.actors.map((actorId) =
   const expected = new Map<string, number>();
   for (let row = 0; row < MOVEMENT_PARITY_CONTEXT.planningState.bounds.rows; row += 1) {
     for (let column = 0; column < MOVEMENT_PARITY_CONTEXT.planningState.bounds.columns; column += 1) {
-      const result = canonicalEngineQueryPort.path(MOVEMENT_PARITY_CONTEXT.planningState, {
+      const result = OFFER_ENVIRONMENT.queries.path(MOVEMENT_PARITY_CONTEXT.planningState, {
         actorId,
         destination: { column, row },
         movement: 'normal',
@@ -466,6 +469,7 @@ describe('blind turn context', () => {
       dmMode: 'blind',
       toolProfile: 'blind',
       turnContextMaximumBytes: 32 * 1024,
+      offerEnvironment: OFFER_ENVIRONMENT,
     }).toolSurface.execute('engine.get_turn_context', {
       run_id: 'encounter:engine-mcp',
       expected_revision: 1,

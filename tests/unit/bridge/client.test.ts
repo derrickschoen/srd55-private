@@ -6,6 +6,7 @@ import {
   type DmBridgeRequest,
 } from '../../../src/vtt/dm-bridge/contracts';
 import { DmEncounterHost } from '../../../src/vtt/dm-encounter-host';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
 import {
   LocalhostDmBridgeClient,
   type BridgeFetch,
@@ -22,6 +23,11 @@ import {
   referenceEncounterSetup,
 } from '../../../src/vtt/reference-encounter';
 import type { SessionRevision } from '../../../src/vtt/session-persistence';
+
+const OFFER_ENVIRONMENT = buildOfferEnvironment({
+  kind: 'configuration',
+  mode: 'legacy_standard',
+});
 
 function response(ok: boolean, status: number, body: unknown) {
   return { ok, status, json: async () => body };
@@ -70,6 +76,7 @@ describe('localhost bridge client and failure containment', () => {
       initialState: state,
       bridge,
       agentSession: { cli: 'codex', sessionId: agentSessionId('019c-host-persisted-thread'), adapterVersion: 1 },
+      offerEnvironment: OFFER_ENVIRONMENT,
     });
     host.start();
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
@@ -112,6 +119,7 @@ describe('localhost bridge client and failure containment', () => {
       initialState: state,
       bridge,
       agentSession: { cli: 'codex', sessionId: agentSessionId('019c-correction-session'), adapterVersion: 1 },
+      offerEnvironment: OFFER_ENVIRONMENT,
     });
     host.start();
     for (let attempt = 0; attempt < 20 && host.bridgeFailureReport() === null; attempt += 1) {
@@ -139,7 +147,9 @@ describe('localhost bridge client and failure containment', () => {
     };
     const failures: unknown[] = [];
     const client = new LocalhostDmBridgeClient('http://127.0.0.1:43173', bridgeFetch, (error) => failures.push(error));
-    const host = new DmEncounterHost('session:mirror-order', new MemoryBrowserSessionStore());
+    const host = new DmEncounterHost('session:mirror-order', new MemoryBrowserSessionStore(), {
+      offerEnvironment: OFFER_ENVIRONMENT,
+    });
     host.connectBridgeMirror(client);
     await client.flushMirror();
 
@@ -151,7 +161,9 @@ describe('localhost bridge client and failure containment', () => {
 
   it('BRIDGE-FAILURE-EXPORT-AND-ABORT exports the browser authority then hard-stops the encounter', async () => {
     const store = new MemoryBrowserSessionStore();
-    const host = new DmEncounterHost('session:bridge-failure', store);
+    const host = new DmEncounterHost('session:bridge-failure', store, {
+      offerEnvironment: OFFER_ENVIRONMENT,
+    });
     const bridgeFetch: BridgeFetch = async () => response(false, 503, { error: 'bridge_down' });
     const client = new LocalhostDmBridgeClient(
       'http://localhost:43173',

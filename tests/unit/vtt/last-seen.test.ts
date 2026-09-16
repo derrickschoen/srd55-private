@@ -8,6 +8,7 @@ import { projectActorKnowledge } from '../../../src/vtt/intel/actor-knowledge';
 import { traceCombatantLine } from '../../../src/combat/cover';
 import type { GridCell } from '../../../src/combat/grid';
 import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
 
 const IDLE = {
   requestSequence: 1,
@@ -16,6 +17,7 @@ const IDLE = {
   continuation: { kind: 'idle' as const },
   pause: null,
 };
+const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
 
 const face = (value: number) => () => (value - 0.5) / 20;
 
@@ -254,6 +256,7 @@ describe('D545 last-seen observation history', () => {
     const hidden = invisible(setup.state, setup.monster);
     const dm = projectDmBoard({
       view: projectDmView(hidden), coordinator: IDLE, controllers: [], history: [],
+      offerEnvironment: OFFER_ENVIRONMENT,
     });
 
     expect(Object.keys(dm.encounter).sort()).toEqual([

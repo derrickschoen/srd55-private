@@ -36,7 +36,6 @@ import type { PlanMaterialityReasonCode } from './plan-materiality';
 import type { EngineOfferableOption } from './turn-proposal';
 import type { EncounterTimelineProjection } from './session-timeline';
 import {
-  createLegacyEngineOptionEnvironmentBinding,
   decodeEngineOptionEnvironmentBinding,
   type EngineOptionEnvironmentBinding,
 } from './offers/offer-environment';
@@ -937,14 +936,6 @@ export function createEngineStateCapsuleForEnvironment(
     ...body,
     digest: digestFor(body),
     generatedAt: new Date(input.generatedAt).toISOString(),
-  });
-}
-
-/** Transitional Slice-2 legacy constructor; the emitted schema-4 binding is never absent. */
-export function createEngineStateCapsule(input: EngineStateCapsuleInput): EngineStateCapsule {
-  return createEngineStateCapsuleForEnvironment({
-    ...input,
-    offerEnvironment: createLegacyEngineOptionEnvironmentBinding(),
   });
 }
 

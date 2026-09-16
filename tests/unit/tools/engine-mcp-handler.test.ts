@@ -14,7 +14,7 @@ import {
   type JsonRpcResponse,
   type McpHandler,
 } from '../../../src/vtt/mcp/handler';
-import { createEngineStateCapsule, engineStateHandle } from '../../../src/vtt/engine-state-capsule';
+import { createEngineStateCapsuleForEnvironment, engineStateHandle } from '../../../src/vtt/engine-state-capsule';
 import {
   engineStateSummaryProofToken,
   SEMANTIC_BOARD_MAX_BYTES,
@@ -23,7 +23,13 @@ import {
   ENGINE_DM_TOOL_NAMES,
   ENGINE_SPECULATIVE_DM_TOOL_NAMES,
 } from '../../../src/vtt/mcp/engine-server';
-import { createEngineMcpRuntime, loadArenaFixture, type EngineMcpRuntime } from '../../../src/vtt/mcp/entrypoint';
+import { loadArenaFixture, type EngineMcpRuntime } from '../../../src/vtt/mcp/entrypoint';
+import * as engineMcpEntrypoint from '../../../src/vtt/mcp/entrypoint';
+import {
+  createDisabledEngineOfferFamilyPolicy,
+} from '../../../src/vtt/offers/offer-environment';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
+import { createUnrepresentedPartyThreatCatalog } from '../../../src/vtt/offers/party-threat-catalog';
 import { canonicalJson } from '../../../src/commands/canonical-json';
 import {
   applyRevisionDelta,
@@ -46,6 +52,22 @@ import {
 } from '../../../src/vtt/mcp/schemas';
 
 const CLIENT_INFO = Object.freeze({ name: 'vitest', version: '1.0.0' });
+const BOUND_OFFER_ENVIRONMENT = buildOfferEnvironment({
+  kind: 'configuration',
+  mode: 'revision_bound',
+  familyPolicy: createDisabledEngineOfferFamilyPolicy(),
+  partyThreatCatalog: createUnrepresentedPartyThreatCatalog(),
+});
+function createEngineMcpRuntime(
+  state: Parameters<typeof engineMcpEntrypoint.createEngineMcpRuntime>[0],
+  options: Omit<NonNullable<Parameters<typeof engineMcpEntrypoint.createEngineMcpRuntime>[1]>,
+    'offerEnvironment'> & { readonly offerEnvironment?: typeof BOUND_OFFER_ENVIRONMENT } = {},
+): ReturnType<typeof engineMcpEntrypoint.createEngineMcpRuntime> {
+  const offerEnvironment = options.offerEnvironment ?? BOUND_OFFER_ENVIRONMENT;
+  const runtime = engineMcpEntrypoint.createEngineMcpRuntime(state, { ...options, offerEnvironment });
+  expect(runtime.feed.current().offerEnvironment).toEqual(offerEnvironment.binding);
+  return runtime;
+}
 const TOOL_NAMES = [
   'engine.get_turn_context',
   'engine.query_tactical_intel',
@@ -378,11 +400,12 @@ function happyArguments(name: typeof TOOL_NAMES[number], state: EncounterState, 
     ];
     const defaultScenario = scenarios[0];
     if (defaultScenario === undefined) throw new Error('Speculative default scenario is absent.');
-    const speculative = createEngineStateCapsule({
+    const speculative = createEngineStateCapsuleForEnvironment({
       runId: capsule.runId,
       branchId: capsule.branchId,
       revision: capsule.revision + 1,
       generatedAt: '2026-08-29T12:00:00.000Z',
+      offerEnvironment: capsule.offerEnvironment,
       request: {
         requestId: 'request:mcp-speculative',
         phase: 'speculative',
@@ -420,11 +443,12 @@ function happyArguments(name: typeof TOOL_NAMES[number], state: EncounterState, 
   if (name === 'engine.submit_plan_adjustment') {
     const capsule = runtime.feed.current();
     if (capsule.request === null || capsule.request.phase === 'speculative') throw new Error('Adjustment fixture request is absent.');
-    const adjusted = createEngineStateCapsule({
+    const adjusted = createEngineStateCapsuleForEnvironment({
       runId: capsule.runId,
       branchId: capsule.branchId,
       revision: capsule.revision + 1,
       generatedAt: capsule.generatedAt,
+      offerEnvironment: capsule.offerEnvironment,
       request: {
         kind: 'plan_adjustment',
         requestId: capsule.request.requestId,
@@ -730,7 +754,7 @@ describe('engine MCP dual-handshake full surface conformance', () => {
       combatant.profile.kind === 'monster' ? [combatant.profile.id] : []).slice(0, 1);
     const players = state.combatants.flatMap((combatant) =>
       combatant.profile.kind === 'player_character' ? [combatant.profile.id] : []);
-    const menu = buildHostScenarioMenu(state, actors, players);
+    const menu = buildHostScenarioMenu(state, actors, players, BOUND_OFFER_ENVIRONMENT);
     const runtime = createEngineMcpRuntime(state, {
       toolProfile: 'dm',
       phase: 'speculative',
@@ -1366,9 +1390,10 @@ describe('engine MCP dual-handshake full surface conformance', () => {
     const { state, runtime } = await fixtureRuntime();
     const facts = fixtureFacts(state, runtime);
     const capsule = runtime.feed.current();
-    runtime.feed.replace(createEngineStateCapsule({
+    runtime.feed.replace(createEngineStateCapsuleForEnvironment({
       runId: capsule.runId, branchId: capsule.branchId, revision: capsule.revision + 1,
       generatedAt: '2026-08-27T12:01:00.000Z', request: capsule.request,
+      offerEnvironment: capsule.offerEnvironment,
       projection: capsule.projection, historyDelta: capsule.historyDelta, rulesIndex: capsule.rulesIndex,
     }));
 
@@ -1386,9 +1411,10 @@ describe('engine MCP dual-handshake full surface conformance', () => {
     const facts = fixtureFacts(state, runtime);
     const capsule = runtime.feed.current();
     if (capsule.request === null || capsule.request.phase === 'speculative') throw new Error('Round request is absent.');
-    runtime.feed.replace(createEngineStateCapsule({
+    runtime.feed.replace(createEngineStateCapsuleForEnvironment({
       runId: capsule.runId, branchId: capsule.branchId, revision: capsule.revision + 1,
       generatedAt: '2026-08-27T12:01:00.000Z',
+      offerEnvironment: capsule.offerEnvironment,
       request: { ...capsule.request, requestId: 'request:concurrent-round' },
       projection: capsule.projection, historyDelta: capsule.historyDelta, rulesIndex: capsule.rulesIndex,
     }));
@@ -1734,6 +1760,15 @@ describe('engine MCP dual-handshake full surface conformance', () => {
       kind: 'plan_adjustment_turn_proposal',
       updates: [{ proposal: { actorId: first, fallbackOptionId } }],
     });
+    const storedPartial = runtime.proposals[1];
+    if (storedPartial?.kind !== 'plan_adjustment_turn_proposal') {
+      throw new Error('Staged plan adjustment was not stored.');
+    }
+    expect(storedPartial.updates).not.toHaveLength(0);
+    for (const update of storedPartial.updates) {
+      expect(update.offerEnvironmentDigest).toBe(BOUND_OFFER_ENVIRONMENT.digest);
+      expect(update.offerEnvironmentDigest).not.toBe(update.resolutionDigest);
+    }
 
     const closedResult = structured(toolCall(runtime.handler, 'engine.submit_plan_adjustment', {
       ...base,
@@ -1837,6 +1872,15 @@ describe('engine MCP dual-handshake full surface conformance', () => {
       idempotency_key: 'adjustment-correction-0001',
       updates: [dodgeUpdate(correctionRuntime, second)],
     }))).toMatchObject({ status: 'proposed', actor_resolutions: [{ actor_id: second }] });
+    const storedCorrection = correctionRuntime.proposals[0];
+    if (storedCorrection?.kind !== 'plan_adjustment_turn_proposal') {
+      throw new Error('Corrected plan adjustment was not stored.');
+    }
+    expect(storedCorrection.updates).not.toHaveLength(0);
+    for (const update of storedCorrection.updates) {
+      expect(update.offerEnvironmentDigest).toBe(BOUND_OFFER_ENVIRONMENT.digest);
+      expect(update.offerEnvironmentDigest).not.toBe(update.resolutionDigest);
+    }
     const fallbackCorrection = structured(toolCall(correctionRuntime.handler, 'engine.submit_plan_adjustment', {
       state_ref: correctionContext['state_ref'],
       request_id: correctionRuntime.feed.current().request?.requestId,
@@ -1930,8 +1974,9 @@ describe('engine MCP dual-handshake full surface conformance', () => {
     const base = `engine://run/${encodeURIComponent(capsule.runId)}`;
     expect(request(runtime.handler, 200, 'subscriptions/listen', { uri: `${base}/turn/current` }).error).toBeUndefined();
     expect(request(runtime.handler, 201, 'subscriptions/listen', { uri: `${base}/room/current` }).error).toBeUndefined();
-    runtime.feed.replace(createEngineStateCapsule({
+    runtime.feed.replace(createEngineStateCapsuleForEnvironment({
       runId: capsule.runId, branchId: capsule.branchId, revision: 2, generatedAt: '2026-08-27T12:01:00.000Z',
+      offerEnvironment: capsule.offerEnvironment,
       request: capsule.request, projection: { ...capsule.projection, room: 2 }, historyDelta: [{ revision: 2, kind: 'room_transition', branchStatus: 'active', encounterRound: capsule.projection.round }], rulesIndex: capsule.rulesIndex,
     }), true);
     expect(runtime.handler.drainNotifications()).toEqual([
@@ -2009,8 +2054,9 @@ describe('engine MCP dual-handshake full surface conformance', () => {
     const capsule = runtime.feed.current();
     expect(JSON.stringify(plan)).not.toContain('proof_token');
     expect(JSON.stringify(plan)).not.toContain(engineStateSummaryProofToken(capsule.digest, 'turn_minimal'));
-    runtime.feed.replace(createEngineStateCapsule({
+    runtime.feed.replace(createEngineStateCapsuleForEnvironment({
       runId: capsule.runId, branchId: capsule.branchId, revision: 2, generatedAt: '2026-08-27T12:02:00.000Z',
+      offerEnvironment: capsule.offerEnvironment,
       request: capsule.request === null ? null : { ...capsule.request, phase: 'correction', correctionNumber: 1 },
       projection: capsule.projection, historyDelta: capsule.historyDelta, rulesIndex: capsule.rulesIndex,
     }));
@@ -2026,8 +2072,9 @@ describe('engine MCP dual-handshake full surface conformance', () => {
   it('pages immutable journal resource chunks with revision-bound cursors', async () => {
     const { runtime } = await fixtureRuntime();
     const capsule = runtime.feed.current();
-    runtime.feed.replace(createEngineStateCapsule({
+    runtime.feed.replace(createEngineStateCapsuleForEnvironment({
       runId: capsule.runId, branchId: capsule.branchId, revision: 2, generatedAt: '2026-08-27T12:03:00.000Z',
+      offerEnvironment: capsule.offerEnvironment,
       request: capsule.request, projection: capsule.projection,
       historyDelta: Array.from({ length: 205 }, (_value, index) => ({ revision: index + 1, kind: `event_${String(index + 1)}`, branchStatus: 'active' as const, encounterRound: 1 })),
       rulesIndex: capsule.rulesIndex,
@@ -2050,8 +2097,9 @@ describe('engine MCP dual-handshake full surface conformance', () => {
   it.each(['engine.validate_proposal', 'engine.submit_proposal', 'engine.submit_round_proposals'] as const)('%s rejects a second fallback during correction with a typed code', async (name) => {
     const { state, runtime } = await fixtureRuntime();
     const capsule = runtime.feed.current();
-    runtime.feed.replace(createEngineStateCapsule({
+    runtime.feed.replace(createEngineStateCapsuleForEnvironment({
       runId: capsule.runId, branchId: capsule.branchId, revision: 2, generatedAt: '2026-08-27T12:04:00.000Z',
+      offerEnvironment: capsule.offerEnvironment,
       request: capsule.request === null ? null : { ...capsule.request, phase: 'correction', correctionNumber: 1 },
       projection: capsule.projection, historyDelta: capsule.historyDelta, rulesIndex: capsule.rulesIndex,
     }));

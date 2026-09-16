@@ -3,9 +3,10 @@ import type { EncounterState } from '../combat/encounter';
 import type { GridCell } from '../combat/grid';
 import type { CombatantId, EngineZoneId } from '../combat/values';
 import { sha256 } from '../crypto/sha256';
-import { enginePlanningCombatantFacts, enginePlanningSemanticZones } from './engine-query-port';
+import { engineActionRegistryForEnvironment } from './engine-query-port';
 import { resolveEngineActorOption, type EngineOfferableOption } from './intent-resolver';
 import { projectFutureMonsterTurns } from './monster-planning-state';
+import type { EngineOptionEnvironment } from './offers/build-offer-environment';
 import type { GuardConditionIdentity } from './speculative-plan-types';
 
 export const PLAN_RELEVANCE_POLICY_VERSION = 'plan-relevance-v2-composite' as const;
@@ -31,6 +32,7 @@ export type PlanRelevanceTurnEvent =
 
 export interface PlanRelevanceContext {
   readonly state: EncounterState;
+  readonly offerEnvironment: EngineOptionEnvironment;
   readonly openMonsterActorIds: readonly CombatantId[];
   readonly remainingOptions: readonly EngineOfferableOption[];
   readonly explicitEngagementAnchors?: readonly PlanRelevanceAnchor[];
@@ -95,8 +97,12 @@ function canonicalConditions(conditions: readonly GuardConditionIdentity[]): rea
   return [...conditions].sort((left, right) => canonicalJson(left).localeCompare(canonicalJson(right)));
 }
 
-function proposalRecord(state: EncounterState, option: EngineOfferableOption): PlanRelevanceProposalRecord {
-  const resolution = resolveEngineActorOption(state, option);
+function proposalRecord(
+  state: EncounterState,
+  option: EngineOfferableOption,
+  offerEnvironment: EngineOptionEnvironment,
+): PlanRelevanceProposalRecord {
+  const resolution = resolveEngineActorOption(state, option, offerEnvironment);
   return resolution.valid
     ? {
         actorId: option.actorId,
@@ -131,10 +137,12 @@ function canonicalTurnEvents(events: readonly PlanRelevanceTurnEvent[]): readonl
 export function createPlanRelevanceRecord(context: PlanRelevanceContext): PlanRelevanceRecord {
   const openMonsterActorIds = uniqueSorted(context.openMonsterActorIds);
   const planningState = projectFutureMonsterTurns(context.state, openMonsterActorIds);
+  const registry = engineActionRegistryForEnvironment(context.state, context.offerEnvironment);
   const open = new Set(openMonsterActorIds);
   const remaining = context.remainingOptions.filter((option) => open.has(option.actorId))
     .sort((left, right) => left.actorId.localeCompare(right.actorId));
-  const proposals = remaining.map((option) => proposalRecord(planningState, option));
+  const proposals = remaining.map((option) =>
+    proposalRecord(planningState, option, context.offerEnvironment));
   const configuredAnchors = context.explicitEngagementAnchors ?? [];
   const relevantIds = uniqueSorted([
     ...openMonsterActorIds,
@@ -149,7 +157,7 @@ export function createPlanRelevanceRecord(context: PlanRelevanceContext): PlanRe
     const combatant = byCombatant.get(combatantId);
     if (combatant === undefined) return [];
     const position = positions.get(combatantId);
-    const planning = enginePlanningCombatantFacts(context.state, combatantId);
+    const planning = registry.planningFactsFor(combatantId);
     return [{
       combatantId, life: combatant.life, boardPresent: position !== undefined,
       position: position === undefined ? null : { ...position },
@@ -157,7 +165,7 @@ export function createPlanRelevanceRecord(context: PlanRelevanceContext): PlanRe
     }];
   });
   const zoneIds = uniqueSorted(configuredAnchors.flatMap((anchor) => anchor.kind === 'semantic_zone' ? [anchor.zoneId] : []));
-  const zoneStates = new Map(enginePlanningSemanticZones(context.state).map((zone) => [zone.id, zone.active] as const));
+  const zoneStates = new Map(registry.semanticZones().map((zone) => [zone.id, zone.active] as const));
   return {
     policy: PLAN_RELEVANCE_POLICY_VERSION,
     openMonsterActorIds,

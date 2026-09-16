@@ -8,6 +8,7 @@ import {
 } from '../../../src/combat/statblock';
 import { SCOUT, SPY } from '../../../src/combat/statblocks/mercenary-company';
 import { PRIEST } from '../../../src/combat/statblocks/monsters';
+import { BROWN_BEAR, DIRE_WOLF } from '../../../src/combat/statblocks/wild-beasts';
 import { armorClass, worldObjectId } from '../../../src/combat/values';
 import type { WorldObject } from '../../../src/combat/world-objects';
 import { EngineRoundSession, type AuthorizedEngineTurnProposal } from '../../../src/vtt/engine-round-session';
@@ -18,11 +19,11 @@ import {
 } from '../../../src/vtt/mcp/entrypoint';
 import {
   availableEngineActorOptions,
-  pureTurnProposalResolver,
+  createPureTurnProposalResolver,
+  engineActorOptionsForEnvironment,
   resolveEngineActorOption,
 } from '../../../src/vtt/intent-resolver';
 import {
-  engineActionId,
   engineOptionId,
   type EngineOfferableOption,
   type EngineTurnProposal,
@@ -30,9 +31,16 @@ import {
 import { placedToken, playerProfile } from '../combat/fixtures';
 import { engineActorOptions } from '../../../src/vtt/turn-option-registry';
 import { generateStandardOfferDeclarations } from '../../../src/vtt/offers/offer-declarations';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
+
+const OFFER_ENVIRONMENT = buildOfferEnvironment({
+  kind: 'configuration',
+  mode: 'legacy_standard',
+});
+const TURN_PROPOSAL_RESOLVER = createPureTurnProposalResolver(OFFER_ENVIRONMENT);
 
 function monsterProfile(
-  statblock: typeof SCOUT | typeof SPY | typeof PRIEST,
+  statblock: typeof SCOUT | typeof SPY | typeof PRIEST | typeof BROWN_BEAR | typeof DIRE_WOLF,
   key: string,
   initiativeBonus = 100,
 ): CombatantProfile {
@@ -73,7 +81,7 @@ function proposalFor(state: EncounterState, option: EngineOfferableOption): Engi
 
 function authorize(state: EncounterState, option: EngineOfferableOption): AuthorizedEngineTurnProposal {
   const proposal = proposalFor(state, option);
-  const resolution = pureTurnProposalResolver.resolve(state, proposal);
+  const resolution = TURN_PROPOSAL_RESOLVER.resolve(state, proposal);
   if (!resolution.valid) {
     throw new Error(`Composite fixture was refused: ${resolution.refusals.map((entry) => entry.code).join(', ')}`);
   }
@@ -123,9 +131,9 @@ describe('complete action economy and composite turn proposals', () => {
     const hidden = partition.humanOnly.find((option) => option.label === 'Disengage');
     if (hidden === undefined) throw new Error('Composite hidden-id fixture omitted Disengage.');
     const forged = engineOptionId(hidden.optionId);
-    expect(availableEngineActorOptions(state, scout.id).map((option) => option.optionId))
+    expect(availableEngineActorOptions(state, scout.id, OFFER_ENVIRONMENT).map((option) => option.optionId))
       .not.toContain(forged);
-    expect(pureTurnProposalResolver.resolve(state, {
+    expect(TURN_PROPOSAL_RESOLVER.resolve(state, {
       actorId: scout.id,
       expectedRevision: state.revision,
       primaryOptionId: forged,
@@ -145,7 +153,7 @@ describe('complete action economy and composite turn proposals', () => {
   it('projects fresh options for every requested generated-room monster turn', async () => {
     const state = await loadArenaFixture('tests/fixtures/arena-basis-hard/seed-5117005.json');
     const scoutId = 'combatant:generated-5117005-monster-3';
-    const runtime = createEngineMcpRuntime(state, { revision: 1 });
+    const runtime = createEngineMcpRuntime(state, { revision: 1, offerEnvironment: OFFER_ENVIRONMENT });
     const scout = runtime.feed.current().projection.combatants.find((actor) => actor.id === scoutId);
     const labels = scout?.options.map((option) => option.label) ?? [];
 
@@ -158,7 +166,7 @@ describe('complete action economy and composite turn proposals', () => {
   it('offers and executes Scout Longbow twice in one main action', () => {
     const scout = monsterProfile(SCOUT, 'scout');
     const state = encounter([{ profile: scout, column: 0, row: 2 }], 20);
-    const option = availableEngineActorOptions(state, scout.id)
+    const option = availableEngineActorOptions(state, scout.id, OFFER_ENVIRONMENT)
       .find((candidate) => mainMultiattack(candidate, 'longbow', 2) && candidate.actionSlots.length === 1);
     if (option === undefined) throw new Error('Scout Longbow ×2 option is absent.');
 
@@ -170,7 +178,12 @@ describe('complete action economy and composite turn proposals', () => {
         { slot: 'main', kind: 'attack', actionId: 'longbow' },
       ]);
 
-    const session = new EngineRoundSession(state, mulberry32(418_201), { kind: 'unattended', askDefault: 'decline' });
+    const session = new EngineRoundSession(
+      state,
+      mulberry32(418_201),
+      { kind: 'unattended', askDefault: 'decline' },
+      OFFER_ENVIRONMENT,
+    );
     session.applyResolvedMechanics([authorized], null);
     expect(session.currentState().eventLog.filter((event) =>
       event.type === 'attack_resolved' && event.actor === scout.id))
@@ -180,7 +193,7 @@ describe('complete action economy and composite turn proposals', () => {
   it('executes Priest movement, Radiant Flame twice, and Divine Aid Bless in one turn', () => {
     const priest = monsterProfile(PRIEST, 'priest');
     const state = encounter([{ profile: priest, column: 0, row: 2 }], 13);
-    const option = availableEngineActorOptions(state, priest.id).find((candidate) =>
+    const option = availableEngineActorOptions(state, priest.id, OFFER_ENVIRONMENT).find((candidate) =>
       mainMultiattack(candidate, 'radiant-flame', 2) &&
       candidate.actionSlots.some((slot) => slot.slot === 'bonus' && slot.use.kind === 'cast_spell' &&
         slot.use.sourceActionId === 'divine-aid' && slot.use.spellId === 'bless'));
@@ -202,7 +215,12 @@ describe('complete action economy and composite turn proposals', () => {
       { slot: 'bonus', kind: 'cast_spell', actionId: 'divine-aid', spellId: 'bless' },
     ]);
 
-    const session = new EngineRoundSession(state, mulberry32(418_202), { kind: 'unattended', askDefault: 'decline' });
+    const session = new EngineRoundSession(
+      state,
+      mulberry32(418_202),
+      { kind: 'unattended', askDefault: 'decline' },
+      OFFER_ENVIRONMENT,
+    );
     session.applyResolvedMechanics([authorized], null);
     const after = session.currentState();
     expect(after.eventLog.filter((event) =>
@@ -219,7 +237,7 @@ describe('complete action economy and composite turn proposals', () => {
   it('spends the correct slot for Cunning Action utilities and applies Dash before movement', () => {
     const spy = monsterProfile(SPY, 'spy');
     const adjacent = encounter([{ profile: spy, column: 0, row: 2 }], 1);
-    const disengage = availableEngineActorOptions(adjacent, spy.id).find((candidate) =>
+    const disengage = availableEngineActorOptions(adjacent, spy.id, OFFER_ENVIRONMENT).find((candidate) =>
       candidate.label === 'Shortsword -> combatant:target + Cunning Action/Disengage');
     if (disengage === undefined) throw new Error('Spy attack + bonus Disengage option is absent.');
 
@@ -227,6 +245,7 @@ describe('complete action economy and composite turn proposals', () => {
       adjacent,
       mulberry32(418_203),
       { kind: 'unattended', askDefault: 'decline' },
+      OFFER_ENVIRONMENT,
     );
     disengageSession.applyResolvedMechanics([authorize(adjacent, disengage)], null);
     const resourceEvents = disengageSession.currentState().eventLog.flatMap((event) =>
@@ -237,7 +256,7 @@ describe('complete action economy and composite turn proposals', () => {
     }));
 
     const distant = encounter([{ profile: spy, column: 0, row: 2 }], 10);
-    const attackAndDash = availableEngineActorOptions(distant, spy.id).find((candidate) =>
+    const attackAndDash = availableEngineActorOptions(distant, spy.id, OFFER_ENVIRONMENT).find((candidate) =>
       candidate.label === 'Shortsword -> combatant:target + Cunning Action/Dash');
     if (attackAndDash === undefined) throw new Error('Spy attack + bonus Dash option is absent.');
     expect(attackAndDash.movement.preference.maximumFeet).toBe(60);
@@ -246,6 +265,7 @@ describe('complete action economy and composite turn proposals', () => {
       distant,
       mulberry32(418_204),
       { kind: 'unattended', askDefault: 'decline' },
+      OFFER_ENVIRONMENT,
     );
     dashSession.applyResolvedMechanics([authorize(distant, attackAndDash)], null);
     expect(dashSession.currentState().tokens.find((token) => token.combatantId === spy.id)?.position.column)
@@ -264,7 +284,7 @@ describe('complete action economy and composite turn proposals', () => {
         ? { ...combatant, turn: { ...combatant.turn, action: { kind: 'spent' } } }
         : combatant),
     };
-    expect(availableEngineActorOptions(spentMain, priest.id)).toEqual([]);
+    expect(availableEngineActorOptions(spentMain, priest.id, OFFER_ENVIRONMENT)).toEqual([]);
 
     const spentBonus: EncounterState = {
       ...available,
@@ -272,7 +292,7 @@ describe('complete action economy and composite turn proposals', () => {
         ? { ...combatant, turn: { ...combatant.turn, bonusActionAvailable: false } }
         : combatant),
     };
-    expect(availableEngineActorOptions(spentBonus, priest.id).every((option) =>
+    expect(availableEngineActorOptions(spentBonus, priest.id, OFFER_ENVIRONMENT).every((option) =>
       option.actionSlots.every((slot) => slot.slot === 'main'))).toBe(true);
 
     const reference = PRIEST.sourceDetails.bonusActions.kind === 'present'
@@ -297,44 +317,40 @@ describe('complete action economy and composite turn proposals', () => {
           }
         : combatant),
     };
-    expect(availableEngineActorOptions(exhausted, priest.id).some((option) =>
+    expect(availableEngineActorOptions(exhausted, priest.id, OFFER_ENVIRONMENT).some((option) =>
       option.actionSlots.some((slot) => slot.use.kind === 'cast_spell' && slot.use.spellId === 'bless')))
       .toBe(false);
   });
 
   it('rejects a multiattack when even one declared component is illegal', () => {
-    const scout = monsterProfile(SCOUT, 'partial-scout');
-    const state = encounter([{ profile: scout, column: 0, row: 2 }], 8);
-    const illegal: EngineOfferableOption = {
-      optionId: engineOptionId('option:partial-illegal'),
-      actorId: scout.id,
-      revision: state.revision,
-      label: 'Longbow plus homebrew missing attack',
-      movement: {
-        preference: { willingness: 'only_if_required', maximumFeet: 30, opportunityRisk: 'avoid' },
-        engagement: {
-          stance: 'maintain_range',
-          anchor: { kind: 'combatant', combatantId: playerProfile('target').id },
-        },
-      },
-      actionSlots: [{
-        slot: 'main',
-        use: {
-          kind: 'multiattack',
-          actionId: engineActionId('multiattack'),
-          components: [
-            { kind: 'attack', actionId: engineActionId('longbow'), target: { kind: 'combatant', combatantId: playerProfile('target').id }, omittedRiders: [] },
-            { kind: 'attack', actionId: engineActionId('homebrew-missing'), target: { kind: 'combatant', combatantId: playerProfile('target').id }, omittedRiders: [] },
-          ],
-        },
-      }],
-      resourceCostLabels: [],
-      omittedRiders: [],
+    const bear = monsterProfile(BROWN_BEAR, 'partial-bear');
+    const state = encounter([{ profile: bear, column: 0, row: 2 }], 3);
+    const options = availableEngineActorOptions(state, bear.id, OFFER_ENVIRONMENT);
+    const option = options.find((candidate) => candidate.actionSlots.some((slot) =>
+      slot.slot === 'main' && slot.use.kind === 'multiattack' &&
+      slot.use.components[0]?.actionId === 'bite' &&
+      slot.use.components[1]?.actionId === 'claw'));
+    if (option === undefined) throw new Error('Brown Bear Bite + Claw option is absent.');
+    const wolf = monsterProfile(DIRE_WOLF, 'partial-wolf');
+    if (wolf.kind !== 'monster') throw new Error('Dire Wolf fixture must be a monster.');
+    const illegalState: EncounterState = {
+      ...state,
+      combatants: state.combatants.map((combatant) => combatant.profile.id === bear.id
+        ? { ...combatant, profile: { ...combatant.profile, statblockId: wolf.statblockId } }
+        : combatant),
     };
-    expect(resolveEngineActorOption(state, illegal)).toEqual({
+    const bite = engineActorOptionsForEnvironment(
+      illegalState,
+      bear.id,
+      OFFER_ENVIRONMENT,
+    ).offerable.find((candidate) => candidate.actionSlots.some((slot) =>
+      slot.slot === 'main' && slot.use.kind === 'attack' && slot.use.actionId === 'bite'));
+    if (bite === undefined) throw new Error('Dire Wolf standalone Bite option is absent.');
+    expect(resolveEngineActorOption(illegalState, bite, OFFER_ENVIRONMENT).valid).toBe(true);
+    expect(resolveEngineActorOption(illegalState, option, OFFER_ENVIRONMENT)).toEqual({
       valid: false,
       code: 'MULTIATTACK_COMBINATION_ILLEGAL',
-      summary: 'combatant:partial-scout: Longbow plus homebrew missing attack is unavailable',
+      summary: 'combatant:partial-bear: Bite + Claw -> combatant:target is unavailable',
     });
   });
 
@@ -362,7 +378,7 @@ describe('complete action economy and composite turn proposals', () => {
       createdRevision: 0,
     };
     const eligible = encounter([{ profile: scout, column: 0, row: 2 }], 8, [actorObject]);
-    const offered = availableEngineActorOptions(eligible, scout.id)
+    const offered = availableEngineActorOptions(eligible, scout.id, OFFER_ENVIRONMENT)
       .find((option) => option.actionSlots.some((slot) =>
         slot.use.kind === 'use_world_object' && slot.use.actionId === 'ring-signal-bell'));
     expect(offered?.label).toBe('ring-signal-bell @ Signal Bell');
@@ -378,7 +394,7 @@ describe('complete action economy and composite turn proposals', () => {
       })),
     };
     const ineligible = encounter([{ profile: scout, column: 0, row: 2 }], 8, [ineligibleObject]);
-    expect(availableEngineActorOptions(ineligible, scout.id).some((option) =>
+    expect(availableEngineActorOptions(ineligible, scout.id, OFFER_ENVIRONMENT).some((option) =>
       option.actionSlots.some((slot) => slot.use.kind === 'use_world_object'))).toBe(false);
   });
 
@@ -389,7 +405,7 @@ describe('complete action economy and composite turn proposals', () => {
       { profile: scout, column: 0, row: 1 },
       { profile: priest, column: 0, row: 3 },
     ], 10);
-    const runtime = createEngineMcpRuntime(state, { revision: 42 });
+    const runtime = createEngineMcpRuntime(state, { revision: 42, offerEnvironment: OFFER_ENVIRONMENT });
     const capsule = runtime.feed.current();
     const labels = capsule.projection.combatants.flatMap((actor) => actor.options.map((option) => option.label));
     expect(labels).toContain('Longbow + Longbow -> combatant:target');

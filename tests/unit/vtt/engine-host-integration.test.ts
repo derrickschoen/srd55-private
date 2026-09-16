@@ -14,6 +14,12 @@ import {
   referenceEncounterSetup,
 } from '../../../src/vtt/reference-encounter';
 import { MemoryBrowserSessionStore, type SessionRevision } from '../../../src/vtt/session-persistence';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
+
+const OFFER_ENVIRONMENT = buildOfferEnvironment({
+  kind: 'configuration',
+  mode: 'legacy_standard',
+});
 
 function identities(): readonly ControllerIdentity[] {
   return [...REFERENCE_PLAYER_IDS, REFERENCE_MONSTER_ID].map((combatantId) => ({
@@ -35,7 +41,11 @@ async function settleUntil(predicate: () => boolean): Promise<void> {
 describe('engine host adjudication and DM control integration', () => {
   it('journals an engine adjudication request, restores its tray entry, and applies only the DM verdict', () => {
     const store = new MemoryBrowserSessionStore();
-    const host = new DmEncounterHost('session:engine-adjudication', store);
+    const host = new DmEncounterHost(
+      'session:engine-adjudication',
+      store,
+      { offerEnvironment: OFFER_ENVIRONMENT },
+    );
     const snapshot = host.snapshot();
     const latest = snapshot.dm.history.at(-1);
     if (latest === undefined) throw new Error('Host needs an initial journal revision.');
@@ -66,7 +76,11 @@ describe('engine host adjudication and DM control integration', () => {
     expect(host.snapshot().dm.history.map((entry) => entry.transition.kind)).toContain('engine_adjudication_requested');
 
     host.close();
-    const restored = new DmEncounterHost('session:engine-adjudication', store);
+    const restored = new DmEncounterHost(
+      'session:engine-adjudication',
+      store,
+      { offerEnvironment: OFFER_ENVIRONMENT },
+    );
     expect(restored.snapshot().dm.decisionTray.entries).toContainEqual(expect.objectContaining({
       kind: 'engine_adjudication',
       request: expect.objectContaining({ adjudicationRequestId: request.adjudicationRequestId }),
@@ -118,6 +132,7 @@ describe('engine host adjudication and DM control integration', () => {
       initialState: state,
       initialControllers: identities(),
       bridge,
+      offerEnvironment: OFFER_ENVIRONMENT,
       agentSession: {
         cli: 'codex',
         sessionId: agentSessionId('agent-session:takeover'),

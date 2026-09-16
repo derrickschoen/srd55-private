@@ -36,16 +36,16 @@ import {
 } from '../../../src/vtt/engine-round-session';
 import {
   availableEngineActorOptions,
-  pureTurnProposalResolver,
+  createPureTurnProposalResolver,
   type EngineTurnProposal,
 } from '../../../src/vtt/intent-resolver';
-import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
 import { generateRoom } from '../../../src/vtt/room-generator';
 import { freshMonsterPlanningState, projectFutureMonsterTurns } from '../../../src/vtt/monster-planning-state';
 import { decodeSessionSnapshotV1 } from '../../../src/vtt/arena-fixture';
 import { runCommandBoundaryTransaction } from '../../../src/vtt/engine-round-application';
 import { reduceSessionEncounter } from '../../../src/vtt/session-encounter-reducer';
 import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
 
 const REQUEST: EngineRoundCapsuleRequest = {
   runId: encounterSessionId('encounter:engine-round-session-test'),
@@ -63,6 +63,8 @@ const ARCHER_ID = combatantId('combatant:generated-3943001-monster-3');
 const FOCUS_ID = combatantId('combatant:fighter');
 const CLERIC_ID = combatantId('combatant:cleric');
 const WIZARD_ID = combatantId('combatant:wizard');
+const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
+const TURN_PROPOSAL_RESOLVER = createPureTurnProposalResolver(OFFER_ENVIRONMENT);
 
 function recordBoundaryPrefixDraw(rng: TransactionalRollRng): void {
   const component = rng.beginComponent({
@@ -114,7 +116,7 @@ function attackProposal(
   targetId: CombatantId,
 ): EngineTurnProposal {
   const planningState = projectFutureMonsterTurns(state, [actorId]);
-  const options = availableEngineActorOptions(planningState, actorId);
+  const options = availableEngineActorOptions(planningState, actorId, OFFER_ENVIRONMENT);
   const primary = options.find((option) => option.actionSlots.some((slot) => {
     const use = slot.use;
     if (use.kind === 'attack') return use.actionId === actionId && use.target.kind === 'combatant' && use.target.combatantId === targetId;
@@ -132,7 +134,7 @@ function attackProposal(
 
 function authorized(state: EncounterState, proposal: EngineTurnProposal): AuthorizedEngineTurnProposal {
   const planningState = projectFutureMonsterTurns(state, [proposal.actorId]);
-  const resolution = pureTurnProposalResolver.resolve(planningState, proposal);
+  const resolution = TURN_PROPOSAL_RESOLVER.resolve(planningState, proposal);
   if (!resolution.valid) throw new Error(`Test proposal was not authorizable: ${resolution.refusals.map((entry) => entry.code).join(', ')}`);
   return {
     proposal, option: resolution.option, primaryOption: resolution.primaryOption,
@@ -171,7 +173,7 @@ function segmentedState(
 
 function dodgeProposal(state: EncounterState, actorId: CombatantId): EngineTurnProposal {
   const planningState = projectFutureMonsterTurns(state, [actorId]);
-  const dodge = availableEngineActorOptions(planningState, actorId)
+  const dodge = availableEngineActorOptions(planningState, actorId, OFFER_ENVIRONMENT)
     .find((option) => option.actionSlots.some((slot) => slot.slot === 'main' && slot.use.kind === 'dodge'));
   if (dodge === undefined) throw new Error(`Test fixture omitted Dodge for ${actorId}.`);
   return {
@@ -233,6 +235,7 @@ describe('authoritative engine round session', () => {
       queued,
       mulberry32(58_410_003),
       { kind: 'unattended', askDefault: 'decline' },
+      OFFER_ENVIRONMENT,
     );
 
     const applied = session.applyResolvedMechanics([], null);
@@ -266,7 +269,7 @@ describe('authoritative engine round session', () => {
     };
     const session = new EngineRoundSession(killed, mulberry32(46_600_004), {
       kind: 'unattended', askDefault: 'decline',
-    });
+    }, OFFER_ENVIRONMENT);
 
     session.beginRoundWithoutSkipping({ ...REQUEST, revision: killed.revision }, null);
 
@@ -295,7 +298,7 @@ describe('authoritative engine round session', () => {
     };
     const lion = authorized(state, attackProposal(state, BRUTE_ID, 'rend', FOCUS_ID));
     expect(lion.mechanics.actionSlots.map((use) => use.kind)).toEqual(['attack', 'attack']);
-    const mixedOption = availableEngineActorOptions(state, BRUTE_ID).find((option) =>
+    const mixedOption = availableEngineActorOptions(state, BRUTE_ID, OFFER_ENVIRONMENT).find((option) =>
       option.label.startsWith('Rend + Roar') && option.actionSlots.some((slot) =>
         slot.slot === 'main' && slot.use.kind === 'multiattack' &&
         slot.use.components.every((component) => component.target.kind === 'combatant' &&
@@ -313,7 +316,7 @@ describe('authoritative engine round session', () => {
 
     const session = new EngineRoundSession(state, mulberry32(46_600_002), {
       kind: 'unattended', askDefault: 'decline',
-    });
+    }, OFFER_ENVIRONMENT);
     session.applyResolvedMechanics([mixed], null);
     const events = session.currentState().eventLog.filter((event) =>
       (event.type === 'attack_resolved' && event.actor === BRUTE_ID) ||
@@ -331,6 +334,7 @@ describe('authoritative engine round session', () => {
       state,
       mulberry32(8_274_114),
       { kind: 'unattended', askDefault: 'decline' },
+      OFFER_ENVIRONMENT,
     );
     session.applyResolvedMechanics([archer], null);
 
@@ -366,6 +370,7 @@ describe('authoritative engine round session', () => {
       state,
       mulberry32(8_274_115),
       { kind: 'unattended', askDefault: 'decline' },
+      OFFER_ENVIRONMENT,
     );
     session.applyResolvedMechanics([archer], null);
 
@@ -383,6 +388,7 @@ describe('authoritative engine round session', () => {
       segmentedState(),
       mulberry32(8_274_113),
       { kind: 'unattended', askDefault: 'decline' },
+      OFFER_ENVIRONMENT,
     );
 
     session.beginRoundWithoutSkipping(REQUEST, null);
@@ -416,6 +422,7 @@ describe('authoritative engine round session', () => {
         segmentedState(),
         mulberry32(6_103_921),
         { kind: 'unattended', askDefault: 'decline' },
+        OFFER_ENVIRONMENT,
       );
       session.beginRoundWithoutSkipping(REQUEST, null);
       completeDodge(session, FOCUS_ID);
@@ -443,6 +450,7 @@ describe('authoritative engine round session', () => {
       state,
       mulberry32(7_210_411),
       { kind: 'unattended', askDefault: 'take' },
+      OFFER_ENVIRONMENT,
     );
     session.beginRoundWithoutSkipping(REQUEST, null);
     session.completeScriptedPcTurn({
@@ -516,11 +524,13 @@ describe('authoritative engine round session', () => {
       started,
       mulberry32(seed),
       { kind: 'unattended', askDefault: 'decline' },
+      OFFER_ENVIRONMENT,
     );
     const untouchedControl = new EngineRoundSession(
       started,
       mulberry32(seed),
       { kind: 'unattended', askDefault: 'decline' },
+      OFFER_ENVIRONMENT,
     );
     const beforeFailureBytes = canonicalJson(failedSession.currentState());
 
@@ -608,11 +618,13 @@ describe('authoritative engine round session', () => {
       state,
       mulberry32(seed),
       { kind: 'unattended', askDefault: 'take' },
+      OFFER_ENVIRONMENT,
     );
     const untouchedControl = new EngineRoundSession(
       state,
       mulberry32(seed),
       { kind: 'unattended', askDefault: 'take' },
+      OFFER_ENVIRONMENT,
     );
     const beforeFailureBytes = canonicalJson(failedSession.currentState());
 
@@ -677,6 +689,7 @@ describe('authoritative engine round session', () => {
       started,
       mulberry32(seed),
       { kind: 'unattended', askDefault: 'decline' },
+      OFFER_ENVIRONMENT,
     );
     const first = authorized(started, attackProposal(started, KILLER_ID, 'dagger', FOCUS_ID));
 
@@ -706,7 +719,7 @@ describe('authoritative engine round session', () => {
       targetId: CombatantId,
       rng: ReturnType<typeof mulberry32>,
     ): EncounterState => {
-      const action = canonicalEngineQueryPort.actions(current, actorId)
+      const action = OFFER_ENVIRONMENT.queries.actions(current, actorId)
         .find((candidate): candidate is MonsterAttackAction =>
           candidate.kind === 'attack' && candidate.id === actionId);
       if (action === undefined) throw new Error(`Direct oracle omitted ${actionId}.`);
@@ -772,6 +785,7 @@ describe('authoritative engine round session', () => {
         generateRoom(seed).encounter.state,
         mulberry32(8_274_113),
         { kind: 'unattended', askDefault: 'decline' },
+        OFFER_ENVIRONMENT,
       );
 
       const prepared = session.prepareRound(REQUEST, null);
@@ -795,7 +809,7 @@ describe('authoritative engine round session', () => {
         decision.kind === 'death_save')).toBe(false);
       for (const actorId of prepared.snapshot.capsule.request?.actors ?? []) {
         const proposal = dodgeProposal(session.currentState(), actorId);
-        const resolution = pureTurnProposalResolver.resolve(
+        const resolution = TURN_PROPOSAL_RESOLVER.resolve(
           projectFutureMonsterTurns(session.currentState(), [actorId]),
           proposal,
         );
@@ -815,7 +829,12 @@ describe('authoritative engine round session', () => {
       started = reduceEncounter(started, { type: 'end_turn', actor: active }, rng).state;
     }
     expect(started.pendingDecisions).toContainEqual(expect.objectContaining({ kind: 'death_save' }));
-    const session = new EngineRoundSession(started, rng, { kind: 'dm_attended' });
+    const session = new EngineRoundSession(
+      started,
+      rng,
+      { kind: 'dm_attended' },
+      OFFER_ENVIRONMENT,
+    );
 
     expect(() => session.prepareRound(REQUEST, null)).toThrow(
       'The turn cannot advance while a pending decision for this boundary is unresolved.',
@@ -846,7 +865,12 @@ describe('authoritative engine round session', () => {
     };
     const killer = authorized(state, attackProposal(state, KILLER_ID, 'dagger', FOCUS_ID));
     const archer = authorized(state, attackProposal(state, ARCHER_ID, 'longbow', FOCUS_ID));
-    const session = new EngineRoundSession(state, mulberry32(19), { kind: 'unattended', askDefault: 'decline' });
+    const session = new EngineRoundSession(
+      state,
+      mulberry32(19),
+      { kind: 'unattended', askDefault: 'decline' },
+      OFFER_ENVIRONMENT,
+    );
 
     const applied = session.applyResolvedMechanics([killer, archer], null);
 
@@ -898,7 +922,7 @@ describe('authoritative engine round session', () => {
     const lion = authorized(state, attackProposal(state, BRUTE_ID, 'rend', FOCUS_ID));
     const session = new EngineRoundSession(state, mulberry32(46_600_006), {
       kind: 'unattended', askDefault: 'decline',
-    });
+    }, OFFER_ENVIRONMENT);
 
     const applied = session.applyResolvedMechanics([lion], null);
 
@@ -935,6 +959,7 @@ describe('authoritative engine round session', () => {
       state,
       mulberry32(19),
       { kind: 'unattended', askDefault: 'decline' },
+      OFFER_ENVIRONMENT,
     );
     session.beginRoundWithoutSkipping(REQUEST, null);
     session.completeScriptedPcTurn({
@@ -974,7 +999,12 @@ describe('authoritative engine round session', () => {
         : token),
     };
     const earlierDodge = authorized(displacedState, dodgeProposal(displacedState, KILLER_ID));
-    const session = new EngineRoundSession(displacedState, mulberry32(23), { kind: 'unattended', askDefault: 'decline' });
+    const session = new EngineRoundSession(
+      displacedState,
+      mulberry32(23),
+      { kind: 'unattended', askDefault: 'decline' },
+      OFFER_ENVIRONMENT,
+    );
 
     const applied = session.applyResolvedMechanics([earlierDodge, archer], null);
 
@@ -997,7 +1027,12 @@ describe('authoritative engine round session', () => {
       [FOCUS_ID, { column: 4, row: 0 }],
     ]));
     const archer = authorized(state, attackProposal(state, ARCHER_ID, 'longbow', FOCUS_ID));
-    const session = new EngineRoundSession(state, mulberry32(29), { kind: 'unattended', askDefault: 'decline' });
+    const session = new EngineRoundSession(
+      state,
+      mulberry32(29),
+      { kind: 'unattended', askDefault: 'decline' },
+      OFFER_ENVIRONMENT,
+    );
 
     const applied = session.applyResolvedMechanics([archer], null);
     const attack = session.currentState().eventLog.find((event) =>
@@ -1018,7 +1053,8 @@ describe('authoritative engine round session', () => {
       [FOCUS_ID, { column: 4, row: 0 }],
     ]), 130);
     const baseProposal = attackProposal(authorizationState, ARCHER_ID, 'longbow', FOCUS_ID);
-    const secondOffense = availableEngineActorOptions(authorizationState, ARCHER_ID).find((option) =>
+    const secondOffense = availableEngineActorOptions(authorizationState, ARCHER_ID, OFFER_ENVIRONMENT)
+      .find((option) =>
       option.optionId !== baseProposal.primaryOptionId && option.actionSlots.some((slot) =>
         slot.use.kind === 'attack' || slot.use.kind === 'multiattack'));
     if (secondOffense === undefined) throw new Error('Fixture omitted a second offensive option.');
@@ -1033,7 +1069,12 @@ describe('authoritative engine round session', () => {
         return token;
       }),
     };
-    const session = new EngineRoundSession(displacedState, mulberry32(31), { kind: 'unattended', askDefault: 'decline' });
+    const session = new EngineRoundSession(
+      displacedState,
+      mulberry32(31),
+      { kind: 'unattended', askDefault: 'decline' },
+      OFFER_ENVIRONMENT,
+    );
 
     const applied = session.applyResolvedMechanics([archer], null);
 
@@ -1059,6 +1100,7 @@ describe('authoritative engine round session', () => {
       positioned,
       mulberry32(58_310_201),
       { kind: 'unattended', askDefault: 'decline' },
+      OFFER_ENVIRONMENT,
     );
     session.beginRoundWithoutSkipping(REQUEST, null);
     const active = session.currentState();
@@ -1097,6 +1139,7 @@ describe('authoritative engine round session', () => {
       prePostPositioned,
       mulberry32(58_310_204),
       { kind: 'unattended', askDefault: 'decline' },
+      OFFER_ENVIRONMENT,
     );
     prePostSession.beginRoundWithoutSkipping(REQUEST, null);
     const beforePreBoundary = prePostSession.currentState();

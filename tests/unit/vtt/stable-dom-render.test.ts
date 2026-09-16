@@ -15,6 +15,9 @@ import { projectHumanEngineOptions } from '../../../src/vtt/encounter-board-proj
 import { generateRoom } from '../../../src/vtt/room-generator';
 import { freshMonsterPlanningState } from '../../../src/vtt/monster-planning-state';
 import { statblockId } from '../../../src/combat/values';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
+
+const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
 
 describe('stable VTT control rendering', () => {
   let restoreDocument: () => void;
@@ -36,7 +39,7 @@ describe('stable VTT control rendering', () => {
         : combatant),
     });
     const catalog = renderHumanEngineOptionCatalog(
-      projectHumanEngineOptions(state, [monster.profile.id]),
+      projectHumanEngineOptions(state, [monster.profile.id], state.revision, OFFER_ENVIRONMENT),
     );
     const entries = interactiveElement(catalog).querySelectorAll('li');
     const availability = entries.map((entry) => entry.dataset['optionAvailability']);

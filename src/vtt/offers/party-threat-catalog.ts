@@ -1,7 +1,11 @@
-import { canonicalJson } from '../../commands/canonical-json';
 import { combatantId, type CombatantId } from '../../combat/values';
-import { sha256 } from '../../crypto/sha256';
 import { abilities, type Ability } from '../../domain/enums';
+import {
+  deepFreeze,
+  digestBody,
+  exactKeys,
+  PARTY_THREAT_CATALOG_FORMAT,
+} from './offer-codec-primitives';
 
 export type PartyThreatRange =
   | { readonly kind: 'melee'; readonly reachFeet: number }
@@ -35,12 +39,12 @@ export interface PartyThreatCatalogEntry {
 
 export type PartyThreatCatalogBody =
   | {
-      readonly format: 'party-threat-catalog-v1';
+      readonly format: typeof PARTY_THREAT_CATALOG_FORMAT;
       readonly representation: 'unrepresented';
       readonly entries: readonly [];
     }
   | {
-      readonly format: 'party-threat-catalog-v1';
+      readonly format: typeof PARTY_THREAT_CATALOG_FORMAT;
       readonly representation: 'represented';
       readonly entries: readonly PartyThreatCatalogEntry[];
     };
@@ -52,18 +56,6 @@ function record(value: unknown, label: string): Readonly<Record<string, unknown>
     throw new TypeError(`${label} must be an object.`);
   }
   return value as Readonly<Record<string, unknown>>;
-}
-
-function exactKeys(
-  value: Readonly<Record<string, unknown>>,
-  keys: readonly string[],
-  label: string,
-): void {
-  const actual = Object.keys(value).sort();
-  const expected = [...keys].sort();
-  if (actual.length !== expected.length || actual.some((key, index) => key !== expected[index])) {
-    throw new TypeError(`${label} has an invalid shape.`);
-  }
 }
 
 function boundedText(value: unknown, label: string): string {
@@ -163,20 +155,10 @@ function entryKey(entry: PartyThreatCatalogEntry): string {
   return `${entry.attackerId}\u0000${entry.sourceId}`;
 }
 
-function digestBody(body: PartyThreatCatalogBody): string {
-  return sha256(canonicalJson(body));
-}
-
-function deepFreeze<T>(value: T): T {
-  if (typeof value !== 'object' || value === null || Object.isFrozen(value)) return value;
-  for (const nested of Object.values(value)) deepFreeze(nested);
-  return Object.freeze(value);
-}
-
 export function decodePartyThreatCatalog(value: unknown): PartyThreatCatalog {
   const catalog = record(value, 'party threat catalog');
   exactKeys(catalog, ['format', 'representation', 'entries', 'digest'], 'party threat catalog');
-  if (catalog['format'] !== 'party-threat-catalog-v1' ||
+  if (catalog['format'] !== PARTY_THREAT_CATALOG_FORMAT ||
     (catalog['representation'] !== 'unrepresented' && catalog['representation'] !== 'represented') ||
     !Array.isArray(catalog['entries']) || typeof catalog['digest'] !== 'string' ||
     !/^[0-9a-f]{64}$/u.test(catalog['digest'])) {
@@ -194,8 +176,8 @@ export function decodePartyThreatCatalog(value: unknown): PartyThreatCatalog {
     throw new TypeError('Party threat catalog entries must be unique and canonically ordered.');
   }
   const body: PartyThreatCatalogBody = catalog['representation'] === 'unrepresented'
-    ? { format: 'party-threat-catalog-v1', representation: 'unrepresented', entries: [] }
-    : { format: 'party-threat-catalog-v1', representation: 'represented', entries };
+    ? { format: PARTY_THREAT_CATALOG_FORMAT, representation: 'unrepresented', entries: [] }
+    : { format: PARTY_THREAT_CATALOG_FORMAT, representation: 'represented', entries };
   if (catalog['digest'] !== digestBody(body)) {
     throw new TypeError('Party threat catalog digest is invalid.');
   }
@@ -208,7 +190,7 @@ export function createPartyThreatCatalog(body: PartyThreatCatalogBody): PartyThr
 
 export function createUnrepresentedPartyThreatCatalog(): PartyThreatCatalog {
   return createPartyThreatCatalog({
-    format: 'party-threat-catalog-v1',
+    format: PARTY_THREAT_CATALOG_FORMAT,
     representation: 'unrepresented',
     entries: [],
   });

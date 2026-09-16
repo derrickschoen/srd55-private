@@ -19,10 +19,10 @@ import {
   LEGACY_BASIS_V1_NORMALIZED_OMISSIONS,
   decodeEncounterStateV1,
 } from '../../../src/vtt/encounter-state-codec';
-import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
 import { runCommandBoundaryTransaction } from '../../../src/vtt/engine-round-application';
 import { resolveEngineActorOption, availableEngineActorOptions } from '../../../src/vtt/intent-resolver';
 import { actorOpportunityReport } from '../../../src/vtt/intel/opportunity-cost';
+import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
 import { ARENA_REACTION_OFFER_POLICY } from '../../../src/vtt/reaction-offer-host-policy';
 import { regretTurnLegalActions } from '../../../src/vtt/regret/legal-actions';
 import { generateRoom, type GeneratedRoom } from '../../../src/vtt/room-generator';
@@ -47,6 +47,10 @@ const FIXTURE_INPUTS = [
   'tests/fixtures/arena-basis-los-cover-v1/seed-5762001.json',
 ] as const;
 const testInputs = declareTestInputs({ fixtures: FIXTURE_INPUTS });
+const OFFER_ENVIRONMENT = buildOfferEnvironment({
+  kind: 'configuration',
+  mode: 'legacy_standard',
+});
 type FixtureInputPath = typeof FIXTURE_INPUTS[number];
 
 async function json(path: FixtureInputPath): Promise<unknown> {
@@ -92,7 +96,7 @@ function selectorMatches(
   actorId: CombatantId,
   selector: OptionSelectorV1,
 ): readonly ReturnType<typeof availableEngineActorOptions>[number][] {
-  return availableEngineActorOptions(state, actorId, canonicalEngineQueryPort, state.revision).filter((option) => {
+  return availableEngineActorOptions(state, actorId, OFFER_ENVIRONMENT, state.revision).filter((option) => {
     const main = option.actionSlots.find((slot) => slot.slot === 'main');
     const bonus = option.actionSlots.find((slot) => slot.slot === 'bonus');
     if (main === undefined || main.use.kind !== selector.requiredMainKind) return false;
@@ -116,7 +120,7 @@ function selectorMatches(
     const bonusTargetIds = bonus?.use.kind === 'cast_spell'
       ? bonus.use.targets.flatMap((target) => target.kind === 'combatant' ? [target.combatantId] : [])
       : [];
-    const resolved = resolveEngineActorOption(state, option, canonicalEngineQueryPort);
+    const resolved = resolveEngineActorOption(state, option, OFFER_ENVIRONMENT);
     if (!resolved.valid) return false;
     return mainActionId === selector.mainActionId && canonicalJson(components) === canonicalJson(selector.orderedComponents) &&
       bonusSpellId === selector.requiredBonusSpellId && canonicalJson(bonusTargetIds) === canonicalJson(selector.bonusTargetIds) &&
@@ -174,9 +178,18 @@ describe('D583 challenge room fixtures', () => {
     const ogre = monsterId(loaded, '-ogre');
     expect(traceCombatantLine(state, ogre, 'combatant:fighter' as CombatantId)).toMatchObject({ tier: 'none', blocksSight: false });
     expect(traceCombatantLine(state, ogre, 'combatant:wizard' as CombatantId)).toMatchObject({ tier: 'half', blocksSight: false });
-    expect(canonicalEngineQueryPort.reach(state, { actorId: ogre, targetId: 'combatant:fighter' as CombatantId, actionId: 'javelin' })).toMatchObject({ legal: true, distanceFeet: 25 });
-    expect(canonicalEngineQueryPort.reach(state, { actorId: ogre, targetId: 'combatant:wizard' as CombatantId, actionId: 'javelin' })).toMatchObject({ legal: true, distanceFeet: 30 });
-    expect(actorOpportunityReport(state, ogre, canonicalEngineQueryPort, 0).defaultOption.label).toBe('Javelin -> combatant:wizard');
+    expect(OFFER_ENVIRONMENT.queries.reach(state, {
+      actorId: ogre,
+      targetId: 'combatant:fighter' as CombatantId,
+      actionId: 'javelin',
+    })).toMatchObject({ legal: true, distanceFeet: 25 });
+    expect(OFFER_ENVIRONMENT.queries.reach(state, {
+      actorId: ogre,
+      targetId: 'combatant:wizard' as CombatantId,
+      actionId: 'javelin',
+    })).toMatchObject({ legal: true, distanceFeet: 30 });
+    expect(actorOpportunityReport(state, ogre, OFFER_ENVIRONMENT, 0).defaultOption.label)
+      .toBe('Javelin -> combatant:wizard');
     expect(findPath(encounterMovementWorld(state), {
       actorId: 'combatant:fighter' as CombatantId,
       start: { column: 9, row: 5 }, goal: { column: 5, row: 5 }, maximumCost: feet(30),
@@ -210,9 +223,9 @@ describe('D583 challenge room fixtures', () => {
       expect(clericTrace.lines).toHaveLength(4);
       expect(clericTrace.lines.every((line) => line.blocksSight)).toBe(true);
       expect(traceCombatantLine(state, ogre, 'combatant:wizard' as CombatantId)).toMatchObject({ tier: 'none', blocksSight: false });
-      const defaultOption = actorOpportunityReport(state, ogre, canonicalEngineQueryPort, state.revision).defaultOption;
+      const defaultOption = actorOpportunityReport(state, ogre, OFFER_ENVIRONMENT, state.revision).defaultOption;
       expect(defaultOption.label).toBe('Greatclub -> combatant:wizard');
-      const resolved = resolveEngineActorOption(state, defaultOption, canonicalEngineQueryPort);
+      const resolved = resolveEngineActorOption(state, defaultOption, OFFER_ENVIRONMENT);
       expect(resolved.valid).toBe(true);
       if (!resolved.valid) throw new Error(resolved.summary);
       expect(resolved.mechanics.finalPosition).toEqual(placement.end);
@@ -251,7 +264,7 @@ describe('D583 challenge room fixtures', () => {
     const livingAllies = state.combatants.filter((entry) => entry.profile.kind === 'monster' && entry.profile.id !== priest && entry.life === 'living')
       .map((entry) => entry.profile.id).sort((left, right) => left.localeCompare(right));
     expect(livingAllies[0]).toBe(knight);
-    const options = availableEngineActorOptions(state, priest, canonicalEngineQueryPort, state.revision);
+    const options = availableEngineActorOptions(state, priest, OFFER_ENVIRONMENT, state.revision);
     const maceOptions = options.filter((option) => option.label.startsWith('Mace + Mace -> combatant:wizard'));
     const withoutHealing = maceOptions.find((option) => option.actionSlots.length === 1);
     const withHealing = maceOptions.find((option) => option.actionSlots.some((slot) =>
@@ -275,7 +288,8 @@ describe('D583 challenge room fixtures', () => {
     expect(Array.from({ length: 12 }, (_unused, row) => row).filter((row) =>
       !state.blockedCells.some((cell) => cell.column === 7 && cell.row === row))).toEqual([5]);
     expect(state.tokens.find((token) => token.combatantId === guard)?.position).toEqual({ column: 7, row: 5 });
-    expect(actorOpportunityReport(state, guard, canonicalEngineQueryPort, 0).defaultOption.label).toBe('Spear -> combatant:wizard');
+    expect(actorOpportunityReport(state, guard, OFFER_ENVIRONMENT, 0).defaultOption.label)
+      .toBe('Spear -> combatant:wizard');
     expect(traceCombatantLine(state, scouts[0]!, 'combatant:fighter' as CombatantId)).toMatchObject({ tier: 'half', blocksSight: false });
     expect(traceCombatantLine(state, scouts[1]!, 'combatant:wizard' as CombatantId)).toMatchObject({ tier: 'three_quarters', blocksSight: false });
   });
