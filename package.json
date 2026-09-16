@@ -7,7 +7,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite --configLoader runner",
-    "build": "tsc -b && vite build --configLoader runner && node tools/assert-dist-clean.mjs",
+    "build": "tsc -b && node tools/dist-build-cache.mjs",
+    "build:dist": "vite build --configLoader runner",
+    "build:dist:validated": "tsc -b && npm run build:dist && node tools/assert-dist-clean.mjs",
     "serve": "node tools/serve.mjs",
     "serve:check": "playwright test --config=tests/serving/playwright.config.ts",
     "typecheck": "scripts/check-command-outcomes.sh && tsc -b",

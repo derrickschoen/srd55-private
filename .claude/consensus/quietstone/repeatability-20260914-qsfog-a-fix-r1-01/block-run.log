@@ -1,0 +1,52 @@
+== block start 21:54:14 HEAD f6e564c9 status 0 load 0.44 0.58 0.56
+== step 1 21:54:14
+== step 2 21:54:14
+{"blockPath":".tmp/runs/quietstone/svg-fog/blocks/20260914-qsfog-a-fix-r1-01.json","freezeSha256":"401b7d9b280d154475c53b37fac117656a75e6e855fb522434ce7f642532be5e","sourceImageSetSha256":"e6e571f9f19f69d2126a5c43f1e32d2242df7a188e0e4b5f588647c67654e6c8","plannedPaths":7}
+== step 3 21:54:14
+bea4f62aa50b778ab505e90fbc30dbfffa2857cb30b7c38efb42f296068f35f6  manifest.json
+== step 4 21:54:24
+bea4f62aa50b778ab505e90fbc30dbfffa2857cb30b7c38efb42f296068f35f6
+== step 5 21:54:24
+# D576 screenshot comprehension probe
+
+Pass criterion: every selected question class has mean Jaccard accuracy >= 0.9.
+
+Board glyphs: none.
+Capture tile: 128 px.
+Board input: png.
+Question restriction: Q9.
+HP vocabulary: uninjured / bloodied / near_death / unknown.
+
+## gpt-5.6-sol:high
+
+Strict selected classes >= 0.9: **FAIL**
+
+| Class | Score numerator / denominator | Mean Jaccard | Mean 95% bootstrap interval | Refusals | Total latency ms | Hallucinations | Three most common confusions | Gate |
+|---|---:|---:|---:|---:|---:|---:|---|---|
+| Q9 | 4.417 / 24 | 0.184 | [+0.085, +0.301] | 0 | 4975392.721 | 548 | fact not present (444); fact omitted (155); obscured read as fogged (96) | FAIL |
+
+== step 6 22:18:29
+# D576 screenshot comprehension probe
+
+Pass criterion: every selected question class has mean Jaccard accuracy >= 0.9.
+
+Board glyphs: none.
+Capture tile: 128 px.
+Board input: png.
+Question restriction: Q9.
+HP vocabulary: uninjured / bloodied / near_death / unknown.
+
+## gpt-5.6-sol:high
+
+Strict selected classes >= 0.9: **FAIL**
+
+| Class | Score numerator / denominator | Mean Jaccard | Mean 95% bootstrap interval | Refusals | Total latency ms | Hallucinations | Three most common confusions | Gate |
+|---|---:|---:|---:|---:|---:|---:|---|---|
+| Q9 | 4.313 / 24 | 0.180 | [+0.090, +0.285] | 0 | 4863441.428 | 334 | fact not present (271); fact omitted (165); obscured read as fogged (52) | FAIL |
+
+== step 7 22:42:51
+{"C1":{"startedAt":"2026-09-14T21:54:24-04:00","endedAt":"2026-09-14T22:18:29-04:00","serviceContinuity":"continuous","jsonlSha256":"076b1415b54601e436ede9a3d6be857254fb8e75615aa65a6197dd799d574a14","imagesRootSha256":"c523a408e5159a88ac690fd5975ea6cb67f1e0660ce75f52de5e36660e1cc2b8","manifestSha256":"bea4f62aa50b778ab505e90fbc30dbfffa2857cb30b7c38efb42f296068f35f6","rows":24,"answered":24},"C2":{"startedAt":"2026-09-14T22:18:29-04:00","endedAt":"2026-09-14T22:42:51-04:00","serviceContinuity":"continuous","jsonlSha256":"8cf17c67dd06f3a813490080fdeb991d3bbfe28564afc7bb14dd5b936a257382","imagesRootSha256":"aed551d5bb0c58cf43b62c3e6683abe1b382c848537878ca4bc5b6032d5b6e6c","manifestSha256":"bea4f62aa50b778ab505e90fbc30dbfffa2857cb30b7c38efb42f296068f35f6","rows":24,"answered":24},"wholeBlockContinuity":{"attestedAt":"2026-09-14T22:42:51-04:00","endedAt":"2026-09-14T22:42:51-04:00","fromArm":"C1","interruptions":[],"startedAt":"2026-09-14T21:54:24-04:00","supervisor":"supervisor","throughArm":"C2","uninterrupted":true}}
+== step 8 22:42:51
+REPEATABILITY_AUTHENTICATED
+== block end 22:43:02
+QSFOG A BLOCK DONE

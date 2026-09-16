@@ -13,3 +13,13 @@ B. Accept astra's minimal corrections as-is: apply PS3-F1's reducer fix and let 
 C. Stop QSFOG-SVG-01 here; record the plan as not implementable; return to D616 (Quietstone merge decision) with the fog regression unresolved.
 
 Supervisor recommendation: A. The repeatability measurement has value independent of any candidate (it is what D616.1 said was missing), and PS3-F2 is a design question about the measurement, not a defect an implementer can fix in code. Nothing is dispatched on this unit until you rule.
+
+## RESOLVED 2026-09-14 18:07 — owner ruling D624.5: A (split). Increment A implementation dispatched; Increment B measurement plan round dispatched.
+
+## REOPENED 2026-09-14 18:50 — the D624.5 round ended in REJECT on the merits (D624.6)
+The frame-band mask that lifted the score to 0.636 measures edge coverage inside the band only; astra's no-frame checkerboard scores 0.926–1.000 on it. Two other retained gates (legend run breaks; obscurement-overlap NCC 0.435/0.355 vs 0.55) reject the frozen 5-px frame independently. Options: (1) accept the deterministic rejection as Increment B's terminal outcome (frame fails; SVG-fog returns to the brainstorm; Increment A's repeatability numbers still land tonight) — supervisor recommendation; (2) authorise a new measurement+geometry design round with astra (a candidate that passes legend breaks, obscurement overlap and an unmasked separability gate, with numbers before any plan); (3) stop the pilot. No further Increment B dispatch until ruled.
+
+## Addendum 2026-09-14 22:50 — repeatability numbers landed (D624.8)
+Same images twice through gpt-5.6-sol:high: ordinary false-positive rate 4.97% then 1.65%; per-base collision counts swing 36→0 and 14→55; 2×spread (0.903) exceeds the score headroom (0.818). Under the frozen ≥25%-and->2×spread rule a candidate cannot be distinguished from judge noise with one paired run. Option 1 stands as the recommendation; any future candidate design (option 2) must first choose a more repeatable judge protocol (more repeats, majority/median aggregation, or a different model/effort) before geometry work.
+
+## RESOLVED 2026-09-15 13:36 — owner ruling D626: option 1 (record the deterministic rejection; pilot closed) superseded by VIS-FIELD-01: engine-computed visibility fields replace authored fog, so board fog no longer needs a vision judge to read it.

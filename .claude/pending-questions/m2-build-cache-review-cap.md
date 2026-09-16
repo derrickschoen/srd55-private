@@ -13,3 +13,8 @@ C. Stop M-2 here; keep the branch; move to M-3 landing.
 Supervisor recommendation: A. It is a scope REDUCTION, the reviewer proposed it, and B would land a cache with a known silent-hit class in the one file (vite.config.ts) most likely to be edited by hand.
 
 Also still open for you: offers 3B at cap (.claude/pending-questions/offers-s3b-runtime-factory-seam.md), the SVG-fog pilot plan at cap (qsfog-svg-pilot-plan-cap.md), and the live checkout's node_modules predating the `ws` dependency (needs `npm install` or `npm ci` in the main checkout when convenient).
+
+## Addendum 2026-09-14 09:35 — landing order
+M-3 (GATE-INVENTORY-01) is ACCEPTED by astra (D623.6) and its worktree gate is running. D623 ordered M-2 before M-3 on trust grounds ("M-2 before trusting distribution checks"), not on a code dependency: M-3 touches tools/vtt-handoff/** and its specs only; M-2 touches tools/dist-build-* and build scripts only; M-3's production-build gate invokes `npm run build` by name, which both branches keep. Option D for this question: let M-3 land ahead of M-2 once its gate is green (fast-forward-safe: main has only the records commit since a04a6093). Supervisor recommendation: D together with A.
+
+## RESOLVED 2026-09-14 13:50 — owner ruling D623.7 (automatic content hashing; both A and B closed; redesign plan round 4 in review) and D623.8 (M-3 landed at 40f04e2c).

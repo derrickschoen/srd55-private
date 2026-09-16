@@ -1,0 +1,43 @@
+== astra exploratory start 07:18:34 HEAD f6e564c9 status 0 manifest bea4f62aa50b778a
+== c1 start 2026-09-15T07:18:34-04:00
+# D576 screenshot comprehension probe
+
+Pass criterion: every selected question class has mean Jaccard accuracy >= 0.9.
+
+Board glyphs: none.
+Capture tile: 128 px.
+Board input: png.
+Question restriction: Q9.
+HP vocabulary: uninjured / bloodied / near_death / unknown.
+
+## gpt-6-astra:high
+
+Strict selected classes >= 0.9: **FAIL**
+
+| Class | Score numerator / denominator | Mean Jaccard | Mean 95% bootstrap interval | Refusals | Total latency ms | Hallucinations | Three most common confusions | Gate |
+|---|---:|---:|---:|---:|---:|---:|---|---|
+| Q9 | 9.911 / 24 | 0.413 | [+0.252, +0.579] | 0 | 1783272.593 | 108 | fact omitted (151); obscured read as fogged (59); fact not present (47) | FAIL |
+
+== c1 end 2026-09-15T07:26:35-04:00 rows 24
+== c2 start 2026-09-15T07:26:35-04:00
+# D576 screenshot comprehension probe
+
+Pass criterion: every selected question class has mean Jaccard accuracy >= 0.9.
+
+Board glyphs: none.
+Capture tile: 128 px.
+Board input: png.
+Question restriction: Q9.
+HP vocabulary: uninjured / bloodied / near_death / unknown.
+
+## gpt-6-astra:high
+
+Strict selected classes >= 0.9: **FAIL**
+
+| Class | Score numerator / denominator | Mean Jaccard | Mean 95% bootstrap interval | Refusals | Total latency ms | Hallucinations | Three most common confusions | Gate |
+|---|---:|---:|---:|---:|---:|---:|---|---|
+| Q9 | 8.181 / 24 | 0.341 | [+0.190, +0.504] | 0 | 1678461.500 | 92 | fact omitted (188); fact not present (47); obscured read as fogged (37) | FAIL |
+
+== c2 end 2026-09-15T07:34:19-04:00 rows 24
+== astra exploratory end 07:34:19
+ASTRA EXPLORATORY DONE

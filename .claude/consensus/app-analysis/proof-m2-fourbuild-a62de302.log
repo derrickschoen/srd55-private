@@ -1,0 +1,107 @@
+== proof start 18:06:05 HEAD a62de302 load 0.89 0.61 0.59 STATIC_APP_CACHE_DIR=unset
+
+> srd-55@0.0.0 build
+> tsc -b && node tools/dist-build-cache.mjs
+
+dist cache miss: 003544268babf597cfa1843e9aa52eb84c1ad0e47db4ba829657e4b57a3b0628
+vite v7.3.6 building client environment for production...
+transforming...
+✓ 726 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/licenses/SRD-5.1-ATTRIBUTION.txt                       0.35 kB │ gzip:   0.25 kB
+dist/licenses/A5ESRD-ATTRIBUTION.txt                        0.36 kB │ gzip:   0.26 kB
+dist/assets/browser-capability-worker-B8qwN7d9.js           0.65 kB
+dist/ART-PROVENANCE.md                                      1.37 kB
+dist/LICENSE.txt                                            1.84 kB │ gzip:   1.02 kB
+dist/index.html                                             2.39 kB │ gzip:   1.02 kB
+dist/LICENSE-ART                                            7.05 kB
+dist/licenses/CC-BY-4.0.txt                                18.66 kB │ gzip:   5.92 kB
+dist/assets/sqlite3-opfs-async-proxy-D_xnb1D8.js           32.29 kB
+dist/assets/sqlite3-worker1-Ydf970DV.js                   213.43 kB
+dist/assets/sqlite3-BVKGSWc-.wasm                         864.75 kB │ gzip: 401.93 kB
+dist/assets/worker-entry-uPsqwkU0.js                    3,799.48 kB
+dist/assets/worker-IfBI-_8W.js                          5,631.92 kB
+dist/assets/index-DMmrebNi.css                             85.97 kB │ gzip:  17.05 kB
+dist/assets/vane-warren-app-YwER3ubC.js                     1.67 kB │ gzip:   0.94 kB
+dist/assets/stored-character-encounter-app-FbG_dqBz.js      2.57 kB │ gzip:   1.32 kB
+dist/assets/board-glyphs-Cxa2g_AV.js                        6.56 kB │ gzip:   2.60 kB
+dist/assets/d365-sample-dungeon-app-D0C2xCiB.js             7.22 kB │ gzip:   2.76 kB
+dist/assets/survival-policy-BZto0rO3.js                    11.66 kB │ gzip:   3.99 kB
+dist/assets/worker-harness-DTFZm-iY.js                     14.31 kB │ gzip:   4.96 kB
+dist/assets/app-lhKN3Es-.js                               167.05 kB │ gzip:  55.26 kB
+dist/assets/encounter-app-Denf89AS.js                   1,796.95 kB │ gzip: 476.10 kB
+dist/assets/index-DEWO3YOG.js                           3,074.37 kB │ gzip: 703.04 kB
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 8.04s
+bundled digest clean: 444 aggregates, df17e8173291e3042464a8ffdc8aa8d84530067b60acba9f479b3233d37bb384
+dist clean: 123 files scanned, control OK, migration control OK, 120 PWA shell files transcribed, 6 licence texts bundled
+dist cache stored: 003544268babf597cfa1843e9aa52eb84c1ad0e47db4ba829657e4b57a3b0628
+artifact commit == HEAD: a62de30203bb34f1b51d465807abaadbc5815c47
+
+> srd-55@0.0.0 build
+> tsc -b && node tools/dist-build-cache.mjs
+
+dist cache miss: d69ad48547c5fff0bc72b8d2c6186e762aa09b7a4f68d1e47e68e857225bcf1e
+vite v7.3.6 building client environment for production...
+transforming...
+✓ 726 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/licenses/SRD-5.1-ATTRIBUTION.txt                       0.35 kB │ gzip:   0.25 kB
+dist/licenses/A5ESRD-ATTRIBUTION.txt                        0.36 kB │ gzip:   0.26 kB
+dist/assets/browser-capability-worker-B8qwN7d9.js           0.65 kB
+dist/ART-PROVENANCE.md                                      1.37 kB
+dist/LICENSE.txt                                            1.84 kB │ gzip:   1.02 kB
+dist/index.html                                             2.39 kB │ gzip:   1.02 kB
+dist/LICENSE-ART                                            7.05 kB
+dist/licenses/CC-BY-4.0.txt                                18.66 kB │ gzip:   5.92 kB
+dist/assets/sqlite3-opfs-async-proxy-D_xnb1D8.js           32.29 kB
+dist/assets/sqlite3-worker1-Ydf970DV.js                   213.43 kB
+dist/assets/sqlite3-BVKGSWc-.wasm                         864.75 kB │ gzip: 401.93 kB
+dist/assets/worker-entry-uPsqwkU0.js                    3,799.48 kB
+dist/assets/worker-IfBI-_8W.js                          5,631.92 kB
+dist/assets/index-DMmrebNi.css                             85.97 kB │ gzip:  17.05 kB
+dist/assets/vane-warren-app-B2GwSTDK.js                     1.67 kB │ gzip:   0.94 kB
+dist/assets/stored-character-encounter-app-B5ZfaZtf.js      2.57 kB │ gzip:   1.32 kB
+dist/assets/board-glyphs-Cxa2g_AV.js                        6.56 kB │ gzip:   2.60 kB
+dist/assets/d365-sample-dungeon-app-Bp7NCOCp.js             7.22 kB │ gzip:   2.76 kB
+dist/assets/survival-policy-Bb617rOA.js                    11.66 kB │ gzip:   3.99 kB
+dist/assets/worker-harness-BDYvU9R1.js                     14.31 kB │ gzip:   4.96 kB
+dist/assets/app-lhKN3Es-.js                               167.05 kB │ gzip:  55.26 kB
+dist/assets/encounter-app-C7r_sIJr.js                   1,796.95 kB │ gzip: 476.10 kB
+dist/assets/index-B_2oFib2.js                           3,074.41 kB │ gzip: 703.07 kB
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 7.95s
+bundled digest clean: 444 aggregates, df17e8173291e3042464a8ffdc8aa8d84530067b60acba9f479b3233d37bb384
+dist clean: 123 files scanned, control OK, migration control OK, 120 PWA shell files transcribed, 6 licence texts bundled
+dist cache stored: d69ad48547c5fff0bc72b8d2c6186e762aa09b7a4f68d1e47e68e857225bcf1e
+artifact commit == HEAD: a62de30203bb34f1b51d465807abaadbc5815c47
+marker files after build-2=1
+
+> srd-55@0.0.0 build
+> tsc -b && node tools/dist-build-cache.mjs
+
+bundled digest clean: 444 aggregates, df17e8173291e3042464a8ffdc8aa8d84530067b60acba9f479b3233d37bb384
+dist clean: 123 files scanned, control OK, migration control OK, 120 PWA shell files transcribed, 6 licence texts bundled
+dist cache hit: d69ad48547c5fff0bc72b8d2c6186e762aa09b7a4f68d1e47e68e857225bcf1e
+artifact commit == HEAD: a62de30203bb34f1b51d465807abaadbc5815c47
+
+> srd-55@0.0.0 build
+> tsc -b && node tools/dist-build-cache.mjs
+
+bundled digest clean: 444 aggregates, df17e8173291e3042464a8ffdc8aa8d84530067b60acba9f479b3233d37bb384
+dist clean: 123 files scanned, control OK, migration control OK, 120 PWA shell files transcribed, 6 licence texts bundled
+dist cache hit: d69ad48547c5fff0bc72b8d2c6186e762aa09b7a4f68d1e47e68e857225bcf1e
+artifact commit == HEAD: a62de30203bb34f1b51d465807abaadbc5815c47
+MISS 003544268babf597cfa1843e9aa52eb84c1ad0e47db4ba829657e4b57a3b0628; MISS d69ad48547c5fff0bc72b8d2c6186e762aa09b7a4f68d1e47e68e857225bcf1e; HIT d69ad48547c5fff0bc72b8d2c6186e762aa09b7a4f68d1e47e68e857225bcf1e; ambient HIT d69ad48547c5fff0bc72b8d2c6186e762aa09b7a4f68d1e47e68e857225bcf1e
+== proof end 18:10:43 git status: 1 dirty
+PROOF M2 DONE
