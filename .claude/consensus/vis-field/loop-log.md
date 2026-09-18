@@ -250,3 +250,5 @@ Sol: removing the two-room authored fog [(8,4)] changes fixtures/scenes/two-room
 
 ## 2026-09-18 08:27 — owner Question 6: seek cover and dodge unless an indication of the enemy's direction exists (D664). BLIND-01 planning dispatched.
 - 2026-09-18 15:56 COMPACTION: draft r1 (609 lines) read in full by supervisor; ref check 250/250 code-doc ids resolve (my script); 86 ACTIVE digest rows uncited (active-uncited.txt); stale vs D673–D676; glued number tokens. r2 dispatched to merge author (resumed); independent fidelity audit (fresh astra HIGH, 45 sampled bullets vs source) dispatched.
+- 2026-09-18 16:44 COMPACTION installed (D682): decisions.md 676 lines; archive .claude/decisions-archive/2026-09-18-full-chronology.md; records commit 8889b450 pushed to mirror.
+- 2026-09-18 16:44 FINDING D683: 8889b450 carried ~25 MB of full lane logs under .claude/consensus; trimmed to final messages; blobs queued for the D674 purge.
