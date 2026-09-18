@@ -326,3 +326,94 @@ Supervisor (ran): engine-server.ts pristine c40292df… before/after; tsc 0/0; c
 
 ## 2026-09-15 17:02 — astra r2 ACCEPT B14 FIX; D617.28 recorded; B18 dispatched (sol resume 01a0a1ea…, log .tmp/runs/fanout/impl-s3-b18.log)
 Astra (ran): diff = one test file, 29 additions, one test; isolated baseline 1 passed / mutant 1 failed with the launch message expected and the downstream "changed during the selected run" message received; fixture digests printed and differ (supplied 0fd2d8c7…, capsule fb1c39f0…); production sha unchanged. Report saved review-impl-s3-b14-astra-r2.md. Worktree confirmed free (no codex process, status clean at e5e5c70c) before B18 launch.
+
+## 2026-09-15 17:56 — B18 verified and COMMITTED 623aa639; supervisor mutants next, then astra (medium)
+Supervisor (ran): status = exactly the five manifest files (29+/42−); plan/contract/lock shas match; tsc app/node 0/0; check-command-outcomes 0; stage self-tests required-surfaces/resolver/final-query 0/0/0; diff --check 0; residual grep (canonical port, optional queries/environment, dependencies.queries) over the five files EMPTY; no added line >120; discovery 643; 26 suites / 305 tests green (the 22 B14 set + legendary/blind/dm-tactical-intel/engine-context-integrations/engine-host-integration/snippets); allowed-red 3B suites 146 failed / 154 passed / 19 skipped — identical per-file profile to B14 (handler 106, conversation 22, delivery 8, boundary 3, golden 2, knowledge-base 2, snapshot 1, live-path 1, simulated 1, arena import-time), every failure block the equal-binding assertion (123 direct, 23 downstream in the two harness suites) — no new red. Sol report saved impl-s3-b18-sol.md.
+
+## 2026-09-15 18:05 — B18 supervisor mutants on 623aa639: 1 killed, 3 survived — two are equivalent under behaviour (source-gate territory), one was a mis-designed off-plan mutant; astra review running (medium)
+Ran (26 suites / 305 tests per mutant; pristine restore hash-checked; worktree clean after): LEGENDARY_USES_CANONICAL killed (legendary-windows suite, 2 tests — the plan's controlled-distance witness works). BLIND_POSITION_FROM_CANONICAL and BLIND_ACTION_NAME_FROM_CANONICAL survived 305/305: both re-import canonicalEngineQueryPort inside blind-intent-resolver.ts for tokenPosition / actionDisplayName reads, which are pure state reads that no environment policy changes, so no behaviour test can distinguish them — the plan protects these consumers with the SOURCE gate (CONSUMER_USES_CANONICAL_BYPASS "must fail the source gate for a real consumer substitution", :202; final canonical-import gate enabled at B15, :555). Verification queued behind astra (no edits while a reviewer runs in the worktree): rerun those two mutants against `node scripts/check-command-outcomes.mjs` and record whether the current gate already refuses the re-import (mutants-s3-b18-gate.log); if it does not, that is expected until B15 and my residual grep is the interim control. MCP_FORWARDS_EQUAL_BINDING_ENV (off-plan) survived and is NOT a finding: under the B14 digest contract an equal-binding rebuild has the same digest and is by definition the same environment, so the mutant is a semantic no-op — my mutant design error, recorded as such. Astra asked to try its own engine-server forwarding and blind-path mutants (brief items 5-6).
+
+## 2026-09-15 18:13 — B18 astra r1 REJECT (B18-F1 arena witness not runnable; B18-F2 runtime forwarding assertion missing); D617.29; fix r1 dispatched (test-only, +3 test files)
+Gate check of my two blind bypass survivors: current architecture gate exit 0 under both — B15's final canonical-import gate is the control (recorded). Report saved review-impl-s3-b18-astra-r1.md. Fix brief impl-s3-builder-b18-fix-r1.md (rules heading grep-checked), log .tmp/runs/fanout/impl-s3-b18-fix-r1.log, sol resume 01a0a1ea…. Worktree confirmed clean (gate mutants restored) before dispatch.
+
+## 2026-09-15 18:26 — B18 fix r1: sol BLOCKED on F2(b) (accepted as a finding about the requirement); supervisor tsc-node found TS7006 ×2 in the new blind test; fix r2 dispatched
+Sol: F1 (arena case in the shared distance witness) and F2(a) (blind resolver legacy rebuild → "keeps blind option provenance" red) implemented with RED-first; F2(b) unprovable test-only: a different-policy environment forwarded from MCP is erased because blind composition passes option IDs to the application's own resolver, which regenerates them under the correct environment, and every builder configuration shares the canonical query port. Supervisor (ran, on the three-file tree): tsc app 0; tsc node 2 (blind-intent-resolver.test.ts:321 implicit any ×2 — sol's r1 report stopped before its verification block, no false claim); check-command-outcomes 0; diff --check 0; no long lines; discovery 643; 13 suites / 150 tests green; my mutants ARENA_DISTANCE_FROM_CANONICAL and BLIND_REBUILDS_LEGACY_ENV both killed by the new witnesses. Fix r2 brief impl-s3-builder-b18-fix-r2.md (typed parameters; report must state exactly what the MCP forwarding test proves), log .tmp/runs/fanout/impl-s3-b18-fix-r2.log. F2(b) ruling goes to astra r2 after commit.
+
+## 2026-09-15 18:43 — B18 fix r2 verified and COMMITTED 5883b87f (test-only, 3 files 165+/4−); astra r2 dispatched (medium) with the F2(b) ruling
+Supervisor (ran): tsc app/node 0/0 (TS7006 ×2 gone); check-command-outcomes 0; diff --check 0; no long lines; discovery 643; 13 suites / 150 tests; mutants ARENA_DISTANCE_FROM_CANONICAL and BLIND_REBUILDS_LEGACY_ENV killed; worktree clean. Sol report saved impl-s3-b18-fix-r2-sol.md. Astra brief review-impl-s3-b18-fix-astra.md, log .tmp/runs/fanout/review-s3-b18-fix.log.
+
+## 2026-09-15 18:45 — B18 astra r2 ACCEPT; D617.30 recorded; B15 brief next
+Report saved review-impl-s3-b18-astra-r2.md.
+
+## 2026-09-15 18:46 — B15 dispatched (sol resume 01a0a1ea…, brief impl-s3-builder-b15.md, log .tmp/runs/fanout/impl-s3-b15.log)
+Ten-file manifest per plan :557-566; required reds incl. the D617.30 CANONICAL_REIMPORT_IN_CONTRACTED_CONSUMER gate check; digest-change = STOP. Worktree clean at 5883b87f before dispatch.
+
+## 2026-09-15 18:50 — B15 r1 BLOCKED (manifest drift, three raw-tag test files); D617.31 (+3, tag replacement only); r2 dispatched (log .tmp/runs/fanout/impl-s3-b15-r2.log)
+Blocked report saved impl-s3-b15-blocked-sol.md. Supervisor grep confirmed the three files.
+
+## 2026-09-15 19:33 — B15 r2 DONE (sol): 13 files (12 M + new offer-codec-primitives.ts), 160+/164−; all pins preserved per sol; 8 reds incl. the D617.30 canonical re-import gate check (blind :25/:709, legendary :11/:208 rejected); unqualified self-test 74 fixtures; sg rule at error; supervisor verification + gate mutants launched (verify-s3-b15.log)
+Sol report saved impl-s3-b15-sol.md.
+
+## 2026-09-15 19:53 — B15 verified and COMMITTED 39cc7df5; astra review dispatched (medium)
+Supervisor (ran): tsc 0/0; checker 0 (allowlist buildOfferEnvironment only); unqualified self-test 0; sg scan 0; sg test 1 passed; diff --check 0; no long lines; raw tags only in primitives; deleted-symbol grep empty (my one false positive was createLegacyEngineOptionEnvironmentBinding — over-broad pattern); discovery 643; 26 suites / 307 tests; allowed-red profile identical (146/154/19; 123 direct + 23 downstream); three gate mutants rejected by the checker (canonical re-import in blind resolver — the D617.30 requirement; second exported builder; raw tag at a usage site); baseline 0/0. Brief review-impl-s3-b15-astra.md, log .tmp/runs/fanout/review-s3-b15.log.
+
+## 2026-09-15 19:59 — B15 astra r1 REJECT (B15-F1: production EngineQueryPort literal/spread not rejected, plan :662); D617.32; fix r1 dispatched (log .tmp/runs/fanout/impl-s3-b15-fix-r1.log)
+Report saved review-impl-s3-b15-astra-r1.md.
+
+## 2026-09-15 20:27 — B15 fix r1 verified and COMMITTED cc8b057f; astra r2 (short, medium) dispatched
+Supervisor (ran): tsc 0/0; checker 0 (query-port probes literal-and-clones=8, spread=1, test-double=0); unqualified self-test 0 (77 fixtures); sg scan 0; sg test 1 passed; diff --check 0; no long lines; 26 suites / 307 tests; five gate mutants rejected (astra's spread, own typed literal, canonical re-import, second builder, raw tag); baseline 0/0. Sol report saved impl-s3-b15-fix-r1-sol.md. Brief review-impl-s3-b15-fix-astra.md, log .tmp/runs/fanout/review-s3-b15-fix.log.
+
+## 2026-09-15 20:34 — B15 astra r2 ACCEPT; D617.33; B16 brief next
+Report saved review-impl-s3-b15-astra-r2.md.
+
+## 2026-09-15 20:35 — B16 (last batch) dispatched (sol resume 01a0a1ea…, brief impl-s3-builder-b16.md, log .tmp/runs/fanout/impl-s3-b16.log)
+Test-only; ten 3B files; carries D617.12 (HOST_SKIPS_DM_DIGEST_CHECK) and D617.26 (divergence fresh-legacy-env survivor); the cumulative union is the FINAL GREEN block.
+
+## 2026-09-15 21:06 — B16 BLOCKED (sol, 20:51, no edits); D617.34: fresh-legacy-env variant retired as equivalent (verified by reading); resume r2
+Report saved impl-s3-b16-blocked-sol.md. Two `claude -p` hits in the log = rules header + a loop-log grep line, not an invocation. Resume brief impl-s3-builder-b16-r2.md.
+
+## 2026-09-15 21:43 — B16 r2 cut by codex capacity outage (exit 1, 21:37, "Selected model is at capacity"); leftover production mutant restored; r3 dispatched
+r2 reached the mutant stage (ten-suite checkpoint reported green by sol, unverified by me) and died with the CONSUMER_DROPS_BOUND_ENV mutant applied at tools/ai-dm-conversation.ts:4278. I restored the file from HEAD (sha 526a3171…, equal to sol's pristine /tmp copy); the ten test edits are intact (103+/511−). Capacity probe at 21:43: sol answers READY. Brief impl-s3-builder-b16-r3.md, log .tmp/runs/fanout/impl-s3-b16-r3.log. D617.35 (owner): B19 provenance batch after B16, before the cumulative gate.
+
+## 2026-09-15 21:51 — B16 r3 also cut by capacity (21:46, exit 1, "thread not found" on rollout record); r4 dispatched as a FRESH sol session
+Small sol/terra probes answer READY; the failures track the 7 M-token resumed session. Production verified pristine (10 test files only). Fresh-session brief impl-s3-builder-b16-r4.md restates COMMON RULES + the original task/allowed/required blocks + D617.34/D617.35 + state-on-disk; log .tmp/runs/fanout/impl-s3-b16-r4.log.
+
+## 2026-09-15 23:42 — B16 r4 DONE (sol fresh session, exit 0); my chain verified; committed 80411ca2 (D617.38); clean-tree rerun of the ten suites running; astra review brief next
+Reports: impl-s3-b16-sol.md. Union timeouts (6 in 3 files) all green isolated. Mutants 4 killed + 1 required-green.
+
+## 2026-09-16 00:05 — B16 clean-tree rerun at 80411ca2: ten suites 372/372 (verified by me); astra B16 review dispatched (medium, resume 01a0a5af…, brief review-impl-s3-b16-astra.md, log fanout/review-s3-b16.log)
+
+## 2026-09-16 00:21 — B16 ACCEPTED by astra r1 (D617.40; review saved review-impl-s3-b16-astra-r1.md); B19 (D617.35 provenance addendum) dispatched to sol (fresh session; brief impl-s3-builder-b19.md; log fanout/impl-s3-b19.log)
+
+## 2026-09-16 02:56 — B19 DONE (sol fresh 01a0a872…, report impl-s3-b19-sol.md); my chain verified; B19-F1 (decoder length case untested) → fix r1 dispatched (resume 01a0a872…, brief impl-s3-builder-b19-fix-r1.md); D617.42
+
+### 2026-09-16 11:06 — host reboot; B19 fix r1 harvested from disk
+- Host rebooted ~11:01 (uptime 4 min at 11:05). The sol fix-r1 lane (session 01a0a872…) died with no exit file; its last log line (02:59) was still waiting on the conversation suite. Tick cron re-armed (cd5ee3df, */15).
+- Sol's edit is on disk in tests/unit/tools/ai-dm-conversation.test.ts: three new rejection cases in the same title (63-char lowercase hex, 65-char lowercase hex, 64-char UPPERCASE hex), lines 2189–2200. No other file touched (worktree status = the 12 B19 files).
+- Verified myself (verify-s3-b19-fix.sh): DECODER_ACCEPTS_ANY_HEX_LENGTH mutant applied (sha a226252402fba39c → 111d3b9d0c06bcac) → title RED at :2192 (63-hex accepted), 1 failed / 108 skipped; restored (sha a226252402fba39c again). Clean title + full suite: see next entry.
+
+### 2026-09-16 11:26 — B19 fix r1 verified, B19 committed 1248d3c7, astra review dispatched
+- Clean title 1/1 (8.5 s). Conversation suite on the loud box: 108/109, one 60 s timeout (SIMULATED two-rooms restore) → isolated rerun on the quiet box passed in 41 s. Load noise.
+- Committed 1248d3c7 (12 files, 268+/14−). Clean-tree rerun of the eight touched suites running (rerun-s3-b19-clean.log). Astra medium review running (review-s3-b19.log, session 01a0a5af… confirmed). D617.43.
+
+### 2026-09-16 12:07 — astra B19 r1 REJECT (0 P1, 2 P2); both reproduced; fix r2 dispatched
+- Clean-tree rerun at 1248d3c7: 8 suites 173/173 (mine). Astra r1 saved (review-impl-s3-b19-astra-r1.md).
+- F2 confirmed by reading (:3243 String() coercion). F3 reproduced (mutants-s3-b19-f3.log): M1 adjustment site stores mechanics digest → survived 158/158; M2 adjustment decoder guard dropped → survived 115/115. Worktree restored, dirty=0.
+- Fix r2 to sol, FRESH session 01a0aaf8-ca9e-7be2-aaa2-61bd9c369d2a (brief impl-s3-builder-b19-fix-r2.md; allowed: tools/ai-dm-conversation.ts, tests ai-dm-conversation + engine-mcp-handler; marker B19 FIX R2 DONE). D617.44.
+
+### 2026-09-16 12:37 — B19 fix r2 harvested and committed 8d5f86fa; my verification running
+- Sol (fresh 01a0aaf8…, 82 k tokens) reports: isSha256Hex typeof-string guard; isPlanAdjustmentProposal exported; round decoder test extended with array/number/null/object for both digests; new adjustment decoder test (8 negatives); handler suite asserts staged + corrected stored updates carry BOUND_OFFER_ENVIRONMENT.digest ≠ resolutionDigest; sol's three mutant proofs red→green; tsc 0/0; 4 suites 258/258 (sol's numbers).
+- Read by me: 3 files 112+/3−, only the allowed files, 0 forbidden patterns, 0 long lines, the one `claude -p` log line is the brief itself. Committed 8d5f86fa (separate call, before any mutant). Report saved impl-s3-b19-fix-r2-sol.md.
+- Running (verify-s3-b19-fix-r2.log): tsc ×2, sg, my M1/M2/M3 (must all die), nine touched suites on the clean tree.
+
+### 2026-09-16 12:51 — fix r2 verified by me (M1/M2/M3 all killed, 9 suites 303/303 at 8d5f86fa); astra r2 dispatched (resume 01a0a5af…, review-s3-b19-r2.log). D617.45.
+
+### 2026-09-16 13:36 — main merged into the branch (1cacd8f0, owner-authorized, 0 conflicts); gate-wt2 launched (gate-wt-p-offer-help.log). D617.47.
+
+### 2026-09-16 14:08 — landing gate: tsc 0, sg 0, vitest 17 timeout-class reds under load (discarded, D617.48; d583 isolated 17/17); Playwright running port 4360; vitest rerun owed on a quiet box.
+
+### 2026-09-16 14:52 — gate: Playwright 187 passed (1.0 h); tsc 0; sg 0; vitest rerun owed on a quiet box; light checks running (offers-light.log). D617.49.
+
+### 2026-09-16 15:08 — light checks on 1cacd8f0: check-command-outcomes 0, architecture self-test 0, architecture 0. Full vitest rerun + D630 pair + arena round launched (gate-offers-vitest.log).
+
+### 2026-09-16 15:36 — LANDED on main as 9f148666. Gate: Playwright 187/187, tsc 0, sg 0, light checks 0/0/0, vitest 11462/11479 with 17 load timeouts → six files 257/257 isolated, pair 32.8 s, arena round 39.7 s. D617.50. Unit closed.
