@@ -108,7 +108,7 @@ restoration** by re-running.
   Timeout increases remain limited to tests explicitly named by D544/D606/D613.
 - Full Vitest, Playwright, and production builds remain serialized through
   `/tmp/dnd-gate.lock`; run no Vitest while Playwright owns that lock. See
-  `.claude/RULES.md:47-50` for the surviving lock boundary.
+  `.claude/decisions.md` Part A (Verification, gates and evidence) for the surviving lock boundary.
 - Browser work still uses a unique port; never use reserved port 4173.
 - Fresh worktrees need `npm ci`.
 - `git commit` always `-F msgfile`. Commit by **explicit path**.
@@ -118,11 +118,11 @@ restoration** by re-running.
 
 - Compile scope and command: D263 requires build mode; the 2026-09-03 14:30
   supervisor finding requires `--force`. Project references are executable in
-  [`../tsconfig.json`](../tsconfig.json); `.claude/RULES.md:44` records the
+  [`../tsconfig.json`](../tsconfig.json); `.claude/decisions.md` Part A records the
   forced compile command and supervisor finding.
 - Gate load, retry, and timeout policy: D587.3, with named exceptions in D544,
   D606, and D613; serialization and the locked retry remain in
-  `.claude/RULES.md:47-50`. The newest entry in
+  `.claude/decisions.md` Part A. The newest entry in
   [`decisions.md`](decisions.md) wins on conflict.
 - Required handoff gate inventory (M-3 owner):
   [`REQUIRED_HANDOFF_GATES`](../tools/vtt-handoff/report.ts). Do not duplicate
@@ -145,7 +145,7 @@ executing it, never by a pasted claim.
    exception. A public doc may state a licensing gate *outcome* but never the
    audit evidence.
 2. **Destroying work.** History rewrite, force-push, bulk deletion.
-   `.claude/decisions.md` is supervisor-only and append-only.
+   `.claude/decisions.md` is supervisor-only; new decisions append in its Part D (compacted 2026-09-18, D682; full chronology in `.claude/decisions-archive/`).
 3. **Outward-facing actions.** Push, publish, send. Local commits are not
    outward-facing.
 

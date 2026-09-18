@@ -1,0 +1,42 @@
+fixture          kept sightedM dropped blindM+off
+seed-5117001        0      0      0      0
+seed-5117002        9      3     21      4
+seed-5117003        0      0      0      0
+seed-5117004        0      0      2      1
+seed-5117005        0      0      0      0
+seed-5117006       14      5      0      0
+seed-5117007        0      0      5      3
+seed-5117008        0      1      3      1
+seed-5117009       27      6      0      0
+seed-5117010        0      0     16      4
+seed-5117011        0      0      8      4
+seed-5117012       15      5     16      2
+seed-5117013        0      0      6      2
+seed-6203001        0      2      0      0
+seed-6203002        0      0      0      0
+seed-6203003        0      0     12      2
+seed-6203004        0      0      9      1
+seed-6203005        9      6      0      0
+seed-6203006        0      3      8      1
+seed-6203007        0      2      0      0
+seed-6203008        0      0      0      0
+seed-6203009        6      6     12      1
+seed-6203010        0      0      1      1
+seed-6206001        0      0      0      0
+seed-6206002        0      2      0      0
+seed-6206003        0      0      0      0
+seed-6206004        0      0      0      0
+seed-6206005        0      0      0      0
+seed-6206006        0      0      0      0
+seed-6206007        0      0     15      2
+seed-6206008        0      0      0      0
+seed-6206009        0      0      0      0
+seed-6206010        0      0      0      0
+
+Derivation (supervisor, probe at a73cda49 = pre-B2, same 33 AGREEMENT fixtures, same freshMonsterPlanningState + legacy_standard environment as engine-query-port.test.ts:591-672):
+- per living monster: seen/located enemies via detectCombatant at the planning state; count of valid offered options carrying an attack or saving_throw use.
+- monsters with >=1 seen/located enemy: 80 offers (kept under D671: perceived -> normal offers).
+- monsters with 0 seen/located enemies: 134 offers from 29 monsters (explicit-target attack offers resolved after movement toward an UNSEEN enemy — the D476/D545 leak class; suppressed by D671's blind_dodge branch).
+- 80 + 134 = 214 (old pin). New pin = 80.
+
+Components (same probe, b2-probe-old-components-a73cda49.txt): sighted monsters 80 offers / 111 attack+save components / 0 saving-throw components; blind monsters 134 / 205 / 4. Old pins 214/316/4 = sums; new pins 80/111/0 = sighted-only. New-tree probe (b2-probe-new-components.txt): identical rows for every sighted monster; zero offers for every blind monster.

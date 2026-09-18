@@ -73,7 +73,7 @@ Follow it rather than re-deciding.
 
 | What | Where |
 |---|---|
-| **Binding decisions and findings — READ BEFORE CHANGING ANYTHING** | `.claude/decisions.md` (D-numbered decisions, F-numbered findings; highest number is newest) |
+| **Binding decisions and findings — READ BEFORE CHANGING ANYTHING** | `.claude/decisions.md` (compacted 2026-09-18: Part A standing rules, Part B in-flight units, Part C retired-id index, Part D chronological appends — highest number is newest; the full pre-compaction chronology is `.claude/decisions-archive/2026-09-18-full-chronology.md`) |
 | Standing rules for the autonomous build loop | `.claude/supervision.md` (model policy, gates, forbidden paths, hard stops, failure lessons) |
 | Open questions for the owner | `.claude/pending-questions/` |
 | **D&D rules and spells — NEVER answer from memory** | `.ai/rules/INDEX.md` (answers inline; `.ai/AGENTS.md` has the lookup protocol) |

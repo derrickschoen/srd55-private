@@ -1,21 +1,3 @@
-# Rule conflicts awaiting the owner (D555)
+# Rule conflicts — moved
 
-The supervisor resolves each conflict on an interim basis and records it here; the owner rules later. Newest first.
-
-| Date | Conflict | Rules | Interim resolution |
-|---|---|---|---|
-| 2026-09-05 | Raising timeouts is forbidden, but the owner ordered the load-flaky timeouts raised | standing "never raise a timeout" vs D544 | D544 applies to the named flaky tests only; the general rule stands for everything else |
-| 2026-09-05 | Comprehension bar at Luna low vs at Luna medium | D525/D526 vs D536 | D536 supersedes; low is measured as research |
-| 2026-09-05 | Image-on by default vs picture is redundancy | D522 vs D535 | Both hold: image stays on; the primary channel is the structured text |
-| 2026-09-05 | Fifteen seats per art round vs three (+1) on intermediate rounds | D529 vs D532 (+amendment) | D532 governs intermediate rounds; fifteen only on landing candidates |
-| 2026-09-05 | Claude never reviews what it authored vs Fable seats reviewing Fable units | consensus protocol vs D528 | Owner-accepted: separate sessions; codex stays the independent seat |
-| 2026-09-05 | Fable implements the iso view vs codex-first for art units | D505 vs D532 | D532 governs once D531's pause lifts; Fable only on supervisor request with a stated reason |
-| 2026-09-05 | (from the RULES.md compaction) D251.4 authorizes routine private-mirror pushes, but the current standing hard stop says never push | see text | this draft keeps the stricter no-push rule and omits the ritual push. |
-| 2026-09-05 | (from the RULES.md compaction) D464 requires three judges on every packet, while D532 changes art-review panel size | see text | this draft treats D464 as experiment-packet judging and D532 as art-review judging. |
-| 2026-09-05 | (from the RULES.md compaction) D450/D457 require one session across a play sitting, while D551 specifically binds serious multi-round testing per encounter | see text | this draft keeps both as complementary rather than treating D551 as narrowing session scope. |
-| 2026-09-05 | (from the RULES.md compaction) D110/D208 tied the data-compatibility flip to an explicit owner announcement or first real campaign, while D550 ties compatibility to public release | see text | this draft treats D550 as the latest save-format rule. |
-| 2026-09-05 | (from the RULES.md compaction) D513.5 proposed pending placement for mandatory growth/re-entry, but D514 replaced that path with auto-relocation while later migration-origin pending states survived | see text | this draft limits pending placement to migration-origin records. |
-| 2026-09-05 | (from the codex RULES.md audit) D25 protects stored user data, while D550 permits pre-release save-format incompatibility | D25 vs D550 | D550 governs format compatibility; active stored user data is never silently discarded — a breaking format change ships with a one-way migration or a visible refusal |
-| 2026-09-05 | (from the codex RULES.md audit) D249's Fable-plan/Opus-implement UI pipeline vs codex-first routing | D249 vs D532/model routing | D532 governs art units; codex-default routing governs other UI work unless the owner expressly revives D249 |
-| 2026-09-05 | (from the codex RULES.md audit) D352's standing delegation lets the supervisor pick fork-class options, while RULES.md keeps scope owner-only | D352 vs owner-only scope rule | the supervisor may choose defensible fork-class options as pending-confirmation; R-parameters, scope-outs, denominator changes, product taste and final scope stay owner-only |
-| 2026-09-05 | (supervisor) A deliberate context-format change collides with a byte/sha pin of the old context | "never regenerate expectations" vs intel-leak fix | pin may move only in the same commit as independent invariants proving the change (arm identity, hidden-id boundary, omitted-count declaration) |
+Since 2026-09-18 (D682) open conflicts are the "Open conflicts" section of `.claude/decisions.md`. Historical entries: `.claude/decisions-archive/2026-09-18-full-chronology.md`.

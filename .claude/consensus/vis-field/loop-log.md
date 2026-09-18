@@ -229,3 +229,24 @@ Sol: removing the two-room authored fog [(8,4)] changes fixtures/scenes/two-room
 ## 2026-09-17 20:22 — WALL-01 fix r1 harvested; my verification launched (seam-ab); plan r2 harvested; astra r2 dispatched. D647.
 
 ## 2026-09-17 20:38 — WALL-F1 RETRACTED (my misread: candidateEntries not candidates; aggregate vs per-ray); stepped-wall proof: baseline leaks, WALL-01 and r1 both block; real consequence: scene-snapshot fog +(8,3),(9,3) → D569 normalization; full vitest on r1 running; plan r2 REJECT (4 P2) → r3 final. D648.
+
+## 2026-09-17 20:56 — history purged in place (D649): .tmp-lane-4b.log gone, mirror force-pushed (main 3be26bd8), 16 detached worktrees remapped; new ids: vis-field candidate 6887755f, clean checkouts e86a4d26. Astra plan r3 (final) and WALL-01 fix r2 dispatched on the rewritten trees.
+
+## 2026-09-17 21:08 — COHORT-01 plan frozen (2b931ed857e6…) with N1; B1 dispatched (new worktree cohort-01); WALL-01 fix r2 re-dispatched after sol capacity outage. D650.
+
+## 2026-09-17 21:25 — WALL-01 fix r2 BLOCKED (four subjects vanish; scene edits proposed) → ruled, fix r3 dispatched; COHORT-01 B1 BLOCKED (v5 cap discontinuity) → N2, plan re-frozen 4bff2145b445…, B1 fix r1 dispatched. D651.
+
+## 2026-09-17 22:08 — WALL-01 r3 verified and committed bc6422bf; astra review of the whole candidate dispatched. D653.
+
+## 2026-09-17 22:23 — WALL-01 astra REJECT (P1: endpoint junctions leak; my brief excluded endpoints) — confirmed by me; fix r4 dispatched. D654.
+
+## 2026-09-17 23:07 — WALL-01 fix r4 harvested (endpoint-junction rule; counts and generation bytes unchanged); my verification running. D656.
+
+## 2026-09-17 23:22 — r4 verified except an aggregate leak at a sealed junction via edge-aligned endpoint rays (my rule gap, WALL-F4) → refined rule, fix r5 dispatched. D657.
+
+## 2026-09-18 00:07 — WALL-01 r5 verified (intended mutant 8 red; probes A–F as required; 35 known reds; pair 39 s) and committed b94dd732; astra r2 dispatched. D660.
+
+## 2026-09-18 00:22 — WALL-01 ACCEPTED (astra r2); vis-field b94dd732 merged into cohort-01 bea24cbe; B3 generation dispatched. D661.
+
+## 2026-09-18 08:27 — owner Question 6: seek cover and dodge unless an indication of the enemy's direction exists (D664). BLIND-01 planning dispatched.
+- 2026-09-18 15:56 COMPACTION: draft r1 (609 lines) read in full by supervisor; ref check 250/250 code-doc ids resolve (my script); 86 ACTIVE digest rows uncited (active-uncited.txt); stale vs D673–D676; glued number tokens. r2 dispatched to merge author (resumed); independent fidelity audit (fresh astra HIGH, 45 sampled bullets vs source) dispatched.

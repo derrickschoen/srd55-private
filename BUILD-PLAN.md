@@ -2,7 +2,7 @@
 
 **Historical plan — completed 2026-07-23.** This file records the original
 static-port sequence; it is not current operational guidance or a backlog.
-Current operating rules are `.claude/RULES.md` under the newest controlling
+Current operating rules are `.claude/decisions.md` (Part A) under the newest controlling
 entries in `.claude/decisions.md`; executable compile configuration lives in
 `package.json` and `tsconfig*.json`; implementation evidence lives in
 `BUILD-PROGRESS.md`, `progress/`, `PARITY-AUDIT.md`, and the retained tests.
