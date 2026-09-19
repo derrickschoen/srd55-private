@@ -102,3 +102,11 @@
 - 2026-09-19 16:22 TICK: boundary plan r2 REJECT 2/5/1 → fix r2 with the offers-from-local-state ruling → D759.
 - 2026-09-19 16:51 TICK: boundary plan fix r2 harvested → astra HIGH r3 (final) → D760.
 - 2026-09-19 17:06 TICK: boundary plan r3 REJECT 1/4/2 → owner escalation → D761.
+- 2026-09-19 17:07 owner ruled BND-NPC: monster side one mutually-known team; player side perception-gated → D762.
+- 2026-09-19 18:13 owner granted a 4th planning round (scoped) → fix r3 dispatched → D763.
+
+- Sat Sep 19 18:37:40 EDT 2026 — TICK: fix r3 harvested (plan 475 lines, sha 0247f508…, copied to MAIN); astra HIGH r4 dispatched (session 01a0bbd1…); D764 recorded. Owner questions open: mirror visibility flip (recommended), records-only mirror push.
+
+- Sat Sep 19 18:51:48 EDT 2026 — TICK: astra r4 REJECT 1/5/1; record saved; D765; unit returned to owner (D763). No lanes live.
+
+- Sat Sep 19 18:58:36 EDT 2026 — owner "a" (D766) + freeze-after-this-round ruling (D767); fix r4 dispatched on resumed sol session 01a0baef….
