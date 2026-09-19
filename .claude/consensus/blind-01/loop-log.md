@@ -88,3 +88,17 @@
 - 2026-09-19 10:21 TICK: B10 astra REJECT 0/1/0 (literal cap) → fix r1 (resumed) → D745.
 - 2026-09-19 11:10 TICK: B10 fix r1 verified (cap-shift mutant killed), committed be09e575; astra re-review dispatched → D746.
 - 2026-09-19 11:21 TICK: astra ACCEPT on B10 fix (be09e575) → D747. Idle pending owner decision on D694-INTEL-01 shape.
+- 2026-09-19 14:30 owner ruled shape A for D694-INTEL-01 → D748; fresh boundary planning lane dispatched.
+- 2026-09-19 14:51 TICK: boundary plan harvested (8 batches, 49 files) → astra HIGH r1 → D749.
+- 2026-09-19 15:07 TICK: boundary plan REJECT 1/4/2 (capsule channel, forgeable brand, frozen-core resolution) → fix r1 → D750.
+- 2026-09-19 15:13 owner reconfirmed Gemma/Ollama cleanup → GEMMA-CLEANUP-01 queued → D751.
+- 2026-09-19 15:23 brainstorm with codex: 8 supervisor rulings, 24-item owner queue → D752.
+- 2026-09-19 15:34 owner ruled BND-IMG = A (actor-local monster image) → D753.
+- 2026-09-19 15:35 boundary plan fix r1 harvested (12 batches/56 files); r1b amendment for D753 images dispatched → D754.
+- 2026-09-19 15:49 owner ruled BND-NARR = B+ (roster hidden until revealed; narrows D694; D693 mechanism to be amended; N3 needs N4) → D755.
+- 2026-09-19 15:50 r1b harvested; r1c (D755) dispatched → D756.
+- 2026-09-19 15:55 owner ruled BND-CUE = B (indication reveals identity) → D757.
+- 2026-09-19 16:06 TICK: boundary plan r1c harvested → astra HIGH r2 → D758.
+- 2026-09-19 16:22 TICK: boundary plan r2 REJECT 2/5/1 → fix r2 with the offers-from-local-state ruling → D759.
+- 2026-09-19 16:51 TICK: boundary plan fix r2 harvested → astra HIGH r3 (final) → D760.
+- 2026-09-19 17:06 TICK: boundary plan r3 REJECT 1/4/2 → owner escalation → D761.
