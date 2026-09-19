@@ -17,3 +17,74 @@
 - 2026-09-18 16:24 B1 fix r1 verified (verify-b1-fix.log) + committed 6ceaea6c; astra review (review-b1-fix-r1-astra.*) + B2 fix r1 (impl-b2-fix-r1.*) dispatched.
 - 2026-09-18 16:39 B1 fix ACCEPTED; B2 fix r1 verified (verify-b2-fix.log) + committed 1c5fd117; astra review dispatched (review-b2-fix-r1-astra.*).
 - 2026-09-18 16:42 B2 fix ACCEPTED (1c5fd117). B3 dispatched fresh sol (impl-b3.*).
+- 2026-09-18 17:09 B3 verified (verify-b3.log) + committed 1b595de8; astra review B3 (review-b3-astra.*) + B4 (impl-b4.*) dispatched.
+- 2026-09-18 17:22 B3 astra REJECT 0/1/0 (rank parity, verified); fix r1 brief ready, queued behind B4.
+- 2026-09-18 17:37 B4 BLOCKED (my brief mislabelled a B6 test as B4-owned) → resumed (impl-b4-resume.*). 185/185 reproduced.
+- 2026-09-18 18:13 B4 verified (verify-b4.log) + committed 51eb71a5; astra review B4 + B3 fix r1 dispatched.
+- 2026-09-18 18:24 B3 fix verified + committed f73da384; astra review (review-b3-fix-r1-astra.*) + B4 fix r1 (impl-b4-fix-r1.*) dispatched.
+- 2026-09-18 18:36 B3 fix ACCEPTED (f73da384). B4 fix r1 running.
+- 2026-09-18 18:54 B4 fix r1 verified (verify-b4-fix.log) + committed a5389bdc; astra fix review dispatched (review-b4-fix-r1-astra.*).
+- 2026-09-18 18:54 slip: unquoted heredoc for the B4-fix review brief executed a backticked identifier (playerInfluence → empty word in item 3); brief otherwise intact, review left running. Rule (memory heredoc-backticks-quote-delimiter): quote the delimiter and pre-expand shas with sed.
+- 2026-09-18 19:07 B4 fix r1 astra REJECT 0/2/0 (unseen speed/condition/presence still published) → fix r2 dispatched (impl-b4-fix-r2.*).
+- 2026-09-18 19:24 B4 fix r2 verified (verify-b4-fix-r2.log) + committed 3554c623; astra review r2 dispatched (review-b4-fix-r2-astra.*).
+- 2026-09-18 19:37 B4 fix r2 ACCEPTED (3554c623). B5 dispatched (impl-b5.*).
+- 2026-09-18 20:02 D694 recorded: owner ruled B (monster omniscience only for perceived PCs); Part A intel line updated, Open-conflicts flag removed; 14 (verify) flags remain. B5 lane still running.
+- 2026-09-18 20:25 B5 harvested (exit 0), verified (tsc 0/0, 156/157, mutant killed x12), committed 662b77a6; astra MEDIUM review dispatched (review-b5-astra.log/.exit).
+- 2026-09-18 20:37 B5 review r1 REJECT 0/3/0 (P2 conditional shape pins, missing stationary-Search negative, scorer unresolved-only); fix r1 dispatched on resumed session (impl-b5-fix-r1.log/.exit).
+- 2026-09-18 20:53 B5 fix r1 harvested, verified (tsc 0/0, 83/84, mutant killed), committed 6a43753d; astra re-review dispatched.
+- 2026-09-18 21:16 B5 ACCEPTED (6a43753d); B6 baseline running before dispatch.
+- 2026-09-18 21:28 B6 baseline on 6a43753d: 7 reds / 5 files (b6-baseline.log). Control at b94dd732 (seam-verify): the 4 arena/conversation rows PASS in 101 s, so BLIND-01 introduces the arena 'loads the first frozen brutal-b room' 30 s timeout and the conversation SIMULATED-session row. Long-timeout run in progress (b6-arena-900s.log; TEMP sed on ai-dm-arena.test.ts:1026, revert if the run is killed). B6 not dispatched yet.
+- 2026-09-18 21:30 arena row: slowdown not hang (63 s with cap lifted); B6 dispatched (impl-b6.log/.exit). D699.
+- 2026-09-18 22:13 B6 BLOCKED (D694 leak pre-exists at base — parked D694-INTEL-01; arena row base 23.7 s vs candidate 25.8–32.1 s, cap→60 s ruled); B6 resumed (impl-b6-resume.log/.exit). D700.
+- 2026-09-18 23:54 B6 harvested, verified (tsc 0/0, 282/282, mutant killed), committed 26885d92; astra review dispatched (review-b6-astra.log/.exit). D701.
+- 2026-09-19 00:07 B6 review r1 REJECT 0/2/0 (cap-row omission witness lost; scripted-party row output-vs-output); fix r1 dispatched (impl-b6-fix-r1.log/.exit). D702.
+- 2026-09-19 00:44 B6 fix r1 harvested, verified (tsc 0/0, 78/78, hash recomputed, mutant killed), committed c0e2ef19; astra re-review dispatched. D703.
+- 2026-09-19 00:51 B6 ACCEPTED c0e2ef19 (P3 byte pins parked). Core complete. Section 9 gate: my scripts on seam-verify@c0e2ef19; codex gate lane in blind-01. D704.
+- 2026-09-19 00:53 BLIND-01 core gate lane dispatched (gate-core.log/.exit): touched tests, generation gate pre(vis-field@b94)/post, six mutants. My scripts gate running on seam-verify@c0e2ef19 (gate-core-scripts.log).
+- 2026-09-19 00:58 FINDING: arch check exit 1 at c0e2ef19 (blind-dodge-posture.test.ts:124 cast, B4); base passes. Fix lane in seam-verify. D705.
+- 2026-09-19 01:10 arch fix (seam-verify, uncommitted): my verify all 0, 11/11; astra review of the Object.create construction dispatched (review-arch-fix-astra.log/.exit). Gate lane still running.
+- 2026-09-19 01:22 gate lane outage (capacity) → relaunched; arch fix r1 REJECT (brand erased) → r2 dispatched (vi.mock seam). D706.
+- 2026-09-19 01:40 arch fix r2 verified (all 0, 31/31), committed 82d0ad82 on seam-verify; astra re-review dispatched. Gate lane running.
+- 2026-09-19 01:51 arch fix r2 REJECT P2 (isolate:false shares module cache; mock can bind/leak across files) → r3 dispatched (resetModules + suite-boundary cleanup, ordering proofs). Gate lane running (47 execs).
+- 2026-09-19 02:11 core gate PASSED (A 495/496, B 43/43 + instrumentation, C 6/6). arch fix r3 verified, committed 64116d19; D630 pair run; astra r3 review dispatched. D708.
+- 2026-09-19 02:12 D630 pair: candidate 36/36 38.63 s (gate-d630-pair.log); baseline b94dd732 see gate-d630-pair-base.log.
+- 2026-09-19 02:21 arch fix ACCEPTED; blind-01 and vis-field ff to 64116d19. Cohort merge previewed. D709.
+- 2026-09-19 02:24 cohort merge: 2 conflicts (manifest test keep-both; brutal-b structural pins kept, productivity predicates dropped per D710); resolution lane dispatched (impl-merge-cohort.log/.exit).
+- 2026-09-19 02:41 cohort merge verified (30 designed reds only), committed cd451ccb, cohort-01 ff'd. B7 dispatched. D711.
+- 2026-09-19 02:53 B7 pre-generation verified (30 designed reds only, mutant killed), committed d5cac639; astra review dispatched. D712.
+- 2026-09-19 03:06 B7 ACCEPTED d5cac639. BLIND-01 core closed; next COHORT-01 B3. D713.
+- 2026-09-19 03:07 COHORT-01 B3 rerun dispatched (impl-b3-rerun.log/.exit). D714.
+- 2026-09-19 03:23 COHORT B3 rerun verified (own generation identical, 15/35 with 20 ENOENT), committed 2b758f0a; astra review dispatched. D715.
+
+- 2026-09-19 03:37 TICK: astra ACCEPT 0/0/0 on COHORT-01 B3 rerun (2b758f0a) saved to consensus/cohort-01; D716 recorded; COHORT-01 Batch 4 (6210 brutal-b-v2) dispatched fresh sol on ../dnd-wt-cohort-01; D710 question put to owner.
+- 2026-09-19 03:41 owner confirmed D710 option C → D717.
+- 2026-09-19 03:45 owner ruled D694-INTEL-01 queued after BLIND-01, before COHORT B9 → D718.
+- 2026-09-19 03:47 owner ruled supervisor seat = Fable 5.1 → D719 (two verify flags closed).
+- 2026-09-19 03:50 TICK: COHORT-01 B4 harvested (lane exit 0), supervisor regen/tsc/arch/v2 verified, committed dd5f6676, astra MEDIUM review dispatched → D720.
+- 2026-09-19 03:51 owner lifted the CLI 0.148.0 pin → D721.
+- 2026-09-19 04:07 TICK: astra ACCEPT 0/0/0 on COHORT-01 B4 (dd5f6676) saved; D722; Batch 5 (6211 brutal-2-v2) dispatched fresh sol.
+- 2026-09-19 04:23 TICK: COHORT-01 B5 harvested, supervisor-verified, committed 9ff97779; astra MEDIUM dispatched → D723. All 30 v2 fixtures generated.
+- 2026-09-19 04:37 TICK: astra ACCEPT 0/0/0 on COHORT-01 B5 (9ff97779); D724; Batch 6 dispatched fresh sol.
+- 2026-09-19 05:28 TICK: COHORT-01 B6 harvested, supervisor-verified (hashes recomputed, 8 suites), committed aeefe48a; supervisor mutant survived (flagged); astra MEDIUM dispatched → D725.
+- 2026-09-19 05:36 TICK: astra REJECT 0/0/1 on COHORT-01 B6 (aeefe48a) — supervisor mutant confirmed non-equivalent; fix r1 dispatched on resumed session → D726.
+- 2026-09-19 05:53 TICK: B6 fix r1 harvested, mutant now killed (supervisor-verified), committed 65db21a9; astra re-review dispatched → D727.
+- 2026-09-19 06:06 TICK: astra ACCEPT 0/0/0 on B6 fix r1 (65db21a9); Batch 6 closed → D728.
+- 2026-09-19 06:07 TICK: Batch 7 dispatched fresh sol; BLIND-01 B7 closing gate launched on the throwaway at 65db21a9 → D729.
+- 2026-09-19 06:09 BLIND-01 B7 closing gate at 65db21a9: freeze 0, v2 36/36, d569 suites green, D583 closure 217 = exact 216 set + d569-v6 (COHORT B6's new test) → D730 ruling (owner may override). BLIND-01 closed.
+- 2026-09-19 06:45 TICK: COHORT-01 B7 harvested, supervisor-verified (arena 62/62 303 s), committed bd02239e, supervisor mutant killed; astra MEDIUM dispatched → D731.
+- 2026-09-19 06:51 TICK: astra ACCEPT 0/0/0 on COHORT-01 B7 (bd02239e); Batch 8 dispatched fresh sol → D732.
+- 2026-09-19 07:49 TICK: COHORT-01 B8 harvested, supervisor-verified (82/82, 30 hash literals recomputed), committed 55465bf6, supervisor mutant killed; astra MEDIUM dispatched → D733.
+- 2026-09-19 07:52 FINDING: Batch 9 partly superseded by BLIND-01 B6 (baseline 11/6/23 green, no reds); N3 planning lane + D694-INTEL-01 planning lane dispatched → D734.
+- 2026-09-19 07:53 TICK: astra ACCEPT 0/0/0 on COHORT-01 B8 (55465bf6) → D735. Two planning lanes running.
+- 2026-09-19 08:07 TICK: N3 draft harvested (3-entry base menu, 2-entry mutated menu under D693); astra HIGH review dispatched → D736.
+- 2026-09-19 08:22 TICK: N3 astra REJECT 0/3/1 → fix r1 (resumed); D694-INTEL-01 plan harvested → astra HIGH review dispatched → D737.
+- 2026-09-19 08:37 TICK: N3 r2 → astra re-review; D694-INTEL-01 plan REJECT 2/4/1 (blind-context + advice-board paths, third-party contamination) → plan fix r1; scope ruling recorded → D738.
+- 2026-09-19 08:51 TICK: N3 ACCEPTED and appended to the frozen COHORT plan; D694-INTEL-01 plan r2 → astra HIGH re-review → D739.
+- 2026-09-19 08:52 TICK: COHORT-01 Batch 10 dispatched fresh sol (test-only) → D740.
+- 2026-09-19 09:06 TICK: D694-INTEL-01 plan r2 REJECT 2/2/0 (option advertisement + board images) → plan fix r2 → D741. Batch 10 running.
+- 2026-09-19 09:21 TICK: D694-INTEL-01 plan r3 (37 files) → astra HIGH r3 → D742. Batch 10 running (mutant phase).
+- 2026-09-19 09:36 TICK: B10 lane done → supervisor verify; D694-INTEL-01 plan r3 REJECT 2/2/1 → owner escalation → D743.
+- 2026-09-19 10:06 TICK: B10 verified (79/79, mutant killed), committed a0ca3795; astra MEDIUM dispatched → D744.
+- 2026-09-19 10:21 TICK: B10 astra REJECT 0/1/0 (literal cap) → fix r1 (resumed) → D745.
+- 2026-09-19 11:10 TICK: B10 fix r1 verified (cap-shift mutant killed), committed be09e575; astra re-review dispatched → D746.
+- 2026-09-19 11:21 TICK: astra ACCEPT on B10 fix (be09e575) → D747. Idle pending owner decision on D694-INTEL-01 shape.
