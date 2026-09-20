@@ -234,3 +234,5 @@
 - Sun Sep 20 15:24:54 EDT 2026 — B7+fix verified (110/110), mutant killed, astra B7 r1 dispatched (D830). Running: astra plan r8, DATA-01 plan.
 
 - Sun Sep 20 15:38:06 EDT 2026 — B7 astra r1 REJECT 1/1/2 (first-local aggregation P1) → fix r2 dispatched (D831); PUBLISH-01 r8 REJECT 0/3/0 (HMAC key, generator modes, RTF tables) → fix r8 dispatched (D832). DATA-01 plan lane running.
+
+- Sun Sep 20 15:52:14 EDT 2026 — DATA-01 plan r1 harvested (337 lines); astra HIGH r1 dispatched (D833). B7 fix r2 + PUBLISH-01 fix r8 running.
