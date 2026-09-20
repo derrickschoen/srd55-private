@@ -218,3 +218,5 @@
 - Sun Sep 20 13:36:58 EDT 2026 — PUBLISH-01 fix r5 DONE (plan 599 / ledger 748, shas verified); astra HIGH r6 dispatched (D821). B7 lane still running (13 MB log).
 
 - Sun Sep 20 13:51:46 EDT 2026 — PUBLISH-01 plan r6 REJECT 0/3/1; iteration paused; finding against my D815 reading (comment-narrative scrub was my extension); owner asked to narrow (D822). B7 lane running (17 MB log).
+
+- Sun Sep 20 14:08:34 EDT 2026 — OWNER: A (files only + mechanical scrub) → D823; PUBLISH-01 plan fix r6 dispatched. B7 lane running.
