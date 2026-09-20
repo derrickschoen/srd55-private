@@ -200,3 +200,9 @@
 - Sun Sep 20 09:53:10 EDT 2026 — B5 fix r1 V green; mutant; astra r2 dispatched (D811).
 
 - Sun Sep 20 10:07:13 EDT 2026 — B5 ACCEPTED (dd932e8b); B6 dispatched (D812); records commit + push.
+
+- Sun Sep 20 11:06:45 EDT 2026 — B6 DONE harvested + committed (D813); V running.
+
+- Sun Sep 20 11:38:26 EDT 2026 — B6 V green; mutant; astra review dispatched (D814).
+
+- Sun Sep 20 11:47:00 EDT 2026 — OWNER ruled on public repo (D815: no chronology, tidy, OGL+CC in, SRD yes / PHB no); PUBLISH-01 plan fix r3 dispatched (resumed sol). B6 astra r1 REJECT (D816, P2 verified by me); B6 fix r1 dispatched.
