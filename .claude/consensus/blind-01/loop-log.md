@@ -174,3 +174,17 @@
 - Sun Sep 20 05:07:34 EDT 2026 — D798.1: mutant reversal failed (non-unique anchor), r3 lane killed and re-dispatched on the clean tree.
 
 - Sun Sep 20 05:22:22 EDT 2026 — B3 ACCEPTED (e90c6292); B4 dispatched (D799); records commit + mirror push.
+
+- Sun Sep 20 05:37:12 EDT 2026 — B4 BLOCKED on B5-owned schemas → D800 ruling (wire unknown arm → B5); B4 resumed.
+
+- Sun Sep 20 06:06:40 EDT 2026 — B4 DONE harvested + committed (D801); V running.
+
+- Sun Sep 20 06:24:26 EDT 2026 — B4 V green; my sameSide mutant SURVIVED (no threat content witness); astra review dispatched (D802).
+
+- Sun Sep 20 06:37:10 EDT 2026 — B4 astra r1 REJECT 3 P2 → fix r1 (D803; phase derivation → B5).
+
+- Sun Sep 20 07:06:41 EDT 2026 — B4 fix r1 committed (D804); V running.
+
+- Sun Sep 20 07:23:04 EDT 2026 — B4 fix r1 V green; mutant re-run; astra r2 dispatched (D805).
+
+- Sun Sep 20 07:37:23 EDT 2026 — B4 ACCEPTED (df1d6bc7); B5 dispatched (D806); records commit + push.
