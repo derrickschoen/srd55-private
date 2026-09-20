@@ -240,3 +240,5 @@
 - Sun Sep 20 16:08:02 EDT 2026 — PUBLISH-01 fix r8 harvested + audit reproduced, astra r9 dispatched (D834); DATA-01 r1 REJECT 0/12/3 → fix r1 dispatched (D835). B7 fix r2 running.
 
 - Sun Sep 20 16:09:20 EDT 2026 — D836: audit pin is 1218f20e (reproduced); r9 killed + redispatched with the corrected brief; self-kill via pgrep-in-own-argv recorded.
+
+- Sun Sep 20 16:21:56 EDT 2026 — PUBLISH-01 r9 REJECT 0/3/0 (fixed-point commit hash; Pi cwd; policy slots) → fix r9 dispatched (D837). B7 fix r2 + DATA-01 fix r1 running.
