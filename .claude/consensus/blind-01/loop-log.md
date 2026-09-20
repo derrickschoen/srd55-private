@@ -110,3 +110,67 @@
 - Sat Sep 19 18:51:48 EDT 2026 — TICK: astra r4 REJECT 1/5/1; record saved; D765; unit returned to owner (D763). No lanes live.
 
 - Sat Sep 19 18:58:36 EDT 2026 — owner "a" (D766) + freeze-after-this-round ruling (D767); fix r4 dispatched on resumed sol session 01a0baef….
+
+- Sat Sep 19 19:05:26 EDT 2026 — D768 push done (mirror = main 32c5bed0); D769 README-01 dispatched (sol, worktree ../dnd-wt-readme).
+
+- Sat Sep 19 19:22:06 EDT 2026 — fix r4 harvested (520 lines, sha 93a8f28a…); astra r5 dispatched (01a0bbf9…); D770. README-01 lane still running.
+
+- Sat Sep 19 19:37:57 EDT 2026 — astra r5 REJECT 0/2/2 → plan FROZEN sha 93a8f28a… with 4 batch-0 tasks (D771); README-01 harvested (D772), astra MEDIUM + fresh-clone verify dispatched.
+
+- Sat Sep 19 19:52:09 EDT 2026 — README astra r1 REJECT 2/3; fresh-clone verify PASS; fix r1 dispatched (D773). B1 lane running.
+
+- Sat Sep 19 20:08:17 EDT 2026 — B1 BLOCKED on prototype local-SHA literal → D774 ruling (my brief error), B1 resumed; README fix r1 harvested (359 lines, sha 40696f4e…), astra r2 dispatched (01a0bc23…).
+
+- Sat Sep 19 20:21:42 EDT 2026 — README astra r2 REJECT 0/0/2 (wording); fix r2 dispatched (D775). B1 resume still running.
+
+- Sat Sep 19 20:37:05 EDT 2026 — B1 DONE harvested (D776), supervisor V running; README fix r2 harvested, astra r3 dispatched.
+
+- Sat Sep 19 20:52:57 EDT 2026 — README-01 CLOSED (dab7d561 on main, mirror pushed); B1 verified + my mutant killed 3/7, committed, astra review dispatched (D777).
+
+- Sat Sep 19 21:07:12 EDT 2026 — B1 astra r1 REJECT 4/2; fix r1 dispatched (D778).
+
+- Sat Sep 19 21:47:10 EDT 2026 — owner A: public repo derrickschoen/srd55 (D779); PUBLISH-01 planning lane dispatched (sol, MAIN repo, sole write .tmp-plans/2026-09-19-publish-01-plan.md). B1 fix r1 still running.
+
+- Sat Sep 19 21:51:36 EDT 2026 — B1 fix r1 harvested (D780); supervisor V running. PUBLISH-01 plan lane running.
+
+- Sat Sep 19 22:08:15 EDT 2026 — B1 fix committed 6785c1f5, astra r2 (01a0bc90…); PUBLISH-01 plan harvested, astra HIGH dispatched (D781). Owner Q: OGL A/B.
+
+- Sat Sep 19 22:22:59 EDT 2026 — B1 r2 REJECT 2 P2 → fix r2; PUBLISH-01 plan r1 REJECT 2/7/1 → fix r1 (D782).
+
+- Sat Sep 19 22:52:11 EDT 2026 — B1 fix r2 harvested, V running; PUBLISH-01 plan fix r1 harvested, astra r2 dispatched (D783).
+
+- Sat Sep 19 23:07:42 EDT 2026 — B1 fix r2 committed, astra r3 (final); PUBLISH-01 plan r2 REJECT 0/4/2 → fix r2 (D784).
+
+- Sat Sep 19 23:22:33 EDT 2026 — B1 ACCEPTED (ed75b664); B2 dispatched; PUBLISH-01 plan fix r2 harvested, astra r3 (final) dispatched (D785).
+
+- Sat Sep 19 23:36:33 EDT 2026 — PUBLISH-01 plan r3 REJECT 0/1/1 → owner escalation (D786). B2 running.
+
+- Sun Sep 20 00:06:39 EDT 2026 — B2 harvested (D787), supervisor V running. Owner escalation on PUBLISH-01 plan pending.
+
+- Sun Sep 20 00:24:07 EDT 2026 — D788 FINDING (my git checkout clobbered a lane file) + D789 recovery byte-exact; B2 committed c22a1efe; astra review dispatched.
+
+- Sun Sep 20 00:37:11 EDT 2026 — B2 ACCEPTED (c22a1efe); B3 dispatched (D790). Owner escalation on PUBLISH-01 plan pending.
+
+- Sun Sep 20 01:36:42 EDT 2026 — B3 harvested + committed (D791); supervisor V running (~12 min).
+
+- Sun Sep 20 02:07:21 EDT 2026 — B3 V green; own mutant; astra review dispatched (D792).
+
+- Sun Sep 20 02:07:55 EDT 2026 — B3 mutant 1 = crash kill (discounted), mutant 2 = semantic kill by the count witness (D792.1).
+
+- Sun Sep 20 02:21:58 EDT 2026 — B3 astra r1 REJECT 0/2; fix r1 dispatched (D793).
+
+- Sun Sep 20 03:06:35 EDT 2026 — B3 fix r1 committed (D794); V running.
+
+- Sun Sep 20 03:37:12 EDT 2026 — B3 fix r1 V green; mutant; astra r2 dispatched (D795).
+
+- Sun Sep 20 03:37:43 EDT 2026 — (correction) r2 brief write failed on first attempt (python NameError); rewritten and dispatched. Mutant: semantic kill, 2/20 red.
+
+- Sun Sep 20 03:51:52 EDT 2026 — B3 astra r2 REJECT 0/1/1 → fix r2 (D796).
+
+- Sun Sep 20 04:51:45 EDT 2026 — B3 fix r2 committed (D797); V running.
+
+- Sun Sep 20 05:06:55 EDT 2026 — B3 fix r2 V green; test-of-test mutant; astra r3 (final) dispatched (D798).
+
+- Sun Sep 20 05:07:34 EDT 2026 — D798.1: mutant reversal failed (non-unique anchor), r3 lane killed and re-dispatched on the clean tree.
+
+- Sun Sep 20 05:22:22 EDT 2026 — B3 ACCEPTED (e90c6292); B4 dispatched (D799); records commit + mirror push.
