@@ -206,3 +206,7 @@
 - Sun Sep 20 11:38:26 EDT 2026 — B6 V green; mutant; astra review dispatched (D814).
 
 - Sun Sep 20 11:47:00 EDT 2026 — OWNER ruled on public repo (D815: no chronology, tidy, OGL+CC in, SRD yes / PHB no); PUBLISH-01 plan fix r3 dispatched (resumed sol). B6 astra r1 REJECT (D816, P2 verified by me); B6 fix r1 dispatched.
+
+- Sun Sep 20 12:07:14 EDT 2026 — B6 fix r1 DONE harvested (test-only, +56/−3) → committed 0a209799 (sha f25ef56a… == codex report); verify-b6-fix-r1 running. PUBLISH-01 plan fix r3 DONE (557 lines, sha 7dfff21c…); astra HIGH r4 dispatched.
+
+- Sun Sep 20 12:24:37 EDT 2026 — B6 fix r1 verified (36/36 etc.), mutant killed, committed 0a209799, astra r2 dispatched (D817). PUBLISH-01 plan r4 REJECT 0/3/2 → fix r4 dispatched under D815 (D818).
