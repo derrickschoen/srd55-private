@@ -220,3 +220,7 @@
 - Sun Sep 20 13:51:46 EDT 2026 — PUBLISH-01 plan r6 REJECT 0/3/1; iteration paused; finding against my D815 reading (comment-narrative scrub was my extension); owner asked to narrow (D822). B7 lane running (17 MB log).
 
 - Sun Sep 20 14:08:34 EDT 2026 — OWNER: A (files only + mechanical scrub) → D823; PUBLISH-01 plan fix r6 dispatched. B7 lane running.
+
+- Sun Sep 20 14:11:47 EDT 2026 — B7 DONE harvested → committed 0d656a82; supervisor finding: local scenario menu ignores the initiative window (conversation 108/110 explained); fix r1 brief ready, dispatch after verify (D824).
+
+- Sun Sep 20 14:37:11 EDT 2026 — B7 verify matches codex (D825), fix r1 dispatched; PUBLISH-01 fix r6 harvested (600/169 lines), astra r7 dispatched; JEV-01 memo harvested (D826).
