@@ -246,3 +246,5 @@
 - Sun Sep 20 16:37:27 EDT 2026 — PUBLISH-01 fix r9 harvested + audit reproduced (174/19), astra r10 dispatched; DATA-01 fix r1 harvested, astra r2 dispatched (D838). B7 fix r2 running.
 
 - Sun Sep 20 16:52:23 EDT 2026 — CODEX USAGE LIMIT (reopens 2026-09-22 17:42); astra r10 + DATA-01 r2 void; B7 fix r2 committed 10f99026 as BLOCKED candidate (snippets :369 pin predates B1); verify running (D839).
+
+- Sun Sep 20 16:57:42 EDT 2026 — D840: fix r2 hard stop upheld by my probe (attack_allocation_unresolved → bypassed); manifest +engine-query-port; fix r3 brief staged for Sep 22 17:42. Codex outage in force.
