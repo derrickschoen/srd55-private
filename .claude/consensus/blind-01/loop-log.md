@@ -224,3 +224,5 @@
 - Sun Sep 20 14:11:47 EDT 2026 — B7 DONE harvested → committed 0d656a82; supervisor finding: local scenario menu ignores the initiative window (conversation 108/110 explained); fix r1 brief ready, dispatch after verify (D824).
 
 - Sun Sep 20 14:37:11 EDT 2026 — B7 verify matches codex (D825), fix r1 dispatched; PUBLISH-01 fix r6 harvested (600/169 lines), astra r7 dispatched; JEV-01 memo harvested (D826).
+
+- Sun Sep 20 14:51:38 EDT 2026 — PUBLISH-01 plan r7 REJECT 0/3/0 (ledger reproducibility) → fix r7 with generator script (D827); JEV-02 survey lane dispatched; B7 fix r1 running.
