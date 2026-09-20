@@ -244,3 +244,5 @@
 - Sun Sep 20 16:21:56 EDT 2026 — PUBLISH-01 r9 REJECT 0/3/0 (fixed-point commit hash; Pi cwd; policy slots) → fix r9 dispatched (D837). B7 fix r2 + DATA-01 fix r1 running.
 
 - Sun Sep 20 16:37:27 EDT 2026 — PUBLISH-01 fix r9 harvested + audit reproduced (174/19), astra r10 dispatched; DATA-01 fix r1 harvested, astra r2 dispatched (D838). B7 fix r2 running.
+
+- Sun Sep 20 16:52:23 EDT 2026 — CODEX USAGE LIMIT (reopens 2026-09-22 17:42); astra r10 + DATA-01 r2 void; B7 fix r2 committed 10f99026 as BLOCKED candidate (snippets :369 pin predates B1); verify running (D839).
