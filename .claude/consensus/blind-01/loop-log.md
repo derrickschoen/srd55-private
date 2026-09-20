@@ -188,3 +188,15 @@
 - Sun Sep 20 07:23:04 EDT 2026 — B4 fix r1 V green; mutant re-run; astra r2 dispatched (D805).
 
 - Sun Sep 20 07:37:23 EDT 2026 — B4 ACCEPTED (df1d6bc7); B5 dispatched (D806); records commit + push.
+
+- Sun Sep 20 08:36:48 EDT 2026 — B5 DONE harvested + committed (D807); V running.
+
+- Sun Sep 20 08:54:02 EDT 2026 — B5 V green; mutant; astra review dispatched (D808).
+
+- Sun Sep 20 09:07:00 EDT 2026 — B5 astra r1 REJECT 3 P2 → fix r1 (D809).
+
+- Sun Sep 20 09:36:44 EDT 2026 — B5 fix r1 committed (D810); V running.
+
+- Sun Sep 20 09:53:10 EDT 2026 — B5 fix r1 V green; mutant; astra r2 dispatched (D811).
+
+- Sun Sep 20 10:07:13 EDT 2026 — B5 ACCEPTED (dd932e8b); B6 dispatched (D812); records commit + push.
