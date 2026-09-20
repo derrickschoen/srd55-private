@@ -216,3 +216,5 @@
 - Sun Sep 20 12:52:31 EDT 2026 — PUBLISH-01 plan r5 REJECT 0/2/1 (catalog Barbed Goad; 8 more chronology sites; frozen-source conflict) → D820 rulings, fix r5 dispatched with complete-ledger appendix; owner asked. B7 lane running.
 
 - Sun Sep 20 13:36:58 EDT 2026 — PUBLISH-01 fix r5 DONE (plan 599 / ledger 748, shas verified); astra HIGH r6 dispatched (D821). B7 lane still running (13 MB log).
+
+- Sun Sep 20 13:51:46 EDT 2026 — PUBLISH-01 plan r6 REJECT 0/3/1; iteration paused; finding against my D815 reading (comment-narrative scrub was my extension); owner asked to narrow (D822). B7 lane running (17 MB log).
