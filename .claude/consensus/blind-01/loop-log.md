@@ -228,3 +228,5 @@
 - Sun Sep 20 14:51:38 EDT 2026 — PUBLISH-01 plan r7 REJECT 0/3/0 (ledger reproducibility) → fix r7 with generator script (D827); JEV-02 survey lane dispatched; B7 fix r1 running.
 
 - Sun Sep 20 15:06:58 EDT 2026 — B7 fix r1 DONE → committed fe991ace; verify running (D828). plan fix r7 + JEV-02 survey still running.
+
+- Sun Sep 20 15:23:47 EDT 2026 — PUBLISH-01 fix r7 harvested, generator reproduced by me, astra r8 dispatched; JEV-02 memo harvested; DATA-01 plan lane dispatched (D829). B7 fix verify done; mutant run.
