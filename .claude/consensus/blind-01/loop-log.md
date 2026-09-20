@@ -236,3 +236,5 @@
 - Sun Sep 20 15:38:06 EDT 2026 — B7 astra r1 REJECT 1/1/2 (first-local aggregation P1) → fix r2 dispatched (D831); PUBLISH-01 r8 REJECT 0/3/0 (HMAC key, generator modes, RTF tables) → fix r8 dispatched (D832). DATA-01 plan lane running.
 
 - Sun Sep 20 15:52:14 EDT 2026 — DATA-01 plan r1 harvested (337 lines); astra HIGH r1 dispatched (D833). B7 fix r2 + PUBLISH-01 fix r8 running.
+
+- Sun Sep 20 16:08:02 EDT 2026 — PUBLISH-01 fix r8 harvested + audit reproduced, astra r9 dispatched (D834); DATA-01 r1 REJECT 0/12/3 → fix r1 dispatched (D835). B7 fix r2 running.
