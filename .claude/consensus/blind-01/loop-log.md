@@ -238,3 +238,5 @@
 - Sun Sep 20 15:52:14 EDT 2026 — DATA-01 plan r1 harvested (337 lines); astra HIGH r1 dispatched (D833). B7 fix r2 + PUBLISH-01 fix r8 running.
 
 - Sun Sep 20 16:08:02 EDT 2026 — PUBLISH-01 fix r8 harvested + audit reproduced, astra r9 dispatched (D834); DATA-01 r1 REJECT 0/12/3 → fix r1 dispatched (D835). B7 fix r2 running.
+
+- Sun Sep 20 16:09:20 EDT 2026 — D836: audit pin is 1218f20e (reproduced); r9 killed + redispatched with the corrected brief; self-kill via pgrep-in-own-argv recorded.
