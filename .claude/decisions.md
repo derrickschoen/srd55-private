@@ -1368,3 +1368,26 @@ Ruling as read by the supervisor:
 5. DATA-01 and PUBLISH-01 are unaffected; their codex dispatches remain queued for the reopen.
 
 Open owner question remains: Opus judge hard cap for DATA-01 (rec. $750). Next free id: D848.
+
+## D848 — SUPERVISOR (2026-09-21 13:35): TEST-PERF brainstorm 2 harvested (6 perspectives: 3 fable + 3 opus, 48 raw → 10 ranked, 17 dropped); the FULL gate is bound by ONE file (ai-dm-conversation.test.ts ≈682 s); baselines + instrumented full gate running
+
+Per D847 §4. Workflow wf_321665a4-a7d (7 agents, 1,028,700 tokens, 25 min, read-only, ≤3 single-file probes each); raw + synthesis at `.tmp/runs/test-perf/brainstorm-2/result.json` (workflow-output.json is the untouched tool result). Synthesis (fable, high) verified numbers against rank9/results.txt and the vitest sequencer cache itself.
+
+HEADLINE (agent-derived, supervisor NOT yet verified — the chain below verifies it): the 644-file full gate runs 682–695 s (Sep 17 vis-field logs) while its tests sum to ≈2,850 s: perfect balance over 8 workers would be ≈420 s. The gap is `tests/unit/tools/ai-dm-conversation.test.ts` at ≈682 s recorded test time in the sequencer cache — the gate wall EQUALS that one file. Next poles: ai-dm-arena 277 s, survival-policy 208 s, ai-dm-board-delivery 125 s, renderer-profile 124 s. None of ranks 1–9 touches the top five (the vis-field brainstorm's rank 8 row declined to split the conversation file and D632 excluded "conversation optimization"). Six-suite pole = room-generator-los-cover (rank 4's target).
+
+RANKED (saving × confidence / effort; M = measurement-only):
+1. IMPL L — partition ai-dm-conversation.test.ts by test into ~4 duration-balanced files, every session chain kept whole; est. full gate 682–695 → ≈380–420 s (−40%). NEEDS OWNER AUTHORIZATION (D632 exclusion; earlier "not recommended" was about cutting the 3×3 session test into one-room tests, which this does not do).
+2. M S — instrument first: quiet full gate with JSON reporter + importDurations + top-level-await census; verbose w1 run of the conversation file for per-test buckets. Corrects the measurement basis (Vitest's results.json excludes module-scope time; a 57 s file recorded 786 ms).
+3. IMPL S (config) — V8 semi-space sizing via test.execArgv (32/64/128 MB) after a GC-share diagnostic; only cheap lever that touches the 682 s pole today; gate-config → rank 9 umbrella or own ruling.
+4. IMPL S — delete unread aggregate `TerrainLineTrace.interveningCells` in src/combat/cover.ts (~12% of every los_cover_v1 generation); byte-identity sweep is the gate, any differing byte rejects.
+5. M S — re-measure maxWorkers 8/12/16 on the FULL gate only AFTER rank 1 lands (before it the null is structural).
+6. IMPL M — split next-tier poles (arena, survival-policy, board-delivery, renderer-profile); cumulative ≈690 → ≈200 s with 5.
+7. IMPL M — engine hot paths from cpu-prof (packed trace keys in cover.ts, precomputed indexes in encounterMovementWorld).
+8. IMPL M — demote module-scope top-level-await production to per-file hooks in 9 files (52 s proven in ai-dm-legacy-invariance); wall ≈0 by itself, big for filtered/Stryker runs.
+9. M S — fsModuleCache on the full gate/affected/Stryker shapes with staleness control.
+10. IMPL M — quarantine the 15 vi.resetModules callers into an isolate:true project; lazy-import chromium in tools/ai-dm-board-snapshot.ts; profile coverage.ts's ~500 ms module self time (cause unattributed: P1's parse-cache theory was killed by a probe, 2–10 ms).
+Dropped 17 with reasons (engine memo = rank 6 territory; worker sweep now; hashing; verdict cache into the gate = policy ceiling; pool substitution forbidden by D633/D634; etc.). Recorded disagreements: which full-gate log is the baseline of record (Sep 16 864 s vs Sep 17 682–695 s; neither had recorded load — the quiet run below settles it); what the "import" column contains; effort of the conversation split (L recorded).
+
+RUNNING NOW (supervisor measurement, box lock, pid 4043957, started 13:34): `.tmp/runs/test-perf/baseline-main/run-chain.sh` = (1) six TEST-PERF suites + D630 ceiling pair, warm-up + A/A each (plan §8, on main e883856a — the D847 §3 authoritative baselines); (2) one quiet instrumented full gate (verbose + json + importDurations) = candidate baseline of record; (3) verbose --maxWorkers=1 run of ai-dm-conversation.test.ts (rank 1's kill criterion / per-test buckets). Nothing lands from any of this.
+
+OWNER QUESTIONS raised by the synthesis (to be asked one at a time; first = rank 1 authorization): rank 1 split authorization; whether gate-config knobs (execArgv, maxWorkers>8, fsModuleCache) sit under D842's rank 9 umbrella; whether the D583 demonstrate-then-normalize digest exception extends to splits beyond the four planned families; full-gate A/A + three pairs (~2 h quiet box per certification) as acceptance evidence despite plan §8; baseline of record; ledger location. Opus judge cap (DATA-01) still open. Next free id: D849.
