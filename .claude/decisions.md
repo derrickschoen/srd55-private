@@ -1431,3 +1431,7 @@ Consequences the DATA-01 fix r2 brief must carry: (1) at the recorded estimate (
 Supervisor correction recorded at full length: in the 14:4x report the supervisor described the DATA-01 judge panel as "fable, astra, sol" (that is the plan-review panel of D587.1, not the D844 dataset judges = opus high + sol high) and claimed $750 gave "about 40 % headroom" over the full state set; at the D845 estimate $750 vs ≈$715 is ≈5 %. Both were supervisor errors, corrected before the owner ruled.
 
 Next owner question (one at a time): DATA-01 plan Q3 — collect primary/fallback labels only, or also the adjustment (retain/replace/replacement) labels? Next free id: D853.
+
+## D852.1 — OWNER (2026-09-21 16:34): the $400 Opus judge cap is a STARTING cap, revisable
+
+Verbatim: "this is a starting cap. can be updated later". Ruling as read: $400 (D852) is the initial ceiling, not a corpus-sizing decision. The plan does not shrink the judged corpus to fit $400; it sizes the judge design (one call per state covering all D846 tunings, supervisor recommendation stands) and, when the 200-state pilot's real receipts give a per-state cost, reports the projected total for full coverage and asks the owner to raise the cap if needed. The tool still stops loudly at whatever cap is current; raising it is an owner ruling recorded here, never a silent edit. Same status applies by analogy to the $500 Luna cap (D841) unless the owner says otherwise. Next free id: D853.
