@@ -12,7 +12,11 @@ import {
   createEngineMcpRuntime,
   loadArenaFixture,
 } from '../../../src/vtt/mcp/entrypoint';
-import { renderBlindEnginePrompt } from '../../../src/vtt/mcp/engine-server';
+import {
+  MONSTER_KNOWLEDGE_BEST_EFFORT_INSTRUCTION,
+  renderBlindEnginePrompt,
+  renderEnginePrompt,
+} from '../../../src/vtt/mcp/engine-server';
 import { encounterBranchId, encounterSessionId } from '../../../src/combat/values';
 import { engineDispatchId } from '../../../src/vtt/agent-session';
 import {
@@ -140,6 +144,32 @@ async function prepareHardCapEvidence() {
 const HARD_CAP_EVIDENCE = await prepareHardCapEvidence().catch((error: unknown) => error);
 
 describe('engine MCP stdio protocol', () => {
+  it('places the monster-knowledge instruction exactly once on every live DM prompt surface', () => {
+    const runtime = createEngineMcpRuntime(createOptionPathFixtureEncounter(), {
+      offerEnvironment: OFFER_ENVIRONMENT,
+    });
+    const capsule = runtime.feed.current();
+    const rules = { get: () => null } as const;
+    const prompts = [
+      ['plan_round', renderEnginePrompt('plan_round', capsule, rules), 'Turn resource:'],
+      ['correct_proposal', renderEnginePrompt('correct_proposal', capsule, rules), 'Turn resource:'],
+      ['speculate_round', renderEnginePrompt('speculate_round', capsule, rules), 'Turn resource:'],
+      ['plan_blind_round', renderBlindEnginePrompt('plan_blind_round', capsule, rules), 'Input mechanics may include'],
+      ['repair_blind_intents', renderBlindEnginePrompt('repair_blind_intents', capsule, rules), 'Input mechanics may include'],
+    ] as const;
+
+    for (const [surface, prompt, boundaryPrefix] of prompts) {
+      const lines = prompt.split('\n');
+      const instructionIndexes = lines.flatMap((line, index) =>
+        line === MONSTER_KNOWLEDGE_BEST_EFFORT_INSTRUCTION ? [index] : []);
+      const boundaryIndex = lines.findIndex((line) => line.startsWith(boundaryPrefix));
+      expect(
+        { instructionIndexes, boundaryIndex },
+        `${surface} instruction placement`,
+      ).toEqual({ instructionIndexes: [1], boundaryIndex: 2 });
+    }
+  });
+
   it('keeps healthy primary prompt and descriptor bytes equal with readiness instrumentation', () => {
     const state = createOptionPathFixtureEncounter();
     const common = {

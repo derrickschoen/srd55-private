@@ -7,9 +7,11 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { canonicalJson } from '../../../src/commands/canonical-json';
 import {
   decodeRoundPlanStructure,
+  E02_SHARED_INSTRUCTIONS,
   e01RoundPlanReplyContract,
   e03RoundPlanReplyContract,
 } from '../../../src/vtt/dm-bridge/round-plan-contract';
+import { MONSTER_KNOWLEDGE_BEST_EFFORT_INSTRUCTION } from '../../../src/vtt/mcp/engine-server';
 import {
   aggregateExperimentRecords,
   computeTacticalRegretFromCaptures,
@@ -196,6 +198,7 @@ describe('E02 worked-example experiment registration', () => {
     expect(new Set(arms.map((arm) => arm.instructions)).size).toBe(1);
     expect(arms.every((arm) => !arm.instructions.includes(arm.exampleBlock))).toBe(true);
     expect(arms.map((arm) => arm.workedExamples.length)).toEqual([0, 1, 3]);
+    expect(E02_SHARED_INSTRUCTIONS).not.toContain(MONSTER_KNOWLEDGE_BEST_EFFORT_INSTRUCTION);
 
     const oneExample = canonicalJson(arms[1]?.workedExamples);
     expect(oneExample).toContain('"kind":"priority"');
