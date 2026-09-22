@@ -73,7 +73,7 @@ export function healingPotionUsesComponentIngress(): boolean {
 
 export function reverseConsumerClosure(
   seeds: readonly string[],
-  reverse: ReadonlyMap<string, ReadonlySet<string>>,
+  reverse: ReadonlyMap<string, ReadonlySet<string>> | Readonly<Record<string, readonly string[]>>,
 ): ReadonlySet<string> {
   const queue = [...seeds];
   const visited = new Set(queue);
@@ -81,7 +81,10 @@ export function reverseConsumerClosure(
   while (queue.length > 0) {
     const dependency = queue.shift();
     if (dependency === undefined) break;
-    for (const consumer of reverse.get(dependency) ?? []) {
+    const directConsumers = reverse instanceof Map
+      ? reverse.get(dependency) ?? []
+      : (reverse as Readonly<Record<string, readonly string[]>>)[dependency] ?? [];
+    for (const consumer of directConsumers) {
       if (consumer.startsWith('tests/') && consumer.endsWith('.test.ts')) consumers.add(consumer);
       if (!visited.has(consumer)) {
         visited.add(consumer);
@@ -165,6 +168,35 @@ function sourceFiles(directory: string): readonly string[] {
   return result.sort();
 }
 
+export interface DependencyIndex {
+  readonly sourceFiles: readonly string[];
+  readonly reverseEdges: Readonly<Record<string, readonly string[]>>;
+}
+
+export function buildDependencyIndex(): DependencyIndex {
+  const files = sourceFiles(ROOT);
+  const reverse = new Map<string, Set<string>>();
+  for (const importer of files) {
+    const text = readFileSync(resolve(ROOT, importer), 'utf8');
+    for (const dependency of dependencySpecifiers(text, importer)) {
+      const resolved = resolveLocal(importer, dependency.specifier);
+      if (resolved === null) continue;
+      const consumers = reverse.get(resolved) ?? new Set<string>();
+      consumers.add(importer);
+      reverse.set(resolved, consumers);
+    }
+  }
+  const reverseEdges = Object.fromEntries(
+    [...reverse.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([dependency, consumers]) => [dependency, Object.freeze([...consumers].sort())]),
+  ) as Readonly<Record<string, readonly string[]>>;
+  return Object.freeze({
+    sourceFiles: Object.freeze([...files]),
+    reverseEdges: Object.freeze(reverseEdges),
+  });
+}
+
 export function resolveLocal(importer: string, specifier: string): string | null {
   if (!specifier.startsWith('.')) return null;
   const pathSpecifier = specifier.split('?')[0];
@@ -221,7 +253,11 @@ function changedPaths(git: GitRunner): readonly string[] {
 }
 
 export function buildD583ContractInventory(
-  input: Readonly<{ changedPaths?: readonly string[]; git?: GitRunner }> = {},
+  input: Readonly<{
+    changedPaths?: readonly string[];
+    git?: GitRunner;
+    index?: DependencyIndex;
+  }> = {},
 ): readonly string[] {
   if (D583_BASELINE_SPECS.length !== 140 || inventoryDigest(D583_BASELINE_SPECS) !== D583_BASELINE_SHA256) {
     throw new Error('D583 inherited 140-spec baseline count or SHA-256 changed.');
@@ -243,22 +279,11 @@ export function buildD583ContractInventory(
   for (const path of TRIAL_CORE_RECONCILIATION_BASELINE_SPECS) if (!existsSync(resolve(ROOT, path))) {
     throw new Error(`Trial-core reconciliation spec is missing: ${path}`);
   }
-  const files = sourceFiles(ROOT);
-  const reverse = new Map<string, Set<string>>();
-  for (const importer of files) {
-    const text = readFileSync(resolve(ROOT, importer), 'utf8');
-    for (const dependency of dependencySpecifiers(text, importer)) {
-      const resolved = resolveLocal(importer, dependency.specifier);
-      if (resolved === null) continue;
-      const consumers = reverse.get(resolved) ?? new Set<string>();
-      consumers.add(importer);
-      reverse.set(resolved, consumers);
-    }
-  }
+  const index = input.index ?? buildDependencyIndex();
   const changed = input.changedPaths ?? changedPaths(input.git ?? gitOutput);
   const consumers = reverseConsumerClosure(
     changed.filter((path) => /\.(?:ts|tsx|mts|cts)$/.test(path)),
-    reverse,
+    index.reverseEdges,
   );
   const changedSpecs = changed.filter((path) => path.startsWith('tests/') && path.endsWith('.test.ts'));
   return contractInventoryUnion(

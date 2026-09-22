@@ -1,10 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import {
+  buildDependencyIndex,
   buildD583ContractInventory,
   contractInventoryUnion,
   D583_BASELINE_SHA256,
   D583_BASELINE_SPECS,
   dependencySpecifiers,
+  type DependencyIndex,
   type GitRunner,
   gitOutput,
   healingPotionUsesComponentIngress,
@@ -26,10 +28,16 @@ const EMPTY_INVENTORY = contractInventoryUnion(
   new Set(),
 );
 
+let dependencyIndex: DependencyIndex;
+
+beforeAll(() => {
+  dependencyIndex = buildDependencyIndex();
+});
+
 function expectEmptyInventory(git: GitRunner): void {
   let inventory: readonly string[] = [];
   expect(() => {
-    inventory = buildD583ContractInventory({ git });
+    inventory = buildD583ContractInventory({ git, index: dependencyIndex });
   }).not.toThrow();
   expect(inventory).toEqual(EMPTY_INVENTORY);
   expect(inventory).toHaveLength(148);
@@ -71,7 +79,28 @@ describe('D583 cumulative contract inventory', () => {
   });
 
   it('unions changed specs and transitive consumers without losing inherited coverage', () => {
-    const inventory = buildD583ContractInventory();
+    const canonicalIndexBytes = JSON.stringify(dependencyIndex);
+    expect(Object.isFrozen(dependencyIndex)).toBe(true);
+    expect(Object.isFrozen(dependencyIndex.sourceFiles)).toBe(true);
+    expect(Object.isFrozen(dependencyIndex.reverseEdges)).toBe(true);
+    expect(Object.values(dependencyIndex.reverseEdges).every((edges) => Object.isFrozen(edges))).toBe(true);
+    expect(dependencyIndex.sourceFiles).toEqual([...dependencyIndex.sourceFiles].sort());
+    expect(Object.keys(dependencyIndex.reverseEdges)).toEqual(Object.keys(dependencyIndex.reverseEdges).sort());
+    expect(Object.values(dependencyIndex.reverseEdges)
+      .every((edges) => JSON.stringify(edges) === JSON.stringify([...edges].sort()))).toBe(true);
+    expect(dependencyIndex.sourceFiles).not.toBeInstanceOf(Set);
+    expect(dependencyIndex.reverseEdges).not.toBeInstanceOf(Map);
+    expect(() => (dependencyIndex.sourceFiles as string[]).push('src/d583-mutation-control.ts')).toThrow();
+    const firstDependency = Object.keys(dependencyIndex.reverseEdges)[0];
+    expect(firstDependency).toBeDefined();
+    expect(() => (dependencyIndex.reverseEdges[firstDependency!] as string[])
+      .push('tests/unit/d583-mutation-control.test.ts')).toThrow();
+    expect(() => {
+      (dependencyIndex.reverseEdges as Record<string, readonly string[]>)['src/d583-mutation-control.ts'] = [];
+    }).toThrow();
+    expect(JSON.stringify(dependencyIndex)).toBe(canonicalIndexBytes);
+
+    const inventory = buildD583ContractInventory({ index: dependencyIndex });
     expect(inventory).toEqual([...inventory].sort());
     expect(inventory).toEqual(expect.arrayContaining(D583_BASELINE_SPECS));
     expect(inventory).toEqual(expect.arrayContaining(SESSION_TRANSACTION_BASELINE_SPECS));
@@ -130,6 +159,7 @@ describe('D583 cumulative contract inventory', () => {
       git: () => {
         throw failure;
       },
+      index: dependencyIndex,
     })).toThrow(failure);
 
     let output: string | null = 'not called';
@@ -142,24 +172,29 @@ describe('D583 cumulative contract inventory', () => {
   it('discovers changed specs and reverse source consumers through the Git seam', () => {
     const changedSpec = 'tests/unit/combat/movement.test.ts';
     const changedSource = 'src/combat/movement.ts';
-    const inventory = buildD583ContractInventory({
-      git: (args) => {
-        const call = args.join(' ');
-        if (call === 'merge-base HEAD main') return 'base\n';
-        if (call === 'diff --name-only main --' || call === 'diff --name-only base --') {
-          return `${changedSource}\n${changedSpec}\n`;
-        }
-        if (call === 'ls-files --others --exclude-standard') return '';
-        throw new Error(`Unexpected Git call: ${call}`);
-      },
-    });
+    const git: GitRunner = (args) => {
+      const call = args.join(' ');
+      if (call === 'merge-base HEAD main') return 'base\n';
+      if (call === 'diff --name-only main --' || call === 'diff --name-only base --') {
+        return `${changedSource}\n${changedSpec}\n`;
+      }
+      if (call === 'ls-files --others --exclude-standard') return '';
+      throw new Error(`Unexpected Git call: ${call}`);
+    };
+    const uncachedInventory = buildD583ContractInventory({ git });
+    const cachedInventory = buildD583ContractInventory({ git, index: dependencyIndex });
 
-    expect(inventory).toEqual([...inventory].sort());
-    expect(inventory).toEqual(expect.arrayContaining([...EMPTY_INVENTORY]));
-    expect(inventory).toContain(changedSpec);
-    expect(inventory).toContain('tests/unit/combat/movement-evaluator.test.ts');
-    expect(inventory).toContain('tests/unit/vtt/team-scorer.test.ts');
-    expect(inventory.length).toBeGreaterThan(EMPTY_INVENTORY.length);
+    for (const inventory of [uncachedInventory, cachedInventory]) {
+      expect(inventory).toEqual([...inventory].sort());
+      expect(inventory).toEqual(expect.arrayContaining([...EMPTY_INVENTORY]));
+      expect(inventory).toContain(changedSpec);
+      expect(inventory.length).toBeGreaterThan(EMPTY_INVENTORY.length);
+    }
+    expect(uncachedInventory).toContain('tests/unit/combat/movement-evaluator.test.ts');
+    expect(uncachedInventory).toContain('tests/unit/vtt/team-scorer.test.ts');
+    expect(cachedInventory).toContain('tests/unit/combat/movement-evaluator.test.ts');
+    expect(cachedInventory).toContain('tests/unit/vtt/team-scorer.test.ts');
+    expect(cachedInventory).toEqual(uncachedInventory);
   });
 
   it('rejects a deleted committed spec discovered through the Git seam', () => {
@@ -174,6 +209,7 @@ describe('D583 cumulative contract inventory', () => {
         if (call === 'ls-files --others --exclude-standard') return '';
         throw new Error(`Unexpected Git call: ${call}`);
       },
+      index: dependencyIndex,
     })).toThrow(`D583 changed spec was deleted: ${deletedSpec}`);
   });
 
