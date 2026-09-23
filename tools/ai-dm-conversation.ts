@@ -116,6 +116,7 @@ import type {
 } from '../src/vtt/mcp/engine-server';
 import {
   DEFAULT_OVERRIDE_POLICY,
+  MONSTER_KNOWLEDGE_BEST_EFFORT_INSTRUCTION,
   OVERRIDE_POLICIES,
   renderBlindEnginePrompt,
   renderEnginePrompt,
@@ -3841,9 +3842,10 @@ function decisionCatalogForSnapshot(
   });
 }
 
-function structuredFinalPrompt(context: CapturedTurnContext, catalog: DecisionCatalog): string {
+export function structuredFinalPrompt(context: CapturedTurnContext, catalog: DecisionCatalog): string {
   return [
     'Return only the schema-constrained indexed decision. Do not call engine tools.',
+    MONSTER_KNOWLEDGE_BEST_EFFORT_INSTRUCTION,
     '[TURN_CONTEXT]',
     context.raw,
     '[DECISION_CATALOG]',

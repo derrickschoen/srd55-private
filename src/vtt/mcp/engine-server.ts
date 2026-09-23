@@ -1020,7 +1020,7 @@ function allowedRule(rules: AllowlistedRulesSource, reference: { readonly rule_i
 }
 
 export const MONSTER_KNOWLEDGE_BEST_EFFORT_INSTRUCTION =
-  'The engine shows you complete facts. Play each monster using only what it could plausibly know right now: what it can see or hear from its position given walls, doors, darkness, distance, and cover, plus what it remembers from earlier rounds. Do not have a monster target, pursue, or react to a creature it has no plausible way to know about. When knowledge is uncertain, choose the action a competent creature in its place would take. This is best-effort guidance, not an engine rule; the engine will not reject a violation.' as const;
+  'The engine shows you complete facts. Play each monster using only what it could plausibly know right now: what it can see or hear from its position given walls, doors, darkness, distance, and cover, plus what it remembers from earlier rounds. Do not have a monster target, pursue, or react to a creature it has no plausible way to know about. When knowledge is uncertain, choose the action a competent creature in its place would take. This is best-effort guidance, not an engine rule; the engine will not reject a violation. This knowledge constraint takes precedence over generic tactical guidance such as pursuing the nearest enemy or attacking whenever an attack is legal; apply that guidance only to creatures the monster plausibly knows about.' as const;
 
 export function renderEnginePrompt(kind: 'plan_round' | 'correct_proposal' | 'speculate_round', capsule: EngineStateCapsule, rules: AllowlistedRulesSource, voice?: string, turnContext?: unknown): string {
   const entries = capsule.rulesIndex.flatMap((reference) => {

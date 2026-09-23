@@ -17,6 +17,7 @@ import {
   renderBlindEnginePrompt,
   renderEnginePrompt,
 } from '../../../src/vtt/mcp/engine-server';
+import { structuredFinalPrompt } from '../../../tools/ai-dm-conversation';
 import { encounterBranchId, encounterSessionId } from '../../../src/combat/values';
 import { engineDispatchId } from '../../../src/vtt/agent-session';
 import {
@@ -156,6 +157,10 @@ describe('engine MCP stdio protocol', () => {
       ['speculate_round', renderEnginePrompt('speculate_round', capsule, rules), 'Turn resource:'],
       ['plan_blind_round', renderBlindEnginePrompt('plan_blind_round', capsule, rules), 'Input mechanics may include'],
       ['repair_blind_intents', renderBlindEnginePrompt('repair_blind_intents', capsule, rules), 'Input mechanics may include'],
+      ['structured_final', structuredFinalPrompt(
+        { raw: '{}', granularity: 'full', value: {} },
+        { digest: 'catalog-digest', requestId: 'request:test', phase: 'initial', expectedRevision: 1, stateDigest: 'state-digest', actors: [] },
+      ), '[TURN_CONTEXT]'],
     ] as const;
 
     for (const [surface, prompt, boundaryPrefix] of prompts) {
@@ -167,6 +172,7 @@ describe('engine MCP stdio protocol', () => {
         { instructionIndexes, boundaryIndex },
         `${surface} instruction placement`,
       ).toEqual({ instructionIndexes: [1], boundaryIndex: 2 });
+      expect(prompt).toContain('This knowledge constraint takes precedence');
     }
   });
 

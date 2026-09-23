@@ -59,6 +59,7 @@ import {
 } from '../../../src/vtt/mcp/entrypoint';
 import * as engineMcpEntrypoint from '../../../src/vtt/mcp/entrypoint';
 import { mcpRequestMeta, type McpHandler } from '../../../src/vtt/mcp/handler';
+import { MONSTER_KNOWLEDGE_BEST_EFFORT_INSTRUCTION } from '../../../src/vtt/mcp/engine-server';
 import { reduceSessionEncounter } from '../../../src/vtt/session-encounter-reducer';
 import {
   importSavedSession,
@@ -1801,6 +1802,13 @@ describe('AI-DM engine MCP conversation runner', () => {
       kind: 'escalation', knowledgeBaseBundleHash: DEFAULT_KB_HASH,
       stateDelivery: 'full_engine_context',
     });
+    const escalationPromptLines = escalation.prompt.split('\n');
+    expect(escalationPromptLines.filter((line) =>
+      line === MONSTER_KNOWLEDGE_BEST_EFFORT_INSTRUCTION)).toHaveLength(1);
+    expect(escalationPromptLines.indexOf(MONSTER_KNOWLEDGE_BEST_EFFORT_INSTRUCTION))
+      .toBeLessThan(escalationPromptLines.findIndex((line) => line.startsWith('Turn resource:')));
+    expect(MONSTER_KNOWLEDGE_BEST_EFFORT_INSTRUCTION)
+      .toContain('This knowledge constraint takes precedence');
     const startupOrder = [
       escalation.instructions.indexOf('## Role'),
       escalation.instructions.indexOf('When a melee creature cannot reach an enemy'),
