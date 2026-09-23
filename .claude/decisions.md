@@ -1576,3 +1576,14 @@ Why: D875 — the four split files finish by ≈220 s in every candidate run; th
 ## D877 — 2026-09-23 10:57 — Owner: "Look for more splits. Brainstorm and experiment. Take risks"
 
 Ruling after the D876 REJECT report. Standing authorization for the supervisor to run throwaway experiments on the full-gate makespan (further file splits, top-level-await relocation, scheduling) on detached checkouts under /home/vagrant/PhpstormProjects/, measuring against the D876 baseline, before any codex plan/review cycle. Nothing lands on this ruling; landing still needs the plan/review protocol. Experiments record their numbers here.
+
+## D878 — 2026-09-23 11:41 — PERF-02 opened: the await files measured; planning fanned out to Opus 5.5 (owner instruction)
+
+Owner: "Look for more splits. Look for ways to improve await times. Look for other performance opportunities. Brainstorm and experiment. Take risks. fan out to opus 5.5 submodels on xhigh for planning". Also asked what the top-level-await unit is and whether it can be improved.
+
+Supervisor measurements (solo, --maxWorkers=1, isolated cache, quiet box, main 2d9066a2):
+- tests/unit/vtt/blind-turn-context.test.ts: import 281.18 s, tests 0.57 s (47 tests), wall 284.1 s.
+- tests/unit/tools/ai-dm-legacy-invariance.test.ts: import 52.43 s, tests 0.81 s (10 tests), wall 55.6 s.
+Read from the D876 trial JSONs: the candidate run on a COLD duration cache (prewarm-B, size-ordered) walled 566.24 s against 682-689 s warm; blind-turn-context finished last in every run. Mechanism (read in node_modules): Vitest's results cache stores file.result.duration, which includes beforeAll/afterAll but excludes module collection, so module-scope await work is invisible to the longest-first sequencer and runs at the tail.
+
+Planning: workflow wf_375c4f6f-ed3, eight Opus 5.5 planners at xhigh (lenses: tla-sched, blind-fixture, arena-split, next-tier, runtime-config, makespan-model, engine-hotpath, import-redundancy), brief .tmp/runs/perf-02/context.md, probes only in private clones via .tmp/runs/perf-02/mkprobe.sh, no full-suite runs. Full-gate experiments run serially by the supervisor afterwards.
