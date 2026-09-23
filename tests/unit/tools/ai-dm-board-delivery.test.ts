@@ -33,6 +33,7 @@ import {
   decodeArenaRowEvidence,
   parseArenaArgs,
   runArena,
+  type ArenaRow,
 } from '../../../tools/ai-dm-arena';
 import {
   BOARD_IMAGE_SCALE_STARTUP_INSTRUCTION,
@@ -439,6 +440,70 @@ describe('MCP board image content', () => {
   });
 });
 
+// The two off-arm invariance titles below both run the implicit-default arena arm and the
+// explicit `--board-image off` arm with the same argv (apart from --out) and the same options
+// (one capture hook). Each of those two runs happens once per file, lazily on first use, so
+// `-t` and shuffled orders need no hook, and each title reads its own private copy. The default
+// and off arms stay two separate executions of two argv lists, so every default/off comparison
+// still has two independent operands; `sharedOffArms` asserts that on every use.
+type SharedOffArm = 'default' | 'off';
+interface SharedOffArmRun {
+  readonly argv: readonly string[];
+  readonly rows: readonly ArenaRow[];
+  readonly invocations: readonly AgentInvocation[];
+}
+const sharedOffArmRuns = new Map<SharedOffArm, Promise<SharedOffArmRun>>();
+let sharedOffArmDirectory: string | undefined;
+
+function offArmInvarianceArgs(directory: string, label: string, flags: readonly string[]): readonly string[] {
+  return [
+    '--rooms', '1', '--reps', '1', '--seed', '3943001',
+    '--out', join(directory, `${label}.jsonl`), '--dry-run', '--effort', 'low',
+    '--model', 'gpt-5.6-luna', '--transport', 'mcp_minimal',
+    '--initiative-profile', 'derived_v1',
+    ...flags,
+  ];
+}
+
+function deepFreeze<T>(value: T): T {
+  if (typeof value === 'object' && value !== null && !Object.isFrozen(value)) {
+    Object.freeze(value);
+    for (const child of Object.values(value)) deepFreeze(child);
+  }
+  return value;
+}
+
+async function sharedOffArmRun(arm: SharedOffArm): Promise<SharedOffArmRun> {
+  let pending = sharedOffArmRuns.get(arm);
+  if (pending === undefined) {
+    sharedOffArmDirectory ??= mkdtempSync(join(tmpdir(), 'board-image-shared-off-arms-'));
+    const argv = offArmInvarianceArgs(sharedOffArmDirectory, arm, arm === 'off' ? ['--board-image', 'off'] : []);
+    pending = (async () => {
+      const invocations: AgentInvocation[] = [];
+      const rows = await runArena(parseArenaArgs(argv), {
+        onPrimaryInvocation: (invocation) => { invocations.push(structuredClone(invocation)); },
+      });
+      return deepFreeze(structuredClone({ argv, rows, invocations }));
+    })();
+    sharedOffArmRuns.set(arm, pending);
+  }
+  return structuredClone(await pending);
+}
+
+async function sharedOffArms(): Promise<{ readonly default: SharedOffArmRun; readonly off: SharedOffArmRun }> {
+  const implicitOff = await sharedOffArmRun('default');
+  const explicitOff = await sharedOffArmRun('off');
+  // Two executions of two argv lists: the default arm never names --board-image, the off arm
+  // ends with `--board-image off`, and every primary dispatch went through its own launcher.
+  expect(implicitOff.argv).not.toContain('--board-image');
+  expect(explicitOff.argv.slice(-2)).toEqual(['--board-image', 'off']);
+  const launcherTokens = [...implicitOff.invocations, ...explicitOff.invocations]
+    .map(({ launcherToken }) => launcherToken);
+  expect(launcherTokens).toHaveLength(2);
+  expect(new Set(launcherTokens).size).toBe(launcherTokens.length);
+  return { default: implicitOff, off: explicitOff };
+}
+
 describe('arena capture lifecycle and off-arm invariance', () => {
   it('records delivered semantic-board bytes and truncation on the arena row', { timeout: 60_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'semantic-board-row-'));
@@ -537,27 +602,20 @@ describe('arena capture lifecycle and off-arm invariance', () => {
 
   it('absent semantic-board and image-off flags preserve the committed raw context and invocation bytes', { timeout: 60_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'semantic-board-off-invariance-'));
-    const invocations = new Map<string, AgentInvocation[]>();
-    const run = async (label: 'default' | 'image-off' | 'semantic-absent') => {
-      const captured: AgentInvocation[] = [];
-      invocations.set(label, captured);
-      const args = [
-        '--rooms', '1', '--reps', '1', '--seed', '3943001',
-        '--out', join(directory, `${label}.jsonl`), '--dry-run', '--effort', 'low',
-        '--model', 'gpt-5.6-luna', '--transport', 'mcp_minimal',
-        '--initiative-profile', 'derived_v1',
-        ...(label === 'image-off' ? ['--board-image', 'off'] : []),
-        ...(label === 'semantic-absent'
-          ? ['--renderer-profile', JSON.stringify(DEFAULT_RENDERER_PROFILE)]
-          : []),
-      ];
-      return runArena(parseArenaArgs(args), {
-        onPrimaryInvocation: (invocation) => { captured.push(structuredClone(invocation)); },
-      });
-    };
-    const defaultResult = await run('default');
-    const offResult = await run('image-off');
-    const absentResult = await run('semantic-absent');
+    const shared = await sharedOffArms();
+    const absentInvocations: AgentInvocation[] = [];
+    const invocations = new Map<string, readonly AgentInvocation[]>([
+      ['default', shared.default.invocations],
+      ['image-off', shared.off.invocations],
+      ['semantic-absent', absentInvocations],
+    ]);
+    const defaultResult = shared.default.rows;
+    const offResult = shared.off.rows;
+    const absentResult = await runArena(parseArenaArgs(offArmInvarianceArgs(directory, 'semantic-absent', [
+      '--renderer-profile', JSON.stringify(DEFAULT_RENDERER_PROFILE),
+    ])), {
+      onPrimaryInvocation: (invocation) => { absentInvocations.push(structuredClone(invocation)); },
+    });
     expect(absentResult.every((row) =>
       row.semanticBoardBytes === 0 && row.semanticBoardTruncated.length === 0)).toBe(true);
     for (const [label, result] of [['image-off', offResult], ['semantic-absent', absentResult]] as const) {
@@ -610,28 +668,23 @@ describe('arena capture lifecycle and off-arm invariance', () => {
 
   it('capture_only_leaks_image_block is killed by off-arm byte identity at every model boundary', { timeout: 60_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'board-image-off-invariance-'));
-    const invocations = new Map<string, AgentInvocation[]>();
-    const services = new Map<string, FakeSnapshotService>();
-    const run = async (label: 'default' | 'off' | 'capture_only') => {
-      const captured: AgentInvocation[] = [];
-      invocations.set(label, captured);
-      const service = label === 'capture_only' ? new FakeSnapshotService() : null;
-      if (service !== null) services.set(label, service);
-      const args = [
-        '--rooms', '1', '--reps', '1', '--seed', '3943001',
-        '--out', join(directory, `${label}.jsonl`), '--dry-run', '--effort', 'low',
-        '--model', 'gpt-5.6-luna', '--transport', 'mcp_minimal',
-        '--initiative-profile', 'derived_v1',
-        ...(label === 'default' ? [] : ['--board-image', label]),
-      ];
-      return runArena(parseArenaArgs(args), {
-        onPrimaryInvocation: (invocation) => { captured.push(structuredClone(invocation)); },
-        ...(service === null ? {} : { boardSnapshotServiceFactory: async () => service }),
-      });
-    };
-    const defaultResult = await run('default');
-    const offResult = await run('off');
-    const captureOnlyResult = await run('capture_only');
+    const shared = await sharedOffArms();
+    const captureOnlyService = new FakeSnapshotService();
+    const services = new Map<string, FakeSnapshotService>([['capture_only', captureOnlyService]]);
+    const captureOnlyInvocations: AgentInvocation[] = [];
+    const invocations = new Map<string, readonly AgentInvocation[]>([
+      ['default', shared.default.invocations],
+      ['off', shared.off.invocations],
+      ['capture_only', captureOnlyInvocations],
+    ]);
+    const defaultResult = shared.default.rows;
+    const offResult = shared.off.rows;
+    const captureOnlyResult = await runArena(parseArenaArgs(offArmInvarianceArgs(directory, 'capture_only', [
+      '--board-image', 'capture_only',
+    ])), {
+      onPrimaryInvocation: (invocation) => { captureOnlyInvocations.push(structuredClone(invocation)); },
+      boardSnapshotServiceFactory: async () => captureOnlyService,
+    });
     expect(offResult.map((row) => row.rawTurnContext))
       .toEqual(defaultResult.map((row) => row.rawTurnContext));
     expect(captureOnlyResult.map((row) => row.rawTurnContext))
