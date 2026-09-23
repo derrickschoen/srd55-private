@@ -1587,3 +1587,21 @@ Supervisor measurements (solo, --maxWorkers=1, isolated cache, quiet box, main 2
 Read from the D876 trial JSONs: the candidate run on a COLD duration cache (prewarm-B, size-ordered) walled 566.24 s against 682-689 s warm; blind-turn-context finished last in every run. Mechanism (read in node_modules): Vitest's results cache stores file.result.duration, which includes beforeAll/afterAll but excludes module collection, so module-scope await work is invisible to the longest-first sequencer and runs at the tail.
 
 Planning: workflow wf_375c4f6f-ed3, eight Opus 5.5 planners at xhigh (lenses: tla-sched, blind-fixture, arena-split, next-tier, runtime-config, makespan-model, engine-hotpath, import-redundancy), brief .tmp/runs/perf-02/context.md, probes only in private clones via .tmp/runs/perf-02/mkprobe.sh, no full-suite runs. Full-gate experiments run serially by the supervisor afterwards.
+
+## D879 — 2026-09-23 14:16 — PERF-02 plan approved after a three-round self + codex consensus loop; review-model authorization; corrections
+
+Owner, in session: "fan out to opus 5.5 submodels on xhigh for planning"; then, for the plan review, "self + fable-5.1-high and codex astra-high and gpt-6-sol-xhigh", revised to "self and codex": "list assumptions then try to prove, critique, revise, collaborate checking each others critiques and revisions trying for consensus. repeat no more than 3 times." Plan approved via plan mode after the loop.
+
+Review model: codex `gpt-6-sol` at xhigh, read-only, one session 01a0cf61-3e70-75b3-972e-cb4454ed4553 resumed across rounds. This is the last codex model/effort the owner named; for PERF-02 it supersedes D860's gpt-5.6-sol. Owner may object.
+
+Planners (workflow wf_375c4f6f-ed3, eight Opus 5.5 xhigh): results in .tmp/runs/perf-02/planner-results.md and <lens>/notes.md. Headline, verified by the supervisor in code: blind legal movement (src/vtt/blind-turn-context.ts:1084-1121) calls queries.path per grid cell per actor, and path() (src/vtt/engine-query-port.ts:1108-1147) runs a second whole-grid search on every miss; ~95% of blind-turn-context's 281 s setup. Planner-measured in memory (not yet in Vitest): a memoized lazy Dijkstra takes that setup to ~10 s with zero mismatches over 660,604 + 144,690 differential comparisons. Planner-inferred: ~5 s boot per vite-node engine-mcp-server child (~107 per conversation file).
+
+Consensus (archived .claude/consensus/perf-02/review-plan-sol-r{1,2,3}.md, plan-r4.md; plan copy .tmp-plans/2026-09-23-perf-02-makespan-experiments.md sha a44fcfee…): r1 REVISE 2 P1/7 P2/1 P3, r2 REVISE (7/10 agreed; 2 P1/4 P2 new), r3 REVISE (7/9 agreed; 1 P1/3 P2 new). All 23 findings verified by the supervisor and accepted; no P1/P2 disputed; codex never returned APPROVE; the round-3 fixes are supervisor-verified but not codex-re-reviewed (round cap).
+
+Real gate cost (supervisor, four Sep 22 gate reports): initial 727/672/721/759 s + serial retry 442/210/533/363 s = 1,168/881/1,254/1,122 s; verdict failed in all four; the two docs test files failed in all 15 inspected runs.
+
+Corrections against my own records (full length):
+- D878 called the two probes "solo"; they were started together in one command and ran concurrently (both logs: Start at 11:33:50).
+- D876 predicted 410-450 s for split + await fix; the makespan model's scheduling floor for today's workload at 8 workers is ~459 s.
+- My round-1 failure census said 19 runs; my glob counted four gate `.evidence.json` sidecars as runs. It is 15 runs, and I missed a fifth non-timeout failure (arena prompt pin, 8 ms, gate 1183392). Codex caught both.
+- Plan-mode deviation: plan mode was active from before the workflow launch and I did not notice. While it was active I committed D878 (96286541) and pushed the mirror, wrote .tmp/runs/perf-02/{context.md,mkprobe.sh,rmprobe.sh,b2-files.tsv,exp/run-arm.sh,exp/summ.py}, ran the two concurrent probes, created/removed one probe clone, and launched the workflow. No source or test file was touched. The planners inherited plan mode, so six of eight ran read-only analysis instead of probes.
