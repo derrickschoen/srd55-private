@@ -1622,3 +1622,20 @@ X1 (codex gpt-6-sol high, clone dnd-gate-exp-x1-E6aN; supervisor commit 058fb8b5
 Own error, caught before reporting: my first tsc run backgrounded two subshells after one `cd`, so tsc ran in the wrong directory and exited 1 on a missing tsconfig; re-run in the clone, exit 0. My first worker-activation probe compared against the worker's own env and could not fail; replaced by a fixed expectation.
 
 Next: X2 memo pack (codex, same clone on 058fb8b5) and X3 step 0 + bundle (codex, clone dnd-gate-exp-x3-XTd5 on main) dispatched; then exploratory gate arms per plan §7.
+
+## D881 — 2026-09-23 15:34 — PERF-02 X2 (memo pack) verified in its clone: pins unchanged, 5/5 mutants killed, hit audit clean over eight families; projected-movement memo never hits
+
+X2 (codex gpt-6-sol high, same clone as X1; supervisor commit e632a35a on 058fb8b5, not for landing): AoE placedAreaSelection memo; movement budget filter before positionFits; projectedMovementState memo; occupant cell index + canTraverseStep (actor,to) and traversal (actor,from,to) memos inside the cached world; combatantSpace/combatantConditions memos; terrain-signature intern; one-pass uniqueSources. TerrainLineTrace.interveningCells unchanged (plan r1 F1). Codex wrote proof paragraphs P1-P6 with file:line evidence before editing (.tmp/perf-02/x2/report.md in the clone). One caveat recorded there: the budget-first reorder can change throw order only for a custom EngineQueryPort that throws; the canonical port does not.
+
+Codex stopped with BLOCKED-PIN on a timeout, not a pin: under PERF02_MEMO_AUDIT=1 (every hit recomputed) room-generator-los-cover "retains a productive first-turn option for every living monster in the versioned basis" took 5,041 ms against 5,000 ms on a shared box. My brief's stop rule named pins, and codex applied it to a timeout; correct to stop, wrong class.
+
+Verified by me on the separate clone at e632a35a (box shared with the X3 lane; timings contended):
+- tsc app + node exit 0.
+- Pins: all seven byte-identical to main's. Capture wall 83.7 s (X1 130 s, main 468 s); survival-seeds 46.8 s (X1 87.5 s, main 126 s).
+- Mutants (my re-run): m1 actor-only AoE key, m2 state-only combatantSpace key (existing D514 creature-cover test), m3 `>=` budget, m4 actor-only projection key, m5 reused intern token: 5/5 KILLED after baseline PASS, bytes restored by sha check. Kill reasons are assertion failures except m3, which trips the test's own "Grab option absent" guard (the exact-budget option disappears). The hit audit throws `PERF02 memo mismatch` for m1, m2 and m4 (checked in the logs; the script's own audit line reported "DID NOT THROW" because it calls `rg`, which is a shell function invisible to bash scripts, already in memory).
+- Hit audit, my run with --testTimeout=60000 for this audit-only run: room-generator-los-cover, blind-turn-context, ai-dm-board-delivery, ai-dm-conversation (unsplit): 4 files 288/288, zero mismatches. Hits: canTraverseStep 1,332,645; traversal 715,791; combatantSpace 350,695; combatantConditions 13,097; terrainSignature 9,251; placedAreaSelection 160; projectedMovementState 0.
+- Codex reports, not re-run by me: audit on survival-policy, ai-dm-arena, renderer-profile, d569-v5, zero mismatches; X1 exhaustive differential on the X2 tree 900,462 comparisons, 0 mismatches.
+
+Finding: projectedMovementState recorded 0 hits in all eight audited families. That memo pays nothing in the gate; a landing unit should drop it unless another workload shows hits.
+
+Arms prepared (clone dnd-gate-exp-arms): arm-split = CONV-SPLIT-01 48e54837 cherry-picked onto 77cc13f0 as bb93c311 (tests/unit/tools and tools/ unchanged between the split's base a7ad85a5 and 77cc13f0; preserve.mjs check against 77cc13f0's conversation file: PASS, my run); arm-split-x12 = 437f894f (split + X1 + X2; src identical to e632a35a); arm-main-x12 = e632a35a.
