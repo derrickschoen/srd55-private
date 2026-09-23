@@ -5,7 +5,10 @@ import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
 import { combatantId, encounterSessionId } from '../../../src/combat/values';
 import { encounterBranchId } from '../../../src/combat/values';
-import { ENGINE_DM_TOOL_NAMES } from '../../../src/vtt/mcp/engine-server';
+import {
+  ENGINE_DM_TOOL_NAMES,
+  MONSTER_KNOWLEDGE_BEST_EFFORT_INSTRUCTION,
+} from '../../../src/vtt/mcp/engine-server';
 import { ENGINE_TOOL_SPECS } from '../../../src/vtt/mcp/schemas';
 import {
   LocalOpenAiAgentSessionAdapter,
@@ -344,7 +347,8 @@ describe('SIMULATED local OpenAI conversation adapter', () => {
       expect(endpoint.requests.every((request) => request.headers.authorization === 'Bearer secret-SIMULATED')).toBe(true);
       expect(messages(endpoint.requests[1]?.body['messages'])).toEqual(expect.arrayContaining([
         expect.objectContaining({
-          role: 'system', content: readFileSync('tests/fixtures/ai-dm-kb/k6.txt', 'utf8'),
+          role: 'system',
+          content: `${readFileSync('tests/fixtures/ai-dm-kb/k6.txt', 'utf8')}\n\n## Monster knowledge\n${MONSTER_KNOWLEDGE_BEST_EFFORT_INSTRUCTION}`,
         }),
         expect.objectContaining({ role: 'assistant' }),
         expect.objectContaining({ role: 'tool', tool_call_id: 'call-context' }),

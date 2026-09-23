@@ -24,7 +24,10 @@ import {
   type AgentDispatchDeadline,
 } from '../../../src/vtt/agent-session-lifecycle';
 import {
+  BOARD_IMAGE_SCALE_STARTUP_INSTRUCTION,
+  UI_FEEDBACK_STARTUP_INSTRUCTION,
   parseConversationArgs,
+  conversationStartupInstructions,
   proposalResolutionDivergence,
   isPlanAdjustmentProposal,
   isRoundProposal,
@@ -59,6 +62,7 @@ import {
 } from '../../../src/vtt/mcp/entrypoint';
 import * as engineMcpEntrypoint from '../../../src/vtt/mcp/entrypoint';
 import { mcpRequestMeta, type McpHandler } from '../../../src/vtt/mcp/handler';
+import { MONSTER_KNOWLEDGE_BEST_EFFORT_INSTRUCTION } from '../../../src/vtt/mcp/engine-server';
 import { reduceSessionEncounter } from '../../../src/vtt/session-encounter-reducer';
 import {
   importSavedSession,
@@ -1788,7 +1792,9 @@ describe('AI-DM engine MCP conversation runner', () => {
     expect(tieredAdapter.resumeInvocations[0]).not.toHaveProperty('bootstrap');
     expect(tieredAdapter.startInvocations[1]?.instructions).toContain('OFFENSIVE corrected round');
     expect(tieredAdapter.startInvocations[1]?.instructions)
-      .toContain('every actor with a legal attack must attack');
+      .not.toContain('every actor with a legal attack must attack');
+    expect(tieredAdapter.startInvocations[1]?.instructions)
+      .toContain('every actor with a legal attack against a creature it plausibly knows about must attack');
     expect(tieredAdapter.startInvocations[1]?.instructions)
       .toContain('Dash-to-close counts as offense for out-of-reach melee');
     expect(tieredAdapter.startInvocations[1]?.instructions)
@@ -1797,10 +1803,19 @@ describe('AI-DM engine MCP conversation runner', () => {
     if (escalation?.instructions === undefined || escalation.instructions === null) {
       throw new Error('Configured escalation omitted its typed startup instructions.');
     }
+    expect(escalation.instructions.split('## Monster knowledge').length - 1).toBe(1);
+    expect(escalation.instructions.split(MONSTER_KNOWLEDGE_BEST_EFFORT_INSTRUCTION).length - 1).toBe(1);
     expect(escalation.bootstrap).toMatchObject({
       kind: 'escalation', knowledgeBaseBundleHash: DEFAULT_KB_HASH,
       stateDelivery: 'full_engine_context',
     });
+    const escalationPromptLines = escalation.prompt.split('\n');
+    expect(escalationPromptLines.filter((line) =>
+      line === MONSTER_KNOWLEDGE_BEST_EFFORT_INSTRUCTION)).toHaveLength(1);
+    expect(escalationPromptLines.indexOf(MONSTER_KNOWLEDGE_BEST_EFFORT_INSTRUCTION))
+      .toBeLessThan(escalationPromptLines.findIndex((line) => line.startsWith('Turn resource:')));
+    expect(MONSTER_KNOWLEDGE_BEST_EFFORT_INSTRUCTION)
+      .toContain('This knowledge constraint takes precedence');
     const startupOrder = [
       escalation.instructions.indexOf('## Role'),
       escalation.instructions.indexOf('When a melee creature cannot reach an enemy'),
@@ -2969,7 +2984,8 @@ describe('AI-DM engine MCP conversation runner', () => {
       `${AI_DM_KB_FIXTURE_DIRECTORY}/${subject}.md`,
       resolve(process.cwd(), AI_DM_KB_FIXTURE_DIRECTORY, `${subject}.md`),
     ), root);
-    const startupInstructions = `${resolvedRoot}\n\n${tactics}`;
+    const kbInstructions = `${resolvedRoot}\n\n${tactics}`;
+    const startupInstructions = `${kbInstructions}\n\n## Monster knowledge\n${MONSTER_KNOWLEDGE_BEST_EFFORT_INSTRUCTION}`;
     const adapter = new RecordingConversationAdapter();
     const config = parseConversationArgs([
       '--rooms', '3', '--rounds', '1', '--out', outPath, '--kb', DEFAULT_AI_DM_KB_ROOT,
@@ -3011,6 +3027,29 @@ describe('AI-DM engine MCP conversation runner', () => {
     )).toBe(true);
     expect(readFileSync(outPath, 'utf8').trim().split('\n').map((line) => JSON.parse(line)))
       .toHaveLength(3);
+  });
+
+  it.each([
+    ['default', 'advice', 'off', []],
+    ['blind', 'blind', 'png', ['General primer']],
+    ['png', 'advice', 'png', [BOARD_IMAGE_SCALE_STARTUP_INSTRUCTION, UI_FEEDBACK_STARTUP_INSTRUCTION]],
+  ] as const)('%s startup instructions end with one monster-knowledge section after the KB and mode text', (
+    _mode,
+    dmMode,
+    boardImageMode,
+    modeInstructions,
+  ) => {
+    const kbInstructions = 'SIMULATED root\n\nSIMULATED tactics';
+    const startupInstructions = conversationStartupInstructions(kbInstructions, dmMode, boardImageMode);
+    const suffix = `## Monster knowledge\n${MONSTER_KNOWLEDGE_BEST_EFFORT_INSTRUCTION}`;
+
+    expect(startupInstructions.startsWith(kbInstructions)).toBe(true);
+    expect(startupInstructions.endsWith(suffix)).toBe(true);
+    expect(startupInstructions.split('## Monster knowledge').length - 1).toBe(1);
+    expect(startupInstructions.split(MONSTER_KNOWLEDGE_BEST_EFFORT_INSTRUCTION).length - 1).toBe(1);
+    expect(modeInstructions.every((instruction) =>
+      startupInstructions.indexOf(instruction) > startupInstructions.indexOf(kbInstructions) &&
+      startupInstructions.indexOf(instruction) < startupInstructions.indexOf(suffix))).toBe(true);
   });
 
   it('threads a selected skill through every invocation and hashes the exact fixture bytes', async () => {

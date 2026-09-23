@@ -1019,6 +1019,9 @@ function allowedRule(rules: AllowlistedRulesSource, reference: { readonly rule_i
   return entry !== null && entry.sourceLocator === reference.source_locator && !disallowedLocator(entry.sourceLocator) && entry.attribution.trim().length > 0 ? entry : null;
 }
 
+export const MONSTER_KNOWLEDGE_BEST_EFFORT_INSTRUCTION =
+  'The engine shows you complete facts. Play each monster using only what it could plausibly know right now: what it can see or hear from its position given walls, doors, darkness, distance, and cover, plus what it remembers from earlier rounds. Do not have a monster target, pursue, or react to a creature it has no plausible way to know about. When knowledge is uncertain, choose the action a competent creature in its place would take. This is best-effort guidance, not an engine rule; the engine will not reject a violation. This knowledge constraint takes precedence over generic tactical guidance such as pursuing the nearest enemy or attacking whenever an attack is legal; apply that guidance only to creatures the monster plausibly knows about.' as const;
+
 export function renderEnginePrompt(kind: 'plan_round' | 'correct_proposal' | 'speculate_round', capsule: EngineStateCapsule, rules: AllowlistedRulesSource, voice?: string, turnContext?: unknown): string {
   const entries = capsule.rulesIndex.flatMap((reference) => {
     const entry = allowedRule(rules, { rule_id: reference.ruleId, source_locator: reference.sourceLocator });
@@ -1037,7 +1040,7 @@ export function renderEnginePrompt(kind: 'plan_round' | 'correct_proposal' | 'sp
     : kind === 'plan_round'
       ? `Use engine.get_turn_context, then submit only the minimal engine.submit_round_proposals arguments for the complete required actor set, with one short sentence per actor saying why this option. Generated minimal example: ${minimalExample}. The launcher fills state_ref, request_id, phase, and idempotency_key from this turn binding. One ACCEPTED submission per round; a call rejected for invalid arguments is not queued — fix it and call again. Select only offered revision-bound option ids and provide an independent fallback. You may declare reaction_guidance for foreseeable Reactions; it persists until replaced. Never emit coordinates, paths, dice, modifiers, DCs, damage, or reducer commands.`
       : `Correct the complete refused proposal request with the minimal engine.submit_round_proposals arguments, with one short sentence per actor saying why this option. Generated minimal example: ${minimalExample}. The launcher fills state_ref, request_id, phase, and idempotency_key from this turn binding. One ACCEPTED submission per round; a call rejected for invalid arguments is not queued — fix it and call again. No fallback remains after this correction; correction fallback_option_id must be null. If you refresh context, use the get_turn_context request in current_context exactly.`;
-  return [fixed, `Turn resource: ${uriBase}/turn/current`, `Proposal schema: ${uriBase}/schema/turn-proposal-v1`, `<engine-data-json>${canonicalJson({ run_id: capsule.runId, revision: capsule.revision, request: promptRequest(capsule), voice: voice ?? null, recent_changes: recentChanges(capsule), current_context: turnContext ?? null, rules: entries })}</engine-data-json>`].join('\n');
+  return [fixed, MONSTER_KNOWLEDGE_BEST_EFFORT_INSTRUCTION, `Turn resource: ${uriBase}/turn/current`, `Proposal schema: ${uriBase}/schema/turn-proposal-v1`, `<engine-data-json>${canonicalJson({ run_id: capsule.runId, revision: capsule.revision, request: promptRequest(capsule), voice: voice ?? null, recent_changes: recentChanges(capsule), current_context: turnContext ?? null, rules: entries })}</engine-data-json>`].join('\n');
 }
 
 export function renderBlindEnginePrompt(
@@ -1071,6 +1074,7 @@ export function renderBlindEnginePrompt(
   ];
   return [
     task,
+    MONSTER_KNOWLEDGE_BEST_EFFORT_INSTRUCTION,
     ...boundary,
     `Turn resource: ${base}/turn/current`,
     `Intent schema: ${base}/schema/${BLIND_INTENT_VERSION}`,

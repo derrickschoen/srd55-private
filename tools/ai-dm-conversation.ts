@@ -116,6 +116,7 @@ import type {
 } from '../src/vtt/mcp/engine-server';
 import {
   DEFAULT_OVERRIDE_POLICY,
+  MONSTER_KNOWLEDGE_BEST_EFFORT_INSTRUCTION,
   OVERRIDE_POLICIES,
   renderBlindEnginePrompt,
   renderEnginePrompt,
@@ -585,6 +586,30 @@ export type ConversationBoardImage =
 
 export const BOARD_IMAGE_SCALE_STARTUP_INSTRUCTION = 'Each grid square on the board image is 5 feet; distances in the text are in feet.';
 export const UI_FEEDBACK_STARTUP_INSTRUCTION = 'After an accepted round decision, you may call engine.submit_ui_feedback once to report how useful the board picture was. This optional feedback is never scored and never affects the encounter.';
+
+const MONSTER_KNOWLEDGE_STARTUP_SECTION =
+  `## Monster knowledge\n${MONSTER_KNOWLEDGE_BEST_EFFORT_INSTRUCTION}`;
+
+function withMonsterKnowledgeStartupSection(instructions: string): string {
+  return `${instructions}\n\n${MONSTER_KNOWLEDGE_STARTUP_SECTION}`;
+}
+
+export function conversationStartupInstructions(
+  knowledgeBaseStartupInstructions: string,
+  dmMode: DmMode,
+  boardImageMode: BoardImageMode,
+): string {
+  const blindPrimer = [GENERAL_PRIMER, ...BOARD_GLYPH_PRIMER.full].join(' ');
+  return dmMode === 'blind'
+    ? withMonsterKnowledgeStartupSection(
+        `${knowledgeBaseStartupInstructions}\n\nGeneral primer ${BLIND_STATE_PRIMER_VERSION}: ${blindPrimer}`,
+      )
+    : boardImageMode === 'png'
+    ? withMonsterKnowledgeStartupSection(
+        `${knowledgeBaseStartupInstructions}\n\n${BOARD_IMAGE_SCALE_STARTUP_INSTRUCTION}\n${UI_FEEDBACK_STARTUP_INSTRUCTION}`,
+      )
+    : withMonsterKnowledgeStartupSection(knowledgeBaseStartupInstructions);
+}
 
 export interface ConversationBoardImageEvidence {
   readonly capturedAtUnixMs: number;
@@ -3841,9 +3866,10 @@ function decisionCatalogForSnapshot(
   });
 }
 
-function structuredFinalPrompt(context: CapturedTurnContext, catalog: DecisionCatalog): string {
+export function structuredFinalPrompt(context: CapturedTurnContext, catalog: DecisionCatalog): string {
   return [
     'Return only the schema-constrained indexed decision. Do not call engine tools.',
+    MONSTER_KNOWLEDGE_BEST_EFFORT_INSTRUCTION,
     '[TURN_CONTEXT]',
     context.raw,
     '[DECISION_CATALOG]',
@@ -4235,12 +4261,11 @@ async function runConversationWithConfiguredIntel(
   const partyPolicy = options.partyPolicyOverride ?? config.partyPolicy;
   const clock = options.clock ?? (() => performance.now());
   const knowledgeBase = await loadKnowledgeBase(config);
-  const blindPrimer = [GENERAL_PRIMER, ...BOARD_GLYPH_PRIMER.full].join(' ');
-  const startupInstructions = config.dmMode === 'blind'
-    ? `${knowledgeBase.startupInstructions}\n\nGeneral primer ${BLIND_STATE_PRIMER_VERSION}: ${blindPrimer}`
-    : config.boardImageMode === 'png'
-    ? `${knowledgeBase.startupInstructions}\n\n${BOARD_IMAGE_SCALE_STARTUP_INSTRUCTION}\n${UI_FEEDBACK_STARTUP_INSTRUCTION}`
-    : knowledgeBase.startupInstructions;
+  const startupInstructions = conversationStartupInstructions(
+    knowledgeBase.startupInstructions,
+    config.dmMode,
+    config.boardImageMode,
+  );
   const freshSessionContext: FreshSessionContext = {
     knowledgeBaseBundleHash: knowledgeBase.combinedStartupHash,
     startupInstructions,
@@ -4335,7 +4360,7 @@ async function runConversationWithConfiguredIntel(
       ? null
       : { model: config.escalationModel, effort: config.escalationEffort };
   const escalationRepairInstructions =
-    'This is a fresh one-shot escalation session for the supplied repair brief. Submit one complete OFFENSIVE corrected round: every actor with a legal attack must attack; Dash-to-close counts as offense for out-of-reach melee; Dodge is allowed only when that actor has no resolvable action. Use only the correction launcher; no fallback remains.';
+    'This is a fresh one-shot escalation session for the supplied repair brief. Submit one complete OFFENSIVE corrected round: every actor with a legal attack against a creature it plausibly knows about must attack; Dash-to-close counts as offense for out-of-reach melee; Dodge is allowed only when that actor has no resolvable action. Use only the correction launcher; no fallback remains.';
   const prepareRound = (request: EngineOrdinaryRoundCapsuleRequest): EngineRoundSnapshot => {
     const prepared = engineSession.prepareRound(request, journal.reactionGuidance());
     recordAutoResolvedReactions(journal, prepared);
