@@ -1766,3 +1766,29 @@ FINDINGS against my own work (full length):
 3. My wave briefs told subagents to write report.md; the harness forbids subagent report files. The agents correctly declined to work around it. Future briefs: return the report as structured output; the supervisor writes files.
 Agent conduct: the model-spec agent's runaway synthetic run held slot 2 for about 5 min (killed by PID by the agent; recorded in its output). Leftover processes after all three workflows: none (checked); my mem-census logger (pid 367938) stays for timed arms.
 Next free id: D888.
+
+
+## D888 — 2026-09-24 10:30 — Owner rulings (small units batched for timing; cover self-body bug fixed as its own unit; X1r also converts reachableCommandPaths); landing candidates built and reviewed; DATA-01 r4 REJECT (regressions) → owner; LUNA6 r2 REVISE
+
+Owner (asked one at a time, verbatim answers logged in .tmp/runs/perf-02/owner-q/answers.txt):
+1. Timing pairs → "Batch small exact units": units with identical pins that save under ~10 s each land in batches with one timed A/B pair per batch; big levers (reachable cells, board, cover walk, split, X3) keep their own pair. Amends D885 §6.
+2. Cover self-body bug → "Fix as its own unit". Confirmed in code by me: src/combat/cover.ts traceCombatantLine/traceCombatantLineToCells pass sourceId to traceSpaces (:502-503, :525), which never reads it; exclusions are only source+target cells (:427), so from a hypothetical anchor the mover's current body counts as creature cover. Output changes, so changed pins must be demonstrated row by row before any expectation changes. Opus agent building it (wf_6ceb79bc-f3a, unit coverself).
+3. X1r scope → "Yes, as a second X1r commit": encounter.ts reachableCommandPaths (reducer Command approach/flee; 14.95 s over 10,780 searches in survival) moves to the same single search.
+
+Session note: the session was suspended from about 01:10 to 10:21 (no commands ran; machine up 7 days, no reboot).
+
+Landing candidates (Opus, wf_ca1c0ecf-7b5, 9/9 ready) and codex gpt-6-sol xhigh review r1 (fresh, read-only, per unit):
+- regex (lookbehind 8c28952f + parse-cache delete 62a3e621): APPROVE 0/0/1. P3: deleting the cache costs about 2.2 s on a one-worker tests/unit/simulation pass (22.6 → 24.8 s). SUPERVISOR DISPOSITION: land the delete anyway — owner's aim "remove the need for as many caches as is practical" (D885), 1,053 lines removed, cold derivation 169 ms; the cost is recorded here.
+- x4 docs reds (df177083): APPROVE 0/0/1 (P3: old CODEBASE_GUIDE claims near D8/D19/D20 are unsupported; separate docs cleanup).
+- x1r: REVISE 0/1/2 (the exhaustive differential records jsonSame but does not require it — verified by me at blind-differential.ts:58/:91; contract boundary for throwing worlds; 5 s cap unmeasured solo).
+- ai1: REVISE 0/3/0 (movement now computed before any command is assessed — verified by me in the diff; call count not tested directly; mutation evidence lacked per-mutant compilation and enforced killer names).
+- cachedel (6 commits): REVISE 0/2/1, all on 6ec4c2d2 (COMPILER_SNAPSHOTS: durationMs telemetry changes; +0.24–1.05 s on experiment-orchestrator vs a 0.5 s bar). SUPERVISOR DISPOSITION: drop 6ec4c2d2 and KEEP COMPILER_SNAPSHOTS — measured speed gain (≈84 ms per type-check) outweighs its memory (3.17 MB now, ≤34 MB) under D885 §9. The other five deletions stand.
+- convsplit: REVISE 0/2/1 — the split itself matches the base's 96 test calls in order (reviewer recomputed the D583 sets and digests); the findings are against my preservation checker preserve.mjs again: it accepts an appended top-level it.skip after describe, and it compares multisets, not order. FINDING against my own tool (full length): the checker I wrote and fixed in D866 still has two fail-open paths the 4th round found; the split files are unaffected.
+- board: REVISE 0/1/1 (the added independent-execution assertions have no exact-killer mutants).
+- x3: REVISE 1/2/1 (P1: Vite config/envDir not bound into validation; P2: an edit during the build can seal old output with new hashes; P2: an invalid bundle becomes an ordinary refusal with exit 0).
+Fix round 1 launched for x1r (+ reachableCommandPaths), ai1, board, convsplit checker, x3 (wf_62c34f8e-427).
+VERIFIED by me on a stack of x1r+ai1+cachedel+regex+x4+board over main (dnd-probe-verifystack-*, 13 commits, clean cherry-picks): `npx tsc -b --force` exit 0; all 7 D880 pins byte-identical; the 9 changed/new test files 107/107 (including the two docs files that fail on main).
+DATA-01 review r4 (gpt-5.6-sol high, fresh, read-only; archived plan .claude/consensus/data-01/plan-r4.md, 334 lines, sha 067aedba…): REJECT 0 P1 / 4 P2 / 0 P3. r3 P2-1, P2-3, P2-4, P2-5, P3-1, P3-2 CLOSED; P2-2 PARTIAL (the teacher agreement gate has no tuning scope). Three P2s are REGRESSIONS: fix r3 dropped previously closed text (format-selection contract when complete ranking is invalid; enriched-audit overlap/replenishment; family-disjoint audit and training-seed count). No round 5 without the owner (D885 §12a) → owner question.
+LUNA6-01 review r2 (gpt-5.6-sol high): REVISE 3 P1 / 3 P2 / 1 P3; r1 P1-1..P1-3, P2-1, P3-1, P3-2 CLOSED, four PARTIAL. SUPERVISOR READINGS of D887 given to the fix agent (not owner rulings): live escalation under an xhigh base = a fresh gpt-6-luna xhigh session; the two medium quality gates are script-chosen → xhigh; the codex explore route in the global CLAUDE.md is a codex helper, outside D887. Plan fix r2 running (same workflow as coverself).
+Agent test slots raised from 2 to 4 (/tmp/perf02-fanout-nslots); timed arms now hold slots 2–8, keeping one agent slot per D885 §5.
+Next free id: D889.
