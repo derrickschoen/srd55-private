@@ -244,4 +244,3 @@ export function findPathToBest<TActorId extends string>(
         cost: feet(best.cost),
       };
 }
-
