@@ -11,7 +11,14 @@
  *
  *   node node_modules/vite-node/vite-node.mjs tools/experiments/reachable-cells/blind-differential.ts
  *
- * Prints one line per fixture and a final BLIND-DIFFERENTIAL line; exits 1 on any mismatch.
+ * Four named checks per fixture, and each one can fail the run:
+ * - resolved-deep / visible-deep: structural equality (isDeepStrictEqual), which
+ *   ignores the order of an object's keys;
+ * - resolved-bytes / visible-bytes: JSON bytes, which do not. The visible block is
+ *   printed into the model's context, so its key order is part of the answer.
+ * Every failed check prints `MISMATCH <check> <family> <seed>`. The final
+ * BLIND-DIFFERENTIAL line carries one count per check; the exit code is 0 only
+ * when all four counts are 0 and all 33 fixtures ran.
  */
 import { isDeepStrictEqual } from 'node:util';
 import { projectEngineBlindTurn } from '../../../src/vtt/blind-turn-context';
@@ -21,15 +28,23 @@ import { referenceLegalMovement } from '../../../tests/helpers/reference-legal-m
 import { blindFixtureCases } from '../../blind-context-fixture-report';
 
 const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
+const EXPECTED_FIXTURES = 33;
 
+const CHECKS = ['resolved-deep', 'visible-deep', 'resolved-bytes', 'visible-bytes'] as const;
+type Check = (typeof CHECKS)[number];
+
+const mismatches: Record<Check, number> = {
+  'resolved-deep': 0,
+  'visible-deep': 0,
+  'resolved-bytes': 0,
+  'visible-bytes': 0,
+};
 const totals = {
   fixtures: 0,
   actors: 0,
   cellsCompared: 0,
   destinations: 0,
   routeCells: 0,
-  mismatches: 0,
-  jsonIdentical: 0,
   singleSearchMs: 0,
   referenceMs: 0,
 };
@@ -53,10 +68,20 @@ for (const fixture of blindFixtureCases()) {
   const oracle = referenceLegalMovement(planningState, capsule);
   const referenced = performance.now();
 
+  const visibleActual = projection.legalMovement.actors.map((actor) => actor.cells);
   const visibleOracle = oracle.map((actor) => actor.cells.map((cell) => ({ label: cell.label, cost_feet: cell.costFeet })));
-  const resolvedSame = isDeepStrictEqual(projection.resolvedMovement, oracle);
-  const visibleSame = isDeepStrictEqual(projection.legalMovement.actors.map((actor) => actor.cells), visibleOracle);
-  const jsonSame = JSON.stringify(projection.resolvedMovement) === JSON.stringify(oracle);
+  const same: Record<Check, boolean> = {
+    'resolved-deep': isDeepStrictEqual(projection.resolvedMovement, oracle),
+    'visible-deep': isDeepStrictEqual(visibleActual, visibleOracle),
+    'resolved-bytes': JSON.stringify(projection.resolvedMovement) === JSON.stringify(oracle),
+    'visible-bytes': JSON.stringify(visibleActual) === JSON.stringify(visibleOracle),
+  };
+  const name = `${fixture.family} ${String(fixture.seed)}`;
+  for (const check of CHECKS) {
+    if (same[check]) continue;
+    mismatches[check] += 1;
+    console.log(`MISMATCH ${check} ${name}`);
+  }
   const destinations = oracle.reduce((sum, actor) => sum + actor.cells.length, 0);
   const routeCells = oracle.reduce((sum, actor) => sum + actor.cells.reduce((inner, cell) => inner + cell.path.length, 0), 0);
   const cells = planningState.bounds.columns * planningState.bounds.rows;
@@ -66,26 +91,25 @@ for (const fixture of blindFixtureCases()) {
   totals.cellsCompared += cells * oracle.length;
   totals.destinations += destinations;
   totals.routeCells += routeCells;
-  totals.mismatches += (resolvedSame ? 0 : 1) + (visibleSame ? 0 : 1);
-  totals.jsonIdentical += jsonSame ? 1 : 0;
   totals.singleSearchMs += projected - began;
   totals.referenceMs += referenced - projected;
   console.log([
-    `${fixture.family} ${String(fixture.seed)}`,
+    name,
     `grid=${String(planningState.bounds.columns)}x${String(planningState.bounds.rows)}`,
     `actors=${String(oracle.length)}`,
     `destinations=${String(destinations)}`,
     `routeCells=${String(routeCells)}`,
-    `resolved=${resolvedSame ? 'SAME' : 'DIFF'}`,
-    `visible=${visibleSame ? 'SAME' : 'DIFF'}`,
-    `json=${jsonSame ? 'SAME' : 'DIFF'}`,
+    ...CHECKS.map((check) => `${check}=${same[check] ? 'SAME' : 'DIFF'}`),
     `projectMs=${(projected - began).toFixed(1)}`,
     `referenceMs=${(referenced - projected).toFixed(1)}`,
   ].join(' '));
 }
 
+const failed = CHECKS.some((check) => mismatches[check] !== 0) || totals.fixtures !== EXPECTED_FIXTURES;
 console.log([
   'BLIND-DIFFERENTIAL',
   ...Object.entries(totals).map(([name, value]) => `${name}=${Number.isInteger(value) ? String(value) : value.toFixed(1)}`),
+  ...CHECKS.map((check) => `mismatches.${check}=${String(mismatches[check])}`),
+  `verdict=${failed ? 'FAIL' : 'PASS'}`,
 ].join(' '));
-process.exitCode = totals.mismatches === 0 && totals.fixtures === 33 ? 0 : 1;
+process.exitCode = failed ? 1 : 0;
