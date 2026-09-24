@@ -1792,3 +1792,44 @@ DATA-01 review r4 (gpt-5.6-sol high, fresh, read-only; archived plan .claude/con
 LUNA6-01 review r2 (gpt-5.6-sol high): REVISE 3 P1 / 3 P2 / 1 P3; r1 P1-1..P1-3, P2-1, P3-1, P3-2 CLOSED, four PARTIAL. SUPERVISOR READINGS of D887 given to the fix agent (not owner rulings): live escalation under an xhigh base = a fresh gpt-6-luna xhigh session; the two medium quality gates are script-chosen → xhigh; the codex explore route in the global CLAUDE.md is a codex helper, outside D887. Plan fix r2 running (same workflow as coverself).
 Agent test slots raised from 2 to 4 (/tmp/perf02-fanout-nslots); timed arms now hold slots 2–8, keeping one agent slot per D885 §5.
 Next free id: D889.
+
+
+## D889 — 2026-09-24 13:33 — Reboot recovered (40 GB verified); owner QA4 (DATA-01 fix r4, supervisor verifies, no r5); DATA-01 plan CLOSED at revision 5 after byte verification; LUNA6-01 r3 REVISE 4 P1 → round cap, escalated to the owner; coverself r1 REVISE 0/2/2; a wrong claim in my QA2 question; x3 stopped mid-fix on the owner's word
+
+OWNER (QA4, 2026-09-24 11:24, via AskUserQuestion): "Fix r4, I verify, no r5" — fix round 4 restores the three regressed contracts verbatim from revision 3 and defines the agreement gate's tuning scope; the supervisor verifies byte for byte; no review round 5.
+
+REBOOT (owner, about 11:35–13:27). Before it: x3's fix agent was stopped once its running mutant N10e printed RESTORED (owner: "tell me when x3 prints RESTORED and then stop it"); the three codex sessions were allowed to finish their turns (owner: "stop the codex sessions when they complete their current turns") and all three exited 0 (11:31–11:32). State file: .tmp/runs/perf-02/STATE-2026-09-24-reboot.md. After it, VERIFIED by me: MemTotal 41,070,236 kB (the D885 40 GB cap is live); no codex/vitest process; /tmp was cleared, so /tmp/perf02-fanout-nslots was recreated with 4 and the old inventory baseline report under /tmp/dnd-gate-reports is gone (use a report from .tmp/runs/perf-02/exp/reports/ or the pair A run).
+
+DATA-01 fix r4 (codex gpt-5.6-sol high, workspace-write, plan file only; exit 0). VERIFIED by me:
+- FINDING AGAINST MY BRIEF: it told codex that revision 3 was archived at .claude/consensus/data-01/plan-r3.md. That file never existed; I never archived revision 3. Codex stopped to find a byte-identical source instead of substituting one, and rebuilt revision 3 from the 278-line deletion hunk in .tmp/runs/data-01/plan-fix-r3.log (lines 2669–2946, leading '-' stripped). I rebuilt it the same way independently: sha256 f8ca3d0d65354da22ba1ef35b3f61445723b5eb4eaff7284703b166d05170017, equal to the hash recorded in the r3 brief. It is now archived at .claude/consensus/data-01/plan-r3.md.
+- The four restored sentence groups (plan lines 83, 113, 178, 198; tags stripped) are each byte-for-byte substrings of revision 3 and absent from revision 4. P2-2 has one reconcile sentence (line 85): the top-two agreement thresholds apply only when complete ranking has valid responses.
+- P2-1 design (line 109): the same seeded Kmax-stratified 100 boundaries are repeated under each of the 4 tunings × 5 replicates = 2,000 calls. LCB ≥0.70 and UCB ≤0.20 must pass per tuning, with no pooled gate. A failure by any tuning blocks all paid scale.
+- I recomputed the dependent ledger: +1,500 calls, giving 18,701 / 36,301 / 52,301 requests. At $0.012 that is $224.412 / $435.612 / $627.612; the scheduled maximum is 87.12% of the $500 Luna cap (was 83.52%) and the attempted envelope 125.52%. Depth capacities are 574/134, 287/67, 143/33, 95/22; rLimit is 0.00956.
+- Only the plan file changed during the dispatch (find -newer between the dispatch script and the .exit file).
+- The r4→r5 diff removes 45 lines, all of them ledger figures, §13 line references or the end marker.
+RESULT: the DATA-01 plan is CLOSED under QA4. Revision 5 is 354 lines, sha256 461245068a49d6b11aece353b3da607e5d3e3127345f38568f153805b2ab929c, archived at .claude/consensus/data-01/plan-r5.md. Carried open by the plan itself: the S-4 knowledge-rubric owner question and the price-basis route-token probe before any paid pilot.
+
+LUNA6-01 review r3 (gpt-5.6-sol high, read-only; the last round): REVISE 4 P1 / 3 P2 / 1 P3. Reviewed plan: .claude/consensus/luna6/plan-r3.md (sha 9dea2467…); review archived at .claude/consensus/luna6/review-plan-sol-r3.log. Route selection matches D887 exactly, per the reviewer.
+The P1s:
+1. The round wall is fixed at 180 s: `roundWallMs: 180_000` in tools/ai-dm-conversation.ts:1265 and the `--round-wall-ms` default in tools/ai-dm-arena.ts:423. The dispatch budget is clamped to the round deadline (src/vtt/agent-session-lifecycle.ts:64). The plan's uncensored 1,800 s pilot and its ≥240 s v7 wall therefore cannot take effect. VERIFIED by me (code read); plan-r3.md:303's "the round wall does not abort the primary session" is wrong.
+2. Q4a option (ii), waiting for COHORT v6, contradicts the frozen amendment #6 and S4's "v7 from the v5 bytes".
+3. Mutant M39 is killed only by a source scan, and the provenance `wx` no-overwrite has no mutant.
+4. The DATA-01 paid-pilot authorization contradicts itself (lines 440 vs 418/459).
+The P2s: the headroom formula mixes $ and %; the T7b oracle derives its length from observed output; launcher cwd/stdio/exit code are unverified. The P3: V5/V8/V12 refer back to r2 commands.
+The round cap is reached (≤3), so this goes to the owner with Q4a–c.
+
+coverself review r1 (gpt-6-sol xhigh, read-only): REVISE 0 P1 / 2 P2 / 2 P3. The reviewer confirmed the rules basis (SRD "another creature" gives half cover; D576.3 corners), independently re-derived the slit test's 16-ray counts, and confirmed that anchored production callers read only Total Cover or blocksSight.
+Findings (agent reports, not yet verified by me):
+- P2: there is no anchored creature-to-cell test, so a mutant restricted to traceCombatantLineToCells survives.
+- P2: the differential swallows loader errors; the four challenge-room encounters were silently skipped (98 states = 74 fixtures + 24 generated).
+- P3: no timed pair yet.
+- P3: "6/6" mutants are 5 distinct mutations, and the killers are not re-run after restore.
+Goes to a fix round.
+
+FINDING AGAINST MY OWN QUESTION (QA2). I told the owner the cover self-body fix "changes engine output, so pins change". The coverself agent showed 0 flips of total/blocksSight across 1,589,500 anchored traces and 7 identical pins. Codex r1 independently agrees: no product consumer reads half or three-quarters creature cover from anchored traces. I repeated the roadmap's claim without checking it. The owner's ruling (fix it as its own unit) stands, but what it buys is latent protection plus a correct exported trace, not changed play.
+
+NEW OBSERVATION (coverself agent, code read; not yet verified by me): projectedMovementOptions' attackAt (src/vtt/engine-query-port.ts ≈1590) passes a null targetArmorClass and ignores half/three-quarters cover, so the symmetric PC evaluator scores positions as if cover did not exist. Queued as an owner question.
+
+x3 (engine-child bundle) fix r1, stopped on the owner's word. The fix is 9b961d89 and the envDir build test is 7a71e696, on base f1c8b32d. 35 mutants were run: N10e and N14e KILLED; G01 (raw text bypasses capture) SURVIVED and needs a killer. Still to do: the 25-case parity re-run, tsc -b --force, sg scan, then codex review r2. The x1r, ai1, board and convsplit fix rounds finished "ready" (journal wf_62c34f8e-427); they go to codex review r2 next.
+
+Next free id: D890.
