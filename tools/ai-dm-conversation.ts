@@ -7,6 +7,7 @@ import { isAbsolute, join, relative, resolve } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { createInterface, type Interface } from 'node:readline';
 import { canonicalJson } from '../src/commands/canonical-json';
+import { ENGINE_CHILD_BUNDLE_ENV, engineChildArgs } from './engine-child-bundle';
 import { decisionReasonProblem } from '../src/vtt/decision-reason';
 import type { PersistedCoordinatorState } from '../src/combat/coordinator';
 import type { EncounterState } from '../src/combat/encounter';
@@ -2023,12 +2024,19 @@ export function createMcpClient(child: ChildProcessWithoutNullStreams): McpClien
   return client;
 }
 
-export function startMcpClient(cwd: string, launcherPath: string): McpClient {
-  return createMcpClient(spawn(process.execPath, [
-    resolve(cwd, 'node_modules/vite-node/vite-node.mjs'),
-    resolve(cwd, 'tools/engine-mcp-server.ts'),
-    launcherPath,
-  ], { cwd, stdio: ['pipe', 'pipe', 'pipe'] }));
+/**
+ * Spawns one engine MCP child. It runs the prebuilt engine child bundle only
+ * when `DND_ENGINE_CHILD_BUNDLE` offers one that checks valid for `cwd`, and
+ * otherwise the vite-node child it always ran (`tools/engine-child-bundle.ts`).
+ */
+export function startMcpClient(
+  cwd: string, launcherPath: string, launch: typeof spawn = spawn,
+): McpClient {
+  return createMcpClient(launch(
+    process.execPath,
+    [...engineChildArgs(cwd, launcherPath, process.env[ENGINE_CHILD_BUNDLE_ENV])],
+    { cwd, stdio: ['pipe', 'pipe', 'pipe'] },
+  ));
 }
 
 export async function mcpRequest(client: McpClient, method: string, params: unknown): Promise<unknown> {

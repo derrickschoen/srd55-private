@@ -36,7 +36,17 @@ export default defineConfig({
     setupFiles: verdictRecorderSetup,
     // Builds the seeded database images once, before any worker is forked
     // (tests/helpers/seeded-database-image-cache.ts).
-    globalSetup: ['tests/helpers/seeded-database-image-global-setup.ts'],
+    /*
+     * The second setup builds the engine MCP child once with esbuild and
+     * offers it to the workers, so `startMcpClient` children boot from the
+     * bundle instead of a vite-node transform each. Every spawn re-checks the
+     * bundle against the checkout and falls back to vite-node when it is
+     * missing or stale (`tools/engine-child-bundle.ts`).
+     */
+    globalSetup: [
+      'tests/helpers/seeded-database-image-global-setup.ts',
+      'tests/helpers/engine-child-bundle-global-setup.ts',
+    ],
     // Shared workers require every test to restore mocks, globals, environments,
     // native-prototype mutations, and scoped module mocks at its suite boundary.
     isolate: false,

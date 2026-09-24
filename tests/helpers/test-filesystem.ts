@@ -17,5 +17,6 @@ export {
   symlinkSync,
   statSync,
   truncateSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs';

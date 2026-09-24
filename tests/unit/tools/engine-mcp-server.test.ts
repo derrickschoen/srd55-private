@@ -18,6 +18,7 @@ import {
   renderEnginePrompt,
 } from '../../../src/vtt/mcp/engine-server';
 import { structuredFinalPrompt } from '../../../tools/ai-dm-conversation';
+import { ENGINE_CHILD_BUNDLE_ENV } from '../../../tools/engine-child-bundle';
 import { encounterBranchId, encounterSessionId } from '../../../src/combat/values';
 import { engineDispatchId } from '../../../src/vtt/agent-session';
 import {
@@ -143,6 +144,58 @@ async function prepareHardCapEvidence() {
 }
 
 const HARD_CAP_EVIDENCE = await prepareHardCapEvidence().catch((error: unknown) => error);
+
+/**
+ * The literal Claude Code initialize transcript, then tools/list and one
+ * tools/call, through one real engine child over stdio. Returns the parsed
+ * responses and every stdout and stderr byte.
+ */
+async function classicTranscript(args: readonly string[]) {
+  const child = spawn(process.execPath, [...args], { cwd: process.cwd(), stdio: ['pipe', 'pipe', 'pipe'] });
+  const stdout: Buffer[] = [];
+  const stderr: Buffer[] = [];
+  child.stdout.on('data', (chunk: Buffer) => stdout.push(chunk));
+  child.stderr.on('data', (chunk: Buffer) => stderr.push(chunk));
+  const exit = new Promise<number | null>((resolvePromise, reject) => {
+    child.once('error', reject);
+    child.once('close', resolvePromise);
+  });
+  const lines = createInterface({ input: child.stdout, crlfDelay: Number.POSITIVE_INFINITY });
+  const iterator = lines[Symbol.asyncIterator]();
+  const nextResponse = async (): Promise<Readonly<Record<string, unknown>>> => {
+    const line = await iterator.next();
+    if (line.done) throw new Error('Classic MCP server closed before responding.');
+    return record(JSON.parse(line.value) as unknown);
+  };
+
+  child.stdin.write(readFileSync(
+    'tests/fixtures/mcp-migration/claude-code-2.1.246-initialize.json',
+    'utf8',
+  ));
+  const initialized = await nextResponse();
+  child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized', params: {} })}\n`);
+  child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} })}\n`);
+  const listed = await nextResponse();
+  child.stdin.write(`${JSON.stringify({
+    jsonrpc: '2.0',
+    id: 2,
+    method: 'tools/call',
+    params: {
+      name: 'engine.get_turn_context',
+      arguments: { run_id: 'encounter:engine-mcp', expected_revision: 1, scope: 'round' },
+    },
+  })}\n`);
+  const called = await nextResponse();
+  child.stdin.end();
+  return {
+    initialized,
+    listed,
+    called,
+    exitCode: await exit,
+    stdout: Buffer.concat(stdout).toString('utf8'),
+    stderr: Buffer.concat(stderr).toString('utf8'),
+  };
+}
 
 describe('engine MCP stdio protocol', () => {
   it('places the monster-knowledge instruction exactly once on every live DM prompt surface', () => {
@@ -776,49 +829,25 @@ describe('engine MCP stdio protocol', () => {
     expect(await exit).toBe(0);
   });
 
-  it('negotiates the literal Claude Code initialize transcript and serves classic tools over real stdio', { timeout: 20_000 }, async () => {
-    const child = spawn(process.execPath, [
-      resolve('node_modules/vite-node/vite-node.mjs'),
-      resolve('tools/engine-mcp-server.ts'),
-      resolve('tests/fixtures/arena-basis/seed-3943001.json'),
-    ], { cwd: process.cwd(), stdio: ['pipe', 'pipe', 'pipe'] });
-    const exit = new Promise<number | null>((resolvePromise, reject) => {
-      child.once('error', reject);
-      child.once('exit', resolvePromise);
-    });
-    const lines = createInterface({ input: child.stdout, crlfDelay: Number.POSITIVE_INFINITY });
-    const iterator = lines[Symbol.asyncIterator]();
-    const nextResponse = async (): Promise<Readonly<Record<string, unknown>>> => {
-      const line = await iterator.next();
-      if (line.done) throw new Error('Classic MCP server closed before responding.');
-      return record(JSON.parse(line.value) as unknown);
-    };
-
-    child.stdin.write(readFileSync(
-      'tests/fixtures/mcp-migration/claude-code-2.1.246-initialize.json',
-      'utf8',
-    ));
-    const initialized = await nextResponse();
-    child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized', params: {} })}\n`);
-    child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} })}\n`);
-    const listed = await nextResponse();
-    child.stdin.write(`${JSON.stringify({
-      jsonrpc: '2.0',
-      id: 2,
-      method: 'tools/call',
-      params: {
-        name: 'engine.get_turn_context',
-        arguments: { run_id: 'encounter:engine-mcp', expected_revision: 1, scope: 'round' },
-      },
-    })}\n`);
-    const called = await nextResponse();
-    child.stdin.end();
+  it('negotiates the literal Claude Code initialize transcript and serves classic tools over real stdio, byte-identical from the engine child bundle', { timeout: 20_000 }, async () => {
+    const bundle = process.env[ENGINE_CHILD_BUNDLE_ENV];
+    if (bundle === undefined) throw new Error('The global setup offered no engine child bundle.');
+    const fixture = resolve('tests/fixtures/arena-basis/seed-3943001.json');
+    // Concurrent, so the bundle child adds no wall time to the vite-node child.
+    const [viaViteNode, viaBundle] = await Promise.all([
+      classicTranscript([resolve('node_modules/vite-node/vite-node.mjs'), resolve('tools/engine-mcp-server.ts'), fixture]),
+      classicTranscript([bundle, fixture]),
+    ]);
+    const { initialized, listed, called } = viaViteNode;
 
     expect(initialized).toMatchObject({ id: 0, result: { protocolVersion: '2025-11-25' } });
     expect(record(listed['result'])['resultType']).toBeUndefined();
     expect(Array.isArray(record(listed['result'])['tools'])).toBe(true);
     expect(record(called['result'])).toMatchObject({ isError: false });
     expect(record(called['result'])['resultType']).toBeUndefined();
-    expect(await exit).toBe(0);
+    expect(viaViteNode.exitCode).toBe(0);
+    expect(viaBundle.exitCode).toBe(0);
+    expect(viaBundle.stdout).toBe(viaViteNode.stdout);
+    expect(viaBundle.stderr).toBe(viaViteNode.stderr);
   });
 });
