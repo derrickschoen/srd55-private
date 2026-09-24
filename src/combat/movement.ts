@@ -367,11 +367,22 @@ class FrontierHeap {
  * Every legal endpoint of one bounded region, found by a single search from
  * `request.start`, with the route and cost `findPath` returns for each.
  *
- * Contract: exactly the in-bounds cells `d` for which
- * `findPath(world, { ...request, goal: d })` is found, with identical cells and
- * cost, in row-major order. An in-bounds start is always present at cost 0 with
- * no cells; an out-of-bounds start gives no endpoints. It calls the world, and
- * throws, exactly as `findPathToAny` does with a goal that never matches.
+ * Contract, for a world whose callbacks are deterministic (the same answer for
+ * the same arguments, however often and in whatever order they are asked) and
+ * return without throwing on the region explored: exactly the in-bounds cells
+ * `d` for which `findPath(world, { ...request, goal: d })` is found, with
+ * identical cells and cost, in row-major order. An in-bounds start is always
+ * present at cost 0 with no cells; an out-of-bounds start gives no endpoints.
+ *
+ * World calls and errors follow a different contract, and it is not the
+ * per-destination one: this search calls the world, and throws, exactly as
+ * `findPathToAny` does with a goal that never matches. A per-destination search
+ * returns when its goal settles, before it asks about the goal's own outgoing
+ * steps; this search asks about every settled cell's steps. So a world that
+ * throws only on a step leaving the last cell to settle makes this search throw
+ * although every per-destination `findPath` returns, and the callback sequence
+ * is not the per-destination one. The equivalence above is claimed only for
+ * deterministic worlds that do not throw.
  *
  * Why the answers are identical: this is `findPathToAny` run to exhaustion
  * instead of stopping at a goal. The (cost, row, column) settle order and the
