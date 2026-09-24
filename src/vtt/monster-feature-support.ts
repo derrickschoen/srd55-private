@@ -11,10 +11,6 @@ import type { CombatantId } from '../combat/values';
 import type { EngineOmittedRider } from './option-modeling';
 import { engineActionId, type EngineActionId } from './turn-proposal';
 
-const componentOmissionCache = new Map<
-  EngineActionId,
-  WeakMap<MonsterMultiattackComponent, readonly EngineOmittedRider[]>
->();
 const multiattackOmissionCache = new WeakMap<
   MonsterMultiattackAction,
   Map<string, readonly EngineOmittedRider[]>
@@ -220,18 +216,9 @@ export function omittedRidersForMultiattackComponent(
   sourceActionId: EngineActionId,
   component: MonsterMultiattackComponent,
 ): readonly EngineOmittedRider[] {
-  let sourceCache = componentOmissionCache.get(sourceActionId);
-  if (sourceCache === undefined) {
-    sourceCache = new WeakMap<MonsterMultiattackComponent, readonly EngineOmittedRider[]>();
-    componentOmissionCache.set(sourceActionId, sourceCache);
-  }
-  const cached = sourceCache.get(component);
-  if (cached !== undefined) return cached;
-  const omissions = component.kind === 'attack'
+  return component.kind === 'attack'
     ? attackOmissions(sourceActionId, component)
     : savingThrowOmissions(sourceActionId, component);
-  sourceCache.set(component, omissions);
-  return omissions;
 }
 
 export function omittedRidersForStandaloneAction(
