@@ -421,6 +421,28 @@ describe('engine child bundle vite-node profile', () => {
     ]);
   });
 
+  it('builds a bundle that goes stale when the config changes envDir or an .env file appears in the envDir it names', async () => {
+    const checkout = scratchDirectory('built-env-dir');
+    fakeCheckout(checkout);
+    writeFileSync(join(checkout, ENGINE_CHILD_ENTRY), "import { rule } from '../src/engine';\nprocess.stdout.write(String(rule));\n");
+    const config = join(checkout, 'vite.config.mjs');
+    writeFileSync(config, "export default { envDir: 'env' };\n");
+    mkdirSync(join(checkout, 'env'));
+    const built = await buildEngineChildBundle(checkout, join(checkout, 'bundles'));
+    writeFileSync(join(checkout, '.env'), 'DND_LANE_INTEL_MODE=off\n');
+    expect(checkEngineChildBundle(checkout, built.bundlePath).status).toBe('valid');
+    writeFileSync(config, "export default { envDir: '.' };\n");
+    expect(checkEngineChildBundle(checkout, built.bundlePath)).toEqual({
+      status: 'stale', reason: `vite.config.mjs changed since ${built.bundlePath} was built`,
+    });
+    writeFileSync(config, "export default { envDir: 'env' };\n");
+    writeFileSync(join(checkout, 'env/.env'), 'DND_LANE_INTEL_MODE=off\n');
+    expect(checkEngineChildBundle(checkout, built.bundlePath)).toEqual({
+      status: 'stale',
+      reason: `vite-node would load ${join(checkout, 'env/.env')} into the child and the bundle would not`,
+    });
+  });
+
   it('refuses to seal a profile when the config changes between its two resolutions', async () => {
     const checkout = scratchDirectory('moving-profile');
     mkdirSync(join(checkout, 'config'));
