@@ -42,7 +42,6 @@ export {
   reviewedResourceRecoverySourceSha256Oracle,
 } from './contracts';
 import {
-  assembleSaveDamageCoverage,
   deriveSaveDamageCoverageFromBodies,
   spellBodyDigestInputsFromFullLayout,
   spellDescriptionsByHeading,
@@ -53,7 +52,6 @@ import {
   type SourceDerivedSaveClause,
   type SourceDerivedSaveDamageCandidate,
 } from './spell-source-reader';
-import { cachedSpellSourceParse } from './spell-source-parse-cache';
 import {
   deepFreeze,
   runtimeReadonlyMap,
@@ -607,33 +605,16 @@ type SaveClauseDiscriminator =
   | { readonly kind: 'source_text'; readonly includes: string };
 
 /**
- * The three corpus readings and the clause parse are ONE pure function of the
- * two corpus strings imported above, so a vitest globalSetup that has proven
- * the inputs identical — the corpus bytes, the reader's source bytes AND the
- * reader bindings this process actually holds — may serve them from a file
- * instead. `cachedSpellSourceParse` is the whole of that decision.
- *
- * `null` is the ordinary answer and the only answer a browser build can get:
- * `import.meta.env.MODE !== 'test'` is statically true there, so Rollup
- * reduces the call to `null` and deletes everything behind it. On `null` the
- * lines below are, deliberately, exactly the reader calls this module made
- * before the cache existed, in the order it made them — which is also what
- * keeps the `vi.doMock` guards in tests/unit/simulation working, since a
- * mocked reader always fails the fingerprint and always lands here.
- *
- * What is never cached: the agreement check below, and
- * `assembleSaveDamageCoverage`, which freezes. Minting re-runs in the process
- * that will use the values, on cached and fresh data alike.
+ * The source-of-truth oracle, derived at module evaluation from the two corpus
+ * strings imported above: both readings of the spell bodies must agree before
+ * the clause parse runs over them. The whole derivation costs about 0.17 s per
+ * process since the gate patterns gained their sentence-start lookbehind
+ * (spell-source-reader.ts GATE_DAMAGE_SAVE_PATTERNS), so every process that
+ * imports this module derives it itself; there is no cache.
  */
-const cachedSpellSource = cachedSpellSourceParse(
-  bundledSrd521,
-  bundledSpellDescriptions,
-);
-const bundledSpellBodies = cachedSpellSource?.bundled_bodies ??
-  spellDescriptionsFromFullLayout(bundledSrd521);
-const extractedSpellBodies = cachedSpellSource?.extracted_bodies ??
-  spellDescriptionsByHeading(bundledSpellDescriptions);
-const bundledSpellBodyDigestInputs = cachedSpellSource?.bundled_digest_inputs ??
+const bundledSpellBodies = spellDescriptionsFromFullLayout(bundledSrd521);
+const extractedSpellBodies = spellDescriptionsByHeading(bundledSpellDescriptions);
+const bundledSpellBodyDigestInputs =
   spellBodyDigestInputsFromFullLayout(bundledSrd521);
 if (
   bundledSpellBodies.size !== extractedSpellBodies.size ||
@@ -645,9 +626,7 @@ if (
     'Column-safe full SRD spell reading does not match the committed readable spell extract.',
   );
 }
-const sourceCoverage = cachedSpellSource === null
-  ? deriveSaveDamageCoverageFromBodies(bundledSpellBodies)
-  : assembleSaveDamageCoverage(bundledSpellBodies, cachedSpellSource.clauses);
+const sourceCoverage = deriveSaveDamageCoverageFromBodies(bundledSpellBodies);
 const sourceDerivedSaveClauses = sourceCoverage.clauses_by_heading;
 
 export const sourceDerivedSaveDamageCandidateCounts = sourceCoverage.counts;

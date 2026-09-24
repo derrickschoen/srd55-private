@@ -34,20 +34,9 @@ export default defineConfig({
     include: ['tests/**/*.test.ts', ...liveInclusions],
     exclude: [...configDefaults.exclude, 'tests/integration-supervisor/**'],
     setupFiles: verdictRecorderSetup,
-    /**
-     * Derives the SRD spell-source parse ONCE, before any worker is forked,
-     * and hands the workers a file path and a key. It is a pure-parse cache
-     * and nothing else: the worker re-checks the key against the corpus it is
-     * actually holding, re-runs every freeze and every mint itself, and a
-     * change to either corpus file or to `spell-source-reader.ts` is a miss
-     * and a full re-derivation.
-     *
-     * Like the live-suite switch above, this adds no suite, excludes nothing
-     * and relaxes nothing — it only moves work that already ran 38 times into
-     * running once. The reasoning lives in the setup file; the guarantee lives
-     * in `src/simulation/spell-source-parse-cache.ts`.
-     */
-    globalSetup: ['tests/helpers/spell-source-parse-cache-global-setup.ts'],
+    // Builds the seeded database images once, before any worker is forked
+    // (tests/helpers/seeded-database-image-cache.ts).
+    globalSetup: ['tests/helpers/seeded-database-image-global-setup.ts'],
     // Shared workers require every test to restore mocks, globals, environments,
     // native-prototype mutations, and scoped module mocks at its suite boundary.
     isolate: false,
