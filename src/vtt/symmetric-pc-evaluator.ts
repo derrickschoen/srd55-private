@@ -53,14 +53,54 @@ export type SymmetricPcMovementAssessment =
   | { readonly status: 'evaluated'; readonly evaluation: MovementEvaluation }
   | { readonly status: 'unresolved'; readonly reason: SymmetricPcUnavailableReason };
 
+/** A command's preference class; 0 is the most preferred. Every command kind shares this one scale. */
+export type SymmetricPcRankBucket = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
+
+/**
+ * The expected damage a move's destination square offers against the move
+ * profile's target, exactly as the projected movement evaluation computed it
+ * for that candidate: hit chance against the target's planning AC plus the
+ * square's cover bonus, times the damage, critical hits included.
+ * Unresolved when the destination is not an evaluated candidate or its attack
+ * has no resolved expected damage (for example, the target has Total Cover).
+ * Every command other than a move is `not_a_move`.
+ */
+export type SymmetricPcDestinationDamage =
+  | { readonly kind: 'resolved'; readonly expectedDamage: number }
+  | { readonly kind: 'unresolved' }
+  | { readonly kind: 'not_a_move' };
+
+/**
+ * Compared element by element; the lower rank is preferred.
+ * Owner ruling 2026-09-24 (PERF-02 pcac): "Within the same bucket, prefer the
+ * square with higher expected damage against the target (hit chance × damage,
+ * which now includes AC + cover), then the canonical text."
+ */
+export type SymmetricPcRank = readonly [
+  bucket: SymmetricPcRankBucket,
+  /** 1 only for command kinds this evaluator does not assess. */
+  unassessedKind: 0 | 1,
+  /**
+   * Where the command sits in its bucket. It is the command's canonical key,
+   * except that every move of a bucket takes the smallest canonical key among
+   * that bucket's moves. The moves therefore stay together where the first of
+   * them stood, a non-move command keeps its place relative to them, and the
+   * next element decides only between moves of one bucket.
+   */
+  placementKey: string,
+  /** Higher expected damage first; unresolved after every resolved value. */
+  destinationDamage: SymmetricPcDestinationDamage,
+  /** The command's canonical JSON: the final tie-break. */
+  canonicalKey: string,
+];
+
 export interface SymmetricPcCommandAssessment {
   readonly command: EncounterCommand;
   readonly commandKey: string;
   readonly tactical: SymmetricPcTacticalAssessment | null;
   readonly movement: SymmetricPcMovementAssessment | null;
   readonly concentration: ConcentrationZoneEvaluation | null;
-  /** Lower ranks are preferred; the canonical command key is the final tie-break. */
-  readonly rank: readonly [number, number, string];
+  readonly rank: SymmetricPcRank;
 }
 
 export interface SymmetricPcDecision {
@@ -271,7 +311,7 @@ function concentrationAssessment(
   });
 }
 
-function tacticalRank(value: SymmetricPcTacticalAssessment): number {
+function tacticalRank(value: SymmetricPcTacticalAssessment): 1 | 2 | 4 | 5 | 6 {
   if (value.status === 'unresolved') return 6;
   if (value.evaluation.range.status !== 'resolved' || !value.evaluation.range.legal) return 5;
   switch (value.evaluation.range.band) {
@@ -282,15 +322,21 @@ function tacticalRank(value: SymmetricPcTacticalAssessment): number {
   }
 }
 
-function movementRank(
+type MovementCandidate = MovementEvaluation['candidates'][number];
+
+/** The evaluated movement candidate at the move's destination, when the evaluation has one. */
+function destinationCandidate(
   command: Extract<EncounterCommand, { readonly type: 'move' }>,
   value: SymmetricPcMovementAssessment,
-): number {
-  if (value.status === 'unresolved') return 7;
+): MovementCandidate | null {
+  if (value.status === 'unresolved') return null;
   const destination = command.path.at(-1);
-  if (destination === undefined) return 7;
-  const candidate = value.evaluation.candidates.find((entry) =>
-    entry.destination.column === destination.column && entry.destination.row === destination.row);
+  if (destination === undefined) return null;
+  return value.evaluation.candidates.find((entry) =>
+    entry.destination.column === destination.column && entry.destination.row === destination.row) ?? null;
+}
+
+function movementRank(candidate: MovementCandidate | null): 0 | 3 | 6 | 7 {
   if (candidate?.semantic.status !== 'resolved') return 7;
   switch (candidate.semantic.kind) {
     case 'move_5_to_normal_range':
@@ -300,30 +346,63 @@ function movementRank(
   }
 }
 
-function commandRank(
+/** Reads the expected damage the evaluation already carries for the destination: its attack verdict there. */
+function destinationDamage(candidate: MovementCandidate | null): SymmetricPcDestinationDamage {
+  if (candidate?.after.status !== 'resolved' || candidate.after.evaluation.damage.status !== 'resolved') {
+    return { kind: 'unresolved' };
+  }
+  return { kind: 'resolved', expectedDamage: candidate.after.evaluation.damage.expectedDamage };
+}
+
+/** A rank before the bucket's moves are placed together. */
+interface CommandOrder {
+  readonly bucket: SymmetricPcRankBucket;
+  readonly unassessedKind: 0 | 1;
+  readonly destinationDamage: SymmetricPcDestinationDamage;
+}
+
+function commandOrder(
   command: EncounterCommand,
   tactical: SymmetricPcTacticalAssessment | null,
   movement: SymmetricPcMovementAssessment | null,
   concentration: ConcentrationZoneEvaluation | null,
-): readonly [number, number, string] {
-  const key = canonicalJson(command);
-  if (command.type === 'attack' && tactical !== null) return [tacticalRank(tactical), 0, key];
-  if (command.type === 'move' && movement !== null) return [movementRank(command, movement), 0, key];
+): CommandOrder {
+  const notAMove = (bucket: SymmetricPcRankBucket, unassessedKind: 0 | 1 = 0): CommandOrder =>
+    ({ bucket, unassessedKind, destinationDamage: { kind: 'not_a_move' } });
+  if (command.type === 'attack' && tactical !== null) return notAMove(tacticalRank(tactical));
+  if (command.type === 'move' && movement !== null) {
+    const candidate = destinationCandidate(command, movement);
+    return { bucket: movementRank(candidate), unassessedKind: 0, destinationDamage: destinationDamage(candidate) };
+  }
   if (command.type === 'cast_spell') {
     const startsConcentration = concentration?.start.status === 'resolved' &&
       concentration.start.kind === 'starts_concentration';
-    return [startsConcentration ? 1 : 3, 0, key];
+    return notAMove(startsConcentration ? 1 : 3);
   }
-  if (command.type === 'drink_healing_potion') return [1, 0, key];
-  if (command.type === 'force_save') return [3, 0, key];
-  if (command.type === 'dodge' || command.type === 'disengage') return [7, 0, key];
-  if (command.type === 'dash') return [8, 0, key];
-  if (command.type === 'end_turn') return [9, 0, key];
-  return [8, 1, key];
+  if (command.type === 'drink_healing_potion') return notAMove(1);
+  if (command.type === 'force_save') return notAMove(3);
+  if (command.type === 'dodge' || command.type === 'disengage') return notAMove(7);
+  if (command.type === 'dash') return notAMove(8);
+  if (command.type === 'end_turn') return notAMove(9);
+  return notAMove(8, 1);
 }
 
-function compareRank(left: readonly [number, number, string], right: readonly [number, number, string]): number {
-  return left[0] - right[0] || left[1] - right[1] || left[2].localeCompare(right[2]);
+function destinationDamageClass(value: SymmetricPcDestinationDamage): 0 | 1 | 2 {
+  switch (value.kind) {
+    case 'resolved': return 0;
+    case 'unresolved': return 1;
+    case 'not_a_move': return 2;
+  }
+}
+
+function compareDestinationDamage(left: SymmetricPcDestinationDamage, right: SymmetricPcDestinationDamage): number {
+  if (left.kind === 'resolved' && right.kind === 'resolved') return right.expectedDamage - left.expectedDamage;
+  return destinationDamageClass(left) - destinationDamageClass(right);
+}
+
+function compareRank(left: SymmetricPcRank, right: SymmetricPcRank): number {
+  return left[0] - right[0] || left[1] - right[1] || left[2].localeCompare(right[2]) ||
+    compareDestinationDamage(left[3], right[3]) || left[4].localeCompare(right[4]);
 }
 
 /**
@@ -347,7 +426,7 @@ export function evaluateSymmetricPcDecision(input: {
   // Asked at the first move command, so commands are still assessed in legal
   // order; every later move command of this decision shares that answer.
   let sharedMovement: SymmetricPcMovementAssessment | null = null;
-  const assessments = legal.map((command): SymmetricPcCommandAssessment => {
+  const evaluated = legal.map((command) => {
     const tactical = command.type === 'attack'
       ? tacticalAssessment(input.state, actorKnowledge, command)
       : null;
@@ -363,7 +442,26 @@ export function evaluateSymmetricPcDecision(input: {
       tactical,
       movement,
       concentration,
-      rank: commandRank(command, tactical, movement, concentration),
+      order: commandOrder(command, tactical, movement, concentration),
+    };
+  });
+  // The smallest canonical key among each bucket's moves places them all.
+  const movePlacement = new Map<SymmetricPcRankBucket, string>();
+  for (const entry of evaluated) {
+    if (entry.order.destinationDamage.kind === 'not_a_move') continue;
+    const placed = movePlacement.get(entry.order.bucket);
+    if (placed === undefined || entry.commandKey.localeCompare(placed) < 0) {
+      movePlacement.set(entry.order.bucket, entry.commandKey);
+    }
+  }
+  const assessments = evaluated.map(({ order, ...assessment }): SymmetricPcCommandAssessment => {
+    const placementKey = order.destinationDamage.kind === 'not_a_move'
+      ? assessment.commandKey
+      : movePlacement.get(order.bucket);
+    if (placementKey === undefined) throw new Error('Every move registered its bucket placement above.');
+    return {
+      ...assessment,
+      rank: [order.bucket, order.unassessedKind, placementKey, order.destinationDamage, assessment.commandKey],
     };
   }).sort((left, right) => compareRank(left.rank, right.rank));
   const selected = assessments[0];
