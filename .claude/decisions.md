@@ -1833,3 +1833,40 @@ NEW OBSERVATION (coverself agent, code read; not yet verified by me): projectedM
 x3 (engine-child bundle) fix r1, stopped on the owner's word. The fix is 9b961d89 and the envDir build test is 7a71e696, on base f1c8b32d. 35 mutants were run: N10e and N14e KILLED; G01 (raw text bypasses capture) SURVIVED and needs a killer. Still to do: the 25-case parity re-run, tsc -b --force, sg scan, then codex review r2. The x1r, ai1, board and convsplit fix rounds finished "ready" (journal wf_62c34f8e-427); they go to codex review r2 next.
 
 Next free id: D890.
+
+
+## D890 — 2026-09-24 16:04 — Owner rulings on LUNA6-01 (lift the Luna timeout cap; a gpt-6-luna high vs xhigh speed/quality study picks the route); regex unit LANDED (3f3c4870) after a valid timed pair (−85.9 s initial phase); a D583 red my verification missed; review r2 verdicts
+
+OWNER (LUNA6 r3 escalation, via AskUserQuestion), answer verbatim: "Lift the timeout cap on Luna. I want stats on speed vs quality for gpt-6-luna high vs xhigh".
+I then asked what the study should decide. The owner's answer: "Study picks the route (Recommended)".
+Rulings as read, and confirmed by that second answer:
+(a) The fixed 180 s round wall is removed for Luna runs. That wall is tools/ai-dm-conversation.ts:1265 `roundWallMs: 180_000` and the tools/ai-dm-arena.ts:423 default; it bounds the agent dispatch through src/vtt/agent-session-lifecycle.ts. Only a 30 min per-call hang guard remains, and it is logged whenever it fires.
+(b) A measured study compares gpt-6-luna at high vs xhigh on the same states: response time per call, and decision quality scored as D569 arms are scored.
+(c) The study picks the route for script-chosen Luna runs. xhigh must beat high on quality by a pre-stated margin, using a named test. Until the study reports, script-chosen runs stay on today's route.
+This supersedes D887(a)'s fixed "script-chosen Luna → xhigh" for the route choice. D887(b), effort studies keep their effort, and D887(c), the no-flag default stays gpt-5.6-sol, are unchanged.
+LUNA6 plan fix r3 was dispatched (Opus, wf_a9418ee1-5ec), writing .tmp/runs/luna6/plan-r4.md. Review r4 follows.
+
+REGEX (SRD gate-pattern lookbehind + parse-cache delete) LANDED on main as c4fd9a92 + 3f3c4870, cherry-picked from the arm commits 4bc96f4f and da1289dc. VERIFIED by me: src, tools, tests, vitest.config.ts and package.json trees are equal to the timed B arm (da1289dc). Pushed to the mirror.
+Timed pair `regex2` (AB, D888 §1), all four runs VALID under void rule v2:
+- initial phase: A 668.2 s, B 582.3 s (−85.9 s)
+- total: A 676.6 s, B 590.8 s (−85.8 s)
+- prewarms: A 671.4 s, B 581.9 s initial
+Both clear the 60 s threshold, and B won the pair. Reds in both arms are only the two pre-existing docs files (x4 fixes them). Test inventory: A has 11,483 tests, B has 11,474; A only has the 12 tests of the deleted tests/unit/simulation/spell-source-parse-cache.test.ts; B only has the 2 lookbehind differential tests and the carried-over save-damage-coverage-freezing test. That difference is exactly what the unit declares.
+The first pair, `regex`, was VOID in all four runs. Outside test runs averaged 1.36–2.57 cores and a database 1.67 cores: the Opus fix agents' vitest runs, plus an unrelated tirelocator CI job (paratest with mysqld). Those reports were moved to pairs/void/. FINDING against D885 §5 as I applied it: "one agent slot during pairs" is not compatible with void rule v2, because a single agent's maxWorkers=1 vitest, or vite-node parity harness, exceeds 1.0 core over 60 s. From now on, timed pairs run only while no agent is running tests.
+
+FINDING AGAINST MY OWN VERIFICATION (regex). The void pair's B arm failed tests/unit/tools/d583-contract-inventory.test.ts with "D583 changed spec was deleted: tests/unit/simulation/spell-source-parse-cache.test.ts". The guard (tools/d583-contract-inventory.ts changedPaths, from D583 slice 3) fires in any checkout whose HEAD deletes a test file relative to its local `main` ref. My regex verification ran only the changed files, and codex r1 approved, so neither of us saw it. D871 already records that prompt-bearing pins must be found by a full gate before review; the same applies to branch-scoped guards.
+It is not a regression on main: once landed, `git diff main` is empty, and the deletion is legitimate. The deleted file tested the deleted cache; its one surviving case, the freeze of cached parses, was carried into save-damage-coverage-freezing.test.ts, and the reviewer saw the deletion (regex review-r1.log:2230).
+For the valid pair I pointed each arm's local `main` ref at its own HEAD, which is the post-landing state, in both arms symmetrically. Any future unit that deletes a test file (cachedel does not) must declare this.
+
+REVIEW r2 (gpt-6-sol xhigh, fresh, read-only):
+- board: APPROVE. It notes that a future same-process per-test retry must consider the rejected Promise retained at ai-dm-board-delivery.test.ts:488. That matters for the owner's Q10 per-test serial retry.
+- x1r: REVISE 0/1/0. Every r1 finding is CLOSED. The new P2: the mutation harnesses compile with tsconfig.app.json only and never re-run killers after restore. The reviewer independently byte-compared all 7 pins as identical.
+- ai1: REVISE 0/2/0. Order and call count are CLOSED; restore procedure PARTIAL. P2s: an unresolved-movement branch witness is missing; the harness must re-run killers after restore and enforce its predicted failure set.
+- convsplit: REVISE 0/2/0. All three r1 checker findings are CLOSED, and the reviewer recomputed the D583 digests (140→143, 148→151). P2s: the checker passes a `// @vitest-environment jsdom` comment inserted inside a describe (Vitest scans the whole source text); two claimed kills are non-compiling controls.
+Fix round 2 was dispatched for x1r, ai1 and convsplit (wf_a9418ee1-5ec). Every harness now follows one written procedure: npx tsc -b --force, killers fail, byte restore with sha256, then killers re-run and pass, fail-closed.
+
+x3 fix r1b (Opus, finished): new commit 4dc6a18e, a ?raw capture test and a data: URL unread-input guard test; G01 is killed by name under a harness-only config without the bundle setup. Under the repo config the setup aborts by design. Parity 25/25; tsc 0; sg 0. The agent reports its own gap: N31 and N32 (the stopsTheRun predicate at the speculative-dispatch and recalculation catch sites) SURVIVE. Its recorder audit reads 164 undeclared inputs, against 31 on main.
+coverself fix r1 (Opus, finished): new commit 5c075def, test only. COVERSELF-TO-CELLS is the sole killer of M6. The differential now decodes the 4 challenge rooms and fails closed; 8 distinct mutations, all killed and re-run after restore; pins 7/7. One test ("retains a productive first-turn option") is +205 ms and runs at 4.3 s against a 5 s timeout.
+Both went to codex review r2. Agent reports; I have not yet verified them.
+
+Next free id: D891.
