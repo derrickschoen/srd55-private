@@ -508,6 +508,22 @@ function referenceCommandCandidates(
     : left.end.column - right.end.column || left.end.row - right.end.row));
 }
 
+/** What the commanded creature pays to walk `cells` from its token, or null if a step is refused. */
+function routeCost(run: CommandRun, cells: readonly GridCell[]): number | null {
+  const world = encounterMovementWorld(run.state);
+  let from = run.state.tokens.find((token) => token.combatantId === run.target.id)?.position;
+  if (from === undefined) throw new Error(`Missing token ${String(run.target.id)}.`);
+  let cost = 0;
+  for (const to of cells) {
+    if (!world.canTraverseStep(run.target.id, from, to)) return null;
+    const step = world.traversal(run.target.id, from, to);
+    if (step.kind === 'blocked') return null;
+    cost += step.cost;
+    from = to;
+  }
+  return cost;
+}
+
 /** Ends the source's turn, so the commanded creature's turn starts and Command moves it. */
 function commandedMove(run: CommandRun): { readonly paths: readonly (readonly GridCell[])[]; readonly position: GridCell | undefined } {
   const reduced = reduceEncounter(run.state, { type: 'end_turn', actor: run.source.id }, () => 0.5);
@@ -554,14 +570,22 @@ function generatedCommandBoards(count: number, seed: number): readonly CommandBo
 
 describe('single-search reachable cells: Command approach and flee in the reducer', () => {
   it('moves the commanded creature along the frozen per-cell reference route on hand boards with real end-cell and route ties', () => {
-    // Each board is load-bearing for one reason, checked before the move is: either the end-cell
-    // order decides which of two equally near (or far) and equally priced cells wins, or the route
-    // must cross a named cell.
-    const boards: readonly (CommandBoard & { readonly load: { readonly endTie: true } | { readonly crosses: GridCell } })[] = [
+    // Each board is load-bearing for one reason, checked before the move is: the end-cell order
+    // decides which of two equally near (or far) and equally priced cells wins; or the search's
+    // row-major tie-break decides between a route and its mirror image, which costs the same; or the
+    // route must cross a named cell.
+    const boards: readonly (CommandBoard & {
+      readonly load: { readonly endTie: true } | { readonly mirrorTie: true } | { readonly crosses: GridCell };
+    })[] = [
       // Approach from 0,0 to 5,5 with 4,4 walled: 5,4 and 4,5 are both 5 feet from the source for 25 feet.
       { name: 'approach-end-tie', option: 'approach', columns: 9, rows: 9, source: cell(5, 5), target: cell(0, 0), walls: [cell(4, 4)], load: { endTie: true } },
       // Flee from 6,6: every cell of row 0 and column 0 is 30 feet away; the two difficult ones cost most.
       { name: 'flee-end-tie', option: 'flee', columns: 9, rows: 9, source: cell(6, 6), target: cell(4, 4), difficult: [cell(0, 5), cell(3, 0)], load: { endTie: true } },
+      // Approach from 0,0 to 4,4 round a pillar at 1,1. The end is 3,3 (20 feet; 4,3 and 3,4 tie on
+      // distance and cost and lose row-major). Row-major settles 1,0 before 0,1, then 2,1 before 1,2,
+      // so 2,2 is reached from 2,1: 1,0 -> 2,1 -> 2,2 -> 3,3. Column-first gives the mirror image
+      // 0,1 -> 1,2 -> 2,2 -> 3,3 at the same 20 feet.
+      { name: 'approach-around-a-pillar', option: 'approach', columns: 7, rows: 7, source: cell(4, 4), target: cell(0, 0), walls: [cell(1, 1)], load: { mirrorTie: true } },
       // A Large creature, whose step prices depend on direction, around a wall and difficult cells.
       {
         name: 'approach-large', option: 'approach', columns: 10, rows: 8, source: cell(8, 6), target: cell(0, 0), targetSize: 'Large',
@@ -584,6 +608,11 @@ describe('single-search reachable cells: Command approach and flee in the reduce
       if (expected === undefined) throw new Error(`${board.name}: the reference finds no move.`);
       if ('endTie' in board.load) {
         expect(referenceCommandCandidates(run, board.option, 'column-major')[0]?.end, board.name).not.toEqual(expected.end);
+      } else if ('mirrorTie' in board.load) {
+        const mirror = expected.cells.map((step) => cell(step.row, step.column));
+        expect(mirror, board.name).not.toEqual(expected.cells);
+        expect(routeCost(run, mirror), board.name).toBe(expected.cost);
+        expect(expected.cells, board.name).toEqual([cell(1, 0), cell(2, 1), cell(2, 2), cell(3, 3)]);
       } else {
         expect(expected.cells.map(key), board.name).toContain(key(board.load.crosses));
       }
