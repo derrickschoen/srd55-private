@@ -329,7 +329,9 @@ function compareRank(left: readonly [number, number, string], right: readonly [n
 /**
  * Evaluates legal PC commands from actor-knowledge-last-seen-v4. The full state never
  * supplies an opponent fact to a tactical decision; it is passed to the
- * projected movement provider only through its projection-restricted entrypoint.
+ * projected movement provider only through its projection-restricted entrypoint,
+ * which takes exactly one opponent fact from it: the target's Armor Class
+ * (owner ruling 2026-09-24, see projectedMovementOptions).
  */
 export function evaluateSymmetricPcDecision(input: {
   readonly state: EncounterState;

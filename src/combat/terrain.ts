@@ -71,6 +71,26 @@ export function coverRank(tier: CoverTier): number {
   }
 }
 
+/** The only defense bonuses the SRD Cover table grants. */
+export type CoverDefenseBonus = 0 | 2 | 5;
+
+/**
+ * SRD 5.2.1 Cover grants the same bonus to AC and Dexterity saves: half +2,
+ * three-quarters +5 (the Cover table, docs/srd/full/srd-5.2.1.txt:945-948).
+ * Total Cover is not a bonus (the target "can't be targeted directly"), so it
+ * contributes 0 here and every caller reports it separately. This is the ONE
+ * table: the reducer (encounter.ts) and both attack planners
+ * (engine-query-port.ts, monster side and PC side) read it, so they cannot drift.
+ */
+export function coverDefenseBonus(tier: CoverTier): CoverDefenseBonus {
+  switch (tier) {
+    case 'none': return 0;
+    case 'half': return 2;
+    case 'three_quarters': return 5;
+    case 'total': return 0;
+  }
+}
+
 export function passabilityRank(passability: TerrainPassability): number {
   switch (passability) {
     case 'open': return 0;

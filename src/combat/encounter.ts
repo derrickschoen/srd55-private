@@ -260,7 +260,7 @@ import {
   type WorldObject,
   type WorldOperation,
 } from './world-objects';
-import { terrainPassabilityAt, terrainWallCells } from './terrain';
+import { coverDefenseBonus, terrainPassabilityAt, terrainWallCells } from './terrain';
 import {
   WildShapeRuleError,
   wildShapeDurationRounds,
@@ -2469,19 +2469,6 @@ function canCombatantPierceVisualIllusion(
   const distance = minimumSpaceDistance(combatantSpace(state, observer), combatantSpace(state, subject));
   return effectiveCombatRules(state, observer).senses.some((sense) =>
     (sense.kind === 'blindsight' || sense.kind === 'truesight') && distance <= sense.rangeFeet);
-}
-
-/**
- * SRD 5.2.1 Cover grants the same bonus to AC and Dexterity saves:
- * half +2, three-quarters +5 (docs/srd/full/srd-5.2.1.txt:270,371).
- */
-function coverDefenseBonus(tier: CoverTier): number {
-  switch (tier) {
-    case 'none': return 0;
-    case 'half': return 2;
-    case 'three_quarters': return 5;
-    case 'total': return 0;
-  }
 }
 
 function coverSavingThrowBonus(

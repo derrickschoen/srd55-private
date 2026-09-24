@@ -26,6 +26,7 @@ import {
   type MovementEvaluationInput,
 } from '../combat/movement-evaluator';
 import { persistentAreaTouchesSpace } from '../combat/persistent-areas';
+import { coverDefenseBonus, type CoverTier } from '../combat/terrain';
 import type { EffectPayload, EncounterEffect } from '../combat/effects';
 import { monsterAttackRange, monsterAttackRollModeSources } from '../combat/monster-commands';
 import { declaredMonsterTraits } from '../combat/monster-traits';
@@ -344,6 +345,31 @@ function planningArmorClass(
     }
   }
   return Math.max(rulesFor(target).armorClass + bonus - slowPenalty, floor);
+}
+
+/**
+ * What an attack plan uses for the target's defense along one line trace:
+ * its planning AC plus the SRD cover bonus of the trace's tier. Total Cover
+ * adds no AC; it is the typed `target_has_total_cover` reason instead, which
+ * blocks the hit probabilities. The monster side (engineTacticalAttackInput)
+ * and the PC side (projectedMovementOptions) both build their attack input
+ * from this one helper, so the two planners cannot drift on AC or cover.
+ */
+interface PlannedTargetDefense {
+  readonly targetArmorClass: number;
+  readonly unresolvedReasons: readonly [] | readonly ['target_has_total_cover'];
+}
+
+function plannedTargetDefense(
+  state: EncounterState,
+  target: EncounterCombatantState,
+  attackerId: CombatantId,
+  cover: CoverTier,
+): PlannedTargetDefense {
+  return {
+    targetArmorClass: planningArmorClass(state, target, attackerId) + coverDefenseBonus(cover),
+    unresolvedReasons: cover === 'total' ? ['target_has_total_cover'] : [],
+  };
 }
 
 function planningAttackRollSources(
@@ -1323,8 +1349,9 @@ export function engineTacticalAttackInput(
     visible: detection?.kind === 'seen',
     reciprocal: reciprocal?.kind === 'seen',
   };
-  const cover = coverBetweenCombatants(state, actorId, targetId).tier;
-  const coverBonus = cover === 'half' ? 2 : cover === 'three_quarters' ? 5 : 0;
+  const defense = plannedTargetDefense(
+    state, target, actorId, coverBetweenCombatants(state, actorId, targetId).tier,
+  );
   const madeRollDefense = state.effects.filter((effect): effect is PlanningRollDefenseEffect =>
     isPlanningRollDefenseEffect(effect) &&
     effect.payload.scopes.includes('attack_rolls_made') &&
@@ -1365,7 +1392,7 @@ export function engineTacticalAttackInput(
     ...(action.damage.some((term) => term.trigger.kind !== 'always')
       ? ['conditional_damage_rider_unresolved' as const]
       : []),
-    ...(cover === 'total' ? ['target_has_total_cover' as const] : []),
+    ...defense.unresolvedReasons,
   ];
   const featureCombatants = state.combatants.flatMap(
     (candidate): readonly MonsterRollModeCombatantFacts[] => {
@@ -1404,7 +1431,7 @@ export function engineTacticalAttackInput(
     range: monsterAttackRange(action),
     attackBonus: action.attackBonus +
       exhaustionPenalty(enginePlanningConditions(state, actorId)) + flatAttackBonus,
-    targetArmorClass: planningArmorClass(state, target, actorId) + coverBonus,
+    targetArmorClass: defense.targetArmorClass,
     criticalFloor: 20,
     damageTerms: action.damage
       .filter((term) => term.trigger.kind === 'always')
@@ -1614,8 +1641,9 @@ function projectedMovementState(
 
 /**
  * Movement evaluation over actor-local knowledge. The full encounter is used
- * only for the actor and public board geometry; every opponent fact comes from
- * the supplied projection.
+ * only for the actor, public board geometry and ONE opponent fact, the
+ * target's Armor Class; every other opponent fact comes from the supplied
+ * projection.
  */
 export function projectedMovementOptions(
   state: EncounterState,
@@ -1627,7 +1655,13 @@ export function projectedMovementOptions(
   const start = state.tokens.find((token) => token.combatantId === request.actorId)?.position;
   const target = projection.targets.find((candidate): candidate is PerceivedTargetKnowledge =>
     candidate.targetId === request.targetId && candidate.kind === 'perceived');
-  if (actor === null || start === undefined || target === undefined) return null;
+  // AC is the one opponent fact deliberately taken from the full state, not
+  // from the projection's AC band. Owner ruling 2026-09-24, verbatim: "Just
+  // give the pc ac. A lot of players know the ac from memory or figure it out
+  // quickly". It is the same planning AC the monster side uses, through the
+  // same plannedTargetDefense helper.
+  const armorClassTarget = combatant(state, request.targetId);
+  if (actor === null || start === undefined || target === undefined || armorClassTarget === null) return null;
 
   const restrictedState = projectedMovementState(state, projection);
   const world = encounterMovementWorld(restrictedState);
@@ -1636,7 +1670,16 @@ export function projectedMovementOptions(
     if (target.reciprocalVisibility.kind === 'unknown') {
       return { status: 'unresolved', reason: 'visibility_unresolved' };
     }
-    const cover = combatantLineVerdict(state, request.actorId, request.targetId, { sourceAnchor: position }).tier;
+    // Cover is traced over the actor-local state: board geometry, the actor,
+    // its allies and perceived opponents. A creature the actor cannot perceive
+    // never adds Half Cover to the planned AC. (Creatures give at most Half
+    // Cover, so the Total Cover verdict is the same as over the full state.)
+    const targetDefense = plannedTargetDefense(
+      state,
+      armorClassTarget,
+      request.actorId,
+      combatantLineVerdict(restrictedState, request.actorId, request.targetId, { sourceAnchor: position }).tier,
+    );
     const selectedLine = minimumSpaceLine(
       queryCombatantSpaceAt(state, request.actorId, position),
       decodeProjectedCreatureSpace(target),
@@ -1650,7 +1693,7 @@ export function projectedMovementOptions(
         targetPosition: selectedLine.targetCell,
         range: request.attack.range,
         attackBonus: request.attack.attackBonus,
-        targetArmorClass: null,
+        targetArmorClass: targetDefense.targetArmorClass,
         criticalFloor: request.attack.criticalFloor,
         damageTerms: request.attack.damageTerms,
         attackerConditions: request.attack.attackerConditions,
@@ -1666,7 +1709,7 @@ export function projectedMovementOptions(
           hitPoints: { kind: 'unknown' },
           usesDeathSaves: { kind: 'unknown' },
         },
-        unresolvedReasons: cover === 'total' ? ['target_has_total_cover'] : [],
+        unresolvedReasons: targetDefense.unresolvedReasons,
       },
     };
   };
