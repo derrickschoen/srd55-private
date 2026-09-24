@@ -49,7 +49,7 @@ function expectEmptyInventory(git: GitRunner): void {
 }
 
 describe('D583 cumulative contract inventory', () => {
-  it('owns the exact inherited 140-spec baseline and pinned digest', () => {
+  it('owns the exact inherited 143-spec baseline and pinned digest', () => {
     expect(D583_BASELINE_SPECS).toHaveLength(143);
     expect(inventoryDigest(D583_BASELINE_SPECS)).toBe(D583_BASELINE_SHA256);
     expect(D583_BASELINE_SPECS).toEqual([...D583_BASELINE_SPECS].sort());
