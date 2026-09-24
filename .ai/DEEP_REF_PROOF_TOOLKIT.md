@@ -239,7 +239,9 @@ count.
 Passing is not evidence. Delete the behaviour the test protects and check it goes
 red.
 
-`decisions.md D20` is the case that made this policy: a test covering a real
+D20, archived since the D682 compaction as
+`.claude/decisions-archive/2026-09-18-full-chronology.md` D20, is the case that
+made this policy: a test covering a real
 defect could not fail — deleting the resolution left 1087 of 1087 passing,
 because the case was written at a level where the expectation was true for
 reasons unrelated to the behaviour. Rewritten one level down, four mutants died.

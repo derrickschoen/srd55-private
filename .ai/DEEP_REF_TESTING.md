@@ -165,8 +165,10 @@ Two properties every guard here has, and yours should too:
 
 ## 6. Mutation is the coverage oracle
 
-Passing is not evidence. `decisions.md D20` records a test that covered a real
-defect and **could not fail**: deleting the resolution left 1087 of 1087 passing,
+Passing is not evidence. D20 (archived since the D682 compaction as
+`.claude/decisions-archive/2026-09-18-full-chronology.md` D20) records a test
+that covered a real defect and **could not fail**: deleting the resolution left
+1087 of 1087 passing,
 because the case was written at a level where the expectation was true for
 reasons unrelated to the behaviour. Rewritten one level down, four mutants died.
 

@@ -50,8 +50,8 @@ mirrored.
 
 | What | Where |
 |---|---|
-| The three audit findings D8 accepted as real and QUEUED rather than fixed — quadratic audit walk, audit accepts unrestorable snapshots, `auditCharacterOwnership` is currently theatre on the production path | `.claude/decisions.md` D8 |
-| F8's recommended first move — drop the Laravel declared-type mimicry in `db/schema/columns.ts`, which is what degrades 223 columns to `z.any()` to protect a goal D7 retired | `.claude/decisions.md` F8 |
+| The three audit findings D8 accepted as real and QUEUED rather than fixed — quadratic audit walk, audit accepts unrestorable snapshots, `auditCharacterOwnership` is currently theatre on the production path | `.claude/decisions-archive/2026-09-18-full-chronology.md` D8 (archived by the D682 compaction) |
+| F8's recommended first move — drop the Laravel declared-type mimicry in `db/schema/columns.ts`, which is what degrades 223 columns to `z.any()` to protect a goal D7 retired | `.claude/decisions-archive/2026-09-18-full-chronology.md` F8 (archived by the D682 compaction) |
 | Assumption registers | `.claude/assumptions/` |
 | Plans | `.claude/plans/` |
 

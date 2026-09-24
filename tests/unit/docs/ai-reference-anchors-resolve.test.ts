@@ -29,6 +29,11 @@ const repoRoot = fileURLToPath(new URL('../../../', import.meta.url));
  *   3. `` `Symbol` (`:N`) ``         → line N of the file that heads the list
  *                                      actually CONTAINS `Symbol`.
  *   4. `decisions.md D29`            → that file contains a `## D29` heading.
+ *      `decisions-archive/<file>.md D29` is checked the same way against
+ *      the archive. Since the D682 compaction, `.claude/decisions.md` keeps
+ *      headings only for Part D appends; earlier ids live as headings in
+ *      `.claude/decisions-archive/2026-09-18-full-chronology.md`, which is
+ *      byte-frozen, so an archive citation is as checkable as a live one.
  *
  * Classes 3 and 4 are containment checks. Class 2 can only bound the line
  * number: a doc that says
@@ -106,6 +111,15 @@ function lineOf(source: string, index: number): number {
   return source.slice(0, index).split('\n').length;
 }
 
+/**
+ * A class-4 citation: the live log or a frozen archive of it, then the id.
+ * Group 1 is the cited path, group 2 the D/F identifier. A fresh global regex
+ * per call, so one scan's `lastIndex` never leaks into another.
+ */
+function decisionsReference(): RegExp {
+  return /(?<![\w/.-])((?:\.claude\/)?(?:decisions\.md|decisions-archive\/[\w.-]+\.md))`?(?:#|\s+)`?([DF]\d+[a-z]?)(?![\w])/gu;
+}
+
 describe('.ai reference anchors resolve', () => {
   const files = trackedFiles();
   const docs = AI_DOCS.flatMap((directory) => markdownUnder(directory, files));
@@ -146,8 +160,7 @@ describe('.ai reference anchors resolve', () => {
     const broken: Anchor[] = [];
     for (const doc of docs) {
       const source = readFileSync(join(repoRoot, doc), 'utf8');
-      const reference =
-        /(?<![\w/.-])((?:\.claude\/)?decisions\.md)`?(?:#|\s+)`?([DF]\d+[a-z]?)(?![\w])/gu;
+      const reference = decisionsReference();
       let match = reference.exec(source);
       while (match !== null) {
         const cited = match[1]!;
@@ -180,6 +193,30 @@ describe('.ai reference anchors resolve', () => {
       }
     }
     expect(broken).toEqual([]);
+  });
+
+  it('recognizes live and archived decisions citations', () => {
+    // The guard's own test for class 4: a citation the scanner does not SEE is
+    // never checked, so dropping the archive form would leave the test above
+    // passing vacuously over every archived citation.
+    const seen = (markdown: string): string[] =>
+      [...markdown.matchAll(decisionsReference())].map(
+        (match) => `${match[1]!} ${match[2]!}`,
+      );
+    expect(
+      seen(
+        '`.claude/decisions.md` D682; ' +
+          '`.claude/decisions-archive/2026-09-18-full-chronology.md` D20, ' +
+          'decisions-archive/2026-09-18-full-chronology.md#F8',
+      ),
+    ).toEqual([
+      '.claude/decisions.md D682',
+      '.claude/decisions-archive/2026-09-18-full-chronology.md D20',
+      'decisions-archive/2026-09-18-full-chronology.md F8',
+    ]);
+    expect(
+      resolvePath('decisions-archive/2026-09-18-full-chronology.md', files),
+    ).toBe('.claude/decisions-archive/2026-09-18-full-chronology.md');
   });
 
   it('forbids file:line anchors into the append-at-top decisions log', () => {

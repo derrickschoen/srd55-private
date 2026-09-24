@@ -196,11 +196,13 @@ ownership**.
 
 - A track OWNS a set of files and does not edit outside it. D8 records both
   tracks merging with no conflict because they were genuinely disjoint;
-  `decisions.md D20` records the opposite outcome when a split was badly scoped
-  ("cost an hour of seam repair", against D18).
+  `.claude/decisions-archive/2026-09-18-full-chronology.md` D20 records the
+  opposite outcome when a split was badly scoped ("cost an hour of seam
+  repair", against D18). These early entries left `.claude/decisions.md` in the
+  D682 compaction; the archive keeps their headings.
 - When two tracks want the same file, the second one **records the change and
   implements it as the next increment** rather than editing underneath the
-  first (`decisions.md D19`).
+  first (`.claude/decisions-archive/2026-09-18-full-chronology.md` D19).
 - Each worktree needs its own `PLAYWRIGHT_PORT` (trap 4 above).
 - Merge evidence is recorded in `decisions.md` as measured counts — vitest
   tests + files, build exit code, Playwright count, table count — and verified

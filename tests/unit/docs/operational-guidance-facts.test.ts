@@ -50,6 +50,28 @@ function verificationGuidance(source: string): string {
     : source.slice(start, afterHeading + nextHeading);
 }
 
+/**
+ * One `###` topic of `.claude/decisions.md` Part A, up to the next heading.
+ *
+ * Since D682 the standing rules that `.claude/RULES.md` used to hold live in
+ * Part A, and RULES.md is a pointer. Guidance that cites a Part A topic is
+ * checked against that topic's text, so a pointer cannot outlive its subject.
+ */
+function standingRuleTopic(decisions: string, topic: string): string {
+  const part = '## Part A — Standing rules\n';
+  const partStart = decisions.indexOf(part);
+  if (partStart < 0) throw new TypeError('Missing Part A of decisions.md.');
+  const partBody = decisions.slice(partStart + part.length);
+  const partEnd = partBody.search(/^## /mu);
+  const standing = partEnd < 0 ? partBody : partBody.slice(0, partEnd);
+  const heading = `### ${topic}\n`;
+  const topicStart = standing.indexOf(heading);
+  if (topicStart < 0) throw new TypeError(`Part A has no ${topic} topic.`);
+  const topicBody = standing.slice(topicStart + heading.length);
+  const topicEnd = topicBody.search(/^#{2,3} /mu);
+  return topicEnd < 0 ? topicBody : topicBody.slice(0, topicEnd);
+}
+
 const evidenceByIncrement = [
   ['tests/unit/schema.test.ts', 'progress/B00.md'],
   ['tests/unit/db/query.test.ts', 'tests/unit/db/transaction.test.ts', 'progress/B00.md'],
@@ -129,9 +151,26 @@ describe('operational guidance facts', () => {
     expect(guidance).toContain('D544/D606/D613');
     expect(guidance).toContain('unique port');
     expect(supervision).not.toContain('One suite-running lane at a time.');
+    // D682 reduced `.claude/RULES.md` to a pointer, so the old line anchor
+    // `.claude/RULES.md:47-50` names nothing. The guidance now cites the Part A
+    // topic, and that topic must still carry the lock, the single serial retry
+    // and the forced compile command the guidance sends readers there for.
     expect(guidance).toMatch(
-      /serialization and the locked retry remain in\s+`\.claude\/RULES\.md:47-50`/u,
+      /serialization and the locked retry remain in\s+`\.claude\/decisions\.md` Part A\./u,
     );
+    expect(guidance).toMatch(
+      /See\s+`\.claude\/decisions\.md` Part A \(Verification, gates and evidence\) for the surviving lock boundary\./u,
+    );
+    expect(supervision).not.toMatch(/\.claude\/RULES\.md:\d/u);
+    const gates = standingRuleTopic(
+      repositoryText('.claude/decisions.md'),
+      'Verification, gates and evidence',
+    );
+    expect(gates).toMatch(
+      /Serialize full Vitest, Playwright and production builds through `\/tmp\/dnd-gate\.lock`/u,
+    );
+    expect(gates).toMatch(/each timeout-red gets exactly ONE serial rerun/u);
+    expect(gates).toContain('`npx tsc -b --force`');
     for (const authority of ['D263', 'D587.3', 'D544', 'D606', 'D613', 'M-3']) {
       expect(guidance).toContain(authority);
     }
@@ -145,7 +184,10 @@ describe('operational guidance facts', () => {
       '**Historical plan — completed 2026-07-23.** This file records the original',
     );
     expect(plan).toMatch(
-      /Current operating rules are `\.claude\/RULES\.md` under the newest controlling\s+entries in `\.claude\/decisions\.md`/u,
+      /Current operating rules are `\.claude\/decisions\.md` \(Part A\) under the newest controlling\s+entries in `\.claude\/decisions\.md`/u,
+    );
+    expect(repositoryText('.claude/decisions.md')).toMatch(
+      /^## Part A — Standing rules$/mu,
     );
     expect(plan).toMatch(
       /executable compile configuration lives in\s+`package\.json` and `tsconfig\*\.json`/u,
