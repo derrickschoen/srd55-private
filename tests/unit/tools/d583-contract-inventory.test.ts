@@ -19,7 +19,10 @@ import {
   TRIAL_CORE_RECONCILIATION_BASELINE_SPECS,
 } from '../../../tools/d583-contract-inventory';
 
-const EMPTY_INVENTORY_SHA256 = 'b0561dd58ab1a12acfbe43d34f3edbfc76c7805cb21ec4188708b0952daaaec6';
+// Filename-set digest, normalized by demonstrate-then-normalize when PERF-02 split ai-dm-conversation.test.ts
+// (D886 §14-15; +3 names, 148 -> 151). Pre-split 148-name value:
+// b0561dd58ab1a12acfbe43d34f3edbfc76c7805cb21ec4188708b0952daaaec6
+const EMPTY_INVENTORY_SHA256 = 'ef991c2c66424d643926ddc9205b4ddb0f034cad8ba20e9610a001d0c30474dc';
 const EMPTY_INVENTORY = contractInventoryUnion(
   D583_BASELINE_SPECS,
   SESSION_TRANSACTION_BASELINE_SPECS,
@@ -40,14 +43,14 @@ function expectEmptyInventory(git: GitRunner): void {
     inventory = buildD583ContractInventory({ git, index: dependencyIndex });
   }).not.toThrow();
   expect(inventory).toEqual(EMPTY_INVENTORY);
-  expect(inventory).toHaveLength(148);
+  expect(inventory).toHaveLength(151);
   expect(inventory).toEqual([...inventory].sort());
   expect(inventoryDigest(inventory)).toBe(EMPTY_INVENTORY_SHA256);
 }
 
 describe('D583 cumulative contract inventory', () => {
   it('owns the exact inherited 140-spec baseline and pinned digest', () => {
-    expect(D583_BASELINE_SPECS).toHaveLength(140);
+    expect(D583_BASELINE_SPECS).toHaveLength(143);
     expect(inventoryDigest(D583_BASELINE_SPECS)).toBe(D583_BASELINE_SHA256);
     expect(D583_BASELINE_SPECS).toEqual([...D583_BASELINE_SPECS].sort());
   });
@@ -128,6 +131,24 @@ describe('D583 cumulative contract inventory', () => {
     expect(calls).toEqual([
       'merge-base HEAD main',
       'diff --name-only main --',
+      'ls-files --others --exclude-standard',
+    ]);
+  });
+
+  it('retains the exact empty inventory when every Git probe succeeds', () => {
+    const calls: string[] = [];
+    expectEmptyInventory((args) => {
+      const call = args.join(' ');
+      calls.push(call);
+      if (call === 'merge-base HEAD main') return 'base\n';
+      if (call === 'diff --name-only main --' || call === 'diff --name-only base --') return '';
+      if (call === 'ls-files --others --exclude-standard') return '';
+      throw new Error(`Unexpected Git call: ${call}`);
+    });
+    expect(calls).toEqual([
+      'merge-base HEAD main',
+      'diff --name-only main --',
+      'diff --name-only base --',
       'ls-files --others --exclude-standard',
     ]);
   });
