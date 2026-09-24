@@ -2738,23 +2738,14 @@ function loadedMemberDistance(
   return minimumSpaceDistance(combatantSpace(state, left), combatantSpace(state, right));
 }
 
-const encounterCombatantIndexes = new WeakMap<
-  Parameters<TurnLegalActions>[0],
-  TotalMap<CombatantId, EncounterCombatantState>
->();
-
 function encounterCombatantIndex(
   state: Parameters<TurnLegalActions>[0],
 ): TotalMap<CombatantId, EncounterCombatantState> {
-  const cached = encounterCombatantIndexes.get(state);
-  if (cached !== undefined) return cached;
-  const index = TotalMap.from(
+  return TotalMap.from(
     state.combatants,
     state.combatants.map((combatant) => combatant.profile.id),
     (combatant) => combatant.profile.id,
   );
-  encounterCombatantIndexes.set(state, index);
-  return index;
 }
 
 function loadedPartyMovementActions(
