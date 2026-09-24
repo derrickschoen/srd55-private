@@ -535,6 +535,52 @@ describe('engine child bundle selection', () => {
   });
 });
 
+/**
+ * Builds of stand-in checkouts only, so these run even when the real checkout's
+ * build fails and the 'engine child bundle build' suite's beforeAll skips it.
+ */
+describe('engine child bundle seal', () => {
+  it('seals the ?raw bytes esbuild compiled, so a corpus edited during the build leaves the bundle stale', async () => {
+    const checkout = scratchDirectory('raw-build-interval');
+    fakeCheckout(checkout);
+    writeFileSync(join(checkout, ENGINE_CHILD_ENTRY), [
+      "import corpus from '../src/corpus.txt?raw';",
+      'process.stdout.write(corpus);',
+      '',
+    ].join('\n'));
+    const corpus = join(checkout, 'src/corpus.txt');
+    const compiled = readFileSync(corpus);
+    const sealed = await buildEngineChildBundle(checkout, join(checkout, 'bundles'), {
+      onInputRead: (path) => {
+        if (path === corpus) writeFileSync(corpus, 'Meteor Swarm\n');
+      },
+    });
+    const output = readFileSync(sealed.bundlePath, 'utf8');
+    expect(output).toContain('Fireball');
+    expect(output).not.toContain('Meteor Swarm');
+    expect(sealed.inputs).toContainEqual({ path: corpus, sha256: sha256Hex(compiled) });
+    expect(checkEngineChildBundle(checkout, sealed.bundlePath)).toEqual({
+      status: 'stale', reason: `src/corpus.txt changed since ${sealed.bundlePath} was built`,
+    });
+  });
+
+  it('refuses to seal a module esbuild compiled without the capture plugin reading it, such as a data: URL import', async () => {
+    const checkout = scratchDirectory('uncaptured');
+    fakeCheckout(checkout);
+    const dataUrl = 'data:text/javascript,export default 7';
+    writeFileSync(join(checkout, ENGINE_CHILD_ENTRY), [
+      `import value from '${dataUrl}';`,
+      'process.stdout.write(String(value));',
+      '',
+    ].join('\n'));
+    const bundles = join(checkout, 'bundles');
+    await expect(buildEngineChildBundle(checkout, bundles)).rejects.toThrow(new EngineChildBundleError(
+      `esbuild compiled ${join(checkout, `<${dataUrl}>`)} without the capture plugin reading it; nothing was sealed.`,
+    ));
+    expect(existsSync(bundles)).toBe(false);
+  });
+});
+
 describe('engine child bundle build', () => {
   let directory = '';
   let built: WrittenEngineChildBundle | undefined;
