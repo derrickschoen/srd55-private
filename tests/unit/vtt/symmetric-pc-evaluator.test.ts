@@ -79,6 +79,73 @@ describe('symmetric scripted-PC evaluator', () => {
     });
   });
 
+  it('asks projected movement once per decision: move commands share it and other commands carry movement: null', () => {
+    const actor = playerProfile('symmetric-pc');
+    const target = monsterProfile('symmetric-target');
+    const state = ready(createEncounter({
+      bounds: { columns: 5, rows: 1 },
+      combatants: [actor, target],
+      tokens: [placedToken(actor, 0), placedToken(target, 3)],
+    }), actor.id);
+    const ranged = attack(actor.id, target.id, {
+      kind: 'ranged', normalRangeFeet: feet(10), longRangeFeet: feet(20),
+    });
+    const oneStep: Extract<EncounterCommand, { readonly type: 'move' }> = {
+      type: 'move', actor: actor.id, path: [{ column: 1, row: 0 }], cause: 'voluntary',
+    };
+    const twoSteps: Extract<EncounterCommand, { readonly type: 'move' }> = {
+      type: 'move', actor: actor.id, path: [{ column: 1, row: 0 }, { column: 2, row: 0 }], cause: 'voluntary',
+    };
+    const endTurn = { type: 'end_turn' as const, actor: actor.id };
+    const decision = evaluateSymmetricPcDecision({
+      state, actorId: actor.id, legalActions: [ranged, oneStep, endTurn, twoSteps],
+    });
+    const byCommand = (command: EncounterCommand) => {
+      const found = decision.assessments.find((assessment) => assessment.command === command);
+      if (found === undefined) throw new Error('Every legal command must be assessed.');
+      return found;
+    };
+
+    // Movement options never depend on which move is ranked, only on the state,
+    // the actor's projection and the perceived attack, so both moves hold the
+    // one answer. Attacks and end_turn are not movement and carry none.
+    const shared = byCommand(oneStep).movement;
+    if (shared?.status !== 'evaluated') throw new Error('Expected projected movement evaluation.');
+    expect(byCommand(twoSteps).movement).toBe(shared);
+    expect(byCommand(ranged).movement).toBeNull();
+    expect(byCommand(endTurn).movement).toBeNull();
+  });
+
+  it('assesses projected movement from each decision\'s own state', () => {
+    const actor = playerProfile('symmetric-pc');
+    const target = monsterProfile('symmetric-target');
+    const ranged = attack(actor.id, target.id, {
+      kind: 'ranged', normalRangeFeet: feet(10), longRangeFeet: feet(20),
+    });
+    const move: Extract<EncounterCommand, { readonly type: 'move' }> = {
+      type: 'move', actor: actor.id, path: [{ column: 1, row: 0 }], cause: 'voluntary',
+    };
+    const semanticAtColumnOne = (targetColumn: number) => {
+      const state = ready(createEncounter({
+        bounds: { columns: 6, rows: 1 },
+        combatants: [actor, target],
+        tokens: [placedToken(actor, 0), placedToken(target, targetColumn)],
+      }), actor.id);
+      const movement = evaluateSymmetricPcDecision({
+        state, actorId: actor.id, legalActions: [ranged, move, { type: 'end_turn', actor: actor.id }],
+      }).assessments.find((assessment) => assessment.command === move)?.movement;
+      if (movement?.status !== 'evaluated') throw new Error('Expected projected movement evaluation.');
+      return movement.evaluation.candidates.find((candidate) =>
+        candidate.destination.column === 1 && candidate.destination.row === 0)?.semantic;
+    };
+
+    // Target 15 ft away: the 5-ft step reaches 10 ft, exactly normal range.
+    expect(semanticAtColumnOne(3)).toEqual({ status: 'resolved', kind: 'move_5_to_normal_range' });
+    // Target 20 ft away: the same step goes from 20 ft to 15 ft, long range both
+    // times, so a later decision must not reuse the earlier decision's answer.
+    expect(semanticAtColumnOne(4)).toEqual({ status: 'resolved', kind: 'maintain_range' });
+  });
+
   it('does not use full monster AC or HP when full knowledge would pick another target', () => {
     const actor = playerProfile('symmetric-pc');
     const alphaBase = monsterProfile('alpha', { hitPoints: 10 });

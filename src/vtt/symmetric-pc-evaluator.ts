@@ -201,10 +201,15 @@ function movementRequest(
   };
 }
 
+/**
+ * The projected movement options of one decision. They depend on the state, the
+ * actor's projection and the perceived attack profile, never on which move
+ * command is being ranked, so a decision asks once and every move command
+ * shares the answer.
+ */
 function movementAssessment(
   state: EncounterState,
   projection: ActorKnowledgeProjection,
-  command: Extract<EncounterCommand, { readonly type: 'move' }>,
   attacks: readonly Extract<EncounterCommand, { readonly type: 'attack' }>[],
 ): SymmetricPcMovementAssessment {
   const profile = attacks
@@ -337,13 +342,14 @@ export function evaluateSymmetricPcDecision(input: {
   if (legal.length === 0) throw new Error(`Symmetric PC evaluator has no legal actions for ${String(input.actorId)}.`);
   const attacks = legal.filter((command): command is Extract<EncounterCommand, { readonly type: 'attack' }> =>
     command.type === 'attack');
+  const sharedMovement = legal.some((command) => command.type === 'move')
+    ? movementAssessment(input.state, actorKnowledge, attacks)
+    : null;
   const assessments = legal.map((command): SymmetricPcCommandAssessment => {
     const tactical = command.type === 'attack'
       ? tacticalAssessment(input.state, actorKnowledge, command)
       : null;
-    const movement = command.type === 'move'
-      ? movementAssessment(input.state, actorKnowledge, command, attacks)
-      : null;
+    const movement = command.type === 'move' ? sharedMovement : null;
     const concentration = command.type === 'cast_spell'
       ? concentrationAssessment(input.state, command)
       : null;
