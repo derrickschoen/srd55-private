@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import * as esbuild from 'esbuild';
-import type { ResolvedConfig } from 'vite';
+import type { InlineConfig, Plugin, ResolvedConfig } from 'vite';
 import { z } from 'zod';
 import { canonicalJson } from '../src/commands/canonical-json';
 
@@ -23,12 +23,19 @@ import { canonicalJson } from '../src/commands/canonical-json';
  * The build seals exactly what it used. esbuild compiles the bytes the capture
  * plugin read and hashed, never a second read, so an edit that lands during the
  * build leaves the sidecar describing the pre-edit bytes, and the next check
- * reports the edit. The build also records the vite-node profile: what
- * vite-node's CLI would resolve for the same child in this checkout (the Vite
- * config file and every module it imports, by bytes; its envDir and mode; its
- * base; the environment variables the config names; anything in the config the
- * bundle does not reproduce). The profile is resolved twice and must agree,
- * so a config edit during resolution refuses to seal.
+ * reports the edit. A file compiled twice (as a module and as `?raw` text) is
+ * read twice; when the two reads differ the bundle holds two versions of it,
+ * no one digest describes it, and the build refuses to seal.
+ *
+ * The build also records the vite-node profile: what vite-node's CLI would
+ * resolve for the same child in this checkout (the Vite config file and every
+ * module it imports, by bytes; its envDir and mode; its base; the environment
+ * variables the config names; anything in the config the bundle does not
+ * reproduce). A resolved plugin counts as Vite's own only when Vite's
+ * resolution without the config has it too, by name and by hook source; any
+ * other plugin with a module hook is a divergence, whatever its name. The
+ * profile is resolved twice and must agree, so a config edit during
+ * resolution refuses to seal.
  *
  * What the check proves, in order:
  *   - the bundle and its sidecar exist                        (else `missing`)
@@ -109,6 +116,15 @@ const VITE_DEFAULT_ESBUILD_OPTIONS: ReadonlySet<string> = new Set(['jsxDev', 'ch
 
 /** Plugin hooks that change what a module is under vite-node. */
 const MODULE_HOOKS = ['resolveId', 'load', 'transform'] as const;
+
+/**
+ * The inline config vite-node's CLI passes to `createServer`
+ * (node_modules/vite-node/dist/cli.mjs), with `root` spelled out because the
+ * child's cwd is the checkout.
+ */
+const viteNodeInlineConfig = (root: string): InlineConfig => ({
+  logLevel: 'error', root, server: { hmr: false, watch: null }, plugins: [],
+});
 
 const RAW_TEXT_NAMESPACE = 'raw-text';
 
@@ -275,19 +291,70 @@ export function environmentReads(source: string): { readonly named: readonly str
   return { named: [...named].sort(), dynamic };
 }
 
-/** What the resolved config would do to the engine's modules that the esbuild bundle does not. */
-export function configDivergences(config: Pick<ResolvedConfig, 'define' | 'plugins' | 'resolve' | 'esbuild'>): string[] {
+/** The source text of each module hook's handler: what tells Vite's own plugin from one that only takes its name. */
+function moduleHookSources(plugin: Plugin): string {
+  return MODULE_HOOKS.map((hook) => {
+    const value = plugin[hook];
+    const handler = typeof value === 'function' ? value : value?.handler;
+    return `${hook}:${handler === undefined ? '' : Function.prototype.toString.call(handler)}`;
+  }).join('\n');
+}
+
+interface ConfigPlugins {
+  /** Resolved plugins Vite did not add on its own. */
+  readonly own: readonly Plugin[];
+  /** Vite's own plugins the resolved list does not hold unchanged. */
+  readonly missing: readonly string[];
+}
+
+/**
+ * Splits the resolved plugins into Vite's built-ins and the config's own.
+ * `builtIn` is Vite's resolution of the same inline config with no config
+ * file. A resolved plugin is built in only when it is the next built-in in
+ * Vite's order with the same name AND the same source for every module hook,
+ * so a config plugin that takes a `vite:` name, even a built-in's own name, is
+ * the config's and its hooks are checked.
+ */
+function configPlugins(resolved: readonly Plugin[], builtIn: readonly Plugin[]): ConfigPlugins {
+  const own: Plugin[] = [];
+  const missing: string[] = [];
+  let next = 0;
+  for (const plugin of resolved) {
+    const sources = moduleHookSources(plugin);
+    const at = builtIn.findIndex((candidate, index) =>
+      index >= next && candidate.name === plugin.name && moduleHookSources(candidate) === sources);
+    if (at < 0) {
+      own.push(plugin);
+      continue;
+    }
+    missing.push(...builtIn.slice(next, at).map((skipped) => skipped.name));
+    next = at + 1;
+  }
+  missing.push(...builtIn.slice(next).map((skipped) => skipped.name));
+  return { own, missing };
+}
+
+/**
+ * What the resolved config would do to the engine's modules that the esbuild
+ * bundle does not. `builtIn` is as for `configPlugins`.
+ */
+export function configDivergences(
+  config: Pick<ResolvedConfig, 'define' | 'plugins' | 'resolve' | 'esbuild'>, builtIn: readonly Plugin[],
+): string[] {
   const found: string[] = [];
   for (const key of Object.keys(config.define ?? {}).sort()) {
     found.push(`vite-node would apply the define ${key}; the bundle does not`);
   }
-  for (const plugin of config.plugins) {
-    if (plugin.name.startsWith('vite:') || plugin.name === 'alias') continue;
+  const plugins = configPlugins(config.plugins, builtIn);
+  for (const plugin of plugins.own) {
     for (const hook of MODULE_HOOKS) {
       if (plugin[hook] !== undefined) {
         found.push(`vite-node would run the ${hook} hook of the Vite plugin ${plugin.name}; the bundle does not`);
       }
     }
+  }
+  for (const name of plugins.missing) {
+    found.push(`the Vite config removes or changes Vite's built-in plugin ${name}; the bundle assumes it runs as Vite adds it`);
   }
   for (const alias of config.resolve.alias) {
     if (!VITE_BUILT_IN_ALIASES.has(String(alias.find))) {
@@ -310,13 +377,11 @@ async function resolveViteNodeProfileOnce(checkout: string): Promise<ViteNodePro
   const { resolveConfig } = await import('vite');
   const saved = VITE_RESOLUTION_WRITES.map((name) => [name, process.env[name]] as const);
   let config: ResolvedConfig;
+  let builtIn: readonly Plugin[];
   try {
-    // The inline config vite-node's CLI passes to `createServer`
-    // (node_modules/vite-node/dist/cli.mjs), with `root` spelled out because
-    // the child's cwd is the checkout.
-    config = await resolveConfig({
-      logLevel: 'error', root: checkout, server: { hmr: false, watch: null }, plugins: [],
-    }, 'serve');
+    config = await resolveConfig(viteNodeInlineConfig(checkout), 'serve');
+    // The same resolution without any config file: the plugins Vite adds on its own.
+    builtIn = (await resolveConfig({ ...viteNodeInlineConfig(checkout), configFile: false }, 'serve')).plugins;
   } finally {
     for (const [name, value] of saved) {
       if (value === undefined) delete process.env[name];
@@ -345,7 +410,7 @@ async function resolveViteNodeProfileOnce(checkout: string): Promise<ViteNodePro
     }
     return { path, sha256: sha256Hex(bytes) };
   });
-  divergences.push(...configDivergences(config));
+  divergences.push(...configDivergences(config, builtIn));
   return {
     configFile,
     configInputs,
@@ -386,14 +451,50 @@ export function rawTextModule(path: string): string {
 }
 
 /**
- * Supplies esbuild every module's contents from one read, and records the
- * sha256 of exactly those bytes. esbuild never reads a source itself, so the
- * seal cannot describe bytes other than the ones compiled.
+ * One file as the capture plugin read it during one build. esbuild loads a
+ * file once per namespace, so a file imported both as a module and as `?raw`
+ * text is read twice. `changed` is two reads that disagree: esbuild compiled
+ * both versions, and no single digest describes the file the bundle holds.
  */
-function capturePlugin(read: Map<string, string>, hooks: EngineChildBuildHooks): esbuild.Plugin {
+type CapturedFile =
+  | { readonly status: 'read'; readonly sha256: string }
+  | { readonly status: 'changed'; readonly sha256s: readonly [string, string, ...string[]] };
+
+function recordRead(earlier: CapturedFile | undefined, sha256: string): CapturedFile {
+  if (earlier === undefined) return { status: 'read', sha256 };
+  switch (earlier.status) {
+    case 'read':
+      return earlier.sha256 === sha256 ? earlier : { status: 'changed', sha256s: [earlier.sha256, sha256] };
+    case 'changed':
+      return { status: 'changed', sha256s: [...earlier.sha256s, sha256] };
+  }
+}
+
+/** The sealed record of a file esbuild compiled, or the reason nothing may be sealed. */
+function sealedInput(path: string, captured: CapturedFile | undefined): BundleInput {
+  if (captured === undefined) {
+    throw new EngineChildBundleError(`esbuild compiled ${path} without the capture plugin reading it; nothing was sealed.`);
+  }
+  switch (captured.status) {
+    case 'read':
+      return { path, sha256: captured.sha256 };
+    case 'changed':
+      throw new EngineChildBundleError(
+        `${path} changed between the capture plugin's reads of it (sha256 ${captured.sha256s.join(', then ')}), ` +
+          'so the bundle compiled more than one version of it. Nothing was sealed; re-run.',
+      );
+  }
+}
+
+/**
+ * Supplies esbuild every module's contents from one read per namespace, and
+ * records the sha256 of exactly those bytes. esbuild never reads a source
+ * itself, so the seal cannot describe bytes other than the ones compiled.
+ */
+function capturePlugin(read: Map<string, CapturedFile>, hooks: EngineChildBuildHooks): esbuild.Plugin {
   const capture = (path: string): Buffer => {
     const bytes = readFileSync(path);
-    read.set(path, sha256Hex(bytes));
+    read.set(path, recordRead(read.get(path), sha256Hex(bytes)));
     hooks.onInputRead?.(path);
     return bytes;
   };
@@ -467,22 +568,16 @@ export async function buildEngineChildBundle(
 ): Promise<WrittenEngineChildBundle> {
   const checkout = resolve(root);
   const vite = await resolveViteNodeProfile(checkout);
-  const read = new Map<string, string>();
+  const read = new Map<string, CapturedFile>();
   const result = await esbuild.build({
     ...BUILD_OPTIONS, absWorkingDir: checkout, write: false, metafile: true, plugins: [capturePlugin(read, hooks)],
   });
   const output = result.outputFiles[0];
   if (output === undefined) throw new EngineChildBundleError('esbuild produced no engine child bundle.');
   assertNoImportMeta(output.text);
-  const inputs = Object.keys(result.metafile.inputs).map((input) => {
-    const path = resolve(checkout, input.startsWith(`${RAW_TEXT_NAMESPACE}:`)
-      ? input.slice(`${RAW_TEXT_NAMESPACE}:`.length) : input);
-    const sha256 = read.get(path);
-    if (sha256 === undefined) {
-      throw new EngineChildBundleError(`esbuild compiled ${path} without the capture plugin reading it; nothing was sealed.`);
-    }
-    return { path, sha256 };
-  }).sort(byPath);
+  const compiled = new Set(Object.keys(result.metafile.inputs).map((input) => resolve(checkout,
+    input.startsWith(`${RAW_TEXT_NAMESPACE}:`) ? input.slice(`${RAW_TEXT_NAMESPACE}:`.length) : input)));
+  const inputs = [...compiled].map((path) => sealedInput(path, read.get(path))).sort(byPath);
   const written = writeEngineChildBundle(directory, engineChildRecipe(checkout), inputs, vite, output.contents);
   sweepEngineChildBundles(directory, written.key, Date.now());
   return written;

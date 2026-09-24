@@ -17,7 +17,14 @@ import {
   utimesSync,
   writeFileSync,
 } from '../../helpers/test-filesystem';
-import { parseConversationArgs, runConversation, startMcpClient } from '../../../tools/ai-dm-conversation';
+import {
+  parseConversationArgs,
+  runConversation,
+  startMcpClient,
+  type ConversationRunOptions,
+} from '../../../tools/ai-dm-conversation';
+import type { AgentCallPhase } from '../../../src/vtt/agent-session';
+import { alternatingInitiativeRoom } from '../../fixtures/initiative-segments/alternating-room';
 import {
   assertNoImportMeta,
   buildEngineChildBundle,
@@ -122,6 +129,52 @@ const viteNodeArgs = (cwd: string): readonly string[] => [
 
 function stderrLines(calls: readonly (readonly unknown[])[], containing: string): readonly string[] {
   return calls.map(([chunk]) => String(chunk)).filter((line) => line.includes(containing));
+}
+
+const invalidOfferMessage = (bundlePath: string): string =>
+  `${ENGINE_CHILD_BUNDLE_ENV}=${bundlePath} is not usable: ${bundlePath} does not hash to the ` +
+    `output digest recorded beside it. It has NOT been used. Delete it, or unset ${ENGINE_CHILD_BUNDLE_ENV}, and re-run.`;
+
+/**
+ * A one-round initiative conversation whose engine child offer is invalid at
+ * one dispatch phase. Every dispatch runs in process, so no engine child is
+ * started. The `onAgentInvocation` seam, which runs inside the dispatch's own
+ * try block, stands in for the child that phase's dry agent would start: it
+ * calls `startMcpClient` with the tampered offer, as the dry agent does, and
+ * that throws before anything is spawned.
+ */
+async function runMeetingInvalidOffer(
+  label: string, phase: AgentCallPhase, options: ConversationRunOptions = {},
+) {
+  const checkout = scratchDirectory(label);
+  const sealed = fakeCheckout(checkout);
+  writeFileSync(sealed.bundlePath, 'throw new Error("not the sealed bundle");\n');
+  process.env[ENGINE_CHILD_BUNDLE_ENV] = sealed.bundlePath;
+  const outPath = join(checkout, 'rows.jsonl');
+  const launch = vi.fn();
+  const phases: AgentCallPhase[] = [];
+  const raised: unknown[] = [];
+  const ended = await runConversation(parseConversationArgs([
+    '--rooms', '1', '--rounds', '1', '--out', outPath, '--combat-model', 'initiative_segments_v1', '--dry-run',
+  ]), {
+    ...options,
+    roomStates: [await alternatingInitiativeRoom()],
+    simulatedInProcessDispatchDelayMs: 1,
+    onAgentInvocation: (invocation) => {
+      phases.push(invocation.callPhase);
+      if (invocation.callPhase !== phase) return;
+      try {
+        startMcpClient(checkout, invocation.launcherToken, launch as unknown as typeof spawn);
+      } catch (error) {
+        raised.push(error);
+        throw error;
+      }
+    },
+  }).then(() => null, (error: unknown) => error);
+  return {
+    ended, raised, phases, launch, bundlePath: sealed.bundlePath,
+    rows: existsSync(outPath) ? readFileSync(outPath, 'utf8') : '',
+  };
 }
 
 describe('engine child bundle validation', () => {
@@ -421,6 +474,43 @@ describe('engine child bundle vite-node profile', () => {
     ]);
   });
 
+  it('records the transform hook of a config plugin named vite:rewrite, which only takes Vite\'s prefix', async () => {
+    const checkout = scratchDirectory('vite-prefixed-plugin');
+    writeFileSync(join(checkout, 'vite.config.mjs'), [
+      'export default {',
+      "  plugins: [{ name: 'vite:rewrite', transform(code) { return code.replaceAll('Fireball', 'Meteor Swarm'); } }],",
+      '};',
+      '',
+    ].join('\n'));
+    expect((await resolveViteNodeProfile(checkout)).divergences).toEqual([
+      'vite-node would run the transform hook of the Vite plugin vite:rewrite; the bundle does not',
+    ]);
+  });
+
+  it('records config plugins that take a built-in plugin\'s own name, with a function or an object hook, and a built-in plugin the config removes', async () => {
+    const checkout = scratchDirectory('vite-built-in-names');
+    writeFileSync(join(checkout, 'vite.config.mjs'), [
+      'export default {',
+      '  plugins: [',
+      "    { name: 'vite:modulepreload-polyfill', enforce: 'pre', load() { return null; } },",
+      "    { name: 'vite:json', enforce: 'pre', transform: { order: 'pre', handler(code) { return code; } } },",
+      '    {',
+      "      name: 'drop-define',",
+      '      configResolved(config) {',
+      "        config.plugins.splice(config.plugins.findIndex((plugin) => plugin.name === 'vite:define'), 1);",
+      '      },',
+      '    },',
+      '  ],',
+      '};',
+      '',
+    ].join('\n'));
+    expect((await resolveViteNodeProfile(checkout)).divergences).toEqual([
+      'vite-node would run the load hook of the Vite plugin vite:modulepreload-polyfill; the bundle does not',
+      'vite-node would run the transform hook of the Vite plugin vite:json; the bundle does not',
+      'the Vite config removes or changes Vite\'s built-in plugin vite:define; the bundle assumes it runs as Vite adds it',
+    ]);
+  });
+
   it('builds a bundle that goes stale when the config changes envDir or an .env file appears in the envDir it names', async () => {
     const checkout = scratchDirectory('built-env-dir');
     fakeCheckout(checkout);
@@ -533,6 +623,30 @@ describe('engine child bundle selection', () => {
     ));
     expect(existsSync(outPath) ? readFileSync(outPath, 'utf8') : '').toBe('');
   });
+
+  it('ends a conversation run with the bundle error, writing no row, when a speculative dispatch meets an invalid offer', async () => {
+    const run = await runMeetingInvalidOffer('invalid-speculation', 'speculation');
+    expect(run.raised).toHaveLength(1);
+    expect(run.raised[0]).toBeInstanceOf(EngineChildBundleError);
+    expect(run.ended).toBe(run.raised[0]);
+    expect((run.ended as Error).message).toBe(invalidOfferMessage(run.bundlePath));
+    expect(run.rows).toBe('');
+    expect(run.launch).not.toHaveBeenCalled();
+  });
+
+  it('ends a conversation run with the bundle error, writing no row, when a speculation recalculation meets an invalid offer', async () => {
+    const run = await runMeetingInvalidOffer('invalid-recalculation', 'speculation_recalculation', {
+      forceSpeculationRecalculationForTest: true,
+    });
+    expect(run.raised).toHaveLength(1);
+    expect(run.raised[0]).toBeInstanceOf(EngineChildBundleError);
+    expect(run.ended).toBe(run.raised[0]);
+    expect((run.ended as Error).message).toBe(invalidOfferMessage(run.bundlePath));
+    expect(run.phases.indexOf('speculation')).toBeGreaterThanOrEqual(0);
+    expect(run.phases.indexOf('speculation')).toBeLessThan(run.phases.indexOf('speculation_recalculation'));
+    expect(run.rows).toBe('');
+    expect(run.launch).not.toHaveBeenCalled();
+  });
 });
 
 /**
@@ -577,6 +691,37 @@ describe('engine child bundle seal', () => {
     await expect(buildEngineChildBundle(checkout, bundles)).rejects.toThrow(new EngineChildBundleError(
       `esbuild compiled ${join(checkout, `<${dataUrl}>`)} without the capture plugin reading it; nothing was sealed.`,
     ));
+    expect(existsSync(bundles)).toBe(false);
+  });
+
+  it('refuses to seal a file imported both as a module and as ?raw text when it changes between the two reads', async () => {
+    const checkout = scratchDirectory('dual-import');
+    fakeCheckout(checkout);
+    writeFileSync(join(checkout, ENGINE_CHILD_ENTRY), [
+      "import { rule } from '../src/engine';",
+      "import source from '../src/engine.ts?raw';",
+      'process.stdout.write(`${String(rule)} ${source}`);',
+      '',
+    ].join('\n'));
+    const engine = join(checkout, 'src/engine.ts');
+    const steady = await buildEngineChildBundle(checkout, join(checkout, 'steady'));
+    expect(steady.inputs.filter((input) => input.path === engine)).toEqual([inputOf(engine)]);
+    expect(checkEngineChildBundle(checkout, steady.bundlePath).status).toBe('valid');
+    const first = readFileSync(engine);
+    const later = 'export const rule = 3;\n';
+    let reads = 0;
+    const bundles = join(checkout, 'bundles');
+    await expect(buildEngineChildBundle(checkout, bundles, {
+      onInputRead: (path) => {
+        if (path !== engine) return;
+        reads += 1;
+        if (reads === 1) writeFileSync(engine, later);
+      },
+    })).rejects.toThrow(new EngineChildBundleError(
+      `${engine} changed between the capture plugin's reads of it (sha256 ${sha256Hex(first)}, then ` +
+        `${sha256Hex(later)}), so the bundle compiled more than one version of it. Nothing was sealed; re-run.`,
+    ));
+    expect(reads).toBe(2);
     expect(existsSync(bundles)).toBe(false);
   });
 });
