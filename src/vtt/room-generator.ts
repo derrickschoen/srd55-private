@@ -566,20 +566,6 @@ export function heldoutMaximizingMonsterRosters(
     codePointCompare(left.statblockIds.join('\0'), right.statblockIds.join('\0')));
 }
 
-const heldoutRosterCache = new Map<string, readonly HeldoutMaximizingRoster[]>();
-
-function cachedHeldoutMaximizingRosters(
-  family: StarterMonsterFamily,
-  targetXp: HeldoutTargetXp,
-): readonly HeldoutMaximizingRoster[] {
-  const key = `${family}:${String(targetXp)}`;
-  const existing = heldoutRosterCache.get(key);
-  if (existing !== undefined) return existing;
-  const computed = heldoutMaximizingMonsterRosters(family, targetXp);
-  heldoutRosterCache.set(key, computed);
-  return computed;
-}
-
 function sampledHeldoutRoster(
   rng: Rng,
   seed: number,
@@ -595,7 +581,7 @@ function sampledHeldoutRoster(
   const family = HELDOUT_STARTER_MONSTER_FAMILIES[familyDrawIndex];
   if (family === undefined) throw new Error('Held-out family draw was outside its closed registry.');
   const familyRows = STARTER_MONSTER_ROSTER.filter((row) => row.family === family);
-  const maximizing = cachedHeldoutMaximizingRosters(family, targetXp);
+  const maximizing = heldoutMaximizingMonsterRosters(family, targetXp);
   const vectorDrawIndex = integer(rng, 0, maximizing.length - 1);
   const selected = maximizing[vectorDrawIndex];
   if (selected === undefined) throw new Error('Held-out roster draw was outside its maximizing set.');
