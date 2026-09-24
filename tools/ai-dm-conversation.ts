@@ -7,7 +7,7 @@ import { isAbsolute, join, relative, resolve } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { createInterface, type Interface } from 'node:readline';
 import { canonicalJson } from '../src/commands/canonical-json';
-import { ENGINE_CHILD_BUNDLE_ENV, engineChildArgs } from './engine-child-bundle';
+import { ENGINE_CHILD_BUNDLE_ENV, engineChildArgs, EngineChildBundleError } from './engine-child-bundle';
 import { decisionReasonProblem } from '../src/vtt/decision-reason';
 import type { PersistedCoordinatorState } from '../src/combat/coordinator';
 import type { EncounterState } from '../src/combat/encounter';
@@ -3683,6 +3683,16 @@ class CellSpeculationDispatchAbort extends Error {
   override readonly name = 'CellSpeculationDispatchAbort' as const;
 }
 
+/**
+ * Errors that end the whole run instead of one cell. An engine child bundle
+ * that checks invalid is corruption or a foreign writer, not something the
+ * agent did (tools/engine-child-bundle.ts), so it must not become a refused
+ * round with a zero exit.
+ */
+function stopsTheRun(error: unknown): boolean {
+  return error instanceof D569IntegrityStop || error instanceof EngineChildBundleError;
+}
+
 function fullTurnContextBase(
   state: EncounterState,
   snapshot: EngineRoundSnapshot,
@@ -4881,7 +4891,7 @@ async function runConversationWithConfiguredIntel(
                 : null,
             };
           } catch (error) {
-            if (error instanceof D569IntegrityStop) throw error;
+            if (stopsTheRun(error)) throw error;
             return {
               plan: null,
               turn: null,
@@ -6994,7 +7004,7 @@ async function runConversationWithConfiguredIntel(
                         options.onSpeculationRecalculationResolved?.(recalculated);
                       }
                     } catch (error) {
-                      if (error instanceof D569IntegrityStop || error instanceof CellInfrastructureAbort) throw error;
+                      if (stopsTheRun(error) || error instanceof CellInfrastructureAbort) throw error;
                       recalculated = null;
                     }
                   }
@@ -7104,7 +7114,7 @@ async function runConversationWithConfiguredIntel(
           initiativeExecutionPending = false;
         }
       } catch (error) {
-        if (error instanceof D569IntegrityStop) throw error;
+        if (stopsTheRun(error)) throw error;
         classifyPolicy();
         if (inFlightSpeculation.current !== null) {
           const pending = inFlightSpeculation.current;
