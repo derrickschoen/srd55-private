@@ -11,11 +11,6 @@ import type { CombatantId } from '../combat/values';
 import type { EngineOmittedRider } from './option-modeling';
 import { engineActionId, type EngineActionId } from './turn-proposal';
 
-const multiattackOmissionCache = new WeakMap<
-  MonsterMultiattackAction,
-  Map<string, readonly EngineOmittedRider[]>
->();
-
 export type FeatureSupportDisposition =
   | { readonly kind: 'modeled' }
   | {
@@ -232,14 +227,6 @@ export function omittedRidersForMultiattack(
   action: MonsterMultiattackAction,
   components: readonly MonsterMultiattackComponent[],
 ): readonly EngineOmittedRider[] {
-  let actionCache = multiattackOmissionCache.get(action);
-  if (actionCache === undefined) {
-    actionCache = new Map<string, readonly EngineOmittedRider[]>();
-    multiattackOmissionCache.set(action, actionCache);
-  }
-  const componentKey = components.map((component) => `${component.kind}:${component.id}`).join('|');
-  const cached = actionCache.get(componentKey);
-  if (cached !== undefined) return cached;
   const sourceActionId = engineActionId(action.id);
   const coupled: EngineOmittedRider[] = (action.mechanics ?? []).map((mechanic) => ({
     ...source(sourceActionId, action.id),
@@ -247,10 +234,8 @@ export function omittedRidersForMultiattack(
     classification: 'coupled_action_use',
     relatedActionId: engineActionId(mechanic.actionId),
   }));
-  const omissions = [
+  return [
     ...components.flatMap((component) => omittedRidersForMultiattackComponent(sourceActionId, component)),
     ...coupled,
   ];
-  actionCache.set(componentKey, omissions);
-  return omissions;
 }
