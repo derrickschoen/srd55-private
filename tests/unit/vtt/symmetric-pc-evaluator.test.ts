@@ -13,13 +13,14 @@ import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
 declareTestInputs({});
 
 // Records, in call order, every projected-movement query and every tactical
-// attack evaluation made outside one; both wrappers delegate unchanged. With
-// isolate: false a worker shares its module registry across files, so it is
-// reset before this file's imports and restored after its last test.
+// attack evaluation made outside one; both wrappers delegate unchanged. When a
+// test turns it on, it also counts target lookups in the actor's projection.
+// With isolate: false a worker shares its module registry across files, so it
+// is reset before this file's imports and restored after its last test.
 const probe = vi.hoisted(() => {
   vi.resetModules();
   const calls: string[] = [];
-  return { calls, insideProjectedMovement: false };
+  return { calls, insideProjectedMovement: false, countTargetLookups: false, targetLookups: 0 };
 });
 
 vi.mock('../../../src/vtt/engine-query-port', async (importOriginal) => {
@@ -45,14 +46,35 @@ vi.mock('../../../src/combat/tactical-evaluator', async (importOriginal) => {
   return { ...original, evaluateTacticalAttack };
 });
 
+vi.mock('../../../src/vtt/intel/actor-knowledge', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../../../src/vtt/intel/actor-knowledge')>();
+  const projectActorKnowledge: typeof original.projectActorKnowledge = (...args) => {
+    const projection = original.projectActorKnowledge(...args);
+    if (!probe.countTargetLookups) return projection;
+    const targets = [...projection.targets];
+    const find = targets.find.bind(targets);
+    Object.defineProperty(targets, 'find', {
+      value: (predicate: Parameters<typeof find>[0]) => {
+        probe.targetLookups += 1;
+        return find(predicate);
+      },
+    });
+    return { ...projection, targets };
+  };
+  return { ...original, projectActorKnowledge };
+});
+
 beforeEach(() => {
   probe.calls.splice(0);
   probe.insideProjectedMovement = false;
+  probe.countTargetLookups = false;
+  probe.targetLookups = 0;
 });
 
 afterAll(() => {
   vi.doUnmock('../../../src/vtt/engine-query-port');
   vi.doUnmock('../../../src/combat/tactical-evaluator');
+  vi.doUnmock('../../../src/vtt/intel/actor-knowledge');
   vi.resetModules();
 });
 
@@ -185,6 +207,48 @@ describe('symmetric scripted-PC evaluator', () => {
     // A decision with no move command has no movement to assess, so no query.
     evaluateSymmetricPcDecision({ state, actorId: actor.id, legalActions: [ranged, endTurn] });
     expect(queries()).toBe(1);
+  });
+
+  it('assesses an unresolved movement profile once per decision and shares it across move commands', () => {
+    const actor = playerProfile('symmetric-pc');
+    const target = monsterProfile('fogged-target');
+    // The target stands in fog, so the actor does not perceive it: the attack
+    // on it gives no perceived attack profile, and movement stays unresolved
+    // without ever reaching the projected-movement query.
+    const state = ready(createEncounter({
+      bounds: { columns: 5, rows: 1 },
+      combatants: [actor, target],
+      tokens: [placedToken(actor, 0), placedToken(target, 3)],
+      foggedCells: [{ column: 3, row: 0 }],
+    }), actor.id);
+    const ranged = attack(actor.id, target.id, {
+      kind: 'ranged', normalRangeFeet: feet(10), longRangeFeet: feet(20),
+    });
+    const oneStep: Extract<EncounterCommand, { readonly type: 'move' }> = {
+      type: 'move', actor: actor.id, path: [{ column: 1, row: 0 }], cause: 'voluntary',
+    };
+    const twoSteps: Extract<EncounterCommand, { readonly type: 'move' }> = {
+      type: 'move', actor: actor.id, path: [{ column: 1, row: 0 }, { column: 2, row: 0 }], cause: 'voluntary',
+    };
+    probe.countTargetLookups = true;
+    const decision = evaluateSymmetricPcDecision({
+      state, actorId: actor.id, legalActions: [ranged, oneStep, { type: 'end_turn', actor: actor.id }, twoSteps],
+    });
+    const byCommand = (command: EncounterCommand) => {
+      const found = decision.assessments.find((assessment) => assessment.command === command);
+      if (found === undefined) throw new Error('Every legal command must be assessed.');
+      return found;
+    };
+
+    // One target lookup is the attack's tactical assessment; each movement
+    // assessment looks the one attack's target up once more. Assessing once
+    // per decision makes 1 + 1 = 2; assessing per move command would make 3.
+    expect(probe.targetLookups).toBe(2);
+    expect(probe.calls.filter((call) => call === 'projected-movement')).toEqual([]);
+    expect(byCommand(ranged).tactical).toEqual({ status: 'unresolved', reason: 'target_not_perceived' });
+    const shared = byCommand(oneStep).movement;
+    expect(shared).toEqual({ status: 'unresolved', reason: 'movement_profile_unavailable' });
+    expect(byCommand(twoSteps).movement).toBe(shared);
   });
 
   it('assesses legal commands in order: the first move queries projected movement after the attack before it', () => {
