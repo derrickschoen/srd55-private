@@ -410,9 +410,8 @@ const querySpaceCache = new WeakMap<EncounterState, Map<CombatantId, CreatureSpa
 const pathResultCache = new WeakMap<EncounterState, Map<string, EnginePathResult>>();
 const approachResultCache = new WeakMap<EncounterState, Map<string, EnginePathResult>>();
 const reachResultCache = new WeakMap<EncounterState, Map<string, EngineReachResult>>();
-const distanceResultCache = new WeakMap<EncounterState, Map<string, number | null>>();
 
-function memoizedStateResult<Result extends object | number | null>(
+function memoizedStateResult<Result extends object>(
   cache: WeakMap<EncounterState, Map<string, Result>>,
   state: EncounterState,
   key: string,
@@ -1829,17 +1828,14 @@ const engineQueryPort: EngineQueryPort = {
   combatant: (state, id) => state.combatants.find((candidate) => candidate.profile.id === id) ?? null,
   tokenPosition: (state, id) => state.tokens.find((token) => token.combatantId === id)?.position ?? null,
   spaceDistance(state, left, right, leftAnchor) {
-    const key = `${left}:${right}:${leftAnchor?.column ?? ''}:${leftAnchor?.row ?? ''}`;
-    return memoizedStateResult(distanceResultCache, state, key, () => {
-      if (!state.combatants.some((candidate) => candidate.profile.id === left) ||
-        !state.combatants.some((candidate) => candidate.profile.id === right) ||
-        !state.tokens.some((token) => token.combatantId === left) ||
-        !state.tokens.some((token) => token.combatantId === right)) return null;
-      const leftSpace = leftAnchor === undefined
-        ? queryCombatantSpace(state, left)
-        : queryCombatantSpaceAt(state, left, leftAnchor);
-      return minimumSpaceDistance(leftSpace, queryCombatantSpace(state, right));
-    });
+    if (!state.combatants.some((candidate) => candidate.profile.id === left) ||
+      !state.combatants.some((candidate) => candidate.profile.id === right) ||
+      !state.tokens.some((token) => token.combatantId === left) ||
+      !state.tokens.some((token) => token.combatantId === right)) return null;
+    const leftSpace = leftAnchor === undefined
+      ? queryCombatantSpace(state, left)
+      : queryCombatantSpaceAt(state, left, leftAnchor);
+    return minimumSpaceDistance(leftSpace, queryCombatantSpace(state, right));
   },
   sameSide: (state, left, right) => combatantsAreAllies(state, left, right),
   actions: monsterActions,
