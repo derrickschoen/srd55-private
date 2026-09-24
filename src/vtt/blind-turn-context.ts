@@ -1063,11 +1063,6 @@ function creatureFacts(
   });
 }
 
-function everyCell(bounds: EncounterState['bounds']): readonly GridCell[] {
-  return Array.from({ length: bounds.rows }, (_row, row) =>
-    Array.from({ length: bounds.columns }, (_column, column) => ({ column, row }))).flat();
-}
-
 export interface BlindResolvedMovementCell {
   readonly label: string;
   readonly cell: GridCell;
@@ -1097,22 +1092,16 @@ function legalMovement(
     if (actor === undefined || display === undefined) {
       throw new Error(`Blind legal movement cannot bind required actor ${String(actorId)}.`);
     }
-    const cells: BlindResolvedMovementCell[] = everyCell(state.bounds).flatMap((destination): BlindResolvedMovementCell[] => {
-      const result = queries.path(state, {
-        actorId,
-        destination,
-        movement: 'normal',
-        maximumFeet: actor.movementRemainingFeet,
-      });
-      return result.legal
-        ? [{
-            label: `${String(destination.column)},${String(destination.row)}`,
-            cell: destination,
-            costFeet: result.costFeet,
-            path: result.cells,
-          }]
-        : [];
-    });
+    // One search per actor, row-major: the cells, costs and routes `queries.path` reports legal cell by cell.
+    const reachable = queries.reachable(state, { actorId, maximumFeet: actor.movementRemainingFeet });
+    const cells = reachable.legal
+      ? reachable.destinations.map(({ destination, cells: path, costFeet }): BlindResolvedMovementCell => ({
+          label: `${String(destination.column)},${String(destination.row)}`,
+          cell: destination,
+          costFeet,
+          path,
+        }))
+      : [];
     return {
       actorId: String(actorId),
       movementBudgetFeet: actor.movementRemainingFeet,

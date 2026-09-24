@@ -125,6 +125,30 @@ describe('canonical engine query port', () => {
     }
   });
 
+  it('reachable returns from one search exactly the destinations, costs, and routes path reports legal per cell', () => {
+    const state = placedState(SEED, new Map<CombatantId, GridCell>([
+      [ACTOR_ID, { column: 2, row: 2 }],
+      [TARGET_ID, { column: 4, row: 2 }],
+    ]), [{ column: 3, row: 1 }, { column: 1, row: 3 }]);
+    // Infinity is clamped to the whole-grid cost exactly as path clamps it; 0 leaves only the start.
+    for (const maximumFeet of [0, 15, Number.POSITIVE_INFINITY]) {
+      const perCell: { destination: GridCell; cells: readonly GridCell[]; costFeet: number }[] = [];
+      for (let row = 0; row < state.bounds.rows; row += 1) {
+        for (let column = 0; column < state.bounds.columns; column += 1) {
+          const result = OFFER_ENVIRONMENT.queries.path(state, {
+            actorId: ACTOR_ID, destination: { column, row }, movement: 'normal', maximumFeet,
+          });
+          if (result.legal) perCell.push({ destination: { column, row }, cells: result.cells, costFeet: result.costFeet });
+        }
+      }
+      expect(perCell.length, `budget ${String(maximumFeet)}`).toBeGreaterThan(0);
+      expect(OFFER_ENVIRONMENT.queries.reachable(state, { actorId: ACTOR_ID, maximumFeet }), `budget ${String(maximumFeet)}`)
+        .toEqual({ legal: true, destinations: perCell });
+    }
+    expect(OFFER_ENVIRONMENT.queries.reachable(state, { actorId: combatantId('combatant:absent'), maximumFeet: 15 }))
+      .toEqual({ legal: false, code: 'actor_not_placed' });
+  });
+
   it('withholds Dash when an enclosed actor has no endpoint closer to its target', () => {
     const generated = placedState(
       SEED,

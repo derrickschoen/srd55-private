@@ -17,7 +17,7 @@ import {
 } from '../combat/creature-space';
 import type { AppliedCondition, ExhaustionLevel } from '../combat/conditions';
 import { adjacentCells, gridDistance, type GridCell } from '../combat/grid';
-import { findPath, findPathToAny, findPathToBest } from '../combat/movement';
+import { findPath, findPathToAny, findPathToBest, findReachableCells } from '../combat/movement';
 import { encounterMovementWorld } from '../combat/encounter-movement-world';
 import {
   evaluateMovementOptions,
@@ -136,6 +136,35 @@ export interface EnginePathRequest {
   readonly maximumFeet?: number;
 }
 
+export interface EngineReachableRequest {
+  readonly actorId: CombatantId;
+  /**
+   * Required, unlike `path`'s: there is no dash or turn-derived default. The
+   * search is clamped to the board's whole-grid path cost, as `path` clamps it.
+   */
+  readonly maximumFeet: number;
+}
+
+export interface EngineReachableDestination {
+  readonly destination: GridCell;
+  /** Destination cells in travel order; the start cell is not repeated. */
+  readonly cells: readonly GridCell[];
+  readonly costFeet: number;
+}
+
+/**
+ * Exactly the destinations `path` reports legal under the same `maximumFeet`,
+ * with the same cells and cost, row-major, from one search. The failure union
+ * has no `insufficient_movement` or `destination_unreachable`: a destination
+ * outside the budget is simply absent, so no second whole-grid search exists.
+ */
+export type EngineReachableResult =
+  | {
+      readonly legal: true;
+      readonly destinations: readonly EngineReachableDestination[];
+    }
+  | { readonly legal: false; readonly code: 'actor_not_placed' };
+
 export interface EngineApproachRequest {
   readonly actorId: CombatantId;
   readonly target: GridCell;
@@ -214,6 +243,7 @@ export interface EngineQueryPort {
     selector: EngineTargetSelector,
   ): CombatantId | null;
   path(state: EncounterState, request: EnginePathRequest): EnginePathResult;
+  reachable(state: EncounterState, request: EngineReachableRequest): EngineReachableResult;
   approach(state: EncounterState, request: EngineApproachRequest): EnginePathResult;
   reach(state: EncounterState, request: EngineReachRequest): EngineReachResult;
   tacticalAttack(
@@ -1145,6 +1175,26 @@ function path(state: EncounterState, request: EnginePathRequest): EnginePathResu
   return { legal: false, code: 'destination_unreachable' };
 }
 
+/** One search per call and nothing stored: the port deliberately does not memoize this query. */
+function reachable(state: EncounterState, request: EngineReachableRequest): EngineReachableResult {
+  const actor = state.combatants.find((candidate) => candidate.profile.id === request.actorId);
+  const start = state.tokens.find((token) => token.combatantId === request.actorId)?.position;
+  if (actor === undefined || start === undefined) return { legal: false, code: 'actor_not_placed' };
+  const destinations = findReachableCells(encounterMovementWorld(state), {
+    actorId: request.actorId,
+    start,
+    maximumCost: feet(Math.min(request.maximumFeet, maximumPathCost(state))),
+  });
+  return {
+    legal: true,
+    destinations: destinations.map((entry) => ({
+      destination: entry.destination,
+      cells: entry.cells,
+      costFeet: entry.cost,
+    })),
+  };
+}
+
 function approach(state: EncounterState, request: EngineApproachRequest): EnginePathResult {
   const actor = state.combatants.find((candidate) => candidate.profile.id === request.actorId);
   const start = state.tokens.find((token) => token.combatantId === request.actorId)?.position;
@@ -1843,6 +1893,7 @@ const engineQueryPort: EngineQueryPort = {
   path(state, request) {
     return memoizedStateResult(pathResultCache, state, JSON.stringify(request), () => path(state, request));
   },
+  reachable,
   approach(state, request) {
     return memoizedStateResult(
       approachResultCache,

@@ -22,8 +22,10 @@ import {
   blindSemanticBoard,
   blindStatblockFacts,
   blindTurnContextSchema,
+  projectEngineBlindTurn,
   type BlindTurnContextBudgetEvidence,
 } from '../../../src/vtt/blind-turn-context';
+import { referenceLegalMovement } from '../../helpers/reference-legal-movement';
 import {
   projectEngineSemanticBoard,
   semanticBoardPayload,
@@ -154,25 +156,14 @@ const movementParityRequest = MOVEMENT_PARITY_CONTEXT.capsule.request;
 if (movementParityRequest === null || movementParityRequest.phase === 'speculative') {
   throw new Error('Expected ordinary movement parity request.');
 }
-const CANONICAL_MOVEMENT_BY_ACTOR = movementParityRequest.actors.map((actorId) => {
-  const actor = MOVEMENT_PARITY_CONTEXT.capsule.projection.combatants.find(
-    (candidate) => candidate.id === actorId,
-  );
-  if (actor === undefined) throw new Error('Movement parity actor missing.');
-  const expected = new Map<string, number>();
-  for (let row = 0; row < MOVEMENT_PARITY_CONTEXT.planningState.bounds.rows; row += 1) {
-    for (let column = 0; column < MOVEMENT_PARITY_CONTEXT.planningState.bounds.columns; column += 1) {
-      const result = OFFER_ENVIRONMENT.queries.path(MOVEMENT_PARITY_CONTEXT.planningState, {
-        actorId,
-        destination: { column, row },
-        movement: 'normal',
-        maximumFeet: actor.movementRemainingFeet,
-      });
-      if (result.legal) expected.set(`${String(column)},${String(row)}`, result.costFeet);
-    }
-  }
-  return expected;
-});
+// Independent oracle: one frozen-reference findPath per cell per required actor, row-major, routes included.
+const REFERENCE_MOVEMENT_BY_ACTOR = referenceLegalMovement(
+  MOVEMENT_PARITY_CONTEXT.planningState,
+  MOVEMENT_PARITY_CONTEXT.capsule,
+);
+if (REFERENCE_MOVEMENT_BY_ACTOR.length !== movementParityRequest.actors.length) {
+  throw new Error('Movement parity oracle lost an actor.');
+}
 
 describe('blind turn context', () => {
   it('emits exactly the closed top-level allowlist and no recommendation structure', async () => {
@@ -369,17 +360,25 @@ describe('blind turn context', () => {
     const { capsule, context } = preparedHardContext(5_117_002);
     const movement = record(context['legal_movement'], 'legal movement');
     const actors = recordArray(movement['actors'], 'movement actors');
+    expect(actors).toHaveLength(REFERENCE_MOVEMENT_BY_ACTOR.length);
     for (const [index, actor] of actors.entries()) {
-      const expected = CANONICAL_MOVEMENT_BY_ACTOR[index];
+      const expected = REFERENCE_MOVEMENT_BY_ACTOR[index];
       if (expected === undefined) throw new Error('Movement actor order mismatch.');
-      const actual = new Map(recordArray(actor['cells'], 'movement cells').map((cell) =>
-        [String(cell['label']), Number(cell['cost_feet'])] as const));
-      expect(actual).toEqual(expected);
+      // An array, not a Map: the printed order (row-major) is part of the answer.
+      expect(actor['cells']).toEqual(expected.cells.map((cell) => ({ label: cell.label, cost_feet: cell.costFeet })));
     }
     expect(movement).toMatchObject({
       provenance: { query: 'canonical-path-v1', state_digest: capsule.digest },
     });
     expect(JSON.stringify(movement)).not.toMatch(/route|path_cells|target|opportunity|cover|score/iu);
+  });
+
+  it('resolves the frozen per-cell reference destinations, costs, and routes in row-major order', () => {
+    const { planningState, capsule } = MOVEMENT_PARITY_CONTEXT;
+    const projection = projectEngineBlindTurn(planningState, capsule, OFFER_ENVIRONMENT.queries);
+    expect(projection.resolvedMovement).toEqual(REFERENCE_MOVEMENT_BY_ACTOR);
+    // The comparison must cover real routes, not only the start and single steps.
+    expect(REFERENCE_MOVEMENT_BY_ACTOR.flatMap((actor) => actor.cells).some((cell) => cell.path.length > 1)).toBe(true);
   });
 
   it.each(BLIND_FIXTURES)(

@@ -116,6 +116,20 @@ export type PathResult =
     }
   | { readonly kind: 'unreachable' };
 
+export interface ReachableRequest<TActorId extends string> {
+  readonly actorId: TActorId;
+  readonly start: GridCell;
+  readonly maximumCost: Feet;
+}
+
+/** One legal endpoint of a bounded region, with the route `findPath` returns for it. */
+export interface ReachableDestination {
+  readonly destination: GridCell;
+  /** Destination cells in travel order; the start cell is not repeated. */
+  readonly cells: readonly GridCell[];
+  readonly cost: Feet;
+}
+
 interface FrontierCell {
   readonly cell: GridCell;
   readonly cost: number;
@@ -301,6 +315,110 @@ export function findPathToBest<TActorId extends string>(
         cells: reconstructPath(request.start, best.cell, previous),
         cost: feet(best.cost),
       };
+}
+
+/**
+ * Binary min-heap over `frontierOrder`. Two live entries never compare equal
+ * (a cell is pushed again only at a strictly lower cost), so the pop sequence is
+ * exactly the sort-then-shift sequence of `findPathToAny`.
+ */
+class FrontierHeap {
+  private readonly entries: FrontierCell[] = [];
+
+  push(entry: FrontierCell): void {
+    const entries = this.entries;
+    let index = entries.length;
+    entries.push(entry);
+    while (index > 0) {
+      const parentIndex = (index - 1) >> 1;
+      const parent = entries[parentIndex];
+      if (parent === undefined || frontierOrder(entry, parent) >= 0) break;
+      entries[index] = parent;
+      index = parentIndex;
+    }
+    entries[index] = entry;
+  }
+
+  pop(): FrontierCell | undefined {
+    const entries = this.entries;
+    const top = entries[0];
+    const last = entries.pop();
+    if (top === undefined || last === undefined || entries.length === 0) return top;
+    let index = 0;
+    for (;;) {
+      const leftIndex = index * 2 + 1;
+      const rightIndex = leftIndex + 1;
+      const left = entries[leftIndex];
+      if (left === undefined) break;
+      const right = entries[rightIndex];
+      const [childIndex, child] = right !== undefined && frontierOrder(right, left) < 0
+        ? [rightIndex, right] as const
+        : [leftIndex, left] as const;
+      if (frontierOrder(child, last) >= 0) break;
+      entries[index] = child;
+      index = childIndex;
+    }
+    entries[index] = last;
+    return top;
+  }
+}
+
+/**
+ * Every legal endpoint of one bounded region, found by a single search from
+ * `request.start`, with the route and cost `findPath` returns for each.
+ *
+ * Contract: exactly the in-bounds cells `d` for which
+ * `findPath(world, { ...request, goal: d })` is found, with identical cells and
+ * cost, in row-major order. An in-bounds start is always present at cost 0 with
+ * no cells; an out-of-bounds start gives no endpoints. It calls the world, and
+ * throws, exactly as `findPathToAny` does with a goal that never matches.
+ *
+ * Why the answers are identical: this is `findPathToAny` run to exhaustion
+ * instead of stopping at a goal. The (cost, row, column) settle order and the
+ * strictly-cheaper relaxation are unchanged, and the goal test only returns, so
+ * each per-destination search is a step-for-step prefix of this one. A settled
+ * cell's cost and predecessor never change afterwards, so the route rebuilt at
+ * the end is the one a per-destination search rebuilds when its goal settles.
+ * Nothing is kept between calls.
+ */
+export function findReachableCells<TActorId extends string>(
+  world: MovementWorld<TActorId>,
+  request: ReachableRequest<TActorId>,
+): readonly ReachableDestination[] {
+  const maximumCost = validatedCost(request.maximumCost);
+  if (!isCellInside(world.bounds, request.start)) return [];
+
+  const distances = new Map<string, number>([[cellKey(request.start), 0]]);
+  const previous = new Map<string, GridCell>();
+  const frontier = new FrontierHeap();
+  frontier.push({ cell: request.start, cost: 0, canEnd: true });
+  const endpoints: FrontierCell[] = [];
+
+  for (let current = frontier.pop(); current !== undefined; current = frontier.pop()) {
+    if (distances.get(cellKey(current.cell)) !== current.cost) continue;
+    if (current.canEnd) endpoints.push(current);
+    for (const neighbor of adjacentCells(world.bounds, current.cell)) {
+      if (!world.canTraverseStep(request.actorId, current.cell, neighbor)) continue;
+      const traversal = world.traversal(request.actorId, current.cell, neighbor);
+      if (traversal.kind === 'blocked') continue;
+      const nextCost = current.cost + validatedCost(traversal.cost);
+      if (nextCost > maximumCost) continue;
+      const neighborKey = cellKey(neighbor);
+      const knownCost = distances.get(neighborKey);
+      if (knownCost !== undefined && knownCost <= nextCost) continue;
+      distances.set(neighborKey, nextCost);
+      previous.set(neighborKey, current.cell);
+      frontier.push({ cell: neighbor, cost: nextCost, canEnd: traversal.canEnd });
+    }
+  }
+
+  return endpoints
+    .sort((left, right) => left.cell.row - right.cell.row || left.cell.column - right.cell.column)
+    .map((endpoint) => ({
+      destination: { column: endpoint.cell.column, row: endpoint.cell.row },
+      cells: reconstructPath(request.start, endpoint.cell, previous),
+      cost: feet(endpoint.cost),
+    }));
 }
 
 function isAdjacent(from: GridCell, to: GridCell): boolean {
