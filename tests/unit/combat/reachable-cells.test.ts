@@ -5,17 +5,24 @@
  * comparison, so the row-major output order is part of the answer. The exhaustive
  * 33-fixture blind differential is experiment evidence only
  * (tools/experiments/reachable-cells/blind-differential.ts) and never runs here.
+ * The last block drives the reducer's Command approach/flee, the second caller,
+ * against the same frozen per-cell reference.
  */
 import { describe, expect, it } from 'vitest';
+import { combatantSpace, combatantSpaceAt } from '../../../src/combat/combat-rules';
+import type { CombatantProfile } from '../../../src/combat/combatant';
+import { minimumSpaceDistance } from '../../../src/combat/creature-space';
+import { createEncounter, reduceEncounter, type EncounterState } from '../../../src/combat/encounter';
 import type { GridCell } from '../../../src/combat/grid';
 import { encounterMovementWorld } from '../../../src/combat/encounter-movement-world';
 import { findReachableCells, type MovementWorld } from '../../../src/combat/movement';
-import { feet, type Feet } from '../../../src/combat/values';
+import { effectStackingIdentity, feet, type Feet } from '../../../src/combat/values';
 import { loadArenaFixture } from '../../../src/vtt/mcp/entrypoint';
 import {
   findPath as referenceFindPath,
   findPathToAny as referenceFindPathToAny,
 } from '../../helpers/reference-movement';
+import { monsterProfile, placedToken, playerProfile } from './fixtures';
 
 function key(cell: GridCell): string {
   return `${String(cell.column)},${String(cell.row)}`;
@@ -384,5 +391,223 @@ describe('single-search reachable cells: a real encounter with Large creatures',
       );
     }
     expect(sampled).toBeGreaterThan(0);
+  });
+});
+
+// The second caller: the reducer's Command approach/flee (encounter.ts enforceCommandedAction), which
+// moves the commanded creature along the route one reachable-cells search gives its chosen end cell.
+type CommandOption = 'approach' | 'flee';
+
+interface CommandBoard {
+  readonly name: string;
+  readonly option: CommandOption;
+  readonly columns: number;
+  readonly rows: number;
+  readonly source: GridCell;
+  readonly target: GridCell;
+  readonly targetSize?: 'Large';
+  readonly walls?: readonly GridCell[];
+  readonly difficult?: readonly GridCell[];
+  /** Monsters on the commanded creature's side: it may cross their cells but never end on them. */
+  readonly allies?: readonly GridCell[];
+}
+
+interface CommandRun {
+  /** The board after Command lands on the target, before the source ends its turn. */
+  readonly state: EncounterState;
+  readonly source: CombatantProfile;
+  readonly target: CombatantProfile;
+}
+
+interface CommandCandidate {
+  readonly end: GridCell;
+  readonly cells: readonly GridCell[];
+  readonly cost: number;
+  readonly distance: number;
+}
+
+function commandBoard(board: CommandBoard): CommandRun {
+  const source = playerProfile(`command-source-${board.name}`, { initiativeBonus: 20 });
+  const monster = monsterProfile(`command-target-${board.name}`, { initiativeBonus: -20 });
+  const target: CombatantProfile = board.targetSize === undefined
+    ? monster
+    : { ...monster, rules: { ...monster.rules, sizeCategory: board.targetSize } };
+  const allies = (board.allies ?? []).map((position, index) => ({
+    position,
+    profile: monsterProfile(`command-ally-${board.name}-${String(index)}`, { initiativeBonus: -30 }),
+  }));
+  const difficult = board.difficult ?? [];
+  let state = createEncounter({
+    bounds: { columns: board.columns, rows: board.rows },
+    blockedCells: board.walls ?? [],
+    environment: {
+      lightRegions: [],
+      difficultTerrainRegions: difficult.length === 0 ? [] : [{ id: 'difficult:command-board', cells: difficult }],
+      obscurementRegions: [],
+      narrowOpeningRegions: [],
+      movementRegions: [],
+    },
+    combatants: [source, target, ...allies.map((ally) => ally.profile)],
+    tokens: [
+      placedToken(source, board.source.column, board.source.row),
+      placedToken(target, board.target.column, board.target.row),
+      ...allies.map((ally) => placedToken(ally.profile, ally.position.column, ally.position.row)),
+    ],
+  });
+  state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+  state = reduceEncounter(state, {
+    type: 'apply_effect',
+    actor: source.id,
+    cost: 'none',
+    effect: {
+      targets: [target.id],
+      duration: { kind: 'permanent' },
+      concentration: false,
+      stackingIdentity: effectStackingIdentity('command-board'),
+      stacking: 'replace_any_source',
+      repeatedSave: null,
+      payload: { kind: 'commanded_action', options: ['approach', 'drop', 'flee', 'grovel', 'halt'], selectedOption: board.option },
+    },
+  }, () => 0.5).state;
+  return { state, source, target };
+}
+
+/**
+ * The oracle: the pre-conversion Command choice on the FROZEN reference. One bounded findPath per grid
+ * cell at the commanded budget (the fixture monsters move 30 feet; Flee dashes first, so 60), the start
+ * left out, then the reducer's order: distance to the Command source (nearest for approach, farthest for
+ * flee), then cost (cheapest for approach, dearest for flee), then the end cell, row-major. The
+ * column-major end order exists only to show that a board's end-cell tie is real.
+ */
+function referenceCommandCandidates(
+  run: CommandRun,
+  option: CommandOption,
+  endOrder: 'row-major' | 'column-major' = 'row-major',
+): readonly CommandCandidate[] {
+  const { state, source, target } = run;
+  const world = encounterMovementWorld(state);
+  const start = state.tokens.find((token) => token.combatantId === target.id)?.position;
+  if (start === undefined) throw new Error(`Missing token ${String(target.id)}.`);
+  const maximumCost = feet(option === 'approach' ? 30 : 60);
+  const sourceSpace = combatantSpace(state, source.id);
+  const candidates: CommandCandidate[] = [];
+  for (let row = 0; row < state.bounds.rows; row += 1) {
+    for (let column = 0; column < state.bounds.columns; column += 1) {
+      const end = cell(column, row);
+      const result = referenceFindPath(world, { actorId: target.id, start, goal: end, maximumCost });
+      if (result.kind !== 'found' || result.cells.length === 0) continue;
+      const distance = minimumSpaceDistance(combatantSpaceAt(state, target.id, end), sourceSpace);
+      candidates.push({ end, cells: result.cells, cost: result.cost, distance });
+    }
+  }
+  const primary = (left: CommandCandidate, right: CommandCandidate): number => option === 'approach'
+    ? left.distance - right.distance || left.cost - right.cost
+    : right.distance - left.distance || right.cost - left.cost;
+  return candidates.sort((left, right) => primary(left, right) || (endOrder === 'row-major'
+    ? left.end.row - right.end.row || left.end.column - right.end.column
+    : left.end.column - right.end.column || left.end.row - right.end.row));
+}
+
+/** Ends the source's turn, so the commanded creature's turn starts and Command moves it. */
+function commandedMove(run: CommandRun): { readonly paths: readonly (readonly GridCell[])[]; readonly position: GridCell | undefined } {
+  const reduced = reduceEncounter(run.state, { type: 'end_turn', actor: run.source.id }, () => 0.5);
+  return {
+    paths: reduced.events.flatMap((event) =>
+      event.type === 'movement_completed' && event.combatant === run.target.id ? [event.path] : []),
+    position: reduced.state.tokens.find((token) => token.combatantId === run.target.id)?.position,
+  };
+}
+
+/** Deterministic boards (Park-Miller generator): walls, difficult terrain and allies at random. */
+function generatedCommandBoards(count: number, seed: number): readonly CommandBoard[] {
+  let current = seed;
+  const next = (): number => {
+    current = (current * 48_271) % 2_147_483_647;
+    return current / 2_147_483_647;
+  };
+  const between = (low: number, high: number): number => low + Math.floor(next() * (high - low + 1));
+  return Array.from({ length: count }, (_board, index): CommandBoard => {
+    const columns = between(6, 12);
+    const rows = between(5, 10);
+    const open = Array.from({ length: columns * rows }, (_cell, at) => cell(at % columns, Math.floor(at / columns)));
+    const take = (): GridCell => {
+      const [taken] = open.splice(between(0, open.length - 1), 1);
+      if (taken === undefined) throw new Error('Generated board ran out of cells.');
+      return taken;
+    };
+    const source = take();
+    const far = open.filter((candidate) =>
+      Math.max(Math.abs(candidate.column - source.column), Math.abs(candidate.row - source.row)) >= 2);
+    const target = far[between(0, far.length - 1)];
+    if (target === undefined) throw new Error('Generated board has no cell two squares from the source.');
+    open.splice(open.indexOf(target), 1);
+    const allies = Array.from({ length: between(0, 2) }, take);
+    const walls = open.filter(() => next() < 0.12);
+    const difficult = open.filter((candidate) => !walls.includes(candidate) && next() < 0.15);
+    return {
+      name: `generated-${String(index)}`,
+      option: index % 2 === 0 ? 'approach' : 'flee',
+      columns, rows, source, target, walls, difficult, allies,
+    };
+  });
+}
+
+describe('single-search reachable cells: Command approach and flee in the reducer', () => {
+  it('moves the commanded creature along the frozen per-cell reference route on hand boards with real end-cell and route ties', () => {
+    // Each board is load-bearing for one reason, checked before the move is: either the end-cell
+    // order decides which of two equally near (or far) and equally priced cells wins, or the route
+    // must cross a named cell.
+    const boards: readonly (CommandBoard & { readonly load: { readonly endTie: true } | { readonly crosses: GridCell } })[] = [
+      // Approach from 0,0 to 5,5 with 4,4 walled: 5,4 and 4,5 are both 5 feet from the source for 25 feet.
+      { name: 'approach-end-tie', option: 'approach', columns: 9, rows: 9, source: cell(5, 5), target: cell(0, 0), walls: [cell(4, 4)], load: { endTie: true } },
+      // Flee from 6,6: every cell of row 0 and column 0 is 30 feet away; the two difficult ones cost most.
+      { name: 'flee-end-tie', option: 'flee', columns: 9, rows: 9, source: cell(6, 6), target: cell(4, 4), difficult: [cell(0, 5), cell(3, 0)], load: { endTie: true } },
+      // A Large creature, whose step prices depend on direction, around a wall and difficult cells.
+      {
+        name: 'approach-large', option: 'approach', columns: 10, rows: 8, source: cell(8, 6), target: cell(0, 0), targetSize: 'Large',
+        walls: [cell(4, 2), cell(4, 3), cell(4, 4)], difficult: [cell(3, 5), cell(6, 1), cell(6, 2)], load: { endTie: true },
+      },
+      // The only gap in the wall holds an ally: crossed, never ended on.
+      {
+        name: 'approach-through-ally', option: 'approach', columns: 9, rows: 5, source: cell(7, 2), target: cell(0, 2),
+        walls: [cell(3, 0), cell(3, 1), cell(3, 3), cell(3, 4)], allies: [cell(3, 2)], load: { crosses: cell(3, 2) },
+      },
+      // Flee through a one-cell door into the far room.
+      {
+        name: 'flee-through-door', option: 'flee', columns: 12, rows: 9, source: cell(3, 4), target: cell(5, 4),
+        walls: [0, 1, 2, 3, 5, 6, 7, 8].map((row) => cell(7, row)), difficult: [cell(9, 2), cell(10, 6)], load: { crosses: cell(7, 4) },
+      },
+    ];
+    for (const board of boards) {
+      const run = commandBoard(board);
+      const [expected] = referenceCommandCandidates(run, board.option);
+      if (expected === undefined) throw new Error(`${board.name}: the reference finds no move.`);
+      if ('endTie' in board.load) {
+        expect(referenceCommandCandidates(run, board.option, 'column-major')[0]?.end, board.name).not.toEqual(expected.end);
+      } else {
+        expect(expected.cells.map(key), board.name).toContain(key(board.load.crosses));
+      }
+      expect(expected.cells.length, board.name).toBeGreaterThan(3);
+      const moved = commandedMove(run);
+      expect(moved.paths, board.name).toEqual([expected.cells]);
+      expect(moved.position, board.name).toEqual(expected.end);
+    }
+  });
+
+  it('moves the commanded creature along the frozen per-cell reference route on 24 generated boards', () => {
+    let moves = 0;
+    let longRoutes = 0;
+    for (const board of generatedCommandBoards(24, 20_260_924)) {
+      const run = commandBoard(board);
+      const [expected] = referenceCommandCandidates(run, board.option);
+      const moved = commandedMove(run);
+      expect(moved.paths, board.name).toEqual(expected === undefined ? [] : [expected.cells]);
+      expect(moved.position, board.name).toEqual(expected?.end ?? board.target);
+      moves += expected === undefined ? 0 : 1;
+      longRoutes += (expected?.cells.length ?? 0) > 3 ? 1 : 0;
+    }
+    // Coverage, not an answer: most boards must move, most of them further than three squares.
+    expect(moves).toBeGreaterThanOrEqual(20);
+    expect(longRoutes).toBeGreaterThanOrEqual(12);
   });
 });

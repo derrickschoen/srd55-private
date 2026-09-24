@@ -119,11 +119,12 @@ import {
   type SizeStepOperation,
 } from './creature-space';
 import {
-  findPath,
   findPathToAny,
+  findReachableCells,
   planMovement,
   spendMovement,
   startTurnMovement,
+  type ReachableDestination,
   type TurnMovement,
 } from './movement';
 import { encounterMovementWorld } from './encounter-movement-world';
@@ -6250,25 +6251,23 @@ function commandedActionEffect(state: EncounterState, target: CombatantId): Comm
       left.createdRevision - right.createdRevision || String(left.id).localeCompare(String(right.id)))[0] ?? null;
 }
 
-function reachableCommandPaths(
+/**
+ * Every cell a commanded creature may end on within `maximumCost`, from one search, with the route and cost
+ * a bounded `findPath` to that cell gives: the same set, routes and row-major order as one `findPath` per
+ * grid cell (the `findReachableCells` contract; the encounter world is deterministic). Both callers sort it
+ * by a total order whose last keys are the end cell's row and column, so the route they move along depends
+ * only on that set.
+ */
+function reachableCommandDestinations(
   state: EncounterState,
   actor: CombatantId,
-  maximumCost: ReturnType<typeof feet>,
-): readonly Extract<ReturnType<typeof findPath>, { readonly kind: 'found' }>[] {
-  const start = token(state, actor).position;
-  const paths: Extract<ReturnType<typeof findPath>, { readonly kind: 'found' }>[] = [];
-  for (let row = 0; row < state.bounds.rows; row += 1) {
-    for (let column = 0; column < state.bounds.columns; column += 1) {
-      const result = findPath(encounterMovementWorld(state), {
-        actorId: actor,
-        start,
-        goal: { column, row },
-        maximumCost,
-      });
-      if (result.kind === 'found') paths.push(result);
-    }
-  }
-  return paths;
+  maximumCost: Feet,
+): readonly ReachableDestination[] {
+  return findReachableCells(encounterMovementWorld(state), {
+    actorId: actor,
+    start: token(state, actor).position,
+    maximumCost,
+  });
 }
 
 function moveForCommand(
@@ -6314,11 +6313,11 @@ function enforceCommandedAction(context: ReductionContext, actor: CombatantId): 
         endCommandedTurnResources(context, actor);
         return;
       }
-      const paths = reachableCommandPaths(context.state, actor, combatant(context.state, actor).turn.movement.remaining)
+      const paths = reachableCommandDestinations(context.state, actor, combatant(context.state, actor).turn.movement.remaining)
         .filter((path) => path.cells.length > 0)
         .sort((left, right) => {
-          const leftEnd = left.cells.at(-1) as GridCell;
-          const rightEnd = right.cells.at(-1) as GridCell;
+          const leftEnd = left.destination;
+          const rightEnd = right.destination;
           return minimumSpaceDistance(combatantSpaceAt(context.state, actor, leftEnd), sourceSpace) -
             minimumSpaceDistance(combatantSpaceAt(context.state, actor, rightEnd), sourceSpace) ||
             left.cost - right.cost || leftEnd.row - rightEnd.row || leftEnd.column - rightEnd.column;
@@ -6355,11 +6354,11 @@ function enforceCommandedAction(context: ReductionContext, actor: CombatantId): 
       });
       if (sourcePosition !== null) {
         const sourceSpace = combatantSpace(context.state, effect.source);
-        const paths = reachableCommandPaths(context.state, actor, combatant(context.state, actor).turn.movement.remaining)
+        const paths = reachableCommandDestinations(context.state, actor, combatant(context.state, actor).turn.movement.remaining)
           .filter((path) => path.cells.length > 0)
           .sort((left, right) => {
-            const leftEnd = left.cells.at(-1) as GridCell;
-            const rightEnd = right.cells.at(-1) as GridCell;
+            const leftEnd = left.destination;
+            const rightEnd = right.destination;
             return minimumSpaceDistance(combatantSpaceAt(context.state, actor, rightEnd), sourceSpace) -
               minimumSpaceDistance(combatantSpaceAt(context.state, actor, leftEnd), sourceSpace) ||
               right.cost - left.cost || leftEnd.row - rightEnd.row || leftEnd.column - rightEnd.column;
