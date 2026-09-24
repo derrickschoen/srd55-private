@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createEncounter, type EncounterState } from '../../../src/combat/encounter';
 import type { EncounterCommand } from '../../../src/combat/events';
 import { armorClass, damageType, dieSides, feet } from '../../../src/combat/values';
@@ -11,6 +11,50 @@ import { declareTestInputs } from '../../helpers/test-inputs';
 import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
 
 declareTestInputs({});
+
+// Records, in call order, every projected-movement query and every tactical
+// attack evaluation made outside one; both wrappers delegate unchanged. With
+// isolate: false a worker shares its module registry across files, so it is
+// reset before this file's imports and restored after its last test.
+const probe = vi.hoisted(() => {
+  vi.resetModules();
+  const calls: string[] = [];
+  return { calls, insideProjectedMovement: false };
+});
+
+vi.mock('../../../src/vtt/engine-query-port', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../../../src/vtt/engine-query-port')>();
+  const projectedMovementOptions: typeof original.projectedMovementOptions = (...args) => {
+    probe.calls.push('projected-movement');
+    probe.insideProjectedMovement = true;
+    try {
+      return original.projectedMovementOptions(...args);
+    } finally {
+      probe.insideProjectedMovement = false;
+    }
+  };
+  return { ...original, projectedMovementOptions };
+});
+
+vi.mock('../../../src/combat/tactical-evaluator', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../../../src/combat/tactical-evaluator')>();
+  const evaluateTacticalAttack: typeof original.evaluateTacticalAttack = (input) => {
+    if (!probe.insideProjectedMovement) probe.calls.push(`tactical:${String(input.targetId)}`);
+    return original.evaluateTacticalAttack(input);
+  };
+  return { ...original, evaluateTacticalAttack };
+});
+
+beforeEach(() => {
+  probe.calls.splice(0);
+  probe.insideProjectedMovement = false;
+});
+
+afterAll(() => {
+  vi.doUnmock('../../../src/vtt/engine-query-port');
+  vi.doUnmock('../../../src/combat/tactical-evaluator');
+  vi.resetModules();
+});
 
 function attack(
   actor: ReturnType<typeof playerProfile>['id'],
@@ -114,6 +158,65 @@ describe('symmetric scripted-PC evaluator', () => {
     expect(byCommand(twoSteps).movement).toBe(shared);
     expect(byCommand(ranged).movement).toBeNull();
     expect(byCommand(endTurn).movement).toBeNull();
+  });
+
+  it('queries projected movement exactly once per decision with move commands and never without one', () => {
+    const actor = playerProfile('symmetric-pc');
+    const target = monsterProfile('symmetric-target');
+    const state = ready(createEncounter({
+      bounds: { columns: 5, rows: 1 },
+      combatants: [actor, target],
+      tokens: [placedToken(actor, 0), placedToken(target, 3)],
+    }), actor.id);
+    const ranged = attack(actor.id, target.id, {
+      kind: 'ranged', normalRangeFeet: feet(10), longRangeFeet: feet(20),
+    });
+    const endTurn = { type: 'end_turn' as const, actor: actor.id };
+    const moveThrough = (...columns: readonly number[]): Extract<EncounterCommand, { readonly type: 'move' }> => ({
+      type: 'move', actor: actor.id, path: columns.map((column) => ({ column, row: 0 })), cause: 'voluntary',
+    });
+    const queries = () => probe.calls.filter((call) => call === 'projected-movement').length;
+
+    // Three move commands, one query: asking per move would make three.
+    evaluateSymmetricPcDecision({
+      state, actorId: actor.id, legalActions: [ranged, moveThrough(1), endTurn, moveThrough(1, 2), moveThrough(1)],
+    });
+    expect(queries()).toBe(1);
+    // A decision with no move command has no movement to assess, so no query.
+    evaluateSymmetricPcDecision({ state, actorId: actor.id, legalActions: [ranged, endTurn] });
+    expect(queries()).toBe(1);
+  });
+
+  it('assesses legal commands in order: the first move queries projected movement after the attack before it', () => {
+    const actor = playerProfile('symmetric-pc');
+    const alpha = monsterProfile('order-alpha');
+    const beta = monsterProfile('order-beta');
+    const state = ready(createEncounter({
+      bounds: { columns: 6, rows: 1 },
+      combatants: [actor, alpha, beta],
+      tokens: [placedToken(actor, 0), placedToken(alpha, 3), placedToken(beta, 4)],
+    }), actor.id);
+    const ranged = (target: typeof alpha.id) => attack(actor.id, target, {
+      kind: 'ranged', normalRangeFeet: feet(10), longRangeFeet: feet(20),
+    });
+    const moveThrough = (...columns: readonly number[]): Extract<EncounterCommand, { readonly type: 'move' }> => ({
+      type: 'move', actor: actor.id, path: columns.map((column) => ({ column, row: 0 })), cause: 'voluntary',
+    });
+
+    evaluateSymmetricPcDecision({
+      state,
+      actorId: actor.id,
+      legalActions: [ranged(alpha.id), moveThrough(1), ranged(beta.id), moveThrough(1, 2), { type: 'end_turn', actor: actor.id }],
+    });
+
+    // Commands are assessed in legal order, so the first appearance of each
+    // call follows it: alpha's attack, then the first move's query, then beta's
+    // attack. (How often the query repeats is the previous test's subject.)
+    expect([...new Set(probe.calls)]).toEqual([
+      `tactical:${String(alpha.id)}`,
+      'projected-movement',
+      `tactical:${String(beta.id)}`,
+    ]);
   });
 
   it('assesses projected movement from each decision\'s own state', () => {
