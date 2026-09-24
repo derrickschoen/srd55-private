@@ -1184,17 +1184,42 @@ function directDamageSaveClauses(body: string): SourceDerivedSaveClause[] {
   });
 }
 
-function gateDamageSaveClause(body: string): SourceDerivedSaveClause | null {
-  const gatePatterns = [
-    /[^.]*Dexterity saving throw[^.]*Grappled[^.]*\.[\s\S]{0,240}?grapples[^.]*damage[^.]*4d6[^.]*\./iu,
-    /[^.]*must succeed on a Wisdom saving throw or become cursed[\s\S]{0,520}?extra 1d8 Necrotic damage[^.]*\./iu,
-    /[^.]*Constitution saving throw[\s\S]{0,120}?successful save[^.]*spell has no effect[\s\S]{0,1500}?(?:extra 1d4 damage|1d4[^.]*less damage)[^.]*\./iu,
-    /[^.]*Strength saving throw[\s\S]{0,260}?successful save[^.]*spell ends[\s\S]{0,180}?While Restrained[^.]*1d6 Piercing damage[^.]*\./iu,
-    /[^.]*Wisdom saving throw or have the Charmed condition[\s\S]{0,260}?While Charmed[^.]*5d10 Psychic damage[^.]*\./iu,
-    /[^.]*Intelligence saving throw[\s\S]{0,900}?affected target[\s\S]{0,420}?2d8 Psychic damage[^.]*\./iu,
-    /[^.]*Constitution saving throw[\s\S]{0,360}?subtracts 1d8 from all its damage rolls[^.]*\./iu,
-    /[^.]*1d6 Fire damage[\s\S]{0,220}?start of each of its turns[\s\S]{0,180}?Constitution saving throw[\s\S]{0,120}?successful save[^.]*spell ends[^.]*\./iu,
-  ];
+/**
+ * The eight hand-written gate clauses, in priority order: the first pattern
+ * that matches a body owns that body's gate clause.
+ *
+ * Every pattern starts with `(?<![^.])`: a match may begin only at the start
+ * of the body or right after a '.'. That is not a narrowing. A pattern of the
+ * form /[^.]*R/ exec'd from index 0 returns the leftmost match, and the
+ * leftmost start of [^.]* inside one sentence absorbs every later start in the
+ * same sentence, so the winning start is always 0 or just after a '.'. The
+ * lookbehind only stops the engine retrying the starts that can never win —
+ * without it every character of every spell body was a fresh start for up to
+ * 1,500-character lazy windows, and this parse runs at module evaluation of
+ * every process that imports the tactical evaluator (coverage.ts): about 1 s
+ * of clause parsing per process without the lookbehind, about 50 ms with it.
+ * tests/unit/simulation/gate-pattern-sentence-start-lookbehind.test.ts holds
+ * the pre-lookbehind patterns frozen and proves identical clauses on both SRD
+ * corpora.
+ *
+ * None of the patterns is global or sticky, so `exec` ignores `lastIndex` and
+ * sharing the RegExp objects across calls carries no state.
+ */
+export const GATE_DAMAGE_SAVE_PATTERNS: readonly RegExp[] = Object.freeze([
+  /(?<![^.])[^.]*Dexterity saving throw[^.]*Grappled[^.]*\.[\s\S]{0,240}?grapples[^.]*damage[^.]*4d6[^.]*\./iu,
+  /(?<![^.])[^.]*must succeed on a Wisdom saving throw or become cursed[\s\S]{0,520}?extra 1d8 Necrotic damage[^.]*\./iu,
+  /(?<![^.])[^.]*Constitution saving throw[\s\S]{0,120}?successful save[^.]*spell has no effect[\s\S]{0,1500}?(?:extra 1d4 damage|1d4[^.]*less damage)[^.]*\./iu,
+  /(?<![^.])[^.]*Strength saving throw[\s\S]{0,260}?successful save[^.]*spell ends[\s\S]{0,180}?While Restrained[^.]*1d6 Piercing damage[^.]*\./iu,
+  /(?<![^.])[^.]*Wisdom saving throw or have the Charmed condition[\s\S]{0,260}?While Charmed[^.]*5d10 Psychic damage[^.]*\./iu,
+  /(?<![^.])[^.]*Intelligence saving throw[\s\S]{0,900}?affected target[\s\S]{0,420}?2d8 Psychic damage[^.]*\./iu,
+  /(?<![^.])[^.]*Constitution saving throw[\s\S]{0,360}?subtracts 1d8 from all its damage rolls[^.]*\./iu,
+  /(?<![^.])[^.]*1d6 Fire damage[\s\S]{0,220}?start of each of its turns[\s\S]{0,180}?Constitution saving throw[\s\S]{0,120}?successful save[^.]*spell ends[^.]*\./iu,
+]);
+
+export function gateDamageSaveClause(
+  body: string,
+  gatePatterns: readonly RegExp[],
+): SourceDerivedSaveClause | null {
   for (const pattern of gatePatterns) {
     const match = pattern.exec(body);
     if (match !== null) {
@@ -1340,7 +1365,7 @@ export function parseSaveDamageClauses(
   let rawCount = 0;
   for (const [heading, body] of bodies) {
     const direct = directDamageSaveClauses(body);
-    const gate = gateDamageSaveClause(body);
+    const gate = gateDamageSaveClause(body, GATE_DAMAGE_SAVE_PATTERNS);
     rawCount += direct.length + (gate === null ? 0 : 1);
     const gateAlreadyOwned = gate !== null && direct.some((clause) =>
       sameClauseOwnership(clause, gate),
