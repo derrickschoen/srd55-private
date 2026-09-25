@@ -1639,17 +1639,24 @@ function projectedMovementState(
   };
 }
 
+interface ProjectedAttackPlanning {
+  readonly actor: EncounterCombatantState;
+  readonly start: GridCell;
+  readonly restrictedState: EncounterState;
+  readonly attackAt: MovementEvaluationInput['attackAt'];
+}
+
 /**
- * Movement evaluation over actor-local knowledge. The full encounter is used
- * only for the actor, public board geometry and ONE opponent fact, the
- * target's Armor Class; every other opponent fact comes from the supplied
- * projection.
+ * One PC attack's verdict input from any square, over actor-local knowledge.
+ * The full encounter is used only for the actor, public board geometry and ONE
+ * opponent fact, the target's Armor Class; every other opponent fact comes
+ * from the supplied projection.
  */
-export function projectedMovementOptions(
+function projectedAttackPlanning(
   state: EncounterState,
   projection: ActorKnowledgeProjection,
   request: EngineProjectedMovementRequest,
-): MovementEvaluation | null {
+): ProjectedAttackPlanning | null {
   if (projection.actorId !== request.actorId) return null;
   const actor = combatant(state, request.actorId);
   const start = state.tokens.find((token) => token.combatantId === request.actorId)?.position;
@@ -1664,7 +1671,6 @@ export function projectedMovementOptions(
   if (actor === null || start === undefined || target === undefined || armorClassTarget === null) return null;
 
   const restrictedState = projectedMovementState(state, projection);
-  const world = encounterMovementWorld(restrictedState);
   const targetConditions = projectedTargetConditions(target);
   const attackAt: MovementEvaluationInput['attackAt'] = (position) => {
     if (target.reciprocalVisibility.kind === 'unknown') {
@@ -1713,6 +1719,22 @@ export function projectedMovementOptions(
       },
     };
   };
+  return { actor, start, restrictedState, attackAt };
+}
+
+/**
+ * Movement evaluation over actor-local knowledge, on projectedAttackPlanning's
+ * basis: the target's Armor Class is the one opponent fact from the full state.
+ */
+export function projectedMovementOptions(
+  state: EncounterState,
+  projection: ActorKnowledgeProjection,
+  request: EngineProjectedMovementRequest,
+): MovementEvaluation | null {
+  const planning = projectedAttackPlanning(state, projection, request);
+  if (planning === null) return null;
+  const { actor, start, restrictedState, attackAt } = planning;
+  const world = encounterMovementWorld(restrictedState);
   const firstLegal = findPathToAny(world, {
     actorId: request.actorId,
     start,
@@ -1755,6 +1777,23 @@ export function projectedMovementOptions(
     hazards: { status: 'resolved', cells: movementHazards(restrictedState) },
     attackAt,
   });
+}
+
+/**
+ * One PC attack made from the actor's own square, evaluated on the basis of
+ * projectedMovementOptions: the target's planning AC plus the cover of the
+ * trace from that square, every other opponent fact actor-local. Null when the
+ * target is not a perceived creature or its reciprocal visibility is unknown.
+ */
+export function projectedAttackFromStart(
+  state: EncounterState,
+  projection: ActorKnowledgeProjection,
+  request: EngineProjectedMovementRequest,
+): TacticalAttackEvaluation | null {
+  const planning = projectedAttackPlanning(state, projection, request);
+  if (planning === null) return null;
+  const verdict = planning.attackAt(planning.start);
+  return verdict.status === 'resolved' ? evaluateTacticalAttack(verdict.input) : null;
 }
 
 function optionBlessTargets(option: EngineOfferableOption): readonly CombatantId[] {

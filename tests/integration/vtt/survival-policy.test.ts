@@ -18,7 +18,7 @@ import {
   loadD365SampleParty,
   type D365SamplePartyLoad,
 } from '../../../src/vtt/d365-sample-party';
-import type { LoadedPartyMember } from '../../../src/vtt/party-pack';
+import { loadedPartyAttackForms, type LoadedPartyMember } from '../../../src/vtt/party-pack';
 import { createPartySessionState, takeShortRest } from '../../../src/vtt/party-session-state';
 import {
   averageCureWoundsHealing,
@@ -1248,6 +1248,31 @@ describe('D382 survival package', () => {
     // Fighter 5 has four masteries (class-level-tables.txt:99-111); Longbow
     // Slow and Battleaxe Topple are in weapons-table.txt:0; effects at
     // docs/srd/full/srd-5.2.1.txt:12807.
+  });
+
+  it('PCAC-RANGE-BRANN-WEAPONS: Brann\'s attack commands state his weapons\' SRD ranges, exported from his weapon rows', () => {
+    const prepared = createD365SurvivalPartySessionState(sample.party.members);
+    const composed = composeD365Room(sample.party.members, sample.displayNames, prepared.state, {
+      useHealingPotions: true,
+      openWithBless: true,
+      reserveClericSlotsForBless: true,
+      useWizardTactics: true,
+      useClericContingency: true,
+    });
+    const brann = sample.party.members.find((member) =>
+      member.source.classes.some((entry) => entry.classId === 'Fighter'));
+    if (brann === undefined) throw new Error('Range fixture has no Fighter.');
+    const active = advanceToActor(composed.state, brann.profile.id);
+    const target = active.combatants.find((combatant) => combatant.profile.kind === 'monster');
+    if (target === undefined) throw new Error('Range fixture has no monster.');
+    const forms = loadedPartyAttackForms(sample.party.members)(active, brann.profile.id, target.profile.id);
+    // Battleaxe (docs/srd/full/srd-5.2.1.txt:5506): no Reach property, so 5 feet.
+    // Longbow (:5529): Range 150/600; Disadvantage beyond 150, nothing beyond 600 (:5434-5439).
+    expect(Object.fromEntries(forms.map((command) => [command.weaponMastery?.property ?? 'none', command.tacticalRange])))
+      .toEqual({
+        Topple: { kind: 'melee', reachFeet: 5 },
+        Slow: { kind: 'ranged', normalRangeFeet: 150, longRangeFeet: 600 },
+      });
   });
 
   it('moves Brann toward a body-blocking melee position before using his ranged Slow weapon', async () => {

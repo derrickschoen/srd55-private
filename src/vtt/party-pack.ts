@@ -14,7 +14,8 @@ import {
   type CombatFeatureEffect,
   type EffectApplication,
 } from '../combat/effects';
-import type { EncounterCommand } from '../combat/events';
+import type { EncounterCommand, StatedRangeAttackCommand } from '../combat/events';
+import { tacticalRangeVerdictAtDistance, type TacticalAttackRange } from '../combat/tactical-evaluator';
 import type { EncounterCombatantState } from '../combat/encounter';
 import { combatantSpace } from '../combat/combat-rules';
 import { adjacentCells, requireBoardCell } from '../combat/grid';
@@ -246,6 +247,12 @@ const attackBaseShape = {
   criticalFloor: integerSchema.min(2).max(20),
   reachFeet: distanceSchema,
   rangeFeet: distanceSchema,
+  /**
+   * A ranged weapon's long range, the second number of its Range property.
+   * Optional on the wire so a pack written before it loads unchanged; an
+   * absent long range loads as null (not stated), never as the normal range.
+   */
+  longRangeFeet: distanceSchema.optional(),
   damage: z.array(z.strictObject({
     damageTypeId: z.enum(damageTypes),
     count: integerSchema.min(0).max(100),
@@ -292,6 +299,18 @@ const ATTACK_RULES = [
     attack.masteryProperty !== 'Topple' && attack.masterySaveDc !== undefined,
     'Only Topple mastery carries a save DC.',
     attackSchemaPath('masterySaveDc'),
+  ),
+  (attack: AttackWireInput): readonly PartyPackValidationIssue[] => issueWhen(
+    attack.longRangeFeet !== undefined && attack.kind !== 'ranged',
+    'Only a ranged attack declares a long range.',
+    attackSchemaPath('longRangeFeet'),
+  ),
+  // SRD 5.2.1 Range property (docs/srd/full/srd-5.2.1.txt:5434-5439): the
+  // first number is the normal range, the second the long range.
+  (attack: AttackWireInput): readonly PartyPackValidationIssue[] => issueWhen(
+    attack.longRangeFeet !== undefined && attack.longRangeFeet < attack.rangeFeet,
+    'A long range is at least the normal range.',
+    attackSchemaPath('longRangeFeet'),
   ),
 ] as const satisfies readonly PartyPackRule<AttackWireInput>[];
 const attackSchema = attackObjectSchema.superRefine(
@@ -1262,13 +1281,23 @@ export type ExternalPartyPackResource = z.infer<typeof externalPartyPackResource
 export type ExternalWorldOperation = z.infer<typeof externalWorldOperationSchema>;
 export type PartySource = z.infer<typeof partySourceSchema>;
 
+/**
+ * A loaded attack's delivery, in the tactical evaluator's own range type: a
+ * melee attack's reach, or a ranged attack's normal and long range. A long
+ * range the pack does not state is null, never the normal range, so beyond
+ * the normal range such an attack is unresolved and no provider lists it.
+ * SRD 5.2.1 Range property (docs/srd/full/srd-5.2.1.txt:5434-5439): beyond the
+ * normal range the attack roll has Disadvantage, and a target beyond the long
+ * range cannot be attacked.
+ */
+export type LoadedPartyAttackDelivery = Extract<TacticalAttackRange, { readonly kind: 'melee' | 'ranged' }>;
+
 export interface LoadedPartyAttack {
   readonly attackId: ExternalPartyPackAttack['attackId'];
-  readonly kind: ExternalPartyPackAttack['kind'];
   readonly attackBonus: number;
   readonly criticalFloor: number;
-  readonly reach: ReturnType<typeof feet>;
-  readonly range: ReturnType<typeof feet>;
+  /** Every attack command built from this attack carries it as its tacticalRange. */
+  readonly delivery: LoadedPartyAttackDelivery;
   readonly mastery:
     | { readonly property: 'Slow' }
     | { readonly property: 'Topple'; readonly saveDc: number }
@@ -1528,6 +1557,7 @@ const ATTACK_FIELDS = {
   criticalFloor: true,
   reachFeet: true,
   rangeFeet: true,
+  longRangeFeet: true,
   masteryProperty: true,
   masterySaveDc: true,
   damage: true,
@@ -1852,6 +1882,17 @@ function sanitizedAttack(
   };
 }
 
+function loadedAttackDelivery(attack: ExternalPartyPackAttack): LoadedPartyAttackDelivery {
+  switch (attack.kind) {
+    case 'melee': return { kind: 'melee', reachFeet: feet(attack.reachFeet) };
+    case 'ranged': return {
+      kind: 'ranged',
+      normalRangeFeet: feet(attack.rangeFeet),
+      longRangeFeet: attack.longRangeFeet === undefined ? null : feet(attack.longRangeFeet),
+    };
+  }
+}
+
 function loadedAttack(attack: ExternalPartyPackAttack): LoadedPartyAttack {
   const mastery = (() => {
     switch (attack.masteryProperty) {
@@ -1872,11 +1913,9 @@ function loadedAttack(attack: ExternalPartyPackAttack): LoadedPartyAttack {
   })();
   return {
     attackId: attack.attackId,
-    kind: attack.kind,
     attackBonus: attack.attackBonus,
     criticalFloor: attack.criticalFloor,
-    reach: feet(attack.reachFeet),
-    range: feet(attack.rangeFeet),
+    delivery: loadedAttackDelivery(attack),
     mastery,
     damage: attack.damage.map((term) => ({
       type: damageType(term.damageTypeId),
@@ -2592,6 +2631,25 @@ function abilityModifier(score: number): number {
   return Math.floor((score - 10) / 2);
 }
 
+/**
+ * A reach override replaces a melee attack's reach; a range override replaces
+ * a ranged attack's normal range. The override states no long range, so the
+ * overridden attack has none (null), as the one-range attack it describes.
+ */
+function overriddenDelivery(
+  delivery: LoadedPartyAttackDelivery,
+  override: { readonly reachFeet?: number; readonly rangeFeet?: number },
+): LoadedPartyAttackDelivery {
+  switch (delivery.kind) {
+    case 'melee': return override.reachFeet === undefined
+      ? delivery
+      : { kind: 'melee', reachFeet: feet(override.reachFeet) };
+    case 'ranged': return override.rangeFeet === undefined
+      ? delivery
+      : { kind: 'ranged', normalRangeFeet: feet(override.rangeFeet), longRangeFeet: null };
+  }
+}
+
 function effectiveLoadedPartyAttack(
   member: LoadedPartyMember,
   attack: LoadedPartyAttack,
@@ -2630,11 +2688,7 @@ function effectiveLoadedPartyAttack(
         break;
       }
       case 'attack_reach_range_override':
-        effective = {
-          ...effective,
-          reach: payload.reachFeet === undefined ? effective.reach : feet(payload.reachFeet),
-          range: payload.rangeFeet === undefined ? effective.range : feet(payload.rangeFeet),
-        };
+        effective = { ...effective, delivery: overriddenDelivery(effective.delivery, payload) };
         break;
       case 'attack_damage_type_choice':
         break;
@@ -2661,7 +2715,7 @@ export function loadedPartyAttackCommand(
     };
     readonly maneuverEffectId?: EncounterEffectId;
   } = {},
-): Extract<EncounterCommand, { readonly type: 'attack' }> {
+): StatedRangeAttackCommand {
   const declaredAttack = member.attacks.find((candidate) => candidate.attackId === attackId);
   if (declaredAttack === undefined) throw new PartyAttackError();
   const attack = effectiveLoadedPartyAttack(member, declaredAttack);
@@ -2700,6 +2754,7 @@ export function loadedPartyAttackCommand(
     rollMode: 'normal',
     attackerCanSeeTarget: true,
     targetCanSeeAttacker: true,
+    tacticalRange: attack.delivery,
     damage: {
       terms: attack.damage.map((term) => ({
         type: term.type,
@@ -3174,7 +3229,7 @@ function loadedPartyFormCommands(
   attack: LoadedPartyAttack,
   target: CombatantId,
   bonusActionGrantEffectId: EncounterEffectId | undefined,
-): Extract<EncounterCommand, { readonly type: 'attack' }>[] {
+): StatedRangeAttackCommand[] {
   const smites = member.effects.filter((effect) =>
     effect.payload.kind === 'damage_rider' && effect.payload.gating?.kind === 'slot_spend');
   const riderChoices = [undefined, ...smites.flatMap((effect) =>
@@ -3266,14 +3321,17 @@ export function loadedPartyTurnLegalActions(
       state.tokens.some((token) => token.combatantId === candidate.profile.id));
     const commands = (
       bonusActionGrantEffectId?: EncounterEffectId,
-    ): Extract<EncounterCommand, { readonly type: 'attack' }>[] =>
+    ): StatedRangeAttackCommand[] =>
       targets.flatMap((target) => member.attacks.flatMap((declaredAttack) => {
         const attack = effectiveLoadedPartyAttack(member, declaredAttack);
-        const distance = loadedMemberDistance(state, actor, target.profile.id);
-        const inRange = attack.kind === 'melee'
-          ? distance <= attack.reach
-          : distance <= attack.range;
-        return inRange
+        // Reach, normal range, and long range (Disadvantage, applied from the
+        // command's tacticalRange); nothing beyond the long range, and nothing
+        // beyond a normal range whose long range the pack does not state.
+        const range = tacticalRangeVerdictAtDistance(
+          loadedMemberDistance(state, actor, target.profile.id),
+          attack.delivery,
+        );
+        return range.status === 'resolved' && range.legal
           ? loadedPartyFormCommands(member, acting, attack, target.profile.id, bonusActionGrantEffectId)
           : [];
       }));

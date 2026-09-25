@@ -347,6 +347,16 @@ export type EncounterCommand =
     }
   | { readonly type: 'end_turn'; readonly actor: CombatantId };
 
+/**
+ * An attack command that states its delivery range: melee reach, or a normal
+ * and a long range. A player character's attack forms are these, and the
+ * scripted-PC planner never assumes a range for an attack that does not state
+ * one. The reducer's command keeps the field optional for its other callers.
+ */
+export type StatedRangeAttackCommand = Extract<EncounterCommand, { readonly type: 'attack' }> & {
+  readonly tacticalRange: TacticalAttackRange;
+};
+
 interface SequencedEvent {
   readonly sequence: number;
 }

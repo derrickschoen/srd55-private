@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { monsterCombatantProfile } from '../../../src/combat/combatant';
 import { traceCombatantLine } from '../../../src/combat/cover';
 import { createEncounter, type EncounterState } from '../../../src/combat/encounter';
-import type { EncounterCommand } from '../../../src/combat/events';
+import type { EncounterCommand, StatedRangeAttackCommand } from '../../../src/combat/events';
 import type { MovementEvaluation } from '../../../src/combat/movement-evaluator';
 import { GOBLIN_WARRIOR } from '../../../src/combat/statblocks/monsters';
 import { terrainBlocking } from '../../../src/combat/terrain';
@@ -417,7 +417,7 @@ describe('PCAC: projected PC movement plans against the target AC plus cover', (
 
   it('PCAC-SYMMETRIC-PATH: the scripted-PC evaluator\'s move assessments carry the same AC-derived numbers', () => {
     const { state, ranger, target } = rangerBoard('none');
-    const longbow: Extract<EncounterCommand, { readonly type: 'attack' }> = {
+    const longbow: StatedRangeAttackCommand = {
       type: 'attack', actor: ranger.id, target: target.id, attackBonus: 5, criticalFloor: 20, rollMode: 'normal',
       attackerCanSeeTarget: true, targetCanSeeAttacker: true,
       tacticalRange: { kind: 'ranged', normalRangeFeet: feet(150), longRangeFeet: feet(600) },

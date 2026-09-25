@@ -3,7 +3,7 @@ import { combatToken, monsterCombatantProfile } from '../../../src/combat/combat
 import { traceCombatantLine } from '../../../src/combat/cover';
 import type { TurnAttackForms } from '../../../src/combat/coordinator';
 import { createEncounter, reduceEncounter, type EncounterState } from '../../../src/combat/encounter';
-import type { EncounterCommand } from '../../../src/combat/events';
+import type { EncounterCommand, StatedRangeAttackCommand } from '../../../src/combat/events';
 import { canonicalJson } from '../../../src/commands/canonical-json';
 import type { GridCell } from '../../../src/combat/grid';
 import { GOBLIN_WARRIOR } from '../../../src/combat/statblocks/monsters';
@@ -105,9 +105,8 @@ afterAll(() => {
 function attack(
   actor: ReturnType<typeof playerProfile>['id'],
   target: ReturnType<typeof monsterProfile>['id'],
-  range: Extract<EncounterCommand, { readonly type: 'attack' }>['tacticalRange'],
-): Extract<EncounterCommand, { readonly type: 'attack' }> {
-  if (range === undefined) throw new Error('The test attack requires a typed tactical range.');
+  range: StatedRangeAttackCommand['tacticalRange'],
+): StatedRangeAttackCommand {
   return {
     type: 'attack', actor, target, attackBonus: 5, criticalFloor: 20, rollMode: 'normal',
     attackerCanSeeTarget: true, targetCanSeeAttacker: true, tacticalRange: range,
@@ -116,7 +115,7 @@ function attack(
 }
 
 /** The attack forms a provider pairs with these attack commands: each command against its own target. */
-function attackFormsOf(...commands: readonly Extract<EncounterCommand, { readonly type: 'attack' }>[]): TurnAttackForms {
+function attackFormsOf(...commands: readonly StatedRangeAttackCommand[]): TurnAttackForms {
   return (_state, actor, target) => commands.filter((command) => command.actor === actor && command.target === target);
 }
 
@@ -279,11 +278,12 @@ describe('symmetric scripted-PC evaluator', () => {
       return found;
     };
 
-    // One target lookup is the attack's tactical assessment; the decision's
-    // movement profiles look the one attack's target up once more (its forms
-    // then read only perceived targets, and there are none). Assessing once
-    // per decision makes 1 + 1 = 2; assessing per move command would make 3.
-    expect(probe.targetLookups).toBe(2);
+    // Two target lookups are the attack's: its tactical assessment and its
+    // planned damage (it states its range). The decision's movement profiles
+    // look the one attack's target up once more (its forms then read only
+    // perceived targets, and there are none). Assessing once per decision
+    // makes 2 + 1 = 3; assessing per move command would make 4.
+    expect(probe.targetLookups).toBe(3);
     expect(probe.calls.filter((call) => call === 'projected-movement')).toEqual([]);
     expect(byCommand(ranged).tactical).toEqual({ status: 'unresolved', reason: 'target_not_perceived' });
     const shared = byCommand(oneStep).movement;
@@ -629,7 +629,7 @@ function paralyzedBoard() {
 function dart(
   actor: ReturnType<typeof playerProfile>['id'],
   target: ReturnType<typeof monsterCombatantProfile>['id'],
-): Extract<EncounterCommand, { readonly type: 'attack' }> {
+): StatedRangeAttackCommand {
   return {
     type: 'attack', actor, target, attackBonus: 5, criticalFloor: 20, rollMode: 'normal',
     attackerCanSeeTarget: true, targetCanSeeAttacker: true,
@@ -847,14 +847,14 @@ const MELEE_OUT_OF_REACH_SQUARES: readonly GridCell[] = [
   { column: 1, row: 0 }, { column: 1, row: 1 }, { column: 1, row: 2 }, { column: 2, row: 0 }, { column: 2, row: 2 },
 ];
 
-type AttackCommand = Extract<EncounterCommand, { readonly type: 'attack' }>;
+type AttackCommand = StatedRangeAttackCommand;
 
 function weaponForm(input: {
   readonly actor: CombatantId;
   readonly target: CombatantId;
   readonly attackId: string;
   readonly dieSides: 4 | 6 | 8 | 10;
-  readonly range: NonNullable<AttackCommand['tacticalRange']>;
+  readonly range: AttackCommand['tacticalRange'];
 }): AttackCommand {
   return {
     type: 'attack', actor: input.actor, target: input.target, attackBonus: 5, criticalFloor: 20, rollMode: 'normal',
@@ -1120,5 +1120,262 @@ describe('PCAC approach: with no legal attack the scripted PC plans its moves wi
     expect(regretAttackForms(regretAt(1), pc.id, target.id)).toEqual(regretLegal);
     expect(regretTurnLegalActions(regretAt(3), pc.id).actions.some((command) => command.type === 'attack')).toBe(false);
     expect(regretAttackForms(regretAt(3), pc.id, target.id)).toEqual(regretLegal);
+  });
+});
+
+/*
+ * PERF-02 pcac, fourth commit. Owner ruling 2026-09-25, "Fix range inside
+ * pcac": PC attack commands carry their weapon's real range (normal and long,
+ * from the SRD weapon table), used by both the legal-attack path and the
+ * approach (forms) path; long range means Disadvantage and beyond long range
+ * is illegal.
+ *
+ * Rules behind every number below (docs/srd/full/srd-5.2.1.txt):
+ * - Longbow (:5529): 1d8 Piercing, Ammunition (Range 150/600). Range property
+ *   (:5434-5439, also :901-909): beyond the normal range the attack roll has
+ *   Disadvantage; no attack beyond the long range. Distance counts squares,
+ *   diagonals included, 5 feet each.
+ * - Attack rolls (:446-453): a natural 20 always hits and is the Critical Hit,
+ *   a natural 1 always misses. Advantage/Disadvantage (:494-499): the higher /
+ *   lower of two d20s. Critical Hits (:997-1003): the damage dice twice.
+ * - Goblin Warrior (:18985-18988): AC 15.
+ *
+ * LONGBOW RANGE. A ranger with a Longbow at +5 for 1d8 + 3 (a hit averages
+ * 7.5, a Critical Hit 2 x 4.5 + 3 = 12) against a Goblin Warrior on one row.
+ * One d20 hits AC 15 on faces 10-20: hit 11/20, critical 1/20.
+ * - 80 feet (16 squares): normal range, no Disadvantage.
+ *   ED = (11/20 - 1/20) x 7.5 + 1/20 x 12 = 3.75 + 0.6 = 4.35.
+ * - 200 feet (40 squares): long range, Disadvantage: hit (11/20)^2 = 121/400,
+ *   critical (1/20)^2 = 1/400. ED = 120/400 x 7.5 + 1/400 x 12 = 2.25 + 0.03
+ *   = 2.28.
+ * - 605 feet (121 squares): beyond the long range: no legal attack, and the
+ *   reducer refuses the command.
+ *
+ * ATTACK BY DAMAGE. A fighter with a Battleaxe (:5506, 1d8 Slashing, no Reach)
+ * at +7 for 1d8 + 4 (hit 8.5, Critical Hit 13) and a Longbow at +5 for
+ * 1d8 + 2 (hit 6.5, Critical Hit 11), against a Goblin Warrior (AC 15).
+ * - Adjacent, both are legal (the Longbow at normal range). Battleaxe: faces
+ *   8-20 hit, 13/20: ED = 12/20 x 8.5 + 1/20 x 13 = 5.1 + 0.65 = 5.75.
+ *   Longbow: faces 10-20, 11/20: ED = 10/20 x 6.5 + 1/20 x 11 = 3.8. Both are
+ *   in bucket 2; the canonical text alone ("attackBonus":5 before 7) would
+ *   take the Longbow.
+ * - 30 feet away, only the Longbow is legal, and it is taken over every move.
+ *
+ * RANGER FIRING SQUARE. The third commit's ranger board (walls (4,2) and
+ * (4,3), goblin at (5,3), ranger at (3,2) after its action), now through the
+ * production party-pack provider: the Longbow's stated 150/600 range keeps
+ * every square 10 feet away in normal range ("maintain range"), so the clear
+ * square (4,1) wins at 4.35 over Half (3.6), Three-Quarters (2.475) and Total
+ * Cover. Planned at reach instead, the Longbow reaches none of them.
+ */
+const LONGBOW_ID = 'attack:pcac-range-longbow';
+const SHORTSWORD_ID = 'attack:pcac-range-shortsword';
+
+/** A three-member pack whose first member is a ranger with a Longbow (150/600) and a Shortsword, both +5 for 1dX + 3. */
+function rangerPack(key: string) {
+  const longbow = {
+    attackId: LONGBOW_ID, kind: 'ranged', attackBonus: 5, criticalFloor: 20, reachFeet: 5, rangeFeet: 150,
+    longRangeFeet: 600, damage: [{ damageTypeId: 'Piercing', count: 1, sides: 8, modifier: 3 }],
+  };
+  const shortsword = {
+    attackId: SHORTSWORD_ID, kind: 'melee', attackBonus: 5, criticalFloor: 20, reachFeet: 5, rangeFeet: 5,
+    damage: [{ damageTypeId: 'Piercing', count: 1, sides: 6, modifier: 3 }],
+  };
+  const member = (index: number, attacks: readonly Record<string, unknown>[]) => ({
+    combatantId: `combatant:${key}-${String(index)}`, tokenId: `token:${key}-${String(index)}`,
+    characterId: 30_000 + index, classes: [{ classId: 'Ranger', level: 4 }],
+    abilities: { strength: 12, dexterity: 16, constitution: 14, intelligence: 10, wisdom: 14, charisma: 8 },
+    armorClass: 15, hitPointMaximum: 36, sizeCategory: 'Medium', walkingSpeedFeet: 30, initiativeBonus: 3,
+    savingThrowBonuses: { strength: 3, dexterity: 5, constitution: 2, intelligence: 0, wisdom: 2, charisma: -1 },
+    attacksPerAction: 1, attacks, startingConditions: [],
+  });
+  const loaded = loadExternalPartyPack(externalPartyPackSchema.parse({
+    schemaVersion: 2, partyId: `party:${key}`, allowPartial: false,
+    members: [member(1, [longbow, shortsword]), member(2, [shortsword]), member(3, [shortsword])],
+  }));
+  if (loaded.status !== 'loaded') throw new Error('The ranger pack was refused.');
+  return loaded.party.members;
+}
+
+/** A three-member pack whose first member is a fighter with a Battleaxe (+7, 1d8 + 4) and a Longbow (+5, 1d8 + 2, 150/600). */
+function fighterPack(key: string) {
+  const battleaxe = {
+    attackId: 'attack:pcac-battleaxe', kind: 'melee', attackBonus: 7, criticalFloor: 20, reachFeet: 5, rangeFeet: 5,
+    damage: [{ damageTypeId: 'Slashing', count: 1, sides: 8, modifier: 4 }],
+  };
+  const longbow = {
+    attackId: 'attack:pcac-longbow', kind: 'ranged', attackBonus: 5, criticalFloor: 20, reachFeet: 5, rangeFeet: 150,
+    longRangeFeet: 600, damage: [{ damageTypeId: 'Piercing', count: 1, sides: 8, modifier: 2 }],
+  };
+  const member = (index: number, attacks: readonly Record<string, unknown>[]) => ({
+    combatantId: `combatant:${key}-${String(index)}`, tokenId: `token:${key}-${String(index)}`,
+    characterId: 31_000 + index, classes: [{ classId: 'Fighter', level: 4 }],
+    abilities: { strength: 18, dexterity: 14, constitution: 14, intelligence: 10, wisdom: 12, charisma: 8 },
+    armorClass: 18, hitPointMaximum: 40, sizeCategory: 'Medium', walkingSpeedFeet: 30, initiativeBonus: 2,
+    savingThrowBonuses: { strength: 6, dexterity: 2, constitution: 4, intelligence: 0, wisdom: 1, charisma: -1 },
+    attacksPerAction: 1, attacks, startingConditions: [],
+  });
+  const loaded = loadExternalPartyPack(externalPartyPackSchema.parse({
+    schemaVersion: 2, partyId: `party:${key}`, allowPartial: false,
+    members: [member(1, [battleaxe, longbow]), member(2, [battleaxe]), member(3, [battleaxe])],
+  }));
+  if (loaded.status !== 'loaded') throw new Error('The fighter pack was refused.');
+  return loaded.party.members;
+}
+
+function assessmentOf(decision: SymmetricPcDecision, predicate: (command: EncounterCommand) => boolean) {
+  const found = decision.assessments.find((assessment) => predicate(assessment.command));
+  if (found === undefined) throw new Error('Expected an assessment for the command.');
+  return found;
+}
+
+function rounded(value: number): number {
+  return Math.round(value * 1e9) / 1e9;
+}
+
+describe('PCAC range: PC attack commands carry their weapon\'s real range', () => {
+  it('PCAC-RANGE-LONGBOW-BANDS: the Longbow is a normal-range shot at 80 feet, a Disadvantage shot at 200 feet, and no shot at 605 feet', () => {
+    const members = rangerPack('pcac-range');
+    const ranger = members[0]!;
+    const goblinProfile = goblin('pcac-range-goblin');
+    const at = (column: number) => reduceEncounter(createEncounter({
+      bounds: { columns: 122, rows: 1 },
+      combatants: [ranger.profile, goblinProfile],
+      tokens: [combatToken(ranger.profile, { column: 0, row: 0 }), combatToken(goblinProfile, { column, row: 0 })],
+    }), { type: 'roll_initiative' }, () => 0.5).state;
+    const legal = loadedPartyTurnLegalActions(members);
+    const forms = loadedPartyAttackForms(members);
+    const longbows = (state: EncounterState) => legal(state, ranger.profile.id).actions
+      .filter((command) => command.type === 'attack' && command.attackId === LONGBOW_ID);
+    const near = at(16);
+    const far = at(40);
+    const beyond = at(121);
+    expect([near, far, beyond].map((state) => state.activeCombatant)).toEqual([ranger.profile.id, ranger.profile.id, ranger.profile.id]);
+    const longbowForm = forms(near, ranger.profile.id, goblinProfile.id).find((command) => command.attackId === LONGBOW_ID);
+    if (longbowForm === undefined) throw new Error('The ranger has a Longbow form.');
+
+    // The command states the SRD range; the legal set lists it to the long range and no further.
+    expect(longbowForm.tacticalRange).toEqual({ kind: 'ranged', normalRangeFeet: 150, longRangeFeet: 600 });
+    expect(longbows(near)).toEqual([longbowForm]);
+    expect(longbows(far)).toEqual([longbowForm]);
+    expect(longbows(beyond)).toEqual([]);
+
+    const decide = (state: EncounterState) => evaluateSymmetricPcDecision({
+      state, actorId: ranger.profile.id, legalActions: legal(state, ranger.profile.id).actions, attackForms: forms,
+    });
+    const shot = (state: EncounterState) => {
+      const decision = decide(state);
+      const tactical = assessmentOf(decision, (command) => command.type === 'attack' && command.attackId === LONGBOW_ID).tactical;
+      const move = assessmentOf(decision, (command) => command.type === 'move').movement;
+      if (tactical?.status !== 'evaluated' || move?.status !== 'evaluated') throw new Error('Expected evaluated assessments.');
+      const before = move.evaluation.candidates[0]?.before;
+      if (before?.status !== 'resolved' || before.evaluation.damage.status !== 'resolved' ||
+        before.evaluation.probabilities.status !== 'resolved') {
+        throw new Error('Expected a resolved planning verdict from the ranger\'s square.');
+      }
+      return {
+        range: tactical.evaluation.range,
+        rollMode: tactical.evaluation.rollMode.mode,
+        profile: `${move.profileSource}:${move.attack.attackId ?? '?'}`,
+        hit: rounded(before.evaluation.probabilities.hit),
+        critical: rounded(before.evaluation.probabilities.critical),
+        expectedDamage: rounded(before.evaluation.damage.expectedDamage),
+      };
+    };
+    expect(shot(near)).toEqual({
+      range: { status: 'resolved', distanceFeet: 80, band: 'normal', legal: true },
+      rollMode: 'normal', profile: `legal_attack:${LONGBOW_ID}`, hit: 0.55, critical: 0.05, expectedDamage: 4.35,
+    });
+    expect(shot(far)).toEqual({
+      range: { status: 'resolved', distanceFeet: 200, band: 'long', legal: true },
+      rollMode: 'disadvantage', profile: `legal_attack:${LONGBOW_ID}`, hit: 0.3025, critical: 0.0025, expectedDamage: 2.28,
+    });
+
+    // The reducer applies the same range: one d20 at 80 feet, the lower of two at 200 feet, a refusal at 605 feet.
+    const rolled = (state: EncounterState) => reduceEncounter(state, longbowForm, () => 0.5).events.flatMap((event) =>
+      event.type === 'attack_resolved' ? [{ mode: event.attack.roll.mode, dice: event.attack.roll.faces.length }] : []);
+    expect(rolled(near)).toEqual([{ mode: 'normal', dice: 1 }]);
+    expect(rolled(far)).toEqual([{ mode: 'disadvantage', dice: 2 }]);
+    expect(() => reduceEncounter(beyond, longbowForm, () => 0.5)).toThrow('The target is out of attack range.');
+  });
+
+  it('PCAC-RANGE-ATTACK-BY-DAMAGE: adjacent, the fighter takes his Battleaxe (5.75) over his Longbow (3.8); 30 feet away, the Longbow', () => {
+    const members = fighterPack('pcac-damage');
+    const fighter = members[0]!;
+    const goblinProfile = goblin('pcac-damage-goblin');
+    const at = (column: number) => ready(createEncounter({
+      bounds: { columns: 8, rows: 1 },
+      combatants: [fighter.profile, goblinProfile],
+      tokens: [combatToken(fighter.profile, { column: 0, row: 0 }), combatToken(goblinProfile, { column, row: 0 })],
+    }), fighter.profile.id);
+    const decide = (state: EncounterState) => evaluateSymmetricPcDecision({
+      state, actorId: fighter.profile.id,
+      legalActions: loadedPartyTurnLegalActions(members)(state, fighter.profile.id).actions,
+      attackForms: loadedPartyAttackForms(members),
+    });
+    const attacks = (decision: SymmetricPcDecision) => decision.assessments.flatMap((assessment) => {
+      if (assessment.command.type !== 'attack') return [];
+      const damage = assessment.rank[3];
+      return [{
+        attackId: assessment.command.attackId,
+        bucket: assessment.rank[0],
+        damage: damage.kind === 'resolved' ? rounded(damage.expectedDamage) : damage.kind,
+      }];
+    });
+
+    const adjacent = decide(at(1));
+    expect(attacks(adjacent)).toEqual([
+      { attackId: 'attack:pcac-battleaxe', bucket: 2, damage: 5.75 },
+      { attackId: 'attack:pcac-longbow', bucket: 2, damage: 3.8 },
+    ]);
+    // Canonical text alone would take the Longbow.
+    expect(adjacent.assessments.filter((assessment) => assessment.command.type === 'attack')
+      .map((assessment) => assessment.commandKey).sort((left, right) => left.localeCompare(right))[0])
+      .toContain('"attackId":"attack:pcac-longbow"');
+    expect(adjacent.selected.command).toMatchObject({ type: 'attack', attackId: 'attack:pcac-battleaxe' });
+
+    const ranged = decide(at(6));
+    expect(attacks(ranged)).toEqual([{ attackId: 'attack:pcac-longbow', bucket: 2, damage: 3.8 }]);
+    expect(ranged.selected.command).toMatchObject({ type: 'attack', attackId: 'attack:pcac-longbow' });
+  });
+
+  it('PCAC-RANGE-RANGER-FIRING-SQUARE: through the party-pack provider, the ranger steps to the clear firing square within the Longbow\'s normal range', () => {
+    const members = rangerPack('pcac-firing');
+    const ranger = members[0]!;
+    const goblinProfile = goblin('pcac-firing-goblin');
+    const created = createEncounter({
+      bounds: { columns: 7, rows: 5 },
+      combatants: [ranger.profile, goblinProfile],
+      tokens: [
+        combatToken(ranger.profile, APPROACH_RANGER_CELL),
+        combatToken(goblinProfile, APPROACH_RANGER_GOBLIN_CELL),
+      ],
+      worldObjects: APPROACH_WALL_CELLS.map((cell) => blockingCell(`pcac-firing-wall-${String(cell.row)}`, cell, 'wall')),
+    });
+    const readied = ready(created, ranger.profile.id);
+    // After shooting: the action is spent, movement remains.
+    const state = {
+      ...readied,
+      combatants: readied.combatants.map((combatant) => combatant.profile.id === ranger.profile.id
+        ? { ...combatant, turn: { ...combatant.turn, action: { kind: 'spent' as const } } }
+        : combatant),
+    };
+    const legalActions = loadedPartyTurnLegalActions(members)(state, ranger.profile.id).actions;
+    expect(legalActions.some((command) => command.type === 'attack')).toBe(false);
+
+    const decision = evaluateSymmetricPcDecision({
+      state, actorId: ranger.profile.id, legalActions, attackForms: loadedPartyAttackForms(members),
+    });
+
+    const form = `own_attack_forms:${LONGBOW_ID}:${String(goblinProfile.id)}`;
+    expect(rankedApproach(decision)).toEqual([
+      { destination: APPROACH_CLEAR_SQUARE, bucket: 3, damage: 4.35, form },
+      { destination: APPROACH_HALF_SQUARES[0], bucket: 3, damage: 3.6, form },
+      { destination: APPROACH_HALF_SQUARES[1], bucket: 3, damage: 3.6, form },
+      { destination: APPROACH_HALF_SQUARES[2], bucket: 3, damage: 3.6, form },
+      { destination: APPROACH_THREE_QUARTERS_SQUARE, bucket: 3, damage: 2.475, form },
+      { destination: APPROACH_TOTAL_SQUARE, bucket: 3, damage: 'unresolved', form },
+    ]);
+    expect(decision.selected.command).toEqual(step(ranger.profile.id, APPROACH_CLEAR_SQUARE));
   });
 });

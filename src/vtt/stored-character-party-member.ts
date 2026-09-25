@@ -180,6 +180,11 @@ function attacks(
       criticalFloor: 20,
       reachFeet: weapon.reach ? 10 : 5,
       rangeFeet: weapon.range.kind === 'ranged' ? weapon.range.near_feet : 5,
+      // A ranged weapon carries its long range (the Range property's second
+      // number, docs/srd/full/srd-5.2.1.txt:5434-5439) when the row records one.
+      ...(weapon.attack_kind === 'ranged' && weapon.range.kind === 'ranged' && weapon.range.far_feet !== null
+        ? { longRangeFeet: weapon.range.far_feet }
+        : {}),
       damage: [{
         damageTypeId: damageType,
         count: parsedDice.count,

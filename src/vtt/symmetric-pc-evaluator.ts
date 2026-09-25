@@ -7,8 +7,8 @@ import { minimumSpaceLine } from '../combat/creature-space';
 import type { AppliedCondition } from '../combat/conditions';
 import type { Controller, ControllerDecision, ControllerRequest } from '../combat/controllers';
 import type { TurnAttackForms } from '../combat/coordinator';
-import type { EncounterCommand } from '../combat/events';
-import { feet, type CombatantId } from '../combat/values';
+import type { EncounterCommand, StatedRangeAttackCommand } from '../combat/events';
+import type { CombatantId } from '../combat/values';
 import {
   evaluateConcentrationZoneIntel,
   CONCENTRATION_INTEL_POLICY,
@@ -19,7 +19,6 @@ import {
   TACTICAL_EVALUATOR_POLICY,
   type AttackRollModeSource,
   type TacticalAttackEvaluation,
-  type TacticalAttackRange,
   type TacticalDamageTerm,
 } from '../combat/tactical-evaluator';
 import { MOVEMENT_EVALUATOR_POLICY, type MovementEvaluation } from '../combat/movement-evaluator';
@@ -30,6 +29,7 @@ import {
   type PerceivedTargetKnowledge,
 } from './intel/actor-knowledge';
 import {
+  projectedAttackFromStart,
   projectedMovementOptions,
   type EngineProjectedMovementRequest,
 } from './engine-query-port';
@@ -44,13 +44,20 @@ export const SYMMETRIC_PC_EVALUATOR_POLICY = 'symmetric-pc-evaluator-v1' as cons
 export type SymmetricPcUnavailableReason =
   | 'target_not_perceived'
   | 'reciprocal_visibility_unknown'
-  | 'movement_profile_unavailable';
+  | 'movement_profile_unavailable'
+  /** The attack command states no range; the evaluator never assumes one (it used to assume melee reach). */
+  | 'attack_range_unstated';
 
 export type SymmetricPcTacticalAssessment =
   | { readonly status: 'evaluated'; readonly evaluation: TacticalAttackEvaluation }
   | { readonly status: 'unresolved'; readonly reason: SymmetricPcUnavailableReason };
 
 type AttackCommand = Extract<EncounterCommand, { readonly type: 'attack' }>;
+type MoveCommand = Extract<EncounterCommand, { readonly type: 'move' }>;
+
+function statesItsRange(command: AttackCommand): command is StatedRangeAttackCommand {
+  return command.tacticalRange !== undefined;
+}
 
 /**
  * Where the attack profiles that assess the PC's moves came from.
@@ -71,7 +78,7 @@ export type SymmetricPcMovementAssessment =
       readonly status: 'evaluated';
       readonly profileSource: SymmetricPcMovementProfileSource;
       /** The attack command whose profile gave the move's destination its assessment. */
-      readonly attack: AttackCommand;
+      readonly attack: StatedRangeAttackCommand;
       readonly evaluation: MovementEvaluation;
     }
   | { readonly status: 'unresolved'; readonly reason: SymmetricPcUnavailableReason };
@@ -80,24 +87,34 @@ export type SymmetricPcMovementAssessment =
 export type SymmetricPcRankBucket = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
 
 /**
- * The expected damage a move's destination square offers against the move
- * profile's target, exactly as the projected movement evaluation computed it
- * for that candidate: hit chance against the target's planning AC plus the
- * square's cover bonus, times the damage, critical hits included.
- * Unresolved when the destination is not an evaluated candidate or its attack
- * has no resolved expected damage (for example, the target has Total Cover).
- * Every command other than a move is `not_a_move`.
+ * The expected damage that orders squares, and attacks, within a bucket: hit
+ * chance against the target's planning AC plus the cover bonus, times the
+ * damage, critical hits included.
+ * - A move: what its destination square offers against the move profile's
+ *   target, exactly as the projected movement evaluation computed it for that
+ *   candidate. Unresolved when the destination is not an evaluated candidate
+ *   or its attack has no resolved expected damage (for example, the target has
+ *   Total Cover).
+ * - An attack: the attack itself, made from the PC's own square, on the same
+ *   basis (projectedAttackFromStart). Unresolved when its range is unstated,
+ *   its target is not perceived, or it has no resolved expected damage.
+ * Every other command is `not_compared`.
  */
-export type SymmetricPcDestinationDamage =
+export type SymmetricPcPlannedDamage =
   | { readonly kind: 'resolved'; readonly expectedDamage: number }
   | { readonly kind: 'unresolved' }
-  | { readonly kind: 'not_a_move' };
+  | { readonly kind: 'not_compared' };
 
 /**
  * Compared element by element; the lower rank is preferred.
  * Owner ruling 2026-09-24 (PERF-02 pcac): "Within the same bucket, prefer the
  * square with higher expected damage against the target (hit chance × damage,
- * which now includes AC + cover), then the canonical text."
+ * which now includes AC + cover), then the canonical text." A bucket's attacks
+ * against one target are ordered the same way, among themselves; the target is
+ * still chosen by the canonical text, as the third commit chooses the forms'
+ * target (PERF-02 pcac, fourth commit: once PC attack commands carry their real
+ * range, a Longbow and a Battleaxe are both legal in melee, and the canonical
+ * text alone took the weaker Longbow).
  */
 export type SymmetricPcRank = readonly [
   bucket: SymmetricPcRankBucket,
@@ -106,13 +123,16 @@ export type SymmetricPcRank = readonly [
   /**
    * Where the command sits in its bucket. It is the command's canonical key,
    * except that every move of a bucket takes the smallest canonical key among
-   * that bucket's moves. The moves therefore stay together where the first of
-   * them stood, a non-move command keeps its place relative to them, and the
-   * next element decides only between moves of one bucket.
+   * that bucket's moves, and every attack the smallest among the bucket's
+   * attacks against the same target. The moves (and each target's attacks)
+   * therefore stay together where the first of them stood, every other command
+   * and every other target keeps its place relative to them, and the next
+   * element decides only between moves, or between attacks on one target, of
+   * one bucket.
    */
   placementKey: string,
   /** Higher expected damage first; unresolved after every resolved value. */
-  destinationDamage: SymmetricPcDestinationDamage,
+  plannedDamage: SymmetricPcPlannedDamage,
   /** The command's canonical JSON: the final tie-break. */
   canonicalKey: string,
 ];
@@ -177,24 +197,11 @@ function projectedConditions(target: PerceivedTargetKnowledge): readonly Applied
   });
 }
 
-function attackRange(
-  state: EncounterState,
-  actorId: CombatantId,
-  command: Extract<EncounterCommand, { readonly type: 'attack' }>,
-): TacticalAttackRange {
-  return command.tacticalRange ?? {
-    kind: 'melee',
-    reachFeet: feet(actor(state, actorId).profile.rules.reach),
-  };
-}
-
-function damageTerms(command: Extract<EncounterCommand, { readonly type: 'attack' }>): readonly TacticalDamageTerm[] {
+function damageTerms(command: AttackCommand): readonly TacticalDamageTerm[] {
   return command.damage.terms.map((term) => ({ dice: term.dice }));
 }
 
-function rollModeSources(
-  command: Extract<EncounterCommand, { readonly type: 'attack' }>,
-): readonly AttackRollModeSource[] {
+function rollModeSources(command: AttackCommand): readonly AttackRollModeSource[] {
   switch (command.rollMode) {
     case 'normal': return [];
     case 'advantage': return [{ mode: 'advantage', reason: 'declared_advantage' }];
@@ -205,8 +212,9 @@ function rollModeSources(
 function tacticalAssessment(
   state: EncounterState,
   projection: ActorKnowledgeProjection,
-  command: Extract<EncounterCommand, { readonly type: 'attack' }>,
+  command: AttackCommand,
 ): SymmetricPcTacticalAssessment {
+  if (!statesItsRange(command)) return { status: 'unresolved', reason: 'attack_range_unstated' };
   const target = projectedTarget(projection, command.target);
   if (target === null) return { status: 'unresolved', reason: 'target_not_perceived' };
   if (target.reciprocalVisibility.kind === 'unknown') {
@@ -224,7 +232,7 @@ function tacticalAssessment(
       targetId: command.target,
       attackerPosition: selectedLine.sourceCell,
       targetPosition: selectedLine.targetCell,
-      range: attackRange(state, command.actor, command),
+      range: command.tacticalRange,
       attackBonus: command.attackBonus,
       // A perceived AC band is not an AC number. D245 requires the evaluator's
       // typed unresolved path rather than an invented representative value.
@@ -248,13 +256,13 @@ function tacticalAssessment(
 
 function movementRequest(
   state: EncounterState,
-  command: Extract<EncounterCommand, { readonly type: 'attack' }>,
+  command: StatedRangeAttackCommand,
 ): EngineProjectedMovementRequest {
   return {
     actorId: command.actor,
     targetId: command.target,
     attack: {
-      range: attackRange(state, command.actor, command),
+      range: command.tacticalRange,
       attackBonus: command.attackBonus,
       criticalFloor: command.criticalFloor === 18 || command.criticalFloor === 19 ? command.criticalFloor : 20,
       damageTerms: damageTerms(command),
@@ -272,7 +280,7 @@ function inCanonicalOrder<T>(values: readonly T[]): readonly T[] {
 }
 
 interface MovementProfile {
-  readonly attack: AttackCommand;
+  readonly attack: StatedRangeAttackCommand;
   readonly evaluation: MovementEvaluation;
 }
 
@@ -285,10 +293,12 @@ interface MovementProfiles {
 /**
  * The attack profiles every move of one decision is assessed with. A legal
  * attack command against a perceived target supplies the one profile, the
- * canonical-first such command. With none, the PC's own attack forms do:
- * the target is the one the canonical-first form command attacks (the same
- * canonical-text rule, applied to the commands the forms would build), and
- * every distinct profile of the forms against that target is evaluated.
+ * canonical-first such command; a legal attack that states no range supplies
+ * none. With none, the PC's own attack forms do: the target is the one the
+ * canonical-first form command attacks (the same canonical-text rule, applied
+ * to the commands the forms would build), and every distinct profile of the
+ * forms against that target is evaluated. Every profile plans with the range
+ * its command states.
  */
 function movementProfiles(
   state: EncounterState,
@@ -297,7 +307,8 @@ function movementProfiles(
   attacks: readonly AttackCommand[],
   attackForms: TurnAttackForms,
 ): MovementProfiles | null {
-  const legal = inCanonicalOrder(attacks.filter((attack) => projectedTarget(projection, attack.target) !== null));
+  const legal = inCanonicalOrder(attacks.filter((attack): attack is StatedRangeAttackCommand =>
+    statesItsRange(attack) && projectedTarget(projection, attack.target) !== null));
   const profileSource: SymmetricPcMovementProfileSource = legal.length > 0 ? 'legal_attack' : 'own_attack_forms';
   const forms = legal.length > 0
     ? legal.slice(0, 1)
@@ -321,10 +332,7 @@ function movementProfiles(
 type MovementCandidate = MovementEvaluation['candidates'][number];
 
 /** The evaluated movement candidate at the move's destination, when the evaluation has one. */
-function destinationCandidate(
-  command: Extract<EncounterCommand, { readonly type: 'move' }>,
-  evaluation: MovementEvaluation,
-): MovementCandidate | null {
+function destinationCandidate(command: MoveCommand, evaluation: MovementEvaluation): MovementCandidate | null {
   const destination = command.path.at(-1);
   if (destination === undefined) return null;
   return evaluation.candidates.find((entry) =>
@@ -338,7 +346,7 @@ function destinationCandidate(
  * the best expected damage across the PC's attacks decides.
  */
 function movementAssessment(
-  command: Extract<EncounterCommand, { readonly type: 'move' }>,
+  command: MoveCommand,
   movement: MovementProfiles | null,
 ): SymmetricPcMovementAssessment {
   if (movement === null) return { status: 'unresolved', reason: 'movement_profile_unavailable' };
@@ -427,18 +435,31 @@ function movementRank(candidate: MovementCandidate | null): 0 | 3 | 6 | 7 {
 }
 
 /** Reads the expected damage the evaluation already carries for the destination: its attack verdict there. */
-function destinationDamage(candidate: MovementCandidate | null): SymmetricPcDestinationDamage {
+function destinationDamage(candidate: MovementCandidate | null): SymmetricPcPlannedDamage {
   if (candidate?.after.status !== 'resolved' || candidate.after.evaluation.damage.status !== 'resolved') {
     return { kind: 'unresolved' };
   }
   return { kind: 'resolved', expectedDamage: candidate.after.evaluation.damage.expectedDamage };
 }
 
-/** A rank before the bucket's moves are placed together. */
+/** The expected damage of a legal attack made from the PC's own square, on the movement planner's basis. */
+function attackPlannedDamage(
+  state: EncounterState,
+  projection: ActorKnowledgeProjection,
+  command: AttackCommand,
+): SymmetricPcPlannedDamage {
+  if (!statesItsRange(command) || projectedTarget(projection, command.target) === null) return { kind: 'unresolved' };
+  const evaluation = projectedAttackFromStart(state, projection, movementRequest(state, command));
+  return evaluation?.damage.status === 'resolved'
+    ? { kind: 'resolved', expectedDamage: evaluation.damage.expectedDamage }
+    : { kind: 'unresolved' };
+}
+
+/** A rank before the bucket's moves, and its attacks, are placed together. */
 interface CommandOrder {
   readonly bucket: SymmetricPcRankBucket;
   readonly unassessedKind: 0 | 1;
-  readonly destinationDamage: SymmetricPcDestinationDamage;
+  readonly plannedDamage: SymmetricPcPlannedDamage;
 }
 
 function commandOrder(
@@ -446,13 +467,16 @@ function commandOrder(
   tactical: SymmetricPcTacticalAssessment | null,
   movement: SymmetricPcMovementAssessment | null,
   concentration: ConcentrationZoneEvaluation | null,
+  attackDamage: () => SymmetricPcPlannedDamage,
 ): CommandOrder {
   const notAMove = (bucket: SymmetricPcRankBucket, unassessedKind: 0 | 1 = 0): CommandOrder =>
-    ({ bucket, unassessedKind, destinationDamage: { kind: 'not_a_move' } });
-  if (command.type === 'attack' && tactical !== null) return notAMove(tacticalRank(tactical));
+    ({ bucket, unassessedKind, plannedDamage: { kind: 'not_compared' } });
+  if (command.type === 'attack' && tactical !== null) {
+    return { bucket: tacticalRank(tactical), unassessedKind: 0, plannedDamage: attackDamage() };
+  }
   if (command.type === 'move' && movement !== null) {
     const candidate = movement.status === 'evaluated' ? destinationCandidate(command, movement.evaluation) : null;
-    return { bucket: movementRank(candidate), unassessedKind: 0, destinationDamage: destinationDamage(candidate) };
+    return { bucket: movementRank(candidate), unassessedKind: 0, plannedDamage: destinationDamage(candidate) };
   }
   if (command.type === 'cast_spell') {
     const startsConcentration = concentration?.start.status === 'resolved' &&
@@ -467,28 +491,28 @@ function commandOrder(
   return notAMove(8, 1);
 }
 
-function destinationDamageClass(value: SymmetricPcDestinationDamage): 0 | 1 | 2 {
+function plannedDamageClass(value: SymmetricPcPlannedDamage): 0 | 1 | 2 {
   switch (value.kind) {
     case 'resolved': return 0;
     case 'unresolved': return 1;
-    case 'not_a_move': return 2;
+    case 'not_compared': return 2;
   }
 }
 
-function compareDestinationDamage(left: SymmetricPcDestinationDamage, right: SymmetricPcDestinationDamage): number {
+function comparePlannedDamage(left: SymmetricPcPlannedDamage, right: SymmetricPcPlannedDamage): number {
   if (left.kind === 'resolved' && right.kind === 'resolved') return right.expectedDamage - left.expectedDamage;
-  return destinationDamageClass(left) - destinationDamageClass(right);
+  return plannedDamageClass(left) - plannedDamageClass(right);
 }
 
 /** A destination's order among squares: bucket, then expected damage. */
 function compareDestination(left: MovementCandidate | null, right: MovementCandidate | null): number {
   return movementRank(left) - movementRank(right) ||
-    compareDestinationDamage(destinationDamage(left), destinationDamage(right));
+    comparePlannedDamage(destinationDamage(left), destinationDamage(right));
 }
 
 function compareRank(left: SymmetricPcRank, right: SymmetricPcRank): number {
   return left[0] - right[0] || left[1] - right[1] || left[2].localeCompare(right[2]) ||
-    compareDestinationDamage(left[3], right[3]) || left[4].localeCompare(right[4]);
+    comparePlannedDamage(left[3], right[3]) || left[4].localeCompare(right[4]);
 }
 
 /**
@@ -536,26 +560,33 @@ export function evaluateSymmetricPcDecision(input: {
       tactical,
       movement,
       concentration,
-      order: commandOrder(command, tactical, movement, concentration),
+      order: commandOrder(command, tactical, movement, concentration, () => command.type === 'attack'
+        ? attackPlannedDamage(input.state, actorKnowledge, command)
+        : { kind: 'not_compared' }),
     };
   });
-  // The smallest canonical key among each bucket's moves places them all.
-  const movePlacement = new Map<SymmetricPcRankBucket, string>();
+  // The smallest canonical key among the moves of each bucket places them
+  // all; likewise the attacks against each target, so the target keeps its
+  // canonical-text place and only its weapons are reordered.
+  const placementGroup = (command: EncounterCommand, order: CommandOrder) =>
+    `${command.type}:${String(order.bucket)}:${command.type === 'attack' ? String(command.target) : ''}`;
+  const groupPlacement = new Map<string, string>();
   for (const entry of evaluated) {
-    if (entry.order.destinationDamage.kind === 'not_a_move') continue;
-    const placed = movePlacement.get(entry.order.bucket);
+    if (entry.order.plannedDamage.kind === 'not_compared') continue;
+    const group = placementGroup(entry.command, entry.order);
+    const placed = groupPlacement.get(group);
     if (placed === undefined || entry.commandKey.localeCompare(placed) < 0) {
-      movePlacement.set(entry.order.bucket, entry.commandKey);
+      groupPlacement.set(group, entry.commandKey);
     }
   }
   const assessments = evaluated.map(({ order, ...assessment }): SymmetricPcCommandAssessment => {
-    const placementKey = order.destinationDamage.kind === 'not_a_move'
+    const placementKey = order.plannedDamage.kind === 'not_compared'
       ? assessment.commandKey
-      : movePlacement.get(order.bucket);
-    if (placementKey === undefined) throw new Error('Every move registered its bucket placement above.');
+      : groupPlacement.get(placementGroup(assessment.command, order));
+    if (placementKey === undefined) throw new Error('Every move and attack registered its bucket placement above.');
     return {
       ...assessment,
-      rank: [order.bucket, order.unassessedKind, placementKey, order.destinationDamage, assessment.commandKey],
+      rank: [order.bucket, order.unassessedKind, placementKey, order.plannedDamage, assessment.commandKey],
     };
   }).sort((left, right) => compareRank(left.rank, right.rank));
   const selected = assessments[0];

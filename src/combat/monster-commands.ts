@@ -1,4 +1,4 @@
-import type { EncounterCommand } from './events';
+import type { EncounterCommand, StatedRangeAttackCommand } from './events';
 import type { AppliedCondition } from './conditions';
 import type { DamageRequest, RollMode } from './resolution';
 import type {
@@ -90,7 +90,7 @@ export function monsterAttackCommand(
   target: CombatantId,
   rollMode?: RollMode,
   opportunity?: false,
-): Extract<EncounterCommand, { readonly type: 'attack' }>;
+): StatedRangeAttackCommand;
 export function monsterAttackCommand(
   action: MonsterAttackAction,
   actor: CombatantId,

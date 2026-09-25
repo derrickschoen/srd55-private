@@ -25,7 +25,7 @@ import {
   type EncounterState,
   type EncounterPhase,
 } from './encounter';
-import type { EncounterCommand, EncounterEvent } from './events';
+import type { EncounterCommand, EncounterEvent, StatedRangeAttackCommand } from './events';
 import type { NonBoundaryRefusalClass } from './encounter-rule-error';
 import type { GridCell } from './grid';
 import { planMovement } from './movement';
@@ -48,13 +48,15 @@ export type TurnLegalActions = (
  * with no range, cover or action-economy filter. A legal-actions provider
  * that lists attack commands pairs its TurnLegalActions with one of these,
  * built by the same code: once the target is in range and the action is
- * available, the provider lists exactly these commands against it.
+ * available, the provider lists exactly these commands against it. Each
+ * states its weapon's range (reach, or normal and long range), so a planner
+ * never has to assume one.
  */
 export type TurnAttackForms = (
   state: EncounterState,
   actor: CombatantId,
   target: CombatantId,
-) => readonly Extract<EncounterCommand, { readonly type: 'attack' }>[];
+) => readonly StatedRangeAttackCommand[];
 
 export type ReactionLegalActions = (
   state: EncounterState,

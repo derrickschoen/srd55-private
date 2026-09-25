@@ -406,6 +406,40 @@ describe('external party-pack boundary', () => {
     ]);
   });
 
+  it('PCAC-RANGE-LONG-RANGE-SHAPE: a long range belongs to a ranged attack and is at least its normal range; an absent one loads as not stated', () => {
+    // SRD 5.2.1 Range property (docs/srd/full/srd-5.2.1.txt:5434-5439): the
+    // first number is the normal range and the second the long range.
+    const refusedCandidate = structuredClone(pack()) as unknown as {
+      members: Array<{ attacks: Array<Record<string, unknown>> }>;
+    };
+    const melee = refusedCandidate.members[0]!.attacks[0]!;
+    refusedCandidate.members[0]!.attacks.push(
+      { ...melee, attackId: 'attack:melee-long-range', longRangeFeet: 60 },
+      { ...melee, attackId: 'attack:long-below-normal', kind: 'ranged', rangeFeet: 80, longRangeFeet: 40 },
+    );
+    const refused = loadExternalPartyPack(refusedCandidate);
+    expect(refused.status).toBe('refused');
+    expect(gapSummary(refused)).toEqual([
+      { featurePath: 'members.0.attacks.1.longRangeFeet', reason: 'value_not_in_engine_vocabulary' },
+      { featurePath: 'members.0.attacks.2.longRangeFeet', reason: 'value_not_in_engine_vocabulary' },
+    ]);
+
+    const acceptedCandidate = structuredClone(pack()) as unknown as {
+      members: Array<{ attacks: Array<Record<string, unknown>> }>;
+    };
+    acceptedCandidate.members[0]!.attacks.push(
+      { ...melee, attackId: 'attack:bow-without-long-range', kind: 'ranged', rangeFeet: 80 },
+      { ...melee, attackId: 'attack:bow-with-long-range', kind: 'ranged', rangeFeet: 80, longRangeFeet: 320 },
+    );
+    const accepted = loadExternalPartyPack(acceptedCandidate);
+    if (accepted.status !== 'loaded') throw new Error('The long-range pack was refused.');
+    expect(accepted.party.members[0]!.attacks.map((attack) => attack.delivery)).toEqual([
+      { kind: 'melee', reachFeet: 5 },
+      { kind: 'ranged', normalRangeFeet: 80, longRangeFeet: null },
+      { kind: 'ranged', normalRangeFeet: 80, longRangeFeet: 320 },
+    ]);
+  });
+
   it('loads executable party-pack v2 world operations and refuses malformed nested specs', () => {
     const candidate = structuredClone(pack());
     candidate.members[0]!.worldOperations = [{
@@ -3308,6 +3342,9 @@ describe('external party-pack boundary', () => {
       type: 'attack', actor: actor.profile.id, target,
       attackBonus: 9, criticalFloor: 20, rollMode: 'normal',
       attackerCanSeeTarget: true, targetCanSeeAttacker: true,
+      // The declared attack is melee with reach 5; the override's reachFeet 10
+      // replaces that reach, and its rangeFeet 20 applies only to a ranged attack.
+      tacticalRange: { kind: 'melee', reachFeet: 10 },
       damage: {
         terms: [
           { type: 'Slashing', dice: { count: 1, sides: 8, modifier: 3 } },

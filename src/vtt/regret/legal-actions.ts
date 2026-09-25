@@ -3,10 +3,11 @@ import type { TurnAttackForms } from '../../combat/coordinator';
 import { combatantsAreAllies } from '../../combat/allies';
 import { combatantSpace, combatantSpaceAt, type EncounterState } from '../../combat/encounter';
 import { minimumSpaceDistance, spacesIntersect } from '../../combat/creature-space';
-import type { EncounterCommand } from '../../combat/events';
+import type { EncounterCommand, StatedRangeAttackCommand } from '../../combat/events';
 import { adjacentCells, requireBoardCell } from '../../combat/grid';
 import { encounterMovementWorld } from '../../combat/encounter-movement-world';
 import type { RollMode } from '../../combat/resolution';
+import type { TacticalAttackRange } from '../../combat/tactical-evaluator';
 import {
   monsterAttackCommand,
   monsterSavingThrowCommand,
@@ -21,6 +22,7 @@ import {
   damageType,
   dieSides,
   type CombatantId,
+  type Feet,
 } from '../../combat/values';
 import type { PlanAction } from '../dm-bridge/contracts';
 
@@ -74,21 +76,31 @@ function decodedMonsterAttacks(
     : [];
 }
 
+/**
+ * The generic weapon attack of an actor with no statblock attacks (every player
+ * character here): a melee attack at the actor's own reach, stated on the
+ * command so that no planner assumes a range for it.
+ */
 function genericAttack(
   actor: CombatantId,
   target: CombatantId,
+  reach: Feet,
   opportunity: false,
-): Extract<EncounterCommand, { readonly type: 'attack' }>;
+): StatedRangeAttackCommand;
 function genericAttack(
   actor: CombatantId,
   target: CombatantId,
+  reach: Feet,
   opportunity: boolean,
 ): Extract<EncounterCommand, { readonly type: 'attack' | 'opportunity_attack' }>;
 function genericAttack(
   actor: CombatantId,
   target: CombatantId,
+  reach: Feet,
   opportunity: boolean,
-): Extract<EncounterCommand, { readonly type: 'attack' | 'opportunity_attack' }> {
+): Extract<EncounterCommand, { readonly type: 'attack' | 'opportunity_attack' }> & {
+  readonly tacticalRange: TacticalAttackRange;
+} {
   return {
     type: opportunity ? 'opportunity_attack' : 'attack',
     actor,
@@ -98,6 +110,7 @@ function genericAttack(
     rollMode: 'normal',
     attackerCanSeeTarget: true,
     targetCanSeeAttacker: true,
+    tacticalRange: { kind: 'melee', reachFeet: reach },
     damage: {
       terms: [{
         type: damageType('Slashing'),
@@ -126,8 +139,9 @@ function attacksAgainst(
         : monsterAttackCommand(action, actor, target, rollMode)];
     });
   if (attacks.length > 0) return attacks;
-  return distance <= subject(state, actor).profile.rules.reach
-    ? [genericAttack(actor, target, options.opportunity)]
+  const reach = subject(state, actor).profile.rules.reach;
+  return distance <= reach
+    ? [genericAttack(actor, target, reach, options.opportunity)]
     : [];
 }
 
@@ -141,7 +155,7 @@ export const regretAttackForms: TurnAttackForms = (state, actor, target) => {
   const statblockAttacks = decodedMonsterAttacks(state, actor);
   return statblockAttacks.length > 0
     ? statblockAttacks.map((action) => monsterAttackCommand(action, actor, target, 'normal'))
-    : [genericAttack(actor, target, false)];
+    : [genericAttack(actor, target, subject(state, actor).profile.rules.reach, false)];
 };
 
 function decodedSavingThrows(
