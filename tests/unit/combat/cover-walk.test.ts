@@ -228,6 +228,36 @@ describe('PERF-02 cover6 exact lattice walk', () => {
     ]);
   });
 
+  it('COVER-CORNER-TIE breaks a tie between equally protective source corners by row before column', () => {
+    // Board 5 x 5. S = (0,0), T = (3,3), a wall at W = (1,1) on the diagonal between them.
+    // Target corners (3,3) (4,3) (3,4) (4,4).
+    //   Corner (0,0): ->(3,3) y = x runs through W's interior; ->(4,3) y = 3x/4 is in W for
+    //     x in (4/3,2); ->(3,4) is its mirror image; ->(4,4) y = x. All four sight-blocked: Total.
+    //   Corner (1,0): ->(3,3) y = 3(x-1)/2 is in W for x in (5/3,2): total. ->(4,3) y = x-1 passes
+    //     the grid corners (2,1) and (3,2): cells (1,0) (2,1) (3,2), none. ->(3,4) y = 2(x-1) and
+    //     ->(4,4) y = 4(x-1)/3 both enter W: total. Lines total, none, total, total: three
+    //     obstructed, strongest Total: Three-Quarters.
+    //   Corner (0,1): the mirror image of (1,0) across y = x: total, total, none, total: Three-Quarters.
+    //   Corner (1,1) is W's own corner; every line leaves it through W: Total.
+    // (1,0) and (0,1) tie at Three-Quarters. Row before column chooses (1,0), in row 0; column
+    // before row would choose (0,1). The verdict is the same either way; the trace is not.
+    const actor = playerProfile('corner-tie-bystander');
+    const state = createEncounter({
+      bounds: { columns: 5, rows: 5 }, combatants: [actor], tokens: [placedToken(actor, 4, 0)],
+      blockedCells: [{ column: 1, row: 1 }],
+    });
+    const trace = traceTerrainLine(state, { column: 0, row: 0 }, { column: 3, row: 3 });
+    expect(trace).toMatchObject({
+      sourceCorner: { column: 1, row: 0 }, tier: 'three_quarters', blocksSight: false,
+      sourceIds: ['blocked:1,1'], firstBlockingCell: null,
+    });
+    expect(trace.lines.map((line) => line.tier)).toEqual(['total', 'none', 'total', 'total']);
+    expect(terrainLineVerdict(state, { column: 0, row: 0 }, { column: 3, row: 3 })).toEqual({
+      sourceCell: { column: 0, row: 0 }, targetCell: { column: 3, row: 3 },
+      tier: 'three_quarters', blocksSight: false, sourceIds: ['blocked:1,1'],
+    });
+  });
+
   it('COVER-VERDICT-STRONGEST-ONLY names only the strongest line tier\'s sources, not a weaker creature on another line', () => {
     // Board 6 x 4. Fighter at S = (0,0), goblin at T = (4,2); an ogre (living, Half Cover) at (2,0) and
     // an arrow slit (three-quarters) at (2,2). Target corners (4,2) (5,2) (4,3) (5,3).
