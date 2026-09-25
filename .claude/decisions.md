@@ -2077,3 +2077,23 @@ My SIMD answer to the owner, recorded:
 - Recommended order: #3 and #6 first, then the contained experiment. The owner accepted it.
 
 Next free id: D896.
+
+
+## D896 — 2026-09-25 11:04 — LUNA6 V17 ran (the power simulation passes; the dominance rule holds); owner Q-POWER: (b) 40 encounters, 480 cells
+
+V17, run by me: node .tmp/runs/luna6/power/simulate.mjs --out oc.json, script sha 16b729c1… (codex APPROVED). Exit 0. Wall time 448.1 s. 560 cells.
+- oc.json sha256: 7b07e2047bf201d11fbe16a266ae60d31f72fdc2d105b1898bba0c6ee08cc776
+- last line: `LUNA6 OC PASS qstar20=0.020 qstar40=0.025 p05A20=0.2042`
+- Dominance rule: P(xhigh | Δ=0.5, bound A, k=20, p=0, q*=0.02) = 0.2042 ± 0.0040. This is below 0.5, so the rule HOLDS and Q-POWER goes to the owner.
+- Δ80 at 20 clusters: 0.958 (bound A) and 1.246 (bound B), interpolated. The grid brackets are 0.7–1.0 and 1.0–1.5.
+- Δ80 at 40 clusters: 0.748 (A) and 0.908 (B); both brackets are 0.7–1.0.
+- At 40 clusters, P(xhigh | Δ=0.5, A, p=0) = 0.3609 at q* = 0.025.
+
+OWNER (Q-POWER, via AskUserQuestion), verbatim answer: "(b) 40 encounters, 480 cells". The study adds the v5 second family:
+- hard-2 5118001–5118010 and brutal-2 6207001–6207010;
+- fixtures pinned by d569-second-family-manifest.json 83daa7ea…;
+- about twice the model time; q* = 0.025 at k = 40;
+- B6 gains mutant M86 (plan r5 §3.5 option b).
+The second family was registered in v5 and never launched; this study uses it up. Recorded in the S-PREREG entry, which is written before any study cell runs.
+
+Next free id: D897.
