@@ -936,6 +936,17 @@ function castCommand(
   };
 }
 
+function withTokenAt(
+  state: EncounterState,
+  id: ReturnType<typeof monsterProfile>['id'],
+  cell: { readonly column: number; readonly row: number },
+): EncounterState {
+  return {
+    ...state,
+    tokens: state.tokens.map((entry) => entry.combatantId === id ? { ...entry, position: onBoard(state.bounds, cell) } : entry),
+  };
+}
+
 function fixture(definition: SpellDefinition): {
   readonly caster: ReturnType<typeof playerProfile>;
   readonly target: ReturnType<typeof monsterProfile>;
@@ -1207,7 +1218,11 @@ describe('spell foundations and implemented value pins', () => {
     for (const [casterLevel, expectedDamage] of [[4, 1], [5, 2], [10, 2], [11, 3], [16, 3], [17, 4]] as const) {
       const definition = spellDefinition('fire-bolt');
       if (definition === null) throw new Error('Fire Bolt definition missing.');
-      const { caster, target, state } = fixture(definition);
+      const { caster, target, state: adjacent } = fixture(definition);
+      // The target stands 10 feet away, so Ranged Attacks in Close Combat
+      // (docs/srd/full/srd-5.2.1.txt:911-917) adds no second d20: the first
+      // draw is the attack roll and every later draw a damage die.
+      const state = withTokenAt(adjacent, target.id, { column: 2, row: 1 });
       let draw = 0;
       const result = reduceEncounter(
         state,
@@ -1312,7 +1327,10 @@ describe('spell foundations and implemented value pins', () => {
     let state = createEncounter({
       bounds: { columns: 12, rows: 6 },
       combatants: [caster, firstTarget, secondTarget],
-      tokens: [placedToken(caster, 0, 1), placedToken(firstTarget, 1, 1), placedToken(secondTarget, 2, 1)],
+      // Neither target is within 5 feet of the caster, so Ranged Attacks in
+      // Close Combat (docs/srd/full/srd-5.2.1.txt:911-917) adds no second d20:
+      // each beam's attack roll is one draw.
+      tokens: [placedToken(caster, 0, 1), placedToken(firstTarget, 2, 1), placedToken(secondTarget, 3, 1)],
     });
     state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
     const draws = [0, 0.999, 0];
@@ -1455,5 +1473,84 @@ describe('every implemented cantrip and level-1 spell executes through the encou
         expect(result.events.some((event) => event.type === 'spell_cast')).toBe(true);
         break;
     }
+  });
+});
+
+/*
+ * RANGED ATTACKS IN CLOSE COMBAT FOR SPELLS, docs/srd/full/srd-5.2.1.txt:911-917:
+ * "When you make a ranged attack roll with a weapon, a spell, or some other
+ * means, you have Disadvantage on the roll if you are within 5 feet of an
+ * enemy who can see you and doesn't have the Incapacitated condition." Each
+ * spell states which roll it makes (docs/srd/source/spell-descriptions.txt):
+ * - "Make a ranged spell attack": Fire Bolt :3184-3200, Ice Knife :4430-4441,
+ *   Acid Arrow :20-30, Eldritch Blast :2608, Scorching Ray (one per ray)
+ *   :6678-6688.
+ * - "make a melee spell attack": Chill Touch :1066-1075, Shocking Grasp
+ *   :7006-7024, Vampiric Touch :8158-8170, Spiritual Weapon :7353-7368.
+ *
+ * BOARD (the batch fixture, bright light): the caster at (0,1) and the target
+ * monster at (1,1), 5 feet away; it sees the caster and is alert, so it is
+ * itself an enemy within 5 feet. Moved to (3,1) it is 15 feet away. The
+ * neighbour, when present, is a second monster (an enemy) or a second player
+ * (an ally) at (0,2), 5 feet from the caster and off the line to (3,1). The
+ * RNG is fixed at 0.5. Every attack roll is read off its attack_resolved
+ * event: Disadvantage rolls two d20 faces, a straight roll one.
+ */
+describe('Ranged Attacks in Close Combat for spell attack rolls (docs/srd/full/srd-5.2.1.txt:911-917)', () => {
+  type Neighbour = 'enemy' | 'ally' | 'none';
+  const attackRolls = (id: string, targetCell: 'adjacent' | 'distant', neighbour: Neighbour = 'none') => {
+    const definition = spellDefinition(id);
+    if (definition === null) throw new Error(`${id} definition missing.`);
+    const caster = playerProfile(`cc-spell-caster-${id}`, {
+      hitPoints: 200, initiativeBonus: 20, spellSlots: referencePartySpellSlots('Wizard'),
+    });
+    const target = monsterProfile(`cc-spell-target-${id}`, { hitPoints: 200, initiativeBonus: 0 });
+    const other = neighbour === 'enemy'
+      ? monsterProfile(`cc-spell-neighbour-${id}`, { hitPoints: 200, initiativeBonus: -10 })
+      : neighbour === 'ally'
+        ? playerProfile(`cc-spell-ally-${id}`, { hitPoints: 200, initiativeBonus: -10 })
+        : null;
+    const created = createEncounter({
+      bounds: { columns: 12, rows: 6 },
+      combatants: [caster, target, ...(other === null ? [] : [other])],
+      tokens: [
+        placedToken(caster, 0, 1),
+        targetCell === 'adjacent' ? placedToken(target, 1, 1) : placedToken(target, 3, 1),
+        ...(other === null ? [] : [placedToken(other, 0, 2)]),
+      ],
+    });
+    const state = reduceEncounter(created, { type: 'roll_initiative' }, () => 0.5).state;
+    expect(state.activeCombatant).toBe(caster.id);
+    const result = reduceEncounter(state, castCommand(definition, caster, target), () => 0.5);
+    return result.events.flatMap((event) =>
+      event.type === 'attack_resolved' ? [`${event.attack.roll.mode}:${String(event.attack.roll.faces.length)}`] : []);
+  };
+
+  it('CC-SPELL-RANGED: a ranged spell attack roll with an alert enemy within 5 feet has Disadvantage, for every ranged spell attack operation', () => {
+    // attack_damage (ranged), attack_then_save_damage, attack_damage_over_time,
+    // attack_beams (two beams at caster level 7) and attack_rays (three rays):
+    // the adjacent target is itself the enemy within 5 feet.
+    expect(attackRolls('fire-bolt', 'adjacent')).toEqual(['disadvantage:2']);
+    expect(attackRolls('ice-knife', 'adjacent')).toEqual(['disadvantage:2']);
+    expect(attackRolls('acid-arrow', 'adjacent')).toEqual(['disadvantage:2']);
+    expect(attackRolls('eldritch-blast', 'adjacent')).toEqual(['disadvantage:2', 'disadvantage:2']);
+    expect(attackRolls('scorching-ray', 'adjacent')).toEqual(['disadvantage:2', 'disadvantage:2', 'disadvantage:2']);
+    // Scorching Ray at a target 15 feet away while an enemy stands next to the
+    // caster: every ray has Disadvantage (review r2's case). Nobody within 5
+    // feet, or only an ally there: a straight roll.
+    expect(attackRolls('scorching-ray', 'distant', 'enemy')).toEqual(['disadvantage:2', 'disadvantage:2', 'disadvantage:2']);
+    expect(attackRolls('scorching-ray', 'distant', 'none')).toEqual(['normal:1', 'normal:1', 'normal:1']);
+    expect(attackRolls('scorching-ray', 'distant', 'ally')).toEqual(['normal:1', 'normal:1', 'normal:1']);
+    expect(attackRolls('fire-bolt', 'distant', 'enemy')).toEqual(['disadvantage:2']);
+    expect(attackRolls('fire-bolt', 'distant', 'none')).toEqual(['normal:1']);
+  });
+
+  it('CC-SPELL-MELEE: a melee spell attack roll never has it, with the target itself an alert enemy within 5 feet', () => {
+    // attack_damage (melee), lifedrain_attack and summoned_weapon_attack.
+    expect(attackRolls('chill-touch', 'adjacent')).toEqual(['normal:1']);
+    expect(attackRolls('shocking-grasp', 'adjacent')).toEqual(['normal:1']);
+    expect(attackRolls('vampiric-touch', 'adjacent')).toEqual(['normal:1']);
+    expect(attackRolls('spiritual-weapon', 'adjacent')).toEqual(['normal:1']);
+    expect(attackRolls('shocking-grasp', 'adjacent', 'enemy')).toEqual(['normal:1']);
   });
 });

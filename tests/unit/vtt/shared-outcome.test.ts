@@ -276,17 +276,21 @@ describe('D344.2 imported synchronized shared-outcome branches', () => {
       'shared_outcome', 'shared_outcome', 'shared_outcome', 'shared_outcome', 'shared_outcome',
     ]);
 
+    // The melee shape touches its target; the two ranged shapes are cast from
+    // 10 feet, so Ranged Attacks in Close Combat (docs/srd/full/srd-5.2.1.txt:
+    // 911-917) adds no second d20: each attack roll is one draw.
     const cases = [
-      { id: 'shocking-grasp-shape', expectedEffect: 'opportunity_attacks_disabled', rng: [0.55, 0], hitPoints: 19 },
-      { id: 'guiding-bolt-shape', expectedEffect: 'attack_roll_mode_modifier', rng: [0.55, 0, 0, 0, 0], hitPoints: 16 },
-      { id: 'ray-of-sickness-shape', expectedEffect: 'condition', rng: [0.55, 0, 0], hitPoints: 18 },
+      { id: 'shocking-grasp-shape', expectedEffect: 'opportunity_attacks_disabled', rng: [0.55, 0], hitPoints: 19, column: 1 },
+      { id: 'guiding-bolt-shape', expectedEffect: 'attack_roll_mode_modifier', rng: [0.55, 0, 0, 0, 0], hitPoints: 16, column: 2 },
+      { id: 'ray-of-sickness-shape', expectedEffect: 'condition', rng: [0.55, 0, 0], hitPoints: 18, column: 2 },
     ] as const;
     for (const [index, exemplar] of cases.entries()) {
       const caster = playerProfile(`attack-caster-${String(index)}`, { initiativeBonus: 20 });
       const target = monsterProfile(`attack-target-${String(index)}`, { initiativeBonus: -20, hitPoints: 20 });
       const rng = sequenceRng(exemplar.rng);
       const result = reduceEncounter(
-        started(pack, caster, [target]), command(caster, exemplar.id, [target]), rng,
+        started(pack, caster, [target], [{ column: 0, row: 0 }, { column: exemplar.column, row: 0 }]),
+        command(caster, exemplar.id, [target]), rng,
       );
       expect(sharedBranches(result.events)).toEqual(['hit']);
       expect(hitPoints(result.state, target)).toBe(exemplar.hitPoints);
@@ -454,8 +458,10 @@ describe('D344.2 imported synchronized shared-outcome branches', () => {
     const pack = packWithSpells([{ id: 'ray-lifecycle', targeting: singleTarget, operation: rayOfSickness }]);
     const caster = playerProfile('ray-caster', { initiativeBonus: 20 });
     const target = monsterProfile('ray-target', { initiativeBonus: -20, hitPoints: 20 });
+    // Cast from 10 feet: no enemy within 5 feet, one d20 (docs/srd/full/srd-5.2.1.txt:911-917).
     let state = reduceEncounter(
-      started(pack, caster, [target]), command(caster, 'ray-lifecycle', [target]), sequenceRng([0.55, 0, 0]),
+      started(pack, caster, [target], [{ column: 0, row: 0 }, { column: 2, row: 0 }]),
+      command(caster, 'ray-lifecycle', [target]), sequenceRng([0.55, 0, 0]),
     ).state;
     expect(combatantConditions(state, target.id)).toContainEqual({ name: 'Poisoned' });
     state = reduceEncounter(state, { type: 'end_turn', actor: caster.id }, () => 0.5).state;
@@ -463,5 +469,33 @@ describe('D344.2 imported synchronized shared-outcome branches', () => {
     expect(combatantConditions(state, target.id)).toContainEqual({ name: 'Poisoned' });
     state = reduceEncounter(state, { type: 'end_turn', actor: caster.id }, () => 0.5).state;
     expect(combatantConditions(state, target.id)).not.toContainEqual({ name: 'Poisoned' });
+  });
+});
+
+describe('Ranged Attacks in Close Combat for an imported shared-outcome attack (docs/srd/full/srd-5.2.1.txt:911-917)', () => {
+  /*
+   * A shared outcome's attack delivery states melee or ranged. With the target
+   * monster 5 feet from the caster in bright light (it sees the caster and is
+   * alert), the ranged shapes roll two d20s (Disadvantage) and the melee shape
+   * one; from 10 feet every shape rolls one. The RNG is fixed at 0.5.
+   */
+  it('CC-SHARED-OUTCOME: the ranged attack shapes have Disadvantage within 5 feet of an alert enemy; the melee shape never does', () => {
+    const pack = packWithSpells([
+      { id: 'cc-shocking-grasp-shape', targeting: singleTarget, operation: shockingGrasp },
+      { id: 'cc-guiding-bolt-shape', targeting: singleTarget, operation: guidingBolt },
+    ]);
+    const rolled = (id: string, column: number) => {
+      const caster = playerProfile(`cc-shared-caster-${id}-${String(column)}`, { initiativeBonus: 20 });
+      const target = monsterProfile(`cc-shared-target-${id}-${String(column)}`, { initiativeBonus: -20, hitPoints: 20 });
+      const result = reduceEncounter(
+        started(pack, caster, [target], [{ column: 0, row: 0 }, { column, row: 0 }]),
+        command(caster, id, [target]), () => 0.5,
+      );
+      return result.events.flatMap((event) =>
+        event.type === 'attack_resolved' ? [`${event.attack.roll.mode}:${String(event.attack.roll.faces.length)}`] : []);
+    };
+    expect(rolled('cc-guiding-bolt-shape', 1)).toEqual(['disadvantage:2']);
+    expect(rolled('cc-guiding-bolt-shape', 2)).toEqual(['normal:1']);
+    expect(rolled('cc-shocking-grasp-shape', 1)).toEqual(['normal:1']);
   });
 });

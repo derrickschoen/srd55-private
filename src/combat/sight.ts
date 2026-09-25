@@ -139,7 +139,7 @@ export function canCombatantSee(
 
 /**
  * The attacker's enemies within 5 feet of its space, with the facts the
- * Ranged Attacks in Close Combat rule reads (rangedCloseCombatVerdict,
+ * Ranged Attacks in Close Combat rule reads (closeCombatVerdict,
  * docs/srd/full/srd-5.2.1.txt:911-917): a placed creature of the opposing
  * side that is not dead, whether it can see the attacker (canCombatantSee),
  * and whether it is Incapacitated. A creature at 0 Hit Points, dying or

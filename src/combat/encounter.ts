@@ -226,9 +226,11 @@ import {
   deathSaveFailuresFromZeroHitPointDamage,
   evaluateTacticalAttack,
   projectMonsterRollModeSources,
-  rangedCloseCombatVerdict,
+  attackRollDelivery,
+  closeCombatVerdict,
   tacticalRangeVerdict,
   tacticalRangeVerdictAtDistance,
+  type AttackRollDelivery,
   type AttackRollModeSource,
   type MonsterRollModeCombatantFacts,
   type MonsterRollModeFeatureInput,
@@ -2469,8 +2471,10 @@ function attackRollModeSources(
       sources.push({ mode: 'disadvantage', reason: 'long_range_disadvantage' });
     }
     // Ranged Attacks in Close Combat: the planner's rule, on the full state.
-    if (rangedCloseCombatVerdict(command.tacticalRange, distance, closeCombatEnemies(state, command.actor)).kind ===
-      'disadvantage') {
+    if (closeCombatVerdict(
+      attackRollDelivery(command.tacticalRange, distance),
+      closeCombatEnemies(state, command.actor),
+    ).kind === 'disadvantage') {
       sources.push({ mode: 'disadvantage', reason: 'ranged_close_combat_disadvantage' });
     }
   }
@@ -8519,13 +8523,54 @@ function forceMove(
   void source;
 }
 
+type SpellAttackOperation = Extract<SpellOperation, {
+  readonly kind:
+    | 'attack_damage'
+    | 'attack_then_save_damage'
+    | 'attack_damage_over_time'
+    | 'attack_rays'
+    | 'attack_beams'
+    | 'lifedrain_attack'
+    | 'summoned_weapon_attack';
+}>;
+
+/**
+ * The attack roll a spell attack operation makes. The kinds that state
+ * attackKind carry it; the other three are fixed by the spell they model:
+ * Scorching Ray, "Make a ranged spell attack for each ray"
+ * (docs/srd/source/spell-descriptions.txt:6678-6688); Vampiric Touch, "Make a
+ * melee spell attack" (:8158-8170); Spiritual Weapon, "make one melee spell
+ * attack" (:7353-7368).
+ */
+function spellAttackDelivery(operation: SpellAttackOperation): AttackRollDelivery {
+  switch (operation.kind) {
+    case 'attack_damage':
+    case 'attack_then_save_damage':
+    case 'attack_damage_over_time':
+    case 'attack_beams': return operation.attackKind;
+    case 'attack_rays': return 'ranged';
+    case 'lifedrain_attack': return 'melee';
+    case 'summoned_weapon_attack': return 'melee';
+  }
+}
+
 function rollSpellAttack(
   context: ReductionContext,
   command: SpellCastCommand,
   target: CombatantId,
+  delivery: AttackRollDelivery,
 ): ReturnType<typeof resolveAttackRoll> {
   const selectedLine = combatantLineVerdict(context.state, command.actor, target);
   if (selectedLine.blocksSight) throw new EncounterRuleError('validation', 'The spell target has Total Cover or is outside line of sight.');
+  // Ranged Attacks in Close Combat covers "a ranged attack roll with ... a
+  // spell" (docs/srd/full/srd-5.2.1.txt:911-917): the weapon path's rule, on
+  // the full state; a melee spell attack never has it.
+  const closeCombatMode: RollMode = closeCombatVerdict(
+    delivery,
+    closeCombatEnemies(context.state, command.actor),
+  ).kind === 'disadvantage'
+    ? 'disadvantage'
+    : 'normal';
   const rollModeEffects = context.state.effects.filter((effect) => {
     if (effect.payload.kind === 'faerie_fire') return effect.targets.includes(target);
     if (effect.payload.kind === 'attacks_against_target_roll_mode') {
@@ -8557,7 +8602,7 @@ function rollSpellAttack(
         command.rollModifierEffectIds,
       ),
     targetArmorClass: coverAdjustedArmorClass(context.state, command.actor, target),
-    rollMode: combineRollModes([visibilityMode, ...madeModes.modes, ...againstModes.modes, ...rollModeEffects.map((effect) =>
+    rollMode: combineRollModes([visibilityMode, closeCombatMode, ...madeModes.modes, ...againstModes.modes, ...rollModeEffects.map((effect) =>
       effect.payload.kind === 'faerie_fire'
         ? effect.payload.attackModeAgainstTarget
         : effect.payload.kind === 'attack_roll_mode_modifier' ||
@@ -8581,11 +8626,12 @@ function resolveSpellAttack(
   definition: SpellDefinition,
   command: SpellCastCommand,
   target: CombatantId,
+  operation: SpellAttackOperation,
   damage: ScaledDice,
   spellDamageType: DamageType,
   rider: EffectData | null,
 ): ReturnType<typeof resolveAttackRoll> {
-  const attack = rollSpellAttack(context, command, target);
+  const attack = rollSpellAttack(context, command, target, spellAttackDelivery(operation));
   let result: ReturnType<typeof resolveDamage> | null = null;
   if (attack.outcome !== 'miss') {
     const baseRequest: DamageRequest = {
@@ -9665,7 +9711,7 @@ function executeSharedOutcome(
   const outcomes: SpellOperationOutcome[] = [];
   for (const target of targets) {
     if ('onHit' in operation) {
-      const attack = rollSpellAttack(context, command, target);
+      const attack = rollSpellAttack(context, command, target, operation.delivery.attackKind);
       emit(context, { type: 'attack_resolved', actor: command.actor, target, attack, damage: null });
       const branch = attack.outcome === 'miss' ? 'miss' : 'hit';
       emit(context, {
@@ -10781,6 +10827,7 @@ function executeSpellOperation(
           definition,
           command,
           target,
+          operation,
           operation.dice,
           selectedSpellDamageType(definition, command, operation.damageType),
           operation.rider,
@@ -10805,6 +10852,7 @@ function executeSpellOperation(
         definition,
         command,
         primary,
+        operation,
         operation.attackDice,
         operation.attackDamageType,
         null,
@@ -10835,6 +10883,7 @@ function executeSpellOperation(
         definition,
         command,
         target,
+        operation,
         operation.initialDice,
         operation.damageType,
         null,
@@ -11149,7 +11198,7 @@ function executeSpellOperation(
     case 'lifedrain_attack': {
       const target = targets[0] as CombatantId;
       const before = combatant(context.state, target).hitPoints;
-      const attack = resolveSpellAttack(context, definition, command, target, operation.dice, operation.damageType, null);
+      const attack = resolveSpellAttack(context, definition, command, target, operation, operation.dice, operation.damageType, null);
       if (attack.outcome !== 'miss') {
         const dealt = before - combatant(context.state, target).hitPoints;
         applyHealing(context, command.actor, command.actor, Math.floor(dealt / operation.healingDivisor));
@@ -11159,12 +11208,12 @@ function executeSpellOperation(
     }
     case 'attack_rays':
       for (const target of targets) {
-        resolveSpellAttack(context, definition, command, target, operation.dice, operation.damageType, null);
+        resolveSpellAttack(context, definition, command, target, operation, operation.dice, operation.damageType, null);
       }
       return 'applied';
     case 'attack_beams':
       for (const target of targets) {
-        resolveSpellAttack(context, definition, command, target, operation.dice, operation.damageType, null);
+        resolveSpellAttack(context, definition, command, target, operation, operation.dice, operation.damageType, null);
       }
       return 'applied';
     case 'summoned_weapon_attack': {
@@ -11173,7 +11222,7 @@ function executeSpellOperation(
         ...operation.dice,
         modifier: operation.dice.modifier + command.spellcastingModifier,
       };
-      resolveSpellAttack(context, definition, command, target, diceWithModifier, operation.damageType, null);
+      resolveSpellAttack(context, definition, command, target, operation, diceWithModifier, operation.damageType, null);
       applySpellEffect(context, definition, command, operation.effect, [command.actor]);
       return 'applied';
     }

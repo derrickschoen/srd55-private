@@ -4,8 +4,9 @@ import {
   combineAttackRollMode,
   evaluateTacticalAttack,
   foldTacticalAttackSequence,
+  attackRollDelivery,
+  closeCombatVerdict,
   projectMonsterRollModeSources,
-  rangedCloseCombatVerdict,
   tacticalRangeVerdict,
   type CloseCombatEnemy,
   type MonsterRollModeFeatureInput,
@@ -594,12 +595,12 @@ describe('Ranged Attacks in Close Combat (docs/srd/full/srd-5.2.1.txt:911-917)',
     expect(expected(baseInput({ ...adjacentTarget, range: thrown, closeCombatEnemies: [enemy()] }))).toEqual(straight);
     expect(expected(baseInput({ range: thrown, closeCombatEnemies: [enemy()] }))).toEqual(disadvantage);
 
-    expect(rangedCloseCombatVerdict({ kind: 'ranged', normalRangeFeet: feet(30), longRangeFeet: feet(60) }, 30, [
+    expect(closeCombatVerdict(attackRollDelivery({ kind: 'ranged', normalRangeFeet: feet(30), longRangeFeet: feet(60) }, 30), [
       enemy({ id: combatantId('combatant:blind'), seesAttacker: false }),
       enemy({ id: combatantId('combatant:alert') }),
       enemy({ id: combatantId('combatant:far'), distanceFeet: 10 }),
     ])).toEqual({ kind: 'disadvantage', enemies: [combatantId('combatant:alert')] });
-    expect(rangedCloseCombatVerdict({ kind: 'melee', reachFeet: feet(5) }, 5, [enemy()])).toEqual({ kind: 'melee_attack' });
+    expect(closeCombatVerdict(attackRollDelivery({ kind: 'melee', reachFeet: feet(5) }, 5), [enemy()])).toEqual({ kind: 'melee_attack' });
   });
 
   it('CC-REDUCER: the goblin archer rolls two d20s at a PC 15 feet away while a second PC stands next to it, and one when that PC is Paralyzed, Blinded, dying, Stable, 10 feet away, or a goblin ally', () => {

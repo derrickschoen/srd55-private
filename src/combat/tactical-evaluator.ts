@@ -234,16 +234,25 @@ export interface CloseCombatEnemy<
 }
 
 /**
- * Whether an attack with this range, against a target this far away, is a
- * ranged attack roll: a ranged attack always; a melee-or-ranged (thrown)
- * attack beyond its reach, as tacticalRangeVerdict bands it; a melee attack
- * never.
+ * How an attack roll is made, which is what the close-combat rule reads: a
+ * melee attack roll or a ranged attack roll, "with a weapon, a spell, or some
+ * other means". A spell states it ("Make a ranged spell attack", "make a
+ * melee spell attack"); a weapon attack takes it from its range and distance
+ * (attackRollDelivery).
  */
-export function isRangedAttackAt(range: TacticalAttackRange, distanceFeet: number): boolean {
+export type AttackRollDelivery = 'melee' | 'ranged';
+
+/**
+ * The delivery of a weapon attack with this range against a target this far
+ * away: a ranged attack is always a ranged attack roll; a melee-or-ranged
+ * (thrown) attack is one beyond its reach, as tacticalRangeVerdict bands it;
+ * a melee attack never is.
+ */
+export function attackRollDelivery(range: TacticalAttackRange, distanceFeet: number): AttackRollDelivery {
   switch (range.kind) {
-    case 'melee': return false;
-    case 'ranged': return true;
-    case 'melee_or_ranged': return distanceFeet > range.reachFeet;
+    case 'melee': return 'melee';
+    case 'ranged': return 'ranged';
+    case 'melee_or_ranged': return distanceFeet > range.reachFeet ? 'ranged' : 'melee';
   }
 }
 
@@ -258,23 +267,24 @@ export type CloseCombatVerdict =
 /** With every enemy's sight known, the verdict is never unresolved. */
 export type KnownCloseCombatVerdict = Exclude<CloseCombatVerdict, { readonly kind: 'unresolved' }>;
 
-/** The one statement of the close-combat rule; the reducer and every planner apply it through this function. */
-export function rangedCloseCombatVerdict(
-  range: TacticalAttackRange,
-  targetDistanceFeet: number,
+/**
+ * The one statement of the close-combat rule. The reducer applies it to weapon
+ * and spell attack rolls, and every planner to the attacks it values, through
+ * this function.
+ */
+export function closeCombatVerdict(
+  delivery: AttackRollDelivery,
   enemies: readonly CloseCombatEnemy<boolean>[],
 ): KnownCloseCombatVerdict;
-export function rangedCloseCombatVerdict(
-  range: TacticalAttackRange,
-  targetDistanceFeet: number,
+export function closeCombatVerdict(
+  delivery: AttackRollDelivery,
   enemies: readonly CloseCombatEnemy[],
 ): CloseCombatVerdict;
-export function rangedCloseCombatVerdict(
-  range: TacticalAttackRange,
-  targetDistanceFeet: number,
+export function closeCombatVerdict(
+  delivery: AttackRollDelivery,
   enemies: readonly CloseCombatEnemy[],
 ): CloseCombatVerdict {
-  if (!isRangedAttackAt(range, targetDistanceFeet)) return { kind: 'melee_attack' };
+  if (delivery === 'melee') return { kind: 'melee_attack' };
   const alert = enemies.filter((enemy) =>
     enemy.distanceFeet <= CLOSE_COMBAT_DISTANCE_FEET && !enemy.incapacitated);
   const seeing = alert.filter((enemy) => enemy.seesAttacker === true);
@@ -303,7 +313,7 @@ export interface TacticalAttackInput {
   readonly featureRollModeInput: MonsterRollModeFeatureInput | null;
   /**
    * The attacker's enemies near its space at attackerPosition, for the
-   * close-combat rule (rangedCloseCombatVerdict reads those within
+   * close-combat rule (closeCombatVerdict reads those within
    * CLOSE_COMBAT_DISTANCE_FEET). Every caller states them: an empty list
    * asserts that no enemy is within 5 feet.
    */
@@ -727,7 +737,7 @@ export function evaluateTacticalAttack(
     input.range,
   );
   const distanceFeet = range.distanceFeet;
-  const closeCombat = rangedCloseCombatVerdict(input.range, distanceFeet, input.closeCombatEnemies);
+  const closeCombat = closeCombatVerdict(attackRollDelivery(input.range, distanceFeet), input.closeCombatEnemies);
   const rangeSources: AttackRollModeSource[] = [
     ...(range.status === 'resolved' && range.band === 'long'
       ? [{ mode: 'disadvantage', reason: 'long_range_disadvantage' } as const]
