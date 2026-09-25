@@ -41,11 +41,11 @@ export {
 } from './combat-rules';
 import { EncounterRuleError } from './encounter-rule-error';
 import {
+  combatantLineVerdict,
+  combatantLineVerdictToCells,
   coverBetweenCombatants,
   coverTierBetweenObjects as coverTierBetweenWorldObjects,
-  traceCombatantLine,
-  traceCombatantLineToCells,
-  traceTerrainLine,
+  terrainLineVerdict,
 } from './cover';
 export {
   coverBetweenCombatants,
@@ -2116,7 +2116,7 @@ export function hasLineOfSight(
   from: GridCell,
   to: GridCell,
 ): boolean {
-  return !traceTerrainLine(state, from, to).blocksSight;
+  return !terrainLineVerdict(state, from, to).blocksSight;
 }
 
 export function coverTierBetween(
@@ -2124,7 +2124,7 @@ export function coverTierBetween(
   from: GridCell,
   to: GridCell,
 ): CoverTier {
-  return traceTerrainLine(state, from, to).tier;
+  return terrainLineVerdict(state, from, to).tier;
 }
 
 export function coverTierBetweenObjects(
@@ -2183,7 +2183,7 @@ export function detectCombatant(
   observer: CombatantId,
   subject: CombatantId,
 ): DetectionResult {
-  const line = traceCombatantLine(state, observer, subject);
+  const line = combatantLineVerdict(state, observer, subject);
   const to = line.targetCell;
   const distance = minimumSpaceDistance(combatantSpace(state, observer), combatantSpace(state, subject));
   const senses = effectiveCombatRules(state, observer).senses;
@@ -4810,7 +4810,7 @@ function perceptionMode(
   if (effectiveCombatRules(state, observer).detectionTraits.includes('keen_sight')) {
     modes.push('advantage');
   }
-  const subjectCell = traceCombatantLine(state, observer, subject).targetCell;
+  const subjectCell = combatantLineVerdict(state, observer, subject).targetCell;
   const light = environmentLightAt(state.environment, subjectCell);
   const obscurement = environmentObscurementAt(state.environment, subjectCell);
   // Lightly Obscured sight checks have Disadvantage: docs/srd/full/srd-5.2.1.txt:656-660.
@@ -7251,7 +7251,7 @@ function processAttack(
   if (cannotHarmTarget(context.state, command.actor, command.target)) {
     throw new EncounterRuleError('validation', 'The Charmed condition prohibits harming this target.');
   }
-  const attackLine = traceCombatantLine(context.state, command.actor, command.target);
+  const attackLine = combatantLineVerdict(context.state, command.actor, command.target);
   if (opportunityTrigger === null && command.tacticalRange !== undefined) {
     const range = tacticalRangeVerdictAtDistance(
       minimumSpaceDistance(
@@ -7269,7 +7269,7 @@ function processAttack(
   }
   if (
     opportunityTrigger === null &&
-    (attackLine.blocksSight || attackLine.tier === 'total')
+    attackLine.blocksSight
   ) {
     throw new EncounterRuleError('validation', 'The target has Total Cover or is outside line of sight.');
   }
@@ -7545,7 +7545,7 @@ function processSuspectedSquareAttack(
   if (!memory.suspicion.cells.some((cell) => cellKey(cell) === cellKey(command.square))) {
     throw new EncounterRuleError('validation', 'The selected square is outside the active suspicion region.');
   }
-  const selectedLine = traceCombatantLineToCells(context.state, command.actor, [command.square]);
+  const selectedLine = combatantLineVerdictToCells(context.state, command.actor, [command.square]);
   if (command.tacticalRange !== undefined) {
     const range = tacticalRangeVerdictAtDistance(
       minimumSpaceDistanceToCells(combatantSpace(context.state, command.actor), [command.square]),
@@ -7558,9 +7558,7 @@ function processSuspectedSquareAttack(
       throw new EncounterRuleError('validation', 'The suspected square is out of attack range.');
     }
   }
-  if (
-    selectedLine.blocksSight || selectedLine.tier === 'total'
-  ) {
+  if (selectedLine.blocksSight) {
     throw new EncounterRuleError('validation', 'The suspected square has Total Cover or is outside line of sight.');
   }
   const ordinaryAttack: Extract<EncounterCommand, { readonly type: 'attack' }> = {
@@ -8634,10 +8632,8 @@ function rollSpellAttack(
   command: SpellCastCommand,
   target: CombatantId,
 ): ReturnType<typeof resolveAttackRoll> {
-  const selectedLine = traceCombatantLine(context.state, command.actor, target);
-  if (
-    selectedLine.blocksSight || selectedLine.tier === 'total'
-  ) throw new EncounterRuleError('validation', 'The spell target has Total Cover or is outside line of sight.');
+  const selectedLine = combatantLineVerdict(context.state, command.actor, target);
+  if (selectedLine.blocksSight) throw new EncounterRuleError('validation', 'The spell target has Total Cover or is outside line of sight.');
   const rollModeEffects = context.state.effects.filter((effect) => {
     if (effect.payload.kind === 'faerie_fire') return effect.targets.includes(target);
     if (effect.payload.kind === 'attacks_against_target_roll_mode') {
@@ -9119,7 +9115,7 @@ function executeHeatMetal(
     throw new EquipmentRuleError('material_mismatch', `${definition.name} requires a metal item.`);
   }
   const targetCells = itemCells(context.state, id);
-  const selectedLine = traceCombatantLineToCells(context.state, command.actor, targetCells);
+  const selectedLine = combatantLineVerdictToCells(context.state, command.actor, targetCells);
   if (
     minimumSpaceDistanceToCells(combatantSpace(context.state, command.actor), targetCells) > heatMetalRange(definition) ||
     selectedLine.blocksSight
@@ -10755,7 +10751,7 @@ function executeSpellOperation(
         }
         const destination = declared.destination;
         const destinationSpace = combatantSpaceAt(context.state, mover, destination);
-        const selectedLine = traceCombatantLineToCells(context.state, command.actor, [destination]);
+        const selectedLine = combatantLineVerdictToCells(context.state, command.actor, [destination]);
         const occupied = context.state.tokens.some((placed) =>
           !movingIds.has(placed.combatantId) && combatant(context.state, placed.combatantId).life !== 'dead' &&
           spacesIntersect(destinationSpace, combatantSpace(context.state, placed.combatantId))) ||

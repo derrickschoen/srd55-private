@@ -1,7 +1,7 @@
 import { canonicalJson } from '../commands/canonical-json';
 import { combatantSpace } from '../combat/combat-rules';
 import { minimumSpaceDistanceToCells, minimumSpaceLine } from '../combat/creature-space';
-import { traceCombatantLine } from '../combat/cover';
+import { combatantLineVerdict } from '../combat/cover';
 import type { EncounterState } from '../combat/encounter';
 import { gridDistance, type GridCell } from '../combat/grid';
 import type {
@@ -276,7 +276,7 @@ function positionFits(
     if (constraint.source.kind === 'spell') {
       const distance = queries.spaceDistance(state, actorId, constraint.targetId, position);
       if (distance === null || distance > constraint.rangeFeet ||
-        (constraint.source.requiresSight && traceCombatantLine(
+        (constraint.source.requiresSight && combatantLineVerdict(
           state, actorId, constraint.targetId, { sourceAnchor: position },
         ).blocksSight)) return false;
       continue;

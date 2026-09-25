@@ -2,7 +2,7 @@ import { combatantFaction, combatantsAreAllies } from '../combat/allies';
 import { conditionSpeedPenaltyFeet, exhaustionPenalty, isIncapacitated } from '../combat/conditions';
 import { creatureSizes, type KnownCreatureSize } from '../domain/enums';
 import type { EncounterCombatantState, EncounterState } from '../combat/encounter';
-import { coverBetweenCombatants, traceCombatantLine } from '../combat/cover';
+import { combatantLineVerdict, coverBetweenCombatants } from '../combat/cover';
 import {
   applySizeSteps,
   creatureSpace,
@@ -827,7 +827,7 @@ function detect(state: EncounterState, observer: CombatantId, subject: Combatant
   const observerPlaced = state.tokens.some((token) => token.combatantId === observer);
   const subjectPlaced = state.tokens.some((token) => token.combatantId === subject);
   if (observerState === null || combatant(state, subject) === null || !observerPlaced || !subjectPlaced) return null;
-  const line = traceCombatantLine(state, observer, subject);
+  const line = combatantLineVerdict(state, observer, subject);
   const distance = minimumSpaceDistance(queryCombatantSpace(state, observer), queryCombatantSpace(state, subject));
   const senses = rulesFor(observerState).senses;
   if (senses.some((sense) => sense.kind === 'blindsight' && distance <= sense.rangeFeet) && !line.blocksSight) {
@@ -1262,7 +1262,7 @@ function reach(state: EncounterState, request: EngineReachRequest): EngineReachR
   const targetSpace = queryCombatantSpace(state, request.targetId);
   const distanceFeet = minimumSpaceDistance(actorSpace, targetSpace);
   if ((action.kind === 'attack' || action.kind === 'saving_throw') &&
-    traceCombatantLine(state, request.actorId, request.targetId, { sourceAnchor: origin }).tier === 'total') {
+    combatantLineVerdict(state, request.actorId, request.targetId, { sourceAnchor: origin }).tier === 'total') {
     return { legal: false, codes: ['target_has_total_cover'] };
   }
   if (action.kind === 'attack') {
@@ -1636,7 +1636,7 @@ export function projectedMovementOptions(
     if (target.reciprocalVisibility.kind === 'unknown') {
       return { status: 'unresolved', reason: 'visibility_unresolved' };
     }
-    const cover = traceCombatantLine(state, request.actorId, request.targetId, { sourceAnchor: position }).tier;
+    const cover = combatantLineVerdict(state, request.actorId, request.targetId, { sourceAnchor: position }).tier;
     const selectedLine = minimumSpaceLine(
       queryCombatantSpaceAt(state, request.actorId, position),
       decodeProjectedCreatureSpace(target),

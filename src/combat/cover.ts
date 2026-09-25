@@ -35,17 +35,16 @@ export function rasterizeInterveningCells(from: GridCell, to: GridCell): readonl
   return result;
 }
 
-function objectOccupiesCell(object: WorldObject, cell: GridCell): boolean {
-  return object.footprint.some((candidate) => cellKey(candidate) === cellKey(cell));
-}
-
 export interface CornerPoint {
   readonly column: number;
   readonly row: number;
 }
 
+/** The four outer corners of a space, row-major: top-left, top-right, bottom-left, bottom-right. */
+export type OuterCorners = readonly [CornerPoint, CornerPoint, CornerPoint, CornerPoint];
+
 /** Row-major outer corners: top-left, top-right, bottom-left, bottom-right. */
-export function outerCorners(cells: readonly GridCell[]): readonly CornerPoint[] {
+export function outerCorners(cells: readonly GridCell[]): OuterCorners {
   const first = cells[0];
   if (first === undefined) throw new RangeError('A line query requires a non-empty space.');
   let minimumColumn = first.column;
@@ -68,7 +67,10 @@ export function outerCorners(cells: readonly GridCell[]): readonly CornerPoint[]
   ];
 }
 
-/** A corner ray crosses only a cell interior; a boundary graze is not a crossing. */
+/**
+ * A corner ray crosses only a cell interior; a boundary graze is not a crossing. This is the
+ * definition walkCornerLine implements exactly; the engine no longer calls it per cell.
+ */
 export function cornerLineCrossesCell(from: CornerPoint, to: CornerPoint, cell: GridCell): boolean {
   const epsilon = 1e-9;
   let entry = 0;
@@ -98,15 +100,49 @@ export function cornerLineCrossesCell(from: CornerPoint, to: CornerPoint, cell: 
   return entry <= exit && exit > 0 && entry < 1;
 }
 
-function lineProgress(from: CornerPoint, to: CornerPoint, cell: GridCell): number {
+/**
+ * Visits, in source-to-target order, every cell whose open interior the segment between two
+ * lattice points crosses (D576.3: a boundary graze or a pass through a grid corner is not a
+ * crossing). Integer arithmetic only, an exact Amanatides-Woo traversal: the segment meets its
+ * k-th vertical grid line at t = k / |dx| and its k-th horizontal one at t = k / |dy|, so the
+ * next crossing is found by comparing nextColumn * |dy| with nextRow * |dx|. A tie is a lattice
+ * point: the segment passes diagonally through that grid corner and only touches the two side
+ * cells there, so both axes advance together. An axis-parallel or zero-length segment lies on
+ * grid lines and crosses no interior. It visits |dx| + |dy| - gcd(|dx|, |dy|) cells, and the
+ * cell centres' projections onto the segment strictly increase, which is the old
+ * rasterizer's sort order.
+ */
+export function walkCornerLine(
+  from: CornerPoint,
+  to: CornerPoint,
+  visit: (column: number, row: number) => void,
+): void {
   const columnDelta = to.column - from.column;
   const rowDelta = to.row - from.row;
-  const magnitudeSquared = columnDelta * columnDelta + rowDelta * rowDelta;
-  if (magnitudeSquared === 0) return 0;
-  return (
-    (cell.column + 0.5 - from.column) * columnDelta +
-    (cell.row + 0.5 - from.row) * rowDelta
-  ) / magnitudeSquared;
+  if (columnDelta === 0 || rowDelta === 0) return;
+  const columnSpan = Math.abs(columnDelta);
+  const rowSpan = Math.abs(rowDelta);
+  const columnStep = columnDelta > 0 ? 1 : -1;
+  const rowStep = rowDelta > 0 ? 1 : -1;
+  // The first cell is the one the segment enters from its start corner.
+  let column = columnDelta > 0 ? from.column : from.column - 1;
+  let row = rowDelta > 0 ? from.row : from.row - 1;
+  let nextColumn = 1;
+  let nextRow = 1;
+  for (;;) {
+    visit(column, row);
+    if (nextColumn >= columnSpan && nextRow >= rowSpan) return;
+    const columnCrossing = nextColumn * rowSpan;
+    const rowCrossing = nextRow * columnSpan;
+    if (columnCrossing <= rowCrossing) {
+      column += columnStep;
+      nextColumn += 1;
+    }
+    if (rowCrossing <= columnCrossing) {
+      row += rowStep;
+      nextRow += 1;
+    }
+  }
 }
 
 /** Rasterizes a corner ray in source-to-target traversal order. */
@@ -116,14 +152,28 @@ export function rasterizeCornerLine(
   candidates: readonly GridCell[],
 ): readonly GridCell[] {
   const crossed: GridCell[] = [];
-  for (const cell of candidates) {
-    if (cornerLineCrossesCell(from, to, cell)) crossed.push(cell);
-  }
-  if (crossed.length > 1) {
-    crossed.sort((left, right) =>
-      lineProgress(from, to, left) - lineProgress(from, to, right) || compareCells(left, right));
-  }
+  walkCornerLine(from, to, (column, row) => {
+    for (const candidate of candidates) {
+      if (candidate.column === column && candidate.row === row) crossed.push(candidate);
+    }
+  });
   return crossed;
+}
+
+/**
+ * Every cell that some corner ray between two spaces crosses, with repeats. Every source a line
+ * between those spaces can count lies on one of these cells, so a change confined to other cells
+ * cannot change that line.
+ */
+export function visitCornerRayCells(
+  sourceCells: readonly GridCell[],
+  targetCells: readonly GridCell[],
+  visit: (column: number, row: number) => void,
+): void {
+  const targetCorners = outerCorners(targetCells);
+  for (const sourceCorner of outerCorners(sourceCells)) {
+    for (const targetCorner of targetCorners) walkCornerLine(sourceCorner, targetCorner, visit);
+  }
 }
 
 export interface TerrainLineSource {
@@ -142,25 +192,55 @@ export interface TerrainCornerLineTrace {
   readonly firstBlockingCell: GridCell | null;
 }
 
-export interface TerrainLineTrace {
-  /** Stable nearest occupied cells retained for attack-position consumers, not cover geometry. */
-  readonly sourceCell: GridCell;
-  readonly targetCell: GridCell;
-  readonly sourceCorner: CornerPoint;
-  readonly lines: readonly TerrainCornerLineTrace[];
-  readonly interveningCells: readonly GridCell[];
-  readonly tier: CoverTier;
-  readonly blocksSight: boolean;
-  readonly sourceIds: readonly string[];
-  readonly sources: readonly TerrainLineSource[];
-  readonly firstBlockingCell: GridCell | null;
-}
+/**
+ * What rules callers ask of a line: sight and cover between two spaces, plus the stable nearest
+ * occupied cells that attack-position consumers read. Total Cover exactly when sight is blocked:
+ * the chosen source corner's four lines all cross a sight-blocking source (D576.3), so the type
+ * cannot pair Total Cover with clear sight or blocked sight with lesser cover.
+ */
+export type LineVerdict =
+  | {
+      readonly sourceCell: GridCell;
+      readonly targetCell: GridCell;
+      readonly tier: 'total';
+      readonly blocksSight: true;
+      readonly sourceIds: readonly string[];
+    }
+  | {
+      readonly sourceCell: GridCell;
+      readonly targetCell: GridCell;
+      readonly tier: Exclude<CoverTier, 'total'>;
+      readonly blocksSight: false;
+      readonly sourceIds: readonly string[];
+    };
 
-export interface TerrainLineOptions {
-  readonly sourceId?: CombatantId;
-  readonly targetId?: CombatantId;
-  readonly includeCreatures?: boolean;
-}
+/** The per-line evidence behind a verdict; the first blocking cell exists exactly when sight is blocked. */
+export type TerrainLineTrace =
+  | {
+      /** Stable nearest occupied cells retained for attack-position consumers, not cover geometry. */
+      readonly sourceCell: GridCell;
+      readonly targetCell: GridCell;
+      readonly sourceCorner: CornerPoint;
+      readonly lines: readonly TerrainCornerLineTrace[];
+      readonly interveningCells: readonly GridCell[];
+      readonly tier: 'total';
+      readonly blocksSight: true;
+      readonly sourceIds: readonly string[];
+      readonly sources: readonly TerrainLineSource[];
+      readonly firstBlockingCell: GridCell;
+    }
+  | {
+      readonly sourceCell: GridCell;
+      readonly targetCell: GridCell;
+      readonly sourceCorner: CornerPoint;
+      readonly lines: readonly TerrainCornerLineTrace[];
+      readonly interveningCells: readonly GridCell[];
+      readonly tier: Exclude<CoverTier, 'total'>;
+      readonly blocksSight: false;
+      readonly sourceIds: readonly string[];
+      readonly sources: readonly TerrainLineSource[];
+      readonly firstBlockingCell: null;
+    };
 
 function taggedSourceId(source: TerrainLineSource): string {
   switch (source.kind) {
@@ -170,215 +250,224 @@ function taggedSourceId(source: TerrainLineSource): string {
   }
 }
 
-interface TerrainSourceCell {
+/** One cell holding cover sources, in the canonical order: walls, then objects, then creatures. */
+interface SourceCell {
   readonly cell: GridCell;
-  readonly sources: TerrainLineSource[];
+  readonly sources: readonly TerrainLineSource[];
 }
 
-function addSource(
-  sourceCells: Map<string, TerrainSourceCell>,
-  cell: GridCell,
-  source: TerrainLineSource,
-  exclusions: ReadonlySet<string>,
-): void {
-  const key = cellKey(cell);
-  if (exclusions.has(key)) return;
-  const existing = sourceCells.get(key);
-  if (existing === undefined) {
-    sourceCells.set(key, { cell: { ...cell }, sources: [source] });
-  } else {
-    existing.sources.push(source);
+/**
+ * A dense row-major grid over the bounding box of every source cell: one array read per visited
+ * cell. Cells outside the box hold no source.
+ */
+interface SourceGrid {
+  readonly minimumColumn: number;
+  readonly minimumRow: number;
+  readonly width: number;
+  readonly height: number;
+  readonly cells: readonly (SourceCell | undefined)[];
+}
+
+interface PlacedSource {
+  readonly cell: GridCell;
+  readonly source: TerrainLineSource;
+}
+
+function sourceGrid(placed: readonly PlacedSource[]): SourceGrid {
+  if (placed.length === 0) return { minimumColumn: 0, minimumRow: 0, width: 0, height: 0, cells: [] };
+  let minimumColumn = Number.POSITIVE_INFINITY;
+  let minimumRow = Number.POSITIVE_INFINITY;
+  let maximumColumn = Number.NEGATIVE_INFINITY;
+  let maximumRow = Number.NEGATIVE_INFINITY;
+  for (const { cell } of placed) {
+    minimumColumn = Math.min(minimumColumn, cell.column);
+    minimumRow = Math.min(minimumRow, cell.row);
+    maximumColumn = Math.max(maximumColumn, cell.column);
+    maximumRow = Math.max(maximumRow, cell.row);
   }
+  const width = maximumColumn - minimumColumn + 1;
+  const height = maximumRow - minimumRow + 1;
+  const building: ({ readonly cell: GridCell; readonly sources: TerrainLineSource[] } | undefined)[] =
+    new Array<undefined>(width * height).fill(undefined);
+  for (const { cell, source } of placed) {
+    const index = (cell.row - minimumRow) * width + cell.column - minimumColumn;
+    const existing = building[index];
+    if (existing === undefined) building[index] = { cell: { ...cell }, sources: [source] };
+    else existing.sources.push(source);
+  }
+  return { minimumColumn, minimumRow, width, height, cells: building };
 }
 
-interface TerrainSourceIndexes {
-  readonly terrain: ReadonlyMap<string, TerrainSourceCell>;
-  withCreatures?: ReadonlyMap<string, TerrainSourceCell>;
+function sourceAt(grid: SourceGrid, column: number, row: number): SourceCell | undefined {
+  const localColumn = column - grid.minimumColumn;
+  const localRow = row - grid.minimumRow;
+  if (localColumn < 0 || localRow < 0 || localColumn >= grid.width || localRow >= grid.height) return undefined;
+  return grid.cells[localRow * grid.width + localColumn];
 }
 
-const terrainSourceIndexes = new WeakMap<EncounterState, TerrainSourceIndexes>();
-const terrainLineTraces = new WeakMap<EncounterState, Map<string, TerrainLineTrace>>();
-const combatantLineTraces = new WeakMap<EncounterState, Map<string, TerrainLineTrace>>();
-const terrainSourceSignatures = new WeakMap<EncounterState, Map<boolean, string>>();
-const equivalentTerrainLineTraces = new Map<string, TerrainLineTrace>();
-const EQUIVALENT_TRACE_CACHE_LIMIT = 4_096;
-
-function terrainSourceSignature(
-  state: EncounterState,
-  includeCreatures: boolean,
-  indexedSources: ReadonlyMap<string, TerrainSourceCell>,
-): string {
-  const stateSignatures = terrainSourceSignatures.get(state) ?? new Map<boolean, string>();
-  const cached = stateSignatures.get(includeCreatures);
-  if (cached !== undefined) return cached;
-  const signature = [...indexedSources].map(([key, entry]) =>
-    `${key}=${entry.sources.map((source) => `${taggedSourceId(source)}:${source.tier}`).join(',')}`)
-    .join('|');
-  stateSignatures.set(includeCreatures, signature);
-  if (!terrainSourceSignatures.has(state)) terrainSourceSignatures.set(state, stateSignatures);
-  return signature;
-}
-
-function retainEquivalentTrace(key: string, trace: TerrainLineTrace): void {
-  equivalentTerrainLineTraces.set(key, trace);
-  if (equivalentTerrainLineTraces.size <= EQUIVALENT_TRACE_CACHE_LIMIT) return;
-  const oldest = equivalentTerrainLineTraces.keys().next().value;
-  if (typeof oldest === 'string') equivalentTerrainLineTraces.delete(oldest);
-}
-
-function buildTerrainSourceIndex(
-  state: EncounterState,
-  includeCreatures: boolean,
-  terrain?: ReadonlyMap<string, TerrainSourceCell>,
-): ReadonlyMap<string, TerrainSourceCell> {
-  const sourceCells: Map<string, TerrainSourceCell> = terrain === undefined
-    ? new Map<string, TerrainSourceCell>()
-    : new Map([...terrain].map(([key, entry]) => [key, {
-        cell: { ...entry.cell }, sources: [...entry.sources],
-      }] as const));
-  const exclusions = new Set<string>();
-  if (terrain === undefined) {
-    for (const cell of state.blockedCells) {
-      addSource(sourceCells, cell, {
-        kind: 'blocked_cell', id: `${String(cell.column)},${String(cell.row)}`, tier: 'total',
-      }, exclusions);
-    }
-    for (const object of state.worldObjects) {
-      if (object.blocking.cover === 'none') continue;
-      for (const cell of object.footprint) {
-        addSource(sourceCells, cell, {
-          kind: 'world_object', id: String(object.id), tier: object.blocking.cover,
-        }, exclusions);
-      }
+function terrainSources(state: EncounterState): PlacedSource[] {
+  const placed: PlacedSource[] = [];
+  for (const cell of state.blockedCells) {
+    placed.push({ cell, source: { kind: 'blocked_cell', id: `${String(cell.column)},${String(cell.row)}`, tier: 'total' } });
+  }
+  for (const object of state.worldObjects) {
+    if (object.blocking.cover === 'none') continue;
+    for (const cell of object.footprint) {
+      placed.push({ cell, source: { kind: 'world_object', id: String(object.id), tier: object.blocking.cover } });
     }
   }
-  if (!includeCreatures) return sourceCells;
+  return placed;
+}
+
+/** Every placed creature that is not dead occupies its space as Half Cover (D514). */
+function creatureSources(state: EncounterState): PlacedSource[] {
+  const placed: PlacedSource[] = [];
   for (const candidate of state.combatants) {
     const id = candidate.profile.id;
     if (candidate.life === 'dead') continue;
     if (!state.tokens.some((token) => token.combatantId === id)) continue;
     for (const cell of combatantSpace(state, id).cells) {
-      addSource(sourceCells, cell, { kind: 'creature', id: String(id), tier: 'half' }, exclusions);
+      placed.push({ cell, source: { kind: 'creature', id: String(id), tier: 'half' } });
     }
   }
-  return sourceCells;
+  return placed;
 }
 
-function indexedTerrainSources(
-  state: EncounterState,
-  includeCreatures: boolean,
-): ReadonlyMap<string, TerrainSourceCell> {
-  const cached = terrainSourceIndexes.get(state);
-  if (cached !== undefined) {
-    if (!includeCreatures) return cached.terrain;
-    const withCreatures = cached.withCreatures ?? buildTerrainSourceIndex(state, true, cached.terrain);
-    cached.withCreatures = withCreatures;
-    return withCreatures;
+/** What a line may count as an obstruction. */
+type LineObstructions = { readonly kind: 'terrain' } | { readonly kind: 'terrain_and_creatures' };
+
+interface StateSourceGrids {
+  readonly terrain: SourceGrid;
+  withCreatures?: SourceGrid;
+}
+
+/**
+ * The one per-state memo left in cover: the source grid (every trace reads it, and rebuilding it
+ * per trace doubles trace cost). Traces themselves are not memoized.
+ */
+const stateSourceGrids = new WeakMap<EncounterState, StateSourceGrids>();
+
+function stateSourceGrid(state: EncounterState, obstructions: LineObstructions): SourceGrid {
+  let grids = stateSourceGrids.get(state);
+  if (grids === undefined) {
+    grids = { terrain: sourceGrid(terrainSources(state)) };
+    stateSourceGrids.set(state, grids);
   }
-  const terrain = buildTerrainSourceIndex(state, false);
-  const entry: TerrainSourceIndexes = { terrain };
-  terrainSourceIndexes.set(state, entry);
-  if (!includeCreatures) return terrain;
-  const withCreatures = buildTerrainSourceIndex(state, true, terrain);
-  entry.withCreatures = withCreatures;
-  return withCreatures;
+  switch (obstructions.kind) {
+    case 'terrain': return grids.terrain;
+    case 'terrain_and_creatures': {
+      grids.withCreatures ??= sourceGrid([...terrainSources(state), ...creatureSources(state)]);
+      return grids.withCreatures;
+    }
+  }
 }
 
 function uniqueSources(sources: readonly TerrainLineSource[]): readonly TerrainLineSource[] {
-  return sources
-    .filter((source, index, all) =>
-      all.findIndex((candidate) => taggedSourceId(candidate) === taggedSourceId(source)) === index)
-    .sort((left, right) => taggedSourceId(left).localeCompare(taggedSourceId(right)));
-}
-
-function traceCornerLine(
-  from: CornerPoint,
-  to: CornerPoint,
-  candidates: readonly GridCell[],
-  sourcesAt: (cell: GridCell) => readonly TerrainLineSource[],
-): TerrainCornerLineTrace {
-  const interveningCells = rasterizeCornerLine(from, to, candidates);
-  let tier: CoverTier = 'none';
-  let strongest: TerrainLineSource[] = [];
-  let firstBlockingCell: GridCell | null = null;
-  for (const cell of interveningCells) {
-    for (const source of sourcesAt(cell)) {
-      if (source.tier === 'total' && firstBlockingCell === null) firstBlockingCell = { ...cell };
-      const comparison = coverRank(source.tier) - coverRank(tier);
-      if (comparison > 0) {
-        tier = source.tier;
-        strongest = [source];
-      } else if (comparison === 0) {
-        strongest.push(source);
-      }
-    }
+  const seen = new Set<string>();
+  const unique: { readonly id: string; readonly source: TerrainLineSource }[] = [];
+  for (const source of sources) {
+    const id = taggedSourceId(source);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    unique.push({ id, source });
   }
-  const sources = uniqueSources(strongest);
-  return {
-    targetCorner: { ...to },
-    interveningCells,
-    tier,
-    blocksSight: firstBlockingCell !== null,
-    sourceIds: sources.map(taggedSourceId),
-    sources,
-    firstBlockingCell,
-  };
+  return unique.sort((left, right) => left.id.localeCompare(right.id)).map((entry) => entry.source);
 }
 
+/** The sources a line between two spaces can cross: the spaces' own cells never obstruct it. */
+interface LineContext {
+  readonly grid: SourceGrid;
+  readonly sourceCells: readonly GridCell[];
+  readonly targetCells: readonly GridCell[];
+}
+
+function spaceContains(cells: readonly GridCell[], column: number, row: number): boolean {
+  for (const cell of cells) if (cell.column === column && cell.row === row) return true;
+  return false;
+}
+
+const TOTAL_RANK = coverRank('total');
+const THREE_QUARTERS_RANK = coverRank('three_quarters');
 const COVER_TIER_BY_RANK = ['none', 'half', 'three_quarters', 'total'] as const satisfies readonly CoverTier[];
 
-function countTier(obstructedLineCount: number): CoverTier {
-  if (obstructedLineCount === 0) return 'none';
-  if (obstructedLineCount <= 2) return 'half';
-  if (obstructedLineCount === 3) return 'three_quarters';
-  return 'total';
+function tierOfRank(rank: number): CoverTier {
+  const tier = COVER_TIER_BY_RANK[rank];
+  if (tier === undefined) throw new RangeError(`No cover tier has rank ${String(rank)}.`);
+  return tier;
 }
 
-function aggregateCornerLines(
-  sourceCorner: CornerPoint,
-  lines: readonly TerrainCornerLineTrace[],
-  sourceCell: GridCell,
-  targetCell: GridCell,
-): TerrainLineTrace {
-  const blocksSight = lines.length === 4 && lines.every((line) => line.blocksSight);
-  const obstructed = lines.filter((line) => line.tier !== 'none');
-  const strongestLineTier = obstructed.reduce<CoverTier>((strongest, line) =>
-    coverRank(line.tier) > coverRank(strongest) ? line.tier : strongest, 'none');
-  const tier = blocksSight
-    ? 'total'
-    : COVER_TIER_BY_RANK[Math.min(
-        coverRank(countTier(obstructed.length)),
-        coverRank(strongestLineTier),
-        coverRank('three_quarters'),
-      )] ?? 'none';
-  const sources = tier === 'none'
-    ? []
-    : uniqueSources(obstructed
-        .filter((line) => line.tier === strongestLineTier)
-        .flatMap((line) => line.sources));
-  const interveningCells = [...new Map(lines
-    .flatMap((line) => line.interveningCells)
-    .map((cell) => [cellKey(cell), cell] as const)).values()];
-  const firstSightBlockingLine = blocksSight ? lines.find((line) => line.blocksSight) : undefined;
-  return {
-    sourceCell: { ...sourceCell },
-    targetCell: { ...targetCell },
-    sourceCorner: { ...sourceCorner },
-    lines,
-    interveningCells,
-    tier,
-    blocksSight,
-    sourceIds: sources.map(taggedSourceId),
-    sources,
-    firstBlockingCell: firstSightBlockingLine?.firstBlockingCell ?? null,
-  };
+/**
+ * Walks one corner line and returns the rank of the strongest source it crosses (0 when it crosses
+ * none). A line blocks sight exactly when that rank is Total's: only sight-blocking sources are
+ * Total. When `crossed` is given, the crossed source cells are appended in traversal order.
+ */
+function scanCornerLine(context: LineContext, from: CornerPoint, to: CornerPoint, crossed?: SourceCell[]): number {
+  let rank = 0;
+  walkCornerLine(from, to, (column, row) => {
+    const entry = sourceAt(context.grid, column, row);
+    if (entry === undefined || spaceContains(context.sourceCells, column, row) ||
+      spaceContains(context.targetCells, column, row)) return;
+    for (const source of entry.sources) {
+      const sourceRank = coverRank(source.tier);
+      if (sourceRank > rank) rank = sourceRank;
+    }
+    crossed?.push(entry);
+  });
+  return rank;
 }
 
-function compareCornerTraces(left: TerrainLineTrace, right: TerrainLineTrace): number {
-  return Number(left.blocksSight) - Number(right.blocksSight) ||
-    coverRank(left.tier) - coverRank(right.tier) ||
-    left.sourceCorner.row - right.sourceCorner.row ||
-    left.sourceCorner.column - right.sourceCorner.column;
+/** Number of obstructed lines to tier rank (D576.3): 0 none, 1-2 half, 3 three-quarters, 4 total. */
+function countRank(obstructedLines: number): number {
+  if (obstructedLines === 0) return coverRank('none');
+  if (obstructedLines <= 2) return coverRank('half');
+  if (obstructedLines === 3) return coverRank('three_quarters');
+  return TOTAL_RANK;
+}
+
+interface CornerRanks {
+  /** The source corner's cover: Total when all four lines block sight, else the clamped count. */
+  readonly rank: number;
+  /** The strongest tier any of its four lines crosses; the named sources are the ones of this rank. */
+  readonly strongestLineRank: number;
+}
+
+/**
+ * D576.3 for one source corner from its four line ranks: all four lines sight-blocked gives Total
+ * with no sight; otherwise the obstructed-line count's tier, clamped by the strongest crossed tier
+ * and by Three-Quarters.
+ */
+function cornerRanks(lineRanks: readonly number[]): CornerRanks {
+  let blockedLines = 0;
+  let obstructedLines = 0;
+  let strongestLineRank = 0;
+  for (const lineRank of lineRanks) {
+    if (lineRank === TOTAL_RANK) blockedLines += 1;
+    if (lineRank > 0) obstructedLines += 1;
+    if (lineRank > strongestLineRank) strongestLineRank = lineRank;
+  }
+  const rank = blockedLines === 4
+    ? TOTAL_RANK
+    : Math.min(countRank(obstructedLines), strongestLineRank, THREE_QUARTERS_RANK);
+  return { rank, strongestLineRank };
+}
+
+interface ChosenCorner {
+  readonly corner: CornerPoint;
+  readonly ranks: CornerRanks;
+}
+
+/** The least-protective source corner; ties go to the lower row, then the lower column. */
+function chooseSourceCorner(context: LineContext, targetCorners: OuterCorners): ChosenCorner {
+  let chosen: ChosenCorner | undefined;
+  for (const corner of outerCorners(context.sourceCells)) {
+    const ranks = cornerRanks(targetCorners.map((targetCorner) => scanCornerLine(context, corner, targetCorner)));
+    if (chosen === undefined ||
+      (ranks.rank - chosen.ranks.rank || corner.row - chosen.corner.row || corner.column - chosen.corner.column) < 0) {
+      chosen = { corner, ranks };
+    }
+  }
+  if (chosen === undefined) throw new RangeError('A line query requires non-empty source and target spaces.');
+  return chosen;
 }
 
 function nearestCells(
@@ -411,78 +500,150 @@ function nearestCells(
   return { sourceCell: selectedSource, targetCell: selectedTarget };
 }
 
+function cornerLineTrace(context: LineContext, from: CornerPoint, to: CornerPoint): TerrainCornerLineTrace {
+  const crossed: SourceCell[] = [];
+  const rank = scanCornerLine(context, from, to, crossed);
+  const strongest = rank === 0
+    ? []
+    : crossed.flatMap((entry) => entry.sources.filter((source) => coverRank(source.tier) === rank));
+  const firstBlocking = rank === TOTAL_RANK
+    ? crossed.find((entry) => entry.sources.some((source) => source.tier === 'total'))
+    : undefined;
+  const sources = uniqueSources(strongest);
+  return {
+    targetCorner: { ...to },
+    interveningCells: crossed.map((entry) => entry.cell),
+    tier: tierOfRank(rank),
+    blocksSight: rank === TOTAL_RANK,
+    sourceIds: sources.map(taggedSourceId),
+    sources,
+    firstBlockingCell: firstBlocking === undefined ? null : { ...firstBlocking.cell },
+  };
+}
+
 function traceSpaces(
   state: EncounterState,
   sourceCells: readonly GridCell[],
   targetCells: readonly GridCell[],
-  options: TerrainLineOptions,
+  obstructions: LineObstructions,
 ): TerrainLineTrace {
-  const traceKey = `${options.includeCreatures === true ? 'creatures' : 'terrain'}:${sourceCells
-    .map(cellKey).join(';')}->${targetCells.map(cellKey).join(';')}`;
-  const stateTraces = terrainLineTraces.get(state) ?? new Map<string, TerrainLineTrace>();
-  const cached = stateTraces.get(traceKey);
-  if (cached !== undefined) return cached;
-  if (!terrainLineTraces.has(state)) terrainLineTraces.set(state, stateTraces);
   const nearest = nearestCells(sourceCells, targetCells);
-  const exclusions = new Set([...sourceCells, ...targetCells].map(cellKey));
-  const indexedSources = indexedTerrainSources(state, options.includeCreatures === true);
-  const equivalentTraceKey = `${terrainSourceSignature(
-    state,
-    options.includeCreatures === true,
-    indexedSources,
-  )}\0${traceKey}`;
-  const equivalent = equivalentTerrainLineTraces.get(equivalentTraceKey);
-  if (equivalent !== undefined) {
-    stateTraces.set(traceKey, equivalent);
-    return equivalent;
-  }
-  const sourceCorners = outerCorners(sourceCells);
+  const context: LineContext = { grid: stateSourceGrid(state, obstructions), sourceCells, targetCells };
   const targetCorners = outerCorners(targetCells);
-  const cornerColumns = [...sourceCorners, ...targetCorners].map((corner) => corner.column);
-  const cornerRows = [...sourceCorners, ...targetCorners].map((corner) => corner.row);
-  const minimumColumn = Math.min(...cornerColumns);
-  const maximumColumn = Math.max(...cornerColumns);
-  const minimumRow = Math.min(...cornerRows);
-  const maximumRow = Math.max(...cornerRows);
-  const candidates = [...indexedSources.values()]
-    .filter((entry) => !exclusions.has(cellKey(entry.cell)) &&
-      entry.cell.column < maximumColumn && entry.cell.column + 1 > minimumColumn &&
-      entry.cell.row < maximumRow && entry.cell.row + 1 > minimumRow)
-    .map((entry) => entry.cell);
-  const traces = sourceCorners.map((sourceCorner) => aggregateCornerLines(
-    sourceCorner,
-    targetCorners.map((targetCorner) => traceCornerLine(
-      sourceCorner,
-      targetCorner,
-      candidates,
-      (cell) => indexedSources.get(cellKey(cell))?.sources ?? [],
-    )),
-    nearest.sourceCell,
-    nearest.targetCell,
-  ));
-  const first = traces[0];
-  if (first === undefined) throw new RangeError('A line query requires non-empty source and target spaces.');
-  const selected = traces.reduce(
-    (best, candidate) => compareCornerTraces(candidate, best) < 0 ? candidate : best,
-    first,
-  );
-  stateTraces.set(traceKey, selected);
-  retainEquivalentTrace(equivalentTraceKey, selected);
-  return selected;
+  const { corner, ranks } = chooseSourceCorner(context, targetCorners);
+  const lines = targetCorners.map((targetCorner) => cornerLineTrace(context, corner, targetCorner));
+  const sources = ranks.rank === 0
+    ? []
+    : uniqueSources(lines
+        .filter((line) => coverRank(line.tier) === ranks.strongestLineRank)
+        .flatMap((line) => line.sources));
+  const interveningCells = [...new Map(lines
+    .flatMap((line) => line.interveningCells)
+    .map((cell) => [cellKey(cell), cell] as const)).values()];
+  const shared = {
+    sourceCell: { ...nearest.sourceCell },
+    targetCell: { ...nearest.targetCell },
+    sourceCorner: { ...corner },
+    lines,
+    interveningCells,
+  };
+  if (ranks.rank === TOTAL_RANK) {
+    const firstBlockingCell = lines[0]?.firstBlockingCell;
+    if (firstBlockingCell === undefined || firstBlockingCell === null) {
+      throw new RangeError('A sight-blocked line must name its first blocking cell.');
+    }
+    return {
+      ...shared,
+      tier: 'total',
+      blocksSight: true,
+      sourceIds: sources.map(taggedSourceId),
+      sources,
+      firstBlockingCell,
+    };
+  }
+  return {
+    ...shared,
+    tier: lesserTierOfRank(ranks.rank),
+    blocksSight: false,
+    sourceIds: sources.map(taggedSourceId),
+    sources,
+    firstBlockingCell: null,
+  };
 }
 
-/** The canonical 2014 corner-to-corner trace for two bare grid cells. */
+const LESSER_TIER_BY_RANK = ['none', 'half', 'three_quarters'] as const satisfies readonly Exclude<CoverTier, 'total'>[];
+
+function lesserTierOfRank(rank: number): Exclude<CoverTier, 'total'> {
+  const tier = LESSER_TIER_BY_RANK[rank];
+  if (tier === undefined) throw new RangeError('A line with sight cannot carry Total Cover.');
+  return tier;
+}
+
+/**
+ * The verdict fields of traceSpaces without building line objects: the chosen corner comes from
+ * rank arithmetic alone, and the named sources are the unique ids, sorted, of the sources on that
+ * corner's lines whose rank is its strongest line's rank.
+ */
+function verdictSpaces(
+  state: EncounterState,
+  sourceCells: readonly GridCell[],
+  targetCells: readonly GridCell[],
+  obstructions: LineObstructions,
+): LineVerdict {
+  const nearest = nearestCells(sourceCells, targetCells);
+  const context: LineContext = { grid: stateSourceGrid(state, obstructions), sourceCells, targetCells };
+  const targetCorners = outerCorners(targetCells);
+  const { corner, ranks } = chooseSourceCorner(context, targetCorners);
+  const ids = new Set<string>();
+  if (ranks.rank > 0) {
+    for (const targetCorner of targetCorners) {
+      const crossed: SourceCell[] = [];
+      scanCornerLine(context, corner, targetCorner, crossed);
+      for (const entry of crossed) {
+        for (const source of entry.sources) {
+          if (coverRank(source.tier) === ranks.strongestLineRank) ids.add(taggedSourceId(source));
+        }
+      }
+    }
+  }
+  const sourceIds = [...ids].sort((left, right) => left.localeCompare(right));
+  const sourceCell = { ...nearest.sourceCell };
+  const targetCell = { ...nearest.targetCell };
+  return ranks.rank === TOTAL_RANK
+    ? { sourceCell, targetCell, tier: 'total', blocksSight: true, sourceIds }
+    : { sourceCell, targetCell, tier: lesserTierOfRank(ranks.rank), blocksSight: false, sourceIds };
+}
+
+/** The canonical corner-to-corner trace for two bare grid cells, terrain sources only. */
 export function traceTerrainLine(
   state: EncounterState,
   sourceCell: GridCell,
   targetCell: GridCell,
-  options: TerrainLineOptions = {},
 ): TerrainLineTrace {
-  return traceSpaces(state, [sourceCell], [targetCell], options);
+  return traceSpaces(state, [sourceCell], [targetCell], { kind: 'terrain' });
+}
+
+/** Sight and cover between two bare grid cells, terrain sources only, without per-line evidence. */
+export function terrainLineVerdict(
+  state: EncounterState,
+  sourceCell: GridCell,
+  targetCell: GridCell,
+): LineVerdict {
+  return verdictSpaces(state, [sourceCell], [targetCell], { kind: 'terrain' });
 }
 
 export interface CreatureLineOptions {
   readonly sourceAnchor?: GridCell;
+}
+
+function sourceSpaceCells(
+  state: EncounterState,
+  sourceId: CombatantId,
+  options: CreatureLineOptions,
+): readonly GridCell[] {
+  return options.sourceAnchor === undefined
+    ? combatantSpace(state, sourceId).cells
+    : combatantSpaceAt(state, sourceId, options.sourceAnchor).cells;
 }
 
 export function traceCombatantLine(
@@ -491,21 +652,8 @@ export function traceCombatantLine(
   targetId: CombatantId,
   options: CreatureLineOptions = {},
 ): TerrainLineTrace {
-  const traceKey = `${String(sourceId)}->${String(targetId)}@${options.sourceAnchor === undefined
-    ? 'current'
-    : cellKey(options.sourceAnchor)}`;
-  const cached = combatantLineTraces.get(state)?.get(traceKey);
-  if (cached !== undefined) return cached;
-  const source = options.sourceAnchor === undefined
-    ? combatantSpace(state, sourceId)
-    : combatantSpaceAt(state, sourceId, options.sourceAnchor);
-  const trace = traceSpaces(state, source.cells, combatantSpace(state, targetId).cells, {
-    sourceId, targetId, includeCreatures: true,
-  });
-  const stateTraces = combatantLineTraces.get(state) ?? new Map<string, TerrainLineTrace>();
-  stateTraces.set(traceKey, trace);
-  if (!combatantLineTraces.has(state)) combatantLineTraces.set(state, stateTraces);
-  return trace;
+  const sourceCells = sourceSpaceCells(state, sourceId, options);
+  return traceSpaces(state, sourceCells, combatantSpace(state, targetId).cells, { kind: 'terrain_and_creatures' });
 }
 
 export function traceCombatantLineToCells(
@@ -514,51 +662,45 @@ export function traceCombatantLineToCells(
   targetCells: readonly GridCell[],
   options: CreatureLineOptions = {},
 ): TerrainLineTrace {
-  const traceKey = `${String(sourceId)}->cells:${targetCells.map(cellKey).join(';')}@${options.sourceAnchor === undefined
-    ? 'current'
-    : cellKey(options.sourceAnchor)}`;
-  const cached = combatantLineTraces.get(state)?.get(traceKey);
-  if (cached !== undefined) return cached;
-  const source = options.sourceAnchor === undefined
-    ? combatantSpace(state, sourceId)
-    : combatantSpaceAt(state, sourceId, options.sourceAnchor);
-  const trace = traceSpaces(state, source.cells, targetCells, { sourceId, includeCreatures: true });
-  const stateTraces = combatantLineTraces.get(state) ?? new Map<string, TerrainLineTrace>();
-  stateTraces.set(traceKey, trace);
-  if (!combatantLineTraces.has(state)) combatantLineTraces.set(state, stateTraces);
-  return trace;
+  return traceSpaces(state, sourceSpaceCells(state, sourceId, options), targetCells, { kind: 'terrain_and_creatures' });
 }
 
+/** Sight and cover between two creatures, without the per-line evidence of traceCombatantLine. */
+export function combatantLineVerdict(
+  state: EncounterState,
+  sourceId: CombatantId,
+  targetId: CombatantId,
+  options: CreatureLineOptions = {},
+): LineVerdict {
+  const sourceCells = sourceSpaceCells(state, sourceId, options);
+  return verdictSpaces(state, sourceCells, combatantSpace(state, targetId).cells, { kind: 'terrain_and_creatures' });
+}
+
+/** Sight and cover from a creature to cells, without the per-line evidence of traceCombatantLineToCells. */
+export function combatantLineVerdictToCells(
+  state: EncounterState,
+  sourceId: CombatantId,
+  targetCells: readonly GridCell[],
+  options: CreatureLineOptions = {},
+): LineVerdict {
+  return verdictSpaces(state, sourceSpaceCells(state, sourceId, options), targetCells, { kind: 'terrain_and_creatures' });
+}
+
+/** Object-only cover between two cells (no walls, no creatures), from a bare object list. */
 export function coverTierBetweenObjects(
   objects: readonly WorldObject[],
   from: GridCell,
   to: GridCell,
 ): CoverTier {
-  const exclusions = new Set([cellKey(from), cellKey(to)]);
-  const candidates = [...new Map(objects
-    .flatMap((object) => object.footprint)
-    .filter((cell) => !exclusions.has(cellKey(cell)))
-    .map((cell) => [cellKey(cell), cell] as const)).values()];
-  const sourceCell = { ...from };
-  const targetCell = { ...to };
-  const targetCorners = outerCorners([to]);
-  const traces = outerCorners([from]).map((sourceCorner) => aggregateCornerLines(
-    sourceCorner,
-    targetCorners.map((targetCorner) => traceCornerLine(
-      sourceCorner,
-      targetCorner,
-      candidates,
-      (cell) => objects.flatMap((object): readonly TerrainLineSource[] =>
-        objectOccupiesCell(object, cell) && object.blocking.cover !== 'none'
-          ? [{ kind: 'world_object', id: String(object.id), tier: object.blocking.cover }]
-          : []),
-    )),
-    sourceCell,
-    targetCell,
-  ));
-  const first = traces[0];
-  if (first === undefined) throw new RangeError('A line query requires non-empty source and target spaces.');
-  return traces.reduce((best, candidate) => compareCornerTraces(candidate, best) < 0 ? candidate : best, first).tier;
+  const placed: PlacedSource[] = [];
+  for (const object of objects) {
+    if (object.blocking.cover === 'none') continue;
+    for (const cell of object.footprint) {
+      placed.push({ cell, source: { kind: 'world_object', id: String(object.id), tier: object.blocking.cover } });
+    }
+  }
+  const context: LineContext = { grid: sourceGrid(placed), sourceCells: [from], targetCells: [to] };
+  return tierOfRank(chooseSourceCorner(context, outerCorners([to])).ranks.rank);
 }
 
 export type CreatureCoverOptions = CreatureLineOptions;
@@ -574,6 +716,6 @@ export function coverBetweenCombatants(
   targetId: CombatantId,
   options: CreatureCoverOptions = {},
 ): CombatantCoverResult {
-  const trace = traceCombatantLine(state, sourceId, targetId, options);
-  return { tier: trace.tier, sourceIds: trace.sourceIds };
+  const verdict = combatantLineVerdict(state, sourceId, targetId, options);
+  return { tier: verdict.tier, sourceIds: verdict.sourceIds };
 }
