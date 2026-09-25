@@ -1016,6 +1016,63 @@ describe('PCAC approach: with no legal attack the scripted PC plans its moves wi
     expect(decision.selected.command).toEqual(step(pc.id, MELEE_CLEAR_SQUARES[0]!));
   });
 
+  /*
+   * FORMS BY DAMAGE (owner ruling 2026-09-24: "best expected damage across its
+   * attacks"). The fighter (Glaive: reach 10, +5, 1d10 + 3, hit 8.5, Critical
+   * Hit 14; Dagger: reach 5, +5, 1d4 + 3, hit 5.5, Critical Hit 8) at (0,1),
+   * its action spent, a goblin (AC 15) at (2,1), 10 feet away: the Glaive is
+   * in reach, the Dagger is not. One d20 hits AC 15 on faces 10-20: 11/20,
+   * critical 1/20; no square has cover.
+   * - (1,0), (1,1), (1,2), 5 feet from the goblin: the Dagger becomes usable
+   *   ("move within speed to enable attack", bucket 0), ED = 10/20 x 5.5 +
+   *   1/20 x 8 = 3.15; the Glaive stays in reach ("maintain range", bucket 3),
+   *   ED = 10/20 x 8.5 + 1/20 x 14 = 4.95. The Glaive's is the better expected
+   *   damage, so it gives the square its value: bucket 3, 4.95. (Bucket first,
+   *   the square would take the Dagger's bucket 0 and 3.15.)
+   * - (0,0), (0,2), 10 feet away: the Dagger cannot reach (no resolved
+   *   damage), the Glaive can: bucket 3, 4.95.
+   */
+  it('PCAC-FORMS-BY-DAMAGE: a square takes the form with the best expected damage there, the Glaive in reach (4.95) over the newly enabled Dagger (3.15)', () => {
+    const { state, pc, goblins } = approachBoard({
+      columns: 4, rows: 3, pcKey: 'pcac-forms-damage', pcCell: { column: 0, row: 1 },
+      goblins: [{ key: 'pcac-forms-damage-goblin', cell: { column: 2, row: 1 } }],
+      blocking: [],
+      actionSpent: true,
+    });
+    const target = goblins[0];
+    if (target === undefined) throw new Error('The forms board has a goblin.');
+    const squares = [
+      { column: 0, row: 0 }, { column: 0, row: 2 }, { column: 1, row: 0 }, { column: 1, row: 1 }, { column: 1, row: 2 },
+    ];
+    expect(coverTiers(state, pc.id, target.id, squares)).toEqual(['none', 'none', 'none', 'none', 'none']);
+
+    const decision = evaluateSymmetricPcDecision({
+      state,
+      actorId: pc.id,
+      legalActions: [...squares.map((cell) => step(pc.id, cell)), { type: 'end_turn', actor: pc.id }],
+      attackForms: ownForms(pc.id, [daggerForm, glaiveForm]),
+    });
+
+    const glaive = `own_attack_forms:glaive:${String(target.id)}`;
+    const byDestination = Object.fromEntries(rankedApproach(decision).map((entry) => [
+      `${String(entry.destination?.column)},${String(entry.destination?.row)}`,
+      { bucket: entry.bucket, damage: entry.damage, form: entry.form },
+    ]));
+    const glaiveSquare = { bucket: 3, damage: 4.95, form: glaive };
+    expect(byDestination).toEqual({
+      '0,0': glaiveSquare, '0,2': glaiveSquare, '1,0': glaiveSquare, '1,1': glaiveSquare, '1,2': glaiveSquare,
+    });
+    // The Dagger alone assesses the adjacent squares at bucket 0, 3.15: the value bucket-first would have taken.
+    const daggerOnly = evaluateSymmetricPcDecision({
+      state,
+      actorId: pc.id,
+      legalActions: [...squares.map((cell) => step(pc.id, cell)), { type: 'end_turn', actor: pc.id }],
+      attackForms: ownForms(pc.id, [daggerForm]),
+    });
+    expect(rankedApproach(daggerOnly).find((entry) => entry.destination?.column === 1 && entry.destination.row === 1))
+      .toEqual({ destination: { column: 1, row: 1 }, bucket: 0, damage: 3.15, form: `own_attack_forms:dagger:${String(target.id)}` });
+  });
+
   it('PCAC-APPROACH-TARGET-RULE: with two goblins perceived, the forms plan against the target of the canonical-first form command', () => {
     const { state, pc, goblins } = approachBoard({
       columns: 6, rows: 5, pcKey: 'pcac-approach-fighter', pcCell: { column: 1, row: 2 },

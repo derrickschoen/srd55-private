@@ -423,10 +423,13 @@ function destinationCandidate(command: MoveCommand, evaluation: MovementEvaluati
 }
 
 /**
- * Each profile assesses the move's destination as the evaluator ranks moves:
- * bucket first, then expected damage. The move takes the best of those
- * assessments (the first profile on a tie), so among squares of one bucket
- * the best expected damage across the PC's attacks decides.
+ * Each profile assesses the move's destination; the move takes the profile
+ * whose attack there has the best expected damage (owner ruling 2026-09-24:
+ * "best expected damage across its attacks"), a resolved value before an
+ * unresolved one, then the lower bucket, then the first profile. The
+ * destination's bucket and expected damage are that attack's. So a newly
+ * enabled attack that deals less than an attack already in reach does not
+ * give the square its value.
  */
 function movementAssessment(
   command: MoveCommand,
@@ -436,7 +439,7 @@ function movementAssessment(
   let best: { readonly profile: MovementProfile; readonly candidate: MovementCandidate | null } | null = null;
   for (const profile of movement.profiles) {
     const candidate = destinationCandidate(command, profile.evaluation);
-    if (best === null || compareDestination(candidate, best.candidate) < 0) best = { profile, candidate };
+    if (best === null || compareForms(candidate, best.candidate) < 0) best = { profile, candidate };
   }
   if (best === null) throw new Error('A resolved movement assessment has at least one profile.');
   return {
@@ -651,10 +654,10 @@ function comparePlannedDamage(left: SymmetricPcPlannedDamage, right: SymmetricPc
   return plannedDamageClass(left) - plannedDamageClass(right);
 }
 
-/** A destination's order among squares: bucket, then expected damage. */
-function compareDestination(left: MovementCandidate | null, right: MovementCandidate | null): number {
-  return movementRank(left) - movementRank(right) ||
-    comparePlannedDamage(destinationDamage(left), destinationDamage(right));
+/** One destination as the PC's attack forms assess it: expected damage, then bucket. */
+function compareForms(left: MovementCandidate | null, right: MovementCandidate | null): number {
+  return comparePlannedDamage(destinationDamage(left), destinationDamage(right)) ||
+    movementRank(left) - movementRank(right);
 }
 
 function compareRank(left: SymmetricPcRank, right: SymmetricPcRank): number {
