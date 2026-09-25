@@ -1941,3 +1941,42 @@ The plan's own prediction is that "inconclusive → high" dominates at 20 cluste
 Next: LUNA6 implementation. Opus writes (D885 §7), codex reviews, batches per plan §8.1. It does not block PERF-02's timed pairs.
 
 Next free id: D893.
+
+
+## D893 — 2026-09-25 02:59 — Owner rulings (void limit 2 cores; pcac range fix + move-and-act; x3 lint guard; go with recommendations overnight); batch 1, board, ai1 and x1r LANDED; convsplit timed slower before x1r, not landed; LUNA6 Phase 0 started
+
+OWNER (via AskUserQuestion, verbatim answers), 2026-09-25:
+- "Raise the limit to 2 cores". The void rule's TEST_ACTIVE_CORES goes from 1.0 to 2.0 for every pair, and today's pairs are re-judged under it. Cause: the owner's other Claude session (ai-security-scanner) runs `python3 -m unittest` and `sg scan` in a loop, at about 1.0–1.9 cores. Changed in exp/contention.py.
+- "Fix range inside pcac (Recommended)". pcac's fourth commit makes PC attack commands carry the weapon's real range: SRD normal/long, with disadvantage at long range. Found by the pcac agent: every PC weapon, the Longbow included, is planned as 5-ft melee because party-pack commands carry no tacticalRange.
+- "Move + action in one turn (Recommended)". The enabling move and the follow-up action are planned together; a legal save or spell that needs no move keeps its place when the combined plan is not better. The arena room-4 test keeps its original "authorized" expectation. The r3 agent had changed it to partial_execution, and that change is REJECTED.
+- "Ban .js beside .ts instead". x3's self-found shadowing hole is closed with a lint rule that fails on a .js/.mjs file beside a same-named .ts in src/ and tools/, not with a per-spawn check.
+- 02:20, verbatim: "I am going to bed. Please go with your recommendations until I get back. Record questions and options to review with me when I get back". Questions and my choices are kept in .tmp/runs/perf-02/owner-q/overnight-questions.md.
+
+TIMED PAIRS, queue 1 (A = main 3f3c4870; each B = the unit cherry-picked onto 3f3c4870; one AB pair each). Figures are initial phase A → B:
+- batch1 (x4 + 5 cachedel commits): 588.4 → 595.3 s (+6.9). Test outside-load 1.16 cores.
+- board: 601.8 → 591.5 s (−10.3). 1.85 / 1.12 cores.
+- ai1: 593.4 → 587.1 s (−6.3). 1.04 / 1.14 cores.
+- x1r: 589.9 → 580.2 s (−9.7). VALID under both limits.
+- convsplit: 592.6 → 636.1 s (+43.5); total 594.5 → 720.9 s. VALID.
+The first three were VOID under 1.0 and are VALID under 2.0. None of the four landed units is more than 30 s slower, so they pass the no-regression guard; none claims a saving over 60 s.
+Test inventories: every difference is an addition (batch1 +1, ai1 +5, x1r +16, board 0). convsplit swaps one D583 test title (the 140→143 baseline) and adds one test.
+Reds: batch1-B has none (x4 fixes the two docs files). All other arms show only the two pre-existing docs files.
+
+LANDED on main: batch1, board, ai1 and x1r, as 17 commits cherry-picked on top of e8512662.
+VERIFIED by me at the combined HEAD (arm dnd-gate-exp-pair-main-9a0f167e):
+- `npx tsc -b --force` exit 0;
+- all 7 pins byte-identical to D880;
+- the 7 test files the landing changed pass 109/109.
+The full-gate acceptance of the combined main is still owed (D885 §6, final 3 pairs).
+Pushed to the mirror.
+
+convsplit NOT landed. In A, the conversation file (588 s) and blind-turn-context (583 s) finish last. In B the split parts take 155–182 s each, but blind-turn-context becomes the last file (634 s), and that is the pole x1r fixes; x1r was not in the arm. The prewarms went the other way: 591.1 → 540.2 s.
+My choice, recorded for the owner: re-time convsplit on top of the new main, and land it only if it passes.
+
+LUNA6 Phase 0 (plan r5 §8.1):
+- P0a PASSED: `CODEX_HOME=~/.codex-aidm codex exec -m gpt-6-luna` answered "OK" at high and at xhigh, served as gpt-6-luna. So M87 is not added (logs in .tmp/runs/luna6/phase0/).
+- V13a is running: 1 room, gpt-6-luna xhigh, before the lift.
+- Recorded for the plan (PR4–PR11): the owner's 18:58 answer "gpt-6-luna only" chose the option that described the plan's narrow reading, including that the 60–300 s speculation window stays.
+- Overnight dispatch (wf_cb490539-eba): LUNA6 B0 (simulate.mjs) and B1 (the lift, call log v2, guardedLunaCall, screenshot guard); pcac r4; x3's lint guard.
+
+Next free id: D894.
