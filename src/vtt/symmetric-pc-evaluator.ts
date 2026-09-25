@@ -61,16 +61,22 @@ function statesItsRange(command: AttackCommand): command is StatedRangeAttackCom
 }
 
 /**
- * Where the attack profiles that assess the PC's moves came from.
- * - `legal_attack`: the canonical-first legal attack command against a
- *   perceived target, as before.
- * - `own_attack_forms`: no legal attack command targets a perceived creature,
- *   so the PC's own attack forms (TurnAttackForms, built by the same code as
- *   its attack commands) against the target the canonical-first form command
- *   attacks. Owner ruling 2026-09-24, verbatim: "when no attack is legal,
- *   movement planning evaluates candidate squares with the PC's own attack
- *   forms (best expected damage across its attacks, AC + cover included), so
- *   approach squares with a clear shot win."
+ * How the target of the attack profiles that assess the PC's moves was chosen.
+ * Either way the profiles are that target's attack forms (TurnAttackForms,
+ * built by the same code as the PC's attack commands).
+ * - `legal_attack`: the target of the canonical-first legal attack command
+ *   against a perceived target. That command is the first profile, and every
+ *   other form against its target joins it, so a square where a better weapon
+ *   comes into reach is valued with that weapon (owner Q2 follow-up,
+ *   2026-09-25, supervisor's choice: "compare 'approach and use a better
+ *   weapon' against the currently legal attack on the same expected-damage
+ *   basis").
+ * - `own_attack_forms`: no legal attack command targets a perceived creature;
+ *   the target the canonical-first form command attacks. Owner ruling
+ *   2026-09-24, verbatim: "when no attack is legal, movement planning
+ *   evaluates candidate squares with the PC's own attack forms (best expected
+ *   damage across its attacks, AC + cover included), so approach squares with
+ *   a clear shot win."
  */
 export type SymmetricPcMovementProfileSource = 'legal_attack' | 'own_attack_forms';
 
@@ -132,7 +138,9 @@ export type SymmetricPcActionValueUnresolvedReason =
   /** The action is spent: no attack can follow the move this turn. */
   | 'follow_up_action_unavailable'
   /** The destination offers no resolved expected damage (for example, the target has Total Cover there). */
-  | 'destination_damage_unresolved';
+  | 'destination_damage_unresolved'
+  /** The legal attack has no resolved expected damage from the PC's own square. */
+  | 'attack_damage_unresolved';
 
 /**
  * An approach move and the attack it enables, planned as one turn. Owner
@@ -141,6 +149,9 @@ export type SymmetricPcActionValueUnresolvedReason =
  * together; a legal save or spell that needs no move keeps its place when the
  * combined plan is not better. A potion is not an alternative: the owner named
  * a save or a spell, and healing is not on the plan's expected-damage basis.
+ * The attack the PC would otherwise make now, the first-ranked legal attack,
+ * is an alternative too, on the same basis (owner Q2 follow-up, 2026-09-25,
+ * supervisor's choice): stepping in to use a better weapon must beat it.
  */
 export interface SymmetricPcCombinedPlan {
   /** The attack form that gave the destination its assessment, against the planned target. */
@@ -153,7 +164,11 @@ export interface SymmetricPcCombinedPlan {
   readonly attacks: number;
   /** attacks x the destination's expected damage. */
   readonly value: SymmetricPcActionValue;
-  /** Canonical keys, in canonical order, of the legal saves and spells this plan does not beat; each keeps its place ahead of it. */
+  /**
+   * Canonical keys, in canonical order, of the alternatives this plan does not
+   * beat (legal saves and spells, and the first-ranked legal attack); each
+   * keeps its place ahead of it.
+   */
   readonly yieldsTo: readonly string[];
 }
 
@@ -173,7 +188,8 @@ export type SymmetricPcRank = readonly [
   /**
    * 1 for a command placed after the rest of its bucket: a command kind this
    * evaluator does not assess (bucket 8), or an approach move that yields to a
-   * save or spell of this bucket (see SymmetricPcCombinedPlan).
+   * save, spell or the first-ranked legal attack of this bucket (see
+   * SymmetricPcCombinedPlan).
    */
   bucketTail: 0 | 1,
   /**
@@ -199,7 +215,10 @@ export interface SymmetricPcCommandAssessment {
   readonly tactical: SymmetricPcTacticalAssessment | null;
   readonly movement: SymmetricPcMovementAssessment | null;
   readonly concentration: ConcentrationZoneEvaluation | null;
-  /** For a legal save or spell: what its action is worth, on the combined plan's basis. */
+  /**
+   * For a legal save or spell, and for the first-ranked legal attack: what its
+   * action is worth, on the combined plan's basis.
+   */
   readonly alternativeValue: SymmetricPcActionValue | null;
   /** For an approach move: the move and the attack it enables, as one turn. */
   readonly combinedPlan: SymmetricPcCombinedPlan | null;
@@ -374,13 +393,13 @@ interface MovementProfiles {
 }
 
 /**
- * The attack profiles every move of one decision is assessed with. A legal
- * attack command against a perceived target supplies the one profile, the
- * canonical-first such command; a legal attack that states no range supplies
- * none. With none, the PC's own attack forms do: the target is the one the
+ * The attack profiles every move of one decision is assessed with: every
+ * distinct profile of the PC's attack forms against one target. With a legal
+ * attack command against a perceived target (a legal attack that states no
+ * range does not count), the target is the canonical-first such command's,
+ * and that command is the first profile. With none, the target is the one the
  * canonical-first form command attacks (the same canonical-text rule, applied
- * to the commands the forms would build), and every distinct profile of the
- * forms against that target is evaluated. Every profile plans with the range
+ * to the commands the forms would build). Every profile plans with the range
  * its command states.
  */
 function movementProfiles(
@@ -393,8 +412,9 @@ function movementProfiles(
   const legal = inCanonicalOrder(attacks.filter((attack): attack is StatedRangeAttackCommand =>
     statesItsRange(attack) && projectedTarget(projection, attack.target) !== null));
   const profileSource: SymmetricPcMovementProfileSource = legal.length > 0 ? 'legal_attack' : 'own_attack_forms';
-  const forms = legal.length > 0
-    ? legal.slice(0, 1)
+  const firstLegal = legal[0];
+  const forms = firstLegal !== undefined
+    ? [firstLegal, ...inCanonicalOrder(attackForms(state, actorId, firstLegal.target))]
     : inCanonicalOrder(projection.targets.flatMap((target) =>
         target.kind === 'perceived' ? attackForms(state, actorId, target.targetId) : []));
   const target = forms[0]?.target;
@@ -551,6 +571,15 @@ function followUpAttacks(state: EncounterState, actorId: CombatantId): number {
   }
 }
 
+/**
+ * The first-ranked legal attack's worth on the combined plan's basis: the
+ * attacks its action allows x its expected damage from the PC's own square.
+ */
+function currentAttackValue(attacks: number, damage: SymmetricPcPlannedDamage): SymmetricPcActionValue {
+  if (damage.kind !== 'resolved') return { kind: 'unresolved', reason: 'attack_damage_unresolved' };
+  return { kind: 'resolved', expectedDamage: attacks * damage.expectedDamage };
+}
+
 function combinedPlanValue(attacks: number, damage: SymmetricPcPlannedDamage): SymmetricPcActionValue {
   if (attacks === 0) return { kind: 'unresolved', reason: 'follow_up_action_unavailable' };
   if (damage.kind !== 'resolved') return { kind: 'unresolved', reason: 'destination_damage_unresolved' };
@@ -666,6 +695,39 @@ function compareRank(left: SymmetricPcRank, right: SymmetricPcRank): number {
 }
 
 /**
+ * The attack the PC would make from where it stands: among the legal attacks
+ * the planner finds in range from the PC's square (melee, normal or long
+ * range), the one the ranking puts first (their order does not depend on the
+ * moves'): bucket, then its target's place (the smallest canonical key among
+ * that bucket's attacks on it), then expected damage, then canonical text.
+ * An attack out of range, or one the planner cannot assess, is not one the PC
+ * can make now. Null when there is none.
+ */
+function firstRankedAttack<Entry extends {
+  readonly command: EncounterCommand;
+  readonly commandKey: string;
+  readonly tactical: SymmetricPcTacticalAssessment | null;
+  readonly order: CommandOrder;
+}>(entries: readonly Entry[]): Entry | null {
+  const attacks = entries.filter((entry) => entry.command.type === 'attack' &&
+    entry.tactical?.status === 'evaluated' && entry.tactical.evaluation.range.status === 'resolved' &&
+    entry.tactical.evaluation.range.legal);
+  const group = (entry: Entry) =>
+    `${String(entry.order.bucket)}:${entry.command.type === 'attack' ? String(entry.command.target) : ''}`;
+  const placement = new Map<string, string>();
+  for (const entry of attacks) {
+    const placed = placement.get(group(entry));
+    if (placed === undefined || entry.commandKey.localeCompare(placed) < 0) placement.set(group(entry), entry.commandKey);
+  }
+  const rank = (entry: Entry): SymmetricPcRank => [
+    entry.order.bucket, entry.order.bucketTail, placement.get(group(entry)) ?? entry.commandKey,
+    entry.order.plannedDamage, entry.commandKey,
+  ];
+  return attacks.reduce<Entry | null>((best, entry) =>
+    best === null || compareRank(rank(entry), rank(best)) < 0 ? entry : best, null);
+}
+
+/**
  * Evaluates legal PC commands from actor-knowledge-last-seen-v4. The full state never
  * supplies an opponent fact to a tactical decision; it is passed to the
  * projected movement provider only through its projection-restricted entrypoint,
@@ -681,12 +743,15 @@ function compareRank(left: SymmetricPcRank, right: SymmetricPcRank): number {
  * plan, worth attacks x the destination's expected damage (see
  * SymmetricPcCombinedPlan). Every legal save and spell (they need no move) is
  * an alternative, worth its own expected damage on the same basis (see
- * alternativeValue); a potion is not one. The rule: an approach move keeps
- * bucket 0 only when its plan's value is resolved and strictly greater than
- * every alternative's resolved value. Otherwise it takes the bucket of the
- * lowest-ranked alternative it does not beat, after every other command of
- * that bucket, so each alternative it does not beat keeps its place ahead of
- * it. Nothing else moves.
+ * alternativeValue); a potion is not one. So is the attack the PC would make
+ * without moving (the first-ranked legal attack in range from its square, see
+ * firstRankedAttack), worth the attacks its action allows x its expected
+ * damage from that square. The rule: an approach move keeps bucket 0 only when its
+ * plan's value is resolved and strictly greater than every alternative's
+ * resolved value. Otherwise it takes the bucket of the lowest-ranked
+ * alternative it does not beat, after every other command of that bucket, so
+ * each alternative it does not beat keeps its place ahead of it. Nothing else
+ * moves.
  */
 export function evaluateSymmetricPcDecision(input: {
   readonly state: EncounterState;
@@ -730,11 +795,15 @@ export function evaluateSymmetricPcDecision(input: {
         : { kind: 'not_compared' }),
     };
   });
-  const alternatives = evaluated.flatMap((entry) => entry.alternativeValue === null
+  const attacksAfterMove = followUpAttacks(input.state, input.actorId);
+  const currentAttack = firstRankedAttack(evaluated);
+  const valued = evaluated.map((entry) => entry === currentAttack
+    ? { ...entry, alternativeValue: currentAttackValue(attacksAfterMove, entry.order.plannedDamage) }
+    : entry);
+  const alternatives = valued.flatMap((entry) => entry.alternativeValue === null
     ? []
     : [{ commandKey: entry.commandKey, bucket: entry.order.bucket, value: entry.alternativeValue }]);
-  const attacksAfterMove = followUpAttacks(input.state, input.actorId);
-  const planned = evaluated.map((entry) => {
+  const planned = valued.map((entry) => {
     if (entry.command.type !== 'move' || entry.movement?.status !== 'evaluated' || entry.order.bucket !== 0) {
       return { ...entry, combinedPlan: null };
     }

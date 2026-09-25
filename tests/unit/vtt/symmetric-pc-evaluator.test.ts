@@ -1680,4 +1680,73 @@ describe('PCAC turn: the approach move and the attack it enables are planned as 
     expect(potionOnly.selected.combinedPlan?.yieldsTo).toEqual([]);
     expect(symmetricPcTurnPlan(potionOnly.selected).kind).toBe('move_then_attack');
   });
+
+  /*
+   * BETTER WEAPON (owner Q2 follow-up, 2026-09-25, supervisor's choice: compare
+   * "approach and use a better weapon" against the currently legal attack on
+   * the same expected-damage basis). One row: the PC at (0,0), a Goblin
+   * Warrior (AC 15) at (2,0), 10 feet away; the party-pack provider offers
+   * one-square steps, so the step to (1,0) is the approach. One d20 hits AC 15
+   * on faces 10-20 (+5): 11/20, critical 1/20; faces 8-20 (+7): 13/20.
+   * - The fighter (fighterPack, one attack per action): the Longbow is legal
+   *   now, at normal range with no enemy within 5 feet: 10/20 x 6.5 + 1/20 x
+   *   11 = 3.8. At (1,0) the Battleaxe comes into reach: 12/20 x 8.5 + 1/20 x
+   *   13 = 5.75 (the Longbow there would have close-combat Disadvantage,
+   *   1.9775). The plan, 1 x 5.75, beats the Longbow's 1 x 3.8: the fighter
+   *   steps in and swings.
+   * - The ranger (rangerPack): the Longbow now, 10/20 x 7.5 + 1/20 x 12 = 4.35.
+   *   At (1,0) the Shortsword comes into reach, 10/20 x 6.5 + 1/20 x 10 = 3.75
+   *   (the Longbow there, 2.28). The plan, 3.75, does not beat 4.35: the move
+   *   yields to the Longbow (bucket 2, after it), and the ranger shoots.
+   */
+  it('PCAC-TURN-BETTER-WEAPON: the fighter steps in to swing his Battleaxe (5.75) rather than shoot his Longbow now (3.8); the ranger keeps shooting (4.35 over a 3.75 Shortsword)', () => {
+    const decide = (members: ReturnType<typeof fighterPack>, key: string) => {
+      const pc = members[0]!;
+      const goblinProfile = goblin(`${key}-goblin`);
+      const state = ready(createEncounter({
+        bounds: { columns: 3, rows: 1 },
+        combatants: [pc.profile, goblinProfile],
+        tokens: [combatToken(pc.profile, { column: 0, row: 0 }), combatToken(goblinProfile, { column: 2, row: 0 })],
+      }), pc.profile.id);
+      const decision = evaluateSymmetricPcDecision({
+        state, actorId: pc.profile.id,
+        legalActions: loadedPartyTurnLegalActions(members)(state, pc.profile.id).actions,
+        attackForms: loadedPartyAttackForms(members),
+      });
+      const value = (worth: SymmetricPcCommandAssessment['alternativeValue']) =>
+        worth === null ? null : worth.kind === 'resolved' ? rounded(worth.expectedDamage) : worth.reason;
+      const ranked = decision.assessments.flatMap((assessment) => {
+        if (assessment.command.type === 'attack') {
+          return [{ type: 'attack', weapon: assessment.command.attackId ?? null, bucket: assessment.rank[0], tail: assessment.rank[1], value: value(assessment.alternativeValue) }];
+        }
+        if (assessment.command.type === 'move') {
+          return [{ type: 'move', weapon: assessment.combinedPlan?.followUp.attackId ?? null, bucket: assessment.rank[0], tail: assessment.rank[1], value: value(assessment.combinedPlan?.value ?? null) }];
+        }
+        return [];
+      });
+      return { decision, ranked };
+    };
+
+    const fighter = decide(fighterPack('pcac-better'), 'pcac-better');
+    expect(fighter.ranked).toEqual([
+      { type: 'move', weapon: 'attack:pcac-battleaxe', bucket: 0, tail: 0, value: 5.75 },
+      { type: 'attack', weapon: 'attack:pcac-longbow', bucket: 2, tail: 0, value: 3.8 },
+    ]);
+    expect(fighter.decision.selected.combinedPlan?.yieldsTo).toEqual([]);
+    const fighterPlan = symmetricPcTurnPlan(fighter.decision.selected);
+    expect(fighterPlan.kind).toBe('move_then_attack');
+    if (fighterPlan.kind !== 'move_then_attack') throw new Error('Expected the combined plan.');
+    expect([fighterPlan.move.path, fighterPlan.attack.attackId, fighterPlan.attacks])
+      .toEqual([[{ column: 1, row: 0 }], 'attack:pcac-battleaxe', 1]);
+
+    const ranger = decide(rangerPack('pcac-better-ranger'), 'pcac-better-ranger');
+    expect(ranger.ranked).toEqual([
+      { type: 'attack', weapon: LONGBOW_ID, bucket: 2, tail: 0, value: 4.35 },
+      { type: 'move', weapon: SHORTSWORD_ID, bucket: 2, tail: 1, value: 3.75 },
+    ]);
+    const shot = ranger.decision.assessments.find((assessment) => assessment.command.type === 'attack');
+    expect(ranger.decision.selected.command).toEqual(shot?.command);
+    expect(ranger.decision.assessments.find((assessment) => assessment.command.type === 'move')?.combinedPlan?.yieldsTo)
+      .toEqual([shot?.commandKey]);
+  });
 });
