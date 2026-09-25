@@ -1,13 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { monsterCombatantProfile } from '../../../src/combat/combatant';
 import { traceCombatantLine } from '../../../src/combat/cover';
-import { createEncounter, type EncounterState } from '../../../src/combat/encounter';
+import { closeCombatEnemies, createEncounter, reduceEncounter, type EncounterState } from '../../../src/combat/encounter';
 import type { EncounterCommand, StatedRangeAttackCommand } from '../../../src/combat/events';
 import type { MovementEvaluation } from '../../../src/combat/movement-evaluator';
 import { GOBLIN_WARRIOR } from '../../../src/combat/statblocks/monsters';
 import { terrainBlocking } from '../../../src/combat/terrain';
 import { armorClass, damageType, dieSides, feet, worldObjectId } from '../../../src/combat/values';
 import {
+  projectedCloseCombatEnemies,
   projectedMovementOptions,
   type EngineProjectedMovementRequest,
 } from '../../../src/vtt/engine-query-port';
@@ -496,5 +497,114 @@ describe('PCAC: projected PC movement plans against the target AC plus cover', (
     expect(hitFrom(CLEAR_SQUARE)).toEqual({ status: 'resolved', hit: 0.55, critical: 0.05, miss: 0.45 });
     expect(hitFrom(HALF_COVER_SQUARE)).toEqual({ status: 'resolved', hit: 0.45, critical: 0.05, miss: 0.55 });
     expect(hitFrom(THREE_QUARTERS_SQUARE)).toEqual({ status: 'resolved', hit: 0.3, critical: 0.05, miss: 0.7 });
+  });
+});
+
+/*
+ * CC-PC-DESTINATION-SIGHT (review r2 P2). Ranged Attacks in Close Combat needs
+ * an enemy "who can see you" (docs/srd/full/srd-5.2.1.txt:911-917). Whether an
+ * enemy sees the PC is a fact of the square the PC stands on; at a square it
+ * could move to, it turns on the enemy's senses against that square's light,
+ * which the PC's actor-local knowledge does not hold. So the plan uses the
+ * fact only on the standing square and leaves it unknown everywhere else.
+ *
+ * BOARD (8 x 3, bright light except (1,1), which is in darkness): the ranger
+ * at (0,1); the guard, a fixture monster with normal sight only (no
+ * darkvision), at (1,2), 5 feet away; the target, a Goblin Warrior (AC 15,
+ * Darkvision 60 ft), at (7,0), 35 feet away and clear of the guard. Both
+ * monsters see the ranger where it stands, so its knowledge records both as
+ * seeing it now. The Longbow is +5, 1d8 + 3, 150/600.
+ * - From the standing square (0,1) the guard is 5 feet away and seen to see
+ *   the ranger: Disadvantage. One d20 hits AC 15 on faces 10-20 (11/20,
+ *   critical 1/20); with Disadvantage hit 121/400, critical 1/400:
+ *   ED = 120/400 x 7.5 + 1/400 x 12 = 2.28.
+ * - From (1,1) (dark, the standing square's row) and (0,2) (lit, its column)
+ *   the guard is 5 feet away and its sight of the ranger there is unknown:
+ *   close_combat_unresolved, no expected damage.
+ * - The reducer after the ranger steps to (1,1): the guard cannot see it in
+ *   darkness, the goblin sees it with Darkvision (30 feet), and the ranger
+ *   sees the goblin in bright light: a straight roll, one d20 (RNG 0.5). The
+ *   plan claimed no Disadvantage there that the roll does not have.
+ */
+describe('CC-PC-DESTINATION-SIGHT: an enemy\'s sight of the PC is not carried to another square', () => {
+  it('CC-PC-DESTINATION-SIGHT: stepping into darkness beside a guard without darkvision is planned unresolved, and the reducer then rolls no close-combat Disadvantage', () => {
+    const ranger = playerProfile('cc-destination-ranger', { initiativeBonus: 20 });
+    const guardBase = monsterProfile('cc-destination-guard', { initiativeBonus: -20 });
+    const guard = { ...guardBase, rules: { ...guardBase.rules, senses: [] } };
+    const goblinBase = monsterCombatantProfile(GOBLIN_WARRIOR, {
+      combatantId: 'combatant:cc-destination-goblin', tokenId: 'token:cc-destination-goblin',
+    });
+    const goblin = { ...goblinBase, rules: { ...goblinBase.rules, initiativeBonus: -20 } };
+    const standing = { column: 0, row: 1 } as const;
+    const dark = { column: 1, row: 1 } as const;
+    const lit = { column: 0, row: 2 } as const;
+    const created = createEncounter({
+      bounds: { columns: 8, rows: 3 },
+      combatants: [ranger, guard, goblin],
+      tokens: [placedToken(ranger, 0, 1), placedToken(guard, 1, 2), placedToken(goblin, 7, 0)],
+      environment: {
+        lightRegions: [{ id: 'cc-destination-dark', cells: [dark], level: 'darkness' }],
+        difficultTerrainRegions: [],
+        obscurementRegions: [],
+        narrowOpeningRegions: [],
+      },
+    });
+    const state = reduceEncounter(created, { type: 'roll_initiative' }, () => 0.5).state;
+    expect(state.activeCombatant).toBe(ranger.id);
+    expect(traceCombatantLine(state, ranger.id, goblin.id).tier).toBe('none');
+    const projection = projectActorKnowledge(state, ranger.id);
+    for (const monster of [guard.id, goblin.id]) {
+      expect(projection.targets.find((target) => target.targetId === monster)).toMatchObject({
+        kind: 'perceived', reciprocalVisibility: { kind: 'perceived', targetCanSeeActor: true },
+      });
+    }
+
+    // The plan's close-combat facts: the guard seen to see the ranger where it stands, unknown elsewhere.
+    expect(projectedCloseCombatEnemies(state, projection, standing)).toEqual([
+      { id: guard.id, distanceFeet: 5, seesAttacker: true, incapacitated: false },
+    ]);
+    for (const cell of [dark, lit]) {
+      expect(projectedCloseCombatEnemies(state, projection, cell)).toEqual([
+        { id: guard.id, distanceFeet: 5, seesAttacker: { kind: 'unknown' }, incapacitated: false },
+      ]);
+    }
+    const evaluation = projectedMovementOptions(state, projection, longbowRequest(ranger.id, goblin.id));
+    if (evaluation === null) throw new Error('Expected a projected movement evaluation.');
+    const planned = (verdict: MovementEvaluation['candidates'][number]['after']) => {
+      if (verdict.status !== 'resolved') throw new Error('Expected an evaluated attack verdict.');
+      return {
+        mode: verdict.evaluation.rollMode.mode,
+        closeCombat: verdict.evaluation.rollMode.reasons.includes('ranged_close_combat_disadvantage'),
+        unresolved: verdict.evaluation.unresolved.includes('close_combat_unresolved'),
+        damage: verdict.evaluation.damage.status === 'resolved'
+          ? Math.round(verdict.evaluation.damage.expectedDamage * 1e9) / 1e9
+          : verdict.evaluation.damage.status,
+      };
+    };
+    expect(planned(candidateAt(evaluation, dark).before))
+      .toEqual({ mode: 'disadvantage', closeCombat: true, unresolved: false, damage: 2.28 });
+    const unknownThere = { mode: 'normal', closeCombat: false, unresolved: true, damage: 'unresolved' };
+    expect(planned(candidateAt(evaluation, dark).after)).toEqual(unknownThere);
+    expect(planned(candidateAt(evaluation, lit).after)).toEqual(unknownThere);
+
+    // The reducer after the step into darkness.
+    const moved = reduceEncounter(state, {
+      type: 'move', actor: ranger.id, path: [{ ...dark }], cause: 'voluntary',
+    }, () => 0.5).state;
+    expect(closeCombatEnemies(moved, ranger.id)).toEqual([
+      { id: guard.id, distanceFeet: 5, seesAttacker: false, incapacitated: false },
+    ]);
+    const shot = reduceEncounter(moved, {
+      type: 'attack', actor: ranger.id, target: goblin.id, attackBonus: 5, criticalFloor: 20, rollMode: 'normal',
+      attackerCanSeeTarget: true, targetCanSeeAttacker: true,
+      tacticalRange: { kind: 'ranged', normalRangeFeet: feet(150), longRangeFeet: feet(600) },
+      damage: {
+        terms: [{ type: damageType('Piercing'), dice: { count: 1, sides: dieSides(8), modifier: 3 } }],
+        critical: false,
+        responses: [],
+      },
+    }, () => 0.5).events.find((event) => event.type === 'attack_resolved');
+    if (shot?.type !== 'attack_resolved') throw new Error('The Longbow shot emitted no attack roll.');
+    expect({ mode: shot.attack.roll.mode, faces: shot.attack.roll.faces.length }).toEqual({ mode: 'normal', faces: 1 });
   });
 });

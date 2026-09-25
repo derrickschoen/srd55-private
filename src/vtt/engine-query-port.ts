@@ -1616,10 +1616,17 @@ function projectedMovementState(
 /**
  * The PC's close-combat enemies with its space anchored at `position`, from
  * actor-local knowledge: every perceived opponent whose footprint is within
- * 5 feet of that space. It sees the PC when the projection says it does now,
- * the reading the attack itself takes for its target at every square;
- * otherwise that fact is unknown (the verdict may then be unresolved). It is
- * Incapacitated when the PC perceives a condition that includes it.
+ * 5 feet of that space, Incapacitated when the PC perceives a condition that
+ * includes it.
+ *
+ * Whether it sees the PC is a fact of the square the PC stands on: the
+ * projection observed it there (reciprocalVisibility). At any other square it
+ * is unknown. Sight at a new square turns on the enemy's senses (darkvision,
+ * blindsight, tremorsense, truesight) against that square's light and
+ * obscurement, and actor-local knowledge does not include senses; so the PC
+ * never carries the fact from where it stands to where it may go (a PC that
+ * steps from light into darkness beside an enemy without darkvision is not
+ * seen there), and the verdict there is close_combat_unresolved, not a guess.
  */
 export function projectedCloseCombatEnemies(
   state: EncounterState,
@@ -1627,6 +1634,9 @@ export function projectedCloseCombatEnemies(
   position: GridCell,
 ): readonly CloseCombatEnemy[] {
   const actorSpace = queryCombatantSpaceAt(state, projection.actorId, position);
+  const standing = state.tokens.find((token) => token.combatantId === projection.actorId)?.position;
+  const atStandingSquare = standing !== undefined &&
+    standing.column === position.column && standing.row === position.row;
   return projection.targets.flatMap((target): readonly CloseCombatEnemy[] => {
     if (target.kind !== 'perceived') return [];
     const distanceFeet = minimumSpaceDistance(actorSpace, decodeProjectedCreatureSpace(target));
@@ -1634,7 +1644,7 @@ export function projectedCloseCombatEnemies(
     return [{
       id: target.targetId,
       distanceFeet,
-      seesAttacker: target.reciprocalVisibility.kind === 'perceived'
+      seesAttacker: atStandingSquare && target.reciprocalVisibility.kind === 'perceived'
         ? target.reciprocalVisibility.targetCanSeeActor
         : { kind: 'unknown' },
       incapacitated: isIncapacitated(projectedTargetConditions(target)),
