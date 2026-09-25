@@ -9,7 +9,7 @@ import {
 } from '../combat/creature-space';
 import { createEncounter, type EncounterCombatantState, type EncounterState } from '../combat/encounter';
 import { combatantSpace } from '../combat/combat-rules';
-import { traceCombatantLine, traceCombatantLineToCells } from '../combat/cover';
+import { combatantLineVerdict, combatantLineVerdictToCells, visitCornerRayCells } from '../combat/cover';
 import type { GridBounds, GridCell } from '../combat/grid';
 import { mulberry32, type Rng } from '../combat/random';
 import type { ChallengeRating } from '../combat/statblock';
@@ -25,6 +25,8 @@ import {
   effectStackingIdentity,
   encounterEffectId,
   worldObjectId,
+  type CombatantId,
+  type WorldObjectId,
 } from '../combat/values';
 import { terrainBlocking, type CanonicalWorldObjectBlocking, type CoverTier } from '../combat/terrain';
 import type { LightLevel, WorldObject } from '../combat/world-objects';
@@ -1158,6 +1160,11 @@ function featureFootprintCandidates(dimensions: GridBounds): readonly (readonly 
   return candidates;
 }
 
+/** A generated cover object's id depends on the seed and kind only, never on where it stands. */
+function generatedCoverObjectId(seed: number, terrainKind: 'half_cover' | 'three_quarters_cover'): WorldObjectId {
+  return worldObjectId(`world-object:generated-${String(seed)}-${terrainKind}`);
+}
+
 function generatedCoverObject<TerrainKind extends 'half_cover' | 'three_quarters_cover'>(
   seed: number,
   terrainKind: TerrainKind,
@@ -1167,7 +1174,7 @@ function generatedCoverObject<TerrainKind extends 'half_cover' | 'three_quarters
   if (position === undefined) throw new RangeError('Generated cover must occupy at least one cell.');
   const blocking = terrainBlocking(terrainKind) as GeneratedCoverObject<TerrainKind>['blocking'];
   return {
-    id: worldObjectId(`world-object:generated-${String(seed)}-${terrainKind}`),
+    id: generatedCoverObjectId(seed, terrainKind),
     name: terrainKind === 'half_cover' ? 'Low Stone Barricade' : 'Arrow-Slit Bulwark',
     kind: 'cover',
     terrainKind,
@@ -1195,56 +1202,96 @@ function livingOpposingPairs(state: EncounterState): readonly {
   ];
 }
 
-function traceHasAuthoredSource(
-  state: EncounterState,
-  tier: CoverTier,
-  authoredSourceIds: ReadonlySet<string>,
-): boolean {
-  return livingOpposingPairs(state).some(({ source, target }) => {
-    const trace = traceCombatantLine(state, source.profile.id, target.profile.id);
-    return trace.tier === tier && trace.sourceIds.some((id) => authoredSourceIds.has(id));
-  });
-}
+// los_cover_v1 placement is a search over candidate footprints, and each candidate differs from the
+// search's base state only by cover sources on its footprint cells: the creatures, their spaces and
+// every other source are the same. A line reads only the sources on the cells its sixteen corner rays
+// cross (visitCornerRayCells), so a line whose rays miss the footprint has the same verdict in the
+// candidate as in the base. The searches below trace only the lines a candidate can change; nothing
+// they compute outlives the search.
 
-function hasOpenOpposingRay(state: EncounterState): boolean {
-  if (livingOpposingPairs(state).some(({ source, target }) =>
-    traceCombatantLine(state, source.profile.id, target.profile.id).tier === 'none')) return true;
-  const occupied = occupiedCombatantCells(state);
-  return state.combatants.some((source) => {
-    if (source.life !== 'living' || !state.tokens.some((token) =>
-      token.combatantId === source.profile.id)) return false;
-    for (let row = 0; row < state.bounds.rows; row += 1) {
-      for (let column = 0; column < state.bounds.columns; column += 1) {
-        const target = { column, row };
-        if (!occupied.has(cellKey(target)) &&
-          traceCombatantLineToCells(state, source.profile.id, [target]).tier === 'none') return true;
-      }
+/** One byte per board cell, row-major: 1 where one of a line's corner rays crosses the cell. */
+type RayCells = Uint8Array;
+
+function rayCells(bounds: GridBounds, sourceCells: readonly GridCell[], targetCells: readonly GridCell[]): RayCells {
+  const cells = new Uint8Array(bounds.columns * bounds.rows);
+  visitCornerRayCells(sourceCells, targetCells, (column, row) => {
+    if (column >= 0 && row >= 0 && column < bounds.columns && row < bounds.rows) {
+      cells[row * bounds.columns + column] = 1;
     }
-    return false;
+  });
+  return cells;
+}
+
+/** Whether a changed cell can lie on the line; a changed cell off the board counts as on every line. */
+function raysMeet(bounds: GridBounds, rays: RayCells, changed: readonly GridCell[]): boolean {
+  return changed.some((cell) =>
+    !cellIsInside(bounds, cell) || rays[cell.row * bounds.columns + cell.column] === 1);
+}
+
+type LineTest = (state: EncounterState, source: CombatantId, target: CombatantId) => boolean;
+
+/**
+ * `livingOpposingPairs(candidate).some(test)` for the candidates of one search from `base`, where
+ * `changed` holds every cell whose sources differ from the base. A line whose rays miss every changed
+ * cell answers with its base answer. A line's rays and base answer are computed when the line is
+ * first reached, and lines are tried in the plain order, so a candidate stops at the same first true
+ * line, and fails on the same line, as the plain `some` over the candidate would.
+ */
+function opposingLinePredicate(
+  base: EncounterState,
+  test: LineTest,
+): (candidate: EncounterState, changed: readonly GridCell[]) => boolean {
+  const pairs = livingOpposingPairs(base).map(({ source, target }) => ({
+    source: source.profile.id,
+    target: target.profile.id,
+  }));
+  const rays: (RayCells | undefined)[] = [];
+  const baseAnswers: (boolean | undefined)[] = [];
+  return (candidate, changed) => pairs.some(({ source, target }, index) => {
+    const lineRays = rays[index] ?? rayCells(
+      base.bounds,
+      combatantSpace(base, source).cells,
+      combatantSpace(base, target).cells,
+    );
+    rays[index] = lineRays;
+    if (raysMeet(base.bounds, lineRays, changed)) return test(candidate, source, target);
+    const answer = baseAnswers[index] ?? test(base, source, target);
+    baseAnswers[index] = answer;
+    return answer;
   });
 }
 
-function traceToCellHasAuthoredSource(
-  state: EncounterState,
-  tier: CoverTier,
-  authoredSourceIds: ReadonlySet<string>,
-): boolean {
+/** The line has the given cover tier and names the authored source among its strongest sources. */
+function namesAuthoredSource(tier: CoverTier, authoredSourceId: string): LineTest {
+  return (state, source, target) => {
+    const verdict = combatantLineVerdict(state, source, target);
+    return verdict.tier === tier && verdict.sourceIds.includes(authoredSourceId);
+  };
+}
+
+interface CellLine {
+  readonly source: CombatantId;
+  readonly target: GridCell;
+  readonly rays: RayCells;
+}
+
+/** Every living placed creature to every cell no creature occupies, in creature then row-major order. */
+function creatureToCellLines(state: EncounterState): readonly CellLine[] {
   const occupied = occupiedCombatantCells(state);
-  return state.combatants.some((source) => {
+  const lines: CellLine[] = [];
+  for (const source of state.combatants) {
     if (source.life !== 'living' || !state.tokens.some((token) =>
-      token.combatantId === source.profile.id)) return false;
+      token.combatantId === source.profile.id)) continue;
+    const sourceCells = combatantSpace(state, source.profile.id).cells;
     for (let row = 0; row < state.bounds.rows; row += 1) {
       for (let column = 0; column < state.bounds.columns; column += 1) {
         const target = { column, row };
         if (occupied.has(cellKey(target))) continue;
-        const trace = traceCombatantLineToCells(state, source.profile.id, [target]);
-        if (trace.tier === tier && trace.sourceIds.some((id) => authoredSourceIds.has(id))) {
-          return true;
-        }
+        lines.push({ source: source.profile.id, target, rays: rayCells(state.bounds, sourceCells, [target]) });
       }
     }
-    return false;
-  });
+  }
+  return lines;
 }
 
 function occupiedCombatantCells(state: EncounterState): ReadonlySet<string> {
@@ -1292,20 +1339,23 @@ function findCoverPlacement<TerrainKind extends 'half_cover' | 'three_quarters_c
   terrainKind: TerrainKind,
   occupied: ReadonlySet<string>,
   authored: ReadonlySet<string>,
-  preserves: (candidate: EncounterState) => boolean,
+  preserves: (candidate: EncounterState, changed: readonly GridCell[]) => boolean,
 ): {
   readonly state: EncounterState;
   readonly object: GeneratedCoverObject<TerrainKind>;
 } {
   const tier = terrainKind === 'half_cover' ? 'half' : 'three_quarters';
+  const exercised = opposingLinePredicate(
+    state,
+    namesAuthoredSource(tier, `object:${String(generatedCoverObjectId(seed, terrainKind))}`),
+  );
   for (const footprint of featureFootprintCandidates(state.bounds)) {
     if (!footprintIsAvailable(footprint, occupied, authored, terrainKind === 'three_quarters_cover')) {
       continue;
     }
     const object = generatedCoverObject(seed, terrainKind, footprint);
     const candidate = withCoverObject(state, object);
-    const sourceId = `object:${String(object.id)}`;
-    if (traceHasAuthoredSource(candidate, tier, new Set([sourceId])) && preserves(candidate)) {
+    if (exercised(candidate, footprint) && preserves(candidate, footprint)) {
       return { state: candidate, object };
     }
   }
@@ -1320,15 +1370,32 @@ function findWallPlacement(
   halfSourceId: string,
   threeQuartersSourceId: string,
 ): { readonly state: EncounterState; readonly cells: readonly GridCell[] } {
+  // A candidate replaces the base's walls with its footprint. The base has none, so a candidate's
+  // changed cells are its footprint, and no line of the base names a wall.
+  if (state.blockedCells.length > 0) throw new RangeError('los_cover_v1 places its wall in a room without walls.');
+  const keepsHalf = opposingLinePredicate(state, namesAuthoredSource('half', halfSourceId));
+  const keepsThreeQuarters = opposingLinePredicate(state, namesAuthoredSource('three_quarters', threeQuartersSourceId));
+  const opensPair = opposingLinePredicate(state, (candidate, source, target) =>
+    combatantLineVerdict(candidate, source, target).tier === 'none');
+  let cellLines: readonly CellLine[] | undefined;
   for (const footprint of featureFootprintCandidates(state.bounds)) {
     if (!footprintIsAvailable(footprint, occupied, authored, true)) continue;
     const candidate = { ...state, blockedCells: footprint };
     const wallSourceIds = new Set(footprint.map((cell) => `blocked:${cellKey(cell)}`));
+    cellLines ??= creatureToCellLines(state);
+    const lines = cellLines;
+    // Total Cover naming this wall needs a line through it: only those lines are traced.
+    const exercisesWall = lines.some((line) => {
+      if (!raysMeet(state.bounds, line.rays, footprint)) return false;
+      const verdict = combatantLineVerdictToCells(candidate, line.source, [line.target]);
+      return verdict.tier === 'total' && verdict.sourceIds.some((id) => wallSourceIds.has(id));
+    });
     if (
-      traceToCellHasAuthoredSource(candidate, 'total', wallSourceIds) &&
-      traceHasAuthoredSource(candidate, 'half', new Set([halfSourceId])) &&
-      traceHasAuthoredSource(candidate, 'three_quarters', new Set([threeQuartersSourceId])) &&
-      hasOpenOpposingRay(candidate)
+      exercisesWall &&
+      keepsHalf(candidate, footprint) &&
+      keepsThreeQuarters(candidate, footprint) &&
+      (opensPair(candidate, footprint) || lines.some((line) =>
+        combatantLineVerdictToCells(candidate, line.source, [line.target]).tier === 'none'))
     ) return { state: candidate, cells: footprint };
   }
   throw new RangeError(`los_cover_v1 could not place an exercised wall for seed ${String(seed)}.`);
@@ -1359,11 +1426,7 @@ function applyLosCoverTerrainProfile(room: GeneratedRoom): GeneratedRoom {
     'three_quarters_cover',
     occupied,
     authored,
-    (candidate) => traceHasAuthoredSource(
-      candidate,
-      'half',
-      new Set([halfSourceId]),
-    ),
+    opposingLinePredicate(half.state, namesAuthoredSource('half', halfSourceId)),
   );
   threeQuarters.object.footprint.forEach((cell) => authored.add(cellKey(cell)));
   const threeQuartersSourceId = `object:${String(threeQuarters.object.id)}`;
