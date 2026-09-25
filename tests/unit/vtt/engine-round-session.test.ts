@@ -581,6 +581,35 @@ describe('authoritative engine round session', () => {
     expect(attackEvent.damage?.terms[0]?.roll.faces).toEqual([]);
   });
 
+  it('PCAC-TURN-LATER-ATTACKS-LAPSE: a scripted Attack action whose first attack kills its target skips the rest', () => {
+    const started = reduceEncounter(
+      segmentedState(new Map([
+        [FOCUS_ID, { column: 0, row: 0 }],
+        [KILLER_ID, { column: 1, row: 0 }],
+      ])),
+      { type: 'roll_initiative' },
+      mulberry32(58_420_001),
+    ).state;
+    expect(started.activeCombatant).toBe(FOCUS_ID);
+    // +100 hits on every face but a natural 1, and 1,000 damage kills.
+    const attack: Extract<EncounterCommand, { readonly type: 'attack' }> = {
+      type: 'attack', actor: FOCUS_ID, target: KILLER_ID, attackBonus: 100, criticalFloor: 20, rollMode: 'normal',
+      attackerCanSeeTarget: true, targetCanSeeAttacker: true,
+      damage: { terms: [{ type: damageType('Force'), dice: { count: 0, sides: dieSides(6), modifier: 1_000 } }], critical: false, responses: [] },
+    };
+    const seed = 58_420_002;
+    const oracle = mulberry32(seed);
+    expect(Math.floor(oracle() * 20) + 1).not.toBe(1);
+    const session = new EngineRoundSession(started, mulberry32(seed), { kind: 'unattended', askDefault: 'decline' }, OFFER_ENVIRONMENT);
+
+    session.completeScriptedPcTurn({ actorId: FOCUS_ID, reducerCommands: [attack, structuredClone(attack)] }, null);
+
+    const after = session.currentState();
+    expect(after.combatants.find((entry) => entry.profile.id === KILLER_ID)?.life).toBe('dead');
+    expect(after.eventLog.filter((event) =>
+      event.type === 'attack_resolved' && event.actor === FOCUS_ID && event.target === KILLER_ID)).toHaveLength(1);
+  });
+
   it('discards failed monster state, evidence, and randomness before a control-identical success', () => {
     const positioned = segmentedState(new Map([
       [CLERIC_ID, { column: 0, row: 0 }],

@@ -4,10 +4,14 @@ import {
   type AlgorithmRoundProposal,
 } from '../../../src/combat/controllers';
 import type { TurnAttackForms, TurnLegalActions } from '../../../src/combat/coordinator';
-import { reduceEncounter } from '../../../src/combat/encounter';
+import { createEncounter, reduceEncounter } from '../../../src/combat/encounter';
 import { mulberry32 } from '../../../src/combat/random';
 import type { DmVisibleEncounterState } from '../../../src/combat/visibility';
-import type { CombatantId } from '../../../src/combat/values';
+import {
+  effectStackingIdentity,
+  encounterEffectId,
+  type CombatantId,
+} from '../../../src/combat/values';
 import type { DecisionProgram } from '../../../src/vtt/dm-bridge/round-plan-contract';
 import {
   createScriptedPartyPlan,
@@ -17,6 +21,8 @@ import {
 import { loadArenaFixture } from '../../../src/vtt/mcp/entrypoint';
 import { generateRoom } from '../../../src/vtt/room-generator';
 import { loadExternalPartyPackBytes } from '../../../src/vtt/party-pack';
+import { regretAttackForms } from '../../../src/vtt/regret/legal-actions';
+import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
 import { alternatingInitiativeRoom } from '../../fixtures/initiative-segments/alternating-room';
 import { declareTestInputs } from '../../helpers/test-inputs';
 
@@ -307,5 +313,65 @@ describe('scripted party round planning and adherence', () => {
     expect(turn.reasonCodes).toEqual(['PLANNED_PRIMARY_NO_LONGER_LEGAL']);
     expect(turn.reducerCommands).toHaveLength(1);
     expect(turn.executedProgramHash).not.toBe(turn.plannedProgramHash);
+  });
+
+  /*
+   * PERF-02 pcac, fourth commit. Owner ruling 2026-09-25 ("Move + action in
+   * one turn"): when the PC's best move only enables an attack, the turn plans
+   * the move and the follow-up action together. Board (3 columns, 1 row, see
+   * symmetric-pc-evaluator.test.ts for the derivation): the Paralyzed fixture
+   * monster at (0,0), the regret PC at (2,0), 10 feet away, acting first. Its
+   * step to (1,0) and generic weapon attack (+7, 1d8 + 4, reach 5; Advantage,
+   * every hit a Critical Hit) are worth 0.96 x 13 = 12.48, more than the 2d8
+   * Dexterity save the monster fails automatically (9).
+   */
+  it('PCAC-TURN-MOVE-THEN-ATTACK: the plan and the executed turn are the step and the attack it enables, in one turn', () => {
+    const pc = playerProfile('pcac-program-pc', { initiativeBonus: 20 });
+    const monster = monsterProfile('pcac-program-monster', { initiativeBonus: -20 });
+    const started = reduceEncounter(createEncounter({
+      bounds: { columns: 3, rows: 1 },
+      combatants: [monster, pc],
+      tokens: [placedToken(monster, 0), placedToken(pc, 2)],
+      config: { initiativeMode: 'per_combatant' },
+    }), { type: 'roll_initiative' }, () => 0.5).state;
+    const state = {
+      ...started,
+      effects: [{
+        id: encounterEffectId('effect:pcac-program-paralyzed'),
+        source: pc.id,
+        targets: [monster.id],
+        createdRevision: started.revision,
+        duration: { kind: 'permanent' as const },
+        concentrationOwner: null,
+        stackingIdentity: effectStackingIdentity('pcac-program-paralyzed'),
+        stacking: 'replace_same_source' as const,
+        repeatedSave: null,
+        payload: { kind: 'condition' as const, condition: 'Paralyzed' as const },
+      }],
+    };
+    expect(state.activeCombatant).toBe(pc.id);
+    const [attack] = regretAttackForms(state, pc.id, monster.id);
+    if (attack === undefined) throw new Error('The regret PC has a generic attack form.');
+    const move = { type: 'move' as const, actor: pc.id, path: [{ column: 1, row: 0 }], cause: 'voluntary' as const };
+
+    const plan = createScriptedPartyPlan(state);
+    const turn = materializeScriptedPartyTurn({ state, plan, actorId: pc.id });
+
+    expect(plan.programs.map((entry) => entry.program)).toEqual([{
+      kind: 'move_then_attack',
+      destination: { column: 1, row: 0 },
+      attack: { kind: 'attack', target: { kind: 'combatant', combatantId: monster.id } },
+    }]);
+    expect(turn.adherence).toBe('followed');
+    expect(turn.executedProgram).toEqual(plan.programs[0]?.program);
+    expect(turn.reducerCommands).toEqual([move, attack]);
+    // The attack is illegal where the PC stands and legal after the step, in the same turn.
+    expect(() => reduceEncounter(state, attack, () => 0.5)).toThrow('The target is out of attack range.');
+    const moved = reduceEncounter(state, move, () => 0.5).state;
+    const attacked = reduceEncounter(moved, attack, () => 0.5);
+    expect(attacked.state.activeCombatant).toBe(pc.id);
+    expect(attacked.events.filter((event) => event.type === 'attack_resolved')
+      .map((event) => event.type === 'attack_resolved' ? [event.actor, event.target] : null))
+      .toEqual([[pc.id, monster.id]]);
   });
 });

@@ -29,6 +29,8 @@ import { regretAttackForms, regretTurnLegalActions } from '../../../src/vtt/regr
 import {
   DEFAULT_SCRIPTED_PC_DECISION_POLICY,
   evaluateSymmetricPcDecision,
+  symmetricPcTurnPlan,
+  type SymmetricPcCommandAssessment,
   type SymmetricPcDecision,
 } from '../../../src/vtt/symmetric-pc-evaluator';
 import { declareTestInputs } from '../../helpers/test-inputs';
@@ -1124,11 +1126,15 @@ describe('PCAC approach: with no legal attack the scripted PC plans its moves wi
 });
 
 /*
- * PERF-02 pcac, fourth commit. Owner ruling 2026-09-25, "Fix range inside
- * pcac": PC attack commands carry their weapon's real range (normal and long,
- * from the SRD weapon table), used by both the legal-attack path and the
- * approach (forms) path; long range means Disadvantage and beyond long range
- * is illegal.
+ * PERF-02 pcac, fourth commit. Owner rulings 2026-09-25:
+ * - "Fix range inside pcac": PC attack commands carry their weapon's real
+ *   range (normal and long, from the SRD weapon table), used by both the
+ *   legal-attack path and the approach (forms) path; long range means
+ *   Disadvantage and beyond long range is illegal.
+ * - "Move + action in one turn": when the PC's best move only enables an
+ *   attack, the turn plans the move and the follow-up action together; a
+ *   legal save, spell or potion that needs no move keeps its place when the
+ *   combined plan is not better.
  *
  * Rules behind every number below (docs/srd/full/srd-5.2.1.txt):
  * - Longbow (:5529): 1d8 Piercing, Ammunition (Range 150/600). Range property
@@ -1138,7 +1144,11 @@ describe('PCAC approach: with no legal attack the scripted PC plans its moves wi
  * - Attack rolls (:446-453): a natural 20 always hits and is the Critical Hit,
  *   a natural 1 always misses. Advantage/Disadvantage (:494-499): the higher /
  *   lower of two d20s. Critical Hits (:997-1003): the damage dice twice.
- * - Goblin Warrior (:18985-18988): AC 15.
+ * - Paralyzed (:11952-11961): the creature automatically fails Strength and
+ *   Dexterity saving throws; attack rolls against it have Advantage; a hit from
+ *   within 5 feet is a Critical Hit.
+ * - Goblin Warrior (:18985-18988): AC 15. The unit fixture monster
+ *   (tests/unit/combat/fixtures.ts:27-38): AC 12, Dexterity save +0, 10 HP.
  *
  * LONGBOW RANGE. A ranger with a Longbow at +5 for 1d8 + 3 (a hit averages
  * 7.5, a Critical Hit 2 x 4.5 + 3 = 12) against a Goblin Warrior on one row.
@@ -1167,6 +1177,23 @@ describe('PCAC approach: with no legal attack the scripted PC plans its moves wi
  * every square 10 feet away in normal range ("maintain range"), so the clear
  * square (4,1) wins at 4.35 over Half (3.6), Three-Quarters (2.475) and Total
  * Cover. Planned at reach instead, the Longbow reaches none of them.
+ *
+ * COMBINED PLAN BOARD (3 columns, 1 row): the fixture monster at (0,0), the
+ * regret PC (generic weapon attack +7, 1d8 + 4 Slashing, reach 5; generic
+ * save DC 15 Dexterity, 2d8 Radiant, no damage on a success) at (2,0), 10
+ * feet away, its action available. Its one move, to (1,0), enables the attack
+ * ("move within speed to enable attack", bucket 0). One d20 hits AC 12 on
+ * faces 5-20: 16/20. A hit averages 4.5 + 4 = 8.5, a Critical Hit 9 + 4 = 13.
+ * - Not Paralyzed: the plan is worth 1 attack x ((16 - 1)/20 x 8.5 + 1/20 x
+ *   13) = 6.375 + 0.65 = 7.025. The save's worth needs the monster's
+ *   Dexterity save bonus, which the PC does not know (it knows AC only), so
+ *   the plan is not shown better: the save keeps its place (as in the arena's
+ *   brutal room-4 fixture, this same board).
+ * - Paralyzed: Advantage, hit 1 - (4/20)^2 = 384/400 = 0.96, and every hit
+ *   from (1,0) is a Critical Hit: the plan is worth 0.96 x 13 = 12.48. The
+ *   monster fails the Dexterity save automatically, so the 2d8 save is worth
+ *   its average, 9: the plan beats it. A 4d8 save is worth 18: it keeps its
+ *   place ahead of the plan.
  */
 const LONGBOW_ID = 'attack:pcac-range-longbow';
 const SHORTSWORD_ID = 'attack:pcac-range-shortsword';
@@ -1377,5 +1404,121 @@ describe('PCAC range: PC attack commands carry their weapon\'s real range', () =
       { destination: APPROACH_TOTAL_SQUARE, bucket: 3, damage: 'unresolved', form },
     ]);
     expect(decision.selected.command).toEqual(step(ranger.profile.id, APPROACH_CLEAR_SQUARE));
+    // The action is spent, so the step enables no attack this turn: no combined plan.
+    expect(decision.selected.combinedPlan).toBeNull();
+  });
+});
+
+function stepBoard(input: { readonly key: string; readonly paralyzed: boolean }) {
+  const pc = playerProfile(`${input.key}-pc`);
+  const monster = monsterProfile(`${input.key}-monster`);
+  const created = createEncounter({
+    bounds: { columns: 3, rows: 1 },
+    combatants: [monster, pc],
+    tokens: [placedToken(monster, 0), placedToken(pc, 2)],
+  });
+  const state = ready({
+    ...created,
+    effects: input.paralyzed
+      ? [{
+          id: encounterEffectId(`effect:${input.key}-paralyzed`),
+          source: pc.id,
+          targets: [monster.id],
+          createdRevision: 0,
+          duration: { kind: 'permanent' },
+          concentrationOwner: null,
+          stackingIdentity: effectStackingIdentity(`${input.key}-paralyzed`),
+          stacking: 'replace_same_source',
+          repeatedSave: null,
+          payload: { kind: 'condition', condition: 'Paralyzed' },
+        }]
+      : [],
+  }, pc.id);
+  return { state, pc, monster };
+}
+
+/** Each ranked command: type, bucket and bucket tail, and the value that decides between a combined plan and its alternatives. */
+function rankedTurn(decision: SymmetricPcDecision) {
+  const value = (assessment: SymmetricPcCommandAssessment) => {
+    const worth = assessment.combinedPlan?.value ?? assessment.alternativeValue;
+    if (worth === null) return null;
+    return worth.kind === 'resolved' ? rounded(worth.expectedDamage) : worth.reason;
+  };
+  return decision.assessments.map((assessment) => ({
+    type: assessment.command.type,
+    bucket: assessment.rank[0],
+    tail: assessment.rank[1],
+    value: value(assessment),
+  }));
+}
+
+describe('PCAC turn: the approach move and the attack it enables are planned as one turn', () => {
+  it('PCAC-TURN-PLAN-BEATS-WORSE-SAVE: stepping in and attacking a Paralyzed monster (12.48) beats the Dexterity save it fails automatically (9)', () => {
+    const { state, pc, monster } = stepBoard({ key: 'pcac-turn-beats', paralyzed: true });
+
+    const decision = evaluateSymmetricPcDecision({
+      state, actorId: pc.id, legalActions: regretTurnLegalActions(state, pc.id).actions, attackForms: regretAttackForms,
+    });
+
+    expect(rankedTurn(decision)).toEqual([
+      { type: 'move', bucket: 0, tail: 0, value: 12.48 },
+      { type: 'force_save', bucket: 3, tail: 0, value: 9 },
+      { type: 'disengage', bucket: 7, tail: 0, value: null },
+      { type: 'dodge', bucket: 7, tail: 0, value: null },
+      { type: 'dash', bucket: 8, tail: 0, value: null },
+      { type: 'end_turn', bucket: 9, tail: 0, value: null },
+    ]);
+    const [attack] = regretAttackForms(state, pc.id, monster.id);
+    expect(decision.selected.combinedPlan).toEqual({ followUp: attack, attacks: 1, value: { kind: 'resolved', expectedDamage: expect.closeTo(12.48, 12) }, yieldsTo: [] });
+    expect(symmetricPcTurnPlan(decision.selected)).toEqual({
+      kind: 'move_then_attack', move: step(pc.id, { column: 1, row: 0 }), attack, attacks: 1,
+    });
+  });
+
+  it('PCAC-TURN-SAVE-KEPT-WHEN-BETTER: a 4d8 save the Paralyzed monster fails automatically (18) keeps its place ahead of the combined plan (12.48)', () => {
+    const { state, pc } = stepBoard({ key: 'pcac-turn-kept', paralyzed: true });
+    const strongerSave = (command: EncounterCommand): EncounterCommand => command.type === 'force_save'
+      ? { ...command, damage: { ...command.damage, terms: [{ type: damageType('Radiant'), dice: { count: 4, sides: dieSides(8), modifier: 0 } }] } }
+      : command;
+    const legalActions = regretTurnLegalActions(state, pc.id).actions.map(strongerSave);
+
+    const decision = evaluateSymmetricPcDecision({ state, actorId: pc.id, legalActions, attackForms: regretAttackForms });
+
+    expect(rankedTurn(decision)).toEqual([
+      { type: 'force_save', bucket: 3, tail: 0, value: 18 },
+      { type: 'move', bucket: 3, tail: 1, value: 12.48 },
+      { type: 'disengage', bucket: 7, tail: 0, value: null },
+      { type: 'dodge', bucket: 7, tail: 0, value: null },
+      { type: 'dash', bucket: 8, tail: 0, value: null },
+      { type: 'end_turn', bucket: 9, tail: 0, value: null },
+    ]);
+    const save = legalActions.find((command) => command.type === 'force_save');
+    expect(decision.selected.command).toEqual(save);
+    expect(assessmentOf(decision, (command) => command.type === 'move').combinedPlan?.yieldsTo).toEqual([canonicalJson(save)]);
+  });
+
+  it('PCAC-TURN-UNKNOWN-KEPT: a save whose failure chance the PC cannot know, and a potion, keep their places ahead of the combined plan (7.025)', () => {
+    const { state, pc } = stepBoard({ key: 'pcac-turn-unknown', paralyzed: false });
+    const potion: EncounterCommand = {
+      type: 'drink_healing_potion', actor: pc.id, effectId: encounterEffectId('effect:pcac-turn-potion'),
+    };
+    const regret = regretTurnLegalActions(state, pc.id).actions;
+
+    const withoutPotion = evaluateSymmetricPcDecision({ state, actorId: pc.id, legalActions: regret, attackForms: regretAttackForms });
+    const withPotion = evaluateSymmetricPcDecision({ state, actorId: pc.id, legalActions: [...regret, potion], attackForms: regretAttackForms });
+
+    // The arena's brutal room-4 decision: the save keeps its place, as it did before the approach planning.
+    expect(withoutPotion.selected.command.type).toBe('force_save');
+    expect(rankedTurn(withPotion)).toEqual([
+      { type: 'drink_healing_potion', bucket: 1, tail: 0, value: 'healing_is_not_damage' },
+      { type: 'force_save', bucket: 3, tail: 0, value: 'target_save_bonus_not_known' },
+      { type: 'move', bucket: 3, tail: 1, value: 7.025 },
+      { type: 'disengage', bucket: 7, tail: 0, value: null },
+      { type: 'dodge', bucket: 7, tail: 0, value: null },
+      { type: 'dash', bucket: 8, tail: 0, value: null },
+      { type: 'end_turn', bucket: 9, tail: 0, value: null },
+    ]);
+    expect(assessmentOf(withPotion, (command) => command.type === 'move').combinedPlan?.yieldsTo)
+      .toEqual([canonicalJson(regret.find((command) => command.type === 'force_save')), canonicalJson(potion)]);
   });
 });

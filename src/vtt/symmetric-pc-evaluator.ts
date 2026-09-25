@@ -4,7 +4,7 @@ import {
   type EncounterState,
 } from '../combat/encounter';
 import { minimumSpaceLine } from '../combat/creature-space';
-import type { AppliedCondition } from '../combat/conditions';
+import { conditionMechanicalState, type AppliedCondition } from '../combat/conditions';
 import type { Controller, ControllerDecision, ControllerRequest } from '../combat/controllers';
 import type { TurnAttackForms } from '../combat/coordinator';
 import type { EncounterCommand, StatedRangeAttackCommand } from '../combat/events';
@@ -106,6 +106,58 @@ export type SymmetricPcPlannedDamage =
   | { readonly kind: 'not_compared' };
 
 /**
+ * What one turn's action is worth, on the one basis the combined plan and the
+ * alternatives it competes with are compared on: the expected damage the
+ * action deals its target (hit or failure chance times the average damage,
+ * critical hits included; damage responses are not applied, as for every
+ * expected damage this evaluator reads). Unresolved when the PC lacks a fact
+ * the number needs; an unresolved value is never shown to be lower.
+ */
+export type SymmetricPcActionValue =
+  | { readonly kind: 'resolved'; readonly expectedDamage: number }
+  | { readonly kind: 'unresolved'; readonly reason: SymmetricPcActionValueUnresolvedReason };
+
+export type SymmetricPcActionValueUnresolvedReason =
+  /** The save's target is not a creature the PC perceives. */
+  | 'target_not_perceived'
+  /**
+   * The PC perceives no condition that makes the target fail this save
+   * automatically, and it has no fact for the target's save bonus: AC is the
+   * one opponent number the owner gave the PC (2026-09-24).
+   */
+  | 'target_save_bonus_not_known'
+  /** This evaluator assesses no spell's outcome. */
+  | 'spell_outcome_not_assessed'
+  /** A potion heals; healing is not damage dealt, so it is not on this basis. */
+  | 'healing_is_not_damage'
+  /** The action is spent: no attack can follow the move this turn. */
+  | 'follow_up_action_unavailable'
+  /** The destination offers no resolved expected damage (for example, the target has Total Cover there). */
+  | 'destination_damage_unresolved';
+
+/**
+ * An approach move and the attack it enables, planned as one turn. Owner
+ * ruling 2026-09-25 ("Move + action in one turn"): when the PC's best move only
+ * enables an attack, the turn plans the move and the follow-up action
+ * together; a legal save, spell or potion that needs no move keeps its place
+ * when the combined plan is not better.
+ */
+export interface SymmetricPcCombinedPlan {
+  /** The attack form that gave the destination its assessment, against the planned target. */
+  readonly followUp: StatedRangeAttackCommand;
+  /**
+   * How many times it is made after the move: the Attack action's attacks
+   * (attacksPerAction) when the action is available, the attacks left when an
+   * Attack action is under way, 0 when the action is spent.
+   */
+  readonly attacks: number;
+  /** attacks x the destination's expected damage. */
+  readonly value: SymmetricPcActionValue;
+  /** Canonical keys, in canonical order, of the legal saves, spells and potions this plan does not beat; each keeps its place ahead of it. */
+  readonly yieldsTo: readonly string[];
+}
+
+/**
  * Compared element by element; the lower rank is preferred.
  * Owner ruling 2026-09-24 (PERF-02 pcac): "Within the same bucket, prefer the
  * square with higher expected damage against the target (hit chance × damage,
@@ -118,8 +170,12 @@ export type SymmetricPcPlannedDamage =
  */
 export type SymmetricPcRank = readonly [
   bucket: SymmetricPcRankBucket,
-  /** 1 only for command kinds this evaluator does not assess. */
-  unassessedKind: 0 | 1,
+  /**
+   * 1 for a command placed after the rest of its bucket: a command kind this
+   * evaluator does not assess (bucket 8), or an approach move that yields to a
+   * save, spell or potion of this bucket (see SymmetricPcCombinedPlan).
+   */
+  bucketTail: 0 | 1,
   /**
    * Where the command sits in its bucket. It is the command's canonical key,
    * except that every move of a bucket takes the smallest canonical key among
@@ -143,6 +199,10 @@ export interface SymmetricPcCommandAssessment {
   readonly tactical: SymmetricPcTacticalAssessment | null;
   readonly movement: SymmetricPcMovementAssessment | null;
   readonly concentration: ConcentrationZoneEvaluation | null;
+  /** For a legal save, spell or potion: what its action is worth, on the combined plan's basis. */
+  readonly alternativeValue: SymmetricPcActionValue | null;
+  /** For an approach move: the move and the attack it enables, as one turn. */
+  readonly combinedPlan: SymmetricPcCombinedPlan | null;
   readonly rank: SymmetricPcRank;
 }
 
@@ -157,6 +217,28 @@ export interface SymmetricPcDecision {
   readonly actorKnowledge: ActorKnowledgeProjection;
   readonly assessments: readonly SymmetricPcCommandAssessment[];
   readonly selected: SymmetricPcCommandAssessment;
+}
+
+/**
+ * The selected command's turn: the command alone, or, when it is an approach
+ * move whose follow-up attack can be made this turn, the move followed by that
+ * attack `attacks` times.
+ */
+export type SymmetricPcTurnPlan =
+  | { readonly kind: 'single'; readonly command: EncounterCommand }
+  | {
+      readonly kind: 'move_then_attack';
+      readonly move: MoveCommand;
+      readonly attack: StatedRangeAttackCommand;
+      readonly attacks: number;
+    };
+
+export function symmetricPcTurnPlan(selected: SymmetricPcCommandAssessment): SymmetricPcTurnPlan {
+  const plan = selected.combinedPlan;
+  if (selected.command.type === 'move' && plan !== null && plan.value.kind === 'resolved') {
+    return { kind: 'move_then_attack', move: selected.command, attack: plan.followUp, attacks: plan.attacks };
+  }
+  return { kind: 'single', command: selected.command };
 }
 
 function actor(state: EncounterState, actorId: CombatantId) {
@@ -413,6 +495,71 @@ function concentrationAssessment(
   });
 }
 
+type AlternativeCommand = Extract<EncounterCommand, {
+  readonly type: 'force_save' | 'cast_spell' | 'drink_healing_potion';
+}>;
+
+/** A legal command the ruling names as the combined plan's competitor: a save, a spell or a potion. It needs no move. */
+function isAlternative(command: EncounterCommand): command is AlternativeCommand {
+  return command.type === 'force_save' || command.type === 'cast_spell' || command.type === 'drink_healing_potion';
+}
+
+/** The average of a save's damage dice: what it deals when the target fails. */
+function averageDamage(command: Extract<AlternativeCommand, { readonly type: 'force_save' }>): number {
+  return command.damage.terms.reduce((sum, term) =>
+    sum + term.dice.count * (term.dice.sides + 1) / 2 + term.dice.modifier, 0);
+}
+
+/**
+ * A save's expected damage is the chance its target fails times the save's
+ * average damage, plus half of it on a success for a half-damage save. The PC
+ * knows the chance only when it perceives a condition under which the target
+ * fails that save automatically (Paralyzed, Petrified, Stunned and Unconscious
+ * fail Strength and Dexterity saves, docs/srd/full/srd-5.2.1.txt:11956-11957):
+ * the chance is then 1 and the value is the average damage. Otherwise the
+ * chance needs the target's save bonus, which the PC does not have.
+ */
+function alternativeValue(
+  projection: ActorKnowledgeProjection,
+  command: AlternativeCommand,
+): SymmetricPcActionValue {
+  switch (command.type) {
+    case 'force_save': {
+      const target = projectedTarget(projection, command.target);
+      if (target === null) return { kind: 'unresolved', reason: 'target_not_perceived' };
+      const failsAutomatically = conditionMechanicalState(projectedConditions(target)).clauses.some((clause) =>
+        clause.kind === 'automatic_save_failure' && clause.abilities.includes(command.ability));
+      return failsAutomatically
+        ? { kind: 'resolved', expectedDamage: averageDamage(command) }
+        : { kind: 'unresolved', reason: 'target_save_bonus_not_known' };
+    }
+    case 'cast_spell': return { kind: 'unresolved', reason: 'spell_outcome_not_assessed' };
+    case 'drink_healing_potion': return { kind: 'unresolved', reason: 'healing_is_not_damage' };
+  }
+}
+
+/** The attacks an action still allows after a move: the whole Attack action, the rest of one under way, or none. */
+function followUpAttacks(state: EncounterState, actorId: CombatantId): number {
+  const subject = actor(state, actorId);
+  switch (subject.turn.action.kind) {
+    case 'available': return subject.profile.rules.attacksPerAction;
+    case 'attack_sequence': return subject.turn.action.attacksRemaining;
+    case 'spent': return 0;
+  }
+}
+
+function combinedPlanValue(attacks: number, damage: SymmetricPcPlannedDamage): SymmetricPcActionValue {
+  if (attacks === 0) return { kind: 'unresolved', reason: 'follow_up_action_unavailable' };
+  if (damage.kind !== 'resolved') return { kind: 'unresolved', reason: 'destination_damage_unresolved' };
+  return { kind: 'resolved', expectedDamage: attacks * damage.expectedDamage };
+}
+
+/** Only a resolved value strictly greater than a resolved value beats it. */
+function beats(plan: SymmetricPcActionValue, alternative: SymmetricPcActionValue): boolean {
+  return plan.kind === 'resolved' && alternative.kind === 'resolved' &&
+    plan.expectedDamage > alternative.expectedDamage;
+}
+
 function tacticalRank(value: SymmetricPcTacticalAssessment): 1 | 2 | 4 | 5 | 6 {
   if (value.status === 'unresolved') return 6;
   if (value.evaluation.range.status !== 'resolved' || !value.evaluation.range.legal) return 5;
@@ -458,7 +605,7 @@ function attackPlannedDamage(
 /** A rank before the bucket's moves, and its attacks, are placed together. */
 interface CommandOrder {
   readonly bucket: SymmetricPcRankBucket;
-  readonly unassessedKind: 0 | 1;
+  readonly bucketTail: 0 | 1;
   readonly plannedDamage: SymmetricPcPlannedDamage;
 }
 
@@ -469,14 +616,14 @@ function commandOrder(
   concentration: ConcentrationZoneEvaluation | null,
   attackDamage: () => SymmetricPcPlannedDamage,
 ): CommandOrder {
-  const notAMove = (bucket: SymmetricPcRankBucket, unassessedKind: 0 | 1 = 0): CommandOrder =>
-    ({ bucket, unassessedKind, plannedDamage: { kind: 'not_compared' } });
+  const notAMove = (bucket: SymmetricPcRankBucket, bucketTail: 0 | 1 = 0): CommandOrder =>
+    ({ bucket, bucketTail, plannedDamage: { kind: 'not_compared' } });
   if (command.type === 'attack' && tactical !== null) {
-    return { bucket: tacticalRank(tactical), unassessedKind: 0, plannedDamage: attackDamage() };
+    return { bucket: tacticalRank(tactical), bucketTail: 0, plannedDamage: attackDamage() };
   }
   if (command.type === 'move' && movement !== null) {
     const candidate = movement.status === 'evaluated' ? destinationCandidate(command, movement.evaluation) : null;
-    return { bucket: movementRank(candidate), unassessedKind: 0, plannedDamage: destinationDamage(candidate) };
+    return { bucket: movementRank(candidate), bucketTail: 0, plannedDamage: destinationDamage(candidate) };
   }
   if (command.type === 'cast_spell') {
     const startsConcentration = concentration?.start.status === 'resolved' &&
@@ -523,6 +670,20 @@ function compareRank(left: SymmetricPcRank, right: SymmetricPcRank): number {
  * (owner ruling 2026-09-24, see projectedMovementOptions). `attackForms` is
  * the PC's own attack forms from the same source as `legalActions`; moves are
  * planned with them when no legal attack targets a perceived creature.
+ *
+ * Combined plans (owner ruling 2026-09-25, "Move + action in one turn"). An
+ * approach move is a move whose destination the evaluator ranks in bucket 0
+ * ("move within speed to enable attack" or "move 5 feet to normal range"):
+ * its value is the attack it enables. With that attack it forms one turn's
+ * plan, worth attacks x the destination's expected damage (see
+ * SymmetricPcCombinedPlan). Every legal save, spell and potion (they need no
+ * move) is an alternative, worth its own expected damage on the same basis
+ * (see alternativeValue). The rule: an approach move keeps bucket 0 only when
+ * its plan's value is resolved and strictly greater than every alternative's
+ * resolved value. Otherwise it takes the bucket of the lowest-ranked
+ * alternative it does not beat, after every other command of that bucket, so
+ * each alternative it does not beat keeps its place ahead of it. Nothing else
+ * moves.
  */
 export function evaluateSymmetricPcDecision(input: {
   readonly state: EncounterState;
@@ -560,18 +721,43 @@ export function evaluateSymmetricPcDecision(input: {
       tactical,
       movement,
       concentration,
+      alternativeValue: isAlternative(command) ? alternativeValue(actorKnowledge, command) : null,
       order: commandOrder(command, tactical, movement, concentration, () => command.type === 'attack'
         ? attackPlannedDamage(input.state, actorKnowledge, command)
         : { kind: 'not_compared' }),
     };
   });
-  // The smallest canonical key among the moves of each bucket places them
-  // all; likewise the attacks against each target, so the target keeps its
-  // canonical-text place and only its weapons are reordered.
+  const alternatives = evaluated.flatMap((entry) => entry.alternativeValue === null
+    ? []
+    : [{ commandKey: entry.commandKey, bucket: entry.order.bucket, value: entry.alternativeValue }]);
+  const attacksAfterMove = followUpAttacks(input.state, input.actorId);
+  const planned = evaluated.map((entry) => {
+    if (entry.command.type !== 'move' || entry.movement?.status !== 'evaluated' || entry.order.bucket !== 0) {
+      return { ...entry, combinedPlan: null };
+    }
+    const value = combinedPlanValue(attacksAfterMove, entry.order.plannedDamage);
+    const unbeaten = alternatives.filter((alternative) => !beats(value, alternative.value));
+    const combinedPlan: SymmetricPcCombinedPlan = {
+      followUp: entry.movement.attack,
+      attacks: attacksAfterMove,
+      value,
+      yieldsTo: unbeaten.map((alternative) => alternative.commandKey).sort((left, right) => left.localeCompare(right)),
+    };
+    const yieldBucket = unbeaten.reduce<SymmetricPcRankBucket | null>((lowest, alternative) =>
+      lowest === null || alternative.bucket > lowest ? alternative.bucket : lowest, null);
+    return {
+      ...entry,
+      combinedPlan,
+      order: yieldBucket === null ? entry.order : { ...entry.order, bucket: yieldBucket, bucketTail: 1 as const },
+    };
+  });
+  // The smallest canonical key among the moves of each bucket (and bucket
+  // tail) places them all; likewise the attacks against each target, so the
+  // target keeps its canonical-text place and only its weapons are reordered.
   const placementGroup = (command: EncounterCommand, order: CommandOrder) =>
-    `${command.type}:${String(order.bucket)}:${command.type === 'attack' ? String(command.target) : ''}`;
+    `${command.type}:${String(order.bucket)}:${String(order.bucketTail)}:${command.type === 'attack' ? String(command.target) : ''}`;
   const groupPlacement = new Map<string, string>();
-  for (const entry of evaluated) {
+  for (const entry of planned) {
     if (entry.order.plannedDamage.kind === 'not_compared') continue;
     const group = placementGroup(entry.command, entry.order);
     const placed = groupPlacement.get(group);
@@ -579,14 +765,14 @@ export function evaluateSymmetricPcDecision(input: {
       groupPlacement.set(group, entry.commandKey);
     }
   }
-  const assessments = evaluated.map(({ order, ...assessment }): SymmetricPcCommandAssessment => {
+  const assessments = planned.map(({ order, ...assessment }): SymmetricPcCommandAssessment => {
     const placementKey = order.plannedDamage.kind === 'not_compared'
       ? assessment.commandKey
       : groupPlacement.get(placementGroup(assessment.command, order));
     if (placementKey === undefined) throw new Error('Every move and attack registered its bucket placement above.');
     return {
       ...assessment,
-      rank: [order.bucket, order.unassessedKind, placementKey, order.plannedDamage, assessment.commandKey],
+      rank: [order.bucket, order.bucketTail, placementKey, order.plannedDamage, assessment.commandKey],
     };
   }).sort((left, right) => compareRank(left.rank, right.rank));
   const selected = assessments[0];
@@ -605,7 +791,12 @@ export function evaluateSymmetricPcDecision(input: {
   };
 }
 
-/** PC controller for coordinator-based arenas such as the survival harness. */
+/**
+ * PC controller for coordinator-based arenas such as the survival harness. The
+ * coordinator asks for one command at a time, so a combined plan runs as its
+ * move now and its attack at the next request, when that attack is legal and
+ * is again the best command.
+ */
 export class SymmetricEvaluatorPcController implements Controller {
   readonly controllerKind = 'custom' as const;
 

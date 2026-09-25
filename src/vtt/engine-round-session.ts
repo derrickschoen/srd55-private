@@ -507,6 +507,13 @@ export class EngineRoundSession {
         if (!('actor' in command) || command.actor !== turn.actorId) {
           throw new Error(`Scripted PC turn ${turn.actorId} may apply only that actor's reducer commands.`);
         }
+        // A scripted Attack action names one target for all its attacks (Extra
+        // Attack, or the attack after a combined plan's move); once that target
+        // is dead the rest lapse, where the reducer would refuse them.
+        if (command.type === 'attack' &&
+          state.combatants.some((entry) => entry.profile.id === command.target && entry.life === 'dead')) {
+          continue;
+        }
         state = commands.apply(command);
       }
       if (state.activeCombatant === turn.actorId) {

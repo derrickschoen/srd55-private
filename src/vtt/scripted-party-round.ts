@@ -12,7 +12,9 @@ import { spellDefinition } from '../combat/spells/definitions';
 import {
   DEFAULT_SCRIPTED_PC_DECISION_POLICY,
   evaluateSymmetricPcDecision,
+  symmetricPcTurnPlan,
   type ScriptedPcDecisionPolicy,
+  type SymmetricPcCommandAssessment,
 } from './symmetric-pc-evaluator';
 import type {
   DecisionProgram,
@@ -33,10 +35,27 @@ export const DEFAULT_SCRIPTED_PARTY_DECISION_POLICY: ScriptedPcDecisionPolicy =
   DEFAULT_SCRIPTED_PC_DECISION_POLICY;
 export type ScriptedPartyDecisionPolicy = ScriptedPcDecisionPolicy;
 
+/**
+ * A scripted PC's turn program: one DecisionProgram, or the symmetric
+ * evaluator's combined plan, an approach move to `destination` followed by
+ * the attack it enables. Owner ruling 2026-09-25 ("Move + action in one
+ * turn"): the turn plans the enabling move and the follow-up action together.
+ * The reducer commands of a turn are one sequence (completeScriptedPcTurn
+ * applies them in order within the PC's turn), so the move and its attacks
+ * run as one turn.
+ */
+export type ScriptedPartyTurnProgram =
+  | DecisionProgram
+  | {
+      readonly kind: 'move_then_attack';
+      readonly destination: GridCell;
+      readonly attack: Extract<PlanAction, { readonly kind: 'attack' }>;
+    };
+
 export interface ScriptedPartyProgram {
   readonly actorId: CombatantId;
   readonly initiativeIndex: number;
-  readonly program: DecisionProgram;
+  readonly program: ScriptedPartyTurnProgram;
   readonly programHash: string;
 }
 
@@ -87,7 +106,7 @@ export interface ScriptedPartyTurnMaterialization {
   readonly reasonCodes: readonly ScriptedPartyAdherenceReasonCode[];
   readonly plannedProgramHash: string;
   readonly executedProgramHash: string;
-  readonly executedProgram: DecisionProgram;
+  readonly executedProgram: ScriptedPartyTurnProgram;
   readonly actionSlotUses: readonly {
     readonly slot: 'main' | 'bonus';
     readonly commandCount: number;
@@ -113,14 +132,31 @@ interface SemanticProgramRecord {
   readonly target: CombatantId | GridCell | null;
 }
 
+function attackAction(
+  command: Extract<EncounterCommand, { readonly type: 'attack' }>,
+): Extract<PlanAction, { readonly kind: 'attack' }> {
+  return {
+    kind: 'attack', target: { kind: 'combatant', combatantId: command.target },
+    ...(command.attackId === undefined ? {} : { attackId: command.attackId }),
+  };
+}
+
+/** The program of the evaluator's selected command: its combined plan, or the command alone. */
+function symmetricTurnProgram(selected: SymmetricPcCommandAssessment): ScriptedPartyTurnProgram {
+  const plan = symmetricPcTurnPlan(selected);
+  switch (plan.kind) {
+    case 'single': return symmetricProgram(plan.command);
+    case 'move_then_attack': {
+      const destination = plan.move.path.at(-1);
+      if (destination === undefined) throw new Error('Symmetric PC evaluator selected an empty movement path.');
+      return { kind: 'move_then_attack', destination, attack: attackAction(plan.attack) };
+    }
+  }
+}
+
 function symmetricProgram(command: EncounterCommand): Extract<DecisionProgram, { readonly kind: 'action' }> {
   switch (command.type) {
-    case 'attack': return {
-      kind: 'action', action: {
-        kind: 'attack', target: { kind: 'combatant', combatantId: command.target },
-        ...(command.attackId === undefined ? {} : { attackId: command.attackId }),
-      },
-    };
+    case 'attack': return { kind: 'action', action: attackAction(command) };
     case 'force_save': return {
       kind: 'action', action: { kind: 'force_save', target: { kind: 'combatant', combatantId: command.target } },
     };
@@ -146,11 +182,20 @@ function symmetricProgram(command: EncounterCommand): Extract<DecisionProgram, {
   }
 }
 
-/** Checks the stored PC program against already-derived legal commands without a DM projection. */
+/**
+ * Checks the stored PC program against already-derived legal commands without
+ * a DM projection. A combined plan is legal when its move is: its attack
+ * becomes legal only after the move.
+ */
 function symmetricProgramIsLegal(
-  program: DecisionProgram,
+  program: ScriptedPartyTurnProgram,
   legal: readonly EncounterCommand[],
 ): boolean {
+  if (program.kind === 'move_then_attack') {
+    return legal.some((command) => command.type === 'move' &&
+      command.path.at(-1)?.column === program.destination.column &&
+      command.path.at(-1)?.row === program.destination.row);
+  }
   if (program.kind !== 'action') return false;
   const action = program.action;
   switch (action.kind) {
@@ -336,7 +381,7 @@ function primaryProgram(
   }
 }
 
-export function scriptedPartyProgramHash(program: DecisionProgram): string {
+export function scriptedPartyProgramHash(program: ScriptedPartyTurnProgram): string {
   return sha256(canonicalJson(program));
 }
 
@@ -422,9 +467,9 @@ export function createScriptedPartyPlan(
       throw new Error(`Scripted party actor ${actorId} has no legal reducer commands.`);
     }
     const program = options.controller === undefined && decisionPolicy === 'symmetric_evaluator_v1'
-      ? symmetricProgram(evaluateSymmetricPcDecision({
+      ? symmetricTurnProgram(evaluateSymmetricPcDecision({
           state, actorId, legalActions: actorLegalActions, attackForms,
-        }).selected.command)
+        }).selected)
       : (() => {
           const proposed = controller.proposeRoundProgram(projection, actorId).program;
           const selected = selectProgram(proposed, actorId, projection, actorLegalActions);
@@ -508,7 +553,8 @@ export function materializeScriptedPartyTurn(
     const live = evaluateSymmetricPcDecision({
       state: input.state, actorId: input.actorId, legalActions: legal, attackForms,
     });
-    const liveProgram = symmetricProgram(live.selected.command);
+    const liveTurn = symmetricPcTurnPlan(live.selected);
+    const liveProgram = symmetricTurnProgram(live.selected);
     const liveProgramHash = scriptedPartyProgramHash(liveProgram);
     const plannedIsLegal = symmetricProgramIsLegal(planned.program, legal);
     const adherence: ScriptedPartyAdherence = !plannedIsLegal
@@ -522,9 +568,14 @@ export function materializeScriptedPartyTurn(
       : evaluateSymmetricPcDecision({
           state: input.state, actorId: input.actorId, legalActions: bonusCandidates, attackForms,
         }).selected.command;
-    const mainCommands = live.selected.command.type === 'attack'
-      ? Array.from({ length: actor.profile.rules.attacksPerAction }, () => structuredClone(live.selected.command))
-      : [live.selected.command];
+    // A combined plan applies its move, then its attack once per attack of the
+    // action (Extra Attack included); the reducer checks each against the
+    // state the move leaves.
+    const mainCommands: readonly EncounterCommand[] = liveTurn.kind === 'move_then_attack'
+      ? [liveTurn.move, ...Array.from({ length: liveTurn.attacks }, () => structuredClone(liveTurn.attack))]
+      : live.selected.command.type === 'attack'
+        ? Array.from({ length: actor.profile.rules.attacksPerAction }, () => structuredClone(live.selected.command))
+        : [live.selected.command];
     const reducerCommands: readonly EncounterCommand[] = bonusSpell === undefined
       ? mainCommands
       : [...mainCommands, bonusSpell];
@@ -548,6 +599,9 @@ export function materializeScriptedPartyTurn(
     };
   }
   const projection = dmVisibleEncounter(projectDmView(input.state));
+  if (planned.program.kind === 'move_then_attack') {
+    throw new TypeError('Only the symmetric evaluator plans a combined move-then-attack program.');
+  }
   const plannedPrimary = primaryProgram(planned.program, projection);
   const plannedSelection = plannedPrimary === null
     ? null

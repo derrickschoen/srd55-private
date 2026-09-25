@@ -1801,30 +1801,28 @@ describe('AI-DM arena', () => {
         '--out', join(directory, 'arena.jsonl'),
       ]), { adapter: new InProcessArenaAdapter(), fixtureStates: [fixtureState] });
 
-      // The defect this pins (f15a2121) made reps 2-3 continue one conversation, and they were
-      // REFUSED; each rep must start from the same digest with a full context at revision 2.
-      // Third pcac commit (owner ruling 2026-09-24, "plan with own attacks"): the scripted PC
-      // stands 10 ft from the monster with no legal attack; its one attack form (the regret
-      // provider's generic weapon attack, reach 5 ft) makes the step to (1,0) "move within speed
-      // to enable attack" (bucket 0), ahead of its generic Dexterity save (bucket 3), which it
-      // chose before the ruling. The step changes the monster's retained proposal, so the
-      // authorized round dispatches a mid-round adjustment, and this SIMULATED adapter throws
-      // when that adjustment context offers no play: every rep ends partial_execution.
-      const approach = { type: 'move', actor: character.id, path: [{ column: 1, row: 0 }], cause: 'voluntary' };
       expect(rows).toHaveLength(3);
       expect(rows.map((row) => ({
         round: row.round,
         outcome: row.outcome,
-        executionErrorClass: row.executionErrorClass,
-        pcCommands: row.pcTurns.map((turn) => turn.commandSequence),
         granularity: row.turnContextGranularity,
         contextRevision: row.contextRevision,
         startingRoomDigest: row.startingRoomDigest,
         failedAttempts: row.chainEvidence.failedAttempts,
-      }))).toEqual([1, 2, 3].map((round) => ({
-        round, outcome: 'partial_execution', executionErrorClass: 'other', pcCommands: [[approach]],
-        granularity: 'full', contextRevision: 2, startingRoomDigest: rows[0]?.startingRoomDigest, failedAttempts: [],
-      })));
+      }))).toEqual([
+        {
+          round: 1, outcome: 'authorized', granularity: 'full', contextRevision: 2,
+          startingRoomDigest: rows[0]?.startingRoomDigest, failedAttempts: [],
+        },
+        {
+          round: 2, outcome: 'authorized', granularity: 'full', contextRevision: 2,
+          startingRoomDigest: rows[0]?.startingRoomDigest, failedAttempts: [],
+        },
+        {
+          round: 3, outcome: 'authorized', granularity: 'full', contextRevision: 2,
+          startingRoomDigest: rows[0]?.startingRoomDigest, failedAttempts: [],
+        },
+      ]);
     });
   });
 
