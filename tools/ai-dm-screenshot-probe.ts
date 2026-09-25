@@ -481,6 +481,8 @@ export interface ScreenshotProbeDependencies {
   readonly candidates?: readonly ProbeStateCandidate[];
   readonly snapshotService?: ProbeSnapshotService;
   readonly answerer?: ProbeAnswerer;
+  /** The CLI each per-entry codex answerer spawns (default `codex`); a test seam for the LUNA6 entry wiring. */
+  readonly cliBin?: string;
 }
 
 const effortSchema = z.enum(['low', 'medium', 'high', 'xhigh']);
@@ -3681,6 +3683,7 @@ export async function runScreenshotProbe(
   const entryAnswerers = new Map(config.models.map((entry): [string, ProbeAnswerer] => [
     `${entry.model}:${entry.effort}`,
     sharedAnswerer ?? codexScreenshotAnswerer({
+      ...(dependencies.cliBin === undefined ? {} : { cliBin: dependencies.cliBin }),
       timeoutMs: entry.timeoutMs,
       ...(entry.model === LUNA_MODEL && lunaCalls !== null ? { onCall: lunaCalls } : {}),
     }),

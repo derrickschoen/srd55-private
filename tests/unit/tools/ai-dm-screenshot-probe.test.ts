@@ -1834,4 +1834,75 @@ describe('LUNA6 Luna lift wiring', () => {
       await rm(directory, { recursive: true, force: true });
     }
   });
+
+  it('screenshot probe hands each gpt-6-luna entry the hang guard and the call log through runScreenshotProbe', async () => {
+    // Review r1 P2: the entry-to-answerer wiring inside runScreenshotProbe, end to end. Only the CLI is replaced: a
+    // fake that reads its prompt and prints one final answer. Every real codex answerer is built by the probe itself.
+    const artifactRoot = resolve('dnd-slim-runs');
+    mkdirSync(artifactRoot, { recursive: true });
+    const directory = await mkdtemp(join(artifactRoot, 'luna6-screenshot-wiring-'));
+    const cliDirectory = await mkdtemp(join(tmpdir(), 'dnd-luna6-screenshot-wiring-cli-'));
+    const cli = join(cliDirectory, 'fake-codex.sh');
+    const outPath = join(directory, 'wiring.jsonl');
+    try {
+      await writeFile(
+        cli,
+        '#!/bin/sh\ncat > /dev/null\n' +
+        'printf \'%s\\n\' \'{"type":"item.completed","item":{"type":"agent_message","text":"{}"}}\'\n',
+        'utf8',
+      );
+      chmodSync(cli, 0o755);
+      const rows = await runScreenshotProbe(parseScreenshotProbeArgs([
+        '--models', 'gpt-6-luna:xhigh,gpt-5.6-sol:high', '--states', '1', '--seed', '1',
+        '--images-root', join(directory, 'wiring-images'), '--out', outPath, '--generation', 'luna6-wiring',
+        '--board-input', 'semantic',
+      ]), {
+        candidates: [{ id: 'luna6-wiring', state: everyClassState() }],
+        snapshotService: new FakeSnapshotService(),
+        cliBin: cli,
+      });
+      const logPath = `${outPath}.luna-calls.jsonl`;
+      const records = existsSync(logPath)
+        ? reconcileLunaCallLog(readFileSync(logPath, 'utf8').split('\n'))
+        : 'absent';
+      expect({
+        rowsPerEntry: Object.fromEntries(['gpt-6-luna:xhigh', 'gpt-5.6-sol:high'].map((entry) => [
+          entry, rows.filter((row) => `${row.model}:${row.effort}` === entry).length,
+        ])),
+        runIds: records === 'absent' ? 'absent' : new Set(records.map((record) => record.runId)).size,
+        records: records === 'absent' ? 'absent' : records.map((record) => ({
+          cellKey: record.cellKey.replace(/:prompt-[0-9a-f]{16}$/u, ':prompt-<sha16>'),
+          surface: record.surface,
+          dispatch: record.dispatch,
+          callPhase: record.callPhase,
+          bootstrapKind: record.bootstrapKind,
+          model: record.model,
+          reasoningEffort: record.reasoningEffort,
+          timeoutMs: record.timeoutMs,
+          boundKind: record.boundKind,
+          exit: record.exit,
+          hangGuardFired: record.hangGuardFired,
+        })),
+      }).toEqual({
+        rowsPerEntry: { 'gpt-6-luna:xhigh': 10, 'gpt-5.6-sol:high': 10 },
+        runIds: 1,
+        records: ['Q1', 'Q2', 'Q3', 'Q4', 'Q5', 'Q6', 'Q7', 'Q8', 'Q9', 'Q10'].map((question) => ({
+          cellKey: `${question}:prompt-<sha16>`,
+          surface: 'screenshot_cli',
+          dispatch: null,
+          callPhase: 'screenshot',
+          bootstrapKind: null,
+          model: 'gpt-6-luna',
+          reasoningEffort: 'xhigh',
+          timeoutMs: 1_800_000,
+          boundKind: 'hang_guard',
+          exit: 'completed',
+          hangGuardFired: false,
+        })),
+      });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+      await rm(cliDirectory, { recursive: true, force: true });
+    }
+  });
 });
