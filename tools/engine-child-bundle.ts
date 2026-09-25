@@ -58,6 +58,13 @@ import { canonicalJson } from '../src/commands/canonical-json';
  *     from the profile's envDir; and every recorded engine
  *     input and config input still has its recorded bytes     (else `stale`)
  *
+ * The check does not look, on each spawn, for a new file that shadows a sealed
+ * input (Vite resolves './x' to x.mjs or x.js before x.ts, so such a file
+ * changes what vite-node runs without changing a sealed byte), because the
+ * lint gate's `scripts/check-no-js-beside-ts.mjs` bans a .js, .mjs, .cjs or
+ * .jsx file beside a same-named .ts, .tsx, .mts or .cts file in src/ and
+ * tools/ (D893).
+ *
  * `missing` and `stale` are ordinary: a source edit, a new checkout, an
  * esbuild upgrade. They fall back to the vite-node child, today's behaviour
  * (PERF-02 plan r3 4), and say so once on stderr, so a silent

@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const steps = [
+  ['node', ['scripts/check-no-js-beside-ts.mjs']],
   ['sg', ['scan', '--config', 'sgconfig.yml', 'src', 'tools', 'tests']],
   [
     'sg',
