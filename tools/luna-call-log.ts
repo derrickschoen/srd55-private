@@ -264,10 +264,17 @@ export interface GuardedLunaCallOptions<Value> {
   readonly providerRequestId?: (value: Value) => string | null;
 }
 
+type GuardedOutcome<Value> =
+  | { readonly kind: 'value'; readonly value: Value }
+  | { readonly kind: 'error'; readonly error: unknown }
+  | { readonly kind: 'guard_fired' };
+
 /**
  * The hang guard for callers that are not agent adapters (DATA-01's Responses client, plan §7): logs the dispatch,
- * arms an abort at the guard, calls `fn` with that abort signal and logs the completion. When the guard fires first,
- * the completion is `timed_out`, the FIRED line is written, and `LunaHangGuardExpired` is thrown.
+ * arms an abort at the guard, calls `fn` with that abort signal and races `fn` against the guard. When the guard
+ * fires first, the completion is `timed_out`, the FIRED line is written, and `LunaHangGuardExpired` is thrown at the
+ * deadline whether or not `fn` honours the abort (review r1 P3): a client that ignores or delays its signal cannot
+ * hold the call past the guard. `fn`'s later settlement, if any, is ignored.
  */
 export async function guardedLunaCall<Value>(
   meta: GuardedLunaCallMeta,
@@ -278,24 +285,31 @@ export async function guardedLunaCall<Value>(
   const timeoutMs = meta.timeoutMs ?? LUNA_HANG_GUARD_MS;
   const inFlight = beginLunaCall(sink, { ...meta, timeoutMs });
   const controller = new AbortController();
+  // Registered before `fn` runs, so at the deadline the guard settles ahead of any rejection `fn` makes from its own
+  // abort listener: a firing is always recorded as the guard's, never as the call's error.
+  const guard = new Promise<GuardedOutcome<Value>>((resolvePromise) => {
+    controller.signal.addEventListener('abort', () => resolvePromise({ kind: 'guard_fired' }), { once: true });
+  });
   const timer = setTimeout(() => controller.abort(), timeoutMs);
-  let value: Value;
-  try {
-    value = await fn(controller.signal);
-  } catch (error) {
-    clearTimeout(timer);
-    if (controller.signal.aborted) {
-      throw new LunaHangGuardExpired(inFlight.complete({ exit: 'timed_out', error: errorMessage(error) }));
-    }
-    inFlight.complete({ exit: 'thrown', error: errorMessage(error) });
-    throw error;
-  }
+  const operation = (async () => fn(controller.signal))().then(
+    (value): GuardedOutcome<Value> => ({ kind: 'value', value }),
+    (error: unknown): GuardedOutcome<Value> => ({ kind: 'error', error }),
+  );
+  const outcome = await Promise.race([operation, guard]);
   clearTimeout(timer);
-  if (controller.signal.aborted) {
-    throw new LunaHangGuardExpired(inFlight.complete({ exit: 'timed_out', error: 'settled after the guard fired' }));
+  switch (outcome.kind) {
+    case 'guard_fired':
+      throw new LunaHangGuardExpired(inFlight.complete({
+        exit: 'timed_out',
+        error: `no settlement within the ${String(timeoutMs)} ms hang guard; the call was aborted`,
+      }));
+    case 'error':
+      inFlight.complete({ exit: 'thrown', error: errorMessage(outcome.error) });
+      throw outcome.error;
+    case 'value':
+      inFlight.complete({ exit: 'completed', providerRequestId: options.providerRequestId?.(outcome.value) ?? null });
+      return outcome.value;
   }
-  inFlight.complete({ exit: 'completed', providerRequestId: options.providerRequestId?.(value) ?? null });
-  return value;
 }
 
 const DISPATCH_KEYS = [

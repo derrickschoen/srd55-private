@@ -230,6 +230,7 @@ describe('LUNA6 model routes and the Luna hang guard', () => {
     const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     try {
       const { sink, events } = memorySink('luna-run:T1-guard');
+      const handed: AbortSignal[] = [];
       let settled = false;
       let error: string | null = null;
       void guardedLunaCall(
@@ -239,6 +240,7 @@ describe('LUNA6 model routes and the Luna hang guard', () => {
         },
         sink,
         (signal) => new Promise<never>((_resolve, reject) => {
+          handed.push(signal);
           signal.addEventListener('abort', () => reject(new Error('SIMULATED request aborted')));
         }),
       ).then(
@@ -262,6 +264,8 @@ describe('LUNA6 model routes and the Luna hang guard', () => {
         before,
         after,
         error,
+        // The call's own signal is the one the guard aborts (M71 hands fn a fresh, never-aborted signal).
+        signalAborted: handed.length === 1 ? handed[0]?.aborted : `${String(handed.length)} calls`,
         record: record === undefined ? null : {
           exit: record.exit, hangGuardFired: record.hangGuardFired, timeoutMs: record.timeoutMs,
         },
@@ -271,11 +275,78 @@ describe('LUNA6 model routes and the Luna hang guard', () => {
         before: false,
         after: true,
         error: 'LunaHangGuardExpired',
+        signalAborted: true,
         record: { exit: 'timed_out', hangGuardFired: true, timeoutMs: 1_800_000 },
         fired: 1,
         firedLines: [
           '[luna-hang-guard] FIRED run=luna-run:T1-guard cell=data01:1 phase=data01_teacher model=gpt-6-luna ' +
           'effort=xhigh timeoutMs=1800000 elapsedMs=1800000\n',
+        ],
+      });
+    } finally {
+      stderr.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it('guardedLunaCall rejects at 1800000 ms and logs the firing when the call ignores its abort signal', async () => {
+    // Review r1 P3: a client that ignores (or delays) the abort must not hold the call past the guard. The call below
+    // never settles; the guard alone must settle it, log it and write the FIRED line at the deadline.
+    vi.useFakeTimers({ now: 5_000_000 });
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    try {
+      const { sink, events } = memorySink('luna-run:T1-deaf');
+      const handed: AbortSignal[] = [];
+      let settled = false;
+      let error: string | null = null;
+      void guardedLunaCall(
+        {
+          cellKey: 'data01:2', surface: 'responses_api', dispatch: null, callPhase: 'data01_teacher',
+          bootstrapKind: null, model: 'gpt-6-luna', reasoningEffort: 'high',
+        },
+        sink,
+        (signal) => {
+          handed.push(signal);
+          return new Promise<never>(() => undefined);
+        },
+      ).then(
+        () => { settled = true; },
+        (thrown: unknown) => {
+          settled = true;
+          error = thrown instanceof Error ? thrown.name : String(thrown);
+        },
+      );
+      const signalAborted = () => (handed.length === 1 ? handed[0]?.aborted : `${String(handed.length)} calls`);
+      await vi.advanceTimersByTimeAsync(1_799_999);
+      await flushMicrotasks();
+      const before = { settled, signalAborted: signalAborted(), events: events.map((event) => event.event) };
+      await vi.advanceTimersByTimeAsync(1);
+      await flushMicrotasks();
+      const after = { settled, signalAborted: signalAborted(), events: events.map((event) => event.event) };
+      const firedLines = stderr.mock.calls
+        .map(([chunk]) => String(chunk))
+        .filter((line) => line.startsWith('[luna-hang-guard] FIRED '));
+      const [record] = reconcileLunaCallLog(events.map((event) => JSON.stringify(event)));
+      expect({
+        before,
+        after,
+        error,
+        record: record === undefined ? null : {
+          pending: record.pending, exit: record.exit, hangGuardFired: record.hangGuardFired,
+          timeoutMs: record.timeoutMs, elapsedMs: record.elapsedMs, error: record.error,
+        },
+        firedLines,
+      }).toEqual({
+        before: { settled: false, signalAborted: false, events: ['dispatch'] },
+        after: { settled: true, signalAborted: true, events: ['dispatch', 'complete'] },
+        error: 'LunaHangGuardExpired',
+        record: {
+          pending: false, exit: 'timed_out', hangGuardFired: true, timeoutMs: 1_800_000, elapsedMs: 1_800_000,
+          error: 'no settlement within the 1800000 ms hang guard; the call was aborted',
+        },
+        firedLines: [
+          '[luna-hang-guard] FIRED run=luna-run:T1-deaf cell=data01:2 phase=data01_teacher model=gpt-6-luna ' +
+          'effort=high timeoutMs=1800000 elapsedMs=1800000\n',
         ],
       });
     } finally {
