@@ -8,8 +8,11 @@
  * Total with no sight; least-protective source corner, ties by row then column).
  *
  * The last block is the bounded permanent differential against the FROZEN pre-walk code in
- * tests/helpers/reference-cover.ts. The exhaustive version (every fixture, every anchor) is
- * experiment evidence only: tools/experiments/cover-walk/exhaustive-differential.ts.
+ * tests/helpers/reference-cover.ts. A line traced from a hypothetical anchor is compared with the
+ * reference on the state where the mover really stands at that anchor: the mover's body goes with
+ * it (the coverself rule, owner ruling D888), which the pre-walk code only knew for real positions.
+ * The exhaustive version (every fixture, every anchor) is experiment evidence only:
+ * tools/experiments/cover-walk/exhaustive-differential.ts.
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -312,6 +315,14 @@ function verdictFields(line: VerdictFields): VerdictFields {
   };
 }
 
+/** The same encounter with one creature's token really standing at the anchor. */
+function withTokenAt(state: EncounterState, mover: CombatantId, anchor: GridCell): EncounterState {
+  return {
+    ...state,
+    tokens: state.tokens.map((token) => token.combatantId === mover ? { ...token, position: { ...anchor } } : token),
+  };
+}
+
 function placed(state: EncounterState): CombatantId[] {
   return state.combatants
     .filter((combatant) => state.tokens.some((token) => token.combatantId === combatant.profile.id))
@@ -354,16 +365,25 @@ function differential(label: string, state: EncounterState): { compared: number;
           outcome(() => verdictFields(combatantLineVerdictToCells(state, first, [cell]))));
       }
       if (mover === undefined) continue;
+      const options = { sourceAnchor: cell };
+      const moved = withTokenAt(state, mover, cell);
       for (const target of ids) {
         if (target === mover) continue;
-        const options = { sourceAnchor: cell };
         check(`${String(mover)}@${String(index)},${String(row)}->${String(target)} trace`,
-          outcome(() => reference.traceCombatantLine(state, mover, target, options)),
+          outcome(() => reference.traceCombatantLine(moved, mover, target)),
           outcome(() => traceCombatantLine(state, mover, target, options)));
         check(`${String(mover)}@${String(index)},${String(row)}->${String(target)} verdict`,
-          outcome(() => verdictFields(reference.traceCombatantLine(state, mover, target, options))),
+          outcome(() => verdictFields(reference.traceCombatantLine(moved, mover, target))),
           outcome(() => verdictFields(combatantLineVerdict(state, mover, target, options))));
       }
+      // One bare cell per anchor: the anchor's mirror image across the board's centre.
+      const mirror = [{ column: state.bounds.columns - 1 - index, row: state.bounds.rows - 1 - row }];
+      check(`${String(mover)}@${String(index)},${String(row)}->mirror trace`,
+        outcome(() => reference.traceCombatantLineToCells(moved, mover, mirror)),
+        outcome(() => traceCombatantLineToCells(state, mover, mirror, options)));
+      check(`${String(mover)}@${String(index)},${String(row)}->mirror verdict`,
+        outcome(() => verdictFields(reference.traceCombatantLineToCells(moved, mover, mirror))),
+        outcome(() => verdictFields(combatantLineVerdictToCells(state, mover, mirror, options))));
     }
   }
   for (let index = 0; index < 120; index += 1) {

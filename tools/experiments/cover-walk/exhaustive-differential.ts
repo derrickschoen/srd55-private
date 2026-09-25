@@ -21,7 +21,11 @@
  * - toCells: every placed creature to every cell, trace and verdict;
  * - anchored: every placed creature from every in-bounds anchor to every other placed
  *   creature, trace and verdict;
- * - anchoredToCells: the same anchors to four sampled cells each, trace and verdict;
+ * - anchoredToCells: the same anchors to four sampled cells each, trace and verdict.
+ *   An anchored line's expected value is the reference on the state where the mover really
+ *   stands at the anchor (the coverself rule, owner ruling D888: the mover's body goes with it).
+ *   Where that differs from the reference traced from the anchor in place, the line is counted
+ *   as changed by design, with its tier transition and any sight or Total Cover flip;
  * - terrain: 400 random cell pairs, traceTerrainLine and terrainLineVerdict;
  * - objects: 100 random cell pairs, coverTierBetweenObjects;
  * - shapes: a multi-cell target list and an empty one (which must throw alike).
@@ -152,6 +156,14 @@ function densify(state: EncounterState, seed: number): EncounterState {
   return { ...state, blockedCells, worldObjects };
 }
 
+/** The same encounter with one creature's token really standing at the anchor. */
+function withTokenAt(state: EncounterState, mover: CombatantId, anchor: GridCell): EncounterState {
+  return {
+    ...state,
+    tokens: state.tokens.map((token) => token.combatantId === mover ? { ...token, position: { ...anchor } } : token),
+  };
+}
+
 function placedIds(state: EncounterState): CombatantId[] {
   return state.combatants
     .filter((combatant) => state.tokens.some((token) => token.combatantId === combatant.profile.id))
@@ -190,6 +202,23 @@ type SectionName = (typeof SECTIONS)[number];
 const totals = Object.fromEntries(SECTIONS.map((name) => [name, { compared: 0, mismatches: 0 }])) as
   Record<SectionName, { compared: number; mismatches: number }>;
 const examples: unknown[] = [];
+/** Anchored lines whose expected value differs from the in-place reference: the coverself changes. */
+const changedByDesign = {
+  anchored: { lines: 0, blocksSightFlips: 0, totalFlips: 0, tierTransitions: {} as Record<string, number> },
+  anchoredToCells: { lines: 0, blocksSightFlips: 0, totalFlips: 0, tierTransitions: {} as Record<string, number> },
+};
+
+function noteChange(section: 'anchored' | 'anchoredToCells', inPlace: string, expected: string): void {
+  if (inPlace === expected || inPlace.startsWith('THROW') || expected.startsWith('THROW')) return;
+  const before = JSON.parse(inPlace) as { tier: string; blocksSight: boolean };
+  const after = JSON.parse(expected) as { tier: string; blocksSight: boolean };
+  const change = changedByDesign[section];
+  change.lines += 1;
+  if (before.blocksSight !== after.blocksSight) change.blocksSightFlips += 1;
+  if ((before.tier === 'total') !== (after.tier === 'total')) change.totalFlips += 1;
+  const transition = `${before.tier}->${after.tier}`;
+  change.tierTransitions[transition] = (change.tierTransitions[transition] ?? 0) + 1;
+}
 
 function compare(section: SectionName, label: string, expected: string, actual: string): void {
   totals[section].compared += 1;
@@ -282,23 +311,27 @@ function stateSections(label: string, state: EncounterState, salt: number): void
       for (let column = 0; column < state.bounds.columns; column += 1) {
         const anchor = { column, row };
         const options = { sourceAnchor: anchor };
+        const moved = withTokenAt(state, a, anchor);
         for (const b of ids) {
           if (a === b) continue;
           const line = `${label} ${String(a)}@${String(column)},${String(row)}->${String(b)}`;
-          compare('anchored', `${line} trace`,
-            outcome(() => reference.traceCombatantLine(state, a, b, options)),
+          const expected = outcome(() => reference.traceCombatantLine(moved, a, b));
+          noteChange('anchored', outcome(() => reference.traceCombatantLine(state, a, b, options)), expected);
+          compare('anchored', `${line} trace`, expected,
             outcome(() => candidate.traceCombatantLine(state, a, b, options)));
           compare('anchored', `${line} verdict`,
-            outcome(() => verdictFields(reference.traceCombatantLine(state, a, b, options))),
+            outcome(() => verdictFields(reference.traceCombatantLine(moved, a, b))),
             outcome(() => verdictFields(candidate.combatantLineVerdict(state, a, b, options))));
         }
         for (const target of sampledTargets(state, token.position, anchor, salt * 31 + moverIndex)) {
           const line = `${label} ${String(a)}@${String(column)},${String(row)}->${String(target.column)},${String(target.row)}`;
-          compare('anchoredToCells', `${line} trace`,
-            outcome(() => reference.traceCombatantLineToCells(state, a, [target], options)),
+          const expected = outcome(() => reference.traceCombatantLineToCells(moved, a, [target]));
+          noteChange('anchoredToCells',
+            outcome(() => reference.traceCombatantLineToCells(state, a, [target], options)), expected);
+          compare('anchoredToCells', `${line} trace`, expected,
             outcome(() => candidate.traceCombatantLineToCells(state, a, [target], options)));
           compare('anchoredToCells', `${line} verdict`,
-            outcome(() => verdictFields(reference.traceCombatantLineToCells(state, a, [target], options))),
+            outcome(() => verdictFields(reference.traceCombatantLineToCells(moved, a, [target]))),
             outcome(() => verdictFields(candidate.combatantLineVerdictToCells(state, a, [target], options))));
         }
       }
@@ -366,6 +399,7 @@ for (const name of SECTIONS) {
   if (totals[name].mismatches !== 0) failures.push(`${name}.mismatches=${String(totals[name].mismatches)}`);
 }
 if (coverage.fixtures.length + coverage.sidecars.length !== coverage.filesSeen) failures.push('fixture files unaccounted');
+if (states > 0 && changedByDesign.anchored.lines === 0) failures.push('anchored.changedByDesign=0 (the oracle was never exercised)');
 const result = {
   shard: `${String(firstState)}:${String(firstState + selected.length)}`,
   baseStates: bases.length,
@@ -380,10 +414,12 @@ const result = {
     generated: coverage.generated.length,
   },
   totals,
+  changedByDesign,
   examples,
 };
 writeFileSync(outPath, `${JSON.stringify(result, null, 1)}\n`);
 console.log(`COVER-DIFFERENTIAL ${result.pass ? 'PASS' : 'FAIL'} shard=${result.shard} states=${String(states)} ` +
   `${SECTIONS.map((name) => `${name}=${String(totals[name].compared)}/${String(totals[name].mismatches)}`).join(' ')} ` +
+  `changedByDesign=${String(changedByDesign.anchored.lines)}+${String(changedByDesign.anchoredToCells.lines)} ` +
   `failures=${JSON.stringify(failures)} wall=${String(result.wallSeconds)}s`);
 process.exit(result.pass ? 0 : 1);

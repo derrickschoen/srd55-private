@@ -333,8 +333,19 @@ function creatureSources(state: EncounterState): PlacedSource[] {
   return placed;
 }
 
-/** What a line may count as an obstruction. */
-type LineObstructions = { readonly kind: 'terrain' } | { readonly kind: 'terrain_and_creatures' };
+/**
+ * What a corner trace may count as an obstruction. A trace that counts creatures must name the
+ * creature the line originates from, because that creature's body is never an obstruction on its
+ * own line: SRD 5.2.1 "Cover" (docs/srd/full/srd-5.2.1.txt:921-949) lets a target benefit from cover
+ * "only when an attack or other effect originates on the opposite side of the cover", and the
+ * originator's body holds the origin. This matters when the engine places the origin somewhere
+ * hypothetical (`sourceAnchor`): the body goes with it, so the cells it occupies NOW are empty on
+ * that line (owner ruling 2026-09-24, D888). The exclusion is by creature id, not by cell, so a Tiny
+ * creature sharing the mover's current cell still gives cover.
+ */
+type LineObstructions =
+  | { readonly kind: 'terrain' }
+  | { readonly kind: 'terrain_and_creatures'; readonly originator: CombatantId };
 
 interface StateSourceGrids {
   readonly terrain: SourceGrid;
@@ -374,11 +385,39 @@ function uniqueSources(sources: readonly TerrainLineSource[]): readonly TerrainL
   return unique.sort((left, right) => left.id.localeCompare(right.id)).map((entry) => entry.source);
 }
 
-/** The sources a line between two spaces can cross: the spaces' own cells never obstruct it. */
+/**
+ * The sources a line between two spaces can cross: the spaces' own cells never obstruct it, and
+ * neither does the originating creature's body wherever it stands now.
+ */
 interface LineContext {
   readonly grid: SourceGrid;
   readonly sourceCells: readonly GridCell[];
   readonly targetCells: readonly GridCell[];
+  /** The originating creature's source id, when creatures count. */
+  readonly originator: string | null;
+}
+
+function lineContext(
+  grid: SourceGrid,
+  sourceCells: readonly GridCell[],
+  targetCells: readonly GridCell[],
+  obstructions: LineObstructions,
+): LineContext {
+  switch (obstructions.kind) {
+    case 'terrain': return { grid, sourceCells, targetCells, originator: null };
+    case 'terrain_and_creatures': return { grid, sourceCells, targetCells, originator: String(obstructions.originator) };
+  }
+}
+
+function isBodyOf(source: TerrainLineSource, originator: string): boolean {
+  return source.kind === 'creature' && source.id === originator;
+}
+
+/** The cell with the originator's own body removed; undefined when nothing else obstructs there. */
+function obstructingCell(entry: SourceCell, originator: string | null): SourceCell | undefined {
+  if (originator === null || !entry.sources.some((source) => isBodyOf(source, originator))) return entry;
+  const others = entry.sources.filter((source) => !isBodyOf(source, originator));
+  return others.length === 0 ? undefined : { cell: entry.cell, sources: others };
 }
 
 function spaceContains(cells: readonly GridCell[], column: number, row: number): boolean {
@@ -404,9 +443,11 @@ function tierOfRank(rank: number): CoverTier {
 function scanCornerLine(context: LineContext, from: CornerPoint, to: CornerPoint, crossed?: SourceCell[]): number {
   let rank = 0;
   walkCornerLine(from, to, (column, row) => {
-    const entry = sourceAt(context.grid, column, row);
-    if (entry === undefined || spaceContains(context.sourceCells, column, row) ||
+    const found = sourceAt(context.grid, column, row);
+    if (found === undefined || spaceContains(context.sourceCells, column, row) ||
       spaceContains(context.targetCells, column, row)) return;
+    const entry = obstructingCell(found, context.originator);
+    if (entry === undefined) return;
     for (const source of entry.sources) {
       const sourceRank = coverRank(source.tier);
       if (sourceRank > rank) rank = sourceRank;
@@ -528,7 +569,7 @@ function traceSpaces(
   obstructions: LineObstructions,
 ): TerrainLineTrace {
   const nearest = nearestCells(sourceCells, targetCells);
-  const context: LineContext = { grid: stateSourceGrid(state, obstructions), sourceCells, targetCells };
+  const context = lineContext(stateSourceGrid(state, obstructions), sourceCells, targetCells, obstructions);
   const targetCorners = outerCorners(targetCells);
   const { corner, ranks } = chooseSourceCorner(context, targetCorners);
   const lines = targetCorners.map((targetCorner) => cornerLineTrace(context, corner, targetCorner));
@@ -591,7 +632,7 @@ function verdictSpaces(
   obstructions: LineObstructions,
 ): LineVerdict {
   const nearest = nearestCells(sourceCells, targetCells);
-  const context: LineContext = { grid: stateSourceGrid(state, obstructions), sourceCells, targetCells };
+  const context = lineContext(stateSourceGrid(state, obstructions), sourceCells, targetCells, obstructions);
   const targetCorners = outerCorners(targetCells);
   const { corner, ranks } = chooseSourceCorner(context, targetCorners);
   const ids = new Set<string>();
@@ -633,6 +674,10 @@ export function terrainLineVerdict(
 }
 
 export interface CreatureLineOptions {
+  /**
+   * Trace as if the source stood at this anchor. Its body moves with it: the cells it occupies
+   * now do not obstruct the line (see LineObstructions).
+   */
   readonly sourceAnchor?: GridCell;
 }
 
@@ -653,7 +698,9 @@ export function traceCombatantLine(
   options: CreatureLineOptions = {},
 ): TerrainLineTrace {
   const sourceCells = sourceSpaceCells(state, sourceId, options);
-  return traceSpaces(state, sourceCells, combatantSpace(state, targetId).cells, { kind: 'terrain_and_creatures' });
+  return traceSpaces(state, sourceCells, combatantSpace(state, targetId).cells, {
+    kind: 'terrain_and_creatures', originator: sourceId,
+  });
 }
 
 export function traceCombatantLineToCells(
@@ -662,7 +709,9 @@ export function traceCombatantLineToCells(
   targetCells: readonly GridCell[],
   options: CreatureLineOptions = {},
 ): TerrainLineTrace {
-  return traceSpaces(state, sourceSpaceCells(state, sourceId, options), targetCells, { kind: 'terrain_and_creatures' });
+  return traceSpaces(state, sourceSpaceCells(state, sourceId, options), targetCells, {
+    kind: 'terrain_and_creatures', originator: sourceId,
+  });
 }
 
 /** Sight and cover between two creatures, without the per-line evidence of traceCombatantLine. */
@@ -673,7 +722,9 @@ export function combatantLineVerdict(
   options: CreatureLineOptions = {},
 ): LineVerdict {
   const sourceCells = sourceSpaceCells(state, sourceId, options);
-  return verdictSpaces(state, sourceCells, combatantSpace(state, targetId).cells, { kind: 'terrain_and_creatures' });
+  return verdictSpaces(state, sourceCells, combatantSpace(state, targetId).cells, {
+    kind: 'terrain_and_creatures', originator: sourceId,
+  });
 }
 
 /** Sight and cover from a creature to cells, without the per-line evidence of traceCombatantLineToCells. */
@@ -683,7 +734,9 @@ export function combatantLineVerdictToCells(
   targetCells: readonly GridCell[],
   options: CreatureLineOptions = {},
 ): LineVerdict {
-  return verdictSpaces(state, sourceSpaceCells(state, sourceId, options), targetCells, { kind: 'terrain_and_creatures' });
+  return verdictSpaces(state, sourceSpaceCells(state, sourceId, options), targetCells, {
+    kind: 'terrain_and_creatures', originator: sourceId,
+  });
 }
 
 /** Object-only cover between two cells (no walls, no creatures), from a bare object list. */
@@ -699,7 +752,7 @@ export function coverTierBetweenObjects(
       placed.push({ cell, source: { kind: 'world_object', id: String(object.id), tier: object.blocking.cover } });
     }
   }
-  const context: LineContext = { grid: sourceGrid(placed), sourceCells: [from], targetCells: [to] };
+  const context = lineContext(sourceGrid(placed), [from], [to], { kind: 'terrain' });
   return tierOfRank(chooseSourceCorner(context, outerCorners([to])).ranks.rank);
 }
 
