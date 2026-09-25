@@ -1913,3 +1913,31 @@ REVIEW r3 of ai1: APPROVE. Board was already APPROVE (D890).
 Ready for timed pairs: batch 1 (x4 + cachedel ×5; I verified it: tsc 0, 7 pins identical to D880), board, ai1, x1r, convsplit. Pairs run only while no agent runs tests (D890).
 
 Next free id: D892.
+
+
+## D892 — 2026-09-24 20:51 — LUNA6-01 plan CLOSED at revision 5 by my verification (owner: "I verify, no review")
+
+OWNER (via AskUserQuestion): "I verify, no review". The question was how to close the LUNA6 plan at revision 5, after four codex rounds. My recommendation had been a fifth codex review.
+
+LUNA6 plan r5 (Opus, from wf_a5426636-f9f): 1,039 lines, sha256 16ddeb25674b7dc4186705350080539fe5bfbdb8b73695a6a086e27368cbd295. Archived at .claude/consensus/luna6/plan-r5.md; review r4 is archived beside it; the working copy is .tmp-plans/2026-09-24-luna6-gpt6-luna-lift-and-effort-study-plan.md.
+
+VERIFIED by me:
+- §0.1 quotes D887, D890 and the 18:58/19:01 owner answers correctly.
+- PR6–PR8 match the owner's "gpt-6-luna only". My question text described the narrow reading as keeping the 60–300 s speculation window, so PR8 is accurate. PR11 (no paid DATA-01 teacher run on gpt-6-luna before the study result) follows from D890(c)'s "stay on today's route".
+- v7 is removed from executable scope (§6). The study runs on the v5 cohorts under a recorded study-only supersession SA-2 (§3.1), matching the owner's "Study on v5, v7 waits for v6".
+- Appendix C gives every one of the 12 review-r4 findings a disposition. P1-1 and P1-2 are ANSWERED BY THE OWNER; the rest are FIXED with section references.
+- I recomputed the statistics independently:
+  - Bound A between-seed variance: 1.288² − 1.583²/3 = 0.8236.
+  - SE of Δ̂: 0.249 at 20 clusters, 0.311 under bound B, 0.176 at 40 clusters.
+  - P(xhigh) at Δ = 0.3/0.5/0.7/1.0, 20 clusters, bound A: 0.06/0.22/0.52/0.89. Bound B: 0.05/0.16/0.36/0.73. 40 clusters: 0.08/0.40/0.81/1.00.
+  - All equal the plan's table.
+- The margin source exists: tools/d569-blind-experiment.ts:30, D569_NONINFERIORITY_MARGIN = -0.20. The pool3 panel files cited as variance data exist in ~/dnd-slim-runs.
+- Only the plan file was written during the dispatch (find -newer plan-r4.md).
+NOT verified: the plan's 22 new study mutants and the pipeline stages are specifications; they are proved when implemented.
+
+Decision rule as registered: one-sided cluster-bootstrap test of superiority by margin δ = 0.20, at a level q* calibrated by the V17 simulation. The route E is xhigh iff H0 is rejected, otherwise high. There is no refusal veto: its simulated pass rate with equal failure rates was 12%, so it would have picked high on noise.
+The plan's own prediction is that "inconclusive → high" dominates at 20 clusters (P(xhigh | Δ = 0.5) ≈ 0.22). If so, Q-POWER goes to the owner before any spend: (a) 240 cells as registered, recommended; (b) add the v5 second family, 480 cells.
+
+Next: LUNA6 implementation. Opus writes (D885 §7), codex reviews, batches per plan §8.1. It does not block PERF-02's timed pairs.
+
+Next free id: D893.
