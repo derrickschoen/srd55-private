@@ -1,4 +1,4 @@
-import { adjacentCells, type GridCell } from './grid';
+import { adjacentCells, boardCell, type GridCell } from './grid';
 import {
   findPath,
   findPathToAny,
@@ -227,7 +227,8 @@ function exhaustivePathCostBound(
   let maximumStepCost = 0;
   for (let row = 0; row < world.bounds.rows; row += 1) {
     for (let column = 0; column < world.bounds.columns; column += 1) {
-      const from = { column, row };
+      const from = boardCell(world.bounds, { column, row });
+      if (from === null) continue;
       for (const to of adjacentCells(world.bounds, from)) {
         if (!world.canTraverseStep(actorId, from, to)) continue;
         const traversal = world.traversal(actorId, from, to);
@@ -364,7 +365,8 @@ function pathRisks(
       readonly cell: GridCell;
       readonly kinds: Set<MovementHazardKind>;
     }>();
-    let previousAnchor = input.start;
+    let previousAnchor = boardCell(input.world.bounds, input.start);
+    if (previousAnchor === null) throw new Error('A found movement path cannot start outside the grid.');
     for (const anchor of path.cells) {
       const previousCells = input.world.occupiedCells(input.actorId, previousAnchor);
       const enteredCells = input.world.occupiedCells(input.actorId, anchor)

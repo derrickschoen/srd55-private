@@ -17,7 +17,7 @@ import {
 import type { EncounterCommand } from '../combat/events';
 import type { EncounterCombatantState } from '../combat/encounter';
 import { combatantSpace } from '../combat/combat-rules';
-import { adjacentCells } from '../combat/grid';
+import { adjacentCells, boardCell } from '../combat/grid';
 import { minimumSpaceDistance } from '../combat/creature-space';
 import { encounterMovementWorld } from '../combat/encounter-movement-world';
 import { terrainWallCells } from '../combat/terrain';
@@ -2754,7 +2754,8 @@ function loadedPartyMovementActions(
 ): readonly Extract<EncounterCommand, { readonly type: 'move' }>[] {
   const acting = encounterCombatantIndex(state).at(actor);
   if (acting.turn.movement.remaining < 5) return [];
-  const origin = loadedMemberPosition(state, actor);
+  const origin = boardCell(state.bounds, loadedMemberPosition(state, actor));
+  if (origin === null) return [];
   const world = encounterMovementWorld(state);
   return adjacentCells(state.bounds, loadedMemberPosition(state, actor))
     .filter((cell) => {

@@ -13,7 +13,7 @@ import { combatantSpace, combatantSpaceAt } from '../../../src/combat/combat-rul
 import type { CombatantProfile } from '../../../src/combat/combatant';
 import { minimumSpaceDistance } from '../../../src/combat/creature-space';
 import { createEncounter, reduceEncounter, type EncounterState } from '../../../src/combat/encounter';
-import type { GridCell } from '../../../src/combat/grid';
+import { boardCell, type BoardCell, type GridCell } from '../../../src/combat/grid';
 import { encounterMovementWorld } from '../../../src/combat/encounter-movement-world';
 import { findReachableCells, type CellTraversal, type MovementWorld } from '../../../src/combat/movement';
 import { effectStackingIdentity, feet, type Feet } from '../../../src/combat/values';
@@ -22,6 +22,7 @@ import {
   findPath as referenceFindPath,
   findPathToAny as referenceFindPathToAny,
 } from '../../helpers/reference-movement';
+import { onBoard } from '../../helpers/board-cell';
 import { monsterProfile, placedToken, playerProfile } from './fixtures';
 
 function key(cell: GridCell): string {
@@ -104,15 +105,15 @@ function tracedWorld<TActorId extends string>(world: MovementWorld<TActorId>, tr
 
 interface Asked<TActorId extends string, TAnswer> {
   readonly actorId: TActorId;
-  readonly from: GridCell;
-  readonly to: GridCell;
+  readonly from: BoardCell;
+  readonly to: BoardCell;
   readonly answer: TAnswer;
 }
 
 function remember<TActorId extends string, TAnswer>(
   asked: Map<string, Asked<TActorId, TAnswer>>,
-  ask: (actorId: TActorId, from: GridCell, to: GridCell) => TAnswer,
-): (actorId: TActorId, from: GridCell, to: GridCell) => TAnswer {
+  ask: (actorId: TActorId, from: BoardCell, to: BoardCell) => TAnswer,
+): (actorId: TActorId, from: BoardCell, to: BoardCell) => TAnswer {
   return (actorId, from, to) => {
     const question = `${actorId} ${edge(from, to)}`;
     const known = asked.get(question);
@@ -572,10 +573,13 @@ function referenceCommandCandidates(
 /** What the commanded creature pays to walk `cells` from its token, or null if a step is refused. */
 function routeCost(run: CommandRun, cells: readonly GridCell[]): number | null {
   const world = encounterMovementWorld(run.state);
-  let from = run.state.tokens.find((token) => token.combatantId === run.target.id)?.position;
-  if (from === undefined) throw new Error(`Missing token ${String(run.target.id)}.`);
+  const token = run.state.tokens.find((candidate) => candidate.combatantId === run.target.id)?.position;
+  if (token === undefined) throw new Error(`Missing token ${String(run.target.id)}.`);
+  let from = onBoard(run.state.bounds, token);
   let cost = 0;
-  for (const to of cells) {
+  for (const cell of cells) {
+    const to = boardCell(run.state.bounds, cell);
+    if (to === null) return null;
     if (!world.canTraverseStep(run.target.id, from, to)) return null;
     const step = world.traversal(run.target.id, from, to);
     if (step.kind === 'blocked') return null;

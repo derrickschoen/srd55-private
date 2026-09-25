@@ -7,8 +7,7 @@ import {
 } from '../combat/encounter';
 import type { EncounterCommand } from '../combat/events';
 import { encounterMovementWorld } from '../combat/encounter-movement-world';
-import type { GridCell } from '../combat/grid';
-import { isCellInside } from '../combat/grid';
+import { boardCell, type GridCell } from '../combat/grid';
 import type { CombatantId } from '../combat/values';
 import {
   loadedPartyTurnLegalActions,
@@ -57,22 +56,22 @@ function movementActions(state: EncounterState, actor: CombatantId): readonly En
   const subject = state.combatants.find((candidate) => candidate.profile.id === actor);
   if (subject === undefined || subject.turn.movement.remaining < 5) return [];
   const current = position(state, actor);
+  const origin = boardCell(state.bounds, current);
+  if (origin === null) return [];
   const world = encounterMovementWorld(state);
   const commands: EncounterCommand[] = [];
   for (let columnDelta = -1; columnDelta <= 1; columnDelta += 1) {
     for (let rowDelta = -1; rowDelta <= 1; rowDelta += 1) {
       if (columnDelta === 0 && rowDelta === 0) continue;
-      const destination = {
+      const destination = boardCell(state.bounds, {
         column: current.column + columnDelta,
         row: current.row + rowDelta,
-      };
-      const traversal = world.canTraverseStep(actor, current, destination)
-        ? world.traversal(actor, current, destination)
+      });
+      if (destination === null) continue;
+      const traversal = world.canTraverseStep(actor, origin, destination)
+        ? world.traversal(actor, origin, destination)
         : { kind: 'blocked' as const };
-      if (
-        isCellInside(state.bounds, destination) &&
-        traversal.kind === 'enterable' && traversal.canEnd
-      ) {
+      if (traversal.kind === 'enterable' && traversal.canEnd) {
         commands.push({
           type: 'move',
           actor,

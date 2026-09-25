@@ -1,4 +1,5 @@
 import { readFileSync } from '../../helpers/test-filesystem';
+import { onBoard } from '../../helpers/board-cell';
 import { describe, expect, it } from 'vitest';
 import type { CombatantProfile } from '../../../src/combat/combatant';
 import type { EffectApplication, EffectPayload } from '../../../src/combat/effects';
@@ -429,7 +430,8 @@ describe('D386.2 path-reservation body blocking', () => {
       bounds: { columns: 3, rows: 1 }, combatants: [mover, hostile],
       tokens: [placedToken(mover, 0), placedToken(hostile, 1)],
     });
-    expect(encounterMovementWorld(hostileState).traversal(mover.id, { column: 0, row: 0 }, { column: 1, row: 0 })).toEqual({
+    expect(encounterMovementWorld(hostileState).traversal(
+      mover.id, onBoard(hostileState.bounds, { column: 0, row: 0 }), onBoard(hostileState.bounds, { column: 1, row: 0 }))).toEqual({
       kind: 'blocked', reason: 'creature space cannot be traversed',
     });
 
@@ -438,7 +440,8 @@ describe('D386.2 path-reservation body blocking', () => {
       bounds: { columns: 3, rows: 1 }, combatants: [mover, ally],
       tokens: [placedToken(mover, 0), placedToken(ally, 1)],
     });
-    expect(encounterMovementWorld(allyState).traversal(mover.id, { column: 0, row: 0 }, { column: 1, row: 0 })).toEqual({
+    expect(encounterMovementWorld(allyState).traversal(
+      mover.id, onBoard(allyState.bounds, { column: 0, row: 0 }), onBoard(allyState.bounds, { column: 1, row: 0 }))).toEqual({
       kind: 'enterable', cost: 5, canEnd: false,
     });
 
@@ -447,7 +450,8 @@ describe('D386.2 path-reservation body blocking', () => {
       bounds: { columns: 3, rows: 1 }, combatants: [mover, tiny],
       tokens: [placedToken(mover, 0), placedToken(tiny, 1)],
     });
-    expect(encounterMovementWorld(tinyState).traversal(mover.id, { column: 0, row: 0 }, { column: 1, row: 0 })).toEqual({
+    expect(encounterMovementWorld(tinyState).traversal(
+      mover.id, onBoard(tinyState.bounds, { column: 0, row: 0 }), onBoard(tinyState.bounds, { column: 1, row: 0 }))).toEqual({
       kind: 'enterable', cost: 5, canEnd: false,
     });
 
@@ -456,7 +460,8 @@ describe('D386.2 path-reservation body blocking', () => {
       bounds: { columns: 4, rows: 3 }, combatants: [mover, huge],
       tokens: [placedToken(mover, 0), placedToken(huge, 1)],
     });
-    expect(encounterMovementWorld(hugeState).traversal(mover.id, { column: 0, row: 0 }, { column: 1, row: 0 })).toEqual({
+    expect(encounterMovementWorld(hugeState).traversal(
+      mover.id, onBoard(hugeState.bounds, { column: 0, row: 0 }), onBoard(hugeState.bounds, { column: 1, row: 0 }))).toEqual({
       kind: 'enterable', cost: 10, canEnd: false,
     });
 
@@ -466,7 +471,8 @@ describe('D386.2 path-reservation body blocking', () => {
       hostile,
       { kind: 'condition', condition: 'Incapacitated' },
     );
-    expect(encounterMovementWorld(incapacitated).traversal(mover.id, { column: 0, row: 0 }, { column: 1, row: 0 })).toEqual({
+    expect(encounterMovementWorld(incapacitated).traversal(
+      mover.id, onBoard(incapacitated.bounds, { column: 0, row: 0 }), onBoard(incapacitated.bounds, { column: 1, row: 0 }))).toEqual({
       kind: 'enterable', cost: 10, canEnd: false,
     });
   });
@@ -491,7 +497,8 @@ describe('D386.2 path-reservation body blocking', () => {
     expect(findPath(encounterMovementWorld(blocked), {
       actorId: mover.id, start: { column: 0, row: 0 }, goal: { column: 2, row: 0 }, maximumCost: feet(30),
     })).toEqual({ kind: 'unreachable' });
-    expect(encounterMovementWorld(blocked).traversal(mover.id, { column: 0, row: 0 }, { column: 0, row: 0 })).toMatchObject({
+    expect(encounterMovementWorld(blocked).traversal(
+      mover.id, onBoard(blocked.bounds, { column: 0, row: 0 }), onBoard(blocked.bounds, { column: 0, row: 0 }))).toMatchObject({
       kind: 'enterable', cost: 5,
     });
   });

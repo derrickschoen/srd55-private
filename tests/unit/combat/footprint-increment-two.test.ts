@@ -4,6 +4,7 @@ import { createEncounter, encounterMovementWorld, reduceEncounter } from '../../
 import { referencePartySpellSlots } from '../../../src/combat/spells/resources';
 import { damageType } from '../../../src/combat/values';
 import { canonicalJson } from '../../../src/commands/canonical-json';
+import { onBoard } from '../../helpers/board-cell';
 import { monsterProfile, placedToken, playerProfile } from './fixtures';
 
 function sizedMonster(key: string, sizeCategory: 'Tiny' | 'Large', initiativeBonus = 0) {
@@ -29,8 +30,8 @@ describe('creature-space Increment 2 integration', () => {
 
     expect(encounterMovementWorld(state).traversal(
       mover.id,
-      { column: 0, row: 0 },
-      { column: 1, row: 0 },
+      onBoard(state.bounds, { column: 0, row: 0 }),
+      onBoard(state.bounds, { column: 1, row: 0 }),
     )).toEqual({ kind: 'enterable', cost: 10, canEnd: true });
   });
 
@@ -51,8 +52,8 @@ describe('creature-space Increment 2 integration', () => {
 
     expect(encounterMovementWorld(state).traversal(
       mover.id,
-      { column: 0, row: 0 },
-      { column: 1, row: 0 },
+      onBoard(state.bounds, { column: 0, row: 0 }),
+      onBoard(state.bounds, { column: 1, row: 0 }),
     )).toEqual({ kind: 'enterable', cost: 5, canEnd: true });
   });
 
@@ -66,8 +67,8 @@ describe('creature-space Increment 2 integration', () => {
 
     expect(encounterMovementWorld(state).traversal(
       mover.id,
-      { column: 1, row: 0 },
-      { column: 2, row: 0 },
+      onBoard(state.bounds, { column: 1, row: 0 }),
+      onBoard(state.bounds, { column: 2, row: 0 }),
     )).toEqual({ kind: 'blocked', reason: 'creature footprint is outside the grid' });
   });
 

@@ -3,7 +3,7 @@ import { combatantsAreAllies } from '../../combat/allies';
 import { combatantSpace, combatantSpaceAt, type EncounterState } from '../../combat/encounter';
 import { minimumSpaceDistance, spacesIntersect } from '../../combat/creature-space';
 import type { EncounterCommand } from '../../combat/events';
-import { adjacentCells } from '../../combat/grid';
+import { adjacentCells, boardCell } from '../../combat/grid';
 import { encounterMovementWorld } from '../../combat/encounter-movement-world';
 import type { RollMode } from '../../combat/resolution';
 import {
@@ -215,14 +215,17 @@ export function regretTurnLegalActions(
   const actions: EncounterCommand[] = [];
   if (acting.turn.movement.remaining >= 5) {
     const movementWorld = encounterMovementWorld(state);
-    for (const cell of adjacentCells(state.bounds, position(state, actor))) {
-      const destination = combatantSpaceAt(state, actor, cell);
-      if (
-        movementWorld.traversal(actor, position(state, actor), cell).kind !== 'blocked' &&
-        state.combatants.every((other) => other.profile.id === actor ||
-          !spacesIntersect(destination, combatantSpace(state, other.profile.id)))
-      ) {
-        actions.push({ type: 'move', actor, path: [cell], cause: 'voluntary' });
+    const origin = boardCell(state.bounds, position(state, actor));
+    if (origin !== null) {
+      for (const cell of adjacentCells(state.bounds, origin)) {
+        const destination = combatantSpaceAt(state, actor, cell);
+        if (
+          movementWorld.traversal(actor, origin, cell).kind !== 'blocked' &&
+          state.combatants.every((other) => other.profile.id === actor ||
+            !spacesIntersect(destination, combatantSpace(state, other.profile.id)))
+        ) {
+          actions.push({ type: 'move', actor, path: [cell], cause: 'voluntary' });
+        }
       }
     }
   }

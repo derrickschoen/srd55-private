@@ -1,3 +1,4 @@
+import type { Brand } from '../domain/ids';
 import { feet, type Feet } from './values';
 
 export interface GridCell {
@@ -22,6 +23,20 @@ function isWholeNumber(value: number): boolean {
   return Number.isSafeInteger(value);
 }
 
+/**
+ * A cell inside the grid it was decoded against: whole-number coordinates with
+ * 0 <= column < columns and 0 <= row < rows. `boardCell` is the only function that
+ * mints one, so a negative, fractional or off-grid position cannot be asked a
+ * movement question: that program does not compile. The brand exists only in the
+ * type; the value is the caller's own cell object, unchanged.
+ */
+export type BoardCell = Brand<GridCell, 'BoardCell'>;
+
+/** The decode-time bounds check: the cell itself when it lies inside `bounds`, otherwise null. */
+export function boardCell(bounds: GridBounds, cell: GridCell): BoardCell | null {
+  return isCellInside(bounds, cell) ? cell as BoardCell : null;
+}
+
 export function isCellInside(bounds: GridBounds, cell: GridCell): boolean {
   return (
     isWholeNumber(bounds.columns) &&
@@ -44,12 +59,12 @@ export function isCellInside(bounds: GridBounds, cell: GridCell): boolean {
 export function adjacentCells(
   bounds: GridBounds,
   cell: GridCell,
-): readonly GridCell[] {
+): readonly BoardCell[] {
   if (!isCellInside(bounds, cell)) {
     return [];
   }
 
-  const cells: GridCell[] = [];
+  const cells: BoardCell[] = [];
   for (let row = cell.row - 1; row <= cell.row + 1; row += 1) {
     for (
       let column = cell.column - 1;
@@ -59,8 +74,8 @@ export function adjacentCells(
       if (column === cell.column && row === cell.row) {
         continue;
       }
-      const candidate = { column, row };
-      if (isCellInside(bounds, candidate)) {
+      const candidate = boardCell(bounds, { column, row });
+      if (candidate !== null) {
         cells.push(candidate);
       }
     }

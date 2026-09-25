@@ -1,7 +1,9 @@
 import {
   adjacentCells,
+  boardCell,
   gridDistance,
   isCellInside,
+  type BoardCell,
   type GridBounds,
   type GridCell,
 } from './grid';
@@ -15,18 +17,24 @@ export type CellTraversal =
       readonly canEnd: boolean;
     };
 
+/**
+ * The movement questions a search asks. Every anchor is a `BoardCell` decoded against
+ * `bounds`, so a world is never asked about a negative, fractional or off-grid anchor.
+ * A footprint that reaches past the grid from an in-bounds anchor is an ordinary answer:
+ * `canTraverseStep` is false and `traversal` is blocked.
+ */
 export interface MovementWorld<TActorId extends string> {
   readonly bounds: GridBounds;
-  occupiedCells(actorId: TActorId, anchor: GridCell): readonly GridCell[];
+  occupiedCells(actorId: TActorId, anchor: BoardCell): readonly GridCell[];
   traversal(
     actorId: TActorId,
-    from: GridCell,
-    to: GridCell,
+    from: BoardCell,
+    to: BoardCell,
   ): CellTraversal;
   canTraverseStep(
     actorId: TActorId,
-    from: GridCell,
-    to: GridCell,
+    from: BoardCell,
+    to: BoardCell,
   ): boolean;
 }
 
@@ -111,7 +119,7 @@ export type PathResult =
   | {
       readonly kind: 'found';
       /** Destination cells in travel order; the start cell is not repeated. */
-      readonly cells: readonly GridCell[];
+      readonly cells: readonly BoardCell[];
       readonly cost: Feet;
     }
   | { readonly kind: 'unreachable' };
@@ -126,12 +134,12 @@ export interface ReachableRequest<TActorId extends string> {
 export interface ReachableDestination {
   readonly destination: GridCell;
   /** Destination cells in travel order; the start cell is not repeated. */
-  readonly cells: readonly GridCell[];
+  readonly cells: readonly BoardCell[];
   readonly cost: Feet;
 }
 
 interface FrontierCell {
-  readonly cell: GridCell;
+  readonly cell: BoardCell;
   readonly cost: number;
   readonly canEnd: boolean;
 }
@@ -157,11 +165,11 @@ function validatedCost(cost: Feet): Feet {
 }
 
 function reconstructPath(
-  start: GridCell,
-  goal: GridCell,
-  previous: ReadonlyMap<string, GridCell>,
-): readonly GridCell[] {
-  const reversed: GridCell[] = [];
+  start: BoardCell,
+  goal: BoardCell,
+  previous: ReadonlyMap<string, BoardCell>,
+): readonly BoardCell[] {
+  const reversed: BoardCell[] = [];
   let cursor = goal;
   while (!sameCell(cursor, start)) {
     reversed.push(cursor);
@@ -203,13 +211,14 @@ export function findPathToAny<TActorId extends string>(
   request: PathToAnyRequest<TActorId>,
 ): PathResult {
   const maximumCost = validatedCost(request.maximumCost);
-  if (!isCellInside(world.bounds, request.start)) return { kind: 'unreachable' };
-  if (request.isGoal(request.start)) return { kind: 'found', cells: [], cost: feet(0) };
+  const start = boardCell(world.bounds, request.start);
+  if (start === null) return { kind: 'unreachable' };
+  if (request.isGoal(start)) return { kind: 'found', cells: [], cost: feet(0) };
 
-  const startKey = cellKey(request.start);
+  const startKey = cellKey(start);
   const distances = new Map<string, number>([[startKey, 0]]);
-  const previous = new Map<string, GridCell>();
-  const frontier: FrontierCell[] = [{ cell: request.start, cost: 0, canEnd: true }];
+  const previous = new Map<string, BoardCell>();
+  const frontier: FrontierCell[] = [{ cell: start, cost: 0, canEnd: true }];
 
   while (frontier.length > 0) {
     frontier.sort(frontierOrder);
@@ -223,7 +232,7 @@ export function findPathToAny<TActorId extends string>(
     if (current.canEnd && request.isGoal(current.cell)) {
       return {
         kind: 'found',
-        cells: reconstructPath(request.start, current.cell, previous),
+        cells: reconstructPath(start, current.cell, previous),
         cost: feet(current.cost),
       };
     }
@@ -267,7 +276,8 @@ export function findPathToBest<TActorId extends string>(
   request: PathToBestRequest<TActorId>,
 ): PathResult {
   const maximumCost = validatedCost(request.maximumCost);
-  if (!isCellInside(world.bounds, request.start)) return { kind: 'unreachable' };
+  const start = boardCell(world.bounds, request.start);
+  if (start === null) return { kind: 'unreachable' };
 
   const compareRank = (left: readonly number[], right: readonly number[]): number => {
     for (let index = 0; index < Math.max(left.length, right.length); index += 1) {
@@ -276,11 +286,11 @@ export function findPathToBest<TActorId extends string>(
     }
     return 0;
   };
-  const startKey = cellKey(request.start);
+  const startKey = cellKey(start);
   const distances = new Map<string, number>([[startKey, 0]]);
-  const previous = new Map<string, GridCell>();
-  const frontier: FrontierCell[] = [{ cell: request.start, cost: 0, canEnd: true }];
-  let best: { readonly cell: GridCell; readonly cost: number; readonly rank: readonly number[] } | null = null;
+  const previous = new Map<string, BoardCell>();
+  const frontier: FrontierCell[] = [{ cell: start, cost: 0, canEnd: true }];
+  let best: { readonly cell: BoardCell; readonly cost: number; readonly rank: readonly number[] } | null = null;
 
   while (frontier.length > 0) {
     frontier.sort(frontierOrder);
@@ -312,7 +322,7 @@ export function findPathToBest<TActorId extends string>(
     ? { kind: 'unreachable' }
     : {
         kind: 'found',
-        cells: reconstructPath(request.start, best.cell, previous),
+        cells: reconstructPath(start, best.cell, previous),
         cost: feet(best.cost),
       };
 }
@@ -397,12 +407,13 @@ export function findReachableCells<TActorId extends string>(
   request: ReachableRequest<TActorId>,
 ): readonly ReachableDestination[] {
   const maximumCost = validatedCost(request.maximumCost);
-  if (!isCellInside(world.bounds, request.start)) return [];
+  const start = boardCell(world.bounds, request.start);
+  if (start === null) return [];
 
-  const distances = new Map<string, number>([[cellKey(request.start), 0]]);
-  const previous = new Map<string, GridCell>();
+  const distances = new Map<string, number>([[cellKey(start), 0]]);
+  const previous = new Map<string, BoardCell>();
   const frontier = new FrontierHeap();
-  frontier.push({ cell: request.start, cost: 0, canEnd: true });
+  frontier.push({ cell: start, cost: 0, canEnd: true });
   const endpoints: FrontierCell[] = [];
 
   for (let current = frontier.pop(); current !== undefined; current = frontier.pop()) {
@@ -427,7 +438,7 @@ export function findReachableCells<TActorId extends string>(
     .sort((left, right) => left.cell.row - right.cell.row || left.cell.column - right.cell.column)
     .map((endpoint) => ({
       destination: { column: endpoint.cell.column, row: endpoint.cell.row },
-      cells: reconstructPath(request.start, endpoint.cell, previous),
+      cells: reconstructPath(start, endpoint.cell, previous),
       cost: feet(endpoint.cost),
     }));
 }
@@ -441,8 +452,8 @@ function isAdjacent(from: GridCell, to: GridCell): boolean {
 function opportunityWindows<TActorId extends string>(
   world: MovementWorld<TActorId>,
   request: MovementRequest<TActorId>,
-  from: GridCell,
-  to: GridCell,
+  from: BoardCell,
+  to: BoardCell,
 ): MovementStep<TActorId>['beforeLeaving'] {
   if (request.cause !== 'voluntary') {
     return [];
@@ -483,16 +494,18 @@ export function planMovement<TActorId extends string>(
   request: MovementRequest<TActorId>,
 ): MovementPlan<TActorId> {
   const budget = validatedCost(request.budgetRemaining);
-  if (!isCellInside(world.bounds, request.start)) {
+  const start = boardCell(world.bounds, request.start);
+  if (start === null) {
     return { kind: 'illegal', reason: 'outside_grid', stepIndex: 0 };
   }
 
   const steps: MovementStep<TActorId>[] = [];
   let totalCost = 0;
-  let from = request.start;
+  let from = start;
   for (let stepIndex = 0; stepIndex < request.path.length; stepIndex += 1) {
-    const to = request.path[stepIndex];
-    if (to === undefined || !isCellInside(world.bounds, to)) {
+    const requested = request.path[stepIndex];
+    const to = requested === undefined ? null : boardCell(world.bounds, requested);
+    if (to === null) {
       return { kind: 'illegal', reason: 'outside_grid', stepIndex };
     }
     if (!isAdjacent(from, to)) {

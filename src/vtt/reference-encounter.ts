@@ -3,7 +3,7 @@ import type { LegalActionSummary } from '../combat/controllers';
 import { combatantSpace, type EncounterState } from '../combat/encounter';
 import { minimumSpaceDistance, minimumSpaceDistanceToCells } from '../combat/creature-space';
 import type { EncounterCommand } from '../combat/events';
-import { gridDistance, isCellInside, type GridCell } from '../combat/grid';
+import { boardCell, gridDistance, type GridCell } from '../combat/grid';
 import { encounterMovementWorld } from '../combat/encounter-movement-world';
 import { terrainWallCells } from '../combat/terrain';
 import { feetPoint, previewAffectedCells } from '../combat/templates';
@@ -148,22 +148,22 @@ function position(state: EncounterState, id: CombatantId): GridCell {
 function movementActions(state: EncounterState, actor: CombatantId): readonly EncounterCommand[] {
   const current = position(state, actor);
   if (subject(state, actor).turn.movement.remaining < 5) return [];
+  const origin = boardCell(state.bounds, current);
+  if (origin === null) return [];
   const world = encounterMovementWorld(state);
   const actions: EncounterCommand[] = [];
   for (let columnDelta = -1; columnDelta <= 1; columnDelta += 1) {
     for (let rowDelta = -1; rowDelta <= 1; rowDelta += 1) {
       if (columnDelta === 0 && rowDelta === 0) continue;
-      const to = {
+      const to = boardCell(state.bounds, {
         column: current.column + columnDelta,
         row: current.row + rowDelta,
-      };
-      const traversal = world.canTraverseStep(actor, current, to)
-        ? world.traversal(actor, current, to)
+      });
+      if (to === null) continue;
+      const traversal = world.canTraverseStep(actor, origin, to)
+        ? world.traversal(actor, origin, to)
         : { kind: 'blocked' as const };
-      if (
-        isCellInside(state.bounds, to) &&
-        traversal.kind === 'enterable' && traversal.canEnd
-      ) {
+      if (traversal.kind === 'enterable' && traversal.canEnd) {
         actions.push({ type: 'move', actor, path: [to], cause: 'voluntary' });
       }
     }
