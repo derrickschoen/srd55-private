@@ -22,11 +22,14 @@ import { monsterAttackCommand, monsterAttackRollModeSources } from '../../../src
 import type { MonsterAttackAction, MonsterTrait } from '../../../src/combat/statblock';
 import { MONSTER_SIDE } from '../../../src/combat/allies';
 import {
+  canCombatantSee,
+  closeCombatEnemies,
   createEncounter,
   evaluateMonsterTacticalAttack,
   reduceEncounter,
   type EncounterState,
 } from '../../../src/combat/encounter';
+import { feetPoint } from '../../../src/combat/templates';
 import { monsterCombatantProfile } from '../../../src/combat/combatant';
 import { GOBLIN_WARRIOR, OGRE, WOLF } from '../../../src/combat/statblocks/monsters';
 import { buildOfferEnvironment } from '../../../src/vtt/offers/build-offer-environment';
@@ -645,6 +648,61 @@ describe('Ranged Attacks in Close Combat (docs/srd/full/srd-5.2.1.txt:911-917)',
     expect(plan(goblinArcherBoard({ key: 'cc-plan-paralyzed', neighbour: 'pc', neighbourCondition: 'Paralyzed' })))
       .toEqual([straight, straight]);
     expect(plan(goblinArcherBoard({ key: 'cc-plan-ally', neighbour: 'goblin_ally' }))).toEqual([straight, straight]);
+  });
+
+  /*
+   * CC-SIGHT-PARITY. The goblin archer board with a Fog Cloud-style heavily
+   * obscured area (an active obscured_area effect): a 5-foot sphere on the
+   * archer's corner (5,5) feet, which covers (0,0)-(1,1) and not the target at
+   * (3,0). Sight is judged at the subject's cell (src/combat/sight.ts), so
+   * neither PC sees the archer inside it, while the archer sees the target
+   * outside it. The neighbour PC, 5 feet away, therefore imposes no
+   * close-combat Disadvantage, and the target cannot see its attacker:
+   * Advantage (unseen attacker). With the RNG at 0.5 the reducer rolls two
+   * faces. The planning port must state the same facts: before review r2 it
+   * read its own detection mirror, which skipped placed obscured areas, and
+   * planned this shot with Disadvantage and no Advantage.
+   */
+  it('CC-SIGHT-PARITY: in a heavily obscured area on the goblin archer, both monster planners and the reducer agree nobody sees it: no close-combat Disadvantage, Advantage from the unseen attacker', () => {
+    const board = goblinArcherBoard({ key: 'cc-fog', neighbour: 'pc' });
+    if (board.neighbour === null) throw new Error('The board has a neighbour.');
+    const fog: EncounterState['effects'][number] = {
+      id: encounterEffectId('effect:cc-fog'),
+      source: board.target.id,
+      targets: [],
+      createdRevision: 0,
+      duration: { kind: 'permanent' },
+      concentrationOwner: null,
+      stackingIdentity: effectStackingIdentity('cc-fog'),
+      stacking: 'replace_same_source',
+      repeatedSave: null,
+      payload: {
+        kind: 'obscured_area',
+        placement: { shape: 'sphere', template: { origin: feetPoint(5, 5), radius: feet(5) } },
+        radiusFeet: 5,
+        obscurement: 'heavy',
+        dispersedByStrongWind: true,
+      },
+    };
+    const state: EncounterState = { ...board.state, effects: [...board.state.effects, fog] };
+    // The reducer's sight: neither PC sees the archer; the archer sees the target.
+    expect(canCombatantSee(state, board.neighbour.id, board.archer.id)).toBe(false);
+    expect(canCombatantSee(state, board.target.id, board.archer.id)).toBe(false);
+    expect(canCombatantSee(state, board.archer.id, board.target.id)).toBe(true);
+    expect(rolledMode(state, monsterAttackCommand(board.shortbow, board.archer.id, board.target.id)))
+      .toEqual({ mode: 'advantage', faces: 2 });
+
+    const port = PLANNING_QUERIES.tacticalAttack(state, board.archer.id, board.target.id, 'shortbow');
+    if (port === null) throw new Error('The planning port has no Shortbow verdict.');
+    const adapter = evaluateMonsterTacticalAttack(state, board.shortbow, board.archer.id, board.target.id);
+    for (const evaluation of [port, adapter]) {
+      expect(evaluation.rollMode.mode).toBe('advantage');
+      expect(evaluation.rollMode.reasons).toContain('unseen_attacker_advantage');
+      expect(evaluation.rollMode.reasons).not.toContain('ranged_close_combat_disadvantage');
+    }
+    const expectedEnemies = [{ id: board.neighbour.id, distanceFeet: 5, seesAttacker: false, incapacitated: false }];
+    expect(PLANNING_QUERIES.closeCombatEnemies(state, board.archer.id)).toEqual(expectedEnemies);
+    expect(closeCombatEnemies(state, board.archer.id)).toEqual(expectedEnemies);
   });
 
   it('CC-THROWN: the Ogre\'s Javelin thrown at a PC 20 feet away has Disadvantage with another PC next to it; swung at that PC, a melee attack, it does not', () => {

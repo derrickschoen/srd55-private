@@ -7,6 +7,7 @@ import type { PlayerBoardProjection } from '../../../src/vtt/encounter-projectio
 
 const RUNTIME_CONSUMERS = [
   'src/combat/encounter.ts',
+  'src/combat/sight.ts',
   'src/combat/encounter-movement-world.ts',
   'src/vtt/engine-query-port.ts',
   'src/vtt/intent-resolver.ts',

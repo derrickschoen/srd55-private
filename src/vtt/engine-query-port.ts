@@ -3,6 +3,7 @@ import { conditionSpeedPenaltyFeet, exhaustionPenalty, isIncapacitated } from '.
 import { creatureSizes, type KnownCreatureSize } from '../domain/enums';
 import type { EncounterCombatantState, EncounterState } from '../combat/encounter';
 import { combatantLineVerdict, coverBetweenCombatants } from '../combat/cover';
+import { closeCombatEnemies, detectCombatant, type DetectionResult } from '../combat/sight';
 import {
   applySizeSteps,
   creatureSpace,
@@ -59,11 +60,7 @@ import {
   type EngineZoneId,
 } from '../combat/values';
 import { wildShapeRulesLens } from '../combat/wild-shape';
-import {
-  environmentLightAt,
-  environmentObscurementAt,
-  isEnvironmentDifficultTerrain,
-} from '../combat/world-objects';
+import { isEnvironmentDifficultTerrain } from '../combat/world-objects';
 import { availableEngineActorOptions, resolveEngineActorOption } from './intent-resolver';
 import type {
   ActorKnowledgeProjection,
@@ -283,7 +280,7 @@ export interface EngineQueryPort {
     readonly sense: 'normal_sight' | 'darkvision' | 'blindsight' | 'truesight' | 'unknown';
     readonly reason: string | null;
   } | null;
-  /** The actor's enemies within 5 feet, for Ranged Attacks in Close Combat (see planningCloseCombatEnemies). */
+  /** The actor's enemies within 5 feet, for Ranged Attacks in Close Combat: the reducer's facts (src/combat/sight.ts). */
   closeCombatEnemies(state: EncounterState, actorId: CombatantId): readonly CloseCombatEnemy<boolean>[];
 }
 
@@ -842,50 +839,19 @@ function isIncapacitatedByState(state: EncounterState, id: CombatantId): boolean
     .some((name) => names.has(name));
 }
 
-function sharesWebArea(state: EncounterState, observer: CombatantId, subject: CombatantId): boolean {
-  return state.persistentAreas.some((area) => area.material?.id === 'webs' &&
-    area.members.includes(observer) && area.members.includes(subject));
-}
-
-type Detection =
-  | { readonly kind: 'seen'; readonly sense: 'normal_sight' | 'darkvision' | 'blindsight' | 'truesight' }
-  | { readonly kind: 'located'; readonly sense: 'web_sense' }
-  | { readonly kind: 'undetected'; readonly reason: 'blocked' | 'hidden' | 'invisible' | 'obscured' | 'darkness' | 'out_of_range' };
-
-function detect(state: EncounterState, observer: CombatantId, subject: CombatantId): Detection | null {
-  const observerState = combatant(state, observer);
-  const observerPlaced = state.tokens.some((token) => token.combatantId === observer);
-  const subjectPlaced = state.tokens.some((token) => token.combatantId === subject);
-  if (observerState === null || combatant(state, subject) === null || !observerPlaced || !subjectPlaced) return null;
-  const line = combatantLineVerdict(state, observer, subject);
-  const distance = minimumSpaceDistance(queryCombatantSpace(state, observer), queryCombatantSpace(state, subject));
-  const senses = rulesFor(observerState).senses;
-  if (senses.some((sense) => sense.kind === 'blindsight' && distance <= sense.rangeFeet) && !line.blocksSight) {
-    return { kind: 'seen', sense: 'blindsight' };
-  }
-  const truesight = senses.some((sense) => sense.kind === 'truesight' && distance <= sense.rangeFeet);
-  if (rulesFor(observerState).detectionTraits.includes('web_sense') && sharesWebArea(state, observer, subject)) {
-    return { kind: 'located', sense: 'web_sense' };
-  }
-  if (line.blocksSight) return { kind: 'undetected', reason: 'blocked' };
-  if (effectConditionNames(state, observer).has('Blinded')) return { kind: 'undetected', reason: 'obscured' };
-  if (state.hiddenCombatants.some((entry) => entry.combatant === subject) && !truesight) {
-    return { kind: 'undetected', reason: 'hidden' };
-  }
-  if (effectConditionNames(state, subject).has('Invisible') && !truesight) {
-    return { kind: 'undetected', reason: 'invisible' };
-  }
-  const obscurement = environmentObscurementAt(state.environment, line.targetCell);
-  if (obscurement === 'heavy') return { kind: 'undetected', reason: 'obscured' };
-  if (truesight) return { kind: 'seen', sense: 'truesight' };
-  if (obscurement === 'magical_darkness') return { kind: 'undetected', reason: 'darkness' };
-  if (environmentLightAt(state.environment, line.targetCell) !== 'darkness') {
-    return { kind: 'seen', sense: 'normal_sight' };
-  }
-  const darkvision = senses.some((sense) => sense.kind === 'darkvision' && distance <= sense.rangeFeet);
-  return darkvision
-    ? { kind: 'seen', sense: 'darkvision' }
-    : { kind: 'undetected', reason: senses.some((sense) => sense.kind === 'darkvision') ? 'out_of_range' : 'darkness' };
+/**
+ * Who sees or locates whom, on the reducer's own rule (src/combat/sight.ts):
+ * the planner and the roll must agree, Fog Cloud, Darkness, tremorsense, web
+ * sense and every other detection source included. Null when either creature
+ * is not on the board.
+ */
+function detect(state: EncounterState, observer: CombatantId, subject: CombatantId): DetectionResult | null {
+  if (
+    combatant(state, observer) === null || combatant(state, subject) === null ||
+    !state.tokens.some((token) => token.combatantId === observer) ||
+    !state.tokens.some((token) => token.combatantId === subject)
+  ) return null;
+  return detectCombatant(state, observer, subject);
 }
 
 function ignoresDifficultTerrain(state: EncounterState, id: CombatantId): boolean {
@@ -1326,37 +1292,6 @@ function reach(state: EncounterState, request: EngineReachRequest): EngineReachR
   };
 }
 
-/**
- * The actor's enemies within 5 feet of its space, for Ranged Attacks in Close
- * Combat (rangedCloseCombatVerdict), on this port's planning basis: its own
- * detection and planning conditions, as for every other fact of an attack
- * plan. It states the reducer's closeCombatEnemies (encounter.ts): a placed
- * opposing creature that is not dead, whether it sees the actor, and whether
- * it is Incapacitated (a creature at 0 Hit Points is Unconscious).
- */
-function planningCloseCombatEnemies(
-  state: EncounterState,
-  actorId: CombatantId,
-): readonly CloseCombatEnemy<boolean>[] {
-  const actorSpace = queryCombatantSpace(state, actorId);
-  return state.combatants.flatMap((candidate): readonly CloseCombatEnemy<boolean>[] => {
-    const id = candidate.profile.id;
-    if (
-      id === actorId || candidate.life === 'dead' ||
-      !state.tokens.some((token) => token.combatantId === id) ||
-      combatantsAreAllies(state, actorId, id)
-    ) return [];
-    const distanceFeet = minimumSpaceDistance(actorSpace, queryCombatantSpace(state, id));
-    if (distanceFeet > CLOSE_COMBAT_DISTANCE_FEET) return [];
-    return [{
-      id,
-      distanceFeet,
-      seesAttacker: detect(state, id, actorId)?.kind === 'seen',
-      incapacitated: candidate.life !== 'living' || isIncapacitated(enginePlanningConditions(state, id)),
-    }];
-  });
-}
-
 /** Builds the immutable attack input shared by single-attack and sequence queries. */
 export function engineTacticalAttackInput(
   state: EncounterState,
@@ -1486,7 +1421,10 @@ export function engineTacticalAttackInput(
       ),
     ],
     featureRollModeInput,
-    closeCombatEnemies: planningCloseCombatEnemies(state, actorId),
+    // The reducer's own facts (src/combat/sight.ts), so the planner and the
+    // roll agree on who sees the attacker, Fog Cloud and every other
+    // obscuring effect included.
+    closeCombatEnemies: closeCombatEnemies(state, actorId),
     attackRollModifiers,
     target: {
       hitPoints: enginePlanningHitPoints(state, targetId),
@@ -2085,7 +2023,7 @@ const engineQueryPort: EngineQueryPort = {
       reason: detection.kind === 'undetected' ? detection.reason : null,
     };
   },
-  closeCombatEnemies: planningCloseCombatEnemies,
+  closeCombatEnemies,
 };
 
 export const canonicalEngineQueryPort: EngineQueryPort = Object.freeze(engineQueryPort);
