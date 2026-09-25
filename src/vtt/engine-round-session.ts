@@ -500,6 +500,10 @@ export class EngineRoundSession {
       initialBoundary: 'resolve_before_program',
     }, (commands) => {
       let state = commands.currentState();
+      const lifeOf = (id: CombatantId) => state.combatants.find((entry) => entry.profile.id === id)?.life;
+      // Targets an earlier attack of this program killed, while the actor's
+      // Attack action is still under way.
+      const killedByThisAttackAction = new Set<CombatantId>();
       for (const command of turn.reducerCommands) {
         if (state.activeCombatant !== turn.actorId) {
           throw new Error(`Scripted PC turn ${turn.actorId} attempted to cross an initiative boundary.`);
@@ -508,13 +512,21 @@ export class EngineRoundSession {
           throw new Error(`Scripted PC turn ${turn.actorId} may apply only that actor's reducer commands.`);
         }
         // A scripted Attack action names one target for all its attacks (Extra
-        // Attack, or the attack after a combined plan's move); once that target
-        // is dead the rest lapse, where the reducer would refuse them.
-        if (command.type === 'attack' &&
-          state.combatants.some((entry) => entry.profile.id === command.target && entry.life === 'dead')) {
+        // Attack, or the attacks after a combined plan's move). When an earlier
+        // attack of that same action killed the target, the later ones lapse,
+        // where the reducer would refuse them. Any other attack on a dead
+        // target, the first one included, still goes to the reducer, which
+        // refuses it.
+        if (command.type === 'attack' && killedByThisAttackAction.has(command.target) &&
+          state.combatants.some((entry) => entry.profile.id === turn.actorId &&
+            entry.turn.action.kind === 'attack_sequence')) {
           continue;
         }
+        const targetLifeBefore = command.type === 'attack' ? lifeOf(command.target) : undefined;
         state = commands.apply(command);
+        if (command.type === 'attack' && targetLifeBefore !== 'dead' && lifeOf(command.target) === 'dead') {
+          killedByThisAttackAction.add(command.target);
+        }
       }
       if (state.activeCombatant === turn.actorId) {
         state = commands.apply({ type: 'end_turn', actor: turn.actorId });

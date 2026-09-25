@@ -610,6 +610,55 @@ describe('authoritative engine round session', () => {
       event.type === 'attack_resolved' && event.actor === FOCUS_ID && event.target === KILLER_ID)).toHaveLength(1);
   });
 
+  it('PCAC-TURN-DEAD-TARGET-STILL-REFUSED: an attack on a creature that was already dead, first or after a kill of another target, still fails the turn', () => {
+    const started = reduceEncounter(
+      segmentedState(new Map([
+        [FOCUS_ID, { column: 0, row: 0 }],
+        [KILLER_ID, { column: 1, row: 0 }],
+        [BRUTE_ID, { column: 1, row: 1 }],
+      ])),
+      { type: 'roll_initiative' },
+      mulberry32(58_420_001),
+    ).state;
+    expect(started.activeCombatant).toBe(FOCUS_ID);
+    const deadBefore = (state: EncounterState, id: CombatantId): EncounterState => ({
+      ...state,
+      combatants: state.combatants.map((entry) => entry.profile.id === id ? { ...entry, hitPoints: 0, life: 'dead' as const } : entry),
+    });
+    // +100 hits on every face but a natural 1, and 1,000 damage kills.
+    const attackOn = (target: CombatantId): Extract<EncounterCommand, { readonly type: 'attack' }> => ({
+      type: 'attack', actor: FOCUS_ID, target, attackBonus: 100, criticalFloor: 20, rollMode: 'normal',
+      attackerCanSeeTarget: true, targetCanSeeAttacker: true,
+      damage: { terms: [{ type: damageType('Force'), dice: { count: 0, sides: dieSides(6), modifier: 1_000 } }], critical: false, responses: [] },
+    });
+    const seed = 58_420_002;
+    const oracle = mulberry32(seed);
+    expect(Math.floor(oracle() * 20) + 1).not.toBe(1);
+    const run = (state: EncounterState, reducerCommands: readonly EncounterCommand[]) => {
+      const session = new EngineRoundSession(state, mulberry32(seed), { kind: 'unattended', askDefault: 'decline' }, OFFER_ENVIRONMENT);
+      expect(() => session.completeScriptedPcTurn({ actorId: FOCUS_ID, reducerCommands }, null))
+        .toThrow('A dead combatant cannot be attacked.');
+      // The failed turn is rolled back.
+      expect(session.currentState()).toEqual(state);
+    };
+
+    // The first attack of the action targets a creature dead before the turn.
+    run(deadBefore(started, KILLER_ID), [attackOn(KILLER_ID), attackOn(KILLER_ID)]);
+    // The first attack kills its target; the second targets another creature that was already dead.
+    run(deadBefore(started, BRUTE_ID), [attackOn(KILLER_ID), attackOn(BRUTE_ID)]);
+    // With one attack per action, the kill spends the Attack action: a second attack is not part of it and fails.
+    const oneAttack: EncounterState = {
+      ...started,
+      combatants: started.combatants.map((entry) => entry.profile.id === FOCUS_ID
+        ? { ...entry, profile: { ...entry.profile, rules: { ...entry.profile.rules, attacksPerAction: 1 } } }
+        : entry),
+    };
+    const session = new EngineRoundSession(oneAttack, mulberry32(seed), { kind: 'unattended', askDefault: 'decline' }, OFFER_ENVIRONMENT);
+    expect(() => session.completeScriptedPcTurn({ actorId: FOCUS_ID, reducerCommands: [attackOn(KILLER_ID), attackOn(KILLER_ID)] }, null))
+      .toThrow();
+    expect(session.currentState()).toEqual(oneAttack);
+  });
+
   it('discards failed monster state, evidence, and randomness before a control-identical success', () => {
     const positioned = segmentedState(new Map([
       [CLERIC_ID, { column: 0, row: 0 }],
