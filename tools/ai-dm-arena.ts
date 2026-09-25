@@ -848,7 +848,11 @@ export function arenaRows(
     const restrictedWall = row.roundWallTimedOut ? registeredWall : row.policyElapsedMs;
     if (restrictedWall === null || !Number.isFinite(restrictedWall) || restrictedWall < 0 ||
       (registeredWall !== null && restrictedWall > registeredWall)) {
-      throw new RangeError('Arena restricted wall must be within the registered round wall.');
+      throw new RangeError(
+        'Arena restricted wall must be within the registered round wall ' +
+        `(roundWallTimedOut ${String(row.roundWallTimedOut)}, policyElapsedMs ${String(row.policyElapsedMs)}, ` +
+        `registered ${String(registeredWall)}).`,
+      );
     }
     const arenaRow: ArenaRow = {
     ...conversationPart(row),
