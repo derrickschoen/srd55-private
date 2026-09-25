@@ -50,6 +50,10 @@ import {
   type BoardImageSource,
   type CaptureTilePx,
 } from './ai-dm-board-snapshot';
+import {
+  beginLunaCall, lunaCallLogPath, lunaCallLogSink, type LunaCallInFlight, type LunaCallLogSink,
+} from './luna-call-log';
+import { LUNA_MODEL, resolveScreenshotTimeout } from './model-routes';
 
 const repositoryRoot = resolve(new URL('../', import.meta.url).pathname);
 const OFFER_ENVIRONMENT = buildOfferEnvironment({ kind: 'configuration', mode: 'legacy_standard' });
@@ -354,6 +358,8 @@ type ProbeAnswer =
 export interface ProbeModelSpec {
   readonly model: string;
   readonly effort: ProbeEffort;
+  /** Per-call timeout: the 30 min hang guard for gpt-6-luna (LUNA6); null is untimed, today's default. */
+  readonly timeoutMs: number | null;
 }
 
 export interface ScreenshotProbeConfig {
@@ -2046,16 +2052,66 @@ function decodeCodexOutput(stdout: string): {
   return { rawAnswer, tokens };
 }
 
-export function codexScreenshotAnswerer(): ProbeAnswerer {
+export type ScreenshotCliStatus = 'completed' | 'failed' | 'timed_out';
+
+export interface CodexScreenshotAnswerResult extends ProbeAnswerResult {
+  readonly status: ScreenshotCliStatus;
+}
+
+export interface CodexScreenshotAnswererOptions {
+  readonly cliBin?: string;
+  /** Per-call kill timer. null (or absent) leaves the call untimed, today's behaviour for non-Luna entries. */
+  readonly timeoutMs?: number | null;
+  /** LUNA6 call log for gpt-6-luna entries (plan §2.4); a logged call must carry a timeout. */
+  readonly onCall?: LunaCallLogSink;
+}
+
+function screenshotCallKey(request: ProbeAnswerRequest): string {
+  return request.imagePath === null
+    ? `${request.question}:prompt-${createHash('sha256').update(request.prompt, 'utf8').digest('hex').slice(0, 16)}`
+    : `${request.question}:${basename(request.imagePath, '.png')}`;
+}
+
+export function codexScreenshotAnswerer(options: CodexScreenshotAnswererOptions = {}): {
+  answer(request: ProbeAnswerRequest): Promise<CodexScreenshotAnswerResult>;
+} {
+  const timeoutMs = options.timeoutMs ?? null;
+  if (options.onCall !== undefined && timeoutMs === null) {
+    throw new TypeError('A logged gpt-6-luna screenshot call requires a per-call timeout.');
+  }
   return {
     answer(request) {
       const started = performance.now();
-      return new Promise<ProbeAnswerResult>((resolvePromise) => {
+      const call: LunaCallInFlight | null = options.onCall === undefined || timeoutMs === null
+        ? null
+        : beginLunaCall(options.onCall, {
+            cellKey: screenshotCallKey(request),
+            surface: 'screenshot_cli',
+            dispatch: null,
+            callPhase: 'screenshot',
+            bootstrapKind: null,
+            model: request.model,
+            reasoningEffort: request.effort,
+            timeoutMs,
+          });
+      return new Promise<CodexScreenshotAnswerResult>((resolvePromise) => {
+        let settled = false;
+        let timedOut = false;
+        let killTimer: ReturnType<typeof setTimeout> | null = null;
+        let escalationTimer: ReturnType<typeof setTimeout> | null = null;
+        const settle = (result: CodexScreenshotAnswerResult): void => {
+          if (settled) return;
+          settled = true;
+          if (killTimer !== null) clearTimeout(killTimer);
+          if (escalationTimer !== null) clearTimeout(escalationTimer);
+          call?.complete({ exit: result.status, error: result.error });
+          resolvePromise(result);
+        };
         const imageArguments = request.imagePath === null
           ? []
           : ['-i', request.imagePath];
         const child = spawn(
-          'codex',
+          options.cliBin ?? 'codex',
           [
             'exec',
             '-C',
@@ -2089,6 +2145,13 @@ export function codexScreenshotAnswerer(): ProbeAnswerer {
             env: { ...process.env, CODEX_HOME: AI_DM_CODEX_HOME },
           },
         );
+        if (timeoutMs !== null) {
+          killTimer = setTimeout(() => {
+            timedOut = true;
+            child.kill('SIGTERM');
+            escalationTimer = setTimeout(() => child.kill('SIGKILL'), 1_000);
+          }, timeoutMs);
+        }
         let stdout = '';
         let stderr = '';
         child.stdout.setEncoding('utf8');
@@ -2100,7 +2163,8 @@ export function codexScreenshotAnswerer(): ProbeAnswerer {
           stderr += chunk;
         });
         child.once('error', (error) =>
-          resolvePromise({
+          settle({
+            status: 'failed',
             rawAnswer: stdout,
             wallMs: performance.now() - started,
             tokens: null,
@@ -2109,8 +2173,19 @@ export function codexScreenshotAnswerer(): ProbeAnswerer {
         );
         child.once('close', (code, signal) => {
           const wallMs = performance.now() - started;
+          if (timedOut) {
+            settle({
+              status: 'timed_out',
+              rawAnswer: stdout,
+              wallMs,
+              tokens: null,
+              error: `codex timed out after ${String(timeoutMs)} ms`,
+            });
+            return;
+          }
           if (code !== 0) {
-            resolvePromise({
+            settle({
+              status: 'failed',
               rawAnswer: stdout,
               wallMs,
               tokens: null,
@@ -2120,9 +2195,10 @@ export function codexScreenshotAnswerer(): ProbeAnswerer {
           }
           try {
             const decoded = decodeCodexOutput(stdout);
-            resolvePromise({ ...decoded, wallMs, error: null });
+            settle({ ...decoded, status: 'completed', wallMs, error: null });
           } catch (error) {
-            resolvePromise({
+            settle({
+              status: 'failed',
               rawAnswer: stdout,
               wallMs,
               tokens: null,
@@ -2136,7 +2212,7 @@ export function codexScreenshotAnswerer(): ProbeAnswerer {
   };
 }
 
-function parseModelSpec(value: string): ProbeModelSpec {
+function parseModelSpec(value: string, explicitTimeoutMs: number | null): ProbeModelSpec {
   const split = value.split(':');
   if (split.length !== 2)
     throw new TypeError(
@@ -2150,7 +2226,8 @@ function parseModelSpec(value: string): ProbeModelSpec {
   ) {
     throw new TypeError(`Model specification ${value} is incomplete.`);
   }
-  return { model, effort: effortSchema.parse(rawEffort) };
+  const effort = effortSchema.parse(rawEffort);
+  return { model, effort, timeoutMs: resolveScreenshotTimeout({ model, effort, explicitTimeoutMs }) };
 }
 
 function insideRepository(path: string, label: string): string {
@@ -2197,6 +2274,7 @@ export function parseScreenshotProbeArgs(
         '--board-glyphs',
         '--capture-tile-px',
         '--board-input',
+        '--timeout-ms',
       ].includes(option ?? '')
     ) {
       throw new TypeError(
@@ -2209,9 +2287,13 @@ export function parseScreenshotProbeArgs(
     values.set(option ?? '', value);
     index += 1;
   }
+  const timeoutValue = values.get('--timeout-ms');
+  const explicitTimeoutMs = timeoutValue === undefined ? null : Number(timeoutValue);
+  if (explicitTimeoutMs !== null && (!Number.isSafeInteger(explicitTimeoutMs) || explicitTimeoutMs < 1))
+    throw new RangeError('--timeout-ms must be a positive safe integer.');
   const models = requiredOption(values, '--models')
     .split(',')
-    .map(parseModelSpec);
+    .map((entry) => parseModelSpec(entry, explicitTimeoutMs));
   if (
     new Set(models.map((entry) => `${entry.model}:${entry.effort}`)).size !==
     models.length
@@ -2738,7 +2820,8 @@ async function runTask(
   boardInput: BoardInput,
 ): Promise<ScreenshotProbeRow> {
   const result = await answerer.answer({
-    ...task.model,
+    model: task.model.model,
+    effort: task.model.effort,
     question: task.question,
     prompt: screenshotQuestionPrompt(
       task.question,
@@ -3588,11 +3671,25 @@ export async function runScreenshotProbe(
   const snapshotService = dependencies.snapshotService ?? ownedService;
   if (snapshotService === null)
     throw new Error('Screenshot probe has no snapshot service.');
-  const answerer =
+  const sharedAnswerer =
     dependencies.answerer ??
-    (config.simulate
-      ? simulatedProbeAnswerer('perfect')
-      : codexScreenshotAnswerer());
+    (config.simulate ? simulatedProbeAnswerer('perfect') : null);
+  // LUNA6: each --models entry gets its own per-call bound; gpt-6-luna entries also log every call.
+  const lunaCalls = sharedAnswerer === null && config.models.some((entry) => entry.model === LUNA_MODEL)
+    ? lunaCallLogSink(lunaCallLogPath(config.outPath))
+    : null;
+  const entryAnswerers = new Map(config.models.map((entry): [string, ProbeAnswerer] => [
+    `${entry.model}:${entry.effort}`,
+    sharedAnswerer ?? codexScreenshotAnswerer({
+      timeoutMs: entry.timeoutMs,
+      ...(entry.model === LUNA_MODEL && lunaCalls !== null ? { onCall: lunaCalls } : {}),
+    }),
+  ]));
+  const answererFor = (entry: ProbeModelSpec): ProbeAnswerer => {
+    const answerer = entryAnswerers.get(`${entry.model}:${entry.effort}`);
+    if (answerer === undefined) throw new Error(`Screenshot probe has no answerer for ${entry.model}:${entry.effort}.`);
+    return answerer;
+  };
   try {
     const captured: Array<{
       readonly candidate: ProbeStateCandidate;
@@ -3675,7 +3772,7 @@ export async function runScreenshotProbe(
       (task) =>
         runTask(
           task,
-          answerer,
+          answererFor(task.model),
           schemas,
           config.imagesRoot,
           config.primer,

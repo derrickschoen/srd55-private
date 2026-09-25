@@ -2358,3 +2358,357 @@ describe('AI-DM arena', () => {
     );
   });
 });
+
+import { existsSync } from '../../helpers/test-filesystem';
+import { reconcileLunaCallLog } from '../../../tools/luna-call-log';
+
+const LUNA6_P1 = { dispatch: 'start', callPhase: 'initial', bootstrapKind: 'cold_start' } as const;
+const LUNA6_P3 = { dispatch: 'resume', callPhase: 'correction', bootstrapKind: null } as const;
+const LUNA6_P4 = { dispatch: 'start', callPhase: 'correction', bootstrapKind: 'escalation' } as const;
+const LUNA6_P7 = { dispatch: 'start', callPhase: 'initial', bootstrapKind: 'cold_start' } as const;
+const LUNA6_MIXED = 'LUNA6: a run mixing gpt-6-luna and other routes cannot give each route its own bound ' +
+  '(owner 2026-09-24: only gpt-6-luna calls lose the 180 s wall); split it';
+
+const luna6Outcome = <Value>(run: () => Value): { readonly ok: Value } | { readonly error: string } => {
+  try {
+    return { ok: run() };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) };
+  }
+};
+
+const luna6CallLog = (outPath: string) => {
+  const path = `${outPath}.luna-calls.jsonl`;
+  if (!existsSync(path)) return 'absent' as const;
+  return reconcileLunaCallLog(readFileSync(path, 'utf8').split('\n')).map((record) => ({
+    dispatch: record.dispatch,
+    callPhase: record.callPhase,
+    bootstrapKind: record.bootstrapKind,
+    model: record.model,
+    reasoningEffort: record.reasoningEffort,
+    timeoutMs: record.timeoutMs,
+    cellKey: record.cellKey,
+    boundKind: record.boundKind,
+    exit: record.exit,
+    hangGuardFired: record.hangGuardFired,
+    elapsedMs: typeof record.elapsedMs === 'number' && record.elapsedMs >= 0 ? '<n>' : record.elapsedMs,
+  }));
+};
+
+class LunaWitnessAdapter implements AgentSessionAdapter {
+  // A codex-kind adapter at the real adapter's seam: it records what it is handed and delegates in process.
+  readonly kind = 'codex' as const;
+  readonly records: Array<{
+    readonly dispatch: 'start' | 'resume';
+    readonly callPhase: AgentInvocation['callPhase'];
+    readonly bootstrapKind: string | null;
+    readonly model: string;
+    readonly reasoningEffort: string;
+    readonly timeoutMs: number | null;
+    readonly signalAbortedAtCall: boolean;
+  }> = [];
+  readonly #inner = new InProcessArenaAdapter();
+
+  constructor(private readonly options: { readonly timedOutPhases?: readonly AgentInvocation['callPhase'][] } = {}) {}
+
+  probe() { return this.#inner.probe(); }
+
+  async start(invocation: AgentInvocation, signal: AbortSignal): Promise<AgentTurnResult> {
+    this.#record('start', invocation, signal);
+    return this.#timedOut(invocation) ?? this.#inner.start(invocation);
+  }
+
+  async resume(
+    binding: AgentSessionBinding,
+    invocation: AgentInvocation,
+    signal: AbortSignal,
+  ): Promise<AgentTurnResult> {
+    this.#record('resume', invocation, signal);
+    return this.#timedOut(invocation) ?? this.#inner.resume(binding, invocation);
+  }
+
+  classifyFailure(): 'unknown' { return 'unknown'; }
+
+  #record(dispatch: 'start' | 'resume', invocation: AgentInvocation, signal: AbortSignal): void {
+    this.records.push({
+      dispatch,
+      callPhase: invocation.callPhase,
+      bootstrapKind: invocation.bootstrap?.kind ?? null,
+      model: invocation.model,
+      reasoningEffort: invocation.reasoningEffort,
+      timeoutMs: invocation.timeoutMs,
+      signalAbortedAtCall: signal.aborted,
+    });
+  }
+
+  /** The adapter's timed_out shape of the frozen timeout fixture (ai-dm-conversation.test.ts:953-962), at the guard. */
+  #timedOut(invocation: AgentInvocation): AgentTurnResult | null {
+    if (!(this.options.timedOutPhases ?? []).includes(invocation.callPhase)) return null;
+    return {
+      exit: 'timed_out', resumeSessionId: null, sessionId: 'partial-timeout-session',
+      finalText: 'catalog observed before timeout', usage: null, timeoutMs: 1_800_000,
+      processEvidence: {
+        startedAtUnixMs: 10, endedAtUnixMs: 20, exitCode: null, signal: 'SIGTERM',
+        stdout: 'catalog observed before timeout', stderr: '', decodedEvents: [],
+      },
+      partialResultEvidence: {
+        status: 'partial', decodedEventCount: 1, finalTextFragment: 'catalog observed before timeout',
+        observedUsage: null, stagedInvocationIds: [],
+      },
+      engineCatalogEvidence: invocation.engineDispatchId === undefined ? null : {
+        status: 'inconclusive', dispatchId: invocation.engineDispatchId, reason: 'no_correlated_catalog',
+      },
+    };
+  }
+}
+
+describe('LUNA6 Luna lift wiring', () => {
+  // LUNA6 (D890; owner 2026-09-24 18:58 "gpt-6-luna only"). Expected call sequences come from the plan §4.4 protocol
+  // state machine, corroborated by frozen literals; they are typed here by hand, never captured from a run.
+  it('arena and conversation parsers lift the round wall and set the 30 min hang guard for gpt-6-luna routes', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-luna6-parse-'));
+    const arena = (args: readonly string[]) => luna6Outcome(() => {
+      const config = parseArenaArgs([
+        '--rooms', '1', '--reps', '1', '--seed', '3943001', '--out', join(directory, 'arena.jsonl'), ...args,
+      ]);
+      return { timeoutMs: config.timeoutMs, roundWallMs: config.experimentPolicy.roundWallMs };
+    });
+    const conversation = (args: readonly string[]) => luna6Outcome(() => {
+      const config = parseConversationArgs([
+        '--rooms', '1', '--rounds', '1', '--out', join(directory, 'conversation.jsonl'), ...args,
+      ]);
+      return { timeoutMs: config.timeoutMs, roundWallMs: config.roundWallMs };
+    });
+    const lifted = { ok: { timeoutMs: 1_800_000, roundWallMs: null } };
+    expect([
+      arena(['--model', 'gpt-6-luna', '--effort', 'xhigh']),
+      arena(['--dm-mode', 'advice', '--model', 'gpt-6-luna', '--effort', 'high']),
+      conversation([
+        '--model', 'gpt-6-luna', '--effort', 'high', '--escalation-model', 'gpt-6-luna', '--escalation-effort', 'xhigh',
+      ]),
+      arena(['--interleave', '--arm', 'a:gpt-6-luna:high', '--arm', 'b:gpt-6-luna:xhigh']),
+      arena([]),
+      conversation([]),
+      conversation(['--dm-mode', 'advice']),
+      arena(['--timeout-ms', '150000']),
+      arena(['--model', 'gpt-6-luna', '--effort', 'xhigh', '--timeout-ms', '120000']),
+      arena(['--model', 'gpt-6-luna', '--effort', 'xhigh', '--round-wall-ms', '180000']),
+      conversation([
+        '--model', 'gpt-6-luna', '--effort', 'high', '--escalation-model', 'gpt-5.6-sol', '--escalation-effort', 'high',
+      ]),
+      arena(['--interleave', '--arm', 'a:gpt-6-luna:high', '--arm', 'b:gpt-5.6-sol:high']),
+    ]).toEqual([
+      lifted,
+      lifted,
+      lifted,
+      lifted,
+      { ok: { timeoutMs: 120_000, roundWallMs: 180_000 } },
+      { ok: { timeoutMs: 120_000, roundWallMs: 180_000 } },
+      { ok: { timeoutMs: 240_000, roundWallMs: 180_000 } },
+      { ok: { timeoutMs: 150_000, roundWallMs: 180_000 } },
+      { error: 'LUNA6: gpt-6-luna xhigh runs uncensored (owner 2026-09-24); --timeout-ms 120000 is refused (hang guard 1800000)' },
+      { error: 'LUNA6: gpt-6-luna xhigh runs uncensored (owner 2026-09-24); --round-wall-ms 180000 is refused (hang guard 1800000)' },
+      { error: LUNA6_MIXED },
+      { error: LUNA6_MIXED },
+    ]);
+  });
+
+  it('a lifted round hands the hang guard to the adapter and accepts a 200 s answer that the sol control censors', async () => {
+    const run = async (route: readonly string[]) => {
+      const directory = mkdtempSync(join(tmpdir(), 'dnd-luna6-w1-'));
+      const outPath = join(directory, 'w1.jsonl');
+      const adapter = new LunaWitnessAdapter();
+      let policyMs = 0;
+      const [row] = await runArena(parseArenaArgs([
+        '--rooms', '1', '--reps', '2', '--cells', '1:2', '--seed', '3943001', '--dry-run', '--cli', 'codex',
+        ...route, '--out', outPath, ...LEGACY_BLOCK_ARGS, ...ALL_OPTIONS_TEST_RENDERER_ARGS,
+      ]), {
+        adapter,
+        simulatedInProcessDispatchDelayMs: 0,
+        policyNow: () => policyMs,
+        onPrimaryResultObservedForTest: () => { policyMs = 200_000; },
+        heartbeat: () => undefined,
+      });
+      if (row === undefined) throw new Error('W1 arena run emitted no row.');
+      return { calls: adapter.records, row, callLog: luna6CallLog(outPath) };
+    };
+    const luna = await run(['--model', 'gpt-6-luna', '--effort', 'xhigh']);
+    const sol = await run([]);
+    expect({
+      luna: {
+        calls: luna.calls,
+        row: {
+          roundWallBudgetMs: luna.row.roundWallBudgetMs,
+          roundWallTimedOut: luna.row.roundWallTimedOut,
+          policyElapsedMs: luna.row.policyElapsedMs,
+          round: luna.row.round,
+        },
+        callLog: luna.callLog,
+      },
+      sol: {
+        calls: sol.calls,
+        row: {
+          outcome: sol.row.outcome,
+          roundWallTimedOut: sol.row.roundWallTimedOut,
+          policyElapsedMs: sol.row.policyElapsedMs,
+          refusals: sol.row.refusals,
+        },
+        callLogExists: sol.callLog !== 'absent',
+      },
+    }).toEqual({
+      luna: {
+        calls: [{
+          ...LUNA6_P1, model: 'gpt-6-luna', reasoningEffort: 'xhigh', timeoutMs: 1_800_000, signalAbortedAtCall: false,
+        }],
+        row: { roundWallBudgetMs: null, roundWallTimedOut: false, policyElapsedMs: 200_000, round: 2 },
+        callLog: [{
+          ...LUNA6_P1, model: 'gpt-6-luna', reasoningEffort: 'xhigh', timeoutMs: 1_800_000, cellKey: '1:2',
+          boundKind: 'hang_guard', exit: 'completed', hangGuardFired: false, elapsedMs: '<n>',
+        }],
+      },
+      sol: {
+        calls: [{
+          ...LUNA6_P1, model: 'gpt-5.6-sol', reasoningEffort: 'medium', timeoutMs: 120_000, signalAbortedAtCall: false,
+        }],
+        row: {
+          outcome: 'refused',
+          roundWallTimedOut: true,
+          policyElapsedMs: 180_000,
+          refusals: ['The conversation round dispatch deadline is exhausted.'],
+        },
+        callLogExists: false,
+      },
+    });
+  });
+
+  it('dm-mode adapter boundary: gpt-6-luna receives 1800000 while the sol control is clamped to the round wall', async () => {
+    const run = async (route: readonly string[]) => {
+      const directory = mkdtempSync(join(tmpdir(), 'dnd-luna6-w2-'));
+      const adapter = new LunaWitnessAdapter();
+      let policyMs = 0;
+      await runConversation(parseConversationArgs([
+        '--rooms', '1', '--rounds', '1', '--out', join(directory, 'w2.jsonl'),
+        '--dm-mode', 'advice', '--cli', 'codex', ...route, ...LEGACY_BLOCK_ARGS,
+      ]), {
+        adapter,
+        boardSnapshotService: new BlindArenaSnapshotService('luna6-w2'),
+        roomStates: [generateRoom(3_943_006).encounter.state],
+        simulatedInProcessDispatchDelayMs: 0,
+        policyNow: () => policyMs,
+        onPrimaryDispatchStart: () => { policyMs = 25; },
+      });
+      const [first] = adapter.records;
+      return first === undefined ? 'no adapter call' : {
+        dispatch: first.dispatch,
+        callPhase: first.callPhase,
+        bootstrapKind: first.bootstrapKind,
+        model: first.model,
+        reasoningEffort: first.reasoningEffort,
+        timeoutMs: first.timeoutMs,
+      };
+    };
+    expect({
+      luna: await run(['--model', 'gpt-6-luna', '--effort', 'high']),
+      sol: await run([]),
+    }).toEqual({
+      luna: { ...LUNA6_P1, model: 'gpt-6-luna', reasoningEffort: 'high', timeoutMs: 1_800_000 },
+      sol: { ...LUNA6_P1, model: 'gpt-5.6-sol', reasoningEffort: 'medium', timeoutMs: 179_975 },
+    });
+  });
+
+  it('every call of a lifted escalation round is logged at the adapter boundary in protocol order', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-luna6-w3-'));
+    const outPath = join(directory, 'w3.jsonl');
+    const [row] = await runArena(parseArenaArgs([
+      '--rooms', '1', '--reps', '1', '--seed', '3943001', '--out', outPath, '--dry-run', '--cli', 'codex',
+      '--model', 'gpt-6-luna', '--effort', 'xhigh', '--escalation-model', 'gpt-6-luna', '--escalation-effort', 'xhigh',
+      ...LEGACY_BLOCK_ARGS,
+    ]), {
+      invalidInitial: ['room-1-round-1'],
+      failCorrection: ['room-1-round-1'],
+      simulatedInProcessDispatchDelayMs: 0,
+      heartbeat: () => undefined,
+    });
+    expect({
+      callLog: luna6CallLog(outPath),
+      callsPerRound: row?.callsPerRound,
+      escalated: row?.escalated,
+    }).toEqual({
+      callLog: [LUNA6_P1, LUNA6_P3, LUNA6_P4].map((call) => ({
+        ...call, model: 'gpt-6-luna', reasoningEffort: 'xhigh', timeoutMs: 1_800_000, cellKey: '1:1',
+        boundKind: 'hang_guard', exit: 'completed', hangGuardFired: false, elapsedMs: '<n>',
+      })),
+      callsPerRound: 3,
+      escalated: true,
+    });
+  });
+
+  it('a hang-guard firing is logged with its phase, route and elapsed time and refuses the round as a timeout', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-luna6-w6-'));
+    const outPath = join(directory, 'w6.jsonl');
+    const adapter = new LunaWitnessAdapter({ timedOutPhases: ['initial'] });
+    const stderr = vi.spyOn(process.stderr, 'write');
+    try {
+      const [row] = await runArena(parseArenaArgs([
+        '--rooms', '1', '--reps', '1', '--seed', '3943001', '--dry-run', '--cli', 'codex',
+        '--model', 'gpt-6-luna', '--effort', 'xhigh', '--out', outPath, ...LEGACY_BLOCK_ARGS,
+      ]), { adapter, simulatedInProcessDispatchDelayMs: 0, heartbeat: () => undefined });
+      const fired = stderr.mock.calls
+        .map(([chunk]) => String(chunk))
+        .filter((line) => /^\[luna-hang-guard\]/u.test(line))
+        .map((line) => line.trimEnd().replace(/ run=\S+ /u, ' run=<runId> ').replace(/ elapsedMs=\d+$/u, ' elapsedMs=<n>'));
+      expect({
+        calls: adapter.records.map((call) => ({
+          dispatch: call.dispatch, callPhase: call.callPhase, bootstrapKind: call.bootstrapKind,
+        })),
+        callLog: luna6CallLog(outPath),
+        row: { outcome: row?.outcome, fallbackReason: row?.fallbackReason },
+        fired,
+      }).toEqual({
+        calls: [LUNA6_P1],
+        callLog: [{
+          ...LUNA6_P1, model: 'gpt-6-luna', reasoningEffort: 'xhigh', timeoutMs: 1_800_000, cellKey: '1:1',
+          boundKind: 'hang_guard', exit: 'timed_out', hangGuardFired: true, elapsedMs: '<n>',
+        }],
+        row: { outcome: 'refused', fallbackReason: 'timeout' },
+        fired: [
+          '[luna-hang-guard] FIRED run=<runId> cell=1:1 phase=initial model=gpt-6-luna effort=xhigh ' +
+          'timeoutMs=1800000 elapsedMs=<n>',
+        ],
+      });
+    } finally {
+      stderr.mockRestore();
+    }
+  });
+
+  it('a lifted blind round has no engine-side deadline and keeps its attempt timings', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-luna6-w7-'));
+    const outPath = join(directory, 'w7.jsonl');
+    const invocations: AgentInvocation[] = [];
+    const [row] = await runArena(parseArenaArgs([
+      '--rooms', '1', '--reps', '1', '--seed', '3943001', '--basis', 'standard', '--out', outPath, '--dry-run',
+      '--dm-mode', 'blind', '--blind-repair-arm', 'code_only', '--blind-facts', 'off',
+      '--cli', 'codex', '--model', 'gpt-6-luna', '--effort', 'xhigh',
+    ]), {
+      boardSnapshotServiceFactory: async () => new BlindArenaSnapshotService('luna6-lift'),
+      onAgentInvocation: (invocation) => { invocations.push(invocation); },
+      heartbeat: () => undefined,
+    });
+    const [first] = invocations;
+    const manifest = first === undefined
+      ? null
+      : objectValue(JSON.parse(readFileSync(first.launcherToken, 'utf8')) as unknown, 'W7 launcher manifest');
+    expect({
+      calls: luna6CallLog(outPath),
+      blindDeadlineUnixMs: manifest?.['blindDeadlineUnixMs'],
+      firstAttemptModelWallAtLeastDelay: Math.min(row?.blindAttempts?.[0]?.modelWallMs ?? -1, 50),
+    }).toEqual({
+      calls: [{
+        ...LUNA6_P7, model: 'gpt-6-luna', reasoningEffort: 'xhigh', timeoutMs: 1_800_000, cellKey: '1:1',
+        boundKind: 'hang_guard', exit: 'completed', hangGuardFired: false, elapsedMs: '<n>',
+      }],
+      blindDeadlineUnixMs: 9_007_199_254_740_991,
+      firstAttemptModelWallAtLeastDelay: 50,
+    });
+  });
+});

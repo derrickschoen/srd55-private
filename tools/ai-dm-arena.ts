@@ -68,6 +68,8 @@ import {
 import { BLIND_TURN_CONTEXT_MAX_BYTES } from '../src/vtt/blind-turn-context';
 import { BLIND_STATE_PRIMER_VERSION } from './ai-dm-board-snapshot';
 import type { OfferEnvironmentInput } from '../src/vtt/offers/build-offer-environment';
+import { lunaCallLogPath } from './luna-call-log';
+import { resolveSessionBounds, type SessionRoute } from './model-routes';
 
 export const ARENA_BASES = ['standard', 'hard', 'brutal', 'brutal-b', 'scenario', 'challenge'] as const;
 export type ArenaBasis = (typeof ARENA_BASES)[number];
@@ -94,7 +96,8 @@ interface ArenaArmBase {
 export type ArenaArm = ArenaArmBase & AgentInstructionSource;
 
 export interface ArenaExperimentPolicy {
-  readonly roundWallMs: 180000;
+  /** null: every route is gpt-6-luna, so the run has no shared round wall, only the per-call hang guard (LUNA6). */
+  readonly roundWallMs: 180000 | null;
   readonly basisDirectory: string | null;
 }
 
@@ -427,6 +430,7 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
   if (roundWallMs !== 180_000) {
     throw new TypeError('--round-wall-ms must be exactly 180000.');
   }
+  const explicitRoundWall = values.has('--round-wall-ms') ? roundWallMs : null;
   const basisDirectory = values.has('--basis-dir')
     ? resolve(cwd, values.get('--basis-dir') ?? '')
     : null;
@@ -643,6 +647,28 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
     if (rooms > 4) throw new RangeError('The challenge basis contains exactly four consecutive rooms.');
     if (generateMissingRooms) throw new TypeError('--generate-missing-rooms is unavailable for the closed challenge basis.');
   }
+  const model = localOpenAi?.model ?? values.get('--model') ?? (selectedCli === 'codex' ? 'gpt-5.6-sol' : 'sonnet');
+  const routesOf = (
+    base: SessionRoute,
+    escalation: { readonly model: string | null; readonly effort: string | null },
+  ): readonly SessionRoute[] => escalation.model === null || escalation.effort === null
+    ? [base]
+    : [base, { model: escalation.model, effort: escalation.effort }];
+  // LUNA6: every route an invocation can dispatch, the arms' own when --arm is given (runArena runs arms, not the base).
+  const arenaRoutes = arms.length === 0
+    ? routesOf({ model, effort }, { model: escalationModel, effort: escalationEffort })
+    : arms.flatMap((arm) => routesOf(
+        { model: arm.model, effort: arm.effort },
+        { model: arm.escalationModel ?? escalationModel, effort: arm.escalationEffort ?? escalationEffort },
+      ));
+  const bounds = resolveSessionBounds({
+    routes: arenaRoutes,
+    path: dmModeExplicit ? 'dm_mode' : 'legacy',
+    explicitTimeoutMs: values.has('--timeout-ms')
+      ? positiveInteger(values.get('--timeout-ms') ?? '', '--timeout-ms')
+      : null,
+    explicitRoundWall,
+  });
   return {
     offerEnvironment: { kind: 'configuration', mode: 'legacy_standard' },
     dmMode: dmMode as DmMode,
@@ -664,7 +690,7 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
     seed,
     cli: selectedCli,
     decisionTransport: transport as ConversationTransport,
-    model: localOpenAi?.model ?? values.get('--model') ?? (selectedCli === 'codex' ? 'gpt-5.6-sol' : 'sonnet'),
+    model,
     effort: effort as ConversationEffort,
     escalationModel,
     escalationEffort: escalationEffort as ConversationEffort | null,
@@ -672,7 +698,7 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
     dryRun,
     cwd: resolve(cwd),
     cliBin: values.get('--cli-bin') ?? (selectedCli === 'codex' ? 'codex' : selectedCli === 'claude-code' ? 'claude' : ''),
-    timeoutMs: positiveInteger(values.get('--timeout-ms') ?? (dmModeExplicit ? '240000' : '120000'), '--timeout-ms'),
+    timeoutMs: bounds.timeoutMs,
     ...instructionSource,
     reactionAskDefault,
     basis: basis as ArenaBasis,
@@ -682,7 +708,7 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
     generateMissingRooms,
     localOpenAi,
     boardImageMode: boardImageMode as BoardImageMode,
-    experimentPolicy: { roundWallMs: 180_000, basisDirectory },
+    experimentPolicy: { roundWallMs: bounds.roundWallMs, basisDirectory },
     armInstructions,
   };
 }
@@ -818,11 +844,10 @@ export function arenaRows(
   seeds: readonly number[],
 ): readonly ArenaRow[] {
   return rows.map((row): ArenaRow => {
-    const restrictedWall = row.roundWallTimedOut
-      ? config.experimentPolicy.roundWallMs
-      : row.policyElapsedMs;
-    if (!Number.isFinite(restrictedWall) || restrictedWall < 0 ||
-      restrictedWall > config.experimentPolicy.roundWallMs) {
+    const registeredWall = config.experimentPolicy.roundWallMs;
+    const restrictedWall = row.roundWallTimedOut ? registeredWall : row.policyElapsedMs;
+    if (restrictedWall === null || !Number.isFinite(restrictedWall) || restrictedWall < 0 ||
+      (registeredWall !== null && restrictedWall > registeredWall)) {
       throw new RangeError('Arena restricted wall must be within the registered round wall.');
     }
     const arenaRow: ArenaRow = {
@@ -931,6 +956,8 @@ export async function runArena(
         : await boardSnapshotServiceFactory(outputDirectory);
     }
     let rows: readonly ArenaRow[];
+    // LUNA6: each cell's own outPath is a temporary file, so every cell logs to the invocation's call log.
+    const lunaCellOptions = { lunaCallLogPath: lunaCallLogPath(config.outPath) } as const;
     if (!config.interleave) {
     const temporaryDirectory = await mkdtemp(join(tmpdir(), 'dnd-ai-dm-arena-independent-'));
     const independent: ArenaRow[] = [];
@@ -948,6 +975,7 @@ export async function runArena(
           scheduledCellKey: `${String(room)}:${String(rep)}`,
         }), {
           ...conversationOptions,
+          ...lunaCellOptions,
           ...(snapshotService === null ? {} : { boardSnapshotService: snapshotService }),
           rendererEvidenceCache,
           roomStates: [states[room - 1]!],
@@ -991,6 +1019,7 @@ export async function runArena(
             instruction: arm,
           }), {
             ...conversationOptions,
+            ...lunaCellOptions,
             ...(snapshotService === null ? {} : { boardSnapshotService: snapshotService }),
             rendererEvidenceCache,
             ...(adapterByArm?.[arm.label] === undefined ? {} : { adapter: adapterByArm[arm.label] }),

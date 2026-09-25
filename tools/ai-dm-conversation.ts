@@ -39,6 +39,7 @@ import {
   AgentDispatchDeadlineExceededError,
   AgentSessionLifecycle,
   createConversationRoundDeadline,
+  createUnboundedRoundDeadline,
   type AgentDispatchDeadline,
 } from '../src/vtt/agent-session-lifecycle';
 import { AGENT_ADAPTER_VERSION, resolveAgentAdapter } from '../src/vtt/agent-adapters';
@@ -250,6 +251,8 @@ import {
   BOARD_GLYPH_PRIMER,
   GENERAL_PRIMER,
 } from './ai-dm-screenshot-probe';
+import { lunaCallLogPath, lunaCallLogSink, withLunaCallLog } from './luna-call-log';
+import { resolveSessionBounds } from './model-routes';
 
 export const CONVERSATION_CLIS = ['codex', 'claude-code', 'local-openai'] as const;
 export type ConversationCli = (typeof CONVERSATION_CLIS)[number];
@@ -310,7 +313,8 @@ interface ConversationConfigBase {
   readonly cwd: string;
   readonly cliBin: string;
   readonly timeoutMs: number;
-  readonly roundWallMs: number;
+  /** null: a gpt-6-luna run with no shared round wall, only the per-call hang guard (LUNA6, D890 (a)). */
+  readonly roundWallMs: number | null;
   readonly reactionAskDefault: UnattendedReactionAskDefault;
   readonly captureRlData: boolean;
   readonly localOpenAi: LocalOpenAiConfig | null;
@@ -766,7 +770,7 @@ interface ConversationRowBase {
   readonly timeToFirstAction: number;
   readonly endToEndWall: number;
   readonly wallPerCreature: number;
-  readonly roundWallBudgetMs: number;
+  readonly roundWallBudgetMs: number | null;
   readonly roundWallTimedOut: boolean;
   readonly policyElapsedMs: number;
   readonly tokens: ConversationTokenCounts;
@@ -977,6 +981,8 @@ export interface ConversationRunOptions {
   ) => ScriptedPartyPlan;
   /** Explicit sitting boundary; omitted means the sitting remains resumable. */
   readonly endSession?: boolean;
+  /** LUNA6 call-log file for a lifted (gpt-6-luna) run; the arena passes one path for all of its cells. */
+  readonly lunaCallLogPath?: string;
   /** Test-only monotonic clock for the restricted per-round policy wall. */
   readonly policyNow?: () => number;
   /** Test-only producer seam for mutation-testing the round-deadline origin. */
@@ -1234,6 +1240,21 @@ export function parseConversationArgs(argv: readonly string[], cwd = process.cwd
     instructionSource.kbPath !== resolve(cwd, D569_AI_DM_KB_ROOT))) {
     throw new TypeError('Explicit D569 DM modes require the shared D570 knowledge bundle.');
   }
+  const model = localOpenAi?.model ?? values.get('--model') ?? (selectedCli === 'codex' ? 'gpt-5.6-sol' : 'sonnet');
+  const conversationRoutes = [
+    { model, effort },
+    ...(escalationModel === null || escalationEffort === null
+      ? []
+      : [{ model: escalationModel, effort: escalationEffort }]),
+  ];
+  const bounds = resolveSessionBounds({
+    routes: conversationRoutes,
+    path: dmModeExplicit ? 'dm_mode' : 'legacy',
+    explicitTimeoutMs: values.has('--timeout-ms')
+      ? positiveInteger(values.get('--timeout-ms') ?? '', '--timeout-ms')
+      : null,
+    explicitRoundWall: null,
+  });
   return {
     offerEnvironment: { kind: 'configuration', mode: 'legacy_standard' },
     dmMode: dmMode as DmMode,
@@ -1254,7 +1275,7 @@ export function parseConversationArgs(argv: readonly string[], cwd = process.cwd
     rounds: positiveInteger(values.get('--rounds') ?? values.get('--reps') ?? '1', '--rounds'),
     cli: selectedCli,
     decisionTransport: transport as ConversationTransport,
-    model: localOpenAi?.model ?? values.get('--model') ?? (selectedCli === 'codex' ? 'gpt-5.6-sol' : 'sonnet'),
+    model,
     effort: effort as ConversationEffort,
     escalationModel,
     escalationEffort: escalationEffort as ConversationEffort | null,
@@ -1262,8 +1283,8 @@ export function parseConversationArgs(argv: readonly string[], cwd = process.cwd
     dryRun,
     cwd: resolve(cwd),
     cliBin: values.get('--cli-bin') ?? (selectedCli === 'codex' ? 'codex' : selectedCli === 'claude-code' ? 'claude' : ''),
-    timeoutMs: positiveInteger(values.get('--timeout-ms') ?? (dmModeExplicit ? '240000' : '120000'), '--timeout-ms'),
-    roundWallMs: 180_000,
+    timeoutMs: bounds.timeoutMs,
+    roundWallMs: bounds.roundWallMs,
     ...instructionSource,
     reactionAskDefault,
     captureRlData,
@@ -4356,7 +4377,15 @@ async function runConversationWithConfiguredIntel(
         },
       }));
   if (selectedAdapter.kind !== config.cli) throw new Error('Configured CLI and agent adapter kind disagree.');
-  const adapter = new ModelCallBookkeepingAdapter(selectedAdapter);
+  // LUNA6: a lifted run logs every call at the adapter boundary, under the cell of the round that dispatched it.
+  let lunaCallCellKey = config.scheduledCellKey ?? '1:1';
+  const adapter = new ModelCallBookkeepingAdapter(config.roundWallMs === null
+    ? withLunaCallLog(
+        selectedAdapter,
+        lunaCallLogSink(options.lunaCallLogPath ?? lunaCallLogPath(config.outPath)),
+        { cellKey: () => lunaCallCellKey },
+      )
+    : selectedAdapter);
   const rows: ConversationRow[] = [];
   let capsuleRevision = 1;
   const offerEnvironment = buildOfferEnvironment(config.offerEnvironment);
@@ -4420,6 +4449,7 @@ async function runConversationWithConfiguredIntel(
     }
 
     for (let round = 1; round <= config.rounds; round += 1) {
+      lunaCallCellKey = config.scheduledCellKey ?? `${String(room)}:${String(round)}`;
       const generationBeforeRound = journal.agentSession()?.generation ?? 0;
       const endToEndStarted = clock();
       const modelCallsBeforeRound = adapter.modelCalls;
@@ -4549,7 +4579,9 @@ async function runConversationWithConfiguredIntel(
           };
         }
       }
-      const blindDeadlineUnixMs = Date.now() + config.timeoutMs;
+      const blindRoundStartedUnixMs = Date.now();
+      // LUNA6: a lifted run gives the engine no blind deadline (a finite value it never reaches, and no timer).
+      const blindDeadlineUnixMs = config.roundWallMs === null ? Number.MAX_SAFE_INTEGER : blindRoundStartedUnixMs + config.timeoutMs;
       const writeInitialLauncher = (name: string) => writeLauncher({
         rendererProfile: config.rendererProfile,
         turnContextMaximumBytes: config.turnContextMaximumBytes,
@@ -5559,11 +5591,9 @@ async function runConversationWithConfiguredIntel(
         }
       };
       const roundStarted = policyNow();
-      const roundDeadline = (options.roundDeadlineFactory ?? createConversationRoundDeadline)(
-        config.roundWallMs,
-        roundStarted,
-        policyNow,
-      );
+      const roundDeadline = config.roundWallMs === null
+        ? createUnboundedRoundDeadline()
+        : (options.roundDeadlineFactory ?? createConversationRoundDeadline)(config.roundWallMs, roundStarted, policyNow);
       try {
         if (options.failBeforeDispatch?.includes(key) === true) {
           throw new Error('SIMULATED host failure before agent dispatch.');
@@ -7163,9 +7193,9 @@ async function runConversationWithConfiguredIntel(
       if (policyClassifiedAtMs === null) classifyPolicy();
       const wall = clock() - started;
       const endToEndWall = clock() - endToEndStarted;
-      const policyElapsedMs = roundWallTimedOut
+      const policyElapsedMs = roundWallTimedOut && config.roundWallMs !== null
         ? config.roundWallMs
-        : Math.min(config.roundWallMs, Math.max(0, (policyClassifiedAtMs ?? roundStarted) - roundStarted));
+        : Math.min(config.roundWallMs ?? Number.POSITIVE_INFINITY, Math.max(0, (policyClassifiedAtMs ?? roundStarted) - roundStarted));
       const binding = journal.agentSession();
       rowTurnContext = takeTurnContext(
         activeInitialSpools.context,
@@ -7354,7 +7384,7 @@ async function runConversationWithConfiguredIntel(
           ? null
           : blindRoundIntentEnvelopeSchema.safeParse(finalSubmission.envelope);
         const parsedIntents = finalParsed?.success === true ? finalParsed.data.intents : null;
-        const attemptBaseline = blindDeadlineUnixMs - config.timeoutMs;
+        const attemptBaseline = blindRoundStartedUnixMs;
         let priorAttemptEnd = attemptBaseline;
         const blindAttempts = submissions.map((submission): ConversationBlindAttempt => {
           const parsed = blindRoundIntentEnvelopeSchema.safeParse(submission.envelope);

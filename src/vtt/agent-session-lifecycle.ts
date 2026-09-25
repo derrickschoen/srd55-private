@@ -87,6 +87,22 @@ export function createConversationRoundDeadline(
   };
 }
 
+/**
+ * LUNA6 (D890 (a); owner 2026-09-24 18:58): a round with no shared wall. Its signal never aborts and every completion
+ * counts; each dispatch keeps the invocation's own per-call timeout, which must be present (the 30 min hang guard).
+ */
+export function createUnboundedRoundDeadline(): AgentDispatchDeadline {
+  const signal = new AbortController().signal;
+  return {
+    signal,
+    dispatch(invocation): AgentDispatchBudget {
+      if (invocation.timeoutMs === null) throw new RangeError('An unbounded round requires a per-call hang guard.');
+      return { kind: 'open', timeoutMs: invocation.timeoutMs, invocation };
+    },
+    acceptsCompletion: () => true,
+  };
+}
+
 function finiteNow(now: () => number): number {
   const value = now();
   if (!Number.isFinite(value)) throw new RangeError('Conversation round clock must be finite.');

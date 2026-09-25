@@ -1725,3 +1725,113 @@ describe('D519 screenshot comprehension schema and CLI', () => {
     }
   });
 });
+
+import { tmpdir } from 'node:os';
+import { chmodSync, existsSync, readFileSync } from '../../helpers/test-filesystem';
+import { codexScreenshotAnswerer } from '../../../tools/ai-dm-screenshot-probe';
+import { lunaCallLogSink, reconcileLunaCallLog } from '../../../tools/luna-call-log';
+
+const LUNA6_SCREENSHOT_ARGS = [
+  '--states', '1', '--seed', '1', '--images-root', 'dnd-slim-runs/luna6-lift-parse-images',
+  '--out', 'dnd-slim-runs/luna6-lift-parse.jsonl', '--generation', 'luna6-lift',
+  '--models', 'gpt-6-luna:xhigh,gpt-5.6-sol:high',
+] as const;
+
+describe('LUNA6 Luna lift wiring', () => {
+  // LUNA6 (D890; owner 2026-09-24 18:58 "gpt-6-luna only"): each screenshot entry gets its own per-call bound.
+  it('screenshot probe parser gives gpt-6-luna entries the 30 min hang guard and refuses a shorter --timeout-ms', () => {
+    const timeouts = (args: readonly string[]) => {
+      try {
+        return {
+          ok: Object.fromEntries(parseScreenshotProbeArgs([...LUNA6_SCREENSHOT_ARGS, ...args]).models
+            .map((entry) => [`${entry.model}:${entry.effort}`, entry.timeoutMs])),
+        };
+      } catch (error) {
+        return { error: error instanceof Error ? error.message : String(error) };
+      }
+    };
+    expect([
+      timeouts([]),
+      timeouts(['--timeout-ms', '1800000']),
+      timeouts(['--timeout-ms', '300000']),
+    ]).toEqual([
+      { ok: { 'gpt-6-luna:xhigh': 1_800_000, 'gpt-5.6-sol:high': null } },
+      { ok: { 'gpt-6-luna:xhigh': 1_800_000, 'gpt-5.6-sol:high': 1_800_000 } },
+      { error: 'LUNA6: gpt-6-luna xhigh runs uncensored (owner 2026-09-24); --timeout-ms 300000 is refused (hang guard 1800000)' },
+    ]);
+  });
+
+  it('screenshot probe kills a CLI call that exceeds its timeout, records timed_out and logs it', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'dnd-luna6-screenshot-kill-'));
+    const cli = join(directory, 'fake-codex.sh');
+    const pidPath = `${cli}.pid`;
+    const logPath = join(directory, 'calls.jsonl');
+    let pid: number | null = null;
+    try {
+      await writeFile(cli, '#!/bin/sh\necho $$ > "$0.pid"\nexec sleep 10\n', 'utf8');
+      chmodSync(cli, 0o755);
+      const answer = codexScreenshotAnswerer({ cliBin: cli, timeoutMs: 300, onCall: lunaCallLogSink(logPath) })
+        .answer({
+          model: 'gpt-6-luna',
+          effort: 'xhigh',
+          question: 'Q4',
+          prompt: 'LUNA6 hang-guard witness',
+          schemaPath: join(directory, 'schema.json'),
+          imagePath: null,
+          truth: { version: 'd576-screenshot-comprehension-v2', question: 'Q4', cells: [] },
+        });
+      const settled = await Promise.race([
+        answer.then((result) => ({ status: result.status, error: result.error })),
+        new Promise<'unsettled after 3000 ms'>((resolvePromise) => {
+          setTimeout(() => resolvePromise('unsettled after 3000 ms'), 3_000);
+        }),
+      ]);
+      pid = existsSync(pidPath) ? Number(readFileSync(pidPath, 'utf8').trim()) : null;
+      let childGone: boolean | 'no pid file' = 'no pid file';
+      if (pid !== null) {
+        try {
+          process.kill(pid, 0);
+          childGone = false;
+        } catch {
+          childGone = true;
+        }
+      }
+      expect({
+        settled,
+        childGone,
+        records: existsSync(logPath)
+          ? reconcileLunaCallLog(readFileSync(logPath, 'utf8').split('\n')).map((record) => ({
+              surface: record.surface,
+              model: record.model,
+              reasoningEffort: record.reasoningEffort,
+              timeoutMs: record.timeoutMs,
+              boundKind: record.boundKind,
+              exit: record.exit,
+              hangGuardFired: record.hangGuardFired,
+            }))
+          : 'absent',
+      }).toEqual({
+        settled: { status: 'timed_out', error: 'codex timed out after 300 ms' },
+        childGone: true,
+        records: [{
+          surface: 'screenshot_cli',
+          model: 'gpt-6-luna',
+          reasoningEffort: 'xhigh',
+          timeoutMs: 300,
+          boundKind: 'shorter_than_guard',
+          exit: 'timed_out',
+          hangGuardFired: false,
+        }],
+      });
+    } finally {
+      if (pid !== null) {
+        try {
+          process.kill(pid, 'SIGKILL');
+        } catch {
+          // Already gone: the expected case.
+        }
+      }
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+});
