@@ -5969,7 +5969,11 @@ async function runConversationWithConfiguredIntel(
           blindIntent: escalationLauncher.blindIntentSpoolPath,
           blindIngress: escalationLauncher.blindIngressSpoolPath,
         };
-        const escalationToolSession = config.cli !== 'local-openai' || escalationLauncher === null
+        // The escalation leg gets the in-process DM tool session under the same condition as the correction leg
+        // above: a local-openai run, or a test's simulated in-process dispatch (LUNA6 review r1: without it the
+        // simulated escalation leg spawned a real MCP child).
+        const escalationToolSession = escalationLauncher === null ||
+          (config.cli !== 'local-openai' && options.simulatedInProcessDispatchDelayMs === undefined)
           ? undefined
           : inProcessDmToolSession({
               state: engineSession.currentState(),
