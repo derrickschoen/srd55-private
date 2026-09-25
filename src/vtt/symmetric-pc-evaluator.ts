@@ -6,6 +6,7 @@ import {
 import { minimumSpaceLine } from '../combat/creature-space';
 import type { AppliedCondition } from '../combat/conditions';
 import type { Controller, ControllerDecision, ControllerRequest } from '../combat/controllers';
+import type { TurnAttackForms } from '../combat/coordinator';
 import type { EncounterCommand } from '../combat/events';
 import { feet, type CombatantId } from '../combat/values';
 import {
@@ -49,8 +50,30 @@ export type SymmetricPcTacticalAssessment =
   | { readonly status: 'evaluated'; readonly evaluation: TacticalAttackEvaluation }
   | { readonly status: 'unresolved'; readonly reason: SymmetricPcUnavailableReason };
 
+type AttackCommand = Extract<EncounterCommand, { readonly type: 'attack' }>;
+
+/**
+ * Where the attack profiles that assess the PC's moves came from.
+ * - `legal_attack`: the canonical-first legal attack command against a
+ *   perceived target, as before.
+ * - `own_attack_forms`: no legal attack command targets a perceived creature,
+ *   so the PC's own attack forms (TurnAttackForms, built by the same code as
+ *   its attack commands) against the target the canonical-first form command
+ *   attacks. Owner ruling 2026-09-24, verbatim: "when no attack is legal,
+ *   movement planning evaluates candidate squares with the PC's own attack
+ *   forms (best expected damage across its attacks, AC + cover included), so
+ *   approach squares with a clear shot win."
+ */
+export type SymmetricPcMovementProfileSource = 'legal_attack' | 'own_attack_forms';
+
 export type SymmetricPcMovementAssessment =
-  | { readonly status: 'evaluated'; readonly evaluation: MovementEvaluation }
+  | {
+      readonly status: 'evaluated';
+      readonly profileSource: SymmetricPcMovementProfileSource;
+      /** The attack command whose profile gave the move's destination its assessment. */
+      readonly attack: AttackCommand;
+      readonly evaluation: MovementEvaluation;
+    }
   | { readonly status: 'unresolved'; readonly reason: SymmetricPcUnavailableReason };
 
 /** A command's preference class; 0 is the most preferred. Every command kind shares this one scale. */
@@ -241,25 +264,96 @@ function movementRequest(
   };
 }
 
+function inCanonicalOrder<T>(values: readonly T[]): readonly T[] {
+  return values
+    .map((value) => ({ value, key: canonicalJson(value) }))
+    .sort((left, right) => left.key.localeCompare(right.key))
+    .map((entry) => entry.value);
+}
+
+interface MovementProfile {
+  readonly attack: AttackCommand;
+  readonly evaluation: MovementEvaluation;
+}
+
+/** One decision's attack profiles for its moves, in the canonical order of their attack commands. */
+interface MovementProfiles {
+  readonly source: SymmetricPcMovementProfileSource;
+  readonly profiles: readonly MovementProfile[];
+}
+
 /**
- * The projected movement options of one decision. They depend on the state, the
- * actor's projection and the perceived attack profile, never on which move
- * command is being ranked, so a decision asks once, at its first move command,
- * and every move command shares the answer.
+ * The attack profiles every move of one decision is assessed with. A legal
+ * attack command against a perceived target supplies the one profile, the
+ * canonical-first such command. With none, the PC's own attack forms do:
+ * the target is the one the canonical-first form command attacks (the same
+ * canonical-text rule, applied to the commands the forms would build), and
+ * every distinct profile of the forms against that target is evaluated.
  */
-function movementAssessment(
+function movementProfiles(
   state: EncounterState,
   projection: ActorKnowledgeProjection,
-  attacks: readonly Extract<EncounterCommand, { readonly type: 'attack' }>[],
+  actorId: CombatantId,
+  attacks: readonly AttackCommand[],
+  attackForms: TurnAttackForms,
+): MovementProfiles | null {
+  const legal = inCanonicalOrder(attacks.filter((attack) => projectedTarget(projection, attack.target) !== null));
+  const profileSource: SymmetricPcMovementProfileSource = legal.length > 0 ? 'legal_attack' : 'own_attack_forms';
+  const forms = legal.length > 0
+    ? legal.slice(0, 1)
+    : inCanonicalOrder(projection.targets.flatMap((target) =>
+        target.kind === 'perceived' ? attackForms(state, actorId, target.targetId) : []));
+  const target = forms[0]?.target;
+  const evaluated = new Set<string>();
+  const profiles: MovementProfile[] = [];
+  for (const attack of forms) {
+    if (attack.target !== target) continue;
+    const request = movementRequest(state, attack);
+    const requestKey = canonicalJson(request);
+    if (evaluated.has(requestKey)) continue;
+    evaluated.add(requestKey);
+    const evaluation = projectedMovementOptions(state, projection, request);
+    if (evaluation !== null) profiles.push({ attack, evaluation });
+  }
+  return profiles.length === 0 ? null : { source: profileSource, profiles };
+}
+
+type MovementCandidate = MovementEvaluation['candidates'][number];
+
+/** The evaluated movement candidate at the move's destination, when the evaluation has one. */
+function destinationCandidate(
+  command: Extract<EncounterCommand, { readonly type: 'move' }>,
+  evaluation: MovementEvaluation,
+): MovementCandidate | null {
+  const destination = command.path.at(-1);
+  if (destination === undefined) return null;
+  return evaluation.candidates.find((entry) =>
+    entry.destination.column === destination.column && entry.destination.row === destination.row) ?? null;
+}
+
+/**
+ * Each profile assesses the move's destination as the evaluator ranks moves:
+ * bucket first, then expected damage. The move takes the best of those
+ * assessments (the first profile on a tie), so among squares of one bucket
+ * the best expected damage across the PC's attacks decides.
+ */
+function movementAssessment(
+  command: Extract<EncounterCommand, { readonly type: 'move' }>,
+  movement: MovementProfiles | null,
 ): SymmetricPcMovementAssessment {
-  const profile = attacks
-    .filter((attack) => projectedTarget(projection, attack.target) !== null)
-    .sort((left, right) => canonicalJson(left).localeCompare(canonicalJson(right)))[0];
-  if (profile === undefined) return { status: 'unresolved', reason: 'movement_profile_unavailable' };
-  const evaluation = projectedMovementOptions(state, projection, movementRequest(state, profile));
-  return evaluation === null
-    ? { status: 'unresolved', reason: 'movement_profile_unavailable' }
-    : { status: 'evaluated', evaluation };
+  if (movement === null) return { status: 'unresolved', reason: 'movement_profile_unavailable' };
+  let best: { readonly profile: MovementProfile; readonly candidate: MovementCandidate | null } | null = null;
+  for (const profile of movement.profiles) {
+    const candidate = destinationCandidate(command, profile.evaluation);
+    if (best === null || compareDestination(candidate, best.candidate) < 0) best = { profile, candidate };
+  }
+  if (best === null) throw new Error('A resolved movement assessment has at least one profile.');
+  return {
+    status: 'evaluated',
+    profileSource: movement.source,
+    attack: best.profile.attack,
+    evaluation: best.profile.evaluation,
+  };
 }
 
 function concentrationRequired(value: unknown): boolean {
@@ -322,20 +416,6 @@ function tacticalRank(value: SymmetricPcTacticalAssessment): 1 | 2 | 4 | 5 | 6 {
   }
 }
 
-type MovementCandidate = MovementEvaluation['candidates'][number];
-
-/** The evaluated movement candidate at the move's destination, when the evaluation has one. */
-function destinationCandidate(
-  command: Extract<EncounterCommand, { readonly type: 'move' }>,
-  value: SymmetricPcMovementAssessment,
-): MovementCandidate | null {
-  if (value.status === 'unresolved') return null;
-  const destination = command.path.at(-1);
-  if (destination === undefined) return null;
-  return value.evaluation.candidates.find((entry) =>
-    entry.destination.column === destination.column && entry.destination.row === destination.row) ?? null;
-}
-
 function movementRank(candidate: MovementCandidate | null): 0 | 3 | 6 | 7 {
   if (candidate?.semantic.status !== 'resolved') return 7;
   switch (candidate.semantic.kind) {
@@ -371,7 +451,7 @@ function commandOrder(
     ({ bucket, unassessedKind, destinationDamage: { kind: 'not_a_move' } });
   if (command.type === 'attack' && tactical !== null) return notAMove(tacticalRank(tactical));
   if (command.type === 'move' && movement !== null) {
-    const candidate = destinationCandidate(command, movement);
+    const candidate = movement.status === 'evaluated' ? destinationCandidate(command, movement.evaluation) : null;
     return { bucket: movementRank(candidate), unassessedKind: 0, destinationDamage: destinationDamage(candidate) };
   }
   if (command.type === 'cast_spell') {
@@ -400,6 +480,12 @@ function compareDestinationDamage(left: SymmetricPcDestinationDamage, right: Sym
   return destinationDamageClass(left) - destinationDamageClass(right);
 }
 
+/** A destination's order among squares: bucket, then expected damage. */
+function compareDestination(left: MovementCandidate | null, right: MovementCandidate | null): number {
+  return movementRank(left) - movementRank(right) ||
+    compareDestinationDamage(destinationDamage(left), destinationDamage(right));
+}
+
 function compareRank(left: SymmetricPcRank, right: SymmetricPcRank): number {
   return left[0] - right[0] || left[1] - right[1] || left[2].localeCompare(right[2]) ||
     compareDestinationDamage(left[3], right[3]) || left[4].localeCompare(right[4]);
@@ -410,28 +496,36 @@ function compareRank(left: SymmetricPcRank, right: SymmetricPcRank): number {
  * supplies an opponent fact to a tactical decision; it is passed to the
  * projected movement provider only through its projection-restricted entrypoint,
  * which takes exactly one opponent fact from it: the target's Armor Class
- * (owner ruling 2026-09-24, see projectedMovementOptions).
+ * (owner ruling 2026-09-24, see projectedMovementOptions). `attackForms` is
+ * the PC's own attack forms from the same source as `legalActions`; moves are
+ * planned with them when no legal attack targets a perceived creature.
  */
 export function evaluateSymmetricPcDecision(input: {
   readonly state: EncounterState;
   readonly actorId: CombatantId;
   readonly legalActions: readonly EncounterCommand[];
+  readonly attackForms: TurnAttackForms;
 }): SymmetricPcDecision {
   actor(input.state, input.actorId);
   const actorKnowledge = projectActorKnowledge(input.state, input.actorId);
   const legal = input.legalActions.filter((command) => 'actor' in command && command.actor === input.actorId);
   if (legal.length === 0) throw new Error(`Symmetric PC evaluator has no legal actions for ${String(input.actorId)}.`);
-  const attacks = legal.filter((command): command is Extract<EncounterCommand, { readonly type: 'attack' }> =>
-    command.type === 'attack');
-  // Asked at the first move command, so commands are still assessed in legal
-  // order; every later move command of this decision shares that answer.
-  let sharedMovement: SymmetricPcMovementAssessment | null = null;
+  const attacks = legal.filter((command): command is AttackCommand => command.type === 'attack');
+  // Every move of the decision is assessed with the same profiles, so they are
+  // evaluated once, when the first move needs them.
+  let profiles: { readonly value: MovementProfiles | null } | null = null;
+  const decisionProfiles = (): MovementProfiles | null => {
+    profiles ??= {
+      value: movementProfiles(input.state, actorKnowledge, input.actorId, attacks, input.attackForms),
+    };
+    return profiles.value;
+  };
   const evaluated = legal.map((command) => {
     const tactical = command.type === 'attack'
       ? tacticalAssessment(input.state, actorKnowledge, command)
       : null;
     const movement = command.type === 'move'
-      ? (sharedMovement ??= movementAssessment(input.state, actorKnowledge, attacks))
+      ? movementAssessment(command, decisionProfiles())
       : null;
     const concentration = command.type === 'cast_spell'
       ? concentrationAssessment(input.state, command)
@@ -484,7 +578,10 @@ export function evaluateSymmetricPcDecision(input: {
 export class SymmetricEvaluatorPcController implements Controller {
   readonly controllerKind = 'custom' as const;
 
-  constructor(private readonly stateForRequest: () => EncounterState) {}
+  constructor(
+    private readonly stateForRequest: () => EncounterState,
+    private readonly attackForms: TurnAttackForms,
+  ) {}
 
   async choose(request: ControllerRequest, signal: AbortSignal): Promise<ControllerDecision> {
     if (signal.aborted) throw new Error('Symmetric PC controller request was cancelled.');
@@ -495,7 +592,10 @@ export class SymmetricEvaluatorPcController implements Controller {
       return { requestId: request.requestId, encounterRevision: request.encounterRevision, action };
     }
     const decision = evaluateSymmetricPcDecision({
-      state: this.stateForRequest(), actorId: request.actorId, legalActions: request.legalActions.actions,
+      state: this.stateForRequest(),
+      actorId: request.actorId,
+      legalActions: request.legalActions.actions,
+      attackForms: this.attackForms,
     });
     return {
       requestId: request.requestId,

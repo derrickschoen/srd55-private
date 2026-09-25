@@ -5,7 +5,7 @@ import type { EncounterEvent } from '../combat/events';
 import { mulberry32, type Rng } from '../combat/random';
 import type { CombatantId } from '../combat/values';
 import { composeD365Room } from './d365-sample-dungeon';
-import type { LoadedPartyMember } from './party-pack';
+import { loadedPartyAttackForms, type LoadedPartyMember } from './party-pack';
 import {
   capturePartySessionState,
   createPartySessionState,
@@ -138,13 +138,16 @@ async function runFight(
 ): Promise<{ readonly state: EncounterState; readonly measurement: SurvivalFightMeasurement }> {
   const entering = hitPointsByName(encounter.state);
   let coordinator: TurnCoordinator | null = null;
+  // Every stored-character composer lists its members' attack commands through
+  // loadedPartyTurnLegalActions(members), which these forms pair with.
+  const attackForms = loadedPartyAttackForms(encounter.members);
   const registry = new ControllerRegistry(encounter.state.combatants.map((candidate) => ({
     combatantId: candidate.profile.id,
     controller: candidate.profile.kind === 'player_character' && pcDecisionPolicy === 'symmetric_evaluator_v1'
       ? new SymmetricEvaluatorPcController(() => {
           if (coordinator === null) throw new Error('Survival PC evaluator was asked before coordinator creation.');
           return coordinator.state();
-        })
+        }, attackForms)
       : new AlgorithmController(),
   })));
   coordinator = new TurnCoordinator(

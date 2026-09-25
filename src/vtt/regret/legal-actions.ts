@@ -1,4 +1,5 @@
 import type { LegalActionSummary } from '../../combat/controllers';
+import type { TurnAttackForms } from '../../combat/coordinator';
 import { combatantsAreAllies } from '../../combat/allies';
 import { combatantSpace, combatantSpaceAt, type EncounterState } from '../../combat/encounter';
 import { minimumSpaceDistance, spacesIntersect } from '../../combat/creature-space';
@@ -76,6 +77,16 @@ function decodedMonsterAttacks(
 function genericAttack(
   actor: CombatantId,
   target: CombatantId,
+  opportunity: false,
+): Extract<EncounterCommand, { readonly type: 'attack' }>;
+function genericAttack(
+  actor: CombatantId,
+  target: CombatantId,
+  opportunity: boolean,
+): Extract<EncounterCommand, { readonly type: 'attack' | 'opportunity_attack' }>;
+function genericAttack(
+  actor: CombatantId,
+  target: CombatantId,
   opportunity: boolean,
 ): Extract<EncounterCommand, { readonly type: 'attack' | 'opportunity_attack' }> {
   return {
@@ -119,6 +130,19 @@ function attacksAgainst(
     ? [genericAttack(actor, target, options.opportunity)]
     : [];
 }
+
+/**
+ * The attack forms attacksAgainst builds from, paired with
+ * regretTurnLegalActions: an actor's statblock attacks at their normal-range
+ * roll mode or, for an actor with none (every player character), the generic
+ * weapon attack. No range filter.
+ */
+export const regretAttackForms: TurnAttackForms = (state, actor, target) => {
+  const statblockAttacks = decodedMonsterAttacks(state, actor);
+  return statblockAttacks.length > 0
+    ? statblockAttacks.map((action) => monsterAttackCommand(action, actor, target, 'normal'))
+    : [genericAttack(actor, target, false)];
+};
 
 function decodedSavingThrows(
   state: EncounterState,

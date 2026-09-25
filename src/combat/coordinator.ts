@@ -43,6 +43,19 @@ export type TurnLegalActions = (
   actor: CombatantId,
 ) => LegalActionSummary;
 
+/**
+ * The attack commands an actor's own attack forms build against one target,
+ * with no range, cover or action-economy filter. A legal-actions provider
+ * that lists attack commands pairs its TurnLegalActions with one of these,
+ * built by the same code: once the target is in range and the action is
+ * available, the provider lists exactly these commands against it.
+ */
+export type TurnAttackForms = (
+  state: EncounterState,
+  actor: CombatantId,
+  target: CombatantId,
+) => readonly Extract<EncounterCommand, { readonly type: 'attack' }>[];
+
 export type ReactionLegalActions = (
   state: EncounterState,
   reactor: CombatantId,

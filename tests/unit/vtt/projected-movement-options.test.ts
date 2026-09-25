@@ -434,6 +434,7 @@ describe('PCAC: projected PC movement plans against the target AC plus cover', (
       state,
       actorId: ranger.id,
       legalActions: [longbow, move(CLEAR_SQUARE), move(THREE_QUARTERS_SQUARE), { type: 'end_turn', actor: ranger.id }],
+      attackForms: (_state, actor, attacked) => actor === ranger.id && attacked === target.id ? [longbow] : [],
     });
     const assessedHit = (cell: { readonly column: number; readonly row: number }) => {
       const assessment = decision.assessments.find((entry) => entry.command.type === 'move' &&

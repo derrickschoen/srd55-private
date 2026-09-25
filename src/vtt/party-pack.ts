@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { CombatantProfile } from '../combat/combatant';
-import type { TurnLegalActions } from '../combat/coordinator';
+import type { TurnAttackForms, TurnLegalActions } from '../combat/coordinator';
 import { combatantsAreAllies } from '../combat/allies';
 import { conditionNames, type ConditionName } from '../combat/conditions';
 import {
@@ -3161,6 +3161,85 @@ function commandKeepAwaySpellCommands(
   })];
 }
 
+/**
+ * Every attack command one attack form builds against `target`, feature
+ * variants included (slot-spend smites, damage-type choices, maneuvers,
+ * Reckless Attack), before any range filter. loadedPartyTurnLegalActions lists
+ * these for each target in range, and loadedPartyAttackForms for any target,
+ * so the two can never describe a different attack.
+ */
+function loadedPartyFormCommands(
+  member: LoadedPartyMember,
+  acting: EncounterCombatantState,
+  attack: LoadedPartyAttack,
+  target: CombatantId,
+  bonusActionGrantEffectId: EncounterEffectId | undefined,
+): Extract<EncounterCommand, { readonly type: 'attack' }>[] {
+  const smites = member.effects.filter((effect) =>
+    effect.payload.kind === 'damage_rider' && effect.payload.gating?.kind === 'slot_spend');
+  const riderChoices = [undefined, ...smites.flatMap((effect) =>
+    acting.spellSlots
+      .filter((slot) => slot.remaining > 0 && slot.level >= 1 && slot.level <= 9)
+      .map((slot) => [{ effectId: effect.id, slotLevel: slot.level as 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 }]))];
+  const recklessChoices = acting.turn.action.kind === 'available'
+    ? member.effects.flatMap((effect) =>
+        effect.payload.kind === 'reckless_attack_mode' &&
+        effect.payload.strengthBasedMeleeAttackIds.includes(attack.attackId)
+          ? [effect.id]
+        : [])
+    : [];
+  const declaredDamageTypeChoices = member.effects.flatMap((effect) =>
+    effect.payload.kind === 'attack_damage_type_choice' && effect.payload.attackId === attack.attackId
+      ? effect.payload.options.map((type) => ({ effectId: effect.id, damageTypeId: String(type) }))
+      : []);
+  const damageTypeChoices = declaredDamageTypeChoices.length === 0
+    ? [undefined]
+    : declaredDamageTypeChoices;
+  const maneuverChoices = [undefined, ...member.effects.flatMap((effect) => {
+    if (effect.payload.kind !== 'resource_die_maneuver' || effect.resourcePoolId === null) return [];
+    const pool = (acting.limitedResources ?? []).find((candidate) => candidate.id === effect.resourcePoolId);
+    return (pool?.remaining ?? 0) > 0 ? [effect.id] : [];
+  })];
+  return riderChoices.flatMap((riderSelections) =>
+    damageTypeChoices.flatMap((damageTypeSelection) =>
+      maneuverChoices.flatMap((maneuverEffectId) => [
+        loadedPartyAttackCommand(member, attack.attackId, target, {
+          ...(bonusActionGrantEffectId === undefined ? {} : { bonusActionGrantEffectId }),
+          ...(riderSelections === undefined ? {} : { riderSelections }),
+          ...(damageTypeSelection === undefined ? {} : { damageTypeSelection }),
+          ...(maneuverEffectId === undefined ? {} : { maneuverEffectId }),
+        }),
+        ...recklessChoices.map((recklessAttackEffectId) => loadedPartyAttackCommand(
+          member,
+          attack.attackId,
+          target,
+          {
+            recklessAttackEffectId,
+            ...(riderSelections === undefined ? {} : { riderSelections }),
+            ...(damageTypeSelection === undefined ? {} : { damageTypeSelection }),
+            ...(maneuverEffectId === undefined ? {} : { maneuverEffectId }),
+          },
+        )),
+      ])));
+}
+
+/**
+ * The loaded members' own attack forms, paired with loadedPartyTurnLegalActions
+ * built from the same members: the attack commands their action would list
+ * against `target` once it is in range, whatever the distance now.
+ */
+export function loadedPartyAttackForms(members: readonly LoadedPartyMember[]): TurnAttackForms {
+  const byId = new Map(members.map((member) => [member.profile.id, member] as const));
+  return (state, actor, target) => {
+    const member = byId.get(actor);
+    if (member === undefined) return [];
+    const acting = encounterCombatantIndex(state).at(actor);
+    return member.attacks.flatMap((declaredAttack) => loadedPartyFormCommands(
+      member, acting, effectiveLoadedPartyAttack(member, declaredAttack), target, undefined,
+    ));
+  };
+}
+
 /** Enumerates reducer-valid attacks and feature actions for loaded v2 party members. */
 export function loadedPartyTurnLegalActions(
   members: readonly LoadedPartyMember[],
@@ -3185,12 +3264,6 @@ export function loadedPartyTurnLegalActions(
       !combatantsAreAllies(state, candidate.profile.id, actor) &&
       candidate.life !== 'dead' &&
       state.tokens.some((token) => token.combatantId === candidate.profile.id));
-    const smites = member.effects.filter((effect) =>
-      effect.payload.kind === 'damage_rider' && effect.payload.gating?.kind === 'slot_spend');
-    const riderChoices = [undefined, ...smites.flatMap((effect) =>
-      acting.spellSlots
-        .filter((slot) => slot.remaining > 0 && slot.level >= 1 && slot.level <= 9)
-        .map((slot) => [{ effectId: effect.id, slotLevel: slot.level as 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 }]))];
     const commands = (
       bonusActionGrantEffectId?: EncounterEffectId,
     ): Extract<EncounterCommand, { readonly type: 'attack' }>[] =>
@@ -3200,47 +3273,9 @@ export function loadedPartyTurnLegalActions(
         const inRange = attack.kind === 'melee'
           ? distance <= attack.reach
           : distance <= attack.range;
-        if (!inRange) return [];
-        const recklessChoices = acting.turn.action.kind === 'available'
-          ? member.effects.flatMap((effect) =>
-              effect.payload.kind === 'reckless_attack_mode' &&
-              effect.payload.strengthBasedMeleeAttackIds.includes(attack.attackId)
-                ? [effect.id]
-              : [])
+        return inRange
+          ? loadedPartyFormCommands(member, acting, attack, target.profile.id, bonusActionGrantEffectId)
           : [];
-        const declaredDamageTypeChoices = member.effects.flatMap((effect) =>
-          effect.payload.kind === 'attack_damage_type_choice' && effect.payload.attackId === attack.attackId
-            ? effect.payload.options.map((type) => ({ effectId: effect.id, damageTypeId: String(type) }))
-            : []);
-        const damageTypeChoices = declaredDamageTypeChoices.length === 0
-          ? [undefined]
-          : declaredDamageTypeChoices;
-        const maneuverChoices = [undefined, ...member.effects.flatMap((effect) => {
-          if (effect.payload.kind !== 'resource_die_maneuver' || effect.resourcePoolId === null) return [];
-          const pool = (acting.limitedResources ?? []).find((candidate) => candidate.id === effect.resourcePoolId);
-          return (pool?.remaining ?? 0) > 0 ? [effect.id] : [];
-        })];
-        return riderChoices.flatMap((riderSelections) =>
-          damageTypeChoices.flatMap((damageTypeSelection) =>
-            maneuverChoices.flatMap((maneuverEffectId) => [
-              loadedPartyAttackCommand(member, attack.attackId, target.profile.id, {
-                ...(bonusActionGrantEffectId === undefined ? {} : { bonusActionGrantEffectId }),
-                ...(riderSelections === undefined ? {} : { riderSelections }),
-                ...(damageTypeSelection === undefined ? {} : { damageTypeSelection }),
-                ...(maneuverEffectId === undefined ? {} : { maneuverEffectId }),
-              }),
-              ...recklessChoices.map((recklessAttackEffectId) => loadedPartyAttackCommand(
-                member,
-                attack.attackId,
-                target.profile.id,
-                {
-                  recklessAttackEffectId,
-                  ...(riderSelections === undefined ? {} : { riderSelections }),
-                  ...(damageTypeSelection === undefined ? {} : { damageTypeSelection }),
-                  ...(maneuverEffectId === undefined ? {} : { maneuverEffectId }),
-                },
-              )),
-            ])));
       }));
 
     const actions: EncounterCommand[] = [...loadedPartyMovementActions(state, actor)];

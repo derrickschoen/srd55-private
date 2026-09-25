@@ -1,7 +1,8 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { monsterCombatantProfile } from '../../../src/combat/combatant';
+import { combatToken, monsterCombatantProfile } from '../../../src/combat/combatant';
 import { traceCombatantLine } from '../../../src/combat/cover';
-import { createEncounter, type EncounterState } from '../../../src/combat/encounter';
+import type { TurnAttackForms } from '../../../src/combat/coordinator';
+import { createEncounter, reduceEncounter, type EncounterState } from '../../../src/combat/encounter';
 import type { EncounterCommand } from '../../../src/combat/events';
 import { canonicalJson } from '../../../src/commands/canonical-json';
 import type { GridCell } from '../../../src/combat/grid';
@@ -18,6 +19,13 @@ import {
   worldObjectId,
 } from '../../../src/combat/values';
 import { evaluateTacticalAttack } from '../../../src/combat/tactical-evaluator';
+import {
+  externalPartyPackSchema,
+  loadExternalPartyPack,
+  loadedPartyAttackForms,
+  loadedPartyTurnLegalActions,
+} from '../../../src/vtt/party-pack';
+import { regretAttackForms, regretTurnLegalActions } from '../../../src/vtt/regret/legal-actions';
 import {
   DEFAULT_SCRIPTED_PC_DECISION_POLICY,
   evaluateSymmetricPcDecision,
@@ -107,6 +115,11 @@ function attack(
   };
 }
 
+/** The attack forms a provider pairs with these attack commands: each command against its own target. */
+function attackFormsOf(...commands: readonly Extract<EncounterCommand, { readonly type: 'attack' }>[]): TurnAttackForms {
+  return (_state, actor, target) => commands.filter((command) => command.actor === actor && command.target === target);
+}
+
 function ready(state: EncounterState, actorId: ReturnType<typeof playerProfile>['id']): EncounterState {
   return {
     ...state,
@@ -143,6 +156,7 @@ describe('symmetric scripted-PC evaluator', () => {
     // the distance 10 feet, exactly normal range, so movement-eval ranks it first.
     const decision = evaluateSymmetricPcDecision({
       state, actorId: actor.id, legalActions: [ranged, move, { type: 'end_turn', actor: actor.id }],
+      attackForms: attackFormsOf(ranged),
     });
 
     expect(DEFAULT_SCRIPTED_PC_DECISION_POLICY).toBe('symmetric_evaluator_v1');
@@ -181,6 +195,7 @@ describe('symmetric scripted-PC evaluator', () => {
     const endTurn = { type: 'end_turn' as const, actor: actor.id };
     const decision = evaluateSymmetricPcDecision({
       state, actorId: actor.id, legalActions: [ranged, oneStep, endTurn, twoSteps],
+      attackForms: attackFormsOf(ranged),
     });
     const byCommand = (command: EncounterCommand) => {
       const found = decision.assessments.find((assessment) => assessment.command === command);
@@ -190,10 +205,16 @@ describe('symmetric scripted-PC evaluator', () => {
 
     // Movement options never depend on which move is ranked, only on the state,
     // the actor's projection and the perceived attack, so both moves hold the
-    // one answer. Attacks and end_turn are not movement and carry none.
+    // one answer. Attacks and end_turn are not movement and carry none. Each
+    // move takes the best profile at its own destination, so each holds its own
+    // assessment; with one profile (the ranged attack, which is also its only
+    // form) both assess with it, and its evaluation is the one shared answer.
     const shared = byCommand(oneStep).movement;
     if (shared?.status !== 'evaluated') throw new Error('Expected projected movement evaluation.');
-    expect(byCommand(twoSteps).movement).toBe(shared);
+    const second = byCommand(twoSteps).movement;
+    if (second?.status !== 'evaluated') throw new Error('Expected projected movement evaluation.');
+    expect(second.evaluation).toBe(shared.evaluation);
+    expect(second).toEqual(shared);
     expect(byCommand(ranged).movement).toBeNull();
     expect(byCommand(endTurn).movement).toBeNull();
   });
@@ -218,10 +239,11 @@ describe('symmetric scripted-PC evaluator', () => {
     // Three move commands, one query: asking per move would make three.
     evaluateSymmetricPcDecision({
       state, actorId: actor.id, legalActions: [ranged, moveThrough(1), endTurn, moveThrough(1, 2), moveThrough(1)],
+      attackForms: attackFormsOf(ranged),
     });
     expect(queries()).toBe(1);
     // A decision with no move command has no movement to assess, so no query.
-    evaluateSymmetricPcDecision({ state, actorId: actor.id, legalActions: [ranged, endTurn] });
+    evaluateSymmetricPcDecision({ state, actorId: actor.id, legalActions: [ranged, endTurn], attackForms: attackFormsOf(ranged) });
     expect(queries()).toBe(1);
   });
 
@@ -249,6 +271,7 @@ describe('symmetric scripted-PC evaluator', () => {
     probe.countTargetLookups = true;
     const decision = evaluateSymmetricPcDecision({
       state, actorId: actor.id, legalActions: [ranged, oneStep, { type: 'end_turn', actor: actor.id }, twoSteps],
+      attackForms: attackFormsOf(ranged),
     });
     const byCommand = (command: EncounterCommand) => {
       const found = decision.assessments.find((assessment) => assessment.command === command);
@@ -256,15 +279,16 @@ describe('symmetric scripted-PC evaluator', () => {
       return found;
     };
 
-    // One target lookup is the attack's tactical assessment; each movement
-    // assessment looks the one attack's target up once more. Assessing once
+    // One target lookup is the attack's tactical assessment; the decision's
+    // movement profiles look the one attack's target up once more (its forms
+    // then read only perceived targets, and there are none). Assessing once
     // per decision makes 1 + 1 = 2; assessing per move command would make 3.
     expect(probe.targetLookups).toBe(2);
     expect(probe.calls.filter((call) => call === 'projected-movement')).toEqual([]);
     expect(byCommand(ranged).tactical).toEqual({ status: 'unresolved', reason: 'target_not_perceived' });
     const shared = byCommand(oneStep).movement;
     expect(shared).toEqual({ status: 'unresolved', reason: 'movement_profile_unavailable' });
-    expect(byCommand(twoSteps).movement).toBe(shared);
+    expect(byCommand(twoSteps).movement).toEqual(shared);
   });
 
   it('assesses legal commands in order: the first move queries projected movement after the attack before it', () => {
@@ -287,6 +311,7 @@ describe('symmetric scripted-PC evaluator', () => {
       state,
       actorId: actor.id,
       legalActions: [ranged(alpha.id), moveThrough(1), ranged(beta.id), moveThrough(1, 2), { type: 'end_turn', actor: actor.id }],
+      attackForms: attackFormsOf(ranged(alpha.id), ranged(beta.id)),
     });
 
     // Commands are assessed in legal order, so the first appearance of each
@@ -316,6 +341,7 @@ describe('symmetric scripted-PC evaluator', () => {
       }), actor.id);
       const movement = evaluateSymmetricPcDecision({
         state, actorId: actor.id, legalActions: [ranged, move, { type: 'end_turn', actor: actor.id }],
+        attackForms: attackFormsOf(ranged),
       }).assessments.find((assessment) => assessment.command === move)?.movement;
       if (movement?.status !== 'evaluated') throw new Error('Expected projected movement evaluation.');
       return movement.evaluation.candidates.find((candidate) =>
@@ -353,6 +379,7 @@ describe('symmetric scripted-PC evaluator', () => {
       state,
       actorId: actor.id,
       legalActions: [betaAttack, alphaAttack, { type: 'end_turn', actor: actor.id }],
+      attackForms: attackFormsOf(betaAttack, alphaAttack),
     });
     const fullAlpha = evaluateTacticalAttack({
       attackerId: actor.id, targetId: alpha.id, attackerPosition: { column: 0, row: 0 }, targetPosition: { column: 1, row: 0 },
@@ -396,6 +423,7 @@ describe('symmetric scripted-PC evaluator', () => {
     const command = attack(actor.id, target.id, { kind: 'melee', reachFeet: feet(5) });
     const decision = evaluateSymmetricPcDecision({
       state, actorId: actor.id, legalActions: [command, { type: 'end_turn', actor: actor.id }],
+      attackForms: attackFormsOf(command),
     });
     const tactical = decision.selected.tactical;
     if (tactical?.status !== 'evaluated') throw new Error('Expected an evaluated tactical input.');
@@ -418,14 +446,18 @@ describe('symmetric scripted-PC evaluator', () => {
       bounds: { columns: 3, rows: 1 }, combatants: [actor, target],
       tokens: [placedToken(actor, 0), placedToken(target, 1)],
     }), actor.id);
+    const melee = attack(actor.id, target.id, { kind: 'melee', reachFeet: feet(5) });
     const legalActions = [
-      attack(actor.id, target.id, { kind: 'melee', reachFeet: feet(5) }),
+      melee,
       { type: 'dodge' as const, actor: actor.id },
       { type: 'end_turn' as const, actor: actor.id },
     ];
+    const attackForms = attackFormsOf(melee);
 
-    expect(evaluateSymmetricPcDecision({ state, actorId: actor.id, legalActions }))
-      .toEqual(evaluateSymmetricPcDecision({ state: structuredClone(state), actorId: actor.id, legalActions: structuredClone(legalActions) }));
+    expect(evaluateSymmetricPcDecision({ state, actorId: actor.id, legalActions, attackForms }))
+      .toEqual(evaluateSymmetricPcDecision({
+        state: structuredClone(state), actorId: actor.id, legalActions: structuredClone(legalActions), attackForms,
+      }));
   });
 });
 
@@ -527,10 +559,10 @@ const HALF_TEN_FOOT_SQUARE = { column: 3, row: 0 } as const;
 function blockingCell(
   id: string,
   cell: GridCell,
-  kind: 'wall' | 'three_quarters_cover',
+  kind: 'wall' | 'three_quarters_cover' | 'half_cover',
 ): EncounterState['worldObjects'][number] {
   return {
-    id: worldObjectId(`object:${id}`), name: kind === 'wall' ? 'Wall' : 'Low wall',
+    id: worldObjectId(`object:${id}`), name: kind === 'wall' ? 'Wall' : kind === 'half_cover' ? 'Barrel' : 'Low wall',
     kind: kind === 'wall' ? 'barrier' : 'cover', position: cell, footprint: [cell],
     durability: { kind: 'indestructible' }, armorClass: armorClass(10), damageResponses: [],
     blocking: terrainBlocking(kind), createdRevision: 0,
@@ -645,6 +677,7 @@ describe('PCAC tie-break: within one bucket the scripted PC prefers the square w
 
     const decision = evaluateSymmetricPcDecision({
       state, actorId: ranger.id, legalActions: [dart(ranger.id, goblin.id), ...moves, { type: 'end_turn', actor: ranger.id }],
+      attackForms: attackFormsOf(dart(ranger.id, goblin.id)),
     });
 
     const ranked = rankedMoves(decision);
@@ -667,6 +700,7 @@ describe('PCAC tie-break: within one bucket the scripted PC prefers the square w
 
     const decision = evaluateSymmetricPcDecision({
       state, actorId: ranger.id, legalActions: [dart(ranger.id, goblin.id), ...moves, { type: 'end_turn', actor: ranger.id }],
+      attackForms: attackFormsOf(dart(ranger.id, goblin.id)),
     });
 
     const ranked = rankedMoves(decision);
@@ -690,6 +724,7 @@ describe('PCAC tie-break: within one bucket the scripted PC prefers the square w
       state,
       actorId: ranger.id,
       legalActions: [dart(ranger.id, goblin.id), ...squares.map((cell) => step(ranger.id, cell)), { type: 'end_turn', actor: ranger.id }],
+      attackForms: attackFormsOf(dart(ranger.id, goblin.id)),
     });
 
     const ranked = rankedMoves(decision);
@@ -713,6 +748,7 @@ describe('PCAC tie-break: within one bucket the scripted PC prefers the square w
 
     const decision = evaluateSymmetricPcDecision({
       state, actorId: ranger.id, legalActions: [...moves, save, dart(ranger.id, goblin.id), { type: 'end_turn', actor: ranger.id }],
+      attackForms: attackFormsOf(dart(ranger.id, goblin.id)),
     });
 
     // The save's canonical text ({"ability":...) sorts before every move's
@@ -721,5 +757,368 @@ describe('PCAC tie-break: within one bucket the scripted PC prefers the square w
     expect(moves.every((move) => inCanonicalOrder([save, move]))).toBe(true);
     expect(decision.assessments.filter((assessment) => assessment.rank[0] === 3)
       .map((assessment) => assessment.command.type)).toEqual(['force_save', 'move', 'move', 'move']);
+  });
+});
+
+/*
+ * PERF-02 pcac, third commit. Owner ruling 2026-09-24, the option as chosen:
+ * "when no attack is legal, movement planning evaluates candidate squares with
+ * the PC's own attack forms (best expected damage across its attacks, AC +
+ * cover included), so approach squares with a clear shot win."
+ *
+ * Rules behind every number below (docs/srd/full/srd-5.2.1.txt), with the
+ * Attack Roll, Cover and Critical Hit citations of the tie-break block above:
+ * a d20 face f hits AC 15 on 10-20 (11/20), Half Cover AC 17 on 12-20 (9/20),
+ * Three-Quarters AC 20 on 15-20 (6/20); a natural 20 (1/20) is the Critical
+ * Hit, whose damage dice are rolled twice. Expected damage =
+ * (hit - 1/20) x (normal hit) + 1/20 x (critical hit). Every target is the SRD
+ * Goblin Warrior, AC 15 (:18985-18988). Weapons (:5490, :5508, :5529):
+ * - Longbow, 1d8 Piercing, Range 150/600, at +5 for 1d8 + 3: a hit averages
+ *   7.5 and a Critical Hit 12. Shortsword, 1d6 Piercing (melee, 5 ft).
+ * - Glaive, 1d10 Slashing, Reach (:5442: +5 feet of reach, so 10 ft), at +5 for
+ *   1d10 + 3: a hit averages 8.5 and a Critical Hit 14. Dagger, 1d4 Piercing
+ *   (melee, 5 ft), at +5 for 1d4 + 3.
+ * Every board below lists only moves and non-attacks: no attack is legal.
+ *
+ * RANGER BOARD (columns 0-6, rows 0-4): the goblin at (5,3), walls at (4,2)
+ * and (4,3), the ranger at (3,2), which has already used its action to shoot.
+ * Every square below is 10 feet from the goblin, inside the Longbow's normal
+ * range, so each move keeps the range ("maintain range", one bucket), and the
+ * Shortsword reaches none of them. Cover by the D576 corner rule:
+ * - (4,1): from corner (5,2), the corner of the wall (4,2), the lines to (5,3)
+ *   and (5,4) run down x = 5 along the walls' right edges and the lines to
+ *   (6,3) and (6,4) pass right of them. No cover: ED = 10/20 x 7.5 + 1/20 x 12
+ *   = 4.35.
+ * - (3,1): its best corner (4,1) keeps one line clear, the one to (6,3)
+ *   (y = x - 3 passes (4,1) and (5,2), neither a wall); its lines to (5,3),
+ *   (5,4) and (6,4) cross the wall (4,2) or (4,3), and every other corner
+ *   obstructs all four. Three-Quarters, AC 20: ED = 5/20 x 7.5 + 0.6 = 2.475.
+ * - (2,2), (2,3), (3,3): from an upper corner such as (2,3) the lines to the
+ *   goblin's top corners (5,3) and (6,3) run along y = 3, the edge between the
+ *   two walls, and the lines to its bottom corners cross (4,3); from a lower
+ *   corner it is the reverse. Two obstructed lines at best: Half, AC 17:
+ *   ED = 8/20 x 7.5 + 0.6 = 3.6.
+ * - (2,1): every line from every corner crosses a wall: Total Cover, so no
+ *   expected damage.
+ * The ranger's own square (3,2) is Half, and adding it as a creature source
+ * changes no tier above (the D888 self-body geometry does not arise here).
+ * Canonical text alone would take (2,1), the square with Total Cover.
+ *
+ * MELEE BOARD (columns 0-6, rows 0-4): the goblin at (5,2), a barrel granting
+ * Half Cover at (4,1), the fighter at (2,1), 15 feet away, out of reach of both
+ * the Dagger (5 ft) and the Glaive (10 ft). Its three squares in column 3 are
+ * 10 feet from the goblin: the Glaive can reach from there after a 5-foot move
+ * ("move within speed to enable attack", bucket 0); the Dagger still cannot
+ * ("other reposition", bucket 6), and neither can reach from any other square.
+ * - (3,1) and (3,2): from a bottom corner such as (4,2) no line enters the
+ *   barrel's square (the lines to the goblin's top corners run along its lower
+ *   edge, y = 2). No cover: ED = 10/20 x 8.5 + 1/20 x 14 = 4.95.
+ * - (3,0): from every corner three or four lines cross the barrel's square,
+ *   but a barrel is an object granting Half Cover, so the degree is Half,
+ *   AC 17: ED = 8/20 x 8.5 + 0.7 = 4.1. The fighter's own square changes none
+ *   of these tiers.
+ * The Dagger is the first form in canonical text ("dagger" before "glaive"),
+ * so planning with the first form alone ranks every square "other reposition"
+ * and the canonical text would take (1,0), a step away from the goblin.
+ *
+ * TARGET BOARD (columns 0-5, rows 0-4): the fighter (Glaive only) at (1,2),
+ * goblins a at (4,0) and b at (4,4), each 15 feet away. The square (2,1) is
+ * within 10 feet of a only, (2,3) of b only, (2,2) of both. The target is the
+ * one the canonical-first form command attacks: a (its id sorts first). So
+ * (2,1) and (2,2) enable the Glaive against a, ED 4.95 each, and the canonical
+ * text takes (2,1).
+ */
+const APPROACH_RANGER_GOBLIN_CELL = { column: 5, row: 3 } as const;
+const APPROACH_RANGER_CELL = { column: 3, row: 2 } as const;
+const APPROACH_WALL_CELLS: readonly GridCell[] = [{ column: 4, row: 2 }, { column: 4, row: 3 }];
+const APPROACH_CLEAR_SQUARE = { column: 4, row: 1 } as const;
+const APPROACH_THREE_QUARTERS_SQUARE = { column: 3, row: 1 } as const;
+const APPROACH_TOTAL_SQUARE = { column: 2, row: 1 } as const;
+const APPROACH_HALF_SQUARES: readonly GridCell[] = [
+  { column: 2, row: 2 }, { column: 2, row: 3 }, { column: 3, row: 3 },
+];
+
+const MELEE_GOBLIN_CELL = { column: 5, row: 2 } as const;
+const MELEE_FIGHTER_CELL = { column: 2, row: 1 } as const;
+const MELEE_BARREL_CELL = { column: 4, row: 1 } as const;
+const MELEE_HALF_SQUARE = { column: 3, row: 0 } as const;
+const MELEE_CLEAR_SQUARES: readonly GridCell[] = [{ column: 3, row: 1 }, { column: 3, row: 2 }];
+const MELEE_OUT_OF_REACH_SQUARES: readonly GridCell[] = [
+  { column: 1, row: 0 }, { column: 1, row: 1 }, { column: 1, row: 2 }, { column: 2, row: 0 }, { column: 2, row: 2 },
+];
+
+type AttackCommand = Extract<EncounterCommand, { readonly type: 'attack' }>;
+
+function weaponForm(input: {
+  readonly actor: CombatantId;
+  readonly target: CombatantId;
+  readonly attackId: string;
+  readonly dieSides: 4 | 6 | 8 | 10;
+  readonly range: NonNullable<AttackCommand['tacticalRange']>;
+}): AttackCommand {
+  return {
+    type: 'attack', actor: input.actor, target: input.target, attackBonus: 5, criticalFloor: 20, rollMode: 'normal',
+    attackerCanSeeTarget: true, targetCanSeeAttacker: true, tacticalRange: input.range, attackId: input.attackId,
+    damage: {
+      terms: [{ type: damageType('Piercing'), dice: { count: 1, sides: dieSides(input.dieSides), modifier: 3 } }],
+      critical: false,
+      responses: [],
+    },
+  };
+}
+
+const longbowForm = (actor: CombatantId, target: CombatantId) => weaponForm({
+  actor, target, attackId: 'longbow', dieSides: 8,
+  range: { kind: 'ranged', normalRangeFeet: feet(150), longRangeFeet: feet(600) },
+});
+const shortswordForm = (actor: CombatantId, target: CombatantId) => weaponForm({
+  actor, target, attackId: 'shortsword', dieSides: 6, range: { kind: 'melee', reachFeet: feet(5) },
+});
+const glaiveForm = (actor: CombatantId, target: CombatantId) => weaponForm({
+  actor, target, attackId: 'glaive', dieSides: 10, range: { kind: 'melee', reachFeet: feet(10) },
+});
+const daggerForm = (actor: CombatantId, target: CombatantId) => weaponForm({
+  actor, target, attackId: 'dagger', dieSides: 4, range: { kind: 'melee', reachFeet: feet(5) },
+});
+
+/** A provider's forms for one PC: the given weapons against whichever target is asked for. */
+function ownForms(
+  pc: CombatantId,
+  weapons: readonly ((actor: CombatantId, target: CombatantId) => AttackCommand)[],
+): TurnAttackForms {
+  return (_state, actor, target) => actor === pc ? weapons.map((weapon) => weapon(actor, target)) : [];
+}
+
+function goblin(key: string) {
+  return monsterCombatantProfile(GOBLIN_WARRIOR, { combatantId: `combatant:${key}`, tokenId: `token:${key}` });
+}
+
+function approachBoard(input: {
+  readonly columns: number;
+  readonly rows: number;
+  readonly pcKey: string;
+  readonly pcCell: GridCell;
+  readonly goblins: readonly { readonly key: string; readonly cell: GridCell }[];
+  readonly blocking: readonly EncounterState['worldObjects'][number][];
+  readonly actionSpent: boolean;
+}) {
+  const pc = playerProfile(input.pcKey);
+  const monsters = input.goblins.map((entry) => ({ profile: goblin(entry.key), cell: entry.cell }));
+  const created = createEncounter({
+    bounds: { columns: input.columns, rows: input.rows },
+    combatants: [pc, ...monsters.map((entry) => entry.profile)],
+    tokens: [
+      placedToken(pc, input.pcCell.column, input.pcCell.row),
+      ...monsters.map((entry) => placedToken(entry.profile, entry.cell.column, entry.cell.row)),
+    ],
+    worldObjects: input.blocking,
+  });
+  const readied = ready(created, pc.id);
+  const state = input.actionSpent
+    ? {
+        ...readied,
+        combatants: readied.combatants.map((combatant) => combatant.profile.id === pc.id
+          ? { ...combatant, turn: { ...combatant.turn, action: { kind: 'spent' as const } } }
+          : combatant),
+      }
+    : readied;
+  return { state, pc, goblins: monsters.map((entry) => entry.profile) };
+}
+
+/** Each ranked move: destination, bucket, expected damage (rounded to 1e-9), and the form that assessed it. */
+function rankedApproach(decision: SymmetricPcDecision) {
+  return decision.assessments.flatMap((assessment) => {
+    if (assessment.command.type !== 'move') return [];
+    const damage = assessment.rank[3];
+    const movement = assessment.movement;
+    return [{
+      destination: assessment.command.path.at(-1),
+      bucket: assessment.rank[0],
+      damage: damage.kind === 'resolved' ? Math.round(damage.expectedDamage * 1e9) / 1e9 : damage.kind,
+      form: movement?.status === 'evaluated'
+        ? `${movement.profileSource}:${movement.attack.attackId ?? '?'}:${String(movement.attack.target)}`
+        : movement?.reason ?? null,
+    }];
+  });
+}
+
+describe('PCAC approach: with no legal attack the scripted PC plans its moves with its own attack forms', () => {
+  it('PCAC-APPROACH-RANGER-CLEAR-SHOT: after shooting, the ranger steps to the square with a clear Longbow shot, not the Three-Quarters or Total Cover one', () => {
+    const { state, pc, goblins } = approachBoard({
+      columns: 7, rows: 5, pcKey: 'pcac-approach-ranger', pcCell: APPROACH_RANGER_CELL,
+      goblins: [{ key: 'pcac-approach-goblin', cell: APPROACH_RANGER_GOBLIN_CELL }],
+      blocking: APPROACH_WALL_CELLS.map((cell) => blockingCell(`pcac-approach-wall-${String(cell.row)}`, cell, 'wall')),
+      actionSpent: true,
+    });
+    const target = goblins[0];
+    if (target === undefined) throw new Error('The ranger board has a goblin.');
+    const squares = [APPROACH_TOTAL_SQUARE, APPROACH_THREE_QUARTERS_SQUARE, APPROACH_CLEAR_SQUARE, ...APPROACH_HALF_SQUARES];
+    expect(coverTiers(state, pc.id, target.id, [APPROACH_RANGER_CELL, ...squares]))
+      .toEqual(['half', 'total', 'three_quarters', 'none', 'half', 'half', 'half']);
+    const moves = squares.map((cell) => step(pc.id, cell));
+    // The canonical text alone takes the Total Cover square (2,1).
+    expect(moves.slice(1).every((move) => inCanonicalOrder([moves[0]!, move]))).toBe(true);
+
+    const decision = evaluateSymmetricPcDecision({
+      state,
+      actorId: pc.id,
+      legalActions: [...moves, { type: 'end_turn', actor: pc.id }],
+      attackForms: ownForms(pc.id, [longbowForm, shortswordForm]),
+    });
+
+    const form = `own_attack_forms:longbow:${String(target.id)}`;
+    expect(rankedApproach(decision)).toEqual([
+      { destination: APPROACH_CLEAR_SQUARE, bucket: 3, damage: 4.35, form },
+      { destination: APPROACH_HALF_SQUARES[0], bucket: 3, damage: 3.6, form },
+      { destination: APPROACH_HALF_SQUARES[1], bucket: 3, damage: 3.6, form },
+      { destination: APPROACH_HALF_SQUARES[2], bucket: 3, damage: 3.6, form },
+      { destination: APPROACH_THREE_QUARTERS_SQUARE, bucket: 3, damage: 2.475, form },
+      { destination: APPROACH_TOTAL_SQUARE, bucket: 3, damage: 'unresolved', form },
+    ]);
+    expect(decision.selected.command).toEqual(step(pc.id, APPROACH_CLEAR_SQUARE));
+  });
+
+  it('PCAC-APPROACH-MELEE-BEST-FORM: out of reach, the fighter steps to where its Glaive (not its canonical-first Dagger) gets a clear swing', () => {
+    const { state, pc, goblins } = approachBoard({
+      columns: 7, rows: 5, pcKey: 'pcac-approach-fighter', pcCell: MELEE_FIGHTER_CELL,
+      goblins: [{ key: 'pcac-approach-goblin', cell: MELEE_GOBLIN_CELL }],
+      blocking: [blockingCell('pcac-approach-barrel', MELEE_BARREL_CELL, 'half_cover')],
+      actionSpent: false,
+    });
+    const target = goblins[0];
+    if (target === undefined) throw new Error('The melee board has a goblin.');
+    expect(coverTiers(state, pc.id, target.id, [MELEE_HALF_SQUARE, ...MELEE_CLEAR_SQUARES]))
+      .toEqual(['half', 'none', 'none']);
+    const squares = [...MELEE_OUT_OF_REACH_SQUARES, MELEE_HALF_SQUARE, ...MELEE_CLEAR_SQUARES];
+    const moves = squares.map((cell) => step(pc.id, cell));
+    expect(inCanonicalOrder(moves)).toBe(true);
+
+    const decision = evaluateSymmetricPcDecision({
+      state,
+      actorId: pc.id,
+      legalActions: [...moves, { type: 'dash', actor: pc.id }, { type: 'end_turn', actor: pc.id }],
+      attackForms: ownForms(pc.id, [glaiveForm, daggerForm]),
+    });
+
+    const glaive = `own_attack_forms:glaive:${String(target.id)}`;
+    const dagger = `own_attack_forms:dagger:${String(target.id)}`;
+    expect(rankedApproach(decision)).toEqual([
+      { destination: MELEE_CLEAR_SQUARES[0], bucket: 0, damage: 4.95, form: glaive },
+      { destination: MELEE_CLEAR_SQUARES[1], bucket: 0, damage: 4.95, form: glaive },
+      { destination: MELEE_HALF_SQUARE, bucket: 0, damage: 4.1, form: glaive },
+      // Neither form reaches from here, so the first form in canonical text assesses the square.
+      ...MELEE_OUT_OF_REACH_SQUARES.map((destination) => ({ destination, bucket: 6, damage: 'unresolved', form: dagger })),
+    ]);
+    expect(decision.selected.command).toEqual(step(pc.id, MELEE_CLEAR_SQUARES[0]!));
+  });
+
+  it('PCAC-APPROACH-TARGET-RULE: with two goblins perceived, the forms plan against the target of the canonical-first form command', () => {
+    const { state, pc, goblins } = approachBoard({
+      columns: 6, rows: 5, pcKey: 'pcac-approach-fighter', pcCell: { column: 1, row: 2 },
+      goblins: [
+        { key: 'pcac-approach-goblin-b', cell: { column: 4, row: 4 } },
+        { key: 'pcac-approach-goblin-a', cell: { column: 4, row: 0 } },
+      ],
+      blocking: [],
+      actionSpent: false,
+    });
+    const goblinA = goblins.find((entry) => String(entry.id).endsWith('-a'));
+    const goblinB = goblins.find((entry) => String(entry.id).endsWith('-b'));
+    if (goblinA === undefined || goblinB === undefined) throw new Error('The target board has two goblins.');
+    const forms = ownForms(pc.id, [glaiveForm]);
+    // Goblin a's command sorts first, whichever order the provider lists them in.
+    expect(inCanonicalOrder([...forms(state, pc.id, goblinA.id), ...forms(state, pc.id, goblinB.id)])).toBe(true);
+    const squares = [
+      { column: 0, row: 1 }, { column: 0, row: 2 }, { column: 0, row: 3 }, { column: 1, row: 1 },
+      { column: 1, row: 3 }, { column: 2, row: 1 }, { column: 2, row: 2 }, { column: 2, row: 3 },
+    ];
+    expect(coverTiers(state, pc.id, goblinA.id, [{ column: 2, row: 1 }, { column: 2, row: 2 }])).toEqual(['none', 'none']);
+
+    const decision = evaluateSymmetricPcDecision({
+      state,
+      actorId: pc.id,
+      legalActions: [...squares.map((cell) => step(pc.id, cell)), { type: 'end_turn', actor: pc.id }],
+      attackForms: forms,
+    });
+
+    const ranked = rankedApproach(decision);
+    expect(new Set(ranked.map((entry) => entry.form))).toEqual(new Set([`own_attack_forms:glaive:${String(goblinA.id)}`]));
+    expect(ranked.slice(0, 2)).toEqual([
+      { destination: { column: 2, row: 1 }, bucket: 0, damage: 4.95, form: `own_attack_forms:glaive:${String(goblinA.id)}` },
+      { destination: { column: 2, row: 2 }, bucket: 0, damage: 4.95, form: `own_attack_forms:glaive:${String(goblinA.id)}` },
+    ]);
+    // (2,3) reaches only goblin b, which is not the planned target.
+    expect(ranked.find((entry) => entry.destination?.row === 3 && entry.destination.column === 2)?.bucket).toBe(6);
+    expect(decision.selected.command).toEqual(step(pc.id, { column: 2, row: 1 }));
+  });
+
+  it('PCAC-APPROACH-FORMS-SINGLE-SOURCE: a provider\'s forms are exactly its attack commands against a target in range, and do not depend on range', () => {
+    const member = {
+      combatantId: 'combatant:pcac-forms-ranger', tokenId: 'token:pcac-forms-ranger', characterId: 20_001,
+      classes: [{ classId: 'Paladin', level: 5 }],
+      abilities: { strength: 12, dexterity: 16, constitution: 14, intelligence: 10, wisdom: 12, charisma: 14 },
+      armorClass: 16, hitPointMaximum: 40, sizeCategory: 'Medium', walkingSpeedFeet: 30, initiativeBonus: 3,
+      savingThrowBonuses: { strength: 1, dexterity: 3, constitution: 2, intelligence: 0, wisdom: 3, charisma: 4 },
+      attacksPerAction: 1,
+      attacks: [
+        { attackId: 'attack:pcac-shortsword', kind: 'melee', attackBonus: 6, criticalFloor: 20, reachFeet: 5, rangeFeet: 5,
+          damage: [{ damageTypeId: 'Piercing', count: 1, sides: 6, modifier: 3 }] },
+        { attackId: 'attack:pcac-longbow', kind: 'ranged', attackBonus: 6, criticalFloor: 20, reachFeet: 5, rangeFeet: 150,
+          damage: [{ damageTypeId: 'Piercing', count: 1, sides: 8, modifier: 3 }] },
+      ],
+      spellcasting: {
+        ability: 'charisma', spellSaveDc: 13, spellAttackBonus: 5, preparedSpellIds: [], knownSpellIds: [],
+        spellSlots: [{ level: 1, count: 2, recharge: 'long_rest' }, { level: 2, count: 1, recharge: 'long_rest' }],
+      },
+      effects: [{
+        effectId: 'effect:pcac-smite', kind: 'slot_spend_damage_rider', trigger: 'on_hit', spendGate: 'slot_spent',
+        criticalGate: 'crit_confirmed', damageTypeId: 'Radiant', baseCount: 1, countPerSlotLevel: 1, sides: 8, modifier: 0,
+      }],
+      startingConditions: [],
+    };
+    // A pack holds three to five members; the other two only fill the party.
+    const companion = (index: number) => ({
+      ...member, combatantId: `combatant:pcac-forms-companion-${String(index)}`,
+      tokenId: `token:pcac-forms-companion-${String(index)}`, characterId: 20_001 + index, effects: [],
+      attacks: member.attacks.slice(0, 1),
+    });
+    const loaded = loadExternalPartyPack(externalPartyPackSchema.parse({
+      schemaVersion: 2, partyId: 'party:pcac-forms', allowPartial: false, members: [member, companion(1), companion(2)],
+    }));
+    if (loaded.status !== 'loaded') throw new Error('The forms pack was refused.');
+    const actor = loaded.party.members[0]!;
+    const target = monsterProfile('pcac-forms-target', { initiativeBonus: -10 });
+    const at = (column: number) => reduceEncounter(createEncounter({
+      bounds: { columns: 6, rows: 1 },
+      combatants: [actor.profile, target],
+      tokens: [combatToken(actor.profile, { column: 0, row: 0 }), combatToken(target, { column, row: 0 })],
+    }), { type: 'roll_initiative' }, () => 0.5).state;
+    const legalAttacks = (state: EncounterState) => loadedPartyTurnLegalActions(loaded.party.members)(state, actor.profile.id)
+      .actions.filter((command) => command.type === 'attack' && command.target === target.id);
+    const forms = loadedPartyAttackForms(loaded.party.members);
+    const adjacent = at(1);
+    const far = at(2);
+
+    // Adjacent, every form is in range: the forms ARE the legal attack commands,
+    // smite variants included (none, 1st-level slot, 2nd-level slot, per weapon).
+    expect(forms(adjacent, actor.profile.id, target.id)).toEqual(legalAttacks(adjacent));
+    expect(forms(adjacent, actor.profile.id, target.id)).toHaveLength(6);
+    // Ten feet away the Shortsword is out of reach: the legal set loses it, the forms do not.
+    expect(legalAttacks(far).map((command) => command.type === 'attack' ? command.attackId : null))
+      .toEqual(['attack:pcac-longbow', 'attack:pcac-longbow', 'attack:pcac-longbow']);
+    expect(forms(far, actor.profile.id, target.id)).toEqual(legalAttacks(adjacent));
+
+    // The regret provider's player-character form is its generic weapon attack.
+    const pc = playerProfile('pcac-forms-regret-pc');
+    const regretAt = (column: number) => ready(createEncounter({
+      bounds: { columns: 6, rows: 1 }, combatants: [pc, target],
+      tokens: [placedToken(pc, 0), placedToken(target, column)],
+    }), pc.id);
+    const regretLegal = regretTurnLegalActions(regretAt(1), pc.id).actions
+      .filter((command) => command.type === 'attack' && command.target === target.id);
+    expect(regretLegal).toHaveLength(1);
+    expect(regretAttackForms(regretAt(1), pc.id, target.id)).toEqual(regretLegal);
+    expect(regretTurnLegalActions(regretAt(3), pc.id).actions.some((command) => command.type === 'attack')).toBe(false);
+    expect(regretAttackForms(regretAt(3), pc.id, target.id)).toEqual(regretLegal);
   });
 });

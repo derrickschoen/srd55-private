@@ -1,6 +1,6 @@
 import { canonicalJson } from '../commands/canonical-json';
 import { AlgorithmController } from '../combat/controllers';
-import type { TurnLegalActions } from '../combat/coordinator';
+import type { TurnAttackForms, TurnLegalActions } from '../combat/coordinator';
 import type { EncounterState } from '../combat/encounter';
 import type { EncounterCommand } from '../combat/events';
 import { gridDistance, type GridCell } from '../combat/grid';
@@ -20,7 +20,7 @@ import type {
   StatePredicate,
   TargetSelector,
 } from './dm-bridge/round-plan-contract';
-import { regretTurnLegalActions } from './regret/legal-actions';
+import { regretAttackForms, regretTurnLegalActions } from './regret/legal-actions';
 
 export const SCRIPTED_PARTY_POLICY_VERSION = 'scripted-party-policy-v4-symmetric-evaluator' as const;
 export const SCRIPTED_PARTY_PLAN_FORMAT = 'scripted-party-plan-v1' as const;
@@ -52,14 +52,22 @@ export interface ScriptedPartyPlan {
   readonly programs: readonly ScriptedPartyProgram[];
 }
 
-export interface ScriptedPartyPlanOptions {
+/**
+ * The PC's legal actions and the attack forms their attack commands are built
+ * from travel together: a caller that replaces the legal-actions provider
+ * supplies its attack forms too. Both default to the regret provider.
+ */
+export type ScriptedPartyActionSource =
+  | { readonly turnLegalActions?: undefined; readonly attackForms?: undefined }
+  | { readonly turnLegalActions: TurnLegalActions; readonly attackForms: TurnAttackForms };
+
+export type ScriptedPartyPlanOptions = ScriptedPartyActionSource & {
   /** Defaults to the actor-knowledge-last-seen-v4 symmetric evaluator; v0 remains A/B selectable. */
   readonly decisionPolicy?: ScriptedPcDecisionPolicy;
   readonly controller?: AlgorithmController;
-  readonly turnLegalActions?: TurnLegalActions;
   readonly legalActionsProviderId?: string;
   readonly sharedObjective?: string;
-}
+};
 
 export type ScriptedPartyAdherence = 'followed' | 'altered' | 'plan_invalidated';
 
@@ -87,14 +95,13 @@ export interface ScriptedPartyTurnMaterialization {
   readonly reducerCommands: readonly EncounterCommand[];
 }
 
-export interface ScriptedPartyTurnInput {
+export type ScriptedPartyTurnInput = ScriptedPartyActionSource & {
   readonly state: EncounterState;
   readonly plan: ScriptedPartyPlan;
   readonly actorId: CombatantId;
   readonly controller?: AlgorithmController;
   readonly decisionPolicy?: ScriptedPcDecisionPolicy;
-  readonly turnLegalActions?: TurnLegalActions;
-}
+};
 
 interface ProgramSelection {
   readonly program: Extract<DecisionProgram, { readonly kind: 'action' }>;
@@ -403,6 +410,7 @@ export function createScriptedPartyPlan(
     (options.controller === undefined ? DEFAULT_SCRIPTED_PC_DECISION_POLICY : 'heuristic_v0');
   const controller = options.controller ?? new AlgorithmController();
   const legalActions = options.turnLegalActions ?? regretTurnLegalActions;
+  const attackForms = options.attackForms ?? regretAttackForms;
   const providerId = options.legalActionsProviderId ?? 'regret-turn-legal-actions-v1';
   const sharedObjective = options.sharedObjective ?? DEFAULT_SCRIPTED_PARTY_OBJECTIVE;
   if (sharedObjective.trim().length === 0) throw new TypeError('Scripted party objective must be non-empty.');
@@ -415,7 +423,7 @@ export function createScriptedPartyPlan(
     }
     const program = options.controller === undefined && decisionPolicy === 'symmetric_evaluator_v1'
       ? symmetricProgram(evaluateSymmetricPcDecision({
-          state, actorId, legalActions: actorLegalActions,
+          state, actorId, legalActions: actorLegalActions, attackForms,
         }).selected.command)
       : (() => {
           const proposed = controller.proposeRoundProgram(projection, actorId).program;
@@ -461,6 +469,7 @@ export function materializeScriptedPartyTurn(
     throw new TypeError('Scripted party turns require a living player character.');
   }
   const legalProvider = input.turnLegalActions ?? regretTurnLegalActions;
+  const attackForms = input.attackForms ?? regretAttackForms;
   const legal = legalProvider(input.state, input.actorId).actions;
   const planned = input.plan.programs.find((candidate) => candidate.actorId === input.actorId);
   if (planned === undefined) {
@@ -497,7 +506,7 @@ export function materializeScriptedPartyTurn(
   }
   if (input.controller === undefined && decisionPolicy === 'symmetric_evaluator_v1') {
     const live = evaluateSymmetricPcDecision({
-      state: input.state, actorId: input.actorId, legalActions: legal,
+      state: input.state, actorId: input.actorId, legalActions: legal, attackForms,
     });
     const liveProgram = symmetricProgram(live.selected.command);
     const liveProgramHash = scriptedPartyProgramHash(liveProgram);
@@ -511,7 +520,7 @@ export function materializeScriptedPartyTurn(
     const bonusSpell = bonusCandidates.length === 0
       ? undefined
       : evaluateSymmetricPcDecision({
-          state: input.state, actorId: input.actorId, legalActions: bonusCandidates,
+          state: input.state, actorId: input.actorId, legalActions: bonusCandidates, attackForms,
         }).selected.command;
     const mainCommands = live.selected.command.type === 'attack'
       ? Array.from({ length: actor.profile.rules.attacksPerAction }, () => structuredClone(live.selected.command))

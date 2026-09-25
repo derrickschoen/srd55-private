@@ -3,7 +3,7 @@ import {
   AlgorithmController,
   type AlgorithmRoundProposal,
 } from '../../../src/combat/controllers';
-import type { TurnLegalActions } from '../../../src/combat/coordinator';
+import type { TurnAttackForms, TurnLegalActions } from '../../../src/combat/coordinator';
 import { reduceEncounter } from '../../../src/combat/encounter';
 import { mulberry32 } from '../../../src/combat/random';
 import type { DmVisibleEncounterState } from '../../../src/combat/visibility';
@@ -40,6 +40,9 @@ class FixedProgramController extends AlgorithmController {
 async function fixture() {
   return loadArenaFixture('tests/fixtures/arena-basis/seed-3943001.json');
 }
+
+/** The fixture providers below list no attack commands, so the forms they pair with are none. */
+const noAttackForms: TurnAttackForms = () => [];
 
 function livingPlayerId(state: Awaited<ReturnType<typeof fixture>>): CombatantId {
   const actor = state.combatants.find((candidate) =>
@@ -168,11 +171,12 @@ describe('scripted party round planning and adherence', () => {
     const plan = createScriptedPartyPlan(state, {
       controller,
       turnLegalActions: planProvider,
+      attackForms: noAttackForms,
       legalActionsProviderId: 'path-fixture-v1',
     });
 
     const turn = materializeScriptedPartyTurn({
-      state, plan, actorId, controller, turnLegalActions: liveProvider,
+      state, plan, actorId, controller, turnLegalActions: liveProvider, attackForms: noAttackForms,
     });
 
     expect(turn).toEqual(expect.objectContaining({
@@ -203,6 +207,7 @@ describe('scripted party round planning and adherence', () => {
     const plan = createScriptedPartyPlan(state, {
       controller: new FixedProgramController(planned),
       turnLegalActions: legal,
+      attackForms: noAttackForms,
       legalActionsProviderId: 'altered-fixture-v1',
     });
 
@@ -212,6 +217,7 @@ describe('scripted party round planning and adherence', () => {
       actorId,
       controller: new FixedProgramController(executed),
       turnLegalActions: legal,
+      attackForms: noAttackForms,
     });
 
     expect(turn.adherence).toBe('altered');
@@ -232,6 +238,7 @@ describe('scripted party round planning and adherence', () => {
     const plan = createScriptedPartyPlan(state, {
       controller: new FixedProgramController(planned),
       turnLegalActions: (_current, actor) => ({ actions: [{ type: 'dodge', actor }] }),
+      attackForms: noAttackForms,
       legalActionsProviderId: 'invalidation-fixture-v1',
     });
 
@@ -241,6 +248,7 @@ describe('scripted party round planning and adherence', () => {
       actorId,
       controller: new FixedProgramController(fallback),
       turnLegalActions: (_current, actor) => ({ actions: [{ type: 'end_turn', actor }] }),
+      attackForms: noAttackForms,
     });
 
     expect(turn.adherence).toBe('plan_invalidated');
