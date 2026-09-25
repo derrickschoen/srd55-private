@@ -1870,3 +1870,46 @@ coverself fix r1 (Opus, finished): new commit 5c075def, test only. COVERSELF-TO-
 Both went to codex review r2. Agent reports; I have not yet verified them.
 
 Next free id: D891.
+
+
+## D891 — 2026-09-24 20:47 — Owner rulings: PCs plan against the real AC, then by expected damage, then with their own attacks (pcac); Luna lift is gpt-6-luna only; the study runs on v5, v7 waits for COHORT v6; x1r/convsplit closed by my verification; x3 last fix; coverself parked until the cover walk; board and ai1 APPROVE
+
+OWNER RULINGS (via AskUserQuestion, verbatim answers), in order:
+1. PC cover (projectedMovementOptions passes targetArmorClass: null, engine-query-port.ts:1604; I verified this myself). The owner chose "Estimate AC", then clarified: "Just give the pc ac. A lot of players know the ac from memory or figure it out quickly". Ruling: PC-side planning uses the target's real planning AC plus the cover bonus, as the monster side does.
+2. After pcac commit 1 (da409b97) changed no decision, the owner answered "Add expected-damage tie-break (Recommended)": within a rank bucket, prefer higher expected damage, then the canonical text.
+3. After commit 2 (595688d6) also changed no decision, the owner answered "Plan with own attacks (Recommended)": when no attack is legal, movement planning evaluates squares with the PC's own attack forms (best expected damage, AC + cover included).
+4. Scope of the Luna lift: "gpt-6-luna only". Only gpt-6-luna calls lose the 180 s wall and keep the logged 30 min per-call guard. gpt-5.6-luna keeps 180 s until the study switches the route. The option chosen was the plan's narrow reading, which also keeps the 60–300 s speculation window.
+5. Cohorts: "Study on v5, v7 waits for v6". The route study runs on the v5 cohorts and caps now, with a study-only supersession of Part A:568. D569 v7 is not registered until COHORT v6 lands on main. COHORT v6 is on the shelved claude/cohort-01 (D847).
+6. x1r and convsplit at the round cap: "Fix, I verify, no r4 (Recommended)".
+7. x3 and coverself at the round cap: "x3 fix; coverself waits for cover walk". x3 gets a last fix; I verify it the same way as item 6, with no r4. coverself is PARKED until roadmap #6, the exact cover walk that deletes the cover caches, because its only open finding is the cache-key memory cost (+9.50 MB over 9 rooms, +3.83 MB in the worst room, ~411 B per entry, no speed benefit; D885 §9).
+
+FINDING AGAINST MY OWN QUESTION (PC cover). My example ("a ranger will happily shoot from a +5 AC square when a clear square is one step away") implied that giving the PC the AC would fix it. It did not. The PC's movementRank (symmetric-pc-evaluator.ts:280) reads only the move's kind bucket and breaks ties by canonical text; I verified this myself after the agent reported it. I should have read the ranking code before framing the question. It took two more owner questions (items 2 and 3) to reach a behaviour change.
+
+pcac, agent reports (not yet verified by me):
+- Commit 1, da409b97: plannedTargetDefense is shared by both sides; one SRD cover table (terrain.ts coverDefenseBonus, typed 0|2|5) serves the reducer and both planners. The PC cover trace runs over the actor-local restricted state. 141/141 affected tests pass; 7 pins identical.
+- Commit 2, 595688d6: an independent re-ranker (rerank.py) matches the evaluator on all 27,231 recorded PC decisions; 0 changed, because 20,640 of 20,700 survival move choices have no legal attack. 5 mutants killed; pins identical.
+- Commit 3: in progress (wf_9967bf0c-303).
+
+LUNA6 plan r5 (Opus, not yet reviewed): 1,039 lines, sha 16ddeb25…. Changes: v7 deferred; the study runs on v5 under amendment SA-2; expected call sequences come from a protocol state machine; the pipeline is end to end, with SA-1 (hang-guard expiry scores 0); a power simulation (Q-POWER); randomized pair order; censored latency reporting. It carries plan reading PR11: no paid DATA-01 teacher run on gpt-6-luna before the study result. A review r5 needs owner authorization; that question is pending.
+
+x1r fix r3: CLOSED by my verification (owner ruling 6).
+- One new commit, ed284eac, whitespace only: tests/helpers/reference-movement.ts, 1 deletion.
+- The fix-r3 harness (mutate_r3.py sha 14def9c5; it execs the original logs/mutate.py, pinned at sha 743fe337) re-ran 23 distinct mutations under the full procedure; all 23 KILLED, and the 2 probes survived as designed.
+VERIFIED by me:
+- mapping.json covers all 21 original rows (19 KILLED, 1 probe, 1 PARTIAL draft); every journal step shows a verdict and a restored file.
+- Independently, by hand in the clone: I applied M2 (budget `>=`, span-scoped to findReachableCells). reachable-cells.test.ts then failed the named EXACT killer plus 7 more tests. After restore, movement.ts sha is 125ef67c, the tree is clean, and the file passes 14/14.
+Review history: r3 closed all r1/r2 findings apart from this evidence item. Pins: 7/7 identical at 5b9bee14 (fix-r1); src is unchanged since.
+
+convsplit fix r3: CLOSED by my verification (owner ruling 6). The checker (fix-r3/preserve.mjs sha 652c556a; harness mutants.py sha a4c9ef87) adds an ordered prelude comparison.
+VERIFIED by me:
+- I rebuilt the base inventory from `git show 45c2056a:tests/unit/tools/ai-dm-conversation.test.ts`. It differs from the agent's before.json only in sourcePath.
+- The candidate at c20afc88 passes.
+- I moved `kbInputs` after the two argument declarations by hand. The fix-r3 checker fails with "local declaration order is [...], expected base order [...]"; the fix-r2 checker PASSES it, which confirms the reviewer's gap. After restore the tree is clean and the check passes.
+
+x3 review r3: REVISE 0/1/0. All r1/r2 findings are CLOSED. The new P2: the vite-node profile omits resolve.extensions; resolve.extensions ['.json'] breaks vite-node while the bundle stays valid. The last fix, r3, is running.
+coverself review r3: REVISE 0/1/0. Cache-key memory cost; parked per ruling 7.
+
+REVIEW r3 of ai1: APPROVE. Board was already APPROVE (D890).
+Ready for timed pairs: batch 1 (x4 + cachedel ×5; I verified it: tsc 0, 7 pins identical to D880), board, ai1, x1r, convsplit. Pairs run only while no agent runs tests (D890).
+
+Next free id: D892.
