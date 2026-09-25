@@ -15,7 +15,7 @@ import { minimumSpaceDistance } from '../../../src/combat/creature-space';
 import { createEncounter, reduceEncounter, type EncounterState } from '../../../src/combat/encounter';
 import type { GridCell } from '../../../src/combat/grid';
 import { encounterMovementWorld } from '../../../src/combat/encounter-movement-world';
-import { findReachableCells, type MovementWorld } from '../../../src/combat/movement';
+import { findReachableCells, type CellTraversal, type MovementWorld } from '../../../src/combat/movement';
 import { effectStackingIdentity, feet, type Feet } from '../../../src/combat/values';
 import { loadArenaFixture } from '../../../src/vtt/mcp/entrypoint';
 import {
@@ -99,6 +99,65 @@ function tracedWorld<TActorId extends string>(world: MovementWorld<TActorId>, tr
       trace.push(`traversal ${edge(from, to)}`);
       return world.traversal(actorId, from, to);
     },
+  };
+}
+
+interface Asked<TActorId extends string, TAnswer> {
+  readonly actorId: TActorId;
+  readonly from: GridCell;
+  readonly to: GridCell;
+  readonly answer: TAnswer;
+}
+
+function remember<TActorId extends string, TAnswer>(
+  asked: Map<string, Asked<TActorId, TAnswer>>,
+  ask: (actorId: TActorId, from: GridCell, to: GridCell) => TAnswer,
+): (actorId: TActorId, from: GridCell, to: GridCell) => TAnswer {
+  return (actorId, from, to) => {
+    const question = `${actorId} ${edge(from, to)}`;
+    const known = asked.get(question);
+    if (known === undefined) {
+      const answer = ask(actorId, from, to);
+      asked.set(question, { actorId, from, to, answer });
+      return answer;
+    }
+    if (known.actorId !== actorId || known.from.column !== from.column || known.from.row !== from.row ||
+      known.to.column !== to.column || known.to.row !== to.row) {
+      throw new Error(`Remembered ${known.actorId} ${edge(known.from, known.to)} answered ${actorId} ${edge(from, to)}.`);
+    }
+    return known.answer;
+  };
+}
+
+/**
+ * The oracle's world for a real encounter. The frozen reference re-asks the same step questions for every
+ * destination (on brutal-b 6206001, 1.76 million calls for the fighter at the whole-grid budget and 0.78 million
+ * for the Large monster at 60 feet: most of the test's time). An encounter world answers from its immutable
+ * state, so this one asks each (actor, from, to) question once and repeats the answer to that same question
+ * only (a repeat for any other question throws): it changes how often the reference asks, never what it is
+ * told, and `changedAnswers` re-asks every remembered question to show the world still gives that answer.
+ * The single search under test keeps the real world.
+ */
+function rememberingWorld<TActorId extends string>(world: MovementWorld<TActorId>): {
+  readonly world: MovementWorld<TActorId>;
+  readonly changedAnswers: () => readonly string[];
+} {
+  const steps = new Map<string, Asked<TActorId, boolean>>();
+  const traversals = new Map<string, Asked<TActorId, CellTraversal>>();
+  return {
+    world: {
+      bounds: world.bounds,
+      occupiedCells: (actorId, anchor) => world.occupiedCells(actorId, anchor),
+      canTraverseStep: remember(steps, (actorId, from, to) => world.canTraverseStep(actorId, from, to)),
+      traversal: remember(traversals, (actorId, from, to) => world.traversal(actorId, from, to)),
+    },
+    changedAnswers: () => [
+      ...[...steps].filter(([, asked]) => world.canTraverseStep(asked.actorId, asked.from, asked.to) !== asked.answer)
+        .map(([question]) => `canTraverseStep ${question}`),
+      ...[...traversals].filter(([, asked]) =>
+        JSON.stringify(world.traversal(asked.actorId, asked.from, asked.to)) !== JSON.stringify(asked.answer))
+        .map(([question]) => `traversal ${question}`),
+    ],
   };
 }
 
@@ -351,6 +410,7 @@ describe('single-search reachable cells: a real encounter with Large creatures',
   it('matches the frozen reference on brutal-b 6206001: every cell for the fighter at full budget and a Large monster at 60 feet, sampled cells for the rest', async () => {
     const state = await loadArenaFixture('tests/fixtures/arena-basis-brutal-b/seed-6206001.json');
     const world = encounterMovementWorld(state);
+    const oracle = rememberingWorld(world);
     const fullBudget = state.bounds.columns * state.bounds.rows * 10;
     const placed = (id: string) => {
       const token = state.tokens.find((candidate) => String(candidate.combatantId) === id);
@@ -363,7 +423,7 @@ describe('single-search reachable cells: a real encounter with Large creatures',
     for (const [id, budget] of [['combatant:fighter', fullBudget], ['combatant:generated-6206001-monster-1', 60]] as const) {
       const token = placed(id);
       const actual = findReachableCells(world, { actorId: token.combatantId, start: token.position, maximumCost: feet(budget) });
-      const expected = perDestination(world, token.combatantId, token.position, budget);
+      const expected = perDestination(oracle.world, token.combatantId, token.position, budget);
       expect(actual, id).toEqual(expected);
       expect(expected.some((entry) => entry.cells.length > 4), id).toBe(true);
     }
@@ -380,7 +440,7 @@ describe('single-search reachable cells: a real encounter with Large creatures',
       const actual = findReachableCells(world, { actorId: token.combatantId, start: token.position, maximumCost: feet(budget) });
       for (let index = 0; index < state.bounds.columns * state.bounds.rows; index += 5) {
         const goal = cell(index % state.bounds.columns, Math.floor(index / state.bounds.columns));
-        const reference = referenceFindPath(world, { actorId: token.combatantId, start: token.position, goal, maximumCost: feet(budget) });
+        const reference = referenceFindPath(oracle.world, { actorId: token.combatantId, start: token.position, goal, maximumCost: feet(budget) });
         const found = actual.find((entry) => key(entry.destination) === key(goal));
         expect(found === undefined ? { kind: 'unreachable' } : { kind: 'found', cells: found.cells, cost: found.cost }, `${id} ${key(goal)}`)
           .toEqual(reference);
@@ -391,6 +451,7 @@ describe('single-search reachable cells: a real encounter with Large creatures',
       );
     }
     expect(sampled).toBeGreaterThan(0);
+    expect(oracle.changedAnswers()).toEqual([]);
   });
 });
 
