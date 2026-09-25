@@ -1582,20 +1582,26 @@ describe('PCAC turn: the approach move and the attack it enables are planned as 
     expect(assessmentOf(decision, (command) => command.type === 'move').combinedPlan?.yieldsTo).toEqual([canonicalJson(save)]);
   });
 
-  it('PCAC-TURN-UNKNOWN-KEPT: a save whose failure chance the PC cannot know, and a potion, keep their places ahead of the combined plan (7.025)', () => {
+  it('PCAC-TURN-UNKNOWN-KEPT: a save whose failure chance the PC cannot know keeps its place ahead of the combined plan (7.025); a potion is no alternative and holds no plan back', () => {
     const { state, pc } = stepBoard({ key: 'pcac-turn-unknown', paralyzed: false });
     const potion: EncounterCommand = {
       type: 'drink_healing_potion', actor: pc.id, effectId: encounterEffectId('effect:pcac-turn-potion'),
     };
     const regret = regretTurnLegalActions(state, pc.id).actions;
+    const save = regret.find((command) => command.type === 'force_save');
+    if (save === undefined) throw new Error('The regret PC has a generic save.');
 
     const withoutPotion = evaluateSymmetricPcDecision({ state, actorId: pc.id, legalActions: regret, attackForms: regretAttackForms });
     const withPotion = evaluateSymmetricPcDecision({ state, actorId: pc.id, legalActions: [...regret, potion], attackForms: regretAttackForms });
+    const potionOnly = evaluateSymmetricPcDecision({
+      state, actorId: pc.id, legalActions: [...regret.filter((command) => command !== save), potion], attackForms: regretAttackForms,
+    });
 
     // The arena's brutal room-4 decision: the save keeps its place, as it did before the approach planning.
     expect(withoutPotion.selected.command.type).toBe('force_save');
+    // The potion keeps its own bucket (1); only the save holds the plan back.
     expect(rankedTurn(withPotion)).toEqual([
-      { type: 'drink_healing_potion', bucket: 1, tail: 0, value: 'healing_is_not_damage' },
+      { type: 'drink_healing_potion', bucket: 1, tail: 0, value: null },
       { type: 'force_save', bucket: 3, tail: 0, value: 'target_save_bonus_not_known' },
       { type: 'move', bucket: 3, tail: 1, value: 7.025 },
       { type: 'disengage', bucket: 7, tail: 0, value: null },
@@ -1604,6 +1610,17 @@ describe('PCAC turn: the approach move and the attack it enables are planned as 
       { type: 'end_turn', bucket: 9, tail: 0, value: null },
     ]);
     expect(assessmentOf(withPotion, (command) => command.type === 'move').combinedPlan?.yieldsTo)
-      .toEqual([canonicalJson(regret.find((command) => command.type === 'force_save')), canonicalJson(potion)]);
+      .toEqual([canonicalJson(save)]);
+    // With a potion and no save or spell, the plan keeps bucket 0 and the turn is the move and its attack.
+    expect(rankedTurn(potionOnly)).toEqual([
+      { type: 'move', bucket: 0, tail: 0, value: 7.025 },
+      { type: 'drink_healing_potion', bucket: 1, tail: 0, value: null },
+      { type: 'disengage', bucket: 7, tail: 0, value: null },
+      { type: 'dodge', bucket: 7, tail: 0, value: null },
+      { type: 'dash', bucket: 8, tail: 0, value: null },
+      { type: 'end_turn', bucket: 9, tail: 0, value: null },
+    ]);
+    expect(potionOnly.selected.combinedPlan?.yieldsTo).toEqual([]);
+    expect(symmetricPcTurnPlan(potionOnly.selected).kind).toBe('move_then_attack');
   });
 });

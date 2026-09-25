@@ -129,8 +129,6 @@ export type SymmetricPcActionValueUnresolvedReason =
   | 'target_save_bonus_not_known'
   /** This evaluator assesses no spell's outcome. */
   | 'spell_outcome_not_assessed'
-  /** A potion heals; healing is not damage dealt, so it is not on this basis. */
-  | 'healing_is_not_damage'
   /** The action is spent: no attack can follow the move this turn. */
   | 'follow_up_action_unavailable'
   /** The destination offers no resolved expected damage (for example, the target has Total Cover there). */
@@ -140,8 +138,9 @@ export type SymmetricPcActionValueUnresolvedReason =
  * An approach move and the attack it enables, planned as one turn. Owner
  * ruling 2026-09-25 ("Move + action in one turn"): when the PC's best move only
  * enables an attack, the turn plans the move and the follow-up action
- * together; a legal save, spell or potion that needs no move keeps its place
- * when the combined plan is not better.
+ * together; a legal save or spell that needs no move keeps its place when the
+ * combined plan is not better. A potion is not an alternative: the owner named
+ * a save or a spell, and healing is not on the plan's expected-damage basis.
  */
 export interface SymmetricPcCombinedPlan {
   /** The attack form that gave the destination its assessment, against the planned target. */
@@ -154,7 +153,7 @@ export interface SymmetricPcCombinedPlan {
   readonly attacks: number;
   /** attacks x the destination's expected damage. */
   readonly value: SymmetricPcActionValue;
-  /** Canonical keys, in canonical order, of the legal saves, spells and potions this plan does not beat; each keeps its place ahead of it. */
+  /** Canonical keys, in canonical order, of the legal saves and spells this plan does not beat; each keeps its place ahead of it. */
   readonly yieldsTo: readonly string[];
 }
 
@@ -174,7 +173,7 @@ export type SymmetricPcRank = readonly [
   /**
    * 1 for a command placed after the rest of its bucket: a command kind this
    * evaluator does not assess (bucket 8), or an approach move that yields to a
-   * save, spell or potion of this bucket (see SymmetricPcCombinedPlan).
+   * save or spell of this bucket (see SymmetricPcCombinedPlan).
    */
   bucketTail: 0 | 1,
   /**
@@ -200,7 +199,7 @@ export interface SymmetricPcCommandAssessment {
   readonly tactical: SymmetricPcTacticalAssessment | null;
   readonly movement: SymmetricPcMovementAssessment | null;
   readonly concentration: ConcentrationZoneEvaluation | null;
-  /** For a legal save, spell or potion: what its action is worth, on the combined plan's basis. */
+  /** For a legal save or spell: what its action is worth, on the combined plan's basis. */
   readonly alternativeValue: SymmetricPcActionValue | null;
   /** For an approach move: the move and the attack it enables, as one turn. */
   readonly combinedPlan: SymmetricPcCombinedPlan | null;
@@ -498,12 +497,12 @@ function concentrationAssessment(
 }
 
 type AlternativeCommand = Extract<EncounterCommand, {
-  readonly type: 'force_save' | 'cast_spell' | 'drink_healing_potion';
+  readonly type: 'force_save' | 'cast_spell';
 }>;
 
-/** A legal command the ruling names as the combined plan's competitor: a save, a spell or a potion. It needs no move. */
+/** A legal command the ruling names as the combined plan's competitor: a save or a spell. It needs no move. */
 function isAlternative(command: EncounterCommand): command is AlternativeCommand {
-  return command.type === 'force_save' || command.type === 'cast_spell' || command.type === 'drink_healing_potion';
+  return command.type === 'force_save' || command.type === 'cast_spell';
 }
 
 /** The average of a save's damage dice: what it deals when the target fails. */
@@ -536,7 +535,6 @@ function alternativeValue(
         : { kind: 'unresolved', reason: 'target_save_bonus_not_known' };
     }
     case 'cast_spell': return { kind: 'unresolved', reason: 'spell_outcome_not_assessed' };
-    case 'drink_healing_potion': return { kind: 'unresolved', reason: 'healing_is_not_damage' };
   }
 }
 
@@ -678,14 +676,14 @@ function compareRank(left: SymmetricPcRank, right: SymmetricPcRank): number {
  * ("move within speed to enable attack" or "move 5 feet to normal range"):
  * its value is the attack it enables. With that attack it forms one turn's
  * plan, worth attacks x the destination's expected damage (see
- * SymmetricPcCombinedPlan). Every legal save, spell and potion (they need no
- * move) is an alternative, worth its own expected damage on the same basis
- * (see alternativeValue). The rule: an approach move keeps bucket 0 only when
- * its plan's value is resolved and strictly greater than every alternative's
- * resolved value. Otherwise it takes the bucket of the lowest-ranked
- * alternative it does not beat, after every other command of that bucket, so
- * each alternative it does not beat keeps its place ahead of it. Nothing else
- * moves.
+ * SymmetricPcCombinedPlan). Every legal save and spell (they need no move) is
+ * an alternative, worth its own expected damage on the same basis (see
+ * alternativeValue); a potion is not one. The rule: an approach move keeps
+ * bucket 0 only when its plan's value is resolved and strictly greater than
+ * every alternative's resolved value. Otherwise it takes the bucket of the
+ * lowest-ranked alternative it does not beat, after every other command of
+ * that bucket, so each alternative it does not beat keeps its place ahead of
+ * it. Nothing else moves.
  */
 export function evaluateSymmetricPcDecision(input: {
   readonly state: EncounterState;
