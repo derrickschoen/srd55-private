@@ -34,6 +34,10 @@ import { canonicalJson } from '../src/commands/canonical-json';
  * reproduce). A resolved plugin counts as Vite's own only when Vite's
  * resolution without the config has it too, by name and by hook source; any
  * other plugin with a module hook is a divergence, whatever its name. The
+ * profile also records every resolve setting of the two Vite environments
+ * vite-node resolves engine modules in. esbuild applies one of them itself,
+ * the extension order, and is given Vite's default; the others only vite-node
+ * applies, so each is a divergence unless it holds Vite's own default. The
  * profile is resolved twice and must agree, so a config edit during
  * resolution refuses to seal.
  *
@@ -118,6 +122,30 @@ const VITE_DEFAULT_ESBUILD_OPTIONS: ReadonlySet<string> = new Set(['jsxDev', 'ch
 const MODULE_HOOKS = ['resolveId', 'load', 'transform'] as const;
 
 /**
+ * Vite's default `resolve.extensions`, in its lookup order. esbuild resolves
+ * an extensionless engine import through this list too (`BUILD_OPTIONS`), so
+ * where `x.js` sits beside `x.ts` the bundle compiles `x.js`, as a vite-node
+ * child runs it; esbuild's own order would pick `x.ts`. A Vite config whose
+ * extensions differ from this list is a divergence.
+ */
+export const VITE_RESOLVE_EXTENSIONS = ['.mjs', '.js', '.mts', '.ts', '.jsx', '.tsx', '.json'] as const;
+
+/**
+ * The Vite environments vite-node resolves engine modules in: `ssr` for
+ * JavaScript, TypeScript and JSON modules and the imports they make, `client`
+ * for any other module and its imports, such as the `?raw` corpora (vite-node's
+ * `getTransformMode`, which its `resolveId` applies to the importer).
+ */
+export const VITE_NODE_ENVIRONMENTS = ['ssr', 'client'] as const;
+export type ViteNodeEnvironment = (typeof VITE_NODE_ENVIRONMENTS)[number];
+
+/**
+ * One environment's resolve settings, `alias` aside (checked on its own), each
+ * as `resolveSettingText` of its value.
+ */
+export type ResolveSettings = Readonly<Record<string, string | null>>;
+
+/**
  * The inline config vite-node's CLI passes to `createServer`
  * (node_modules/vite-node/dist/cli.mjs), with `root` spelled out because the
  * child's cwd is the checkout.
@@ -143,6 +171,7 @@ const BUILD_OPTIONS = {
   // Bare package imports (zod) resolve at run time from the checkout's
   // node_modules. That is why the bundle directory lives inside the checkout.
   packages: 'external',
+  resolveExtensions: [...VITE_RESOLVE_EXTENSIONS],
   sourcemap: false,
   define: Object.fromEntries(Object.entries(VITE_CHILD_ENV).map(([key, value]) =>
     [`import.meta.env.${key}`, JSON.stringify(value)])),
@@ -174,6 +203,8 @@ export interface ViteNodeProfile {
   readonly base: string;
   /** Every environment variable the config sources name, as sha256 of the value the build saw; null when unset. */
   readonly environment: Readonly<Record<string, string | null>>;
+  /** The resolve settings of each environment vite-node resolves engine modules in. */
+  readonly resolve: Readonly<Record<ViteNodeEnvironment, ResolveSettings>>;
   /** Everything the resolved config would do to the engine's modules that the bundle does not. */
   readonly divergences: readonly string[];
 }
@@ -216,6 +247,10 @@ const sidecarSchema = z.strictObject({
     mode: z.string(),
     base: z.string(),
     environment: z.record(z.string(), SHA256.nullable()),
+    resolve: z.strictObject({
+      ssr: z.record(z.string(), z.string().nullable()),
+      client: z.record(z.string(), z.string().nullable()),
+    }),
     divergences: z.array(z.string()),
   }),
   outputSha256: SHA256,
@@ -373,15 +408,75 @@ export function configDivergences(
   return found;
 }
 
+/**
+ * Canonical text of a resolve setting's value: JSON, with a RegExp written as
+ * `{"regexp":"/source/flags"}`. Null when the value holds anything other than
+ * strings, numbers, booleans, null, RegExps and arrays of them; such a value
+ * is never taken to equal anything.
+ */
+export function resolveSettingText(value: unknown): string | null {
+  const recordable = (item: unknown): boolean =>
+    item === null || typeof item === 'string' || typeof item === 'number' || typeof item === 'boolean' ||
+    item instanceof RegExp || (Array.isArray(item) && item.every(recordable));
+  if (!recordable(value)) return null;
+  return JSON.stringify(value, (_key, item: unknown) => (item instanceof RegExp ? { regexp: String(item) } : item));
+}
+
+/** Every resolve setting but `alias` of each environment vite-node resolves engine modules in. */
+function resolveSettings(config: Pick<ResolvedConfig, 'environments'>): Record<ViteNodeEnvironment, ResolveSettings> {
+  const settings = (name: ViteNodeEnvironment): ResolveSettings => Object.fromEntries(
+    Object.entries(config.environments[name]?.resolve ?? {})
+      .filter(([key]) => key !== 'alias')
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(([key, value]) => [key, resolveSettingText(value)]),
+  );
+  return { ssr: settings('ssr'), client: settings('client') };
+}
+
+/** The resolve settings esbuild applies itself, with the value it applies (`BUILD_OPTIONS`). */
+const BUNDLE_RESOLVE_SETTINGS: ResolveSettings = { extensions: resolveSettingText(VITE_RESOLVE_EXTENSIONS) };
+
+/**
+ * Every resolve setting with which vite-node would resolve an engine import
+ * differently from the bundle. esbuild applies BUNDLE_RESOLVE_SETTINGS itself.
+ * Every other setting only vite-node applies, so the bundle is built for its
+ * value in `reference`: Vite's resolution of the same inline config without
+ * the config file. A setting present on one side only, or one the profile
+ * cannot record, is a divergence.
+ */
+export function resolveDivergences(
+  settings: Readonly<Record<ViteNodeEnvironment, ResolveSettings>>,
+  reference: Readonly<Record<ViteNodeEnvironment, ResolveSettings>>,
+): string[] {
+  const found: string[] = [];
+  const setting = (from: ResolveSettings, key: string): string | null | undefined =>
+    Object.hasOwn(from, key) ? from[key] : undefined;
+  const shown = (text: string | null | undefined): string =>
+    text === undefined ? '(no such setting)' : text ?? '(a value the profile cannot record)';
+  for (const environment of VITE_NODE_ENVIRONMENTS) {
+    const own = settings[environment];
+    const defaults = reference[environment];
+    for (const key of [...new Set([...Object.keys(own), ...Object.keys(defaults)])].sort()) {
+      const value = setting(own, key);
+      const expected = setting(Object.hasOwn(BUNDLE_RESOLVE_SETTINGS, key) ? BUNDLE_RESOLVE_SETTINGS : defaults, key);
+      if (value === null || value !== expected) {
+        found.push(`vite-node would resolve ${environment} imports with resolve.${key} ${shown(value)}; ` +
+          `the bundle is built for ${shown(expected)}`);
+      }
+    }
+  }
+  return found;
+}
+
 async function resolveViteNodeProfileOnce(checkout: string): Promise<ViteNodeProfile> {
   const { resolveConfig } = await import('vite');
   const saved = VITE_RESOLUTION_WRITES.map((name) => [name, process.env[name]] as const);
   let config: ResolvedConfig;
-  let builtIn: readonly Plugin[];
+  let reference: ResolvedConfig;
   try {
     config = await resolveConfig(viteNodeInlineConfig(checkout), 'serve');
-    // The same resolution without any config file: the plugins Vite adds on its own.
-    builtIn = (await resolveConfig({ ...viteNodeInlineConfig(checkout), configFile: false }, 'serve')).plugins;
+    // The same resolution without any config file: the plugins and resolve settings Vite has on its own.
+    reference = await resolveConfig({ ...viteNodeInlineConfig(checkout), configFile: false }, 'serve');
   } finally {
     for (const [name, value] of saved) {
       if (value === undefined) delete process.env[name];
@@ -410,7 +505,9 @@ async function resolveViteNodeProfileOnce(checkout: string): Promise<ViteNodePro
     }
     return { path, sha256: sha256Hex(bytes) };
   });
-  divergences.push(...configDivergences(config, builtIn));
+  divergences.push(...configDivergences(config, reference.plugins));
+  const settings = resolveSettings(config);
+  divergences.push(...resolveDivergences(settings, resolveSettings(reference)));
   return {
     configFile,
     configInputs,
@@ -418,6 +515,7 @@ async function resolveViteNodeProfileOnce(checkout: string): Promise<ViteNodePro
     mode: config.mode,
     base: String(config.env['BASE_URL']),
     environment: Object.fromEntries(Object.entries(environment).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))),
+    resolve: settings,
     divergences,
   };
 }

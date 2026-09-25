@@ -1,9 +1,17 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
+import { builtinModules } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import { PassThrough } from 'node:stream';
+import {
+  defaultClientConditions,
+  defaultClientMainFields,
+  defaultExternalConditions,
+  defaultServerConditions,
+  defaultServerMainFields,
+} from 'vite';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import bundledSrd521 from '../../../docs/srd/full/srd-5.2.1.txt?raw';
 import bundledSpellDescriptions from '../../../docs/srd/source/spell-descriptions.txt?raw';
@@ -38,6 +46,8 @@ import {
   EngineChildBundleError,
   engineChildRecipe,
   rawTextModule,
+  resolveDivergences,
+  resolveSettingText,
   resolveViteNodeProfile,
   sweepEngineChildBundles,
   VITE_CHILD_ENV,
@@ -81,15 +91,67 @@ function fakeCheckout(checkout: string): WrittenEngineChildBundle {
 }
 
 /**
+ * The resolve settings Vite 7 gives vite-node's inline config in its ssr and
+ * client environments when no config changes them. Written from Vite's
+ * exported defaults, its documented `resolve.extensions` default and the
+ * server builtins it derives from `node:module`, never from the profile code.
+ */
+function viteDefaultResolve(): ViteNodeProfile['resolve'] {
+  const shared = {
+    dedupe: '[]',
+    extensions: JSON.stringify(['.mjs', '.js', '.mts', '.ts', '.jsx', '.tsx', '.json']),
+    external: '[]',
+    externalConditions: JSON.stringify(defaultExternalConditions),
+    noExternal: '[]',
+    preserveSymlinks: 'false',
+  };
+  return {
+    ssr: {
+      ...shared,
+      builtins: JSON.stringify([
+        ...builtinModules.filter((id) => !id.includes(':')), { regexp: '/^node:/' }, { regexp: '/^bun:/' },
+      ]),
+      conditions: JSON.stringify(defaultServerConditions),
+      mainFields: JSON.stringify(defaultServerMainFields),
+    },
+    client: {
+      ...shared,
+      builtins: '[]',
+      conditions: JSON.stringify(defaultClientConditions),
+      mainFields: JSON.stringify(defaultClientMainFields),
+    },
+  };
+}
+
+/**
  * The profile of a checkout with no Vite config: what vite-node resolves by
  * default, which is what the bundle's defines hold.
  */
 function plainProfile(checkout: string, overrides: Partial<ViteNodeProfile> = {}): ViteNodeProfile {
   return {
     configFile: null, configInputs: [], envDir: checkout, mode: 'development', base: '/', environment: {},
-    divergences: [], ...overrides,
+    resolve: viteDefaultResolve(), divergences: [], ...overrides,
   };
 }
+
+const viteNodeBin = resolve(root, 'node_modules/vite-node/vite-node.mjs');
+
+/** Runs `node <args>` in `cwd` to its end. */
+async function nodeChild(args: readonly string[], cwd: string) {
+  const child = spawn(process.execPath, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+  const stdout: Buffer[] = [];
+  const stderr: Buffer[] = [];
+  child.stdout.on('data', (chunk: Buffer) => stdout.push(chunk));
+  child.stderr.on('data', (chunk: Buffer) => stderr.push(chunk));
+  const code = await new Promise<number | null>((resolveExit, reject) => {
+    child.once('error', reject);
+    child.once('close', resolveExit);
+  });
+  return { code, stdout: Buffer.concat(stdout).toString('utf8'), stderr: Buffer.concat(stderr).toString('utf8') };
+}
+
+/** An engine entry that prints the rule it imports through an extensionless specifier. */
+const RULE_ENTRY = "import { rule } from '../src/engine';\nprocess.stdout.write(String(rule));\n";
 
 function seal(
   checkout: string,
@@ -446,6 +508,7 @@ describe('engine child bundle vite-node profile', () => {
       mode: 'staging',
       base: '/probe/',
       environment: { ENGINE_CHILD_PROFILE_PROBE_BASE: sha256Hex('/probe/'), ENGINE_CHILD_PROFILE_PROBE_MODE: null },
+      resolve: viteDefaultResolve(),
       divergences: [],
     });
   });
@@ -511,6 +574,55 @@ describe('engine child bundle vite-node profile', () => {
     ]);
   });
 
+  it('records as divergences the resolve settings that differ from Vite\'s own in either environment vite-node resolves in', async () => {
+    const checkout = scratchDirectory('resolve-settings');
+    writeFileSync(join(checkout, 'vite.config.mjs'), [
+      "import { builtinModules } from 'node:module';",
+      'export default {',
+      "  resolve: { dedupe: ['zod'], mainFields: ['main'], preserveSymlinks: true },",
+      "  ssr: { noExternal: ['zod'], resolve: { conditions: ['engine'] } },",
+      '  environments: {',
+      // Vite's own server builtins with /^bun:/ swapped for /^deno:/: equal to the default unless each RegExp is written out.
+      "    ssr: { resolve: { builtins: [...builtinModules.filter((id) => !id.includes(':')), /^node:/, /^deno:/] } },",
+      "    client: { resolve: { extensions: ['.ts'] } },",
+      '  },',
+      '};',
+      '',
+    ].join('\n'));
+    const defaults = viteDefaultResolve();
+    const divergence = (environment: 'ssr' | 'client', key: string, value: string): string =>
+      `vite-node would resolve ${environment} imports with resolve.${key} ${value}; ` +
+        `the bundle is built for ${String(defaults[environment][key])}`;
+    const builtins = JSON.stringify([
+      ...builtinModules.filter((id) => !id.includes(':')), { regexp: '/^node:/' }, { regexp: '/^deno:/' },
+    ]);
+    expect((await resolveViteNodeProfile(checkout)).divergences).toEqual([
+      divergence('ssr', 'builtins', builtins),
+      divergence('ssr', 'conditions', '["engine"]'),
+      divergence('ssr', 'dedupe', '["zod"]'),
+      divergence('ssr', 'noExternal', '["zod"]'),
+      divergence('ssr', 'preserveSymlinks', 'true'),
+      divergence('client', 'dedupe', '["zod"]'),
+      divergence('client', 'extensions', '[".ts"]'),
+      divergence('client', 'mainFields', '["main"]'),
+      divergence('client', 'preserveSymlinks', 'true'),
+    ]);
+  });
+
+  it('records as divergences a resolve setting the profile cannot record, even on both sides, and one on one side only', () => {
+    expect(resolveSettingText([/^node:/i, 'module', true, 1, null])).toBe('[{"regexp":"/^node:/i"},"module",true,1,null]');
+    expect(resolveSettingText(['module', () => 'node'])).toBeNull();
+    expect(resolveSettingText({ node: true })).toBeNull();
+    expect(resolveDivergences(
+      { ssr: { conditions: null, dedupe: '[]' }, client: {} },
+      { ssr: { conditions: null, dedupe: '[]' }, client: { builtins: '[]' } },
+    )).toEqual([
+      'vite-node would resolve ssr imports with resolve.conditions (a value the profile cannot record); ' +
+        'the bundle is built for (a value the profile cannot record)',
+      'vite-node would resolve client imports with resolve.builtins (no such setting); the bundle is built for []',
+    ]);
+  });
+
   it('builds a bundle that goes stale when the config changes envDir or an .env file appears in the envDir it names', async () => {
     const checkout = scratchDirectory('built-env-dir');
     fakeCheckout(checkout);
@@ -531,6 +643,41 @@ describe('engine child bundle vite-node profile', () => {
       status: 'stale',
       reason: `vite-node would load ${join(checkout, 'env/.env')} into the child and the bundle would not`,
     });
+  });
+
+  it('builds a bundle that goes stale when resolve.extensions stops a vite-node child resolving the entry\'s extensionless import', async () => {
+    const checkout = scratchDirectory('built-extensions');
+    fakeCheckout(checkout);
+    writeFileSync(join(checkout, ENGINE_CHILD_ENTRY), RULE_ENTRY);
+    writeFileSync(join(checkout, 'vite.config.mjs'), "export default { resolve: { extensions: ['.json'] } };\n");
+    const built = await buildEngineChildBundle(checkout, join(checkout, 'bundles'));
+    const defaults = viteDefaultResolve();
+    expect(built.vite.resolve).toEqual({
+      ssr: { ...defaults.ssr, extensions: '[".json"]' }, client: { ...defaults.client, extensions: '[".json"]' },
+    });
+    const divergence = (environment: string): string =>
+      `vite-node would resolve ${environment} imports with resolve.extensions [".json"]; ` +
+        'the bundle is built for [".mjs",".js",".mts",".ts",".jsx",".tsx",".json"]';
+    expect(built.vite.divergences).toEqual([divergence('ssr'), divergence('client')]);
+    expect(checkEngineChildBundle(checkout, built.bundlePath)).toEqual({ status: 'stale', reason: divergence('ssr') });
+    // What the stale verdict guards: a vite-node child in this checkout cannot resolve the import at all.
+    const child = await nodeChild([viteNodeBin, join(checkout, ENGINE_CHILD_ENTRY)], checkout);
+    expect(child.code, child.stderr).toBe(1);
+    expect(child.stderr).toContain("Cannot find module '../src/engine'");
+  });
+
+  it('compiles the file a vite-node child runs when an extensionless import matches both x.js and x.ts', async () => {
+    const checkout = scratchDirectory('built-extension-order');
+    fakeCheckout(checkout);
+    writeFileSync(join(checkout, ENGINE_CHILD_ENTRY), RULE_ENTRY);
+    writeFileSync(join(checkout, 'src/engine.js'), 'export const rule = 7;\n');
+    const built = await buildEngineChildBundle(checkout, join(checkout, 'bundles'));
+    const viteNode = await nodeChild([viteNodeBin, join(checkout, ENGINE_CHILD_ENTRY)], checkout);
+    expect({ code: viteNode.code, stdout: viteNode.stdout }, viteNode.stderr).toEqual({ code: 0, stdout: '7' });
+    const bundle = await nodeChild([built.bundlePath], checkout);
+    expect({ code: bundle.code, stdout: bundle.stdout }, bundle.stderr).toEqual({ code: 0, stdout: '7' });
+    expect(built.inputs.map((input) => relative(checkout, input.path))).toEqual(['src/engine.js', ENGINE_CHILD_ENTRY]);
+    expect(checkEngineChildBundle(checkout, built.bundlePath).status).toBe('valid');
   });
 
   it('refuses to seal a profile when the config changes between its two resolutions', async () => {
@@ -837,11 +984,12 @@ describe('engine child bundle build', () => {
     });
   });
 
-  it('binds the real checkout\'s vite-node profile: vite.config.ts and its imports, no divergence, the defines\' mode and base', () => {
+  it('binds the real checkout\'s vite-node profile: vite.config.ts and its imports, Vite\'s own resolve settings, no divergence, the defines\' mode and base', () => {
     const { vite } = requireBuilt();
     expect(vite.configFile).toBe(resolve(root, 'vite.config.ts'));
     expect(vite.configInputs).toContainEqual(inputOf(resolve(root, 'vite.config.ts')));
     expect(vite.configInputs).toContainEqual(inputOf(resolve(root, 'tools/ai-bridge/plugin.ts')));
+    expect(vite.resolve).toEqual(viteDefaultResolve());
     expect(vite.divergences).toEqual([]);
     expect({ envDir: vite.envDir, mode: vite.mode, base: vite.base })
       .toEqual({ envDir: root, mode: VITE_CHILD_ENV.MODE, base: VITE_CHILD_ENV.BASE_URL });
